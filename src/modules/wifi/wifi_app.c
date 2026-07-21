@@ -1,0 +1,113 @@
+#include "wifi_app.h"
+
+#include <stdbool.h>
+#include <stdio.h>
+#include <string.h>
+
+#include "wifi_common.h"
+#include "wifi_webui.h"
+
+static int wifi_app_default(void)
+{
+    return wifi__connect_known() ? 0 : -1;
+}
+
+static int wifi_app_scan(void)
+{
+    wifi__network_t networks[32];
+    int count = wifi__scan(networks, sizeof(networks) / sizeof(networks[0]));
+    if (count < 0) {
+        return -1;
+    }
+
+    for (int i = 0; i < count; ++i) {
+        printf("%s rssi=%d channel=%u auth=%u\n", networks[i].ssid, networks[i].rssi,
+               networks[i].channel, networks[i].authmode);
+    }
+    return 0;
+}
+
+static int wifi_app_connect(int argc, char **argv)
+{
+    if (argc < 3) {
+        printf("wifi connect requires ssid and password\n");
+        return -1;
+    }
+
+    if (!wifi__connect(argv[1], argv[2], 10000)) {
+        return -1;
+    }
+    return wifi__add_credential(argv[1], argv[2]) ? 0 : -1;
+}
+
+static int wifi_app_add(int argc, char **argv)
+{
+    if (argc < 3) {
+        printf("wifi add requires ssid and password\n");
+        return -1;
+    }
+    return wifi__add_credential(argv[1], argv[2]) ? 0 : -1;
+}
+
+static int wifi_app_webui(int argc, char **argv)
+{
+    bool no_ap = false;
+
+    if (argc > 1 && argv[1] != NULL && strcmp(argv[1], "noAp") == 0) {
+        no_ap = true;
+    }
+
+    return wifi__start_webui(!no_ap) ? 0 : -1;
+}
+
+int wifi_app(int argc, char **argv)
+{
+    if (argc <= 0 || argv == NULL || argv[0] == NULL) {
+        return wifi_app_default();
+    }
+
+    if (strcmp(argv[0], "on") == 0) {
+        return wifi__connect_known() ? 0 : wifi__setup_ap() ? 0 : -1;
+    }
+
+    if (strcmp(argv[0], "off") == 0) {
+        wifi__disconnect();
+        return 0;
+    }
+
+    if (strcmp(argv[0], "add") == 0) {
+        return wifi_app_add(argc, argv);
+    }
+
+    if (strcmp(argv[0], "webui") == 0) {
+        return wifi_app_webui(argc, argv);
+    }
+
+    if (strcmp(argv[0], "arp") == 0) {
+        return wifi__scan_hosts() ? 0 : -1;
+    }
+
+    if (strcmp(argv[0], "listen") == 0) {
+        return wifi__listen_tcp() ? 0 : -1;
+    }
+
+    if (strcmp(argv[0], "sniffer") == 0) {
+        return wifi__start_sniffer() ? 0 : -1;
+    }
+
+    if (strcmp(argv[0], "scan") == 0) {
+        return wifi_app_scan();
+    }
+
+    if (strcmp(argv[0], "connect") == 0) {
+        return wifi_app_connect(argc, argv);
+    }
+
+    if (strcmp(argv[0], "disconnect") == 0) {
+        wifi__disconnect();
+        return 0;
+    }
+
+    printf("Unknown wifi command: %s\n", argv[0]);
+    return -1;
+}

@@ -1,0 +1,354 @@
+#include "wifi_common.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "esp_event.h"
+#include "esp_log.h"
+#include "esp_netif.h"
+#include "esp_wifi.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/event_groups.h"
+#include "freertos/semphr.h"
+#include "lwip/inet.h"
+
+#define WIFI__CONNECTED_BIT BIT0
+#define WIFI__AP_BIT BIT1
+#define WIFI__DEFAULT_CONNECT_TIMEOUT_MS 10000
+
+static const char *const TAG = "bruce_wifi";
+static StaticSemaphore_t s_wifi_mutex_storage;
+static SemaphoreHandle_t s_wifi_mutex;
+static EventGroupHandle_t s_wifi_events;
+static esp_netif_t *s_sta_netif;
+static esp_netif_t *s_ap_netif;
+static bool s_initialized;
+static bool s_started;
+static bool s_ap_running;
+static char s_active_ssid[CONFIG__WIFI_SSID_MAX_LEN + 1];
+
+static void wifi__copy(char *destination, size_t destination_size, const char *source)
+{
+    if (destination == NULL || destination_size == 0) {
+        return;
+    }
+    strncpy(destination, source != NULL ? source : "", destination_size - 1);
+    destination[destination_size - 1] = '\0';
+}
+
+static void wifi__event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
+{
+    (void)arg;
+    (void)event_data;
+    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+        xEventGroupClearBits(s_wifi_events, WIFI__CONNECTED_BIT);
+    } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
+        xEventGroupSetBits(s_wifi_events, WIFI__CONNECTED_BIT);
+    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_START) {
+        xEventGroupSetBits(s_wifi_events, WIFI__AP_BIT);
+    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_STOP) {
+        xEventGroupClearBits(s_wifi_events, WIFI__AP_BIT);
+    }
+}
+
+static bool wifi__start_locked(wifi_mode_t mode)
+{
+    esp_err_t err = esp_wifi_set_mode(mode);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "could not select Wi-Fi mode: %s", esp_err_to_name(err));
+        return false;
+    }
+    if (!s_started) {
+        err = esp_wifi_start();
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "could not start Wi-Fi: %s", esp_err_to_name(err));
+            return false;
+        }
+        s_started = true;
+    }
+    return true;
+}
+
+bool wifi__init(void)
+{
+    if (s_wifi_mutex == NULL) {
+        s_wifi_mutex = xSemaphoreCreateMutexStatic(&s_wifi_mutex_storage);
+    }
+    xSemaphoreTake(s_wifi_mutex, portMAX_DELAY);
+    if (s_initialized) {
+        xSemaphoreGive(s_wifi_mutex);
+        return true;
+    }
+
+    if (!config__init()) {
+        xSemaphoreGive(s_wifi_mutex);
+        return false;
+    }
+    s_wifi_events = xEventGroupCreate();
+    if (s_wifi_events == NULL) {
+        xSemaphoreGive(s_wifi_mutex);
+        return false;
+    }
+
+    esp_err_t err = esp_netif_init();
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        ESP_LOGE(TAG, "could not initialize netif: %s", esp_err_to_name(err));
+        xSemaphoreGive(s_wifi_mutex);
+        return false;
+    }
+    err = esp_event_loop_create_default();
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        ESP_LOGE(TAG, "could not create event loop: %s", esp_err_to_name(err));
+        xSemaphoreGive(s_wifi_mutex);
+        return false;
+    }
+
+    s_sta_netif = esp_netif_create_default_wifi_sta();
+    if (s_sta_netif == NULL) {
+        ESP_LOGE(TAG, "could not create station netif");
+        xSemaphoreGive(s_wifi_mutex);
+        return false;
+    }
+    s_ap_netif = esp_netif_create_default_wifi_ap();
+    if (s_ap_netif == NULL) {
+        ESP_LOGE(TAG, "could not create access-point netif");
+        xSemaphoreGive(s_wifi_mutex);
+        return false;
+    }
+    wifi_init_config_t init_config = WIFI_INIT_CONFIG_DEFAULT();
+    err = esp_wifi_init(&init_config);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "could not initialize Wi-Fi: %s", esp_err_to_name(err));
+        xSemaphoreGive(s_wifi_mutex);
+        return false;
+    }
+    esp_wifi_set_storage(WIFI_STORAGE_RAM);
+    esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi__event_handler, NULL);
+    esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi__event_handler, NULL);
+    s_initialized = true;
+    xSemaphoreGive(s_wifi_mutex);
+    return true;
+}
+
+void wifi__disconnect(void)
+{
+    if (!wifi__init()) {
+        return;
+    }
+    xSemaphoreTake(s_wifi_mutex, portMAX_DELAY);
+    if (s_started) {
+        esp_wifi_disconnect();
+        esp_wifi_stop();
+        s_started = false;
+    }
+    s_ap_running = false;
+    s_active_ssid[0] = '\0';
+    xEventGroupClearBits(s_wifi_events, WIFI__CONNECTED_BIT | WIFI__AP_BIT);
+    xSemaphoreGive(s_wifi_mutex);
+}
+
+bool wifi__connect(const char *ssid, const char *password, uint32_t timeout_ms)
+{
+    if (ssid == NULL || ssid[0] == '\0' ||
+        strnlen(ssid, CONFIG__WIFI_SSID_MAX_LEN + 1) > CONFIG__WIFI_SSID_MAX_LEN || password == NULL ||
+        strnlen(password, CONFIG__WIFI_PASSWORD_MAX_LEN + 1) > CONFIG__WIFI_PASSWORD_MAX_LEN || !wifi__init()) {
+        return false;
+    }
+
+    wifi_config_t station = {0};
+    wifi__copy((char *)station.sta.ssid, sizeof(station.sta.ssid), ssid);
+    wifi__copy((char *)station.sta.password, sizeof(station.sta.password), password);
+
+    xSemaphoreTake(s_wifi_mutex, portMAX_DELAY);
+    if (!wifi__start_locked(WIFI_MODE_STA) || esp_wifi_set_config(WIFI_IF_STA, &station) != ESP_OK) {
+        xSemaphoreGive(s_wifi_mutex);
+        return false;
+    }
+    s_ap_running = false;
+    xEventGroupClearBits(s_wifi_events, WIFI__CONNECTED_BIT);
+    esp_err_t err = esp_wifi_connect();
+    xSemaphoreGive(s_wifi_mutex);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "could not connect to %s: %s", ssid, esp_err_to_name(err));
+        return false;
+    }
+
+    if (timeout_ms == 0) {
+        timeout_ms = WIFI__DEFAULT_CONNECT_TIMEOUT_MS;
+    }
+    EventBits_t bits = xEventGroupWaitBits(s_wifi_events, WIFI__CONNECTED_BIT, pdFALSE, pdFALSE,
+                                           pdMS_TO_TICKS(timeout_ms));
+    if ((bits & WIFI__CONNECTED_BIT) == 0) {
+        return false;
+    }
+    xSemaphoreTake(s_wifi_mutex, portMAX_DELAY);
+    wifi__copy(s_active_ssid, sizeof(s_active_ssid), ssid);
+    xSemaphoreGive(s_wifi_mutex);
+    return true;
+}
+
+int wifi__scan(wifi__network_t *networks, size_t capacity)
+{
+    if (!wifi__init()) {
+        return -1;
+    }
+    xSemaphoreTake(s_wifi_mutex, portMAX_DELAY);
+    if (!wifi__start_locked(WIFI_MODE_STA)) {
+        xSemaphoreGive(s_wifi_mutex);
+        return -1;
+    }
+    esp_err_t err = esp_wifi_scan_start(NULL, true);
+    if (err != ESP_OK) {
+        xSemaphoreGive(s_wifi_mutex);
+        return -1;
+    }
+    uint16_t found = 0;
+    esp_wifi_scan_get_ap_num(&found);
+    uint16_t returned = found > capacity ? (uint16_t)capacity : found;
+    if (returned > 0 && networks != NULL) {
+        wifi_ap_record_t *records = calloc(returned, sizeof(*records));
+        if (records == NULL) {
+            xSemaphoreGive(s_wifi_mutex);
+            return -1;
+        }
+        uint16_t record_count = returned;
+        err = esp_wifi_scan_get_ap_records(&record_count, records);
+        if (err == ESP_OK) {
+            for (uint16_t i = 0; i < record_count; ++i) {
+                wifi__copy(networks[i].ssid, sizeof(networks[i].ssid), (const char *)records[i].ssid);
+                networks[i].rssi = records[i].rssi;
+                networks[i].channel = records[i].primary;
+                networks[i].authmode = (uint8_t)records[i].authmode;
+            }
+            returned = record_count;
+        } else {
+            returned = 0;
+        }
+        free(records);
+    }
+    xSemaphoreGive(s_wifi_mutex);
+    return (int)returned;
+}
+
+bool wifi__connect_known(void)
+{
+    wifi__network_t networks[16];
+    int count = wifi__scan(networks, 16);
+    if (count < 0) {
+        return false;
+    }
+    for (int i = 0; i < count; ++i) {
+        config__wifi_credential_t credential;
+        if (config__find_wifi_credential(networks[i].ssid, &credential)) {
+            bool connected = wifi__connect(credential.ssid, credential.password, WIFI__DEFAULT_CONNECT_TIMEOUT_MS);
+            config__free_wifi_credential(&credential);
+            if (connected) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+bool wifi__setup_ap(void)
+{
+    if (!wifi__init()) {
+        return false;
+    }
+    char ssid[CONFIG__WIFI_SSID_MAX_LEN + 1];
+    char password[CONFIG__WIFI_PASSWORD_MAX_LEN + 1];
+    if (!config__get_wifi_ap(ssid, sizeof(ssid), password, sizeof(password))) {
+        return false;
+    }
+    wifi_config_t ap = {0};
+    wifi__copy((char *)ap.ap.ssid, sizeof(ap.ap.ssid), ssid);
+    wifi__copy((char *)ap.ap.password, sizeof(ap.ap.password), password);
+    ap.ap.ssid_len = strlen(ssid);
+    ap.ap.channel = 6;
+    ap.ap.max_connection = 4;
+    ap.ap.authmode = WIFI_AUTH_WPA2_PSK;
+
+    xSemaphoreTake(s_wifi_mutex, portMAX_DELAY);
+    bool started = wifi__start_locked(WIFI_MODE_AP) && esp_wifi_set_config(WIFI_IF_AP, &ap) == ESP_OK;
+    if (started) {
+        s_ap_running = true;
+        wifi__copy(s_active_ssid, sizeof(s_active_ssid), ssid);
+    }
+    xSemaphoreGive(s_wifi_mutex);
+    return started;
+}
+
+bool wifi__is_connected(void)
+{
+    return s_wifi_events != NULL && (xEventGroupGetBits(s_wifi_events) & WIFI__CONNECTED_BIT) != 0;
+}
+
+bool wifi__is_ap_running(void)
+{
+    return s_wifi_events != NULL && (xEventGroupGetBits(s_wifi_events) & WIFI__AP_BIT) != 0;
+}
+
+bool wifi__get_ssid(char *ssid, size_t size)
+{
+    if (ssid == NULL || size == 0 || !wifi__init()) {
+        return false;
+    }
+    xSemaphoreTake(s_wifi_mutex, portMAX_DELAY);
+    wifi__copy(ssid, size, s_active_ssid);
+    bool present = s_active_ssid[0] != '\0';
+    xSemaphoreGive(s_wifi_mutex);
+    return present;
+}
+
+bool wifi__get_ip(char *ip, size_t size)
+{
+    if (ip == NULL || size == 0 || !wifi__init()) {
+        return false;
+    }
+    esp_netif_t *netif = NULL;
+    if (wifi__is_connected()) {
+        netif = s_sta_netif;
+    } else if (wifi__is_ap_running()) {
+        netif = s_ap_netif;
+    }
+    esp_netif_ip_info_t info;
+    if (netif == NULL || esp_netif_get_ip_info(netif, &info) != ESP_OK) {
+        ip[0] = '\0';
+        return false;
+    }
+    return inet_ntoa_r(info.ip, ip, size) != NULL;
+}
+
+bool wifi__get_mac(char *mac, size_t size)
+{
+    uint8_t address[6];
+    if (mac == NULL || size < 18 || !wifi__init() || esp_wifi_get_mac(WIFI_IF_STA, address) != ESP_OK) {
+        return false;
+    }
+    snprintf(mac, size, "%02X:%02X:%02X:%02X:%02X:%02X", address[0], address[1], address[2], address[3], address[4], address[5]);
+    return true;
+}
+
+bool wifi__add_credential(const char *ssid, const char *password)
+{
+    return config__add_or_update_wifi_credential(ssid, password);
+}
+
+bool wifi__scan_hosts(void)
+{
+    ESP_LOGW(TAG, "host scanning belongs to a Wi-Fi application module");
+    return wifi__is_connected();
+}
+
+bool wifi__start_sniffer(void)
+{
+    ESP_LOGW(TAG, "sniffer belongs to a Wi-Fi application module");
+    return false;
+}
+
+bool wifi__listen_tcp(void)
+{
+    ESP_LOGW(TAG, "TCP listener belongs to a Wi-Fi application module");
+    return false;
+}
