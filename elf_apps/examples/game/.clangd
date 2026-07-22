@@ -1,0 +1,4 @@
+# ELF app project: use the local build directory for compile_commands.json.
+CompileFlags:
+    CompilationDatabase: build
+    Remove: [-f*, -m*]

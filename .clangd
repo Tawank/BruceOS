@@ -1,2 +1,5 @@
+# Main Bruce firmware compilation database.
+# ELF app subprojects override this in their own .clangd files.
 CompileFlags:
+    CompilationDatabase: build
     Remove: [-f*, -m*]

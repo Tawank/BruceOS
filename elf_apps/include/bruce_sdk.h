@@ -7,14 +7,14 @@
  * public Bruce Core API declarations and the BRUCE_APP_MANIFEST() macro.
  */
 
-#include "core_sdk/app_runner.h"
-#include "core_sdk/loader.h"
-#include "core_sdk/manifest.h"
-#include "core_sdk/memory.h"
-#include "core_sdk/permission.h"
-#include "core_sdk/result.h"
-#include "core_sdk/storage.h"
-#include "core_sdk/task.h"
+#include "core_sdk/app_runner.h"  // IWYU pragma: export
+#include "core_sdk/loader.h"      // IWYU pragma: export
+#include "core_sdk/manifest.h"    // IWYU pragma: export
+#include "core_sdk/memory.h"      // IWYU pragma: export
+#include "core_sdk/permission.h"  // IWYU pragma: export
+#include "core_sdk/result.h"      // IWYU pragma: export
+#include "core_sdk/storage.h"     // IWYU pragma: export
+#include "core_sdk/task.h"        // IWYU pragma: export
 
 /* Embed the canonical manifest JSON in the non-loadable .bruce.manifest
  * section.  The JSON string must be valid UTF-8 and contain the required
