@@ -22,7 +22,8 @@ typedef void (*bruce_task_resource_cleanup_t)(void *context);
 typedef struct {
     /* Display/log name; copied, may be NULL (-> "app"). */
     const char *name;
-    /* Required entry point, matching the ELF/built-in app_main signature. */
+    /* Entry point matching the built-in app_main signature. Exactly one of
+     * `entry` or `task_entry` below must be non-NULL. */
     bruce_app_entry_t entry;
     int argc;
     /* Shallow array of pointers; the strings and the array are deep-copied
@@ -50,12 +51,21 @@ typedef struct {
     bool start_in_background;
     /* 0 selects a Core default (4096 bytes). */
     uint32_t stack_bytes;
+    /* Alternative entry point used by loader modules via
+     * app_runner__spawn_loader_task() (see core_sdk/loader.h) instead of
+     * `entry` above: called as task_entry(task_entry_context) on the new
+     * task's own stack, with no argc/argv handling of its own - a loader
+     * hands its own decoded image/context through task_entry_context.
+     * Exactly one of `entry` or `task_entry` must be non-NULL. */
+    void (*task_entry)(void *context);
+    void *task_entry_context;
 } task_create_params_t;
 
-/* Creates and starts a new Core-tracked task.  On success returns BRUCE_OK
- * and the new task's id via *out_task_id.  On failure returns
- * BRUCE_ERR_INVALID_ARGUMENT, BRUCE_ERR_RESOURCE_LIMIT (task table full), or
- * BRUCE_ERR_NO_MEMORY (FreeRTOS task creation failed). */
+/* Creates and starts a new Core-tracked task.  Exactly one of
+ * params->entry or params->task_entry must be set (see task_create_params_t).
+ * On success returns BRUCE_OK and the new task's id via *out_task_id.  On
+ * failure returns BRUCE_ERR_INVALID_ARGUMENT, BRUCE_ERR_RESOURCE_LIMIT (task
+ * table full), or BRUCE_ERR_NO_MEMORY (FreeRTOS task creation failed). */
 bruce_result_t task_registry__create(const task_create_params_t *params, bruce_task_id_t *out_task_id);
 
 /* Registers a cleanup callback against the *calling* task.  Returns

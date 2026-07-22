@@ -28,21 +28,29 @@ hardware behavior.
 ### Core owns
 
 - bootstrap and system configuration;
-- task, runtime, app_runner, ELF loader, and JavaScript runner;
+- task, runtime, and app_runner, including its pluggable loader registry;
 - permission decisions and resource ownership;
 - memory, file, dialog, input, display, network, radio, and other HAL APIs;
 - all ESP-IDF calls and hardware handles.
 
 Core has no launcher menu, application menu, theme policy, or feature-specific
 screen.  Renderer-neutral primitives such as `dialog__choice()` are Core APIs;
-the active task context selects a GUI or terminal renderer.
+the active task context selects a GUI or terminal renderer.  Core also does
+not own any particular file-format loader: it owns the registry that lets a
+module claim an extension, not the ELF loader or JavaScript runner
+themselves (see "Loader modules" below).
 
 ### Apps and modules own
 
 - menus, launchers, terminal UX, file-manager UX, settings screens, and
   feature workflows;
 - translating user intent into public Core API calls;
-- application-specific presentation and state.
+- application-specific presentation and state;
+- loader modules: the code that turns a file of one specific extension
+  (`.elf`, `.js`, or any other third-party format such as `.py`) into a
+  running task.  A loader module registers itself with app_runner's loader
+  registry; being "the ELF loader" or "the JS runner" gives it no Core
+  access that a new third-party loader module would not also have.
 
 Built-in modules are compiled into firmware.  ELF and JavaScript apps are
 external applications.  Built-ins use the same public SDK API and lifecycle as
@@ -99,27 +107,84 @@ backslash escaping); empty or `NULL` creates `argc == 0`.
 Resolution is deterministic and never scans directories:
 
 1. registered built-in module;
-2. `/bin/<app_name>.elf`;
-3. `/bin/<app_name>.js`;
-4. `BRUCE_ERR_NOT_FOUND`.
+2. every registered loader, tried in ascending priority order, matching
+   `/bin/<app_name><extension>`;
+3. `BRUCE_ERR_NOT_FOUND`.
 
-ELF wins if both external paths exist.  Duplicate built-in command names are a
-startup registration error.
+Core ships a built-in ELF loader module registered at priority 10 and a
+built-in JavaScript loader module registered at priority 20, so ELF still
+wins if both `/bin/<app_name>.elf` and `/bin/<app_name>.js` exist.  A
+third-party loader module (a `.py` loader, for example) registers its own
+extension and priority the same way and is resolved by the same loop, with no
+Core change required.  Duplicate built-in command names and duplicate loader
+extensions are both startup registration errors.
 
-The loaders use the equivalent contract:
+Any caller — including `app_runner__run()` itself — that needs to start an
+arbitrary path rather than a `/bin/<name>` command uses the loader-agnostic:
 
 ```c
-int elf__run_path(const char *path, const char *arg, bool in_background);
-int js__run_path(const char *path, const char *arg, bool in_background);
+int app_runner__run_path(const char *path, const char *arg, bool in_background);
 ```
 
-Both accept only normalized absolute paths with no `.` or `..` components and
-require their matching extension.  An app with `execute` may start an ELF or
-JS file from any mounted path.  Core does not discover `/apps/`, `/sdcard/`,
-or any other folder; launcher and file-manager apps decide what to enumerate.
+which accepts only normalized absolute paths with no `.` or `..` components,
+looks up the loader registered for the path's extension, and dispatches to
+it.  An app with `execute` may start an ELF, JS, or any other
+loader-registered file type from any mounted path this way.  Core does not
+discover `/apps/`, `/sdcard/`, or any other folder; launcher and
+file-manager apps decide what to enumerate.
 
 Launching another app does not inherit or intersect permissions.  Each target
 is its own user-controlled task.
+
+### Loader modules
+
+A loader module owns everything specific to one file format: recognizing its
+manifest, decoding/relocating/interpreting its content, and running it.  It
+registers itself with:
+
+```c
+bruce_result_t app_runner__register_loader(const char *extension, int priority,
+                                            bruce_loader_run_fn run_fn,
+                                            bruce_loader_inspect_fn inspect_fn);
+```
+
+`extension` includes the leading dot (for example `.elf`); `priority` breaks
+ties when more than one candidate file matches an app name, lower first.
+`run_fn` matches `app_runner__run_path()`'s signature; `inspect_fn` matches
+`app_runner__inspect_path()`'s and never launches anything.  Registration
+happens once at boot, alongside built-in command registration, before the
+first named-run or path-run call.  A duplicate extension registration is a
+startup error, the same as a duplicate built-in command name.
+
+Turning a decoded image into a live task needs more than an ordinary built-in
+gets from `app_runner__register()`, so loaders get one extra public
+primitive:
+
+```c
+int app_runner__spawn_loader_task(const char *permission_key, bool gui_requested,
+                                   bool in_background, uint32_t stack_size,
+                                   bruce_loader_task_entry_fn entry, void *ctx);
+```
+
+This creates a real Core task that calls `entry(ctx)` on its own stack, wired
+into the same foreground stack, resource registry, and permission checks
+(`permission_key`, e.g. `"game.elf"`) as any other task.  It is the only new
+capability a loader author needs beyond the rest of the public SDK
+(`memory__malloc()`/`memory__free()` for image/VM storage, which are freed
+automatically at task exit or kill with no custom cleanup callback needed).
+A loader module still includes only `core_sdk/...` headers — it gets no
+private-header exemption, unlike `modules/selftest`.
+
+Manifest parsing itself is shared, not duplicated per loader: every loader
+extracts its own raw manifest bytes (an ELF section, a leading JS comment
+block, or whatever a new format uses) and hands them to the one canonical
+parser/validator in `core_sdk/manifest.h`, so every loader enforces the same
+required fields, ABI check, stack bounds, icon decoding, and permission-name
+validation without reimplementing JSON handling.
+
+Built-in ELF and JavaScript loader modules live under `src/modules/loaders/`,
+the same as any other module; they have no special standing over a
+third-party loader someone else registers the same way.
 
 ### Task lifecycle
 
@@ -149,10 +214,10 @@ hide FreeRTOS from apps.
 
 ## ELF contract
 
-Every ELF contains a non-loadable `.bruce.manifest` section.  The loader reads
-and validates it before relocation or entry.  The SDK macro/tool
-`BRUCE_APP_MANIFEST(...)` emits this section; authors do not hand-write ELF
-section attributes.
+Every ELF contains a non-loadable `.bruce.manifest` section.  The built-in ELF
+loader module reads and validates it before relocation or entry.  The SDK
+macro/tool `BRUCE_APP_MANIFEST(...)` emits this section; authors do not
+hand-write ELF section attributes.
 
 The manifest is canonical UTF-8 JSON with fixed field order and no
 insignificant whitespace.  Permission array order is author-controlled, but
@@ -187,18 +252,19 @@ empty array.  A complete example is:
 Ed25519 signing is deferred.  Canonical manifest bytes and the ELF
 loadable-content hash are the future signing inputs.
 
-`elf_find_sym()` resolves only the documented public SDK symbol allowlist.
-It never resolves ESP-IDF, private Core, `malloc`, or `free` symbols.  The SDK
-uses `memory__malloc()` and `memory__free()`; imports named `malloc` or `free`
-are rejected.  A trusted native app can still embed a custom allocator, which
-is unsupported rather than a hard sandbox violation.
+The ELF loader module's `elf_find_sym()` resolves only the documented public
+SDK symbol allowlist it maintains.  It never resolves ESP-IDF, private Core,
+`malloc`, or `free` symbols.  The SDK uses `memory__malloc()` and
+`memory__free()`; imports named `malloc` or `free` are rejected.  A trusted
+native app can still embed a custom allocator, which is unsupported rather
+than a hard sandbox violation.
 
 ## JavaScript contract
 
-`js__run_path()` evaluates the script and owns its mQuickJS event loop.
-JavaScript timers and `runtime.main()` remain JavaScript-runtime features;
-they are not moved into Core.  `js__run_path()` allocates VM/context memory
-with `memory__malloc()`.
+The built-in JavaScript loader module evaluates the script and owns its
+mQuickJS event loop.  JavaScript timers and `runtime.main()` remain
+JavaScript-runtime features; they are not moved into Core.  The loader
+allocates VM/context memory with `memory__malloc()`.
 
 A JS file may start with the same canonical manifest in a comment block.  It
 is optional.  An unmanifested script starts with zero grants, uses its filename
@@ -319,6 +385,13 @@ Maintain two header layers:
 - `src/core_sdk/` contains the public Core SDK headers used by every built-in
   module and external ELF app.  SDK callers include them with their full,
   unambiguous namespace, for example `"core_sdk/app_runner.h"`.
+
+`core_sdk/loader.h` declares the loader registry
+(`app_runner__register_loader()`, `app_runner__run_path()`,
+`app_runner__inspect_path()`, `app_runner__spawn_loader_task()`) that any
+loader module uses.  Built-in ELF and JavaScript loader modules live under
+`src/modules/loaders/elf/` and `src/modules/loaders/js/`, like any other
+built-in module, not under `src/core/`.
 
 The component exports the `src/` include root only so those `core_sdk/...`
 includes resolve.  Built-in modules include only `core_sdk/...` headers;

@@ -42,6 +42,8 @@ typedef struct {
     int argc;
     char **argv;
 
+    void (*task_entry)(void *context);
+    void *task_entry_context;
     volatile bool stop_requested;
     volatile bool pause_requested;
 
@@ -287,8 +289,11 @@ static void task__trampoline(void *arg)
     }
     task__unlock();
 
-    int result = record->entry != NULL ? record->entry(record->argc, record->argv) : -1;
-    (void)result;
+    if (record->task_entry != NULL) {
+        record->task_entry(record->task_entry_context);
+    } else if (record->entry != NULL) {
+        (void)record->entry(record->argc, record->argv);
+    }
 
     task__lock();
     task__teardown_locked(record);
@@ -300,7 +305,13 @@ static void task__trampoline(void *arg)
 bruce_result_t task_registry__create(const task_create_params_t *params, bruce_task_id_t *out_task_id)
 {
     task__ensure_init();
-    if (params == NULL || params->entry == NULL || out_task_id == NULL) {
+    if (params == NULL || out_task_id == NULL) {
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    bool has_entry = params->entry != NULL;
+    bool has_task_entry = params->task_entry != NULL;
+    if (has_entry == has_task_entry) {
+        /* exactly one of the two entry kinds must be set */
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
     *out_task_id = BRUCE_TASK_ID_INVALID;
@@ -341,6 +352,8 @@ bruce_result_t task_registry__create(const task_create_params_t *params, bruce_t
     }
     record->start_in_background = params->start_in_background;
     record->entry = params->entry;
+    record->task_entry = params->task_entry;
+    record->task_entry_context = params->task_entry_context;
     record->argc = params->argc > 0 ? params->argc : 0;
     record->argv = argv_copy;
     record->next_resource_id = 1;

@@ -10,6 +10,7 @@
 #include "permission_test.h"
 #include "storage_test.h"
 #include "config_test.h"
+#include "loader_test.h"
 
 void selftest__resource_cleanup(void *context)
 {
@@ -47,6 +48,10 @@ int selftest_app(int argc, char **argv)
     printf("[selftest] %s %s\n", "run_config_permission_allowed_case", selftest__run_config_permission_allowed_case() ? "PASS" : "FAIL");
     printf("[selftest] %s %s\n", "run_config_protected_field_denied_case", selftest__run_config_protected_field_denied_case() ? "PASS" : "FAIL");
     printf("[selftest] %s %s\n", "run_config_builtin_manage_case", selftest__run_config_builtin_manage_case() ? "PASS" : "FAIL");
+
+    printf("[selftest] %s %s\n", "run_manifest_parse_case", selftest__run_manifest_parse_case() ? "PASS" : "FAIL");
+    printf("[selftest] %s %s\n", "run_loader_registry_extensibility_case", selftest__run_loader_registry_extensibility_case() ? "PASS" : "FAIL");
+    printf("[selftest] %s %s\n", "run_elf_loader_case", selftest__run_elf_loader_case() ? "PASS" : "FAIL");
 
     return 0;
 }

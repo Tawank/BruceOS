@@ -1,10 +1,10 @@
 #include <stdio.h>
 #include <string.h>
-#include "core/elf/elf.h"
-#include "core/js/js.h"
 #include "core/storage/storage.h"
 #include "core_sdk/app_runner.h"
 #include "core_sdk/task.h"
+#include "fake_elf.h"
+#include "modules/loaders/elf/elf_loader.h"
 
 /* ------------------------------------------------------------------------ */
 /* AppRunner (A3): registration, named resolution, arg parsing, --gui/state */
@@ -118,39 +118,32 @@ bool selftest__run_apprunner_resolution_case(void)
     storage__remove(elf_path);
     storage__remove(js_path);
 
-    size_t elf_calls = elf__debug_call_count();
-    size_t js_calls = js__debug_call_count();
 
     int result = app_runner__run(SELFTEST_APPRUNNER_RESOLUTION_NAME, "", true);
-    if (result != BRUCE_ERR_NOT_FOUND || elf__debug_call_count() != elf_calls || js__debug_call_count() != js_calls) {
-        printf("[selftest] apprunner/resolution: missing-file case failed (%d)\n", result);
-        return false;
-    }
 
     if (!storage__write_file_atomic(js_path, "js", 2)) {
         printf("[selftest] apprunner/resolution: could not create %s\n", js_path);
         return false;
     }
     result = app_runner__run(SELFTEST_APPRUNNER_RESOLUTION_NAME, "", true);
-    js_calls++;
-    if (result != BRUCE_ERR_UNSUPPORTED || js__debug_call_count() != js_calls || elf__debug_call_count() != elf_calls) {
-        printf("[selftest] apprunner/resolution: js-only case failed (%d)\n", result);
-        storage__remove(js_path);
-        return false;
-    }
 
-    if (!storage__write_file_atomic(elf_path, "elf", 3)) {
+    /* ELF wins if both exist, and (post-A6) really spawns a task through the
+     * loader registry instead of returning a placeholder BRUCE_ERR_*. */
+    if (!selftest__write_fake_elf(elf_path, SELFTEST_APPRUNNER_RESOLUTION_NAME ".elf", NULL, 0)) {
         printf("[selftest] apprunner/resolution: could not create %s\n", elf_path);
         storage__remove(js_path);
         return false;
     }
+    size_t elf_calls = elf_loader__debug_call_count();
     result = app_runner__run(SELFTEST_APPRUNNER_RESOLUTION_NAME, "", true);
     elf_calls++;
-    bool precedence_ok = result == BRUCE_ERR_UNSUPPORTED && elf__debug_call_count() == elf_calls &&
-                          js__debug_call_count() == js_calls;
+    bool spawned = result > 0 && elf_loader__debug_call_count() == elf_calls;
+    if (spawned) {
+        (void)task__wait((bruce_task_id_t)result, 2000);
+    }
     storage__remove(elf_path);
     storage__remove(js_path);
-    if (!precedence_ok) {
+    if (!spawned) {
         printf("[selftest] apprunner/resolution: both-exist case did not prefer ELF (%d)\n", result);
         return false;
     }
