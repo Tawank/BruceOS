@@ -1,5 +1,6 @@
 #include "task.h"
 
+#include "core_sdk/permission.h"
 #include "core_sdk/task.h"
 
 #include <stdlib.h>
@@ -33,6 +34,7 @@ typedef struct {
     bruce_task_state_t state_before_pause;
     bool built_in;
     bool gui_requested;
+    char permission_key[BRUCE_PERMISSION_FILE_NAME_MAX];
     bool start_in_background;
     TaskHandle_t handle;
 
@@ -333,6 +335,10 @@ bruce_result_t task_registry__create(const task_create_params_t *params, bruce_t
             BRUCE_TASK_NAME_MAX - 1);
     record->built_in = params->built_in;
     record->gui_requested = params->gui_requested;
+    if (params->permission_key != NULL && params->permission_key[0] != '\0') {
+        strncpy(record->permission_key, params->permission_key, BRUCE_PERMISSION_FILE_NAME_MAX - 1);
+        record->permission_key[BRUCE_PERMISSION_FILE_NAME_MAX - 1] = '\0';
+    }
     record->start_in_background = params->start_in_background;
     record->entry = params->entry;
     record->argc = params->argc > 0 ? params->argc : 0;
@@ -426,6 +432,30 @@ void task_registry__account_memory(int64_t delta_bytes)
         }
     }
     task__unlock();
+}
+
+bruce_result_t task_registry__current_context(bool *out_built_in, char *out_permission_key,
+                                               size_t permission_key_size, bool *out_gui_requested)
+{
+    task__ensure_init();
+    task__lock();
+    task__record_t *self = task__find_by_handle_locked(xTaskGetCurrentTaskHandle());
+    if (self == NULL) {
+        task__unlock();
+        return BRUCE_ERR_NOT_FOUND;
+    }
+    if (out_built_in != NULL) {
+        *out_built_in = self->built_in;
+    }
+    if (out_permission_key != NULL && permission_key_size > 0) {
+        strncpy(out_permission_key, self->permission_key, permission_key_size - 1);
+        out_permission_key[permission_key_size - 1] = '\0';
+    }
+    if (out_gui_requested != NULL) {
+        *out_gui_requested = self->gui_requested;
+    }
+    task__unlock();
+    return BRUCE_OK;
 }
 
 /* ---- Public core_sdk/task.h API ---- */

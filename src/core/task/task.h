@@ -34,6 +34,14 @@ typedef struct {
      * instruction runs (this is the "--gui task context" AppRunner records
      * ahead of any launch-time permission check). */
     bool gui_requested;
+    /* Filename with extension (e.g. "game.elf"), used as the
+     * permission__* lookup key for this task. Ignored for built_in tasks,
+     * which are always granted every permission regardless of this field.
+     * NULL or empty means "no permission key": permission__check() denies
+     * every permission for such an external task. The ELF/JS loaders
+     * (Stage 3 / A6-A7) are expected to pass the launched file's basename
+     * here. */
+    const char *permission_key;
     /* The new task is BRUCE_TASK_STARTING until it actually begins running;
      * at that point (still before its entry point is called) it transitions
      * itself: false => pushed onto the foreground stack as
@@ -64,3 +72,14 @@ bruce_result_t task_registry__resource_release(bruce_resource_id_t resource_id);
 /* Adds (positive) or removes (negative) bytes from the calling task's
  * tracked-memory statistic.  A no-op if there is no current Core task. */
 void task_registry__account_memory(int64_t delta_bytes);
+
+/* Fills in permission-relevant context for the *calling* task: whether it is
+ * built_in, its permission_key (copied, NUL-terminated, truncated to fit;
+ * empty if unset), and whether it was launched with --gui. Any of the three
+ * output pointers may be NULL to skip that field. Returns BRUCE_ERR_NOT_FOUND
+ * if there is no current Core task (e.g. this runs on the boot/init task,
+ * before any task_registry__create() call). Used by permission__check() and
+ * the dialog__* renderer-selection logic; built-in modules and apps must
+ * never call this directly. */
+bruce_result_t task_registry__current_context(bool *out_built_in, char *out_permission_key,
+                                               size_t permission_key_size, bool *out_gui_requested);

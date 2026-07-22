@@ -1,0 +1,8 @@
+#pragma once
+
+bool selftest__run_permission_allow_case(void);
+bool selftest__run_permission_deny_no_reprompt_case(void);
+bool selftest__run_permission_shared_basename_case(void);
+bool selftest__run_permission_builtin_grant_case(void);
+bool selftest__run_permission_preflight_case(void);
+bool selftest__run_dialog_gui_terminal_dispatch_case(void);
