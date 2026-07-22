@@ -139,7 +139,18 @@ prompts for requested permissions, and frees image memory at exit; the
 built-in `elf` command loads an ELF by absolute path; the SDK build tooling
 can produce a loader ELF that loads another ELF.
 
-## A7 — JavaScript loader module and bridge conversion
+## A7 — Terminal and launcher modules
+
+Dependencies: A3, A4, A5, A6
+
+Implement terminal as AppRunner parser.  Port `bruce_launcher` as menu-only
+composition; add `/apps/` discovery using inspection APIs.  Convert legacy
+`menu_items` one-by-one into modules rather than Core menu code.
+
+Acceptance: terminal and launcher execute the same named/path applications;
+Core contains no feature menu or serial-feature dispatcher.
+
+## A8 — JavaScript loader module and bridge conversion
 
 Dependencies: A2, A3, A4, A5, A6.
 
@@ -161,9 +172,9 @@ Acceptance: old-style `wifi.scan()`, `display.*`, `dialog.*`, and
 Arduino facilities; the JS loader module includes only `core_sdk/...`
 headers.
 
-## A8 — Wi-Fi vertical slice
+## A9 — Wi-Fi vertical slice
 
-Dependencies: A1–A7.
+Dependencies: A1–A8.
 
 Finish permission-checked Core Wi-Fi and HTTP APIs, then migrate the Wi-Fi
 module, terminal command, and JS binding from the listed BrucePIO sources.
@@ -172,7 +183,7 @@ Use `wifi` for radio control and `http` independently for HTTP.
 Acceptance: equivalent Wi-Fi scan/connect/disconnect behavior through GUI,
 terminal, JS, and ELF; test both permission denials.
 
-## A9 — Input/display/dialog vertical slice
+## A10 — Input/display/dialog vertical slice
 
 Dependencies: A1, A2, A4, A7.
 
@@ -183,20 +194,9 @@ Migrate legacy JS input/display/dialog bindings.
 Acceptance: a GPIO/I²C/Bluetooth adapter can inject an event to a foreground
 app; GUI and serial dialogs work; viewer/file handles are cleaned up.
 
-## A10 — Terminal and launcher modules
-
-Dependencies: A3, A4, A5, A6, A7, A8, A9.
-
-Implement terminal as AppRunner parser.  Port `bruce_launcher` as menu-only
-composition; add `/apps/` discovery using inspection APIs.  Convert legacy
-`menu_items` one-by-one into modules rather than Core menu code.
-
-Acceptance: terminal and launcher execute the same named/path applications;
-Core contains no feature menu or serial-feature dispatcher.
-
 ## A11 — Remaining capability slices
 
-Dependencies: A1–A10.
+Dependencies: A1–A11.
 
 For each remaining BrucePIO capability (Bluetooth, RF, IR, RFID, GPS,
 GPIO/I²C, HID, microphone, configuration, and file manager), implement Core
