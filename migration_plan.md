@@ -50,7 +50,7 @@ Deliver the lifetime model before adding dynamic apps.
 Exit criteria: a test module can allocate memory, background itself, be killed,
 and leave no tracked memory/file resources behind.
 
-## Stage 2 — AppRunner and loaders
+## Stage 2 — app_runner and loaders
 
 Deliver uniform launch behavior.
 
@@ -58,7 +58,7 @@ Deliver uniform launch behavior.
 - Implement `app_runner__run()`, shell-style argument parsing, and task-ID
   result/error behavior.
 - Implement `elf__run_path()` and `js__run_path()` path validation.
-- Implement AppRunner `STARTING` state and `--gui` task context.
+- Implement app_runner `STARTING` state and `--gui` task context.
 - Add built-in `launcher` utility and `run_launcher_app()` fallback behavior.
 
 Exit criteria: a uniquely named built-in app starts foreground/background with
@@ -112,7 +112,7 @@ Work:
 - Complete permission-checked synchronous `wifi__*` and `http__*` APIs.
 - Keep JS names such as `wifi.scan()` and `httpFetch()`; replace direct Arduino
   calls with Core calls.
-- Make the terminal `wifi` command invoke the Wi-Fi app through AppRunner.
+- Make the terminal `wifi` command invoke the Wi-Fi app through app_runner.
 - Make the launcher Wi-Fi module compose UI and invoke the same APIs.
 - Verify `wifi` and `http` are independently checked.
 
@@ -134,7 +134,7 @@ app receives it; GUI and terminal dialog paths both work.
 ## Stage 7 — Terminal and launcher migration
 
 - Implement terminal as a thin parser: first token is app name, remainder is
-  AppRunner `arg`.
+  app_runner `arg`.
 - Route JS `serial.cmd()` to the same parser.
 - Port `bruce_launcher` menu composition from legacy `menu_items`; each feature
   becomes a module command instead of Core menu code.

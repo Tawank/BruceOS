@@ -1,5 +1,17 @@
 #pragma once
 
+typedef struct {
+    volatile bool foregrounded_self;
+    volatile bool backgrounded_self;
+    volatile bool allocated_memory;
+    volatile bool registered_resource;
+    volatile bool resource_cleanup_ran;
+} selftest__shared_t;
+
+static selftest__shared_t s_shared;
+
+void selftest__resource_cleanup(void *context);
+
 /*
  * Built-in diagnostic app for exercising Core internals directly.
  *

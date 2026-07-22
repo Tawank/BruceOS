@@ -14,7 +14,7 @@ int bruce_launcher_app(int argc, char **argv)
 
     int result = app_runner__run("wifi", "--gui", false);
 
-    if (result != 0) {
+    if (result < 0) {
         printf("Wifi app returned %d\n", result);
     }
 

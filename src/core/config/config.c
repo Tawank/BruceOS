@@ -6,6 +6,7 @@
 
 #include "cJSON.h"
 #include "core/storage/storage.h"
+#include "core_sdk/config.h"
 #include "freertos/idf_additions.h"
 #include "freertos/semphr.h"
 
@@ -105,6 +106,7 @@ static bool config__is_valid_ipv4(const char *value)
 static void config__free_config(config__t *cfg)
 {
     config__release(&cfg->themePath);
+    config__release(&cfg->launcherApp);
     config__release(&cfg->keyboardLang);
     config__release(&cfg->webUIUser);
     config__release(&cfg->webUIPassword);
@@ -138,6 +140,7 @@ static void config__free_config(config__t *cfg)
 static void config__duplicate_strings(config__t *cfg)
 {
     cfg->themePath = config__strdup(cfg->themePath);
+    cfg->launcherApp = config__strdup(cfg->launcherApp);
     cfg->keyboardLang = config__strdup(cfg->keyboardLang);
     cfg->webUIUser = config__strdup(cfg->webUIUser);
     cfg->webUIPassword = config__strdup(cfg->webUIPassword);
@@ -190,6 +193,7 @@ static void config__set_defaults(config__t *cfg)
     cfg->bgColor = 0x0000;
     config__assign(&cfg->themePath, "");
     cfg->themeOnSd = false;
+    config__assign(&cfg->launcherApp, "");
 
     cfg->dimmerSet = 60;
     cfg->bright = 100;
@@ -371,6 +375,7 @@ static void config__parse_json(config__t *cfg, const cJSON *root)
     json_get_hex16(root, "bgColor", &cfg->bgColor);
     json_get_string(root, "themeFile", &cfg->themePath);
     json_get_bool(root, "themeOnSd", &cfg->themeOnSd);
+    json_get_string(root, "launcherApp", &cfg->launcherApp);
 
     json_get_int(root, "dimmerSet", &cfg->dimmerSet);
     json_get_int(root, "bright", &cfg->bright);
@@ -524,6 +529,7 @@ static cJSON *config__build_json(const config__t *cfg)
     cJSON_AddStringToObject(root, "bgColor", hex);
     cJSON_AddStringToObject(root, "themeFile", config__or_empty(cfg->themePath));
     cJSON_AddBoolToObject(root, "themeOnSd", cfg->themeOnSd);
+    cJSON_AddStringToObject(root, "launcherApp", config__or_empty(cfg->launcherApp));
 
     cJSON_AddNumberToObject(root, "dimmerSet", cfg->dimmerSet);
     cJSON_AddNumberToObject(root, "bright", cfg->bright);
@@ -729,6 +735,15 @@ void config__free_snapshot(config__t *snapshot)
     if (snapshot == NULL) return;
     config__free_config(snapshot);
     memset(snapshot, 0, sizeof(*snapshot));
+}
+
+char *config__get_launcher_app(void)
+{
+    config__load();
+    config__lock();
+    char *copy = config__strdup(s_config.launcherApp);
+    config__unlock();
+    return copy;
 }
 
 /* ------------------------------------------------------------------------ */

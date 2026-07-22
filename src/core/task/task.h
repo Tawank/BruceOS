@@ -30,9 +30,14 @@ typedef struct {
      * after task_registry__create() returns. */
     char **argv;
     bool built_in;
+    /* Recorded on the task record immediately, before the task's first
+     * instruction runs (this is the "--gui task context" AppRunner records
+     * ahead of any launch-time permission check). */
     bool gui_requested;
-    /* false => the new task is pushed onto the foreground stack and starts
-     * BRUCE_TASK_FOREGROUND, displacing the current top; true => it starts
+    /* The new task is BRUCE_TASK_STARTING until it actually begins running;
+     * at that point (still before its entry point is called) it transitions
+     * itself: false => pushed onto the foreground stack as
+     * BRUCE_TASK_FOREGROUND, displacing the current top; true => becomes
      * BRUCE_TASK_BACKGROUND without touching the stack. */
     bool start_in_background;
     /* 0 selects a Core default (4096 bytes). */

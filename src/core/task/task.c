@@ -33,6 +33,7 @@ typedef struct {
     bruce_task_state_t state_before_pause;
     bool built_in;
     bool gui_requested;
+    bool start_in_background;
     TaskHandle_t handle;
 
     bruce_app_entry_t entry;
@@ -272,6 +273,18 @@ static void task__teardown_locked(task__record_t *record)
 static void task__trampoline(void *arg)
 {
     task__record_t *record = (task__record_t *)arg;
+
+    /* The record was created in BRUCE_TASK_STARTING; this is the first thing
+     * the new task does once FreeRTOS actually schedules it, and still runs
+     * before record->entry() sees a single instruction. */
+    task__lock();
+    if (record->start_in_background) {
+        record->state = BRUCE_TASK_BACKGROUND;
+    } else {
+        task__foreground_stack_push_locked(record->id, record);
+    }
+    task__unlock();
+
     int result = record->entry != NULL ? record->entry(record->argc, record->argv) : -1;
     (void)result;
 
@@ -320,23 +333,21 @@ bruce_result_t task_registry__create(const task_create_params_t *params, bruce_t
             BRUCE_TASK_NAME_MAX - 1);
     record->built_in = params->built_in;
     record->gui_requested = params->gui_requested;
+    record->start_in_background = params->start_in_background;
     record->entry = params->entry;
     record->argc = params->argc > 0 ? params->argc : 0;
     record->argv = argv_copy;
     record->next_resource_id = 1;
     xEventGroupClearBits(s_task_events[slot], TASK__EVT_WAKE | TASK__EVT_EXITED);
 
-    if (params->start_in_background) {
-        record->state = BRUCE_TASK_BACKGROUND;
-    } else {
-        task__foreground_stack_push_locked(record->id, record);
-    }
+    /* record->state is already BRUCE_TASK_STARTING from the memset above
+     * (BRUCE_TASK_STARTING == 0); task__trampoline() performs the actual
+     * foreground/background transition once the task begins running. */
 
     uint32_t stack_bytes = params->stack_bytes != 0 ? params->stack_bytes : TASK__DEFAULT_STACK_BYTES;
     BaseType_t created = xTaskCreate(task__trampoline, record->name, stack_bytes, record, tskIDLE_PRIORITY + 1,
                                       &record->handle);
     if (created != pdPASS) {
-        task__foreground_stack_pop_if_top_locked(record->id);
         task__free_argv(record->argc, record->argv);
         record->in_use = false;
         task__unlock();

@@ -14,7 +14,7 @@ void app_main(void)
 
     int result = app_runner__run("launcher", "", false);
 
-    if (result != 0) {
-        printf("Launcher failed with code %d\n", result);
+    if (result < 0) {
+        printf("Launcher failed to start with code %d\n", result);
     }
 }

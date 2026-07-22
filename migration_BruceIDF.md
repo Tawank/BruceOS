@@ -28,7 +28,7 @@ hardware behavior.
 ### Core owns
 
 - bootstrap and system configuration;
-- task, runtime, AppRunner, ELF loader, and JavaScript runner;
+- task, runtime, app_runner, ELF loader, and JavaScript runner;
 - permission decisions and resource ownership;
 - memory, file, dialog, input, display, network, radio, and other HAL APIs;
 - all ESP-IDF calls and hardware handles.
@@ -54,7 +54,7 @@ whose entire purpose is validating Core's private implementation (task
 registry, memory tracking, resource cleanup, and so on as Core grows).  It is
 allowed to include `src/core/` private headers and call FreeRTOS/ESP-IDF
 directly, the same way Core source itself does.  It still has no special
-launch path: it is registered and run through AppRunner like any other
+launch path: it is registered and run through app_runner like any other
 built-in (`app_runner__run("selftest", ...)`, from the launcher, or from the
 terminal), and it is never a dependency of another app or module.  No other
 built-in gets this exemption.
@@ -66,14 +66,14 @@ runs the built-in utility command `launcher`.
 
 `launcher` is a small module under `modules/utils/`.  Its
 `run_launcher_app()` helper reads `launcherApp` from `bruce.json` using the
-public Config API and starts that command with AppRunner.  The default is
+public Config API and starts that command with app_runner.  The default is
 `bruce_launcher`; an empty or unstartable configured value falls back to
 `bruce_launcher`.
 
 `bruce_launcher` is an application, not Core.  It composes menus and may scan
 `/apps/`.  It appends `--gui` to every app it launches.
 
-## Applications and AppRunner
+## Applications and app_runner
 
 ### Entry points
 
@@ -211,7 +211,7 @@ they are not renamed to a new `bruce.*` namespace.
 
 `runtime.main()` is retained for now even though optional `app_main(argv)` is
 the normal JS lifecycle entry.  `serial.cmd(command)` delegates to the same
-terminal/AppRunner parser and requires `execute`.
+terminal/app_runner parser and requires `execute`.
 
 ## Permissions
 
@@ -264,7 +264,7 @@ for tasks launched with `--gui`, or a terminal choice such as:
 pick: _
 ```
 
-AppRunner records the initial `--gui` launch context in task-local storage
+app_runner records the initial `--gui` launch context in task-local storage
 before launch-time permission checks, but leaves the argument in the app’s
 `argv`.  A background serial-monitor-style task decides its own behavior;
 there is no separate dynamic task interaction-mode API.
