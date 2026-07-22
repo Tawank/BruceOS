@@ -4,8 +4,13 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* Core-private legacy configuration representation.  It remains private
- * until A5 replaces it with field-specific headers under src/core_sdk/. */
+#include "core_sdk/config.h"
+
+/* Core-private legacy configuration representation. A5 exposes it through
+ * field-specific getters/setters under src/core_sdk/config.h; this struct
+ * and the whole-snapshot config__get()/config__set() below stay private and
+ * are only used by Core itself (config.c's own JSON I/O, and other Core
+ * modules such as core/wifi that need direct struct access). */
 #define CONFIG__FILE_PATH "/bruce.json"
 
 #define CONFIG__WIFI_SSID_MAX_LEN 32
@@ -15,6 +20,7 @@
 
 #define CONFIG__THEME_PATH_MAX_LEN 64
 #define CONFIG__KEYBOARD_LANG_MAX_LEN 15
+#define CONFIG__LAUNCHER_APP_MAX_LEN 64
 
 #define CONFIG__WEBUI_USER_MAX_LEN 32
 #define CONFIG__WEBUI_PASSWORD_MAX_LEN 64
@@ -42,11 +48,6 @@ typedef enum {
     CONFIG__EVIL_PORTAL_FIRST_LAST_CHAR = 1,
     CONFIG__EVIL_PORTAL_HIDE_PASSWORD = 2,
 } config__evil_portal_password_mode_t;
-
-typedef struct {
-    const char *ssid;
-    const char *password;
-} config__wifi_credential_t;
 
 typedef struct {
     const char *menuName;
@@ -115,7 +116,7 @@ typedef struct {
     /* Wi-Fi */
     const char *wifiApSsid;
     const char *wifiApPassword;
-    config__wifi_credential_t wifiCredentials[CONFIG__WIFI_MAX_CREDENTIALS];
+    bruce_config_wifi_credential_t wifiCredentials[CONFIG__WIFI_MAX_CREDENTIALS];
     size_t wifiCredentialCount;
     const char *wifiMAC;
     bool terminalLog;
@@ -162,16 +163,11 @@ bool config__get(config__t *out);
 bool config__set(const config__t *in);
 void config__free_snapshot(config__t *snapshot);
 
-/* Wi-Fi (kept for existing callers, e.g. core/wifi). */
-bool config__set_wifi_ap(const char *ssid, const char *password);
-bool config__get_wifi_ap(char *ssid, size_t ssid_size, char *password, size_t password_size);
-size_t config__wifi_credential_count(void);
-/* credential->ssid/password are heap allocated; free both with
- * config__free_wifi_credential() when done. */
-bool config__wifi_credential_at(size_t index, config__wifi_credential_t *credential);
-bool config__find_wifi_credential(const char *ssid, config__wifi_credential_t *credential);
-void config__free_wifi_credential(config__wifi_credential_t *credential);
-bool config__add_or_update_wifi_credential(const char *ssid, const char *password);
+/* Wi-Fi AP config, Wi-Fi client credentials, MAC, and Web UI credentials are
+ * now public (and permanently protected from ELF/JS) - see
+ * core_sdk/config.h's config__get_wifi_ap()/config__find_wifi_credential()/
+ * etc. Core modules (e.g. core/wifi/wifi_common.c) call those same public
+ * functions directly; there is no private duplicate. */
 
 /* List helpers that mirror BruceConfig's dedicated mutators. */
 bool config__add_qr_code_entry(const char *menu_name, const char *content);

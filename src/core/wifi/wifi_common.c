@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "core/config/config.h"
+#include "core_sdk/config.h"
 #include "core_sdk/wifi.h"
 
 #include "esp_event.h"
@@ -243,8 +244,8 @@ bruce_result_t wifi__connect_known(void)
     int count = wifi__scan(networks, 16);
     if (count < 0) return (bruce_result_t)count;
     for (int i = 0; i < count; ++i) {
-        config__wifi_credential_t credential;
-        if (config__find_wifi_credential(networks[i].ssid, &credential)) {
+        bruce_config_wifi_credential_t credential;
+        if (config__find_wifi_credential(networks[i].ssid, &credential) == BRUCE_OK) {
             bruce_result_t result = wifi__connect(credential.ssid, credential.password, WIFI__DEFAULT_CONNECT_TIMEOUT_MS);
             config__free_wifi_credential(&credential);
             if (result == BRUCE_OK) return BRUCE_OK;
@@ -259,7 +260,7 @@ bruce_result_t wifi__setup_ap(void)
     if (result != BRUCE_OK) return result;
     char ssid[CONFIG__WIFI_SSID_MAX_LEN + 1];
     char password[CONFIG__WIFI_PASSWORD_MAX_LEN + 1];
-    if (!config__get_wifi_ap(ssid, sizeof(ssid), password, sizeof(password))) {
+    if (config__get_wifi_ap(ssid, sizeof(ssid), password, sizeof(password)) != BRUCE_OK) {
         return BRUCE_ERR_IO;
     }
     wifi_config_t ap = {0};

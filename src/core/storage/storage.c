@@ -5,6 +5,11 @@
 #include <string.h>
 #include <unistd.h>
 
+#include <dirent.h>
+#include <errno.h> // IWYU pragma: export
+#include <fcntl.h>
+#include <sys/stat.h>
+
 #include "driver/sdspi_host.h"
 #include "esp_err.h"
 #include "esp_log.h"
@@ -12,6 +17,10 @@
 #include "esp_vfs_fat.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+
+#include "core/task/task.h"
+#include "core_sdk/permission.h"
+#include "core_sdk/storage.h"
 
 #define STORAGE__PATH_MAX 192
 
@@ -260,4 +269,292 @@ bool storage__sd_is_ready(void)
 void storage__free(void *data)
 {
     free(data);
+}
+
+/* ------------------------------------------------------------------------ */
+/* A5: task-owned opaque file handles (core_sdk/storage.h)                  */
+/* ------------------------------------------------------------------------ */
+
+#define STORAGE__MAX_OPEN_FILES 16
+
+typedef struct {
+    bool in_use;
+    int fd;
+    bruce_file_id_t id;
+    bruce_resource_id_t resource_id;
+    bruce_task_id_t owner;
+} storage__file_slot_t;
+
+static storage__file_slot_t s_open_files[STORAGE__MAX_OPEN_FILES];
+static uint32_t s_next_file_id = 1;
+
+/* /bruce.json and /permissions.json (plus their atomic-write .tmp siblings)
+ * are the only paths this public API refuses, per migration_BruceIDF.md -
+ * "Input, display, storage, and Config". Everything else mounted (SPIFFS or
+ * SD) is reachable by a storage-granted caller. Core itself still reads/
+ * writes those two files directly through storage__read_file()/
+ * storage__write_file_atomic() above, which this check does not apply to. */
+static bool storage__is_protected_path(const char *path)
+{
+    static const char *const protected_paths[] = {
+        "/bruce.json",
+        "/bruce.json.tmp",
+        "/permissions.json",
+        "/permissions.json.tmp",
+    };
+    if (path == NULL) return false;
+    for (size_t i = 0; i < sizeof(protected_paths) / sizeof(protected_paths[0]); ++i) {
+        if (strcmp(path, protected_paths[i]) == 0) return true;
+    }
+    return false;
+}
+
+static bool storage__is_valid_public_path(const char *path)
+{
+    return path != NULL && path[0] == '/' && strlen(path) < BRUCE_STORAGE_PATH_MAX && strstr(path, "..") == NULL;
+}
+
+/* Caller must hold s_storage_mutex. */
+static int storage__find_open_slot_locked(bruce_file_id_t file)
+{
+    if (file == BRUCE_FILE_ID_INVALID) return -1;
+    for (int i = 0; i < STORAGE__MAX_OPEN_FILES; ++i) {
+        if (s_open_files[i].in_use && s_open_files[i].id == file) return i;
+    }
+    return -1;
+}
+
+/* Invoked by task_registry__* teardown if a task exits/is killed without
+ * closing its own handles; runs while the task registry's own lock is held,
+ * so it must not call back into task_registry__* itself (mirrors
+ * memory__cleanup's rule in core/memory/memory.c). */
+static void storage__file_cleanup(void *context)
+{
+    storage__file_slot_t *slot = (storage__file_slot_t *)context;
+    storage__lock();
+    if (slot->in_use) {
+        close(slot->fd);
+        slot->in_use = false;
+        slot->id = BRUCE_FILE_ID_INVALID;
+    }
+    storage__unlock();
+}
+
+bruce_result_t storage__open(const char *path, uint32_t flags, bruce_file_id_t *out_file)
+{
+    if (out_file == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    *out_file = BRUCE_FILE_ID_INVALID;
+
+    bruce_result_t permission = permission__check(BRUCE_PERMISSION_STORAGE);
+    if (permission != BRUCE_OK) return permission;
+    if (!storage__is_valid_public_path(path)) return BRUCE_ERR_INVALID_PATH;
+    if (storage__is_protected_path(path)) return BRUCE_ERR_PERMISSION;
+
+    bool want_read = (flags & BRUCE_STORAGE_OPEN_READ) != 0;
+    bool want_write = (flags & BRUCE_STORAGE_OPEN_WRITE) != 0;
+    bool want_append = (flags & BRUCE_STORAGE_OPEN_APPEND) != 0;
+    bool want_create = (flags & BRUCE_STORAGE_OPEN_CREATE) != 0;
+    bool want_truncate = (flags & BRUCE_STORAGE_OPEN_TRUNCATE) != 0;
+    if (!want_read && !want_write && !want_append) return BRUCE_ERR_INVALID_ARGUMENT;
+
+    int posix_flags;
+    if (want_append) {
+        posix_flags = (want_read ? O_RDWR : O_WRONLY) | O_APPEND;
+    } else if (want_read && want_write) {
+        posix_flags = O_RDWR;
+    } else if (want_write) {
+        posix_flags = O_WRONLY;
+    } else {
+        posix_flags = O_RDONLY;
+    }
+    if (want_create) posix_flags |= O_CREAT;
+    if (want_truncate) posix_flags |= O_TRUNC;
+
+    storage__lock();
+    if (!storage__is_ready(path)) {
+        storage__unlock();
+        return BRUCE_ERR_IO;
+    }
+    int slot_index = -1;
+    for (int i = 0; i < STORAGE__MAX_OPEN_FILES; ++i) {
+        if (!s_open_files[i].in_use) {
+            slot_index = i;
+            break;
+        }
+    }
+    if (slot_index < 0) {
+        storage__unlock();
+        return BRUCE_ERR_RESOURCE_LIMIT;
+    }
+    /* Reserve the slot before releasing the lock: open() and
+     * task_registry__resource_register() must never run while
+     * s_storage_mutex is held. The cleanup callback above re-enters
+     * s_storage_mutex from inside the task registry's own lock during task
+     * teardown, so nesting the two locks in the opposite order here would
+     * be a lock-order inversion. */
+    s_open_files[slot_index].in_use = true;
+    s_open_files[slot_index].id = BRUCE_FILE_ID_INVALID;
+    s_open_files[slot_index].fd = -1;
+    storage__unlock();
+
+    int fd = open(path, posix_flags, 0644);
+    if (fd < 0) {
+        storage__lock();
+        s_open_files[slot_index].in_use = false;
+        storage__unlock();
+        return errno == ENOENT ? BRUCE_ERR_NOT_FOUND : BRUCE_ERR_IO;
+    }
+
+    bruce_resource_id_t resource_id = task_registry__resource_register(storage__file_cleanup, &s_open_files[slot_index]);
+    if (resource_id == BRUCE_RESOURCE_ID_INVALID) {
+        close(fd);
+        storage__lock();
+        s_open_files[slot_index].in_use = false;
+        storage__unlock();
+        return BRUCE_ERR_RESOURCE_LIMIT;
+    }
+
+    storage__lock();
+    s_open_files[slot_index].fd = fd;
+    s_open_files[slot_index].resource_id = resource_id;
+    s_open_files[slot_index].owner = task__current_id();
+    bruce_file_id_t id = s_next_file_id++;
+    if (s_next_file_id == BRUCE_FILE_ID_INVALID) s_next_file_id = 1;
+    s_open_files[slot_index].id = id;
+    *out_file = id;
+    storage__unlock();
+    return BRUCE_OK;
+}
+
+bruce_result_t storage__read(bruce_file_id_t file, void *buffer, size_t capacity, size_t *out_size)
+{
+    if (buffer == NULL || out_size == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    storage__lock();
+    int slot_index = storage__find_open_slot_locked(file);
+    if (slot_index < 0) {
+        storage__unlock();
+        return BRUCE_ERR_NOT_FOUND;
+    }
+    if (s_open_files[slot_index].owner != task__current_id()) {
+        storage__unlock();
+        return BRUCE_ERR_PERMISSION;
+    }
+    ssize_t result = read(s_open_files[slot_index].fd, buffer, capacity);
+    storage__unlock();
+    if (result < 0) return BRUCE_ERR_IO;
+    *out_size = (size_t)result;
+    return BRUCE_OK;
+}
+
+bruce_result_t storage__write(bruce_file_id_t file, const void *buffer, size_t size, size_t *out_size)
+{
+    if (out_size == NULL || (buffer == NULL && size != 0)) return BRUCE_ERR_INVALID_ARGUMENT;
+    storage__lock();
+    int slot_index = storage__find_open_slot_locked(file);
+    if (slot_index < 0) {
+        storage__unlock();
+        return BRUCE_ERR_NOT_FOUND;
+    }
+    if (s_open_files[slot_index].owner != task__current_id()) {
+        storage__unlock();
+        return BRUCE_ERR_PERMISSION;
+    }
+    ssize_t result = write(s_open_files[slot_index].fd, buffer, size);
+    storage__unlock();
+    if (result < 0) return BRUCE_ERR_IO;
+    *out_size = (size_t)result;
+    return BRUCE_OK;
+}
+
+bruce_result_t storage__seek(bruce_file_id_t file, int64_t offset, int whence, uint64_t *out_position)
+{
+    if (whence != SEEK_SET && whence != SEEK_CUR && whence != SEEK_END) return BRUCE_ERR_INVALID_ARGUMENT;
+    storage__lock();
+    int slot_index = storage__find_open_slot_locked(file);
+    if (slot_index < 0) {
+        storage__unlock();
+        return BRUCE_ERR_NOT_FOUND;
+    }
+    if (s_open_files[slot_index].owner != task__current_id()) {
+        storage__unlock();
+        return BRUCE_ERR_PERMISSION;
+    }
+    off_t result = lseek(s_open_files[slot_index].fd, (off_t)offset, whence);
+    storage__unlock();
+    if (result < 0) return BRUCE_ERR_IO;
+    if (out_position != NULL) *out_position = (uint64_t)result;
+    return BRUCE_OK;
+}
+
+bruce_result_t storage__close(bruce_file_id_t file)
+{
+    storage__lock();
+    int slot_index = storage__find_open_slot_locked(file);
+    if (slot_index < 0) {
+        storage__unlock();
+        return BRUCE_ERR_NOT_FOUND;
+    }
+    if (s_open_files[slot_index].owner != task__current_id()) {
+        storage__unlock();
+        return BRUCE_ERR_PERMISSION;
+    }
+    int fd = s_open_files[slot_index].fd;
+    bruce_resource_id_t resource_id = s_open_files[slot_index].resource_id;
+    s_open_files[slot_index].in_use = false;
+    s_open_files[slot_index].id = BRUCE_FILE_ID_INVALID;
+    storage__unlock();
+
+    close(fd);
+    /* The handle is already released above; this only removes the now-
+     * redundant teardown-time cleanup registration, it does not close fd
+     * again. */
+    task_registry__resource_release(resource_id);
+    return BRUCE_OK;
+}
+
+bruce_result_t storage__list(const char *path, bruce_storage_entry_t *entries, size_t capacity, size_t *out_count)
+{
+    bruce_result_t permission = permission__check(BRUCE_PERMISSION_STORAGE);
+    if (permission != BRUCE_OK) return permission;
+    if (out_count == NULL || !storage__is_valid_public_path(path) || (capacity != 0 && entries == NULL)) {
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+
+    storage__lock();
+    if (!storage__is_ready(path)) {
+        storage__unlock();
+        return BRUCE_ERR_IO;
+    }
+    DIR *dir = opendir(path);
+    if (dir == NULL) {
+        storage__unlock();
+        return errno == ENOENT ? BRUCE_ERR_NOT_FOUND : BRUCE_ERR_IO;
+    }
+
+    size_t path_length = strlen(path);
+    bool has_trailing_slash = path_length > 0 && path[path_length - 1] == '/';
+    size_t written = 0;
+    struct dirent *dir_entry;
+    while (written < capacity && (dir_entry = readdir(dir)) != NULL) {
+        if (strcmp(dir_entry->d_name, ".") == 0 || strcmp(dir_entry->d_name, "..") == 0) continue;
+
+        char full_path[BRUCE_STORAGE_PATH_MAX];
+        int printed = snprintf(full_path, sizeof(full_path), has_trailing_slash ? "%s%s" : "%s/%s", path, dir_entry->d_name);
+        if (printed < 0 || (size_t)printed >= sizeof(full_path)) continue;
+        if (storage__is_protected_path(full_path)) continue;
+
+        struct stat entry_stat;
+        if (stat(full_path, &entry_stat) != 0) continue;
+
+        bruce_storage_entry_t *out = &entries[written];
+        strncpy(out->name, dir_entry->d_name, BRUCE_STORAGE_NAME_MAX - 1);
+        out->name[BRUCE_STORAGE_NAME_MAX - 1] = '\0';
+        out->type = S_ISDIR(entry_stat.st_mode) ? BRUCE_STORAGE_ENTRY_DIRECTORY : BRUCE_STORAGE_ENTRY_FILE;
+        out->size = (size_t)entry_stat.st_size;
+        ++written;
+    }
+    closedir(dir);
+    *out_count = written;
+    storage__unlock();
+    return BRUCE_OK;
 }

@@ -8,6 +8,8 @@
 #include "task_test.h"
 #include "app_runner_test.h"
 #include "permission_test.h"
+#include "storage_test.h"
+#include "config_test.h"
 
 void selftest__resource_cleanup(void *context)
 {
@@ -33,6 +35,18 @@ int selftest_app(int argc, char **argv)
     printf("[selftest] %s %s\n", "run_permission_builtin_grant_case", selftest__run_permission_builtin_grant_case() ? "PASS" : "FAIL");
     printf("[selftest] %s %s\n", "run_permission_preflight_case", selftest__run_permission_preflight_case() ? "PASS" : "FAIL");
     printf("[selftest] %s %s\n", "run_dialog_gui_terminal_dispatch_case", selftest__run_dialog_gui_terminal_dispatch_case() ? "PASS" : "FAIL");
+
+    printf("[selftest] %s %s\n", "run_storage_permission_denied_case", selftest__run_storage_permission_denied_case() ? "PASS" : "FAIL");
+    printf("[selftest] %s %s\n", "run_storage_protected_path_case", selftest__run_storage_protected_path_case() ? "PASS" : "FAIL");
+    printf("[selftest] %s %s\n", "run_storage_roundtrip_case", selftest__run_storage_roundtrip_case() ? "PASS" : "FAIL");
+    printf("[selftest] %s %s\n", "run_storage_ownership_case", selftest__run_storage_ownership_case() ? "PASS" : "FAIL");
+    printf("[selftest] %s %s\n", "run_storage_no_leak_normal_exit_case", selftest__run_storage_no_leak_normal_exit_case() ? "PASS" : "FAIL");
+    printf("[selftest] %s %s\n", "run_storage_no_leak_killed_case", selftest__run_storage_no_leak_killed_case() ? "PASS" : "FAIL");
+
+    printf("[selftest] %s %s\n", "run_config_permission_denied_case", selftest__run_config_permission_denied_case() ? "PASS" : "FAIL");
+    printf("[selftest] %s %s\n", "run_config_permission_allowed_case", selftest__run_config_permission_allowed_case() ? "PASS" : "FAIL");
+    printf("[selftest] %s %s\n", "run_config_protected_field_denied_case", selftest__run_config_protected_field_denied_case() ? "PASS" : "FAIL");
+    printf("[selftest] %s %s\n", "run_config_builtin_manage_case", selftest__run_config_builtin_manage_case() ? "PASS" : "FAIL");
 
     return 0;
 }
