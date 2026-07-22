@@ -1,6 +1,8 @@
 #include <stdio.h>
 
-#include "app_runner.h"
+#include "core_sdk/app_runner.h"
+
+#include "core/app_runner/app_runner.h"
 #include "core/config/config.h"
 
 void app_main(void)
@@ -10,7 +12,7 @@ void app_main(void)
     }
     app_runner__register_defaults();
 
-    int result = app_runner__run("launcher", false);
+    int result = app_runner__run("launcher", "", false);
 
     if (result != 0) {
         printf("Launcher failed with code %d\n", result);

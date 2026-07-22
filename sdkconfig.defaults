@@ -1,2 +1,7 @@
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# Required by the Core task registry (src/core/task/task.c) for sampled
+# per-task CPU accounting via uxTaskGetSystemState()/TaskStatus_t.
+CONFIG_FREERTOS_USE_TRACE_FACILITY=y
+CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y

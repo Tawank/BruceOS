@@ -4,14 +4,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/*
- * This header is part of the API exposed to ELF apps. Strings are heap
- * allocated (see the config__t ownership rules below), which works because
- * ELF apps run in the same address space and heap as the core on ESP32.
- *
- * This is a C port of BrucePIO's BruceConfig (src/core/config.h/.cpp),
- * backed by /bruce.json and parsed with cJSON instead of ArduinoJson.
- */
+/* Core-private legacy configuration representation.  It remains private
+ * until A5 replaces it with field-specific headers under src/core_sdk/. */
 #define CONFIG__FILE_PATH "/bruce.json"
 
 #define CONFIG__WIFI_SSID_MAX_LEN 32

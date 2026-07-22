@@ -1,10 +1,10 @@
-#include "launcher.h"
+#include "bruce_launcher.h"
 
 #include <stdio.h>
 
-#include "core/apprunner/app_runner.h"
+#include "core_sdk/app_runner.h"
 
-int launcher_app(int argc, char **argv)
+int bruce_launcher_app(int argc, char **argv)
 {
     (void)argc;
     (void)argv;
@@ -12,8 +12,7 @@ int launcher_app(int argc, char **argv)
     printf("Launcher started\n");
     printf("Launcher menu: wifi\n");
 
-    char *wifi_argv[] = {"webui"};
-    int result = app_runner__run("wifi", 1, wifi_argv);
+    int result = app_runner__run("wifi", "--gui", false);
 
     if (result != 0) {
         printf("Wifi app returned %d\n", result);

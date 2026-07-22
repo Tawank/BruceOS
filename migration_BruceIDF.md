@@ -1,467 +1,379 @@
-# Bruce OS Architecture
+# BruceIDF Architecture Contract
 
-## Goal
+## Purpose
 
-Bruce OS is a small runtime for ESP32 devices.
+BruceIDF is a new ESP-IDF implementation of Bruce OS.  `BrucePIO/` is a
+reference repository to migrate feature-by-feature; it is not code to modify,
+delete, or refactor in place.
 
-The core should stay as small as possible and only provide the runtime and hardware APIs.
+The Core is deliberately small.  It owns runtime state, policy, hardware, and
+safe application interfaces.  Everything a person uses is an application or a
+module above that Core.
 
-Everything the user interacts with should be an application in the `modules/` directory.
-
-Bruce OS should not force any user interface. A user may boot into a launcher, terminal, clock, or their own application, by setting the `launcherApp` in the configuration. That application may be a menu, a terminal, or anything else. And that application may launch other applications, or not using the AppRunner/Task API.
-
----
-
-# Project Structure
+The design goal is one implementation per capability:
 
 ```
-core/
-    config/
-    runtime/
-    task/
-    app_runner/
-
-    wifi/
-    display/
-    storage/
-    input/
-    gpio/
-    js_interpreter/
-    bt/
-    ir/
-    rf/
-    rfid/
-    gps/
-    ethernet/
-    fm/
-    audio/
-
-modules/
-    launcher/
-    terminal/
-    wifi/
-    config/
-    weather/
-    clock/
+ELF application ─┐
+JavaScript app ──┼─> public Core API ─> ESP-IDF / hardware
+terminal command ┤
+launcher module ─┘
 ```
 
-The **core** contains the operating system.
+No JavaScript binding, serial command, launcher menu, or feature module may
+implement a second copy of Wi-Fi, storage, configuration, display, or other
+hardware behavior.
 
-The **modules** directory contains everything the user runs.
+## Boundaries
 
----
+### Core owns
 
-# Core
+- bootstrap and system configuration;
+- task, runtime, AppRunner, ELF loader, and JavaScript runner;
+- permission decisions and resource ownership;
+- memory, file, dialog, input, display, network, radio, and other HAL APIs;
+- all ESP-IDF calls and hardware handles.
 
-The core should only contain:
+Core has no launcher menu, application menu, theme policy, or feature-specific
+screen.  Renderer-neutral primitives such as `dialog__choice()` are Core APIs;
+the active task context selects a GUI or terminal renderer.
 
-- Bruce HAL
-- Bruce Runtime
-- BruceConfig
-- Task Manager
-- AppRunner
+### Apps and modules own
 
-Nothing else. Core should be callable from AppRunner tasks elf/javascript and should be thread safe.
+- menus, launchers, terminal UX, file-manager UX, settings screens, and
+  feature workflows;
+- translating user intent into public Core API calls;
+- application-specific presentation and state.
 
-The core should **not** contain:
+Built-in modules are compiled into firmware.  ELF and JavaScript apps are
+external applications.  Built-ins use the same public SDK API and lifecycle as
+external apps, but their permission checks always pass.  Neither kind of app
+uses private Core headers or ESP-IDF directly.
 
-- menus
-- launcher
-- themes
-- settings screens
-- application logic
+The one deliberate exception is `modules/selftest`, a built-in diagnostic app
+whose entire purpose is validating Core's private implementation (task
+registry, memory tracking, resource cleanup, and so on as Core grows).  It is
+allowed to include `src/core/` private headers and call FreeRTOS/ESP-IDF
+directly, the same way Core source itself does.  It still has no special
+launch path: it is registered and run through AppRunner like any other
+built-in (`app_runner__run("selftest", ...)`, from the launcher, or from the
+terminal), and it is never a dependency of another app or module.  No other
+built-in gets this exemption.
 
----
+## Bootstrap and launcher selection
 
-# BruceConfig
+`main.c` initializes Core services (including display and configuration), then
+runs the built-in utility command `launcher`.
 
-BruceConfig is responsible for loading and saving:
+`launcher` is a small module under `modules/utils/`.  Its
+`run_launcher_app()` helper reads `launcherApp` from `bruce.json` using the
+public Config API and starts that command with AppRunner.  The default is
+`bruce_launcher`; an empty or unstartable configured value falls back to
+`bruce_launcher`.
 
-```
-bruce.json
-```
+`bruce_launcher` is an application, not Core.  It composes menus and may scan
+`/apps/`.  It appends `--gui` to every app it launches.
 
-It stores system settings such as:
+## Applications and AppRunner
 
-- colors
-- brightness
-- timezone
-- sound
-- WiFi
-- startup application
-- developer mode
-- QR codes
-- user preferences
+### Entry points
 
-Applications should never edit JSON directly.
+- Every ELF exports `int app_main(int argc, char **argv)`.
+- Every built-in registers a uniquely named C function with that same
+  signature.  It cannot use the literal global `app_main`, because firmware
+  contains multiple modules.
+- A JavaScript file is evaluated first.  If it defines `app_main(argv)`, the
+  JavaScript event loop invokes it; it is optional.
 
----
+### Named execution
 
-# AppRunner
-
-AppRunner starts applications.
-
-Applications register exactly one entry point.
+The public named-run API is:
 
 ```c
-apprunner__register(
-    "wifi",
-    wifi_app
-);
-
-apprunner__register(
-    "clock",
-    clock_app
-);
+int app_runner__run(const char *app_name, const char *arg, bool in_background);
 ```
 
-Applications are started by name.
+It returns a positive Core task ID on success and a negative `BRUCE_ERR_*`
+error code on failure.  `arg` is a shell-style argument string (quotes and
+backslash escaping); empty or `NULL` creates `argc == 0`.
+
+Resolution is deterministic and never scans directories:
+
+1. registered built-in module;
+2. `/bin/<app_name>.elf`;
+3. `/bin/<app_name>.js`;
+4. `BRUCE_ERR_NOT_FOUND`.
+
+ELF wins if both external paths exist.  Duplicate built-in command names are a
+startup registration error.
+
+The loaders use the equivalent contract:
 
 ```c
-apprunner__run("wifi");
+int elf__run_path(const char *path, const char *arg, bool in_background);
+int js__run_path(const char *path, const char *arg, bool in_background);
 ```
 
-Arguments work exactly like `main()`.
-
-```c
-apprunner__run(
-    "wifi",
-    "connect",
-    "MyWifi",
-    "password123"
-);
-```
-
-Applications receive:
-
-```c
-int wifi_app(int argc, char **argv);
-```
-
-The application decides what to do.
-
-Example:
-
-```c
-int wifi_app(int argc, char **argv)
-{
-    if (argc == 0)
-        wifi_menu();
-
-    else if (!strcmp(argv[0], "scan"))
-        wifi_scan();
-
-    else if (!strcmp(argv[0], "connect"))
-        wifi_connect(argv[1], argv[2]);
-
-    return 0;
-}
-```
-
-AppRunner does not know application commands.
-
-It simply starts applications.
-
----
-
-# Task Manager
-
-Task Manager manages every running application.
-
-Responsibilities:
-
-- start
-- stop
-- restart
-- pause
-- resume
-- move to background
-- bring to foreground
-
-Tracks:
-
-- task
-- heap usage
-- stack usage
-- CPU usage
-- running state
-
-Applications never access FreeRTOS directly.
-
----
-
-# Runtime
-
-The runtime is responsible for:
-
-- creating tasks
-- destroying tasks
-- loading applications
-- unloading applications
-- resource ownership
-- memory tracking
-
-Applications use the Bruce API only.
-
----
-
-# HAL
-
-The core provides all hardware APIs.
-
-Naming convention:
-
-```
-module__action()
-```
-
-Examples:
-
-```c
-wifi__connect();
-
-wifi__disconnect();
-
-wifi__scan();
-```
-
-```c
-display__clear();
-
-display__update();
-
-display__draw_text();
-```
-
-```c
-gpio__read();
-
-gpio__write();
-```
-
-```c
-fs__open();
-
-fs__read();
-
-fs__write();
-```
-
-```c
-audio__play();
-```
-
-The HAL owns all hardware resources.
-
-Applications never use ESP-IDF directly.
-
----
-
-# Applications
-
-Applications live inside:
-
-```
-modules/
-```
-
-Examples:
-
-```
-launcher/
-
-terminal/
-
-wifi/
-
-config/
-
-weather/
-
-clock/
-```
-
-Applications only use Bruce APIs.
-
-Applications never access ESP-IDF directly.
-
----
-
-# Launcher
-
-Launcher is optional.
-
-It is just another application.
-
-It may read:
-
-```
-apps.json
-```
-
-Example:
+Both accept only normalized absolute paths with no `.` or `..` components and
+require their matching extension.  An app with `execute` may start an ELF or
+JS file from any mounted path.  Core does not discover `/apps/`, `/sdcard/`,
+or any other folder; launcher and file-manager apps decide what to enumerate.
+
+Launching another app does not inherit or intersect permissions.  Each target
+is its own user-controlled task.
+
+### Task lifecycle
+
+Every run creates a Core-managed task.  A normal named run starts foreground;
+`in_background` supports autostart and services.  The Core keeps a foreground
+stack: foregrounding a new task pushes the prior task; exit or
+`runtime__to_background()` restores the most recent foreground task, falling
+back to `bruce_launcher`.
+
+Backgrounding changes state and physical-input ownership only.  It does not
+suspend the task or revoke display/serial use.  Display drawing is shared and
+serialized; v1 has immediate-mode, last-completed-update-wins semantics.
+
+Tasks are identified by opaque nonzero `uint32_t` IDs, never FreeRTOS handles.
+`task__list()` returns read-only snapshots of live tasks including state,
+stack high-water mark, sampled CPU percentage, and memory/resource statistics.
+Completed tasks are cleaned up immediately; v1 has no history.
+`task__wait()` works only while a task still exists.
+
+`stop`, `pause`, and `resume` are cooperative.  `task__kill()` is an explicit
+force-delete escape hatch.  Controlling another task requires `task`; every
+app can control only itself without that permission.
+
+`runtime__sleep(ms)` is interrupted when the task is foregrounded.
+`runtime__delay(ms)` waits the requested duration.  Both are Core APIs; they
+hide FreeRTOS from apps.
+
+## ELF contract
+
+Every ELF contains a non-loadable `.bruce.manifest` section.  The loader reads
+and validates it before relocation or entry.  The SDK macro/tool
+`BRUCE_APP_MANIFEST(...)` emits this section; authors do not hand-write ELF
+section attributes.
+
+The manifest is canonical UTF-8 JSON with fixed field order and no
+insignificant whitespace.  Permission array order is author-controlled, but
+duplicates are invalid.  Required fields are `appName`, `appIcon`,
+`coreAbiVersion`, and `stackSize`; `permissions` is optional and defaults to an
+empty array.  A complete example is:
 
 ```json
 {
-    "wifi": {
-        "Connect": "wifi connect"
-    },
-
-    "clock": "clock",
-
-    "config": {
-        "Display": "config display"
-    }
+  "appName": "Example app",
+  "appIcon": "<Base64 128-byte bitmap>",
+  "coreAbiVersion": 1,
+  "permissions": ["wifi", "http"],
+  "stackSize": 8192
 }
 ```
 
-Selecting an item simply executes:
+- `appName` is the launcher/task-manager display name.  The filename is the
+  command identity; there is no `appId`.
+- `appIcon` decodes to exactly 128 bytes: 32×32 monochrome, row-major,
+  most-significant-bit leftmost.  A 1 uses launcher foreground colour; 0 uses
+  launcher background colour.
+- `stackSize` is bytes, constrained to 4–16 KiB.  SDK tooling uses 8 KiB by
+  default.
+- An omitted or empty `permissions` array gives a safe zero-permission ELF
+  fallback.
+- A Core ABI mismatch shows a warning and requires an explicit user choice to
+  run anyway.
+- The ELF header, not the manifest, is authoritative for architecture; a
+  mismatching chip architecture is rejected.
+
+Ed25519 signing is deferred.  Canonical manifest bytes and the ELF
+loadable-content hash are the future signing inputs.
+
+`elf_find_sym()` resolves only the documented public SDK symbol allowlist.
+It never resolves ESP-IDF, private Core, `malloc`, or `free` symbols.  The SDK
+uses `memory__malloc()` and `memory__free()`; imports named `malloc` or `free`
+are rejected.  A trusted native app can still embed a custom allocator, which
+is unsupported rather than a hard sandbox violation.
+
+## JavaScript contract
+
+`js__run_path()` evaluates the script and owns its mQuickJS event loop.
+JavaScript timers and `runtime.main()` remain JavaScript-runtime features;
+they are not moved into Core.  `js__run_path()` allocates VM/context memory
+with `memory__malloc()`.
+
+A JS file may start with the same canonical manifest in a comment block.  It
+is optional.  An unmanifested script starts with zero grants, uses its filename
+as display name, a generic icon, and the mQuickJS default task stack.
+
+Preserve the existing JS surface as much as possible: `wifi.scan()`,
+`dialog.choice()`, `display.*`, `runtime.*`, `serial.cmd()`, and similar APIs
+remain.  Their bindings are replaced internally to call the public Core APIs;
+they are not renamed to a new `bruce.*` namespace.
+
+`runtime.main()` is retained for now even though optional `app_main(argv)` is
+the normal JS lifecycle entry.  `serial.cmd(command)` delegates to the same
+terminal/AppRunner parser and requires `execute`.
+
+## Permissions
+
+Permissions are coarse-grained.  The current vocabulary is:
 
 ```
-wifi connect
+http, wifi, bt, gps, rf, input, gpio, ir, rfid, microphone,
+hid, execute, task, storage, config, serial
 ```
 
-↓
+`gpio` includes I²C.  `rf` includes Sub-GHz, LoRa, and NRF24.  `audio` is not
+permission-gated.  Unknown permission names are invalid.
 
-```c
-apprunner__run(...)
-```
-
-Users are free to replace the launcher.
-
----
-
-# Terminal
-
-Terminal is also just an application.
-
-It parses commands.
-
-Example:
-
-```
-wifi
-
-wifi scan
-
-wifi connect MyWifi password
-
-clock
-
-weather
-```
-
-Each command becomes:
-
-```c
-apprunner__run(...)
-```
-
-A user may set Terminal as the startup application instead of Launcher.
-
----
-
-# Startup
-
-BruceConfig contains:
+Permissions are stored in Core-owned `/permissions.json`, keyed only by the
+filename including extension and without its path:
 
 ```json
 {
-    "startupApp": "terminal"
+  "game.elf": { "wifi": 0, "bt": 1 },
+  "weather.js": { "http": 1 }
 }
 ```
 
-or
+Files with the same basename deliberately share this decision, even from
+different folders.  Use different filenames when separate decisions are
+needed.  The file remains simple: there is no source/provenance metadata and
+Core never prunes saved grants or denials.
 
-```json
-{
-    "startupApp": "launcher"
-}
+Manifest permissions are a pre-launch request list.  Missing decisions are
+shown together, unchecked by default, and saved after the user chooses.  A
+permission not declared in the manifest may be requested dynamically on its
+first protected API call.  A saved `0` denies immediately without reprompting;
+a permissions-management UI is the way to change it.
+
+Built-in module tasks are implicitly granted every permission.  External
+tasks are checked inside each protected Core API.
+
+`http__request()` needs `http`; it does not imply `wifi`.  Wi-Fi state control
+and credentials need `wifi`.  `input__inject()` needs `input`; task control of
+another task needs `task`; starting a path needs `execute`.
+
+## Dialog and task interaction
+
+`dialog__*` is renderer-agnostic.  `dialog__choice()` displays a GUI choice
+for tasks launched with `--gui`, or a terminal choice such as:
+
+```
+1. yes
+2. no
+pick: _
 ```
 
-or
+AppRunner records the initial `--gui` launch context in task-local storage
+before launch-time permission checks, but leaves the argument in the app’s
+`argv`.  A background serial-monitor-style task decides its own behavior;
+there is no separate dynamic task interaction-mode API.
 
-```json
-{
-    "startupApp": "my_app"
-}
-```
+Retain the JS `dialog.message`, `info`, `success`, `warning`, `error`, and
+`choice` APIs as wrappers.  Keep `dialog.pickFile()` as a Core renderer-neutral
+API: it requires `storage` and hides `/bruce.json` and `/permissions.json`.
+Do not migrate `dialog.viewFile()`.  `dialog__create_text_viewer()` returns an
+opaque viewer ID with draw, scroll, set-text, and close operations; it is a
+tracked resource.
 
-The runtime simply executes:
+## Memory and resource ownership
 
-```c
-apprunner__run(startupApp);
-```
+ELF apps never receive libc `malloc` or `free`.  They use
+`memory__malloc()`/`memory__free()`.  Core allocates ELF images, BSS, loader
+bookkeeping, and JS VM/context memory through this same task-owned allocator.
 
-No application is special.
+Every task has one universal resource registry in thread-local storage.  Core
+services register opaque handles and Core-owned cleanup callbacks for memory,
+files, sockets, viewers, radios, and similar resources.  Apps cannot register
+arbitrary callbacks.  At normal exit or kill, Core reads the registry before
+the task disappears and cleans resources in reverse acquisition order.
 
----
+## Input, display, storage, and Config
 
-# Resource Ownership
+Physical buttons, touch, keyboard, and encoder input go only to the foreground
+task.  `input__read(input_event_t *, timeout_ms)` is a blocking foreground
+queue read.  `input__inject()` accepts a normalized event with type, action,
+code, value, timestamp, and source task ID, allowing Bluetooth, GPIO, and I²C
+adapters to feed the same pipeline.
 
-The runtime owns every resource.
+Display HAL calls are serialized by Core; v1 intentionally has no compositor
+or layers.
 
-Examples:
+`storage` grants access to Core `storage__*` APIs.  Public file handles are
+opaque IDs and are closed automatically at task teardown.  The only v1
+protected paths are `/bruce.json`, `/permissions.json`, and their atomic-write
+temporary files; all other mounted paths are usable by a storage-granted app.
 
-- memory
-- files
-- GPIO
-- WiFi
-- sockets
-- timers
-- display
+`config` grants field-specific APIs such as `config__get_bright()` and
+`config__set_soundEnabled(true)`.  Setters validate and atomically persist
+immediately.  The following fields are permanently protected from ELF and JS,
+even with `config`: `wifiApSsid`, `webUIPassword`, `wifiCredentials`,
+`wifiMAC`, and `webUIUser`.  Built-ins may use those APIs.
 
-Resources are released automatically when an application exits.
+## Public SDK and migration rules
 
----
+Maintain two header layers:
 
-# Memory
+- `src/core/` contains private Core implementation headers and ESP-IDF
+  details; only Core source may include them.
+- `src/core_sdk/` contains the public Core SDK headers used by every built-in
+  module and external ELF app.  SDK callers include them with their full,
+  unambiguous namespace, for example `"core_sdk/app_runner.h"`.
 
-Applications allocate memory using the Bruce API.
+The component exports the `src/` include root only so those `core_sdk/...`
+includes resolve.  Built-in modules include only `core_sdk/...` headers;
+their privilege is policy, not access to private C declarations.  The single
+exception is the `modules/selftest` diagnostic built-in described under
+"Apps and modules own", which may include `src/core/` headers directly; it is
+excluded from the compile-time check (in `src/CMakeLists.txt`) that verifies
+every other built-in only pulls in `core_sdk/...` headers.  New public
+fallible APIs use shared `BRUCE_*` result codes such as `BRUCE_OK`,
+`BRUCE_ERR_PERMISSION`, `BRUCE_ERR_NOT_FOUND`, and `BRUCE_ERR_BUSY` by
+default, but `bruce_result_t` is not mandatory for every public function.
+Use whatever return type is easiest for a caller when the operation cannot
+fail or when a simpler type documents the failure case just as clearly, for
+example `bool wifi__is_connected(void)`, `char *wifi__get_ssid(void)`
+(`NULL` when unavailable), or `int wifi__scan(...)` (network count, or a
+negative `BRUCE_*` value on failure).  Document the exact success/failure
+values in the header comment above the declaration whenever the type is not
+`bruce_result_t`.
 
-```c
-bruce__malloc();
+### Private headers must not duplicate the public SDK declaration
 
-bruce__free();
-```
+A Core-private header (`src/core/<module>/<module>_common.h`) must never
+redeclare the struct/function signatures that its matching `src/core_sdk/`
+header already declares, even if the two currently look identical.  The
+implementation `.c` file should `#include "core_sdk/<module>.h"` directly to
+pick up the one authoritative declaration of the public contract it
+implements, in addition to its own private header for genuinely
+Core-internal-only declarations.  Two independent copies of the same public
+signature drift the moment either side changes a parameter or return type
+(this happened once already with `wifi__scan`/`wifi__is_connected`/
+`wifi__get_ssid`/`wifi__get_ip`/`wifi__get_mac` and had to be fixed), and a
+mismatched redeclaration is a hard compile error, not a warning.  If a
+private header ends up with nothing left to declare, that is expected and
+correct — leave it as a documented placeholder rather than re-adding the
+public API to give it content.
 
-The runtime tracks allocations for each application.
+### API naming and ownership
 
-When an application exits, remaining allocations are released automatically.
+Public capability functions use exactly `module__action()` names.  For
+example, Wi-Fi functions are `wifi__scan()`, `wifi__connect()`, and
+`wifi__disconnect()`.  Do not add a `bruce_` function prefix or create a
+second SDK wrapper such as `bruce_wifi__scan()`; the public declaration must
+refer to the one Core implementation.  `BRUCE_*` is reserved for result codes,
+constants, and public type prefixes where appropriate.
 
----
+When an existing capability is exposed through `src/core_sdk/`, declare its
+existing `module__action()` API there.  Do not add a forwarding `.c` file
+unless the Core capability itself is genuinely missing.  In particular,
+`wifi_common.c` remains the single Wi-Fi implementation; most of its
+functions return the public `BRUCE_*` results directly, and the handful that
+return `bool`/`int`/`char *` instead are documented in `core_sdk/wifi.h`.
+A8 adds permission checks there.
 
-# Background Applications
 
-Applications may run in:
-
-- foreground
-- background
-
-Examples:
-
-- Weather
-- MQTT
-- Clock
-- Music player
-
-Task Manager manages them all.
-
----
-
-# Design Rules
-
-- Keep the core small.
-- The core only provides runtime and hardware APIs.
-- Every application has one entry point.
-- Applications decide how to handle their own arguments.
-- AppRunner only starts applications.
-- Task Manager manages application lifecycles.
-- Applications communicate through AppRunner.
-- The HAL owns all hardware.
-- Applications never access ESP-IDF directly.
-- Every public API follows the `module__action()` naming convention.
-- Launcher is optional.
-- Terminal is optional.
-- Any application can become the startup application.
-- Nothing in the core should depend on a specific user interface.
+Migrate in vertical slices.  For each capability, first create the Core API,
+then route its JavaScript binding, terminal command, and launcher module to
+that API.  Do not delete or change BrucePIO; use it only as the behavioral
+reference.  Wi-Fi is the first complete vertical slice.

@@ -4,12 +4,11 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "wifi_common.h"
-#include "wifi_webui.h"
+#include "core_sdk/wifi.h"
 
 static int wifi_app_default(void)
 {
-    return wifi__connect_known() ? 0 : -1;
+    return wifi__connect_known() == BRUCE_OK ? 0 : -1;
 }
 
 static int wifi_app_scan(void)
@@ -34,10 +33,10 @@ static int wifi_app_connect(int argc, char **argv)
         return -1;
     }
 
-    if (!wifi__connect(argv[1], argv[2], 10000)) {
+    if (wifi__connect(argv[1], argv[2], 10000) != BRUCE_OK) {
         return -1;
     }
-    return wifi__add_credential(argv[1], argv[2]) ? 0 : -1;
+    return wifi__add_credential(argv[1], argv[2]) == BRUCE_OK ? 0 : -1;
 }
 
 static int wifi_app_add(int argc, char **argv)
@@ -46,7 +45,7 @@ static int wifi_app_add(int argc, char **argv)
         printf("wifi add requires ssid and password\n");
         return -1;
     }
-    return wifi__add_credential(argv[1], argv[2]) ? 0 : -1;
+    return wifi__add_credential(argv[1], argv[2]) == BRUCE_OK ? 0 : -1;
 }
 
 static int wifi_app_webui(int argc, char **argv)
@@ -57,7 +56,9 @@ static int wifi_app_webui(int argc, char **argv)
         no_ap = true;
     }
 
-    return wifi__start_webui(!no_ap) ? 0 : -1;
+    (void)no_ap;
+    printf("wifi webui is unavailable\n");
+    return -1;
 }
 
 int wifi_app(int argc, char **argv)
@@ -67,12 +68,11 @@ int wifi_app(int argc, char **argv)
     }
 
     if (strcmp(argv[0], "on") == 0) {
-        return wifi__connect_known() ? 0 : wifi__setup_ap() ? 0 : -1;
+        return wifi__connect_known() == BRUCE_OK ? 0 : wifi__setup_ap() == BRUCE_OK ? 0 : -1;
     }
 
     if (strcmp(argv[0], "off") == 0) {
-        wifi__disconnect();
-        return 0;
+        return wifi__disconnect() == BRUCE_OK ? 0 : -1;
     }
 
     if (strcmp(argv[0], "add") == 0) {
@@ -84,15 +84,15 @@ int wifi_app(int argc, char **argv)
     }
 
     if (strcmp(argv[0], "arp") == 0) {
-        return wifi__scan_hosts() ? 0 : -1;
+        return wifi__scan_hosts() == BRUCE_OK ? 0 : -1;
     }
 
     if (strcmp(argv[0], "listen") == 0) {
-        return wifi__listen_tcp() ? 0 : -1;
+        return wifi__listen_tcp() == BRUCE_OK ? 0 : -1;
     }
 
     if (strcmp(argv[0], "sniffer") == 0) {
-        return wifi__start_sniffer() ? 0 : -1;
+        return wifi__start_sniffer() == BRUCE_OK ? 0 : -1;
     }
 
     if (strcmp(argv[0], "scan") == 0) {
@@ -104,8 +104,7 @@ int wifi_app(int argc, char **argv)
     }
 
     if (strcmp(argv[0], "disconnect") == 0) {
-        wifi__disconnect();
-        return 0;
+        return wifi__disconnect() == BRUCE_OK ? 0 : -1;
     }
 
     printf("Unknown wifi command: %s\n", argv[0]);
