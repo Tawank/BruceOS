@@ -72,30 +72,35 @@ internals, so ELF, JavaScript, and any future format (Python, etc.) share one
 registration contract and no format gets special Core access.
 
 - Add the app_runner loader registry: `app_runner__register_loader()`,
-  `app_runner__run_path()`, `app_runner__inspect_path()`, and
-  `app_runner__spawn_loader_task()` (the public primitive a loader uses to
-  turn a decoded image into a permission-checked, resource-tracked task
-  without any private Core header).  Refactor Stage 2's placeholder
-  `/bin/<name>.elf` -> `/bin/<name>.js` resolution to iterate this registry.
-- Add the shared canonical-manifest parser/validator in `core_sdk/manifest.h`
-  so every loader validates `.bruce.manifest`/JS-comment manifests
-  identically: required fields, ABI warning, stack validation, icon decoding,
-  and architecture validation.
+  `app_runner__run_path()`, and `app_runner__spawn_loader_task()` (the
+  public primitive a loader uses to turn a decoded image into a
+  permission-checked, resource-tracked task without any private Core header).
+  Refactor Stage 2's placeholder `/bin/<name>.elf` -> `/bin/<name>.js`
+  resolution to iterate this registry.
+- Add the universal manifest inspector `manifest__inspect_path()` in
+  `core/manifest/` / `core_sdk/manifest.h` that auto-detects file format
+  (ELF magic, JS comment block, etc.), extracts the raw manifest bytes, and
+  hands them to the canonical parser.  This is the one place all programs —
+  the launcher, file manager, terminal, and every loader module — go to
+  inspect any file.  Per-loader inspection functions (`elf__inspect_path()`,
+  `js__inspect_path()`) are not needed; the shared `manifest__inspect_path()`
+  replaces them so format-aware extraction is never duplicated.
 - Add the built-in ELF loader module (`src/modules/loaders/elf/`): registers
   `.elf` at priority 10, integrates the Espressif ELF loader with
   `app_runner__spawn_loader_task()`-owned allocations, exposes a public
-  symbol allowlist, and rejects unresolved `malloc`/`free` imports.
+  symbol allowlist, and rejects unresolved `malloc`/`free` imports.  Its
+  task entry is `elf_loader__app_main(void *context)`.
 - Add the built-in JavaScript loader module (`src/modules/loaders/js/`):
   registers `.js` at priority 20, parses an optional leading manifest with
   zero-permission defaults, and uses `memory__malloc()` for the mQuickJS
   VM/context; preserves JS timers, `runtime.main()`, and optional
-  `app_main(argv)`.
-- Add `elf__inspect_path()` and `js__inspect_path()`, reachable through
-  `app_runner__inspect_path()`.
+  `app_main(argv)`.  Its task entry is `js__app_main(void *context)`.
 
 Exit criteria: a minimal ELF and JS app load, show metadata, run in a task,
 and cleanly unload/exit; a third, independent loader module can register a
-new extension using only `core_sdk/` headers, with zero changes to Core.
+new extension using only `core_sdk/` headers, with zero changes to Core;
+`manifest__inspect_path()` inspects ELF, JS, and any registered extension
+uniformly without involving the loader module.
 
 ## Stage 4 — Permissions, Config, Storage, and dialogs
 

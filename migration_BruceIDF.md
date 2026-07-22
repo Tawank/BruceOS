@@ -138,27 +138,25 @@ is its own user-controlled task.
 
 ### Loader modules
 
-A loader module owns everything specific to one file format: recognizing its
-manifest, decoding/relocating/interpreting its content, and running it.  It
-registers itself with:
+A loader module owns everything specific to one file format:
+decoding/relocating/interpreting its content and running it.  It registers
+itself with:
 
 ```c
 bruce_result_t app_runner__register_loader(const char *extension, int priority,
-                                            bruce_loader_run_fn run_fn,
-                                            bruce_loader_inspect_fn inspect_fn);
+                                            bruce_loader_run_fn run_fn);
 ```
 
 `extension` includes the leading dot (for example `.elf`); `priority` breaks
 ties when more than one candidate file matches an app name, lower first.
-`run_fn` matches `app_runner__run_path()`'s signature; `inspect_fn` matches
-`app_runner__inspect_path()`'s and never launches anything.  Registration
-happens once at boot, alongside built-in command registration, before the
-first named-run or path-run call.  A duplicate extension registration is a
-startup error, the same as a duplicate built-in command name.
+`run_fn` matches `app_runner__run_path()`'s signature.  Registration happens
+once at boot, alongside built-in command registration, before the first
+named-run or path-run call.  A duplicate extension registration is a startup
+error, the same as a duplicate built-in command name.
 
 Turning a decoded image into a live task needs more than an ordinary built-in
-gets from `app_runner__register()`, so loaders get one extra public
-primitive:
+gets from `app_runner__register()`, so loaders get two extra public
+primitives:
 
 ```c
 int app_runner__spawn_loader_task(const char *permission_key, bool gui_requested,
@@ -166,21 +164,29 @@ int app_runner__spawn_loader_task(const char *permission_key, bool gui_requested
                                    bruce_loader_task_entry_fn entry, void *ctx);
 ```
 
-This creates a real Core task that calls `entry(ctx)` on its own stack, wired
-into the same foreground stack, resource registry, and permission checks
-(`permission_key`, e.g. `"game.elf"`) as any other task.  It is the only new
-capability a loader author needs beyond the rest of the public SDK
-(`memory__malloc()`/`memory__free()` for image/VM storage, which are freed
-automatically at task exit or kill with no custom cleanup callback needed).
+```c
+bruce_result_t manifest__inspect_path(const char *path,
+                                       bruce_app_inspection_t *out_inspection);
+```
+
+`app_runner__spawn_loader_task()` creates a real Core task that calls
+`entry(ctx)` on its own stack, wired into the same foreground stack, resource
+registry, and permission checks (`permission_key`, e.g. `"game.elf"`) as any
+other task.  Its `entry` is the loader's own `elf_loader__app_main`,
+`js__app_main`, or equivalent for future formats, so every loader task entry
+follows the same naming convention as a regular `app_main`.
+
+`manifest__inspect_path()` is the universal manifest inspector provided by
+`core/manifest`.  It auto-detects file format (ELF magic, JS comment block,
+or whatever a future format uses), extracts raw manifest bytes, and hands
+them to the canonical parser/validator in `core_sdk/manifest.h`.  Every
+loader, the launcher, file-manager apps, and terminal tools call this one
+function to inspect any file uniformly.  Loader modules do not provide their
+own inspection — `core/manifest` owns that capability, so format-aware
+manifest extraction is not duplicated across loaders.
+
 A loader module still includes only `core_sdk/...` headers — it gets no
 private-header exemption, unlike `modules/selftest`.
-
-Manifest parsing itself is shared, not duplicated per loader: every loader
-extracts its own raw manifest bytes (an ELF section, a leading JS comment
-block, or whatever a new format uses) and hands them to the one canonical
-parser/validator in `core_sdk/manifest.h`, so every loader enforces the same
-required fields, ABI check, stack bounds, icon decoding, and permission-name
-validation without reimplementing JSON handling.
 
 Built-in ELF and JavaScript loader modules live under `src/modules/loaders/`,
 the same as any other module; they have no special standing over a
@@ -219,6 +225,11 @@ loader module reads and validates it before relocation or entry.  The SDK
 macro/tool `BRUCE_APP_MANIFEST(...)` emits this section; authors do not
 hand-write ELF section attributes.
 
+The ELF loader module's task entry is `elf_loader__app_main(void *context)`.
+It is started by `app_runner__spawn_loader_task()` when an ELF app is launched.
+Like any other program entry, it receives the app path, arguments, permissions,
+and GUI context through the spawn parameters and its opaque context struct.
+
 The manifest is canonical UTF-8 JSON with fixed field order and no
 insignificant whitespace.  Permission array order is author-controlled, but
 duplicates are invalid.  Required fields are `appName`, `appIcon`,
@@ -252,6 +263,13 @@ empty array.  A complete example is:
 Ed25519 signing is deferred.  Canonical manifest bytes and the ELF
 loadable-content hash are the future signing inputs.
 
+Manifest inspection — extracting the `.bruce.manifest` section bytes from an
+ELF file, checking `e_machine`, and parsing/validating the JSON — is handled
+by the universal `manifest__inspect_path()` in `core/manifest`, not by the
+ELF loader module.  The ELF loader calls it at launch time to read the
+manifest, and any other program (launcher, file manager, terminal) calls the
+same function to inspect ELF files without involving the loader module.
+
 The ELF loader module's `elf_find_sym()` resolves only the documented public
 SDK symbol allowlist it maintains.  It never resolves ESP-IDF, private Core,
 `malloc`, or `free` symbols.  The SDK uses `memory__malloc()` and
@@ -266,9 +284,18 @@ mQuickJS event loop.  JavaScript timers and `runtime.main()` remain
 JavaScript-runtime features; they are not moved into Core.  The loader
 allocates VM/context memory with `memory__malloc()`.
 
+The JS loader module's task entry is `js__app_main(void *context)`.  It is
+started by `app_runner__spawn_loader_task()` when a JS script is launched.
+Like any other program entry, it receives the script path, arguments,
+permissions, and GUI context through the spawn parameters and its opaque
+context struct.
+
 A JS file may start with the same canonical manifest in a comment block.  It
 is optional.  An unmanifested script starts with zero grants, uses its filename
 as display name, a generic icon, and the mQuickJS default task stack.
+Manifest inspection — detecting the leading JS comment block, extracting the
+raw JSON, and parsing/validating it — is handled by the universal
+`manifest__inspect_path()` in `core/manifest`, not by the JS loader module.
 
 Preserve the existing JS surface as much as possible: `wifi.scan()`,
 `dialog.choice()`, `display.*`, `runtime.*`, `serial.cmd()`, and similar APIs
@@ -388,10 +415,14 @@ Maintain two header layers:
 
 `core_sdk/loader.h` declares the loader registry
 (`app_runner__register_loader()`, `app_runner__run_path()`,
-`app_runner__inspect_path()`, `app_runner__spawn_loader_task()`) that any
-loader module uses.  Built-in ELF and JavaScript loader modules live under
-`src/modules/loaders/elf/` and `src/modules/loaders/js/`, like any other
-built-in module, not under `src/core/`.
+`app_runner__spawn_loader_task()`) that any loader module uses.  Manifest
+inspection is provided by the universal `manifest__inspect_path()` in
+`core_sdk/manifest.h` / `core/manifest/`; it auto-detects file format and
+replaces per-loader inspection functions so the launcher, file manager, and
+any other tool can inspect any file uniformly.  Built-in ELF and JavaScript
+loader modules live under `src/modules/loaders/elf/` and
+`src/modules/loaders/js/`, like any other built-in module, not under
+`src/core/`.
 
 The component exports the `src/` include root only so those `core_sdk/...`
 includes resolve.  Built-in modules include only `core_sdk/...` headers;

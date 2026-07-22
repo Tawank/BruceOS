@@ -36,7 +36,6 @@ typedef struct {
     char extension[APP_RUNNER_LOADER_EXTENSION_MAX];
     int priority;
     bruce_loader_run_fn run_fn;
-    bruce_loader_inspect_fn inspect_fn;
 } app_runner_loader_t;
 
 static app_runner_loader_t s_loaders[APP_RUNNER_MAX_LOADERS];
@@ -81,7 +80,7 @@ void app_runner__register_defaults(void)
      * both go through the exact same public registration API a third-party
      * loader would use. */
     elf_loader__register();
-    (void)app_runner__register_loader(".js", 20, js__run_path, js__inspect_path);
+    (void)app_runner__register_loader(".js", 20, js__run_path);
 }
 
 static bruce_app_entry_t app_runner__find_builtin(const char *app_name)
@@ -94,10 +93,9 @@ static bruce_app_entry_t app_runner__find_builtin(const char *app_name)
     return NULL;
 }
 
-bruce_result_t app_runner__register_loader(const char *extension, int priority, bruce_loader_run_fn run_fn,
-                                            bruce_loader_inspect_fn inspect_fn)
+bruce_result_t app_runner__register_loader(const char *extension, int priority, bruce_loader_run_fn run_fn)
 {
-    if (extension == NULL || extension[0] != '.' || extension[1] == '\0' || run_fn == NULL || inspect_fn == NULL ||
+    if (extension == NULL || extension[0] != '.' || extension[1] == '\0' || run_fn == NULL ||
         strlen(extension) >= APP_RUNNER_LOADER_EXTENSION_MAX) {
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
@@ -117,7 +115,6 @@ bruce_result_t app_runner__register_loader(const char *extension, int priority, 
     loader->extension[APP_RUNNER_LOADER_EXTENSION_MAX - 1] = '\0';
     loader->priority = priority;
     loader->run_fn = run_fn;
-    loader->inspect_fn = inspect_fn;
     return BRUCE_OK;
 }
 
@@ -173,18 +170,6 @@ int app_runner__run_path(const char *path, const char *arg, bool in_background)
         return BRUCE_ERR_NOT_FOUND;
     }
     return loader->run_fn(path, arg, in_background);
-}
-
-bruce_result_t app_runner__inspect_path(const char *path, bruce_app_inspection_t *out_inspection)
-{
-    if (!app_runner__path_is_valid(path) || out_inspection == NULL) {
-        return BRUCE_ERR_INVALID_PATH;
-    }
-    app_runner_loader_t *loader = app_runner__find_loader_for_path(path);
-    if (loader == NULL) {
-        return BRUCE_ERR_NOT_FOUND;
-    }
-    return loader->inspect_fn(path, out_inspection);
 }
 
 int app_runner__spawn_loader_task(const char *permission_key, bool gui_requested, bool in_background,

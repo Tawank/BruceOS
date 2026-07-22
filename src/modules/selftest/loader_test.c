@@ -122,24 +122,15 @@ static int selftest__throwaway_loader_run(const char *path, const char *arg, boo
     return 777; /* sentinel "task id" so the test can prove dispatch happened */
 }
 
-static bruce_result_t selftest__throwaway_loader_inspect(const char *path, bruce_app_inspection_t *out_inspection)
-{
-    (void)path;
-    memset(out_inspection, 0, sizeof(*out_inspection));
-    return BRUCE_OK;
-}
-
 bool selftest__run_loader_registry_extensibility_case(void)
 {
     s_throwaway_loader_calls = 0;
 
-    if (app_runner__register_loader(".selftest_ext", 5, selftest__throwaway_loader_run,
-                                     selftest__throwaway_loader_inspect) != BRUCE_OK) {
+    if (app_runner__register_loader(".selftest_ext", 5, selftest__throwaway_loader_run) != BRUCE_OK) {
         printf("[selftest] loader/registry: registration failed\n");
         return false;
     }
-    if (app_runner__register_loader(".selftest_ext", 5, selftest__throwaway_loader_run,
-                                     selftest__throwaway_loader_inspect) != BRUCE_ERR_ALREADY_EXISTS) {
+    if (app_runner__register_loader(".selftest_ext", 5, selftest__throwaway_loader_run) != BRUCE_ERR_ALREADY_EXISTS) {
         printf("[selftest] loader/registry: duplicate extension was not rejected\n");
         return false;
     }
@@ -148,12 +139,6 @@ bool selftest__run_loader_registry_extensibility_case(void)
     if (result != 777 || s_throwaway_loader_calls != 1) {
         printf("[selftest] loader/registry: run_path did not dispatch to the new loader (%d, calls=%d)\n", result,
                s_throwaway_loader_calls);
-        return false;
-    }
-
-    bruce_app_inspection_t inspection;
-    if (app_runner__inspect_path("/tmp/whatever.selftest_ext", &inspection) != BRUCE_OK) {
-        printf("[selftest] loader/registry: inspect_path did not dispatch to the new loader\n");
         return false;
     }
 
@@ -181,8 +166,8 @@ typedef struct {
 static selftest__elf_dialog_mock_t s_elf_dialog_mock;
 
 static bruce_result_t selftest__elf_dialog_allow_provider(const char *title, const char *message,
-                                                           const bruce_dialog_choice_t *choices, size_t choice_count,
-                                                           size_t *out_selected)
+                                                            const bruce_dialog_choice_t *choices, size_t choice_count,
+                                                            size_t *out_selected)
 {
     (void)title;
     (void)message;
@@ -205,7 +190,7 @@ bool selftest__run_elf_loader_case(void)
     }
 
     bruce_app_inspection_t inspection;
-    bruce_result_t inspect_result = app_runner__inspect_path(path, &inspection);
+    bruce_result_t inspect_result = manifest__inspect_path(path, &inspection);
     bool inspect_ok = inspect_result == BRUCE_OK && inspection.kind == BRUCE_APP_KIND_ELF &&
                        !inspection.abi_warning && strcmp(inspection.manifest.app_name, "Selftest ELF") == 0 &&
                        inspection.manifest.permission_count == 1 &&

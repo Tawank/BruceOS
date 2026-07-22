@@ -86,33 +86,43 @@ Dependencies: A1, A2, A3, A4.
 ELF and JS are not Core internals: they are modules that register themselves
 with app_runner's loader registry, the same way any third party could
 register a `.py` or other loader without touching Core.  First add the
-registry itself: `app_runner__register_loader(extension, priority, run_fn,
-inspect_fn)` in `core_sdk/loader.h`/`core/app_runner/`, the loader-agnostic
-`app_runner__run_path()`/`app_runner__inspect_path()`, and
-`app_runner__spawn_loader_task()` (the one extra public primitive a loader
-needs to turn a decoded image into a permission-checked, resource-tracked
-Core task without any private header).  Refactor A3's hardcoded
-`/bin/<name>.elf` -> `/bin/<name>.js` resolution inside `app_runner__run()`
-to iterate this registry instead, with no change to `app_runner__run()`'s
-observable behavior.  Also add the shared canonical-manifest
-parser/validator to `core_sdk/manifest.h` so every loader (including future
-ones) validates `.bruce.manifest`/JS-comment manifests identically.
+registry itself: `app_runner__register_loader(extension, priority, run_fn)`
+in `core_sdk/loader.h`/`core/app_runner/`, the loader-agnostic
+`app_runner__run_path()`, and `app_runner__spawn_loader_task()` (the one
+extra public primitive a loader needs to turn a decoded image into a
+permission-checked, resource-tracked Core task without any private header).
+Refactor A3's hardcoded `/bin/<name>.elf` -> `/bin/<name>.js` resolution
+inside `app_runner__run()` to iterate this registry instead, with no change
+to `app_runner__run()`'s observable behavior.
+
+Also add the universal manifest inspector `manifest__inspect_path()` in
+`core/manifest/` / `core_sdk/manifest.h` that auto-detects file format (ELF
+magic bytes / `e_machine`, JS comment block, etc.), extracts the raw manifest
+bytes, and hands them to the canonical `manifest__parse()` parser/validator
+so every format is parsed identically.  This is the one inspection function;
+per-loader `inspect_fn` callbacks are not needed.  The loader registry's
+`app_runner__register_loader()` no longer takes an `inspect_fn` — any
+program (launcher, file manager, terminal, or a loader module itself)
+inspects files with `manifest__inspect_path()` directly.
 
 Then, as the registry's first consumer, add the built-in ELF loader module
 under `src/modules/loaders/elf/` (not `src/core/elf/`): integrate the
-Espressif ELF loader, mandatory `.bruce.manifest` parsing/validation via the
-shared parser, ABI warning, target check, 32×32 icon decoding,
-`app_runner__spawn_loader_task()`-owned allocations, a public symbol
-resolver, and rejection of imported `malloc`/`free`.  Register it for `.elf`
-at priority 10.  Provide SDK manifest build tooling and `elf__inspect_path()`
-(reachable through `app_runner__inspect_path()`).  The loader module includes
-only `core_sdk/...` headers, the same as any other built-in — it gets no
-`modules/selftest`-style private-header exemption.
+Espressif ELF loader, call `manifest__inspect_path()` for mandatory
+`.bruce.manifest` parsing, ABI warning, target check, and 32×32 icon
+decoding, use `app_runner__spawn_loader_task()`-owned allocations, expose a
+public symbol resolver, and reject imported `malloc`/`free`.  Register it
+for `.elf` at priority 10.  The loader module's task entry (the function
+passed as `entry` to `app_runner__spawn_loader_task()`) is
+`elf_loader__app_main(void *context)`.  Provide SDK manifest build tooling.
+The loader module includes only `core_sdk/...` headers, the same as any
+other built-in — it gets no `modules/selftest`-style private-header
+exemption.
 
 Acceptance: a third, throwaway test loader module can register a new
-extension using only the public registry API with zero Core changes; a
-minimal ELF loads from `/bin`, exposes only approved imports, prompts for
-requested permissions, and frees image memory at exit.
+extension using only the public registry API with zero Core changes;
+`manifest__inspect_path()` inspects an ELF file without involving the loader
+module; a minimal ELF loads from `/bin`, exposes only approved imports,
+prompts for requested permissions, and frees image memory at exit.
 
 ## A7 — JavaScript loader module and bridge conversion
 
@@ -120,15 +130,15 @@ Dependencies: A2, A3, A4, A5, A6.
 
 As the registry's second consumer, add the built-in JavaScript loader module
 under `src/modules/loaders/js/` (not `src/core/js/`): register `.js` at
-priority 20 with `app_runner__register_loader()`, implement the run/inspect
-functions app_runner dispatches to, optional leading manifest parsing via the
-shared `core_sdk/manifest.h` parser with zero-permission fallback,
+priority 20 with `app_runner__register_loader()` (no `inspect_fn` — use
+`manifest__inspect_path()` instead), call `manifest__inspect_path()` for
+optional leading manifest parsing with zero-permission fallback,
 `app_runner__spawn_loader_task()`-owned mQuickJS allocation (VM/context
 memory via `memory__malloc()`), optional `app_main(argv)`, and
-`js__inspect_path()` (reachable through `app_runner__inspect_path()`).
-Preserve the existing JS API names and rewrite each binding to call Core APIs
-instead of Arduino/legacy globals.  Keep timers and `runtime.main()` inside
-the JavaScript runtime.
+`js__app_main(void *context)` as the loader's task entry.  Preserve the
+existing JS API names and rewrite each binding to call Core APIs instead of
+Arduino/legacy globals.  Keep timers and `runtime.main()` inside the
+JavaScript runtime.
 
 Acceptance: old-style `wifi.scan()`, `display.*`, `dialog.*`, and
 `serial.cmd()` bindings use Core APIs; no binding directly calls ESP-IDF or
