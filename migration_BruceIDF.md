@@ -1,5 +1,54 @@
 # BruceIDF Architecture Contract
 
+## BruceIDF build notes
+
+- ESP-IDF v6.0.2 installed at ~/.espressif/v6.0.2/esp-idf
+  (also v5.5.5 available). Source with:
+  `source ~/.espressif/tools/activate_idf_v6.0.2.sh`
+- Then `idf.py reconfigure` / `idf.py build` from repo root
+  (~/opensource/Bruce-migration/BruceIDF).
+- Target: esp32s3 (see build/config.env IDF_TARGET).
+- Terminal build/reconfigure commands were skipped by the user interactively
+  during a session (chose to run it themselves) - don't assume failure, just
+  ask before invoking long-running idf.py build/reconfigure commands.
+- The `espressif/elf_loader` v1.3.1 managed component needs a small patch to
+  build with ESP-IDF v6.0.2's toolchain.  After `idf.py reconfigure`, run
+  `tools/apply_patches.sh` (the patch is in `patches/`).  The patch removes
+  newlib symbol exports that the newer toolchain no longer exposes; the Bruce
+  loader supplies its own symbol allowlist via `elf_set_symbol_resolver()`.
+- `sdkconfig.defaults` disables `CONFIG_ESP_SYSTEM_MEMPROT` so that the ELF
+  loader can allocate executable memory (`MALLOC_CAP_EXEC`), and disables the
+  built-in `ELF_LOADER_LIBC_SYMBOLS` / `ELF_LOADER_ESPIDF_SYMBOLS` tables.
+
+## Project layout
+- `src/` is the only ESP-IDF component (EXTRA_COMPONENT_DIRS src), registered
+  in src/CMakeLists.txt with explicit SRCS/REQUIRES/INCLUDE_DIRS lists (add
+  new source files there manually).
+- `src/idf_component.yml` declares managed component deps (idf-component-manager).
+  Added `espressif/cjson` here for JSON parsing (component target name: `cjson`,
+  header: `cJSON.h`, functions like cJSON_Parse/cJSON_Print/cJSON_AddXToObject).
+- `BrucePIO/` is the old PlatformIO/Arduino codebase being migrated from -
+  useful as a reference for porting logic (e.g. BrucePIO/src/core/config.cpp)
+  but not part of the ESP-IDF build.
+- Core code lives in src/core/{config,storage,wifi,apprunner}; apps in
+  src/modules/*. See migration_BruceIDF.md at repo root for the architecture
+  (core must stay minimal: HAL + runtime + BruceConfig + AppRunner only).
+- Naming convention: `module__action()` for public C API, snake_case fields.
+- Public fallible APIs don't have to return `bruce_result_t`; simpler types
+  (bool/int/pointer) are fine when documented in the `core_sdk/` header (e.g.
+  wifi__is_connected() -> bool, wifi__scan() -> int count/negative BRUCE_*,
+  wifi__get_ssid()/get_ip()/get_mac() -> char* or NULL).
+- Core-private `*_common.h` headers (e.g. src/core/wifi/wifi_common.h) must
+  NOT redeclare the public struct/functions already in the matching
+  src/core_sdk/<module>.h - the .c file includes the core_sdk header directly
+  for those declarations instead, to avoid conflicting duplicate
+  redeclarations when the public signature changes. Private headers should
+  only hold genuinely Core-internal-only declarations (can be empty/placeholder).
+- Private Core headers are named plain `<module>.h` inside `core/<module>/`
+  (e.g. core/app_runner/app_runner.h, core/config/config.h, core/task/task.h),
+  not `<module>_common.h`. wifi has no private header at all (nothing private
+  needed) - core/wifi/wifi_common.c includes core_sdk/wifi.h directly.
+
 ## Purpose
 
 BruceIDF is a new ESP-IDF implementation of Bruce OS.  `BrucePIO/` is a
@@ -89,6 +138,13 @@ public Config API and starts that command with app_runner.  The default is
 - Every built-in registers a uniquely named C function with that same
   signature.  It cannot use the literal global `app_main`, because firmware
   contains multiple modules.
+- The built-in ELF loader is additionally exposed as a command named `elf`:
+  `elf ./app.elf <args>...` loads the named ELF file and passes the
+  remaining arguments to it.  Relative paths starting with `./` are normalized
+  to the root directory.  A loaded ELF app with the `execute` permission can
+  itself call `app_runner__run_path()` to load another ELF, enabling chains
+  such as `elf ./elf_loader.elf ./game.elf` followed by `elf_loader` loading
+  `game.elf`.
 - A JavaScript file is evaluated first.  If it defines `app_main(argv)`, the
   JavaScript event loop invokes it; it is optional.
 
@@ -126,9 +182,10 @@ arbitrary path rather than a `/bin/<name>` command uses the loader-agnostic:
 int app_runner__run_path(const char *path, const char *arg, bool in_background);
 ```
 
-which accepts only normalized absolute paths with no `.` or `..` components,
-looks up the loader registered for the path's extension, and dispatches to
-it.  An app with `execute` may start an ELF, JS, or any other
+which accepts normalized absolute paths and `./` relative paths (which are
+mapped to the root directory), but never `.` or `..` components.  It looks up
+the loader registered for the path's extension and dispatches to it.  An app with
+`execute` may start an ELF, JS, or any other
 loader-registered file type from any mounted path this way.  Core does not
 discover `/apps/`, `/sdcard/`, or any other folder; launcher and
 file-manager apps decide what to enumerate.
@@ -149,9 +206,9 @@ bruce_result_t app_runner__register_loader(const char *extension, int priority,
 
 `extension` includes the leading dot (for example `.elf`); `priority` breaks
 ties when more than one candidate file matches an app name, lower first.
-`run_fn` matches `app_runner__run_path()`'s signature.  Registration happens
-once at boot, alongside built-in command registration, before the first
-named-run or path-run call.  A duplicate extension registration is a startup
+`run_fn` matches `app_runner__run_path()`'s signature e.g., `elf_loader__app_main`.  
+Registration happens once at boot, alongside built-in command registration, in main.c, 
+before the first named-run or path-run call. A duplicate extension registration is a startup
 error, the same as a duplicate built-in command name.
 
 Turning a decoded image into a live task needs more than an ordinary built-in
@@ -166,7 +223,12 @@ int app_runner__spawn_loader_task(const char *permission_key, bool gui_requested
 
 ```c
 bruce_result_t manifest__inspect_path(const char *path,
-                                       bruce_app_inspection_t *out_inspection);
+                                       char **out_json, size_t *out_json_len);
+```
+
+```c
+bruce_result_t manifest__inspect_elf(const char *path,
+                                      bruce_app_inspection_t *out_inspection);
 ```
 
 `app_runner__spawn_loader_task()` creates a real Core task that calls
@@ -176,14 +238,21 @@ other task.  Its `entry` is the loader's own `elf_loader__app_main`,
 `js__app_main`, or equivalent for future formats, so every loader task entry
 follows the same naming convention as a regular `app_main`.
 
-`manifest__inspect_path()` is the universal manifest inspector provided by
-`core/manifest`.  It auto-detects file format (ELF magic, JS comment block,
-or whatever a future format uses), extracts raw manifest bytes, and hands
-them to the canonical parser/validator in `core_sdk/manifest.h`.  Every
-loader, the launcher, file-manager apps, and terminal tools call this one
-function to inspect any file uniformly.  Loader modules do not provide their
-own inspection — `core/manifest` owns that capability, so format-aware
-manifest extraction is not duplicated across loaders.
+`manifest__inspect_path()` is the universal manifest JSON extractor provided
+by `core/manifest`.  It auto-detects file format (ELF magic, JS comment
+block, or whatever a future format uses) and returns the raw manifest bytes.
+The launcher, file-manager apps, and terminal tools call this one function to
+extract manifest JSON from any file uniformly.
+
+`manifest__inspect_elf()` is the ELF-specific full inspection: it validates
+the ELF32 header (magic, `e_machine` vs. this build's target), extracts and
+parses the `.bruce.manifest` section, and returns a complete
+`bruce_app_inspection_t` with kind, parsed manifest, and ABI-warning flag.
+The ELF loader module calls this directly at launch time.
+
+Loader modules do not provide their own inspection — `core/manifest` owns
+that capability, so format-aware manifest extraction is not duplicated across
+loaders.
 
 A loader module still includes only `core_sdk/...` headers — it gets no
 private-header exemption, unlike `modules/selftest`.
@@ -223,7 +292,9 @@ hide FreeRTOS from apps.
 Every ELF contains a non-loadable `.bruce.manifest` section.  The built-in ELF
 loader module reads and validates it before relocation or entry.  The SDK
 macro/tool `BRUCE_APP_MANIFEST(...)` emits this section; authors do not
-hand-write ELF section attributes.
+hand-write ELF section attributes.  The SDK build tooling in `elf_apps/tools/`
+post-processes linked ELF files with `objcopy` to add the section as
+non-allocatable and provides template apps in `elf_apps/examples/`.
 
 The ELF loader module's task entry is `elf_loader__app_main(void *context)`.
 It is started by `app_runner__spawn_loader_task()` when an ELF app is launched.
@@ -265,10 +336,11 @@ loadable-content hash are the future signing inputs.
 
 Manifest inspection — extracting the `.bruce.manifest` section bytes from an
 ELF file, checking `e_machine`, and parsing/validating the JSON — is handled
-by the universal `manifest__inspect_path()` in `core/manifest`, not by the
-ELF loader module.  The ELF loader calls it at launch time to read the
-manifest, and any other program (launcher, file manager, terminal) calls the
-same function to inspect ELF files without involving the loader module.
+by `manifest__inspect_elf()` in `core/manifest`, not by the ELF loader
+module.  The ELF loader calls it at launch time to read and validate the
+manifest.  Other programs (launcher, file manager, terminal) call the
+universal `manifest__inspect_path()` to extract raw manifest JSON from any
+file format without involving the loader module.
 
 The ELF loader module's `elf_find_sym()` resolves only the documented public
 SDK symbol allowlist it maintains.  It never resolves ESP-IDF, private Core,
@@ -295,7 +367,8 @@ is optional.  An unmanifested script starts with zero grants, uses its filename
 as display name, a generic icon, and the mQuickJS default task stack.
 Manifest inspection — detecting the leading JS comment block, extracting the
 raw JSON, and parsing/validating it — is handled by the universal
-`manifest__inspect_path()` in `core/manifest`, not by the JS loader module.
+`manifest__inspect_path()` in `core/manifest` (raw extraction) plus
+`manifest__parse()` (parsing), not by the JS loader module.
 
 Preserve the existing JS surface as much as possible: `wifi.scan()`,
 `dialog.choice()`, `display.*`, `runtime.*`, `serial.cmd()`, and similar APIs

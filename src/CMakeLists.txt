@@ -3,7 +3,6 @@ idf_component_register(SRCS
                     "core/app_runner/app_runner.c"
                     "core/config/config.c"
                     "core/dialog/dialog.c"
-                    "core/js/js.c"
                     "core/manifest/manifest.c"
                     "core/memory/memory.c"
                     "core/permission/permission.c"
@@ -12,6 +11,7 @@ idf_component_register(SRCS
                     "core/wifi/wifi_common.c"
                     "modules/bruce_launcher/bruce_launcher.c"
                     "modules/loaders/elf/elf_loader.c"
+                    "modules/loaders/elf/elf_loader_sdk_symbols.c"
                     "modules/selftest/app_runner_test.c"
                     "modules/selftest/config_test.c"
                     "modules/selftest/fake_elf.c"
@@ -33,6 +33,7 @@ idf_component_register(SRCS
                     log
                     lwip
                     spiffs
+                    elf_loader
                     INCLUDE_DIRS
                     "."
                     PRIV_INCLUDE_DIRS
@@ -56,10 +57,17 @@ target_include_directories(bruce_sdk_builtin_utils_launcher_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/utils/launcher")
 
-add_library(bruce_sdk_builtin_elf_loader_check OBJECT "modules/loaders/elf/elf_loader.c")
+add_library(bruce_sdk_builtin_elf_loader_check OBJECT
+            "modules/loaders/elf/elf_loader.c"
+            "modules/loaders/elf/elf_loader_sdk_symbols.c")
 target_include_directories(bruce_sdk_builtin_elf_loader_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
-                           "${CMAKE_CURRENT_LIST_DIR}/modules/loaders/elf")
+                           "${CMAKE_CURRENT_LIST_DIR}/modules/loaders/elf"
+                           "${CMAKE_CURRENT_LIST_DIR}/../managed_components/espressif__elf_loader/include")
+# The ELF loader module legitimately uses the third-party espressif/elf_loader
+# component API; the core_sdk-only check is about rejecting Core-private headers,
+# not component dependencies.
+target_link_libraries(bruce_sdk_builtin_elf_loader_check PRIVATE elf_loader)
 
 # modules/selftest is intentionally NOT added to the core_sdk-only compile
 # check above: it is the one built-in explicitly permitted to include

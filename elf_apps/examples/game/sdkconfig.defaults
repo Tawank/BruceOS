@@ -1,0 +1,4 @@
+# espressif/elf_loader needs executable memory.
+CONFIG_ESP_SYSTEM_MEMPROT=n
+CONFIG_ELF_LOADER_LIBC_SYMBOLS=n
+CONFIG_ELF_LOADER_ESPIDF_SYMBOLS=n

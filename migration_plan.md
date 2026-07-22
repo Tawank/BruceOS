@@ -77,19 +77,25 @@ registration contract and no format gets special Core access.
   permission-checked, resource-tracked task without any private Core header).
   Refactor Stage 2's placeholder `/bin/<name>.elf` -> `/bin/<name>.js`
   resolution to iterate this registry.
-- Add the universal manifest inspector `manifest__inspect_path()` in
-  `core/manifest/` / `core_sdk/manifest.h` that auto-detects file format
-  (ELF magic, JS comment block, etc.), extracts the raw manifest bytes, and
-  hands them to the canonical parser.  This is the one place all programs —
-  the launcher, file manager, terminal, and every loader module — go to
-  inspect any file.  Per-loader inspection functions (`elf__inspect_path()`,
-  `js__inspect_path()`) are not needed; the shared `manifest__inspect_path()`
-  replaces them so format-aware extraction is never duplicated.
+- Add universal manifest inspection in `core/manifest/` /
+  `core_sdk/manifest.h`: `manifest__inspect_path()` auto-detects file format
+  (ELF magic, JS comment block, etc.) and returns raw manifest JSON bytes;
+  `manifest__inspect_elf()` validates the ELF32 header (magic, `e_machine`)
+  and returns a parsed `bruce_app_inspection_t`.  Per-loader inspection
+  functions (`elf__inspect_path()`, `js__inspect_path()`) are not needed —
+  `core/manifest` owns format-aware extraction so it is never duplicated.
 - Add the built-in ELF loader module (`src/modules/loaders/elf/`): registers
-  `.elf` at priority 10, integrates the Espressif ELF loader with
+  `.elf` at priority 10, calls `manifest__inspect_elf()` for mandatory
+  manifest validation, integrates the Espressif ELF loader with
   `app_runner__spawn_loader_task()`-owned allocations, exposes a public
-  symbol allowlist, and rejects unresolved `malloc`/`free` imports.  Its
+  symbol allowlist, and rejects imported `malloc`/`free`.  Its
   task entry is `elf_loader__app_main(void *context)`.
+- Expose the built-in ELF loader as a command named `elf` so that
+  `elf ./app.elf <args>...` loads the named ELF directly.  This lets an
+  ELF app itself act as a loader (e.g. `elf ./elf_loader.elf ./game.elf`),
+  with the loaded app calling `app_runner__run_path()` to load another ELF.
+- Provide SDK ELF build tooling (`elf_apps/include/bruce_sdk.h`,
+  `elf_apps/tools/build_elf_apps.py`) and template apps in `elf_apps/examples/`.
 - Add the built-in JavaScript loader module (`src/modules/loaders/js/`):
   registers `.js` at priority 20, parses an optional leading manifest with
   zero-permission defaults, and uses `memory__malloc()` for the mQuickJS
@@ -100,7 +106,8 @@ Exit criteria: a minimal ELF and JS app load, show metadata, run in a task,
 and cleanly unload/exit; a third, independent loader module can register a
 new extension using only `core_sdk/` headers, with zero changes to Core;
 `manifest__inspect_path()` inspects ELF, JS, and any registered extension
-uniformly without involving the loader module.
+uniformly without involving the loader module; the built-in `elf` command can
+load an ELF by path and an ELF loader app can load another ELF.
 
 ## Stage 4 — Permissions, Config, Storage, and dialogs
 

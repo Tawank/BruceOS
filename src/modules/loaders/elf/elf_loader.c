@@ -6,12 +6,15 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "esp_elf.h"
+
 #include "core_sdk/app_runner.h"
 #include "core_sdk/loader.h"
 #include "core_sdk/manifest.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/permission.h"
 #include "core_sdk/storage.h"
+#include "core_sdk/task.h"
 
 static size_t s_call_count;
 
@@ -22,7 +25,10 @@ size_t elf_loader__debug_call_count(void)
 
 static bool elf_loader__path_is_valid(const char *path)
 {
-    if (path == NULL || path[0] != '/' || strstr(path, "..") != NULL) {
+    if (path == NULL || strstr(path, "..") != NULL) {
+        return false;
+    }
+    if (path[0] != '/' && strncmp(path, "./", 2) != 0) {
         return false;
     }
     size_t length = strlen(path);
@@ -31,49 +37,158 @@ static bool elf_loader__path_is_valid(const char *path)
     return length > extension_length && strcmp(path + length - extension_length, extension) == 0;
 }
 
+static bool elf_loader__normalize_path(const char *path, char *out, size_t out_size)
+{
+    if (path == NULL || strstr(path, "..") != NULL || out_size == 0) {
+        return false;
+    }
+    int len;
+    if (path[0] == '/') {
+        len = snprintf(out, out_size, "%s", path);
+    } else if (strncmp(path, "./", 2) == 0) {
+        len = snprintf(out, out_size, "/%s", path + 2);
+    } else {
+        return false;
+    }
+    return len > 0 && (size_t)len < out_size;
+}
+
 static const char *elf_loader__basename(const char *path)
 {
     const char *slash = strrchr(path, '/');
     return slash != NULL ? slash + 1 : path;
 }
 
+static const char *elf_loader__command_name(const char *path)
+{
+    const char *base = elf_loader__basename(path);
+    const char *dot = strrchr(base, '.');
+    size_t len = dot != NULL ? (size_t)(dot - base) : strlen(base);
+    if (len >= BRUCE_STORAGE_NAME_MAX) {
+        len = BRUCE_STORAGE_NAME_MAX - 1;
+    }
+    static char name[BRUCE_STORAGE_NAME_MAX];
+    memcpy(name, base, len);
+    name[len] = '\0';
+    return name;
+}
+
 typedef struct {
     char path[BRUCE_STORAGE_PATH_MAX];
     char permission_key[BRUCE_PERMISSION_FILE_NAME_MAX];
+    int argc;
+    char **argv;
+    size_t image_size;
+    uint8_t *image;
 } elf_loader_task_ctx_t;
 
+/* Public SDK symbol allowlist.  ELF apps may only resolve these names; any
+ * other undefined symbol (including libc malloc/free) is rejected. */
+extern const struct esp_elfsym g_bruce_sdk_elfsyms[];
+
+static uintptr_t elf_loader__find_symbol(const char *sym_name)
+{
+    if (strcmp(sym_name, "malloc") == 0 || strcmp(sym_name, "free") == 0) {
+        printf("[elf_loader] rejected import: %s\n", sym_name);
+        return 0;
+    }
+
+    const struct esp_elfsym *syms = g_bruce_sdk_elfsyms;
+    while (syms->name != NULL) {
+        if (strcmp(syms->name, sym_name) == 0) {
+            return (uintptr_t)syms->sym;
+        }
+        syms++;
+    }
+    return 0;
+}
+
+static void elf_loader__free_task_ctx(elf_loader_task_ctx_t *ctx)
+{
+    if (ctx == NULL) {
+        return;
+    }
+    if (ctx->image != NULL) {
+        memory__free(ctx->image);
+    }
+    app_runner__free_args(ctx->argv, ctx->argc);
+    memory__free(ctx);
+}
+
+/* Task entry for the loaded ELF.  Runs on the loader task's own stack with
+ * the image and args prepared by elf_loader__run_path(). */
 static void elf_loader__app_main(void *context)
 {
     elf_loader_task_ctx_t *ctx = (elf_loader_task_ctx_t *)context;
 
-    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
-    if (storage__open(ctx->path, BRUCE_STORAGE_OPEN_READ, &file) == BRUCE_OK) {
-        uint64_t size = 0;
-        if (storage__seek(file, 0, SEEK_END, &size) == BRUCE_OK && size > 0) {
-            void *image = memory__malloc((size_t)size);
-            if (image != NULL) {
-                uint8_t *out = (uint8_t *)image;
-                if (storage__seek(file, 0, SEEK_SET, NULL) == BRUCE_OK) {
-                    size_t total = 0;
-                    while (total < (size_t)size) {
-                        size_t chunk = 0;
-                        if (storage__read(file, out + total, (size_t)size - total, &chunk) != BRUCE_OK || chunk == 0) {
-                            break;
-                        }
-                        total += chunk;
-                    }
-                }
-                memory__free(image);
-            }
-        }
-        storage__close(file);
+    esp_elf_t elf;
+    memset(&elf, 0, sizeof(elf));
+
+    if (esp_elf_init(&elf) != 0) {
+        printf("[elf_loader] %s: esp_elf_init failed\n", ctx->permission_key);
+        elf_loader__free_task_ctx(ctx);
+        return;
     }
 
-    printf("[elf_loader] %s: execution not implemented yet (registry/manifest validation only)\n",
-           ctx->permission_key);
-    free(ctx);
+    if (esp_elf_relocate(&elf, ctx->image) != 0) {
+        printf("[elf_loader] %s: esp_elf_relocate failed\n", ctx->permission_key);
+        esp_elf_deinit(&elf);
+        elf_loader__free_task_ctx(ctx);
+        return;
+    }
+
+    (void)esp_elf_request(&elf, 0, ctx->argc, ctx->argv);
+
+    esp_elf_deinit(&elf);
+    elf_loader__free_task_ctx(ctx);
 }
 
+static int elf_loader__load_image(const char *path, elf_loader_task_ctx_t *ctx)
+{
+    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
+    bruce_result_t open_result = storage__open(path, BRUCE_STORAGE_OPEN_READ, &file);
+    if (open_result != BRUCE_OK) {
+        return (int)open_result;
+    }
+
+    int result = BRUCE_OK;
+    uint64_t size = 0;
+    if (storage__seek(file, 0, SEEK_END, &size) != BRUCE_OK || size == 0) {
+        result = BRUCE_ERR_IO;
+    } else {
+        ctx->image = memory__malloc((size_t)size);
+        if (ctx->image == NULL) {
+            result = BRUCE_ERR_NO_MEMORY;
+        } else {
+            ctx->image_size = (size_t)size;
+            if (storage__seek(file, 0, SEEK_SET, NULL) != BRUCE_OK) {
+                result = BRUCE_ERR_IO;
+            } else {
+                size_t total = 0;
+                while (total < ctx->image_size) {
+                    size_t chunk = 0;
+                    if (storage__read(file, ctx->image + total, ctx->image_size - total, &chunk) != BRUCE_OK ||
+                        chunk == 0) {
+                        result = BRUCE_ERR_IO;
+                        break;
+                    }
+                    total += chunk;
+                }
+            }
+        }
+    }
+
+    storage__close(file);
+    if (result != BRUCE_OK && ctx->image != NULL) {
+        memory__free(ctx->image);
+        ctx->image = NULL;
+        ctx->image_size = 0;
+    }
+    return result;
+}
+
+/* Loader registry run function: called by app_runner__run_path() or by the
+ * built-in "elf" command. */
 static int elf_loader__run_path(const char *path, const char *arg, bool in_background)
 {
     s_call_count++;
@@ -82,47 +197,139 @@ static int elf_loader__run_path(const char *path, const char *arg, bool in_backg
         return BRUCE_ERR_INVALID_PATH;
     }
 
-    bruce_app_inspection_t inspection;
-    bruce_result_t inspect_result = manifest__inspect_path(path, &inspection);
-    if (inspect_result != BRUCE_OK) {
-        return (int)inspect_result;
+    char normalized_path[BRUCE_STORAGE_PATH_MAX];
+    if (!elf_loader__normalize_path(path, normalized_path, sizeof(normalized_path))) {
+        return BRUCE_ERR_INVALID_PATH;
     }
 
-    const char *permission_key = elf_loader__basename(path);
+    bruce_app_inspection_t *inspection = manifest__inspect_elf(normalized_path);
+    if (inspection == NULL) {
+        return BRUCE_ERR_MANIFEST_INVALID;
+    }
+
+    const char *permission_key = elf_loader__basename(normalized_path);
 
     const char *permission_names[BRUCE_MANIFEST_MAX_PERMISSIONS];
-    for (size_t i = 0; i < inspection.manifest.permission_count; ++i) {
-        permission_names[i] = inspection.manifest.permissions[i];
+    for (size_t i = 0; i < inspection->manifest.permission_count; ++i) {
+        permission_names[i] = inspection->manifest.permissions[i];
     }
-    (void)permission__preflight(permission_key, permission_names, inspection.manifest.permission_count);
+    (void)permission__preflight(permission_key, permission_names, inspection->manifest.permission_count);
 
     char **argv = NULL;
     int argc = 0;
     bruce_result_t parse_result = app_runner__parse_args(arg, &argv, &argc);
     if (parse_result != BRUCE_OK) {
+        memory__free(inspection);
         return (int)parse_result;
     }
-    bool gui_requested = app_runner__args_have_gui(argc, argv);
-    app_runner__free_args(argv, argc);
 
-    elf_loader_task_ctx_t *ctx = malloc(sizeof(*ctx));
-    if (ctx == NULL) {
+    /* argv[0] is the display name for the loaded ELF app. */
+    const char *cmd_name = elf_loader__command_name(normalized_path);
+    char **full_argv = NULL;
+    int full_argc = argc + 1;
+    full_argv = memory__malloc(sizeof(char *) * (size_t)full_argc);
+    if (full_argv == NULL) {
+        app_runner__free_args(argv, argc);
+        memory__free(inspection);
         return BRUCE_ERR_NO_MEMORY;
     }
-    strncpy(ctx->path, path, sizeof(ctx->path) - 1);
+
+    full_argv[0] = memory__malloc(strlen(cmd_name) + 1);
+    if (full_argv[0] == NULL) {
+        memory__free(full_argv);
+        app_runner__free_args(argv, argc);
+        memory__free(inspection);
+        return BRUCE_ERR_NO_MEMORY;
+    }
+    strcpy(full_argv[0], cmd_name);
+    for (int i = 0; i < argc; ++i) {
+        full_argv[i + 1] = argv[i];
+    }
+    app_runner__free_args(argv, argc);
+    argv = NULL;
+    argc = 0;
+
+    bool gui_requested = app_runner__args_have_gui(full_argc, full_argv);
+
+    elf_loader_task_ctx_t *ctx = memory__malloc(sizeof(*ctx));
+    if (ctx == NULL) {
+        app_runner__free_args(full_argv, full_argc);
+        memory__free(inspection);
+        return BRUCE_ERR_NO_MEMORY;
+    }
+    memset(ctx, 0, sizeof(*ctx));
+    strncpy(ctx->path, normalized_path, sizeof(ctx->path) - 1);
     ctx->path[sizeof(ctx->path) - 1] = '\0';
     strncpy(ctx->permission_key, permission_key, sizeof(ctx->permission_key) - 1);
     ctx->permission_key[sizeof(ctx->permission_key) - 1] = '\0';
+    ctx->argc = full_argc;
+    ctx->argv = full_argv;
+
+    int load_result = elf_loader__load_image(path, ctx);
+    if (load_result != BRUCE_OK) {
+        elf_loader__free_task_ctx(ctx);
+        memory__free(inspection);
+        return load_result;
+    }
 
     int result = app_runner__spawn_loader_task(permission_key, gui_requested, in_background,
-                                                inspection.manifest.stack_size, elf_loader__app_main, ctx);
+                                                inspection->manifest.stack_size, elf_loader__app_main, ctx);
     if (result <= 0) {
-        free(ctx);
+        elf_loader__free_task_ctx(ctx);
     }
+    memory__free(inspection);
     return result;
+}
+
+/* Built-in "elf" command entry: "elf ./target.elf <args>..." loads the
+ * named ELF file and passes the remaining arguments to it.  This lets users
+ * (and ELF apps themselves) chain loaders: the first loader can be the
+ * built-in "elf" command, and a loaded ELF app can call
+ * app_runner__run_path() to load another ELF. */
+static int elf_loader__command(int argc, char **argv)
+{
+    if (argc < 2) {
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+
+    const char *path = argv[1];
+    bool gui_requested = app_runner__args_have_gui(argc, argv);
+
+    /* Build the argument string to forward to the loaded ELF. */
+    char arg[BRUCE_STORAGE_PATH_MAX];
+    size_t arg_len = 0;
+    arg[0] = '\0';
+    for (int i = 2; i < argc; ++i) {
+        if (i > 2) {
+            if (arg_len + 1 >= sizeof(arg)) {
+                return BRUCE_ERR_INVALID_ARGUMENT;
+            }
+            arg[arg_len++] = ' ';
+            arg[arg_len] = '\0';
+        }
+        size_t len = strlen(argv[i]);
+        if (arg_len + len >= sizeof(arg)) {
+            return BRUCE_ERR_INVALID_ARGUMENT;
+        }
+        memcpy(arg + arg_len, argv[i], len + 1);
+        arg_len += len;
+    }
+
+    /* Inherit the background/foreground mode of the calling "elf" command
+     * task so the loaded ELF follows the same context. */
+    bruce_task_snapshot_t snapshot;
+    bool in_background = false;
+    if (task__snapshot(task__current_id(), &snapshot) == BRUCE_OK) {
+        in_background = (snapshot.state == BRUCE_TASK_BACKGROUND);
+    }
+    (void)gui_requested; /* gui flag is already detected and passed by run_path. */
+
+    return elf_loader__run_path(path, arg[0] != '\0' ? arg : NULL, in_background);
 }
 
 void elf_loader__register(void)
 {
+    (void)app_runner__register("elf", elf_loader__command);
     (void)app_runner__register_loader(".elf", 10, elf_loader__run_path);
+    elf_set_symbol_resolver(elf_loader__find_symbol);
 }

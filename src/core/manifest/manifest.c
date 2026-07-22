@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "cJSON.h"
+#include "core_sdk/memory.h"
 #include "core_sdk/permission.h"
 #include "core_sdk/storage.h"
 
@@ -63,18 +64,23 @@ static bool manifest__base64_decode_exact(const char *in, uint8_t *out, size_t o
     return out_index == out_size;
 }
 
-bruce_result_t manifest__parse(const char *json, size_t json_len, bruce_manifest_t *out_manifest)
+bruce_manifest_t *manifest__parse(const char *json, size_t json_len)
 {
-    if (json == NULL || out_manifest == NULL || json_len == 0) {
-        return BRUCE_ERR_MANIFEST_INVALID;
+    if (json == NULL || json_len == 0) {
+        return NULL;
     }
 
     cJSON *root = cJSON_ParseWithLength(json, json_len);
     if (root == NULL || !cJSON_IsObject(root)) {
         cJSON_Delete(root);
-        return BRUCE_ERR_MANIFEST_INVALID;
+        return NULL;
     }
 
+    bruce_manifest_t *out_manifest = memory__malloc(sizeof(bruce_manifest_t));
+    if (out_manifest == NULL) {
+        cJSON_Delete(root);
+        return NULL;
+    }
     memset(out_manifest, 0, sizeof(*out_manifest));
 
     const cJSON *name = cJSON_GetObjectItemCaseSensitive(root, "appName");
@@ -92,12 +98,12 @@ bruce_result_t manifest__parse(const char *json, size_t json_len, bruce_manifest
     ok = ok && (permissions == NULL || cJSON_IsArray(permissions));
     if (!ok) {
         cJSON_Delete(root);
-        return BRUCE_ERR_MANIFEST_INVALID;
+        return NULL;
     }
 
     if (!manifest__base64_decode_exact(icon->valuestring, out_manifest->app_icon, BRUCE_MANIFEST_ICON_BYTES)) {
         cJSON_Delete(root);
-        return BRUCE_ERR_MANIFEST_INVALID;
+        return NULL;
     }
 
     strncpy(out_manifest->app_name, name->valuestring, BRUCE_MANIFEST_APP_NAME_MAX - 1);
@@ -109,7 +115,7 @@ bruce_result_t manifest__parse(const char *json, size_t json_len, bruce_manifest
         int array_size = cJSON_GetArraySize(permissions);
         if (array_size < 0 || (size_t)array_size > BRUCE_MANIFEST_MAX_PERMISSIONS) {
             cJSON_Delete(root);
-            return BRUCE_ERR_MANIFEST_INVALID;
+            return NULL;
         }
         for (int i = 0; i < array_size; ++i) {
             const cJSON *entry = cJSON_GetArrayItem(permissions, i);
@@ -117,7 +123,7 @@ bruce_result_t manifest__parse(const char *json, size_t json_len, bruce_manifest
             if (!cJSON_IsString(entry) || entry->valuestring == NULL ||
                 !permission__from_name(entry->valuestring, &permission)) {
                 cJSON_Delete(root);
-                return BRUCE_ERR_MANIFEST_INVALID;
+                return NULL;
             }
             bool duplicate = false;
             for (size_t j = 0; j < permission_count; ++j) {
@@ -128,7 +134,7 @@ bruce_result_t manifest__parse(const char *json, size_t json_len, bruce_manifest
             }
             if (duplicate || strlen(entry->valuestring) >= BRUCE_MANIFEST_PERMISSION_NAME_MAX) {
                 cJSON_Delete(root);
-                return BRUCE_ERR_MANIFEST_INVALID;
+                return NULL;
             }
             strncpy(out_manifest->permissions[permission_count], entry->valuestring,
                     BRUCE_MANIFEST_PERMISSION_NAME_MAX - 1);
@@ -138,11 +144,11 @@ bruce_result_t manifest__parse(const char *json, size_t json_len, bruce_manifest
     out_manifest->permission_count = permission_count;
 
     cJSON_Delete(root);
-    return BRUCE_OK;
+    return out_manifest;
 }
 
 /* ----------------------------------------------------------------------- */
-/* File-I/O helpers for format detection & manifest extraction              */
+/* File-I/O helpers                                                          */
 /* ----------------------------------------------------------------------- */
 
 static bool manifest__pread(bruce_file_id_t file, uint64_t offset, void *buffer, size_t size)
@@ -163,13 +169,9 @@ static bool manifest__pread(bruce_file_id_t file, uint64_t offset, void *buffer,
 }
 
 /* ----------------------------------------------------------------------- */
-/* ELF-specific manifest extraction                                         */
+/* ELF-specific helpers                                                      */
 /* ----------------------------------------------------------------------- */
 
-/* This build's expected e_machine value (see migration_BruceIDF.md, "ELF
- * contract": "The ELF header, not the manifest, is authoritative for
- * architecture").  ESP-IDF defines exactly one of these two Kconfig symbols
- * per target. */
 #if CONFIG_IDF_TARGET_ARCH_RISCV
 #define MANIFEST_ELF_EXPECTED_MACHINE 243u /* EM_RISCV */
 #else
@@ -210,17 +212,14 @@ typedef struct __attribute__((packed)) {
     uint32_t sh_entsize;
 } manifest_elf_shdr_t;
 
-static bruce_result_t manifest__inspect_elf(bruce_file_id_t file, bruce_app_inspection_t *out_inspection)
+/* Reads the .bruce.manifest section raw bytes from an already-open ELF
+ * file.  Does NOT validate e_machine or ELF magic — the caller is
+ * responsible for that.  Returns malloc'd bytes in *out_bytes. */
+static bruce_result_t manifest__read_elf_manifest_bytes(bruce_file_id_t file, char **out_bytes, size_t *out_len)
 {
     manifest_elf_ehdr_t header;
     if (!manifest__pread(file, 0, &header, sizeof(header))) {
         return BRUCE_ERR_MANIFEST_INVALID;
-    }
-    if (memcmp(header.e_ident, "\x7f" "ELF", 4) != 0 || header.e_ident[4] != 1 /* ELFCLASS32 */) {
-        return BRUCE_ERR_MANIFEST_INVALID;
-    }
-    if (header.e_machine != MANIFEST_ELF_EXPECTED_MACHINE) {
-        return BRUCE_ERR_TARGET_MISMATCH;
     }
     if (header.e_shnum == 0 || header.e_shstrndx >= header.e_shnum) {
         return BRUCE_ERR_MANIFEST_INVALID;
@@ -255,16 +254,12 @@ static bruce_result_t manifest__inspect_elf(bruce_file_id_t file, bruce_app_insp
         if (bytes == NULL) {
             return BRUCE_ERR_NO_MEMORY;
         }
-        bool read_ok = manifest__pread(file, section.sh_offset, bytes, section.sh_size);
-        bruce_result_t parse_result = read_ok ? manifest__parse(bytes, section.sh_size, &out_inspection->manifest)
-                                               : BRUCE_ERR_MANIFEST_INVALID;
-        free(bytes);
-        if (parse_result != BRUCE_OK) {
-            return parse_result;
+        if (!manifest__pread(file, section.sh_offset, bytes, section.sh_size)) {
+            free(bytes);
+            return BRUCE_ERR_MANIFEST_INVALID;
         }
-
-        out_inspection->kind = BRUCE_APP_KIND_ELF;
-        out_inspection->abi_warning = out_inspection->manifest.core_abi_version != BRUCE_CORE_ABI_VERSION;
+        *out_bytes = bytes;
+        *out_len = section.sh_size;
         return BRUCE_OK;
     }
 
@@ -272,30 +267,112 @@ static bruce_result_t manifest__inspect_elf(bruce_file_id_t file, bruce_app_insp
 }
 
 /* ----------------------------------------------------------------------- */
-/* Universal manifest inspection                                            */
+/* Path normalization (accepts absolute or "./" relative, maps to root)      */
 /* ----------------------------------------------------------------------- */
 
-bruce_result_t manifest__inspect_path(const char *path, bruce_app_inspection_t *out_inspection)
+static bool manifest__normalize_path(const char *path, char *out, size_t out_size)
 {
-    if (path == NULL || path[0] != '/' || strstr(path, "..") != NULL || out_inspection == NULL) {
-        return BRUCE_ERR_INVALID_PATH;
+    if (path == NULL || strstr(path, "..") != NULL || out_size == 0) {
+        return false;
     }
-    memset(out_inspection, 0, sizeof(*out_inspection));
+    int len;
+    if (path[0] == '/') {
+        len = snprintf(out, out_size, "%s", path);
+    } else if (strncmp(path, "./", 2) == 0) {
+        len = snprintf(out, out_size, "/%s", path + 2);
+    } else {
+        return false;
+    }
+    return len > 0 && (size_t)len < out_size;
+}
+
+/* ----------------------------------------------------------------------- */
+/* Universal manifest JSON extractor                                        */
+/* ----------------------------------------------------------------------- */
+
+const char *manifest__inspect_path(const char *path)
+{
+    char normalized_path[BRUCE_STORAGE_PATH_MAX];
+    if (!manifest__normalize_path(path, normalized_path, sizeof(normalized_path))) {
+        return NULL;
+    }
 
     bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
-    bruce_result_t open_result = storage__open(path, BRUCE_STORAGE_OPEN_READ, &file);
+    bruce_result_t open_result = storage__open(normalized_path, BRUCE_STORAGE_OPEN_READ, &file);
     if (open_result != BRUCE_OK) {
-        return open_result;
+        return NULL;
     }
 
-    uint8_t magic[4];
+    char *out_json = NULL;
     bruce_result_t result;
+    uint8_t magic[4];
     if (manifest__pread(file, 0, magic, sizeof(magic)) && memcmp(magic, "\x7f" "ELF", 4) == 0) {
-        result = manifest__inspect_elf(file, out_inspection);
+        size_t out_len = 0;
+        result = manifest__read_elf_manifest_bytes(file, &out_json, &out_len);
     } else {
         result = BRUCE_ERR_MANIFEST_INVALID;
     }
 
     storage__close(file);
-    return result;
+    return result == BRUCE_OK ? out_json : NULL;
+}
+
+/* ----------------------------------------------------------------------- */
+/* ELF-specific full inspection                                             */
+/* ----------------------------------------------------------------------- */
+
+bruce_app_inspection_t *manifest__inspect_elf(const char *path)
+{
+    char normalized_path[BRUCE_STORAGE_PATH_MAX];
+    if (!manifest__normalize_path(path, normalized_path, sizeof(normalized_path))) {
+        return NULL;
+    }
+
+    bruce_app_inspection_t *out_inspection = memory__malloc(sizeof(*out_inspection));
+    if (out_inspection == NULL) {
+        return NULL;
+    }
+    memset(out_inspection, 0, sizeof(*out_inspection));
+
+    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
+    bruce_result_t open_result = storage__open(normalized_path, BRUCE_STORAGE_OPEN_READ, &file);
+    if (open_result != BRUCE_OK) {
+        memory__free(out_inspection);
+        return NULL;
+    }
+
+    manifest_elf_ehdr_t header;
+    bruce_result_t result;
+    if (!manifest__pread(file, 0, &header, sizeof(header))) {
+        result = BRUCE_ERR_MANIFEST_INVALID;
+    } else if (memcmp(header.e_ident, "\x7f" "ELF", 4) != 0 || header.e_ident[4] != 1 /* ELFCLASS32 */) {
+        result = BRUCE_ERR_MANIFEST_INVALID;
+    } else if (header.e_machine != MANIFEST_ELF_EXPECTED_MACHINE) {
+        result = BRUCE_ERR_TARGET_MISMATCH;
+    } else {
+        char *bytes = NULL;
+        size_t bytes_len = 0;
+        result = manifest__read_elf_manifest_bytes(file, &bytes, &bytes_len);
+        if (result == BRUCE_OK) {
+            bruce_manifest_t *parsed = manifest__parse(bytes, bytes_len);
+            free(bytes);
+            if (parsed != NULL) {
+                out_inspection->kind = BRUCE_APP_KIND_ELF;
+                out_inspection->manifest = *parsed;
+                out_inspection->abi_warning =
+                    out_inspection->manifest.core_abi_version != BRUCE_CORE_ABI_VERSION;
+                memory__free(parsed);
+                result = BRUCE_OK;
+            } else {
+                result = BRUCE_ERR_MANIFEST_INVALID;
+            }
+        }
+    }
+
+    storage__close(file);
+    if (result != BRUCE_OK) {
+        memory__free(out_inspection);
+        return NULL;
+    }
+    return out_inspection;
 }

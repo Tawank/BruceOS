@@ -95,34 +95,49 @@ Refactor A3's hardcoded `/bin/<name>.elf` -> `/bin/<name>.js` resolution
 inside `app_runner__run()` to iterate this registry instead, with no change
 to `app_runner__run()`'s observable behavior.
 
-Also add the universal manifest inspector `manifest__inspect_path()` in
-`core/manifest/` / `core_sdk/manifest.h` that auto-detects file format (ELF
-magic bytes / `e_machine`, JS comment block, etc.), extracts the raw manifest
-bytes, and hands them to the canonical `manifest__parse()` parser/validator
-so every format is parsed identically.  This is the one inspection function;
-per-loader `inspect_fn` callbacks are not needed.  The loader registry's
-`app_runner__register_loader()` no longer takes an `inspect_fn` — any
-program (launcher, file manager, terminal, or a loader module itself)
-inspects files with `manifest__inspect_path()` directly.
+Also add universal manifest inspection in `core/manifest/` /
+`core_sdk/manifest.h`: `manifest__inspect_path()` auto-detects file format
+(ELF magic, JS comment block, JPG, PNG etc.) and returns the raw manifest JSON bytes;
+`manifest__inspect_elf()` validates the ELF32 header (magic, `e_machine` vs.
+this build's target) and returns a parsed `bruce_app_inspection_t`.  The
+loader registry's `app_runner__register_loader()` no longer takes an
+`inspect_fn` — any program (launcher, file manager, terminal) inspects
+files with `manifest__inspect_path()` directly; ELF-specific programs use
+`manifest__inspect_elf()`.
 
 Then, as the registry's first consumer, add the built-in ELF loader module
 under `src/modules/loaders/elf/` (not `src/core/elf/`): integrate the
-Espressif ELF loader, call `manifest__inspect_path()` for mandatory
+Espressif ELF loader, call `manifest__inspect_elf()` for mandatory
 `.bruce.manifest` parsing, ABI warning, target check, and 32×32 icon
 decoding, use `app_runner__spawn_loader_task()`-owned allocations, expose a
 public symbol resolver, and reject imported `malloc`/`free`.  Register it
 for `.elf` at priority 10.  The loader module's task entry (the function
 passed as `entry` to `app_runner__spawn_loader_task()`) is
-`elf_loader__app_main(void *context)`.  Provide SDK manifest build tooling.
+`elf_loader__app_main(void *context)`.
+
+Also expose the loader as a built-in command named `elf`, so that
+`elf ./app.elf <args>...` loads the named ELF file and passes the
+remaining arguments to it.  This enables loader chains: the built-in
+`elf` command can load an ELF loader app such as `./elf_loader.elf`, and
+`elf_loader.elf` (with the `execute` permission) can call
+`app_runner__run_path()` to load `./game.elf`.
+
+Provide SDK manifest build tooling: `elf_apps/include/bruce_sdk.h` with the
+`BRUCE_APP_MANIFEST()` macro, `elf_apps/tools/build_elf_apps.py` to inject the
+non-allocatable `.bruce.manifest` section, and template apps in
+`elf_apps/examples/` (including `elf_loader` and `game`).
+
 The loader module includes only `core_sdk/...` headers, the same as any
 other built-in — it gets no `modules/selftest`-style private-header
 exemption.
 
 Acceptance: a third, throwaway test loader module can register a new
 extension using only the public registry API with zero Core changes;
-`manifest__inspect_path()` inspects an ELF file without involving the loader
+`manifest__inspect_elf()` inspects an ELF file without involving the loader
 module; a minimal ELF loads from `/bin`, exposes only approved imports,
-prompts for requested permissions, and frees image memory at exit.
+prompts for requested permissions, and frees image memory at exit; the
+built-in `elf` command loads an ELF by absolute path; the SDK build tooling
+can produce a loader ELF that loads another ELF.
 
 ## A7 — JavaScript loader module and bridge conversion
 
@@ -130,9 +145,10 @@ Dependencies: A2, A3, A4, A5, A6.
 
 As the registry's second consumer, add the built-in JavaScript loader module
 under `src/modules/loaders/js/` (not `src/core/js/`): register `.js` at
-priority 20 with `app_runner__register_loader()` (no `inspect_fn` — use
-`manifest__inspect_path()` instead), call `manifest__inspect_path()` for
-optional leading manifest parsing with zero-permission fallback,
+priority 20 with `app_runner__register_loader()` (no `inspect_fn`), call
+`manifest__inspect_path()` to extract raw manifest JSON from the JS comment
+block, then `manifest__parse()` for optional leading manifest parsing with
+zero-permission fallback,
 `app_runner__spawn_loader_task()`-owned mQuickJS allocation (VM/context
 memory via `memory__malloc()`), optional `app_main(argv)`, and
 `js__app_main(void *context)` as the loader's task entry.  Preserve the

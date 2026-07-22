@@ -5,3 +5,16 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 # per-task CPU accounting via uxTaskGetSystemState()/TaskStatus_t.
 CONFIG_FREERTOS_USE_TRACE_FACILITY=y
 CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y
+
+# espressif/elf_loader needs executable memory; memory protection in ESP-IDF
+# v6 hides MALLOC_CAP_EXEC when enabled.  Disable it for the ELF loader slice.
+CONFIG_ESP_SYSTEM_PMP_IDRAM_SPLIT=n
+CONFIG_ESP_SYSTEM_MEMPROT_FEATURE=n
+CONFIG_ESP_SYSTEM_MEMPROT_FEATURE_LOCK=n
+CONFIG_ESP_SYSTEM_MEMPROT_FEATURE_VIA_TEE=n
+
+# The default espressif/elf_loader symbol tables reference newlib symbols that
+# are not exposed by the ESP-IDF v6 toolchain; the Bruce loader supplies its own
+# allowlist via elf_set_symbol_resolver(), so disable the built-in tables.
+CONFIG_ELF_LOADER_LIBC_SYMBOLS=n
+CONFIG_ELF_LOADER_ESPIDF_SYMBOLS=n

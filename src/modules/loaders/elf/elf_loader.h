@@ -9,8 +9,8 @@
  * modules/selftest.
  */
 
-/* Registers this module with app_runner's loader registry for the ".elf"
- * extension at priority 10.  Called once from
+/* Registers this module: a built-in "elf" command that loads an arbitrary
+ * ELF file by path, plus the ".elf" loader at priority 10.  Called once from
  * app_runner__register_defaults(). */
 void elf_loader__register(void);
 

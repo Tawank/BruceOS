@@ -1,4 +1,3 @@
 dependencies:
   idf: '>=5.1'
-  espressif/cjson: ^1.7.19~2
   espressif/elf_loader: ^1.3.1

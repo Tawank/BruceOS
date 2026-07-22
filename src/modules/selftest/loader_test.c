@@ -9,6 +9,7 @@
 #include "core_sdk/dialog.h"
 #include "core_sdk/loader.h"
 #include "core_sdk/manifest.h"
+#include "core_sdk/memory.h"
 #include "core_sdk/task.h"
 #include "modules/loaders/elf/elf_loader.h"
 
@@ -52,22 +53,24 @@ bool selftest__run_manifest_parse_case(void)
         return false;
     }
 
-    bruce_manifest_t manifest;
-    if (manifest__parse(json, (size_t)len, &manifest) != BRUCE_OK) {
+    bruce_manifest_t *manifest = manifest__parse(json, (size_t)len);
+    if (manifest == NULL) {
         printf("[selftest] loader/manifest_parse: valid manifest rejected\n");
         return false;
     }
     bool icon_all_zero = true;
     for (size_t i = 0; i < BRUCE_MANIFEST_ICON_BYTES; ++i) {
-        if (manifest.app_icon[i] != 0) {
+        if (manifest->app_icon[i] != 0) {
             icon_all_zero = false;
             break;
         }
     }
-    if (strcmp(manifest.app_name, "Example app") != 0 || manifest.core_abi_version != 1 ||
-        manifest.stack_size != 8192 || manifest.permission_count != 2 ||
-        strcmp(manifest.permissions[0], "wifi") != 0 || strcmp(manifest.permissions[1], "http") != 0 ||
-        !icon_all_zero) {
+    bool ok = strcmp(manifest->app_name, "Example app") == 0 && manifest->core_abi_version == 1 &&
+              manifest->stack_size == 8192 && manifest->permission_count == 2 &&
+              strcmp(manifest->permissions[0], "wifi") == 0 && strcmp(manifest->permissions[1], "http") == 0 &&
+              icon_all_zero;
+    memory__free(manifest);
+    if (!ok) {
         printf("[selftest] loader/manifest_parse: parsed fields mismatch\n");
         return false;
     }
@@ -77,7 +80,7 @@ bool selftest__run_manifest_parse_case(void)
     char bad_stack_json[512];
     snprintf(bad_stack_json, sizeof(bad_stack_json),
              "{\"appName\":\"x\",\"appIcon\":\"%s\",\"coreAbiVersion\":1,\"stackSize\":100}", icon_b64);
-    if (manifest__parse(bad_stack_json, strlen(bad_stack_json), &manifest) != BRUCE_ERR_MANIFEST_INVALID) {
+    if (manifest__parse(bad_stack_json, strlen(bad_stack_json)) != NULL) {
         printf("[selftest] loader/manifest_parse: out-of-range stackSize accepted\n");
         return false;
     }
@@ -87,7 +90,7 @@ bool selftest__run_manifest_parse_case(void)
              "{\"appName\":\"x\",\"appIcon\":\"%s\",\"coreAbiVersion\":1,\"stackSize\":8192,"
              "\"permissions\":[\"not_a_real_permission\"]}",
              icon_b64);
-    if (manifest__parse(unknown_perm_json, strlen(unknown_perm_json), &manifest) != BRUCE_ERR_MANIFEST_INVALID) {
+    if (manifest__parse(unknown_perm_json, strlen(unknown_perm_json)) != NULL) {
         printf("[selftest] loader/manifest_parse: unknown permission name accepted\n");
         return false;
     }
@@ -97,7 +100,7 @@ bool selftest__run_manifest_parse_case(void)
              "{\"appName\":\"x\",\"appIcon\":\"%s\",\"coreAbiVersion\":1,\"stackSize\":8192,"
              "\"permissions\":[\"wifi\",\"wifi\"]}",
              icon_b64);
-    if (manifest__parse(duplicate_perm_json, strlen(duplicate_perm_json), &manifest) != BRUCE_ERR_MANIFEST_INVALID) {
+    if (manifest__parse(duplicate_perm_json, strlen(duplicate_perm_json)) != NULL) {
         printf("[selftest] loader/manifest_parse: duplicate permission accepted\n");
         return false;
     }
@@ -189,14 +192,16 @@ bool selftest__run_elf_loader_case(void)
         return false;
     }
 
-    bruce_app_inspection_t inspection;
-    bruce_result_t inspect_result = manifest__inspect_path(path, &inspection);
-    bool inspect_ok = inspect_result == BRUCE_OK && inspection.kind == BRUCE_APP_KIND_ELF &&
-                       !inspection.abi_warning && strcmp(inspection.manifest.app_name, "Selftest ELF") == 0 &&
-                       inspection.manifest.permission_count == 1 &&
-                       strcmp(inspection.manifest.permissions[0], "wifi") == 0;
+    bruce_app_inspection_t *inspection = manifest__inspect_elf(path);
+    bool inspect_ok = inspection != NULL && inspection->kind == BRUCE_APP_KIND_ELF &&
+                       !inspection->abi_warning && strcmp(inspection->manifest.app_name, "Selftest ELF") == 0 &&
+                       inspection->manifest.permission_count == 1 &&
+                       strcmp(inspection->manifest.permissions[0], "wifi") == 0;
+    if (inspection != NULL) {
+        memory__free(inspection);
+    }
     if (!inspect_ok) {
-        printf("[selftest] loader/elf: inspect_path mismatch (result=%d)\n", inspect_result);
+        printf("[selftest] loader/elf: inspect_path mismatch\n");
         storage__remove(path);
         return false;
     }

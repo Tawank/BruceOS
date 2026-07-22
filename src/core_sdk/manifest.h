@@ -3,8 +3,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "core_sdk/result.h"
-
 #define BRUCE_CORE_ABI_VERSION 1u
 #define BRUCE_MANIFEST_APP_NAME_MAX 64
 #define BRUCE_MANIFEST_ICON_BYTES 128
@@ -39,18 +37,32 @@ typedef struct {
  * caller extracts raw manifest bytes from the file format and calls this one
  * shared parser instead of reimplementing JSON/base64 handling.  Returns
  * BRUCE_OK or BRUCE_ERR_MANIFEST_INVALID. */
-bruce_result_t manifest__parse(const char *json, size_t json_len, bruce_manifest_t *out_manifest);
+bruce_manifest_t *manifest__parse(const char *json, size_t json_len);
 
-/* Universal manifest inspector (see migration_BruceIDF.md, "Loader
- * modules").  Opens `path`, auto-detects the file format (ELF magic bytes,
- * JS comment block, etc.), extracts the raw manifest bytes, hands them to
- * manifest__parse(), and fills `out_inspection` with the parsed manifest,
- * app kind, and ABI-warning flag.  Never launches an app.  This is the one
- * function every program — loader modules, the launcher, file manager,
- * terminal tools — uses to inspect any file.
+/* Universal manifest JSON extractor (see migration_BruceIDF.md, "Loader
+ * modules").  Opens `path`, auto-detects the file format (ELF section, JS
+ * comment block, etc.), and returns the raw manifest JSON bytes in
+ * *out_json (malloc'd, caller must free with free()).  Never launches an
+ * app.  This is the one function every program — the launcher, file
+ * manager, terminal tools — uses to extract the manifest from any file.
  *
- * Returns BRUCE_OK on success, or BRUCE_ERR_INVALID_PATH (null or
- * malformed path), BRUCE_ERR_NOT_FOUND (file does not exist),
- * BRUCE_ERR_MANIFEST_INVALID (missing/invalid manifest), or
- * BRUCE_ERR_TARGET_MISMATCH (ELF e_machine does not match this build). */
-bruce_result_t manifest__inspect_path(const char *path, bruce_app_inspection_t *out_inspection);
+ * Does NOT parse the JSON or do format-specific validation (e_machine,
+ * ABI warning).  Callers that need a parsed manifest call manifest__parse()
+ * on the returned bytes.  Format-specific full inspection is handled by
+ * manifest__inspect_elf() and similar per-format functions.
+ *
+ * Returns BRUCE_OK on success, BRUCE_ERR_INVALID_PATH, BRUCE_ERR_NOT_FOUND,
+ * or BRUCE_ERR_MANIFEST_INVALID (no extractable manifest in this file). */
+const char *manifest__inspect_path(const char *path);
+
+/* ELF-specific manifest inspection (see migration_BruceIDF.md, "ELF
+ * contract").  Opens `path`, validates the ELF32 header (magic, e_machine
+ * vs. this build's target), extracts and parses the .bruce.manifest
+ * section via manifest__parse(), and fills *out_inspection with the parsed
+ * manifest, BRUCE_APP_KIND_ELF, and the ABI-warning flag.  Loader modules
+ * that know they are loading an ELF file (the built-in ELF loader, for
+ * example) call this directly.
+ *
+ * Returns BRUCE_OK on success, or BRUCE_ERR_INVALID_PATH, BRUCE_ERR_NOT_FOUND,
+ * BRUCE_ERR_MANIFEST_INVALID, BRUCE_ERR_TARGET_MISMATCH. */
+bruce_app_inspection_t *manifest__inspect_elf(const char *path);

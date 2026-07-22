@@ -4,7 +4,6 @@
 #include "core/storage/storage.h"
 #include "core/task/task.h"
 #include "core_sdk/app_runner.h"
-#include "core_sdk/js.h"
 #include "core_sdk/loader.h"
 #include "core_sdk/result.h"
 #include "core_sdk/task.h"
@@ -80,7 +79,6 @@ void app_runner__register_defaults(void)
      * both go through the exact same public registration API a third-party
      * loader would use. */
     elf_loader__register();
-    (void)app_runner__register_loader(".js", 20, js__run_path);
 }
 
 static bruce_app_entry_t app_runner__find_builtin(const char *app_name)
@@ -120,7 +118,26 @@ bruce_result_t app_runner__register_loader(const char *extension, int priority, 
 
 static bool app_runner__path_is_valid(const char *path)
 {
-    return path != NULL && path[0] == '/' && strstr(path, "..") == NULL;
+    if (path == NULL || strstr(path, "..") != NULL) {
+        return false;
+    }
+    return path[0] == '/' || strncmp(path, "./", 2) == 0;
+}
+
+static bool app_runner__normalize_path(const char *path, char *out, size_t out_size)
+{
+    if (path == NULL || strstr(path, "..") != NULL || out_size == 0) {
+        return false;
+    }
+    int len;
+    if (path[0] == '/') {
+        len = snprintf(out, out_size, "%s", path);
+    } else if (strncmp(path, "./", 2) == 0) {
+        len = snprintf(out, out_size, "/%s", path + 2);
+    } else {
+        return false;
+    }
+    return len > 0 && (size_t)len < out_size;
 }
 
 static bool app_runner__path_has_extension(const char *path, const char *extension)
@@ -165,11 +182,17 @@ int app_runner__run_path(const char *path, const char *arg, bool in_background)
     if (!app_runner__path_is_valid(path)) {
         return BRUCE_ERR_INVALID_PATH;
     }
-    app_runner_loader_t *loader = app_runner__find_loader_for_path(path);
+
+    char normalized_path[APP_RUNNER_PATH_MAX];
+    if (!app_runner__normalize_path(path, normalized_path, sizeof(normalized_path))) {
+        return BRUCE_ERR_INVALID_PATH;
+    }
+
+    app_runner_loader_t *loader = app_runner__find_loader_for_path(normalized_path);
     if (loader == NULL) {
         return BRUCE_ERR_NOT_FOUND;
     }
-    return loader->run_fn(path, arg, in_background);
+    return loader->run_fn(normalized_path, arg, in_background);
 }
 
 int app_runner__spawn_loader_task(const char *permission_key, bool gui_requested, bool in_background,
