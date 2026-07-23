@@ -7,6 +7,7 @@
 
 #include "core_sdk/app_runner.h"
 #include "core_sdk/dialog.h"
+#include "core_sdk/display.h"
 #include "core_sdk/loader.h"
 #include "core_sdk/manifest.h"
 #include "core_sdk/memory.h"
@@ -15,6 +16,14 @@
 
 #define BRUCE_LAUNCHER_MAX_ENTRIES 32
 #define BRUCE_LAUNCHER_LABEL_MAX 80
+
+/* Display layout constants (text size 1: 5x7 font + 1px spacing = 6x8). */
+#define BRUCE_LAUNCHER_TITLE_H 10
+#define BRUCE_LAUNCHER_ITEM_H 10
+#define BRUCE_LAUNCHER_FOOTER_H 10
+#define BRUCE_LAUNCHER_TEXT_SIZE 1
+#define BRUCE_LAUNCHER_CHAR_W 6
+#define BRUCE_LAUNCHER_CHAR_H 8
 
 /* One entry in the launcher menu.  Built-ins are dispatched by name; /apps/
  * entries are dispatched by path. */
@@ -101,6 +110,93 @@ static int bruce_launcher__discover_apps(bruce_launcher_entry_t *entries, int ca
     return added;
 }
 
+static int bruce_launcher__items_per_page(void)
+{
+    int h = display__height();
+    int available = h - BRUCE_LAUNCHER_TITLE_H - BRUCE_LAUNCHER_FOOTER_H;
+    if (available < BRUCE_LAUNCHER_ITEM_H) {
+        return 1;
+    }
+    return available / BRUCE_LAUNCHER_ITEM_H;
+}
+
+static void bruce_launcher__draw_entry(const bruce_launcher_entry_t *entry, int y, bool selected)
+{
+    int w = display__width();
+    int label_max = (w - 4) / BRUCE_LAUNCHER_CHAR_W;
+    char label[BRUCE_LAUNCHER_LABEL_MAX];
+    if (label_max < 1) {
+        label[0] = '\0';
+    } else if ((int)strlen(entry->label) > label_max) {
+        snprintf(label, sizeof(label), "%.*s...", label_max - 3, entry->label);
+    } else {
+        snprintf(label, sizeof(label), "%s", entry->label);
+    }
+
+    if (selected) {
+        display__fill_rect(0, y, w, BRUCE_LAUNCHER_ITEM_H, BRUCE_COLOR_WHITE);
+        display__set_text_color(BRUCE_COLOR_BLACK);
+    } else {
+        display__set_text_color(BRUCE_COLOR_WHITE);
+    }
+
+    display__set_text_size(BRUCE_LAUNCHER_TEXT_SIZE);
+    display__set_cursor(2, y + 1);
+    display__print(label);
+}
+
+static void bruce_launcher__draw_menu(const bruce_launcher_entry_t *entries, int entry_count,
+                                      int selected, int first_visible)
+{
+    int w = display__width();
+    int h = display__height();
+    int items_per_page = bruce_launcher__items_per_page();
+    int last_visible = first_visible + items_per_page - 1;
+    if (last_visible >= entry_count) {
+        last_visible = entry_count - 1;
+    }
+
+    display__clear();
+
+    /* Title bar. */
+    display__fill_rect(0, 0, w, BRUCE_LAUNCHER_TITLE_H, BRUCE_COLOR_BLUE);
+    display__set_text_color(BRUCE_COLOR_WHITE);
+    display__set_text_size(BRUCE_LAUNCHER_TEXT_SIZE);
+    const char *title = "Bruce Launcher";
+    int title_w = strlen(title) * BRUCE_LAUNCHER_CHAR_W;
+    int title_x = (w - title_w) / 2;
+    if (title_x < 0) {
+        title_x = 0;
+    }
+    display__set_cursor(title_x, 1);
+    display__print(title);
+
+    /* Menu items. */
+    for (int i = first_visible; i <= last_visible; ++i) {
+        int y = BRUCE_LAUNCHER_TITLE_H + (i - first_visible) * BRUCE_LAUNCHER_ITEM_H;
+        bruce_launcher__draw_entry(&entries[i], y, i == selected);
+    }
+
+    /* Scroll indicators. */
+    display__set_text_color(BRUCE_COLOR_WHITE);
+    if (first_visible > 0) {
+        display__set_cursor(w - BRUCE_LAUNCHER_CHAR_W, BRUCE_LAUNCHER_TITLE_H + 1);
+        display__print("^");
+    }
+    if (last_visible < entry_count - 1) {
+        display__set_cursor(w - BRUCE_LAUNCHER_CHAR_W, h - BRUCE_LAUNCHER_FOOTER_H - BRUCE_LAUNCHER_CHAR_H - 1);
+        display__print("v");
+    }
+
+    /* Footer. */
+    display__fill_rect(0, h - BRUCE_LAUNCHER_FOOTER_H, w, BRUCE_LAUNCHER_FOOTER_H, BRUCE_COLOR_DARKGREY);
+    display__set_text_color(BRUCE_COLOR_WHITE);
+    display__set_cursor(2, h - BRUCE_LAUNCHER_FOOTER_H + 1);
+    display__print("Use terminal to select");
+
+    display__flush();
+}
+
 static int bruce_launcher__run_entry(const bruce_launcher_entry_t *entry)
 {
     int result;
@@ -144,14 +240,32 @@ int bruce_launcher_app(int argc, char **argv)
         choices[i].value = entries[i].is_path ? entries[i].path : entries[i].app_name;
     }
 
+    int selected = 0;
+    int first_visible = 0;
     for (;;) {
-        size_t selected = 0;
+        int items_per_page = bruce_launcher__items_per_page();
+        if (selected < first_visible) {
+            first_visible = selected;
+        } else if (selected >= first_visible + items_per_page) {
+            first_visible = selected - items_per_page + 1;
+        }
+        if (first_visible < 0) {
+            first_visible = 0;
+        }
+        if (first_visible >= entry_count && entry_count > 0) {
+            first_visible = entry_count - 1;
+        }
+
+        bruce_launcher__draw_menu(entries, entry_count, selected, first_visible);
+
+        size_t choice = 0;
         bruce_result_t choice_result = dialog__choice("Bruce Launcher", "Select an app", choices, (size_t)entry_count,
-                                                      &selected);
+                                                      &choice);
         if (choice_result != BRUCE_OK) {
             break;
         }
-        if ((int)selected == exit_index) {
+        selected = (int)choice;
+        if (selected == exit_index) {
             break;
         }
         (void)bruce_launcher__run_entry(&entries[selected]);

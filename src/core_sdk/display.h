@@ -10,10 +10,11 @@
  * is serialized by a Core mutex so tasks share one output surface safely.
  *
  * All coordinates are logical and respect the current rotation set by
- * display__set_rotation().  The framebuffer is stored in the panel's native
- * orientation (135x240); rotation is applied by the ST7789 controller via
- * esp_lcd_panel_swap_xy() / esp_lcd_panel_mirror(), so logical and native
- * coordinates are identical.  The default rotation is board-specific.
+ * display__set_rotation().  The framebuffer is stored in the logical
+ * orientation for the current rotation; the ST7789 controller maps it to the
+ * physical panel via esp_lcd_panel_swap_xy() / esp_lcd_panel_mirror().  The
+ * default rotation is board-specific (portrait for M5 StickC Plus2, landscape
+ * for M5 Cardputer).
  */
 
 #include <stdbool.h>

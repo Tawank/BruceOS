@@ -184,6 +184,8 @@ static bool s_initialized;
 
 static bruce_display_color_t *s_framebuffer;
 static uint8_t s_rotation;
+static int16_t s_fb_width;
+static int16_t s_fb_height;
 static bruce_display_color_t s_text_color;
 static bruce_display_color_t s_text_bg_color;
 static bool s_text_bg_transparent;
@@ -208,9 +210,21 @@ static inline void display__unlock(void)
 
 /*
  * Rotation is handled by the ST7789 panel controller via esp_lcd_panel_swap_xy()
- * and esp_lcd_panel_mirror().  The framebuffer is always stored in the panel's
- * native orientation, so logical and native coordinates are identical.
+ * and esp_lcd_panel_mirror().  The framebuffer is stored in the logical
+ * orientation for the current rotation; the controller maps it to the physical
+ * panel.
  */
+static void display__update_fb_dimensions(void)
+{
+    if (s_rotation == 0 || s_rotation == 2) {
+        s_fb_width = DISPLAY__NATIVE_WIDTH;
+        s_fb_height = DISPLAY__NATIVE_HEIGHT;
+    } else {
+        s_fb_width = DISPLAY__NATIVE_HEIGHT;
+        s_fb_height = DISPLAY__NATIVE_WIDTH;
+    }
+}
+
 static void display__configure_rotation(void)
 {
     bool swap_xy = false;
@@ -234,16 +248,18 @@ static void display__configure_rotation(void)
             break;
     }
 
+    display__update_fb_dimensions();
     esp_lcd_panel_swap_xy(s_panel, swap_xy);
     esp_lcd_panel_mirror(s_panel, mirror_x, mirror_y);
+    esp_lcd_panel_set_gap(s_panel, 52, 40);
 }
 
 static void display__set_pixel(int16_t x, int16_t y, bruce_display_color_t color)
 {
-    if (x < 0 || x >= DISPLAY__NATIVE_WIDTH || y < 0 || y >= DISPLAY__NATIVE_HEIGHT) {
+    if (x < 0 || x >= s_fb_width || y < 0 || y >= s_fb_height) {
         return;
     }
-    s_framebuffer[y * DISPLAY__NATIVE_WIDTH + x] = color;
+    s_framebuffer[y * s_fb_width + x] = color;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -389,17 +405,17 @@ static void display__fill_rect_native(int16_t nx, int16_t ny, int16_t nw, int16_
         nh += ny;
         ny = 0;
     }
-    if (nx + nw > DISPLAY__NATIVE_WIDTH) {
-        nw = DISPLAY__NATIVE_WIDTH - nx;
+    if (nx + nw > s_fb_width) {
+        nw = s_fb_width - nx;
     }
-    if (ny + nh > DISPLAY__NATIVE_HEIGHT) {
-        nh = DISPLAY__NATIVE_HEIGHT - ny;
+    if (ny + nh > s_fb_height) {
+        nh = s_fb_height - ny;
     }
     if (nw <= 0 || nh <= 0) {
         return;
     }
     for (int16_t row = ny; row < ny + nh; ++row) {
-        bruce_display_color_t *row_ptr = &s_framebuffer[row * DISPLAY__NATIVE_WIDTH + nx];
+        bruce_display_color_t *row_ptr = &s_framebuffer[row * s_fb_width + nx];
         for (int16_t col = 0; col < nw; ++col) {
             row_ptr[col] = color;
         }
@@ -650,7 +666,7 @@ void display__deinit(void)
 int display__width(void)
 {
     display__lock();
-    int w = DISPLAY__NATIVE_WIDTH;
+    int w = s_fb_width;
     display__unlock();
     return w;
 }
@@ -658,7 +674,7 @@ int display__width(void)
 int display__height(void)
 {
     display__lock();
-    int h = DISPLAY__NATIVE_HEIGHT;
+    int h = s_fb_height;
     display__unlock();
     return h;
 }
@@ -1093,8 +1109,8 @@ bruce_result_t display__flush(void)
         display__unlock();
         return BRUCE_ERR_NOT_INITIALIZED;
     }
-    esp_err_t err = esp_lcd_panel_draw_bitmap(s_panel, 0, 0, DISPLAY__NATIVE_WIDTH,
-                                               DISPLAY__NATIVE_HEIGHT, s_framebuffer);
+    esp_err_t err = esp_lcd_panel_draw_bitmap(s_panel, 0, 0, s_fb_width,
+                                               s_fb_height, s_framebuffer);
     display__unlock();
     return err == ESP_OK ? BRUCE_OK : BRUCE_ERR_IO;
 }
