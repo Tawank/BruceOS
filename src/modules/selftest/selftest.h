@@ -8,8 +8,6 @@ typedef struct {
     volatile bool resource_cleanup_ran;
 } selftest__shared_t;
 
-static selftest__shared_t s_shared;
-
 void selftest__resource_cleanup(void *context);
 
 /*

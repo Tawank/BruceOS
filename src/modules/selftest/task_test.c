@@ -10,6 +10,8 @@
 #include "freertos/idf_additions.h"
 #include "selftest.h"
 
+static selftest__shared_t s_shared;
+
 static int selftest__worker_normal_exit(int argc, char **argv)
 {
     (void)argc;
