@@ -13,6 +13,7 @@
 #include "loader_test.h"
 #include "terminal_test.h"
 #include "launcher_test.h"
+#include "input_test.h"
 
 void selftest__resource_cleanup(void *context)
 {
@@ -59,6 +60,11 @@ int selftest_app(int argc, char **argv)
     printf("[selftest] %s %s\n", "run_terminal_path_case", selftest__run_terminal_path_case() ? "PASS" : "FAIL");
     printf("[selftest] %s %s\n", "run_terminal_invalid_case", selftest__run_terminal_invalid_case() ? "PASS" : "FAIL");
     printf("[selftest] %s %s\n", "run_launcher_apps_discovery_case", selftest__run_launcher_apps_discovery_case() ? "PASS" : "FAIL");
+
+    printf("[selftest] %s %s\n", "run_input_poll_case", selftest__run_input_poll_case() ? "PASS" : "FAIL");
+    printf("[selftest] %s %s\n", "run_input_inject_case", selftest__run_input_inject_case() ? "PASS" : "FAIL");
+    printf("[selftest] %s %s\n", "run_input_flush_case", selftest__run_input_flush_case() ? "PASS" : "FAIL");
+    printf("[selftest] %s %s\n", "run_input_non_blocking_case", selftest__run_input_non_blocking_case() ? "PASS" : "FAIL");
 
     return 0;
 }

@@ -5,6 +5,7 @@
 
 #include "core/app_runner/app_runner.h"
 #include "core/config/config.h"
+#include "core/input/input.h"
 
 void app_main(void)
 {
@@ -13,6 +14,9 @@ void app_main(void)
     }
     if (display__init() != BRUCE_OK) {
         printf("Display initialization failed; continuing without LCD\n");
+    }
+    if (input__init() != BRUCE_OK) {
+        printf("Input initialization failed; continuing without physical input\n");
     }
     app_runner__register_defaults();
 

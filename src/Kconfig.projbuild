@@ -5,7 +5,7 @@ menu "Bruce hardware configuration"
         default BRUCE_BOARD_M5_CARDPUTER
         help
             Select the M5Stack target board. This determines the LCD pinout,
-            default screen orientation, and backlight GPIO.
+            default screen orientation, backlight GPIO, and input hardware.
 
         config BRUCE_BOARD_M5_CARDPUTER
             bool "M5 Cardputer (ESP32-S3, ST7789V2 240x135)"
@@ -13,5 +13,30 @@ menu "Bruce hardware configuration"
         config BRUCE_BOARD_M5_STICKC_PLUS2
             bool "M5 StickC Plus2 (ESP32-PICO-V3-02, ST7789V2 135x240)"
     endchoice
+
+    config BRUCE_INPUT_POLL_PERIOD_MS
+        int "Input poll period (ms)"
+        default 20
+        range 5 100
+        help
+            Period between physical input polls. Lower values reduce latency
+            but use more CPU.
+
+    config BRUCE_INPUT_DEBOUNCE_MS
+        int "Input debounce time (ms)"
+        default 30
+        range 10 200
+        help
+            Minimum time between accepted state changes for a single button
+            or key. Increase this if you see spurious repeated events.
+
+    config BRUCE_INPUT_SCAN_SETTLE_US
+        int "Keyboard scan settle time (us)"
+        default 30
+        range 10 200
+        depends on BRUCE_BOARD_M5_CARDPUTER
+        help
+            Delay after changing the Cardputer keyboard scan outputs before
+            reading the sense lines. Increase this if keys are missed.
 
 endmenu

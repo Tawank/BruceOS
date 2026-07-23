@@ -18,6 +18,7 @@
 #include "esp_elf.h"
 
 #include "core_sdk/app_runner.h"
+#include "core_sdk/input.h"
 #include "core_sdk/loader.h"
 #include "core_sdk/manifest.h"
 #include "core_sdk/memory.h"
@@ -55,6 +56,12 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(permission__check),
     ESP_ELFSYM_EXPORT(permission__from_name),
     ESP_ELFSYM_EXPORT(permission__name),
+
+    /* Input (read is foreground-only; inject requires input permission) */
+    ESP_ELFSYM_EXPORT(input__read),
+    ESP_ELFSYM_EXPORT(input__poll),
+    ESP_ELFSYM_EXPORT(input__flush),
+    ESP_ELFSYM_EXPORT(input__inject),
 
     /* Manifest inspection */
     ESP_ELFSYM_EXPORT(manifest__parse),
