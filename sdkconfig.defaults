@@ -18,3 +18,6 @@ CONFIG_ESP_SYSTEM_MEMPROT_FEATURE_VIA_TEE=n
 # allowlist via elf_set_symbol_resolver(), so disable the built-in tables.
 CONFIG_ELF_LOADER_LIBC_SYMBOLS=n
 CONFIG_ELF_LOADER_ESPIDF_SYMBOLS=n
+
+# Default target board for the display HAL (src/core/display/display.c).
+CONFIG_BRUCE_BOARD_M5_CARDPUTER=y

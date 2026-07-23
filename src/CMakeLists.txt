@@ -3,6 +3,7 @@ idf_component_register(SRCS
                     "core/app_runner/app_runner.c"
                     "core/config/config.c"
                     "core/dialog/dialog.c"
+                    "core/display/display.c"
                     "core/manifest/manifest.c"
                     "core/memory/memory.c"
                     "core/permission/permission.c"
@@ -29,7 +30,11 @@ idf_component_register(SRCS
                     cjson
                     esp_event
                     driver
+                    esp_driver_gpio
+                    esp_driver_ledc
+                    esp_driver_spi
                     esp_driver_sdspi
+                    esp_lcd
                     esp_netif
                     esp_wifi
                     fatfs

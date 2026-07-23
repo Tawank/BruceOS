@@ -1,0 +1,17 @@
+menu "Bruce hardware configuration"
+
+    choice BRUCE_BOARD
+        prompt "Target board"
+        default BRUCE_BOARD_M5_CARDPUTER
+        help
+            Select the M5Stack target board. This determines the LCD pinout,
+            default screen orientation, and backlight GPIO.
+
+        config BRUCE_BOARD_M5_CARDPUTER
+            bool "M5 Cardputer (ESP32-S3, ST7789V2 240x135)"
+
+        config BRUCE_BOARD_M5_STICKC_PLUS2
+            bool "M5 StickC Plus2 (ESP32-PICO-V3-02, ST7789V2 135x240)"
+    endchoice
+
+endmenu

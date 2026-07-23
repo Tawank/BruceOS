@@ -4,9 +4,9 @@
 
 - ESP-IDF v6.0.2 installed at ~/.espressif/v6.0.2/esp-idf
   (also v5.5.5 available). Source with:
-  `source /opt/esp/idf/export.sh`
-- Then `source /opt/esp/idf/export.sh && idf.py reconfigure` /
- `source /opt/esp/idf/export.sh && idf.py build` from repo root
+  `source ~/esp/idf/export.sh`
+- Then `source ~/esp/idf/export.sh && idf.py reconfigure` /
+ `source ~/esp/idf/export.sh && idf.py build` from repo root
   (BruceIDF).
 - Target: esp32s3 (see build/config.env IDF_TARGET).
 - Terminal build/reconfigure commands were skipped by the user interactively
