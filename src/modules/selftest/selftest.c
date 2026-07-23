@@ -65,6 +65,9 @@ int selftest_app(int argc, char **argv)
     printf("[selftest] %s %s\n", "run_input_inject_case", selftest__run_input_inject_case() ? "PASS" : "FAIL");
     printf("[selftest] %s %s\n", "run_input_flush_case", selftest__run_input_flush_case() ? "PASS" : "FAIL");
     printf("[selftest] %s %s\n", "run_input_non_blocking_case", selftest__run_input_non_blocking_case() ? "PASS" : "FAIL");
+    printf("[selftest] %s %s\n", "run_input_peek_case", selftest__run_input_peek_case() ? "PASS" : "FAIL");
+    printf("[selftest] %s %s\n", "run_input_wait_case", selftest__run_input_wait_case() ? "PASS" : "FAIL");
+    printf("[selftest] %s %s\n", "run_input_check_case", selftest__run_input_check_case() ? "PASS" : "FAIL");
 
     return 0;
 }

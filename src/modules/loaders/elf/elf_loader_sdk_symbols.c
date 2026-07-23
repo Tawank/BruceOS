@@ -61,6 +61,9 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(input__read),
     ESP_ELFSYM_EXPORT(input__poll),
     ESP_ELFSYM_EXPORT(input__flush),
+    ESP_ELFSYM_EXPORT(input__peek),
+    ESP_ELFSYM_EXPORT(input__wait),
+    ESP_ELFSYM_EXPORT(input__check),
     ESP_ELFSYM_EXPORT(input__inject),
 
     /* Manifest inspection */

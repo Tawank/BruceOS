@@ -674,6 +674,111 @@ bruce_result_t input__flush(void)
     return BRUCE_OK;
 }
 
+bruce_result_t input__peek(bruce_input_event_t *out_event)
+{
+    if (out_event == NULL) {
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    if (!s_initialized) {
+        return BRUCE_ERR_NOT_INITIALIZED;
+    }
+    if (!input__is_foreground_task()) {
+        return BRUCE_ERR_NOT_FOREGROUND;
+    }
+
+    BaseType_t received = xQueuePeek(s_queue, out_event, 0);
+    if (received != pdPASS) {
+        return BRUCE_ERR_TIMEOUT;
+    }
+    return BRUCE_OK;
+}
+
+bruce_result_t input__wait(uint32_t timeout_ms, int32_t *out_code)
+{
+    if (out_code == NULL) {
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    if (!s_initialized) {
+        return BRUCE_ERR_NOT_INITIALIZED;
+    }
+    if (!input__is_foreground_task()) {
+        return BRUCE_ERR_NOT_FOREGROUND;
+    }
+
+    uint64_t start_ms = input__now_ms();
+    for (;;) {
+        uint32_t remaining;
+        if (timeout_ms == portMAX_DELAY) {
+            remaining = portMAX_DELAY;
+        } else {
+            uint64_t elapsed_ms = input__now_ms() - start_ms;
+            if (elapsed_ms >= timeout_ms) {
+                remaining = 0;
+            } else {
+                remaining = (uint32_t)(timeout_ms - elapsed_ms);
+            }
+        }
+
+        bruce_input_event_t ev;
+        bruce_result_t rc = input__read(&ev, remaining);
+        if (rc != BRUCE_OK) {
+            return rc;
+        }
+        if (ev.action == BRUCE_INPUT_PRESS) {
+            *out_code = ev.code;
+            return BRUCE_OK;
+        }
+    }
+}
+
+bool input__check(int32_t code, bool consume)
+{
+    if (!s_initialized || !input__is_foreground_task()) {
+        return false;
+    }
+
+    input__lock();
+
+    UBaseType_t count = uxQueueMessagesWaiting(s_queue);
+    if (count == 0 || count > INPUT__QUEUE_LENGTH) {
+        input__unlock();
+        return false;
+    }
+
+    bruce_input_event_t buffer[INPUT__QUEUE_LENGTH];
+    for (UBaseType_t i = 0; i < count; ++i) {
+        (void)xQueueReceive(s_queue, &buffer[i], 0);
+    }
+
+    bool found = false;
+    UBaseType_t found_index = 0;
+    for (UBaseType_t i = 0; i < count; ++i) {
+        if (buffer[i].action == BRUCE_INPUT_PRESS && buffer[i].code == code) {
+            found = true;
+            found_index = i;
+            break;
+        }
+    }
+
+    if (found && consume) {
+        /* Restore everything except the consumed event, preserving order. */
+        for (UBaseType_t i = count; i-- > 0;) {
+            if (i == found_index) {
+                continue;
+            }
+            (void)xQueueSendToFront(s_queue, &buffer[i], 0);
+        }
+    } else {
+        /* Restore all events in original order. */
+        for (UBaseType_t i = count; i-- > 0;) {
+            (void)xQueueSendToFront(s_queue, &buffer[i], 0);
+        }
+    }
+
+    input__unlock();
+    return found;
+}
+
 bruce_result_t input__inject(const bruce_input_event_t *event)
 {
     if (event == NULL) {

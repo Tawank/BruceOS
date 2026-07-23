@@ -85,6 +85,32 @@ static inline bruce_result_t input__poll(bruce_input_event_t *out_event)
  * or BRUCE_ERR_NOT_FOREGROUND if the caller is not the foreground task. */
 bruce_result_t input__flush(void);
 
+/* input__peek inspects the next queued event without removing it.
+ *
+ * Returns BRUCE_OK with *out_event filled, BRUCE_ERR_TIMEOUT if the queue is
+ * empty, or BRUCE_ERR_NOT_FOREGROUND if the caller is not the foreground task.
+ */
+bruce_result_t input__peek(bruce_input_event_t *out_event);
+
+/* input__wait blocks until a press event arrives.
+ *
+ * Returns BRUCE_OK with the event code in *out_code, BRUCE_ERR_TIMEOUT if no
+ * press event arrived within the timeout, or BRUCE_ERR_NOT_FOREGROUND if the
+ * caller is not the foreground task.  Release and change events are ignored.
+ */
+bruce_result_t input__wait(uint32_t timeout_ms, int32_t *out_code);
+
+/* input__check tests whether a press event for `code` is currently queued.
+ *
+ * If `consume` is true the first matching press event is removed from the queue;
+ * if false the event is left in place.  Returns true if a matching press event
+ * exists, false otherwise.  Always returns false for non-foreground tasks.
+ *
+ * This is the Core equivalent of the legacy `check(PrevPress)` / `check(SelPress)`
+ * pattern used by the old Arduino loop code and JS bindings.
+ */
+bool input__check(int32_t code, bool consume);
+
 /* input__inject pushes a normalized event into the input queue.  It is used
  * by input adapters (Bluetooth, GPIO, I2C, serial, ...) to feed the same
  * event pipeline as physical buttons and keyboard.
