@@ -15,12 +15,15 @@ idf_component_register(SRCS
                     "modules/selftest/app_runner_test.c"
                     "modules/selftest/config_test.c"
                     "modules/selftest/fake_elf.c"
+                    "modules/selftest/launcher_test.c"
                     "modules/selftest/loader_test.c"
                     "modules/selftest/permission_test.c"
                     "modules/selftest/selftest.c"
                     "modules/selftest/storage_test.c"
                     "modules/selftest/task_test.c"
+                    "modules/selftest/terminal_test.c"
                     "modules/utils/launcher/launcher.c"
+                    "modules/utils/terminal/terminal.c"
                     "modules/wifi/wifi_app.c"
                     REQUIRES
                     cjson
@@ -56,6 +59,11 @@ add_library(bruce_sdk_builtin_utils_launcher_check OBJECT "modules/utils/launche
 target_include_directories(bruce_sdk_builtin_utils_launcher_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/utils/launcher")
+
+add_library(bruce_sdk_builtin_utils_terminal_check OBJECT "modules/utils/terminal/terminal.c")
+target_include_directories(bruce_sdk_builtin_utils_terminal_check PRIVATE
+                           "${CMAKE_CURRENT_LIST_DIR}"
+                           "${CMAKE_CURRENT_LIST_DIR}/modules/utils/terminal")
 
 add_library(bruce_sdk_builtin_elf_loader_check OBJECT
             "modules/loaders/elf/elf_loader.c"

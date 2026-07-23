@@ -11,6 +11,8 @@
 #include "storage_test.h"
 #include "config_test.h"
 #include "loader_test.h"
+#include "terminal_test.h"
+#include "launcher_test.h"
 
 void selftest__resource_cleanup(void *context)
 {
@@ -52,6 +54,11 @@ int selftest_app(int argc, char **argv)
     printf("[selftest] %s %s\n", "run_manifest_parse_case", selftest__run_manifest_parse_case() ? "PASS" : "FAIL");
     printf("[selftest] %s %s\n", "run_loader_registry_extensibility_case", selftest__run_loader_registry_extensibility_case() ? "PASS" : "FAIL");
     printf("[selftest] %s %s\n", "run_elf_loader_case", selftest__run_elf_loader_case() ? "PASS" : "FAIL");
+
+    printf("[selftest] %s %s\n", "run_terminal_named_case", selftest__run_terminal_named_case() ? "PASS" : "FAIL");
+    printf("[selftest] %s %s\n", "run_terminal_path_case", selftest__run_terminal_path_case() ? "PASS" : "FAIL");
+    printf("[selftest] %s %s\n", "run_terminal_invalid_case", selftest__run_terminal_invalid_case() ? "PASS" : "FAIL");
+    printf("[selftest] %s %s\n", "run_launcher_apps_discovery_case", selftest__run_launcher_apps_discovery_case() ? "PASS" : "FAIL");
 
     return 0;
 }

@@ -11,6 +11,7 @@
 #include "modules/loaders/elf/elf_loader.h"
 #include "modules/selftest/selftest.h"
 #include "modules/utils/launcher/launcher.h"
+#include "modules/utils/terminal/terminal.h"
 #include "modules/wifi/wifi_app.h"
 
 #include <stdio.h>
@@ -72,6 +73,7 @@ void app_runner__register_defaults(void)
     (void)app_runner__register("bruce_launcher", bruce_launcher_app);
     (void)app_runner__register("wifi", wifi_app);
     (void)app_runner__register("selftest", selftest_app);
+    (void)app_runner__register("terminal", terminal_app);
 
     /* Built-in loader modules (see migration_BruceIDF.md, "Loader modules").
      * ELF is a real module (src/modules/loaders/elf/); JS is still a Core

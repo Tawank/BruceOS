@@ -250,7 +250,7 @@ static bruce_result_t manifest__read_elf_manifest_bytes(bruce_file_id_t file, ch
             return BRUCE_ERR_MANIFEST_INVALID;
         }
 
-        char *bytes = malloc(section.sh_size);
+        char *bytes = malloc(section.sh_size + 1);
         if (bytes == NULL) {
             return BRUCE_ERR_NO_MEMORY;
         }
@@ -258,6 +258,7 @@ static bruce_result_t manifest__read_elf_manifest_bytes(bruce_file_id_t file, ch
             free(bytes);
             return BRUCE_ERR_MANIFEST_INVALID;
         }
+        bytes[section.sh_size] = '\0';
         *out_bytes = bytes;
         *out_len = section.sh_size;
         return BRUCE_OK;
