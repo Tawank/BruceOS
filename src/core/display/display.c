@@ -203,48 +203,47 @@ static inline void display__unlock(void)
 }
 
 /* -------------------------------------------------------------------------- */
-/* Coordinate transformation                                                  */
+/* Panel rotation and pixel helpers                                           */
 /* -------------------------------------------------------------------------- */
 
-static bool display__map_logical_to_native(int16_t lx, int16_t ly, int16_t *nx, int16_t *ny)
+/*
+ * Rotation is handled by the ST7789 panel controller via esp_lcd_panel_swap_xy()
+ * and esp_lcd_panel_mirror().  The framebuffer is always stored in the panel's
+ * native orientation, so logical and native coordinates are identical.
+ */
+static void display__configure_rotation(void)
 {
+    bool swap_xy = false;
+    bool mirror_x = false;
+    bool mirror_y = false;
+
     switch (s_rotation) {
         case 0:
-            *nx = lx;
-            *ny = ly;
             break;
         case 1:
-            *nx = (DISPLAY__NATIVE_WIDTH - 1) - ly;
-            *ny = lx;
+            swap_xy = true;
+            mirror_x = true;
             break;
         case 2:
-            *nx = (DISPLAY__NATIVE_WIDTH - 1) - lx;
-            *ny = (DISPLAY__NATIVE_HEIGHT - 1) - ly;
+            mirror_x = true;
+            mirror_y = true;
             break;
         case 3:
-            *nx = ly;
-            *ny = (DISPLAY__NATIVE_HEIGHT - 1) - lx;
+            swap_xy = true;
+            mirror_y = true;
             break;
-        default:
-            return false;
     }
-    return *nx >= 0 && *nx < DISPLAY__NATIVE_WIDTH && *ny >= 0 && *ny < DISPLAY__NATIVE_HEIGHT;
-}
 
-static void display__set_native_pixel(int16_t nx, int16_t ny, bruce_display_color_t color)
-{
-    if (nx < 0 || nx >= DISPLAY__NATIVE_WIDTH || ny < 0 || ny >= DISPLAY__NATIVE_HEIGHT) {
-        return;
-    }
-    s_framebuffer[ny * DISPLAY__NATIVE_WIDTH + nx] = color;
+    esp_lcd_panel_swap_xy(s_panel, swap_xy);
+    esp_lcd_panel_mirror(s_panel, mirror_x, mirror_y);
 }
 
 static void display__set_pixel(int16_t x, int16_t y, bruce_display_color_t color)
 {
-    int16_t nx, ny;
-    if (display__map_logical_to_native(x, y, &nx, &ny)) {
-        display__set_native_pixel(nx, ny, color);
+    if (x < 0 || x >= DISPLAY__NATIVE_WIDTH || y < 0 || y >= DISPLAY__NATIVE_HEIGHT) {
+        return;
     }
+    s_framebuffer[y * DISPLAY__NATIVE_WIDTH + x] = color;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -343,6 +342,7 @@ static bruce_result_t display__panel_init(void)
     esp_lcd_panel_init(s_panel);
     esp_lcd_panel_set_gap(s_panel, 52, 40);
     esp_lcd_panel_invert_color(s_panel, true);
+    display__configure_rotation();
     esp_lcd_panel_disp_on_off(s_panel, true);
 
     return BRUCE_OK;
@@ -650,7 +650,7 @@ void display__deinit(void)
 int display__width(void)
 {
     display__lock();
-    int w = (s_rotation == 0 || s_rotation == 2) ? DISPLAY__NATIVE_WIDTH : DISPLAY__NATIVE_HEIGHT;
+    int w = DISPLAY__NATIVE_WIDTH;
     display__unlock();
     return w;
 }
@@ -658,7 +658,7 @@ int display__width(void)
 int display__height(void)
 {
     display__lock();
-    int h = (s_rotation == 0 || s_rotation == 2) ? DISPLAY__NATIVE_HEIGHT : DISPLAY__NATIVE_WIDTH;
+    int h = DISPLAY__NATIVE_HEIGHT;
     display__unlock();
     return h;
 }
@@ -840,17 +840,7 @@ bruce_result_t display__fill_rect(int16_t x, int16_t y, int16_t w, int16_t h,
         display__unlock();
         return BRUCE_ERR_NOT_INITIALIZED;
     }
-    /* Optimize axis-aligned fill by transforming the rectangle to native
-     * coordinates and filling directly in the framebuffer. */
-    if (s_rotation == 0) {
-        display__fill_rect_native(x, y, w, h, color);
-    } else if (s_rotation == 2) {
-        display__fill_rect_native(DISPLAY__NATIVE_WIDTH - x - w, DISPLAY__NATIVE_HEIGHT - y - h, w, h, color);
-    } else {
-        for (int16_t row = y; row < y + h; ++row) {
-            display__draw_line_bresenham(x, row, x + w - 1, row, color);
-        }
-    }
+    display__fill_rect_native(x, y, w, h, color);
     display__unlock();
     return BRUCE_OK;
 }
@@ -1035,6 +1025,7 @@ bruce_result_t display__set_rotation(uint8_t rotation)
         return BRUCE_ERR_NOT_INITIALIZED;
     }
     s_rotation = rotation & 3;
+    display__configure_rotation();
     display__unlock();
     return BRUCE_OK;
 }
