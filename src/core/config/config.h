@@ -70,11 +70,11 @@ typedef struct {
  *     mutators always duplicate the strings you pass in; they never take
  *     ownership of your pointers, and you remain responsible for freeing
  *     your own inputs if you allocated them.
- *   - config__get() returns an independent, heap-allocated snapshot that
- *     YOU own. Release it with config__free_snapshot() when done.
+ *   - config__get() returns a shared, heap-allocated snapshot that
+ *     YOU do not own.
  *   - config__wifi_credential_at() and config__find_wifi_credential()
- *     likewise return heap-allocated ssid/password strings that YOU own;
- *     free them with config__free_wifi_credential() when done.
+ *     returns a shared, heap-allocated snapshot that
+ *     YOU do not own.
  * The max-length macros below (CONFIG__*_MAX_LEN) are validation limits
  * enforced when a value is set, not fixed buffer sizes. */
 typedef struct {

@@ -12,10 +12,6 @@
 #include "freertos/idf_additions.h"
 #include "freertos/semphr.h"
 
-/* /bruce.conf is the historic BrucePIO config path; keep reading it once so
- * devices migrating from BrucePIO to BruceIDF pick up their existing settings. */
-#define CONFIG__LEGACY_FILE_PATH "/bruce.conf"
-
 static SemaphoreHandle_t s_config_mutex;
 static bool s_defaults_initialized;
 static bool s_loaded;
@@ -664,10 +660,6 @@ bool config__load(void)
     char *text = NULL;
     size_t size = 0;
     bool read = storage__read_file(CONFIG__FILE_PATH, &text, &size);
-    if (!read) {
-        /* Migrate settings from the legacy BrucePIO config file, if present. */
-        read = storage__read_file(CONFIG__LEGACY_FILE_PATH, &text, &size);
-    }
     if (read && size > 0) {
         cJSON *root = cJSON_ParseWithLength(text, size);
         if (root != NULL) {

@@ -1,7 +1,7 @@
 # BruceIDF Migration Plan
 
-This plan migrates behavior from `BrucePIO/` into a clean ESP-IDF
-implementation.  Nothing in `BrucePIO/` is changed or removed.  Each completed
+This plan migrates behavior from `BrucePIO_legacy/` into a clean ESP-IDF
+implementation.  Nothing in `BrucePIO_legacy/` is changed or removed.  Each completed
 slice has exactly one Core implementation and routes all front ends through it.
 
 ## Rules for every stage
@@ -11,7 +11,7 @@ slice has exactly one Core implementation and routes all front ends through it.
 3. Route the built-in module, terminal command, and JS binding through it.
 4. Add focused host/unit tests where possible and device smoke tests otherwise.
 5. Do not copy a menu, CLI callback, or JS binding directly into Core.
-6. Keep BrucePIO behavior as the migration reference; do not edit it.
+6. Keep BrucePIO_legacy behavior as the migration reference; do not edit it.
 7. Public capability APIs are named exactly `module__action()`.  Do not add
    `bruce_`-prefixed aliases or SDK forwarding implementations for a capability
    that already exists in Core.
@@ -130,10 +130,10 @@ protected config files/fields, and a built-in can manage configuration.
 
 Migrate the first full feature from these legacy sources:
 
-- `BrucePIO/src/core/wifi/`
-- `BrucePIO/src/core/serial_commands/wifi_commands.cpp`
-- `BrucePIO/src/modules/bjs_interpreter/wifi_js.cpp`
-- `BrucePIO/src/core/menu_items/WifiMenu.cpp`
+- `BrucePIO_legacy/src/core/wifi/`
+- `BrucePIO_legacy/src/core/serial_commands/wifi_commands.cpp`
+- `BrucePIO_legacy/src/modules/bjs_interpreter/wifi_js.cpp`
+- `BrucePIO_legacy/src/core/menu_items/WifiMenu.cpp`
 
 Work:
 

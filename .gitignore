@@ -1,5 +1,5 @@
 build/
 managed_components/
 .cache/
-BrucePIO/
+BrucePIO_legacy/
 .vscode/settings.json

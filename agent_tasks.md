@@ -2,7 +2,7 @@
 
 These briefs are intentionally scoped so agents can work independently once
 their listed dependencies are complete.  Every implementation must follow
-[`migration_BruceIDF.md`](migration_BruceIDF.md) and use `BrucePIO/` only as a
+[`migration_BruceIDF.md`](migration_BruceIDF.md) and use `BrucePIO_legacy/` only as a
 read-only behavior reference.
 
 ## A1 — Public SDK and error model
@@ -177,7 +177,7 @@ headers.
 Dependencies: A1–A8.
 
 Finish permission-checked Core Wi-Fi and HTTP APIs, then migrate the Wi-Fi
-module, terminal command, and JS binding from the listed BrucePIO sources.
+module, terminal command, and JS binding from the listed BrucePIO_legacy sources.
 Use `wifi` for radio control and `http` independently for HTTP.
 
 Acceptance: equivalent Wi-Fi scan/connect/disconnect behavior through GUI,
@@ -198,7 +198,7 @@ app; GUI and serial dialogs work; viewer/file handles are cleaned up.
 
 Dependencies: A1–A11.
 
-For each remaining BrucePIO capability (Bluetooth, RF, IR, RFID, GPS,
+For each remaining BrucePIO_legacy capability (Bluetooth, RF, IR, RFID, GPS,
 GPIO/I²C, HID, microphone, configuration, and file manager), implement Core
 first, then migrate its JS, terminal, and launcher paths.  Work one feature per
 change set and do not mix unrelated feature migrations.

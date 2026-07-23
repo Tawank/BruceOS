@@ -6,7 +6,7 @@
   (also v5.5.5 available). Source with:
   `source ~/.espressif/tools/activate_idf_v6.0.2.sh`
 - Then `idf.py reconfigure` / `idf.py build` from repo root
-  (~/opensource/Bruce-migration/BruceIDF).
+  (BruceIDF).
 - Target: esp32s3 (see build/config.env IDF_TARGET).
 - Terminal build/reconfigure commands were skipped by the user interactively
   during a session (chose to run it themselves) - don't assume failure, just
@@ -27,8 +27,8 @@
 - `src/idf_component.yml` declares managed component deps (idf-component-manager).
   Added `espressif/cjson` here for JSON parsing (component target name: `cjson`,
   header: `cJSON.h`, functions like cJSON_Parse/cJSON_Print/cJSON_AddXToObject).
-- `BrucePIO/` is the old PlatformIO/Arduino codebase being migrated from -
-  useful as a reference for porting logic (e.g. BrucePIO/src/core/config.cpp)
+- `BrucePIO_legacy/` is the old PlatformIO/Arduino codebase being migrated from -
+  useful as a reference for porting logic (e.g. BrucePIO_legacy/src/core/config.cpp)
   but not part of the ESP-IDF build.
 - Core code lives in src/core/{config,storage,wifi,apprunner}; apps in
   src/modules/*. See migration_BruceIDF.md at repo root for the architecture
@@ -51,7 +51,7 @@
 
 ## Purpose
 
-BruceIDF is a new ESP-IDF implementation of Bruce OS.  `BrucePIO/` is a
+BruceIDF is a new ESP-IDF implementation of Bruce OS.  `BrucePIO_legacy/` is a
 reference repository to migrate feature-by-feature; it is not code to modify,
 delete, or refactor in place.
 
@@ -552,5 +552,5 @@ A8 adds permission checks there.
 
 Migrate in vertical slices.  For each capability, first create the Core API,
 then route its JavaScript binding, terminal command, and launcher module to
-that API.  Do not delete or change BrucePIO; use it only as the behavioral
+that API.  Do not delete or change BrucePIO_legacy; use it only as the behavioral
 reference.  Wi-Fi is the first complete vertical slice.
