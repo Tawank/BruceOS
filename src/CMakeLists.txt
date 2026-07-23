@@ -16,6 +16,7 @@ idf_component_register(SRCS
                     "modules/loaders/elf/elf_loader_sdk_symbols.c"
                     "modules/selftest/app_runner_test.c"
                     "modules/selftest/config_test.c"
+                    "modules/selftest/dialog_test.c"
                     "modules/selftest/fake_elf.c"
                     "modules/selftest/input_test.c"
                     "modules/selftest/launcher_test.c"

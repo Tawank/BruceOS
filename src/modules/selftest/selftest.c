@@ -14,6 +14,7 @@
 #include "terminal_test.h"
 #include "launcher_test.h"
 #include "input_test.h"
+#include "dialog_test.h"
 
 void selftest__resource_cleanup(void *context)
 {
@@ -68,6 +69,12 @@ int selftest_app(int argc, char **argv)
     printf("[selftest] %s %s\n", "run_input_peek_case", selftest__run_input_peek_case() ? "PASS" : "FAIL");
     printf("[selftest] %s %s\n", "run_input_wait_case", selftest__run_input_wait_case() ? "PASS" : "FAIL");
     printf("[selftest] %s %s\n", "run_input_check_case", selftest__run_input_check_case() ? "PASS" : "FAIL");
+
+    printf("[selftest] %s %s\n", "run_dialog_text_input_case", selftest__run_dialog_text_input_case() ? "PASS" : "FAIL");
+    printf("[selftest] %s %s\n", "run_dialog_hex_input_case", selftest__run_dialog_hex_input_case() ? "PASS" : "FAIL");
+    printf("[selftest] %s %s\n", "run_dialog_number_input_case", selftest__run_dialog_number_input_case() ? "PASS" : "FAIL");
+    printf("[selftest] %s %s\n", "run_dialog_pick_file_case", selftest__run_dialog_pick_file_case() ? "PASS" : "FAIL");
+    printf("[selftest] %s %s\n", "run_dialog_viewer_case", selftest__run_dialog_viewer_case() ? "PASS" : "FAIL");
 
     return 0;
 }

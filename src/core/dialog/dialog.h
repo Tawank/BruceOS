@@ -16,11 +16,28 @@ typedef bruce_result_t (*dialog__test_choice_provider_t)(const char *title, cons
                                                           const bruce_dialog_choice_t *choices, size_t choice_count,
                                                           size_t *out_selected);
 
+/* `out_buffer` is a caller-owned buffer of `buffer_size` bytes; the provider
+ * fills the final string and returns BRUCE_OK or BRUCE_ERR_CANCELLED. */
+typedef bruce_result_t (*dialog__test_input_provider_t)(const char *title, const char *prompt,
+                                                          const char *initial_text, bool mask_input,
+                                                          char *out_buffer, size_t buffer_size);
+
+/* `out_path` is a caller-owned buffer of `out_path_size` bytes. */
+typedef bruce_result_t (*dialog__test_pick_file_provider_t)(const char *initial_path,
+                                                              const char *extension_filter,
+                                                              char *out_path, size_t out_path_size);
+
 /* Overrides dialog__choice()'s rendering with `provider` (called instead of
  * the real console prompt); pass NULL to restore normal behavior. */
 void dialog__test_set_choice_provider(dialog__test_choice_provider_t provider);
 
-/* Returns whether the most recent dialog__message()/dialog__choice() call
- * selected the GUI renderer (the calling task's --gui context) rather than
- * the terminal one. */
+/* Overrides text/hex/number input dialogs.  The provider is invoked with the
+ * same arguments as the public dialog__*input() API and must fill `out_buffer`. */
+void dialog__test_set_input_provider(dialog__test_input_provider_t provider);
+
+/* Overrides dialog__pick_file(). */
+void dialog__test_set_pick_file_provider(dialog__test_pick_file_provider_t provider);
+
+/* Returns whether the most recent dialog__* call selected the GUI renderer
+ * (the calling task's --gui context) rather than the terminal one. */
 bool dialog__test_last_call_was_gui(void);

@@ -18,6 +18,7 @@
 #include "esp_elf.h"
 
 #include "core_sdk/app_runner.h"
+#include "core_sdk/dialog.h"
 #include "core_sdk/input.h"
 #include "core_sdk/loader.h"
 #include "core_sdk/manifest.h"
@@ -65,6 +66,18 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(input__wait),
     ESP_ELFSYM_EXPORT(input__check),
     ESP_ELFSYM_EXPORT(input__inject),
+
+    /* Dialog */
+    ESP_ELFSYM_EXPORT(dialog__message),
+    ESP_ELFSYM_EXPORT(dialog__choice),
+    ESP_ELFSYM_EXPORT(dialog__pick_file),
+    ESP_ELFSYM_EXPORT(dialog__text_input),
+    ESP_ELFSYM_EXPORT(dialog__hex_input),
+    ESP_ELFSYM_EXPORT(dialog__number_input),
+    ESP_ELFSYM_EXPORT(dialog__create_text_viewer),
+    ESP_ELFSYM_EXPORT(dialog__viewer_set_text),
+    ESP_ELFSYM_EXPORT(dialog__viewer_scroll),
+    ESP_ELFSYM_EXPORT(dialog__viewer_close),
 
     /* Manifest inspection */
     ESP_ELFSYM_EXPORT(manifest__parse),

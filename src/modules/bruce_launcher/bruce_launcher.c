@@ -192,7 +192,7 @@ static void bruce_launcher__draw_menu(const bruce_launcher_entry_t *entries, int
     display__fill_rect(0, h - BRUCE_LAUNCHER_FOOTER_H, w, BRUCE_LAUNCHER_FOOTER_H, BRUCE_COLOR_DARKGREY);
     display__set_text_color(BRUCE_COLOR_WHITE);
     display__set_cursor(2, h - BRUCE_LAUNCHER_FOOTER_H + 1);
-    display__print("Use terminal to select");
+    display__print("UP/DOWN/SEL to navigate");
 
     display__flush();
 }

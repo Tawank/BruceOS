@@ -51,6 +51,7 @@ extern "C" {
 #define BRUCE_COLOR_ORANGE 0xFD20
 #define BRUCE_COLOR_GREENYELLOW 0xAFE5
 #define BRUCE_COLOR_PINK 0xF81F
+#define BRUCE_COLOR_TRANSPARENT 0x10000
 
 typedef uint16_t bruce_display_color_t;
 
