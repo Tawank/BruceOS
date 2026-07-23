@@ -7,8 +7,8 @@ ELF applications.
 
 - `include/bruce_sdk.h` — single header that pulls in all public Core SDK
   APIs and the `BRUCE_APP_MANIFEST()` macro.
-- `elf_apps/elf_loader/` — template for a loader ELF app (`elf_loader.elf`).
-- `elf_apps/game/` — template for a simple ELF app (`game.elf`).
+- `elf_apps/examples/elf_loader/` — template for a loader ELF app (`elf_loader.elf`).
+- `elf_apps/examples/game/` — template for a simple ELF app (`game.elf`).
 - `tools/build_elf_apps.py` — builds the templates and injects the
   `.bruce.manifest` section from each app's `manifest.json`.
 
@@ -17,13 +17,13 @@ ELF applications.
 Set `IDF_PATH` and run:
 
 ```bash
-python3 sdk/tools/build_elf_apps.py --target esp32s3
+python3 elf_apps/tools/build_elf_apps.py --target esp32s3
 ```
 
 Final ELF files are written to:
 
-- `sdk/elf_apps/elf_loader.elf`
-- `sdk/elf_apps/game.elf`
+- `elf_apps/examples/elf_loader.elf`
+- `elf_apps/examples/game.elf`
 
 ## Running
 
@@ -71,14 +71,14 @@ elf ./game.elf
    ```
 6. Include `bruce_sdk.h` and export `int app_main(int argc, char **argv)`.
 7. Provide a `manifest.json` in the project root (see the templates) and use
-   `sdk/tools/build_elf_apps.py` as a reference for injecting the
+   `elf_apps/tools/build_elf_apps.py` as a reference for injecting the
    `.bruce.manifest` section after linking.
 
 Alternatively, you can skip the external `manifest.json` and use the
 `BRUCE_APP_MANIFEST(...)` macro once in your main file to embed the manifest
 section at build time.
 
-See `sdk/elf_apps/` for complete examples.
+See `elf_apps/examples/` for complete examples.
 
 ## ESP-IDF v6 compatibility note
 
