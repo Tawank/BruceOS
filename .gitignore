@@ -1,5 +1,8 @@
+.vscode/settings.json
+
+.cache/
+
 build/
 managed_components/
-.cache/
 BrucePIO_legacy/
-.vscode/settings.json
+__pycache__
