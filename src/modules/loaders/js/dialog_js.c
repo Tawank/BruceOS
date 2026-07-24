@@ -1,4 +1,5 @@
 #include "dialog_js.h"
+#include "native_helpers_js.h"
 #include "user_classes_js.h"
 
 #include "core_sdk/dialog.h"

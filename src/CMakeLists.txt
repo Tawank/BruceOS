@@ -16,6 +16,7 @@ idf_component_register(SRCS
                     "modules/loaders/elf/elf_loader_sdk_symbols.c"
                     "modules/loaders/js/dialog_js.c"
                     "modules/loaders/js/display_js.c"
+                    "modules/loaders/js/js_stdlib.c"
                     "modules/loaders/js/keyboard_js.c"
                     "modules/loaders/js/js_loader.c"
                     "modules/loaders/js/runtime_js.c"
@@ -106,6 +107,9 @@ target_include_directories(bruce_sdk_builtin_js_loader_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}/modules/loaders/js"
                            "${CMAKE_CURRENT_LIST_DIR}/../components/mquickjs")
 target_link_libraries(bruce_sdk_builtin_js_loader_check PRIVATE mquickjs)
+# The JS loader check target includes the generated mquickjs stdlib header,
+# so make sure the generator runs before it is compiled.
+add_dependencies(bruce_sdk_builtin_js_loader_check mquickjs_generate_stdlib)
 
 # modules/selftest is intentionally NOT added to the core_sdk-only compile
 # check above: it is the one built-in explicitly permitted to include

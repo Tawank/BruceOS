@@ -15,6 +15,15 @@
 #include "core_sdk/storage.h"
 #include "core_sdk/task.h"
 
+#include "dialog_js.h"       // IWYU pragma: export
+#include "display_js.h"      // IWYU pragma: export
+#include "js_stdlib.h"       // IWYU pragma: export
+#include "keyboard_js.h"     // IWYU pragma: export
+#include "runtime_js.h"      // IWYU pragma: export
+#include "serial_js.h"       // IWYU pragma: export
+#include "wifi_js.h"         // IWYU pragma: export
+#include "user_classes_js.h" // IWYU pragma: export
+
 #include "mqjs_stdlib.h"
 
 #define JS_LOADER_PATH_MAX BRUCE_STORAGE_PATH_MAX
