@@ -52,6 +52,7 @@ idf_component_register(SRCS
                     fatfs
                     log
                     lwip
+                    nvs_flash
                     spiffs
                     elf_loader
                     mquickjs

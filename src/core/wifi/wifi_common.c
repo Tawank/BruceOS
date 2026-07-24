@@ -10,6 +10,7 @@
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_wifi.h"
+#include "nvs_flash.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "freertos/semphr.h"
@@ -95,7 +96,18 @@ static bruce_result_t wifi__init(void)
         return BRUCE_ERR_NO_MEMORY;
     }
 
-    esp_err_t err = esp_netif_init();
+    esp_err_t err = nvs_flash_init();
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        nvs_flash_erase();
+        err = nvs_flash_init();
+    }
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "could not initialize NVS: %s", esp_err_to_name(err));
+        xSemaphoreGive(s_wifi_mutex);
+        return BRUCE_ERR_IO;
+    }
+
+    err = esp_netif_init();
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
         ESP_LOGE(TAG, "could not initialize netif: %s", esp_err_to_name(err));
         xSemaphoreGive(s_wifi_mutex);
