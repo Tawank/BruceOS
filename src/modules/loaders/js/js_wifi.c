@@ -1,120 +1,133 @@
-#include "js_bindings_private.h"
+#include "wifi_js.h"
 
 #include "core_sdk/wifi.h"
 
-static JSValue jsb_wifi_connected(JSContext *ctx, JSValue *args_ptr)
+static const char *wifi_enc_types[] = {
+    "OPEN",
+    "WEP",
+    "WPA_PSK",
+    "WPA2_PSK",
+    "WPA_WPA2_PSK",
+    "ENTERPRISE",
+    "WPA2_ENTERPRISE",
+    "WPA3_PSK",
+    "WPA2_WPA3_PSK",
+    "WAPI_PSK",
+    "WPA3_ENT_192",
+    "MAX"
+};
+
+JSValue native_wifiConnected(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
 {
-    (void)args_ptr;
+    (void)ctx;
+    (void)this_val;
+    (void)argc;
+    (void)argv;
     return JS_NewBool(wifi__is_connected());
 }
 
-static JSValue jsb_wifi_connectDialog(JSContext *ctx, JSValue *args_ptr)
+JSValue native_wifiConnectDialog(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
 {
     (void)ctx;
-    (void)args_ptr;
+    (void)this_val;
+    (void)argc;
+    (void)argv;
     /* No Core dialog-driven Wi-Fi connection API; use wifi.connect() instead. */
     return JS_NewBool(false);
 }
 
-static JSValue jsb_wifi_connect(JSContext *ctx, JSValue *args_ptr)
+JSValue native_wifiConnect(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
 {
-    JSCStringBuf ssid_buf;
-    const char *ssid = jsb_arg_string(ctx, args_ptr, 0, &ssid_buf);
-    if (ssid == NULL) {
-        return JS_ThrowTypeError(ctx, "wifi.connect(ssid, timeout?, pwd?)");
+    (void)this_val;
+    if (argc < 1 || !JS_IsString(ctx, argv[0])) {
+        return JS_ThrowTypeError(ctx, "wifi.connect(ssid:string, timeout?:int, pwd?:string)");
     }
+
+    JSCStringBuf ssb;
+    const char *ssid = JS_ToCString(ctx, argv[0], &ssb);
+
     int timeout_sec = 10;
-    jsb_arg_int(ctx, args_ptr, 1, &timeout_sec);
+    if (argc > 1 && JS_IsNumber(ctx, argv[1])) {
+        JS_ToInt32(ctx, &timeout_sec, argv[1]);
+    }
     if (timeout_sec < 1) {
         timeout_sec = 1;
     }
-    JSCStringBuf pwd_buf;
-    const char *pwd = jsb_arg_string(ctx, args_ptr, 2, &pwd_buf);
-    return JS_NewBool(wifi__connect(ssid, pwd, (uint32_t)timeout_sec * 1000u) == BRUCE_OK);
+
+    const char *pwd = NULL;
+    JSCStringBuf psb;
+    if (argc > 2 && JS_IsString(ctx, argv[2])) {
+        pwd = JS_ToCString(ctx, argv[2], &psb);
+    }
+
+    bruce_result_t result = wifi__connect(ssid, pwd, (uint32_t)timeout_sec * 1000u);
+    return JS_NewBool(result == BRUCE_OK);
 }
 
-static JSValue jsb_wifi_scan(JSContext *ctx, JSValue *args_ptr)
+JSValue native_wifiScan(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
 {
-    (void)args_ptr;
+    (void)this_val;
+    (void)argc;
+    (void)argv;
+
     wifi__network_t networks[32];
     int count = wifi__scan(networks, sizeof(networks) / sizeof(networks[0]));
     if (count < 0) {
         return JS_ThrowInternalError(ctx, "wifi.scan failed: %d", count);
     }
+
     JSValue arr = JS_NewArray(ctx, count);
     if (JS_IsException(arr)) {
         return arr;
     }
-    for (int i = 0; i < count; ++i) {
+
+    for (int i = 0; i < count; i++) {
         JSValue obj = JS_NewObject(ctx);
+        int enctypeInt = (int)networks[i].authmode;
+        const char *enctype = enctypeInt < 12 ? wifi_enc_types[enctypeInt] : "UNKNOWN";
+        JS_SetPropertyStr(ctx, obj, "encryptionType", JS_NewString(ctx, enctype));
         JS_SetPropertyStr(ctx, obj, "SSID", JS_NewString(ctx, networks[i].ssid));
+        JS_SetPropertyStr(ctx, obj, "MAC", JS_NewString(ctx, ""));
         JS_SetPropertyStr(ctx, obj, "RSSI", JS_NewInt32(ctx, networks[i].rssi));
         JS_SetPropertyStr(ctx, obj, "channel", JS_NewInt32(ctx, networks[i].channel));
-        JS_SetPropertyStr(ctx, obj, "encryptionType", JS_NewInt32(ctx, networks[i].authmode));
         JS_SetPropertyUint32(ctx, arr, (uint32_t)i, obj);
     }
     return arr;
 }
 
-static JSValue jsb_wifi_disconnect(JSContext *ctx, JSValue *args_ptr)
+JSValue native_wifiDisconnect(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
 {
-    (void)args_ptr;
+    (void)this_val;
+    (void)argc;
+    (void)argv;
     return JS_NewInt32(ctx, (int)wifi__disconnect());
 }
 
-static JSValue jsb_wifi_httpFetch(JSContext *ctx, JSValue *args_ptr)
+JSValue native_httpFetch(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
 {
-    (void)args_ptr;
+    (void)this_val;
+    (void)argc;
+    (void)argv;
     return JS_ThrowInternalError(ctx, "wifi.httpFetch is not implemented in this Core ABI version");
 }
 
-static JSValue jsb_wifi_macAddress(JSContext *ctx, JSValue *args_ptr)
+JSValue native_wifiMACAddress(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
 {
-    (void)args_ptr;
+    (void)this_val;
+    (void)argc;
+    (void)argv;
     char *mac = wifi__get_mac();
     return JS_NewString(ctx, mac != NULL ? mac : "");
 }
 
-static JSValue jsb_wifi_ipAddress(JSContext *ctx, JSValue *args_ptr)
+JSValue native_ipAddress(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
 {
-    (void)args_ptr;
+    (void)this_val;
+    (void)argc;
+    (void)argv;
     char *ip = wifi__get_ip();
-    return JS_NewString(ctx, ip != NULL ? ip : "");
-}
-
-static const js_binding_t s_wifi_bindings[] = {
-    {"wifi.connected", jsb_wifi_connected},
-    {"wifi.connectDialog", jsb_wifi_connectDialog},
-    {"wifi.connect", jsb_wifi_connect},
-    {"wifi.scan", jsb_wifi_scan},
-    {"wifi.disconnect", jsb_wifi_disconnect},
-    {"wifi.httpFetch", jsb_wifi_httpFetch},
-    {"wifi.macAddress", jsb_wifi_macAddress},
-    {"wifi.ipAddress", jsb_wifi_ipAddress},
-};
-
-static const char s_wifi_setup[] =
-    "(function(){"
-    "var bridge=globalThis.__bruce_bridge;"
-    "if(typeof bridge!=='function')return;"
-    "globalThis.wifi=globalThis.wifi||{};"
-    "var methods=['connected','connectDialog','connect','scan','disconnect','httpFetch','macAddress','ipAddress'];"
-    "for(var i=0;i<methods.length;i++){"
-    "(function(full,method){"
-    "globalThis.wifi[method]=function(){return bridge(full,Array.prototype.slice.call(arguments));};"
-    "})('wifi.'+methods[i],methods[i]);"
-    "}"
-    "})();";
-
-void jsb_wifi__init(JSContext *ctx)
-{
-    js_bindings__add_module(s_wifi_bindings,
-                            sizeof(s_wifi_bindings) / sizeof(s_wifi_bindings[0]));
-    JSValue result = JS_Eval(ctx, s_wifi_setup, sizeof(s_wifi_setup) - 1, "js_wifi_setup", 0);
-    if (JS_IsException(result)) {
-        JSValue ex = JS_GetException(ctx);
-        printf("[js_wifi] setup error: ");
-        JS_PrintValueF(ctx, ex, JS_DUMP_LONG);
-        printf("\n");
+    if (ip != NULL) {
+        return JS_NewString(ctx, ip);
     }
+    return JS_NULL;
 }

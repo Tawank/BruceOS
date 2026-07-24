@@ -1,50 +1,60 @@
-#include "js_bindings_private.h"
+#include "dialog_js.h"
+#include "user_classes_js.h"
 
 #include "core_sdk/dialog.h"
 #include "core_sdk/storage.h"
 
-static JSValue jsb_dialog_message(JSContext *ctx, JSValue *args_ptr)
+JSValue native_dialogMessage(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
 {
-    JSCStringBuf buf;
-    const char *msg = jsb_arg_string(ctx, args_ptr, 0, &buf);
-    if (msg == NULL) {
+    (void)this_val;
+    if (argc < 1 || !JS_IsString(ctx, argv[0])) {
         return JS_ThrowTypeError(ctx, "dialog.message(msg:string, buttons?:object)");
     }
 
-    bool has_buttons = jsb_arg_is_object(ctx, args_ptr, 1);
-    if (!has_buttons) {
-        dialog__message(BRUCE_DIALOG_INFO, NULL, msg);
-        return JS_NewString(ctx, "right");
-    }
+    JSCStringBuf msg_buf;
+    const char *msg = JS_ToCString(ctx, argv[0], &msg_buf);
 
-    JSValue buttons = jsb_get_arg(ctx, args_ptr, 1);
-    bruce_dialog_choice_t choices[3];
-    size_t choice_count = 0;
-    JSCStringBuf left_buf, center_buf, right_buf;
     const char *left = NULL;
     const char *center = NULL;
     const char *right = NULL;
+    JSCStringBuf left_buf, center_buf, right_buf;
 
-    JSValue v = JS_GetPropertyStr(ctx, buttons, "left");
-    if (JS_IsString(ctx, v)) {
-        left = JS_ToCString(ctx, v, &left_buf);
+    if (argc > 1 && JS_IsObject(ctx, argv[1])) {
+        JSValue v = JS_GetPropertyStr(ctx, argv[1], "left");
+        if (JS_IsString(ctx, v)) {
+            left = JS_ToCString(ctx, v, &left_buf);
+        }
+        v = JS_GetPropertyStr(ctx, argv[1], "center");
+        if (JS_IsString(ctx, v)) {
+            center = JS_ToCString(ctx, v, &center_buf);
+        }
+        v = JS_GetPropertyStr(ctx, argv[1], "right");
+        if (JS_IsString(ctx, v)) {
+            right = JS_ToCString(ctx, v, &right_buf);
+        }
+    }
+
+    bruce_dialog_choice_t choices[3];
+    size_t choice_count = 0;
+    if (left != NULL) {
         choices[choice_count].label = left;
         choices[choice_count].value = left;
         choice_count++;
     }
-    v = JS_GetPropertyStr(ctx, buttons, "center");
-    if (JS_IsString(ctx, v)) {
-        center = JS_ToCString(ctx, v, &center_buf);
+    if (center != NULL) {
         choices[choice_count].label = center;
         choices[choice_count].value = center;
         choice_count++;
     }
-    v = JS_GetPropertyStr(ctx, buttons, "right");
-    if (JS_IsString(ctx, v)) {
-        right = JS_ToCString(ctx, v, &right_buf);
+    if (right != NULL) {
         choices[choice_count].label = right;
         choices[choice_count].value = right;
         choice_count++;
+    }
+
+    if (choice_count == 0) {
+        dialog__message(BRUCE_DIALOG_INFO, NULL, msg);
+        return JS_NewString(ctx, "right");
     }
 
     size_t selected = 0;
@@ -52,58 +62,80 @@ static JSValue jsb_dialog_message(JSContext *ctx, JSValue *args_ptr)
     if (result != BRUCE_OK) {
         return JS_NewString(ctx, "");
     }
-    const char *rv = "";
-    if (selected == 0 && left != NULL) rv = left;
-    else if (selected == 1 && center != NULL) rv = center;
-    else if (right != NULL) rv = right;
+
+    const char *rv = "right";
+    if (selected == 0 && left != NULL) {
+        rv = left;
+    } else if (selected == 1 && center != NULL) {
+        rv = center;
+    } else if (right != NULL) {
+        rv = right;
+    }
     return JS_NewString(ctx, rv);
 }
 
-static JSValue jsb_dialog_info(JSContext *ctx, JSValue *args_ptr)
+JSValue native_dialogInfo(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
 {
-    JSCStringBuf buf;
-    const char *s = jsb_arg_string(ctx, args_ptr, 0, &buf);
+    (void)this_val;
+    if (argc < 1 || !JS_IsString(ctx, argv[0])) {
+        return JS_UNDEFINED;
+    }
+    JSCStringBuf sb;
+    const char *s = JS_ToCString(ctx, argv[0], &sb);
     if (s != NULL) {
         dialog__message(BRUCE_DIALOG_INFO, NULL, s);
     }
     return JS_UNDEFINED;
 }
 
-static JSValue jsb_dialog_success(JSContext *ctx, JSValue *args_ptr)
+JSValue native_dialogSuccess(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
 {
-    JSCStringBuf buf;
-    const char *s = jsb_arg_string(ctx, args_ptr, 0, &buf);
+    (void)this_val;
+    if (argc < 1 || !JS_IsString(ctx, argv[0])) {
+        return JS_UNDEFINED;
+    }
+    JSCStringBuf sb;
+    const char *s = JS_ToCString(ctx, argv[0], &sb);
     if (s != NULL) {
         dialog__message(BRUCE_DIALOG_SUCCESS, NULL, s);
     }
     return JS_UNDEFINED;
 }
 
-static JSValue jsb_dialog_warning(JSContext *ctx, JSValue *args_ptr)
+JSValue native_dialogWarning(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
 {
-    JSCStringBuf buf;
-    const char *s = jsb_arg_string(ctx, args_ptr, 0, &buf);
+    (void)this_val;
+    if (argc < 1 || !JS_IsString(ctx, argv[0])) {
+        return JS_UNDEFINED;
+    }
+    JSCStringBuf sb;
+    const char *s = JS_ToCString(ctx, argv[0], &sb);
     if (s != NULL) {
         dialog__message(BRUCE_DIALOG_WARNING, NULL, s);
     }
     return JS_UNDEFINED;
 }
 
-static JSValue jsb_dialog_error(JSContext *ctx, JSValue *args_ptr)
+JSValue native_dialogError(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
 {
-    JSCStringBuf buf;
-    const char *s = jsb_arg_string(ctx, args_ptr, 0, &buf);
+    (void)this_val;
+    if (argc < 1 || !JS_IsString(ctx, argv[0])) {
+        return JS_UNDEFINED;
+    }
+    JSCStringBuf sb;
+    const char *s = JS_ToCString(ctx, argv[0], &sb);
     if (s != NULL) {
         dialog__message(BRUCE_DIALOG_ERROR, NULL, s);
     }
     return JS_UNDEFINED;
 }
 
-static JSValue jsb_dialog_pickFile(JSContext *ctx, JSValue *args_ptr)
+JSValue native_dialogPickFile(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
 {
+    (void)this_val;
     JSCStringBuf path_buf, ext_buf;
-    const char *path = jsb_arg_string(ctx, args_ptr, 0, &path_buf);
-    const char *ext = jsb_arg_string(ctx, args_ptr, 1, &ext_buf);
+    const char *path = js_native_arg_string(ctx, argc, argv, 0, &path_buf);
+    const char *ext = js_native_arg_string(ctx, argc, argv, 1, &ext_buf);
     char out[BRUCE_STORAGE_PATH_MAX];
     out[0] = '\0';
     bruce_result_t result = dialog__pick_file(path != NULL ? path : "/",
@@ -114,19 +146,20 @@ static JSValue jsb_dialog_pickFile(JSContext *ctx, JSValue *args_ptr)
     return JS_NewString(ctx, out);
 }
 
-static JSValue jsb_dialog_choice(JSContext *ctx, JSValue *args_ptr)
+JSValue native_dialogChoice(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
 {
-    if (!jsb_arg_is_object(ctx, args_ptr, 0)) {
+    (void)this_val;
+    if (argc < 1 || !JS_IsObject(ctx, argv[0])) {
         return JS_ThrowTypeError(ctx, "dialog.choice(choices: object|array)");
     }
 
-    JSValue choices_in = jsb_get_arg(ctx, args_ptr, 0);
+    JSValue choices_in = argv[0];
     bruce_dialog_choice_t choices[32];
     size_t choice_count = 0;
     char value_storage[32][64];
 
-    if (jsb_arg_is_array(ctx, args_ptr, 0)) {
-        uint32_t len = jsb_array_length(ctx, choices_in);
+    if (JS_GetClassID(ctx, choices_in) == JS_CLASS_ARRAY) {
+        uint32_t len = js_native_array_length(ctx, choices_in);
         for (uint32_t i = 0; i < len && choice_count < 32; ++i) {
             JSValue item = JS_GetPropertyUint32(ctx, choices_in, i);
             if (JS_IsString(ctx, item)) {
@@ -158,7 +191,9 @@ static JSValue jsb_dialog_choice(JSContext *ctx, JSValue *args_ptr)
         uint32_t prop_count = 0;
         for (uint32_t idx = 0; choice_count < 32; ++idx) {
             const char *key = JS_GetOwnPropertyByIndex(ctx, idx, &prop_count, choices_in);
-            if (key == NULL) break;
+            if (key == NULL) {
+                break;
+            }
             JSValue val = JS_GetPropertyStr(ctx, choices_in, key);
             if (JS_IsString(ctx, val)) {
                 JSCStringBuf vb;
@@ -182,131 +217,239 @@ static JSValue jsb_dialog_choice(JSContext *ctx, JSValue *args_ptr)
     return JS_NewString(ctx, choices[selected].value);
 }
 
-static JSValue jsb_dialog_viewFile(JSContext *ctx, JSValue *args_ptr)
+JSValue native_dialogViewFile(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
 {
     (void)ctx;
-    (void)args_ptr;
+    (void)this_val;
+    (void)argc;
+    (void)argv;
     /* dialog.viewFile() is intentionally not migrated; use createTextViewer(). */
     return JS_UNDEFINED;
 }
 
-static JSValue jsb_dialog_viewText(JSContext *ctx, JSValue *args_ptr)
+JSValue native_dialogViewText(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
 {
-    JSCStringBuf buf;
-    const char *text = jsb_arg_string(ctx, args_ptr, 0, &buf);
-    if (text == NULL) {
+    (void)this_val;
+    if (argc < 1 || !JS_IsString(ctx, argv[0])) {
         return JS_ThrowTypeError(ctx, "dialog.viewText(text:string, title?:string)");
     }
+    JSCStringBuf sb;
+    const char *text = JS_ToCString(ctx, argv[0], &sb);
     bruce_viewer_id_t viewer = BRUCE_VIEWER_ID_INVALID;
-    dialog__create_text_viewer(NULL, text, &viewer);
+    dialog__create_text_viewer(NULL, text != NULL ? text : "", &viewer);
     return JS_NewUint32(ctx, viewer);
 }
 
-static JSValue jsb_dialog_createTextViewer(JSContext *ctx, JSValue *args_ptr)
-{
-    JSCStringBuf buf;
-    const char *text = jsb_arg_string(ctx, args_ptr, 0, &buf);
-    if (text == NULL) {
-        return JS_ThrowTypeError(ctx, "dialog.createTextViewer(text:string)");
-    }
-    bruce_viewer_id_t viewer = BRUCE_VIEWER_ID_INVALID;
-    dialog__create_text_viewer(NULL, text, &viewer);
-    return JS_NewUint32(ctx, viewer);
-}
+/* -------------------------------------------------------------------------- */
+/* TextViewer object                                                          */
+/* -------------------------------------------------------------------------- */
 
-static JSValue jsb_dialog_textInput(JSContext *ctx, JSValue *args_ptr)
-{
-    JSCStringBuf t, p, i;
-    const char *title = jsb_arg_string(ctx, args_ptr, 0, &t);
-    const char *prompt = jsb_arg_string(ctx, args_ptr, 1, &p);
-    const char *initial = jsb_arg_string(ctx, args_ptr, 2, &i);
-    int mask = 0;
-    jsb_arg_bool(ctx, args_ptr, 3, &mask);
-    char buffer[256];
-    buffer[0] = '\0';
-    bruce_result_t result = dialog__text_input(title, prompt, initial, mask != 0, buffer, sizeof(buffer));
-    if (result != BRUCE_OK) {
-        return JS_NewString(ctx, "");
-    }
-    return JS_NewString(ctx, buffer);
-}
+typedef struct {
+    bruce_viewer_id_t viewer;
+} js_textviewer_data_t;
 
-static JSValue jsb_dialog_hexInput(JSContext *ctx, JSValue *args_ptr)
-{
-    JSCStringBuf t, p, i;
-    const char *title = jsb_arg_string(ctx, args_ptr, 0, &t);
-    const char *prompt = jsb_arg_string(ctx, args_ptr, 1, &p);
-    const char *initial = jsb_arg_string(ctx, args_ptr, 2, &i);
-    char buffer[256];
-    buffer[0] = '\0';
-    bruce_result_t result = dialog__hex_input(title, prompt, initial, buffer, sizeof(buffer));
-    if (result != BRUCE_OK) {
-        return JS_NewString(ctx, "");
-    }
-    return JS_NewString(ctx, buffer);
-}
-
-static JSValue jsb_dialog_numberInput(JSContext *ctx, JSValue *args_ptr)
-{
-    JSCStringBuf t, p, i;
-    const char *title = jsb_arg_string(ctx, args_ptr, 0, &t);
-    const char *prompt = jsb_arg_string(ctx, args_ptr, 1, &p);
-    const char *initial = jsb_arg_string(ctx, args_ptr, 2, &i);
-    char buffer[64];
-    buffer[0] = '\0';
-    bruce_result_t result = dialog__number_input(title, prompt, initial, buffer, sizeof(buffer));
-    if (result != BRUCE_OK) {
-        return JS_NewString(ctx, "");
-    }
-    return JS_NewString(ctx, buffer);
-}
-
-static JSValue jsb_dialog_drawStatusBar(JSContext *ctx, JSValue *args_ptr)
+void native_textviewer_finalizer(JSContext *ctx, void *opaque)
 {
     (void)ctx;
-    (void)args_ptr;
+    js_textviewer_data_t *d = (js_textviewer_data_t *)opaque;
+    if (d == NULL) {
+        return;
+    }
+    if (d->viewer != BRUCE_VIEWER_ID_INVALID) {
+        dialog__viewer_close(d->viewer);
+    }
+    free(d);
+}
+
+static bruce_viewer_id_t js_textviewer_get_id(JSContext *ctx, JSValue obj)
+{
+    if (!JS_IsObject(ctx, obj) || JS_GetClassID(ctx, obj) != JS_CLASS_TEXTVIEWER) {
+        return BRUCE_VIEWER_ID_INVALID;
+    }
+    js_textviewer_data_t *d = (js_textviewer_data_t *)JS_GetOpaque(ctx, obj);
+    if (d == NULL) {
+        return BRUCE_VIEWER_ID_INVALID;
+    }
+    return d->viewer;
+}
+
+JSValue native_dialogCreateTextViewer(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
+{
+    (void)this_val;
+    if (argc < 1 || !JS_IsString(ctx, argv[0])) {
+        return JS_ThrowTypeError(ctx, "TextViewer requires text");
+    }
+
+    JSCStringBuf sb;
+    const char *text = JS_ToCString(ctx, argv[0], &sb);
+    const char *title = NULL;
+    JSCStringBuf title_buf;
+    if (argc > 1 && JS_IsString(ctx, argv[1])) {
+        title = JS_ToCString(ctx, argv[1], &title_buf);
+    }
+
+    bruce_viewer_id_t viewer = BRUCE_VIEWER_ID_INVALID;
+    bruce_result_t result = dialog__create_text_viewer(title, text != NULL ? text : "", &viewer);
+    if (result != BRUCE_OK) {
+        return JS_ThrowInternalError(ctx, "createTextViewer failed");
+    }
+
+    JSValue obj = JS_NewObjectClassUser(ctx, JS_CLASS_TEXTVIEWER);
+    if (JS_IsException(obj)) {
+        dialog__viewer_close(viewer);
+        return obj;
+    }
+
+    js_textviewer_data_t *d = (js_textviewer_data_t *)malloc(sizeof(js_textviewer_data_t));
+    if (d == NULL) {
+        dialog__viewer_close(viewer);
+        return JS_ThrowOutOfMemory(ctx);
+    }
+    d->viewer = viewer;
+    JS_SetOpaque(ctx, obj, d);
+
+    return obj;
+}
+
+JSValue native_dialogCreateTextViewerDraw(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
+{
+    (void)argc;
+    (void)argv;
+    bruce_viewer_id_t viewer = js_textviewer_get_id(ctx, *this_val);
+    if (viewer == BRUCE_VIEWER_ID_INVALID) {
+        return JS_ThrowTypeError(ctx, "TextViewer: does not exist");
+    }
+    (void)viewer;
+    /* Core text viewer is drawn by the dialog system; no explicit draw API. */
     return JS_UNDEFINED;
 }
 
-static const js_binding_t s_dialog_bindings[] = {
-    {"dialog.message", jsb_dialog_message},
-    {"dialog.info", jsb_dialog_info},
-    {"dialog.success", jsb_dialog_success},
-    {"dialog.warning", jsb_dialog_warning},
-    {"dialog.error", jsb_dialog_error},
-    {"dialog.pickFile", jsb_dialog_pickFile},
-    {"dialog.choice", jsb_dialog_choice},
-    {"dialog.viewFile", jsb_dialog_viewFile},
-    {"dialog.viewText", jsb_dialog_viewText},
-    {"dialog.createTextViewer", jsb_dialog_createTextViewer},
-    {"dialog.textInput", jsb_dialog_textInput},
-    {"dialog.hexInput", jsb_dialog_hexInput},
-    {"dialog.numberInput", jsb_dialog_numberInput},
-    {"dialog.drawStatusBar", jsb_dialog_drawStatusBar},
-};
-
-static const char s_dialog_setup[] =
-    "(function(){"
-    "var bridge=globalThis.__bruce_bridge;"
-    "if(typeof bridge!=='function')return;"
-    "globalThis.dialog=globalThis.dialog||{};"
-    "var methods=['message','info','success','warning','error','pickFile','choice','viewFile','viewText','createTextViewer','textInput','hexInput','numberInput','drawStatusBar'];"
-    "for(var i=0;i<methods.length;i++){"
-    "(function(full,method){"
-    "globalThis.dialog[method]=function(){return bridge(full,Array.prototype.slice.call(arguments));};"
-    "})('dialog.'+methods[i],methods[i]);"
-    "}"
-    "})();";
-
-void jsb_dialog__init(JSContext *ctx)
+JSValue native_dialogCreateTextViewerScrollUp(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
 {
-    js_bindings__add_module(s_dialog_bindings,
-                            sizeof(s_dialog_bindings) / sizeof(s_dialog_bindings[0]));
-    JSValue result = JS_Eval(ctx, s_dialog_setup, sizeof(s_dialog_setup) - 1, "js_dialog_setup", 0);
-    if (JS_IsException(result)) {
-        JSValue ex = JS_GetException(ctx);
-        printf("[js_dialog] setup error: ");
-        JS_PrintValueF(ctx, ex, JS_DUMP_LONG);
-        printf("\n");
+    (void)argc;
+    (void)argv;
+    bruce_viewer_id_t viewer = js_textviewer_get_id(ctx, *this_val);
+    if (viewer == BRUCE_VIEWER_ID_INVALID) {
+        return JS_ThrowTypeError(ctx, "TextViewer: does not exist");
     }
+    dialog__viewer_scroll(viewer, -1);
+    return JS_UNDEFINED;
+}
+
+JSValue native_dialogCreateTextViewerScrollDown(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
+{
+    (void)argc;
+    (void)argv;
+    bruce_viewer_id_t viewer = js_textviewer_get_id(ctx, *this_val);
+    if (viewer == BRUCE_VIEWER_ID_INVALID) {
+        return JS_ThrowTypeError(ctx, "TextViewer: does not exist");
+    }
+    dialog__viewer_scroll(viewer, 1);
+    return JS_UNDEFINED;
+}
+
+JSValue native_dialogCreateTextViewerScrollToLine(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
+{
+    bruce_viewer_id_t viewer = js_textviewer_get_id(ctx, *this_val);
+    if (viewer == BRUCE_VIEWER_ID_INVALID) {
+        return JS_ThrowTypeError(ctx, "TextViewer: does not exist");
+    }
+    (void)viewer;
+    (void)argc;
+    (void)argv;
+    /* Absolute line scrolling is not exposed by the Core dialog API. */
+    return JS_UNDEFINED;
+}
+
+JSValue native_dialogCreateTextViewerGetLine(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
+{
+    bruce_viewer_id_t viewer = js_textviewer_get_id(ctx, *this_val);
+    if (viewer == BRUCE_VIEWER_ID_INVALID) {
+        return JS_ThrowTypeError(ctx, "TextViewer: does not exist");
+    }
+    (void)viewer;
+    (void)argc;
+    (void)argv;
+    return JS_NewString(ctx, "");
+}
+
+JSValue native_dialogCreateTextViewerGetMaxLines(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
+{
+    bruce_viewer_id_t viewer = js_textviewer_get_id(ctx, *this_val);
+    if (viewer == BRUCE_VIEWER_ID_INVALID) {
+        return JS_ThrowTypeError(ctx, "TextViewer: does not exist");
+    }
+    (void)viewer;
+    (void)argc;
+    (void)argv;
+    return JS_NewInt32(ctx, 0);
+}
+
+JSValue native_dialogCreateTextViewerGetVisibleText(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
+{
+    bruce_viewer_id_t viewer = js_textviewer_get_id(ctx, *this_val);
+    if (viewer == BRUCE_VIEWER_ID_INVALID) {
+        return JS_ThrowTypeError(ctx, "TextViewer: does not exist");
+    }
+    (void)viewer;
+    (void)argc;
+    (void)argv;
+    return JS_NewString(ctx, "");
+}
+
+JSValue native_dialogCreateTextViewerClear(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
+{
+    bruce_viewer_id_t viewer = js_textviewer_get_id(ctx, *this_val);
+    if (viewer == BRUCE_VIEWER_ID_INVALID) {
+        return JS_ThrowTypeError(ctx, "TextViewer: does not exist");
+    }
+    dialog__viewer_set_text(viewer, "");
+    (void)argc;
+    (void)argv;
+    return JS_UNDEFINED;
+}
+
+JSValue native_dialogCreateTextViewerFromString(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
+{
+    bruce_viewer_id_t viewer = js_textviewer_get_id(ctx, *this_val);
+    if (viewer == BRUCE_VIEWER_ID_INVALID) {
+        return JS_ThrowTypeError(ctx, "TextViewer: does not exist");
+    }
+    if (argc > 0 && JS_IsString(ctx, argv[0])) {
+        JSCStringBuf sb;
+        const char *s = JS_ToCString(ctx, argv[0], &sb);
+        dialog__viewer_set_text(viewer, s != NULL ? s : "");
+    }
+    return JS_UNDEFINED;
+}
+
+JSValue native_dialogCreateTextViewerClose(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
+{
+    JSValue obj = JS_UNDEFINED;
+    if (argc > 0 && JS_IsObject(ctx, argv[0])) {
+        obj = argv[0];
+    } else if (JS_IsObject(ctx, *this_val)) {
+        obj = *this_val;
+    }
+
+    if (!JS_IsObject(ctx, obj) || JS_GetClassID(ctx, obj) != JS_CLASS_TEXTVIEWER) {
+        return JS_UNDEFINED;
+    }
+
+    js_textviewer_data_t *d = (js_textviewer_data_t *)JS_GetOpaque(ctx, obj);
+    if (d != NULL && d->viewer != BRUCE_VIEWER_ID_INVALID) {
+        dialog__viewer_close(d->viewer);
+        d->viewer = BRUCE_VIEWER_ID_INVALID;
+    }
+    JS_SetOpaque(ctx, obj, NULL);
+    return JS_UNDEFINED;
+}
+
+JSValue native_drawStatusBar(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
+{
+    (void)ctx;
+    (void)this_val;
+    (void)argc;
+    (void)argv;
+    return JS_UNDEFINED;
 }

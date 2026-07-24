@@ -13,16 +13,15 @@ idf_component_register(SRCS
                     "core/wifi/wifi_common.c"
                     "modules/bruce_launcher/bruce_launcher.c"
                     "modules/loaders/elf/elf_loader.c"
-                     "modules/loaders/elf/elf_loader_sdk_symbols.c"
-                     "modules/loaders/js/js_bindings.c"
-                     "modules/loaders/js/js_bindings_common.c"
-                     "modules/loaders/js/js_dialog.c"
-                     "modules/loaders/js/js_display.c"
-                     "modules/loaders/js/js_loader.c"
-                     "modules/loaders/js/js_runtime.c"
-                     "modules/loaders/js/js_serial.c"
-                     "modules/loaders/js/js_wifi.c"
-                     "modules/selftest/app_runner_test.c"
+                    "modules/loaders/elf/elf_loader_sdk_symbols.c"
+                    "modules/loaders/js/js_dialog.c"
+                    "modules/loaders/js/js_display.c"
+                    "modules/loaders/js/js_keyboard.c"
+                    "modules/loaders/js/js_loader.c"
+                    "modules/loaders/js/js_runtime.c"
+                    "modules/loaders/js/js_serial.c"
+                    "modules/loaders/js/js_wifi.c"
+                    "modules/selftest/app_runner_test.c"
                     "modules/selftest/config_test.c"
                     "modules/selftest/dialog_test.c"
                     "modules/selftest/fake_elf.c"
@@ -51,10 +50,10 @@ idf_component_register(SRCS
                     fatfs
                     log
                     lwip
-                     spiffs
-                     elf_loader
-                     mquickjs
-                     INCLUDE_DIRS
+                    spiffs
+                    elf_loader
+                    mquickjs
+                    INCLUDE_DIRS
                     "."
                     PRIV_INCLUDE_DIRS
                     ".")
@@ -95,10 +94,9 @@ target_include_directories(bruce_sdk_builtin_elf_loader_check PRIVATE
 target_link_libraries(bruce_sdk_builtin_elf_loader_check PRIVATE elf_loader)
 
 add_library(bruce_sdk_builtin_js_loader_check OBJECT
-            "modules/loaders/js/js_bindings.c"
-            "modules/loaders/js/js_bindings_common.c"
             "modules/loaders/js/js_dialog.c"
             "modules/loaders/js/js_display.c"
+            "modules/loaders/js/js_keyboard.c"
             "modules/loaders/js/js_loader.c"
             "modules/loaders/js/js_runtime.c"
             "modules/loaders/js/js_serial.c"
