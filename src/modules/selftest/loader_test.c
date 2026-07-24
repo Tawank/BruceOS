@@ -7,6 +7,7 @@
 #include "core/dialog/dialog.h"
 #include "core/storage/storage.h"
 #include "core_sdk/dialog.h"
+#include "core_sdk/storage.h"
 #include "core_sdk/loader.h"
 #include "core_sdk/manifest.h"
 #include "core_sdk/memory.h"
@@ -222,5 +223,68 @@ bool selftest__run_elf_loader_case(void)
     }
 
     printf("[selftest] loader/elf: OK\n");
+    return true;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Built-in JavaScript loader module                                        */
+/* ------------------------------------------------------------------------ */
+
+bool selftest__run_js_loader_case(void)
+{
+    const char *path = "/bin/selftest_js_target.js";
+    storage__remove(path);
+
+    char icon_b64[200];
+    selftest__loader_test_icon_base64(icon_b64, sizeof(icon_b64));
+
+    const char *script_fmt =
+        "/*\n"
+        "{\"appName\":\"Selftest JS\",\"appIcon\":\"%s\",\"coreAbiVersion\":1,"
+        "\"stackSize\":8192,\"permissions\":[]}\n"
+        "*/\n"
+        "print('selftest_js_ok');\n";
+    char script[512];
+    int len = snprintf(script, sizeof(script), script_fmt, icon_b64);
+    if (len <= 0 || (size_t)len >= sizeof(script)) {
+        printf("[selftest] loader/js: failed to build test script\n");
+        return false;
+    }
+
+    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
+    if (storage__open(path, BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE | BRUCE_STORAGE_OPEN_TRUNCATE,
+                       &file) != BRUCE_OK) {
+        printf("[selftest] loader/js: could not create test script\n");
+        return false;
+    }
+    size_t written = 0;
+    storage__write(file, script, (size_t)len, &written);
+    storage__close(file);
+
+    bruce_app_inspection_t *inspection = manifest__inspect_javascript(path);
+    bool inspect_ok = inspection != NULL && inspection->kind == BRUCE_APP_KIND_JAVASCRIPT &&
+                       !inspection->abi_warning && strcmp(inspection->manifest.app_name, "Selftest JS") == 0 &&
+                       inspection->manifest.permission_count == 0;
+    if (inspection != NULL) {
+        memory__free(inspection);
+    }
+    if (!inspect_ok) {
+        printf("[selftest] loader/js: inspect mismatch\n");
+        storage__remove(path);
+        return false;
+    }
+
+    int result = app_runner__run_path(path, NULL, true);
+    bool run_ok = result > 0;
+    if (run_ok) {
+        run_ok = (task__wait((bruce_task_id_t)result, 2000) == BRUCE_OK);
+    }
+    storage__remove(path);
+    if (!run_ok) {
+        printf("[selftest] loader/js: run did not spawn or complete (%d)\n", result);
+        return false;
+    }
+
+    printf("[selftest] loader/js: OK\n");
     return true;
 }

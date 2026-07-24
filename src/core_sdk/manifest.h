@@ -66,3 +66,16 @@ const char *manifest__inspect_path(const char *path);
  * Returns BRUCE_OK on success, or BRUCE_ERR_INVALID_PATH, BRUCE_ERR_NOT_FOUND,
  * BRUCE_ERR_MANIFEST_INVALID, BRUCE_ERR_TARGET_MISMATCH. */
 bruce_app_inspection_t *manifest__inspect_elf(const char *path);
+
+/* JavaScript-specific manifest inspection (see migration_BruceIDF.md,
+ * "JavaScript contract").  Opens `path`, detects a leading block comment
+ * (slash-asterisk ... asterisk-slash) containing the canonical manifest JSON,
+ * and parses it.
+ * Fills *out_inspection with the parsed manifest, BRUCE_APP_KIND_JAVASCRIPT,
+ * and ABI-warning flag.  If there is no leading manifest block, the script
+ * still gets a valid inspection using its filename as the app name, a generic
+ * icon, the current ABI version, and zero permissions.
+ *
+ * Returns BRUCE_OK on success, or BRUCE_ERR_INVALID_PATH, BRUCE_ERR_NOT_FOUND,
+ * BRUCE_ERR_MANIFEST_INVALID. */
+bruce_app_inspection_t *manifest__inspect_javascript(const char *path);

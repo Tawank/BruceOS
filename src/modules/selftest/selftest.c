@@ -56,6 +56,7 @@ int selftest_app(int argc, char **argv)
     printf("[selftest] %s %s\n", "run_manifest_parse_case", selftest__run_manifest_parse_case() ? "PASS" : "FAIL");
     printf("[selftest] %s %s\n", "run_loader_registry_extensibility_case", selftest__run_loader_registry_extensibility_case() ? "PASS" : "FAIL");
     printf("[selftest] %s %s\n", "run_elf_loader_case", selftest__run_elf_loader_case() ? "PASS" : "FAIL");
+    printf("[selftest] %s %s\n", "run_js_loader_case", selftest__run_js_loader_case() ? "PASS" : "FAIL");
 
     printf("[selftest] %s %s\n", "run_terminal_named_case", selftest__run_terminal_named_case() ? "PASS" : "FAIL");
     printf("[selftest] %s %s\n", "run_terminal_path_case", selftest__run_terminal_path_case() ? "PASS" : "FAIL");

@@ -13,8 +13,16 @@ idf_component_register(SRCS
                     "core/wifi/wifi_common.c"
                     "modules/bruce_launcher/bruce_launcher.c"
                     "modules/loaders/elf/elf_loader.c"
-                    "modules/loaders/elf/elf_loader_sdk_symbols.c"
-                    "modules/selftest/app_runner_test.c"
+                     "modules/loaders/elf/elf_loader_sdk_symbols.c"
+                     "modules/loaders/js/js_bindings.c"
+                     "modules/loaders/js/js_bindings_common.c"
+                     "modules/loaders/js/js_dialog.c"
+                     "modules/loaders/js/js_display.c"
+                     "modules/loaders/js/js_loader.c"
+                     "modules/loaders/js/js_runtime.c"
+                     "modules/loaders/js/js_serial.c"
+                     "modules/loaders/js/js_wifi.c"
+                     "modules/selftest/app_runner_test.c"
                     "modules/selftest/config_test.c"
                     "modules/selftest/dialog_test.c"
                     "modules/selftest/fake_elf.c"
@@ -43,9 +51,10 @@ idf_component_register(SRCS
                     fatfs
                     log
                     lwip
-                    spiffs
-                    elf_loader
-                    INCLUDE_DIRS
+                     spiffs
+                     elf_loader
+                     mquickjs
+                     INCLUDE_DIRS
                     "."
                     PRIV_INCLUDE_DIRS
                     ".")
@@ -84,6 +93,21 @@ target_include_directories(bruce_sdk_builtin_elf_loader_check PRIVATE
 # component API; the core_sdk-only check is about rejecting Core-private headers,
 # not component dependencies.
 target_link_libraries(bruce_sdk_builtin_elf_loader_check PRIVATE elf_loader)
+
+add_library(bruce_sdk_builtin_js_loader_check OBJECT
+            "modules/loaders/js/js_bindings.c"
+            "modules/loaders/js/js_bindings_common.c"
+            "modules/loaders/js/js_dialog.c"
+            "modules/loaders/js/js_display.c"
+            "modules/loaders/js/js_loader.c"
+            "modules/loaders/js/js_runtime.c"
+            "modules/loaders/js/js_serial.c"
+            "modules/loaders/js/js_wifi.c")
+target_include_directories(bruce_sdk_builtin_js_loader_check PRIVATE
+                           "${CMAKE_CURRENT_LIST_DIR}"
+                           "${CMAKE_CURRENT_LIST_DIR}/modules/loaders/js"
+                           "${CMAKE_CURRENT_LIST_DIR}/../components/mquickjs")
+target_link_libraries(bruce_sdk_builtin_js_loader_check PRIVATE mquickjs)
 
 # modules/selftest is intentionally NOT added to the core_sdk-only compile
 # check above: it is the one built-in explicitly permitted to include

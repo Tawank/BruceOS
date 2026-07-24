@@ -18,6 +18,16 @@
 #define MANIFEST__STACK_MIN 4096u
 #define MANIFEST__STACK_MAX 16384u
 
+#define MANIFEST_JS_MAX_BYTES 2048u
+#define MANIFEST_JS_GENERIC_ICON_BYTE 0xAAu
+
+static const uint8_t s_generic_icon[BRUCE_MANIFEST_ICON_BYTES] = {
+    MANIFEST_JS_GENERIC_ICON_BYTE, MANIFEST_JS_GENERIC_ICON_BYTE,
+    MANIFEST_JS_GENERIC_ICON_BYTE, MANIFEST_JS_GENERIC_ICON_BYTE,
+    MANIFEST_JS_GENERIC_ICON_BYTE, MANIFEST_JS_GENERIC_ICON_BYTE,
+    MANIFEST_JS_GENERIC_ICON_BYTE, MANIFEST_JS_GENERIC_ICON_BYTE,
+};
+
 static int manifest__base64_value(char c)
 {
     if (c >= 'A' && c <= 'Z') return c - 'A';
@@ -291,6 +301,8 @@ static bool manifest__normalize_path(const char *path, char *out, size_t out_siz
 /* Universal manifest JSON extractor                                        */
 /* ----------------------------------------------------------------------- */
 
+static bruce_result_t manifest__read_js_manifest_bytes(bruce_file_id_t file, char **out_bytes, size_t *out_len);
+
 const char *manifest__inspect_path(const char *path)
 {
     char normalized_path[BRUCE_STORAGE_PATH_MAX];
@@ -307,9 +319,14 @@ const char *manifest__inspect_path(const char *path)
     char *out_json = NULL;
     bruce_result_t result;
     uint8_t magic[4];
+    size_t path_len = strlen(normalized_path);
+    bool is_js = path_len > 3 && strcmp(normalized_path + path_len - 3, ".js") == 0;
     if (manifest__pread(file, 0, magic, sizeof(magic)) && memcmp(magic, "\x7f" "ELF", 4) == 0) {
         size_t out_len = 0;
         result = manifest__read_elf_manifest_bytes(file, &out_json, &out_len);
+    } else if (is_js) {
+        size_t out_len = 0;
+        result = manifest__read_js_manifest_bytes(file, &out_json, &out_len);
     } else {
         result = BRUCE_ERR_MANIFEST_INVALID;
     }
@@ -376,4 +393,185 @@ bruce_app_inspection_t *manifest__inspect_elf(const char *path)
         return NULL;
     }
     return out_inspection;
+}
+
+/* ----------------------------------------------------------------------- */
+/* JavaScript helpers and full inspection                                  */
+/* ----------------------------------------------------------------------- */
+
+/* Reads up to MANIFEST_JS_MAX_BYTES from the beginning of `file` into a
+ * malloc'd, NUL-terminated buffer.  Returns BRUCE_OK or an error code. */
+static bruce_result_t manifest__read_js_head(bruce_file_id_t file, char **out_bytes, size_t *out_len)
+{
+    char *bytes = malloc(MANIFEST_JS_MAX_BYTES + 1);
+    if (bytes == NULL) {
+        return BRUCE_ERR_NO_MEMORY;
+    }
+
+    size_t total = 0;
+    while (total < MANIFEST_JS_MAX_BYTES) {
+        size_t chunk = 0;
+        if (storage__read(file, bytes + total, MANIFEST_JS_MAX_BYTES - total, &chunk) != BRUCE_OK) {
+            free(bytes);
+            return BRUCE_ERR_IO;
+        }
+        if (chunk == 0) {
+            break;
+        }
+        total += chunk;
+    }
+    bytes[total] = '\0';
+    *out_bytes = bytes;
+    *out_len = total;
+    return BRUCE_OK;
+}
+
+/* If the JS head starts with a block comment (slash-asterisk ...
+ * asterisk-slash), extract the content between the markers.  Returns NULL
+ * if no leading block comment is present or if it is unclosed.  The returned
+ * pointer is into 'head' and is not separately allocated; *out_len receives the
+ * content length. */
+static const char *manifest__extract_js_block_comment(const char *head, size_t head_len, size_t *out_len)
+{
+    if (head_len < 4 || head[0] != '/' || head[1] != '*') {
+        return NULL;
+    }
+    const char *end = strstr(head + 2, "*/");
+    if (end == NULL) {
+        return NULL;
+    }
+    *out_len = (size_t)(end - (head + 2));
+    return head + 2;
+}
+
+/* Tries to parse the content of a leading JS comment block as canonical
+ * manifest JSON.  Returns a malloc'd manifest on success, NULL otherwise. */
+static bruce_manifest_t *manifest__parse_js_manifest_comment(const char *comment, size_t comment_len)
+{
+    /* Skip leading whitespace; the trailing block-comment terminator is already excluded. */
+    while (comment_len > 0 && (*comment == ' ' || *comment == '\t' || *comment == '\n' || *comment == '\r')) {
+        comment++;
+        comment_len--;
+    }
+    while (comment_len > 0 &&
+           (comment[comment_len - 1] == ' ' || comment[comment_len - 1] == '\t' ||
+            comment[comment_len - 1] == '\n' || comment[comment_len - 1] == '\r' ||
+            comment[comment_len - 1] == '*')) {
+        comment_len--;
+    }
+    if (comment_len == 0) {
+        return NULL;
+    }
+    return manifest__parse(comment, comment_len);
+}
+
+/* Builds a fallback manifest for an unmanifested JS file. */
+static bruce_manifest_t *manifest__default_js_manifest(const char *path)
+{
+    bruce_manifest_t *manifest = memory__malloc(sizeof(*manifest));
+    if (manifest == NULL) {
+        return NULL;
+    }
+    memset(manifest, 0, sizeof(*manifest));
+
+    const char *base = strrchr(path, '/');
+    base = base != NULL ? base + 1 : path;
+    size_t name_len = strlen(base);
+    if (name_len >= BRUCE_MANIFEST_APP_NAME_MAX) {
+        name_len = BRUCE_MANIFEST_APP_NAME_MAX - 1;
+    }
+    memcpy(manifest->app_name, base, name_len);
+    manifest->app_name[name_len] = '\0';
+
+    memcpy(manifest->app_icon, s_generic_icon, BRUCE_MANIFEST_ICON_BYTES);
+    manifest->core_abi_version = BRUCE_CORE_ABI_VERSION;
+    manifest->stack_size = 8192;
+    manifest->permission_count = 0;
+    return manifest;
+}
+
+bruce_app_inspection_t *manifest__inspect_javascript(const char *path)
+{
+    char normalized_path[BRUCE_STORAGE_PATH_MAX];
+    if (!manifest__normalize_path(path, normalized_path, sizeof(normalized_path))) {
+        return NULL;
+    }
+
+    bruce_app_inspection_t *out_inspection = memory__malloc(sizeof(*out_inspection));
+    if (out_inspection == NULL) {
+        return NULL;
+    }
+    memset(out_inspection, 0, sizeof(*out_inspection));
+
+    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
+    bruce_result_t open_result = storage__open(normalized_path, BRUCE_STORAGE_OPEN_READ, &file);
+    if (open_result != BRUCE_OK) {
+        memory__free(out_inspection);
+        return NULL;
+    }
+
+    bruce_manifest_t *parsed = NULL;
+    bruce_result_t result;
+    char *head = NULL;
+    size_t head_len = 0;
+    if (!manifest__read_js_head(file, &head, &head_len)) {
+        size_t comment_len = 0;
+        const char *comment = manifest__extract_js_block_comment(head, head_len, &comment_len);
+        if (comment != NULL) {
+            parsed = manifest__parse_js_manifest_comment(comment, comment_len);
+        }
+        if (parsed == NULL) {
+            parsed = manifest__default_js_manifest(normalized_path);
+        }
+        if (parsed != NULL) {
+            out_inspection->kind = BRUCE_APP_KIND_JAVASCRIPT;
+            out_inspection->manifest = *parsed;
+            out_inspection->abi_warning =
+                out_inspection->manifest.core_abi_version != BRUCE_CORE_ABI_VERSION;
+            memory__free(parsed);
+            result = BRUCE_OK;
+        } else {
+            result = BRUCE_ERR_MANIFEST_INVALID;
+        }
+        free(head);
+    } else {
+        result = BRUCE_ERR_MANIFEST_INVALID;
+    }
+
+    storage__close(file);
+    if (result != BRUCE_OK) {
+        memory__free(out_inspection);
+        return NULL;
+    }
+    return out_inspection;
+}
+
+/* Updates the universal extractor to also recognize JavaScript files. */
+static bruce_result_t manifest__read_js_manifest_bytes(bruce_file_id_t file, char **out_bytes, size_t *out_len)
+{
+    char *head = NULL;
+    size_t head_len = 0;
+    bruce_result_t result = manifest__read_js_head(file, &head, &head_len);
+    if (result != BRUCE_OK) {
+        return result;
+    }
+
+    size_t comment_len = 0;
+    const char *comment = manifest__extract_js_block_comment(head, head_len, &comment_len);
+    if (comment == NULL) {
+        free(head);
+        return BRUCE_ERR_MANIFEST_INVALID;
+    }
+
+    char *bytes = malloc(comment_len + 1);
+    if (bytes == NULL) {
+        free(head);
+        return BRUCE_ERR_NO_MEMORY;
+    }
+    memcpy(bytes, comment, comment_len);
+    bytes[comment_len] = '\0';
+    free(head);
+    *out_bytes = bytes;
+    *out_len = comment_len;
+    return BRUCE_OK;
 }

@@ -9,6 +9,7 @@
 #include "core_sdk/task.h"
 #include "modules/bruce_launcher/bruce_launcher.h"
 #include "modules/loaders/elf/elf_loader.h"
+#include "modules/loaders/js/js_loader.h"
 #include "modules/selftest/selftest.h"
 #include "modules/utils/launcher/launcher.h"
 #include "modules/utils/terminal/terminal.h"
@@ -76,11 +77,10 @@ void app_runner__register_defaults(void)
     (void)app_runner__register("terminal", terminal_app);
 
     /* Built-in loader modules (see migration_BruceIDF.md, "Loader modules").
-     * ELF is a real module (src/modules/loaders/elf/); JS is still a Core
-     * placeholder (core/js/js.c) until A7 moves it into its own module -
-     * both go through the exact same public registration API a third-party
-     * loader would use. */
+     * ELF and JS are real modules under src/modules/loaders/; both go through
+     * the exact same public registration API a third-party loader would use. */
     elf_loader__register();
+    js_loader__register();
 }
 
 static bruce_app_entry_t app_runner__find_builtin(const char *app_name)
