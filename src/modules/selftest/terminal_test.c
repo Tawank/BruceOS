@@ -3,14 +3,13 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "core/dialog/dialog.h"
 #include "core/storage/storage.h"
 #include "core_sdk/app_runner.h"
 #include "core_sdk/result.h"
 #include "core_sdk/task.h"
 #include "fake_elf.h"
-#include "modules/loaders/elf/elf_loader.h"
-#include "modules/utils/terminal/terminal.h"
+#include "modules/loaders/elf/elf_loader_app.h"
+#include "modules/utils/terminal/terminal_app.h"
 
 /* ------------------------------------------------------------------------ */
 /* Terminal parser: named built-in dispatch                                  */

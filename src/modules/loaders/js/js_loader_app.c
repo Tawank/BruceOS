@@ -1,4 +1,4 @@
-#include "js_loader.h"
+#include "js_loader_app.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -217,7 +217,7 @@ static void js__app_main(void *context)
 
 /* Loader registry run function: called by app_runner__run_path() or by the
  * built-in "js" command. */
-static int js_loader__run_path(const char *path, const char *arg, bool in_background)
+int js_loader__run_path(const char *path, const char *arg, bool in_background)
 {
     if (!js_loader__path_is_valid(path)) {
         return BRUCE_ERR_INVALID_PATH;
@@ -283,7 +283,7 @@ static int js_loader__run_path(const char *path, const char *arg, bool in_backgr
 
 /* Built-in "js" command entry: "js ./target.js <args>..." loads the named JS
  * file and passes the remaining arguments to it. */
-static int js_loader__command(int argc, char **argv)
+int js_loader__app_main(int argc, char **argv)
 {
     if (argc < 2) {
         return BRUCE_ERR_INVALID_ARGUMENT;
@@ -319,10 +319,4 @@ static int js_loader__command(int argc, char **argv)
     (void)gui_requested;
 
     return js_loader__run_path(path, arg[0] != '\0' ? arg : NULL, in_background);
-}
-
-void js_loader__register(void)
-{
-    (void)app_runner__register("js", js_loader__command);
-    (void)app_runner__register_loader(".js", 20, js_loader__run_path);
 }

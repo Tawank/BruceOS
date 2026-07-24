@@ -1,4 +1,4 @@
-#include "bruce_launcher.h"
+#include "bruce_launcher_app.h"
 
 #include <stdbool.h>
 #include <stdio.h>
@@ -214,7 +214,7 @@ static int bruce_launcher__run_entry(const bruce_launcher_entry_t *entry)
     return result;
 }
 
-int bruce_launcher_app(int argc, char **argv)
+int bruce_launcher_app_main(int argc, char **argv)
 {
     (void)argc;
     (void)argv;

@@ -1,4 +1,4 @@
-#include "terminal.h"
+#include "terminal_app.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -54,7 +54,7 @@ int terminal__run_line(const char *line)
     return app_runner__run(token, arg, false);
 }
 
-int terminal_app(int argc, char **argv)
+int terminal_app_main(int argc, char **argv)
 {
     (void)argc;
     (void)argv;

@@ -61,7 +61,7 @@ static int wifi_app_webui(int argc, char **argv)
     return -1;
 }
 
-int wifi_app(int argc, char **argv)
+int wifi_app_main(int argc, char **argv)
 {
     if (argc <= 1 || argv == NULL || argv[1] == NULL) {
         return wifi_app_default();

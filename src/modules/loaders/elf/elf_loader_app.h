@@ -8,11 +8,9 @@
  * core_sdk/... headers and gets no private-Core-header exemption, unlike
  * modules/selftest.
  */
-
-/* Registers this module: a built-in "elf" command that loads an arbitrary
- * ELF file by path, plus the ".elf" loader at priority 10.  Called once from
- * app_runner__register_defaults(). */
-void elf_loader__register(void);
+void elf_loader__init(void);
+int elf_loader__app_main(int argc, char **argv);
+int elf_loader__run_path(const char *path, const char *arg, bool in_background);
 
 /* Test-only observability for modules/selftest (exempt from the
  * core_sdk-only-headers rule); not part of any public contract.  Counts

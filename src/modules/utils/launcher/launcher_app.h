@@ -10,4 +10,4 @@
  * This is distinct from "bruce_launcher" (src/modules/bruce_launcher/),
  * which is the actual menu application.
  */
-int launcher_app(int argc, char **argv);
+int launcher_app_main(int argc, char **argv);

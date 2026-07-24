@@ -1,4 +1,4 @@
-#include "elf_loader.h"
+#include "elf_loader_app.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -117,7 +117,7 @@ static void elf_loader__free_task_ctx(elf_loader_task_ctx_t *ctx)
 
 /* Task entry for the loaded ELF.  Runs on the loader task's own stack with
  * the image and args prepared by elf_loader__run_path(). */
-static void elf_loader__app_main(void *context)
+static void elf_loader__entry(void *context)
 {
     elf_loader_task_ctx_t *ctx = (elf_loader_task_ctx_t *)context;
 
@@ -189,7 +189,7 @@ static int elf_loader__load_image(const char *path, elf_loader_task_ctx_t *ctx)
 
 /* Loader registry run function: called by app_runner__run_path() or by the
  * built-in "elf" command. */
-static int elf_loader__run_path(const char *path, const char *arg, bool in_background)
+int elf_loader__run_path(const char *path, const char *arg, bool in_background)
 {
     s_call_count++;
 
@@ -273,7 +273,7 @@ static int elf_loader__run_path(const char *path, const char *arg, bool in_backg
     }
 
     int result = app_runner__spawn_loader_task(permission_key, gui_requested, in_background,
-                                                inspection->manifest.stack_size, elf_loader__app_main, ctx);
+                                                inspection->manifest.stack_size, elf_loader__entry, ctx);
     if (result <= 0) {
         elf_loader__free_task_ctx(ctx);
     }
@@ -286,7 +286,7 @@ static int elf_loader__run_path(const char *path, const char *arg, bool in_backg
  * (and ELF apps themselves) chain loaders: the first loader can be the
  * built-in "elf" command, and a loaded ELF app can call
  * app_runner__run_path() to load another ELF. */
-static int elf_loader__command(int argc, char **argv)
+int elf_loader__app_main(int argc, char **argv)
 {
     if (argc < 2) {
         return BRUCE_ERR_INVALID_ARGUMENT;
@@ -327,9 +327,7 @@ static int elf_loader__command(int argc, char **argv)
     return elf_loader__run_path(path, arg[0] != '\0' ? arg : NULL, in_background);
 }
 
-void elf_loader__register(void)
+void elf_loader__init(void)
 {
-    (void)app_runner__register("elf", elf_loader__command);
-    (void)app_runner__register_loader(".elf", 10, elf_loader__run_path);
     elf_set_symbol_resolver(elf_loader__find_symbol);
 }

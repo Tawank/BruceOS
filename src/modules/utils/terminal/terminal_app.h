@@ -13,7 +13,7 @@
  * command string to the same parser without duplicating the split logic.
  */
 
-int terminal_app(int argc, char **argv);
+int terminal_app_main(int argc, char **argv);
 
 /* Parses a single command line and runs it.  Returns the positive task ID on
  * success or a negative BRUCE_ERR_* value on failure, exactly like

@@ -10,7 +10,7 @@
 #include "core_sdk/result.h"
 #include "core_sdk/task.h"
 #include "fake_elf.h"
-#include "modules/loaders/elf/elf_loader.h"
+#include "modules/loaders/elf/elf_loader_app.h"
 
 /* ------------------------------------------------------------------------ */
 /* Launcher menu: drives the dialog__choice provider to select the /apps/    */

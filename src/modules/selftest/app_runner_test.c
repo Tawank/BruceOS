@@ -4,7 +4,7 @@
 #include "core_sdk/app_runner.h"
 #include "core_sdk/task.h"
 #include "fake_elf.h"
-#include "modules/loaders/elf/elf_loader.h"
+#include "modules/loaders/elf/elf_loader_app.h"
 
 /* ------------------------------------------------------------------------ */
 /* AppRunner (A3): registration, named resolution, arg parsing, --gui/state */

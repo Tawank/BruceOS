@@ -3,16 +3,18 @@
 #include "core/app_runner/app_runner.h"
 #include "core/storage/storage.h"
 #include "core/task/task.h"
+
 #include "core_sdk/app_runner.h"
 #include "core_sdk/loader.h"
 #include "core_sdk/result.h"
 #include "core_sdk/task.h"
-#include "modules/bruce_launcher/bruce_launcher.h"
-#include "modules/loaders/elf/elf_loader.h"
-#include "modules/loaders/js/js_loader.h"
+
+#include "modules/bruce_launcher/bruce_launcher_app.h"
+#include "modules/loaders/elf/elf_loader_app.h"
+#include "modules/loaders/js/js_loader_app.h"
 #include "modules/selftest/selftest.h"
-#include "modules/utils/launcher/launcher.h"
-#include "modules/utils/terminal/terminal.h"
+#include "modules/utils/launcher/launcher_app.h"
+#include "modules/utils/terminal/terminal_app.h"
 #include "modules/wifi/wifi_app.h"
 
 #include <stdio.h>
@@ -70,17 +72,18 @@ void app_runner__register_defaults(void)
         return;
     }
 
-    (void)app_runner__register("launcher", launcher_app);
-    (void)app_runner__register("bruce_launcher", bruce_launcher_app);
-    (void)app_runner__register("wifi", wifi_app);
-    (void)app_runner__register("selftest", selftest_app);
-    (void)app_runner__register("terminal", terminal_app);
+    (void)app_runner__register("launcher", launcher_app_main);
+    (void)app_runner__register("bruce_launcher", bruce_launcher_app_main);
+    (void)app_runner__register("wifi", wifi_app_main);
+    (void)app_runner__register("selftest", selftest_app_main);
+    (void)app_runner__register("terminal", terminal_app_main);
+    (void)app_runner__register("elf", elf_loader__app_main);
+    (void)app_runner__register("js", js_loader__app_main);
 
-    /* Built-in loader modules (see migration_BruceIDF.md, "Loader modules").
-     * ELF and JS are real modules under src/modules/loaders/; both go through
-     * the exact same public registration API a third-party loader would use. */
-    elf_loader__register();
-    js_loader__register();
+    (void)app_runner__register_loader(".elf", 10, elf_loader__run_path);
+    (void)app_runner__register_loader(".js", 20, js_loader__run_path);
+
+    elf_loader__init();
 }
 
 static bruce_app_entry_t app_runner__find_builtin(const char *app_name)

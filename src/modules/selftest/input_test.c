@@ -2,7 +2,6 @@
 
 #include <inttypes.h>
 #include <stdio.h>
-#include <string.h>
 
 #include "core_sdk/input.h"
 #include "core_sdk/result.h"

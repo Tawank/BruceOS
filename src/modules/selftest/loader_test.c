@@ -12,7 +12,7 @@
 #include "core_sdk/manifest.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/task.h"
-#include "modules/loaders/elf/elf_loader.h"
+#include "modules/loaders/elf/elf_loader_app.h"
 
 #include "fake_elf.h"
 #include "loader_test.h"

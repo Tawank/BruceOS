@@ -22,7 +22,7 @@ void selftest__resource_cleanup(void *context)
     shared->resource_cleanup_ran = true;
 }
 
-int selftest_app(int argc, char **argv)
+int selftest_app_main(int argc, char **argv)
 {
     (void)argc;
     (void)argv;

@@ -24,4 +24,4 @@ void selftest__resource_cleanup(void *context);
  * terminal) and must not be treated as a source of Core capability for other
  * apps to depend on.
  */
-int selftest_app(int argc, char **argv);
+int selftest_app_main(int argc, char **argv);

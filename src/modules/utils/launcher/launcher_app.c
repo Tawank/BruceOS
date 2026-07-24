@@ -1,4 +1,4 @@
-#include "launcher.h"
+#include "launcher_app.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,7 +9,7 @@
 
 #define LAUNCHER__FALLBACK_APP "bruce_launcher"
 
-int launcher_app(int argc, char **argv)
+int launcher_app_main(int argc, char **argv)
 {
     (void)argc;
     (void)argv;

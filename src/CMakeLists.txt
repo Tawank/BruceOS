@@ -11,14 +11,14 @@ idf_component_register(SRCS
                     "core/storage/storage.c"
                     "core/task/task.c"
                     "core/wifi/wifi_common.c"
-                    "modules/bruce_launcher/bruce_launcher.c"
-                    "modules/loaders/elf/elf_loader.c"
+                    "modules/bruce_launcher/bruce_launcher_app.c"
+                    "modules/loaders/elf/elf_loader_app.c"
                     "modules/loaders/elf/elf_loader_sdk_symbols.c"
                     "modules/loaders/js/dialog_js.c"
                     "modules/loaders/js/display_js.c"
                     "modules/loaders/js/js_stdlib.c"
                     "modules/loaders/js/keyboard_js.c"
-                    "modules/loaders/js/js_loader.c"
+                    "modules/loaders/js/js_loader_app.c"
                     "modules/loaders/js/runtime_js.c"
                     "modules/loaders/js/serial_js.c"
                     "modules/loaders/js/wifi_js.c"
@@ -34,8 +34,8 @@ idf_component_register(SRCS
                     "modules/selftest/storage_test.c"
                     "modules/selftest/task_test.c"
                     "modules/selftest/terminal_test.c"
-                    "modules/utils/launcher/launcher.c"
-                    "modules/utils/terminal/terminal.c"
+                    "modules/utils/launcher/launcher_app.c"
+                    "modules/utils/terminal/terminal_app.c"
                     "modules/wifi/wifi_app.c"
                     REQUIRES
                     cjson
@@ -62,7 +62,7 @@ idf_component_register(SRCS
 # These compile the real built-in module sources against the exported
 # core_sdk/ include namespace.  Built-in source must include only
 # "core_sdk/..." headers; Core-private includes are rejected by source review.
-add_library(bruce_sdk_builtin_launcher_check OBJECT "modules/bruce_launcher/bruce_launcher.c")
+add_library(bruce_sdk_builtin_launcher_check OBJECT "modules/bruce_launcher/bruce_launcher_app.c")
 target_include_directories(bruce_sdk_builtin_launcher_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/bruce_launcher")
@@ -72,18 +72,18 @@ target_include_directories(bruce_sdk_builtin_wifi_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/wifi")
 
-add_library(bruce_sdk_builtin_utils_launcher_check OBJECT "modules/utils/launcher/launcher.c")
+add_library(bruce_sdk_builtin_utils_launcher_check OBJECT "modules/utils/launcher/launcher_app.c")
 target_include_directories(bruce_sdk_builtin_utils_launcher_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/utils/launcher")
 
-add_library(bruce_sdk_builtin_utils_terminal_check OBJECT "modules/utils/terminal/terminal.c")
+add_library(bruce_sdk_builtin_utils_terminal_check OBJECT "modules/utils/terminal/terminal_app.c")
 target_include_directories(bruce_sdk_builtin_utils_terminal_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/utils/terminal")
 
 add_library(bruce_sdk_builtin_elf_loader_check OBJECT
-            "modules/loaders/elf/elf_loader.c"
+            "modules/loaders/elf/elf_loader_app.c"
             "modules/loaders/elf/elf_loader_sdk_symbols.c")
 target_include_directories(bruce_sdk_builtin_elf_loader_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
@@ -98,7 +98,7 @@ add_library(bruce_sdk_builtin_js_loader_check OBJECT
             "modules/loaders/js/dialog_js.c"
             "modules/loaders/js/display_js.c"
             "modules/loaders/js/keyboard_js.c"
-            "modules/loaders/js/js_loader.c"
+            "modules/loaders/js/js_loader_app.c"
             "modules/loaders/js/runtime_js.c"
             "modules/loaders/js/serial_js.c"
             "modules/loaders/js/wifi_js.c")

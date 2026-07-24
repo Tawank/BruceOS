@@ -1,3 +1,3 @@
 #pragma once
 
-int wifi_app(int argc, char **argv);
+int wifi_app_main(int argc, char **argv);
