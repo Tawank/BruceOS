@@ -70,7 +70,11 @@
 /* -------------------------------------------------------------------------- */
 
 #ifndef INPUT__TASK_STACK
-#    define INPUT__TASK_STACK 4096
+#    ifdef CONFIG_BRUCE_INPUT_TASK_STACK
+#        define INPUT__TASK_STACK CONFIG_BRUCE_INPUT_TASK_STACK
+#    else
+#        define INPUT__TASK_STACK 8192
+#    endif
 #endif
 
 #ifndef INPUT__TASK_PRIORITY

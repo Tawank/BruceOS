@@ -219,7 +219,10 @@ int bruce_launcher_app_main(int argc, char **argv)
     (void)argc;
     (void)argv;
 
-    bruce_launcher_entry_t entries[BRUCE_LAUNCHER_MAX_ENTRIES];
+    bruce_launcher_entry_t *entries = calloc(BRUCE_LAUNCHER_MAX_ENTRIES, sizeof(*entries));
+    if (entries == NULL) {
+        return BRUCE_ERR_NO_MEMORY;
+    }
     int entry_count = 0;
 
     /* Feature modules live under src/modules/ and are registered as built-in
@@ -261,8 +264,13 @@ int bruce_launcher_app_main(int argc, char **argv)
         size_t choice = 0;
         bruce_result_t choice_result = dialog__choice("Bruce Launcher", "Select an app", choices, (size_t)entry_count,
                                                       &choice);
-        if (choice_result != BRUCE_OK) {
+
+        if (choice_result == BRUCE_ERR_CANCELLED) {
             break;
+        }
+        if (choice_result != BRUCE_OK) {
+            printf("Invalid choice (%d), try again.\n", choice_result);
+            continue;
         }
         selected = (int)choice;
         if (selected == exit_index) {
@@ -271,5 +279,6 @@ int bruce_launcher_app_main(int argc, char **argv)
         (void)bruce_launcher__run_entry(&entries[selected]);
     }
 
+    free(entries);
     return 0;
 }

@@ -2,6 +2,7 @@
 
 #include "core_sdk/app_runner.h"
 #include "core_sdk/loader.h"
+#include "core_sdk/stdio.h"
 #include "native_helpers_js.h"
 
 #include <stdio.h>
@@ -27,13 +28,8 @@ JSValue native_serialReadln(JSContext *ctx, JSValue *this_val, int argc, JSValue
     (void)argc;
     (void)argv;
     char line[256];
-    if (fgets(line, sizeof(line), stdin) == NULL) {
+    if (bruce_stdio_read_line(line, sizeof(line), false) < 0) {
         line[0] = '\0';
-    } else {
-        size_t n = strlen(line);
-        if (n > 0 && line[n - 1] == '\n') {
-            line[n - 1] = '\0';
-        }
     }
     return JS_NewString(ctx, line);
 }

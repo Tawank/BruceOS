@@ -39,4 +39,12 @@ menu "Bruce hardware configuration"
             Delay after changing the Cardputer keyboard scan outputs before
             reading the sense lines. Increase this if keys are missed.
 
+    config BRUCE_INPUT_TASK_STACK
+        int "Input task stack size (bytes)"
+        default 8192
+        range 2048 32768
+        help
+            Stack size for the bruce_input polling task. Increase this value if
+            a stack overflow is reported for bruce_input.
+
 endmenu

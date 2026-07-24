@@ -6,8 +6,10 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-/* All paths are VFS paths: internal files use /..., SD files use /sdcard/.... */
-#define STORAGE__MOUNT_PATH "/"
+/* All paths are VFS paths: internal files use /..., SD files use /sdcard/....
+ * An empty mount path registers SPIFFS as the fallback VFS (root filesystem).
+ * A single "/" is not a valid VFS prefix because it is shorter than two chars. */
+#define STORAGE__MOUNT_PATH ""
 #define STORAGE__SD_MOUNT_PATH "/sdcard"
 
 typedef struct {

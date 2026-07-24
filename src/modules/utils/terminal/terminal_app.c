@@ -7,6 +7,7 @@
 #include "core_sdk/app_runner.h"
 #include "core_sdk/loader.h"
 #include "core_sdk/result.h"
+#include "core_sdk/stdio.h"
 
 #define TERMINAL_LINE_MAX 256
 
@@ -65,13 +66,9 @@ int terminal_app_main(int argc, char **argv)
         printf("bruce> ");
         fflush(stdout);
 
-        if (fgets(line, sizeof(line), stdin) == NULL) {
+        int len = bruce_stdio_read_line(line, sizeof(line), false);
+        if (len < 0) {
             break;
-        }
-
-        size_t len = strlen(line);
-        if (len > 0 && line[len - 1] == '\n') {
-            line[len - 1] = '\0';
         }
         if (line[0] == '\0') {
             continue;

@@ -5,6 +5,7 @@
 #include "core_sdk/input.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/result.h"
+#include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
 #include "core_sdk/task.h"
 
@@ -81,6 +82,11 @@ static bruce_result_t dialog__term_message(bruce_dialog_kind_t kind, const char 
     return BRUCE_OK;
 }
 
+static int dialog__term_read_line(char *buffer, size_t buffer_size, bool mask_input)
+{
+    return bruce_stdio_read_line(buffer, buffer_size, mask_input);
+}
+
 static bruce_result_t dialog__term_choice(const char *title, const char *message,
                                           const bruce_dialog_choice_t *choices, size_t choice_count,
                                           size_t *out_selected)
@@ -98,7 +104,7 @@ static bruce_result_t dialog__term_choice(const char *title, const char *message
     fflush(stdout);
 
     char line[16];
-    if (fgets(line, sizeof(line), stdin) == NULL) {
+    if (dialog__term_read_line(line, sizeof(line), false) < 0) {
         return BRUCE_ERR_CANCELLED;
     }
     char *end = NULL;
@@ -108,38 +114,6 @@ static bruce_result_t dialog__term_choice(const char *title, const char *message
     }
     *out_selected = (size_t)(picked - 1);
     return BRUCE_OK;
-}
-
-static int dialog__term_read_line(char *buffer, size_t buffer_size, bool mask_input)
-{
-    size_t i = 0;
-    while (i + 1 < buffer_size) {
-        int c = getchar();
-        if (c == EOF || c == '\n') {
-            break;
-        }
-        if (c == '\r') {
-            continue;
-        }
-        if (c == '\b' || c == 0x7f) {
-            if (i > 0) {
-                i--;
-                if (!mask_input) {
-                    printf("\b \b");
-                    fflush(stdout);
-                }
-            }
-            continue;
-        }
-        buffer[i++] = (char)c;
-        if (!mask_input) {
-            putchar(c);
-            fflush(stdout);
-        }
-    }
-    buffer[i] = '\0';
-    printf("\n");
-    return (int)i;
 }
 
 static bruce_result_t dialog__term_input(const char *title, const char *prompt, const char *initial_text,
@@ -227,12 +201,9 @@ static bruce_result_t dialog__term_pick_file(const char *initial_path, const cha
     fflush(stdout);
 
     char line[BRUCE_STORAGE_PATH_MAX];
-    if (fgets(line, sizeof(line), stdin) == NULL) {
+    int len = dialog__term_read_line(line, sizeof(line), false);
+    if (len < 0) {
         return BRUCE_ERR_CANCELLED;
-    }
-    size_t len = strlen(line);
-    if (len > 0 && line[len - 1] == '\n') {
-        line[len - 1] = '\0';
     }
 
     if (line[0] == '\0') {

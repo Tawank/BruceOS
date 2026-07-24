@@ -26,3 +26,7 @@ CONFIG_ELF_LOADER_ESPIDF_SYMBOLS=n
 
 # Default target board for the display HAL (src/core/display/display.c).
 CONFIG_BRUCE_BOARD_M5_CARDPUTER=y
+
+# Larger stack for the bruce_input polling task (src/core/input/input.c).
+# The previous default of 4 KiB caused stack overflows on the Cardputer keyboard path.
+CONFIG_BRUCE_INPUT_TASK_STACK=8192

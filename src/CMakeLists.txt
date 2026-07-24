@@ -8,6 +8,7 @@ idf_component_register(SRCS
                     "core/manifest/manifest.c"
                     "core/memory/memory.c"
                     "core/permission/permission.c"
+                    "core/stdio/stdio.c"
                     "core/storage/storage.c"
                     "core/task/task.c"
                     "core/wifi/wifi_common.c"

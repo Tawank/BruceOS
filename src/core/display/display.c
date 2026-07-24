@@ -1,6 +1,5 @@
 #include "display.h"
 
-#include <math.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -13,13 +12,12 @@
 
 #include "driver/gpio.h"
 #include "driver/ledc.h"
-#include "driver/spi_master.h"
 #include "esp_heap_caps.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
-#include "esp_lcd_panel_vendor.h"
+#include "esp_lcd_panel_vendor.h"  // IWYU pragma: export
 #include "esp_log.h"
-#include "freertos/FreeRTOS.h"
+#include "freertos/FreeRTOS.h" // IWYU pragma: export
 #include "freertos/semphr.h"
 
 #define TAG "bruce_display"
@@ -176,7 +174,6 @@ static const uint8_t s_font_5x7[][5] = {
 /* Module state                                                               */
 /* -------------------------------------------------------------------------- */
 
-static StaticSemaphore_t s_mutex_storage;
 static SemaphoreHandle_t s_mutex;
 static esp_lcd_panel_handle_t s_panel;
 static esp_lcd_panel_io_handle_t s_io;
@@ -567,7 +564,7 @@ static void display__handle_newline(void)
 bruce_result_t display__init(void)
 {
     if (s_mutex == NULL) {
-        s_mutex = xSemaphoreCreateRecursiveMutexStatic(&s_mutex_storage);
+        s_mutex = xSemaphoreCreateRecursiveMutex();
     }
 
     display__lock();
@@ -691,8 +688,13 @@ bruce_result_t display__fill_screen(bruce_display_color_t color)
         display__unlock();
         return BRUCE_ERR_NOT_INITIALIZED;
     }
-    for (size_t i = 0; i < DISPLAY__NATIVE_WIDTH * DISPLAY__NATIVE_HEIGHT; ++i) {
-        s_framebuffer[i] = color;
+
+    if (color == BRUCE_COLOR_BLACK) {
+        memset(s_framebuffer, 0, DISPLAY__FB_SIZE);
+    } else {
+        for (size_t i = 0; i < DISPLAY__NATIVE_WIDTH * DISPLAY__NATIVE_HEIGHT; ++i) {
+            s_framebuffer[i] = color;
+        }
     }
     display__unlock();
     return BRUCE_OK;
@@ -700,7 +702,7 @@ bruce_result_t display__fill_screen(bruce_display_color_t color)
 
 bruce_result_t display__clear(void)
 {
-    return display__fill_screen(BRUCE_COLOR_BLACK);
+    return display__fill_screen(BRUCE_COLOR_NAVY);
 }
 
 bruce_result_t display__set_text_color(bruce_display_color_t color)
