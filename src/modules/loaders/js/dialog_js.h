@@ -1,6 +1,6 @@
 #pragma once
 
-#include "native_helpers_js.h"
+#include "mquickjs.h"
 
 JSValue native_dialogMessage(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
 JSValue native_dialogInfo(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);

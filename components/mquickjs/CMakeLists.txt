@@ -4,7 +4,6 @@ idf_component_register(
         "cutils.c"
         "dtoa.c"
         "libm.c"
-        "js_port.c"
     INCLUDE_DIRS "."
     PRIV_REQUIRES ""
 )

@@ -14,13 +14,13 @@ idf_component_register(SRCS
                     "modules/bruce_launcher/bruce_launcher.c"
                     "modules/loaders/elf/elf_loader.c"
                     "modules/loaders/elf/elf_loader_sdk_symbols.c"
-                    "modules/loaders/js/js_dialog.c"
-                    "modules/loaders/js/js_display.c"
-                    "modules/loaders/js/js_keyboard.c"
+                    "modules/loaders/js/dialog_js.c"
+                    "modules/loaders/js/display_js.c"
+                    "modules/loaders/js/keyboard_js.c"
                     "modules/loaders/js/js_loader.c"
-                    "modules/loaders/js/js_runtime.c"
-                    "modules/loaders/js/js_serial.c"
-                    "modules/loaders/js/js_wifi.c"
+                    "modules/loaders/js/runtime_js.c"
+                    "modules/loaders/js/serial_js.c"
+                    "modules/loaders/js/wifi_js.c"
                     "modules/selftest/app_runner_test.c"
                     "modules/selftest/config_test.c"
                     "modules/selftest/dialog_test.c"
@@ -94,13 +94,13 @@ target_include_directories(bruce_sdk_builtin_elf_loader_check PRIVATE
 target_link_libraries(bruce_sdk_builtin_elf_loader_check PRIVATE elf_loader)
 
 add_library(bruce_sdk_builtin_js_loader_check OBJECT
-            "modules/loaders/js/js_dialog.c"
-            "modules/loaders/js/js_display.c"
-            "modules/loaders/js/js_keyboard.c"
+            "modules/loaders/js/dialog_js.c"
+            "modules/loaders/js/display_js.c"
+            "modules/loaders/js/keyboard_js.c"
             "modules/loaders/js/js_loader.c"
-            "modules/loaders/js/js_runtime.c"
-            "modules/loaders/js/js_serial.c"
-            "modules/loaders/js/js_wifi.c")
+            "modules/loaders/js/runtime_js.c"
+            "modules/loaders/js/serial_js.c"
+            "modules/loaders/js/wifi_js.c")
 target_include_directories(bruce_sdk_builtin_js_loader_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/loaders/js"

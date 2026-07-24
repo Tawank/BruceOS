@@ -2,8 +2,10 @@
 
 #include "core_sdk/app_runner.h"
 #include "core_sdk/loader.h"
+#include "native_helpers_js.h"
 
 #include <stdio.h>
+#include <string.h>
 
 JSValue native_serialPrint(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
 {

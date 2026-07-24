@@ -1,4 +1,4 @@
-#include "loader_js.h"
+#include "js_loader.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -15,13 +15,6 @@
 #include "core_sdk/storage.h"
 #include "core_sdk/task.h"
 
-#include <port_js.h>          /* engine stdlib port hooks (js_print, js_gc, ...) */
-#include "display_js.h"
-#include "keyboard_js.h"
-#include "wifi_js.h"
-#include "dialog_js.h"
-#include "serial_js.h"
-#include "runtime_js.h"
 #include "mqjs_stdlib.h"
 
 #define JS_LOADER_PATH_MAX BRUCE_STORAGE_PATH_MAX
