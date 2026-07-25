@@ -30,7 +30,9 @@ Deliver the public SDK header layout and shared `BRUCE_*` error vocabulary.
   example, the public Wi-Fi declaration is `wifi__scan()`, never
   `bruce_wifi__scan()`; do not add a duplicate `wifi_sdk.c` wrapper around
   `wifi_common.c`, which returns `BRUCE_*` results directly.
-- Add compile checks preventing modules from including private Core headers.
+- Add SDK-only compile smoke targets in `src/CMakeLists.txt` that build key
+  built-in modules against the public `core_sdk/` include namespace; enforcement
+  that private Core headers are not included is currently by source review.
 
 Exit criteria: a built-in module compiles using only public SDK headers and the
 current application build remains valid.
@@ -79,11 +81,15 @@ registration contract and no format gets special Core access.
   resolution to iterate this registry.
 - Add universal manifest inspection in `core/manifest/` /
   `core_sdk/manifest.h`: `manifest__inspect_path()` auto-detects file format
-  (ELF magic, JS comment block, etc.) and returns raw manifest JSON bytes;
-  `manifest__inspect_elf()` validates the ELF32 header (magic, `e_machine`)
-  and returns a parsed `bruce_app_inspection_t`.  Per-loader inspection
-  functions (`elf__inspect_path()`, `js__inspect_path()`) are not needed —
-  `core/manifest` owns format-aware extraction so it is never duplicated.
+  (ELF magic, JS comment block, etc.) and returns a heap-allocated raw
+  manifest JSON string (caller frees); `manifest__inspect_elf()` validates
+  the ELF32 header (magic, `e_machine`) and returns a heap-allocated parsed
+  `bruce_app_inspection_t` (caller frees with `memory__free()`);
+  `manifest__inspect_javascript()` extracts the JS comment block;
+  `manifest__parse()` parses JSON into `bruce_manifest_t`.  Per-loader
+  inspection functions (`elf__inspect_path()`, `js__inspect_path()`) are not
+  needed — `core/manifest` owns format-aware extraction so it is never
+  duplicated.
 - Add the built-in ELF loader module (`src/modules/loaders/elf/`): registers
   `.elf` at priority 10, calls `manifest__inspect_elf()` for mandatory
   manifest validation, integrates the Espressif ELF loader with

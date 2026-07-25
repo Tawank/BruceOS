@@ -2,24 +2,24 @@
 
 ## BruceIDF build notes
 
-- ESP-IDF v6.0.2 installed at ~/.espressif/v6.0.2/esp-idf
-  (also v5.5.5 available). Source with:
-  `source ~/esp/idf/export.sh`
-- Then `source ~/esp/idf/export.sh && idf.py reconfigure` /
- `source ~/esp/idf/export.sh && idf.py build` from repo root
-  (BruceIDF).
-- Target: esp32s3 (see build/config.env IDF_TARGET).
-- Terminal build/reconfigure commands were skipped by the user interactively
-  during a session (chose to run it themselves) - don't assume failure, just
-  ask before invoking long-running idf.py build/reconfigure commands.
-- The `espressif/elf_loader` v1.3.1 managed component needs a small patch to
-  build with ESP-IDF v6.0.2's toolchain.  After `idf.py reconfigure`, run
-  `tools/apply_patches.sh` (the patch is in `patches/`).  The patch removes
-  newlib symbol exports that the newer toolchain no longer exposes; the Bruce
-  loader supplies its own symbol allowlist via `elf_set_symbol_resolver()`.
-- `sdkconfig.defaults` disables `CONFIG_ESP_SYSTEM_MEMPROT` so that the ELF
-  loader can allocate executable memory (`MALLOC_CAP_EXEC`), and disables the
-  built-in `ELF_LOADER_LIBC_SYMBOLS` / `ELF_LOADER_ESPIDF_SYMBOLS` tables.
+- ESP-IDF v6.0.2 is exported by `source ~/esp/idf/export.sh`.
+  Then run `idf.py reconfigure` / `idf.py build` (or `ninja all` inside
+  `build/`) from the repo root.
+- Target: esp32s3.
+- Ask before invoking long-running `idf.py build`/`reconfigure` commands unless
+  the user has already approved.
+- `sdkconfig.defaults` disables memory protection so the ELF loader can
+  allocate executable memory (`MALLOC_CAP_EXEC`), and disables the built-in
+  `ELF_LOADER_LIBC_SYMBOLS` / `ELF_LOADER_ESPIDF_SYMBOLS` tables.  The exact
+  v6 options are:
+  - `CONFIG_ESP_SYSTEM_PMP_IDRAM_SPLIT=n`
+  - `CONFIG_ESP_SYSTEM_MEMPROT_FEATURE=n`
+  - `CONFIG_ESP_SYSTEM_MEMPROT_FEATURE_LOCK=n`
+  - `CONFIG_ESP_SYSTEM_MEMPROT_FEATURE_VIA_TEE=n`
+  - `CONFIG_LIBC_NEWLIB=y`
+  - `CONFIG_LIBC_PICOLIBC=n`
+  It also sets `CONFIG_BRUCE_BOARD_M5_CARDPUTER=y` and
+  `CONFIG_BRUCE_INPUT_TASK_STACK=8192`.
 
 ## Project layout
 - `src/` is the only ESP-IDF component (EXTRA_COMPONENT_DIRS src), registered
@@ -31,7 +31,7 @@
 - `BrucePIO_legacy/` is the old PlatformIO/Arduino codebase being migrated from -
   useful as a reference for porting logic (e.g. BrucePIO_legacy/src/core/config.cpp)
   but not part of the ESP-IDF build.
-- Core code lives in src/core/{config,storage,wifi,apprunner}; apps in
+- Core code lives in src/core/{app_runner,config,dialog,display,http,input,manifest,memory,permission,stdio,storage,task,wifi}; apps in
   src/modules/*. See migration_BruceIDF.md at repo root for the architecture
   (core must stay minimal: HAL + runtime + BruceConfig + AppRunner only).
 - Naming convention: `module__action()` for public C API, snake_case fields.
@@ -47,8 +47,9 @@
   only hold genuinely Core-internal-only declarations (can be empty/placeholder).
 - Private Core headers are named plain `<module>.h` inside `core/<module>/`
   (e.g. core/app_runner/app_runner.h, core/config/config.h, core/task/task.h),
-  not `<module>_common.h`. wifi has no private header at all (nothing private
-  needed) - core/wifi/wifi_common.c includes core_sdk/wifi.h directly.
+  not `<module>_common.h`. `core/wifi/wifi_common.h` is the private Wi-Fi header;
+  it holds only genuinely internal declarations (`wifi__init()`) and does not
+  redeclare the public `wifi__*` API, which lives in `core_sdk/wifi.h`.
 
 ## Purpose
 
@@ -223,13 +224,19 @@ int app_runner__spawn_loader_task(const char *permission_key, bool gui_requested
 ```
 
 ```c
-bruce_result_t manifest__inspect_path(const char *path,
-                                       char **out_json, size_t *out_json_len);
+const char *manifest__inspect_path(const char *path);
 ```
 
 ```c
-bruce_result_t manifest__inspect_elf(const char *path,
-                                      bruce_app_inspection_t *out_inspection);
+bruce_app_inspection_t *manifest__inspect_elf(const char *path);
+```
+
+```c
+const char *manifest__inspect_javascript(const char *path);
+```
+
+```c
+bruce_manifest_t *manifest__parse(const char *json, size_t len);
 ```
 
 `app_runner__spawn_loader_task()` creates a real Core task that calls
@@ -241,15 +248,22 @@ follows the same naming convention as a regular `app_main`.
 
 `manifest__inspect_path()` is the universal manifest JSON extractor provided
 by `core/manifest`.  It auto-detects file format (ELF magic, JS comment
-block, or whatever a future format uses) and returns the raw manifest bytes.
-The launcher, file-manager apps, and terminal tools call this one function to
+block, or whatever a future format uses) and returns the raw manifest bytes as
+a heap-allocated string.  The caller must `free()` the returned string.  The
+launcher, file-manager apps, and terminal tools call this one function to
 extract manifest JSON from any file uniformly.
 
 `manifest__inspect_elf()` is the ELF-specific full inspection: it validates
 the ELF32 header (magic, `e_machine` vs. this build's target), extracts and
 parses the `.bruce.manifest` section, and returns a complete
 `bruce_app_inspection_t` with kind, parsed manifest, and ABI-warning flag.
-The ELF loader module calls this directly at launch time.
+The returned structure is heap-allocated; the caller must free it with
+`memory__free()`.  The ELF loader module calls this directly at launch time.
+
+`manifest__inspect_javascript()` extracts the optional leading manifest comment
+block from a JS file and returns the raw JSON bytes; the caller must `free()`
+the result.  `manifest__parse()` parses a JSON string into a `bruce_manifest_t`
+that the caller must free with `memory__free()`.
 
 Loader modules do not provide their own inspection — `core/manifest` owns
 that capability, so format-aware manifest extraction is not duplicated across
@@ -281,12 +295,13 @@ Completed tasks are cleaned up immediately; v1 has no history.
 `task__wait()` works only while a task still exists.
 
 `stop`, `pause`, and `resume` are cooperative.  `task__kill()` is an explicit
-force-delete escape hatch.  Controlling another task requires `task`; every
-app can control only itself without that permission.
+force-delete escape hatch.  The `task` permission is declared in the vocabulary
+but is not yet enforced on cross-task control paths.
 
-`runtime__sleep(ms)` is interrupted when the task is foregrounded.
-`runtime__delay(ms)` waits the requested duration.  Both are Core APIs; they
-hide FreeRTOS from apps.
+`runtime__sleep(ms)` interrupts a background task when it is foregrounded;
+foreground tasks sleep for the full duration.  `runtime__delay(ms)` waits the
+requested duration regardless of state.  Both are Core APIs; they hide FreeRTOS
+from apps.
 
 ## ELF contract
 
@@ -327,8 +342,8 @@ empty array.  A complete example is:
   default.
 - An omitted or empty `permissions` array gives a safe zero-permission ELF
   fallback.
-- A Core ABI mismatch shows a warning and requires an explicit user choice to
-  run anyway.
+- A Core ABI mismatch is reported by `manifest__inspect_elf()` but is not yet
+  enforced with a warning/confirmation dialog.
 - The ELF header, not the manifest, is authoritative for architecture; a
   mismatching chip architecture is rejected.
 
@@ -418,7 +433,8 @@ tasks are checked inside each protected Core API.
 
 `http__request()` needs `http`; it does not imply `wifi`.  Wi-Fi state control
 and credentials need `wifi`.  `input__inject()` needs `input`; task control of
-another task needs `task`; starting a path needs `execute`.
+another task is intended to need `task` but is not yet enforced; starting a path
+is intended to need `execute` but is not yet enforced.
 
 ## Dialog and task interaction
 
@@ -472,7 +488,7 @@ protected paths are `/bruce.json`, `/permissions.json`, and their atomic-write
 temporary files; all other mounted paths are usable by a storage-granted app.
 
 `config` grants field-specific APIs such as `config__get_bright()` and
-`config__set_soundEnabled(true)`.  Setters validate and atomically persist
+`config__set_sound_enabled(true)`.  Setters validate and atomically persist
 immediately.  The following fields are permanently protected from ELF and JS,
 even with `config`: `wifiApSsid`, `webUIPassword`, `wifiCredentials`,
 `wifiMAC`, and `webUIUser`.  Built-ins may use those APIs.
@@ -491,9 +507,10 @@ Maintain two header layers:
 (`app_runner__register_loader()`, `app_runner__run_path()`,
 `app_runner__spawn_loader_task()`) that any loader module uses.  Manifest
 inspection is provided by the universal `manifest__inspect_path()` in
-`core_sdk/manifest.h` / `core/manifest/`; it auto-detects file format and
-replaces per-loader inspection functions so the launcher, file manager, and
-any other tool can inspect any file uniformly.  Built-in ELF and JavaScript
+`core_sdk/manifest.h` / `core/manifest/`; it returns a heap-allocated raw JSON
+string that the caller must `free()`, auto-detects file format, and replaces
+per-loader inspection functions so the launcher, file manager, and any other
+tool can inspect any file uniformly.  Built-in ELF and JavaScript
 loader modules live under `src/modules/loaders/elf/` and
 `src/modules/loaders/js/`, like any other built-in module, not under
 `src/core/`.
@@ -503,8 +520,8 @@ includes resolve.  Built-in modules include only `core_sdk/...` headers;
 their privilege is policy, not access to private C declarations.  The single
 exception is the `modules/selftest` diagnostic built-in described under
 "Apps and modules own", which may include `src/core/` headers directly; it is
-excluded from the compile-time check (in `src/CMakeLists.txt`) that verifies
-every other built-in only pulls in `core_sdk/...` headers.  New public
+excluded from the SDK-only compile smoke targets in `src/CMakeLists.txt` that
+build the other built-ins against the public `core_sdk/` include namespace.  New public
 fallible APIs use shared `BRUCE_*` result codes such as `BRUCE_OK`,
 `BRUCE_ERR_PERMISSION`, `BRUCE_ERR_NOT_FOUND`, and `BRUCE_ERR_BUSY` by
 default, but `bruce_result_t` is not mandatory for every public function.

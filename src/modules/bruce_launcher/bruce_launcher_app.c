@@ -22,10 +22,10 @@
 #define BRUCE_LAUNCHER_TITLE "Main Menu"
 #define BRUCE_LAUNCHER_VERSION_TEXT "BRUCE"
 
-/* Legacy MainMenu look constants. The original Arduino UI centers the menu in
- * a rounded rectangle that occupies 80% of the screen width, with the selected
- * item highlighted in the primary theme color and a "BRUCE" label in the
- * status bar. */
+/* MainMenu visual-style constants. The launcher draws a centered rounded
+ * rectangle that occupies 80% of the screen width, with the selected item
+ * highlighted in the primary theme color and a "BRUCE" label in the status
+ * bar. */
 #define BRUCE_LAUNCHER_BORDER_PAD 5
 #define BRUCE_LAUNCHER_STATUS_H 25
 #define BRUCE_LAUNCHER_MAX_VISIBLE 6
@@ -149,9 +149,8 @@ static int bruce_launcher__font_size(int w)
     return (w >= 200) ? BRUCE_LAUNCHER_FONT_MEDIUM : BRUCE_LAUNCHER_FONT_SMALL;
 }
 
-/* Draw the main border/status bar exactly like the legacy MainMenu:
- * background fill, rounded screen border, horizontal status-line separator,
- * and "BRUCE" text in the top-left corner. */
+/* Draw the main border/status bar: background fill, rounded screen border,
+ * horizontal status-line separator, and "BRUCE" text in the top-left corner. */
 static void bruce_launcher__draw_main_border(const bruce_launcher_theme_t *theme)
 {
     int w = display__width();
@@ -172,9 +171,8 @@ static void bruce_launcher__draw_main_border(const bruce_launcher_theme_t *theme
     display__print(BRUCE_LAUNCHER_VERSION_TEXT);
 }
 
-/* Draw the centered rounded menu box that loopOptions/drawOptions used in the
- * legacy Arduino code. Selected row is highlighted in the primary color with a
- * ">" prefix; other rows are prefixed with a space. */
+/* Draw the centered rounded menu box. The selected row is highlighted in the
+ * primary color with a ">" prefix; other rows are prefixed with a space. */
 static void bruce_launcher__draw_options(const bruce_launcher_entry_t *entries, int entry_count,
                                          int selected, const bruce_launcher_theme_t *theme)
 {
@@ -267,11 +265,10 @@ static int bruce_launcher__run_entry(const bruce_launcher_entry_t *entry)
     return result;
 }
 
-/* GUI menu loop that mirrors the legacy MainMenu interaction: UP/DOWN move the
- * selection, SELECT/ Btn-A launches the highlighted item, BACK/Btn-B exits.
- * A short initial delay avoids immediately selecting if the button is still
- * held from the previous screen. */
-static int bruce_launcher__run_legacy_menu(bruce_launcher_entry_t *entries, int entry_count, int exit_index)
+/* GUI menu loop: UP/DOWN move the selection, SELECT/Btn-A launches the
+ * highlighted item, BACK/Btn-B exits. A short initial delay avoids immediately
+ * selecting if the button is still held from the previous screen. */
+static int bruce_launcher__run_gui_menu(bruce_launcher_entry_t *entries, int entry_count, int exit_index)
 {
     bruce_launcher_theme_t theme;
     bruce_launcher__get_theme(&theme);
@@ -380,7 +377,7 @@ int bruce_launcher_app_main(int argc, char **argv)
 
     int result;
     if (app_runner__args_have_gui(argc, argv)) {
-        result = bruce_launcher__run_legacy_menu(entries, entry_count, exit_index);
+        result = bruce_launcher__run_gui_menu(entries, entry_count, exit_index);
     } else {
         result = bruce_launcher__run_terminal_menu(entries, entry_count, exit_index);
     }

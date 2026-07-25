@@ -5,6 +5,16 @@ their listed dependencies are complete.  Every implementation must follow
 [`migration_BruceIDF.md`](migration_BruceIDF.md) and use `BrucePIO_legacy/` only as a
 read-only behavior reference.
 
+## Current status
+
+- **A1–A8** — implemented.
+- **A9** — partially implemented: Core Wi-Fi/HTTP APIs and JS bindings exist,
+  but several advanced features (`wifi__scan_hosts`, `wifi__start_sniffer`,
+  `wifi__listen_tcp`) are currently stubs returning `BRUCE_ERR_UNSUPPORTED` /
+  `BRUCE_ERR_INVALID_STATE`.
+- **A10** — implemented.
+- **A11** — not started.
+
 ## A1 — Public SDK and error model
 
 Dependencies: none.
@@ -97,12 +107,15 @@ to `app_runner__run()`'s observable behavior.
 
 Also add universal manifest inspection in `core/manifest/` /
 `core_sdk/manifest.h`: `manifest__inspect_path()` auto-detects file format
-(ELF magic, JS comment block, JPG, PNG etc.) and returns the raw manifest JSON bytes;
-`manifest__inspect_elf()` validates the ELF32 header (magic, `e_machine` vs.
-this build's target) and returns a parsed `bruce_app_inspection_t`.  The
-loader registry's `app_runner__register_loader()` no longer takes an
-`inspect_fn` — any program (launcher, file manager, terminal) inspects
-files with `manifest__inspect_path()` directly; ELF-specific programs use
+(ELF magic, JS comment block, etc.) and returns a heap-allocated raw manifest
+JSON string that the caller must `free()`; `manifest__inspect_elf()` validates
+the ELF32 header (magic, `e_machine` vs. this build's target) and returns a
+heap-allocated parsed `bruce_app_inspection_t` that the caller must free with
+`memory__free()`; `manifest__inspect_javascript()` extracts the JS comment
+block; `manifest__parse()` parses JSON into `bruce_manifest_t`.  The loader
+registry's `app_runner__register_loader()` no longer takes an `inspect_fn` —
+any program (launcher, file manager, terminal) inspects files with
+`manifest__inspect_path()` directly; ELF-specific programs use
 `manifest__inspect_elf()`.
 
 Then, as the registry's first consumer, add the built-in ELF loader module
@@ -157,9 +170,9 @@ Dependencies: A2, A3, A4, A5, A6.
 As the registry's second consumer, add the built-in JavaScript loader module
 under `src/modules/loaders/js/` (not `src/core/js/`): register `.js` at
 priority 20 with `app_runner__register_loader()` (no `inspect_fn`), call
-`manifest__inspect_path()` to extract raw manifest JSON from the JS comment
-block, then `manifest__parse()` for optional leading manifest parsing with
-zero-permission fallback,
+`manifest__inspect_path()` (or `manifest__inspect_javascript()`) to extract
+raw manifest JSON from the JS comment block, then `manifest__parse()` for
+optional leading manifest parsing with zero-permission fallback,
 `app_runner__spawn_loader_task()`-owned mQuickJS allocation (VM/context
 memory via `memory__malloc()`), optional `app_main(argv)`, and
 `js__app_main(void *context)` as the loader's task entry.  Preserve the
@@ -196,7 +209,7 @@ app; GUI and serial dialogs work; viewer/file handles are cleaned up.
 
 ## A11 — Remaining capability slices
 
-Dependencies: A1–A11.
+Dependencies: A1–A10.
 
 For each remaining BrucePIO_legacy capability (Bluetooth, RF, IR, RFID, GPS,
 GPIO/I²C, HID, microphone, configuration, and file manager), implement Core

@@ -5,8 +5,10 @@ ELF applications.
 
 ## Layout
 
-- `include/bruce_sdk.h` — single header that pulls in all public Core SDK
-  APIs and the `BRUCE_APP_MANIFEST()` macro.
+- `include/bruce_sdk.h` — pulls in the runtime/loader/manifest/task/memory/permission/result/storage
+  public Core SDK APIs and the `BRUCE_APP_MANIFEST()` macro.  Apps that need
+  `config`, `dialog`, `display`, `http`, `input`, `stdio`, or `wifi` should also
+  include the corresponding `core_sdk/*.h` headers.
 - `elf_apps/examples/elf_loader/` — template for a loader ELF app (`elf_loader.elf`).
 - `elf_apps/examples/game/` — template for a simple ELF app (`game.elf`).
 - `tools/build_elf_apps.py` — builds the templates and injects the
@@ -52,7 +54,10 @@ elf ./game.elf
 3. Disable memory protection and the default symbol tables in
    `sdkconfig.defaults`:
    ```
-   CONFIG_ESP_SYSTEM_MEMPROT=n
+   CONFIG_ESP_SYSTEM_PMP_IDRAM_SPLIT=n
+   CONFIG_ESP_SYSTEM_MEMPROT_FEATURE=n
+   CONFIG_ESP_SYSTEM_MEMPROT_FEATURE_LOCK=n
+   CONFIG_ESP_SYSTEM_MEMPROT_FEATURE_VIA_TEE=n
    CONFIG_ELF_LOADER_LIBC_SYMBOLS=n
    CONFIG_ELF_LOADER_ESPIDF_SYMBOLS=n
    ```
@@ -82,7 +87,7 @@ See `elf_apps/examples/` for complete examples.
 
 ## ESP-IDF v6 compatibility note
 
-`espressif/elf_loader` v1.3.1 requires a small patch to build against ESP-IDF
-v6.0.2. The build script applies `patches/elf_loader-v1.3.1-idf-v6.patch`
-automatically; for manual builds run `tools/apply_patches.sh` after
-`idf.py reconfigure`.
+`espressif/elf_loader` v1.3.1 originally required a small patch to build against
+ESP-IDF v6.0.2.  The current build setup no longer relies on a separate
+`tools/apply_patches.sh` or `patches/` directory; the managed component builds
+as configured by this project.

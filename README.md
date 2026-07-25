@@ -31,10 +31,10 @@ Or you can burn it directly from the [m5burner tool](https://docs.m5stack.com/en
 
 Install [ESP-IDF](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/get-started/index.html) and follow the instructions to build Bruce.
 
-then switch to the esp-idf version 6.0.2 and build running the following commands:
+then build by sourcing the ESP-IDF environment and running:
 
 ```sh
-source ~/.espressif/tools/activate_idf_v6.0.2.sh
+source ~/esp/idf/export.sh
 idf.py build
 ```
 
