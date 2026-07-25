@@ -21,5 +21,5 @@ When asked to make a new function or module **behave like** a legacy one:
 ## Build notes
 
 - Activate ESP-IDF with `source ~/esp/idf/export.sh`.
-- `idf.py build` / `ninja all` from the repo root (or `build/`).
-- Ask before running long-running `idf.py reconfigure` or full builds unless the user has already approved.
+- `idf.py build` from the repo root (use tail to truncate the output never use it without it). 
+
