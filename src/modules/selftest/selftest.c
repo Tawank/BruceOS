@@ -13,6 +13,7 @@
 #include "loader_test.h"
 #include "terminal_test.h"
 #include "launcher_test.h"
+#include "wifi_test.h"
 #include "input_test.h"
 #include "dialog_test.h"
 
@@ -62,6 +63,10 @@ int selftest_app_main(int argc, char **argv)
     printf("[selftest] %s %s\n", "run_terminal_path_case", selftest__run_terminal_path_case() ? "PASS" : "FAIL");
     printf("[selftest] %s %s\n", "run_terminal_invalid_case", selftest__run_terminal_invalid_case() ? "PASS" : "FAIL");
     printf("[selftest] %s %s\n", "run_launcher_apps_discovery_case", selftest__run_launcher_apps_discovery_case() ? "PASS" : "FAIL");
+
+    printf("[selftest] %s %s\n", "run_wifi_permission_denied_case", selftest__run_wifi_permission_denied_case() ? "PASS" : "FAIL");
+    printf("[selftest] %s %s\n", "run_http_permission_denied_case", selftest__run_http_permission_denied_case() ? "PASS" : "FAIL");
+    printf("[selftest] %s %s\n", "run_wifi_http_independent_permission_case", selftest__run_wifi_http_independent_permission_case() ? "PASS" : "FAIL");
 
     printf("[selftest] %s %s\n", "run_input_poll_case", selftest__run_input_poll_case() ? "PASS" : "FAIL");
     printf("[selftest] %s %s\n", "run_input_inject_case", selftest__run_input_inject_case() ? "PASS" : "FAIL");

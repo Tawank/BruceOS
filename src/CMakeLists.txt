@@ -4,6 +4,7 @@ idf_component_register(SRCS
                     "core/config/config.c"
                     "core/dialog/dialog.c"
                     "core/display/display.c"
+                    "core/http/http.c"
                     "core/input/input.c"
                     "core/manifest/manifest.c"
                     "core/memory/memory.c"
@@ -35,6 +36,7 @@ idf_component_register(SRCS
                     "modules/selftest/storage_test.c"
                     "modules/selftest/task_test.c"
                     "modules/selftest/terminal_test.c"
+                    "modules/selftest/wifi_test.c"
                     "modules/utils/launcher/launcher_app.c"
                     "modules/utils/terminal/terminal_app.c"
                     "modules/wifi/wifi_app.c"
@@ -46,6 +48,7 @@ idf_component_register(SRCS
                     esp_driver_ledc
                     esp_driver_spi
                     esp_driver_sdspi
+                    esp_http_client
                     esp_lcd
                     esp_netif
                     esp_wifi

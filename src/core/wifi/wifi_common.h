@@ -7,5 +7,11 @@
  * public header directly for its own declarations instead of this file
  * redeclaring them, so there is never a second copy of the public signatures
  * that can drift out of sync (mismatched redeclarations are a compile
- * error, not a warning). */
-int wifi__init(void);
+ * error, not a warning).
+ *
+ * wifi__init() is the only genuinely internal helper exposed to other Core
+ * code; it does not perform a permission check because callers are public
+ * wifi__* APIs that already enforce the `wifi` permission. */
+#include "core_sdk/result.h"
+
+bruce_result_t wifi__init(void);
