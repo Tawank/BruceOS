@@ -1,56 +1,5 @@
 # BruceIDF Architecture Contract
 
-## BruceIDF build notes
-
-- ESP-IDF v6.0.2 is exported by `source ~/esp/idf/export.sh`.
-  Then run `idf.py reconfigure` / `idf.py build` (or `ninja all` inside
-  `build/`) from the repo root.
-- Target: esp32s3.
-- Ask before invoking long-running `idf.py build`/`reconfigure` commands unless
-  the user has already approved.
-- `sdkconfig.defaults` disables memory protection so the ELF loader can
-  allocate executable memory (`MALLOC_CAP_EXEC`), and disables the built-in
-  `ELF_LOADER_LIBC_SYMBOLS` / `ELF_LOADER_ESPIDF_SYMBOLS` tables.  The exact
-  v6 options are:
-  - `CONFIG_ESP_SYSTEM_PMP_IDRAM_SPLIT=n`
-  - `CONFIG_ESP_SYSTEM_MEMPROT_FEATURE=n`
-  - `CONFIG_ESP_SYSTEM_MEMPROT_FEATURE_LOCK=n`
-  - `CONFIG_ESP_SYSTEM_MEMPROT_FEATURE_VIA_TEE=n`
-  - `CONFIG_LIBC_NEWLIB=y`
-  - `CONFIG_LIBC_PICOLIBC=n`
-  It also sets `CONFIG_BRUCE_BOARD_M5_CARDPUTER=y` and
-  `CONFIG_BRUCE_INPUT_TASK_STACK=8192`.
-
-## Project layout
-- `src/` is the only ESP-IDF component (EXTRA_COMPONENT_DIRS src), registered
-  in src/CMakeLists.txt with explicit SRCS/REQUIRES/INCLUDE_DIRS lists (add
-  new source files there manually).
-- `src/idf_component.yml` declares managed component deps (idf-component-manager).
-  Added `espressif/cjson` here for JSON parsing (component target name: `cjson`,
-  header: `cJSON.h`, functions like cJSON_Parse/cJSON_Print/cJSON_AddXToObject).
-- `BrucePIO_legacy/` is the old PlatformIO/Arduino codebase being migrated from -
-  useful as a reference for porting logic (e.g. BrucePIO_legacy/src/core/config.cpp)
-  but not part of the ESP-IDF build.
-- Core code lives in src/core/{app_runner,config,dialog,display,http,input,manifest,memory,permission,stdio,storage,task,wifi}; apps in
-  src/modules/*. See migration_BruceIDF.md at repo root for the architecture
-  (core must stay minimal: HAL + runtime + BruceConfig + AppRunner only).
-- Naming convention: `module__action()` for public C API, snake_case fields.
-- Public fallible APIs don't have to return `bruce_result_t`; simpler types
-  (bool/int/pointer) are fine when documented in the `core_sdk/` header (e.g.
-  wifi__is_connected() -> bool, wifi__scan() -> int count/negative BRUCE_*,
-  wifi__get_ssid()/get_ip()/get_mac() -> char* or NULL).
-- Core-private `*_common.h` headers (e.g. src/core/wifi/wifi_common.h) must
-  NOT redeclare the public struct/functions already in the matching
-  src/core_sdk/<module>.h - the .c file includes the core_sdk header directly
-  for those declarations instead, to avoid conflicting duplicate
-  redeclarations when the public signature changes. Private headers should
-  only hold genuinely Core-internal-only declarations (can be empty/placeholder).
-- Private Core headers are named plain `<module>.h` inside `core/<module>/`
-  (e.g. core/app_runner/app_runner.h, core/config/config.h, core/task/task.h),
-  not `<module>_common.h`. `core/wifi/wifi_common.h` is the private Wi-Fi header;
-  it holds only genuinely internal declarations (`wifi__init()`) and does not
-  redeclare the public `wifi__*` API, which lives in `core_sdk/wifi.h`.
-
 ## Purpose
 
 BruceIDF is a new ESP-IDF implementation of Bruce OS.  `BrucePIO_legacy/` is a
