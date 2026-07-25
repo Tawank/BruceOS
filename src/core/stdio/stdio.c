@@ -68,5 +68,6 @@ int bruce_stdio_read_line(char *buffer, size_t buffer_size, bool mask_input)
     if (eof && i == 0) {
         return -1;
     }
+
     return (int)i;
 }

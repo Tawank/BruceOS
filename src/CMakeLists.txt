@@ -56,7 +56,7 @@ idf_component_register(SRCS
                     log
                     lwip
                     nvs_flash
-                    spiffs
+                    littlefs
                     elf_loader
                     mquickjs
                     INCLUDE_DIRS

@@ -7,6 +7,8 @@
 - `src/idf_component.yml` declares managed component deps (idf-component-manager).
   Added `espressif/cjson` here for JSON parsing (component target name: `cjson`,
   header: `cJSON.h`, functions like cJSON_Parse/cJSON_Print/cJSON_AddXToObject).
+  The internal filesystem uses `joltwallet/littlefs` (component target name:
+  `littlefs`, header: `esp_littlefs.h`).
 - `BrucePIO_legacy/` is the old PlatformIO/Arduino codebase being migrated from -
   useful as a reference for porting logic (e.g. BrucePIO_legacy/src/core/config.cpp)
   but not part of the ESP-IDF build.

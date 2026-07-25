@@ -39,7 +39,7 @@ typedef struct {
  * "/permissions.json", and their atomic-write ".tmp" siblings entirely -
  * BRUCE_ERR_PERMISSION - regardless of any granted permission; storage__list()
  * silently omits those two names rather than erroring. Every other mounted
- * path (SPIFFS or SD) is otherwise reachable. `path` must be an absolute,
+ * path (LittleFS or SD) is otherwise reachable. `path` must be an absolute,
  * normalized path with no "." or ".." components, else BRUCE_ERR_INVALID_PATH.
  * A file handle can only be used by the task that opened it; any other task
  * (or a stale/unknown id) gets BRUCE_ERR_NOT_FOUND/BRUCE_ERR_PERMISSION from

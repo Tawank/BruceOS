@@ -12,8 +12,8 @@
 
 #include "driver/sdspi_host.h"
 #include "esp_err.h"
+#include "esp_littlefs.h"
 #include "esp_log.h"
-#include "esp_spiffs.h"
 #include "esp_vfs_fat.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -54,13 +54,13 @@ bool storage__init(void)
 {
     storage__lock();
     if (!s_initialized) {
-        const esp_vfs_spiffs_conf_t config = {
+        const esp_vfs_littlefs_conf_t config = {
             .base_path = STORAGE__MOUNT_PATH,
-            .partition_label = "spiffs",
-            .max_files = 5,
+            .partition_label = "littlefs",
             .format_if_mount_failed = true,
+            .grow_on_mount = false,
         };
-        esp_err_t err = esp_vfs_spiffs_register(&config);
+        esp_err_t err = esp_vfs_littlefs_register(&config);
         s_ready = err == ESP_OK || err == ESP_ERR_INVALID_STATE;
         s_initialized = true;
         if (!s_ready) ESP_LOGE(TAG, "could not mount internal storage: %s", esp_err_to_name(err));
@@ -191,7 +191,7 @@ bool storage__get_usage(const char *path, size_t *total_bytes, size_t *used_byte
                 known = true;
             }
         } else if (!storage__is_sd_path(path) && s_ready) {
-            known = esp_spiffs_info("spiffs", total_bytes, used_bytes) == ESP_OK;
+            known = esp_littlefs_info("littlefs", total_bytes, used_bytes) == ESP_OK;
         }
     }
     storage__unlock();
@@ -290,7 +290,7 @@ static uint32_t s_next_file_id = 1;
 
 /* /bruce.json and /permissions.json (plus their atomic-write .tmp siblings)
  * are the only paths this public API refuses, per migration_BruceIDF.md -
- * "Input, display, storage, and Config". Everything else mounted (SPIFFS or
+ * "Input, display, storage, and Config". Everything else mounted (LittleFS or
  * SD) is reachable by a storage-granted caller. Core itself still reads/
  * writes those two files directly through storage__read_file()/
  * storage__write_file_atomic() above, which this check does not apply to. */
