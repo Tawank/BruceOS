@@ -51,6 +51,8 @@ bool selftest__run_ir_validation_case(void)
               ir__transmit("1", "unknown", 1, 0) == BRUCE_ERR_UNSUPPORTED &&
               ir__transmit_raw(&timing, 1, BRUCE_IR_DEFAULT_FREQUENCY_HZ, 0) == BRUCE_ERR_INVALID_ARGUMENT &&
               ir__receive(false, 0, NULL, 0) == BRUCE_ERR_INVALID_ARGUMENT &&
+              ir__transmit_record(NULL, 0) == BRUCE_ERR_INVALID_ARGUMENT &&
+              ir__transmit_record("Filetype: IR signals file\nVersion: 1\n#\n", 0) == BRUCE_ERR_NOT_FOUND &&
               ir__transmit_file("relative.ir", 0) == BRUCE_ERR_INVALID_PATH;
     printf("[selftest] ir/validation: %s\n", ok ? "OK" : "FAIL");
     return ok;

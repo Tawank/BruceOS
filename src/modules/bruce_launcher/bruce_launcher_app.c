@@ -40,6 +40,7 @@
 typedef enum {
     BRUCE_LAUNCHER_ICON_NONE,
     BRUCE_LAUNCHER_ICON_WIFI,
+    BRUCE_LAUNCHER_ICON_IR,
     BRUCE_LAUNCHER_ICON_SELFTEST,
     BRUCE_LAUNCHER_ICON_TERMINAL,
     BRUCE_LAUNCHER_ICON_TASKS,
@@ -89,6 +90,8 @@ static bool bruce_launcher__add_builtin(bruce_launcher_entry_t *entries, int *co
     entry->is_path = false;
     if (strcmp(app_name, "wifi") == 0) {
         entry->icon = BRUCE_LAUNCHER_ICON_WIFI;
+    } else if (strcmp(app_name, "ir") == 0) {
+        entry->icon = BRUCE_LAUNCHER_ICON_IR;
     } else if (strcmp(app_name, "selftest") == 0) {
         entry->icon = BRUCE_LAUNCHER_ICON_SELFTEST;
     } else if (strcmp(app_name, "terminal") == 0) {
@@ -282,6 +285,12 @@ static void bruce_launcher__draw_entry_icon(bruce_launcher_icon_t icon, int x, i
         display__draw_circle(cx, bottom, size / 3 - pad / 2, color);
         display__fill_rect(x, bottom, size, size - (bottom - y), background);
         display__fill_circle(cx, bottom - pad, size >= 24 ? 2 : 1, color);
+    } else if (icon == BRUCE_LAUNCHER_ICON_IR) {
+        display__fill_circle(x + size / 4, cy, size >= 24 ? 2 : 1, color);
+        display__draw_line(x + size / 2, cy - size / 5, x + size * 2 / 3, cy, color);
+        display__draw_line(x + size * 2 / 3, cy, x + size / 2, cy + size / 5, color);
+        display__draw_line(x + size * 2 / 3, cy - size / 3, x + size - pad, cy, color);
+        display__draw_line(x + size - pad, cy, x + size * 2 / 3, cy + size / 3, color);
     } else if (icon == BRUCE_LAUNCHER_ICON_SELFTEST) {
         int radius = size / 2 - pad;
         display__draw_circle(cx, cy, radius, color);

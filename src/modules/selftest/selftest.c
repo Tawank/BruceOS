@@ -53,6 +53,7 @@ int selftest_app_main(int argc, char **argv)
     RUN_SELFTEST(selftest__run_storage_permission_denied_case);
     RUN_SELFTEST(selftest__run_storage_protected_path_case);
     RUN_SELFTEST(selftest__run_storage_roundtrip_case);
+    RUN_SELFTEST(selftest__run_storage_mkdir_case);
     RUN_SELFTEST(selftest__run_storage_ownership_case);
     RUN_SELFTEST(selftest__run_storage_no_leak_normal_exit_case);
     RUN_SELFTEST(selftest__run_storage_no_leak_killed_case);

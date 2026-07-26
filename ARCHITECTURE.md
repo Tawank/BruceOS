@@ -461,6 +461,8 @@ list and draw them themselves.
 opaque IDs and are closed automatically at task teardown.  The only v1
 protected paths are `/bruce.json`, `/permissions.json`, and their atomic-write
 temporary files; all other mounted paths are usable by a storage-granted app.
+`storage__mkdir()` creates one directory at a time through the same path and
+permission policy and succeeds when that directory already exists.
 
 `config` grants field-specific APIs such as `config__get_bright()` and
 `config__set_sound_enabled(true)`.  Setters validate and atomically persist
@@ -472,10 +474,17 @@ even with `config`: `wifiApSsid`, `webUIPassword`, `wifiCredentials`,
 through `ir__receive()`, `ir__transmit()`, and `ir__transmit_raw()`. Captures
 are returned as Bruce/Flipper version-1 IR records. Decoded capture recognizes
 NEC; NEC, NECext, Samsung32, and Sony SIRC variants can be transmitted. Unknown
-captures can be read as raw 38 kHz timings. `ir__transmit_file()` replays version-1 `.ir` files and
+captures can be read as raw 38 kHz timings. `ir__transmit_record()` replays an
+in-memory capture so learning workflows can test it before saving.
+`ir__transmit_file()` replays version-1 `.ir` files and
 also requires `storage`, since it uses task-owned public storage handles. One
 transmission is always made and `repeats` specifies additional transmissions.
 IR GPIOs are board defaults configurable through Kconfig.
+The built-in Infrared app provides regional TV power-code runs, RMT-backed
+basic/enhanced/sweep/random/empty jammer patterns, custom learning, and TV, AC,
+fan, sound, and LED-strip quick-learning templates. Learned remotes use the
+version-1 format under `/BruceIR`; filename collisions may be numbered,
+overwritten, renamed, or cancelled.
 
 ## Public SDK and migration rules
 

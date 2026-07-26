@@ -50,3 +50,7 @@ bruce_result_t storage__write(bruce_file_id_t file, const void *buffer, size_t s
 bruce_result_t storage__seek(bruce_file_id_t file, int64_t offset, int whence, uint64_t *out_position);
 bruce_result_t storage__close(bruce_file_id_t file);
 bruce_result_t storage__list(const char *path, bruce_storage_entry_t *entries, size_t capacity, size_t *out_count);
+
+/* Creates one directory. The parent must already exist. Returns BRUCE_OK when
+ * the path already names a directory. */
+bruce_result_t storage__mkdir(const char *path);

@@ -177,6 +177,24 @@ bool selftest__run_storage_roundtrip_case(void)
     return ok;
 }
 
+bool selftest__run_storage_mkdir_case(void)
+{
+    static const char *const path = "/selftest_directory";
+    (void)storage__remove(path);
+    bruce_result_t created = storage__mkdir(path);
+    bruce_result_t existing = storage__mkdir(path);
+    bruce_result_t missing_parent = storage__mkdir("/selftest_missing/child");
+    bruce_result_t protected_path = storage__mkdir("/bruce.json");
+
+    size_t count = 0;
+    bruce_result_t listed = storage__list(path, NULL, 0, &count);
+    bool removed = storage__remove(path);
+    bool ok = created == BRUCE_OK && existing == BRUCE_OK && missing_parent == BRUCE_ERR_NOT_FOUND &&
+              protected_path == BRUCE_ERR_PERMISSION && listed == BRUCE_OK && removed;
+    printf("[selftest] storage/mkdir: %s\n", ok ? "OK" : "FAIL");
+    return ok;
+}
+
 /* ------------------------------------------------------------------------ */
 /* selftest__run_storage_ownership_case                                     */
 /* ------------------------------------------------------------------------ */

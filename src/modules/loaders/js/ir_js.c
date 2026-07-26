@@ -62,3 +62,14 @@ JSValue native_irTransmitFile(JSContext *ctx, JSValue *this_val, int argc, JSVal
     const char *path = JS_ToCString(ctx, argv[0], &path_buf);
     return JS_NewBool(ir__transmit_file(path, 0) == BRUCE_OK);
 }
+
+JSValue native_irTransmitRecord(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
+{
+    (void)this_val;
+    if (argc < 1 || !JS_IsString(ctx, argv[0])) {
+        return JS_ThrowTypeError(ctx, "ir.transmitRecord(record:string)");
+    }
+    JSCStringBuf record_buf;
+    const char *record = JS_ToCString(ctx, argv[0], &record_buf);
+    return JS_NewBool(ir__transmit_record(record, 0) == BRUCE_OK);
+}

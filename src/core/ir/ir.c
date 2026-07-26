@@ -497,6 +497,39 @@ static bruce_result_t ir__send_file_record(char *record, uint8_t repeats)
     return ir__transmit_raw(timings, count, frequency, repeats);
 }
 
+bruce_result_t ir__transmit_record(const char *contents, uint8_t repeats)
+{
+    bruce_result_t permission = permission__check(BRUCE_PERMISSION_IR);
+    if (permission != BRUCE_OK) return permission;
+    if (contents == NULL || contents[0] == '\0') return BRUCE_ERR_INVALID_ARGUMENT;
+    size_t length = strlen(contents);
+    if (length > IR_FILE_MAX_SIZE) return BRUCE_ERR_RESOURCE_LIMIT;
+
+    char *copy = malloc(length + 1u);
+    if (copy == NULL) return BRUCE_ERR_NO_MEMORY;
+    memcpy(copy, contents, length + 1u);
+
+    bool sent = false;
+    char *cursor = copy;
+    while (*cursor != '\0') {
+        char *delimiter = strstr(cursor, "\n#");
+        if (delimiter == NULL) delimiter = cursor + strlen(cursor);
+        char saved = *delimiter;
+        *delimiter = '\0';
+        bruce_result_t result = ir__send_file_record(cursor, repeats);
+        if (result == BRUCE_OK) sent = true;
+        else if (result != BRUCE_ERR_NOT_FOUND) {
+            free(copy);
+            return result;
+        }
+        if (saved == '\0') break;
+        cursor = delimiter + 2;
+        while (*cursor == '\r' || *cursor == '\n' || *cursor == '#') cursor++;
+    }
+    free(copy);
+    return sent ? BRUCE_OK : BRUCE_ERR_NOT_FOUND;
+}
+
 bruce_result_t ir__transmit_file(const char *path, uint8_t repeats)
 {
     bruce_result_t permission = permission__check(BRUCE_PERMISSION_IR);
@@ -531,23 +564,7 @@ bruce_result_t ir__transmit_file(const char *path, uint8_t repeats)
     }
     contents[total] = '\0';
 
-    bool sent = false;
-    char *cursor = contents;
-    while (*cursor != '\0') {
-        char *delimiter = strstr(cursor, "\n#");
-        if (delimiter == NULL) delimiter = cursor + strlen(cursor);
-        char saved = *delimiter;
-        *delimiter = '\0';
-        bruce_result_t record_result = ir__send_file_record(cursor, repeats);
-        if (record_result == BRUCE_OK) sent = true;
-        else if (record_result != BRUCE_ERR_NOT_FOUND) {
-            free(contents);
-            return record_result;
-        }
-        if (saved == '\0') break;
-        cursor = delimiter + 2;
-        while (*cursor == '\r' || *cursor == '\n' || *cursor == '#') cursor++;
-    }
+    result = ir__transmit_record(contents, repeats);
     free(contents);
-    return sent ? BRUCE_OK : BRUCE_ERR_NOT_FOUND;
+    return result;
 }

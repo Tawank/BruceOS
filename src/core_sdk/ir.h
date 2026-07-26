@@ -35,5 +35,9 @@ bruce_result_t ir__receive(bool raw, uint32_t timeout_ms, char *out, size_t out_
  * Supported parsed records are the same protocols accepted by ir__transmit(). */
 bruce_result_t ir__transmit_file(const char *path, uint8_t repeats);
 
+/* Replays one or more version-1 records already held in memory. This is useful
+ * for testing a learned capture before it is saved and requires only `ir`. */
+bruce_result_t ir__transmit_record(const char *contents, uint8_t repeats);
+
 int ir__tx_pin(void);
 int ir__rx_pin(void);

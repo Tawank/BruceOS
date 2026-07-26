@@ -558,3 +558,20 @@ bruce_result_t storage__list(const char *path, bruce_storage_entry_t *entries, s
     storage__unlock();
     return BRUCE_OK;
 }
+
+bruce_result_t storage__mkdir(const char *path)
+{
+    bruce_result_t permission = permission__check(BRUCE_PERMISSION_STORAGE);
+    if (permission != BRUCE_OK) return permission;
+    if (!storage__is_valid_public_path(path) || strcmp(path, "/") == 0) return BRUCE_ERR_INVALID_PATH;
+    if (storage__is_protected_path(path)) return BRUCE_ERR_PERMISSION;
+
+    storage__lock();
+    bruce_result_t result = BRUCE_OK;
+    struct stat path_stat;
+    if (!storage__is_ready(path)) result = BRUCE_ERR_INVALID_STATE;
+    else if (stat(path, &path_stat) == 0) result = S_ISDIR(path_stat.st_mode) ? BRUCE_OK : BRUCE_ERR_INVALID_PATH;
+    else if (mkdir(path, 0775) != 0) result = errno == ENOENT ? BRUCE_ERR_NOT_FOUND : BRUCE_ERR_IO;
+    storage__unlock();
+    return result;
+}

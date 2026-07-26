@@ -77,6 +77,7 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(ir__transmit_parsed),
     ESP_ELFSYM_EXPORT(ir__receive),
     ESP_ELFSYM_EXPORT(ir__transmit_file),
+    ESP_ELFSYM_EXPORT(ir__transmit_record),
     ESP_ELFSYM_EXPORT(ir__tx_pin),
     ESP_ELFSYM_EXPORT(ir__rx_pin),
 
@@ -147,6 +148,7 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(storage__seek),
     ESP_ELFSYM_EXPORT(storage__close),
     ESP_ELFSYM_EXPORT(storage__list),
+    ESP_ELFSYM_EXPORT(storage__mkdir),
 
     /* Standard C library subset (provided by firmware, not by forwarding
      * malloc/free to libc). */
