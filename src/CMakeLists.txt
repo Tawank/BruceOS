@@ -16,6 +16,7 @@ idf_component_register(SRCS
                     "core/task/task.c"
                     "core/wifi/wifi_common.c"
                     "modules/bruce_launcher/bruce_launcher_app.c"
+                    "modules/filemanager/filemanager_app.c"
                     "modules/loaders/elf/elf_loader_app.c"
                     "modules/loaders/elf/elf_loader_sdk_symbols.c"
                     "modules/loaders/js/dialog_js.c"
@@ -82,6 +83,11 @@ add_library(bruce_sdk_builtin_wifi_check OBJECT "modules/wifi/wifi_app.c")
 target_include_directories(bruce_sdk_builtin_wifi_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/wifi")
+
+add_library(bruce_sdk_builtin_filemanager_check OBJECT "modules/filemanager/filemanager_app.c")
+target_include_directories(bruce_sdk_builtin_filemanager_check PRIVATE
+                           "${CMAKE_CURRENT_LIST_DIR}"
+                           "${CMAKE_CURRENT_LIST_DIR}/modules/filemanager")
 
 add_library(bruce_sdk_builtin_utils_launcher_check OBJECT "modules/utils/launcher/launcher_app.c")
 target_include_directories(bruce_sdk_builtin_utils_launcher_check PRIVATE

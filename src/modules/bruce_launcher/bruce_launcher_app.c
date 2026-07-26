@@ -43,6 +43,7 @@ typedef enum {
     BRUCE_LAUNCHER_ICON_SELFTEST,
     BRUCE_LAUNCHER_ICON_TERMINAL,
     BRUCE_LAUNCHER_ICON_TASKS,
+    BRUCE_LAUNCHER_ICON_FILES,
 } bruce_launcher_icon_t;
 
 /* One entry in the launcher menu.  Built-ins are dispatched by name; /apps/
@@ -94,6 +95,8 @@ static bool bruce_launcher__add_builtin(bruce_launcher_entry_t *entries, int *co
         entry->icon = BRUCE_LAUNCHER_ICON_TERMINAL;
     } else if (strcmp(app_name, BRUCE_LAUNCHER_TASKS_APP) == 0) {
         entry->icon = BRUCE_LAUNCHER_ICON_TASKS;
+    } else if (strcmp(app_name, "filemanager") == 0) {
+        entry->icon = BRUCE_LAUNCHER_ICON_FILES;
     }
     return true;
 }
@@ -296,6 +299,15 @@ static void bruce_launcher__draw_entry_icon(bruce_launcher_icon_t icon, int x, i
                                  size - offset - pad, size / 10, color);
         display__draw_round_rect(x + pad, y + offset, size - offset - pad,
                                  size - offset - pad, size / 10, color);
+    } else if (icon == BRUCE_LAUNCHER_ICON_FILES) {
+        int page_w = size * 3 / 5;
+        int page_h = size * 3 / 4;
+        int step = size / 6;
+        display__draw_rect(x + step * 2, y + pad, page_w, page_h, color);
+        display__fill_rect(x + step, y + step, page_w, page_h, background);
+        display__draw_rect(x + step, y + step, page_w, page_h, color);
+        display__fill_rect(x, y + step * 2, page_w, page_h, background);
+        display__draw_rect(x, y + step * 2, page_w, page_h, color);
     }
 }
 
@@ -767,6 +779,8 @@ int bruce_launcher_app_main(int argc, char **argv)
     (void)bruce_launcher__add_builtin(entries, &entry_count, BRUCE_LAUNCHER_MAX_ENTRIES, "terminal", "Terminal");
     (void)bruce_launcher__add_builtin(entries, &entry_count, BRUCE_LAUNCHER_MAX_ENTRIES,
                                        BRUCE_LAUNCHER_TASKS_APP, "Tasks");
+    (void)bruce_launcher__add_builtin(entries, &entry_count, BRUCE_LAUNCHER_MAX_ENTRIES,
+                                       "filemanager", "Files");
 
     int builtin_count = entry_count;
 

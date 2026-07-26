@@ -83,6 +83,11 @@ public Config API and starts that command with app_runner.  The default is
 carousel; Built-ins and Apps open list submenus with up to four visible rows.
 It appends `--gui` to every app it launches.
 
+The built-in `filemanager` app browses mounted storage through `storage__list()`
+and `dialog__pick_file()`. It can show a bounded text preview, report file size,
+or dispatch a selected file through `app_runner__run_path()`; it does not bypass
+the public Storage API to implement unsupported mutation operations.
+
 ## Applications and app_runner
 
 ### Entry points
