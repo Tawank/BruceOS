@@ -24,6 +24,7 @@
 #include "core_sdk/display.h"
 #include "core_sdk/gpio.h"
 #include "core_sdk/i2c.h"
+#include "core_sdk/image.h"
 #include "core_sdk/input.h"
 #include "core_sdk/ir.h"
 #include "core_sdk/loader.h"
@@ -154,6 +155,11 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(display__begin_frame),
     ESP_ELFSYM_EXPORT(display__present),
     ESP_ELFSYM_EXPORT(display__flush),
+
+    /* Encoded images */
+    ESP_ELFSYM_EXPORT(image__draw_memory),
+    ESP_ELFSYM_EXPORT(image__draw_path),
+    ESP_ELFSYM_EXPORT(image__is_supported_path),
 
     /* Unrestricted global UI services */
     ESP_ELFSYM_EXPORT(notification__push),

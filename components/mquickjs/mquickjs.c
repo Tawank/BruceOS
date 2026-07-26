@@ -2107,6 +2107,7 @@ const char *JS_GetTypedArrayBuffer(JSContext *ctx, size_t *plen, JSValue val)
 
         pbuffer = JS_VALUE_TO_PTR(p->u.typed_array.buffer);
         arr = JS_VALUE_TO_PTR(pbuffer->u.array_buffer.byte_buffer);
+        size_t element_size;
         if (plen) {
             *plen = p->u.typed_array.len;
             switch(p->class_id) {
@@ -2137,9 +2138,28 @@ const char *JS_GetTypedArrayBuffer(JSContext *ctx, size_t *plen, JSValue val)
                 *plen *= sizeof(double);
                 break;
             }
-            
         }
-        return (const char *)(arr->buf);
+        switch(p->class_id) {
+        default:
+        case JS_CLASS_UINT8C_ARRAY:
+        case JS_CLASS_UINT8_ARRAY:
+        case JS_CLASS_INT8_ARRAY:
+            element_size = 1;
+            break;
+        case JS_CLASS_INT16_ARRAY:
+        case JS_CLASS_UINT16_ARRAY:
+            element_size = 2;
+            break;
+        case JS_CLASS_INT32_ARRAY:
+        case JS_CLASS_UINT32_ARRAY:
+        case JS_CLASS_FLOAT32_ARRAY:
+            element_size = 4;
+            break;
+        case JS_CLASS_FLOAT64_ARRAY:
+            element_size = 8;
+            break;
+        }
+        return (const char *)(arr->buf + p->u.typed_array.offset * element_size);
     }
     return NULL;
 }

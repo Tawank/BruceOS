@@ -1,6 +1,9 @@
 #include "display_js.h"
 
 #include "core_sdk/display.h"
+#include "core_sdk/image.h"
+
+#include "native_helpers_js.h"
 
 /* -------------------------------------------------------------------------- */
 /* Legacy mquickjs stdlib native functions (direct C bindings)             */
@@ -413,22 +416,56 @@ JSValue native_drawArc(JSContext *ctx, JSValue *this_val, int argc, JSValue *arg
     return JS_UNDEFINED;
 }
 
+static JSValue native_drawImageCommon(JSContext *ctx, int argc, JSValue *argv)
+{
+    if (argc < 1 || (!JS_IsString(ctx, argv[0]) && !JS_IsTypedArray(ctx, argv[0]))) {
+        return JS_ThrowTypeError(ctx, "display image source must be a path or Uint8Array");
+    }
+    bruce_image_draw_options_t options = {
+        .x = (int16_t)native_arg_int(ctx, argc, argv, 1, 0),
+        .y = (int16_t)native_arg_int(ctx, argc, argv, 2, 0),
+        .center = js_native_arg_bool(ctx, argc, argv, 3, false),
+        .fit = js_native_arg_bool(ctx, argc, argv, 4, false),
+        .background = BRUCE_COLOR_BLACK,
+    };
+    bruce_result_t result;
+    if (JS_IsString(ctx, argv[0])) {
+        JSCStringBuf path_buffer;
+        const char *path = JS_ToCString(ctx, argv[0], &path_buffer);
+        if (path == NULL) return JS_ThrowTypeError(ctx, "invalid image path");
+        result = image__draw_path(path, &options, NULL);
+    } else {
+        size_t size = 0;
+        const uint8_t *data = (const uint8_t *)JS_GetTypedArrayBuffer(ctx, &size, argv[0]);
+        if (data == NULL || size == 0) return JS_ThrowTypeError(ctx, "empty image data");
+        result = image__draw_memory(data, size, &options, NULL);
+    }
+    if (result != BRUCE_OK) return JS_ThrowInternalError(ctx, "image decode failed: %d", (int)result);
+    return JS_NewBool(true);
+}
+
+JSValue native_drawImage(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
+{
+    (void)this_val;
+    return native_drawImageCommon(ctx, argc, argv);
+}
+
 JSValue native_drawJpg(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
 {
-    (void)ctx;
     (void)this_val;
-    (void)argc;
-    (void)argv;
-    return JS_UNDEFINED;
+    return native_drawImageCommon(ctx, argc, argv);
+}
+
+JSValue native_drawPng(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
+{
+    (void)this_val;
+    return native_drawImageCommon(ctx, argc, argv);
 }
 
 JSValue native_drawGif(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
 {
-    (void)ctx;
     (void)this_val;
-    (void)argc;
-    (void)argv;
-    return JS_UNDEFINED;
+    return native_drawImageCommon(ctx, argc, argv);
 }
 
 JSValue native_gifOpen(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
@@ -502,4 +539,3 @@ JSValue native_deleteSprite(JSContext *ctx, JSValue *this_val, int argc, JSValue
     (void)argv;
     return JS_UNDEFINED;
 }
-

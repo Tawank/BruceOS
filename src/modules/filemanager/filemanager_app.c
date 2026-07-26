@@ -8,9 +8,11 @@
 #include "core_sdk/app_runner.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/input.h"
+#include "core_sdk/image.h"
 #include "core_sdk/loader.h"
 #include "core_sdk/result.h"
 #include "core_sdk/storage.h"
+#include "core_sdk/task.h"
 
 #define FILEMANAGER_PREVIEW_MAX 4096
 
@@ -57,6 +59,12 @@ static bruce_result_t filemanager__read_preview(const char *path, char **out_tex
 
 static bruce_result_t filemanager__view_file(const char *path, bool gui)
 {
+    if (image__is_supported_path(path)) {
+        int task = app_runner__run_path(path, NULL, false);
+        if (task <= 0) return (bruce_result_t)task;
+        return task__wait((bruce_task_id_t)task, UINT32_MAX);
+    }
+
     char *text = NULL;
     bool truncated = false;
     bruce_result_t result = filemanager__read_preview(path, &text, &truncated);
@@ -123,7 +131,7 @@ int filemanager_app_main(int argc, char **argv)
 {
     bool gui = app_runner__args_have_gui(argc, argv);
     const bruce_dialog_choice_t actions[] = {
-        {.label = "View file", .value = "view"},
+        {.label = "Open / view", .value = "view"},
         {.label = "File info", .value = "info"},
         {.label = "Run", .value = "run"},
         {.label = "Back", .value = "back"},

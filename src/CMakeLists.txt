@@ -8,6 +8,7 @@ idf_component_register(SRCS
                      "core/display/display.c"
                      "core/gpio/gpio.c"
                      "core/http/http.c"
+                     "core/image/image.c"
                      "core/i2c/i2c.c"
                     "core/input/input.c"
                     "core/ir/ir.c"
@@ -28,7 +29,8 @@ idf_component_register(SRCS
                     "modules/bluetooth_hid/bluetooth_hid_app.c"
                     "modules/filemanager/filemanager_app.c"
                     "modules/loaders/elf/elf_loader_app.c"
-                    "modules/loaders/elf/elf_loader_sdk_symbols.c"
+                     "modules/loaders/elf/elf_loader_sdk_symbols.c"
+                     "modules/loaders/image/image_loader_app.c"
                     "modules/loaders/js/dialog_js.c"
                     "modules/loaders/js/display_js.c"
                     "modules/loaders/js/js_stdlib.c"
@@ -46,7 +48,8 @@ idf_component_register(SRCS
                      "modules/selftest/display_test.c"
                      "modules/selftest/gpio_bus_test.c"
                     "modules/selftest/fake_elf.c"
-                    "modules/selftest/input_test.c"
+                     "modules/selftest/input_test.c"
+                     "modules/selftest/image_test.c"
                     "modules/selftest/ir_test.c"
                     "modules/selftest/launcher_test.c"
                     "modules/selftest/loader_test.c"
@@ -77,7 +80,8 @@ idf_component_register(SRCS
                     esp_driver_spi
                     esp_driver_sdspi
                     esp_http_client
-                    esp_lcd
+                     esp_lcd
+                     esp_jpeg
                     esp_hid
                     esp_netif
                     esp_wifi
@@ -85,7 +89,8 @@ idf_component_register(SRCS
                     log
                     lwip
                     nvs_flash
-                    littlefs
+                     littlefs
+                     libpng
                     elf_loader
                     mquickjs
                     INCLUDE_DIRS
@@ -130,6 +135,11 @@ add_library(bruce_sdk_builtin_filemanager_check OBJECT "modules/filemanager/file
 target_include_directories(bruce_sdk_builtin_filemanager_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/filemanager")
+
+add_library(bruce_sdk_builtin_image_loader_check OBJECT "modules/loaders/image/image_loader_app.c")
+target_include_directories(bruce_sdk_builtin_image_loader_check PRIVATE
+                           "${CMAKE_CURRENT_LIST_DIR}"
+                           "${CMAKE_CURRENT_LIST_DIR}/modules/loaders/image")
 
 add_library(bruce_sdk_builtin_utils_launcher_check OBJECT "modules/utils/launcher/launcher_app.c")
 target_include_directories(bruce_sdk_builtin_utils_launcher_check PRIVATE

@@ -486,6 +486,16 @@ of `display__present()`; tile rows are packed into worker-owned DMA scratch.
 Text and cursor state are task-local, rotation is global, and no resize event is
 emitted. `display__flush()` provides an implicit-frame compatibility path.
 
+Image Core decodes JPEG, PNG, and the first frame of GIF data from memory or a
+Core storage path into the caller's viewport. `image__draw_memory()` and
+`image__draw_path()` optionally fit without upscaling, preserve aspect ratio,
+center relative to caller coordinates, and composite transparency over a
+caller-selected RGB565 background. They update the framebuffer but leave frame
+presentation to the caller. The image loader registers `.jpg`, `.jpeg`, `.png`,
+and `.gif` case-insensitively; its viewer fits, centers, presents, and remains
+open until input. File manager image viewing and terminal/serial direct paths
+use this same loader. GIF animation is not part of this initial contract.
+
 Core also owns one transient notification overlay. `notification__push()` and
 `notification__dismiss()` are unrestricted, last-writer-wins operations; text
 is copied into fixed storage and duration is clamped to 250 through 30000 ms.

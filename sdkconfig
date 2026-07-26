@@ -4339,6 +4339,13 @@ CONFIG_ELF_LOADER_NUMBER_SYMBOLS=32
 # end of Espressif ELF Loader Configuration
 
 #
+# JPEG Decoder
+#
+# default:
+CONFIG_JD_USE_ROM=y
+# end of JPEG Decoder
+
+#
 # LittleFS
 #
 # default:

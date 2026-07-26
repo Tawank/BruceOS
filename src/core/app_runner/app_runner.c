@@ -15,6 +15,7 @@
 #include "modules/bluetooth_hid/bluetooth_hid_app.h"
 #include "modules/filemanager/filemanager_app.h"
 #include "modules/loaders/elf/elf_loader_app.h"
+#include "modules/loaders/image/image_loader_app.h"
 #include "modules/loaders/js/js_loader_app.h"
 #include "modules/ir/ir_app.h"
 #include "modules/nrf24/nrf24_app.h"
@@ -29,10 +30,11 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
-#define APP_RUNNER_MAX_APPS 16
+#define APP_RUNNER_MAX_APPS 20
 #define APP_RUNNER_PATH_MAX 160
-#define APP_RUNNER_MAX_LOADERS 8
+#define APP_RUNNER_MAX_LOADERS 12
 #define APP_RUNNER_LOADER_EXTENSION_MAX 16
 
 typedef struct {
@@ -92,11 +94,17 @@ void app_runner__register_defaults(void)
     (void)app_runner__register("terminal", terminal_app_main);
     (void)app_runner__register("elf", elf_loader__app_main);
     (void)app_runner__register("js", js_loader__app_main);
+    (void)app_runner__register("image", image_app_main);
+    (void)app_runner__register("image_viewer", image_viewer_app_main);
     (void)app_runner__register("notification", notification_app_main);
     (void)app_runner__register("tcp", tcp_app_main);
 
     (void)app_runner__register_loader(".elf", 10, elf_loader__run_path);
     (void)app_runner__register_loader(".js", 20, js_loader__run_path);
+    (void)app_runner__register_loader(".jpg", 30, image_loader__run_path);
+    (void)app_runner__register_loader(".jpeg", 30, image_loader__run_path);
+    (void)app_runner__register_loader(".png", 30, image_loader__run_path);
+    (void)app_runner__register_loader(".gif", 30, image_loader__run_path);
 
     elf_loader__init();
 }
@@ -164,7 +172,7 @@ static bool app_runner__path_has_extension(const char *path, const char *extensi
 {
     size_t path_len = strlen(path);
     size_t ext_len = strlen(extension);
-    return path_len > ext_len && strcmp(path + path_len - ext_len, extension) == 0;
+    return path_len > ext_len && strcasecmp(path + path_len - ext_len, extension) == 0;
 }
 
 static app_runner_loader_t *app_runner__find_loader_for_path(const char *path)
