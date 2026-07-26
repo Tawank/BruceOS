@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "core_sdk/app_runner.h"
+#include "core_sdk/bluetooth_hid.h"
 #include "core_sdk/config.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/display.h"
@@ -784,6 +785,12 @@ int bruce_launcher_app_main(int argc, char **argv)
      * commands.  The launcher is only menu composition: it does not contain any
      * feature logic. */
     (void)bruce_launcher__add_builtin(entries, &entry_count, BRUCE_LAUNCHER_MAX_ENTRIES, "wifi", "Wi-Fi");
+    (void)bruce_launcher__add_builtin(entries, &entry_count, BRUCE_LAUNCHER_MAX_ENTRIES,
+                                       "bluetooth", "BLE Scanner");
+    if (bluetooth_hid__is_supported()) {
+        (void)bruce_launcher__add_builtin(entries, &entry_count, BRUCE_LAUNCHER_MAX_ENTRIES,
+                                           "bluetooth_hid_app", "Bluetooth HID");
+    }
     (void)bruce_launcher__add_builtin(entries, &entry_count, BRUCE_LAUNCHER_MAX_ENTRIES, "ir", "Infrared");
     (void)bruce_launcher__add_builtin(entries, &entry_count, BRUCE_LAUNCHER_MAX_ENTRIES, "selftest", "Self-test");
     (void)bruce_launcher__add_builtin(entries, &entry_count, BRUCE_LAUNCHER_MAX_ENTRIES, "terminal", "Terminal");

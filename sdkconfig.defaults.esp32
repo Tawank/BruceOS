@@ -1,0 +1,10 @@
+# Original ESP32 targets additionally support Classic Bluetooth HID host mode.
+CONFIG_BTDM_CTRL_MODE_BTDM=y
+CONFIG_BT_CLASSIC_ENABLED=y
+CONFIG_BT_HID_ENABLED=y
+CONFIG_BT_HID_HOST_ENABLED=y
+
+# BTDM and the full Bruce runtime compete for the original ESP32's smaller
+# IRAM. Keep Wi-Fi functional but place its optional hot paths in flash.
+CONFIG_ESP_WIFI_IRAM_OPT=n
+CONFIG_ESP_WIFI_RX_IRAM_OPT=n

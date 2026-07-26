@@ -1,6 +1,8 @@
-# 2 MB layout for the currently configured ESP32-S3 target.
+# 8 MB layout. Keep existing data partitions at their original offsets so an
+# upgrade does not discard configuration or files; the larger app lives above
+# the former 2 MB image range.
 # Name,   Type, SubType, Offset,  Size, Flags
 nvs,      data, nvs,      0x9000,  0x6000,
-factory,  app,  factory,  0x10000, 0x170000,
 littlefs, data, littlefs, 0x180000,0x70000,
 coredump, data, coredump, 0x1F0000,0x10000,
+factory,  app,  factory,  0x200000,0x300000,

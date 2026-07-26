@@ -34,3 +34,9 @@ CONFIG_BRUCE_BOARD_M5_CARDPUTER=y
 # Larger stack for the bruce_input polling task (src/core/input/input.c).
 # The previous default of 4 KiB caused stack overflows on the Cardputer keyboard path.
 CONFIG_BRUCE_INPUT_TASK_STACK=8192
+
+# BLE advertisement scanning uses Bluedroid on every supported target.
+CONFIG_BT_ENABLED=y
+CONFIG_BT_BLUEDROID_ENABLED=y
+CONFIG_BT_BLE_ENABLED=y
+CONFIG_BT_BLE_42_FEATURES_SUPPORTED=y

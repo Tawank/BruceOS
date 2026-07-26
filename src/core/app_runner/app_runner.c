@@ -11,6 +11,8 @@
 #include "core_sdk/task.h"
 
 #include "modules/bruce_launcher/bruce_launcher_app.h"
+#include "modules/bluetooth/bluetooth_app.h"
+#include "modules/bluetooth_hid/bluetooth_hid_app.h"
 #include "modules/filemanager/filemanager_app.h"
 #include "modules/loaders/elf/elf_loader_app.h"
 #include "modules/loaders/js/js_loader_app.h"
@@ -81,6 +83,8 @@ void app_runner__register_defaults(void)
     (void)app_runner__register("bruce_launcher", bruce_launcher_app_main);
     (void)app_runner__register("filemanager", filemanager_app_main);
     (void)app_runner__register("wifi", wifi_app_main);
+    (void)app_runner__register("bluetooth", bluetooth_app_main);
+    (void)app_runner__register("bluetooth_hid_app", bluetooth_hid_app_main);
     (void)app_runner__register("ir", ir_app_main);
     (void)app_runner__register("selftest", selftest_app_main);
     (void)app_runner__register("terminal", terminal_app_main);

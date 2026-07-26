@@ -1,6 +1,8 @@
 idf_component_register(SRCS
                     "main.c"
                     "core/app_runner/app_runner.c"
+                    "core/bluetooth/bluetooth.c"
+                    "core/bluetooth/bluetooth_hid.c"
                     "core/config/config.c"
                     "core/dialog/dialog.c"
                     "core/display/display.c"
@@ -18,6 +20,8 @@ idf_component_register(SRCS
                     "core/tcp/tcp.c"
                     "core/wifi/wifi_common.c"
                     "modules/bruce_launcher/bruce_launcher_app.c"
+                    "modules/bluetooth/bluetooth_app.c"
+                    "modules/bluetooth_hid/bluetooth_hid_app.c"
                     "modules/filemanager/filemanager_app.c"
                     "modules/loaders/elf/elf_loader_app.c"
                     "modules/loaders/elf/elf_loader_sdk_symbols.c"
@@ -32,6 +36,7 @@ idf_component_register(SRCS
                     "modules/loaders/js/serial_js.c"
                     "modules/loaders/js/wifi_js.c"
                     "modules/selftest/app_runner_test.c"
+                    "modules/selftest/bluetooth_test.c"
                     "modules/selftest/config_test.c"
                     "modules/selftest/dialog_test.c"
                     "modules/selftest/display_test.c"
@@ -55,6 +60,7 @@ idf_component_register(SRCS
                     "modules/wifi/wifi_app.c"
                     REQUIRES
                     cjson
+                    bt
                     esp_event
                     driver
                     esp_driver_gpio
@@ -64,6 +70,7 @@ idf_component_register(SRCS
                     esp_driver_sdspi
                     esp_http_client
                     esp_lcd
+                    esp_hid
                     esp_netif
                     esp_wifi
                     fatfs
@@ -90,6 +97,16 @@ add_library(bruce_sdk_builtin_wifi_check OBJECT "modules/wifi/wifi_app.c")
 target_include_directories(bruce_sdk_builtin_wifi_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/wifi")
+
+add_library(bruce_sdk_builtin_bluetooth_check OBJECT "modules/bluetooth/bluetooth_app.c")
+target_include_directories(bruce_sdk_builtin_bluetooth_check PRIVATE
+                           "${CMAKE_CURRENT_LIST_DIR}"
+                           "${CMAKE_CURRENT_LIST_DIR}/modules/bluetooth")
+
+add_library(bruce_sdk_builtin_bluetooth_hid_check OBJECT "modules/bluetooth_hid/bluetooth_hid_app.c")
+target_include_directories(bruce_sdk_builtin_bluetooth_hid_check PRIVATE
+                           "${CMAKE_CURRENT_LIST_DIR}"
+                           "${CMAKE_CURRENT_LIST_DIR}/modules/bluetooth_hid")
 
 add_library(bruce_sdk_builtin_ir_check OBJECT "modules/ir/ir_app.c")
 target_include_directories(bruce_sdk_builtin_ir_check PRIVATE

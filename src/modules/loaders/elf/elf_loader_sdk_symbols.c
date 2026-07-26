@@ -18,6 +18,8 @@
 #include "esp_elf.h"
 
 #include "core_sdk/app_runner.h"
+#include "core_sdk/bluetooth.h"
+#include "core_sdk/bluetooth_hid.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/display.h"
 #include "core_sdk/input.h"
@@ -72,6 +74,15 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(input__wait),
     ESP_ELFSYM_EXPORT(input__check),
     ESP_ELFSYM_EXPORT(input__inject),
+
+    /* Bluetooth advertisement scan and Classic HID host */
+    ESP_ELFSYM_EXPORT(bluetooth__scan_ble),
+    ESP_ELFSYM_EXPORT(bluetooth_hid__is_supported),
+    ESP_ELFSYM_EXPORT(bluetooth_hid__scan),
+    ESP_ELFSYM_EXPORT(bluetooth_hid__connect),
+    ESP_ELFSYM_EXPORT(bluetooth_hid__disconnect),
+    ESP_ELFSYM_EXPORT(bluetooth_hid__is_connected),
+    ESP_ELFSYM_EXPORT(bluetooth_hid__connected_device),
 
     /* Infrared */
     ESP_ELFSYM_EXPORT(ir__transmit_raw),

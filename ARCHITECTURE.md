@@ -426,6 +426,28 @@ files, sockets, viewers, radios, and similar resources.  Apps cannot register
 arbitrary callbacks.  At normal exit or kill, Core reads the registry before
 the task disappears and cleans resources in reverse acquisition order.
 
+## Bluetooth
+
+Bluetooth Core owns the single ESP-IDF controller and Bluedroid host instance.
+`bluetooth__scan_ble()` performs a bounded, synchronous BLE advertisement scan,
+deduplicates devices by address, and returns Core-independent result records in
+descending RSSI order. Bluetooth APIs require `bt`; built-in apps receive that
+permission implicitly.
+
+Classic HID hosting is exposed separately through `bluetooth_hid__*`. It is
+available only when the SoC and build support Classic Bluetooth and otherwise
+returns `BRUCE_ERR_UNSUPPORTED` (notably on ESP32-S3). One Classic HID keyboard
+or gamepad may be connected at a time. The connection belongs to the task that
+opened it and closes during task cleanup. The `bluetooth_hid_app` built-in can
+remain in the background while its device feeds the foreground app.
+
+Keyboard boot reports become key press/release events, including normalized
+navigation, Select, and Back codes. Common gamepad reports expose four signed
+axes, a hat mapped to directional events, and twelve stable button codes through
+the public input vocabulary. Descriptor-specific report layouts that do not
+match that common format are not guessed. All accepted HID reports enter Bruce
+only through `input__inject()`; modules never receive ESP-IDF Bluetooth handles.
+
 ## Input, display, storage, and Config
 
 Physical buttons, touch, keyboard, and encoder input go only to the effective

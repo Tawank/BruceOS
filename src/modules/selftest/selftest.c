@@ -6,6 +6,7 @@
 #include "freertos/task.h"
 
 #include "task_test.h"
+#include "bluetooth_test.h"
 #include "app_runner_test.h"
 #include "permission_test.h"
 #include "storage_test.h"
@@ -82,6 +83,8 @@ int selftest_app_main(int argc, char **argv)
     RUN_SELFTEST(selftest__run_input_peek_case);
     RUN_SELFTEST(selftest__run_input_wait_case);
     RUN_SELFTEST(selftest__run_input_check_case);
+    RUN_SELFTEST(selftest__run_bluetooth_hid_keyboard_translation_case);
+    RUN_SELFTEST(selftest__run_bluetooth_hid_validation_case);
     RUN_SELFTEST(selftest__run_dialog_text_input_case);
     RUN_SELFTEST(selftest__run_dialog_hex_input_case);
     RUN_SELFTEST(selftest__run_dialog_number_input_case);
