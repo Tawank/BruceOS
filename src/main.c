@@ -6,6 +6,7 @@
 #include "core/app_runner/app_runner.h"
 #include "core/config/config.h"
 #include "core/input/input.h"
+#include "core/ir/ir.h"
 #include "freertos/idf_additions.h"
  
 void app_main(void)
@@ -20,6 +21,9 @@ void app_main(void)
     bool input_ok = input__init() == BRUCE_OK;
     if (!input_ok) {
         printf("Input initialization failed; continuing without physical input\n");
+    }
+    if (ir__init() != BRUCE_OK) {
+        printf("Infrared initialization failed; IR is unavailable\n");
     }
     app_runner__register_defaults();
 

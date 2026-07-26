@@ -468,6 +468,15 @@ immediately.  The following fields are permanently protected from ELF and JS,
 even with `config`: `wifiApSsid`, `webUIPassword`, `wifiCredentials`,
 `wifiMAC`, and `webUIUser`.  Built-ins may use those APIs.
 
+`ir` grants access to synchronous ESP-IDF RMT infrared capture and transmit
+through `ir__receive()`, `ir__transmit()`, and `ir__transmit_raw()`. Captures
+are returned as Bruce/Flipper version-1 IR records. Decoded capture recognizes
+NEC; NEC, NECext, Samsung32, and Sony SIRC variants can be transmitted. Unknown
+captures can be read as raw 38 kHz timings. `ir__transmit_file()` replays version-1 `.ir` files and
+also requires `storage`, since it uses task-owned public storage handles. One
+transmission is always made and `repeats` specifies additional transmissions.
+IR GPIOs are board defaults configurable through Kconfig.
+
 ## Public SDK and migration rules
 
 Maintain two header layers:

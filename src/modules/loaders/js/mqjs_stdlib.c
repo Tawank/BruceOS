@@ -400,8 +400,6 @@ static const JSPropDef js_badusb[] = {
 const JSClassDef js_badusb_obj = JS_OBJECT_DEF("BadUSB", js_badusb);
 #endif
 
-/* IR module - not implemented */
-#if 0
 static const JSPropDef js_ir[] = {
     JS_CFUNC_DEF("read", 1, native_irRead),
     JS_CFUNC_DEF("readRaw", 1, native_irReadRaw),
@@ -411,7 +409,6 @@ static const JSPropDef js_ir[] = {
 };
 
 const JSClassDef js_ir_obj = JS_OBJECT_DEF("IR", js_ir);
-#endif
 
 /* Dialog module */
 static const JSPropDef js_dialog[] = {
@@ -892,6 +889,7 @@ static const JSPropDef js_global_object[] = {
     JS_PROP_CLASS_DEF("runtime", &js_runtime_obj),
     JS_PROP_CLASS_DEF("notification", &js_notification_obj),
     JS_PROP_CLASS_DEF("statusIcon", &js_status_icon_obj),
+    JS_PROP_CLASS_DEF("ir", &js_ir_obj),
 
     /* The following Bruce modules are not implemented yet */
 #if 0
@@ -900,7 +898,6 @@ static const JSPropDef js_global_object[] = {
     JS_PROP_CLASS_DEF("device", &js_device_obj),
     JS_PROP_CLASS_DEF("gpio", &js_gpio_obj),
     JS_PROP_CLASS_DEF("i2c", &js_i2c_obj),
-    JS_PROP_CLASS_DEF("ir", &js_ir_obj),
     JS_PROP_CLASS_DEF("mic", &js_mic_obj),
     JS_PROP_CLASS_DEF("rfid", &js_rfid_obj),
     JS_PROP_CLASS_DEF("storage", &js_storage_obj),

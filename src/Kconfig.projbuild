@@ -47,4 +47,20 @@ menu "Bruce hardware configuration"
             Stack size for the bruce_input polling task. Increase this value if
             a stack overflow is reported for bruce_input.
 
+    config BRUCE_IR_TX_GPIO
+        int "Infrared transmit GPIO"
+        default 44 if BRUCE_BOARD_M5_CARDPUTER
+        default 19 if BRUCE_BOARD_M5_STICKC_PLUS2
+        range 0 48
+        help
+            GPIO connected to the active-high infrared transmitter.
+
+    config BRUCE_IR_RX_GPIO
+        int "Infrared receive GPIO"
+        default 1 if BRUCE_BOARD_M5_CARDPUTER
+        default 33 if BRUCE_BOARD_M5_STICKC_PLUS2
+        range 0 48
+        help
+            GPIO connected to the active-low infrared receiver output.
+
 endmenu

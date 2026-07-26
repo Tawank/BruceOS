@@ -14,6 +14,7 @@
 #include "modules/filemanager/filemanager_app.h"
 #include "modules/loaders/elf/elf_loader_app.h"
 #include "modules/loaders/js/js_loader_app.h"
+#include "modules/ir/ir_app.h"
 #include "modules/selftest/selftest.h"
 #include "modules/utils/launcher/launcher_app.h"
 #include "modules/utils/terminal/terminal_app.h"
@@ -79,6 +80,7 @@ void app_runner__register_defaults(void)
     (void)app_runner__register("bruce_launcher", bruce_launcher_app_main);
     (void)app_runner__register("filemanager", filemanager_app_main);
     (void)app_runner__register("wifi", wifi_app_main);
+    (void)app_runner__register("ir", ir_app_main);
     (void)app_runner__register("selftest", selftest_app_main);
     (void)app_runner__register("terminal", terminal_app_main);
     (void)app_runner__register("elf", elf_loader__app_main);

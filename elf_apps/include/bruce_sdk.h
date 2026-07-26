@@ -10,6 +10,7 @@
 #include "core_sdk/app_runner.h"  // IWYU pragma: export
 #include "core_sdk/display.h"     // IWYU pragma: export
 #include "core_sdk/loader.h"      // IWYU pragma: export
+#include "core_sdk/ir.h"          // IWYU pragma: export
 #include "core_sdk/manifest.h"    // IWYU pragma: export
 #include "core_sdk/memory.h"      // IWYU pragma: export
 #include "core_sdk/notification.h" // IWYU pragma: export

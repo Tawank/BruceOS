@@ -6,6 +6,7 @@ idf_component_register(SRCS
                     "core/display/display.c"
                     "core/http/http.c"
                     "core/input/input.c"
+                    "core/ir/ir.c"
                     "core/manifest/manifest.c"
                     "core/memory/memory.c"
                     "core/notification/notification.c"
@@ -23,6 +24,7 @@ idf_component_register(SRCS
                     "modules/loaders/js/display_js.c"
                     "modules/loaders/js/js_stdlib.c"
                     "modules/loaders/js/keyboard_js.c"
+                    "modules/loaders/js/ir_js.c"
                     "modules/loaders/js/notification_js.c"
                     "modules/loaders/js/js_loader_app.c"
                     "modules/loaders/js/runtime_js.c"
@@ -34,6 +36,7 @@ idf_component_register(SRCS
                     "modules/selftest/display_test.c"
                     "modules/selftest/fake_elf.c"
                     "modules/selftest/input_test.c"
+                    "modules/selftest/ir_test.c"
                     "modules/selftest/launcher_test.c"
                     "modules/selftest/loader_test.c"
                     "modules/selftest/permission_test.c"
@@ -46,6 +49,7 @@ idf_component_register(SRCS
                     "modules/utils/launcher/launcher_app.c"
                     "modules/utils/terminal/terminal_app.c"
                     "modules/utils/notification/notification_app.c"
+                    "modules/ir/ir_app.c"
                     "modules/wifi/wifi_app.c"
                     REQUIRES
                     cjson
@@ -53,6 +57,7 @@ idf_component_register(SRCS
                     driver
                     esp_driver_gpio
                     esp_driver_ledc
+                    esp_driver_rmt
                     esp_driver_spi
                     esp_driver_sdspi
                     esp_http_client
@@ -83,6 +88,11 @@ add_library(bruce_sdk_builtin_wifi_check OBJECT "modules/wifi/wifi_app.c")
 target_include_directories(bruce_sdk_builtin_wifi_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/wifi")
+
+add_library(bruce_sdk_builtin_ir_check OBJECT "modules/ir/ir_app.c")
+target_include_directories(bruce_sdk_builtin_ir_check PRIVATE
+                           "${CMAKE_CURRENT_LIST_DIR}"
+                           "${CMAKE_CURRENT_LIST_DIR}/modules/ir")
 
 add_library(bruce_sdk_builtin_filemanager_check OBJECT "modules/filemanager/filemanager_app.c")
 target_include_directories(bruce_sdk_builtin_filemanager_check PRIVATE
@@ -121,6 +131,7 @@ add_library(bruce_sdk_builtin_js_loader_check OBJECT
             "modules/loaders/js/display_js.c"
             "modules/loaders/js/js_stdlib.c"
             "modules/loaders/js/keyboard_js.c"
+            "modules/loaders/js/ir_js.c"
             "modules/loaders/js/notification_js.c"
             "modules/loaders/js/js_loader_app.c"
             "modules/loaders/js/runtime_js.c"

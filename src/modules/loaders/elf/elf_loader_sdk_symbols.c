@@ -21,6 +21,7 @@
 #include "core_sdk/dialog.h"
 #include "core_sdk/display.h"
 #include "core_sdk/input.h"
+#include "core_sdk/ir.h"
 #include "core_sdk/loader.h"
 #include "core_sdk/manifest.h"
 #include "core_sdk/memory.h"
@@ -69,6 +70,15 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(input__wait),
     ESP_ELFSYM_EXPORT(input__check),
     ESP_ELFSYM_EXPORT(input__inject),
+
+    /* Infrared */
+    ESP_ELFSYM_EXPORT(ir__transmit_raw),
+    ESP_ELFSYM_EXPORT(ir__transmit),
+    ESP_ELFSYM_EXPORT(ir__transmit_parsed),
+    ESP_ELFSYM_EXPORT(ir__receive),
+    ESP_ELFSYM_EXPORT(ir__transmit_file),
+    ESP_ELFSYM_EXPORT(ir__tx_pin),
+    ESP_ELFSYM_EXPORT(ir__rx_pin),
 
     /* Display (layout management remains built-in-only) */
     ESP_ELFSYM_EXPORT(display__width),
