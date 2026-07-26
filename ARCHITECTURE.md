@@ -79,7 +79,9 @@ public Config API and starts that command with app_runner.  The default is
 `bruce_launcher`.
 
 `bruce_launcher` is an application, not Core.  It composes menus and may scan
-`/apps/`.  It appends `--gui` to every app it launches.
+`/apps/`. Its GUI presents Built-ins, Apps, and Exit as a three-icon top-level
+carousel; Built-ins and Apps open list submenus with up to four visible rows.
+It appends `--gui` to every app it launches.
 
 ## Applications and app_runner
 
