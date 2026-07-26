@@ -6,8 +6,9 @@
  * This is the Core-side implementation of the JavaScript `display.*`
  * surface used by the bjs_interpreter.  It is intentionally small and
  * immediate-mode: drawing primitives update a Core-owned framebuffer and
- * are sent to the LCD only when display__flush() is called.  Display access
- * is serialized by a Core mutex so tasks share one output surface safely.
+ * are sent to the LCD only when a frame is presented. GUI tasks render in
+ * task-local coordinates into a Core-assigned fullscreen or tiled viewport.
+ * Hidden tasks see a zero-sized viewport and drawing is a successful no-op.
  *
  * All coordinates are logical and respect the current rotation set by
  * display__set_rotation().  The framebuffer is stored in the logical
@@ -22,6 +23,7 @@
 #include <stdint.h>
 
 #include "core_sdk/result.h"
+#include "core_sdk/task.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -55,6 +57,20 @@ extern "C" {
 
 typedef uint16_t bruce_display_color_t;
 
+#define BRUCE_DISPLAY_MAX_TILES 4
+
+typedef struct {
+    int16_t x;
+    int16_t y;
+    int16_t width;
+    int16_t height;
+} bruce_display_rect_t;
+
+typedef struct {
+    bruce_task_id_t task_id;
+    bruce_display_rect_t rect;
+} bruce_display_tile_t;
+
 /* -------------------------------------------------------------------------- */
 /* Lifecycle                                                                  */
 /* -------------------------------------------------------------------------- */
@@ -74,10 +90,10 @@ void display__deinit(void);
 /* Screen dimensions and colors                                               */
 /* -------------------------------------------------------------------------- */
 
-/* Logical width in the current rotation.  Always returns a positive value. */
+/* Width of the caller's current viewport, or zero while hidden. */
 int display__width(void);
 
-/* Logical height in the current rotation.  Always returns a positive value. */
+/* Height of the caller's current viewport, or zero while hidden. */
 int display__height(void);
 
 /* Convert 8-bit RGB components to an RGB565 color value. */
@@ -202,10 +218,18 @@ bruce_result_t display__display_on_off(bool on);
 /* Framebuffer flush                                                          */
 /* -------------------------------------------------------------------------- */
 
+/* Lease the caller's current viewport for one complete frame. */
+bruce_result_t display__begin_frame(void);
+
+/* Present an active frame and wait until its LCD transfer completes. */
+bruce_result_t display__present(void);
+
+/* Built-in launcher layout operation. Not exported to external runtimes. */
+bruce_result_t display__set_tiles(const bruce_display_tile_t *tiles, size_t count);
+
 /*
- * Send the framebuffer contents to the LCD panel.  Drawing primitives only
- * update the in-memory framebuffer; this call makes them visible.  Returns
- * BRUCE_OK or BRUCE_ERR_NOT_INITIALIZED / BRUCE_ERR_BUSY.
+ * Compatibility presentation. If no explicit frame is active, this creates
+ * and presents an implicit one around pixels already drawn by legacy code.
  */
 bruce_result_t display__flush(void);
 

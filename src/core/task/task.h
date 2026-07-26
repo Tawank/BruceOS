@@ -93,3 +93,9 @@ void task_registry__account_memory(int64_t delta_bytes);
  * never call this directly. */
 bruce_result_t task_registry__current_context(bool *out_built_in, char *out_permission_key,
                                                size_t permission_key_size, bool *out_gui_requested);
+
+/* Input's per-task wake channel. These helpers never run while the input mutex
+ * is held except for the lock-free event-group wait itself. */
+bruce_result_t task_registry__input_wake_clear(bruce_task_id_t task_id);
+bruce_result_t task_registry__input_wake_wait(bruce_task_id_t task_id, uint32_t timeout_ms);
+void task_registry__input_wake(bruce_task_id_t task_id);

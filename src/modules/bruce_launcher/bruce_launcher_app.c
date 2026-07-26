@@ -15,6 +15,7 @@
 #include "core_sdk/memory.h"
 #include "core_sdk/result.h"
 #include "core_sdk/storage.h"
+#include "core_sdk/status_icon.h"
 #include "core_sdk/task.h"
 
 #define BRUCE_LAUNCHER_MAX_ENTRIES 32
@@ -36,6 +37,7 @@
 #define BRUCE_LAUNCHER_MENU_MARGIN_X_DEN 10
 #define BRUCE_LAUNCHER_MENU_WIDTH_NUM 8
 #define BRUCE_LAUNCHER_MENU_WIDTH_DEN 10
+#define BRUCE_LAUNCHER_TASKS_APP "__tasks"
 
 /* One entry in the launcher menu.  Built-ins are dispatched by name; /apps/
  * entries are dispatched by path. */
@@ -149,6 +151,29 @@ static int bruce_launcher__font_size(int w)
     return (w >= 200) ? BRUCE_LAUNCHER_FONT_MEDIUM : BRUCE_LAUNCHER_FONT_SMALL;
 }
 
+static uint32_t bruce_launcher__draw_status_icons(const bruce_launcher_theme_t *theme)
+{
+    bruce_status_icon_t icons[BRUCE_STATUS_ICON_MAX];
+    size_t count = 0;
+    uint32_t revision = 0;
+    if (status_icon__list(icons, BRUCE_STATUS_ICON_MAX, &count, &revision) != BRUCE_OK) {
+        return revision;
+    }
+    int w = display__width();
+    display__fill_rect(55, 6, w - 63, BRUCE_LAUNCHER_STATUS_H - 7, theme->bg);
+    display__set_text_bg_color(theme->bg);
+    int x = w - BRUCE_LAUNCHER_BORDER_PAD - 2;
+    for (size_t i = count; i > 0; --i) {
+        const bruce_status_icon_t *icon = &icons[i - 1];
+        x -= icon->width;
+        if (x < 57) break;
+        display__draw_bitmap((int16_t)x, (int16_t)(7 + (16 - icon->height) / 2), icon->bitmap,
+                             icon->width, icon->height, theme->pri);
+        x -= 3;
+    }
+    return revision;
+}
+
 /* Draw the main border/status bar: background fill, rounded screen border,
  * horizontal status-line separator, and "BRUCE" text in the top-left corner. */
 static void bruce_launcher__draw_main_border(const bruce_launcher_theme_t *theme)
@@ -169,6 +194,7 @@ static void bruce_launcher__draw_main_border(const bruce_launcher_theme_t *theme
     display__set_text_size(BRUCE_LAUNCHER_FONT_SMALL);
     display__set_cursor(BRUCE_LAUNCHER_BORDER_PAD + 2, 7);
     display__print(BRUCE_LAUNCHER_VERSION_TEXT);
+    (void)bruce_launcher__draw_status_icons(theme);
 }
 
 /* Draw the centered rounded menu box. The selected row is highlighted in the
@@ -245,11 +271,158 @@ static void bruce_launcher__draw_options(const bruce_launcher_entry_t *entries, 
         display__print(text);
     }
 
-    display__flush();
+}
+
+static size_t bruce_launcher__task_candidates(bruce_task_snapshot_t *tasks, size_t capacity)
+{
+    bruce_task_snapshot_t all[16];
+    size_t count = 0;
+    size_t written = 0;
+    bruce_task_id_t self = task__current_id();
+    if (task__list(all, sizeof(all) / sizeof(all[0]), &count) != BRUCE_OK) {
+        return 0;
+    }
+    for (size_t i = 0; i < count && written < capacity; ++i) {
+        if (all[i].id != self && all[i].gui_requested && all[i].state == BRUCE_TASK_BACKGROUND) {
+            tasks[written++] = all[i];
+        }
+    }
+    return written;
+}
+
+static void bruce_launcher__task_layout(const bruce_task_snapshot_t *tasks, size_t count,
+                                         int selected, bruce_display_tile_t *tiles,
+                                         const bruce_launcher_theme_t *theme)
+{
+    int w = display__width();
+    int h = display__height();
+    int top = BRUCE_LAUNCHER_STATUS_H + 2;
+    int cols = (count == 1 || (count == 2 && h > w)) ? 1 : 2;
+    int rows = (int)((count + (size_t)cols - 1) / (size_t)cols);
+    int cell_w = w / cols;
+    int cell_h = (h - top) / rows;
+
+    display__fill_screen(theme->bg);
+    display__set_text_size(1);
+    display__set_text_color(theme->pri);
+    display__set_text_bg_color(theme->bg);
+    display__set_cursor(4, 7);
+    display__print("Tasks  arrows: move  select: open  back: exit");
+    display__draw_line(0, BRUCE_LAUNCHER_STATUS_H, w - 1, BRUCE_LAUNCHER_STATUS_H, theme->pri);
+
+    for (size_t i = 0; i < count; ++i) {
+        int col = (int)i % cols;
+        int row = (int)i / cols;
+        int cell_x = col * cell_w;
+        int cell_y = top + row * cell_h;
+        int right = col == cols - 1 ? w : cell_x + cell_w;
+        int bottom = row == rows - 1 ? h : cell_y + cell_h;
+        tiles[i].task_id = tasks[i].id;
+        tiles[i].rect = (bruce_display_rect_t){
+            .x = cell_x + 3,
+            .y = cell_y + 12,
+            .width = right - cell_x - 6,
+            .height = bottom - cell_y - 15,
+        };
+        display__set_cursor(cell_x + 4, cell_y + 2);
+        display__print(tasks[i].name);
+        display__draw_rect(cell_x + 1, cell_y + 10, right - cell_x - 2,
+                           bottom - cell_y - 11, (int)i == selected ? theme->pri : theme->sec);
+    }
+}
+
+static bruce_result_t bruce_launcher__draw_task_page(const bruce_task_snapshot_t *tasks, size_t count,
+                                                       int selected, const bruce_launcher_theme_t *theme)
+{
+    bruce_result_t result = display__set_tiles(NULL, 0);
+    if (result != BRUCE_OK) {
+        return result;
+    }
+    result = display__begin_frame();
+    if (result != BRUCE_OK) {
+        return result;
+    }
+    bruce_display_tile_t tiles[BRUCE_DISPLAY_MAX_TILES];
+    bruce_launcher__task_layout(tasks, count, selected, tiles, theme);
+    result = display__present();
+    if (result != BRUCE_OK || count == 0) {
+        return result;
+    }
+    return display__set_tiles(tiles, count);
+}
+
+static int bruce_launcher__run_task_switcher(const bruce_launcher_theme_t *theme)
+{
+    size_t page = 0;
+    int selected = 0;
+    bool redraw = true;
+    for (;;) {
+        bruce_task_snapshot_t candidates[16];
+        size_t total = bruce_launcher__task_candidates(candidates, sizeof(candidates) / sizeof(candidates[0]));
+        size_t pages = total == 0 ? 1 : (total + BRUCE_DISPLAY_MAX_TILES - 1) / BRUCE_DISPLAY_MAX_TILES;
+        if (page >= pages) page = pages - 1;
+        size_t start = page * BRUCE_DISPLAY_MAX_TILES;
+        size_t page_count = total > start ? total - start : 0;
+        if (page_count > BRUCE_DISPLAY_MAX_TILES) page_count = BRUCE_DISPLAY_MAX_TILES;
+        if (selected >= (int)page_count) selected = page_count > 0 ? (int)page_count - 1 : 0;
+
+        if (redraw) {
+            bruce_result_t draw = bruce_launcher__draw_task_page(&candidates[start], page_count, selected, theme);
+            if (draw == BRUCE_ERR_BUSY) {
+                (void)runtime__delay(20);
+                continue;
+            }
+            redraw = false;
+        }
+
+        bruce_input_event_t event;
+        bruce_result_t input_result = input__read(&event, 100);
+        if (input_result == BRUCE_ERR_NOT_FOREGROUND) {
+            return 0;
+        }
+        if (input_result != BRUCE_OK || event.action != BRUCE_INPUT_PRESS) {
+            continue;
+        }
+        if (event.code == BRUCE_INPUT_CODE_BACK || event.code == BRUCE_INPUT_CODE_BUTTON_B) {
+            (void)display__set_tiles(NULL, 0);
+            return 0;
+        }
+        if ((event.code == BRUCE_INPUT_CODE_UP || event.code == BRUCE_INPUT_CODE_LEFT) && selected > 0) {
+            selected--;
+            redraw = true;
+        } else if ((event.code == BRUCE_INPUT_CODE_DOWN || event.code == BRUCE_INPUT_CODE_RIGHT) &&
+                   selected + 1 < (int)page_count) {
+            selected++;
+            redraw = true;
+        } else if (event.code == BRUCE_INPUT_CODE_LEFT && page > 0) {
+            page--;
+            selected = 0;
+            redraw = true;
+        } else if (event.code == BRUCE_INPUT_CODE_RIGHT && page + 1 < pages) {
+            page++;
+            selected = 0;
+            redraw = true;
+        } else if ((event.code == BRUCE_INPUT_CODE_SELECT || event.code == BRUCE_INPUT_CODE_BUTTON_A) &&
+                   page_count > 0) {
+            bruce_task_id_t target = candidates[start + (size_t)selected].id;
+            bruce_task_snapshot_t snapshot;
+            if (task__snapshot(target, &snapshot) == BRUCE_OK) {
+                (void)display__set_tiles(NULL, 0);
+                (void)task__foreground(target);
+                return 0;
+            }
+            redraw = true;
+        }
+    }
 }
 
 static int bruce_launcher__run_entry(const bruce_launcher_entry_t *entry)
 {
+    if (!entry->is_path && strcmp(entry->app_name, BRUCE_LAUNCHER_TASKS_APP) == 0) {
+        bruce_launcher_theme_t theme;
+        bruce_launcher__get_theme(&theme);
+        return bruce_launcher__run_task_switcher(&theme);
+    }
     int result;
     if (entry->is_path) {
         result = app_runner__run_path(entry->path, "--gui", false);
@@ -276,14 +449,38 @@ static int bruce_launcher__run_gui_menu(bruce_launcher_entry_t *entries, int ent
     (void)runtime__delay(300);
     (void)input__flush();
 
-    bruce_launcher__draw_main_border(&theme);
-
     int selected = 0;
     int last_drawn = -1;
+    uint32_t icon_revision = UINT32_MAX;
     for (;;) {
         if (selected != last_drawn) {
+            bruce_result_t frame = display__begin_frame();
+            if (frame == BRUCE_ERR_NOT_FOREGROUND) {
+                (void)runtime__delay(20);
+                continue;
+            }
+            if (frame != BRUCE_OK) {
+                return frame;
+            }
+            bruce_launcher__draw_main_border(&theme);
             bruce_launcher__draw_options(entries, entry_count, selected, &theme);
+            icon_revision = bruce_launcher__draw_status_icons(&theme);
+            frame = display__present();
+            if (frame != BRUCE_OK) {
+                return frame;
+            }
             last_drawn = selected;
+        }
+
+        size_t icon_count = 0;
+        uint32_t current_revision = 0;
+        if (status_icon__list(NULL, 0, &icon_count, &current_revision) == BRUCE_OK &&
+            current_revision != icon_revision) {
+            bruce_result_t frame = display__begin_frame();
+            if (frame == BRUCE_OK) {
+                icon_revision = bruce_launcher__draw_status_icons(&theme);
+                (void)display__present();
+            }
         }
 
         bruce_input_event_t ev;
@@ -310,7 +507,6 @@ static int bruce_launcher__run_gui_menu(bruce_launcher_entry_t *entries, int ent
                 }
                 (void)bruce_launcher__run_entry(&entries[selected]);
                 (void)input__flush();
-                bruce_launcher__draw_main_border(&theme);
                 last_drawn = -1;
                 break;
             case BRUCE_INPUT_CODE_BACK:
@@ -369,6 +565,8 @@ int bruce_launcher_app_main(int argc, char **argv)
     (void)bruce_launcher__add_builtin(entries, &entry_count, BRUCE_LAUNCHER_MAX_ENTRIES, "wifi", "Wi-Fi");
     (void)bruce_launcher__add_builtin(entries, &entry_count, BRUCE_LAUNCHER_MAX_ENTRIES, "selftest", "Self-test");
     (void)bruce_launcher__add_builtin(entries, &entry_count, BRUCE_LAUNCHER_MAX_ENTRIES, "terminal", "Terminal");
+    (void)bruce_launcher__add_builtin(entries, &entry_count, BRUCE_LAUNCHER_MAX_ENTRIES,
+                                       BRUCE_LAUNCHER_TASKS_APP, "Tasks");
 
     entry_count += bruce_launcher__discover_apps(&entries[entry_count], BRUCE_LAUNCHER_MAX_ENTRIES - entry_count);
 

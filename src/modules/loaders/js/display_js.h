@@ -2,6 +2,9 @@
 
 #include "mquickjs.h"
 
+JSValue native_beginFrame(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
+JSValue native_present(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
+JSValue native_flush(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
 JSValue native_color(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
 JSValue native_setTextColor(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
 JSValue native_setTextSize(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);

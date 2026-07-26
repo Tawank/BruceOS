@@ -1,0 +1,53 @@
+#include "notification_app.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "core_sdk/notification.h"
+#include "core_sdk/status_icon.h"
+
+static int notification_app__usage(void)
+{
+    printf("usage: notification push <duration-ms> <text> | dismiss | icon-list | icon-remove <key>\n");
+    return BRUCE_ERR_INVALID_ARGUMENT;
+}
+
+int notification_app_main(int argc, char **argv)
+{
+    if (argc < 2) return notification_app__usage();
+    if (strcmp(argv[1], "push") == 0) {
+        if (argc < 4) return notification_app__usage();
+        char *end = NULL;
+        unsigned long duration = strtoul(argv[2], &end, 10);
+        if (end == argv[2] || *end != '\0' || duration > UINT32_MAX) return notification_app__usage();
+        size_t length = 0;
+        for (int i = 3; i < argc; ++i) length += strlen(argv[i]) + (i > 3 ? 1u : 0u);
+        if (length >= BRUCE_NOTIFICATION_TEXT_MAX) return BRUCE_ERR_INVALID_ARGUMENT;
+        char text[BRUCE_NOTIFICATION_TEXT_MAX] = {0};
+        for (int i = 3; i < argc; ++i) {
+            if (i > 3) strcat(text, " ");
+            strcat(text, argv[i]);
+        }
+        return notification__push(text, (uint32_t)duration);
+    }
+    if (strcmp(argv[1], "dismiss") == 0) {
+        return notification__dismiss();
+    }
+    if (strcmp(argv[1], "icon-remove") == 0) {
+        return argc == 3 ? status_icon__remove(argv[2]) : notification_app__usage();
+    }
+    if (strcmp(argv[1], "icon-list") == 0) {
+        bruce_status_icon_t icons[BRUCE_STATUS_ICON_MAX];
+        size_t count = 0;
+        uint32_t revision = 0;
+        bruce_result_t result = status_icon__list(icons, BRUCE_STATUS_ICON_MAX, &count, &revision);
+        if (result != BRUCE_OK) return result;
+        printf("revision %lu, %u icon(s)\n", (unsigned long)revision, (unsigned)count);
+        for (size_t i = 0; i < count; ++i) {
+            printf("%s %ux%u\n", icons[i].key, icons[i].width, icons[i].height);
+        }
+        return BRUCE_OK;
+    }
+    return notification_app__usage();
+}

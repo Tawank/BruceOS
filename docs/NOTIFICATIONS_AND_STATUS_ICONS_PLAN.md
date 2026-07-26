@@ -220,10 +220,10 @@ The APIs are intentionally available without permission checks.
 Provide thin terminal-accessible commands over the same Core APIs:
 
 ```text
-ui notify <duration-ms> <text>
-ui notification-dismiss
-ui icon-list
-ui icon-remove <key>
+notification push <duration-ms> <text>
+notification dismiss
+notification icon-list
+notification icon-remove <key>
 ```
 
 Bitmap push is optional in the terminal because entering binary bitmap data is

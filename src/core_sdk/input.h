@@ -53,13 +53,14 @@ typedef struct {
  * `timeout_ms` controls blocking:
  *   - 0      : non-blocking; returns BRUCE_ERR_TIMEOUT immediately if no event
  *             is queued.
- *   - >0     : blocks up to the requested number of milliseconds.
+ *   - >0     : blocks up to the requested total elapsed milliseconds.
  *   - 0xFFFFFFFF (portMAX_DELAY equivalent) : block until an event arrives.
  *
  * Returns BRUCE_OK with *out_event filled, BRUCE_ERR_TIMEOUT if no event
  * arrived within the timeout, or BRUCE_ERR_NOT_FOREGROUND if the caller is not
- * the current foreground task.  Other BRUCE_ERR_* values are possible for
- * internal failures.
+ * the current foreground task. A blocked read is revoked immediately when its
+ * foreground tenure ends; regaining foreground requires a new call. An
+ * indefinite read is also interrupted by input deinitialization.
  *
  * Physical input is delivered only to the foreground task; background tasks
  * must call task__foreground() or use input__inject() (which requires the

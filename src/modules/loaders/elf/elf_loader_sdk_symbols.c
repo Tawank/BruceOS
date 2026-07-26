@@ -19,13 +19,16 @@
 
 #include "core_sdk/app_runner.h"
 #include "core_sdk/dialog.h"
+#include "core_sdk/display.h"
 #include "core_sdk/input.h"
 #include "core_sdk/loader.h"
 #include "core_sdk/manifest.h"
 #include "core_sdk/memory.h"
+#include "core_sdk/notification.h"
 #include "core_sdk/permission.h"
 #include "core_sdk/result.h"
 #include "core_sdk/storage.h"
+#include "core_sdk/status_icon.h"
 #include "core_sdk/task.h"
 
 const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
@@ -66,6 +69,49 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(input__wait),
     ESP_ELFSYM_EXPORT(input__check),
     ESP_ELFSYM_EXPORT(input__inject),
+
+    /* Display (layout management remains built-in-only) */
+    ESP_ELFSYM_EXPORT(display__width),
+    ESP_ELFSYM_EXPORT(display__height),
+    ESP_ELFSYM_EXPORT(display__color565),
+    ESP_ELFSYM_EXPORT(display__fill_screen),
+    ESP_ELFSYM_EXPORT(display__clear),
+    ESP_ELFSYM_EXPORT(display__set_text_color),
+    ESP_ELFSYM_EXPORT(display__set_text_bg_color),
+    ESP_ELFSYM_EXPORT(display__set_text_size),
+    ESP_ELFSYM_EXPORT(display__set_cursor),
+    ESP_ELFSYM_EXPORT(display__get_cursor),
+    ESP_ELFSYM_EXPORT(display__print),
+    ESP_ELFSYM_EXPORT(display__println),
+    ESP_ELFSYM_EXPORT(display__draw_pixel),
+    ESP_ELFSYM_EXPORT(display__draw_line),
+    ESP_ELFSYM_EXPORT(display__draw_rect),
+    ESP_ELFSYM_EXPORT(display__fill_rect),
+    ESP_ELFSYM_EXPORT(display__draw_circle),
+    ESP_ELFSYM_EXPORT(display__fill_circle),
+    ESP_ELFSYM_EXPORT(display__draw_triangle),
+    ESP_ELFSYM_EXPORT(display__fill_triangle),
+    ESP_ELFSYM_EXPORT(display__draw_round_rect),
+    ESP_ELFSYM_EXPORT(display__fill_round_rect),
+    ESP_ELFSYM_EXPORT(display__draw_bitmap),
+    ESP_ELFSYM_EXPORT(display__draw_xbitmap),
+    ESP_ELFSYM_EXPORT(display__draw_rgb_bitmap),
+    ESP_ELFSYM_EXPORT(display__set_rotation),
+    ESP_ELFSYM_EXPORT(display__get_rotation),
+    ESP_ELFSYM_EXPORT(display__invert_display),
+    ESP_ELFSYM_EXPORT(display__set_brightness),
+    ESP_ELFSYM_EXPORT(display__get_brightness),
+    ESP_ELFSYM_EXPORT(display__display_on_off),
+    ESP_ELFSYM_EXPORT(display__begin_frame),
+    ESP_ELFSYM_EXPORT(display__present),
+    ESP_ELFSYM_EXPORT(display__flush),
+
+    /* Unrestricted global UI services */
+    ESP_ELFSYM_EXPORT(notification__push),
+    ESP_ELFSYM_EXPORT(notification__dismiss),
+    ESP_ELFSYM_EXPORT(status_icon__push),
+    ESP_ELFSYM_EXPORT(status_icon__remove),
+    ESP_ELFSYM_EXPORT(status_icon__list),
 
     /* Dialog */
     ESP_ELFSYM_EXPORT(dialog__message),

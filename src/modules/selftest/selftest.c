@@ -16,6 +16,8 @@
 #include "wifi_test.h"
 #include "input_test.h"
 #include "dialog_test.h"
+#include "display_test.h"
+#include "notification_test.h"
 
 void selftest__resource_cleanup(void *context)
 {
@@ -81,6 +83,9 @@ int selftest_app_main(int argc, char **argv)
     printf("[selftest] %s %s\n", "run_dialog_number_input_case", selftest__run_dialog_number_input_case() ? "PASS" : "FAIL");
     printf("[selftest] %s %s\n", "run_dialog_pick_file_case", selftest__run_dialog_pick_file_case() ? "PASS" : "FAIL");
     printf("[selftest] %s %s\n", "run_dialog_viewer_case", selftest__run_dialog_viewer_case() ? "PASS" : "FAIL");
+    printf("[selftest] %s %s\n", "run_display_compositor_case", selftest__run_display_compositor_case() ? "PASS" : "FAIL");
+    printf("[selftest] %s %s\n", "run_notification_case", selftest__run_notification_case() ? "PASS" : "FAIL");
+    printf("[selftest] %s %s\n", "run_status_icon_case", selftest__run_status_icon_case() ? "PASS" : "FAIL");
 
     return 0;
 }

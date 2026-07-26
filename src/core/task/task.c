@@ -1,5 +1,7 @@
 #include "task.h"
 
+#include "core/display/display.h"
+#include "core/input/input.h"
 #include "core_sdk/permission.h"
 #include "core_sdk/task.h"
 
@@ -13,10 +15,11 @@
 
 #define TASK__MAX_RECORDS 16
 #define TASK__MAX_RESOURCES 16
-#define TASK__FOREGROUND_STACK_MAX 8
+#define TASK__FOREGROUND_STACK_MAX TASK__MAX_RECORDS
 #define TASK__DEFAULT_STACK_BYTES 4096u
 #define TASK__EVT_WAKE (1u << 0)
 #define TASK__EVT_EXITED (1u << 1)
+#define TASK__EVT_INPUT_WAKE (1u << 2)
 
 typedef struct {
     bruce_resource_id_t id;
@@ -67,6 +70,7 @@ static bruce_task_id_t s_next_task_id = 1;
 
 static bruce_task_id_t s_fg_stack[TASK__FOREGROUND_STACK_MAX];
 static int s_fg_depth;
+static bruce_task_id_t s_effective_foreground;
 
 static uint32_t s_last_total_runtime;
 
@@ -136,39 +140,80 @@ static void task__wake_locked(task__record_t *record)
 /* Removes `id` from the foreground stack if (and only if) it is currently on
  * top, restoring the task beneath it (if any) to BRUCE_TASK_FOREGROUND.
  * Caller must hold the lock. */
-static void task__foreground_stack_pop_if_top_locked(bruce_task_id_t id)
+static void task__foreground_notify_locked(bruce_task_id_t previous, bruce_task_id_t current)
 {
-    if (s_fg_depth <= 0 || s_fg_stack[s_fg_depth - 1] != id) {
-        return;
+    input__foreground_changed(current);
+    if (previous != BRUCE_TASK_ID_INVALID) {
+        task__record_t *record = task__find_by_id_locked(previous);
+        if (record != NULL) {
+            xEventGroupSetBits(s_task_events[task__slot_index_locked(record)], TASK__EVT_INPUT_WAKE);
+        }
     }
-    s_fg_depth--;
-    if (s_fg_depth > 0) {
-        task__record_t *restored = task__find_by_id_locked(s_fg_stack[s_fg_depth - 1]);
-        if (restored != NULL) {
-            restored->state = BRUCE_TASK_FOREGROUND;
-            task__wake_locked(restored);
+    if (current != BRUCE_TASK_ID_INVALID) {
+        task__record_t *record = task__find_by_id_locked(current);
+        if (record != NULL) {
+            xEventGroupSetBits(s_task_events[task__slot_index_locked(record)], TASK__EVT_INPUT_WAKE);
         }
     }
 }
 
-/* Pushes `id` on top of the foreground stack, backgrounding the previous top
- * (if any and if different).  Caller must hold the lock. */
-static void task__foreground_stack_push_locked(bruce_task_id_t id, task__record_t *record)
+/* Compact the stack and derive all runnable foreground/background states from
+ * it. Paused tasks retain their position but are temporarily ineligible. */
+static void task__foreground_recompute_locked(void)
 {
-    if (s_fg_depth > 0 && s_fg_stack[s_fg_depth - 1] != id) {
-        task__record_t *previous_top = task__find_by_id_locked(s_fg_stack[s_fg_depth - 1]);
-        if (previous_top != NULL) {
-            previous_top->state = BRUCE_TASK_BACKGROUND;
-            task__wake_locked(previous_top);
+    int write = 0;
+    bruce_task_id_t next = BRUCE_TASK_ID_INVALID;
+    for (int i = 0; i < s_fg_depth; ++i) {
+        task__record_t *record = task__find_by_id_locked(s_fg_stack[i]);
+        if (record == NULL || record->state == BRUCE_TASK_STOPPING) {
+            continue;
+        }
+        s_fg_stack[write++] = record->id;
+        if (record->state != BRUCE_TASK_PAUSED && record->state != BRUCE_TASK_STARTING) {
+            next = record->id;
         }
     }
-    if (s_fg_depth == 0 || s_fg_stack[s_fg_depth - 1] != id) {
-        if (s_fg_depth < TASK__FOREGROUND_STACK_MAX) {
-            s_fg_stack[s_fg_depth++] = id;
+    s_fg_depth = write;
+
+    for (int i = 0; i < TASK__MAX_RECORDS; ++i) {
+        task__record_t *record = &s_tasks[i];
+        if (!record->in_use || record->state == BRUCE_TASK_STARTING ||
+            record->state == BRUCE_TASK_PAUSED || record->state == BRUCE_TASK_STOPPING) {
+            continue;
+        }
+        bruce_task_state_t new_state = record->id == next ? BRUCE_TASK_FOREGROUND : BRUCE_TASK_BACKGROUND;
+        if (record->state != new_state) {
+            record->state = new_state;
+            task__wake_locked(record);
+            display__task_state_changed(record->id, new_state);
         }
     }
-    record->state = BRUCE_TASK_FOREGROUND;
-    task__wake_locked(record);
+
+    if (next != s_effective_foreground) {
+        bruce_task_id_t previous = s_effective_foreground;
+        s_effective_foreground = next;
+        task__foreground_notify_locked(previous, next);
+    }
+}
+
+static void task__foreground_remove_locked(bruce_task_id_t id)
+{
+    int write = 0;
+    for (int i = 0; i < s_fg_depth; ++i) {
+        if (s_fg_stack[i] != id) {
+            s_fg_stack[write++] = s_fg_stack[i];
+        }
+    }
+    s_fg_depth = write;
+}
+
+static void task__foreground_push_locked(bruce_task_id_t id)
+{
+    task__foreground_remove_locked(id);
+    if (s_fg_depth < TASK__FOREGROUND_STACK_MAX) {
+        s_fg_stack[s_fg_depth++] = id;
+    }
+    task__foreground_recompute_locked();
 }
 
 static void task__refresh_cpu_samples_locked(void)
@@ -264,7 +309,9 @@ static void task__teardown_locked(task__record_t *record)
     record->resource_count = 0;
     record->memory_bytes = 0;
 
-    task__foreground_stack_pop_if_top_locked(record->id);
+    task__foreground_remove_locked(record->id);
+    display__task_removed(record->id);
+    task__foreground_recompute_locked();
     task__free_argv(record->argc, record->argv);
     record->argv = NULL;
 
@@ -284,8 +331,10 @@ static void task__trampoline(void *arg)
     task__lock();
     if (record->start_in_background) {
         record->state = BRUCE_TASK_BACKGROUND;
+        display__task_state_changed(record->id, record->state);
     } else {
-        task__foreground_stack_push_locked(record->id, record);
+        record->state = BRUCE_TASK_BACKGROUND;
+        task__foreground_push_locked(record->id);
     }
     task__unlock();
 
@@ -336,7 +385,9 @@ bruce_result_t task_registry__create(const task_create_params_t *params, bruce_t
     }
 
     task__record_t *record = &s_tasks[slot];
+    uint32_t generation = record->generation;
     memset(record, 0, sizeof(*record));
+    record->generation = generation;
     record->in_use = true;
     record->id = s_next_task_id++;
     if (s_next_task_id == BRUCE_TASK_ID_INVALID) {
@@ -357,7 +408,7 @@ bruce_result_t task_registry__create(const task_create_params_t *params, bruce_t
     record->argc = params->argc > 0 ? params->argc : 0;
     record->argv = argv_copy;
     record->next_resource_id = 1;
-    xEventGroupClearBits(s_task_events[slot], TASK__EVT_WAKE | TASK__EVT_EXITED);
+    xEventGroupClearBits(s_task_events[slot], TASK__EVT_WAKE | TASK__EVT_EXITED | TASK__EVT_INPUT_WAKE);
 
     /* record->state is already BRUCE_TASK_STARTING from the memset above
      * (BRUCE_TASK_STARTING == 0); task__trampoline() performs the actual
@@ -373,6 +424,7 @@ bruce_result_t task_registry__create(const task_create_params_t *params, bruce_t
         return BRUCE_ERR_NO_MEMORY;
     }
 
+    display__task_created(record->id, record->gui_requested);
     *out_task_id = record->id;
     task__unlock();
     return BRUCE_OK;
@@ -471,6 +523,47 @@ bruce_result_t task_registry__current_context(bool *out_built_in, char *out_perm
     return BRUCE_OK;
 }
 
+bruce_result_t task_registry__input_wake_clear(bruce_task_id_t task_id)
+{
+    task__ensure_init();
+    task__lock();
+    task__record_t *record = task__find_by_id_locked(task_id);
+    if (record == NULL) {
+        task__unlock();
+        return BRUCE_ERR_NOT_FOUND;
+    }
+    xEventGroupClearBits(s_task_events[task__slot_index_locked(record)], TASK__EVT_INPUT_WAKE);
+    task__unlock();
+    return BRUCE_OK;
+}
+
+bruce_result_t task_registry__input_wake_wait(bruce_task_id_t task_id, uint32_t timeout_ms)
+{
+    task__ensure_init();
+    task__lock();
+    task__record_t *record = task__find_by_id_locked(task_id);
+    if (record == NULL) {
+        task__unlock();
+        return BRUCE_ERR_NOT_FOUND;
+    }
+    EventGroupHandle_t events = s_task_events[task__slot_index_locked(record)];
+    task__unlock();
+    TickType_t ticks = timeout_ms == portMAX_DELAY ? portMAX_DELAY : pdMS_TO_TICKS(timeout_ms);
+    EventBits_t bits = xEventGroupWaitBits(events, TASK__EVT_INPUT_WAKE, pdTRUE, pdFALSE, ticks);
+    return (bits & TASK__EVT_INPUT_WAKE) != 0 ? BRUCE_OK : BRUCE_ERR_TIMEOUT;
+}
+
+void task_registry__input_wake(bruce_task_id_t task_id)
+{
+    task__ensure_init();
+    task__lock();
+    task__record_t *record = task__find_by_id_locked(task_id);
+    if (record != NULL) {
+        xEventGroupSetBits(s_task_events[task__slot_index_locked(record)], TASK__EVT_INPUT_WAKE);
+    }
+    task__unlock();
+}
+
 /* ---- Public core_sdk/task.h API ---- */
 
 bruce_task_id_t task__current_id(void)
@@ -534,9 +627,10 @@ bruce_result_t task__to_background(void)
         task__unlock();
         return BRUCE_ERR_INVALID_STATE;
     }
+    task__foreground_remove_locked(self->id);
     self->state = BRUCE_TASK_BACKGROUND;
-    task__wake_locked(self);
-    task__foreground_stack_pop_if_top_locked(self->id);
+    display__task_state_changed(self->id, self->state);
+    task__foreground_recompute_locked();
     task__unlock();
     return BRUCE_OK;
 }
@@ -558,7 +652,7 @@ bruce_result_t task__foreground(bruce_task_id_t task_id)
         task__unlock();
         return BRUCE_ERR_INVALID_STATE;
     }
-    task__foreground_stack_push_locked(task_id, target);
+    task__foreground_push_locked(task_id);
     task__unlock();
     return BRUCE_OK;
 }
@@ -575,6 +669,8 @@ bruce_result_t task__stop(bruce_task_id_t task_id)
     record->stop_requested = true;
     record->state = BRUCE_TASK_STOPPING;
     task__wake_locked(record);
+    display__task_state_changed(record->id, record->state);
+    task__foreground_recompute_locked();
     task__unlock();
     return BRUCE_OK;
 }
@@ -600,6 +696,8 @@ bruce_result_t task__pause(bruce_task_id_t task_id)
     record->state = BRUCE_TASK_PAUSED;
     record->pause_requested = true;
     task__wake_locked(record);
+    display__task_state_changed(record->id, record->state);
+    task__foreground_recompute_locked();
     task__unlock();
     return BRUCE_OK;
 }
@@ -618,8 +716,10 @@ bruce_result_t task__resume(bruce_task_id_t task_id)
         return BRUCE_ERR_INVALID_STATE;
     }
     record->pause_requested = false;
-    record->state = record->state_before_pause;
+    record->state = BRUCE_TASK_BACKGROUND;
     task__wake_locked(record);
+    display__task_state_changed(record->id, record->state);
+    task__foreground_recompute_locked();
     task__unlock();
     return BRUCE_OK;
 }
@@ -644,9 +744,17 @@ bruce_result_t task__kill(bruce_task_id_t task_id)
         return BRUCE_OK; /* unreachable */
     }
 
-    /* Force-delete another task first so it cannot race the cleanup below
-     * (note: if it currently held a non-Core mutex, that mutex is stranded -
-     * a known limitation of forceful kill). */
+    /* Close Core service gates before deletion. The display hook waits past
+     * any short raster critical section and transfers an in-flight frame to
+     * worker ownership; foreground recomputation similarly revokes input. */
+    record->stop_requested = true;
+    record->state = BRUCE_TASK_STOPPING;
+    task__wake_locked(record);
+    display__task_state_changed(record->id, record->state);
+    task__foreground_recompute_locked();
+
+    /* Arbitrary application-owned mutexes cannot be recovered after a force
+     * delete, which remains the documented limitation of task__kill(). */
     if (handle != NULL) {
         vTaskDelete(handle);
     }

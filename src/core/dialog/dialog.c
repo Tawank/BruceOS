@@ -251,12 +251,16 @@ static void dialog__gui_footer(const char *hint)
     display__print(hint != NULL ? hint : "");
 }
 
-static void dialog__gui_wait_for_any_key(void)
+static bruce_result_t dialog__gui_wait_for_any_key(void)
 {
     for (;;) {
         bruce_input_event_t ev;
-        if (input__read(&ev, 100) == BRUCE_OK && ev.action == BRUCE_INPUT_PRESS) {
-            return;
+        bruce_result_t result = input__read(&ev, 100);
+        if (result == BRUCE_ERR_NOT_FOREGROUND) {
+            return BRUCE_ERR_CANCELLED;
+        }
+        if (result == BRUCE_OK && ev.action == BRUCE_INPUT_PRESS) {
+            return BRUCE_OK;
         }
     }
 }
@@ -264,6 +268,13 @@ static void dialog__gui_wait_for_any_key(void)
 static bruce_result_t dialog__gui_message(bruce_dialog_kind_t kind, const char *title, const char *message)
 {
     (void)kind;
+    bruce_result_t frame_result = display__begin_frame();
+    if (frame_result == BRUCE_ERR_NOT_FOREGROUND) {
+        return BRUCE_ERR_CANCELLED;
+    }
+    if (frame_result != BRUCE_OK) {
+        return frame_result;
+    }
     dialog__gui_clear();
     dialog__gui_title_bar(title);
 
@@ -298,9 +309,11 @@ static bruce_result_t dialog__gui_message(bruce_dialog_kind_t kind, const char *
     }
 
     dialog__gui_footer("OK: select");
-    display__flush();
-    dialog__gui_wait_for_any_key();
-    return BRUCE_OK;
+    frame_result = display__present();
+    if (frame_result != BRUCE_OK) {
+        return frame_result == BRUCE_ERR_NOT_FOREGROUND ? BRUCE_ERR_CANCELLED : frame_result;
+    }
+    return dialog__gui_wait_for_any_key();
 }
 
 static bruce_result_t dialog__gui_choice(const char *title, const char *message,
@@ -321,6 +334,13 @@ static bruce_result_t dialog__gui_choice(const char *title, const char *message,
     }
 
     for (;;) {
+        bruce_result_t frame_result = display__begin_frame();
+        if (frame_result == BRUCE_ERR_NOT_FOREGROUND) {
+            return BRUCE_ERR_CANCELLED;
+        }
+        if (frame_result != BRUCE_OK) {
+            return frame_result;
+        }
         if (selected < first_visible) {
             first_visible = selected;
         } else if (selected >= first_visible + items_per_page) {
@@ -359,10 +379,17 @@ static bruce_result_t dialog__gui_choice(const char *title, const char *message,
         }
 
         dialog__gui_footer("");
-        display__flush();
+        frame_result = display__present();
+        if (frame_result != BRUCE_OK) {
+            return frame_result == BRUCE_ERR_NOT_FOREGROUND ? BRUCE_ERR_CANCELLED : frame_result;
+        }
 
         bruce_input_event_t ev;
-        if (input__read(&ev, 100) != BRUCE_OK || ev.action != BRUCE_INPUT_PRESS) {
+        bruce_result_t input_result = input__read(&ev, 100);
+        if (input_result == BRUCE_ERR_NOT_FOREGROUND) {
+            return BRUCE_ERR_CANCELLED;
+        }
+        if (input_result != BRUCE_OK || ev.action != BRUCE_INPUT_PRESS) {
             continue;
         }
 
@@ -592,8 +619,12 @@ static bool dialog__keyboard_validate_char(dialog__keyboard_state_t *st, char c,
     return false;
 }
 
-static void dialog__keyboard_draw(dialog__keyboard_state_t *st, int kind)
+static bruce_result_t dialog__keyboard_draw(dialog__keyboard_state_t *st, int kind)
 {
+    bruce_result_t result = display__begin_frame();
+    if (result != BRUCE_OK) {
+        return result;
+    }
     int w = display__width();
     int h = display__height();
 
@@ -691,7 +722,7 @@ static void dialog__keyboard_draw(dialog__keyboard_state_t *st, int kind)
         }
     }
 
-    display__flush();
+    return display__present();
 }
 
 static bruce_result_t dialog__gui_input(const char *title, const char *prompt, const char *initial_text,
@@ -746,10 +777,20 @@ static bruce_result_t dialog__gui_input(const char *title, const char *prompt, c
     dialog__keyboard_ensure_valid(&st);
 
     for (;;) {
-        dialog__keyboard_draw(&st, kind);
+        bruce_result_t draw_result = dialog__keyboard_draw(&st, kind);
+        if (draw_result == BRUCE_ERR_NOT_FOREGROUND) {
+            return BRUCE_ERR_CANCELLED;
+        }
+        if (draw_result != BRUCE_OK) {
+            return draw_result;
+        }
 
         bruce_input_event_t ev;
-        if (input__read(&ev, 100) != BRUCE_OK || ev.action != BRUCE_INPUT_PRESS) {
+        bruce_result_t input_result = input__read(&ev, 100);
+        if (input_result == BRUCE_ERR_NOT_FOREGROUND) {
+            return BRUCE_ERR_CANCELLED;
+        }
+        if (input_result != BRUCE_OK || ev.action != BRUCE_INPUT_PRESS) {
             continue;
         }
 
@@ -1025,6 +1066,10 @@ static void dialog__viewer_cleanup(void *context)
 static bruce_result_t dialog__viewer_draw(dialog__viewer_t *viewer, bool gui)
 {
     if (gui) {
+        bruce_result_t frame_result = display__begin_frame();
+        if (frame_result != BRUCE_OK) {
+            return frame_result == BRUCE_ERR_NOT_FOREGROUND ? BRUCE_ERR_CANCELLED : frame_result;
+        }
         int w = display__width();
         int h = display__height();
         int usable_h = h - (DIALOG__CHAR_H + 4);
@@ -1082,7 +1127,10 @@ static bruce_result_t dialog__viewer_draw(dialog__viewer_t *viewer, bool gui)
         }
         snprintf(footer, sizeof(footer), "%d/%d", viewer->scroll_y + 1, total_lines + 1);
         dialog__gui_footer(footer);
-        display__flush();
+        frame_result = display__present();
+        if (frame_result != BRUCE_OK) {
+            return frame_result == BRUCE_ERR_NOT_FOREGROUND ? BRUCE_ERR_CANCELLED : frame_result;
+        }
     } else {
         printf("--- %s ---\n", viewer->title != NULL ? viewer->title : "viewer");
         printf("%s\n", viewer->text != NULL ? viewer->text : "");

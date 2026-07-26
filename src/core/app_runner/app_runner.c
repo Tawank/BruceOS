@@ -15,6 +15,7 @@
 #include "modules/selftest/selftest.h"
 #include "modules/utils/launcher/launcher_app.h"
 #include "modules/utils/terminal/terminal_app.h"
+#include "modules/utils/notification/notification_app.h"
 #include "modules/wifi/wifi_app.h"
 
 #include <stdio.h>
@@ -79,6 +80,7 @@ void app_runner__register_defaults(void)
     (void)app_runner__register("terminal", terminal_app_main);
     (void)app_runner__register("elf", elf_loader__app_main);
     (void)app_runner__register("js", js_loader__app_main);
+    (void)app_runner__register("notification", notification_app_main);
 
     (void)app_runner__register_loader(".elf", 10, elf_loader__run_path);
     (void)app_runner__register_loader(".js", 20, js_loader__run_path);

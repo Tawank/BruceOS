@@ -24,6 +24,30 @@ static const char *native_arg_string(JSContext *ctx, int argc, JSValue *argv, in
     return JS_ToCString(ctx, argv[idx], buf);
 }
 
+JSValue native_beginFrame(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
+{
+    (void)this_val;
+    (void)argc;
+    (void)argv;
+    return JS_NewInt32(ctx, display__begin_frame());
+}
+
+JSValue native_present(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
+{
+    (void)this_val;
+    (void)argc;
+    (void)argv;
+    return JS_NewInt32(ctx, display__present());
+}
+
+JSValue native_flush(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
+{
+    (void)this_val;
+    (void)argc;
+    (void)argv;
+    return JS_NewInt32(ctx, display__flush());
+}
+
 JSValue native_color(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
 {
     (void)this_val;
@@ -478,5 +502,4 @@ JSValue native_deleteSprite(JSContext *ctx, JSValue *this_val, int argc, JSValue
     (void)argv;
     return JS_UNDEFINED;
 }
-
 

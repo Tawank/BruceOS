@@ -233,9 +233,9 @@ stack: foregrounding a new task pushes the prior task; exit or
 `runtime__to_background()` restores the most recent foreground task, falling
 back to `bruce_launcher`.
 
-Backgrounding changes state and physical-input ownership only.  It does not
-suspend the task or revoke display/serial use.  Display drawing is shared and
-serialized; v1 has immediate-mode, last-completed-update-wins semantics.
+Backgrounding changes state and physical-input ownership. A background GUI task
+is hidden unless the launcher assigns it a compositor tile; hidden drawing is a
+successful no-op. Serial access remains independent of foreground state.
 
 Tasks are identified by opaque nonzero `uint32_t` IDs, never FreeRTOS handles.
 `task__list()` returns read-only snapshots of live tasks including state,
@@ -422,14 +422,34 @@ the task disappears and cleans resources in reverse acquisition order.
 
 ## Input, display, storage, and Config
 
-Physical buttons, touch, keyboard, and encoder input go only to the foreground
-task.  `input__read(input_event_t *, timeout_ms)` is a blocking foreground
-queue read.  `input__inject()` accepts a normalized event with type, action,
+Physical buttons, touch, keyboard, and encoder input go only to the effective
+foreground task. Blocking reads carry an input-owned foreground epoch and are
+revoked immediately on handoff, including an A-to-B-to-A transition. Timeout
+budgets span internal wakes. `input__inject()` accepts a normalized event with type, action,
 code, value, timestamp, and source task ID, allowing Bluetooth, GPIO, and I²C
 adapters to feed the same pipeline.
 
-Display HAL calls are serialized by Core; v1 intentionally has no compositor
-or layers.
+Display Core owns one RGB565 framebuffer and one panel-transfer worker. GUI
+tasks draw in local coordinates into a fullscreen foreground viewport, one of
+up to four launcher-assigned non-overlapping tiles, or a hidden zero-sized
+viewport. `display__begin_frame()` leases the viewport through the completion
+of `display__present()`; tile rows are packed into worker-owned DMA scratch.
+Text and cursor state are task-local, rotation is global, and no resize event is
+emitted. `display__flush()` provides an implicit-frame compatibility path.
+
+Core also owns one transient notification overlay. `notification__push()` and
+`notification__dismiss()` are unrestricted, last-writer-wins operations; text
+is copied into fixed storage and duration is clamped to 250 through 30000 ms.
+The worker composes the bottom-right overlay only into DMA transfer scratch, so
+it never changes application framebuffer pixels. Show, replacement, dismissal,
+expiration, and intersecting application presentations are event-driven.
+
+The unrestricted status-icon service is a separate runtime-only global keyed
+registry. Any task may replace or remove any key, including one created by a
+different task. Entries survive producer exit, list in lexicographic key order,
+and every effective mutation increments a revision. Core never renders these
+1bpp icons or reserves a status bar; the launcher and interested applications
+list and draw them themselves.
 
 `storage` grants access to Core `storage__*` APIs.  Public file handles are
 opaque IDs and are closed automatically at task teardown.  The only v1

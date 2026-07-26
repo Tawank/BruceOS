@@ -195,11 +195,16 @@ Migrate one capability at a time, using the same four-front-end rule:
 Each slice first adds tested Core API behavior, then migrates its JS bindings,
 terminal path, and launcher module.
 
+The compositor-adjacent notification and status-icon slice is implemented:
+notifications are transient Core-composited overlays, while status icons remain
+an application-rendered global registry exposed through C/ELF, JavaScript, the
+launcher, and the built-in `notification` terminal command.
+
 ## Deferred work
 
 - Ed25519 signing of the canonical manifest plus ELF loadable-content hash.
 - Hardware/process isolation for hostile native apps.  v1 native apps are
   trusted extensions with a restricted ABI, not a hard sandbox.
 - Per-app private persistent data namespaces beyond storage permission.
-- Display compositor/layers.
+- Rich display layers beyond the implemented small viewport compositor.
 - Async Core hardware APIs and task history.

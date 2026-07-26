@@ -5,7 +5,7 @@ ELF applications.
 
 ## Layout
 
-- `include/bruce_sdk.h` — pulls in the runtime/loader/manifest/task/memory/permission/result/storage
+- `include/bruce_sdk.h` — pulls in the runtime/loader/manifest/task/memory/permission/result/storage/display
   public Core SDK APIs and the `BRUCE_APP_MANIFEST()` macro.  Apps that need
   `config`, `dialog`, `display`, `http`, `input`, `stdio`, or `wifi` should also
   include the corresponding `core_sdk/*.h` headers.
@@ -84,6 +84,28 @@ Alternatively, you can skip the external `manifest.json` and use the
 section at build time.
 
 See `elf_apps/examples/` for complete examples.
+
+GUI applications should query their viewport every render loop because a
+background application may be tiled or hidden. Hidden applications receive
+zero dimensions. Present complete frames explicitly:
+
+```c
+if (display__width() > 0 && display__begin_frame() == BRUCE_OK) {
+    display__fill_screen(BRUCE_COLOR_BLACK);
+    display__set_cursor(2, 2);
+    display__print("Hello");
+    display__present();
+}
+```
+
+`display__flush()` remains available for legacy one-shot drawing. Tile layout
+management is launcher-only and is not exported to ELF applications.
+
+ELF applications may call the unrestricted `notification__push()` and
+`notification__dismiss()` APIs. They may also publish, remove, and list global
+1bpp status icons with `status_icon__push()`, `status_icon__remove()`, and
+`status_icon__list()`. Status icons are runtime-only and are rendered by the
+launcher or by applications, not by Core.
 
 ## ESP-IDF v6 compatibility note
 

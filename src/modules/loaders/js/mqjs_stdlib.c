@@ -366,13 +366,22 @@ const JSPropDef js_keyboard[] = {
 
 const JSClassDef js_keyboard_obj = JS_OBJECT_DEF("Keyboard", js_keyboard);
 
-/* const JSPropDef js_notification[] = {
-    JS_CFUNC_DEF("blink", 1, native_notifyBlink),
+const JSPropDef js_notification[] = {
+    JS_CFUNC_DEF("push", 2, native_notificationPush),
+    JS_CFUNC_DEF("dismiss", 0, native_notificationDismiss),
     JS_PROP_END,
 };
 
 const JSClassDef js_notification_obj = JS_OBJECT_DEF("Notification", js_notification);
-*/
+
+const JSPropDef js_status_icon[] = {
+    JS_CFUNC_DEF("push", 4, native_statusIconPush),
+    JS_CFUNC_DEF("remove", 1, native_statusIconRemove),
+    JS_CFUNC_DEF("list", 0, native_statusIconList),
+    JS_PROP_END,
+};
+
+const JSClassDef js_status_icon_obj = JS_OBJECT_DEF("StatusIcon", js_status_icon);
 /* BadUSB module - not implemented */
 #if 0
 static const JSPropDef js_badusb[] = {
@@ -646,6 +655,9 @@ const JSClassDef js_menu_obj = JS_OBJECT_DEF("Menu", js_menu);
 
 /* Display module */
 static const JSPropDef js_display[] = {
+    JS_CFUNC_DEF("beginFrame", 0, native_beginFrame),
+    JS_CFUNC_DEF("present", 0, native_present),
+    JS_CFUNC_DEF("flush", 0, native_flush),
     JS_CFUNC_DEF("color", 4, native_color),
     JS_CFUNC_DEF("fill", 1, native_fillScreen),
     JS_CFUNC_DEF("setCursor", 2, native_setCursor),
@@ -888,6 +900,7 @@ static const JSPropDef js_global_object[] = {
     JS_PROP_CLASS_DEF("i2c", &js_i2c_obj),
     JS_PROP_CLASS_DEF("ir", &js_ir_obj),
     JS_PROP_CLASS_DEF("notification", &js_notification_obj),
+    JS_PROP_CLASS_DEF("statusIcon", &js_status_icon_obj),
     JS_PROP_CLASS_DEF("mic", &js_mic_obj),
     JS_PROP_CLASS_DEF("rfid", &js_rfid_obj),
     JS_PROP_CLASS_DEF("storage", &js_storage_obj),
