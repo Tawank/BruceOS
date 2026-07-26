@@ -8,6 +8,7 @@
 #include "core_sdk/loader.h"
 #include "core_sdk/result.h"
 #include "core_sdk/stdio.h"
+#include "core_sdk/task.h"
 
 #define TERMINAL_LINE_MAX 256
 
@@ -81,6 +82,9 @@ int terminal_app_main(int argc, char **argv)
         int result = terminal__run_line(line);
         if (result > 0) {
             printf("started task %u\n", (unsigned int)result);
+            while (task__wait((bruce_task_id_t)result, 100) == BRUCE_ERR_TIMEOUT) {
+                if (runtime__delay(1) != BRUCE_OK) return BRUCE_ERR_CANCELLED;
+            }
         } else {
             printf("error %d\n", result);
         }

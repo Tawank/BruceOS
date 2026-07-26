@@ -3,3 +3,4 @@
 bool selftest__run_wifi_permission_denied_case(void);
 bool selftest__run_http_permission_denied_case(void);
 bool selftest__run_wifi_http_independent_permission_case(void);
+bool selftest__run_tcp_permission_denied_case(void);

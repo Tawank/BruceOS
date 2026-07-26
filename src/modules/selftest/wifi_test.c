@@ -16,6 +16,7 @@
 #include "core_sdk/permission.h"
 #include "core_sdk/result.h"
 #include "core_sdk/task.h"
+#include "core_sdk/tcp.h"
 #include "core_sdk/wifi.h"
 
 #include "wifi_test.h"
@@ -57,6 +58,16 @@ static int selftest__http_request_entry(int argc, char **argv)
     };
     bruce_http_response_t response = {0};
     s_wifi_http_result.result = http__request(&request, &response);
+    s_wifi_http_result.ran = true;
+    return 0;
+}
+
+static int selftest__tcp_connect_entry(int argc, char **argv)
+{
+    (void)argc;
+    (void)argv;
+    bruce_tcp_id_t socket = BRUCE_TCP_ID_INVALID;
+    s_wifi_http_result.result = tcp__connect("127.0.0.1", 1, 1, &socket);
     s_wifi_http_result.ran = true;
     return 0;
 }
@@ -140,5 +151,15 @@ bool selftest__run_wifi_http_independent_permission_case(void)
     bool ok = wifi_result == BRUCE_ERR_PERMISSION && http_result != BRUCE_ERR_PERMISSION;
     printf("[selftest] wifi+http/independent-permission: %s (wifi=%d http=%d)\n", ok ? "OK" : "FAIL", wifi_result,
            http_result);
+    return ok;
+}
+
+bool selftest__run_tcp_permission_denied_case(void)
+{
+    permission__test_reset();
+    permission__set("tcp_denied.elf", BRUCE_PERMISSION_WIFI, false);
+    bruce_result_t result = selftest__run_as_external("tcp_denied.elf", selftest__tcp_connect_entry);
+    bool ok = result == BRUCE_ERR_PERMISSION;
+    printf("[selftest] tcp/permission-denied: %s (result=%d)\n", ok ? "OK" : "FAIL", result);
     return ok;
 }

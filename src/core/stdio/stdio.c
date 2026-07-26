@@ -9,6 +9,29 @@
 #include "freertos/FreeRTOS.h" // IWYU pragma: export
 #include "freertos/task.h"
 
+#include "core_sdk/result.h"
+
+bruce_result_t bruce_stdio_read(void *buffer, size_t capacity, uint32_t timeout_ms, size_t *out_size)
+{
+    if (buffer == NULL || capacity == 0 || out_size == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    *out_size = 0;
+    fd_set rfds;
+    FD_ZERO(&rfds);
+    FD_SET(STDIN_FILENO, &rfds);
+    struct timeval timeout = {
+        .tv_sec = (time_t)(timeout_ms / 1000u),
+        .tv_usec = (suseconds_t)((timeout_ms % 1000u) * 1000u),
+    };
+    int ready = select(STDIN_FILENO + 1, &rfds, NULL, NULL, &timeout);
+    if (ready == 0) return BRUCE_ERR_TIMEOUT;
+    if (ready < 0) return BRUCE_ERR_IO;
+    ssize_t count = read(STDIN_FILENO, buffer, capacity);
+    if (count < 0) return BRUCE_ERR_IO;
+    if (count == 0) return BRUCE_ERR_NOT_FOUND;
+    *out_size = (size_t)count;
+    return BRUCE_OK;
+}
+
 int bruce_stdio_read_line(char *buffer, size_t buffer_size, bool mask_input)
 {
     if (buffer == NULL || buffer_size == 0) {

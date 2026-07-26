@@ -387,8 +387,8 @@ a permissions-management UI is the way to change it.
 Built-in module tasks are implicitly granted every permission.  External
 tasks are checked inside each protected Core API.
 
-`http__request()` needs `http`; it does not imply `wifi`. Wi-Fi state control
-and credentials need `wifi`. `input__inject()` needs `input`; task control of
+`http__request()` needs `http`; it does not imply `wifi`. Wi-Fi state control,
+credentials, and raw TCP sockets need `wifi`. `input__inject()` needs `input`; task control of
 another task needs `task`; starting a built-in command or path needs `execute`.
 
 ## Dialog and task interaction
@@ -463,6 +463,17 @@ protected paths are `/bruce.json`, `/permissions.json`, and their atomic-write
 temporary files; all other mounted paths are usable by a storage-granted app.
 `storage__mkdir()` creates one directory at a time through the same path and
 permission policy and succeeds when that directory already exists.
+
+Raw IPv4 TCP uses task-owned opaque handles through `tcp__connect()`,
+`tcp__listen()`, `tcp__accept()`, `tcp__read()`, `tcp__write()`, and
+`tcp__close()`. Connect accepts hostnames, all blocking operations have caller-
+supplied timeouts, and EOF is reported as a successful zero-byte read. Handles
+are restricted to their owning task and close automatically at task teardown.
+The built-in `tcp` terminal app provides client and sequential single-client
+listener modes. It forwards raw stdin bytes to the socket and prints received
+bytes to stdout; Ctrl+] closes the active mode. The terminal waits for a
+launched foreground command to exit, preventing its prompt from competing for
+stdin.
 
 `config` grants field-specific APIs such as `config__get_bright()` and
 `config__set_sound_enabled(true)`.  Setters validate and atomically persist

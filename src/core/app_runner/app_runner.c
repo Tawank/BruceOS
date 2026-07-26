@@ -16,6 +16,7 @@
 #include "modules/loaders/js/js_loader_app.h"
 #include "modules/ir/ir_app.h"
 #include "modules/selftest/selftest.h"
+#include "modules/tcp/tcp_app.h"
 #include "modules/utils/launcher/launcher_app.h"
 #include "modules/utils/terminal/terminal_app.h"
 #include "modules/utils/notification/notification_app.h"
@@ -86,6 +87,7 @@ void app_runner__register_defaults(void)
     (void)app_runner__register("elf", elf_loader__app_main);
     (void)app_runner__register("js", js_loader__app_main);
     (void)app_runner__register("notification", notification_app_main);
+    (void)app_runner__register("tcp", tcp_app_main);
 
     (void)app_runner__register_loader(".elf", 10, elf_loader__run_path);
     (void)app_runner__register_loader(".js", 20, js_loader__run_path);

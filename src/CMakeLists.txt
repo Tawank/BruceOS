@@ -15,6 +15,7 @@ idf_component_register(SRCS
                     "core/storage/storage.c"
                     "core/status_icon/status_icon.c"
                     "core/task/task.c"
+                    "core/tcp/tcp.c"
                     "core/wifi/wifi_common.c"
                     "modules/bruce_launcher/bruce_launcher_app.c"
                     "modules/filemanager/filemanager_app.c"
@@ -46,6 +47,7 @@ idf_component_register(SRCS
                     "modules/selftest/task_test.c"
                     "modules/selftest/terminal_test.c"
                     "modules/selftest/wifi_test.c"
+                    "modules/tcp/tcp_app.c"
                     "modules/utils/launcher/launcher_app.c"
                     "modules/utils/terminal/terminal_app.c"
                     "modules/utils/notification/notification_app.c"
@@ -113,6 +115,11 @@ add_library(bruce_sdk_builtin_notification_check OBJECT "modules/utils/notificat
 target_include_directories(bruce_sdk_builtin_notification_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/utils/notification")
+
+add_library(bruce_sdk_builtin_tcp_check OBJECT "modules/tcp/tcp_app.c")
+target_include_directories(bruce_sdk_builtin_tcp_check PRIVATE
+                           "${CMAKE_CURRENT_LIST_DIR}"
+                           "${CMAKE_CURRENT_LIST_DIR}/modules/tcp")
 
 add_library(bruce_sdk_builtin_elf_loader_check OBJECT
             "modules/loaders/elf/elf_loader_app.c"

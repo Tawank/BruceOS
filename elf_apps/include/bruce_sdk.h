@@ -18,7 +18,9 @@
 #include "core_sdk/result.h"      // IWYU pragma: export
 #include "core_sdk/storage.h"     // IWYU pragma: export
 #include "core_sdk/status_icon.h" // IWYU pragma: export
+#include "core_sdk/stdio.h"       // IWYU pragma: export
 #include "core_sdk/task.h"        // IWYU pragma: export
+#include "core_sdk/tcp.h"         // IWYU pragma: export
 
 /* Embed the canonical manifest JSON in the non-loadable .bruce.manifest
  * section.  The JSON string must be valid UTF-8 and contain the required

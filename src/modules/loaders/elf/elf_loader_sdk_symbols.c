@@ -30,7 +30,9 @@
 #include "core_sdk/result.h"
 #include "core_sdk/storage.h"
 #include "core_sdk/status_icon.h"
+#include "core_sdk/stdio.h"
 #include "core_sdk/task.h"
+#include "core_sdk/tcp.h"
 
 const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     /* Core runtime / task */
@@ -149,6 +151,15 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(storage__close),
     ESP_ELFSYM_EXPORT(storage__list),
     ESP_ELFSYM_EXPORT(storage__mkdir),
+
+    /* TCP and console streams */
+    ESP_ELFSYM_EXPORT(tcp__connect),
+    ESP_ELFSYM_EXPORT(tcp__listen),
+    ESP_ELFSYM_EXPORT(tcp__accept),
+    ESP_ELFSYM_EXPORT(tcp__read),
+    ESP_ELFSYM_EXPORT(tcp__write),
+    ESP_ELFSYM_EXPORT(tcp__close),
+    ESP_ELFSYM_EXPORT(bruce_stdio_read),
 
     /* Standard C library subset (provided by firmware, not by forwarding
      * malloc/free to libc). */
