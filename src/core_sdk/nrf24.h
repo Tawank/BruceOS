@@ -18,8 +18,8 @@ typedef struct {
     int ce;
 } bruce_nrf24_pins_t;
 
-/* NRF24 operations require the `rf` permission. The radio uses SPI3_HOST so
- * it does not interfere with the display-owned SPI2_HOST. */
+/* NRF24 operations require the `rf` permission. The radio attaches to the
+ * shared external SPI3_HOST bus and does not use display-owned SPI2_HOST. */
 bruce_result_t nrf24__probe(bool *out_connected);
 bruce_result_t nrf24__set_channel(uint8_t channel);
 bruce_result_t nrf24__get_channel(uint8_t *out_channel);

@@ -5,8 +5,10 @@ idf_component_register(SRCS
                     "core/bluetooth/bluetooth_hid.c"
                     "core/config/config.c"
                     "core/dialog/dialog.c"
-                    "core/display/display.c"
-                    "core/http/http.c"
+                     "core/display/display.c"
+                     "core/gpio/gpio.c"
+                     "core/http/http.c"
+                     "core/i2c/i2c.c"
                     "core/input/input.c"
                     "core/ir/ir.c"
                     "core/manifest/manifest.c"
@@ -14,7 +16,8 @@ idf_component_register(SRCS
                     "core/notification/notification.c"
                     "core/nrf24/nrf24.c"
                     "core/permission/permission.c"
-                    "core/stdio/stdio.c"
+                     "core/stdio/stdio.c"
+                     "core/spi/spi.c"
                     "core/storage/storage.c"
                     "core/status_icon/status_icon.c"
                     "core/task/task.c"
@@ -40,7 +43,8 @@ idf_component_register(SRCS
                     "modules/selftest/bluetooth_test.c"
                     "modules/selftest/config_test.c"
                     "modules/selftest/dialog_test.c"
-                    "modules/selftest/display_test.c"
+                     "modules/selftest/display_test.c"
+                     "modules/selftest/gpio_bus_test.c"
                     "modules/selftest/fake_elf.c"
                     "modules/selftest/input_test.c"
                     "modules/selftest/ir_test.c"
@@ -66,7 +70,8 @@ idf_component_register(SRCS
                     bt
                     esp_event
                     driver
-                    esp_driver_gpio
+                     esp_driver_gpio
+                     esp_driver_i2c
                     esp_driver_ledc
                     esp_driver_rmt
                     esp_driver_spi

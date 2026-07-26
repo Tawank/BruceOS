@@ -22,6 +22,8 @@
 #include "core_sdk/bluetooth_hid.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/display.h"
+#include "core_sdk/gpio.h"
+#include "core_sdk/i2c.h"
 #include "core_sdk/input.h"
 #include "core_sdk/ir.h"
 #include "core_sdk/loader.h"
@@ -31,6 +33,7 @@
 #include "core_sdk/nrf24.h"
 #include "core_sdk/permission.h"
 #include "core_sdk/result.h"
+#include "core_sdk/spi.h"
 #include "core_sdk/storage.h"
 #include "core_sdk/status_icon.h"
 #include "core_sdk/stdio.h"
@@ -101,6 +104,20 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(nrf24__get_channel),
     ESP_ELFSYM_EXPORT(nrf24__scan),
     ESP_ELFSYM_EXPORT(nrf24__get_pins),
+
+    /* GPIO and serial buses */
+    ESP_ELFSYM_EXPORT(gpio__configure),
+    ESP_ELFSYM_EXPORT(gpio__read),
+    ESP_ELFSYM_EXPORT(gpio__write),
+    ESP_ELFSYM_EXPORT(i2c__open),
+    ESP_ELFSYM_EXPORT(i2c__probe),
+    ESP_ELFSYM_EXPORT(i2c__write),
+    ESP_ELFSYM_EXPORT(i2c__read),
+    ESP_ELFSYM_EXPORT(i2c__write_read),
+    ESP_ELFSYM_EXPORT(i2c__close),
+    ESP_ELFSYM_EXPORT(spi__open),
+    ESP_ELFSYM_EXPORT(spi__transfer),
+    ESP_ELFSYM_EXPORT(spi__close),
 
     /* Display (layout management remains built-in-only) */
     ESP_ELFSYM_EXPORT(display__width),

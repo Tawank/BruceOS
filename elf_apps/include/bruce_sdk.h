@@ -9,6 +9,8 @@
 
 #include "core_sdk/app_runner.h"  // IWYU pragma: export
 #include "core_sdk/display.h"     // IWYU pragma: export
+#include "core_sdk/gpio.h"        // IWYU pragma: export
+#include "core_sdk/i2c.h"         // IWYU pragma: export
 #include "core_sdk/loader.h"      // IWYU pragma: export
 #include "core_sdk/ir.h"          // IWYU pragma: export
 #include "core_sdk/manifest.h"    // IWYU pragma: export
@@ -17,6 +19,7 @@
 #include "core_sdk/nrf24.h"       // IWYU pragma: export
 #include "core_sdk/permission.h"  // IWYU pragma: export
 #include "core_sdk/result.h"      // IWYU pragma: export
+#include "core_sdk/spi.h"         // IWYU pragma: export
 #include "core_sdk/storage.h"     // IWYU pragma: export
 #include "core_sdk/status_icon.h" // IWYU pragma: export
 #include "core_sdk/stdio.h"       // IWYU pragma: export

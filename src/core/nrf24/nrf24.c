@@ -1,19 +1,17 @@
 #include "nrf24.h"
 
+#include "core/gpio/gpio.h"
+#include "core/spi/spi.h"
 #include "core_sdk/nrf24.h"
 #include "core_sdk/permission.h"
 
 #include <string.h>
 
-#include "driver/gpio.h"
-#include "driver/spi_master.h"
-#include "esp_err.h"
 #include "esp_rom_sys.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
-#define NRF24_SPI_HOST SPI3_HOST
 #define NRF24_SPI_CLOCK_HZ 10000000
 
 #define NRF24_CMD_R_REGISTER 0x00u
@@ -33,19 +31,20 @@
 #define NRF24_CONFIG_PWR_UP (1u << 1)
 #define NRF24_CONFIG_PRIM_RX (1u << 0)
 
+static StaticSemaphore_t s_nrf24_mutex_storage;
 static SemaphoreHandle_t s_nrf24_mutex;
-static spi_device_handle_t s_nrf24_device;
+static portMUX_TYPE s_nrf24_init_mux = portMUX_INITIALIZER_UNLOCKED;
+static bruce_spi_id_t s_nrf24_device = BRUCE_SPI_ID_INVALID;
 static uint8_t s_nrf24_channel = BRUCE_NRF24_DEFAULT_CHANNEL;
 
-static bruce_result_t nrf24__esp_result(esp_err_t error)
+static void nrf24__ensure_mutex(void)
 {
-    if (error == ESP_OK) return BRUCE_OK;
-    if (error == ESP_ERR_INVALID_ARG) return BRUCE_ERR_INVALID_ARGUMENT;
-    if (error == ESP_ERR_NO_MEM) return BRUCE_ERR_NO_MEMORY;
-    if (error == ESP_ERR_INVALID_STATE || error == ESP_ERR_NOT_FOUND) return BRUCE_ERR_BUSY;
-    if (error == ESP_ERR_TIMEOUT) return BRUCE_ERR_TIMEOUT;
-    if (error == ESP_ERR_NOT_SUPPORTED) return BRUCE_ERR_UNSUPPORTED;
-    return BRUCE_ERR_IO;
+    if (s_nrf24_mutex != NULL) return;
+    portENTER_CRITICAL(&s_nrf24_init_mux);
+    if (s_nrf24_mutex == NULL) {
+        s_nrf24_mutex = xSemaphoreCreateMutexStatic(&s_nrf24_mutex_storage);
+    }
+    portEXIT_CRITICAL(&s_nrf24_init_mux);
 }
 
 void nrf24__get_pins(bruce_nrf24_pins_t *out_pins)
@@ -62,44 +61,28 @@ void nrf24__get_pins(bruce_nrf24_pins_t *out_pins)
 
 bruce_result_t nrf24__init(void)
 {
-    if (s_nrf24_mutex == NULL) {
-        s_nrf24_mutex = xSemaphoreCreateMutex();
-        if (s_nrf24_mutex == NULL) return BRUCE_ERR_NO_MEMORY;
+    nrf24__ensure_mutex();
+    if (xSemaphoreTake(s_nrf24_mutex, pdMS_TO_TICKS(1000)) != pdTRUE) return BRUCE_ERR_BUSY;
+    if (s_nrf24_device != BRUCE_SPI_ID_INVALID) {
+        xSemaphoreGive(s_nrf24_mutex);
+        return BRUCE_OK;
     }
-    if (s_nrf24_device != NULL) return BRUCE_OK;
 
-    gpio_config_t ce_config = {
-        .pin_bit_mask = 1ULL << CONFIG_BRUCE_NRF24_CE_GPIO,
-        .mode = GPIO_MODE_OUTPUT,
-    };
-    esp_err_t error = gpio_config(&ce_config);
-    if (error != ESP_OK) return nrf24__esp_result(error);
-    gpio_set_level(CONFIG_BRUCE_NRF24_CE_GPIO, 0);
-
-    spi_bus_config_t bus_config = {
-        .sclk_io_num = CONFIG_BRUCE_NRF24_SCK_GPIO,
-        .miso_io_num = CONFIG_BRUCE_NRF24_MISO_GPIO,
-        .mosi_io_num = CONFIG_BRUCE_NRF24_MOSI_GPIO,
-        .quadwp_io_num = -1,
-        .quadhd_io_num = -1,
-        .max_transfer_sz = 33,
-    };
-    error = spi_bus_initialize(NRF24_SPI_HOST, &bus_config, SPI_DMA_DISABLED);
-    if (error != ESP_OK) return nrf24__esp_result(error);
-
-    spi_device_interface_config_t device_config = {
-        .clock_speed_hz = NRF24_SPI_CLOCK_HZ,
+    bruce_result_t result = gpio__configure_internal(CONFIG_BRUCE_NRF24_CE_GPIO,
+                                                       BRUCE_GPIO_MODE_OUTPUT, BRUCE_GPIO_PULL_NONE);
+    if (result == BRUCE_OK) result = gpio__write_internal(CONFIG_BRUCE_NRF24_CE_GPIO, 0);
+    bruce_spi_device_config_t device_config = {
+        .sck = CONFIG_BRUCE_NRF24_SCK_GPIO,
+        .miso = CONFIG_BRUCE_NRF24_MISO_GPIO,
+        .mosi = CONFIG_BRUCE_NRF24_MOSI_GPIO,
+        .cs = CONFIG_BRUCE_NRF24_CS_GPIO,
+        .clock_hz = NRF24_SPI_CLOCK_HZ,
         .mode = 0,
-        .spics_io_num = CONFIG_BRUCE_NRF24_CS_GPIO,
-        .queue_size = 1,
     };
-    error = spi_bus_add_device(NRF24_SPI_HOST, &device_config, &s_nrf24_device);
-    if (error != ESP_OK) {
-        (void)spi_bus_free(NRF24_SPI_HOST);
-        return nrf24__esp_result(error);
-    }
-    vTaskDelay(pdMS_TO_TICKS(5));
-    return BRUCE_OK;
+    if (result == BRUCE_OK) result = spi__open_internal(&device_config, false, &s_nrf24_device);
+    if (result == BRUCE_OK) vTaskDelay(pdMS_TO_TICKS(5));
+    xSemaphoreGive(s_nrf24_mutex);
+    return result;
 }
 
 static bruce_result_t nrf24__transfer(uint8_t command, const uint8_t *write_data,
@@ -111,12 +94,7 @@ static bruce_result_t nrf24__transfer(uint8_t command, const uint8_t *write_data
     tx[0] = command;
     if (write_data != NULL && size > 0) memcpy(&tx[1], write_data, size);
     else if (size > 0) memset(&tx[1], NRF24_CMD_NOP, size);
-    spi_transaction_t transaction = {
-        .length = (size + 1u) * 8u,
-        .tx_buffer = tx,
-        .rx_buffer = rx,
-    };
-    bruce_result_t result = nrf24__esp_result(spi_device_transmit(s_nrf24_device, &transaction));
+    bruce_result_t result = spi__transfer_internal(s_nrf24_device, tx, rx, size + 1u);
     if (result != BRUCE_OK) return result;
     if (out_status != NULL) *out_status = rx[0];
     if (read_data != NULL && size > 0) memcpy(read_data, &rx[1], size);
@@ -233,15 +211,20 @@ bruce_result_t nrf24__scan(uint8_t first_channel, size_t channel_count,
             uint8_t channel = (uint8_t)(first_channel + index);
             result = nrf24__write_register(NRF24_REG_RF_CH, channel);
             if (result != BRUCE_OK) break;
-            gpio_set_level(CONFIG_BRUCE_NRF24_CE_GPIO, 1);
+            result = gpio__write_internal(CONFIG_BRUCE_NRF24_CE_GPIO, 1);
+            if (result != BRUCE_OK) break;
             esp_rom_delay_us(140);
             uint8_t rpd = 0;
             result = nrf24__read_register(NRF24_REG_RPD, &rpd);
-            gpio_set_level(CONFIG_BRUCE_NRF24_CE_GPIO, 0);
+            if (gpio__write_internal(CONFIG_BRUCE_NRF24_CE_GPIO, 0) != BRUCE_OK && result == BRUCE_OK) {
+                result = BRUCE_ERR_IO;
+            }
             if (result == BRUCE_OK && (rpd & 1u) != 0) out_activity[index]++;
         }
     }
-    gpio_set_level(CONFIG_BRUCE_NRF24_CE_GPIO, 0);
+    if (gpio__write_internal(CONFIG_BRUCE_NRF24_CE_GPIO, 0) != BRUCE_OK && result == BRUCE_OK) {
+        result = BRUCE_ERR_IO;
+    }
     (void)nrf24__write_register(NRF24_REG_CONFIG, 0);
     if (nrf24__write_register(NRF24_REG_RF_CH, s_nrf24_channel) != BRUCE_OK && result == BRUCE_OK) {
         result = BRUCE_ERR_IO;

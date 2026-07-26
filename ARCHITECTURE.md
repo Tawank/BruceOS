@@ -360,7 +360,7 @@ http, wifi, bt, gps, rf, input, gpio, ir, rfid, microphone,
 hid, execute, task, storage, config, serial
 ```
 
-`gpio` includes I²C.  `rf` includes Sub-GHz, LoRa, and NRF24.  `audio` is not
+`gpio` includes raw GPIO, I²C, and SPI. `rf` includes Sub-GHz, LoRa, and NRF24. `audio` is not
 permission-gated.  Unknown permission names are invalid.
 
 Permissions are stored in Core-owned `/permissions.json`, keyed only by the
@@ -457,6 +457,27 @@ budgets span internal wakes. `input__inject()` accepts a normalized event with t
 code, value, timestamp, and source task ID, allowing Bluetooth, GPIO, and I²C
 adapters to feed the same pipeline.
 
+Raw GPIO is exposed through `gpio__configure()`, `gpio__read()`, and
+`gpio__write()`. Modes and pin capabilities are validated against the selected
+SoC, and every public operation requires `gpio`.
+
+I²C master buses are opened with `i2c__open()` using an explicit or
+automatically selected controller, SDA/SCL pins, clock, and pull-up policy.
+Compatible opens share one Core-owned hardware bus. Handles are task-owned,
+close automatically, and support 7-bit probe, write, read, and repeated-start
+write/read transactions of at most 4096 bytes. Reserved addresses outside
+0x08 through 0x77 are rejected. A probe NACK is `BRUCE_OK` with `present=false`;
+transaction NACK is `BRUCE_ERR_NOT_FOUND`.
+
+SPI devices are opened with `spi__open()` on the board's external
+`SPI3_HOST`. The first device selects the SCK/MISO/MOSI tuple; additional
+devices may attach while that tuple matches and have independent CS, mode, and
+clock settings. Device handles are task-owned, close automatically, and allow
+bounded full-duplex transfers of at most 64 bytes without DMA. The display continues to
+own `SPI2_HOST` and is never attached through this API. Core hardware drivers
+use trusted private GPIO/bus entry points so their capability-specific
+permission remains authoritative.
+
 Display Core owns one RGB565 framebuffer and one panel-transfer worker. GUI
 tasks draw in local coordinates into a fullscreen foreground viewport, one of
 up to four launcher-assigned non-overlapping tiles, or a hidden zero-sized
@@ -524,7 +545,8 @@ presence, channel operations cover the hardware range 0 through 125, and
 `nrf24__scan()` returns bounded counts from the radio's RPD threshold detector.
 RPD results indicate 2.4 GHz activity only; they are not calibrated RSSI and do
 not decode packets. Core owns the radio and serializes synchronous operations.
-NRF24 uses `SPI3_HOST`, leaving the display-owned `SPI2_HOST` untouched, with
+NRF24 attaches to the shared external SPI Core bus on `SPI3_HOST`, leaving the
+display-owned `SPI2_HOST` untouched, with
 board-specific SCK, MISO, MOSI, CS, and CE defaults configurable through
 Kconfig. The built-in NRF24 app exposes status and passive spectrum scans in
 both launcher GUI and terminal forms. The v1 API intentionally excludes packet

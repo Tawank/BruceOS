@@ -13,12 +13,16 @@ typedef uint32_t bruce_resource_id_t;
 typedef uint32_t bruce_file_id_t;
 typedef uint32_t bruce_viewer_id_t;
 typedef uint32_t bruce_tcp_id_t;
+typedef uint32_t bruce_i2c_id_t;
+typedef uint32_t bruce_spi_id_t;
 
 #define BRUCE_TASK_ID_INVALID ((bruce_task_id_t)0)
 #define BRUCE_RESOURCE_ID_INVALID ((bruce_resource_id_t)0)
 #define BRUCE_FILE_ID_INVALID ((bruce_file_id_t)0)
 #define BRUCE_VIEWER_ID_INVALID ((bruce_viewer_id_t)0)
 #define BRUCE_TCP_ID_INVALID ((bruce_tcp_id_t)0)
+#define BRUCE_I2C_ID_INVALID ((bruce_i2c_id_t)0)
+#define BRUCE_SPI_ID_INVALID ((bruce_spi_id_t)0)
 
 #define BRUCE_TASK_NAME_MAX 64
 
