@@ -395,19 +395,16 @@ static bruce_result_t dialog__gui_choice(const char *title, const char *message,
 
         switch (ev.code) {
             case BRUCE_INPUT_CODE_UP:
-            case ';':
                 if (selected > 0) {
                     selected--;
                 }
                 break;
             case BRUCE_INPUT_CODE_DOWN:
-            case '.':
                 if ((size_t)selected + 1 < choice_count) {
                     selected++;
                 }
                 break;
             case BRUCE_INPUT_CODE_LEFT:
-            case ',':
                 if (selected > 0) {
                     selected -= items_per_page;
                     if (selected < 0) {
@@ -416,7 +413,6 @@ static bruce_result_t dialog__gui_choice(const char *title, const char *message,
                 }
                 break;
             case BRUCE_INPUT_CODE_RIGHT:
-            case '/':
                 if (selected + items_per_page < (int)choice_count) {
                     selected += items_per_page;
                 } else {
@@ -425,13 +421,11 @@ static bruce_result_t dialog__gui_choice(const char *title, const char *message,
                 break;
             case BRUCE_INPUT_CODE_SELECT:
             case BRUCE_INPUT_CODE_BUTTON_A:
-            case '\n':
             case '\r':
                 *out_selected = (size_t)selected;
                 return BRUCE_OK;
             case BRUCE_INPUT_CODE_BACK:
             case BRUCE_INPUT_CODE_BUTTON_B:
-            case '`':
                 return BRUCE_ERR_CANCELLED;
             default:
                 break;

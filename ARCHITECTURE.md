@@ -78,15 +78,14 @@ public Config API and starts that command with app_runner.  The default is
 `bruce_launcher`; an empty or unstartable configured value falls back to
 `bruce_launcher`.
 
-`bruce_launcher` is an application, not Core.  It composes menus and may scan
-`/apps/`. Its GUI presents Built-ins, Apps, and Exit as a three-icon top-level
-carousel; Built-ins and Apps open list submenus with up to four visible rows.
-It appends `--gui` to every app it launches.
-
-The built-in `filemanager` app browses mounted storage through `storage__list()`
-and `dialog__pick_file()`. It can show a bounded text preview, report file size,
-or dispatch a selected file through `app_runner__run_path()`; it does not bypass
-the public Storage API to implement unsupported mutation operations.
+`bruce_launcher` is an application, not Core.  It reads `/launcher.json` and
+builds a nested menu from it.  Top-level keys are menu labels; values are either
+a command string (dispatched as-is to `app_runner__run()` or
+`app_runner__run_path()`), a string path starting with `/` that enumerates a
+directory (e.g., `"Apps": "/apps"`), or another object defining a submenu.
+Every submenu automatically appends a `"Back"` entry.  The command strings are
+passed exactly as written; the launcher does not append `--gui` automatically.
+If `/launcher.json` is missing, the launcher writes a default configuration.
 
 ## Applications and app_runner
 

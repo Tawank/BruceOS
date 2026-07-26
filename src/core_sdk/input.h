@@ -27,14 +27,14 @@ typedef enum {
  * physical buttons and Fn-chord keyboard bindings can emit the same
  * semantic events.
  */
-#define BRUCE_INPUT_CODE_UP      0x100
-#define BRUCE_INPUT_CODE_DOWN    0x101
-#define BRUCE_INPUT_CODE_LEFT    0x102
-#define BRUCE_INPUT_CODE_RIGHT   0x103
-#define BRUCE_INPUT_CODE_SELECT  0x104
-#define BRUCE_INPUT_CODE_BACK    0x105
-#define BRUCE_INPUT_CODE_MENU    0x106
-#define BRUCE_INPUT_CODE_HOME    0x107
+#define BRUCE_INPUT_CODE_UP       0x03B
+#define BRUCE_INPUT_CODE_DOWN     0x02E
+#define BRUCE_INPUT_CODE_LEFT     0x02C
+#define BRUCE_INPUT_CODE_RIGHT    0x02F
+#define BRUCE_INPUT_CODE_SELECT   0x00A
+#define BRUCE_INPUT_CODE_BACK     0x060
+#define BRUCE_INPUT_CODE_MENU     0x106
+#define BRUCE_INPUT_CODE_HOME     0x107
 #define BRUCE_INPUT_CODE_BUTTON_A 0x200
 #define BRUCE_INPUT_CODE_BUTTON_B 0x201
 #define BRUCE_INPUT_CODE_BUTTON_C 0x202

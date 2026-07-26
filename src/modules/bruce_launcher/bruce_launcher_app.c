@@ -5,8 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "cJSON.h"
 #include "core_sdk/app_runner.h"
-#include "core_sdk/bluetooth_hid.h"
 #include "core_sdk/config.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/display.h"
@@ -19,7 +19,10 @@
 #include "core_sdk/status_icon.h"
 #include "core_sdk/task.h"
 
+#define BRUCE_LAUNCHER_CONFIG_PATH "/launcher.json"
+#define BRUCE_LAUNCHER_JSON_MAX 8192
 #define BRUCE_LAUNCHER_MAX_ENTRIES 32
+#define BRUCE_LAUNCHER_MAX_DEPTH 4
 #define BRUCE_LAUNCHER_LABEL_MAX 80
 #define BRUCE_LAUNCHER_TITLE "Main Menu"
 #define BRUCE_LAUNCHER_VERSION_TEXT "BRUCE"
@@ -48,15 +51,57 @@ typedef enum {
     BRUCE_LAUNCHER_ICON_FILES,
 } bruce_launcher_icon_t;
 
-/* One entry in the launcher menu.  Built-ins are dispatched by name; /apps/
- * entries are dispatched by path. */
+/* Default launcher configuration written when /launcher.json is missing. */
+static const char *BRUCE_LAUNCHER_DEFAULT_JSON =
+    "{\n"
+    "  \"wifi\": {\n"
+    "    \"Connect to Wifi\": \"wifi connect\",\n"
+    "    \"Start WiFi AP\": \"wifi ap start\",\n"
+    "    \"Turn Off WiFi\": \"wifi disconnect\",\n"
+    "    \"AP info\": \"wifi ap info\",\n"
+    "    \"Wifi Atks\": {\n"
+    "      \"Target Atks\": \"wifiatks target\",\n"
+    "      \"Karma Attack\": \"wifiatks karma\",\n"
+    "      \"Beacon SPAM\": \"wifiatks beacon\"\n"
+    "    }\n"
+    "  },\n"
+    "  \"Selftest\": \"selftest\",\n"
+    "  \"Clock\": \"clock\",\n"
+    "  \"Config\": {\n"
+    "    \"Display & UI\": \"config display\",\n"
+    "    \"LED Config\": \"config led\",\n"
+    "    \"Audio Config\": \"config audio\",\n"
+    "    \"System Config\": \"config system\",\n"
+    "    \"Power\": \"config power\",\n"
+    "    \"Install App Store\": \"appstore install\",\n"
+    "    \"About\": \"config about\"\n"
+    "  },\n"
+    "  \"Apps\": \"/apps\"\n"
+    "}\n";
+
+/* One entry in the launcher menu. */
+typedef struct bruce_launcher_menu bruce_launcher_menu_t;
+
+typedef enum {
+    BRUCE_LAUNCHER_ENTRY_COMMAND,
+    BRUCE_LAUNCHER_ENTRY_SUBMENU,
+    BRUCE_LAUNCHER_ENTRY_BACK,
+} bruce_launcher_entry_kind_t;
+
 typedef struct {
     char label[BRUCE_LAUNCHER_LABEL_MAX];
-    char app_name[BRUCE_STORAGE_NAME_MAX];
-    char path[BRUCE_STORAGE_PATH_MAX];
-    bool is_path;
-    bruce_launcher_icon_t icon;
+    bruce_launcher_entry_kind_t kind;
+    char command[BRUCE_STORAGE_PATH_MAX];
+    bruce_launcher_menu_t *submenu;
 } bruce_launcher_entry_t;
+
+struct bruce_launcher_menu {
+    char title[BRUCE_LAUNCHER_LABEL_MAX];
+    bruce_launcher_entry_t *entries;
+    int entry_count;
+    int capacity;
+    bruce_launcher_menu_t *parent;
+};
 
 /* Theme colors cached from bruce.json. */
 typedef struct {
@@ -65,82 +110,163 @@ typedef struct {
     uint16_t bg;
 } bruce_launcher_theme_t;
 
-typedef enum {
-    BRUCE_LAUNCHER_MENU_BUILTINS,
-    BRUCE_LAUNCHER_MENU_APPS,
-    BRUCE_LAUNCHER_MENU_EXIT,
-    BRUCE_LAUNCHER_MENU_COUNT,
-} bruce_launcher_menu_t;
+/* -------------------------------------------------------------------------- */
+/* Menu tree helpers                                                          */
+/* -------------------------------------------------------------------------- */
 
-static const char *const s_main_menu_labels[BRUCE_LAUNCHER_MENU_COUNT] = {
-    "Built-ins",
-    "Apps",
-    "Exit",
-};
-
-static bool bruce_launcher__add_builtin(bruce_launcher_entry_t *entries, int *count, int capacity,
-                                        const char *app_name, const char *label)
+static bruce_launcher_menu_t *bruce_launcher__menu_create(const char *title, bruce_launcher_menu_t *parent)
 {
-    if (*count >= capacity) {
+    bruce_launcher_menu_t *menu = (bruce_launcher_menu_t *)calloc(1, sizeof(*menu));
+    if (menu == NULL) {
+        return NULL;
+    }
+
+    strncpy(menu->title, title, sizeof(menu->title) - 1);
+    menu->capacity = BRUCE_LAUNCHER_MAX_ENTRIES;
+    menu->entries = (bruce_launcher_entry_t *)calloc((size_t)menu->capacity, sizeof(*menu->entries));
+    if (menu->entries == NULL) {
+        free(menu);
+        return NULL;
+    }
+    menu->parent = parent;
+    return menu;
+}
+
+static void bruce_launcher__menu_free(bruce_launcher_menu_t *menu)
+{
+    if (menu == NULL) {
+        return;
+    }
+    for (int i = 0; i < menu->entry_count; ++i) {
+        if (menu->entries[i].kind == BRUCE_LAUNCHER_ENTRY_SUBMENU) {
+            bruce_launcher__menu_free(menu->entries[i].submenu);
+            menu->entries[i].submenu = NULL;
+        }
+    }
+    free(menu->entries);
+    free(menu);
+}
+
+static bool bruce_launcher__menu_add_command(bruce_launcher_menu_t *menu, const char *label, const char *command)
+{
+    if (menu->entry_count >= menu->capacity) {
         return false;
     }
-    bruce_launcher_entry_t *entry = &entries[(*count)++];
-    memset(entry, 0, sizeof(*entry));
+    bruce_launcher_entry_t *entry = &menu->entries[menu->entry_count++];
     strncpy(entry->label, label, sizeof(entry->label) - 1);
-    strncpy(entry->app_name, app_name, sizeof(entry->app_name) - 1);
-    entry->is_path = false;
-    if (strcmp(app_name, "wifi") == 0 || strcmp(app_name, "webui") == 0) {
-        entry->icon = BRUCE_LAUNCHER_ICON_WIFI;
-    } else if (strcmp(app_name, "ir") == 0) {
-        entry->icon = BRUCE_LAUNCHER_ICON_IR;
-    } else if (strcmp(app_name, "selftest") == 0) {
-        entry->icon = BRUCE_LAUNCHER_ICON_SELFTEST;
-    } else if (strcmp(app_name, "terminal") == 0) {
-        entry->icon = BRUCE_LAUNCHER_ICON_TERMINAL;
-    } else if (strcmp(app_name, BRUCE_LAUNCHER_TASKS_APP) == 0) {
-        entry->icon = BRUCE_LAUNCHER_ICON_TASKS;
-    } else if (strcmp(app_name, "filemanager") == 0) {
-        entry->icon = BRUCE_LAUNCHER_ICON_FILES;
-    }
+    strncpy(entry->command, command, sizeof(entry->command) - 1);
+    entry->kind = BRUCE_LAUNCHER_ENTRY_COMMAND;
     return true;
 }
 
-static bool bruce_launcher__add_app(bruce_launcher_entry_t *entries, int *count, int capacity,
-                                    const char *path, const char *label)
+static bool bruce_launcher__menu_add_submenu(bruce_launcher_menu_t *menu, const char *label,
+                                             bruce_launcher_menu_t *submenu)
 {
-    if (*count >= capacity) {
+    if (menu->entry_count >= menu->capacity) {
         return false;
     }
-    bruce_launcher_entry_t *entry = &entries[(*count)++];
-    memset(entry, 0, sizeof(*entry));
+    bruce_launcher_entry_t *entry = &menu->entries[menu->entry_count++];
     strncpy(entry->label, label, sizeof(entry->label) - 1);
-    strncpy(entry->path, path, sizeof(entry->path) - 1);
-    entry->is_path = true;
+    entry->submenu = submenu;
+    entry->kind = BRUCE_LAUNCHER_ENTRY_SUBMENU;
     return true;
 }
 
-/* Discovers applications in /apps/ by extracting their manifest metadata.
+static bool bruce_launcher__menu_add_back(bruce_launcher_menu_t *menu)
+{
+    if (menu->entry_count >= menu->capacity) {
+        return false;
+    }
+    bruce_launcher_entry_t *entry = &menu->entries[menu->entry_count++];
+    strncpy(entry->label, "Back", sizeof(entry->label) - 1);
+    entry->kind = BRUCE_LAUNCHER_ENTRY_BACK;
+    return true;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Default config I/O                                                         */
+/* -------------------------------------------------------------------------- */
+
+static char *bruce_launcher__read_file(const char *path)
+{
+    bruce_file_id_t file;
+    bruce_result_t result = storage__open(path, BRUCE_STORAGE_OPEN_READ, &file);
+    if (result != BRUCE_OK) {
+        return NULL;
+    }
+
+    char *buffer = (char *)malloc(BRUCE_LAUNCHER_JSON_MAX);
+    if (buffer == NULL) {
+        storage__close(file);
+        return NULL;
+    }
+
+    size_t total = 0;
+    for (;;) {
+        size_t chunk = 0;
+        result = storage__read(file, buffer + total, BRUCE_LAUNCHER_JSON_MAX - total - 1, &chunk);
+        if (result != BRUCE_OK || chunk == 0) {
+            break;
+        }
+        total += chunk;
+        if (total >= BRUCE_LAUNCHER_JSON_MAX - 1) {
+            break;
+        }
+    }
+    buffer[total] = '\0';
+    storage__close(file);
+    return buffer;
+}
+
+static bool bruce_launcher__write_default_config(const char *path)
+{
+    bruce_file_id_t file;
+    bruce_result_t result = storage__open(path,
+                                          BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE |
+                                              BRUCE_STORAGE_OPEN_TRUNCATE,
+                                          &file);
+    if (result != BRUCE_OK) {
+        return false;
+    }
+
+    size_t to_write = strlen(BRUCE_LAUNCHER_DEFAULT_JSON);
+    size_t written = 0;
+    result = storage__write(file, BRUCE_LAUNCHER_DEFAULT_JSON, to_write, &written);
+    storage__close(file);
+    return result == BRUCE_OK && written == to_write;
+}
+
+/* -------------------------------------------------------------------------- */
+/* App discovery                                                              */
+/* -------------------------------------------------------------------------- */
+
+/* Discovers applications in a directory by extracting their manifest metadata.
  * Files without a manifest are skipped; the universal manifest__inspect_path()
  * auto-detects the format (ELF section, JS comment block, etc.) so the
  * launcher does not need format-specific knowledge. */
-static int bruce_launcher__discover_apps(bruce_launcher_entry_t *entries, int capacity)
+static int bruce_launcher__discover_apps(bruce_launcher_menu_t *menu, const char *path)
 {
-    bruce_storage_entry_t storage_entries[BRUCE_LAUNCHER_MAX_ENTRIES];
+    bruce_storage_entry_t *storage_entries =
+        (bruce_storage_entry_t *)malloc(sizeof(*storage_entries) * BRUCE_LAUNCHER_MAX_ENTRIES);
+    if (storage_entries == NULL) {
+        return 0;
+    }
+
     size_t discovered_count = 0;
-    bruce_result_t list_result = storage__list("/apps", storage_entries, sizeof(storage_entries) / sizeof(storage_entries[0]),
-                                               &discovered_count);
+    bruce_result_t list_result = storage__list(path, storage_entries, BRUCE_LAUNCHER_MAX_ENTRIES, &discovered_count);
     if (list_result != BRUCE_OK) {
+        free(storage_entries);
         return 0;
     }
 
     int added = 0;
-    for (size_t i = 0; i < discovered_count && added < capacity; ++i) {
+    for (size_t i = 0; i < discovered_count && menu->entry_count < menu->capacity; ++i) {
         if (storage_entries[i].type != BRUCE_STORAGE_ENTRY_FILE) {
             continue;
         }
 
         char full_path[BRUCE_STORAGE_PATH_MAX];
-        int printed = snprintf(full_path, sizeof(full_path), "/apps/%s", storage_entries[i].name);
+        int printed = snprintf(full_path, sizeof(full_path), "%s/%s", path, storage_entries[i].name);
         if (printed < 0 || (size_t)printed >= sizeof(full_path)) {
             continue;
         }
@@ -156,16 +282,122 @@ static int bruce_launcher__discover_apps(bruce_launcher_entry_t *entries, int ca
             continue;
         }
 
-        char label[BRUCE_LAUNCHER_LABEL_MAX];
-        int label_len = snprintf(label, sizeof(label), "%s", manifest->app_name);
-        if (label_len > 0 && (size_t)label_len < sizeof(label)) {
-            (void)bruce_launcher__add_app(entries, &added, capacity, full_path, label);
+        if (bruce_launcher__menu_add_command(menu, manifest->app_name, full_path)) {
+            added++;
         }
         memory__free(manifest);
     }
 
+    free(storage_entries);
     return added;
 }
+
+/* -------------------------------------------------------------------------- */
+/* JSON parser                                                                */
+/* -------------------------------------------------------------------------- */
+
+static bruce_launcher_menu_t *bruce_launcher__parse_json_object(cJSON *root, const char *title,
+                                                                bruce_launcher_menu_t *parent, int depth);
+
+static bool bruce_launcher__parse_json_value(bruce_launcher_menu_t *menu, const char *key, cJSON *value, int depth)
+{
+    if (cJSON_IsString(value) && value->valuestring != NULL) {
+        if (value->valuestring[0] == '/') {
+            /* Directory discovery entry: create a submenu populated from the path. */
+            bruce_launcher_menu_t *submenu = bruce_launcher__menu_create(key, menu);
+            if (submenu == NULL) {
+                return false;
+            }
+            (void)bruce_launcher__discover_apps(submenu, value->valuestring);
+            (void)bruce_launcher__menu_add_back(submenu);
+            if (!bruce_launcher__menu_add_submenu(menu, key, submenu)) {
+                bruce_launcher__menu_free(submenu);
+                return false;
+            }
+            return true;
+        } else {
+            return bruce_launcher__menu_add_command(menu, key, value->valuestring);
+        }
+    } else if (cJSON_IsObject(value) && depth < BRUCE_LAUNCHER_MAX_DEPTH) {
+        bruce_launcher_menu_t *submenu = bruce_launcher__parse_json_object(value, key, menu, depth + 1);
+        if (submenu == NULL) {
+            return false;
+        }
+        if (!bruce_launcher__menu_add_submenu(menu, key, submenu)) {
+            bruce_launcher__menu_free(submenu);
+            return false;
+        }
+        return true;
+    }
+
+    /* Ignore unsupported JSON values silently. */
+    return true;
+}
+
+static bruce_launcher_menu_t *bruce_launcher__parse_json_object(cJSON *root, const char *title,
+                                                                bruce_launcher_menu_t *parent, int depth)
+{
+    bruce_launcher_menu_t *menu = bruce_launcher__menu_create(title, parent);
+    if (menu == NULL) {
+        return NULL;
+    }
+
+    cJSON *child;
+    cJSON_ArrayForEach(child, root)
+    {
+        if (child->string == NULL) {
+            continue;
+        }
+        if (!bruce_launcher__parse_json_value(menu, child->string, child, depth)) {
+            break;
+        }
+    }
+
+    if (parent != NULL) {
+        (void)bruce_launcher__menu_add_back(menu);
+    }
+    return menu;
+}
+
+static bruce_launcher_menu_t *bruce_launcher__load_config(void)
+{
+    char *text = bruce_launcher__read_file(BRUCE_LAUNCHER_CONFIG_PATH);
+    if (text == NULL) {
+        (void)bruce_launcher__write_default_config(BRUCE_LAUNCHER_CONFIG_PATH);
+        text = bruce_launcher__read_file(BRUCE_LAUNCHER_CONFIG_PATH);
+    }
+
+    cJSON *root = NULL;
+    if (text != NULL) {
+        root = cJSON_Parse(text);
+    }
+    free(text);
+
+    if (root != NULL && cJSON_IsObject(root)) {
+        bruce_launcher_menu_t *menu = bruce_launcher__parse_json_object(root, BRUCE_LAUNCHER_TITLE, NULL, 0);
+        cJSON_Delete(root);
+        if (menu != NULL) {
+            return menu;
+        }
+    } else if (root != NULL) {
+        cJSON_Delete(root);
+    }
+
+    /* Malformed /launcher.json: fall back to the default tree in memory. */
+    root = cJSON_Parse(BRUCE_LAUNCHER_DEFAULT_JSON);
+    if (root == NULL || !cJSON_IsObject(root)) {
+        cJSON_Delete(root);
+        return NULL;
+    }
+
+    bruce_launcher_menu_t *menu = bruce_launcher__parse_json_object(root, BRUCE_LAUNCHER_TITLE, NULL, 0);
+    cJSON_Delete(root);
+    return menu;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Visual style                                                               */
+/* -------------------------------------------------------------------------- */
 
 static void bruce_launcher__get_theme(bruce_launcher_theme_t *theme)
 {
@@ -364,22 +596,38 @@ static void bruce_launcher__draw_options(const bruce_launcher_entry_t *entries, 
     int char_w = 8 * font_size;
     int char_h = 16 * font_size;
     int line_h = char_h + 2;
-    bool show_icons = entry_count > 0 && entries[0].icon != BRUCE_LAUNCHER_ICON_NONE;
-    int icon_size = line_h - 4;
-    int icon_space = show_icons ? icon_size + 4 : 0;
 
     int box_x = w * BRUCE_LAUNCHER_MENU_MARGIN_X_NUM / BRUCE_LAUNCHER_MENU_MARGIN_X_DEN;
     int box_w = w * BRUCE_LAUNCHER_MENU_WIDTH_NUM / BRUCE_LAUNCHER_MENU_WIDTH_DEN;
-    int box_h = visible * line_h + 10;
-    int box_y = (h - box_h) / 2;
-    int min_box_y = BRUCE_LAUNCHER_STATUS_H + char_h + 6;
-    if (box_y < min_box_y) {
-        box_y = min_box_y;
+
+    /* Fit the menu box inside the screen and cap the visible row count. */
+    int available_h = h - 2 * BRUCE_LAUNCHER_BORDER_PAD - BRUCE_LAUNCHER_STATUS_H - 10;
+    if (available_h < line_h + 10) {
+        available_h = line_h + 10;
+    }
+    int max_visible = (available_h - 10) / line_h;
+    if (max_visible < 1) {
+        max_visible = 1;
+    }
+    if (max_visible > BRUCE_LAUNCHER_MAX_VISIBLE) {
+        max_visible = BRUCE_LAUNCHER_MAX_VISIBLE;
     }
 
-    int title_y = box_y - char_h - 4;
-    if (title_y >= BRUCE_LAUNCHER_STATUS_H + 2) {
-        bruce_launcher__draw_centered_text(title, title_y, font_size, theme);
+    int visible = entry_count;
+    if (visible > max_visible) {
+        visible = max_visible;
+    }
+    if (visible < 1) {
+        visible = 1;
+    }
+
+    int box_h = visible * line_h + 10;
+    int box_y = (h - box_h) / 2;
+    if (box_y + box_h > h - BRUCE_LAUNCHER_BORDER_PAD) {
+        box_y = h - BRUCE_LAUNCHER_BORDER_PAD - box_h;
+    }
+    if (box_y < BRUCE_LAUNCHER_STATUS_H + 2) {
+        box_y = BRUCE_LAUNCHER_STATUS_H + 2;
     }
 
     /* Background box with border. */
@@ -582,6 +830,29 @@ static int bruce_launcher__run_task_switcher(const bruce_launcher_theme_t *theme
     }
 }
 
+/* -------------------------------------------------------------------------- */
+/* Command dispatch                                                           */
+/* -------------------------------------------------------------------------- */
+
+static void bruce_launcher__split_command(const char *command, char *first, size_t first_size, const char **rest)
+{
+    const char *p = command;
+    while (*p == ' ' || *p == '\t') {
+        p++;
+    }
+
+    size_t i = 0;
+    while (*p != '\0' && *p != ' ' && *p != '\t' && i + 1 < first_size) {
+        first[i++] = *p++;
+    }
+    first[i] = '\0';
+
+    while (*p == ' ' || *p == '\t') {
+        p++;
+    }
+    *rest = p;
+}
+
 static int bruce_launcher__run_entry(const bruce_launcher_entry_t *entry)
 {
     if (!entry->is_path && strcmp(entry->app_name, BRUCE_LAUNCHER_TASKS_APP) == 0) {
@@ -590,10 +861,17 @@ static int bruce_launcher__run_entry(const bruce_launcher_entry_t *entry)
         return bruce_launcher__run_task_switcher(&theme);
     }
     int result;
-    if (entry->is_path) {
-        result = app_runner__run_path(entry->path, "--gui", false);
+
+    if (entry->command[0] == '/') {
+        result = app_runner__run_path(entry->command, NULL, false);
     } else {
-        result = app_runner__run(entry->app_name, "--gui", false);
+        char first[BRUCE_LAUNCHER_LABEL_MAX];
+        const char *rest = NULL;
+        bruce_launcher__split_command(entry->command, first, sizeof(first), &rest);
+        if (first[0] == '\0') {
+            return BRUCE_ERR_INVALID_ARGUMENT;
+        }
+        result = app_runner__run(first, rest[0] != '\0' ? rest : NULL, false);
     }
 
     if (result < 0) {
@@ -604,8 +882,15 @@ static int bruce_launcher__run_entry(const bruce_launcher_entry_t *entry)
     return result;
 }
 
-static int bruce_launcher__run_submenu(bruce_launcher_entry_t *entries, int entry_count,
-                                       const char *title, const bruce_launcher_theme_t *theme)
+/* -------------------------------------------------------------------------- */
+/* GUI menu runner                                                            */
+/* -------------------------------------------------------------------------- */
+
+/* GUI menu loop: UP/DOWN move the selection, SELECT/Btn-A launches the
+ * highlighted item, BACK/Btn-B exits (or returns to the parent submenu). A
+ * short initial delay avoids immediately selecting if the button is still held
+ * from the previous screen. */
+static int bruce_launcher__run_gui_menu(bruce_launcher_menu_t *menu)
 {
     (void)input__flush();
 
@@ -614,21 +899,7 @@ static int bruce_launcher__run_submenu(bruce_launcher_entry_t *entries, int entr
     uint32_t icon_revision = UINT32_MAX;
     for (;;) {
         if (selected != last_drawn) {
-            bruce_result_t frame = display__begin_frame();
-            if (frame == BRUCE_ERR_NOT_FOREGROUND) {
-                (void)runtime__delay(20);
-                continue;
-            }
-            if (frame != BRUCE_OK) {
-                return frame;
-            }
-            bruce_launcher__draw_main_border(theme);
-            bruce_launcher__draw_options(entries, entry_count, selected, title, theme);
-            icon_revision = bruce_launcher__draw_status_icons(theme);
-            frame = display__present();
-            if (frame != BRUCE_OK) {
-                return frame;
-            }
+            bruce_launcher__draw_options(menu->entries, menu->entry_count, selected, &theme);
             last_drawn = selected;
         }
 
@@ -649,6 +920,8 @@ static int bruce_launcher__run_submenu(bruce_launcher_entry_t *entries, int entr
             continue;
         }
 
+        printf("Input event: code=%ld, action=%ld\n", (long)ev.code, (long)ev.action);
+
         switch (ev.code) {
             case BRUCE_INPUT_CODE_UP:
                 if (selected > 0) {
@@ -656,16 +929,25 @@ static int bruce_launcher__run_submenu(bruce_launcher_entry_t *entries, int entr
                 }
                 break;
             case BRUCE_INPUT_CODE_DOWN:
-                if (selected + 1 < entry_count) {
+                if (selected + 1 < menu->entry_count) {
                     selected++;
                 }
                 break;
             case BRUCE_INPUT_CODE_SELECT:
-            case BRUCE_INPUT_CODE_BUTTON_A:
-                (void)bruce_launcher__run_entry(&entries[selected]);
+            case BRUCE_INPUT_CODE_BUTTON_A: {
+                const bruce_launcher_entry_t *entry = &menu->entries[selected];
+                if (entry->kind == BRUCE_LAUNCHER_ENTRY_BACK) {
+                    return 0;
+                }
+                if (entry->kind == BRUCE_LAUNCHER_ENTRY_SUBMENU) {
+                    (void)bruce_launcher__run_gui_menu(entry->submenu);
+                } else {
+                    (void)bruce_launcher__run_entry(entry);
+                }
                 (void)input__flush();
                 last_drawn = -1;
                 break;
+            }
             case BRUCE_INPUT_CODE_BACK:
             case BRUCE_INPUT_CODE_BUTTON_B:
                 return 0;
@@ -675,86 +957,30 @@ static int bruce_launcher__run_submenu(bruce_launcher_entry_t *entries, int entr
     }
 }
 
-/* GUI menu loop: LEFT/RIGHT select one of the three top-level categories;
- * SELECT opens it and BACK exits the launcher. */
-static int bruce_launcher__run_gui_menu(bruce_launcher_entry_t *entries, int builtin_count, int app_count)
-{
-    bruce_launcher_theme_t theme;
-    bruce_launcher__get_theme(&theme);
-
-    (void)runtime__delay(300);
-    (void)input__flush();
-
-    int selected = BRUCE_LAUNCHER_MENU_BUILTINS;
-    int last_drawn = -1;
-    uint32_t icon_revision = UINT32_MAX;
-    for (;;) {
-        if (selected != last_drawn) {
-            bruce_result_t frame = display__begin_frame();
-            if (frame == BRUCE_ERR_NOT_FOREGROUND) {
-                (void)runtime__delay(20);
-                continue;
-            }
-            if (frame != BRUCE_OK) return frame;
-            bruce_launcher__draw_main_border(&theme);
-            bruce_launcher__draw_main_menu(selected, &theme);
-            icon_revision = bruce_launcher__draw_status_icons(&theme);
-            frame = display__present();
-            if (frame != BRUCE_OK) return frame;
-            last_drawn = selected;
-        }
-
-        size_t icon_count = 0;
-        uint32_t current_revision = 0;
-        if (status_icon__list(NULL, 0, &icon_count, &current_revision) == BRUCE_OK &&
-            current_revision != icon_revision) {
-            bruce_result_t frame = display__begin_frame();
-            if (frame == BRUCE_OK) {
-                icon_revision = bruce_launcher__draw_status_icons(&theme);
-                (void)display__present();
-            }
-        }
-
-        bruce_input_event_t event;
-        bruce_result_t result = input__read(&event, 100);
-        if (result != BRUCE_OK || event.action != BRUCE_INPUT_PRESS) continue;
-
-        if (event.code == BRUCE_INPUT_CODE_LEFT || event.code == BRUCE_INPUT_CODE_UP) {
-            selected = (selected + BRUCE_LAUNCHER_MENU_COUNT - 1) % BRUCE_LAUNCHER_MENU_COUNT;
-        } else if (event.code == BRUCE_INPUT_CODE_RIGHT || event.code == BRUCE_INPUT_CODE_DOWN) {
-            selected = (selected + 1) % BRUCE_LAUNCHER_MENU_COUNT;
-        } else if (event.code == BRUCE_INPUT_CODE_BACK || event.code == BRUCE_INPUT_CODE_BUTTON_B) {
-            return 0;
-        } else if (event.code == BRUCE_INPUT_CODE_SELECT || event.code == BRUCE_INPUT_CODE_BUTTON_A) {
-            if (selected == BRUCE_LAUNCHER_MENU_EXIT) return 0;
-            if (selected == BRUCE_LAUNCHER_MENU_BUILTINS) {
-                (void)bruce_launcher__run_submenu(entries, builtin_count, "Built-ins", &theme);
-            } else if (app_count > 0) {
-                (void)bruce_launcher__run_submenu(&entries[builtin_count], app_count, "Apps", &theme);
-            } else {
-                (void)dialog__message(BRUCE_DIALOG_INFO, "Apps", "No apps found in /apps");
-            }
-            (void)input__flush();
-            last_drawn = -1;
-        }
-    }
-}
+/* -------------------------------------------------------------------------- */
+/* Terminal menu runner                                                       */
+/* -------------------------------------------------------------------------- */
 
 /* Terminal fallback used when the launcher is started without --gui. Keeps
  * the original renderer-agnostic dialog__choice() path so serial/terminal
  * usage and the host selftest continue to work. */
-static int bruce_launcher__run_terminal_menu(bruce_launcher_entry_t *entries, int entry_count, int exit_index)
+static int bruce_launcher__run_terminal_menu(bruce_launcher_menu_t *menu)
 {
-    bruce_dialog_choice_t choices[BRUCE_LAUNCHER_MAX_ENTRIES];
-    for (int i = 0; i < entry_count; ++i) {
-        choices[i].label = entries[i].label;
-        choices[i].value = entries[i].is_path ? entries[i].path : entries[i].app_name;
+    bruce_dialog_choice_t *choices =
+        (bruce_dialog_choice_t *)malloc(sizeof(*choices) * (size_t)menu->capacity);
+    if (choices == NULL) {
+        return BRUCE_ERR_NO_MEMORY;
     }
 
     for (;;) {
+        for (int i = 0; i < menu->entry_count; ++i) {
+            choices[i].label = menu->entries[i].label;
+            choices[i].value = menu->entries[i].label;
+        }
+
         size_t choice = 0;
-        bruce_result_t choice_result = dialog__choice(BRUCE_LAUNCHER_TITLE, "Select an app", choices,
-                                                        (size_t)entry_count, &choice);
+        bruce_result_t choice_result =
+            dialog__choice(menu->title, "Select an app", choices, (size_t)menu->entry_count, &choice);
 
         if (choice_result == BRUCE_ERR_CANCELLED) {
             break;
@@ -763,60 +989,44 @@ static int bruce_launcher__run_terminal_menu(bruce_launcher_entry_t *entries, in
             printf("Invalid choice (%d), try again.\n", choice_result);
             continue;
         }
-        int selected = (int)choice;
-        if (selected == exit_index) {
+
+        const bruce_launcher_entry_t *entry = &menu->entries[(int)choice];
+        if (entry->kind == BRUCE_LAUNCHER_ENTRY_BACK) {
             break;
         }
-        (void)bruce_launcher__run_entry(&entries[selected]);
+        if (entry->kind == BRUCE_LAUNCHER_ENTRY_SUBMENU) {
+            (void)bruce_launcher__run_terminal_menu(entry->submenu);
+        } else {
+            (void)bruce_launcher__run_entry(entry);
+        }
     }
 
+    free(choices);
     return 0;
 }
 
+/* -------------------------------------------------------------------------- */
+/* Entry point                                                                */
+/* -------------------------------------------------------------------------- */
+
 int bruce_launcher_app_main(int argc, char **argv)
 {
-    bruce_launcher_entry_t *entries = calloc(BRUCE_LAUNCHER_MAX_ENTRIES, sizeof(*entries));
-    if (entries == NULL) {
-        return BRUCE_ERR_NO_MEMORY;
+    (void)argc;
+    (void)argv;
+
+    bruce_launcher_menu_t *root = bruce_launcher__load_config();
+    if (root == NULL) {
+        printf("Failed to load launcher configuration\n");
+        return BRUCE_ERR_INTERNAL;
     }
-    int entry_count = 0;
-
-    /* Feature modules live under src/modules/ and are registered as built-in
-     * commands.  The launcher is only menu composition: it does not contain any
-     * feature logic. */
-    (void)bruce_launcher__add_builtin(entries, &entry_count, BRUCE_LAUNCHER_MAX_ENTRIES, "wifi", "Wi-Fi");
-    (void)bruce_launcher__add_builtin(entries, &entry_count, BRUCE_LAUNCHER_MAX_ENTRIES, "webui", "WebUI");
-    (void)bruce_launcher__add_builtin(entries, &entry_count, BRUCE_LAUNCHER_MAX_ENTRIES,
-                                       "bluetooth", "BLE Scanner");
-    if (bluetooth_hid__is_supported()) {
-        (void)bruce_launcher__add_builtin(entries, &entry_count, BRUCE_LAUNCHER_MAX_ENTRIES,
-                                           "bluetooth_hid_app", "Bluetooth HID");
-    }
-    (void)bruce_launcher__add_builtin(entries, &entry_count, BRUCE_LAUNCHER_MAX_ENTRIES, "ir", "Infrared");
-    (void)bruce_launcher__add_builtin(entries, &entry_count, BRUCE_LAUNCHER_MAX_ENTRIES, "nrf24", "NRF24");
-    (void)bruce_launcher__add_builtin(entries, &entry_count, BRUCE_LAUNCHER_MAX_ENTRIES, "selftest", "Self-test");
-    (void)bruce_launcher__add_builtin(entries, &entry_count, BRUCE_LAUNCHER_MAX_ENTRIES, "terminal", "Terminal");
-    (void)bruce_launcher__add_builtin(entries, &entry_count, BRUCE_LAUNCHER_MAX_ENTRIES,
-                                       BRUCE_LAUNCHER_TASKS_APP, "Tasks");
-    (void)bruce_launcher__add_builtin(entries, &entry_count, BRUCE_LAUNCHER_MAX_ENTRIES,
-                                       "filemanager", "Files");
-
-    int builtin_count = entry_count;
-
-    int app_count = bruce_launcher__discover_apps(&entries[entry_count],
-                                                   BRUCE_LAUNCHER_MAX_ENTRIES - entry_count - 1);
-    entry_count += app_count;
-
-    int exit_index = entry_count;
-    (void)bruce_launcher__add_builtin(entries, &entry_count, BRUCE_LAUNCHER_MAX_ENTRIES, "", "Exit");
 
     int result;
     if (app_runner__args_have_gui(argc, argv)) {
-        result = bruce_launcher__run_gui_menu(entries, builtin_count, app_count);
+        result = bruce_launcher__run_gui_menu(root);
     } else {
-        result = bruce_launcher__run_terminal_menu(entries, entry_count, exit_index);
+        result = bruce_launcher__run_terminal_menu(root);
     }
 
-    free(entries);
+    bruce_launcher__menu_free(root);
     return result;
 }

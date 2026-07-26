@@ -107,7 +107,11 @@ idf_component_register(SRCS
 add_library(bruce_sdk_builtin_launcher_check OBJECT "modules/bruce_launcher/bruce_launcher_app.c")
 target_include_directories(bruce_sdk_builtin_launcher_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
-                           "${CMAKE_CURRENT_LIST_DIR}/modules/bruce_launcher")
+                           "${CMAKE_CURRENT_LIST_DIR}/modules/bruce_launcher"
+                           "${CMAKE_CURRENT_LIST_DIR}/../managed_components/espressif__cjson/cJSON")
+# The launcher module legitimately uses the third-party espressif/cjson
+# component API; the core_sdk-only check is about rejecting Core-private headers,
+# not component dependencies.
 
 add_library(bruce_sdk_builtin_wifi_check OBJECT "modules/wifi/wifi_app.c")
 target_include_directories(bruce_sdk_builtin_wifi_check PRIVATE
