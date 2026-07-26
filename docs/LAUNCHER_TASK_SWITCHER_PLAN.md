@@ -217,13 +217,12 @@ iteration. Do not force-release another task's frame.
 
 ## AppRunner Capacity
 
-`src/core/app_runner/app_runner.c` currently defines `APP_RUNNER_MAX_APPS` as
-eight and registers seven default commands. Selftests register additional
-temporary commands.
+`src/core/app_runner/app_runner.c` defines `APP_RUNNER_MAX_APPS` as 16 and
+registers seven default commands, leaving capacity for selftest and future
+built-in commands.
 
-If the task switcher is a separate built-in command, increase the capacity or
-make it a mode of the existing launcher rather than consuming another command
-slot. A launcher mode is the smaller design and avoids a second shell task.
+If the task switcher is a separate built-in command, the registry has capacity,
+but a launcher mode remains the smaller design and avoids a second shell task.
 
 ## Terminal Behavior
 

@@ -230,9 +230,8 @@ Bitmap push is optional in the terminal because entering binary bitmap data is
 awkward. Do not add feature-specific parsing to the generic terminal loop;
 register a built-in command through AppRunner.
 
-`APP_RUNNER_MAX_APPS` is currently eight while seven defaults already exist and
-selftests register additional commands. Increase or redesign that fixed limit
-before adding another built-in.
+`APP_RUNNER_MAX_APPS` is 16, leaving capacity beyond the seven defaults and
+selftest commands for this built-in.
 
 ## Files Expected to Change
 

@@ -31,6 +31,17 @@ bool selftest__run_apprunner_registration_case(void)
         printf("[selftest] apprunner/registration: unknown app did not return BRUCE_ERR_NOT_FOUND\n");
         return false;
     }
+    static const char *capacity_names[] = {
+        "selftest_apprunner_capacity_1",
+        "selftest_apprunner_capacity_2",
+    };
+    for (size_t i = 0; i < sizeof(capacity_names) / sizeof(capacity_names[0]); ++i) {
+        bruce_result_t result = app_runner__register(capacity_names[i], selftest__apprunner_dummy_entry);
+        if (result != BRUCE_OK && result != BRUCE_ERR_ALREADY_EXISTS) {
+            printf("[selftest] apprunner/registration: additional registration failed (%d)\n", result);
+            return false;
+        }
+    }
     printf("[selftest] apprunner/registration: OK\n");
     return true;
 }

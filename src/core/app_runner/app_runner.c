@@ -22,7 +22,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define APP_RUNNER_MAX_APPS 8
+#define APP_RUNNER_MAX_APPS 16
 #define APP_RUNNER_PATH_MAX 160
 #define APP_RUNNER_MAX_LOADERS 8
 #define APP_RUNNER_LOADER_EXTENSION_MAX 16
@@ -417,4 +417,3 @@ int app_runner__run(const char *app_name, const char *arg, bool in_background)
     app_runner__free_args(argv, argc);
     return result;
 }
-
