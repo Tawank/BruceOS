@@ -519,6 +519,17 @@ fan, sound, and LED-strip quick-learning templates. Learned remotes use the
 version-1 format under `/BruceIR`; filename collisions may be numbered,
 overwritten, renamed, or cancelled.
 
+`rf` grants access to the NRF24 Core API. `nrf24__probe()` checks physical chip
+presence, channel operations cover the hardware range 0 through 125, and
+`nrf24__scan()` returns bounded counts from the radio's RPD threshold detector.
+RPD results indicate 2.4 GHz activity only; they are not calibrated RSSI and do
+not decode packets. Core owns the radio and serializes synchronous operations.
+NRF24 uses `SPI3_HOST`, leaving the display-owned `SPI2_HOST` untouched, with
+board-specific SCK, MISO, MOSI, CS, and CE defaults configurable through
+Kconfig. The built-in NRF24 app exposes status and passive spectrum scans in
+both launcher GUI and terminal forms. The v1 API intentionally excludes packet
+transmit, MouseJack, and constant-carrier jamming.
+
 ## Public SDK and migration rules
 
 Maintain two header layers:

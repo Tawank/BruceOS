@@ -20,6 +20,7 @@
 #include "dialog_test.h"
 #include "display_test.h"
 #include "notification_test.h"
+#include "nrf24_test.h"
 
 void selftest__resource_cleanup(void *context)
 {
@@ -76,6 +77,8 @@ int selftest_app_main(int argc, char **argv)
     RUN_SELFTEST(selftest__run_tcp_permission_denied_case);
     RUN_SELFTEST(selftest__run_ir_permission_denied_case);
     RUN_SELFTEST(selftest__run_ir_validation_case);
+    RUN_SELFTEST(selftest__run_nrf24_permission_denied_case);
+    RUN_SELFTEST(selftest__run_nrf24_validation_case);
     RUN_SELFTEST(selftest__run_input_poll_case);
     RUN_SELFTEST(selftest__run_input_inject_case);
     RUN_SELFTEST(selftest__run_input_flush_case);

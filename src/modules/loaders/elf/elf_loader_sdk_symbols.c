@@ -28,6 +28,7 @@
 #include "core_sdk/manifest.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/notification.h"
+#include "core_sdk/nrf24.h"
 #include "core_sdk/permission.h"
 #include "core_sdk/result.h"
 #include "core_sdk/storage.h"
@@ -93,6 +94,13 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(ir__transmit_record),
     ESP_ELFSYM_EXPORT(ir__tx_pin),
     ESP_ELFSYM_EXPORT(ir__rx_pin),
+
+    /* NRF24 passive radio operations */
+    ESP_ELFSYM_EXPORT(nrf24__probe),
+    ESP_ELFSYM_EXPORT(nrf24__set_channel),
+    ESP_ELFSYM_EXPORT(nrf24__get_channel),
+    ESP_ELFSYM_EXPORT(nrf24__scan),
+    ESP_ELFSYM_EXPORT(nrf24__get_pins),
 
     /* Display (layout management remains built-in-only) */
     ESP_ELFSYM_EXPORT(display__width),

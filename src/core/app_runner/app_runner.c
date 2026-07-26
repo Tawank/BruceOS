@@ -17,6 +17,7 @@
 #include "modules/loaders/elf/elf_loader_app.h"
 #include "modules/loaders/js/js_loader_app.h"
 #include "modules/ir/ir_app.h"
+#include "modules/nrf24/nrf24_app.h"
 #include "modules/selftest/selftest.h"
 #include "modules/tcp/tcp_app.h"
 #include "modules/utils/launcher/launcher_app.h"
@@ -86,6 +87,7 @@ void app_runner__register_defaults(void)
     (void)app_runner__register("bluetooth", bluetooth_app_main);
     (void)app_runner__register("bluetooth_hid_app", bluetooth_hid_app_main);
     (void)app_runner__register("ir", ir_app_main);
+    (void)app_runner__register("nrf24", nrf24_app_main);
     (void)app_runner__register("selftest", selftest_app_main);
     (void)app_runner__register("terminal", terminal_app_main);
     (void)app_runner__register("elf", elf_loader__app_main);

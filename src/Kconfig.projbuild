@@ -61,6 +61,39 @@ menu "Bruce hardware configuration"
         default 33 if BRUCE_BOARD_M5_STICKC_PLUS2
         range 0 48
         help
-            GPIO connected to the active-low infrared receiver output.
+             GPIO connected to the active-low infrared receiver output.
+
+    config BRUCE_NRF24_SCK_GPIO
+        int "NRF24 SPI clock GPIO"
+        default 40 if BRUCE_BOARD_M5_CARDPUTER
+        default 0 if BRUCE_BOARD_M5_STICKC_PLUS2
+        range 0 48
+
+    config BRUCE_NRF24_MISO_GPIO
+        int "NRF24 SPI MISO GPIO"
+        default 39 if BRUCE_BOARD_M5_CARDPUTER
+        default 33 if BRUCE_BOARD_M5_STICKC_PLUS2
+        range 0 48
+
+    config BRUCE_NRF24_MOSI_GPIO
+        int "NRF24 SPI MOSI GPIO"
+        default 14 if BRUCE_BOARD_M5_CARDPUTER
+        default 32 if BRUCE_BOARD_M5_STICKC_PLUS2
+        range 0 48
+
+    config BRUCE_NRF24_CS_GPIO
+        int "NRF24 chip-select GPIO"
+        default 1 if BRUCE_BOARD_M5_CARDPUTER
+        default 26 if BRUCE_BOARD_M5_STICKC_PLUS2
+        range 0 48
+
+    config BRUCE_NRF24_CE_GPIO
+        int "NRF24 chip-enable GPIO"
+        default 2 if BRUCE_BOARD_M5_CARDPUTER
+        default 25 if BRUCE_BOARD_M5_STICKC_PLUS2
+        range 0 48
+        help
+            NRF24 defaults match the external SPI wiring used by Bruce legacy
+            builds. The radio uses SPI3_HOST; IRQ is not required.
 
 endmenu

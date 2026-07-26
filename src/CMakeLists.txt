@@ -12,6 +12,7 @@ idf_component_register(SRCS
                     "core/manifest/manifest.c"
                     "core/memory/memory.c"
                     "core/notification/notification.c"
+                    "core/nrf24/nrf24.c"
                     "core/permission/permission.c"
                     "core/stdio/stdio.c"
                     "core/storage/storage.c"
@@ -57,6 +58,8 @@ idf_component_register(SRCS
                     "modules/utils/terminal/terminal_app.c"
                     "modules/utils/notification/notification_app.c"
                     "modules/ir/ir_app.c"
+                    "modules/nrf24/nrf24_app.c"
+                    "modules/selftest/nrf24_test.c"
                     "modules/wifi/wifi_app.c"
                     REQUIRES
                     cjson
@@ -112,6 +115,11 @@ add_library(bruce_sdk_builtin_ir_check OBJECT "modules/ir/ir_app.c")
 target_include_directories(bruce_sdk_builtin_ir_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/ir")
+
+add_library(bruce_sdk_builtin_nrf24_check OBJECT "modules/nrf24/nrf24_app.c")
+target_include_directories(bruce_sdk_builtin_nrf24_check PRIVATE
+                           "${CMAKE_CURRENT_LIST_DIR}"
+                           "${CMAKE_CURRENT_LIST_DIR}/modules/nrf24")
 
 add_library(bruce_sdk_builtin_filemanager_check OBJECT "modules/filemanager/filemanager_app.c")
 target_include_directories(bruce_sdk_builtin_filemanager_check PRIVATE

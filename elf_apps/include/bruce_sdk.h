@@ -14,6 +14,7 @@
 #include "core_sdk/manifest.h"    // IWYU pragma: export
 #include "core_sdk/memory.h"      // IWYU pragma: export
 #include "core_sdk/notification.h" // IWYU pragma: export
+#include "core_sdk/nrf24.h"       // IWYU pragma: export
 #include "core_sdk/permission.h"  // IWYU pragma: export
 #include "core_sdk/result.h"      // IWYU pragma: export
 #include "core_sdk/storage.h"     // IWYU pragma: export
