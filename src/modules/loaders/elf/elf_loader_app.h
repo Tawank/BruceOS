@@ -3,7 +3,7 @@
 #include <stddef.h>
 
 /*
- * Built-in ELF loader module (see migration_BruceIDF.md, "Loader modules" /
+ * Built-in ELF loader module (see migration_plan.md, "Loader modules" /
  * "ELF contract").  This is an ordinary built-in module - it includes only
  * core_sdk/... headers and gets no private-Core-header exemption, unlike
  * modules/selftest.

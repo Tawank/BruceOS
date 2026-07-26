@@ -113,6 +113,7 @@ target_link_libraries(bruce_sdk_builtin_elf_loader_check PRIVATE elf_loader)
 add_library(bruce_sdk_builtin_js_loader_check OBJECT
             "modules/loaders/js/dialog_js.c"
             "modules/loaders/js/display_js.c"
+            "modules/loaders/js/js_stdlib.c"
             "modules/loaders/js/keyboard_js.c"
             "modules/loaders/js/notification_js.c"
             "modules/loaders/js/js_loader_app.c"
@@ -131,4 +132,4 @@ add_dependencies(bruce_sdk_builtin_js_loader_check mquickjs_generate_stdlib)
 # modules/selftest is intentionally NOT added to the core_sdk-only compile
 # check above: it is the one built-in explicitly permitted to include
 # Core-private headers and call FreeRTOS/ESP-IDF directly (see selftest.h
-# and migration_BruceIDF.md) so it can validate Core's private internals.
+# and migration_plan.md) so it can validate Core's private internals.

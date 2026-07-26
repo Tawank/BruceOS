@@ -41,7 +41,9 @@ typedef struct {
     bool gui_requested;
 } bruce_task_snapshot_t;
 
-/* All task APIs below return BRUCE_OK or a documented BRUCE_ERR_* result. */
+/* All task APIs below return BRUCE_OK or a documented BRUCE_ERR_* result.
+ * Foregrounding, stopping, pausing, resuming, or killing another task requires
+ * the `task` permission; a task may perform those operations on itself. */
 bruce_task_id_t task__current_id(void);
 bruce_result_t task__list(bruce_task_snapshot_t *snapshots, size_t capacity, size_t *out_count);
 bruce_result_t task__snapshot(bruce_task_id_t task_id, bruce_task_snapshot_t *out_snapshot);

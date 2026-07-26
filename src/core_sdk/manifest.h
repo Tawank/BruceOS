@@ -30,7 +30,7 @@ typedef struct {
 } bruce_app_inspection_t;
 
 /* Parses and validates canonical manifest JSON bytes (see
- * migration_BruceIDF.md, "ELF contract"): required appName/appIcon (base64,
+ * migration_plan.md, "ELF contract"): required appName/appIcon (base64,
  * decodes to exactly BRUCE_MANIFEST_ICON_BYTES bytes)/coreAbiVersion/
  * stackSize (4096-16384 inclusive), and an optional permissions array (each
  * name must be a known bruce_permission_t name, no duplicates).  Every
@@ -39,7 +39,7 @@ typedef struct {
  * BRUCE_OK or BRUCE_ERR_MANIFEST_INVALID. */
 bruce_manifest_t *manifest__parse(const char *json, size_t json_len);
 
-/* Universal manifest JSON extractor (see migration_BruceIDF.md, "Loader
+/* Universal manifest JSON extractor (see migration_plan.md, "Loader
  * modules").  Opens `path`, auto-detects the file format (ELF section, JS
  * comment block, etc.), and returns the raw manifest JSON bytes in
  * *out_json (malloc'd, caller must free with free()).  Never launches an
@@ -55,7 +55,7 @@ bruce_manifest_t *manifest__parse(const char *json, size_t json_len);
  * or BRUCE_ERR_MANIFEST_INVALID (no extractable manifest in this file). */
 const char *manifest__inspect_path(const char *path);
 
-/* ELF-specific manifest inspection (see migration_BruceIDF.md, "ELF
+/* ELF-specific manifest inspection (see migration_plan.md, "ELF
  * contract").  Opens `path`, validates the ELF32 header (magic, e_machine
  * vs. this build's target), extracts and parses the .bruce.manifest
  * section via manifest__parse(), and fills *out_inspection with the parsed
@@ -67,7 +67,7 @@ const char *manifest__inspect_path(const char *path);
  * BRUCE_ERR_MANIFEST_INVALID, BRUCE_ERR_TARGET_MISMATCH. */
 bruce_app_inspection_t *manifest__inspect_elf(const char *path);
 
-/* JavaScript-specific manifest inspection (see migration_BruceIDF.md,
+/* JavaScript-specific manifest inspection (see migration_plan.md,
  * "JavaScript contract").  Opens `path`, detects a leading block comment
  * (slash-asterisk ... asterisk-slash) containing the canonical manifest JSON,
  * and parses it.

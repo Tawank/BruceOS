@@ -243,9 +243,9 @@ stack high-water mark, sampled CPU percentage, and memory/resource statistics.
 Completed tasks are cleaned up immediately; v1 has no history.
 `task__wait()` works only while a task still exists.
 
-`stop`, `pause`, and `resume` are cooperative.  `task__kill()` is an explicit
-force-delete escape hatch.  The `task` permission is declared in the vocabulary
-but is not yet enforced on cross-task control paths.
+`stop`, `pause`, and `resume` are cooperative. `task__kill()` is an explicit
+force-delete escape hatch. Cross-task foreground, stop, pause, resume, and kill
+operations require the `task` permission; a task may control itself without it.
 
 `runtime__sleep(ms)` interrupts a background task when it is foregrounded;
 foreground tasks sleep for the full duration.  `runtime__delay(ms)` waits the
@@ -380,10 +380,9 @@ a permissions-management UI is the way to change it.
 Built-in module tasks are implicitly granted every permission.  External
 tasks are checked inside each protected Core API.
 
-`http__request()` needs `http`; it does not imply `wifi`.  Wi-Fi state control
-and credentials need `wifi`.  `input__inject()` needs `input`; task control of
-another task is intended to need `task` but is not yet enforced; starting a path
-is intended to need `execute` but is not yet enforced.
+`http__request()` needs `http`; it does not imply `wifi`. Wi-Fi state control
+and credentials need `wifi`. `input__inject()` needs `input`; task control of
+another task needs `task`; starting a built-in command or path needs `execute`.
 
 ## Dialog and task interaction
 

@@ -1,6 +1,6 @@
 /* A6 acceptance coverage: shared manifest parser, the app_runner loader
  * registry's third-party extensibility, and the built-in ELF loader module
- * (see migration_BruceIDF.md, "Loader modules"). */
+ * (see migration_plan.md, "Loader modules"). */
 #include <stdio.h>
 #include <string.h>
 

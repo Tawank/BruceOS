@@ -131,12 +131,22 @@ bool selftest__run_apprunner_resolution_case(void)
 
 
     int result = app_runner__run(SELFTEST_APPRUNNER_RESOLUTION_NAME, "", true);
+    if (result != BRUCE_ERR_NOT_FOUND) {
+        printf("[selftest] apprunner/resolution: missing target returned %d\n", result);
+        return false;
+    }
 
     if (!storage__write_file_atomic(js_path, "js", 2)) {
         printf("[selftest] apprunner/resolution: could not create %s\n", js_path);
         return false;
     }
     result = app_runner__run(SELFTEST_APPRUNNER_RESOLUTION_NAME, "", true);
+    if (result <= 0) {
+        printf("[selftest] apprunner/resolution: JS-only target did not spawn (%d)\n", result);
+        storage__remove(js_path);
+        return false;
+    }
+    (void)task__wait((bruce_task_id_t)result, 2000);
 
     /* ELF wins if both exist, and (post-A6) really spawns a task through the
      * loader registry instead of returning a placeholder BRUCE_ERR_*. */

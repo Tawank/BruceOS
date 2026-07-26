@@ -13,7 +13,7 @@
   useful as a reference for porting logic (e.g. BrucePIO_legacy/src/core/config.cpp)
   but not part of the ESP-IDF build.
 - Core code lives in src/core/{app_runner,config,dialog,display,http,input,manifest,memory,permission,stdio,storage,task,wifi}; apps in
-  src/modules/*. See migration_BruceIDF.md at repo root for the architecture
+  src/modules/*. See migration_plan.md at repo root for the architecture
   (core must stay minimal: HAL + runtime + BruceConfig + AppRunner only).
 - Naming convention: `module__action()` for public C API, snake_case fields.
 - Public fallible APIs don't have to return `bruce_result_t`; simpler types
@@ -74,7 +74,7 @@ When asked to make a new function or module **behave like** a legacy one:
 - `src/core/` — private Core implementation; only Core source and `modules/selftest` may include it.
 - `src/core_sdk/` — public SDK used by every built-in module and external ELF app.
 - `src/modules/` — built-in apps and loader modules; include only `core_sdk/*.h` headers.
-- `BrucePIO_legacy/` — reference only. See `migration_BruceIDF.md` for the full architecture contract.
+- `BrucePIO_legacy/` — reference only. See `migration_plan.md` for the full architecture contract.
 
 ## Build notes
 

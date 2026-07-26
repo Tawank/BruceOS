@@ -14,7 +14,7 @@ void selftest__resource_cleanup(void *context);
  * Built-in diagnostic app for exercising Core internals directly.
  *
  * Unlike every other built-in module, `selftest` is explicitly exempt from
- * the "built-ins use only core_sdk/ headers" rule (see migration_BruceIDF.md,
+ * the "built-ins use only core_sdk/ headers" rule (see migration_plan.md,
  * "Boundaries" / "Public SDK and migration rules").  Its entire purpose is to
  * validate Core's private implementation - task registry, memory tracking,
  * resource cleanup, and so on - so it is allowed to include Core-private

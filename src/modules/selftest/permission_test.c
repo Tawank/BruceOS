@@ -13,6 +13,7 @@
 #include "core/dialog/dialog.h"
 #include "core/permission/permission.h"
 #include "core/task/task.h"
+#include "core_sdk/app_runner.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/permission.h"
 #include "core_sdk/task.h"
@@ -224,6 +225,109 @@ bool selftest__run_permission_preflight_case(void)
               wifi_allowed && got_bt && !bt_allowed;
     printf("[selftest] permission/preflight: %s (first=%d second=%d third=%d trap=%d wifi=%d/%d bt=%d/%d)\n",
            ok ? "OK" : "FAIL", first, second, third, trap_violated, got_wifi, wifi_allowed, got_bt, bt_allowed);
+    return ok;
+}
+
+typedef enum {
+    SELFTEST_BOUNDARY_EXECUTE,
+    SELFTEST_BOUNDARY_TASK,
+} selftest__boundary_operation_t;
+
+typedef struct {
+    volatile bruce_result_t result;
+    volatile bool ran;
+    selftest__boundary_operation_t operation;
+    bruce_task_id_t target;
+} selftest__boundary_result_t;
+
+static selftest__boundary_result_t s_boundary;
+
+static int selftest__boundary_entry(int argc, char **argv)
+{
+    (void)argc;
+    (void)argv;
+    if (s_boundary.operation == SELFTEST_BOUNDARY_EXECUTE) {
+        s_boundary.result = (bruce_result_t)app_runner__run("selftest_missing_command", "", true);
+    } else {
+        s_boundary.result = task__pause(s_boundary.target);
+    }
+    s_boundary.ran = true;
+    return 0;
+}
+
+static bruce_result_t selftest__run_boundary_as(const char *permission_key,
+                                                 selftest__boundary_operation_t operation,
+                                                 bruce_task_id_t target)
+{
+    memset(&s_boundary, 0, sizeof(s_boundary));
+    s_boundary.operation = operation;
+    s_boundary.target = target;
+    task_create_params_t params = {
+        .name = "selftest_boundary",
+        .entry = selftest__boundary_entry,
+        .built_in = false,
+        .permission_key = permission_key,
+        .start_in_background = true,
+        .stack_bytes = 4096,
+    };
+    bruce_task_id_t id = BRUCE_TASK_ID_INVALID;
+    if (task_registry__create(&params, &id) != BRUCE_OK) return BRUCE_ERR_INTERNAL;
+    bruce_result_t wait_result = task__wait(id, 2000);
+    if (wait_result != BRUCE_OK && wait_result != BRUCE_ERR_NOT_FOUND) return BRUCE_ERR_TIMEOUT;
+    return s_boundary.ran ? s_boundary.result : BRUCE_ERR_INTERNAL;
+}
+
+static int selftest__boundary_target_entry(int argc, char **argv)
+{
+    (void)argc;
+    (void)argv;
+    for (;;) runtime__delay(1000);
+    return 0;
+}
+
+bool selftest__run_permission_protected_boundaries_case(void)
+{
+    permission__test_reset();
+    selftest__dialog_mock_reset(0);
+    s_mock.trap = true;
+
+    (void)permission__set("execute-denied.elf", BRUCE_PERMISSION_EXECUTE, false);
+    (void)permission__set("execute-allowed.elf", BRUCE_PERMISSION_EXECUTE, true);
+    bruce_result_t execute_denied = selftest__run_boundary_as("execute-denied.elf", SELFTEST_BOUNDARY_EXECUTE,
+                                                              BRUCE_TASK_ID_INVALID);
+    bruce_result_t execute_allowed = selftest__run_boundary_as("execute-allowed.elf", SELFTEST_BOUNDARY_EXECUTE,
+                                                               BRUCE_TASK_ID_INVALID);
+
+    task_create_params_t target_params = {
+        .name = "selftest_control_target",
+        .entry = selftest__boundary_target_entry,
+        .built_in = true,
+        .start_in_background = true,
+        .stack_bytes = 4096,
+    };
+    bruce_task_id_t target = BRUCE_TASK_ID_INVALID;
+    bool target_created = task_registry__create(&target_params, &target) == BRUCE_OK;
+
+    (void)permission__set("task-denied.elf", BRUCE_PERMISSION_TASK, false);
+    (void)permission__set("task-allowed.elf", BRUCE_PERMISSION_TASK, true);
+    bruce_result_t task_denied = target_created
+                                     ? selftest__run_boundary_as("task-denied.elf", SELFTEST_BOUNDARY_TASK, target)
+                                     : BRUCE_ERR_INTERNAL;
+    bruce_result_t task_allowed = target_created
+                                      ? selftest__run_boundary_as("task-allowed.elf", SELFTEST_BOUNDARY_TASK, target)
+                                      : BRUCE_ERR_INTERNAL;
+
+    bruce_task_snapshot_t snapshot;
+    bool paused = target_created && task__snapshot(target, &snapshot) == BRUCE_OK &&
+                  snapshot.state == BRUCE_TASK_PAUSED;
+    if (target_created) (void)task__kill(target);
+    bool trap_violated = s_mock.trap_violated;
+    selftest__dialog_mock_clear();
+
+    bool ok = execute_denied == BRUCE_ERR_PERMISSION && execute_allowed == BRUCE_ERR_NOT_FOUND &&
+              task_denied == BRUCE_ERR_PERMISSION && task_allowed == BRUCE_OK && paused && !trap_violated;
+    printf("[selftest] permission/protected-boundaries: %s (execute=%d/%d task=%d/%d paused=%d trap=%d)\n",
+           ok ? "OK" : "FAIL", execute_denied, execute_allowed, task_denied, task_allowed, paused, trap_violated);
     return ok;
 }
 

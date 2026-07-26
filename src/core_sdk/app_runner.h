@@ -13,8 +13,9 @@ bruce_result_t app_runner__register(const char *name, bruce_app_entry_t entry);
 /* Starts a named built-in or loader-registered application (see
  * core_sdk/loader.h).  On success this returns a positive bruce_task_id_t.
  * On failure it returns a negative BRUCE_ERR_* value (including
- * BRUCE_ERR_NOT_FOUND and BRUCE_ERR_BUSY).  `arg` is shell-style text; NULL
- * or an empty string creates argc == 0. */
+ * BRUCE_ERR_NOT_FOUND and BRUCE_ERR_BUSY). External callers require the
+ * `execute` permission. `arg` is shell-style text; NULL or an empty string
+ * creates argc == 0. */
 int app_runner__run(const char *app_name, const char *arg, bool in_background);
 
 /* Shell-style tokenizer shared by app_runner__run()'s own named resolution
@@ -36,6 +37,6 @@ void app_runner__free_args(char **argv, int argc);
 /* Returns true if any element of argv is exactly "--gui".  Shared by
  * app_runner__run()'s built-in path and by loader modules, which must parse
  * their own raw `arg` string (see app_runner__parse_args()) to determine
- * this for the task context they spawn (see migration_BruceIDF.md, "Dialog
+ * this for the task context they spawn (see migration_plan.md, "Dialog
  * and task interaction"). */
 bool app_runner__args_have_gui(int argc, char *const *argv);

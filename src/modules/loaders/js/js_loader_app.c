@@ -19,6 +19,7 @@
 #include "display_js.h"      // IWYU pragma: export
 #include "js_stdlib.h"       // IWYU pragma: export
 #include "keyboard_js.h"     // IWYU pragma: export
+#include "notification_js.h" // IWYU pragma: export
 #include "runtime_js.h"      // IWYU pragma: export
 #include "serial_js.h"       // IWYU pragma: export
 #include "wifi_js.h"         // IWYU pragma: export

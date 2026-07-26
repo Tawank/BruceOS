@@ -637,6 +637,10 @@ bruce_result_t task__to_background(void)
 
 bruce_result_t task__foreground(bruce_task_id_t task_id)
 {
+    if (task_id != task__current_id()) {
+        bruce_result_t permission_result = permission__check(BRUCE_PERMISSION_TASK);
+        if (permission_result != BRUCE_OK) return permission_result;
+    }
     task__ensure_init();
     task__lock();
     task__record_t *target = task__find_by_id_locked(task_id);
@@ -659,6 +663,10 @@ bruce_result_t task__foreground(bruce_task_id_t task_id)
 
 bruce_result_t task__stop(bruce_task_id_t task_id)
 {
+    if (task_id != task__current_id()) {
+        bruce_result_t permission_result = permission__check(BRUCE_PERMISSION_TASK);
+        if (permission_result != BRUCE_OK) return permission_result;
+    }
     task__ensure_init();
     task__lock();
     task__record_t *record = task__find_by_id_locked(task_id);
@@ -677,6 +685,10 @@ bruce_result_t task__stop(bruce_task_id_t task_id)
 
 bruce_result_t task__pause(bruce_task_id_t task_id)
 {
+    if (task_id != task__current_id()) {
+        bruce_result_t permission_result = permission__check(BRUCE_PERMISSION_TASK);
+        if (permission_result != BRUCE_OK) return permission_result;
+    }
     task__ensure_init();
     task__lock();
     task__record_t *record = task__find_by_id_locked(task_id);
@@ -704,6 +716,10 @@ bruce_result_t task__pause(bruce_task_id_t task_id)
 
 bruce_result_t task__resume(bruce_task_id_t task_id)
 {
+    if (task_id != task__current_id()) {
+        bruce_result_t permission_result = permission__check(BRUCE_PERMISSION_TASK);
+        if (permission_result != BRUCE_OK) return permission_result;
+    }
     task__ensure_init();
     task__lock();
     task__record_t *record = task__find_by_id_locked(task_id);
@@ -726,6 +742,10 @@ bruce_result_t task__resume(bruce_task_id_t task_id)
 
 bruce_result_t task__kill(bruce_task_id_t task_id)
 {
+    if (task_id != task__current_id()) {
+        bruce_result_t permission_result = permission__check(BRUCE_PERMISSION_TASK);
+        if (permission_result != BRUCE_OK) return permission_result;
+    }
     task__ensure_init();
     task__lock();
     task__record_t *record = task__find_by_id_locked(task_id);

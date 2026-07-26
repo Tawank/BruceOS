@@ -6,6 +6,7 @@
 
 #include "core_sdk/app_runner.h"
 #include "core_sdk/loader.h"
+#include "core_sdk/permission.h"
 #include "core_sdk/result.h"
 #include "core_sdk/task.h"
 
@@ -190,6 +191,11 @@ int app_runner__run_path(const char *path, const char *arg, bool in_background)
         return BRUCE_ERR_INVALID_PATH;
     }
 
+    bruce_result_t permission_result = permission__check(BRUCE_PERMISSION_EXECUTE);
+    if (permission_result != BRUCE_OK) {
+        return permission_result;
+    }
+
     char normalized_path[APP_RUNNER_PATH_MAX];
     if (!app_runner__normalize_path(path, normalized_path, sizeof(normalized_path))) {
         return BRUCE_ERR_INVALID_PATH;
@@ -352,7 +358,7 @@ bruce_result_t app_runner__parse_args(const char *arg, char ***out_argv, int *ou
 }
 
 /* AppRunner records this task context ahead of any launch-time permission
- * check (see migration_BruceIDF.md, "Dialog and task interaction"); the
+ * check (see migration_plan.md, "Dialog and task interaction"); the
  * "--gui" token is left in argv, not stripped. */
 bool app_runner__args_have_gui(int argc, char *const *argv)
 {
@@ -368,6 +374,11 @@ int app_runner__run(const char *app_name, const char *arg, bool in_background)
 {
     if (app_name == NULL || app_name[0] == '\0') {
         return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+
+    bruce_result_t permission_result = permission__check(BRUCE_PERMISSION_EXECUTE);
+    if (permission_result != BRUCE_OK) {
+        return permission_result;
     }
 
     char **argv = NULL;

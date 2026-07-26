@@ -289,7 +289,7 @@ static storage__file_slot_t s_open_files[STORAGE__MAX_OPEN_FILES];
 static uint32_t s_next_file_id = 1;
 
 /* /bruce.json and /permissions.json (plus their atomic-write .tmp siblings)
- * are the only paths this public API refuses, per migration_BruceIDF.md -
+ * are the only paths this public API refuses, per migration_plan.md -
  * "Input, display, storage, and Config". Everything else mounted (LittleFS or
  * SD) is reachable by a storage-granted caller. Core itself still reads/
  * writes those two files directly through storage__read_file()/

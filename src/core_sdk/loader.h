@@ -1,7 +1,7 @@
 #pragma once
 
 /*
- * Loader registry (see migration_BruceIDF.md, "Loader modules").
+ * Loader registry (see migration_plan.md, "Loader modules").
  *
  * A loader module turns a file of one specific extension into a running
  * Core task by registering itself here.  Core ships built-in ELF
@@ -38,7 +38,8 @@ bruce_result_t app_runner__register_loader(const char *extension, int priority, 
  * `path` must be normalized with no "." or ".." components.  Returns a
  * positive bruce_task_id_t on success; BRUCE_ERR_INVALID_PATH,
  * BRUCE_ERR_NOT_FOUND (no loader registered for the extension), or the
- * loader's own negative BRUCE_ERR_* on failure. */
+ * loader's own negative BRUCE_ERR_* on failure. External callers require the
+ * `execute` permission. */
 int app_runner__run_path(const char *path, const char *arg, bool in_background);
 
 /* The one extra public primitive a loader module needs beyond

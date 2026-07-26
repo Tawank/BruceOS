@@ -890,6 +890,8 @@ static const JSPropDef js_global_object[] = {
     JS_PROP_CLASS_DEF("serial", &js_serial_obj),
     JS_PROP_CLASS_DEF("dialog", &js_dialog_obj),
     JS_PROP_CLASS_DEF("runtime", &js_runtime_obj),
+    JS_PROP_CLASS_DEF("notification", &js_notification_obj),
+    JS_PROP_CLASS_DEF("statusIcon", &js_status_icon_obj),
 
     /* The following Bruce modules are not implemented yet */
 #if 0
@@ -899,8 +901,6 @@ static const JSPropDef js_global_object[] = {
     JS_PROP_CLASS_DEF("gpio", &js_gpio_obj),
     JS_PROP_CLASS_DEF("i2c", &js_i2c_obj),
     JS_PROP_CLASS_DEF("ir", &js_ir_obj),
-    JS_PROP_CLASS_DEF("notification", &js_notification_obj),
-    JS_PROP_CLASS_DEF("statusIcon", &js_status_icon_obj),
     JS_PROP_CLASS_DEF("mic", &js_mic_obj),
     JS_PROP_CLASS_DEF("rfid", &js_rfid_obj),
     JS_PROP_CLASS_DEF("storage", &js_storage_obj),
