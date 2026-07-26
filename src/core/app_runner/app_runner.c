@@ -25,6 +25,7 @@
 #include "modules/utils/terminal/terminal_app.h"
 #include "modules/utils/notification/notification_app.h"
 #include "modules/wifi/wifi_app.h"
+#include "modules/webui/webui_app.h"
 
 #include <stdio.h>
 #include <stdbool.h>
@@ -86,6 +87,7 @@ void app_runner__register_defaults(void)
     (void)app_runner__register("bruce_launcher", bruce_launcher_app_main);
     (void)app_runner__register("filemanager", filemanager_app_main);
     (void)app_runner__register("wifi", wifi_app_main);
+    (void)app_runner__register("webui", webui_app_main);
     (void)app_runner__register("bluetooth", bluetooth_app_main);
     (void)app_runner__register("bluetooth_hid_app", bluetooth_hid_app_main);
     (void)app_runner__register("ir", ir_app_main);

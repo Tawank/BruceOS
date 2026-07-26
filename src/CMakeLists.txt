@@ -23,7 +23,8 @@ idf_component_register(SRCS
                     "core/status_icon/status_icon.c"
                     "core/task/task.c"
                     "core/tcp/tcp.c"
-                    "core/wifi/wifi_common.c"
+                     "core/wifi/wifi_common.c"
+                     "core/http_server/http_server.c"
                     "modules/bruce_launcher/bruce_launcher_app.c"
                     "modules/bluetooth/bluetooth_app.c"
                     "modules/bluetooth_hid/bluetooth_hid_app.c"
@@ -67,7 +68,8 @@ idf_component_register(SRCS
                     "modules/ir/ir_app.c"
                     "modules/nrf24/nrf24_app.c"
                     "modules/selftest/nrf24_test.c"
-                    "modules/wifi/wifi_app.c"
+                     "modules/wifi/wifi_app.c"
+                     "modules/webui/webui_app.c"
                     REQUIRES
                     cjson
                     bt
@@ -79,7 +81,8 @@ idf_component_register(SRCS
                     esp_driver_rmt
                     esp_driver_spi
                     esp_driver_sdspi
-                    esp_http_client
+                     esp_http_client
+                     esp_http_server
                      esp_lcd
                      esp_jpeg
                     esp_hid
@@ -110,6 +113,11 @@ add_library(bruce_sdk_builtin_wifi_check OBJECT "modules/wifi/wifi_app.c")
 target_include_directories(bruce_sdk_builtin_wifi_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/wifi")
+
+add_library(bruce_sdk_builtin_webui_check OBJECT "modules/webui/webui_app.c")
+target_include_directories(bruce_sdk_builtin_webui_check PRIVATE
+                           "${CMAKE_CURRENT_LIST_DIR}"
+                           "${CMAKE_CURRENT_LIST_DIR}/modules/webui")
 
 add_library(bruce_sdk_builtin_bluetooth_check OBJECT "modules/bluetooth/bluetooth_app.c")
 target_include_directories(bruce_sdk_builtin_bluetooth_check PRIVATE

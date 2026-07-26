@@ -89,7 +89,7 @@ static bool bruce_launcher__add_builtin(bruce_launcher_entry_t *entries, int *co
     strncpy(entry->label, label, sizeof(entry->label) - 1);
     strncpy(entry->app_name, app_name, sizeof(entry->app_name) - 1);
     entry->is_path = false;
-    if (strcmp(app_name, "wifi") == 0) {
+    if (strcmp(app_name, "wifi") == 0 || strcmp(app_name, "webui") == 0) {
         entry->icon = BRUCE_LAUNCHER_ICON_WIFI;
     } else if (strcmp(app_name, "ir") == 0) {
         entry->icon = BRUCE_LAUNCHER_ICON_IR;
@@ -785,6 +785,7 @@ int bruce_launcher_app_main(int argc, char **argv)
      * commands.  The launcher is only menu composition: it does not contain any
      * feature logic. */
     (void)bruce_launcher__add_builtin(entries, &entry_count, BRUCE_LAUNCHER_MAX_ENTRIES, "wifi", "Wi-Fi");
+    (void)bruce_launcher__add_builtin(entries, &entry_count, BRUCE_LAUNCHER_MAX_ENTRIES, "webui", "WebUI");
     (void)bruce_launcher__add_builtin(entries, &entry_count, BRUCE_LAUNCHER_MAX_ENTRIES,
                                        "bluetooth", "BLE Scanner");
     if (bluetooth_hid__is_supported()) {

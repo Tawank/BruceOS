@@ -387,7 +387,7 @@ a permissions-management UI is the way to change it.
 Built-in module tasks are implicitly granted every permission.  External
 tasks are checked inside each protected Core API.
 
-`http__request()` needs `http`; it does not imply `wifi`. Wi-Fi state control,
+`http__request()` and `http_server__*` need `http`; neither implies `wifi`. Wi-Fi state control,
 credentials, and raw TCP sockets need `wifi`. `input__inject()` needs `input`; task control of
 another task needs `task`; starting a built-in command or path needs `execute`.
 
@@ -527,6 +527,17 @@ listener modes. It forwards raw stdin bytes to the socket and prints received
 bytes to stdout; Ctrl+] closes the active mode. The terminal waits for a
 launched foreground command to exit, preventing its prompt from competing for
 stdin.
+
+Inbound HTTP is a generic Core service exposed through `http_server__*`. A
+caller with `http` permission supplies bounded method/URI/content-type/body
+route descriptors; Core copies them and serves fixed responses from one
+device-wide ESP-IDF HTTP server. The API contains no Wi-Fi, WebUI, asset, or
+application policy. The built-in `webui` module selects an existing station or
+configured access point, supplies its landing page and read-only `/api/status`
+route, and controls server lifecycle. This initial WebUI slice intentionally
+has no browser file mutation, input injection, command execution, credential,
+or reboot endpoint; those require authenticated dynamic-request contracts
+before exposure.
 
 `config` grants field-specific APIs such as `config__get_bright()` and
 `config__set_sound_enabled(true)`.  Setters validate and atomically persist
