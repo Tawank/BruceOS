@@ -500,6 +500,25 @@ static bruce_launcher_icon_t bruce_launcher__entry_icon(const bruce_launcher_ent
                                                        : BRUCE_LAUNCHER_ICON_COMMAND;
 }
 
+static void bruce_launcher__draw_thick_line(int x0, int y0, int x1, int y1, int thickness, uint16_t color)
+{
+    int half = thickness / 2;
+    bool mostly_horizontal = abs(x1 - x0) >= abs(y1 - y0);
+    for (int offset = -half; offset <= half; ++offset) {
+        display__draw_line(x0 + (mostly_horizontal ? 0 : offset),
+                           y0 + (mostly_horizontal ? offset : 0),
+                           x1 + (mostly_horizontal ? 0 : offset),
+                           y1 + (mostly_horizontal ? offset : 0), color);
+    }
+}
+
+static void bruce_launcher__draw_ring(int cx, int cy, int radius, int thickness, uint16_t color)
+{
+    for (int offset = 0; offset < thickness && radius - offset > 0; ++offset) {
+        display__draw_circle(cx, cy, radius - offset, color);
+    }
+}
+
 static void bruce_launcher__draw_entry_icon(const bruce_launcher_entry_t *entry, int cx, int cy,
                                              int size, uint16_t color,
                                              const bruce_launcher_theme_t *theme)
@@ -508,41 +527,65 @@ static void bruce_launcher__draw_entry_icon(const bruce_launcher_entry_t *entry,
     int left = cx - size / 2;
     int top = cy - size / 2;
     int pad = size >= 48 ? 5 : 3;
+    int stroke = size >= 48 ? 3 : 1;
 
     if (icon == BRUCE_LAUNCHER_ICON_WIFI) {
-        int bottom = top + size - pad;
-        display__draw_circle(cx, bottom, size / 2 - pad, color);
-        display__draw_circle(cx, bottom, size / 3 - pad / 2, color);
-        display__fill_rect(left, bottom, size, size - (bottom - top), theme->bg);
-        display__fill_circle(cx, bottom - 1, size >= 48 ? 3 : 2, color);
+        int origin_y = cy + size * 3 / 10;
+        bruce_launcher__draw_ring(cx, origin_y, size * 7 / 16, stroke, color);
+        bruce_launcher__draw_ring(cx, origin_y, size / 4, stroke, color);
+        display__fill_rect(left, origin_y, size, top + size - origin_y + 1, theme->bg);
+        display__fill_circle(cx, origin_y - 1, size >= 48 ? 5 : 2, color);
     } else if (icon == BRUCE_LAUNCHER_ICON_APPS) {
-        int tab_h = size / 5;
-        display__fill_round_rect(left + pad, top + tab_h, size - 2 * pad,
-                                 size - tab_h - pad, size / 10, color);
-        display__fill_round_rect(left + pad * 2, top + pad, size * 2 / 5,
-                                 tab_h * 2, size / 12, color);
+        /* The legacy Files icon: three offset sheets, kept open and light. */
+        int page_w = size / 2;
+        int page_h = size * 3 / 4;
+        int step = size / 8;
+        int page_x = cx - page_w / 2;
+        int page_y = cy - page_h / 2;
+        display__draw_rect(page_x + step, page_y - step, page_w, page_h, color);
+        display__fill_rect(page_x, page_y, page_w, page_h, theme->bg);
+        display__draw_rect(page_x, page_y, page_w, page_h, color);
+        display__fill_rect(page_x - step, page_y + step, page_w, page_h, theme->bg);
+        display__draw_rect(page_x - step, page_y + step, page_w, page_h, color);
+        bruce_launcher__draw_thick_line(page_x - step + page_w / 5, cy,
+                                        page_x - step + page_w * 4 / 5, cy, stroke, color);
+        bruce_launcher__draw_thick_line(page_x - step + page_w / 5, cy + size / 7,
+                                        page_x - step + page_w * 3 / 5, cy + size / 7, stroke, color);
     } else if (icon == BRUCE_LAUNCHER_ICON_CONFIG) {
-        int radius = size / 3;
-        display__draw_circle(cx, cy, radius, color);
-        display__draw_circle(cx, cy, radius / 3, color);
-        for (int offset = -1; offset <= 1; offset += 2) {
-            display__draw_line(cx + offset * radius, cy, cx + offset * (size / 2 - pad), cy, color);
-            display__draw_line(cx, cy + offset * radius, cx, cy + offset * (size / 2 - pad), color);
+        int radius = size * 5 / 16;
+        int tooth = size * 7 / 16;
+        int diagonal = radius * 7 / 10;
+        int diagonal_tooth = tooth * 7 / 10;
+        bruce_launcher__draw_ring(cx, cy, radius, stroke, color);
+        bruce_launcher__draw_ring(cx, cy, size / 9, stroke, color);
+        bruce_launcher__draw_thick_line(cx - tooth, cy, cx - radius + 1, cy, stroke, color);
+        bruce_launcher__draw_thick_line(cx + radius - 1, cy, cx + tooth, cy, stroke, color);
+        bruce_launcher__draw_thick_line(cx, cy - tooth, cx, cy - radius + 1, stroke, color);
+        bruce_launcher__draw_thick_line(cx, cy + radius - 1, cx, cy + tooth, stroke, color);
+        for (int sx = -1; sx <= 1; sx += 2) {
+            for (int sy = -1; sy <= 1; sy += 2) {
+                bruce_launcher__draw_thick_line(cx + sx * diagonal, cy + sy * diagonal,
+                                                cx + sx * diagonal_tooth, cy + sy * diagonal_tooth,
+                                                stroke, color);
+            }
         }
     } else if (icon == BRUCE_LAUNCHER_ICON_CLOCK) {
         int radius = size / 2 - pad;
-        display__draw_circle(cx, cy, radius, color);
-        display__draw_line(cx, cy, cx, cy - radius * 2 / 3, color);
-        display__draw_line(cx, cy, cx + radius / 2, cy + radius / 3, color);
+        bruce_launcher__draw_ring(cx, cy, radius, stroke, color);
+        bruce_launcher__draw_thick_line(cx, cy, cx - radius / 2, cy - radius / 2, stroke, color);
+        bruce_launcher__draw_thick_line(cx, cy, cx + radius * 2 / 3, cy - radius * 2 / 3, stroke, color);
+        display__fill_circle(cx, cy, stroke + 1, color);
     } else if (icon == BRUCE_LAUNCHER_ICON_SELFTEST) {
         int radius = size / 2 - pad;
-        display__draw_circle(cx, cy, radius, color);
-        display__draw_line(cx - radius / 2, cy, cx - radius / 6, cy + radius / 3, color);
-        display__draw_line(cx - radius / 6, cy + radius / 3, cx + radius / 2, cy - radius / 3, color);
+        bruce_launcher__draw_ring(cx, cy, radius, stroke, color);
+        bruce_launcher__draw_thick_line(cx - radius / 2, cy, cx - radius / 7,
+                                        cy + radius / 3, stroke, color);
+        bruce_launcher__draw_thick_line(cx - radius / 7, cy + radius / 3,
+                                        cx + radius * 3 / 5, cy - radius / 3, stroke, color);
     } else if (icon == BRUCE_LAUNCHER_ICON_BACK) {
-        display__draw_line(left + pad, cy, left + size - pad, cy, color);
-        display__draw_line(left + pad, cy, cx, top + pad, color);
-        display__draw_line(left + pad, cy, cx, top + size - pad, color);
+        bruce_launcher__draw_thick_line(left + pad, cy, left + size - pad, cy, stroke, color);
+        bruce_launcher__draw_thick_line(left + pad, cy, cx, top + pad, stroke, color);
+        bruce_launcher__draw_thick_line(left + pad, cy, cx, top + size - pad, stroke, color);
     } else if (icon == BRUCE_LAUNCHER_ICON_FOLDER) {
         int tab_h = size / 5;
         display__draw_round_rect(left + pad, top + tab_h, size - 2 * pad,
@@ -555,6 +598,17 @@ static void bruce_launcher__draw_entry_icon(const bruce_launcher_entry_t *entry,
         display__fill_triangle(cx - size / 8, cy - size / 5, cx - size / 8,
                                cy + size / 5, cx + size / 5, cy, color);
     }
+}
+
+static void bruce_launcher__draw_carousel_arrow(int cx, int cy, int direction, bool compact,
+                                                 uint16_t color)
+{
+    int extent = compact ? 8 : 11;
+    int stroke = compact ? 2 : 3;
+    int tip_x = cx + direction * extent / 2;
+    int back_x = cx - direction * extent / 2;
+    bruce_launcher__draw_thick_line(back_x, cy - extent, tip_x, cy, stroke, color);
+    bruce_launcher__draw_thick_line(tip_x, cy, back_x, cy + extent, stroke, color);
 }
 
 static void bruce_launcher__draw_root_menu(const bruce_launcher_menu_t *menu, int selected,
@@ -570,15 +624,12 @@ static void bruce_launcher__draw_root_menu(const bruce_launcher_menu_t *menu, in
 
     bool compact = w < 180 || h < 180;
     int large = compact ? 52 : 64;
-    int small = compact ? 28 : 36;
     int content_h = h - BRUCE_LAUNCHER_STATUS_H;
     int cy = BRUCE_LAUNCHER_STATUS_H + content_h * 2 / 5;
-    int previous = (selected + menu->entry_count - 1) % menu->entry_count;
-    int next = (selected + 1) % menu->entry_count;
 
     if (menu->entry_count > 1) {
-        bruce_launcher__draw_entry_icon(&menu->entries[previous], w / 7, cy, small, theme->sec, theme);
-        bruce_launcher__draw_entry_icon(&menu->entries[next], w - w / 7, cy, small, theme->sec, theme);
+        bruce_launcher__draw_carousel_arrow(w / 7, cy, -1, compact, theme->pri);
+        bruce_launcher__draw_carousel_arrow(w - w / 7, cy, 1, compact, theme->pri);
     }
     bruce_launcher__draw_entry_icon(&menu->entries[selected], w / 2, cy, large, theme->pri, theme);
 
