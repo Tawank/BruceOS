@@ -16,7 +16,7 @@
 
 #include "core_sdk/result.h"
 
-#define BRUCE_PERMISSION_FILE_NAME_MAX 96
+#define BRUCE_PERMISSION_FILE_NAME_MAX 48
 
 typedef enum {
     BRUCE_PERMISSION_HTTP = 0,

@@ -234,7 +234,7 @@ static portMUX_TYPE s_init_mux = portMUX_INITIALIZER_UNLOCKED;
 static portMUX_TYPE s_state_mux = portMUX_INITIALIZER_UNLOCKED;
 static bool s_hidh_initialized;
 static esp_err_t s_open_status;
-static bluetooth_hid__device_t s_scan_devices[BLUETOOTH_HID__MAX_RESULTS];
+static bluetooth_hid__device_t *s_scan_devices;
 static size_t s_scan_capacity;
 static size_t s_scan_count;
 static bool s_scanning;
@@ -540,10 +540,17 @@ int bluetooth_hid__scan(bluetooth_hid__device_t *devices, size_t capacity, uint3
         bluetooth_hid__operation_unlock();
         return initialized;
     }
-    s_scanning = true;
+    if (s_scan_devices == NULL) {
+        s_scan_devices = calloc(BLUETOOTH_HID__MAX_RESULTS, sizeof(bluetooth_hid__device_t));
+        if (s_scan_devices == NULL) {
+            bluetooth_hid__operation_unlock();
+            return BRUCE_ERR_NO_MEMORY;
+        }
+    }
     s_scan_capacity = capacity < BLUETOOTH_HID__MAX_RESULTS ? capacity : BLUETOOTH_HID__MAX_RESULTS;
     s_scan_count = 0;
-    memset(s_scan_devices, 0, sizeof(s_scan_devices));
+    memset(s_scan_devices, 0, BLUETOOTH_HID__MAX_RESULTS * sizeof(bluetooth_hid__device_t));
+    s_scanning = true;
     xEventGroupClearBits(s_events, BLUETOOTH_HID__SCAN_DONE_BIT);
     uint8_t inquiry_length = (uint8_t)((timeout_ms + 1279) / 1280);
     esp_err_t error = esp_bt_gap_start_discovery(ESP_BT_INQ_MODE_GENERAL_INQUIRY, inquiry_length, 0);

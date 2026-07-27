@@ -16,8 +16,8 @@
 #include "core_sdk/task.h"
 
 #define STDIO__MAX_SESSIONS 4
-#define STDIO__OUTPUT_CAPACITY 4096
-#define STDIO__INPUT_CAPACITY 512
+#define STDIO__OUTPUT_CAPACITY 1024
+#define STDIO__INPUT_CAPACITY 256
 
 typedef struct {
     bool active;

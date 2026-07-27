@@ -29,7 +29,7 @@ static EventGroupHandle_t s_events;
 static portMUX_TYPE s_init_mux = portMUX_INITIALIZER_UNLOCKED;
 static bool s_initialized;
 static bool s_gap_registered;
-static bluetooth__device_t s_scan_devices[BLUETOOTH__MAX_RESULTS];
+static bluetooth__device_t *s_scan_devices;
 static size_t s_scan_capacity;
 static size_t s_scan_count;
 static uint32_t s_scan_seconds;
@@ -220,12 +220,19 @@ int bluetooth__scan_ble(bluetooth__device_t *devices, size_t capacity, uint32_t 
         bluetooth__unlock();
         return BRUCE_ERR_BUSY;
     }
-    s_scanning = true;
+    if (s_scan_devices == NULL) {
+        s_scan_devices = calloc(BLUETOOTH__MAX_RESULTS, sizeof(bluetooth__device_t));
+        if (s_scan_devices == NULL) {
+            bluetooth__unlock();
+            return BRUCE_ERR_NO_MEMORY;
+        }
+    }
     s_scan_capacity = capacity < BLUETOOTH__MAX_RESULTS ? capacity : BLUETOOTH__MAX_RESULTS;
     s_scan_count = 0;
     s_scan_seconds = (timeout_ms + 999) / 1000;
     s_scan_start_error = ESP_OK;
-    memset(s_scan_devices, 0, sizeof(s_scan_devices));
+    memset(s_scan_devices, 0, BLUETOOTH__MAX_RESULTS * sizeof(bluetooth__device_t));
+    s_scanning = true;
     xEventGroupClearBits(s_events, BLUETOOTH__SCAN_DONE_BIT | BLUETOOTH__SCAN_STOPPED_BIT);
 
     esp_ble_scan_params_t parameters = {

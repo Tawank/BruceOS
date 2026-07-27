@@ -15,8 +15,8 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
-#define TASK__MAX_RECORDS 16
-#define TASK__MAX_RESOURCES 16
+#define TASK__MAX_RECORDS 8
+#define TASK__MAX_RESOURCES 8
 #define TASK__FOREGROUND_STACK_MAX TASK__MAX_RECORDS
 #define TASK__DEFAULT_STACK_BYTES 4096u
 #define TASK__EVT_WAKE (1u << 0)

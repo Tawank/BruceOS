@@ -76,5 +76,5 @@ set_property(TARGET ${COMPONENT_LIB} APPEND PROPERTY
 # Silence warnings in the upstream engine files so the build stays clean.
 set_source_files_properties(
     mquickjs.c cutils.c dtoa.c libm.c
-    PROPERTIES COMPILE_FLAGS "-Wno-unused-variable -Wno-unused-label -Wno-comment -Wno-unused-function -Wno-maybe-uninitialized -Wno-conversion -Wno-type-limits -Wno-format -Wno-strict-aliasing"
+    PROPERTIES COMPILE_FLAGS "-Wno-unused-variable -Wno-unused-label -Wno-comment -Wno-unused-function -Wno-maybe-uninitialized -Wno-conversion -Wno-type-limits -Wno-format -Wno-strict-aliasing -Wno-dangling-pointer"
 )
