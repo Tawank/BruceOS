@@ -33,8 +33,6 @@ void app_main(void)
      * and should not trigger the task watchdog. */
     app_runner__run("serial_commands", NULL, true);
 
-    app_runner__run("launcher", NULL, false);
-
     const char *launcher_args = (display_ok && input_ok) ? "--gui" : NULL;
     int result = app_runner__run("launcher", launcher_args, false);
 
