@@ -2,6 +2,7 @@
 
 #include "core/display/display.h"
 #include "core/input/input.h"
+#include "core/stdio/stdio.h"
 #include "core_sdk/permission.h"
 #include "core_sdk/task.h"
 
@@ -40,6 +41,8 @@ typedef struct {
     bool gui_requested;
     char permission_key[BRUCE_PERMISSION_FILE_NAME_MAX];
     bool start_in_background;
+    bruce_stdio_session_t stdio_session;
+    bruce_stdio_session_t child_stdio_session;
     TaskHandle_t handle;
 
     bruce_app_entry_t entry;
@@ -325,6 +328,8 @@ static void task__teardown_locked(task__record_t *record)
 static void task__trampoline(void *arg)
 {
     task__record_t *record = (task__record_t *)arg;
+    FILE *stdio_input = NULL;
+    FILE *stdio_output = NULL;
 
     /* The record was created in BRUCE_TASK_STARTING; this is the first thing
      * the new task does once FreeRTOS actually schedules it, and still runs
@@ -339,11 +344,15 @@ static void task__trampoline(void *arg)
     }
     task__unlock();
 
+    stdio__task_attach(record->stdio_session, &stdio_input, &stdio_output);
+
     if (record->task_entry != NULL) {
         record->task_entry(record->task_entry_context);
     } else if (record->entry != NULL) {
         (void)record->entry(record->argc, record->argv);
     }
+
+    stdio__task_detach(stdio_input, stdio_output);
 
     task__lock();
     task__teardown_locked(record);
@@ -391,6 +400,10 @@ bruce_result_t task_registry__create(const task_create_params_t *params, bruce_t
     record->generation = generation;
     record->in_use = true;
     record->id = s_next_task_id++;
+    task__record_t *parent = task__find_by_handle_locked(xTaskGetCurrentTaskHandle());
+    if (parent != NULL) {
+        record->stdio_session = parent->child_stdio_session;
+    }
     if (s_next_task_id == BRUCE_TASK_ID_INVALID) {
         s_next_task_id = 1; /* skip 0 on wraparound */
     }
@@ -522,6 +535,30 @@ bruce_result_t task_registry__current_context(bool *out_built_in, char *out_perm
     }
     task__unlock();
     return BRUCE_OK;
+}
+
+bruce_result_t task_registry__set_child_stdio_session(uint32_t session)
+{
+    task__ensure_init();
+    task__lock();
+    task__record_t *self = task__find_by_handle_locked(xTaskGetCurrentTaskHandle());
+    if (self == NULL) {
+        task__unlock();
+        return BRUCE_ERR_NOT_FOUND;
+    }
+    self->child_stdio_session = session;
+    task__unlock();
+    return BRUCE_OK;
+}
+
+uint32_t task_registry__current_stdio_session(void)
+{
+    task__ensure_init();
+    task__lock();
+    task__record_t *self = task__find_by_handle_locked(xTaskGetCurrentTaskHandle());
+    uint32_t session = self != NULL ? self->stdio_session : BRUCE_STDIO_SESSION_INVALID;
+    task__unlock();
+    return session;
 }
 
 bruce_result_t task_registry__input_wake_clear(bruce_task_id_t task_id)

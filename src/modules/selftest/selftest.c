@@ -75,6 +75,7 @@ int selftest_app_main(int argc, char **argv)
     RUN_SELFTEST(selftest__run_terminal_named_case);
     RUN_SELFTEST(selftest__run_terminal_path_case);
     RUN_SELFTEST(selftest__run_terminal_invalid_case);
+    RUN_SELFTEST(selftest__run_terminal_stdio_case);
     RUN_SELFTEST(selftest__run_launcher_apps_discovery_case);
     RUN_SELFTEST(selftest__run_wifi_permission_denied_case);
     RUN_SELFTEST(selftest__run_http_permission_denied_case);

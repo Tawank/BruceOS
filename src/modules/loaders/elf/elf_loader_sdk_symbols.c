@@ -210,6 +210,12 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(tcp__write),
     ESP_ELFSYM_EXPORT(tcp__close),
     ESP_ELFSYM_EXPORT(bruce_stdio_read),
+    ESP_ELFSYM_EXPORT(bruce_stdio_read_line),
+    ESP_ELFSYM_EXPORT(bruce_stdio_session_create),
+    ESP_ELFSYM_EXPORT(bruce_stdio_session_close),
+    ESP_ELFSYM_EXPORT(bruce_stdio_session_route_children),
+    ESP_ELFSYM_EXPORT(bruce_stdio_session_write_input),
+    ESP_ELFSYM_EXPORT(bruce_stdio_session_read_output),
 
     /* Standard C library subset (provided by firmware, not by forwarding
      * malloc/free to libc). */

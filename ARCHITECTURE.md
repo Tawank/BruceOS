@@ -359,7 +359,22 @@ they are not renamed to a new `bruce.*` namespace.
 
 `runtime.main()` is retained for now even though optional `app_main(argv)` is
 the normal JS lifecycle entry.  `serial.cmd(command)` delegates to the same
-terminal/app_runner parser and requires `execute`.
+`serial_commands`/AppRunner parser and requires `execute`.
+
+## Terminal and stdio sessions
+
+`terminal` is a GUI-by-default built-in. It remains foreground while running
+non-GUI commands in the background, displays their captured stdout/stderr, and
+routes entered lines to their stdin. Commands containing `--gui` use the normal
+foreground handoff and return to the terminal when they exit. The physical
+serial command loop is the separate `serial_commands` built-in.
+
+Core owns bounded, task-owned stdio sessions. A session owner may route newly
+created child tasks to the session, drain captured output, and enqueue input.
+The route is inherited atomically during task creation and should be cleared
+immediately after launch. Session resources are released automatically with
+their owner; output overflow drops the oldest captured bytes, while input
+overflow returns `BRUCE_ERR_RESOURCE_LIMIT`.
 
 ## Permissions
 

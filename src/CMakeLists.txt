@@ -66,8 +66,9 @@ idf_component_register(SRCS
                     "modules/selftest/terminal_test.c"
                     "modules/selftest/wifi_test.c"
                     "modules/tcp/tcp_app.c"
-                    "modules/utils/launcher/launcher_app.c"
-                    "modules/utils/terminal/terminal_app.c"
+                     "modules/utils/launcher/launcher_app.c"
+                     "modules/utils/serial_commands/serial_commands_app.c"
+                     "modules/utils/terminal/terminal_app.c"
                     "modules/utils/notification/notification_app.c"
                     "modules/ir/ir_app.c"
                     "modules/nrf24/nrf24_app.c"
@@ -171,6 +172,12 @@ add_library(bruce_sdk_builtin_utils_terminal_check OBJECT "modules/utils/termina
 target_include_directories(bruce_sdk_builtin_utils_terminal_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/utils/terminal")
+
+add_library(bruce_sdk_builtin_utils_serial_commands_check OBJECT
+            "modules/utils/serial_commands/serial_commands_app.c")
+target_include_directories(bruce_sdk_builtin_utils_serial_commands_check PRIVATE
+                           "${CMAKE_CURRENT_LIST_DIR}"
+                           "${CMAKE_CURRENT_LIST_DIR}/modules/utils/serial_commands")
 
 add_library(bruce_sdk_builtin_notification_check OBJECT "modules/utils/notification/notification_app.c")
 target_include_directories(bruce_sdk_builtin_notification_check PRIVATE

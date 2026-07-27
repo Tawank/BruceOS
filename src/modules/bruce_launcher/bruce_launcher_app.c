@@ -568,6 +568,14 @@ static int bruce_launcher__run_gui_menu(bruce_launcher_menu_t *menu)
     uint32_t icon_revision = UINT32_MAX;
     uint64_t status_drawn_at = 0;
     for (;;) {
+        bruce_task_snapshot_t self;
+        if (task__snapshot(task__current_id(), &self) != BRUCE_OK ||
+            self.state != BRUCE_TASK_FOREGROUND) {
+            last_drawn = -1;
+            (void)runtime__delay(20);
+            continue;
+        }
+
         if (selected != last_drawn) {
             bruce_result_t frame = display__begin_frame();
             if (frame == BRUCE_ERR_NOT_FOREGROUND) {

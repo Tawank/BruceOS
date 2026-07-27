@@ -22,6 +22,7 @@
 #include "modules/selftest/selftest.h"
 #include "modules/tcp/tcp_app.h"
 #include "modules/utils/launcher/launcher_app.h"
+#include "modules/utils/serial_commands/serial_commands_app.h"
 #include "modules/utils/terminal/terminal_app.h"
 #include "modules/utils/notification/notification_app.h"
 #include "modules/wifi/wifi_app.h"
@@ -33,7 +34,7 @@
 #include <string.h>
 #include <strings.h>
 
-#define APP_RUNNER_MAX_APPS 20
+#define APP_RUNNER_MAX_APPS 24
 #define APP_RUNNER_PATH_MAX 160
 #define APP_RUNNER_MAX_LOADERS 12
 #define APP_RUNNER_LOADER_EXTENSION_MAX 16
@@ -41,6 +42,7 @@
 typedef struct {
     const char *name;
     bruce_app_entry_t entry;
+    bool gui_default;
 } app_runner_app_t;
 
 static app_runner_app_t s_apps[APP_RUNNER_MAX_APPS];
@@ -73,6 +75,7 @@ bruce_result_t app_runner__register(const char *name, bruce_app_entry_t entry)
 
     s_apps[s_app_count].name = name;
     s_apps[s_app_count].entry = entry;
+    s_apps[s_app_count].gui_default = false;
     s_app_count++;
     return BRUCE_OK;
 }
@@ -94,6 +97,8 @@ void app_runner__register_defaults(void)
     (void)app_runner__register("nrf24", nrf24_app_main);
     (void)app_runner__register("selftest", selftest_app_main);
     (void)app_runner__register("terminal", terminal_app_main);
+    s_apps[s_app_count - 1].gui_default = true;
+    (void)app_runner__register("serial_commands", serial_commands_app_main);
     (void)app_runner__register("elf", elf_loader__app_main);
     (void)app_runner__register("js", js_loader__app_main);
     (void)app_runner__register("image", image_app_main);
@@ -428,6 +433,12 @@ int app_runner__run(const char *app_name, const char *arg, bool in_background)
             .start_in_background = in_background,
             .stack_bytes = 0,
         };
+        for (int i = 0; i < s_app_count; ++i) {
+            if (s_apps[i].entry == entry) {
+                params.gui_requested = params.gui_requested || s_apps[i].gui_default;
+                break;
+            }
+        }
         bruce_task_id_t task_id = BRUCE_TASK_ID_INVALID;
         bruce_result_t create_result = task_registry__create(&params, &task_id);
         result = create_result == BRUCE_OK ? (int)task_id : (int)create_result;

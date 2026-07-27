@@ -99,3 +99,6 @@ bruce_result_t task_registry__current_context(bool *out_built_in, char *out_perm
 bruce_result_t task_registry__input_wake_clear(bruce_task_id_t task_id);
 bruce_result_t task_registry__input_wake_wait(bruce_task_id_t task_id, uint32_t timeout_ms);
 void task_registry__input_wake(bruce_task_id_t task_id);
+
+bruce_result_t task_registry__set_child_stdio_session(uint32_t session);
+uint32_t task_registry__current_stdio_session(void);

@@ -167,8 +167,9 @@ app receives it; GUI and terminal dialog paths both work.
 
 ## Stage 7 — Terminal and launcher migration
 
-- Implement terminal as a thin parser: first token is app name, remainder is
-  app_runner `arg`.
+- Implement `serial_commands` as a thin parser: first token is app name,
+  remainder is app_runner `arg`; the GUI terminal uses the same parser through
+  a captured Core stdio session.
 - Route JS `serial.cmd()` to the same parser.
 - Port `bruce_launcher` menu composition from legacy `menu_items`; each feature
   becomes a module command instead of Core menu code.

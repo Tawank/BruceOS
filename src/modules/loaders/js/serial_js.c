@@ -1,8 +1,7 @@
 #include "serial_js.h"
 
-#include "core_sdk/app_runner.h"
-#include "core_sdk/loader.h"
 #include "core_sdk/stdio.h"
+#include "modules/utils/serial_commands/serial_commands_app.h"
 #include "native_helpers_js.h"
 
 #include <stdio.h>
@@ -43,19 +42,5 @@ JSValue native_serialCmd(JSContext *ctx, JSValue *this_val, int argc, JSValue *a
         return JS_NewBool(false);
     }
 
-    const char *p = line;
-    while (*p == ' ' || *p == '\t') p++;
-    char token[256];
-    size_t ti = 0;
-    while (*p != '\0' && *p != ' ' && *p != '\t' && ti + 1 < sizeof(token)) {
-        token[ti++] = *p++;
-    }
-    token[ti] = '\0';
-    while (*p == ' ' || *p == '\t') p++;
-    const char *arg = (*p != '\0') ? p : NULL;
-
-    if (token[0] == '/' || strncmp(token, "./", 2) == 0) {
-        return JS_NewBool(app_runner__run_path(token, arg, false) > 0);
-    }
-    return JS_NewBool(app_runner__run(token, arg, false) > 0);
+    return JS_NewBool(serial_commands__run_line(line, false) > 0);
 }
