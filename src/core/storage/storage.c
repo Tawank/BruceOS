@@ -510,7 +510,7 @@ storage__list(const char *path, bruce_storage_entry_t *entries, size_t capacity,
     bool has_trailing_slash = path_length > 0 && path[path_length - 1] == '/';
     size_t written = 0;
     struct dirent *dir_entry;
-    while (written < capacity && (dir_entry = readdir(dir)) != NULL) {
+    while ((dir_entry = readdir(dir)) != NULL) {
         if (strcmp(dir_entry->d_name, ".") == 0 || strcmp(dir_entry->d_name, "..") == 0) continue;
 
         char full_path[BRUCE_STORAGE_PATH_MAX];
@@ -523,11 +523,13 @@ storage__list(const char *path, bruce_storage_entry_t *entries, size_t capacity,
         struct stat entry_stat;
         if (stat(full_path, &entry_stat) != 0) continue;
 
-        bruce_storage_entry_t *out = &entries[written];
-        strncpy(out->name, dir_entry->d_name, BRUCE_STORAGE_NAME_MAX - 1);
-        out->name[BRUCE_STORAGE_NAME_MAX - 1] = '\0';
-        out->type = S_ISDIR(entry_stat.st_mode) ? BRUCE_STORAGE_ENTRY_DIRECTORY : BRUCE_STORAGE_ENTRY_FILE;
-        out->size = (size_t)entry_stat.st_size;
+        if (entries != NULL && written < capacity) {
+            bruce_storage_entry_t *out = &entries[written];
+            strncpy(out->name, dir_entry->d_name, BRUCE_STORAGE_NAME_MAX - 1);
+            out->name[BRUCE_STORAGE_NAME_MAX - 1] = '\0';
+            out->type = S_ISDIR(entry_stat.st_mode) ? BRUCE_STORAGE_ENTRY_DIRECTORY : BRUCE_STORAGE_ENTRY_FILE;
+            out->size = (size_t)entry_stat.st_size;
+        }
         ++written;
     }
     closedir(dir);

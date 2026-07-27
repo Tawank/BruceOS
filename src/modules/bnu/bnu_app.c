@@ -128,3 +128,30 @@ int bnu_free_app_main(int argc, char **argv) {
     }
     return BRUCE_OK;
 }
+
+int bnu_mkdir_app_main(int argc, char **argv) {
+    if (argc != 1) return bnu__usage("mkdir", "<directory>");
+    char path[BRUCE_STORAGE_PATH_MAX];
+    if (!bnu__resolve_path(argv[0], path)) return BRUCE_ERR_INVALID_PATH;
+    bruce_result_t result = storage__mkdir(path);
+    if (result != BRUCE_OK) {
+        printf("mkdir: %s: error %d\n", path, result);
+        return result;
+    }
+    return BRUCE_OK;
+}
+
+int bnu_touch_app_main(int argc, char **argv) {
+    if (argc != 1) return bnu__usage("touch", "<file>");
+    char path[BRUCE_STORAGE_PATH_MAX];
+    if (!bnu__resolve_path(argv[0], path)) return BRUCE_ERR_INVALID_PATH;
+    bruce_file_id_t file;
+    bruce_result_t result =
+        storage__open(path, BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE, &file);
+    if (result != BRUCE_OK) {
+        printf("touch: %s: error %d\n", path, result);
+        return result;
+    }
+    storage__close(file);
+    return BRUCE_OK;
+}

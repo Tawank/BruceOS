@@ -814,12 +814,20 @@ static bruce_result_t dialog__gui_pick_file(
         initial_path != NULL && initial_path[0] != '\0' ? initial_path : "/"
     );
 
-    bruce_storage_entry_t entries[32];
     for (;;) {
         size_t count = 0;
-        bruce_result_t list_result =
-            storage__list(current_path, entries, sizeof(entries) / sizeof(entries[0]), &count);
+        bruce_result_t list_result = storage__list(current_path, NULL, 0, &count);
         if (list_result != BRUCE_OK) { return list_result; }
+
+        bruce_storage_entry_t *entries = memory__malloc(count * sizeof(bruce_storage_entry_t));
+        if (entries == NULL && count > 0) { return BRUCE_ERR_NO_MEMORY; }
+        if (entries != NULL) {
+            list_result = storage__list(current_path, entries, count, &count);
+            if (list_result != BRUCE_OK) {
+                memory__free(entries);
+                return list_result;
+            }
+        }
 
         int h = display__height();
         int usable_h = h - (DIALOG__CHAR_H + 4) - (DIALOG__CHAR_H + 4);
@@ -828,9 +836,13 @@ static bruce_result_t dialog__gui_pick_file(
         (void)items_per_page;
 
         bruce_dialog_choice_t *choices = memory__malloc((count + 1) * sizeof(bruce_dialog_choice_t));
-        if (choices == NULL) { return BRUCE_ERR_NO_MEMORY; }
+        if (choices == NULL) {
+            memory__free(entries);
+            return BRUCE_ERR_NO_MEMORY;
+        }
         const char **values = memory__malloc((count + 1) * sizeof(const char *));
         if (values == NULL) {
+            memory__free(entries);
             memory__free(choices);
             return BRUCE_ERR_NO_MEMORY;
         }
@@ -843,7 +855,7 @@ static bruce_result_t dialog__gui_pick_file(
             choices[choice_count].value = "..";
             choice_count++;
         }
-        for (size_t i = 0; i < count && choice_count < (int)(sizeof(entries) / sizeof(entries[0])) + 1; ++i) {
+        for (size_t i = 0; i < count && (size_t)choice_count < count + 1; ++i) {
             if (entries[i].type == BRUCE_STORAGE_ENTRY_FILE &&
                 !dialog__matches_extension_filter(entries[i].name, extension_filter)) {
                 continue;
@@ -862,7 +874,10 @@ static bruce_result_t dialog__gui_pick_file(
         memory__free(values);
         memory__free(choices);
 
-        if (choice_result != BRUCE_OK) { return BRUCE_ERR_CANCELLED; }
+        if (choice_result != BRUCE_OK) {
+            memory__free(entries);
+            return BRUCE_ERR_CANCELLED;
+        }
 
         if (strcmp(picked, "..") == 0) {
             /* Strip last path component. */
@@ -872,6 +887,7 @@ static bruce_result_t dialog__gui_pick_file(
             } else {
                 current_path[1] = '\0';
             }
+            memory__free(entries);
             continue;
         }
 
@@ -882,7 +898,10 @@ static bruce_result_t dialog__gui_pick_file(
         } else {
             printed = snprintf(next_path, sizeof(next_path), "%s/%s", current_path, picked);
         }
-        if (printed < 0 || (size_t)printed >= sizeof(next_path)) { return BRUCE_ERR_INVALID_PATH; }
+        if (printed < 0 || (size_t)printed >= sizeof(next_path)) {
+            memory__free(entries);
+            return BRUCE_ERR_INVALID_PATH;
+        }
 
         /* If the picked entry is a directory, descend into it. */
         bool is_file = false;
@@ -895,10 +914,12 @@ static bruce_result_t dialog__gui_pick_file(
 
         if (is_file) {
             snprintf(out_path, out_path_size, "%s", next_path);
+            memory__free(entries);
             return BRUCE_OK;
         }
 
         snprintf(current_path, sizeof(current_path), "%s", next_path);
+        memory__free(entries);
     }
 }
 
