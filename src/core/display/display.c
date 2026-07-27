@@ -67,6 +67,7 @@
 #define DISPLAY__FB_SIZE (DISPLAY__NATIVE_WIDTH * DISPLAY__NATIVE_HEIGHT * sizeof(bruce_display_color_t))
 #define DISPLAY__MAX_CONTEXTS 16
 #define DISPLAY__WORKER_STACK 4096
+#define DISPLAY__ROW_BUF_PIXELS (DISPLAY__NATIVE_WIDTH > DISPLAY__NATIVE_HEIGHT ? DISPLAY__NATIVE_WIDTH : DISPLAY__NATIVE_HEIGHT)
 
 #define DISPLAY__FONT_WIDTH 5
 #define DISPLAY__FONT_HEIGHT 7
@@ -188,7 +189,7 @@ static esp_lcd_panel_io_handle_t s_io;
 static bool s_initialized;
 
 static bruce_display_color_t *s_framebuffer;
-static bruce_display_color_t *s_dma_buffer;
+static bruce_display_color_t s_row_buffer[DISPLAY__ROW_BUF_PIXELS];
 static uint8_t s_rotation;
 static int16_t s_fb_width;
 static int16_t s_fb_height;
@@ -340,38 +341,34 @@ static bool display__overlay_conflicts_locked(bruce_display_rect_t rect)
     return false;
 }
 
-static void display__scratch_pixel(bruce_display_rect_t transfer, int x, int y,
-                                    bruce_display_color_t color)
-{
-    if (x < transfer.x || y < transfer.y || x >= transfer.x + transfer.width ||
-        y >= transfer.y + transfer.height) {
-        return;
-    }
-    s_dma_buffer[(y - transfer.y) * transfer.width + (x - transfer.x)] = color;
-}
-
-static void display__compose_notification(bruce_display_rect_t transfer,
-                                           const notification__state_t *notification)
+static void display__compose_notification_row(bruce_display_rect_t transfer,
+                                               const notification__state_t *notification,
+                                               int screen_y)
 {
     bruce_display_rect_t rect = notification->rect;
-    for (int y = rect.y; y < rect.y + rect.height; ++y) {
-        for (int x = rect.x; x < rect.x + rect.width; ++x) {
-            bool border = x == rect.x || y == rect.y || x == rect.x + rect.width - 1 ||
-                          y == rect.y + rect.height - 1;
-            display__scratch_pixel(transfer, x, y, border ? BRUCE_COLOR_WHITE : BRUCE_COLOR_NAVY);
-        }
+    if (screen_y < rect.y || screen_y >= rect.y + rect.height) return;
+
+    int y = screen_y;
+    for (int x = rect.x; x < rect.x + rect.width; ++x) {
+        if (x < transfer.x || x >= transfer.x + transfer.width) continue;
+        bool border = x == rect.x || y == rect.y || x == rect.x + rect.width - 1 ||
+                      y == rect.y + rect.height - 1;
+        s_row_buffer[(x - transfer.x)] = border ? BRUCE_COLOR_WHITE : BRUCE_COLOR_NAVY;
     }
+    int text_base_y = rect.y + 4;
+    if (y < text_base_y || y >= text_base_y + DISPLAY__FONT_HEIGHT) return;
+    int font_row = y - text_base_y;
     int cursor_x = rect.x + 4;
-    int cursor_y = rect.y + 4;
     for (const char *p = notification->text; *p != '\0'; ++p) {
         if (cursor_x + DISPLAY__FONT_WIDTH >= rect.x + rect.width - 3) break;
         char c = *p;
-        if (c < DISPLAY__FONT_FIRST || c > DISPLAY__FONT_LAST) c = '?';
+        if (c < DISPLAY__FONT_FIRST || c > DISPLAY__FONT_LAST) { cursor_x += DISPLAY__FONT_WIDTH + 1; continue; }
         const uint8_t *glyph = s_font_5x7[(int)c - DISPLAY__FONT_FIRST];
         for (int col = 0; col < DISPLAY__FONT_WIDTH; ++col) {
-            for (int row = 0; row < DISPLAY__FONT_HEIGHT; ++row) {
-                if (glyph[col] & (1u << row)) {
-                    display__scratch_pixel(transfer, cursor_x + col, cursor_y + row, BRUCE_COLOR_WHITE);
+            if (glyph[col] & (1u << font_row)) {
+                int px = cursor_x + col;
+                if (px >= transfer.x && px < transfer.x + transfer.width) {
+                    s_row_buffer[px - transfer.x] = BRUCE_COLOR_WHITE;
                 }
             }
         }
@@ -487,37 +484,66 @@ static void display__worker(void *arg)
         notification__state_t notification = s_notification;
         bool compose = notification.active && display__rects_overlap(request.rect, notification.rect);
         bool packed = !request.fullscreen || compose || request.overlay_update;
-        const bruce_display_color_t *pixels = s_framebuffer;
-        if (packed) {
-            for (int row = 0; row < request.rect.height; ++row) {
-                memcpy(&s_dma_buffer[row * request.rect.width],
-                       &s_framebuffer[(request.rect.y + row) * s_fb_width + request.rect.x],
-                       (size_t)request.rect.width * sizeof(*s_dma_buffer));
-            }
-            pixels = s_dma_buffer;
-        }
-        if (compose) {
-            display__compose_notification(request.rect, &notification);
-        }
         display__unlock();
+
         while (xSemaphoreTake(s_transfer_done, 0) == pdTRUE) {
         }
-        esp_err_t err = esp_lcd_panel_draw_bitmap(s_panel, request.rect.x, request.rect.y,
-                                                   request.rect.x + request.rect.width,
-                                                   request.rect.y + request.rect.height, pixels);
-        if (err != ESP_OK) {
-            display__lock();
-            s_transfer_active = false;
-            display__unlock();
-            display__finish_request(&request, BRUCE_ERR_IO);
+
+        if (packed) {
+            int x = request.rect.x;
+            int y = request.rect.y;
+            int w = request.rect.width;
+            int h = request.rect.height;
+
+            for (int row = 0; row < h; ++row) {
+                const bruce_display_color_t *row_pixels;
+                int screen_y = y + row;
+                if (compose) {
+                    display__lock();
+                    memcpy(s_row_buffer,
+                           &s_framebuffer[screen_y * s_fb_width + x],
+                           (size_t)w * sizeof(bruce_display_color_t));
+                    display__compose_notification_row(request.rect, &notification, screen_y);
+                    display__unlock();
+                    row_pixels = s_row_buffer;
+                } else {
+                    row_pixels = &s_framebuffer[screen_y * s_fb_width + x];
+                }
+                esp_err_t err = esp_lcd_panel_draw_bitmap(s_panel, x, screen_y, x + w, screen_y + 1, row_pixels);
+                if (err != ESP_OK || xSemaphoreTake(s_transfer_done, portMAX_DELAY) != pdTRUE) {
+                    display__lock();
+                    s_transfer_active = false;
+                    display__unlock();
+                    display__finish_request(&request, BRUCE_ERR_IO);
+                    break;
+                }
+            }
+            if (s_transfer_active) {
+                s_transfer_active = false;
+                display__finish_request(&request, BRUCE_OK);
+            }
             continue;
-        }
-        if (xSemaphoreTake(s_transfer_done, portMAX_DELAY) != pdTRUE) {
-            display__lock();
-            s_transfer_active = false;
-            display__unlock();
-            display__finish_request(&request, BRUCE_ERR_IO);
-            continue;
+        } else {
+            while (xSemaphoreTake(s_transfer_done, 0) == pdTRUE) {
+            }
+            esp_err_t err = esp_lcd_panel_draw_bitmap(s_panel, request.rect.x, request.rect.y,
+                                                       request.rect.x + request.rect.width,
+                                                       request.rect.y + request.rect.height,
+                                                       s_framebuffer);
+            if (err != ESP_OK) {
+                display__lock();
+                s_transfer_active = false;
+                display__unlock();
+                display__finish_request(&request, BRUCE_ERR_IO);
+                continue;
+            }
+            if (xSemaphoreTake(s_transfer_done, portMAX_DELAY) != pdTRUE) {
+                display__lock();
+                s_transfer_active = false;
+                display__unlock();
+                display__finish_request(&request, BRUCE_ERR_IO);
+                continue;
+            }
         }
         display__lock();
         s_transfer_active = false;
@@ -1023,14 +1049,8 @@ bruce_result_t display__init(void)
 
     s_framebuffer = (bruce_display_color_t *)heap_caps_malloc(
         DISPLAY__FB_SIZE, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
-    s_dma_buffer = (bruce_display_color_t *)heap_caps_malloc(
-        DISPLAY__FB_SIZE, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
-    if (s_framebuffer == NULL || s_dma_buffer == NULL) {
-        ESP_LOGE(TAG, "failed to allocate compositor buffers");
-        heap_caps_free(s_framebuffer);
-        heap_caps_free(s_dma_buffer);
-        s_framebuffer = NULL;
-        s_dma_buffer = NULL;
+    if (s_framebuffer == NULL) {
+        ESP_LOGE(TAG, "failed to allocate framebuffer");
         esp_lcd_panel_del(s_panel);
         esp_lcd_panel_io_del(s_io);
         spi_bus_free(DISPLAY__SPI_HOST);
@@ -1057,9 +1077,7 @@ bruce_result_t display__init(void)
         xTaskCreate(display__worker, "bruce_display", DISPLAY__WORKER_STACK, NULL,
                     tskIDLE_PRIORITY + 3, &s_worker_task) != pdPASS) {
         heap_caps_free(s_framebuffer);
-        heap_caps_free(s_dma_buffer);
         s_framebuffer = NULL;
-        s_dma_buffer = NULL;
         display__unlock();
         return BRUCE_ERR_NO_MEMORY;
     }
@@ -1134,10 +1152,6 @@ void display__deinit(void)
     if (s_framebuffer != NULL) {
         heap_caps_free(s_framebuffer);
         s_framebuffer = NULL;
-    }
-    if (s_dma_buffer != NULL) {
-        heap_caps_free(s_dma_buffer);
-        s_dma_buffer = NULL;
     }
     if (s_request_queue != NULL) {
         vQueueDelete(s_request_queue);
