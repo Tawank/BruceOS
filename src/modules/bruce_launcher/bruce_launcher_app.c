@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #include "cJSON.h"
 #include "core_sdk/app_runner.h"
@@ -30,7 +31,7 @@
 /* MainMenu visual-style constants. */
 #define BRUCE_LAUNCHER_BORDER_PAD 5
 #define BRUCE_LAUNCHER_STATUS_H 25
-#define BRUCE_LAUNCHER_SUBMENU_VISIBLE 4
+#define BRUCE_LAUNCHER_SUBMENU_VISIBLE 3
 #define BRUCE_LAUNCHER_FONT_SMALL 1
 #define BRUCE_LAUNCHER_FONT_MEDIUM 2
 #define BRUCE_LAUNCHER_MENU_MARGIN_X_NUM 1
@@ -97,6 +98,17 @@ typedef struct {
     uint16_t sec;
     uint16_t bg;
 } bruce_launcher_theme_t;
+
+typedef enum {
+    BRUCE_LAUNCHER_ICON_COMMAND,
+    BRUCE_LAUNCHER_ICON_FOLDER,
+    BRUCE_LAUNCHER_ICON_WIFI,
+    BRUCE_LAUNCHER_ICON_APPS,
+    BRUCE_LAUNCHER_ICON_CONFIG,
+    BRUCE_LAUNCHER_ICON_CLOCK,
+    BRUCE_LAUNCHER_ICON_SELFTEST,
+    BRUCE_LAUNCHER_ICON_BACK,
+} bruce_launcher_icon_t;
 
 /* -------------------------------------------------------------------------- */
 /* Menu tree helpers                                                          */
@@ -464,7 +476,118 @@ static void bruce_launcher__draw_centered_text(const char *text, int y, int font
     display__print(text);
 }
 
-/* Draw a centered submenu box with up to four visible rows. */
+static bruce_launcher_icon_t bruce_launcher__entry_icon(const bruce_launcher_entry_t *entry)
+{
+    if (entry->kind == BRUCE_LAUNCHER_ENTRY_BACK) {
+        return BRUCE_LAUNCHER_ICON_BACK;
+    }
+    if (strcasecmp(entry->label, "wifi") == 0) {
+        return BRUCE_LAUNCHER_ICON_WIFI;
+    }
+    if (strcasecmp(entry->label, "apps") == 0) {
+        return BRUCE_LAUNCHER_ICON_APPS;
+    }
+    if (strcasecmp(entry->label, "config") == 0) {
+        return BRUCE_LAUNCHER_ICON_CONFIG;
+    }
+    if (strcasecmp(entry->label, "clock") == 0) {
+        return BRUCE_LAUNCHER_ICON_CLOCK;
+    }
+    if (strcasecmp(entry->label, "selftest") == 0 || strcasecmp(entry->label, "self-test") == 0) {
+        return BRUCE_LAUNCHER_ICON_SELFTEST;
+    }
+    return entry->kind == BRUCE_LAUNCHER_ENTRY_SUBMENU ? BRUCE_LAUNCHER_ICON_FOLDER
+                                                       : BRUCE_LAUNCHER_ICON_COMMAND;
+}
+
+static void bruce_launcher__draw_entry_icon(const bruce_launcher_entry_t *entry, int cx, int cy,
+                                             int size, uint16_t color,
+                                             const bruce_launcher_theme_t *theme)
+{
+    bruce_launcher_icon_t icon = bruce_launcher__entry_icon(entry);
+    int left = cx - size / 2;
+    int top = cy - size / 2;
+    int pad = size >= 48 ? 5 : 3;
+
+    if (icon == BRUCE_LAUNCHER_ICON_WIFI) {
+        int bottom = top + size - pad;
+        display__draw_circle(cx, bottom, size / 2 - pad, color);
+        display__draw_circle(cx, bottom, size / 3 - pad / 2, color);
+        display__fill_rect(left, bottom, size, size - (bottom - top), theme->bg);
+        display__fill_circle(cx, bottom - 1, size >= 48 ? 3 : 2, color);
+    } else if (icon == BRUCE_LAUNCHER_ICON_APPS) {
+        int tab_h = size / 5;
+        display__fill_round_rect(left + pad, top + tab_h, size - 2 * pad,
+                                 size - tab_h - pad, size / 10, color);
+        display__fill_round_rect(left + pad * 2, top + pad, size * 2 / 5,
+                                 tab_h * 2, size / 12, color);
+    } else if (icon == BRUCE_LAUNCHER_ICON_CONFIG) {
+        int radius = size / 3;
+        display__draw_circle(cx, cy, radius, color);
+        display__draw_circle(cx, cy, radius / 3, color);
+        for (int offset = -1; offset <= 1; offset += 2) {
+            display__draw_line(cx + offset * radius, cy, cx + offset * (size / 2 - pad), cy, color);
+            display__draw_line(cx, cy + offset * radius, cx, cy + offset * (size / 2 - pad), color);
+        }
+    } else if (icon == BRUCE_LAUNCHER_ICON_CLOCK) {
+        int radius = size / 2 - pad;
+        display__draw_circle(cx, cy, radius, color);
+        display__draw_line(cx, cy, cx, cy - radius * 2 / 3, color);
+        display__draw_line(cx, cy, cx + radius / 2, cy + radius / 3, color);
+    } else if (icon == BRUCE_LAUNCHER_ICON_SELFTEST) {
+        int radius = size / 2 - pad;
+        display__draw_circle(cx, cy, radius, color);
+        display__draw_line(cx - radius / 2, cy, cx - radius / 6, cy + radius / 3, color);
+        display__draw_line(cx - radius / 6, cy + radius / 3, cx + radius / 2, cy - radius / 3, color);
+    } else if (icon == BRUCE_LAUNCHER_ICON_BACK) {
+        display__draw_line(left + pad, cy, left + size - pad, cy, color);
+        display__draw_line(left + pad, cy, cx, top + pad, color);
+        display__draw_line(left + pad, cy, cx, top + size - pad, color);
+    } else if (icon == BRUCE_LAUNCHER_ICON_FOLDER) {
+        int tab_h = size / 5;
+        display__draw_round_rect(left + pad, top + tab_h, size - 2 * pad,
+                                 size - tab_h - pad, size / 10, color);
+        display__draw_round_rect(left + pad * 2, top + pad, size * 2 / 5,
+                                 tab_h * 2, size / 12, color);
+    } else {
+        display__draw_round_rect(left + pad, top + pad, size - 2 * pad, size - 2 * pad,
+                                 size / 10, color);
+        display__fill_triangle(cx - size / 8, cy - size / 5, cx - size / 8,
+                               cy + size / 5, cx + size / 5, cy, color);
+    }
+}
+
+static void bruce_launcher__draw_root_menu(const bruce_launcher_menu_t *menu, int selected,
+                                            const bruce_launcher_theme_t *theme)
+{
+    int w = display__width();
+    int h = display__height();
+    if (menu->entry_count == 0) {
+        bruce_launcher__draw_centered_text("No entries", (h + BRUCE_LAUNCHER_STATUS_H) / 2,
+                                           BRUCE_LAUNCHER_FONT_SMALL, theme);
+        return;
+    }
+
+    bool compact = w < 180 || h < 180;
+    int large = compact ? 52 : 64;
+    int small = compact ? 28 : 36;
+    int content_h = h - BRUCE_LAUNCHER_STATUS_H;
+    int cy = BRUCE_LAUNCHER_STATUS_H + content_h * 2 / 5;
+    int previous = (selected + menu->entry_count - 1) % menu->entry_count;
+    int next = (selected + 1) % menu->entry_count;
+
+    if (menu->entry_count > 1) {
+        bruce_launcher__draw_entry_icon(&menu->entries[previous], w / 7, cy, small, theme->sec, theme);
+        bruce_launcher__draw_entry_icon(&menu->entries[next], w - w / 7, cy, small, theme->sec, theme);
+    }
+    bruce_launcher__draw_entry_icon(&menu->entries[selected], w / 2, cy, large, theme->pri, theme);
+
+    int font_size = compact ? BRUCE_LAUNCHER_FONT_SMALL : bruce_launcher__font_size(w);
+    bruce_launcher__draw_centered_text(menu->entries[selected].label, cy + large / 2 + 12,
+                                       font_size, theme);
+}
+
+/* Draw a centered submenu box with up to three visible rows. */
 static void bruce_launcher__draw_options(const bruce_launcher_entry_t *entries, int entry_count,
                                          int selected, const char *title,
                                          const bruce_launcher_theme_t *theme)
@@ -764,10 +887,8 @@ static int bruce_launcher__run_entry(const bruce_launcher_entry_t *entry)
 /* GUI menu runner                                                            */
 /* -------------------------------------------------------------------------- */
 
-/* GUI menu loop: UP/DOWN move the selection, SELECT/Btn-A launches the
- * highlighted item, BACK/Btn-B exits (or returns to the parent submenu). A
- * short initial delay avoids immediately selecting if the button is still held
- * from the previous screen. */
+/* The root is a horizontal carousel. Nested menus are vertical three-row
+ * lists. SELECT/Btn-A opens the highlighted entry and BACK/Btn-B returns. */
 static int bruce_launcher__run_gui_menu(bruce_launcher_menu_t *menu)
 {
     bruce_launcher_theme_t theme;
@@ -790,7 +911,11 @@ static int bruce_launcher__run_gui_menu(bruce_launcher_menu_t *menu)
                 return frame;
             }
             bruce_launcher__draw_main_border(&theme);
-            bruce_launcher__draw_options(menu->entries, menu->entry_count, selected, menu->title, &theme);
+            if (menu->parent == NULL) {
+                bruce_launcher__draw_root_menu(menu, selected, &theme);
+            } else {
+                bruce_launcher__draw_options(menu->entries, menu->entry_count, selected, menu->title, &theme);
+            }
             icon_revision = bruce_launcher__draw_status_icons(&theme);
             frame = display__present();
             if (frame != BRUCE_OK) {
@@ -817,13 +942,19 @@ static int bruce_launcher__run_gui_menu(bruce_launcher_menu_t *menu)
         }
 
         switch (ev.code) {
+            case BRUCE_INPUT_CODE_LEFT:
             case BRUCE_INPUT_CODE_UP:
-                if (selected > 0) {
+                if (menu->parent == NULL && menu->entry_count > 0) {
+                    selected = (selected + menu->entry_count - 1) % menu->entry_count;
+                } else if (selected > 0) {
                     selected--;
                 }
                 break;
+            case BRUCE_INPUT_CODE_RIGHT:
             case BRUCE_INPUT_CODE_DOWN:
-                if (selected + 1 < menu->entry_count) {
+                if (menu->parent == NULL && menu->entry_count > 0) {
+                    selected = (selected + 1) % menu->entry_count;
+                } else if (selected + 1 < menu->entry_count) {
                     selected++;
                 }
                 break;
