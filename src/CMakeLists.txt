@@ -29,6 +29,7 @@ idf_component_register(SRCS
                     "modules/bruce_launcher/bruce_launcher_app.c"
                     "modules/bruce_launcher/bruce_launcher_icons.c"
                     "modules/bruce_launcher/bruce_launcher_menu.c"
+                    "modules/bnu/bnu_app.c"
                     "modules/bluetooth/bluetooth_app.c"
                     "modules/bluetooth_hid/bluetooth_hid_app.c"
                     "modules/filemanager/filemanager_app.c"
@@ -47,6 +48,7 @@ idf_component_register(SRCS
                     "modules/loaders/js/wifi_js.c"
                     "modules/selftest/app_runner_test.c"
                     "modules/selftest/bluetooth_test.c"
+                    "modules/selftest/bnu_test.c"
                     "modules/selftest/config_test.c"
                     "modules/selftest/dialog_test.c"
                     "modules/selftest/device_test.c"
@@ -122,6 +124,11 @@ target_include_directories(bruce_sdk_builtin_launcher_check PRIVATE
 # The launcher module legitimately uses the third-party espressif/cjson
 # component API; the core_sdk-only check is about rejecting Core-private headers,
 # not component dependencies.
+
+add_library(bruce_sdk_builtin_bnu_check OBJECT "modules/bnu/bnu_app.c")
+target_include_directories(bruce_sdk_builtin_bnu_check PRIVATE
+                           "${CMAKE_CURRENT_LIST_DIR}"
+                           "${CMAKE_CURRENT_LIST_DIR}/modules/bnu")
 
 add_library(bruce_sdk_builtin_wifi_check OBJECT "modules/wifi/wifi_app.c")
 target_include_directories(bruce_sdk_builtin_wifi_check PRIVATE

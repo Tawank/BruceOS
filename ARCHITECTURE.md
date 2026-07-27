@@ -369,6 +369,11 @@ routes entered lines to their stdin. Commands containing `--gui` use the normal
 foreground handoff and return to the terminal when they exit. The physical
 serial command loop is the separate `serial_commands` built-in.
 
+The built-in BNU (Bruce is Not Unix) module provides the direct commands
+`pwd`, `cd [directory]`, `ls [path]`, and `free`. BNU keeps a shell working
+directory for relative storage paths; it is independent of libc process cwd.
+`free` reports Core-provided internal RAM and PSRAM heap statistics.
+
 Core owns bounded, task-owned stdio sessions. A session owner may route newly
 created child tasks to the session, drain captured output, and enqueue input.
 The route is inherited atomically during task creation and should be cleared

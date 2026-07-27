@@ -11,6 +11,7 @@
 #include "core_sdk/task.h"
 
 #include "modules/bruce_launcher/bruce_launcher_app.h"
+#include "modules/bnu/bnu_app.h"
 #include "modules/bluetooth/bluetooth_app.h"
 #include "modules/bluetooth_hid/bluetooth_hid_app.h"
 #include "modules/filemanager/filemanager_app.h"
@@ -34,7 +35,7 @@
 #include <string.h>
 #include <strings.h>
 
-#define APP_RUNNER_MAX_APPS 24
+#define APP_RUNNER_MAX_APPS 32
 #define APP_RUNNER_PATH_MAX 160
 #define APP_RUNNER_MAX_LOADERS 12
 #define APP_RUNNER_LOADER_EXTENSION_MAX 16
@@ -99,6 +100,10 @@ void app_runner__register_defaults(void)
     (void)app_runner__register("terminal", terminal_app_main);
     s_apps[s_app_count - 1].gui_default = true;
     (void)app_runner__register("serial_commands", serial_commands_app_main);
+    (void)app_runner__register("pwd", bnu_pwd_app_main);
+    (void)app_runner__register("cd", bnu_cd_app_main);
+    (void)app_runner__register("ls", bnu_ls_app_main);
+    (void)app_runner__register("free", bnu_free_app_main);
     (void)app_runner__register("elf", elf_loader__app_main);
     (void)app_runner__register("js", js_loader__app_main);
     (void)app_runner__register("image", image_app_main);

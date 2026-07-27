@@ -27,7 +27,15 @@ void app_main(void)
     }
     app_runner__register_defaults();
 
-    const char *launcher_args = (display_ok && input_ok) ? "--gui" : "";
+    /* Start a background serial command listener. The loop inside
+     * serial_commands_app_main uses blocking stdio reads (select/getchar with
+     * delays) and yields while waiting, so it does not starve the idle task
+     * and should not trigger the task watchdog. */
+    app_runner__run("serial_commands", NULL, true);
+
+    app_runner__run("launcher", NULL, false);
+
+    const char *launcher_args = (display_ok && input_ok) ? "--gui" : NULL;
     int result = app_runner__run("launcher", launcher_args, false);
 
     if (result < 0) {

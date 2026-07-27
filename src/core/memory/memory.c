@@ -3,6 +3,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+#include "esp_heap_caps.h"
+
 #include "core/task/task.h"
 #include "core_sdk/task.h"
 
@@ -57,4 +59,18 @@ void memory__free(void *ptr)
     task_registry__account_memory(-(int64_t)header->size);
     header->magic = 0;
     free(header);
+}
+
+bruce_result_t memory__get_stats(bruce_memory_stats_t *out_stats)
+{
+    if (out_stats == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    *out_stats = (bruce_memory_stats_t){
+        .internal_total = heap_caps_get_total_size(MALLOC_CAP_INTERNAL),
+        .internal_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+        .internal_largest_block = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+        .psram_total = heap_caps_get_total_size(MALLOC_CAP_SPIRAM),
+        .psram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+        .psram_largest_block = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM),
+    };
+    return BRUCE_OK;
 }

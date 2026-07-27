@@ -72,6 +72,7 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     /* Memory */
     ESP_ELFSYM_EXPORT(memory__malloc),
     ESP_ELFSYM_EXPORT(memory__free),
+    ESP_ELFSYM_EXPORT(memory__get_stats),
 
     /* Permission (introspection only; protected APIs check internally) */
     ESP_ELFSYM_EXPORT(permission__check),

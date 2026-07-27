@@ -247,30 +247,36 @@ static int stdio__stream_write(void *cookie, const char *buffer, int size)
     return size;
 }
 
-void stdio__task_attach(bruce_stdio_session_t session, FILE **out_input, FILE **out_output)
+void stdio__task_attach(bruce_stdio_session_t session, FILE **out_input, FILE **out_output, FILE **out_error)
 {
     if (out_input != NULL) *out_input = NULL;
     if (out_output != NULL) *out_output = NULL;
+    if (out_error != NULL) *out_error = NULL;
     if (session == BRUCE_STDIO_SESSION_INVALID) return;
     FILE *input = funopen((void *)(uintptr_t)session, stdio__stream_read, NULL, NULL, NULL);
     FILE *output = funopen((void *)(uintptr_t)session, NULL, stdio__stream_write, NULL, NULL);
-    if (input == NULL || output == NULL) {
-        if (input != NULL) fclose(input);
-        if (output != NULL) fclose(output);
+    FILE *error = funopen((void *)(uintptr_t)session, NULL, stdio__stream_write, NULL, NULL);
+    if (input == NULL || output == NULL || error == NULL) {
         return;
     }
     setvbuf(output, NULL, _IONBF, 0);
+    setvbuf(error, NULL, _IONBF, 0);
     stdin = input;
     stdout = output;
-    stderr = output;
+    stderr = error;
     if (out_input != NULL) *out_input = input;
     if (out_output != NULL) *out_output = output;
+    if (out_error != NULL) *out_error = error;
 }
 
-void stdio__task_detach(FILE *input, FILE *output)
+void stdio__task_detach(FILE *input, FILE *output, FILE *error)
 {
-    if (output != NULL) fclose(output);
-    if (input != NULL) fclose(input);
+    (void)input;
+    (void)output;
+    (void)error;
+    /* funopen() adds these streams to the task's Newlib reentrancy state.
+     * FreeRTOS reclaims that state after vTaskDelete(), so closing here would
+     * make the idle task close the same stream and its lock a second time. */
 }
 
 bruce_result_t bruce_stdio_read(void *buffer, size_t capacity, uint32_t timeout_ms, size_t *out_size)

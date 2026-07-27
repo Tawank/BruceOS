@@ -330,6 +330,7 @@ static void task__trampoline(void *arg)
     task__record_t *record = (task__record_t *)arg;
     FILE *stdio_input = NULL;
     FILE *stdio_output = NULL;
+    FILE *stdio_error = NULL;
 
     /* The record was created in BRUCE_TASK_STARTING; this is the first thing
      * the new task does once FreeRTOS actually schedules it, and still runs
@@ -344,7 +345,7 @@ static void task__trampoline(void *arg)
     }
     task__unlock();
 
-    stdio__task_attach(record->stdio_session, &stdio_input, &stdio_output);
+    stdio__task_attach(record->stdio_session, &stdio_input, &stdio_output, &stdio_error);
 
     if (record->task_entry != NULL) {
         record->task_entry(record->task_entry_context);
@@ -352,7 +353,7 @@ static void task__trampoline(void *arg)
         (void)record->entry(record->argc, record->argv);
     }
 
-    stdio__task_detach(stdio_input, stdio_output);
+    stdio__task_detach(stdio_input, stdio_output, stdio_error);
 
     task__lock();
     task__teardown_locked(record);
