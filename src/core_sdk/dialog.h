@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #include "core_sdk/result.h"
 #include "core_sdk/task.h"
@@ -24,6 +25,9 @@ typedef struct {
     int padding_bottom;
     int padding_left;
     bool render_borders;
+    int text_size;
+    uint16_t background_color;
+    uint16_t text_color;
 } bruce_dialog_render_params_t;
 
 /* Dialog APIs return BRUCE_OK or BRUCE_ERR_CANCELLED, BRUCE_ERR_BUSY,
@@ -32,7 +36,9 @@ typedef struct {
 bruce_result_t dialog__message(bruce_dialog_kind_t kind, const char *title, const char *message);
 /* `render_params` only affects GUI rendering. NULL uses the full display with
  * the standard title and footer bars. Padding limits the choice viewport, and
- * `render_borders=false` renders a plain title without those bars. */
+ * `render_borders=false` renders a plain size-1 title without those bars.
+ * `text_size` and the colors style the choices; selected rows invert the two
+ * colors. */
 bruce_result_t dialog__choice(const char *title, const char *message, const bruce_dialog_choice_t *choices,
                                size_t choice_count, size_t *out_selected,
                                const bruce_dialog_render_params_t *render_params);

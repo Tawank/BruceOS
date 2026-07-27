@@ -54,6 +54,11 @@ static void bruce_launcher__get_theme(bruce_launcher_theme_t *theme)
     }
 }
 
+static int bruce_launcher__submenu_font_size(void)
+{
+    return display__width() >= 200 ? BRUCE_LAUNCHER_FONT_MEDIUM : BRUCE_LAUNCHER_FONT_SMALL;
+}
+
 static uint32_t bruce_launcher__draw_status_bar(const bruce_launcher_theme_t *theme)
 {
     bruce_status_icon_t icons[BRUCE_STATUS_ICON_MAX];
@@ -510,6 +515,9 @@ static int bruce_launcher__run_gui_menu(bruce_launcher_menu_t *menu)
             .padding_bottom = BRUCE_LAUNCHER_BORDER_PAD + 1,
             .padding_left = BRUCE_LAUNCHER_BORDER_PAD + 1,
             .render_borders = false,
+            .text_size = bruce_launcher__submenu_font_size(),
+            .background_color = theme.bg,
+            .text_color = theme.pri,
         };
 
         (void)runtime__delay(300);

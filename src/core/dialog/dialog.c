@@ -332,14 +332,22 @@ static bruce_result_t dialog__gui_choice(const char *title, const char *message,
     bool render_borders = render_params == NULL || render_params->render_borders;
     int viewport_w = right - left;
     int viewport_h = bottom - top;
+    int text_size = render_params != NULL && render_params->text_size > 0
+                        ? render_params->text_size
+                        : DIALOG__TEXT_SIZE;
+    bruce_display_color_t background_color =
+        render_params != NULL ? render_params->background_color : BRUCE_COLOR_NAVY;
+    bruce_display_color_t text_color =
+        render_params != NULL ? render_params->text_color : BRUCE_COLOR_WHITE;
+    int row_h = DIALOG__CHAR_H * text_size + 2;
     int title_h = render_borders || (title != NULL && title[0] != '\0') ? DIALOG__CHAR_H + 4 : 0;
     int footer_h = render_borders ? DIALOG__CHAR_H + 4 : 0;
     int message_h = (message != NULL && message[0] != '\0') ? (DIALOG__CHAR_H + 2) : 0;
     int usable_h = viewport_h - title_h - message_h - footer_h;
-    if (usable_h < DIALOG__CHAR_H + 2) {
+    if (usable_h < row_h) {
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
-    int items_per_page = usable_h / (DIALOG__CHAR_H + 2);
+    int items_per_page = usable_h / row_h;
 
     for (;;) {
         bruce_result_t frame_result = display__begin_frame();
@@ -355,12 +363,12 @@ static bruce_result_t dialog__gui_choice(const char *title, const char *message,
             first_visible = selected - items_per_page + 1;
         }
 
-        display__fill_rect(left, top, viewport_w, viewport_h, BRUCE_COLOR_NAVY);
+        display__fill_rect(left, top, viewport_w, viewport_h, background_color);
         if (title_h > 0) {
             if (render_borders) {
                 display__fill_rect(left, top, viewport_w, title_h, BRUCE_COLOR_BLUE);
             }
-            display__set_text_color(BRUCE_COLOR_WHITE);
+            display__set_text_color(text_color);
             display__set_text_size(DIALOG__TEXT_SIZE);
             display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
             display__set_cursor(left + DIALOG__MARGIN, top + DIALOG__MARGIN);
@@ -368,7 +376,7 @@ static bruce_result_t dialog__gui_choice(const char *title, const char *message,
         }
 
         if (message_h > 0) {
-            display__set_text_color(BRUCE_COLOR_WHITE);
+            display__set_text_color(text_color);
             display__set_text_size(DIALOG__TEXT_SIZE);
             display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
             display__set_cursor(left + DIALOG__MARGIN, top + title_h + 1);
@@ -382,14 +390,14 @@ static bruce_result_t dialog__gui_choice(const char *title, const char *message,
         }
 
         for (int i = first_visible; i <= last_visible; ++i) {
-            int y = list_y + (i - first_visible) * (DIALOG__CHAR_H + 2);
+            int y = list_y + (i - first_visible) * row_h;
             if (i == selected) {
-                display__fill_rect(left, y, viewport_w, DIALOG__CHAR_H + 2, BRUCE_COLOR_WHITE);
-                display__set_text_color(BRUCE_COLOR_BLACK);
+                display__fill_rect(left, y, viewport_w, row_h, text_color);
+                display__set_text_color(background_color);
             } else {
-                display__set_text_color(BRUCE_COLOR_WHITE);
+                display__set_text_color(text_color);
             }
-            display__set_text_size(DIALOG__TEXT_SIZE);
+            display__set_text_size(text_size);
             display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
             display__set_cursor(left + DIALOG__MARGIN, y + 1);
             display__print(choices[i].label != NULL ? choices[i].label : "");
