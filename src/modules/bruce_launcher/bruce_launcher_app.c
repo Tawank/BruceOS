@@ -622,9 +622,9 @@ static void bruce_launcher__draw_root_menu(const bruce_launcher_menu_t *menu, in
         return;
     }
 
-    bool compact = w < 180 || h < 180;
-    int large = compact ? 52 : 64;
-    int small = compact ? 28 : 36;
+    bool narrow = w < 180;
+    int large = narrow ? 52 : 64;
+    int small = narrow ? 28 : 36;
     int content_h = h - BRUCE_LAUNCHER_STATUS_H;
     int cy = BRUCE_LAUNCHER_STATUS_H + content_h * 2 / 5;
     int previous = (selected + menu->entry_count - 1) % menu->entry_count;
@@ -636,7 +636,7 @@ static void bruce_launcher__draw_root_menu(const bruce_launcher_menu_t *menu, in
     }
     bruce_launcher__draw_entry_icon(&menu->entries[selected], w / 2, cy, large, theme->pri);
 
-    int font_size = compact ? BRUCE_LAUNCHER_FONT_SMALL : bruce_launcher__font_size(w);
+    int font_size = (narrow || h < 180) ? BRUCE_LAUNCHER_FONT_SMALL : bruce_launcher__font_size(w);
     bruce_launcher__draw_centered_text(menu->entries[selected].label, cy + large / 2 + 12,
                                        font_size, theme);
 }
