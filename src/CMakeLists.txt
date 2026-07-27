@@ -25,7 +25,9 @@ idf_component_register(SRCS
                     "core/tcp/tcp.c"
                      "core/wifi/wifi_common.c"
                      "core/http_server/http_server.c"
-                    "modules/bruce_launcher/bruce_launcher_app.c"
+                     "modules/bruce_launcher/bruce_launcher_app.c"
+                     "modules/bruce_launcher/bruce_launcher_icons.c"
+                     "modules/bruce_launcher/bruce_launcher_menu.c"
                     "modules/bluetooth/bluetooth_app.c"
                     "modules/bluetooth_hid/bluetooth_hid_app.c"
                     "modules/filemanager/filemanager_app.c"
@@ -104,7 +106,10 @@ idf_component_register(SRCS
 # These compile the real built-in module sources against the exported
 # core_sdk/ include namespace.  Built-in source must include only
 # "core_sdk/..." headers; Core-private includes are rejected by source review.
-add_library(bruce_sdk_builtin_launcher_check OBJECT "modules/bruce_launcher/bruce_launcher_app.c")
+add_library(bruce_sdk_builtin_launcher_check OBJECT
+            "modules/bruce_launcher/bruce_launcher_app.c"
+            "modules/bruce_launcher/bruce_launcher_icons.c"
+            "modules/bruce_launcher/bruce_launcher_menu.c")
 target_include_directories(bruce_sdk_builtin_launcher_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/bruce_launcher"
