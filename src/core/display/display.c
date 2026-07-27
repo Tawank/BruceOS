@@ -806,6 +806,46 @@ static void display__draw_circle_helper(int16_t cx, int16_t cy, int16_t r,
     }
 }
 
+enum {
+    DISPLAY__CIRCLE_TOP_LEFT = 1 << 0,
+    DISPLAY__CIRCLE_TOP_RIGHT = 1 << 1,
+    DISPLAY__CIRCLE_BOTTOM_LEFT = 1 << 2,
+    DISPLAY__CIRCLE_BOTTOM_RIGHT = 1 << 3,
+};
+
+static void display__draw_circle_quadrants(int16_t cx, int16_t cy, int16_t r,
+                                            uint8_t quadrants, bruce_display_color_t color)
+{
+    int16_t x = 0;
+    int16_t y = r;
+    int16_t d = 3 - 2 * r;
+    while (x <= y) {
+        if (quadrants & DISPLAY__CIRCLE_TOP_LEFT) {
+            display__set_pixel(cx - x, cy - y, color);
+            display__set_pixel(cx - y, cy - x, color);
+        }
+        if (quadrants & DISPLAY__CIRCLE_TOP_RIGHT) {
+            display__set_pixel(cx + x, cy - y, color);
+            display__set_pixel(cx + y, cy - x, color);
+        }
+        if (quadrants & DISPLAY__CIRCLE_BOTTOM_LEFT) {
+            display__set_pixel(cx - x, cy + y, color);
+            display__set_pixel(cx - y, cy + x, color);
+        }
+        if (quadrants & DISPLAY__CIRCLE_BOTTOM_RIGHT) {
+            display__set_pixel(cx + x, cy + y, color);
+            display__set_pixel(cx + y, cy + x, color);
+        }
+        if (d < 0) {
+            d += 4 * x + 6;
+        } else {
+            d += 4 * (x - y) + 10;
+            y--;
+        }
+        x++;
+    }
+}
+
 static void display__draw_arc_helper(int16_t cx, int16_t cy, int16_t r,
                                       int start_angle, int end_angle,
                                       bruce_display_color_t color)
@@ -1471,7 +1511,7 @@ bruce_result_t display__fill_triangle(int16_t x0, int16_t y0, int16_t x1, int16_
 }
 
 bruce_result_t display__draw_round_rect(int16_t x, int16_t y, int16_t w, int16_t h,
-                                         int16_t r, bruce_display_color_t color)
+                                          int16_t r, bruce_display_color_t color)
 {
     bruce_task_id_t caller = task__current_id();
     display__lock();
@@ -1487,16 +1527,24 @@ bruce_result_t display__draw_round_rect(int16_t x, int16_t y, int16_t w, int16_t
     if (r > max_r) {
         r = max_r;
     }
+    if (r <= 0) {
+        display__draw_line_bresenham(x, y, x + w - 1, y, color);
+        display__draw_line_bresenham(x + w - 1, y, x + w - 1, y + h - 1, color);
+        display__draw_line_bresenham(x + w - 1, y + h - 1, x, y + h - 1, color);
+        display__draw_line_bresenham(x, y + h - 1, x, y, color);
+        display__unlock();
+        return BRUCE_OK;
+    }
     display__draw_line_bresenham(x + r, y, x + w - r - 1, y, color);
     display__draw_line_bresenham(x + r, y + h - 1, x + w - r - 1, y + h - 1, color);
     display__draw_line_bresenham(x, y + r, x, y + h - r - 1, color);
     display__draw_line_bresenham(x + w - 1, y + r, x + w - 1, y + h - r - 1, color);
 
-    /* Four corner arcs approximated by small circles. */
-    display__draw_circle_helper(x + r, y + r, r, color, false);
-    display__draw_circle_helper(x + w - r - 1, y + r, r, color, false);
-    display__draw_circle_helper(x + r, y + h - r - 1, r, color, false);
-    display__draw_circle_helper(x + w - r - 1, y + h - r - 1, r, color, false);
+    display__draw_circle_quadrants(x + r, y + r, r, DISPLAY__CIRCLE_TOP_LEFT, color);
+    display__draw_circle_quadrants(x + w - r - 1, y + r, r, DISPLAY__CIRCLE_TOP_RIGHT, color);
+    display__draw_circle_quadrants(x + r, y + h - r - 1, r, DISPLAY__CIRCLE_BOTTOM_LEFT, color);
+    display__draw_circle_quadrants(x + w - r - 1, y + h - r - 1, r,
+                                   DISPLAY__CIRCLE_BOTTOM_RIGHT, color);
     display__unlock();
     return BRUCE_OK;
 }

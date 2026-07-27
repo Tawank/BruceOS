@@ -21,6 +21,7 @@ bool selftest__run_display_compositor_case(void)
     if (display__fill_screen(BRUCE_COLOR_BLACK) != BRUCE_OK ||
         display__draw_pixel(0, 0, BRUCE_COLOR_GREEN) != BRUCE_OK ||
         display__draw_arc(10, 10, 5, 0, 180, BRUCE_COLOR_YELLOW) != BRUCE_OK ||
+        display__draw_round_rect(20, 20, 20, 12, 3, BRUCE_COLOR_CYAN) != BRUCE_OK ||
         display__draw_arc(10, 10, -1, 0, 180, BRUCE_COLOR_YELLOW) != BRUCE_ERR_INVALID_ARGUMENT) {
         return false;
     }
@@ -34,6 +35,11 @@ bool selftest__run_display_compositor_case(void)
         display__test_read_pixel(10, 5, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_YELLOW ||
         display__test_read_pixel(15, 10, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_BLACK) {
         printf("[selftest] display/compositor: FAIL, arc geometry\n");
+        return false;
+    }
+    if (display__test_read_pixel(23, 20, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_CYAN ||
+        display__test_read_pixel(26, 23, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_BLACK) {
+        printf("[selftest] display/compositor: FAIL, rounded rectangle corners\n");
         return false;
     }
     if (display__present() != BRUCE_OK) {

@@ -34,6 +34,8 @@
 #define BRUCE_LAUNCHER_SUBMENU_VISIBLE 3
 #define BRUCE_LAUNCHER_FONT_SMALL 1
 #define BRUCE_LAUNCHER_FONT_MEDIUM 2
+#define BRUCE_LAUNCHER_FONT_ADVANCE 6
+#define BRUCE_LAUNCHER_FONT_HEIGHT 8
 #define BRUCE_LAUNCHER_MENU_MARGIN_X_NUM 1
 #define BRUCE_LAUNCHER_MENU_MARGIN_X_DEN 10
 #define BRUCE_LAUNCHER_MENU_WIDTH_NUM 8
@@ -468,7 +470,7 @@ static void bruce_launcher__draw_main_border(const bruce_launcher_theme_t *theme
 static void bruce_launcher__draw_centered_text(const char *text, int y, int font_size,
                                                 const bruce_launcher_theme_t *theme)
 {
-    int text_w = (int)strlen(text) * 8 * font_size;
+    int text_w = (int)strlen(text) * BRUCE_LAUNCHER_FONT_ADVANCE * font_size;
     display__set_text_size(font_size);
     display__set_text_color(theme->pri);
     display__set_text_bg_color(theme->bg);
@@ -636,9 +638,8 @@ static void bruce_launcher__draw_root_menu(const bruce_launcher_menu_t *menu, in
     }
     bruce_launcher__draw_entry_icon(&menu->entries[selected], w / 2, cy, large, theme->pri);
 
-    int font_size = (narrow || h < 180) ? BRUCE_LAUNCHER_FONT_SMALL : bruce_launcher__font_size(w);
     bruce_launcher__draw_centered_text(menu->entries[selected].label, cy + large / 2 + 12,
-                                       font_size, theme);
+                                       BRUCE_LAUNCHER_FONT_MEDIUM, theme);
 }
 
 /* Draw a centered submenu box with up to three visible rows. */
@@ -649,8 +650,8 @@ static void bruce_launcher__draw_options(const bruce_launcher_entry_t *entries, 
     int w = display__width();
     int h = display__height();
     int font_size = bruce_launcher__font_size(w);
-    int char_w = 8 * font_size;
-    int char_h = 16 * font_size;
+    int char_w = BRUCE_LAUNCHER_FONT_ADVANCE * font_size;
+    int char_h = BRUCE_LAUNCHER_FONT_HEIGHT * font_size;
     int line_h = char_h + 2;
 
     int box_x = w * BRUCE_LAUNCHER_MENU_MARGIN_X_NUM / BRUCE_LAUNCHER_MENU_MARGIN_X_DEN;
@@ -733,7 +734,7 @@ static void bruce_launcher__draw_options(const bruce_launcher_entry_t *entries, 
         }
 
         display__set_text_size(font_size);
-        display__set_cursor(box_x + 5, y + 2);
+        display__set_cursor(box_x + 5, y + 1);
 
         char text[BRUCE_LAUNCHER_LABEL_MAX + 4];
         snprintf(text, sizeof(text), "%c%s", is_selected ? '>' : ' ', label);
