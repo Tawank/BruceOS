@@ -43,7 +43,7 @@
 /* Default launcher configuration written when /launcher.json is missing. */
 static const char *BRUCE_LAUNCHER_DEFAULT_JSON =
     "{\n"
-    "  \"wifi\": {\n"
+    "  \"WiFi\": {\n"
     "    \"Connect to Wifi\": \"wifi connect\",\n"
     "    \"Start WiFi AP\": \"wifi ap start\",\n"
     "    \"Turn Off WiFi\": \"wifi disconnect\",\n"
