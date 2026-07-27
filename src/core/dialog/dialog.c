@@ -306,7 +306,7 @@ static bruce_result_t dialog__gui_choice(
     uint16_t pri, sec, bg;
     dialog__get_theme_colors(&pri, &sec, &bg);
     bruce_display_color_t background_color = render_params != NULL ? render_params->background_color : bg;
-    bruce_display_color_t text_color = render_params != NULL ? render_params->text_color : BRUCE_COLOR_WHITE;
+    bruce_display_color_t text_color = render_params != NULL ? render_params->text_color : pri;
     int row_h = DIALOG__CHAR_H * text_size + 2;
     int title_h = render_borders || (title != NULL && title[0] != '\0') ? DIALOG__CHAR_H + 4 : 0;
     int footer_h = render_borders ? DIALOG__CHAR_H + 4 : 0;
@@ -356,7 +356,7 @@ static bruce_result_t dialog__gui_choice(
                 display__set_text_color(text_color);
             }
             display__set_text_size(text_size);
-            display__set_text_bg_color(background_color);
+            display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
             display__set_cursor(left + DIALOG__MARGIN, y + 1);
             display__print(choices[i].label != NULL ? choices[i].label : "");
         }
