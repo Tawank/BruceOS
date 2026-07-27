@@ -10,7 +10,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
-#include "sdkconfig.h"
 
 #include "core/task/task.h"
 #include "core_sdk/result.h"
