@@ -2,6 +2,8 @@
 #include "native_helpers_js.h"
 #include "user_classes_js.h"
 
+#include <stdlib.h>
+
 #include "core_sdk/dialog.h"
 #include "core_sdk/storage.h"
 

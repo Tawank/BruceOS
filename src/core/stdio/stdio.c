@@ -10,6 +10,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "sdkconfig.h"
 
 #include "core/task/task.h"
 #include "core_sdk/result.h"
@@ -37,6 +38,19 @@ static SemaphoreHandle_t s_lock;
 static portMUX_TYPE s_init_mux = portMUX_INITIALIZER_UNLOCKED;
 static stdio__session_t s_sessions[STDIO__MAX_SESSIONS];
 static bruce_stdio_session_t s_next_id = 1;
+static bool s_original_stdio_saved = false;
+static FILE *s_original_stdin = NULL;
+static FILE *s_original_stdout = NULL;
+static FILE *s_original_stderr = NULL;
+
+#if CONFIG_LIBC_PICOLIBC_NEWLIB_COMPATIBILITY
+extern __thread FILE *tls_stdin;
+extern __thread FILE *tls_stdout;
+extern __thread FILE *tls_stderr;
+static FILE *s_original_tls_stdin = NULL;
+static FILE *s_original_tls_stdout = NULL;
+static FILE *s_original_tls_stderr = NULL;
+#endif
 
 static void stdio__ensure_init(void) {
     if (s_lock != NULL) return;
@@ -251,21 +265,52 @@ void stdio__task_attach(
     if (input == NULL || output == NULL || error == NULL) { return; }
     setvbuf(output, NULL, _IONBF, 0);
     setvbuf(error, NULL, _IONBF, 0);
+    if (!s_original_stdio_saved) {
+        s_original_stdin = stdin;
+        s_original_stdout = stdout;
+        s_original_stderr = stderr;
+#if CONFIG_LIBC_PICOLIBC_NEWLIB_COMPATIBILITY
+        s_original_tls_stdin = tls_stdin;
+        s_original_tls_stdout = tls_stdout;
+        s_original_tls_stderr = tls_stderr;
+#endif
+        s_original_stdio_saved = true;
+    }
     stdin = input;
     stdout = output;
     stderr = error;
+#if CONFIG_LIBC_PICOLIBC_NEWLIB_COMPATIBILITY
+    tls_stdin = input;
+    tls_stdout = output;
+    tls_stderr = error;
+#endif
     if (out_input != NULL) *out_input = input;
     if (out_output != NULL) *out_output = output;
     if (out_error != NULL) *out_error = error;
 }
 
 void stdio__task_detach(FILE *input, FILE *output, FILE *error) {
-    (void)input;
-    (void)output;
-    (void)error;
-    /* funopen() adds these streams to the task's Newlib reentrancy state.
-     * FreeRTOS reclaims that state after vTaskDelete(), so closing here would
-     * make the idle task close the same stream and its lock a second time. */
+    if (input != NULL) {
+        if (stdin == input) stdin = s_original_stdin;
+#if CONFIG_LIBC_PICOLIBC_NEWLIB_COMPATIBILITY
+        if (tls_stdin == input) tls_stdin = s_original_tls_stdin;
+#endif
+        fclose(input);
+    }
+    if (output != NULL) {
+        if (stdout == output) stdout = s_original_stdout;
+#if CONFIG_LIBC_PICOLIBC_NEWLIB_COMPATIBILITY
+        if (tls_stdout == output) tls_stdout = s_original_tls_stdout;
+#endif
+        fclose(output);
+    }
+    if (error != NULL) {
+        if (stderr == error) stderr = s_original_stderr;
+#if CONFIG_LIBC_PICOLIBC_NEWLIB_COMPATIBILITY
+        if (tls_stderr == error) tls_stderr = s_original_tls_stderr;
+#endif
+        fclose(error);
+    }
 }
 
 bruce_result_t bruce_stdio_read(void *buffer, size_t capacity, uint32_t timeout_ms, size_t *out_size) {
@@ -310,20 +355,12 @@ int bruce_stdio_read_line(char *buffer, size_t buffer_size, bool mask_input) {
             }
             c = (unsigned char)byte;
         } else {
-            fd_set rfds;
-            FD_ZERO(&rfds);
-            FD_SET(STDIN_FILENO, &rfds);
-            struct timeval tv = {.tv_sec = 0, .tv_usec = 100000};
-            int ready = select(STDIN_FILENO + 1, &rfds, NULL, NULL, &tv);
-            c = getchar();
-            if (c == EOF) {
-                if (ready > 0) {
-                    eof = true;
-                    break;
-                }
-                vTaskDelay(pdMS_TO_TICKS(10));
+            int ch = getchar();
+            if (ch == EOF) {
+                vTaskDelay(pdMS_TO_TICKS(50));
                 continue;
             }
+            c = ch;
         }
         if (c == '\n') break;
         if (c == '\r') continue;

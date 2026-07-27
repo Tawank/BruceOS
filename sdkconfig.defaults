@@ -17,10 +17,12 @@ CONFIG_ESP_SYSTEM_MEMPROT_FEATURE=n
 CONFIG_ESP_SYSTEM_MEMPROT_FEATURE_LOCK=n
 CONFIG_ESP_SYSTEM_MEMPROT_FEATURE_VIA_TEE=n
 
-# Use Newlib instead of Picolibc so the espressif/elf_loader newlib symbol
-# table compiles with the ESP-IDF v6 toolchain.
-CONFIG_LIBC_NEWLIB=y
-CONFIG_LIBC_PICOLIBC=n
+# Use Picolibc with newlib API compatibility (provides funopen, etc.).
+# The espressif/elf_loader libc symbol table is disabled and the patched
+# symbol file guards newlib-only symbols behind !__PICOLIBC__.
+CONFIG_LIBC_PICOLIBC=y
+CONFIG_LIBC_NEWLIB=n
+CONFIG_LIBC_PICOLIBC_NEWLIB_COMPATIBILITY=y
 
 # The default espressif/elf_loader symbol tables reference newlib symbols that
 # are not exposed by the ESP-IDF v6 toolchain; the Bruce loader supplies its own
