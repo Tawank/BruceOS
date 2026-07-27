@@ -5,6 +5,7 @@ idf_component_register(SRCS
                     "core/bluetooth/bluetooth_hid.c"
                     "core/config/config.c"
                     "core/dialog/dialog.c"
+                    "core/device/device.c"
                     "core/display/display.c"
                     "core/gpio/gpio.c"
                     "core/http/http.c"
@@ -48,6 +49,7 @@ idf_component_register(SRCS
                     "modules/selftest/bluetooth_test.c"
                     "modules/selftest/config_test.c"
                     "modules/selftest/dialog_test.c"
+                    "modules/selftest/device_test.c"
                     "modules/selftest/display_test.c"
                     "modules/selftest/gpio_bus_test.c"
                     "modules/selftest/fake_elf.c"
@@ -77,6 +79,7 @@ idf_component_register(SRCS
                     bt
                     esp_event
                     driver
+                    esp_adc
                     esp_driver_gpio
                     esp_driver_i2c
                     esp_driver_ledc

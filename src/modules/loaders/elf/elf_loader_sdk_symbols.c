@@ -21,6 +21,7 @@
 #include "core_sdk/bluetooth.h"
 #include "core_sdk/bluetooth_hid.h"
 #include "core_sdk/dialog.h"
+#include "core_sdk/device.h"
 #include "core_sdk/display.h"
 #include "core_sdk/gpio.h"
 #include "core_sdk/i2c.h"
@@ -56,6 +57,11 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(task__wait),
     ESP_ELFSYM_EXPORT(task__snapshot),
     ESP_ELFSYM_EXPORT(task__list),
+
+    /* Device state */
+    ESP_ELFSYM_EXPORT(device__get_battery),
+    ESP_ELFSYM_EXPORT(device__get_time),
+    ESP_ELFSYM_EXPORT(device__get_date),
 
     /* AppRunner / loader */
     ESP_ELFSYM_EXPORT(app_runner__run_path),

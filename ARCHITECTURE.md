@@ -259,6 +259,16 @@ requested duration regardless of state.  Both are Core APIs; they hide FreeRTOS
 from apps. `runtime__now()` returns monotonic milliseconds since boot for
 elapsed-time measurement and must not be interpreted as wall-clock time.
 
+### Device state
+
+`device__get_battery()` returns a battery percentage from 0 through 100. The
+current Cardputer and StickC Plus2 backends estimate charge from calibrated ADC
+voltage; unsupported hardware returns `BRUCE_ERR_UNSUPPORTED` rather than a fake
+percentage. `device__get_time()` and `device__get_date()` return configured local
+wall time and fail with `BRUCE_ERR_INVALID_STATE` until the system clock contains
+a valid date. These APIs expose state only; launcher status-bar rendering remains
+module-owned.
+
 ## ELF contract
 
 Every ELF contains a non-loadable `.bruce.manifest` section.  The built-in ELF

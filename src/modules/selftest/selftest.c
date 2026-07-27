@@ -19,6 +19,7 @@
 #include "image_test.h"
 #include "ir_test.h"
 #include "dialog_test.h"
+#include "device_test.h"
 #include "display_test.h"
 #include "gpio_bus_test.h"
 #include "notification_test.h"
@@ -45,6 +46,7 @@ int selftest_app_main(int argc, char **argv)
     RUN_SELFTEST(selftest__run_task_normal_exit_case);
     RUN_SELFTEST(selftest__run_task_killed_case);
     RUN_SELFTEST(selftest__run_runtime_now_case);
+    RUN_SELFTEST(selftest__run_device_state_case);
     RUN_SELFTEST(selftest__run_apprunner_registration_case);
     RUN_SELFTEST(selftest__run_apprunner_args_case);
     RUN_SELFTEST(selftest__run_apprunner_resolution_case);

@@ -9,6 +9,7 @@
 #include "bruce_launcher_menu.h"
 #include "core_sdk/app_runner.h"
 #include "core_sdk/config.h"
+#include "core_sdk/device.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/display.h"
 #include "core_sdk/input.h"
@@ -16,8 +17,6 @@
 #include "core_sdk/result.h"
 #include "core_sdk/status_icon.h"
 #include "core_sdk/task.h"
-
-#define BRUCE_LAUNCHER_VERSION_TEXT "BRUCE"
 
 /* MainMenu visual-style constants. */
 #define BRUCE_LAUNCHER_BORDER_PAD 5
@@ -34,6 +33,8 @@
 #define BRUCE_LAUNCHER_TASKS_APP "__tasks"
 #define BRUCE_LAUNCHER_SLIDE_DURATION_MS 160
 #define BRUCE_LAUNCHER_EASING_SCALE 1000
+#define BRUCE_LAUNCHER_STATUS_REFRESH_MS 1000
+#define BRUCE_LAUNCHER_STATUS_TEXT_Y 11
 
 /* Theme colors cached from bruce.json. */
 typedef struct {
@@ -66,7 +67,7 @@ static int bruce_launcher__font_size(int w)
     return (w >= 200) ? BRUCE_LAUNCHER_FONT_MEDIUM : BRUCE_LAUNCHER_FONT_SMALL;
 }
 
-static uint32_t bruce_launcher__draw_status_icons(const bruce_launcher_theme_t *theme)
+static uint32_t bruce_launcher__draw_status_bar(const bruce_launcher_theme_t *theme)
 {
     bruce_status_icon_t icons[BRUCE_STATUS_ICON_MAX];
     size_t count = 0;
@@ -75,13 +76,57 @@ static uint32_t bruce_launcher__draw_status_icons(const bruce_launcher_theme_t *
         return revision;
     }
     int w = display__width();
-    display__fill_rect(55, 6, w - 63, BRUCE_LAUNCHER_STATUS_H - 7, theme->bg);
+    display__fill_rect(BRUCE_LAUNCHER_BORDER_PAD + 1, 6,
+                       w - 2 * BRUCE_LAUNCHER_BORDER_PAD - 2,
+                       BRUCE_LAUNCHER_STATUS_H - 7, theme->bg);
+    display__set_text_color(theme->pri);
     display__set_text_bg_color(theme->bg);
-    int x = w - BRUCE_LAUNCHER_BORDER_PAD - 2;
+    display__set_text_size(BRUCE_LAUNCHER_FONT_SMALL);
+
+    char clock_text[13] = "--:--:--";
+    bruce_device_time_t time;
+    if (device__get_time(&time) == BRUCE_OK) {
+        bool clock24 = true;
+        (void)config__get_clock24hr(&clock24);
+        int hour = time.hour;
+        if (!clock24) {
+            hour %= 12;
+            if (hour == 0) hour = 12;
+        }
+        snprintf(clock_text, sizeof(clock_text), "%02d:%02d:%02d",
+                 hour, time.minute, time.second);
+    }
+    int clock_x = BRUCE_LAUNCHER_BORDER_PAD + 8;
+    display__set_cursor(clock_x, BRUCE_LAUNCHER_STATUS_TEXT_Y);
+    display__print(clock_text);
+    int left_limit = clock_x + (int)strlen(clock_text) * BRUCE_LAUNCHER_FONT_ADVANCE + 3;
+
+    int x = w - BRUCE_LAUNCHER_BORDER_PAD - 8;
+    int battery = device__get_battery();
+    if (battery >= 0) {
+        int icon_x = x - 14;
+        int icon_y = 11;
+        display__draw_rect(icon_x, icon_y, 11, 9, theme->pri);
+        display__fill_rect(icon_x + 11, icon_y + 2, 3, 5, theme->pri);
+        int fill_width = battery * 7 / 100;
+        if (battery > 0 && fill_width == 0) fill_width = 1;
+        if (fill_width > 0) {
+            display__fill_rect(icon_x + 2, icon_y + 2, fill_width, 5, theme->pri);
+        }
+
+        char battery_text[12];
+        snprintf(battery_text, sizeof(battery_text), "%d%%", battery);
+        int text_width = (int)strlen(battery_text) * BRUCE_LAUNCHER_FONT_ADVANCE;
+        int text_x = icon_x - text_width - 3;
+        display__set_cursor(text_x, BRUCE_LAUNCHER_STATUS_TEXT_Y);
+        display__print(battery_text);
+        x = text_x - 3;
+    }
+
     for (size_t i = count; i > 0; --i) {
         const bruce_status_icon_t *icon = &icons[i - 1];
         x -= icon->width;
-        if (x < 57) break;
+        if (x < left_limit) break;
         display__draw_bitmap((int16_t)x, (int16_t)(7 + (16 - icon->height) / 2), icon->bitmap,
                              icon->width, icon->height, theme->pri);
         x -= 3;
@@ -89,8 +134,7 @@ static uint32_t bruce_launcher__draw_status_icons(const bruce_launcher_theme_t *
     return revision;
 }
 
-/* Draw the main border/status bar: background fill, rounded screen border,
- * horizontal status-line separator, and "BRUCE" text in the top-left corner. */
+/* Draw the main border and horizontal status-line separator. */
 static void bruce_launcher__draw_main_border(const bruce_launcher_theme_t *theme)
 {
     int w = display__width();
@@ -104,12 +148,6 @@ static void bruce_launcher__draw_main_border(const bruce_launcher_theme_t *theme
     display__draw_line(BRUCE_LAUNCHER_BORDER_PAD, BRUCE_LAUNCHER_STATUS_H,
                        w - BRUCE_LAUNCHER_BORDER_PAD, BRUCE_LAUNCHER_STATUS_H, theme->pri);
 
-    display__set_text_color(theme->pri);
-    display__set_text_bg_color(theme->bg);
-    display__set_text_size(BRUCE_LAUNCHER_FONT_SMALL);
-    display__set_cursor(BRUCE_LAUNCHER_BORDER_PAD + 2, 7);
-    display__print(BRUCE_LAUNCHER_VERSION_TEXT);
-    (void)bruce_launcher__draw_status_icons(theme);
 }
 
 static void bruce_launcher__draw_centered_text(const char *text, int y, int font_size,
@@ -148,7 +186,7 @@ static void bruce_launcher__draw_root_menu(const bruce_launcher_menu_t *menu, in
     }
     bruce_launcher__draw_entry_icon(&menu->entries[selected], w / 2, cy, large, theme->pri);
 
-    bruce_launcher__draw_centered_text(menu->entries[selected].label, cy + large / 2 + 12,
+    bruce_launcher__draw_centered_text(menu->entries[selected].label, cy + large / 2 + 10,
                                        BRUCE_LAUNCHER_FONT_MEDIUM, theme);
 }
 
@@ -221,7 +259,7 @@ static void bruce_launcher__draw_root_transition(const bruce_launcher_menu_t *me
     int label_entry = progress < BRUCE_LAUNCHER_EASING_SCALE / 2
                           ? from
                           : bruce_launcher__wrap_index(from + direction, menu->entry_count);
-    bruce_launcher__draw_centered_text(menu->entries[label_entry].label, cy + large / 2 + 12,
+    bruce_launcher__draw_centered_text(menu->entries[label_entry].label, cy + large / 2 + 10,
                                        BRUCE_LAUNCHER_FONT_MEDIUM, theme);
 }
 
@@ -253,7 +291,7 @@ static bruce_result_t bruce_launcher__animate_root_menu(const bruce_launcher_men
 
         bruce_launcher__draw_main_border(theme);
         bruce_launcher__draw_root_transition(menu, from, direction, progress, theme);
-        *icon_revision = bruce_launcher__draw_status_icons(theme);
+        *icon_revision = bruce_launcher__draw_status_bar(theme);
         frame = display__present();
         if (frame != BRUCE_OK) {
             return frame;
@@ -577,6 +615,7 @@ static int bruce_launcher__run_gui_menu(bruce_launcher_menu_t *menu)
     int selected = 0;
     int last_drawn = -1;
     uint32_t icon_revision = UINT32_MAX;
+    uint64_t status_drawn_at = 0;
     for (;;) {
         if (selected != last_drawn) {
             bruce_result_t frame = display__begin_frame();
@@ -593,7 +632,8 @@ static int bruce_launcher__run_gui_menu(bruce_launcher_menu_t *menu)
             } else {
                 bruce_launcher__draw_options(menu->entries, menu->entry_count, selected, menu->title, &theme);
             }
-            icon_revision = bruce_launcher__draw_status_icons(&theme);
+            icon_revision = bruce_launcher__draw_status_bar(&theme);
+            status_drawn_at = runtime__now();
             frame = display__present();
             if (frame != BRUCE_OK) {
                 return frame;
@@ -603,11 +643,14 @@ static int bruce_launcher__run_gui_menu(bruce_launcher_menu_t *menu)
 
         size_t icon_count = 0;
         uint32_t current_revision = 0;
-        if (status_icon__list(NULL, 0, &icon_count, &current_revision) == BRUCE_OK &&
-            current_revision != icon_revision) {
+        uint64_t now = runtime__now();
+        if ((status_icon__list(NULL, 0, &icon_count, &current_revision) == BRUCE_OK &&
+             current_revision != icon_revision) ||
+            now - status_drawn_at >= BRUCE_LAUNCHER_STATUS_REFRESH_MS) {
             bruce_result_t frame = display__begin_frame();
             if (frame == BRUCE_OK) {
-                icon_revision = bruce_launcher__draw_status_icons(&theme);
+                icon_revision = bruce_launcher__draw_status_bar(&theme);
+                status_drawn_at = now;
                 (void)display__present();
             }
         }
