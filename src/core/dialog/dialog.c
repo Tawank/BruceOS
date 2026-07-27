@@ -318,20 +318,28 @@ static bruce_result_t dialog__gui_message(bruce_dialog_kind_t kind, const char *
 
 static bruce_result_t dialog__gui_choice(const char *title, const char *message,
                                          const bruce_dialog_choice_t *choices, size_t choice_count,
-                                         size_t *out_selected)
+                                         size_t *out_selected,
+                                         const bruce_dialog_render_params_t *render_params)
 {
     int selected = 0;
     int first_visible = 0;
     int w = display__width();
     int h = display__height();
-    int title_h = DIALOG__CHAR_H + 4;
-    int footer_h = DIALOG__CHAR_H + 4;
+    int left = render_params != NULL ? render_params->padding_left : 0;
+    int top = render_params != NULL ? render_params->padding_top : 0;
+    int right = w - (render_params != NULL ? render_params->padding_right : 0);
+    int bottom = h - (render_params != NULL ? render_params->padding_bottom : 0);
+    bool render_borders = render_params == NULL || render_params->render_borders;
+    int viewport_w = right - left;
+    int viewport_h = bottom - top;
+    int title_h = render_borders || (title != NULL && title[0] != '\0') ? DIALOG__CHAR_H + 4 : 0;
+    int footer_h = render_borders ? DIALOG__CHAR_H + 4 : 0;
     int message_h = (message != NULL && message[0] != '\0') ? (DIALOG__CHAR_H + 2) : 0;
-    int usable_h = h - title_h - message_h - footer_h;
-    int items_per_page = usable_h / (DIALOG__CHAR_H + 2);
-    if (items_per_page < 1) {
-        items_per_page = 1;
+    int usable_h = viewport_h - title_h - message_h - footer_h;
+    if (usable_h < DIALOG__CHAR_H + 2) {
+        return BRUCE_ERR_INVALID_ARGUMENT;
     }
+    int items_per_page = usable_h / (DIALOG__CHAR_H + 2);
 
     for (;;) {
         bruce_result_t frame_result = display__begin_frame();
@@ -347,18 +355,27 @@ static bruce_result_t dialog__gui_choice(const char *title, const char *message,
             first_visible = selected - items_per_page + 1;
         }
 
-        dialog__gui_clear();
-        dialog__gui_title_bar(title);
+        display__fill_rect(left, top, viewport_w, viewport_h, BRUCE_COLOR_NAVY);
+        if (title_h > 0) {
+            if (render_borders) {
+                display__fill_rect(left, top, viewport_w, title_h, BRUCE_COLOR_BLUE);
+            }
+            display__set_text_color(BRUCE_COLOR_WHITE);
+            display__set_text_size(DIALOG__TEXT_SIZE);
+            display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
+            display__set_cursor(left + DIALOG__MARGIN, top + DIALOG__MARGIN);
+            display__print(title != NULL ? title : "");
+        }
 
         if (message_h > 0) {
             display__set_text_color(BRUCE_COLOR_WHITE);
             display__set_text_size(DIALOG__TEXT_SIZE);
             display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
-            display__set_cursor(DIALOG__MARGIN, title_h + 1);
+            display__set_cursor(left + DIALOG__MARGIN, top + title_h + 1);
             display__print(message);
         }
 
-        int list_y = title_h + message_h;
+        int list_y = top + title_h + message_h;
         int last_visible = first_visible + items_per_page - 1;
         if ((size_t)last_visible >= choice_count) {
             last_visible = (int)choice_count - 1;
@@ -367,18 +384,20 @@ static bruce_result_t dialog__gui_choice(const char *title, const char *message,
         for (int i = first_visible; i <= last_visible; ++i) {
             int y = list_y + (i - first_visible) * (DIALOG__CHAR_H + 2);
             if (i == selected) {
-                display__fill_rect(0, y, w, DIALOG__CHAR_H + 2, BRUCE_COLOR_WHITE);
+                display__fill_rect(left, y, viewport_w, DIALOG__CHAR_H + 2, BRUCE_COLOR_WHITE);
                 display__set_text_color(BRUCE_COLOR_BLACK);
             } else {
                 display__set_text_color(BRUCE_COLOR_WHITE);
             }
             display__set_text_size(DIALOG__TEXT_SIZE);
             display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
-            display__set_cursor(DIALOG__MARGIN, y + 1);
+            display__set_cursor(left + DIALOG__MARGIN, y + 1);
             display__print(choices[i].label != NULL ? choices[i].label : "");
         }
 
-        dialog__gui_footer("");
+        if (render_borders) {
+            display__fill_rect(left, bottom - footer_h, viewport_w, footer_h, BRUCE_COLOR_DARKGREY);
+        }
         frame_result = display__present();
         if (frame_result != BRUCE_OK) {
             return frame_result == BRUCE_ERR_NOT_FOREGROUND ? BRUCE_ERR_CANCELLED : frame_result;
@@ -928,7 +947,7 @@ static bruce_result_t dialog__gui_pick_file(const char *initial_path, const char
 
         size_t out_selected = 0;
         bruce_result_t choice_result =
-            dialog__gui_choice("Pick file", current_path, choices, (size_t)choice_count, &out_selected);
+            dialog__gui_choice("Pick file", current_path, choices, (size_t)choice_count, &out_selected, NULL);
 
         const char *picked = values[out_selected];
         memory__free(values);
@@ -1149,21 +1168,29 @@ bruce_result_t dialog__message(bruce_dialog_kind_t kind, const char *title, cons
 }
 
 bruce_result_t dialog__choice(const char *title, const char *message, const bruce_dialog_choice_t *choices,
-                              size_t choice_count, size_t *out_selected)
+                               size_t choice_count, size_t *out_selected,
+                               const bruce_dialog_render_params_t *render_params)
 {
     if (choices == NULL || choice_count == 0 || out_selected == NULL) {
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
-
     bool gui = dialog__current_task_wants_gui();
     s_last_call_was_gui = gui;
+
+    if (gui && render_params != NULL &&
+        (render_params->padding_top < 0 || render_params->padding_right < 0 ||
+         render_params->padding_bottom < 0 || render_params->padding_left < 0 ||
+         render_params->padding_left + render_params->padding_right >= display__width() ||
+         render_params->padding_top + render_params->padding_bottom >= display__height())) {
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
 
     if (s_test_choice_provider != NULL) {
         return s_test_choice_provider(title, message, choices, choice_count, out_selected);
     }
 
     if (gui) {
-        return dialog__gui_choice(title, message, choices, choice_count, out_selected);
+        return dialog__gui_choice(title, message, choices, choice_count, out_selected, render_params);
     }
     return dialog__term_choice(title, message, choices, choice_count, out_selected);
 }

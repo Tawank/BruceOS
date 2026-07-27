@@ -196,7 +196,7 @@ static bool permission__prompt(const char *file_name, bruce_permission_t permiss
     snprintf(message, sizeof(message), "%s requests %s permission", file_name, permission__name(permission));
 
     size_t selected = 1;
-    bruce_result_t result = dialog__choice("Permission request", message, choices, 2, &selected);
+    bruce_result_t result = dialog__choice("Permission request", message, choices, 2, &selected, NULL);
     *out_answered = result == BRUCE_OK;
     return result == BRUCE_OK && selected == 0;
 }

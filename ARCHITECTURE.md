@@ -412,6 +412,10 @@ for tasks launched with `--gui`, or a terminal choice such as:
 pick: _
 ```
 
+GUI callers may provide render parameters with per-edge padding and optional
+title/footer bars. The choice renderer derives its visible row count from the
+remaining padded viewport; terminal rendering ignores these parameters.
+
 app_runner records the initial `--gui` launch context in task-local storage
 before launch-time permission checks, but leaves the argument in the app’s
 `argv`.  A background serial-monitor-style task decides its own behavior;

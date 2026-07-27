@@ -147,7 +147,7 @@ int filemanager_app_main(int argc, char **argv)
         }
 
         size_t selected = 0;
-        result = dialog__choice("File manager", path, actions, sizeof(actions) / sizeof(actions[0]), &selected);
+        result = dialog__choice("File manager", path, actions, sizeof(actions) / sizeof(actions[0]), &selected, NULL);
         if (result == BRUCE_ERR_CANCELLED || selected == 3) continue;
         if (result != BRUCE_OK) {
             filemanager__show_error("Action", result);

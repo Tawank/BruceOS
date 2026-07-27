@@ -90,7 +90,7 @@ static int nrf24_app__gui(void)
     };
     for (;;) {
         size_t selected = 0;
-        bruce_result_t result = dialog__choice("NRF24", "2.4 GHz radio tools", choices, 4, &selected);
+        bruce_result_t result = dialog__choice("NRF24", "2.4 GHz radio tools", choices, 4, &selected, NULL);
         if (result == BRUCE_ERR_CANCELLED || selected == 3) return 0;
         if (result != BRUCE_OK) return result;
         if (selected == 0) (void)nrf24_app__scan(0, NRF24_APP_SPECTRUM_CHANNELS - 1u,

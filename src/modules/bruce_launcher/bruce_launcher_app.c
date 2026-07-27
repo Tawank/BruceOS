@@ -21,15 +21,9 @@
 /* MainMenu visual-style constants. */
 #define BRUCE_LAUNCHER_BORDER_PAD 5
 #define BRUCE_LAUNCHER_STATUS_H 25
-#define BRUCE_LAUNCHER_SUBMENU_VISIBLE 3
 #define BRUCE_LAUNCHER_FONT_SMALL 1
 #define BRUCE_LAUNCHER_FONT_MEDIUM 2
 #define BRUCE_LAUNCHER_FONT_ADVANCE 6
-#define BRUCE_LAUNCHER_FONT_HEIGHT 8
-#define BRUCE_LAUNCHER_MENU_MARGIN_X_NUM 1
-#define BRUCE_LAUNCHER_MENU_MARGIN_X_DEN 10
-#define BRUCE_LAUNCHER_MENU_WIDTH_NUM 8
-#define BRUCE_LAUNCHER_MENU_WIDTH_DEN 10
 #define BRUCE_LAUNCHER_TASKS_APP "__tasks"
 #define BRUCE_LAUNCHER_SLIDE_DURATION_MS 160
 #define BRUCE_LAUNCHER_EASING_SCALE 1000
@@ -58,13 +52,6 @@ static void bruce_launcher__get_theme(bruce_launcher_theme_t *theme)
     if (config__get_bg_color(&theme->bg) != BRUCE_OK) {
         theme->bg = BRUCE_COLOR_BLACK;
     }
-}
-
-static int bruce_launcher__font_size(int w)
-{
-    /* Use the medium font on wide (landscape) screens, small font on the
-     * 135x240 portrait reference. */
-    return (w >= 200) ? BRUCE_LAUNCHER_FONT_MEDIUM : BRUCE_LAUNCHER_FONT_SMALL;
 }
 
 static uint32_t bruce_launcher__draw_status_bar(const bruce_launcher_theme_t *theme)
@@ -302,107 +289,6 @@ static bruce_result_t bruce_launcher__animate_root_menu(const bruce_launcher_men
     }
 }
 
-/* Draw a centered submenu box with up to three visible rows. */
-static void bruce_launcher__draw_options(const bruce_launcher_entry_t *entries, int entry_count,
-                                         int selected, const char *title,
-                                         const bruce_launcher_theme_t *theme)
-{
-    int w = display__width();
-    int h = display__height();
-    int font_size = bruce_launcher__font_size(w);
-    int char_w = BRUCE_LAUNCHER_FONT_ADVANCE * font_size;
-    int char_h = BRUCE_LAUNCHER_FONT_HEIGHT * font_size;
-    int line_h = char_h + 2;
-
-    int box_x = w * BRUCE_LAUNCHER_MENU_MARGIN_X_NUM / BRUCE_LAUNCHER_MENU_MARGIN_X_DEN;
-    int box_w = w * BRUCE_LAUNCHER_MENU_WIDTH_NUM / BRUCE_LAUNCHER_MENU_WIDTH_DEN;
-
-    /* Fit the menu box inside the screen and cap the visible row count. */
-    int available_h = h - 2 * BRUCE_LAUNCHER_BORDER_PAD - BRUCE_LAUNCHER_STATUS_H - 10;
-    if (available_h < line_h + 10) {
-        available_h = line_h + 10;
-    }
-    int max_visible = (available_h - 10) / line_h;
-    if (max_visible < 1) {
-        max_visible = 1;
-    }
-    if (max_visible > BRUCE_LAUNCHER_SUBMENU_VISIBLE) {
-        max_visible = BRUCE_LAUNCHER_SUBMENU_VISIBLE;
-    }
-
-    int visible = entry_count;
-    if (visible > max_visible) {
-        visible = max_visible;
-    }
-    if (visible < 1) {
-        visible = 1;
-    }
-
-    int box_h = visible * line_h + 10;
-    int box_y = (h - box_h) / 2;
-    if (box_y + box_h > h - BRUCE_LAUNCHER_BORDER_PAD) {
-        box_y = h - BRUCE_LAUNCHER_BORDER_PAD - box_h;
-    }
-    if (box_y < BRUCE_LAUNCHER_STATUS_H + 2) {
-        box_y = BRUCE_LAUNCHER_STATUS_H + 2;
-    }
-
-    int title_y = box_y - char_h - 4;
-    if (title_y >= BRUCE_LAUNCHER_STATUS_H + 2) {
-        bruce_launcher__draw_centered_text(title, title_y, font_size, theme);
-    }
-
-    /* Background box with border. */
-    display__fill_round_rect(box_x, box_y, box_w, box_h, 5, theme->bg);
-    display__draw_round_rect(box_x, box_y, box_w, box_h, 5, theme->pri);
-
-    /* Scroll window so the selection is always visible. */
-    int first = selected - visible / 2;
-    if (first < 0) {
-        first = 0;
-    }
-    if (first > entry_count - visible) {
-        first = entry_count - visible;
-    }
-    if (first < 0) {
-        first = 0;
-    }
-
-    int max_chars = (box_w - 10) / char_w - 1;
-    if (max_chars < 1) {
-        max_chars = 1;
-    }
-
-    for (int i = first; i < first + visible && i < entry_count; ++i) {
-        int y = box_y + 5 + (i - first) * line_h;
-        bool is_selected = (i == selected);
-
-        char label[BRUCE_LAUNCHER_LABEL_MAX];
-        if ((int)strlen(entries[i].label) > max_chars) {
-            snprintf(label, sizeof(label), "%.*s...", max_chars - 3, entries[i].label);
-        } else {
-            snprintf(label, sizeof(label), "%s", entries[i].label);
-        }
-
-        if (is_selected) {
-            display__fill_round_rect(box_x + 2, y + 1, box_w - 4, line_h - 2, 3, theme->pri);
-            display__set_text_color(theme->bg);
-            display__set_text_bg_color(theme->pri);
-        } else {
-            display__set_text_color(theme->pri);
-            display__set_text_bg_color(theme->bg);
-        }
-
-        display__set_text_size(font_size);
-        display__set_cursor(box_x + 5, y + 1);
-
-        char text[BRUCE_LAUNCHER_LABEL_MAX + 4];
-        snprintf(text, sizeof(text), "%c%s", is_selected ? '>' : ' ', label);
-        display__print(text);
-    }
-
-}
-
 static size_t bruce_launcher__task_candidates(bruce_task_snapshot_t *tasks, size_t capacity)
 {
     bruce_task_snapshot_t all[16];
@@ -602,12 +488,69 @@ static int bruce_launcher__run_entry(const bruce_launcher_entry_t *entry)
 /* GUI menu runner                                                            */
 /* -------------------------------------------------------------------------- */
 
-/* The root is a horizontal carousel. Nested menus are vertical three-row
- * lists. SELECT/Btn-A opens the highlighted entry and BACK/Btn-B returns. */
+/* The root is a horizontal carousel. Nested menus use Core's choice renderer
+ * inside the launcher's status bar and outer border. */
 static int bruce_launcher__run_gui_menu(bruce_launcher_menu_t *menu)
 {
     bruce_launcher_theme_t theme;
     bruce_launcher__get_theme(&theme);
+
+    if (menu->parent != NULL) {
+        bruce_dialog_choice_t *choices =
+            (bruce_dialog_choice_t *)malloc(sizeof(*choices) * (size_t)menu->entry_count);
+        if (choices == NULL) return BRUCE_ERR_NO_MEMORY;
+        for (int i = 0; i < menu->entry_count; ++i) {
+            choices[i].label = menu->entries[i].label;
+            choices[i].value = menu->entries[i].label;
+        }
+
+        const bruce_dialog_render_params_t render_params = {
+            .padding_top = BRUCE_LAUNCHER_STATUS_H + 1,
+            .padding_right = BRUCE_LAUNCHER_BORDER_PAD + 1,
+            .padding_bottom = BRUCE_LAUNCHER_BORDER_PAD + 1,
+            .padding_left = BRUCE_LAUNCHER_BORDER_PAD + 1,
+            .render_borders = false,
+        };
+
+        (void)runtime__delay(300);
+        (void)input__flush();
+        for (;;) {
+            bruce_result_t frame = display__begin_frame();
+            if (frame == BRUCE_ERR_NOT_FOREGROUND) {
+                (void)runtime__delay(20);
+                continue;
+            }
+            if (frame != BRUCE_OK) {
+                free(choices);
+                return frame;
+            }
+            bruce_launcher__draw_main_border(&theme);
+            (void)bruce_launcher__draw_status_bar(&theme);
+            frame = display__present();
+            if (frame != BRUCE_OK) {
+                free(choices);
+                return frame;
+            }
+
+            size_t selected = 0;
+            bruce_result_t result = dialog__choice(menu->title, NULL, choices,
+                                                    (size_t)menu->entry_count, &selected,
+                                                    &render_params);
+            if (result == BRUCE_ERR_CANCELLED) break;
+            if (result != BRUCE_OK) continue;
+
+            const bruce_launcher_entry_t *entry = &menu->entries[selected];
+            if (entry->kind == BRUCE_LAUNCHER_ENTRY_BACK) break;
+            if (entry->kind == BRUCE_LAUNCHER_ENTRY_SUBMENU) {
+                (void)bruce_launcher__run_gui_menu(entry->submenu);
+            } else {
+                (void)bruce_launcher__run_entry(entry);
+            }
+            (void)input__flush();
+        }
+        free(choices);
+        return 0;
+    }
 
     (void)runtime__delay(300);
     (void)input__flush();
@@ -627,11 +570,7 @@ static int bruce_launcher__run_gui_menu(bruce_launcher_menu_t *menu)
                 return frame;
             }
             bruce_launcher__draw_main_border(&theme);
-            if (menu->parent == NULL) {
-                bruce_launcher__draw_root_menu(menu, selected, &theme);
-            } else {
-                bruce_launcher__draw_options(menu->entries, menu->entry_count, selected, menu->title, &theme);
-            }
+            bruce_launcher__draw_root_menu(menu, selected, &theme);
             icon_revision = bruce_launcher__draw_status_bar(&theme);
             status_drawn_at = runtime__now();
             frame = display__present();
@@ -746,7 +685,7 @@ static int bruce_launcher__run_terminal_menu(bruce_launcher_menu_t *menu)
 
         size_t choice = 0;
         bruce_result_t choice_result =
-            dialog__choice(menu->title, "Select an app", choices, (size_t)menu->entry_count, &choice);
+            dialog__choice(menu->title, "Select an app", choices, (size_t)menu->entry_count, &choice, NULL);
 
         if (choice_result == BRUCE_ERR_CANCELLED) {
             break;

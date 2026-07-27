@@ -351,7 +351,7 @@ static int selftest__dialog_dispatch_entry(int argc, char **argv)
         {.label = "B", .value = "b"},
     };
     size_t selected = 0;
-    dialog__choice("t", "m", choices, 2, &selected);
+    dialog__choice("t", "m", choices, 2, &selected, NULL);
     s_dispatch.observed_gui = dialog__test_last_call_was_gui();
     s_dispatch.ran = true;
     return 0;

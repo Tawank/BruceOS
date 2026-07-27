@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 
 #include "core_sdk/result.h"
@@ -17,12 +18,24 @@ typedef struct {
     const char *value;
 } bruce_dialog_choice_t;
 
+typedef struct {
+    int padding_top;
+    int padding_right;
+    int padding_bottom;
+    int padding_left;
+    bool render_borders;
+} bruce_dialog_render_params_t;
+
 /* Dialog APIs return BRUCE_OK or BRUCE_ERR_CANCELLED, BRUCE_ERR_BUSY,
  * BRUCE_ERR_INVALID_ARGUMENT, or another BRUCE_ERR_* result.  Rendering is
  * chosen from the task's launch context, never by an app-specific renderer. */
 bruce_result_t dialog__message(bruce_dialog_kind_t kind, const char *title, const char *message);
+/* `render_params` only affects GUI rendering. NULL uses the full display with
+ * the standard title and footer bars. Padding limits the choice viewport, and
+ * `render_borders=false` renders a plain title without those bars. */
 bruce_result_t dialog__choice(const char *title, const char *message, const bruce_dialog_choice_t *choices,
-                              size_t choice_count, size_t *out_selected);
+                               size_t choice_count, size_t *out_selected,
+                               const bruce_dialog_render_params_t *render_params);
 bruce_result_t dialog__pick_file(const char *initial_path, const char *extension_filter, char *out_path,
                                  size_t out_path_size);
 

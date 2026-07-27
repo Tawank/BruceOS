@@ -55,7 +55,7 @@ static int bluetooth_app__scan_gui(void)
         choices[i].value = labels[i];
     }
     size_t selected = 0;
-    if (dialog__choice("BLE Advertisements", "Select a device", choices, (size_t)count, &selected) == BRUCE_OK) {
+    if (dialog__choice("BLE Advertisements", "Select a device", choices, (size_t)count, &selected, NULL) == BRUCE_OK) {
         char details[160];
         bluetooth__device_t *device = &devices[selected];
         snprintf(details, sizeof(details),
@@ -72,7 +72,7 @@ int bluetooth_app_main(int argc, char **argv)
     if (app_runner__args_have_gui(argc, argv)) {
         const bruce_dialog_choice_t choices[] = {{"BLE advertisement scan", "scan"}};
         size_t selected = 0;
-        if (dialog__choice("Bluetooth", "Select an action", choices, 1, &selected) == BRUCE_OK) {
+        if (dialog__choice("Bluetooth", "Select an action", choices, 1, &selected, NULL) == BRUCE_OK) {
             return bluetooth_app__scan_gui();
         }
         return 0;

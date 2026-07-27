@@ -112,7 +112,7 @@ static int webui_app__gui(void)
         {.label = "Exit", .value = "exit"},
     };
     size_t selected = 0;
-    bruce_result_t result = dialog__choice("WebUI", "Browser access", choices, 5, &selected);
+    bruce_result_t result = dialog__choice("WebUI", "Browser access", choices, 5, &selected, NULL);
     if (result == BRUCE_ERR_CANCELLED || selected == 4) return BRUCE_OK;
     if (result != BRUCE_OK) return result;
     if (selected == 0) return webui_app__start(WEBUI_APP_NETWORK_AP, true);

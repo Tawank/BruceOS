@@ -111,7 +111,7 @@ static int bluetooth_hid_app__scan_and_connect_gui(void)
     }
     size_t selected = 0;
     bruce_result_t choice = dialog__choice("Classic Bluetooth HID", "Select a controller", choices,
-                                            (size_t)count, &selected);
+                                            (size_t)count, &selected, NULL);
     return choice == BRUCE_OK ? bluetooth_hid_app__connect(devices[selected].address, true) : 0;
 }
 
@@ -127,7 +127,7 @@ static int bluetooth_hid_app__gui(void)
         {"Disconnect", "disconnect"},
     };
     size_t selected = 0;
-    if (dialog__choice("Bluetooth HID", "Keyboards and gamepads", choices, 2, &selected) != BRUCE_OK) return 0;
+    if (dialog__choice("Bluetooth HID", "Keyboards and gamepads", choices, 2, &selected, NULL) != BRUCE_OK) return 0;
     if (selected == 1) return bluetooth_hid__disconnect();
     return bluetooth_hid_app__scan_and_connect_gui();
 }
