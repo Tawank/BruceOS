@@ -61,6 +61,10 @@ bruce_result_t task__resume(bruce_task_id_t task_id);
 bruce_result_t task__kill(bruce_task_id_t task_id);
 bruce_result_t task__wait(bruce_task_id_t task_id, uint32_t timeout_ms);
 
+/* Monotonic milliseconds since boot.  Use differences between readings for
+ * elapsed-time measurement; this is not wall-clock time. */
+uint64_t runtime__now(void);
+
 /* Both return BRUCE_OK once the full duration has elapsed and
  * BRUCE_ERR_CANCELLED if interrupted early.  runtime__sleep is interrupted
  * when the calling task is paused (it blocks until resumed, then keeps

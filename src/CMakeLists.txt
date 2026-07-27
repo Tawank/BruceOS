@@ -5,11 +5,11 @@ idf_component_register(SRCS
                     "core/bluetooth/bluetooth_hid.c"
                     "core/config/config.c"
                     "core/dialog/dialog.c"
-                     "core/display/display.c"
-                     "core/gpio/gpio.c"
-                     "core/http/http.c"
-                     "core/image/image.c"
-                     "core/i2c/i2c.c"
+                    "core/display/display.c"
+                    "core/gpio/gpio.c"
+                    "core/http/http.c"
+                    "core/image/image.c"
+                    "core/i2c/i2c.c"
                     "core/input/input.c"
                     "core/ir/ir.c"
                     "core/manifest/manifest.c"
@@ -17,23 +17,23 @@ idf_component_register(SRCS
                     "core/notification/notification.c"
                     "core/nrf24/nrf24.c"
                     "core/permission/permission.c"
-                     "core/stdio/stdio.c"
-                     "core/spi/spi.c"
+                    "core/stdio/stdio.c"
+                    "core/spi/spi.c"
                     "core/storage/storage.c"
                     "core/status_icon/status_icon.c"
                     "core/task/task.c"
                     "core/tcp/tcp.c"
-                     "core/wifi/wifi_common.c"
-                     "core/http_server/http_server.c"
-                     "modules/bruce_launcher/bruce_launcher_app.c"
-                     "modules/bruce_launcher/bruce_launcher_icons.c"
-                     "modules/bruce_launcher/bruce_launcher_menu.c"
+                    "core/wifi/wifi_common.c"
+                    "core/http_server/http_server.c"
+                    "modules/bruce_launcher/bruce_launcher_app.c"
+                    "modules/bruce_launcher/bruce_launcher_icons.c"
+                    "modules/bruce_launcher/bruce_launcher_menu.c"
                     "modules/bluetooth/bluetooth_app.c"
                     "modules/bluetooth_hid/bluetooth_hid_app.c"
                     "modules/filemanager/filemanager_app.c"
                     "modules/loaders/elf/elf_loader_app.c"
-                     "modules/loaders/elf/elf_loader_sdk_symbols.c"
-                     "modules/loaders/image/image_loader_app.c"
+                    "modules/loaders/elf/elf_loader_sdk_symbols.c"
+                    "modules/loaders/image/image_loader_app.c"
                     "modules/loaders/js/dialog_js.c"
                     "modules/loaders/js/display_js.c"
                     "modules/loaders/js/js_stdlib.c"
@@ -48,11 +48,11 @@ idf_component_register(SRCS
                     "modules/selftest/bluetooth_test.c"
                     "modules/selftest/config_test.c"
                     "modules/selftest/dialog_test.c"
-                     "modules/selftest/display_test.c"
-                     "modules/selftest/gpio_bus_test.c"
+                    "modules/selftest/display_test.c"
+                    "modules/selftest/gpio_bus_test.c"
                     "modules/selftest/fake_elf.c"
-                     "modules/selftest/input_test.c"
-                     "modules/selftest/image_test.c"
+                    "modules/selftest/input_test.c"
+                    "modules/selftest/image_test.c"
                     "modules/selftest/ir_test.c"
                     "modules/selftest/launcher_test.c"
                     "modules/selftest/loader_test.c"
@@ -70,23 +70,24 @@ idf_component_register(SRCS
                     "modules/ir/ir_app.c"
                     "modules/nrf24/nrf24_app.c"
                     "modules/selftest/nrf24_test.c"
-                     "modules/wifi/wifi_app.c"
-                     "modules/webui/webui_app.c"
+                    "modules/wifi/wifi_app.c"
+                    "modules/webui/webui_app.c"
                     REQUIRES
                     cjson
                     bt
                     esp_event
                     driver
-                     esp_driver_gpio
-                     esp_driver_i2c
+                    esp_driver_gpio
+                    esp_driver_i2c
                     esp_driver_ledc
                     esp_driver_rmt
                     esp_driver_spi
                     esp_driver_sdspi
-                     esp_http_client
-                     esp_http_server
-                     esp_lcd
-                     esp_jpeg
+                    esp_http_client
+                    esp_http_server
+                    esp_lcd
+                    esp_timer
+                    esp_jpeg
                     esp_hid
                     esp_netif
                     esp_wifi
@@ -94,8 +95,8 @@ idf_component_register(SRCS
                     log
                     lwip
                     nvs_flash
-                     littlefs
-                     libpng
+                    littlefs
+                    libpng
                     elf_loader
                     mquickjs
                     INCLUDE_DIRS

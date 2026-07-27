@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "freertos/semphr.h"
@@ -861,6 +862,11 @@ static bruce_result_t task__wait_ms(uint32_t ms, bool interruptible)
         }
         /* Woken early; loop to re-check stop/pause/foreground state. */
     }
+}
+
+uint64_t runtime__now(void)
+{
+    return (uint64_t)esp_timer_get_time() / 1000u;
 }
 
 bruce_result_t runtime__sleep(uint32_t milliseconds)

@@ -32,6 +32,8 @@
 #define BRUCE_LAUNCHER_MENU_WIDTH_NUM 8
 #define BRUCE_LAUNCHER_MENU_WIDTH_DEN 10
 #define BRUCE_LAUNCHER_TASKS_APP "__tasks"
+#define BRUCE_LAUNCHER_SLIDE_DURATION_MS 160
+#define BRUCE_LAUNCHER_EASING_SCALE 1000
 
 /* Theme colors cached from bruce.json. */
 typedef struct {
@@ -148,6 +150,118 @@ static void bruce_launcher__draw_root_menu(const bruce_launcher_menu_t *menu, in
 
     bruce_launcher__draw_centered_text(menu->entries[selected].label, cy + large / 2 + 12,
                                        BRUCE_LAUNCHER_FONT_MEDIUM, theme);
+}
+
+static uint16_t bruce_launcher__blend_color(uint16_t from, uint16_t to, int amount)
+{
+    int inverse = BRUCE_LAUNCHER_EASING_SCALE - amount;
+    int r = (((from >> 11) & 0x1f) * inverse + ((to >> 11) & 0x1f) * amount) /
+            BRUCE_LAUNCHER_EASING_SCALE;
+    int g = (((from >> 5) & 0x3f) * inverse + ((to >> 5) & 0x3f) * amount) /
+            BRUCE_LAUNCHER_EASING_SCALE;
+    int b = ((from & 0x1f) * inverse + (to & 0x1f) * amount) /
+            BRUCE_LAUNCHER_EASING_SCALE;
+    return (uint16_t)((r << 11) | (g << 5) | b);
+}
+
+static int bruce_launcher__wrap_index(int index, int count)
+{
+    index %= count;
+    return index < 0 ? index + count : index;
+}
+
+static void bruce_launcher__draw_sliding_icon(const bruce_launcher_menu_t *menu, int from,
+                                               int relative, int direction, int progress,
+                                               int center_x, int spacing, int cy, int small,
+                                               int large, const bruce_launcher_theme_t *theme)
+{
+    int position = relative * BRUCE_LAUNCHER_EASING_SCALE - direction * progress;
+    int distance = abs(position);
+    if (distance > BRUCE_LAUNCHER_EASING_SCALE) {
+        distance = BRUCE_LAUNCHER_EASING_SCALE;
+    }
+    int size = large - (large - small) * distance / BRUCE_LAUNCHER_EASING_SCALE;
+    uint16_t color = bruce_launcher__blend_color(theme->pri, theme->sec, distance);
+    int x = center_x + position * spacing / BRUCE_LAUNCHER_EASING_SCALE;
+    int entry = bruce_launcher__wrap_index(from + relative, menu->entry_count);
+    bruce_launcher__draw_entry_icon(&menu->entries[entry], x, cy, size, color);
+}
+
+static void bruce_launcher__draw_root_transition(const bruce_launcher_menu_t *menu, int from,
+                                                  int direction, int progress,
+                                                  const bruce_launcher_theme_t *theme)
+{
+    int w = display__width();
+    int h = display__height();
+    bool narrow = w < 180;
+    int large = narrow ? 52 : 64;
+    int small = narrow ? 28 : 36;
+    int cy = BRUCE_LAUNCHER_STATUS_H + (h - BRUCE_LAUNCHER_STATUS_H) * 2 / 5;
+    int spacing = w / 2 - w / 7;
+    int outer_before = direction > 0 ? -1 : 1;
+    int outer_after = direction > 0 ? 2 : -2;
+    int destination = direction;
+
+    bruce_launcher__draw_sliding_icon(menu, from, outer_before, direction, progress, w / 2,
+                                      spacing, cy, small, large, theme);
+    bruce_launcher__draw_sliding_icon(menu, from, outer_after, direction, progress, w / 2,
+                                      spacing, cy, small, large, theme);
+    if (progress < BRUCE_LAUNCHER_EASING_SCALE / 2) {
+        bruce_launcher__draw_sliding_icon(menu, from, destination, direction, progress, w / 2,
+                                          spacing, cy, small, large, theme);
+        bruce_launcher__draw_sliding_icon(menu, from, 0, direction, progress, w / 2, spacing,
+                                          cy, small, large, theme);
+    } else {
+        bruce_launcher__draw_sliding_icon(menu, from, 0, direction, progress, w / 2, spacing,
+                                          cy, small, large, theme);
+        bruce_launcher__draw_sliding_icon(menu, from, destination, direction, progress, w / 2,
+                                          spacing, cy, small, large, theme);
+    }
+
+    int label_entry = progress < BRUCE_LAUNCHER_EASING_SCALE / 2
+                          ? from
+                          : bruce_launcher__wrap_index(from + direction, menu->entry_count);
+    bruce_launcher__draw_centered_text(menu->entries[label_entry].label, cy + large / 2 + 12,
+                                       BRUCE_LAUNCHER_FONT_MEDIUM, theme);
+}
+
+static bruce_result_t bruce_launcher__animate_root_menu(const bruce_launcher_menu_t *menu,
+                                                         int from, int direction,
+                                                         const bruce_launcher_theme_t *theme,
+                                                         uint32_t *icon_revision)
+{
+    uint64_t started_at = runtime__now();
+    for (;;) {
+        uint64_t elapsed = runtime__now() - started_at;
+        int linear = elapsed >= BRUCE_LAUNCHER_SLIDE_DURATION_MS
+                         ? BRUCE_LAUNCHER_EASING_SCALE
+                         : (int)(elapsed * BRUCE_LAUNCHER_EASING_SCALE /
+                                 BRUCE_LAUNCHER_SLIDE_DURATION_MS);
+        int progress = linear * linear * (3 * BRUCE_LAUNCHER_EASING_SCALE - 2 * linear) /
+                       (BRUCE_LAUNCHER_EASING_SCALE * BRUCE_LAUNCHER_EASING_SCALE);
+
+        bruce_result_t frame;
+        do {
+            frame = display__begin_frame();
+            if (frame == BRUCE_ERR_NOT_FOREGROUND) {
+                runtime__delay(20);
+            }
+        } while (frame == BRUCE_ERR_NOT_FOREGROUND);
+        if (frame != BRUCE_OK) {
+            return frame;
+        }
+
+        bruce_launcher__draw_main_border(theme);
+        bruce_launcher__draw_root_transition(menu, from, direction, progress, theme);
+        *icon_revision = bruce_launcher__draw_status_icons(theme);
+        frame = display__present();
+        if (frame != BRUCE_OK) {
+            return frame;
+        }
+        if (linear == BRUCE_LAUNCHER_EASING_SCALE) {
+            return BRUCE_OK;
+        }
+    }
 }
 
 /* Draw a centered submenu box with up to three visible rows. */
@@ -508,7 +622,16 @@ static int bruce_launcher__run_gui_menu(bruce_launcher_menu_t *menu)
             case BRUCE_INPUT_CODE_LEFT:
             case BRUCE_INPUT_CODE_UP:
                 if (menu->parent == NULL && menu->entry_count > 0) {
+                    int previous = selected;
                     selected = (selected + menu->entry_count - 1) % menu->entry_count;
+                    if (menu->entry_count > 1) {
+                        result = bruce_launcher__animate_root_menu(menu, previous, -1, &theme,
+                                                                   &icon_revision);
+                        if (result != BRUCE_OK) {
+                            return result;
+                        }
+                        last_drawn = selected;
+                    }
                 } else if (selected > 0) {
                     selected--;
                 }
@@ -516,7 +639,16 @@ static int bruce_launcher__run_gui_menu(bruce_launcher_menu_t *menu)
             case BRUCE_INPUT_CODE_RIGHT:
             case BRUCE_INPUT_CODE_DOWN:
                 if (menu->parent == NULL && menu->entry_count > 0) {
+                    int previous = selected;
                     selected = (selected + 1) % menu->entry_count;
+                    if (menu->entry_count > 1) {
+                        result = bruce_launcher__animate_root_menu(menu, previous, 1, &theme,
+                                                                   &icon_revision);
+                        if (result != BRUCE_OK) {
+                            return result;
+                        }
+                        last_drawn = selected;
+                    }
                 } else if (selected + 1 < menu->entry_count) {
                     selected++;
                 }

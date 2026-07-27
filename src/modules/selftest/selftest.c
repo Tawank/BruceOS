@@ -44,6 +44,7 @@ int selftest_app_main(int argc, char **argv)
 
     RUN_SELFTEST(selftest__run_task_normal_exit_case);
     RUN_SELFTEST(selftest__run_task_killed_case);
+    RUN_SELFTEST(selftest__run_runtime_now_case);
     RUN_SELFTEST(selftest__run_apprunner_registration_case);
     RUN_SELFTEST(selftest__run_apprunner_args_case);
     RUN_SELFTEST(selftest__run_apprunner_resolution_case);

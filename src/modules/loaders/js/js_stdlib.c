@@ -3,6 +3,7 @@
 
 #include "core_sdk/memory.h"
 #include "core_sdk/storage.h"
+#include "core_sdk/task.h"
 
 #include <stdio.h>
 #include <sys/time.h>
@@ -26,9 +27,7 @@ JSValue js_performance_now(JSContext *ctx, JSValue *this_val, int argc, JSValue 
     (void)argc;
     (void)argv;
 
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    return JS_NewInt64(ctx, (int64_t)tv.tv_sec * 1000 + tv.tv_usec / 1000);
+    return JS_NewInt64(ctx, (int64_t)runtime__now());
 }
 
 JSValue js_print(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)

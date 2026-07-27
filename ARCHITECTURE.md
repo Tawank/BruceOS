@@ -256,7 +256,8 @@ operations require the `task` permission; a task may control itself without it.
 `runtime__sleep(ms)` interrupts a background task when it is foregrounded;
 foreground tasks sleep for the full duration.  `runtime__delay(ms)` waits the
 requested duration regardless of state.  Both are Core APIs; they hide FreeRTOS
-from apps.
+from apps. `runtime__now()` returns monotonic milliseconds since boot for
+elapsed-time measurement and must not be interpreted as wall-clock time.
 
 ## ELF contract
 

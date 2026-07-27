@@ -12,6 +12,17 @@
 
 static selftest__shared_t s_shared;
 
+bool selftest__run_runtime_now_case(void)
+{
+    uint64_t before = runtime__now();
+    if (runtime__delay(2) != BRUCE_OK || runtime__now() <= before) {
+        printf("[selftest] task/runtime-now: monotonic clock did not advance\n");
+        return false;
+    }
+    printf("[selftest] task/runtime-now: OK\n");
+    return true;
+}
+
 static int selftest__worker_normal_exit(int argc, char **argv)
 {
     (void)argc;

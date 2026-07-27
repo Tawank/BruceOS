@@ -225,8 +225,10 @@ int app_runner__run_path(const char *path, const char *arg, bool in_background)
 
     app_runner_loader_t *loader = app_runner__find_loader_for_path(normalized_path);
     if (loader == NULL) {
+        printf("app_runner__run_path: normalized_path=%s, loader=NULL\n", normalized_path);
         return BRUCE_ERR_NOT_FOUND;
     }
+    printf("app_runner__run_path: normalized_path=%s, loader=%p, priority=%d\n", normalized_path, (void *)loader, loader->priority);
     return loader->run_fn(normalized_path, arg, in_background);
 }
 
@@ -412,6 +414,8 @@ int app_runner__run(const char *app_name, const char *arg, bool in_background)
 
     /* 1. registered built-in. */
     bruce_app_entry_t entry = app_runner__find_builtin(app_name);
+    printf("app_runner__run: app_name=%s, entry=%p\n", app_name, (void *)entry);
+    fflush(stdout);
     int result;
     if (entry != NULL) {
         task_create_params_t params = {

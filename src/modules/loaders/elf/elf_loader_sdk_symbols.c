@@ -43,6 +43,7 @@
 
 const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     /* Core runtime / task */
+    ESP_ELFSYM_EXPORT(runtime__now),
     ESP_ELFSYM_EXPORT(runtime__sleep),
     ESP_ELFSYM_EXPORT(runtime__delay),
     ESP_ELFSYM_EXPORT(task__current_id),
