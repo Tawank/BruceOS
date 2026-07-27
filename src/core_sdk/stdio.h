@@ -27,5 +27,6 @@ bruce_result_t bruce_stdio_session_create(bruce_stdio_session_t *out_session);
 bruce_result_t bruce_stdio_session_close(bruce_stdio_session_t session);
 bruce_result_t bruce_stdio_session_route_children(bruce_stdio_session_t session);
 bruce_result_t bruce_stdio_session_write_input(bruce_stdio_session_t session, const void *data, size_t size);
-bruce_result_t bruce_stdio_session_read_output(bruce_stdio_session_t session, void *buffer, size_t capacity,
-                                                size_t *out_size);
+bruce_result_t bruce_stdio_session_read_output(
+    bruce_stdio_session_t session, void *buffer, size_t capacity, size_t *out_size
+);

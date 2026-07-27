@@ -21,11 +21,11 @@
 #define DEVICE__VALID_EPOCH_MIN 1577836800
 
 #if defined(CONFIG_BRUCE_BOARD_M5_CARDPUTER)
-#    define DEVICE__BATTERY_CHANNEL ADC_CHANNEL_9
+#define DEVICE__BATTERY_CHANNEL ADC_CHANNEL_9
 #elif defined(CONFIG_BRUCE_BOARD_M5_STICKC_PLUS2)
-#    define DEVICE__BATTERY_CHANNEL ADC_CHANNEL_2
+#define DEVICE__BATTERY_CHANNEL ADC_CHANNEL_2
 #else
-#    define DEVICE__NO_BATTERY 1
+#define DEVICE__NO_BATTERY 1
 #endif
 
 static StaticSemaphore_t s_lock_storage;
@@ -38,19 +38,15 @@ static bool s_cached_battery_valid;
 static int s_cached_battery;
 static uint64_t s_battery_read_at;
 
-static bool device__ensure_lock(void)
-{
+static bool device__ensure_lock(void) {
     if (s_lock != NULL) return true;
     portENTER_CRITICAL(&s_init_mux);
-    if (s_lock == NULL) {
-        s_lock = xSemaphoreCreateMutexStatic(&s_lock_storage);
-    }
+    if (s_lock == NULL) { s_lock = xSemaphoreCreateMutexStatic(&s_lock_storage); }
     portEXIT_CRITICAL(&s_init_mux);
     return s_lock != NULL;
 }
 
-static bruce_result_t device__init_battery(void)
-{
+static bruce_result_t device__init_battery(void) {
 #if defined(DEVICE__NO_BATTERY)
     return BRUCE_ERR_UNSUPPORTED;
 #else
@@ -106,8 +102,7 @@ static bruce_result_t device__init_battery(void)
 #endif
 }
 
-int device__get_battery(void)
-{
+int device__get_battery(void) {
 #if defined(DEVICE__NO_BATTERY)
     return BRUCE_ERR_UNSUPPORTED;
 #else
@@ -143,8 +138,8 @@ int device__get_battery(void)
         return BRUCE_ERR_IO;
     }
     int battery_mv = pin_mv * DEVICE__BATTERY_DIVIDER;
-    int percent = (battery_mv - DEVICE__BATTERY_EMPTY_MV) * 100 /
-                  (DEVICE__BATTERY_FULL_MV - DEVICE__BATTERY_EMPTY_MV);
+    int percent =
+        (battery_mv - DEVICE__BATTERY_EMPTY_MV) * 100 / (DEVICE__BATTERY_FULL_MV - DEVICE__BATTERY_EMPTY_MV);
     if (percent < 0) percent = 0;
     if (percent > 100) percent = 100;
 
@@ -156,8 +151,7 @@ int device__get_battery(void)
 #endif
 }
 
-static bruce_result_t device__get_local_datetime(struct tm *out)
-{
+static bruce_result_t device__get_local_datetime(struct tm *out) {
     time_t now = time(NULL);
     if (now < DEVICE__VALID_EPOCH_MIN) return BRUCE_ERR_INVALID_STATE;
 
@@ -169,8 +163,7 @@ static bruce_result_t device__get_local_datetime(struct tm *out)
     return gmtime_r(&now, out) != NULL ? BRUCE_OK : BRUCE_ERR_INTERNAL;
 }
 
-bruce_result_t device__get_time(bruce_device_time_t *out)
-{
+bruce_result_t device__get_time(bruce_device_time_t *out) {
     if (out == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     struct tm local;
     bruce_result_t result = device__get_local_datetime(&local);
@@ -181,8 +174,7 @@ bruce_result_t device__get_time(bruce_device_time_t *out)
     return BRUCE_OK;
 }
 
-bruce_result_t device__get_date(bruce_device_date_t *out)
-{
+bruce_result_t device__get_date(bruce_device_date_t *out) {
     if (out == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     struct tm local;
     bruce_result_t result = device__get_local_datetime(&local);

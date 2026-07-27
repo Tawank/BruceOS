@@ -20,11 +20,10 @@ typedef struct {
 } bruce_status_icon_t;
 
 /* The registry is global and unrestricted. Existing keys are replaced. */
-bruce_result_t status_icon__push(const char *key, const uint8_t *bitmap,
-                                  uint8_t width, uint8_t height);
+bruce_result_t status_icon__push(const char *key, const uint8_t *bitmap, uint8_t width, uint8_t height);
 bruce_result_t status_icon__remove(const char *key);
 
 /* Returns the total entry count and current revision. Up to capacity entries
  * are copied in lexicographic key order. */
-bruce_result_t status_icon__list(bruce_status_icon_t *icons, size_t capacity,
-                                  size_t *out_count, uint32_t *out_revision);
+bruce_result_t
+status_icon__list(bruce_status_icon_t *icons, size_t capacity, size_t *out_count, uint32_t *out_revision);

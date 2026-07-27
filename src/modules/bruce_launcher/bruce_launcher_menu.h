@@ -2,8 +2,6 @@
 
 #include <stdbool.h>
 
-#include "core_sdk/storage.h"
-
 #define BRUCE_LAUNCHER_MAX_ENTRIES 32
 #define BRUCE_LAUNCHER_LABEL_MAX 48
 #define BRUCE_LAUNCHER_COMMAND_MAX 128

@@ -2,16 +2,14 @@
 
 #include "core_sdk/task.h"
 
-JSValue native_runtimeToBackground(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
-{
+JSValue native_runtimeToBackground(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
     (void)this_val;
     (void)argc;
     (void)argv;
     return JS_NewInt32(ctx, (int)task__to_background());
 }
 
-JSValue native_runtimeToForeground(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
-{
+JSValue native_runtimeToForeground(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
     (void)this_val;
     (void)argc;
     (void)argv;
@@ -19,8 +17,7 @@ JSValue native_runtimeToForeground(JSContext *ctx, JSValue *this_val, int argc, 
     return JS_NewInt32(ctx, (int)task__foreground(id));
 }
 
-JSValue native_runtimeIsForeground(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
-{
+JSValue native_runtimeIsForeground(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
     (void)this_val;
     (void)argc;
     (void)argv;
@@ -32,8 +29,7 @@ JSValue native_runtimeIsForeground(JSContext *ctx, JSValue *this_val, int argc, 
     return JS_NewBool(fg);
 }
 
-JSValue native_runtimeMain(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
-{
+JSValue native_runtimeMain(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
     (void)this_val;
     (void)argc;
     (void)argv;

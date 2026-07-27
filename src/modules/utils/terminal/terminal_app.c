@@ -37,8 +37,7 @@ typedef struct {
     size_t length;
 } terminal__visual_line_t;
 
-static void terminal__append(terminal__state_t *state, const char *text, size_t size)
-{
+static void terminal__append(terminal__state_t *state, const char *text, size_t size) {
     for (size_t i = 0; i < size; ++i) {
         char c = text[i];
         if (c == '\r') continue;
@@ -52,14 +51,13 @@ static void terminal__append(terminal__state_t *state, const char *text, size_t 
     state->dirty = true;
 }
 
-static void terminal__append_text(terminal__state_t *state, const char *text)
-{
+static void terminal__append_text(terminal__state_t *state, const char *text) {
     terminal__append(state, text, strlen(text));
 }
 
-static int terminal__collect_lines(const terminal__state_t *state, int columns, int rows,
-                                   terminal__visual_line_t *lines)
-{
+static int terminal__collect_lines(
+    const terminal__state_t *state, int columns, int rows, terminal__visual_line_t *lines
+) {
     int count = 0;
     size_t start = 0;
     while (start < state->transcript_size) {
@@ -80,8 +78,7 @@ static int terminal__collect_lines(const terminal__state_t *state, int columns, 
     return count;
 }
 
-static bruce_result_t terminal__draw(const terminal__state_t *state)
-{
+static bruce_result_t terminal__draw(const terminal__state_t *state) {
     uint16_t foreground = BRUCE_COLOR_WHITE;
     uint16_t background = BRUCE_COLOR_BLACK;
     (void)config__get_pri_color(&foreground);
@@ -121,13 +118,13 @@ static bruce_result_t terminal__draw(const terminal__state_t *state)
     display__set_cursor(2, prompt_y);
     display__print(state->child != BRUCE_TASK_ID_INVALID ? "> " : "$ ");
     size_t visible = (size_t)(columns > 2 ? columns - 2 : 1);
-    const char *input = state->input_size > visible ? state->input + state->input_size - visible : state->input;
+    const char *input =
+        state->input_size > visible ? state->input + state->input_size - visible : state->input;
     display__print(input);
     return display__present();
 }
 
-static void terminal__drain_output(terminal__state_t *state)
-{
+static void terminal__drain_output(terminal__state_t *state) {
     char output[256];
     size_t size = 0;
     while (bruce_stdio_session_read_output(state->session, output, sizeof(output), &size) == BRUCE_OK) {
@@ -135,8 +132,7 @@ static void terminal__drain_output(terminal__state_t *state)
     }
 }
 
-static void terminal__submit(terminal__state_t *state)
-{
+static void terminal__submit(terminal__state_t *state) {
     if (state->input_size == 0) return;
     state->input[state->input_size] = '\0';
     if (state->child != BRUCE_TASK_ID_INVALID) {
@@ -168,8 +164,7 @@ static void terminal__submit(terminal__state_t *state)
     state->dirty = true;
 }
 
-int terminal_app_main(int argc, char **argv)
-{
+int terminal_app_main(int argc, char **argv) {
     (void)argc;
     (void)argv;
     terminal__state_t state = {0};
@@ -223,8 +218,14 @@ int terminal_app_main(int argc, char **argv)
             state.dirty = true;
         } else if (event.code == BRUCE_INPUT_CODE_SELECT || event.code == BRUCE_INPUT_CODE_BUTTON_A) {
             char entered[TERMINAL__LINE_CAPACITY];
-            if (dialog__text_input("Terminal", state.child != BRUCE_TASK_ID_INVALID ? "stdin" : "command",
-                                   state.input, false, entered, sizeof(entered)) == BRUCE_OK) {
+            if (dialog__text_input(
+                    "Terminal",
+                    state.child != BRUCE_TASK_ID_INVALID ? "stdin" : "command",
+                    state.input,
+                    false,
+                    entered,
+                    sizeof(entered)
+                ) == BRUCE_OK) {
                 snprintf(state.input, sizeof(state.input), "%s", entered);
                 state.input_size = strlen(state.input);
                 terminal__submit(&state);

@@ -6,8 +6,7 @@
 #include "core_sdk/display.h"
 #include "core_sdk/result.h"
 
-bool selftest__run_display_compositor_case(void)
-{
+bool selftest__run_display_compositor_case(void) {
     int width = display__width();
     int height = display__height();
     if (width <= 0 || height <= 0) {

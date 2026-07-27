@@ -11,8 +11,7 @@
 static volatile bruce_result_t s_nrf24_result;
 static volatile bool s_nrf24_ran;
 
-static int selftest__nrf24_external_entry(int argc, char **argv)
-{
+static int selftest__nrf24_external_entry(int argc, char **argv) {
     (void)argc;
     (void)argv;
     bool connected = false;
@@ -21,8 +20,7 @@ static int selftest__nrf24_external_entry(int argc, char **argv)
     return 0;
 }
 
-bool selftest__run_nrf24_permission_denied_case(void)
-{
+bool selftest__run_nrf24_permission_denied_case(void) {
     permission__test_reset();
     permission__set("nrf24_denied.js", BRUCE_PERMISSION_RF, false);
     s_nrf24_result = BRUCE_OK;
@@ -44,8 +42,7 @@ bool selftest__run_nrf24_permission_denied_case(void)
     return ok;
 }
 
-bool selftest__run_nrf24_validation_case(void)
-{
+bool selftest__run_nrf24_validation_case(void) {
     uint8_t activity = 0;
     bool ok = nrf24__probe(NULL) == BRUCE_ERR_INVALID_ARGUMENT &&
               nrf24__set_channel(126) == BRUCE_ERR_INVALID_ARGUMENT &&

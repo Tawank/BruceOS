@@ -46,8 +46,7 @@ typedef struct __attribute__((packed)) {
  * is 0), so this needs no real encoder: 42 "AAAA" groups (126 bytes) plus a
  * 2-byte remainder ("AAA=") covers the 128-byte icon this helper always
  * writes. */
-static void selftest__fake_elf_icon_base64(char *out, size_t out_capacity)
-{
+static void selftest__fake_elf_icon_base64(char *out, size_t out_capacity) {
     size_t out_index = 0;
     for (int i = 0; i < 42 && out_index + 4 < out_capacity; ++i) {
         memcpy(out + out_index, "AAAA", 4);
@@ -60,27 +59,34 @@ static void selftest__fake_elf_icon_base64(char *out, size_t out_capacity)
     out[out_index] = '\0';
 }
 
-bool selftest__write_fake_elf(const char *path, const char *app_name, const char *const *permissions,
-                               size_t permission_count)
-{
+bool selftest__write_fake_elf(
+    const char *path, const char *app_name, const char *const *permissions, size_t permission_count
+) {
     char icon_b64[200];
     selftest__fake_elf_icon_base64(icon_b64, sizeof(icon_b64));
 
     char manifest[512];
-    int offset = snprintf(manifest, sizeof(manifest),
-                           "{\"appName\":\"%s\",\"appIcon\":\"%s\",\"coreAbiVersion\":1,\"stackSize\":8192,"
-                           "\"permissions\":[",
-                           app_name, icon_b64);
+    int offset = snprintf(
+        manifest,
+        sizeof(manifest),
+        "{\"appName\":\"%s\",\"appIcon\":\"%s\",\"coreAbiVersion\":1,\"stackSize\":8192,"
+        "\"permissions\":[",
+        app_name,
+        icon_b64
+    );
     for (size_t i = 0; i < permission_count && offset > 0 && (size_t)offset < sizeof(manifest); ++i) {
-        offset += snprintf(manifest + offset, sizeof(manifest) - (size_t)offset, "%s\"%s\"", i == 0 ? "" : ",",
-                            permissions[i]);
+        offset += snprintf(
+            manifest + offset,
+            sizeof(manifest) - (size_t)offset,
+            "%s\"%s\"",
+            i == 0 ? "" : ",",
+            permissions[i]
+        );
     }
     if (offset > 0 && (size_t)offset < sizeof(manifest)) {
         offset += snprintf(manifest + offset, sizeof(manifest) - (size_t)offset, "]}");
     }
-    if (offset <= 0 || (size_t)offset >= sizeof(manifest)) {
-        return false;
-    }
+    if (offset <= 0 || (size_t)offset >= sizeof(manifest)) { return false; }
     size_t manifest_len = (size_t)offset;
 
     /* shstrtab layout: [0]="" [1]=".bruce.manifest\0" [17]=".shstrtab\0" */
@@ -92,9 +98,7 @@ bool selftest__write_fake_elf(const char *path, const char *app_name, const char
     size_t shstr_offset = manifest_offset + manifest_len;
     size_t shoff = shstr_offset + shstr_len;
     size_t total_size = shoff + 3 * sizeof(selftest_elf_shdr_t);
-    if (total_size > sizeof(buffer)) {
-        return false;
-    }
+    if (total_size > sizeof(buffer)) { return false; }
 
     selftest_elf_ehdr_t ehdr;
     memset(&ehdr, 0, sizeof(ehdr));
@@ -105,7 +109,7 @@ bool selftest__write_fake_elf(const char *path, const char *app_name, const char
     ehdr.e_ident[4] = 1; /* ELFCLASS32 */
     ehdr.e_ident[5] = 1; /* ELFDATA2LSB */
     ehdr.e_ident[6] = 1; /* EV_CURRENT */
-    ehdr.e_type = 2; /* ET_EXEC */
+    ehdr.e_type = 2;     /* ET_EXEC */
     ehdr.e_machine = (uint16_t)SELFTEST_FAKE_ELF_MACHINE;
     ehdr.e_version = 1;
     ehdr.e_shoff = (uint32_t)shoff;
@@ -121,8 +125,8 @@ bool selftest__write_fake_elf(const char *path, const char *app_name, const char
 
     selftest_elf_shdr_t sh_manifest;
     memset(&sh_manifest, 0, sizeof(sh_manifest));
-    sh_manifest.sh_name = 1; /* ".bruce.manifest" */
-    sh_manifest.sh_type = 1; /* SHT_PROGBITS */
+    sh_manifest.sh_name = 1;  /* ".bruce.manifest" */
+    sh_manifest.sh_type = 1;  /* SHT_PROGBITS */
     sh_manifest.sh_flags = 0; /* not SHF_ALLOC -> non-loadable */
     sh_manifest.sh_offset = (uint32_t)manifest_offset;
     sh_manifest.sh_size = (uint32_t)manifest_len;
@@ -130,7 +134,7 @@ bool selftest__write_fake_elf(const char *path, const char *app_name, const char
     selftest_elf_shdr_t sh_shstrtab;
     memset(&sh_shstrtab, 0, sizeof(sh_shstrtab));
     sh_shstrtab.sh_name = 17; /* ".shstrtab" */
-    sh_shstrtab.sh_type = 3; /* SHT_STRTAB */
+    sh_shstrtab.sh_type = 3;  /* SHT_STRTAB */
     sh_shstrtab.sh_offset = (uint32_t)shstr_offset;
     sh_shstrtab.sh_size = (uint32_t)shstr_len;
 

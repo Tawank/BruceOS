@@ -5,8 +5,7 @@
 #include "core_sdk/notification.h"
 #include "core_sdk/status_icon.h"
 
-JSValue native_notificationPush(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
-{
+JSValue native_notificationPush(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
     (void)this_val;
     if (argc < 2 || !JS_IsString(ctx, argv[0]) || !JS_IsNumber(ctx, argv[1])) {
         return JS_ThrowTypeError(ctx, "notification.push(text:string, durationMs:int)");
@@ -22,21 +21,20 @@ JSValue native_notificationPush(JSContext *ctx, JSValue *this_val, int argc, JSV
     return JS_NewInt32(ctx, (int32_t)result);
 }
 
-JSValue native_notificationDismiss(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
-{
+JSValue native_notificationDismiss(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
     (void)this_val;
     (void)argc;
     (void)argv;
     return JS_NewInt32(ctx, (int32_t)notification__dismiss());
 }
 
-JSValue native_statusIconPush(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
-{
+JSValue native_statusIconPush(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
     (void)this_val;
-    if (argc < 4 || !JS_IsString(ctx, argv[0]) ||
-        JS_GetClassID(ctx, argv[1]) != JS_CLASS_UINT8_ARRAY ||
+    if (argc < 4 || !JS_IsString(ctx, argv[0]) || JS_GetClassID(ctx, argv[1]) != JS_CLASS_UINT8_ARRAY ||
         !JS_IsNumber(ctx, argv[2]) || !JS_IsNumber(ctx, argv[3])) {
-        return JS_ThrowTypeError(ctx, "statusIcon.push(key:string, bitmap:Uint8Array, width:int, height:int)");
+        return JS_ThrowTypeError(
+            ctx, "statusIcon.push(key:string, bitmap:Uint8Array, width:int, height:int)"
+        );
     }
     JSCStringBuf key_buf;
     const char *key = JS_ToCString(ctx, argv[0], &key_buf);
@@ -53,8 +51,7 @@ JSValue native_statusIconPush(JSContext *ctx, JSValue *this_val, int argc, JSVal
     return JS_NewInt32(ctx, (int32_t)status_icon__push(key, bitmap, (uint8_t)width, (uint8_t)height));
 }
 
-JSValue native_statusIconRemove(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
-{
+JSValue native_statusIconRemove(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
     (void)this_val;
     if (argc < 1 || !JS_IsString(ctx, argv[0])) {
         return JS_ThrowTypeError(ctx, "statusIcon.remove(key:string)");
@@ -64,8 +61,7 @@ JSValue native_statusIconRemove(JSContext *ctx, JSValue *this_val, int argc, JSV
     return JS_NewInt32(ctx, (int32_t)status_icon__remove(key));
 }
 
-JSValue native_statusIconList(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
-{
+JSValue native_statusIconList(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
     (void)this_val;
     (void)argc;
     (void)argv;
@@ -73,9 +69,7 @@ JSValue native_statusIconList(JSContext *ctx, JSValue *this_val, int argc, JSVal
     size_t count = 0;
     uint32_t revision = 0;
     bruce_result_t result = status_icon__list(icons, BRUCE_STATUS_ICON_MAX, &count, &revision);
-    if (result != BRUCE_OK) {
-        return JS_ThrowInternalError(ctx, "statusIcon.list failed: %d", (int)result);
-    }
+    if (result != BRUCE_OK) { return JS_ThrowInternalError(ctx, "statusIcon.list failed: %d", (int)result); }
     JSValue array = JS_NewArray(ctx, (int)count);
     JS_SetPropertyStr(ctx, array, "revision", JS_NewInt32(ctx, (int32_t)revision));
     for (size_t i = 0; i < count; ++i) {

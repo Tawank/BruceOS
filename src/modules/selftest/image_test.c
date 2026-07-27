@@ -6,13 +6,10 @@
 #include "core_sdk/display.h"
 #include "core_sdk/image.h"
 
-bool selftest__run_image_decode_case(void)
-{
+bool selftest__run_image_decode_case(void) {
     static const uint8_t red_gif[] = {
-        'G', 'I', 'F', '8', '9', 'a', 1, 0, 1, 0, 0x80, 0, 0,
-        0xff, 0, 0, 0, 0, 0,
-        0x2c, 0, 0, 0, 0, 1, 0, 1, 0, 0,
-        2, 2, 0x44, 0x01, 0, 0x3b,
+        'G', 'I',  'F', '8', '9', 'a', 1, 0, 1, 0, 0x80, 0, 0, 0xff, 0,    0, 0,    0,
+        0,   0x2c, 0,   0,   0,   0,   1, 0, 1, 0, 0,    2, 2, 0x44, 0x01, 0, 0x3b,
     };
     static const uint8_t invalid[] = {'n', 'o', 't', 'i', 'm', 'g'};
     bruce_image_draw_options_t options = {.background = BRUCE_COLOR_BLACK};

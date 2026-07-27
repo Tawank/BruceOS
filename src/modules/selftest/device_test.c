@@ -4,8 +4,7 @@
 
 #include "core_sdk/device.h"
 
-bool selftest__run_device_state_case(void)
-{
+bool selftest__run_device_state_case(void) {
     if (device__get_time(NULL) != BRUCE_ERR_INVALID_ARGUMENT ||
         device__get_date(NULL) != BRUCE_ERR_INVALID_ARGUMENT) {
         printf("[selftest] device/state: NULL output was accepted\n");

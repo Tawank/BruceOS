@@ -12,11 +12,11 @@
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_wifi.h"
-#include "nvs_flash.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "freertos/semphr.h"
 #include "lwip/inet.h"
+#include "nvs_flash.h"
 
 #define WIFI__CONNECTED_BIT BIT0
 #define WIFI__AP_BIT BIT1
@@ -35,17 +35,13 @@ static char s_active_ssid[CONFIG__WIFI_SSID_MAX_LEN + 1];
 static char s_ip_buffer[16];
 static char s_mac_buffer[18];
 
-static void wifi__copy(char *destination, size_t destination_size, const char *source)
-{
-    if (destination == NULL || destination_size == 0) {
-        return;
-    }
+static void wifi__copy(char *destination, size_t destination_size, const char *source) {
+    if (destination == NULL || destination_size == 0) { return; }
     strncpy(destination, source != NULL ? source : "", destination_size - 1);
     destination[destination_size - 1] = '\0';
 }
 
-static void wifi__event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
-{
+static void wifi__event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
     (void)arg;
     (void)event_data;
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
@@ -59,8 +55,7 @@ static void wifi__event_handler(void *arg, esp_event_base_t event_base, int32_t 
     }
 }
 
-static bool wifi__start_locked(wifi_mode_t mode)
-{
+static bool wifi__start_locked(wifi_mode_t mode) {
     esp_err_t err = esp_wifi_set_mode(mode);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "could not select Wi-Fi mode: %s", esp_err_to_name(err));
@@ -77,11 +72,8 @@ static bool wifi__start_locked(wifi_mode_t mode)
     return true;
 }
 
-bruce_result_t wifi__init(void)
-{
-    if (s_wifi_mutex == NULL) {
-        s_wifi_mutex = xSemaphoreCreateMutexStatic(&s_wifi_mutex_storage);
-    }
+bruce_result_t wifi__init(void) {
+    if (s_wifi_mutex == NULL) { s_wifi_mutex = xSemaphoreCreateMutexStatic(&s_wifi_mutex_storage); }
     xSemaphoreTake(s_wifi_mutex, portMAX_DELAY);
     if (s_initialized) {
         xSemaphoreGive(s_wifi_mutex);
@@ -149,8 +141,7 @@ bruce_result_t wifi__init(void)
     return BRUCE_OK;
 }
 
-bruce_result_t wifi__disconnect(void)
-{
+bruce_result_t wifi__disconnect(void) {
     bruce_result_t result = permission__check(BRUCE_PERMISSION_WIFI);
     if (result != BRUCE_OK) return result;
     result = wifi__init();
@@ -168,8 +159,7 @@ bruce_result_t wifi__disconnect(void)
     return BRUCE_OK;
 }
 
-bruce_result_t wifi__connect(const char *ssid, const char *password, uint32_t timeout_ms)
-{
+bruce_result_t wifi__connect(const char *ssid, const char *password, uint32_t timeout_ms) {
     bruce_result_t result = permission__check(BRUCE_PERMISSION_WIFI);
     if (result != BRUCE_OK) return result;
     if (ssid == NULL || ssid[0] == '\0' ||
@@ -198,22 +188,17 @@ bruce_result_t wifi__connect(const char *ssid, const char *password, uint32_t ti
         return BRUCE_ERR_IO;
     }
 
-    if (timeout_ms == 0) {
-        timeout_ms = WIFI__DEFAULT_CONNECT_TIMEOUT_MS;
-    }
-    EventBits_t bits = xEventGroupWaitBits(s_wifi_events, WIFI__CONNECTED_BIT, pdFALSE, pdFALSE,
-                                           pdMS_TO_TICKS(timeout_ms));
-    if ((bits & WIFI__CONNECTED_BIT) == 0) {
-        return BRUCE_ERR_TIMEOUT;
-    }
+    if (timeout_ms == 0) { timeout_ms = WIFI__DEFAULT_CONNECT_TIMEOUT_MS; }
+    EventBits_t bits =
+        xEventGroupWaitBits(s_wifi_events, WIFI__CONNECTED_BIT, pdFALSE, pdFALSE, pdMS_TO_TICKS(timeout_ms));
+    if ((bits & WIFI__CONNECTED_BIT) == 0) { return BRUCE_ERR_TIMEOUT; }
     xSemaphoreTake(s_wifi_mutex, portMAX_DELAY);
     wifi__copy(s_active_ssid, sizeof(s_active_ssid), ssid);
     xSemaphoreGive(s_wifi_mutex);
     return BRUCE_OK;
 }
 
-int wifi__scan(wifi__network_t *networks, size_t capacity)
-{
+int wifi__scan(wifi__network_t *networks, size_t capacity) {
     bruce_result_t result = permission__check(BRUCE_PERMISSION_WIFI);
     if (result != BRUCE_OK) return (int)result;
     if (capacity != 0 && networks == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
@@ -258,8 +243,7 @@ int wifi__scan(wifi__network_t *networks, size_t capacity)
     return scan_result;
 }
 
-bruce_result_t wifi__connect_known(void)
-{
+bruce_result_t wifi__connect_known(void) {
     bruce_result_t result = permission__check(BRUCE_PERMISSION_WIFI);
     if (result != BRUCE_OK) return result;
     wifi__network_t networks[16];
@@ -268,7 +252,8 @@ bruce_result_t wifi__connect_known(void)
     for (int i = 0; i < count; ++i) {
         bruce_config_wifi_credential_t credential;
         if (config__find_wifi_credential(networks[i].ssid, &credential) == BRUCE_OK) {
-            bruce_result_t result = wifi__connect(credential.ssid, credential.password, WIFI__DEFAULT_CONNECT_TIMEOUT_MS);
+            bruce_result_t result =
+                wifi__connect(credential.ssid, credential.password, WIFI__DEFAULT_CONNECT_TIMEOUT_MS);
             config__free_wifi_credential(&credential);
             if (result == BRUCE_OK) return BRUCE_OK;
         }
@@ -276,8 +261,7 @@ bruce_result_t wifi__connect_known(void)
     return BRUCE_ERR_NOT_FOUND;
 }
 
-bruce_result_t wifi__setup_ap(void)
-{
+bruce_result_t wifi__setup_ap(void) {
     bruce_result_t result = permission__check(BRUCE_PERMISSION_WIFI);
     if (result != BRUCE_OK) return result;
     result = wifi__init();
@@ -305,20 +289,17 @@ bruce_result_t wifi__setup_ap(void)
     return started ? BRUCE_OK : BRUCE_ERR_IO;
 }
 
-bool wifi__is_connected(void)
-{
+bool wifi__is_connected(void) {
     if (permission__check(BRUCE_PERMISSION_WIFI) != BRUCE_OK) return false;
     return s_wifi_events != NULL && (xEventGroupGetBits(s_wifi_events) & WIFI__CONNECTED_BIT) != 0;
 }
 
-bool wifi__is_ap_running(void)
-{
+bool wifi__is_ap_running(void) {
     if (permission__check(BRUCE_PERMISSION_WIFI) != BRUCE_OK) return false;
     return s_wifi_events != NULL && (xEventGroupGetBits(s_wifi_events) & WIFI__AP_BIT) != 0;
 }
 
-char *wifi__get_ssid(void)
-{
+char *wifi__get_ssid(void) {
     if (permission__check(BRUCE_PERMISSION_WIFI) != BRUCE_OK) return NULL;
     if (wifi__init() != BRUCE_OK) return NULL;
     xSemaphoreTake(s_wifi_mutex, portMAX_DELAY);
@@ -327,8 +308,7 @@ char *wifi__get_ssid(void)
     return present ? s_active_ssid : NULL;
 }
 
-char *wifi__get_ip(void)
-{
+char *wifi__get_ip(void) {
     if (permission__check(BRUCE_PERMISSION_WIFI) != BRUCE_OK) return NULL;
     if (wifi__init() != BRUCE_OK) return NULL;
     esp_netif_t *netif = NULL;
@@ -338,49 +318,51 @@ char *wifi__get_ip(void)
         netif = s_ap_netif;
     }
     esp_netif_ip_info_t info;
-    if (netif == NULL || esp_netif_get_ip_info(netif, &info) != ESP_OK) {
-        return NULL;
-    }
+    if (netif == NULL || esp_netif_get_ip_info(netif, &info) != ESP_OK) { return NULL; }
     return inet_ntoa_r(info.ip, s_ip_buffer, sizeof(s_ip_buffer)) != NULL ? s_ip_buffer : NULL;
 }
 
-char *wifi__get_mac(void)
-{
+char *wifi__get_mac(void) {
     if (permission__check(BRUCE_PERMISSION_WIFI) != BRUCE_OK) return NULL;
     uint8_t address[6];
     if (wifi__init() != BRUCE_OK) return NULL;
     if (esp_wifi_get_mac(WIFI_IF_STA, address) != ESP_OK) return NULL;
-    snprintf(s_mac_buffer, sizeof(s_mac_buffer), "%02X:%02X:%02X:%02X:%02X:%02X", address[0], address[1],
-             address[2], address[3], address[4], address[5]);
+    snprintf(
+        s_mac_buffer,
+        sizeof(s_mac_buffer),
+        "%02X:%02X:%02X:%02X:%02X:%02X",
+        address[0],
+        address[1],
+        address[2],
+        address[3],
+        address[4],
+        address[5]
+    );
     return s_mac_buffer;
 }
 
-bruce_result_t wifi__add_credential(const char *ssid, const char *password)
-{
+bruce_result_t wifi__add_credential(const char *ssid, const char *password) {
     bruce_result_t result = permission__check(BRUCE_PERMISSION_WIFI);
     if (result != BRUCE_OK) return result;
     if (ssid == NULL || password == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     return config__add_or_update_wifi_credential(ssid, password) ? BRUCE_OK : BRUCE_ERR_IO;
 }
 
-bruce_result_t wifi__scan_hosts(void)
-{
+bruce_result_t wifi__scan_hosts(void) {
     bruce_result_t result = permission__check(BRUCE_PERMISSION_WIFI);
     if (result != BRUCE_OK) return result;
     ESP_LOGW(TAG, "host scanning belongs to a Wi-Fi application module");
     return wifi__is_connected() ? BRUCE_OK : BRUCE_ERR_INVALID_STATE;
 }
 
-bruce_result_t wifi__start_sniffer(void)
-{
+bruce_result_t wifi__start_sniffer(void) {
     bruce_result_t result = permission__check(BRUCE_PERMISSION_WIFI);
     if (result != BRUCE_OK) return result;
     ESP_LOGW(TAG, "sniffer belongs to a Wi-Fi application module");
     return BRUCE_ERR_UNSUPPORTED;
 }
 
-bruce_result_t wifi__listen_tcp(void)
-{
+bruce_result_t wifi__listen_tcp(void) {
     bruce_result_t result = permission__check(BRUCE_PERMISSION_WIFI);
     if (result != BRUCE_OK) return result;
     ESP_LOGW(TAG, "TCP listener belongs to a Wi-Fi application module");

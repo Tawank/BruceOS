@@ -9,25 +9,25 @@
 
 static char s_working_directory[BRUCE_STORAGE_PATH_MAX] = "/";
 
-const char *bnu__get_working_directory(void)
-{
-    return s_working_directory;
-}
+const char *bnu__get_working_directory(void) { return s_working_directory; }
 
-static int bnu__usage(const char *command, const char *arguments)
-{
+static int bnu__usage(const char *command, const char *arguments) {
     printf("usage: %s%s%s\n", command, arguments[0] != '\0' ? " " : "", arguments);
     return BRUCE_ERR_INVALID_ARGUMENT;
 }
 
-static bool bnu__resolve_path(const char *path, char *out_path)
-{
+static bool bnu__resolve_path(const char *path, char *out_path) {
     char combined[BRUCE_STORAGE_PATH_MAX * 2];
     if (path == NULL || path[0] == '\0') path = s_working_directory;
-    int written = path[0] == '/'
-                      ? snprintf(combined, sizeof(combined), "%s", path)
-                      : snprintf(combined, sizeof(combined), "%s%s%s", s_working_directory,
-                                 strcmp(s_working_directory, "/") == 0 ? "" : "/", path);
+    int written = path[0] == '/' ? snprintf(combined, sizeof(combined), "%s", path)
+                                 : snprintf(
+                                       combined,
+                                       sizeof(combined),
+                                       "%s%s%s",
+                                       s_working_directory,
+                                       strcmp(s_working_directory, "/") == 0 ? "" : "/",
+                                       path
+                                   );
     if (written < 0 || (size_t)written >= sizeof(combined)) return false;
 
     size_t out_length = 1;
@@ -56,16 +56,14 @@ static bool bnu__resolve_path(const char *path, char *out_path)
     return true;
 }
 
-int bnu_pwd_app_main(int argc, char **argv)
-{
+int bnu_pwd_app_main(int argc, char **argv) {
     (void)argv;
     if (argc != 0) return bnu__usage("pwd", "");
     printf("%s\n", s_working_directory);
     return BRUCE_OK;
 }
 
-int bnu_cd_app_main(int argc, char **argv)
-{
+int bnu_cd_app_main(int argc, char **argv) {
     if (argc > 1) return bnu__usage("cd", "[directory]");
     char path[BRUCE_STORAGE_PATH_MAX];
     if (!bnu__resolve_path(argc == 1 ? argv[0] : "/", path)) return BRUCE_ERR_INVALID_PATH;
@@ -79,8 +77,7 @@ int bnu_cd_app_main(int argc, char **argv)
     return BRUCE_OK;
 }
 
-int bnu_ls_app_main(int argc, char **argv)
-{
+int bnu_ls_app_main(int argc, char **argv) {
     if (argc > 1) return bnu__usage("ls", "[path]");
     char path[BRUCE_STORAGE_PATH_MAX];
     if (!bnu__resolve_path(argc == 1 ? argv[0] : NULL, path)) return BRUCE_ERR_INVALID_PATH;
@@ -107,14 +104,18 @@ int bnu_ls_app_main(int argc, char **argv)
     return result;
 }
 
-static void bnu__print_memory_row(const char *name, size_t total, size_t free_size, size_t largest)
-{
-    printf("%-5s %7u %7u %6u %6u\n", name, (unsigned)total, (unsigned)(total - free_size),
-           (unsigned)free_size, (unsigned)largest);
+static void bnu__print_memory_row(const char *name, size_t total, size_t free_size, size_t largest) {
+    printf(
+        "%-5s %7u %7u %6u %6u\n",
+        name,
+        (unsigned)total,
+        (unsigned)(total - free_size),
+        (unsigned)free_size,
+        (unsigned)largest
+    );
 }
 
-int bnu_free_app_main(int argc, char **argv)
-{
+int bnu_free_app_main(int argc, char **argv) {
     (void)argv;
     if (argc != 0) return bnu__usage("free", "");
     bruce_memory_stats_t stats;

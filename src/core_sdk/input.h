@@ -27,14 +27,14 @@ typedef enum {
  * physical buttons and Fn-chord keyboard bindings can emit the same
  * semantic events.
  */
-#define BRUCE_INPUT_CODE_UP       0x03B
-#define BRUCE_INPUT_CODE_DOWN     0x02E
-#define BRUCE_INPUT_CODE_LEFT     0x02C
-#define BRUCE_INPUT_CODE_RIGHT    0x02F
-#define BRUCE_INPUT_CODE_SELECT   0x00A
-#define BRUCE_INPUT_CODE_BACK     0x060
-#define BRUCE_INPUT_CODE_MENU     0x106
-#define BRUCE_INPUT_CODE_HOME     0x107
+#define BRUCE_INPUT_CODE_UP 0x03B
+#define BRUCE_INPUT_CODE_DOWN 0x02E
+#define BRUCE_INPUT_CODE_LEFT 0x02C
+#define BRUCE_INPUT_CODE_RIGHT 0x02F
+#define BRUCE_INPUT_CODE_SELECT 0x00A
+#define BRUCE_INPUT_CODE_BACK 0x060
+#define BRUCE_INPUT_CODE_MENU 0x106
+#define BRUCE_INPUT_CODE_HOME 0x107
 #define BRUCE_INPUT_CODE_BUTTON_A 0x200
 #define BRUCE_INPUT_CODE_BUTTON_B 0x201
 #define BRUCE_INPUT_CODE_BUTTON_C 0x202
@@ -90,10 +90,7 @@ bruce_result_t input__read(bruce_input_event_t *out_event, uint32_t timeout_ms);
  *   bruce_input_event_t ev;
  *   while (input__poll(&ev) == BRUCE_OK) { ... handle ev ... }
  */
-static inline bruce_result_t input__poll(bruce_input_event_t *out_event)
-{
-    return input__read(out_event, 0);
-}
+static inline bruce_result_t input__poll(bruce_input_event_t *out_event) { return input__read(out_event, 0); }
 
 /* input__flush removes all queued input events.  It is useful when switching
  * screens so that stale presses do not affect the new UI.  Returns BRUCE_OK

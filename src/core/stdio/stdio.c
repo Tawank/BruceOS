@@ -38,29 +38,25 @@ static portMUX_TYPE s_init_mux = portMUX_INITIALIZER_UNLOCKED;
 static stdio__session_t s_sessions[STDIO__MAX_SESSIONS];
 static bruce_stdio_session_t s_next_id = 1;
 
-static void stdio__ensure_init(void)
-{
+static void stdio__ensure_init(void) {
     if (s_lock != NULL) return;
     portENTER_CRITICAL(&s_init_mux);
     if (s_lock == NULL) s_lock = xSemaphoreCreateMutexStatic(&s_lock_storage);
     portEXIT_CRITICAL(&s_init_mux);
 }
 
-static stdio__session_t *stdio__find_locked(bruce_stdio_session_t id)
-{
+static stdio__session_t *stdio__find_locked(bruce_stdio_session_t id) {
     for (size_t i = 0; i < STDIO__MAX_SESSIONS; ++i) {
         if (s_sessions[i].active && s_sessions[i].id == id) return &s_sessions[i];
     }
     return NULL;
 }
 
-static bool stdio__owned_locked(const stdio__session_t *session, bruce_task_id_t owner)
-{
+static bool stdio__owned_locked(const stdio__session_t *session, bruce_task_id_t owner) {
     return session != NULL && session->owner == owner;
 }
 
-static void stdio__session_cleanup(void *context)
-{
+static void stdio__session_cleanup(void *context) {
     bruce_stdio_session_t id = (bruce_stdio_session_t)(uintptr_t)context;
     stdio__ensure_init();
     xSemaphoreTake(s_lock, portMAX_DELAY);
@@ -69,8 +65,7 @@ static void stdio__session_cleanup(void *context)
     xSemaphoreGive(s_lock);
 }
 
-bruce_result_t bruce_stdio_session_create(bruce_stdio_session_t *out_session)
-{
+bruce_result_t bruce_stdio_session_create(bruce_stdio_session_t *out_session) {
     if (out_session == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     *out_session = BRUCE_STDIO_SESSION_INVALID;
     bruce_task_id_t owner = task__current_id();
@@ -85,8 +80,8 @@ bruce_result_t bruce_stdio_session_create(bruce_stdio_session_t *out_session)
             s_sessions[i].owner = owner;
             bruce_stdio_session_t id = s_sessions[i].id;
             xSemaphoreGive(s_lock);
-            bruce_resource_id_t resource = task_registry__resource_register(
-                stdio__session_cleanup, (void *)(uintptr_t)id);
+            bruce_resource_id_t resource =
+                task_registry__resource_register(stdio__session_cleanup, (void *)(uintptr_t)id);
             if (resource == BRUCE_RESOURCE_ID_INVALID) {
                 stdio__session_cleanup((void *)(uintptr_t)id);
                 return BRUCE_ERR_RESOURCE_LIMIT;
@@ -103,8 +98,7 @@ bruce_result_t bruce_stdio_session_create(bruce_stdio_session_t *out_session)
     return BRUCE_ERR_RESOURCE_LIMIT;
 }
 
-bruce_result_t bruce_stdio_session_close(bruce_stdio_session_t session)
-{
+bruce_result_t bruce_stdio_session_close(bruce_stdio_session_t session) {
     bruce_task_id_t owner = task__current_id();
     stdio__ensure_init();
     xSemaphoreTake(s_lock, portMAX_DELAY);
@@ -121,8 +115,7 @@ bruce_result_t bruce_stdio_session_close(bruce_stdio_session_t session)
     return BRUCE_OK;
 }
 
-bruce_result_t bruce_stdio_session_route_children(bruce_stdio_session_t session)
-{
+bruce_result_t bruce_stdio_session_route_children(bruce_stdio_session_t session) {
     if (session != BRUCE_STDIO_SESSION_INVALID) {
         bruce_task_id_t owner = task__current_id();
         stdio__ensure_init();
@@ -135,8 +128,7 @@ bruce_result_t bruce_stdio_session_route_children(bruce_stdio_session_t session)
     return task_registry__set_child_stdio_session(session);
 }
 
-bruce_result_t bruce_stdio_session_write_input(bruce_stdio_session_t session, const void *data, size_t size)
-{
+bruce_result_t bruce_stdio_session_write_input(bruce_stdio_session_t session, const void *data, size_t size) {
     if (data == NULL || size == 0) return BRUCE_ERR_INVALID_ARGUMENT;
     bruce_task_id_t owner = task__current_id();
     stdio__ensure_init();
@@ -160,9 +152,9 @@ bruce_result_t bruce_stdio_session_write_input(bruce_stdio_session_t session, co
     return BRUCE_OK;
 }
 
-bruce_result_t bruce_stdio_session_read_output(bruce_stdio_session_t session, void *buffer, size_t capacity,
-                                                size_t *out_size)
-{
+bruce_result_t bruce_stdio_session_read_output(
+    bruce_stdio_session_t session, void *buffer, size_t capacity, size_t *out_size
+) {
     if (buffer == NULL || capacity == 0 || out_size == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     *out_size = 0;
     bruce_task_id_t owner = task__current_id();
@@ -185,9 +177,9 @@ bruce_result_t bruce_stdio_session_read_output(bruce_stdio_session_t session, vo
     return copied > 0 ? BRUCE_OK : BRUCE_ERR_TIMEOUT;
 }
 
-bruce_result_t stdio__session_read_input(bruce_stdio_session_t session, void *buffer, size_t capacity,
-                                         uint32_t timeout_ms, size_t *out_size)
-{
+bruce_result_t stdio__session_read_input(
+    bruce_stdio_session_t session, void *buffer, size_t capacity, uint32_t timeout_ms, size_t *out_size
+) {
     if (buffer == NULL || capacity == 0 || out_size == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     *out_size = 0;
     uint64_t started = runtime__now();
@@ -216,16 +208,15 @@ bruce_result_t stdio__session_read_input(bruce_stdio_session_t session, void *bu
     }
 }
 
-static int stdio__stream_read(void *cookie, char *buffer, int size)
-{
+static int stdio__stream_read(void *cookie, char *buffer, int size) {
     size_t read_size = 0;
-    bruce_result_t result = stdio__session_read_input((bruce_stdio_session_t)(uintptr_t)cookie, buffer,
-                                                       (size_t)size, UINT32_MAX, &read_size);
+    bruce_result_t result = stdio__session_read_input(
+        (bruce_stdio_session_t)(uintptr_t)cookie, buffer, (size_t)size, UINT32_MAX, &read_size
+    );
     return result == BRUCE_OK ? (int)read_size : 0;
 }
 
-static int stdio__stream_write(void *cookie, const char *buffer, int size)
-{
+static int stdio__stream_write(void *cookie, const char *buffer, int size) {
     if (buffer == NULL || size <= 0) return 0;
     stdio__ensure_init();
     xSemaphoreTake(s_lock, portMAX_DELAY);
@@ -247,8 +238,9 @@ static int stdio__stream_write(void *cookie, const char *buffer, int size)
     return size;
 }
 
-void stdio__task_attach(bruce_stdio_session_t session, FILE **out_input, FILE **out_output, FILE **out_error)
-{
+void stdio__task_attach(
+    bruce_stdio_session_t session, FILE **out_input, FILE **out_output, FILE **out_error
+) {
     if (out_input != NULL) *out_input = NULL;
     if (out_output != NULL) *out_output = NULL;
     if (out_error != NULL) *out_error = NULL;
@@ -256,9 +248,7 @@ void stdio__task_attach(bruce_stdio_session_t session, FILE **out_input, FILE **
     FILE *input = funopen((void *)(uintptr_t)session, stdio__stream_read, NULL, NULL, NULL);
     FILE *output = funopen((void *)(uintptr_t)session, NULL, stdio__stream_write, NULL, NULL);
     FILE *error = funopen((void *)(uintptr_t)session, NULL, stdio__stream_write, NULL, NULL);
-    if (input == NULL || output == NULL || error == NULL) {
-        return;
-    }
+    if (input == NULL || output == NULL || error == NULL) { return; }
     setvbuf(output, NULL, _IONBF, 0);
     setvbuf(error, NULL, _IONBF, 0);
     stdin = input;
@@ -269,8 +259,7 @@ void stdio__task_attach(bruce_stdio_session_t session, FILE **out_input, FILE **
     if (out_error != NULL) *out_error = error;
 }
 
-void stdio__task_detach(FILE *input, FILE *output, FILE *error)
-{
+void stdio__task_detach(FILE *input, FILE *output, FILE *error) {
     (void)input;
     (void)output;
     (void)error;
@@ -279,8 +268,7 @@ void stdio__task_detach(FILE *input, FILE *output, FILE *error)
      * make the idle task close the same stream and its lock a second time. */
 }
 
-bruce_result_t bruce_stdio_read(void *buffer, size_t capacity, uint32_t timeout_ms, size_t *out_size)
-{
+bruce_result_t bruce_stdio_read(void *buffer, size_t capacity, uint32_t timeout_ms, size_t *out_size) {
     bruce_stdio_session_t session = task_registry__current_stdio_session();
     if (session != BRUCE_STDIO_SESSION_INVALID) {
         return stdio__session_read_input(session, buffer, capacity, timeout_ms, out_size);
@@ -304,8 +292,7 @@ bruce_result_t bruce_stdio_read(void *buffer, size_t capacity, uint32_t timeout_
     return BRUCE_OK;
 }
 
-int bruce_stdio_read_line(char *buffer, size_t buffer_size, bool mask_input)
-{
+int bruce_stdio_read_line(char *buffer, size_t buffer_size, bool mask_input) {
     if (buffer == NULL || buffer_size == 0) return -1;
     bruce_stdio_session_t session = task_registry__current_stdio_session();
     size_t i = 0;

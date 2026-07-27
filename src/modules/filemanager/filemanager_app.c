@@ -7,8 +7,8 @@
 
 #include "core_sdk/app_runner.h"
 #include "core_sdk/dialog.h"
-#include "core_sdk/input.h"
 #include "core_sdk/image.h"
+#include "core_sdk/input.h"
 #include "core_sdk/loader.h"
 #include "core_sdk/result.h"
 #include "core_sdk/storage.h"
@@ -16,14 +16,12 @@
 
 #define FILEMANAGER_PREVIEW_MAX 4096
 
-static const char *filemanager__basename(const char *path)
-{
+static const char *filemanager__basename(const char *path) {
     const char *slash = strrchr(path, '/');
     return slash != NULL ? slash + 1 : path;
 }
 
-static bruce_result_t filemanager__read_preview(const char *path, char **out_text, bool *out_truncated)
-{
+static bruce_result_t filemanager__read_preview(const char *path, char **out_text, bool *out_truncated) {
     bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
     bruce_result_t result = storage__open(path, BRUCE_STORAGE_OPEN_READ, &file);
     if (result != BRUCE_OK) return result;
@@ -57,8 +55,7 @@ static bruce_result_t filemanager__read_preview(const char *path, char **out_tex
     return BRUCE_OK;
 }
 
-static bruce_result_t filemanager__view_file(const char *path, bool gui)
-{
+static bruce_result_t filemanager__view_file(const char *path, bool gui) {
     if (image__is_supported_path(path)) {
         int task = app_runner__run_path(path, NULL, false);
         if (task <= 0) return (bruce_result_t)task;
@@ -104,8 +101,7 @@ static bruce_result_t filemanager__view_file(const char *path, bool gui)
     return dialog__viewer_close(viewer);
 }
 
-static bruce_result_t filemanager__show_info(const char *path)
-{
+static bruce_result_t filemanager__show_info(const char *path) {
     bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
     bruce_result_t result = storage__open(path, BRUCE_STORAGE_OPEN_READ, &file);
     if (result != BRUCE_OK) return result;
@@ -120,21 +116,19 @@ static bruce_result_t filemanager__show_info(const char *path)
     return dialog__message(BRUCE_DIALOG_INFO, "File info", message);
 }
 
-static void filemanager__show_error(const char *action, bruce_result_t result)
-{
+static void filemanager__show_error(const char *action, bruce_result_t result) {
     char message[80];
     snprintf(message, sizeof(message), "%s failed (%d)", action, result);
     (void)dialog__message(BRUCE_DIALOG_ERROR, "File manager", message);
 }
 
-int filemanager_app_main(int argc, char **argv)
-{
+int filemanager_app_main(int argc, char **argv) {
     bool gui = app_runner__args_have_gui(argc, argv);
     const bruce_dialog_choice_t actions[] = {
         {.label = "Open / view", .value = "view"},
-        {.label = "File info", .value = "info"},
-        {.label = "Run", .value = "run"},
-        {.label = "Back", .value = "back"},
+        {.label = "File info",   .value = "info"},
+        {.label = "Run",         .value = "run" },
+        {.label = "Back",        .value = "back"},
     };
 
     for (;;) {
@@ -147,7 +141,9 @@ int filemanager_app_main(int argc, char **argv)
         }
 
         size_t selected = 0;
-        result = dialog__choice("File manager", path, actions, sizeof(actions) / sizeof(actions[0]), &selected, NULL);
+        result = dialog__choice(
+            "File manager", path, actions, sizeof(actions) / sizeof(actions[0]), &selected, NULL
+        );
         if (result == BRUCE_ERR_CANCELLED || selected == 3) continue;
         if (result != BRUCE_OK) {
             filemanager__show_error("Action", result);

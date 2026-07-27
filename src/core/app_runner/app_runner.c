@@ -10,27 +10,27 @@
 #include "core_sdk/result.h"
 #include "core_sdk/task.h"
 
-#include "modules/bruce_launcher/bruce_launcher_app.h"
-#include "modules/bnu/bnu_app.h"
 #include "modules/bluetooth/bluetooth_app.h"
 #include "modules/bluetooth_hid/bluetooth_hid_app.h"
+#include "modules/bnu/bnu_app.h"
+#include "modules/bruce_launcher/bruce_launcher_app.h"
 #include "modules/filemanager/filemanager_app.h"
+#include "modules/ir/ir_app.h"
 #include "modules/loaders/elf/elf_loader_app.h"
 #include "modules/loaders/image/image_loader_app.h"
 #include "modules/loaders/js/js_loader_app.h"
-#include "modules/ir/ir_app.h"
 #include "modules/nrf24/nrf24_app.h"
 #include "modules/selftest/selftest.h"
 #include "modules/tcp/tcp_app.h"
 #include "modules/utils/launcher/launcher_app.h"
+#include "modules/utils/notification/notification_app.h"
 #include "modules/utils/serial_commands/serial_commands_app.h"
 #include "modules/utils/terminal/terminal_app.h"
-#include "modules/utils/notification/notification_app.h"
-#include "modules/wifi/wifi_app.h"
 #include "modules/webui/webui_app.h"
+#include "modules/wifi/wifi_app.h"
 
-#include <stdio.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
@@ -58,21 +58,14 @@ typedef struct {
 static app_runner_loader_t s_loaders[APP_RUNNER_MAX_LOADERS];
 static int s_loader_count;
 
-bruce_result_t app_runner__register(const char *name, bruce_app_entry_t entry)
-{
-    if (name == NULL || name[0] == '\0' || entry == NULL) {
-        return BRUCE_ERR_INVALID_ARGUMENT;
-    }
+bruce_result_t app_runner__register(const char *name, bruce_app_entry_t entry) {
+    if (name == NULL || name[0] == '\0' || entry == NULL) { return BRUCE_ERR_INVALID_ARGUMENT; }
 
     for (int i = 0; i < s_app_count; ++i) {
-        if (strcmp(s_apps[i].name, name) == 0) {
-            return BRUCE_ERR_ALREADY_EXISTS;
-        }
+        if (strcmp(s_apps[i].name, name) == 0) { return BRUCE_ERR_ALREADY_EXISTS; }
     }
 
-    if (s_app_count >= APP_RUNNER_MAX_APPS) {
-        return BRUCE_ERR_RESOURCE_LIMIT;
-    }
+    if (s_app_count >= APP_RUNNER_MAX_APPS) { return BRUCE_ERR_RESOURCE_LIMIT; }
 
     s_apps[s_app_count].name = name;
     s_apps[s_app_count].entry = entry;
@@ -81,11 +74,8 @@ bruce_result_t app_runner__register(const char *name, bruce_app_entry_t entry)
     return BRUCE_OK;
 }
 
-void app_runner__register_defaults(void)
-{
-    if (s_app_count != 0) {
-        return;
-    }
+void app_runner__register_defaults(void) {
+    if (s_app_count != 0) return;
 
     (void)app_runner__register("launcher", launcher_app_main);
     (void)app_runner__register("bruce_launcher", bruce_launcher_app_main);
@@ -121,32 +111,24 @@ void app_runner__register_defaults(void)
     elf_loader__init();
 }
 
-static bruce_app_entry_t app_runner__find_builtin(const char *app_name)
-{
+static bruce_app_entry_t app_runner__find_builtin(const char *app_name) {
     for (int i = 0; i < s_app_count; ++i) {
-        if (strcmp(s_apps[i].name, app_name) == 0) {
-            return s_apps[i].entry;
-        }
+        if (strcmp(s_apps[i].name, app_name) == 0) { return s_apps[i].entry; }
     }
     return NULL;
 }
 
-bruce_result_t app_runner__register_loader(const char *extension, int priority, bruce_loader_run_fn run_fn)
-{
+bruce_result_t app_runner__register_loader(const char *extension, int priority, bruce_loader_run_fn run_fn) {
     if (extension == NULL || extension[0] != '.' || extension[1] == '\0' || run_fn == NULL ||
         strlen(extension) >= APP_RUNNER_LOADER_EXTENSION_MAX) {
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
 
     for (int i = 0; i < s_loader_count; ++i) {
-        if (strcmp(s_loaders[i].extension, extension) == 0) {
-            return BRUCE_ERR_ALREADY_EXISTS;
-        }
+        if (strcmp(s_loaders[i].extension, extension) == 0) { return BRUCE_ERR_ALREADY_EXISTS; }
     }
 
-    if (s_loader_count >= APP_RUNNER_MAX_LOADERS) {
-        return BRUCE_ERR_RESOURCE_LIMIT;
-    }
+    if (s_loader_count >= APP_RUNNER_MAX_LOADERS) { return BRUCE_ERR_RESOURCE_LIMIT; }
 
     app_runner_loader_t *loader = &s_loaders[s_loader_count++];
     strncpy(loader->extension, extension, APP_RUNNER_LOADER_EXTENSION_MAX - 1);
@@ -156,19 +138,13 @@ bruce_result_t app_runner__register_loader(const char *extension, int priority, 
     return BRUCE_OK;
 }
 
-static bool app_runner__path_is_valid(const char *path)
-{
-    if (path == NULL || strstr(path, "..") != NULL) {
-        return false;
-    }
+static bool app_runner__path_is_valid(const char *path) {
+    if (path == NULL || strstr(path, "..") != NULL) { return false; }
     return path[0] == '/' || strncmp(path, "./", 2) == 0;
 }
 
-static bool app_runner__normalize_path(const char *path, char *out, size_t out_size)
-{
-    if (path == NULL || strstr(path, "..") != NULL || out_size == 0) {
-        return false;
-    }
+static bool app_runner__normalize_path(const char *path, char *out, size_t out_size) {
+    if (path == NULL || strstr(path, "..") != NULL || out_size == 0) { return false; }
     int len;
     if (path[0] == '/') {
         len = snprintf(out, out_size, "%s", path);
@@ -180,19 +156,15 @@ static bool app_runner__normalize_path(const char *path, char *out, size_t out_s
     return len > 0 && (size_t)len < out_size;
 }
 
-static bool app_runner__path_has_extension(const char *path, const char *extension)
-{
+static bool app_runner__path_has_extension(const char *path, const char *extension) {
     size_t path_len = strlen(path);
     size_t ext_len = strlen(extension);
     return path_len > ext_len && strcasecmp(path + path_len - ext_len, extension) == 0;
 }
 
-static app_runner_loader_t *app_runner__find_loader_for_path(const char *path)
-{
+static app_runner_loader_t *app_runner__find_loader_for_path(const char *path) {
     for (int i = 0; i < s_loader_count; ++i) {
-        if (app_runner__path_has_extension(path, s_loaders[i].extension)) {
-            return &s_loaders[i];
-        }
+        if (app_runner__path_has_extension(path, s_loaders[i].extension)) { return &s_loaders[i]; }
     }
     return NULL;
 }
@@ -200,11 +172,8 @@ static app_runner_loader_t *app_runner__find_loader_for_path(const char *path)
 /* Fills `order` (capacity APP_RUNNER_MAX_LOADERS) with s_loaders indices
  * sorted by ascending priority (stable for equal priorities). Returns the
  * loader count. */
-static int app_runner__loader_priority_order(int *order)
-{
-    for (int i = 0; i < s_loader_count; ++i) {
-        order[i] = i;
-    }
+static int app_runner__loader_priority_order(int *order) {
+    for (int i = 0; i < s_loader_count; ++i) { order[i] = i; }
     for (int i = 1; i < s_loader_count; ++i) {
         int key = order[i];
         int j = i - 1;
@@ -217,16 +186,11 @@ static int app_runner__loader_priority_order(int *order)
     return s_loader_count;
 }
 
-int app_runner__run_path(const char *path, const char *arg, bool in_background)
-{
-    if (!app_runner__path_is_valid(path)) {
-        return BRUCE_ERR_INVALID_PATH;
-    }
+int app_runner__run_path(const char *path, const char *arg, bool in_background) {
+    if (!app_runner__path_is_valid(path)) { return BRUCE_ERR_INVALID_PATH; }
 
     bruce_result_t permission_result = permission__check(BRUCE_PERMISSION_EXECUTE);
-    if (permission_result != BRUCE_OK) {
-        return permission_result;
-    }
+    if (permission_result != BRUCE_OK) { return permission_result; }
 
     char normalized_path[APP_RUNNER_PATH_MAX];
     if (!app_runner__normalize_path(path, normalized_path, sizeof(normalized_path))) {
@@ -238,16 +202,20 @@ int app_runner__run_path(const char *path, const char *arg, bool in_background)
         printf("app_runner__run_path: normalized_path=%s, loader=NULL\n", normalized_path);
         return BRUCE_ERR_NOT_FOUND;
     }
-    printf("app_runner__run_path: normalized_path=%s, loader=%p, priority=%d\n", normalized_path, (void *)loader, loader->priority);
+    printf(
+        "app_runner__run_path: normalized_path=%s, loader=%p, priority=%d\n",
+        normalized_path,
+        (void *)loader,
+        loader->priority
+    );
     return loader->run_fn(normalized_path, arg, in_background);
 }
 
-int app_runner__spawn_loader_task(const char *permission_key, bool gui_requested, bool in_background,
-                                   uint32_t stack_size, bruce_loader_task_entry_fn entry, void *context)
-{
-    if (entry == NULL) {
-        return BRUCE_ERR_INVALID_ARGUMENT;
-    }
+int app_runner__spawn_loader_task(
+    const char *permission_key, bool gui_requested, bool in_background, uint32_t stack_size,
+    bruce_loader_task_entry_fn entry, void *context
+) {
+    if (entry == NULL) { return BRUCE_ERR_INVALID_ARGUMENT; }
     task_create_params_t params = {
         .name = (permission_key != NULL && permission_key[0] != '\0') ? permission_key : "app",
         .entry = NULL,
@@ -266,42 +234,28 @@ int app_runner__spawn_loader_task(const char *permission_key, bool gui_requested
     return create_result == BRUCE_OK ? (int)task_id : (int)create_result;
 }
 
-void app_runner__free_args(char **argv, int argc)
-{
-    if (argv == NULL) {
-        return;
-    }
-    for (int i = 0; i < argc; ++i) {
-        free(argv[i]);
-    }
+void app_runner__free_args(char **argv, int argc) {
+    if (argv == NULL) { return; }
+    for (int i = 0; i < argc; ++i) { free(argv[i]); }
     free(argv);
 }
 
-bruce_result_t app_runner__parse_args(const char *arg, char ***out_argv, int *out_argc)
-{
+bruce_result_t app_runner__parse_args(const char *arg, char ***out_argv, int *out_argc) {
     *out_argv = NULL;
     *out_argc = 0;
-    if (arg == NULL || arg[0] == '\0') {
-        return BRUCE_OK;
-    }
+    if (arg == NULL || arg[0] == '\0') { return BRUCE_OK; }
 
     size_t length = strlen(arg);
     char *token = malloc(length + 1);
-    if (token == NULL) {
-        return BRUCE_ERR_NO_MEMORY;
-    }
+    if (token == NULL) { return BRUCE_ERR_NO_MEMORY; }
 
     char **argv = NULL;
     int argc = 0;
     size_t i = 0;
 
     while (i < length) {
-        while (i < length && (arg[i] == ' ' || arg[i] == '\t')) {
-            i++;
-        }
-        if (i >= length) {
-            break;
-        }
+        while (i < length && (arg[i] == ' ' || arg[i] == '\t')) { i++; }
+        if (i >= length) { break; }
 
         size_t token_len = 0;
         bool in_single = false;
@@ -334,9 +288,7 @@ bruce_result_t app_runner__parse_args(const char *arg, char ***out_argv, int *ou
                 i++;
                 continue;
             }
-            if (c == ' ' || c == '\t') {
-                break;
-            }
+            if (c == ' ' || c == '\t') { break; }
             if (c == '\'') {
                 in_single = true;
                 i++;
@@ -394,33 +346,23 @@ bruce_result_t app_runner__parse_args(const char *arg, char ***out_argv, int *ou
 /* AppRunner records this task context ahead of any launch-time permission
  * check (see migration_plan.md, "Dialog and task interaction"); the
  * "--gui" token is left in argv, not stripped. */
-bool app_runner__args_have_gui(int argc, char *const *argv)
-{
+bool app_runner__args_have_gui(int argc, char *const *argv) {
     for (int i = 0; i < argc; ++i) {
-        if (argv[i] != NULL && strcmp(argv[i], "--gui") == 0) {
-            return true;
-        }
+        if (argv[i] != NULL && strcmp(argv[i], "--gui") == 0) { return true; }
     }
     return false;
 }
 
-int app_runner__run(const char *app_name, const char *arg, bool in_background)
-{
-    if (app_name == NULL || app_name[0] == '\0') {
-        return BRUCE_ERR_INVALID_ARGUMENT;
-    }
+int app_runner__run(const char *app_name, const char *arg, bool in_background) {
+    if (app_name == NULL || app_name[0] == '\0') { return BRUCE_ERR_INVALID_ARGUMENT; }
 
     bruce_result_t permission_result = permission__check(BRUCE_PERMISSION_EXECUTE);
-    if (permission_result != BRUCE_OK) {
-        return permission_result;
-    }
+    if (permission_result != BRUCE_OK) { return permission_result; }
 
     char **argv = NULL;
     int argc = 0;
     bruce_result_t parse_result = app_runner__parse_args(arg, &argv, &argc);
-    if (parse_result != BRUCE_OK) {
-        return parse_result;
-    }
+    if (parse_result != BRUCE_OK) { return parse_result; }
 
     /* 1. registered built-in. */
     bruce_app_entry_t entry = app_runner__find_builtin(app_name);
@@ -459,9 +401,7 @@ int app_runner__run(const char *app_name, const char *arg, bool in_background)
             app_runner_loader_t *loader = &s_loaders[order[i]];
             char path[APP_RUNNER_PATH_MAX];
             int written = snprintf(path, sizeof(path), "/bin/%s%s", app_name, loader->extension);
-            if (written < 0 || (size_t)written >= sizeof(path)) {
-                continue;
-            }
+            if (written < 0 || (size_t)written >= sizeof(path)) { continue; }
             if (storage__exists(path)) {
                 result = loader->run_fn(path, arg, in_background);
                 break;

@@ -5,43 +5,42 @@
 #include "freertos/FreeRTOS.h" // IWYU pragma: export
 #include "freertos/task.h"
 
-#include "task_test.h"
+#include "app_runner_test.h"
 #include "bluetooth_test.h"
 #include "bnu_test.h"
-#include "app_runner_test.h"
-#include "permission_test.h"
-#include "storage_test.h"
 #include "config_test.h"
-#include "loader_test.h"
-#include "terminal_test.h"
-#include "launcher_test.h"
-#include "wifi_test.h"
-#include "input_test.h"
-#include "image_test.h"
-#include "ir_test.h"
-#include "dialog_test.h"
 #include "device_test.h"
+#include "dialog_test.h"
 #include "display_test.h"
 #include "gpio_bus_test.h"
+#include "image_test.h"
+#include "input_test.h"
+#include "ir_test.h"
+#include "launcher_test.h"
+#include "loader_test.h"
 #include "notification_test.h"
 #include "nrf24_test.h"
+#include "permission_test.h"
+#include "storage_test.h"
+#include "task_test.h"
+#include "terminal_test.h"
+#include "wifi_test.h"
 
-void selftest__resource_cleanup(void *context)
-{
+void selftest__resource_cleanup(void *context) {
     selftest__shared_t *shared = (selftest__shared_t *)context;
     shared->resource_cleanup_ran = true;
 }
 
-int selftest_app_main(int argc, char **argv)
-{
+int selftest_app_main(int argc, char **argv) {
     (void)argc;
     (void)argv;
 
     int failures = 0;
-#define RUN_SELFTEST(fn) do { \
-        bool passed = (fn)(); \
-        printf("[selftest] %s %s\n", #fn, passed ? "PASS" : "FAIL"); \
-        if (!passed) failures++; \
+#define RUN_SELFTEST(fn)                                                                                     \
+    do {                                                                                                     \
+        bool passed = (fn)();                                                                                \
+        printf("[selftest] %s %s\n", #fn, passed ? "PASS" : "FAIL");                                         \
+        if (!passed) failures++;                                                                             \
     } while (0)
 
     RUN_SELFTEST(selftest__run_task_normal_exit_case);

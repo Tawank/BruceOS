@@ -34,8 +34,7 @@ static StaticSemaphore_t s_mutex_storage;
 static SemaphoreHandle_t s_mutex;
 static portMUX_TYPE s_init_mux = portMUX_INITIALIZER_UNLOCKED;
 
-static void tcp__lock(void)
-{
+static void tcp__lock(void) {
     if (s_mutex == NULL) {
         portENTER_CRITICAL(&s_init_mux);
         if (s_mutex == NULL) s_mutex = xSemaphoreCreateMutexStatic(&s_mutex_storage);
@@ -44,13 +43,9 @@ static void tcp__lock(void)
     xSemaphoreTake(s_mutex, portMAX_DELAY);
 }
 
-static void tcp__unlock(void)
-{
-    xSemaphoreGive(s_mutex);
-}
+static void tcp__unlock(void) { xSemaphoreGive(s_mutex); }
 
-static int tcp__find_locked(bruce_tcp_id_t id)
-{
+static int tcp__find_locked(bruce_tcp_id_t id) {
     if (id == BRUCE_TCP_ID_INVALID) return -1;
     for (int i = 0; i < TCP__MAX_SOCKETS; ++i) {
         if (s_slots[i].in_use && s_slots[i].id == id) return i;
@@ -58,8 +53,7 @@ static int tcp__find_locked(bruce_tcp_id_t id)
     return -1;
 }
 
-static void tcp__cleanup(void *context)
-{
+static void tcp__cleanup(void *context) {
     tcp__slot_t *slot = context;
     tcp__lock();
     if (slot->in_use) {
@@ -70,8 +64,7 @@ static void tcp__cleanup(void *context)
     tcp__unlock();
 }
 
-static bruce_result_t tcp__adopt(int fd, bruce_tcp_id_t *out_socket)
-{
+static bruce_result_t tcp__adopt(int fd, bruce_tcp_id_t *out_socket) {
     tcp__lock();
     int index = -1;
     for (int i = 0; i < TCP__MAX_SOCKETS; ++i) {
@@ -109,8 +102,7 @@ static bruce_result_t tcp__adopt(int fd, bruce_tcp_id_t *out_socket)
     return BRUCE_OK;
 }
 
-static bruce_result_t tcp__owned_fd(bruce_tcp_id_t socket, int *out_fd)
-{
+static bruce_result_t tcp__owned_fd(bruce_tcp_id_t socket, int *out_fd) {
     tcp__lock();
     int index = tcp__find_locked(socket);
     if (index < 0) {
@@ -126,8 +118,7 @@ static bruce_result_t tcp__owned_fd(bruce_tcp_id_t socket, int *out_fd)
     return BRUCE_OK;
 }
 
-static bruce_result_t tcp__wait_fd(int fd, bool write_ready, uint32_t timeout_ms)
-{
+static bruce_result_t tcp__wait_fd(int fd, bool write_ready, uint32_t timeout_ms) {
     fd_set set;
     FD_ZERO(&set);
     FD_SET(fd, &set);
@@ -140,9 +131,8 @@ static bruce_result_t tcp__wait_fd(int fd, bool write_ready, uint32_t timeout_ms
     return ready < 0 ? BRUCE_ERR_IO : BRUCE_OK;
 }
 
-bruce_result_t tcp__connect(const char *host, uint16_t port, uint32_t timeout_ms,
-                            bruce_tcp_id_t *out_socket)
-{
+bruce_result_t
+tcp__connect(const char *host, uint16_t port, uint32_t timeout_ms, bruce_tcp_id_t *out_socket) {
     bruce_result_t permission = permission__check(BRUCE_PERMISSION_WIFI);
     if (permission != BRUCE_OK) return permission;
     if (host == NULL || host[0] == '\0' || port == 0 || out_socket == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
@@ -180,7 +170,8 @@ bruce_result_t tcp__connect(const char *host, uint16_t port, uint32_t timeout_ms
         return BRUCE_ERR_IO;
     }
     if (connected < 0) {
-        bruce_result_t wait = tcp__wait_fd(fd, true, timeout_ms == 0 ? TCP__DEFAULT_CONNECT_TIMEOUT_MS : timeout_ms);
+        bruce_result_t wait =
+            tcp__wait_fd(fd, true, timeout_ms == 0 ? TCP__DEFAULT_CONNECT_TIMEOUT_MS : timeout_ms);
         if (wait != BRUCE_OK) {
             (void)tcp__close(socket_id);
             return wait;
@@ -196,8 +187,7 @@ bruce_result_t tcp__connect(const char *host, uint16_t port, uint32_t timeout_ms
     return BRUCE_OK;
 }
 
-bruce_result_t tcp__listen(uint16_t port, bruce_tcp_id_t *out_listener)
-{
+bruce_result_t tcp__listen(uint16_t port, bruce_tcp_id_t *out_listener) {
     bruce_result_t permission = permission__check(BRUCE_PERMISSION_WIFI);
     if (permission != BRUCE_OK) return permission;
     if (port == 0 || out_listener == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
@@ -221,9 +211,9 @@ bruce_result_t tcp__listen(uint16_t port, bruce_tcp_id_t *out_listener)
     return tcp__adopt(fd, out_listener);
 }
 
-bruce_result_t tcp__accept(bruce_tcp_id_t listener, uint32_t timeout_ms,
-                           bruce_tcp_id_t *out_socket, bruce_tcp_endpoint_t *out_peer)
-{
+bruce_result_t tcp__accept(
+    bruce_tcp_id_t listener, uint32_t timeout_ms, bruce_tcp_id_t *out_socket, bruce_tcp_endpoint_t *out_peer
+) {
     bruce_result_t permission = permission__check(BRUCE_PERMISSION_WIFI);
     if (permission != BRUCE_OK) return permission;
     if (out_socket == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
@@ -252,9 +242,8 @@ bruce_result_t tcp__accept(bruce_tcp_id_t listener, uint32_t timeout_ms,
     return result;
 }
 
-bruce_result_t tcp__read(bruce_tcp_id_t socket, void *buffer, size_t capacity,
-                         uint32_t timeout_ms, size_t *out_size)
-{
+bruce_result_t
+tcp__read(bruce_tcp_id_t socket, void *buffer, size_t capacity, uint32_t timeout_ms, size_t *out_size) {
     bruce_result_t permission = permission__check(BRUCE_PERMISSION_WIFI);
     if (permission != BRUCE_OK) return permission;
     if (buffer == NULL || capacity == 0 || out_size == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
@@ -270,9 +259,8 @@ bruce_result_t tcp__read(bruce_tcp_id_t socket, void *buffer, size_t capacity,
     return BRUCE_OK;
 }
 
-bruce_result_t tcp__write(bruce_tcp_id_t socket, const void *buffer, size_t size,
-                          uint32_t timeout_ms, size_t *out_size)
-{
+bruce_result_t
+tcp__write(bruce_tcp_id_t socket, const void *buffer, size_t size, uint32_t timeout_ms, size_t *out_size) {
     bruce_result_t permission = permission__check(BRUCE_PERMISSION_WIFI);
     if (permission != BRUCE_OK) return permission;
     if ((buffer == NULL && size != 0) || out_size == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
@@ -289,8 +277,7 @@ bruce_result_t tcp__write(bruce_tcp_id_t socket, const void *buffer, size_t size
     return BRUCE_OK;
 }
 
-bruce_result_t tcp__close(bruce_tcp_id_t socket)
-{
+bruce_result_t tcp__close(bruce_tcp_id_t socket) {
     bruce_result_t permission = permission__check(BRUCE_PERMISSION_WIFI);
     if (permission != BRUCE_OK) return permission;
     tcp__lock();

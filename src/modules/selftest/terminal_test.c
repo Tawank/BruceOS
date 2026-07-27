@@ -23,8 +23,7 @@ typedef struct {
 
 static terminal_test_echo_t s_echo;
 
-static int selftest__terminal_test_echo_entry(int argc, char **argv)
-{
+static int selftest__terminal_test_echo_entry(int argc, char **argv) {
     s_echo.argc = argc;
     for (int i = 0; i < argc && i < 4; ++i) {
         strncpy(s_echo.argv_buf[i], argv[i], sizeof(s_echo.argv_buf[i]) - 1);
@@ -33,11 +32,11 @@ static int selftest__terminal_test_echo_entry(int argc, char **argv)
     return 0;
 }
 
-bool selftest__run_terminal_named_case(void)
-{
+bool selftest__run_terminal_named_case(void) {
     memset(&s_echo, 0, sizeof(s_echo));
 
-    bruce_result_t registered = app_runner__register("terminal_test_echo", selftest__terminal_test_echo_entry);
+    bruce_result_t registered =
+        app_runner__register("terminal_test_echo", selftest__terminal_test_echo_entry);
     if (registered != BRUCE_OK && registered != BRUCE_ERR_ALREADY_EXISTS) {
         printf("[selftest] terminal/named: failed to register echo app (%d)\n", registered);
         return false;
@@ -57,8 +56,12 @@ bool selftest__run_terminal_named_case(void)
 
     if (s_echo.argc != 2 || strcmp(s_echo.argv_buf[0], "hello") != 0 ||
         strcmp(s_echo.argv_buf[1], "world now") != 0) {
-        printf("[selftest] terminal/named: argc=%d argv=[%s|%s]\n", s_echo.argc, s_echo.argv_buf[0],
-               s_echo.argv_buf[1]);
+        printf(
+            "[selftest] terminal/named: argc=%d argv=[%s|%s]\n",
+            s_echo.argc,
+            s_echo.argv_buf[0],
+            s_echo.argv_buf[1]
+        );
         return false;
     }
 
@@ -70,8 +73,7 @@ bool selftest__run_terminal_named_case(void)
 /* Terminal parser: path dispatch (ELF loader)                               */
 /* ------------------------------------------------------------------------ */
 
-bool selftest__run_terminal_path_case(void)
-{
+bool selftest__run_terminal_path_case(void) {
     const char *path = "/apps/terminal_test_app.elf";
     storage__remove(path);
 
@@ -84,14 +86,16 @@ bool selftest__run_terminal_path_case(void)
     int result = serial_commands__run_line(path, false);
     size_t calls_after = elf_loader__debug_call_count();
 
-    if (result > 0) {
-        (void)task__wait((bruce_task_id_t)result, 2000);
-    }
+    if (result > 0) { (void)task__wait((bruce_task_id_t)result, 2000); }
     storage__remove(path);
 
     if (result <= 0 || calls_after != calls_before + 1) {
-        printf("[selftest] terminal/path: ELF loader not dispatched (%d, calls %zu -> %zu)\n", result, calls_before,
-               calls_after);
+        printf(
+            "[selftest] terminal/path: ELF loader not dispatched (%d, calls %zu -> %zu)\n",
+            result,
+            calls_before,
+            calls_after
+        );
         return false;
     }
 
@@ -103,14 +107,15 @@ bool selftest__run_terminal_path_case(void)
 /* Terminal parser: invalid input                                            */
 /* ------------------------------------------------------------------------ */
 
-bool selftest__run_terminal_invalid_case(void)
-{
+bool selftest__run_terminal_invalid_case(void) {
     if (serial_commands__run_line("", false) != BRUCE_ERR_INVALID_ARGUMENT) {
         printf("[selftest] terminal/invalid: empty line did not return BRUCE_ERR_INVALID_ARGUMENT\n");
         return false;
     }
     if (serial_commands__run_line("   ", false) != BRUCE_ERR_INVALID_ARGUMENT) {
-        printf("[selftest] terminal/invalid: whitespace-only line did not return BRUCE_ERR_INVALID_ARGUMENT\n");
+        printf(
+            "[selftest] terminal/invalid: whitespace-only line did not return BRUCE_ERR_INVALID_ARGUMENT\n"
+        );
         return false;
     }
     if (serial_commands__run_line("selftest_terminal_unknown_command", false) != BRUCE_ERR_NOT_FOUND) {
@@ -122,19 +127,15 @@ bool selftest__run_terminal_invalid_case(void)
     return true;
 }
 
-static int selftest__terminal_stdio_entry(int argc, char **argv)
-{
+static int selftest__terminal_stdio_entry(int argc, char **argv) {
     (void)argc;
     (void)argv;
     char line[32];
-    if (bruce_stdio_read_line(line, sizeof(line), false) >= 0) {
-        printf("received:%s\n", line);
-    }
+    if (bruce_stdio_read_line(line, sizeof(line), false) >= 0) { printf("received:%s\n", line); }
     return 0;
 }
 
-bool selftest__run_terminal_stdio_case(void)
-{
+bool selftest__run_terminal_stdio_case(void) {
     bruce_result_t registered = app_runner__register("terminal_test_stdio", selftest__terminal_stdio_entry);
     if (registered != BRUCE_OK && registered != BRUCE_ERR_ALREADY_EXISTS) return false;
 
@@ -152,7 +153,8 @@ bool selftest__run_terminal_stdio_case(void)
     bruce_result_t waited = task__wait((bruce_task_id_t)result, 2000);
     char output[128] = {0};
     size_t output_size = 0;
-    bruce_result_t read_result = bruce_stdio_session_read_output(session, output, sizeof(output) - 1, &output_size);
+    bruce_result_t read_result =
+        bruce_stdio_session_read_output(session, output, sizeof(output) - 1, &output_size);
     (void)bruce_stdio_session_close(session);
     bool ok = (waited == BRUCE_OK || waited == BRUCE_ERR_NOT_FOUND) && read_result == BRUCE_OK &&
               strstr(output, "hello") != NULL && strstr(output, "received:hello") != NULL;

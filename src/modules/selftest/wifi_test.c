@@ -28,8 +28,7 @@ typedef struct {
 
 static selftest__wifi_http_result_t s_wifi_http_result;
 
-static int selftest__wifi_scan_entry(int argc, char **argv)
-{
+static int selftest__wifi_scan_entry(int argc, char **argv) {
     (void)argc;
     (void)argv;
     wifi__network_t networks[4];
@@ -43,8 +42,7 @@ static int selftest__wifi_scan_entry(int argc, char **argv)
     return 0;
 }
 
-static int selftest__http_request_entry(int argc, char **argv)
-{
+static int selftest__http_request_entry(int argc, char **argv) {
     (void)argc;
     (void)argv;
     bruce_http_request_t request = {
@@ -62,8 +60,7 @@ static int selftest__http_request_entry(int argc, char **argv)
     return 0;
 }
 
-static int selftest__tcp_connect_entry(int argc, char **argv)
-{
+static int selftest__tcp_connect_entry(int argc, char **argv) {
     (void)argc;
     (void)argv;
     bruce_tcp_id_t socket = BRUCE_TCP_ID_INVALID;
@@ -72,8 +69,7 @@ static int selftest__tcp_connect_entry(int argc, char **argv)
     return 0;
 }
 
-static bruce_result_t selftest__run_as_external(const char *permission_key, bruce_app_entry_t entry)
-{
+static bruce_result_t selftest__run_as_external(const char *permission_key, bruce_app_entry_t entry) {
     memset(&s_wifi_http_result, 0, sizeof(s_wifi_http_result));
     task_create_params_t params = {
         .name = "selftest_wifi_http",
@@ -87,18 +83,13 @@ static bruce_result_t selftest__run_as_external(const char *permission_key, bruc
         .stack_bytes = 8192,
     };
     bruce_task_id_t id = BRUCE_TASK_ID_INVALID;
-    if (task_registry__create(&params, &id) != BRUCE_OK) {
-        return BRUCE_ERR_INTERNAL;
-    }
+    if (task_registry__create(&params, &id) != BRUCE_OK) { return BRUCE_ERR_INTERNAL; }
     bruce_result_t wait_result = task__wait(id, 5000);
-    if (wait_result != BRUCE_OK && wait_result != BRUCE_ERR_NOT_FOUND) {
-        return BRUCE_ERR_TIMEOUT;
-    }
+    if (wait_result != BRUCE_OK && wait_result != BRUCE_ERR_NOT_FOUND) { return BRUCE_ERR_TIMEOUT; }
     return s_wifi_http_result.ran ? s_wifi_http_result.result : BRUCE_ERR_INTERNAL;
 }
 
-static bool selftest__denied_wifi_scan(void)
-{
+static bool selftest__denied_wifi_scan(void) {
     permission__test_reset();
     permission__set("wifi_http_indep.elf", BRUCE_PERMISSION_WIFI, false);
     permission__set("wifi_http_indep.elf", BRUCE_PERMISSION_HTTP, false);
@@ -110,8 +101,7 @@ static bool selftest__denied_wifi_scan(void)
     return ok;
 }
 
-static bool selftest__denied_http_request(void)
-{
+static bool selftest__denied_http_request(void) {
     permission__test_reset();
     permission__set("wifi_http_indep.elf", BRUCE_PERMISSION_WIFI, false);
     permission__set("wifi_http_indep.elf", BRUCE_PERMISSION_HTTP, false);
@@ -123,18 +113,11 @@ static bool selftest__denied_http_request(void)
     return ok;
 }
 
-bool selftest__run_wifi_permission_denied_case(void)
-{
-    return selftest__denied_wifi_scan();
-}
+bool selftest__run_wifi_permission_denied_case(void) { return selftest__denied_wifi_scan(); }
 
-bool selftest__run_http_permission_denied_case(void)
-{
-    return selftest__denied_http_request();
-}
+bool selftest__run_http_permission_denied_case(void) { return selftest__denied_http_request(); }
 
-bool selftest__run_wifi_http_independent_permission_case(void)
-{
+bool selftest__run_wifi_http_independent_permission_case(void) {
     permission__test_reset();
     /* Deny Wi-Fi, allow HTTP. wifi__scan must fail with permission error while
      * http__request must not fail because of the Wi-Fi permission. */
@@ -146,16 +129,20 @@ bool selftest__run_wifi_http_independent_permission_case(void)
     /* For the allowed HTTP case, the network request itself will almost
      * certainly fail (no connectivity in a self-test environment), but it must
      * not be BRUCE_ERR_PERMISSION because `http` was allowed. */
-    bruce_result_t http_result = selftest__run_as_external("wifi_http_indep.elf", selftest__http_request_entry);
+    bruce_result_t http_result =
+        selftest__run_as_external("wifi_http_indep.elf", selftest__http_request_entry);
 
     bool ok = wifi_result == BRUCE_ERR_PERMISSION && http_result != BRUCE_ERR_PERMISSION;
-    printf("[selftest] wifi+http/independent-permission: %s (wifi=%d http=%d)\n", ok ? "OK" : "FAIL", wifi_result,
-           http_result);
+    printf(
+        "[selftest] wifi+http/independent-permission: %s (wifi=%d http=%d)\n",
+        ok ? "OK" : "FAIL",
+        wifi_result,
+        http_result
+    );
     return ok;
 }
 
-bool selftest__run_tcp_permission_denied_case(void)
-{
+bool selftest__run_tcp_permission_denied_case(void) {
     permission__test_reset();
     permission__set("tcp_denied.elf", BRUCE_PERMISSION_WIFI, false);
     bruce_result_t result = selftest__run_as_external("tcp_denied.elf", selftest__tcp_connect_entry);

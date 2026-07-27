@@ -91,8 +91,9 @@ void task_registry__account_memory(int64_t delta_bytes);
  * before any task_registry__create() call). Used by permission__check() and
  * the dialog__* renderer-selection logic; built-in modules and apps must
  * never call this directly. */
-bruce_result_t task_registry__current_context(bool *out_built_in, char *out_permission_key,
-                                               size_t permission_key_size, bool *out_gui_requested);
+bruce_result_t task_registry__current_context(
+    bool *out_built_in, char *out_permission_key, size_t permission_key_size, bool *out_gui_requested
+);
 
 /* Input's per-task wake channel. These helpers never run while the input mutex
  * is held except for the lock-free event-group wait itself. */

@@ -12,8 +12,7 @@
 static volatile bruce_result_t s_ir_result;
 static volatile bool s_ir_ran;
 
-static int selftest__ir_external_entry(int argc, char **argv)
-{
+static int selftest__ir_external_entry(int argc, char **argv) {
     (void)argc;
     (void)argv;
     s_ir_result = ir__transmit("20DF10EF", "NEC", 32, 0);
@@ -21,8 +20,7 @@ static int selftest__ir_external_entry(int argc, char **argv)
     return 0;
 }
 
-bool selftest__run_ir_permission_denied_case(void)
-{
+bool selftest__run_ir_permission_denied_case(void) {
     permission__test_reset();
     permission__set("ir_denied.js", BRUCE_PERMISSION_IR, false);
     s_ir_result = BRUCE_OK;
@@ -38,14 +36,13 @@ bool selftest__run_ir_permission_denied_case(void)
     bruce_task_id_t id = BRUCE_TASK_ID_INVALID;
     if (task_registry__create(&params, &id) != BRUCE_OK) return false;
     bruce_result_t wait = task__wait(id, 5000);
-    bool ok = (wait == BRUCE_OK || wait == BRUCE_ERR_NOT_FOUND) && s_ir_ran &&
-              s_ir_result == BRUCE_ERR_PERMISSION;
+    bool ok =
+        (wait == BRUCE_OK || wait == BRUCE_ERR_NOT_FOUND) && s_ir_ran && s_ir_result == BRUCE_ERR_PERMISSION;
     printf("[selftest] ir/permission-denied: %s (result=%d)\n", ok ? "OK" : "FAIL", s_ir_result);
     return ok;
 }
 
-bool selftest__run_ir_validation_case(void)
-{
+bool selftest__run_ir_validation_case(void) {
     uint32_t timing = 560;
     bool ok = ir__transmit(NULL, "NEC", 32, 0) == BRUCE_ERR_INVALID_ARGUMENT &&
               ir__transmit("1", "unknown", 1, 0) == BRUCE_ERR_UNSUPPORTED &&

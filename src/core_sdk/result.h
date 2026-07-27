@@ -31,7 +31,4 @@ typedef enum {
     BRUCE_ERR_INTERNAL = -19,
 } bruce_result_t;
 
-static inline int bruce__result_is_ok(bruce_result_t result)
-{
-    return result == BRUCE_OK;
-}
+static inline int bruce__result_is_ok(bruce_result_t result) { return result == BRUCE_OK; }

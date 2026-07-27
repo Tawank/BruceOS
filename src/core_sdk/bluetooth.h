@@ -3,8 +3,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "core_sdk/result.h"
-
 #define BRUCE_BLUETOOTH_NAME_MAX 63
 #define BRUCE_BLUETOOTH_ADDRESS_LEN 6
 

@@ -27,16 +27,16 @@
 typedef struct {
     volatile int call_count;
     volatile size_t next_selection;
-    volatile bool trap;          /* being invoked while set is itself a failure */
+    volatile bool trap; /* being invoked while set is itself a failure */
     volatile bool trap_violated;
 } selftest__dialog_mock_t;
 
 static selftest__dialog_mock_t s_mock;
 
-static bruce_result_t selftest__dialog_mock_provider(const char *title, const char *message,
-                                                      const bruce_dialog_choice_t *choices, size_t choice_count,
-                                                      size_t *out_selected)
-{
+static bruce_result_t selftest__dialog_mock_provider(
+    const char *title, const char *message, const bruce_dialog_choice_t *choices, size_t choice_count,
+    size_t *out_selected
+) {
     (void)title;
     (void)message;
     (void)choices;
@@ -47,17 +47,13 @@ static bruce_result_t selftest__dialog_mock_provider(const char *title, const ch
     return BRUCE_OK;
 }
 
-static void selftest__dialog_mock_reset(size_t selection)
-{
+static void selftest__dialog_mock_reset(size_t selection) {
     memset(&s_mock, 0, sizeof(s_mock));
     s_mock.next_selection = selection;
     dialog__test_set_choice_provider(selftest__dialog_mock_provider);
 }
 
-static void selftest__dialog_mock_clear(void)
-{
-    dialog__test_set_choice_provider(NULL);
-}
+static void selftest__dialog_mock_clear(void) { dialog__test_set_choice_provider(NULL); }
 
 /* ------------------------------------------------------------------------ */
 /* Helper: run permission__check() from a task with a chosen built_in/key    */
@@ -70,8 +66,7 @@ typedef struct {
 
 static selftest__permcheck_result_t s_permcheck;
 
-static int selftest__permission_check_entry(int argc, char **argv)
-{
+static int selftest__permission_check_entry(int argc, char **argv) {
     bruce_permission_t permission;
     if (argc < 1 || !permission__from_name(argv[0], &permission)) {
         s_permcheck.result = BRUCE_ERR_INVALID_ARGUMENT;
@@ -83,9 +78,8 @@ static int selftest__permission_check_entry(int argc, char **argv)
     return 0;
 }
 
-static bruce_result_t selftest__permission_check_as(bool built_in, const char *permission_key,
-                                                     const char *permission_name)
-{
+static bruce_result_t
+selftest__permission_check_as(bool built_in, const char *permission_key, const char *permission_name) {
     memset(&s_permcheck, 0, sizeof(s_permcheck));
     char *argv[1] = {(char *)permission_name};
     task_create_params_t params = {
@@ -100,13 +94,9 @@ static bruce_result_t selftest__permission_check_as(bool built_in, const char *p
         .stack_bytes = 4096,
     };
     bruce_task_id_t id = BRUCE_TASK_ID_INVALID;
-    if (task_registry__create(&params, &id) != BRUCE_OK) {
-        return BRUCE_ERR_INTERNAL;
-    }
+    if (task_registry__create(&params, &id) != BRUCE_OK) { return BRUCE_ERR_INTERNAL; }
     bruce_result_t wait_result = task__wait(id, 2000);
-    if (wait_result != BRUCE_OK && wait_result != BRUCE_ERR_NOT_FOUND) {
-        return BRUCE_ERR_TIMEOUT;
-    }
+    if (wait_result != BRUCE_OK && wait_result != BRUCE_ERR_NOT_FOUND) { return BRUCE_ERR_TIMEOUT; }
     return s_permcheck.ran ? s_permcheck.result : BRUCE_ERR_INTERNAL;
 }
 
@@ -114,8 +104,7 @@ static bruce_result_t selftest__permission_check_as(bool built_in, const char *p
 /* Cases                                                                     */
 /* ------------------------------------------------------------------------ */
 
-bool selftest__run_permission_allow_case(void)
-{
+bool selftest__run_permission_allow_case(void) {
     permission__test_reset();
     selftest__dialog_mock_reset(0 /* Allow */);
 
@@ -123,18 +112,23 @@ bool selftest__run_permission_allow_case(void)
     int calls = s_mock.call_count;
 
     bool allowed = false;
-    bool saved_ok = permission__get_saved("selftest_allow.elf", BRUCE_PERMISSION_WIFI, &allowed) == BRUCE_OK && allowed;
+    bool saved_ok =
+        permission__get_saved("selftest_allow.elf", BRUCE_PERMISSION_WIFI, &allowed) == BRUCE_OK && allowed;
 
     selftest__dialog_mock_clear();
 
     bool ok = result == BRUCE_OK && calls == 1 && saved_ok;
-    printf("[selftest] permission/allow: %s (result=%d calls=%d saved_ok=%d)\n", ok ? "OK" : "FAIL", result, calls,
-           saved_ok);
+    printf(
+        "[selftest] permission/allow: %s (result=%d calls=%d saved_ok=%d)\n",
+        ok ? "OK" : "FAIL",
+        result,
+        calls,
+        saved_ok
+    );
     return ok;
 }
 
-bool selftest__run_permission_deny_no_reprompt_case(void)
-{
+bool selftest__run_permission_deny_no_reprompt_case(void) {
     permission__test_reset();
     selftest__dialog_mock_reset(1 /* Deny */);
 
@@ -150,15 +144,21 @@ bool selftest__run_permission_deny_no_reprompt_case(void)
 
     selftest__dialog_mock_clear();
 
-    bool ok = first == BRUCE_ERR_PERMISSION && first_calls == 1 && second == BRUCE_ERR_PERMISSION && !trap_violated &&
-              second_calls == first_calls;
-    printf("[selftest] permission/deny-no-reprompt: %s (first=%d second=%d calls=%d/%d trap_violated=%d)\n",
-           ok ? "OK" : "FAIL", first, second, first_calls, second_calls, trap_violated);
+    bool ok = first == BRUCE_ERR_PERMISSION && first_calls == 1 && second == BRUCE_ERR_PERMISSION &&
+              !trap_violated && second_calls == first_calls;
+    printf(
+        "[selftest] permission/deny-no-reprompt: %s (first=%d second=%d calls=%d/%d trap_violated=%d)\n",
+        ok ? "OK" : "FAIL",
+        first,
+        second,
+        first_calls,
+        second_calls,
+        trap_violated
+    );
     return ok;
 }
 
-bool selftest__run_permission_shared_basename_case(void)
-{
+bool selftest__run_permission_shared_basename_case(void) {
     permission__test_reset();
     selftest__dialog_mock_reset(0 /* Allow */);
 
@@ -174,13 +174,17 @@ bool selftest__run_permission_shared_basename_case(void)
     selftest__dialog_mock_clear();
 
     bool ok = first_task == BRUCE_OK && calls_after_first == 1 && second_task == BRUCE_OK && !trap_violated;
-    printf("[selftest] permission/shared-basename: %s (first=%d second=%d trap_violated=%d)\n", ok ? "OK" : "FAIL",
-           first_task, second_task, trap_violated);
+    printf(
+        "[selftest] permission/shared-basename: %s (first=%d second=%d trap_violated=%d)\n",
+        ok ? "OK" : "FAIL",
+        first_task,
+        second_task,
+        trap_violated
+    );
     return ok;
 }
 
-bool selftest__run_permission_builtin_grant_case(void)
-{
+bool selftest__run_permission_builtin_grant_case(void) {
     permission__test_reset();
     memset(&s_mock, 0, sizeof(s_mock));
     s_mock.trap = true; /* a built-in must never prompt */
@@ -192,13 +196,16 @@ bool selftest__run_permission_builtin_grant_case(void)
     selftest__dialog_mock_clear();
 
     bool ok = result == BRUCE_OK && !trap_violated;
-    printf("[selftest] permission/builtin-grant: %s (result=%d trap_violated=%d)\n", ok ? "OK" : "FAIL", result,
-           trap_violated);
+    printf(
+        "[selftest] permission/builtin-grant: %s (result=%d trap_violated=%d)\n",
+        ok ? "OK" : "FAIL",
+        result,
+        trap_violated
+    );
     return ok;
 }
 
-bool selftest__run_permission_preflight_case(void)
-{
+bool selftest__run_permission_preflight_case(void) {
     permission__test_reset();
 
     selftest__dialog_mock_reset(0 /* Allow */);
@@ -223,8 +230,18 @@ bool selftest__run_permission_preflight_case(void)
 
     bool ok = first == BRUCE_OK && second == BRUCE_OK && third == BRUCE_OK && !trap_violated && got_wifi &&
               wifi_allowed && got_bt && !bt_allowed;
-    printf("[selftest] permission/preflight: %s (first=%d second=%d third=%d trap=%d wifi=%d/%d bt=%d/%d)\n",
-           ok ? "OK" : "FAIL", first, second, third, trap_violated, got_wifi, wifi_allowed, got_bt, bt_allowed);
+    printf(
+        "[selftest] permission/preflight: %s (first=%d second=%d third=%d trap=%d wifi=%d/%d bt=%d/%d)\n",
+        ok ? "OK" : "FAIL",
+        first,
+        second,
+        third,
+        trap_violated,
+        got_wifi,
+        wifi_allowed,
+        got_bt,
+        bt_allowed
+    );
     return ok;
 }
 
@@ -242,8 +259,7 @@ typedef struct {
 
 static selftest__boundary_result_t s_boundary;
 
-static int selftest__boundary_entry(int argc, char **argv)
-{
+static int selftest__boundary_entry(int argc, char **argv) {
     (void)argc;
     (void)argv;
     if (s_boundary.operation == SELFTEST_BOUNDARY_EXECUTE) {
@@ -255,10 +271,9 @@ static int selftest__boundary_entry(int argc, char **argv)
     return 0;
 }
 
-static bruce_result_t selftest__run_boundary_as(const char *permission_key,
-                                                 selftest__boundary_operation_t operation,
-                                                 bruce_task_id_t target)
-{
+static bruce_result_t selftest__run_boundary_as(
+    const char *permission_key, selftest__boundary_operation_t operation, bruce_task_id_t target
+) {
     memset(&s_boundary, 0, sizeof(s_boundary));
     s_boundary.operation = operation;
     s_boundary.target = target;
@@ -277,26 +292,24 @@ static bruce_result_t selftest__run_boundary_as(const char *permission_key,
     return s_boundary.ran ? s_boundary.result : BRUCE_ERR_INTERNAL;
 }
 
-static int selftest__boundary_target_entry(int argc, char **argv)
-{
+static int selftest__boundary_target_entry(int argc, char **argv) {
     (void)argc;
     (void)argv;
     for (;;) runtime__delay(1000);
     return 0;
 }
 
-bool selftest__run_permission_protected_boundaries_case(void)
-{
+bool selftest__run_permission_protected_boundaries_case(void) {
     permission__test_reset();
     selftest__dialog_mock_reset(0);
     s_mock.trap = true;
 
     (void)permission__set("execute-denied.elf", BRUCE_PERMISSION_EXECUTE, false);
     (void)permission__set("execute-allowed.elf", BRUCE_PERMISSION_EXECUTE, true);
-    bruce_result_t execute_denied = selftest__run_boundary_as("execute-denied.elf", SELFTEST_BOUNDARY_EXECUTE,
-                                                              BRUCE_TASK_ID_INVALID);
-    bruce_result_t execute_allowed = selftest__run_boundary_as("execute-allowed.elf", SELFTEST_BOUNDARY_EXECUTE,
-                                                               BRUCE_TASK_ID_INVALID);
+    bruce_result_t execute_denied =
+        selftest__run_boundary_as("execute-denied.elf", SELFTEST_BOUNDARY_EXECUTE, BRUCE_TASK_ID_INVALID);
+    bruce_result_t execute_allowed =
+        selftest__run_boundary_as("execute-allowed.elf", SELFTEST_BOUNDARY_EXECUTE, BRUCE_TASK_ID_INVALID);
 
     task_create_params_t target_params = {
         .name = "selftest_control_target",
@@ -310,12 +323,12 @@ bool selftest__run_permission_protected_boundaries_case(void)
 
     (void)permission__set("task-denied.elf", BRUCE_PERMISSION_TASK, false);
     (void)permission__set("task-allowed.elf", BRUCE_PERMISSION_TASK, true);
-    bruce_result_t task_denied = target_created
-                                     ? selftest__run_boundary_as("task-denied.elf", SELFTEST_BOUNDARY_TASK, target)
-                                     : BRUCE_ERR_INTERNAL;
-    bruce_result_t task_allowed = target_created
-                                      ? selftest__run_boundary_as("task-allowed.elf", SELFTEST_BOUNDARY_TASK, target)
-                                      : BRUCE_ERR_INTERNAL;
+    bruce_result_t task_denied =
+        target_created ? selftest__run_boundary_as("task-denied.elf", SELFTEST_BOUNDARY_TASK, target)
+                       : BRUCE_ERR_INTERNAL;
+    bruce_result_t task_allowed =
+        target_created ? selftest__run_boundary_as("task-allowed.elf", SELFTEST_BOUNDARY_TASK, target)
+                       : BRUCE_ERR_INTERNAL;
 
     bruce_task_snapshot_t snapshot;
     bool paused = target_created && task__snapshot(target, &snapshot) == BRUCE_OK &&
@@ -326,8 +339,16 @@ bool selftest__run_permission_protected_boundaries_case(void)
 
     bool ok = execute_denied == BRUCE_ERR_PERMISSION && execute_allowed == BRUCE_ERR_NOT_FOUND &&
               task_denied == BRUCE_ERR_PERMISSION && task_allowed == BRUCE_OK && paused && !trap_violated;
-    printf("[selftest] permission/protected-boundaries: %s (execute=%d/%d task=%d/%d paused=%d trap=%d)\n",
-           ok ? "OK" : "FAIL", execute_denied, execute_allowed, task_denied, task_allowed, paused, trap_violated);
+    printf(
+        "[selftest] permission/protected-boundaries: %s (execute=%d/%d task=%d/%d paused=%d trap=%d)\n",
+        ok ? "OK" : "FAIL",
+        execute_denied,
+        execute_allowed,
+        task_denied,
+        task_allowed,
+        paused,
+        trap_violated
+    );
     return ok;
 }
 
@@ -342,8 +363,7 @@ typedef struct {
 
 static selftest__dialog_dispatch_t s_dispatch;
 
-static int selftest__dialog_dispatch_entry(int argc, char **argv)
-{
+static int selftest__dialog_dispatch_entry(int argc, char **argv) {
     (void)argc;
     (void)argv;
     bruce_dialog_choice_t choices[2] = {
@@ -357,8 +377,7 @@ static int selftest__dialog_dispatch_entry(int argc, char **argv)
     return 0;
 }
 
-static bool selftest__run_dialog_dispatch_as(bool gui_requested, bool *out_observed_gui)
-{
+static bool selftest__run_dialog_dispatch_as(bool gui_requested, bool *out_observed_gui) {
     memset(&s_dispatch, 0, sizeof(s_dispatch));
     task_create_params_t params = {
         .name = "selftest_dialog_dispatch",
@@ -372,19 +391,14 @@ static bool selftest__run_dialog_dispatch_as(bool gui_requested, bool *out_obser
         .stack_bytes = 4096,
     };
     bruce_task_id_t id = BRUCE_TASK_ID_INVALID;
-    if (task_registry__create(&params, &id) != BRUCE_OK) {
-        return false;
-    }
+    if (task_registry__create(&params, &id) != BRUCE_OK) { return false; }
     bruce_result_t wait_result = task__wait(id, 2000);
-    if ((wait_result != BRUCE_OK && wait_result != BRUCE_ERR_NOT_FOUND) || !s_dispatch.ran) {
-        return false;
-    }
+    if ((wait_result != BRUCE_OK && wait_result != BRUCE_ERR_NOT_FOUND) || !s_dispatch.ran) { return false; }
     *out_observed_gui = s_dispatch.observed_gui;
     return true;
 }
 
-bool selftest__run_dialog_gui_terminal_dispatch_case(void)
-{
+bool selftest__run_dialog_gui_terminal_dispatch_case(void) {
     selftest__dialog_mock_reset(0);
 
     bool observed_gui = false;
@@ -398,8 +412,14 @@ bool selftest__run_dialog_gui_terminal_dispatch_case(void)
     selftest__dialog_mock_clear();
 
     bool ok = gui_ok && terminal_ok;
-    printf("[selftest] dialog/gui-terminal-dispatch: %s (gui_ran=%d observed_gui=%d terminal_ran=%d "
-           "observed_terminal=%d)\n",
-           ok ? "OK" : "FAIL", gui_ran, observed_gui, terminal_ran, observed_terminal);
+    printf(
+        "[selftest] dialog/gui-terminal-dispatch: %s (gui_ran=%d observed_gui=%d terminal_ran=%d "
+        "observed_terminal=%d)\n",
+        ok ? "OK" : "FAIL",
+        gui_ran,
+        observed_gui,
+        terminal_ran,
+        observed_terminal
+    );
     return ok;
 }

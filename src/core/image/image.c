@@ -22,35 +22,27 @@ typedef struct {
     size_t offset;
 } image_reader_t;
 
-static bool image__read(image_reader_t *reader, void *out, size_t size)
-{
+static bool image__read(image_reader_t *reader, void *out, size_t size) {
     if (size > reader->size - reader->offset) return false;
     if (out != NULL) memcpy(out, reader->data + reader->offset, size);
     reader->offset += size;
     return true;
 }
 
-static bool image__skip(image_reader_t *reader, size_t size)
-{
-    return image__read(reader, NULL, size);
-}
+static bool image__skip(image_reader_t *reader, size_t size) { return image__read(reader, NULL, size); }
 
-static bool image__read_u8(image_reader_t *reader, uint8_t *out)
-{
-    return image__read(reader, out, 1);
-}
+static bool image__read_u8(image_reader_t *reader, uint8_t *out) { return image__read(reader, out, 1); }
 
-static bool image__read_u16(image_reader_t *reader, uint16_t *out)
-{
+static bool image__read_u16(image_reader_t *reader, uint16_t *out) {
     uint8_t bytes[2];
     if (!image__read(reader, bytes, sizeof(bytes))) return false;
     *out = (uint16_t)bytes[0] | ((uint16_t)bytes[1] << 8);
     return true;
 }
 
-static void image__fit_size(uint32_t source_width, uint32_t source_height, bool fit,
-                            uint16_t *out_width, uint16_t *out_height)
-{
+static void image__fit_size(
+    uint32_t source_width, uint32_t source_height, bool fit, uint16_t *out_width, uint16_t *out_height
+) {
     uint32_t width = source_width;
     uint32_t height = source_height;
     uint32_t viewport_width = (uint32_t)display__width();
@@ -70,9 +62,9 @@ static void image__fit_size(uint32_t source_width, uint32_t source_height, bool 
     *out_height = (uint16_t)(height > UINT16_MAX ? UINT16_MAX : height);
 }
 
-static bruce_result_t image__draw_pixels(const uint16_t *pixels, uint16_t width, uint16_t height,
-                                         const bruce_image_draw_options_t *options)
-{
+static bruce_result_t image__draw_pixels(
+    const uint16_t *pixels, uint16_t width, uint16_t height, const bruce_image_draw_options_t *options
+) {
     if (width > INT16_MAX || height > INT16_MAX) return BRUCE_ERR_RESOURCE_LIMIT;
     int x = options->x;
     int y = options->y;
@@ -83,9 +75,9 @@ static bruce_result_t image__draw_pixels(const uint16_t *pixels, uint16_t width,
     return display__draw_rgb_bitmap((int16_t)x, (int16_t)y, pixels, (int16_t)width, (int16_t)height);
 }
 
-static bruce_result_t image__draw_scaled_pixels(const uint16_t *pixels, uint16_t width, uint16_t height,
-                                                const bruce_image_draw_options_t *options)
-{
+static bruce_result_t image__draw_scaled_pixels(
+    const uint16_t *pixels, uint16_t width, uint16_t height, const bruce_image_draw_options_t *options
+) {
     uint16_t out_width;
     uint16_t out_height;
     image__fit_size(width, height, options->fit, &out_width, &out_height);
@@ -110,10 +102,9 @@ static bruce_result_t image__draw_scaled_pixels(const uint16_t *pixels, uint16_t
     return result;
 }
 
-static bruce_result_t image__decode_jpeg(const uint8_t *data, size_t size,
-                                         const bruce_image_draw_options_t *options,
-                                         bruce_image_info_t *info)
-{
+static bruce_result_t image__decode_jpeg(
+    const uint8_t *data, size_t size, const bruce_image_draw_options_t *options, bruce_image_info_t *info
+) {
     if (size > UINT32_MAX) return BRUCE_ERR_RESOURCE_LIMIT;
     esp_jpeg_image_cfg_t config = {
         .indata = (uint8_t *)data,
@@ -158,8 +149,7 @@ static bruce_result_t image__decode_jpeg(const uint8_t *data, size_t size,
     return result;
 }
 
-static void image__png_read(png_structp png, png_bytep out, size_t count)
-{
+static void image__png_read(png_structp png, png_bytep out, size_t count) {
     image_reader_t *reader = png_get_io_ptr(png);
     if (!image__read(reader, out, count)) png_error(png, "truncated PNG");
 }
@@ -169,10 +159,9 @@ typedef struct {
     uint16_t *pixels;
 } image_png_allocations_t;
 
-static bruce_result_t image__decode_png(const uint8_t *data, size_t size,
-                                        const bruce_image_draw_options_t *options,
-                                        bruce_image_info_t *info)
-{
+static bruce_result_t image__decode_png(
+    const uint8_t *data, size_t size, const bruce_image_draw_options_t *options, bruce_image_info_t *info
+) {
     image_reader_t reader = {.data = data, .size = size};
     png_structp png = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
     if (png == NULL) return BRUCE_ERR_NO_MEMORY;
@@ -209,7 +198,8 @@ static bruce_result_t image__decode_png(const uint8_t *data, size_t size,
     if (color_type == PNG_COLOR_TYPE_PALETTE) png_set_palette_to_rgb(png);
     if (color_type == PNG_COLOR_TYPE_GRAY && bit_depth < 8) png_set_expand_gray_1_2_4_to_8(png);
     if (png_get_valid(png, png_info, PNG_INFO_tRNS)) png_set_tRNS_to_alpha(png);
-    if (color_type == PNG_COLOR_TYPE_GRAY || color_type == PNG_COLOR_TYPE_GRAY_ALPHA) png_set_gray_to_rgb(png);
+    if (color_type == PNG_COLOR_TYPE_GRAY || color_type == PNG_COLOR_TYPE_GRAY_ALPHA)
+        png_set_gray_to_rgb(png);
     if ((color_type & PNG_COLOR_MASK_ALPHA) == 0 && !png_get_valid(png, png_info, PNG_INFO_tRNS)) {
         png_set_add_alpha(png, 0xff, PNG_FILLER_AFTER);
     }
@@ -218,8 +208,7 @@ static bruce_result_t image__decode_png(const uint8_t *data, size_t size,
     uint16_t out_width;
     uint16_t out_height;
     image__fit_size(source_width, source_height, options->fit, &out_width, &out_height);
-    if (out_width == 0 || out_height == 0 ||
-        (size_t)out_width > SIZE_MAX / (sizeof(uint16_t) * out_height)) {
+    if (out_width == 0 || out_height == 0 || (size_t)out_width > SIZE_MAX / (sizeof(uint16_t) * out_height)) {
         result = BRUCE_ERR_RESOURCE_LIMIT;
         goto cleanup;
     }
@@ -264,8 +253,7 @@ cleanup:
     return (bruce_result_t)result;
 }
 
-static bool image__gif_skip_blocks(image_reader_t *reader)
-{
+static bool image__gif_skip_blocks(image_reader_t *reader) {
     uint8_t count = 1;
     do {
         if (!image__read_u8(reader, &count) || !image__skip(reader, count)) return false;
@@ -273,8 +261,7 @@ static bool image__gif_skip_blocks(image_reader_t *reader)
     return true;
 }
 
-static bool image__gif_palette(image_reader_t *reader, uint16_t *palette, size_t count)
-{
+static bool image__gif_palette(image_reader_t *reader, uint16_t *palette, size_t count) {
     for (size_t i = 0; i < count; ++i) {
         uint8_t rgb[3];
         if (!image__read(reader, rgb, sizeof(rgb))) return false;
@@ -300,8 +287,7 @@ typedef struct {
     size_t pixel_index;
 } gif_output_t;
 
-static uint16_t image__gif_interlaced_row(uint16_t row, uint16_t height)
-{
+static uint16_t image__gif_interlaced_row(uint16_t row, uint16_t height) {
     static const uint8_t starts[] = {0, 4, 2, 1};
     static const uint8_t steps[] = {8, 8, 4, 2};
     uint16_t index = 0;
@@ -313,8 +299,7 @@ static uint16_t image__gif_interlaced_row(uint16_t row, uint16_t height)
     return row;
 }
 
-static void image__gif_emit(gif_output_t *output, uint8_t color)
-{
+static void image__gif_emit(gif_output_t *output, uint8_t color) {
     if (output->pixel_index >= (size_t)output->frame_width * output->frame_height) {
         output->too_many_pixels = true;
         return;
@@ -333,8 +318,7 @@ static void image__gif_emit(gif_output_t *output, uint8_t color)
     output->pixels[(size_t)out_y * output->canvas_width + out_x] = output->palette[color];
 }
 
-static bool image__gif_lzw(image_reader_t *reader, uint8_t minimum_code_size, gif_output_t *output)
-{
+static bool image__gif_lzw(image_reader_t *reader, uint8_t minimum_code_size, gif_output_t *output) {
     if (minimum_code_size < 2 || minimum_code_size > 8) return false;
     size_t compressed_start = reader->offset;
     size_t compressed_size = 0;
@@ -400,7 +384,10 @@ static bool image__gif_lzw(image_reader_t *reader, uint8_t minimum_code_size, gi
             break;
         }
         if (old_code < 0) {
-            if (code >= clear) { ok = false; break; }
+            if (code >= clear) {
+                ok = false;
+                break;
+            }
             first = (uint8_t)code;
             image__gif_emit(output, first);
             old_code = code;
@@ -417,7 +404,10 @@ static bool image__gif_lzw(image_reader_t *reader, uint8_t minimum_code_size, gi
             stack[stack_size++] = suffix[code];
             code = prefix[code];
         }
-        if (code >= clear || stack_size >= GIF_DICTIONARY_SIZE) { ok = false; break; }
+        if (code >= clear || stack_size >= GIF_DICTIONARY_SIZE) {
+            ok = false;
+            break;
+        }
         first = (uint8_t)code;
         stack[stack_size++] = first;
         while (stack_size > 0) image__gif_emit(output, stack[--stack_size]);
@@ -439,10 +429,9 @@ static bool image__gif_lzw(image_reader_t *reader, uint8_t minimum_code_size, gi
            output->pixel_index == (size_t)output->frame_width * output->frame_height;
 }
 
-static bruce_result_t image__decode_gif(const uint8_t *data, size_t size,
-                                        const bruce_image_draw_options_t *options,
-                                        bruce_image_info_t *info)
-{
+static bruce_result_t image__decode_gif(
+    const uint8_t *data, size_t size, const bruce_image_draw_options_t *options, bruce_image_info_t *info
+) {
     image_reader_t reader = {.data = data, .size = size};
     uint8_t header[6];
     uint16_t source_width;
@@ -480,7 +469,8 @@ static bruce_result_t image__decode_gif(const uint8_t *data, size_t size,
                 uint8_t terminator;
                 if (!image__read_u8(&reader, &block_size) || block_size != 4 ||
                     !image__read(&reader, control, sizeof(control)) ||
-                    !image__read_u8(&reader, &terminator) || terminator != 0) return BRUCE_ERR_IO;
+                    !image__read_u8(&reader, &terminator) || terminator != 0)
+                    return BRUCE_ERR_IO;
                 transparent_index = (control[0] & 1) != 0 ? control[3] : -1;
             } else if (!image__gif_skip_blocks(&reader)) {
                 return BRUCE_ERR_IO;
@@ -496,8 +486,9 @@ static bruce_result_t image__decode_gif(const uint8_t *data, size_t size,
         };
         uint8_t image_packed;
         if (!image__read_u16(&reader, &output.left) || !image__read_u16(&reader, &output.top) ||
-            !image__read_u16(&reader, &output.frame_width) || !image__read_u16(&reader, &output.frame_height) ||
-            !image__read_u8(&reader, &image_packed) || output.frame_width == 0 || output.frame_height == 0) {
+            !image__read_u16(&reader, &output.frame_width) ||
+            !image__read_u16(&reader, &output.frame_height) || !image__read_u8(&reader, &image_packed) ||
+            output.frame_width == 0 || output.frame_height == 0) {
             return BRUCE_ERR_IO;
         }
         output.interlaced = (image_packed & 0x40) != 0;
@@ -509,8 +500,9 @@ static bruce_result_t image__decode_gif(const uint8_t *data, size_t size,
             memcpy(output.palette, global_palette, sizeof(global_palette));
         }
 
-        image__fit_size(source_width, source_height, options->fit,
-                        &output.canvas_width, &output.canvas_height);
+        image__fit_size(
+            source_width, source_height, options->fit, &output.canvas_width, &output.canvas_height
+        );
         if (output.canvas_width == 0 || output.canvas_height == 0 ||
             (size_t)output.canvas_width > SIZE_MAX / ((size_t)output.canvas_height * sizeof(uint16_t))) {
             return BRUCE_ERR_RESOURCE_LIMIT;
@@ -523,9 +515,9 @@ static bruce_result_t image__decode_gif(const uint8_t *data, size_t size,
 
         uint8_t code_size;
         bool decoded = image__read_u8(&reader, &code_size) && image__gif_lzw(&reader, code_size, &output);
-        bruce_result_t result = decoded
-            ? image__draw_pixels(output.pixels, output.canvas_width, output.canvas_height, options)
-            : BRUCE_ERR_IO;
+        bruce_result_t result =
+            decoded ? image__draw_pixels(output.pixels, output.canvas_width, output.canvas_height, options)
+                    : BRUCE_ERR_IO;
         memory__free(output.pixels);
         if (result == BRUCE_OK && info != NULL) {
             info->format = BRUCE_IMAGE_FORMAT_GIF;
@@ -536,8 +528,7 @@ static bruce_result_t image__decode_gif(const uint8_t *data, size_t size,
     }
 }
 
-bool image__is_supported_path(const char *path)
-{
+bool image__is_supported_path(const char *path) {
     if (path == NULL) return false;
     const char *extension = strrchr(path, '.');
     if (extension == NULL) return false;
@@ -545,10 +536,9 @@ bool image__is_supported_path(const char *path)
            strcasecmp(extension, ".png") == 0 || strcasecmp(extension, ".gif") == 0;
 }
 
-bruce_result_t image__draw_memory(const void *data, size_t size,
-                                  const bruce_image_draw_options_t *options,
-                                  bruce_image_info_t *out_info)
-{
+bruce_result_t image__draw_memory(
+    const void *data, size_t size, const bruce_image_draw_options_t *options, bruce_image_info_t *out_info
+) {
     if (data == NULL || size < 6) return BRUCE_ERR_INVALID_ARGUMENT;
     bruce_image_draw_options_t defaults = {
         .center = false,
@@ -557,9 +547,7 @@ bruce_result_t image__draw_memory(const void *data, size_t size,
     };
     if (options == NULL) options = &defaults;
     const uint8_t *bytes = data;
-    if (bytes[0] == 0xff && bytes[1] == 0xd8) {
-        return image__decode_jpeg(bytes, size, options, out_info);
-    }
+    if (bytes[0] == 0xff && bytes[1] == 0xd8) { return image__decode_jpeg(bytes, size, options, out_info); }
     static const uint8_t png_signature[] = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'};
     if (size >= sizeof(png_signature) && memcmp(bytes, png_signature, sizeof(png_signature)) == 0) {
         return image__decode_png(bytes, size, options, out_info);
@@ -570,10 +558,8 @@ bruce_result_t image__draw_memory(const void *data, size_t size,
     return BRUCE_ERR_UNSUPPORTED;
 }
 
-bruce_result_t image__draw_path(const char *path,
-                                const bruce_image_draw_options_t *options,
-                                bruce_image_info_t *out_info)
-{
+bruce_result_t
+image__draw_path(const char *path, const bruce_image_draw_options_t *options, bruce_image_info_t *out_info) {
     if (path == NULL || !image__is_supported_path(path)) return BRUCE_ERR_INVALID_PATH;
     bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
     bruce_result_t result = storage__open(path, BRUCE_STORAGE_OPEN_READ, &file);

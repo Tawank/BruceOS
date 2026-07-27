@@ -8,8 +8,7 @@
 #include "core_sdk/notification.h"
 #include "core_sdk/status_icon.h"
 
-bool selftest__run_notification_case(void)
-{
+bool selftest__run_notification_case(void) {
     int width = display__width();
     int height = display__height();
     bruce_display_color_t before = 0;
@@ -25,9 +24,8 @@ bool selftest__run_notification_case(void)
     uint32_t generation = 0;
     bruce_display_rect_t rect = {0};
     if (display__test_notification(text, sizeof(text), &active, &duration, &rect, &generation) != BRUCE_OK ||
-        !active || strcmp(text, "replacement") != 0 ||
-        duration != BRUCE_NOTIFICATION_DURATION_MAX_MS || rect.x + rect.width != display__width() - 2 ||
-        rect.y + rect.height != display__height() - 2) {
+        !active || strcmp(text, "replacement") != 0 || duration != BRUCE_NOTIFICATION_DURATION_MAX_MS ||
+        rect.x + rect.width != display__width() - 2 || rect.y + rect.height != display__height() - 2) {
         printf("[selftest] notification: state/copy/clamp/placement failed\n");
         return false;
     }
@@ -37,16 +35,15 @@ bool selftest__run_notification_case(void)
     }
     if (notification__dismiss() != BRUCE_OK || notification__dismiss() != BRUCE_OK) return false;
     uint32_t dismissed_generation = 0;
-    if (display__test_notification(text, sizeof(text), &active, &duration, &rect,
-                                   &dismissed_generation) != BRUCE_OK || active ||
-        dismissed_generation <= generation) {
+    if (display__test_notification(text, sizeof(text), &active, &duration, &rect, &dismissed_generation) !=
+            BRUCE_OK ||
+        active || dismissed_generation <= generation) {
         return false;
     }
     return true;
 }
 
-bool selftest__run_status_icon_case(void)
-{
+bool selftest__run_status_icon_case(void) {
     static const uint8_t bitmap_a[] = {0x80};
     static const uint8_t bitmap_b[] = {0xc0};
     (void)status_icon__remove("selftest-a");
@@ -91,8 +88,6 @@ bool selftest__run_status_icon_case(void)
         valid = status_icon__push(keys[0], bitmap_b, 2, 1) == BRUCE_OK;
         valid = valid && status_icon__push("selftest-overflow", bitmap_a, 1, 1) == BRUCE_ERR_RESOURCE_LIMIT;
     }
-    for (size_t i = 0; i < inserted; ++i) {
-        (void)status_icon__remove(keys[i]);
-    }
+    for (size_t i = 0; i < inserted; ++i) { (void)status_icon__remove(keys[i]); }
     return valid;
 }

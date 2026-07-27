@@ -49,5 +49,7 @@ int app_runner__run_path(const char *path, const char *arg, bool in_background);
  * "game.elf") as any other task - without any private Core header.
  * `stack_size` of 0 selects a Core default.  Returns a positive
  * bruce_task_id_t on success or a negative BRUCE_ERR_*. */
-int app_runner__spawn_loader_task(const char *permission_key, bool gui_requested, bool in_background,
-                                   uint32_t stack_size, bruce_loader_task_entry_fn entry, void *context);
+int app_runner__spawn_loader_task(
+    const char *permission_key, bool gui_requested, bool in_background, uint32_t stack_size,
+    bruce_loader_task_entry_fn entry, void *context
+);

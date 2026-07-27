@@ -22,14 +22,12 @@ typedef struct {
  * close automatically on task exit. Addresses are unshifted 7-bit values.
  * A zero timeout performs one immediate, bounded driver attempt. */
 bruce_result_t i2c__open(const bruce_i2c_bus_config_t *config, bruce_i2c_id_t *out_bus);
-bruce_result_t i2c__probe(bruce_i2c_id_t bus, uint8_t address, uint32_t timeout_ms,
-                          bool *out_present);
-bruce_result_t i2c__write(bruce_i2c_id_t bus, uint8_t address, const void *data,
-                          size_t size, uint32_t timeout_ms);
-bruce_result_t i2c__read(bruce_i2c_id_t bus, uint8_t address, void *data,
-                         size_t size, uint32_t timeout_ms);
-bruce_result_t i2c__write_read(bruce_i2c_id_t bus, uint8_t address,
-                               const void *write_data, size_t write_size,
-                               void *read_data, size_t read_size,
-                               uint32_t timeout_ms);
+bruce_result_t i2c__probe(bruce_i2c_id_t bus, uint8_t address, uint32_t timeout_ms, bool *out_present);
+bruce_result_t
+i2c__write(bruce_i2c_id_t bus, uint8_t address, const void *data, size_t size, uint32_t timeout_ms);
+bruce_result_t i2c__read(bruce_i2c_id_t bus, uint8_t address, void *data, size_t size, uint32_t timeout_ms);
+bruce_result_t i2c__write_read(
+    bruce_i2c_id_t bus, uint8_t address, const void *write_data, size_t write_size, void *read_data,
+    size_t read_size, uint32_t timeout_ms
+);
 bruce_result_t i2c__close(bruce_i2c_id_t bus);

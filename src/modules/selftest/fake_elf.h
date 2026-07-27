@@ -14,5 +14,6 @@
  * internally) since no test currently needs a non-trivial icon.  Returns
  * false on any internal buffer-size failure.
  */
-bool selftest__write_fake_elf(const char *path, const char *app_name, const char *const *permissions,
-                               size_t permission_count);
+bool selftest__write_fake_elf(
+    const char *path, const char *app_name, const char *const *permissions, size_t permission_count
+);

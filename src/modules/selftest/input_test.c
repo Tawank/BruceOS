@@ -6,8 +6,7 @@
 #include "core_sdk/input.h"
 #include "core_sdk/result.h"
 
-bool selftest__run_input_poll_case(void)
-{
+bool selftest__run_input_poll_case(void) {
     bruce_input_event_t ev;
     bruce_result_t result = input__poll(&ev);
     if (result == BRUCE_ERR_TIMEOUT) {
@@ -18,8 +17,7 @@ bool selftest__run_input_poll_case(void)
     return false;
 }
 
-bool selftest__run_input_inject_case(void)
-{
+bool selftest__run_input_inject_case(void) {
     bruce_input_event_t inject = {
         .type = BRUCE_INPUT_BUTTON,
         .action = BRUCE_INPUT_PRESS,
@@ -40,10 +38,16 @@ bool selftest__run_input_inject_case(void)
         return false;
     }
 
-    if (ev.type != BRUCE_INPUT_BUTTON || ev.action != BRUCE_INPUT_PRESS || ev.code != BRUCE_INPUT_CODE_SELECT ||
-        ev.value != 1) {
-        printf("[selftest] input/inject: FAIL, event mismatch type=%d action=%d code=%" PRId32 " value=%" PRId32 "\n",
-               ev.type, ev.action, ev.code, ev.value);
+    if (ev.type != BRUCE_INPUT_BUTTON || ev.action != BRUCE_INPUT_PRESS ||
+        ev.code != BRUCE_INPUT_CODE_SELECT || ev.value != 1) {
+        printf(
+            "[selftest] input/inject: FAIL, event mismatch type=%d action=%d code=%" PRId32 " value=%" PRId32
+            "\n",
+            ev.type,
+            ev.action,
+            ev.code,
+            ev.value
+        );
         return false;
     }
 
@@ -51,8 +55,7 @@ bool selftest__run_input_inject_case(void)
     return true;
 }
 
-bool selftest__run_input_flush_case(void)
-{
+bool selftest__run_input_flush_case(void) {
     /* Inject two events, then flush, then read should return TIMEOUT. */
     bruce_input_event_t inject = {
         .type = BRUCE_INPUT_BUTTON,
@@ -80,8 +83,7 @@ bool selftest__run_input_flush_case(void)
     return true;
 }
 
-bool selftest__run_input_non_blocking_case(void)
-{
+bool selftest__run_input_non_blocking_case(void) {
     /* Flush any stale events, then ensure non-blocking read returns TIMEOUT. */
     (void)input__flush();
 
@@ -107,8 +109,12 @@ bool selftest__run_input_non_blocking_case(void)
 
     result = input__read(&ev, 0);
     if (result != BRUCE_OK || ev.code != 'a' || ev.value != 'a') {
-        printf("[selftest] input/nonblocking: FAIL, read returned %d, code=%" PRId32 " value=%" PRId32 "\n", result,
-               ev.code, ev.value);
+        printf(
+            "[selftest] input/nonblocking: FAIL, read returned %d, code=%" PRId32 " value=%" PRId32 "\n",
+            result,
+            ev.code,
+            ev.value
+        );
         return false;
     }
 
@@ -116,8 +122,7 @@ bool selftest__run_input_non_blocking_case(void)
     return true;
 }
 
-bool selftest__run_input_peek_case(void)
-{
+bool selftest__run_input_peek_case(void) {
     (void)input__flush();
 
     bruce_input_event_t ev;
@@ -156,8 +161,7 @@ bool selftest__run_input_peek_case(void)
     return true;
 }
 
-bool selftest__run_input_wait_case(void)
-{
+bool selftest__run_input_wait_case(void) {
     (void)input__flush();
 
     /* With an empty queue, wait(0) must time out. */
@@ -191,8 +195,7 @@ bool selftest__run_input_wait_case(void)
     return true;
 }
 
-bool selftest__run_input_check_case(void)
-{
+bool selftest__run_input_check_case(void) {
     (void)input__flush();
 
     /* Empty queue: check returns false. */

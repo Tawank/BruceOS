@@ -8,6 +8,7 @@
 #include "core_sdk/manifest.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/result.h"
+#include "core_sdk/storage.h"
 
 #define BRUCE_LAUNCHER_CONFIG_PATH "/launcher.json"
 #define BRUCE_LAUNCHER_JSON_MAX 8192
@@ -50,8 +51,7 @@ static const char *BRUCE_LAUNCHER_DEFAULT_JSON =
     "  \"Apps\": \"/apps\"\n"
     "}\n";
 
-static bruce_launcher_menu_t *bruce_launcher__menu_create(const char *title, bruce_launcher_menu_t *parent)
-{
+static bruce_launcher_menu_t *bruce_launcher__menu_create(const char *title, bruce_launcher_menu_t *parent) {
     bruce_launcher_menu_t *menu = (bruce_launcher_menu_t *)calloc(1, sizeof(*menu));
     if (menu == NULL) return NULL;
 
@@ -66,8 +66,7 @@ static bruce_launcher_menu_t *bruce_launcher__menu_create(const char *title, bru
     return menu;
 }
 
-void bruce_launcher__menu_free(bruce_launcher_menu_t *menu)
-{
+void bruce_launcher__menu_free(bruce_launcher_menu_t *menu) {
     if (menu == NULL) return;
     for (int i = 0; i < menu->entry_count; ++i) {
         if (menu->entries[i].kind == BRUCE_LAUNCHER_ENTRY_SUBMENU) {
@@ -78,9 +77,8 @@ void bruce_launcher__menu_free(bruce_launcher_menu_t *menu)
     free(menu);
 }
 
-static bool bruce_launcher__menu_add_command(bruce_launcher_menu_t *menu, const char *label,
-                                              const char *command)
-{
+static bool
+bruce_launcher__menu_add_command(bruce_launcher_menu_t *menu, const char *label, const char *command) {
     if (menu->entry_count >= menu->capacity) return false;
     bruce_launcher_entry_t *entry = &menu->entries[menu->entry_count++];
     strncpy(entry->label, label, sizeof(entry->label) - 1);
@@ -89,9 +87,9 @@ static bool bruce_launcher__menu_add_command(bruce_launcher_menu_t *menu, const 
     return true;
 }
 
-static bool bruce_launcher__menu_add_submenu(bruce_launcher_menu_t *menu, const char *label,
-                                              bruce_launcher_menu_t *submenu)
-{
+static bool bruce_launcher__menu_add_submenu(
+    bruce_launcher_menu_t *menu, const char *label, bruce_launcher_menu_t *submenu
+) {
     if (menu->entry_count >= menu->capacity) return false;
     bruce_launcher_entry_t *entry = &menu->entries[menu->entry_count++];
     strncpy(entry->label, label, sizeof(entry->label) - 1);
@@ -100,8 +98,7 @@ static bool bruce_launcher__menu_add_submenu(bruce_launcher_menu_t *menu, const 
     return true;
 }
 
-static bool bruce_launcher__menu_add_back(bruce_launcher_menu_t *menu)
-{
+static bool bruce_launcher__menu_add_back(bruce_launcher_menu_t *menu) {
     if (menu->entry_count >= menu->capacity) return false;
     bruce_launcher_entry_t *entry = &menu->entries[menu->entry_count++];
     strncpy(entry->label, "Back", sizeof(entry->label) - 1);
@@ -109,8 +106,7 @@ static bool bruce_launcher__menu_add_back(bruce_launcher_menu_t *menu)
     return true;
 }
 
-static char *bruce_launcher__read_file(const char *path)
-{
+static char *bruce_launcher__read_file(const char *path) {
     bruce_file_id_t file;
     if (storage__open(path, BRUCE_STORAGE_OPEN_READ, &file) != BRUCE_OK) return NULL;
 
@@ -134,13 +130,13 @@ static char *bruce_launcher__read_file(const char *path)
     return buffer;
 }
 
-static bool bruce_launcher__write_default_config(void)
-{
+static bool bruce_launcher__write_default_config(void) {
     bruce_file_id_t file;
-    bruce_result_t result = storage__open(BRUCE_LAUNCHER_CONFIG_PATH,
-                                           BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE |
-                                               BRUCE_STORAGE_OPEN_TRUNCATE,
-                                           &file);
+    bruce_result_t result = storage__open(
+        BRUCE_LAUNCHER_CONFIG_PATH,
+        BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE | BRUCE_STORAGE_OPEN_TRUNCATE,
+        &file
+    );
     if (result != BRUCE_OK) return false;
 
     size_t length = strlen(BRUCE_LAUNCHER_DEFAULT_JSON);
@@ -150,8 +146,7 @@ static bool bruce_launcher__write_default_config(void)
     return result == BRUCE_OK && written == length;
 }
 
-static int bruce_launcher__discover_apps(bruce_launcher_menu_t *menu, const char *path)
-{
+static int bruce_launcher__discover_apps(bruce_launcher_menu_t *menu, const char *path) {
     bruce_storage_entry_t *entries =
         (bruce_storage_entry_t *)malloc(sizeof(*entries) * BRUCE_LAUNCHER_MAX_ENTRIES);
     if (entries == NULL) return 0;
@@ -184,12 +179,11 @@ static int bruce_launcher__discover_apps(bruce_launcher_menu_t *menu, const char
     return added;
 }
 
-static bruce_launcher_menu_t *bruce_launcher__parse_json_object(cJSON *root, const char *title,
-                                                                 bruce_launcher_menu_t *parent, int depth);
+static bruce_launcher_menu_t *
+bruce_launcher__parse_json_object(cJSON *root, const char *title, bruce_launcher_menu_t *parent, int depth);
 
-static bool bruce_launcher__parse_json_value(bruce_launcher_menu_t *menu, const char *key,
-                                              cJSON *value, int depth)
-{
+static bool
+bruce_launcher__parse_json_value(bruce_launcher_menu_t *menu, const char *key, cJSON *value, int depth) {
     if (cJSON_IsString(value) && value->valuestring != NULL) {
         if (value->valuestring[0] != '/') {
             return bruce_launcher__menu_add_command(menu, key, value->valuestring);
@@ -213,23 +207,21 @@ static bool bruce_launcher__parse_json_value(bruce_launcher_menu_t *menu, const 
     return true;
 }
 
-static bruce_launcher_menu_t *bruce_launcher__parse_json_object(cJSON *root, const char *title,
-                                                                 bruce_launcher_menu_t *parent, int depth)
-{
+static bruce_launcher_menu_t *
+bruce_launcher__parse_json_object(cJSON *root, const char *title, bruce_launcher_menu_t *parent, int depth) {
     bruce_launcher_menu_t *menu = bruce_launcher__menu_create(title, parent);
     if (menu == NULL) return NULL;
 
     cJSON *child;
-    cJSON_ArrayForEach(child, root)
-    {
-        if (child->string != NULL && !bruce_launcher__parse_json_value(menu, child->string, child, depth)) break;
+    cJSON_ArrayForEach(child, root) {
+        if (child->string != NULL && !bruce_launcher__parse_json_value(menu, child->string, child, depth))
+            break;
     }
     if (parent != NULL) (void)bruce_launcher__menu_add_back(menu);
     return menu;
 }
 
-bruce_launcher_menu_t *bruce_launcher__menu_load(void)
-{
+bruce_launcher_menu_t *bruce_launcher__menu_load(void) {
     char *text = bruce_launcher__read_file(BRUCE_LAUNCHER_CONFIG_PATH);
     if (text == NULL) {
         (void)bruce_launcher__write_default_config();

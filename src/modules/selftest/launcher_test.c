@@ -29,34 +29,27 @@ static launcher_test_state_t s_launcher_test_state;
 static const char *s_launcher_test_target_label;
 static bool s_launcher_test_found;
 
-static size_t selftest__launcher_find_choice(const bruce_dialog_choice_t *choices, size_t choice_count,
-                                             const char *label)
-{
+static size_t
+selftest__launcher_find_choice(const bruce_dialog_choice_t *choices, size_t choice_count, const char *label) {
     for (size_t i = 0; i < choice_count; ++i) {
-        if (strstr(choices[i].label, label) != NULL) {
-            return i;
-        }
+        if (strstr(choices[i].label, label) != NULL) { return i; }
     }
     return (size_t)-1;
 }
 
-static bruce_result_t selftest__launcher_choice_provider(const char *title, const char *message,
-                                                          const bruce_dialog_choice_t *choices, size_t choice_count,
-                                                          size_t *out_selected)
-{
+static bruce_result_t selftest__launcher_choice_provider(
+    const char *title, const char *message, const bruce_dialog_choice_t *choices, size_t choice_count,
+    size_t *out_selected
+) {
     (void)message;
 
-    if (s_launcher_test_state == LAUNCHER_TEST_STATE_DONE) {
-        return BRUCE_ERR_CANCELLED;
-    }
+    if (s_launcher_test_state == LAUNCHER_TEST_STATE_DONE) { return BRUCE_ERR_CANCELLED; }
 
     bool is_root = (title != NULL && strcmp(title, "Main Menu") == 0);
 
     if (s_launcher_test_state == LAUNCHER_TEST_STATE_ROOT_OPEN_APPS && is_root) {
         size_t index = selftest__launcher_find_choice(choices, choice_count, "Apps");
-        if (index == (size_t)-1) {
-            return BRUCE_ERR_CANCELLED;
-        }
+        if (index == (size_t)-1) { return BRUCE_ERR_CANCELLED; }
         *out_selected = index;
         s_launcher_test_state = LAUNCHER_TEST_STATE_APPS_SELECT_APP;
         return BRUCE_OK;
@@ -72,18 +65,14 @@ static bruce_result_t selftest__launcher_choice_provider(const char *title, cons
         }
         /* App not found in Apps submenu: go back and exit. */
         size_t back = selftest__launcher_find_choice(choices, choice_count, "Back");
-        if (back != (size_t)-1) {
-            *out_selected = back;
-        }
+        if (back != (size_t)-1) { *out_selected = back; }
         s_launcher_test_state = LAUNCHER_TEST_STATE_ROOT_EXIT;
         return BRUCE_OK;
     }
 
     if (s_launcher_test_state == LAUNCHER_TEST_STATE_APPS_GO_BACK && !is_root) {
         size_t back = selftest__launcher_find_choice(choices, choice_count, "Back");
-        if (back == (size_t)-1) {
-            return BRUCE_ERR_CANCELLED;
-        }
+        if (back == (size_t)-1) { return BRUCE_ERR_CANCELLED; }
         *out_selected = back;
         s_launcher_test_state = LAUNCHER_TEST_STATE_ROOT_EXIT;
         return BRUCE_OK;
@@ -98,8 +87,7 @@ static bruce_result_t selftest__launcher_choice_provider(const char *title, cons
     return BRUCE_ERR_CANCELLED;
 }
 
-bool selftest__run_launcher_apps_discovery_case(void)
-{
+bool selftest__run_launcher_apps_discovery_case(void) {
     const char *path = "/apps/launcher_test_app.elf";
     storage__remove(path);
 
@@ -115,7 +103,8 @@ bool selftest__run_launcher_apps_discovery_case(void)
     dialog__test_set_choice_provider(selftest__launcher_choice_provider);
     size_t calls_before = elf_loader__debug_call_count();
     int result = app_runner__run("bruce_launcher", "", true);
-    bruce_result_t wait_result = result > 0 ? task__wait((bruce_task_id_t)result, 5000) : BRUCE_ERR_INVALID_ARGUMENT;
+    bruce_result_t wait_result =
+        result > 0 ? task__wait((bruce_task_id_t)result, 5000) : BRUCE_ERR_INVALID_ARGUMENT;
     dialog__test_set_choice_provider(NULL);
 
     storage__remove(path);
@@ -123,8 +112,14 @@ bool selftest__run_launcher_apps_discovery_case(void)
     bool ok = s_launcher_test_found && result > 0 && wait_result == BRUCE_OK &&
               elf_loader__debug_call_count() == calls_before + 1;
     if (!ok) {
-        printf("[selftest] launcher/apps: found=%d result=%d wait=%d calls %zu -> %zu\n", s_launcher_test_found, result,
-               wait_result, calls_before, elf_loader__debug_call_count());
+        printf(
+            "[selftest] launcher/apps: found=%d result=%d wait=%d calls %zu -> %zu\n",
+            s_launcher_test_found,
+            result,
+            wait_result,
+            calls_before,
+            elf_loader__debug_call_count()
+        );
         return false;
     }
 

@@ -1,17 +1,12 @@
 #include "core_sdk/bluetooth_hid.h"
 
-#include <stdlib.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "core/bluetooth/bluetooth_internal.h"
-#include "core/task/task.h"
 #include "core_sdk/input.h"
-#include "core_sdk/notification.h"
 #include "core_sdk/permission.h"
-
-#include "sdkconfig.h"
-#include "soc/soc_caps.h"
 
 #if SOC_BT_CLASSIC_SUPPORTED && CONFIG_BT_CLASSIC_ENABLED && CONFIG_BT_HID_HOST_ENABLED
 #include "esp_gap_bt_api.h"
@@ -32,9 +27,8 @@ static uint8_t s_gamepad_hat = 8;
 static int8_t s_gamepad_axes[4];
 static bool s_gamepad_initialized;
 
-static bruce_result_t bluetooth_hid__inject(bruce_input_type_t type, bruce_input_action_t action,
-                                            int32_t code, int32_t value)
-{
+static bruce_result_t
+bluetooth_hid__inject(bruce_input_type_t type, bruce_input_action_t action, int32_t code, int32_t value) {
     bruce_input_event_t event = {
         .type = type,
         .action = action,
@@ -44,43 +38,39 @@ static bruce_result_t bluetooth_hid__inject(bruce_input_type_t type, bruce_input
     return input__inject(&event);
 }
 
-static int32_t bluetooth_hid__keyboard_code(uint8_t usage, bool shift)
-{
-    if (usage >= 0x04 && usage <= 0x1d) {
-        return (shift ? 'A' : 'a') + usage - 0x04;
-    }
+static int32_t bluetooth_hid__keyboard_code(uint8_t usage, bool shift) {
+    if (usage >= 0x04 && usage <= 0x1d) { return (shift ? 'A' : 'a') + usage - 0x04; }
     static const char digits[] = "1234567890";
     static const char shifted_digits[] = "!@#$%^&*()";
     if (usage >= 0x1e && usage <= 0x27) {
         return shift ? shifted_digits[usage - 0x1e] : digits[usage - 0x1e];
     }
     switch (usage) {
-    case 0x28: return BRUCE_INPUT_CODE_SELECT;
-    case 0x29: return BRUCE_INPUT_CODE_BACK;
-    case 0x2a: return '\b';
-    case 0x2b: return '\t';
-    case 0x2c: return ' ';
-    case 0x2d: return shift ? '_' : '-';
-    case 0x2e: return shift ? '+' : '=';
-    case 0x2f: return shift ? '{' : '[';
-    case 0x30: return shift ? '}' : ']';
-    case 0x31: return shift ? '|' : '\\';
-    case 0x33: return shift ? ':' : ';';
-    case 0x34: return shift ? '"' : '\'';
-    case 0x35: return shift ? '~' : '`';
-    case 0x36: return shift ? '<' : ',';
-    case 0x37: return shift ? '>' : '.';
-    case 0x38: return shift ? '?' : '/';
-    case 0x4f: return BRUCE_INPUT_CODE_RIGHT;
-    case 0x50: return BRUCE_INPUT_CODE_LEFT;
-    case 0x51: return BRUCE_INPUT_CODE_DOWN;
-    case 0x52: return BRUCE_INPUT_CODE_UP;
-    default: return 0;
+        case 0x28: return BRUCE_INPUT_CODE_SELECT;
+        case 0x29: return BRUCE_INPUT_CODE_BACK;
+        case 0x2a: return '\b';
+        case 0x2b: return '\t';
+        case 0x2c: return ' ';
+        case 0x2d: return shift ? '_' : '-';
+        case 0x2e: return shift ? '+' : '=';
+        case 0x2f: return shift ? '{' : '[';
+        case 0x30: return shift ? '}' : ']';
+        case 0x31: return shift ? '|' : '\\';
+        case 0x33: return shift ? ':' : ';';
+        case 0x34: return shift ? '"' : '\'';
+        case 0x35: return shift ? '~' : '`';
+        case 0x36: return shift ? '<' : ',';
+        case 0x37: return shift ? '>' : '.';
+        case 0x38: return shift ? '?' : '/';
+        case 0x4f: return BRUCE_INPUT_CODE_RIGHT;
+        case 0x50: return BRUCE_INPUT_CODE_LEFT;
+        case 0x51: return BRUCE_INPUT_CODE_DOWN;
+        case 0x52: return BRUCE_INPUT_CODE_UP;
+        default: return 0;
     }
 }
 
-void bluetooth_hid__reset_input_state(void)
-{
+void bluetooth_hid__reset_input_state(void) {
     memset(s_keyboard_usages, 0, sizeof(s_keyboard_usages));
     memset(s_keyboard_codes, 0, sizeof(s_keyboard_codes));
     s_gamepad_buttons = 0;
@@ -89,8 +79,7 @@ void bluetooth_hid__reset_input_state(void)
     s_gamepad_initialized = false;
 }
 
-bruce_result_t bluetooth_hid__translate_keyboard_report(const uint8_t *data, size_t length)
-{
+bruce_result_t bluetooth_hid__translate_keyboard_report(const uint8_t *data, size_t length) {
     if (data == NULL || length < 8) return BRUCE_ERR_INVALID_ARGUMENT;
     for (size_t i = 2; i < 8; ++i) {
         if (data[i] == 1) return BRUCE_OK;
@@ -105,8 +94,8 @@ bruce_result_t bluetooth_hid__translate_keyboard_report(const uint8_t *data, siz
             if (data[current + 2] == s_keyboard_usages[old]) retained = true;
         }
         if (!retained && s_keyboard_codes[old] != 0) {
-            bruce_result_t injected = bluetooth_hid__inject(BRUCE_INPUT_KEY, BRUCE_INPUT_RELEASE,
-                                                            s_keyboard_codes[old], 0);
+            bruce_result_t injected =
+                bluetooth_hid__inject(BRUCE_INPUT_KEY, BRUCE_INPUT_RELEASE, s_keyboard_codes[old], 0);
             if (result == BRUCE_OK && injected != BRUCE_OK) result = injected;
         }
     }
@@ -128,8 +117,9 @@ bruce_result_t bluetooth_hid__translate_keyboard_report(const uint8_t *data, siz
         if (!retained) {
             next_codes[current] = bluetooth_hid__keyboard_code(usage, shift);
             if (next_codes[current] != 0) {
-                bruce_result_t injected = bluetooth_hid__inject(BRUCE_INPUT_KEY, BRUCE_INPUT_PRESS,
-                                                                next_codes[current], next_codes[current]);
+                bruce_result_t injected = bluetooth_hid__inject(
+                    BRUCE_INPUT_KEY, BRUCE_INPUT_PRESS, next_codes[current], next_codes[current]
+                );
                 if (result == BRUCE_OK && injected != BRUCE_OK) result = injected;
             }
         }
@@ -139,40 +129,51 @@ bruce_result_t bluetooth_hid__translate_keyboard_report(const uint8_t *data, siz
     return result;
 }
 
-static void bluetooth_hid__inject_hat(uint8_t hat, bruce_input_action_t action)
-{
+static void bluetooth_hid__inject_hat(uint8_t hat, bruce_input_action_t action) {
     if (hat == 0 || hat == 1 || hat == 7) {
-        (void)bluetooth_hid__inject(BRUCE_INPUT_BUTTON, action, BRUCE_INPUT_CODE_UP,
-                                    action == BRUCE_INPUT_PRESS);
+        (void
+        )bluetooth_hid__inject(BRUCE_INPUT_BUTTON, action, BRUCE_INPUT_CODE_UP, action == BRUCE_INPUT_PRESS);
     }
     if (hat >= 1 && hat <= 3) {
-        (void)bluetooth_hid__inject(BRUCE_INPUT_BUTTON, action, BRUCE_INPUT_CODE_RIGHT,
-                                    action == BRUCE_INPUT_PRESS);
+        (void)bluetooth_hid__inject(
+            BRUCE_INPUT_BUTTON, action, BRUCE_INPUT_CODE_RIGHT, action == BRUCE_INPUT_PRESS
+        );
     }
     if (hat >= 3 && hat <= 5) {
-        (void)bluetooth_hid__inject(BRUCE_INPUT_BUTTON, action, BRUCE_INPUT_CODE_DOWN,
-                                    action == BRUCE_INPUT_PRESS);
+        (void)bluetooth_hid__inject(
+            BRUCE_INPUT_BUTTON, action, BRUCE_INPUT_CODE_DOWN, action == BRUCE_INPUT_PRESS
+        );
     }
     if (hat >= 5 && hat <= 7) {
-        (void)bluetooth_hid__inject(BRUCE_INPUT_BUTTON, action, BRUCE_INPUT_CODE_LEFT,
-                                    action == BRUCE_INPUT_PRESS);
+        (void)bluetooth_hid__inject(
+            BRUCE_INPUT_BUTTON, action, BRUCE_INPUT_CODE_LEFT, action == BRUCE_INPUT_PRESS
+        );
     }
 }
 
-bruce_result_t bluetooth_hid__translate_gamepad_report(const uint8_t *data, size_t length)
-{
+bruce_result_t bluetooth_hid__translate_gamepad_report(const uint8_t *data, size_t length) {
     /* Common HID gamepad report: X, Y, RX, RY, hat, then 16 button bits.
      * Descriptor-specific layouts are deliberately not guessed. */
     if (data == NULL || length < 7) return BRUCE_ERR_INVALID_ARGUMENT;
     static const int32_t axis_codes[4] = {
-        BRUCE_INPUT_CODE_GAMEPAD_AXIS_X, BRUCE_INPUT_CODE_GAMEPAD_AXIS_Y,
-        BRUCE_INPUT_CODE_GAMEPAD_AXIS_RX, BRUCE_INPUT_CODE_GAMEPAD_AXIS_RY,
+        BRUCE_INPUT_CODE_GAMEPAD_AXIS_X,
+        BRUCE_INPUT_CODE_GAMEPAD_AXIS_Y,
+        BRUCE_INPUT_CODE_GAMEPAD_AXIS_RX,
+        BRUCE_INPUT_CODE_GAMEPAD_AXIS_RY,
     };
     static const int32_t button_codes[12] = {
-        BRUCE_INPUT_CODE_BUTTON_A, BRUCE_INPUT_CODE_BUTTON_B, BRUCE_INPUT_CODE_BUTTON_X,
-        BRUCE_INPUT_CODE_BUTTON_Y, BRUCE_INPUT_CODE_BUTTON_L1, BRUCE_INPUT_CODE_BUTTON_R1,
-        BRUCE_INPUT_CODE_BUTTON_L2, BRUCE_INPUT_CODE_BUTTON_R2, BRUCE_INPUT_CODE_BUTTON_SELECT,
-        BRUCE_INPUT_CODE_BUTTON_START, BRUCE_INPUT_CODE_BUTTON_THUMB_L, BRUCE_INPUT_CODE_BUTTON_THUMB_R,
+        BRUCE_INPUT_CODE_BUTTON_A,
+        BRUCE_INPUT_CODE_BUTTON_B,
+        BRUCE_INPUT_CODE_BUTTON_X,
+        BRUCE_INPUT_CODE_BUTTON_Y,
+        BRUCE_INPUT_CODE_BUTTON_L1,
+        BRUCE_INPUT_CODE_BUTTON_R1,
+        BRUCE_INPUT_CODE_BUTTON_L2,
+        BRUCE_INPUT_CODE_BUTTON_R2,
+        BRUCE_INPUT_CODE_BUTTON_SELECT,
+        BRUCE_INPUT_CODE_BUTTON_START,
+        BRUCE_INPUT_CODE_BUTTON_THUMB_L,
+        BRUCE_INPUT_CODE_BUTTON_THUMB_R,
     };
 
     for (size_t i = 0; i < 4; ++i) {
@@ -195,9 +196,12 @@ bruce_result_t bluetooth_hid__translate_gamepad_report(const uint8_t *data, size
         uint16_t mask = (uint16_t)1 << i;
         if ((changed & mask) != 0) {
             bool pressed = (buttons & mask) != 0;
-            (void)bluetooth_hid__inject(BRUCE_INPUT_BUTTON,
-                                        pressed ? BRUCE_INPUT_PRESS : BRUCE_INPUT_RELEASE,
-                                        button_codes[i], pressed);
+            (void)bluetooth_hid__inject(
+                BRUCE_INPUT_BUTTON,
+                pressed ? BRUCE_INPUT_PRESS : BRUCE_INPUT_RELEASE,
+                button_codes[i],
+                pressed
+            );
         }
     }
     s_gamepad_buttons = buttons;
@@ -242,8 +246,7 @@ static bluetooth_hid__connection_t *s_pending_connection;
 static bluetooth_hid__connection_t *s_connection;
 static esp_hidh_dev_t *s_wait_close_dev;
 
-static void bluetooth_hid__connection_unref(bluetooth_hid__connection_t *connection)
-{
+static void bluetooth_hid__connection_unref(bluetooth_hid__connection_t *connection) {
     bool destroy = false;
     portENTER_CRITICAL(&s_state_mux);
     if (connection != NULL && connection->refs > 0) {
@@ -254,37 +257,31 @@ static void bluetooth_hid__connection_unref(bluetooth_hid__connection_t *connect
     if (destroy) free(connection);
 }
 
-static void bluetooth_hid__operation_lock(void)
-{
+static void bluetooth_hid__operation_lock(void) {
     if (s_operation_mutex == NULL) {
         portENTER_CRITICAL(&s_init_mux);
-        if (s_operation_mutex == NULL) s_operation_mutex = xSemaphoreCreateMutexStatic(&s_operation_mutex_storage);
+        if (s_operation_mutex == NULL)
+            s_operation_mutex = xSemaphoreCreateMutexStatic(&s_operation_mutex_storage);
         portEXIT_CRITICAL(&s_init_mux);
     }
     xSemaphoreTake(s_operation_mutex, portMAX_DELAY);
 }
 
-static void bluetooth_hid__operation_unlock(void)
-{
-    xSemaphoreGive(s_operation_mutex);
-}
+static void bluetooth_hid__operation_unlock(void) { xSemaphoreGive(s_operation_mutex); }
 
-static bluetooth_hid__usage_t bluetooth_hid__map_usage(esp_hid_usage_t usage)
-{
+static bluetooth_hid__usage_t bluetooth_hid__map_usage(esp_hid_usage_t usage) {
     if (usage == ESP_HID_USAGE_KEYBOARD) return BRUCE_BLUETOOTH_HID_KEYBOARD;
     if (usage == ESP_HID_USAGE_GAMEPAD || usage == ESP_HID_USAGE_JOYSTICK) return BRUCE_BLUETOOTH_HID_GAMEPAD;
     return BRUCE_BLUETOOTH_HID_UNKNOWN;
 }
 
-static void bluetooth_hid__copy_name(char *destination, size_t size, const uint8_t *source, size_t length)
-{
+static void bluetooth_hid__copy_name(char *destination, size_t size, const uint8_t *source, size_t length) {
     size_t copy_length = length < size - 1 ? length : size - 1;
     if (source != NULL && copy_length > 0) memcpy(destination, source, copy_length);
     destination[copy_length] = '\0';
 }
 
-static void bluetooth_hid__gap_callback(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *parameter)
-{
+static void bluetooth_hid__gap_callback(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *parameter) {
     if (event == ESP_BT_GAP_DISC_RES_EVT && s_scanning) {
         uint32_t cod_value = 0;
         int8_t rssi = -128;
@@ -300,9 +297,12 @@ static void bluetooth_hid__gap_callback(esp_bt_gap_cb_event_t event, esp_bt_gap_
                 name = property->val;
                 name_length = property->len > UINT8_MAX ? UINT8_MAX : (uint8_t)property->len;
             } else if (property->type == ESP_BT_GAP_DEV_PROP_EIR && name == NULL) {
-                name = esp_bt_gap_resolve_eir_data(property->val, ESP_BT_EIR_TYPE_CMPL_LOCAL_NAME, &name_length);
+                name =
+                    esp_bt_gap_resolve_eir_data(property->val, ESP_BT_EIR_TYPE_CMPL_LOCAL_NAME, &name_length);
                 if (name == NULL) {
-                    name = esp_bt_gap_resolve_eir_data(property->val, ESP_BT_EIR_TYPE_SHORT_LOCAL_NAME, &name_length);
+                    name = esp_bt_gap_resolve_eir_data(
+                        property->val, ESP_BT_EIR_TYPE_SHORT_LOCAL_NAME, &name_length
+                    );
                 }
             }
         }
@@ -322,8 +322,10 @@ static void bluetooth_hid__gap_callback(esp_bt_gap_cb_event_t event, esp_bt_gap_
         }
         s_scan_devices[index].rssi = rssi;
         s_scan_devices[index].usage = mapped_usage;
-        if (name != NULL) bluetooth_hid__copy_name(s_scan_devices[index].name,
-                                                   sizeof(s_scan_devices[index].name), name, name_length);
+        if (name != NULL)
+            bluetooth_hid__copy_name(
+                s_scan_devices[index].name, sizeof(s_scan_devices[index].name), name, name_length
+            );
     } else if (event == ESP_BT_GAP_DISC_STATE_CHANGED_EVT &&
                parameter->disc_st_chg.state == ESP_BT_GAP_DISCOVERY_STOPPED) {
         xEventGroupSetBits(s_events, BLUETOOTH_HID__SCAN_DONE_BIT);
@@ -331,8 +333,12 @@ static void bluetooth_hid__gap_callback(esp_bt_gap_cb_event_t event, esp_bt_gap_
         (void)esp_bt_gap_ssp_confirm_reply(parameter->cfm_req.bda, true);
     } else if (event == ESP_BT_GAP_KEY_NOTIF_EVT) {
         char message[BRUCE_NOTIFICATION_TEXT_MAX];
-        snprintf(message, sizeof(message), "Bluetooth pairing code: %06lu",
-                 (unsigned long)parameter->key_notif.passkey);
+        snprintf(
+            message,
+            sizeof(message),
+            "Bluetooth pairing code: %06lu",
+            (unsigned long)parameter->key_notif.passkey
+        );
         (void)notification__push(message, BRUCE_NOTIFICATION_DURATION_MAX_MS);
     } else if (event == ESP_BT_GAP_PIN_REQ_EVT) {
         esp_bt_pin_code_t pin = {'1', '2', '3', '4'};
@@ -340,124 +346,135 @@ static void bluetooth_hid__gap_callback(esp_bt_gap_cb_event_t event, esp_bt_gap_
     }
 }
 
-static void bluetooth_hid__event_callback(void *argument, esp_event_base_t base, int32_t id, void *event_data)
-{
+static void
+bluetooth_hid__event_callback(void *argument, esp_event_base_t base, int32_t id, void *event_data) {
     (void)argument;
     (void)base;
     esp_hidh_event_data_t *parameter = event_data;
     switch ((esp_hidh_event_t)id) {
-    case ESP_HIDH_START_EVENT:
-        s_open_status = parameter->start.status;
-        xEventGroupSetBits(s_events, BLUETOOTH_HID__START_DONE_BIT);
-        break;
-    case ESP_HIDH_OPEN_EVENT:
-        portENTER_CRITICAL(&s_state_mux);
-        bluetooth_hid__connection_t *opened = s_pending_connection;
-        bool matched_open = opened != NULL && (opened->dev == NULL || opened->dev == parameter->open.dev);
-        if (matched_open && parameter->open.status == ESP_OK) {
-            opened->dev = parameter->open.dev;
-            s_pending_connection = NULL;
-            bluetooth_hid__reset_input_state();
-        } else if (opened == NULL || opened->dev != parameter->open.dev) {
-            opened = NULL;
-        }
-        portEXIT_CRITICAL(&s_state_mux);
-        if (opened != NULL && parameter->open.status == ESP_OK) {
-            const uint8_t *address = esp_hidh_dev_bda_get(parameter->open.dev);
-            if (address != NULL) memcpy(opened->snapshot.address, address, ESP_BD_ADDR_LEN);
-            const char *name = esp_hidh_dev_name_get(parameter->open.dev);
-            if (name != NULL) bluetooth_hid__copy_name(opened->snapshot.name, sizeof(opened->snapshot.name),
-                                                       (const uint8_t *)name, strlen(name));
-            opened->snapshot.usage = bluetooth_hid__map_usage(esp_hidh_dev_usage_get(parameter->open.dev));
-            size_t report_count = 0;
-            esp_hid_report_item_t *reports = NULL;
-            if (esp_hidh_dev_reports_get(parameter->open.dev, &report_count, &reports) == ESP_OK) {
-                for (size_t i = 0; i < report_count; ++i) {
-                    if (reports[i].report_type != ESP_HID_REPORT_TYPE_INPUT) continue;
-                    if (reports[i].usage == ESP_HID_USAGE_KEYBOARD && reports[i].value_len == 8) {
-                        opened->keyboard_supported = true;
-                        opened->keyboard_map = reports[i].map_index;
-                        opened->keyboard_report_id = reports[i].report_id;
-                    } else if ((reports[i].usage == ESP_HID_USAGE_GAMEPAD ||
-                                reports[i].usage == ESP_HID_USAGE_JOYSTICK) && reports[i].value_len == 7) {
-                        opened->gamepad_supported = true;
-                        opened->gamepad_map = reports[i].map_index;
-                        opened->gamepad_report_id = reports[i].report_id;
-                    }
-                }
-                free(reports);
-            }
+        case ESP_HIDH_START_EVENT:
+            s_open_status = parameter->start.status;
+            xEventGroupSetBits(s_events, BLUETOOTH_HID__START_DONE_BIT);
+            break;
+        case ESP_HIDH_OPEN_EVENT:
             portENTER_CRITICAL(&s_state_mux);
-            s_connection = opened;
-            portEXIT_CRITICAL(&s_state_mux);
-        } else if (parameter->open.status == ESP_OK) {
-            (void)esp_hidh_dev_close(parameter->open.dev);
-        }
-        if (matched_open) {
-            s_open_status = parameter->open.status;
-            xEventGroupSetBits(s_events, BLUETOOTH_HID__OPEN_DONE_BIT);
-        }
-        break;
-    case ESP_HIDH_INPUT_EVENT: {
-        bool keyboard = false;
-        bool gamepad = false;
-        portENTER_CRITICAL(&s_state_mux);
-        bluetooth_hid__connection_t *active = s_connection;
-        if (active != NULL && active->dev == parameter->input.dev) {
-            keyboard = active->keyboard_supported && active->keyboard_map == parameter->input.map_index &&
-                       active->keyboard_report_id == parameter->input.report_id;
-            gamepad = active->gamepad_supported && active->gamepad_map == parameter->input.map_index &&
-                      active->gamepad_report_id == parameter->input.report_id;
-        }
-        portEXIT_CRITICAL(&s_state_mux);
-        if (keyboard) {
-            (void)bluetooth_hid__translate_keyboard_report(parameter->input.data, parameter->input.length);
-        } else if (gamepad) {
-            (void)bluetooth_hid__translate_gamepad_report(parameter->input.data, parameter->input.length);
-        }
-        break;
-    }
-    case ESP_HIDH_CLOSE_EVENT: {
-        bool waited = false;
-        bool was_active = false;
-        portENTER_CRITICAL(&s_state_mux);
-        if (s_connection != NULL && s_connection->dev == parameter->close.dev) {
-            s_connection->dev = NULL;
-            s_connection = NULL;
-            was_active = true;
-        }
-        if (s_pending_connection != NULL && s_pending_connection->dev == parameter->close.dev) {
-            s_pending_connection->dev = NULL;
-            s_pending_connection = NULL;
-        }
-        if (s_wait_close_dev == parameter->close.dev) {
-            s_wait_close_dev = NULL;
-            waited = true;
-        }
-        portEXIT_CRITICAL(&s_state_mux);
-        if (was_active || waited) {
-            uint8_t keyboard_release[8] = {0};
-            uint8_t gamepad_release[7] = {
-                (uint8_t)s_gamepad_axes[0], (uint8_t)s_gamepad_axes[1],
-                (uint8_t)s_gamepad_axes[2], (uint8_t)s_gamepad_axes[3], 8, 0, 0,
-            };
-            (void)bluetooth_hid__translate_keyboard_report(keyboard_release, sizeof(keyboard_release));
-            if (s_gamepad_initialized) {
-                (void)bluetooth_hid__translate_gamepad_report(gamepad_release, sizeof(gamepad_release));
+            bluetooth_hid__connection_t *opened = s_pending_connection;
+            bool matched_open = opened != NULL && (opened->dev == NULL || opened->dev == parameter->open.dev);
+            if (matched_open && parameter->open.status == ESP_OK) {
+                opened->dev = parameter->open.dev;
+                s_pending_connection = NULL;
+                bluetooth_hid__reset_input_state();
+            } else if (opened == NULL || opened->dev != parameter->open.dev) {
+                opened = NULL;
             }
-            bluetooth_hid__reset_input_state();
+            portEXIT_CRITICAL(&s_state_mux);
+            if (opened != NULL && parameter->open.status == ESP_OK) {
+                const uint8_t *address = esp_hidh_dev_bda_get(parameter->open.dev);
+                if (address != NULL) memcpy(opened->snapshot.address, address, ESP_BD_ADDR_LEN);
+                const char *name = esp_hidh_dev_name_get(parameter->open.dev);
+                if (name != NULL)
+                    bluetooth_hid__copy_name(
+                        opened->snapshot.name,
+                        sizeof(opened->snapshot.name),
+                        (const uint8_t *)name,
+                        strlen(name)
+                    );
+                opened->snapshot.usage =
+                    bluetooth_hid__map_usage(esp_hidh_dev_usage_get(parameter->open.dev));
+                size_t report_count = 0;
+                esp_hid_report_item_t *reports = NULL;
+                if (esp_hidh_dev_reports_get(parameter->open.dev, &report_count, &reports) == ESP_OK) {
+                    for (size_t i = 0; i < report_count; ++i) {
+                        if (reports[i].report_type != ESP_HID_REPORT_TYPE_INPUT) continue;
+                        if (reports[i].usage == ESP_HID_USAGE_KEYBOARD && reports[i].value_len == 8) {
+                            opened->keyboard_supported = true;
+                            opened->keyboard_map = reports[i].map_index;
+                            opened->keyboard_report_id = reports[i].report_id;
+                        } else if ((reports[i].usage == ESP_HID_USAGE_GAMEPAD ||
+                                    reports[i].usage == ESP_HID_USAGE_JOYSTICK) &&
+                                   reports[i].value_len == 7) {
+                            opened->gamepad_supported = true;
+                            opened->gamepad_map = reports[i].map_index;
+                            opened->gamepad_report_id = reports[i].report_id;
+                        }
+                    }
+                    free(reports);
+                }
+                portENTER_CRITICAL(&s_state_mux);
+                s_connection = opened;
+                portEXIT_CRITICAL(&s_state_mux);
+            } else if (parameter->open.status == ESP_OK) {
+                (void)esp_hidh_dev_close(parameter->open.dev);
+            }
+            if (matched_open) {
+                s_open_status = parameter->open.status;
+                xEventGroupSetBits(s_events, BLUETOOTH_HID__OPEN_DONE_BIT);
+            }
+            break;
+        case ESP_HIDH_INPUT_EVENT: {
+            bool keyboard = false;
+            bool gamepad = false;
+            portENTER_CRITICAL(&s_state_mux);
+            bluetooth_hid__connection_t *active = s_connection;
+            if (active != NULL && active->dev == parameter->input.dev) {
+                keyboard = active->keyboard_supported && active->keyboard_map == parameter->input.map_index &&
+                           active->keyboard_report_id == parameter->input.report_id;
+                gamepad = active->gamepad_supported && active->gamepad_map == parameter->input.map_index &&
+                          active->gamepad_report_id == parameter->input.report_id;
+            }
+            portEXIT_CRITICAL(&s_state_mux);
+            if (keyboard) {
+                (void
+                )bluetooth_hid__translate_keyboard_report(parameter->input.data, parameter->input.length);
+            } else if (gamepad) {
+                (void)bluetooth_hid__translate_gamepad_report(parameter->input.data, parameter->input.length);
+            }
+            break;
         }
-        (void)esp_hidh_dev_free(parameter->close.dev);
-        if (waited) xEventGroupSetBits(s_events, BLUETOOTH_HID__CLOSE_DONE_BIT);
-        break;
-    }
-    default:
-        break;
+        case ESP_HIDH_CLOSE_EVENT: {
+            bool waited = false;
+            bool was_active = false;
+            portENTER_CRITICAL(&s_state_mux);
+            if (s_connection != NULL && s_connection->dev == parameter->close.dev) {
+                s_connection->dev = NULL;
+                s_connection = NULL;
+                was_active = true;
+            }
+            if (s_pending_connection != NULL && s_pending_connection->dev == parameter->close.dev) {
+                s_pending_connection->dev = NULL;
+                s_pending_connection = NULL;
+            }
+            if (s_wait_close_dev == parameter->close.dev) {
+                s_wait_close_dev = NULL;
+                waited = true;
+            }
+            portEXIT_CRITICAL(&s_state_mux);
+            if (was_active || waited) {
+                uint8_t keyboard_release[8] = {0};
+                uint8_t gamepad_release[7] = {
+                    (uint8_t)s_gamepad_axes[0],
+                    (uint8_t)s_gamepad_axes[1],
+                    (uint8_t)s_gamepad_axes[2],
+                    (uint8_t)s_gamepad_axes[3],
+                    8,
+                    0,
+                    0,
+                };
+                (void)bluetooth_hid__translate_keyboard_report(keyboard_release, sizeof(keyboard_release));
+                if (s_gamepad_initialized) {
+                    (void)bluetooth_hid__translate_gamepad_report(gamepad_release, sizeof(gamepad_release));
+                }
+                bluetooth_hid__reset_input_state();
+            }
+            (void)esp_hidh_dev_free(parameter->close.dev);
+            if (waited) xEventGroupSetBits(s_events, BLUETOOTH_HID__CLOSE_DONE_BIT);
+            break;
+        }
+        default: break;
     }
 }
 
-static bruce_result_t bluetooth_hid__init(void)
-{
+static bruce_result_t bluetooth_hid__init(void) {
     bruce_result_t result = bluetooth__stack_init();
     if (result != BRUCE_OK) return result;
     if (s_hidh_initialized) return BRUCE_OK;
@@ -479,23 +496,21 @@ static bruce_result_t bluetooth_hid__init(void)
     };
     xEventGroupClearBits(s_events, BLUETOOTH_HID__START_DONE_BIT);
     if (esp_hidh_init(&config) != ESP_OK) return BRUCE_ERR_IO;
-    EventBits_t bits = xEventGroupWaitBits(s_events, BLUETOOTH_HID__START_DONE_BIT, pdTRUE, pdFALSE,
-                                           pdMS_TO_TICKS(5000));
+    EventBits_t bits =
+        xEventGroupWaitBits(s_events, BLUETOOTH_HID__START_DONE_BIT, pdTRUE, pdFALSE, pdMS_TO_TICKS(5000));
     if ((bits & BLUETOOTH_HID__START_DONE_BIT) == 0) return BRUCE_ERR_TIMEOUT;
     if (s_open_status != ESP_OK) return BRUCE_ERR_IO;
     s_hidh_initialized = true;
     return BRUCE_OK;
 }
 
-static int bluetooth_hid__compare_rssi(const void *left, const void *right)
-{
+static int bluetooth_hid__compare_rssi(const void *left, const void *right) {
     const bluetooth_hid__device_t *a = left;
     const bluetooth_hid__device_t *b = right;
     return (int)b->rssi - (int)a->rssi;
 }
 
-static void bluetooth_hid__connection_cleanup(void *context)
-{
+static void bluetooth_hid__connection_cleanup(void *context) {
     bluetooth_hid__connection_t *connection = context;
     if (connection == NULL) return;
     portENTER_CRITICAL(&s_state_mux);
@@ -508,8 +523,9 @@ static void bluetooth_hid__connection_cleanup(void *context)
     if (dev != NULL) {
         xEventGroupClearBits(s_events, BLUETOOTH_HID__CLOSE_DONE_BIT);
         if (esp_hidh_dev_close(dev) == ESP_OK) {
-            (void)xEventGroupWaitBits(s_events, BLUETOOTH_HID__CLOSE_DONE_BIT, pdTRUE, pdFALSE,
-                                      pdMS_TO_TICKS(5000));
+            (void)xEventGroupWaitBits(
+                s_events, BLUETOOTH_HID__CLOSE_DONE_BIT, pdTRUE, pdFALSE, pdMS_TO_TICKS(5000)
+            );
         }
     }
     bluetooth_hid__connection_unref(connection);
@@ -517,8 +533,7 @@ static void bluetooth_hid__connection_cleanup(void *context)
 
 #endif
 
-bool bluetooth_hid__is_supported(void)
-{
+bool bluetooth_hid__is_supported(void) {
 #if SOC_BT_CLASSIC_SUPPORTED && CONFIG_BT_CLASSIC_ENABLED && CONFIG_BT_HID_HOST_ENABLED
     return true;
 #else
@@ -526,8 +541,7 @@ bool bluetooth_hid__is_supported(void)
 #endif
 }
 
-int bluetooth_hid__scan(bluetooth_hid__device_t *devices, size_t capacity, uint32_t timeout_ms)
-{
+int bluetooth_hid__scan(bluetooth_hid__device_t *devices, size_t capacity, uint32_t timeout_ms) {
     bruce_result_t permission = permission__check(BRUCE_PERMISSION_BT);
     if (permission != BRUCE_OK) return permission;
     if (capacity > 0 && devices == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
@@ -559,11 +573,13 @@ int bluetooth_hid__scan(bluetooth_hid__device_t *devices, size_t capacity, uint3
         bluetooth_hid__operation_unlock();
         return error == ESP_ERR_INVALID_STATE ? BRUCE_ERR_BUSY : BRUCE_ERR_IO;
     }
-    EventBits_t bits = xEventGroupWaitBits(s_events, BLUETOOTH_HID__SCAN_DONE_BIT, pdTRUE, pdFALSE,
-                                           pdMS_TO_TICKS(timeout_ms + 2000));
+    EventBits_t bits = xEventGroupWaitBits(
+        s_events, BLUETOOTH_HID__SCAN_DONE_BIT, pdTRUE, pdFALSE, pdMS_TO_TICKS(timeout_ms + 2000)
+    );
     if ((bits & BLUETOOTH_HID__SCAN_DONE_BIT) == 0) {
         if (esp_bt_gap_cancel_discovery() == ESP_OK) {
-            bits = xEventGroupWaitBits(s_events, BLUETOOTH_HID__SCAN_DONE_BIT, pdTRUE, pdFALSE, portMAX_DELAY);
+            bits =
+                xEventGroupWaitBits(s_events, BLUETOOTH_HID__SCAN_DONE_BIT, pdTRUE, pdFALSE, portMAX_DELAY);
         }
     }
     int count = (int)s_scan_count;
@@ -583,8 +599,8 @@ int bluetooth_hid__scan(bluetooth_hid__device_t *devices, size_t capacity, uint3
 #endif
 }
 
-bruce_result_t bluetooth_hid__connect(const uint8_t address[BRUCE_BLUETOOTH_ADDRESS_LEN], uint32_t timeout_ms)
-{
+bruce_result_t
+bluetooth_hid__connect(const uint8_t address[BRUCE_BLUETOOTH_ADDRESS_LEN], uint32_t timeout_ms) {
     bruce_result_t permission = permission__check(BRUCE_PERMISSION_BT);
     if (permission != BRUCE_OK) return permission;
     if (address == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
@@ -635,8 +651,9 @@ bruce_result_t bluetooth_hid__connect(const uint8_t address[BRUCE_BLUETOOTH_ADDR
     portENTER_CRITICAL(&s_state_mux);
     if (connection->dev == NULL) connection->dev = opened_dev;
     portEXIT_CRITICAL(&s_state_mux);
-    EventBits_t bits = xEventGroupWaitBits(s_events, BLUETOOTH_HID__OPEN_DONE_BIT, pdTRUE, pdFALSE,
-                                           pdMS_TO_TICKS(timeout_ms));
+    EventBits_t bits = xEventGroupWaitBits(
+        s_events, BLUETOOTH_HID__OPEN_DONE_BIT, pdTRUE, pdFALSE, pdMS_TO_TICKS(timeout_ms)
+    );
     if ((bits & BLUETOOTH_HID__OPEN_DONE_BIT) == 0) {
         (void)task_registry__resource_release(connection->resource);
         bluetooth_hid__connection_cleanup(connection);
@@ -660,8 +677,7 @@ bruce_result_t bluetooth_hid__connect(const uint8_t address[BRUCE_BLUETOOTH_ADDR
 #endif
 }
 
-bruce_result_t bluetooth_hid__disconnect(void)
-{
+bruce_result_t bluetooth_hid__disconnect(void) {
     bruce_result_t permission = permission__check(BRUCE_PERMISSION_BT);
     if (permission != BRUCE_OK) return permission;
 #if SOC_BT_CLASSIC_SUPPORTED && CONFIG_BT_CLASSIC_ENABLED && CONFIG_BT_HID_HOST_ENABLED
@@ -684,8 +700,9 @@ bruce_result_t bluetooth_hid__disconnect(void)
     esp_err_t error = esp_hidh_dev_close(dev);
     EventBits_t closed = 0;
     if (error == ESP_OK) {
-        closed = xEventGroupWaitBits(s_events, BLUETOOTH_HID__CLOSE_DONE_BIT, pdTRUE, pdFALSE,
-                                     pdMS_TO_TICKS(5000));
+        closed = xEventGroupWaitBits(
+            s_events, BLUETOOTH_HID__CLOSE_DONE_BIT, pdTRUE, pdFALSE, pdMS_TO_TICKS(5000)
+        );
     }
     if (error == ESP_OK && (closed & BLUETOOTH_HID__CLOSE_DONE_BIT) != 0 &&
         connection->owner == task__current_id() &&
@@ -701,8 +718,7 @@ bruce_result_t bluetooth_hid__disconnect(void)
 #endif
 }
 
-bool bluetooth_hid__is_connected(void)
-{
+bool bluetooth_hid__is_connected(void) {
 #if SOC_BT_CLASSIC_SUPPORTED && CONFIG_BT_CLASSIC_ENABLED && CONFIG_BT_HID_HOST_ENABLED
     portENTER_CRITICAL(&s_state_mux);
     bool connected = s_connection != NULL && s_connection->dev != NULL;
@@ -713,8 +729,7 @@ bool bluetooth_hid__is_connected(void)
 #endif
 }
 
-bruce_result_t bluetooth_hid__connected_device(bluetooth_hid__device_t *out_device)
-{
+bruce_result_t bluetooth_hid__connected_device(bluetooth_hid__device_t *out_device) {
     if (out_device == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     bruce_result_t permission = permission__check(BRUCE_PERMISSION_BT);
     if (permission != BRUCE_OK) return permission;

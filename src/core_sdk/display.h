@@ -100,8 +100,7 @@ int display__height(void);
 bruce_display_color_t display__color565(uint8_t r, uint8_t g, uint8_t b);
 
 /* Legacy alias for display__color565(). */
-static inline bruce_display_color_t display__color(uint8_t r, uint8_t g, uint8_t b)
-{
+static inline bruce_display_color_t display__color(uint8_t r, uint8_t g, uint8_t b) {
     return display__color565(r, g, b);
 }
 
@@ -150,30 +149,28 @@ bruce_result_t display__println(const char *text);
 /* -------------------------------------------------------------------------- */
 
 bruce_result_t display__draw_pixel(int16_t x, int16_t y, bruce_display_color_t color);
-bruce_result_t display__draw_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1,
-                                   bruce_display_color_t color);
-bruce_result_t display__draw_rect(int16_t x, int16_t y, int16_t w, int16_t h,
-                                   bruce_display_color_t color);
-bruce_result_t display__fill_rect(int16_t x, int16_t y, int16_t w, int16_t h,
-                                   bruce_display_color_t color);
-bruce_result_t display__draw_circle(int16_t x, int16_t y, int16_t r,
-                                     bruce_display_color_t color);
-bruce_result_t display__fill_circle(int16_t x, int16_t y, int16_t r,
-                                     bruce_display_color_t color);
+bruce_result_t
+display__draw_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1, bruce_display_color_t color);
+bruce_result_t display__draw_rect(int16_t x, int16_t y, int16_t w, int16_t h, bruce_display_color_t color);
+bruce_result_t display__fill_rect(int16_t x, int16_t y, int16_t w, int16_t h, bruce_display_color_t color);
+bruce_result_t display__draw_circle(int16_t x, int16_t y, int16_t r, bruce_display_color_t color);
+bruce_result_t display__fill_circle(int16_t x, int16_t y, int16_t r, bruce_display_color_t color);
 /* Draw a circular arc. Angles use the legacy Bruce convention: zero degrees
  * is at six o'clock and values increase clockwise. An end angle less than the
  * start angle wraps through zero; a range of 360 degrees draws a full circle. */
-bruce_result_t display__draw_arc(int16_t x, int16_t y, int16_t r,
-                                  int16_t start_angle, int16_t end_angle,
-                                  bruce_display_color_t color);
-bruce_result_t display__draw_triangle(int16_t x0, int16_t y0, int16_t x1, int16_t y1,
-                                       int16_t x2, int16_t y2, bruce_display_color_t color);
-bruce_result_t display__fill_triangle(int16_t x0, int16_t y0, int16_t x1, int16_t y1,
-                                       int16_t x2, int16_t y2, bruce_display_color_t color);
-bruce_result_t display__draw_round_rect(int16_t x, int16_t y, int16_t w, int16_t h,
-                                         int16_t r, bruce_display_color_t color);
-bruce_result_t display__fill_round_rect(int16_t x, int16_t y, int16_t w, int16_t h,
-                                         int16_t r, bruce_display_color_t color);
+bruce_result_t display__draw_arc(
+    int16_t x, int16_t y, int16_t r, int16_t start_angle, int16_t end_angle, bruce_display_color_t color
+);
+bruce_result_t display__draw_triangle(
+    int16_t x0, int16_t y0, int16_t x1, int16_t y1, int16_t x2, int16_t y2, bruce_display_color_t color
+);
+bruce_result_t display__fill_triangle(
+    int16_t x0, int16_t y0, int16_t x1, int16_t y1, int16_t x2, int16_t y2, bruce_display_color_t color
+);
+bruce_result_t
+display__draw_round_rect(int16_t x, int16_t y, int16_t w, int16_t h, int16_t r, bruce_display_color_t color);
+bruce_result_t
+display__fill_round_rect(int16_t x, int16_t y, int16_t w, int16_t h, int16_t r, bruce_display_color_t color);
 
 /* -------------------------------------------------------------------------- */
 /* Bitmaps                                                                    */
@@ -184,19 +181,20 @@ bruce_result_t display__fill_round_rect(int16_t x, int16_t y, int16_t w, int16_t
  * `color`, a clear bit draws the current background color (or is skipped
  * when the background is transparent).
  */
-bruce_result_t display__draw_bitmap(int16_t x, int16_t y, const uint8_t *bitmap,
-                                     int16_t w, int16_t h, bruce_display_color_t color);
+bruce_result_t display__draw_bitmap(
+    int16_t x, int16_t y, const uint8_t *bitmap, int16_t w, int16_t h, bruce_display_color_t color
+);
 
 /*
  * Draw a 1bpp XBM bitmap.  Each row is byte-aligned; a set bit draws `color`,
  * a clear bit is transparent.
  */
-bruce_result_t display__draw_xbitmap(int16_t x, int16_t y, const uint8_t *bitmap,
-                                      int16_t w, int16_t h, bruce_display_color_t color);
+bruce_result_t display__draw_xbitmap(
+    int16_t x, int16_t y, const uint8_t *bitmap, int16_t w, int16_t h, bruce_display_color_t color
+);
 
 /* Draw a raw RGB565 bitmap from `bitmap` (width * height * 2 bytes). */
-bruce_result_t display__draw_rgb_bitmap(int16_t x, int16_t y, const uint16_t *bitmap,
-                                         int16_t w, int16_t h);
+bruce_result_t display__draw_rgb_bitmap(int16_t x, int16_t y, const uint16_t *bitmap, int16_t w, int16_t h);
 
 /* -------------------------------------------------------------------------- */
 /* Display control                                                            */

@@ -16,7 +16,7 @@
 #include "driver/rmt_rx.h"
 #include "driver/rmt_tx.h"
 #include "esp_err.h"
-#include "freertos/FreeRTOS.h"
+#include "freertos/FreeRTOS.h" // IWYU pragma: export
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 
@@ -27,25 +27,11 @@
 
 static SemaphoreHandle_t s_ir_mutex;
 
-bruce_result_t ir__init(void)
-{
-    if (s_ir_mutex != NULL) return BRUCE_OK;
-    s_ir_mutex = xSemaphoreCreateMutex();
-    return s_ir_mutex != NULL ? BRUCE_OK : BRUCE_ERR_NO_MEMORY;
-}
+int ir__tx_pin(void) { return CONFIG_BRUCE_IR_TX_GPIO; }
 
-int ir__tx_pin(void)
-{
-    return CONFIG_BRUCE_IR_TX_GPIO;
-}
+int ir__rx_pin(void) { return CONFIG_BRUCE_IR_RX_GPIO; }
 
-int ir__rx_pin(void)
-{
-    return CONFIG_BRUCE_IR_RX_GPIO;
-}
-
-static bruce_result_t ir__esp_result(esp_err_t error)
-{
+static bruce_result_t ir__esp_result(esp_err_t error) {
     if (error == ESP_OK) return BRUCE_OK;
     if (error == ESP_ERR_INVALID_ARG) return BRUCE_ERR_INVALID_ARGUMENT;
     if (error == ESP_ERR_NO_MEM) return BRUCE_ERR_NO_MEMORY;
@@ -56,19 +42,15 @@ static bruce_result_t ir__esp_result(esp_err_t error)
     return BRUCE_ERR_IO;
 }
 
-static bool ir__lock(void)
-{
+static bool ir__lock(void) {
     return s_ir_mutex != NULL && xSemaphoreTake(s_ir_mutex, pdMS_TO_TICKS(1000)) == pdTRUE;
 }
 
-static void ir__unlock(void)
-{
-    xSemaphoreGive(s_ir_mutex);
-}
+static void ir__unlock(void) { xSemaphoreGive(s_ir_mutex); }
 
-static bruce_result_t ir__send_symbols(const rmt_symbol_word_t *symbols, size_t symbol_count,
-                                       uint32_t frequency_hz, uint8_t repeats)
-{
+static bruce_result_t ir__send_symbols(
+    const rmt_symbol_word_t *symbols, size_t symbol_count, uint32_t frequency_hz, uint8_t repeats
+) {
     rmt_channel_handle_t channel = NULL;
     rmt_encoder_handle_t encoder = NULL;
     rmt_tx_channel_config_t channel_config = {
@@ -107,9 +89,8 @@ static bruce_result_t ir__send_symbols(const rmt_symbol_word_t *symbols, size_t 
     return ir__esp_result(error);
 }
 
-bruce_result_t ir__transmit_raw(const uint32_t *timings_us, size_t timing_count,
-                                uint32_t frequency_hz, uint8_t repeats)
-{
+bruce_result_t
+ir__transmit_raw(const uint32_t *timings_us, size_t timing_count, uint32_t frequency_hz, uint8_t repeats) {
     bruce_result_t permission = permission__check(BRUCE_PERMISSION_IR);
     if (permission != BRUCE_OK) return permission;
     if (timings_us == NULL || timing_count < 2 || timing_count > BRUCE_IR_MAX_RAW_TIMINGS ||
@@ -146,9 +127,8 @@ bruce_result_t ir__transmit_raw(const uint32_t *timings_us, size_t timing_count,
     return result;
 }
 
-static bool ir__append_pair(rmt_symbol_word_t *symbols, size_t capacity, size_t *count,
-                            uint16_t mark, uint16_t space)
-{
+static bool
+ir__append_pair(rmt_symbol_word_t *symbols, size_t capacity, size_t *count, uint16_t mark, uint16_t space) {
     if (*count >= capacity) return false;
     symbols[*count] = (rmt_symbol_word_t){
         .level0 = 1,
@@ -160,12 +140,11 @@ static bool ir__append_pair(rmt_symbol_word_t *symbols, size_t capacity, size_t 
     return true;
 }
 
-static bruce_result_t ir__encode_nec(uint32_t data, uint8_t bits, uint16_t leader_mark,
-                                     uint16_t leader_space, rmt_symbol_word_t *symbols,
-                                     size_t capacity, size_t *out_count)
-{
-    if (bits == 0 || bits > 32 ||
-        !ir__append_pair(symbols, capacity, out_count, leader_mark, leader_space)) {
+static bruce_result_t ir__encode_nec(
+    uint32_t data, uint8_t bits, uint16_t leader_mark, uint16_t leader_space, rmt_symbol_word_t *symbols,
+    size_t capacity, size_t *out_count
+) {
+    if (bits == 0 || bits > 32 || !ir__append_pair(symbols, capacity, out_count, leader_mark, leader_space)) {
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
     for (int bit = bits - 1; bit >= 0; --bit) {
@@ -176,9 +155,9 @@ static bruce_result_t ir__encode_nec(uint32_t data, uint8_t bits, uint16_t leade
     return ir__append_pair(symbols, capacity, out_count, 560, 1) ? BRUCE_OK : BRUCE_ERR_RESOURCE_LIMIT;
 }
 
-static bruce_result_t ir__encode_sony_frame(uint32_t data, uint8_t bits, rmt_symbol_word_t *symbols,
-                                            size_t capacity, size_t *out_count)
-{
+static bruce_result_t ir__encode_sony_frame(
+    uint32_t data, uint8_t bits, rmt_symbol_word_t *symbols, size_t capacity, size_t *out_count
+) {
     if (bits == 0 || bits > 32 || !ir__append_pair(symbols, capacity, out_count, 2400, 600)) {
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
@@ -194,8 +173,7 @@ static bruce_result_t ir__encode_sony_frame(uint32_t data, uint8_t bits, rmt_sym
     return BRUCE_OK;
 }
 
-bruce_result_t ir__transmit(const char *data_hex, const char *protocol, uint8_t bits, uint8_t repeats)
-{
+bruce_result_t ir__transmit(const char *data_hex, const char *protocol, uint8_t bits, uint8_t repeats) {
     bruce_result_t permission = permission__check(BRUCE_PERMISSION_IR);
     if (permission != BRUCE_OK) return permission;
     if (data_hex == NULL || data_hex[0] == '\0' || protocol == NULL || protocol[0] == '\0') {
@@ -211,8 +189,8 @@ bruce_result_t ir__transmit(const char *data_hex, const char *protocol, uint8_t 
     if (strcasecmp(protocol, "NEC") == 0 || strcasecmp(protocol, "NECext") == 0 ||
         strcasecmp(protocol, "Samsung32") == 0) {
         bool samsung = strcasecmp(protocol, "Samsung32") == 0;
-        result = ir__encode_nec((uint32_t)parsed, bits, samsung ? 4500 : 9000, 4500,
-                                symbols, 128, &symbol_count);
+        result =
+            ir__encode_nec((uint32_t)parsed, bits, samsung ? 4500 : 9000, 4500, symbols, 128, &symbol_count);
     } else if (strcasecmp(protocol, "SIRC") == 0 || strcasecmp(protocol, "SIRC15") == 0 ||
                strcasecmp(protocol, "SIRC20") == 0 || strcasecmp(protocol, "SONY") == 0) {
         if (strcasecmp(protocol, "SIRC") == 0) bits = 12;
@@ -236,8 +214,8 @@ typedef struct {
     QueueHandle_t queue;
 } ir__rx_context_t;
 
-static bool ir__rx_done(rmt_channel_handle_t channel, const rmt_rx_done_event_data_t *event, void *user_data)
-{
+static bool
+ir__rx_done(rmt_channel_handle_t channel, const rmt_rx_done_event_data_t *event, void *user_data) {
     (void)channel;
     ir__rx_context_t *context = user_data;
     BaseType_t wake = pdFALSE;
@@ -245,16 +223,15 @@ static bool ir__rx_done(rmt_channel_handle_t channel, const rmt_rx_done_event_da
     return wake == pdTRUE;
 }
 
-static bool ir__duration_near(uint32_t duration, uint32_t expected)
-{
+static bool ir__duration_near(uint32_t duration, uint32_t expected) {
     uint32_t tolerance = expected / 4u;
     return duration >= expected - tolerance && duration <= expected + tolerance;
 }
 
-static bool ir__decode_nec(const rmt_symbol_word_t *symbols, size_t count, uint32_t *out_data)
-{
+static bool ir__decode_nec(const rmt_symbol_word_t *symbols, size_t count, uint32_t *out_data) {
     if (count < 34 || !ir__duration_near(symbols[0].duration0, 9000) ||
-        !ir__duration_near(symbols[0].duration1, 4500)) return false;
+        !ir__duration_near(symbols[0].duration1, 4500))
+        return false;
     uint32_t data = 0;
     for (size_t i = 0; i < 32; ++i) {
         const rmt_symbol_word_t *symbol = &symbols[i + 1];
@@ -267,8 +244,7 @@ static bool ir__decode_nec(const rmt_symbol_word_t *symbols, size_t count, uint3
     return true;
 }
 
-bruce_result_t ir__receive(bool raw, uint32_t timeout_ms, char *out, size_t out_size)
-{
+bruce_result_t ir__receive(bool raw, uint32_t timeout_ms, char *out, size_t out_size) {
     bruce_result_t permission = permission__check(BRUCE_PERMISSION_IR);
     if (permission != BRUCE_OK) return permission;
     if (timeout_ms == 0 || out == NULL || out_size == 0) return BRUCE_ERR_INVALID_ARGUMENT;
@@ -301,7 +277,8 @@ bruce_result_t ir__receive(bool raw, uint32_t timeout_ms, char *out, size_t out_
         .signal_range_min_ns = 3000,
         .signal_range_max_ns = 15000000,
     };
-    if (error == ESP_OK) error = rmt_receive(channel, symbols, IR_RX_SYMBOLS * sizeof(*symbols), &receive_config);
+    if (error == ESP_OK)
+        error = rmt_receive(channel, symbols, IR_RX_SYMBOLS * sizeof(*symbols), &receive_config);
     if (error != ESP_OK) {
         result = ir__esp_result(error);
         goto cleanup;
@@ -323,17 +300,24 @@ bruce_result_t ir__receive(bool raw, uint32_t timeout_ms, char *out, size_t out_
             result = BRUCE_ERR_UNSUPPORTED;
             goto cleanup;
         }
-        int written = snprintf(out, out_size,
+        int written = snprintf(
+            out,
+            out_size,
             "Filetype: IR signals file\nVersion: 1\n#\n#\nname: Unknown\n"
-            "type: parsed\nprotocol: NEC\nbits: 32\nvalue: %08" PRIX32 "\n#\n", data);
+            "type: parsed\nprotocol: NEC\nbits: 32\nvalue: %08" PRIX32 "\n#\n",
+            data
+        );
         result = written >= 0 && (size_t)written < out_size ? BRUCE_OK : BRUCE_ERR_RESOURCE_LIMIT;
         goto cleanup;
     }
 
     size_t used = 0;
-    int written = snprintf(out, out_size,
+    int written = snprintf(
+        out,
+        out_size,
         "Filetype: IR signals file\nVersion: 1\n#\n#\nname: Unknown\n"
-        "type: raw\nfrequency: 38000\nduty_cycle: 0.330000\ndata:");
+        "type: raw\nfrequency: 38000\nduty_cycle: 0.330000\ndata:"
+    );
     if (written < 0 || (size_t)written >= out_size) {
         result = BRUCE_ERR_RESOURCE_LIMIT;
         goto cleanup;
@@ -362,16 +346,14 @@ cleanup:
     return result;
 }
 
-static char *ir__trim(char *text)
-{
+static char *ir__trim(char *text) {
     while (isspace((unsigned char)*text)) text++;
     char *end = text + strlen(text);
     while (end > text && isspace((unsigned char)end[-1])) *--end = '\0';
     return text;
 }
 
-static uint32_t ir__parse_hex_bytes_le(const char *text)
-{
+static uint32_t ir__parse_hex_bytes_le(const char *text) {
     uint32_t value = 0;
     unsigned int byte = 0;
     for (unsigned int index = 0; index < 4 && text != NULL && *text != '\0'; ++index) {
@@ -383,8 +365,7 @@ static uint32_t ir__parse_hex_bytes_le(const char *text)
     return value;
 }
 
-static bool ir__normalize_hex(const char *text, char *out, size_t out_size)
-{
+static bool ir__normalize_hex(const char *text, char *out, size_t out_size) {
     if (text == NULL || out_size < 2) return false;
     size_t used = 0;
     if (text[0] == '0' && (text[1] == 'x' || text[1] == 'X')) text += 2;
@@ -401,14 +382,11 @@ static bool ir__normalize_hex(const char *text, char *out, size_t out_size)
     return used > 0;
 }
 
-bruce_result_t ir__transmit_parsed(const char *protocol, const char *address_hex,
-                                   const char *command_hex, uint8_t repeats)
-{
+bruce_result_t
+ir__transmit_parsed(const char *protocol, const char *address_hex, const char *command_hex, uint8_t repeats) {
     bruce_result_t permission = permission__check(BRUCE_PERMISSION_IR);
     if (permission != BRUCE_OK) return permission;
-    if (protocol == NULL || address_hex == NULL || command_hex == NULL) {
-        return BRUCE_ERR_INVALID_ARGUMENT;
-    }
+    if (protocol == NULL || address_hex == NULL || command_hex == NULL) { return BRUCE_ERR_INVALID_ARGUMENT; }
     char normalized_address[9];
     char normalized_command[9];
     if (!ir__normalize_hex(address_hex, normalized_address, sizeof(normalized_address)) ||
@@ -423,8 +401,7 @@ bruce_result_t ir__transmit_parsed(const char *protocol, const char *address_hex
     uint8_t bits = 32;
     if (strncasecmp(protocol, "SIRC", 4) == 0 || strcasecmp(protocol, "SONY") == 0) {
         frame = ((address & 0x1fffu) << 7) | (command & 0x7fu);
-        bits = strcasecmp(protocol, "SIRC15") == 0 ? 15 :
-               strcasecmp(protocol, "SIRC20") == 0 ? 20 : 12;
+        bits = strcasecmp(protocol, "SIRC15") == 0 ? 15 : strcasecmp(protocol, "SIRC20") == 0 ? 20 : 12;
     } else if (strcasecmp(protocol, "NECext") == 0) {
         frame = ((address & 0xffffu) << 16) | ((uint32_t)command_byte << 8) | (uint8_t)~command_byte;
     } else if (strcasecmp(protocol, "Samsung32") == 0) {
@@ -441,8 +418,7 @@ bruce_result_t ir__transmit_parsed(const char *protocol, const char *address_hex
     return ir__transmit(payload, protocol, bits, repeats);
 }
 
-static bruce_result_t ir__send_file_record(char *record, uint8_t repeats)
-{
+static bruce_result_t ir__send_file_record(char *record, uint8_t repeats) {
     char *type = NULL;
     char *protocol = NULL;
     char *value = NULL;
@@ -491,14 +467,14 @@ static bruce_result_t ir__send_file_record(char *record, uint8_t repeats)
         if (count >= BRUCE_IR_MAX_RAW_TIMINGS) return BRUCE_ERR_RESOURCE_LIMIT;
         char *end = NULL;
         unsigned long duration = strtoul(token, &end, 10);
-        if (end == token || *end != '\0' || duration == 0 || duration > UINT32_MAX) return BRUCE_ERR_INVALID_ARGUMENT;
+        if (end == token || *end != '\0' || duration == 0 || duration > UINT32_MAX)
+            return BRUCE_ERR_INVALID_ARGUMENT;
         timings[count++] = (uint32_t)duration;
     }
     return ir__transmit_raw(timings, count, frequency, repeats);
 }
 
-bruce_result_t ir__transmit_record(const char *contents, uint8_t repeats)
-{
+bruce_result_t ir__transmit_record(const char *contents, uint8_t repeats) {
     bruce_result_t permission = permission__check(BRUCE_PERMISSION_IR);
     if (permission != BRUCE_OK) return permission;
     if (contents == NULL || contents[0] == '\0') return BRUCE_ERR_INVALID_ARGUMENT;
@@ -530,8 +506,7 @@ bruce_result_t ir__transmit_record(const char *contents, uint8_t repeats)
     return sent ? BRUCE_OK : BRUCE_ERR_NOT_FOUND;
 }
 
-bruce_result_t ir__transmit_file(const char *path, uint8_t repeats)
-{
+bruce_result_t ir__transmit_file(const char *path, uint8_t repeats) {
     bruce_result_t permission = permission__check(BRUCE_PERMISSION_IR);
     if (permission != BRUCE_OK) return permission;
     if (path == NULL || path[0] != '/' || strstr(path, "..") != NULL) return BRUCE_ERR_INVALID_PATH;

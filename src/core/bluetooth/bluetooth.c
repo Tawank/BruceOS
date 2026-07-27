@@ -36,8 +36,7 @@ static uint32_t s_scan_seconds;
 static esp_err_t s_scan_start_error;
 static bool s_scanning;
 
-static void bluetooth__lock(void)
-{
+static void bluetooth__lock(void) {
     if (s_mutex == NULL) {
         portENTER_CRITICAL(&s_init_mux);
         if (s_mutex == NULL) s_mutex = xSemaphoreCreateMutexStatic(&s_mutex_storage);
@@ -46,22 +45,18 @@ static void bluetooth__lock(void)
     xSemaphoreTake(s_mutex, portMAX_DELAY);
 }
 
-static void bluetooth__unlock(void)
-{
-    xSemaphoreGive(s_mutex);
-}
+static void bluetooth__unlock(void) { xSemaphoreGive(s_mutex); }
 
-static void bluetooth__copy_name(char *destination, size_t destination_size, const uint8_t *source,
-                                 size_t source_length)
-{
+static void bluetooth__copy_name(
+    char *destination, size_t destination_size, const uint8_t *source, size_t source_length
+) {
     if (destination == NULL || destination_size == 0) return;
     size_t length = source_length < destination_size - 1 ? source_length : destination_size - 1;
     if (source != NULL && length > 0) memcpy(destination, source, length);
     destination[length] = '\0';
 }
 
-static void bluetooth__collect_scan_result(const struct ble_scan_result_evt_param *result)
-{
+static void bluetooth__collect_scan_result(const struct ble_scan_result_evt_param *result) {
     if (!s_scanning || s_scan_capacity == 0) return;
 
     size_t index = s_scan_count;
@@ -84,17 +79,18 @@ static void bluetooth__collect_scan_result(const struct ble_scan_result_evt_para
 
     uint8_t name_length = 0;
     uint16_t advertisement_length = result->adv_data_len + result->scan_rsp_len;
-    uint8_t *name = esp_ble_resolve_adv_data_by_type((uint8_t *)result->ble_adv, advertisement_length,
-                                                     ESP_BLE_AD_TYPE_NAME_CMPL, &name_length);
+    uint8_t *name = esp_ble_resolve_adv_data_by_type(
+        (uint8_t *)result->ble_adv, advertisement_length, ESP_BLE_AD_TYPE_NAME_CMPL, &name_length
+    );
     if (name == NULL) {
-        name = esp_ble_resolve_adv_data_by_type((uint8_t *)result->ble_adv, advertisement_length,
-                                                ESP_BLE_AD_TYPE_NAME_SHORT, &name_length);
+        name = esp_ble_resolve_adv_data_by_type(
+            (uint8_t *)result->ble_adv, advertisement_length, ESP_BLE_AD_TYPE_NAME_SHORT, &name_length
+        );
     }
     if (name != NULL) bluetooth__copy_name(device->name, sizeof(device->name), name, name_length);
 }
 
-static void bluetooth__ble_gap_callback(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *parameter)
-{
+static void bluetooth__ble_gap_callback(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *parameter) {
     if (event == ESP_GAP_BLE_SCAN_PARAM_SET_COMPLETE_EVT) {
         if (parameter->scan_param_cmpl.status == ESP_BT_STATUS_SUCCESS) {
             s_scan_start_error = esp_ble_gap_start_scanning(s_scan_seconds);
@@ -120,8 +116,7 @@ static void bluetooth__ble_gap_callback(esp_gap_ble_cb_event_t event, esp_ble_ga
     }
 }
 
-bruce_result_t bluetooth__stack_init(void)
-{
+bruce_result_t bluetooth__stack_init(void) {
     bluetooth__lock();
     if (s_initialized) {
         bluetooth__unlock();
@@ -192,20 +187,15 @@ bruce_result_t bluetooth__stack_init(void)
     return BRUCE_OK;
 }
 
-bruce_result_t bluetooth__init(void)
-{
-    return bluetooth__stack_init();
-}
+bruce_result_t bluetooth__init(void) { return bluetooth__stack_init(); }
 
-static int bluetooth__compare_rssi(const void *left, const void *right)
-{
+static int bluetooth__compare_rssi(const void *left, const void *right) {
     const bluetooth__device_t *a = left;
     const bluetooth__device_t *b = right;
     return (int)b->rssi - (int)a->rssi;
 }
 
-int bluetooth__scan_ble(bluetooth__device_t *devices, size_t capacity, uint32_t timeout_ms)
-{
+int bluetooth__scan_ble(bluetooth__device_t *devices, size_t capacity, uint32_t timeout_ms) {
     bruce_result_t permission = permission__check(BRUCE_PERMISSION_BT);
     if (permission != BRUCE_OK) return permission;
     if ((capacity > 0 && devices == NULL) || capacity > UINT16_MAX) return BRUCE_ERR_INVALID_ARGUMENT;
@@ -253,8 +243,9 @@ int bluetooth__scan_ble(bluetooth__device_t *devices, size_t capacity, uint32_t 
         return error == ESP_ERR_INVALID_STATE ? BRUCE_ERR_BUSY : BRUCE_ERR_IO;
     }
 
-    EventBits_t bits = xEventGroupWaitBits(s_events, BLUETOOTH__SCAN_DONE_BIT, pdTRUE, pdFALSE,
-                                           pdMS_TO_TICKS(timeout_ms + 1500));
+    EventBits_t bits = xEventGroupWaitBits(
+        s_events, BLUETOOTH__SCAN_DONE_BIT, pdTRUE, pdFALSE, pdMS_TO_TICKS(timeout_ms + 1500)
+    );
     if ((bits & BLUETOOTH__SCAN_DONE_BIT) == 0) {
         if (esp_ble_gap_stop_scanning() == ESP_OK) {
             (void)xEventGroupWaitBits(s_events, BLUETOOTH__SCAN_STOPPED_BIT, pdTRUE, pdFALSE, portMAX_DELAY);

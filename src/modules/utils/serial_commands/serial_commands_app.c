@@ -12,8 +12,7 @@
 
 #define SERIAL_COMMANDS__LINE_MAX 256
 
-static const char *serial_commands__split_line(const char *line, char *token, size_t token_size)
-{
+static const char *serial_commands__split_line(const char *line, char *token, size_t token_size) {
     const char *p = line;
     while (isspace((unsigned char)*p)) p++;
     size_t i = 0;
@@ -23,8 +22,7 @@ static const char *serial_commands__split_line(const char *line, char *token, si
     return p;
 }
 
-int serial_commands__run_line(const char *line, bool in_background)
-{
+int serial_commands__run_line(const char *line, bool in_background) {
     if (line == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     char token[SERIAL_COMMANDS__LINE_MAX];
     const char *rest = serial_commands__split_line(line, token, sizeof(token));
@@ -36,8 +34,7 @@ int serial_commands__run_line(const char *line, bool in_background)
     return app_runner__run(token, arg, in_background);
 }
 
-int serial_commands_app_main(int argc, char **argv)
-{
+int serial_commands_app_main(int argc, char **argv) {
     (void)argc;
     (void)argv;
     char line[SERIAL_COMMANDS__LINE_MAX];
@@ -52,7 +49,7 @@ int serial_commands_app_main(int argc, char **argv)
         if (result > 0) {
             printf("started task %u\n", (unsigned int)result);
             while (task__wait((bruce_task_id_t)result, 100) == BRUCE_ERR_TIMEOUT) {
-                if (runtime__delay(1) != BRUCE_OK) return BRUCE_ERR_CANCELLED;
+                if (runtime__delay(10) != BRUCE_OK) return BRUCE_ERR_CANCELLED;
             }
         } else {
             printf("error %d\n", result);

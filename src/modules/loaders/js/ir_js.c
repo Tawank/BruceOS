@@ -7,8 +7,7 @@
 
 #define IR_JS_CAPTURE_SIZE 8192u
 
-static JSValue ir_js__read(JSContext *ctx, int argc, JSValue *argv, bool raw)
-{
+static JSValue ir_js__read(JSContext *ctx, int argc, JSValue *argv, bool raw) {
     int timeout_seconds = 10;
     if (argc > 0 && JS_IsNumber(ctx, argv[0])) JS_ToInt32(ctx, &timeout_seconds, argv[0]);
     if (timeout_seconds < 1 || (uint32_t)timeout_seconds > UINT32_MAX / 1000u) {
@@ -22,20 +21,17 @@ static JSValue ir_js__read(JSContext *ctx, int argc, JSValue *argv, bool raw)
     return value;
 }
 
-JSValue native_irRead(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
-{
+JSValue native_irRead(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
     (void)this_val;
     return ir_js__read(ctx, argc, argv, false);
 }
 
-JSValue native_irReadRaw(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
-{
+JSValue native_irReadRaw(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
     (void)this_val;
     return ir_js__read(ctx, argc, argv, true);
 }
 
-JSValue native_irTransmit(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
-{
+JSValue native_irTransmit(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
     (void)this_val;
     if (argc < 1 || !JS_IsString(ctx, argv[0])) {
         return JS_ThrowTypeError(ctx, "ir.transmit(data:string, protocol?:string, bits?:int)");
@@ -52,8 +48,7 @@ JSValue native_irTransmit(JSContext *ctx, JSValue *this_val, int argc, JSValue *
     return JS_NewBool(result == BRUCE_OK);
 }
 
-JSValue native_irTransmitFile(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
-{
+JSValue native_irTransmitFile(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
     (void)this_val;
     if (argc < 1 || !JS_IsString(ctx, argv[0])) {
         return JS_ThrowTypeError(ctx, "ir.transmitFile(path:string)");
@@ -63,8 +58,7 @@ JSValue native_irTransmitFile(JSContext *ctx, JSValue *this_val, int argc, JSVal
     return JS_NewBool(ir__transmit_file(path, 0) == BRUCE_OK);
 }
 
-JSValue native_irTransmitRecord(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
-{
+JSValue native_irTransmitRecord(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
     (void)this_val;
     if (argc < 1 || !JS_IsString(ctx, argv[0])) {
         return JS_ThrowTypeError(ctx, "ir.transmitRecord(record:string)");

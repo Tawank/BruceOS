@@ -41,7 +41,8 @@ typedef struct {
     const char *password;
 } bruce_config_wifi_credential_t;
 
-bruce_result_t config__get_wifi_ap(char *ssid_out, size_t ssid_size, char *password_out, size_t password_size);
+bruce_result_t
+config__get_wifi_ap(char *ssid_out, size_t ssid_size, char *password_out, size_t password_size);
 bruce_result_t config__set_wifi_ap(const char *ssid, const char *password);
 
 bruce_result_t config__wifi_credential_count(size_t *out_count);

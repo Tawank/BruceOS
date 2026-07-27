@@ -27,7 +27,7 @@ bruce_result_t nrf24__get_channel(uint8_t *out_channel);
 /* Samples the nRF24 RPD threshold detector on consecutive channels. Each
  * output value is the number of positive samples (0..samples). RPD is a
  * threshold activity indication, not calibrated RSSI or packet decoding. */
-bruce_result_t nrf24__scan(uint8_t first_channel, size_t channel_count,
-                           uint8_t samples, uint8_t *out_activity);
+bruce_result_t
+nrf24__scan(uint8_t first_channel, size_t channel_count, uint8_t samples, uint8_t *out_activity);
 
 void nrf24__get_pins(bruce_nrf24_pins_t *out_pins);

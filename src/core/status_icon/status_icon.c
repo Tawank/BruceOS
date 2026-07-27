@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "freertos/FreeRTOS.h"
+#include "freertos/FreeRTOS.h" // IWYU pragma: export
 #include "freertos/semphr.h"
 
 static SemaphoreHandle_t s_mutex;
@@ -13,32 +13,24 @@ static bruce_status_icon_t s_icons[BRUCE_STATUS_ICON_MAX];
 static size_t s_count;
 static uint32_t s_revision;
 
-static bool status_icon__ensure_lock(void)
-{
-    if (s_mutex != NULL) {
-        return true;
-    }
+static bool status_icon__ensure_lock(void) {
+    if (s_mutex != NULL) { return true; }
     taskENTER_CRITICAL(&s_init_lock);
-    if (s_mutex == NULL) {
-        s_mutex = xSemaphoreCreateMutex();
-    }
+    if (s_mutex == NULL) { s_mutex = xSemaphoreCreateMutex(); }
     taskEXIT_CRITICAL(&s_init_lock);
     return s_mutex != NULL;
 }
 
-static int status_icon__key_compare(const void *left, const void *right)
-{
+static int status_icon__key_compare(const void *left, const void *right) {
     const bruce_status_icon_t *a = left;
     const bruce_status_icon_t *b = right;
     return strcmp(a->key, b->key);
 }
 
-bruce_result_t status_icon__push(const char *key, const uint8_t *bitmap,
-                                  uint8_t width, uint8_t height)
-{
-    if (key == NULL || bitmap == NULL || key[0] == '\0' ||
-        strlen(key) >= BRUCE_STATUS_ICON_KEY_MAX || width == 0 || height == 0 ||
-        width > BRUCE_STATUS_ICON_MAX_WIDTH || height > BRUCE_STATUS_ICON_MAX_HEIGHT) {
+bruce_result_t status_icon__push(const char *key, const uint8_t *bitmap, uint8_t width, uint8_t height) {
+    if (key == NULL || bitmap == NULL || key[0] == '\0' || strlen(key) >= BRUCE_STATUS_ICON_KEY_MAX ||
+        width == 0 || height == 0 || width > BRUCE_STATUS_ICON_MAX_WIDTH ||
+        height > BRUCE_STATUS_ICON_MAX_HEIGHT) {
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
     size_t bitmap_size = (size_t)((width + 7) / 8) * height;
@@ -69,23 +61,18 @@ bruce_result_t status_icon__push(const char *key, const uint8_t *bitmap,
         return BRUCE_OK;
     }
     s_icons[index] = next;
-    if (index == s_count) {
-        s_count++;
-    }
+    if (index == s_count) { s_count++; }
     qsort(s_icons, s_count, sizeof(s_icons[0]), status_icon__key_compare);
     s_revision++;
     xSemaphoreGive(s_mutex);
     return BRUCE_OK;
 }
 
-bruce_result_t status_icon__remove(const char *key)
-{
+bruce_result_t status_icon__remove(const char *key) {
     if (key == NULL || key[0] == '\0' || strlen(key) >= BRUCE_STATUS_ICON_KEY_MAX) {
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
-    if (!status_icon__ensure_lock()) {
-        return BRUCE_ERR_NO_MEMORY;
-    }
+    if (!status_icon__ensure_lock()) { return BRUCE_ERR_NO_MEMORY; }
     xSemaphoreTake(s_mutex, portMAX_DELAY);
     for (size_t i = 0; i < s_count; ++i) {
         if (strcmp(s_icons[i].key, key) == 0) {
@@ -101,20 +88,15 @@ bruce_result_t status_icon__remove(const char *key)
     return BRUCE_OK;
 }
 
-bruce_result_t status_icon__list(bruce_status_icon_t *icons, size_t capacity,
-                                  size_t *out_count, uint32_t *out_revision)
-{
+bruce_result_t
+status_icon__list(bruce_status_icon_t *icons, size_t capacity, size_t *out_count, uint32_t *out_revision) {
     if ((capacity > 0 && icons == NULL) || out_count == NULL || out_revision == NULL) {
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
-    if (!status_icon__ensure_lock()) {
-        return BRUCE_ERR_NO_MEMORY;
-    }
+    if (!status_icon__ensure_lock()) { return BRUCE_ERR_NO_MEMORY; }
     xSemaphoreTake(s_mutex, portMAX_DELAY);
     size_t copied = capacity < s_count ? capacity : s_count;
-    if (copied > 0) {
-        memcpy(icons, s_icons, copied * sizeof(s_icons[0]));
-    }
+    if (copied > 0) { memcpy(icons, s_icons, copied * sizeof(s_icons[0])); }
     *out_count = s_count;
     *out_revision = s_revision;
     xSemaphoreGive(s_mutex);

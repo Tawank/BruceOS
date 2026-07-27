@@ -1,9 +1,9 @@
 /* Backgrounds/foregrounds itself, allocates tracked memory, registers a
  * tracked resource it deliberately never releases, then exits normally so
  * Core must release both automatically. */
-#include "core_sdk/task.h"
-#include "core_sdk/memory.h"
 #include "core/task/task.h"
+#include "core_sdk/memory.h"
+#include "core_sdk/task.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -12,8 +12,7 @@
 
 static selftest__shared_t s_shared;
 
-bool selftest__run_runtime_now_case(void)
-{
+bool selftest__run_runtime_now_case(void) {
     uint64_t before = runtime__now();
     if (runtime__delay(2) != BRUCE_OK || runtime__now() <= before) {
         printf("[selftest] task/runtime-now: monotonic clock did not advance\n");
@@ -23,25 +22,18 @@ bool selftest__run_runtime_now_case(void)
     return true;
 }
 
-static int selftest__worker_normal_exit(int argc, char **argv)
-{
+static int selftest__worker_normal_exit(int argc, char **argv) {
     (void)argc;
     (void)argv;
 
-    if (task__foreground(task__current_id()) != BRUCE_OK) {
-        return -1;
-    }
+    if (task__foreground(task__current_id()) != BRUCE_OK) { return -1; }
     s_shared.foregrounded_self = true;
 
-    if (task__to_background() != BRUCE_OK) {
-        return -1;
-    }
+    if (task__to_background() != BRUCE_OK) { return -1; }
     s_shared.backgrounded_self = true;
 
     void *block = memory__malloc(256);
-    if (block == NULL) {
-        return -1;
-    }
+    if (block == NULL) { return -1; }
     memset(block, 0xAB, 256);
     s_shared.allocated_memory = true;
 
@@ -67,26 +59,20 @@ static int selftest__worker_normal_exit(int argc, char **argv)
 
 /* Allocates tracked memory and registers a tracked resource, then blocks
  * forever; the harness force-kills this task and expects both released. */
-static int selftest__worker_killed(int argc, char **argv)
-{
+static int selftest__worker_killed(int argc, char **argv) {
     (void)argc;
     (void)argv;
 
     void *block = memory__malloc(128);
-    if (block == NULL) {
-        return -1;
-    }
+    if (block == NULL) { return -1; }
     s_shared.allocated_memory = true;
     task_registry__resource_register(selftest__resource_cleanup, &s_shared);
     s_shared.registered_resource = true;
 
-    for (;;) {
-        runtime__delay(1000);
-    }
+    for (;;) { runtime__delay(1000); }
 }
 
-bool selftest__run_task_normal_exit_case(void)
-{
+bool selftest__run_task_normal_exit_case(void) {
     memset(&s_shared, 0, sizeof(s_shared));
 
     task_create_params_t params = {
@@ -124,8 +110,7 @@ bool selftest__run_task_normal_exit_case(void)
     return true;
 }
 
-bool selftest__run_task_killed_case(void)
-{
+bool selftest__run_task_killed_case(void) {
     memset(&s_shared, 0, sizeof(s_shared));
 
     task_create_params_t params = {

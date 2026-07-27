@@ -1,5 +1,6 @@
 #include "dialog.h"
 
+#include "core_sdk/config.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/display.h"
 #include "core_sdk/input.h"
@@ -223,30 +224,45 @@ static bruce_result_t dialog__term_pick_file(const char *initial_path, const cha
 #define DIALOG__TEXT_SIZE 1
 #define DIALOG__MARGIN 2
 
+static void dialog__get_theme_colors(uint16_t *pri, uint16_t *sec, uint16_t *bg)
+{
+    if (config__get_pri_color(pri) != BRUCE_OK)    *pri = BRUCE_COLOR_BLUE;
+    if (config__get_bg_color(bg) != BRUCE_OK)      *bg  = BRUCE_COLOR_BLACK;
+    if (config__get_sec_color(sec) != BRUCE_OK)    *sec = BRUCE_COLOR_DARKGREY;
+}
+
 static void dialog__gui_clear(void)
 {
-    (void)display__clear();
+    uint16_t pri, sec, bg;
+    dialog__get_theme_colors(&pri, &sec, &bg);
+    (void)display__fill_screen(bg);
 }
 
 static void dialog__gui_title_bar(const char *title)
 {
+    uint16_t pri, sec, bg;
+    dialog__get_theme_colors(&pri, &sec, &bg);
+
     int w = display__width();
-    display__fill_rect(0, 0, w, DIALOG__CHAR_H + 4, BRUCE_COLOR_BLUE);
+    display__fill_rect(0, 0, w, DIALOG__CHAR_H + 4, pri);
     display__set_text_color(BRUCE_COLOR_WHITE);
     display__set_text_size(DIALOG__TEXT_SIZE);
-    display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
+    display__set_text_bg_color(pri);
     display__set_cursor(DIALOG__MARGIN, DIALOG__MARGIN);
     display__print(title != NULL ? title : "");
 }
 
 static void dialog__gui_footer(const char *hint)
 {
+    uint16_t pri, sec, bg;
+    dialog__get_theme_colors(&pri, &sec, &bg);
+
     int w = display__width();
     int h = display__height();
-    display__fill_rect(0, h - DIALOG__CHAR_H - 4, w, DIALOG__CHAR_H + 4, BRUCE_COLOR_DARKGREY);
+    display__fill_rect(0, h - DIALOG__CHAR_H - 4, w, DIALOG__CHAR_H + 4, sec);
     display__set_text_color(BRUCE_COLOR_WHITE);
     display__set_text_size(DIALOG__TEXT_SIZE);
-    display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
+    display__set_text_bg_color(sec);
     display__set_cursor(DIALOG__MARGIN, h - DIALOG__CHAR_H - 2);
     display__print(hint != NULL ? hint : "");
 }
@@ -268,6 +284,9 @@ static bruce_result_t dialog__gui_wait_for_any_key(void)
 static bruce_result_t dialog__gui_message(bruce_dialog_kind_t kind, const char *title, const char *message)
 {
     (void)kind;
+    uint16_t pri, sec, bg;
+    dialog__get_theme_colors(&pri, &sec, &bg);
+
     bruce_result_t frame_result = display__begin_frame();
     if (frame_result == BRUCE_ERR_NOT_FOREGROUND) {
         return BRUCE_ERR_CANCELLED;
@@ -275,7 +294,7 @@ static bruce_result_t dialog__gui_message(bruce_dialog_kind_t kind, const char *
     if (frame_result != BRUCE_OK) {
         return frame_result;
     }
-    dialog__gui_clear();
+    (void)display__fill_screen(bg);
     dialog__gui_title_bar(title);
 
     int w = display__width();
@@ -286,7 +305,7 @@ static bruce_result_t dialog__gui_message(bruce_dialog_kind_t kind, const char *
 
     display__set_text_color(BRUCE_COLOR_WHITE);
     display__set_text_size(DIALOG__TEXT_SIZE);
-    display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
+    display__set_text_bg_color(bg);
     display__set_cursor(DIALOG__MARGIN, DIALOG__CHAR_H + 8);
 
     if (message != NULL) {
@@ -335,10 +354,13 @@ static bruce_result_t dialog__gui_choice(const char *title, const char *message,
     int text_size = render_params != NULL && render_params->text_size > 0
                         ? render_params->text_size
                         : DIALOG__TEXT_SIZE;
+
+    uint16_t pri, sec, bg;
+    dialog__get_theme_colors(&pri, &sec, &bg);
     bruce_display_color_t background_color =
-        render_params != NULL ? render_params->background_color : BRUCE_COLOR_NAVY;
+        render_params != NULL ? render_params->background_color : bg;
     bruce_display_color_t text_color =
-        render_params != NULL ? render_params->text_color : BRUCE_COLOR_WHITE;
+        render_params != NULL ? render_params->text_color : pri;
     int row_h = DIALOG__CHAR_H * text_size + 2;
     int title_h = render_borders || (title != NULL && title[0] != '\0') ? DIALOG__CHAR_H + 4 : 0;
     int footer_h = render_borders ? DIALOG__CHAR_H + 4 : 0;
@@ -366,11 +388,11 @@ static bruce_result_t dialog__gui_choice(const char *title, const char *message,
         display__fill_rect(left, top, viewport_w, viewport_h, background_color);
         if (title_h > 0) {
             if (render_borders) {
-                display__fill_rect(left, top, viewport_w, title_h, BRUCE_COLOR_BLUE);
+                display__fill_rect(left, top, viewport_w, title_h, pri);
             }
             display__set_text_color(text_color);
             display__set_text_size(DIALOG__TEXT_SIZE);
-            display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
+            display__set_text_bg_color(render_borders ? pri : background_color);
             display__set_cursor(left + DIALOG__MARGIN, top + DIALOG__MARGIN);
             display__print(title != NULL ? title : "");
         }
@@ -378,7 +400,7 @@ static bruce_result_t dialog__gui_choice(const char *title, const char *message,
         if (message_h > 0) {
             display__set_text_color(text_color);
             display__set_text_size(DIALOG__TEXT_SIZE);
-            display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
+            display__set_text_bg_color(background_color);
             display__set_cursor(left + DIALOG__MARGIN, top + title_h + 1);
             display__print(message);
         }
@@ -398,13 +420,13 @@ static bruce_result_t dialog__gui_choice(const char *title, const char *message,
                 display__set_text_color(text_color);
             }
             display__set_text_size(text_size);
-            display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
+            display__set_text_bg_color(background_color);
             display__set_cursor(left + DIALOG__MARGIN, y + 1);
             display__print(choices[i].label != NULL ? choices[i].label : "");
         }
 
         if (render_borders) {
-            display__fill_rect(left, bottom - footer_h, viewport_w, footer_h, BRUCE_COLOR_DARKGREY);
+            display__fill_rect(left, bottom - footer_h, viewport_w, footer_h, sec);
         }
         frame_result = display__present();
         if (frame_result != BRUCE_OK) {

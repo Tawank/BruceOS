@@ -1,7 +1,5 @@
 #pragma once
 
-#include <stdint.h>
-
 #include "core_sdk/result.h"
 
 typedef enum {

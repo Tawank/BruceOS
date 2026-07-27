@@ -10,8 +10,7 @@
 #include "core_sdk/result.h"
 #include "core_sdk/storage.h"
 
-int image_viewer_app_main(int argc, char **argv)
-{
+int image_viewer_app_main(int argc, char **argv) {
     if (argc < 1 || argv[0] == NULL || !image__is_supported_path(argv[0])) {
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
@@ -46,8 +45,7 @@ int image_viewer_app_main(int argc, char **argv)
     return result;
 }
 
-static bool image_loader__escape_arg(const char *path, char *out, size_t out_size)
-{
+static bool image_loader__escape_arg(const char *path, char *out, size_t out_size) {
     size_t written = 0;
     for (size_t i = 0; path[i] != '\0'; ++i) {
         if (path[i] == ' ' || path[i] == '\t' || path[i] == '\\' || path[i] == '\'' || path[i] == '"') {
@@ -63,8 +61,7 @@ static bool image_loader__escape_arg(const char *path, char *out, size_t out_siz
     return true;
 }
 
-int image_loader__run_path(const char *path, const char *arg, bool in_background)
-{
+int image_loader__run_path(const char *path, const char *arg, bool in_background) {
     (void)arg;
     if (path == NULL || !image__is_supported_path(path)) return BRUCE_ERR_INVALID_PATH;
 
@@ -75,8 +72,7 @@ int image_loader__run_path(const char *path, const char *arg, bool in_background
     return app_runner__run("image_viewer", escaped_path, in_background);
 }
 
-int image_app_main(int argc, char **argv)
-{
+int image_app_main(int argc, char **argv) {
     if (argc < 1 || argv[0] == NULL || argv[0][0] == '-') {
         printf("usage: image /path/file.jpg|png|gif\n");
         return BRUCE_ERR_INVALID_ARGUMENT;

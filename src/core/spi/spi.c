@@ -5,7 +5,7 @@
 #include "core/task/task.h"
 #include "core_sdk/permission.h"
 
-#include "driver/gpio.h"
+#include "driver/gpio.h" // IWYU pragma: export
 #include "driver/spi_master.h"
 #include "esp_err.h"
 #include "freertos/FreeRTOS.h"
@@ -33,8 +33,7 @@ static StaticSemaphore_t s_mutex_storage;
 static SemaphoreHandle_t s_mutex;
 static portMUX_TYPE s_init_mux = portMUX_INITIALIZER_UNLOCKED;
 
-static void spi__lock(void)
-{
+static void spi__lock(void) {
     if (s_mutex == NULL) {
         portENTER_CRITICAL(&s_init_mux);
         if (s_mutex == NULL) s_mutex = xSemaphoreCreateMutexStatic(&s_mutex_storage);
@@ -43,13 +42,9 @@ static void spi__lock(void)
     xSemaphoreTake(s_mutex, portMAX_DELAY);
 }
 
-static void spi__unlock(void)
-{
-    xSemaphoreGive(s_mutex);
-}
+static void spi__unlock(void) { xSemaphoreGive(s_mutex); }
 
-static bruce_result_t spi__esp_result(esp_err_t error)
-{
+static bruce_result_t spi__esp_result(esp_err_t error) {
     if (error == ESP_OK) return BRUCE_OK;
     if (error == ESP_ERR_INVALID_ARG) return BRUCE_ERR_INVALID_ARGUMENT;
     if (error == ESP_ERR_NO_MEM) return BRUCE_ERR_NO_MEMORY;
@@ -59,8 +54,7 @@ static bruce_result_t spi__esp_result(esp_err_t error)
     return BRUCE_ERR_IO;
 }
 
-static int spi__find_locked(bruce_spi_id_t id)
-{
+static int spi__find_locked(bruce_spi_id_t id) {
     if (id == BRUCE_SPI_ID_INVALID) return -1;
     for (int i = 0; i < SPI__MAX_DEVICES; ++i) {
         if (s_slots[i].in_use && s_slots[i].id == id) return i;
@@ -68,8 +62,7 @@ static int spi__find_locked(bruce_spi_id_t id)
     return -1;
 }
 
-static void spi__release_locked(spi__slot_t *slot)
-{
+static void spi__release_locked(spi__slot_t *slot) {
     (void)spi_bus_remove_device(slot->handle);
     memset(slot, 0, sizeof(*slot));
     if (--s_device_count == 0) {
@@ -78,30 +71,31 @@ static void spi__release_locked(spi__slot_t *slot)
     }
 }
 
-static void spi__cleanup(void *context)
-{
+static void spi__cleanup(void *context) {
     spi__lock();
     spi__slot_t *slot = context;
     if (slot->in_use) spi__release_locked(slot);
     spi__unlock();
 }
 
-bruce_result_t spi__open_internal(const bruce_spi_device_config_t *config,
-                                  bool task_owned, bruce_spi_id_t *out_device)
-{
+bruce_result_t
+spi__open_internal(const bruce_spi_device_config_t *config, bool task_owned, bruce_spi_id_t *out_device) {
     bruce_task_id_t owner = task_owned ? task__current_id() : BRUCE_TASK_ID_INVALID;
     if (out_device != NULL) *out_device = BRUCE_SPI_ID_INVALID;
     if (config == NULL || out_device == NULL || !GPIO_IS_VALID_OUTPUT_GPIO(config->sck) ||
         !GPIO_IS_VALID_GPIO(config->miso) || !GPIO_IS_VALID_OUTPUT_GPIO(config->mosi) ||
-        !GPIO_IS_VALID_OUTPUT_GPIO(config->cs) || config->clock_hz == 0 ||
-        config->clock_hz > 80000000u || config->mode > 3) {
+        !GPIO_IS_VALID_OUTPUT_GPIO(config->cs) || config->clock_hz == 0 || config->clock_hz > 80000000u ||
+        config->mode > 3) {
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
 
     spi__lock();
     int index = -1;
     for (int i = 0; i < SPI__MAX_DEVICES; ++i) {
-        if (!s_slots[i].in_use) { index = i; break; }
+        if (!s_slots[i].in_use) {
+            index = i;
+            break;
+        }
     }
     if (index < 0) {
         spi__unlock();
@@ -174,9 +168,8 @@ bruce_result_t spi__open_internal(const bruce_spi_device_config_t *config,
     return BRUCE_OK;
 }
 
-bruce_result_t spi__transfer_internal(bruce_spi_id_t device, const void *tx_data,
-                                      void *rx_data, size_t size)
-{
+bruce_result_t
+spi__transfer_internal(bruce_spi_id_t device, const void *tx_data, void *rx_data, size_t size) {
     if (size == 0 || size > BRUCE_SPI_MAX_TRANSFER_SIZE || (tx_data == NULL && rx_data == NULL)) {
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
@@ -196,8 +189,7 @@ bruce_result_t spi__transfer_internal(bruce_spi_id_t device, const void *tx_data
     return result;
 }
 
-bruce_result_t spi__close_internal(bruce_spi_id_t device)
-{
+bruce_result_t spi__close_internal(bruce_spi_id_t device) {
     bruce_task_id_t owner = task__current_id();
     spi__lock();
     int index = spi__find_locked(device);
@@ -216,14 +208,12 @@ bruce_result_t spi__close_internal(bruce_spi_id_t device)
     return task_owned ? task_registry__resource_release(resource) : BRUCE_OK;
 }
 
-bruce_result_t spi__open(const bruce_spi_device_config_t *config, bruce_spi_id_t *out_device)
-{
+bruce_result_t spi__open(const bruce_spi_device_config_t *config, bruce_spi_id_t *out_device) {
     bruce_result_t permission = permission__check(BRUCE_PERMISSION_GPIO);
     return permission == BRUCE_OK ? spi__open_internal(config, true, out_device) : permission;
 }
 
-bruce_result_t spi__transfer(bruce_spi_id_t device, const void *tx_data, void *rx_data, size_t size)
-{
+bruce_result_t spi__transfer(bruce_spi_id_t device, const void *tx_data, void *rx_data, size_t size) {
     bruce_result_t permission = permission__check(BRUCE_PERMISSION_GPIO);
     if (permission != BRUCE_OK) return permission;
     bruce_task_id_t owner = task__current_id();
@@ -231,12 +221,12 @@ bruce_result_t spi__transfer(bruce_spi_id_t device, const void *tx_data, void *r
     int index = spi__find_locked(device);
     bool owned = index >= 0 && s_slots[index].task_owned && s_slots[index].owner == owner;
     spi__unlock();
-    return owned ? spi__transfer_internal(device, tx_data, rx_data, size) :
-           index < 0 ? BRUCE_ERR_NOT_FOUND : BRUCE_ERR_PERMISSION;
+    return owned       ? spi__transfer_internal(device, tx_data, rx_data, size)
+           : index < 0 ? BRUCE_ERR_NOT_FOUND
+                       : BRUCE_ERR_PERMISSION;
 }
 
-bruce_result_t spi__close(bruce_spi_id_t device)
-{
+bruce_result_t spi__close(bruce_spi_id_t device) {
     bruce_result_t permission = permission__check(BRUCE_PERMISSION_GPIO);
     return permission == BRUCE_OK ? spi__close_internal(device) : permission;
 }

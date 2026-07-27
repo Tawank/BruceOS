@@ -6,7 +6,6 @@
 #include "core_sdk/i2c.h"
 #include "core_sdk/permission.h"
 
-#include "driver/gpio.h"
 #include "driver/i2c_master.h"
 #include "esp_err.h"
 #include "freertos/FreeRTOS.h"
@@ -40,8 +39,7 @@ static StaticSemaphore_t s_mutex_storage;
 static SemaphoreHandle_t s_mutex;
 static portMUX_TYPE s_init_mux = portMUX_INITIALIZER_UNLOCKED;
 
-static void i2c__lock(void)
-{
+static void i2c__lock(void) {
     if (s_mutex == NULL) {
         portENTER_CRITICAL(&s_init_mux);
         if (s_mutex == NULL) s_mutex = xSemaphoreCreateMutexStatic(&s_mutex_storage);
@@ -50,13 +48,9 @@ static void i2c__lock(void)
     xSemaphoreTake(s_mutex, portMAX_DELAY);
 }
 
-static void i2c__unlock(void)
-{
-    xSemaphoreGive(s_mutex);
-}
+static void i2c__unlock(void) { xSemaphoreGive(s_mutex); }
 
-static bruce_result_t i2c__esp_result(esp_err_t error)
-{
+static bruce_result_t i2c__esp_result(esp_err_t error) {
     if (error == ESP_OK) return BRUCE_OK;
     if (error == ESP_ERR_INVALID_ARG) return BRUCE_ERR_INVALID_ARGUMENT;
     if (error == ESP_ERR_NO_MEM) return BRUCE_ERR_NO_MEMORY;
@@ -67,8 +61,7 @@ static bruce_result_t i2c__esp_result(esp_err_t error)
     return BRUCE_ERR_IO;
 }
 
-static int i2c__find_locked(bruce_i2c_id_t id)
-{
+static int i2c__find_locked(bruce_i2c_id_t id) {
     if (id == BRUCE_I2C_ID_INVALID) return -1;
     for (int i = 0; i < I2C__MAX_HANDLES; ++i) {
         if (s_slots[i].in_use && s_slots[i].id == id) return i;
@@ -76,8 +69,7 @@ static int i2c__find_locked(bruce_i2c_id_t id)
     return -1;
 }
 
-static void i2c__release_locked(i2c__slot_t *slot)
-{
+static void i2c__release_locked(i2c__slot_t *slot) {
     i2c__physical_bus_t *bus = &s_buses[slot->port];
     memset(slot, 0, sizeof(*slot));
     if (--bus->references == 0) {
@@ -86,16 +78,14 @@ static void i2c__release_locked(i2c__slot_t *slot)
     }
 }
 
-static void i2c__cleanup(void *context)
-{
+static void i2c__cleanup(void *context) {
     i2c__lock();
     i2c__slot_t *slot = context;
     if (slot->in_use) i2c__release_locked(slot);
     i2c__unlock();
 }
 
-bruce_result_t i2c__open(const bruce_i2c_bus_config_t *config, bruce_i2c_id_t *out_bus)
-{
+bruce_result_t i2c__open(const bruce_i2c_bus_config_t *config, bruce_i2c_id_t *out_bus) {
     bruce_result_t permission = permission__check(BRUCE_PERMISSION_GPIO);
     if (permission != BRUCE_OK) return permission;
     bruce_task_id_t owner = task__current_id();
@@ -110,7 +100,10 @@ bruce_result_t i2c__open(const bruce_i2c_bus_config_t *config, bruce_i2c_id_t *o
     i2c__lock();
     int slot_index = -1;
     for (int i = 0; i < I2C__MAX_HANDLES; ++i) {
-        if (!s_slots[i].in_use) { slot_index = i; break; }
+        if (!s_slots[i].in_use) {
+            slot_index = i;
+            break;
+        }
     }
     if (slot_index < 0) {
         i2c__unlock();
@@ -129,7 +122,10 @@ bruce_result_t i2c__open(const bruce_i2c_bus_config_t *config, bruce_i2c_id_t *o
         }
         if (port < 0) {
             for (int i = 0; i < SOC_I2C_NUM; ++i) {
-                if (!s_buses[i].initialized) { port = i; break; }
+                if (!s_buses[i].initialized) {
+                    port = i;
+                    break;
+                }
             }
         }
         if (port < 0) {
@@ -187,9 +183,9 @@ bruce_result_t i2c__open(const bruce_i2c_bus_config_t *config, bruce_i2c_id_t *o
     return BRUCE_OK;
 }
 
-static bruce_result_t i2c__device_locked(bruce_i2c_id_t id, bruce_task_id_t owner, uint8_t address,
-                                         i2c_master_dev_handle_t *out_device)
-{
+static bruce_result_t i2c__device_locked(
+    bruce_i2c_id_t id, bruce_task_id_t owner, uint8_t address, i2c_master_dev_handle_t *out_device
+) {
     if (address < 0x08 || address > 0x77) return BRUCE_ERR_INVALID_ARGUMENT;
     int index = i2c__find_locked(id);
     if (index < 0) return BRUCE_ERR_NOT_FOUND;
@@ -199,17 +195,13 @@ static bruce_result_t i2c__device_locked(bruce_i2c_id_t id, bruce_task_id_t owne
         .device_address = address,
         .scl_speed_hz = s_slots[index].clock_hz,
     };
-    return i2c__esp_result(i2c_master_bus_add_device(s_buses[s_slots[index].port].handle, &config, out_device));
+    return i2c__esp_result(i2c_master_bus_add_device(s_buses[s_slots[index].port].handle, &config, out_device)
+    );
 }
 
-static int i2c__timeout(uint32_t timeout_ms)
-{
-    return timeout_ms > INT32_MAX ? INT32_MAX : (int)timeout_ms;
-}
+static int i2c__timeout(uint32_t timeout_ms) { return timeout_ms > INT32_MAX ? INT32_MAX : (int)timeout_ms; }
 
-bruce_result_t i2c__probe(bruce_i2c_id_t bus_id, uint8_t address, uint32_t timeout_ms,
-                          bool *out_present)
-{
+bruce_result_t i2c__probe(bruce_i2c_id_t bus_id, uint8_t address, uint32_t timeout_ms, bool *out_present) {
     bruce_result_t permission = permission__check(BRUCE_PERMISSION_GPIO);
     if (permission != BRUCE_OK) return permission;
     if (out_present == NULL || address < 0x08 || address > 0x77) return BRUCE_ERR_INVALID_ARGUMENT;
@@ -221,7 +213,8 @@ bruce_result_t i2c__probe(bruce_i2c_id_t bus_id, uint8_t address, uint32_t timeo
         i2c__unlock();
         return index < 0 ? BRUCE_ERR_NOT_FOUND : BRUCE_ERR_PERMISSION;
     }
-    esp_err_t error = i2c_master_probe(s_buses[s_slots[index].port].handle, address, i2c__timeout(timeout_ms));
+    esp_err_t error =
+        i2c_master_probe(s_buses[s_slots[index].port].handle, address, i2c__timeout(timeout_ms));
     i2c__unlock();
     if (error == ESP_OK) {
         *out_present = true;
@@ -231,10 +224,10 @@ bruce_result_t i2c__probe(bruce_i2c_id_t bus_id, uint8_t address, uint32_t timeo
     return i2c__esp_result(error);
 }
 
-static bruce_result_t i2c__transaction(bruce_i2c_id_t bus, uint8_t address,
-                                       const void *write_data, size_t write_size,
-                                       void *read_data, size_t read_size, uint32_t timeout_ms)
-{
+static bruce_result_t i2c__transaction(
+    bruce_i2c_id_t bus, uint8_t address, const void *write_data, size_t write_size, void *read_data,
+    size_t read_size, uint32_t timeout_ms
+) {
     if (write_size > BRUCE_I2C_MAX_TRANSFER_SIZE || read_size > BRUCE_I2C_MAX_TRANSFER_SIZE ||
         (write_size > 0 && write_data == NULL) || (read_size > 0 && read_data == NULL) ||
         (write_size == 0 && read_size == 0)) {
@@ -247,8 +240,9 @@ static bruce_result_t i2c__transaction(bruce_i2c_id_t bus, uint8_t address,
     if (result == BRUCE_OK) {
         esp_err_t error;
         if (write_size > 0 && read_size > 0) {
-            error = i2c_master_transmit_receive(device, write_data, write_size, read_data, read_size,
-                                                i2c__timeout(timeout_ms));
+            error = i2c_master_transmit_receive(
+                device, write_data, write_size, read_data, read_size, i2c__timeout(timeout_ms)
+            );
         } else if (write_size > 0) {
             error = i2c_master_transmit(device, write_data, write_size, i2c__timeout(timeout_ms));
         } else {
@@ -261,31 +255,30 @@ static bruce_result_t i2c__transaction(bruce_i2c_id_t bus, uint8_t address,
     return result;
 }
 
-bruce_result_t i2c__write(bruce_i2c_id_t bus, uint8_t address, const void *data,
-                          size_t size, uint32_t timeout_ms)
-{
+bruce_result_t
+i2c__write(bruce_i2c_id_t bus, uint8_t address, const void *data, size_t size, uint32_t timeout_ms) {
     bruce_result_t permission = permission__check(BRUCE_PERMISSION_GPIO);
-    return permission == BRUCE_OK ? i2c__transaction(bus, address, data, size, NULL, 0, timeout_ms) : permission;
+    return permission == BRUCE_OK ? i2c__transaction(bus, address, data, size, NULL, 0, timeout_ms)
+                                  : permission;
 }
 
-bruce_result_t i2c__read(bruce_i2c_id_t bus, uint8_t address, void *data,
-                         size_t size, uint32_t timeout_ms)
-{
+bruce_result_t i2c__read(bruce_i2c_id_t bus, uint8_t address, void *data, size_t size, uint32_t timeout_ms) {
     bruce_result_t permission = permission__check(BRUCE_PERMISSION_GPIO);
-    return permission == BRUCE_OK ? i2c__transaction(bus, address, NULL, 0, data, size, timeout_ms) : permission;
+    return permission == BRUCE_OK ? i2c__transaction(bus, address, NULL, 0, data, size, timeout_ms)
+                                  : permission;
 }
 
-bruce_result_t i2c__write_read(bruce_i2c_id_t bus, uint8_t address,
-                               const void *write_data, size_t write_size,
-                               void *read_data, size_t read_size, uint32_t timeout_ms)
-{
+bruce_result_t i2c__write_read(
+    bruce_i2c_id_t bus, uint8_t address, const void *write_data, size_t write_size, void *read_data,
+    size_t read_size, uint32_t timeout_ms
+) {
     bruce_result_t permission = permission__check(BRUCE_PERMISSION_GPIO);
-    return permission == BRUCE_OK ? i2c__transaction(bus, address, write_data, write_size,
-                                                     read_data, read_size, timeout_ms) : permission;
+    return permission == BRUCE_OK
+               ? i2c__transaction(bus, address, write_data, write_size, read_data, read_size, timeout_ms)
+               : permission;
 }
 
-bruce_result_t i2c__close(bruce_i2c_id_t bus)
-{
+bruce_result_t i2c__close(bruce_i2c_id_t bus) {
     bruce_result_t permission = permission__check(BRUCE_PERMISSION_GPIO);
     if (permission != BRUCE_OK) return permission;
     bruce_task_id_t owner = task__current_id();

@@ -71,7 +71,8 @@ bruce_result_t permission__check(bruce_permission_t permission);
  * been processed (regardless of individual allow/deny outcomes) or
  * BRUCE_ERR_INVALID_ARGUMENT for an invalid `file_name` or an unknown
  * permission name. */
-bruce_result_t permission__preflight(const char *file_name, const char *const *permission_names, size_t count);
+bruce_result_t
+permission__preflight(const char *file_name, const char *const *permission_names, size_t count);
 
 /* Returns the saved decision without prompting, e.g. for a
  * permissions-management UI. Returns BRUCE_ERR_NOT_FOUND if `file_name` has

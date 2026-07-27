@@ -10,18 +10,17 @@
  */
 
 #include <stddef.h>
-#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "esp_elf.h"
+#include "esp_elf.h" // IWYU pragma: export
 
 #include "core_sdk/app_runner.h"
 #include "core_sdk/bluetooth.h"
 #include "core_sdk/bluetooth_hid.h"
-#include "core_sdk/dialog.h"
 #include "core_sdk/device.h"
+#include "core_sdk/dialog.h"
 #include "core_sdk/display.h"
 #include "core_sdk/gpio.h"
 #include "core_sdk/i2c.h"
@@ -34,11 +33,10 @@
 #include "core_sdk/notification.h"
 #include "core_sdk/nrf24.h"
 #include "core_sdk/permission.h"
-#include "core_sdk/result.h"
 #include "core_sdk/spi.h"
-#include "core_sdk/storage.h"
 #include "core_sdk/status_icon.h"
 #include "core_sdk/stdio.h"
+#include "core_sdk/storage.h"
 #include "core_sdk/task.h"
 #include "core_sdk/tcp.h"
 

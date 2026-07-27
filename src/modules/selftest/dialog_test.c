@@ -16,17 +16,15 @@ static struct {
     bool mask_observed;
 } s_input_mock;
 
-static bruce_result_t selftest__dialog_input_provider(const char *title, const char *prompt,
-                                                      const char *initial_text, bool mask_input,
-                                                      char *out_buffer, size_t buffer_size)
-{
+static bruce_result_t selftest__dialog_input_provider(
+    const char *title, const char *prompt, const char *initial_text, bool mask_input, char *out_buffer,
+    size_t buffer_size
+) {
     (void)title;
     (void)prompt;
     (void)initial_text;
     s_input_mock.mask_observed = mask_input;
-    if (s_input_mock.result == NULL) {
-        return BRUCE_ERR_CANCELLED;
-    }
+    if (s_input_mock.result == NULL) { return BRUCE_ERR_CANCELLED; }
     snprintf(out_buffer, buffer_size, "%s", s_input_mock.result);
     return BRUCE_OK;
 }
@@ -37,15 +35,12 @@ static bruce_result_t selftest__dialog_input_provider(const char *title, const c
 
 static const char *s_pick_file_result;
 
-static bruce_result_t selftest__dialog_pick_file_provider(const char *initial_path,
-                                                          const char *extension_filter,
-                                                          char *out_path, size_t out_path_size)
-{
+static bruce_result_t selftest__dialog_pick_file_provider(
+    const char *initial_path, const char *extension_filter, char *out_path, size_t out_path_size
+) {
     (void)initial_path;
     (void)extension_filter;
-    if (s_pick_file_result == NULL) {
-        return BRUCE_ERR_CANCELLED;
-    }
+    if (s_pick_file_result == NULL) { return BRUCE_ERR_CANCELLED; }
     snprintf(out_path, out_path_size, "%s", s_pick_file_result);
     return BRUCE_OK;
 }
@@ -54,8 +49,7 @@ static bruce_result_t selftest__dialog_pick_file_provider(const char *initial_pa
 /* Cases                                                                     */
 /* ------------------------------------------------------------------------ */
 
-bool selftest__run_dialog_text_input_case(void)
-{
+bool selftest__run_dialog_text_input_case(void) {
     s_input_mock.result = "hello";
     s_input_mock.mask_observed = false;
     dialog__test_set_input_provider(selftest__dialog_input_provider);
@@ -82,8 +76,7 @@ bool selftest__run_dialog_text_input_case(void)
     return true;
 }
 
-bool selftest__run_dialog_hex_input_case(void)
-{
+bool selftest__run_dialog_hex_input_case(void) {
     s_input_mock.result = "DEADBEEF";
     dialog__test_set_input_provider(selftest__dialog_input_provider);
 
@@ -101,8 +94,7 @@ bool selftest__run_dialog_hex_input_case(void)
     return true;
 }
 
-bool selftest__run_dialog_number_input_case(void)
-{
+bool selftest__run_dialog_number_input_case(void) {
     s_input_mock.result = "123.45";
     dialog__test_set_input_provider(selftest__dialog_input_provider);
 
@@ -120,8 +112,7 @@ bool selftest__run_dialog_number_input_case(void)
     return true;
 }
 
-bool selftest__run_dialog_pick_file_case(void)
-{
+bool selftest__run_dialog_pick_file_case(void) {
     s_pick_file_result = "/apps/test.elf";
     dialog__test_set_pick_file_provider(selftest__dialog_pick_file_provider);
 
@@ -139,8 +130,7 @@ bool selftest__run_dialog_pick_file_case(void)
     return true;
 }
 
-bool selftest__run_dialog_viewer_case(void)
-{
+bool selftest__run_dialog_viewer_case(void) {
     bruce_viewer_id_t viewer = BRUCE_VIEWER_ID_INVALID;
     bruce_result_t result = dialog__create_text_viewer("Test", "Line 1\nLine 2\nLine 3", &viewer);
     if (result != BRUCE_OK) {

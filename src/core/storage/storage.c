@@ -35,8 +35,7 @@ static bool s_sd_bus_owned;
 static int s_sd_host;
 static sdmmc_card_t *s_sd_card;
 
-static void storage__lock(void)
-{
+static void storage__lock(void) {
     if (s_storage_mutex == NULL) {
         portENTER_CRITICAL(&s_storage_init_mux);
         if (s_storage_mutex == NULL) s_storage_mutex = xSemaphoreCreateMutexStatic(&s_storage_mutex_storage);
@@ -45,13 +44,9 @@ static void storage__lock(void)
     xSemaphoreTake(s_storage_mutex, portMAX_DELAY);
 }
 
-static void storage__unlock(void)
-{
-    xSemaphoreGive(s_storage_mutex);
-}
+static void storage__unlock(void) { xSemaphoreGive(s_storage_mutex); }
 
-bool storage__init(void)
-{
+bool storage__init(void) {
     storage__lock();
     if (!s_initialized) {
         const esp_vfs_littlefs_conf_t config = {
@@ -70,20 +65,17 @@ bool storage__init(void)
     return ready;
 }
 
-static bool storage__is_sd_path(const char *path)
-{
+static bool storage__is_sd_path(const char *path) {
     size_t mount_length = strlen(STORAGE__SD_MOUNT_PATH);
     return path != NULL && strncmp(path, STORAGE__SD_MOUNT_PATH, mount_length) == 0 &&
            (path[mount_length] == '\0' || path[mount_length] == '/');
 }
 
-static bool storage__is_ready(const char *path)
-{
+static bool storage__is_ready(const char *path) {
     return path != NULL && (storage__is_sd_path(path) ? s_sd_ready : s_ready);
 }
 
-static bool storage__read_file_locked(const char *path, char **data, size_t *size)
-{
+static bool storage__read_file_locked(const char *path, char **data, size_t *size) {
     if (data == NULL || size == NULL || !storage__is_ready(path)) return false;
     *data = NULL;
     *size = 0;
@@ -114,11 +106,11 @@ static bool storage__read_file_locked(const char *path, char **data, size_t *siz
     return true;
 }
 
-static bool storage__write_file_atomic_locked(const char *path, const void *data, size_t size)
-{
+static bool storage__write_file_atomic_locked(const char *path, const void *data, size_t size) {
     char temporary_path[STORAGE__PATH_MAX];
     if ((data == NULL && size != 0) || !storage__is_ready(path) ||
-        snprintf(temporary_path, sizeof(temporary_path), "%s.tmp", path) >= (int)sizeof(temporary_path)) return false;
+        snprintf(temporary_path, sizeof(temporary_path), "%s.tmp", path) >= (int)sizeof(temporary_path))
+        return false;
     FILE *file = fopen(temporary_path, "wb");
     if (file == NULL) return false;
     const void *content = data != NULL ? data : "";
@@ -136,40 +128,35 @@ static bool storage__write_file_atomic_locked(const char *path, const void *data
     return true;
 }
 
-bool storage__exists(const char *path)
-{
+bool storage__exists(const char *path) {
     storage__lock();
     bool exists = storage__is_ready(path) && access(path, F_OK) == 0;
     storage__unlock();
     return exists;
 }
 
-bool storage__read_file(const char *path, char **data, size_t *size)
-{
+bool storage__read_file(const char *path, char **data, size_t *size) {
     storage__lock();
     bool read = storage__read_file_locked(path, data, size);
     storage__unlock();
     return read;
 }
 
-bool storage__write_file_atomic(const char *path, const void *data, size_t size)
-{
+bool storage__write_file_atomic(const char *path, const void *data, size_t size) {
     storage__lock();
     bool written = storage__write_file_atomic_locked(path, data, size);
     storage__unlock();
     return written;
 }
 
-bool storage__remove(const char *path)
-{
+bool storage__remove(const char *path) {
     storage__lock();
     bool removed = storage__is_ready(path) && remove(path) == 0;
     storage__unlock();
     return removed;
 }
 
-bool storage__rename(const char *from, const char *to)
-{
+bool storage__rename(const char *from, const char *to) {
     storage__lock();
     bool renamed = storage__is_ready(from) && storage__is_ready(to) &&
                    storage__is_sd_path(from) == storage__is_sd_path(to) && rename(from, to) == 0;
@@ -177,8 +164,7 @@ bool storage__rename(const char *from, const char *to)
     return renamed;
 }
 
-bool storage__get_usage(const char *path, size_t *total_bytes, size_t *used_bytes)
-{
+bool storage__get_usage(const char *path, size_t *total_bytes, size_t *used_bytes) {
     storage__lock();
     bool known = false;
     if (total_bytes != NULL && used_bytes != NULL && path != NULL) {
@@ -198,9 +184,10 @@ bool storage__get_usage(const char *path, size_t *total_bytes, size_t *used_byte
     return known;
 }
 
-bool storage__sd_mount_spi(const storage__sdspi_config_t *config)
-{
-    if (config == NULL || config->mosi_gpio < 0 || config->miso_gpio < 0 || config->sck_gpio < 0 || config->cs_gpio < 0) return false;
+bool storage__sd_mount_spi(const storage__sdspi_config_t *config) {
+    if (config == NULL || config->mosi_gpio < 0 || config->miso_gpio < 0 || config->sck_gpio < 0 ||
+        config->cs_gpio < 0)
+        return false;
     storage__lock();
     if (s_sd_ready) {
         storage__unlock();
@@ -245,8 +232,7 @@ bool storage__sd_mount_spi(const storage__sdspi_config_t *config)
     return true;
 }
 
-void storage__sd_unmount(void)
-{
+void storage__sd_unmount(void) {
     storage__lock();
     if (s_sd_ready) {
         esp_vfs_fat_sdcard_unmount(STORAGE__SD_MOUNT_PATH, s_sd_card);
@@ -258,18 +244,14 @@ void storage__sd_unmount(void)
     storage__unlock();
 }
 
-bool storage__sd_is_ready(void)
-{
+bool storage__sd_is_ready(void) {
     storage__lock();
     bool ready = s_sd_ready;
     storage__unlock();
     return ready;
 }
 
-void storage__free(void *data)
-{
-    free(data);
-}
+void storage__free(void *data) { free(data); }
 
 /* ------------------------------------------------------------------------ */
 /* A5: task-owned opaque file handles (core_sdk/storage.h)                  */
@@ -294,8 +276,7 @@ static uint32_t s_next_file_id = 1;
  * SD) is reachable by a storage-granted caller. Core itself still reads/
  * writes those two files directly through storage__read_file()/
  * storage__write_file_atomic() above, which this check does not apply to. */
-static bool storage__is_protected_path(const char *path)
-{
+static bool storage__is_protected_path(const char *path) {
     static const char *const protected_paths[] = {
         "/bruce.json",
         "/bruce.json.tmp",
@@ -309,14 +290,13 @@ static bool storage__is_protected_path(const char *path)
     return false;
 }
 
-static bool storage__is_valid_public_path(const char *path)
-{
-    return path != NULL && path[0] == '/' && strlen(path) < BRUCE_STORAGE_PATH_MAX && strstr(path, "..") == NULL;
+static bool storage__is_valid_public_path(const char *path) {
+    return path != NULL && path[0] == '/' && strlen(path) < BRUCE_STORAGE_PATH_MAX &&
+           strstr(path, "..") == NULL;
 }
 
 /* Caller must hold s_storage_mutex. */
-static int storage__find_open_slot_locked(bruce_file_id_t file)
-{
+static int storage__find_open_slot_locked(bruce_file_id_t file) {
     if (file == BRUCE_FILE_ID_INVALID) return -1;
     for (int i = 0; i < STORAGE__MAX_OPEN_FILES; ++i) {
         if (s_open_files[i].in_use && s_open_files[i].id == file) return i;
@@ -328,8 +308,7 @@ static int storage__find_open_slot_locked(bruce_file_id_t file)
  * closing its own handles; runs while the task registry's own lock is held,
  * so it must not call back into task_registry__* itself (mirrors
  * memory__cleanup's rule in core/memory/memory.c). */
-static void storage__file_cleanup(void *context)
-{
+static void storage__file_cleanup(void *context) {
     storage__file_slot_t *slot = (storage__file_slot_t *)context;
     storage__lock();
     if (slot->in_use) {
@@ -340,8 +319,7 @@ static void storage__file_cleanup(void *context)
     storage__unlock();
 }
 
-bruce_result_t storage__open(const char *path, uint32_t flags, bruce_file_id_t *out_file)
-{
+bruce_result_t storage__open(const char *path, uint32_t flags, bruce_file_id_t *out_file) {
     if (out_file == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     *out_file = BRUCE_FILE_ID_INVALID;
 
@@ -405,7 +383,8 @@ bruce_result_t storage__open(const char *path, uint32_t flags, bruce_file_id_t *
         return errno == ENOENT ? BRUCE_ERR_NOT_FOUND : BRUCE_ERR_IO;
     }
 
-    bruce_resource_id_t resource_id = task_registry__resource_register(storage__file_cleanup, &s_open_files[slot_index]);
+    bruce_resource_id_t resource_id =
+        task_registry__resource_register(storage__file_cleanup, &s_open_files[slot_index]);
     if (resource_id == BRUCE_RESOURCE_ID_INVALID) {
         close(fd);
         storage__lock();
@@ -426,8 +405,7 @@ bruce_result_t storage__open(const char *path, uint32_t flags, bruce_file_id_t *
     return BRUCE_OK;
 }
 
-bruce_result_t storage__read(bruce_file_id_t file, void *buffer, size_t capacity, size_t *out_size)
-{
+bruce_result_t storage__read(bruce_file_id_t file, void *buffer, size_t capacity, size_t *out_size) {
     if (buffer == NULL || out_size == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     storage__lock();
     int slot_index = storage__find_open_slot_locked(file);
@@ -446,8 +424,7 @@ bruce_result_t storage__read(bruce_file_id_t file, void *buffer, size_t capacity
     return BRUCE_OK;
 }
 
-bruce_result_t storage__write(bruce_file_id_t file, const void *buffer, size_t size, size_t *out_size)
-{
+bruce_result_t storage__write(bruce_file_id_t file, const void *buffer, size_t size, size_t *out_size) {
     if (out_size == NULL || (buffer == NULL && size != 0)) return BRUCE_ERR_INVALID_ARGUMENT;
     storage__lock();
     int slot_index = storage__find_open_slot_locked(file);
@@ -466,8 +443,7 @@ bruce_result_t storage__write(bruce_file_id_t file, const void *buffer, size_t s
     return BRUCE_OK;
 }
 
-bruce_result_t storage__seek(bruce_file_id_t file, int64_t offset, int whence, uint64_t *out_position)
-{
+bruce_result_t storage__seek(bruce_file_id_t file, int64_t offset, int whence, uint64_t *out_position) {
     if (whence != SEEK_SET && whence != SEEK_CUR && whence != SEEK_END) return BRUCE_ERR_INVALID_ARGUMENT;
     storage__lock();
     int slot_index = storage__find_open_slot_locked(file);
@@ -486,8 +462,7 @@ bruce_result_t storage__seek(bruce_file_id_t file, int64_t offset, int whence, u
     return BRUCE_OK;
 }
 
-bruce_result_t storage__close(bruce_file_id_t file)
-{
+bruce_result_t storage__close(bruce_file_id_t file) {
     storage__lock();
     int slot_index = storage__find_open_slot_locked(file);
     if (slot_index < 0) {
@@ -512,8 +487,8 @@ bruce_result_t storage__close(bruce_file_id_t file)
     return BRUCE_OK;
 }
 
-bruce_result_t storage__list(const char *path, bruce_storage_entry_t *entries, size_t capacity, size_t *out_count)
-{
+bruce_result_t
+storage__list(const char *path, bruce_storage_entry_t *entries, size_t capacity, size_t *out_count) {
     bruce_result_t permission = permission__check(BRUCE_PERMISSION_STORAGE);
     if (permission != BRUCE_OK) return permission;
     if (out_count == NULL || !storage__is_valid_public_path(path) || (capacity != 0 && entries == NULL)) {
@@ -539,7 +514,9 @@ bruce_result_t storage__list(const char *path, bruce_storage_entry_t *entries, s
         if (strcmp(dir_entry->d_name, ".") == 0 || strcmp(dir_entry->d_name, "..") == 0) continue;
 
         char full_path[BRUCE_STORAGE_PATH_MAX];
-        int printed = snprintf(full_path, sizeof(full_path), has_trailing_slash ? "%s%s" : "%s/%s", path, dir_entry->d_name);
+        int printed = snprintf(
+            full_path, sizeof(full_path), has_trailing_slash ? "%s%s" : "%s/%s", path, dir_entry->d_name
+        );
         if (printed < 0 || (size_t)printed >= sizeof(full_path)) continue;
         if (storage__is_protected_path(full_path)) continue;
 
@@ -559,8 +536,7 @@ bruce_result_t storage__list(const char *path, bruce_storage_entry_t *entries, s
     return BRUCE_OK;
 }
 
-bruce_result_t storage__mkdir(const char *path)
-{
+bruce_result_t storage__mkdir(const char *path) {
     bruce_result_t permission = permission__check(BRUCE_PERMISSION_STORAGE);
     if (permission != BRUCE_OK) return permission;
     if (!storage__is_valid_public_path(path) || strcmp(path, "/") == 0) return BRUCE_ERR_INVALID_PATH;
@@ -570,7 +546,8 @@ bruce_result_t storage__mkdir(const char *path)
     bruce_result_t result = BRUCE_OK;
     struct stat path_stat;
     if (!storage__is_ready(path)) result = BRUCE_ERR_INVALID_STATE;
-    else if (stat(path, &path_stat) == 0) result = S_ISDIR(path_stat.st_mode) ? BRUCE_OK : BRUCE_ERR_INVALID_PATH;
+    else if (stat(path, &path_stat) == 0)
+        result = S_ISDIR(path_stat.st_mode) ? BRUCE_OK : BRUCE_ERR_INVALID_PATH;
     else if (mkdir(path, 0775) != 0) result = errno == ENOENT ? BRUCE_ERR_NOT_FOUND : BRUCE_ERR_IO;
     storage__unlock();
     return result;

@@ -22,6 +22,5 @@ typedef struct {
  * belong to the calling task and close automatically on task exit. `tx_data`
  * may be NULL for receive-only transfers and `rx_data` may be NULL to discard input. */
 bruce_result_t spi__open(const bruce_spi_device_config_t *config, bruce_spi_id_t *out_device);
-bruce_result_t spi__transfer(bruce_spi_id_t device, const void *tx_data,
-                             void *rx_data, size_t size);
+bruce_result_t spi__transfer(bruce_spi_id_t device, const void *tx_data, void *rx_data, size_t size);
 bruce_result_t spi__close(bruce_spi_id_t device);

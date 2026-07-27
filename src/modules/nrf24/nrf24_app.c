@@ -12,8 +12,7 @@
 #define NRF24_APP_SPECTRUM_CHANNELS 80u
 #define NRF24_APP_SPECTRUM_SAMPLES 8u
 
-static bool nrf24_app__parse_channel(const char *text, uint8_t *out)
-{
+static bool nrf24_app__parse_channel(const char *text, uint8_t *out) {
     if (text == NULL || out == NULL) return false;
     char *end = NULL;
     unsigned long value = strtoul(text, &end, 10);
@@ -22,30 +21,38 @@ static bool nrf24_app__parse_channel(const char *text, uint8_t *out)
     return true;
 }
 
-static int nrf24_app__status(bool gui)
-{
+static int nrf24_app__status(bool gui) {
     bool connected = false;
     bruce_result_t result = nrf24__probe(&connected);
     bruce_nrf24_pins_t pins;
     nrf24__get_pins(&pins);
     char message[160];
-    snprintf(message, sizeof(message),
-             "Radio: %s\nSPI3 SCK:%d MISO:%d MOSI:%d\nCS:%d CE:%d",
-             result == BRUCE_OK && connected ? "connected" : "not found",
-             pins.sck, pins.miso, pins.mosi, pins.cs, pins.ce);
-    if (gui) (void)dialog__message(result == BRUCE_OK ? BRUCE_DIALOG_SUCCESS : BRUCE_DIALOG_WARNING,
-                                   "NRF24 status", message);
+    snprintf(
+        message,
+        sizeof(message),
+        "Radio: %s\nSPI3 SCK:%d MISO:%d MOSI:%d\nCS:%d CE:%d",
+        result == BRUCE_OK && connected ? "connected" : "not found",
+        pins.sck,
+        pins.miso,
+        pins.mosi,
+        pins.cs,
+        pins.ce
+    );
+    if (gui)
+        (void)dialog__message(
+            result == BRUCE_OK ? BRUCE_DIALOG_SUCCESS : BRUCE_DIALOG_WARNING, "NRF24 status", message
+        );
     else printf("%s\n", message);
     return result;
 }
 
-static int nrf24_app__scan(uint8_t first, uint8_t last, uint8_t samples, bool gui)
-{
+static int nrf24_app__scan(uint8_t first, uint8_t last, uint8_t samples, bool gui) {
     size_t count = (size_t)last - first + 1u;
     uint8_t activity[BRUCE_NRF24_CHANNEL_MAX + 1u];
     bruce_result_t result = nrf24__scan(first, count, samples, activity);
     if (result != BRUCE_OK) {
-        if (gui) (void)dialog__message(BRUCE_DIALOG_ERROR, "NRF24 spectrum", "Scan failed or radio not found");
+        if (gui)
+            (void)dialog__message(BRUCE_DIALOG_ERROR, "NRF24 spectrum", "Scan failed or radio not found");
         else printf("NRF24 scan failed: %d\n", result);
         return result;
     }
@@ -60,12 +67,16 @@ static int nrf24_app__scan(uint8_t first, uint8_t last, uint8_t samples, bool gu
     }
 
     char spectrum[768];
-    size_t used = (size_t)snprintf(spectrum, sizeof(spectrum),
-                                   "2.4 GHz RPD activity (%u samples)\n\n", samples);
+    size_t used =
+        (size_t)snprintf(spectrum, sizeof(spectrum), "2.4 GHz RPD activity (%u samples)\n\n", samples);
     for (size_t row = 0; row < count && used + 32 < sizeof(spectrum); row += 10) {
-        int written = snprintf(spectrum + used, sizeof(spectrum) - used, "%02u-%02u  ",
-                               (unsigned int)(first + row),
-                               (unsigned int)(first + (row + 9 < count ? row + 9 : count - 1)));
+        int written = snprintf(
+            spectrum + used,
+            sizeof(spectrum) - used,
+            "%02u-%02u  ",
+            (unsigned int)(first + row),
+            (unsigned int)(first + (row + 9 < count ? row + 9 : count - 1))
+        );
         if (written < 0 || (size_t)written >= sizeof(spectrum) - used) break;
         used += (size_t)written;
         for (size_t index = row; index < row + 10 && index < count && used + 2 < sizeof(spectrum); ++index) {
@@ -80,38 +91,39 @@ static int nrf24_app__scan(uint8_t first, uint8_t last, uint8_t samples, bool gu
     return BRUCE_OK;
 }
 
-static int nrf24_app__gui(void)
-{
+static int nrf24_app__gui(void) {
     const bruce_dialog_choice_t choices[] = {
-        {.label = "Spectrum scan", .value = "scan"},
-        {.label = "Radio status", .value = "status"},
-        {.label = "Information", .value = "info"},
-        {.label = "Exit", .value = "exit"},
+        {.label = "Spectrum scan", .value = "scan"  },
+        {.label = "Radio status",  .value = "status"},
+        {.label = "Information",   .value = "info"  },
+        {.label = "Exit",          .value = "exit"  },
     };
     for (;;) {
         size_t selected = 0;
         bruce_result_t result = dialog__choice("NRF24", "2.4 GHz radio tools", choices, 4, &selected, NULL);
         if (result == BRUCE_ERR_CANCELLED || selected == 3) return 0;
         if (result != BRUCE_OK) return result;
-        if (selected == 0) (void)nrf24_app__scan(0, NRF24_APP_SPECTRUM_CHANNELS - 1u,
-                                                 NRF24_APP_SPECTRUM_SAMPLES, true);
+        if (selected == 0)
+            (void)nrf24_app__scan(0, NRF24_APP_SPECTRUM_CHANNELS - 1u, NRF24_APP_SPECTRUM_SAMPLES, true);
         else if (selected == 1) (void)nrf24_app__status(true);
-        else (void)dialog__message(BRUCE_DIALOG_INFO, "NRF24",
-            "Passive spectrum scan shows threshold activity, not RSSI or decoded packets.\n\n"
-            "Use short wiring and a stable 3.3 V supply. PA/LNA radios should have local decoupling.");
+        else
+            (void)dialog__message(
+                BRUCE_DIALOG_INFO,
+                "NRF24",
+                "Passive spectrum scan shows threshold activity, not RSSI or decoded packets.\n\n"
+                "Use short wiring and a stable 3.3 V supply. PA/LNA radios should have local decoupling."
+            );
     }
 }
 
-static void nrf24_app__usage(void)
-{
+static void nrf24_app__usage(void) {
     printf("NRF24 commands:\n");
     printf("  nrf24 status\n");
     printf("  nrf24 channel <0-125>\n");
     printf("  nrf24 scan [first] [last] [samples]\n");
 }
 
-int nrf24_app_main(int argc, char **argv)
-{
+int nrf24_app_main(int argc, char **argv) {
     if (app_runner__args_have_gui(argc, argv)) return nrf24_app__gui();
     if (argc == 0 || argv == NULL || argv[0] == NULL || strcmp(argv[0], "status") == 0) {
         return nrf24_app__status(false);

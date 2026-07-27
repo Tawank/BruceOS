@@ -17,31 +17,22 @@ static bool s_defaults_initialized;
 static bool s_loaded;
 static config__t s_config;
 
-static void config__lock(void)
-{
-    xSemaphoreTake(s_config_mutex, portMAX_DELAY);
-}
+static void config__lock(void) { xSemaphoreTake(s_config_mutex, portMAX_DELAY); }
 
-static void config__unlock(void)
-{
-    xSemaphoreGive(s_config_mutex);
-}
+static void config__unlock(void) { xSemaphoreGive(s_config_mutex); }
 
-static void config__copy(char *destination, size_t destination_size, const char *source)
-{
+static void config__copy(char *destination, size_t destination_size, const char *source) {
     if (destination == NULL || destination_size == 0) return;
     strncpy(destination, source != NULL ? source : "", destination_size - 1);
     destination[destination_size - 1] = '\0';
 }
 
-static bool config__valid_value(const char *value, size_t max_length, bool allow_empty)
-{
+static bool config__valid_value(const char *value, size_t max_length, bool allow_empty) {
     return value != NULL && (allow_empty || value[0] != '\0') && strnlen(value, max_length + 1) <= max_length;
 }
 
 /* Heap-allocates a NUL-terminated copy of `value` (treating NULL as ""). */
-static char *config__strdup(const char *value)
-{
+static char *config__strdup(const char *value) {
     if (value == NULL) value = "";
     size_t length = strlen(value) + 1;
     char *copy = malloc(length);
@@ -53,8 +44,7 @@ static char *config__strdup(const char *value)
  * `value` is read before the old copy is freed, so it's safe to call this
  * with value == *field (i.e. re-duplicating a field in place). On
  * allocation failure the previous value is left untouched. */
-static bool config__assign(const char **field, const char *value)
-{
+static bool config__assign(const char **field, const char *value) {
     char *copy = config__strdup(value);
     if (copy == NULL) return false;
     free((void *)*field);
@@ -62,24 +52,19 @@ static bool config__assign(const char **field, const char *value)
     return true;
 }
 
-static void config__release(const char **field)
-{
+static void config__release(const char **field) {
     free((void *)*field);
     *field = NULL;
 }
 
-static const char *config__or_empty(const char *value)
-{
-    return value != NULL ? value : "";
-}
+static const char *config__or_empty(const char *value) { return value != NULL ? value : ""; }
 
-static bool config__is_valid_ipv4(const char *value)
-{
+static bool config__is_valid_ipv4(const char *value) {
     if (value == NULL) return false;
     int octets = 0;
     int digits = 0;
     long part = -1;
-    for (const char *c = value; ; ++c) {
+    for (const char *c = value;; ++c) {
         if (*c >= '0' && *c <= '9') {
             part = (part < 0 ? 0 : part) * 10 + (*c - '0');
             if (part > 255 || ++digits > 3) return false;
@@ -101,8 +86,7 @@ static bool config__is_valid_ipv4(const char *value)
 /* ------------------------------------------------------------------------ */
 
 /* Frees every heap string owned by cfg (safe to call on a zeroed struct). */
-static void config__free_config(config__t *cfg)
-{
+static void config__free_config(config__t *cfg) {
     config__release(&cfg->themePath);
     config__release(&cfg->launcherApp);
     config__release(&cfg->keyboardLang);
@@ -135,19 +119,21 @@ static void config__free_config(config__t *cfg)
  * longer shares ownership with whatever it was assigned from (e.g. a
  * caller-supplied config__t passed into config__set()). Slots beyond each
  * list's count are cleared to NULL. */
-static void config__duplicate_strings(config__t *cfg)
-{
+static void config__duplicate_strings(config__t *cfg) {
     cfg->themePath = config__strdup(cfg->themePath);
     cfg->launcherApp = config__strdup(cfg->launcherApp);
     cfg->keyboardLang = config__strdup(cfg->keyboardLang);
     cfg->webUIUser = config__strdup(cfg->webUIUser);
     cfg->webUIPassword = config__strdup(cfg->webUIPassword);
-    if (cfg->webUISessionCount > CONFIG__WEBUI_MAX_SESSIONS) cfg->webUISessionCount = CONFIG__WEBUI_MAX_SESSIONS;
-    for (size_t i = 0; i < cfg->webUISessionCount; ++i) cfg->webUISessions[i] = config__strdup(cfg->webUISessions[i]);
+    if (cfg->webUISessionCount > CONFIG__WEBUI_MAX_SESSIONS)
+        cfg->webUISessionCount = CONFIG__WEBUI_MAX_SESSIONS;
+    for (size_t i = 0; i < cfg->webUISessionCount; ++i)
+        cfg->webUISessions[i] = config__strdup(cfg->webUISessions[i]);
     for (size_t i = cfg->webUISessionCount; i < CONFIG__WEBUI_MAX_SESSIONS; ++i) cfg->webUISessions[i] = NULL;
     cfg->wifiApSsid = config__strdup(cfg->wifiApSsid);
     cfg->wifiApPassword = config__strdup(cfg->wifiApPassword);
-    if (cfg->wifiCredentialCount > CONFIG__WIFI_MAX_CREDENTIALS) cfg->wifiCredentialCount = CONFIG__WIFI_MAX_CREDENTIALS;
+    if (cfg->wifiCredentialCount > CONFIG__WIFI_MAX_CREDENTIALS)
+        cfg->wifiCredentialCount = CONFIG__WIFI_MAX_CREDENTIALS;
     for (size_t i = 0; i < cfg->wifiCredentialCount; ++i) {
         cfg->wifiCredentials[i].ssid = config__strdup(cfg->wifiCredentials[i].ssid);
         cfg->wifiCredentials[i].password = config__strdup(cfg->wifiCredentials[i].password);
@@ -157,9 +143,12 @@ static void config__duplicate_strings(config__t *cfg)
         cfg->wifiCredentials[i].password = NULL;
     }
     cfg->wifiMAC = config__strdup(cfg->wifiMAC);
-    if (cfg->evilWifiNameCount > CONFIG__EVIL_WIFI_MAX_NAMES) cfg->evilWifiNameCount = CONFIG__EVIL_WIFI_MAX_NAMES;
-    for (size_t i = 0; i < cfg->evilWifiNameCount; ++i) cfg->evilWifiNames[i] = config__strdup(cfg->evilWifiNames[i]);
-    for (size_t i = cfg->evilWifiNameCount; i < CONFIG__EVIL_WIFI_MAX_NAMES; ++i) cfg->evilWifiNames[i] = NULL;
+    if (cfg->evilWifiNameCount > CONFIG__EVIL_WIFI_MAX_NAMES)
+        cfg->evilWifiNameCount = CONFIG__EVIL_WIFI_MAX_NAMES;
+    for (size_t i = 0; i < cfg->evilWifiNameCount; ++i)
+        cfg->evilWifiNames[i] = config__strdup(cfg->evilWifiNames[i]);
+    for (size_t i = cfg->evilWifiNameCount; i < CONFIG__EVIL_WIFI_MAX_NAMES; ++i)
+        cfg->evilWifiNames[i] = NULL;
     cfg->evilPortalEndpoints.getCredsEndpoint = config__strdup(cfg->evilPortalEndpoints.getCredsEndpoint);
     cfg->evilPortalEndpoints.setSsidEndpoint = config__strdup(cfg->evilPortalEndpoints.setSsidEndpoint);
     cfg->evilPortalGatewayIp = config__strdup(cfg->evilPortalGatewayIp);
@@ -167,9 +156,12 @@ static void config__duplicate_strings(config__t *cfg)
     cfg->startupAppJSInterpreterFile = config__strdup(cfg->startupAppJSInterpreterFile);
     cfg->wigleBasicToken = config__strdup(cfg->wigleBasicToken);
     cfg->wdgwarsApiKey = config__strdup(cfg->wdgwarsApiKey);
-    if (cfg->disabledMenuCount > CONFIG__DISABLED_MENU_MAX_COUNT) cfg->disabledMenuCount = CONFIG__DISABLED_MENU_MAX_COUNT;
-    for (size_t i = 0; i < cfg->disabledMenuCount; ++i) cfg->disabledMenus[i] = config__strdup(cfg->disabledMenus[i]);
-    for (size_t i = cfg->disabledMenuCount; i < CONFIG__DISABLED_MENU_MAX_COUNT; ++i) cfg->disabledMenus[i] = NULL;
+    if (cfg->disabledMenuCount > CONFIG__DISABLED_MENU_MAX_COUNT)
+        cfg->disabledMenuCount = CONFIG__DISABLED_MENU_MAX_COUNT;
+    for (size_t i = 0; i < cfg->disabledMenuCount; ++i)
+        cfg->disabledMenus[i] = config__strdup(cfg->disabledMenus[i]);
+    for (size_t i = cfg->disabledMenuCount; i < CONFIG__DISABLED_MENU_MAX_COUNT; ++i)
+        cfg->disabledMenus[i] = NULL;
     if (cfg->qrCodeCount > CONFIG__QR_CODE_MAX_ENTRIES) cfg->qrCodeCount = CONFIG__QR_CODE_MAX_ENTRIES;
     for (size_t i = 0; i < cfg->qrCodeCount; ++i) {
         cfg->qrCodes[i].menuName = config__strdup(cfg->qrCodes[i].menuName);
@@ -181,8 +173,7 @@ static void config__duplicate_strings(config__t *cfg)
     }
 }
 
-static void config__set_defaults(config__t *cfg)
-{
+static void config__set_defaults(config__t *cfg) {
     config__free_config(cfg);
     memset(cfg, 0, sizeof(*cfg));
 
@@ -254,8 +245,7 @@ static void config__set_defaults(config__t *cfg)
 /* Validation (mirrors BruceConfig::validateConfig)                         */
 /* ------------------------------------------------------------------------ */
 
-static void config__validate(config__t *cfg)
-{
+static void config__validate(config__t *cfg) {
     if (cfg->dimmerSet < 0) cfg->dimmerSet = 10;
     if (cfg->dimmerSet > 60) cfg->dimmerSet = 0;
 
@@ -317,55 +307,48 @@ static void config__validate(config__t *cfg)
 /* JSON <-> config__t                                                        */
 /* ------------------------------------------------------------------------ */
 
-static void json_get_string(const cJSON *object, const char *key, const char **out)
-{
+static void json_get_string(const cJSON *object, const char *key, const char **out) {
     const cJSON *item = cJSON_GetObjectItemCaseSensitive(object, key);
     if (cJSON_IsString(item) && item->valuestring != NULL) config__assign(out, item->valuestring);
 }
 
-static void json_get_int(const cJSON *object, const char *key, int *out)
-{
+static void json_get_int(const cJSON *object, const char *key, int *out) {
     const cJSON *item = cJSON_GetObjectItemCaseSensitive(object, key);
     if (cJSON_IsNumber(item)) *out = item->valueint;
 }
 
-static void json_get_uint16(const cJSON *object, const char *key, uint16_t *out)
-{
+static void json_get_uint16(const cJSON *object, const char *key, uint16_t *out) {
     const cJSON *item = cJSON_GetObjectItemCaseSensitive(object, key);
     if (cJSON_IsNumber(item)) *out = (uint16_t)item->valueint;
 }
 
-static void json_get_float(const cJSON *object, const char *key, float *out)
-{
+static void json_get_float(const cJSON *object, const char *key, float *out) {
     const cJSON *item = cJSON_GetObjectItemCaseSensitive(object, key);
     if (cJSON_IsNumber(item)) *out = (float)item->valuedouble;
 }
 
-static void json_get_bool(const cJSON *object, const char *key, bool *out)
-{
+static void json_get_bool(const cJSON *object, const char *key, bool *out) {
     const cJSON *item = cJSON_GetObjectItemCaseSensitive(object, key);
     if (cJSON_IsBool(item)) *out = cJSON_IsTrue(item);
 }
 
-static void json_get_hex16(const cJSON *object, const char *key, uint16_t *out)
-{
+static void json_get_hex16(const cJSON *object, const char *key, uint16_t *out) {
     const cJSON *item = cJSON_GetObjectItemCaseSensitive(object, key);
-    if (cJSON_IsString(item) && item->valuestring != NULL) *out = (uint16_t)strtoul(item->valuestring, NULL, 16);
+    if (cJSON_IsString(item) && item->valuestring != NULL)
+        *out = (uint16_t)strtoul(item->valuestring, NULL, 16);
 }
 
-static void json_get_hex32(const cJSON *object, const char *key, uint32_t *out)
-{
+static void json_get_hex32(const cJSON *object, const char *key, uint32_t *out) {
     const cJSON *item = cJSON_GetObjectItemCaseSensitive(object, key);
-    if (cJSON_IsString(item) && item->valuestring != NULL) *out = (uint32_t)strtoul(item->valuestring, NULL, 16);
+    if (cJSON_IsString(item) && item->valuestring != NULL)
+        *out = (uint32_t)strtoul(item->valuestring, NULL, 16);
 }
 
-static void config__clear_string_array(const char **array, size_t max_count)
-{
+static void config__clear_string_array(const char **array, size_t max_count) {
     for (size_t i = 0; i < max_count; ++i) config__release(&array[i]);
 }
 
-static void config__parse_json(config__t *cfg, const cJSON *root)
-{
+static void config__parse_json(config__t *cfg, const cJSON *root) {
     if (!cJSON_IsObject(root)) return;
 
     json_get_hex16(root, "priColor", &cfg->priColor);
@@ -405,8 +388,7 @@ static void config__parse_json(config__t *cfg, const cJSON *root)
         config__clear_string_array(cfg->webUISessions, CONFIG__WEBUI_MAX_SESSIONS);
         cfg->webUISessionCount = 0;
         const cJSON *session;
-        cJSON_ArrayForEach(session, web_ui_sessions)
-        {
+        cJSON_ArrayForEach(session, web_ui_sessions) {
             if (cfg->webUISessionCount >= CONFIG__WEBUI_MAX_SESSIONS) break;
             if (!cJSON_IsString(session) || session->valuestring == NULL) continue;
             cfg->webUISessions[cfg->webUISessionCount] = config__strdup(session->valuestring);
@@ -430,8 +412,7 @@ static void config__parse_json(config__t *cfg, const cJSON *root)
         }
         cfg->wifiCredentialCount = 0;
         const cJSON *entry;
-        cJSON_ArrayForEach(entry, wifi)
-        {
+        cJSON_ArrayForEach(entry, wifi) {
             if (cfg->wifiCredentialCount >= CONFIG__WIFI_MAX_CREDENTIALS) break;
             if (entry->string == NULL || !cJSON_IsString(entry) || entry->valuestring == NULL) continue;
             bruce_config_wifi_credential_t *credential = &cfg->wifiCredentials[cfg->wifiCredentialCount];
@@ -446,8 +427,7 @@ static void config__parse_json(config__t *cfg, const cJSON *root)
         config__clear_string_array(cfg->evilWifiNames, CONFIG__EVIL_WIFI_MAX_NAMES);
         cfg->evilWifiNameCount = 0;
         const cJSON *name;
-        cJSON_ArrayForEach(name, evil_names)
-        {
+        cJSON_ArrayForEach(name, evil_names) {
             if (cfg->evilWifiNameCount >= CONFIG__EVIL_WIFI_MAX_NAMES) break;
             if (!cJSON_IsString(name) || name->valuestring == NULL) continue;
             cfg->evilWifiNames[cfg->evilWifiNameCount] = config__strdup(name->valuestring);
@@ -484,8 +464,7 @@ static void config__parse_json(config__t *cfg, const cJSON *root)
         config__clear_string_array(cfg->disabledMenus, CONFIG__DISABLED_MENU_MAX_COUNT);
         cfg->disabledMenuCount = 0;
         const cJSON *menu;
-        cJSON_ArrayForEach(menu, disabled_menus)
-        {
+        cJSON_ArrayForEach(menu, disabled_menus) {
             if (cfg->disabledMenuCount >= CONFIG__DISABLED_MENU_MAX_COUNT) break;
             if (!cJSON_IsString(menu) || menu->valuestring == NULL) continue;
             cfg->disabledMenus[cfg->disabledMenuCount] = config__strdup(menu->valuestring);
@@ -501,8 +480,7 @@ static void config__parse_json(config__t *cfg, const cJSON *root)
         }
         cfg->qrCodeCount = 0;
         const cJSON *entry;
-        cJSON_ArrayForEach(entry, qr_codes)
-        {
+        cJSON_ArrayForEach(entry, qr_codes) {
             if (cfg->qrCodeCount >= CONFIG__QR_CODE_MAX_ENTRIES) break;
             if (!cJSON_IsObject(entry)) continue;
             config__qr_code_entry_t *qr = &cfg->qrCodes[cfg->qrCodeCount];
@@ -513,8 +491,7 @@ static void config__parse_json(config__t *cfg, const cJSON *root)
     }
 }
 
-static cJSON *config__build_json(const config__t *cfg)
-{
+static cJSON *config__build_json(const config__t *cfg) {
     cJSON *root = cJSON_CreateObject();
     if (root == NULL) return NULL;
 
@@ -572,8 +549,12 @@ static cJSON *config__build_json(const config__t *cfg)
     }
 
     cJSON *evil_endpoints = cJSON_AddObjectToObject(root, "evilWifiEndpoints");
-    cJSON_AddStringToObject(evil_endpoints, "getCredsEndpoint", config__or_empty(cfg->evilPortalEndpoints.getCredsEndpoint));
-    cJSON_AddStringToObject(evil_endpoints, "setSsidEndpoint", config__or_empty(cfg->evilPortalEndpoints.setSsidEndpoint));
+    cJSON_AddStringToObject(
+        evil_endpoints, "getCredsEndpoint", config__or_empty(cfg->evilPortalEndpoints.getCredsEndpoint)
+    );
+    cJSON_AddStringToObject(
+        evil_endpoints, "setSsidEndpoint", config__or_empty(cfg->evilPortalEndpoints.setSsidEndpoint)
+    );
     cJSON_AddBoolToObject(evil_endpoints, "showEndpoints", cfg->evilPortalEndpoints.showEndpoints);
     cJSON_AddBoolToObject(evil_endpoints, "allowSetSsid", cfg->evilPortalEndpoints.allowSetSsid);
     cJSON_AddBoolToObject(evil_endpoints, "allowGetCreds", cfg->evilPortalEndpoints.allowGetCreds);
@@ -583,12 +564,17 @@ static cJSON *config__build_json(const config__t *cfg)
 
     cJSON *wifi = cJSON_AddObjectToObject(root, "wifi");
     for (size_t i = 0; i < cfg->wifiCredentialCount; ++i) {
-        cJSON_AddStringToObject(wifi, config__or_empty(cfg->wifiCredentials[i].ssid),
-                                 config__or_empty(cfg->wifiCredentials[i].password));
+        cJSON_AddStringToObject(
+            wifi,
+            config__or_empty(cfg->wifiCredentials[i].ssid),
+            config__or_empty(cfg->wifiCredentials[i].password)
+        );
     }
 
     cJSON_AddStringToObject(root, "startupApp", config__or_empty(cfg->startupApp));
-    cJSON_AddStringToObject(root, "startupAppJSInterpreterFile", config__or_empty(cfg->startupAppJSInterpreterFile));
+    cJSON_AddStringToObject(
+        root, "startupAppJSInterpreterFile", config__or_empty(cfg->startupAppJSInterpreterFile)
+    );
     cJSON_AddStringToObject(root, "wigleBasicToken", config__or_empty(cfg->wigleBasicToken));
     cJSON_AddStringToObject(root, "wdgwarsApiKey", config__or_empty(cfg->wdgwarsApiKey));
     cJSON_AddNumberToObject(root, "devMode", cfg->devMode);
@@ -618,8 +604,7 @@ static cJSON *config__build_json(const config__t *cfg)
 /* Load / save                                                               */
 /* ------------------------------------------------------------------------ */
 
-static bool config__save_locked(void)
-{
+static bool config__save_locked(void) {
     cJSON *root = config__build_json(&s_config);
     if (root == NULL) return false;
 
@@ -632,8 +617,7 @@ static bool config__save_locked(void)
     return saved;
 }
 
-void config__init_defaults(void)
-{
+void config__init_defaults(void) {
     config__lock();
     if (!s_defaults_initialized) {
         config__set_defaults(&s_config);
@@ -642,15 +626,13 @@ void config__init_defaults(void)
     config__unlock();
 }
 
-bool config__init(void)
-{
+bool config__init(void) {
     s_config_mutex = xSemaphoreCreateMutex();
     config__init_defaults();
     return storage__init() && config__load();
 }
 
-bool config__load(void)
-{
+bool config__load(void) {
     config__init_defaults();
     config__lock();
     if (s_loaded) {
@@ -675,8 +657,7 @@ bool config__load(void)
     return result;
 }
 
-bool config__save(void)
-{
+bool config__save(void) {
     if (!config__init()) return false;
     config__lock();
     config__validate(&s_config);
@@ -685,8 +666,7 @@ bool config__save(void)
     return saved;
 }
 
-bool config__factory_reset(void)
-{
+bool config__factory_reset(void) {
     if (!config__init()) return false;
     config__lock();
     config__set_defaults(&s_config);
@@ -699,8 +679,7 @@ bool config__factory_reset(void)
 /* Whole-struct access                                                       */
 /* ------------------------------------------------------------------------ */
 
-bool config__get(config__t *out)
-{
+bool config__get(config__t *out) {
     if (!config__init() || out == NULL) return false;
     config__lock();
     *out = s_config;
@@ -709,8 +688,7 @@ bool config__get(config__t *out)
     return true;
 }
 
-bool config__set(const config__t *in)
-{
+bool config__set(const config__t *in) {
     if (!config__init() || in == NULL) return false;
     config__lock();
     config__free_config(&s_config);
@@ -724,8 +702,7 @@ bool config__set(const config__t *in)
     return saved;
 }
 
-void config__free_snapshot(config__t *snapshot)
-{
+void config__free_snapshot(config__t *snapshot) {
     if (snapshot == NULL) return;
     config__free_config(snapshot);
     memset(snapshot, 0, sizeof(*snapshot));
@@ -740,207 +717,191 @@ void config__free_snapshot(config__t *snapshot)
  * Used by the permanently-protected fields, which bypass `config`
  * permission checks entirely for such callers but are never accessible to
  * an external task, no matter what it has been granted. */
-static bool config__caller_is_trusted(void)
-{
+static bool config__caller_is_trusted(void) {
     bool built_in = false;
     bruce_result_t context = task_registry__current_context(&built_in, NULL, 0, NULL);
     return context == BRUCE_ERR_NOT_FOUND || built_in;
 }
 
-static bruce_result_t config__guard(void)
-{
-    return permission__check(BRUCE_PERMISSION_CONFIG);
-}
+static bruce_result_t config__guard(void) { return permission__check(BRUCE_PERMISSION_CONFIG); }
 
-static bruce_result_t config__guard_protected(void)
-{
+static bruce_result_t config__guard_protected(void) {
     return config__caller_is_trusted() ? BRUCE_OK : BRUCE_ERR_PERMISSION;
 }
 
 typedef bruce_result_t (*config__guard_fn_t)(void);
 
-#define CONFIG__DEFINE_STRING_FIELD_GUARDED(NAME, FIELD, MAX_LEN, GUARD_FN)                                   \
-    bruce_result_t config__get_##NAME(char *out, size_t out_size)                                             \
-    {                                                                                                          \
-        bruce_result_t guard = (GUARD_FN)();                                                                  \
-        if (guard != BRUCE_OK) return guard;                                                                   \
-        if (!config__init() || out == NULL || out_size == 0) return BRUCE_ERR_INVALID_ARGUMENT;               \
-        config__lock();                                                                                       \
-        config__copy(out, out_size, s_config.FIELD);                                                          \
-        config__unlock();                                                                                     \
-        return BRUCE_OK;                                                                                       \
-    }                                                                                                          \
-    bruce_result_t config__set_##NAME(const char *value)                                                      \
-    {                                                                                                           \
-        bruce_result_t guard = (GUARD_FN)();                                                                  \
-        if (guard != BRUCE_OK) return guard;                                                                   \
-        if (!config__init() || !config__valid_value(value, (MAX_LEN), true)) return BRUCE_ERR_INVALID_ARGUMENT; \
-        config__lock();                                                                                        \
-        config__assign(&s_config.FIELD, value);                                                                \
-        config__validate(&s_config);                                                                           \
-        bool saved = config__save_locked();                                                                    \
-        config__unlock();                                                                                      \
-        return saved ? BRUCE_OK : BRUCE_ERR_IO;                                                                 \
+#define CONFIG__DEFINE_STRING_FIELD_GUARDED(NAME, FIELD, MAX_LEN, GUARD_FN)                                  \
+    bruce_result_t config__get_##NAME(char *out, size_t out_size) {                                          \
+        bruce_result_t guard = (GUARD_FN)();                                                                 \
+        if (guard != BRUCE_OK) return guard;                                                                 \
+        if (!config__init() || out == NULL || out_size == 0) return BRUCE_ERR_INVALID_ARGUMENT;              \
+        config__lock();                                                                                      \
+        config__copy(out, out_size, s_config.FIELD);                                                         \
+        config__unlock();                                                                                    \
+        return BRUCE_OK;                                                                                     \
+    }                                                                                                        \
+    bruce_result_t config__set_##NAME(const char *value) {                                                   \
+        bruce_result_t guard = (GUARD_FN)();                                                                 \
+        if (guard != BRUCE_OK) return guard;                                                                 \
+        if (!config__init() || !config__valid_value(value, (MAX_LEN), true))                                 \
+            return BRUCE_ERR_INVALID_ARGUMENT;                                                               \
+        config__lock();                                                                                      \
+        config__assign(&s_config.FIELD, value);                                                              \
+        config__validate(&s_config);                                                                         \
+        bool saved = config__save_locked();                                                                  \
+        config__unlock();                                                                                    \
+        return saved ? BRUCE_OK : BRUCE_ERR_IO;                                                              \
     }
-#define CONFIG__DEFINE_STRING_FIELD(NAME, FIELD, MAX_LEN) \
+#define CONFIG__DEFINE_STRING_FIELD(NAME, FIELD, MAX_LEN)                                                    \
     CONFIG__DEFINE_STRING_FIELD_GUARDED(NAME, FIELD, MAX_LEN, config__guard)
 
-#define CONFIG__DEFINE_INT_FIELD_GUARDED(NAME, FIELD, GUARD_FN)          \
-    bruce_result_t config__get_##NAME(int *out)                          \
-    {                                                                     \
-        bruce_result_t guard = (GUARD_FN)();                             \
-        if (guard != BRUCE_OK) return guard;                              \
-        if (!config__init() || out == NULL) return BRUCE_ERR_INVALID_ARGUMENT; \
-        config__lock();                                                  \
-        *out = s_config.FIELD;                                           \
-        config__unlock();                                                \
-        return BRUCE_OK;                                                  \
-    }                                                                     \
-    bruce_result_t config__set_##NAME(int value)                         \
-    {                                                                     \
-        bruce_result_t guard = (GUARD_FN)();                             \
-        if (guard != BRUCE_OK) return guard;                              \
-        if (!config__init()) return BRUCE_ERR_IO;                        \
-        config__lock();                                                  \
-        s_config.FIELD = value;                                          \
-        config__validate(&s_config);                                     \
-        bool saved = config__save_locked();                              \
-        config__unlock();                                                \
-        return saved ? BRUCE_OK : BRUCE_ERR_IO;                          \
+#define CONFIG__DEFINE_INT_FIELD_GUARDED(NAME, FIELD, GUARD_FN)                                              \
+    bruce_result_t config__get_##NAME(int *out) {                                                            \
+        bruce_result_t guard = (GUARD_FN)();                                                                 \
+        if (guard != BRUCE_OK) return guard;                                                                 \
+        if (!config__init() || out == NULL) return BRUCE_ERR_INVALID_ARGUMENT;                               \
+        config__lock();                                                                                      \
+        *out = s_config.FIELD;                                                                               \
+        config__unlock();                                                                                    \
+        return BRUCE_OK;                                                                                     \
+    }                                                                                                        \
+    bruce_result_t config__set_##NAME(int value) {                                                           \
+        bruce_result_t guard = (GUARD_FN)();                                                                 \
+        if (guard != BRUCE_OK) return guard;                                                                 \
+        if (!config__init()) return BRUCE_ERR_IO;                                                            \
+        config__lock();                                                                                      \
+        s_config.FIELD = value;                                                                              \
+        config__validate(&s_config);                                                                         \
+        bool saved = config__save_locked();                                                                  \
+        config__unlock();                                                                                    \
+        return saved ? BRUCE_OK : BRUCE_ERR_IO;                                                              \
     }
 #define CONFIG__DEFINE_INT_FIELD(NAME, FIELD) CONFIG__DEFINE_INT_FIELD_GUARDED(NAME, FIELD, config__guard)
 
-#define CONFIG__DEFINE_BOOL_FIELD_GUARDED(NAME, FIELD, GUARD_FN)         \
-    bruce_result_t config__get_##NAME(bool *out)                         \
-    {                                                                     \
-        bruce_result_t guard = (GUARD_FN)();                             \
-        if (guard != BRUCE_OK) return guard;                              \
-        if (!config__init() || out == NULL) return BRUCE_ERR_INVALID_ARGUMENT; \
-        config__lock();                                                  \
-        *out = s_config.FIELD;                                           \
-        config__unlock();                                                \
-        return BRUCE_OK;                                                  \
-    }                                                                     \
-    bruce_result_t config__set_##NAME(bool value)                        \
-    {                                                                     \
-        bruce_result_t guard = (GUARD_FN)();                             \
-        if (guard != BRUCE_OK) return guard;                              \
-        if (!config__init()) return BRUCE_ERR_IO;                        \
-        config__lock();                                                  \
-        s_config.FIELD = value;                                          \
-        config__validate(&s_config);                                     \
-        bool saved = config__save_locked();                              \
-        config__unlock();                                                \
-        return saved ? BRUCE_OK : BRUCE_ERR_IO;                          \
+#define CONFIG__DEFINE_BOOL_FIELD_GUARDED(NAME, FIELD, GUARD_FN)                                             \
+    bruce_result_t config__get_##NAME(bool *out) {                                                           \
+        bruce_result_t guard = (GUARD_FN)();                                                                 \
+        if (guard != BRUCE_OK) return guard;                                                                 \
+        if (!config__init() || out == NULL) return BRUCE_ERR_INVALID_ARGUMENT;                               \
+        config__lock();                                                                                      \
+        *out = s_config.FIELD;                                                                               \
+        config__unlock();                                                                                    \
+        return BRUCE_OK;                                                                                     \
+    }                                                                                                        \
+    bruce_result_t config__set_##NAME(bool value) {                                                          \
+        bruce_result_t guard = (GUARD_FN)();                                                                 \
+        if (guard != BRUCE_OK) return guard;                                                                 \
+        if (!config__init()) return BRUCE_ERR_IO;                                                            \
+        config__lock();                                                                                      \
+        s_config.FIELD = value;                                                                              \
+        config__validate(&s_config);                                                                         \
+        bool saved = config__save_locked();                                                                  \
+        config__unlock();                                                                                    \
+        return saved ? BRUCE_OK : BRUCE_ERR_IO;                                                              \
     }
 #define CONFIG__DEFINE_BOOL_FIELD(NAME, FIELD) CONFIG__DEFINE_BOOL_FIELD_GUARDED(NAME, FIELD, config__guard)
 
 /* Same as CONFIG__DEFINE_BOOL_FIELD, but FIELD is an `int` (historically
  * BrucePIO stored these as 0/1 ints, not C bool). */
-#define CONFIG__DEFINE_BOOL_INT_FIELD_GUARDED(NAME, FIELD, GUARD_FN)     \
-    bruce_result_t config__get_##NAME(bool *out)                         \
-    {                                                                     \
-        bruce_result_t guard = (GUARD_FN)();                             \
-        if (guard != BRUCE_OK) return guard;                              \
-        if (!config__init() || out == NULL) return BRUCE_ERR_INVALID_ARGUMENT; \
-        config__lock();                                                  \
-        *out = s_config.FIELD != 0;                                      \
-        config__unlock();                                                \
-        return BRUCE_OK;                                                  \
-    }                                                                     \
-    bruce_result_t config__set_##NAME(bool value)                        \
-    {                                                                     \
-        bruce_result_t guard = (GUARD_FN)();                             \
-        if (guard != BRUCE_OK) return guard;                              \
-        if (!config__init()) return BRUCE_ERR_IO;                        \
-        config__lock();                                                  \
-        s_config.FIELD = value ? 1 : 0;                                  \
-        config__validate(&s_config);                                     \
-        bool saved = config__save_locked();                              \
-        config__unlock();                                                \
-        return saved ? BRUCE_OK : BRUCE_ERR_IO;                          \
+#define CONFIG__DEFINE_BOOL_INT_FIELD_GUARDED(NAME, FIELD, GUARD_FN)                                         \
+    bruce_result_t config__get_##NAME(bool *out) {                                                           \
+        bruce_result_t guard = (GUARD_FN)();                                                                 \
+        if (guard != BRUCE_OK) return guard;                                                                 \
+        if (!config__init() || out == NULL) return BRUCE_ERR_INVALID_ARGUMENT;                               \
+        config__lock();                                                                                      \
+        *out = s_config.FIELD != 0;                                                                          \
+        config__unlock();                                                                                    \
+        return BRUCE_OK;                                                                                     \
+    }                                                                                                        \
+    bruce_result_t config__set_##NAME(bool value) {                                                          \
+        bruce_result_t guard = (GUARD_FN)();                                                                 \
+        if (guard != BRUCE_OK) return guard;                                                                 \
+        if (!config__init()) return BRUCE_ERR_IO;                                                            \
+        config__lock();                                                                                      \
+        s_config.FIELD = value ? 1 : 0;                                                                      \
+        config__validate(&s_config);                                                                         \
+        bool saved = config__save_locked();                                                                  \
+        config__unlock();                                                                                    \
+        return saved ? BRUCE_OK : BRUCE_ERR_IO;                                                              \
     }
-#define CONFIG__DEFINE_BOOL_INT_FIELD(NAME, FIELD) CONFIG__DEFINE_BOOL_INT_FIELD_GUARDED(NAME, FIELD, config__guard)
+#define CONFIG__DEFINE_BOOL_INT_FIELD(NAME, FIELD)                                                           \
+    CONFIG__DEFINE_BOOL_INT_FIELD_GUARDED(NAME, FIELD, config__guard)
 
-#define CONFIG__DEFINE_FLOAT_FIELD_GUARDED(NAME, FIELD, GUARD_FN)        \
-    bruce_result_t config__get_##NAME(float *out)                        \
-    {                                                                     \
-        bruce_result_t guard = (GUARD_FN)();                             \
-        if (guard != BRUCE_OK) return guard;                              \
-        if (!config__init() || out == NULL) return BRUCE_ERR_INVALID_ARGUMENT; \
-        config__lock();                                                  \
-        *out = s_config.FIELD;                                           \
-        config__unlock();                                                \
-        return BRUCE_OK;                                                  \
-    }                                                                     \
-    bruce_result_t config__set_##NAME(float value)                       \
-    {                                                                     \
-        bruce_result_t guard = (GUARD_FN)();                             \
-        if (guard != BRUCE_OK) return guard;                              \
-        if (!config__init()) return BRUCE_ERR_IO;                        \
-        config__lock();                                                  \
-        s_config.FIELD = value;                                          \
-        config__validate(&s_config);                                     \
-        bool saved = config__save_locked();                              \
-        config__unlock();                                                \
-        return saved ? BRUCE_OK : BRUCE_ERR_IO;                          \
+#define CONFIG__DEFINE_FLOAT_FIELD_GUARDED(NAME, FIELD, GUARD_FN)                                            \
+    bruce_result_t config__get_##NAME(float *out) {                                                          \
+        bruce_result_t guard = (GUARD_FN)();                                                                 \
+        if (guard != BRUCE_OK) return guard;                                                                 \
+        if (!config__init() || out == NULL) return BRUCE_ERR_INVALID_ARGUMENT;                               \
+        config__lock();                                                                                      \
+        *out = s_config.FIELD;                                                                               \
+        config__unlock();                                                                                    \
+        return BRUCE_OK;                                                                                     \
+    }                                                                                                        \
+    bruce_result_t config__set_##NAME(float value) {                                                         \
+        bruce_result_t guard = (GUARD_FN)();                                                                 \
+        if (guard != BRUCE_OK) return guard;                                                                 \
+        if (!config__init()) return BRUCE_ERR_IO;                                                            \
+        config__lock();                                                                                      \
+        s_config.FIELD = value;                                                                              \
+        config__validate(&s_config);                                                                         \
+        bool saved = config__save_locked();                                                                  \
+        config__unlock();                                                                                    \
+        return saved ? BRUCE_OK : BRUCE_ERR_IO;                                                              \
     }
 #define CONFIG__DEFINE_FLOAT_FIELD(NAME, FIELD) CONFIG__DEFINE_FLOAT_FIELD_GUARDED(NAME, FIELD, config__guard)
 
-#define CONFIG__DEFINE_UINT16_FIELD_GUARDED(NAME, FIELD, GUARD_FN)       \
-    bruce_result_t config__get_##NAME(uint16_t *out)                     \
-    {                                                                     \
-        bruce_result_t guard = (GUARD_FN)();                             \
-        if (guard != BRUCE_OK) return guard;                              \
-        if (!config__init() || out == NULL) return BRUCE_ERR_INVALID_ARGUMENT; \
-        config__lock();                                                  \
-        *out = s_config.FIELD;                                           \
-        config__unlock();                                                \
-        return BRUCE_OK;                                                  \
-    }                                                                     \
-    bruce_result_t config__set_##NAME(uint16_t value)                    \
-    {                                                                     \
-        bruce_result_t guard = (GUARD_FN)();                             \
-        if (guard != BRUCE_OK) return guard;                              \
-        if (!config__init()) return BRUCE_ERR_IO;                        \
-        config__lock();                                                  \
-        s_config.FIELD = value;                                          \
-        config__validate(&s_config);                                     \
-        bool saved = config__save_locked();                              \
-        config__unlock();                                                \
-        return saved ? BRUCE_OK : BRUCE_ERR_IO;                          \
+#define CONFIG__DEFINE_UINT16_FIELD_GUARDED(NAME, FIELD, GUARD_FN)                                           \
+    bruce_result_t config__get_##NAME(uint16_t *out) {                                                       \
+        bruce_result_t guard = (GUARD_FN)();                                                                 \
+        if (guard != BRUCE_OK) return guard;                                                                 \
+        if (!config__init() || out == NULL) return BRUCE_ERR_INVALID_ARGUMENT;                               \
+        config__lock();                                                                                      \
+        *out = s_config.FIELD;                                                                               \
+        config__unlock();                                                                                    \
+        return BRUCE_OK;                                                                                     \
+    }                                                                                                        \
+    bruce_result_t config__set_##NAME(uint16_t value) {                                                      \
+        bruce_result_t guard = (GUARD_FN)();                                                                 \
+        if (guard != BRUCE_OK) return guard;                                                                 \
+        if (!config__init()) return BRUCE_ERR_IO;                                                            \
+        config__lock();                                                                                      \
+        s_config.FIELD = value;                                                                              \
+        config__validate(&s_config);                                                                         \
+        bool saved = config__save_locked();                                                                  \
+        config__unlock();                                                                                    \
+        return saved ? BRUCE_OK : BRUCE_ERR_IO;                                                              \
     }
-#define CONFIG__DEFINE_UINT16_FIELD(NAME, FIELD) CONFIG__DEFINE_UINT16_FIELD_GUARDED(NAME, FIELD, config__guard)
+#define CONFIG__DEFINE_UINT16_FIELD(NAME, FIELD)                                                             \
+    CONFIG__DEFINE_UINT16_FIELD_GUARDED(NAME, FIELD, config__guard)
 
-#define CONFIG__DEFINE_UINT32_FIELD_GUARDED(NAME, FIELD, GUARD_FN)       \
-    bruce_result_t config__get_##NAME(uint32_t *out)                     \
-    {                                                                     \
-        bruce_result_t guard = (GUARD_FN)();                             \
-        if (guard != BRUCE_OK) return guard;                              \
-        if (!config__init() || out == NULL) return BRUCE_ERR_INVALID_ARGUMENT; \
-        config__lock();                                                  \
-        *out = s_config.FIELD;                                           \
-        config__unlock();                                                \
-        return BRUCE_OK;                                                  \
-    }                                                                     \
-    bruce_result_t config__set_##NAME(uint32_t value)                    \
-    {                                                                     \
-        bruce_result_t guard = (GUARD_FN)();                             \
-        if (guard != BRUCE_OK) return guard;                              \
-        if (!config__init()) return BRUCE_ERR_IO;                        \
-        config__lock();                                                  \
-        s_config.FIELD = value;                                          \
-        config__validate(&s_config);                                     \
-        bool saved = config__save_locked();                              \
-        config__unlock();                                                \
-        return saved ? BRUCE_OK : BRUCE_ERR_IO;                          \
+#define CONFIG__DEFINE_UINT32_FIELD_GUARDED(NAME, FIELD, GUARD_FN)                                           \
+    bruce_result_t config__get_##NAME(uint32_t *out) {                                                       \
+        bruce_result_t guard = (GUARD_FN)();                                                                 \
+        if (guard != BRUCE_OK) return guard;                                                                 \
+        if (!config__init() || out == NULL) return BRUCE_ERR_INVALID_ARGUMENT;                               \
+        config__lock();                                                                                      \
+        *out = s_config.FIELD;                                                                               \
+        config__unlock();                                                                                    \
+        return BRUCE_OK;                                                                                     \
+    }                                                                                                        \
+    bruce_result_t config__set_##NAME(uint32_t value) {                                                      \
+        bruce_result_t guard = (GUARD_FN)();                                                                 \
+        if (guard != BRUCE_OK) return guard;                                                                 \
+        if (!config__init()) return BRUCE_ERR_IO;                                                            \
+        config__lock();                                                                                      \
+        s_config.FIELD = value;                                                                              \
+        config__validate(&s_config);                                                                         \
+        bool saved = config__save_locked();                                                                  \
+        config__unlock();                                                                                    \
+        return saved ? BRUCE_OK : BRUCE_ERR_IO;                                                              \
     }
-#define CONFIG__DEFINE_UINT32_FIELD(NAME, FIELD) CONFIG__DEFINE_UINT32_FIELD_GUARDED(NAME, FIELD, config__guard)
+#define CONFIG__DEFINE_UINT32_FIELD(NAME, FIELD)                                                             \
+    CONFIG__DEFINE_UINT32_FIELD_GUARDED(NAME, FIELD, config__guard)
 
 /* ---- Permanently protected (ELF/JS never; built-ins/no-context bypass) --- */
 
-bruce_result_t config__set_wifi_ap(const char *ssid, const char *password)
-{
+bruce_result_t config__set_wifi_ap(const char *ssid, const char *password) {
     bruce_result_t guard = config__guard_protected();
     if (guard != BRUCE_OK) return guard;
     if (!config__init() || !config__valid_value(ssid, CONFIG__WIFI_SSID_MAX_LEN, false) ||
@@ -955,8 +916,8 @@ bruce_result_t config__set_wifi_ap(const char *ssid, const char *password)
     return saved ? BRUCE_OK : BRUCE_ERR_IO;
 }
 
-bruce_result_t config__get_wifi_ap(char *ssid_out, size_t ssid_size, char *password_out, size_t password_size)
-{
+bruce_result_t
+config__get_wifi_ap(char *ssid_out, size_t ssid_size, char *password_out, size_t password_size) {
     bruce_result_t guard = config__guard_protected();
     if (guard != BRUCE_OK) return guard;
     if (!config__init() || ssid_out == NULL || ssid_size == 0 || password_out == NULL || password_size == 0) {
@@ -969,8 +930,7 @@ bruce_result_t config__get_wifi_ap(char *ssid_out, size_t ssid_size, char *passw
     return BRUCE_OK;
 }
 
-bruce_result_t config__wifi_credential_count(size_t *out_count)
-{
+bruce_result_t config__wifi_credential_count(size_t *out_count) {
     bruce_result_t guard = config__guard_protected();
     if (guard != BRUCE_OK) return guard;
     if (!config__init() || out_count == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
@@ -980,8 +940,7 @@ bruce_result_t config__wifi_credential_count(size_t *out_count)
     return BRUCE_OK;
 }
 
-bruce_result_t config__wifi_credential_at(size_t index, bruce_config_wifi_credential_t *out_credential)
-{
+bruce_result_t config__wifi_credential_at(size_t index, bruce_config_wifi_credential_t *out_credential) {
     bruce_result_t guard = config__guard_protected();
     if (guard != BRUCE_OK) return guard;
     if (!config__init() || out_credential == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
@@ -995,8 +954,8 @@ bruce_result_t config__wifi_credential_at(size_t index, bruce_config_wifi_creden
     return found ? BRUCE_OK : BRUCE_ERR_NOT_FOUND;
 }
 
-bruce_result_t config__find_wifi_credential(const char *ssid, bruce_config_wifi_credential_t *out_credential)
-{
+bruce_result_t
+config__find_wifi_credential(const char *ssid, bruce_config_wifi_credential_t *out_credential) {
     bruce_result_t guard = config__guard_protected();
     if (guard != BRUCE_OK) return guard;
     if (!config__init() || ssid == NULL || out_credential == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
@@ -1014,8 +973,7 @@ bruce_result_t config__find_wifi_credential(const char *ssid, bruce_config_wifi_
     return found ? BRUCE_OK : BRUCE_ERR_NOT_FOUND;
 }
 
-void config__free_wifi_credential(bruce_config_wifi_credential_t *credential)
-{
+void config__free_wifi_credential(bruce_config_wifi_credential_t *credential) {
     if (credential == NULL) return;
     free((void *)credential->ssid);
     free((void *)credential->password);
@@ -1023,8 +981,7 @@ void config__free_wifi_credential(bruce_config_wifi_credential_t *credential)
     credential->password = NULL;
 }
 
-bruce_result_t config__add_or_update_wifi_credential(const char *ssid, const char *password)
-{
+bruce_result_t config__add_or_update_wifi_credential(const char *ssid, const char *password) {
     bruce_result_t guard = config__guard_protected();
     if (guard != BRUCE_OK) return guard;
     if (!config__init() || !config__valid_value(ssid, CONFIG__WIFI_SSID_MAX_LEN, false) ||
@@ -1054,8 +1011,12 @@ bruce_result_t config__add_or_update_wifi_credential(const char *ssid, const cha
 }
 
 CONFIG__DEFINE_STRING_FIELD_GUARDED(wifi_mac, wifiMAC, CONFIG__WIFI_MAC_MAX_LEN, config__guard_protected)
-CONFIG__DEFINE_STRING_FIELD_GUARDED(web_ui_user, webUIUser, CONFIG__WEBUI_USER_MAX_LEN, config__guard_protected)
-CONFIG__DEFINE_STRING_FIELD_GUARDED(web_ui_password, webUIPassword, CONFIG__WEBUI_PASSWORD_MAX_LEN, config__guard_protected)
+CONFIG__DEFINE_STRING_FIELD_GUARDED(
+    web_ui_user, webUIUser, CONFIG__WEBUI_USER_MAX_LEN, config__guard_protected
+)
+CONFIG__DEFINE_STRING_FIELD_GUARDED(
+    web_ui_password, webUIPassword, CONFIG__WEBUI_PASSWORD_MAX_LEN, config__guard_protected
+)
 
 /* ---- `config`-permission-gated fields ------------------------------------ */
 
@@ -1065,8 +1026,7 @@ CONFIG__DEFINE_UINT16_FIELD(bg_color, bgColor)
 CONFIG__DEFINE_STRING_FIELD(theme_path, themePath, CONFIG__THEME_PATH_MAX_LEN)
 CONFIG__DEFINE_BOOL_FIELD(theme_on_sd, themeOnSd)
 
-char *config__get_launcher_app(void)
-{
+char *config__get_launcher_app(void) {
     if (config__guard() != BRUCE_OK) return NULL;
     config__load();
     config__lock();
@@ -1075,8 +1035,7 @@ char *config__get_launcher_app(void)
     return copy;
 }
 
-bruce_result_t config__set_launcher_app(const char *value)
-{
+bruce_result_t config__set_launcher_app(const char *value) {
     bruce_result_t guard = config__guard();
     if (guard != BRUCE_OK) return guard;
     if (!config__init() || !config__valid_value(value, CONFIG__LAUNCHER_APP_MAX_LEN, true)) {
@@ -1116,10 +1075,10 @@ CONFIG__DEFINE_STRING_FIELD(startup_app, startupApp, CONFIG__STARTUP_APP_MAX_LEN
 /* List helpers                                                              */
 /* ------------------------------------------------------------------------ */
 
-bool config__add_qr_code_entry(const char *menu_name, const char *content)
-{
+bool config__add_qr_code_entry(const char *menu_name, const char *content) {
     if (!config__init() || !config__valid_value(menu_name, CONFIG__QR_CODE_MENU_NAME_MAX_LEN, false) ||
-        !config__valid_value(content, CONFIG__QR_CODE_CONTENT_MAX_LEN, false)) return false;
+        !config__valid_value(content, CONFIG__QR_CODE_CONTENT_MAX_LEN, false))
+        return false;
     config__lock();
     if (s_config.qrCodeCount == CONFIG__QR_CODE_MAX_ENTRIES) {
         config__unlock();
@@ -1134,8 +1093,7 @@ bool config__add_qr_code_entry(const char *menu_name, const char *content)
     return saved;
 }
 
-bool config__remove_qr_code_entry(const char *menu_name)
-{
+bool config__remove_qr_code_entry(const char *menu_name) {
     if (!config__init() || menu_name == NULL) return false;
     config__lock();
     size_t write_index = 0;
@@ -1158,8 +1116,7 @@ bool config__remove_qr_code_entry(const char *menu_name)
     return saved;
 }
 
-bool config__add_disabled_menu(const char *value)
-{
+bool config__add_disabled_menu(const char *value) {
     if (!config__init() || !config__valid_value(value, CONFIG__DISABLED_MENU_MAX_LEN, false)) return false;
     config__lock();
     if (s_config.disabledMenuCount == CONFIG__DISABLED_MENU_MAX_COUNT) {
@@ -1173,8 +1130,7 @@ bool config__add_disabled_menu(const char *value)
     return saved;
 }
 
-bool config__add_evil_wifi_name(const char *value)
-{
+bool config__add_evil_wifi_name(const char *value) {
     if (!config__init() || !config__valid_value(value, CONFIG__WIFI_SSID_MAX_LEN, false)) return false;
     config__lock();
     for (size_t i = 0; i < s_config.evilWifiNameCount; ++i) {
@@ -1194,8 +1150,7 @@ bool config__add_evil_wifi_name(const char *value)
     return saved;
 }
 
-bool config__remove_evil_wifi_name(const char *value)
-{
+bool config__remove_evil_wifi_name(const char *value) {
     if (!config__init() || value == NULL) return false;
     config__lock();
     size_t write_index = 0;
@@ -1216,15 +1171,18 @@ bool config__remove_evil_wifi_name(const char *value)
     return saved;
 }
 
-bool config__add_web_ui_session(const char *token)
-{
-    if (!config__init() || !config__valid_value(token, CONFIG__WEBUI_SESSION_TOKEN_MAX_LEN, false)) return false;
+bool config__add_web_ui_session(const char *token) {
+    if (!config__init() || !config__valid_value(token, CONFIG__WEBUI_SESSION_TOKEN_MAX_LEN, false))
+        return false;
     config__lock();
     if (s_config.webUISessionCount == CONFIG__WEBUI_MAX_SESSIONS) {
         /* FIFO eviction: drop the oldest session, matching BruceConfig::addWebUISession. */
         config__release(&s_config.webUISessions[0]);
-        memmove(&s_config.webUISessions[0], &s_config.webUISessions[1],
-                (CONFIG__WEBUI_MAX_SESSIONS - 1) * sizeof(s_config.webUISessions[0]));
+        memmove(
+            &s_config.webUISessions[0],
+            &s_config.webUISessions[1],
+            (CONFIG__WEBUI_MAX_SESSIONS - 1) * sizeof(s_config.webUISessions[0])
+        );
         --s_config.webUISessionCount;
     }
     s_config.webUISessions[s_config.webUISessionCount] = config__strdup(token);
@@ -1234,8 +1192,7 @@ bool config__add_web_ui_session(const char *token)
     return saved;
 }
 
-bool config__remove_web_ui_session(const char *token)
-{
+bool config__remove_web_ui_session(const char *token) {
     if (!config__init() || token == NULL) return false;
     config__lock();
     size_t write_index = 0;
@@ -1256,8 +1213,7 @@ bool config__remove_web_ui_session(const char *token)
     return saved;
 }
 
-bool config__is_valid_web_ui_session(const char *token)
-{
+bool config__is_valid_web_ui_session(const char *token) {
     if (!config__init() || token == NULL) return false;
     config__lock();
     bool found = false;
@@ -1270,4 +1226,3 @@ bool config__is_valid_web_ui_session(const char *token)
     config__unlock();
     return found;
 }
-

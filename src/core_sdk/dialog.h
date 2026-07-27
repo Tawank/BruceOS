@@ -39,11 +39,13 @@ bruce_result_t dialog__message(bruce_dialog_kind_t kind, const char *title, cons
  * `render_borders=false` renders a plain size-1 title without those bars.
  * `text_size` and the colors style the choices; selected rows invert the two
  * colors. */
-bruce_result_t dialog__choice(const char *title, const char *message, const bruce_dialog_choice_t *choices,
-                               size_t choice_count, size_t *out_selected,
-                               const bruce_dialog_render_params_t *render_params);
-bruce_result_t dialog__pick_file(const char *initial_path, const char *extension_filter, char *out_path,
-                                 size_t out_path_size);
+bruce_result_t dialog__choice(
+    const char *title, const char *message, const bruce_dialog_choice_t *choices, size_t choice_count,
+    size_t *out_selected, const bruce_dialog_render_params_t *render_params
+);
+bruce_result_t dialog__pick_file(
+    const char *initial_path, const char *extension_filter, char *out_path, size_t out_path_size
+);
 
 /* Text input dialogs.
  *
@@ -59,12 +61,16 @@ bruce_result_t dialog__pick_file(const char *initial_path, const char *extension
  * dialog__hex_input accepts only 0-9, A-F, a-f.
  * dialog__number_input accepts only 0-9 and at most one '.' or '-'.
  */
-bruce_result_t dialog__text_input(const char *title, const char *prompt, const char *initial_text, bool mask_input,
-                                  char *buffer, size_t buffer_size);
-bruce_result_t dialog__hex_input(const char *title, const char *prompt, const char *initial_text,
-                                 char *buffer, size_t buffer_size);
-bruce_result_t dialog__number_input(const char *title, const char *prompt, const char *initial_text,
-                                    char *buffer, size_t buffer_size);
+bruce_result_t dialog__text_input(
+    const char *title, const char *prompt, const char *initial_text, bool mask_input, char *buffer,
+    size_t buffer_size
+);
+bruce_result_t dialog__hex_input(
+    const char *title, const char *prompt, const char *initial_text, char *buffer, size_t buffer_size
+);
+bruce_result_t dialog__number_input(
+    const char *title, const char *prompt, const char *initial_text, char *buffer, size_t buffer_size
+);
 
 bruce_result_t dialog__create_text_viewer(const char *title, const char *text, bruce_viewer_id_t *out_viewer);
 bruce_result_t dialog__viewer_set_text(bruce_viewer_id_t viewer, const char *text);

@@ -18,30 +18,19 @@
 
 static size_t s_call_count;
 
-size_t elf_loader__debug_call_count(void)
-{
-    return s_call_count;
-}
+size_t elf_loader__debug_call_count(void) { return s_call_count; }
 
-static bool elf_loader__path_is_valid(const char *path)
-{
-    if (path == NULL || strstr(path, "..") != NULL) {
-        return false;
-    }
-    if (path[0] != '/' && strncmp(path, "./", 2) != 0) {
-        return false;
-    }
+static bool elf_loader__path_is_valid(const char *path) {
+    if (path == NULL || strstr(path, "..") != NULL) { return false; }
+    if (path[0] != '/' && strncmp(path, "./", 2) != 0) { return false; }
     size_t length = strlen(path);
     static const char extension[] = ".elf";
     size_t extension_length = sizeof(extension) - 1;
     return length > extension_length && strcmp(path + length - extension_length, extension) == 0;
 }
 
-static bool elf_loader__normalize_path(const char *path, char *out, size_t out_size)
-{
-    if (path == NULL || strstr(path, "..") != NULL || out_size == 0) {
-        return false;
-    }
+static bool elf_loader__normalize_path(const char *path, char *out, size_t out_size) {
+    if (path == NULL || strstr(path, "..") != NULL || out_size == 0) { return false; }
     int len;
     if (path[0] == '/') {
         len = snprintf(out, out_size, "%s", path);
@@ -53,20 +42,16 @@ static bool elf_loader__normalize_path(const char *path, char *out, size_t out_s
     return len > 0 && (size_t)len < out_size;
 }
 
-static const char *elf_loader__basename(const char *path)
-{
+static const char *elf_loader__basename(const char *path) {
     const char *slash = strrchr(path, '/');
     return slash != NULL ? slash + 1 : path;
 }
 
-static const char *elf_loader__command_name(const char *path)
-{
+static const char *elf_loader__command_name(const char *path) {
     const char *base = elf_loader__basename(path);
     const char *dot = strrchr(base, '.');
     size_t len = dot != NULL ? (size_t)(dot - base) : strlen(base);
-    if (len >= BRUCE_STORAGE_NAME_MAX) {
-        len = BRUCE_STORAGE_NAME_MAX - 1;
-    }
+    if (len >= BRUCE_STORAGE_NAME_MAX) { len = BRUCE_STORAGE_NAME_MAX - 1; }
     static char name[BRUCE_STORAGE_NAME_MAX];
     memcpy(name, base, len);
     name[len] = '\0';
@@ -86,8 +71,7 @@ typedef struct {
  * other undefined symbol (including libc malloc/free) is rejected. */
 extern const struct esp_elfsym g_bruce_sdk_elfsyms[];
 
-static uintptr_t elf_loader__find_symbol(const char *sym_name)
-{
+static uintptr_t elf_loader__find_symbol(const char *sym_name) {
     if (strcmp(sym_name, "malloc") == 0 || strcmp(sym_name, "free") == 0) {
         printf("[elf_loader] rejected import: %s\n", sym_name);
         return 0;
@@ -95,30 +79,22 @@ static uintptr_t elf_loader__find_symbol(const char *sym_name)
 
     const struct esp_elfsym *syms = g_bruce_sdk_elfsyms;
     while (syms->name != NULL) {
-        if (strcmp(syms->name, sym_name) == 0) {
-            return (uintptr_t)syms->sym;
-        }
+        if (strcmp(syms->name, sym_name) == 0) { return (uintptr_t)syms->sym; }
         syms++;
     }
     return 0;
 }
 
-static void elf_loader__free_task_ctx(elf_loader_task_ctx_t *ctx)
-{
-    if (ctx == NULL) {
-        return;
-    }
-    if (ctx->image != NULL) {
-        memory__free(ctx->image);
-    }
+static void elf_loader__free_task_ctx(elf_loader_task_ctx_t *ctx) {
+    if (ctx == NULL) { return; }
+    if (ctx->image != NULL) { memory__free(ctx->image); }
     app_runner__free_args(ctx->argv, ctx->argc);
     memory__free(ctx);
 }
 
 /* Task entry for the loaded ELF.  Runs on the loader task's own stack with
  * the image and args prepared by elf_loader__run_path(). */
-static void elf_loader__entry(void *context)
-{
+static void elf_loader__entry(void *context) {
     elf_loader_task_ctx_t *ctx = (elf_loader_task_ctx_t *)context;
 
     esp_elf_t elf;
@@ -143,13 +119,10 @@ static void elf_loader__entry(void *context)
     elf_loader__free_task_ctx(ctx);
 }
 
-static int elf_loader__load_image(const char *path, elf_loader_task_ctx_t *ctx)
-{
+static int elf_loader__load_image(const char *path, elf_loader_task_ctx_t *ctx) {
     bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
     bruce_result_t open_result = storage__open(path, BRUCE_STORAGE_OPEN_READ, &file);
-    if (open_result != BRUCE_OK) {
-        return (int)open_result;
-    }
+    if (open_result != BRUCE_OK) { return (int)open_result; }
 
     int result = BRUCE_OK;
     uint64_t size = 0;
@@ -167,7 +140,8 @@ static int elf_loader__load_image(const char *path, elf_loader_task_ctx_t *ctx)
                 size_t total = 0;
                 while (total < ctx->image_size) {
                     size_t chunk = 0;
-                    if (storage__read(file, ctx->image + total, ctx->image_size - total, &chunk) != BRUCE_OK ||
+                    if (storage__read(file, ctx->image + total, ctx->image_size - total, &chunk) !=
+                            BRUCE_OK ||
                         chunk == 0) {
                         result = BRUCE_ERR_IO;
                         break;
@@ -189,13 +163,10 @@ static int elf_loader__load_image(const char *path, elf_loader_task_ctx_t *ctx)
 
 /* Loader registry run function: called by app_runner__run_path() or by the
  * built-in "elf" command. */
-int elf_loader__run_path(const char *path, const char *arg, bool in_background)
-{
+int elf_loader__run_path(const char *path, const char *arg, bool in_background) {
     s_call_count++;
 
-    if (!elf_loader__path_is_valid(path)) {
-        return BRUCE_ERR_INVALID_PATH;
-    }
+    if (!elf_loader__path_is_valid(path)) { return BRUCE_ERR_INVALID_PATH; }
 
     char normalized_path[BRUCE_STORAGE_PATH_MAX];
     if (!elf_loader__normalize_path(path, normalized_path, sizeof(normalized_path))) {
@@ -203,9 +174,7 @@ int elf_loader__run_path(const char *path, const char *arg, bool in_background)
     }
 
     bruce_app_inspection_t *inspection = manifest__inspect_elf(normalized_path);
-    if (inspection == NULL) {
-        return BRUCE_ERR_MANIFEST_INVALID;
-    }
+    if (inspection == NULL) { return BRUCE_ERR_MANIFEST_INVALID; }
 
     const char *permission_key = elf_loader__basename(normalized_path);
 
@@ -242,9 +211,7 @@ int elf_loader__run_path(const char *path, const char *arg, bool in_background)
         return BRUCE_ERR_NO_MEMORY;
     }
     strcpy(full_argv[0], cmd_name);
-    for (int i = 0; i < argc; ++i) {
-        full_argv[i + 1] = argv[i];
-    }
+    for (int i = 0; i < argc; ++i) { full_argv[i + 1] = argv[i]; }
     app_runner__free_args(argv, argc);
     argv = NULL;
     argc = 0;
@@ -272,11 +239,10 @@ int elf_loader__run_path(const char *path, const char *arg, bool in_background)
         return load_result;
     }
 
-    int result = app_runner__spawn_loader_task(permission_key, gui_requested, in_background,
-                                                inspection->manifest.stack_size, elf_loader__entry, ctx);
-    if (result <= 0) {
-        elf_loader__free_task_ctx(ctx);
-    }
+    int result = app_runner__spawn_loader_task(
+        permission_key, gui_requested, in_background, inspection->manifest.stack_size, elf_loader__entry, ctx
+    );
+    if (result <= 0) { elf_loader__free_task_ctx(ctx); }
     memory__free(inspection);
     return result;
 }
@@ -286,11 +252,8 @@ int elf_loader__run_path(const char *path, const char *arg, bool in_background)
  * (and ELF apps themselves) chain loaders: the first loader can be the
  * built-in "elf" command, and a loaded ELF app can call
  * app_runner__run_path() to load another ELF. */
-int elf_loader__app_main(int argc, char **argv)
-{
-    if (argc < 2) {
-        return BRUCE_ERR_INVALID_ARGUMENT;
-    }
+int elf_loader__app_main(int argc, char **argv) {
+    if (argc < 2) { return BRUCE_ERR_INVALID_ARGUMENT; }
 
     const char *path = argv[1];
     bool gui_requested = app_runner__args_have_gui(argc, argv);
@@ -301,16 +264,12 @@ int elf_loader__app_main(int argc, char **argv)
     arg[0] = '\0';
     for (int i = 2; i < argc; ++i) {
         if (i > 2) {
-            if (arg_len + 1 >= sizeof(arg)) {
-                return BRUCE_ERR_INVALID_ARGUMENT;
-            }
+            if (arg_len + 1 >= sizeof(arg)) { return BRUCE_ERR_INVALID_ARGUMENT; }
             arg[arg_len++] = ' ';
             arg[arg_len] = '\0';
         }
         size_t len = strlen(argv[i]);
-        if (arg_len + len >= sizeof(arg)) {
-            return BRUCE_ERR_INVALID_ARGUMENT;
-        }
+        if (arg_len + len >= sizeof(arg)) { return BRUCE_ERR_INVALID_ARGUMENT; }
         memcpy(arg + arg_len, argv[i], len + 1);
         arg_len += len;
     }
@@ -327,7 +286,4 @@ int elf_loader__app_main(int argc, char **argv)
     return elf_loader__run_path(path, arg[0] != '\0' ? arg : NULL, in_background);
 }
 
-void elf_loader__init(void)
-{
-    elf_set_symbol_resolver(elf_loader__find_symbol);
-}
+void elf_loader__init(void) { elf_set_symbol_resolver(elf_loader__find_symbol); }

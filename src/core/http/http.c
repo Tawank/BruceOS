@@ -1,6 +1,5 @@
 #include "core_sdk/http.h"
 
-#include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -25,11 +24,8 @@ typedef struct {
 
 static const char *const TAG = "bruce_http";
 
-static esp_http_client_method_t http__method_from_string(const char *method)
-{
-    if (method == NULL || method[0] == '\0') {
-        return HTTP_METHOD_GET;
-    }
+static esp_http_client_method_t http__method_from_string(const char *method) {
+    if (method == NULL || method[0] == '\0') { return HTTP_METHOD_GET; }
     if (strcasecmp(method, "GET") == 0) return HTTP_METHOD_GET;
     if (strcasecmp(method, "POST") == 0) return HTTP_METHOD_POST;
     if (strcasecmp(method, "PUT") == 0) return HTTP_METHOD_PUT;
@@ -40,8 +36,7 @@ static esp_http_client_method_t http__method_from_string(const char *method)
     return HTTP_METHOD_GET;
 }
 
-static esp_err_t http__event_handler(esp_http_client_event_t *evt)
-{
+static esp_err_t http__event_handler(esp_http_client_event_t *evt) {
     if (evt == NULL) return ESP_OK;
     http__headers_t *headers = (http__headers_t *)evt->user_data;
 
@@ -58,14 +53,12 @@ static esp_err_t http__event_handler(esp_http_client_event_t *evt)
                 }
             }
             break;
-        default:
-            break;
+        default: break;
     }
     return ESP_OK;
 }
 
-static bruce_result_t http__collect_headers(const http__headers_t *headers, bruce_http_response_t *response)
-{
+static bruce_result_t http__collect_headers(const http__headers_t *headers, bruce_http_response_t *response) {
     if (headers->count == 0) return BRUCE_OK;
 
     response->header_names = memory__malloc(sizeof(char *) * headers->count);
@@ -101,11 +94,8 @@ static bruce_result_t http__collect_headers(const http__headers_t *headers, bruc
     return BRUCE_OK;
 }
 
-bruce_result_t http__request(const bruce_http_request_t *request, bruce_http_response_t *response)
-{
-    if (request == NULL || response == NULL || request->url == NULL) {
-        return BRUCE_ERR_INVALID_ARGUMENT;
-    }
+bruce_result_t http__request(const bruce_http_request_t *request, bruce_http_response_t *response) {
+    if (request == NULL || response == NULL || request->url == NULL) { return BRUCE_ERR_INVALID_ARGUMENT; }
 
     bruce_result_t result = permission__check(BRUCE_PERMISSION_HTTP);
     if (result != BRUCE_OK) return result;
@@ -133,9 +123,7 @@ bruce_result_t http__request(const bruce_http_request_t *request, bruce_http_res
     for (size_t i = 0; i < request->header_count; ++i) {
         const char *key = request->headers[i * 2];
         const char *value = request->headers[i * 2 + 1];
-        if (key != NULL && value != NULL) {
-            esp_http_client_set_header(client, key, value);
-        }
+        if (key != NULL && value != NULL) { esp_http_client_set_header(client, key, value); }
     }
 
     if (request->body != NULL && request->body_len > 0) {
@@ -193,9 +181,7 @@ bruce_result_t http__request(const bruce_http_request_t *request, bruce_http_res
         if (read == 0) break;
         body_used += (size_t)read;
     }
-    if (body != NULL) {
-        body[body_used] = '\0';
-    }
+    if (body != NULL) { body[body_used] = '\0'; }
 
     response->status_code = status;
     response->body = body;
@@ -214,22 +200,17 @@ bruce_result_t http__request(const bruce_http_request_t *request, bruce_http_res
     return BRUCE_OK;
 }
 
-void http__response_free(bruce_http_response_t *response)
-{
+void http__response_free(bruce_http_response_t *response) {
     if (response == NULL) return;
     memory__free(response->body);
     response->body = NULL;
     response->body_len = 0;
     if (response->header_names != NULL) {
-        for (size_t i = 0; i < response->header_count; ++i) {
-            memory__free(response->header_names[i]);
-        }
+        for (size_t i = 0; i < response->header_count; ++i) { memory__free(response->header_names[i]); }
         memory__free(response->header_names);
     }
     if (response->header_values != NULL) {
-        for (size_t i = 0; i < response->header_count; ++i) {
-            memory__free(response->header_values[i]);
-        }
+        for (size_t i = 0; i < response->header_count; ++i) { memory__free(response->header_values[i]); }
         memory__free(response->header_values);
     }
     response->header_names = NULL;

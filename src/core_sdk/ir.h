@@ -13,18 +13,17 @@
  * File transmission additionally uses the public storage API and therefore
  * requires `storage`. `repeats` means additional complete transmissions after
  * the initial transmission, matching the Bruce IR file/menu convention. */
-bruce_result_t ir__transmit_raw(const uint32_t *timings_us, size_t timing_count,
-                                uint32_t frequency_hz, uint8_t repeats);
+bruce_result_t
+ir__transmit_raw(const uint32_t *timings_us, size_t timing_count, uint32_t frequency_hz, uint8_t repeats);
 
 /* Transmits hexadecimal scalar data using NEC, NECext, Samsung32, SIRC,
  * SIRC15, or SIRC20. Protocol matching is case-insensitive. */
-bruce_result_t ir__transmit(const char *data_hex, const char *protocol, uint8_t bits,
-                            uint8_t repeats);
+bruce_result_t ir__transmit(const char *data_hex, const char *protocol, uint8_t bits, uint8_t repeats);
 
 /* Transmits a parsed Bruce/Flipper address and command pair. Byte strings may
  * be contiguous ("04000000") or space-separated ("04 00 00 00"). */
-bruce_result_t ir__transmit_parsed(const char *protocol, const char *address_hex,
-                                   const char *command_hex, uint8_t repeats);
+bruce_result_t
+ir__transmit_parsed(const char *protocol, const char *address_hex, const char *command_hex, uint8_t repeats);
 
 /* Receives one signal and writes a complete NUL-terminated version-1 IR file
  * record. Decoded mode recognizes NEC; unrecognized signals return

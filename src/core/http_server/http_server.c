@@ -33,19 +33,14 @@ static uint16_t s_port;
 static http_server__route_t s_routes[BRUCE_HTTP_SERVER_MAX_ROUTES];
 static size_t s_route_count;
 
-static void http_server__lock(void)
-{
+static void http_server__lock(void) {
     if (s_mutex == NULL) s_mutex = xSemaphoreCreateMutexStatic(&s_mutex_storage);
     xSemaphoreTake(s_mutex, portMAX_DELAY);
 }
 
-static void http_server__unlock(void)
-{
-    xSemaphoreGive(s_mutex);
-}
+static void http_server__unlock(void) { xSemaphoreGive(s_mutex); }
 
-static void http_server__free_routes(void)
-{
+static void http_server__free_routes(void) {
     for (size_t index = 0; index < s_route_count; ++index) {
         free(s_routes[index].body);
         memset(&s_routes[index], 0, sizeof(s_routes[index]));
@@ -53,8 +48,7 @@ static void http_server__free_routes(void)
     s_route_count = 0;
 }
 
-static const char *http_server__reason_phrase(int status_code)
-{
+static const char *http_server__reason_phrase(int status_code) {
     switch (status_code) {
         case 200: return "OK";
         case 201: return "Created";
@@ -71,8 +65,7 @@ static const char *http_server__reason_phrase(int status_code)
     }
 }
 
-static httpd_method_t http_server__method(bruce_http_server_method_t method)
-{
+static httpd_method_t http_server__method(bruce_http_server_method_t method) {
     switch (method) {
         case BRUCE_HTTP_SERVER_POST: return HTTP_POST;
         case BRUCE_HTTP_SERVER_PUT: return HTTP_PUT;
@@ -81,8 +74,7 @@ static httpd_method_t http_server__method(bruce_http_server_method_t method)
     }
 }
 
-static esp_err_t http_server__route_handler(httpd_req_t *request)
-{
+static esp_err_t http_server__route_handler(httpd_req_t *request) {
     const http_server__route_t *route = request->user_ctx;
     httpd_resp_set_status(request, route->status);
     httpd_resp_set_type(request, route->content_type);
@@ -90,8 +82,7 @@ static esp_err_t http_server__route_handler(httpd_req_t *request)
     return httpd_resp_send(request, route->body, (ssize_t)route->body_len);
 }
 
-static bruce_result_t http_server__validate(const bruce_http_server_options_t *options)
-{
+static bruce_result_t http_server__validate(const bruce_http_server_options_t *options) {
     if (options == NULL || options->routes == NULL || options->route_count == 0 ||
         options->route_count > BRUCE_HTTP_SERVER_MAX_ROUTES) {
         return BRUCE_ERR_INVALID_ARGUMENT;
@@ -103,7 +94,8 @@ static bruce_result_t http_server__validate(const bruce_http_server_options_t *o
             route->uri == NULL || route->uri[0] != '/' ||
             strnlen(route->uri, HTTP_SERVER__URI_MAX_LEN) >= HTTP_SERVER__URI_MAX_LEN ||
             route->content_type == NULL || route->content_type[0] == '\0' ||
-            strnlen(route->content_type, HTTP_SERVER__CONTENT_TYPE_MAX_LEN) >= HTTP_SERVER__CONTENT_TYPE_MAX_LEN ||
+            strnlen(route->content_type, HTTP_SERVER__CONTENT_TYPE_MAX_LEN) >=
+                HTTP_SERVER__CONTENT_TYPE_MAX_LEN ||
             (route->status_code != 0 && (route->status_code < 100 || route->status_code > 599)) ||
             (route->body_len > 0 && route->body == NULL) ||
             route->body_len > HTTP_SERVER__MAX_BODY_SIZE - total_body_size) {
@@ -120,8 +112,7 @@ static bruce_result_t http_server__validate(const bruce_http_server_options_t *o
     return BRUCE_OK;
 }
 
-bruce_result_t http_server__start(const bruce_http_server_options_t *options)
-{
+bruce_result_t http_server__start(const bruce_http_server_options_t *options) {
     bruce_result_t result = permission__check(BRUCE_PERMISSION_HTTP);
     if (result != BRUCE_OK) return result;
     result = http_server__validate(options);
@@ -141,8 +132,13 @@ bruce_result_t http_server__start(const bruce_http_server_options_t *options)
         snprintf(target->content_type, sizeof(target->content_type), "%s", source->content_type);
         target->body_len = source->body_len;
         int status_code = source->status_code == 0 ? 200 : source->status_code;
-        snprintf(target->status, sizeof(target->status), "%d %s", status_code,
-                 http_server__reason_phrase(status_code));
+        snprintf(
+            target->status,
+            sizeof(target->status),
+            "%d %s",
+            status_code,
+            http_server__reason_phrase(status_code)
+        );
         if (source->body_len > 0) {
             target->body = malloc(source->body_len);
             if (target->body == NULL) {
@@ -203,8 +199,7 @@ bruce_result_t http_server__start(const bruce_http_server_options_t *options)
     return BRUCE_OK;
 }
 
-bruce_result_t http_server__stop(void)
-{
+bruce_result_t http_server__stop(void) {
     bruce_result_t result = permission__check(BRUCE_PERMISSION_HTTP);
     if (result != BRUCE_OK) return result;
 
@@ -230,8 +225,7 @@ bruce_result_t http_server__stop(void)
     return err == ESP_OK ? BRUCE_OK : BRUCE_ERR_IO;
 }
 
-bruce_result_t http_server__get_status(bruce_http_server_status_t *out_status)
-{
+bruce_result_t http_server__get_status(bruce_http_server_status_t *out_status) {
     if (out_status == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     bruce_result_t result = permission__check(BRUCE_PERMISSION_HTTP);
     if (result != BRUCE_OK) return result;
@@ -243,8 +237,7 @@ bruce_result_t http_server__get_status(bruce_http_server_status_t *out_status)
     return BRUCE_OK;
 }
 
-bool http_server__is_running(void)
-{
+bool http_server__is_running(void) {
     if (permission__check(BRUCE_PERMISSION_HTTP) != BRUCE_OK) return false;
     http_server__lock();
     bool running = s_server != NULL;

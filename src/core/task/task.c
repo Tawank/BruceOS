@@ -78,74 +78,48 @@ static bruce_task_id_t s_effective_foreground;
 
 static uint32_t s_last_total_runtime;
 
-static void task__ensure_init(void)
-{
-    if (s_lock != NULL) {
-        return;
-    }
+static void task__ensure_init(void) {
+    if (s_lock != NULL) { return; }
     portENTER_CRITICAL(&s_init_mux);
     if (s_lock == NULL) {
         s_lock = xSemaphoreCreateRecursiveMutexStatic(&s_lock_storage);
-        for (int i = 0; i < TASK__MAX_RECORDS; ++i) {
-            s_task_events[i] = xEventGroupCreate();
-        }
+        for (int i = 0; i < TASK__MAX_RECORDS; ++i) { s_task_events[i] = xEventGroupCreate(); }
     }
     portEXIT_CRITICAL(&s_init_mux);
 }
 
-static void task__lock(void)
-{
-    xSemaphoreTakeRecursive(s_lock, portMAX_DELAY);
-}
+static void task__lock(void) { xSemaphoreTakeRecursive(s_lock, portMAX_DELAY); }
 
-static void task__unlock(void)
-{
-    xSemaphoreGiveRecursive(s_lock);
-}
+static void task__unlock(void) { xSemaphoreGiveRecursive(s_lock); }
 
 /* Caller must hold the lock. */
-static task__record_t *task__find_by_id_locked(bruce_task_id_t id)
-{
-    if (id == BRUCE_TASK_ID_INVALID) {
-        return NULL;
-    }
+static task__record_t *task__find_by_id_locked(bruce_task_id_t id) {
+    if (id == BRUCE_TASK_ID_INVALID) { return NULL; }
     for (int i = 0; i < TASK__MAX_RECORDS; ++i) {
-        if (s_tasks[i].in_use && s_tasks[i].id == id) {
-            return &s_tasks[i];
-        }
+        if (s_tasks[i].in_use && s_tasks[i].id == id) { return &s_tasks[i]; }
     }
     return NULL;
 }
 
 /* Caller must hold the lock. */
-static task__record_t *task__find_by_handle_locked(TaskHandle_t handle)
-{
-    if (handle == NULL) {
-        return NULL;
-    }
+static task__record_t *task__find_by_handle_locked(TaskHandle_t handle) {
+    if (handle == NULL) { return NULL; }
     for (int i = 0; i < TASK__MAX_RECORDS; ++i) {
-        if (s_tasks[i].in_use && s_tasks[i].handle == handle) {
-            return &s_tasks[i];
-        }
+        if (s_tasks[i].in_use && s_tasks[i].handle == handle) { return &s_tasks[i]; }
     }
     return NULL;
 }
 
-static int task__slot_index_locked(const task__record_t *record)
-{
-    return (int)(record - s_tasks);
-}
+static int task__slot_index_locked(const task__record_t *record) { return (int)(record - s_tasks); }
 
-static void task__wake_locked(task__record_t *record)
-{
+static void task__wake_locked(task__record_t *record) {
     xEventGroupSetBits(s_task_events[task__slot_index_locked(record)], TASK__EVT_WAKE);
 }
 
 /* Removes `id` from the foreground stack if (and only if) it is currently on
  * top, restoring the task beneath it (if any) to BRUCE_TASK_FOREGROUND.
  * Caller must hold the lock. */
-static void task__foreground_notify_locked(bruce_task_id_t previous, bruce_task_id_t current)
-{
+static void task__foreground_notify_locked(bruce_task_id_t previous, bruce_task_id_t current) {
     input__foreground_changed(current);
     if (previous != BRUCE_TASK_ID_INVALID) {
         task__record_t *record = task__find_by_id_locked(previous);
@@ -163,26 +137,21 @@ static void task__foreground_notify_locked(bruce_task_id_t previous, bruce_task_
 
 /* Compact the stack and derive all runnable foreground/background states from
  * it. Paused tasks retain their position but are temporarily ineligible. */
-static void task__foreground_recompute_locked(void)
-{
+static void task__foreground_recompute_locked(void) {
     int write = 0;
     bruce_task_id_t next = BRUCE_TASK_ID_INVALID;
     for (int i = 0; i < s_fg_depth; ++i) {
         task__record_t *record = task__find_by_id_locked(s_fg_stack[i]);
-        if (record == NULL || record->state == BRUCE_TASK_STOPPING) {
-            continue;
-        }
+        if (record == NULL || record->state == BRUCE_TASK_STOPPING) { continue; }
         s_fg_stack[write++] = record->id;
-        if (record->state != BRUCE_TASK_PAUSED && record->state != BRUCE_TASK_STARTING) {
-            next = record->id;
-        }
+        if (record->state != BRUCE_TASK_PAUSED && record->state != BRUCE_TASK_STARTING) { next = record->id; }
     }
     s_fg_depth = write;
 
     for (int i = 0; i < TASK__MAX_RECORDS; ++i) {
         task__record_t *record = &s_tasks[i];
-        if (!record->in_use || record->state == BRUCE_TASK_STARTING ||
-            record->state == BRUCE_TASK_PAUSED || record->state == BRUCE_TASK_STOPPING) {
+        if (!record->in_use || record->state == BRUCE_TASK_STARTING || record->state == BRUCE_TASK_PAUSED ||
+            record->state == BRUCE_TASK_STOPPING) {
             continue;
         }
         bruce_task_state_t new_state = record->id == next ? BRUCE_TASK_FOREGROUND : BRUCE_TASK_BACKGROUND;
@@ -200,41 +169,34 @@ static void task__foreground_recompute_locked(void)
     }
 }
 
-static void task__foreground_remove_locked(bruce_task_id_t id)
-{
+static void task__foreground_remove_locked(bruce_task_id_t id) {
     int write = 0;
     for (int i = 0; i < s_fg_depth; ++i) {
-        if (s_fg_stack[i] != id) {
-            s_fg_stack[write++] = s_fg_stack[i];
-        }
+        if (s_fg_stack[i] != id) { s_fg_stack[write++] = s_fg_stack[i]; }
     }
     s_fg_depth = write;
 }
 
-static void task__foreground_push_locked(bruce_task_id_t id)
-{
+static void task__foreground_push_locked(bruce_task_id_t id) {
     task__foreground_remove_locked(id);
-    if (s_fg_depth < TASK__FOREGROUND_STACK_MAX) {
-        s_fg_stack[s_fg_depth++] = id;
-    }
+    if (s_fg_depth < TASK__FOREGROUND_STACK_MAX) { s_fg_stack[s_fg_depth++] = id; }
     task__foreground_recompute_locked();
 }
 
-static void task__refresh_cpu_samples_locked(void)
-{
+static void task__refresh_cpu_samples_locked(void) {
     static TaskStatus_t status_buf[TASK__MAX_RECORDS + 8];
     uint32_t total_runtime = 0;
-    UBaseType_t count = uxTaskGetSystemState(status_buf, sizeof(status_buf) / sizeof(status_buf[0]), &total_runtime);
+    UBaseType_t count =
+        uxTaskGetSystemState(status_buf, sizeof(status_buf) / sizeof(status_buf[0]), &total_runtime);
     uint32_t total_delta = total_runtime - s_last_total_runtime;
 
     for (int i = 0; i < TASK__MAX_RECORDS; ++i) {
-        if (!s_tasks[i].in_use || s_tasks[i].handle == NULL) {
-            continue;
-        }
+        if (!s_tasks[i].in_use || s_tasks[i].handle == NULL) { continue; }
         for (UBaseType_t j = 0; j < count; ++j) {
             if (status_buf[j].xHandle == s_tasks[i].handle) {
                 uint32_t delta = status_buf[j].ulRunTimeCounter - s_tasks[i].last_runtime_counter;
-                s_tasks[i].cpu_percent = total_delta > 0 ? (uint32_t)(((uint64_t)delta * 100u) / total_delta) : 0u;
+                s_tasks[i].cpu_percent =
+                    total_delta > 0 ? (uint32_t)(((uint64_t)delta * 100u) / total_delta) : 0u;
                 s_tasks[i].last_runtime_counter = status_buf[j].ulRunTimeCounter;
                 s_tasks[i].stack_high_water_bytes =
                     (uint32_t)(uxTaskGetStackHighWaterMark(s_tasks[i].handle) * sizeof(StackType_t));
@@ -245,8 +207,7 @@ static void task__refresh_cpu_samples_locked(void)
     s_last_total_runtime = total_runtime;
 }
 
-static void task__fill_snapshot_locked(const task__record_t *record, bruce_task_snapshot_t *out_snapshot)
-{
+static void task__fill_snapshot_locked(const task__record_t *record, bruce_task_snapshot_t *out_snapshot) {
     memset(out_snapshot, 0, sizeof(*out_snapshot));
     out_snapshot->id = record->id;
     out_snapshot->state = record->state;
@@ -259,27 +220,17 @@ static void task__fill_snapshot_locked(const task__record_t *record, bruce_task_
     out_snapshot->gui_requested = record->gui_requested;
 }
 
-static void task__free_argv(int argc, char **argv)
-{
-    if (argv == NULL) {
-        return;
-    }
-    for (int i = 0; i < argc; ++i) {
-        free(argv[i]);
-    }
+static void task__free_argv(int argc, char **argv) {
+    if (argv == NULL) { return; }
+    for (int i = 0; i < argc; ++i) { free(argv[i]); }
     free(argv);
 }
 
-static bool task__dup_argv(int argc, char *const *src_argv, char ***out_argv)
-{
+static bool task__dup_argv(int argc, char *const *src_argv, char ***out_argv) {
     *out_argv = NULL;
-    if (argc <= 0) {
-        return true;
-    }
+    if (argc <= 0) { return true; }
     char **copy = calloc((size_t)argc, sizeof(char *));
-    if (copy == NULL) {
-        return false;
-    }
+    if (copy == NULL) { return false; }
     for (int i = 0; i < argc; ++i) {
         const char *source = (src_argv != NULL && src_argv[i] != NULL) ? src_argv[i] : "";
         size_t length = strlen(source) + 1;
@@ -298,16 +249,13 @@ static bool task__dup_argv(int argc, char *const *src_argv, char ***out_argv)
  * order, pops the task off the foreground stack if it was on top, and marks
  * the slot as free for reuse.  Caller must hold the lock; called for both
  * normal exit and task__kill(). */
-static void task__teardown_locked(task__record_t *record)
-{
+static void task__teardown_locked(task__record_t *record) {
     for (int i = TASK__MAX_RESOURCES - 1; i >= 0; --i) {
         if (record->resources[i].active) {
             bruce_task_resource_cleanup_t cleanup = record->resources[i].cleanup;
             void *context = record->resources[i].context;
             record->resources[i].active = false;
-            if (cleanup != NULL) {
-                cleanup(context);
-            }
+            if (cleanup != NULL) { cleanup(context); }
         }
     }
     record->resource_count = 0;
@@ -325,8 +273,7 @@ static void task__teardown_locked(task__record_t *record)
     record->generation++;
 }
 
-static void task__trampoline(void *arg)
-{
+static void task__trampoline(void *arg) {
     task__record_t *record = (task__record_t *)arg;
     FILE *stdio_input = NULL;
     FILE *stdio_output = NULL;
@@ -362,12 +309,9 @@ static void task__trampoline(void *arg)
     vTaskDelete(NULL);
 }
 
-bruce_result_t task_registry__create(const task_create_params_t *params, bruce_task_id_t *out_task_id)
-{
+bruce_result_t task_registry__create(const task_create_params_t *params, bruce_task_id_t *out_task_id) {
     task__ensure_init();
-    if (params == NULL || out_task_id == NULL) {
-        return BRUCE_ERR_INVALID_ARGUMENT;
-    }
+    if (params == NULL || out_task_id == NULL) { return BRUCE_ERR_INVALID_ARGUMENT; }
     bool has_entry = params->entry != NULL;
     bool has_task_entry = params->task_entry != NULL;
     if (has_entry == has_task_entry) {
@@ -377,9 +321,7 @@ bruce_result_t task_registry__create(const task_create_params_t *params, bruce_t
     *out_task_id = BRUCE_TASK_ID_INVALID;
 
     char **argv_copy = NULL;
-    if (!task__dup_argv(params->argc, params->argv, &argv_copy)) {
-        return BRUCE_ERR_NO_MEMORY;
-    }
+    if (!task__dup_argv(params->argc, params->argv, &argv_copy)) { return BRUCE_ERR_NO_MEMORY; }
 
     task__lock();
     int slot = -1;
@@ -402,14 +344,13 @@ bruce_result_t task_registry__create(const task_create_params_t *params, bruce_t
     record->in_use = true;
     record->id = s_next_task_id++;
     task__record_t *parent = task__find_by_handle_locked(xTaskGetCurrentTaskHandle());
-    if (parent != NULL) {
-        record->stdio_session = parent->child_stdio_session;
-    }
-    if (s_next_task_id == BRUCE_TASK_ID_INVALID) {
-        s_next_task_id = 1; /* skip 0 on wraparound */
-    }
-    strncpy(record->name, params->name != NULL && params->name[0] != '\0' ? params->name : "app",
-            BRUCE_TASK_NAME_MAX - 1);
+    if (parent != NULL) { record->stdio_session = parent->child_stdio_session; }
+    if (s_next_task_id == BRUCE_TASK_ID_INVALID) { s_next_task_id = 1; /* skip 0 on wraparound */ }
+    strncpy(
+        record->name,
+        params->name != NULL && params->name[0] != '\0' ? params->name : "app",
+        BRUCE_TASK_NAME_MAX - 1
+    );
     record->built_in = params->built_in;
     record->gui_requested = params->gui_requested;
     if (params->permission_key != NULL && params->permission_key[0] != '\0') {
@@ -430,8 +371,9 @@ bruce_result_t task_registry__create(const task_create_params_t *params, bruce_t
      * foreground/background transition once the task begins running. */
 
     uint32_t stack_bytes = params->stack_bytes != 0 ? params->stack_bytes : TASK__DEFAULT_STACK_BYTES;
-    BaseType_t created = xTaskCreate(task__trampoline, record->name, stack_bytes, record, tskIDLE_PRIORITY + 1,
-                                      &record->handle);
+    BaseType_t created = xTaskCreate(
+        task__trampoline, record->name, stack_bytes, record, tskIDLE_PRIORITY + 1, &record->handle
+    );
     if (created != pdPASS) {
         task__free_argv(record->argc, record->argv);
         record->in_use = false;
@@ -445,8 +387,7 @@ bruce_result_t task_registry__create(const task_create_params_t *params, bruce_t
     return BRUCE_OK;
 }
 
-bruce_resource_id_t task_registry__resource_register(bruce_task_resource_cleanup_t cleanup, void *context)
-{
+bruce_resource_id_t task_registry__resource_register(bruce_task_resource_cleanup_t cleanup, void *context) {
     task__ensure_init();
     task__lock();
     task__record_t *self = task__find_by_handle_locked(xTaskGetCurrentTaskHandle());
@@ -466,9 +407,7 @@ bruce_resource_id_t task_registry__resource_register(bruce_task_resource_cleanup
         return BRUCE_RESOURCE_ID_INVALID;
     }
     bruce_resource_id_t id = self->next_resource_id++;
-    if (self->next_resource_id == BRUCE_RESOURCE_ID_INVALID) {
-        self->next_resource_id = 1;
-    }
+    if (self->next_resource_id == BRUCE_RESOURCE_ID_INVALID) { self->next_resource_id = 1; }
     self->resources[free_slot].id = id;
     self->resources[free_slot].cleanup = cleanup;
     self->resources[free_slot].context = context;
@@ -478,8 +417,7 @@ bruce_resource_id_t task_registry__resource_register(bruce_task_resource_cleanup
     return id;
 }
 
-bruce_result_t task_registry__resource_release(bruce_resource_id_t resource_id)
-{
+bruce_result_t task_registry__resource_release(bruce_resource_id_t resource_id) {
     task__ensure_init();
     task__lock();
     task__record_t *self = task__find_by_handle_locked(xTaskGetCurrentTaskHandle());
@@ -499,8 +437,7 @@ bruce_result_t task_registry__resource_release(bruce_resource_id_t resource_id)
     return BRUCE_ERR_NOT_FOUND;
 }
 
-void task_registry__account_memory(int64_t delta_bytes)
-{
+void task_registry__account_memory(int64_t delta_bytes) {
     task__ensure_init();
     task__lock();
     task__record_t *self = task__find_by_handle_locked(xTaskGetCurrentTaskHandle());
@@ -514,9 +451,9 @@ void task_registry__account_memory(int64_t delta_bytes)
     task__unlock();
 }
 
-bruce_result_t task_registry__current_context(bool *out_built_in, char *out_permission_key,
-                                               size_t permission_key_size, bool *out_gui_requested)
-{
+bruce_result_t task_registry__current_context(
+    bool *out_built_in, char *out_permission_key, size_t permission_key_size, bool *out_gui_requested
+) {
     task__ensure_init();
     task__lock();
     task__record_t *self = task__find_by_handle_locked(xTaskGetCurrentTaskHandle());
@@ -524,22 +461,17 @@ bruce_result_t task_registry__current_context(bool *out_built_in, char *out_perm
         task__unlock();
         return BRUCE_ERR_NOT_FOUND;
     }
-    if (out_built_in != NULL) {
-        *out_built_in = self->built_in;
-    }
+    if (out_built_in != NULL) { *out_built_in = self->built_in; }
     if (out_permission_key != NULL && permission_key_size > 0) {
         strncpy(out_permission_key, self->permission_key, permission_key_size - 1);
         out_permission_key[permission_key_size - 1] = '\0';
     }
-    if (out_gui_requested != NULL) {
-        *out_gui_requested = self->gui_requested;
-    }
+    if (out_gui_requested != NULL) { *out_gui_requested = self->gui_requested; }
     task__unlock();
     return BRUCE_OK;
 }
 
-bruce_result_t task_registry__set_child_stdio_session(uint32_t session)
-{
+bruce_result_t task_registry__set_child_stdio_session(uint32_t session) {
     task__ensure_init();
     task__lock();
     task__record_t *self = task__find_by_handle_locked(xTaskGetCurrentTaskHandle());
@@ -552,8 +484,7 @@ bruce_result_t task_registry__set_child_stdio_session(uint32_t session)
     return BRUCE_OK;
 }
 
-uint32_t task_registry__current_stdio_session(void)
-{
+uint32_t task_registry__current_stdio_session(void) {
     task__ensure_init();
     task__lock();
     task__record_t *self = task__find_by_handle_locked(xTaskGetCurrentTaskHandle());
@@ -562,8 +493,7 @@ uint32_t task_registry__current_stdio_session(void)
     return session;
 }
 
-bruce_result_t task_registry__input_wake_clear(bruce_task_id_t task_id)
-{
+bruce_result_t task_registry__input_wake_clear(bruce_task_id_t task_id) {
     task__ensure_init();
     task__lock();
     task__record_t *record = task__find_by_id_locked(task_id);
@@ -576,8 +506,7 @@ bruce_result_t task_registry__input_wake_clear(bruce_task_id_t task_id)
     return BRUCE_OK;
 }
 
-bruce_result_t task_registry__input_wake_wait(bruce_task_id_t task_id, uint32_t timeout_ms)
-{
+bruce_result_t task_registry__input_wake_wait(bruce_task_id_t task_id, uint32_t timeout_ms) {
     task__ensure_init();
     task__lock();
     task__record_t *record = task__find_by_id_locked(task_id);
@@ -592,8 +521,7 @@ bruce_result_t task_registry__input_wake_wait(bruce_task_id_t task_id, uint32_t 
     return (bits & TASK__EVT_INPUT_WAKE) != 0 ? BRUCE_OK : BRUCE_ERR_TIMEOUT;
 }
 
-void task_registry__input_wake(bruce_task_id_t task_id)
-{
+void task_registry__input_wake(bruce_task_id_t task_id) {
     task__ensure_init();
     task__lock();
     task__record_t *record = task__find_by_id_locked(task_id);
@@ -605,8 +533,7 @@ void task_registry__input_wake(bruce_task_id_t task_id)
 
 /* ---- Public core_sdk/task.h API ---- */
 
-bruce_task_id_t task__current_id(void)
-{
+bruce_task_id_t task__current_id(void) {
     task__ensure_init();
     task__lock();
     task__record_t *self = task__find_by_handle_locked(xTaskGetCurrentTaskHandle());
@@ -615,12 +542,9 @@ bruce_task_id_t task__current_id(void)
     return id;
 }
 
-bruce_result_t task__list(bruce_task_snapshot_t *snapshots, size_t capacity, size_t *out_count)
-{
+bruce_result_t task__list(bruce_task_snapshot_t *snapshots, size_t capacity, size_t *out_count) {
     task__ensure_init();
-    if (out_count == NULL || (capacity != 0 && snapshots == NULL)) {
-        return BRUCE_ERR_INVALID_ARGUMENT;
-    }
+    if (out_count == NULL || (capacity != 0 && snapshots == NULL)) { return BRUCE_ERR_INVALID_ARGUMENT; }
     task__lock();
     task__refresh_cpu_samples_locked();
     size_t written = 0;
@@ -635,12 +559,9 @@ bruce_result_t task__list(bruce_task_snapshot_t *snapshots, size_t capacity, siz
     return BRUCE_OK;
 }
 
-bruce_result_t task__snapshot(bruce_task_id_t task_id, bruce_task_snapshot_t *out_snapshot)
-{
+bruce_result_t task__snapshot(bruce_task_id_t task_id, bruce_task_snapshot_t *out_snapshot) {
     task__ensure_init();
-    if (out_snapshot == NULL) {
-        return BRUCE_ERR_INVALID_ARGUMENT;
-    }
+    if (out_snapshot == NULL) { return BRUCE_ERR_INVALID_ARGUMENT; }
     task__lock();
     task__refresh_cpu_samples_locked();
     task__record_t *record = task__find_by_id_locked(task_id);
@@ -653,8 +574,7 @@ bruce_result_t task__snapshot(bruce_task_id_t task_id, bruce_task_snapshot_t *ou
     return BRUCE_OK;
 }
 
-bruce_result_t task__to_background(void)
-{
+bruce_result_t task__to_background(void) {
     task__ensure_init();
     task__lock();
     task__record_t *self = task__find_by_handle_locked(xTaskGetCurrentTaskHandle());
@@ -674,8 +594,7 @@ bruce_result_t task__to_background(void)
     return BRUCE_OK;
 }
 
-bruce_result_t task__foreground(bruce_task_id_t task_id)
-{
+bruce_result_t task__foreground(bruce_task_id_t task_id) {
     if (task_id != task__current_id()) {
         bruce_result_t permission_result = permission__check(BRUCE_PERMISSION_TASK);
         if (permission_result != BRUCE_OK) return permission_result;
@@ -700,8 +619,7 @@ bruce_result_t task__foreground(bruce_task_id_t task_id)
     return BRUCE_OK;
 }
 
-bruce_result_t task__stop(bruce_task_id_t task_id)
-{
+bruce_result_t task__stop(bruce_task_id_t task_id) {
     if (task_id != task__current_id()) {
         bruce_result_t permission_result = permission__check(BRUCE_PERMISSION_TASK);
         if (permission_result != BRUCE_OK) return permission_result;
@@ -722,8 +640,7 @@ bruce_result_t task__stop(bruce_task_id_t task_id)
     return BRUCE_OK;
 }
 
-bruce_result_t task__pause(bruce_task_id_t task_id)
-{
+bruce_result_t task__pause(bruce_task_id_t task_id) {
     if (task_id != task__current_id()) {
         bruce_result_t permission_result = permission__check(BRUCE_PERMISSION_TASK);
         if (permission_result != BRUCE_OK) return permission_result;
@@ -753,8 +670,7 @@ bruce_result_t task__pause(bruce_task_id_t task_id)
     return BRUCE_OK;
 }
 
-bruce_result_t task__resume(bruce_task_id_t task_id)
-{
+bruce_result_t task__resume(bruce_task_id_t task_id) {
     if (task_id != task__current_id()) {
         bruce_result_t permission_result = permission__check(BRUCE_PERMISSION_TASK);
         if (permission_result != BRUCE_OK) return permission_result;
@@ -779,8 +695,7 @@ bruce_result_t task__resume(bruce_task_id_t task_id)
     return BRUCE_OK;
 }
 
-bruce_result_t task__kill(bruce_task_id_t task_id)
-{
+bruce_result_t task__kill(bruce_task_id_t task_id) {
     if (task_id != task__current_id()) {
         bruce_result_t permission_result = permission__check(BRUCE_PERMISSION_TASK);
         if (permission_result != BRUCE_OK) return permission_result;
@@ -814,16 +729,13 @@ bruce_result_t task__kill(bruce_task_id_t task_id)
 
     /* Arbitrary application-owned mutexes cannot be recovered after a force
      * delete, which remains the documented limitation of task__kill(). */
-    if (handle != NULL) {
-        vTaskDelete(handle);
-    }
+    if (handle != NULL) { vTaskDelete(handle); }
     task__teardown_locked(record);
     task__unlock();
     return BRUCE_OK;
 }
 
-bruce_result_t task__wait(bruce_task_id_t task_id, uint32_t timeout_ms)
-{
+bruce_result_t task__wait(bruce_task_id_t task_id, uint32_t timeout_ms) {
     task__ensure_init();
     task__lock();
     task__record_t *record = task__find_by_id_locked(task_id);
@@ -836,15 +748,14 @@ bruce_result_t task__wait(bruce_task_id_t task_id, uint32_t timeout_ms)
     EventGroupHandle_t events = s_task_events[slot];
     task__unlock();
 
-    EventBits_t bits = xEventGroupWaitBits(events, TASK__EVT_EXITED, pdFALSE, pdFALSE, pdMS_TO_TICKS(timeout_ms));
+    EventBits_t bits =
+        xEventGroupWaitBits(events, TASK__EVT_EXITED, pdFALSE, pdFALSE, pdMS_TO_TICKS(timeout_ms));
 
     task__lock();
     bool recycled = s_tasks[slot].generation != generation;
     task__unlock();
 
-    if (recycled || (bits & TASK__EVT_EXITED) != 0) {
-        return BRUCE_OK;
-    }
+    if (recycled || (bits & TASK__EVT_EXITED) != 0) { return BRUCE_OK; }
     return BRUCE_ERR_TIMEOUT;
 }
 
@@ -853,8 +764,7 @@ bruce_result_t task__wait(bruce_task_id_t task_id, uint32_t timeout_ms)
  * stop is requested, and otherwise waits out `ms`.  When `interruptible` is
  * true and the task is background when the wait begins, being foregrounded
  * mid-wait also returns BRUCE_ERR_CANCELLED early. */
-static bruce_result_t task__wait_ms(uint32_t ms, bool interruptible)
-{
+static bruce_result_t task__wait_ms(uint32_t ms, bool interruptible) {
     task__ensure_init();
     task__lock();
     task__record_t *self = task__find_by_handle_locked(xTaskGetCurrentTaskHandle());
@@ -878,41 +788,24 @@ static bruce_result_t task__wait_ms(uint32_t ms, bool interruptible)
         bool now_foreground = s_tasks[slot].state == BRUCE_TASK_FOREGROUND;
         task__unlock();
 
-        if (stopped) {
-            return BRUCE_ERR_CANCELLED;
-        }
+        if (stopped) { return BRUCE_ERR_CANCELLED; }
         if (paused) {
             xEventGroupWaitBits(s_task_events[slot], TASK__EVT_WAKE, pdTRUE, pdFALSE, portMAX_DELAY);
             continue;
         }
-        if (interruptible && was_background && now_foreground) {
-            return BRUCE_ERR_CANCELLED;
-        }
+        if (interruptible && was_background && now_foreground) { return BRUCE_ERR_CANCELLED; }
 
         TickType_t elapsed = xTaskGetTickCount() - start;
-        if (elapsed >= total_ticks) {
-            return BRUCE_OK;
-        }
+        if (elapsed >= total_ticks) { return BRUCE_OK; }
         EventBits_t bits =
             xEventGroupWaitBits(s_task_events[slot], TASK__EVT_WAKE, pdTRUE, pdFALSE, total_ticks - elapsed);
-        if (bits == 0) {
-            return BRUCE_OK;
-        }
+        if (bits == 0) { return BRUCE_OK; }
         /* Woken early; loop to re-check stop/pause/foreground state. */
     }
 }
 
-uint64_t runtime__now(void)
-{
-    return (uint64_t)esp_timer_get_time() / 1000u;
-}
+uint64_t runtime__now(void) { return (uint64_t)esp_timer_get_time() / 1000u; }
 
-bruce_result_t runtime__sleep(uint32_t milliseconds)
-{
-    return task__wait_ms(milliseconds, true);
-}
+bruce_result_t runtime__sleep(uint32_t milliseconds) { return task__wait_ms(milliseconds, true); }
 
-bruce_result_t runtime__delay(uint32_t milliseconds)
-{
-    return task__wait_ms(milliseconds, false);
-}
+bruce_result_t runtime__delay(uint32_t milliseconds) { return task__wait_ms(milliseconds, false); }

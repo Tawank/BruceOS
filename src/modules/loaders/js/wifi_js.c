@@ -1,7 +1,6 @@
 #include "wifi_js.h"
 
 #include "core_sdk/http.h"
-#include "core_sdk/memory.h"
 #include "core_sdk/wifi.h"
 
 #include "native_helpers_js.h"
@@ -27,8 +26,7 @@ static const char *wifi_enc_types[] = {
     "MAX"
 };
 
-JSValue native_wifiConnected(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
-{
+JSValue native_wifiConnected(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
     (void)ctx;
     (void)this_val;
     (void)argc;
@@ -36,8 +34,7 @@ JSValue native_wifiConnected(JSContext *ctx, JSValue *this_val, int argc, JSValu
     return JS_NewBool(wifi__is_connected());
 }
 
-JSValue native_wifiConnectDialog(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
-{
+JSValue native_wifiConnectDialog(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
     (void)ctx;
     (void)this_val;
     (void)argc;
@@ -46,8 +43,7 @@ JSValue native_wifiConnectDialog(JSContext *ctx, JSValue *this_val, int argc, JS
     return JS_NewBool(false);
 }
 
-JSValue native_wifiConnect(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
-{
+JSValue native_wifiConnect(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
     (void)this_val;
     if (argc < 1 || !JS_IsString(ctx, argv[0])) {
         return JS_ThrowTypeError(ctx, "wifi.connect(ssid:string, timeout?:int, pwd?:string)");
@@ -57,39 +53,28 @@ JSValue native_wifiConnect(JSContext *ctx, JSValue *this_val, int argc, JSValue 
     const char *ssid = JS_ToCString(ctx, argv[0], &ssb);
 
     int timeout_sec = 10;
-    if (argc > 1 && JS_IsNumber(ctx, argv[1])) {
-        JS_ToInt32(ctx, &timeout_sec, argv[1]);
-    }
-    if (timeout_sec < 1) {
-        timeout_sec = 1;
-    }
+    if (argc > 1 && JS_IsNumber(ctx, argv[1])) { JS_ToInt32(ctx, &timeout_sec, argv[1]); }
+    if (timeout_sec < 1) { timeout_sec = 1; }
 
     const char *pwd = NULL;
     JSCStringBuf psb;
-    if (argc > 2 && JS_IsString(ctx, argv[2])) {
-        pwd = JS_ToCString(ctx, argv[2], &psb);
-    }
+    if (argc > 2 && JS_IsString(ctx, argv[2])) { pwd = JS_ToCString(ctx, argv[2], &psb); }
 
     bruce_result_t result = wifi__connect(ssid, pwd, (uint32_t)timeout_sec * 1000u);
     return JS_NewBool(result == BRUCE_OK);
 }
 
-JSValue native_wifiScan(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
-{
+JSValue native_wifiScan(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
     (void)this_val;
     (void)argc;
     (void)argv;
 
     wifi__network_t networks[32];
     int count = wifi__scan(networks, sizeof(networks) / sizeof(networks[0]));
-    if (count < 0) {
-        return JS_ThrowInternalError(ctx, "wifi.scan failed: %d", count);
-    }
+    if (count < 0) { return JS_ThrowInternalError(ctx, "wifi.scan failed: %d", count); }
 
     JSValue arr = JS_NewArray(ctx, count);
-    if (JS_IsException(arr)) {
-        return arr;
-    }
+    if (JS_IsException(arr)) { return arr; }
 
     for (int i = 0; i < count; i++) {
         JSValue obj = JS_NewObject(ctx);
@@ -105,16 +90,14 @@ JSValue native_wifiScan(JSContext *ctx, JSValue *this_val, int argc, JSValue *ar
     return arr;
 }
 
-JSValue native_wifiDisconnect(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
-{
+JSValue native_wifiDisconnect(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
     (void)this_val;
     (void)argc;
     (void)argv;
     return JS_NewInt32(ctx, (int)wifi__disconnect());
 }
 
-JSValue native_httpFetch(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
-{
+JSValue native_httpFetch(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
     (void)this_val;
 
     if (argc < 1 || !JS_IsString(ctx, argv[0])) {
@@ -147,7 +130,8 @@ JSValue native_httpFetch(JSContext *ctx, JSValue *this_val, int argc, JSValue *a
                 JSValue key_val = JS_GetPropertyUint32(ctx, argv[1], i);
                 JSValue value_val = JS_GetPropertyUint32(ctx, argv[1], i + 1);
                 const char *key = JS_IsString(ctx, key_val) ? JS_ToCString(ctx, key_val, &key_buf) : NULL;
-                const char *value = JS_IsString(ctx, value_val) ? JS_ToCString(ctx, value_val, &value_buf) : NULL;
+                const char *value =
+                    JS_IsString(ctx, value_val) ? JS_ToCString(ctx, value_val, &value_buf) : NULL;
                 if (key != NULL && value != NULL) {
                     headers[header_count * 2] = key;
                     headers[header_count * 2 + 1] = value;
@@ -206,8 +190,10 @@ JSValue native_httpFetch(JSContext *ctx, JSValue *this_val, int argc, JSValue *a
                         JSCStringBuf value_buf;
                         JSValue key_val = JS_GetPropertyUint32(ctx, jsv_headers, i);
                         JSValue value_val = JS_GetPropertyUint32(ctx, jsv_headers, i + 1);
-                        const char *key = JS_IsString(ctx, key_val) ? JS_ToCString(ctx, key_val, &key_buf) : NULL;
-                        const char *value = JS_IsString(ctx, value_val) ? JS_ToCString(ctx, value_val, &value_buf) : NULL;
+                        const char *key =
+                            JS_IsString(ctx, key_val) ? JS_ToCString(ctx, key_val, &key_buf) : NULL;
+                        const char *value =
+                            JS_IsString(ctx, value_val) ? JS_ToCString(ctx, value_val, &value_buf) : NULL;
                         if (key != NULL && value != NULL) {
                             headers[header_count * 2] = key;
                             headers[header_count * 2 + 1] = value;
@@ -221,7 +207,8 @@ JSValue native_httpFetch(JSContext *ctx, JSValue *this_val, int argc, JSValue *a
                         if (key == NULL) break;
                         JSValue value_val = JS_GetPropertyStr(ctx, jsv_headers, key);
                         if (!JS_IsUndefined(value_val) &&
-                            (JS_IsString(ctx, value_val) || JS_IsNumber(ctx, value_val) || JS_IsBool(value_val))) {
+                            (JS_IsString(ctx, value_val) || JS_IsNumber(ctx, value_val) ||
+                             JS_IsBool(value_val))) {
                             JSCStringBuf value_buf;
                             const char *value = JS_ToCString(ctx, value_val, &value_buf);
                             if (value != NULL) {
@@ -248,14 +235,13 @@ JSValue native_httpFetch(JSContext *ctx, JSValue *this_val, int argc, JSValue *a
 
     bruce_http_response_t http_response = {0};
     bruce_result_t result = http__request(&request, &http_response);
-    if (result != BRUCE_OK) {
-        return JS_ThrowInternalError(ctx, "httpFetch failed: %d", (int)result);
-    }
+    if (result != BRUCE_OK) { return JS_ThrowInternalError(ctx, "httpFetch failed: %d", (int)result); }
 
     JSValue headers_obj = JS_NewObject(ctx);
     for (size_t i = 0; i < http_response.header_count; ++i) {
-        JS_SetPropertyStr(ctx, headers_obj, http_response.header_names[i],
-                          JS_NewString(ctx, http_response.header_values[i]));
+        JS_SetPropertyStr(
+            ctx, headers_obj, http_response.header_names[i], JS_NewString(ctx, http_response.header_values[i])
+        );
     }
 
     JSValue obj = JS_NewObject(ctx);
@@ -263,17 +249,25 @@ JSValue native_httpFetch(JSContext *ctx, JSValue *this_val, int argc, JSValue *a
     JS_SetPropertyStr(ctx, obj, "headers", headers_obj);
     JS_SetPropertyStr(ctx, obj, "response", JS_NewInt32(ctx, http_response.status_code));
     JS_SetPropertyStr(ctx, obj, "status", JS_NewInt32(ctx, http_response.status_code));
-    JS_SetPropertyStr(ctx, obj, "ok", JS_NewBool(http_response.status_code >= 200 && http_response.status_code < 300));
+    JS_SetPropertyStr(
+        ctx, obj, "ok", JS_NewBool(http_response.status_code >= 200 && http_response.status_code < 300)
+    );
 
     if (return_response_type == 1 && http_response.body_len > 0) {
-        JS_SetPropertyStr(ctx, obj, "body",
-                          JS_NewUint8ArrayCopy(ctx, (const uint8_t *)http_response.body, http_response.body_len));
+        JS_SetPropertyStr(
+            ctx,
+            obj,
+            "body",
+            JS_NewUint8ArrayCopy(ctx, (const uint8_t *)http_response.body, http_response.body_len)
+        );
     } else if (return_response_type == 2 && http_response.body_len > 0) {
         JSValue json_body = JS_Eval(ctx, http_response.body, http_response.body_len, "<http>", JS_EVAL_JSON);
         if (JS_IsException(json_body)) {
             JSValue ex = JS_GetException(ctx);
             JS_PrintValueF(ctx, ex, JS_DUMP_LONG);
-            JS_SetPropertyStr(ctx, obj, "body", JS_NewStringLen(ctx, http_response.body, http_response.body_len));
+            JS_SetPropertyStr(
+                ctx, obj, "body", JS_NewStringLen(ctx, http_response.body, http_response.body_len)
+            );
         } else {
             JS_SetPropertyStr(ctx, obj, "body", json_body);
         }
@@ -285,8 +279,7 @@ JSValue native_httpFetch(JSContext *ctx, JSValue *this_val, int argc, JSValue *a
     return obj;
 }
 
-JSValue native_wifiMACAddress(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
-{
+JSValue native_wifiMACAddress(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
     (void)this_val;
     (void)argc;
     (void)argv;
@@ -294,14 +287,11 @@ JSValue native_wifiMACAddress(JSContext *ctx, JSValue *this_val, int argc, JSVal
     return JS_NewString(ctx, mac != NULL ? mac : "");
 }
 
-JSValue native_ipAddress(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
-{
+JSValue native_ipAddress(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
     (void)this_val;
     (void)argc;
     (void)argv;
     char *ip = wifi__get_ip();
-    if (ip != NULL) {
-        return JS_NewString(ctx, ip);
-    }
+    if (ip != NULL) { return JS_NewString(ctx, ip); }
     return JS_NULL;
 }

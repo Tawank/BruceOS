@@ -16,6 +16,7 @@ bruce_result_t display__notification_dismiss(void);
 
 /* Private on-device selftest seam. */
 bruce_result_t display__test_read_pixel(int16_t x, int16_t y, bruce_display_color_t *out_color);
-bruce_result_t display__test_notification(char *text, size_t text_size, bool *active,
-                                           uint32_t *duration_ms, bruce_display_rect_t *rect,
-                                           uint32_t *generation);
+bruce_result_t display__test_notification(
+    char *text, size_t text_size, bool *active, uint32_t *duration_ms, bruce_display_rect_t *rect,
+    uint32_t *generation
+);

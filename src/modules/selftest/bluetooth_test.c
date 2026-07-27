@@ -5,8 +5,7 @@
 #include "core/bluetooth/bluetooth_internal.h"
 #include "core_sdk/input.h"
 
-bool selftest__run_bluetooth_hid_keyboard_translation_case(void)
-{
+bool selftest__run_bluetooth_hid_keyboard_translation_case(void) {
     (void)input__flush();
     bluetooth_hid__reset_input_state();
     const uint8_t press[8] = {0x02, 0, 0x04, 0, 0, 0, 0, 0};
@@ -26,8 +25,7 @@ bool selftest__run_bluetooth_hid_keyboard_translation_case(void)
     return ok;
 }
 
-bool selftest__run_bluetooth_hid_validation_case(void)
-{
+bool selftest__run_bluetooth_hid_validation_case(void) {
     uint8_t short_report[2] = {0};
     bool ok = bluetooth_hid__translate_keyboard_report(NULL, 8) == BRUCE_ERR_INVALID_ARGUMENT &&
               bluetooth_hid__translate_keyboard_report(short_report, sizeof(short_report)) ==

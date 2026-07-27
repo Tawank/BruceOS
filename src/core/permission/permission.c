@@ -26,14 +26,22 @@ typedef struct {
 } permission__file_entry_t;
 
 static const char *const s_permission_names[BRUCE_PERMISSION_COUNT] = {
-    [BRUCE_PERMISSION_HTTP] = "http",       [BRUCE_PERMISSION_WIFI] = "wifi",
-    [BRUCE_PERMISSION_BT] = "bt",           [BRUCE_PERMISSION_GPS] = "gps",
-    [BRUCE_PERMISSION_RF] = "rf",           [BRUCE_PERMISSION_INPUT] = "input",
-    [BRUCE_PERMISSION_GPIO] = "gpio",       [BRUCE_PERMISSION_IR] = "ir",
-    [BRUCE_PERMISSION_RFID] = "rfid",       [BRUCE_PERMISSION_MICROPHONE] = "microphone",
-    [BRUCE_PERMISSION_HID] = "hid",         [BRUCE_PERMISSION_EXECUTE] = "execute",
-    [BRUCE_PERMISSION_TASK] = "task",       [BRUCE_PERMISSION_STORAGE] = "storage",
-    [BRUCE_PERMISSION_CONFIG] = "config",   [BRUCE_PERMISSION_SERIAL] = "serial",
+    [BRUCE_PERMISSION_HTTP] = "http",
+    [BRUCE_PERMISSION_WIFI] = "wifi",
+    [BRUCE_PERMISSION_BT] = "bt",
+    [BRUCE_PERMISSION_GPS] = "gps",
+    [BRUCE_PERMISSION_RF] = "rf",
+    [BRUCE_PERMISSION_INPUT] = "input",
+    [BRUCE_PERMISSION_GPIO] = "gpio",
+    [BRUCE_PERMISSION_IR] = "ir",
+    [BRUCE_PERMISSION_RFID] = "rfid",
+    [BRUCE_PERMISSION_MICROPHONE] = "microphone",
+    [BRUCE_PERMISSION_HID] = "hid",
+    [BRUCE_PERMISSION_EXECUTE] = "execute",
+    [BRUCE_PERMISSION_TASK] = "task",
+    [BRUCE_PERMISSION_STORAGE] = "storage",
+    [BRUCE_PERMISSION_CONFIG] = "config",
+    [BRUCE_PERMISSION_SERIAL] = "serial",
 };
 
 static StaticSemaphore_t s_mutex_storage;
@@ -43,8 +51,7 @@ static portMUX_TYPE s_init_mux = portMUX_INITIALIZER_UNLOCKED;
 static permission__file_entry_t s_files[PERMISSION__MAX_FILES];
 static bool s_loaded;
 
-static void permission__lock(void)
-{
+static void permission__lock(void) {
     if (s_mutex == NULL) {
         portENTER_CRITICAL(&s_init_mux);
         if (s_mutex == NULL) s_mutex = xSemaphoreCreateMutexStatic(&s_mutex_storage);
@@ -53,19 +60,14 @@ static void permission__lock(void)
     xSemaphoreTake(s_mutex, portMAX_DELAY);
 }
 
-static void permission__unlock(void)
-{
-    xSemaphoreGive(s_mutex);
-}
+static void permission__unlock(void) { xSemaphoreGive(s_mutex); }
 
-const char *permission__name(bruce_permission_t permission)
-{
+const char *permission__name(bruce_permission_t permission) {
     if (permission < 0 || permission >= BRUCE_PERMISSION_COUNT) return NULL;
     return s_permission_names[permission];
 }
 
-bool permission__from_name(const char *name, bruce_permission_t *out_permission)
-{
+bool permission__from_name(const char *name, bruce_permission_t *out_permission) {
     if (name == NULL || out_permission == NULL) return false;
     for (int i = 0; i < BRUCE_PERMISSION_COUNT; ++i) {
         if (strcmp(s_permission_names[i], name) == 0) {
@@ -77,20 +79,16 @@ bool permission__from_name(const char *name, bruce_permission_t *out_permission)
 }
 
 /* Caller must hold the lock. */
-static permission__file_entry_t *permission__find_locked(const char *file_name)
-{
+static permission__file_entry_t *permission__find_locked(const char *file_name) {
     for (int i = 0; i < PERMISSION__MAX_FILES; ++i) {
-        if (s_files[i].in_use && strcmp(s_files[i].file_name, file_name) == 0) {
-            return &s_files[i];
-        }
+        if (s_files[i].in_use && strcmp(s_files[i].file_name, file_name) == 0) { return &s_files[i]; }
     }
     return NULL;
 }
 
 /* Caller must hold the lock. Returns NULL if the table is full and
  * `file_name` has no existing entry. */
-static permission__file_entry_t *permission__find_or_create_locked(const char *file_name)
-{
+static permission__file_entry_t *permission__find_or_create_locked(const char *file_name) {
     permission__file_entry_t *entry = permission__find_locked(file_name);
     if (entry != NULL) return entry;
     for (int i = 0; i < PERMISSION__MAX_FILES; ++i) {
@@ -105,8 +103,7 @@ static permission__file_entry_t *permission__find_or_create_locked(const char *f
 }
 
 /* Caller must hold the lock. */
-static void permission__load_locked(void)
-{
+static void permission__load_locked(void) {
     if (s_loaded) return;
     s_loaded = true;
 
@@ -125,14 +122,12 @@ static void permission__load_locked(void)
     }
 
     const cJSON *file_item;
-    cJSON_ArrayForEach(file_item, root)
-    {
+    cJSON_ArrayForEach(file_item, root) {
         if (file_item->string == NULL || !cJSON_IsObject(file_item)) continue;
         permission__file_entry_t *entry = permission__find_or_create_locked(file_item->string);
         if (entry == NULL) continue;
         const cJSON *perm_item;
-        cJSON_ArrayForEach(perm_item, file_item)
-        {
+        cJSON_ArrayForEach(perm_item, file_item) {
             if (perm_item->string == NULL || !cJSON_IsNumber(perm_item)) continue;
             bruce_permission_t permission;
             if (!permission__from_name(perm_item->string, &permission)) continue;
@@ -143,16 +138,14 @@ static void permission__load_locked(void)
     cJSON_Delete(root);
 }
 
-static void permission__ensure_loaded(void)
-{
+static void permission__ensure_loaded(void) {
     permission__lock();
     permission__load_locked();
     permission__unlock();
 }
 
 /* Caller must hold the lock. */
-static bool permission__save_locked(void)
-{
+static bool permission__save_locked(void) {
     cJSON *root = cJSON_CreateObject();
     if (root == NULL) return false;
 
@@ -174,8 +167,7 @@ static bool permission__save_locked(void)
     return saved;
 }
 
-static bool permission__save(void)
-{
+static bool permission__save(void) {
     permission__lock();
     bool saved = permission__save_locked();
     permission__unlock();
@@ -186,11 +178,10 @@ static bool permission__save(void)
  * Returns true only if the dialog succeeded and the user picked "Allow"
  * (choice index 0); *out_answered reports whether the dialog produced any
  * usable answer at all, so the caller can decide whether to persist it. */
-static bool permission__prompt(const char *file_name, bruce_permission_t permission, bool *out_answered)
-{
+static bool permission__prompt(const char *file_name, bruce_permission_t permission, bool *out_answered) {
     bruce_dialog_choice_t choices[2] = {
         {.label = "Allow", .value = "allow"},
-        {.label = "Deny", .value = "deny"},
+        {.label = "Deny",  .value = "deny" },
     };
     char message[160];
     snprintf(message, sizeof(message), "%s requests %s permission", file_name, permission__name(permission));
@@ -201,11 +192,8 @@ static bool permission__prompt(const char *file_name, bruce_permission_t permiss
     return result == BRUCE_OK && selected == 0;
 }
 
-bruce_result_t permission__check(bruce_permission_t permission)
-{
-    if (permission < 0 || permission >= BRUCE_PERMISSION_COUNT) {
-        return BRUCE_ERR_INVALID_ARGUMENT;
-    }
+bruce_result_t permission__check(bruce_permission_t permission) {
+    if (permission < 0 || permission >= BRUCE_PERMISSION_COUNT) { return BRUCE_ERR_INVALID_ARGUMENT; }
 
     bool built_in = false;
     char key[BRUCE_PERMISSION_FILE_NAME_MAX] = {0};
@@ -214,12 +202,8 @@ bruce_result_t permission__check(bruce_permission_t permission)
          * same as a built-in's implicit grant. */
         return BRUCE_OK;
     }
-    if (built_in) {
-        return BRUCE_OK;
-    }
-    if (key[0] == '\0') {
-        return BRUCE_ERR_PERMISSION;
-    }
+    if (built_in) { return BRUCE_OK; }
+    if (key[0] == '\0') { return BRUCE_ERR_PERMISSION; }
 
     permission__ensure_loaded();
 
@@ -255,23 +239,17 @@ bruce_result_t permission__check(bruce_permission_t permission)
     return allowed ? BRUCE_OK : BRUCE_ERR_PERMISSION;
 }
 
-bruce_result_t permission__preflight(const char *file_name, const char *const *permission_names, size_t count)
-{
+bruce_result_t
+permission__preflight(const char *file_name, const char *const *permission_names, size_t count) {
     if (file_name == NULL || file_name[0] == '\0' || strlen(file_name) >= BRUCE_PERMISSION_FILE_NAME_MAX) {
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
-    if (count > 0 && permission_names == NULL) {
-        return BRUCE_ERR_INVALID_ARGUMENT;
-    }
-    if (count > BRUCE_PERMISSION_COUNT) {
-        return BRUCE_ERR_INVALID_ARGUMENT;
-    }
+    if (count > 0 && permission_names == NULL) { return BRUCE_ERR_INVALID_ARGUMENT; }
+    if (count > BRUCE_PERMISSION_COUNT) { return BRUCE_ERR_INVALID_ARGUMENT; }
 
     bruce_permission_t resolved[BRUCE_PERMISSION_COUNT];
     for (size_t i = 0; i < count; ++i) {
-        if (!permission__from_name(permission_names[i], &resolved[i])) {
-            return BRUCE_ERR_INVALID_ARGUMENT;
-        }
+        if (!permission__from_name(permission_names[i], &resolved[i])) { return BRUCE_ERR_INVALID_ARGUMENT; }
     }
 
     permission__ensure_loaded();
@@ -304,8 +282,8 @@ bruce_result_t permission__preflight(const char *file_name, const char *const *p
     return BRUCE_OK;
 }
 
-bruce_result_t permission__get_saved(const char *file_name, bruce_permission_t permission, bool *out_allowed)
-{
+bruce_result_t
+permission__get_saved(const char *file_name, bruce_permission_t permission, bool *out_allowed) {
     if (file_name == NULL || file_name[0] == '\0' || permission < 0 || permission >= BRUCE_PERMISSION_COUNT ||
         out_allowed == NULL) {
         return BRUCE_ERR_INVALID_ARGUMENT;
@@ -326,8 +304,7 @@ bruce_result_t permission__get_saved(const char *file_name, bruce_permission_t p
     return result;
 }
 
-bruce_result_t permission__set(const char *file_name, bruce_permission_t permission, bool allowed)
-{
+bruce_result_t permission__set(const char *file_name, bruce_permission_t permission, bool allowed) {
     if (file_name == NULL || file_name[0] == '\0' || strlen(file_name) >= BRUCE_PERMISSION_FILE_NAME_MAX ||
         permission < 0 || permission >= BRUCE_PERMISSION_COUNT) {
         return BRUCE_ERR_INVALID_ARGUMENT;
@@ -348,8 +325,7 @@ bruce_result_t permission__set(const char *file_name, bruce_permission_t permiss
     return permission__save() ? BRUCE_OK : BRUCE_ERR_IO;
 }
 
-bool permission__test_reset(void)
-{
+bool permission__test_reset(void) {
     permission__lock();
     memset(s_files, 0, sizeof(s_files));
     s_loaded = true; /* prevent a later ensure_loaded from reloading the old file before removal completes */

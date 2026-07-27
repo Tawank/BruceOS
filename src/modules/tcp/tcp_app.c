@@ -15,8 +15,7 @@
 #define TCP_APP_IO_TIMEOUT_MS 20u
 #define TCP_APP_EXIT_BYTE 0x1du
 
-static void tcp_app__usage(void)
-{
+static void tcp_app__usage(void) {
     printf("TCP terminal commands:\n");
     printf("  tcp client <host> <port>\n");
     printf("  tcp listener <port>\n");
@@ -24,8 +23,7 @@ static void tcp_app__usage(void)
     printf("Press Ctrl+] to close.\n");
 }
 
-static bool tcp_app__parse_port(const char *text, uint16_t *out_port)
-{
+static bool tcp_app__parse_port(const char *text, uint16_t *out_port) {
     if (text == NULL || out_port == NULL || text[0] == '\0') return false;
     char *end = NULL;
     unsigned long value = strtoul(text, &end, 10);
@@ -34,8 +32,7 @@ static bool tcp_app__parse_port(const char *text, uint16_t *out_port)
     return true;
 }
 
-static bruce_result_t tcp_app__send_all(bruce_tcp_id_t socket, const char *data, size_t size)
-{
+static bruce_result_t tcp_app__send_all(bruce_tcp_id_t socket, const char *data, size_t size) {
     size_t total = 0;
     while (total < size) {
         size_t sent = 0;
@@ -47,8 +44,7 @@ static bruce_result_t tcp_app__send_all(bruce_tcp_id_t socket, const char *data,
     return BRUCE_OK;
 }
 
-static bruce_result_t tcp_app__forward_stdin(bruce_tcp_id_t socket, bool *out_exit)
-{
+static bruce_result_t tcp_app__forward_stdin(bruce_tcp_id_t socket, bool *out_exit) {
     char input[TCP_APP_BUFFER_SIZE];
     size_t input_size = 0;
     bruce_result_t result = bruce_stdio_read(input, sizeof(input), 0, &input_size);
@@ -65,14 +61,13 @@ static bruce_result_t tcp_app__forward_stdin(bruce_tcp_id_t socket, bool *out_ex
     return BRUCE_OK;
 }
 
-static bruce_result_t tcp_app__session(bruce_tcp_id_t socket, bool *out_local_exit)
-{
+static bruce_result_t tcp_app__session(bruce_tcp_id_t socket, bool *out_local_exit) {
     *out_local_exit = false;
     char received[TCP_APP_BUFFER_SIZE + 1];
     for (;;) {
         size_t received_size = 0;
-        bruce_result_t result = tcp__read(socket, received, TCP_APP_BUFFER_SIZE,
-                                          TCP_APP_IO_TIMEOUT_MS, &received_size);
+        bruce_result_t result =
+            tcp__read(socket, received, TCP_APP_BUFFER_SIZE, TCP_APP_IO_TIMEOUT_MS, &received_size);
         if (result == BRUCE_OK) {
             if (received_size == 0) return BRUCE_OK;
             received[received_size] = '\0';
@@ -93,8 +88,7 @@ static bruce_result_t tcp_app__session(bruce_tcp_id_t socket, bool *out_local_ex
     }
 }
 
-static int tcp_app__client(const char *host, uint16_t port)
-{
+static int tcp_app__client(const char *host, uint16_t port) {
     if (!wifi__is_connected()) {
         printf("TCP client: Wi-Fi is not connected\n");
         return BRUCE_ERR_INVALID_STATE;
@@ -114,8 +108,7 @@ static int tcp_app__client(const char *host, uint16_t port)
     return result;
 }
 
-static int tcp_app__listener(uint16_t port)
-{
+static int tcp_app__listener(uint16_t port) {
     if (!wifi__is_connected()) {
         printf("TCP listener: Wi-Fi is not connected\n");
         return BRUCE_ERR_INVALID_STATE;
@@ -128,8 +121,7 @@ static int tcp_app__listener(uint16_t port)
     }
 
     const char *ip = wifi__get_ip();
-    printf("Listening on %s:%u. Press Ctrl+] to stop.\n", ip != NULL ? ip : "0.0.0.0",
-           (unsigned int)port);
+    printf("Listening on %s:%u. Press Ctrl+] to stop.\n", ip != NULL ? ip : "0.0.0.0", (unsigned int)port);
     for (;;) {
         bruce_tcp_id_t client = BRUCE_TCP_ID_INVALID;
         bruce_tcp_endpoint_t peer;
@@ -168,8 +160,7 @@ static int tcp_app__listener(uint16_t port)
     return result;
 }
 
-int tcp_app_main(int argc, char **argv)
-{
+int tcp_app_main(int argc, char **argv) {
     if (argc == 0 || argv == NULL || argv[0] == NULL || strcmp(argv[0], "help") == 0) {
         tcp_app__usage();
         return 0;
