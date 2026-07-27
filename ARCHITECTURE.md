@@ -483,7 +483,9 @@ up to four launcher-assigned non-overlapping tiles, or a hidden zero-sized
 viewport. `display__begin_frame()` leases the viewport through the completion
 of `display__present()`; tile rows are packed into worker-owned DMA scratch.
 Text and cursor state are task-local, rotation is global, and no resize event is
-emitted. `display__flush()` provides an implicit-frame compatibility path.
+emitted. Drawing primitives include legacy-compatible circular arcs whose zero
+angle is at six o'clock and increases clockwise. `display__flush()` provides an
+implicit-frame compatibility path.
 
 Image Core decodes JPEG, PNG, and the first frame of GIF data from memory or a
 Core storage path into the caller's viewport. `image__draw_memory()` and

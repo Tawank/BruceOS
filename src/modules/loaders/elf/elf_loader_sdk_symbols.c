@@ -139,6 +139,7 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(display__fill_rect),
     ESP_ELFSYM_EXPORT(display__draw_circle),
     ESP_ELFSYM_EXPORT(display__fill_circle),
+    ESP_ELFSYM_EXPORT(display__draw_arc),
     ESP_ELFSYM_EXPORT(display__draw_triangle),
     ESP_ELFSYM_EXPORT(display__fill_triangle),
     ESP_ELFSYM_EXPORT(display__draw_round_rect),

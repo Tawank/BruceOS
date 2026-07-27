@@ -409,10 +409,15 @@ JSValue native_drawXBitmap(JSContext *ctx, JSValue *this_val, int argc, JSValue 
 
 JSValue native_drawArc(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
 {
-    (void)ctx;
     (void)this_val;
-    (void)argc;
-    (void)argv;
+    int x = native_arg_int(ctx, argc, argv, 0, 0);
+    int y = native_arg_int(ctx, argc, argv, 1, 0);
+    int r = native_arg_int(ctx, argc, argv, 2, 0);
+    int start = native_arg_int(ctx, argc, argv, 3, 0);
+    int end = native_arg_int(ctx, argc, argv, 4, 360);
+    int c = native_arg_int(ctx, argc, argv, 5, 0xFFFF);
+    display__draw_arc((int16_t)x, (int16_t)y, (int16_t)r,
+                      (int16_t)start, (int16_t)end, (bruce_display_color_t)c);
     return JS_UNDEFINED;
 }
 

@@ -160,6 +160,12 @@ bruce_result_t display__draw_circle(int16_t x, int16_t y, int16_t r,
                                      bruce_display_color_t color);
 bruce_result_t display__fill_circle(int16_t x, int16_t y, int16_t r,
                                      bruce_display_color_t color);
+/* Draw a circular arc. Angles use the legacy Bruce convention: zero degrees
+ * is at six o'clock and values increase clockwise. An end angle less than the
+ * start angle wraps through zero; a range of 360 degrees draws a full circle. */
+bruce_result_t display__draw_arc(int16_t x, int16_t y, int16_t r,
+                                  int16_t start_angle, int16_t end_angle,
+                                  bruce_display_color_t color);
 bruce_result_t display__draw_triangle(int16_t x0, int16_t y0, int16_t x1, int16_t y1,
                                        int16_t x2, int16_t y2, bruce_display_color_t color);
 bruce_result_t display__fill_triangle(int16_t x0, int16_t y0, int16_t x1, int16_t y1,

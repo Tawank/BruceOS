@@ -1,5 +1,6 @@
 #include "display.h"
 
+#include <math.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -774,7 +775,7 @@ static void display__fill_rect_native(int16_t nx, int16_t ny, int16_t nw, int16_
 }
 
 static void display__draw_circle_helper(int16_t cx, int16_t cy, int16_t r,
-                                         bruce_display_color_t color, bool fill)
+                                          bruce_display_color_t color, bool fill)
 {
     int16_t x = 0;
     int16_t y = r;
@@ -802,6 +803,44 @@ static void display__draw_circle_helper(int16_t cx, int16_t cy, int16_t r,
             y--;
         }
         x++;
+    }
+}
+
+static void display__draw_arc_helper(int16_t cx, int16_t cy, int16_t r,
+                                      int start_angle, int end_angle,
+                                      bruce_display_color_t color)
+{
+    int sweep = end_angle - start_angle;
+    if (sweep == 0) {
+        return;
+    }
+    if (sweep < 0) {
+        sweep %= 360;
+        sweep += 360;
+    } else if (sweep > 360) {
+        sweep = 360;
+    }
+
+    int normalized_start = start_angle % 360;
+    if (normalized_start < 0) {
+        normalized_start += 360;
+    }
+
+    int16_t previous_x = cx;
+    int16_t previous_y = cy + r;
+    bool have_previous = false;
+    for (int offset = 0; offset <= sweep; ++offset) {
+        float radians = (float)(normalized_start + offset) * ((float)M_PI / 180.0f);
+        int16_t x = (int16_t)lroundf((float)cx - sinf(radians) * r);
+        int16_t y = (int16_t)lroundf((float)cy + cosf(radians) * r);
+        if (!have_previous) {
+            display__set_pixel(x, y, color);
+            have_previous = true;
+        } else if (x != previous_x || y != previous_y) {
+            display__draw_line_bresenham(previous_x, previous_y, x, y, color);
+        }
+        previous_x = x;
+        previous_y = y;
     }
 }
 
@@ -1354,7 +1393,7 @@ bruce_result_t display__draw_circle(int16_t x, int16_t y, int16_t r,
 }
 
 bruce_result_t display__fill_circle(int16_t x, int16_t y, int16_t r,
-                                     bruce_display_color_t color)
+                                      bruce_display_color_t color)
 {
     bruce_task_id_t caller = task__current_id();
     display__lock();
@@ -1367,6 +1406,28 @@ bruce_result_t display__fill_circle(int16_t x, int16_t y, int16_t r,
         return BRUCE_ERR_PERMISSION;
     }
     display__draw_circle_helper(x, y, r, color, true);
+    display__unlock();
+    return BRUCE_OK;
+}
+
+bruce_result_t display__draw_arc(int16_t x, int16_t y, int16_t r,
+                                  int16_t start_angle, int16_t end_angle,
+                                  bruce_display_color_t color)
+{
+    if (r < 0) {
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    bruce_task_id_t caller = task__current_id();
+    display__lock();
+    if (!s_initialized) {
+        display__unlock();
+        return BRUCE_ERR_NOT_INITIALIZED;
+    }
+    if (display__drawing_context_locked(caller) == NULL) {
+        display__unlock();
+        return BRUCE_ERR_PERMISSION;
+    }
+    display__draw_arc_helper(x, y, r, start_angle, end_angle, color);
     display__unlock();
     return BRUCE_OK;
 }
