@@ -30,39 +30,31 @@ static dialog__test_input_provider_t s_test_input_provider;
 static dialog__test_pick_file_provider_t s_test_pick_file_provider;
 static bool s_last_call_was_gui;
 
-void dialog__test_set_choice_provider(dialog__test_choice_provider_t provider)
-{
+void dialog__test_set_choice_provider(dialog__test_choice_provider_t provider) {
     s_test_choice_provider = provider;
 }
 
-void dialog__test_set_input_provider(dialog__test_input_provider_t provider)
-{
+void dialog__test_set_input_provider(dialog__test_input_provider_t provider) {
     s_test_input_provider = provider;
 }
 
-void dialog__test_set_pick_file_provider(dialog__test_pick_file_provider_t provider)
-{
+void dialog__test_set_pick_file_provider(dialog__test_pick_file_provider_t provider) {
     s_test_pick_file_provider = provider;
 }
 
-bool dialog__test_last_call_was_gui(void)
-{
-    return s_last_call_was_gui;
-}
+bool dialog__test_last_call_was_gui(void) { return s_last_call_was_gui; }
 
 /* -------------------------------------------------------------------------- */
 /* Renderer selection                                                         */
 /* -------------------------------------------------------------------------- */
 
-static bool dialog__current_task_wants_gui(void)
-{
+static bool dialog__current_task_wants_gui(void) {
     bool gui_requested = false;
     (void)task_registry__current_context(NULL, NULL, 0, &gui_requested);
     return gui_requested;
 }
 
-static const char *dialog__kind_label(bruce_dialog_kind_t kind)
-{
+static const char *dialog__kind_label(bruce_dialog_kind_t kind) {
     switch (kind) {
         case BRUCE_DIALOG_INFO: return "info";
         case BRUCE_DIALOG_SUCCESS: return "success";
@@ -76,28 +68,28 @@ static const char *dialog__kind_label(bruce_dialog_kind_t kind)
 /* Terminal renderers                                                         */
 /* -------------------------------------------------------------------------- */
 
-static bruce_result_t dialog__term_message(bruce_dialog_kind_t kind, const char *title, const char *message)
-{
-    printf("[dialog:%s:%s] %s%s%s\n", "term", dialog__kind_label(kind), title != NULL ? title : "",
-           title != NULL && message != NULL ? ": " : "", message != NULL ? message : "");
+static bruce_result_t dialog__term_message(bruce_dialog_kind_t kind, const char *title, const char *message) {
+    printf(
+        "[dialog:%s:%s] %s%s%s\n",
+        "term",
+        dialog__kind_label(kind),
+        title != NULL ? title : "",
+        title != NULL && message != NULL ? ": " : "",
+        message != NULL ? message : ""
+    );
     return BRUCE_OK;
 }
 
-static int dialog__term_read_line(char *buffer, size_t buffer_size, bool mask_input)
-{
+static int dialog__term_read_line(char *buffer, size_t buffer_size, bool mask_input) {
     return bruce_stdio_read_line(buffer, buffer_size, mask_input);
 }
 
-static bruce_result_t dialog__term_choice(const char *title, const char *message,
-                                          const bruce_dialog_choice_t *choices, size_t choice_count,
-                                          size_t *out_selected)
-{
-    if (title != NULL) {
-        printf("%s\n", title);
-    }
-    if (message != NULL) {
-        printf("%s\n", message);
-    }
+static bruce_result_t dialog__term_choice(
+    const char *title, const char *message, const bruce_dialog_choice_t *choices, size_t choice_count,
+    size_t *out_selected
+) {
+    if (title != NULL) { printf("%s\n", title); }
+    if (message != NULL) { printf("%s\n", message); }
     for (size_t i = 0; i < choice_count; ++i) {
         printf("%u. %s\n", (unsigned int)(i + 1), choices[i].label != NULL ? choices[i].label : "");
     }
@@ -105,44 +97,30 @@ static bruce_result_t dialog__term_choice(const char *title, const char *message
     fflush(stdout);
 
     char line[16];
-    if (dialog__term_read_line(line, sizeof(line), false) < 0) {
-        return BRUCE_ERR_CANCELLED;
-    }
+    if (dialog__term_read_line(line, sizeof(line), false) < 0) { return BRUCE_ERR_CANCELLED; }
     char *end = NULL;
     long picked = strtol(line, &end, 10);
-    if (end == line || picked < 1 || (size_t)picked > choice_count) {
-        return BRUCE_ERR_INVALID_ARGUMENT;
-    }
+    if (end == line || picked < 1 || (size_t)picked > choice_count) { return BRUCE_ERR_INVALID_ARGUMENT; }
     *out_selected = (size_t)(picked - 1);
     return BRUCE_OK;
 }
 
-static bruce_result_t dialog__term_input(const char *title, const char *prompt, const char *initial_text,
-                                         bool mask_input, char *buffer, size_t buffer_size,
-                                         bool (*validate)(const char *text, size_t len))
-{
-    if (title != NULL) {
-        printf("%s\n", title);
-    }
-    if (prompt != NULL) {
-        printf("%s", prompt);
-    }
-    if (initial_text != NULL && initial_text[0] != '\0') {
-        printf(" [%s]", initial_text);
-    }
+static bruce_result_t dialog__term_input(
+    const char *title, const char *prompt, const char *initial_text, bool mask_input, char *buffer,
+    size_t buffer_size, bool (*validate)(const char *text, size_t len)
+) {
+    if (title != NULL) { printf("%s\n", title); }
+    if (prompt != NULL) { printf("%s", prompt); }
+    if (initial_text != NULL && initial_text[0] != '\0') { printf(" [%s]", initial_text); }
     printf(": ");
     fflush(stdout);
 
     char tmp[256];
     size_t tmp_size = buffer_size < sizeof(tmp) ? buffer_size : sizeof(tmp);
-    if (tmp_size == 0) {
-        return BRUCE_ERR_INVALID_ARGUMENT;
-    }
+    if (tmp_size == 0) { return BRUCE_ERR_INVALID_ARGUMENT; }
 
     int len = dialog__term_read_line(tmp, tmp_size, mask_input);
-    if (len < 0) {
-        return BRUCE_ERR_CANCELLED;
-    }
+    if (len < 0) { return BRUCE_ERR_CANCELLED; }
 
     if (tmp[0] == '\0' && initial_text != NULL) {
         snprintf(buffer, buffer_size, "%s", initial_text);
@@ -158,30 +136,22 @@ static bruce_result_t dialog__term_input(const char *title, const char *prompt, 
     return BRUCE_OK;
 }
 
-static bool dialog__validate_hex(const char *text, size_t len)
-{
+static bool dialog__validate_hex(const char *text, size_t len) {
     for (size_t i = 0; i < len; ++i) {
         char c = text[i];
-        if (!isxdigit((unsigned char)c)) {
-            return false;
-        }
+        if (!isxdigit((unsigned char)c)) { return false; }
     }
     return true;
 }
 
-static bool dialog__validate_number(const char *text, size_t len)
-{
+static bool dialog__validate_number(const char *text, size_t len) {
     bool has_dot = false;
     for (size_t i = 0; i < len; ++i) {
         char c = text[i];
         if (c == '-') {
-            if (i != 0) {
-                return false;
-            }
+            if (i != 0) { return false; }
         } else if (c == '.') {
-            if (has_dot) {
-                return false;
-            }
+            if (has_dot) { return false; }
             has_dot = true;
         } else if (!isdigit((unsigned char)c)) {
             return false;
@@ -190,22 +160,18 @@ static bool dialog__validate_number(const char *text, size_t len)
     return true;
 }
 
-static bruce_result_t dialog__term_pick_file(const char *initial_path, const char *extension_filter,
-                                             char *out_path, size_t out_path_size)
-{
+static bruce_result_t dialog__term_pick_file(
+    const char *initial_path, const char *extension_filter, char *out_path, size_t out_path_size
+) {
     const char *path = initial_path != NULL && initial_path[0] != '\0' ? initial_path : "/";
     printf("Enter file path");
-    if (extension_filter != NULL) {
-        printf(" (%s)", extension_filter);
-    }
+    if (extension_filter != NULL) { printf(" (%s)", extension_filter); }
     printf(" [%s]: ", path);
     fflush(stdout);
 
     char line[BRUCE_STORAGE_PATH_MAX];
     int len = dialog__term_read_line(line, sizeof(line), false);
-    if (len < 0) {
-        return BRUCE_ERR_CANCELLED;
-    }
+    if (len < 0) { return BRUCE_ERR_CANCELLED; }
 
     if (line[0] == '\0') {
         snprintf(out_path, out_path_size, "%s", path);
@@ -224,22 +190,19 @@ static bruce_result_t dialog__term_pick_file(const char *initial_path, const cha
 #define DIALOG__TEXT_SIZE 1
 #define DIALOG__MARGIN 2
 
-static void dialog__get_theme_colors(uint16_t *pri, uint16_t *sec, uint16_t *bg)
-{
-    if (config__get_pri_color(pri) != BRUCE_OK)    *pri = BRUCE_COLOR_BLUE;
-    if (config__get_bg_color(bg) != BRUCE_OK)      *bg  = BRUCE_COLOR_BLACK;
-    if (config__get_sec_color(sec) != BRUCE_OK)    *sec = BRUCE_COLOR_DARKGREY;
+static void dialog__get_theme_colors(uint16_t *pri, uint16_t *sec, uint16_t *bg) {
+    if (config__get_pri_color(pri) != BRUCE_OK) *pri = BRUCE_COLOR_BLUE;
+    if (config__get_bg_color(bg) != BRUCE_OK) *bg = BRUCE_COLOR_BLACK;
+    if (config__get_sec_color(sec) != BRUCE_OK) *sec = BRUCE_COLOR_DARKGREY;
 }
 
-static void dialog__gui_clear(void)
-{
+static void dialog__gui_clear(void) {
     uint16_t pri, sec, bg;
     dialog__get_theme_colors(&pri, &sec, &bg);
     (void)display__fill_screen(bg);
 }
 
-static void dialog__gui_title_bar(const char *title)
-{
+static void dialog__gui_title_bar(const char *title) {
     uint16_t pri, sec, bg;
     dialog__get_theme_colors(&pri, &sec, &bg);
 
@@ -252,8 +215,7 @@ static void dialog__gui_title_bar(const char *title)
     display__print(title != NULL ? title : "");
 }
 
-static void dialog__gui_footer(const char *hint)
-{
+static void dialog__gui_footer(const char *hint) {
     uint16_t pri, sec, bg;
     dialog__get_theme_colors(&pri, &sec, &bg);
 
@@ -267,41 +229,29 @@ static void dialog__gui_footer(const char *hint)
     display__print(hint != NULL ? hint : "");
 }
 
-static bruce_result_t dialog__gui_wait_for_any_key(void)
-{
+static bruce_result_t dialog__gui_wait_for_any_key(void) {
     for (;;) {
         bruce_input_event_t ev;
         bruce_result_t result = input__read(&ev, 100);
-        if (result == BRUCE_ERR_NOT_FOREGROUND) {
-            return BRUCE_ERR_CANCELLED;
-        }
-        if (result == BRUCE_OK && ev.action == BRUCE_INPUT_PRESS) {
-            return BRUCE_OK;
-        }
+        if (result == BRUCE_ERR_NOT_FOREGROUND) { return BRUCE_ERR_CANCELLED; }
+        if (result == BRUCE_OK && ev.action == BRUCE_INPUT_PRESS) { return BRUCE_OK; }
     }
 }
 
-static bruce_result_t dialog__gui_message(bruce_dialog_kind_t kind, const char *title, const char *message)
-{
+static bruce_result_t dialog__gui_message(bruce_dialog_kind_t kind, const char *title, const char *message) {
     (void)kind;
     uint16_t pri, sec, bg;
     dialog__get_theme_colors(&pri, &sec, &bg);
 
     bruce_result_t frame_result = display__begin_frame();
-    if (frame_result == BRUCE_ERR_NOT_FOREGROUND) {
-        return BRUCE_ERR_CANCELLED;
-    }
-    if (frame_result != BRUCE_OK) {
-        return frame_result;
-    }
+    if (frame_result == BRUCE_ERR_NOT_FOREGROUND) { return BRUCE_ERR_CANCELLED; }
+    if (frame_result != BRUCE_OK) { return frame_result; }
     (void)display__fill_screen(bg);
     dialog__gui_title_bar(title);
 
     int w = display__width();
     int max_chars = (w - 2 * DIALOG__MARGIN) / DIALOG__CHAR_W;
-    if (max_chars < 1) {
-        max_chars = 1;
-    }
+    if (max_chars < 1) { max_chars = 1; }
 
     display__set_text_color(BRUCE_COLOR_WHITE);
     display__set_text_size(DIALOG__TEXT_SIZE);
@@ -335,11 +285,10 @@ static bruce_result_t dialog__gui_message(bruce_dialog_kind_t kind, const char *
     return dialog__gui_wait_for_any_key();
 }
 
-static bruce_result_t dialog__gui_choice(const char *title, const char *message,
-                                         const bruce_dialog_choice_t *choices, size_t choice_count,
-                                         size_t *out_selected,
-                                         const bruce_dialog_render_params_t *render_params)
-{
+static bruce_result_t dialog__gui_choice(
+    const char *title, const char *message, const bruce_dialog_choice_t *choices, size_t choice_count,
+    size_t *out_selected, const bruce_dialog_render_params_t *render_params
+) {
     int selected = 0;
     int first_visible = 0;
     int w = display__width();
@@ -351,34 +300,25 @@ static bruce_result_t dialog__gui_choice(const char *title, const char *message,
     bool render_borders = render_params == NULL || render_params->render_borders;
     int viewport_w = right - left;
     int viewport_h = bottom - top;
-    int text_size = render_params != NULL && render_params->text_size > 0
-                        ? render_params->text_size
-                        : DIALOG__TEXT_SIZE;
+    int text_size =
+        render_params != NULL && render_params->text_size > 0 ? render_params->text_size : DIALOG__TEXT_SIZE;
 
     uint16_t pri, sec, bg;
     dialog__get_theme_colors(&pri, &sec, &bg);
-    bruce_display_color_t background_color =
-        render_params != NULL ? render_params->background_color : bg;
-    bruce_display_color_t text_color =
-        render_params != NULL ? render_params->text_color : pri;
+    bruce_display_color_t background_color = render_params != NULL ? render_params->background_color : bg;
+    bruce_display_color_t text_color = render_params != NULL ? render_params->text_color : BRUCE_COLOR_WHITE;
     int row_h = DIALOG__CHAR_H * text_size + 2;
     int title_h = render_borders || (title != NULL && title[0] != '\0') ? DIALOG__CHAR_H + 4 : 0;
     int footer_h = render_borders ? DIALOG__CHAR_H + 4 : 0;
     int message_h = (message != NULL && message[0] != '\0') ? (DIALOG__CHAR_H + 2) : 0;
     int usable_h = viewport_h - title_h - message_h - footer_h;
-    if (usable_h < row_h) {
-        return BRUCE_ERR_INVALID_ARGUMENT;
-    }
+    if (usable_h < row_h) { return BRUCE_ERR_INVALID_ARGUMENT; }
     int items_per_page = usable_h / row_h;
 
     for (;;) {
         bruce_result_t frame_result = display__begin_frame();
-        if (frame_result == BRUCE_ERR_NOT_FOREGROUND) {
-            return BRUCE_ERR_CANCELLED;
-        }
-        if (frame_result != BRUCE_OK) {
-            return frame_result;
-        }
+        if (frame_result == BRUCE_ERR_NOT_FOREGROUND) { return BRUCE_ERR_CANCELLED; }
+        if (frame_result != BRUCE_OK) { return frame_result; }
         if (selected < first_visible) {
             first_visible = selected;
         } else if (selected >= first_visible + items_per_page) {
@@ -387,9 +327,7 @@ static bruce_result_t dialog__gui_choice(const char *title, const char *message,
 
         display__fill_rect(left, top, viewport_w, viewport_h, background_color);
         if (title_h > 0) {
-            if (render_borders) {
-                display__fill_rect(left, top, viewport_w, title_h, pri);
-            }
+            if (render_borders) { display__fill_rect(left, top, viewport_w, title_h, pri); }
             display__set_text_color(text_color);
             display__set_text_size(DIALOG__TEXT_SIZE);
             display__set_text_bg_color(render_borders ? pri : background_color);
@@ -407,9 +345,7 @@ static bruce_result_t dialog__gui_choice(const char *title, const char *message,
 
         int list_y = top + title_h + message_h;
         int last_visible = first_visible + items_per_page - 1;
-        if ((size_t)last_visible >= choice_count) {
-            last_visible = (int)choice_count - 1;
-        }
+        if ((size_t)last_visible >= choice_count) { last_visible = (int)choice_count - 1; }
 
         for (int i = first_visible; i <= last_visible; ++i) {
             int y = list_y + (i - first_visible) * row_h;
@@ -425,9 +361,7 @@ static bruce_result_t dialog__gui_choice(const char *title, const char *message,
             display__print(choices[i].label != NULL ? choices[i].label : "");
         }
 
-        if (render_borders) {
-            display__fill_rect(left, bottom - footer_h, viewport_w, footer_h, sec);
-        }
+        if (render_borders) { display__fill_rect(left, bottom - footer_h, viewport_w, footer_h, sec); }
         frame_result = display__present();
         if (frame_result != BRUCE_OK) {
             return frame_result == BRUCE_ERR_NOT_FOREGROUND ? BRUCE_ERR_CANCELLED : frame_result;
@@ -435,30 +369,20 @@ static bruce_result_t dialog__gui_choice(const char *title, const char *message,
 
         bruce_input_event_t ev;
         bruce_result_t input_result = input__read(&ev, 100);
-        if (input_result == BRUCE_ERR_NOT_FOREGROUND) {
-            return BRUCE_ERR_CANCELLED;
-        }
-        if (input_result != BRUCE_OK || ev.action != BRUCE_INPUT_PRESS) {
-            continue;
-        }
+        if (input_result == BRUCE_ERR_NOT_FOREGROUND) { return BRUCE_ERR_CANCELLED; }
+        if (input_result != BRUCE_OK || ev.action != BRUCE_INPUT_PRESS) { continue; }
 
         switch (ev.code) {
             case BRUCE_INPUT_CODE_UP:
-                if (selected > 0) {
-                    selected--;
-                }
+                if (selected > 0) { selected--; }
                 break;
             case BRUCE_INPUT_CODE_DOWN:
-                if ((size_t)selected + 1 < choice_count) {
-                    selected++;
-                }
+                if ((size_t)selected + 1 < choice_count) { selected++; }
                 break;
             case BRUCE_INPUT_CODE_LEFT:
                 if (selected > 0) {
                     selected -= items_per_page;
-                    if (selected < 0) {
-                        selected = 0;
-                    }
+                    if (selected < 0) { selected = 0; }
                 }
                 break;
             case BRUCE_INPUT_CODE_RIGHT:
@@ -470,14 +394,10 @@ static bruce_result_t dialog__gui_choice(const char *title, const char *message,
                 break;
             case BRUCE_INPUT_CODE_SELECT:
             case BRUCE_INPUT_CODE_BUTTON_A:
-            case '\r':
-                *out_selected = (size_t)selected;
-                return BRUCE_OK;
+            case '\r': *out_selected = (size_t)selected; return BRUCE_OK;
             case BRUCE_INPUT_CODE_BACK:
-            case BRUCE_INPUT_CODE_BUTTON_B:
-                return BRUCE_ERR_CANCELLED;
-            default:
-                break;
+            case BRUCE_INPUT_CODE_BUTTON_B: return BRUCE_ERR_CANCELLED;
+            default: break;
         }
     }
 }
@@ -509,47 +429,86 @@ typedef struct {
 
 static const dialog__key_t s_text_keys[DIALOG__TEXT_ROWS][DIALOG__TEXT_COLS] = {
     {
-        {"1", '1', 0}, {"2", '2', 0}, {"3", '3', 0}, {"4", '4', 0}, {"5", '5', 0},
-        {"6", '6', 0}, {"7", '7', 0}, {"8", '8', 0}, {"9", '9', 0}, {"0", '0', 0},
-    },
+     {"1", '1', 0},
+     {"2", '2', 0},
+     {"3", '3', 0},
+     {"4", '4', 0},
+     {"5", '5', 0},
+     {"6", '6', 0},
+     {"7", '7', 0},
+     {"8", '8', 0},
+     {"9", '9', 0},
+     {"0", '0', 0},
+     },
     {
-        {"q", 'q', 0}, {"w", 'w', 0}, {"e", 'e', 0}, {"r", 'r', 0}, {"t", 't', 0},
-        {"y", 'y', 0}, {"u", 'u', 0}, {"i", 'i', 0}, {"o", 'o', 0}, {"p", 'p', 0},
-    },
+     {"q", 'q', 0},
+     {"w", 'w', 0},
+     {"e", 'e', 0},
+     {"r", 'r', 0},
+     {"t", 't', 0},
+     {"y", 'y', 0},
+     {"u", 'u', 0},
+     {"i", 'i', 0},
+     {"o", 'o', 0},
+     {"p", 'p', 0},
+     },
     {
-        {"a", 'a', 0}, {"s", 's', 0}, {"d", 'd', 0}, {"f", 'f', 0}, {"g", 'g', 0},
-        {"h", 'h', 0}, {"j", 'j', 0}, {"k", 'k', 0}, {"l", 'l', 0}, {";", ';', 0},
-    },
+     {"a", 'a', 0},
+     {"s", 's', 0},
+     {"d", 'd', 0},
+     {"f", 'f', 0},
+     {"g", 'g', 0},
+     {"h", 'h', 0},
+     {"j", 'j', 0},
+     {"k", 'k', 0},
+     {"l", 'l', 0},
+     {";", ';', 0},
+     },
     {
-        {"z", 'z', 0}, {"x", 'x', 0}, {"c", 'c', 0}, {"v", 'v', 0}, {"b", 'b', 0},
-        {"n", 'n', 0}, {"m", 'm', 0}, {",", ',', 0}, {".", '.', 0}, {"/", '/', 0},
-    },
+     {"z", 'z', 0},
+     {"x", 'x', 0},
+     {"c", 'c', 0},
+     {"v", 'v', 0},
+     {"b", 'b', 0},
+     {"n", 'n', 0},
+     {"m", 'm', 0},
+     {",", ',', 0},
+     {".", '.', 0},
+     {"/", '/', 0},
+     },
     {
-        {"OK", 0, DIALOG__KEY_OK}, {"AB", 0, DIALOG__KEY_CAPS}, {"<-", 0, DIALOG__KEY_DELETE},
-        {"SP", 0, DIALOG__KEY_SPACE}, {"X", 0, DIALOG__KEY_CANCEL},
-        {NULL, 0, 0}, {NULL, 0, 0}, {NULL, 0, 0}, {NULL, 0, 0}, {NULL, 0, 0},
-    },
+     {"OK", 0, DIALOG__KEY_OK},
+     {"AB", 0, DIALOG__KEY_CAPS},
+     {"<-", 0, DIALOG__KEY_DELETE},
+     {"SP", 0, DIALOG__KEY_SPACE},
+     {"X", 0, DIALOG__KEY_CANCEL},
+     {NULL, 0, 0},
+     {NULL, 0, 0},
+     {NULL, 0, 0},
+     {NULL, 0, 0},
+     {NULL, 0, 0},
+     },
 };
 
 #define DIALOG__HEX_COLS 4
 #define DIALOG__HEX_ROWS 5
 
 static const dialog__key_t s_hex_keys[DIALOG__HEX_ROWS][DIALOG__HEX_COLS] = {
-    {{"0", '0', 0}, {"1", '1', 0}, {"2", '2', 0}, {"3", '3', 0}},
-    {{"4", '4', 0}, {"5", '5', 0}, {"6", '6', 0}, {"7", '7', 0}},
-    {{"8", '8', 0}, {"9", '9', 0}, {"A", 'A', 0}, {"B", 'B', 0}},
-    {{"C", 'C', 0}, {"D", 'D', 0}, {"E", 'E', 0}, {"F", 'F', 0}},
-    {{"OK", 0, DIALOG__KEY_OK}, {"DEL", 0, DIALOG__KEY_DELETE}, {"CAN", 0, DIALOG__KEY_CANCEL}, {NULL, 0, 0}},
+    {{"0", '0', 0},             {"1", '1', 0},                  {"2", '2', 0},                  {"3", '3', 0}},
+    {{"4", '4', 0},             {"5", '5', 0},                  {"6", '6', 0},                  {"7", '7', 0}},
+    {{"8", '8', 0},             {"9", '9', 0},                  {"A", 'A', 0},                  {"B", 'B', 0}},
+    {{"C", 'C', 0},             {"D", 'D', 0},                  {"E", 'E', 0},                  {"F", 'F', 0}},
+    {{"OK", 0, DIALOG__KEY_OK}, {"DEL", 0, DIALOG__KEY_DELETE}, {"CAN", 0, DIALOG__KEY_CANCEL}, {NULL, 0, 0} },
 };
 
 #define DIALOG__NUM_COLS 3
 #define DIALOG__NUM_ROWS 5
 
 static const dialog__key_t s_num_keys[DIALOG__NUM_ROWS][DIALOG__NUM_COLS] = {
-    {{"1", '1', 0}, {"2", '2', 0}, {"3", '3', 0}},
-    {{"4", '4', 0}, {"5", '5', 0}, {"6", '6', 0}},
-    {{"7", '7', 0}, {"8", '8', 0}, {"9", '9', 0}},
-    {{"-", '-', 0}, {"0", '0', 0}, {".", '.', 0}},
+    {{"1", '1', 0},             {"2", '2', 0},                  {"3", '3', 0}                 },
+    {{"4", '4', 0},             {"5", '5', 0},                  {"6", '6', 0}                 },
+    {{"7", '7', 0},             {"8", '8', 0},                  {"9", '9', 0}                 },
+    {{"-", '-', 0},             {"0", '0', 0},                  {".", '.', 0}                 },
     {{"OK", 0, DIALOG__KEY_OK}, {"DEL", 0, DIALOG__KEY_DELETE}, {"CAN", 0, DIALOG__KEY_CANCEL}},
 };
 
@@ -569,41 +528,26 @@ typedef struct {
     const char *prompt;
 } dialog__keyboard_state_t;
 
-static bool dialog__key_is_valid(const dialog__key_t *key)
-{
-    return key != NULL && key->label != NULL;
-}
+static bool dialog__key_is_valid(const dialog__key_t *key) { return key != NULL && key->label != NULL; }
 
-static const dialog__key_t *dialog__current_key(const dialog__keyboard_state_t *st)
-{
+static const dialog__key_t *dialog__current_key(const dialog__keyboard_state_t *st) {
     if (st->sel_row < 0 || st->sel_row >= st->rows || st->sel_col < 0 || st->sel_col >= st->cols) {
         return NULL;
     }
     return &st->keys[st->sel_row * st->cols + st->sel_col];
 }
 
-static void dialog__keyboard_find_valid_cell(dialog__keyboard_state_t *st, int dir_row, int dir_col)
-{
+static void dialog__keyboard_find_valid_cell(dialog__keyboard_state_t *st, int dir_row, int dir_col) {
     int start_row = st->sel_row;
     int start_col = st->sel_col;
     for (int attempts = 0; attempts < st->rows * st->cols; ++attempts) {
         st->sel_row += dir_row;
         st->sel_col += dir_col;
-        if (st->sel_row < 0) {
-            st->sel_row = st->rows - 1;
-        }
-        if (st->sel_row >= st->rows) {
-            st->sel_row = 0;
-        }
-        if (st->sel_col < 0) {
-            st->sel_col = st->cols - 1;
-        }
-        if (st->sel_col >= st->cols) {
-            st->sel_col = 0;
-        }
-        if (dialog__key_is_valid(dialog__current_key(st))) {
-            return;
-        }
+        if (st->sel_row < 0) { st->sel_row = st->rows - 1; }
+        if (st->sel_row >= st->rows) { st->sel_row = 0; }
+        if (st->sel_col < 0) { st->sel_col = st->cols - 1; }
+        if (st->sel_col >= st->cols) { st->sel_col = 0; }
+        if (dialog__key_is_valid(dialog__current_key(st))) { return; }
         if (dir_row != 0 && dir_col != 0) {
             /* move horizontally first when both are requested */
             st->sel_row = start_row;
@@ -614,46 +558,28 @@ static void dialog__keyboard_find_valid_cell(dialog__keyboard_state_t *st, int d
     st->sel_col = start_col;
 }
 
-static void dialog__keyboard_ensure_valid(dialog__keyboard_state_t *st)
-{
-    if (!dialog__key_is_valid(dialog__current_key(st))) {
-        dialog__keyboard_find_valid_cell(st, 0, 1);
-    }
+static void dialog__keyboard_ensure_valid(dialog__keyboard_state_t *st) {
+    if (!dialog__key_is_valid(dialog__current_key(st))) { dialog__keyboard_find_valid_cell(st, 0, 1); }
 }
 
-static void dialog__keyboard_add_char(dialog__keyboard_state_t *st, char c)
-{
-    if (st->len + 1 >= st->buffer_size || st->len >= st->max_len) {
-        return;
-    }
+static void dialog__keyboard_add_char(dialog__keyboard_state_t *st, char c) {
+    if (st->len + 1 >= st->buffer_size || st->len >= st->max_len) { return; }
     st->buffer[st->len++] = c;
     st->buffer[st->len] = '\0';
 }
 
-static void dialog__keyboard_delete(dialog__keyboard_state_t *st)
-{
-    if (st->len > 0) {
-        st->buffer[--st->len] = '\0';
-    }
+static void dialog__keyboard_delete(dialog__keyboard_state_t *st) {
+    if (st->len > 0) { st->buffer[--st->len] = '\0'; }
 }
 
-static bool dialog__keyboard_validate_char(dialog__keyboard_state_t *st, char c, int kind)
-{
-    if (kind == BRUCE_DIALOG_INPUT_TEXT) {
-        return (c >= 0x20 && c <= 0x7E) || c == ' ';
-    }
-    if (kind == BRUCE_DIALOG_INPUT_HEX) {
-        return isxdigit((unsigned char)c) != 0;
-    }
+static bool dialog__keyboard_validate_char(dialog__keyboard_state_t *st, char c, int kind) {
+    if (kind == BRUCE_DIALOG_INPUT_TEXT) { return (c >= 0x20 && c <= 0x7E) || c == ' '; }
+    if (kind == BRUCE_DIALOG_INPUT_HEX) { return isxdigit((unsigned char)c) != 0; }
     if (kind == BRUCE_DIALOG_INPUT_NUMBER) {
-        if (c == '-') {
-            return st->len == 0;
-        }
+        if (c == '-') { return st->len == 0; }
         if (c == '.') {
             for (size_t i = 0; i < st->len; ++i) {
-                if (st->buffer[i] == '.') {
-                    return false;
-                }
+                if (st->buffer[i] == '.') { return false; }
             }
             return true;
         }
@@ -662,12 +588,9 @@ static bool dialog__keyboard_validate_char(dialog__keyboard_state_t *st, char c,
     return false;
 }
 
-static bruce_result_t dialog__keyboard_draw(dialog__keyboard_state_t *st, int kind)
-{
+static bruce_result_t dialog__keyboard_draw(dialog__keyboard_state_t *st, int kind) {
     bruce_result_t result = display__begin_frame();
-    if (result != BRUCE_OK) {
-        return result;
-    }
+    if (result != BRUCE_OK) { return result; }
     int w = display__width();
     int h = display__height();
 
@@ -675,12 +598,8 @@ static bruce_result_t dialog__keyboard_draw(dialog__keyboard_state_t *st, int ki
     int keyboard_h = h - text_area_h;
     int cell_w = w / st->cols;
     int cell_h = keyboard_h / st->rows;
-    if (cell_w < 1) {
-        cell_w = 1;
-    }
-    if (cell_h < 1) {
-        cell_h = 1;
-    }
+    if (cell_w < 1) { cell_w = 1; }
+    if (cell_h < 1) { cell_h = 1; }
 
     dialog__gui_clear();
     dialog__gui_title_bar(st->title);
@@ -700,8 +619,9 @@ static bruce_result_t dialog__keyboard_draw(dialog__keyboard_state_t *st, int ki
 
     /* Text box. */
     int textbox_y = DIALOG__CHAR_H * 2 + 10;
-    display__draw_rect(DIALOG__MARGIN, textbox_y, w - 2 * DIALOG__MARGIN, DIALOG__CHAR_H * 2 + 4,
-                       BRUCE_COLOR_WHITE);
+    display__draw_rect(
+        DIALOG__MARGIN, textbox_y, w - 2 * DIALOG__MARGIN, DIALOG__CHAR_H * 2 + 4, BRUCE_COLOR_WHITE
+    );
     display__set_cursor(DIALOG__MARGIN + 2, textbox_y + 2);
 
     if (st->mask_input) {
@@ -712,9 +632,7 @@ static bruce_result_t dialog__keyboard_draw(dialog__keyboard_state_t *st, int ki
         display__print(stars);
     } else {
         int max_chars = (w - 4 * DIALOG__MARGIN) / DIALOG__CHAR_W;
-        if (max_chars < 1) {
-            max_chars = 1;
-        }
+        if (max_chars < 1) { max_chars = 1; }
         if ((int)st->len <= max_chars) {
             display__print(st->buffer);
         } else {
@@ -726,9 +644,7 @@ static bruce_result_t dialog__keyboard_draw(dialog__keyboard_state_t *st, int ki
     for (int row = 0; row < st->rows; ++row) {
         for (int col = 0; col < st->cols; ++col) {
             const dialog__key_t *key = &st->keys[row * st->cols + col];
-            if (!dialog__key_is_valid(key)) {
-                continue;
-            }
+            if (!dialog__key_is_valid(key)) { continue; }
 
             int x = col * cell_w;
             int y = text_area_h + row * cell_h;
@@ -736,7 +652,8 @@ static bruce_result_t dialog__keyboard_draw(dialog__keyboard_state_t *st, int ki
             bool selected = (row == st->sel_row && col == st->sel_col);
             const char *label = key->label;
             char tmp_label[2];
-            if (!key->special && kind == BRUCE_DIALOG_INPUT_TEXT && st->caps && isalpha((unsigned char)key->code)) {
+            if (!key->special && kind == BRUCE_DIALOG_INPUT_TEXT && st->caps &&
+                isalpha((unsigned char)key->code)) {
                 tmp_label[0] = (char)toupper((unsigned char)key->code);
                 tmp_label[1] = '\0';
                 label = tmp_label;
@@ -753,13 +670,9 @@ static bruce_result_t dialog__keyboard_draw(dialog__keyboard_state_t *st, int ki
             display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
             int label_w = (int)strlen(label) * DIALOG__CHAR_W;
             int label_x = x + (cell_w - label_w) / 2;
-            if (label_x < x + 1) {
-                label_x = x + 1;
-            }
+            if (label_x < x + 1) { label_x = x + 1; }
             int label_y = y + (cell_h - DIALOG__CHAR_H) / 2;
-            if (label_y < y + 1) {
-                label_y = y + 1;
-            }
+            if (label_y < y + 1) { label_y = y + 1; }
             display__set_cursor(label_x, label_y);
             display__print(label);
         }
@@ -768,9 +681,10 @@ static bruce_result_t dialog__keyboard_draw(dialog__keyboard_state_t *st, int ki
     return display__present();
 }
 
-static bruce_result_t dialog__gui_input(const char *title, const char *prompt, const char *initial_text,
-                                        bool mask_input, char *buffer, size_t buffer_size, int kind)
-{
+static bruce_result_t dialog__gui_input(
+    const char *title, const char *prompt, const char *initial_text, bool mask_input, char *buffer,
+    size_t buffer_size, int kind
+) {
     const dialog__key_t *keys;
     int rows, cols;
     size_t max_len = buffer_size > 0 ? buffer_size - 1 : 0;
@@ -805,9 +719,7 @@ static bruce_result_t dialog__gui_input(const char *title, const char *prompt, c
         .prompt = prompt,
     };
 
-    if (buffer_size > 0) {
-        buffer[0] = '\0';
-    }
+    if (buffer_size > 0) { buffer[0] = '\0'; }
     if (initial_text != NULL && buffer_size > 0) {
         snprintf(buffer, buffer_size, "%s", initial_text);
         st.len = strlen(buffer);
@@ -821,24 +733,17 @@ static bruce_result_t dialog__gui_input(const char *title, const char *prompt, c
 
     for (;;) {
         bruce_result_t draw_result = dialog__keyboard_draw(&st, kind);
-        if (draw_result == BRUCE_ERR_NOT_FOREGROUND) {
-            return BRUCE_ERR_CANCELLED;
-        }
-        if (draw_result != BRUCE_OK) {
-            return draw_result;
-        }
+        if (draw_result == BRUCE_ERR_NOT_FOREGROUND) { return BRUCE_ERR_CANCELLED; }
+        if (draw_result != BRUCE_OK) { return draw_result; }
 
         bruce_input_event_t ev;
         bruce_result_t input_result = input__read(&ev, 100);
-        if (input_result == BRUCE_ERR_NOT_FOREGROUND) {
-            return BRUCE_ERR_CANCELLED;
-        }
-        if (input_result != BRUCE_OK || ev.action != BRUCE_INPUT_PRESS) {
-            continue;
-        }
+        if (input_result == BRUCE_ERR_NOT_FOREGROUND) { return BRUCE_ERR_CANCELLED; }
+        if (input_result != BRUCE_OK || ev.action != BRUCE_INPUT_PRESS) { continue; }
 
         /* Direct physical keyboard typing for text modes. */
-        if (kind == BRUCE_DIALOG_INPUT_TEXT && ev.type == BRUCE_INPUT_KEY && ev.code >= 0x20 && ev.code <= 0x7E) {
+        if (kind == BRUCE_DIALOG_INPUT_TEXT && ev.type == BRUCE_INPUT_KEY && ev.code >= 0x20 &&
+            ev.code <= 0x7E) {
             dialog__keyboard_add_char(&st, (char)ev.code);
             continue;
         }
@@ -854,36 +759,20 @@ static bruce_result_t dialog__gui_input(const char *title, const char *prompt, c
         }
 
         switch (ev.code) {
-            case BRUCE_INPUT_CODE_UP:
-                dialog__keyboard_find_valid_cell(&st, -1, 0);
-                break;
-            case BRUCE_INPUT_CODE_DOWN:
-                dialog__keyboard_find_valid_cell(&st, 1, 0);
-                break;
-            case BRUCE_INPUT_CODE_LEFT:
-                dialog__keyboard_find_valid_cell(&st, 0, -1);
-                break;
-            case BRUCE_INPUT_CODE_RIGHT:
-                dialog__keyboard_find_valid_cell(&st, 0, 1);
-                break;
+            case BRUCE_INPUT_CODE_UP: dialog__keyboard_find_valid_cell(&st, -1, 0); break;
+            case BRUCE_INPUT_CODE_DOWN: dialog__keyboard_find_valid_cell(&st, 1, 0); break;
+            case BRUCE_INPUT_CODE_LEFT: dialog__keyboard_find_valid_cell(&st, 0, -1); break;
+            case BRUCE_INPUT_CODE_RIGHT: dialog__keyboard_find_valid_cell(&st, 0, 1); break;
             case BRUCE_INPUT_CODE_SELECT:
             case BRUCE_INPUT_CODE_BUTTON_A: {
                 const dialog__key_t *key = dialog__current_key(&st);
-                if (key == NULL || key->label == NULL) {
-                    break;
-                }
-                if (key->special == DIALOG__KEY_OK) {
-                    return BRUCE_OK;
-                }
-                if (key->special == DIALOG__KEY_CANCEL) {
-                    return BRUCE_ERR_CANCELLED;
-                }
+                if (key == NULL || key->label == NULL) { break; }
+                if (key->special == DIALOG__KEY_OK) { return BRUCE_OK; }
+                if (key->special == DIALOG__KEY_CANCEL) { return BRUCE_ERR_CANCELLED; }
                 if (key->special == DIALOG__KEY_DELETE) {
                     dialog__keyboard_delete(&st);
                 } else if (key->special == DIALOG__KEY_SPACE) {
-                    if (kind == BRUCE_DIALOG_INPUT_TEXT) {
-                        dialog__keyboard_add_char(&st, ' ');
-                    }
+                    if (kind == BRUCE_DIALOG_INPUT_TEXT) { dialog__keyboard_add_char(&st, ' '); }
                 } else if (key->special == DIALOG__KEY_CAPS) {
                     st.caps = !st.caps;
                 } else if (key->code != '\0') {
@@ -891,17 +780,13 @@ static bruce_result_t dialog__gui_input(const char *title, const char *prompt, c
                     if (kind == BRUCE_DIALOG_INPUT_TEXT && st.caps && isalpha((unsigned char)c)) {
                         c = (char)toupper((unsigned char)c);
                     }
-                    if (dialog__keyboard_validate_char(&st, c, kind)) {
-                        dialog__keyboard_add_char(&st, c);
-                    }
+                    if (dialog__keyboard_validate_char(&st, c, kind)) { dialog__keyboard_add_char(&st, c); }
                 }
                 break;
             }
             case BRUCE_INPUT_CODE_BACK:
-            case BRUCE_INPUT_CODE_BUTTON_B:
-                return BRUCE_ERR_CANCELLED;
-            default:
-                break;
+            case BRUCE_INPUT_CODE_BUTTON_B: return BRUCE_ERR_CANCELLED;
+            default: break;
         }
     }
 }
@@ -910,46 +795,40 @@ static bruce_result_t dialog__gui_input(const char *title, const char *prompt, c
 /* GUI file picker                                                            */
 /* -------------------------------------------------------------------------- */
 
-static bool dialog__matches_extension_filter(const char *name, const char *extension_filter)
-{
-    if (extension_filter == NULL || extension_filter[0] == '\0') {
-        return true;
-    }
+static bool dialog__matches_extension_filter(const char *name, const char *extension_filter) {
+    if (extension_filter == NULL || extension_filter[0] == '\0') { return true; }
     size_t name_len = strlen(name);
     size_t filter_len = strlen(extension_filter);
-    if (filter_len == 0 || name_len < filter_len) {
-        return false;
-    }
+    if (filter_len == 0 || name_len < filter_len) { return false; }
     return strcasecmp(name + name_len - filter_len, extension_filter) == 0;
 }
 
-static bruce_result_t dialog__gui_pick_file(const char *initial_path, const char *extension_filter,
-                                            char *out_path, size_t out_path_size)
-{
+static bruce_result_t dialog__gui_pick_file(
+    const char *initial_path, const char *extension_filter, char *out_path, size_t out_path_size
+) {
     char current_path[BRUCE_STORAGE_PATH_MAX];
-    snprintf(current_path, sizeof(current_path), "%s",
-             initial_path != NULL && initial_path[0] != '\0' ? initial_path : "/");
+    snprintf(
+        current_path,
+        sizeof(current_path),
+        "%s",
+        initial_path != NULL && initial_path[0] != '\0' ? initial_path : "/"
+    );
 
     bruce_storage_entry_t entries[32];
     for (;;) {
         size_t count = 0;
-        bruce_result_t list_result = storage__list(current_path, entries, sizeof(entries) / sizeof(entries[0]), &count);
-        if (list_result != BRUCE_OK) {
-            return list_result;
-        }
+        bruce_result_t list_result =
+            storage__list(current_path, entries, sizeof(entries) / sizeof(entries[0]), &count);
+        if (list_result != BRUCE_OK) { return list_result; }
 
         int h = display__height();
         int usable_h = h - (DIALOG__CHAR_H + 4) - (DIALOG__CHAR_H + 4);
         int items_per_page = usable_h / (DIALOG__CHAR_H + 2);
-        if (items_per_page < 1) {
-            items_per_page = 1;
-        }
+        if (items_per_page < 1) { items_per_page = 1; }
         (void)items_per_page;
 
         bruce_dialog_choice_t *choices = memory__malloc((count + 1) * sizeof(bruce_dialog_choice_t));
-        if (choices == NULL) {
-            return BRUCE_ERR_NO_MEMORY;
-        }
+        if (choices == NULL) { return BRUCE_ERR_NO_MEMORY; }
         const char **values = memory__malloc((count + 1) * sizeof(const char *));
         if (values == NULL) {
             memory__free(choices);
@@ -983,9 +862,7 @@ static bruce_result_t dialog__gui_pick_file(const char *initial_path, const char
         memory__free(values);
         memory__free(choices);
 
-        if (choice_result != BRUCE_OK) {
-            return BRUCE_ERR_CANCELLED;
-        }
+        if (choice_result != BRUCE_OK) { return BRUCE_ERR_CANCELLED; }
 
         if (strcmp(picked, "..") == 0) {
             /* Strip last path component. */
@@ -1005,9 +882,7 @@ static bruce_result_t dialog__gui_pick_file(const char *initial_path, const char
         } else {
             printed = snprintf(next_path, sizeof(next_path), "%s/%s", current_path, picked);
         }
-        if (printed < 0 || (size_t)printed >= sizeof(next_path)) {
-            return BRUCE_ERR_INVALID_PATH;
-        }
+        if (printed < 0 || (size_t)printed >= sizeof(next_path)) { return BRUCE_ERR_INVALID_PATH; }
 
         /* If the picked entry is a directory, descend into it. */
         bool is_file = false;
@@ -1046,48 +921,31 @@ static dialog__viewer_t s_viewers[DIALOG__VIEWER_MAX];
 static StaticSemaphore_t s_viewer_mutex_storage;
 static SemaphoreHandle_t s_viewer_mutex;
 
-static void dialog__viewer_lock(void)
-{
-    if (s_viewer_mutex != NULL) {
-        xSemaphoreTake(s_viewer_mutex, portMAX_DELAY);
-    }
+static void dialog__viewer_lock(void) {
+    if (s_viewer_mutex != NULL) { xSemaphoreTake(s_viewer_mutex, portMAX_DELAY); }
 }
 
-static void dialog__viewer_unlock(void)
-{
-    if (s_viewer_mutex != NULL) {
-        xSemaphoreGive(s_viewer_mutex);
-    }
+static void dialog__viewer_unlock(void) {
+    if (s_viewer_mutex != NULL) { xSemaphoreGive(s_viewer_mutex); }
 }
 
-static char *dialog__strdup(const char *src)
-{
-    if (src == NULL) {
-        src = "";
-    }
+static char *dialog__strdup(const char *src) {
+    if (src == NULL) { src = ""; }
     size_t len = strlen(src);
     char *copy = memory__malloc(len + 1);
-    if (copy == NULL) {
-        return NULL;
-    }
+    if (copy == NULL) { return NULL; }
     memcpy(copy, src, len + 1);
     return copy;
 }
 
-static dialog__viewer_t *dialog__viewer_find(bruce_viewer_id_t id)
-{
-    if (id == BRUCE_VIEWER_ID_INVALID || id > DIALOG__VIEWER_MAX) {
-        return NULL;
-    }
+static dialog__viewer_t *dialog__viewer_find(bruce_viewer_id_t id) {
+    if (id == BRUCE_VIEWER_ID_INVALID || id > DIALOG__VIEWER_MAX) { return NULL; }
     dialog__viewer_t *viewer = &s_viewers[id - 1];
     return viewer->used ? viewer : NULL;
 }
 
-static void dialog__viewer_free(dialog__viewer_t *viewer)
-{
-    if (viewer == NULL) {
-        return;
-    }
+static void dialog__viewer_free(dialog__viewer_t *viewer) {
+    if (viewer == NULL) { return; }
     memory__free(viewer->title);
     memory__free(viewer->text);
     viewer->title = NULL;
@@ -1098,16 +956,14 @@ static void dialog__viewer_free(dialog__viewer_t *viewer)
     viewer->scroll_y = 0;
 }
 
-static void dialog__viewer_cleanup(void *context)
-{
+static void dialog__viewer_cleanup(void *context) {
     dialog__viewer_t *viewer = (dialog__viewer_t *)context;
     dialog__viewer_lock();
     dialog__viewer_free(viewer);
     dialog__viewer_unlock();
 }
 
-static bruce_result_t dialog__viewer_draw(dialog__viewer_t *viewer, bool gui)
-{
+static bruce_result_t dialog__viewer_draw(dialog__viewer_t *viewer, bool gui) {
     if (gui) {
         bruce_result_t frame_result = display__begin_frame();
         if (frame_result != BRUCE_OK) {
@@ -1117,13 +973,9 @@ static bruce_result_t dialog__viewer_draw(dialog__viewer_t *viewer, bool gui)
         int h = display__height();
         int usable_h = h - (DIALOG__CHAR_H + 4);
         int lines_per_screen = usable_h / (DIALOG__CHAR_H + 1);
-        if (lines_per_screen < 1) {
-            lines_per_screen = 1;
-        }
+        if (lines_per_screen < 1) { lines_per_screen = 1; }
         int max_chars = (w - 2 * DIALOG__MARGIN) / DIALOG__CHAR_W;
-        if (max_chars < 1) {
-            max_chars = 1;
-        }
+        if (max_chars < 1) { max_chars = 1; }
 
         dialog__gui_clear();
         dialog__gui_title_bar(viewer->title);
@@ -1149,13 +1001,9 @@ static bruce_result_t dialog__viewer_draw(dialog__viewer_t *viewer, bool gui)
                 y += DIALOG__CHAR_H + 1;
                 drawn++;
             } else {
-                while (*p != '\0' && *p != '\n') {
-                    p++;
-                }
+                while (*p != '\0' && *p != '\n') { p++; }
             }
-            if (*p == '\n') {
-                p++;
-            }
+            if (*p == '\n') { p++; }
             line++;
         }
 
@@ -1163,9 +1011,7 @@ static bruce_result_t dialog__viewer_draw(dialog__viewer_t *viewer, bool gui)
         int total_lines = 0;
         const char *q = viewer->text != NULL ? viewer->text : "";
         while (*q != '\0') {
-            if (*q == '\n') {
-                total_lines++;
-            }
+            if (*q == '\n') { total_lines++; }
             q++;
         }
         snprintf(footer, sizeof(footer), "%d/%d", viewer->scroll_y + 1, total_lines + 1);
@@ -1186,24 +1032,19 @@ static bruce_result_t dialog__viewer_draw(dialog__viewer_t *viewer, bool gui)
 /* Public API                                                                 */
 /* -------------------------------------------------------------------------- */
 
-bruce_result_t dialog__message(bruce_dialog_kind_t kind, const char *title, const char *message)
-{
+bruce_result_t dialog__message(bruce_dialog_kind_t kind, const char *title, const char *message) {
     bool gui = dialog__current_task_wants_gui();
     s_last_call_was_gui = gui;
 
-    if (gui) {
-        return dialog__gui_message(kind, title, message);
-    }
+    if (gui) { return dialog__gui_message(kind, title, message); }
     return dialog__term_message(kind, title, message);
 }
 
-bruce_result_t dialog__choice(const char *title, const char *message, const bruce_dialog_choice_t *choices,
-                               size_t choice_count, size_t *out_selected,
-                               const bruce_dialog_render_params_t *render_params)
-{
-    if (choices == NULL || choice_count == 0 || out_selected == NULL) {
-        return BRUCE_ERR_INVALID_ARGUMENT;
-    }
+bruce_result_t dialog__choice(
+    const char *title, const char *message, const bruce_dialog_choice_t *choices, size_t choice_count,
+    size_t *out_selected, const bruce_dialog_render_params_t *render_params
+) {
+    if (choices == NULL || choice_count == 0 || out_selected == NULL) { return BRUCE_ERR_INVALID_ARGUMENT; }
     bool gui = dialog__current_task_wants_gui();
     s_last_call_was_gui = gui;
 
@@ -1225,12 +1066,10 @@ bruce_result_t dialog__choice(const char *title, const char *message, const bruc
     return dialog__term_choice(title, message, choices, choice_count, out_selected);
 }
 
-bruce_result_t dialog__pick_file(const char *initial_path, const char *extension_filter, char *out_path,
-                                 size_t out_path_size)
-{
-    if (out_path == NULL || out_path_size == 0) {
-        return BRUCE_ERR_INVALID_ARGUMENT;
-    }
+bruce_result_t dialog__pick_file(
+    const char *initial_path, const char *extension_filter, char *out_path, size_t out_path_size
+) {
+    if (out_path == NULL || out_path_size == 0) { return BRUCE_ERR_INVALID_ARGUMENT; }
 
     bool gui = dialog__current_task_wants_gui();
     s_last_call_was_gui = gui;
@@ -1239,18 +1078,15 @@ bruce_result_t dialog__pick_file(const char *initial_path, const char *extension
         return s_test_pick_file_provider(initial_path, extension_filter, out_path, out_path_size);
     }
 
-    if (gui) {
-        return dialog__gui_pick_file(initial_path, extension_filter, out_path, out_path_size);
-    }
+    if (gui) { return dialog__gui_pick_file(initial_path, extension_filter, out_path, out_path_size); }
     return dialog__term_pick_file(initial_path, extension_filter, out_path, out_path_size);
 }
 
-bruce_result_t dialog__text_input(const char *title, const char *prompt, const char *initial_text,
-                                  bool mask_input, char *buffer, size_t buffer_size)
-{
-    if (buffer == NULL || buffer_size == 0) {
-        return BRUCE_ERR_INVALID_ARGUMENT;
-    }
+bruce_result_t dialog__text_input(
+    const char *title, const char *prompt, const char *initial_text, bool mask_input, char *buffer,
+    size_t buffer_size
+) {
+    if (buffer == NULL || buffer_size == 0) { return BRUCE_ERR_INVALID_ARGUMENT; }
 
     bool gui = dialog__current_task_wants_gui();
     s_last_call_was_gui = gui;
@@ -1260,18 +1096,17 @@ bruce_result_t dialog__text_input(const char *title, const char *prompt, const c
     }
 
     if (gui) {
-        return dialog__gui_input(title, prompt, initial_text, mask_input, buffer, buffer_size,
-                                 BRUCE_DIALOG_INPUT_TEXT);
+        return dialog__gui_input(
+            title, prompt, initial_text, mask_input, buffer, buffer_size, BRUCE_DIALOG_INPUT_TEXT
+        );
     }
     return dialog__term_input(title, prompt, initial_text, mask_input, buffer, buffer_size, NULL);
 }
 
-bruce_result_t dialog__hex_input(const char *title, const char *prompt, const char *initial_text,
-                                 char *buffer, size_t buffer_size)
-{
-    if (buffer == NULL || buffer_size == 0) {
-        return BRUCE_ERR_INVALID_ARGUMENT;
-    }
+bruce_result_t dialog__hex_input(
+    const char *title, const char *prompt, const char *initial_text, char *buffer, size_t buffer_size
+) {
+    if (buffer == NULL || buffer_size == 0) { return BRUCE_ERR_INVALID_ARGUMENT; }
 
     bool gui = dialog__current_task_wants_gui();
     s_last_call_was_gui = gui;
@@ -1281,19 +1116,17 @@ bruce_result_t dialog__hex_input(const char *title, const char *prompt, const ch
     }
 
     if (gui) {
-        return dialog__gui_input(title, prompt, initial_text, false, buffer, buffer_size,
-                                 BRUCE_DIALOG_INPUT_HEX);
+        return dialog__gui_input(
+            title, prompt, initial_text, false, buffer, buffer_size, BRUCE_DIALOG_INPUT_HEX
+        );
     }
-    return dialog__term_input(title, prompt, initial_text, false, buffer, buffer_size,
-                              dialog__validate_hex);
+    return dialog__term_input(title, prompt, initial_text, false, buffer, buffer_size, dialog__validate_hex);
 }
 
-bruce_result_t dialog__number_input(const char *title, const char *prompt, const char *initial_text,
-                                    char *buffer, size_t buffer_size)
-{
-    if (buffer == NULL || buffer_size == 0) {
-        return BRUCE_ERR_INVALID_ARGUMENT;
-    }
+bruce_result_t dialog__number_input(
+    const char *title, const char *prompt, const char *initial_text, char *buffer, size_t buffer_size
+) {
+    if (buffer == NULL || buffer_size == 0) { return BRUCE_ERR_INVALID_ARGUMENT; }
 
     bool gui = dialog__current_task_wants_gui();
     s_last_call_was_gui = gui;
@@ -1303,24 +1136,22 @@ bruce_result_t dialog__number_input(const char *title, const char *prompt, const
     }
 
     if (gui) {
-        return dialog__gui_input(title, prompt, initial_text, false, buffer, buffer_size,
-                                 BRUCE_DIALOG_INPUT_NUMBER);
+        return dialog__gui_input(
+            title, prompt, initial_text, false, buffer, buffer_size, BRUCE_DIALOG_INPUT_NUMBER
+        );
     }
-    return dialog__term_input(title, prompt, initial_text, false, buffer, buffer_size,
-                              dialog__validate_number);
+    return dialog__term_input(
+        title, prompt, initial_text, false, buffer, buffer_size, dialog__validate_number
+    );
 }
 
-bruce_result_t dialog__create_text_viewer(const char *title, const char *text, bruce_viewer_id_t *out_viewer)
-{
-    if (out_viewer == NULL) {
-        return BRUCE_ERR_INVALID_ARGUMENT;
-    }
+bruce_result_t
+dialog__create_text_viewer(const char *title, const char *text, bruce_viewer_id_t *out_viewer) {
+    if (out_viewer == NULL) { return BRUCE_ERR_INVALID_ARGUMENT; }
     *out_viewer = BRUCE_VIEWER_ID_INVALID;
 
     dialog__viewer_lock();
-    if (s_viewer_mutex == NULL) {
-        s_viewer_mutex = xSemaphoreCreateMutexStatic(&s_viewer_mutex_storage);
-    }
+    if (s_viewer_mutex == NULL) { s_viewer_mutex = xSemaphoreCreateMutexStatic(&s_viewer_mutex_storage); }
 
     dialog__viewer_t *slot = NULL;
     for (int i = 0; i < DIALOG__VIEWER_MAX; ++i) {
@@ -1359,8 +1190,7 @@ bruce_result_t dialog__create_text_viewer(const char *title, const char *text, b
     return BRUCE_OK;
 }
 
-bruce_result_t dialog__viewer_set_text(bruce_viewer_id_t viewer, const char *text)
-{
+bruce_result_t dialog__viewer_set_text(bruce_viewer_id_t viewer, const char *text) {
     dialog__viewer_lock();
     dialog__viewer_t *slot = dialog__viewer_find(viewer);
     if (slot == NULL) {
@@ -1389,8 +1219,7 @@ bruce_result_t dialog__viewer_set_text(bruce_viewer_id_t viewer, const char *tex
     return result;
 }
 
-bruce_result_t dialog__viewer_scroll(bruce_viewer_id_t viewer, int lines)
-{
+bruce_result_t dialog__viewer_scroll(bruce_viewer_id_t viewer, int lines) {
     dialog__viewer_lock();
     dialog__viewer_t *slot = dialog__viewer_find(viewer);
     if (slot == NULL) {
@@ -1403,9 +1232,7 @@ bruce_result_t dialog__viewer_scroll(bruce_viewer_id_t viewer, int lines)
     }
 
     slot->scroll_y += lines;
-    if (slot->scroll_y < 0) {
-        slot->scroll_y = 0;
-    }
+    if (slot->scroll_y < 0) { slot->scroll_y = 0; }
 
     bool gui = dialog__current_task_wants_gui();
     s_last_call_was_gui = gui;
@@ -1415,8 +1242,7 @@ bruce_result_t dialog__viewer_scroll(bruce_viewer_id_t viewer, int lines)
     return result;
 }
 
-bruce_result_t dialog__viewer_close(bruce_viewer_id_t viewer)
-{
+bruce_result_t dialog__viewer_close(bruce_viewer_id_t viewer) {
     dialog__viewer_lock();
     dialog__viewer_t *slot = dialog__viewer_find(viewer);
     if (slot == NULL) {
