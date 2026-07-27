@@ -1864,6 +1864,9 @@ void display__task_state_changed(bruce_task_id_t task_id, bruce_task_state_t sta
     display__task_context_t *context = display__find_context_locked(task_id);
     if (context != NULL) {
         context->state = state;
+        if (state != BRUCE_TASK_FOREGROUND && context->frame_active && !context->tiled) {
+            context->frame_noop = true;
+        }
         if (!context->frame_active) { display__set_visibility_locked(context); }
     }
     display__unlock();
