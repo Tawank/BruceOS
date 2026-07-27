@@ -587,7 +587,7 @@ static void bruce_launcher__draw_entry_icon(const bruce_launcher_entry_t *entry,
         bruce_launcher__draw_thick_line(cx, cy, cx + pointer, cy - pointer, stroke, color);
         display__fill_circle(cx, cy, stroke + 1, color);
     } else if (icon == BRUCE_LAUNCHER_ICON_SELFTEST) {
-        int radius = size / 2 - pad;
+        int radius = size / 2;
         bruce_launcher__draw_arc_band(cx, cy, radius, radius - stroke + 1, 45, 315, color);
         bruce_launcher__draw_thick_line(cx - radius / 2, cy, cx - radius / 7,
                                         cy + radius / 3, stroke, color);
@@ -611,17 +611,6 @@ static void bruce_launcher__draw_entry_icon(const bruce_launcher_entry_t *entry,
     }
 }
 
-static void bruce_launcher__draw_carousel_arrow(int cx, int cy, int direction, bool compact,
-                                                 uint16_t color)
-{
-    int extent = compact ? 8 : 11;
-    int stroke = compact ? 2 : 3;
-    int tip_x = cx + direction * extent / 2;
-    int back_x = cx - direction * extent / 2;
-    bruce_launcher__draw_thick_line(back_x, cy - extent, tip_x, cy, stroke, color);
-    bruce_launcher__draw_thick_line(tip_x, cy, back_x, cy + extent, stroke, color);
-}
-
 static void bruce_launcher__draw_root_menu(const bruce_launcher_menu_t *menu, int selected,
                                             const bruce_launcher_theme_t *theme)
 {
@@ -635,12 +624,15 @@ static void bruce_launcher__draw_root_menu(const bruce_launcher_menu_t *menu, in
 
     bool compact = w < 180 || h < 180;
     int large = compact ? 52 : 64;
+    int small = compact ? 28 : 36;
     int content_h = h - BRUCE_LAUNCHER_STATUS_H;
     int cy = BRUCE_LAUNCHER_STATUS_H + content_h * 2 / 5;
+    int previous = (selected + menu->entry_count - 1) % menu->entry_count;
+    int next = (selected + 1) % menu->entry_count;
 
     if (menu->entry_count > 1) {
-        bruce_launcher__draw_carousel_arrow(w / 7, cy, -1, compact, theme->pri);
-        bruce_launcher__draw_carousel_arrow(w - w / 7, cy, 1, compact, theme->pri);
+        bruce_launcher__draw_entry_icon(&menu->entries[previous], w / 7, cy, small, theme->sec);
+        bruce_launcher__draw_entry_icon(&menu->entries[next], w - w / 7, cy, small, theme->sec);
     }
     bruce_launcher__draw_entry_icon(&menu->entries[selected], w / 2, cy, large, theme->pri);
 
