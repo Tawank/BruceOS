@@ -10,6 +10,7 @@
 #include "core_sdk/dialog.h"
 #include "core_sdk/input.h"
 #include "core_sdk/ir.h"
+#include "core_sdk/memory.h"
 #include "core_sdk/result.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
@@ -232,7 +233,7 @@ static bruce_result_t ir_app__prepare_learning_file(
 }
 
 static int ir_app__receive(bool raw, uint32_t timeout_ms, bool show_dialog) {
-    char *capture = malloc(IR_APP_CAPTURE_SIZE);
+    char *capture = memory__malloc(IR_APP_CAPTURE_SIZE);
     if (capture == NULL) return BRUCE_ERR_NO_MEMORY;
     bruce_result_t result = ir__receive(raw, timeout_ms, capture, IR_APP_CAPTURE_SIZE);
     if (result == BRUCE_OK) {
@@ -241,7 +242,7 @@ static int ir_app__receive(bool raw, uint32_t timeout_ms, bool show_dialog) {
     } else if (result == BRUCE_ERR_TIMEOUT) stdio__printf("IR receive timed out\n");
     else if (result == BRUCE_ERR_UNSUPPORTED) stdio__printf("IR decoding failed; retry with raw mode\n");
     else stdio__printf("IR receive failed: %d\n", result);
-    free(capture);
+    memory__free(capture);
     return result;
 }
 
@@ -262,7 +263,7 @@ static bruce_result_t ir_app__custom_learn(void) {
     bruce_result_t result = dialog__choice("Custom learn", "Capture format", modes, 3, &mode, NULL);
     if (result != BRUCE_OK || mode == 2) return BRUCE_ERR_CANCELLED;
 
-    char *capture = malloc(IR_APP_CAPTURE_SIZE);
+    char *capture = memory__malloc(IR_APP_CAPTURE_SIZE);
     if (capture == NULL) return BRUCE_ERR_NO_MEMORY;
     result = ir_app__capture_signal(mode == 1, "the button", capture);
     if (result == BRUCE_ERR_UNSUPPORTED && mode == 0) {
@@ -279,7 +280,7 @@ static bruce_result_t ir_app__custom_learn(void) {
         }
     }
     if (result != BRUCE_OK) {
-        free(capture);
+        memory__free(capture);
         return result;
     }
 
@@ -326,7 +327,7 @@ static bruce_result_t ir_app__custom_learn(void) {
         );
         break;
     }
-    free(capture);
+    memory__free(capture);
     return result == BRUCE_ERR_CANCELLED ? BRUCE_OK : result;
 }
 
@@ -374,7 +375,7 @@ static bruce_result_t ir_app__quick_learn(void) {
     char path[BRUCE_STORAGE_PATH_MAX] = {0};
     bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
 
-    char *capture = malloc(IR_APP_CAPTURE_SIZE);
+    char *capture = memory__malloc(IR_APP_CAPTURE_SIZE);
     if (capture == NULL) { return BRUCE_ERR_NO_MEMORY; }
     size_t saved = 0;
     for (size_t button = 0; button < button_count;) {
@@ -422,7 +423,7 @@ static bruce_result_t ir_app__quick_learn(void) {
         saved++;
         button++;
     }
-    free(capture);
+    memory__free(capture);
     if (file != BRUCE_FILE_ID_INVALID) (void)storage__close(file);
 
     char summary[BRUCE_STORAGE_PATH_MAX + 40];
@@ -673,7 +674,7 @@ static int ir_app__tx_raw(int argc, char **argv) {
     if (argc < 4) return BRUCE_ERR_INVALID_ARGUMENT;
     uint32_t frequency = 0;
     if (!ir_app__parse_u32(argv[2], 100000, &frequency)) return BRUCE_ERR_INVALID_ARGUMENT;
-    uint32_t *timings = malloc(BRUCE_IR_MAX_RAW_TIMINGS * sizeof(*timings));
+    uint32_t *timings = memory__malloc(BRUCE_IR_MAX_RAW_TIMINGS * sizeof(*timings));
     if (timings == NULL) return BRUCE_ERR_NO_MEMORY;
     size_t count = 0;
     for (int arg = 3; arg < argc; ++arg) {
@@ -684,7 +685,7 @@ static int ir_app__tx_raw(int argc, char **argv) {
             char *end = NULL;
             unsigned long duration = strtoul(cursor, &end, 10);
             if (end == cursor || duration == 0 || duration > 32767 || count >= BRUCE_IR_MAX_RAW_TIMINGS) {
-                free(timings);
+                memory__free(timings);
                 return count >= BRUCE_IR_MAX_RAW_TIMINGS ? BRUCE_ERR_RESOURCE_LIMIT
                                                          : BRUCE_ERR_INVALID_ARGUMENT;
             }
@@ -693,7 +694,7 @@ static int ir_app__tx_raw(int argc, char **argv) {
         }
     }
     bruce_result_t result = ir__transmit_raw(timings, count, frequency, 0);
-    free(timings);
+    memory__free(timings);
     return result;
 }
 
@@ -705,7 +706,7 @@ static int ir_app__learn_cli(int argc, char **argv) {
     if (argc > timeout_index && !ir_app__parse_u32(argv[timeout_index], UINT32_MAX / 1000u, &timeout)) {
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
-    char *capture = malloc(IR_APP_CAPTURE_SIZE);
+    char *capture = memory__malloc(IR_APP_CAPTURE_SIZE);
     if (capture == NULL) return BRUCE_ERR_NO_MEMORY;
     bruce_result_t result = ir__receive(raw, timeout * 1000u, capture, IR_APP_CAPTURE_SIZE);
     bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
@@ -718,7 +719,7 @@ static int ir_app__learn_cli(int argc, char **argv) {
     if (result == BRUCE_OK) result = ir_app__write_all(file, header, sizeof(header) - 1u);
     if (result == BRUCE_OK) result = ir_app__write_capture(file, capture, argv[3]);
     if (file != BRUCE_FILE_ID_INVALID) (void)storage__close(file);
-    free(capture);
+    memory__free(capture);
     return result;
 }
 

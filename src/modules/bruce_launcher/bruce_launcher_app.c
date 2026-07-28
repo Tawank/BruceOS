@@ -14,6 +14,7 @@
 #include "core_sdk/display.h"
 #include "core_sdk/input.h"
 #include "core_sdk/loader.h"
+#include "core_sdk/memory.h"
 #include "core_sdk/result.h"
 #include "core_sdk/status_icon.h"
 #include "core_sdk/task.h"
@@ -479,7 +480,7 @@ static int bruce_launcher__run_gui_menu(bruce_launcher_menu_t *menu) {
 
     if (menu->parent != NULL) {
         bruce_dialog_choice_t *choices =
-            (bruce_dialog_choice_t *)malloc(sizeof(*choices) * (size_t)menu->entry_count);
+            (bruce_dialog_choice_t *)memory__malloc(sizeof(*choices) * (size_t)menu->entry_count);
         if (choices == NULL) return BRUCE_ERR_NO_MEMORY;
         for (int i = 0; i < menu->entry_count; ++i) {
             choices[i].label = menu->entries[i].label;
@@ -512,14 +513,14 @@ static int bruce_launcher__run_gui_menu(bruce_launcher_menu_t *menu) {
                 continue;
             }
             if (frame != BRUCE_OK) {
-                free(choices);
+                memory__free(choices);
                 return frame;
             }
             bruce_launcher__draw_main_border(&theme);
             (void)bruce_launcher__draw_status_bar(&theme);
             frame = display__present();
             if (frame != BRUCE_OK) {
-                free(choices);
+                memory__free(choices);
                 return frame;
             }
 
@@ -539,7 +540,7 @@ static int bruce_launcher__run_gui_menu(bruce_launcher_menu_t *menu) {
             }
             (void)input__flush();
         }
-        free(choices);
+        memory__free(choices);
         return 0;
     }
 
@@ -651,7 +652,7 @@ static int bruce_launcher__run_gui_menu(bruce_launcher_menu_t *menu) {
  * usage and the host selftest continue to work. */
 static int bruce_launcher__run_terminal_menu(bruce_launcher_menu_t *menu) {
     bruce_dialog_choice_t *choices =
-        (bruce_dialog_choice_t *)malloc(sizeof(*choices) * (size_t)menu->capacity);
+        (bruce_dialog_choice_t *)memory__malloc(sizeof(*choices) * (size_t)menu->capacity);
     if (choices == NULL) { return BRUCE_ERR_NO_MEMORY; }
 
     for (;;) {
@@ -679,7 +680,7 @@ static int bruce_launcher__run_terminal_menu(bruce_launcher_menu_t *menu) {
         }
     }
 
-    free(choices);
+    memory__free(choices);
     return 0;
 }
 

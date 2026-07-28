@@ -429,6 +429,25 @@ bruce_resource_id_t task_registry__resource_register(bruce_task_resource_cleanup
     return id;
 }
 
+bruce_result_t task_registry__resource_update(bruce_resource_id_t resource_id, void *context) {
+    task__ensure_init();
+    task__lock();
+    task__record_t *self = task__find_by_handle_locked(xTaskGetCurrentTaskHandle());
+    if (self == NULL) {
+        task__unlock();
+        return BRUCE_ERR_NOT_FOUND;
+    }
+    for (int i = 0; i < TASK__MAX_RESOURCES; ++i) {
+        if (self->resources[i].active && self->resources[i].id == resource_id) {
+            self->resources[i].context = context;
+            task__unlock();
+            return BRUCE_OK;
+        }
+    }
+    task__unlock();
+    return BRUCE_ERR_NOT_FOUND;
+}
+
 bruce_result_t task_registry__resource_release(bruce_resource_id_t resource_id) {
     task__ensure_init();
     task__lock();

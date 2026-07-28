@@ -361,33 +361,32 @@ bruce_result_t bruce_stdio_write(const void *data, size_t size) {
     return BRUCE_OK;
 }
 
-int stdio__printf(const char *format, ...) {
+int stdio__vprintf(const char *format, va_list args) {
     if (format == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     char stack_buffer[256];
-    va_list args;
-    va_start(args, format);
     va_list measure;
     va_copy(measure, args);
     int size = vsnprintf(stack_buffer, sizeof(stack_buffer), format, measure);
     va_end(measure);
-    if (size < 0) {
-        va_end(args);
-        return BRUCE_ERR_IO;
-    }
+    if (size < 0) return BRUCE_ERR_IO;
 
     char *output = stack_buffer;
     if ((size_t)size >= sizeof(stack_buffer)) {
         output = malloc((size_t)size + 1);
-        if (output == NULL) {
-            va_end(args);
-            return BRUCE_ERR_NO_MEMORY;
-        }
+        if (output == NULL) return BRUCE_ERR_NO_MEMORY;
         (void)vsnprintf(output, (size_t)size + 1, format, args);
     }
-    va_end(args);
     bruce_result_t result = bruce_stdio_write(output, (size_t)size);
     if (output != stack_buffer) free(output);
     return result == BRUCE_OK ? size : (int)result;
+}
+
+int stdio__printf(const char *format, ...) {
+    va_list args;
+    va_start(args, format);
+    int result = stdio__vprintf(format, args);
+    va_end(args);
+    return result;
 }
 
 bruce_result_t bruce_stdio_read(void *buffer, size_t capacity, uint32_t timeout_ms, size_t *out_size) {

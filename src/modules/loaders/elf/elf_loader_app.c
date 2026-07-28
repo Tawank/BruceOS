@@ -67,16 +67,11 @@ typedef struct {
     uint8_t *image;
 } elf_loader_task_ctx_t;
 
-/* Public SDK symbol allowlist.  ELF apps may only resolve these names; any
- * other undefined symbol (including libc malloc/free) is rejected. */
+/* Public SDK symbol allowlist. ELF apps may only resolve these names; selected
+ * libc names in the table route through task-aware Bruce SDK functions. */
 extern const struct esp_elfsym g_bruce_sdk_elfsyms[];
 
 static uintptr_t elf_loader__find_symbol(const char *sym_name) {
-    if (strcmp(sym_name, "malloc") == 0 || strcmp(sym_name, "free") == 0) {
-        printf("[elf_loader] rejected import: %s\n", sym_name);
-        return 0;
-    }
-
     const struct esp_elfsym *syms = g_bruce_sdk_elfsyms;
     while (syms->name != NULL) {
         if (strcmp(syms->name, sym_name) == 0) { return (uintptr_t)syms->sym; }

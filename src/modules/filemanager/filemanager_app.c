@@ -2,7 +2,6 @@
 
 #include <stdbool.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
 #include "core_sdk/app_runner.h"
@@ -10,6 +9,7 @@
 #include "core_sdk/image.h"
 #include "core_sdk/input.h"
 #include "core_sdk/loader.h"
+#include "core_sdk/memory.h"
 #include "core_sdk/result.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
@@ -27,7 +27,7 @@ static bruce_result_t filemanager__read_preview(const char *path, char **out_tex
     bruce_result_t result = storage__open(path, BRUCE_STORAGE_OPEN_READ, &file);
     if (result != BRUCE_OK) return result;
 
-    char *text = calloc(FILEMANAGER_PREVIEW_MAX + 1, 1);
+    char *text = memory__calloc(FILEMANAGER_PREVIEW_MAX + 1, 1);
     if (text == NULL) {
         (void)storage__close(file);
         return BRUCE_ERR_NO_MEMORY;
@@ -43,7 +43,7 @@ static bruce_result_t filemanager__read_preview(const char *path, char **out_tex
     }
     (void)storage__close(file);
     if (result != BRUCE_OK) {
-        free(text);
+        memory__free(text);
         return result;
     }
 
@@ -70,13 +70,13 @@ static bruce_result_t filemanager__view_file(const char *path, bool gui) {
 
     if (!gui) {
         stdio__printf("%s%s\n", text, truncated ? "\n[preview truncated]" : "");
-        free(text);
+        memory__free(text);
         return BRUCE_OK;
     }
 
     bruce_viewer_id_t viewer = BRUCE_VIEWER_ID_INVALID;
     result = dialog__create_text_viewer(filemanager__basename(path), text, &viewer);
-    free(text);
+    memory__free(text);
     if (result != BRUCE_OK) return result;
 
     (void)input__flush();

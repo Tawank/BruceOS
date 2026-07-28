@@ -2,9 +2,8 @@
 #include "native_helpers_js.h"
 #include "user_classes_js.h"
 
-#include <stdlib.h>
-
 #include "core_sdk/dialog.h"
+#include "core_sdk/memory.h"
 #include "core_sdk/storage.h"
 
 JSValue native_dialogMessage(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
@@ -217,7 +216,7 @@ void native_textviewer_finalizer(JSContext *ctx, void *opaque) {
     js_textviewer_data_t *d = (js_textviewer_data_t *)opaque;
     if (d == NULL) { return; }
     if (d->viewer != BRUCE_VIEWER_ID_INVALID) { dialog__viewer_close(d->viewer); }
-    free(d);
+    memory__free(d);
 }
 
 static bruce_viewer_id_t js_textviewer_get_id(JSContext *ctx, JSValue obj) {
@@ -249,7 +248,7 @@ JSValue native_dialogCreateTextViewer(JSContext *ctx, JSValue *this_val, int arg
         return obj;
     }
 
-    js_textviewer_data_t *d = (js_textviewer_data_t *)malloc(sizeof(js_textviewer_data_t));
+    js_textviewer_data_t *d = (js_textviewer_data_t *)memory__malloc(sizeof(js_textviewer_data_t));
     if (d == NULL) {
         dialog__viewer_close(viewer);
         return JS_ThrowOutOfMemory(ctx);
@@ -362,6 +361,7 @@ JSValue native_dialogCreateTextViewerClose(JSContext *ctx, JSValue *this_val, in
         dialog__viewer_close(d->viewer);
         d->viewer = BRUCE_VIEWER_ID_INVALID;
     }
+    memory__free(d);
     JS_SetOpaque(ctx, obj, NULL);
     return JS_UNDEFINED;
 }

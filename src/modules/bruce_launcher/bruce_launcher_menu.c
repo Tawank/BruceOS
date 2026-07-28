@@ -1,6 +1,7 @@
 #include "bruce_launcher_menu.h"
 
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -14,6 +15,11 @@
 #define BRUCE_LAUNCHER_JSON_MAX 8192
 #define BRUCE_LAUNCHER_MAX_DEPTH 4
 #define BRUCE_LAUNCHER_TITLE "Main Menu"
+
+typedef struct {
+    uint8_t *next;
+    size_t remaining;
+} bruce_launcher_menu_arena_t;
 
 /* Default launcher configuration written when /launcher.json is missing. */
 static const char *BRUCE_LAUNCHER_DEFAULT_JSON =
@@ -73,30 +79,27 @@ static void bruce_launcher__parse_label(
     icon_name[icon_name_size - 1] = '\0';
 }
 
-static bruce_launcher_menu_t *bruce_launcher__menu_create(const char *title, bruce_launcher_menu_t *parent) {
-    bruce_launcher_menu_t *menu = (bruce_launcher_menu_t *)calloc(1, sizeof(*menu));
-    if (menu == NULL) return NULL;
+static bruce_launcher_menu_t *
+bruce_launcher__menu_create(
+    bruce_launcher_menu_arena_t *arena, const char *title, bruce_launcher_menu_t *parent, int capacity
+) {
+    size_t entries_size = (size_t)capacity * sizeof(bruce_launcher_entry_t);
+    size_t allocation_size = sizeof(bruce_launcher_menu_t) + entries_size;
+    if (arena == NULL || allocation_size > arena->remaining) return NULL;
+
+    bruce_launcher_menu_t *menu = (bruce_launcher_menu_t *)arena->next;
+    arena->next += allocation_size;
+    arena->remaining -= allocation_size;
 
     bruce_launcher__parse_label(title, menu->title, sizeof(menu->title), NULL, 0);
-    menu->capacity = BRUCE_LAUNCHER_MAX_ENTRIES;
-    menu->entries = (bruce_launcher_entry_t *)calloc((size_t)menu->capacity, sizeof(*menu->entries));
-    if (menu->entries == NULL) {
-        free(menu);
-        return NULL;
-    }
+    menu->capacity = capacity;
+    menu->entries = capacity > 0 ? (bruce_launcher_entry_t *)(menu + 1) : NULL;
     menu->parent = parent;
     return menu;
 }
 
 void bruce_launcher__menu_free(bruce_launcher_menu_t *menu) {
-    if (menu == NULL) return;
-    for (int i = 0; i < menu->entry_count; ++i) {
-        if (menu->entries[i].kind == BRUCE_LAUNCHER_ENTRY_SUBMENU) {
-            bruce_launcher__menu_free(menu->entries[i].submenu);
-        }
-    }
-    free(menu->entries);
-    free(menu);
+    memory__free(menu);
 }
 
 static bool
@@ -136,7 +139,7 @@ static char *bruce_launcher__read_file(const char *path) {
     bruce_file_id_t file;
     if (storage__open(path, BRUCE_STORAGE_OPEN_READ, &file) != BRUCE_OK) return NULL;
 
-    char *buffer = (char *)malloc(BRUCE_LAUNCHER_JSON_MAX);
+    char *buffer = (char *)memory__malloc(BRUCE_LAUNCHER_JSON_MAX);
     if (buffer == NULL) {
         storage__close(file);
         return NULL;
@@ -174,12 +177,12 @@ static bool bruce_launcher__write_default_config(void) {
 
 static int bruce_launcher__discover_apps(bruce_launcher_menu_t *menu, const char *path) {
     bruce_storage_entry_t *entries =
-        (bruce_storage_entry_t *)malloc(sizeof(*entries) * BRUCE_LAUNCHER_MAX_ENTRIES);
+        (bruce_storage_entry_t *)memory__malloc(sizeof(*entries) * BRUCE_LAUNCHER_MAX_ENTRIES);
     if (entries == NULL) return 0;
 
     size_t count = 0;
     if (storage__list(path, entries, BRUCE_LAUNCHER_MAX_ENTRIES, &count) != BRUCE_OK) {
-        free(entries);
+        memory__free(entries);
         return 0;
     }
 
@@ -201,49 +204,114 @@ static int bruce_launcher__discover_apps(bruce_launcher_menu_t *menu, const char
         memory__free(manifest);
     }
 
-    free(entries);
+    memory__free(entries);
     return added;
 }
 
 static bruce_launcher_menu_t *
-bruce_launcher__parse_json_object(cJSON *root, const char *title, bruce_launcher_menu_t *parent, int depth);
+bruce_launcher__parse_json_object(
+    bruce_launcher_menu_arena_t *arena, cJSON *root, const char *title, bruce_launcher_menu_t *parent,
+    int depth
+);
 
-static bool
-bruce_launcher__parse_json_value(bruce_launcher_menu_t *menu, const char *key, cJSON *value, int depth) {
+static int bruce_launcher__json_entry_count(cJSON *root, bool include_back, int depth) {
+    int count = include_back ? 1 : 0;
+    cJSON *child;
+    cJSON_ArrayForEach(child, root) {
+        bool is_command = cJSON_IsString(child) && child->valuestring != NULL;
+        bool is_submenu = cJSON_IsObject(child) && depth < BRUCE_LAUNCHER_MAX_DEPTH;
+        if (child->string != NULL && (is_command || is_submenu)) count++;
+        if (count >= BRUCE_LAUNCHER_MAX_ENTRIES) break;
+    }
+    return count;
+}
+
+static size_t bruce_launcher__json_allocation_size(cJSON *root, bool include_back, int depth) {
+    int capacity = bruce_launcher__json_entry_count(root, include_back, depth);
+    size_t size = sizeof(bruce_launcher_menu_t) + (size_t)capacity * sizeof(bruce_launcher_entry_t);
+    int child_limit = capacity - (include_back ? 1 : 0);
+    int child_count = 0;
+
+    cJSON *child;
+    cJSON_ArrayForEach(child, root) {
+        bool is_command = cJSON_IsString(child) && child->valuestring != NULL;
+        bool is_submenu = cJSON_IsObject(child) && depth < BRUCE_LAUNCHER_MAX_DEPTH;
+        if (child->string == NULL || (!is_command && !is_submenu)) continue;
+        if (child_count >= child_limit) break;
+        child_count++;
+
+        size_t child_size = 0;
+        if (is_command && child->valuestring[0] == '/') {
+            child_size = sizeof(bruce_launcher_menu_t) +
+                         BRUCE_LAUNCHER_MAX_ENTRIES * sizeof(bruce_launcher_entry_t);
+        } else if (is_submenu) {
+            child_size = bruce_launcher__json_allocation_size(child, true, depth + 1);
+        }
+        if (child_size > SIZE_MAX - size) return 0;
+        size += child_size;
+    }
+    return size;
+}
+
+static bool bruce_launcher__parse_json_value(
+    bruce_launcher_menu_arena_t *arena, bruce_launcher_menu_t *menu, const char *key, cJSON *value,
+    int depth
+) {
     if (cJSON_IsString(value) && value->valuestring != NULL) {
         if (value->valuestring[0] != '/') {
             return bruce_launcher__menu_add_command(menu, key, value->valuestring);
         }
-        bruce_launcher_menu_t *submenu = bruce_launcher__menu_create(key, menu);
+        bruce_launcher_menu_t *submenu =
+            bruce_launcher__menu_create(arena, key, menu, BRUCE_LAUNCHER_MAX_ENTRIES);
         if (submenu == NULL) return false;
         (void)bruce_launcher__discover_apps(submenu, value->valuestring);
         (void)bruce_launcher__menu_add_back(submenu);
         if (bruce_launcher__menu_add_submenu(menu, key, submenu)) return true;
-        bruce_launcher__menu_free(submenu);
         return false;
     }
 
     if (cJSON_IsObject(value) && depth < BRUCE_LAUNCHER_MAX_DEPTH) {
-        bruce_launcher_menu_t *submenu = bruce_launcher__parse_json_object(value, key, menu, depth + 1);
+        bruce_launcher_menu_t *submenu =
+            bruce_launcher__parse_json_object(arena, value, key, menu, depth + 1);
         if (submenu == NULL) return false;
         if (bruce_launcher__menu_add_submenu(menu, key, submenu)) return true;
-        bruce_launcher__menu_free(submenu);
         return false;
     }
     return true;
 }
 
 static bruce_launcher_menu_t *
-bruce_launcher__parse_json_object(cJSON *root, const char *title, bruce_launcher_menu_t *parent, int depth) {
-    bruce_launcher_menu_t *menu = bruce_launcher__menu_create(title, parent);
+bruce_launcher__parse_json_object(
+    bruce_launcher_menu_arena_t *arena, cJSON *root, const char *title, bruce_launcher_menu_t *parent,
+    int depth
+) {
+    int capacity = bruce_launcher__json_entry_count(root, parent != NULL, depth);
+    bruce_launcher_menu_t *menu = bruce_launcher__menu_create(arena, title, parent, capacity);
     if (menu == NULL) return NULL;
 
     cJSON *child;
     cJSON_ArrayForEach(child, root) {
-        if (child->string != NULL && !bruce_launcher__parse_json_value(menu, child->string, child, depth))
+        if (child->string != NULL &&
+            !bruce_launcher__parse_json_value(arena, menu, child->string, child, depth))
             break;
     }
     if (parent != NULL) (void)bruce_launcher__menu_add_back(menu);
+    return menu;
+}
+
+static bruce_launcher_menu_t *bruce_launcher__parse_json(cJSON *root) {
+    size_t allocation_size = bruce_launcher__json_allocation_size(root, false, 0);
+    if (allocation_size == 0) return NULL;
+
+    void *allocation = memory__calloc(1, allocation_size);
+    if (allocation == NULL) return NULL;
+    bruce_launcher_menu_arena_t arena = {
+        .next = (uint8_t *)allocation,
+        .remaining = allocation_size,
+    };
+    bruce_launcher_menu_t *menu =
+        bruce_launcher__parse_json_object(&arena, root, BRUCE_LAUNCHER_TITLE, NULL, 0);
+    if (menu == NULL) memory__free(allocation);
     return menu;
 }
 
@@ -255,9 +323,9 @@ bruce_launcher_menu_t *bruce_launcher__menu_load(void) {
     }
 
     cJSON *root = text != NULL ? cJSON_Parse(text) : NULL;
-    free(text);
+    memory__free(text);
     if (root != NULL && cJSON_IsObject(root)) {
-        bruce_launcher_menu_t *menu = bruce_launcher__parse_json_object(root, BRUCE_LAUNCHER_TITLE, NULL, 0);
+        bruce_launcher_menu_t *menu = bruce_launcher__parse_json(root);
         cJSON_Delete(root);
         if (menu != NULL) return menu;
     } else if (root != NULL) {
@@ -269,7 +337,7 @@ bruce_launcher_menu_t *bruce_launcher__menu_load(void) {
         cJSON_Delete(root);
         return NULL;
     }
-    bruce_launcher_menu_t *menu = bruce_launcher__parse_json_object(root, BRUCE_LAUNCHER_TITLE, NULL, 0);
+    bruce_launcher_menu_t *menu = bruce_launcher__parse_json(root);
     cJSON_Delete(root);
     return menu;
 }

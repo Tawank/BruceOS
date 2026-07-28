@@ -354,10 +354,11 @@ file format without involving the loader module.
 
 The ELF loader module's `elf_find_sym()` resolves only the documented public
 SDK symbol allowlist it maintains.  It never resolves ESP-IDF, private Core,
-`malloc`, or `free` symbols.  The SDK uses `memory__malloc()` and
-`memory__free()`; imports named `malloc` or `free` are rejected.  A trusted
-native app can still embed a custom allocator, which is unsupported rather
-than a hard sandbox violation.
+or arbitrary libc symbols. Standard heap imports (`malloc`, `calloc`,
+`realloc`, and `free`) resolve to the task-owned `memory__*` API, while console
+imports such as `printf` resolve to routed Bruce stdio. A trusted native app
+can still embed a custom allocator, which is unsupported rather than a hard
+sandbox violation.
 
 ## JavaScript contract
 
@@ -488,8 +489,9 @@ tracked resource.
 ## Memory and resource ownership
 
 ELF apps never receive libc `malloc` or `free`.  They use
-`memory__malloc()`/`memory__free()`.  Core allocates ELF images, BSS, loader
-bookkeeping, and JS VM/context memory through this same task-owned allocator.
+`memory__malloc()`/`memory__calloc()`/`memory__realloc()`/`memory__free()`.
+Core allocates ELF images, BSS, loader bookkeeping, and JS VM/context memory
+through this same task-owned allocator.
 
 Every task has one universal resource registry in thread-local storage.  Core
 services register opaque handles and Core-owned cleanup callbacks for memory,

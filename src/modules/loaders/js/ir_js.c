@@ -1,9 +1,9 @@
 #include "ir_js.h"
 
 #include <stdint.h>
-#include <stdlib.h>
 
 #include "core_sdk/ir.h"
+#include "core_sdk/memory.h"
 
 #define IR_JS_CAPTURE_SIZE 8192u
 
@@ -13,11 +13,11 @@ static JSValue ir_js__read(JSContext *ctx, int argc, JSValue *argv, bool raw) {
     if (timeout_seconds < 1 || (uint32_t)timeout_seconds > UINT32_MAX / 1000u) {
         return JS_ThrowRangeError(ctx, "ir.read timeout out of range");
     }
-    char *capture = malloc(IR_JS_CAPTURE_SIZE);
+    char *capture = memory__malloc(IR_JS_CAPTURE_SIZE);
     if (capture == NULL) return JS_ThrowInternalError(ctx, "ir.read out of memory");
     bruce_result_t result = ir__receive(raw, (uint32_t)timeout_seconds * 1000u, capture, IR_JS_CAPTURE_SIZE);
     JSValue value = JS_NewString(ctx, result == BRUCE_OK ? capture : "");
-    free(capture);
+    memory__free(capture);
     return value;
 }
 

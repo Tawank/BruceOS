@@ -2,13 +2,13 @@
 
 #include <stdbool.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
 #include "core_sdk/config.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/display.h"
 #include "core_sdk/input.h"
+#include "core_sdk/memory.h"
 #include "core_sdk/result.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/task.h"
@@ -182,10 +182,10 @@ static void terminal__argv_to_line(int argc, char **argv, char *out, size_t out_
 int terminal_app_main(int argc, char **argv) {
     terminal__state_t state = {0};
     state.child = BRUCE_TASK_ID_INVALID;
-    state.transcript = calloc(TERMINAL__TRANSCRIPT_CAPACITY, 1);
+    state.transcript = memory__calloc(TERMINAL__TRANSCRIPT_CAPACITY, 1);
     if (state.transcript == NULL) return BRUCE_ERR_NO_MEMORY;
     if (bruce_stdio_session_create(&state.session) != BRUCE_OK) {
-        free(state.transcript);
+        memory__free(state.transcript);
         return BRUCE_ERR_RESOURCE_LIMIT;
     }
     terminal__append_text(&state, "Bruce terminal\nType a command and press Enter.\n");
@@ -255,6 +255,6 @@ int terminal_app_main(int argc, char **argv) {
 
     if (state.child != BRUCE_TASK_ID_INVALID) (void)task__stop(state.child);
     (void)bruce_stdio_session_close(state.session);
-    free(state.transcript);
+    memory__free(state.transcript);
     return 0;
 }

@@ -1,9 +1,9 @@
 /* Public SDK symbol table exported to ELF applications.
  *
  * The ELF loader module registers this table with the Espressif ELF loader and
- * uses a custom resolver that searches only these symbols.  Imported libc
- * malloc/free are explicitly rejected; all other unknown symbols resolve to 0
- * and cause relocation failure, which is the desired sandbox behavior.
+ * uses a custom resolver that searches only these symbols. Selected libc names
+ * are mapped to task-aware SDK functions; all other unknown symbols resolve to
+ * 0 and cause relocation failure, which is the desired sandbox behavior.
  *
  * When adding a new public SDK capability, also export its entry points here
  * if ELF apps are expected to call them directly.
@@ -42,6 +42,16 @@
 #include "core_sdk/task.h"
 #include "core_sdk/tcp.h"
 
+static int bruce_elf__puts(const char *text) {
+    if (text == NULL || bruce_stdio_write(text, strlen(text)) != BRUCE_OK) return EOF;
+    return bruce_stdio_write("\n", 1) == BRUCE_OK ? 0 : EOF;
+}
+
+static int bruce_elf__putchar(int character) {
+    unsigned char byte = (unsigned char)character;
+    return bruce_stdio_write(&byte, 1) == BRUCE_OK ? byte : EOF;
+}
+
 const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     /* Core runtime / task */
     ESP_ELFSYM_EXPORT(runtime__now),
@@ -79,8 +89,14 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
 
     /* Memory */
     ESP_ELFSYM_EXPORT(memory__malloc),
+    ESP_ELFSYM_EXPORT(memory__calloc),
+    ESP_ELFSYM_EXPORT(memory__realloc),
     ESP_ELFSYM_EXPORT(memory__free),
     ESP_ELFSYM_EXPORT(memory__get_stats),
+    {"malloc", (const void *)&memory__malloc},
+    {"calloc", (const void *)&memory__calloc},
+    {"realloc", (const void *)&memory__realloc},
+    {"free", (const void *)&memory__free},
 
     /* Permission (introspection only; protected APIs check internally) */
     ESP_ELFSYM_EXPORT(permission__check),
@@ -228,19 +244,21 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(bruce_stdio_read_line),
     ESP_ELFSYM_EXPORT(bruce_stdio_write),
     ESP_ELFSYM_EXPORT(stdio__printf),
+    ESP_ELFSYM_EXPORT(stdio__vprintf),
     ESP_ELFSYM_EXPORT(bruce_stdio_session_create),
     ESP_ELFSYM_EXPORT(bruce_stdio_session_close),
     ESP_ELFSYM_EXPORT(bruce_stdio_session_route_children),
     ESP_ELFSYM_EXPORT(bruce_stdio_session_write_input),
     ESP_ELFSYM_EXPORT(bruce_stdio_session_read_output),
 
-    /* Standard C library subset (provided by firmware, not by forwarding
-     * malloc/free to libc). */
-    ESP_ELFSYM_EXPORT(printf),
-    ESP_ELFSYM_EXPORT(puts),
+    /* Standard C library subset. Console and heap calls are routed through
+     * task-aware Bruce SDK functions rather than firmware libc. */
+    {"printf", (const void *)&stdio__printf},
+    {"vprintf", (const void *)&stdio__vprintf},
+    {"puts", (const void *)&bruce_elf__puts},
+    {"putchar", (const void *)&bruce_elf__putchar},
     ESP_ELFSYM_EXPORT(snprintf),
     ESP_ELFSYM_EXPORT(sprintf),
-    ESP_ELFSYM_EXPORT(vprintf),
     ESP_ELFSYM_EXPORT(memcpy),
     ESP_ELFSYM_EXPORT(memmove),
     ESP_ELFSYM_EXPORT(memset),

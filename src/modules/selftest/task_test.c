@@ -32,9 +32,27 @@ static int selftest__worker_normal_exit(int argc, char **argv) {
     if (task__to_background() != BRUCE_OK) { return -1; }
     s_shared.backgrounded_self = true;
 
-    void *block = memory__malloc(256);
+    unsigned char *block = memory__calloc(256, 1);
     if (block == NULL) { return -1; }
+    for (size_t i = 0; i < 256; ++i) {
+        if (block[i] != 0) {
+            memory__free(block);
+            return -1;
+        }
+    }
     memset(block, 0xAB, 256);
+    unsigned char *grown = memory__realloc(block, 384);
+    if (grown == NULL) {
+        memory__free(block);
+        return -1;
+    }
+    block = grown;
+    for (size_t i = 0; i < 256; ++i) {
+        if (block[i] != 0xAB) {
+            memory__free(block);
+            return -1;
+        }
+    }
     s_shared.allocated_memory = true;
 
     bruce_resource_id_t resource = task_registry__resource_register(selftest__resource_cleanup, &s_shared);
@@ -45,7 +63,7 @@ static int selftest__worker_normal_exit(int argc, char **argv) {
     s_shared.registered_resource = true;
 
     bruce_task_snapshot_t snapshot;
-    if (task__snapshot(task__current_id(), &snapshot) != BRUCE_OK || snapshot.memory_bytes < 256 ||
+    if (task__snapshot(task__current_id(), &snapshot) != BRUCE_OK || snapshot.memory_bytes < 384 ||
         snapshot.resource_count < 2) {
         memory__free(block);
         return -1;

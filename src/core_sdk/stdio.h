@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -28,6 +29,7 @@ bruce_result_t bruce_stdio_write(const void *data, size_t size);
 /* printf-style form of bruce_stdio_write(). Returns the number of formatted
  * bytes written, or a negative BRUCE_ERR_* value. */
 int stdio__printf(const char *format, ...) __attribute__((format(printf, 1, 2)));
+int stdio__vprintf(const char *format, va_list args) __attribute__((format(printf, 1, 0)));
 
 /* Creates a task-owned, bounded input/output session. Routing a session makes
  * subsequently launched child tasks use it through bruce_stdio_read(),

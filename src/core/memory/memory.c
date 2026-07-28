@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "esp_heap_caps.h"
 
@@ -38,6 +39,42 @@ void *memory__malloc(size_t size) {
     header->resource_id = resource_id;
     task_registry__account_memory((int64_t)size);
     return (void *)(header + 1);
+}
+
+void *memory__calloc(size_t count, size_t size) {
+    if (count == 0 || size == 0 || count > SIZE_MAX / size) { return NULL; }
+    size_t total = count * size;
+    void *ptr = memory__malloc(total);
+    if (ptr != NULL) { memset(ptr, 0, total); }
+    return ptr;
+}
+
+void *memory__realloc(void *ptr, size_t size) {
+    if (ptr == NULL) return memory__malloc(size);
+    if (size == 0) {
+        memory__free(ptr);
+        return NULL;
+    }
+    if (size > SIZE_MAX - sizeof(memory__header_t)) return NULL;
+
+    memory__header_t *header = ((memory__header_t *)ptr) - 1;
+    if (header->magic != MEMORY__MAGIC) return NULL;
+
+    memory__header_t *grown = malloc(sizeof(*grown) + size);
+    if (grown == NULL) return NULL;
+    grown->magic = MEMORY__MAGIC;
+    grown->size = size;
+    grown->resource_id = header->resource_id;
+    memcpy(grown + 1, ptr, header->size < size ? header->size : size);
+
+    if (task_registry__resource_update(header->resource_id, grown) != BRUCE_OK) {
+        free(grown);
+        return NULL;
+    }
+    task_registry__account_memory((int64_t)size - (int64_t)header->size);
+    header->magic = 0;
+    free(header);
+    return grown + 1;
 }
 
 void memory__free(void *ptr) {

@@ -73,6 +73,9 @@ bruce_result_t task_registry__create(const task_create_params_t *params, bruce_t
  * resource table is full. */
 bruce_resource_id_t task_registry__resource_register(bruce_task_resource_cleanup_t cleanup, void *context);
 
+/* Replaces the cleanup context for a resource owned by the calling task. */
+bruce_result_t task_registry__resource_update(bruce_resource_id_t resource_id, void *context);
+
 /* Releases a resource early because the owner already cleaned it up itself
  * (e.g. an explicit storage__close()); this does NOT invoke the cleanup
  * callback again.  `resource_id` must belong to the calling task.  Returns
