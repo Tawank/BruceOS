@@ -29,14 +29,14 @@ bool selftest__run_icon_registry_case(void) {
         return false;
     }
 
-    /* Verify at least one icon renders successfully through display__draw_svg_path. */
+    /* Verify at least one icon renders successfully through display__fill_svg_path. */
     const char *clock = icon__get("clock");
     if (display__begin_frame() != BRUCE_OK) {
         printf("[selftest] icon/registry: FAIL, could not begin frame\n");
         return false;
     }
     if (display__fill_screen(BRUCE_COLOR_BLACK) != BRUCE_OK ||
-        display__draw_svg_path(0, 0, 24, 24, clock, BRUCE_COLOR_WHITE) != BRUCE_OK) {
+        display__fill_svg_path(0, 0, 24, 24, clock, BRUCE_COLOR_WHITE) != BRUCE_OK) {
         printf("[selftest] icon/registry: FAIL, could not draw icon\n");
         display__present();
         return false;

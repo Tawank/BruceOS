@@ -207,6 +207,17 @@ bruce_result_t display__draw_svg_path(
     int16_t x, int16_t y, int16_t w, int16_t h, const char *path, bruce_display_color_t color
 );
 
+/*
+ * Fill a vector path in SVG path-data syntax inside a destination rectangle.
+ * The path is assumed to be authored in a 24x24 viewBox (Material icon style);
+ * it is scaled to fit the rectangle and every closed subpath is filled with
+ * `color` using the even-odd rule.  Strokes are not drawn — use
+ * display__draw_svg_path() for outline-only rendering.
+ */
+bruce_result_t display__fill_svg_path(
+    int16_t x, int16_t y, int16_t w, int16_t h, const char *path, bruce_display_color_t color
+);
+
 /* -------------------------------------------------------------------------- */
 /* Display control                                                            */
 /* -------------------------------------------------------------------------- */

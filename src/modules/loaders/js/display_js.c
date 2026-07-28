@@ -392,6 +392,25 @@ JSValue native_drawSvgPath(JSContext *ctx, JSValue *this_val, int argc, JSValue 
     return JS_UNDEFINED;
 }
 
+JSValue native_fillSvgPath(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
+    (void)this_val;
+    int x = native_arg_int(ctx, argc, argv, 0, 0);
+    int y = native_arg_int(ctx, argc, argv, 1, 0);
+    int w = native_arg_int(ctx, argc, argv, 2, 24);
+    int h = native_arg_int(ctx, argc, argv, 3, 24);
+    int c = native_arg_int(ctx, argc, argv, 5, 0xFFFF);
+
+    JSCStringBuf buf;
+    const char *path = NULL;
+    if (argc > 4 && JS_IsString(ctx, argv[4])) {
+        path = JS_ToCString(ctx, argv[4], &buf);
+    }
+    if (path != NULL) {
+        display__fill_svg_path((int16_t)x, (int16_t)y, (int16_t)w, (int16_t)h, path, (bruce_display_color_t)c);
+    }
+    return JS_UNDEFINED;
+}
+
 static JSValue native_drawImageCommon(JSContext *ctx, int argc, JSValue *argv) {
     if (argc < 1 || (!JS_IsString(ctx, argv[0]) && !JS_IsTypedArray(ctx, argv[0]))) {
         return JS_ThrowTypeError(ctx, "display image source must be a path or Uint8Array");

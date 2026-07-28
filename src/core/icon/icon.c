@@ -18,16 +18,21 @@ static const char s_icon_wifi[] =
 
 /* mdi-bluetooth */
 static const char s_icon_bluetooth[] =
-    "M14.88,16.29L13,18.17V14.41M13,5.83L14.88,7.71L13,9.58M17.71,7.71L12,2H11V9.58L6.41,5L5,6.41"
-    "L10.59,12L5,17.58L6.41,19L11,14.41V22H12L17.71,16.29L13.41,12L17.71,7.71Z";
+    "M14.88,16.29L13,18.17V14.41M13,5.83L14.88,7.71L13,9.58M17.71,7.71L12,2H11V9.58L6.41,5L5,6.41L10.59,12L5,"
+    "17.58L6.41,19L11,14.41V22H12L17.71,16.29L13.41,12L17.71,7.71Z";
 
 /* mdi-remote */
 static const char s_icon_ir[] =
-    "M12,0C8.96,0 6.21,1.23 4.22,3.22L5.63,4.63C7.26,3 9.5,2 12,2C14.5,2 16.74,3 18.36,4.64L19.77,3.23"
-    "C17.79,1.23 15.04,0 12,0M7.05,6.05L8.46,7.46C9.37,6.56 10.62,6 12,6C13.38,6 14.63,6.56 15.54,7.46"
-    "L16.95,6.05C15.68,4.78 13.93,4 12,4C10.07,4 8.32,4.78 7.05,6.05M12,15A2,2 0 0,1 10,13A2,2 0 0,1 12,11"
-    "A2,2 0 0,1 14,13A2,2 0 0,1 12,15M15,9H9A1,1 0 0,0 8,10V22A1,1 0 0,0 9,23H15A1,1 0 0,0 16,22V10"
-    "A1,1 0 0,0 15,9Z";
+    "M12,0C8.96,0 6.21,1.23 4.22,3.22L5.63,4.63C7.26,3 9.5,2 12,2C14.5,2 16.74,3 "
+    "18.36,4.64L19.77,3.23C17.79,1.23 15.04,0 12,0M7.05,6.05L8.46,7.46C9.37,6.56 10.62,6 12,6C13.38,6 "
+    "14.63,6.56 15.54,7.46L16.95,6.05C15.68,4.78 13.93,4 12,4C10.07,4 8.32,4.78 7.05,6.05M12,15A2,2 0 0,1 "
+    "10,13A2,2 0 0,1 12,11A2,2 0 0,1 14,13A2,2 0 0,1 12,15M15,9H9A1,1 0 0,0 8,10V22A1,1 0 0,0 9,23H15A1,1 0 "
+    "0,0 16,22V10A1,1 0 0,0 15,9Z";
+
+/* mdi-radio-handheld */
+static const char s_icon_handheld[] =
+    "M9,2A1,1 0 0,0 8,3C8,8.67 8,14.33 8,20C8,21.11 8.89,22 10,22H15C16.11,22 17,21.11 17,20V9C17,7.89 "
+    "16.11,7 15,7H10V3A1,1 0 0,0 9,2M10,9H15V13H10V9Z";
 
 /* mdi-folder */
 static const char s_icon_folder[] =
@@ -74,19 +79,17 @@ typedef struct {
 } icon__entry_t;
 
 static const icon__entry_t s_icons[] = {
-    {"wifi",      s_icon_wifi     },
-    {"bluetooth", s_icon_bluetooth},
-    {"bt",        s_icon_bluetooth},
-    {"ir",        s_icon_ir       },
-    {"folder",    s_icon_folder   },
-    {"files",     s_icon_folder   },
-    {"terminal",  s_icon_terminal },
-    {"clock",     s_icon_clock    },
-    {"settings",  s_icon_settings },
-    {"cog",       s_icon_settings },
-    {"selftest",  s_icon_selftest },
-    {"test-tube", s_icon_selftest },
-    {"apps",      s_icon_apps     },
+    {"wifi",     s_icon_wifi     },
+    {"ble",      s_icon_bluetooth},
+    {"remote",   s_icon_ir       },
+    {"handheld", s_icon_handheld },
+    {"folder",   s_icon_folder   },
+    {"files",    s_icon_folder   },
+    {"terminal", s_icon_terminal },
+    {"clock",    s_icon_clock    },
+    {"settings", s_icon_settings },
+    {"selftest", s_icon_selftest },
+    {"apps",     s_icon_apps     },
 };
 
 const char *icon__get(const char *name) {

@@ -916,6 +916,11 @@ static void display__draw_triangle_fill(
 #define DISPLAY__SVG_VIEWBOX_HEIGHT 24.0f
 #define DISPLAY__SVG_MAX_STEPS 64
 #define DISPLAY__SVG_MIN_STEPS 8
+#define DISPLAY__SVG_MAX_EDGES 384
+
+typedef struct {
+    float x0, y0, x1, y1;
+} display__svg_edge_t;
 
 typedef struct {
     float x;
@@ -926,6 +931,87 @@ typedef struct {
     float last_cpy;
     bool initialized;
 } display__svg_state_t;
+
+static display__svg_edge_t s_svg_edges[DISPLAY__SVG_MAX_EDGES];
+static size_t s_svg_edge_count;
+static bool s_svg_fill_mode;
+static int16_t s_svg_ddx, s_svg_ddy, s_svg_ddw, s_svg_ddh;
+static bruce_display_color_t s_svg_color;
+
+static void display__svg_add_edge(float x0, float y0, float x1, float y1) {
+    if (!s_svg_fill_mode || s_svg_edge_count >= DISPLAY__SVG_MAX_EDGES) { return; }
+    s_svg_edges[s_svg_edge_count].x0 = (float)s_svg_ddx + x0 * s_svg_ddw / DISPLAY__SVG_VIEWBOX_WIDTH;
+    s_svg_edges[s_svg_edge_count].y0 = (float)s_svg_ddy + y0 * s_svg_ddh / DISPLAY__SVG_VIEWBOX_HEIGHT;
+    s_svg_edges[s_svg_edge_count].x1 = (float)s_svg_ddx + x1 * s_svg_ddw / DISPLAY__SVG_VIEWBOX_WIDTH;
+    s_svg_edges[s_svg_edge_count].y1 = (float)s_svg_ddy + y1 * s_svg_ddh / DISPLAY__SVG_VIEWBOX_HEIGHT;
+    s_svg_edge_count++;
+}
+
+static void display__svg_fill_edges(bruce_display_color_t color) {
+    if (s_svg_edge_count == 0) { return; }
+
+    float scan_min = s_svg_edges[0].y0;
+    float scan_max = s_svg_edges[0].y0;
+    for (size_t i = 0; i < s_svg_edge_count; ++i) {
+        float min_yi = fminf(s_svg_edges[i].y0, s_svg_edges[i].y1);
+        float max_yi = fmaxf(s_svg_edges[i].y0, s_svg_edges[i].y1);
+        if (min_yi < scan_min) { scan_min = min_yi; }
+        if (max_yi > scan_max) { scan_max = max_yi; }
+    }
+
+    int y0 = (int)floorf(scan_min);
+    int y1 = (int)ceilf(scan_max);
+
+    typedef struct { float x; int dw; } svg_ix_t;
+    svg_ix_t ix[128];
+
+    for (int y = y0; y <= y1; ++y) {
+        int count = 0;
+        float yf = (float)y;
+        for (size_t i = 0; i < s_svg_edge_count && count < (int)(sizeof(ix) / sizeof(ix[0])); ++i) {
+            float ey0 = s_svg_edges[i].y0;
+            float ey1 = s_svg_edges[i].y1;
+            if (ey0 == ey1) { continue; }
+            float min_ey = fminf(ey0, ey1);
+            float max_ey = fmaxf(ey0, ey1);
+            if (yf < min_ey || yf >= max_ey) { continue; }
+            ix[count].x = s_svg_edges[i].x0 +
+                (s_svg_edges[i].x1 - s_svg_edges[i].x0) * (yf - ey0) / (ey1 - ey0);
+            ix[count].dw = (ey0 < ey1) ? 1 : -1;
+            ++count;
+        }
+
+        /* Sort by x; at equal x, upward edges (+1) precede downward (-1). */
+        for (int a = 1; a < count; ++a) {
+            svg_ix_t tmp = ix[a];
+            int b = a - 1;
+            while (b >= 0 &&
+                   (ix[b].x > tmp.x || (ix[b].x == tmp.x && ix[b].dw < tmp.dw))) {
+                ix[b + 1] = ix[b];
+                --b;
+            }
+            ix[b + 1] = tmp;
+        }
+
+        int winding = 0;
+        int16_t span_start = 0;
+        bool in_span = false;
+        for (int a = 0; a < count; ++a) {
+            winding += ix[a].dw;
+            if (!in_span && winding != 0) {
+                span_start = (int16_t)lroundf(ix[a].x);
+                in_span = true;
+            } else if (in_span && winding == 0) {
+                int16_t span_end = (int16_t)lroundf(ix[a].x);
+                if (span_start <= span_end) {
+                    display__draw_line_bresenham(span_start, (int16_t)y, span_end, (int16_t)y, color);
+                }
+                in_span = false;
+            }
+        }
+    }
+    s_svg_edge_count = 0;
+}
 
 static void display__svg_draw_line(
     float x0, float y0, float x1, float y1, int16_t dx, int16_t dy, int16_t dw, int16_t dh,
@@ -938,6 +1024,7 @@ static void display__svg_draw_line(
         (int16_t)lroundf(dy + y1 * dh / DISPLAY__SVG_VIEWBOX_HEIGHT),
         color
     );
+    display__svg_add_edge(x0, y0, x1, y1);
 }
 
 static void display__svg_move_to(display__svg_state_t *s, float x, float y) {
@@ -1098,9 +1185,19 @@ static float display__svg_parse_number(const char **p, bool *ok) {
 }
 
 static void display__svg_render_path(
-    int16_t dx, int16_t dy, int16_t dw, int16_t dh, const char *path, bruce_display_color_t color
+    int16_t dx, int16_t dy, int16_t dw, int16_t dh, const char *path,
+    bruce_display_color_t color, bool fill
 ) {
     display__svg_state_t s = {0};
+
+    s_svg_fill_mode = fill;
+    s_svg_ddx = dx;
+    s_svg_ddy = dy;
+    s_svg_ddw = dw;
+    s_svg_ddh = dh;
+    s_svg_color = color;
+    s_svg_edge_count = 0;
+
     const char *p = path;
     char cmd = 0;
     bool first_cmd = true;
@@ -1224,6 +1321,9 @@ static void display__svg_render_path(
             default:
                 break;
         }
+    }
+    if (s_svg_fill_mode && s_svg_edge_count > 0) {
+        display__svg_fill_edges(color);
     }
 }
 
@@ -1910,7 +2010,26 @@ bruce_result_t display__draw_svg_path(
         display__unlock();
         return BRUCE_ERR_PERMISSION;
     }
-    display__svg_render_path(x, y, w, h, path, color);
+    display__svg_render_path(x, y, w, h, path, color, false);
+    display__unlock();
+    return BRUCE_OK;
+}
+
+bruce_result_t display__fill_svg_path(
+    int16_t x, int16_t y, int16_t w, int16_t h, const char *path, bruce_display_color_t color
+) {
+    if (path == NULL || w <= 0 || h <= 0) { return BRUCE_ERR_INVALID_ARGUMENT; }
+    bruce_task_id_t caller = task__current_id();
+    display__lock();
+    if (!s_initialized) {
+        display__unlock();
+        return BRUCE_ERR_NOT_INITIALIZED;
+    }
+    if (display__drawing_context_locked(caller) == NULL) {
+        display__unlock();
+        return BRUCE_ERR_PERMISSION;
+    }
+    display__svg_render_path(x, y, w, h, path, color, true);
     display__unlock();
     return BRUCE_OK;
 }

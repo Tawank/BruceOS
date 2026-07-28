@@ -522,7 +522,9 @@ Text and cursor state are task-local, rotation is global, and no resize event is
 emitted. Drawing primitives include legacy-compatible circular arcs whose zero
 angle is at six o'clock and increases clockwise, plus `display__draw_svg_path()`
 which renders a 24x24 SVG path-data string (Material icon style) scaled into a
-destination rectangle with 1-pixel strokes. `display__flush()` provides an
+destination rectangle with 1-pixel strokes, and `display__fill_svg_path()` which
+accumulates every subpath's edges and fills the union with the SVG nonzero
+winding rule for correct solid-icon rendering (holes stay transparent). `display__flush()` provides an
 implicit-frame compatibility path.
 
 Icon Core stores a small set of built-in 24x24 Material Design Icons as
@@ -530,7 +532,9 @@ read-only SVG path-data strings. `icon__get(name)` returns a pointer to constant
 firmware memory (never free it) for recognized names such as `wifi`,
 `bluetooth`, `ir`, `folder`, `terminal`, `clock`, `settings`, `selftest`, and
 `apps`, plus aliases like `bt`, `cog`, `test-tube`, and `files`. Unknown names
-and `NULL` return `NULL`. The intended consumer is `display__draw_svg_path()`.
+and `NULL` return `NULL`. The intended consumer is `display__fill_svg_path()`
+for filled icons; `display__draw_svg_path()` can be used for outline-only
+rendering.
 
 Image Core decodes JPEG, PNG, and the first frame of GIF data from memory or a
 Core storage path into the caller's viewport. `image__draw_memory()` and

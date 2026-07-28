@@ -690,6 +690,7 @@ static const JSPropDef js_display[] = {
     JS_CFUNC_DEF("drawXBitmap", 7, native_drawXBitmap),
     JS_CFUNC_DEF("drawArc", 6, native_drawArc),
     JS_CFUNC_DEF("drawSvgPath", 6, native_drawSvgPath),
+    JS_CFUNC_DEF("fillSvgPath", 6, native_fillSvgPath),
     JS_CFUNC_DEF("drawImage", 5, native_drawImage),
     JS_CFUNC_DEF("drawJpg", 4, native_drawJpg),
     JS_CFUNC_DEF("drawPng", 4, native_drawPng),
