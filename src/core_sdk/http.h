@@ -22,9 +22,18 @@
 extern "C" {
 #endif
 
+#define BRUCE_HTTP_DEFAULT_MAX_RESPONSE_BYTES (64u * 1024u)
+
+/* Called synchronously as response body chunks arrive. Return BRUCE_OK to
+ * continue or any negative BRUCE_ERR_* value to abort the request. The data is
+ * valid only for the duration of the callback. */
+typedef bruce_result_t (*bruce_http_response_chunk_cb_t)(
+    const void *data, size_t data_len, void *context
+);
+
 typedef struct {
     const char *url;
-    const char *method; /* NULL or "GET"/"POST"/"PUT"/"DELETE"/"HEAD"/"PATCH" */
+    const char *method; /* NULL or GET/POST/PUT/DELETE/HEAD/PATCH/OPTIONS */
     const char *body;
     size_t body_len;
 
@@ -34,6 +43,17 @@ typedef struct {
     size_t header_count;
 
     uint32_t timeout_ms; /* 0 means the implementation default */
+
+    /* Maximum total response-body bytes accepted. 0 selects
+     * BRUCE_HTTP_DEFAULT_MAX_RESPONSE_BYTES. The limit applies to buffered and
+     * callback responses and returns BRUCE_ERR_RESOURCE_LIMIT when exceeded. */
+    size_t max_response_bytes;
+
+    /* When non-NULL, body chunks are delivered here instead of being buffered
+     * in the response. `response.body` remains NULL and body_len reports the
+     * total bytes delivered. */
+    bruce_http_response_chunk_cb_t on_response_chunk;
+    void *response_chunk_context;
 } bruce_http_request_t;
 
 typedef struct {
@@ -41,15 +61,18 @@ typedef struct {
     char *body;
     size_t body_len;
 
-    /* Response headers as flattened key/value pairs, same layout as request. */
+    /* Response headers as parallel name/value arrays. Up to 32 headers and
+     * 4096 bytes of header text are retained; excess headers are omitted. */
     char **header_names;
     char **header_values;
     size_t header_count;
 } bruce_http_response_t;
 
-/* Perform a synchronous HTTP request.  Requires the `http` permission.
- * On success, fills `response` and returns BRUCE_OK.  On failure, leaves
- * `response` zeroed and returns a negative BRUCE_ERR_* value. */
+/* Perform a synchronous HTTP request. Requires the `http` permission.
+ * On success, fills `response` and returns BRUCE_OK. The body is NUL-terminated
+ * in buffered mode, but body_len is authoritative. Body and headers share one
+ * task-owned allocation. On failure, leaves `response` zeroed and returns a
+ * negative BRUCE_ERR_* value. */
 bruce_result_t http__request(const bruce_http_request_t *request, bruce_http_response_t *response);
 
 /* Release all memory owned by `response`.  NULL or a zero-initialized response

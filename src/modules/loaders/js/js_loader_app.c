@@ -152,7 +152,11 @@ static void js__app_main(void *context) {
         return;
     }
 
-    JSValue val = JS_Eval(js_ctx, script, strlen(script), ctx->path, 0);
+    size_t script_len = strlen(script);
+    JSValue val = JS_Eval(js_ctx, script, script_len, ctx->path, 0);
+    free(ctx->source);
+    ctx->source = NULL;
+    ctx->source_len = 0;
     if (JS_IsException(val)) {
         JSValue obj = JS_GetException(js_ctx);
         printf("[js_loader] %s: runtime error: ", ctx->permission_key);

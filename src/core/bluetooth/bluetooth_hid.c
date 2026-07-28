@@ -282,7 +282,7 @@ static void bluetooth_hid__copy_name(char *destination, size_t size, const uint8
 }
 
 static void bluetooth_hid__gap_callback(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *parameter) {
-    if (event == ESP_BT_GAP_DISC_RES_EVT && s_scanning) {
+    if (event == ESP_BT_GAP_DISC_RES_EVT) {
         uint32_t cod_value = 0;
         int8_t rssi = -128;
         const uint8_t *name = NULL;
@@ -310,12 +310,20 @@ static void bluetooth_hid__gap_callback(esp_bt_gap_cb_event_t event, esp_bt_gap_
         bluetooth_hid__usage_t mapped_usage = bluetooth_hid__map_usage(usage);
         if (mapped_usage == BRUCE_BLUETOOTH_HID_UNKNOWN) return;
 
+        portENTER_CRITICAL(&s_state_mux);
+        if (!s_scanning || s_scan_devices == NULL || s_scan_capacity == 0) {
+            portEXIT_CRITICAL(&s_state_mux);
+            return;
+        }
         size_t index = s_scan_count;
         for (size_t i = 0; i < s_scan_count; ++i) {
             if (memcmp(s_scan_devices[i].address, parameter->disc_res.bda, ESP_BD_ADDR_LEN) == 0) index = i;
         }
         if (index == s_scan_count) {
-            if (s_scan_count >= s_scan_capacity) return;
+            if (s_scan_count >= s_scan_capacity) {
+                portEXIT_CRITICAL(&s_state_mux);
+                return;
+            }
             memset(&s_scan_devices[index], 0, sizeof(s_scan_devices[index]));
             memcpy(s_scan_devices[index].address, parameter->disc_res.bda, ESP_BD_ADDR_LEN);
             s_scan_count++;
@@ -326,6 +334,7 @@ static void bluetooth_hid__gap_callback(esp_bt_gap_cb_event_t event, esp_bt_gap_
             bluetooth_hid__copy_name(
                 s_scan_devices[index].name, sizeof(s_scan_devices[index].name), name, name_length
             );
+        portEXIT_CRITICAL(&s_state_mux);
     } else if (event == ESP_BT_GAP_DISC_STATE_CHANGED_EVT &&
                parameter->disc_st_chg.state == ESP_BT_GAP_DISCOVERY_STOPPED) {
         xEventGroupSetBits(s_events, BLUETOOTH_HID__SCAN_DONE_BIT);
@@ -554,22 +563,32 @@ int bluetooth_hid__scan(bluetooth_hid__device_t *devices, size_t capacity, uint3
         bluetooth_hid__operation_unlock();
         return initialized;
     }
-    if (s_scan_devices == NULL) {
-        s_scan_devices = calloc(BLUETOOTH_HID__MAX_RESULTS, sizeof(bluetooth_hid__device_t));
-        if (s_scan_devices == NULL) {
+    size_t scan_capacity = capacity < BLUETOOTH_HID__MAX_RESULTS ? capacity : BLUETOOTH_HID__MAX_RESULTS;
+    bluetooth_hid__device_t *scan_devices = NULL;
+    if (scan_capacity > 0) {
+        scan_devices = calloc(scan_capacity, sizeof(*scan_devices));
+        if (scan_devices == NULL) {
             bluetooth_hid__operation_unlock();
             return BRUCE_ERR_NO_MEMORY;
         }
     }
-    s_scan_capacity = capacity < BLUETOOTH_HID__MAX_RESULTS ? capacity : BLUETOOTH_HID__MAX_RESULTS;
+    portENTER_CRITICAL(&s_state_mux);
+    s_scan_devices = scan_devices;
+    s_scan_capacity = scan_capacity;
     s_scan_count = 0;
-    memset(s_scan_devices, 0, BLUETOOTH_HID__MAX_RESULTS * sizeof(bluetooth_hid__device_t));
     s_scanning = true;
+    portEXIT_CRITICAL(&s_state_mux);
     xEventGroupClearBits(s_events, BLUETOOTH_HID__SCAN_DONE_BIT);
     uint8_t inquiry_length = (uint8_t)((timeout_ms + 1279) / 1280);
     esp_err_t error = esp_bt_gap_start_discovery(ESP_BT_INQ_MODE_GENERAL_INQUIRY, inquiry_length, 0);
     if (error != ESP_OK) {
+        portENTER_CRITICAL(&s_state_mux);
         s_scanning = false;
+        s_scan_devices = NULL;
+        s_scan_capacity = 0;
+        s_scan_count = 0;
+        portEXIT_CRITICAL(&s_state_mux);
+        free(scan_devices);
         bluetooth_hid__operation_unlock();
         return error == ESP_ERR_INVALID_STATE ? BRUCE_ERR_BUSY : BRUCE_ERR_IO;
     }
@@ -582,11 +601,15 @@ int bluetooth_hid__scan(bluetooth_hid__device_t *devices, size_t capacity, uint3
                 xEventGroupWaitBits(s_events, BLUETOOTH_HID__SCAN_DONE_BIT, pdTRUE, pdFALSE, portMAX_DELAY);
         }
     }
+    portENTER_CRITICAL(&s_state_mux);
     int count = (int)s_scan_count;
-    if (devices != NULL && count > 0) memcpy(devices, s_scan_devices, (size_t)count * sizeof(*devices));
     s_scanning = false;
+    s_scan_devices = NULL;
     s_scan_capacity = 0;
     s_scan_count = 0;
+    portEXIT_CRITICAL(&s_state_mux);
+    if (devices != NULL && count > 0) memcpy(devices, scan_devices, (size_t)count * sizeof(*devices));
+    free(scan_devices);
     bluetooth_hid__operation_unlock();
     if ((bits & BLUETOOTH_HID__SCAN_DONE_BIT) == 0) return BRUCE_ERR_TIMEOUT;
     if (count > 1) qsort(devices, (size_t)count, sizeof(*devices), bluetooth_hid__compare_rssi);

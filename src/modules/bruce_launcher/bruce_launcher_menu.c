@@ -187,7 +187,9 @@ static int bruce_launcher__discover_apps(bruce_launcher_menu_t *menu, const char
     }
 
     int added = 0;
-    for (size_t i = 0; i < count && menu->entry_count < menu->capacity; ++i) {
+    for (size_t i = 0;
+         i < count && (menu == NULL || menu->entry_count + 1 < menu->capacity);
+         ++i) {
         if (entries[i].type != BRUCE_STORAGE_ENTRY_FILE) continue;
 
         char full_path[BRUCE_STORAGE_PATH_MAX];
@@ -200,12 +202,21 @@ static int bruce_launcher__discover_apps(bruce_launcher_menu_t *menu, const char
         free((void *)json);
         if (manifest == NULL) continue;
 
-        if (bruce_launcher__menu_add_command(menu, manifest->app_name, full_path)) added++;
+        if (menu == NULL ||
+            bruce_launcher__menu_add_command(menu, manifest->app_name, full_path)) {
+            added++;
+        }
         memory__free(manifest);
     }
 
     memory__free(entries);
     return added;
+}
+
+static int bruce_launcher__discovered_menu_capacity(const char *path) {
+    int capacity = bruce_launcher__discover_apps(NULL, path);
+    if (capacity >= BRUCE_LAUNCHER_MAX_ENTRIES) capacity = BRUCE_LAUNCHER_MAX_ENTRIES - 1;
+    return capacity + 1;
 }
 
 static bruce_launcher_menu_t *
@@ -242,8 +253,11 @@ static size_t bruce_launcher__json_allocation_size(cJSON *root, bool include_bac
 
         size_t child_size = 0;
         if (is_command && child->valuestring[0] == '/') {
-            child_size = sizeof(bruce_launcher_menu_t) +
-                         BRUCE_LAUNCHER_MAX_ENTRIES * sizeof(bruce_launcher_entry_t);
+            int capacity = bruce_launcher__discovered_menu_capacity(child->valuestring);
+            /* Carry the preflight result on the temporary JSON node into arena construction. */
+            child->valueint = capacity;
+            child_size =
+                sizeof(bruce_launcher_menu_t) + (size_t)capacity * sizeof(bruce_launcher_entry_t);
         } else if (is_submenu) {
             child_size = bruce_launcher__json_allocation_size(child, true, depth + 1);
         }
@@ -262,7 +276,7 @@ static bool bruce_launcher__parse_json_value(
             return bruce_launcher__menu_add_command(menu, key, value->valuestring);
         }
         bruce_launcher_menu_t *submenu =
-            bruce_launcher__menu_create(arena, key, menu, BRUCE_LAUNCHER_MAX_ENTRIES);
+            bruce_launcher__menu_create(arena, key, menu, value->valueint);
         if (submenu == NULL) return false;
         (void)bruce_launcher__discover_apps(submenu, value->valuestring);
         (void)bruce_launcher__menu_add_back(submenu);

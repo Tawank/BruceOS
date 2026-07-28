@@ -24,7 +24,6 @@
 #define STDIO__INPUT_CAPACITY 256
 
 typedef struct {
-    bool active;
     bruce_stdio_session_t id;
     bruce_task_id_t owner;
     bruce_resource_id_t resource;
@@ -39,7 +38,7 @@ typedef struct {
 static StaticSemaphore_t s_lock_storage;
 static SemaphoreHandle_t s_lock;
 static portMUX_TYPE s_init_mux = portMUX_INITIALIZER_UNLOCKED;
-static stdio__session_t s_sessions[STDIO__MAX_SESSIONS];
+static stdio__session_t *s_sessions[STDIO__MAX_SESSIONS];
 static bruce_stdio_session_t s_next_id = 1;
 #if !CONFIG_LIBC_PICOLIBC
 static bool s_original_stdio_saved = false;
@@ -66,9 +65,18 @@ static void stdio__ensure_init(void) {
 
 static stdio__session_t *stdio__find_locked(bruce_stdio_session_t id) {
     for (size_t i = 0; i < STDIO__MAX_SESSIONS; ++i) {
-        if (s_sessions[i].active && s_sessions[i].id == id) return &s_sessions[i];
+        if (s_sessions[i] != NULL && s_sessions[i]->id == id) return s_sessions[i];
     }
     return NULL;
+}
+
+static void stdio__remove_locked(stdio__session_t *session) {
+    for (size_t i = 0; i < STDIO__MAX_SESSIONS; ++i) {
+        if (s_sessions[i] == session) {
+            s_sessions[i] = NULL;
+            return;
+        }
+    }
 }
 
 static bool stdio__owned_locked(const stdio__session_t *session, bruce_task_id_t owner) {
@@ -76,45 +84,49 @@ static bool stdio__owned_locked(const stdio__session_t *session, bruce_task_id_t
 }
 
 static void stdio__session_cleanup(void *context) {
-    bruce_stdio_session_t id = (bruce_stdio_session_t)(uintptr_t)context;
+    stdio__session_t *session = context;
     stdio__ensure_init();
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    stdio__session_t *entry = stdio__find_locked(id);
-    if (entry != NULL) memset(entry, 0, sizeof(*entry));
+    stdio__remove_locked(session);
     xSemaphoreGive(s_lock);
+    free(session);
 }
 
 bruce_result_t bruce_stdio_session_create(bruce_stdio_session_t *out_session) {
     if (out_session == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     *out_session = BRUCE_STDIO_SESSION_INVALID;
     bruce_task_id_t owner = task__current_id();
+    stdio__session_t *session = calloc(1, sizeof(*session));
+    if (session == NULL) return BRUCE_ERR_NO_MEMORY;
+
+    session->owner = owner;
+    session->resource = task_registry__resource_register(stdio__session_cleanup, session);
+    if (session->resource == BRUCE_RESOURCE_ID_INVALID) {
+        free(session);
+        return BRUCE_ERR_RESOURCE_LIMIT;
+    }
+
     stdio__ensure_init();
     xSemaphoreTake(s_lock, portMAX_DELAY);
+    size_t slot = STDIO__MAX_SESSIONS;
     for (size_t i = 0; i < STDIO__MAX_SESSIONS; ++i) {
-        if (!s_sessions[i].active) {
-            memset(&s_sessions[i], 0, sizeof(s_sessions[i]));
-            s_sessions[i].active = true;
-            s_sessions[i].id = s_next_id++;
-            if (s_next_id == BRUCE_STDIO_SESSION_INVALID) s_next_id++;
-            s_sessions[i].owner = owner;
-            bruce_stdio_session_t id = s_sessions[i].id;
-            xSemaphoreGive(s_lock);
-            bruce_resource_id_t resource =
-                task_registry__resource_register(stdio__session_cleanup, (void *)(uintptr_t)id);
-            if (resource == BRUCE_RESOURCE_ID_INVALID) {
-                stdio__session_cleanup((void *)(uintptr_t)id);
-                return BRUCE_ERR_RESOURCE_LIMIT;
-            }
-            xSemaphoreTake(s_lock, portMAX_DELAY);
-            stdio__session_t *entry = stdio__find_locked(id);
-            if (entry != NULL) entry->resource = resource;
-            xSemaphoreGive(s_lock);
-            *out_session = id;
-            return BRUCE_OK;
+        if (s_sessions[i] == NULL) {
+            slot = i;
+            break;
         }
     }
+    if (slot == STDIO__MAX_SESSIONS) {
+        xSemaphoreGive(s_lock);
+        (void)task_registry__resource_release(session->resource);
+        free(session);
+        return BRUCE_ERR_RESOURCE_LIMIT;
+    }
+    session->id = s_next_id++;
+    if (s_next_id == BRUCE_STDIO_SESSION_INVALID) s_next_id++;
+    s_sessions[slot] = session;
     xSemaphoreGive(s_lock);
-    return BRUCE_ERR_RESOURCE_LIMIT;
+    *out_session = session->id;
+    return BRUCE_OK;
 }
 
 bruce_result_t bruce_stdio_session_close(bruce_stdio_session_t session) {
@@ -127,9 +139,10 @@ bruce_result_t bruce_stdio_session_close(bruce_stdio_session_t session) {
         return entry == NULL ? BRUCE_ERR_NOT_FOUND : BRUCE_ERR_PERMISSION;
     }
     bruce_resource_id_t resource = entry->resource;
-    memset(entry, 0, sizeof(*entry));
+    stdio__remove_locked(entry);
     xSemaphoreGive(s_lock);
     (void)task_registry__resource_release(resource);
+    free(entry);
     (void)task_registry__set_child_stdio_session(BRUCE_STDIO_SESSION_INVALID);
     return BRUCE_OK;
 }
@@ -285,7 +298,12 @@ void stdio__task_attach(
     FILE *input = funopen((void *)(uintptr_t)session, stdio__stream_read, NULL, NULL, NULL);
     FILE *output = funopen((void *)(uintptr_t)session, NULL, stdio__stream_write, NULL, NULL);
     FILE *error = funopen((void *)(uintptr_t)session, NULL, stdio__stream_write, NULL, NULL);
-    if (input == NULL || output == NULL || error == NULL) { return; }
+    if (input == NULL || output == NULL || error == NULL) {
+        if (input != NULL) fclose(input);
+        if (output != NULL) fclose(output);
+        if (error != NULL) fclose(error);
+        return;
+    }
     setvbuf(output, NULL, _IONBF, 0);
     setvbuf(error, NULL, _IONBF, 0);
     if (!s_original_stdio_saved) {

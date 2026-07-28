@@ -149,9 +149,28 @@ static bruce_result_t image__decode_jpeg(
     return result;
 }
 
-static void image__png_read(png_structp png, png_bytep out, size_t count) {
+static void image__png_memory_read(png_structp png, png_bytep out, size_t count) {
     image_reader_t *reader = png_get_io_ptr(png);
     if (!image__read(reader, out, count)) png_error(png, "truncated PNG");
+}
+
+typedef struct {
+    bruce_file_id_t file;
+    bruce_result_t result;
+} image_png_file_reader_t;
+
+static void image__png_file_read(png_structp png, png_bytep out, size_t count) {
+    image_png_file_reader_t *reader = png_get_io_ptr(png);
+    size_t total = 0;
+    while (total < count) {
+        size_t read_size = 0;
+        reader->result = storage__read(reader->file, out + total, count - total, &read_size);
+        if (reader->result != BRUCE_OK || read_size == 0) {
+            if (reader->result == BRUCE_OK) reader->result = BRUCE_ERR_IO;
+            png_error(png, "truncated PNG");
+        }
+        total += read_size;
+    }
 }
 
 typedef struct {
@@ -159,10 +178,9 @@ typedef struct {
     uint16_t *pixels;
 } image_png_allocations_t;
 
-static bruce_result_t image__decode_png(
-    const uint8_t *data, size_t size, const bruce_image_draw_options_t *options, bruce_image_info_t *info
+static bruce_result_t image__decode_png_reader(
+    void *reader, png_rw_ptr read_fn, const bruce_image_draw_options_t *options, bruce_image_info_t *info
 ) {
-    image_reader_t reader = {.data = data, .size = size};
     png_structp png = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
     if (png == NULL) return BRUCE_ERR_NO_MEMORY;
     png_infop png_info = png_create_info_struct(png);
@@ -178,7 +196,7 @@ static bruce_result_t image__decode_png(
     }
     volatile bruce_result_t result = BRUCE_ERR_IO;
     if (setjmp(png_jmpbuf(png)) != 0) goto cleanup;
-    png_set_read_fn(png, &reader, image__png_read);
+    png_set_read_fn(png, reader, read_fn);
     png_read_info(png, png_info);
 
     png_uint_32 source_width = png_get_image_width(png, png_info);
@@ -251,6 +269,13 @@ cleanup:
     free(allocations);
     png_destroy_read_struct(&png, &png_info, NULL);
     return (bruce_result_t)result;
+}
+
+static bruce_result_t image__decode_png(
+    const uint8_t *data, size_t size, const bruce_image_draw_options_t *options, bruce_image_info_t *info
+) {
+    image_reader_t reader = {.data = data, .size = size};
+    return image__decode_png_reader(&reader, image__png_memory_read, options, info);
 }
 
 static bool image__gif_skip_blocks(image_reader_t *reader) {
@@ -571,6 +596,41 @@ image__draw_path(const char *path, const bruce_image_draw_options_t *options, br
         (void)storage__close(file);
         return result != BRUCE_OK ? result : BRUCE_ERR_RESOURCE_LIMIT;
     }
+
+    uint8_t signature[8];
+    size_t signature_size = file_size < sizeof(signature) ? (size_t)file_size : sizeof(signature);
+    size_t signature_read = 0;
+    result = storage__seek(file, 0, SEEK_SET, NULL);
+    while (result == BRUCE_OK && signature_read < signature_size) {
+        size_t count = 0;
+        result = storage__read(file, signature + signature_read, signature_size - signature_read, &count);
+        if (result == BRUCE_OK && count == 0) result = BRUCE_ERR_IO;
+        signature_read += count;
+    }
+
+    static const uint8_t png_signature[] = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'};
+    if (result == BRUCE_OK && signature_size == sizeof(png_signature) &&
+        memcmp(signature, png_signature, sizeof(png_signature)) == 0) {
+        bruce_image_draw_options_t defaults = {
+            .center = false,
+            .fit = false,
+            .background = BRUCE_COLOR_BLACK,
+        };
+        if (options == NULL) options = &defaults;
+        result = storage__seek(file, 0, SEEK_SET, NULL);
+        if (result == BRUCE_OK) {
+            image_png_file_reader_t reader = {.file = file, .result = BRUCE_OK};
+            result = image__decode_png_reader(&reader, image__png_file_read, options, out_info);
+            if (result == BRUCE_ERR_IO && reader.result != BRUCE_OK) result = reader.result;
+        }
+        (void)storage__close(file);
+        return result;
+    }
+    if (result != BRUCE_OK) {
+        (void)storage__close(file);
+        return result;
+    }
+
     uint8_t *data = memory__malloc((size_t)file_size);
     if (data == NULL) {
         (void)storage__close(file);

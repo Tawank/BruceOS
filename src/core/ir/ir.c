@@ -474,6 +474,24 @@ static bruce_result_t ir__send_file_record(char *record, uint8_t repeats) {
     return ir__transmit_raw(timings, count, frequency, repeats);
 }
 
+static bruce_result_t ir__transmit_record_mutable(char *contents, uint8_t repeats) {
+    bool sent = false;
+    char *cursor = contents;
+    while (*cursor != '\0') {
+        char *delimiter = strstr(cursor, "\n#");
+        if (delimiter == NULL) delimiter = cursor + strlen(cursor);
+        char saved = *delimiter;
+        *delimiter = '\0';
+        bruce_result_t result = ir__send_file_record(cursor, repeats);
+        if (result == BRUCE_OK) sent = true;
+        else if (result != BRUCE_ERR_NOT_FOUND) return result;
+        if (saved == '\0') break;
+        cursor = delimiter + 2;
+        while (*cursor == '\r' || *cursor == '\n' || *cursor == '#') cursor++;
+    }
+    return sent ? BRUCE_OK : BRUCE_ERR_NOT_FOUND;
+}
+
 bruce_result_t ir__transmit_record(const char *contents, uint8_t repeats) {
     bruce_result_t permission = permission__check(BRUCE_PERMISSION_IR);
     if (permission != BRUCE_OK) return permission;
@@ -485,25 +503,9 @@ bruce_result_t ir__transmit_record(const char *contents, uint8_t repeats) {
     if (copy == NULL) return BRUCE_ERR_NO_MEMORY;
     memcpy(copy, contents, length + 1u);
 
-    bool sent = false;
-    char *cursor = copy;
-    while (*cursor != '\0') {
-        char *delimiter = strstr(cursor, "\n#");
-        if (delimiter == NULL) delimiter = cursor + strlen(cursor);
-        char saved = *delimiter;
-        *delimiter = '\0';
-        bruce_result_t result = ir__send_file_record(cursor, repeats);
-        if (result == BRUCE_OK) sent = true;
-        else if (result != BRUCE_ERR_NOT_FOUND) {
-            free(copy);
-            return result;
-        }
-        if (saved == '\0') break;
-        cursor = delimiter + 2;
-        while (*cursor == '\r' || *cursor == '\n' || *cursor == '#') cursor++;
-    }
+    bruce_result_t result = ir__transmit_record_mutable(copy, repeats);
     free(copy);
-    return sent ? BRUCE_OK : BRUCE_ERR_NOT_FOUND;
+    return result;
 }
 
 bruce_result_t ir__transmit_file(const char *path, uint8_t repeats) {
@@ -539,7 +541,7 @@ bruce_result_t ir__transmit_file(const char *path, uint8_t repeats) {
     }
     contents[total] = '\0';
 
-    result = ir__transmit_record(contents, repeats);
+    result = total == 0 ? BRUCE_ERR_INVALID_ARGUMENT : ir__transmit_record_mutable(contents, repeats);
     free(contents);
     return result;
 }

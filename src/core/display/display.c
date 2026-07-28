@@ -188,6 +188,8 @@ static const uint8_t s_font_5x7[][5] = {
 static SemaphoreHandle_t s_mutex;
 static esp_lcd_panel_handle_t s_panel;
 static esp_lcd_panel_io_handle_t s_io;
+static bool s_spi_bus_initialized;
+static bool s_backlight_initialized;
 static bool s_initialized;
 
 static bruce_display_color_t *s_framebuffer;
@@ -228,6 +230,7 @@ typedef struct {
     bruce_display_rect_t rect;
     bool fullscreen;
     bool overlay_update;
+    bool shutdown;
     uint32_t notification_generation;
 } display__request_t;
 
@@ -245,6 +248,7 @@ static display__task_context_t s_system_context;
 static display__task_context_t *s_draw_context;
 static QueueHandle_t s_request_queue;
 static SemaphoreHandle_t s_transfer_done;
+static SemaphoreHandle_t s_worker_stopped;
 static TaskHandle_t s_worker_task;
 static bool s_dashboard_layout;
 static notification__state_t s_notification;
@@ -403,11 +407,16 @@ static void display__finish_request(display__request_t *request, bruce_result_t 
     context->frame_active = false;
     context->frame_noop = false;
     if (!context->remove_pending) { display__set_visibility_locked(context); }
-    xSemaphoreGive(context->completion);
     if (context->remove_pending && context != &s_system_context) {
+        SemaphoreHandle_t completion = context->completion;
+        context->completion = NULL;
         context->in_use = false;
         context->remove_pending = false;
+        display__unlock();
+        if (completion != NULL) vSemaphoreDelete(completion);
+        return;
     }
+    xSemaphoreGive(context->completion);
     display__unlock();
 }
 
@@ -436,6 +445,15 @@ static void display__worker(void *arg) {
             s_notification.active = false;
             s_notification.generation++;
             display__unlock();
+        }
+
+        if (request.shutdown) {
+            display__lock();
+            s_worker_task = NULL;
+            display__unlock();
+            xSemaphoreGive(s_worker_stopped);
+            vTaskDelete(NULL);
+            continue;
         }
 
         display__lock();
@@ -638,9 +656,11 @@ static bruce_result_t display__backlight_init(void) {
     };
     if (ledc_channel_config(&channel) != ESP_OK) {
         ESP_LOGE(TAG, "failed to configure LEDC channel");
+        ledc_timer_rst(DISPLAY__BL_LEDC_MODE, DISPLAY__BL_LEDC_TIMER);
         return BRUCE_ERR_INTERNAL;
     }
 
+    s_backlight_initialized = true;
     return BRUCE_OK;
 }
 
@@ -668,6 +688,7 @@ static bruce_result_t display__panel_init(void) {
         ESP_LOGE(TAG, "failed to initialize SPI bus");
         return BRUCE_ERR_INTERNAL;
     }
+    s_spi_bus_initialized = true;
 
     esp_lcd_panel_io_spi_config_t io_config = {
         .dc_gpio_num = DISPLAY__PIN_DC,
@@ -680,6 +701,8 @@ static bruce_result_t display__panel_init(void) {
     };
     if (esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)DISPLAY__SPI_HOST, &io_config, &s_io) != ESP_OK) {
         ESP_LOGE(TAG, "failed to create panel IO");
+        spi_bus_free(DISPLAY__SPI_HOST);
+        s_spi_bus_initialized = false;
         return BRUCE_ERR_INTERNAL;
     }
 
@@ -688,6 +711,10 @@ static bruce_result_t display__panel_init(void) {
     };
     if (esp_lcd_panel_io_register_event_callbacks(s_io, &callbacks, NULL) != ESP_OK) {
         ESP_LOGE(TAG, "failed to register panel completion callback");
+        esp_lcd_panel_io_del(s_io);
+        s_io = NULL;
+        spi_bus_free(DISPLAY__SPI_HOST);
+        s_spi_bus_initialized = false;
         return BRUCE_ERR_INTERNAL;
     }
 
@@ -699,6 +726,10 @@ static bruce_result_t display__panel_init(void) {
     };
     if (esp_lcd_new_panel_st7789(s_io, &panel_config, &s_panel) != ESP_OK) {
         ESP_LOGE(TAG, "failed to create ST7789 panel");
+        esp_lcd_panel_io_del(s_io);
+        s_io = NULL;
+        spi_bus_free(DISPLAY__SPI_HOST);
+        s_spi_bus_initialized = false;
         return BRUCE_ERR_INTERNAL;
     }
 
@@ -710,6 +741,27 @@ static bruce_result_t display__panel_init(void) {
     esp_lcd_panel_disp_on_off(s_panel, true);
 
     return BRUCE_OK;
+}
+
+static void display__hardware_deinit(void) {
+    if (s_backlight_initialized) {
+        ledc_stop(DISPLAY__BL_LEDC_MODE, DISPLAY__BL_LEDC_CHANNEL, 0);
+        ledc_timer_rst(DISPLAY__BL_LEDC_MODE, DISPLAY__BL_LEDC_TIMER);
+        s_backlight_initialized = false;
+    }
+    if (s_panel != NULL) {
+        esp_lcd_panel_disp_on_off(s_panel, false);
+        esp_lcd_panel_del(s_panel);
+        s_panel = NULL;
+    }
+    if (s_io != NULL) {
+        esp_lcd_panel_io_del(s_io);
+        s_io = NULL;
+    }
+    if (s_spi_bus_initialized) {
+        spi_bus_free(DISPLAY__SPI_HOST);
+        s_spi_bus_initialized = false;
+    }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -947,7 +999,7 @@ typedef struct {
     bool initialized;
 } display__svg_state_t;
 
-static display__svg_edge_t s_svg_edges[DISPLAY__SVG_MAX_EDGES];
+static display__svg_edge_t *s_svg_edges;
 static size_t s_svg_edge_count;
 static bool s_svg_fill_mode;
 static int16_t s_svg_ddx, s_svg_ddy, s_svg_ddw, s_svg_ddh;
@@ -1219,11 +1271,16 @@ static float display__svg_parse_number(const char **p, bool *ok) {
     return v;
 }
 
-static void display__svg_render_path(
+static bruce_result_t display__svg_render_path(
     int16_t dx, int16_t dy, int16_t dw, int16_t dh, const char *path,
     bruce_display_color_t color, bool fill
 ) {
     display__svg_state_t s = {0};
+
+    if (fill) {
+        s_svg_edges = malloc(DISPLAY__SVG_MAX_EDGES * sizeof(*s_svg_edges));
+        if (s_svg_edges == NULL) return BRUCE_ERR_NO_MEMORY;
+    }
 
     s_svg_fill_mode = fill;
     s_svg_ddx = dx;
@@ -1364,6 +1421,9 @@ static void display__svg_render_path(
     if (s_svg_fill_mode && s_svg_edge_count > 0) {
         display__svg_fill_edges(color);
     }
+    free(s_svg_edges);
+    s_svg_edges = NULL;
+    return BRUCE_OK;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1435,6 +1495,41 @@ static void display__handle_newline(void) {
 /* Public API implementation                                                  */
 /* -------------------------------------------------------------------------- */
 
+/* Caller holds the display lock and has stopped or never started request use. */
+static void display__release_resources_locked(void) {
+    if (s_worker_task != NULL) {
+        vTaskDelete(s_worker_task);
+        s_worker_task = NULL;
+    }
+    if (s_request_queue != NULL) {
+        vQueueDelete(s_request_queue);
+        s_request_queue = NULL;
+    }
+    if (s_transfer_done != NULL) {
+        vSemaphoreDelete(s_transfer_done);
+        s_transfer_done = NULL;
+    }
+    if (s_worker_stopped != NULL) {
+        vSemaphoreDelete(s_worker_stopped);
+        s_worker_stopped = NULL;
+    }
+    if (s_system_context.completion != NULL) {
+        vSemaphoreDelete(s_system_context.completion);
+        s_system_context.completion = NULL;
+    }
+    for (int i = 0; i < DISPLAY__MAX_CONTEXTS; ++i) {
+        if (s_contexts[i].completion != NULL) {
+            vSemaphoreDelete(s_contexts[i].completion);
+            s_contexts[i].completion = NULL;
+        }
+    }
+    if (s_framebuffer != NULL) {
+        heap_caps_free(s_framebuffer);
+        s_framebuffer = NULL;
+    }
+    display__hardware_deinit();
+}
+
 bruce_result_t display__init(void) {
     display__ensure_lock();
 
@@ -1454,11 +1549,7 @@ bruce_result_t display__init(void) {
 
     result = display__backlight_init();
     if (result != BRUCE_OK) {
-        esp_lcd_panel_del(s_panel);
-        esp_lcd_panel_io_del(s_io);
-        spi_bus_free(DISPLAY__SPI_HOST);
-        s_panel = NULL;
-        s_io = NULL;
+        display__hardware_deinit();
         display__unlock();
         return result;
     }
@@ -1468,11 +1559,7 @@ bruce_result_t display__init(void) {
         (bruce_display_color_t *)heap_caps_malloc(DISPLAY__FB_SIZE, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
     if (s_framebuffer == NULL) {
         ESP_LOGE(TAG, "failed to allocate framebuffer");
-        esp_lcd_panel_del(s_panel);
-        esp_lcd_panel_io_del(s_io);
-        spi_bus_free(DISPLAY__SPI_HOST);
-        s_panel = NULL;
-        s_io = NULL;
+        display__hardware_deinit();
         display__unlock();
         return BRUCE_ERR_NO_MEMORY;
     }
@@ -1489,8 +1576,17 @@ bruce_result_t display__init(void) {
     display__context_defaults(&s_system_context);
 
     s_transfer_done = xSemaphoreCreateBinary();
+    s_worker_stopped = xSemaphoreCreateBinary();
     s_request_queue = xQueueCreate(DISPLAY__MAX_CONTEXTS + 1, sizeof(display__request_t));
-    if (s_system_context.completion == NULL || s_transfer_done == NULL || s_request_queue == NULL ||
+    bool completion_failed = false;
+    for (int i = 0; i < DISPLAY__MAX_CONTEXTS; ++i) {
+        if (s_contexts[i].in_use && s_contexts[i].completion == NULL) {
+            s_contexts[i].completion = xSemaphoreCreateBinary();
+            if (s_contexts[i].completion == NULL) completion_failed = true;
+        }
+    }
+    if (s_system_context.completion == NULL || s_transfer_done == NULL || s_worker_stopped == NULL ||
+        s_request_queue == NULL || completion_failed ||
         xTaskCreate(
             display__worker,
             "bruce_display",
@@ -1499,8 +1595,7 @@ bruce_result_t display__init(void) {
             tskIDLE_PRIORITY + 3,
             &s_worker_task
         ) != pdPASS) {
-        heap_caps_free(s_framebuffer);
-        s_framebuffer = NULL;
+        display__release_resources_locked();
         display__unlock();
         return BRUCE_ERR_NO_MEMORY;
     }
@@ -1536,48 +1631,21 @@ void display__deinit(void) {
     }
 
     s_initialized = false;
+    QueueHandle_t request_queue = s_request_queue;
+    SemaphoreHandle_t worker_stopped = s_worker_stopped;
+    TaskHandle_t worker_task = s_worker_task;
     display__unlock();
 
-    /* No new requests can enter after initialized is cleared. Let the sole
-     * transfer owner finish queued work before transport or DMA memory dies. */
-    for (;;) {
-        display__lock();
-        bool idle =
-            !s_transfer_active && (s_request_queue == NULL || uxQueueMessagesWaiting(s_request_queue) == 0);
-        display__unlock();
-        if (idle) { break; }
-        vTaskDelay(1);
+    /* The shutdown marker is queued after all accepted requests, so its
+     * acknowledgement also guarantees that every waiter has been signalled. */
+    if (worker_task != NULL && request_queue != NULL && worker_stopped != NULL) {
+        display__request_t shutdown = {.shutdown = true};
+        if (xQueueSend(request_queue, &shutdown, portMAX_DELAY) == pdPASS) {
+            (void)xSemaphoreTake(worker_stopped, portMAX_DELAY);
+        }
     }
-    if (s_worker_task != NULL) {
-        vTaskDelete(s_worker_task);
-        s_worker_task = NULL;
-    }
-
     display__lock();
-    if (s_panel != NULL) {
-        esp_lcd_panel_disp_on_off(s_panel, false);
-        esp_lcd_panel_del(s_panel);
-        s_panel = NULL;
-    }
-    if (s_io != NULL) {
-        esp_lcd_panel_io_del(s_io);
-        s_io = NULL;
-    }
-    spi_bus_free(DISPLAY__SPI_HOST);
-
-    if (s_framebuffer != NULL) {
-        heap_caps_free(s_framebuffer);
-        s_framebuffer = NULL;
-    }
-    if (s_request_queue != NULL) {
-        vQueueDelete(s_request_queue);
-        s_request_queue = NULL;
-    }
-    if (s_transfer_done != NULL) {
-        vSemaphoreDelete(s_transfer_done);
-        s_transfer_done = NULL;
-    }
-
+    display__release_resources_locked();
     display__unlock();
 }
 
@@ -2083,9 +2151,9 @@ bruce_result_t display__draw_svg_path(
         display__unlock();
         return BRUCE_ERR_PERMISSION;
     }
-    display__svg_render_path(x, y, w, h, path, color, false);
+    bruce_result_t result = display__svg_render_path(x, y, w, h, path, color, false);
     display__unlock();
-    return BRUCE_OK;
+    return result;
 }
 
 bruce_result_t display__fill_svg_path(
@@ -2102,9 +2170,9 @@ bruce_result_t display__fill_svg_path(
         display__unlock();
         return BRUCE_ERR_PERMISSION;
     }
-    display__svg_render_path(x, y, w, h, path, color, true);
+    bruce_result_t result = display__svg_render_path(x, y, w, h, path, color, true);
     display__unlock();
-    return BRUCE_OK;
+    return result;
 }
 
 bruce_result_t display__set_rotation(uint8_t rotation) {
@@ -2414,6 +2482,7 @@ void display__task_state_changed(bruce_task_id_t task_id, bruce_task_state_t sta
 void display__task_removed(bruce_task_id_t task_id) {
     display__ensure_lock();
     display__lock();
+    SemaphoreHandle_t completion = NULL;
     display__task_context_t *context = display__find_context_locked(task_id);
     if (context != NULL) {
         context->hidden = true;
@@ -2423,9 +2492,12 @@ void display__task_removed(bruce_task_id_t task_id) {
         } else {
             context->frame_active = false;
             context->in_use = false;
+            completion = context->completion;
+            context->completion = NULL;
         }
     }
     display__unlock();
+    if (completion != NULL) vSemaphoreDelete(completion);
 }
 
 bruce_result_t display__test_read_pixel(int16_t x, int16_t y, bruce_display_color_t *out_color) {

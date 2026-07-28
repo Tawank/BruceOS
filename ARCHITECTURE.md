@@ -458,6 +458,15 @@ tasks are checked inside each protected Core API.
 credentials, and raw TCP sockets need `wifi`. `input__inject()` needs `input`; task control of
 another task needs `task`; starting a built-in command or path needs `execute`.
 
+`http__request()` accepts at most 64 KiB of response body by default. Callers may set
+`max_response_bytes` to another non-zero limit. A response that exceeds the selected limit fails
+with `BRUCE_ERR_RESOURCE_LIMIT`. Setting `on_response_chunk` delivers body data synchronously as it
+arrives instead of retaining it; callback data is borrowed for the callback duration, and the
+successful response reports the delivered byte count with a null body. Buffered response bodies
+are NUL-terminated, while `body_len` remains authoritative. Core retains at most 32 response
+headers and 4096 bytes of header text; omitted excess headers do not fail the request. The retained
+headers and buffered body share one task-owned allocation released by `http__response_free()`.
+
 ## Dialog and task interaction
 
 `dialog__*` is renderer-agnostic.  `dialog__choice()` displays a GUI choice

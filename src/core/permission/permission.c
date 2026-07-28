@@ -48,7 +48,7 @@ static StaticSemaphore_t s_mutex_storage;
 static SemaphoreHandle_t s_mutex;
 static portMUX_TYPE s_init_mux = portMUX_INITIALIZER_UNLOCKED;
 
-static permission__file_entry_t s_files[PERMISSION__MAX_FILES];
+static permission__file_entry_t *s_files;
 static bool s_loaded;
 
 static void permission__lock(void) {
@@ -80,6 +80,7 @@ bool permission__from_name(const char *name, bruce_permission_t *out_permission)
 
 /* Caller must hold the lock. */
 static permission__file_entry_t *permission__find_locked(const char *file_name) {
+    if (s_files == NULL) return NULL;
     for (int i = 0; i < PERMISSION__MAX_FILES; ++i) {
         if (s_files[i].in_use && strcmp(s_files[i].file_name, file_name) == 0) { return &s_files[i]; }
     }
@@ -91,6 +92,10 @@ static permission__file_entry_t *permission__find_locked(const char *file_name) 
 static permission__file_entry_t *permission__find_or_create_locked(const char *file_name) {
     permission__file_entry_t *entry = permission__find_locked(file_name);
     if (entry != NULL) return entry;
+    if (s_files == NULL) {
+        s_files = calloc(PERMISSION__MAX_FILES, sizeof(*s_files));
+        if (s_files == NULL) return NULL;
+    }
     for (int i = 0; i < PERMISSION__MAX_FILES; ++i) {
         if (!s_files[i].in_use) {
             memset(&s_files[i], 0, sizeof(s_files[i]));
@@ -103,22 +108,29 @@ static permission__file_entry_t *permission__find_or_create_locked(const char *f
 }
 
 /* Caller must hold the lock. */
-static void permission__load_locked(void) {
-    if (s_loaded) return;
+static bruce_result_t permission__load_locked(void) {
+    if (s_loaded) return BRUCE_OK;
     s_loaded = true;
 
     char *text = NULL;
     size_t size = 0;
     if (!storage__read_file(PERMISSION__FILE_PATH, &text, &size) || size == 0) {
         if (text != NULL) storage__free(text);
-        return;
+        return BRUCE_OK;
     }
 
     cJSON *root = cJSON_ParseWithLength(text, size);
     storage__free(text);
     if (root == NULL || !cJSON_IsObject(root)) {
         if (root != NULL) cJSON_Delete(root);
-        return;
+        return BRUCE_OK;
+    }
+
+    s_files = calloc(PERMISSION__MAX_FILES, sizeof(*s_files));
+    if (s_files == NULL) {
+        cJSON_Delete(root);
+        s_loaded = false;
+        return BRUCE_ERR_NO_MEMORY;
     }
 
     const cJSON *file_item;
@@ -136,12 +148,14 @@ static void permission__load_locked(void) {
         }
     }
     cJSON_Delete(root);
+    return BRUCE_OK;
 }
 
-static void permission__ensure_loaded(void) {
+static bruce_result_t permission__ensure_loaded(void) {
     permission__lock();
-    permission__load_locked();
+    bruce_result_t result = permission__load_locked();
     permission__unlock();
+    return result;
 }
 
 /* Caller must hold the lock. */
@@ -149,7 +163,7 @@ static bool permission__save_locked(void) {
     cJSON *root = cJSON_CreateObject();
     if (root == NULL) return false;
 
-    for (int i = 0; i < PERMISSION__MAX_FILES; ++i) {
+    for (int i = 0; s_files != NULL && i < PERMISSION__MAX_FILES; ++i) {
         if (!s_files[i].in_use) continue;
         cJSON *file_obj = cJSON_AddObjectToObject(root, s_files[i].file_name);
         if (file_obj == NULL) continue;
@@ -205,15 +219,12 @@ bruce_result_t permission__check(bruce_permission_t permission) {
     if (built_in) { return BRUCE_OK; }
     if (key[0] == '\0') { return BRUCE_ERR_PERMISSION; }
 
-    permission__ensure_loaded();
+    bruce_result_t loaded = permission__ensure_loaded();
+    if (loaded != BRUCE_OK) return loaded;
 
     permission__lock();
-    permission__file_entry_t *entry = permission__find_or_create_locked(key);
-    if (entry == NULL) {
-        permission__unlock();
-        return BRUCE_ERR_RESOURCE_LIMIT;
-    }
-    if (entry->known[permission]) {
+    permission__file_entry_t *entry = permission__find_locked(key);
+    if (entry != NULL && entry->known[permission]) {
         bool allowed = entry->allowed[permission];
         permission__unlock();
         return allowed ? BRUCE_OK : BRUCE_ERR_PERMISSION;
@@ -229,10 +240,13 @@ bruce_result_t permission__check(bruce_permission_t permission) {
 
     permission__lock();
     entry = permission__find_or_create_locked(key);
-    if (entry != NULL) {
-        entry->known[permission] = true;
-        entry->allowed[permission] = allowed;
+    if (entry == NULL) {
+        bruce_result_t result = s_files == NULL ? BRUCE_ERR_NO_MEMORY : BRUCE_ERR_RESOURCE_LIMIT;
+        permission__unlock();
+        return result;
     }
+    entry->known[permission] = true;
+    entry->allowed[permission] = allowed;
     permission__unlock();
     permission__save();
 
@@ -252,16 +266,13 @@ permission__preflight(const char *file_name, const char *const *permission_names
         if (!permission__from_name(permission_names[i], &resolved[i])) { return BRUCE_ERR_INVALID_ARGUMENT; }
     }
 
-    permission__ensure_loaded();
+    bruce_result_t loaded = permission__ensure_loaded();
+    if (loaded != BRUCE_OK) return loaded;
 
     for (size_t i = 0; i < count; ++i) {
         permission__lock();
-        permission__file_entry_t *entry = permission__find_or_create_locked(file_name);
-        if (entry == NULL) {
-            permission__unlock();
-            return BRUCE_ERR_RESOURCE_LIMIT;
-        }
-        bool already_known = entry->known[resolved[i]];
+        permission__file_entry_t *entry = permission__find_locked(file_name);
+        bool already_known = entry != NULL && entry->known[resolved[i]];
         permission__unlock();
         if (already_known) continue;
 
@@ -271,10 +282,13 @@ permission__preflight(const char *file_name, const char *const *permission_names
 
         permission__lock();
         entry = permission__find_or_create_locked(file_name);
-        if (entry != NULL) {
-            entry->known[resolved[i]] = true;
-            entry->allowed[resolved[i]] = allowed;
+        if (entry == NULL) {
+            bruce_result_t result = s_files == NULL ? BRUCE_ERR_NO_MEMORY : BRUCE_ERR_RESOURCE_LIMIT;
+            permission__unlock();
+            return result;
         }
+        entry->known[resolved[i]] = true;
+        entry->allowed[resolved[i]] = allowed;
         permission__unlock();
     }
 
@@ -289,7 +303,8 @@ permission__get_saved(const char *file_name, bruce_permission_t permission, bool
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
 
-    permission__ensure_loaded();
+    bruce_result_t loaded = permission__ensure_loaded();
+    if (loaded != BRUCE_OK) return loaded;
 
     permission__lock();
     permission__file_entry_t *entry = permission__find_locked(file_name);
@@ -310,13 +325,15 @@ bruce_result_t permission__set(const char *file_name, bruce_permission_t permiss
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
 
-    permission__ensure_loaded();
+    bruce_result_t loaded = permission__ensure_loaded();
+    if (loaded != BRUCE_OK) return loaded;
 
     permission__lock();
     permission__file_entry_t *entry = permission__find_or_create_locked(file_name);
     if (entry == NULL) {
+        bruce_result_t result = s_files == NULL ? BRUCE_ERR_NO_MEMORY : BRUCE_ERR_RESOURCE_LIMIT;
         permission__unlock();
-        return BRUCE_ERR_RESOURCE_LIMIT;
+        return result;
     }
     entry->known[permission] = true;
     entry->allowed[permission] = allowed;
@@ -327,7 +344,8 @@ bruce_result_t permission__set(const char *file_name, bruce_permission_t permiss
 
 bool permission__test_reset(void) {
     permission__lock();
-    memset(s_files, 0, sizeof(s_files));
+    free(s_files);
+    s_files = NULL;
     s_loaded = true; /* prevent a later ensure_loaded from reloading the old file before removal completes */
     permission__unlock();
 
