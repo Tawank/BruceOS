@@ -9,15 +9,30 @@
 #include "core/task/task.h"
 #include "core_sdk/config.h"
 #include "core_sdk/permission.h"
+#include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h"
 #include "freertos/semphr.h"
 
+static StaticSemaphore_t s_config_mutex_storage;
 static SemaphoreHandle_t s_config_mutex;
+static portMUX_TYPE s_config_init_mux = portMUX_INITIALIZER_UNLOCKED;
 static bool s_defaults_initialized;
 static bool s_loaded;
 static config__t s_config;
 
-static void config__lock(void) { xSemaphoreTake(s_config_mutex, portMAX_DELAY); }
+static void config__ensure_mutex(void) {
+    if (s_config_mutex != NULL) return;
+    portENTER_CRITICAL(&s_config_init_mux);
+    if (s_config_mutex == NULL) {
+        s_config_mutex = xSemaphoreCreateMutexStatic(&s_config_mutex_storage);
+    }
+    portEXIT_CRITICAL(&s_config_init_mux);
+}
+
+static void config__lock(void) {
+    config__ensure_mutex();
+    xSemaphoreTake(s_config_mutex, portMAX_DELAY);
+}
 
 static void config__unlock(void) { xSemaphoreGive(s_config_mutex); }
 
@@ -627,7 +642,7 @@ void config__init_defaults(void) {
 }
 
 bool config__init(void) {
-    s_config_mutex = xSemaphoreCreateMutex();
+    config__ensure_mutex();
     config__init_defaults();
     return storage__init() && config__load();
 }
