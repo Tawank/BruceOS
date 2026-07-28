@@ -17,6 +17,7 @@
 
 #include "dialog_js.h"       // IWYU pragma: export
 #include "display_js.h"      // IWYU pragma: export
+#include "icon_js.h"         // IWYU pragma: export
 #include "ir_js.h"           // IWYU pragma: export
 #include "js_stdlib.h"       // IWYU pragma: export
 #include "keyboard_js.h"     // IWYU pragma: export

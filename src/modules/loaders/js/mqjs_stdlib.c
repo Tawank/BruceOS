@@ -27,6 +27,7 @@
 
 #include <mquickjs_build.h>
 
+#include "icon_js.h"         // IWYU pragma: export
 #include "user_classes_js.h" // IWYU pragma: export
 
 static const JSPropDef js_object_proto[] = {
@@ -688,6 +689,7 @@ static const JSPropDef js_display[] = {
     JS_CFUNC_DEF("drawBitmap", 7, native_drawBitmap),
     JS_CFUNC_DEF("drawXBitmap", 7, native_drawXBitmap),
     JS_CFUNC_DEF("drawArc", 6, native_drawArc),
+    JS_CFUNC_DEF("drawSvgPath", 6, native_drawSvgPath),
     JS_CFUNC_DEF("drawImage", 5, native_drawImage),
     JS_CFUNC_DEF("drawJpg", 4, native_drawJpg),
     JS_CFUNC_DEF("drawPng", 4, native_drawPng),
@@ -706,6 +708,14 @@ static const JSPropDef js_display[] = {
 };
 
 const JSClassDef js_display_obj = JS_OBJECT_DEF("Display", js_display);
+
+/* Icon module */
+static const JSPropDef js_icon[] = {
+    JS_CFUNC_DEF("get", 1, native_iconGet),
+    JS_PROP_END,
+};
+
+const JSClassDef js_icon_obj = JS_OBJECT_DEF("Icon", js_icon);
 
 /* TextViewer (dialog.createTextViewer) */
 static const JSPropDef js_textviewer_proto[] = {
@@ -892,6 +902,7 @@ static const JSPropDef js_global_object[] = {
     /* Modules */
     JS_PROP_CLASS_DEF("keyboard", &js_keyboard_obj),
     JS_PROP_CLASS_DEF("display", &js_display_obj),
+    JS_PROP_CLASS_DEF("icon", &js_icon_obj),
     JS_PROP_CLASS_DEF("wifi", &js_wifi_obj),
     JS_PROP_CLASS_DEF("serial", &js_serial_obj),
     JS_PROP_CLASS_DEF("dialog", &js_dialog_obj),

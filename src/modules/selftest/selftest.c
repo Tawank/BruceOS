@@ -13,6 +13,7 @@
 #include "dialog_test.h"
 #include "display_test.h"
 #include "gpio_bus_test.h"
+#include "icon_test.h"
 #include "image_test.h"
 #include "input_test.h"
 #include "ir_test.h"
@@ -103,6 +104,8 @@ int selftest_app_main(int argc, char **argv) {
     RUN_SELFTEST(selftest__run_dialog_pick_file_case);
     RUN_SELFTEST(selftest__run_dialog_viewer_case);
     RUN_SELFTEST(selftest__run_display_compositor_case);
+    RUN_SELFTEST(selftest__run_display_svg_path_case);
+    RUN_SELFTEST(selftest__run_icon_registry_case);
     RUN_SELFTEST(selftest__run_image_decode_case);
     RUN_SELFTEST(selftest__run_notification_case);
     RUN_SELFTEST(selftest__run_status_icon_case);

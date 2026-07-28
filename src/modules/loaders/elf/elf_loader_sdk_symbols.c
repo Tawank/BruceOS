@@ -24,6 +24,7 @@
 #include "core_sdk/display.h"
 #include "core_sdk/gpio.h"
 #include "core_sdk/i2c.h"
+#include "core_sdk/icon.h"
 #include "core_sdk/image.h"
 #include "core_sdk/input.h"
 #include "core_sdk/ir.h"
@@ -146,6 +147,7 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(display__draw_circle),
     ESP_ELFSYM_EXPORT(display__fill_circle),
     ESP_ELFSYM_EXPORT(display__draw_arc),
+    ESP_ELFSYM_EXPORT(display__draw_svg_path),
     ESP_ELFSYM_EXPORT(display__draw_triangle),
     ESP_ELFSYM_EXPORT(display__fill_triangle),
     ESP_ELFSYM_EXPORT(display__draw_round_rect),
@@ -162,6 +164,9 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(display__begin_frame),
     ESP_ELFSYM_EXPORT(display__present),
     ESP_ELFSYM_EXPORT(display__flush),
+
+    /* Built-in vector icons */
+    ESP_ELFSYM_EXPORT(icon__get),
 
     /* Encoded images */
     ESP_ELFSYM_EXPORT(image__draw_memory),

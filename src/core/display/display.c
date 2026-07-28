@@ -1,5 +1,6 @@
 #include "display.h"
 
+#include <ctype.h>
 #include <math.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -908,6 +909,325 @@ static void display__draw_triangle_fill(
 }
 
 /* -------------------------------------------------------------------------- */
+/* SVG path rendering                                                         */
+/* -------------------------------------------------------------------------- */
+
+#define DISPLAY__SVG_VIEWBOX_WIDTH 24.0f
+#define DISPLAY__SVG_VIEWBOX_HEIGHT 24.0f
+#define DISPLAY__SVG_MAX_STEPS 64
+#define DISPLAY__SVG_MIN_STEPS 8
+
+typedef struct {
+    float x;
+    float y;
+    float start_x;
+    float start_y;
+    float last_cpx;
+    float last_cpy;
+    bool initialized;
+} display__svg_state_t;
+
+static void display__svg_draw_line(
+    float x0, float y0, float x1, float y1, int16_t dx, int16_t dy, int16_t dw, int16_t dh,
+    bruce_display_color_t color
+) {
+    display__draw_line_bresenham(
+        (int16_t)lroundf(dx + x0 * dw / DISPLAY__SVG_VIEWBOX_WIDTH),
+        (int16_t)lroundf(dy + y0 * dh / DISPLAY__SVG_VIEWBOX_HEIGHT),
+        (int16_t)lroundf(dx + x1 * dw / DISPLAY__SVG_VIEWBOX_WIDTH),
+        (int16_t)lroundf(dy + y1 * dh / DISPLAY__SVG_VIEWBOX_HEIGHT),
+        color
+    );
+}
+
+static void display__svg_move_to(display__svg_state_t *s, float x, float y) {
+    s->x = x;
+    s->y = y;
+    s->start_x = x;
+    s->start_y = y;
+    s->initialized = true;
+}
+
+static void display__svg_line_to(
+    display__svg_state_t *s, float x, float y, int16_t dx, int16_t dy, int16_t dw, int16_t dh,
+    bruce_display_color_t color
+) {
+    if (!s->initialized) { return; }
+    display__svg_draw_line(s->x, s->y, x, y, dx, dy, dw, dh, color);
+    s->x = x;
+    s->y = y;
+}
+
+static void display__svg_close_path(
+    display__svg_state_t *s, int16_t dx, int16_t dy, int16_t dw, int16_t dh,
+    bruce_display_color_t color
+) {
+    if (!s->initialized) { return; }
+    display__svg_draw_line(s->x, s->y, s->start_x, s->start_y, dx, dy, dw, dh, color);
+    s->x = s->start_x;
+    s->y = s->start_y;
+}
+
+static void display__svg_cubic_bezier(
+    display__svg_state_t *s, float c1x, float c1y, float c2x, float c2y, float x, float y,
+    int16_t dx, int16_t dy, int16_t dw, int16_t dh, bruce_display_color_t color
+) {
+    if (!s->initialized) { return; }
+    float px = s->x;
+    float py = s->y;
+    for (int i = 1; i <= DISPLAY__SVG_MIN_STEPS; i++) {
+        float t = (float)i / (float)DISPLAY__SVG_MIN_STEPS;
+        float mt = 1.0f - t;
+        float bx = mt * mt * mt * s->x + 3.0f * mt * mt * t * c1x + 3.0f * mt * t * t * c2x + t * t * t * x;
+        float by = mt * mt * mt * s->y + 3.0f * mt * mt * t * c1y + 3.0f * mt * t * t * c2y + t * t * t * y;
+        display__svg_draw_line(px, py, bx, by, dx, dy, dw, dh, color);
+        px = bx;
+        py = by;
+    }
+    s->x = x;
+    s->y = y;
+    s->last_cpx = c2x;
+    s->last_cpy = c2y;
+}
+
+static void display__svg_quadratic_bezier(
+    display__svg_state_t *s, float cpx, float cpy, float x, float y,
+    int16_t dx, int16_t dy, int16_t dw, int16_t dh, bruce_display_color_t color
+) {
+    if (!s->initialized) { return; }
+    float px = s->x;
+    float py = s->y;
+    for (int i = 1; i <= DISPLAY__SVG_MIN_STEPS; i++) {
+        float t = (float)i / (float)DISPLAY__SVG_MIN_STEPS;
+        float mt = 1.0f - t;
+        float bx = mt * mt * s->x + 2.0f * mt * t * cpx + t * t * x;
+        float by = mt * mt * s->y + 2.0f * mt * t * cpy + t * t * y;
+        display__svg_draw_line(px, py, bx, by, dx, dy, dw, dh, color);
+        px = bx;
+        py = by;
+    }
+    s->x = x;
+    s->y = y;
+    s->last_cpx = cpx;
+    s->last_cpy = cpy;
+}
+
+static void display__svg_arc(
+    display__svg_state_t *s, float rx, float ry, float phi, bool large_arc, bool sweep, float x, float y,
+    int16_t dx, int16_t dy, int16_t dw, int16_t dh, bruce_display_color_t color
+) {
+    if (!s->initialized || (s->x == x && s->y == y) || rx <= 0.0f || ry <= 0.0f) { return; }
+
+    float x1 = s->x;
+    float y1 = s->y;
+    float x2 = x;
+    float y2 = y;
+
+    float phi_rad = phi * (float)M_PI / 180.0f;
+    float cos_phi = cosf(phi_rad);
+    float sin_phi = sinf(phi_rad);
+
+    float dx2 = (x1 - x2) / 2.0f;
+    float dy2 = (y1 - y2) / 2.0f;
+    float x1p = cos_phi * dx2 + sin_phi * dy2;
+    float y1p = -sin_phi * dx2 + cos_phi * dy2;
+
+    float lambda = (x1p * x1p) / (rx * rx) + (y1p * y1p) / (ry * ry);
+    if (lambda > 1.0f) {
+        float sqrt_lambda = sqrtf(lambda);
+        rx *= sqrt_lambda;
+        ry *= sqrt_lambda;
+    }
+
+    float numerator = rx * rx * ry * ry - rx * rx * y1p * y1p - ry * ry * x1p * x1p;
+    if (numerator < 0.0f) { numerator = 0.0f; }
+    float denominator = rx * rx * y1p * y1p + ry * ry * x1p * x1p;
+    float coef = (denominator <= 0.0f) ? 0.0f : (large_arc == sweep ? -1.0f : 1.0f) * sqrtf(numerator / denominator);
+
+    float cxp = coef * (rx * y1p / ry);
+    float cyp = coef * (-ry * x1p / rx);
+    float cx = cos_phi * cxp - sin_phi * cyp + (x1 + x2) / 2.0f;
+    float cy = sin_phi * cxp + cos_phi * cyp + (y1 + y2) / 2.0f;
+
+    float theta1 = atan2f(y1p - cyp, x1p - cxp);
+    float theta2 = atan2f(-y1p - cyp, -x1p - cxp);
+    float delta = theta2 - theta1;
+    if (sweep && delta < 0.0f) {
+        delta += 2.0f * (float)M_PI;
+    } else if (!sweep && delta > 0.0f) {
+        delta -= 2.0f * (float)M_PI;
+    }
+
+    float perimeter = fmaxf(fabsf(delta * rx), fabsf(delta * ry));
+    int steps = (int)(perimeter / 2.0f);
+    if (steps < DISPLAY__SVG_MIN_STEPS) { steps = DISPLAY__SVG_MIN_STEPS; }
+    if (steps > DISPLAY__SVG_MAX_STEPS) { steps = DISPLAY__SVG_MAX_STEPS; }
+
+    float px = x1;
+    float py = y1;
+    for (int i = 1; i <= steps; i++) {
+        float theta = theta1 + delta * (float)i / (float)steps;
+        float bx = rx * cosf(theta);
+        float by = ry * sinf(theta);
+        float ax = bx * cos_phi - by * sin_phi + cx;
+        float ay = bx * sin_phi + by * cos_phi + cy;
+        display__svg_draw_line(px, py, ax, ay, dx, dy, dw, dh, color);
+        px = ax;
+        py = ay;
+    }
+    s->x = x;
+    s->y = y;
+}
+
+static float display__svg_parse_number(const char **p, bool *ok) {
+    while (isspace((unsigned char)**p) || **p == ',') { (*p)++; }
+    if (**p == '\0') {
+        if (ok != NULL) { *ok = false; }
+        return 0.0f;
+    }
+    char *end = NULL;
+    float v = strtof(*p, &end);
+    if (end == *p) {
+        if (ok != NULL) { *ok = false; }
+        (*p)++;
+        return 0.0f;
+    }
+    *p = end;
+    if (ok != NULL) { *ok = true; }
+    return v;
+}
+
+static void display__svg_render_path(
+    int16_t dx, int16_t dy, int16_t dw, int16_t dh, const char *path, bruce_display_color_t color
+) {
+    display__svg_state_t s = {0};
+    const char *p = path;
+    char cmd = 0;
+    bool first_cmd = true;
+
+    while (*p != '\0') {
+        while (isspace((unsigned char)*p) || *p == ',') { p++; }
+        if (*p == '\0') { break; }
+
+        if (isalpha((unsigned char)*p)) {
+            cmd = *p++;
+            if (first_cmd) {
+                first_cmd = false;
+                if (cmd == 'm') { cmd = 'M'; }
+            }
+        } else if (cmd == 0) {
+            break;
+        }
+
+        bool relative = islower((unsigned char)cmd);
+        char base = (char)toupper((unsigned char)cmd);
+        bool ok;
+        float nx, ny;
+
+        switch (base) {
+            case 'M': {
+                nx = display__svg_parse_number(&p, &ok);
+                ny = display__svg_parse_number(&p, &ok);
+                if (!ok) { continue; }
+                if (relative) { nx += s.x; ny += s.y; }
+                display__svg_move_to(&s, nx, ny);
+                cmd = relative ? 'l' : 'L';
+                break;
+            }
+            case 'L': {
+                nx = display__svg_parse_number(&p, &ok);
+                ny = display__svg_parse_number(&p, &ok);
+                if (!ok) { continue; }
+                if (relative) { nx += s.x; ny += s.y; }
+                display__svg_line_to(&s, nx, ny, dx, dy, dw, dh, color);
+                break;
+            }
+            case 'H': {
+                nx = display__svg_parse_number(&p, &ok);
+                if (!ok) { continue; }
+                if (relative) { nx += s.x; }
+                display__svg_line_to(&s, nx, s.y, dx, dy, dw, dh, color);
+                break;
+            }
+            case 'V': {
+                ny = display__svg_parse_number(&p, &ok);
+                if (!ok) { continue; }
+                if (relative) { ny += s.y; }
+                display__svg_line_to(&s, s.x, ny, dx, dy, dw, dh, color);
+                break;
+            }
+            case 'C': {
+                float c1x = display__svg_parse_number(&p, &ok);
+                float c1y = display__svg_parse_number(&p, &ok);
+                float c2x = display__svg_parse_number(&p, &ok);
+                float c2y = display__svg_parse_number(&p, &ok);
+                nx = display__svg_parse_number(&p, &ok);
+                ny = display__svg_parse_number(&p, &ok);
+                if (!ok) { continue; }
+                if (relative) {
+                    c1x += s.x; c1y += s.y; c2x += s.x; c2y += s.y; nx += s.x; ny += s.y;
+                }
+                display__svg_cubic_bezier(&s, c1x, c1y, c2x, c2y, nx, ny, dx, dy, dw, dh, color);
+                break;
+            }
+            case 'S': {
+                float c1x = 2.0f * s.x - s.last_cpx;
+                float c1y = 2.0f * s.y - s.last_cpy;
+                float c2x = display__svg_parse_number(&p, &ok);
+                float c2y = display__svg_parse_number(&p, &ok);
+                nx = display__svg_parse_number(&p, &ok);
+                ny = display__svg_parse_number(&p, &ok);
+                if (!ok) { continue; }
+                if (relative) { c2x += s.x; c2y += s.y; nx += s.x; ny += s.y; }
+                display__svg_cubic_bezier(&s, c1x, c1y, c2x, c2y, nx, ny, dx, dy, dw, dh, color);
+                break;
+            }
+            case 'Q': {
+                float cpx = display__svg_parse_number(&p, &ok);
+                float cpy = display__svg_parse_number(&p, &ok);
+                nx = display__svg_parse_number(&p, &ok);
+                ny = display__svg_parse_number(&p, &ok);
+                if (!ok) { continue; }
+                if (relative) { cpx += s.x; cpy += s.y; nx += s.x; ny += s.y; }
+                display__svg_quadratic_bezier(&s, cpx, cpy, nx, ny, dx, dy, dw, dh, color);
+                break;
+            }
+            case 'T': {
+                float cpx = 2.0f * s.x - s.last_cpx;
+                float cpy = 2.0f * s.y - s.last_cpy;
+                nx = display__svg_parse_number(&p, &ok);
+                ny = display__svg_parse_number(&p, &ok);
+                if (!ok) { continue; }
+                if (relative) { nx += s.x; ny += s.y; }
+                display__svg_quadratic_bezier(&s, cpx, cpy, nx, ny, dx, dy, dw, dh, color);
+                break;
+            }
+            case 'A': {
+                float rx = display__svg_parse_number(&p, &ok);
+                float ry = display__svg_parse_number(&p, &ok);
+                float phi = display__svg_parse_number(&p, &ok);
+                float fa = display__svg_parse_number(&p, &ok);
+                float fs = display__svg_parse_number(&p, &ok);
+                nx = display__svg_parse_number(&p, &ok);
+                ny = display__svg_parse_number(&p, &ok);
+                if (!ok) { continue; }
+                if (relative) { nx += s.x; ny += s.y; }
+                display__svg_arc(
+                    &s, rx, ry, phi, fa != 0.0f, fs != 0.0f, nx, ny, dx, dy, dw, dh, color
+                );
+                break;
+            }
+            case 'Z': {
+                display__svg_close_path(&s, dx, dy, dw, dh, color);
+                break;
+            }
+            default:
+                break;
+        }
+    }
+}
+
+/* -------------------------------------------------------------------------- */
 /* Text rendering                                                             */
 /* -------------------------------------------------------------------------- */
 
@@ -1572,6 +1892,25 @@ bruce_result_t display__draw_rgb_bitmap(int16_t x, int16_t y, const uint16_t *bi
     for (int16_t row = 0; row < h; ++row) {
         for (int16_t col = 0; col < w; ++col) { display__set_pixel(x + col, y + row, bitmap[row * w + col]); }
     }
+    display__unlock();
+    return BRUCE_OK;
+}
+
+bruce_result_t display__draw_svg_path(
+    int16_t x, int16_t y, int16_t w, int16_t h, const char *path, bruce_display_color_t color
+) {
+    if (path == NULL || w <= 0 || h <= 0) { return BRUCE_ERR_INVALID_ARGUMENT; }
+    bruce_task_id_t caller = task__current_id();
+    display__lock();
+    if (!s_initialized) {
+        display__unlock();
+        return BRUCE_ERR_NOT_INITIALIZED;
+    }
+    if (display__drawing_context_locked(caller) == NULL) {
+        display__unlock();
+        return BRUCE_ERR_PERMISSION;
+    }
+    display__svg_render_path(x, y, w, h, path, color);
     display__unlock();
     return BRUCE_OK;
 }

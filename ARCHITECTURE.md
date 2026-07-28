@@ -520,8 +520,17 @@ viewport. `display__begin_frame()` leases the viewport through the completion
 of `display__present()`; tile rows are packed into worker-owned DMA scratch.
 Text and cursor state are task-local, rotation is global, and no resize event is
 emitted. Drawing primitives include legacy-compatible circular arcs whose zero
-angle is at six o'clock and increases clockwise. `display__flush()` provides an
+angle is at six o'clock and increases clockwise, plus `display__draw_svg_path()`
+which renders a 24x24 SVG path-data string (Material icon style) scaled into a
+destination rectangle with 1-pixel strokes. `display__flush()` provides an
 implicit-frame compatibility path.
+
+Icon Core stores a small set of built-in 24x24 Material Design Icons as
+read-only SVG path-data strings. `icon__get(name)` returns a pointer to constant
+firmware memory (never free it) for recognized names such as `wifi`,
+`bluetooth`, `ir`, `folder`, `terminal`, `clock`, `settings`, `selftest`, and
+`apps`, plus aliases like `bt`, `cog`, `test-tube`, and `files`. Unknown names
+and `NULL` return `NULL`. The intended consumer is `display__draw_svg_path()`.
 
 Image Core decodes JPEG, PNG, and the first frame of GIF data from memory or a
 Core storage path into the caller's viewport. `image__draw_memory()` and
