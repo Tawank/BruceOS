@@ -11,6 +11,7 @@
 #include "core_sdk/input.h"
 #include "core_sdk/loader.h"
 #include "core_sdk/result.h"
+#include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
 #include "core_sdk/task.h"
 
@@ -68,7 +69,7 @@ static bruce_result_t filemanager__view_file(const char *path, bool gui) {
     if (result != BRUCE_OK) return result;
 
     if (!gui) {
-        printf("%s%s\n", text, truncated ? "\n[preview truncated]" : "");
+        stdio__printf("%s%s\n", text, truncated ? "\n[preview truncated]" : "");
         free(text);
         return BRUCE_OK;
     }

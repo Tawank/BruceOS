@@ -6,6 +6,7 @@
 
 #include "core_sdk/app_runner.h"
 #include "core_sdk/config.h"
+#include "core_sdk/stdio.h"
 
 #define LAUNCHER__FALLBACK_APP "bruce_launcher"
 
@@ -16,7 +17,7 @@ int launcher_app_main(int argc, char **argv) {
 
     int result = app_runner__run(target, gui_arg, false);
     if (result < 0 && strcmp(target, LAUNCHER__FALLBACK_APP) != 0) {
-        printf(
+        stdio__printf(
             "launcherApp \"%s\" failed to start (%d); falling back to " LAUNCHER__FALLBACK_APP "\n",
             target,
             result

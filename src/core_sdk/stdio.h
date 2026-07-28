@@ -20,9 +20,19 @@ int bruce_stdio_read_line(char *buffer, size_t buffer_size, bool mask_input);
  * polls. Returns BRUCE_ERR_TIMEOUT when no input arrives before the deadline. */
 bruce_result_t bruce_stdio_read(void *buffer, size_t capacity, uint32_t timeout_ms, size_t *out_size);
 
-/* Creates a task-owned, bounded stdin/stdout session. Routing a session makes
- * subsequently launched child tasks read from its input queue and write to
- * its output queue; call route_children(INVALID) after launching. */
+/* Writes app-visible output to the calling task's routed session, or to the
+ * physical serial console when no session is routed. Core diagnostics should
+ * continue to use the normal logging/stdio functions. */
+bruce_result_t bruce_stdio_write(const void *data, size_t size);
+
+/* printf-style form of bruce_stdio_write(). Returns the number of formatted
+ * bytes written, or a negative BRUCE_ERR_* value. */
+int stdio__printf(const char *format, ...) __attribute__((format(printf, 1, 2)));
+
+/* Creates a task-owned, bounded input/output session. Routing a session makes
+ * subsequently launched child tasks use it through bruce_stdio_read(),
+ * bruce_stdio_write(), and stdio__printf(); call route_children(INVALID)
+ * after launching. */
 bruce_result_t bruce_stdio_session_create(bruce_stdio_session_t *out_session);
 bruce_result_t bruce_stdio_session_close(bruce_stdio_session_t session);
 bruce_result_t bruce_stdio_session_route_children(bruce_stdio_session_t session);

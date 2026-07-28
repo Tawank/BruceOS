@@ -6,11 +6,12 @@
 #include "core_sdk/app_runner.h"
 #include "core_sdk/bluetooth.h"
 #include "core_sdk/dialog.h"
+#include "core_sdk/stdio.h"
 
 #define BLUETOOTH_APP__MAX_RESULTS 32
 
 static void bluetooth_app__print_address(const uint8_t *address) {
-    printf(
+    stdio__printf(
         "%02X:%02X:%02X:%02X:%02X:%02X",
         address[0],
         address[1],
@@ -25,12 +26,12 @@ static int bluetooth_app__scan_terminal(void) {
     bluetooth__device_t devices[BLUETOOTH_APP__MAX_RESULTS];
     int count = bluetooth__scan_ble(devices, BLUETOOTH_APP__MAX_RESULTS, 5000);
     if (count < 0) {
-        printf("BLE scan failed: %d\n", count);
+        stdio__printf("BLE scan failed: %d\n", count);
         return count;
     }
     for (int i = 0; i < count; ++i) {
         bluetooth_app__print_address(devices[i].address);
-        printf(
+        stdio__printf(
             " rssi=%d name=%s\n", devices[i].rssi, devices[i].name[0] != '\0' ? devices[i].name : "(unnamed)"
         );
     }
@@ -101,6 +102,6 @@ int bluetooth_app_main(int argc, char **argv) {
     if (argc == 0 || argv == NULL || argv[0] == NULL || strcmp(argv[0], "scan") == 0) {
         return bluetooth_app__scan_terminal();
     }
-    printf("Usage: bluetooth scan\n");
+    stdio__printf("Usage: bluetooth scan\n");
     return BRUCE_ERR_INVALID_ARGUMENT;
 }

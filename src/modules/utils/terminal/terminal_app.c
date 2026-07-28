@@ -164,9 +164,22 @@ static void terminal__submit(terminal__state_t *state) {
     state->dirty = true;
 }
 
+/* Rebuilds a shell-style line from argv so startup args run exactly like a
+ * typed command (serial_commands__run_line() -> app_runner__parse_args()).
+ * Tokens containing spaces/tabs are single-quoted to survive the re-split. */
+static void terminal__argv_to_line(int argc, char **argv, char *out, size_t out_size) {
+    size_t used = 0;
+    for (int i = 0; i < argc && used + 1 < out_size; ++i) {
+        bool quote = strpbrk(argv[i], " \t") != NULL;
+        if (quote) out[used++] = '\'';
+        for (const char *p = argv[i]; *p != '\0' && used + 1 < out_size; ++p) { out[used++] = *p; }
+        if (quote && used + 1 < out_size) out[used++] = '\'';
+        if (i + 1 < argc && used + 1 < out_size) out[used++] = ' ';
+    }
+    out[used] = '\0';
+}
+
 int terminal_app_main(int argc, char **argv) {
-    (void)argc;
-    (void)argv;
     terminal__state_t state = {0};
     state.child = BRUCE_TASK_ID_INVALID;
     state.transcript = calloc(TERMINAL__TRANSCRIPT_CAPACITY, 1);
@@ -177,6 +190,12 @@ int terminal_app_main(int argc, char **argv) {
     }
     terminal__append_text(&state, "Bruce terminal\nType a command and press Enter.\n");
     (void)input__flush();
+
+    if (argc > 0) {
+        terminal__argv_to_line(argc, argv, state.input, sizeof(state.input));
+        state.input_size = strlen(state.input);
+        terminal__submit(&state);
+    }
 
     while (!state.exit_requested) {
         terminal__drain_output(&state);

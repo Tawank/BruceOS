@@ -16,11 +16,11 @@
 #define TCP_APP_EXIT_BYTE 0x1du
 
 static void tcp_app__usage(void) {
-    printf("TCP terminal commands:\n");
-    printf("  tcp client <host> <port>\n");
-    printf("  tcp listener <port>\n");
-    printf("During a session, stdin is sent to TCP and received data is printed to stdout.\n");
-    printf("Press Ctrl+] to close.\n");
+    stdio__printf("TCP terminal commands:\n");
+    stdio__printf("  tcp client <host> <port>\n");
+    stdio__printf("  tcp listener <port>\n");
+    stdio__printf("During a session, stdin is sent to TCP and received data is printed to output.\n");
+    stdio__printf("Press Ctrl+] to close.\n");
 }
 
 static bool tcp_app__parse_port(const char *text, uint16_t *out_port) {
@@ -71,8 +71,7 @@ static bruce_result_t tcp_app__session(bruce_tcp_id_t socket, bool *out_local_ex
         if (result == BRUCE_OK) {
             if (received_size == 0) return BRUCE_OK;
             received[received_size] = '\0';
-            printf("%.*s", (int)received_size, received);
-            fflush(stdout);
+            (void)bruce_stdio_write(received, received_size);
         } else if (result != BRUCE_ERR_TIMEOUT) {
             return result;
         }
@@ -90,38 +89,40 @@ static bruce_result_t tcp_app__session(bruce_tcp_id_t socket, bool *out_local_ex
 
 static int tcp_app__client(const char *host, uint16_t port) {
     if (!wifi__is_connected()) {
-        printf("TCP client: Wi-Fi is not connected\n");
+        stdio__printf("TCP client: Wi-Fi is not connected\n");
         return BRUCE_ERR_INVALID_STATE;
     }
-    printf("Connecting to %s:%u...\n", host, (unsigned int)port);
+    stdio__printf("Connecting to %s:%u...\n", host, (unsigned int)port);
     bruce_tcp_id_t socket = BRUCE_TCP_ID_INVALID;
     bruce_result_t result = tcp__connect(host, port, 10000, &socket);
     if (result != BRUCE_OK) {
-        printf("TCP client: connection failed (%d)\n", result);
+        stdio__printf("TCP client: connection failed (%d)\n", result);
         return result;
     }
-    printf("Connected. Press Ctrl+] to close.\n");
+    stdio__printf("Connected. Press Ctrl+] to close.\n");
     bool local_exit = false;
     result = tcp_app__session(socket, &local_exit);
     (void)tcp__close(socket);
-    printf("\nConnection closed%s\n", result == BRUCE_OK ? "." : " with an error.");
+    stdio__printf("\nConnection closed%s\n", result == BRUCE_OK ? "." : " with an error.");
     return result;
 }
 
 static int tcp_app__listener(uint16_t port) {
     if (!wifi__is_connected()) {
-        printf("TCP listener: Wi-Fi is not connected\n");
+        stdio__printf("TCP listener: Wi-Fi is not connected\n");
         return BRUCE_ERR_INVALID_STATE;
     }
     bruce_tcp_id_t listener = BRUCE_TCP_ID_INVALID;
     bruce_result_t result = tcp__listen(port, &listener);
     if (result != BRUCE_OK) {
-        printf("TCP listener: could not listen on port %u (%d)\n", (unsigned int)port, result);
+        stdio__printf("TCP listener: could not listen on port %u (%d)\n", (unsigned int)port, result);
         return result;
     }
 
     const char *ip = wifi__get_ip();
-    printf("Listening on %s:%u. Press Ctrl+] to stop.\n", ip != NULL ? ip : "0.0.0.0", (unsigned int)port);
+    stdio__printf(
+        "Listening on %s:%u. Press Ctrl+] to stop.\n", ip != NULL ? ip : "0.0.0.0", (unsigned int)port
+    );
     for (;;) {
         bruce_tcp_id_t client = BRUCE_TCP_ID_INVALID;
         bruce_tcp_endpoint_t peer;
@@ -143,20 +144,22 @@ static int tcp_app__listener(uint16_t port) {
         }
         if (result != BRUCE_OK) break;
 
-        printf("Client connected from %s:%u\n", peer.host, (unsigned int)peer.port);
+        stdio__printf("Client connected from %s:%u\n", peer.host, (unsigned int)peer.port);
         bool local_exit = false;
         bruce_result_t session_result = tcp_app__session(client, &local_exit);
         (void)tcp__close(client);
-        printf("\nClient disconnected%s\n", session_result == BRUCE_OK ? "." : " with an error.");
+        stdio__printf(
+            "\nClient disconnected%s\n", session_result == BRUCE_OK ? "." : " with an error."
+        );
         if (local_exit || session_result == BRUCE_ERR_CANCELLED) {
             result = session_result;
             break;
         }
-        printf("Waiting for another client. Press Ctrl+] to stop.\n");
+        stdio__printf("Waiting for another client. Press Ctrl+] to stop.\n");
     }
 
     (void)tcp__close(listener);
-    printf("Listener stopped.\n");
+    stdio__printf("Listener stopped.\n");
     return result;
 }
 

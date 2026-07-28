@@ -6,9 +6,12 @@
 
 #include "core_sdk/notification.h"
 #include "core_sdk/status_icon.h"
+#include "core_sdk/stdio.h"
 
 static int notification_app__usage(void) {
-    printf("usage: notification push <duration-ms> <text> | dismiss | icon-list | icon-remove <key>\n");
+    stdio__printf(
+        "usage: notification push <duration-ms> <text> | dismiss | icon-list | icon-remove <key>\n"
+    );
     return BRUCE_ERR_INVALID_ARGUMENT;
 }
 
@@ -39,9 +42,9 @@ int notification_app_main(int argc, char **argv) {
         uint32_t revision = 0;
         bruce_result_t result = status_icon__list(icons, BRUCE_STATUS_ICON_MAX, &count, &revision);
         if (result != BRUCE_OK) return result;
-        printf("revision %lu, %u icon(s)\n", (unsigned long)revision, (unsigned)count);
+        stdio__printf("revision %lu, %u icon(s)\n", (unsigned long)revision, (unsigned)count);
         for (size_t i = 0; i < count; ++i) {
-            printf("%s %ux%u\n", icons[i].key, icons[i].width, icons[i].height);
+            stdio__printf("%s %ux%u\n", icons[i].key, icons[i].width, icons[i].height);
         }
         return BRUCE_OK;
     }

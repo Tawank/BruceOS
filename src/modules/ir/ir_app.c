@@ -11,6 +11,7 @@
 #include "core_sdk/input.h"
 #include "core_sdk/ir.h"
 #include "core_sdk/result.h"
+#include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
 #include "core_sdk/task.h"
 
@@ -111,15 +112,15 @@ static bool ir_app__parse_u32(const char *text, uint32_t maximum, uint32_t *out)
 }
 
 static void ir_app__usage(void) {
-    printf("IR commands:\n");
-    printf("  ir rx [raw] [timeout_seconds]\n");
-    printf("  ir learn <absolute_path> <button_name> [raw] [timeout_seconds]\n");
-    printf("  ir tx <protocol> <hex_data> [bits] [repeats]\n");
-    printf("  ir tx <protocol> <address> <command>\n");
-    printf("  ir tx_raw <frequency_hz> <mark_us> <space_us> [...]\n");
-    printf("  ir tx_from_file <absolute_path> [repeats]\n");
-    printf("  ir tvbgone <na|eu>\n");
-    printf("  ir jam <frequency_hz> <seconds> [basic|enhanced|sweep|random|empty]\n");
+    stdio__printf("IR commands:\n");
+    stdio__printf("  ir rx [raw] [timeout_seconds]\n");
+    stdio__printf("  ir learn <absolute_path> <button_name> [raw] [timeout_seconds]\n");
+    stdio__printf("  ir tx <protocol> <hex_data> [bits] [repeats]\n");
+    stdio__printf("  ir tx <protocol> <address> <command>\n");
+    stdio__printf("  ir tx_raw <frequency_hz> <mark_us> <space_us> [...]\n");
+    stdio__printf("  ir tx_from_file <absolute_path> [repeats]\n");
+    stdio__printf("  ir tvbgone <na|eu>\n");
+    stdio__printf("  ir jam <frequency_hz> <seconds> [basic|enhanced|sweep|random|empty]\n");
 }
 
 static bruce_result_t ir_app__write_all(bruce_file_id_t file, const char *text, size_t size) {
@@ -236,10 +237,10 @@ static int ir_app__receive(bool raw, uint32_t timeout_ms, bool show_dialog) {
     bruce_result_t result = ir__receive(raw, timeout_ms, capture, IR_APP_CAPTURE_SIZE);
     if (result == BRUCE_OK) {
         if (show_dialog) (void)dialog__message(BRUCE_DIALOG_INFO, "IR capture", capture);
-        else printf("%s", capture);
-    } else if (result == BRUCE_ERR_TIMEOUT) printf("IR receive timed out\n");
-    else if (result == BRUCE_ERR_UNSUPPORTED) printf("IR decoding failed; retry with raw mode\n");
-    else printf("IR receive failed: %d\n", result);
+        else stdio__printf("%s", capture);
+    } else if (result == BRUCE_ERR_TIMEOUT) stdio__printf("IR receive timed out\n");
+    else if (result == BRUCE_ERR_UNSUPPORTED) stdio__printf("IR decoding failed; retry with raw mode\n");
+    else stdio__printf("IR receive failed: %d\n", result);
     free(capture);
     return result;
 }
@@ -651,7 +652,7 @@ static int ir_app__rx(int argc, char **argv) {
             return BRUCE_ERR_INVALID_ARGUMENT;
         }
     }
-    printf("Waiting for IR signal...\n");
+    stdio__printf("Waiting for IR signal...\n");
     return ir_app__receive(raw, timeout_seconds * 1000u, false);
 }
 
@@ -760,6 +761,6 @@ int ir_app_main(int argc, char **argv) {
         ir_app__usage();
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
-    printf(result == BRUCE_OK ? "IR operation complete\n" : "IR operation failed: %d\n", result);
+    stdio__printf(result == BRUCE_OK ? "IR operation complete\n" : "IR operation failed: %d\n", result);
     return result;
 }

@@ -7,6 +7,7 @@
 #include "core_sdk/bluetooth_hid.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/result.h"
+#include "core_sdk/stdio.h"
 #include "core_sdk/task.h"
 
 #define BLUETOOTH_HID_APP__MAX_RESULTS 24
@@ -62,7 +63,7 @@ static int bluetooth_hid_app__connect(const uint8_t address[BRUCE_BLUETOOTH_ADDR
             snprintf(message, sizeof(message), "Connection failed (%d)", result);
             (void)dialog__message(BRUCE_DIALOG_ERROR, "Bluetooth HID", message);
         } else {
-            printf("Bluetooth HID connection failed: %d\n", result);
+            stdio__printf("Bluetooth HID connection failed: %d\n", result);
         }
         return result;
     }
@@ -73,7 +74,7 @@ static int bluetooth_hid_app__connect(const uint8_t address[BRUCE_BLUETOOTH_ADDR
             "Connected. Input is active in Bruce; this adapter will continue in the background."
         );
     } else {
-        printf("Connected. Bluetooth HID input adapter is running in the background.\n");
+        stdio__printf("Connected. Bluetooth HID input adapter is running in the background.\n");
     }
     return bluetooth_hid_app__stay_active();
 }
@@ -82,11 +83,11 @@ static int bluetooth_hid_app__scan_terminal(void) {
     bluetooth_hid__device_t devices[BLUETOOTH_HID_APP__MAX_RESULTS];
     int count = bluetooth_hid__scan(devices, BLUETOOTH_HID_APP__MAX_RESULTS, 10000);
     if (count < 0) {
-        printf("Classic Bluetooth HID scan failed: %d\n", count);
+        stdio__printf("Classic Bluetooth HID scan failed: %d\n", count);
         return count;
     }
     for (int i = 0; i < count; ++i) {
-        printf(
+        stdio__printf(
             "%02X:%02X:%02X:%02X:%02X:%02X rssi=%d type=%s name=%s\n",
             devices[i].address[0],
             devices[i].address[1],
@@ -157,7 +158,7 @@ static int bluetooth_hid_app__gui(void) {
 int bluetooth_hid_app_main(int argc, char **argv) {
     if (app_runner__args_have_gui(argc, argv)) return bluetooth_hid_app__gui();
     if (!bluetooth_hid__is_supported()) {
-        printf("Classic Bluetooth HID is unsupported on this target.\n");
+        stdio__printf("Classic Bluetooth HID is unsupported on this target.\n");
         return BRUCE_ERR_UNSUPPORTED;
     }
     if (argc == 0 || argv == NULL || argv[0] == NULL || strcmp(argv[0], "scan") == 0) {
@@ -166,16 +167,18 @@ int bluetooth_hid_app_main(int argc, char **argv) {
     if (strcmp(argv[0], "connect") == 0) {
         uint8_t address[BRUCE_BLUETOOTH_ADDRESS_LEN];
         if (argc < 2 || !bluetooth_hid_app__parse_address(argv[1], address)) {
-            printf("Usage: bluetooth_hid_app connect XX:XX:XX:XX:XX:XX\n");
+            stdio__printf("Usage: bluetooth_hid_app connect XX:XX:XX:XX:XX:XX\n");
             return BRUCE_ERR_INVALID_ARGUMENT;
         }
         return bluetooth_hid_app__connect(address, false);
     }
     if (strcmp(argv[0], "disconnect") == 0) return bluetooth_hid__disconnect();
     if (strcmp(argv[0], "status") == 0) {
-        printf("Classic Bluetooth HID: %s\n", bluetooth_hid__is_connected() ? "connected" : "disconnected");
+        stdio__printf(
+            "Classic Bluetooth HID: %s\n", bluetooth_hid__is_connected() ? "connected" : "disconnected"
+        );
         return 0;
     }
-    printf("Usage: bluetooth_hid_app [scan|connect ADDRESS|disconnect|status]\n");
+    stdio__printf("Usage: bluetooth_hid_app [scan|connect ADDRESS|disconnect|status]\n");
     return BRUCE_ERR_INVALID_ARGUMENT;
 }

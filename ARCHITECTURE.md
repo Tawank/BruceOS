@@ -381,6 +381,12 @@ immediately after launch. Session resources are released automatically with
 their owner; output overflow drops the oldest captured bytes, while input
 overflow returns `BRUCE_ERR_RESOURCE_LIMIT`.
 
+App-visible command output uses `bruce_stdio_write()` or
+`stdio__printf()`. These functions write to the calling task's routed
+session, or to the physical serial console when no session is routed. Normal
+libc `printf()` and Core logging remain diagnostic serial output and are not
+captured, preventing unrelated subsystem logs from polluting terminal output.
+
 ## Permissions
 
 Permissions are coarse-grained.  The current vocabulary is:

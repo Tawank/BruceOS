@@ -8,6 +8,7 @@
 #include "core_sdk/dialog.h"
 #include "core_sdk/nrf24.h"
 #include "core_sdk/result.h"
+#include "core_sdk/stdio.h"
 
 #define NRF24_APP_SPECTRUM_CHANNELS 80u
 #define NRF24_APP_SPECTRUM_SAMPLES 8u
@@ -42,7 +43,7 @@ static int nrf24_app__status(bool gui) {
         (void)dialog__message(
             result == BRUCE_OK ? BRUCE_DIALOG_SUCCESS : BRUCE_DIALOG_WARNING, "NRF24 status", message
         );
-    else printf("%s\n", message);
+    else stdio__printf("%s\n", message);
     return result;
 }
 
@@ -53,15 +54,15 @@ static int nrf24_app__scan(uint8_t first, uint8_t last, uint8_t samples, bool gu
     if (result != BRUCE_OK) {
         if (gui)
             (void)dialog__message(BRUCE_DIALOG_ERROR, "NRF24 spectrum", "Scan failed or radio not found");
-        else printf("NRF24 scan failed: %d\n", result);
+        else stdio__printf("NRF24 scan failed: %d\n", result);
         return result;
     }
 
     if (!gui) {
         for (size_t index = 0; index < count; ++index) {
-            printf("%3u %3u/%u ", (unsigned int)(first + index), activity[index], samples);
-            for (uint8_t bar = 0; bar < activity[index]; ++bar) putchar('#');
-            putchar('\n');
+            stdio__printf("%3u %3u/%u ", (unsigned int)(first + index), activity[index], samples);
+            for (uint8_t bar = 0; bar < activity[index]; ++bar) (void)bruce_stdio_write("#", 1);
+            (void)bruce_stdio_write("\n", 1);
         }
         return BRUCE_OK;
     }
@@ -117,10 +118,10 @@ static int nrf24_app__gui(void) {
 }
 
 static void nrf24_app__usage(void) {
-    printf("NRF24 commands:\n");
-    printf("  nrf24 status\n");
-    printf("  nrf24 channel <0-125>\n");
-    printf("  nrf24 scan [first] [last] [samples]\n");
+    stdio__printf("NRF24 commands:\n");
+    stdio__printf("  nrf24 status\n");
+    stdio__printf("  nrf24 channel <0-125>\n");
+    stdio__printf("  nrf24 scan [first] [last] [samples]\n");
 }
 
 int nrf24_app_main(int argc, char **argv) {
@@ -132,8 +133,8 @@ int nrf24_app_main(int argc, char **argv) {
         uint8_t channel = 0;
         if (argc != 2 || !nrf24_app__parse_channel(argv[1], &channel)) return BRUCE_ERR_INVALID_ARGUMENT;
         bruce_result_t result = nrf24__set_channel(channel);
-        if (result == BRUCE_OK) printf("NRF24 channel set to %u\n", channel);
-        else printf("NRF24 channel failed: %d\n", result);
+        if (result == BRUCE_OK) stdio__printf("NRF24 channel set to %u\n", channel);
+        else stdio__printf("NRF24 channel failed: %d\n", result);
         return result;
     }
     if (strcmp(argv[0], "scan") == 0) {

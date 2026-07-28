@@ -8,6 +8,7 @@
 #include "core_sdk/image.h"
 #include "core_sdk/input.h"
 #include "core_sdk/result.h"
+#include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
 
 int image_viewer_app_main(int argc, char **argv) {
@@ -74,7 +75,7 @@ int image_loader__run_path(const char *path, const char *arg, bool in_background
 
 int image_app_main(int argc, char **argv) {
     if (argc < 1 || argv[0] == NULL || argv[0][0] == '-') {
-        printf("usage: image /path/file.jpg|png|gif\n");
+        stdio__printf("usage: image /path/file.jpg|png|gif\n");
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
     return image_loader__run_path(argv[0], NULL, false);

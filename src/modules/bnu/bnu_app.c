@@ -5,6 +5,7 @@
 
 #include "core_sdk/memory.h"
 #include "core_sdk/result.h"
+#include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
 
 static char s_working_directory[BRUCE_STORAGE_PATH_MAX] = "/";
@@ -12,7 +13,7 @@ static char s_working_directory[BRUCE_STORAGE_PATH_MAX] = "/";
 const char *bnu__get_working_directory(void) { return s_working_directory; }
 
 static int bnu__usage(const char *command, const char *arguments) {
-    printf("usage: %s%s%s\n", command, arguments[0] != '\0' ? " " : "", arguments);
+    stdio__printf("usage: %s%s%s\n", command, arguments[0] != '\0' ? " " : "", arguments);
     return BRUCE_ERR_INVALID_ARGUMENT;
 }
 
@@ -59,7 +60,7 @@ static bool bnu__resolve_path(const char *path, char *out_path) {
 int bnu_pwd_app_main(int argc, char **argv) {
     (void)argv;
     if (argc != 0) return bnu__usage("pwd", "");
-    printf("%s\n", s_working_directory);
+    stdio__printf("%s\n", s_working_directory);
     return BRUCE_OK;
 }
 
@@ -70,7 +71,7 @@ int bnu_cd_app_main(int argc, char **argv) {
     size_t count = 0;
     bruce_result_t result = storage__list(path, NULL, 0, &count);
     if (result != BRUCE_OK) {
-        printf("cd: %s: error %d\n", path, result);
+        stdio__printf("cd: %s: error %d\n", path, result);
         return result;
     }
     snprintf(s_working_directory, sizeof(s_working_directory), "%s", path);
@@ -84,7 +85,7 @@ int bnu_ls_app_main(int argc, char **argv) {
     size_t count = 0;
     bruce_result_t result = storage__list(path, NULL, 0, &count);
     if (result != BRUCE_OK) {
-        printf("ls: %s: error %d\n", path, result);
+        stdio__printf("ls: %s: error %d\n", path, result);
         return result;
     }
     if (count == 0) return BRUCE_OK;
@@ -94,9 +95,9 @@ int bnu_ls_app_main(int argc, char **argv) {
     if (result == BRUCE_OK) {
         for (size_t i = 0; i < count; ++i) {
             if (entries[i].type == BRUCE_STORAGE_ENTRY_DIRECTORY) {
-                printf("%-10s %s/\n", "<dir>", entries[i].name);
+                stdio__printf("%-10s %s/\n", "<dir>", entries[i].name);
             } else {
-                printf("%10u %s\n", (unsigned)entries[i].size, entries[i].name);
+                stdio__printf("%10u %s\n", (unsigned)entries[i].size, entries[i].name);
             }
         }
     }
@@ -105,7 +106,7 @@ int bnu_ls_app_main(int argc, char **argv) {
 }
 
 static void bnu__print_memory_row(const char *name, size_t total, size_t free_size, size_t largest) {
-    printf(
+    stdio__printf(
         "%-5s %7u %7u %6u %6u\n",
         name,
         (unsigned)total,
@@ -121,7 +122,7 @@ int bnu_free_app_main(int argc, char **argv) {
     bruce_memory_stats_t stats;
     bruce_result_t result = memory__get_stats(&stats);
     if (result != BRUCE_OK) return result;
-    printf("%-5s %7s %7s %6s %6s\n", "mem", "total", "used", "free", "lrgst");
+    stdio__printf("%-5s %7s %7s %6s %6s\n", "mem", "total", "used", "free", "lrgst");
     bnu__print_memory_row("int", stats.internal_total, stats.internal_free, stats.internal_largest_block);
     if (stats.psram_total > 0) {
         bnu__print_memory_row("psram", stats.psram_total, stats.psram_free, stats.psram_largest_block);
@@ -135,7 +136,7 @@ int bnu_mkdir_app_main(int argc, char **argv) {
     if (!bnu__resolve_path(argv[0], path)) return BRUCE_ERR_INVALID_PATH;
     bruce_result_t result = storage__mkdir(path);
     if (result != BRUCE_OK) {
-        printf("mkdir: %s: error %d\n", path, result);
+        stdio__printf("mkdir: %s: error %d\n", path, result);
         return result;
     }
     return BRUCE_OK;
@@ -149,7 +150,7 @@ int bnu_touch_app_main(int argc, char **argv) {
     bruce_result_t result =
         storage__open(path, BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE, &file);
     if (result != BRUCE_OK) {
-        printf("touch: %s: error %d\n", path, result);
+        stdio__printf("touch: %s: error %d\n", path, result);
         return result;
     }
     storage__close(file);

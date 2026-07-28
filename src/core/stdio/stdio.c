@@ -1,11 +1,15 @@
 #include "stdio.h"
 
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/select.h>
 #include <sys/time.h>
 #include <unistd.h>
+
+#include "sdkconfig.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -37,6 +41,7 @@ static SemaphoreHandle_t s_lock;
 static portMUX_TYPE s_init_mux = portMUX_INITIALIZER_UNLOCKED;
 static stdio__session_t s_sessions[STDIO__MAX_SESSIONS];
 static bruce_stdio_session_t s_next_id = 1;
+#if !CONFIG_LIBC_PICOLIBC
 static bool s_original_stdio_saved = false;
 static FILE *s_original_stdin = NULL;
 static FILE *s_original_stdout = NULL;
@@ -49,6 +54,7 @@ extern __thread FILE *tls_stderr;
 static FILE *s_original_tls_stdin = NULL;
 static FILE *s_original_tls_stdout = NULL;
 static FILE *s_original_tls_stderr = NULL;
+#endif
 #endif
 
 static void stdio__ensure_init(void) {
@@ -221,6 +227,7 @@ bruce_result_t stdio__session_read_input(
     }
 }
 
+#if !CONFIG_LIBC_PICOLIBC
 static int stdio__stream_read(void *cookie, char *buffer, int size) {
     size_t read_size = 0;
     bruce_result_t result = stdio__session_read_input(
@@ -228,17 +235,21 @@ static int stdio__stream_read(void *cookie, char *buffer, int size) {
     );
     return result == BRUCE_OK ? (int)read_size : 0;
 }
+#endif
 
-static int stdio__stream_write(void *cookie, const char *buffer, int size) {
-    if (buffer == NULL || size <= 0) return 0;
+static bruce_result_t stdio__session_write_output(
+    bruce_stdio_session_t session, const void *data, size_t size
+) {
+    if (data == NULL || size == 0) return BRUCE_ERR_INVALID_ARGUMENT;
     stdio__ensure_init();
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    stdio__session_t *entry = stdio__find_locked((bruce_stdio_session_t)(uintptr_t)cookie);
+    stdio__session_t *entry = stdio__find_locked(session);
     if (entry == NULL) {
         xSemaphoreGive(s_lock);
-        return 0;
+        return BRUCE_ERR_NOT_FOUND;
     }
-    for (int i = 0; i < size; ++i) {
+    const char *buffer = data;
+    for (size_t i = 0; i < size; ++i) {
         if (entry->output_size == STDIO__OUTPUT_CAPACITY) {
             entry->output_read = (entry->output_read + 1) % STDIO__OUTPUT_CAPACITY;
             entry->output_size--;
@@ -248,8 +259,18 @@ static int stdio__stream_write(void *cookie, const char *buffer, int size) {
         entry->output_size++;
     }
     xSemaphoreGive(s_lock);
-    return size;
+    return BRUCE_OK;
 }
+
+#if !CONFIG_LIBC_PICOLIBC
+static int stdio__stream_write(void *cookie, const char *buffer, int size) {
+    if (size <= 0) return 0;
+    bruce_result_t result = stdio__session_write_output(
+        (bruce_stdio_session_t)(uintptr_t)cookie, buffer, (size_t)size
+    );
+    return result == BRUCE_OK ? size : 0;
+}
+#endif
 
 void stdio__task_attach(
     bruce_stdio_session_t session, FILE **out_input, FILE **out_output, FILE **out_error
@@ -257,6 +278,9 @@ void stdio__task_attach(
     if (out_input != NULL) *out_input = NULL;
     if (out_output != NULL) *out_output = NULL;
     if (out_error != NULL) *out_error = NULL;
+#if CONFIG_LIBC_PICOLIBC
+    (void)session;
+#else
     if (session == BRUCE_STDIO_SESSION_INVALID) return;
     FILE *input = funopen((void *)(uintptr_t)session, stdio__stream_read, NULL, NULL, NULL);
     FILE *output = funopen((void *)(uintptr_t)session, NULL, stdio__stream_write, NULL, NULL);
@@ -286,9 +310,15 @@ void stdio__task_attach(
     if (out_input != NULL) *out_input = input;
     if (out_output != NULL) *out_output = output;
     if (out_error != NULL) *out_error = error;
+#endif
 }
 
 void stdio__task_detach(FILE *input, FILE *output, FILE *error) {
+#if CONFIG_LIBC_PICOLIBC
+    (void)input;
+    (void)output;
+    (void)error;
+#else
     if (input != NULL) {
         if (stdin == input) stdin = s_original_stdin;
 #if CONFIG_LIBC_PICOLIBC_NEWLIB_COMPATIBILITY
@@ -310,6 +340,54 @@ void stdio__task_detach(FILE *input, FILE *output, FILE *error) {
 #endif
         fclose(error);
     }
+#endif
+}
+
+bruce_result_t bruce_stdio_write(const void *data, size_t size) {
+    if (size == 0) return BRUCE_OK;
+    if (data == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    bruce_stdio_session_t session = task_registry__current_stdio_session();
+    if (session != BRUCE_STDIO_SESSION_INVALID) {
+        return stdio__session_write_output(session, data, size);
+    }
+
+    const char *bytes = data;
+    size_t offset = 0;
+    while (offset < size) {
+        ssize_t written = write(STDOUT_FILENO, bytes + offset, size - offset);
+        if (written <= 0) return BRUCE_ERR_IO;
+        offset += (size_t)written;
+    }
+    return BRUCE_OK;
+}
+
+int stdio__printf(const char *format, ...) {
+    if (format == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    char stack_buffer[256];
+    va_list args;
+    va_start(args, format);
+    va_list measure;
+    va_copy(measure, args);
+    int size = vsnprintf(stack_buffer, sizeof(stack_buffer), format, measure);
+    va_end(measure);
+    if (size < 0) {
+        va_end(args);
+        return BRUCE_ERR_IO;
+    }
+
+    char *output = stack_buffer;
+    if ((size_t)size >= sizeof(stack_buffer)) {
+        output = malloc((size_t)size + 1);
+        if (output == NULL) {
+            va_end(args);
+            return BRUCE_ERR_NO_MEMORY;
+        }
+        (void)vsnprintf(output, (size_t)size + 1, format, args);
+    }
+    va_end(args);
+    bruce_result_t result = bruce_stdio_write(output, (size_t)size);
+    if (output != stack_buffer) free(output);
+    return result == BRUCE_OK ? size : (int)result;
 }
 
 bruce_result_t bruce_stdio_read(void *buffer, size_t capacity, uint32_t timeout_ms, size_t *out_size) {
@@ -367,19 +445,18 @@ int bruce_stdio_read_line(char *buffer, size_t buffer_size, bool mask_input) {
             if (i > 0) {
                 i--;
                 if (!mask_input) {
-                    printf("\b \b");
-                    fflush(stdout);
+                    (void)bruce_stdio_write("\b \b", 3);
                 }
             }
             continue;
         }
         buffer[i++] = (char)c;
         if (!mask_input) {
-            putchar(c);
-            fflush(stdout);
+            char byte = (char)c;
+            (void)bruce_stdio_write(&byte, 1);
         }
     }
     buffer[i] = '\0';
-    printf("\n");
+    (void)bruce_stdio_write("\n", 1);
     return eof && i == 0 ? -1 : (int)i;
 }

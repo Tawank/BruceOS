@@ -7,6 +7,7 @@
 #include "core_sdk/dialog.h"
 #include "core_sdk/http_server.h"
 #include "core_sdk/result.h"
+#include "core_sdk/stdio.h"
 #include "core_sdk/wifi.h"
 
 typedef enum {
@@ -60,7 +61,7 @@ static int webui_app__status(bool gui) {
         snprintf(message, sizeof(message), "WebUI is stopped");
     }
     if (gui) (void)dialog__message(BRUCE_DIALOG_INFO, "WebUI", message);
-    else printf("%s\n", message);
+    else stdio__printf("%s\n", message);
     return BRUCE_OK;
 }
 
@@ -73,7 +74,7 @@ static int webui_app__start(webui_app_network_mode_t mode, bool gui) {
     }
     if (result != BRUCE_OK) {
         if (gui) (void)dialog__message(BRUCE_DIALOG_ERROR, "WebUI", "Could not start Wi-Fi");
-        else printf("Wi-Fi start failed: %d\n", result);
+        else stdio__printf("Wi-Fi start failed: %d\n", result);
         return result;
     }
 
@@ -112,7 +113,7 @@ static int webui_app__start(webui_app_network_mode_t mode, bool gui) {
     result = http_server__start(&options);
     if (result != BRUCE_OK) {
         if (gui) (void)dialog__message(BRUCE_DIALOG_ERROR, "WebUI", "Could not start WebUI or Wi-Fi");
-        else printf("WebUI start failed: %d\n", result);
+        else stdio__printf("WebUI start failed: %d\n", result);
         return result;
     }
     s_network_mode = mode;
@@ -140,10 +141,10 @@ static int webui_app__gui(void) {
 }
 
 static void webui_app__usage(void) {
-    printf("WebUI commands:\n");
-    printf("  webui start ap|sta\n");
-    printf("  webui status\n");
-    printf("  webui stop\n");
+    stdio__printf("WebUI commands:\n");
+    stdio__printf("  webui start ap|sta\n");
+    stdio__printf("  webui status\n");
+    stdio__printf("  webui stop\n");
 }
 
 int webui_app_main(int argc, char **argv) {
@@ -153,7 +154,7 @@ int webui_app_main(int argc, char **argv) {
     }
     if (strcmp(argv[0], "stop") == 0) {
         bruce_result_t result = http_server__stop();
-        if (result == BRUCE_OK) printf("WebUI stopped\n");
+        if (result == BRUCE_OK) stdio__printf("WebUI stopped\n");
         return result;
     }
     if (strcmp(argv[0], "start") == 0) {

@@ -217,6 +217,8 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(tcp__close),
     ESP_ELFSYM_EXPORT(bruce_stdio_read),
     ESP_ELFSYM_EXPORT(bruce_stdio_read_line),
+    ESP_ELFSYM_EXPORT(bruce_stdio_write),
+    ESP_ELFSYM_EXPORT(stdio__printf),
     ESP_ELFSYM_EXPORT(bruce_stdio_session_create),
     ESP_ELFSYM_EXPORT(bruce_stdio_session_close),
     ESP_ELFSYM_EXPORT(bruce_stdio_session_route_children),

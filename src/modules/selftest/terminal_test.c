@@ -131,7 +131,7 @@ static int selftest__terminal_stdio_entry(int argc, char **argv) {
     (void)argc;
     (void)argv;
     char line[32];
-    if (bruce_stdio_read_line(line, sizeof(line), false) >= 0) { printf("received:%s\n", line); }
+    if (bruce_stdio_read_line(line, sizeof(line), false) >= 0) { stdio__printf("received:%s\n", line); }
     return 0;
 }
 
