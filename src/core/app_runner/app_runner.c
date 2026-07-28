@@ -14,6 +14,8 @@
 #include "modules/bluetooth_hid/bluetooth_hid_app.h"
 #include "modules/bnu/bnu_app.h"
 #include "modules/bruce_launcher/bruce_launcher_app.h"
+#include "modules/clock/clock_app.h"
+#include "modules/config/config_app.h"
 #include "modules/filemanager/filemanager_app.h"
 #include "modules/ir/ir_app.h"
 #include "modules/loaders/elf/elf_loader_app.h"
@@ -83,6 +85,8 @@ void app_runner__register_defaults(void) {
     (void)app_runner__register("launcher", launcher_app_main);
     (void)app_runner__register("bruce_launcher", bruce_launcher_app_main);
     (void)app_runner__register("filemanager", filemanager_app_main);
+    (void)app_runner__register("clock", clock_app_main);
+    (void)app_runner__register("config", config_app_main);
     (void)app_runner__register("wifi", wifi_app_main);
     (void)app_runner__register("webui", webui_app_main);
     (void)app_runner__register("bluetooth", bluetooth_app_main);

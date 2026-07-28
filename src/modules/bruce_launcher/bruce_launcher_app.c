@@ -497,9 +497,15 @@ static int bruce_launcher__run_gui_menu(bruce_launcher_menu_t *menu) {
             .text_color = theme.pri,
         };
 
-        (void)runtime__delay(300);
         (void)input__flush();
         for (;;) {
+            bruce_task_snapshot_t self;
+            if (task__snapshot(task__current_id(), &self) != BRUCE_OK ||
+                self.state != BRUCE_TASK_FOREGROUND) {
+                (void)runtime__delay(20);
+                continue;
+            }
+
             bruce_result_t frame = display__begin_frame();
             if (frame == BRUCE_ERR_NOT_FOREGROUND) {
                 (void)runtime__delay(20);
@@ -537,7 +543,6 @@ static int bruce_launcher__run_gui_menu(bruce_launcher_menu_t *menu) {
         return 0;
     }
 
-    (void)runtime__delay(300);
     (void)input__flush();
 
     int selected = 0;

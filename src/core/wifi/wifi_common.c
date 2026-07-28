@@ -3,16 +3,19 @@
 #include <string.h>
 
 #include "core/config/config.h"
+#include "core/clock/clock.h"
 #include "core/network/network.h"
 #include "core/wifi/wifi_common.h"
 #include "core_sdk/config.h"
 #include "core_sdk/permission.h"
+#include "core_sdk/status_icon.h"
 #include "core_sdk/wifi.h"
 
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_wifi.h"
+#include "esp_wifi_default.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "freertos/semphr.h"
@@ -22,6 +25,7 @@
 #define WIFI__CONNECTED_BIT BIT0
 #define WIFI__AP_BIT BIT1
 #define WIFI__DEFAULT_CONNECT_TIMEOUT_MS 10000
+#define WIFI__STATUS_ICON_KEY "core.wifi"
 
 static const char *const TAG = "bruce_wifi";
 static StaticSemaphore_t s_wifi_mutex_storage;
@@ -36,6 +40,27 @@ static char s_active_ssid[CONFIG__WIFI_SSID_MAX_LEN + 1];
 static char s_ip_buffer[16];
 static char s_mac_buffer[18];
 
+static const uint8_t s_wifi_status_icon[] = {
+    0x3F, 0xE0,
+    0x60, 0x30,
+    0x00, 0x00,
+    0x0F, 0x80,
+    0x18, 0xC0,
+    0x00, 0x00,
+    0x07, 0x00,
+    0x07, 0x00,
+};
+
+static void wifi__set_connected(bool connected) {
+    if (connected) {
+        xEventGroupSetBits(s_wifi_events, WIFI__CONNECTED_BIT);
+        (void)status_icon__push(WIFI__STATUS_ICON_KEY, s_wifi_status_icon, 13, 8);
+    } else {
+        xEventGroupClearBits(s_wifi_events, WIFI__CONNECTED_BIT);
+        (void)status_icon__remove(WIFI__STATUS_ICON_KEY);
+    }
+}
+
 static void wifi__copy(char *destination, size_t destination_size, const char *source) {
     if (destination == NULL || destination_size == 0) { return; }
     strncpy(destination, source != NULL ? source : "", destination_size - 1);
@@ -45,15 +70,22 @@ static void wifi__copy(char *destination, size_t destination_size, const char *s
 static void wifi__event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
     (void)arg;
     (void)event_data;
+    xSemaphoreTake(s_wifi_mutex, portMAX_DELAY);
+    if (!s_initialized || s_wifi_events == NULL) {
+        xSemaphoreGive(s_wifi_mutex);
+        return;
+    }
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
-        xEventGroupClearBits(s_wifi_events, WIFI__CONNECTED_BIT);
+        wifi__set_connected(false);
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
-        xEventGroupSetBits(s_wifi_events, WIFI__CONNECTED_BIT);
+        wifi__set_connected(true);
+        clock__notify_network_connected();
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_START) {
         xEventGroupSetBits(s_wifi_events, WIFI__AP_BIT);
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_STOP) {
         xEventGroupClearBits(s_wifi_events, WIFI__AP_BIT);
     }
+    xSemaphoreGive(s_wifi_mutex);
 }
 
 static bool wifi__start_locked(wifi_mode_t mode) {
@@ -145,19 +177,45 @@ bruce_result_t wifi__init(void) {
 bruce_result_t wifi__disconnect(void) {
     bruce_result_t result = permission__check(BRUCE_PERMISSION_WIFI);
     if (result != BRUCE_OK) return result;
-    result = wifi__init();
-    if (result != BRUCE_OK) return result;
+    if (s_wifi_mutex == NULL) {
+        (void)status_icon__remove(WIFI__STATUS_ICON_KEY);
+        return BRUCE_OK;
+    }
+
     xSemaphoreTake(s_wifi_mutex, portMAX_DELAY);
+    if (!s_initialized) {
+        xSemaphoreGive(s_wifi_mutex);
+        (void)status_icon__remove(WIFI__STATUS_ICON_KEY);
+        return BRUCE_OK;
+    }
+
+    wifi__set_connected(false);
+    xEventGroupClearBits(s_wifi_events, WIFI__AP_BIT);
+    (void)esp_event_handler_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi__event_handler);
+    (void)esp_event_handler_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi__event_handler);
+
+    esp_err_t stop_err = ESP_OK;
     if (s_started) {
-        esp_wifi_disconnect();
-        esp_wifi_stop();
+        (void)esp_wifi_disconnect();
+        stop_err = esp_wifi_stop();
         s_started = false;
     }
+    esp_err_t deinit_err = esp_wifi_deinit();
+    if (s_sta_netif != NULL) {
+        esp_netif_destroy_default_wifi(s_sta_netif);
+        s_sta_netif = NULL;
+    }
+    if (s_ap_netif != NULL) {
+        esp_netif_destroy_default_wifi(s_ap_netif);
+        s_ap_netif = NULL;
+    }
+    vEventGroupDelete(s_wifi_events);
+    s_wifi_events = NULL;
+    s_initialized = false;
     s_ap_running = false;
     s_active_ssid[0] = '\0';
-    xEventGroupClearBits(s_wifi_events, WIFI__CONNECTED_BIT | WIFI__AP_BIT);
     xSemaphoreGive(s_wifi_mutex);
-    return BRUCE_OK;
+    return stop_err == ESP_OK && deinit_err == ESP_OK ? BRUCE_OK : BRUCE_ERR_IO;
 }
 
 bruce_result_t wifi__connect(const char *ssid, const char *password, uint32_t timeout_ms) {
@@ -181,7 +239,7 @@ bruce_result_t wifi__connect(const char *ssid, const char *password, uint32_t ti
         return BRUCE_ERR_IO;
     }
     s_ap_running = false;
-    xEventGroupClearBits(s_wifi_events, WIFI__CONNECTED_BIT);
+    wifi__set_connected(false);
     esp_err_t err = esp_wifi_connect();
     xSemaphoreGive(s_wifi_mutex);
     if (err != ESP_OK) {
@@ -292,6 +350,10 @@ bruce_result_t wifi__setup_ap(void) {
 
 bool wifi__is_connected(void) {
     if (permission__check(BRUCE_PERMISSION_WIFI) != BRUCE_OK) return false;
+    return wifi__is_connected_internal();
+}
+
+bool wifi__is_connected_internal(void) {
     return s_wifi_events != NULL && (xEventGroupGetBits(s_wifi_events) & WIFI__CONNECTED_BIT) != 0;
 }
 

@@ -1,11 +1,10 @@
 #include "device.h"
 
-#include "core_sdk/config.h"
+#include "core_sdk/clock.h"
 #include "core_sdk/device.h"
 #include "core_sdk/task.h"
 
 #include <stdbool.h>
-#include <time.h>
 
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
@@ -151,36 +150,24 @@ int device__get_battery(void) {
 #endif
 }
 
-static bruce_result_t device__get_local_datetime(struct tm *out) {
-    time_t now = time(NULL);
-    if (now < DEVICE__VALID_EPOCH_MIN) return BRUCE_ERR_INVALID_STATE;
-
-    float timezone = 0.0f;
-    bool dst = false;
-    (void)config__get_tmz(&timezone);
-    (void)config__get_dst(&dst);
-    now += (time_t)(timezone * 3600.0f) + (dst ? 3600 : 0);
-    return gmtime_r(&now, out) != NULL ? BRUCE_OK : BRUCE_ERR_INTERNAL;
-}
-
 bruce_result_t device__get_time(bruce_device_time_t *out) {
     if (out == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
-    struct tm local;
-    bruce_result_t result = device__get_local_datetime(&local);
+    bruce_clock_datetime_t local;
+    bruce_result_t result = clock__get_local(&local);
     if (result != BRUCE_OK) return result;
-    out->hour = (uint8_t)local.tm_hour;
-    out->minute = (uint8_t)local.tm_min;
-    out->second = (uint8_t)local.tm_sec;
+    out->hour = local.hour;
+    out->minute = local.minute;
+    out->second = local.second;
     return BRUCE_OK;
 }
 
 bruce_result_t device__get_date(bruce_device_date_t *out) {
     if (out == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
-    struct tm local;
-    bruce_result_t result = device__get_local_datetime(&local);
+    bruce_clock_datetime_t local;
+    bruce_result_t result = clock__get_local(&local);
     if (result != BRUCE_OK) return result;
-    out->year = (uint16_t)(local.tm_year + 1900);
-    out->month = (uint8_t)(local.tm_mon + 1);
-    out->day = (uint8_t)local.tm_mday;
+    out->year = local.year;
+    out->month = local.month;
+    out->day = local.day;
     return BRUCE_OK;
 }

@@ -8,6 +8,7 @@
 #include "app_runner_test.h"
 #include "bluetooth_test.h"
 #include "bnu_test.h"
+#include "clock_test.h"
 #include "config_test.h"
 #include "device_test.h"
 #include "dialog_test.h"
@@ -48,6 +49,7 @@ int selftest_app_main(int argc, char **argv) {
     RUN_SELFTEST(selftest__run_task_killed_case);
     RUN_SELFTEST(selftest__run_runtime_now_case);
     RUN_SELFTEST(selftest__run_device_state_case);
+    RUN_SELFTEST(selftest__run_clock_case);
     RUN_SELFTEST(selftest__run_apprunner_registration_case);
     RUN_SELFTEST(selftest__run_apprunner_args_case);
     RUN_SELFTEST(selftest__run_apprunner_resolution_case);

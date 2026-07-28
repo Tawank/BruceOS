@@ -8,6 +8,7 @@
  */
 
 #include "core_sdk/app_runner.h"   // IWYU pragma: export
+#include "core_sdk/clock.h"        // IWYU pragma: export
 #include "core_sdk/display.h"      // IWYU pragma: export
 #include "core_sdk/gpio.h"         // IWYU pragma: export
 #include "core_sdk/i2c.h"          // IWYU pragma: export

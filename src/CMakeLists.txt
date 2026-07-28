@@ -1,6 +1,7 @@
 set(BRUCE_SELFTEST_SOURCES
     "modules/selftest/app_runner_test.c"
     "modules/selftest/bluetooth_test.c"
+    "modules/selftest/clock_test.c"
     "modules/selftest/bnu_test.c"
     "modules/selftest/config_test.c"
     "modules/selftest/device_test.c"
@@ -28,6 +29,7 @@ idf_component_register(SRCS
                     "core/app_runner/app_runner.c"
                     "core/bluetooth/bluetooth.c"
                     "core/bluetooth/bluetooth_hid.c"
+                    "core/clock/clock.c"
                     "core/config/config.c"
                     "core/dialog/dialog.c"
                     "core/device/device.c"
@@ -59,6 +61,8 @@ idf_component_register(SRCS
                     "modules/bnu/bnu_app.c"
                     "modules/bluetooth/bluetooth_app.c"
                     "modules/bluetooth_hid/bluetooth_hid_app.c"
+                    "modules/clock/clock_app.c"
+                    "modules/config/config_app.c"
                     "modules/filemanager/filemanager_app.c"
                     "modules/loaders/elf/elf_loader_app.c"
                     "modules/loaders/elf/elf_loader_sdk_symbols.c"
@@ -140,6 +144,16 @@ add_library(bruce_sdk_builtin_bnu_check OBJECT "modules/bnu/bnu_app.c")
 target_include_directories(bruce_sdk_builtin_bnu_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/bnu")
+
+add_library(bruce_sdk_builtin_clock_check OBJECT "modules/clock/clock_app.c")
+target_include_directories(bruce_sdk_builtin_clock_check PRIVATE
+                           "${CMAKE_CURRENT_LIST_DIR}"
+                           "${CMAKE_CURRENT_LIST_DIR}/modules/clock")
+
+add_library(bruce_sdk_builtin_config_check OBJECT "modules/config/config_app.c")
+target_include_directories(bruce_sdk_builtin_config_check PRIVATE
+                           "${CMAKE_CURRENT_LIST_DIR}"
+                           "${CMAKE_CURRENT_LIST_DIR}/modules/config")
 
 add_library(bruce_sdk_builtin_wifi_check OBJECT "modules/wifi/wifi_app.c")
 target_include_directories(bruce_sdk_builtin_wifi_check PRIVATE

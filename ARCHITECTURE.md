@@ -272,6 +272,28 @@ wall time and fail with `BRUCE_ERR_INVALID_STATE` until the system clock contain
 a valid date. These APIs expose state only; launcher status-bar rendering remains
 module-owned.
 
+### Clock and time
+
+Core keeps the libc system clock in UTC. `clock__get_utc()` reads it directly,
+while `clock__get_local()` applies the persisted fixed UTC offset and the
+optional manual one-hour DST adjustment. `clock__set_local()` validates a full
+calendar value and converts it back to UTC; 12/24-hour format is presentation
+policy only. The clock is invalid until its epoch is at least 2020.
+
+`clock__sync_ntp()` performs a bounded SNTP synchronization against
+`pool.ntp.org` and reports busy, disconnected, and timeout failures. A station
+IP event starts the same synchronization asynchronously only when
+`automaticTimeUpdateViaNTP` is enabled. System time is never shifted into a
+local epoch, so changing timezone or DST does not rewrite the clock.
+
+The built-in `clock` module provides `show`, monotonic `timer`, and daily
+local-time `alarm` actions. `clock --gui` opens the clock face; Select opens its
+Timer/Alarm menu and Back exits. Timer and alarm are foreground workflows and
+can be cancelled with Back; persistent/background alarms and hardware RTC wake
+are outside this initial contract. The built-in `config system clock --gui`
+screen and its terminal equivalents configure NTP, timezone, DST, format, and
+full manual date/time through the same Core API.
+
 ## ELF contract
 
 Every ELF contains a non-loadable `.bruce.manifest` section.  The built-in ELF
@@ -576,7 +598,8 @@ registry. Any task may replace or remove any key, including one created by a
 different task. Entries survive producer exit, list in lexicographic key order,
 and every effective mutation increments a revision. Core never renders these
 1bpp icons or reserves a status bar; the launcher and interested applications
-list and draw them themselves.
+list and draw them themselves. Wi-Fi publishes the `core.wifi` icon after a
+station obtains an IP address and removes it when that station disconnects.
 
 `storage` grants access to Core `storage__*` APIs.  Public file handles are
 opaque IDs and are closed automatically at task teardown.  The only v1

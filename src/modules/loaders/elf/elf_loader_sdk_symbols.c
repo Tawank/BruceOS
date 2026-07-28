@@ -19,6 +19,7 @@
 #include "core_sdk/app_runner.h"
 #include "core_sdk/bluetooth.h"
 #include "core_sdk/bluetooth_hid.h"
+#include "core_sdk/clock.h"
 #include "core_sdk/device.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/display.h"
@@ -61,6 +62,14 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(device__get_battery),
     ESP_ELFSYM_EXPORT(device__get_time),
     ESP_ELFSYM_EXPORT(device__get_date),
+
+    /* Wall clock */
+    ESP_ELFSYM_EXPORT(clock__get_utc),
+    ESP_ELFSYM_EXPORT(clock__get_local),
+    ESP_ELFSYM_EXPORT(clock__set_local),
+    ESP_ELFSYM_EXPORT(clock__sync_ntp),
+    ESP_ELFSYM_EXPORT(clock__get_sync_status),
+    ESP_ELFSYM_EXPORT(clock__get_ntp_server),
 
     /* AppRunner / loader */
     ESP_ELFSYM_EXPORT(app_runner__run_path),
