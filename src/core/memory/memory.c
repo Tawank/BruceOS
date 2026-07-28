@@ -60,20 +60,15 @@ void *memory__realloc(void *ptr, size_t size) {
     memory__header_t *header = ((memory__header_t *)ptr) - 1;
     if (header->magic != MEMORY__MAGIC) return NULL;
 
-    memory__header_t *grown = malloc(sizeof(*grown) + size);
+    size_t old_size = header->size;
+    bruce_resource_id_t resource_id = header->resource_id;
+    memory__header_t *grown =
+        task_registry__resource_realloc(resource_id, header, sizeof(*grown) + size);
     if (grown == NULL) return NULL;
     grown->magic = MEMORY__MAGIC;
     grown->size = size;
-    grown->resource_id = header->resource_id;
-    memcpy(grown + 1, ptr, header->size < size ? header->size : size);
-
-    if (task_registry__resource_update(header->resource_id, grown) != BRUCE_OK) {
-        free(grown);
-        return NULL;
-    }
-    task_registry__account_memory((int64_t)size - (int64_t)header->size);
-    header->magic = 0;
-    free(header);
+    grown->resource_id = resource_id;
+    task_registry__account_memory((int64_t)size - (int64_t)old_size);
     return grown + 1;
 }
 

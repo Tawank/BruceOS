@@ -7,6 +7,7 @@
  * register resources for automatic cleanup. */
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "core_sdk/app_runner.h"
@@ -75,6 +76,12 @@ bruce_resource_id_t task_registry__resource_register(bruce_task_resource_cleanup
 
 /* Replaces the cleanup context for a resource owned by the calling task. */
 bruce_result_t task_registry__resource_update(bruce_resource_id_t resource_id, void *context);
+
+/* Reallocates a cleanup context while holding the registry lock so task
+ * teardown cannot observe a pointer that libc has moved. */
+void *task_registry__resource_realloc(
+    bruce_resource_id_t resource_id, void *context, size_t allocation_size
+);
 
 /* Releases a resource early because the owner already cleaned it up itself
  * (e.g. an explicit storage__close()); this does NOT invoke the cleanup

@@ -516,19 +516,33 @@ bruce_result_t ir__transmit_file(const char *path, uint8_t repeats) {
     bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
     bruce_result_t result = storage__open(path, BRUCE_STORAGE_OPEN_READ, &file);
     if (result != BRUCE_OK) return result;
-    char *contents = malloc(IR_FILE_MAX_SIZE + 1u);
+    uint64_t file_size = 0;
+    result = storage__seek(file, 0, SEEK_END, &file_size);
+    if (result == BRUCE_OK && file_size > IR_FILE_MAX_SIZE) result = BRUCE_ERR_RESOURCE_LIMIT;
+    if (result == BRUCE_OK && file_size == 0) result = BRUCE_ERR_INVALID_ARGUMENT;
+    if (result == BRUCE_OK) result = storage__seek(file, 0, SEEK_SET, NULL);
+    if (result != BRUCE_OK) {
+        storage__close(file);
+        return result;
+    }
+
+    char *contents = malloc((size_t)file_size + 1u);
     if (contents == NULL) {
         storage__close(file);
         return BRUCE_ERR_NO_MEMORY;
     }
     size_t total = 0;
-    while (total < IR_FILE_MAX_SIZE) {
+    while (total < (size_t)file_size) {
         size_t read_size = 0;
-        result = storage__read(file, contents + total, IR_FILE_MAX_SIZE - total, &read_size);
-        if (result != BRUCE_OK || read_size == 0) break;
+        result = storage__read(file, contents + total, (size_t)file_size - total, &read_size);
+        if (result != BRUCE_OK) break;
+        if (read_size == 0) {
+            result = BRUCE_ERR_IO;
+            break;
+        }
         total += read_size;
     }
-    if (result == BRUCE_OK && total == IR_FILE_MAX_SIZE) {
+    if (result == BRUCE_OK) {
         char extra;
         size_t extra_size = 0;
         result = storage__read(file, &extra, 1, &extra_size);
@@ -541,7 +555,7 @@ bruce_result_t ir__transmit_file(const char *path, uint8_t repeats) {
     }
     contents[total] = '\0';
 
-    result = total == 0 ? BRUCE_ERR_INVALID_ARGUMENT : ir__transmit_record_mutable(contents, repeats);
+    result = ir__transmit_record_mutable(contents, repeats);
     free(contents);
     return result;
 }

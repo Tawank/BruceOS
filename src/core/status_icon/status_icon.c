@@ -9,7 +9,7 @@
 
 static SemaphoreHandle_t s_mutex;
 static portMUX_TYPE s_init_lock = portMUX_INITIALIZER_UNLOCKED;
-static bruce_status_icon_t s_icons[BRUCE_STATUS_ICON_MAX];
+static bruce_status_icon_t *s_icons;
 static size_t s_count;
 static uint32_t s_revision;
 
@@ -51,6 +51,15 @@ bruce_result_t status_icon__push(const char *key, const uint8_t *bitmap, uint8_t
         return BRUCE_ERR_RESOURCE_LIMIT;
     }
 
+    if (index == s_count) {
+        bruce_status_icon_t *grown = realloc(s_icons, (s_count + 1u) * sizeof(*s_icons));
+        if (grown == NULL) {
+            xSemaphoreGive(s_mutex);
+            return BRUCE_ERR_NO_MEMORY;
+        }
+        s_icons = grown;
+    }
+
     bruce_status_icon_t next = {0};
     strncpy(next.key, key, sizeof(next.key) - 1);
     next.width = width;
@@ -79,7 +88,14 @@ bruce_result_t status_icon__remove(const char *key) {
             if (i + 1 < s_count) {
                 memmove(&s_icons[i], &s_icons[i + 1], (s_count - i - 1) * sizeof(s_icons[0]));
             }
-            memset(&s_icons[--s_count], 0, sizeof(s_icons[0]));
+            s_count--;
+            if (s_count == 0) {
+                free(s_icons);
+                s_icons = NULL;
+            } else {
+                bruce_status_icon_t *shrunk = realloc(s_icons, s_count * sizeof(*s_icons));
+                if (shrunk != NULL) s_icons = shrunk;
+            }
             s_revision++;
             break;
         }

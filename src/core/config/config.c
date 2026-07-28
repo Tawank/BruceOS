@@ -659,6 +659,8 @@ bool config__load(void) {
     bool read = storage__read_file(CONFIG__FILE_PATH, &text, &size);
     if (read && size > 0) {
         cJSON *root = cJSON_ParseWithLength(text, size);
+        storage__free(text);
+        text = NULL;
         if (root != NULL) {
             config__parse_json(&s_config, root);
             cJSON_Delete(root);

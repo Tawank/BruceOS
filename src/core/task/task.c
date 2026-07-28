@@ -185,10 +185,11 @@ static void task__foreground_push_locked(bruce_task_id_t id) {
 }
 
 static void task__refresh_cpu_samples_locked(void) {
-    static TaskStatus_t status_buf[TASK__MAX_RECORDS + 8];
+    const size_t status_capacity = TASK__MAX_RECORDS + 8u;
+    TaskStatus_t *status_buf = malloc(status_capacity * sizeof(*status_buf));
+    if (status_buf == NULL) return;
     uint32_t total_runtime = 0;
-    UBaseType_t count =
-        uxTaskGetSystemState(status_buf, sizeof(status_buf) / sizeof(status_buf[0]), &total_runtime);
+    UBaseType_t count = uxTaskGetSystemState(status_buf, status_capacity, &total_runtime);
     uint32_t total_delta = total_runtime - s_last_total_runtime;
 
     for (int i = 0; i < TASK__MAX_RECORDS; ++i) {
@@ -206,6 +207,7 @@ static void task__refresh_cpu_samples_locked(void) {
         }
     }
     s_last_total_runtime = total_runtime;
+    free(status_buf);
 }
 
 static void task__fill_snapshot_locked(const task__record_t *record, bruce_task_snapshot_t *out_snapshot) {
@@ -446,6 +448,29 @@ bruce_result_t task_registry__resource_update(bruce_resource_id_t resource_id, v
     }
     task__unlock();
     return BRUCE_ERR_NOT_FOUND;
+}
+
+void *task_registry__resource_realloc(
+    bruce_resource_id_t resource_id, void *context, size_t allocation_size
+) {
+    task__ensure_init();
+    task__lock();
+    task__record_t *self = task__find_by_handle_locked(xTaskGetCurrentTaskHandle());
+    if (self == NULL) {
+        task__unlock();
+        return NULL;
+    }
+    for (int i = 0; i < TASK__MAX_RESOURCES; ++i) {
+        if (self->resources[i].active && self->resources[i].id == resource_id &&
+            self->resources[i].context == context) {
+            void *resized = realloc(context, allocation_size);
+            if (resized != NULL) self->resources[i].context = resized;
+            task__unlock();
+            return resized;
+        }
+    }
+    task__unlock();
+    return NULL;
 }
 
 bruce_result_t task_registry__resource_release(bruce_resource_id_t resource_id) {

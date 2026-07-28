@@ -30,7 +30,7 @@ static SemaphoreHandle_t s_mutex;
 static httpd_handle_t s_server;
 static bool s_transitioning;
 static uint16_t s_port;
-static http_server__route_t s_routes[BRUCE_HTTP_SERVER_MAX_ROUTES];
+static http_server__route_t *s_routes;
 static size_t s_route_count;
 
 static void http_server__lock(void) {
@@ -43,8 +43,9 @@ static void http_server__unlock(void) { xSemaphoreGive(s_mutex); }
 static void http_server__free_routes(void) {
     for (size_t index = 0; index < s_route_count; ++index) {
         free(s_routes[index].body);
-        memset(&s_routes[index], 0, sizeof(s_routes[index]));
     }
+    free(s_routes);
+    s_routes = NULL;
     s_route_count = 0;
 }
 
@@ -124,6 +125,12 @@ bruce_result_t http_server__start(const bruce_http_server_options_t *options) {
         return BRUCE_ERR_ALREADY_EXISTS;
     }
     s_transitioning = true;
+    s_routes = calloc(options->route_count, sizeof(*s_routes));
+    if (s_routes == NULL) {
+        s_transitioning = false;
+        http_server__unlock();
+        return BRUCE_ERR_NO_MEMORY;
+    }
 
     for (size_t index = 0; index < options->route_count; ++index) {
         const bruce_http_server_route_t *source = &options->routes[index];

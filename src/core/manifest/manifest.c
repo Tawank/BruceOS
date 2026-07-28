@@ -100,6 +100,7 @@ bruce_manifest_t *manifest__parse(const char *json, size_t json_len) {
          stack->valuedouble <= MANIFEST__STACK_MAX;
     ok = ok && (permissions == NULL || cJSON_IsArray(permissions));
     if (!ok) {
+        memory__free(out_manifest);
         cJSON_Delete(root);
         return NULL;
     }
@@ -107,6 +108,7 @@ bruce_manifest_t *manifest__parse(const char *json, size_t json_len) {
     if (!manifest__base64_decode_exact(
             icon->valuestring, out_manifest->app_icon, BRUCE_MANIFEST_ICON_BYTES
         )) {
+        memory__free(out_manifest);
         cJSON_Delete(root);
         return NULL;
     }
@@ -119,6 +121,7 @@ bruce_manifest_t *manifest__parse(const char *json, size_t json_len) {
     if (permissions != NULL) {
         int array_size = cJSON_GetArraySize(permissions);
         if (array_size < 0 || (size_t)array_size > BRUCE_MANIFEST_MAX_PERMISSIONS) {
+            memory__free(out_manifest);
             cJSON_Delete(root);
             return NULL;
         }
@@ -127,6 +130,7 @@ bruce_manifest_t *manifest__parse(const char *json, size_t json_len) {
             bruce_permission_t permission;
             if (!cJSON_IsString(entry) || entry->valuestring == NULL ||
                 !permission__from_name(entry->valuestring, &permission)) {
+                memory__free(out_manifest);
                 cJSON_Delete(root);
                 return NULL;
             }
@@ -138,6 +142,7 @@ bruce_manifest_t *manifest__parse(const char *json, size_t json_len) {
                 }
             }
             if (duplicate || strlen(entry->valuestring) >= BRUCE_MANIFEST_PERMISSION_NAME_MAX) {
+                memory__free(out_manifest);
                 cJSON_Delete(root);
                 return NULL;
             }
