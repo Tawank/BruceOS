@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-ICON_SIZE = 64
+ICON_SIZE = 24
 CURVE_STEPS = 8
 ARC_MIN_STEPS = 8
 ARC_MAX_STEPS = 64
