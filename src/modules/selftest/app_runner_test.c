@@ -156,8 +156,25 @@ bool selftest__run_apprunner_resolution_case(void) {
         return false;
     }
 
-    if (!storage__write_file_atomic(js_path, "js", 2)) {
+    char icon[173];
+    memset(icon, 'A', sizeof(icon) - 2);
+    icon[sizeof(icon) - 2] = '=';
+    icon[sizeof(icon) - 1] = '\0';
+    char js_source[384];
+    int source_len = snprintf(
+        js_source,
+        sizeof(js_source),
+        "/*\n{\"appName\":\"Resolution Test\",\"appIcon\":\"%s\",\"coreAbiVersion\":1,"
+        "\"stackSize\":8192,\"permissions\":[]}\n*/\n",
+        icon
+    );
+    if (source_len <= 0 || (size_t)source_len >= sizeof(js_source) ||
+        !storage__write_file_atomic(js_path, js_source, (size_t)source_len)) {
         printf("[selftest] apprunner/resolution: could not create %s\n", js_path);
+        return false;
+    }
+    if (!storage__exists(js_path)) {
+        printf("[selftest] apprunner/resolution: created JS path is not visible\n");
         return false;
     }
     result = app_runner__run(SELFTEST_APPRUNNER_RESOLUTION_NAME, "", true);

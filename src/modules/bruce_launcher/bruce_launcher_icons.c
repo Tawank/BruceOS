@@ -53,45 +53,6 @@ bruce_launcher__draw_icon_path(int cx, int cy, int size, const char *name, bruce
     );
 }
 
-static void bruce_launcher__draw_thick_line(int x0, int y0, int x1, int y1, int thickness, uint16_t color) {
-    int half = thickness / 2;
-    bool mostly_horizontal = abs(x1 - x0) >= abs(y1 - y0);
-    for (int offset = -half; offset <= half; ++offset) {
-        display__draw_line(
-            x0 + (mostly_horizontal ? 0 : offset),
-            y0 + (mostly_horizontal ? offset : 0),
-            x1 + (mostly_horizontal ? 0 : offset),
-            y1 + (mostly_horizontal ? offset : 0),
-            color
-        );
-    }
-}
-
-static void bruce_launcher__draw_arc_band(
-    int cx, int cy, int outer_radius, int inner_radius, int start_angle, int end_angle, uint16_t color
-) {
-    if (inner_radius < 1) inner_radius = 1;
-    for (int radius = inner_radius; radius <= outer_radius; ++radius) {
-        display__draw_arc(cx, cy, radius, start_angle, end_angle, color);
-    }
-}
-
-static void bruce_launcher__draw_box(int x, int y, int w, int h, int stroke, uint16_t color) {
-    for (int inset = 0; inset < stroke && w - 2 * inset > 0 && h - 2 * inset > 0; ++inset) {
-        display__draw_rect(x + inset, y + inset, w - 2 * inset, h - 2 * inset, color);
-    }
-}
-
-static void bruce_launcher__draw_bluetooth_rune(int cx, int cy, int size, int stroke, uint16_t color) {
-    int half_h = size * 3 / 8;
-    int arm = size / 5;
-    bruce_launcher__draw_thick_line(cx, cy - half_h, cx, cy + half_h, stroke, color);
-    bruce_launcher__draw_thick_line(cx, cy - half_h, cx + arm, cy - arm / 2, stroke, color);
-    bruce_launcher__draw_thick_line(cx + arm, cy - arm / 2, cx - arm / 2, cy + arm / 2, stroke, color);
-    bruce_launcher__draw_thick_line(cx - arm / 2, cy - arm / 2, cx + arm, cy + arm / 2, stroke, color);
-    bruce_launcher__draw_thick_line(cx + arm, cy + arm / 2, cx, cy + half_h, stroke, color);
-}
-
 void bruce_launcher__draw_entry_icon(
     const bruce_launcher_entry_t *entry, int cx, int cy, int size, uint16_t color
 ) {

@@ -1,5 +1,12 @@
 menu "Bruce hardware configuration"
 
+    config BRUCE_QEMU_TEST_MODE
+        bool "QEMU self-test mode"
+        default n
+        help
+            Skip physical display and input initialization and expose the
+            serial self-test protocol used by the QEMU pytest suite.
+
     choice BRUCE_BOARD
         prompt "Target board"
         default BRUCE_BOARD_M5_CARDPUTER

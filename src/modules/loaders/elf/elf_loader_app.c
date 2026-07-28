@@ -87,9 +87,9 @@ static uintptr_t elf_loader__find_symbol(const char *sym_name) {
 
 static void elf_loader__free_task_ctx(elf_loader_task_ctx_t *ctx) {
     if (ctx == NULL) { return; }
-    if (ctx->image != NULL) { memory__free(ctx->image); }
+    free(ctx->image);
     app_runner__free_args(ctx->argv, ctx->argc);
-    memory__free(ctx);
+    free(ctx);
 }
 
 /* Task entry for the loaded ELF.  Runs on the loader task's own stack with
@@ -129,7 +129,7 @@ static int elf_loader__load_image(const char *path, elf_loader_task_ctx_t *ctx) 
     if (storage__seek(file, 0, SEEK_END, &size) != BRUCE_OK || size == 0) {
         result = BRUCE_ERR_IO;
     } else {
-        ctx->image = memory__malloc((size_t)size);
+            ctx->image = malloc((size_t)size);
         if (ctx->image == NULL) {
             result = BRUCE_ERR_NO_MEMORY;
         } else {
@@ -154,7 +154,7 @@ static int elf_loader__load_image(const char *path, elf_loader_task_ctx_t *ctx) 
 
     storage__close(file);
     if (result != BRUCE_OK && ctx->image != NULL) {
-        memory__free(ctx->image);
+        free(ctx->image);
         ctx->image = NULL;
         ctx->image_size = 0;
     }
@@ -212,13 +212,13 @@ int elf_loader__run_path(const char *path, const char *arg, bool in_background) 
     }
     strcpy(full_argv[0], cmd_name);
     for (int i = 0; i < argc; ++i) { full_argv[i + 1] = argv[i]; }
-    app_runner__free_args(argv, argc);
+    memory__free(argv);
     argv = NULL;
     argc = 0;
 
     bool gui_requested = app_runner__args_have_gui(full_argc, full_argv);
 
-    elf_loader_task_ctx_t *ctx = memory__malloc(sizeof(*ctx));
+    elf_loader_task_ctx_t *ctx = malloc(sizeof(*ctx));
     if (ctx == NULL) {
         app_runner__free_args(full_argv, full_argc);
         memory__free(inspection);

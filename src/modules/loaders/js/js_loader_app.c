@@ -72,9 +72,9 @@ static bool js_loader__normalize_path(const char *path, char *out, size_t out_si
 
 static void js_loader__free_task_ctx(js_loader_task_ctx_t *ctx) {
     if (ctx == NULL) { return; }
-    if (ctx->source != NULL) { memory__free(ctx->source); }
+    free(ctx->source);
     app_runner__free_args(ctx->argv, ctx->argc);
-    memory__free(ctx);
+    free(ctx);
 }
 
 static int js_loader__load_source(const char *path, js_loader_task_ctx_t *ctx) {
@@ -87,7 +87,7 @@ static int js_loader__load_source(const char *path, js_loader_task_ctx_t *ctx) {
     if (storage__seek(file, 0, SEEK_END, &size) != BRUCE_OK || size == 0 || size > JS_LOADER_SOURCE_MAX) {
         result = BRUCE_ERR_IO;
     } else {
-        ctx->source = memory__malloc((size_t)size + 1);
+        ctx->source = malloc((size_t)size + 1);
         if (ctx->source == NULL) {
             result = BRUCE_ERR_NO_MEMORY;
         } else {
@@ -113,7 +113,7 @@ static int js_loader__load_source(const char *path, js_loader_task_ctx_t *ctx) {
 
     storage__close(file);
     if (result != BRUCE_OK && ctx->source != NULL) {
-        memory__free(ctx->source);
+        free(ctx->source);
         ctx->source = NULL;
         ctx->source_len = 0;
     }
@@ -223,7 +223,7 @@ int js_loader__run_path(const char *path, const char *arg, bool in_background) {
         return (int)parse_result;
     }
 
-    js_loader_task_ctx_t *ctx = memory__malloc(sizeof(*ctx));
+    js_loader_task_ctx_t *ctx = malloc(sizeof(*ctx));
     if (ctx == NULL) {
         app_runner__free_args(argv, argc);
         memory__free(inspection);

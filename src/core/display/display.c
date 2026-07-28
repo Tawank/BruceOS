@@ -442,6 +442,14 @@ static void display__worker(void *arg) {
         s_transfer_active = true;
         display__unlock();
 
+#if CONFIG_BRUCE_QEMU_TEST_MODE
+        display__lock();
+        s_transfer_active = false;
+        display__unlock();
+        display__finish_request(&request, BRUCE_OK);
+        continue;
+#endif
+
         for (;;) {
             display__lock();
             bool conflict = request.overlay_update && display__overlay_conflicts_locked(request.rect);
@@ -579,9 +587,11 @@ static void display__configure_rotation(void) {
     }
 
     display__update_fb_dimensions();
-    esp_lcd_panel_swap_xy(s_panel, swap_xy);
-    esp_lcd_panel_mirror(s_panel, mirror_x, mirror_y);
-    esp_lcd_panel_set_gap(s_panel, x_gap, y_gap);
+    if (s_panel != NULL) {
+        esp_lcd_panel_swap_xy(s_panel, swap_xy);
+        esp_lcd_panel_mirror(s_panel, mirror_x, mirror_y);
+        esp_lcd_panel_set_gap(s_panel, x_gap, y_gap);
+    }
 }
 
 static void display__set_pixel(int16_t x, int16_t y, bruce_display_color_t color) {
@@ -1434,7 +1444,9 @@ bruce_result_t display__init(void) {
         return BRUCE_OK;
     }
 
-    bruce_result_t result = display__panel_init();
+    bruce_result_t result = BRUCE_OK;
+#if !CONFIG_BRUCE_QEMU_TEST_MODE
+    result = display__panel_init();
     if (result != BRUCE_OK) {
         display__unlock();
         return result;
@@ -1450,6 +1462,7 @@ bruce_result_t display__init(void) {
         display__unlock();
         return result;
     }
+#endif
 
     s_framebuffer =
         (bruce_display_color_t *)heap_caps_malloc(DISPLAY__FB_SIZE, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
@@ -1501,7 +1514,9 @@ bruce_result_t display__init(void) {
     int cfg_bright = 100;
     if (config__get_bright(&cfg_bright) != BRUCE_OK) { cfg_bright = 100; }
     uint8_t init_brightness = (uint8_t)((cfg_bright * 255) / 100);
+#if !CONFIG_BRUCE_QEMU_TEST_MODE
     display__set_backlight_duty(init_brightness);
+#endif
     s_brightness = init_brightness;
 
     s_initialized = true;

@@ -2,13 +2,13 @@
 
 #include "core_sdk/clock.h"
 #include "core_sdk/device.h"
-#include "core_sdk/task.h"
+#include "core_sdk/task.h" // IWYU pragma: keep
 
 #include <stdbool.h>
 
-#include "esp_adc/adc_cali.h"
-#include "esp_adc/adc_cali_scheme.h"
-#include "esp_adc/adc_oneshot.h"
+#include "esp_adc/adc_cali.h"        // IWYU pragma: keep
+#include "esp_adc/adc_cali_scheme.h" // IWYU pragma: keep
+#include "esp_adc/adc_oneshot.h"     // IWYU pragma: keep
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 
@@ -19,7 +19,9 @@
 #define DEVICE__BATTERY_CACHE_MS 30000
 #define DEVICE__VALID_EPOCH_MIN 1577836800
 
-#if defined(CONFIG_BRUCE_BOARD_M5_CARDPUTER)
+#if CONFIG_BRUCE_QEMU_TEST_MODE
+#define DEVICE__NO_BATTERY 1
+#elif defined(CONFIG_BRUCE_BOARD_M5_CARDPUTER)
 #define DEVICE__BATTERY_CHANNEL ADC_CHANNEL_9
 #elif defined(CONFIG_BRUCE_BOARD_M5_STICKC_PLUS2)
 #define DEVICE__BATTERY_CHANNEL ADC_CHANNEL_2
@@ -30,12 +32,14 @@
 static StaticSemaphore_t s_lock_storage;
 static SemaphoreHandle_t s_lock;
 static portMUX_TYPE s_init_mux = portMUX_INITIALIZER_UNLOCKED;
+#if !defined(DEVICE__NO_BATTERY)
 static adc_oneshot_unit_handle_t s_adc;
 static adc_cali_handle_t s_adc_cali;
 static bool s_battery_initialized;
 static bool s_cached_battery_valid;
 static int s_cached_battery;
 static uint64_t s_battery_read_at;
+#endif
 
 static bool device__ensure_lock(void) {
     if (s_lock != NULL) return true;

@@ -1,0 +1,9 @@
+# QEMU's serial fixture is connected to UART0, not USB Serial/JTAG.
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+
+# Keep emulator startup deterministic; production builds remain dual-core.
+CONFIG_FREERTOS_UNICORE=y
+
+# Do not initialize the physical Cardputer LCD and keyboard in the emulator.
+CONFIG_BRUCE_QEMU_TEST_MODE=y

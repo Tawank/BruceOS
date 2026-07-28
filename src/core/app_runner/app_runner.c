@@ -94,6 +94,7 @@ void app_runner__register_defaults(void) {
     (void)app_runner__register("ir", ir_app_main);
     (void)app_runner__register("nrf24", nrf24_app_main);
     (void)app_runner__register("selftest", selftest_app_main);
+    s_apps[s_app_count - 1].gui_default = true;
     s_apps[s_app_count - 1].stack_bytes = APP_RUNNER_SELFTEST_STACK_BYTES;
     (void)app_runner__register("terminal", terminal_app_main);
     s_apps[s_app_count - 1].gui_default = true;

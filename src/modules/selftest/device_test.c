@@ -35,7 +35,7 @@ bool selftest__run_device_state_case(void) {
     }
 
     int battery = device__get_battery();
-    if (battery < 0 || battery > 100) {
+    if ((battery < 0 && battery != BRUCE_ERR_UNSUPPORTED) || battery > 100) {
         printf("[selftest] device/state: battery read failed (%d)\n", battery);
         return false;
     }

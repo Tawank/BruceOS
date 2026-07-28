@@ -200,7 +200,16 @@ bool selftest__run_storage_mkdir_case(void) {
     bool removed = storage__remove(path);
     bool ok = created == BRUCE_OK && existing == BRUCE_OK && missing_parent == BRUCE_ERR_NOT_FOUND &&
               protected_path == BRUCE_ERR_PERMISSION && listed == BRUCE_OK && removed;
-    printf("[selftest] storage/mkdir: %s\n", ok ? "OK" : "FAIL");
+    printf(
+        "[selftest] storage/mkdir: %s (create=%d existing=%d missing=%d protected=%d list=%d remove=%d)\n",
+        ok ? "OK" : "FAIL",
+        created,
+        existing,
+        missing_parent,
+        protected_path,
+        listed,
+        removed
+    );
     return ok;
 }
 

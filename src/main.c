@@ -11,20 +11,30 @@
 void app_main(void) {
     if (!config__init()) printf("Configuration storage is unavailable; using in-memory defaults\n");
 
+#if CONFIG_BRUCE_QEMU_TEST_MODE
+    if (display__init() != BRUCE_OK) printf("Headless display initialization failed\n");
+    if (input__init() != BRUCE_OK) printf("Headless input initialization failed\n");
+#else
     bool display_ok = display__init() == BRUCE_OK;
     if (!display_ok) printf("Display initialization failed; continuing without LCD\n");
 
     bool input_ok = input__init() == BRUCE_OK;
     if (!input_ok) printf("Input initialization failed; continuing without physical input\n");
+#endif
 
     app_runner__register_defaults();
 
     app_runner__run("serial_commands", NULL, true);
-
+#if CONFIG_BRUCE_QEMU_TEST_MODE
+    printf("SELFTEST READY\n");
+    fflush(stdout);
+    while (1) { vTaskDelay(pdMS_TO_TICKS(5000)); }
+#else
     const char *launcher_args = (display_ok && input_ok) ? "--gui" : NULL;
     int result = app_runner__run("launcher", launcher_args, false);
 
     if (result < 0) { printf("Launcher failed to start with code %d\n", result); }
 
     while (1) { vTaskDelay(pdMS_TO_TICKS(5000)); }
+#endif
 }

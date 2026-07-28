@@ -216,6 +216,9 @@ bruce_result_t spi__open(const bruce_spi_device_config_t *config, bruce_spi_id_t
 bruce_result_t spi__transfer(bruce_spi_id_t device, const void *tx_data, void *rx_data, size_t size) {
     bruce_result_t permission = permission__check(BRUCE_PERMISSION_GPIO);
     if (permission != BRUCE_OK) return permission;
+    if (size == 0 || size > BRUCE_SPI_MAX_TRANSFER_SIZE || (tx_data == NULL && rx_data == NULL)) {
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
     bruce_task_id_t owner = task__current_id();
     spi__lock();
     int index = spi__find_locked(device);

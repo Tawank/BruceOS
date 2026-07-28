@@ -3,6 +3,7 @@
 .cache/
 
 build/
+build-qemu/
 managed_components/
 BrucePIO_legacy/
 __pycache__

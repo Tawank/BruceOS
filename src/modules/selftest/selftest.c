@@ -5,6 +5,8 @@
 #include "freertos/FreeRTOS.h" // IWYU pragma: export
 #include "freertos/task.h"
 
+#include "core_sdk/storage.h"
+
 #include "app_runner_test.h"
 #include "bluetooth_test.h"
 #include "bnu_test.h"
@@ -36,6 +38,9 @@ void selftest__resource_cleanup(void *context) {
 int selftest_app_main(int argc, char **argv) {
     (void)argc;
     (void)argv;
+
+    (void)storage__mkdir("/apps");
+    (void)storage__mkdir("/bin");
 
     int failures = 0;
 #define RUN_SELFTEST(fn)                                                                                     \
@@ -115,5 +120,7 @@ int selftest_app_main(int argc, char **argv) {
 
 #undef RUN_SELFTEST
     printf("[selftest] summary: %d failure(s)\n", failures);
+    printf("SELFTEST %s\n", failures == 0 ? "PASS" : "FAIL");
+    fflush(stdout);
     return failures == 0 ? 0 : 1;
 }

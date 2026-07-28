@@ -552,9 +552,9 @@ bruce_result_t input__init(void) {
         return BRUCE_ERR_INTERNAL;
     }
 
+#if !CONFIG_BRUCE_QEMU_TEST_MODE
     input__buttons_init();
     input__kb_gpio_init();
-
     BaseType_t created = xTaskCreate(
         input__poll_task, "bruce_input", INPUT__TASK_STACK, NULL, INPUT__TASK_PRIORITY, &s_poll_task
     );
@@ -563,6 +563,7 @@ bruce_result_t input__init(void) {
         input__unlock();
         return BRUCE_ERR_NO_MEMORY;
     }
+#endif
 
     s_initialized = true;
     input__unlock();

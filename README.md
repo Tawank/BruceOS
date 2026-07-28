@@ -6,6 +6,7 @@ It also supports M5stack and Lilygo products and works great with Cardputer, Sti
 ## :building_construction: How to install
 
 ```sh
+source ~/.espressif/v6.0.2/esp-idf/export.sh
 idf.py -p PORT flash
 ```
 
@@ -16,8 +17,16 @@ Install [ESP-IDF](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/ge
 then build by sourcing the ESP-IDF environment and running:
 
 ```sh
-source ~/esp/idf/export.sh
+source ~/.espressif/v6.0.2/esp-idf/export.sh
 idf.py build
+```
+
+## :test_tube: How to run tests
+
+```sh
+source ~/.espressif/v6.0.2/esp-idf/export.sh
+idf.py -B build-qemu build
+python -m pytest tests/pytest_firmware.py
 ```
 
 ## :computer: List of Features BrucePIO supports

@@ -78,5 +78,5 @@ When asked to make a new function or module **behave like** a legacy one:
 
 ## Build notes
 
-- Activate ESP-IDF with `source ~/esp/idf/export.sh`.
+- Activate ESP-IDF with `source ~/esp/idf/export.sh` or `source ~/.espressif/tools/activate_idf_v6.0.2.sh`.
 - `idf.py build` from the repo root (use tail to truncate the output never use it without it). 

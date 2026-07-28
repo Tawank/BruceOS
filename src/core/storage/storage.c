@@ -130,7 +130,8 @@ static bool storage__write_file_atomic_locked(const char *path, const void *data
 
 bool storage__exists(const char *path) {
     storage__lock();
-    bool exists = storage__is_ready(path) && access(path, F_OK) == 0;
+    struct stat path_stat;
+    bool exists = storage__is_ready(path) && stat(path, &path_stat) == 0;
     storage__unlock();
     return exists;
 }
@@ -151,7 +152,9 @@ bool storage__write_file_atomic(const char *path, const void *data, size_t size)
 
 bool storage__remove(const char *path) {
     storage__lock();
-    bool removed = storage__is_ready(path) && remove(path) == 0;
+    struct stat path_stat;
+    bool removed = storage__is_ready(path) && stat(path, &path_stat) == 0 &&
+                   (S_ISDIR(path_stat.st_mode) ? rmdir(path) : remove(path)) == 0;
     storage__unlock();
     return removed;
 }
