@@ -10,8 +10,9 @@
 
 bool selftest__run_icon_registry_case(void) {
     static const char *const names[] = {
-        "wifi", "ble", "remote", "handheld", "folder", "files",
-        "terminal", "clock", "settings", "selftest", "apps",
+        "apps",           "bluetooth", "clock-outline", "cog",     "console",
+        "expansion-card", "folder",    "infrared",      "radio-handheld",
+        "remote-tv",      "rfid",      "test-tube",     "wifi",
     };
     for (size_t i = 0; i < (sizeof(names) / sizeof(names[0])); ++i) {
         const bruce_icon_t *icon = icon__get(names[i]);
@@ -38,7 +39,7 @@ bool selftest__run_icon_registry_case(void) {
     }
 
     /* Verify an icon renders through the scaled 1bpp bitmap path. */
-    const bruce_icon_t *clock = icon__get("clock");
+    const bruce_icon_t *clock = icon__get("clock-outline");
     if (display__begin_frame() != BRUCE_OK) {
         printf("[selftest] icon/registry: FAIL, could not begin frame\n");
         return false;

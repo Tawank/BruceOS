@@ -82,7 +82,10 @@ public Config API and starts that command with app_runner.  The default is
 builds a nested menu from it.  Top-level keys are menu labels; values are either
 a command string (dispatched as-is to `app_runner__run()` or
 `app_runner__run_path()`), a string path starting with `/` that enumerates a
-directory (e.g., `"Apps": "/apps"`), or another object defining a submenu.
+directory (e.g., `"Apps@apps": "/apps"`), or another object defining a submenu.
+Labels may end with `@icon-name`; the suffix is hidden from the displayed label
+and resolved directly through `icon__get()`. Labels without a suffix have no
+launcher icon.
 Every submenu automatically appends a `"Back"` entry.  The command strings are
 passed exactly as written; the launcher does not append `--gui` automatically.
 If `/launcher.json` is missing, the launcher writes a default configuration.

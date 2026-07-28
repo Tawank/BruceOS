@@ -252,15 +252,15 @@ static int clock_app__alarm(int argc, char **argv, bool gui) {
 
 static void clock_app__usage(void) {
     stdio__printf("Clock commands:\n");
-    stdio__printf("  clock show\n  clock timer HH:MM:SS\n  clock alarm HH:MM[:SS]\n");
+    stdio__printf("  clock\n  clock timer HH:MM:SS\n  clock alarm HH:MM[:SS]\n");
 }
 
 static int clock_app__gui(int argc, char **argv) {
     const bruce_dialog_choice_t choices[] = {
-        {.label = "Timer", .value = "timer"},
-        {.label = "Alarm", .value = "alarm"},
-        {.label = "Back to clock", .value = "back"},
-        {.label = "Exit", .value = "exit"},
+        {.label = "Timer",         .value = "timer"},
+        {.label = "Alarm",         .value = "alarm"},
+        {.label = "Back to clock", .value = "back" },
+        {.label = "Exit",          .value = "exit" },
     };
     for (;;) {
         int result = clock_app__show(true);

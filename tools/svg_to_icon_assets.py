@@ -20,25 +20,6 @@ TOKEN_RE = re.compile(
     r"[AaCcHhLlMmQqSsTtVvZz]|[-+]?(?:\d+\.?(?:\d*)?|\.\d+)(?:[eE][-+]?\d+)?"
 )
 
-# Public lookup names do not always match the source asset filename. Multiple
-# names may point at one asset to preserve established aliases.
-ICON_NAMES = {
-    "apps": ("apps",),
-    "bluetooth": ("ble",),
-    "clock-outline": ("clock",),
-    "cog": ("settings",),
-    "console": ("terminal",),
-    "expansion-card": ("expansion-card",),
-    "folder": ("folder", "files"),
-    "infrared": ("remote",),
-    "radio-handheld": ("handheld",),
-    "remote-tv": ("remote-tv",),
-    "rfid": ("rfid",),
-    "test-tube": ("selftest",),
-    "wifi": ("wifi",),
-}
-
-
 @dataclass
 class State:
     x: float = 0.0
@@ -331,13 +312,6 @@ def format_header(assets: list[Path]) -> str:
         "",
     ]
     names: set[str] = set()
-    assets_by_stem = {asset.stem: asset for asset in assets}
-    missing_names = assets_by_stem.keys() - ICON_NAMES.keys()
-    missing_assets = ICON_NAMES.keys() - assets_by_stem.keys()
-    if missing_names:
-        raise ValueError(f"missing ICON_NAMES entries for: {', '.join(sorted(missing_names))}")
-    if missing_assets:
-        raise ValueError(f"ICON_NAMES references missing assets: {', '.join(sorted(missing_assets))}")
     for asset in assets:
         name = identifier(asset)
         if name in names:
@@ -351,13 +325,8 @@ def format_header(assets: list[Path]) -> str:
         lines.extend(("};", ""))
 
     lines.append("static const icon__entry_t s_icons[] = {")
-    lookup_names: set[str] = set()
     for asset in assets:
-        for lookup_name in ICON_NAMES[asset.stem]:
-            if lookup_name in lookup_names:
-                raise ValueError(f"duplicate icon lookup name {lookup_name!r}")
-            lookup_names.add(lookup_name)
-            lines.append(f'    ICON__ENTRY("{lookup_name}", {identifier(asset)}),')
+        lines.append(f'    ICON__ENTRY("{asset.stem}", {identifier(asset)}),')
     lines.extend(("};", ""))
     return "\n".join(lines)
 

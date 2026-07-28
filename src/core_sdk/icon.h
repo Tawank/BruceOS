@@ -25,17 +25,8 @@ typedef struct {
  * Return the built-in icon named `name`, or NULL if `name` is not recognized.
  *
  * Recognized names (case-sensitive):
- *   "wifi"       - Wi-Fi signal icon
- *   "ble"        - Bluetooth rune
- *   "remote"     - infrared / remote icon
- *   "handheld"   - radio handheld icon
- *   "folder"     - folder icon
- *   "files"      - alias for "folder"
- *   "terminal"   - terminal / console icon
- *   "clock"      - analog clock icon
- *   "settings"   - cog / settings icon
- *   "selftest"   - test-tube icon
- *   "apps"       - 3x3 grid of squares
+ * Names match the SVG filenames in core/icon/assets (without the .svg suffix),
+ * for example "wifi", "bluetooth", "radio-handheld", and "clock-outline".
  *
  * The returned struct is owned by Core; the caller must not free or modify it.
  * Draw it with display__draw_bitmap_scaled(), e.g.:

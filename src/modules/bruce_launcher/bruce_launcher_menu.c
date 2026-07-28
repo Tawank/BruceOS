@@ -18,7 +18,7 @@
 /* Default launcher configuration written when /launcher.json is missing. */
 static const char *BRUCE_LAUNCHER_DEFAULT_JSON =
     "{\n"
-    "  \"WiFi\": {\n"
+    "  \"WiFi@wifi\": {\n"
     "    \"Connect to Wifi\": \"wifi connect\",\n"
     "    \"Start WiFi AP\": \"wifi ap start\",\n"
     "    \"Turn Off WiFi\": \"wifi disconnect\",\n"
@@ -30,13 +30,13 @@ static const char *BRUCE_LAUNCHER_DEFAULT_JSON =
     "      \"Beacon SPAM\": \"wifiatks beacon\"\n"
     "    }\n"
     "  },\n"
-    "  \"Bluetooth\": \"bluetooth --gui\",\n"
-    "  \"Infrared\": \"ir --gui\",\n"
-    "  \"NRF24\": \"nrf24 --gui\",\n"
-    "  \"Files\": \"filemanager --gui\",\n"
-    "  \"Terminal\": \"terminal\",\n"
-    "  \"Clock\": \"clock --gui\",\n"
-    "  \"Config\": {\n"
+    "  \"Bluetooth@bluetooth\": \"bluetooth --gui\",\n"
+    "  \"Infrared@infrared\": \"ir --gui\",\n"
+    "  \"NRF24@radio-handheld\": \"nrf24 --gui\",\n"
+    "  \"Files@folder\": \"filemanager --gui\",\n"
+    "  \"Terminal@console\": \"terminal\",\n"
+    "  \"Clock@clock-outline\": \"clock --gui\",\n"
+    "  \"Config@cog\": {\n"
     "    \"Display & UI\": \"config display --gui\",\n"
     "    \"LED Config\": \"config led --gui\",\n"
     "    \"Audio Config\": \"config audio --gui\",\n"
@@ -53,15 +53,31 @@ static const char *BRUCE_LAUNCHER_DEFAULT_JSON =
     "    \"Install App Store\": \"appstore install\",\n"
     "    \"About\": \"config about --gui\"\n"
     "  },\n"
-    "  \"Selftest\": \"terminal selftest\",\n"
-    "  \"Apps\": \"/apps\"\n"
+    "  \"Selftest@test-tube\": \"terminal selftest\",\n"
+    "  \"Apps@apps\": \"/apps\"\n"
     "}\n";
+
+static void bruce_launcher__parse_label(
+    const char *source, char *label, size_t label_size, char *icon_name, size_t icon_name_size
+) {
+    const char *separator = strrchr(source, '@');
+    size_t label_length = separator != NULL ? (size_t)(separator - source) : strlen(source);
+    if (label_length >= label_size) label_length = label_size - 1;
+    memcpy(label, source, label_length);
+    label[label_length] = '\0';
+
+    if (icon_name == NULL || icon_name_size == 0) return;
+    icon_name[0] = '\0';
+    if (separator == NULL || separator[1] == '\0') return;
+    strncpy(icon_name, separator + 1, icon_name_size - 1);
+    icon_name[icon_name_size - 1] = '\0';
+}
 
 static bruce_launcher_menu_t *bruce_launcher__menu_create(const char *title, bruce_launcher_menu_t *parent) {
     bruce_launcher_menu_t *menu = (bruce_launcher_menu_t *)calloc(1, sizeof(*menu));
     if (menu == NULL) return NULL;
 
-    strncpy(menu->title, title, sizeof(menu->title) - 1);
+    bruce_launcher__parse_label(title, menu->title, sizeof(menu->title), NULL, 0);
     menu->capacity = BRUCE_LAUNCHER_MAX_ENTRIES;
     menu->entries = (bruce_launcher_entry_t *)calloc((size_t)menu->capacity, sizeof(*menu->entries));
     if (menu->entries == NULL) {
@@ -87,7 +103,9 @@ static bool
 bruce_launcher__menu_add_command(bruce_launcher_menu_t *menu, const char *label, const char *command) {
     if (menu->entry_count >= menu->capacity) return false;
     bruce_launcher_entry_t *entry = &menu->entries[menu->entry_count++];
-    strncpy(entry->label, label, sizeof(entry->label) - 1);
+    bruce_launcher__parse_label(
+        label, entry->label, sizeof(entry->label), entry->icon_name, sizeof(entry->icon_name)
+    );
     strncpy(entry->command, command, sizeof(entry->command) - 1);
     entry->kind = BRUCE_LAUNCHER_ENTRY_COMMAND;
     return true;
@@ -98,7 +116,9 @@ static bool bruce_launcher__menu_add_submenu(
 ) {
     if (menu->entry_count >= menu->capacity) return false;
     bruce_launcher_entry_t *entry = &menu->entries[menu->entry_count++];
-    strncpy(entry->label, label, sizeof(entry->label) - 1);
+    bruce_launcher__parse_label(
+        label, entry->label, sizeof(entry->label), entry->icon_name, sizeof(entry->icon_name)
+    );
     entry->submenu = submenu;
     entry->kind = BRUCE_LAUNCHER_ENTRY_SUBMENU;
     return true;
