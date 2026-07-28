@@ -44,11 +44,13 @@ static bruce_launcher_icon_t bruce_launcher__entry_icon(const bruce_launcher_ent
 
 static void
 bruce_launcher__draw_icon_path(int cx, int cy, int size, const char *name, bruce_display_color_t color) {
-    const char *path = icon__get(name);
-    if (path == NULL) { return; }
+    const bruce_icon_t *icon = icon__get(name);
+    if (icon == NULL) { return; }
     int x = cx - size / 2;
     int y = cy - size / 2;
-    display__fill_svg_path((int16_t)x, (int16_t)y, (int16_t)size, (int16_t)size, path, color);
+    display__draw_bitmap_scaled(
+        (int16_t)x, (int16_t)y, icon->bits, icon->width, icon->height, (int16_t)size, (int16_t)size, color
+    );
 }
 
 static void bruce_launcher__draw_thick_line(int x0, int y0, int x1, int y1, int thickness, uint16_t color) {

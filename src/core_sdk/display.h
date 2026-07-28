@@ -197,6 +197,17 @@ bruce_result_t display__draw_xbitmap(
 bruce_result_t display__draw_rgb_bitmap(int16_t x, int16_t y, const uint16_t *bitmap, int16_t w, int16_t h);
 
 /*
+ * Draw a 1bpp MSB-first bitmap of `w` x `h` pixels scaled to `dw` x `dh`
+ * using nearest-neighbor sampling.  A set bit draws `color`; a clear bit is
+ * transparent.  This is the fast path for built-in icons (see icon.h): pure
+ * integer math, no parsing, no extra RAM.
+ */
+bruce_result_t display__draw_bitmap_scaled(
+    int16_t x, int16_t y, const uint8_t *bitmap, int16_t w, int16_t h, int16_t dw, int16_t dh,
+    bruce_display_color_t color
+);
+
+/*
  * Draw a vector path in SVG path-data syntax into a destination rectangle.
  * The path is assumed to be authored in a 24x24 viewBox (Material icon style);
  * it is scaled to fit the rectangle and rendered with 1-pixel strokes using
@@ -210,9 +221,12 @@ bruce_result_t display__draw_svg_path(
 /*
  * Fill a vector path in SVG path-data syntax inside a destination rectangle.
  * The path is assumed to be authored in a 24x24 viewBox (Material icon style);
- * it is scaled to fit the rectangle and every closed subpath is filled with
- * `color` using the even-odd rule.  Strokes are not drawn — use
- * display__draw_svg_path() for outline-only rendering.
+ * it is scaled to fit the rectangle and every subpath is filled with `color`
+ * using the nonzero winding rule (open subpaths are implicitly closed, per
+ * the SVG specification).  Strokes are not drawn — use
+ * display__draw_svg_path() for outline-only rendering.  This parser-based
+ * path is meant for arbitrary application-supplied paths; built-in icons
+ * should prefer the cheaper display__draw_bitmap_scaled() with icon__get().
  */
 bruce_result_t display__fill_svg_path(
     int16_t x, int16_t y, int16_t w, int16_t h, const char *path, bruce_display_color_t color

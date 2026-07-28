@@ -712,7 +712,7 @@ const JSClassDef js_display_obj = JS_OBJECT_DEF("Display", js_display);
 
 /* Icon module */
 static const JSPropDef js_icon[] = {
-    JS_CFUNC_DEF("get", 1, native_iconGet),
+    JS_CFUNC_DEF("draw", 5, native_iconDraw),
     JS_PROP_END,
 };
 

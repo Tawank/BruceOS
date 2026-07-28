@@ -156,6 +156,7 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(display__draw_bitmap),
     ESP_ELFSYM_EXPORT(display__draw_xbitmap),
     ESP_ELFSYM_EXPORT(display__draw_rgb_bitmap),
+    ESP_ELFSYM_EXPORT(display__draw_bitmap_scaled),
     ESP_ELFSYM_EXPORT(display__set_rotation),
     ESP_ELFSYM_EXPORT(display__get_rotation),
     ESP_ELFSYM_EXPORT(display__invert_display),

@@ -105,6 +105,7 @@ int selftest_app_main(int argc, char **argv) {
     RUN_SELFTEST(selftest__run_dialog_viewer_case);
     RUN_SELFTEST(selftest__run_display_compositor_case);
     RUN_SELFTEST(selftest__run_display_svg_path_case);
+    RUN_SELFTEST(selftest__run_display_svg_fill_case);
     RUN_SELFTEST(selftest__run_icon_registry_case);
     RUN_SELFTEST(selftest__run_image_decode_case);
     RUN_SELFTEST(selftest__run_notification_case);

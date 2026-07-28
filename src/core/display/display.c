@@ -918,8 +918,12 @@ static void display__draw_triangle_fill(
 #define DISPLAY__SVG_MIN_STEPS 8
 #define DISPLAY__SVG_MAX_EDGES 384
 
+/* Edges are stored in integer destination coordinates (8 bytes per edge).
+ * Because every vertex lands on an integer coordinate, scanlines taken at
+ * pixel centers (y + 0.5) never pass exactly through a vertex, which keeps
+ * the winding count free of vertex double-counting artifacts. */
 typedef struct {
-    float x0, y0, x1, y1;
+    int16_t x0, y0, x1, y1;
 } display__svg_edge_t;
 
 typedef struct {
@@ -936,57 +940,60 @@ static display__svg_edge_t s_svg_edges[DISPLAY__SVG_MAX_EDGES];
 static size_t s_svg_edge_count;
 static bool s_svg_fill_mode;
 static int16_t s_svg_ddx, s_svg_ddy, s_svg_ddw, s_svg_ddh;
-static bruce_display_color_t s_svg_color;
+
+static int16_t display__svg_to_px_x(float x) {
+    return (int16_t)lroundf((float)s_svg_ddx + x * (float)s_svg_ddw / DISPLAY__SVG_VIEWBOX_WIDTH);
+}
+
+static int16_t display__svg_to_px_y(float y) {
+    return (int16_t)lroundf((float)s_svg_ddy + y * (float)s_svg_ddh / DISPLAY__SVG_VIEWBOX_HEIGHT);
+}
 
 static void display__svg_add_edge(float x0, float y0, float x1, float y1) {
     if (!s_svg_fill_mode || s_svg_edge_count >= DISPLAY__SVG_MAX_EDGES) { return; }
-    s_svg_edges[s_svg_edge_count].x0 = (float)s_svg_ddx + x0 * s_svg_ddw / DISPLAY__SVG_VIEWBOX_WIDTH;
-    s_svg_edges[s_svg_edge_count].y0 = (float)s_svg_ddy + y0 * s_svg_ddh / DISPLAY__SVG_VIEWBOX_HEIGHT;
-    s_svg_edges[s_svg_edge_count].x1 = (float)s_svg_ddx + x1 * s_svg_ddw / DISPLAY__SVG_VIEWBOX_WIDTH;
-    s_svg_edges[s_svg_edge_count].y1 = (float)s_svg_ddy + y1 * s_svg_ddh / DISPLAY__SVG_VIEWBOX_HEIGHT;
+    s_svg_edges[s_svg_edge_count].x0 = display__svg_to_px_x(x0);
+    s_svg_edges[s_svg_edge_count].y0 = display__svg_to_px_y(y0);
+    s_svg_edges[s_svg_edge_count].x1 = display__svg_to_px_x(x1);
+    s_svg_edges[s_svg_edge_count].y1 = display__svg_to_px_y(y1);
     s_svg_edge_count++;
 }
 
 static void display__svg_fill_edges(bruce_display_color_t color) {
     if (s_svg_edge_count == 0) { return; }
 
-    float scan_min = s_svg_edges[0].y0;
-    float scan_max = s_svg_edges[0].y0;
+    int y0 = s_svg_edges[0].y0;
+    int y1 = s_svg_edges[0].y0;
     for (size_t i = 0; i < s_svg_edge_count; ++i) {
-        float min_yi = fminf(s_svg_edges[i].y0, s_svg_edges[i].y1);
-        float max_yi = fmaxf(s_svg_edges[i].y0, s_svg_edges[i].y1);
-        if (min_yi < scan_min) { scan_min = min_yi; }
-        if (max_yi > scan_max) { scan_max = max_yi; }
+        int min_yi = s_svg_edges[i].y0 < s_svg_edges[i].y1 ? s_svg_edges[i].y0 : s_svg_edges[i].y1;
+        int max_yi = s_svg_edges[i].y0 > s_svg_edges[i].y1 ? s_svg_edges[i].y0 : s_svg_edges[i].y1;
+        if (min_yi < y0) { y0 = min_yi; }
+        if (max_yi > y1) { y1 = max_yi; }
     }
-
-    int y0 = (int)floorf(scan_min);
-    int y1 = (int)ceilf(scan_max);
 
     typedef struct { float x; int dw; } svg_ix_t;
     svg_ix_t ix[128];
 
-    for (int y = y0; y <= y1; ++y) {
+    for (int y = y0; y < y1; ++y) {
+        float yf = (float)y + 0.5f;
         int count = 0;
-        float yf = (float)y;
         for (size_t i = 0; i < s_svg_edge_count && count < (int)(sizeof(ix) / sizeof(ix[0])); ++i) {
-            float ey0 = s_svg_edges[i].y0;
-            float ey1 = s_svg_edges[i].y1;
+            int ey0 = s_svg_edges[i].y0;
+            int ey1 = s_svg_edges[i].y1;
             if (ey0 == ey1) { continue; }
-            float min_ey = fminf(ey0, ey1);
-            float max_ey = fmaxf(ey0, ey1);
-            if (yf < min_ey || yf >= max_ey) { continue; }
-            ix[count].x = s_svg_edges[i].x0 +
-                (s_svg_edges[i].x1 - s_svg_edges[i].x0) * (yf - ey0) / (ey1 - ey0);
+            int min_ey = ey0 < ey1 ? ey0 : ey1;
+            int max_ey = ey0 > ey1 ? ey0 : ey1;
+            if (yf < (float)min_ey || yf >= (float)max_ey) { continue; }
+            ix[count].x = (float)s_svg_edges[i].x0 +
+                (float)(s_svg_edges[i].x1 - s_svg_edges[i].x0) * (yf - (float)ey0) / (float)(ey1 - ey0);
             ix[count].dw = (ey0 < ey1) ? 1 : -1;
             ++count;
         }
 
-        /* Sort by x; at equal x, upward edges (+1) precede downward (-1). */
+        /* Sort by x. */
         for (int a = 1; a < count; ++a) {
             svg_ix_t tmp = ix[a];
             int b = a - 1;
-            while (b >= 0 &&
-                   (ix[b].x > tmp.x || (ix[b].x == tmp.x && ix[b].dw < tmp.dw))) {
+            while (b >= 0 && ix[b].x > tmp.x) {
                 ix[b + 1] = ix[b];
                 --b;
             }
@@ -994,17 +1001,19 @@ static void display__svg_fill_edges(bruce_display_color_t color) {
         }
 
         int winding = 0;
-        int16_t span_start = 0;
+        float span_start = 0.0f;
         bool in_span = false;
         for (int a = 0; a < count; ++a) {
             winding += ix[a].dw;
             if (!in_span && winding != 0) {
-                span_start = (int16_t)lroundf(ix[a].x);
+                span_start = ix[a].x;
                 in_span = true;
             } else if (in_span && winding == 0) {
-                int16_t span_end = (int16_t)lroundf(ix[a].x);
-                if (span_start <= span_end) {
-                    display__draw_line_bresenham(span_start, (int16_t)y, span_end, (int16_t)y, color);
+                /* Pixel j is inside when span_start <= j + 0.5 < span_end. */
+                int16_t x_start = (int16_t)ceilf(span_start - 0.5f);
+                int16_t x_end = (int16_t)ceilf(ix[a].x - 0.5f) - 1;
+                if (x_start <= x_end) {
+                    display__fill_rect_native(x_start, (int16_t)y, (int16_t)(x_end - x_start + 1), 1, color);
                 }
                 in_span = false;
             }
@@ -1017,13 +1026,15 @@ static void display__svg_draw_line(
     float x0, float y0, float x1, float y1, int16_t dx, int16_t dy, int16_t dw, int16_t dh,
     bruce_display_color_t color
 ) {
-    display__draw_line_bresenham(
-        (int16_t)lroundf(dx + x0 * dw / DISPLAY__SVG_VIEWBOX_WIDTH),
-        (int16_t)lroundf(dy + y0 * dh / DISPLAY__SVG_VIEWBOX_HEIGHT),
-        (int16_t)lroundf(dx + x1 * dw / DISPLAY__SVG_VIEWBOX_WIDTH),
-        (int16_t)lroundf(dy + y1 * dh / DISPLAY__SVG_VIEWBOX_HEIGHT),
-        color
-    );
+    if (!s_svg_fill_mode) {
+        display__draw_line_bresenham(
+            (int16_t)lroundf(dx + x0 * dw / DISPLAY__SVG_VIEWBOX_WIDTH),
+            (int16_t)lroundf(dy + y0 * dh / DISPLAY__SVG_VIEWBOX_HEIGHT),
+            (int16_t)lroundf(dx + x1 * dw / DISPLAY__SVG_VIEWBOX_WIDTH),
+            (int16_t)lroundf(dy + y1 * dh / DISPLAY__SVG_VIEWBOX_HEIGHT),
+            color
+        );
+    }
     display__svg_add_edge(x0, y0, x1, y1);
 }
 
@@ -1033,6 +1044,15 @@ static void display__svg_move_to(display__svg_state_t *s, float x, float y) {
     s->start_x = x;
     s->start_y = y;
     s->initialized = true;
+}
+
+/* Fill implicitly closes open subpaths (per the SVG specification): record
+ * the closing edge without stroking it. */
+static void display__svg_close_subpath_for_fill(display__svg_state_t *s) {
+    if (!s_svg_fill_mode || !s->initialized) { return; }
+    if (s->x != s->start_x || s->y != s->start_y) {
+        display__svg_add_edge(s->x, s->y, s->start_x, s->start_y);
+    }
 }
 
 static void display__svg_line_to(
@@ -1162,6 +1182,10 @@ static void display__svg_arc(
         px = ax;
         py = ay;
     }
+    /* The tessellation ends at the computed theta2 point, which differs from
+     * the exact command target; stitch the gap so the subpath stays
+     * continuous and the fill winding count remains correct. */
+    display__svg_draw_line(px, py, x, y, dx, dy, dw, dh, color);
     s->x = x;
     s->y = y;
 }
@@ -1195,7 +1219,6 @@ static void display__svg_render_path(
     s_svg_ddy = dy;
     s_svg_ddw = dw;
     s_svg_ddh = dh;
-    s_svg_color = color;
     s_svg_edge_count = 0;
 
     const char *p = path;
@@ -1220,6 +1243,9 @@ static void display__svg_render_path(
         char base = (char)toupper((unsigned char)cmd);
         bool ok;
         float nx, ny;
+
+        /* A new subpath implicitly closes the previous one for filling. */
+        if (base == 'M') { display__svg_close_subpath_for_fill(&s); }
 
         switch (base) {
             case 'M': {
@@ -1322,6 +1348,8 @@ static void display__svg_render_path(
                 break;
         }
     }
+    /* The final subpath is implicitly closed for filling too. */
+    display__svg_close_subpath_for_fill(&s);
     if (s_svg_fill_mode && s_svg_edge_count > 0) {
         display__svg_fill_edges(color);
     }
@@ -1971,6 +1999,35 @@ bruce_result_t display__draw_xbitmap(
         for (int16_t col = 0; col < w; ++col) {
             uint8_t byte = bitmap[row * byte_width + col / 8];
             if (byte & (1 << (col & 7))) { display__set_pixel(x + col, y + row, color); }
+        }
+    }
+    display__unlock();
+    return BRUCE_OK;
+}
+
+bruce_result_t display__draw_bitmap_scaled(
+    int16_t x, int16_t y, const uint8_t *bitmap, int16_t w, int16_t h, int16_t dw, int16_t dh,
+    bruce_display_color_t color
+) {
+    if (bitmap == NULL || w <= 0 || h <= 0 || dw <= 0 || dh <= 0) { return BRUCE_ERR_INVALID_ARGUMENT; }
+    bruce_task_id_t caller = task__current_id();
+    display__lock();
+    if (!s_initialized) {
+        display__unlock();
+        return BRUCE_ERR_NOT_INITIALIZED;
+    }
+    if (display__drawing_context_locked(caller) == NULL) {
+        display__unlock();
+        return BRUCE_ERR_PERMISSION;
+    }
+    /* Nearest-neighbor scale with integer math only; clear bits stay
+     * transparent so the icon composites over the existing background. */
+    int16_t byte_width = (w + 7) / 8;
+    for (int16_t row = 0; row < dh; ++row) {
+        const uint8_t *src_row = bitmap + (int32_t)row * h / dh * byte_width;
+        for (int16_t col = 0; col < dw; ++col) {
+            int16_t src_col = (int16_t)((int32_t)col * w / dw);
+            if (src_row[src_col / 8] & (0x80 >> (src_col & 7))) { display__set_pixel(x + col, y + row, color); }
         }
     }
     display__unlock();
