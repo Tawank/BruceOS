@@ -149,21 +149,27 @@ static void webui_app__usage(void) {
 
 int webui_app_main(int argc, char **argv) {
     if (app_runner__args_have_gui(argc, argv)) return webui_app__gui();
-    if (argc == 0 || argv == NULL || argv[0] == NULL || strcmp(argv[0], "status") == 0) {
+    if (argc <= 1 || argv == NULL || argv[1] == NULL || strcmp(argv[1], "status") == 0) {
         return webui_app__status(false);
     }
-    if (strcmp(argv[0], "stop") == 0) {
+    if (strcmp(argv[1], "stop") == 0) {
         bruce_result_t result = http_server__stop();
         if (result == BRUCE_OK) stdio__printf("WebUI stopped\n");
         return result;
     }
-    if (strcmp(argv[0], "start") == 0) {
-        if (strcmp(argv[1], "ap") == 0) {
+    if (strcmp(argv[1], "start") == 0) {
+        if (argc != 3) {
+            webui_app__usage();
+            return BRUCE_ERR_INVALID_ARGUMENT;
+        }
+        if (strcmp(argv[2], "ap") == 0) {
             return webui_app__start(WEBUI_APP_NETWORK_AP, false);
-        } else {
+        } else if (strcmp(argv[2], "sta") == 0) {
             return webui_app__start(WEBUI_APP_NETWORK_EXISTING, false);
         }
+        webui_app__usage();
+        return BRUCE_ERR_INVALID_ARGUMENT;
     }
     webui_app__usage();
-    return strcmp(argv[0], "help") == 0 ? BRUCE_OK : BRUCE_ERR_INVALID_ARGUMENT;
+    return strcmp(argv[1], "help") == 0 ? BRUCE_OK : BRUCE_ERR_INVALID_ARGUMENT;
 }

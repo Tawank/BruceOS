@@ -196,16 +196,16 @@ int elf_loader__run_path(const char *path, const char *arg, bool in_background) 
     const char *cmd_name = elf_loader__command_name(normalized_path);
     char **full_argv = NULL;
     int full_argc = argc + 1;
-    full_argv = memory__malloc(sizeof(char *) * (size_t)full_argc);
+    full_argv = calloc((size_t)full_argc + 1u, sizeof(char *));
     if (full_argv == NULL) {
         app_runner__free_args(argv, argc);
         memory__free(inspection);
         return BRUCE_ERR_NO_MEMORY;
     }
 
-    full_argv[0] = memory__malloc(strlen(cmd_name) + 1);
+    full_argv[0] = malloc(strlen(cmd_name) + 1);
     if (full_argv[0] == NULL) {
-        memory__free(full_argv);
+        free(full_argv);
         app_runner__free_args(argv, argc);
         memory__free(inspection);
         return BRUCE_ERR_NO_MEMORY;

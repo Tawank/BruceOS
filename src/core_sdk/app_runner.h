@@ -14,8 +14,10 @@ bruce_result_t app_runner__register(const char *name, bruce_app_entry_t entry);
  * core_sdk/loader.h).  On success this returns a positive bruce_task_id_t.
  * On failure it returns a negative BRUCE_ERR_* value (including
  * BRUCE_ERR_NOT_FOUND and BRUCE_ERR_BUSY). External callers require the
- * `execute` permission. `arg` is shell-style text; NULL or an empty string
- * creates argc == 0. */
+ * `execute` permission. `arg` is shell-style text. Registered built-ins use
+ * conventional C arguments: argv[0] is `app_name`, argv[argc] is NULL, and
+ * NULL or an empty `arg` therefore creates argc == 1. Loader-resolved
+ * applications define their own argv[0] convention. */
 int app_runner__run(const char *app_name, const char *arg, bool in_background);
 
 /* Shell-style tokenizer shared by app_runner__run()'s own named resolution

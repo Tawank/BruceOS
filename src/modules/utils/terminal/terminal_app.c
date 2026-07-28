@@ -164,8 +164,8 @@ static void terminal__submit(terminal__state_t *state) {
     state->dirty = true;
 }
 
-/* Rebuilds a shell-style line from argv so startup args run exactly like a
- * typed command (serial_commands__run_line() -> app_runner__parse_args()).
+/* Rebuilds a shell-style line from the user arguments after argv[0] so startup
+ * args run exactly like a typed command (serial_commands__run_line() -> app_runner__parse_args()).
  * Tokens containing spaces/tabs are single-quoted to survive the re-split. */
 static void terminal__argv_to_line(int argc, char **argv, char *out, size_t out_size) {
     size_t used = 0;
@@ -191,8 +191,8 @@ int terminal_app_main(int argc, char **argv) {
     terminal__append_text(&state, "Bruce terminal\nType a command and press Enter.\n");
     (void)input__flush();
 
-    if (argc > 0) {
-        terminal__argv_to_line(argc, argv, state.input, sizeof(state.input));
+    if (argc > 1) {
+        terminal__argv_to_line(argc - 1, argv + 1, state.input, sizeof(state.input));
         state.input_size = strlen(state.input);
         terminal__submit(&state);
     }

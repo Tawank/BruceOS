@@ -60,15 +60,15 @@ static bool bnu__resolve_path(const char *path, char *out_path) {
 
 int bnu_pwd_app_main(int argc, char **argv) {
     (void)argv;
-    if (argc != 0) return bnu__usage("pwd", "");
+    if (argc != 1) return bnu__usage("pwd", "");
     stdio__printf("%s\n", s_working_directory);
     return BRUCE_OK;
 }
 
 int bnu_cd_app_main(int argc, char **argv) {
-    if (argc > 1) return bnu__usage("cd", "[directory]");
+    if (argc < 1 || argc > 2) return bnu__usage("cd", "[directory]");
     char path[BRUCE_STORAGE_PATH_MAX];
-    if (!bnu__resolve_path(argc == 1 ? argv[0] : "/", path)) return BRUCE_ERR_INVALID_PATH;
+    if (!bnu__resolve_path(argc == 2 ? argv[1] : "/", path)) return BRUCE_ERR_INVALID_PATH;
     size_t count = 0;
     bruce_result_t result = storage__list(path, NULL, 0, &count);
     if (result != BRUCE_OK) {
@@ -80,9 +80,9 @@ int bnu_cd_app_main(int argc, char **argv) {
 }
 
 int bnu_ls_app_main(int argc, char **argv) {
-    if (argc > 1) return bnu__usage("ls", "[path]");
+    if (argc < 1 || argc > 2) return bnu__usage("ls", "[path]");
     char path[BRUCE_STORAGE_PATH_MAX];
-    if (!bnu__resolve_path(argc == 1 ? argv[0] : NULL, path)) return BRUCE_ERR_INVALID_PATH;
+    if (!bnu__resolve_path(argc == 2 ? argv[1] : NULL, path)) return BRUCE_ERR_INVALID_PATH;
     size_t count = 0;
     bruce_result_t result = storage__list(path, NULL, 0, &count);
     if (result != BRUCE_OK) {
@@ -119,7 +119,7 @@ static void bnu__print_memory_row(const char *name, size_t total, size_t free_si
 
 int bnu_free_app_main(int argc, char **argv) {
     (void)argv;
-    if (argc != 0) return bnu__usage("free", "");
+    if (argc != 1) return bnu__usage("free", "");
     bruce_memory_stats_t stats;
     bruce_result_t result = memory__get_stats(&stats);
     if (result != BRUCE_OK) return result;
@@ -144,7 +144,7 @@ static const char *bnu__task_state_name(bruce_task_state_t state) {
 
 int bnu_top_app_main(int argc, char **argv) {
     (void)argv;
-    if (argc != 0) return bnu__usage("top", "");
+    if (argc != 1) return bnu__usage("top", "");
 
     bruce_task_snapshot_t tasks[16];
     size_t task_count = 0;
@@ -172,9 +172,9 @@ int bnu_top_app_main(int argc, char **argv) {
 }
 
 int bnu_mkdir_app_main(int argc, char **argv) {
-    if (argc != 1) return bnu__usage("mkdir", "<directory>");
+    if (argc != 2) return bnu__usage("mkdir", "<directory>");
     char path[BRUCE_STORAGE_PATH_MAX];
-    if (!bnu__resolve_path(argv[0], path)) return BRUCE_ERR_INVALID_PATH;
+    if (!bnu__resolve_path(argv[1], path)) return BRUCE_ERR_INVALID_PATH;
     bruce_result_t result = storage__mkdir(path);
     if (result != BRUCE_OK) {
         stdio__printf("mkdir: %s: error %d\n", path, result);
@@ -184,9 +184,9 @@ int bnu_mkdir_app_main(int argc, char **argv) {
 }
 
 int bnu_touch_app_main(int argc, char **argv) {
-    if (argc != 1) return bnu__usage("touch", "<file>");
+    if (argc != 2) return bnu__usage("touch", "<file>");
     char path[BRUCE_STORAGE_PATH_MAX];
-    if (!bnu__resolve_path(argv[0], path)) return BRUCE_ERR_INVALID_PATH;
+    if (!bnu__resolve_path(argv[1], path)) return BRUCE_ERR_INVALID_PATH;
     bruce_file_id_t file;
     bruce_result_t result = storage__open(path, BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE, &file);
     if (result != BRUCE_OK) {

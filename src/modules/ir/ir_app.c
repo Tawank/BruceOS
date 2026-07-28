@@ -642,7 +642,7 @@ static int ir_app__gui(void) {
 static int ir_app__rx(int argc, char **argv) {
     bool raw = false;
     uint32_t timeout_seconds = 10;
-    int index = 1;
+    int index = 2;
     if (argc > index && strcmp(argv[index], "raw") == 0) {
         raw = true;
         index++;
@@ -657,26 +657,26 @@ static int ir_app__rx(int argc, char **argv) {
 }
 
 static int ir_app__tx(int argc, char **argv) {
-    if (argc < 3) return BRUCE_ERR_INVALID_ARGUMENT;
-    if (argc == 4 && strlen(argv[2]) == 8 && strlen(argv[3]) == 8) {
-        return ir__transmit_parsed(argv[1], argv[2], argv[3], 0);
+    if (argc < 4) return BRUCE_ERR_INVALID_ARGUMENT;
+    if (argc == 5 && strlen(argv[3]) == 8 && strlen(argv[4]) == 8) {
+        return ir__transmit_parsed(argv[2], argv[3], argv[4], 0);
     }
     uint32_t bits = 32;
     uint32_t repeats = 0;
-    if ((argc > 3 && !ir_app__parse_u32(argv[3], 32, &bits)) || bits == 0 ||
-        (argc > 4 && !ir_app__parse_u32(argv[4], UINT8_MAX, &repeats)))
+    if ((argc > 4 && !ir_app__parse_u32(argv[4], 32, &bits)) || bits == 0 ||
+        (argc > 5 && !ir_app__parse_u32(argv[5], UINT8_MAX, &repeats)))
         return BRUCE_ERR_INVALID_ARGUMENT;
-    return ir__transmit(argv[2], argv[1], (uint8_t)bits, (uint8_t)repeats);
+    return ir__transmit(argv[3], argv[2], (uint8_t)bits, (uint8_t)repeats);
 }
 
 static int ir_app__tx_raw(int argc, char **argv) {
-    if (argc < 3) return BRUCE_ERR_INVALID_ARGUMENT;
+    if (argc < 4) return BRUCE_ERR_INVALID_ARGUMENT;
     uint32_t frequency = 0;
-    if (!ir_app__parse_u32(argv[1], 100000, &frequency)) return BRUCE_ERR_INVALID_ARGUMENT;
+    if (!ir_app__parse_u32(argv[2], 100000, &frequency)) return BRUCE_ERR_INVALID_ARGUMENT;
     uint32_t *timings = malloc(BRUCE_IR_MAX_RAW_TIMINGS * sizeof(*timings));
     if (timings == NULL) return BRUCE_ERR_NO_MEMORY;
     size_t count = 0;
-    for (int arg = 2; arg < argc; ++arg) {
+    for (int arg = 3; arg < argc; ++arg) {
         const char *cursor = argv[arg];
         while (*cursor != '\0') {
             while (*cursor == ' ' || *cursor == '\t' || *cursor == ',') cursor++;
@@ -698,9 +698,9 @@ static int ir_app__tx_raw(int argc, char **argv) {
 }
 
 static int ir_app__learn_cli(int argc, char **argv) {
-    if (argc < 3 || argv[1][0] != '/') return BRUCE_ERR_INVALID_ARGUMENT;
-    bool raw = argc > 3 && strcmp(argv[3], "raw") == 0;
-    int timeout_index = raw ? 4 : 3;
+    if (argc < 4 || argv[2][0] != '/') return BRUCE_ERR_INVALID_ARGUMENT;
+    bool raw = argc > 4 && strcmp(argv[4], "raw") == 0;
+    int timeout_index = raw ? 5 : 4;
     uint32_t timeout = 10;
     if (argc > timeout_index && !ir_app__parse_u32(argv[timeout_index], UINT32_MAX / 1000u, &timeout)) {
         return BRUCE_ERR_INVALID_ARGUMENT;
@@ -711,12 +711,12 @@ static int ir_app__learn_cli(int argc, char **argv) {
     bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
     if (result == BRUCE_OK) {
         result = storage__open(
-            argv[1], BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE | BRUCE_STORAGE_OPEN_TRUNCATE, &file
+            argv[2], BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE | BRUCE_STORAGE_OPEN_TRUNCATE, &file
         );
     }
     static const char header[] = "Filetype: Bruce IR File\nVersion: 1\n#\n";
     if (result == BRUCE_OK) result = ir_app__write_all(file, header, sizeof(header) - 1u);
-    if (result == BRUCE_OK) result = ir_app__write_capture(file, capture, argv[2]);
+    if (result == BRUCE_OK) result = ir_app__write_capture(file, capture, argv[3]);
     if (file != BRUCE_FILE_ID_INVALID) (void)storage__close(file);
     free(capture);
     return result;
@@ -724,36 +724,36 @@ static int ir_app__learn_cli(int argc, char **argv) {
 
 int ir_app_main(int argc, char **argv) {
     if (app_runner__args_have_gui(argc, argv)) return ir_app__gui();
-    if (argc == 0 || argv == NULL || argv[0] == NULL || strcmp(argv[0], "help") == 0) {
+    if (argc <= 1 || argv == NULL || argv[1] == NULL || strcmp(argv[1], "help") == 0) {
         ir_app__usage();
         return 0;
     }
     bruce_result_t result = BRUCE_ERR_INVALID_ARGUMENT;
-    if (strcmp(argv[0], "rx") == 0) return ir_app__rx(argc, argv);
-    if (strcmp(argv[0], "learn") == 0) result = ir_app__learn_cli(argc, argv);
-    else if (strcmp(argv[0], "tx") == 0) result = ir_app__tx(argc, argv);
-    else if (strcmp(argv[0], "tx_raw") == 0) result = ir_app__tx_raw(argc, argv);
-    else if (strcmp(argv[0], "tx_from_file") == 0) {
-        if (argc < 2) return BRUCE_ERR_INVALID_ARGUMENT;
+    if (strcmp(argv[1], "rx") == 0) return ir_app__rx(argc, argv);
+    if (strcmp(argv[1], "learn") == 0) result = ir_app__learn_cli(argc, argv);
+    else if (strcmp(argv[1], "tx") == 0) result = ir_app__tx(argc, argv);
+    else if (strcmp(argv[1], "tx_raw") == 0) result = ir_app__tx_raw(argc, argv);
+    else if (strcmp(argv[1], "tx_from_file") == 0) {
+        if (argc < 3) return BRUCE_ERR_INVALID_ARGUMENT;
         uint32_t repeats = 0;
-        if (argc > 2 && !ir_app__parse_u32(argv[2], UINT8_MAX, &repeats)) return BRUCE_ERR_INVALID_ARGUMENT;
-        result = ir__transmit_file(argv[1], (uint8_t)repeats);
-    } else if (strcmp(argv[0], "tvbgone") == 0) {
-        if (argc != 2 || (strcasecmp(argv[1], "na") != 0 && strcasecmp(argv[1], "eu") != 0)) {
+        if (argc > 3 && !ir_app__parse_u32(argv[3], UINT8_MAX, &repeats)) return BRUCE_ERR_INVALID_ARGUMENT;
+        result = ir__transmit_file(argv[2], (uint8_t)repeats);
+    } else if (strcmp(argv[1], "tvbgone") == 0) {
+        if (argc != 3 || (strcasecmp(argv[2], "na") != 0 && strcasecmp(argv[2], "eu") != 0)) {
             return BRUCE_ERR_INVALID_ARGUMENT;
         }
-        result = ir_app__tvbgone(strcasecmp(argv[1], "eu") == 0, false);
-    } else if (strcmp(argv[0], "jam") == 0) {
+        result = ir_app__tvbgone(strcasecmp(argv[2], "eu") == 0, false);
+    } else if (strcmp(argv[1], "jam") == 0) {
         uint32_t frequency = 0;
         uint32_t seconds = 0;
         unsigned int mode = 0;
-        if (argc < 3 || !ir_app__parse_u32(argv[1], 100000, &frequency) || frequency < 20000 ||
-            !ir_app__parse_u32(argv[2], UINT32_MAX / 1000u, &seconds) || seconds == 0) {
+        if (argc < 4 || !ir_app__parse_u32(argv[2], 100000, &frequency) || frequency < 20000 ||
+            !ir_app__parse_u32(argv[3], UINT32_MAX / 1000u, &seconds) || seconds == 0) {
             return BRUCE_ERR_INVALID_ARGUMENT;
         }
         static const char *const modes[] = {"basic", "enhanced", "sweep", "random", "empty"};
-        if (argc > 3) {
-            for (mode = 0; mode < 5 && strcasecmp(argv[3], modes[mode]) != 0; ++mode) {}
+        if (argc > 4) {
+            for (mode = 0; mode < 5 && strcasecmp(argv[4], modes[mode]) != 0; ++mode) {}
             if (mode == 5) return BRUCE_ERR_INVALID_ARGUMENT;
         }
         result = ir_app__jammer(frequency, seconds * 1000u, mode, false);

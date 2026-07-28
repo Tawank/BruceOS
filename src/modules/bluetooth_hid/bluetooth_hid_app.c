@@ -161,19 +161,19 @@ int bluetooth_hid_app_main(int argc, char **argv) {
         stdio__printf("Classic Bluetooth HID is unsupported on this target.\n");
         return BRUCE_ERR_UNSUPPORTED;
     }
-    if (argc == 0 || argv == NULL || argv[0] == NULL || strcmp(argv[0], "scan") == 0) {
+    if (argc <= 1 || argv == NULL || argv[1] == NULL || strcmp(argv[1], "scan") == 0) {
         return bluetooth_hid_app__scan_terminal();
     }
-    if (strcmp(argv[0], "connect") == 0) {
+    if (strcmp(argv[1], "connect") == 0) {
         uint8_t address[BRUCE_BLUETOOTH_ADDRESS_LEN];
-        if (argc < 2 || !bluetooth_hid_app__parse_address(argv[1], address)) {
+        if (argc < 3 || !bluetooth_hid_app__parse_address(argv[2], address)) {
             stdio__printf("Usage: bluetooth_hid_app connect XX:XX:XX:XX:XX:XX\n");
             return BRUCE_ERR_INVALID_ARGUMENT;
         }
         return bluetooth_hid_app__connect(address, false);
     }
-    if (strcmp(argv[0], "disconnect") == 0) return bluetooth_hid__disconnect();
-    if (strcmp(argv[0], "status") == 0) {
+    if (strcmp(argv[1], "disconnect") == 0) return bluetooth_hid__disconnect();
+    if (strcmp(argv[1], "status") == 0) {
         stdio__printf(
             "Classic Bluetooth HID: %s\n", bluetooth_hid__is_connected() ? "connected" : "disconnected"
         );

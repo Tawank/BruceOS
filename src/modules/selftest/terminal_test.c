@@ -54,13 +54,14 @@ bool selftest__run_terminal_named_case(void) {
         return false;
     }
 
-    if (s_echo.argc != 2 || strcmp(s_echo.argv_buf[0], "hello") != 0 ||
-        strcmp(s_echo.argv_buf[1], "world now") != 0) {
+    if (s_echo.argc != 3 || strcmp(s_echo.argv_buf[0], "terminal_test_echo") != 0 ||
+        strcmp(s_echo.argv_buf[1], "hello") != 0 || strcmp(s_echo.argv_buf[2], "world now") != 0) {
         printf(
-            "[selftest] terminal/named: argc=%d argv=[%s|%s]\n",
+            "[selftest] terminal/named: argc=%d argv=[%s|%s|%s]\n",
             s_echo.argc,
             s_echo.argv_buf[0],
-            s_echo.argv_buf[1]
+            s_echo.argv_buf[1],
+            s_echo.argv_buf[2]
         );
         return false;
     }

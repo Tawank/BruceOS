@@ -12,7 +12,7 @@
 #include "core_sdk/storage.h"
 
 int image_viewer_app_main(int argc, char **argv) {
-    if (argc < 1 || argv[0] == NULL || !image__is_supported_path(argv[0])) {
+    if (argc < 2 || argv == NULL || argv[1] == NULL || !image__is_supported_path(argv[1])) {
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
 
@@ -23,7 +23,7 @@ int image_viewer_app_main(int argc, char **argv) {
     };
     bruce_result_t result = display__begin_frame();
     if (result == BRUCE_OK) result = display__fill_screen(options.background);
-    if (result == BRUCE_OK) result = image__draw_path(argv[0], &options, NULL);
+    if (result == BRUCE_OK) result = image__draw_path(argv[1], &options, NULL);
     if (result == BRUCE_OK) {
         result = display__present();
     } else {
@@ -74,9 +74,9 @@ int image_loader__run_path(const char *path, const char *arg, bool in_background
 }
 
 int image_app_main(int argc, char **argv) {
-    if (argc < 1 || argv[0] == NULL || argv[0][0] == '-') {
+    if (argc < 2 || argv == NULL || argv[1] == NULL || argv[1][0] == '-') {
         stdio__printf("usage: image /path/file.jpg|png|gif\n");
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
-    return image_loader__run_path(argv[0], NULL, false);
+    return image_loader__run_path(argv[1], NULL, false);
 }

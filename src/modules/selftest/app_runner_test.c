@@ -46,16 +46,17 @@ bool selftest__run_apprunner_registration_case(void) {
 
 typedef struct {
     volatile int argc;
-    char argv_buf[4][32];
+    char argv_buf[5][32];
+    volatile bool argv_terminated;
     volatile bool gui_requested;
     volatile bruce_task_state_t state;
 } selftest__apprunner_echo_t;
 
 static selftest__apprunner_echo_t s_echo;
 
-/* Records its own argc/argv (shell-parsed by AppRunner) and the task state
- * / gui_requested flag AppRunner recorded for it, so the harness can inspect
- * them after the task exits (its own task record is gone by then). */
+/* Records its own conventional argc/argv (argv[0] plus shell-parsed arguments)
+ * and the task state / gui_requested flag AppRunner recorded for it, so the
+ * harness can inspect them after the task exits (its task record is gone by then). */
 static int selftest__apprunner_echo_entry(int argc, char **argv) {
     bruce_task_snapshot_t snapshot;
     if (task__snapshot(task__current_id(), &snapshot) == BRUCE_OK) {
@@ -63,7 +64,8 @@ static int selftest__apprunner_echo_entry(int argc, char **argv) {
         s_echo.gui_requested = snapshot.gui_requested;
     }
     s_echo.argc = argc;
-    for (int i = 0; i < argc && i < 4; ++i) {
+    s_echo.argv_terminated = argv != NULL && argv[argc] == NULL;
+    for (int i = 0; i < argc && i < 5; ++i) {
         strncpy(s_echo.argv_buf[i], argv[i], sizeof(s_echo.argv_buf[i]) - 1);
         s_echo.argv_buf[i][sizeof(s_echo.argv_buf[i]) - 1] = '\0';
     }
@@ -90,21 +92,23 @@ bool selftest__run_apprunner_args_case(void) {
         );
         return false;
     }
-    bool background_ok = s_echo.argc == 4 && strcmp(s_echo.argv_buf[0], "--gui") == 0 &&
-                         strcmp(s_echo.argv_buf[1], "foo") == 0 &&
-                         strcmp(s_echo.argv_buf[2], "bar baz") == 0 &&
-                         strcmp(s_echo.argv_buf[3], "escaped space") == 0 && s_echo.gui_requested &&
-                         s_echo.state == BRUCE_TASK_BACKGROUND;
+    bool background_ok = s_echo.argc == 5 && strcmp(s_echo.argv_buf[0], "selftest_echo") == 0 &&
+                          strcmp(s_echo.argv_buf[1], "--gui") == 0 &&
+                          strcmp(s_echo.argv_buf[2], "foo") == 0 &&
+                          strcmp(s_echo.argv_buf[3], "bar baz") == 0 &&
+                          strcmp(s_echo.argv_buf[4], "escaped space") == 0 && s_echo.argv_terminated &&
+                          s_echo.gui_requested && s_echo.state == BRUCE_TASK_BACKGROUND;
     if (!background_ok) {
         printf(
-            "[selftest] apprunner/args: background argc=%d gui=%d state=%d argv=[%s|%s|%s|%s]\n",
+            "[selftest] apprunner/args: background argc=%d gui=%d state=%d argv=[%s|%s|%s|%s|%s]\n",
             s_echo.argc,
             s_echo.gui_requested,
             s_echo.state,
             s_echo.argv_buf[0],
             s_echo.argv_buf[1],
             s_echo.argv_buf[2],
-            s_echo.argv_buf[3]
+            s_echo.argv_buf[3],
+            s_echo.argv_buf[4]
         );
         return false;
     }
@@ -122,7 +126,9 @@ bool selftest__run_apprunner_args_case(void) {
         );
         return false;
     }
-    if (s_echo.argc != 2 || s_echo.gui_requested || s_echo.state != BRUCE_TASK_FOREGROUND) {
+    if (s_echo.argc != 3 || strcmp(s_echo.argv_buf[0], "selftest_echo") != 0 ||
+        strcmp(s_echo.argv_buf[1], "one") != 0 || strcmp(s_echo.argv_buf[2], "two") != 0 ||
+        !s_echo.argv_terminated || s_echo.gui_requested || s_echo.state != BRUCE_TASK_FOREGROUND) {
         printf(
             "[selftest] apprunner/args: foreground argc=%d gui=%d state=%d\n",
             s_echo.argc,

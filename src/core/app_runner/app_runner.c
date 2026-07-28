@@ -377,6 +377,23 @@ int app_runner__run(const char *app_name, const char *arg, bool in_background) {
     fflush(stdout);
     int result;
     if (entry != NULL) {
+        char *command_name = malloc(strlen(app_name) + 1u);
+        if (command_name == NULL) {
+            app_runner__free_args(argv, argc);
+            return BRUCE_ERR_NO_MEMORY;
+        }
+        strcpy(command_name, app_name);
+        char **full_argv = realloc(argv, ((size_t)argc + 1u) * sizeof(*full_argv));
+        if (full_argv == NULL) {
+            free(command_name);
+            app_runner__free_args(argv, argc);
+            return BRUCE_ERR_NO_MEMORY;
+        }
+        argv = full_argv;
+        memmove(argv + 1, argv, (size_t)argc * sizeof(*argv));
+        argv[0] = command_name;
+        argc++;
+
         task_create_params_t params = {
             .name = app_name,
             .entry = entry,

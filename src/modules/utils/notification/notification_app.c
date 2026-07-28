@@ -16,27 +16,27 @@ static int notification_app__usage(void) {
 }
 
 int notification_app_main(int argc, char **argv) {
-    if (argc < 1) return notification_app__usage();
-    if (strcmp(argv[0], "push") == 0) {
-        if (argc < 3) return notification_app__usage();
+    if (argc < 2 || argv == NULL || argv[1] == NULL) return notification_app__usage();
+    if (strcmp(argv[1], "push") == 0) {
+        if (argc < 4) return notification_app__usage();
         char *end = NULL;
-        unsigned long duration = strtoul(argv[1], &end, 10);
-        if (end == argv[1] || *end != '\0' || duration > UINT32_MAX) return notification_app__usage();
+        unsigned long duration = strtoul(argv[2], &end, 10);
+        if (end == argv[2] || *end != '\0' || duration > UINT32_MAX) return notification_app__usage();
         size_t length = 0;
-        for (int i = 2; i < argc; ++i) length += strlen(argv[i]) + (i > 2 ? 1u : 0u);
+        for (int i = 3; i < argc; ++i) length += strlen(argv[i]) + (i > 3 ? 1u : 0u);
         if (length >= BRUCE_NOTIFICATION_TEXT_MAX) return BRUCE_ERR_INVALID_ARGUMENT;
         char text[BRUCE_NOTIFICATION_TEXT_MAX] = {0};
-        for (int i = 2; i < argc; ++i) {
-            if (i > 2) strcat(text, " ");
+        for (int i = 3; i < argc; ++i) {
+            if (i > 3) strcat(text, " ");
             strcat(text, argv[i]);
         }
         return notification__push(text, (uint32_t)duration);
     }
-    if (strcmp(argv[0], "dismiss") == 0) { return notification__dismiss(); }
-    if (strcmp(argv[0], "icon-remove") == 0) {
-        return argc == 2 ? status_icon__remove(argv[1]) : notification_app__usage();
+    if (strcmp(argv[1], "dismiss") == 0) { return notification__dismiss(); }
+    if (strcmp(argv[1], "icon-remove") == 0) {
+        return argc == 3 ? status_icon__remove(argv[2]) : notification_app__usage();
     }
-    if (strcmp(argv[0], "icon-list") == 0) {
+    if (strcmp(argv[1], "icon-list") == 0) {
         bruce_status_icon_t icons[BRUCE_STATUS_ICON_MAX];
         size_t count = 0;
         uint32_t revision = 0;

@@ -229,7 +229,7 @@ static void task__free_argv(int argc, char **argv) {
 static bool task__dup_argv(int argc, char *const *src_argv, char ***out_argv) {
     *out_argv = NULL;
     if (argc <= 0) { return true; }
-    char **copy = calloc((size_t)argc, sizeof(char *));
+    char **copy = calloc((size_t)argc + 1u, sizeof(char *));
     if (copy == NULL) { return false; }
     for (int i = 0; i < argc; ++i) {
         const char *source = (src_argv != NULL && src_argv[i] != NULL) ? src_argv[i] : "";

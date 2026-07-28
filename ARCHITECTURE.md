@@ -115,7 +115,10 @@ int app_runner__run(const char *app_name, const char *arg, bool in_background);
 
 It returns a positive Core task ID on success and a negative `BRUCE_ERR_*`
 error code on failure.  `arg` is a shell-style argument string (quotes and
-backslash escaping); empty or `NULL` creates `argc == 0`.
+backslash escaping). Registered built-ins receive conventional C arguments:
+`argv[0]` is the registered command name, `argv[argc]` is `NULL`, and empty or
+`NULL` creates `argc == 1`. Loader-resolved ELF and JavaScript applications
+retain their loader-defined argument conventions.
 
 Resolution is deterministic and never scans directories:
 

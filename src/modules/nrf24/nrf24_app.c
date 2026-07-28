@@ -126,29 +126,29 @@ static void nrf24_app__usage(void) {
 
 int nrf24_app_main(int argc, char **argv) {
     if (app_runner__args_have_gui(argc, argv)) return nrf24_app__gui();
-    if (argc == 0 || argv == NULL || argv[0] == NULL || strcmp(argv[0], "status") == 0) {
+    if (argc <= 1 || argv == NULL || argv[1] == NULL || strcmp(argv[1], "status") == 0) {
         return nrf24_app__status(false);
     }
-    if (strcmp(argv[0], "channel") == 0) {
+    if (strcmp(argv[1], "channel") == 0) {
         uint8_t channel = 0;
-        if (argc != 2 || !nrf24_app__parse_channel(argv[1], &channel)) return BRUCE_ERR_INVALID_ARGUMENT;
+        if (argc != 3 || !nrf24_app__parse_channel(argv[2], &channel)) return BRUCE_ERR_INVALID_ARGUMENT;
         bruce_result_t result = nrf24__set_channel(channel);
         if (result == BRUCE_OK) stdio__printf("NRF24 channel set to %u\n", channel);
         else stdio__printf("NRF24 channel failed: %d\n", result);
         return result;
     }
-    if (strcmp(argv[0], "scan") == 0) {
+    if (strcmp(argv[1], "scan") == 0) {
         uint8_t first = 0;
         uint8_t last = NRF24_APP_SPECTRUM_CHANNELS - 1u;
         uint8_t samples = NRF24_APP_SPECTRUM_SAMPLES;
-        if ((argc > 1 && !nrf24_app__parse_channel(argv[1], &first)) ||
-            (argc > 2 && !nrf24_app__parse_channel(argv[2], &last)) || last < first) {
+        if ((argc > 2 && !nrf24_app__parse_channel(argv[2], &first)) ||
+            (argc > 3 && !nrf24_app__parse_channel(argv[3], &last)) || last < first) {
             return BRUCE_ERR_INVALID_ARGUMENT;
         }
-        if (argc > 3) {
+        if (argc > 4) {
             char *end = NULL;
-            unsigned long value = strtoul(argv[3], &end, 10);
-            if (end == argv[3] || *end != '\0' || value == 0 || value > UINT8_MAX) {
+            unsigned long value = strtoul(argv[4], &end, 10);
+            if (end == argv[4] || *end != '\0' || value == 0 || value > UINT8_MAX) {
                 return BRUCE_ERR_INVALID_ARGUMENT;
             }
             samples = (uint8_t)value;
@@ -156,5 +156,5 @@ int nrf24_app_main(int argc, char **argv) {
         return nrf24_app__scan(first, last, samples, false);
     }
     nrf24_app__usage();
-    return strcmp(argv[0], "help") == 0 ? BRUCE_OK : BRUCE_ERR_INVALID_ARGUMENT;
+    return strcmp(argv[1], "help") == 0 ? BRUCE_OK : BRUCE_ERR_INVALID_ARGUMENT;
 }

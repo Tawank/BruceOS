@@ -164,18 +164,18 @@ static int tcp_app__listener(uint16_t port) {
 }
 
 int tcp_app_main(int argc, char **argv) {
-    if (argc == 0 || argv == NULL || argv[0] == NULL || strcmp(argv[0], "help") == 0) {
+    if (argc <= 1 || argv == NULL || argv[1] == NULL || strcmp(argv[1], "help") == 0) {
         tcp_app__usage();
         return 0;
     }
 
     uint16_t port = 0;
-    if ((strcmp(argv[0], "client") == 0 || strcmp(argv[0], "connect") == 0) && argc == 3 &&
-        tcp_app__parse_port(argv[2], &port)) {
-        return tcp_app__client(argv[1], port);
+    if ((strcmp(argv[1], "client") == 0 || strcmp(argv[1], "connect") == 0) && argc == 4 &&
+        tcp_app__parse_port(argv[3], &port)) {
+        return tcp_app__client(argv[2], port);
     }
-    if ((strcmp(argv[0], "listener") == 0 || strcmp(argv[0], "listen") == 0) && argc == 2 &&
-        tcp_app__parse_port(argv[1], &port)) {
+    if ((strcmp(argv[1], "listener") == 0 || strcmp(argv[1], "listen") == 0) && argc == 3 &&
+        tcp_app__parse_port(argv[2], &port)) {
         return tcp_app__listener(port);
     }
 

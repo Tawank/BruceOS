@@ -99,7 +99,7 @@ int bluetooth_app_main(int argc, char **argv) {
         }
         return 0;
     }
-    if (argc == 0 || argv == NULL || argv[0] == NULL || strcmp(argv[0], "scan") == 0) {
+    if (argc <= 1 || argv == NULL || argv[1] == NULL || strcmp(argv[1], "scan") == 0) {
         return bluetooth_app__scan_terminal();
     }
     stdio__printf("Usage: bluetooth scan\n");
