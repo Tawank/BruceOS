@@ -3,6 +3,7 @@
 #include "core/display/display.h"
 #include "core/input/input.h"
 #include "core/stdio/stdio.h"
+#include "core_sdk/display.h"
 #include "core_sdk/permission.h"
 #include "core_sdk/task.h"
 
@@ -291,6 +292,17 @@ static void task__trampoline(void *arg) {
         task__foreground_push_locked(record->id);
     }
     task__unlock();
+
+    /* Do not let a newly launched fullscreen GUI inherit the previous
+     * foreground task's completed panel frame. Clear and present once before
+     * application code starts; normal app redraw throttling can then remain
+     * event-driven. */
+    if (record->gui_requested && !record->start_in_background) {
+        if (display__begin_frame() == BRUCE_OK) {
+            (void)display__fill_screen(BRUCE_COLOR_BLACK);
+            (void)display__present();
+        }
+    }
 
     stdio__task_attach(record->stdio_session, &stdio_input, &stdio_output, &stdio_error);
 

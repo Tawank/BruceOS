@@ -203,6 +203,7 @@ typedef struct {
     bool built_in;
     bool tiled;
     bool hidden;
+    bool clear_on_next_frame;
     bool frame_active;
     bool frame_noop;
     bool transfer_pending;
@@ -2220,6 +2221,11 @@ bruce_result_t display__begin_frame(void) {
                 return BRUCE_ERR_BUSY;
             }
         }
+        if (context->clear_on_next_frame) {
+            s_draw_context = context;
+            display__fill_rect_native(0, 0, context->viewport.width, context->viewport.height, BRUCE_COLOR_BLACK);
+            context->clear_on_next_frame = false;
+        }
     }
     display__unlock();
     return BRUCE_OK;
@@ -2378,6 +2384,9 @@ void display__task_state_changed(bruce_task_id_t task_id, bruce_task_state_t sta
     display__lock();
     display__task_context_t *context = display__find_context_locked(task_id);
     if (context != NULL) {
+        if (context->gui_requested && state == BRUCE_TASK_FOREGROUND && context->state != BRUCE_TASK_FOREGROUND) {
+            context->clear_on_next_frame = true;
+        }
         context->state = state;
         if (state != BRUCE_TASK_FOREGROUND && context->frame_active && !context->tiled) {
             context->frame_noop = true;

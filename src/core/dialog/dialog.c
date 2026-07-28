@@ -314,57 +314,61 @@ static bruce_result_t dialog__gui_choice(
     int usable_h = viewport_h - title_h - message_h - footer_h;
     if (usable_h < row_h) { return BRUCE_ERR_INVALID_ARGUMENT; }
     int items_per_page = usable_h / row_h;
+    bool redraw = true;
 
     for (;;) {
-        bruce_result_t frame_result = display__begin_frame();
-        if (frame_result == BRUCE_ERR_NOT_FOREGROUND) { return BRUCE_ERR_CANCELLED; }
-        if (frame_result != BRUCE_OK) { return frame_result; }
-        if (selected < first_visible) {
-            first_visible = selected;
-        } else if (selected >= first_visible + items_per_page) {
-            first_visible = selected - items_per_page + 1;
-        }
-
-        display__fill_rect(left, top, viewport_w, viewport_h, background_color);
-        if (title_h > 0) {
-            if (render_borders) { display__fill_rect(left, top, viewport_w, title_h, pri); }
-            display__set_text_color(text_color);
-            display__set_text_size(DIALOG__TEXT_SIZE);
-            display__set_text_bg_color(render_borders ? pri : background_color);
-            display__set_cursor(left + DIALOG__MARGIN, top + DIALOG__MARGIN);
-            display__print(title != NULL ? title : "");
-        }
-
-        if (message_h > 0) {
-            display__set_text_color(text_color);
-            display__set_text_size(DIALOG__TEXT_SIZE);
-            display__set_text_bg_color(background_color);
-            display__set_cursor(left + DIALOG__MARGIN, top + title_h + 1);
-            display__print(message);
-        }
-
-        int list_y = top + title_h + message_h;
-        int last_visible = first_visible + items_per_page - 1;
-        if ((size_t)last_visible >= choice_count) { last_visible = (int)choice_count - 1; }
-
-        for (int i = first_visible; i <= last_visible; ++i) {
-            int y = list_y + (i - first_visible) * row_h;
-            if (i == selected) {
-                display__fill_rect(left, y, viewport_w, row_h, text_color);
-                display__set_text_color(background_color);
-            } else {
-                display__set_text_color(text_color);
+        if (redraw) {
+            bruce_result_t frame_result = display__begin_frame();
+            if (frame_result == BRUCE_ERR_NOT_FOREGROUND) { return BRUCE_ERR_CANCELLED; }
+            if (frame_result != BRUCE_OK) { return frame_result; }
+            if (selected < first_visible) {
+                first_visible = selected;
+            } else if (selected >= first_visible + items_per_page) {
+                first_visible = selected - items_per_page + 1;
             }
-            display__set_text_size(text_size);
-            display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
-            display__set_cursor(left + DIALOG__MARGIN, y + 1);
-            display__print(choices[i].label != NULL ? choices[i].label : "");
-        }
 
-        if (render_borders) { display__fill_rect(left, bottom - footer_h, viewport_w, footer_h, sec); }
-        frame_result = display__present();
-        if (frame_result != BRUCE_OK) {
-            return frame_result == BRUCE_ERR_NOT_FOREGROUND ? BRUCE_ERR_CANCELLED : frame_result;
+            display__fill_rect(left, top, viewport_w, viewport_h, background_color);
+            if (title_h > 0) {
+                if (render_borders) { display__fill_rect(left, top, viewport_w, title_h, pri); }
+                display__set_text_color(text_color);
+                display__set_text_size(DIALOG__TEXT_SIZE);
+                display__set_text_bg_color(render_borders ? pri : background_color);
+                display__set_cursor(left + DIALOG__MARGIN, top + DIALOG__MARGIN);
+                display__print(title != NULL ? title : "");
+            }
+
+            if (message_h > 0) {
+                display__set_text_color(text_color);
+                display__set_text_size(DIALOG__TEXT_SIZE);
+                display__set_text_bg_color(background_color);
+                display__set_cursor(left + DIALOG__MARGIN, top + title_h + 1);
+                display__print(message);
+            }
+
+            int list_y = top + title_h + message_h;
+            int last_visible = first_visible + items_per_page - 1;
+            if ((size_t)last_visible >= choice_count) { last_visible = (int)choice_count - 1; }
+
+            for (int i = first_visible; i <= last_visible; ++i) {
+                int y = list_y + (i - first_visible) * row_h;
+                if (i == selected) {
+                    display__fill_rect(left, y, viewport_w, row_h, text_color);
+                    display__set_text_color(background_color);
+                } else {
+                    display__set_text_color(text_color);
+                }
+                display__set_text_size(text_size);
+                display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
+                display__set_cursor(left + DIALOG__MARGIN, y + 1);
+                display__print(choices[i].label != NULL ? choices[i].label : "");
+            }
+
+            if (render_borders) { display__fill_rect(left, bottom - footer_h, viewport_w, footer_h, sec); }
+            frame_result = display__present();
+            if (frame_result != BRUCE_OK) {
+                return frame_result == BRUCE_ERR_NOT_FOREGROUND ? BRUCE_ERR_CANCELLED : frame_result;
+            }
+            redraw = false;
         }
 
         bruce_input_event_t ev;
@@ -372,6 +376,7 @@ static bruce_result_t dialog__gui_choice(
         if (input_result == BRUCE_ERR_NOT_FOREGROUND) { return BRUCE_ERR_CANCELLED; }
         if (input_result != BRUCE_OK || ev.action != BRUCE_INPUT_PRESS) { continue; }
 
+        int previous_selected = selected;
         switch (ev.code) {
             case BRUCE_INPUT_CODE_UP:
                 if (selected > 0) { selected--; }
@@ -399,6 +404,7 @@ static bruce_result_t dialog__gui_choice(
             case BRUCE_INPUT_CODE_BUTTON_B: return BRUCE_ERR_CANCELLED;
             default: break;
         }
+        redraw = selected != previous_selected;
     }
 }
 
