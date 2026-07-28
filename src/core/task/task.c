@@ -779,8 +779,7 @@ static bruce_result_t task__wait_ms(uint32_t ms, bool interruptible) {
     bool was_background = self->state == BRUCE_TASK_BACKGROUND;
     task__unlock();
 
-    TickType_t total_ticks = pdMS_TO_TICKS(ms);
-    TickType_t start = xTaskGetTickCount();
+    int64_t deadline_us = esp_timer_get_time() + (int64_t)ms * 1000;
     for (;;) {
         task__lock();
         bool stopped = s_tasks[slot].stop_requested;
@@ -795,11 +794,14 @@ static bruce_result_t task__wait_ms(uint32_t ms, bool interruptible) {
         }
         if (interruptible && was_background && now_foreground) { return BRUCE_ERR_CANCELLED; }
 
-        TickType_t elapsed = xTaskGetTickCount() - start;
-        if (elapsed >= total_ticks) { return BRUCE_OK; }
-        EventBits_t bits =
-            xEventGroupWaitBits(s_task_events[slot], TASK__EVT_WAKE, pdTRUE, pdFALSE, total_ticks - elapsed);
-        if (bits == 0) { return BRUCE_OK; }
+        int64_t remaining_us = deadline_us - esp_timer_get_time();
+        if (remaining_us <= 0) { return BRUCE_OK; }
+        uint64_t remaining_ms = ((uint64_t)remaining_us + 999u) / 1000u;
+        TickType_t wait_ticks = pdMS_TO_TICKS(remaining_ms);
+        if (wait_ticks == 0) wait_ticks = 1;
+        (void)xEventGroupWaitBits(
+            s_task_events[slot], TASK__EVT_WAKE, pdTRUE, pdFALSE, wait_ticks
+        );
         /* Woken early; loop to re-check stop/pause/foreground state. */
     }
 }

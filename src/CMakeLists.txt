@@ -1,3 +1,28 @@
+set(BRUCE_SELFTEST_SOURCES
+    "modules/selftest/app_runner_test.c"
+    "modules/selftest/bluetooth_test.c"
+    "modules/selftest/bnu_test.c"
+    "modules/selftest/config_test.c"
+    "modules/selftest/device_test.c"
+    "modules/selftest/dialog_test.c"
+    "modules/selftest/display_test.c"
+    "modules/selftest/fake_elf.c"
+    "modules/selftest/gpio_bus_test.c"
+    "modules/selftest/icon_test.c"
+    "modules/selftest/image_test.c"
+    "modules/selftest/input_test.c"
+    "modules/selftest/ir_test.c"
+    "modules/selftest/launcher_test.c"
+    "modules/selftest/loader_test.c"
+    "modules/selftest/notification_test.c"
+    "modules/selftest/nrf24_test.c"
+    "modules/selftest/permission_test.c"
+    "modules/selftest/selftest.c"
+    "modules/selftest/storage_test.c"
+    "modules/selftest/task_test.c"
+    "modules/selftest/terminal_test.c"
+    "modules/selftest/wifi_test.c")
+
 idf_component_register(SRCS
                     "main.c"
                     "core/app_runner/app_runner.c"
@@ -16,6 +41,7 @@ idf_component_register(SRCS
                     "core/ir/ir.c"
                     "core/manifest/manifest.c"
                     "core/memory/memory.c"
+                    "core/network/network.c"
                     "core/notification/notification.c"
                     "core/nrf24/nrf24.c"
                     "core/permission/permission.c"
@@ -48,28 +74,7 @@ idf_component_register(SRCS
                     "modules/loaders/js/runtime_js.c"
                     "modules/loaders/js/serial_js.c"
                     "modules/loaders/js/wifi_js.c"
-                    "modules/selftest/app_runner_test.c"
-                    "modules/selftest/bluetooth_test.c"
-                    "modules/selftest/bnu_test.c"
-                    "modules/selftest/config_test.c"
-                    "modules/selftest/dialog_test.c"
-                    "modules/selftest/device_test.c"
-                    "modules/selftest/display_test.c"
-                    "modules/selftest/gpio_bus_test.c"
-                    "modules/selftest/icon_test.c"
-                    "modules/selftest/fake_elf.c"
-                    "modules/selftest/input_test.c"
-                    "modules/selftest/image_test.c"
-                    "modules/selftest/ir_test.c"
-                    "modules/selftest/launcher_test.c"
-                    "modules/selftest/loader_test.c"
-                    "modules/selftest/permission_test.c"
-                    "modules/selftest/notification_test.c"
-                    "modules/selftest/selftest.c"
-                    "modules/selftest/storage_test.c"
-                    "modules/selftest/task_test.c"
-                    "modules/selftest/terminal_test.c"
-                    "modules/selftest/wifi_test.c"
+                    ${BRUCE_SELFTEST_SOURCES}
                     "modules/tcp/tcp_app.c"
                      "modules/utils/launcher/launcher_app.c"
                      "modules/utils/serial_commands/serial_commands_app.c"
@@ -77,7 +82,6 @@ idf_component_register(SRCS
                     "modules/utils/notification/notification_app.c"
                     "modules/ir/ir_app.c"
                     "modules/nrf24/nrf24_app.c"
-                    "modules/selftest/nrf24_test.c"
                     "modules/wifi/wifi_app.c"
                     "modules/webui/webui_app.c"
                     REQUIRES
@@ -112,6 +116,10 @@ idf_component_register(SRCS
                     "."
                     PRIV_INCLUDE_DIRS
                     ".")
+
+set_source_files_properties(${BRUCE_SELFTEST_SOURCES} PROPERTIES
+                            COMPILE_OPTIONS
+                            "-include;${CMAKE_CURRENT_LIST_DIR}/modules/selftest/selftest_output.h")
 
 # These compile the real built-in module sources against the exported
 # core_sdk/ include namespace.  Built-in source must include only

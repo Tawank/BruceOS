@@ -1,5 +1,7 @@
 #include "core_sdk/http.h"
 
+#include "core/network/network.h"
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -101,8 +103,12 @@ bruce_result_t http__request(const bruce_http_request_t *request, bruce_http_res
     if (result != BRUCE_OK) return result;
 
     memset(response, 0, sizeof(*response));
+    result = network__init();
+    if (result != BRUCE_OK) return result;
 
-    http__headers_t headers = {0};
+    http__headers_t *headers = memory__malloc(sizeof(*headers));
+    if (headers == NULL) return BRUCE_ERR_NO_MEMORY;
+    memset(headers, 0, sizeof(*headers));
 
     esp_http_client_config_t config = {
         .url = request->url,
@@ -111,12 +117,13 @@ bruce_result_t http__request(const bruce_http_request_t *request, bruce_http_res
         .cert_pem = NULL,
         .skip_cert_common_name_check = true,
         .event_handler = http__event_handler,
-        .user_data = &headers,
+        .user_data = headers,
     };
 
     esp_http_client_handle_t client = esp_http_client_init(&config);
     if (client == NULL) {
         ESP_LOGE(TAG, "failed to initialize HTTP client for %s", request->url);
+        memory__free(headers);
         return BRUCE_ERR_IO;
     }
 
@@ -134,6 +141,7 @@ bruce_result_t http__request(const bruce_http_request_t *request, bruce_http_res
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "HTTP request failed for %s: %s", request->url, esp_err_to_name(err));
         esp_http_client_cleanup(client);
+        memory__free(headers);
         return BRUCE_ERR_IO;
     }
 
@@ -150,6 +158,7 @@ bruce_result_t http__request(const bruce_http_request_t *request, bruce_http_res
         body = memory__malloc(body_capacity);
         if (body == NULL) {
             esp_http_client_cleanup(client);
+            memory__free(headers);
             return BRUCE_ERR_NO_MEMORY;
         }
     }
@@ -161,6 +170,7 @@ bruce_result_t http__request(const bruce_http_request_t *request, bruce_http_res
             if (grown == NULL) {
                 memory__free(body);
                 esp_http_client_cleanup(client);
+                memory__free(headers);
                 return BRUCE_ERR_NO_MEMORY;
             }
             if (body != NULL) {
@@ -176,6 +186,7 @@ bruce_result_t http__request(const bruce_http_request_t *request, bruce_http_res
             ESP_LOGE(TAG, "HTTP read failed for %s", request->url);
             memory__free(body);
             esp_http_client_cleanup(client);
+            memory__free(headers);
             return BRUCE_ERR_IO;
         }
         if (read == 0) break;
@@ -187,16 +198,18 @@ bruce_result_t http__request(const bruce_http_request_t *request, bruce_http_res
     response->body = body;
     response->body_len = body_used;
 
-    result = http__collect_headers(&headers, response);
+    result = http__collect_headers(headers, response);
     if (result != BRUCE_OK) {
         memory__free(body);
         response->body = NULL;
         response->body_len = 0;
         esp_http_client_cleanup(client);
+        memory__free(headers);
         return result;
     }
 
     esp_http_client_cleanup(client);
+    memory__free(headers);
     return BRUCE_OK;
 }
 

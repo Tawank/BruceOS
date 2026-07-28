@@ -1,6 +1,5 @@
 #include "tcp.h"
 
-#include <errno.h>
 #include <fcntl.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -13,6 +12,7 @@
 #include "lwip/netdb.h"
 #include "lwip/sockets.h"
 
+#include "core/network/network.h"
 #include "core/task/task.h"
 #include "core_sdk/permission.h"
 #include "core_sdk/tcp.h"
@@ -137,6 +137,8 @@ tcp__connect(const char *host, uint16_t port, uint32_t timeout_ms, bruce_tcp_id_
     if (permission != BRUCE_OK) return permission;
     if (host == NULL || host[0] == '\0' || port == 0 || out_socket == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     *out_socket = BRUCE_TCP_ID_INVALID;
+    bruce_result_t network_result = network__init();
+    if (network_result != BRUCE_OK) return network_result;
 
     char service[6];
     snprintf(service, sizeof(service), "%u", (unsigned int)port);

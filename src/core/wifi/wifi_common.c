@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "core/config/config.h"
+#include "core/network/network.h"
 #include "core/wifi/wifi_common.h"
 #include "core_sdk/config.h"
 #include "core_sdk/permission.h"
@@ -101,11 +102,11 @@ bruce_result_t wifi__init(void) {
         return BRUCE_ERR_IO;
     }
 
-    err = esp_netif_init();
-    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
-        ESP_LOGE(TAG, "could not initialize netif: %s", esp_err_to_name(err));
+    bruce_result_t network_result = network__init();
+    if (network_result != BRUCE_OK) {
+        ESP_LOGE(TAG, "could not initialize network stack");
         xSemaphoreGive(s_wifi_mutex);
-        return BRUCE_ERR_IO;
+        return network_result;
     }
     err = esp_event_loop_create_default();
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {

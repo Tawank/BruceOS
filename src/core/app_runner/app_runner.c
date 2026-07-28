@@ -38,12 +38,14 @@
 #define APP_RUNNER_MAX_APPS 32
 #define APP_RUNNER_PATH_MAX 160
 #define APP_RUNNER_MAX_LOADERS 12
+#define APP_RUNNER_SELFTEST_STACK_BYTES 8192u
 #define APP_RUNNER_LOADER_EXTENSION_MAX 16
 
 typedef struct {
     const char *name;
     bruce_app_entry_t entry;
     bool gui_default;
+    uint32_t stack_bytes;
 } app_runner_app_t;
 
 static app_runner_app_t s_apps[APP_RUNNER_MAX_APPS];
@@ -70,6 +72,7 @@ bruce_result_t app_runner__register(const char *name, bruce_app_entry_t entry) {
     s_apps[s_app_count].name = name;
     s_apps[s_app_count].entry = entry;
     s_apps[s_app_count].gui_default = false;
+    s_apps[s_app_count].stack_bytes = 0;
     s_app_count++;
     return BRUCE_OK;
 }
@@ -87,6 +90,7 @@ void app_runner__register_defaults(void) {
     (void)app_runner__register("ir", ir_app_main);
     (void)app_runner__register("nrf24", nrf24_app_main);
     (void)app_runner__register("selftest", selftest_app_main);
+    s_apps[s_app_count - 1].stack_bytes = APP_RUNNER_SELFTEST_STACK_BYTES;
     (void)app_runner__register("terminal", terminal_app_main);
     s_apps[s_app_count - 1].gui_default = true;
     (void)app_runner__register("serial_commands", serial_commands_app_main);
@@ -386,6 +390,7 @@ int app_runner__run(const char *app_name, const char *arg, bool in_background) {
         for (int i = 0; i < s_app_count; ++i) {
             if (s_apps[i].entry == entry) {
                 params.gui_requested = params.gui_requested || s_apps[i].gui_default;
+                params.stack_bytes = s_apps[i].stack_bytes;
                 break;
             }
         }
