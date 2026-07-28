@@ -7,6 +7,7 @@
 #include "core_sdk/result.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
+#include "core_sdk/task.h"
 
 static char s_working_directory[BRUCE_STORAGE_PATH_MAX] = "/";
 
@@ -130,6 +131,46 @@ int bnu_free_app_main(int argc, char **argv) {
     return BRUCE_OK;
 }
 
+static const char *bnu__task_state_name(bruce_task_state_t state) {
+    switch (state) {
+        case BRUCE_TASK_STARTING: return "start";
+        case BRUCE_TASK_FOREGROUND: return "fore";
+        case BRUCE_TASK_BACKGROUND: return "back";
+        case BRUCE_TASK_PAUSED: return "pause";
+        case BRUCE_TASK_STOPPING: return "stop";
+        default: return "?";
+    }
+}
+
+int bnu_top_app_main(int argc, char **argv) {
+    (void)argv;
+    if (argc != 0) return bnu__usage("top", "");
+
+    bruce_task_snapshot_t tasks[16];
+    size_t task_count = 0;
+    bruce_result_t result = task__list(tasks, sizeof(tasks) / sizeof(tasks[0]), &task_count);
+    if (result != BRUCE_OK) return result;
+    result = runtime__delay(250);
+    if (result != BRUCE_OK) return result;
+    result = task__list(tasks, sizeof(tasks) / sizeof(tasks[0]), &task_count);
+    if (result != BRUCE_OK) return result;
+
+    stdio__printf("\n%2s %3s %4s %4s %-5s %s", "", "", "stack", "", "", "");
+    stdio__printf("\n%2s %3s %4s %4s %-5s %s\n", "id", "cpu", "free", "heap", "state", "name");
+    for (size_t i = 0; i < task_count; ++i) {
+        stdio__printf(
+            "%2u %3u %4u %4u %-5s %s\n",
+            (unsigned)tasks[i].id,
+            (unsigned)tasks[i].cpu_percent,
+            (unsigned)tasks[i].stack_high_water_bytes,
+            (unsigned)tasks[i].memory_bytes,
+            bnu__task_state_name(tasks[i].state),
+            tasks[i].name
+        );
+    }
+    return BRUCE_OK;
+}
+
 int bnu_mkdir_app_main(int argc, char **argv) {
     if (argc != 1) return bnu__usage("mkdir", "<directory>");
     char path[BRUCE_STORAGE_PATH_MAX];
@@ -147,8 +188,7 @@ int bnu_touch_app_main(int argc, char **argv) {
     char path[BRUCE_STORAGE_PATH_MAX];
     if (!bnu__resolve_path(argv[0], path)) return BRUCE_ERR_INVALID_PATH;
     bruce_file_id_t file;
-    bruce_result_t result =
-        storage__open(path, BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE, &file);
+    bruce_result_t result = storage__open(path, BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE, &file);
     if (result != BRUCE_OK) {
         stdio__printf("touch: %s: error %d\n", path, result);
         return result;

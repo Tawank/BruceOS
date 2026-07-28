@@ -94,6 +94,7 @@ void app_runner__register_defaults(void) {
     (void)app_runner__register("cd", bnu_cd_app_main);
     (void)app_runner__register("ls", bnu_ls_app_main);
     (void)app_runner__register("free", bnu_free_app_main);
+    (void)app_runner__register("top", bnu_top_app_main);
     (void)app_runner__register("mkdir", bnu_mkdir_app_main);
     (void)app_runner__register("touch", bnu_touch_app_main);
     (void)app_runner__register("elf", elf_loader__app_main);
