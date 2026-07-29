@@ -33,8 +33,6 @@ JSValue native_drawFillCircle(JSContext *ctx, JSValue *this_val, int argc, JSVal
 JSValue native_drawBitmap(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
 JSValue native_drawXBitmap(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
 JSValue native_drawArc(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
-JSValue native_drawSvgPath(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
-JSValue native_fillSvgPath(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
 JSValue native_drawImage(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
 JSValue native_drawJpg(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
 JSValue native_drawPng(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);

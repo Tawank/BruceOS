@@ -53,51 +53,46 @@ bool selftest__run_display_compositor_case(void) {
     return true;
 }
 
-bool selftest__run_display_svg_path_case(void) {
-    static const char *clock_path =
-        "M12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22C6.47,22 2,17.5 2,12A10,10 0 0,1 12,2M12.5,7V12.25L17,14.92L16.25,16.15L11,13V7H12.5Z";
+bool selftest__run_display_rendering_case(void) {
+    static const uint8_t bitmap[] = {0x80};
 
-    if (display__begin_frame() != BRUCE_OK) {
-        printf("[selftest] display/svg_path: FAIL, could not begin frame\n");
-        return false;
-    }
-    if (display__fill_screen(BRUCE_COLOR_BLACK) != BRUCE_OK ||
-        display__draw_svg_path(0, 0, 24, 24, clock_path, BRUCE_COLOR_WHITE) != BRUCE_OK) {
-        printf("[selftest] display/svg_path: FAIL, draw returned error\n");
-        display__present();
+    if (display__begin_frame() != BRUCE_OK || display__fill_screen(BRUCE_COLOR_BLACK) != BRUCE_OK ||
+        display__set_text_color(BRUCE_COLOR_WHITE) != BRUCE_OK ||
+        display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT) != BRUCE_OK ||
+        display__set_text_size(1) != BRUCE_OK || display__set_cursor(1, 1) != BRUCE_OK ||
+        display__print("A") != BRUCE_OK) {
+        printf("[selftest] display/rendering: FAIL, text setup or draw\n");
         return false;
     }
 
+    int16_t cursor_x = 0;
+    int16_t cursor_y = 0;
     bruce_display_color_t pixel = 0;
-    if (display__test_read_pixel(12, 4, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_WHITE) {
-        printf("[selftest] display/svg_path: FAIL, top of inner clock face not drawn\n");
-        display__present();
+    if (display__get_cursor(&cursor_x, &cursor_y) != BRUCE_OK || cursor_x != 7 || cursor_y != 1 ||
+        display__test_read_pixel(1, 3, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_WHITE ||
+        display__test_read_pixel(1, 1, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_BLACK) {
+        printf("[selftest] display/rendering: FAIL, glyph or cursor\n");
+        (void)display__present();
         return false;
     }
-    if (display__test_read_pixel(12, 2, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_WHITE) {
-        printf("[selftest] display/svg_path: FAIL, top of outer clock face not drawn\n");
-        display__present();
+
+    if (display__set_text_bg_color(BRUCE_COLOR_RED) != BRUCE_OK ||
+        display__draw_bitmap(20, 1, bitmap, 8, 1, BRUCE_COLOR_GREEN) != BRUCE_OK ||
+        display__test_read_pixel(20, 1, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_GREEN ||
+        display__test_read_pixel(21, 1, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_RED) {
+        printf("[selftest] display/rendering: FAIL, bitmap colors\n");
+        (void)display__present();
         return false;
     }
-    if (display__test_read_pixel(12, 12, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_BLACK) {
-        printf("[selftest] display/svg_path: FAIL, center of clock face overdrawn\n");
-        display__present();
+
+    if (display__draw_bitmap_scaled(30, 1, bitmap, 8, 1, 16, 2, BRUCE_COLOR_CYAN) != BRUCE_OK ||
+        display__test_read_pixel(30, 1, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_CYAN ||
+        display__test_read_pixel(32, 1, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_BLACK ||
+        display__color565(255, 0, 0) != BRUCE_COLOR_RED || display__present() != BRUCE_OK) {
+        printf("[selftest] display/rendering: FAIL, scaled bitmap, color conversion, or present\n");
         return false;
     }
-    if (display__test_read_pixel(0, 0, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_BLACK) {
-        printf("[selftest] display/svg_path: FAIL, background overdrawn\n");
-        display__present();
-        return false;
-    }
-    if (display__draw_svg_path(0, 0, 24, 24, NULL, BRUCE_COLOR_WHITE) != BRUCE_ERR_INVALID_ARGUMENT) {
-        printf("[selftest] display/svg_path: FAIL, NULL path not rejected\n");
-        display__present();
-        return false;
-    }
-    if (display__present() != BRUCE_OK) {
-        printf("[selftest] display/svg_path: FAIL, present\n");
-        return false;
-    }
-    printf("[selftest] display/svg_path: OK\n");
+
+    printf("[selftest] display/rendering: OK\n");
     return true;
 }

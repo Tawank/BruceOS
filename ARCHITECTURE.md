@@ -579,13 +579,7 @@ viewport. `display__begin_frame()` leases the viewport through the completion
 of `display__present()`; tile rows are packed into worker-owned DMA scratch.
 Text and cursor state are task-local, rotation is global, and no resize event is
 emitted. Drawing primitives include legacy-compatible circular arcs whose zero
-angle is at six o'clock and increases clockwise, plus `display__draw_svg_path()`
-which renders a 24x24 SVG path-data string (Material icon style) scaled into a
-destination rectangle with 1-pixel strokes, and `display__fill_svg_path()` which
-fills every subpath with the SVG nonzero winding rule for correct solid-icon
-rendering (holes stay transparent; open subpaths are implicitly closed as the
-SVG specification requires, and no strokes are drawn). The SVG fill path is the
-general-but-heavier option for arbitrary application-supplied path data;
+angle is at six o'clock and increases clockwise.
 `display__draw_bitmap_scaled()` blits a 1bpp MSB-first bitmap of any size into
 a destination rectangle with nearest-neighbor scaling and transparent clear
 bits, using only integer math, and is the preferred way to draw filled icons.
@@ -598,9 +592,8 @@ point, no working RAM at draw time. `icon__get(name)` returns a Core-owned
 `bruce_icon_t` (never free it) for recognized names `wifi`, `ble`, `remote`,
 `handheld`, `folder`, `files`, `terminal`, `clock`, `settings`, `selftest`,
 and `apps`. Unknown names and `NULL` return `NULL`. The intended consumer is
-`display__draw_bitmap_scaled()`; the bitmaps are rendered from the same MDI
-path data with the same nonzero-winding fill used by
-`display__fill_svg_path()`, so both drawing paths agree.
+`display__draw_bitmap_scaled()`; the bitmaps are generated from the MDI source
+assets at development time.
 
 Image Core decodes JPEG, PNG, and the first frame of GIF data from memory or a
 Core storage path into the caller's viewport. `image__draw_memory()` and
