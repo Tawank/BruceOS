@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "args.h"
+#include "core_sdk/app_runner.h"
 #include "modules/bluetooth/bluetooth_app.h"
 #include "modules/bluetooth_hid/bluetooth_hid_app.h"
 #include "modules/bnu/bnu_app.h"
@@ -15,6 +16,7 @@
 #include "modules/loaders/js/js_loader_app.h"
 #include "modules/nrf24/nrf24_app.h"
 #include "modules/tcp/tcp_app.h"
+#include "modules/utils/help/help_app.h"
 #include "modules/utils/notification/notification_app.h"
 #include "modules/utils/task/task_app.h"
 #include "modules/utils/terminal/terminal_app.h"
@@ -93,6 +95,7 @@ static bool selftest__args_module_help(void) {
         js_loader__app_main,
         nrf24_app_main,
         notification_app_main,
+        help_app_main,
         task_app_main,
         tcp_app_main,
         terminal_app_main,
@@ -103,6 +106,23 @@ static bool selftest__args_module_help(void) {
         if (entries[i](2, argv) != BRUCE_OK) return false;
     }
     return true;
+}
+
+static volatile bool s_help_target_received_help;
+
+static int selftest__args_help_target(int argc, char **argv) {
+    s_help_target_received_help =
+        argc == 2 && strcmp(argv[0], "selftest_help_target") == 0 && strcmp(argv[1], "--help") == 0;
+    return BRUCE_OK;
+}
+
+static bool selftest__args_help_integration(void) {
+    bruce_result_t registered = app_runner__register("selftest_help_target", selftest__args_help_target);
+    if (registered != BRUCE_OK && registered != BRUCE_ERR_ALREADY_EXISTS) return false;
+
+    s_help_target_received_help = false;
+    char *argv[] = {"help", "selftest_help_target"};
+    return help_app_main(2, argv) == BRUCE_OK && s_help_target_received_help;
 }
 
 static bool selftest__args_wifi_integration(void) {
@@ -116,7 +136,7 @@ static bool selftest__args_wifi_integration(void) {
 bool selftest__run_args_case(void) {
     bool ok = selftest__args_named_positionals() && selftest__args_nonfatal_status() &&
               selftest__args_trailing_positionals() && selftest__args_module_help() &&
-              selftest__args_wifi_integration();
+              selftest__args_wifi_integration() && selftest__args_help_integration();
     printf("[selftest] args: %s\n", ok ? "OK" : "failed");
     return ok;
 }

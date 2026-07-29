@@ -24,11 +24,12 @@
 #include "modules/nrf24/nrf24_app.h"
 #include "modules/selftest/selftest.h"
 #include "modules/tcp/tcp_app.h"
+#include "modules/utils/help/help_app.h"
 #include "modules/utils/launcher/launcher_app.h"
 #include "modules/utils/notification/notification_app.h"
 #include "modules/utils/serial_commands/serial_commands_app.h"
-#include "modules/utils/terminal/terminal_app.h"
 #include "modules/utils/task/task_app.h"
+#include "modules/utils/terminal/terminal_app.h"
 #include "modules/webui/webui_app.h"
 #include "modules/wifi/wifi_app.h"
 
@@ -38,7 +39,7 @@
 #include <string.h>
 #include <strings.h>
 
-#define APP_RUNNER_MAX_APPS 32
+#define APP_RUNNER_MAX_APPS 40
 #define APP_RUNNER_PATH_MAX 160
 #define APP_RUNNER_MAX_LOADERS 12
 #define APP_RUNNER_SELFTEST_STACK_BYTES 8192u
@@ -78,6 +79,12 @@ bruce_result_t app_runner__register(const char *name, bruce_app_entry_t entry) {
     return BRUCE_OK;
 }
 
+size_t app_runner__command_count(void) { return (size_t)s_app_count; }
+
+const char *app_runner__command_name(size_t index) {
+    return index < (size_t)s_app_count ? s_apps[index].name : NULL;
+}
+
 void app_runner__register_defaults(void) {
     if (s_app_count != 0) return;
 
@@ -97,6 +104,7 @@ void app_runner__register_defaults(void) {
     (void)app_runner__register("terminal", terminal_app_main);
     (void)app_runner__register("serial_commands", serial_commands_app_main);
     (void)app_runner__register("task", task_app_main);
+    (void)app_runner__register("help", help_app_main);
     (void)app_runner__register("pwd", bnu_pwd_app_main);
     (void)app_runner__register("cd", bnu_cd_app_main);
     (void)app_runner__register("ls", bnu_ls_app_main);

@@ -126,6 +126,12 @@ backslash escaping). Registered built-ins receive conventional C arguments:
 `NULL` creates `argc == 1`. Loader-resolved ELF and JavaScript applications
 retain their loader-defined argument conventions.
 
+Registered built-in command names can be enumerated in registration order with
+`app_runner__command_count()` and `app_runner__command_name()`. The returned
+names remain owned by AppRunner. The built-in `help` utility uses this registry:
+`help` prints all registered commands, while `help <command>` starts the named
+command with `--help` and waits for it to finish.
+
 AppRunner owns only the shell-style conversion from command text to `argc` and
 `argv`. Built-in modules use the local `components/args` parser when they need
 commands, options, or named positional arguments. The parser uses task-owned

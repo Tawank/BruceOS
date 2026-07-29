@@ -17,6 +17,16 @@ static int selftest__apprunner_dummy_entry(int argc, char **argv) {
 }
 
 bool selftest__run_apprunner_registration_case(void) {
+    size_t command_count = app_runner__command_count();
+    bool found_help = false;
+    for (size_t i = 0; i < command_count; ++i) {
+        const char *name = app_runner__command_name(i);
+        if (name != NULL && strcmp(name, "help") == 0) found_help = true;
+    }
+    if (!found_help || app_runner__command_name(command_count) != NULL) {
+        printf("[selftest] apprunner/registration: command enumeration failed\n");
+        return false;
+    }
     if (app_runner__register("selftest", selftest__apprunner_dummy_entry) != BRUCE_ERR_ALREADY_EXISTS) {
         printf("[selftest] apprunner/registration: duplicate name was not rejected\n");
         return false;
@@ -100,11 +110,10 @@ bool selftest__run_apprunner_args_case(void) {
         return false;
     }
     bool background_ok = s_echo.argc == 5 && strcmp(s_echo.argv_buf[0], "selftest_echo") == 0 &&
-                          strcmp(s_echo.argv_buf[1], "--gui") == 0 &&
-                          strcmp(s_echo.argv_buf[2], "foo") == 0 &&
-                          strcmp(s_echo.argv_buf[3], "bar baz") == 0 &&
-                          strcmp(s_echo.argv_buf[4], "escaped space") == 0 && s_echo.argv_terminated &&
-                          s_echo.gui_requested && s_echo.state == BRUCE_TASK_BACKGROUND;
+                         strcmp(s_echo.argv_buf[1], "--gui") == 0 && strcmp(s_echo.argv_buf[2], "foo") == 0 &&
+                         strcmp(s_echo.argv_buf[3], "bar baz") == 0 &&
+                         strcmp(s_echo.argv_buf[4], "escaped space") == 0 && s_echo.argv_terminated &&
+                         s_echo.gui_requested && s_echo.state == BRUCE_TASK_BACKGROUND;
     if (!background_ok) {
         printf(
             "[selftest] apprunner/args: background argc=%d gui=%d state=%d argv=[%s|%s|%s|%s|%s]\n",
