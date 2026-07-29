@@ -504,7 +504,10 @@ pick: _
 GUI callers may provide render parameters with per-edge padding, optional
 title/footer bars, choice text size, and content colors. The choice renderer
 derives its visible row count from the remaining padded viewport and scaled
-row height; terminal rendering ignores these parameters.
+row height. An optional render callback runs inside the dialog frame, with a
+caller-selected refresh interval, so surrounding UI outside the padded
+viewport can remain current while the choice is open. Terminal rendering
+ignores these parameters.
 
 app_runner records the initial `--gui` launch context in task-local storage
 before launch-time permission checks, but leaves the argument in the app’s

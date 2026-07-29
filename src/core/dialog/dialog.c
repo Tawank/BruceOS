@@ -315,8 +315,16 @@ static bruce_result_t dialog__gui_choice(
     if (usable_h < row_h) { return BRUCE_ERR_INVALID_ARGUMENT; }
     int items_per_page = usable_h / row_h;
     bool redraw = true;
+    uint64_t rendered_at = 0;
 
     for (;;) {
+        uint64_t now = runtime__now();
+        if (render_params != NULL && render_params->render_callback != NULL &&
+            render_params->refresh_interval_ms > 0 &&
+            now - rendered_at >= render_params->refresh_interval_ms) {
+            redraw = true;
+        }
+
         if (redraw) {
             bruce_result_t frame_result = display__begin_frame();
             if (frame_result == BRUCE_ERR_NOT_FOREGROUND) { return BRUCE_ERR_CANCELLED; }
@@ -364,10 +372,14 @@ static bruce_result_t dialog__gui_choice(
             }
 
             if (render_borders) { display__fill_rect(left, bottom - footer_h, viewport_w, footer_h, sec); }
+            if (render_params != NULL && render_params->render_callback != NULL) {
+                render_params->render_callback(render_params->render_callback_context);
+            }
             frame_result = display__present();
             if (frame_result != BRUCE_OK) {
                 return frame_result == BRUCE_ERR_NOT_FOREGROUND ? BRUCE_ERR_CANCELLED : frame_result;
             }
+            rendered_at = runtime__now();
             redraw = false;
         }
 

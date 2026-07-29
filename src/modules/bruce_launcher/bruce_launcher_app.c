@@ -122,6 +122,10 @@ static uint32_t bruce_launcher__draw_status_bar(const bruce_launcher_theme_t *th
     return revision;
 }
 
+static void bruce_launcher__refresh_dialog_status(void *context) {
+    (void)bruce_launcher__draw_status_bar((const bruce_launcher_theme_t *)context);
+}
+
 /* Draw the main border and horizontal status-line separator. */
 static void bruce_launcher__draw_main_border(const bruce_launcher_theme_t *theme) {
     int w = display__width();
@@ -398,8 +402,10 @@ static int bruce_launcher__run_task_switcher(const bruce_launcher_theme_t *theme
         if ((event.code == BRUCE_INPUT_CODE_UP || event.code == BRUCE_INPUT_CODE_LEFT) && selected > 0) {
             selected--;
             redraw = true;
-        } else if ((event.code == BRUCE_INPUT_CODE_DOWN || event.code == BRUCE_INPUT_CODE_RIGHT) &&
-                   selected + 1 < (int)page_count) {
+        } else if (
+            (event.code == BRUCE_INPUT_CODE_DOWN || event.code == BRUCE_INPUT_CODE_RIGHT) &&
+            selected + 1 < (int)page_count
+        ) {
             selected++;
             redraw = true;
         } else if (event.code == BRUCE_INPUT_CODE_LEFT && page > 0) {
@@ -410,8 +416,10 @@ static int bruce_launcher__run_task_switcher(const bruce_launcher_theme_t *theme
             page++;
             selected = 0;
             redraw = true;
-        } else if ((event.code == BRUCE_INPUT_CODE_SELECT || event.code == BRUCE_INPUT_CODE_BUTTON_A) &&
-                   page_count > 0) {
+        } else if (
+            (event.code == BRUCE_INPUT_CODE_SELECT || event.code == BRUCE_INPUT_CODE_BUTTON_A) &&
+            page_count > 0
+        ) {
             bruce_task_id_t target = candidates[start + (size_t)selected].id;
             bruce_task_snapshot_t snapshot;
             if (task__snapshot(target, &snapshot) == BRUCE_OK) {
@@ -495,6 +503,9 @@ static int bruce_launcher__run_gui_menu(bruce_launcher_menu_t *menu) {
             .text_size = bruce_launcher__submenu_font_size(),
             .background_color = theme.bg,
             .text_color = theme.pri,
+            .refresh_interval_ms = BRUCE_LAUNCHER_STATUS_REFRESH_MS,
+            .render_callback = bruce_launcher__refresh_dialog_status,
+            .render_callback_context = &theme,
         };
 
         (void)input__flush();

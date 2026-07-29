@@ -19,6 +19,8 @@ typedef struct {
     const char *value;
 } bruce_dialog_choice_t;
 
+typedef void (*bruce_dialog_render_callback_t)(void *context);
+
 typedef struct {
     int padding_top;
     int padding_right;
@@ -28,6 +30,9 @@ typedef struct {
     int text_size;
     uint16_t background_color;
     uint16_t text_color;
+    uint32_t refresh_interval_ms;
+    bruce_dialog_render_callback_t render_callback;
+    void *render_callback_context;
 } bruce_dialog_render_params_t;
 
 /* Dialog APIs return BRUCE_OK or BRUCE_ERR_CANCELLED, BRUCE_ERR_BUSY,
@@ -38,7 +43,9 @@ bruce_result_t dialog__message(bruce_dialog_kind_t kind, const char *title, cons
  * the standard title and footer bars. Padding limits the choice viewport, and
  * `render_borders=false` renders a plain size-1 title without those bars.
  * `text_size` and the colors style the choices; selected rows invert the two
- * colors. */
+ * colors. When `render_callback` is set, it runs inside each active dialog
+ * frame after the choice viewport is drawn. `refresh_interval_ms` requests
+ * periodic frames so caller-owned pixels outside the viewport can update. */
 bruce_result_t dialog__choice(
     const char *title, const char *message, const bruce_dialog_choice_t *choices, size_t choice_count,
     size_t *out_selected, const bruce_dialog_render_params_t *render_params
