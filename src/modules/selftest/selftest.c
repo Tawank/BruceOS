@@ -8,6 +8,7 @@
 #include "core_sdk/storage.h"
 
 #include "app_runner_test.h"
+#include "args_test.h"
 #include "bluetooth_test.h"
 #include "bnu_test.h"
 #include "clock_test.h"
@@ -58,6 +59,7 @@ int selftest_app_main(int argc, char **argv) {
     RUN_SELFTEST(selftest__run_apprunner_registration_case);
     RUN_SELFTEST(selftest__run_apprunner_args_case);
     RUN_SELFTEST(selftest__run_apprunner_resolution_case);
+    RUN_SELFTEST(selftest__run_args_case);
     RUN_SELFTEST(selftest__run_permission_allow_case);
     RUN_SELFTEST(selftest__run_permission_deny_no_reprompt_case);
     RUN_SELFTEST(selftest__run_permission_shared_basename_case);

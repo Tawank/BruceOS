@@ -1,4 +1,5 @@
 set(BRUCE_SELFTEST_SOURCES
+    "modules/selftest/args_test.c"
     "modules/selftest/app_runner_test.c"
     "modules/selftest/bluetooth_test.c"
     "modules/selftest/clock_test.c"
@@ -89,6 +90,7 @@ idf_component_register(SRCS
                     "modules/wifi/wifi_app.c"
                     "modules/webui/webui_app.c"
                     REQUIRES
+                    args
                     cjson
                     bt
                     esp_event
@@ -158,7 +160,8 @@ target_include_directories(bruce_sdk_builtin_config_check PRIVATE
 add_library(bruce_sdk_builtin_wifi_check OBJECT "modules/wifi/wifi_app.c")
 target_include_directories(bruce_sdk_builtin_wifi_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
-                           "${CMAKE_CURRENT_LIST_DIR}/modules/wifi")
+                           "${CMAKE_CURRENT_LIST_DIR}/modules/wifi"
+                           "${CMAKE_CURRENT_LIST_DIR}/../components/args")
 
 add_library(bruce_sdk_builtin_webui_check OBJECT "modules/webui/webui_app.c")
 target_include_directories(bruce_sdk_builtin_webui_check PRIVATE

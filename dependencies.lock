@@ -1,14 +1,4 @@
 dependencies:
-  args:
-    component_hash: 7061e57f9e1f72b9299020cae47ce5b26893f3a3ff7f304dabb18d36bc51ef1c
-    dependencies:
-    - name: idf
-      version: '>=5.1'
-    source:
-      git: https://github.com/Tawank/args
-      path: .
-      type: git
-    version: 2af3760683f59090a81787167dd5bedcc507d18c
   espressif/cjson:
     component_hash: e788323270d90738662d66fffa910bfe1fba019bba087f01557e70c40485b469
     dependencies:
@@ -97,13 +87,12 @@ dependencies:
       type: service
     version: 1.22.3
 direct_dependencies:
-- args
 - espressif/cjson
 - espressif/elf_loader
 - espressif/esp_jpeg
 - espressif/libpng
 - idf
 - joltwallet/littlefs
-manifest_hash: 99c2201aea3b09b2636c816c315579274292dc406178e11b07b2c7f009578b41
+manifest_hash: 253fe3a7098596106e534206622a8dfa81208f5d284233e198536d003a249b04
 target: esp32s3
 version: 3.0.0

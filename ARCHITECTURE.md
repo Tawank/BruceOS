@@ -123,6 +123,14 @@ backslash escaping). Registered built-ins receive conventional C arguments:
 `NULL` creates `argc == 1`. Loader-resolved ELF and JavaScript applications
 retain their loader-defined argument conventions.
 
+AppRunner owns only the shell-style conversion from command text to `argc` and
+`argv`. Built-in modules use the local `components/args` parser when they need
+commands, options, or named positional arguments. The parser uses task-owned
+Core memory, routes help and diagnostics through Bruce stdio, and reports help,
+version, invalid input, and allocation failure as statuses instead of exiting
+the application task. Named positional getters return borrowed `argv` strings
+and return `NULL` when an optional value is absent.
+
 Resolution is deterministic and never scans directories:
 
 1. registered built-in module;
