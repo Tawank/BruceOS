@@ -2,8 +2,8 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 
+#include "args.h"
 #include "core_sdk/app_runner.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/nrf24.h"
@@ -117,44 +117,69 @@ static int nrf24_app__gui(void) {
     }
 }
 
-static void nrf24_app__usage(void) {
-    stdio__printf("NRF24 commands:\n");
-    stdio__printf("  nrf24 status\n");
-    stdio__printf("  nrf24 channel <0-125>\n");
-    stdio__printf("  nrf24 scan [first] [last] [samples]\n");
-}
-
 int nrf24_app_main(int argc, char **argv) {
     if (app_runner__args_have_gui(argc, argv)) return nrf24_app__gui();
-    if (argc <= 1 || argv == NULL || argv[1] == NULL || strcmp(argv[1], "status") == 0) {
-        return nrf24_app__status(false);
-    }
-    if (strcmp(argv[1], "channel") == 0) {
-        uint8_t channel = 0;
-        if (argc != 3 || !nrf24_app__parse_channel(argv[2], &channel)) return BRUCE_ERR_INVALID_ARGUMENT;
-        bruce_result_t result = nrf24__set_channel(channel);
-        if (result == BRUCE_OK) stdio__printf("NRF24 channel set to %u\n", channel);
-        else stdio__printf("NRF24 channel failed: %d\n", result);
+
+    ArgParser *root = ap_new_parser();
+    if (root == NULL) return BRUCE_ERR_NO_MEMORY;
+    ap_set_helptext(root, "Inspect and configure an NRF24 2.4 GHz radio.");
+    ArgParser *status = ap_new_cmd(root, "status");
+    ArgParser *channel_command = ap_new_cmd(root, "channel");
+    ArgParser *scan = ap_new_cmd(root, "scan");
+    ap_set_helptext(status, "Show radio and pin status.");
+    ap_set_helptext(channel_command, "Set the active NRF24 channel.");
+    ap_add_required_arg(channel_command, "channel", "Radio channel (0-125)");
+    ap_set_helptext(scan, "Scan a channel range for RPD activity.");
+    ap_add_optional_arg(scan, "first", "First channel (default 0)");
+    ap_add_optional_arg(scan, "last", "Last channel (default 79)");
+    ap_add_optional_arg(scan, "samples", "Samples per channel (default 8, maximum 255)");
+    if (!ap_parse(root, argc, argv)) {
+        ap_status_t parse_status = ap_get_status(root);
+        if (parse_status != AP_STATUS_HELP && parse_status != AP_STATUS_VERSION)
+            ap_print_help(ap_get_cmd_parser(root) != NULL ? ap_get_cmd_parser(root) : root);
+        int result = parse_status == AP_STATUS_HELP || parse_status == AP_STATUS_VERSION
+                         ? BRUCE_OK
+                         : parse_status == AP_STATUS_NO_MEMORY ? BRUCE_ERR_NO_MEMORY : BRUCE_ERR_INVALID_ARGUMENT;
+        ap_free(root);
         return result;
     }
-    if (strcmp(argv[1], "scan") == 0) {
+
+    int result;
+    ArgParser *command = ap_get_cmd_parser(root);
+    if (command == NULL || command == status) {
+        result = nrf24_app__status(false);
+    } else if (command == channel_command) {
+        uint8_t channel = 0;
+        if (!nrf24_app__parse_channel(ap_get_arg(channel_command, "channel"), &channel)) {
+            result = BRUCE_ERR_INVALID_ARGUMENT;
+        } else {
+            result = nrf24__set_channel(channel);
+            if (result == BRUCE_OK) stdio__printf("NRF24 channel set to %u\n", channel);
+            else stdio__printf("NRF24 channel failed: %d\n", result);
+        }
+    } else {
         uint8_t first = 0;
         uint8_t last = NRF24_APP_SPECTRUM_CHANNELS - 1u;
         uint8_t samples = NRF24_APP_SPECTRUM_SAMPLES;
-        if ((argc > 2 && !nrf24_app__parse_channel(argv[2], &first)) ||
-            (argc > 3 && !nrf24_app__parse_channel(argv[3], &last)) || last < first) {
-            return BRUCE_ERR_INVALID_ARGUMENT;
-        }
-        if (argc > 4) {
+        const char *first_text = ap_get_arg(scan, "first");
+        const char *last_text = ap_get_arg(scan, "last");
+        const char *samples_text = ap_get_arg(scan, "samples");
+        if ((first_text != NULL && !nrf24_app__parse_channel(first_text, &first)) ||
+            (last_text != NULL && !nrf24_app__parse_channel(last_text, &last)) || last < first) {
+            result = BRUCE_ERR_INVALID_ARGUMENT;
+        } else if (samples_text != NULL) {
             char *end = NULL;
-            unsigned long value = strtoul(argv[4], &end, 10);
-            if (end == argv[4] || *end != '\0' || value == 0 || value > UINT8_MAX) {
-                return BRUCE_ERR_INVALID_ARGUMENT;
+            unsigned long value = strtoul(samples_text, &end, 10);
+            if (end == samples_text || *end != '\0' || value == 0 || value > UINT8_MAX)
+                result = BRUCE_ERR_INVALID_ARGUMENT;
+            else {
+                samples = (uint8_t)value;
+                result = nrf24_app__scan(first, last, samples, false);
             }
-            samples = (uint8_t)value;
+        } else {
+            result = nrf24_app__scan(first, last, samples, false);
         }
-        return nrf24_app__scan(first, last, samples, false);
     }
-    nrf24_app__usage();
-    return strcmp(argv[1], "help") == 0 ? BRUCE_OK : BRUCE_ERR_INVALID_ARGUMENT;
+    ap_free(root);
+    return result;
 }

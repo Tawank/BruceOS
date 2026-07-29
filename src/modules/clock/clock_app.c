@@ -1,6 +1,6 @@
 #include "clock_app.h"
 
-#include "core_sdk/app_runner.h"
+#include "args.h"
 #include "core_sdk/clock.h"
 #include "core_sdk/config.h"
 #include "core_sdk/dialog.h"
@@ -13,23 +13,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-static const char *clock_app__action(int argc, char **argv) {
-    for (int i = 1; i < argc; ++i) {
-        if (strcmp(argv[i], "--gui") != 0) return argv[i];
-    }
-    return "show";
-}
-
-static const char *clock_app__argument_after(int argc, char **argv, const char *action) {
-    bool found = false;
-    for (int i = 1; i < argc; ++i) {
-        if (strcmp(argv[i], "--gui") == 0) continue;
-        if (found) return argv[i];
-        if (strcmp(argv[i], action) == 0) found = true;
-    }
-    return NULL;
-}
 
 static void clock_app__format_time(const bruce_clock_datetime_t *now, char *out, size_t size) {
     bool format24 = true;
@@ -144,9 +127,8 @@ static bruce_result_t clock_app__prompt_duration(uint32_t *out_seconds) {
     return clock_app__parse_duration(duration, out_seconds) ? BRUCE_OK : BRUCE_ERR_INVALID_ARGUMENT;
 }
 
-static int clock_app__timer(int argc, char **argv, bool gui) {
+static int clock_app__timer(const char *argument, bool gui) {
     uint32_t duration = 0;
-    const char *argument = clock_app__argument_after(argc, argv, "timer");
     bruce_result_t result =
         argument != NULL
             ? (clock_app__parse_duration(argument, &duration) ? BRUCE_OK : BRUCE_ERR_INVALID_ARGUMENT)
@@ -209,12 +191,11 @@ static bruce_result_t clock_app__prompt_alarm(uint32_t *out_seconds_of_day) {
     return clock_app__parse_alarm(value, out_seconds_of_day) ? BRUCE_OK : BRUCE_ERR_INVALID_ARGUMENT;
 }
 
-static int clock_app__alarm(int argc, char **argv, bool gui) {
+static int clock_app__alarm(const char *argument, bool gui) {
     bruce_clock_datetime_t now;
     bruce_result_t result = clock__get_local(&now);
     if (result != BRUCE_OK) return result;
     uint32_t target = 0;
-    const char *argument = clock_app__argument_after(argc, argv, "alarm");
     result = argument != NULL
                  ? (clock_app__parse_alarm(argument, &target) ? BRUCE_OK : BRUCE_ERR_INVALID_ARGUMENT)
                  : (gui ? clock_app__prompt_alarm(&target) : BRUCE_ERR_INVALID_ARGUMENT);
@@ -250,12 +231,12 @@ static int clock_app__alarm(int argc, char **argv, bool gui) {
     return BRUCE_OK;
 }
 
-static void clock_app__usage(void) {
-    stdio__printf("Clock commands:\n");
-    stdio__printf("  clock\n  clock timer HH:MM:SS\n  clock alarm HH:MM[:SS]\n");
+static void clock_app__add_gui_option(ArgParser *parser) {
+    ap_add_flag(parser, "gui");
+    ap_set_opt_help(parser, "gui", "Use GUI interaction mode");
 }
 
-static int clock_app__gui(int argc, char **argv) {
+static int clock_app__gui(void) {
     const bruce_dialog_choice_t choices[] = {
         {.label = "Timer",         .value = "timer"},
         {.label = "Alarm",         .value = "alarm"},
@@ -275,18 +256,47 @@ static int clock_app__gui(int argc, char **argv) {
         if (choice_result != BRUCE_OK) return choice_result;
         if (selected == 3) return BRUCE_OK;
 
-        result = selected == 0 ? clock_app__timer(argc, argv, true) : clock_app__alarm(argc, argv, true);
+        result = selected == 0 ? clock_app__timer(NULL, true) : clock_app__alarm(NULL, true);
         if (result != BRUCE_OK) return result;
         (void)input__flush();
     }
 }
 
 int clock_app_main(int argc, char **argv) {
-    bool gui = app_runner__args_have_gui(argc, argv);
-    const char *action = clock_app__action(argc, argv);
-    if (strcmp(action, "show") == 0) return gui ? clock_app__gui(argc, argv) : clock_app__show(false);
-    if (strcmp(action, "timer") == 0) return clock_app__timer(argc, argv, gui);
-    if (strcmp(action, "alarm") == 0) return clock_app__alarm(argc, argv, gui);
-    clock_app__usage();
-    return strcmp(action, "help") == 0 ? BRUCE_OK : BRUCE_ERR_INVALID_ARGUMENT;
+    ArgParser *root = ap_new_parser();
+    if (root == NULL) return BRUCE_ERR_NO_MEMORY;
+    ap_set_helptext(root, "Show the clock or run timer and alarm tools.");
+    clock_app__add_gui_option(root);
+
+    ArgParser *show = ap_new_cmd(root, "show");
+    ArgParser *timer = ap_new_cmd(root, "timer");
+    ArgParser *alarm = ap_new_cmd(root, "alarm");
+    if (show == NULL || timer == NULL || alarm == NULL) {
+        ap_free(root);
+        return BRUCE_ERR_NO_MEMORY;
+    }
+    clock_app__add_gui_option(show);
+    clock_app__add_gui_option(timer);
+    clock_app__add_gui_option(alarm);
+    ap_set_helptext(show, "Show the current local date and time.");
+    ap_set_helptext(timer, "Run a countdown timer.");
+    ap_add_optional_arg(timer, "duration", "Countdown duration as HH:MM:SS (GUI prompts if omitted)");
+    ap_set_helptext(alarm, "Wait until a local time of day.");
+    ap_add_optional_arg(alarm, "time", "Alarm time as HH:MM[:SS] (GUI prompts if omitted)");
+
+    if (!ap_parse(root, argc, argv)) {
+        ap_status_t status = ap_get_status(root);
+        ap_free(root);
+        if (status == AP_STATUS_HELP || status == AP_STATUS_VERSION) return BRUCE_OK;
+        return status == AP_STATUS_NO_MEMORY ? BRUCE_ERR_NO_MEMORY : BRUCE_ERR_INVALID_ARGUMENT;
+    }
+
+    ArgParser *command = ap_get_cmd_parser(root);
+    bool gui = ap_found(root, "gui") || (command != NULL && ap_found(command, "gui"));
+    int result;
+    if (command == NULL || command == show) result = gui ? clock_app__gui() : clock_app__show(false);
+    else if (command == timer) result = clock_app__timer(ap_get_arg(timer, "duration"), gui);
+    else result = clock_app__alarm(ap_get_arg(alarm, "time"), gui);
+    ap_free(root);
+    return result;
 }

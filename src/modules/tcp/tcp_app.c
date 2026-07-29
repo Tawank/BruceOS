@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "args.h"
 #include "core_sdk/result.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/task.h"
@@ -14,14 +15,6 @@
 #define TCP_APP_BUFFER_SIZE 256u
 #define TCP_APP_IO_TIMEOUT_MS 20u
 #define TCP_APP_EXIT_BYTE 0x1du
-
-static void tcp_app__usage(void) {
-    stdio__printf("TCP terminal commands:\n");
-    stdio__printf("  tcp client <host> <port>\n");
-    stdio__printf("  tcp listener <port>\n");
-    stdio__printf("During a session, stdin is sent to TCP and received data is printed to output.\n");
-    stdio__printf("Press Ctrl+] to close.\n");
-}
 
 static bool tcp_app__parse_port(const char *text, uint16_t *out_port) {
     if (text == NULL || out_port == NULL || text[0] == '\0') return false;
@@ -164,21 +157,55 @@ static int tcp_app__listener(uint16_t port) {
 }
 
 int tcp_app_main(int argc, char **argv) {
-    if (argc <= 1 || argv == NULL || argv[1] == NULL || strcmp(argv[1], "help") == 0) {
-        tcp_app__usage();
-        return 0;
+    ArgParser *root = ap_new_parser();
+    if (root == NULL) return BRUCE_ERR_NO_MEMORY;
+    ap_set_helptext(
+        root,
+        "Open an interactive TCP client or listener. During a session, stdin is sent to TCP and "
+        "received data is printed. Press Ctrl+] to close."
+    );
+    ArgParser *client = ap_new_cmd(root, "client connect");
+    ArgParser *listener = ap_new_cmd(root, "listener listen");
+    ap_set_helptext(client, "Connect to a remote TCP endpoint.");
+    ap_add_required_arg(client, "host", "Remote host name or address");
+    ap_add_required_arg(client, "port", "Remote TCP port (1-65535)");
+    ap_set_helptext(listener, "Listen for incoming TCP connections.");
+    ap_add_required_arg(listener, "port", "Local TCP port (1-65535)");
+
+    if (!ap_parse(root, argc, argv)) {
+        ap_status_t status = ap_get_status(root);
+        if (status != AP_STATUS_HELP && status != AP_STATUS_VERSION)
+            ap_print_help(ap_get_cmd_parser(root) != NULL ? ap_get_cmd_parser(root) : root);
+        int result = status == AP_STATUS_HELP || status == AP_STATUS_VERSION
+                         ? BRUCE_OK
+                         : status == AP_STATUS_NO_MEMORY ? BRUCE_ERR_NO_MEMORY : BRUCE_ERR_INVALID_ARGUMENT;
+        ap_free(root);
+        return result;
     }
 
-    uint16_t port = 0;
-    if ((strcmp(argv[1], "client") == 0 || strcmp(argv[1], "connect") == 0) && argc == 4 &&
-        tcp_app__parse_port(argv[3], &port)) {
-        return tcp_app__client(argv[2], port);
+    int result = BRUCE_OK;
+    ArgParser *command = ap_get_cmd_parser(root);
+    if (command == NULL) {
+        ap_print_help(root);
+        ap_free(root);
+    } else {
+        uint16_t port = 0;
+        const char *port_text = ap_get_arg(command, "port");
+        if (!tcp_app__parse_port(port_text, &port)) {
+            ap_print_help(command);
+            result = BRUCE_ERR_INVALID_ARGUMENT;
+            ap_free(root);
+        } else if (command == client) {
+            const char *parsed_host = ap_get_arg(client, "host");
+            char host[BRUCE_TCP_HOST_MAX];
+            int length = snprintf(host, sizeof(host), "%s", parsed_host);
+            ap_free(root);
+            result = length < 0 || (size_t)length >= sizeof(host) ? BRUCE_ERR_INVALID_ARGUMENT
+                                                                  : tcp_app__client(host, port);
+        } else {
+            ap_free(root);
+            result = tcp_app__listener(port);
+        }
     }
-    if ((strcmp(argv[1], "listener") == 0 || strcmp(argv[1], "listen") == 0) && argc == 3 &&
-        tcp_app__parse_port(argv[2], &port)) {
-        return tcp_app__listener(port);
-    }
-
-    tcp_app__usage();
-    return BRUCE_ERR_INVALID_ARGUMENT;
+    return result;
 }

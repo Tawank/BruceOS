@@ -1,8 +1,8 @@
 #include "bluetooth_hid_app.h"
 
 #include <stdio.h>
-#include <string.h>
 
+#include "args.h"
 #include "core_sdk/app_runner.h"
 #include "core_sdk/bluetooth_hid.h"
 #include "core_sdk/dialog.h"
@@ -157,28 +157,59 @@ static int bluetooth_hid_app__gui(void) {
 
 int bluetooth_hid_app_main(int argc, char **argv) {
     if (app_runner__args_have_gui(argc, argv)) return bluetooth_hid_app__gui();
+
+    ArgParser *root = ap_new_parser();
+    if (root == NULL) return BRUCE_ERR_NO_MEMORY;
+    ap_set_helptext(root, "Manage a Classic Bluetooth keyboard or gamepad input adapter.");
+    ArgParser *scan = ap_new_cmd(root, "scan");
+    ArgParser *connect = ap_new_cmd(root, "connect");
+    ArgParser *disconnect = ap_new_cmd(root, "disconnect");
+    ArgParser *status = ap_new_cmd(root, "status");
+    ap_set_helptext(scan, "List nearby Classic Bluetooth HID devices.");
+    ap_set_helptext(connect, "Connect to a Bluetooth HID device.");
+    ap_add_required_arg(connect, "address", "Bluetooth address in XX:XX:XX:XX:XX:XX form");
+    ap_set_helptext(disconnect, "Disconnect the active Bluetooth HID device.");
+    ap_set_helptext(status, "Show the Bluetooth HID connection status.");
+    if (!ap_parse(root, argc, argv)) {
+        ap_status_t parse_status = ap_get_status(root);
+        if (parse_status != AP_STATUS_HELP && parse_status != AP_STATUS_VERSION)
+            ap_print_help(ap_get_cmd_parser(root) != NULL ? ap_get_cmd_parser(root) : root);
+        int result = parse_status == AP_STATUS_HELP || parse_status == AP_STATUS_VERSION
+                         ? BRUCE_OK
+                         : parse_status == AP_STATUS_NO_MEMORY ? BRUCE_ERR_NO_MEMORY : BRUCE_ERR_INVALID_ARGUMENT;
+        ap_free(root);
+        return result;
+    }
     if (!bluetooth_hid__is_supported()) {
+        ap_free(root);
         stdio__printf("Classic Bluetooth HID is unsupported on this target.\n");
         return BRUCE_ERR_UNSUPPORTED;
     }
-    if (argc <= 1 || argv == NULL || argv[1] == NULL || strcmp(argv[1], "scan") == 0) {
-        return bluetooth_hid_app__scan_terminal();
-    }
-    if (strcmp(argv[1], "connect") == 0) {
+
+    int result;
+    ArgParser *command = ap_get_cmd_parser(root);
+    if (command == NULL || command == scan) {
+        ap_free(root);
+        result = bluetooth_hid_app__scan_terminal();
+    } else if (command == connect) {
         uint8_t address[BRUCE_BLUETOOTH_ADDRESS_LEN];
-        if (argc < 3 || !bluetooth_hid_app__parse_address(argv[2], address)) {
-            stdio__printf("Usage: bluetooth_hid_app connect XX:XX:XX:XX:XX:XX\n");
-            return BRUCE_ERR_INVALID_ARGUMENT;
+        if (!bluetooth_hid_app__parse_address(ap_get_arg(connect, "address"), address)) {
+            ap_print_help(connect);
+            result = BRUCE_ERR_INVALID_ARGUMENT;
+            ap_free(root);
+        } else {
+            ap_free(root);
+            result = bluetooth_hid_app__connect(address, false);
         }
-        return bluetooth_hid_app__connect(address, false);
-    }
-    if (strcmp(argv[1], "disconnect") == 0) return bluetooth_hid__disconnect();
-    if (strcmp(argv[1], "status") == 0) {
+    } else if (command == disconnect) {
+        ap_free(root);
+        result = bluetooth_hid__disconnect();
+    } else {
+        ap_free(root);
         stdio__printf(
             "Classic Bluetooth HID: %s\n", bluetooth_hid__is_connected() ? "connected" : "disconnected"
         );
-        return 0;
+        result = BRUCE_OK;
     }
-    stdio__printf("Usage: bluetooth_hid_app [scan|connect ADDRESS|disconnect|status]\n");
-    return BRUCE_ERR_INVALID_ARGUMENT;
+    return result;
 }

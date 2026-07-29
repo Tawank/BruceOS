@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "args.h"
 #include "core_sdk/app_runner.h"
 #include "core_sdk/display.h"
 #include "core_sdk/image.h"
@@ -12,7 +13,22 @@
 #include "core_sdk/storage.h"
 
 int image_viewer_app_main(int argc, char **argv) {
-    if (argc < 2 || argv == NULL || argv[1] == NULL || !image__is_supported_path(argv[1])) {
+    ArgParser *parser = ap_new_parser();
+    if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
+    ap_set_helptext(parser, "Display an image until an input event is received.");
+    ap_add_required_arg(parser, "path", "Path to a JPEG, PNG, or GIF image");
+    ap_unknown_options_as_args(parser);
+    ap_allow_extra_args(parser);
+    ap_first_pos_arg_ends_option_parsing(parser);
+    if (argc < 1 || !ap_parse(parser, argc, argv)) {
+        ap_status_t status = ap_get_status(parser);
+        ap_free(parser);
+        if (status == AP_STATUS_HELP || status == AP_STATUS_VERSION) return BRUCE_OK;
+        return status == AP_STATUS_NO_MEMORY ? BRUCE_ERR_NO_MEMORY : BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    const char *path = ap_get_arg(parser, "path");
+    ap_free(parser);
+    if (!image__is_supported_path(path)) {
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
 
@@ -23,7 +39,7 @@ int image_viewer_app_main(int argc, char **argv) {
     };
     bruce_result_t result = display__begin_frame();
     if (result == BRUCE_OK) result = display__fill_screen(options.background);
-    if (result == BRUCE_OK) result = image__draw_path(argv[1], &options, NULL);
+    if (result == BRUCE_OK) result = image__draw_path(path, &options, NULL);
     if (result == BRUCE_OK) {
         result = display__present();
     } else {
@@ -74,9 +90,19 @@ int image_loader__run_path(const char *path, const char *arg, bool in_background
 }
 
 int image_app_main(int argc, char **argv) {
-    if (argc < 2 || argv == NULL || argv[1] == NULL || argv[1][0] == '-') {
-        stdio__printf("usage: image /path/file.jpg|png|gif\n");
-        return BRUCE_ERR_INVALID_ARGUMENT;
+    ArgParser *parser = ap_new_parser();
+    if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
+    ap_set_helptext(parser, "Open an image in the image viewer.");
+    ap_add_required_arg(parser, "path", "Path to a JPEG, PNG, or GIF image");
+    ap_allow_extra_args(parser);
+    ap_first_pos_arg_ends_option_parsing(parser);
+    if (argc < 1 || !ap_parse(parser, argc, argv)) {
+        ap_status_t status = ap_get_status(parser);
+        ap_free(parser);
+        if (status == AP_STATUS_HELP || status == AP_STATUS_VERSION) return BRUCE_OK;
+        return status == AP_STATUS_NO_MEMORY ? BRUCE_ERR_NO_MEMORY : BRUCE_ERR_INVALID_ARGUMENT;
     }
-    return image_loader__run_path(argv[1], NULL, false);
+    char *path = ap_get_arg(parser, "path");
+    ap_free(parser);
+    return image_loader__run_path(path, NULL, false);
 }

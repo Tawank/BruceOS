@@ -160,8 +160,7 @@ target_include_directories(bruce_sdk_builtin_config_check PRIVATE
 add_library(bruce_sdk_builtin_wifi_check OBJECT "modules/wifi/wifi_app.c")
 target_include_directories(bruce_sdk_builtin_wifi_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
-                           "${CMAKE_CURRENT_LIST_DIR}/modules/wifi"
-                           "${CMAKE_CURRENT_LIST_DIR}/../components/args")
+                           "${CMAKE_CURRENT_LIST_DIR}/modules/wifi")
 
 add_library(bruce_sdk_builtin_webui_check OBJECT "modules/webui/webui_app.c")
 target_include_directories(bruce_sdk_builtin_webui_check PRIVATE
@@ -256,6 +255,26 @@ target_link_libraries(bruce_sdk_builtin_js_loader_check PRIVATE mquickjs)
 # The JS loader check target includes the generated mquickjs stdlib header,
 # so make sure the generator runs before it is compiled.
 add_dependencies(bruce_sdk_builtin_js_loader_check mquickjs_generate_stdlib)
+
+set(BRUCE_ARGS_SDK_CHECK_TARGETS
+    bruce_sdk_builtin_bnu_check
+    bruce_sdk_builtin_clock_check
+    bruce_sdk_builtin_config_check
+    bruce_sdk_builtin_wifi_check
+    bruce_sdk_builtin_webui_check
+    bruce_sdk_builtin_bluetooth_check
+    bruce_sdk_builtin_bluetooth_hid_check
+    bruce_sdk_builtin_ir_check
+    bruce_sdk_builtin_nrf24_check
+    bruce_sdk_builtin_image_loader_check
+    bruce_sdk_builtin_utils_terminal_check
+    bruce_sdk_builtin_notification_check
+    bruce_sdk_builtin_tcp_check
+    bruce_sdk_builtin_elf_loader_check
+    bruce_sdk_builtin_js_loader_check)
+foreach(target IN LISTS BRUCE_ARGS_SDK_CHECK_TARGETS)
+    target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../components/args")
+endforeach()
 
 # modules/selftest is intentionally NOT added to the core_sdk-only compile
 # check above: it is the one built-in explicitly permitted to include

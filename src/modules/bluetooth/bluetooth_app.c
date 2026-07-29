@@ -1,8 +1,8 @@
 #include "bluetooth_app.h"
 
 #include <stdio.h>
-#include <string.h>
 
+#include "args.h"
 #include "core_sdk/app_runner.h"
 #include "core_sdk/bluetooth.h"
 #include "core_sdk/dialog.h"
@@ -99,9 +99,24 @@ int bluetooth_app_main(int argc, char **argv) {
         }
         return 0;
     }
-    if (argc <= 1 || argv == NULL || argv[1] == NULL || strcmp(argv[1], "scan") == 0) {
-        return bluetooth_app__scan_terminal();
+
+    ArgParser *root = ap_new_parser();
+    if (root == NULL) return BRUCE_ERR_NO_MEMORY;
+    ap_set_helptext(root, "Scan for nearby Bluetooth Low Energy advertisements.");
+    ArgParser *scan = ap_new_cmd(root, "scan");
+    ap_set_helptext(scan, "List nearby BLE advertisements.");
+    if (!ap_parse(root, argc, argv)) {
+        ap_status_t status = ap_get_status(root);
+        if (status != AP_STATUS_HELP && status != AP_STATUS_VERSION)
+            ap_print_help(ap_get_cmd_parser(root) != NULL ? ap_get_cmd_parser(root) : root);
+        int result = status == AP_STATUS_HELP || status == AP_STATUS_VERSION
+                         ? BRUCE_OK
+                         : status == AP_STATUS_NO_MEMORY ? BRUCE_ERR_NO_MEMORY : BRUCE_ERR_INVALID_ARGUMENT;
+        ap_free(root);
+        return result;
     }
-    stdio__printf("Usage: bluetooth scan\n");
-    return BRUCE_ERR_INVALID_ARGUMENT;
+
+    int result = bluetooth_app__scan_terminal();
+    ap_free(root);
+    return result;
 }

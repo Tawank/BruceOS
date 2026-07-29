@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "args.h"
 #include "core_sdk/app_runner.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/http_server.h"
@@ -140,36 +141,46 @@ static int webui_app__gui(void) {
     return result;
 }
 
-static void webui_app__usage(void) {
-    stdio__printf("WebUI commands:\n");
-    stdio__printf("  webui start ap|sta\n");
-    stdio__printf("  webui status\n");
-    stdio__printf("  webui stop\n");
-}
-
 int webui_app_main(int argc, char **argv) {
     if (app_runner__args_have_gui(argc, argv)) return webui_app__gui();
-    if (argc <= 1 || argv == NULL || argv[1] == NULL || strcmp(argv[1], "status") == 0) {
-        return webui_app__status(false);
-    }
-    if (strcmp(argv[1], "stop") == 0) {
-        bruce_result_t result = http_server__stop();
-        if (result == BRUCE_OK) stdio__printf("WebUI stopped\n");
+
+    ArgParser *root = ap_new_parser();
+    if (root == NULL) return BRUCE_ERR_NO_MEMORY;
+    ap_set_helptext(root, "Start, stop, and inspect the browser-based WebUI service.");
+    ArgParser *start = ap_new_cmd(root, "start");
+    ArgParser *status = ap_new_cmd(root, "status");
+    ArgParser *stop = ap_new_cmd(root, "stop");
+    ap_set_helptext(start, "Start WebUI using an access point or existing Wi-Fi.");
+    ap_add_required_arg(start, "mode", "Network mode: ap or sta");
+    ap_set_helptext(status, "Show the WebUI service status.");
+    ap_set_helptext(stop, "Stop the WebUI service.");
+    if (!ap_parse(root, argc, argv)) {
+        ap_status_t parse_status = ap_get_status(root);
+        if (parse_status != AP_STATUS_HELP && parse_status != AP_STATUS_VERSION)
+            ap_print_help(ap_get_cmd_parser(root) != NULL ? ap_get_cmd_parser(root) : root);
+        int result = parse_status == AP_STATUS_HELP || parse_status == AP_STATUS_VERSION
+                         ? BRUCE_OK
+                         : parse_status == AP_STATUS_NO_MEMORY ? BRUCE_ERR_NO_MEMORY : BRUCE_ERR_INVALID_ARGUMENT;
+        ap_free(root);
         return result;
     }
-    if (strcmp(argv[1], "start") == 0) {
-        if (argc != 3) {
-            webui_app__usage();
-            return BRUCE_ERR_INVALID_ARGUMENT;
+
+    int result;
+    ArgParser *command = ap_get_cmd_parser(root);
+    if (command == NULL || command == status) {
+        result = webui_app__status(false);
+    } else if (command == stop) {
+        result = http_server__stop();
+        if (result == BRUCE_OK) stdio__printf("WebUI stopped\n");
+    } else {
+        const char *mode = ap_get_arg(start, "mode");
+        if (strcmp(mode, "ap") == 0) result = webui_app__start(WEBUI_APP_NETWORK_AP, false);
+        else if (strcmp(mode, "sta") == 0) result = webui_app__start(WEBUI_APP_NETWORK_EXISTING, false);
+        else {
+            ap_print_help(start);
+            result = BRUCE_ERR_INVALID_ARGUMENT;
         }
-        if (strcmp(argv[2], "ap") == 0) {
-            return webui_app__start(WEBUI_APP_NETWORK_AP, false);
-        } else if (strcmp(argv[2], "sta") == 0) {
-            return webui_app__start(WEBUI_APP_NETWORK_EXISTING, false);
-        }
-        webui_app__usage();
-        return BRUCE_ERR_INVALID_ARGUMENT;
     }
-    webui_app__usage();
-    return strcmp(argv[1], "help") == 0 ? BRUCE_OK : BRUCE_ERR_INVALID_ARGUMENT;
+    ap_free(root);
+    return result;
 }

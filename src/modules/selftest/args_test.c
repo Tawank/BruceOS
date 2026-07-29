@@ -4,6 +4,20 @@
 #include <string.h>
 
 #include "args.h"
+#include "modules/bluetooth/bluetooth_app.h"
+#include "modules/bluetooth_hid/bluetooth_hid_app.h"
+#include "modules/bnu/bnu_app.h"
+#include "modules/clock/clock_app.h"
+#include "modules/config/config_app.h"
+#include "modules/ir/ir_app.h"
+#include "modules/loaders/elf/elf_loader_app.h"
+#include "modules/loaders/image/image_loader_app.h"
+#include "modules/loaders/js/js_loader_app.h"
+#include "modules/nrf24/nrf24_app.h"
+#include "modules/tcp/tcp_app.h"
+#include "modules/utils/notification/notification_app.h"
+#include "modules/utils/terminal/terminal_app.h"
+#include "modules/webui/webui_app.h"
 #include "modules/wifi/wifi_app.h"
 
 static bool selftest__args_named_positionals(void) {
@@ -47,6 +61,48 @@ static bool selftest__args_nonfatal_status(void) {
     return missing_ok && help_ok;
 }
 
+static bool selftest__args_trailing_positionals(void) {
+    ArgParser *parser = ap_new_parser();
+    if (parser == NULL) return false;
+    ap_add_required_arg(parser, "path", "Input path");
+    ap_allow_extra_args(parser);
+    ap_first_pos_arg_ends_option_parsing(parser);
+    char *argv[] = {"loader", "/apps/example.elf", "--literal", "two words"};
+    bool parsed = ap_parse(parser, 4, argv);
+    bool ok = parsed && strcmp(ap_get_arg(parser, "path"), "/apps/example.elf") == 0 &&
+              ap_count_args(parser) == 3 && strcmp(ap_get_arg_at_index(parser, 1), "--literal") == 0 &&
+              strcmp(ap_get_arg_at_index(parser, 2), "two words") == 0;
+    ap_free(parser);
+    return ok;
+}
+
+static bool selftest__args_module_help(void) {
+    char *argv[] = {"app", "--help"};
+    typedef int (*entry_t)(int argc, char **argv);
+    static const entry_t entries[] = {
+        bluetooth_app_main,
+        bluetooth_hid_app_main,
+        bnu_pwd_app_main,
+        clock_app_main,
+        config_app_main,
+        ir_app_main,
+        elf_loader__app_main,
+        image_app_main,
+        image_viewer_app_main,
+        js_loader__app_main,
+        nrf24_app_main,
+        notification_app_main,
+        tcp_app_main,
+        terminal_app_main,
+        webui_app_main,
+        wifi_app_main,
+    };
+    for (size_t i = 0; i < sizeof(entries) / sizeof(entries[0]); ++i) {
+        if (entries[i](2, argv) != BRUCE_OK) return false;
+    }
+    return true;
+}
+
 static bool selftest__args_wifi_integration(void) {
     char *help_argv[] = {"wifi", "help", "connect"};
     char *missing_argv[] = {"wifi", "add", "ssid-only"};
@@ -57,6 +113,7 @@ static bool selftest__args_wifi_integration(void) {
 
 bool selftest__run_args_case(void) {
     bool ok = selftest__args_named_positionals() && selftest__args_nonfatal_status() &&
+              selftest__args_trailing_positionals() && selftest__args_module_help() &&
               selftest__args_wifi_integration();
     printf("[selftest] args: %s\n", ok ? "OK" : "failed");
     return ok;

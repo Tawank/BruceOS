@@ -1,6 +1,6 @@
 #include "config_app.h"
 
-#include "core_sdk/app_runner.h"
+#include "args.h"
 #include "core_sdk/clock.h"
 #include "core_sdk/config.h"
 #include "core_sdk/dialog.h"
@@ -113,55 +113,119 @@ static int config_app__clock_gui(void) {
 }
 
 static bool config_app__parse_on_off(const char *text, bool *out) {
+    if (text == NULL) return false;
     if (strcmp(text, "on") == 0) *out = true;
     else if (strcmp(text, "off") == 0) *out = false;
     else return false;
     return true;
 }
 
-static int config_app__clock_cli(int argc, char **argv) {
-    if (argc <= 3 || strcmp(argv[3], "show") == 0) return config_app__show_clock();
-    const char *action = argv[3];
-    if (strcmp(action, "sync") == 0) {
+static int config_app__clock_cli(ArgParser *clock_parser, ArgParser *show, ArgParser *sync, ArgParser *ntp,
+                                 ArgParser *timezone, ArgParser *dst, ArgParser *format, ArgParser *set) {
+    ArgParser *action = ap_get_cmd_parser(clock_parser);
+    if (action == NULL || action == show) return config_app__show_clock();
+    if (action == sync) {
         bruce_result_t result = clock__sync_ntp(10000);
         stdio__printf(result == BRUCE_OK ? "Clock synchronized\n" : "NTP synchronization failed: %d\n", result);
         return result;
     }
-    if (strcmp(action, "ntp") == 0 && argc == 5) {
+    if (action == ntp) {
         bool value;
-        return config_app__parse_on_off(argv[4], &value) ? config__set_automatic_time_update_via_ntp(value) :
-                                                           BRUCE_ERR_INVALID_ARGUMENT;
+        return config_app__parse_on_off(ap_get_arg(ntp, "state"), &value)
+                   ? config__set_automatic_time_update_via_ntp(value)
+                   : BRUCE_ERR_INVALID_ARGUMENT;
     }
-    if (strcmp(action, "timezone") == 0 && argc == 5) {
+    if (action == timezone) {
+        const char *offset = ap_get_arg(timezone, "offset");
+        if (offset == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
         char *end = NULL;
-        float value = strtof(argv[4], &end);
-        if (end == argv[4] || *end != '\0' || value < -12.0f || value > 14.0f) return BRUCE_ERR_INVALID_ARGUMENT;
+        float value = strtof(offset, &end);
+        if (end == offset || *end != '\0' || value < -12.0f || value > 14.0f) return BRUCE_ERR_INVALID_ARGUMENT;
         return config__set_tmz(value);
     }
-    if (strcmp(action, "dst") == 0 && argc == 5) {
+    if (action == dst) {
         bool value;
-        return config_app__parse_on_off(argv[4], &value) ? config__set_dst(value) : BRUCE_ERR_INVALID_ARGUMENT;
+        return config_app__parse_on_off(ap_get_arg(dst, "state"), &value) ? config__set_dst(value)
+                                                                          : BRUCE_ERR_INVALID_ARGUMENT;
     }
-    if (strcmp(action, "format") == 0 && argc == 5) {
-        if (strcmp(argv[4], "12") == 0) return config__set_clock24hr(false);
-        if (strcmp(argv[4], "24") == 0) return config__set_clock24hr(true);
+    if (action == format) {
+        const char *value = ap_get_arg(format, "hours");
+        if (value == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+        if (strcmp(value, "12") == 0) return config__set_clock24hr(false);
+        if (strcmp(value, "24") == 0) return config__set_clock24hr(true);
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
-    if (strcmp(action, "set") == 0 && argc == 6) {
+    if (action == set) {
         bruce_clock_datetime_t value;
-        if (!config_app__parse_datetime(argv[4], argv[5], &value)) return BRUCE_ERR_INVALID_ARGUMENT;
+        if (!config_app__parse_datetime(ap_get_arg(set, "date"), ap_get_arg(set, "time"), &value))
+            return BRUCE_ERR_INVALID_ARGUMENT;
         bruce_result_t result = clock__set_local(&value);
         if (result == BRUCE_OK) (void)config__set_automatic_time_update_via_ntp(false);
         return result;
     }
-    stdio__printf("config system clock [show|sync|ntp on|off|timezone OFFSET|dst on|off|format 12|24|set DATE TIME]\n");
     return BRUCE_ERR_INVALID_ARGUMENT;
 }
 
+static void config_app__add_gui_option(ArgParser *parser) {
+    ap_add_flag(parser, "gui");
+    ap_set_opt_help(parser, "gui", "Use GUI interaction mode");
+}
+
 int config_app_main(int argc, char **argv) {
-    if (argc >= 3 && strcmp(argv[1], "system") == 0 && strcmp(argv[2], "clock") == 0) {
-        return app_runner__args_have_gui(argc, argv) ? config_app__clock_gui() : config_app__clock_cli(argc, argv);
+    ArgParser *root = ap_new_parser();
+    if (root == NULL) return BRUCE_ERR_NO_MEMORY;
+    ap_set_helptext(root, "Configure BruceOS settings.");
+    config_app__add_gui_option(root);
+
+    ArgParser *system = ap_new_cmd(root, "system");
+    ArgParser *clock = system != NULL ? ap_new_cmd(system, "clock") : NULL;
+    ArgParser *show = clock != NULL ? ap_new_cmd(clock, "show") : NULL;
+    ArgParser *sync = clock != NULL ? ap_new_cmd(clock, "sync") : NULL;
+    ArgParser *ntp = clock != NULL ? ap_new_cmd(clock, "ntp") : NULL;
+    ArgParser *timezone = clock != NULL ? ap_new_cmd(clock, "timezone") : NULL;
+    ArgParser *dst = clock != NULL ? ap_new_cmd(clock, "dst") : NULL;
+    ArgParser *format = clock != NULL ? ap_new_cmd(clock, "format") : NULL;
+    ArgParser *set = clock != NULL ? ap_new_cmd(clock, "set") : NULL;
+    ArgParser *parsers[] = {system, clock, show, sync, ntp, timezone, dst, format, set};
+    for (size_t i = 0; i < sizeof(parsers) / sizeof(parsers[0]); ++i) {
+        if (parsers[i] == NULL) {
+            ap_free(root);
+            return BRUCE_ERR_NO_MEMORY;
+        }
+        config_app__add_gui_option(parsers[i]);
     }
-    stdio__printf("Supported: config system clock [--gui]\n");
-    return BRUCE_ERR_INVALID_ARGUMENT;
+
+    ap_set_helptext(system, "Configure system settings.");
+    ap_set_helptext(clock, "Configure the system clock and local-time display.");
+    ap_set_helptext(show, "Show clock configuration and local time.");
+    ap_set_helptext(sync, "Synchronize the clock from NTP now.");
+    ap_set_helptext(ntp, "Enable or disable automatic NTP updates.");
+    ap_add_optional_arg(ntp, "state", "on or off (required outside GUI mode)");
+    ap_set_helptext(timezone, "Set the local UTC offset.");
+    ap_add_optional_arg(timezone, "offset", "UTC offset from -12 to +14 (required outside GUI mode)");
+    ap_unknown_options_as_args(timezone);
+    ap_set_helptext(dst, "Enable or disable daylight savings.");
+    ap_add_optional_arg(dst, "state", "on or off (required outside GUI mode)");
+    ap_set_helptext(format, "Select 12-hour or 24-hour display.");
+    ap_add_optional_arg(format, "hours", "12 or 24 (required outside GUI mode)");
+    ap_set_helptext(set, "Set local date and time manually.");
+    ap_add_optional_arg(set, "date", "Date as YYYY-MM-DD (required outside GUI mode)");
+    ap_add_optional_arg(set, "time", "Time as HH:MM:SS (required outside GUI mode)");
+
+    if (!ap_parse(root, argc, argv)) {
+        ap_status_t status = ap_get_status(root);
+        ap_free(root);
+        if (status == AP_STATUS_HELP || status == AP_STATUS_VERSION) return BRUCE_OK;
+        return status == AP_STATUS_NO_MEMORY ? BRUCE_ERR_NO_MEMORY : BRUCE_ERR_INVALID_ARGUMENT;
+    }
+
+    bool hierarchy_found = ap_get_cmd_parser(root) == system && ap_get_cmd_parser(system) == clock;
+    bool gui = ap_found(root, "gui") || ap_found(system, "gui") || ap_found(clock, "gui");
+    ArgParser *action = hierarchy_found ? ap_get_cmd_parser(clock) : NULL;
+    if (action != NULL) gui = gui || ap_found(action, "gui");
+    int result = !hierarchy_found ? BRUCE_ERR_INVALID_ARGUMENT
+                                  : gui ? config_app__clock_gui()
+                                        : config_app__clock_cli(clock, show, sync, ntp, timezone, dst, format, set);
+    ap_free(root);
+    return result;
 }

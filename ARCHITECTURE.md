@@ -129,7 +129,11 @@ commands, options, or named positional arguments. The parser uses task-owned
 Core memory, routes help and diagnostics through Bruce stdio, and reports help,
 version, invalid input, and allocation failure as statuses instead of exiting
 the application task. Named positional getters return borrowed `argv` strings
-and return `NULL` when an optional value is absent.
+and return `NULL` when an optional value is absent. Wi-Fi, Bluetooth, clock,
+configuration, IR, NRF24, TCP, WebUI, BNU, notification, image, ELF/JavaScript
+loader, and terminal commands all use this parser. Commands that forward an
+argument remainder explicitly allow trailing positionals; option parsing can
+stop at the first positional so forwarded `--` tokens remain data.
 
 Resolution is deterministic and never scans directories:
 

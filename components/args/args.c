@@ -86,6 +86,7 @@ struct ArgParser {
     bool enable_help_command;
     bool first_pos_arg_ends_option_parsing;
     bool all_args_as_pos_args;
+    bool allow_extra_args;
     bool unknown_options_as_args;
 };
 
@@ -264,6 +265,10 @@ void ap_first_pos_arg_ends_option_parsing(ArgParser *parser) {
 
 void ap_all_args_as_pos_args(ArgParser *parser) {
     if (parser != NULL) parser->all_args_as_pos_args = true;
+}
+
+void ap_allow_extra_args(ArgParser *parser) {
+    if (parser != NULL) parser->allow_extra_args = true;
 }
 
 void ap_unknown_options_as_args(ArgParser *parser) {
@@ -578,6 +583,7 @@ void ap_print_help(ArgParser *parser) {
     for (int i = 0; i < parser->positional_count; ++i) {
         stdio__printf(parser->positionals[i].required ? " <%s>" : " [%s]", parser->positionals[i].name);
     }
+    if (parser->allow_extra_args) stdio__printf(" [args...]");
     if (parser->option_count > 0) stdio__printf(" [options]");
     stdio__printf("\n");
     if (parser->helptext != NULL && parser->helptext[0] != '\0') stdio__printf("\n%s\n", parser->helptext);
@@ -592,6 +598,7 @@ void ap_print_help(ArgParser *parser) {
                 ap_positional_t *positional = &command->parser->positionals[j];
                 stdio__printf(positional->required ? " <%s>" : " [%s]", positional->name);
             }
+            if (command->parser->allow_extra_args) stdio__printf(" [args...]");
             if (command->parser->command_count > 0) stdio__printf(" <command>");
             if (command->parser->helptext != NULL) stdio__printf("\t%s", command->parser->helptext);
             stdio__printf("\n");
@@ -702,7 +709,7 @@ static bool ap_handle_short_options(ArgParser *parser, const char *text, int arg
 
 static bool ap_validate_positionals(ArgParser *parser) {
     if (parser->positional_count == 0) {
-        if (parser->parsed_arg_count == 0 || parser->all_args_as_pos_args) return true;
+        if (parser->parsed_arg_count == 0 || parser->all_args_as_pos_args || parser->allow_extra_args) return true;
         ap_fail(
             parser,
             AP_STATUS_INVALID_ARGUMENT,
@@ -711,7 +718,7 @@ static bool ap_validate_positionals(ArgParser *parser) {
         );
         return false;
     }
-    if (parser->parsed_arg_count > parser->positional_count) {
+    if (!parser->allow_extra_args && parser->parsed_arg_count > parser->positional_count) {
         ap_fail(parser, AP_STATUS_INVALID_ARGUMENT, "unexpected argument '%s'", parser->parsed_args[parser->positional_count]);
         return false;
     }

@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "args.h"
 #include "core_sdk/config.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/display.h"
@@ -164,22 +165,53 @@ static void terminal__submit(terminal__state_t *state) {
     state->dirty = true;
 }
 
-/* Rebuilds a shell-style line from the user arguments after argv[0] so startup
- * args run exactly like a typed command (serial_commands__run_line() -> app_runner__parse_args()).
- * Tokens containing spaces/tabs are single-quoted to survive the re-split. */
-static void terminal__argv_to_line(int argc, char **argv, char *out, size_t out_size) {
+/* Rebuilds a shell-style line from startup argv so the terminal submission
+ * path can tokenize it again without changing argument boundaries. */
+static bool terminal__args_to_line(ArgParser *parser, char *out, size_t out_size) {
     size_t used = 0;
-    for (int i = 0; i < argc && used + 1 < out_size; ++i) {
-        bool quote = strpbrk(argv[i], " \t") != NULL;
-        if (quote) out[used++] = '\'';
-        for (const char *p = argv[i]; *p != '\0' && used + 1 < out_size; ++p) { out[used++] = *p; }
-        if (quote && used + 1 < out_size) out[used++] = '\'';
-        if (i + 1 < argc && used + 1 < out_size) out[used++] = ' ';
+    int argc = ap_count_args(parser);
+    for (int i = 0; i < argc; ++i) {
+        const char *arg = ap_get_arg_at_index(parser, i);
+        size_t needed = i > 0 ? 1u : 0u;
+        needed += 2;
+        for (const char *p = arg; *p != '\0'; ++p) needed += (*p == '\\' || *p == '"') ? 2u : 1u;
+        if (needed >= out_size - used) return false;
+        if (i > 0) out[used++] = ' ';
+        out[used++] = '"';
+        for (const char *p = arg; *p != '\0'; ++p) {
+            if (*p == '\\' || *p == '"') out[used++] = '\\';
+            out[used++] = *p;
+        }
+        out[used++] = '"';
     }
     out[used] = '\0';
+    return true;
 }
 
 int terminal_app_main(int argc, char **argv) {
+    char startup_line[TERMINAL__LINE_CAPACITY] = {0};
+    bool has_startup_command = false;
+    ArgParser *parser = ap_new_parser();
+    if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
+    ap_set_helptext(parser, "Open the terminal and optionally run a startup command.");
+    ap_add_optional_arg(parser, "command", "Command to run on startup");
+    ap_unknown_options_as_args(parser);
+    ap_allow_extra_args(parser);
+    ap_first_pos_arg_ends_option_parsing(parser);
+    if (!ap_parse(parser, argc, argv)) {
+        ap_status_t status = ap_get_status(parser);
+        ap_free(parser);
+        if (status == AP_STATUS_HELP) return 0;
+        return status == AP_STATUS_NO_MEMORY ? BRUCE_ERR_NO_MEMORY : BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    const char *command = ap_get_arg(parser, "command");
+    has_startup_command = command != NULL;
+    if (has_startup_command && !terminal__args_to_line(parser, startup_line, sizeof(startup_line))) {
+        ap_free(parser);
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    ap_free(parser);
+
     terminal__state_t state = {0};
     state.child = BRUCE_TASK_ID_INVALID;
     state.transcript = memory__calloc(TERMINAL__TRANSCRIPT_CAPACITY, 1);
@@ -191,8 +223,8 @@ int terminal_app_main(int argc, char **argv) {
     terminal__append_text(&state, "Bruce terminal\nType a command and press Enter.\n");
     (void)input__flush();
 
-    if (argc > 1) {
-        terminal__argv_to_line(argc - 1, argv + 1, state.input, sizeof(state.input));
+    if (has_startup_command) {
+        memcpy(state.input, startup_line, sizeof(state.input));
         state.input_size = strlen(state.input);
         terminal__submit(&state);
     }

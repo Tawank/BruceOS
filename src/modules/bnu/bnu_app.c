@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "args.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/result.h"
 #include "core_sdk/stdio.h"
@@ -13,9 +14,17 @@ static char s_working_directory[BRUCE_STORAGE_PATH_MAX] = "/";
 
 const char *bnu__get_working_directory(void) { return s_working_directory; }
 
-static int bnu__usage(const char *command, const char *arguments) {
-    stdio__printf("usage: %s%s%s\n", command, arguments[0] != '\0' ? " " : "", arguments);
-    return BRUCE_ERR_INVALID_ARGUMENT;
+static int bnu__parse_failure(ArgParser *parser) {
+    ap_status_t status = ap_get_status(parser);
+    ap_free(parser);
+    if (status == AP_STATUS_HELP || status == AP_STATUS_VERSION) return BRUCE_OK;
+    return status == AP_STATUS_NO_MEMORY ? BRUCE_ERR_NO_MEMORY : BRUCE_ERR_INVALID_ARGUMENT;
+}
+
+static ArgParser *bnu__new_parser(const char *helptext) {
+    ArgParser *parser = ap_new_parser();
+    if (parser != NULL) ap_set_helptext(parser, helptext);
+    return parser;
 }
 
 static bool bnu__resolve_path(const char *path, char *out_path) {
@@ -59,16 +68,25 @@ static bool bnu__resolve_path(const char *path, char *out_path) {
 }
 
 int bnu_pwd_app_main(int argc, char **argv) {
-    (void)argv;
-    if (argc != 1) return bnu__usage("pwd", "");
+    ArgParser *parser = bnu__new_parser("Print the current working directory.");
+    if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
+    if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
+    ap_free(parser);
     stdio__printf("%s\n", s_working_directory);
     return BRUCE_OK;
 }
 
 int bnu_cd_app_main(int argc, char **argv) {
-    if (argc < 1 || argc > 2) return bnu__usage("cd", "[directory]");
+    ArgParser *parser = bnu__new_parser("Change the current working directory.");
+    if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
+    ap_add_optional_arg(parser, "directory", "Directory path (defaults to /)");
+    ap_unknown_options_as_args(parser);
+    if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
     char path[BRUCE_STORAGE_PATH_MAX];
-    if (!bnu__resolve_path(argc == 2 ? argv[1] : "/", path)) return BRUCE_ERR_INVALID_PATH;
+    char *directory = ap_get_arg(parser, "directory");
+    bool resolved = bnu__resolve_path(directory != NULL ? directory : "/", path);
+    ap_free(parser);
+    if (!resolved) return BRUCE_ERR_INVALID_PATH;
     size_t count = 0;
     bruce_result_t result = storage__list(path, NULL, 0, &count);
     if (result != BRUCE_OK) {
@@ -80,9 +98,15 @@ int bnu_cd_app_main(int argc, char **argv) {
 }
 
 int bnu_ls_app_main(int argc, char **argv) {
-    if (argc < 1 || argc > 2) return bnu__usage("ls", "[path]");
+    ArgParser *parser = bnu__new_parser("List files and directories.");
+    if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
+    ap_add_optional_arg(parser, "path", "Path to list (defaults to the working directory)");
+    ap_unknown_options_as_args(parser);
+    if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
     char path[BRUCE_STORAGE_PATH_MAX];
-    if (!bnu__resolve_path(argc == 2 ? argv[1] : NULL, path)) return BRUCE_ERR_INVALID_PATH;
+    bool resolved = bnu__resolve_path(ap_get_arg(parser, "path"), path);
+    ap_free(parser);
+    if (!resolved) return BRUCE_ERR_INVALID_PATH;
     size_t count = 0;
     bruce_result_t result = storage__list(path, NULL, 0, &count);
     if (result != BRUCE_OK) {
@@ -118,8 +142,10 @@ static void bnu__print_memory_row(const char *name, size_t total, size_t free_si
 }
 
 int bnu_free_app_main(int argc, char **argv) {
-    (void)argv;
-    if (argc != 1) return bnu__usage("free", "");
+    ArgParser *parser = bnu__new_parser("Show internal memory and PSRAM usage.");
+    if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
+    if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
+    ap_free(parser);
     bruce_memory_stats_t stats;
     bruce_result_t result = memory__get_stats(&stats);
     if (result != BRUCE_OK) return result;
@@ -143,8 +169,10 @@ static const char *bnu__task_state_name(bruce_task_state_t state) {
 }
 
 int bnu_top_app_main(int argc, char **argv) {
-    (void)argv;
-    if (argc != 1) return bnu__usage("top", "");
+    ArgParser *parser = bnu__new_parser("Show runtime task resource usage.");
+    if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
+    if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
+    ap_free(parser);
 
     bruce_task_snapshot_t tasks[16];
     size_t task_count = 0;
@@ -172,9 +200,15 @@ int bnu_top_app_main(int argc, char **argv) {
 }
 
 int bnu_mkdir_app_main(int argc, char **argv) {
-    if (argc != 2) return bnu__usage("mkdir", "<directory>");
+    ArgParser *parser = bnu__new_parser("Create a directory.");
+    if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
+    ap_add_required_arg(parser, "directory", "Directory path to create");
+    ap_unknown_options_as_args(parser);
+    if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
     char path[BRUCE_STORAGE_PATH_MAX];
-    if (!bnu__resolve_path(argv[1], path)) return BRUCE_ERR_INVALID_PATH;
+    bool resolved = bnu__resolve_path(ap_get_arg(parser, "directory"), path);
+    ap_free(parser);
+    if (!resolved) return BRUCE_ERR_INVALID_PATH;
     bruce_result_t result = storage__mkdir(path);
     if (result != BRUCE_OK) {
         stdio__printf("mkdir: %s: error %d\n", path, result);
@@ -184,9 +218,15 @@ int bnu_mkdir_app_main(int argc, char **argv) {
 }
 
 int bnu_touch_app_main(int argc, char **argv) {
-    if (argc != 2) return bnu__usage("touch", "<file>");
+    ArgParser *parser = bnu__new_parser("Create a file if it does not exist.");
+    if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
+    ap_add_required_arg(parser, "file", "File path to create");
+    ap_unknown_options_as_args(parser);
+    if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
     char path[BRUCE_STORAGE_PATH_MAX];
-    if (!bnu__resolve_path(argv[1], path)) return BRUCE_ERR_INVALID_PATH;
+    bool resolved = bnu__resolve_path(ap_get_arg(parser, "file"), path);
+    ap_free(parser);
+    if (!resolved) return BRUCE_ERR_INVALID_PATH;
     bruce_file_id_t file;
     bruce_result_t result = storage__open(path, BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE, &file);
     if (result != BRUCE_OK) {

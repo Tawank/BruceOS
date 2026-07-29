@@ -29,6 +29,9 @@ void ap_print_help(ArgParser *parser);
 
 void ap_first_pos_arg_ends_option_parsing(ArgParser *parser);
 void ap_all_args_as_pos_args(ArgParser *parser);
+/* Accepts positional arguments beyond the declared named positionals. They
+ * remain available through ap_get_arg_at_index()/ap_get_args(). */
+void ap_allow_extra_args(ArgParser *parser);
 /* Treats unregistered option-looking tokens as positional arguments while
  * continuing to recognize registered options. Useful for passwords, paths,
  * and other free-form positional values that may begin with '-'. */

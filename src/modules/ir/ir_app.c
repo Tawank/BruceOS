@@ -6,6 +6,7 @@
 #include <string.h>
 #include <strings.h>
 
+#include "args.h"
 #include "core_sdk/app_runner.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/input.h"
@@ -110,18 +111,6 @@ static bool ir_app__parse_u32(const char *text, uint32_t maximum, uint32_t *out)
     if (end == text || *end != '\0' || parsed > maximum) return false;
     *out = (uint32_t)parsed;
     return true;
-}
-
-static void ir_app__usage(void) {
-    stdio__printf("IR commands:\n");
-    stdio__printf("  ir rx [raw] [timeout_seconds]\n");
-    stdio__printf("  ir learn <absolute_path> <button_name> [raw] [timeout_seconds]\n");
-    stdio__printf("  ir tx <protocol> <hex_data> [bits] [repeats]\n");
-    stdio__printf("  ir tx <protocol> <address> <command>\n");
-    stdio__printf("  ir tx_raw <frequency_hz> <mark_us> <space_us> [...]\n");
-    stdio__printf("  ir tx_from_file <absolute_path> [repeats]\n");
-    stdio__printf("  ir tvbgone <na|eu>\n");
-    stdio__printf("  ir jam <frequency_hz> <seconds> [basic|enhanced|sweep|random|empty]\n");
 }
 
 static bruce_result_t ir_app__write_all(bruce_file_id_t file, const char *text, size_t size) {
@@ -640,16 +629,17 @@ static int ir_app__gui(void) {
     }
 }
 
-static int ir_app__rx(int argc, char **argv) {
+static int ir_app__rx(ArgParser *parser) {
     bool raw = false;
     uint32_t timeout_seconds = 10;
-    int index = 2;
-    if (argc > index && strcmp(argv[index], "raw") == 0) {
+    int index = 0;
+    if (ap_count_args(parser) > index && strcmp(ap_get_arg_at_index(parser, index), "raw") == 0) {
         raw = true;
         index++;
     }
-    if (argc > index) {
-        if (!ir_app__parse_u32(argv[index], UINT32_MAX / 1000u, &timeout_seconds) || timeout_seconds == 0) {
+    if (ap_count_args(parser) > index) {
+        if (!ir_app__parse_u32(ap_get_arg_at_index(parser, index), UINT32_MAX / 1000u, &timeout_seconds) ||
+            timeout_seconds == 0) {
             return BRUCE_ERR_INVALID_ARGUMENT;
         }
     }
@@ -657,28 +647,35 @@ static int ir_app__rx(int argc, char **argv) {
     return ir_app__receive(raw, timeout_seconds * 1000u, false);
 }
 
-static int ir_app__tx(int argc, char **argv) {
-    if (argc < 4) return BRUCE_ERR_INVALID_ARGUMENT;
-    if (argc == 5 && strlen(argv[3]) == 8 && strlen(argv[4]) == 8) {
-        return ir__transmit_parsed(argv[2], argv[3], argv[4], 0);
+static int ir_app__tx(ArgParser *parser) {
+    const char *protocol = ap_get_arg(parser, "protocol");
+    const char *value = ap_get_arg(parser, "data_or_address");
+    const char *third = ap_get_arg(parser, "bits_or_command");
+    const char *fourth = ap_get_arg(parser, "repeats");
+    if (protocol == NULL || value == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    if (third != NULL && fourth == NULL && strlen(value) == 8 && strlen(third) == 8) {
+        return ir__transmit_parsed(protocol, value, third, 0);
     }
     uint32_t bits = 32;
     uint32_t repeats = 0;
-    if ((argc > 4 && !ir_app__parse_u32(argv[4], 32, &bits)) || bits == 0 ||
-        (argc > 5 && !ir_app__parse_u32(argv[5], UINT8_MAX, &repeats)))
+    if ((third != NULL && !ir_app__parse_u32(third, 32, &bits)) || bits == 0 ||
+        (fourth != NULL && !ir_app__parse_u32(fourth, UINT8_MAX, &repeats)))
         return BRUCE_ERR_INVALID_ARGUMENT;
-    return ir__transmit(argv[3], argv[2], (uint8_t)bits, (uint8_t)repeats);
+    return ir__transmit(value, protocol, (uint8_t)bits, (uint8_t)repeats);
 }
 
-static int ir_app__tx_raw(int argc, char **argv) {
-    if (argc < 4) return BRUCE_ERR_INVALID_ARGUMENT;
+static int ir_app__tx_raw(ArgParser *parser) {
+    int argc = ap_count_args(parser);
+    if (argc < 2) return BRUCE_ERR_INVALID_ARGUMENT;
     uint32_t frequency = 0;
-    if (!ir_app__parse_u32(argv[2], 100000, &frequency)) return BRUCE_ERR_INVALID_ARGUMENT;
+    if (!ir_app__parse_u32(ap_get_arg_at_index(parser, 0), 100000, &frequency)) {
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
     uint32_t *timings = memory__malloc(BRUCE_IR_MAX_RAW_TIMINGS * sizeof(*timings));
     if (timings == NULL) return BRUCE_ERR_NO_MEMORY;
     size_t count = 0;
-    for (int arg = 3; arg < argc; ++arg) {
-        const char *cursor = argv[arg];
+    for (int arg = 1; arg < argc; ++arg) {
+        const char *cursor = ap_get_arg_at_index(parser, arg);
         while (*cursor != '\0') {
             while (*cursor == ' ' || *cursor == '\t' || *cursor == ',') cursor++;
             if (*cursor == '\0') break;
@@ -698,12 +695,15 @@ static int ir_app__tx_raw(int argc, char **argv) {
     return result;
 }
 
-static int ir_app__learn_cli(int argc, char **argv) {
-    if (argc < 4 || argv[2][0] != '/') return BRUCE_ERR_INVALID_ARGUMENT;
-    bool raw = argc > 4 && strcmp(argv[4], "raw") == 0;
-    int timeout_index = raw ? 5 : 4;
+static int ir_app__learn_cli(ArgParser *parser) {
+    const char *path = ap_get_arg(parser, "absolute_path");
+    const char *button = ap_get_arg(parser, "button_name");
+    if (path == NULL || button == NULL || path[0] != '/') return BRUCE_ERR_INVALID_ARGUMENT;
+    const char *format_or_timeout = ap_get_arg(parser, "raw_or_timeout");
+    bool raw = format_or_timeout != NULL && strcmp(format_or_timeout, "raw") == 0;
+    const char *timeout_arg = raw ? ap_get_arg(parser, "timeout_seconds") : format_or_timeout;
     uint32_t timeout = 10;
-    if (argc > timeout_index && !ir_app__parse_u32(argv[timeout_index], UINT32_MAX / 1000u, &timeout)) {
+    if (timeout_arg != NULL && !ir_app__parse_u32(timeout_arg, UINT32_MAX / 1000u, &timeout)) {
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
     char *capture = memory__malloc(IR_APP_CAPTURE_SIZE);
@@ -712,12 +712,12 @@ static int ir_app__learn_cli(int argc, char **argv) {
     bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
     if (result == BRUCE_OK) {
         result = storage__open(
-            argv[2], BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE | BRUCE_STORAGE_OPEN_TRUNCATE, &file
+            path, BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE | BRUCE_STORAGE_OPEN_TRUNCATE, &file
         );
     }
     static const char header[] = "Filetype: Bruce IR File\nVersion: 1\n#\n";
     if (result == BRUCE_OK) result = ir_app__write_all(file, header, sizeof(header) - 1u);
-    if (result == BRUCE_OK) result = ir_app__write_capture(file, capture, argv[3]);
+    if (result == BRUCE_OK) result = ir_app__write_capture(file, capture, button);
     if (file != BRUCE_FILE_ID_INVALID) (void)storage__close(file);
     memory__free(capture);
     return result;
@@ -725,43 +725,104 @@ static int ir_app__learn_cli(int argc, char **argv) {
 
 int ir_app_main(int argc, char **argv) {
     if (app_runner__args_have_gui(argc, argv)) return ir_app__gui();
-    if (argc <= 1 || argv == NULL || argv[1] == NULL || strcmp(argv[1], "help") == 0) {
-        ir_app__usage();
-        return 0;
-    }
-    bruce_result_t result = BRUCE_ERR_INVALID_ARGUMENT;
-    if (strcmp(argv[1], "rx") == 0) return ir_app__rx(argc, argv);
-    if (strcmp(argv[1], "learn") == 0) result = ir_app__learn_cli(argc, argv);
-    else if (strcmp(argv[1], "tx") == 0) result = ir_app__tx(argc, argv);
-    else if (strcmp(argv[1], "tx_raw") == 0) result = ir_app__tx_raw(argc, argv);
-    else if (strcmp(argv[1], "tx_from_file") == 0) {
-        if (argc < 3) return BRUCE_ERR_INVALID_ARGUMENT;
-        uint32_t repeats = 0;
-        if (argc > 3 && !ir_app__parse_u32(argv[3], UINT8_MAX, &repeats)) return BRUCE_ERR_INVALID_ARGUMENT;
-        result = ir__transmit_file(argv[2], (uint8_t)repeats);
-    } else if (strcmp(argv[1], "tvbgone") == 0) {
-        if (argc != 3 || (strcasecmp(argv[2], "na") != 0 && strcasecmp(argv[2], "eu") != 0)) {
-            return BRUCE_ERR_INVALID_ARGUMENT;
+
+    ArgParser *root = ap_new_parser();
+    if (root == NULL) return BRUCE_ERR_NO_MEMORY;
+    ap_set_helptext(root, "Receive, learn, transmit, and generate infrared signals.");
+    ap_add_flag(root, "gui");
+    ap_set_opt_help(root, "gui", "Use GUI interaction mode");
+
+    ArgParser *rx = ap_new_cmd(root, "rx");
+    ArgParser *learn = ap_new_cmd(root, "learn");
+    ArgParser *tx = ap_new_cmd(root, "tx");
+    ArgParser *tx_raw = ap_new_cmd(root, "tx_raw");
+    ArgParser *tx_from_file = ap_new_cmd(root, "tx_from_file");
+    ArgParser *tvbgone = ap_new_cmd(root, "tvbgone");
+    ArgParser *jam = ap_new_cmd(root, "jam");
+    ArgParser *commands[] = {rx, learn, tx, tx_raw, tx_from_file, tvbgone, jam};
+    for (size_t i = 0; i < sizeof(commands) / sizeof(commands[0]); ++i) {
+        if (commands[i] == NULL) {
+            ap_free(root);
+            return BRUCE_ERR_NO_MEMORY;
         }
-        result = ir_app__tvbgone(strcasecmp(argv[2], "eu") == 0, false);
-    } else if (strcmp(argv[1], "jam") == 0) {
+    }
+
+    ap_set_helptext(rx, "Receive a decoded or raw signal: rx [raw] [timeout_seconds].");
+    ap_add_optional_arg(rx, "raw_or_timeout", "The word raw, or timeout in seconds");
+    ap_add_optional_arg(rx, "timeout_seconds", "Timeout when raw is specified");
+    ap_set_helptext(learn, "Capture one signal and write a Bruce IR file.");
+    ap_add_required_arg(learn, "absolute_path", "Destination .ir file path");
+    ap_add_required_arg(learn, "button_name", "Name stored for the signal");
+    ap_add_optional_arg(learn, "raw_or_timeout", "The word raw, or timeout in seconds");
+    ap_add_optional_arg(learn, "timeout_seconds", "Timeout when raw is specified");
+    ap_set_helptext(tx, "Transmit protocol data, or an address/command pair for supported protocols.");
+    ap_add_required_arg(tx, "protocol", "IR protocol name");
+    ap_add_required_arg(tx, "data_or_address", "Hex data or protocol address");
+    ap_add_optional_arg(tx, "bits_or_command", "Bit count or protocol command");
+    ap_add_optional_arg(tx, "repeats", "Repeat count (0-255)");
+    ap_set_helptext(tx_raw, "Transmit raw timings: tx_raw <frequency_hz> <timing_us> [...]. Commas are accepted.");
+    ap_add_required_arg(tx_raw, "frequency_hz", "Carrier frequency in Hz");
+    ap_allow_extra_args(tx_raw);
+    ap_first_pos_arg_ends_option_parsing(tx_raw);
+    ap_set_helptext(tx_from_file, "Transmit every signal in a Bruce IR file.");
+    ap_add_required_arg(tx_from_file, "absolute_path", "Source .ir file path");
+    ap_add_optional_arg(tx_from_file, "repeats", "Repeat count (0-255)");
+    ap_set_helptext(tvbgone, "Send regional TV power codes.");
+    ap_add_required_arg(tvbgone, "region", "na or eu (case-insensitive)");
+    ap_set_helptext(jam, "Transmit an IR jamming pattern.");
+    ap_add_required_arg(jam, "frequency_hz", "Carrier frequency from 20000 to 100000 Hz");
+    ap_add_required_arg(jam, "seconds", "Duration in seconds");
+    ap_add_optional_arg(jam, "mode", "basic, enhanced, sweep, random, or empty");
+
+    if (!ap_parse(root, argc, argv)) {
+        ap_status_t status = ap_get_status(root);
+        ap_free(root);
+        if (status == AP_STATUS_HELP || status == AP_STATUS_VERSION) return 0;
+        return status == AP_STATUS_NO_MEMORY ? BRUCE_ERR_NO_MEMORY : BRUCE_ERR_INVALID_ARGUMENT;
+    }
+
+    bruce_result_t result = BRUCE_ERR_INVALID_ARGUMENT;
+    ArgParser *command = ap_get_cmd_parser(root);
+    bool is_rx = command == rx;
+    if (command == NULL) {
+        ap_print_help(root);
+        result = BRUCE_OK;
+    } else if (command == rx) result = ir_app__rx(rx);
+    else if (command == learn) result = ir_app__learn_cli(learn);
+    else if (command == tx) result = ir_app__tx(tx);
+    else if (command == tx_raw) result = ir_app__tx_raw(tx_raw);
+    else if (command == tx_from_file) {
+        uint32_t repeats = 0;
+        const char *repeats_arg = ap_get_arg(tx_from_file, "repeats");
+        if (repeats_arg != NULL && !ir_app__parse_u32(repeats_arg, UINT8_MAX, &repeats)) {
+            result = BRUCE_ERR_INVALID_ARGUMENT;
+        } else result = ir__transmit_file(ap_get_arg(tx_from_file, "absolute_path"), (uint8_t)repeats);
+    } else if (command == tvbgone) {
+        const char *region = ap_get_arg(tvbgone, "region");
+        if (strcasecmp(region, "na") != 0 && strcasecmp(region, "eu") != 0) {
+            result = BRUCE_ERR_INVALID_ARGUMENT;
+        } else result = ir_app__tvbgone(strcasecmp(region, "eu") == 0, false);
+    } else if (command == jam) {
         uint32_t frequency = 0;
         uint32_t seconds = 0;
         unsigned int mode = 0;
-        if (argc < 4 || !ir_app__parse_u32(argv[2], 100000, &frequency) || frequency < 20000 ||
-            !ir_app__parse_u32(argv[3], UINT32_MAX / 1000u, &seconds) || seconds == 0) {
-            return BRUCE_ERR_INVALID_ARGUMENT;
+        const char *frequency_arg = ap_get_arg(jam, "frequency_hz");
+        const char *seconds_arg = ap_get_arg(jam, "seconds");
+        const char *mode_arg = ap_get_arg(jam, "mode");
+        if (!ir_app__parse_u32(frequency_arg, 100000, &frequency) || frequency < 20000 ||
+            !ir_app__parse_u32(seconds_arg, UINT32_MAX / 1000u, &seconds) || seconds == 0) {
+            result = BRUCE_ERR_INVALID_ARGUMENT;
+        } else {
+            static const char *const modes[] = {"basic", "enhanced", "sweep", "random", "empty"};
+            if (mode_arg != NULL) {
+                for (mode = 0; mode < 5 && strcasecmp(mode_arg, modes[mode]) != 0; ++mode) {}
+            }
+            result = mode == 5 ? BRUCE_ERR_INVALID_ARGUMENT
+                               : ir_app__jammer(frequency, seconds * 1000u, mode, false);
         }
-        static const char *const modes[] = {"basic", "enhanced", "sweep", "random", "empty"};
-        if (argc > 4) {
-            for (mode = 0; mode < 5 && strcasecmp(argv[4], modes[mode]) != 0; ++mode) {}
-            if (mode == 5) return BRUCE_ERR_INVALID_ARGUMENT;
-        }
-        result = ir_app__jammer(frequency, seconds * 1000u, mode, false);
-    } else {
-        ir_app__usage();
-        return BRUCE_ERR_INVALID_ARGUMENT;
     }
-    stdio__printf(result == BRUCE_OK ? "IR operation complete\n" : "IR operation failed: %d\n", result);
+    ap_free(root);
+    if (!is_rx && command != NULL)
+        stdio__printf(result == BRUCE_OK ? "IR operation complete\n" : "IR operation failed: %d\n", result);
     return result;
 }

@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "args.h"
 #include "core_sdk/app_runner.h"
 #include "core_sdk/loader.h"
 #include "core_sdk/manifest.h"
@@ -260,33 +261,55 @@ int js_loader__run_path(const char *path, const char *arg, bool in_background) {
 
 /* Built-in "js" command entry: "js ./target.js <args>..." loads the named JS
  * file and passes the remaining arguments to it. */
-int js_loader__app_main(int argc, char **argv) {
-    if (argc < 2) { return BRUCE_ERR_INVALID_ARGUMENT; }
+static bool js_loader__append_arg(char *out, size_t out_size, size_t *used, const char *value) {
+    size_t needed = *used > 0 ? 1u : 0u;
+    needed += 2;
+    for (const char *p = value; *p != '\0'; ++p) needed += (*p == '\\' || *p == '"') ? 2u : 1u;
+    if (needed >= out_size - *used) return false;
+    if (*used > 0) out[(*used)++] = ' ';
+    out[(*used)++] = '"';
+    for (const char *p = value; *p != '\0'; ++p) {
+        if (*p == '\\' || *p == '"') out[(*used)++] = '\\';
+        out[(*used)++] = *p;
+    }
+    out[(*used)++] = '"';
+    out[*used] = '\0';
+    return true;
+}
 
-    const char *path = argv[1];
-    bool gui_requested = app_runner__args_have_gui(argc, argv);
+int js_loader__app_main(int argc, char **argv) {
+    ArgParser *parser = ap_new_parser();
+    if (parser == NULL) { return BRUCE_ERR_NO_MEMORY; }
+    ap_set_helptext(parser, "Load and run a JavaScript application.");
+    ap_add_required_arg(parser, "path", "JavaScript file to load");
+    ap_unknown_options_as_args(parser);
+    ap_allow_extra_args(parser);
+    ap_first_pos_arg_ends_option_parsing(parser);
+    if (!ap_parse(parser, argc, argv)) {
+        ap_status_t status = ap_get_status(parser);
+        ap_free(parser);
+        if (status == AP_STATUS_HELP) { return 0; }
+        return status == AP_STATUS_NO_MEMORY ? BRUCE_ERR_NO_MEMORY : BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    const char *path = ap_get_arg(parser, "path");
 
     char arg[BRUCE_STORAGE_PATH_MAX];
     size_t arg_len = 0;
     arg[0] = '\0';
-    for (int i = 2; i < argc; i++) {
-        if (i > 2) {
-            if (arg_len + 1 >= sizeof(arg)) { return BRUCE_ERR_INVALID_ARGUMENT; }
-            arg[arg_len++] = ' ';
-            arg[arg_len] = '\0';
+    int parsed_argc = ap_count_args(parser);
+    for (int i = 1; i < parsed_argc; i++) {
+        const char *forwarded_arg = ap_get_arg_at_index(parser, i);
+        if (!js_loader__append_arg(arg, sizeof(arg), &arg_len, forwarded_arg)) {
+            ap_free(parser);
+            return BRUCE_ERR_INVALID_ARGUMENT;
         }
-        size_t len = strlen(argv[i]);
-        if (arg_len + len >= sizeof(arg)) { return BRUCE_ERR_INVALID_ARGUMENT; }
-        memcpy(arg + arg_len, argv[i], len + 1);
-        arg_len += len;
     }
+    ap_free(parser);
 
     bruce_task_snapshot_t snapshot;
     bool in_background = false;
     if (task__snapshot(task__current_id(), &snapshot) == BRUCE_OK) {
         in_background = (snapshot.state == BRUCE_TASK_BACKGROUND);
     }
-    (void)gui_requested;
-
     return js_loader__run_path(path, arg[0] != '\0' ? arg : NULL, in_background);
 }
