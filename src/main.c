@@ -24,14 +24,13 @@ void app_main(void) {
 #if CONFIG_BRUCE_QEMU_TEST_MODE
     printf("SELFTEST READY\n");
     fflush(stdout);
-    while (1) { vTaskDelay(pdMS_TO_TICKS(5000)); }
-#else
-
-    const char *launcher_args = (display_ok && input_ok) ? "--gui" : NULL;
-    int result = app_runner__run("launcher", launcher_args, false);
-
-    if (result < 0) { printf("Launcher failed to start with code %d\n", result); }
-
-    while (1) { vTaskDelay(pdMS_TO_TICKS(5000)); }
+    return;
 #endif
+
+    if (display_ok && input_ok) {
+        int result = app_runner__run("launcher", "--gui", false);
+        if (result < 0) { printf("Launcher failed to start with code %d\n", result); }
+    }
+
+    while (1) { vTaskDelay(pdMS_TO_TICKS(5000)); }
 }
