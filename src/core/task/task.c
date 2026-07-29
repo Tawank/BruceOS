@@ -630,6 +630,60 @@ bruce_result_t task__snapshot(bruce_task_id_t task_id, bruce_task_snapshot_t *ou
     return BRUCE_OK;
 }
 
+static bruce_result_t task__switch_relative(int direction) {
+    task__ensure_init();
+    task__lock();
+    bruce_task_id_t anchor_id = s_effective_foreground;
+    task__record_t *anchor = task__find_by_id_locked(anchor_id);
+    if (anchor == NULL || !anchor->gui_requested) {
+        anchor_id = BRUCE_TASK_ID_INVALID;
+        for (int i = s_fg_depth - 1; i >= 0; --i) {
+            task__record_t *stacked = task__find_by_id_locked(s_fg_stack[i]);
+            if (stacked != NULL && stacked->gui_requested) {
+                anchor_id = stacked->id;
+                break;
+            }
+        }
+    }
+
+    int foreground_index = -1;
+    for (int i = 0; i < TASK__MAX_RECORDS; ++i) {
+        if (s_tasks[i].in_use && s_tasks[i].id == anchor_id) {
+            foreground_index = i;
+            break;
+        }
+    }
+    for (int offset = 1; offset <= TASK__MAX_RECORDS; ++offset) {
+        int index = foreground_index >= 0
+                        ? (foreground_index + direction * offset + TASK__MAX_RECORDS) % TASK__MAX_RECORDS
+                        : (direction > 0 ? offset - 1 : TASK__MAX_RECORDS - offset);
+        task__record_t *candidate = &s_tasks[index];
+        if (candidate->in_use && candidate->gui_requested && candidate->state == BRUCE_TASK_BACKGROUND) {
+            task__foreground_push_locked(candidate->id);
+            task__unlock();
+            return BRUCE_OK;
+        }
+    }
+    task__unlock();
+    return BRUCE_ERR_NOT_FOUND;
+}
+
+bruce_result_t task_registry__switch_next(void) { return task__switch_relative(1); }
+
+bruce_result_t task_registry__switch_previous(void) { return task__switch_relative(-1); }
+
+bruce_result_t task__switch_next(void) {
+    bruce_result_t permission_result = permission__check(BRUCE_PERMISSION_TASK);
+    if (permission_result != BRUCE_OK) return permission_result;
+    return task_registry__switch_next();
+}
+
+bruce_result_t task__switch_previous(void) {
+    bruce_result_t permission_result = permission__check(BRUCE_PERMISSION_TASK);
+    if (permission_result != BRUCE_OK) return permission_result;
+    return task_registry__switch_previous();
+}
+
 bruce_result_t task__to_background(void) {
     task__ensure_init();
     task__lock();

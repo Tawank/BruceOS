@@ -14,6 +14,19 @@
 #include <stdlib.h>
 #include <string.h>
 
+static bool clock_app__resume_after_handoff(void) {
+    bruce_task_snapshot_t snapshot;
+    bruce_task_id_t self = task__current_id();
+    if (self == BRUCE_TASK_ID_INVALID || task__snapshot(self, &snapshot) != BRUCE_OK ||
+        snapshot.state != BRUCE_TASK_BACKGROUND) {
+        return false;
+    }
+    do {
+        if (runtime__delay(20) != BRUCE_OK || task__snapshot(self, &snapshot) != BRUCE_OK) return false;
+    } while (snapshot.state == BRUCE_TASK_BACKGROUND);
+    return snapshot.state == BRUCE_TASK_FOREGROUND;
+}
+
 static void clock_app__format_time(const bruce_clock_datetime_t *now, char *out, size_t size) {
     bool format24 = config__get_clock24hr();
     if (format24) {
@@ -90,6 +103,7 @@ static int clock_app__show(bool gui) {
         result = input__wait(200, &code);
         if (result == BRUCE_OK && code == BRUCE_INPUT_CODE_BACK) return BRUCE_OK;
         if (result == BRUCE_OK && code == BRUCE_INPUT_CODE_SELECT) return CLOCK_APP_OPEN_MENU;
+        if (result == BRUCE_ERR_NOT_FOREGROUND && clock_app__resume_after_handoff()) continue;
         if (result != BRUCE_OK && result != BRUCE_ERR_TIMEOUT) return result;
     }
 }
@@ -158,6 +172,7 @@ static int clock_app__timer(const char *argument, bool gui) {
             int32_t code = 0;
             result = input__wait(100, &code);
             if (result == BRUCE_OK && code == BRUCE_INPUT_CODE_BACK) return BRUCE_OK;
+            if (result == BRUCE_ERR_NOT_FOREGROUND && clock_app__resume_after_handoff()) continue;
             if (result != BRUCE_OK && result != BRUCE_ERR_TIMEOUT) return result;
         } else if (runtime__delay(100) != BRUCE_OK) return BRUCE_ERR_CANCELLED;
     }
@@ -219,6 +234,7 @@ static int clock_app__alarm(const char *argument, bool gui) {
             int32_t code = 0;
             result = input__wait(200, &code);
             if (result == BRUCE_OK && code == BRUCE_INPUT_CODE_BACK) return BRUCE_OK;
+            if (result == BRUCE_ERR_NOT_FOREGROUND && clock_app__resume_after_handoff()) continue;
             if (result != BRUCE_OK && result != BRUCE_ERR_TIMEOUT) return result;
         } else if (runtime__delay(200) != BRUCE_OK) return BRUCE_ERR_CANCELLED;
     }
@@ -245,6 +261,10 @@ static int clock_app__gui(void) {
 
         size_t selected = 0;
         bruce_result_t choice_result = dialog__choice("Clock", "Clock tools", choices, 4, &selected, NULL);
+        if (choice_result == BRUCE_ERR_CANCELLED && clock_app__resume_after_handoff()) {
+            (void)input__flush();
+            continue;
+        }
         if (choice_result == BRUCE_ERR_CANCELLED || selected == 2) {
             (void)input__flush();
             continue;

@@ -205,8 +205,10 @@ bool selftest__run_config_builtin_manage_case(void) {
     const char *current_ssid = config__get_wifi_ap_ssid();
     const char *current_password = config__get_wifi_ap_password();
     const bruce_config_startup_apps_t *current_apps = config__get_startup_apps();
+    const bruce_config_hotkeys_t *current_hotkeys = config__get_hotkeys();
     if (current_ssid == NULL || current_password == NULL || current_apps == NULL ||
-        current_apps->count > CONFIG__STARTUP_APP_MAX_COUNT) {
+        current_apps->count > CONFIG__STARTUP_APP_MAX_COUNT || current_hotkeys == NULL ||
+        current_hotkeys->count > CONFIG__HOTKEY_MAX_COUNT) {
         printf("[selftest] config/builtin-manage: FAIL (singleton)\n");
         return false;
     }
@@ -217,11 +219,21 @@ bool selftest__run_config_builtin_manage_case(void) {
     char original_app_storage[CONFIG__STARTUP_APP_MAX_COUNT][CONFIG__STARTUP_APP_MAX_LEN + 1] = {0};
     const char *original_apps[CONFIG__STARTUP_APP_MAX_COUNT] = {0};
     size_t original_app_count = current_apps->count;
+    char original_hotkey_storage[CONFIG__HOTKEY_MAX_COUNT][CONFIG__HOTKEY_MAX_LEN + 1] = {0};
+    char original_action_storage[CONFIG__HOTKEY_MAX_COUNT][CONFIG__HOTKEY_ACTION_MAX_LEN + 1] = {0};
+    bruce_config_hotkey_t original_hotkeys[CONFIG__HOTKEY_MAX_COUNT] = {0};
+    size_t original_hotkey_count = current_hotkeys->count;
     snprintf(original_ssid, sizeof(original_ssid), "%s", current_ssid);
     snprintf(original_password, sizeof(original_password), "%s", current_password);
     for (size_t i = 0; i < original_app_count; ++i) {
         snprintf(original_app_storage[i], sizeof(original_app_storage[i]), "%s", current_apps->items[i]);
         original_apps[i] = original_app_storage[i];
+    }
+    for (size_t i = 0; i < original_hotkey_count; ++i) {
+        snprintf(original_hotkey_storage[i], sizeof(original_hotkey_storage[i]), "%s", current_hotkeys->items[i].key);
+        snprintf(original_action_storage[i], sizeof(original_action_storage[i]), "%s", current_hotkeys->items[i].action);
+        original_hotkeys[i].key = original_hotkey_storage[i];
+        original_hotkeys[i].action = original_action_storage[i];
     }
 
     bruce_result_t set_general = config__set_sound_volume(42);
@@ -249,12 +261,20 @@ bool selftest__run_config_builtin_manage_case(void) {
     bool list_mutations = add_duplicate == BRUCE_OK && add_app == BRUCE_OK && remove_app == BRUCE_OK &&
                           remove_missing == BRUCE_ERR_NOT_FOUND && apps != NULL && apps->count == 3 &&
                           strcmp(apps->items[0], "clock") == 0 && strcmp(apps->items[1], "webui") == 0 &&
-                          strcmp(apps->items[2], "settings") == 0;
+                           strcmp(apps->items[2], "settings") == 0;
+
+    const bruce_config_hotkey_t test_hotkeys[] = {{"ctrl + x", "task switch next"}};
+    bruce_result_t set_hotkeys = config__set_hotkeys(test_hotkeys, 1);
+    const bruce_config_hotkeys_t *hotkeys = config__get_hotkeys();
+    bool hotkey_values = set_hotkeys == BRUCE_OK && hotkeys != NULL && hotkeys->count == 1 &&
+                         strcmp(hotkeys->items[0].key, "ctrl + x") == 0 &&
+                         strcmp(hotkeys->items[0].action, "task switch next") == 0;
 
     char *json = NULL;
     size_t json_size = 0;
     bool read_json = storage__read_file(CONFIG__FILE_PATH, &json, &json_size);
     bool schema = read_json && json_size > 0 && strstr(json, "\"startupApps\"") != NULL &&
+                  strstr(json, "\"hotkeys\"") != NULL &&
                   strstr(json, "\"startupApp\":") == NULL && strstr(json, "\"qrCodes\"") == NULL &&
                   strstr(json, "\"evilWifiNames\"") == NULL && strstr(json, "\"evilWifiEndpoints\"") == NULL &&
                   strstr(json, "\"evilWifiPasswordMode\"") == NULL;
@@ -262,10 +282,11 @@ bool selftest__run_config_builtin_manage_case(void) {
 
     bool restored = config__set_sound_volume(original_volume) == BRUCE_OK &&
                     config__set_wifi_ap(original_ssid, original_password) == BRUCE_OK &&
-                    config__set_startup_apps(original_apps, original_app_count) == BRUCE_OK;
+                    config__set_startup_apps(original_apps, original_app_count) == BRUCE_OK &&
+                    config__set_hotkeys(original_hotkeys, original_hotkey_count) == BRUCE_OK;
 
     bool ok = set_general == BRUCE_OK && general_value == 42 && set_protected == BRUCE_OK && string_values &&
-              array_values && list_mutations && schema && restored;
+              array_values && list_mutations && hotkey_values && schema && restored;
     printf(
         "[selftest] config/builtin-manage: %s (general=%d array=%d schema=%d)\n",
         ok ? "OK" : "FAIL",

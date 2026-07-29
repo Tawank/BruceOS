@@ -33,11 +33,24 @@ typedef struct {
 } bruce_config_wifi_credential_t;
 
 #define BRUCE_CONFIG_STARTUP_APP_MAX_COUNT 8
+#define BRUCE_CONFIG_HOTKEY_MAX_COUNT 8
+#define BRUCE_CONFIG_HOTKEY_MAX_LEN 32
+#define BRUCE_CONFIG_HOTKEY_ACTION_MAX_LEN 64
 
 typedef struct {
     const char *items[BRUCE_CONFIG_STARTUP_APP_MAX_COUNT];
     size_t count;
 } bruce_config_startup_apps_t;
+
+typedef struct {
+    const char *key;
+    const char *action;
+} bruce_config_hotkey_t;
+
+typedef struct {
+    bruce_config_hotkey_t items[BRUCE_CONFIG_HOTKEY_MAX_COUNT];
+    size_t count;
+} bruce_config_hotkeys_t;
 
 const char *config__get_wifi_ap_ssid(void);
 const char *config__get_wifi_ap_password(void);
@@ -99,6 +112,8 @@ bool config__get_instant_boot(void);
 bruce_result_t config__set_instant_boot(bool value);
 const char *config__get_keyboard_lang(void);
 bruce_result_t config__set_keyboard_lang(const char *value);
+const bruce_config_hotkeys_t *config__get_hotkeys(void);
+bruce_result_t config__set_hotkeys(const bruce_config_hotkey_t *values, size_t count);
 
 /* LED */
 int config__get_led_bright(void);

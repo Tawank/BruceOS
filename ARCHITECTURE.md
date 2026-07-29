@@ -660,7 +660,12 @@ configuration is changed, loaded, or reset and callers must not free them.
 `config__get_startup_apps()` returns the singleton's `startupApps` array and
 count. `config__add_startup_app()` appends a key only when it is not already
 present, and `config__remove_startup_app()` removes a key while preserving the
-order of the remaining entries. Setters validate and atomically persist
+order of the remaining entries. `hotkeys` is a bounded key-to-action object;
+the default `alt + tab` chord runs `task switch next`, cycling foreground focus
+to the next background GUI task. The same operation is available through
+`task__switch_next()`. The built-in `task` utility supports
+`task switch <next|prev|id>` and is structured for additional task-management
+subcommands. Setters validate and atomically persist
 immediately. The following
 values are permanently protected from ELF and JS, even with `config`:
 `wifiAp.ssid`, `wifiAp.pwd`, `webUI.pwd`, `wifiCredentials`, `wifiMAC`, and

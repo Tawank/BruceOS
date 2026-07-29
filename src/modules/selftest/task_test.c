@@ -4,6 +4,7 @@
 #include "core/task/task.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/task.h"
+#include "modules/utils/task/task_app.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -167,4 +168,48 @@ bool selftest__run_task_killed_case(void) {
     }
     printf("[selftest] task/killed: OK\n");
     return true;
+}
+
+static int selftest__task_switch_target(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    for (;;) (void)runtime__delay(1000);
+    return 0;
+}
+
+bool selftest__run_task_app_switch_case(void) {
+    char *invalid_argv[] = {"task", "switch", "not-an-id", NULL};
+    if (task_app_main(3, invalid_argv) != BRUCE_ERR_INVALID_ARGUMENT) {
+        printf("[selftest] task/app-switch: invalid target accepted\n");
+        return false;
+    }
+
+    task_create_params_t params = {
+        .name = "selftest_switch_target",
+        .entry = selftest__task_switch_target,
+        .built_in = true,
+        .gui_requested = true,
+        .start_in_background = true,
+        .stack_bytes = 4096,
+    };
+    bruce_task_id_t target = BRUCE_TASK_ID_INVALID;
+    if (task_registry__create(&params, &target) != BRUCE_OK) {
+        printf("[selftest] task/app-switch: target create failed\n");
+        return false;
+    }
+    vTaskDelay(pdMS_TO_TICKS(20));
+
+    bruce_task_id_t self = task__current_id();
+    char target_arg[16];
+    snprintf(target_arg, sizeof(target_arg), "%lu", (unsigned long)target);
+    char *switch_argv[] = {"task", "switch", target_arg, NULL};
+    int switched = task_app_main(3, switch_argv);
+    bruce_task_snapshot_t snapshot;
+    bool foreground = task__snapshot(target, &snapshot) == BRUCE_OK && snapshot.state == BRUCE_TASK_FOREGROUND;
+
+    (void)task__foreground(self);
+    (void)task__kill(target);
+    bool ok = switched == BRUCE_OK && foreground;
+    printf("[selftest] task/app-switch: %s\n", ok ? "OK" : "FAIL");
+    return ok;
 }

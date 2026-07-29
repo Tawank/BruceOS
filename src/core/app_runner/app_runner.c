@@ -28,6 +28,7 @@
 #include "modules/utils/notification/notification_app.h"
 #include "modules/utils/serial_commands/serial_commands_app.h"
 #include "modules/utils/terminal/terminal_app.h"
+#include "modules/utils/task/task_app.h"
 #include "modules/webui/webui_app.h"
 #include "modules/wifi/wifi_app.h"
 
@@ -95,6 +96,7 @@ void app_runner__register_defaults(void) {
     s_apps[s_app_count - 1].stack_bytes = APP_RUNNER_SELFTEST_STACK_BYTES;
     (void)app_runner__register("terminal", terminal_app_main);
     (void)app_runner__register("serial_commands", serial_commands_app_main);
+    (void)app_runner__register("task", task_app_main);
     (void)app_runner__register("pwd", bnu_pwd_app_main);
     (void)app_runner__register("cd", bnu_cd_app_main);
     (void)app_runner__register("ls", bnu_ls_app_main);

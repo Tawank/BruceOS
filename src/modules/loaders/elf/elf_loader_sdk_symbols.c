@@ -58,6 +58,8 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(runtime__sleep),
     ESP_ELFSYM_EXPORT(runtime__delay),
     ESP_ELFSYM_EXPORT(task__current_id),
+    ESP_ELFSYM_EXPORT(task__switch_next),
+    ESP_ELFSYM_EXPORT(task__switch_previous),
     ESP_ELFSYM_EXPORT(task__to_background),
     ESP_ELFSYM_EXPORT(task__foreground),
     ESP_ELFSYM_EXPORT(task__stop),

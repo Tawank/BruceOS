@@ -1,6 +1,5 @@
 #include "launcher_app.h"
 
-#include <stdio.h>
 #include <string.h>
 
 #include "core_sdk/app_runner.h"

@@ -17,6 +17,19 @@
 
 #define FILEMANAGER_PREVIEW_MAX 4096
 
+static bool filemanager__resume_after_handoff(void) {
+    bruce_task_snapshot_t snapshot;
+    bruce_task_id_t self = task__current_id();
+    if (self == BRUCE_TASK_ID_INVALID || task__snapshot(self, &snapshot) != BRUCE_OK ||
+        snapshot.state != BRUCE_TASK_BACKGROUND) {
+        return false;
+    }
+    do {
+        if (runtime__delay(20) != BRUCE_OK || task__snapshot(self, &snapshot) != BRUCE_OK) return false;
+    } while (snapshot.state == BRUCE_TASK_BACKGROUND);
+    return snapshot.state == BRUCE_TASK_FOREGROUND;
+}
+
 static const char *filemanager__basename(const char *path) {
     const char *slash = strrchr(path, '/');
     return slash != NULL ? slash + 1 : path;
@@ -83,6 +96,7 @@ static bruce_result_t filemanager__view_file(const char *path, bool gui) {
     for (;;) {
         bruce_input_event_t event;
         result = input__read(&event, 100);
+        if (result == BRUCE_ERR_NOT_FOREGROUND && filemanager__resume_after_handoff()) continue;
         if (result == BRUCE_ERR_NOT_FOREGROUND) break;
         if (result != BRUCE_OK || event.action != BRUCE_INPUT_PRESS) continue;
 
@@ -135,6 +149,10 @@ int filemanager_app_main(int argc, char **argv) {
     for (;;) {
         char path[BRUCE_STORAGE_PATH_MAX];
         bruce_result_t result = dialog__pick_file("/", NULL, path, sizeof(path));
+        if (result == BRUCE_ERR_CANCELLED && filemanager__resume_after_handoff()) {
+            (void)input__flush();
+            continue;
+        }
         if (result == BRUCE_ERR_CANCELLED) return 0;
         if (result != BRUCE_OK) {
             filemanager__show_error("Browse", result);
@@ -145,6 +163,10 @@ int filemanager_app_main(int argc, char **argv) {
         result = dialog__choice(
             "File manager", path, actions, sizeof(actions) / sizeof(actions[0]), &selected, NULL
         );
+        if (result == BRUCE_ERR_CANCELLED && filemanager__resume_after_handoff()) {
+            (void)input__flush();
+            continue;
+        }
         if (result == BRUCE_ERR_CANCELLED || selected == 3) continue;
         if (result != BRUCE_OK) {
             filemanager__show_error("Action", result);

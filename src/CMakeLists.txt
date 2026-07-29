@@ -87,6 +87,7 @@ idf_component_register(SRCS
                      "modules/utils/launcher/launcher_app.c"
                      "modules/utils/serial_commands/serial_commands_app.c"
                      "modules/utils/terminal/terminal_app.c"
+                     "modules/utils/task/task_app.c"
                     "modules/utils/notification/notification_app.c"
                     "modules/ir/ir_app.c"
                     "modules/nrf24/nrf24_app.c"
@@ -212,6 +213,12 @@ add_library(bruce_sdk_builtin_utils_terminal_check OBJECT "modules/utils/termina
 target_include_directories(bruce_sdk_builtin_utils_terminal_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/utils/terminal")
+
+add_library(bruce_sdk_builtin_utils_task_check OBJECT
+            "modules/utils/task/task_app.c")
+target_include_directories(bruce_sdk_builtin_utils_task_check PRIVATE
+                           "${CMAKE_CURRENT_LIST_DIR}"
+                           "${CMAKE_CURRENT_LIST_DIR}/modules/utils/task")
 
 add_library(bruce_sdk_builtin_utils_serial_commands_check OBJECT
             "modules/utils/serial_commands/serial_commands_app.c")

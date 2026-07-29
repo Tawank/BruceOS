@@ -111,5 +111,10 @@ bruce_result_t task_registry__input_wake_clear(bruce_task_id_t task_id);
 bruce_result_t task_registry__input_wake_wait(bruce_task_id_t task_id, uint32_t timeout_ms);
 void task_registry__input_wake(bruce_task_id_t task_id);
 
+/* Foregrounds the next background GUI task in registry order. Core services
+ * use this variant because they do not execute in an app permission context. */
+bruce_result_t task_registry__switch_next(void);
+bruce_result_t task_registry__switch_previous(void);
+
 bruce_result_t task_registry__set_child_stdio_session(uint32_t session);
 uint32_t task_registry__current_stdio_session(void);

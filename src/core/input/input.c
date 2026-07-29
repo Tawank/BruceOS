@@ -1,12 +1,14 @@
 #include "input.h"
 
 #include "core/task/task.h"
+#include "core_sdk/config.h"
 #include "core_sdk/input.h"
 #include "core_sdk/permission.h"
 #include "core_sdk/result.h"
 #include "core_sdk/task.h"
 
 #include <string.h>
+#include <stdio.h>
 
 #include "driver/gpio.h"
 #include "esp_log.h"
@@ -285,6 +287,7 @@ static const gpio_num_t s_kb_in_alt_pins[INPUT__KB_IN_COUNT] = INPUT__KB_IN_ALT_
 
 static bool s_kb_use_alt_in_pins;
 static bool s_kb_prev_pressed[INPUT__KB_ROWS][INPUT__KB_COLS];
+static bool s_kb_hotkey_consumed[INPUT__KB_ROWS][INPUT__KB_COLS];
 static uint64_t s_kb_last_event_ms[INPUT__KB_ROWS][INPUT__KB_COLS];
 static bool s_kb_fn_held;
 static bool s_kb_shift_held;
@@ -406,6 +409,7 @@ static void input__kb_update_modifiers(const bool pressed[INPUT__KB_ROWS][INPUT_
     for (int y = 0; y < INPUT__KB_ROWS; ++y) {
         for (int x = 0; x < INPUT__KB_COLS; ++x) {
             if (!pressed[y][x]) { continue; }
+
             const char *label = s_kb_normal[y][x];
             if (strcmp(label, "fn") == 0) {
                 s_kb_fn_held = true;
@@ -439,6 +443,46 @@ static int32_t input__kb_decode_fn_nav(int x, int y) {
     return 0;
 }
 
+static bool input__kb_match_hotkey(const char *key, bool *out_switch_next) {
+    char chord[BRUCE_CONFIG_HOTKEY_MAX_LEN + 1] = {0};
+    size_t used = 0;
+#define INPUT__APPEND_CHORD_PART(part)                                                                       \
+    do {                                                                                                     \
+        int written = snprintf(chord + used, sizeof(chord) - used, "%s%s", used == 0 ? "" : " + ", part); \
+        if (written < 0 || (size_t)written >= sizeof(chord) - used) return false;                             \
+        used += (size_t)written;                                                                             \
+    } while (0)
+    if (s_kb_fn_held) INPUT__APPEND_CHORD_PART("fn");
+    if (s_kb_ctrl_held) INPUT__APPEND_CHORD_PART("ctrl");
+    if (s_kb_alt_held) INPUT__APPEND_CHORD_PART("alt");
+    if (s_kb_shift_held) INPUT__APPEND_CHORD_PART("shift");
+    INPUT__APPEND_CHORD_PART(key);
+#undef INPUT__APPEND_CHORD_PART
+
+    const bruce_config_hotkeys_t *hotkeys = config__get_hotkeys();
+    if (hotkeys == NULL) return false;
+    for (size_t i = 0; i < hotkeys->count; ++i) {
+        if (strcmp(hotkeys->items[i].key, chord) != 0) continue;
+        if (strcmp(hotkeys->items[i].action, "task switch next") == 0) {
+            *out_switch_next = true;
+            return true;
+        }
+    }
+    return false;
+}
+
+static void input__kb_discard_modifier_events_locked(void) {
+    UBaseType_t count = uxQueueMessagesWaiting(s_queue);
+    bruce_input_event_t events[INPUT__QUEUE_LENGTH];
+    UBaseType_t kept = 0;
+    for (UBaseType_t i = 0; i < count && i < INPUT__QUEUE_LENGTH; ++i) {
+        bruce_input_event_t event;
+        if (xQueueReceive(s_queue, &event, 0) != pdPASS) break;
+        if (event.type != BRUCE_INPUT_KEY || event.code != 0) events[kept++] = event;
+    }
+    for (UBaseType_t i = 0; i < kept; ++i) (void)xQueueSend(s_queue, &events[i], 0);
+}
+
 static void input__poll_keyboard(void) {
     if (!s_kb_initialized) { return; }
 
@@ -449,6 +493,7 @@ static void input__poll_keyboard(void) {
     input__kb_update_modifiers(pressed);
 
     uint64_t now = input__now_ms();
+    bool switch_next = false;
     input__lock();
 
     for (int y = 0; y < INPUT__KB_ROWS; ++y) {
@@ -468,6 +513,9 @@ static void input__poll_keyboard(void) {
                         (void)input__push_event_locked(
                             BRUCE_INPUT_KEY, BRUCE_INPUT_PRESS, 0, (int32_t)label[0], BRUCE_TASK_ID_INVALID
                         );
+                    } else if (input__kb_match_hotkey(s_kb_normal[y][x], &switch_next)) {
+                        s_kb_hotkey_consumed[y][x] = true;
+                        input__kb_discard_modifier_events_locked();
                     } else if (s_kb_fn_held) {
                         int32_t nav = input__kb_decode_fn_nav(x, y);
                         if (nav != 0) {
@@ -476,7 +524,8 @@ static void input__poll_keyboard(void) {
                             );
                         }
                     } else {
-                        const char *label = s_kb_shift_held ? s_kb_shifted[y][x] : s_kb_normal[y][x];
+                        const char *normal_label = s_kb_normal[y][x];
+                        const char *label = s_kb_shift_held ? s_kb_shifted[y][x] : normal_label;
                         int32_t code = input__kb_char_code(label);
                         if (code != 0) {
                             (void)input__push_event_locked(
@@ -492,12 +541,16 @@ static void input__poll_keyboard(void) {
                 /* Emit release events only for character keys (not for
                  * modifiers or Fn chords). */
                 if (!input__kb_is_modifier(x, y)) {
-                    const char *label = s_kb_shift_held ? s_kb_shifted[y][x] : s_kb_normal[y][x];
-                    int32_t code = input__kb_char_code(label);
-                    if (code != 0) {
-                        (void)input__push_event_locked(
-                            BRUCE_INPUT_KEY, BRUCE_INPUT_RELEASE, code, code, BRUCE_TASK_ID_INVALID
-                        );
+                    if (s_kb_hotkey_consumed[y][x]) {
+                        s_kb_hotkey_consumed[y][x] = false;
+                    } else {
+                        const char *label = s_kb_shift_held ? s_kb_shifted[y][x] : s_kb_normal[y][x];
+                        int32_t code = input__kb_char_code(label);
+                        if (code != 0) {
+                            (void)input__push_event_locked(
+                                BRUCE_INPUT_KEY, BRUCE_INPUT_RELEASE, code, code, BRUCE_TASK_ID_INVALID
+                            );
+                        }
                     }
                 }
             }
@@ -508,6 +561,7 @@ static void input__poll_keyboard(void) {
 
     bruce_task_id_t owner = s_foreground_task_id;
     input__unlock();
+    if (switch_next) (void)task_registry__switch_next();
     task_registry__input_wake(owner);
 }
 
@@ -658,7 +712,8 @@ bruce_result_t input__flush(void) {
         return BRUCE_ERR_NOT_FOREGROUND;
     }
     bruce_input_event_t ev;
-    while (xQueueReceive(s_queue, &ev, 0) == pdPASS) { /* Discard. */ }
+    while (xQueueReceive(s_queue, &ev, 0) == pdPASS) { /* Discard. */
+    }
     input__unlock();
     return BRUCE_OK;
 }

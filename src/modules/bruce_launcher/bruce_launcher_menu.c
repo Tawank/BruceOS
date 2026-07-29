@@ -1,7 +1,7 @@
 #include "bruce_launcher_menu.h"
 
-#include <stdio.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -25,9 +25,9 @@ typedef struct {
 static const char *BRUCE_LAUNCHER_DEFAULT_JSON =
     "{\n"
     "  \"WiFi@wifi\": {\n"
-    "    \"Connect to Wifi\": \"wifi connect --gui\",\n"
+    "    \"Connect to Wifi\": \"wifi connect\",\n"
     "    \"Start WiFi AP\": \"wifi ap start --gui\",\n"
-    "    \"Turn Off WiFi\": \"wifi disconnect --gui\",\n"
+    "    \"Turn Off WiFi\": \"wifi disconnect\",\n"
     "    \"AP info\": \"wifi ap info --gui\",\n"
     "    \"WebUI\": \"webui --gui\",\n"
     "    \"Wifi Atks\": {\n"
@@ -60,7 +60,7 @@ static const char *BRUCE_LAUNCHER_DEFAULT_JSON =
     "    \"About\": \"config about --gui\"\n"
     "  },\n"
     "  \"Selftest@test-tube\": \"terminal selftest --gui\",\n"
-    "  \"Apps@apps\": \"/apps --gui\"\n"
+    "  \"Apps@apps\": \"apps --gui\"\n"
     "}\n";
 
 static void bruce_launcher__parse_label(
@@ -79,8 +79,7 @@ static void bruce_launcher__parse_label(
     icon_name[icon_name_size - 1] = '\0';
 }
 
-static bruce_launcher_menu_t *
-bruce_launcher__menu_create(
+static bruce_launcher_menu_t *bruce_launcher__menu_create(
     bruce_launcher_menu_arena_t *arena, const char *title, bruce_launcher_menu_t *parent, int capacity
 ) {
     size_t entries_size = (size_t)capacity * sizeof(bruce_launcher_entry_t);
@@ -98,9 +97,7 @@ bruce_launcher__menu_create(
     return menu;
 }
 
-void bruce_launcher__menu_free(bruce_launcher_menu_t *menu) {
-    memory__free(menu);
-}
+void bruce_launcher__menu_free(bruce_launcher_menu_t *menu) { memory__free(menu); }
 
 static bool
 bruce_launcher__menu_add_command(bruce_launcher_menu_t *menu, const char *label, const char *command) {
@@ -187,9 +184,7 @@ static int bruce_launcher__discover_apps(bruce_launcher_menu_t *menu, const char
     }
 
     int added = 0;
-    for (size_t i = 0;
-         i < count && (menu == NULL || menu->entry_count + 1 < menu->capacity);
-         ++i) {
+    for (size_t i = 0; i < count && (menu == NULL || menu->entry_count + 1 < menu->capacity); ++i) {
         if (entries[i].type != BRUCE_STORAGE_ENTRY_FILE) continue;
 
         char full_path[BRUCE_STORAGE_PATH_MAX];
@@ -202,8 +197,7 @@ static int bruce_launcher__discover_apps(bruce_launcher_menu_t *menu, const char
         free((void *)json);
         if (manifest == NULL) continue;
 
-        if (menu == NULL ||
-            bruce_launcher__menu_add_command(menu, manifest->app_name, full_path)) {
+        if (menu == NULL || bruce_launcher__menu_add_command(menu, manifest->app_name, full_path)) {
             added++;
         }
         memory__free(manifest);
@@ -219,8 +213,7 @@ static int bruce_launcher__discovered_menu_capacity(const char *path) {
     return capacity + 1;
 }
 
-static bruce_launcher_menu_t *
-bruce_launcher__parse_json_object(
+static bruce_launcher_menu_t *bruce_launcher__parse_json_object(
     bruce_launcher_menu_arena_t *arena, cJSON *root, const char *title, bruce_launcher_menu_t *parent,
     int depth
 );
@@ -256,8 +249,7 @@ static size_t bruce_launcher__json_allocation_size(cJSON *root, bool include_bac
             int capacity = bruce_launcher__discovered_menu_capacity(child->valuestring);
             /* Carry the preflight result on the temporary JSON node into arena construction. */
             child->valueint = capacity;
-            child_size =
-                sizeof(bruce_launcher_menu_t) + (size_t)capacity * sizeof(bruce_launcher_entry_t);
+            child_size = sizeof(bruce_launcher_menu_t) + (size_t)capacity * sizeof(bruce_launcher_entry_t);
         } else if (is_submenu) {
             child_size = bruce_launcher__json_allocation_size(child, true, depth + 1);
         }
@@ -268,15 +260,13 @@ static size_t bruce_launcher__json_allocation_size(cJSON *root, bool include_bac
 }
 
 static bool bruce_launcher__parse_json_value(
-    bruce_launcher_menu_arena_t *arena, bruce_launcher_menu_t *menu, const char *key, cJSON *value,
-    int depth
+    bruce_launcher_menu_arena_t *arena, bruce_launcher_menu_t *menu, const char *key, cJSON *value, int depth
 ) {
     if (cJSON_IsString(value) && value->valuestring != NULL) {
         if (value->valuestring[0] != '/') {
             return bruce_launcher__menu_add_command(menu, key, value->valuestring);
         }
-        bruce_launcher_menu_t *submenu =
-            bruce_launcher__menu_create(arena, key, menu, value->valueint);
+        bruce_launcher_menu_t *submenu = bruce_launcher__menu_create(arena, key, menu, value->valueint);
         if (submenu == NULL) return false;
         (void)bruce_launcher__discover_apps(submenu, value->valuestring);
         (void)bruce_launcher__menu_add_back(submenu);
@@ -294,8 +284,7 @@ static bool bruce_launcher__parse_json_value(
     return true;
 }
 
-static bruce_launcher_menu_t *
-bruce_launcher__parse_json_object(
+static bruce_launcher_menu_t *bruce_launcher__parse_json_object(
     bruce_launcher_menu_arena_t *arena, cJSON *root, const char *title, bruce_launcher_menu_t *parent,
     int depth
 ) {

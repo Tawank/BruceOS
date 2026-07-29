@@ -6,9 +6,34 @@
 #include "core_sdk/app_runner.h"
 #include "core_sdk/bluetooth.h"
 #include "core_sdk/dialog.h"
+#include "core_sdk/result.h"
 #include "core_sdk/stdio.h"
+#include "core_sdk/task.h"
 
 #define BLUETOOTH_APP__MAX_RESULTS 32
+
+static bool bluetooth_app__resume_after_handoff(void) {
+    bruce_task_snapshot_t snapshot;
+    bruce_task_id_t self = task__current_id();
+    if (self == BRUCE_TASK_ID_INVALID || task__snapshot(self, &snapshot) != BRUCE_OK ||
+        snapshot.state != BRUCE_TASK_BACKGROUND) {
+        return false;
+    }
+    do {
+        if (runtime__delay(20) != BRUCE_OK || task__snapshot(self, &snapshot) != BRUCE_OK) return false;
+    } while (snapshot.state == BRUCE_TASK_BACKGROUND);
+    return snapshot.state == BRUCE_TASK_FOREGROUND;
+}
+
+static bruce_result_t bluetooth_app__message(
+    bruce_dialog_kind_t type, const char *title, const char *message
+) {
+    bruce_result_t result;
+    do {
+        result = dialog__message(type, title, message);
+    } while (result == BRUCE_ERR_CANCELLED && bluetooth_app__resume_after_handoff());
+    return result;
+}
 
 static void bluetooth_app__print_address(const uint8_t *address) {
     stdio__printf(
@@ -44,11 +69,11 @@ static int bluetooth_app__scan_gui(void) {
     if (count < 0) {
         char message[48];
         snprintf(message, sizeof(message), "BLE scan failed (%d)", count);
-        (void)dialog__message(BRUCE_DIALOG_ERROR, "Bluetooth", message);
+        (void)bluetooth_app__message(BRUCE_DIALOG_ERROR, "Bluetooth", message);
         return count;
     }
     if (count == 0) {
-        (void)dialog__message(BRUCE_DIALOG_INFO, "BLE Scan", "No advertisements found");
+        (void)bluetooth_app__message(BRUCE_DIALOG_INFO, "BLE Scan", "No advertisements found");
         return 0;
     }
 
@@ -66,8 +91,12 @@ static int bluetooth_app__scan_gui(void) {
         choices[i].value = labels[i];
     }
     size_t selected = 0;
-    if (dialog__choice("BLE Advertisements", "Select a device", choices, (size_t)count, &selected, NULL) ==
-        BRUCE_OK) {
+    bruce_result_t choice_result;
+    do {
+        choice_result =
+            dialog__choice("BLE Advertisements", "Select a device", choices, (size_t)count, &selected, NULL);
+    } while (choice_result == BRUCE_ERR_CANCELLED && bluetooth_app__resume_after_handoff());
+    if (choice_result == BRUCE_OK) {
         char details[160];
         bluetooth__device_t *device = &devices[selected];
         snprintf(
@@ -83,7 +112,7 @@ static int bluetooth_app__scan_gui(void) {
             device->address[5],
             device->rssi
         );
-        (void)dialog__message(BRUCE_DIALOG_INFO, "BLE Device", details);
+        (void)bluetooth_app__message(BRUCE_DIALOG_INFO, "BLE Device", details);
     }
     return 0;
 }
@@ -94,7 +123,11 @@ int bluetooth_app_main(int argc, char **argv) {
             {"BLE advertisement scan", "scan"}
         };
         size_t selected = 0;
-        if (dialog__choice("Bluetooth", "Select an action", choices, 1, &selected, NULL) == BRUCE_OK) {
+        bruce_result_t choice_result;
+        do {
+            choice_result = dialog__choice("Bluetooth", "Select an action", choices, 1, &selected, NULL);
+        } while (choice_result == BRUCE_ERR_CANCELLED && bluetooth_app__resume_after_handoff());
+        if (choice_result == BRUCE_OK) {
             return bluetooth_app__scan_gui();
         }
         return 0;

@@ -17,6 +17,9 @@
 #define CONFIG__THEME_PATH_MAX_LEN 64
 #define CONFIG__KEYBOARD_LANG_MAX_LEN 15
 #define CONFIG__LAUNCHER_APP_MAX_LEN 64
+#define CONFIG__HOTKEY_MAX_LEN BRUCE_CONFIG_HOTKEY_MAX_LEN
+#define CONFIG__HOTKEY_ACTION_MAX_LEN BRUCE_CONFIG_HOTKEY_ACTION_MAX_LEN
+#define CONFIG__HOTKEY_MAX_COUNT BRUCE_CONFIG_HOTKEY_MAX_COUNT
 
 #define CONFIG__WEBUI_USER_MAX_LEN 32
 #define CONFIG__WEBUI_PASSWORD_MAX_LEN 64
@@ -64,6 +67,7 @@ typedef struct {
     int wifiAtStartup;
     int instantBoot;
     const char *keyboardLang; /* "QWERTY" | "AZERTY" | "QWERTZ" */
+    bruce_config_hotkeys_t hotkeys;
 
     int ledBright;
     uint32_t ledColor;

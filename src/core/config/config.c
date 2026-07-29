@@ -77,6 +77,10 @@ static void config__free_config(config__t *cfg) {
     config__release(&cfg->themePath);
     config__release(&cfg->launcherApp);
     config__release(&cfg->keyboardLang);
+    for (size_t i = 0; i < CONFIG__HOTKEY_MAX_COUNT; ++i) {
+        config__release(&cfg->hotkeys.items[i].key);
+        config__release(&cfg->hotkeys.items[i].action);
+    }
     config__release(&cfg->webUIUser);
     config__release(&cfg->webUIPassword);
     for (size_t i = 0; i < CONFIG__WEBUI_MAX_SESSIONS; ++i) config__release(&cfg->webUISessions[i]);
@@ -117,6 +121,9 @@ static void config__set_defaults(config__t *cfg) {
     cfg->wifiAtStartup = 0;
     cfg->instantBoot = 0;
     config__assign(&cfg->keyboardLang, "QWERTY");
+    config__assign(&cfg->hotkeys.items[0].key, "alt + tab");
+    config__assign(&cfg->hotkeys.items[0].action, "task switch next");
+    cfg->hotkeys.count = 1;
 
     cfg->ledBright = 50;
     cfg->ledColor = 0x960064;
@@ -250,6 +257,33 @@ static void config__parse_json(config__t *cfg, const cJSON *root) {
     json_get_int(root, "instantBoot", &cfg->instantBoot);
     json_get_string(root, "keyboardLang", &cfg->keyboardLang);
 
+    const cJSON *hotkeys = cJSON_GetObjectItemCaseSensitive(root, "hotkeys");
+    if (cJSON_IsObject(hotkeys)) {
+        for (size_t i = 0; i < CONFIG__HOTKEY_MAX_COUNT; ++i) {
+            config__release(&cfg->hotkeys.items[i].key);
+            config__release(&cfg->hotkeys.items[i].action);
+        }
+        cfg->hotkeys.count = 0;
+        const cJSON *hotkey;
+        cJSON_ArrayForEach(hotkey, hotkeys) {
+            if (cfg->hotkeys.count >= CONFIG__HOTKEY_MAX_COUNT) break;
+            if (hotkey->string == NULL || !cJSON_IsString(hotkey) || hotkey->valuestring == NULL ||
+                !config__valid_value(hotkey->string, CONFIG__HOTKEY_MAX_LEN, false) ||
+                !config__valid_value(hotkey->valuestring, CONFIG__HOTKEY_ACTION_MAX_LEN, false)) {
+                continue;
+            }
+            bruce_config_hotkey_t *entry = &cfg->hotkeys.items[cfg->hotkeys.count];
+            entry->key = config__strdup(hotkey->string);
+            entry->action = config__strdup(hotkey->valuestring);
+            if (entry->key != NULL && entry->action != NULL) {
+                ++cfg->hotkeys.count;
+            } else {
+                config__release(&entry->key);
+                config__release(&entry->action);
+            }
+        }
+    }
+
     json_get_int(root, "ledBright", &cfg->ledBright);
     json_get_hex32(root, "ledColor", &cfg->ledColor);
     json_get_int(root, "ledBlinkEnabled", &cfg->ledBlinkEnabled);
@@ -366,6 +400,15 @@ static cJSON *config__build_json(const config__t *cfg) {
     cJSON_AddNumberToObject(root, "wifiAtStartup", cfg->wifiAtStartup);
     cJSON_AddNumberToObject(root, "instantBoot", cfg->instantBoot);
     cJSON_AddStringToObject(root, "keyboardLang", config__or_empty(cfg->keyboardLang));
+
+    cJSON *hotkeys = cJSON_AddObjectToObject(root, "hotkeys");
+    for (size_t i = 0; i < cfg->hotkeys.count; ++i) {
+        cJSON_AddStringToObject(
+            hotkeys,
+            config__or_empty(cfg->hotkeys.items[i].key),
+            config__or_empty(cfg->hotkeys.items[i].action)
+        );
+    }
 
     cJSON_AddNumberToObject(root, "ledBright", cfg->ledBright);
     snprintf(hex, sizeof(hex), "%lx", (unsigned long)cfg->ledColor);
@@ -790,6 +833,54 @@ CONFIG__DEFINE_INT_FIELD(sound_volume, soundVolume)
 CONFIG__DEFINE_BOOL_INT_FIELD(wifi_at_startup, wifiAtStartup)
 CONFIG__DEFINE_BOOL_INT_FIELD(instant_boot, instantBoot)
 CONFIG__DEFINE_STRING_FIELD(keyboard_lang, keyboardLang, CONFIG__KEYBOARD_LANG_MAX_LEN)
+
+const bruce_config_hotkeys_t *config__get_hotkeys(void) {
+    if (config__guard() != BRUCE_OK || !config__init()) return NULL;
+    config__lock();
+    const bruce_config_hotkeys_t *hotkeys = &s_config.hotkeys;
+    config__unlock();
+    return hotkeys;
+}
+
+bruce_result_t config__set_hotkeys(const bruce_config_hotkey_t *values, size_t count) {
+    bruce_result_t guard = config__guard();
+    if (guard != BRUCE_OK) return guard;
+    if (!config__init() || count > CONFIG__HOTKEY_MAX_COUNT || (count > 0 && values == NULL)) {
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+
+    bruce_config_hotkey_t copies[CONFIG__HOTKEY_MAX_COUNT] = {0};
+    for (size_t i = 0; i < count; ++i) {
+        if (!config__valid_value(values[i].key, CONFIG__HOTKEY_MAX_LEN, false) ||
+            !config__valid_value(values[i].action, CONFIG__HOTKEY_ACTION_MAX_LEN, false)) {
+            for (size_t j = 0; j < i; ++j) {
+                config__release(&copies[j].key);
+                config__release(&copies[j].action);
+            }
+            return BRUCE_ERR_INVALID_ARGUMENT;
+        }
+        copies[i].key = config__strdup(values[i].key);
+        copies[i].action = config__strdup(values[i].action);
+        if (copies[i].key == NULL || copies[i].action == NULL) {
+            for (size_t j = 0; j <= i; ++j) {
+                config__release(&copies[j].key);
+                config__release(&copies[j].action);
+            }
+            return BRUCE_ERR_NO_MEMORY;
+        }
+    }
+
+    config__lock();
+    for (size_t i = 0; i < CONFIG__HOTKEY_MAX_COUNT; ++i) {
+        config__release(&s_config.hotkeys.items[i].key);
+        config__release(&s_config.hotkeys.items[i].action);
+    }
+    memcpy(s_config.hotkeys.items, copies, sizeof(copies));
+    s_config.hotkeys.count = count;
+    bool saved = config__save_locked();
+    config__unlock();
+    return saved ? BRUCE_OK : BRUCE_ERR_IO;
+}
 
 CONFIG__DEFINE_INT_FIELD(led_bright, ledBright)
 CONFIG__DEFINE_UINT32_FIELD(led_color, ledColor)
