@@ -78,6 +78,11 @@ public Config API and starts that command with app_runner.  The default is
 `bruce_launcher`; an empty or unstartable configured value falls back to
 `bruce_launcher`.
 
+After boot, Main monitors Core foreground ownership. If UI initialization
+succeeded and the foreground stack becomes empty, Main starts the configured
+`launcher --gui` command again. Closing or killing the launcher therefore
+returns the device to its launcher instead of leaving an unowned display.
+
 `bruce_launcher` is an application, not Core.  It reads `/launcher.json` and
 builds a nested menu from it.  Top-level keys are menu labels; values are either
 a command string (dispatched as-is to `app_runner__run()` or

@@ -184,6 +184,13 @@ static void task__foreground_push_locked(bruce_task_id_t id) {
     task__foreground_recompute_locked();
 }
 
+static void task__clear_foreground_display(void) {
+    if (display__begin_frame() == BRUCE_OK) {
+        (void)display__fill_screen(BRUCE_COLOR_BLACK);
+        (void)display__present();
+    }
+}
+
 static void task__refresh_cpu_samples_locked(void) {
     const size_t status_capacity = TASK__MAX_RECORDS + 8u;
     TaskStatus_t *status_buf = malloc(status_capacity * sizeof(*status_buf));
@@ -299,12 +306,7 @@ static void task__trampoline(void *arg) {
      * foreground task's completed panel frame. Clear and present once before
      * application code starts; normal app redraw throttling can then remain
      * event-driven. */
-    if (record->gui_requested && !record->start_in_background) {
-        if (display__begin_frame() == BRUCE_OK) {
-            (void)display__fill_screen(BRUCE_COLOR_BLACK);
-            (void)display__present();
-        }
-    }
+    if (record->gui_requested && !record->start_in_background) task__clear_foreground_display();
 
     stdio__task_attach(record->stdio_session, &stdio_input, &stdio_output, &stdio_error);
 
@@ -450,9 +452,8 @@ bruce_result_t task_registry__resource_update(bruce_resource_id_t resource_id, v
     return BRUCE_ERR_NOT_FOUND;
 }
 
-void *task_registry__resource_realloc(
-    bruce_resource_id_t resource_id, void *context, size_t allocation_size
-) {
+void *
+task_registry__resource_realloc(bruce_resource_id_t resource_id, void *context, size_t allocation_size) {
     task__ensure_init();
     task__lock();
     task__record_t *self = task__find_by_handle_locked(xTaskGetCurrentTaskHandle());
@@ -672,6 +673,14 @@ bruce_result_t task_registry__switch_next(void) { return task__switch_relative(1
 
 bruce_result_t task_registry__switch_previous(void) { return task__switch_relative(-1); }
 
+bruce_task_id_t task_registry__foreground_id(void) {
+    task__ensure_init();
+    task__lock();
+    bruce_task_id_t task_id = s_effective_foreground;
+    task__unlock();
+    return task_id;
+}
+
 bruce_result_t task__switch_next(void) {
     bruce_result_t permission_result = permission__check(BRUCE_PERMISSION_TASK);
     if (permission_result != BRUCE_OK) return permission_result;
@@ -720,8 +729,10 @@ bruce_result_t task__to_foreground(void) {
         self->gui_requested = true;
         display__task_set_gui_requested(self->id);
     }
-    if (self->state == BRUCE_TASK_BACKGROUND) task__foreground_push_locked(self->id);
+    bool promoted = self->state == BRUCE_TASK_BACKGROUND;
+    if (promoted) task__foreground_push_locked(self->id);
     task__unlock();
+    if (promoted) task__clear_foreground_display();
     return BRUCE_OK;
 }
 
@@ -930,9 +941,7 @@ static bruce_result_t task__wait_ms(uint32_t ms, bool interruptible) {
         uint64_t remaining_ms = ((uint64_t)remaining_us + 999u) / 1000u;
         TickType_t wait_ticks = pdMS_TO_TICKS(remaining_ms);
         if (wait_ticks == 0) wait_ticks = 1;
-        (void)xEventGroupWaitBits(
-            s_task_events[slot], TASK__EVT_WAKE, pdTRUE, pdFALSE, wait_ticks
-        );
+        (void)xEventGroupWaitBits(s_task_events[slot], TASK__EVT_WAKE, pdTRUE, pdFALSE, wait_ticks);
         /* Woken early; loop to re-check stop/pause/foreground state. */
     }
 }

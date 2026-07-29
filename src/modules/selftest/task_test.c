@@ -207,10 +207,12 @@ bool selftest__run_task_app_switch_case(void) {
     bruce_task_snapshot_t snapshot;
     bool foreground =
         task__snapshot(target, &snapshot) == BRUCE_OK && snapshot.state == BRUCE_TASK_FOREGROUND;
+    bool registry_foreground = task_registry__foreground_id() == target;
 
     (void)task__foreground(self);
     (void)task__kill(target);
-    bool ok = switched == BRUCE_OK && foreground;
+    bool ok =
+        switched == BRUCE_OK && foreground && registry_foreground && task_registry__foreground_id() == self;
     printf("[selftest] task/app-switch: %s\n", ok ? "OK" : "FAIL");
     return ok;
 }

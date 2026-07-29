@@ -7,7 +7,15 @@
 #include "core/config/config.h"
 #include "core/input/input.h"
 #include "core/stdio/stdio.h"
+#include "core/task/task.h"
 #include "freertos/idf_additions.h"
+
+#define MAIN_LAUNCHER_CHECK_INTERVAL_MS 1000
+
+static void main__launch_launcher(void) {
+    int result = app_runner__run("launcher", "--gui", true);
+    if (result < 0) { printf("Launcher failed to start with code %d\n", result); }
+}
 
 bool init_user_interface(void) {
     bool display_ok = display__init() == BRUCE_OK;
@@ -35,10 +43,11 @@ void app_main(void) {
     return;
 #endif
 
-    if (ui_ok) {
-        int result = app_runner__run("launcher", "--gui", true);
-        if (result < 0) { printf("Launcher failed to start with code %d\n", result); }
-    }
+    if (!ui_ok) return;
 
-    while (1) { vTaskDelay(pdMS_TO_TICKS(5000)); }
+    main__launch_launcher();
+    while (1) {
+        vTaskDelay(pdMS_TO_TICKS(MAIN_LAUNCHER_CHECK_INTERVAL_MS));
+        if (ui_ok && task_registry__foreground_id() == BRUCE_TASK_ID_INVALID) main__launch_launcher();
+    }
 }

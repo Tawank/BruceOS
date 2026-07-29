@@ -79,9 +79,7 @@ bruce_result_t task_registry__resource_update(bruce_resource_id_t resource_id, v
 
 /* Reallocates a cleanup context while holding the registry lock so task
  * teardown cannot observe a pointer that libc has moved. */
-void *task_registry__resource_realloc(
-    bruce_resource_id_t resource_id, void *context, size_t allocation_size
-);
+void *task_registry__resource_realloc(bruce_resource_id_t resource_id, void *context, size_t allocation_size);
 
 /* Releases a resource early because the owner already cleaned it up itself
  * (e.g. an explicit storage__close()); this does NOT invoke the cleanup
@@ -115,6 +113,9 @@ void task_registry__input_wake(bruce_task_id_t task_id);
  * use this variant because they do not execute in an app permission context. */
 bruce_result_t task_registry__switch_next(void);
 bruce_result_t task_registry__switch_previous(void);
+/* Returns the current effective foreground task, or BRUCE_TASK_ID_INVALID when
+ * the foreground stack is empty. */
+bruce_task_id_t task_registry__foreground_id(void);
 
 bruce_result_t task_registry__set_child_stdio_session(uint32_t session);
 uint32_t task_registry__current_stdio_session(void);
