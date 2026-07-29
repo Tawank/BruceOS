@@ -15,8 +15,7 @@
 #include <string.h>
 
 static void clock_app__format_time(const bruce_clock_datetime_t *now, char *out, size_t size) {
-    bool format24 = true;
-    (void)config__get_clock24hr(&format24);
+    bool format24 = config__get_clock24hr();
     if (format24) {
         snprintf(out, size, "%02u:%02u:%02u", now->hour, now->minute, now->second);
         return;
@@ -29,12 +28,9 @@ static void clock_app__format_time(const bruce_clock_datetime_t *now, char *out,
 static bruce_result_t clock_app__draw(const char *title, const char *main_text, const char *footer) {
     int width = display__width();
     int height = display__height();
-    uint16_t primary = BRUCE_COLOR_ORANGE;
-    uint16_t secondary = BRUCE_COLOR_WHITE;
-    uint16_t background = BRUCE_COLOR_BLACK;
-    (void)config__get_pri_color(&primary);
-    (void)config__get_sec_color(&secondary);
-    (void)config__get_bg_color(&background);
+    uint16_t primary = config__get_pri_color();
+    uint16_t secondary = config__get_sec_color();
+    uint16_t background = config__get_bg_color();
     bruce_result_t result = display__begin_frame();
     if (result != BRUCE_OK) return result;
     (void)display__fill_screen(background);

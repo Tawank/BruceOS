@@ -1,7 +1,6 @@
 #include "launcher_app.h"
 
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
 #include "core_sdk/app_runner.h"
@@ -11,7 +10,7 @@
 #define LAUNCHER__FALLBACK_APP "bruce_launcher"
 
 int launcher_app_main(int argc, char **argv) {
-    char *configured = config__get_launcher_app();
+    const char *configured = config__get_launcher_app();
     const char *target = (configured != NULL && configured[0] != '\0') ? configured : LAUNCHER__FALLBACK_APP;
     const char *gui_arg = app_runner__args_have_gui(argc, argv) ? "--gui" : "";
 
@@ -25,6 +24,5 @@ int launcher_app_main(int argc, char **argv) {
         result = app_runner__run(LAUNCHER__FALLBACK_APP, gui_arg, false);
     }
 
-    free(configured);
     return result < 0 ? result : 0;
 }

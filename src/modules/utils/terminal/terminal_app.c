@@ -80,10 +80,8 @@ static int terminal__collect_lines(
 }
 
 static bruce_result_t terminal__draw(const terminal__state_t *state) {
-    uint16_t foreground = BRUCE_COLOR_WHITE;
-    uint16_t background = BRUCE_COLOR_BLACK;
-    (void)config__get_pri_color(&foreground);
-    (void)config__get_bg_color(&background);
+    uint16_t foreground = config__get_pri_color();
+    uint16_t background = config__get_bg_color();
     int width = display__width();
     int height = display__height();
     int columns = (width - 4) / TERMINAL__CHAR_W;

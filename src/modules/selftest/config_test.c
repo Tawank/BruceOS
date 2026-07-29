@@ -1,5 +1,6 @@
-/* A5 acceptance coverage: field-specific Config getters/setters, `config`
- * permission enforcement, and the permanently-protected field group
+/* Config acceptance coverage: type-safe singleton getters/setters, `config`
+ * permission enforcement, and the
+ * permanently-protected field group
  * (wifiApSsid/wifiApPassword, wifiCredentials, wifiMAC, webUIUser,
  * webUIPassword) that stays denied to an external task no matter what it
  * has been granted.
@@ -9,10 +10,13 @@
  * task_registry__create() (no ELF/JS loader exists yet to launch a real
  * one). */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "core/dialog/dialog.h"
+#include "core/config/config.h"
 #include "core/permission/permission.h"
+#include "core/storage/storage.h"
 #include "core/task/task.h"
 #include "core_sdk/config.h"
 #include "core_sdk/dialog.h"
@@ -88,8 +92,7 @@ static int selftest__config_bright_entry(int argc, char **argv) {
     (void)argc;
     (void)argv;
     s_config_set_result = config__set_bright(55);
-    int value = -1;
-    s_config_get_result = config__get_bright(&value);
+    s_config_get_result = config__get_bright() == 0 ? BRUCE_ERR_PERMISSION : BRUCE_OK;
     return 0;
 }
 
@@ -124,8 +127,8 @@ static int selftest__config_bright_allowed_entry(int argc, char **argv) {
     (void)argc;
     (void)argv;
     s_config_set_result = config__set_bright(66);
-    int value = -1;
-    s_config_get_result = config__get_bright(&value);
+    int value = config__get_bright();
+    s_config_get_result = value == 66 ? BRUCE_OK : BRUCE_ERR_INTERNAL;
     s_config_bright_value = value;
     return 0;
 }
@@ -161,9 +164,7 @@ bool selftest__run_config_permission_allowed_case(void) {
 static int selftest__config_protected_entry(int argc, char **argv) {
     (void)argc;
     (void)argv;
-    char ssid[33] = {0};
-    char password[65] = {0};
-    s_config_get_result = config__get_wifi_ap(ssid, sizeof(ssid), password, sizeof(password));
+    s_config_get_result = config__get_wifi_ap_ssid() == NULL ? BRUCE_ERR_PERMISSION : BRUCE_OK;
     s_config_set_result = config__set_web_ui_password("not-allowed");
     return 0;
 }
@@ -201,31 +202,76 @@ bool selftest__run_config_protected_field_denied_case(void) {
 
 bool selftest__run_config_builtin_manage_case(void) {
     /* Called directly within selftest's own built-in task context. */
+    const char *current_ssid = config__get_wifi_ap_ssid();
+    const char *current_password = config__get_wifi_ap_password();
+    const bruce_config_startup_apps_t *current_apps = config__get_startup_apps();
+    if (current_ssid == NULL || current_password == NULL || current_apps == NULL ||
+        current_apps->count > CONFIG__STARTUP_APP_MAX_COUNT) {
+        printf("[selftest] config/builtin-manage: FAIL (singleton)\n");
+        return false;
+    }
+
+    int original_volume = config__get_sound_volume();
+    char original_ssid[CONFIG__WIFI_SSID_MAX_LEN + 1];
+    char original_password[CONFIG__WIFI_PASSWORD_MAX_LEN + 1];
+    char original_app_storage[CONFIG__STARTUP_APP_MAX_COUNT][CONFIG__STARTUP_APP_MAX_LEN + 1] = {0};
+    const char *original_apps[CONFIG__STARTUP_APP_MAX_COUNT] = {0};
+    size_t original_app_count = current_apps->count;
+    snprintf(original_ssid, sizeof(original_ssid), "%s", current_ssid);
+    snprintf(original_password, sizeof(original_password), "%s", current_password);
+    for (size_t i = 0; i < original_app_count; ++i) {
+        snprintf(original_app_storage[i], sizeof(original_app_storage[i]), "%s", current_apps->items[i]);
+        original_apps[i] = original_app_storage[i];
+    }
+
     bruce_result_t set_general = config__set_sound_volume(42);
-    int general_value = -1;
-    bruce_result_t get_general = config__get_sound_volume(&general_value);
+    int general_value = config__get_sound_volume();
 
-    char original_ssid[33] = {0};
-    char original_password[65] = {0};
-    bruce_result_t get_original = config__get_wifi_ap(
-        original_ssid, sizeof(original_ssid), original_password, sizeof(original_password)
-    );
     bruce_result_t set_protected = config__set_wifi_ap("SelftestNet", "selftestpwd");
-    char ssid[33] = {0};
-    char password[65] = {0};
-    bruce_result_t get_protected = config__get_wifi_ap(ssid, sizeof(ssid), password, sizeof(password));
-    /* Restore the original AP credentials so this test doesn't permanently
-     * change device configuration as a side effect. */
-    if (get_original == BRUCE_OK) config__set_wifi_ap(original_ssid, original_password);
+    const char *ssid = config__get_wifi_ap_ssid();
+    const char *password = config__get_wifi_ap_password();
+    const char *theme = config__get_theme_path();
+    bool string_values = ssid != NULL && password != NULL && theme != NULL &&
+                         strcmp(ssid, "SelftestNet") == 0 && strcmp(password, "selftestpwd") == 0;
 
-    bool ok = set_general == BRUCE_OK && get_general == BRUCE_OK && general_value == 42 &&
-              set_protected == BRUCE_OK && get_protected == BRUCE_OK && strcmp(ssid, "SelftestNet") == 0 &&
-              strcmp(password, "selftestpwd") == 0;
+    const char *new_apps[] = {"clock", "terminal", "webui"};
+    bruce_result_t set_array = config__set_startup_apps(new_apps, 3);
+    const bruce_config_startup_apps_t *apps = config__get_startup_apps();
+    bool array_values = set_array == BRUCE_OK && apps != NULL && apps->count == 3 &&
+                         strcmp(apps->items[0], "clock") == 0 && strcmp(apps->items[1], "terminal") == 0 &&
+                         strcmp(apps->items[2], "webui") == 0;
+
+    bruce_result_t add_duplicate = config__add_startup_app("clock");
+    bruce_result_t add_app = config__add_startup_app("settings");
+    bruce_result_t remove_app = config__remove_startup_app("terminal");
+    bruce_result_t remove_missing = config__remove_startup_app("missing");
+    apps = config__get_startup_apps();
+    bool list_mutations = add_duplicate == BRUCE_OK && add_app == BRUCE_OK && remove_app == BRUCE_OK &&
+                          remove_missing == BRUCE_ERR_NOT_FOUND && apps != NULL && apps->count == 3 &&
+                          strcmp(apps->items[0], "clock") == 0 && strcmp(apps->items[1], "webui") == 0 &&
+                          strcmp(apps->items[2], "settings") == 0;
+
+    char *json = NULL;
+    size_t json_size = 0;
+    bool read_json = storage__read_file(CONFIG__FILE_PATH, &json, &json_size);
+    bool schema = read_json && json_size > 0 && strstr(json, "\"startupApps\"") != NULL &&
+                  strstr(json, "\"startupApp\":") == NULL && strstr(json, "\"qrCodes\"") == NULL &&
+                  strstr(json, "\"evilWifiNames\"") == NULL && strstr(json, "\"evilWifiEndpoints\"") == NULL &&
+                  strstr(json, "\"evilWifiPasswordMode\"") == NULL;
+    storage__free(json);
+
+    bool restored = config__set_sound_volume(original_volume) == BRUCE_OK &&
+                    config__set_wifi_ap(original_ssid, original_password) == BRUCE_OK &&
+                    config__set_startup_apps(original_apps, original_app_count) == BRUCE_OK;
+
+    bool ok = set_general == BRUCE_OK && general_value == 42 && set_protected == BRUCE_OK && string_values &&
+              array_values && list_mutations && schema && restored;
     printf(
-        "[selftest] config/builtin-manage: %s (general=%d ssid=\"%s\")\n",
+        "[selftest] config/builtin-manage: %s (general=%d array=%d schema=%d)\n",
         ok ? "OK" : "FAIL",
         general_value,
-        ssid
+        array_values,
+        schema
     );
     return ok;
 }

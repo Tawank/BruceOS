@@ -436,8 +436,7 @@ bruce_result_t display__init(void) {
         if (s_contexts[i].in_use) display__set_visibility_locked(&s_contexts[i]);
     }
     memset(s_framebuffer, 0, DISPLAY__FB_SIZE);
-    int configured_brightness = 100;
-    if (config__get_bright(&configured_brightness) != BRUCE_OK) configured_brightness = 100;
+    int configured_brightness = config__get_bright();
     s_brightness = (uint8_t)((configured_brightness * 255) / 100);
 #if !CONFIG_BRUCE_QEMU_TEST_MODE
     display_driver__set_backlight(s_brightness);

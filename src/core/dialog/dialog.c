@@ -191,9 +191,9 @@ static bruce_result_t dialog__term_pick_file(
 #define DIALOG__MARGIN 2
 
 static void dialog__get_theme_colors(uint16_t *pri, uint16_t *sec, uint16_t *bg) {
-    if (config__get_pri_color(pri) != BRUCE_OK) *pri = BRUCE_COLOR_BLUE;
-    if (config__get_bg_color(bg) != BRUCE_OK) *bg = BRUCE_COLOR_BLACK;
-    if (config__get_sec_color(sec) != BRUCE_OK) *sec = BRUCE_COLOR_DARKGREY;
+    *pri = config__get_pri_color();
+    *bg = config__get_bg_color();
+    *sec = config__get_sec_color();
 }
 
 static void dialog__gui_clear(void) {

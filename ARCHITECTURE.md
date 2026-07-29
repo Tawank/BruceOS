@@ -649,11 +649,20 @@ has no browser file mutation, input injection, command execution, credential,
 or reboot endpoint; those require authenticated dynamic-request contracts
 before exposure.
 
-`config` grants field-specific APIs such as `config__get_bright()` and
-`config__set_sound_enabled(true)`.  Setters validate and atomically persist
-immediately.  The following fields are permanently protected from ELF and JS,
-even with `config`: `wifiApSsid`, `webUIPassword`, `wifiCredentials`,
-`wifiMAC`, and `webUIUser`.  Built-ins may use those APIs.
+`config` is one Core-owned singleton exposed through type-safe field APIs such
+as `config__get_bright()`, `config__get_theme_path()`, and
+`config__set_sound_enabled(true)`. Scalar getters return values directly;
+string, string-array, and credential getters return read-only pointers into the
+singleton without allocating or copying. Those pointers remain valid until the
+configuration is changed, loaded, or reset and callers must not free them.
+`config__get_startup_apps()` returns the singleton's `startupApps` array and
+count. `config__add_startup_app()` appends a key only when it is not already
+present, and `config__remove_startup_app()` removes a key while preserving the
+order of the remaining entries. Setters validate and atomically persist
+immediately. The following
+values are permanently protected from ELF and JS, even with `config`:
+`wifiAp.ssid`, `wifiAp.pwd`, `webUI.pwd`, `wifiCredentials`, `wifiMAC`, and
+`webUI.user`. Built-ins may use those APIs.
 
 `ir` grants access to synchronous ESP-IDF RMT infrared capture and transmit
 through `ir__receive()`, `ir__transmit()`, and `ir__transmit_raw()`. Captures

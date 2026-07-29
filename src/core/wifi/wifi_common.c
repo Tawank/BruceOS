@@ -309,11 +309,11 @@ bruce_result_t wifi__connect_known(void) {
     int count = wifi__scan(networks, 16);
     if (count < 0) return (bruce_result_t)count;
     for (int i = 0; i < count; ++i) {
-        bruce_config_wifi_credential_t credential;
-        if (config__find_wifi_credential(networks[i].ssid, &credential) == BRUCE_OK) {
+        const bruce_config_wifi_credential_t *credential =
+            config__find_wifi_credential(networks[i].ssid);
+        if (credential != NULL) {
             bruce_result_t result =
-                wifi__connect(credential.ssid, credential.password, WIFI__DEFAULT_CONNECT_TIMEOUT_MS);
-            config__free_wifi_credential(&credential);
+                wifi__connect(credential->ssid, credential->password, WIFI__DEFAULT_CONNECT_TIMEOUT_MS);
             if (result == BRUCE_OK) return BRUCE_OK;
         }
     }
@@ -325,11 +325,9 @@ bruce_result_t wifi__setup_ap(void) {
     if (result != BRUCE_OK) return result;
     result = wifi__init();
     if (result != BRUCE_OK) return result;
-    char ssid[CONFIG__WIFI_SSID_MAX_LEN + 1];
-    char password[CONFIG__WIFI_PASSWORD_MAX_LEN + 1];
-    if (config__get_wifi_ap(ssid, sizeof(ssid), password, sizeof(password)) != BRUCE_OK) {
-        return BRUCE_ERR_IO;
-    }
+    const char *ssid = config__get_wifi_ap_ssid();
+    const char *password = config__get_wifi_ap_password();
+    if (ssid == NULL || password == NULL) return BRUCE_ERR_IO;
     wifi_config_t ap = {0};
     wifi__copy((char *)ap.ap.ssid, sizeof(ap.ap.ssid), ssid);
     wifi__copy((char *)ap.ap.password, sizeof(ap.ap.password), password);
@@ -408,7 +406,7 @@ bruce_result_t wifi__add_credential(const char *ssid, const char *password) {
     bruce_result_t result = permission__check(BRUCE_PERMISSION_WIFI);
     if (result != BRUCE_OK) return result;
     if (ssid == NULL || password == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
-    return config__add_or_update_wifi_credential(ssid, password) ? BRUCE_OK : BRUCE_ERR_IO;
+    return config__add_or_update_wifi_credential(ssid, password);
 }
 
 bruce_result_t wifi__scan_hosts(void) {

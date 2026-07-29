@@ -43,9 +43,9 @@ typedef struct {
 /* -------------------------------------------------------------------------- */
 
 static void bruce_launcher__get_theme(bruce_launcher_theme_t *theme) {
-    if (config__get_pri_color(&theme->pri) != BRUCE_OK) { theme->pri = BRUCE_COLOR_WHITE; }
-    if (config__get_sec_color(&theme->sec) != BRUCE_OK) { theme->sec = BRUCE_COLOR_LIGHTGREY; }
-    if (config__get_bg_color(&theme->bg) != BRUCE_OK) { theme->bg = BRUCE_COLOR_BLACK; }
+    theme->pri = config__get_pri_color();
+    theme->sec = config__get_sec_color();
+    theme->bg = config__get_bg_color();
 }
 
 static int bruce_launcher__submenu_font_size(void) {
@@ -72,8 +72,7 @@ static uint32_t bruce_launcher__draw_status_bar(const bruce_launcher_theme_t *th
     char clock_text[13] = "--:--:--";
     bruce_device_time_t time;
     if (device__get_time(&time) == BRUCE_OK) {
-        bool clock24 = true;
-        (void)config__get_clock24hr(&clock24);
+        bool clock24 = config__get_clock24hr();
         int hour = time.hour;
         if (!clock24) {
             hour %= 12;

@@ -12,13 +12,11 @@
 #include <string.h>
 
 static int config_app__show_clock(void) {
-    bool automatic = false, dst = false, format24 = true;
-    float timezone = 0;
+    bool automatic = config__get_automatic_time_update_via_ntp();
+    bool dst = config__get_dst();
+    bool format24 = config__get_clock24hr();
+    float timezone = config__get_tmz();
     bruce_clock_datetime_t now;
-    (void)config__get_automatic_time_update_via_ntp(&automatic);
-    (void)config__get_tmz(&timezone);
-    (void)config__get_dst(&dst);
-    (void)config__get_clock24hr(&format24);
     bruce_result_t clock_result = clock__get_local(&now);
     if (clock_result == BRUCE_OK) {
         stdio__printf("Local time: %04u-%02u-%02u %02u:%02u:%02u\n", now.year, now.month, now.day, now.hour,
@@ -58,12 +56,10 @@ static bruce_result_t config_app__manual_dialog(void) {
 
 static int config_app__clock_gui(void) {
     for (;;) {
-        bool automatic = false, dst = false, format24 = true;
-        float timezone = 0;
-        (void)config__get_automatic_time_update_via_ntp(&automatic);
-        (void)config__get_tmz(&timezone);
-        (void)config__get_dst(&dst);
-        (void)config__get_clock24hr(&format24);
+        bool automatic = config__get_automatic_time_update_via_ntp();
+        bool dst = config__get_dst();
+        bool format24 = config__get_clock24hr();
+        float timezone = config__get_tmz();
         char ntp_label[40], timezone_label[40], dst_label[32], format_label[32];
         snprintf(ntp_label, sizeof(ntp_label), "Automatic NTP: %s", automatic ? "ON" : "OFF");
         snprintf(timezone_label, sizeof(timezone_label), "Timezone: UTC%+.2f", timezone);
