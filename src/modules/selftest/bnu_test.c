@@ -4,6 +4,8 @@
 #include <string.h>
 
 #include "core_sdk/result.h"
+#include "core_sdk/storage.h"
+#include "core/storage/storage.h"
 #include "modules/bnu/bnu_app.h"
 
 bool selftest__run_bnu_case(void) {
@@ -13,11 +15,25 @@ bool selftest__run_bnu_case(void) {
     char *ls_argv[] = {"ls"};
     char *free_argv[] = {"free"};
     char *top_argv[] = {"top"};
+    char *cat_argv[] = {"cat", "/selftest_bnu_cat.txt"};
+    static const char cat_text[] = "bnu cat selftest\n";
+    bruce_file_id_t cat_file = BRUCE_FILE_ID_INVALID;
+    size_t cat_written = 0;
+    bruce_result_t cat_open = storage__open(
+        cat_argv[1], BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE | BRUCE_STORAGE_OPEN_TRUNCATE, &cat_file
+    );
+    bruce_result_t cat_write = cat_open == BRUCE_OK
+                                   ? storage__write(cat_file, cat_text, sizeof(cat_text) - 1, &cat_written)
+                                   : cat_open;
+    bruce_result_t cat_close = cat_open == BRUCE_OK ? storage__close(cat_file) : cat_open;
     bool ok = bnu_cd_app_main(1, cd_root_argv) == BRUCE_OK &&
               bnu_cd_app_main(2, cd_dot_argv) == BRUCE_OK &&
               strcmp(bnu__get_working_directory(), "/") == 0 &&
               bnu_pwd_app_main(1, pwd_argv) == BRUCE_OK && bnu_ls_app_main(1, ls_argv) == BRUCE_OK &&
-              bnu_free_app_main(1, free_argv) == BRUCE_OK && bnu_top_app_main(1, top_argv) == BRUCE_OK;
+              bnu_free_app_main(1, free_argv) == BRUCE_OK && bnu_top_app_main(1, top_argv) == BRUCE_OK &&
+              cat_open == BRUCE_OK && cat_write == BRUCE_OK && cat_written == sizeof(cat_text) - 1 &&
+              cat_close == BRUCE_OK && bnu_cat_app_main(2, cat_argv) == BRUCE_OK;
+    storage__remove(cat_argv[1]);
     printf("[selftest] bnu: %s\n", ok ? "OK" : "failed");
     return ok;
 }

@@ -236,3 +236,47 @@ int bnu_touch_app_main(int argc, char **argv) {
     storage__close(file);
     return BRUCE_OK;
 }
+
+static bruce_result_t bnu__cat_file(const char *path) {
+    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
+    bruce_result_t result = storage__open(path, BRUCE_STORAGE_OPEN_READ, &file);
+    if (result != BRUCE_OK) return result;
+
+    unsigned char buffer[256];
+    while (result == BRUCE_OK) {
+        size_t read_size = 0;
+        result = storage__read(file, buffer, sizeof(buffer), &read_size);
+        if (result != BRUCE_OK || read_size == 0) break;
+        result = bruce_stdio_write(buffer, read_size);
+    }
+
+    bruce_result_t close_result = storage__close(file);
+    return result != BRUCE_OK ? result : close_result;
+}
+
+int bnu_cat_app_main(int argc, char **argv) {
+    ArgParser *parser = bnu__new_parser("Print file contents.");
+    if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
+    ap_add_required_arg(parser, "file", "File path to print");
+    ap_allow_extra_args(parser);
+    ap_unknown_options_as_args(parser);
+    if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
+
+    int path_count = ap_count_args(parser);
+    for (int i = 0; i < path_count; ++i) {
+        char path[BRUCE_STORAGE_PATH_MAX];
+        if (!bnu__resolve_path(ap_get_arg_at_index(parser, i), path)) {
+            ap_free(parser);
+            return BRUCE_ERR_INVALID_PATH;
+        }
+        bruce_result_t result = bnu__cat_file(path);
+        if (result != BRUCE_OK) {
+            stdio__printf("cat: %s: error %d\n", path, result);
+            ap_free(parser);
+            return result;
+        }
+    }
+
+    ap_free(parser);
+    return BRUCE_OK;
+}

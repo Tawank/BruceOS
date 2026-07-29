@@ -15,6 +15,11 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+#include "driver/usb_serial_jtag.h"
+#include "driver/usb_serial_jtag_vfs.h"
+#endif
+
 #include "core/task/task.h"
 #include "core_sdk/result.h"
 #include "core_sdk/task.h"
@@ -61,6 +66,20 @@ static void stdio__ensure_init(void) {
     portENTER_CRITICAL(&s_init_mux);
     if (s_lock == NULL) s_lock = xSemaphoreCreateMutexStatic(&s_lock_storage);
     portEXIT_CRITICAL(&s_init_mux);
+}
+
+bruce_result_t stdio__init(void) {
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+    if (!usb_serial_jtag_is_driver_installed()) {
+        usb_serial_jtag_driver_config_t config = {
+            .rx_buffer_size = 1024,
+            .tx_buffer_size = 1024,
+        };
+        if (usb_serial_jtag_driver_install(&config) != ESP_OK) return BRUCE_ERR_IO;
+    }
+    usb_serial_jtag_vfs_use_driver();
+#endif
+    return BRUCE_OK;
 }
 
 static stdio__session_t *stdio__find_locked(bruce_stdio_session_t id) {
@@ -414,6 +433,14 @@ bruce_result_t bruce_stdio_read(void *buffer, size_t capacity, uint32_t timeout_
     }
     if (buffer == NULL || capacity == 0 || out_size == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     *out_size = 0;
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+    if (stdio__init() != BRUCE_OK) return BRUCE_ERR_IO;
+    int count = usb_serial_jtag_read_bytes(buffer, capacity, pdMS_TO_TICKS(timeout_ms));
+    if (count == 0) return BRUCE_ERR_TIMEOUT;
+    if (count < 0) return BRUCE_ERR_IO;
+    *out_size = (size_t)count;
+    return BRUCE_OK;
+#else
     fd_set rfds;
     FD_ZERO(&rfds);
     FD_SET(STDIN_FILENO, &rfds);
@@ -429,6 +456,7 @@ bruce_result_t bruce_stdio_read(void *buffer, size_t capacity, uint32_t timeout_
     if (count == 0) return BRUCE_ERR_NOT_FOUND;
     *out_size = (size_t)count;
     return BRUCE_OK;
+#endif
 }
 
 int bruce_stdio_read_line(char *buffer, size_t buffer_size, bool mask_input) {

@@ -187,12 +187,13 @@ static display__task_context_t *display__drawing_context_locked(bruce_task_id_t 
 }
 
 bruce_result_t display_internal__begin_draw(display__task_context_t **out_context) {
+    bruce_task_id_t caller = task__current_id();
     display__lock();
     if (!s_initialized) {
         display__unlock();
         return BRUCE_ERR_NOT_INITIALIZED;
     }
-    display__task_context_t *context = display__drawing_context_locked(task__current_id());
+    display__task_context_t *context = display__drawing_context_locked(caller);
     if (context == NULL) {
         display__unlock();
         return BRUCE_ERR_PERMISSION;
@@ -466,25 +467,28 @@ void display__deinit(void) {
 }
 
 int display__width(void) {
+    bruce_task_id_t caller = task__current_id();
     display__lock();
-    display__task_context_t *context = display__find_context_locked(task__current_id());
+    display__task_context_t *context = display__find_context_locked(caller);
     int width = context != NULL && !context->hidden ? context->viewport.width : 0;
     display__unlock();
     return width;
 }
 
 int display__height(void) {
+    bruce_task_id_t caller = task__current_id();
     display__lock();
-    display__task_context_t *context = display__find_context_locked(task__current_id());
+    display__task_context_t *context = display__find_context_locked(caller);
     int height = context != NULL && !context->hidden ? context->viewport.height : 0;
     display__unlock();
     return height;
 }
 
 bruce_result_t display__set_rotation(uint8_t rotation) {
+    bruce_task_id_t caller_id = task__current_id();
     display__lock();
     if (!s_initialized) { display__unlock(); return BRUCE_ERR_NOT_INITIALIZED; }
-    display__task_context_t *caller = display__find_context_locked(task__current_id());
+    display__task_context_t *caller = display__find_context_locked(caller_id);
     if (caller == NULL || caller->tiled) { display__unlock(); return BRUCE_ERR_PERMISSION; }
     if (s_transfer_active || (s_request_queue != NULL && uxQueueMessagesWaiting(s_request_queue) != 0)) {
         display__unlock();
@@ -536,14 +540,20 @@ bruce_result_t display__invert_display(bool invert) {
 bruce_result_t display__set_brightness(uint8_t brightness) {
     display__lock();
     if (!s_initialized) { display__unlock(); return BRUCE_ERR_NOT_INITIALIZED; }
+    display__unlock();
     bruce_result_t result = config__set_bright((int)brightness * 100 / 255);
     if (result == BRUCE_OK) {
+        display__lock();
+        if (!s_initialized) {
+            display__unlock();
+            return BRUCE_ERR_NOT_INITIALIZED;
+        }
         s_brightness = brightness;
 #if !CONFIG_BRUCE_QEMU_TEST_MODE
         display_driver__set_backlight(brightness);
 #endif
+        display__unlock();
     }
-    display__unlock();
     return result;
 }
 
@@ -568,9 +578,10 @@ bruce_result_t display__display_on_off(bool on) {
 }
 
 bruce_result_t display__begin_frame(void) {
+    bruce_task_id_t caller = task__current_id();
     display__lock();
     if (!s_initialized) { display__unlock(); return BRUCE_ERR_NOT_INITIALIZED; }
-    display__task_context_t *context = display__find_context_locked(task__current_id());
+    display__task_context_t *context = display__find_context_locked(caller);
     if (context == NULL) { display__unlock(); return BRUCE_ERR_PERMISSION; }
     if (context->completion == NULL) { display__unlock(); return BRUCE_ERR_NO_MEMORY; }
     if (context->frame_active) { display__unlock(); return BRUCE_ERR_INVALID_STATE; }
@@ -598,8 +609,9 @@ bruce_result_t display__begin_frame(void) {
 }
 
 bruce_result_t display__present(void) {
+    bruce_task_id_t caller = task__current_id();
     display__lock();
-    display__task_context_t *context = display__find_context_locked(task__current_id());
+    display__task_context_t *context = display__find_context_locked(caller);
     if (!s_initialized) { display__unlock(); return BRUCE_ERR_NOT_INITIALIZED; }
     if (context == NULL || !context->frame_active) { display__unlock(); return BRUCE_ERR_INVALID_STATE; }
     if (context->frame_noop) {
@@ -633,8 +645,9 @@ bruce_result_t display__present(void) {
 }
 
 bruce_result_t display__flush(void) {
+    bruce_task_id_t caller = task__current_id();
     display__lock();
-    display__task_context_t *context = display__find_context_locked(task__current_id());
+    display__task_context_t *context = display__find_context_locked(caller);
     bool active = context != NULL && context->frame_active;
     display__unlock();
     if (!active) {
@@ -650,9 +663,10 @@ bruce_result_t display__set_tiles(const bruce_display_tile_t *tiles, size_t coun
         task_registry__current_context(&built_in, NULL, 0, NULL) != BRUCE_OK || !built_in) {
         return BRUCE_ERR_PERMISSION;
     }
+    bruce_task_id_t caller = task__current_id();
     display__lock();
     if (!s_initialized) { display__unlock(); return BRUCE_ERR_NOT_INITIALIZED; }
-    display__task_context_t *owner = display__find_context_locked(task__current_id());
+    display__task_context_t *owner = display__find_context_locked(caller);
     if (owner == NULL || owner->state != BRUCE_TASK_FOREGROUND) {
         display__unlock();
         return BRUCE_ERR_NOT_FOREGROUND;

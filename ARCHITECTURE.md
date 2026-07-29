@@ -408,14 +408,16 @@ the normal JS lifecycle entry.  `serial.cmd(command)` delegates to the same
 non-GUI commands in the background, displays their captured stdout/stderr, and
 routes entered lines to their stdin. Commands containing `--gui` use the normal
 foreground handoff and return to the terminal when they exit. The physical
-serial command loop is the separate `serial_commands` built-in.
+serial command loop is the separate `serial_commands` built-in. The configured
+ESP-IDF console transport and its input driver remain Core-owned.
 
 The built-in BNU (Bruce is Not Unix) module provides the direct commands
-`pwd`, `cd [directory]`, `ls [path]`, `free`, and `top`. BNU keeps a shell
-working directory for relative storage paths; it is independent of libc process
-cwd. `free` reports Core-provided internal RAM and PSRAM heap statistics. `top`
-reports the same system heaps plus CPU usage, stack high-water bytes, and tracked
-heap usage for each Core-managed task.
+`pwd`, `cd [directory]`, `ls [path]`, `mkdir <directory>`, `touch <file>`,
+`cat <file>...`, `free`, and `top`. BNU keeps a shell working directory for
+relative storage paths; it is independent of libc process cwd. `cat` streams
+files unchanged to app-visible stdout. `free` reports Core-provided internal RAM
+and PSRAM heap statistics. `top` reports the same system heaps plus CPU usage,
+stack high-water bytes, and tracked heap usage for each Core-managed task.
 
 Core owns bounded, task-owned stdio sessions. A session owner may route newly
 created child tasks to the session, drain captured output, and enqueue input.

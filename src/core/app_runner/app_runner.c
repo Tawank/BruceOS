@@ -102,6 +102,7 @@ void app_runner__register_defaults(void) {
     (void)app_runner__register("top", bnu_top_app_main);
     (void)app_runner__register("mkdir", bnu_mkdir_app_main);
     (void)app_runner__register("touch", bnu_touch_app_main);
+    (void)app_runner__register("cat", bnu_cat_app_main);
     (void)app_runner__register("elf", elf_loader__app_main);
     (void)app_runner__register("js", js_loader__app_main);
     (void)app_runner__register("image", image_app_main);

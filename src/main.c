@@ -6,6 +6,7 @@
 #include "core/app_runner/app_runner.h"
 #include "core/config/config.h"
 #include "core/input/input.h"
+#include "core/stdio/stdio.h"
 #include "freertos/idf_additions.h"
 
 bool init_user_interface(void) {
@@ -20,6 +21,7 @@ bool init_user_interface(void) {
 
 void app_main(void) {
     if (!config__init()) printf("Configuration storage is unavailable; using in-memory defaults\n");
+    if (stdio__init() != BRUCE_OK) printf("USB serial console initialization failed\n");
 
     bool ui_ok = init_user_interface();
 

@@ -104,6 +104,7 @@ idf_component_register(SRCS
                     esp_driver_ledc
                     esp_driver_rmt
                     esp_driver_spi
+                    esp_driver_usb_serial_jtag
                     esp_driver_sdspi
                     esp_http_client
                     esp_http_server
