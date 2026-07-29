@@ -156,7 +156,13 @@ static int bluetooth_hid_app__gui(void) {
 }
 
 int bluetooth_hid_app_main(int argc, char **argv) {
-    if (app_runner__args_have_gui(argc, argv)) return bluetooth_hid_app__gui();
+    if (app_runner__args_have_gui(argc, argv)) {
+        if (!app_runner__args_have_background(argc, argv)) {
+            bruce_result_t foreground = task__to_foreground();
+            if (foreground != BRUCE_OK) return foreground;
+        }
+        return bluetooth_hid_app__gui();
+    }
 
     ArgParser *root = ap_new_parser();
     if (root == NULL) return BRUCE_ERR_NO_MEMORY;

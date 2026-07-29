@@ -364,6 +364,13 @@ bool app_runner__args_have_gui(int argc, char *const *argv) {
     return false;
 }
 
+bool app_runner__args_have_background(int argc, char *const *argv) {
+    for (int i = 0; i < argc; ++i) {
+        if (argv[i] != NULL && strcmp(argv[i], "--bg") == 0) return true;
+    }
+    return false;
+}
+
 int app_runner__run(const char *app_name, const char *arg, bool in_background) {
     if (app_name == NULL || app_name[0] == '\0') { return BRUCE_ERR_INVALID_ARGUMENT; }
 

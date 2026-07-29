@@ -42,3 +42,7 @@ void app_runner__free_args(char **argv, int argc);
  * this for the task context they spawn (see migration_plan.md, "Dialog
  * and task interaction"). */
 bool app_runner__args_have_gui(int argc, char *const *argv);
+
+/* Returns true if any argv element is exactly "--bg". GUI applications use
+ * this to suppress their normal startup foreground claim. */
+bool app_runner__args_have_background(int argc, char *const *argv);

@@ -7,6 +7,7 @@
 #include "core_sdk/display.h"
 
 void display__task_created(bruce_task_id_t task_id, bool gui_requested);
+void display__task_set_gui_requested(bruce_task_id_t task_id);
 void display__task_state_changed(bruce_task_id_t task_id, bruce_task_state_t state);
 void display__task_removed(bruce_task_id_t task_id);
 

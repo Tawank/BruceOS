@@ -36,7 +36,7 @@ void app_main(void) {
 #endif
 
     if (ui_ok) {
-        int result = app_runner__run("launcher", "--gui", false);
+        int result = app_runner__run("launcher", "--gui", true);
         if (result < 0) { printf("Launcher failed to start with code %d\n", result); }
     }
 

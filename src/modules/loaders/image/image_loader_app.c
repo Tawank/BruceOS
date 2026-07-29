@@ -11,6 +11,7 @@
 #include "core_sdk/result.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
+#include "core_sdk/task.h"
 
 int image_viewer_app_main(int argc, char **argv) {
     ArgParser *parser = ap_new_parser();
@@ -30,6 +31,10 @@ int image_viewer_app_main(int argc, char **argv) {
     ap_free(parser);
     if (!image__is_supported_path(path)) {
         return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    if (!app_runner__args_have_background(argc, argv)) {
+        bruce_result_t foreground = task__to_foreground();
+        if (foreground != BRUCE_OK) return foreground;
     }
 
     bruce_image_draw_options_t options = {
@@ -104,5 +109,5 @@ int image_app_main(int argc, char **argv) {
     }
     char *path = ap_get_arg(parser, "path");
     ap_free(parser);
-    return image_loader__run_path(path, NULL, false);
+    return image_loader__run_path(path, NULL, true);
 }

@@ -450,13 +450,13 @@ static int bruce_launcher__run_entry(const bruce_launcher_entry_t *entry) {
     int result;
 
     if (entry->command[0] == '/') {
-        result = app_runner__run_path(entry->command, NULL, false);
+        result = app_runner__run_path(entry->command, NULL, true);
     } else {
         char first[BRUCE_LAUNCHER_LABEL_MAX];
         const char *rest = NULL;
         bruce_launcher__split_command(entry->command, first, sizeof(first), &rest);
         if (first[0] == '\0') { return BRUCE_ERR_INVALID_ARGUMENT; }
-        result = app_runner__run(first, rest[0] != '\0' ? rest : NULL, false);
+        result = app_runner__run(first, rest[0] != '\0' ? rest : NULL, true);
     }
 
     if (result < 0) {
@@ -688,9 +688,6 @@ static int bruce_launcher__run_terminal_menu(bruce_launcher_menu_t *menu) {
 /* -------------------------------------------------------------------------- */
 
 int bruce_launcher_app_main(int argc, char **argv) {
-    (void)argc;
-    (void)argv;
-
     bruce_launcher_menu_t *root = bruce_launcher__menu_load();
     if (root == NULL) {
         printf("Failed to load launcher configuration\n");
@@ -699,6 +696,13 @@ int bruce_launcher_app_main(int argc, char **argv) {
 
     int result;
     if (app_runner__args_have_gui(argc, argv)) {
+        if (!app_runner__args_have_background(argc, argv)) {
+            result = task__to_foreground();
+            if (result != BRUCE_OK) {
+                bruce_launcher__menu_free(root);
+                return result;
+            }
+        }
         result = bruce_launcher__run_gui_menu(root);
     } else {
         result = bruce_launcher__run_terminal_menu(root);

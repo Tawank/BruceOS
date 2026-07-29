@@ -27,7 +27,7 @@ static int selftest__worker_normal_exit(int argc, char **argv) {
     (void)argc;
     (void)argv;
 
-    if (task__foreground(task__current_id()) != BRUCE_OK) { return -1; }
+    if (task__to_foreground() != BRUCE_OK) { return -1; }
     s_shared.foregrounded_self = true;
 
     if (task__to_background() != BRUCE_OK) { return -1; }
@@ -64,8 +64,8 @@ static int selftest__worker_normal_exit(int argc, char **argv) {
     s_shared.registered_resource = true;
 
     bruce_task_snapshot_t snapshot;
-    if (task__snapshot(task__current_id(), &snapshot) != BRUCE_OK || snapshot.memory_bytes < 384 ||
-        snapshot.resource_count < 2) {
+    if (task__snapshot(task__current_id(), &snapshot) != BRUCE_OK || !snapshot.gui_requested ||
+        snapshot.memory_bytes < 384 || snapshot.resource_count < 2) {
         memory__free(block);
         return -1;
     }

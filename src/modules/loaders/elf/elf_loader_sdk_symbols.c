@@ -61,6 +61,7 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(task__switch_next),
     ESP_ELFSYM_EXPORT(task__switch_previous),
     ESP_ELFSYM_EXPORT(task__to_background),
+    ESP_ELFSYM_EXPORT(task__to_foreground),
     ESP_ELFSYM_EXPORT(task__foreground),
     ESP_ELFSYM_EXPORT(task__stop),
     ESP_ELFSYM_EXPORT(task__pause),
@@ -88,6 +89,7 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(app_runner__parse_args),
     ESP_ELFSYM_EXPORT(app_runner__free_args),
     ESP_ELFSYM_EXPORT(app_runner__args_have_gui),
+    ESP_ELFSYM_EXPORT(app_runner__args_have_background),
 
     /* Memory */
     ESP_ELFSYM_EXPORT(memory__malloc),

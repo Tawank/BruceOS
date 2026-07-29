@@ -56,6 +56,9 @@ bruce_result_t task__snapshot(bruce_task_id_t task_id, bruce_task_snapshot_t *ou
 bruce_result_t task__switch_next(void);
 bruce_result_t task__switch_previous(void);
 bruce_result_t task__to_background(void);
+/* Declares the calling task GUI-capable and gives it foreground ownership.
+ * This self-only operation does not require the `task` permission. */
+bruce_result_t task__to_foreground(void);
 bruce_result_t task__foreground(bruce_task_id_t task_id);
 bruce_result_t task__stop(bruce_task_id_t task_id);
 bruce_result_t task__pause(bruce_task_id_t task_id);

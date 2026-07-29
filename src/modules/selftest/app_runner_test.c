@@ -73,6 +73,13 @@ static int selftest__apprunner_echo_entry(int argc, char **argv) {
 }
 
 bool selftest__run_apprunner_args_case(void) {
+    char *lifecycle_argv[] = {"app", "--gui-mode", "--bg", "--gui", NULL};
+    if (!app_runner__args_have_gui(4, lifecycle_argv) ||
+        !app_runner__args_have_background(4, lifecycle_argv) ||
+        app_runner__args_have_gui(2, lifecycle_argv) || app_runner__args_have_background(2, lifecycle_argv)) {
+        printf("[selftest] apprunner/args: lifecycle flags were not matched exactly\n");
+        return false;
+    }
     bruce_result_t registered = app_runner__register("selftest_echo", selftest__apprunner_echo_entry);
     if (registered != BRUCE_OK && registered != BRUCE_ERR_ALREADY_EXISTS) {
         printf("[selftest] apprunner/args: register failed (%d)\n", registered);

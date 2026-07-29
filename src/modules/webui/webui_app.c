@@ -9,6 +9,7 @@
 #include "core_sdk/http_server.h"
 #include "core_sdk/result.h"
 #include "core_sdk/stdio.h"
+#include "core_sdk/task.h"
 #include "core_sdk/wifi.h"
 
 typedef enum {
@@ -142,7 +143,13 @@ static int webui_app__gui(void) {
 }
 
 int webui_app_main(int argc, char **argv) {
-    if (app_runner__args_have_gui(argc, argv)) return webui_app__gui();
+    if (app_runner__args_have_gui(argc, argv)) {
+        if (!app_runner__args_have_background(argc, argv)) {
+            bruce_result_t foreground = task__to_foreground();
+            if (foreground != BRUCE_OK) return foreground;
+        }
+        return webui_app__gui();
+    }
 
     ArgParser *root = ap_new_parser();
     if (root == NULL) return BRUCE_ERR_NO_MEMORY;

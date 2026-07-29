@@ -13,8 +13,7 @@ JSValue native_runtimeToForeground(JSContext *ctx, JSValue *this_val, int argc, 
     (void)this_val;
     (void)argc;
     (void)argv;
-    bruce_task_id_t id = task__current_id();
-    return JS_NewInt32(ctx, (int)task__foreground(id));
+    return JS_NewInt32(ctx, (int)task__to_foreground());
 }
 
 JSValue native_runtimeIsForeground(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {

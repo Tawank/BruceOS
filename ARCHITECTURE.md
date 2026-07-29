@@ -88,6 +88,9 @@ and resolved directly through `icon__get()`. Labels without a suffix have no
 launcher icon.
 Every submenu automatically appends a `"Back"` entry.  The command strings are
 passed exactly as written; the launcher does not append `--gui` automatically.
+The launcher starts every command and discovered path in the background. An
+application that wants to draw calls `task__to_foreground()` itself; an exact
+`--bg` argument lets the application suppress that startup claim.
 If `/launcher.json` is missing, the launcher writes a default configuration.
 
 ## Applications and app_runner
@@ -257,6 +260,12 @@ stack: foregrounding a new task pushes the prior task; exit or
 `runtime__to_background()` restores the most recent foreground task, falling
 back to `bruce_launcher`.
 
+Launcher and terminal front ends use background-first dispatch. Graphical apps
+claim foreground with `task__to_foreground()` immediately before interaction;
+this also dynamically marks the caller GUI-capable. Built-ins honor exact
+`--bg` by not making that startup claim. `--gui` selects a GUI frontend but does
+not itself determine foreground ownership.
+
 Backgrounding changes state and physical-input ownership. A background GUI task
 is hidden unless the launcher assigns it a compositor tile; hidden drawing is a
 successful no-op. Serial access remains independent of foreground state.
@@ -404,10 +413,10 @@ the normal JS lifecycle entry.  `serial.cmd(command)` delegates to the same
 
 ## Terminal and stdio sessions
 
-`terminal` is a GUI-by-default built-in. It remains foreground while running
-non-GUI commands in the background, displays their captured stdout/stderr, and
-routes entered lines to their stdin. Commands containing `--gui` use the normal
-foreground handoff and return to the terminal when they exit. The physical
+`terminal` is a GUI-by-default built-in. It starts all commands in the
+background, displays their captured stdout/stderr, and routes entered lines to
+their stdin. Graphical commands explicitly claim foreground and return to the
+terminal when they exit. The physical
 serial command loop is the separate `serial_commands` built-in. The configured
 ESP-IDF console transport and its input driver remain Core-owned.
 

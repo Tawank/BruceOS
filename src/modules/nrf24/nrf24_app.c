@@ -9,6 +9,7 @@
 #include "core_sdk/nrf24.h"
 #include "core_sdk/result.h"
 #include "core_sdk/stdio.h"
+#include "core_sdk/task.h"
 
 #define NRF24_APP_SPECTRUM_CHANNELS 80u
 #define NRF24_APP_SPECTRUM_SAMPLES 8u
@@ -118,7 +119,13 @@ static int nrf24_app__gui(void) {
 }
 
 int nrf24_app_main(int argc, char **argv) {
-    if (app_runner__args_have_gui(argc, argv)) return nrf24_app__gui();
+    if (app_runner__args_have_gui(argc, argv)) {
+        if (!app_runner__args_have_background(argc, argv)) {
+            bruce_result_t foreground = task__to_foreground();
+            if (foreground != BRUCE_OK) return foreground;
+        }
+        return nrf24_app__gui();
+    }
 
     ArgParser *root = ap_new_parser();
     if (root == NULL) return BRUCE_ERR_NO_MEMORY;

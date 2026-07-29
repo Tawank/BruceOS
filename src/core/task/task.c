@@ -704,6 +704,27 @@ bruce_result_t task__to_background(void) {
     return BRUCE_OK;
 }
 
+bruce_result_t task__to_foreground(void) {
+    task__ensure_init();
+    task__lock();
+    task__record_t *self = task__find_by_handle_locked(xTaskGetCurrentTaskHandle());
+    if (self == NULL) {
+        task__unlock();
+        return BRUCE_ERR_NOT_FOUND;
+    }
+    if (self->state != BRUCE_TASK_BACKGROUND && self->state != BRUCE_TASK_FOREGROUND) {
+        task__unlock();
+        return BRUCE_ERR_INVALID_STATE;
+    }
+    if (!self->gui_requested) {
+        self->gui_requested = true;
+        display__task_set_gui_requested(self->id);
+    }
+    if (self->state == BRUCE_TASK_BACKGROUND) task__foreground_push_locked(self->id);
+    task__unlock();
+    return BRUCE_OK;
+}
+
 bruce_result_t task__foreground(bruce_task_id_t task_id) {
     if (task_id != task__current_id()) {
         bruce_result_t permission_result = permission__check(BRUCE_PERMISSION_TASK);

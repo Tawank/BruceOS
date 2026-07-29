@@ -1,11 +1,13 @@
 #include "config_app.h"
 
 #include "args.h"
+#include "core_sdk/app_runner.h"
 #include "core_sdk/clock.h"
 #include "core_sdk/config.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/result.h"
 #include "core_sdk/stdio.h"
+#include "core_sdk/task.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -165,6 +167,8 @@ static int config_app__clock_cli(ArgParser *clock_parser, ArgParser *show, ArgPa
 static void config_app__add_gui_option(ArgParser *parser) {
     ap_add_flag(parser, "gui");
     ap_set_opt_help(parser, "gui", "Use GUI interaction mode");
+    ap_add_flag(parser, "bg");
+    ap_set_opt_help(parser, "bg", "Do not claim foreground at startup");
 }
 
 int config_app_main(int argc, char **argv) {
@@ -219,6 +223,13 @@ int config_app_main(int argc, char **argv) {
     bool gui = ap_found(root, "gui") || ap_found(system, "gui") || ap_found(clock, "gui");
     ArgParser *action = hierarchy_found ? ap_get_cmd_parser(clock) : NULL;
     if (action != NULL) gui = gui || ap_found(action, "gui");
+    if (gui && !app_runner__args_have_background(argc, argv)) {
+        bruce_result_t foreground = task__to_foreground();
+        if (foreground != BRUCE_OK) {
+            ap_free(root);
+            return foreground;
+        }
+    }
     int result = !hierarchy_found ? BRUCE_ERR_INVALID_ARGUMENT
                                   : gui ? config_app__clock_gui()
                                         : config_app__clock_cli(clock, show, sync, ntp, timezone, dst, format, set);

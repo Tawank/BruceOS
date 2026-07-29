@@ -742,6 +742,18 @@ void display__task_created(bruce_task_id_t task_id, bool gui_requested) {
     display__unlock();
 }
 
+void display__task_set_gui_requested(bruce_task_id_t task_id) {
+    display__ensure_lock();
+    display__lock();
+    display__task_context_t *context = display__find_context_locked(task_id);
+    if (context != NULL && !context->gui_requested) {
+        context->gui_requested = true;
+        if (context->state == BRUCE_TASK_FOREGROUND) context->clear_on_next_frame = true;
+        if (!context->frame_active) display__set_visibility_locked(context);
+    }
+    display__unlock();
+}
+
 void display__task_state_changed(bruce_task_id_t task_id, bruce_task_state_t state) {
     display__ensure_lock();
     display__lock();

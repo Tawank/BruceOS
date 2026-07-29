@@ -45,7 +45,7 @@ int serial_commands_app_main(int argc, char **argv) {
         if (len < 0) break;
         if (line[0] == '\0') continue;
         if (strcmp(line, "exit") == 0) return 0;
-        int result = serial_commands__run_line(line, false);
+        int result = serial_commands__run_line(line, true);
         if (result > 0) {
             printf("started task %u\n", (unsigned int)result);
             while (task__wait((bruce_task_id_t)result, 100) == BRUCE_ERR_TIMEOUT) {

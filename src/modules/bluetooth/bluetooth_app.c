@@ -119,6 +119,10 @@ static int bluetooth_app__scan_gui(void) {
 
 int bluetooth_app_main(int argc, char **argv) {
     if (app_runner__args_have_gui(argc, argv)) {
+        if (!app_runner__args_have_background(argc, argv)) {
+            bruce_result_t foreground = task__to_foreground();
+            if (foreground != BRUCE_OK) return foreground;
+        }
         const bruce_dialog_choice_t choices[] = {
             {"BLE advertisement scan", "scan"}
         };

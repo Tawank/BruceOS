@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "args.h"
+#include "core_sdk/app_runner.h"
 #include "core_sdk/config.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/display.h"
@@ -146,9 +147,8 @@ static void terminal__submit(terminal__state_t *state) {
         terminal__append_text(state, "$ ");
         terminal__append(state, state->input, state->input_size);
         terminal__append_text(state, "\n");
-        bool gui_child = strstr(state->input, "--gui") != NULL;
         (void)bruce_stdio_session_route_children(state->session);
-        int result = serial_commands__run_line(state->input, !gui_child);
+        int result = serial_commands__run_line(state->input, true);
         (void)bruce_stdio_session_route_children(BRUCE_STDIO_SESSION_INVALID);
         if (result > 0) {
             state->child = (bruce_task_id_t)result;
@@ -192,6 +192,8 @@ int terminal_app_main(int argc, char **argv) {
     ArgParser *parser = ap_new_parser();
     if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
     ap_set_helptext(parser, "Open the terminal and optionally run a startup command.");
+    ap_add_flag(parser, "gui");
+    ap_add_flag(parser, "bg");
     ap_add_optional_arg(parser, "command", "Command to run on startup");
     ap_unknown_options_as_args(parser);
     ap_allow_extra_args(parser);
@@ -209,6 +211,11 @@ int terminal_app_main(int argc, char **argv) {
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
     ap_free(parser);
+
+    if (!app_runner__args_have_background(argc, argv)) {
+        bruce_result_t foreground = task__to_foreground();
+        if (foreground != BRUCE_OK) return foreground;
+    }
 
     terminal__state_t state = {0};
     state.child = BRUCE_TASK_ID_INVALID;
