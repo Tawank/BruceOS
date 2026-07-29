@@ -5,5 +5,9 @@ CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
 # Keep emulator startup deterministic; production builds remain dual-core.
 CONFIG_FREERTOS_UNICORE=y
 
+# pytest-embedded creates its QEMU image offline, where esptool cannot use the
+# hardware-only `detect` flash-size mode enabled for production flashing.
+CONFIG_ESPTOOLPY_HEADER_FLASHSIZE_UPDATE=n
+
 # Do not initialize the physical Cardputer LCD and keyboard in the emulator.
 CONFIG_BRUCE_QEMU_TEST_MODE=y

@@ -664,6 +664,13 @@ values are permanently protected from ELF and JS, even with `config`:
 `wifiAp.ssid`, `wifiAp.pwd`, `webUI.pwd`, `wifiCredentials`, `wifiMAC`, and
 `webUI.user`. Built-ins may use those APIs.
 
+Core registers internal LittleFS at runtime over all sector-aligned flash after
+the final static partition. The flashed partition table therefore remains
+usable on 4, 8, 16, and 32 MiB devices while LittleFS consumes the available
+remainder reported by the flash driver. Existing filesystems at the same start
+address grow on mount; Core formats only when the LittleFS metadata area is
+erased, so a failed migration mount does not silently erase nonblank data.
+
 `ir` grants access to synchronous ESP-IDF RMT infrared capture and transmit
 through `ir__receive()`, `ir__transmit()`, and `ir__transmit_raw()`. Captures
 are returned as Bruce/Flipper version-1 IR records. Decoded capture recognizes

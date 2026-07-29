@@ -56,14 +56,6 @@ static int wifi_app_add(ArgParser *parser) {
     return ssid != NULL && password != NULL && wifi__add_credential(ssid, password) == BRUCE_OK ? 0 : -1;
 }
 
-static int wifi_app_webui(ArgParser *parser) {
-    char *mode = ap_get_arg(parser, "mode");
-    bool no_ap = mode != NULL && strcmp(mode, "noAp") == 0;
-    (void)no_ap;
-    stdio__printf("wifi webui is unavailable\n");
-    return -1;
-}
-
 static void wifi_app_add_common_options(ArgParser *parser) {
     ap_add_flag(parser, "gui");
     ap_set_opt_help(parser, "gui", "Use GUI interaction mode");
@@ -79,7 +71,6 @@ int wifi_app_main(int argc, char **argv) {
     ArgParser *off = ap_new_cmd(root, "off disconnect");
     ArgParser *add = ap_new_cmd(root, "add");
     ArgParser *ap = ap_new_cmd(root, "ap");
-    ArgParser *webui = ap_new_cmd(root, "webui");
     ArgParser *arp = ap_new_cmd(root, "arp");
     ArgParser *listen = ap_new_cmd(root, "listen");
     ArgParser *sniffer = ap_new_cmd(root, "sniffer");
@@ -88,7 +79,7 @@ int wifi_app_main(int argc, char **argv) {
     ArgParser *ap_start = ap != NULL ? ap_new_cmd(ap, "start") : NULL;
     ArgParser *ap_info = ap != NULL ? ap_new_cmd(ap, "info") : NULL;
 
-    ArgParser *commands[] = {on, off, add, ap, webui, arp, listen, sniffer, scan, connect, ap_start, ap_info};
+    ArgParser *commands[] = {on, off, add, ap, arp, listen, sniffer, scan, connect, ap_start, ap_info};
     for (size_t i = 0; i < sizeof(commands) / sizeof(commands[0]); ++i) {
         if (commands[i] == NULL) {
             ap_free(root);
@@ -106,8 +97,6 @@ int wifi_app_main(int argc, char **argv) {
     ap_set_helptext(ap, "Manage access-point mode.");
     ap_set_helptext(ap_start, "Start the configured access point.");
     ap_set_helptext(ap_info, "Show access-point status and addresses.");
-    ap_set_helptext(webui, "Start the Web UI when available.");
-    ap_add_optional_arg(webui, "mode", "Use noAp to avoid AP fallback");
     ap_set_helptext(arp, "Scan hosts on the connected network.");
     ap_set_helptext(listen, "Start the Wi-Fi TCP listener.");
     ap_set_helptext(sniffer, "Start Wi-Fi packet capture.");
@@ -130,7 +119,6 @@ int wifi_app_main(int argc, char **argv) {
         result = wifi__connect_known() == BRUCE_OK ? 0 : wifi__setup_ap() == BRUCE_OK ? 0 : -1;
     else if (command == off) result = wifi__disconnect() == BRUCE_OK ? 0 : -1;
     else if (command == add) result = wifi_app_add(add);
-    else if (command == webui) result = wifi_app_webui(webui);
     else if (command == arp) result = wifi__scan_hosts() == BRUCE_OK ? 0 : -1;
     else if (command == listen) result = wifi__listen_tcp() == BRUCE_OK ? 0 : -1;
     else if (command == sniffer) result = wifi__start_sniffer() == BRUCE_OK ? 0 : -1;

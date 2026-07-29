@@ -4,6 +4,9 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 # Target board has 8 MB flash; use the full size instead of the default 2 MB.
 CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
 CONFIG_ESPTOOLPY_FLASHSIZE="8MB"
+# Let esptool patch the image header to the detected chip size when flashing;
+# runtime storage uses that detected size for its LittleFS partition.
+CONFIG_ESPTOOLPY_HEADER_FLASHSIZE_UPDATE=y
 
 # Required by the Core task registry (src/core/task/task.c) for sampled
 # per-task CPU accounting via uxTaskGetSystemState()/TaskStatus_t.

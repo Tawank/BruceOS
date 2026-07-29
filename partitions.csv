@@ -1,8 +1,8 @@
-# 8 MB layout. Keep existing data partitions at their original offsets so an
-# upgrade does not discard configuration or files; the larger app lives above
-# the former 2 MB image range.
-# Name,   Type, SubType, Offset,  Size, Flags
-nvs,      data, nvs,      0x9000,  0x6000,
-littlefs, data, littlefs, 0x180000,0x70000,
-coredump, data, coredump, 0x1F0000,0x10000,
-factory,  app,  factory,  0x200000,0x300000,
+# Flash-size-independent static layout. Core registers all flash after the
+# factory app as the LittleFS partition at runtime.
+# Name,          Type,            SubType, Offset,    Size,     Flags
+bootloader,      bootloader,      primary,  N/A,      N/A,
+partition_table, partition_table, primary,  N/A,      N/A,
+nvs,             data,            nvs,      ,         24K,
+coredump,        data,            coredump, ,         64K,
+factory,         app,             factory,  ,         3M,

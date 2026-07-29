@@ -111,13 +111,15 @@ idf_component_register(SRCS
                     esp_timer
                     esp_jpeg
                     esp_hid
-                    esp_netif
-                    esp_wifi
+                     esp_netif
+                     esp_partition
+                     esp_wifi
                     fatfs
                     log
                     lwip
-                    nvs_flash
-                    littlefs
+                     nvs_flash
+                     spi_flash
+                     littlefs
                     libpng
                     elf_loader
                     mquickjs
