@@ -676,9 +676,9 @@ order of the remaining entries. `hotkeys` is a bounded key-to-action object;
 the default `alt + tab` chord runs `task switch next`, cycling foreground focus
 to the next background GUI task. The same operation is available through
 `task__switch_next()`. The built-in `task` utility supports
-`task switch <next|prev|id>` and is structured for additional task-management
-subcommands. Setters validate and atomically persist
-immediately. The following
+`task switch <next|prev|id>` and `task kill <id|name>`. Kill names are exact
+matches and ambiguous duplicate names fail without killing either task. Setters
+validate and atomically persist immediately. The following
 values are permanently protected from ELF and JS, even with `config`:
 `wifiAp.ssid`, `wifiAp.pwd`, `webUI.pwd`, `wifiCredentials`, `wifiMAC`, and
 `webUI.user`. Built-ins may use those APIs.

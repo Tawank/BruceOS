@@ -280,6 +280,7 @@ set(BRUCE_ARGS_SDK_CHECK_TARGETS
     bruce_sdk_builtin_ir_check
     bruce_sdk_builtin_nrf24_check
     bruce_sdk_builtin_image_loader_check
+    bruce_sdk_builtin_utils_task_check
     bruce_sdk_builtin_utils_terminal_check
     bruce_sdk_builtin_notification_check
     bruce_sdk_builtin_tcp_check

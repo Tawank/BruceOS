@@ -205,11 +205,73 @@ bool selftest__run_task_app_switch_case(void) {
     char *switch_argv[] = {"task", "switch", target_arg, NULL};
     int switched = task_app_main(3, switch_argv);
     bruce_task_snapshot_t snapshot;
-    bool foreground = task__snapshot(target, &snapshot) == BRUCE_OK && snapshot.state == BRUCE_TASK_FOREGROUND;
+    bool foreground =
+        task__snapshot(target, &snapshot) == BRUCE_OK && snapshot.state == BRUCE_TASK_FOREGROUND;
 
     (void)task__foreground(self);
     (void)task__kill(target);
     bool ok = switched == BRUCE_OK && foreground;
     printf("[selftest] task/app-switch: %s\n", ok ? "OK" : "FAIL");
+    return ok;
+}
+
+static bool selftest__task_app_create_target(const char *name, bruce_task_id_t *out_id) {
+    task_create_params_t params = {
+        .name = name,
+        .entry = selftest__task_switch_target,
+        .built_in = true,
+        .gui_requested = false,
+        .start_in_background = true,
+        .stack_bytes = 4096,
+    };
+    if (task_registry__create(&params, out_id) != BRUCE_OK) return false;
+    vTaskDelay(pdMS_TO_TICKS(20));
+    return true;
+}
+
+bool selftest__run_task_app_kill_case(void) {
+    bruce_task_id_t by_id = BRUCE_TASK_ID_INVALID;
+    if (!selftest__task_app_create_target("selftest_kill_by_id", &by_id)) {
+        printf("[selftest] task/app-kill: ID target create failed\n");
+        return false;
+    }
+
+    char id_arg[16];
+    snprintf(id_arg, sizeof(id_arg), "%lu", (unsigned long)by_id);
+    char *id_argv[] = {"task", "kill", id_arg, NULL};
+    if (task_app_main(3, id_argv) != BRUCE_OK) {
+        (void)task__kill(by_id);
+        printf("[selftest] task/app-kill: kill by ID failed\n");
+        return false;
+    }
+
+    bruce_task_snapshot_t snapshot;
+    if (task__snapshot(by_id, &snapshot) == BRUCE_OK) {
+        (void)task__kill(by_id);
+        printf("[selftest] task/app-kill: ID target still present\n");
+        return false;
+    }
+
+    bruce_task_id_t by_name = BRUCE_TASK_ID_INVALID;
+    if (!selftest__task_app_create_target("selftest_kill_by_name", &by_name)) {
+        printf("[selftest] task/app-kill: name target create failed\n");
+        return false;
+    }
+
+    char *name_argv[] = {"task", "kill", "selftest_kill_by_name", NULL};
+    if (task_app_main(3, name_argv) != BRUCE_OK) {
+        (void)task__kill(by_name);
+        printf("[selftest] task/app-kill: kill by name failed\n");
+        return false;
+    }
+    if (task__snapshot(by_name, &snapshot) == BRUCE_OK) {
+        (void)task__kill(by_name);
+        printf("[selftest] task/app-kill: name target still present\n");
+        return false;
+    }
+
+    char *missing_argv[] = {"task", "kill", "selftest_missing", NULL};
+    bool ok = task_app_main(3, missing_argv) == BRUCE_ERR_NOT_FOUND;
+    printf("[selftest] task/app-kill: %s\n", ok ? "OK" : "FAIL");
     return ok;
 }

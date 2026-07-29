@@ -55,6 +55,7 @@ int selftest_app_main(int argc, char **argv) {
     RUN_SELFTEST(selftest__run_task_killed_case);
     RUN_SELFTEST(selftest__run_runtime_now_case);
     RUN_SELFTEST(selftest__run_task_app_switch_case);
+    RUN_SELFTEST(selftest__run_task_app_kill_case);
     RUN_SELFTEST(selftest__run_device_state_case);
     RUN_SELFTEST(selftest__run_clock_case);
     RUN_SELFTEST(selftest__run_apprunner_registration_case);

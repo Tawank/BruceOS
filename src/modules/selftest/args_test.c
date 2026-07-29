@@ -16,6 +16,7 @@
 #include "modules/nrf24/nrf24_app.h"
 #include "modules/tcp/tcp_app.h"
 #include "modules/utils/notification/notification_app.h"
+#include "modules/utils/task/task_app.h"
 #include "modules/utils/terminal/terminal_app.h"
 #include "modules/webui/webui_app.h"
 #include "modules/wifi/wifi_app.h"
@@ -48,8 +49,8 @@ static bool selftest__args_nonfatal_status(void) {
     if (required == NULL) return false;
     ap_add_required_arg(required, "value", "Required value");
     char *missing_argv[] = {"required"};
-    bool missing_ok = !ap_parse(required, 1, missing_argv) &&
-                      ap_get_status(required) == AP_STATUS_INVALID_ARGUMENT;
+    bool missing_ok =
+        !ap_parse(required, 1, missing_argv) && ap_get_status(required) == AP_STATUS_INVALID_ARGUMENT;
     ap_free(required);
 
     ArgParser *help = ap_new_parser();
@@ -92,6 +93,7 @@ static bool selftest__args_module_help(void) {
         js_loader__app_main,
         nrf24_app_main,
         notification_app_main,
+        task_app_main,
         tcp_app_main,
         terminal_app_main,
         webui_app_main,
