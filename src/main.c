@@ -8,14 +8,20 @@
 #include "core/input/input.h"
 #include "freertos/idf_additions.h"
 
-void app_main(void) {
-    if (!config__init()) printf("Configuration storage is unavailable; using in-memory defaults\n");
-
+bool init_user_interface(void) {
     bool display_ok = display__init() == BRUCE_OK;
     if (!display_ok) printf("Display initialization failed; continuing without LCD\n");
 
     bool input_ok = input__init() == BRUCE_OK;
     if (!input_ok) printf("Input initialization failed; continuing without physical input\n");
+
+    return display_ok && input_ok;
+}
+
+void app_main(void) {
+    if (!config__init()) printf("Configuration storage is unavailable; using in-memory defaults\n");
+
+    bool ui_ok = init_user_interface();
 
     app_runner__register_defaults();
 
@@ -27,7 +33,7 @@ void app_main(void) {
     return;
 #endif
 
-    if (display_ok && input_ok) {
+    if (ui_ok) {
         int result = app_runner__run("launcher", "--gui", false);
         if (result < 0) { printf("Launcher failed to start with code %d\n", result); }
     }
