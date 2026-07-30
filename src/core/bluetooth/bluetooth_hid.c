@@ -220,7 +220,7 @@ bruce_result_t bluetooth_hid__translate_gamepad_report(const uint8_t *data, size
 typedef struct {
     esp_hidh_dev_t *dev;
     bruce_resource_id_t resource;
-    bruce_task_id_t owner;
+    bruce_process_id_t owner;
     size_t refs;
     bluetooth_hid__device_t snapshot;
     bool keyboard_supported;
@@ -648,14 +648,14 @@ bluetooth_hid__connect(const uint8_t address[BRUCE_BLUETOOTH_ADDRESS_LEN], uint3
         bluetooth_hid__operation_unlock();
         return BRUCE_ERR_NO_MEMORY;
     }
-    connection->owner = task__current_id();
+    connection->owner = process__current_id();
     connection->refs = 1;
     xEventGroupClearBits(s_events, BLUETOOTH_HID__OPEN_DONE_BIT);
     s_open_status = ESP_FAIL;
     portENTER_CRITICAL(&s_state_mux);
     s_pending_connection = connection;
     portEXIT_CRITICAL(&s_state_mux);
-    connection->resource = task_registry__resource_register(bluetooth_hid__connection_cleanup, connection);
+    connection->resource = process_registry__resource_register(bluetooth_hid__connection_cleanup, connection);
     if (connection->resource == BRUCE_RESOURCE_ID_INVALID) {
         bluetooth_hid__connection_cleanup(connection);
         bluetooth_hid__operation_unlock();
@@ -666,7 +666,7 @@ bluetooth_hid__connect(const uint8_t address[BRUCE_BLUETOOTH_ADDRESS_LEN], uint3
         portENTER_CRITICAL(&s_state_mux);
         if (s_pending_connection == connection) s_pending_connection = NULL;
         portEXIT_CRITICAL(&s_state_mux);
-        (void)task_registry__resource_release(connection->resource);
+        (void)process_registry__resource_release(connection->resource);
         bluetooth_hid__connection_unref(connection);
         bluetooth_hid__operation_unlock();
         return BRUCE_ERR_IO;
@@ -678,7 +678,7 @@ bluetooth_hid__connect(const uint8_t address[BRUCE_BLUETOOTH_ADDRESS_LEN], uint3
         s_events, BLUETOOTH_HID__OPEN_DONE_BIT, pdTRUE, pdFALSE, pdMS_TO_TICKS(timeout_ms)
     );
     if ((bits & BLUETOOTH_HID__OPEN_DONE_BIT) == 0) {
-        (void)task_registry__resource_release(connection->resource);
+        (void)process_registry__resource_release(connection->resource);
         bluetooth_hid__connection_cleanup(connection);
         bluetooth_hid__operation_unlock();
         return BRUCE_ERR_TIMEOUT;
@@ -687,7 +687,7 @@ bluetooth_hid__connect(const uint8_t address[BRUCE_BLUETOOTH_ADDRESS_LEN], uint3
     bool connected = s_connection == connection && connection->dev != NULL;
     portEXIT_CRITICAL(&s_state_mux);
     if (s_open_status != ESP_OK || !connected) {
-        (void)task_registry__resource_release(connection->resource);
+        (void)process_registry__resource_release(connection->resource);
         bluetooth_hid__connection_cleanup(connection);
         bluetooth_hid__operation_unlock();
         return BRUCE_ERR_IO;
@@ -728,8 +728,8 @@ bruce_result_t bluetooth_hid__disconnect(void) {
         );
     }
     if (error == ESP_OK && (closed & BLUETOOTH_HID__CLOSE_DONE_BIT) != 0 &&
-        connection->owner == task__current_id() &&
-        task_registry__resource_release(connection->resource) == BRUCE_OK) {
+        connection->owner == process__current_id() &&
+        process_registry__resource_release(connection->resource) == BRUCE_OK) {
         bluetooth_hid__connection_unref(connection);
     }
     bluetooth_hid__connection_unref(connection);

@@ -42,9 +42,9 @@ bruce_result_t notification__dismiss(void);
 Policy:
 
 - No permission check.
-- Any task can show a notification.
-- Any task can replace the current notification.
-- Any task can dismiss it.
+- Any process can show a notification.
+- Any process can replace the current notification.
+- Any process can dismiss it.
 - Last writer wins; there is no queue or retained inbox.
 - Dismiss is idempotent.
 - The text is copied synchronously into fixed Core storage.
@@ -140,12 +140,12 @@ the required bytes.
 - No permission check.
 - The namespace is global.
 - No source or owner is stored.
-- Any task can replace any key.
-- Any task can remove any key.
+- Any process can replace any key.
+- Any process can remove any key.
 - Removal is idempotent.
 - Pushing an existing key replaces it without consuming another slot.
 - Adding a new key to a full registry returns `BRUCE_ERR_RESOURCE_LIMIT`.
-- Entries survive producer task exit.
+- Entries survive producer process exit.
 - Entries are runtime-only and are not persisted.
 - Every effective mutation increments a revision counter.
 - Listing returns a stable, deterministic order.
@@ -166,7 +166,7 @@ The launcher controls whether its own tiled layout leaves space for status
 icons.
 
 The launcher should poll the revision in its existing loop and redraw the
-status region only when the revision changes. It should not redraw all task
+status region only when the revision changes. It should not redraw all process
 tiles for an icon-only change.
 
 ## Concurrency
@@ -177,7 +177,7 @@ Copy list snapshots while locked, then release the lock before drawing.
 Follow the global lock order documented by the compositor:
 
 ```text
-task registry -> display/compositor -> notification/status state
+process registry -> display/compositor -> notification/status state
 ```
 
 Prefer folding notification state into compositor state to avoid another lock.
@@ -259,7 +259,7 @@ Notification tests must cover:
 - Text copying.
 - Duration validation and clamping.
 - Last-writer replacement.
-- Cross-task dismissal.
+- Cross-process dismissal.
 - Idempotent dismissal.
 - Expiration generation handling.
 - Bottom-right placement in every rotation.
@@ -272,7 +272,7 @@ Status-icon tests must cover:
 
 - Insert and list.
 - Replacement by key.
-- Cross-task replacement and removal.
+- Cross-process replacement and removal.
 - Idempotent removal.
 - Key and bitmap validation.
 - Capacity limit.
@@ -288,7 +288,7 @@ Status-icon tests must cover:
 - A notification never permanently changes application framebuffer pixels.
 - Notification expiration works without application redraw activity.
 - An application presentation cannot visually erase an active notification.
-- Any task can replace or dismiss the current notification.
-- Any task can push, replace, list, or remove any status icon.
+- Any process can replace or dismiss the current notification.
+- Any process can push, replace, list, or remove any status icon.
 - Status icons are rendered only by launcher/apps that request the registry.
 - No continuous redraw loop is introduced.

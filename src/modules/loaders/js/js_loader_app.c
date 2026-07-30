@@ -14,7 +14,7 @@
 #include "core_sdk/permission.h"
 #include "core_sdk/result.h"
 #include "core_sdk/storage.h"
-#include "core_sdk/task.h"
+#include "core_sdk/process.h"
 
 #include "dialog_js.h"       // IWYU pragma: export
 #include "display_js.h"      // IWYU pragma: export
@@ -42,7 +42,7 @@ typedef struct {
     size_t source_len;
     int argc;
     char **argv;
-} js_loader_task_ctx_t;
+} js_loader_process_ctx_t;
 
 static const char *js_loader__basename(const char *path) {
     const char *slash = strrchr(path, '/');
@@ -71,14 +71,14 @@ static bool js_loader__normalize_path(const char *path, char *out, size_t out_si
     return len > 0 && (size_t)len < out_size;
 }
 
-static void js_loader__free_task_ctx(js_loader_task_ctx_t *ctx) {
+static void js_loader__free_process_ctx(js_loader_process_ctx_t *ctx) {
     if (ctx == NULL) { return; }
     free(ctx->source);
     app_runner__free_args(ctx->argv, ctx->argc);
     free(ctx);
 }
 
-static int js_loader__load_source(const char *path, js_loader_task_ctx_t *ctx) {
+static int js_loader__load_source(const char *path, js_loader_process_ctx_t *ctx) {
     bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
     bruce_result_t open_result = storage__open(path, BRUCE_STORAGE_OPEN_READ, &file);
     if (open_result != BRUCE_OK) { return (int)open_result; }
@@ -132,7 +132,7 @@ static const char *js_loader__skip_manifest_comment(const char *s) {
 }
 
 static void js__app_main(void *context) {
-    js_loader_task_ctx_t *ctx = (js_loader_task_ctx_t *)context;
+    js_loader_process_ctx_t *ctx = (js_loader_process_ctx_t *)context;
 
     const char *script = js_loader__skip_manifest_comment(ctx->source);
     while (*script == '\n' || *script == '\r' || *script == ' ' || *script == '\t') { script++; }
@@ -141,7 +141,7 @@ static void js__app_main(void *context) {
     uint8_t *mem_buf = memory__malloc(mem_size);
     if (mem_buf == NULL) {
         printf("[js_loader] %s: failed to allocate VM memory\n", ctx->permission_key);
-        js_loader__free_task_ctx(ctx);
+        js_loader__free_process_ctx(ctx);
         return;
     }
 
@@ -149,7 +149,7 @@ static void js__app_main(void *context) {
     if (js_ctx == NULL) {
         printf("[js_loader] %s: JS_NewContext failed\n", ctx->permission_key);
         memory__free(mem_buf);
-        js_loader__free_task_ctx(ctx);
+        js_loader__free_process_ctx(ctx);
         return;
     }
 
@@ -196,7 +196,7 @@ static void js__app_main(void *context) {
 
     JS_FreeContext(js_ctx);
     memory__free(mem_buf);
-    js_loader__free_task_ctx(ctx);
+    js_loader__free_process_ctx(ctx);
 }
 
 /* Loader registry run function: called by app_runner__run_path() or by the
@@ -228,7 +228,7 @@ int js_loader__run_path(const char *path, const char *arg, bool in_background) {
         return (int)parse_result;
     }
 
-    js_loader_task_ctx_t *ctx = malloc(sizeof(*ctx));
+    js_loader_process_ctx_t *ctx = malloc(sizeof(*ctx));
     if (ctx == NULL) {
         app_runner__free_args(argv, argc);
         memory__free(inspection);
@@ -244,17 +244,17 @@ int js_loader__run_path(const char *path, const char *arg, bool in_background) {
 
     int load_result = js_loader__load_source(ctx->path, ctx);
     if (load_result != BRUCE_OK) {
-        js_loader__free_task_ctx(ctx);
+        js_loader__free_process_ctx(ctx);
         memory__free(inspection);
         return load_result;
     }
 
     bool gui_requested = app_runner__args_have_gui(argc, argv);
 
-    int result = app_runner__spawn_loader_task(
+    int result = app_runner__spawn_loader_process(
         permission_key, gui_requested, in_background, inspection->manifest.stack_size, js__app_main, ctx
     );
-    if (result <= 0) { js_loader__free_task_ctx(ctx); }
+    if (result <= 0) { js_loader__free_process_ctx(ctx); }
     memory__free(inspection);
     return result;
 }
@@ -306,10 +306,10 @@ int js_loader__app_main(int argc, char **argv) {
     }
     ap_free(parser);
 
-    bruce_task_snapshot_t snapshot;
+    bruce_process_snapshot_t snapshot;
     bool in_background = false;
-    if (task__snapshot(task__current_id(), &snapshot) == BRUCE_OK) {
-        in_background = (snapshot.state == BRUCE_TASK_BACKGROUND);
+    if (process__snapshot(process__current_id(), &snapshot) == BRUCE_OK) {
+        in_background = (snapshot.state == BRUCE_PROCESS_BACKGROUND);
     }
     return js_loader__run_path(path, arg[0] != '\0' ? arg : NULL, in_background);
 }

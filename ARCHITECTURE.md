@@ -28,14 +28,14 @@ hardware behavior.
 ### Core owns
 
 - bootstrap and system configuration;
-- task, runtime, and app_runner, including its pluggable loader registry;
+- process, runtime, and app_runner, including its pluggable loader registry;
 - permission decisions and resource ownership;
 - memory, file, dialog, input, display, network, radio, and other HAL APIs;
 - all ESP-IDF calls and hardware handles.
 
 Core has no launcher menu, application menu, theme policy, or feature-specific
 screen.  Renderer-neutral primitives such as `dialog__choice()` are Core APIs;
-the active task context selects a GUI or terminal renderer.  Core also does
+the active process context selects a GUI or terminal renderer.  Core also does
 not own any particular file-format loader: it owns the registry that lets a
 module claim an extension, not the ELF loader or JavaScript runner
 themselves (see "Loader modules" below).
@@ -48,7 +48,7 @@ themselves (see "Loader modules" below).
 - application-specific presentation and state;
 - loader modules: the code that turns a file of one specific extension
   (`.elf`, `.js`, or any other third-party format such as `.py`) into a
-  running task.  A loader module registers itself with app_runner's loader
+  running process.  A loader module registers itself with app_runner's loader
   registry; being "the ELF loader" or "the JS runner" gives it no Core
   access that a new third-party loader module would not also have.
 
@@ -58,7 +58,7 @@ external apps, but their permission checks always pass.  Neither kind of app
 uses private Core headers or ESP-IDF directly.
 
 The one deliberate exception is `modules/selftest`, a built-in diagnostic app
-whose entire purpose is validating Core's private implementation (task
+whose entire purpose is validating Core's private implementation (process
 registry, memory tracking, resource cleanup, and so on as Core grows).  It is
 allowed to include `src/core/` private headers and call FreeRTOS/ESP-IDF
 directly, the same way Core source itself does.  It still has no special
@@ -94,7 +94,7 @@ launcher icon.
 Every submenu automatically appends a `"Back"` entry.  The command strings are
 passed exactly as written; the launcher does not append `--gui` automatically.
 The launcher starts every command and discovered path in the background. An
-application that wants to draw calls `task__to_foreground()` itself; an exact
+application that wants to draw calls `process__to_foreground()` itself; an exact
 `--bg` argument lets the application suppress that startup claim.
 If `/launcher.json` is missing, the launcher writes a default configuration.
 
@@ -124,7 +124,7 @@ The public named-run API is:
 int app_runner__run(const char *app_name, const char *arg, bool in_background);
 ```
 
-It returns a positive Core task ID on success and a negative `BRUCE_ERR_*`
+It returns a positive Core process ID on success and a negative `BRUCE_ERR_*`
 error code on failure.  `arg` is a shell-style argument string (quotes and
 backslash escaping). Registered built-ins receive conventional C arguments:
 `argv[0]` is the registered command name, `argv[argc]` is `NULL`, and empty or
@@ -139,10 +139,10 @@ command with `--help` and waits for it to finish.
 
 AppRunner owns only the shell-style conversion from command text to `argc` and
 `argv`. Built-in modules use the local `components/args` parser when they need
-commands, options, or named positional arguments. The parser uses task-owned
+commands, options, or named positional arguments. The parser uses process-owned
 Core memory, routes help and diagnostics through Bruce stdio, and reports help,
 version, invalid input, and allocation failure as statuses instead of exiting
-the application task. Named positional getters return borrowed `argv` strings
+the application process. Named positional getters return borrowed `argv` strings
 and return `NULL` when an optional value is absent. Wi-Fi, Bluetooth, clock,
 configuration, IR, NRF24, TCP, WebUI, BNU, notification, image, ELF/JavaScript
 loader, and terminal commands all use this parser. Commands that forward an
@@ -180,7 +180,7 @@ discover `/apps/`, `/sdcard/`, or any other folder; launcher and
 file-manager apps decide what to enumerate.
 
 Launching another app does not inherit or intersect permissions.  Each target
-is its own user-controlled task.
+is its own user-controlled process.
 
 ### Loader modules
 
@@ -200,14 +200,14 @@ Registration happens once at boot, alongside built-in command registration, in m
 before the first named-run or path-run call. A duplicate extension registration is a startup
 error, the same as a duplicate built-in command name.
 
-Turning a decoded image into a live task needs more than an ordinary built-in
+Turning a decoded image into a live process needs more than an ordinary built-in
 gets from `app_runner__register()`, so loaders get two extra public
 primitives:
 
 ```c
-int app_runner__spawn_loader_task(const char *permission_key, bool gui_requested,
+int app_runner__spawn_loader_process(const char *permission_key, bool gui_requested,
                                    bool in_background, uint32_t stack_size,
-                                   bruce_loader_task_entry_fn entry, void *ctx);
+                                   bruce_loader_process_entry_fn entry, void *ctx);
 ```
 
 ```c
@@ -226,11 +226,11 @@ const char *manifest__inspect_javascript(const char *path);
 bruce_manifest_t *manifest__parse(const char *json, size_t len);
 ```
 
-`app_runner__spawn_loader_task()` creates a real Core task that calls
+`app_runner__spawn_loader_process()` creates a real Core process that calls
 `entry(ctx)` on its own stack, wired into the same foreground stack, resource
 registry, and permission checks (`permission_key`, e.g. `"game.elf"`) as any
-other task.  Its `entry` is the loader's own `elf_loader__app_main`,
-`js__app_main`, or equivalent for future formats, so every loader task entry
+other process.  Its `entry` is the loader's own `elf_loader__app_main`,
+`js__app_main`, or equivalent for future formats, so every loader process entry
 follows the same naming convention as a regular `app_main`.
 
 `manifest__inspect_path()` is the universal manifest JSON extractor provided
@@ -263,36 +263,58 @@ Built-in ELF and JavaScript loader modules live under `src/modules/loaders/`,
 the same as any other module; they have no special standing over a
 third-party loader someone else registers the same way.
 
-### Task lifecycle
+### Process lifecycle
 
-Every run creates a Core-managed task.  A normal named run starts foreground;
+Every run creates a Core-managed process.  A normal named run starts foreground;
 `in_background` supports autostart and services.  The Core keeps a foreground
-stack: foregrounding a new task pushes the prior task; exit or
-`runtime__to_background()` restores the most recent foreground task, falling
+stack: foregrounding a new process pushes the prior process; exit or
+`process__to_background()` restores the most recent foreground process, falling
 back to `bruce_launcher`.
 
 Launcher and terminal front ends use background-first dispatch. Graphical apps
-claim foreground with `task__to_foreground()` immediately before interaction;
+claim foreground with `process__to_foreground()` immediately before interaction;
 this also dynamically marks the caller GUI-capable. Built-ins honor exact
 `--bg` by not making that startup claim. `--gui` selects a GUI frontend but does
 not itself determine foreground ownership.
 
-Backgrounding changes state and physical-input ownership. A background GUI task
+Backgrounding changes state and physical-input ownership. A background GUI process
 is hidden unless the launcher assigns it a compositor tile; hidden drawing is a
 successful no-op. Serial access remains independent of foreground state.
 
-Tasks are identified by opaque nonzero `uint32_t` IDs, never FreeRTOS handles.
-`task__list()` returns read-only snapshots of live tasks including state,
+Processes are identified by opaque positive IDs in the range `1..INT_MAX`, never
+FreeRTOS handles. IDs do not collide with either live processes or retained
+completion records, including when ID allocation wraps.
+`process__list()` returns read-only snapshots of live processes including state,
 stack high-water mark, sampled CPU percentage, and memory/resource statistics.
-Completed tasks are cleaned up immediately; v1 has no history.
-`task__wait()` works only while a task still exists.
+After resource and display cleanup, Core retains structured completion status in
+a fixed 16-entry table. Natural built-in completion is `EXITED` with the integer
+entry-point return value. Loader process entries currently return `void`, so a
+successful loader return is reported as `EXITED` with code 0. Cooperative `INT`
+and `TERM` completion is `TERMINATED` with the delivered signal and exit code 0;
+forced `KILL` completion is `KILLED` with signal `KILL` and exit code 0. Shells
+translate either signal completion to `$? = 128 + signal`; this translation is a
+shell policy and is not stored in `bruce_process_status_t`.
 
-`stop`, `pause`, and `resume` are cooperative. `task__kill()` is an explicit
-force-delete escape hatch. Cross-task foreground, stop, pause, resume, and kill
-operations require the `task` permission; a task may control itself without it.
+`process__wait()` is non-consuming and succeeds for retained status as well as a
+live process that completes before its timeout. `process__wait_status()` atomically
+consumes retained status, so exactly one caller succeeds; any caller with the
+`process` permission may consume it, without a parent relationship. When the
+table is full, the oldest unconsumed, unpinned completion is evicted. Live slots
+remain pinned while waiters are attached, preventing slot reuse and lost-event
+races.
 
-`runtime__sleep(ms)` interrupts a background task when it is foregrounded;
-foreground tasks sleep for the full duration.  `runtime__delay(ms)` waits the
+`INT`, `TERM`, pause, and resume are cooperative. `process__terminate()` sends
+`TERM`; `process__kill()` is an explicit forced `KILL` escape hatch. Cross-process
+foreground, signal, pause, resume, and kill operations require the `process`
+permission; a process may control itself without it. Status consumption always
+requires the `process` permission. Cooperative signals wake Core waits and stdio.
+The built-in `process signal <int|term|kill> <id|name>` command exposes delivery
+to shell users; `process kill <id|name>` remains the direct forced-kill shortcut.
+A cancelled shell wait forwards its pending INT or TERM to the child, waits for a
+bounded grace period, and force-kills a child that does not stop.
+
+`runtime__sleep(ms)` interrupts a background process when it is foregrounded;
+foreground processes sleep for the full duration.  `runtime__delay(ms)` waits the
 requested duration regardless of state.  Both are Core APIs; they hide FreeRTOS
 from apps. `runtime__now()` returns monotonic milliseconds since boot for
 elapsed-time measurement and must not be interpreted as wall-clock time.
@@ -338,8 +360,8 @@ hand-write ELF section attributes.  The SDK build tooling in `elf_apps/tools/`
 post-processes linked ELF files with `objcopy` to add the section as
 non-allocatable and provides template apps in `elf_apps/examples/`.
 
-The ELF loader module's task entry is `elf_loader__app_main(void *context)`.
-It is started by `app_runner__spawn_loader_task()` when an ELF app is launched.
+The ELF loader module's process entry is `elf_loader__app_main(void *context)`.
+It is started by `app_runner__spawn_loader_process()` when an ELF app is launched.
 Like any other program entry, it receives the app path, arguments, permissions,
 and GUI context through the spawn parameters and its opaque context struct.
 
@@ -353,13 +375,13 @@ empty array.  A complete example is:
 {
   "appName": "Example app",
   "appIcon": "<Base64 128-byte bitmap>",
-  "coreAbiVersion": 1,
+  "coreAbiVersion": 2,
   "permissions": ["wifi", "http"],
   "stackSize": 8192
 }
 ```
 
-- `appName` is the launcher/task-manager display name.  The filename is the
+- `appName` is the launcher/process-manager display name.  The filename is the
   command identity; there is no `appId`.
 - `appIcon` decodes to exactly 128 bytes: 32×32 monochrome, row-major,
   most-significant-bit leftmost.  A 1 uses launcher foreground colour; 0 uses
@@ -387,7 +409,7 @@ file format without involving the loader module.
 The ELF loader module's `elf_find_sym()` resolves only the documented public
 SDK symbol allowlist it maintains.  It never resolves ESP-IDF, private Core,
 or arbitrary libc symbols. Standard heap imports (`malloc`, `calloc`,
-`realloc`, and `free`) resolve to the task-owned `memory__*` API, while console
+`realloc`, and `free`) resolve to the process-owned `memory__*` API, while console
 imports such as `printf` resolve to routed Bruce stdio. A trusted native app
 can still embed a custom allocator, which is unsupported rather than a hard
 sandbox violation.
@@ -399,15 +421,15 @@ mQuickJS event loop.  JavaScript timers and `runtime.main()` remain
 JavaScript-runtime features; they are not moved into Core.  The loader
 allocates VM/context memory with `memory__malloc()`.
 
-The JS loader module's task entry is `js__app_main(void *context)`.  It is
-started by `app_runner__spawn_loader_task()` when a JS script is launched.
+The JS loader module's process entry is `js__app_main(void *context)`.  It is
+started by `app_runner__spawn_loader_process()` when a JS script is launched.
 Like any other program entry, it receives the script path, arguments,
 permissions, and GUI context through the spawn parameters and its opaque
 context struct.
 
 A JS file may start with the same canonical manifest in a comment block.  It
 is optional.  An unmanifested script starts with zero grants, uses its filename
-as display name, a generic icon, and the mQuickJS default task stack.
+as display name, a generic icon, and the mQuickJS default process stack.
 Manifest inspection — detecting the leading JS comment block, extracting the
 raw JSON, and parsing/validating it — is handled by the universal
 `manifest__inspect_path()` in `core/manifest` (raw extraction) plus
@@ -424,12 +446,26 @@ the normal JS lifecycle entry.  `serial.cmd(command)` delegates to the same
 
 ## Terminal and stdio sessions
 
-`terminal` is a GUI-by-default built-in. It starts all commands in the
-background, displays their captured stdout/stderr, and routes entered lines to
-their stdin. Graphical commands explicitly claim foreground and return to the
-terminal when they exit. The physical
-serial command loop is the separate `serial_commands` built-in. The configured
-ESP-IDF console transport and its input driver remain Core-owned.
+`terminal` is a GUI-by-default built-in. It owns one persistent background
+`shell` child, displays the child's captured stdout/stderr, and routes entered
+lines to its stdin. Shell variables therefore persist for the terminal lifetime.
+Graphical commands explicitly claim foreground and return to the terminal when
+they exit. The terminal intercepts `clear` and `exit` as UI actions and Back
+terminates the shell before closing. The physical `serial_commands` frontend
+runs the same interactive shell language. The configured ESP-IDF console
+transport and its input driver remain Core-owned.
+
+The built-in `shell` module owns command-language parsing and execution. It
+supports whitespace-delimited words, literal single quotes, expandable double
+quotes, backslash escaping, `NAME=value`, `$NAME`, `${NAME}`, `$?`, token-boundary
+comments, and left-to-right `;`, `&&`, and `||`. Its bounded variables persist
+across interactive input and script lines. Builtins are `echo`, `true`, `false`,
+`set`, `unset`, `export`, `exit`, and `help`; other names and absolute/`./` paths
+launch through AppRunner in Core-background mode and are synchronously reaped.
+The `.sh` loader invokes this built-in for absolute scripts. Command
+substitution, globbing, subshells, functions, positional parameters, pipes, and
+redirection are deferred. Unquoted, unescaped `|`, `<`, and `>` are explicit
+syntax errors rather than emulated features.
 
 The built-in BNU (Bruce is Not Unix) module provides the direct commands
 `pwd`, `cd [directory]`, `ls [path]`, `mkdir <directory>`, `touch <file>`,
@@ -437,17 +473,19 @@ The built-in BNU (Bruce is Not Unix) module provides the direct commands
 relative storage paths; it is independent of libc process cwd. `cat` streams
 files unchanged to app-visible stdout. `free` reports Core-provided internal RAM
 and PSRAM heap statistics. `top` reports the same system heaps plus CPU usage,
-stack high-water bytes, and tracked heap usage for each Core-managed task.
+stack high-water bytes, and tracked heap usage for each Core-managed process.
 
-Core owns bounded, task-owned stdio sessions. A session owner may route newly
-created child tasks to the session, drain captured output, and enqueue input.
-The route is inherited atomically during task creation and should be cleared
+Core owns bounded, process-owned stdio sessions. A session owner may route newly
+created child processes to the session, drain captured output, and enqueue input.
+The route is inherited atomically during process creation and becomes the
+child's default route for its own children, so a terminal-routed shell passes the
+same session to command grandchildren. The owner should clear its launch route
 immediately after launch. Session resources are released automatically with
 their owner; output overflow drops the oldest captured bytes, while input
 overflow returns `BRUCE_ERR_RESOURCE_LIMIT`.
 
 App-visible command output uses `bruce_stdio_write()` or
-`stdio__printf()`. These functions write to the calling task's routed
+`stdio__printf()`. These functions write to the calling process's routed
 session, or to the physical serial console when no session is routed. Normal
 libc `printf()` and Core logging remain diagnostic serial output and are not
 captured, preventing unrelated subsystem logs from polluting terminal output.
@@ -458,7 +496,7 @@ Permissions are coarse-grained.  The current vocabulary is:
 
 ```
 http, wifi, bt, gps, rf, input, gpio, ir, rfid, microphone,
-hid, execute, task, storage, config, serial
+hid, execute, process, storage, config, serial
 ```
 
 `gpio` includes raw GPIO, I²C, and SPI. `rf` includes Sub-GHz, LoRa, and NRF24. `audio` is not
@@ -485,12 +523,12 @@ permission not declared in the manifest may be requested dynamically on its
 first protected API call.  A saved `0` denies immediately without reprompting;
 a permissions-management UI is the way to change it.
 
-Built-in module tasks are implicitly granted every permission.  External
-tasks are checked inside each protected Core API.
+Built-in module processes are implicitly granted every permission.  External
+processes are checked inside each protected Core API.
 
 `http__request()` and `http_server__*` need `http`; neither implies `wifi`. Wi-Fi state control,
-credentials, and raw TCP sockets need `wifi`. `input__inject()` needs `input`; task control of
-another task needs `task`; starting a built-in command or path needs `execute`.
+credentials, and raw TCP sockets need `wifi`. `input__inject()` needs `input`; process control of
+another process needs `process`; starting a built-in command or path needs `execute`.
 
 `http__request()` accepts at most 64 KiB of response body by default. Callers may set
 `max_response_bytes` to another non-zero limit. A response that exceeds the selected limit fails
@@ -499,12 +537,12 @@ arrives instead of retaining it; callback data is borrowed for the callback dura
 successful response reports the delivered byte count with a null body. Buffered response bodies
 are NUL-terminated, while `body_len` remains authoritative. Core retains at most 32 response
 headers and 4096 bytes of header text; omitted excess headers do not fail the request. The retained
-headers and buffered body share one task-owned allocation released by `http__response_free()`.
+headers and buffered body share one process-owned allocation released by `http__response_free()`.
 
-## Dialog and task interaction
+## Dialog and process interaction
 
 `dialog__*` is renderer-agnostic.  `dialog__choice()` displays a GUI choice
-for tasks launched with `--gui`, or a terminal choice such as:
+for processes launched with `--gui`, or a terminal choice such as:
 
 ```
 1. yes
@@ -520,10 +558,10 @@ caller-selected refresh interval, so surrounding UI outside the padded
 viewport can remain current while the choice is open. Terminal rendering
 ignores these parameters.
 
-app_runner records the initial `--gui` launch context in task-local storage
+app_runner records the initial `--gui` launch context in process-local storage
 before launch-time permission checks, but leaves the argument in the app’s
-`argv`.  A background serial-monitor-style task decides its own behavior;
-there is no separate dynamic task interaction-mode API.
+`argv`.  A background serial-monitor-style process decides its own behavior;
+there is no separate dynamic process interaction-mode API.
 
 Retain the JS `dialog.message`, `info`, `success`, `warning`, `error`, and
 `choice` APIs as wrappers.  Keep `dialog.pickFile()` as a Core renderer-neutral
@@ -537,13 +575,13 @@ tracked resource.
 ELF apps never receive libc `malloc` or `free`.  They use
 `memory__malloc()`/`memory__calloc()`/`memory__realloc()`/`memory__free()`.
 Core allocates ELF images, BSS, loader bookkeeping, and JS VM/context memory
-through this same task-owned allocator.
+through this same process-owned allocator.
 
-Every task has one universal resource registry in thread-local storage.  Core
+Every process has one universal resource registry in thread-local storage.  Core
 services register opaque handles and Core-owned cleanup callbacks for memory,
 files, sockets, viewers, radios, and similar resources.  Apps cannot register
 arbitrary callbacks.  At normal exit or kill, Core reads the registry before
-the task disappears and cleans resources in reverse acquisition order.
+the process disappears and cleans resources in reverse acquisition order.
 
 ## Bluetooth
 
@@ -556,8 +594,8 @@ permission implicitly.
 Classic HID hosting is exposed separately through `bluetooth_hid__*`. It is
 available only when the SoC and build support Classic Bluetooth and otherwise
 returns `BRUCE_ERR_UNSUPPORTED` (notably on ESP32-S3). One Classic HID keyboard
-or gamepad may be connected at a time. The connection belongs to the task that
-opened it and closes during task cleanup. The `bluetooth_hid_app` built-in can
+or gamepad may be connected at a time. The connection belongs to the process that
+opened it and closes during process cleanup. The `bluetooth_hid_app` built-in can
 remain in the background while its device feeds the foreground app.
 
 Keyboard boot reports become key press/release events, including normalized
@@ -570,10 +608,10 @@ only through `input__inject()`; modules never receive ESP-IDF Bluetooth handles.
 ## Input, display, storage, and Config
 
 Physical buttons, touch, keyboard, and encoder input go only to the effective
-foreground task. Blocking reads carry an input-owned foreground epoch and are
+foreground process. Blocking reads carry an input-owned foreground epoch and are
 revoked immediately on handoff, including an A-to-B-to-A transition. Timeout
 budgets span internal wakes. `input__inject()` accepts a normalized event with type, action,
-code, value, timestamp, and source task ID, allowing Bluetooth, GPIO, and I²C
+code, value, timestamp, and source process ID, allowing Bluetooth, GPIO, and I²C
 adapters to feed the same pipeline.
 
 Raw GPIO is exposed through `gpio__configure()`, `gpio__read()`, and
@@ -582,7 +620,7 @@ SoC, and every public operation requires `gpio`.
 
 I²C master buses are opened with `i2c__open()` using an explicit or
 automatically selected controller, SDA/SCL pins, clock, and pull-up policy.
-Compatible opens share one Core-owned hardware bus. Handles are task-owned,
+Compatible opens share one Core-owned hardware bus. Handles are process-owned,
 close automatically, and support 7-bit probe, write, read, and repeated-start
 write/read transactions of at most 4096 bytes. Reserved addresses outside
 0x08 through 0x77 are rejected. A probe NACK is `BRUCE_OK` with `present=false`;
@@ -591,18 +629,18 @@ transaction NACK is `BRUCE_ERR_NOT_FOUND`.
 SPI devices are opened with `spi__open()` on the board's external
 `SPI3_HOST`. The first device selects the SCK/MISO/MOSI tuple; additional
 devices may attach while that tuple matches and have independent CS, mode, and
-clock settings. Device handles are task-owned, close automatically, and allow
+clock settings. Device handles are process-owned, close automatically, and allow
 bounded full-duplex transfers of at most 64 bytes without DMA. The display continues to
 own `SPI2_HOST` and is never attached through this API. Core hardware drivers
 use trusted private GPIO/bus entry points so their capability-specific
 permission remains authoritative.
 
 Display Core owns one RGB565 framebuffer and one panel-transfer worker. GUI
-tasks draw in local coordinates into a fullscreen foreground viewport, one of
+processes draw in local coordinates into a fullscreen foreground viewport, one of
 up to four launcher-assigned non-overlapping tiles, or a hidden zero-sized
 viewport. `display__begin_frame()` leases the viewport through the completion
 of `display__present()`; tile rows are packed into worker-owned DMA scratch.
-Text and cursor state are task-local, rotation is global, and no resize event is
+Text and cursor state are process-local, rotation is global, and no resize event is
 emitted. Drawing primitives include legacy-compatible circular arcs whose zero
 angle is at six o'clock and increases clockwise.
 `display__draw_bitmap_scaled()` blits a 1bpp MSB-first bitmap of any size into
@@ -638,15 +676,15 @@ it never changes application framebuffer pixels. Show, replacement, dismissal,
 expiration, and intersecting application presentations are event-driven.
 
 The unrestricted status-icon service is a separate runtime-only global keyed
-registry. Any task may replace or remove any key, including one created by a
-different task. Entries survive producer exit, list in lexicographic key order,
+registry. Any process may replace or remove any key, including one created by a
+different process. Entries survive producer exit, list in lexicographic key order,
 and every effective mutation increments a revision. Core never renders these
 1bpp icons or reserves a status bar; the launcher and interested applications
 list and draw them themselves. Wi-Fi publishes the `core.wifi` icon after a
 station obtains an IP address and removes it when that station disconnects.
 
 `storage` grants access to Core `storage__*` APIs.  Public file handles are
-opaque IDs and are closed automatically at task teardown.  The only v1
+opaque IDs and are closed automatically at process teardown.  The only v1
 protected paths are `/bruce.json`, `/permissions.json`, and their atomic-write
 temporary files; all other mounted paths are usable by a storage-granted app.
 `storage__mkdir()` creates one directory at a time through the same path and
@@ -654,11 +692,11 @@ permission policy and succeeds when that directory already exists. Public
 remove, same-volume rename, and volume-usage queries enforce the same normalized
 path and protected-configuration policy.
 
-Raw IPv4 TCP uses task-owned opaque handles through `tcp__connect()`,
+Raw IPv4 TCP uses process-owned opaque handles through `tcp__connect()`,
 `tcp__listen()`, `tcp__accept()`, `tcp__read()`, `tcp__write()`, and
 `tcp__close()`. Connect accepts hostnames, all blocking operations have caller-
 supplied timeouts, and EOF is reported as a successful zero-byte read. Handles
-are restricted to their owning task and close automatically at task teardown.
+are restricted to their owning process and close automatically at process teardown.
 The built-in `tcp` terminal app provides client and sequential single-client
 listener modes. It forwards raw stdin bytes to the socket and prints received
 bytes to stdout; Ctrl+] closes the active mode. The terminal waits for a
@@ -677,7 +715,7 @@ reuses an active Wi-Fi connection or selects a configured station/access point,
 serves generated gzip assets from `embedded_resources/web_interface`, and owns
 authenticated file management, uploads, command/navigation input, credentials,
 screen capture, status, and reboot routes. WebUI sessions and credentials remain
-permanently unavailable to external ELF/JS tasks.
+permanently unavailable to external ELF/JS processes.
 
 `config` is one Core-owned singleton exposed through type-safe field APIs such
 as `config__get_bright()`, `config__get_theme_path()`, and
@@ -691,15 +729,15 @@ present, and `config__remove_startup_app()` removes a key while preserving the
 order of the remaining entries. `hotkeys` is a bounded key-to-action object.
 Each action is an AppRunner command line: its first token selects a registered
 command or loader path and the remaining text is passed as its arguments. The
-default `alt + tab` chord runs `task switch next`, cycling foreground focus to
-the next background GUI task. The same operation is available through
-`task__switch_next()`. The built-in `task` utility supports
-`task switch <next|prev|id>`, `task preview`, and `task kill <id|name>`.
-`task preview` claims foreground and tiles up to four background GUI tasks at a
+default `alt + tab` chord runs `process switch next`, cycling foreground focus to
+the next background GUI process. The same operation is available through
+`process__switch_next()`. The built-in `process` utility supports
+`process switch <next|prev|id>`, `process preview`, and `process kill <id|name>`.
+`process preview` claims foreground and tiles up to four background GUI processes at a
 time through the compositor (`display__set_tiles()`); arrows move the selection
 across the grid (paging when more than four qualify), Select foregrounds the
-highlighted task, and Back clears the tiles and exits. Kill names are exact
-matches and ambiguous duplicate names fail without killing either task. Setters
+highlighted process, and Back clears the tiles and exits. Kill names are exact
+matches and ambiguous duplicate names fail without killing either process. Setters
 validate and atomically persist immediately. The following
 values are permanently protected from ELF and JS, even with `config`:
 `wifiAp.ssid`, `wifiAp.pwd`, `webUI.pwd`, `wifiCredentials`, `wifiMAC`, and
@@ -719,7 +757,7 @@ NEC; NEC, NECext, Samsung32, and Sony SIRC variants can be transmitted. Unknown
 captures can be read as raw 38 kHz timings. `ir__transmit_record()` replays an
 in-memory capture so learning workflows can test it before saving.
 `ir__transmit_file()` replays version-1 `.ir` files and
-also requires `storage`, since it uses task-owned public storage handles. One
+also requires `storage`, since it uses process-owned public storage handles. One
 transmission is always made and `repeats` specifies additional transmissions.
 IR GPIOs are board defaults configurable through Kconfig.
 The built-in Infrared app provides regional TV power-code runs, RMT-backed
@@ -752,7 +790,7 @@ Maintain two header layers:
 
 `core_sdk/loader.h` declares the loader registry
 (`app_runner__register_loader()`, `app_runner__run_path()`,
-`app_runner__spawn_loader_task()`) that any loader module uses.  Manifest
+`app_runner__spawn_loader_process()`) that any loader module uses.  Manifest
 inspection is provided by the universal `manifest__inspect_path()` in
 `core_sdk/manifest.h` / `core/manifest/`; it returns a heap-allocated raw JSON
 string that the caller must `free()`, auto-detects file format, and replaces

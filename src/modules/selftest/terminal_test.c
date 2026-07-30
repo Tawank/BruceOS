@@ -7,7 +7,8 @@
 #include "core_sdk/app_runner.h"
 #include "core_sdk/result.h"
 #include "core_sdk/stdio.h"
-#include "core_sdk/task.h"
+#include "core_sdk/process.h"
+#include "core_sdk/runtime.h"
 #include "fake_elf.h"
 #include "modules/loaders/elf/elf_loader_app.h"
 #include "modules/utils/serial_commands/serial_commands_app.h"
@@ -48,7 +49,7 @@ bool selftest__run_terminal_named_case(void) {
         return false;
     }
 
-    bruce_result_t wait_result = task__wait((bruce_task_id_t)result, 2000);
+    bruce_result_t wait_result = process__wait((bruce_process_id_t)result, 2000);
     if (wait_result != BRUCE_OK && wait_result != BRUCE_ERR_NOT_FOUND) {
         printf("[selftest] terminal/named: wait failed (%d)\n", wait_result);
         return false;
@@ -87,7 +88,7 @@ bool selftest__run_terminal_path_case(void) {
     int result = serial_commands__run_line(path, false);
     size_t calls_after = elf_loader__debug_call_count();
 
-    if (result > 0) { (void)task__wait((bruce_task_id_t)result, 2000); }
+    if (result > 0) { (void)process__wait((bruce_process_id_t)result, 2000); }
     storage__remove(path);
 
     if (result <= 0 || calls_after != calls_before + 1) {
@@ -136,6 +137,19 @@ static int selftest__terminal_stdio_entry(int argc, char **argv) {
     return 0;
 }
 
+static volatile bool s_stdio_cancel_started;
+static volatile bruce_result_t s_stdio_cancel_result;
+
+static int selftest__terminal_stdio_cancel_entry(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    char byte;
+    size_t size = 0;
+    s_stdio_cancel_started = true;
+    s_stdio_cancel_result = bruce_stdio_read(&byte, 1, UINT32_MAX, &size);
+    return 0;
+}
+
 bool selftest__run_terminal_stdio_case(void) {
     bruce_result_t registered = app_runner__register("terminal_test_stdio", selftest__terminal_stdio_entry);
     if (registered != BRUCE_OK && registered != BRUCE_ERR_ALREADY_EXISTS) return false;
@@ -151,14 +165,60 @@ bool selftest__run_terminal_stdio_case(void) {
         (void)bruce_stdio_session_close(session);
         return false;
     }
-    bruce_result_t waited = task__wait((bruce_task_id_t)result, 2000);
+    bruce_process_status_t status;
+    bruce_result_t waited = process__wait_status((bruce_process_id_t)result, 2000, &status);
     char output[128] = {0};
     size_t output_size = 0;
     bruce_result_t read_result =
         bruce_stdio_session_read_output(session, output, sizeof(output) - 1, &output_size);
     (void)bruce_stdio_session_close(session);
-    bool ok = (waited == BRUCE_OK || waited == BRUCE_ERR_NOT_FOUND) && read_result == BRUCE_OK &&
+    bool ok = waited == BRUCE_OK && status.reason == BRUCE_PROCESS_EXITED && status.exit_code == 0 &&
+              read_result == BRUCE_OK &&
               strstr(output, "hello") != NULL && strstr(output, "received:hello") != NULL;
     printf("[selftest] terminal/stdio: %s\n", ok ? "OK" : "failed");
+    return ok;
+}
+
+bool selftest__run_terminal_stdio_cancel_case(void) {
+    bruce_result_t registered =
+        app_runner__register("terminal_test_stdio_cancel", selftest__terminal_stdio_cancel_entry);
+    if (registered != BRUCE_OK && registered != BRUCE_ERR_ALREADY_EXISTS) return false;
+
+    s_stdio_cancel_started = false;
+    s_stdio_cancel_result = BRUCE_OK;
+    bruce_stdio_session_t session = BRUCE_STDIO_SESSION_INVALID;
+    if (bruce_stdio_session_create(&session) != BRUCE_OK ||
+        bruce_stdio_session_route_children(session) != BRUCE_OK) {
+        if (session != BRUCE_STDIO_SESSION_INVALID) (void)bruce_stdio_session_close(session);
+        return false;
+    }
+
+    int launched = app_runner__run("terminal_test_stdio_cancel", NULL, true);
+    (void)bruce_stdio_session_route_children(BRUCE_STDIO_SESSION_INVALID);
+    if (launched <= 0) {
+        (void)bruce_stdio_session_close(session);
+        return false;
+    }
+
+    uint64_t started = runtime__now();
+    while (!s_stdio_cancel_started && runtime__now() - started < 250) (void)runtime__delay(5);
+
+    bruce_process_id_t process_id = (bruce_process_id_t)launched;
+    bruce_process_status_t status;
+    bruce_result_t signal_result = s_stdio_cancel_started
+                                       ? process__signal(process_id, BRUCE_PROCESS_SIGNAL_TERM)
+                                       : BRUCE_ERR_TIMEOUT;
+    bruce_result_t wait_result = process__wait_status(process_id, 1000, &status);
+    if (wait_result != BRUCE_OK) {
+        (void)process__kill(process_id);
+        (void)process__wait_status(process_id, 1000, &status);
+    }
+    (void)bruce_stdio_session_close(session);
+
+    bool ok = signal_result == BRUCE_OK && wait_result == BRUCE_OK &&
+              s_stdio_cancel_result == BRUCE_ERR_CANCELLED &&
+              status.reason == BRUCE_PROCESS_TERMINATED && status.exit_code == 0 &&
+              status.signal == BRUCE_PROCESS_SIGNAL_TERM;
+    printf("[selftest] terminal/stdio-cancel: %s\n", ok ? "OK" : "failed");
     return ok;
 }

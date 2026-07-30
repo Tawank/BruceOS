@@ -3,7 +3,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define BRUCE_CORE_ABI_VERSION 1u
+#define BRUCE_CORE_ABI_VERSION 2u
 #define BRUCE_MANIFEST_APP_NAME_MAX 64
 #define BRUCE_MANIFEST_ICON_BYTES 128
 #define BRUCE_MANIFEST_MAX_PERMISSIONS 16

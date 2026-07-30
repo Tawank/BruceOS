@@ -19,12 +19,13 @@
 #include "core_sdk/notification.h" // IWYU pragma: export
 #include "core_sdk/nrf24.h"        // IWYU pragma: export
 #include "core_sdk/permission.h"   // IWYU pragma: export
+#include "core_sdk/process.h"      // IWYU pragma: export
 #include "core_sdk/result.h"       // IWYU pragma: export
+#include "core_sdk/runtime.h"      // IWYU pragma: export
 #include "core_sdk/spi.h"          // IWYU pragma: export
 #include "core_sdk/storage.h"      // IWYU pragma: export
 #include "core_sdk/status_icon.h"  // IWYU pragma: export
 #include "core_sdk/stdio.h"        // IWYU pragma: export
-#include "core_sdk/task.h"         // IWYU pragma: export
 #include "core_sdk/tcp.h"          // IWYU pragma: export
 
 /* Embed the canonical manifest JSON in the non-loadable .bruce.manifest
@@ -33,7 +34,7 @@
  *
  * Example:
  *   BRUCE_APP_MANIFEST("{\"appName\":\"My app\",\"appIcon\":\"...\","
- *                       "\"coreAbiVersion\":1,\"stackSize\":8192}");
+ *                       "\"coreAbiVersion\":2,\"stackSize\":8192}");
  */
 #define BRUCE_APP_MANIFEST(json) \
     __attribute__((section(".bruce.manifest"), used)) \

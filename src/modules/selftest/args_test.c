@@ -18,7 +18,7 @@
 #include "modules/tcp/tcp_app.h"
 #include "modules/utils/help/help_app.h"
 #include "modules/utils/notification/notification_app.h"
-#include "modules/utils/task/task_app.h"
+#include "modules/utils/process/process_app.h"
 #include "modules/utils/terminal/terminal_app.h"
 #include "modules/webui/webui_app.h"
 #include "modules/wifi/wifi_app.h"
@@ -96,7 +96,7 @@ static bool selftest__args_module_help(void) {
         nrf24_app_main,
         notification_app_main,
         help_app_main,
-        task_app_main,
+        process_app_main,
         tcp_app_main,
         terminal_app_main,
         webui_app_main,

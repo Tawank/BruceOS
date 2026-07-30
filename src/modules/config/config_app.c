@@ -7,7 +7,7 @@
 #include "core_sdk/dialog.h"
 #include "core_sdk/result.h"
 #include "core_sdk/stdio.h"
-#include "core_sdk/task.h"
+#include "core_sdk/process.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -224,7 +224,7 @@ int config_app_main(int argc, char **argv) {
     ArgParser *action = hierarchy_found ? ap_get_cmd_parser(clock) : NULL;
     if (action != NULL) gui = gui || ap_found(action, "gui");
     if (gui && !app_runner__args_have_background(argc, argv)) {
-        bruce_result_t foreground = task__to_foreground();
+        bruce_result_t foreground = process__to_foreground();
         if (foreground != BRUCE_OK) {
             ap_free(root);
             return foreground;

@@ -2,7 +2,7 @@
  *
  * The ELF loader module registers this table with the Espressif ELF loader and
  * uses a custom resolver that searches only these symbols. Selected libc names
- * are mapped to task-aware SDK functions; all other unknown symbols resolve to
+ * are mapped to process-aware SDK functions; all other unknown symbols resolve to
  * 0 and cause relocation failure, which is the desired sandbox behavior.
  *
  * When adding a new public SDK capability, also export its entry points here
@@ -39,7 +39,8 @@
 #include "core_sdk/status_icon.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
-#include "core_sdk/task.h"
+#include "core_sdk/process.h"
+#include "core_sdk/runtime.h"
 #include "core_sdk/tcp.h"
 
 static int bruce_elf__puts(const char *text) {
@@ -53,23 +54,26 @@ static int bruce_elf__putchar(int character) {
 }
 
 const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
-    /* Core runtime / task */
+    /* Core runtime / process */
     ESP_ELFSYM_EXPORT(runtime__now),
     ESP_ELFSYM_EXPORT(runtime__sleep),
     ESP_ELFSYM_EXPORT(runtime__delay),
-    ESP_ELFSYM_EXPORT(task__current_id),
-    ESP_ELFSYM_EXPORT(task__switch_next),
-    ESP_ELFSYM_EXPORT(task__switch_previous),
-    ESP_ELFSYM_EXPORT(task__to_background),
-    ESP_ELFSYM_EXPORT(task__to_foreground),
-    ESP_ELFSYM_EXPORT(task__foreground),
-    ESP_ELFSYM_EXPORT(task__stop),
-    ESP_ELFSYM_EXPORT(task__pause),
-    ESP_ELFSYM_EXPORT(task__resume),
-    ESP_ELFSYM_EXPORT(task__kill),
-    ESP_ELFSYM_EXPORT(task__wait),
-    ESP_ELFSYM_EXPORT(task__snapshot),
-    ESP_ELFSYM_EXPORT(task__list),
+    ESP_ELFSYM_EXPORT(process__current_id),
+    ESP_ELFSYM_EXPORT(process__switch_next),
+    ESP_ELFSYM_EXPORT(process__switch_previous),
+    ESP_ELFSYM_EXPORT(process__to_background),
+    ESP_ELFSYM_EXPORT(process__to_foreground),
+    ESP_ELFSYM_EXPORT(process__foreground),
+    ESP_ELFSYM_EXPORT(process__signal),
+    ESP_ELFSYM_EXPORT(process__terminate),
+    ESP_ELFSYM_EXPORT(process__pause),
+    ESP_ELFSYM_EXPORT(process__resume),
+    ESP_ELFSYM_EXPORT(process__kill),
+    ESP_ELFSYM_EXPORT(process__wait),
+    ESP_ELFSYM_EXPORT(process__wait_status),
+    ESP_ELFSYM_EXPORT(process__current_signal),
+    ESP_ELFSYM_EXPORT(process__snapshot),
+    ESP_ELFSYM_EXPORT(process__list),
 
     /* Device state */
     ESP_ELFSYM_EXPORT(device__get_battery),
@@ -254,7 +258,7 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(bruce_stdio_session_read_output),
 
     /* Standard C library subset. Console and heap calls are routed through
-     * task-aware Bruce SDK functions rather than firmware libc. */
+     * process-aware Bruce SDK functions rather than firmware libc. */
     {"printf", (const void *)&stdio__printf},
     {"vprintf", (const void *)&stdio__vprintf},
     {"puts", (const void *)&bruce_elf__puts},

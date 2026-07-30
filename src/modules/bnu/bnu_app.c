@@ -8,7 +8,8 @@
 #include "core_sdk/result.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
-#include "core_sdk/task.h"
+#include "core_sdk/process.h"
+#include "core_sdk/runtime.h"
 
 static char s_working_directory[BRUCE_STORAGE_PATH_MAX] = "/";
 
@@ -157,43 +158,43 @@ int bnu_free_app_main(int argc, char **argv) {
     return BRUCE_OK;
 }
 
-static const char *bnu__task_state_name(bruce_task_state_t state) {
+static const char *bnu__process_state_name(bruce_process_state_t state) {
     switch (state) {
-        case BRUCE_TASK_STARTING: return "start";
-        case BRUCE_TASK_FOREGROUND: return "fore";
-        case BRUCE_TASK_BACKGROUND: return "back";
-        case BRUCE_TASK_PAUSED: return "pause";
-        case BRUCE_TASK_STOPPING: return "stop";
+        case BRUCE_PROCESS_STARTING: return "start";
+        case BRUCE_PROCESS_FOREGROUND: return "fore";
+        case BRUCE_PROCESS_BACKGROUND: return "back";
+        case BRUCE_PROCESS_PAUSED: return "pause";
+        case BRUCE_PROCESS_STOPPING: return "stop";
         default: return "?";
     }
 }
 
 int bnu_top_app_main(int argc, char **argv) {
-    ArgParser *parser = bnu__new_parser("Show runtime task resource usage.");
+    ArgParser *parser = bnu__new_parser("Show runtime process resource usage.");
     if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
     if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
     ap_free(parser);
 
-    bruce_task_snapshot_t tasks[16];
-    size_t task_count = 0;
-    bruce_result_t result = task__list(tasks, sizeof(tasks) / sizeof(tasks[0]), &task_count);
+    bruce_process_snapshot_t processes[16];
+    size_t process_count = 0;
+    bruce_result_t result = process__list(processes, sizeof(processes) / sizeof(processes[0]), &process_count);
     if (result != BRUCE_OK) return result;
     result = runtime__delay(250);
     if (result != BRUCE_OK) return result;
-    result = task__list(tasks, sizeof(tasks) / sizeof(tasks[0]), &task_count);
+    result = process__list(processes, sizeof(processes) / sizeof(processes[0]), &process_count);
     if (result != BRUCE_OK) return result;
 
     stdio__printf("\n%2s %3s %4s %4s %-5s %s", "", "", "stack", "", "", "");
     stdio__printf("\n%2s %3s %4s %4s %-5s %s\n", "id", "cpu", "free", "heap", "state", "name");
-    for (size_t i = 0; i < task_count; ++i) {
+    for (size_t i = 0; i < process_count; ++i) {
         stdio__printf(
             "%2u %3u %4u %4u %-5s %s\n",
-            (unsigned)tasks[i].id,
-            (unsigned)tasks[i].cpu_percent,
-            (unsigned)tasks[i].stack_high_water_bytes,
-            (unsigned)tasks[i].memory_bytes,
-            bnu__task_state_name(tasks[i].state),
-            tasks[i].name
+            (unsigned)processes[i].id,
+            (unsigned)processes[i].cpu_percent,
+            (unsigned)processes[i].stack_high_water_bytes,
+            (unsigned)processes[i].memory_bytes,
+            bnu__process_state_name(processes[i].state),
+            processes[i].name
         );
     }
     return BRUCE_OK;

@@ -8,7 +8,7 @@
  * does NOT imply the `wifi` permission; callers must arrange Wi-Fi
  * connectivity separately (e.g. via `wifi__connect()`).
  *
- * Response memory is allocated with the task-owned allocator and must be
+ * Response memory is allocated with the process-owned allocator and must be
  * released with `http__response_free()`.  Binary bodies may contain embedded
  * NUL bytes; callers must use `body_len` instead of `strlen(body)`.
  */
@@ -71,7 +71,7 @@ typedef struct {
 /* Perform a synchronous HTTP request. Requires the `http` permission.
  * On success, fills `response` and returns BRUCE_OK. The body is NUL-terminated
  * in buffered mode, but body_len is authoritative. Body and headers share one
- * task-owned allocation. On failure, leaves `response` zeroed and returns a
+ * process-owned allocation. On failure, leaves `response` zeroed and returns a
  * negative BRUCE_ERR_* value. */
 bruce_result_t http__request(const bruce_http_request_t *request, bruce_http_response_t *response);
 

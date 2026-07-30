@@ -24,8 +24,8 @@ typedef struct {
     bool frame_noop;
     bool transfer_pending;
     bool remove_pending;
-    bruce_task_id_t task_id;
-    bruce_task_state_t state;
+    bruce_process_id_t process_id;
+    bruce_process_state_t state;
     bruce_display_rect_t viewport;
     uint32_t viewport_generation;
     uint32_t frame_generation;
@@ -37,9 +37,9 @@ typedef struct {
     int16_t cursor_y;
     SemaphoreHandle_t completion;
     bruce_result_t completion_result;
-} display__task_context_t;
+} display__process_context_t;
 
-bruce_result_t display_internal__begin_draw(display__task_context_t **context);
+bruce_result_t display_internal__begin_draw(display__process_context_t **context);
 void display_internal__unlock(void);
 void display_internal__set_pixel(int16_t x, int16_t y, bruce_display_color_t color);
 void display_internal__fill_rect(int16_t x, int16_t y, int16_t w, int16_t h, bruce_display_color_t color);

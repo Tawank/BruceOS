@@ -15,7 +15,7 @@
 #include "core_sdk/memory.h"
 #include "core_sdk/permission.h"
 #include "core_sdk/storage.h"
-#include "core_sdk/task.h"
+#include "core_sdk/process.h"
 
 static size_t s_call_count;
 
@@ -66,10 +66,10 @@ typedef struct {
     char **argv;
     size_t image_size;
     uint8_t *image;
-} elf_loader_task_ctx_t;
+} elf_loader_process_ctx_t;
 
 /* Public SDK symbol allowlist. ELF apps may only resolve these names; selected
- * libc names in the table route through task-aware Bruce SDK functions. */
+ * libc names in the table route through process-aware Bruce SDK functions. */
 extern const struct esp_elfsym g_bruce_sdk_elfsyms[];
 
 static uintptr_t elf_loader__find_symbol(const char *sym_name) {
@@ -81,41 +81,41 @@ static uintptr_t elf_loader__find_symbol(const char *sym_name) {
     return 0;
 }
 
-static void elf_loader__free_task_ctx(elf_loader_task_ctx_t *ctx) {
+static void elf_loader__free_process_ctx(elf_loader_process_ctx_t *ctx) {
     if (ctx == NULL) { return; }
     free(ctx->image);
     app_runner__free_args(ctx->argv, ctx->argc);
     free(ctx);
 }
 
-/* Task entry for the loaded ELF.  Runs on the loader task's own stack with
+/* Process entry for the loaded ELF.  Runs on the loader process's own stack with
  * the image and args prepared by elf_loader__run_path(). */
 static void elf_loader__entry(void *context) {
-    elf_loader_task_ctx_t *ctx = (elf_loader_task_ctx_t *)context;
+    elf_loader_process_ctx_t *ctx = (elf_loader_process_ctx_t *)context;
 
     esp_elf_t elf;
     memset(&elf, 0, sizeof(elf));
 
     if (esp_elf_init(&elf) != 0) {
         printf("[elf_loader] %s: esp_elf_init failed\n", ctx->permission_key);
-        elf_loader__free_task_ctx(ctx);
+        elf_loader__free_process_ctx(ctx);
         return;
     }
 
     if (esp_elf_relocate(&elf, ctx->image) != 0) {
         printf("[elf_loader] %s: esp_elf_relocate failed\n", ctx->permission_key);
         esp_elf_deinit(&elf);
-        elf_loader__free_task_ctx(ctx);
+        elf_loader__free_process_ctx(ctx);
         return;
     }
 
     (void)esp_elf_request(&elf, 0, ctx->argc, ctx->argv);
 
     esp_elf_deinit(&elf);
-    elf_loader__free_task_ctx(ctx);
+    elf_loader__free_process_ctx(ctx);
 }
 
-static int elf_loader__load_image(const char *path, elf_loader_task_ctx_t *ctx) {
+static int elf_loader__load_image(const char *path, elf_loader_process_ctx_t *ctx) {
     bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
     bruce_result_t open_result = storage__open(path, BRUCE_STORAGE_OPEN_READ, &file);
     if (open_result != BRUCE_OK) { return (int)open_result; }
@@ -214,7 +214,7 @@ int elf_loader__run_path(const char *path, const char *arg, bool in_background) 
 
     bool gui_requested = app_runner__args_have_gui(full_argc, full_argv);
 
-    elf_loader_task_ctx_t *ctx = malloc(sizeof(*ctx));
+    elf_loader_process_ctx_t *ctx = malloc(sizeof(*ctx));
     if (ctx == NULL) {
         app_runner__free_args(full_argv, full_argc);
         memory__free(inspection);
@@ -230,15 +230,15 @@ int elf_loader__run_path(const char *path, const char *arg, bool in_background) 
 
     int load_result = elf_loader__load_image(path, ctx);
     if (load_result != BRUCE_OK) {
-        elf_loader__free_task_ctx(ctx);
+        elf_loader__free_process_ctx(ctx);
         memory__free(inspection);
         return load_result;
     }
 
-    int result = app_runner__spawn_loader_task(
+    int result = app_runner__spawn_loader_process(
         permission_key, gui_requested, in_background, inspection->manifest.stack_size, elf_loader__entry, ctx
     );
-    if (result <= 0) { elf_loader__free_task_ctx(ctx); }
+    if (result <= 0) { elf_loader__free_process_ctx(ctx); }
     memory__free(inspection);
     return result;
 }
@@ -295,11 +295,11 @@ int elf_loader__app_main(int argc, char **argv) {
     ap_free(parser);
 
     /* Inherit the background/foreground mode of the calling "elf" command
-     * task so the loaded ELF follows the same context. */
-    bruce_task_snapshot_t snapshot;
+     * process so the loaded ELF follows the same context. */
+    bruce_process_snapshot_t snapshot;
     bool in_background = false;
-    if (task__snapshot(task__current_id(), &snapshot) == BRUCE_OK) {
-        in_background = (snapshot.state == BRUCE_TASK_BACKGROUND);
+    if (process__snapshot(process__current_id(), &snapshot) == BRUCE_OK) {
+        in_background = (snapshot.state == BRUCE_PROCESS_BACKGROUND);
     }
     return elf_loader__run_path(path, arg[0] != '\0' ? arg : NULL, in_background);
 }

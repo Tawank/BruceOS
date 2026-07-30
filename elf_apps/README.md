@@ -5,7 +5,7 @@ ELF applications.
 
 ## Layout
 
-- `include/bruce_sdk.h` — pulls in the runtime/loader/manifest/task/memory/permission/result/storage/display
+- `include/bruce_sdk.h` pulls in the runtime/loader/manifest/process/memory/permission/result/storage/display
   public Core SDK APIs and the `BRUCE_APP_MANIFEST()` macro.  Apps that need
   `config`, `dialog`, `display`, `http`, `input`, `stdio`, or `wifi` should also
   include the corresponding `core_sdk/*.h` headers.

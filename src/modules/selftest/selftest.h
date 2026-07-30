@@ -16,7 +16,7 @@ void selftest__resource_cleanup(void *context);
  * Unlike every other built-in module, `selftest` is explicitly exempt from
  * the "built-ins use only core_sdk/ headers" rule (see migration_plan.md,
  * "Boundaries" / "Public SDK and migration rules").  Its entire purpose is to
- * validate Core's private implementation - task registry, memory tracking,
+ * validate Core's private implementation - process registry, memory tracking,
  * resource cleanup, and so on - so it is allowed to include Core-private
  * headers (core/...) and call FreeRTOS/ESP-IDF APIs directly, the same way
  * Core source itself does.  It must still be registered and launched like any

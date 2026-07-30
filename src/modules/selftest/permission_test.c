@@ -3,20 +3,21 @@
  *
  * Every test drives permission__check()/permission__preflight() through the
  * public core_sdk/permission.h and core_sdk/dialog.h APIs; the "external
- * app" tasks these tests need (permission__check() only applies non-trivial
- * logic to non-built-in tasks) are created directly via the Core-private
- * task_registry__create(), the same way task_test.c/app_runner_test.c do,
+ * app" processes these tests need (permission__check() only applies non-trivial
+ * logic to non-built-in processes) are created directly via the Core-private
+ * process_registry__create(), the same way task_test.c/app_runner_test.c do,
  * since ELF/JS loading (A6/A7) doesn't exist yet to launch a real one. */
 #include <stdio.h>
 #include <string.h>
 
 #include "core/dialog/dialog.h"
 #include "core/permission/permission.h"
-#include "core/task/task.h"
+#include "core/process/process.h"
 #include "core_sdk/app_runner.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/permission.h"
-#include "core_sdk/task.h"
+#include "core_sdk/process.h"
+#include "core_sdk/runtime.h"
 
 #include "permission_test.h"
 
@@ -56,7 +57,7 @@ static void selftest__dialog_mock_reset(size_t selection) {
 static void selftest__dialog_mock_clear(void) { dialog__test_set_choice_provider(NULL); }
 
 /* ------------------------------------------------------------------------ */
-/* Helper: run permission__check() from a task with a chosen built_in/key    */
+/* Helper: run permission__check() from a process with a chosen built_in/key    */
 /* ------------------------------------------------------------------------ */
 
 typedef struct {
@@ -82,7 +83,7 @@ static bruce_result_t
 selftest__permission_check_as(bool built_in, const char *permission_key, const char *permission_name) {
     memset(&s_permcheck, 0, sizeof(s_permcheck));
     char *argv[1] = {(char *)permission_name};
-    task_create_params_t params = {
+    process_create_params_t params = {
         .name = "selftest_permcheck",
         .entry = selftest__permission_check_entry,
         .argc = 1,
@@ -93,9 +94,9 @@ selftest__permission_check_as(bool built_in, const char *permission_key, const c
         .start_in_background = true,
         .stack_bytes = 4096,
     };
-    bruce_task_id_t id = BRUCE_TASK_ID_INVALID;
-    if (task_registry__create(&params, &id) != BRUCE_OK) { return BRUCE_ERR_INTERNAL; }
-    bruce_result_t wait_result = task__wait(id, 2000);
+    bruce_process_id_t id = BRUCE_PROCESS_ID_INVALID;
+    if (process_registry__create(&params, &id) != BRUCE_OK) { return BRUCE_ERR_INTERNAL; }
+    bruce_result_t wait_result = process__wait(id, 2000);
     if (wait_result != BRUCE_OK && wait_result != BRUCE_ERR_NOT_FOUND) { return BRUCE_ERR_TIMEOUT; }
     return s_permcheck.ran ? s_permcheck.result : BRUCE_ERR_INTERNAL;
 }
@@ -162,23 +163,23 @@ bool selftest__run_permission_shared_basename_case(void) {
     permission__test_reset();
     selftest__dialog_mock_reset(0 /* Allow */);
 
-    bruce_result_t first_task = selftest__permission_check_as(false, "shared.elf", "bt");
+    bruce_result_t first_process = selftest__permission_check_as(false, "shared.elf", "bt");
     int calls_after_first = s_mock.call_count;
 
-    /* A different task instance with the *same* permission key must share
+    /* A different process instance with the *same* permission key must share
      * the decision without re-prompting. */
     s_mock.trap = true;
-    bruce_result_t second_task = selftest__permission_check_as(false, "shared.elf", "bt");
+    bruce_result_t second_process = selftest__permission_check_as(false, "shared.elf", "bt");
     bool trap_violated = s_mock.trap_violated;
 
     selftest__dialog_mock_clear();
 
-    bool ok = first_task == BRUCE_OK && calls_after_first == 1 && second_task == BRUCE_OK && !trap_violated;
+    bool ok = first_process == BRUCE_OK && calls_after_first == 1 && second_process == BRUCE_OK && !trap_violated;
     printf(
         "[selftest] permission/shared-basename: %s (first=%d second=%d trap_violated=%d)\n",
         ok ? "OK" : "FAIL",
-        first_task,
-        second_task,
+        first_process,
+        second_process,
         trap_violated
     );
     return ok;
@@ -247,14 +248,14 @@ bool selftest__run_permission_preflight_case(void) {
 
 typedef enum {
     SELFTEST_BOUNDARY_EXECUTE,
-    SELFTEST_BOUNDARY_TASK,
+    SELFTEST_BOUNDARY_PROCESS,
 } selftest__boundary_operation_t;
 
 typedef struct {
     volatile bruce_result_t result;
     volatile bool ran;
     selftest__boundary_operation_t operation;
-    bruce_task_id_t target;
+    bruce_process_id_t target;
 } selftest__boundary_result_t;
 
 static selftest__boundary_result_t s_boundary;
@@ -265,19 +266,19 @@ static int selftest__boundary_entry(int argc, char **argv) {
     if (s_boundary.operation == SELFTEST_BOUNDARY_EXECUTE) {
         s_boundary.result = (bruce_result_t)app_runner__run("selftest_missing_command", "", true);
     } else {
-        s_boundary.result = task__pause(s_boundary.target);
+        s_boundary.result = process__pause(s_boundary.target);
     }
     s_boundary.ran = true;
     return 0;
 }
 
 static bruce_result_t selftest__run_boundary_as(
-    const char *permission_key, selftest__boundary_operation_t operation, bruce_task_id_t target
+    const char *permission_key, selftest__boundary_operation_t operation, bruce_process_id_t target
 ) {
     memset(&s_boundary, 0, sizeof(s_boundary));
     s_boundary.operation = operation;
     s_boundary.target = target;
-    task_create_params_t params = {
+    process_create_params_t params = {
         .name = "selftest_boundary",
         .entry = selftest__boundary_entry,
         .built_in = false,
@@ -285,9 +286,9 @@ static bruce_result_t selftest__run_boundary_as(
         .start_in_background = true,
         .stack_bytes = 4096,
     };
-    bruce_task_id_t id = BRUCE_TASK_ID_INVALID;
-    if (task_registry__create(&params, &id) != BRUCE_OK) return BRUCE_ERR_INTERNAL;
-    bruce_result_t wait_result = task__wait(id, 2000);
+    bruce_process_id_t id = BRUCE_PROCESS_ID_INVALID;
+    if (process_registry__create(&params, &id) != BRUCE_OK) return BRUCE_ERR_INTERNAL;
+    bruce_result_t wait_result = process__wait(id, 2000);
     if (wait_result != BRUCE_OK && wait_result != BRUCE_ERR_NOT_FOUND) return BRUCE_ERR_TIMEOUT;
     return s_boundary.ran ? s_boundary.result : BRUCE_ERR_INTERNAL;
 }
@@ -307,40 +308,40 @@ bool selftest__run_permission_protected_boundaries_case(void) {
     (void)permission__set("execute-denied.elf", BRUCE_PERMISSION_EXECUTE, false);
     (void)permission__set("execute-allowed.elf", BRUCE_PERMISSION_EXECUTE, true);
     bruce_result_t execute_denied =
-        selftest__run_boundary_as("execute-denied.elf", SELFTEST_BOUNDARY_EXECUTE, BRUCE_TASK_ID_INVALID);
+        selftest__run_boundary_as("execute-denied.elf", SELFTEST_BOUNDARY_EXECUTE, BRUCE_PROCESS_ID_INVALID);
     bruce_result_t execute_allowed =
-        selftest__run_boundary_as("execute-allowed.elf", SELFTEST_BOUNDARY_EXECUTE, BRUCE_TASK_ID_INVALID);
+        selftest__run_boundary_as("execute-allowed.elf", SELFTEST_BOUNDARY_EXECUTE, BRUCE_PROCESS_ID_INVALID);
 
-    task_create_params_t target_params = {
+    process_create_params_t target_params = {
         .name = "selftest_control_target",
         .entry = selftest__boundary_target_entry,
         .built_in = true,
         .start_in_background = true,
         .stack_bytes = 4096,
     };
-    bruce_task_id_t target = BRUCE_TASK_ID_INVALID;
-    bool target_created = task_registry__create(&target_params, &target) == BRUCE_OK;
+    bruce_process_id_t target = BRUCE_PROCESS_ID_INVALID;
+    bool target_created = process_registry__create(&target_params, &target) == BRUCE_OK;
 
-    (void)permission__set("task-denied.elf", BRUCE_PERMISSION_TASK, false);
-    (void)permission__set("task-allowed.elf", BRUCE_PERMISSION_TASK, true);
+    (void)permission__set("process-denied.elf", BRUCE_PERMISSION_PROCESS, false);
+    (void)permission__set("process-allowed.elf", BRUCE_PERMISSION_PROCESS, true);
     bruce_result_t task_denied =
-        target_created ? selftest__run_boundary_as("task-denied.elf", SELFTEST_BOUNDARY_TASK, target)
+        target_created ? selftest__run_boundary_as("process-denied.elf", SELFTEST_BOUNDARY_PROCESS, target)
                        : BRUCE_ERR_INTERNAL;
     bruce_result_t task_allowed =
-        target_created ? selftest__run_boundary_as("task-allowed.elf", SELFTEST_BOUNDARY_TASK, target)
+        target_created ? selftest__run_boundary_as("process-allowed.elf", SELFTEST_BOUNDARY_PROCESS, target)
                        : BRUCE_ERR_INTERNAL;
 
-    bruce_task_snapshot_t snapshot;
-    bool paused = target_created && task__snapshot(target, &snapshot) == BRUCE_OK &&
-                  snapshot.state == BRUCE_TASK_PAUSED;
-    if (target_created) (void)task__kill(target);
+    bruce_process_snapshot_t snapshot;
+    bool paused = target_created && process__snapshot(target, &snapshot) == BRUCE_OK &&
+                  snapshot.state == BRUCE_PROCESS_PAUSED;
+    if (target_created) (void)process__kill(target);
     bool trap_violated = s_mock.trap_violated;
     selftest__dialog_mock_clear();
 
     bool ok = execute_denied == BRUCE_ERR_PERMISSION && execute_allowed == BRUCE_ERR_NOT_FOUND &&
               task_denied == BRUCE_ERR_PERMISSION && task_allowed == BRUCE_OK && paused && !trap_violated;
     printf(
-        "[selftest] permission/protected-boundaries: %s (execute=%d/%d task=%d/%d paused=%d trap=%d)\n",
+        "[selftest] permission/protected-boundaries: %s (execute=%d/%d process=%d/%d paused=%d trap=%d)\n",
         ok ? "OK" : "FAIL",
         execute_denied,
         execute_allowed,
@@ -379,7 +380,7 @@ static int selftest__dialog_dispatch_entry(int argc, char **argv) {
 
 static bool selftest__run_dialog_dispatch_as(bool gui_requested, bool *out_observed_gui) {
     memset(&s_dispatch, 0, sizeof(s_dispatch));
-    task_create_params_t params = {
+    process_create_params_t params = {
         .name = "selftest_dialog_dispatch",
         .entry = selftest__dialog_dispatch_entry,
         .argc = 0,
@@ -390,9 +391,9 @@ static bool selftest__run_dialog_dispatch_as(bool gui_requested, bool *out_obser
         .start_in_background = true,
         .stack_bytes = 4096,
     };
-    bruce_task_id_t id = BRUCE_TASK_ID_INVALID;
-    if (task_registry__create(&params, &id) != BRUCE_OK) { return false; }
-    bruce_result_t wait_result = task__wait(id, 2000);
+    bruce_process_id_t id = BRUCE_PROCESS_ID_INVALID;
+    if (process_registry__create(&params, &id) != BRUCE_OK) { return false; }
+    bruce_result_t wait_result = process__wait(id, 2000);
     if ((wait_result != BRUCE_OK && wait_result != BRUCE_ERR_NOT_FOUND) || !s_dispatch.ran) { return false; }
     *out_observed_gui = s_dispatch.observed_gui;
     return true;

@@ -1,10 +1,10 @@
-/* A5 acceptance coverage: task-owned opaque Storage handles, `storage`
+/* A5 acceptance coverage: process-owned opaque Storage handles, `storage`
  * permission enforcement, the permanently-protected /bruce.json and
  * /permissions.json paths, per-owner isolation, and automatic cleanup at
  * normal exit and force-kill.
  *
- * Like permission_test.c, the "external app" tasks these tests need are
- * created directly via the Core-private task_registry__create() (no ELF/JS
+ * Like permission_test.c, the "external app" processes these tests need are
+ * created directly via the Core-private process_registry__create() (no ELF/JS
  * loader exists yet to launch a real one). */
 #include <stdio.h>
 #include <string.h>
@@ -15,10 +15,10 @@
 #include "core/dialog/dialog.h"
 #include "core/permission/permission.h"
 #include "core/storage/storage.h"
-#include "core/task/task.h"
+#include "core/process/process.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/storage.h"
-#include "core_sdk/task.h"
+#include "core_sdk/process.h"
 
 #include "storage_test.h"
 
@@ -85,7 +85,7 @@ bool selftest__run_storage_permission_denied_case(void) {
     selftest__storage_dialog_mock_reset(1 /* Deny */);
     memset(&s_open_result, 0, sizeof(s_open_result));
 
-    task_create_params_t params = {
+    process_create_params_t params = {
         .name = "selftest_storage_denied",
         .entry = selftest__storage_open_denied_entry,
         .argc = 0,
@@ -96,9 +96,9 @@ bool selftest__run_storage_permission_denied_case(void) {
         .start_in_background = true,
         .stack_bytes = 4096,
     };
-    bruce_task_id_t id = BRUCE_TASK_ID_INVALID;
-    bool created = task_registry__create(&params, &id) == BRUCE_OK;
-    bruce_result_t wait_result = created ? task__wait(id, 2000) : BRUCE_ERR_INTERNAL;
+    bruce_process_id_t id = BRUCE_PROCESS_ID_INVALID;
+    bool created = process_registry__create(&params, &id) == BRUCE_OK;
+    bruce_result_t wait_result = created ? process__wait(id, 2000) : BRUCE_ERR_INTERNAL;
 
     selftest__storage_dialog_mock_clear();
 
@@ -115,8 +115,8 @@ bool selftest__run_storage_permission_denied_case(void) {
 /* ------------------------------------------------------------------------ */
 
 bool selftest__run_storage_protected_path_case(void) {
-    /* Called directly within selftest's own built-in task context: built-in
-     * tasks always pass the `storage` permission check, so a denial here can
+    /* Called directly within selftest's own built-in process context: built-in
+     * processes always pass the `storage` permission check, so a denial here can
      * only come from the permanently-protected-path rule itself. */
     bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
     bruce_result_t bruce_json = storage__open("/bruce.json", BRUCE_STORAGE_OPEN_READ, &file);
@@ -260,7 +260,7 @@ bool selftest__run_storage_ownership_case(void) {
     s_owner_ready = false;
     memset(&s_access_result, 0, sizeof(s_access_result));
 
-    task_create_params_t owner_params = {
+    process_create_params_t owner_params = {
         .name = "selftest_storage_owner",
         .entry = selftest__storage_owner_entry,
         .argc = 0,
@@ -271,14 +271,14 @@ bool selftest__run_storage_ownership_case(void) {
         .start_in_background = true,
         .stack_bytes = 4096,
     };
-    bruce_task_id_t owner_id = BRUCE_TASK_ID_INVALID;
-    bool owner_created = task_registry__create(&owner_params, &owner_id) == BRUCE_OK;
+    bruce_process_id_t owner_id = BRUCE_PROCESS_ID_INVALID;
+    bool owner_created = process_registry__create(&owner_params, &owner_id) == BRUCE_OK;
 
     for (int i = 0; i < 200 && !s_owner_ready; ++i) { vTaskDelay(pdMS_TO_TICKS(10)); }
 
     bool ok = false;
     if (owner_created && s_owner_ready && s_owner_file_id != BRUCE_FILE_ID_INVALID) {
-        task_create_params_t intruder_params = {
+        process_create_params_t intruder_params = {
             .name = "selftest_storage_intruder",
             .entry = selftest__storage_intruder_entry,
             .argc = 0,
@@ -289,15 +289,15 @@ bool selftest__run_storage_ownership_case(void) {
             .start_in_background = true,
             .stack_bytes = 4096,
         };
-        bruce_task_id_t intruder_id = BRUCE_TASK_ID_INVALID;
-        bool intruder_created = task_registry__create(&intruder_params, &intruder_id) == BRUCE_OK;
-        bruce_result_t wait_result = intruder_created ? task__wait(intruder_id, 2000) : BRUCE_ERR_INTERNAL;
+        bruce_process_id_t intruder_id = BRUCE_PROCESS_ID_INVALID;
+        bool intruder_created = process_registry__create(&intruder_params, &intruder_id) == BRUCE_OK;
+        bruce_result_t wait_result = intruder_created ? process__wait(intruder_id, 2000) : BRUCE_ERR_INTERNAL;
         ok = intruder_created && (wait_result == BRUCE_OK || wait_result == BRUCE_ERR_NOT_FOUND) &&
              s_access_result.ran && s_access_result.result == BRUCE_ERR_PERMISSION;
     }
 
     s_owner_should_exit = true;
-    if (owner_created) task__wait(owner_id, 2000);
+    if (owner_created) process__wait(owner_id, 2000);
     storage__remove("/selftest_ownership.txt");
 
     printf(
@@ -318,7 +318,7 @@ static int selftest__storage_leak_open_entry(int argc, char **argv) {
     (void)argv;
     bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
     /* Deliberately never closes: the point of the test is that Core closes
-     * it automatically at task exit. */
+     * it automatically at process exit. */
     bruce_result_t opened = storage__open(
         "/selftest_leak.txt",
         BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE | BRUCE_STORAGE_OPEN_TRUNCATE,
@@ -327,7 +327,7 @@ static int selftest__storage_leak_open_entry(int argc, char **argv) {
     return opened == BRUCE_OK ? 0 : -1;
 }
 
-/* Repeatedly creates a task that opens (and never closes) a file, waiting
+/* Repeatedly creates a process that opens (and never closes) a file, waiting
  * for each to finish before starting the next. Run more times than any
  * reasonable open-file table size; if handles leaked, the table would fill
  * up partway through and later opens would start failing. No printf here -
@@ -335,7 +335,7 @@ static int selftest__storage_leak_open_entry(int argc, char **argv) {
 static bool selftest__storage_leak_iterations_ok(void) {
     bool ok = true;
     for (int i = 0; i < SELFTEST__STORAGE_LEAK_ITERATIONS && ok; ++i) {
-        task_create_params_t params = {
+        process_create_params_t params = {
             .name = "selftest_storage_leak",
             .entry = selftest__storage_leak_open_entry,
             .argc = 0,
@@ -346,9 +346,9 @@ static bool selftest__storage_leak_iterations_ok(void) {
             .start_in_background = true,
             .stack_bytes = 4096,
         };
-        bruce_task_id_t id = BRUCE_TASK_ID_INVALID;
-        bool created = task_registry__create(&params, &id) == BRUCE_OK;
-        bruce_result_t wait_result = created ? task__wait(id, 2000) : BRUCE_ERR_INTERNAL;
+        bruce_process_id_t id = BRUCE_PROCESS_ID_INVALID;
+        bool created = process_registry__create(&params, &id) == BRUCE_OK;
+        bruce_result_t wait_result = created ? process__wait(id, 2000) : BRUCE_ERR_INTERNAL;
         ok = created && (wait_result == BRUCE_OK || wait_result == BRUCE_ERR_NOT_FOUND);
     }
     return ok;
@@ -383,7 +383,7 @@ static int selftest__storage_leak_block_entry(int argc, char **argv) {
 }
 
 bool selftest__run_storage_no_leak_killed_case(void) {
-    task_create_params_t params = {
+    process_create_params_t params = {
         .name = "selftest_storage_leak_killed",
         .entry = selftest__storage_leak_block_entry,
         .argc = 0,
@@ -394,13 +394,13 @@ bool selftest__run_storage_no_leak_killed_case(void) {
         .start_in_background = true,
         .stack_bytes = 4096,
     };
-    bruce_task_id_t id = BRUCE_TASK_ID_INVALID;
-    bool created = task_registry__create(&params, &id) == BRUCE_OK;
+    bruce_process_id_t id = BRUCE_PROCESS_ID_INVALID;
+    bool created = process_registry__create(&params, &id) == BRUCE_OK;
     vTaskDelay(pdMS_TO_TICKS(100));
-    bruce_result_t killed = created ? task__kill(id) : BRUCE_ERR_INTERNAL;
+    bruce_result_t killed = created ? process__kill(id) : BRUCE_ERR_INTERNAL;
     vTaskDelay(pdMS_TO_TICKS(100));
 
-    /* If the killed task's handle leaked, the table would fill up and this
+    /* If the killed process's handle leaked, the table would fill up and this
      * loop's opens would start failing with BRUCE_ERR_RESOURCE_LIMIT. */
     bool reopen_ok = selftest__storage_leak_iterations_ok();
     storage__remove("/selftest_leak.txt");

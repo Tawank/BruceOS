@@ -1,6 +1,6 @@
 #pragma once
 
-/* Core-private VFS/storage bootstrap.  Task-owned opaque file handles are
+/* Core-private VFS/storage bootstrap.  Process-owned opaque file handles are
  * declared in the public <bruce/storage.h> SDK header. */
 
 #include <stdbool.h>

@@ -2,12 +2,12 @@
  * permission enforcement, and the
  * permanently-protected field group
  * (wifiApSsid/wifiApPassword, wifiCredentials, wifiMAC, webUIUser,
- * webUIPassword) that stays denied to an external task no matter what it
+ * webUIPassword) that stays denied to an external process no matter what it
  * has been granted.
  *
- * Like permission_test.c/storage_test.c, the "external app" tasks these
+ * Like permission_test.c/storage_test.c, the "external app" processes these
  * tests need are created directly via the Core-private
- * task_registry__create() (no ELF/JS loader exists yet to launch a real
+ * process_registry__create() (no ELF/JS loader exists yet to launch a real
  * one). */
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,10 +17,10 @@
 #include "core/config/config.h"
 #include "core/permission/permission.h"
 #include "core/storage/storage.h"
-#include "core/task/task.h"
+#include "core/process/process.h"
 #include "core_sdk/config.h"
 #include "core_sdk/dialog.h"
-#include "core_sdk/task.h"
+#include "core_sdk/process.h"
 
 #include "config_test.h"
 
@@ -57,14 +57,14 @@ static void selftest__config_dialog_mock_reset(size_t selection) {
 static void selftest__config_dialog_mock_clear(void) { dialog__test_set_choice_provider(NULL); }
 
 /* ------------------------------------------------------------------------ */
-/* Helper: run a body from a chosen built_in/permission_key task context     */
+/* Helper: run a body from a chosen built_in/permission_key process context     */
 /* ------------------------------------------------------------------------ */
 
 typedef int (*selftest__config_entry_t)(int argc, char **argv);
 
 static bool
 selftest__config_run_as(bool built_in, const char *permission_key, selftest__config_entry_t entry) {
-    task_create_params_t params = {
+    process_create_params_t params = {
         .name = "selftest_config",
         .entry = entry,
         .argc = 0,
@@ -75,9 +75,9 @@ selftest__config_run_as(bool built_in, const char *permission_key, selftest__con
         .start_in_background = true,
         .stack_bytes = 4096,
     };
-    bruce_task_id_t id = BRUCE_TASK_ID_INVALID;
-    if (task_registry__create(&params, &id) != BRUCE_OK) return false;
-    bruce_result_t wait_result = task__wait(id, 2000);
+    bruce_process_id_t id = BRUCE_PROCESS_ID_INVALID;
+    if (process_registry__create(&params, &id) != BRUCE_OK) return false;
+    bruce_result_t wait_result = process__wait(id, 2000);
     return wait_result == BRUCE_OK || wait_result == BRUCE_ERR_NOT_FOUND;
 }
 
@@ -171,7 +171,7 @@ static int selftest__config_protected_entry(int argc, char **argv) {
 
 bool selftest__run_config_protected_field_denied_case(void) {
     permission__test_reset();
-    /* Mock answers Allow: even if the external task were to request and be
+    /* Mock answers Allow: even if the external process were to request and be
      * granted `config`, the permanently-protected group must still deny it -
      * these two calls never even consult permission__check()/the dialog. */
     selftest__config_dialog_mock_reset(0 /* Allow */);
@@ -201,7 +201,7 @@ bool selftest__run_config_protected_field_denied_case(void) {
 /* ------------------------------------------------------------------------ */
 
 bool selftest__run_config_builtin_manage_case(void) {
-    /* Called directly within selftest's own built-in task context. */
+    /* Called directly within selftest's own built-in process context. */
     const char *current_ssid = config__get_wifi_ap_ssid();
     const char *current_password = config__get_wifi_ap_password();
     const bruce_config_startup_apps_t *current_apps = config__get_startup_apps();
@@ -263,12 +263,12 @@ bool selftest__run_config_builtin_manage_case(void) {
                           strcmp(apps->items[0], "clock") == 0 && strcmp(apps->items[1], "webui") == 0 &&
                            strcmp(apps->items[2], "settings") == 0;
 
-    const bruce_config_hotkey_t test_hotkeys[] = {{"ctrl + x", "task switch next"}};
+    const bruce_config_hotkey_t test_hotkeys[] = {{"ctrl + x", "process switch next"}};
     bruce_result_t set_hotkeys = config__set_hotkeys(test_hotkeys, 1);
     const bruce_config_hotkeys_t *hotkeys = config__get_hotkeys();
     bool hotkey_values = set_hotkeys == BRUCE_OK && hotkeys != NULL && hotkeys->count == 1 &&
                          strcmp(hotkeys->items[0].key, "ctrl + x") == 0 &&
-                         strcmp(hotkeys->items[0].action, "task switch next") == 0;
+                         strcmp(hotkeys->items[0].action, "process switch next") == 0;
 
     char *json = NULL;
     size_t json_size = 0;

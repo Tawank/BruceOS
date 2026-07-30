@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 #include "core_sdk/result.h"
-#include "core_sdk/task.h"
+#include "core_sdk/process.h"
 
 #define BRUCE_TCP_HOST_MAX 64
 
@@ -13,8 +13,8 @@ typedef struct {
     uint16_t port;
 } bruce_tcp_endpoint_t;
 
-/* TCP handles are owned by the calling task, require the `wifi` permission,
- * and are closed automatically when that task exits. A zero timeout polls.
+/* TCP handles are owned by the calling process, require the `wifi` permission,
+ * and are closed automatically when that process exits. A zero timeout polls.
  * TCP EOF is BRUCE_OK with *out_size == 0. */
 bruce_result_t tcp__connect(const char *host, uint16_t port, uint32_t timeout_ms, bruce_tcp_id_t *out_socket);
 bruce_result_t tcp__listen(uint16_t port, bruce_tcp_id_t *out_listener);

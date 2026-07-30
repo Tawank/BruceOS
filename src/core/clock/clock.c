@@ -3,7 +3,7 @@
 #include "core_sdk/clock.h"
 #include "core_sdk/config.h"
 #include "core_sdk/permission.h"
-#include "core_sdk/task.h"
+#include "core_sdk/runtime.h"
 #include "core_sdk/wifi.h"
 #include "core/wifi/wifi_common.h"
 

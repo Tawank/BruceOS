@@ -8,7 +8,8 @@
 #include "core_sdk/dialog.h"
 #include "core_sdk/result.h"
 #include "core_sdk/stdio.h"
-#include "core_sdk/task.h"
+#include "core_sdk/process.h"
+#include "core_sdk/runtime.h"
 
 #define BLUETOOTH_HID_APP__MAX_RESULTS 24
 
@@ -41,11 +42,11 @@ static const char *bluetooth_hid_app__usage_name(bluetooth_hid__usage_t usage) {
 }
 
 static int bluetooth_hid_app__stay_active(void) {
-    bruce_task_snapshot_t snapshot;
-    bruce_result_t status = task__snapshot(task__current_id(), &snapshot);
+    bruce_process_snapshot_t snapshot;
+    bruce_result_t status = process__snapshot(process__current_id(), &snapshot);
     if (status != BRUCE_OK) return status;
-    if (snapshot.state != BRUCE_TASK_BACKGROUND) {
-        bruce_result_t background = task__to_background();
+    if (snapshot.state != BRUCE_PROCESS_BACKGROUND) {
+        bruce_result_t background = process__to_background();
         if (background != BRUCE_OK) return background;
     }
     while (bluetooth_hid__is_connected()) {
@@ -158,7 +159,7 @@ static int bluetooth_hid_app__gui(void) {
 int bluetooth_hid_app_main(int argc, char **argv) {
     if (app_runner__args_have_gui(argc, argv)) {
         if (!app_runner__args_have_background(argc, argv)) {
-            bruce_result_t foreground = task__to_foreground();
+            bruce_result_t foreground = process__to_foreground();
             if (foreground != BRUCE_OK) return foreground;
         }
         return bluetooth_hid_app__gui();

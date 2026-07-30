@@ -6,8 +6,9 @@
 #include "core/app_runner/app_runner.h"
 #include "core/config/config.h"
 #include "core/input/input.h"
+#include "core/storage/storage.h"
 #include "core/stdio/stdio.h"
-#include "core/task/task.h"
+#include "core/process/process.h"
 #include "freertos/idf_additions.h"
 
 #define MAIN_LAUNCHER_CHECK_INTERVAL_MS 1000
@@ -50,6 +51,6 @@ void app_main(void) {
     main__launch_launcher();
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(MAIN_LAUNCHER_CHECK_INTERVAL_MS));
-        if (ui_ok && task_registry__foreground_id() == BRUCE_TASK_ID_INVALID) main__launch_launcher();
+        if (ui_ok && process_registry__foreground_id() == BRUCE_PROCESS_ID_INVALID) main__launch_launcher();
     }
 }

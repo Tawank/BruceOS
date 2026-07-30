@@ -58,7 +58,7 @@ const uint8_t *display_internal__font_glyph(char c) {
     return s_font_5x7[(int)c - DISPLAY__FONT_FIRST];
 }
 
-static void display__draw_char(display__task_context_t *context, int16_t x, int16_t y, char c) {
+static void display__draw_char(display__process_context_t *context, int16_t x, int16_t y, char c) {
     const uint8_t *glyph = display_internal__font_glyph(c);
     if (glyph == NULL) { return; }
     for (int16_t col = 0; col < DISPLAY__FONT_WIDTH; ++col) {
@@ -92,7 +92,7 @@ static void display__draw_char(display__task_context_t *context, int16_t x, int1
 }
 
 bruce_result_t display__set_text_color(bruce_display_color_t color) {
-    display__task_context_t *context;
+    display__process_context_t *context;
     bruce_result_t result = display_internal__begin_draw(&context);
     if (result != BRUCE_OK) { return result; }
     context->text_color = color;
@@ -101,7 +101,7 @@ bruce_result_t display__set_text_color(bruce_display_color_t color) {
 }
 
 bruce_result_t display__set_text_bg_color(uint32_t color) {
-    display__task_context_t *context;
+    display__process_context_t *context;
     bruce_result_t result = display_internal__begin_draw(&context);
     if (result != BRUCE_OK) { return result; }
     context->text_bg_transparent = color >= 0x10000;
@@ -111,7 +111,7 @@ bruce_result_t display__set_text_bg_color(uint32_t color) {
 }
 
 bruce_result_t display__set_text_size(uint8_t size) {
-    display__task_context_t *context;
+    display__process_context_t *context;
     bruce_result_t result = display_internal__begin_draw(&context);
     if (result != BRUCE_OK) { return result; }
     context->text_size = size < 1 ? 1 : (size > 8 ? 8 : size);
@@ -120,7 +120,7 @@ bruce_result_t display__set_text_size(uint8_t size) {
 }
 
 bruce_result_t display__set_cursor(int16_t x, int16_t y) {
-    display__task_context_t *context;
+    display__process_context_t *context;
     bruce_result_t result = display_internal__begin_draw(&context);
     if (result != BRUCE_OK) { return result; }
     context->cursor_x = x;
@@ -131,7 +131,7 @@ bruce_result_t display__set_cursor(int16_t x, int16_t y) {
 
 bruce_result_t display__get_cursor(int16_t *x, int16_t *y) {
     if (x == NULL || y == NULL) { return BRUCE_ERR_INVALID_ARGUMENT; }
-    display__task_context_t *context;
+    display__process_context_t *context;
     bruce_result_t result = display_internal__begin_draw(&context);
     if (result != BRUCE_OK) { return result; }
     *x = context->cursor_x;
@@ -142,7 +142,7 @@ bruce_result_t display__get_cursor(int16_t *x, int16_t *y) {
 
 bruce_result_t display__print(const char *text) {
     if (text == NULL) { return BRUCE_ERR_INVALID_ARGUMENT; }
-    display__task_context_t *context;
+    display__process_context_t *context;
     bruce_result_t result = display_internal__begin_draw(&context);
     if (result != BRUCE_OK) { return result; }
     for (const char *p = text; *p != '\0'; ++p) {

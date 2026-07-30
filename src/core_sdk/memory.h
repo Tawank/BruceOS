@@ -14,16 +14,16 @@ typedef struct {
 } bruce_memory_stats_t;
 
 /*
- * Task-owned tracked heap allocator.
+ * Process-owned tracked heap allocator.
  *
  * ELF apps never receive libc malloc/free (those imports are rejected by the
  * loader); JS and built-in code should also prefer this allocator so memory
- * is accounted against the owning task and released automatically if the
- * task exits or is killed without freeing it first.
+ * is accounted against the owning process and released automatically if the
+ * process exits or is killed without freeing it first.
  *
- * memory__malloc() must be called from within a Core-managed task (i.e. a
- * task started by task_registry__create()/AppRunner); calling it with no
- * current task returns NULL, the same result as an allocation failure.
+ * memory__malloc() must be called from within a Core-managed process (i.e. a
+ * process started by process_registry__create()/AppRunner); calling it with no
+ * current process returns NULL, the same result as an allocation failure.
  */
 void *memory__malloc(size_t size);
 
@@ -31,7 +31,7 @@ void *memory__malloc(size_t size);
  * when either argument is zero or their product overflows size_t. */
 void *memory__calloc(size_t count, size_t size);
 
-/* Resizes a tracked allocation while preserving its task ownership. The
+/* Resizes a tracked allocation while preserving its process ownership. The
  * libc realloc rules apply for NULL ptr and zero size. */
 void *memory__realloc(void *ptr, size_t size);
 

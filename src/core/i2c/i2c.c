@@ -2,7 +2,7 @@
 
 #include <string.h>
 
-#include "core/task/task.h"
+#include "core/process/process.h"
 #include "core_sdk/i2c.h"
 #include "core_sdk/permission.h"
 
@@ -26,7 +26,7 @@ typedef struct {
 typedef struct {
     bool in_use;
     bruce_i2c_id_t id;
-    bruce_task_id_t owner;
+    bruce_process_id_t owner;
     bruce_resource_id_t resource_id;
     int port;
     uint32_t clock_hz;
@@ -88,7 +88,7 @@ static void i2c__cleanup(void *context) {
 bruce_result_t i2c__open(const bruce_i2c_bus_config_t *config, bruce_i2c_id_t *out_bus) {
     bruce_result_t permission = permission__check(BRUCE_PERMISSION_GPIO);
     if (permission != BRUCE_OK) return permission;
-    bruce_task_id_t owner = task__current_id();
+    bruce_process_id_t owner = process__current_id();
     if (out_bus != NULL) *out_bus = BRUCE_I2C_ID_INVALID;
     if (config == NULL || out_bus == NULL ||
         (config->port != BRUCE_I2C_PORT_AUTO && (config->port < 0 || config->port >= SOC_I2C_NUM)) ||
@@ -166,7 +166,7 @@ bruce_result_t i2c__open(const bruce_i2c_bus_config_t *config, bruce_i2c_id_t *o
     s_slots[slot_index].clock_hz = config->clock_hz;
     i2c__unlock();
 
-    bruce_resource_id_t resource = task_registry__resource_register(i2c__cleanup, &s_slots[slot_index]);
+    bruce_resource_id_t resource = process_registry__resource_register(i2c__cleanup, &s_slots[slot_index]);
     if (resource == BRUCE_RESOURCE_ID_INVALID) {
         i2c__cleanup(&s_slots[slot_index]);
         return BRUCE_ERR_RESOURCE_LIMIT;
@@ -184,7 +184,7 @@ bruce_result_t i2c__open(const bruce_i2c_bus_config_t *config, bruce_i2c_id_t *o
 }
 
 static bruce_result_t i2c__device_locked(
-    bruce_i2c_id_t id, bruce_task_id_t owner, uint8_t address, i2c_master_dev_handle_t *out_device
+    bruce_i2c_id_t id, bruce_process_id_t owner, uint8_t address, i2c_master_dev_handle_t *out_device
 ) {
     if (address < 0x08 || address > 0x77) return BRUCE_ERR_INVALID_ARGUMENT;
     int index = i2c__find_locked(id);
@@ -206,7 +206,7 @@ bruce_result_t i2c__probe(bruce_i2c_id_t bus_id, uint8_t address, uint32_t timeo
     if (permission != BRUCE_OK) return permission;
     if (out_present == NULL || address < 0x08 || address > 0x77) return BRUCE_ERR_INVALID_ARGUMENT;
     *out_present = false;
-    bruce_task_id_t owner = task__current_id();
+    bruce_process_id_t owner = process__current_id();
     i2c__lock();
     int index = i2c__find_locked(bus_id);
     if (index < 0 || s_slots[index].owner != owner) {
@@ -233,7 +233,7 @@ static bruce_result_t i2c__transaction(
         (write_size == 0 && read_size == 0)) {
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
-    bruce_task_id_t owner = task__current_id();
+    bruce_process_id_t owner = process__current_id();
     i2c__lock();
     i2c_master_dev_handle_t device = NULL;
     bruce_result_t result = i2c__device_locked(bus, owner, address, &device);
@@ -281,7 +281,7 @@ bruce_result_t i2c__write_read(
 bruce_result_t i2c__close(bruce_i2c_id_t bus) {
     bruce_result_t permission = permission__check(BRUCE_PERMISSION_GPIO);
     if (permission != BRUCE_OK) return permission;
-    bruce_task_id_t owner = task__current_id();
+    bruce_process_id_t owner = process__current_id();
     i2c__lock();
     int index = i2c__find_locked(bus);
     if (index < 0 || s_slots[index].owner != owner) {
@@ -291,5 +291,5 @@ bruce_result_t i2c__close(bruce_i2c_id_t bus) {
     bruce_resource_id_t resource = s_slots[index].resource_id;
     i2c__release_locked(&s_slots[index]);
     i2c__unlock();
-    return task_registry__resource_release(resource);
+    return process_registry__resource_release(resource);
 }

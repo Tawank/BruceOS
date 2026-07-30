@@ -140,7 +140,7 @@ bruce_display_color_t display__color565(uint8_t r, uint8_t g, uint8_t b) {
 }
 
 bruce_result_t display__fill_screen(bruce_display_color_t color) {
-    display__task_context_t *context;
+    display__process_context_t *context;
     bruce_result_t result = display_internal__begin_draw(&context);
     if (result != BRUCE_OK) { return result; }
     display_internal__fill_rect(0, 0, context->viewport.width, context->viewport.height, color);
@@ -283,7 +283,7 @@ bruce_result_t display__draw_bitmap(
     int16_t x, int16_t y, const uint8_t *bitmap, int16_t w, int16_t h, bruce_display_color_t color
 ) {
     if (bitmap == NULL) { return BRUCE_ERR_INVALID_ARGUMENT; }
-    display__task_context_t *context;
+    display__process_context_t *context;
     bruce_result_t result = display_internal__begin_draw(&context);
     if (result != BRUCE_OK) { return result; }
     int16_t byte_width = (w + 7) / 8;

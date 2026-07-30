@@ -11,7 +11,7 @@
 #include "freertos/semphr.h"
 
 #include "core/storage/storage.h"
-#include "core/task/task.h"
+#include "core/process/process.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/result.h"
 
@@ -37,7 +37,7 @@ static const char *const s_permission_names[BRUCE_PERMISSION_COUNT] = {
     [BRUCE_PERMISSION_MICROPHONE] = "microphone",
     [BRUCE_PERMISSION_HID] = "hid",
     [BRUCE_PERMISSION_EXECUTE] = "execute",
-    [BRUCE_PERMISSION_TASK] = "task",
+    [BRUCE_PERMISSION_PROCESS] = "process",
     [BRUCE_PERMISSION_STORAGE] = "storage",
     [BRUCE_PERMISSION_CONFIG] = "config",
     [BRUCE_PERMISSION_SERIAL] = "serial",
@@ -212,8 +212,8 @@ bruce_result_t permission__check(bruce_permission_t permission) {
 
     bool built_in = false;
     char key[BRUCE_PERMISSION_FILE_NAME_MAX] = {0};
-    if (task_registry__current_context(&built_in, key, sizeof(key), NULL) != BRUCE_OK) {
-        /* No Core task context at all (e.g. called during boot): treat the
+    if (process_registry__current_context(&built_in, key, sizeof(key), NULL) != BRUCE_OK) {
+        /* No Core process context at all (e.g. called during boot): treat the
          * same as a built-in's implicit grant. */
         return BRUCE_OK;
     }

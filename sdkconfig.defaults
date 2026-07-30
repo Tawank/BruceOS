@@ -8,8 +8,8 @@ CONFIG_ESPTOOLPY_FLASHSIZE="8MB"
 # runtime storage uses that detected size for its LittleFS partition.
 CONFIG_ESPTOOLPY_HEADER_FLASHSIZE_UPDATE=y
 
-# Required by the Core task registry (src/core/task/task.c) for sampled
-# per-task CPU accounting via uxTaskGetSystemState()/TaskStatus_t.
+# Required by the Core process registry (src/core/process/process.c) for sampled
+# per-process CPU accounting via uxTaskGetSystemState()/TaskStatus_t.
 CONFIG_FREERTOS_USE_TRACE_FACILITY=y
 CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y
 

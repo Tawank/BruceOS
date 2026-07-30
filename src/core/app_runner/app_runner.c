@@ -2,13 +2,13 @@
 
 #include "core/app_runner/app_runner.h"
 #include "core/storage/storage.h"
-#include "core/task/task.h"
+#include "core/process/process.h"
 
 #include "core_sdk/app_runner.h"
 #include "core_sdk/loader.h"
 #include "core_sdk/permission.h"
 #include "core_sdk/result.h"
-#include "core_sdk/task.h"
+#include "core_sdk/process.h"
 
 #include "modules/bluetooth/bluetooth_app.h"
 #include "modules/bluetooth_hid/bluetooth_hid_app.h"
@@ -23,12 +23,13 @@
 #include "modules/loaders/js/js_loader_app.h"
 #include "modules/nrf24/nrf24_app.h"
 #include "modules/selftest/selftest.h"
+#include "modules/shell/shell_app.h"
 #include "modules/tcp/tcp_app.h"
 #include "modules/utils/help/help_app.h"
 #include "modules/utils/launcher/launcher_app.h"
 #include "modules/utils/notification/notification_app.h"
 #include "modules/utils/serial_commands/serial_commands_app.h"
-#include "modules/utils/task/task_app.h"
+#include "modules/utils/process/process_app.h"
 #include "modules/utils/terminal/terminal_app.h"
 #include "modules/webui/webui_app.h"
 #include "modules/wifi/wifi_app.h"
@@ -43,6 +44,7 @@
 #define APP_RUNNER_PATH_MAX 160
 #define APP_RUNNER_MAX_LOADERS 12
 #define APP_RUNNER_SELFTEST_STACK_BYTES 8192u
+#define APP_RUNNER_SHELL_STACK_BYTES 8192u
 #define APP_RUNNER_LOADER_EXTENSION_MAX 5
 
 typedef struct {
@@ -102,8 +104,10 @@ void app_runner__register_defaults(void) {
     (void)app_runner__register("selftest", selftest_app_main);
     s_apps[s_app_count - 1].stack_bytes = APP_RUNNER_SELFTEST_STACK_BYTES;
     (void)app_runner__register("terminal", terminal_app_main);
+    (void)app_runner__register("shell", shell_app_main);
+    s_apps[s_app_count - 1].stack_bytes = APP_RUNNER_SHELL_STACK_BYTES;
     (void)app_runner__register("serial_commands", serial_commands_app_main);
-    (void)app_runner__register("task", task_app_main);
+    (void)app_runner__register("process", process_app_main);
     (void)app_runner__register("help", help_app_main);
     (void)app_runner__register("pwd", bnu_pwd_app_main);
     (void)app_runner__register("cd", bnu_cd_app_main);
@@ -122,6 +126,7 @@ void app_runner__register_defaults(void) {
 
     (void)app_runner__register_loader(".elf", 10, elf_loader__run_path);
     (void)app_runner__register_loader(".js", 20, js_loader__run_path);
+    (void)app_runner__register_loader(".sh", 25, shell_loader__run_path);
     (void)app_runner__register_loader(".jpg", 30, image_loader__run_path);
     (void)app_runner__register_loader(".jpeg", 30, image_loader__run_path);
     (void)app_runner__register_loader(".png", 30, image_loader__run_path);
@@ -230,12 +235,12 @@ int app_runner__run_path(const char *path, const char *arg, bool in_background) 
     return loader->run_fn(normalized_path, arg, in_background);
 }
 
-int app_runner__spawn_loader_task(
+int app_runner__spawn_loader_process(
     const char *permission_key, bool gui_requested, bool in_background, uint32_t stack_size,
-    bruce_loader_task_entry_fn entry, void *context
+    bruce_loader_process_entry_fn entry, void *context
 ) {
     if (entry == NULL) { return BRUCE_ERR_INVALID_ARGUMENT; }
-    task_create_params_t params = {
+    process_create_params_t params = {
         .name = (permission_key != NULL && permission_key[0] != '\0') ? permission_key : "app",
         .entry = NULL,
         .argc = 0,
@@ -245,12 +250,12 @@ int app_runner__spawn_loader_task(
         .permission_key = permission_key,
         .start_in_background = in_background,
         .stack_bytes = stack_size,
-        .task_entry = entry,
-        .task_entry_context = context,
+        .process_entry = entry,
+        .process_entry_context = context,
     };
-    bruce_task_id_t task_id = BRUCE_TASK_ID_INVALID;
-    bruce_result_t create_result = task_registry__create(&params, &task_id);
-    return create_result == BRUCE_OK ? (int)task_id : (int)create_result;
+    bruce_process_id_t process_id = BRUCE_PROCESS_ID_INVALID;
+    bruce_result_t create_result = process_registry__create(&params, &process_id);
+    return create_result == BRUCE_OK ? (int)process_id : (int)create_result;
 }
 
 void app_runner__free_args(char **argv, int argc) {
@@ -362,8 +367,8 @@ bruce_result_t app_runner__parse_args(const char *arg, char ***out_argv, int *ou
     return BRUCE_OK;
 }
 
-/* AppRunner records this task context ahead of any launch-time permission
- * check (see migration_plan.md, "Dialog and task interaction"); the
+/* AppRunner records this process context ahead of any launch-time permission
+ * check (see migration_plan.md, "Dialog and process interaction"); the
  * "--gui" token is left in argv, not stripped. */
 bool app_runner__args_have_gui(int argc, char *const *argv) {
     for (int i = 0; i < argc; ++i) {
@@ -413,7 +418,7 @@ int app_runner__run(const char *app_name, const char *arg, bool in_background) {
         argv[0] = command_name;
         argc++;
 
-        task_create_params_t params = {
+        process_create_params_t params = {
             .name = app_name,
             .entry = entry,
             .argc = argc,
@@ -430,9 +435,9 @@ int app_runner__run(const char *app_name, const char *arg, bool in_background) {
                 break;
             }
         }
-        bruce_task_id_t task_id = BRUCE_TASK_ID_INVALID;
-        bruce_result_t create_result = task_registry__create(&params, &task_id);
-        result = create_result == BRUCE_OK ? (int)task_id : (int)create_result;
+        bruce_process_id_t process_id = BRUCE_PROCESS_ID_INVALID;
+        bruce_result_t create_result = process_registry__create(&params, &process_id);
+        result = create_result == BRUCE_OK ? (int)process_id : (int)create_result;
     } else {
         /* 2. every registered loader, tried in ascending priority order,
          * matching /bin/<app_name><extension>.  Core ships ELF at priority

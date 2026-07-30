@@ -6,8 +6,8 @@
 
 #include "esp_heap_caps.h"
 
-#include "core/task/task.h"
-#include "core_sdk/task.h"
+#include "core/process/process.h"
+#include "core_sdk/process.h"
 
 #define MEMORY__MAGIC 0x42524d31u /* "BRM1" */
 
@@ -28,7 +28,7 @@ void *memory__malloc(size_t size) {
     memory__header_t *header = malloc(sizeof(memory__header_t) + size);
     if (header == NULL) { return NULL; }
 
-    bruce_resource_id_t resource_id = task_registry__resource_register(memory__cleanup, header);
+    bruce_resource_id_t resource_id = process_registry__resource_register(memory__cleanup, header);
     if (resource_id == BRUCE_RESOURCE_ID_INVALID) {
         free(header);
         return NULL;
@@ -37,7 +37,7 @@ void *memory__malloc(size_t size) {
     header->magic = MEMORY__MAGIC;
     header->size = size;
     header->resource_id = resource_id;
-    task_registry__account_memory((int64_t)size);
+    process_registry__account_memory((int64_t)size);
     return (void *)(header + 1);
 }
 
@@ -63,12 +63,12 @@ void *memory__realloc(void *ptr, size_t size) {
     size_t old_size = header->size;
     bruce_resource_id_t resource_id = header->resource_id;
     memory__header_t *grown =
-        task_registry__resource_realloc(resource_id, header, sizeof(*grown) + size);
+        process_registry__resource_realloc(resource_id, header, sizeof(*grown) + size);
     if (grown == NULL) return NULL;
     grown->magic = MEMORY__MAGIC;
     grown->size = size;
     grown->resource_id = resource_id;
-    task_registry__account_memory((int64_t)size - (int64_t)old_size);
+    process_registry__account_memory((int64_t)size - (int64_t)old_size);
     return grown + 1;
 }
 
@@ -76,8 +76,8 @@ void memory__free(void *ptr) {
     if (ptr == NULL) { return; }
     memory__header_t *header = ((memory__header_t *)ptr) - 1;
     if (header->magic != MEMORY__MAGIC) { return; }
-    task_registry__resource_release(header->resource_id);
-    task_registry__account_memory(-(int64_t)header->size);
+    process_registry__resource_release(header->resource_id);
+    process_registry__account_memory(-(int64_t)header->size);
     header->magic = 0;
     free(header);
 }

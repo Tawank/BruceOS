@@ -27,7 +27,8 @@
 #include "nrf24_test.h"
 #include "permission_test.h"
 #include "storage_test.h"
-#include "task_test.h"
+#include "process_test.h"
+#include "shell_test.h"
 #include "terminal_test.h"
 #include "wifi_test.h"
 
@@ -51,11 +52,12 @@ int selftest_app_main(int argc, char **argv) {
         if (!passed) failures++;                                                                             \
     } while (0)
 
-    RUN_SELFTEST(selftest__run_task_normal_exit_case);
-    RUN_SELFTEST(selftest__run_task_killed_case);
+    RUN_SELFTEST(selftest__run_process_normal_exit_case);
+    RUN_SELFTEST(selftest__run_process_status_case);
+    RUN_SELFTEST(selftest__run_process_killed_case);
     RUN_SELFTEST(selftest__run_runtime_now_case);
-    RUN_SELFTEST(selftest__run_task_app_switch_case);
-    RUN_SELFTEST(selftest__run_task_app_kill_case);
+    RUN_SELFTEST(selftest__run_process_app_switch_case);
+    RUN_SELFTEST(selftest__run_process_app_kill_case);
     RUN_SELFTEST(selftest__run_device_state_case);
     RUN_SELFTEST(selftest__run_clock_case);
     RUN_SELFTEST(selftest__run_apprunner_registration_case);
@@ -88,6 +90,10 @@ int selftest_app_main(int argc, char **argv) {
     RUN_SELFTEST(selftest__run_terminal_path_case);
     RUN_SELFTEST(selftest__run_terminal_invalid_case);
     RUN_SELFTEST(selftest__run_terminal_stdio_case);
+    RUN_SELFTEST(selftest__run_terminal_stdio_cancel_case);
+    RUN_SELFTEST(selftest__run_shell_language_case);
+    RUN_SELFTEST(selftest__run_shell_script_case);
+    RUN_SELFTEST(selftest__run_shell_stdio_inheritance_case);
     RUN_SELFTEST(selftest__run_bnu_case);
     RUN_SELFTEST(selftest__run_launcher_apps_discovery_case);
     RUN_SELFTEST(selftest__run_wifi_permission_denied_case);

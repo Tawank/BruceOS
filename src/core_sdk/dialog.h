@@ -5,7 +5,7 @@
 #include <stdint.h>
 
 #include "core_sdk/result.h"
-#include "core_sdk/task.h"
+#include "core_sdk/process.h"
 
 typedef enum {
     BRUCE_DIALOG_INFO,
@@ -37,7 +37,7 @@ typedef struct {
 
 /* Dialog APIs return BRUCE_OK or BRUCE_ERR_CANCELLED, BRUCE_ERR_BUSY,
  * BRUCE_ERR_INVALID_ARGUMENT, or another BRUCE_ERR_* result.  Rendering is
- * chosen from the task's launch context, never by an app-specific renderer. */
+ * chosen from the process's launch context, never by an app-specific renderer. */
 bruce_result_t dialog__message(bruce_dialog_kind_t kind, const char *title, const char *message);
 /* `render_params` only affects GUI rendering. NULL uses the full display with
  * the standard title and footer bars. Padding limits the choice viewport, and

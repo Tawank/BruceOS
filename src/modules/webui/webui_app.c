@@ -15,7 +15,7 @@
 #include "core_sdk/result.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
-#include "core_sdk/task.h"
+#include "core_sdk/process.h"
 #include "core_sdk/wifi.h"
 #include "webfiles.h"
 
@@ -722,8 +722,8 @@ static bruce_result_t webui__command(bruce_http_server_request_t *request, void 
         while (isspace((unsigned char)*cursor)) cursor++;
         argument = cursor;
     } else argument = NULL;
-    int task = app_runner__run(name, argument, true);
-    if (task < 0) return webui__reply_error(request, (bruce_result_t)task);
+    int process = app_runner__run(name, argument, true);
+    if (process < 0) return webui__reply_error(request, (bruce_result_t)process);
     return webui__reply_text(request, 202, "Command queued");
 }
 
@@ -966,7 +966,7 @@ static void webui_app__print_help(void) { stdio__printf("Usage: webui [status|st
 int webui_app_main(int argc, char **argv) {
     if (app_runner__args_have_gui(argc, argv)) {
         if (!app_runner__args_have_background(argc, argv)) {
-            bruce_result_t foreground = task__to_foreground();
+            bruce_result_t foreground = process__to_foreground();
             if (foreground != BRUCE_OK) return foreground;
         }
         return webui_app__gui();

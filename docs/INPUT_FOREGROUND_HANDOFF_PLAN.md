@@ -12,24 +12,24 @@ blocks directly on one shared FreeRTOS queue:
 This sequence is racy:
 
 ```text
-Task A verifies that it is foreground.
-Task A blocks in xQueueReceive().
-Task B becomes foreground.
+Process A verifies that it is foreground.
+Process A blocks in xQueueReceive().
+Process B becomes foreground.
 An event is queued.
-FreeRTOS wakes Task A because it is an older queue waiter.
-Task A removes the event intended for Task B.
+FreeRTOS wakes Process A because it is an older queue waiter.
+Process A removes the event intended for Process B.
 ```
 
-Checking foreground again after dequeue does not fix the issue. The old task
+Checking foreground again after dequeue does not fix the issue. The old process
 has already removed the event. Requeueing is also unsafe because ordering and
 capacity may have changed.
 
-The compositor task switcher requires immediate, race-free physical-input
+The compositor process switcher requires immediate, race-free physical-input
 handoff.
 
 ## Required Semantics
 
-- Only the effective foreground task can remove physical input events.
+- Only the effective foreground process can remove physical input events.
 - Losing foreground revokes an already-blocked read immediately.
 - The revoked call returns `BRUCE_ERR_NOT_FOREGROUND`.
 - Regaining foreground does not revive an old read.
@@ -43,15 +43,15 @@ handoff.
 Add input-owned state protected by the input mutex:
 
 ```c
-static bruce_task_id_t s_foreground_task_id;
+static bruce_process_id_t s_foreground_process_id;
 static uint32_t s_foreground_epoch;
 ```
 
 Every effective owner change increments the epoch, including `A -> B -> A`.
-This prevents Task A's old blocked call from becoming valid merely because A
+This prevents Process A's old blocked call from becoming valid merely because A
 later becomes foreground again.
 
-Task transitions update input ownership through a private Core hook. The task
+Process transitions update input ownership through a private Core hook. The process
 registry remains authoritative for foreground policy; input mirrors only the
 effective owner and epoch needed to linearize queue removal.
 
@@ -59,7 +59,7 @@ effective owner and epoch needed to linearize queue removal.
 
 Keep the single global event queue, but never perform a blocking receive on it.
 
-Add a dedicated per-task input wake bit to the existing task event groups:
+Add a dedicated per-process input wake bit to the existing process event groups:
 
 ```c
 #define TASK__EVT_INPUT_WAKE (1u << 2)
@@ -70,7 +70,7 @@ different semantics.
 
 `input__read()` should use this loop:
 
-1. Resolve the calling task ID.
+1. Resolve the calling process ID.
 2. Capture its current foreground epoch.
 3. Clear the caller's input-wake bit.
 4. Lock the input mutex.
@@ -108,10 +108,10 @@ Apply this to physical polling and `input__inject()`.
 which temporarily drains and reconstructs the queue at
 `src/core/input/input.c:744-782`. Injection must use the same mutex.
 
-`input__push_event_locked()` currently calls `task__current_id()` while input
-is locked. Remove that lock inversion by resolving or passing the source task
+`input__push_event_locked()` currently calls `process__current_id()` while input
+is locked. Remove that lock inversion by resolving or passing the source process
 ID before taking the input mutex. Physical polling should use
-`BRUCE_TASK_ID_INVALID` as its source task.
+`BRUCE_PROCESS_ID_INVALID` as its source process.
 
 ## Nonblocking Input APIs
 
@@ -132,31 +132,31 @@ change events. It must propagate foreground revocation immediately.
 
 The existing stack implementation has issues that affect reliable handoff:
 
-- It removes only the top task at `src/core/task/task.c:136-152`.
-- A buried task can exit and leave a stale ID.
-- Foregrounding a buried task can duplicate its ID.
-- The stack has depth eight while the registry has sixteen task records.
-- Overflow silently marks a task foreground without placing it on the stack.
+- It removes only the top process at `src/core/process/process.c:136-152`.
+- A buried process can exit and leave a stale ID.
+- Foregrounding a buried process can duplicate its ID.
+- The stack has depth eight while the registry has sixteen process records.
+- Overflow silently marks a process foreground without placing it on the stack.
 - Paused or stopping records can interfere with restoration.
 
-Replace scattered state assignment with one task-locked recomputation path.
+Replace scattered state assignment with one process-locked recomputation path.
 
 Required invariants:
 
-1. A task ID appears at most once in the stack.
-2. Every stack ID refers to a live task.
+1. A process ID appears at most once in the stack.
+2. Every stack ID refers to a live process.
 3. Stack capacity is at least `TASK__MAX_RECORDS`.
 4. The effective foreground is the highest live, unpaused, non-stopping entry.
-5. Exactly that record has `BRUCE_TASK_FOREGROUND`.
+5. Exactly that record has `BRUCE_PROCESS_FOREGROUND`.
 6. Input's mirrored foreground ID equals the effective foreground.
-7. Removing a task works from any stack position.
+7. Removing a process works from any stack position.
 8. Every effective-owner change increments the input epoch.
 
 Use the common path for:
 
-- Initial foreground task start.
-- `task__foreground()`.
-- `task__to_background()`.
+- Initial foreground process start.
+- `process__foreground()`.
+- `process__to_background()`.
 - Pause and resume.
 - Stop.
 - Normal exit.
@@ -166,7 +166,7 @@ Pause may preserve stack position while making the record temporarily
 ineligible. Resume recomputes the effective owner instead of blindly restoring
 `state_before_pause`.
 
-Stop should immediately make the record ineligible so an underlying task can
+Stop should immediately make the record ineligible so an underlying process can
 receive input before cooperative teardown finishes.
 
 ## Locking
@@ -174,24 +174,24 @@ receive input before cooperative teardown finishes.
 The required lock order is:
 
 ```text
-task registry lock -> input mutex
+process registry lock -> input mutex
 ```
 
-Never acquire the task registry lock while holding the input mutex.
+Never acquire the process registry lock while holding the input mutex.
 
 Never block on a queue, event group, or semaphore while holding either lock.
 
-Private task helpers should clear, wait for, and signal input-wake bits without
-exposing FreeRTOS handles through `core_sdk/task.h`.
+Private process helpers should clear, wait for, and signal input-wake bits without
+exposing FreeRTOS handles through `core_sdk/process.h`.
 
-Force kill needs special care because deleting a task while it owns a Core
+Force kill needs special care because deleting a process while it owns a Core
 mutex can strand that mutex. The implementation must establish a safe input
 barrier or otherwise prove that the target cannot own/re-enter the input mutex
 when it is deleted.
 
 ## Deinitialization
 
-`input__deinit()` currently cannot wake a task blocked directly in the queue.
+`input__deinit()` currently cannot wake a process blocked directly in the queue.
 After the wait architecture changes, deinitialization must:
 
 1. Mark input uninitialized under the input mutex.
@@ -219,19 +219,19 @@ contract.
 
 - `src/core/input/input.c`
 - `src/core/input/input.h`
-- `src/core/task/task.c`
-- `src/core/task/task.h`
+- `src/core/process/process.c`
+- `src/core/process/process.h`
 - `src/core_sdk/input.h`
 - `src/modules/selftest/input_test.c`
 - `src/modules/selftest/input_test.h`
-- `src/modules/selftest/task_test.c`
+- `src/modules/selftest/process_test.c`
 - `ARCHITECTURE.md`
 
 ## Required Tests
 
 ### Blocking Handoff
 
-Task A blocks indefinitely while foreground. Task B becomes foreground and
+Process A blocks indefinitely while foreground. Process B becomes foreground and
 blocks. Inject a unique event. Assert that A returns
 `BRUCE_ERR_NOT_FOREGROUND` and B receives the event.
 
@@ -242,12 +242,12 @@ call is revoked and a new call receives the event.
 
 ### Background
 
-Background a blocked foreground task. Assert that the restored task receives
+Background a blocked foreground process. Assert that the restored process receives
 the next event.
 
 ### Pause and Resume
 
-Pause the foreground owner, deliver input to the restored task, resume the old
+Pause the foreground owner, deliver input to the restored process, resume the old
 owner, and verify that only a fresh read under the new epoch works.
 
 ### Stop and Kill
@@ -278,6 +278,6 @@ Assert no duplication, stale-owner removal, ordering corruption, or deadlock.
 - Pause and stop immediately relinquish input ownership.
 - Exit and kill remove stack entries from any position.
 - Injection cannot corrupt `input__check()` queue reconstruction.
-- No input path takes task lock while holding input lock.
+- No input path takes process lock while holding input lock.
 - No blocking wait occurs while holding a Core state lock.
 - Force kill cannot strand the input mutex.

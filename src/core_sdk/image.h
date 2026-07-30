@@ -34,7 +34,7 @@ bruce_result_t image__draw_memory(
     const void *data, size_t size, const bruce_image_draw_options_t *options, bruce_image_info_t *out_info
 );
 
-/* Reads and draws an image through task-owned Core storage. */
+/* Reads and draws an image through process-owned Core storage. */
 bruce_result_t
 image__draw_path(const char *path, const bruce_image_draw_options_t *options, bruce_image_info_t *out_info);
 

@@ -13,21 +13,22 @@
 #include "core_sdk/result.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
-#include "core_sdk/task.h"
+#include "core_sdk/process.h"
+#include "core_sdk/runtime.h"
 
 #define FILEMANAGER_PREVIEW_MAX 4096
 
 static bool filemanager__resume_after_handoff(void) {
-    bruce_task_snapshot_t snapshot;
-    bruce_task_id_t self = task__current_id();
-    if (self == BRUCE_TASK_ID_INVALID || task__snapshot(self, &snapshot) != BRUCE_OK ||
-        snapshot.state != BRUCE_TASK_BACKGROUND) {
+    bruce_process_snapshot_t snapshot;
+    bruce_process_id_t self = process__current_id();
+    if (self == BRUCE_PROCESS_ID_INVALID || process__snapshot(self, &snapshot) != BRUCE_OK ||
+        snapshot.state != BRUCE_PROCESS_BACKGROUND) {
         return false;
     }
     do {
-        if (runtime__delay(20) != BRUCE_OK || task__snapshot(self, &snapshot) != BRUCE_OK) return false;
-    } while (snapshot.state == BRUCE_TASK_BACKGROUND);
-    return snapshot.state == BRUCE_TASK_FOREGROUND;
+        if (runtime__delay(20) != BRUCE_OK || process__snapshot(self, &snapshot) != BRUCE_OK) return false;
+    } while (snapshot.state == BRUCE_PROCESS_BACKGROUND);
+    return snapshot.state == BRUCE_PROCESS_FOREGROUND;
 }
 
 static const char *filemanager__basename(const char *path) {
@@ -71,9 +72,9 @@ static bruce_result_t filemanager__read_preview(const char *path, char **out_tex
 
 static bruce_result_t filemanager__view_file(const char *path, bool gui) {
     if (image__is_supported_path(path)) {
-        int task = app_runner__run_path(path, NULL, true);
-        if (task <= 0) return (bruce_result_t)task;
-        return task__wait((bruce_task_id_t)task, UINT32_MAX);
+        int process = app_runner__run_path(path, NULL, true);
+        if (process <= 0) return (bruce_result_t)process;
+        return process__wait((bruce_process_id_t)process, UINT32_MAX);
     }
 
     char *text = NULL;
@@ -140,7 +141,7 @@ static void filemanager__show_error(const char *action, bruce_result_t result) {
 int filemanager_app_main(int argc, char **argv) {
     bool gui = app_runner__args_have_gui(argc, argv);
     if (gui && !app_runner__args_have_background(argc, argv)) {
-        bruce_result_t foreground = task__to_foreground();
+        bruce_result_t foreground = process__to_foreground();
         if (foreground != BRUCE_OK) return foreground;
     }
     const bruce_dialog_choice_t actions[] = {
@@ -182,8 +183,8 @@ int filemanager_app_main(int argc, char **argv) {
         } else if (selected == 1) {
             result = filemanager__show_info(path);
         } else {
-            int task = app_runner__run_path(path, gui ? "--gui" : "", true);
-            result = task > 0 ? BRUCE_OK : (bruce_result_t)task;
+            int process = app_runner__run_path(path, gui ? "--gui" : "", true);
+            result = process > 0 ? BRUCE_OK : (bruce_result_t)process;
         }
         if (result != BRUCE_OK) filemanager__show_error(actions[selected].label, result);
         (void)input__flush();

@@ -31,7 +31,7 @@ typedef enum {
     BRUCE_PERMISSION_MICROPHONE,
     BRUCE_PERMISSION_HID,
     BRUCE_PERMISSION_EXECUTE,
-    BRUCE_PERMISSION_TASK,
+    BRUCE_PERMISSION_PROCESS,
     BRUCE_PERMISSION_STORAGE,
     BRUCE_PERMISSION_CONFIG,
     BRUCE_PERMISSION_SERIAL,
@@ -46,16 +46,16 @@ const char *permission__name(bruce_permission_t permission);
  * (leaving *out_permission untouched) for an unknown name. */
 bool permission__from_name(const char *name, bruce_permission_t *out_permission);
 
-/* Checks whether the *calling* task currently holds `permission`. This is
+/* Checks whether the *calling* process currently holds `permission`. This is
  * the function every protected Core API (wifi__*, http__*, storage__*,
- * config__*, task__* control of another task, app_runner__run, ...) calls
+ * config__*, process__* control of another process, app_runner__run, ...) calls
  * internally; app/module code never needs to call it directly.
  *
- * A built-in task always returns BRUCE_OK. An external (ELF/JS) task with an
+ * A built-in process always returns BRUCE_OK. An external (ELF/JS) process with an
  * existing saved decision returns immediately (BRUCE_OK or
  * BRUCE_ERR_PERMISSION) with no prompt. With no saved decision yet, this is
  * the dynamic first-use request: it shows an allow/deny dialog__choice(),
- * persists the answer keyed by the task's permission file name, and returns
+ * persists the answer keyed by the process's permission file name, and returns
  * accordingly. If the dialog itself fails (e.g. is cancelled) the decision
  * is left unresolved (not persisted) and BRUCE_ERR_PERMISSION is returned,
  * so a later call may prompt again. Returns BRUCE_ERR_INVALID_ARGUMENT for
@@ -67,7 +67,7 @@ bruce_result_t permission__check(bruce_permission_t permission);
  * default) and persists the user's choice; already-known permissions are
  * left untouched and not re-prompted. Intended for the ELF/JS loaders
  * (Stage 3) to call with the manifest's declared permission list before a
- * new task's first instruction runs. Returns BRUCE_OK once every name has
+ * new process's first instruction runs. Returns BRUCE_OK once every name has
  * been processed (regardless of individual allow/deny outcomes) or
  * BRUCE_ERR_INVALID_ARGUMENT for an invalid `file_name` or an unknown
  * permission name. */

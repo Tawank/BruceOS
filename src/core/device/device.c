@@ -3,7 +3,7 @@
 #include "core_sdk/clock.h"
 #include "core_sdk/device.h"
 #include "core_sdk/permission.h"
-#include "core_sdk/task.h" // IWYU pragma: keep
+#include "core_sdk/runtime.h" // IWYU pragma: keep
 
 #include <stdbool.h>
 
@@ -43,7 +43,7 @@ static void device__restart_task(void *context) {
 }
 
 bruce_result_t device__restart(uint32_t delay_ms) {
-    bruce_result_t permission = permission__check(BRUCE_PERMISSION_TASK);
+    bruce_result_t permission = permission__check(BRUCE_PERMISSION_PROCESS);
     if (permission != BRUCE_OK) return permission;
     return xTaskCreate(device__restart_task, "device_restart", 2048, (void *)(uintptr_t)delay_ms, 5, NULL) == pdPASS
                ? BRUCE_OK

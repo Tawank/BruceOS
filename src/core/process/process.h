@@ -1,0 +1,121 @@
+#pragma once
+
+/* Core-internal process/runtime registry.  Built-in modules and apps must never
+ * include this header; they use only "core_sdk/process.h" (and, for tracked
+ * memory, "core_sdk/memory.h").  This header is for AppRunner and other Core
+ * services (memory, storage, dialog, ...) that need to create processes or
+ * register resources for automatic cleanup. */
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#include "core_sdk/app_runner.h"
+#include "core_sdk/result.h"
+#include "core_sdk/process.h"
+
+/* Cleanup callback invoked automatically, in reverse-registration order, when
+ * the owning process exits or is killed without releasing the resource itself.
+ * It must not block and should not itself call process_registry__* for a
+ * *different* process. */
+typedef void (*bruce_process_resource_cleanup_t)(void *context);
+
+typedef struct {
+    /* Display/log name; copied, may be NULL (-> "app"). */
+    const char *name;
+    /* Entry point matching the built-in app_main signature. Exactly one of
+     * `entry` or `process_entry` below must be non-NULL. */
+    bruce_app_entry_t entry;
+    int argc;
+    /* Shallow array of pointers; the strings and the array are deep-copied
+     * for the process's lifetime, so the caller may free its own copy right
+     * after process_registry__create() returns. */
+    char **argv;
+    bool built_in;
+    /* Recorded on the process record immediately, before the process's first
+     * instruction runs (this is the "--gui process context" AppRunner records
+     * ahead of any launch-time permission check). */
+    bool gui_requested;
+    /* Filename with extension (e.g. "game.elf"), used as the
+     * permission__* lookup key for this process. Ignored for built_in processes,
+     * which are always granted every permission regardless of this field.
+     * NULL or empty means "no permission key": permission__check() denies
+     * every permission for such an external process. The ELF/JS loaders
+     * (Stage 3 / A6-A7) are expected to pass the launched file's basename
+     * here. */
+    const char *permission_key;
+    /* The new process is BRUCE_PROCESS_STARTING until it actually begins running;
+     * at that point (still before its entry point is called) it transitions
+     * itself: false => pushed onto the foreground stack as
+     * BRUCE_PROCESS_FOREGROUND, displacing the current top; true => becomes
+     * BRUCE_PROCESS_BACKGROUND without touching the stack. */
+    bool start_in_background;
+    /* 0 selects a Core default (4096 bytes). */
+    uint32_t stack_bytes;
+    /* Alternative entry point used by loader modules via
+     * app_runner__spawn_loader_process() (see core_sdk/loader.h) instead of
+     * `entry` above: called as process_entry(process_entry_context) on the new
+     * process's own stack, with no argc/argv handling of its own - a loader
+     * hands its own decoded image/context through process_entry_context.
+     * Exactly one of `entry` or `process_entry` must be non-NULL. */
+    void (*process_entry)(void *context);
+    void *process_entry_context;
+} process_create_params_t;
+
+/* Creates and starts a new Core-tracked process.  Exactly one of
+ * params->entry or params->process_entry must be set (see process_create_params_t).
+ * On success returns BRUCE_OK and the new process's id via *out_process_id.  On
+ * failure returns BRUCE_ERR_INVALID_ARGUMENT, BRUCE_ERR_RESOURCE_LIMIT (process
+ * table full), or BRUCE_ERR_NO_MEMORY (FreeRTOS task creation failed). */
+bruce_result_t process_registry__create(const process_create_params_t *params, bruce_process_id_t *out_process_id);
+
+/* Registers a cleanup callback against the *calling* process.  Returns
+ * BRUCE_RESOURCE_ID_INVALID if there is no current Core process or the process's
+ * resource table is full. */
+bruce_resource_id_t process_registry__resource_register(bruce_process_resource_cleanup_t cleanup, void *context);
+
+/* Replaces the cleanup context for a resource owned by the calling process. */
+bruce_result_t process_registry__resource_update(bruce_resource_id_t resource_id, void *context);
+
+/* Reallocates a cleanup context while holding the registry lock so process
+ * teardown cannot observe a pointer that libc has moved. */
+void *process_registry__resource_realloc(bruce_resource_id_t resource_id, void *context, size_t allocation_size);
+
+/* Releases a resource early because the owner already cleaned it up itself
+ * (e.g. an explicit storage__close()); this does NOT invoke the cleanup
+ * callback again.  `resource_id` must belong to the calling process.  Returns
+ * BRUCE_ERR_NOT_FOUND if it does not. */
+bruce_result_t process_registry__resource_release(bruce_resource_id_t resource_id);
+
+/* Adds (positive) or removes (negative) bytes from the calling process's
+ * tracked-memory statistic.  A no-op if there is no current Core process. */
+void process_registry__account_memory(int64_t delta_bytes);
+
+/* Fills in permission-relevant context for the *calling* process: whether it is
+ * built_in, its permission_key (copied, NUL-terminated, truncated to fit;
+ * empty if unset), and whether it was launched with --gui. Any of the three
+ * output pointers may be NULL to skip that field. Returns BRUCE_ERR_NOT_FOUND
+ * if there is no current Core process (e.g. this runs on the boot/init process,
+ * before any process_registry__create() call). Used by permission__check() and
+ * the dialog__* renderer-selection logic; built-in modules and apps must
+ * never call this directly. */
+bruce_result_t process_registry__current_context(
+    bool *out_built_in, char *out_permission_key, size_t permission_key_size, bool *out_gui_requested
+);
+
+/* Input's per-process wake channel. These helpers never run while the input mutex
+ * is held except for the lock-free event-group wait itself. */
+bruce_result_t process_registry__input_wake_clear(bruce_process_id_t process_id);
+bruce_result_t process_registry__input_wake_wait(bruce_process_id_t process_id, uint32_t timeout_ms);
+void process_registry__input_wake(bruce_process_id_t process_id);
+
+/* Foregrounds the next background GUI process in registry order. Core services
+ * use this variant because they do not execute in an app permission context. */
+bruce_result_t process_registry__switch_next(void);
+bruce_result_t process_registry__switch_previous(void);
+/* Returns the current effective foreground process, or BRUCE_PROCESS_ID_INVALID when
+ * the foreground stack is empty. */
+bruce_process_id_t process_registry__foreground_id(void);
+
+bruce_result_t process_registry__set_child_stdio_session(uint32_t session);
+uint32_t process_registry__current_stdio_session(void);

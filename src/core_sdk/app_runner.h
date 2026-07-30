@@ -18,7 +18,7 @@ size_t app_runner__command_count(void);
 const char *app_runner__command_name(size_t index);
 
 /* Starts a named built-in or loader-registered application (see
- * core_sdk/loader.h).  On success this returns a positive bruce_task_id_t.
+ * core_sdk/loader.h).  On success this returns a positive bruce_process_id_t.
  * On failure it returns a negative BRUCE_ERR_* value (including
  * BRUCE_ERR_NOT_FOUND and BRUCE_ERR_BUSY). External callers require the
  * `execute` permission. `arg` is shell-style text. Registered built-ins use
@@ -46,8 +46,8 @@ void app_runner__free_args(char **argv, int argc);
 /* Returns true if any element of argv is exactly "--gui".  Shared by
  * app_runner__run()'s built-in path and by loader modules, which must parse
  * their own raw `arg` string (see app_runner__parse_args()) to determine
- * this for the task context they spawn (see migration_plan.md, "Dialog
- * and task interaction"). */
+ * this for the process context they spawn (see migration_plan.md, "Dialog
+ * and process interaction"). */
 bool app_runner__args_have_gui(int argc, char *const *argv);
 
 /* Returns true if any argv element is exactly "--bg". GUI applications use

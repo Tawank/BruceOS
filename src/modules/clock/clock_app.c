@@ -9,23 +9,24 @@
 #include "core_sdk/input.h"
 #include "core_sdk/result.h"
 #include "core_sdk/stdio.h"
-#include "core_sdk/task.h"
+#include "core_sdk/process.h"
+#include "core_sdk/runtime.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 static bool clock_app__resume_after_handoff(void) {
-    bruce_task_snapshot_t snapshot;
-    bruce_task_id_t self = task__current_id();
-    if (self == BRUCE_TASK_ID_INVALID || task__snapshot(self, &snapshot) != BRUCE_OK ||
-        snapshot.state != BRUCE_TASK_BACKGROUND) {
+    bruce_process_snapshot_t snapshot;
+    bruce_process_id_t self = process__current_id();
+    if (self == BRUCE_PROCESS_ID_INVALID || process__snapshot(self, &snapshot) != BRUCE_OK ||
+        snapshot.state != BRUCE_PROCESS_BACKGROUND) {
         return false;
     }
     do {
-        if (runtime__delay(20) != BRUCE_OK || task__snapshot(self, &snapshot) != BRUCE_OK) return false;
-    } while (snapshot.state == BRUCE_TASK_BACKGROUND);
-    return snapshot.state == BRUCE_TASK_FOREGROUND;
+        if (runtime__delay(20) != BRUCE_OK || process__snapshot(self, &snapshot) != BRUCE_OK) return false;
+    } while (snapshot.state == BRUCE_PROCESS_BACKGROUND);
+    return snapshot.state == BRUCE_PROCESS_FOREGROUND;
 }
 
 static void clock_app__format_time(const bruce_clock_datetime_t *now, char *out, size_t size) {
@@ -313,7 +314,7 @@ int clock_app_main(int argc, char **argv) {
     ArgParser *command = ap_get_cmd_parser(root);
     bool gui = ap_found(root, "gui") || (command != NULL && ap_found(command, "gui"));
     if (gui && !app_runner__args_have_background(argc, argv)) {
-        bruce_result_t foreground = task__to_foreground();
+        bruce_result_t foreground = process__to_foreground();
         if (foreground != BRUCE_OK) {
             ap_free(root);
             return foreground;

@@ -21,7 +21,8 @@ set(BRUCE_SELFTEST_SOURCES
     "modules/selftest/permission_test.c"
     "modules/selftest/selftest.c"
     "modules/selftest/storage_test.c"
-    "modules/selftest/task_test.c"
+    "modules/selftest/process_test.c"
+    "modules/selftest/shell_test.c"
     "modules/selftest/terminal_test.c"
     "modules/selftest/wifi_test.c")
 
@@ -55,7 +56,7 @@ idf_component_register(SRCS
                     "core/spi/spi.c"
                     "core/storage/storage.c"
                     "core/status_icon/status_icon.c"
-                    "core/task/task.c"
+                    "core/process/process.c"
                     "core/tcp/tcp.c"
                     "core/wifi/wifi_common.c"
                     "core/http_server/http_server.c"
@@ -81,14 +82,18 @@ idf_component_register(SRCS
                     "modules/loaders/js/js_loader_app.c"
                     "modules/loaders/js/runtime_js.c"
                     "modules/loaders/js/serial_js.c"
-                    "modules/loaders/js/wifi_js.c"
+                     "modules/loaders/js/wifi_js.c"
+                    "modules/shell/shell_app.c"
+                    "modules/shell/shell_parser.c"
+                    "modules/shell/shell_executor.c"
+                    "modules/shell/shell_builtins.c"
                     ${BRUCE_SELFTEST_SOURCES}
                     "modules/tcp/tcp_app.c"
                      "modules/utils/launcher/launcher_app.c"
                      "modules/utils/help/help_app.c"
                      "modules/utils/serial_commands/serial_commands_app.c"
                      "modules/utils/terminal/terminal_app.c"
-                     "modules/utils/task/task_app.c"
+                     "modules/utils/process/process_app.c"
                     "modules/utils/notification/notification_app.c"
                     "modules/ir/ir_app.c"
                     "modules/nrf24/nrf24_app.c"
@@ -238,17 +243,26 @@ target_include_directories(bruce_sdk_builtin_utils_terminal_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/utils/terminal")
 
-add_library(bruce_sdk_builtin_utils_task_check OBJECT
-            "modules/utils/task/task_app.c")
-target_include_directories(bruce_sdk_builtin_utils_task_check PRIVATE
+add_library(bruce_sdk_builtin_utils_process_check OBJECT
+            "modules/utils/process/process_app.c")
+target_include_directories(bruce_sdk_builtin_utils_process_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
-                           "${CMAKE_CURRENT_LIST_DIR}/modules/utils/task")
+                           "${CMAKE_CURRENT_LIST_DIR}/modules/utils/process")
 
 add_library(bruce_sdk_builtin_utils_serial_commands_check OBJECT
             "modules/utils/serial_commands/serial_commands_app.c")
 target_include_directories(bruce_sdk_builtin_utils_serial_commands_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/utils/serial_commands")
+
+add_library(bruce_sdk_builtin_shell_check OBJECT
+            "modules/shell/shell_app.c"
+            "modules/shell/shell_parser.c"
+            "modules/shell/shell_executor.c"
+            "modules/shell/shell_builtins.c")
+target_include_directories(bruce_sdk_builtin_shell_check PRIVATE
+                           "${CMAKE_CURRENT_LIST_DIR}"
+                           "${CMAKE_CURRENT_LIST_DIR}/modules/shell")
 
 add_library(bruce_sdk_builtin_notification_check OBJECT "modules/utils/notification/notification_app.c")
 target_include_directories(bruce_sdk_builtin_notification_check PRIVATE
@@ -305,8 +319,9 @@ set(BRUCE_ARGS_SDK_CHECK_TARGETS
     bruce_sdk_builtin_nrf24_check
     bruce_sdk_builtin_image_loader_check
     bruce_sdk_builtin_utils_help_check
-    bruce_sdk_builtin_utils_task_check
+    bruce_sdk_builtin_utils_process_check
     bruce_sdk_builtin_utils_terminal_check
+    bruce_sdk_builtin_shell_check
     bruce_sdk_builtin_notification_check
     bruce_sdk_builtin_tcp_check
     bruce_sdk_builtin_elf_loader_check

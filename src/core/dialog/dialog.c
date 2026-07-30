@@ -8,9 +8,10 @@
 #include "core_sdk/result.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
-#include "core_sdk/task.h"
+#include "core_sdk/process.h"
+#include "core_sdk/runtime.h"
 
-#include "core/task/task.h"
+#include "core/process/process.h"
 
 #include <ctype.h>
 #include <stdbool.h>
@@ -48,9 +49,9 @@ bool dialog__test_last_call_was_gui(void) { return s_last_call_was_gui; }
 /* Renderer selection                                                         */
 /* -------------------------------------------------------------------------- */
 
-static bool dialog__current_task_wants_gui(void) {
+static bool dialog__current_process_wants_gui(void) {
     bool gui_requested = false;
-    (void)task_registry__current_context(NULL, NULL, 0, &gui_requested);
+    (void)process_registry__current_context(NULL, NULL, 0, &gui_requested);
     return gui_requested;
 }
 
@@ -949,7 +950,7 @@ static bruce_result_t dialog__gui_pick_file(
 
 typedef struct {
     bool used;
-    bruce_task_id_t owner;
+    bruce_process_id_t owner;
     bruce_resource_id_t resource_id;
     char *title;
     char *text;
@@ -990,7 +991,7 @@ static void dialog__viewer_free(dialog__viewer_t *viewer) {
     viewer->title = NULL;
     viewer->text = NULL;
     viewer->used = false;
-    viewer->owner = BRUCE_TASK_ID_INVALID;
+    viewer->owner = BRUCE_PROCESS_ID_INVALID;
     viewer->resource_id = BRUCE_RESOURCE_ID_INVALID;
     viewer->scroll_y = 0;
 }
@@ -1072,7 +1073,7 @@ static bruce_result_t dialog__viewer_draw(dialog__viewer_t *viewer, bool gui) {
 /* -------------------------------------------------------------------------- */
 
 bruce_result_t dialog__message(bruce_dialog_kind_t kind, const char *title, const char *message) {
-    bool gui = dialog__current_task_wants_gui();
+    bool gui = dialog__current_process_wants_gui();
     s_last_call_was_gui = gui;
 
     if (gui) { return dialog__gui_message(kind, title, message); }
@@ -1084,7 +1085,7 @@ bruce_result_t dialog__choice(
     size_t *out_selected, const bruce_dialog_render_params_t *render_params
 ) {
     if (choices == NULL || choice_count == 0 || out_selected == NULL) { return BRUCE_ERR_INVALID_ARGUMENT; }
-    bool gui = dialog__current_task_wants_gui();
+    bool gui = dialog__current_process_wants_gui();
     s_last_call_was_gui = gui;
 
     if (gui && render_params != NULL &&
@@ -1110,7 +1111,7 @@ bruce_result_t dialog__pick_file(
 ) {
     if (out_path == NULL || out_path_size == 0) { return BRUCE_ERR_INVALID_ARGUMENT; }
 
-    bool gui = dialog__current_task_wants_gui();
+    bool gui = dialog__current_process_wants_gui();
     s_last_call_was_gui = gui;
 
     if (s_test_pick_file_provider != NULL) {
@@ -1127,7 +1128,7 @@ bruce_result_t dialog__text_input(
 ) {
     if (buffer == NULL || buffer_size == 0) { return BRUCE_ERR_INVALID_ARGUMENT; }
 
-    bool gui = dialog__current_task_wants_gui();
+    bool gui = dialog__current_process_wants_gui();
     s_last_call_was_gui = gui;
 
     if (s_test_input_provider != NULL) {
@@ -1147,7 +1148,7 @@ bruce_result_t dialog__hex_input(
 ) {
     if (buffer == NULL || buffer_size == 0) { return BRUCE_ERR_INVALID_ARGUMENT; }
 
-    bool gui = dialog__current_task_wants_gui();
+    bool gui = dialog__current_process_wants_gui();
     s_last_call_was_gui = gui;
 
     if (s_test_input_provider != NULL) {
@@ -1167,7 +1168,7 @@ bruce_result_t dialog__number_input(
 ) {
     if (buffer == NULL || buffer_size == 0) { return BRUCE_ERR_INVALID_ARGUMENT; }
 
-    bool gui = dialog__current_task_wants_gui();
+    bool gui = dialog__current_process_wants_gui();
     s_last_call_was_gui = gui;
 
     if (s_test_input_provider != NULL) {
@@ -1205,7 +1206,7 @@ dialog__create_text_viewer(const char *title, const char *text, bruce_viewer_id_
     }
 
     slot->used = true;
-    slot->owner = task__current_id();
+    slot->owner = process__current_id();
     slot->title = title != NULL ? dialog__strdup(title) : dialog__strdup("");
     slot->text = text != NULL ? dialog__strdup(text) : dialog__strdup("");
     slot->scroll_y = 0;
@@ -1218,9 +1219,9 @@ dialog__create_text_viewer(const char *title, const char *text, bruce_viewer_id_
     }
 
     bruce_viewer_id_t id = (bruce_viewer_id_t)(slot - s_viewers + 1);
-    slot->resource_id = task_registry__resource_register(dialog__viewer_cleanup, slot);
+    slot->resource_id = process_registry__resource_register(dialog__viewer_cleanup, slot);
 
-    bool gui = dialog__current_task_wants_gui();
+    bool gui = dialog__current_process_wants_gui();
     s_last_call_was_gui = gui;
     dialog__viewer_draw(slot, gui);
 
@@ -1236,7 +1237,7 @@ bruce_result_t dialog__viewer_set_text(bruce_viewer_id_t viewer, const char *tex
         dialog__viewer_unlock();
         return BRUCE_ERR_NOT_FOUND;
     }
-    if (slot->owner != task__current_id()) {
+    if (slot->owner != process__current_id()) {
         dialog__viewer_unlock();
         return BRUCE_ERR_PERMISSION;
     }
@@ -1250,7 +1251,7 @@ bruce_result_t dialog__viewer_set_text(bruce_viewer_id_t viewer, const char *tex
     slot->text = copy;
     slot->scroll_y = 0;
 
-    bool gui = dialog__current_task_wants_gui();
+    bool gui = dialog__current_process_wants_gui();
     s_last_call_was_gui = gui;
     bruce_result_t result = dialog__viewer_draw(slot, gui);
 
@@ -1265,7 +1266,7 @@ bruce_result_t dialog__viewer_scroll(bruce_viewer_id_t viewer, int lines) {
         dialog__viewer_unlock();
         return BRUCE_ERR_NOT_FOUND;
     }
-    if (slot->owner != task__current_id()) {
+    if (slot->owner != process__current_id()) {
         dialog__viewer_unlock();
         return BRUCE_ERR_PERMISSION;
     }
@@ -1273,7 +1274,7 @@ bruce_result_t dialog__viewer_scroll(bruce_viewer_id_t viewer, int lines) {
     slot->scroll_y += lines;
     if (slot->scroll_y < 0) { slot->scroll_y = 0; }
 
-    bool gui = dialog__current_task_wants_gui();
+    bool gui = dialog__current_process_wants_gui();
     s_last_call_was_gui = gui;
     bruce_result_t result = dialog__viewer_draw(slot, gui);
 
@@ -1288,13 +1289,13 @@ bruce_result_t dialog__viewer_close(bruce_viewer_id_t viewer) {
         dialog__viewer_unlock();
         return BRUCE_ERR_NOT_FOUND;
     }
-    if (slot->owner != task__current_id()) {
+    if (slot->owner != process__current_id()) {
         dialog__viewer_unlock();
         return BRUCE_ERR_PERMISSION;
     }
 
     if (slot->resource_id != BRUCE_RESOURCE_ID_INVALID) {
-        task_registry__resource_release(slot->resource_id);
+        process_registry__resource_release(slot->resource_id);
     }
     dialog__viewer_free(slot);
     dialog__viewer_unlock();

@@ -2,7 +2,7 @@
 
 #include <string.h>
 
-#include "core/task/task.h"
+#include "core/process/process.h"
 #include "core_sdk/permission.h"
 
 #include "driver/gpio.h" // IWYU pragma: export
@@ -16,9 +16,9 @@
 
 typedef struct {
     bool in_use;
-    bool task_owned;
+    bool process_owned;
     bruce_spi_id_t id;
-    bruce_task_id_t owner;
+    bruce_process_id_t owner;
     bruce_resource_id_t resource_id;
     spi_device_handle_t handle;
 } spi__slot_t;
@@ -79,8 +79,8 @@ static void spi__cleanup(void *context) {
 }
 
 bruce_result_t
-spi__open_internal(const bruce_spi_device_config_t *config, bool task_owned, bruce_spi_id_t *out_device) {
-    bruce_task_id_t owner = task_owned ? task__current_id() : BRUCE_TASK_ID_INVALID;
+spi__open_internal(const bruce_spi_device_config_t *config, bool process_owned, bruce_spi_id_t *out_device) {
+    bruce_process_id_t owner = process_owned ? process__current_id() : BRUCE_PROCESS_ID_INVALID;
     if (out_device != NULL) *out_device = BRUCE_SPI_ID_INVALID;
     if (config == NULL || out_device == NULL || !GPIO_IS_VALID_OUTPUT_GPIO(config->sck) ||
         !GPIO_IS_VALID_GPIO(config->miso) || !GPIO_IS_VALID_OUTPUT_GPIO(config->mosi) ||
@@ -142,15 +142,15 @@ spi__open_internal(const bruce_spi_device_config_t *config, bool task_owned, bru
     }
     s_slots[index] = (spi__slot_t){
         .in_use = true,
-        .task_owned = task_owned,
+        .process_owned = process_owned,
         .handle = handle,
     };
     s_device_count++;
     spi__unlock();
 
     bruce_resource_id_t resource = BRUCE_RESOURCE_ID_INVALID;
-    if (task_owned) {
-        resource = task_registry__resource_register(spi__cleanup, &s_slots[index]);
+    if (process_owned) {
+        resource = process_registry__resource_register(spi__cleanup, &s_slots[index]);
         if (resource == BRUCE_RESOURCE_ID_INVALID) {
             spi__cleanup(&s_slots[index]);
             return BRUCE_ERR_RESOURCE_LIMIT;
@@ -190,7 +190,7 @@ spi__transfer_internal(bruce_spi_id_t device, const void *tx_data, void *rx_data
 }
 
 bruce_result_t spi__close_internal(bruce_spi_id_t device) {
-    bruce_task_id_t owner = task__current_id();
+    bruce_process_id_t owner = process__current_id();
     spi__lock();
     int index = spi__find_locked(device);
     if (index < 0) {
@@ -198,14 +198,14 @@ bruce_result_t spi__close_internal(bruce_spi_id_t device) {
         return BRUCE_ERR_NOT_FOUND;
     }
     bruce_resource_id_t resource = s_slots[index].resource_id;
-    bool task_owned = s_slots[index].task_owned;
-    if (task_owned && s_slots[index].owner != owner) {
+    bool process_owned = s_slots[index].process_owned;
+    if (process_owned && s_slots[index].owner != owner) {
         spi__unlock();
         return BRUCE_ERR_PERMISSION;
     }
     spi__release_locked(&s_slots[index]);
     spi__unlock();
-    return task_owned ? task_registry__resource_release(resource) : BRUCE_OK;
+    return process_owned ? process_registry__resource_release(resource) : BRUCE_OK;
 }
 
 bruce_result_t spi__open(const bruce_spi_device_config_t *config, bruce_spi_id_t *out_device) {
@@ -219,10 +219,10 @@ bruce_result_t spi__transfer(bruce_spi_id_t device, const void *tx_data, void *r
     if (size == 0 || size > BRUCE_SPI_MAX_TRANSFER_SIZE || (tx_data == NULL && rx_data == NULL)) {
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
-    bruce_task_id_t owner = task__current_id();
+    bruce_process_id_t owner = process__current_id();
     spi__lock();
     int index = spi__find_locked(device);
-    bool owned = index >= 0 && s_slots[index].task_owned && s_slots[index].owner == owner;
+    bool owned = index >= 0 && s_slots[index].process_owned && s_slots[index].owner == owner;
     spi__unlock();
     return owned       ? spi__transfer_internal(device, tx_data, rx_data, size)
            : index < 0 ? BRUCE_ERR_NOT_FOUND

@@ -8,19 +8,19 @@ last-writer-wins display behavior with a small Core compositor.
 The agreed design is:
 
 - Keep one shared RGB565 application framebuffer.
-- Give the foreground task a fullscreen viewport.
-- Make display calls from ordinary hidden tasks successful no-ops.
-- Let the launcher assign up to four background GUI tasks to non-overlapping
+- Give the foreground process a fullscreen viewport.
+- Make display calls from ordinary hidden processes successful no-ops.
+- Let the launcher assign up to four background GUI processes to non-overlapping
   viewports.
 - Reflow applications to viewport dimensions; do not scale full-size frames.
 - Do not send resize events. Applications discover changed dimensions in their
   normal rendering loop.
-- Keep a task's viewport logically locked from `display__begin_frame()` until
+- Keep a process's viewport logically locked from `display__begin_frame()` until
   its LCD transfer completes.
-- Keep physical input assigned only to the foreground task.
+- Keep physical input assigned only to the foreground process.
 - Let a Core display worker be the only owner of panel transfers.
 
-The input ownership race must be fixed before enabling the task switcher. See
+The input ownership race must be fixed before enabling the process switcher. See
 `docs/INPUT_FOREGROUND_HANDOFF_PLAN.md`.
 
 ## Current Implementation
@@ -44,24 +44,24 @@ recursive mutex:
 
 Every primitive currently locks independently. This serializes individual
 writes but does not make a complete frame atomic. Text color, background,
-cursor, and text size also leak between tasks because they are global.
+cursor, and text size also leak between processes because they are global.
 
 ## Required Invariants
 
 The implementation is complete only when these invariants hold:
 
 1. Only the Core display worker submits panel transfers.
-2. No task receives a direct framebuffer pointer.
-3. Task coordinates are local to the task's current viewport.
+2. No process receives a direct framebuffer pointer.
+3. Process coordinates are local to the process's current viewport.
 4. Every primitive clips to that viewport.
-5. Hidden task drawing and presentation return success without changing pixels.
-6. Foreground tasks render fullscreen unless the caller is the launcher while
+5. Hidden process drawing and presentation return success without changing pixels.
+6. Foreground processes render fullscreen unless the caller is the launcher while
    it owns a dashboard layout.
-7. Only launcher-assigned background tasks may render tiles.
+7. Only launcher-assigned background processes may render tiles.
 8. Tile assignments cannot change during an active frame or transfer.
 9. A tile remains leased through the LCD transfer-completion callback.
-10. Killing a task cannot strand a mutex, tile lease, or DMA transfer.
-11. Text and cursor state are task-local.
+10. Killing a process cannot strand a mutex, tile lease, or DMA transfer.
+11. Text and cursor state are process-local.
 12. Rotation remains a global physical-panel operation.
 
 ## Public Frame API
@@ -87,18 +87,18 @@ while call sites migrate to explicit frame boundaries.
 
 `display__begin_frame()` must:
 
-- Resolve the calling Core task before acquiring the display state lock.
+- Resolve the calling Core process before acquiring the display state lock.
 - Reject a nested frame with `BRUCE_ERR_INVALID_STATE`.
 - Snapshot the caller's viewport and its generation.
 - Establish a Core-managed logical lease over the viewport.
 - Return `BRUCE_ERR_BUSY` if a conflicting region is already leased.
-- Establish a successful no-op frame when the task is hidden.
-- Avoid retaining a task-owned FreeRTOS mutex across API calls.
+- Establish a successful no-op frame when the process is hidden.
+- Avoid retaining a process-owned FreeRTOS mutex across API calls.
 
-The last point is essential. `task__kill()` can delete an application at any
-instruction. Deleting a task that owns a FreeRTOS mutex can strand that mutex
+The last point is essential. `process__kill()` can delete an application at any
+instruction. Deleting a process that owns a FreeRTOS mutex can strand that mutex
 forever. The logical lease must instead be state owned by Core and removable by
-the task lifecycle hook.
+the process lifecycle hook.
 
 ### `display__present()`
 
@@ -112,17 +112,17 @@ the task lifecycle hook.
   transferred.
 - Release the frame and viewport lease on every success and error path.
 
-If the presenting task is force-killed, the display worker must finish or
+If the presenting process is force-killed, the display worker must finish or
 safely fail the already-submitted transfer, then release the Core-owned lease.
 
-## Task Display Context
+## Process Display Context
 
-Keep one Core context for every live GUI task:
+Keep one Core context for every live GUI process:
 
 ```c
 typedef struct {
     bool in_use;
-    bruce_task_id_t task_id;
+    bruce_process_id_t process_id;
 
     bool tiled;
     bool hidden;
@@ -138,7 +138,7 @@ typedef struct {
     uint8_t text_size;
     int16_t cursor_x;
     int16_t cursor_y;
-} display__task_context_t;
+} display__process_context_t;
 ```
 
 Defaults must match current behavior: white text, black opaque background, text
@@ -147,27 +147,27 @@ size one, and cursor `(0, 0)`.
 Move the globals currently at `src/core/display/display.c:186-191` into this
 context. Geometry changes do not need to reset text state or cursor position.
 
-Use private task lifecycle hooks declared in `src/core/display/display.h`:
+Use private process lifecycle hooks declared in `src/core/display/display.h`:
 
 ```c
-void display__task_created(bruce_task_id_t task_id, bool gui_requested);
-void display__task_state_changed(bruce_task_id_t task_id,
-                                 bruce_task_state_t state);
-void display__task_removed(bruce_task_id_t task_id);
+void display__process_created(bruce_process_id_t process_id, bool gui_requested);
+void display__process_state_changed(bruce_process_id_t process_id,
+                                 bruce_process_state_t state);
+void display__process_removed(bruce_process_id_t process_id);
 ```
 
-Task code may invoke these hooks while holding the task registry lock. Display
-code must never call a task API while holding the display state lock.
+Process code may invoke these hooks while holding the process registry lock. Display
+code must never call a process API while holding the display state lock.
 
 ## Viewport Semantics
 
-The effective foreground GUI task sees the full logical display:
+The effective foreground GUI process sees the full logical display:
 
 ```c
 { .x = 0, .y = 0, .width = screen_width, .height = screen_height }
 ```
 
-A tiled task sees its launcher-assigned rectangle. A hidden task sees a
+A tiled process sees its launcher-assigned rectangle. A hidden process sees a
 zero-sized viewport.
 
 Change `display__width()` and `display__height()` accordingly. The existing
@@ -221,7 +221,7 @@ typedef struct {
 } bruce_display_rect_t;
 
 typedef struct {
-    bruce_task_id_t task_id;
+    bruce_process_id_t process_id;
     bruce_display_rect_t rect;
 } bruce_display_tile_t;
 
@@ -238,7 +238,7 @@ selection borders, and gutters. Core owns clipping and transfer policy, not
 launcher visual design.
 
 Changing a layout must acquire or reserve all affected regions in a stable
-order. Return `BRUCE_ERR_BUSY` if an affected task owns an unfinished frame;
+order. Return `BRUCE_ERR_BUSY` if an affected process owns an unfinished frame;
 the launcher can retry in its loop. Never silently move a viewport midway
 through a frame.
 
@@ -280,7 +280,7 @@ for (int row = 0; row < rect.height; ++row) {
 ```
 
 A quarter-screen buffer is about 16 KB. It is shared transfer scratch, not a
-private task render surface.
+private process render surface.
 
 Fullscreen transfers may use the framebuffer directly when no overlay needs
 composition. The fullscreen logical lease prevents mutation until DMA
@@ -317,7 +317,7 @@ Rotation remains global. `display__set_rotation()` must:
 8. Re-anchor any active notification.
 9. Let the launcher submit a new layout.
 
-External tiled tasks must not be allowed to rotate the physical panel.
+External tiled processes must not be allowed to rotate the physical panel.
 
 ## Dialog Migration
 
@@ -362,7 +362,7 @@ export tile management.
 - `src/core_sdk/display.h`
 - `src/core/display/display.h`
 - `src/core/display/display.c`
-- `src/core/task/task.c`
+- `src/core/process/process.c`
 - `src/core/dialog/dialog.c`
 - `src/modules/bruce_launcher/bruce_launcher_app.c`
 - `src/modules/loaders/js/display_js.c`
@@ -394,7 +394,7 @@ Add display/compositor selftests covering:
 - Packed row correctness.
 - Lease retention through mocked DMA completion.
 - Submission failure cleanup.
-- Task exit and force-kill cleanup.
+- Process exit and force-kill cleanup.
 - Rotation behavior.
 - Existing flush compatibility.
 
@@ -404,13 +404,13 @@ require physical LCD DMA.
 ## Implementation Order
 
 1. Complete the foreground input handoff fix.
-2. Add task-local display contexts and hidden/fullscreen behavior.
+2. Add process-local display contexts and hidden/fullscreen behavior.
 3. Add Core-owned logical frame leases.
 4. Add the display worker and transfer-completion callback.
 5. Add packed partial rectangle transfers.
 6. Add transactional tile assignment.
 7. Migrate dialogs and launcher drawing to frame transactions.
-8. Implement the launcher task overview.
+8. Implement the launcher process overview.
 9. Add notification composition.
 10. Add the status-icon registry.
 11. Add JavaScript, ELF, and terminal front ends.

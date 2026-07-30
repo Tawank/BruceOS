@@ -14,14 +14,18 @@ typedef uint32_t bruce_stdio_session_t;
 /* Read a line from stdin, waiting if the console driver is non-blocking.
  * Echoes characters unless mask_input is true.
  * The returned string does NOT include the trailing newline.
- * Returns the number of characters read, or -1 on invalid arguments / EOF. */
+ * Returns the number of characters read, BRUCE_ERR_CANCELLED if the calling
+ * process receives cooperative INT/TERM, or -1 on invalid arguments / EOF. */
 int bruce_stdio_read_line(char *buffer, size_t buffer_size, bool mask_input);
 
 /* Reads up to `capacity` raw bytes from stdin without echoing. A zero timeout
- * polls. Returns BRUCE_ERR_TIMEOUT when no input arrives before the deadline. */
+ * polls and UINT32_MAX waits indefinitely. Finite waits use the original
+ * absolute deadline. Returns BRUCE_ERR_TIMEOUT when no input arrives before
+ * that deadline, or BRUCE_ERR_CANCELLED if the calling process receives
+ * cooperative INT/TERM. Cancellation takes precedence over queued input. */
 bruce_result_t bruce_stdio_read(void *buffer, size_t capacity, uint32_t timeout_ms, size_t *out_size);
 
-/* Writes app-visible output to the calling task's routed session, or to the
+/* Writes app-visible output to the calling process's routed session, or to the
  * physical serial console when no session is routed. Core diagnostics should
  * continue to use the normal logging/stdio functions. */
 bruce_result_t bruce_stdio_write(const void *data, size_t size);
@@ -31,8 +35,8 @@ bruce_result_t bruce_stdio_write(const void *data, size_t size);
 int stdio__printf(const char *format, ...) __attribute__((format(printf, 1, 2)));
 int stdio__vprintf(const char *format, va_list args) __attribute__((format(printf, 1, 0)));
 
-/* Creates a task-owned, bounded input/output session. Routing a session makes
- * subsequently launched child tasks use it through bruce_stdio_read(),
+/* Creates a process-owned, bounded input/output session. Routing a session makes
+ * subsequently launched child processes use it through bruce_stdio_read(),
  * bruce_stdio_write(), and stdio__printf(); call route_children(INVALID)
  * after launching. */
 bruce_result_t bruce_stdio_session_create(bruce_stdio_session_t *out_session);

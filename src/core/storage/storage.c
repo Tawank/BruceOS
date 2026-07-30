@@ -21,7 +21,7 @@
 #include "freertos/semphr.h"
 #include "spi_flash_mmap.h"
 
-#include "core/task/task.h"
+#include "core/process/process.h"
 #include "core_sdk/permission.h"
 #include "core_sdk/storage.h"
 
@@ -324,7 +324,7 @@ bool storage__sd_is_ready(void) {
 void storage__free(void *data) { free(data); }
 
 /* ------------------------------------------------------------------------ */
-/* A5: task-owned opaque file handles (core_sdk/storage.h)                  */
+/* A5: process-owned opaque file handles (core_sdk/storage.h)                  */
 /* ------------------------------------------------------------------------ */
 
 #define STORAGE__MAX_OPEN_FILES 16
@@ -334,7 +334,7 @@ typedef struct {
     int fd;
     bruce_file_id_t id;
     bruce_resource_id_t resource_id;
-    bruce_task_id_t owner;
+    bruce_process_id_t owner;
 } storage__file_slot_t;
 
 static storage__file_slot_t s_open_files[STORAGE__MAX_OPEN_FILES];
@@ -385,9 +385,9 @@ static int storage__find_open_slot_locked(bruce_file_id_t file) {
     return -1;
 }
 
-/* Invoked by task_registry__* teardown if a task exits/is killed without
- * closing its own handles; runs while the task registry's own lock is held,
- * so it must not call back into task_registry__* itself (mirrors
+/* Invoked by process_registry__* teardown if a process exits/is killed without
+ * closing its own handles; runs while the process registry's own lock is held,
+ * so it must not call back into process_registry__* itself (mirrors
  * memory__cleanup's rule in core/memory/memory.c). */
 static void storage__file_cleanup(void *context) {
     storage__file_slot_t *slot = (storage__file_slot_t *)context;
@@ -446,9 +446,9 @@ bruce_result_t storage__open(const char *path, uint32_t flags, bruce_file_id_t *
         return BRUCE_ERR_RESOURCE_LIMIT;
     }
     /* Reserve the slot before releasing the lock: open() and
-     * task_registry__resource_register() must never run while
+     * process_registry__resource_register() must never run while
      * s_storage_mutex is held. The cleanup callback above re-enters
-     * s_storage_mutex from inside the task registry's own lock during task
+     * s_storage_mutex from inside the process registry's own lock during process
      * teardown, so nesting the two locks in the opposite order here would
      * be a lock-order inversion. */
     s_open_files[slot_index].in_use = true;
@@ -465,7 +465,7 @@ bruce_result_t storage__open(const char *path, uint32_t flags, bruce_file_id_t *
     }
 
     bruce_resource_id_t resource_id =
-        task_registry__resource_register(storage__file_cleanup, &s_open_files[slot_index]);
+        process_registry__resource_register(storage__file_cleanup, &s_open_files[slot_index]);
     if (resource_id == BRUCE_RESOURCE_ID_INVALID) {
         close(fd);
         storage__lock();
@@ -477,7 +477,7 @@ bruce_result_t storage__open(const char *path, uint32_t flags, bruce_file_id_t *
     storage__lock();
     s_open_files[slot_index].fd = fd;
     s_open_files[slot_index].resource_id = resource_id;
-    s_open_files[slot_index].owner = task__current_id();
+    s_open_files[slot_index].owner = process__current_id();
     bruce_file_id_t id = s_next_file_id++;
     if (s_next_file_id == BRUCE_FILE_ID_INVALID) s_next_file_id = 1;
     s_open_files[slot_index].id = id;
@@ -494,7 +494,7 @@ bruce_result_t storage__read(bruce_file_id_t file, void *buffer, size_t capacity
         storage__unlock();
         return BRUCE_ERR_NOT_FOUND;
     }
-    if (s_open_files[slot_index].owner != task__current_id()) {
+    if (s_open_files[slot_index].owner != process__current_id()) {
         storage__unlock();
         return BRUCE_ERR_PERMISSION;
     }
@@ -513,7 +513,7 @@ bruce_result_t storage__write(bruce_file_id_t file, const void *buffer, size_t s
         storage__unlock();
         return BRUCE_ERR_NOT_FOUND;
     }
-    if (s_open_files[slot_index].owner != task__current_id()) {
+    if (s_open_files[slot_index].owner != process__current_id()) {
         storage__unlock();
         return BRUCE_ERR_PERMISSION;
     }
@@ -532,7 +532,7 @@ bruce_result_t storage__seek(bruce_file_id_t file, int64_t offset, int whence, u
         storage__unlock();
         return BRUCE_ERR_NOT_FOUND;
     }
-    if (s_open_files[slot_index].owner != task__current_id()) {
+    if (s_open_files[slot_index].owner != process__current_id()) {
         storage__unlock();
         return BRUCE_ERR_PERMISSION;
     }
@@ -550,7 +550,7 @@ bruce_result_t storage__close(bruce_file_id_t file) {
         storage__unlock();
         return BRUCE_ERR_NOT_FOUND;
     }
-    if (s_open_files[slot_index].owner != task__current_id()) {
+    if (s_open_files[slot_index].owner != process__current_id()) {
         storage__unlock();
         return BRUCE_ERR_PERMISSION;
     }
@@ -564,7 +564,7 @@ bruce_result_t storage__close(bruce_file_id_t file) {
     /* The handle is already released above; this only removes the now-
      * redundant teardown-time cleanup registration, it does not close fd
      * again. */
-    task_registry__resource_release(resource_id);
+    process_registry__resource_release(resource_id);
     return BRUCE_OK;
 }
 

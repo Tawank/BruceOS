@@ -7,8 +7,7 @@
 #include "core_sdk/app_runner.h"
 #include "core_sdk/loader.h"
 #include "core_sdk/result.h"
-#include "core_sdk/stdio.h"
-#include "core_sdk/task.h"
+#include "modules/shell/shell_app.h"
 
 #define SERIAL_COMMANDS__LINE_MAX 256
 
@@ -36,24 +35,6 @@ int serial_commands__run_line(const char *line, bool in_background) {
 
 int serial_commands_app_main(int argc, char **argv) {
     (void)argc;
-    (void)argv;
-    char line[SERIAL_COMMANDS__LINE_MAX];
-    for (;;) {
-        printf("bruce> ");
-        fflush(stdout);
-        int len = bruce_stdio_read_line(line, sizeof(line), false);
-        if (len < 0) break;
-        if (line[0] == '\0') continue;
-        if (strcmp(line, "exit") == 0) return 0;
-        int result = serial_commands__run_line(line, true);
-        if (result > 0) {
-            printf("started task %u\n", (unsigned int)result);
-            while (task__wait((bruce_task_id_t)result, 100) == BRUCE_ERR_TIMEOUT) {
-                if (runtime__delay(10) != BRUCE_OK) return BRUCE_ERR_CANCELLED;
-            }
-        } else {
-            printf("error %d\n", result);
-        }
-    }
-    return 0;
+    char *shell_argv[] = {"shell", "-i", NULL};
+    return shell_app_main(2, shell_argv);
 }

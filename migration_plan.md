@@ -23,7 +23,7 @@ Deliver the public SDK header layout and shared `BRUCE_*` error vocabulary.
 - Keep private implementation headers in `src/core/` and public SDK headers
   in `src/core_sdk/`.  SDK callers must include the full `"core_sdk/..."`
   path (for example, `"core_sdk/result.h"`) rather than a bare filename.
-- Define task IDs, task states, task snapshots, resource IDs, file IDs, and
+- Define process IDs, process states, process snapshots, resource IDs, file IDs, and
   manifest data structures.
 - Enable FreeRTOS runtime statistics for sampled CPU reporting.
 - Establish naming: `module__action()` and field-specific Config APIs.  For
@@ -37,13 +37,13 @@ Deliver the public SDK header layout and shared `BRUCE_*` error vocabulary.
 Exit criteria: a built-in module compiles using only public SDK headers and the
 current application build remains valid.
 
-## Stage 1 — Runtime, Task, and memory foundation
+## Stage 1 — Runtime, Process, and memory foundation
 
 Deliver the lifetime model before adding dynamic apps.
 
-- Implement task creation, foreground stack, backgrounding, foregrounding,
-  cooperative stop/pause/resume, force kill, task listing, and live-only wait.
-- Implement task-local universal resource registry and reverse-order cleanup.
+- Implement process creation, foreground stack, backgrounding, foregrounding,
+  cooperative stop/pause/resume, force kill, process listing, and live-only wait.
+- Implement process-local universal resource registry and reverse-order cleanup.
 - Implement `memory__malloc()`/`memory__free()` accounting and automatic leak
   cleanup.
 - Implement `runtime__sleep()` and `runtime__delay()`.
@@ -57,15 +57,15 @@ and leave no tracked memory/file resources behind.
 Deliver uniform launch behavior.
 
 - Implement built-in registration and deterministic named resolution.
-- Implement `app_runner__run()`, shell-style argument parsing, and task-ID
+- Implement `app_runner__run()`, shell-style argument parsing, and process-ID
   result/error behavior.
 - Implement placeholder `.elf`/`.js` path validation ahead of Stage 3's
   loader registry (`app_runner__register_loader()`, `app_runner__run_path()`).
-- Implement app_runner `STARTING` state and `--gui` task context.
+- Implement app_runner `STARTING` state and `--gui` process context.
 - Add built-in `launcher` utility and `run_launcher_app()` fallback behavior.
 
 Exit criteria: a uniquely named built-in app starts foreground/background with
-correct arguments and return/task behavior.
+correct arguments and return/process behavior.
 
 ## Stage 3 — Loader registry, ELF, and JavaScript loader modules
 
@@ -74,9 +74,9 @@ internals, so ELF, JavaScript, and any future format (Python, etc.) share one
 registration contract and no format gets special Core access.
 
 - Add the app_runner loader registry: `app_runner__register_loader()`,
-  `app_runner__run_path()`, and `app_runner__spawn_loader_task()` (the
+  `app_runner__run_path()`, and `app_runner__spawn_loader_process()` (the
   public primitive a loader uses to turn a decoded image into a
-  permission-checked, resource-tracked task without any private Core header).
+  permission-checked, resource-tracked process without any private Core header).
   Refactor Stage 2's placeholder `/bin/<name>.elf` -> `/bin/<name>.js`
   resolution to iterate this registry.
 - Add universal manifest inspection in `core/manifest/` /
@@ -93,9 +93,9 @@ registration contract and no format gets special Core access.
 - Add the built-in ELF loader module (`src/modules/loaders/elf/`): registers
   `.elf` at priority 10, calls `manifest__inspect_elf()` for mandatory
   manifest validation, integrates the Espressif ELF loader with
-  `app_runner__spawn_loader_task()`-owned allocations, exposes a public
+  `app_runner__spawn_loader_process()`-owned allocations, exposes a public
   symbol allowlist, and rejects imported `malloc`/`free`.  Its
-  task entry is `elf_loader__app_main(void *context)`.
+  process entry is `elf_loader__app_main(void *context)`.
 - Expose the built-in ELF loader as a command named `elf` so that
   `elf ./app.elf <args>...` loads the named ELF directly.  This lets an
   ELF app itself act as a loader (e.g. `elf ./elf_loader.elf ./game.elf`),
@@ -106,9 +106,9 @@ registration contract and no format gets special Core access.
   registers `.js` at priority 20, parses an optional leading manifest with
   zero-permission defaults, and uses `memory__malloc()` for the mQuickJS
   VM/context; preserves JS timers, `runtime.main()`, and optional
-  `app_main(argv)`.  Its task entry is `js__app_main(void *context)`.
+  `app_main(argv)`.  Its process entry is `js__app_main(void *context)`.
 
-Exit criteria: a minimal ELF and JS app load, show metadata, run in a task,
+Exit criteria: a minimal ELF and JS app load, show metadata, run in a process,
 and cleanly unload/exit; a third, independent loader module can register a
 new extension using only `core_sdk/` headers, with zero changes to Core;
 `manifest__inspect_path()` inspects ELF, JS, and any registered extension
@@ -208,4 +208,4 @@ launcher, and the built-in `notification` terminal command.
   trusted extensions with a restricted ABI, not a hard sandbox.
 - Per-app private persistent data namespaces beyond storage permission.
 - Rich display layers beyond the implemented small viewport compositor.
-- Async Core hardware APIs and task history.
+- Async Core hardware APIs and process history.

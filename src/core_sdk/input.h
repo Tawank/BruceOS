@@ -3,7 +3,7 @@
 #include <stdint.h>
 
 #include "core_sdk/result.h"
-#include "core_sdk/task.h"
+#include "core_sdk/process.h"
 
 typedef enum {
     BRUCE_INPUT_KEY,
@@ -59,10 +59,10 @@ typedef struct {
     int32_t code;
     int32_t value;
     uint64_t timestamp_ms;
-    bruce_task_id_t source_task_id;
+    bruce_process_id_t source_process_id;
 } bruce_input_event_t;
 
-/* input__read pops the next input event for the foreground task.
+/* input__read pops the next input event for the foreground process.
  *
  * `timeout_ms` controls blocking:
  *   - 0      : non-blocking; returns BRUCE_ERR_TIMEOUT immediately if no event
@@ -72,12 +72,12 @@ typedef struct {
  *
  * Returns BRUCE_OK with *out_event filled, BRUCE_ERR_TIMEOUT if no event
  * arrived within the timeout, or BRUCE_ERR_NOT_FOREGROUND if the caller is not
- * the current foreground task. A blocked read is revoked immediately when its
+ * the current foreground process. A blocked read is revoked immediately when its
  * foreground tenure ends; regaining foreground requires a new call. An
  * indefinite read is also interrupted by input deinitialization.
  *
- * Physical input is delivered only to the foreground task; background tasks
- * must call task__foreground() or use input__inject() (which requires the
+ * Physical input is delivered only to the foreground process; background processes
+ * must call process__foreground() or use input__inject() (which requires the
  * `input` permission).
  */
 bruce_result_t input__read(bruce_input_event_t *out_event, uint32_t timeout_ms);
@@ -94,13 +94,13 @@ static inline bruce_result_t input__poll(bruce_input_event_t *out_event) { retur
 
 /* input__flush removes all queued input events.  It is useful when switching
  * screens so that stale presses do not affect the new UI.  Returns BRUCE_OK
- * or BRUCE_ERR_NOT_FOREGROUND if the caller is not the foreground task. */
+ * or BRUCE_ERR_NOT_FOREGROUND if the caller is not the foreground process. */
 bruce_result_t input__flush(void);
 
 /* input__peek inspects the next queued event without removing it.
  *
  * Returns BRUCE_OK with *out_event filled, BRUCE_ERR_TIMEOUT if the queue is
- * empty, or BRUCE_ERR_NOT_FOREGROUND if the caller is not the foreground task.
+ * empty, or BRUCE_ERR_NOT_FOREGROUND if the caller is not the foreground process.
  */
 bruce_result_t input__peek(bruce_input_event_t *out_event);
 
@@ -108,7 +108,7 @@ bruce_result_t input__peek(bruce_input_event_t *out_event);
  *
  * Returns BRUCE_OK with the event code in *out_code, BRUCE_ERR_TIMEOUT if no
  * press event arrived within the timeout, or BRUCE_ERR_NOT_FOREGROUND if the
- * caller is not the foreground task.  Release and change events are ignored.
+ * caller is not the foreground process.  Release and change events are ignored.
  */
 bruce_result_t input__wait(uint32_t timeout_ms, int32_t *out_code);
 
@@ -116,7 +116,7 @@ bruce_result_t input__wait(uint32_t timeout_ms, int32_t *out_code);
  *
  * If `consume` is true the first matching press event is removed from the queue;
  * if false the event is left in place.  Returns true if a matching press event
- * exists, false otherwise.  Always returns false for non-foreground tasks.
+ * exists, false otherwise.  Always returns false for non-foreground processes.
  *
  * This is the Core equivalent of the legacy `check(PrevPress)` / `check(SelPress)`
  * pattern used by the old Arduino loop code and JS bindings.
@@ -131,7 +131,7 @@ bool input__check(int32_t code, bool consume);
  * permission, BRUCE_ERR_INVALID_ARGUMENT for a malformed event, or another
  * BRUCE_ERR_* value for internal failures.
  *
- * `event->timestamp_ms` and `event->source_task_id` are ignored by the core;
- * the core fills them in from the current time/task before queuing.
+ * `event->timestamp_ms` and `event->source_process_id` are ignored by the core;
+ * the core fills them in from the current time/process before queuing.
  */
 bruce_result_t input__inject(const bruce_input_event_t *event);

@@ -15,7 +15,8 @@
 #include "core_sdk/result.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
-#include "core_sdk/task.h"
+#include "core_sdk/process.h"
+#include "core_sdk/runtime.h"
 
 #define IR_APP_CAPTURE_SIZE 8192u
 #define IR_APP_LIBRARY_PATH "/BruceIR"
@@ -726,7 +727,7 @@ static int ir_app__learn_cli(ArgParser *parser) {
 int ir_app_main(int argc, char **argv) {
     if (app_runner__args_have_gui(argc, argv)) {
         if (!app_runner__args_have_background(argc, argv)) {
-            bruce_result_t foreground = task__to_foreground();
+            bruce_result_t foreground = process__to_foreground();
             if (foreground != BRUCE_OK) return foreground;
         }
         return ir_app__gui();

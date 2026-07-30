@@ -4,10 +4,10 @@
 #include <string.h>
 
 #include "core/permission/permission.h"
-#include "core/task/task.h"
+#include "core/process/process.h"
 #include "core_sdk/ir.h"
 #include "core_sdk/permission.h"
-#include "core_sdk/task.h"
+#include "core_sdk/process.h"
 
 static volatile bruce_result_t s_ir_result;
 static volatile bool s_ir_ran;
@@ -25,7 +25,7 @@ bool selftest__run_ir_permission_denied_case(void) {
     permission__set("ir_denied.js", BRUCE_PERMISSION_IR, false);
     s_ir_result = BRUCE_OK;
     s_ir_ran = false;
-    task_create_params_t params = {
+    process_create_params_t params = {
         .name = "selftest_ir",
         .entry = selftest__ir_external_entry,
         .built_in = false,
@@ -33,9 +33,9 @@ bool selftest__run_ir_permission_denied_case(void) {
         .start_in_background = true,
         .stack_bytes = 4096,
     };
-    bruce_task_id_t id = BRUCE_TASK_ID_INVALID;
-    if (task_registry__create(&params, &id) != BRUCE_OK) return false;
-    bruce_result_t wait = task__wait(id, 5000);
+    bruce_process_id_t id = BRUCE_PROCESS_ID_INVALID;
+    if (process_registry__create(&params, &id) != BRUCE_OK) return false;
+    bruce_result_t wait = process__wait(id, 5000);
     bool ok =
         (wait == BRUCE_OK || wait == BRUCE_ERR_NOT_FOUND) && s_ir_ran && s_ir_result == BRUCE_ERR_PERMISSION;
     printf("[selftest] ir/permission-denied: %s (result=%d)\n", ok ? "OK" : "FAIL", s_ir_result);

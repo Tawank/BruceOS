@@ -39,5 +39,5 @@ void dialog__test_set_input_provider(dialog__test_input_provider_t provider);
 void dialog__test_set_pick_file_provider(dialog__test_pick_file_provider_t provider);
 
 /* Returns whether the most recent dialog__* call selected the GUI renderer
- * (the calling task's --gui context) rather than the terminal one. */
+ * (the calling process's --gui context) rather than the terminal one. */
 bool dialog__test_last_call_was_gui(void);

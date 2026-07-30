@@ -5,7 +5,7 @@
  *
  * A fallible SDK function returns BRUCE_OK on success and one of the negative
  * BRUCE_ERR_* values below on failure, unless its individual documentation
- * explicitly says it returns a positive task ID on success.  Result values
+ * explicitly says it returns a positive process ID on success.  Result values
  * are part of the Core ABI and must not be renumbered.
  */
 typedef enum {

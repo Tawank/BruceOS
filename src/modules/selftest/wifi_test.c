@@ -3,7 +3,7 @@
  * These tests verify that the migrated Wi-Fi Core API (`wifi__scan()`) and the
  * new HTTP Core API (`http__request()`) enforce their respective `wifi` and
  * `http` permissions independently.  They do so by running the actual public
- * APIs from a synthetic external task, the same way a real ELF/JS app would.
+ * APIs from a synthetic external process, the same way a real ELF/JS app would.
  *
  * The denied cases return before any hardware/network activity because the
  * permission check is the first thing each API does. */
@@ -11,11 +11,11 @@
 #include <string.h>
 
 #include "core/permission/permission.h"
-#include "core/task/task.h"
+#include "core/process/process.h"
 #include "core_sdk/http.h"
 #include "core_sdk/permission.h"
 #include "core_sdk/result.h"
-#include "core_sdk/task.h"
+#include "core_sdk/process.h"
 #include "core_sdk/tcp.h"
 #include "core_sdk/wifi.h"
 
@@ -71,7 +71,7 @@ static int selftest__tcp_connect_entry(int argc, char **argv) {
 
 static bruce_result_t selftest__run_as_external(const char *permission_key, bruce_app_entry_t entry) {
     memset(&s_wifi_http_result, 0, sizeof(s_wifi_http_result));
-    task_create_params_t params = {
+    process_create_params_t params = {
         .name = "selftest_wifi_http",
         .entry = entry,
         .argc = 0,
@@ -82,9 +82,9 @@ static bruce_result_t selftest__run_as_external(const char *permission_key, bruc
         .start_in_background = true,
         .stack_bytes = 8192,
     };
-    bruce_task_id_t id = BRUCE_TASK_ID_INVALID;
-    if (task_registry__create(&params, &id) != BRUCE_OK) { return BRUCE_ERR_INTERNAL; }
-    bruce_result_t wait_result = task__wait(id, 5000);
+    bruce_process_id_t id = BRUCE_PROCESS_ID_INVALID;
+    if (process_registry__create(&params, &id) != BRUCE_OK) { return BRUCE_ERR_INTERNAL; }
+    bruce_result_t wait_result = process__wait(id, 5000);
     if (wait_result != BRUCE_OK && wait_result != BRUCE_ERR_NOT_FOUND) { return BRUCE_ERR_TIMEOUT; }
     return s_wifi_http_result.ran ? s_wifi_http_result.result : BRUCE_ERR_INTERNAL;
 }

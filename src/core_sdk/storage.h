@@ -5,7 +5,7 @@
 #include <stdint.h>
 
 #include "core_sdk/result.h"
-#include "core_sdk/task.h"
+#include "core_sdk/process.h"
 
 #define BRUCE_STORAGE_PATH_MAX 192
 #define BRUCE_STORAGE_NAME_MAX 96
@@ -31,17 +31,17 @@ typedef struct {
 
 /* Each fallible storage API returns BRUCE_OK or BRUCE_ERR_PERMISSION,
  * BRUCE_ERR_NOT_FOUND, BRUCE_ERR_INVALID_PATH, BRUCE_ERR_IO, or a related
- * BRUCE_ERR_* result.  Open files are task-owned and automatically closed at
- * task exit/kill even if the caller never calls storage__close() itself.
+ * BRUCE_ERR_* result.  Open files are process-owned and automatically closed at
+ * process exit/kill even if the caller never calls storage__close() itself.
  *
- * storage__open()/storage__list() check the calling task's `storage`
+ * storage__open()/storage__list() check the calling process's `storage`
  * permission (built-ins always pass) and additionally refuse "/bruce.json",
  * "/permissions.json", and their atomic-write ".tmp" siblings entirely -
  * BRUCE_ERR_PERMISSION - regardless of any granted permission; storage__list()
  * silently omits those two names rather than erroring. Every other mounted
  * path (LittleFS or SD) is otherwise reachable. `path` must be an absolute,
  * normalized path with no "." or ".." components, else BRUCE_ERR_INVALID_PATH.
- * A file handle can only be used by the task that opened it; any other task
+ * A file handle can only be used by the process that opened it; any other process
  * (or a stale/unknown id) gets BRUCE_ERR_NOT_FOUND/BRUCE_ERR_PERMISSION from
  * storage__read()/write()/seek()/close(). */
 bruce_result_t storage__open(const char *path, uint32_t flags, bruce_file_id_t *out_file);

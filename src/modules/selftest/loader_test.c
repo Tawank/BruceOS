@@ -11,7 +11,7 @@
 #include "core_sdk/manifest.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/storage.h"
-#include "core_sdk/task.h"
+#include "core_sdk/process.h"
 #include "modules/loaders/elf/elf_loader_app.h"
 
 #include "fake_elf.h"
@@ -46,7 +46,7 @@ bool selftest__run_manifest_parse_case(void) {
     int len = snprintf(
         json,
         sizeof(json),
-        "{\"appName\":\"Example app\",\"appIcon\":\"%s\",\"coreAbiVersion\":1,"
+        "{\"appName\":\"Example app\",\"appIcon\":\"%s\",\"coreAbiVersion\":2,"
         "\"stackSize\":8192,\"permissions\":[\"wifi\",\"http\"]}",
         icon_b64
     );
@@ -67,7 +67,7 @@ bool selftest__run_manifest_parse_case(void) {
             break;
         }
     }
-    bool ok = strcmp(manifest->app_name, "Example app") == 0 && manifest->core_abi_version == 1 &&
+    bool ok = strcmp(manifest->app_name, "Example app") == 0 && manifest->core_abi_version == 2 &&
               manifest->stack_size == 8192 && manifest->permission_count == 2 &&
               strcmp(manifest->permissions[0], "wifi") == 0 &&
               strcmp(manifest->permissions[1], "http") == 0 && icon_all_zero;
@@ -83,7 +83,7 @@ bool selftest__run_manifest_parse_case(void) {
     snprintf(
         bad_stack_json,
         sizeof(bad_stack_json),
-        "{\"appName\":\"x\",\"appIcon\":\"%s\",\"coreAbiVersion\":1,\"stackSize\":100}",
+        "{\"appName\":\"x\",\"appIcon\":\"%s\",\"coreAbiVersion\":2,\"stackSize\":100}",
         icon_b64
     );
     if (manifest__parse(bad_stack_json, strlen(bad_stack_json)) != NULL) {
@@ -95,7 +95,7 @@ bool selftest__run_manifest_parse_case(void) {
     snprintf(
         unknown_perm_json,
         sizeof(unknown_perm_json),
-        "{\"appName\":\"x\",\"appIcon\":\"%s\",\"coreAbiVersion\":1,\"stackSize\":8192,"
+        "{\"appName\":\"x\",\"appIcon\":\"%s\",\"coreAbiVersion\":2,\"stackSize\":8192,"
         "\"permissions\":[\"not_a_real_permission\"]}",
         icon_b64
     );
@@ -108,7 +108,7 @@ bool selftest__run_manifest_parse_case(void) {
     snprintf(
         duplicate_perm_json,
         sizeof(duplicate_perm_json),
-        "{\"appName\":\"x\",\"appIcon\":\"%s\",\"coreAbiVersion\":1,\"stackSize\":8192,"
+        "{\"appName\":\"x\",\"appIcon\":\"%s\",\"coreAbiVersion\":2,\"stackSize\":8192,"
         "\"permissions\":[\"wifi\",\"wifi\"]}",
         icon_b64
     );
@@ -133,7 +133,7 @@ static int selftest__throwaway_loader_run(const char *path, const char *arg, boo
     (void)arg;
     (void)in_background;
     s_throwaway_loader_calls++;
-    return 777; /* sentinel "task id" so the test can prove dispatch happened */
+    return 777; /* sentinel "process id" so the test can prove dispatch happened */
 }
 
 bool selftest__run_loader_registry_extensibility_case(void) {
@@ -224,10 +224,10 @@ bool selftest__run_elf_loader_case(void) {
     dialog__test_set_choice_provider(NULL);
 
     bool run_ok = result > 0 && elf_loader__debug_call_count() == calls_before + 1;
-    if (run_ok) { (void)task__wait((bruce_task_id_t)result, 2000); }
+    if (run_ok) { (void)process__wait((bruce_process_id_t)result, 2000); }
     storage__remove(path);
     if (!run_ok) {
-        printf("[selftest] loader/elf: run_path did not spawn a task (%d)\n", result);
+        printf("[selftest] loader/elf: run_path did not spawn a process (%d)\n", result);
         return false;
     }
 
@@ -247,7 +247,7 @@ bool selftest__run_js_loader_case(void) {
     selftest__loader_test_icon_base64(icon_b64, sizeof(icon_b64));
 
     const char *script_fmt = "/*\n"
-                             "{\"appName\":\"Selftest JS\",\"appIcon\":\"%s\",\"coreAbiVersion\":1,"
+                              "{\"appName\":\"Selftest JS\",\"appIcon\":\"%s\",\"coreAbiVersion\":2,"
                              "\"stackSize\":8192,\"permissions\":[]}\n"
                              "*/\n"
                              "print('selftest_js_ok');\n";
@@ -282,7 +282,7 @@ bool selftest__run_js_loader_case(void) {
 
     int result = app_runner__run_path(path, NULL, true);
     bool run_ok = result > 0;
-    if (run_ok) { run_ok = (task__wait((bruce_task_id_t)result, 2000) == BRUCE_OK); }
+    if (run_ok) { run_ok = (process__wait((bruce_process_id_t)result, 2000) == BRUCE_OK); }
     storage__remove(path);
     if (!run_ok) {
         printf("[selftest] loader/js: run did not spawn or complete (%d)\n", result);

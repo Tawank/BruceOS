@@ -6,7 +6,8 @@
 #include "core_sdk/app_runner.h"
 #include "core_sdk/result.h"
 #include "core_sdk/stdio.h"
-#include "core_sdk/task.h"
+#include "core_sdk/process.h"
+#include "core_sdk/runtime.h"
 
 static int help_app__list_commands(void) {
     stdio__printf("Available commands:\n");
@@ -20,11 +21,11 @@ static int help_app__list_commands(void) {
 }
 
 static int help_app__show_command(const char *command) {
-    int task_id = app_runner__run(command, "--help", true);
-    if (task_id < 0) return task_id;
+    int process_id = app_runner__run(command, "--help", true);
+    if (process_id < 0) return process_id;
 
     for (;;) {
-        int result = task__wait((bruce_task_id_t)task_id, 100);
+        int result = process__wait((bruce_process_id_t)process_id, 100);
         if (result == BRUCE_OK || result == BRUCE_ERR_NOT_FOUND) return BRUCE_OK;
         if (result != BRUCE_ERR_TIMEOUT) return result;
         if (runtime__delay(10) != BRUCE_OK) return BRUCE_ERR_CANCELLED;

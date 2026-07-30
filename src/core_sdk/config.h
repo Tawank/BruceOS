@@ -11,8 +11,8 @@
  * Getters return zero, false, or NULL if initialization or permission checks
  * fail. Setters return BRUCE_OK or a BRUCE_ERR_* result, validate input, and
  * persist immediately to bruce.json. Built-in modules always pass permission
- * checks; external ELF/JS tasks require `config`, except that protected
- * credentials are never exposed to external tasks.
+ * checks; external ELF/JS processes require `config`, except that protected
+ * credentials are never exposed to external processes.
  */
 
 #include <stdbool.h>
@@ -22,7 +22,7 @@
 #include "core_sdk/result.h"
 
 /* ------------------------------------------------------------------------ */
-/* Permanently protected: an external (ELF/JS) task can NEVER read or write
+/* Permanently protected: an external (ELF/JS) process can NEVER read or write
  * these, even if it holds the `config` permission. Built-in modules are
  * unaffected. */
 /* ------------------------------------------------------------------------ */

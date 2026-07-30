@@ -13,7 +13,7 @@
 #include "lwip/sockets.h"
 
 #include "core/network/network.h"
-#include "core/task/task.h"
+#include "core/process/process.h"
 #include "core_sdk/permission.h"
 #include "core_sdk/tcp.h"
 
@@ -25,7 +25,7 @@ typedef struct {
     int fd;
     bruce_tcp_id_t id;
     bruce_resource_id_t resource_id;
-    bruce_task_id_t owner;
+    bruce_process_id_t owner;
 } tcp__slot_t;
 
 static tcp__slot_t s_slots[TCP__MAX_SOCKETS];
@@ -82,7 +82,7 @@ static bruce_result_t tcp__adopt(int fd, bruce_tcp_id_t *out_socket) {
         return BRUCE_ERR_RESOURCE_LIMIT;
     }
 
-    bruce_resource_id_t resource = task_registry__resource_register(tcp__cleanup, &s_slots[index]);
+    bruce_resource_id_t resource = process_registry__resource_register(tcp__cleanup, &s_slots[index]);
     if (resource == BRUCE_RESOURCE_ID_INVALID) {
         close(fd);
         tcp__lock();
@@ -95,7 +95,7 @@ static bruce_result_t tcp__adopt(int fd, bruce_tcp_id_t *out_socket) {
     bruce_tcp_id_t id = s_next_id++;
     if (s_next_id == BRUCE_TCP_ID_INVALID) s_next_id = 1;
     s_slots[index].id = id;
-    s_slots[index].owner = task__current_id();
+    s_slots[index].owner = process__current_id();
     s_slots[index].resource_id = resource;
     tcp__unlock();
     *out_socket = id;
@@ -109,7 +109,7 @@ static bruce_result_t tcp__owned_fd(bruce_tcp_id_t socket, int *out_fd) {
         tcp__unlock();
         return BRUCE_ERR_NOT_FOUND;
     }
-    if (s_slots[index].owner != task__current_id()) {
+    if (s_slots[index].owner != process__current_id()) {
         tcp__unlock();
         return BRUCE_ERR_PERMISSION;
     }
@@ -288,7 +288,7 @@ bruce_result_t tcp__close(bruce_tcp_id_t socket) {
         tcp__unlock();
         return BRUCE_ERR_NOT_FOUND;
     }
-    if (s_slots[index].owner != task__current_id()) {
+    if (s_slots[index].owner != process__current_id()) {
         tcp__unlock();
         return BRUCE_ERR_PERMISSION;
     }
@@ -298,6 +298,6 @@ bruce_result_t tcp__close(bruce_tcp_id_t socket) {
     s_slots[index].id = BRUCE_TCP_ID_INVALID;
     tcp__unlock();
     close(fd);
-    (void)task_registry__resource_release(resource);
+    (void)process_registry__resource_release(resource);
     return BRUCE_OK;
 }

@@ -6,9 +6,9 @@
  * This is the Core-side implementation of the JavaScript `display.*`
  * surface used by the bjs_interpreter.  It is intentionally small and
  * immediate-mode: drawing primitives update a Core-owned framebuffer and
- * are sent to the LCD only when a frame is presented. GUI tasks render in
- * task-local coordinates into a Core-assigned fullscreen or tiled viewport.
- * Hidden tasks see a zero-sized viewport and drawing is a successful no-op.
+ * are sent to the LCD only when a frame is presented. GUI processes render in
+ * process-local coordinates into a Core-assigned fullscreen or tiled viewport.
+ * Hidden processes see a zero-sized viewport and drawing is a successful no-op.
  *
  * All coordinates are logical and respect the current rotation set by
  * display__set_rotation().  The framebuffer is stored in the logical
@@ -23,7 +23,7 @@
 #include <stdint.h>
 
 #include "core_sdk/result.h"
-#include "core_sdk/task.h"
+#include "core_sdk/process.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -67,7 +67,7 @@ typedef struct {
 } bruce_display_rect_t;
 
 typedef struct {
-    bruce_task_id_t task_id;
+    bruce_process_id_t process_id;
     bruce_display_rect_t rect;
 } bruce_display_tile_t;
 

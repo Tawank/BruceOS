@@ -5,7 +5,7 @@
 #include <stdint.h>
 
 #include "core_sdk/result.h"
-#include "core_sdk/task.h"
+#include "core_sdk/process.h"
 
 #define BRUCE_I2C_PORT_AUTO (-1)
 #define BRUCE_I2C_MAX_TRANSFER_SIZE 4096u
@@ -18,8 +18,8 @@ typedef struct {
     bool enable_internal_pullups;
 } bruce_i2c_bus_config_t;
 
-/* I2C uses the `gpio` permission. Bus handles belong to the calling task and
- * close automatically on task exit. Addresses are unshifted 7-bit values.
+/* I2C uses the `gpio` permission. Bus handles belong to the calling process and
+ * close automatically on process exit. Addresses are unshifted 7-bit values.
  * A zero timeout performs one immediate, bounded driver attempt. */
 bruce_result_t i2c__open(const bruce_i2c_bus_config_t *config, bruce_i2c_id_t *out_bus);
 bruce_result_t i2c__probe(bruce_i2c_id_t bus, uint8_t address, uint32_t timeout_ms, bool *out_present);

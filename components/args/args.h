@@ -22,7 +22,7 @@ void ap_set_version(ArgParser *parser, const char *version);
 char *ap_get_version(ArgParser *parser);
 
 /* Parses conventional main()-style arguments without modifying argv. Parse
- * errors, help, and version requests never exit the calling task. */
+ * errors, help, and version requests never exit the calling process. */
 bool ap_parse(ArgParser *parser, int argc, char **argv);
 ap_status_t ap_get_status(ArgParser *parser);
 void ap_print_help(ArgParser *parser);

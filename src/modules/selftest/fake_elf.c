@@ -69,7 +69,7 @@ bool selftest__write_fake_elf(
     int offset = snprintf(
         manifest,
         sizeof(manifest),
-        "{\"appName\":\"%s\",\"appIcon\":\"%s\",\"coreAbiVersion\":1,\"stackSize\":8192,"
+        "{\"appName\":\"%s\",\"appIcon\":\"%s\",\"coreAbiVersion\":2,\"stackSize\":8192,"
         "\"permissions\":[",
         app_name,
         icon_b64

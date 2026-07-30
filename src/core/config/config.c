@@ -6,7 +6,7 @@
 
 #include "cJSON.h"
 #include "core/storage/storage.h"
-#include "core/task/task.h"
+#include "core/process/process.h"
 #include "core_sdk/config.h"
 #include "core_sdk/permission.h"
 #include "esp_random.h"
@@ -120,9 +120,9 @@ static void config__set_defaults(config__t *cfg) {
     cfg->instantBoot = 0;
     config__assign(&cfg->keyboardLang, "QWERTY");
     config__assign(&cfg->hotkeys.items[0].key, "alt + tab");
-    config__assign(&cfg->hotkeys.items[0].action, "task switch next");
+    config__assign(&cfg->hotkeys.items[0].action, "process switch next");
     config__assign(&cfg->hotkeys.items[1].key, "ctrl + tab");
-    config__assign(&cfg->hotkeys.items[1].action, "task preview");
+    config__assign(&cfg->hotkeys.items[1].action, "process preview");
     config__assign(&cfg->hotkeys.items[2].key, "ctrl + space");
     config__assign(&cfg->hotkeys.items[2].action, "launcher");
     cfg->hotkeys.count = 3;
@@ -549,14 +549,14 @@ bool config__factory_reset(void) {
 /* Public Config API (core_sdk/config.h)                                    */
 /* ------------------------------------------------------------------------ */
 
-/* True for a built-in caller or when there is no current Core task at all
+/* True for a built-in caller or when there is no current Core process at all
  * (e.g. boot), mirroring permission__check()'s own implicit-grant rule.
  * Used by the permanently-protected fields, which bypass `config`
  * permission checks entirely for such callers but are never accessible to
- * an external task, no matter what it has been granted. */
+ * an external process, no matter what it has been granted. */
 static bool config__caller_is_trusted(void) {
     bool built_in = false;
-    bruce_result_t context = task_registry__current_context(&built_in, NULL, 0, NULL);
+    bruce_result_t context = process_registry__current_context(&built_in, NULL, 0, NULL);
     return context == BRUCE_ERR_NOT_FOUND || built_in;
 }
 

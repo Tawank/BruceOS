@@ -12,7 +12,7 @@
 - `BrucePIO_legacy/` is the old PlatformIO/Arduino codebase being migrated from -
   useful as a reference for porting logic (e.g. BrucePIO_legacy/src/core/config.cpp)
   but not part of the ESP-IDF build.
-- Core code lives in src/core/{app_runner,config,dialog,display,http,input,manifest,memory,permission,stdio,storage,task,wifi}; apps in
+- Core code lives in src/core/{app_runner,config,dialog,display,http,input,manifest,memory,permission,stdio,storage,process,wifi}; apps in
   src/modules/*. See migration_plan.md at repo root for the architecture
   (core must stay minimal: HAL + runtime + BruceConfig + AppRunner only).
 - Naming convention: `module__action()` for public C API, snake_case fields.
@@ -27,7 +27,7 @@
   redeclarations when the public signature changes. Private headers should
   only hold genuinely Core-internal-only declarations (can be empty/placeholder).
 - Private Core headers are named plain `<module>.h` inside `core/<module>/`
-  (e.g. core/app_runner/app_runner.h, core/config/config.h, core/task/task.h),
+  (e.g. core/app_runner/app_runner.h, core/config/config.h, core/process/process.h),
   not `<module>_common.h`. `core/wifi/wifi_common.h` is the private Wi-Fi header;
   it holds only genuinely internal declarations (`wifi__init()`) and does not
   redeclare the public `wifi__*` API, which lives in `core_sdk/wifi.h`.

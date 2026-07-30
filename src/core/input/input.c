@@ -1,13 +1,13 @@
 #include "input.h"
 
-#include "core/task/task.h"
+#include "core/process/process.h"
 #include "core_sdk/app_runner.h"
 #include "core_sdk/config.h"
 #include "core_sdk/input.h"
 #include "core_sdk/loader.h"
 #include "core_sdk/permission.h"
 #include "core_sdk/result.h"
-#include "core_sdk/task.h"
+#include "core_sdk/process.h"
 
 #include <ctype.h>
 #include <string.h>
@@ -134,7 +134,7 @@ static uint8_t s_queue_buffer[INPUT__QUEUE_LENGTH * sizeof(bruce_input_event_t)]
 static QueueHandle_t s_queue;
 static bool s_initialized;
 static TaskHandle_t s_poll_task;
-static bruce_task_id_t s_foreground_task_id;
+static bruce_process_id_t s_foreground_process_id;
 static uint32_t s_foreground_epoch;
 
 static inline void input__lock(void) { xSemaphoreTakeRecursive(s_mutex, portMAX_DELAY); }
@@ -147,14 +147,14 @@ static inline void input__unlock(void) { xSemaphoreGiveRecursive(s_mutex); }
 
 static uint64_t input__now_ms(void) { return (uint64_t)xTaskGetTickCount() * portTICK_PERIOD_MS; }
 
-static bool input__caller_is_foreground_locked(bruce_task_id_t caller) {
-    return caller != BRUCE_TASK_ID_INVALID && caller == s_foreground_task_id;
+static bool input__caller_is_foreground_locked(bruce_process_id_t caller) {
+    return caller != BRUCE_PROCESS_ID_INVALID && caller == s_foreground_process_id;
 }
 
 /* Push one event into the queue.  Caller must hold the lock. */
 static bruce_result_t input__push_event_locked(
     bruce_input_type_t type, bruce_input_action_t action, int32_t code, int32_t value,
-    bruce_task_id_t source_task_id
+    bruce_process_id_t source_process_id
 ) {
     if (s_queue == NULL) { return BRUCE_ERR_INVALID_STATE; }
 
@@ -173,7 +173,7 @@ static bruce_result_t input__push_event_locked(
     }
 
     event.timestamp_ms = input__now_ms();
-    event.source_task_id = source_task_id;
+    event.source_process_id = source_process_id;
 
     BaseType_t sent = xQueueSend(s_queue, &event, 0);
     return sent == pdPASS ? BRUCE_OK : BRUCE_ERR_BUSY;
@@ -239,11 +239,11 @@ static void input__poll_buttons(void) {
                     pressed ? BRUCE_INPUT_PRESS : BRUCE_INPUT_RELEASE,
                     btn->code,
                     pressed ? 1 : 0,
-                    BRUCE_TASK_ID_INVALID
+                    BRUCE_PROCESS_ID_INVALID
                 );
-                bruce_task_id_t owner = s_foreground_task_id;
+                bruce_process_id_t owner = s_foreground_process_id;
                 input__unlock();
-                task_registry__input_wake(owner);
+                process_registry__input_wake(owner);
             }
         }
     }
@@ -473,8 +473,8 @@ static bool input__kb_match_hotkey(const char *key, char *out_action, size_t act
 }
 
 static void input__kb_run_hotkey(const char *action) {
-    if (strcmp(action, "task switch next") == 0) {
-        (void)task_registry__switch_next();
+    if (strcmp(action, "process switch next") == 0) {
+        (void)process_registry__switch_next();
         return;
     }
 
@@ -541,7 +541,7 @@ static void input__poll_keyboard(void) {
                          * the modifier. */
                         const char *label = s_kb_normal[y][x];
                         (void)input__push_event_locked(
-                            BRUCE_INPUT_KEY, BRUCE_INPUT_PRESS, 0, (int32_t)label[0], BRUCE_TASK_ID_INVALID
+                            BRUCE_INPUT_KEY, BRUCE_INPUT_PRESS, 0, (int32_t)label[0], BRUCE_PROCESS_ID_INVALID
                         );
                     } else if (matched_hotkey) {
                         memcpy(hotkey_action, matched_action, sizeof(hotkey_action));
@@ -551,7 +551,7 @@ static void input__poll_keyboard(void) {
                         int32_t nav = input__kb_decode_fn_nav(x, y);
                         if (nav != 0) {
                             (void)input__push_event_locked(
-                                BRUCE_INPUT_KEY, BRUCE_INPUT_PRESS, nav, 0, BRUCE_TASK_ID_INVALID
+                                BRUCE_INPUT_KEY, BRUCE_INPUT_PRESS, nav, 0, BRUCE_PROCESS_ID_INVALID
                             );
                         }
                     } else {
@@ -560,7 +560,7 @@ static void input__poll_keyboard(void) {
                         int32_t code = input__kb_char_code(label);
                         if (code != 0) {
                             (void)input__push_event_locked(
-                                BRUCE_INPUT_KEY, BRUCE_INPUT_PRESS, code, code, BRUCE_TASK_ID_INVALID
+                                BRUCE_INPUT_KEY, BRUCE_INPUT_PRESS, code, code, BRUCE_PROCESS_ID_INVALID
                             );
                         }
                     }
@@ -579,7 +579,7 @@ static void input__poll_keyboard(void) {
                         int32_t code = input__kb_char_code(label);
                         if (code != 0) {
                             (void)input__push_event_locked(
-                                BRUCE_INPUT_KEY, BRUCE_INPUT_RELEASE, code, code, BRUCE_TASK_ID_INVALID
+                                BRUCE_INPUT_KEY, BRUCE_INPUT_RELEASE, code, code, BRUCE_PROCESS_ID_INVALID
                             );
                         }
                     }
@@ -590,9 +590,9 @@ static void input__poll_keyboard(void) {
         }
     }
 
-    bruce_task_id_t owner = s_foreground_task_id;
+    bruce_process_id_t owner = s_foreground_process_id;
     input__unlock();
-    task_registry__input_wake(owner);
+    process_registry__input_wake(owner);
     if (hotkey_action[0] != '\0') input__kb_run_hotkey(hotkey_action);
 }
 
@@ -604,7 +604,7 @@ static void input__poll_keyboard(void) {}
 #endif
 
 /* -------------------------------------------------------------------------- */
-/* Polling task                                                               */
+/* Polling process                                                               */
 /* -------------------------------------------------------------------------- */
 
 static void input__poll_task(void *arg) {
@@ -669,22 +669,22 @@ void input__deinit(void) {
     }
 
     s_initialized = false;
-    bruce_task_id_t owner = s_foreground_task_id;
-    s_foreground_task_id = BRUCE_TASK_ID_INVALID;
+    bruce_process_id_t owner = s_foreground_process_id;
+    s_foreground_process_id = BRUCE_PROCESS_ID_INVALID;
     s_foreground_epoch++;
     input__unlock();
-    task_registry__input_wake(owner);
+    process_registry__input_wake(owner);
 }
 
-void input__foreground_changed(bruce_task_id_t task_id) {
+void input__foreground_changed(bruce_process_id_t process_id) {
     if (s_mutex == NULL) {
-        s_foreground_task_id = task_id;
+        s_foreground_process_id = process_id;
         s_foreground_epoch++;
         return;
     }
     input__lock();
-    if (s_foreground_task_id != task_id) {
-        s_foreground_task_id = task_id;
+    if (s_foreground_process_id != process_id) {
+        s_foreground_process_id = process_id;
         s_foreground_epoch++;
     }
     input__unlock();
@@ -692,7 +692,7 @@ void input__foreground_changed(bruce_task_id_t task_id) {
 
 bruce_result_t input__read(bruce_input_event_t *out_event, uint32_t timeout_ms) {
     if (out_event == NULL) { return BRUCE_ERR_INVALID_ARGUMENT; }
-    bruce_task_id_t caller = task__current_id();
+    bruce_process_id_t caller = process__current_id();
     uint64_t start_ms = input__now_ms();
     input__lock();
     if (!s_initialized) {
@@ -707,7 +707,7 @@ bruce_result_t input__read(bruce_input_event_t *out_event, uint32_t timeout_ms) 
     input__unlock();
 
     for (;;) {
-        if (task_registry__input_wake_clear(caller) != BRUCE_OK) { return BRUCE_ERR_NOT_FOREGROUND; }
+        if (process_registry__input_wake_clear(caller) != BRUCE_OK) { return BRUCE_ERR_NOT_FOREGROUND; }
         input__lock();
         if (!s_initialized) {
             input__unlock();
@@ -727,12 +727,12 @@ bruce_result_t input__read(bruce_input_event_t *out_event, uint32_t timeout_ms) 
             if (elapsed >= timeout_ms) { return BRUCE_ERR_TIMEOUT; }
             remaining = (uint32_t)(timeout_ms - elapsed);
         }
-        (void)task_registry__input_wake_wait(caller, remaining);
+        (void)process_registry__input_wake_wait(caller, remaining);
     }
 }
 
 bruce_result_t input__flush(void) {
-    bruce_task_id_t caller = task__current_id();
+    bruce_process_id_t caller = process__current_id();
     input__lock();
     if (!s_initialized) {
         input__unlock();
@@ -751,7 +751,7 @@ bruce_result_t input__flush(void) {
 
 bruce_result_t input__peek(bruce_input_event_t *out_event) {
     if (out_event == NULL) { return BRUCE_ERR_INVALID_ARGUMENT; }
-    bruce_task_id_t caller = task__current_id();
+    bruce_process_id_t caller = process__current_id();
     input__lock();
     if (!s_initialized) {
         input__unlock();
@@ -794,7 +794,7 @@ bruce_result_t input__wait(uint32_t timeout_ms, int32_t *out_code) {
 }
 
 bool input__check(int32_t code, bool consume) {
-    bruce_task_id_t caller = task__current_id();
+    bruce_process_id_t caller = process__current_id();
     input__lock();
     if (!s_initialized || !input__caller_is_foreground_locked(caller)) {
         input__unlock();
@@ -851,7 +851,7 @@ bruce_result_t input__inject(const bruce_input_event_t *event) {
 
     bruce_input_event_t ev = *event;
     ev.timestamp_ms = input__now_ms();
-    ev.source_task_id = task__current_id();
+    ev.source_process_id = process__current_id();
 
     input__lock();
     if (!s_initialized) {
@@ -859,8 +859,8 @@ bruce_result_t input__inject(const bruce_input_event_t *event) {
         return BRUCE_ERR_NOT_INITIALIZED;
     }
     BaseType_t sent = xQueueSend(s_queue, &ev, 0);
-    bruce_task_id_t owner = s_foreground_task_id;
+    bruce_process_id_t owner = s_foreground_process_id;
     input__unlock();
-    task_registry__input_wake(owner);
+    process_registry__input_wake(owner);
     return sent == pdPASS ? BRUCE_OK : BRUCE_ERR_BUSY;
 }

@@ -1,6 +1,6 @@
 #include "core/storage/storage.h"
 #include "core_sdk/app_runner.h"
-#include "core_sdk/task.h"
+#include "core_sdk/process.h"
 #include "fake_elf.h"
 #include "modules/loaders/elf/elf_loader_app.h"
 #include <stdio.h>
@@ -59,17 +59,17 @@ typedef struct {
     char argv_buf[5][32];
     volatile bool argv_terminated;
     volatile bool gui_requested;
-    volatile bruce_task_state_t state;
+    volatile bruce_process_state_t state;
 } selftest__apprunner_echo_t;
 
 static selftest__apprunner_echo_t s_echo;
 
 /* Records its own conventional argc/argv (argv[0] plus shell-parsed arguments)
- * and the task state / gui_requested flag AppRunner recorded for it, so the
- * harness can inspect them after the task exits (its task record is gone by then). */
+ * and the process state / gui_requested flag AppRunner recorded for it, so the
+ * harness can inspect them after the process exits (its process record is gone by then). */
 static int selftest__apprunner_echo_entry(int argc, char **argv) {
-    bruce_task_snapshot_t snapshot;
-    if (task__snapshot(task__current_id(), &snapshot) == BRUCE_OK) {
+    bruce_process_snapshot_t snapshot;
+    if (process__snapshot(process__current_id(), &snapshot) == BRUCE_OK) {
         s_echo.state = snapshot.state;
         s_echo.gui_requested = snapshot.gui_requested;
     }
@@ -99,7 +99,7 @@ bool selftest__run_apprunner_args_case(void) {
     memset(&s_echo, 0, sizeof(s_echo));
     int background_result = app_runner__run("selftest_echo", "--gui foo \"bar baz\" escaped\\ space", true);
     bruce_result_t background_wait = background_result > 0
-                                         ? task__wait((bruce_task_id_t)background_result, 2000)
+                                         ? process__wait((bruce_process_id_t)background_result, 2000)
                                          : BRUCE_ERR_INVALID_ARGUMENT;
     if (background_wait != BRUCE_OK && background_wait != BRUCE_ERR_NOT_FOUND) {
         printf(
@@ -113,7 +113,7 @@ bool selftest__run_apprunner_args_case(void) {
                          strcmp(s_echo.argv_buf[1], "--gui") == 0 && strcmp(s_echo.argv_buf[2], "foo") == 0 &&
                          strcmp(s_echo.argv_buf[3], "bar baz") == 0 &&
                          strcmp(s_echo.argv_buf[4], "escaped space") == 0 && s_echo.argv_terminated &&
-                         s_echo.gui_requested && s_echo.state == BRUCE_TASK_BACKGROUND;
+                         s_echo.gui_requested && s_echo.state == BRUCE_PROCESS_BACKGROUND;
     if (!background_ok) {
         printf(
             "[selftest] apprunner/args: background argc=%d gui=%d state=%d argv=[%s|%s|%s|%s|%s]\n",
@@ -132,7 +132,7 @@ bool selftest__run_apprunner_args_case(void) {
     memset(&s_echo, 0, sizeof(s_echo));
     int foreground_result = app_runner__run("selftest_echo", "one two", false);
     bruce_result_t foreground_wait = foreground_result > 0
-                                         ? task__wait((bruce_task_id_t)foreground_result, 2000)
+                                         ? process__wait((bruce_process_id_t)foreground_result, 2000)
                                          : BRUCE_ERR_INVALID_ARGUMENT;
     if (foreground_wait != BRUCE_OK && foreground_wait != BRUCE_ERR_NOT_FOUND) {
         printf(
@@ -144,7 +144,7 @@ bool selftest__run_apprunner_args_case(void) {
     }
     if (s_echo.argc != 3 || strcmp(s_echo.argv_buf[0], "selftest_echo") != 0 ||
         strcmp(s_echo.argv_buf[1], "one") != 0 || strcmp(s_echo.argv_buf[2], "two") != 0 ||
-        !s_echo.argv_terminated || s_echo.gui_requested || s_echo.state != BRUCE_TASK_FOREGROUND) {
+        !s_echo.argv_terminated || s_echo.gui_requested || s_echo.state != BRUCE_PROCESS_FOREGROUND) {
         printf(
             "[selftest] apprunner/args: foreground argc=%d gui=%d state=%d\n",
             s_echo.argc,
@@ -180,7 +180,7 @@ bool selftest__run_apprunner_resolution_case(void) {
     int source_len = snprintf(
         js_source,
         sizeof(js_source),
-        "/*\n{\"appName\":\"Resolution Test\",\"appIcon\":\"%s\",\"coreAbiVersion\":1,"
+        "/*\n{\"appName\":\"Resolution Test\",\"appIcon\":\"%s\",\"coreAbiVersion\":2,"
         "\"stackSize\":8192,\"permissions\":[]}\n*/\n",
         icon
     );
@@ -199,9 +199,9 @@ bool selftest__run_apprunner_resolution_case(void) {
         storage__remove(js_path);
         return false;
     }
-    (void)task__wait((bruce_task_id_t)result, 2000);
+    (void)process__wait((bruce_process_id_t)result, 2000);
 
-    /* ELF wins if both exist, and (post-A6) really spawns a task through the
+    /* ELF wins if both exist, and (post-A6) really spawns a process through the
      * loader registry instead of returning a placeholder BRUCE_ERR_*. */
     if (!selftest__write_fake_elf(elf_path, SELFTEST_APPRUNNER_RESOLUTION_NAME ".elf", NULL, 0)) {
         printf("[selftest] apprunner/resolution: could not create %s\n", elf_path);
@@ -212,7 +212,7 @@ bool selftest__run_apprunner_resolution_case(void) {
     result = app_runner__run(SELFTEST_APPRUNNER_RESOLUTION_NAME, "", true);
     elf_calls++;
     bool spawned = result > 0 && elf_loader__debug_call_count() == elf_calls;
-    if (spawned) { (void)task__wait((bruce_task_id_t)result, 2000); }
+    if (spawned) { (void)process__wait((bruce_process_id_t)result, 2000); }
     storage__remove(elf_path);
     storage__remove(js_path);
     if (!spawned) {

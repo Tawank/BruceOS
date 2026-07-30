@@ -1,29 +1,29 @@
 #include "runtime_js.h"
 
-#include "core_sdk/task.h"
+#include "core_sdk/process.h"
 
 JSValue native_runtimeToBackground(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
     (void)this_val;
     (void)argc;
     (void)argv;
-    return JS_NewInt32(ctx, (int)task__to_background());
+    return JS_NewInt32(ctx, (int)process__to_background());
 }
 
 JSValue native_runtimeToForeground(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
     (void)this_val;
     (void)argc;
     (void)argv;
-    return JS_NewInt32(ctx, (int)task__to_foreground());
+    return JS_NewInt32(ctx, (int)process__to_foreground());
 }
 
 JSValue native_runtimeIsForeground(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
     (void)this_val;
     (void)argc;
     (void)argv;
-    bruce_task_snapshot_t snapshot;
+    bruce_process_snapshot_t snapshot;
     bool fg = false;
-    if (task__snapshot(task__current_id(), &snapshot) == BRUCE_OK) {
-        fg = (snapshot.state == BRUCE_TASK_FOREGROUND);
+    if (process__snapshot(process__current_id(), &snapshot) == BRUCE_OK) {
+        fg = (snapshot.state == BRUCE_PROCESS_FOREGROUND);
     }
     return JS_NewBool(fg);
 }

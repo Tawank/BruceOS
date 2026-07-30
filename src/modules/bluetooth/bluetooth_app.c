@@ -8,21 +8,22 @@
 #include "core_sdk/dialog.h"
 #include "core_sdk/result.h"
 #include "core_sdk/stdio.h"
-#include "core_sdk/task.h"
+#include "core_sdk/process.h"
+#include "core_sdk/runtime.h"
 
 #define BLUETOOTH_APP__MAX_RESULTS 32
 
 static bool bluetooth_app__resume_after_handoff(void) {
-    bruce_task_snapshot_t snapshot;
-    bruce_task_id_t self = task__current_id();
-    if (self == BRUCE_TASK_ID_INVALID || task__snapshot(self, &snapshot) != BRUCE_OK ||
-        snapshot.state != BRUCE_TASK_BACKGROUND) {
+    bruce_process_snapshot_t snapshot;
+    bruce_process_id_t self = process__current_id();
+    if (self == BRUCE_PROCESS_ID_INVALID || process__snapshot(self, &snapshot) != BRUCE_OK ||
+        snapshot.state != BRUCE_PROCESS_BACKGROUND) {
         return false;
     }
     do {
-        if (runtime__delay(20) != BRUCE_OK || task__snapshot(self, &snapshot) != BRUCE_OK) return false;
-    } while (snapshot.state == BRUCE_TASK_BACKGROUND);
-    return snapshot.state == BRUCE_TASK_FOREGROUND;
+        if (runtime__delay(20) != BRUCE_OK || process__snapshot(self, &snapshot) != BRUCE_OK) return false;
+    } while (snapshot.state == BRUCE_PROCESS_BACKGROUND);
+    return snapshot.state == BRUCE_PROCESS_FOREGROUND;
 }
 
 static bruce_result_t bluetooth_app__message(
@@ -120,7 +121,7 @@ static int bluetooth_app__scan_gui(void) {
 int bluetooth_app_main(int argc, char **argv) {
     if (app_runner__args_have_gui(argc, argv)) {
         if (!app_runner__args_have_background(argc, argv)) {
-            bruce_result_t foreground = task__to_foreground();
+            bruce_result_t foreground = process__to_foreground();
             if (foreground != BRUCE_OK) return foreground;
         }
         const bruce_dialog_choice_t choices[] = {

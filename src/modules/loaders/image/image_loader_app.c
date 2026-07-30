@@ -11,7 +11,7 @@
 #include "core_sdk/result.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
-#include "core_sdk/task.h"
+#include "core_sdk/process.h"
 
 int image_viewer_app_main(int argc, char **argv) {
     ArgParser *parser = ap_new_parser();
@@ -33,7 +33,7 @@ int image_viewer_app_main(int argc, char **argv) {
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
     if (!app_runner__args_have_background(argc, argv)) {
-        bruce_result_t foreground = task__to_foreground();
+        bruce_result_t foreground = process__to_foreground();
         if (foreground != BRUCE_OK) return foreground;
     }
 
