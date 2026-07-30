@@ -662,11 +662,18 @@ own `SPI2_HOST` and is never attached through this API. Core hardware drivers
 use trusted private GPIO/bus entry points so their capability-specific
 permission remains authoritative.
 
-Display Core owns one RGB565 framebuffer and one panel-transfer worker. GUI
-processes draw in local coordinates into a fullscreen foreground viewport, one of
-up to four launcher-assigned non-overlapping tiles, or a hidden zero-sized
-viewport. `display__begin_frame()` leases the viewport through the completion
-of `display__present()`; tile rows are packed into worker-owned DMA scratch.
+Display Core owns one RGB565 framebuffer and transfers run synchronously in
+the caller's task: `display__present()` (and the `display__flush()`
+implicit-frame path) pushes the viewport rect to the panel before returning,
+serialized by the display lock, so transfers never race with drawing or with
+each other. GUI processes draw in local coordinates into a fullscreen
+foreground viewport, one of up to four launcher-assigned non-overlapping
+tiles, or a hidden zero-sized viewport. `display__begin_frame()` leases the
+viewport through the completion of `display__present()`; tile rows are packed
+into a shared DMA scratch row buffer. A full-screen `display__present()` with
+the default configuration streams the framebuffer directly over DMA
+(`displayDmaFramebuffer` in `bruce.json`, default true); any partial rect,
+overlay composition, or a `false` setting falls back to row-packed transfers.
 Text and cursor state are process-local, rotation is global, and no resize event is
 emitted. Drawing primitives include legacy-compatible circular arcs whose zero
 angle is at six o'clock and increases clockwise.
@@ -698,9 +705,11 @@ use this same loader. GIF animation is not part of this initial contract.
 Core also owns one transient notification overlay. `notification__push()` and
 `notification__dismiss()` are unrestricted, last-writer-wins operations; text
 is copied into fixed storage and duration is clamped to 250 through 30000 ms.
-The worker composes the bottom-right overlay only into DMA transfer scratch, so
-it never changes application framebuffer pixels. Show, replacement, dismissal,
-expiration, and intersecting application presentations are event-driven.
+The overlay is composed only into transfer scratch rows, so it never changes
+application framebuffer pixels. Push and dismiss repaint the overlay rect
+immediately unless a frame is mid-flight over it, in which case the overlay
+appears on that app's next `display__present()`; expiry is lazy and the
+overlay disappears on the next transfer that overlaps its rect.
 
 The unrestricted status-icon service is a separate runtime-only global keyed
 registry. Any process may replace or remove any key, including one created by a

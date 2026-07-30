@@ -12,13 +12,12 @@
 #include "esp_heap_caps.h"
 #include "esp_attr.h"
 #include "esp_log.h"
-#include "freertos/queue.h"
+#include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
 #define TAG "bruce_display"
 #define DISPLAY__MAX_CONTEXTS 16
-#define DISPLAY__WORKER_STACK 4096
 #define DISPLAY__ROW_BUF_PIXELS                                                                              \
     (DISPLAY__NATIVE_WIDTH > DISPLAY__NATIVE_HEIGHT ? DISPLAY__NATIVE_WIDTH : DISPLAY__NATIVE_HEIGHT)
 
@@ -29,15 +28,6 @@
 #else
 #error "No Bruce board selected; set CONFIG_BRUCE_BOARD_* via menuconfig or sdkconfig"
 #endif
-
-typedef struct {
-    display__process_context_t *context;
-    bruce_display_rect_t rect;
-    bool fullscreen;
-    bool overlay_update;
-    bool shutdown;
-    uint32_t notification_generation;
-} display__request_t;
 
 typedef struct {
     bool active;
@@ -60,13 +50,9 @@ static uint8_t s_brightness;
 static display__process_context_t s_contexts[DISPLAY__MAX_CONTEXTS];
 static display__process_context_t s_system_context;
 static display__process_context_t *s_draw_context;
-static QueueHandle_t s_request_queue;
 static SemaphoreHandle_t s_transfer_done;
-static SemaphoreHandle_t s_worker_stopped;
-static TaskHandle_t s_worker_task;
 static bool s_dashboard_layout;
 static notification__state_t s_notification;
-static bool s_transfer_active;
 
 static inline void display__lock(void) { xSemaphoreTakeRecursive(s_mutex, portMAX_DELAY); }
 static inline void display__unlock(void) { xSemaphoreGiveRecursive(s_mutex); }
@@ -270,126 +256,62 @@ bool display_internal__on_transfer_done_from_isr(void) {
     return high_priority_woken == pdTRUE;
 }
 
-static void display__finish_request(display__request_t *request, bruce_result_t result) {
-    if (request->overlay_update) return;
-    display__lock();
-    display__process_context_t *context = request->context;
-    context->completion_result = result;
-    context->transfer_pending = false;
-    context->frame_active = false;
-    context->frame_noop = false;
-    if (!context->remove_pending) display__set_visibility_locked(context);
-    if (context->remove_pending && context != &s_system_context) {
-        SemaphoreHandle_t completion = context->completion;
-        context->completion = NULL;
-        context->in_use = false;
-        context->remove_pending = false;
-        display__unlock();
-        if (completion != NULL) vSemaphoreDelete(completion);
-        return;
+/* Marks the notification as expired once its deadline passes.  Expiry is
+ * lazy: the overlay pixels are repainted without the notification by the next
+ * transfer that overlaps its rect, not by a dedicated timeout.  The caller
+ * must hold the display lock. */
+static void display__expire_notification_locked(void) {
+    if (s_notification.active && (int32_t)(xTaskGetTickCount() - s_notification.expires_at) >= 0) {
+        s_notification.active = false;
+        s_notification.generation++;
     }
-    xSemaphoreGive(context->completion);
-    display__unlock();
 }
 
-static void display__worker(void *arg) {
-    (void)arg;
-    display__request_t request;
-    for (;;) {
-        TickType_t wait = portMAX_DELAY;
-        display__lock();
-        if (s_notification.active) {
-            TickType_t now = xTaskGetTickCount();
-            wait = (int32_t)(s_notification.expires_at - now) > 0 ? s_notification.expires_at - now : 0;
-        }
-        display__unlock();
-        if (xQueueReceive(s_request_queue, &request, wait) != pdPASS) {
-            display__lock();
-            if (!s_notification.active || (int32_t)(xTaskGetTickCount() - s_notification.expires_at) < 0) {
-                display__unlock();
-                continue;
-            }
-            request = (display__request_t){
-                .rect = s_notification.rect,
-                .overlay_update = true,
-                .notification_generation = s_notification.generation,
-            };
-            s_notification.active = false;
-            s_notification.generation++;
-            display__unlock();
-        }
-        if (request.shutdown) {
-            display__lock();
-            s_worker_task = NULL;
-            display__unlock();
-            xSemaphoreGive(s_worker_stopped);
-            vTaskDelete(NULL);
-            continue;
-        }
-        display__lock();
-        s_transfer_active = true;
-        display__unlock();
+/* Pushes `rect` from the framebuffer to the panel, compositing the active
+ * notification overlay into the transferred rows.  Runs synchronously in the
+ * caller's task with the display lock held, so transfers are serialized and
+ * can never race with drawing or with each other. */
+static bruce_result_t display__transfer_locked(bruce_display_rect_t rect, bool fullscreen) {
 #if CONFIG_BRUCE_QEMU_TEST_MODE
-        display__lock();
-        s_transfer_active = false;
-        display__unlock();
-        display__finish_request(&request, BRUCE_OK);
-        continue;
-#endif
-        for (;;) {
-            display__lock();
-            bool conflict = request.overlay_update && display__overlay_conflicts_locked(request.rect);
-            display__unlock();
-            if (!conflict) break;
-            vTaskDelay(1);
-        }
-        display__lock();
-        notification__state_t notification = s_notification;
-        bool compose = notification.active && display__rects_overlap(request.rect, notification.rect);
-        bool packed = !s_dma_framebuffer || !request.fullscreen || compose || request.overlay_update;
-        display__unlock();
-        while (xSemaphoreTake(s_transfer_done, 0) == pdTRUE) {}
-        if (packed) {
-            int x = request.rect.x;
-            int y = request.rect.y;
-            int w = request.rect.width;
-            int h = request.rect.height;
-            bool failed = false;
-            for (int row = 0; row < h; ++row) {
-                int screen_y = y + row;
-                const bruce_display_color_t *pixels = &s_framebuffer[screen_y * s_fb_width + x];
-                if (compose || !s_dma_framebuffer) {
-                    display__lock();
-                    memcpy(s_row_buffer, pixels, (size_t)w * sizeof(*pixels));
-                    if (compose) display__compose_notification_row(request.rect, &notification, screen_y);
-                    display__unlock();
-                    pixels = s_row_buffer;
-                }
-                if (display_driver__draw_bitmap(x, screen_y, x + w, screen_y + 1, pixels) != BRUCE_OK ||
-                    xSemaphoreTake(s_transfer_done, portMAX_DELAY) != pdTRUE) {
-                    failed = true;
-                    break;
-                }
+    (void)rect;
+    (void)fullscreen;
+    return BRUCE_OK;
+#else
+    display__expire_notification_locked();
+    notification__state_t notification = s_notification;
+    bool compose = notification.active && display__rects_overlap(rect, notification.rect);
+    bool packed = !s_dma_framebuffer || !fullscreen || compose;
+    while (xSemaphoreTake(s_transfer_done, 0) == pdTRUE) {}
+    if (packed) {
+        for (int row = 0; row < rect.height; ++row) {
+            int screen_y = rect.y + row;
+            const bruce_display_color_t *pixels = &s_framebuffer[screen_y * s_fb_width + rect.x];
+            if (compose || !s_dma_framebuffer) {
+                memcpy(s_row_buffer, pixels, (size_t)rect.width * sizeof(*pixels));
+                if (compose) display__compose_notification_row(rect, &notification, screen_y);
+                pixels = s_row_buffer;
             }
-            display__lock();
-            s_transfer_active = false;
-            display__unlock();
-            display__finish_request(&request, failed ? BRUCE_ERR_IO : BRUCE_OK);
-            continue;
+            if (display_driver__draw_bitmap(rect.x, screen_y, rect.x + rect.width, screen_y + 1, pixels) !=
+                    BRUCE_OK ||
+                xSemaphoreTake(s_transfer_done, portMAX_DELAY) != pdTRUE) {
+                return BRUCE_ERR_IO;
+            }
         }
-        bruce_result_t result = display_driver__draw_bitmap(
-            request.rect.x,
-            request.rect.y,
-            request.rect.x + request.rect.width,
-            request.rect.y + request.rect.height,
-            s_framebuffer
-        );
-        if (result == BRUCE_OK && xSemaphoreTake(s_transfer_done, portMAX_DELAY) != pdTRUE) result = BRUCE_ERR_IO;
-        display__lock();
-        s_transfer_active = false;
-        display__unlock();
-        display__finish_request(&request, result);
+        return BRUCE_OK;
     }
+    bruce_result_t result = display_driver__draw_bitmap(
+        rect.x, rect.y, rect.x + rect.width, rect.y + rect.height, s_framebuffer
+    );
+    if (result == BRUCE_OK && xSemaphoreTake(s_transfer_done, portMAX_DELAY) != pdTRUE) result = BRUCE_ERR_IO;
+    return result;
+#endif
+}
+
+/* Caller must hold the display lock. */
+static void display__finish_frame_locked(display__process_context_t *context) {
+    context->frame_active = false;
+    context->frame_noop = false;
+    display__set_visibility_locked(context);
 }
 
 static void display__configure_rotation(void) {
@@ -404,20 +326,7 @@ static void display__configure_rotation(void) {
 }
 
 static void display__release_resources_locked(void) {
-    if (s_worker_task != NULL) { vTaskDelete(s_worker_task); s_worker_task = NULL; }
-    if (s_request_queue != NULL) { vQueueDelete(s_request_queue); s_request_queue = NULL; }
     if (s_transfer_done != NULL) { vSemaphoreDelete(s_transfer_done); s_transfer_done = NULL; }
-    if (s_worker_stopped != NULL) { vSemaphoreDelete(s_worker_stopped); s_worker_stopped = NULL; }
-    if (s_system_context.completion != NULL) {
-        vSemaphoreDelete(s_system_context.completion);
-        s_system_context.completion = NULL;
-    }
-    for (int i = 0; i < DISPLAY__MAX_CONTEXTS; ++i) {
-        if (s_contexts[i].completion != NULL) {
-            vSemaphoreDelete(s_contexts[i].completion);
-            s_contexts[i].completion = NULL;
-        }
-    }
     if (s_framebuffer != NULL) { heap_caps_free(s_framebuffer); s_framebuffer = NULL; }
     display_driver__deinit();
 }
@@ -447,23 +356,9 @@ bruce_result_t display__init(void) {
     s_system_context.gui_requested = true;
     s_system_context.state = BRUCE_PROCESS_FOREGROUND;
     s_system_context.viewport = display__fullscreen_rect();
-    s_system_context.completion = xSemaphoreCreateBinary();
     display__context_defaults(&s_system_context);
     s_transfer_done = xSemaphoreCreateBinary();
-    s_worker_stopped = xSemaphoreCreateBinary();
-    s_request_queue = xQueueCreate(DISPLAY__MAX_CONTEXTS + 1, sizeof(display__request_t));
-    bool completion_failed = false;
-    for (int i = 0; i < DISPLAY__MAX_CONTEXTS; ++i) {
-        if (s_contexts[i].in_use && s_contexts[i].completion == NULL) {
-            s_contexts[i].completion = xSemaphoreCreateBinary();
-            if (s_contexts[i].completion == NULL) completion_failed = true;
-        }
-    }
-    if (s_system_context.completion == NULL || s_transfer_done == NULL || s_worker_stopped == NULL ||
-        s_request_queue == NULL || completion_failed ||
-        xTaskCreate(
-            display__worker, "bruce_display", DISPLAY__WORKER_STACK, NULL, tskIDLE_PRIORITY + 3, &s_worker_task
-        ) != pdPASS) {
+    if (s_transfer_done == NULL) {
         display__release_resources_locked();
         display__unlock();
         return BRUCE_ERR_NO_MEMORY;
@@ -488,15 +383,6 @@ void display__deinit(void) {
     display__lock();
     if (!s_initialized) { display__unlock(); return; }
     s_initialized = false;
-    QueueHandle_t queue = s_request_queue;
-    SemaphoreHandle_t stopped = s_worker_stopped;
-    TaskHandle_t worker = s_worker_task;
-    display__unlock();
-    if (worker != NULL && queue != NULL && stopped != NULL) {
-        display__request_t shutdown = {.shutdown = true};
-        if (xQueueSend(queue, &shutdown, portMAX_DELAY) == pdPASS) xSemaphoreTake(stopped, portMAX_DELAY);
-    }
-    display__lock();
     display__release_resources_locked();
     display__unlock();
 }
@@ -525,10 +411,6 @@ bruce_result_t display__set_rotation(uint8_t rotation) {
     if (!s_initialized) { display__unlock(); return BRUCE_ERR_NOT_INITIALIZED; }
     display__process_context_t *caller = display__find_context_locked(caller_id);
     if (caller == NULL || caller->tiled) { display__unlock(); return BRUCE_ERR_PERMISSION; }
-    if (s_transfer_active || (s_request_queue != NULL && uxQueueMessagesWaiting(s_request_queue) != 0)) {
-        display__unlock();
-        return BRUCE_ERR_BUSY;
-    }
     for (int i = 0; i < DISPLAY__MAX_CONTEXTS; ++i) {
         if (s_contexts[i].in_use && s_contexts[i].frame_active) { display__unlock(); return BRUCE_ERR_BUSY; }
     }
@@ -618,7 +500,6 @@ bruce_result_t display__begin_frame(void) {
     if (!s_initialized) { display__unlock(); return BRUCE_ERR_NOT_INITIALIZED; }
     display__process_context_t *context = display__find_context_locked(caller);
     if (context == NULL) { display__unlock(); return BRUCE_ERR_PERMISSION; }
-    if (context->completion == NULL) { display__unlock(); return BRUCE_ERR_NO_MEMORY; }
     if (context->frame_active) { display__unlock(); return BRUCE_ERR_INVALID_STATE; }
     context->frame_active = true;
     context->frame_noop = context->hidden;
@@ -650,33 +531,21 @@ bruce_result_t display__present(void) {
     if (!s_initialized) { display__unlock(); return BRUCE_ERR_NOT_INITIALIZED; }
     if (context == NULL || !context->frame_active) { display__unlock(); return BRUCE_ERR_INVALID_STATE; }
     if (context->frame_noop) {
-        context->frame_active = false;
-        context->frame_noop = false;
+        display__finish_frame_locked(context);
         display__unlock();
         return BRUCE_OK;
     }
     if (context->frame_generation != context->viewport_generation) {
-        context->frame_active = false;
+        display__finish_frame_locked(context);
         display__unlock();
         return BRUCE_ERR_INVALID_STATE;
     }
-    display__request_t request = {
-        .context = context,
-        .rect = context->viewport,
-        .fullscreen = context->viewport.x == 0 && context->viewport.y == 0 &&
-                      context->viewport.width == s_fb_width && context->viewport.height == s_fb_height,
-    };
-    while (xSemaphoreTake(context->completion, 0) == pdTRUE) {}
-    context->transfer_pending = true;
-    if (xQueueSend(s_request_queue, &request, 0) != pdPASS) {
-        context->transfer_pending = false;
-        context->frame_active = false;
-        display__unlock();
-        return BRUCE_ERR_BUSY;
-    }
+    bool fullscreen = context->viewport.x == 0 && context->viewport.y == 0 &&
+                      context->viewport.width == s_fb_width && context->viewport.height == s_fb_height;
+    bruce_result_t result = display__transfer_locked(context->viewport, fullscreen);
+    display__finish_frame_locked(context);
     display__unlock();
-    if (xSemaphoreTake(context->completion, portMAX_DELAY) != pdTRUE) return BRUCE_ERR_IO;
-    return context->completion_result;
+    return result;
 }
 
 bruce_result_t display__flush(void) {
@@ -763,13 +632,11 @@ void display__process_created(bruce_process_id_t process_id, bool gui_requested)
     display__lock();
     for (int i = 0; i < DISPLAY__MAX_CONTEXTS; ++i) {
         if (!s_contexts[i].in_use) {
-            SemaphoreHandle_t completion = s_contexts[i].completion;
             memset(&s_contexts[i], 0, sizeof(s_contexts[i]));
             s_contexts[i].in_use = true;
             s_contexts[i].process_id = process_id;
             s_contexts[i].gui_requested = gui_requested;
             s_contexts[i].hidden = true;
-            s_contexts[i].completion = completion != NULL ? completion : xSemaphoreCreateBinary();
             display__context_defaults(&s_contexts[i]);
             break;
         }
@@ -807,21 +674,14 @@ void display__process_state_changed(bruce_process_id_t process_id, bruce_process
 void display__process_removed(bruce_process_id_t process_id) {
     display__ensure_lock();
     display__lock();
-    SemaphoreHandle_t completion = NULL;
     display__process_context_t *context = display__find_context_locked(process_id);
     if (context != NULL) {
         context->hidden = true;
         context->tiled = false;
-        if (context->transfer_pending) context->remove_pending = true;
-        else {
-            context->frame_active = false;
-            context->in_use = false;
-            completion = context->completion;
-            context->completion = NULL;
-        }
+        context->frame_active = false;
+        context->in_use = false;
     }
     display__unlock();
-    if (completion != NULL) vSemaphoreDelete(completion);
 }
 
 bruce_result_t display__test_read_pixel(int16_t x, int16_t y, bruce_display_color_t *out_color) {
@@ -845,7 +705,6 @@ bruce_result_t display__notification_push(const char *text, uint32_t duration_ms
     display__ensure_lock();
     display__lock();
     if (!s_initialized) { display__unlock(); return BRUCE_ERR_NOT_INITIALIZED; }
-    notification__state_t previous = s_notification;
     bruce_display_rect_t old_rect = s_notification.active ? s_notification.rect : (bruce_display_rect_t){0};
     strncpy(s_notification.text, text, sizeof(s_notification.text) - 1);
     s_notification.text[sizeof(s_notification.text) - 1] = '\0';
@@ -854,18 +713,11 @@ bruce_result_t display__notification_push(const char *text, uint32_t duration_ms
     s_notification.expires_at = xTaskGetTickCount() + pdMS_TO_TICKS(duration_ms);
     s_notification.rect = display__notification_rect(s_notification.text);
     s_notification.generation++;
-    display__request_t request = {
-        .rect = display__rect_union(old_rect, s_notification.rect),
-        .overlay_update = true,
-        .notification_generation = s_notification.generation,
-    };
-    if (xQueueSend(s_request_queue, &request, 0) != pdPASS) {
-        s_notification = previous;
-        display__unlock();
-        return BRUCE_ERR_BUSY;
-    }
+    bruce_result_t result = BRUCE_OK;
+    bruce_display_rect_t repaint = display__rect_union(old_rect, s_notification.rect);
+    if (!display__overlay_conflicts_locked(repaint)) result = display__transfer_locked(repaint, false);
     display__unlock();
-    return BRUCE_OK;
+    return result;
 }
 
 bruce_result_t display__notification_dismiss(void) {
@@ -873,21 +725,13 @@ bruce_result_t display__notification_dismiss(void) {
     display__lock();
     if (!s_initialized) { display__unlock(); return BRUCE_ERR_NOT_INITIALIZED; }
     if (!s_notification.active) { display__unlock(); return BRUCE_OK; }
-    notification__state_t previous = s_notification;
-    display__request_t request = {
-        .rect = s_notification.rect,
-        .overlay_update = true,
-        .notification_generation = s_notification.generation,
-    };
+    bruce_display_rect_t repaint = s_notification.rect;
     s_notification.active = false;
     s_notification.generation++;
-    if (xQueueSend(s_request_queue, &request, 0) != pdPASS) {
-        s_notification = previous;
-        display__unlock();
-        return BRUCE_ERR_BUSY;
-    }
+    bruce_result_t result = BRUCE_OK;
+    if (!display__overlay_conflicts_locked(repaint)) result = display__transfer_locked(repaint, false);
     display__unlock();
-    return BRUCE_OK;
+    return result;
 }
 
 bruce_result_t display__test_notification(

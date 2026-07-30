@@ -3,12 +3,12 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "core/storage/storage.h"
+#include "core/storage/storage.h" // IWYU pragma: keep
 #include "core_sdk/app_runner.h"
-#include "core_sdk/result.h"
-#include "core_sdk/stdio.h"
 #include "core_sdk/process.h"
+#include "core_sdk/result.h"
 #include "core_sdk/runtime.h"
+#include "core_sdk/stdio.h"
 #include "fake_elf.h"
 #include "modules/loaders/elf/elf_loader_app.h"
 #include "modules/utils/serial_commands/serial_commands_app.h"
@@ -37,7 +37,7 @@ bool selftest__run_terminal_named_case(void) {
     memset(&s_echo, 0, sizeof(s_echo));
 
     bruce_result_t registered =
-        app_runner__register("terminal_test_echo", selftest__terminal_test_echo_entry);
+        app_runner__register("terminal_test_echo", selftest__terminal_test_echo_entry, 0);
     if (registered != BRUCE_OK && registered != BRUCE_ERR_ALREADY_EXISTS) {
         printf("[selftest] terminal/named: failed to register echo app (%d)\n", registered);
         return false;
@@ -151,7 +151,8 @@ static int selftest__terminal_stdio_cancel_entry(int argc, char **argv) {
 }
 
 bool selftest__run_terminal_stdio_case(void) {
-    bruce_result_t registered = app_runner__register("terminal_test_stdio", selftest__terminal_stdio_entry);
+    bruce_result_t registered =
+        app_runner__register("terminal_test_stdio", selftest__terminal_stdio_entry, 0);
     if (registered != BRUCE_OK && registered != BRUCE_ERR_ALREADY_EXISTS) return false;
 
     bruce_stdio_session_t session = BRUCE_STDIO_SESSION_INVALID;
@@ -173,15 +174,15 @@ bool selftest__run_terminal_stdio_case(void) {
         bruce_stdio_session_read_output(session, output, sizeof(output) - 1, &output_size);
     (void)bruce_stdio_session_close(session);
     bool ok = waited == BRUCE_OK && status.reason == BRUCE_PROCESS_EXITED && status.exit_code == 0 &&
-              read_result == BRUCE_OK &&
-              strstr(output, "hello") != NULL && strstr(output, "received:hello") != NULL;
+              read_result == BRUCE_OK && strstr(output, "hello") != NULL &&
+              strstr(output, "received:hello") != NULL;
     printf("[selftest] terminal/stdio: %s\n", ok ? "OK" : "failed");
     return ok;
 }
 
 bool selftest__run_terminal_stdio_cancel_case(void) {
     bruce_result_t registered =
-        app_runner__register("terminal_test_stdio_cancel", selftest__terminal_stdio_cancel_entry);
+        app_runner__register("terminal_test_stdio_cancel", selftest__terminal_stdio_cancel_entry, 0);
     if (registered != BRUCE_OK && registered != BRUCE_ERR_ALREADY_EXISTS) return false;
 
     s_stdio_cancel_started = false;
@@ -205,9 +206,8 @@ bool selftest__run_terminal_stdio_cancel_case(void) {
 
     bruce_process_id_t process_id = (bruce_process_id_t)launched;
     bruce_process_status_t status;
-    bruce_result_t signal_result = s_stdio_cancel_started
-                                       ? process__signal(process_id, BRUCE_PROCESS_SIGNAL_TERM)
-                                       : BRUCE_ERR_TIMEOUT;
+    bruce_result_t signal_result =
+        s_stdio_cancel_started ? process__signal(process_id, BRUCE_PROCESS_SIGNAL_TERM) : BRUCE_ERR_TIMEOUT;
     bruce_result_t wait_result = process__wait_status(process_id, 1000, &status);
     if (wait_result != BRUCE_OK) {
         (void)process__kill(process_id);
@@ -216,9 +216,8 @@ bool selftest__run_terminal_stdio_cancel_case(void) {
     (void)bruce_stdio_session_close(session);
 
     bool ok = signal_result == BRUCE_OK && wait_result == BRUCE_OK &&
-              s_stdio_cancel_result == BRUCE_ERR_CANCELLED &&
-              status.reason == BRUCE_PROCESS_TERMINATED && status.exit_code == 0 &&
-              status.signal == BRUCE_PROCESS_SIGNAL_TERM;
+              s_stdio_cancel_result == BRUCE_ERR_CANCELLED && status.reason == BRUCE_PROCESS_TERMINATED &&
+              status.exit_code == 0 && status.signal == BRUCE_PROCESS_SIGNAL_TERM;
     printf("[selftest] terminal/stdio-cancel: %s\n", ok ? "OK" : "failed");
     return ok;
 }

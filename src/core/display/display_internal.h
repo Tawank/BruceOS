@@ -2,8 +2,6 @@
 
 #include "core_sdk/display.h"
 
-#include "freertos/FreeRTOS.h"
-
 #define DISPLAY__NATIVE_WIDTH 135
 #define DISPLAY__NATIVE_HEIGHT 240
 #define DISPLAY__FB_SIZE (DISPLAY__NATIVE_WIDTH * DISPLAY__NATIVE_HEIGHT * sizeof(bruce_display_color_t))
@@ -22,8 +20,6 @@ typedef struct {
     bool clear_on_next_frame;
     bool frame_active;
     bool frame_noop;
-    bool transfer_pending;
-    bool remove_pending;
     bruce_process_id_t process_id;
     bruce_process_state_t state;
     bruce_display_rect_t viewport;
@@ -35,8 +31,6 @@ typedef struct {
     uint8_t text_size;
     int16_t cursor_x;
     int16_t cursor_y;
-    SemaphoreHandle_t completion;
-    bruce_result_t completion_result;
 } display__process_context_t;
 
 bruce_result_t display_internal__begin_draw(display__process_context_t **context);

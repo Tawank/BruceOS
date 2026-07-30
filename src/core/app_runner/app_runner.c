@@ -1,39 +1,14 @@
 #include "app_runner.h"
 
 #include "core/app_runner/app_runner.h"
-#include "core/storage/storage.h"
 #include "core/process/process.h"
+#include "core/storage/storage.h"
 
 #include "core_sdk/app_runner.h"
 #include "core_sdk/loader.h"
 #include "core_sdk/permission.h"
-#include "core_sdk/result.h"
 #include "core_sdk/process.h"
-
-#include "modules/apps/apps_app.h"
-#include "modules/bluetooth/bluetooth_app.h"
-#include "modules/bluetooth_hid/bluetooth_hid_app.h"
-#include "modules/bnu/bnu_app.h"
-#include "modules/bruce_launcher/bruce_launcher_app.h"
-#include "modules/clock/clock_app.h"
-#include "modules/config/config_app.h"
-#include "modules/filemanager/filemanager_app.h"
-#include "modules/ir/ir_app.h"
-#include "modules/loaders/elf/elf_loader_app.h"
-#include "modules/loaders/image/image_loader_app.h"
-#include "modules/loaders/js/js_loader_app.h"
-#include "modules/nrf24/nrf24_app.h"
-#include "modules/selftest/selftest.h"
-#include "modules/shell/shell_app.h"
-#include "modules/tcp/tcp_app.h"
-#include "modules/utils/help/help_app.h"
-#include "modules/utils/launcher/launcher_app.h"
-#include "modules/utils/notification/notification_app.h"
-#include "modules/utils/serial_commands/serial_commands_app.h"
-#include "modules/utils/process/process_app.h"
-#include "modules/utils/terminal/terminal_app.h"
-#include "modules/webui/webui_app.h"
-#include "modules/wifi/wifi_app.h"
+#include "core_sdk/result.h"
 
 #include <stdbool.h>
 #include <stdio.h>
@@ -41,11 +16,9 @@
 #include <string.h>
 #include <strings.h>
 
-#define APP_RUNNER_MAX_APPS 40
+#define APP_RUNNER_MAX_APPS 30
 #define APP_RUNNER_PATH_MAX 160
 #define APP_RUNNER_MAX_LOADERS 12
-#define APP_RUNNER_SELFTEST_STACK_BYTES 8192u
-#define APP_RUNNER_SHELL_STACK_BYTES 8192u
 #define APP_RUNNER_LOADER_EXTENSION_MAX 5
 
 typedef struct {
@@ -66,7 +39,7 @@ typedef struct {
 static app_runner_loader_t s_loaders[APP_RUNNER_MAX_LOADERS];
 static int s_loader_count;
 
-bruce_result_t app_runner__register(const char *name, bruce_app_entry_t entry) {
+bruce_result_t app_runner__register(const char *name, bruce_app_entry_t entry, uint32_t stack_bytes) {
     if (name == NULL || name[0] == '\0' || entry == NULL) { return BRUCE_ERR_INVALID_ARGUMENT; }
 
     for (int i = 0; i < s_app_count; ++i) {
@@ -77,7 +50,7 @@ bruce_result_t app_runner__register(const char *name, bruce_app_entry_t entry) {
 
     s_apps[s_app_count].name = name;
     s_apps[s_app_count].entry = entry;
-    s_apps[s_app_count].stack_bytes = 0;
+    s_apps[s_app_count].stack_bytes = stack_bytes;
     s_app_count++;
     return BRUCE_OK;
 }
@@ -86,55 +59,6 @@ size_t app_runner__command_count(void) { return (size_t)s_app_count; }
 
 const char *app_runner__command_name(size_t index) {
     return index < (size_t)s_app_count ? s_apps[index].name : NULL;
-}
-
-void app_runner__register_defaults(void) {
-    if (s_app_count != 0) return;
-
-    (void)app_runner__register("launcher", launcher_app_main);
-    (void)app_runner__register("bruce_launcher", bruce_launcher_app_main);
-    (void)app_runner__register("apps", apps_app_main);
-    (void)app_runner__register("filemanager", filemanager_app_main);
-    (void)app_runner__register("clock", clock_app_main);
-    (void)app_runner__register("config", config_app_main);
-    (void)app_runner__register("wifi", wifi_app_main);
-    (void)app_runner__register("webui", webui_app_main);
-    (void)app_runner__register("bluetooth", bluetooth_app_main);
-    (void)app_runner__register("bluetooth_hid_app", bluetooth_hid_app_main);
-    (void)app_runner__register("ir", ir_app_main);
-    (void)app_runner__register("nrf24", nrf24_app_main);
-    (void)app_runner__register("selftest", selftest_app_main);
-    s_apps[s_app_count - 1].stack_bytes = APP_RUNNER_SELFTEST_STACK_BYTES;
-    (void)app_runner__register("terminal", terminal_app_main);
-    (void)app_runner__register("shell", shell_app_main);
-    s_apps[s_app_count - 1].stack_bytes = APP_RUNNER_SHELL_STACK_BYTES;
-    (void)app_runner__register("serial_commands", serial_commands_app_main);
-    (void)app_runner__register("process", process_app_main);
-    (void)app_runner__register("help", help_app_main);
-    (void)app_runner__register("pwd", bnu_pwd_app_main);
-    (void)app_runner__register("cd", bnu_cd_app_main);
-    (void)app_runner__register("ls", bnu_ls_app_main);
-    (void)app_runner__register("free", bnu_free_app_main);
-    (void)app_runner__register("top", bnu_top_app_main);
-    (void)app_runner__register("mkdir", bnu_mkdir_app_main);
-    (void)app_runner__register("touch", bnu_touch_app_main);
-    (void)app_runner__register("cat", bnu_cat_app_main);
-    (void)app_runner__register("elf", elf_loader__app_main);
-    (void)app_runner__register("js", js_loader__app_main);
-    (void)app_runner__register("image", image_app_main);
-    (void)app_runner__register("image_viewer", image_viewer_app_main);
-    (void)app_runner__register("notification", notification_app_main);
-    (void)app_runner__register("tcp", tcp_app_main);
-
-    (void)app_runner__register_loader(".elf", 10, elf_loader__run_path);
-    (void)app_runner__register_loader(".js", 20, js_loader__run_path);
-    (void)app_runner__register_loader(".sh", 25, shell_loader__run_path);
-    (void)app_runner__register_loader(".jpg", 30, image_loader__run_path);
-    (void)app_runner__register_loader(".jpeg", 30, image_loader__run_path);
-    (void)app_runner__register_loader(".png", 30, image_loader__run_path);
-    (void)app_runner__register_loader(".gif", 30, image_loader__run_path);
-
-    elf_loader__init();
 }
 
 static bruce_app_entry_t app_runner__find_builtin(const char *app_name) {

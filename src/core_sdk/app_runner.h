@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #include "core_sdk/result.h"
 
@@ -9,7 +10,7 @@ typedef int (*bruce_app_entry_t)(int argc, char **argv);
 
 /* Registers a built-in command.  Returns BRUCE_ERR_ALREADY_EXISTS for a
  * duplicate name and BRUCE_ERR_RESOURCE_LIMIT if the registry is full. */
-bruce_result_t app_runner__register(const char *name, bruce_app_entry_t entry);
+bruce_result_t app_runner__register(const char *name, bruce_app_entry_t entry, uint32_t stack_bytes);
 
 /* Read-only access to registered built-in command names. Names are returned in
  * registration order and remain owned by AppRunner. Returns NULL when `index`

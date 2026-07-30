@@ -1,8 +1,8 @@
 #include "elf_loader_app.h"
 
+#include <errno.h> // IWYU pragma: keep
 #include <stdbool.h>
 #include <stdint.h>
-#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,8 +15,8 @@
 #include "core_sdk/manifest.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/permission.h"
-#include "core_sdk/storage.h"
 #include "core_sdk/process.h"
+#include "core_sdk/storage.h"
 
 static size_t s_call_count;
 

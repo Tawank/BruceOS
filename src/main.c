@@ -3,15 +3,41 @@
 #include "core_sdk/app_runner.h"
 #include "core_sdk/display.h"
 
-#include "core/app_runner/app_runner.h"
 #include "core/config/config.h"
 #include "core/input/input.h"
-#include "core/storage/storage.h"
 #include "core/stdio/stdio.h"
-#include "core/process/process.h"
-#include "freertos/idf_additions.h"
+#include "core/storage/storage.h"
+#include "core_sdk/loader.h"
+
+#include "modules/apps/apps_app.h"
+#include "modules/bluetooth/bluetooth_app.h"
+#include "modules/bluetooth_hid/bluetooth_hid_app.h"
+#include "modules/bnu/bnu_app.h"
+#include "modules/bruce_launcher/bruce_launcher_app.h"
+#include "modules/clock/clock_app.h"
+#include "modules/config/config_app.h"
+#include "modules/filemanager/filemanager_app.h"
+#include "modules/ir/ir_app.h"
+#include "modules/loaders/elf/elf_loader_app.h"
+#include "modules/loaders/image/image_loader_app.h"
+#include "modules/loaders/js/js_loader_app.h"
+#include "modules/nrf24/nrf24_app.h"
+#include "modules/selftest/selftest.h"
+#include "modules/shell/shell_app.h"
+#include "modules/tcp/tcp_app.h"
+#include "modules/utils/help/help_app.h"
+#include "modules/utils/launcher/launcher_app.h"
+#include "modules/utils/notification/notification_app.h"
+#include "modules/utils/process/process_app.h"
+#include "modules/utils/serial_commands/serial_commands_app.h"
+#include "modules/utils/terminal/terminal_app.h"
+#include "modules/webui/webui_app.h"
+#include "modules/wifi/wifi_app.h"
 
 #define MAIN_LAUNCHER_CHECK_INTERVAL_MS 1000
+
+#define SELFTEST_STACK_BYTES 8192u
+#define SHELL_STACK_BYTES 8192u
 
 static void main__launch_launcher(void) {
     int result = app_runner__run("launcher", "--gui", true);
@@ -26,6 +52,51 @@ bool init_user_interface(void) {
     if (!input_ok) printf("Input initialization failed; continuing without physical input\n");
 
     return display_ok && input_ok;
+}
+
+void app_runner__register_defaults(void) {
+    (void)app_runner__register("launcher", launcher_app_main, 0);
+    (void)app_runner__register("bruce_launcher", bruce_launcher_app_main, 0);
+    (void)app_runner__register("apps", apps_app_main, 0);
+    (void)app_runner__register("filemanager", filemanager_app_main, 0);
+    (void)app_runner__register("clock", clock_app_main, 0);
+    (void)app_runner__register("config", config_app_main, 0);
+    (void)app_runner__register("wifi", wifi_app_main, 0);
+    (void)app_runner__register("webui", webui_app_main, 0);
+    (void)app_runner__register("bluetooth", bluetooth_app_main, 0);
+    (void)app_runner__register("bluetooth_hid_app", bluetooth_hid_app_main, 0);
+    (void)app_runner__register("ir", ir_app_main, 0);
+    (void)app_runner__register("nrf24", nrf24_app_main, 0);
+    (void)app_runner__register("selftest", selftest_app_main, SELFTEST_STACK_BYTES);
+    (void)app_runner__register("terminal", terminal_app_main, 0);
+    (void)app_runner__register("shell", shell_app_main, SHELL_STACK_BYTES);
+    (void)app_runner__register("serial_commands", serial_commands_app_main, 0);
+    (void)app_runner__register("process", process_app_main, 0);
+    (void)app_runner__register("help", help_app_main, 0);
+    (void)app_runner__register("pwd", bnu_pwd_app_main, 0);
+    (void)app_runner__register("cd", bnu_cd_app_main, 0);
+    (void)app_runner__register("ls", bnu_ls_app_main, 0);
+    (void)app_runner__register("free", bnu_free_app_main, 0);
+    (void)app_runner__register("top", bnu_top_app_main, 0);
+    (void)app_runner__register("mkdir", bnu_mkdir_app_main, 0);
+    (void)app_runner__register("touch", bnu_touch_app_main, 0);
+    (void)app_runner__register("cat", bnu_cat_app_main, 0);
+    (void)app_runner__register("elf", elf_loader__app_main, 0);
+    (void)app_runner__register("js", js_loader__app_main, 0);
+    (void)app_runner__register("image", image_app_main, 0);
+    (void)app_runner__register("image_viewer", image_viewer_app_main, 0);
+    (void)app_runner__register("notification", notification_app_main, 0);
+    (void)app_runner__register("tcp", tcp_app_main, 0);
+
+    (void)app_runner__register_loader(".elf", 10, elf_loader__run_path);
+    (void)app_runner__register_loader(".js", 20, js_loader__run_path);
+    (void)app_runner__register_loader(".sh", 25, shell_loader__run_path);
+    (void)app_runner__register_loader(".jpg", 30, image_loader__run_path);
+    (void)app_runner__register_loader(".jpeg", 30, image_loader__run_path);
+    (void)app_runner__register_loader(".png", 30, image_loader__run_path);
+    (void)app_runner__register_loader(".gif", 30, image_loader__run_path);
+
+    elf_loader__init();
 }
 
 void app_main(void) {
@@ -49,8 +120,4 @@ void app_main(void) {
     if (!ui_ok) return;
 
     main__launch_launcher();
-    while (1) {
-        vTaskDelay(pdMS_TO_TICKS(MAIN_LAUNCHER_CHECK_INTERVAL_MS));
-        if (ui_ok && process_registry__foreground_id() == BRUCE_PROCESS_ID_INVALID) main__launch_launcher();
-    }
 }
