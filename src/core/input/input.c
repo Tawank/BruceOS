@@ -1,12 +1,15 @@
 #include "input.h"
 
 #include "core/task/task.h"
+#include "core_sdk/app_runner.h"
 #include "core_sdk/config.h"
 #include "core_sdk/input.h"
+#include "core_sdk/loader.h"
 #include "core_sdk/permission.h"
 #include "core_sdk/result.h"
 #include "core_sdk/task.h"
 
+#include <ctype.h>
 #include <string.h>
 #include <stdio.h>
 
@@ -443,7 +446,7 @@ static int32_t input__kb_decode_fn_nav(int x, int y) {
     return 0;
 }
 
-static bool input__kb_match_hotkey(const char *key, bool *out_switch_next) {
+static bool input__kb_match_hotkey(const char *key, char *out_action, size_t action_size) {
     char chord[BRUCE_CONFIG_HOTKEY_MAX_LEN + 1] = {0};
     size_t used = 0;
 #define INPUT__APPEND_CHORD_PART(part)                                                                       \
@@ -463,12 +466,35 @@ static bool input__kb_match_hotkey(const char *key, bool *out_switch_next) {
     if (hotkeys == NULL) return false;
     for (size_t i = 0; i < hotkeys->count; ++i) {
         if (strcmp(hotkeys->items[i].key, chord) != 0) continue;
-        if (strcmp(hotkeys->items[i].action, "task switch next") == 0) {
-            *out_switch_next = true;
-            return true;
-        }
+        int written = snprintf(out_action, action_size, "%s", hotkeys->items[i].action);
+        return written > 0 && (size_t)written < action_size;
     }
     return false;
+}
+
+static void input__kb_run_hotkey(const char *action) {
+    if (strcmp(action, "task switch next") == 0) {
+        (void)task_registry__switch_next();
+        return;
+    }
+
+    while (isspace((unsigned char)*action)) action++;
+    char command[BRUCE_CONFIG_HOTKEY_ACTION_MAX_LEN + 1];
+    size_t command_size = 0;
+    while (action[command_size] != '\0' && !isspace((unsigned char)action[command_size])) command_size++;
+    if (command_size == 0 || command_size >= sizeof(command)) return;
+    memcpy(command, action, command_size);
+    command[command_size] = '\0';
+
+    const char *arg = action + command_size;
+    while (isspace((unsigned char)*arg)) arg++;
+    if (*arg == '\0') arg = NULL;
+    if (strcmp(command, "launcher") == 0 && arg == NULL) arg = "--gui";
+
+    int result = command[0] == '/' || strncmp(command, "./", 2) == 0
+                     ? app_runner__run_path(command, arg, true)
+                     : app_runner__run(command, arg, true);
+    if (result < 0) ESP_LOGW(TAG, "hotkey action '%s' failed: %d", action, result);
 }
 
 static void input__kb_discard_modifier_events_locked(void) {
@@ -493,7 +519,7 @@ static void input__poll_keyboard(void) {
     input__kb_update_modifiers(pressed);
 
     uint64_t now = input__now_ms();
-    bool switch_next = false;
+    char hotkey_action[BRUCE_CONFIG_HOTKEY_ACTION_MAX_LEN + 1] = {0};
     input__lock();
 
     for (int y = 0; y < INPUT__KB_ROWS; ++y) {
@@ -504,8 +530,12 @@ static void input__poll_keyboard(void) {
             if (is_pressed && !was_pressed) {
                 if (now - s_kb_last_event_ms[y][x] >= INPUT__DEBOUNCE_MS) {
                     s_kb_last_event_ms[y][x] = now;
+                    bool is_modifier = input__kb_is_modifier(x, y);
+                    char matched_action[BRUCE_CONFIG_HOTKEY_ACTION_MAX_LEN + 1] = {0};
+                    bool matched_hotkey =
+                        !is_modifier && input__kb_match_hotkey(s_kb_normal[y][x], matched_action, sizeof(matched_action));
 
-                    if (input__kb_is_modifier(x, y)) {
+                    if (is_modifier) {
                         /* Modifiers are tracked internally; optionally emit
                          * a key press with a zero code so listeners can see
                          * the modifier. */
@@ -513,7 +543,8 @@ static void input__poll_keyboard(void) {
                         (void)input__push_event_locked(
                             BRUCE_INPUT_KEY, BRUCE_INPUT_PRESS, 0, (int32_t)label[0], BRUCE_TASK_ID_INVALID
                         );
-                    } else if (input__kb_match_hotkey(s_kb_normal[y][x], &switch_next)) {
+                    } else if (matched_hotkey) {
+                        memcpy(hotkey_action, matched_action, sizeof(hotkey_action));
                         s_kb_hotkey_consumed[y][x] = true;
                         input__kb_discard_modifier_events_locked();
                     } else if (s_kb_fn_held) {
@@ -561,8 +592,8 @@ static void input__poll_keyboard(void) {
 
     bruce_task_id_t owner = s_foreground_task_id;
     input__unlock();
-    if (switch_next) (void)task_registry__switch_next();
     task_registry__input_wake(owner);
+    if (hotkey_action[0] != '\0') input__kb_run_hotkey(hotkey_action);
 }
 
 #else

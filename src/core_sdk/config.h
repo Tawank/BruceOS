@@ -44,6 +44,7 @@ typedef struct {
 
 typedef struct {
     const char *key;
+    /* AppRunner command line executed when the chord is pressed. */
     const char *action;
 } bruce_config_hotkey_t;
 

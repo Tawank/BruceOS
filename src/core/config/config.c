@@ -123,7 +123,9 @@ static void config__set_defaults(config__t *cfg) {
     config__assign(&cfg->hotkeys.items[0].action, "task switch next");
     config__assign(&cfg->hotkeys.items[1].key, "ctrl + tab");
     config__assign(&cfg->hotkeys.items[1].action, "task preview");
-    cfg->hotkeys.count = 2;
+    config__assign(&cfg->hotkeys.items[2].key, "ctrl + space");
+    config__assign(&cfg->hotkeys.items[2].action, "launcher");
+    cfg->hotkeys.count = 3;
 
     cfg->ledBright = 50;
     cfg->ledColor = 0x960064;
