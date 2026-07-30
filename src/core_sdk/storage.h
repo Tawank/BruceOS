@@ -55,3 +55,14 @@ storage__list(const char *path, bruce_storage_entry_t *entries, size_t capacity,
 /* Creates one directory. The parent must already exist. Returns BRUCE_OK when
  * the path already names a directory. */
 bruce_result_t storage__mkdir(const char *path);
+
+/* Removes one file or empty directory. Root and protected configuration files
+ * are never removable through the public SDK. */
+bruce_result_t storage__remove(const char *path);
+
+/* Renames a file or directory without replacing an existing destination.
+ * Both paths must be on the same mounted filesystem. */
+bruce_result_t storage__rename(const char *from, const char *to);
+
+/* Returns filesystem capacity and used bytes for the volume containing path. */
+bruce_result_t storage__get_usage(const char *path, size_t *total_bytes, size_t *used_bytes);

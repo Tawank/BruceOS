@@ -9,6 +9,7 @@
 #include "core/task/task.h"
 #include "core_sdk/config.h"
 #include "core_sdk/permission.h"
+#include "esp_random.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h"
 #include "freertos/semphr.h"
@@ -23,9 +24,7 @@ static config__t s_config;
 static void config__ensure_mutex(void) {
     if (s_config_mutex != NULL) return;
     portENTER_CRITICAL(&s_config_init_mux);
-    if (s_config_mutex == NULL) {
-        s_config_mutex = xSemaphoreCreateMutexStatic(&s_config_mutex_storage);
-    }
+    if (s_config_mutex == NULL) { s_config_mutex = xSemaphoreCreateMutexStatic(&s_config_mutex_storage); }
     portEXIT_CRITICAL(&s_config_init_mux);
 }
 
@@ -91,8 +90,7 @@ static void config__free_config(config__t *cfg) {
         config__release(&cfg->wifiCredentials[i].password);
     }
     config__release(&cfg->wifiMAC);
-    for (size_t i = 0; i < CONFIG__STARTUP_APP_MAX_COUNT; ++i)
-        config__release(&cfg->startupApps.items[i]);
+    for (size_t i = 0; i < CONFIG__STARTUP_APP_MAX_COUNT; ++i) config__release(&cfg->startupApps.items[i]);
     config__release(&cfg->startupAppJSInterpreterFile);
     config__release(&cfg->wigleBasicToken);
     config__release(&cfg->wdgwarsApiKey);
@@ -123,7 +121,9 @@ static void config__set_defaults(config__t *cfg) {
     config__assign(&cfg->keyboardLang, "QWERTY");
     config__assign(&cfg->hotkeys.items[0].key, "alt + tab");
     config__assign(&cfg->hotkeys.items[0].action, "task switch next");
-    cfg->hotkeys.count = 1;
+    config__assign(&cfg->hotkeys.items[1].key, "ctrl + tab");
+    config__assign(&cfg->hotkeys.items[1].action, "task preview");
+    cfg->hotkeys.count = 2;
 
     cfg->ledBright = 50;
     cfg->ledColor = 0x960064;
@@ -187,7 +187,6 @@ static void config__validate(config__t *cfg) {
         cfg->badUSBBLEKeyboardLayout = 0;
     }
     if (cfg->badUSBBLEKeyDelay > 500) cfg->badUSBBLEKeyDelay = 500;
-
 }
 
 /* ------------------------------------------------------------------------ */
@@ -371,7 +370,6 @@ static void config__parse_json(config__t *cfg, const cJSON *root) {
             ++cfg->disabledMenuCount;
         }
     }
-
 }
 
 static cJSON *config__build_json(const config__t *cfg) {
@@ -1033,13 +1031,29 @@ bool config__add_web_ui_session(const char *token) {
     return saved;
 }
 
-bool config__remove_web_ui_session(const char *token) {
-    if (!config__init() || token == NULL) return false;
+bruce_result_t config__create_web_ui_session(char *out_token, size_t capacity) {
+    static const char alphabet[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    if (config__guard_protected() != BRUCE_OK) return BRUCE_ERR_PERMISSION;
+    if (out_token == NULL || capacity < BRUCE_CONFIG_WEB_UI_SESSION_TOKEN_LEN + 1u) {
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    for (size_t i = 0; i < BRUCE_CONFIG_WEB_UI_SESSION_TOKEN_LEN; ++i) {
+        out_token[i] = alphabet[esp_random() % (sizeof(alphabet) - 1u)];
+    }
+    out_token[BRUCE_CONFIG_WEB_UI_SESSION_TOKEN_LEN] = '\0';
+    return config__add_web_ui_session(out_token) ? BRUCE_OK : BRUCE_ERR_IO;
+}
+
+bruce_result_t config__remove_web_ui_session(const char *token) {
+    if (config__guard_protected() != BRUCE_OK) return BRUCE_ERR_PERMISSION;
+    if (!config__init() || token == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     config__lock();
     size_t write_index = 0;
+    bool removed = false;
     for (size_t read_index = 0; read_index < s_config.webUISessionCount; ++read_index) {
         if (strcmp(s_config.webUISessions[read_index], token) == 0) {
             config__release(&s_config.webUISessions[read_index]);
+            removed = true;
             continue;
         }
         if (write_index != read_index) {
@@ -1051,11 +1065,12 @@ bool config__remove_web_ui_session(const char *token) {
     s_config.webUISessionCount = write_index;
     bool saved = config__save_locked();
     config__unlock();
-    return saved;
+    if (!removed) return BRUCE_ERR_NOT_FOUND;
+    return saved ? BRUCE_OK : BRUCE_ERR_IO;
 }
 
 bool config__is_valid_web_ui_session(const char *token) {
-    if (!config__init() || token == NULL) return false;
+    if (config__guard_protected() != BRUCE_OK || !config__init() || token == NULL) return false;
     config__lock();
     bool found = false;
     for (size_t i = 0; i < s_config.webUISessionCount; ++i) {

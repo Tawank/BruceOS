@@ -217,7 +217,7 @@ bool storage__write_file_atomic(const char *path, const void *data, size_t size)
     return written;
 }
 
-bool storage__remove(const char *path) {
+bool storage__remove_internal(const char *path) {
     storage__lock();
     struct stat path_stat;
     bool removed = storage__is_ready(path) && stat(path, &path_stat) == 0 &&
@@ -226,7 +226,7 @@ bool storage__remove(const char *path) {
     return removed;
 }
 
-bool storage__rename(const char *from, const char *to) {
+bool storage__rename_internal(const char *from, const char *to) {
     storage__lock();
     bool renamed = storage__is_ready(from) && storage__is_ready(to) &&
                    storage__is_sd_path(from) == storage__is_sd_path(to) && rename(from, to) == 0;
@@ -234,7 +234,7 @@ bool storage__rename(const char *from, const char *to) {
     return renamed;
 }
 
-bool storage__get_usage(const char *path, size_t *total_bytes, size_t *used_bytes) {
+bool storage__get_usage_internal(const char *path, size_t *total_bytes, size_t *used_bytes) {
     storage__lock();
     bool known = false;
     if (total_bytes != NULL && used_bytes != NULL && path != NULL) {
@@ -361,8 +361,19 @@ static bool storage__is_protected_path(const char *path) {
 }
 
 static bool storage__is_valid_public_path(const char *path) {
-    return path != NULL && path[0] == '/' && strlen(path) < BRUCE_STORAGE_PATH_MAX &&
-           strstr(path, "..") == NULL;
+    if (path == NULL || path[0] != '/' || strlen(path) >= BRUCE_STORAGE_PATH_MAX) return false;
+    const char *component = path + 1;
+    while (*component != '\0') {
+        const char *end = strchr(component, '/');
+        size_t length = end != NULL ? (size_t)(end - component) : strlen(component);
+        if (length == 0 || (length == 1 && component[0] == '.') ||
+            (length == 2 && component[0] == '.' && component[1] == '.')) {
+            return false;
+        }
+        if (end == NULL) break;
+        component = end + 1;
+    }
+    return true;
 }
 
 /* Caller must hold s_storage_mutex. */
@@ -623,4 +634,56 @@ bruce_result_t storage__mkdir(const char *path) {
     else if (mkdir(path, 0775) != 0) result = errno == ENOENT ? BRUCE_ERR_NOT_FOUND : BRUCE_ERR_IO;
     storage__unlock();
     return result;
+}
+
+bruce_result_t storage__remove(const char *path) {
+    bruce_result_t permission = permission__check(BRUCE_PERMISSION_STORAGE);
+    if (permission != BRUCE_OK) return permission;
+    if (!storage__is_valid_public_path(path) || strcmp(path, "/") == 0) return BRUCE_ERR_INVALID_PATH;
+    if (storage__is_protected_path(path)) return BRUCE_ERR_PERMISSION;
+
+    storage__lock();
+    if (!storage__is_ready(path)) {
+        storage__unlock();
+        return BRUCE_ERR_INVALID_STATE;
+    }
+    struct stat path_stat;
+    if (stat(path, &path_stat) != 0) {
+        storage__unlock();
+        return errno == ENOENT ? BRUCE_ERR_NOT_FOUND : BRUCE_ERR_IO;
+    }
+    int removed = S_ISDIR(path_stat.st_mode) ? rmdir(path) : remove(path);
+    bruce_result_t result = removed == 0 ? BRUCE_OK : errno == ENOTEMPTY ? BRUCE_ERR_BUSY : BRUCE_ERR_IO;
+    storage__unlock();
+    return result;
+}
+
+bruce_result_t storage__rename(const char *from, const char *to) {
+    bruce_result_t permission = permission__check(BRUCE_PERMISSION_STORAGE);
+    if (permission != BRUCE_OK) return permission;
+    if (!storage__is_valid_public_path(from) || !storage__is_valid_public_path(to) ||
+        strcmp(from, "/") == 0 || strcmp(to, "/") == 0) {
+        return BRUCE_ERR_INVALID_PATH;
+    }
+    if (storage__is_protected_path(from) || storage__is_protected_path(to)) return BRUCE_ERR_PERMISSION;
+    if (storage__is_sd_path(from) != storage__is_sd_path(to)) return BRUCE_ERR_INVALID_ARGUMENT;
+
+    storage__lock();
+    bruce_result_t result = BRUCE_OK;
+    struct stat path_stat;
+    if (!storage__is_ready(from) || !storage__is_ready(to)) result = BRUCE_ERR_INVALID_STATE;
+    else if (stat(from, &path_stat) != 0) result = errno == ENOENT ? BRUCE_ERR_NOT_FOUND : BRUCE_ERR_IO;
+    else if (stat(to, &path_stat) == 0) result = BRUCE_ERR_ALREADY_EXISTS;
+    else if (rename(from, to) != 0) result = errno == ENOENT ? BRUCE_ERR_NOT_FOUND : BRUCE_ERR_IO;
+    storage__unlock();
+    return result;
+}
+
+bruce_result_t storage__get_usage(const char *path, size_t *total_bytes, size_t *used_bytes) {
+    bruce_result_t permission = permission__check(BRUCE_PERMISSION_STORAGE);
+    if (permission != BRUCE_OK) return permission;
+    if (!storage__is_valid_public_path(path) || total_bytes == NULL || used_bytes == NULL) {
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    return storage__get_usage_internal(path, total_bytes, used_bytes) ? BRUCE_OK : BRUCE_ERR_INVALID_STATE;
 }

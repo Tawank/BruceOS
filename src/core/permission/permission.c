@@ -355,6 +355,6 @@ bool permission__test_reset(void) {
     s_loaded = true; /* prevent a later ensure_loaded from reloading the old file before removal completes */
     permission__unlock();
 
-    if (storage__remove(PERMISSION__FILE_PATH)) return true;
+    if (storage__remove_internal(PERMISSION__FILE_PATH)) return true;
     return !storage__exists(PERMISSION__FILE_PATH);
 }

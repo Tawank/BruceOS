@@ -24,3 +24,6 @@ int device__get_battery(void);
  * BRUCE_ERR_INVALID_STATE means that the system wall clock is not yet valid. */
 bruce_result_t device__get_time(bruce_device_time_t *out);
 bruce_result_t device__get_date(bruce_device_date_t *out);
+
+/* Schedules a device restart after delay_ms. Requires the `task` permission. */
+bruce_result_t device__restart(uint32_t delay_ms);

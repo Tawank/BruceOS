@@ -2,6 +2,7 @@
 
 #include "core_sdk/clock.h"
 #include "core_sdk/device.h"
+#include "core_sdk/permission.h"
 #include "core_sdk/task.h" // IWYU pragma: keep
 
 #include <stdbool.h>
@@ -9,8 +10,10 @@
 #include "esp_adc/adc_cali.h"        // IWYU pragma: keep
 #include "esp_adc/adc_cali_scheme.h" // IWYU pragma: keep
 #include "esp_adc/adc_oneshot.h"     // IWYU pragma: keep
+#include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/task.h"
 
 #define DEVICE__BATTERY_EMPTY_MV 3300
 #define DEVICE__BATTERY_FULL_MV 4150
@@ -32,6 +35,20 @@
 static StaticSemaphore_t s_lock_storage;
 static SemaphoreHandle_t s_lock;
 static portMUX_TYPE s_init_mux = portMUX_INITIALIZER_UNLOCKED;
+
+static void device__restart_task(void *context) {
+    uint32_t delay_ms = (uint32_t)(uintptr_t)context;
+    if (delay_ms > 0) vTaskDelay(pdMS_TO_TICKS(delay_ms));
+    esp_restart();
+}
+
+bruce_result_t device__restart(uint32_t delay_ms) {
+    bruce_result_t permission = permission__check(BRUCE_PERMISSION_TASK);
+    if (permission != BRUCE_OK) return permission;
+    return xTaskCreate(device__restart_task, "device_restart", 2048, (void *)(uintptr_t)delay_ms, 5, NULL) == pdPASS
+               ? BRUCE_OK
+               : BRUCE_ERR_NO_MEMORY;
+}
 #if !defined(DEVICE__NO_BATTERY)
 static adc_oneshot_unit_handle_t s_adc;
 static adc_cali_handle_t s_adc_cali;

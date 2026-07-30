@@ -650,7 +650,9 @@ opaque IDs and are closed automatically at task teardown.  The only v1
 protected paths are `/bruce.json`, `/permissions.json`, and their atomic-write
 temporary files; all other mounted paths are usable by a storage-granted app.
 `storage__mkdir()` creates one directory at a time through the same path and
-permission policy and succeeds when that directory already exists.
+permission policy and succeeds when that directory already exists. Public
+remove, same-volume rename, and volume-usage queries enforce the same normalized
+path and protected-configuration policy.
 
 Raw IPv4 TCP uses task-owned opaque handles through `tcp__connect()`,
 `tcp__listen()`, `tcp__accept()`, `tcp__read()`, `tcp__write()`, and
@@ -664,15 +666,18 @@ launched foreground command to exit, preventing its prompt from competing for
 stdin.
 
 Inbound HTTP is a generic Core service exposed through `http_server__*`. A
-caller with `http` permission supplies bounded method/URI/content-type/body
-route descriptors; Core copies them and serves fixed responses from one
-device-wide ESP-IDF HTTP server. The API contains no Wi-Fi, WebUI, asset, or
-application policy. The built-in `webui` module selects an existing station or
-configured access point, supplies its landing page and read-only `/api/status`
-route, and controls server lifecycle. This initial WebUI slice intentionally
-has no browser file mutation, input injection, command execution, credential,
-or reboot endpoint; those require authenticated dynamic-request contracts
-before exposure.
+caller with `http` permission supplies bounded fixed or dynamic route
+descriptors. Core copies fixed metadata and bodies, owns the device-wide
+ESP-IDF HTTP server, and provides opaque request, receive, header, response, and
+chunked-transfer operations without exposing ESP-IDF handles. Dynamic handlers
+run concurrently in a bounded worker pool so file transfers do not block quick
+requests; callbacks and retained contexts must therefore be thread-safe. The API contains
+no Wi-Fi, WebUI, asset, or application policy. The built-in `webui` module
+reuses an active Wi-Fi connection or selects a configured station/access point,
+serves generated gzip assets from `embedded_resources/web_interface`, and owns
+authenticated file management, uploads, command/navigation input, credentials,
+screen capture, status, and reboot routes. WebUI sessions and credentials remain
+permanently unavailable to external ELF/JS tasks.
 
 `config` is one Core-owned singleton exposed through type-safe field APIs such
 as `config__get_bright()`, `config__get_theme_path()`, and
@@ -683,11 +688,17 @@ configuration is changed, loaded, or reset and callers must not free them.
 `config__get_startup_apps()` returns the singleton's `startupApps` array and
 count. `config__add_startup_app()` appends a key only when it is not already
 present, and `config__remove_startup_app()` removes a key while preserving the
-order of the remaining entries. `hotkeys` is a bounded key-to-action object;
-the default `alt + tab` chord runs `task switch next`, cycling foreground focus
-to the next background GUI task. The same operation is available through
+order of the remaining entries. `hotkeys` is a bounded key-to-action object.
+Each action is an AppRunner command line: its first token selects a registered
+command or loader path and the remaining text is passed as its arguments. The
+default `alt + tab` chord runs `task switch next`, cycling foreground focus to
+the next background GUI task. The same operation is available through
 `task__switch_next()`. The built-in `task` utility supports
-`task switch <next|prev|id>` and `task kill <id|name>`. Kill names are exact
+`task switch <next|prev|id>`, `task preview`, and `task kill <id|name>`.
+`task preview` claims foreground and tiles up to four background GUI tasks at a
+time through the compositor (`display__set_tiles()`); arrows move the selection
+across the grid (paging when more than four qualify), Select foregrounds the
+highlighted task, and Back clears the tiles and exits. Kill names are exact
 matches and ambiguous duplicate names fail without killing either task. Setters
 validate and atomically persist immediately. The following
 values are permanently protected from ELF and JS, even with `config`:

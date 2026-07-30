@@ -217,6 +217,16 @@ bruce_result_t display__set_rotation(uint8_t rotation);
 /* Return the current rotation (0..3). */
 uint8_t display__get_rotation(void);
 
+/* Copies the composed RGB565 framebuffer for remote display tools. Pass NULL
+ * with capacity 0 to query dimensions and required pixel count. */
+bruce_result_t display__snapshot(
+    uint16_t *pixels,
+    size_t capacity,
+    uint16_t *out_width,
+    uint16_t *out_height,
+    size_t *out_pixel_count
+);
+
 /* Invert the panel colors (independent of color_inverted config). */
 bruce_result_t display__invert_display(bool invert);
 

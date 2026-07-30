@@ -128,8 +128,25 @@ idf_component_register(SRCS
                     mquickjs
                     INCLUDE_DIRS
                     "."
-                    PRIV_INCLUDE_DIRS
-                    ".")
+                     PRIV_INCLUDE_DIRS
+                     ".")
+
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+set(BRUCE_WEBUI_ASSET_DIR "${CMAKE_CURRENT_LIST_DIR}/../embedded_resources/web_interface")
+set(BRUCE_WEBUI_HEADER "${CMAKE_CURRENT_LIST_DIR}/modules/webui/webfiles.h")
+set(BRUCE_WEBUI_ASSETS
+    "${BRUCE_WEBUI_ASSET_DIR}/index.html"
+    "${BRUCE_WEBUI_ASSET_DIR}/login.html"
+    "${BRUCE_WEBUI_ASSET_DIR}/index.css"
+    "${BRUCE_WEBUI_ASSET_DIR}/index.js")
+add_custom_command(
+    OUTPUT "${BRUCE_WEBUI_HEADER}"
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_LIST_DIR}/../tools/generate_webfiles.py"
+    DEPENDS "${CMAKE_CURRENT_LIST_DIR}/../tools/generate_webfiles.py" ${BRUCE_WEBUI_ASSETS}
+    COMMENT "Generating compressed WebUI assets"
+    VERBATIM)
+add_custom_target(bruce_webui_assets DEPENDS "${BRUCE_WEBUI_HEADER}")
+add_dependencies(${COMPONENT_LIB} bruce_webui_assets)
 
 set_source_files_properties(${BRUCE_SELFTEST_SOURCES} PROPERTIES
                             COMPILE_OPTIONS
@@ -171,6 +188,7 @@ target_include_directories(bruce_sdk_builtin_wifi_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}/modules/wifi")
 
 add_library(bruce_sdk_builtin_webui_check OBJECT "modules/webui/webui_app.c")
+add_dependencies(bruce_sdk_builtin_webui_check bruce_webui_assets)
 target_include_directories(bruce_sdk_builtin_webui_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/webui")

@@ -68,6 +68,37 @@ static bool s_transfer_active;
 
 static inline void display__lock(void) { xSemaphoreTakeRecursive(s_mutex, portMAX_DELAY); }
 static inline void display__unlock(void) { xSemaphoreGiveRecursive(s_mutex); }
+static void display__ensure_lock(void);
+
+bruce_result_t display__snapshot(
+    uint16_t *pixels,
+    size_t capacity,
+    uint16_t *out_width,
+    uint16_t *out_height,
+    size_t *out_pixel_count
+) {
+    if (out_width == NULL || out_height == NULL || out_pixel_count == NULL ||
+        (pixels == NULL && capacity != 0)) {
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    display__ensure_lock();
+    display__lock();
+    if (!s_initialized || s_framebuffer == NULL) {
+        display__unlock();
+        return BRUCE_ERR_INVALID_STATE;
+    }
+    size_t count = (size_t)s_fb_width * (size_t)s_fb_height;
+    *out_width = (uint16_t)s_fb_width;
+    *out_height = (uint16_t)s_fb_height;
+    *out_pixel_count = count;
+    if (pixels != NULL && capacity < count) {
+        display__unlock();
+        return BRUCE_ERR_RESOURCE_LIMIT;
+    }
+    if (pixels != NULL) memcpy(pixels, s_framebuffer, count * sizeof(*pixels));
+    display__unlock();
+    return BRUCE_OK;
+}
 
 static void display__ensure_lock(void) {
     if (s_mutex == NULL) s_mutex = xSemaphoreCreateRecursiveMutex();

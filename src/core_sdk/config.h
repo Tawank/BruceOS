@@ -69,6 +69,14 @@ bruce_result_t config__set_web_ui_user(const char *value);
 const char *config__get_web_ui_password(void);
 bruce_result_t config__set_web_ui_password(const char *value);
 
+#define BRUCE_CONFIG_WEB_UI_SESSION_TOKEN_LEN 48
+
+/* Built-in-only WebUI session operations. Tokens are generated from the ESP
+ * hardware RNG and persisted with the rest of the protected WebUI settings. */
+bruce_result_t config__create_web_ui_session(char *out_token, size_t capacity);
+bruce_result_t config__remove_web_ui_session(const char *token);
+bool config__is_valid_web_ui_session(const char *token);
+
 /* ------------------------------------------------------------------------ */
 /* `config`-permission-gated fields                                          */
 /* ------------------------------------------------------------------------ */

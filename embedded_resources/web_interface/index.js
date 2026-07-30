@@ -158,10 +158,7 @@ async function requestGet(url, data) {
 
 async function requestPost(url, data) {
   return new Promise((resolve, reject) => {
-    let fd = new FormData();
-    for (let key in data) {
-      if (data.hasOwnProperty(key)) fd.append(key, data[key]);
-    }
+    let body = new URLSearchParams(data);
 
     let realUrl = url;
     if (IS_DEV) realUrl = "/bruce" + url;
@@ -178,7 +175,8 @@ async function requestPost(url, data) {
       }
     };
     req.onerror = () => reject(new Error("Network error"));
-    req.send(fd);
+    req.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
+    req.send(body.toString());
   });
 }
 
@@ -248,14 +246,15 @@ async function uploadFile() {
   return new Promise((resolve, reject) => {
     _runningUpload = true;
     let file = _queueUpload.shift();
-    let fd = new FormData();
     let filename = file.webkitRelativePath || file.name;
     let fileId = stringToId(filename);
-    fd.append("file", file, filename);
-    fd.append("folder", currentPath);
-    fd.append("fs", currentDrive);
 
-    let realUrl = `/upload`;
+    let query = new URLSearchParams({
+      fs: currentDrive,
+      folder: currentPath,
+      name: filename,
+    });
+    let realUrl = `/upload?${query.toString()}`;
     if (IS_DEV) realUrl = "/bruce" + realUrl;
     let req = new XMLHttpRequest();
     req.upload.onprogress = (e) => {
@@ -275,7 +274,7 @@ async function uploadFile() {
     req.onabort = () => reject();
     req.onerror = () => reject();
     req.open("POST", realUrl, true);
-    req.send(fd);
+    req.send(file);
   });
 }
 
@@ -531,10 +530,21 @@ async function reloadScreen() {
   SCREEN_RELOAD = true;
   btnForceReload.classList.add("reloading");
   try {
-    let binResponse = await fetch((IS_DEV ? "/bruce" : "") + "/getscreen");
-    let arrayBuffer = await binResponse.arrayBuffer();
-    let screenData = new Uint8Array(arrayBuffer);
-    await renderTFT(screenData);
+    let response = await fetch(
+      (IS_DEV ? "/bruce" : "") + "/getscreen?ts=" + Date.now(),
+      { cache: "no-store" },
+    );
+    if (response.status === 401) {
+      handleAuthError();
+      throw new Error("Unauthorized access (401)");
+    }
+    if (!response.ok) throw new Error(`Request failed with status ${response.status}`);
+    let bitmap = await createImageBitmap(await response.blob());
+    const canvas = $("#navigator-screen");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    canvas.getContext("2d").drawImage(bitmap, 0, 0);
+    bitmap.close();
   } catch (error) {
     console.error("Failed to reload screen:", error);
     alert("Failed to reload screen: " + error.message);
@@ -1136,7 +1146,7 @@ $(".act-save-credential").addEventListener("click", async (e) => {
   }
 
   Dialog.loading.show("Saving WiFi Credentials...");
-  await requestGet("/wifi", {
+  await requestPost("/wifi", {
     usr: username,
     pwd: password,
   });
@@ -1185,11 +1195,7 @@ $(".navigator-canvas").addEventListener("click", async (e) => {
   if (nav === null) return;
 
   let direction = nav.getAttribute("data-direction");
-  if (direction === "Menu") {
-    direction = "Sel 500";
-  }
-
-  await runNavigation(direction.toLowerCase());
+    await runNavigation(direction.toLowerCase());
 });
 
 window.addEventListener("keydown", async (e) => {

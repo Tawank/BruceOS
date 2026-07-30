@@ -122,5 +122,3 @@ void config__init_defaults(void);
 /* Core-private list helpers. */
 bool config__add_disabled_menu(const char *value);
 bool config__add_web_ui_session(const char *token);
-bool config__remove_web_ui_session(const char *token);
-bool config__is_valid_web_ui_session(const char *token);
