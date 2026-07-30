@@ -15,6 +15,7 @@
 #include "core_sdk/http.h"
 #include "core_sdk/permission.h"
 #include "core_sdk/result.h"
+#include "core_sdk/ssh.h"
 #include "core_sdk/process.h"
 #include "core_sdk/tcp.h"
 #include "core_sdk/wifi.h"
@@ -65,6 +66,15 @@ static int selftest__tcp_connect_entry(int argc, char **argv) {
     (void)argv;
     bruce_tcp_id_t socket = BRUCE_TCP_ID_INVALID;
     s_wifi_http_result.result = tcp__connect("127.0.0.1", 1, 1, &socket);
+    s_wifi_http_result.ran = true;
+    return 0;
+}
+
+static int selftest__ssh_connect_entry(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    bruce_ssh_id_t session = BRUCE_SSH_ID_INVALID;
+    s_wifi_http_result.result = ssh__connect("127.0.0.1", 22, 1, &session);
     s_wifi_http_result.ran = true;
     return 0;
 }
@@ -148,5 +158,14 @@ bool selftest__run_tcp_permission_denied_case(void) {
     bruce_result_t result = selftest__run_as_external("tcp_denied.elf", selftest__tcp_connect_entry);
     bool ok = result == BRUCE_ERR_PERMISSION;
     printf("[selftest] tcp/permission-denied: %s (result=%d)\n", ok ? "OK" : "FAIL", result);
+    return ok;
+}
+
+bool selftest__run_ssh_permission_denied_case(void) {
+    permission__test_reset();
+    permission__set("ssh_denied.elf", BRUCE_PERMISSION_SSH, false);
+    bruce_result_t result = selftest__run_as_external("ssh_denied.elf", selftest__ssh_connect_entry);
+    bool ok = result == BRUCE_ERR_PERMISSION;
+    printf("[selftest] ssh/permission-denied: %s (result=%d)\n", ok ? "OK" : "FAIL", result);
     return ok;
 }

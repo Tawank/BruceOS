@@ -41,6 +41,7 @@ static const char *const s_permission_names[BRUCE_PERMISSION_COUNT] = {
     [BRUCE_PERMISSION_STORAGE] = "storage",
     [BRUCE_PERMISSION_CONFIG] = "config",
     [BRUCE_PERMISSION_SERIAL] = "serial",
+    [BRUCE_PERMISSION_SSH] = "ssh",
 };
 
 static StaticSemaphore_t s_mutex_storage;

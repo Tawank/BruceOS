@@ -36,6 +36,7 @@
 #include "core_sdk/nrf24.h"
 #include "core_sdk/permission.h"
 #include "core_sdk/spi.h"
+#include "core_sdk/ssh.h"
 #include "core_sdk/status_icon.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
@@ -246,6 +247,15 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(tcp__read),
     ESP_ELFSYM_EXPORT(tcp__write),
     ESP_ELFSYM_EXPORT(tcp__close),
+    ESP_ELFSYM_EXPORT(ssh__connect),
+    ESP_ELFSYM_EXPORT(ssh__host_key_sha256),
+    ESP_ELFSYM_EXPORT(ssh__verify_host_key_sha256),
+    ESP_ELFSYM_EXPORT(ssh__authenticate_password),
+    ESP_ELFSYM_EXPORT(ssh__open_shell),
+    ESP_ELFSYM_EXPORT(ssh__resize_pty),
+    ESP_ELFSYM_EXPORT(ssh__read),
+    ESP_ELFSYM_EXPORT(ssh__write),
+    ESP_ELFSYM_EXPORT(ssh__close),
     ESP_ELFSYM_EXPORT(bruce_stdio_read),
     ESP_ELFSYM_EXPORT(bruce_stdio_read_line),
     ESP_ELFSYM_EXPORT(bruce_stdio_write),

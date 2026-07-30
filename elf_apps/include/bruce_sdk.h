@@ -19,6 +19,7 @@
 #include "core_sdk/notification.h" // IWYU pragma: export
 #include "core_sdk/nrf24.h"        // IWYU pragma: export
 #include "core_sdk/permission.h"   // IWYU pragma: export
+#include "core_sdk/ssh.h"          // IWYU pragma: export
 #include "core_sdk/process.h"      // IWYU pragma: export
 #include "core_sdk/result.h"       // IWYU pragma: export
 #include "core_sdk/runtime.h"      // IWYU pragma: export

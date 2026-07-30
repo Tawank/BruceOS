@@ -1,0 +1,46 @@
+#pragma once
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#include "core_sdk/process.h"
+#include "core_sdk/result.h"
+
+#define BRUCE_SSH_HOST_KEY_SHA256_SIZE 32
+
+/* SSH sessions are opaque, owned by the calling process, require the `ssh`
+ * permission, and close automatically when that process exits. The caller
+ * must verify the host-key fingerprint before authenticating. */
+bruce_result_t ssh__connect(
+    const char *host, uint16_t port, uint32_t timeout_ms, bruce_ssh_id_t *out_session
+);
+bruce_result_t ssh__host_key_sha256(
+    bruce_ssh_id_t session, uint8_t out_fingerprint[BRUCE_SSH_HOST_KEY_SHA256_SIZE]
+);
+/* Compares an expected fingerprint to the negotiated host key. Authentication
+ * remains unavailable until this succeeds. */
+bruce_result_t ssh__verify_host_key_sha256(
+    bruce_ssh_id_t session, const uint8_t expected[BRUCE_SSH_HOST_KEY_SHA256_SIZE]
+);
+bruce_result_t ssh__authenticate_password(
+    bruce_ssh_id_t session, const char *username, const char *password, uint32_t timeout_ms
+);
+bruce_result_t ssh__open_shell(
+    bruce_ssh_id_t session, const char *terminal_type, uint16_t columns, uint16_t rows,
+    uint32_t timeout_ms
+);
+bruce_result_t ssh__resize_pty(
+    bruce_ssh_id_t session, uint16_t columns, uint16_t rows, uint32_t timeout_ms
+);
+/* EOF is BRUCE_OK with *out_size == 0. Set `stderr_stream` to read the SSH
+ * channel's extended-data stream. */
+bruce_result_t ssh__read(
+    bruce_ssh_id_t session, bool stderr_stream, void *buffer, size_t capacity,
+    uint32_t timeout_ms, size_t *out_size
+);
+bruce_result_t ssh__write(
+    bruce_ssh_id_t session, const void *buffer, size_t size, uint32_t timeout_ms,
+    size_t *out_size
+);
+bruce_result_t ssh__close(bruce_ssh_id_t session);

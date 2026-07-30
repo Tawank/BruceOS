@@ -53,7 +53,8 @@ idf_component_register(SRCS
                     "core/nrf24/nrf24.c"
                     "core/permission/permission.c"
                     "core/stdio/stdio.c"
-                    "core/spi/spi.c"
+                     "core/spi/spi.c"
+                     "core/ssh/ssh.c"
                     "core/storage/storage.c"
                     "core/status_icon/status_icon.c"
                     "core/process/process.c"
@@ -128,7 +129,8 @@ idf_component_register(SRCS
                      nvs_flash
                      spi_flash
                      littlefs
-                    libpng
+                     libpng
+                     libssh2_esp
                     elf_loader
                     mquickjs
                     INCLUDE_DIRS

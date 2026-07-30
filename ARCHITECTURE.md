@@ -30,7 +30,7 @@ hardware behavior.
 - bootstrap and system configuration;
 - process, runtime, and app_runner, including its pluggable loader registry;
 - permission decisions and resource ownership;
-- memory, file, dialog, input, display, network, radio, and other HAL APIs;
+- memory, file, dialog, input, display, network, SSH, radio, and other HAL APIs;
 - all ESP-IDF calls and hardware handles.
 
 Core has no launcher menu, application menu, theme policy, or feature-specific
@@ -702,6 +702,16 @@ listener modes. It forwards raw stdin bytes to the socket and prints received
 bytes to stdout; Ctrl+] closes the active mode. The terminal waits for a
 launched foreground command to exit, preventing its prompt from competing for
 stdin.
+
+SSH client sessions are Core-owned opaque handles backed by the in-tree
+`libssh2_esp` component. They require the independent `ssh` permission, belong
+to the creating process, and close automatically at process teardown. The
+public API exposes handshake, SHA-256 host-key fingerprint retrieval and
+verification, password authentication, PTY shell open/resize, and nonblocking
+channel byte I/O with caller-supplied timeouts. Core refuses authentication
+until `ssh__verify_host_key_sha256()` succeeds; callers may not silently bypass
+host-key verification. Library sessions, channels, and native sockets remain
+private to Core and are never exported through the ELF SDK.
 
 Inbound HTTP is a generic Core service exposed through `http_server__*`. A
 caller with `http` permission supplies bounded fixed or dynamic route
