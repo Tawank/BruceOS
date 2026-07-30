@@ -497,7 +497,7 @@ void config__init_defaults(void) {
 bool config__init(void) {
     config__ensure_mutex();
     config__init_defaults();
-    return storage__init() && config__load();
+    return config__load();
 }
 
 bool config__load(void) {

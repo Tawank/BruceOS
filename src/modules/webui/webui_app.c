@@ -945,15 +945,19 @@ static int webui_app__gui(void) {
             (void)webui_app__start(WEBUI_APP_NETWORK_AP, true);
             continue;
         }
+        if (wifi__connect_known() == BRUCE_OK) {
+            (void)webui_app__start(WEBUI_APP_NETWORK_EXISTING, true);
+            continue;
+        }
         const bruce_dialog_choice_t network_choices[] = {
-            {.label = "Access point",   .value = "ap" },
-            {.label = "Existing Wi-Fi", .value = "sta"},
+            {.label = "Start access point", .value = "ap"    },
+            {.label = "Cancel",             .value = "cancel"},
         };
         size_t network = 0;
-        result = dialog__choice("Start WebUI", "Choose network", network_choices, 2, &network, NULL);
-        if (result == BRUCE_OK)
-            (void)webui_app__start(network == 0u ? WEBUI_APP_NETWORK_AP : WEBUI_APP_NETWORK_EXISTING, true);
-        else if (result != BRUCE_ERR_CANCELLED) return result;
+        result = dialog__choice("Start WebUI", "Existing Wi-Fi unavailable", network_choices, 2, &network, NULL);
+        if (result == BRUCE_ERR_CANCELLED || (result == BRUCE_OK && network == 1u)) continue;
+        if (result != BRUCE_OK) return result;
+        (void)webui_app__start(WEBUI_APP_NETWORK_AP, true);
     }
 }
 

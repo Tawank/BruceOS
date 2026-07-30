@@ -28,7 +28,9 @@ bool init_user_interface(void) {
 }
 
 void app_main(void) {
-    if (!config__init()) printf("Configuration storage is unavailable; using in-memory defaults\n");
+    bool storage_ok = storage__init();
+    if (!storage_ok) printf("Storage initialization failed\n");
+    if (storage_ok && !config__init()) printf("Configuration is unavailable; using in-memory defaults\n");
     if (stdio__init() != BRUCE_OK) printf("USB serial console initialization failed\n");
 
     bool ui_ok = init_user_interface();
