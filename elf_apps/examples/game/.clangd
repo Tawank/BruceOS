@@ -1,4 +1,4 @@
-# ELF app project: use the local build directory for compile_commands.json.
+# Point clangd at this example's own ESP-IDF compile database so it does not
+# fall back to the firmware-wide build/compile_commands.json at the repo root.
 CompileFlags:
-    CompilationDatabase: build
-    Remove: [-f*, -m*]
+  CompilationDatabase: build/
