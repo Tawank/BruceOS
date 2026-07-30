@@ -35,14 +35,26 @@
 #include "core_sdk/notification.h"
 #include "core_sdk/nrf24.h"
 #include "core_sdk/permission.h"
+#include "core_sdk/process.h"
+#include "core_sdk/runtime.h"
 #include "core_sdk/spi.h"
 #include "core_sdk/ssh.h"
 #include "core_sdk/status_icon.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
-#include "core_sdk/process.h"
-#include "core_sdk/runtime.h"
 #include "core_sdk/tcp.h"
+
+/* GCC emits these libgcc helpers for floating-point operations in ELF apps.
+ * Keep them in the restricted resolver so portable C code does not need to
+ * carry target-specific libgcc objects inside every loadable image. */
+extern int __eqdf2(double left, double right);
+extern float __divsf3(float left, float right);
+extern double __floatsidf(int value);
+extern double __extendsfdf2(float value);
+extern int __fixdfsi(double value);
+extern double __divdf3(double left, double right);
+extern double __muldf3(double left, double right);
+extern float __truncdfsf2(double value);
 
 static int bruce_elf__puts(const char *text) {
     if (text == NULL || bruce_stdio_write(text, strlen(text)) != BRUCE_OK) return EOF;
@@ -91,6 +103,8 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
 
     /* AppRunner / loader */
     ESP_ELFSYM_EXPORT(app_runner__run_path),
+    ESP_ELFSYM_EXPORT(loader__stage_path),
+    ESP_ELFSYM_EXPORT(loader__release_image),
     ESP_ELFSYM_EXPORT(app_runner__parse_args),
     ESP_ELFSYM_EXPORT(app_runner__free_args),
     ESP_ELFSYM_EXPORT(app_runner__args_have_gui),
@@ -102,10 +116,10 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(memory__realloc),
     ESP_ELFSYM_EXPORT(memory__free),
     ESP_ELFSYM_EXPORT(memory__get_stats),
-    {"malloc", (const void *)&memory__malloc},
-    {"calloc", (const void *)&memory__calloc},
-    {"realloc", (const void *)&memory__realloc},
-    {"free", (const void *)&memory__free},
+    {"malloc",  (const void *)&memory__malloc    },
+    {"calloc",  (const void *)&memory__calloc    },
+    {"realloc", (const void *)&memory__realloc   },
+    {"free",    (const void *)&memory__free      },
 
     /* Permission (introspection only; protected APIs check internally) */
     ESP_ELFSYM_EXPORT(permission__check),
@@ -269,12 +283,13 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
 
     /* Standard C library subset. Console and heap calls are routed through
      * process-aware Bruce SDK functions rather than firmware libc. */
-    {"printf", (const void *)&stdio__printf},
-    {"vprintf", (const void *)&stdio__vprintf},
-    {"puts", (const void *)&bruce_elf__puts},
+    {"printf",  (const void *)&stdio__printf     },
+    {"vprintf", (const void *)&stdio__vprintf    },
+    {"puts",    (const void *)&bruce_elf__puts   },
     {"putchar", (const void *)&bruce_elf__putchar},
     ESP_ELFSYM_EXPORT(snprintf),
     ESP_ELFSYM_EXPORT(sprintf),
+    ESP_ELFSYM_EXPORT(vsnprintf),
     ESP_ELFSYM_EXPORT(memcpy),
     ESP_ELFSYM_EXPORT(memmove),
     ESP_ELFSYM_EXPORT(memset),
@@ -299,6 +314,16 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(abs),
     ESP_ELFSYM_EXPORT(labs),
     ESP_ELFSYM_EXPORT(llabs),
+
+    /* GCC runtime helpers used by freestanding ELF code. */
+    ESP_ELFSYM_EXPORT(__eqdf2),
+    ESP_ELFSYM_EXPORT(__divsf3),
+    ESP_ELFSYM_EXPORT(__floatsidf),
+    ESP_ELFSYM_EXPORT(__extendsfdf2),
+    ESP_ELFSYM_EXPORT(__fixdfsi),
+    ESP_ELFSYM_EXPORT(__divdf3),
+    ESP_ELFSYM_EXPORT(__muldf3),
+    ESP_ELFSYM_EXPORT(__truncdfsf2),
 
     ESP_ELFSYM_END,
 };

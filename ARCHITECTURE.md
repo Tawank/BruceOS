@@ -98,6 +98,13 @@ application that wants to draw calls `process__to_foreground()` itself; an exact
 `--bg` argument lets the application suppress that startup claim.
 If `/launcher.json` is missing, the launcher writes a default configuration.
 
+The built-in `apps` module provides the default launcher's application browser.
+It enumerates regular `.elf` and `.js` files from `/apps` and `/scripts`, sorts
+them by display name, and starts the selected path through the loader registry.
+Valid manifests provide display names; files without usable metadata remain
+visible under their filename. The browser passes `--gui` to selected apps when
+it was itself launched with `--gui` and resumes when the child yields or exits.
+
 ## Applications and app_runner
 
 ### Entry points
@@ -359,11 +366,22 @@ macro/tool `BRUCE_APP_MANIFEST(...)` emits this section; authors do not
 hand-write ELF section attributes.  The SDK build tooling in `elf_apps/tools/`
 post-processes linked ELF files with `objcopy` to add the section as
 non-allocatable and provides template apps in `elf_apps/examples/`.
+For recovery and compatibility, a valid ELF32 file for the current chip may
+still launch when its manifest is missing or invalid. The loader logs a warning
+and uses the filename, current Core ABI, an 8 KiB stack, and no predeclared
+permissions. Invalid ELF headers and mismatching chip architectures remain
+launch errors.
 
 The ELF loader module's process entry is `elf_loader__app_main(void *context)`.
 It is started by `app_runner__spawn_loader_process()` when an ELF app is launched.
 Like any other program entry, it receives the app path, arguments, permissions,
 and GUI context through the spawn parameters and its opaque context struct.
+Before relocation, Core streams the source file through a 512 KiB `elf_stage`
+partition, verifies the staged bytes, and exposes a temporary read-only flash
+mapping. Relocation consumes that mapping directly, then releases it before the
+ELF process starts, so the complete source file is never retained in RAM. Only
+one image can be staged or relocated at a time; this does not prevent already
+relocated ELF processes from running concurrently.
 
 The manifest is canonical UTF-8 JSON with fixed field order and no
 insignificant whitespace.  Permission array order is author-controlled, but
@@ -375,7 +393,7 @@ empty array.  A complete example is:
 {
   "appName": "Example app",
   "appIcon": "<Base64 128-byte bitmap>",
-  "coreAbiVersion": 2,
+  "coreAbiVersion": 3,
   "permissions": ["wifi", "http"],
   "stackSize": 8192
 }
@@ -413,6 +431,10 @@ or arbitrary libc symbols. Standard heap imports (`malloc`, `calloc`,
 imports such as `printf` resolve to routed Bruce stdio. A trusted native app
 can still embed a custom allocator, which is unsupported rather than a hard
 sandbox violation.
+
+The allowlist also includes the narrow set of GCC floating-point helper symbols
+needed by freestanding C applications. These resolve to the firmware's libgcc
+implementation and are compiler runtime support, not ESP-IDF or Core APIs.
 
 ## JavaScript contract
 
@@ -525,6 +547,11 @@ a permissions-management UI is the way to change it.
 
 Built-in module processes are implicitly granted every permission.  External
 processes are checked inside each protected Core API.
+
+Prompts are not reentrant: while a task is inside a permission prompt dialog,
+any nested `permission__check()` from that same task (e.g. the dialog reading
+theme colors through `config__*`) is denied immediately without a second
+dialog, so prompting can never recurse.
 
 `http__request()` and `http_server__*` need `http`; neither implies `wifi`. Wi-Fi state control,
 credentials, and raw TCP sockets need `wifi`. `input__inject()` needs `input`; process control of
@@ -737,6 +764,10 @@ configuration is changed, loaded, or reset and callers must not free them.
 count. `config__add_startup_app()` appends a key only when it is not already
 present, and `config__remove_startup_app()` removes a key while preserving the
 order of the remaining entries. `hotkeys` is a bounded key-to-action object.
+`displayDmaFramebuffer` defaults to true and is applied at boot. When false,
+the full compositing framebuffer is ordinary internal memory and display
+updates are copied through a small DMA-capable row buffer instead of issuing a
+full-frame DMA transfer.
 Each action is an AppRunner command line: its first token selects a registered
 command or loader path and the remaining text is passed as its arguments. The
 default `alt + tab` chord runs `process switch next`, cycling foreground focus to
@@ -754,7 +785,9 @@ values are permanently protected from ELF and JS, even with `config`:
 `webUI.user`. Built-ins may use those APIs.
 
 Core registers internal LittleFS at runtime over all sector-aligned flash after
-the final static partition. The flashed partition table therefore remains
+the final static partition. The factory partition is 2.5 MiB and the following
+512 KiB `elf_stage` partition ends at the former 3 MiB factory boundary, so the
+LittleFS start address remains unchanged. The flashed partition table therefore remains
 usable on 4, 8, 16, and 32 MiB devices while LittleFS consumes the available
 remainder reported by the flash driver. Existing filesystems at the same start
 address grow on mount; Core formats only when the LittleFS metadata area is

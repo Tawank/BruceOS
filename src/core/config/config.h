@@ -52,6 +52,7 @@ typedef struct {
     uint16_t bgColor;
     const char *themePath;
     bool themeOnSd;
+    bool displayDmaFramebuffer;
 
     const char *launcherApp;
 

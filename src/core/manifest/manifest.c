@@ -17,6 +17,7 @@
 
 #define MANIFEST__STACK_MIN 4096u
 #define MANIFEST__STACK_MAX 16384u
+#define MANIFEST__STACK_DEFAULT 32768u
 
 #define MANIFEST_JS_MAX_BYTES 2048u
 #define MANIFEST_JS_GENERIC_ICON_BYTE 0xAAu
@@ -222,15 +223,40 @@ typedef struct __attribute__((packed)) {
     uint32_t sh_entsize;
 } manifest_elf_shdr_t;
 
+typedef enum {
+    MANIFEST_ELF_READ_NONE,
+    MANIFEST_ELF_READ_HEADER,
+    MANIFEST_ELF_READ_SECTION_TABLE,
+    MANIFEST_ELF_READ_SECTION_NOT_FOUND,
+    MANIFEST_ELF_READ_SECTION_METADATA,
+    MANIFEST_ELF_READ_SECTION_PAYLOAD,
+    MANIFEST_ELF_READ_JSON,
+} manifest_elf_read_stage_t;
+
+static const char *manifest__elf_read_failure(manifest_elf_read_stage_t stage) {
+    switch (stage) {
+        case MANIFEST_ELF_READ_HEADER: return "ELF header or section indexes are invalid";
+        case MANIFEST_ELF_READ_SECTION_TABLE: return "ELF section table is unreadable or truncated";
+        case MANIFEST_ELF_READ_SECTION_NOT_FOUND: return ".bruce.manifest section was not found";
+        case MANIFEST_ELF_READ_SECTION_METADATA: return ".bruce.manifest flags or size are invalid";
+        case MANIFEST_ELF_READ_SECTION_PAYLOAD: return ".bruce.manifest payload is unreadable or truncated";
+        case MANIFEST_ELF_READ_JSON: return ".bruce.manifest JSON is invalid";
+        default: return "invalid ELF manifest";
+    }
+}
+
 /* Reads the .bruce.manifest section raw bytes from an already-open ELF
  * file.  Does NOT validate e_machine or ELF magic — the caller is
  * responsible for that.  Returns malloc'd bytes in *out_bytes. */
-static bruce_result_t
-manifest__read_elf_manifest_bytes(bruce_file_id_t file, char **out_bytes, size_t *out_len) {
+static bruce_result_t manifest__read_elf_manifest_bytes(
+    bruce_file_id_t file, char **out_bytes, size_t *out_len, manifest_elf_read_stage_t *out_stage
+) {
+    if (out_stage != NULL) *out_stage = MANIFEST_ELF_READ_HEADER;
     manifest_elf_ehdr_t header;
     if (!manifest__pread(file, 0, &header, sizeof(header))) { return BRUCE_ERR_MANIFEST_INVALID; }
     if (header.e_shnum == 0 || header.e_shstrndx >= header.e_shnum) { return BRUCE_ERR_MANIFEST_INVALID; }
 
+    if (out_stage != NULL) *out_stage = MANIFEST_ELF_READ_SECTION_TABLE;
     manifest_elf_shdr_t shstrtab_hdr;
     if (!manifest__pread(
             file,
@@ -257,11 +283,13 @@ manifest__read_elf_manifest_bytes(bruce_file_id_t file, char **out_bytes, size_t
         if (strcmp(name, MANIFEST_ELF_SECTION_NAME) != 0) { continue; }
         if ((section.sh_flags & MANIFEST_ELF_SHF_ALLOC) != 0 || section.sh_size == 0 ||
             section.sh_size > MANIFEST_ELF_MAX_MANIFEST_BYTES) {
+            if (out_stage != NULL) *out_stage = MANIFEST_ELF_READ_SECTION_METADATA;
             return BRUCE_ERR_MANIFEST_INVALID;
         }
 
         char *bytes = malloc(section.sh_size + 1);
         if (bytes == NULL) { return BRUCE_ERR_NO_MEMORY; }
+        if (out_stage != NULL) *out_stage = MANIFEST_ELF_READ_SECTION_PAYLOAD;
         if (!manifest__pread(file, section.sh_offset, bytes, section.sh_size)) {
             free(bytes);
             return BRUCE_ERR_MANIFEST_INVALID;
@@ -269,9 +297,11 @@ manifest__read_elf_manifest_bytes(bruce_file_id_t file, char **out_bytes, size_t
         bytes[section.sh_size] = '\0';
         *out_bytes = bytes;
         *out_len = section.sh_size;
+        if (out_stage != NULL) *out_stage = MANIFEST_ELF_READ_NONE;
         return BRUCE_OK;
     }
 
+    if (out_stage != NULL) *out_stage = MANIFEST_ELF_READ_SECTION_NOT_FOUND;
     return BRUCE_ERR_MANIFEST_INVALID;
 }
 
@@ -319,7 +349,7 @@ const char *manifest__inspect_path(const char *path) {
                                                               4
                                                           ) == 0) {
         size_t out_len = 0;
-        result = manifest__read_elf_manifest_bytes(file, &out_json, &out_len);
+        result = manifest__read_elf_manifest_bytes(file, &out_json, &out_len, NULL);
     } else if (is_js) {
         size_t out_len = 0;
         result = manifest__read_js_manifest_bytes(file, &out_json, &out_len);
@@ -352,6 +382,8 @@ bruce_app_inspection_t *manifest__inspect_elf(const char *path) {
 
     manifest_elf_ehdr_t header;
     bruce_result_t result;
+    bool header_valid = false;
+    manifest_elf_read_stage_t read_stage = MANIFEST_ELF_READ_HEADER;
     if (!manifest__pread(file, 0, &header, sizeof(header))) {
         result = BRUCE_ERR_MANIFEST_INVALID;
     } else if (memcmp(
@@ -365,9 +397,10 @@ bruce_app_inspection_t *manifest__inspect_elf(const char *path) {
     } else if (header.e_machine != MANIFEST_ELF_EXPECTED_MACHINE) {
         result = BRUCE_ERR_TARGET_MISMATCH;
     } else {
+        header_valid = true;
         char *bytes = NULL;
         size_t bytes_len = 0;
-        result = manifest__read_elf_manifest_bytes(file, &bytes, &bytes_len);
+        result = manifest__read_elf_manifest_bytes(file, &bytes, &bytes_len, &read_stage);
         if (result == BRUCE_OK) {
             bruce_manifest_t *parsed = manifest__parse(bytes, bytes_len);
             free(bytes);
@@ -379,6 +412,7 @@ bruce_app_inspection_t *manifest__inspect_elf(const char *path) {
                 memory__free(parsed);
                 result = BRUCE_OK;
             } else {
+                read_stage = MANIFEST_ELF_READ_JSON;
                 result = BRUCE_ERR_MANIFEST_INVALID;
             }
         }
@@ -386,6 +420,32 @@ bruce_app_inspection_t *manifest__inspect_elf(const char *path) {
 
     storage__close(file);
     if (result != BRUCE_OK) {
+        const char *reason = result == BRUCE_ERR_TARGET_MISMATCH ? "ELF target does not match this device"
+                             : result == BRUCE_ERR_NO_MEMORY     ? "not enough memory to inspect manifest"
+                                                                 : manifest__elf_read_failure(read_stage);
+        printf("manifest__inspect_elf: warning: %s: %s (%d)\n", normalized_path, reason, result);
+        if (result == BRUCE_ERR_MANIFEST_INVALID && header_valid) {
+            const char *base = strrchr(normalized_path, '/');
+            base = base != NULL ? base + 1 : normalized_path;
+            const char *extension = strrchr(base, '.');
+            size_t name_len =
+                extension != NULL && extension != base ? (size_t)(extension - base) : strlen(base);
+            if (name_len >= sizeof(out_inspection->manifest.app_name)) {
+                name_len = sizeof(out_inspection->manifest.app_name) - 1;
+            }
+            memcpy(out_inspection->manifest.app_name, base, name_len);
+            out_inspection->manifest.app_name[name_len] = '\0';
+            out_inspection->kind = BRUCE_APP_KIND_ELF;
+            out_inspection->manifest.core_abi_version = BRUCE_CORE_ABI_VERSION;
+            out_inspection->manifest.stack_size = MANIFEST__STACK_DEFAULT;
+            printf(
+                "manifest__inspect_elf: warning: %s: launching with filename, %u-byte stack, and no "
+                "predeclared permissions\n",
+                normalized_path,
+                (unsigned)MANIFEST__STACK_DEFAULT
+            );
+            return out_inspection;
+        }
         memory__free(out_inspection);
         return NULL;
     }

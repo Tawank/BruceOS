@@ -93,6 +93,10 @@ const char *config__get_theme_path(void);
 bruce_result_t config__set_theme_path(const char *value);
 bool config__get_theme_on_sd(void);
 bruce_result_t config__set_theme_on_sd(bool value);
+/* Controls whether the full framebuffer is DMA-capable. Changes apply after
+ * reboot; when false, display transfers use a small DMA row buffer instead. */
+bool config__get_display_dma_framebuffer(void);
+bruce_result_t config__set_display_dma_framebuffer(bool value);
 
 /* Launcher */
 const char *config__get_launcher_app(void);

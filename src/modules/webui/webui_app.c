@@ -579,28 +579,40 @@ static bruce_result_t webui__edit(bruce_http_server_request_t *request, void *co
     char *body = webui__read_body(request, WEBUI_FORM_MAX * 3u + 1024u);
     if (body == NULL) return webui__reply_text(request, 413, "Editor content exceeds 64 KiB");
     char fs[16], name[BRUCE_STORAGE_PATH_MAX], path[BRUCE_STORAGE_PATH_MAX];
-    char *content = malloc(WEBUI_FORM_MAX + 1u);
-    bool valid = content != NULL && webui__form_value(body, "fs", fs, sizeof(fs)) &&
-                 webui__form_value(body, "name", name, sizeof(name)) &&
-                 webui__form_value(body, "content", content, WEBUI_FORM_MAX + 1u) &&
-                 webui__storage_path(fs, name, NULL, path, sizeof(path));
-    free(body);
-    if (!valid) {
-        free(content);
-        return webui__reply_text(request, 400, "Invalid editor form");
+    size_t body_length = strlen(body);
+    size_t content_capacity = body_length < WEBUI_FORM_MAX ? body_length + 1u : WEBUI_FORM_MAX + 1u;
+    bool fs_valid = webui__form_value(body, "fs", fs, sizeof(fs));
+    bool name_valid = webui__form_value(body, "name", name, sizeof(name));
+    bool content_valid = webui__form_value(body, "content", body, content_capacity);
+    bool path_valid = fs_valid && name_valid && webui__storage_path(fs, name, NULL, path, sizeof(path));
+    if (!fs_valid || !name_valid || !content_valid || !path_valid) {
+        const char *reason = !fs_valid        ? "Invalid editor filesystem"
+                             : !name_valid    ? "Invalid editor filename"
+                             : !content_valid ? "Invalid or oversized editor content"
+                                              : "Invalid editor path";
+        printf(
+            "webui__edit: warning: %s (fs=%d name=%d content=%d path=%d)\n",
+            reason,
+            fs_valid,
+            name_valid,
+            content_valid,
+            path_valid
+        );
+        free(body);
+        return webui__reply_text(request, 400, reason);
     }
     bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
     bruce_result_t result = storage__open(
         path, BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE | BRUCE_STORAGE_OPEN_TRUNCATE, &file
     );
-    size_t length = strlen(content), offset = 0;
+    size_t length = strlen(body), offset = 0;
     while (result == BRUCE_OK && offset < length) {
         size_t written = 0;
-        result = storage__write(file, content + offset, length - offset, &written);
+        result = storage__write(file, body + offset, length - offset, &written);
         if (result == BRUCE_OK && written == 0) result = BRUCE_ERR_IO;
         offset += written;
     }
-    free(content);
+    free(body);
     if (result == BRUCE_OK) result = storage__close(file);
     else if (file != BRUCE_FILE_ID_INVALID) (void)storage__close(file);
     if (result != BRUCE_OK) return webui__reply_error(request, result);

@@ -10,6 +10,7 @@
 #include "core_sdk/result.h"
 #include "core_sdk/process.h"
 
+#include "modules/apps/apps_app.h"
 #include "modules/bluetooth/bluetooth_app.h"
 #include "modules/bluetooth_hid/bluetooth_hid_app.h"
 #include "modules/bnu/bnu_app.h"
@@ -92,6 +93,7 @@ void app_runner__register_defaults(void) {
 
     (void)app_runner__register("launcher", launcher_app_main);
     (void)app_runner__register("bruce_launcher", bruce_launcher_app_main);
+    (void)app_runner__register("apps", apps_app_main);
     (void)app_runner__register("filemanager", filemanager_app_main);
     (void)app_runner__register("clock", clock_app_main);
     (void)app_runner__register("config", config_app_main);

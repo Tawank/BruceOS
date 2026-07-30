@@ -25,6 +25,7 @@ const T = {
 };
 
 const EXECUTABLE = {
+  elf: "elf",
   ir: "ir tx_from_file",
   sub: "subghz tx_from_file",
   js: "js run_from_file",
@@ -33,6 +34,18 @@ const EXECUTABLE = {
   mp3: "play",
   wav: "play",
 };
+
+const BINARY_FILE_EXTENSIONS = new Set([
+  "elf",
+  "jpg",
+  "jpeg",
+  "png",
+  "gif",
+  "bmp",
+  "webp",
+  "mp3",
+  "wav",
+]);
 
 const Dialog = {
   _bg: function (show) {
@@ -146,7 +159,11 @@ async function requestGet(url, data) {
         handleAuthError();
         reject(new Error(`Unauthorized access (401)`));
       } else {
-        reject(new Error(`Request failed with status ${req.status}`));
+        reject(
+          new Error(
+            req.responseText || `Request failed with status ${req.status}`,
+          ),
+        );
       }
     };
     req.onerror = () => {
@@ -171,7 +188,11 @@ async function requestPost(url, data) {
         handleAuthError();
         reject(new Error(`Unauthorized access (401)`));
       } else {
-        reject(new Error(`Request failed with status ${req.status}`));
+        reject(
+          new Error(
+            req.responseText || `Request failed with status ${req.status}`,
+          ),
+        );
       }
     };
     req.onerror = () => reject(new Error("Network error"));
@@ -375,7 +396,12 @@ function renderFileRow(fileList) {
           "data-action",
           "renameFile",
         );
-        e.querySelector(".col-name").classList.add("act-edit-file");
+        let extension = name.includes(".")
+          ? name.split(".").pop().toLowerCase()
+          : "";
+        if (!BINARY_FILE_EXTENSIONS.has(extension)) {
+          e.querySelector(".col-name").classList.add("act-edit-file");
+        }
         e.querySelector(".col-name").textContent = name;
         e.querySelector(".col-name").setAttribute("title", name);
         e.querySelector(".col-size").textContent = size;
@@ -476,23 +502,29 @@ async function saveEditorFile(runFile = false) {
   Dialog.loading.show("Saving...");
   let editor = $(".dialog.editor .file-content");
   let filename = $(".dialog.editor .editor-file-name").textContent.trim();
-  if (isModified(editor)) {
-    $(".act-save-edit-file").disabled = true;
-    editor.setAttribute("data-hash", calcHash(editor.value));
-    await requestPost("/edit", {
-      fs: currentDrive,
-      name: filename,
-      content: editor.value,
-    });
-  }
-
-  if (runFile) {
-    let serial = getSerialCommand(filename);
-    if (serial !== undefined) {
-      await runCommand(serial + ' "' + filename + '"');
+  try {
+    if (isModified(editor)) {
+      $(".act-save-edit-file").disabled = true;
+      await requestPost("/edit", {
+        fs: currentDrive,
+        name: filename,
+        content: editor.value,
+      });
+      editor.setAttribute("data-hash", calcHash(editor.value));
     }
+
+    if (runFile) {
+      let serial = getSerialCommand(filename);
+      if (serial !== undefined) {
+        await runCommand(serial + ' "' + filename + '"');
+      }
+    }
+  } catch (error) {
+    $(".act-save-edit-file").disabled = false;
+    alert("Failed to save file: " + error.message);
+  } finally {
+    Dialog.loading.hide();
   }
-  Dialog.loading.hide();
 }
 
 function isModified(target) {

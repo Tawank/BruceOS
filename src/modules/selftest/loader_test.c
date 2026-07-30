@@ -223,11 +223,31 @@ bool selftest__run_elf_loader_case(void) {
     int result = app_runner__run_path(path, "--gui", true);
     dialog__test_set_choice_provider(NULL);
 
-    bool run_ok = result > 0 && elf_loader__debug_call_count() == calls_before + 1;
-    if (run_ok) { (void)process__wait((bruce_process_id_t)result, 2000); }
-    storage__remove(path);
+    bool run_ok = result == BRUCE_ERR_INVALID_ARGUMENT && elf_loader__debug_call_count() == calls_before + 1;
     if (!run_ok) {
-        printf("[selftest] loader/elf: run_path did not spawn a process (%d)\n", result);
+        printf("[selftest] loader/elf: invalid fake image was not rejected after staging (%d)\n", result);
+        storage__remove(path);
+        return false;
+    }
+
+    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
+    size_t written = 0;
+    bool corrupted = storage__open(path, BRUCE_STORAGE_OPEN_WRITE, &file) == BRUCE_OK &&
+                     storage__seek(file, 52, SEEK_SET, NULL) == BRUCE_OK &&
+                     storage__write(file, "!", 1, &written) == BRUCE_OK && written == 1;
+    if (file != BRUCE_FILE_ID_INVALID) storage__close(file);
+    inspection = corrupted ? manifest__inspect_elf(path) : NULL;
+    bool fallback_ok = inspection != NULL && inspection->kind == BRUCE_APP_KIND_ELF &&
+                       strcmp(inspection->manifest.app_name, "selftest_elf_loader_target") == 0 &&
+                       inspection->manifest.stack_size == 8192 && inspection->manifest.permission_count == 0;
+    if (inspection != NULL) memory__free(inspection);
+    if (fallback_ok) {
+        result = app_runner__run_path(path, "--gui", true);
+        fallback_ok = result == BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    storage__remove(path);
+    if (!fallback_ok) {
+        printf("[selftest] loader/elf: invalid manifest did not use fallback metadata\n");
         return false;
     }
 

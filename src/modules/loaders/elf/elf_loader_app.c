@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -64,8 +65,8 @@ typedef struct {
     char permission_key[BRUCE_PERMISSION_FILE_NAME_MAX];
     int argc;
     char **argv;
-    size_t image_size;
-    uint8_t *image;
+    esp_elf_t elf;
+    bool elf_initialized;
 } elf_loader_process_ctx_t;
 
 /* Public SDK symbol allowlist. ELF apps may only resolve these names; selected
@@ -83,78 +84,16 @@ static uintptr_t elf_loader__find_symbol(const char *sym_name) {
 
 static void elf_loader__free_process_ctx(elf_loader_process_ctx_t *ctx) {
     if (ctx == NULL) { return; }
-    free(ctx->image);
+    if (ctx->elf_initialized) esp_elf_deinit(&ctx->elf);
     app_runner__free_args(ctx->argv, ctx->argc);
     free(ctx);
 }
 
-/* Process entry for the loaded ELF.  Runs on the loader process's own stack with
- * the image and args prepared by elf_loader__run_path(). */
+/* Process entry for an ELF already relocated by elf_loader__run_path(). */
 static void elf_loader__entry(void *context) {
     elf_loader_process_ctx_t *ctx = (elf_loader_process_ctx_t *)context;
-
-    esp_elf_t elf;
-    memset(&elf, 0, sizeof(elf));
-
-    if (esp_elf_init(&elf) != 0) {
-        printf("[elf_loader] %s: esp_elf_init failed\n", ctx->permission_key);
-        elf_loader__free_process_ctx(ctx);
-        return;
-    }
-
-    if (esp_elf_relocate(&elf, ctx->image) != 0) {
-        printf("[elf_loader] %s: esp_elf_relocate failed\n", ctx->permission_key);
-        esp_elf_deinit(&elf);
-        elf_loader__free_process_ctx(ctx);
-        return;
-    }
-
-    (void)esp_elf_request(&elf, 0, ctx->argc, ctx->argv);
-
-    esp_elf_deinit(&elf);
+    (void)esp_elf_request(&ctx->elf, 0, ctx->argc, ctx->argv);
     elf_loader__free_process_ctx(ctx);
-}
-
-static int elf_loader__load_image(const char *path, elf_loader_process_ctx_t *ctx) {
-    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
-    bruce_result_t open_result = storage__open(path, BRUCE_STORAGE_OPEN_READ, &file);
-    if (open_result != BRUCE_OK) { return (int)open_result; }
-
-    int result = BRUCE_OK;
-    uint64_t size = 0;
-    if (storage__seek(file, 0, SEEK_END, &size) != BRUCE_OK || size == 0) {
-        result = BRUCE_ERR_IO;
-    } else {
-            ctx->image = malloc((size_t)size);
-        if (ctx->image == NULL) {
-            result = BRUCE_ERR_NO_MEMORY;
-        } else {
-            ctx->image_size = (size_t)size;
-            if (storage__seek(file, 0, SEEK_SET, NULL) != BRUCE_OK) {
-                result = BRUCE_ERR_IO;
-            } else {
-                size_t total = 0;
-                while (total < ctx->image_size) {
-                    size_t chunk = 0;
-                    if (storage__read(file, ctx->image + total, ctx->image_size - total, &chunk) !=
-                            BRUCE_OK ||
-                        chunk == 0) {
-                        result = BRUCE_ERR_IO;
-                        break;
-                    }
-                    total += chunk;
-                }
-            }
-        }
-    }
-
-    storage__close(file);
-    if (result != BRUCE_OK && ctx->image != NULL) {
-        free(ctx->image);
-        ctx->image = NULL;
-        ctx->image_size = 0;
-    }
-    return result;
 }
 
 /* Loader registry run function: called by app_runner__run_path() or by the
@@ -228,11 +167,31 @@ int elf_loader__run_path(const char *path, const char *arg, bool in_background) 
     ctx->argc = full_argc;
     ctx->argv = full_argv;
 
-    int load_result = elf_loader__load_image(path, ctx);
-    if (load_result != BRUCE_OK) {
+    bruce_loader_image_t image;
+    bruce_result_t stage_result = loader__stage_path(normalized_path, &image);
+    if (stage_result != BRUCE_OK) {
         elf_loader__free_process_ctx(ctx);
         memory__free(inspection);
-        return load_result;
+        return stage_result;
+    }
+    int relocate_result = esp_elf_init(&ctx->elf);
+    if (relocate_result == 0) {
+        ctx->elf_initialized = true;
+        relocate_result = esp_elf_relocate(&ctx->elf, image.data);
+    }
+    bruce_result_t release_result = loader__release_image(&image);
+    if (relocate_result != 0 || release_result != BRUCE_OK) {
+        printf(
+            "[elf_loader] %s: flash-backed relocation failed (relocate=%d, release=%d)\n",
+            ctx->permission_key,
+            relocate_result,
+            release_result
+        );
+        elf_loader__free_process_ctx(ctx);
+        memory__free(inspection);
+        return relocate_result != 0
+                   ? (relocate_result == -ENOMEM ? BRUCE_ERR_NO_MEMORY : BRUCE_ERR_INVALID_ARGUMENT)
+                   : release_result;
     }
 
     int result = app_runner__spawn_loader_process(

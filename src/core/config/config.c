@@ -106,6 +106,7 @@ static void config__set_defaults(config__t *cfg) {
     cfg->bgColor = 0x0000;
     config__assign(&cfg->themePath, "");
     cfg->themeOnSd = false;
+    cfg->displayDmaFramebuffer = true;
     config__assign(&cfg->launcherApp, "");
 
     cfg->dimmerSet = 60;
@@ -244,6 +245,7 @@ static void config__parse_json(config__t *cfg, const cJSON *root) {
     json_get_hex16(root, "bgColor", &cfg->bgColor);
     json_get_string(root, "themeFile", &cfg->themePath);
     json_get_bool(root, "themeOnSd", &cfg->themeOnSd);
+    json_get_bool(root, "displayDmaFramebuffer", &cfg->displayDmaFramebuffer);
     json_get_string(root, "launcherApp", &cfg->launcherApp);
 
     json_get_int(root, "dimmerSet", &cfg->dimmerSet);
@@ -387,6 +389,7 @@ static cJSON *config__build_json(const config__t *cfg) {
     cJSON_AddStringToObject(root, "bgColor", hex);
     cJSON_AddStringToObject(root, "themeFile", config__or_empty(cfg->themePath));
     cJSON_AddBoolToObject(root, "themeOnSd", cfg->themeOnSd);
+    cJSON_AddBoolToObject(root, "displayDmaFramebuffer", cfg->displayDmaFramebuffer);
     cJSON_AddStringToObject(root, "launcherApp", config__or_empty(cfg->launcherApp));
 
     cJSON_AddNumberToObject(root, "dimmerSet", cfg->dimmerSet);
@@ -820,6 +823,7 @@ CONFIG__DEFINE_UINT16_FIELD(sec_color, secColor)
 CONFIG__DEFINE_UINT16_FIELD(bg_color, bgColor)
 CONFIG__DEFINE_STRING_FIELD(theme_path, themePath, CONFIG__THEME_PATH_MAX_LEN)
 CONFIG__DEFINE_BOOL_FIELD(theme_on_sd, themeOnSd)
+CONFIG__DEFINE_BOOL_FIELD(display_dma_framebuffer, displayDmaFramebuffer)
 CONFIG__DEFINE_STRING_FIELD(launcher_app, launcherApp, CONFIG__LAUNCHER_APP_MAX_LEN)
 
 CONFIG__DEFINE_INT_FIELD(dimmer_set, dimmerSet)

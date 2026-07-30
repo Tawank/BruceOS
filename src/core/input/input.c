@@ -473,7 +473,7 @@ static bool input__kb_match_hotkey(const char *key, char *out_action, size_t act
 }
 
 static void input__kb_run_hotkey(const char *action) {
-    if (strcmp(action, "process switch next") == 0) {
+    if (strcmp(action, "process switch next") == 0 || strcmp(action, "task switch next") == 0) {
         (void)process_registry__switch_next();
         return;
     }

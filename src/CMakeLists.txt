@@ -45,8 +45,9 @@ idf_component_register(SRCS
                     "core/image/image.c"
                     "core/i2c/i2c.c"
                     "core/input/input.c"
-                    "core/ir/ir.c"
-                    "core/manifest/manifest.c"
+                     "core/ir/ir.c"
+                    "core/loader_image/loader_image.c"
+                     "core/manifest/manifest.c"
                     "core/memory/memory.c"
                     "core/network/network.c"
                     "core/notification/notification.c"
@@ -60,8 +61,9 @@ idf_component_register(SRCS
                     "core/process/process.c"
                     "core/tcp/tcp.c"
                     "core/wifi/wifi_common.c"
-                    "core/http_server/http_server.c"
-                    "modules/bruce_launcher/bruce_launcher_app.c"
+                     "core/http_server/http_server.c"
+                     "modules/apps/apps_app.c"
+                     "modules/bruce_launcher/bruce_launcher_app.c"
                     "modules/bruce_launcher/bruce_launcher_icons.c"
                     "modules/bruce_launcher/bruce_launcher_menu.c"
                     "modules/bnu/bnu_app.c"
@@ -178,6 +180,11 @@ add_library(bruce_sdk_builtin_bnu_check OBJECT "modules/bnu/bnu_app.c")
 target_include_directories(bruce_sdk_builtin_bnu_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/bnu")
+
+add_library(bruce_sdk_builtin_apps_check OBJECT "modules/apps/apps_app.c")
+target_include_directories(bruce_sdk_builtin_apps_check PRIVATE
+                           "${CMAKE_CURRENT_LIST_DIR}"
+                           "${CMAKE_CURRENT_LIST_DIR}/modules/apps")
 
 add_library(bruce_sdk_builtin_clock_check OBJECT "modules/clock/clock_app.c")
 target_include_directories(bruce_sdk_builtin_clock_check PRIVATE
@@ -310,6 +317,7 @@ target_link_libraries(bruce_sdk_builtin_js_loader_check PRIVATE mquickjs)
 add_dependencies(bruce_sdk_builtin_js_loader_check mquickjs_generate_stdlib)
 
 set(BRUCE_ARGS_SDK_CHECK_TARGETS
+    bruce_sdk_builtin_apps_check
     bruce_sdk_builtin_bnu_check
     bruce_sdk_builtin_clock_check
     bruce_sdk_builtin_config_check

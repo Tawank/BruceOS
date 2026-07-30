@@ -11,6 +11,8 @@ ELF applications.
   include the corresponding `core_sdk/*.h` headers.
 - `elf_apps/examples/elf_loader/` — template for a loader ELF app (`elf_loader.elf`).
 - `elf_apps/examples/game/` — template for a simple ELF app (`game.elf`).
+- `elf_apps/examples/nes/` — Nofrendo NES emulator port using Bruce display, input, and storage APIs.
+- `components/nofrendo/` — reusable ESP-IDF component containing the emulator core.
 - `tools/build_elf_apps.py` — builds the templates and injects the
   `.bruce.manifest` section from each app's `manifest.json`.
 
@@ -26,6 +28,20 @@ Final ELF files are written to:
 
 - `elf_apps/examples/elf_loader.elf`
 - `elf_apps/examples/game.elf`
+- `elf_apps/examples/nes.elf`
+
+Nofrendo can be launched with a ROM path or without one to open the file picker:
+
+```
+elf ./nes.elf --gui /roms/game.nes
+elf ./nes.elf --gui
+```
+
+The Back input exits. D-pad/gamepad inputs are mapped directly; keyboard controls
+are WASD, J (A), K (B), Enter (Start), and Space (Select). Audio is currently
+disabled because the public Bruce ELF SDK does not expose an audio stream API.
+The NES project builds with `-Os` because both executable memory and internal
+RAM are constrained on non-PSRAM devices.
 
 ## Running
 

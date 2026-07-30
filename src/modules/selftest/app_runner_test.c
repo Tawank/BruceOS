@@ -19,11 +19,13 @@ static int selftest__apprunner_dummy_entry(int argc, char **argv) {
 bool selftest__run_apprunner_registration_case(void) {
     size_t command_count = app_runner__command_count();
     bool found_help = false;
+    bool found_apps = false;
     for (size_t i = 0; i < command_count; ++i) {
         const char *name = app_runner__command_name(i);
         if (name != NULL && strcmp(name, "help") == 0) found_help = true;
+        if (name != NULL && strcmp(name, "apps") == 0) found_apps = true;
     }
-    if (!found_help || app_runner__command_name(command_count) != NULL) {
+    if (!found_help || !found_apps || app_runner__command_name(command_count) != NULL) {
         printf("[selftest] apprunner/registration: command enumeration failed\n");
         return false;
     }

@@ -10,6 +10,7 @@
 #include "core_sdk/notification.h"
 #include "core_sdk/process.h"
 #include "esp_heap_caps.h"
+#include "esp_attr.h"
 #include "esp_log.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
@@ -50,7 +51,8 @@ typedef struct {
 static SemaphoreHandle_t s_mutex;
 static bool s_initialized;
 static bruce_display_color_t *s_framebuffer;
-static bruce_display_color_t s_row_buffer[DISPLAY__ROW_BUF_PIXELS];
+static DMA_ATTR bruce_display_color_t s_row_buffer[DISPLAY__ROW_BUF_PIXELS];
+static bool s_dma_framebuffer;
 static uint8_t s_rotation;
 static int16_t s_fb_width;
 static int16_t s_fb_height;
@@ -344,7 +346,7 @@ static void display__worker(void *arg) {
         display__lock();
         notification__state_t notification = s_notification;
         bool compose = notification.active && display__rects_overlap(request.rect, notification.rect);
-        bool packed = !request.fullscreen || compose || request.overlay_update;
+        bool packed = !s_dma_framebuffer || !request.fullscreen || compose || request.overlay_update;
         display__unlock();
         while (xSemaphoreTake(s_transfer_done, 0) == pdTRUE) {}
         if (packed) {
@@ -356,10 +358,10 @@ static void display__worker(void *arg) {
             for (int row = 0; row < h; ++row) {
                 int screen_y = y + row;
                 const bruce_display_color_t *pixels = &s_framebuffer[screen_y * s_fb_width + x];
-                if (compose) {
+                if (compose || !s_dma_framebuffer) {
                     display__lock();
                     memcpy(s_row_buffer, pixels, (size_t)w * sizeof(*pixels));
-                    display__compose_notification_row(request.rect, &notification, screen_y);
+                    if (compose) display__compose_notification_row(request.rect, &notification, screen_y);
                     display__unlock();
                     pixels = s_row_buffer;
                 }
@@ -428,7 +430,9 @@ bruce_result_t display__init(void) {
     bruce_result_t result = display_driver__init();
     if (result != BRUCE_OK) { display__unlock(); return result; }
 #endif
-    s_framebuffer = heap_caps_malloc(DISPLAY__FB_SIZE, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+    s_dma_framebuffer = config__get_display_dma_framebuffer();
+    uint32_t framebuffer_caps = MALLOC_CAP_INTERNAL | (s_dma_framebuffer ? MALLOC_CAP_DMA : MALLOC_CAP_8BIT);
+    s_framebuffer = heap_caps_malloc(DISPLAY__FB_SIZE, framebuffer_caps);
     if (s_framebuffer == NULL) {
         ESP_LOGE(TAG, "failed to allocate framebuffer");
         display_driver__deinit();

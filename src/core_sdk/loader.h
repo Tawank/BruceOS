@@ -11,6 +11,7 @@
  */
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "core_sdk/result.h"
@@ -22,6 +23,18 @@ typedef int (*bruce_loader_run_fn)(const char *path, const char *arg, bool in_ba
  * `context` is the loader's own opaque pointer (e.g. a struct holding the
  * decoded image or script source and its own argc/argv). */
 typedef void (*bruce_loader_process_entry_fn)(void *context);
+
+typedef struct {
+    const uint8_t *data;
+    size_t size;
+    uint32_t handle;
+} bruce_loader_image_t;
+
+/* Streams a file into the dedicated loader staging partition, verifies it,
+ * and returns a temporary read-only flash mapping. Only one staged image may
+ * be active at a time. The caller must release successful mappings promptly. */
+bruce_result_t loader__stage_path(const char *path, bruce_loader_image_t *out_image);
+bruce_result_t loader__release_image(bruce_loader_image_t *image);
 
 /* Registers a loader for `extension` (must start with '.', e.g. ".elf").
  * `priority` breaks ties when app_runner__run()'s named resolution finds

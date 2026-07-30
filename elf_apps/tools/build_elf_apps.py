@@ -4,12 +4,13 @@
 Usage:
     python3 elf_apps/tools/build_elf_apps.py [--target esp32s3]
 
-The script builds elf_apps/examples/elf_loader and elf_apps/examples/game, then
+The script builds the ELF examples listed in APPS, then
 injects their manifest.json files into the resulting ELF images as a
 non-allocatable .bruce.manifest section.  Final outputs are written to:
 
     elf_apps/examples/elf_loader.elf
     elf_apps/examples/game.elf
+    elf_apps/examples/nes.elf
 
 The firmware's built-in "elf" command can then load them:
 
@@ -25,7 +26,7 @@ import sys
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 SDK_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
 APPS_DIR = os.path.join(SDK_DIR, "examples")
-APPS = ["elf_loader", "game"]
+APPS = ["elf_loader", "game", "nes"]
 
 
 def run(cmd, cwd, env=None):

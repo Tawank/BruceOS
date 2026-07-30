@@ -19,6 +19,7 @@
 #include "esp_vfs_fat.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/task.h"
 #include "spi_flash_mmap.h"
 
 #include "core/process/process.h"
@@ -109,12 +110,7 @@ static esp_err_t storage__mount_internal(void) {
         if (err == ESP_OK) err = esp_vfs_littlefs_register(&config);
     }
     if (err == ESP_OK) {
-        ESP_LOGI(
-            TAG,
-            "mounted internal storage at 0x%zx (%zu bytes)",
-            start,
-            s_littlefs_partition->size
-        );
+        ESP_LOGI(TAG, "mounted internal storage at 0x%zx (%zu bytes)", start, s_littlefs_partition->size);
     }
     return err;
 }
@@ -335,6 +331,7 @@ typedef struct {
     bruce_file_id_t id;
     bruce_resource_id_t resource_id;
     bruce_process_id_t owner;
+    TaskHandle_t service_owner;
 } storage__file_slot_t;
 
 static storage__file_slot_t s_open_files[STORAGE__MAX_OPEN_FILES];
@@ -348,10 +345,7 @@ static uint32_t s_next_file_id = 1;
  * storage__write_file_atomic() above, which this check does not apply to. */
 static bool storage__is_protected_path(const char *path) {
     static const char *const protected_paths[] = {
-        "/bruce.json",
-        "/bruce.json.tmp",
         "/permissions.json",
-        "/permissions.json.tmp",
     };
     if (path == NULL) return false;
     for (size_t i = 0; i < sizeof(protected_paths) / sizeof(protected_paths[0]); ++i) {
@@ -383,6 +377,14 @@ static int storage__find_open_slot_locked(bruce_file_id_t file) {
         if (s_open_files[i].in_use && s_open_files[i].id == file) return i;
     }
     return -1;
+}
+
+/* Core service tasks are not process-registry entries. Their handles remain
+ * task-owned, but require explicit close rather than process-exit cleanup. */
+static bool storage__file_owned_by_caller_locked(const storage__file_slot_t *slot) {
+    bruce_process_id_t process = process__current_id();
+    return slot->owner != BRUCE_PROCESS_ID_INVALID ? slot->owner == process
+                                                   : slot->service_owner == xTaskGetCurrentTaskHandle();
 }
 
 /* Invoked by process_registry__* teardown if a process exits/is killed without
@@ -464,9 +466,12 @@ bruce_result_t storage__open(const char *path, uint32_t flags, bruce_file_id_t *
         return errno == ENOENT ? BRUCE_ERR_NOT_FOUND : BRUCE_ERR_IO;
     }
 
-    bruce_resource_id_t resource_id =
-        process_registry__resource_register(storage__file_cleanup, &s_open_files[slot_index]);
-    if (resource_id == BRUCE_RESOURCE_ID_INVALID) {
+    bruce_process_id_t owner = process__current_id();
+    bruce_resource_id_t resource_id = BRUCE_RESOURCE_ID_INVALID;
+    if (owner != BRUCE_PROCESS_ID_INVALID) {
+        resource_id = process_registry__resource_register(storage__file_cleanup, &s_open_files[slot_index]);
+    }
+    if (owner != BRUCE_PROCESS_ID_INVALID && resource_id == BRUCE_RESOURCE_ID_INVALID) {
         close(fd);
         storage__lock();
         s_open_files[slot_index].in_use = false;
@@ -477,7 +482,9 @@ bruce_result_t storage__open(const char *path, uint32_t flags, bruce_file_id_t *
     storage__lock();
     s_open_files[slot_index].fd = fd;
     s_open_files[slot_index].resource_id = resource_id;
-    s_open_files[slot_index].owner = process__current_id();
+    s_open_files[slot_index].owner = owner;
+    s_open_files[slot_index].service_owner =
+        owner == BRUCE_PROCESS_ID_INVALID ? xTaskGetCurrentTaskHandle() : NULL;
     bruce_file_id_t id = s_next_file_id++;
     if (s_next_file_id == BRUCE_FILE_ID_INVALID) s_next_file_id = 1;
     s_open_files[slot_index].id = id;
@@ -494,7 +501,7 @@ bruce_result_t storage__read(bruce_file_id_t file, void *buffer, size_t capacity
         storage__unlock();
         return BRUCE_ERR_NOT_FOUND;
     }
-    if (s_open_files[slot_index].owner != process__current_id()) {
+    if (!storage__file_owned_by_caller_locked(&s_open_files[slot_index])) {
         storage__unlock();
         return BRUCE_ERR_PERMISSION;
     }
@@ -513,7 +520,7 @@ bruce_result_t storage__write(bruce_file_id_t file, const void *buffer, size_t s
         storage__unlock();
         return BRUCE_ERR_NOT_FOUND;
     }
-    if (s_open_files[slot_index].owner != process__current_id()) {
+    if (!storage__file_owned_by_caller_locked(&s_open_files[slot_index])) {
         storage__unlock();
         return BRUCE_ERR_PERMISSION;
     }
@@ -532,7 +539,7 @@ bruce_result_t storage__seek(bruce_file_id_t file, int64_t offset, int whence, u
         storage__unlock();
         return BRUCE_ERR_NOT_FOUND;
     }
-    if (s_open_files[slot_index].owner != process__current_id()) {
+    if (!storage__file_owned_by_caller_locked(&s_open_files[slot_index])) {
         storage__unlock();
         return BRUCE_ERR_PERMISSION;
     }
@@ -550,7 +557,7 @@ bruce_result_t storage__close(bruce_file_id_t file) {
         storage__unlock();
         return BRUCE_ERR_NOT_FOUND;
     }
-    if (s_open_files[slot_index].owner != process__current_id()) {
+    if (!storage__file_owned_by_caller_locked(&s_open_files[slot_index])) {
         storage__unlock();
         return BRUCE_ERR_PERMISSION;
     }
@@ -564,7 +571,7 @@ bruce_result_t storage__close(bruce_file_id_t file) {
     /* The handle is already released above; this only removes the now-
      * redundant teardown-time cleanup registration, it does not close fd
      * again. */
-    process_registry__resource_release(resource_id);
+    if (resource_id != BRUCE_RESOURCE_ID_INVALID) process_registry__resource_release(resource_id);
     return BRUCE_OK;
 }
 
@@ -608,7 +615,8 @@ storage__list(const char *path, bruce_storage_entry_t *entries, size_t capacity,
             bruce_storage_entry_t *out = &entries[written];
             strncpy(out->name, dir_entry->d_name, BRUCE_STORAGE_NAME_MAX - 1);
             out->name[BRUCE_STORAGE_NAME_MAX - 1] = '\0';
-            out->type = S_ISDIR(entry_stat.st_mode) ? BRUCE_STORAGE_ENTRY_DIRECTORY : BRUCE_STORAGE_ENTRY_FILE;
+            out->type =
+                S_ISDIR(entry_stat.st_mode) ? BRUCE_STORAGE_ENTRY_DIRECTORY : BRUCE_STORAGE_ENTRY_FILE;
             out->size = (size_t)entry_stat.st_size;
         }
         ++written;

@@ -59,12 +59,14 @@ const char *manifest__inspect_path(const char *path);
  * contract").  Opens `path`, validates the ELF32 header (magic, e_machine
  * vs. this build's target), extracts and parses the .bruce.manifest
  * section via manifest__parse(), and fills *out_inspection with the parsed
- * manifest, BRUCE_APP_KIND_ELF, and the ABI-warning flag.  Loader modules
+ * manifest, BRUCE_APP_KIND_ELF, and the ABI-warning flag. A valid ELF with a
+ * missing or invalid manifest receives fallback metadata: its filename,
+ * current Core ABI, an 8192-byte stack, and no predeclared permissions. Loader modules
  * that know they are loading an ELF file (the built-in ELF loader, for
  * example) call this directly.
  *
- * Returns BRUCE_OK on success, or BRUCE_ERR_INVALID_PATH, BRUCE_ERR_NOT_FOUND,
- * BRUCE_ERR_MANIFEST_INVALID, BRUCE_ERR_TARGET_MISMATCH. */
+ * Return NULL for invalid paths, missing files, malformed ELF headers,
+ * target mismatches, or allocation failures. */
 bruce_app_inspection_t *manifest__inspect_elf(const char *path);
 
 /* JavaScript-specific manifest inspection (see migration_plan.md,

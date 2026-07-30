@@ -9,6 +9,7 @@
 #include "cJSON.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/task.h"
 
 #include "core/storage/storage.h"
 #include "core/process/process.h"
@@ -52,6 +53,9 @@ static permission__file_entry_t *s_files;
 static size_t s_file_count;
 static size_t s_file_capacity;
 static bool s_loaded;
+/* Task currently inside permission__prompt(); nested checks from it fail
+ * closed so the dialog cannot recurse into another prompt. */
+static TaskHandle_t s_prompt_task;
 
 static void permission__lock(void) {
     if (s_mutex == NULL) {
@@ -208,6 +212,22 @@ static bool permission__prompt(const char *file_name, bruce_permission_t permiss
     return result == BRUCE_OK && selected == 0;
 }
 
+/* Runs permission__prompt() with a reentrancy guard: the dialog re-enters
+ * permission__check() through Core UI paths (dialog theme colors ->
+ * config__get_pri_color -> config__guard), and re-prompting there would
+ * recurse until the task stack overflows. A nested attempt reports
+ * "unanswered" so callers fail closed without showing a second dialog. */
+static bool permission__prompt_guarded(const char *file_name, bruce_permission_t permission, bool *out_answered) {
+    if (s_prompt_task == xTaskGetCurrentTaskHandle()) {
+        *out_answered = false;
+        return false;
+    }
+    s_prompt_task = xTaskGetCurrentTaskHandle();
+    bool allowed = permission__prompt(file_name, permission, out_answered);
+    s_prompt_task = NULL;
+    return allowed;
+}
+
 bruce_result_t permission__check(bruce_permission_t permission) {
     if (permission < 0 || permission >= BRUCE_PERMISSION_COUNT) { return BRUCE_ERR_INVALID_ARGUMENT; }
 
@@ -234,7 +254,7 @@ bruce_result_t permission__check(bruce_permission_t permission) {
     permission__unlock(); /* dialog__choice() must not run while holding the lock */
 
     bool answered = false;
-    bool allowed = permission__prompt(key, permission, &answered);
+    bool allowed = permission__prompt_guarded(key, permission, &answered);
     if (!answered) {
         /* Indeterminate: don't persist, let a later call try again. */
         return BRUCE_ERR_PERMISSION;
@@ -280,7 +300,7 @@ permission__preflight(const char *file_name, const char *const *permission_names
         if (already_known) continue;
 
         bool answered = false;
-        bool allowed = permission__prompt(file_name, resolved[i], &answered);
+        bool allowed = permission__prompt_guarded(file_name, resolved[i], &answered);
         if (!answered) continue; /* leave unresolved; a dynamic request may retry it later */
 
         permission__lock();
