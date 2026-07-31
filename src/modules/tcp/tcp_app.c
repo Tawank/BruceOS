@@ -7,8 +7,8 @@
 
 #include "args.h"
 #include "core_sdk/result.h"
-#include "core_sdk/stdio.h"
 #include "core_sdk/runtime.h"
+#include "core_sdk/stdio.h"
 #include "core_sdk/tcp.h"
 #include "core_sdk/wifi.h"
 
@@ -40,7 +40,7 @@ static bruce_result_t tcp_app__send_all(bruce_tcp_id_t socket, const char *data,
 static bruce_result_t tcp_app__forward_stdin(bruce_tcp_id_t socket, bool *out_exit) {
     char input[TCP_APP_BUFFER_SIZE];
     size_t input_size = 0;
-    bruce_result_t result = bruce_stdio_read(input, sizeof(input), 0, &input_size);
+    bruce_result_t result = stdio__read(input, sizeof(input), 0, &input_size);
     if (result == BRUCE_ERR_TIMEOUT) return BRUCE_OK;
     if (result != BRUCE_OK) return result;
 
@@ -64,7 +64,7 @@ static bruce_result_t tcp_app__session(bruce_tcp_id_t socket, bool *out_local_ex
         if (result == BRUCE_OK) {
             if (received_size == 0) return BRUCE_OK;
             received[received_size] = '\0';
-            (void)bruce_stdio_write(received, received_size);
+            (void)stdio__write(received, received_size);
         } else if (result != BRUCE_ERR_TIMEOUT) {
             return result;
         }
@@ -123,7 +123,7 @@ static int tcp_app__listener(uint16_t port) {
         if (result == BRUCE_ERR_TIMEOUT) {
             char input[TCP_APP_BUFFER_SIZE];
             size_t input_size = 0;
-            bruce_result_t input_result = bruce_stdio_read(input, sizeof(input), 0, &input_size);
+            bruce_result_t input_result = stdio__read(input, sizeof(input), 0, &input_size);
             if (input_result == BRUCE_ERR_NOT_FOUND ||
                 (input_result == BRUCE_OK && memchr(input, TCP_APP_EXIT_BYTE, input_size) != NULL)) {
                 result = BRUCE_OK;
@@ -141,9 +141,7 @@ static int tcp_app__listener(uint16_t port) {
         bool local_exit = false;
         bruce_result_t session_result = tcp_app__session(client, &local_exit);
         (void)tcp__close(client);
-        stdio__printf(
-            "\nClient disconnected%s\n", session_result == BRUCE_OK ? "." : " with an error."
-        );
+        stdio__printf("\nClient disconnected%s\n", session_result == BRUCE_OK ? "." : " with an error.");
         if (local_exit || session_result == BRUCE_ERR_CANCELLED) {
             result = session_result;
             break;
@@ -176,9 +174,9 @@ int tcp_app_main(int argc, char **argv) {
         ap_status_t status = ap_get_status(root);
         if (status != AP_STATUS_HELP && status != AP_STATUS_VERSION)
             ap_print_help(ap_get_cmd_parser(root) != NULL ? ap_get_cmd_parser(root) : root);
-        int result = status == AP_STATUS_HELP || status == AP_STATUS_VERSION
-                         ? BRUCE_OK
-                         : status == AP_STATUS_NO_MEMORY ? BRUCE_ERR_NO_MEMORY : BRUCE_ERR_INVALID_ARGUMENT;
+        int result = status == AP_STATUS_HELP || status == AP_STATUS_VERSION ? BRUCE_OK
+                     : status == AP_STATUS_NO_MEMORY                         ? BRUCE_ERR_NO_MEMORY
+                                                                             : BRUCE_ERR_INVALID_ARGUMENT;
         ap_free(root);
         return result;
     }

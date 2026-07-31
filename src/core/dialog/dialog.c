@@ -5,11 +5,11 @@
 #include "core_sdk/display.h"
 #include "core_sdk/input.h"
 #include "core_sdk/memory.h"
+#include "core_sdk/process.h"
 #include "core_sdk/result.h"
+#include "core_sdk/runtime.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
-#include "core_sdk/process.h"
-#include "core_sdk/runtime.h"
 
 #include "core/process/process.h"
 
@@ -82,7 +82,7 @@ static bruce_result_t dialog__term_message(bruce_dialog_kind_t kind, const char 
 }
 
 static int dialog__term_read_line(char *buffer, size_t buffer_size, bool mask_input) {
-    return bruce_stdio_read_line(buffer, buffer_size, mask_input);
+    return stdio__read_line(buffer, buffer_size, mask_input);
 }
 
 static bruce_result_t dialog__term_choice(

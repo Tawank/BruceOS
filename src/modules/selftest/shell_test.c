@@ -82,19 +82,18 @@ bool selftest__run_shell_script_case(void) {
 bool selftest__run_shell_stdio_inheritance_case(void) {
     if (!selftest__shell_register_probe()) return false;
     bruce_stdio_session_t session = BRUCE_STDIO_SESSION_INVALID;
-    if (bruce_stdio_session_create(&session) != BRUCE_OK ||
-        bruce_stdio_session_route_children(session) != BRUCE_OK) {
+    if (stdio__session_create(&session) != BRUCE_OK || stdio__session_route_children(session) != BRUCE_OK) {
         return false;
     }
     int launched = app_runner__run("shell", "-c \"shell_test_probe routed\"", true);
-    (void)bruce_stdio_session_route_children(BRUCE_STDIO_SESSION_INVALID);
+    (void)stdio__session_route_children(BRUCE_STDIO_SESSION_INVALID);
     bruce_process_status_t status;
     bool completed =
         launched > 0 && process__wait_status((bruce_process_id_t)launched, 2000, &status) == BRUCE_OK;
     char output[128] = {0};
     size_t size = 0;
-    bruce_result_t read = bruce_stdio_session_read_output(session, output, sizeof(output) - 1, &size);
-    (void)bruce_stdio_session_close(session);
+    bruce_result_t read = stdio__session_read_output(session, output, sizeof(output) - 1, &size);
+    (void)stdio__session_close(session);
     bool ok = completed && status.reason == BRUCE_PROCESS_EXITED && status.exit_code == 0 &&
               read == BRUCE_OK && strstr(output, "shell-grandchild-routed") != NULL;
     printf("[selftest] shell/stdio-inheritance: %s\n", ok ? "OK" : "failed");

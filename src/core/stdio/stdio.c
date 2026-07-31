@@ -21,8 +21,8 @@
 #endif
 
 #include "core/process/process.h"
-#include "core_sdk/result.h"
 #include "core_sdk/process.h"
+#include "core_sdk/result.h"
 #include "core_sdk/runtime.h"
 
 #define STDIO__MAX_SESSIONS 4
@@ -113,7 +113,7 @@ static void stdio__session_cleanup(void *context) {
     free(session);
 }
 
-bruce_result_t bruce_stdio_session_create(bruce_stdio_session_t *out_session) {
+bruce_result_t stdio__session_create(bruce_stdio_session_t *out_session) {
     if (out_session == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     *out_session = BRUCE_STDIO_SESSION_INVALID;
     bruce_process_id_t owner = process__current_id();
@@ -150,7 +150,7 @@ bruce_result_t bruce_stdio_session_create(bruce_stdio_session_t *out_session) {
     return BRUCE_OK;
 }
 
-bruce_result_t bruce_stdio_session_close(bruce_stdio_session_t session) {
+bruce_result_t stdio__session_close(bruce_stdio_session_t session) {
     bruce_process_id_t owner = process__current_id();
     stdio__ensure_init();
     xSemaphoreTake(s_lock, portMAX_DELAY);
@@ -168,7 +168,7 @@ bruce_result_t bruce_stdio_session_close(bruce_stdio_session_t session) {
     return BRUCE_OK;
 }
 
-bruce_result_t bruce_stdio_session_route_children(bruce_stdio_session_t session) {
+bruce_result_t stdio__session_route_children(bruce_stdio_session_t session) {
     if (session != BRUCE_STDIO_SESSION_INVALID) {
         bruce_process_id_t owner = process__current_id();
         stdio__ensure_init();
@@ -181,7 +181,7 @@ bruce_result_t bruce_stdio_session_route_children(bruce_stdio_session_t session)
     return process_registry__set_child_stdio_session(session);
 }
 
-bruce_result_t bruce_stdio_session_write_input(bruce_stdio_session_t session, const void *data, size_t size) {
+bruce_result_t stdio__session_write_input(bruce_stdio_session_t session, const void *data, size_t size) {
     if (data == NULL || size == 0) return BRUCE_ERR_INVALID_ARGUMENT;
     bruce_process_id_t owner = process__current_id();
     stdio__ensure_init();
@@ -205,9 +205,8 @@ bruce_result_t bruce_stdio_session_write_input(bruce_stdio_session_t session, co
     return BRUCE_OK;
 }
 
-bruce_result_t bruce_stdio_session_read_output(
-    bruce_stdio_session_t session, void *buffer, size_t capacity, size_t *out_size
-) {
+bruce_result_t
+stdio__session_read_output(bruce_stdio_session_t session, void *buffer, size_t capacity, size_t *out_size) {
     if (buffer == NULL || capacity == 0 || out_size == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     *out_size = 0;
     bruce_process_id_t owner = process__current_id();
@@ -278,9 +277,8 @@ static int stdio__stream_read(void *cookie, char *buffer, int size) {
 }
 #endif
 
-static bruce_result_t stdio__session_write_output(
-    bruce_stdio_session_t session, const void *data, size_t size
-) {
+static bruce_result_t
+stdio__session_write_output(bruce_stdio_session_t session, const void *data, size_t size) {
     if (data == NULL || size == 0) return BRUCE_ERR_INVALID_ARGUMENT;
     stdio__ensure_init();
     xSemaphoreTake(s_lock, portMAX_DELAY);
@@ -306,9 +304,8 @@ static bruce_result_t stdio__session_write_output(
 #if !CONFIG_LIBC_PICOLIBC
 static int stdio__stream_write(void *cookie, const char *buffer, int size) {
     if (size <= 0) return 0;
-    bruce_result_t result = stdio__session_write_output(
-        (bruce_stdio_session_t)(uintptr_t)cookie, buffer, (size_t)size
-    );
+    bruce_result_t result =
+        stdio__session_write_output((bruce_stdio_session_t)(uintptr_t)cookie, buffer, (size_t)size);
     return result == BRUCE_OK ? size : 0;
 }
 #endif
@@ -389,13 +386,11 @@ void stdio__process_detach(FILE *input, FILE *output, FILE *error) {
 #endif
 }
 
-bruce_result_t bruce_stdio_write(const void *data, size_t size) {
+bruce_result_t stdio__write(const void *data, size_t size) {
     if (size == 0) return BRUCE_OK;
     if (data == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     bruce_stdio_session_t session = process_registry__current_stdio_session();
-    if (session != BRUCE_STDIO_SESSION_INVALID) {
-        return stdio__session_write_output(session, data, size);
-    }
+    if (session != BRUCE_STDIO_SESSION_INVALID) { return stdio__session_write_output(session, data, size); }
 
     const char *bytes = data;
     size_t offset = 0;
@@ -422,7 +417,7 @@ int stdio__vprintf(const char *format, va_list args) {
         if (output == NULL) return BRUCE_ERR_NO_MEMORY;
         (void)vsnprintf(output, (size_t)size + 1, format, args);
     }
-    bruce_result_t result = bruce_stdio_write(output, (size_t)size);
+    bruce_result_t result = stdio__write(output, (size_t)size);
     if (output != stack_buffer) free(output);
     return result == BRUCE_OK ? size : (int)result;
 }
@@ -435,91 +430,80 @@ int stdio__printf(const char *format, ...) {
     return result;
 }
 
-bruce_result_t bruce_stdio_read(void *buffer, size_t capacity, uint32_t timeout_ms, size_t *out_size) {
+bruce_result_t stdio__read(void *buffer, size_t capacity, uint32_t timeout_ms, size_t *out_size) {
     bruce_stdio_session_t session = process_registry__current_stdio_session();
     if (session != BRUCE_STDIO_SESSION_INVALID) {
         return stdio__session_read_input(session, buffer, capacity, timeout_ms, out_size);
     }
     if (buffer == NULL || capacity == 0 || out_size == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     *out_size = 0;
-    uint64_t started = runtime__now();
-    for (;;) {
-        if (runtime__delay(0) != BRUCE_OK) return BRUCE_ERR_CANCELLED;
-        uint32_t wait_ms = 0;
-        if (timeout_ms != 0) {
-            uint64_t elapsed = runtime__now() - started;
-            if (timeout_ms != UINT32_MAX && elapsed >= timeout_ms) return BRUCE_ERR_TIMEOUT;
-            uint64_t remaining = timeout_ms == UINT32_MAX ? STDIO__READ_POLL_MS : timeout_ms - elapsed;
-            wait_ms = remaining < STDIO__READ_POLL_MS ? (uint32_t)remaining : STDIO__READ_POLL_MS;
-        }
 #if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
-        if (stdio__init() != BRUCE_OK) return BRUCE_ERR_IO;
-        TickType_t wait_ticks = pdMS_TO_TICKS(wait_ms);
-        if (wait_ms > 0 && wait_ticks == 0) wait_ticks = 1;
-        int count = usb_serial_jtag_read_bytes(buffer, capacity, wait_ticks);
+    if (stdio__init() != BRUCE_OK) return BRUCE_ERR_IO;
+    int count = usb_serial_jtag_read_bytes(buffer, capacity, pdMS_TO_TICKS(timeout_ms));
+    if (count == 0) return BRUCE_ERR_TIMEOUT;
+    if (count < 0) return BRUCE_ERR_IO;
+    *out_size = (size_t)count;
+    return BRUCE_OK;
 #else
-        fd_set rfds;
-        FD_ZERO(&rfds);
-        FD_SET(STDIN_FILENO, &rfds);
-        struct timeval timeout = {
-            .tv_sec = (time_t)(wait_ms / 1000u),
-            .tv_usec = (suseconds_t)((wait_ms % 1000u) * 1000u),
-        };
-        int ready = select(STDIN_FILENO + 1, &rfds, NULL, NULL, &timeout);
-        if (ready < 0) return BRUCE_ERR_IO;
-        ssize_t count = ready > 0 ? read(STDIN_FILENO, buffer, capacity) : 0;
+    fd_set rfds;
+    FD_ZERO(&rfds);
+    FD_SET(STDIN_FILENO, &rfds);
+    struct timeval timeout = {
+        .tv_sec = (time_t)(timeout_ms / 1000u),
+        .tv_usec = (suseconds_t)((timeout_ms % 1000u) * 1000u),
+    };
+    int ready = select(STDIN_FILENO + 1, &rfds, NULL, NULL, &timeout);
+    if (ready == 0) return BRUCE_ERR_TIMEOUT;
+    if (ready < 0) return BRUCE_ERR_IO;
+    ssize_t count = read(STDIN_FILENO, buffer, capacity);
+    if (count < 0) return BRUCE_ERR_IO;
+    if (count == 0) return BRUCE_ERR_NOT_FOUND;
+    *out_size = (size_t)count;
+    return BRUCE_OK;
 #endif
-        if (runtime__delay(0) != BRUCE_OK) return BRUCE_ERR_CANCELLED;
-        if (count < 0) return BRUCE_ERR_IO;
-#if !CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
-        if (ready > 0 && count == 0) return BRUCE_ERR_NOT_FOUND;
-#endif
-        if (count > 0) {
-            *out_size = (size_t)count;
-            return BRUCE_OK;
-        }
-        if (timeout_ms == 0 ||
-            (timeout_ms != UINT32_MAX && runtime__now() - started >= timeout_ms)) {
-            return BRUCE_ERR_TIMEOUT;
-        }
-    }
 }
 
-int bruce_stdio_read_line(char *buffer, size_t buffer_size, bool mask_input) {
+int stdio__read_line(char *buffer, size_t buffer_size, bool mask_input) {
     if (buffer == NULL || buffer_size == 0) return -1;
+    bruce_stdio_session_t session = process_registry__current_stdio_session();
     size_t i = 0;
     bool eof = false;
     while (i + 1 < buffer_size) {
-        char byte;
-        size_t count = 0;
-        bruce_result_t result = bruce_stdio_read(&byte, 1, UINT32_MAX, &count);
-        if (result == BRUCE_ERR_CANCELLED) {
-            buffer[i] = '\0';
-            return BRUCE_ERR_CANCELLED;
+        int c;
+        if (session != BRUCE_STDIO_SESSION_INVALID) {
+            char byte;
+            size_t count = 0;
+            bruce_result_t result = stdio__session_read_input(session, &byte, 1, 100, &count);
+            if (result == BRUCE_ERR_TIMEOUT) continue;
+            if (result != BRUCE_OK) {
+                eof = true;
+                break;
+            }
+            c = (unsigned char)byte;
+        } else {
+            int ch = getchar();
+            if (ch == EOF) {
+                vTaskDelay(pdMS_TO_TICKS(50));
+                continue;
+            }
+            c = ch;
         }
-        if (result != BRUCE_OK) {
-            eof = true;
-            break;
-        }
-        int c = (unsigned char)byte;
         if (c == '\n') break;
         if (c == '\r') continue;
         if (c == '\b' || c == 0x7f) {
             if (i > 0) {
                 i--;
-                if (!mask_input) {
-                    (void)bruce_stdio_write("\b \b", 3);
-                }
+                if (!mask_input) { (void)stdio__write("\b \b", 3); }
             }
             continue;
         }
         buffer[i++] = (char)c;
         if (!mask_input) {
             char byte = (char)c;
-            (void)bruce_stdio_write(&byte, 1);
+            (void)stdio__write(&byte, 1);
         }
     }
     buffer[i] = '\0';
-    (void)bruce_stdio_write("\n", 1);
+    (void)stdio__write("\n", 1);
     return eof && i == 0 ? -1 : (int)i;
 }

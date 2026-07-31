@@ -23,7 +23,7 @@ JSValue native_serialReadln(JSContext *ctx, JSValue *this_val, int argc, JSValue
     (void)argc;
     (void)argv;
     char line[256];
-    if (bruce_stdio_read_line(line, sizeof(line), false) < 0) { line[0] = '\0'; }
+    if (stdio__read_line(line, sizeof(line), false) < 0) { line[0] = '\0'; }
     return JS_NewString(ctx, line);
 }
 

@@ -110,7 +110,7 @@ static int shell__interactive(shell_state_t *state, bool suppress_echo) {
     }
     while (!state->exit_requested) {
         stdio__printf("bruce$ ");
-        int length = bruce_stdio_read_line(line, SHELL__LINE_MAX, suppress_echo);
+        int length = stdio__read_line(line, SHELL__LINE_MAX, suppress_echo);
         if (length == BRUCE_ERR_CANCELLED) {
             int status = 128 + (int)process__current_signal();
             memory__free(line);
@@ -160,7 +160,8 @@ int shell_app_main(int argc, char **argv) {
     const char *script_value = ap_get_arg(parser, "script");
     bool has_script = script_value != NULL;
 
-    bool valid = !(no_echo && !interactive_flag) && !(has_command && (interactive_flag || no_echo || has_script)) &&
+    bool valid = !(no_echo && !interactive_flag) &&
+                 !(has_command && (interactive_flag || no_echo || has_script)) &&
                  !(has_script && (interactive_flag || no_echo || has_command)) &&
                  (!has_script || shell__is_script_path(script_value));
 
@@ -170,7 +171,9 @@ int shell_app_main(int argc, char **argv) {
     ap_free(parser);
 
     if (!valid || alloc_failed) {
-        stdio__printf(alloc_failed ? "shell: out of memory\n" : "shell: expected -i, -c command, or absolute .sh path\n");
+        stdio__printf(
+            alloc_failed ? "shell: out of memory\n" : "shell: expected -i, -c command, or absolute .sh path\n"
+        );
         memory__free(command);
         memory__free(script);
         return alloc_failed ? 1 : 2;
@@ -201,16 +204,17 @@ int shell_app_main(int argc, char **argv) {
     return status;
 }
 
-static bool shell__quote_path(const char *path, char *out, size_t capacity) {
+bool shell__quote_arg(const char *text, char *out, size_t capacity) {
     size_t used = 0;
     if (capacity < 3) return false;
     out[used++] = '"';
-    for (const char *p = path; *p != '\0'; ++p) {
+    for (const char *p = text; *p != '\0'; ++p) {
         if ((*p == '\\' || *p == '"') && used + 1 >= capacity) return false;
         if (*p == '\\' || *p == '"') out[used++] = '\\';
         if (used + 1 >= capacity) return false;
         out[used++] = *p;
     }
+    if (used + 2 > capacity) return false;
     out[used++] = '"';
     out[used] = '\0';
     return true;
@@ -220,6 +224,6 @@ int shell_loader__run_path(const char *path, const char *arg, bool in_background
     if (path == NULL) return BRUCE_ERR_INVALID_PATH;
     if (arg != NULL && arg[0] != '\0') return BRUCE_ERR_UNSUPPORTED;
     char arguments[BRUCE_STORAGE_PATH_MAX * 2];
-    if (!shell__quote_path(path, arguments, sizeof(arguments))) return BRUCE_ERR_INVALID_PATH;
+    if (!shell__quote_arg(path, arguments, sizeof(arguments))) return BRUCE_ERR_INVALID_PATH;
     return app_runner__run("shell", arguments, in_background);
 }

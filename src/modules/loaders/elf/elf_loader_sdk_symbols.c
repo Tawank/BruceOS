@@ -57,13 +57,13 @@ extern double __muldf3(double left, double right);
 extern float __truncdfsf2(double value);
 
 static int bruce_elf__puts(const char *text) {
-    if (text == NULL || bruce_stdio_write(text, strlen(text)) != BRUCE_OK) return EOF;
-    return bruce_stdio_write("\n", 1) == BRUCE_OK ? 0 : EOF;
+    if (text == NULL || stdio__write(text, strlen(text)) != BRUCE_OK) return EOF;
+    return stdio__write("\n", 1) == BRUCE_OK ? 0 : EOF;
 }
 
 static int bruce_elf__putchar(int character) {
     unsigned char byte = (unsigned char)character;
-    return bruce_stdio_write(&byte, 1) == BRUCE_OK ? byte : EOF;
+    return stdio__write(&byte, 1) == BRUCE_OK ? byte : EOF;
 }
 
 const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
@@ -270,16 +270,16 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(ssh__read),
     ESP_ELFSYM_EXPORT(ssh__write),
     ESP_ELFSYM_EXPORT(ssh__close),
-    ESP_ELFSYM_EXPORT(bruce_stdio_read),
-    ESP_ELFSYM_EXPORT(bruce_stdio_read_line),
-    ESP_ELFSYM_EXPORT(bruce_stdio_write),
+    ESP_ELFSYM_EXPORT(stdio__read),
+    ESP_ELFSYM_EXPORT(stdio__read_line),
+    ESP_ELFSYM_EXPORT(stdio__write),
     ESP_ELFSYM_EXPORT(stdio__printf),
     ESP_ELFSYM_EXPORT(stdio__vprintf),
-    ESP_ELFSYM_EXPORT(bruce_stdio_session_create),
-    ESP_ELFSYM_EXPORT(bruce_stdio_session_close),
-    ESP_ELFSYM_EXPORT(bruce_stdio_session_route_children),
-    ESP_ELFSYM_EXPORT(bruce_stdio_session_write_input),
-    ESP_ELFSYM_EXPORT(bruce_stdio_session_read_output),
+    ESP_ELFSYM_EXPORT(stdio__session_create),
+    ESP_ELFSYM_EXPORT(stdio__session_close),
+    ESP_ELFSYM_EXPORT(stdio__session_route_children),
+    ESP_ELFSYM_EXPORT(stdio__session_write_input),
+    ESP_ELFSYM_EXPORT(stdio__session_read_output),
 
     /* Standard C library subset. Console and heap calls are routed through
      * process-aware Bruce SDK functions rather than firmware libc. */

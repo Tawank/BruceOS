@@ -5,11 +5,11 @@
 
 #include "args.h"
 #include "core_sdk/memory.h"
+#include "core_sdk/process.h"
 #include "core_sdk/result.h"
+#include "core_sdk/runtime.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
-#include "core_sdk/process.h"
-#include "core_sdk/runtime.h"
 
 static char s_working_directory[BRUCE_STORAGE_PATH_MAX] = "/";
 
@@ -177,7 +177,8 @@ int bnu_top_app_main(int argc, char **argv) {
 
     bruce_process_snapshot_t processes[16];
     size_t process_count = 0;
-    bruce_result_t result = process__list(processes, sizeof(processes) / sizeof(processes[0]), &process_count);
+    bruce_result_t result =
+        process__list(processes, sizeof(processes) / sizeof(processes[0]), &process_count);
     if (result != BRUCE_OK) return result;
     result = runtime__delay(250);
     if (result != BRUCE_OK) return result;
@@ -248,7 +249,7 @@ static bruce_result_t bnu__cat_file(const char *path) {
         size_t read_size = 0;
         result = storage__read(file, buffer, sizeof(buffer), &read_size);
         if (result != BRUCE_OK || read_size == 0) break;
-        result = bruce_stdio_write(buffer, read_size);
+        result = stdio__write(buffer, read_size);
     }
 
     bruce_result_t close_result = storage__close(file);

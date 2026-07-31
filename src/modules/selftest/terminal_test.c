@@ -133,7 +133,7 @@ static int selftest__terminal_stdio_entry(int argc, char **argv) {
     (void)argc;
     (void)argv;
     char line[32];
-    if (bruce_stdio_read_line(line, sizeof(line), false) >= 0) { stdio__printf("received:%s\n", line); }
+    if (stdio__read_line(line, sizeof(line), false) >= 0) { stdio__printf("received:%s\n", line); }
     return 0;
 }
 
@@ -146,7 +146,7 @@ static int selftest__terminal_stdio_cancel_entry(int argc, char **argv) {
     char byte;
     size_t size = 0;
     s_stdio_cancel_started = true;
-    s_stdio_cancel_result = bruce_stdio_read(&byte, 1, UINT32_MAX, &size);
+    s_stdio_cancel_result = stdio__read(&byte, 1, UINT32_MAX, &size);
     return 0;
 }
 
@@ -156,14 +156,13 @@ bool selftest__run_terminal_stdio_case(void) {
     if (registered != BRUCE_OK && registered != BRUCE_ERR_ALREADY_EXISTS) return false;
 
     bruce_stdio_session_t session = BRUCE_STDIO_SESSION_INVALID;
-    if (bruce_stdio_session_create(&session) != BRUCE_OK ||
-        bruce_stdio_session_route_children(session) != BRUCE_OK) {
+    if (stdio__session_create(&session) != BRUCE_OK || stdio__session_route_children(session) != BRUCE_OK) {
         return false;
     }
     int result = app_runner__run("terminal_test_stdio", NULL, true);
-    (void)bruce_stdio_session_route_children(BRUCE_STDIO_SESSION_INVALID);
-    if (result <= 0 || bruce_stdio_session_write_input(session, "hello\n", 6) != BRUCE_OK) {
-        (void)bruce_stdio_session_close(session);
+    (void)stdio__session_route_children(BRUCE_STDIO_SESSION_INVALID);
+    if (result <= 0 || stdio__session_write_input(session, "hello\n", 6) != BRUCE_OK) {
+        (void)stdio__session_close(session);
         return false;
     }
     bruce_process_status_t status;
@@ -171,8 +170,8 @@ bool selftest__run_terminal_stdio_case(void) {
     char output[128] = {0};
     size_t output_size = 0;
     bruce_result_t read_result =
-        bruce_stdio_session_read_output(session, output, sizeof(output) - 1, &output_size);
-    (void)bruce_stdio_session_close(session);
+        stdio__session_read_output(session, output, sizeof(output) - 1, &output_size);
+    (void)stdio__session_close(session);
     bool ok = waited == BRUCE_OK && status.reason == BRUCE_PROCESS_EXITED && status.exit_code == 0 &&
               read_result == BRUCE_OK && strstr(output, "hello") != NULL &&
               strstr(output, "received:hello") != NULL;
@@ -188,16 +187,15 @@ bool selftest__run_terminal_stdio_cancel_case(void) {
     s_stdio_cancel_started = false;
     s_stdio_cancel_result = BRUCE_OK;
     bruce_stdio_session_t session = BRUCE_STDIO_SESSION_INVALID;
-    if (bruce_stdio_session_create(&session) != BRUCE_OK ||
-        bruce_stdio_session_route_children(session) != BRUCE_OK) {
-        if (session != BRUCE_STDIO_SESSION_INVALID) (void)bruce_stdio_session_close(session);
+    if (stdio__session_create(&session) != BRUCE_OK || stdio__session_route_children(session) != BRUCE_OK) {
+        if (session != BRUCE_STDIO_SESSION_INVALID) (void)stdio__session_close(session);
         return false;
     }
 
     int launched = app_runner__run("terminal_test_stdio_cancel", NULL, true);
-    (void)bruce_stdio_session_route_children(BRUCE_STDIO_SESSION_INVALID);
+    (void)stdio__session_route_children(BRUCE_STDIO_SESSION_INVALID);
     if (launched <= 0) {
-        (void)bruce_stdio_session_close(session);
+        (void)stdio__session_close(session);
         return false;
     }
 
@@ -213,7 +211,7 @@ bool selftest__run_terminal_stdio_cancel_case(void) {
         (void)process__kill(process_id);
         (void)process__wait_status(process_id, 1000, &status);
     }
-    (void)bruce_stdio_session_close(session);
+    (void)stdio__session_close(session);
 
     bool ok = signal_result == BRUCE_OK && wait_result == BRUCE_OK &&
               s_stdio_cancel_result == BRUCE_ERR_CANCELLED && status.reason == BRUCE_PROCESS_TERMINATED &&

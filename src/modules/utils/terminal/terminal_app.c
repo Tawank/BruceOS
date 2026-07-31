@@ -11,10 +11,10 @@
 #include "core_sdk/display.h"
 #include "core_sdk/input.h"
 #include "core_sdk/memory.h"
-#include "core_sdk/result.h"
-#include "core_sdk/stdio.h"
 #include "core_sdk/process.h"
+#include "core_sdk/result.h"
 #include "core_sdk/runtime.h"
+#include "core_sdk/stdio.h"
 
 #define TERMINAL__TRANSCRIPT_CAPACITY 4096
 #define TERMINAL__LINE_CAPACITY 256
@@ -127,7 +127,7 @@ static bruce_result_t terminal__draw(const terminal__state_t *state) {
 static void terminal__drain_output(terminal__state_t *state) {
     char output[256];
     size_t size = 0;
-    while (bruce_stdio_session_read_output(state->session, output, sizeof(output), &size) == BRUCE_OK) {
+    while (stdio__session_read_output(state->session, output, sizeof(output), &size) == BRUCE_OK) {
         terminal__append(state, output, size);
     }
 }
@@ -142,8 +142,8 @@ static void terminal__submit(terminal__state_t *state) {
         state->exit_requested = true;
     } else {
         terminal__append(state, state->input, state->input_size);
-        (void)bruce_stdio_session_write_input(state->session, state->input, state->input_size);
-        (void)bruce_stdio_session_write_input(state->session, "\n", 1);
+        (void)stdio__session_write_input(state->session, state->input, state->input_size);
+        (void)stdio__session_write_input(state->session, "\n", 1);
     }
     state->input_size = 0;
     state->input[0] = '\0';
@@ -208,18 +208,18 @@ int terminal_app_main(int argc, char **argv) {
     state.child = BRUCE_PROCESS_ID_INVALID;
     state.transcript = memory__calloc(TERMINAL__TRANSCRIPT_CAPACITY, 1);
     if (state.transcript == NULL) return BRUCE_ERR_NO_MEMORY;
-    if (bruce_stdio_session_create(&state.session) != BRUCE_OK) {
+    if (stdio__session_create(&state.session) != BRUCE_OK) {
         memory__free(state.transcript);
         return BRUCE_ERR_RESOURCE_LIMIT;
     }
     terminal__append_text(&state, "Bruce terminal\nType a command and press Enter.\n");
     (void)input__flush();
 
-    (void)bruce_stdio_session_route_children(state.session);
+    (void)stdio__session_route_children(state.session);
     int shell_process = app_runner__run("shell", "-i --no-echo", true);
-    (void)bruce_stdio_session_route_children(BRUCE_STDIO_SESSION_INVALID);
+    (void)stdio__session_route_children(BRUCE_STDIO_SESSION_INVALID);
     if (shell_process <= 0) {
-        (void)bruce_stdio_session_close(state.session);
+        (void)stdio__session_close(state.session);
         memory__free(state.transcript);
         return shell_process;
     }
@@ -270,14 +270,8 @@ int terminal_app_main(int argc, char **argv) {
             state.dirty = true;
         } else if (event.code == BRUCE_INPUT_CODE_SELECT || event.code == BRUCE_INPUT_CODE_BUTTON_A) {
             char entered[TERMINAL__LINE_CAPACITY];
-            if (dialog__text_input(
-                    "Terminal",
-                    "command",
-                    state.input,
-                    false,
-                    entered,
-                    sizeof(entered)
-                ) == BRUCE_OK) {
+            if (dialog__text_input("Terminal", "command", state.input, false, entered, sizeof(entered)) ==
+                BRUCE_OK) {
                 snprintf(state.input, sizeof(state.input), "%s", entered);
                 state.input_size = strlen(state.input);
                 terminal__submit(&state);
@@ -294,7 +288,7 @@ int terminal_app_main(int argc, char **argv) {
             (void)process__wait_status(state.child, 500, &status);
         }
     }
-    (void)bruce_stdio_session_close(state.session);
+    (void)stdio__session_close(state.session);
     memory__free(state.transcript);
     return 0;
 }
