@@ -37,7 +37,7 @@
 #define MAIN_LAUNCHER_CHECK_INTERVAL_MS 1000
 
 #define SELFTEST_STACK_BYTES 8192u
-#define SHELL_STACK_BYTES 8192u
+#define SHELL_STACK_BYTES 4096u
 
 static void main__launch_launcher(void) {
     int result = app_runner__run("launcher", "--gui", true);

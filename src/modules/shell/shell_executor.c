@@ -59,12 +59,18 @@ static int shell_executor__wait(bruce_process_id_t child) {
 }
 
 static int shell_executor__external(int argc, char **argv) {
-    char arguments[SHELL__LINE_MAX * 2];
+    size_t capacity = SHELL__LINE_MAX * 2;
+    char *arguments = memory__malloc(capacity);
+    if (arguments == NULL) {
+        stdio__printf("shell: out of memory\n");
+        return 1;
+    }
     size_t used = 0;
     arguments[0] = '\0';
     for (int i = 1; i < argc; ++i) {
-        if (!shell_executor__append_arg(arguments, sizeof(arguments), &used, argv[i])) {
+        if (!shell_executor__append_arg(arguments, capacity, &used, argv[i])) {
             stdio__printf("shell: arguments too long\n");
+            memory__free(arguments);
             return 2;
         }
     }
@@ -74,6 +80,7 @@ static int shell_executor__external(int argc, char **argv) {
     } else {
         launched = app_runner__run(argv[0], used > 0 ? arguments : NULL, true);
     }
+    memory__free(arguments);
     if (launched == BRUCE_ERR_NOT_FOUND || launched == BRUCE_ERR_INVALID_PATH) {
         stdio__printf("shell: %s: not found\n", argv[0]);
         return 127;
@@ -85,59 +92,48 @@ static int shell_executor__external(int argc, char **argv) {
     return shell_executor__wait((bruce_process_id_t)launched);
 }
 
-static int shell_executor__command(shell_state_t *state, const shell_command_t *command) {
-    char(*words)[SHELL__WORD_MAX] =
-        memory__calloc(SHELL__MAX_WORDS, sizeof(*words));
-    char *argv[SHELL__MAX_WORDS];
-    int argc = 0;
-    const char *error = NULL;
-    int result = 0;
-    if (words == NULL) {
-        stdio__printf("shell: out of memory\n");
-        return 1;
-    }
-    if (shell_parser__words(
-            command, words, &argc, shell_executor__lookup, state, state->last_status, &error
-        ) != 0) {
-        stdio__printf("shell: %s\n", error != NULL ? error : "parse error");
-        result = 2;
-        goto done;
-    }
-    for (int i = 0; i < argc; ++i) argv[i] = words[i];
-
+/* Consumes leading NAME=value assignment words, then dispatches the
+ * remainder (if any) to a builtin or an external process. `words` is
+ * borrowed; the caller owns and frees it. */
+static int shell_executor__dispatch(shell_state_t *state, char **words, int argc) {
     int first_command = 0;
     while (first_command < argc) {
-        char *equals = strchr(argv[first_command], '=');
+        char *equals = strchr(words[first_command], '=');
         if (equals == NULL) break;
-        size_t name_length = (size_t)(equals - argv[first_command]);
-        if (!shell_parser__valid_name(argv[first_command], name_length)) {
+        size_t name_length = (size_t)(equals - words[first_command]);
+        if (!shell_parser__valid_name(words[first_command], name_length)) {
             stdio__printf("shell: invalid variable name\n");
-            result = 2;
-            goto done;
+            return 2;
         }
         char name[SHELL__VARIABLE_NAME_MAX];
         if (name_length >= sizeof(name)) {
             stdio__printf("shell: variable name too long\n");
-            result = 2;
-            goto done;
+            return 2;
         }
-        memcpy(name, argv[first_command], name_length);
+        memcpy(name, words[first_command], name_length);
         name[name_length] = '\0';
         int assigned = shell_builtins__set(state, name, equals + 1);
-        if (assigned != 0) {
-            result = assigned;
-            goto done;
-        }
+        if (assigned != 0) return assigned;
         first_command++;
     }
-    if (first_command == argc) goto done;
-    argc -= first_command;
-    argv[0] = words[first_command];
-    for (int i = 1; i < argc; ++i) argv[i] = words[first_command + i];
-    result = shell_builtins__is_builtin(argv[0]) ? shell_builtins__run(state, argc, argv)
-                                                 : shell_executor__external(argc, argv);
-done:
-    memory__free(words);
+    if (first_command == argc) return 0;
+    int remaining = argc - first_command;
+    char **argv = words + first_command;
+    return shell_builtins__is_builtin(argv[0]) ? shell_builtins__run(state, remaining, argv)
+                                                : shell_executor__external(remaining, argv);
+}
+
+static int shell_executor__command(shell_state_t *state, const shell_command_t *command) {
+    char **words = NULL;
+    int argc = 0;
+    const char *error = NULL;
+    if (shell_parser__words(command, &words, &argc, shell_executor__lookup, state, state->last_status, &error) !=
+        0) {
+        stdio__printf("shell: %s\n", error != NULL ? error : "parse error");
+        return 2;
+    }
+    int result = shell_executor__dispatch(state, words, argc);
+    shell_parser__free_words(words, argc);
     return result;
 }
 

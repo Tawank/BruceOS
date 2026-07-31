@@ -1,7 +1,10 @@
 #include "shell_app.h"
 
+#include <stdbool.h>
+#include <stddef.h>
 #include <string.h>
 
+#include "args.h"
 #include "core_sdk/app_runner.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/process.h"
@@ -9,9 +12,22 @@
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
 #include "shell_executor.h"
+#include "shell_internal.h"
 #include "shell_parser.h"
 
 void shell__state_init(shell_state_t *state) { memset(state, 0, sizeof(*state)); }
+
+void shell__state_free(shell_state_t *state) {
+    if (state == NULL) return;
+    for (size_t i = 0; i < state->variable_count; ++i) {
+        memory__free(state->variables[i].name);
+        memory__free(state->variables[i].value);
+    }
+    memory__free(state->variables);
+    state->variables = NULL;
+    state->variable_count = 0;
+    state->variable_capacity = 0;
+}
 
 int shell__execute_line(shell_state_t *state, const char *line) {
     if (state == NULL || line == NULL) return 2;
@@ -33,7 +49,12 @@ static int shell__run_script(shell_state_t *state, const char *path) {
         stdio__printf("shell: %s: cannot open (%d)\n", path, opened);
         return 1;
     }
-    char line[SHELL__LINE_MAX];
+    char *line = memory__malloc(SHELL__LINE_MAX);
+    if (line == NULL) {
+        stdio__printf("shell: out of memory\n");
+        (void)storage__close(file);
+        return 1;
+    }
     size_t used = 0;
     int status = state->last_status;
     bool overlong = false;
@@ -59,7 +80,7 @@ static int shell__run_script(shell_state_t *state, const char *path) {
                 status = shell__execute_line(state, line);
                 used = 0;
                 if (state->exit_requested) goto done;
-            } else if (used + 1 < sizeof(line)) {
+            } else if (used + 1 < SHELL__LINE_MAX) {
                 line[used++] = c;
             } else {
                 overlong = true;
@@ -76,54 +97,107 @@ static int shell__run_script(shell_state_t *state, const char *path) {
         status = shell__execute_line(state, line);
     }
 done:
+    memory__free(line);
     (void)storage__close(file);
     return state->exit_requested ? state->exit_status : status;
 }
 
 static int shell__interactive(shell_state_t *state, bool suppress_echo) {
-    char line[SHELL__LINE_MAX];
+    char *line = memory__malloc(SHELL__LINE_MAX);
+    if (line == NULL) {
+        stdio__printf("shell: out of memory\n");
+        return 1;
+    }
     while (!state->exit_requested) {
         stdio__printf("bruce$ ");
-        int length = bruce_stdio_read_line(line, sizeof(line), suppress_echo);
-        if (length == BRUCE_ERR_CANCELLED) return 128 + (int)process__current_signal();
+        int length = bruce_stdio_read_line(line, SHELL__LINE_MAX, suppress_echo);
+        if (length == BRUCE_ERR_CANCELLED) {
+            int status = 128 + (int)process__current_signal();
+            memory__free(line);
+            return status;
+        }
         if (length < 0) break;
         (void)shell__execute_line(state, line);
     }
+    memory__free(line);
     return state->exit_requested ? state->exit_status : state->last_status;
 }
 
+static bool shell__is_script_path(const char *path) {
+    size_t length = strlen(path);
+    return path[0] == '/' && length >= 4 && strcmp(path + length - 3, ".sh") == 0;
+}
+
+static char *shell__dup(const char *text) {
+    size_t length = strlen(text);
+    char *copy = memory__malloc(length + 1);
+    if (copy != NULL) memcpy(copy, text, length + 1);
+    return copy;
+}
+
 int shell_app_main(int argc, char **argv) {
+    ArgParser *parser = ap_new_parser();
+    if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
+    ap_set_helptext(parser, "Run the interactive shell, a single command, or a script.");
+    ap_add_flag(parser, "i");
+    ap_set_opt_help(parser, "i", "Run interactively");
+    ap_add_flag(parser, "no-echo");
+    ap_set_opt_help(parser, "no-echo", "Suppress input echo in interactive mode (with -i)");
+    ap_add_str_opt(parser, "c", NULL);
+    ap_set_opt_help(parser, "c", "Run a single command string");
+    ap_add_optional_arg(parser, "script", "Absolute path to a .sh script to run");
+
+    if (!ap_parse(parser, argc, argv)) {
+        ap_status_t parse_status = ap_get_status(parser);
+        ap_free(parser);
+        return parse_status == AP_STATUS_HELP || parse_status == AP_STATUS_VERSION ? 0 : 2;
+    }
+
+    bool interactive_flag = ap_found(parser, "i");
+    bool no_echo = ap_found(parser, "no-echo");
+    bool has_command = ap_found(parser, "c");
+    const char *command_value = ap_get_str_value(parser, "c");
+    const char *script_value = ap_get_arg(parser, "script");
+    bool has_script = script_value != NULL;
+
+    bool valid = !(no_echo && !interactive_flag) && !(has_command && (interactive_flag || no_echo || has_script)) &&
+                 !(has_script && (interactive_flag || no_echo || has_command)) &&
+                 (!has_script || shell__is_script_path(script_value));
+
+    char *command = has_command && valid ? shell__dup(command_value) : NULL;
+    char *script = has_script && valid ? shell__dup(script_value) : NULL;
+    bool alloc_failed = (has_command && valid && command == NULL) || (has_script && valid && script == NULL);
+    ap_free(parser);
+
+    if (!valid || alloc_failed) {
+        stdio__printf(alloc_failed ? "shell: out of memory\n" : "shell: expected -i, -c command, or absolute .sh path\n");
+        memory__free(command);
+        memory__free(script);
+        return alloc_failed ? 1 : 2;
+    }
+
     shell_state_t *state = memory__calloc(1, sizeof(*state));
-    if (state == NULL) return BRUCE_ERR_NO_MEMORY;
+    if (state == NULL) {
+        memory__free(command);
+        memory__free(script);
+        return BRUCE_ERR_NO_MEMORY;
+    }
     shell__state_init(state);
+
     int status;
-    if (argc <= 1 || (argc == 2 && strcmp(argv[1], "-i") == 0)) {
-        status = shell__interactive(state, false);
-        goto done;
-    }
-    if (argc == 3 && strcmp(argv[1], "-i") == 0 && strcmp(argv[2], "--no-echo") == 0) {
-        status = shell__interactive(state, true);
-        goto done;
-    }
-    if (strcmp(argv[1], "-c") == 0) {
-        if (argc != 3) {
-            stdio__printf("shell: -c requires one command string\n");
-            status = 2;
-            goto done;
-        }
-        status = shell__execute_line(state, argv[2]);
+    if (has_command) {
+        status = shell__execute_line(state, command);
         if (state->exit_requested) status = state->exit_status;
-        goto done;
+    } else if (has_script) {
+        status = shell__run_script(state, script);
+    } else {
+        status = shell__interactive(state, no_echo);
     }
-    if (argc != 2 || argv[1][0] != '/' || strlen(argv[1]) < 4 ||
-        strcmp(argv[1] + strlen(argv[1]) - 3, ".sh") != 0) {
-        stdio__printf("shell: expected -i, -c command, or absolute .sh path\n");
-        status = 2;
-        goto done;
-    }
-    status = shell__run_script(state, argv[1]);
-done:
+
+    shell__state_free(state);
     memory__free(state);
+    memory__free(command);
+    memory__free(script);
     return status;
 }
 

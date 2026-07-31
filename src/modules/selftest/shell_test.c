@@ -9,6 +9,7 @@
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
 #include "modules/shell/shell_app.h"
+#include "modules/shell/shell_internal.h"
 
 static volatile int s_probe_calls;
 static char s_probe_arg[64];
@@ -48,6 +49,7 @@ bool selftest__run_shell_language_case(void) {
         shell__execute_line(&state, "echo broken | echo nope") == 2 &&
         shell__execute_line(&state, "echo > file") == 2 &&
         shell__execute_line(&state, "echo 'unterminated") == 2;
+    shell__state_free(&state);
     printf("[selftest] shell/language: %s\n", ok ? "OK" : "failed");
     return ok;
 }

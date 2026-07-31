@@ -2,7 +2,7 @@
 
 #include <stdbool.h>
 
-#include "shell_app.h"
+#include "shell_internal.h"
 
 bool shell_builtins__is_builtin(const char *name);
 int shell_builtins__run(shell_state_t *state, int argc, char **argv);
