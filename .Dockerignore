@@ -1,0 +1,5 @@
+.cache
+.pytest_cache
+build
+build-qemu
+managed_components

@@ -1,19 +1,37 @@
 services:
-  platformio_build:
+  esp-idf:
     build:
       context: .
-      dockerfile: docker/Dockerfile.ci
-    working_dir: /work
+      dockerfile: Dockerfile.esp-idf
+
+    image: bruce-esp-idf:6.0.2
+    working_dir: /workspace
+
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+
     volumes:
-      - .:/work
-      - pio_home:/root/.platformio
-      - pio_build:/work/.pio
+      - .:/workspace
+
+      - esp-idf-build:/workspace/build
+      - esp-idf-build-qemu:/workspace/build-qemu
+      - esp-idf-managed-components:/workspace/managed_components
+
+      - esp-idf-claude-config:/home/ubuntu/.claude
+      - esp-idf-claude-data:/home/ubuntu/.local/share/claude
+
     environment:
-      # Optional overrides:
-      - PIO_ENVS=m5stack-cplus2
-      - PLATFORMIO_CORE_DIR=/root/.platformio
-    command: ["bash", "docker/run_all_envs.sh"]
+      HOME: /home/ubuntu
+      PATH: "/home/ubuntu/.local/bin:${PATH}"
+      TERM: xterm-256color
+
+    stdin_open: true
+    tty: true
+
+    command: ["bash"]
 
 volumes:
-  pio_home:
-  pio_build:
+  esp-idf-build:
+  esp-idf-build-qemu:
+  esp-idf-managed-components:
+  esp-idf-claude-config:
+  esp-idf-claude-data:

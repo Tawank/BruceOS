@@ -20,17 +20,17 @@ commands:
           --depth 1 \
           --recursive \
           https://github.com/espressif/esp-idf.git \
-          /opt/esp/idf
+          ~/.espressif/v6.0.2/esp-idf
       user: 1000
 
     - description: Install ESP-IDF tools
       command: |
-        export IDF_PATH=/opt/esp/idf
+        export IDF_PATH=~/.espressif/v6.0.2/esp-idf
         export IDF_TOOLS_PATH=/opt/esp
-        /opt/esp/idf/install.sh all
+        ~/.espressif/v6.0.2/esp-idf/install.sh all
       user: 1000
 
   startup:
     - description: Add ESP-IDF export to bashrc
-      command: ["source /opt/esp/idf/export.sh"]
+      command: ["source ~/.espressif/v6.0.2/esp-idf/export.sh"]
       user: 1000
