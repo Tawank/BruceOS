@@ -14,6 +14,10 @@
 #define NRF24_APP_SPECTRUM_CHANNELS 80u
 #define NRF24_APP_SPECTRUM_SAMPLES 8u
 
+/* Renders NRF24's GUI menu inside the launcher's window chrome (same border,
+ * status bar, and font as the WiFi submenu); a no-op outside GUI mode. */
+static const bruce_dialog_render_params_t s_window_chrome = {.window_chrome = true};
+
 static bool nrf24_app__parse_channel(const char *text, uint8_t *out) {
     if (text == NULL || out == NULL) return false;
     char *end = NULL;
@@ -102,7 +106,8 @@ static int nrf24_app__gui(void) {
     };
     for (;;) {
         size_t selected = 0;
-        bruce_result_t result = dialog__choice("NRF24", "2.4 GHz radio tools", choices, 4, &selected, NULL);
+        bruce_result_t result =
+            dialog__choice("NRF24", "2.4 GHz radio tools", choices, 4, &selected, &s_window_chrome);
         if (result == BRUCE_ERR_CANCELLED || selected == 3) return 0;
         if (result != BRUCE_OK) return result;
         if (selected == 0)

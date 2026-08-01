@@ -123,10 +123,6 @@ static uint32_t bruce_launcher__draw_status_bar(const bruce_launcher_theme_t *th
     return revision;
 }
 
-static void bruce_launcher__refresh_dialog_status(void *context) {
-    (void)bruce_launcher__draw_status_bar((const bruce_launcher_theme_t *)context);
-}
-
 /* Draw the main border and horizontal status-line separator. */
 static void bruce_launcher__draw_main_border(const bruce_launcher_theme_t *theme) {
     int w = display__width();
@@ -148,6 +144,23 @@ static void bruce_launcher__draw_main_border(const bruce_launcher_theme_t *theme
         BRUCE_LAUNCHER_STATUS_H,
         theme->pri
     );
+}
+
+/* Window-chrome renderer registered with Core's dialog layer (see
+ * dialog__set_window_renderer()), so any foreground GUI process can request
+ * the same bordered look via dialog__choice()'s window_chrome flag. */
+static void bruce_launcher__window_draw_border(void *context) {
+    (void)context;
+    bruce_launcher_theme_t theme;
+    bruce_launcher__get_theme(&theme);
+    bruce_launcher__draw_main_border(&theme);
+}
+
+static void bruce_launcher__window_draw_status(void *context) {
+    (void)context;
+    bruce_launcher_theme_t theme;
+    bruce_launcher__get_theme(&theme);
+    (void)bruce_launcher__draw_status_bar(&theme);
 }
 
 static void bruce_launcher__draw_centered_text(
@@ -495,19 +508,7 @@ static int bruce_launcher__run_gui_menu(bruce_launcher_menu_t *menu) {
             choices[i].value = menu->entries[i].label;
         }
 
-        const bruce_dialog_render_params_t render_params = {
-            .padding_top = BRUCE_LAUNCHER_STATUS_H + 1,
-            .padding_right = BRUCE_LAUNCHER_BORDER_PAD + 1,
-            .padding_bottom = BRUCE_LAUNCHER_BORDER_PAD + 1,
-            .padding_left = BRUCE_LAUNCHER_BORDER_PAD + 1,
-            .render_borders = false,
-            .text_size = bruce_launcher__submenu_font_size(),
-            .background_color = theme.bg,
-            .text_color = theme.pri,
-            .refresh_interval_ms = BRUCE_LAUNCHER_STATUS_REFRESH_MS,
-            .render_callback = bruce_launcher__refresh_dialog_status,
-            .render_callback_context = &theme,
-        };
+        const bruce_dialog_render_params_t render_params = {.window_chrome = true};
 
         (void)input__flush();
         for (;;) {
@@ -715,6 +716,17 @@ int bruce_launcher_app_main(int argc, char **argv) {
                 return result;
             }
         }
+        const bruce_dialog_window_renderer_t window_renderer = {
+            .padding_top = BRUCE_LAUNCHER_STATUS_H + 1,
+            .padding_right = BRUCE_LAUNCHER_BORDER_PAD + 1,
+            .padding_bottom = BRUCE_LAUNCHER_BORDER_PAD + 1,
+            .padding_left = BRUCE_LAUNCHER_BORDER_PAD + 1,
+            .text_size = bruce_launcher__submenu_font_size(),
+            .draw_border = bruce_launcher__window_draw_border,
+            .draw_status = bruce_launcher__window_draw_status,
+            .status_refresh_interval_ms = BRUCE_LAUNCHER_STATUS_REFRESH_MS,
+        };
+        dialog__set_window_renderer(&window_renderer, NULL);
         result = bruce_launcher__run_gui_menu(root);
     } else {
         result = bruce_launcher__run_terminal_menu(root);

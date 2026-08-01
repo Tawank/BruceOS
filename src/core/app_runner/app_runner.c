@@ -332,8 +332,8 @@ int app_runner__run(const char *app_name, const char *arg, bool in_background) {
 
     /* 1. registered built-in. */
     bruce_app_entry_t entry = app_runner__find_builtin(app_name);
-    printf("app_runner__run: app_name=%s, entry=%p\n", app_name, (void *)entry);
-    fflush(stdout);
+    // printf("app_runner__run: app_name=%s, entry=%p\n", app_name, (void *)entry);
+    // fflush(stdout);
     int result;
     if (entry != NULL) {
         char *command_name = malloc(strlen(app_name) + 1u);

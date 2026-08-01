@@ -13,6 +13,10 @@
 
 #define BLUETOOTH_APP__MAX_RESULTS 32
 
+/* Renders Bluetooth's GUI menus inside the launcher's window chrome (same
+ * border, status bar, and font as the WiFi submenu); a no-op outside GUI mode. */
+static const bruce_dialog_render_params_t s_window_chrome = {.window_chrome = true};
+
 static bool bluetooth_app__resume_after_handoff(void) {
     bruce_process_snapshot_t snapshot;
     bruce_process_id_t self = process__current_id();
@@ -95,7 +99,9 @@ static int bluetooth_app__scan_gui(void) {
     bruce_result_t choice_result;
     do {
         choice_result =
-            dialog__choice("BLE Advertisements", "Select a device", choices, (size_t)count, &selected, NULL);
+            dialog__choice(
+                "BLE Advertisements", "Select a device", choices, (size_t)count, &selected, &s_window_chrome
+            );
     } while (choice_result == BRUCE_ERR_CANCELLED && bluetooth_app__resume_after_handoff());
     if (choice_result == BRUCE_OK) {
         char details[160];
@@ -130,7 +136,8 @@ int bluetooth_app_main(int argc, char **argv) {
         size_t selected = 0;
         bruce_result_t choice_result;
         do {
-            choice_result = dialog__choice("Bluetooth", "Select an action", choices, 1, &selected, NULL);
+            choice_result =
+                dialog__choice("Bluetooth", "Select an action", choices, 1, &selected, &s_window_chrome);
         } while (choice_result == BRUCE_ERR_CANCELLED && bluetooth_app__resume_after_handoff());
         if (choice_result == BRUCE_OK) {
             return bluetooth_app__scan_gui();

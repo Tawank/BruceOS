@@ -33,6 +33,13 @@ typedef struct {
     uint32_t refresh_interval_ms;
     bruce_dialog_render_callback_t render_callback;
     void *render_callback_context;
+    /* When true and a window renderer is registered (see
+     * dialog__set_window_renderer() below), dialog__choice() ignores every
+     * other field above and instead renders inside that renderer's chrome -
+     * normally the launcher's rounded border and live status bar. With no
+     * renderer registered this is a no-op and the fields above apply as
+     * usual. */
+    bool window_chrome;
 } bruce_dialog_render_params_t;
 
 /* Dialog APIs return BRUCE_OK or BRUCE_ERR_CANCELLED, BRUCE_ERR_BUSY,
@@ -53,6 +60,45 @@ bruce_result_t dialog__choice(
 bruce_result_t dialog__pick_file(
     const char *initial_path, const char *extension_filter, char *out_path, size_t out_path_size
 );
+
+/* Window chrome: a pluggable "look" (rounded border, live status bar, ...)
+ * that dialog__choice() draws around a choice list when render_params has
+ * `window_chrome=true`. Core doesn't own that look - the launcher registers
+ * it once at GUI startup via dialog__set_window_renderer(), and every
+ * foreground GUI process sharing the display then gets the same window by
+ * requesting window_chrome. If nothing is registered, window_chrome is
+ * ignored and the normal full-screen layout is used instead. */
+typedef void (*bruce_dialog_window_draw_fn_t)(void *context);
+
+typedef struct {
+    /* Space to reserve around the choice viewport for the border/status bar. */
+    int padding_top;
+    int padding_right;
+    int padding_bottom;
+    int padding_left;
+    /* Font size window-chrome content should use; <= 0 falls back to 1. */
+    int text_size;
+    /* Paints the full window frame. Called once per dialog__choice() call,
+     * before the choice viewport is first drawn, inside an active frame. */
+    bruce_dialog_window_draw_fn_t draw_border;
+    /* Repaints just the live parts (e.g. clock/battery). Called right after
+     * draw_border and then again every status_refresh_interval_ms while the
+     * dialog stays open. May be NULL. */
+    bruce_dialog_window_draw_fn_t draw_status;
+    uint32_t status_refresh_interval_ms;
+} bruce_dialog_window_renderer_t;
+
+/* Registers the renderer dialog__choice() uses for window_chrome requests;
+ * the struct is copied, so it may be stack-allocated. Pass NULL to clear a
+ * previously registered renderer. */
+void dialog__set_window_renderer(const bruce_dialog_window_renderer_t *renderer, void *context);
+
+/* Returns the render_params dialog__choice() uses when `render_params` is
+ * NULL (full screen, bordered title/footer bars, themed colors), with
+ * `text_size` substituted (falls back to the normal default when <= 0).
+ * Useful for a caller that wants that standard look at a different font
+ * size. */
+bruce_dialog_render_params_t dialog__default_render_params(int text_size);
 
 /* Text input dialogs.
  *

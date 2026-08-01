@@ -227,6 +227,36 @@ static void dialog__gui_footer(const char *hint) {
     display__print(hint != NULL ? hint : "");
 }
 
+/* -------------------------------------------------------------------------- */
+/* Window chrome renderer registry                                           */
+/* -------------------------------------------------------------------------- */
+
+static bruce_dialog_window_renderer_t s_window_renderer;
+static void *s_window_renderer_context;
+static bool s_window_renderer_set;
+
+void dialog__set_window_renderer(const bruce_dialog_window_renderer_t *renderer, void *context) {
+    if (renderer == NULL) {
+        s_window_renderer_set = false;
+        s_window_renderer_context = NULL;
+        return;
+    }
+    s_window_renderer = *renderer;
+    s_window_renderer_context = context;
+    s_window_renderer_set = true;
+}
+
+bruce_dialog_render_params_t dialog__default_render_params(int text_size) {
+    uint16_t pri, sec, bg;
+    dialog__get_theme_colors(&pri, &sec, &bg);
+    bruce_dialog_render_params_t params = {0};
+    params.render_borders = true;
+    params.text_size = text_size > 0 ? text_size : DIALOG__TEXT_SIZE;
+    params.background_color = bg;
+    params.text_color = pri;
+    return params;
+}
+
 static bruce_result_t dialog__gui_wait_for_any_key(void) {
     for (;;) {
         bruce_input_event_t ev;
@@ -287,24 +317,40 @@ static bruce_result_t dialog__gui_choice(
     const char *title, const char *message, const bruce_dialog_choice_t *choices, size_t choice_count,
     size_t *out_selected, const bruce_dialog_render_params_t *render_params
 ) {
+    /* window_chrome degrades to the plain layout below if nothing ever
+     * registered a renderer (dialog__set_window_renderer()) - there is then
+     * no border/status bar to draw around, so the choice list just uses
+     * whatever plain fields the caller also set (typically none). */
+    bool window_chrome = render_params != NULL && render_params->window_chrome && s_window_renderer_set;
     int selected = 0;
     int first_visible = 0;
     int w = display__width();
     int h = display__height();
-    int left = render_params != NULL ? render_params->padding_left : 0;
-    int top = render_params != NULL ? render_params->padding_top : 0;
-    int right = w - (render_params != NULL ? render_params->padding_right : 0);
-    int bottom = h - (render_params != NULL ? render_params->padding_bottom : 0);
-    bool render_borders = render_params == NULL || render_params->render_borders;
+    int left = window_chrome ? s_window_renderer.padding_left
+                              : (render_params != NULL ? render_params->padding_left : 0);
+    int top = window_chrome ? s_window_renderer.padding_top
+                             : (render_params != NULL ? render_params->padding_top : 0);
+    int right = w - (window_chrome ? s_window_renderer.padding_right
+                                    : (render_params != NULL ? render_params->padding_right : 0));
+    int bottom = h - (window_chrome ? s_window_renderer.padding_bottom
+                                     : (render_params != NULL ? render_params->padding_bottom : 0));
+    bool render_borders = !window_chrome && (render_params == NULL || render_params->render_borders);
     int viewport_w = right - left;
     int viewport_h = bottom - top;
-    int text_size =
-        render_params != NULL && render_params->text_size > 0 ? render_params->text_size : DIALOG__TEXT_SIZE;
+    int text_size = render_params != NULL && render_params->text_size > 0 ? render_params->text_size
+                     : window_chrome && s_window_renderer.text_size > 0   ? s_window_renderer.text_size
+                     : window_chrome                                     ? 1
+                                                                          : DIALOG__TEXT_SIZE;
 
     uint16_t pri, sec, bg;
     dialog__get_theme_colors(&pri, &sec, &bg);
-    bruce_display_color_t background_color = render_params != NULL ? render_params->background_color : bg;
-    bruce_display_color_t text_color = render_params != NULL ? render_params->text_color : pri;
+    bruce_display_color_t background_color =
+        window_chrome ? bg : (render_params != NULL ? render_params->background_color : bg);
+    bruce_display_color_t text_color =
+        window_chrome ? pri : (render_params != NULL ? render_params->text_color : pri);
+    uint32_t refresh_interval_ms = window_chrome ? s_window_renderer.status_refresh_interval_ms
+                                    : render_params != NULL ? render_params->refresh_interval_ms
+                                                             : 0u;
     int row_h = DIALOG__CHAR_H * text_size + 2;
     int title_h = render_borders || (title != NULL && title[0] != '\0') ? DIALOG__CHAR_H + 4 : 0;
     int footer_h = render_borders ? DIALOG__CHAR_H + 4 : 0;
@@ -313,13 +359,14 @@ static bruce_result_t dialog__gui_choice(
     if (usable_h < row_h) { return BRUCE_ERR_INVALID_ARGUMENT; }
     int items_per_page = usable_h / row_h;
     bool redraw = true;
+    bool chrome_border_drawn = false;
     uint64_t rendered_at = 0;
+    bool wants_periodic_refresh = window_chrome ? s_window_renderer.draw_status != NULL
+                                                 : render_params != NULL && render_params->render_callback != NULL;
 
     for (;;) {
         uint64_t now = runtime__now();
-        if (render_params != NULL && render_params->render_callback != NULL &&
-            render_params->refresh_interval_ms > 0 &&
-            now - rendered_at >= render_params->refresh_interval_ms) {
+        if (wants_periodic_refresh && refresh_interval_ms > 0 && now - rendered_at >= refresh_interval_ms) {
             redraw = true;
         }
 
@@ -331,6 +378,11 @@ static bruce_result_t dialog__gui_choice(
                 first_visible = selected;
             } else if (selected >= first_visible + items_per_page) {
                 first_visible = selected - items_per_page + 1;
+            }
+
+            if (window_chrome && !chrome_border_drawn) {
+                if (s_window_renderer.draw_border != NULL) { s_window_renderer.draw_border(s_window_renderer_context); }
+                chrome_border_drawn = true;
             }
 
             display__fill_rect(left, top, viewport_w, viewport_h, background_color);
@@ -370,7 +422,9 @@ static bruce_result_t dialog__gui_choice(
             }
 
             if (render_borders) { display__fill_rect(left, bottom - footer_h, viewport_w, footer_h, sec); }
-            if (render_params != NULL && render_params->render_callback != NULL) {
+            if (window_chrome) {
+                if (s_window_renderer.draw_status != NULL) { s_window_renderer.draw_status(s_window_renderer_context); }
+            } else if (render_params != NULL && render_params->render_callback != NULL) {
                 render_params->render_callback(render_params->render_callback_context);
             }
             frame_result = display__present();
