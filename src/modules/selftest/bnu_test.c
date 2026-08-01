@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "core_sdk/result.h"
+#include "core_sdk/disk.h"
 #include "core_sdk/storage.h"
 #include "core/storage/storage.h"
 #include "modules/bnu/bnu_app.h"
@@ -13,6 +14,9 @@ bool selftest__run_bnu_case(void) {
     char *cd_dot_argv[] = {"cd", "."};
     char *pwd_argv[] = {"pwd"};
     char *ls_argv[] = {"ls"};
+    char *lsblk_argv[] = {"lsblk"};
+    char *mount_argv[] = {"mount"};
+    char *unmount_argv[] = {"unmount", "missing"};
     char *free_argv[] = {"free"};
     char *top_argv[] = {"top"};
     char *cat_argv[] = {"cat", "/selftest_bnu_cat.txt"};
@@ -26,10 +30,15 @@ bool selftest__run_bnu_case(void) {
                                    ? storage__write(cat_file, cat_text, sizeof(cat_text) - 1, &cat_written)
                                    : cat_open;
     bruce_result_t cat_close = cat_open == BRUCE_OK ? storage__close(cat_file) : cat_open;
-    bool ok = bnu_cd_app_main(1, cd_root_argv) == BRUCE_OK &&
+    size_t disk_count = 0;
+    bool ok = disk__list(NULL, 0, &disk_count) == BRUCE_OK && disk_count > 1 &&
+              bnu_cd_app_main(1, cd_root_argv) == BRUCE_OK &&
               bnu_cd_app_main(2, cd_dot_argv) == BRUCE_OK &&
               strcmp(bnu__get_working_directory(), "/") == 0 &&
               bnu_pwd_app_main(1, pwd_argv) == BRUCE_OK && bnu_ls_app_main(1, ls_argv) == BRUCE_OK &&
+              bnu_lsblk_app_main(1, lsblk_argv) == BRUCE_OK &&
+              bnu_mount_app_main(1, mount_argv) == BRUCE_OK &&
+              bnu_unmount_app_main(2, unmount_argv) == BRUCE_ERR_NOT_FOUND &&
               bnu_free_app_main(1, free_argv) == BRUCE_OK && bnu_top_app_main(1, top_argv) == BRUCE_OK &&
               cat_open == BRUCE_OK && cat_write == BRUCE_OK && cat_written == sizeof(cat_text) - 1 &&
               cat_close == BRUCE_OK && bnu_cat_app_main(2, cat_argv) == BRUCE_OK;

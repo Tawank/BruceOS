@@ -13,6 +13,7 @@
 #include "core_sdk/clock.h"        // IWYU pragma: export
 #include "core_sdk/device.h"       // IWYU pragma: export
 #include "core_sdk/dialog.h"       // IWYU pragma: export
+#include "core_sdk/disk.h"         // IWYU pragma: export
 #include "core_sdk/display.h"      // IWYU pragma: export
 #include "core_sdk/gpio.h"         // IWYU pragma: export
 #include "core_sdk/http.h"         // IWYU pragma: export

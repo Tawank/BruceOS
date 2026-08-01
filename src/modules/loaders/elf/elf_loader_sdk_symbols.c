@@ -22,6 +22,7 @@
 #include "core_sdk/clock.h"
 #include "core_sdk/device.h"
 #include "core_sdk/dialog.h"
+#include "core_sdk/disk.h"
 #include "core_sdk/display.h"
 #include "core_sdk/gpio.h"
 #include "core_sdk/http.h"
@@ -273,6 +274,11 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(storage__remove),
     ESP_ELFSYM_EXPORT(storage__rename),
     ESP_ELFSYM_EXPORT(storage__get_usage),
+
+    /* Block devices */
+    ESP_ELFSYM_EXPORT(disk__list),
+    ESP_ELFSYM_EXPORT(disk__mount),
+    ESP_ELFSYM_EXPORT(disk__unmount),
 
     /* TCP and console streams */
     ESP_ELFSYM_EXPORT(tcp__connect),

@@ -32,7 +32,9 @@ bool storage__get_usage_internal(const char *path, size_t *total_bytes, size_t *
 
 /* SD is optional and board-specific. The caller supplies the SPI host and pins. */
 bool storage__sd_mount_spi(const storage__sdspi_config_t *config);
-void storage__sd_unmount(void);
+bruce_result_t storage__sd_unmount(void);
 bool storage__sd_is_ready(void);
+bool storage__get_sd_capacity(uint64_t *out_size);
+bool storage__is_internal_partition_mounted(const char *label);
 
 void storage__free(void *data);

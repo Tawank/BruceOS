@@ -42,6 +42,7 @@ static const esp_partition_t *s_littlefs_partition;
 
 static bool storage__is_protected_path(const char *path);
 static bool storage__is_valid_public_path(const char *path);
+static bool storage__has_open_sd_files_locked(void);
 
 static void storage__lock(void) {
     if (s_storage_mutex == NULL) {
@@ -322,16 +323,26 @@ bool storage__sd_mount_spi(const storage__sdspi_config_t *config) {
     return true;
 }
 
-void storage__sd_unmount(void) {
+bruce_result_t storage__sd_unmount(void) {
     storage__lock();
-    if (s_sd_ready) {
-        esp_vfs_fat_sdcard_unmount(STORAGE__SD_MOUNT_PATH, s_sd_card);
-        if (s_sd_bus_owned) spi_bus_free(s_sd_host);
-        s_sd_card = NULL;
-        s_sd_ready = false;
-        s_sd_bus_owned = false;
+    if (!s_sd_ready) {
+        storage__unlock();
+        return BRUCE_ERR_INVALID_STATE;
     }
+    if (storage__has_open_sd_files_locked()) {
+        storage__unlock();
+        return BRUCE_ERR_BUSY;
+    }
+    if (esp_vfs_fat_sdcard_unmount(STORAGE__SD_MOUNT_PATH, s_sd_card) != ESP_OK) {
+        storage__unlock();
+        return BRUCE_ERR_IO;
+    }
+    if (s_sd_bus_owned) spi_bus_free(s_sd_host);
+    s_sd_card = NULL;
+    s_sd_ready = false;
+    s_sd_bus_owned = false;
     storage__unlock();
+    return BRUCE_OK;
 }
 
 bool storage__sd_is_ready(void) {
@@ -339,6 +350,23 @@ bool storage__sd_is_ready(void) {
     bool ready = s_sd_ready;
     storage__unlock();
     return ready;
+}
+
+bool storage__get_sd_capacity(uint64_t *out_size) {
+    if (out_size == NULL) return false;
+    storage__lock();
+    bool ready = s_sd_ready && s_sd_card != NULL;
+    if (ready) *out_size = (uint64_t)s_sd_card->csd.capacity * s_sd_card->csd.sector_size;
+    storage__unlock();
+    return ready;
+}
+
+bool storage__is_internal_partition_mounted(const char *label) {
+    storage__lock();
+    bool mounted = s_ready && s_littlefs_partition != NULL && label != NULL &&
+                   strcmp(s_littlefs_partition->label, label) == 0;
+    storage__unlock();
+    return mounted;
 }
 
 void storage__free(void *data) { free(data); }
@@ -351,6 +379,7 @@ void storage__free(void *data) { free(data); }
 
 typedef struct {
     bool in_use;
+    bool sd;
     int fd;
     bruce_file_id_t id;
     bruce_resource_id_t resource_id;
@@ -360,6 +389,13 @@ typedef struct {
 
 static storage__file_slot_t s_open_files[STORAGE__MAX_OPEN_FILES];
 static uint32_t s_next_file_id = 1;
+
+static bool storage__has_open_sd_files_locked(void) {
+    for (int i = 0; i < STORAGE__MAX_OPEN_FILES; ++i) {
+        if (s_open_files[i].in_use && s_open_files[i].sd) return true;
+    }
+    return false;
+}
 
 /* /bruce.json and /permissions.json (plus their atomic-write .tmp siblings)
  * are the only paths this public API refuses, per migration_plan.md -
@@ -478,6 +514,7 @@ bruce_result_t storage__open(const char *path, uint32_t flags, bruce_file_id_t *
      * teardown, so nesting the two locks in the opposite order here would
      * be a lock-order inversion. */
     s_open_files[slot_index].in_use = true;
+    s_open_files[slot_index].sd = storage__is_sd_path(path);
     s_open_files[slot_index].id = BRUCE_FILE_ID_INVALID;
     s_open_files[slot_index].fd = -1;
     storage__unlock();

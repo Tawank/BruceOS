@@ -39,6 +39,7 @@ idf_component_register(SRCS
                     "core/display/display_draw.c"
                     "core/display/display_driver.c"
                     "core/display/display_text.c"
+                    "core/disk/disk.c"
                     "core/gpio/gpio.c"
                     "core/icon/icon.c"
                     "core/http/http.c"

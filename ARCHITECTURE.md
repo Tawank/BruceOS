@@ -793,6 +793,17 @@ key after the same mandatory host-key verification flow. Authentication accepts
 unencrypted ECDSA P-256 SEC1 PEM and OpenSSH Ed25519 private keys; the default identity
 is also selected automatically when it exists unless `--password` is supplied.
 
+Disk Core provides an unrestricted, read-only block-device inventory through
+`disk__list()`. It reports the internal flash device, every ESP partition with
+its label, offset, size, and parent, and a mounted SD card when present. Storage
+Core remains responsible for filesystems and supplies mount-point state to Disk
+Core. The built-in `lsblk` command renders this inventory in Linux-style
+`NAME MAJ:MIN RM SIZE RO TYPE MOUNTPOINTS` columns. Built-in-only
+`disk__mount()` and `disk__unmount()` operations manage the Cardputer SD device
+as `sd0` at `/sdcard`; unmount refuses while public SD file handles are open.
+The `mount` command lists mounted filesystems when called without arguments,
+and `mount sd0 [mount-point]` and `unmount <sd0|/sdcard>` manage the SD card.
+
 Inbound HTTP is a generic Core service exposed through `http_server__*`. A
 caller with `http` permission supplies bounded fixed or dynamic route
 descriptors. Core copies fixed metadata and bodies, owns the device-wide
