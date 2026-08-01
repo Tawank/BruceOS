@@ -30,7 +30,8 @@ hardware behavior.
 - bootstrap and system configuration;
 - process, runtime, and app_runner, including its pluggable loader registry;
 - permission decisions and resource ownership;
-- memory, file, dialog, input, display, network, SSH, radio, and other HAL APIs;
+- memory, file, dialog, display, network, SSH, radio, and other HAL APIs;
+- the normalized event loop, including foreground-only delivery and injection;
 - all ESP-IDF calls and hardware handles.
 
 Core has no launcher menu, application menu, theme policy, or feature-specific
@@ -50,12 +51,19 @@ themselves (see "Loader modules" below).
   (`.elf`, `.js`, or any other third-party format such as `.py`) into a
   running process.  A loader module registers itself with app_runner's loader
   registry; being "the ELF loader" or "the JS runner" gives it no Core
-  access that a new third-party loader module would not also have.
+  access that a new third-party loader module would not also have;
+- physical-input adapters, including board scanning, key normalization, and
+  configured hotkey dispatch. Adapters inject events into Core's event loop.
 
 Built-in modules are compiled into firmware.  ELF and JavaScript apps are
 external applications.  Built-ins use the same public SDK API and lifecycle as
 external apps, but their permission checks always pass.  Neither kind of app
 uses private Core headers or ESP-IDF directly.
+
+`modules/input` is a narrow hardware-adapter exception: it may use ESP-IDF GPIO
+drivers to sample the selected board, but it owns no Core queue or process
+policy and receives no private Core access. It emits only normalized events
+through `input__inject()` and remains a normal app_runner-managed process.
 
 The one deliberate exception is `modules/selftest`, a built-in diagnostic app
 whose entire purpose is validating Core's private implementation (process
@@ -69,8 +77,8 @@ built-in gets this exemption.
 
 ## Bootstrap and launcher selection
 
-`main.c` initializes storage, configuration, stdio, and display, registers the
-built-ins, then starts each command line in `startupApps` in order. The default
+`main.c` initializes storage, configuration, stdio, display, and the Core event
+loop, registers the built-ins, then starts each command line in `startupApps` in order. The default
 list is `bootanimation`, `input`, `serial_commands`, and `launcher -s`.
 
 `launcher` is a small module under `modules/utils/`.  Its
@@ -658,8 +666,11 @@ only through `input__inject()`; modules never receive ESP-IDF Bluetooth handles.
 
 ## Input, display, storage, and Config
 
+Core owns the normalized event loop and initializes it before starting apps.
+The resident `input` module owns board GPIO polling, keyboard decoding, and
+hotkey dispatch, and injects normalized events through `input__inject()`.
 Physical buttons, touch, keyboard, and encoder input go only to the effective
-foreground process. Blocking reads carry an input-owned foreground epoch and are
+foreground process. Blocking reads carry an event-loop foreground epoch and are
 revoked immediately on handoff, including an A-to-B-to-A transition. Timeout
 budgets span internal wakes. `input__inject()` accepts a normalized event with type, action,
 code, value, timestamp, and source process ID, allowing Bluetooth, GPIO, and I²C
@@ -809,7 +820,10 @@ count. Each entry is an AppRunner command line; Main starts all entries in order
 and leaves successfully created processes running concurrently.
 `config__add_startup_app()` appends a command line only when it is not already
 present, and `config__remove_startup_app()` removes one while preserving the
-order of the remaining entries. `hotkeys` is a bounded key-to-action object.
+order of the remaining entries. The built-in command exposes these operations as
+`config startup add <name>` and `config startup remove <name>`; command lines
+containing spaces must be passed as one quoted argument. `hotkeys` is a bounded
+key-to-action object.
 `displayDmaFramebuffer` defaults to true and is applied at boot. When false,
 the full compositing framebuffer is ordinary internal memory and display
 updates are copied through a small DMA-capable row buffer instead of issuing a

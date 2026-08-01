@@ -7,7 +7,8 @@ slice has exactly one Core implementation and routes all front ends through it.
 ## Rules for every stage
 
 1. Add or adjust a documented public Core API first.
-2. Implement Core behavior with ESP-IDF only in Core code.
+2. Implement Core behavior with ESP-IDF only in Core code. The built-in input
+   hardware adapter is the narrow exception documented in `ARCHITECTURE.md`.
 3. Route the built-in module, terminal command, and JS binding through it.
 4. Add focused host/unit tests where possible and device smoke tests otherwise.
 5. Do not copy a menu, CLI callback, or JS binding directly into Core.
@@ -157,7 +158,8 @@ produce equivalent scan/connect/disconnect behavior.
 
 Migrate common UI primitives before feature menus.
 
-- Port input queue, normalized injection, and legacy JS keyboard helpers.
+- Keep the normalized event loop in Core; port physical input adapters and
+  legacy JS keyboard helpers as modules that inject into it.
 - Port display HAL methods and route existing JS `display.*` bindings to them.
 - Route JS `dialog.*` common methods to Core dialog APIs.
 - Preserve `dialog.pickFile()` and text-viewer handles; omit `viewFile()`.

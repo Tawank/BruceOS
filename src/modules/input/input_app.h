@@ -1,4 +1,4 @@
 #pragma once
 
-/* Initializes Core's physical input service. Safe to run more than once. */
+/* Runs the resident physical-input adapter until the process is stopped. */
 int input_app_main(int argc, char **argv);

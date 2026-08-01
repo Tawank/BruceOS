@@ -1,7 +1,7 @@
 #include "process.h"
 
 #include "core/display/display.h"
-#include "core/input/input.h"
+#include "core/event_loop/event_loop.h"
 #include "core/stdio/stdio.h"
 #include "core_sdk/display.h"
 #include "core_sdk/permission.h"
@@ -25,7 +25,7 @@
 #define PROCESS__DEFAULT_STACK_BYTES 4096u
 #define PROCESS__EVT_WAKE (1u << 0)
 #define PROCESS__EVT_EXITED (1u << 1)
-#define PROCESS__EVT_INPUT_WAKE (1u << 2)
+#define PROCESS__EVT_EVENT_WAKE (1u << 2)
 #define PROCESS__EVT_WAITER_WAKE (1u << 3)
 
 typedef struct {
@@ -206,17 +206,17 @@ static void process__detach_wait_locked(process__record_t *waiter) {
  * top, restoring the process beneath it (if any) to BRUCE_PROCESS_FOREGROUND.
  * Caller must hold the lock. */
 static void process__foreground_notify_locked(bruce_process_id_t previous, bruce_process_id_t current) {
-    input__foreground_changed(current);
+    event_loop__foreground_changed(current);
     if (previous != BRUCE_PROCESS_ID_INVALID) {
         process__record_t *record = process__find_by_id_locked(previous);
         if (record != NULL) {
-            xEventGroupSetBits(s_process_events[process__slot_index_locked(record)], PROCESS__EVT_INPUT_WAKE);
+            xEventGroupSetBits(s_process_events[process__slot_index_locked(record)], PROCESS__EVT_EVENT_WAKE);
         }
     }
     if (current != BRUCE_PROCESS_ID_INVALID) {
         process__record_t *record = process__find_by_id_locked(current);
         if (record != NULL) {
-            xEventGroupSetBits(s_process_events[process__slot_index_locked(record)], PROCESS__EVT_INPUT_WAKE);
+            xEventGroupSetBits(s_process_events[process__slot_index_locked(record)], PROCESS__EVT_EVENT_WAKE);
         }
     }
 }
@@ -488,7 +488,7 @@ bruce_result_t process_registry__create(const process_create_params_t *params, b
     record->next_resource_id = 1;
     xEventGroupClearBits(
         s_process_events[slot],
-        PROCESS__EVT_WAKE | PROCESS__EVT_EXITED | PROCESS__EVT_INPUT_WAKE | PROCESS__EVT_WAITER_WAKE
+        PROCESS__EVT_WAKE | PROCESS__EVT_EXITED | PROCESS__EVT_EVENT_WAKE | PROCESS__EVT_WAITER_WAKE
     );
 
     /* record->state is already BRUCE_PROCESS_STARTING from the memset above
@@ -659,7 +659,7 @@ uint32_t process_registry__current_stdio_session(void) {
     return session;
 }
 
-bruce_result_t process_registry__input_wake_clear(bruce_process_id_t process_id) {
+bruce_result_t process_registry__event_wake_clear(bruce_process_id_t process_id) {
     process__ensure_init();
     process__lock();
     process__record_t *record = process__find_by_id_locked(process_id);
@@ -667,12 +667,12 @@ bruce_result_t process_registry__input_wake_clear(bruce_process_id_t process_id)
         process__unlock();
         return BRUCE_ERR_NOT_FOUND;
     }
-    xEventGroupClearBits(s_process_events[process__slot_index_locked(record)], PROCESS__EVT_INPUT_WAKE);
+    xEventGroupClearBits(s_process_events[process__slot_index_locked(record)], PROCESS__EVT_EVENT_WAKE);
     process__unlock();
     return BRUCE_OK;
 }
 
-bruce_result_t process_registry__input_wake_wait(bruce_process_id_t process_id, uint32_t timeout_ms) {
+bruce_result_t process_registry__event_wake_wait(bruce_process_id_t process_id, uint32_t timeout_ms) {
     process__ensure_init();
     process__lock();
     process__record_t *record = process__find_by_id_locked(process_id);
@@ -683,16 +683,16 @@ bruce_result_t process_registry__input_wake_wait(bruce_process_id_t process_id, 
     EventGroupHandle_t events = s_process_events[process__slot_index_locked(record)];
     process__unlock();
     TickType_t ticks = timeout_ms == portMAX_DELAY ? portMAX_DELAY : pdMS_TO_TICKS(timeout_ms);
-    EventBits_t bits = xEventGroupWaitBits(events, PROCESS__EVT_INPUT_WAKE, pdTRUE, pdFALSE, ticks);
-    return (bits & PROCESS__EVT_INPUT_WAKE) != 0 ? BRUCE_OK : BRUCE_ERR_TIMEOUT;
+    EventBits_t bits = xEventGroupWaitBits(events, PROCESS__EVT_EVENT_WAKE, pdTRUE, pdFALSE, ticks);
+    return (bits & PROCESS__EVT_EVENT_WAKE) != 0 ? BRUCE_OK : BRUCE_ERR_TIMEOUT;
 }
 
-void process_registry__input_wake(bruce_process_id_t process_id) {
+void process_registry__event_wake(bruce_process_id_t process_id) {
     process__ensure_init();
     process__lock();
     process__record_t *record = process__find_by_id_locked(process_id);
     if (record != NULL) {
-        xEventGroupSetBits(s_process_events[process__slot_index_locked(record)], PROCESS__EVT_INPUT_WAKE);
+        xEventGroupSetBits(s_process_events[process__slot_index_locked(record)], PROCESS__EVT_EVENT_WAKE);
     }
     process__unlock();
 }
@@ -902,7 +902,7 @@ bruce_result_t process__signal(bruce_process_id_t process_id, bruce_process_sign
     record->pending_signal = signal;
     record->state = BRUCE_PROCESS_STOPPING;
     process__wake_locked(record);
-    xEventGroupSetBits(s_process_events[process__slot_index_locked(record)], PROCESS__EVT_INPUT_WAKE);
+    xEventGroupSetBits(s_process_events[process__slot_index_locked(record)], PROCESS__EVT_EVENT_WAKE);
     display__process_state_changed(record->id, record->state);
     process__foreground_recompute_locked();
     process__unlock();
@@ -1006,7 +1006,7 @@ bruce_result_t process__kill(bruce_process_id_t process_id) {
     record->pending_signal = BRUCE_PROCESS_SIGNAL_KILL;
     record->state = BRUCE_PROCESS_STOPPING;
     process__wake_locked(record);
-    xEventGroupSetBits(s_process_events[process__slot_index_locked(record)], PROCESS__EVT_INPUT_WAKE);
+    xEventGroupSetBits(s_process_events[process__slot_index_locked(record)], PROCESS__EVT_EVENT_WAKE);
     display__process_state_changed(record->id, record->state);
     process__foreground_recompute_locked();
 

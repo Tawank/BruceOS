@@ -164,6 +164,13 @@ static int config_app__clock_cli(ArgParser *clock_parser, ArgParser *show, ArgPa
     return BRUCE_ERR_INVALID_ARGUMENT;
 }
 
+static int config_app__startup_cli(ArgParser *startup_parser, ArgParser *add, ArgParser *remove) {
+    ArgParser *action = ap_get_cmd_parser(startup_parser);
+    if (action == add) return config__add_startup_app(ap_get_arg(add, "name"));
+    if (action == remove) return config__remove_startup_app(ap_get_arg(remove, "name"));
+    return BRUCE_ERR_INVALID_ARGUMENT;
+}
+
 static void config_app__add_gui_option(ArgParser *parser) {
     ap_add_flag(parser, "gui");
     ap_set_opt_help(parser, "gui", "Use GUI interaction mode");
@@ -186,7 +193,12 @@ int config_app_main(int argc, char **argv) {
     ArgParser *dst = clock != NULL ? ap_new_cmd(clock, "dst") : NULL;
     ArgParser *format = clock != NULL ? ap_new_cmd(clock, "format") : NULL;
     ArgParser *set = clock != NULL ? ap_new_cmd(clock, "set") : NULL;
-    ArgParser *parsers[] = {system, clock, show, sync, ntp, timezone, dst, format, set};
+    ArgParser *startup = ap_new_cmd(root, "startup");
+    ArgParser *startup_add = startup != NULL ? ap_new_cmd(startup, "add") : NULL;
+    ArgParser *startup_remove = startup != NULL ? ap_new_cmd(startup, "remove") : NULL;
+    ArgParser *parsers[] = {
+        system, clock, show, sync, ntp, timezone, dst, format, set, startup, startup_add, startup_remove,
+    };
     for (size_t i = 0; i < sizeof(parsers) / sizeof(parsers[0]); ++i) {
         if (parsers[i] == NULL) {
             ap_free(root);
@@ -211,6 +223,11 @@ int config_app_main(int argc, char **argv) {
     ap_set_helptext(set, "Set local date and time manually.");
     ap_add_optional_arg(set, "date", "Date as YYYY-MM-DD (required outside GUI mode)");
     ap_add_optional_arg(set, "time", "Time as HH:MM:SS (required outside GUI mode)");
+    ap_set_helptext(startup, "Manage applications launched during boot.");
+    ap_set_helptext(startup_add, "Append an application command to the startup list.");
+    ap_add_required_arg(startup_add, "name", "Application name or quoted command line");
+    ap_set_helptext(startup_remove, "Remove an application command from the startup list.");
+    ap_add_required_arg(startup_remove, "name", "Application name or quoted command line");
 
     if (!ap_parse(root, argc, argv)) {
         ap_status_t status = ap_get_status(root);
@@ -219,9 +236,11 @@ int config_app_main(int argc, char **argv) {
         return status == AP_STATUS_NO_MEMORY ? BRUCE_ERR_NO_MEMORY : BRUCE_ERR_INVALID_ARGUMENT;
     }
 
-    bool hierarchy_found = ap_get_cmd_parser(root) == system && ap_get_cmd_parser(system) == clock;
+    ArgParser *root_action = ap_get_cmd_parser(root);
+    bool clock_hierarchy = root_action == system && ap_get_cmd_parser(system) == clock;
+    bool startup_hierarchy = root_action == startup;
     bool gui = ap_found(root, "gui") || ap_found(system, "gui") || ap_found(clock, "gui");
-    ArgParser *action = hierarchy_found ? ap_get_cmd_parser(clock) : NULL;
+    ArgParser *action = clock_hierarchy ? ap_get_cmd_parser(clock) : NULL;
     if (action != NULL) gui = gui || ap_found(action, "gui");
     if (gui && !app_runner__args_have_background(argc, argv)) {
         bruce_result_t foreground = process__to_foreground();
@@ -230,9 +249,15 @@ int config_app_main(int argc, char **argv) {
             return foreground;
         }
     }
-    int result = !hierarchy_found ? BRUCE_ERR_INVALID_ARGUMENT
-                                  : gui ? config_app__clock_gui()
-                                        : config_app__clock_cli(clock, show, sync, ntp, timezone, dst, format, set);
+    int result;
+    if (clock_hierarchy) {
+        result = gui ? config_app__clock_gui()
+                     : config_app__clock_cli(clock, show, sync, ntp, timezone, dst, format, set);
+    } else if (startup_hierarchy && !gui) {
+        result = config_app__startup_cli(startup, startup_add, startup_remove);
+    } else {
+        result = BRUCE_ERR_INVALID_ARGUMENT;
+    }
     ap_free(root);
     return result;
 }

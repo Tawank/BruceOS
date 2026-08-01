@@ -21,6 +21,7 @@
 #include "core_sdk/config.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/process.h"
+#include "modules/config/config_app.h"
 
 #include "config_test.h"
 
@@ -266,6 +267,13 @@ bool selftest__run_config_builtin_manage_case(void) {
                           strcmp(apps->items[0], "clock") == 0 && strcmp(apps->items[1], "webui") == 0 &&
                            strcmp(apps->items[2], "settings") == 0;
 
+    char *startup_add_argv[] = {"config", "startup", "add", "selftest-startup"};
+    char *startup_remove_argv[] = {"config", "startup", "remove", "selftest-startup"};
+    bruce_result_t cli_add = config_app_main(4, startup_add_argv);
+    bruce_result_t cli_remove = config_app_main(4, startup_remove_argv);
+    apps = config__get_startup_apps();
+    bool cli_mutations = cli_add == BRUCE_OK && cli_remove == BRUCE_OK && apps != NULL && apps->count == 3;
+
     const bruce_config_hotkey_t test_hotkeys[] = {{"ctrl + x", "process switch next"}};
     bruce_result_t set_hotkeys = config__set_hotkeys(test_hotkeys, 1);
     const bruce_config_hotkeys_t *hotkeys = config__get_hotkeys();
@@ -292,7 +300,7 @@ bool selftest__run_config_builtin_manage_case(void) {
 
     bool ok = set_general == BRUCE_OK && general_value == 42 && set_dma_framebuffer == BRUCE_OK &&
               !dma_framebuffer_value && set_protected == BRUCE_OK && string_values && array_values &&
-              list_mutations && hotkey_values && schema && restored;
+               list_mutations && cli_mutations && hotkey_values && schema && restored;
     printf(
         "[selftest] config/builtin-manage: %s (general=%d array=%d schema=%d)\n",
         ok ? "OK" : "FAIL",

@@ -44,7 +44,7 @@ idf_component_register(SRCS
                     "core/http/http.c"
                     "core/image/image.c"
                     "core/i2c/i2c.c"
-                    "core/input/input.c"
+                    "core/event_loop/event_loop.c"
                      "core/ir/ir.c"
                     "core/loader_image/loader_image.c"
                      "core/manifest/manifest.c"
@@ -254,6 +254,10 @@ add_library(bruce_sdk_builtin_input_check OBJECT "modules/input/input_app.c")
 target_include_directories(bruce_sdk_builtin_input_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/input")
+# The input module is the documented hardware-adapter exception: it uses GPIO
+# and timing APIs directly while remaining isolated from Core-private headers.
+target_link_libraries(bruce_sdk_builtin_input_check PRIVATE
+                      idf::esp_driver_gpio idf::esp_rom idf::freertos idf::log)
 
 add_library(bruce_sdk_builtin_clock_check OBJECT "modules/clock/clock_app.c")
 target_include_directories(bruce_sdk_builtin_clock_check PRIVATE

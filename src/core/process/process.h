@@ -105,9 +105,9 @@ bruce_result_t process_registry__current_context(
 
 /* Input's per-process wake channel. These helpers never run while the input mutex
  * is held except for the lock-free event-group wait itself. */
-bruce_result_t process_registry__input_wake_clear(bruce_process_id_t process_id);
-bruce_result_t process_registry__input_wake_wait(bruce_process_id_t process_id, uint32_t timeout_ms);
-void process_registry__input_wake(bruce_process_id_t process_id);
+bruce_result_t process_registry__event_wake_clear(bruce_process_id_t process_id);
+bruce_result_t process_registry__event_wake_wait(bruce_process_id_t process_id, uint32_t timeout_ms);
+void process_registry__event_wake(bruce_process_id_t process_id);
 
 /* Foregrounds the next background GUI process in registry order. Core services
  * use this variant because they do not execute in an app permission context. */

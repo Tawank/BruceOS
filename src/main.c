@@ -1,11 +1,12 @@
-#include <stdio.h>
 #include <ctype.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "core_sdk/app_runner.h"
 #include "core_sdk/display.h"
 
 #include "core/config/config.h"
+#include "core/event_loop/event_loop.h"
 #include "core/stdio/stdio.h"
 #include "core/storage/storage.h"
 #include "core_sdk/loader.h"
@@ -14,14 +15,14 @@
 #include "modules/apps/apps_app.h"
 #include "modules/bluetooth/bluetooth_app.h"
 #include "modules/bluetooth_hid/bluetooth_hid_app.h"
-#include "modules/bootanimation/bootanimation_app.h"
 #include "modules/bnu/bnu_app.h"
+#include "modules/bootanimation/bootanimation_app.h"
 #include "modules/bruce_launcher/bruce_launcher_app.h"
 #include "modules/clock/clock_app.h"
 #include "modules/config/config_app.h"
 #include "modules/filemanager/filemanager_app.h"
-#include "modules/ir/ir_app.h"
 #include "modules/input/input_app.h"
+#include "modules/ir/ir_app.h"
 #include "modules/loaders/elf/elf_loader_app.h"
 #include "modules/loaders/image/image_loader_app.h"
 #include "modules/loaders/js/js_loader_app.h"
@@ -42,6 +43,7 @@
 
 #define MAIN_SERIAL_READY_TIMEOUT_MS 1000
 
+#define INPUT_STACK_BYTES CONFIG_BRUCE_INPUT_TASK_STACK
 #define SELFTEST_STACK_BYTES 8192u
 #define SHELL_STACK_BYTES 4096u
 #define SSH_STACK_BYTES 16384u
@@ -56,7 +58,7 @@ bool init_user_interface(void) {
 void app_runner__register_defaults(void) {
     (void)app_runner__register("launcher", launcher_app_main, 0);
     (void)app_runner__register("bootanimation", bootanimation_app_main, 0);
-    (void)app_runner__register("input", input_app_main, 0);
+    (void)app_runner__register("input", input_app_main, INPUT_STACK_BYTES);
     (void)app_runner__register("bruce_launcher", bruce_launcher_app_main, 0);
     (void)app_runner__register("apps", apps_app_main, 0);
     (void)app_runner__register("filemanager", filemanager_app_main, 0);
@@ -146,6 +148,7 @@ void app_main(void) {
     if (!storage_ok) printf("Storage initialization failed\n");
     if (storage_ok && !config__init()) printf("Configuration is unavailable; using in-memory defaults\n");
     if (stdio__init() != BRUCE_OK) printf("USB serial console initialization failed\n");
+    if (event_loop__init() != BRUCE_OK) printf("Core event loop initialization failed\n");
 
     (void)init_user_interface();
 
