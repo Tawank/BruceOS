@@ -874,7 +874,8 @@ static bool dialog__matches_extension_filter(const char *name, const char *exten
 }
 
 static bruce_result_t dialog__gui_pick_file(
-    const char *initial_path, const char *extension_filter, char *out_path, size_t out_path_size
+    const char *initial_path, const char *extension_filter, char *out_path, size_t out_path_size,
+    const bruce_dialog_render_params_t *render_params
 ) {
     char current_path[BRUCE_STORAGE_PATH_MAX];
     snprintf(
@@ -937,8 +938,9 @@ static bruce_result_t dialog__gui_pick_file(
         }
 
         size_t out_selected = 0;
-        bruce_result_t choice_result =
-            dialog__gui_choice("Pick file", current_path, choices, (size_t)choice_count, &out_selected, NULL);
+        bruce_result_t choice_result = dialog__gui_choice(
+            "Pick file", current_path, choices, (size_t)choice_count, &out_selected, render_params
+        );
 
         const char *picked = values[out_selected];
         memory__free(values);
@@ -1160,6 +1162,13 @@ bruce_result_t dialog__choice(
 bruce_result_t dialog__pick_file(
     const char *initial_path, const char *extension_filter, char *out_path, size_t out_path_size
 ) {
+    return dialog__pick_file_ex(initial_path, extension_filter, out_path, out_path_size, NULL);
+}
+
+bruce_result_t dialog__pick_file_ex(
+    const char *initial_path, const char *extension_filter, char *out_path, size_t out_path_size,
+    const bruce_dialog_render_params_t *render_params
+) {
     if (out_path == NULL || out_path_size == 0) { return BRUCE_ERR_INVALID_ARGUMENT; }
 
     bool gui = dialog__current_process_wants_gui();
@@ -1169,7 +1178,9 @@ bruce_result_t dialog__pick_file(
         return s_test_pick_file_provider(initial_path, extension_filter, out_path, out_path_size);
     }
 
-    if (gui) { return dialog__gui_pick_file(initial_path, extension_filter, out_path, out_path_size); }
+    if (gui) {
+        return dialog__gui_pick_file(initial_path, extension_filter, out_path, out_path_size, render_params);
+    }
     return dialog__term_pick_file(initial_path, extension_filter, out_path, out_path_size);
 }
 

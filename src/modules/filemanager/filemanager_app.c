@@ -156,7 +156,7 @@ int filemanager_app_main(int argc, char **argv) {
 
     for (;;) {
         char path[BRUCE_STORAGE_PATH_MAX];
-        bruce_result_t result = dialog__pick_file("/", NULL, path, sizeof(path));
+        bruce_result_t result = dialog__pick_file_ex("/", NULL, path, sizeof(path), &action_params);
         if (result == BRUCE_ERR_CANCELLED && filemanager__resume_after_handoff()) {
             (void)input__flush();
             continue;

@@ -15,10 +15,10 @@
 #include "core_sdk/input.h"
 #include "core_sdk/loader.h"
 #include "core_sdk/memory.h"
-#include "core_sdk/result.h"
-#include "core_sdk/status_icon.h"
 #include "core_sdk/process.h"
+#include "core_sdk/result.h"
 #include "core_sdk/runtime.h"
+#include "core_sdk/status_icon.h"
 
 /* MainMenu visual-style constants. */
 #define BRUCE_LAUNCHER_BORDER_PAD 5
@@ -416,10 +416,8 @@ static int bruce_launcher__run_process_switcher(const bruce_launcher_theme_t *th
         if ((event.code == BRUCE_INPUT_CODE_UP || event.code == BRUCE_INPUT_CODE_LEFT) && selected > 0) {
             selected--;
             redraw = true;
-        } else if (
-            (event.code == BRUCE_INPUT_CODE_DOWN || event.code == BRUCE_INPUT_CODE_RIGHT) &&
-            selected + 1 < (int)page_count
-        ) {
+        } else if ((event.code == BRUCE_INPUT_CODE_DOWN || event.code == BRUCE_INPUT_CODE_RIGHT) &&
+                   selected + 1 < (int)page_count) {
             selected++;
             redraw = true;
         } else if (event.code == BRUCE_INPUT_CODE_LEFT && page > 0) {
@@ -430,10 +428,8 @@ static int bruce_launcher__run_process_switcher(const bruce_launcher_theme_t *th
             page++;
             selected = 0;
             redraw = true;
-        } else if (
-            (event.code == BRUCE_INPUT_CODE_SELECT || event.code == BRUCE_INPUT_CODE_BUTTON_A) &&
-            page_count > 0
-        ) {
+        } else if ((event.code == BRUCE_INPUT_CODE_SELECT || event.code == BRUCE_INPUT_CODE_BUTTON_A) &&
+                   page_count > 0) {
             bruce_process_id_t target = candidates[start + (size_t)selected].id;
             bruce_process_snapshot_t snapshot;
             if (process__snapshot(target, &snapshot) == BRUCE_OK) {
@@ -564,7 +560,8 @@ static int bruce_launcher__run_gui_menu(bruce_launcher_menu_t *menu) {
     uint64_t status_drawn_at = 0;
     for (;;) {
         bruce_process_snapshot_t self;
-        if (process__snapshot(process__current_id(), &self) != BRUCE_OK || self.state != BRUCE_PROCESS_FOREGROUND) {
+        if (process__snapshot(process__current_id(), &self) != BRUCE_OK ||
+            self.state != BRUCE_PROCESS_FOREGROUND) {
             last_drawn = -1;
             (void)runtime__delay(20);
             continue;
@@ -733,5 +730,6 @@ int bruce_launcher_app_main(int argc, char **argv) {
     }
 
     bruce_launcher__menu_free(root);
+    display__fill_screen(BRUCE_COLOR_BLACK);
     return result;
 }

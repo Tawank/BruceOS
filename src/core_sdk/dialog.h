@@ -60,6 +60,13 @@ bruce_result_t dialog__choice(
 bruce_result_t dialog__pick_file(
     const char *initial_path, const char *extension_filter, char *out_path, size_t out_path_size
 );
+/* Like dialog__pick_file(), but `render_params` styles the GUI listing the
+ * same way it styles dialog__choice() (NULL behaves exactly like
+ * dialog__pick_file()). Ignored on non-GUI/terminal picks. */
+bruce_result_t dialog__pick_file_ex(
+    const char *initial_path, const char *extension_filter, char *out_path, size_t out_path_size,
+    const bruce_dialog_render_params_t *render_params
+);
 
 /* Window chrome: a pluggable "look" (rounded border, live status bar, ...)
  * that dialog__choice() draws around a choice list when render_params has
