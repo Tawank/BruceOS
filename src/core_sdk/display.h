@@ -129,7 +129,7 @@ bruce_result_t display__set_text_color(bruce_display_color_t color);
  */
 bruce_result_t display__set_text_bg_color(uint32_t color);
 
-/* Text size multiplier (1 = 8x16 glyphs, 2 = 16x32, ...).  Clamped to 1..8. */
+/* Text size multiplier (1 = 6x8 character cells, 2 = 12x16, ...). Clamped to 1..8. */
 bruce_result_t display__set_text_size(uint8_t size);
 
 /* Position the text cursor in logical coordinates. */

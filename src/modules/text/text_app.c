@@ -8,6 +8,7 @@
 
 #include "args.h"
 #include "core_sdk/app_runner.h"
+#include "core_sdk/config.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/display.h"
 #include "core_sdk/input.h"
@@ -20,10 +21,11 @@
 
 #define TEXT_MAX_BYTES (32u * 1024u)
 #define TEXT_LINE_INPUT_MAX 512u
-#define TEXT_BODY_TOP 18
-#define TEXT_BODY_BOTTOM 31
-#define TEXT_GLYPH_WIDTH 8
-#define TEXT_GLYPH_HEIGHT 16
+#define TEXT_CHAR_WIDTH 6
+#define TEXT_CHAR_HEIGHT 8
+#define TEXT_TITLE_HEIGHT 12
+#define TEXT_FOOTER_HEIGHT 20
+#define TEXT_FRAME_MARGIN 2
 
 typedef struct {
     char *data;
@@ -200,9 +202,11 @@ static void text__move_vertical(text_editor_t *editor, int direction) {
 static void text__render(const char *path, text_editor_t *editor) {
     int width = display__width();
     int height = display__height();
-    if (width <= 0 || height <= TEXT_BODY_TOP + TEXT_BODY_BOTTOM) return;
-    size_t visible_columns = (size_t)(width - 8) / TEXT_GLYPH_WIDTH;
-    size_t visible_lines = (size_t)(height - TEXT_BODY_TOP - TEXT_BODY_BOTTOM) / TEXT_GLYPH_HEIGHT;
+    if (width <= 0 || height <= TEXT_TITLE_HEIGHT + TEXT_FOOTER_HEIGHT) return;
+    uint16_t foreground = config__get_pri_color();
+    uint16_t background = config__get_bg_color();
+    size_t visible_columns = (size_t)(width - 2 * TEXT_FRAME_MARGIN) / TEXT_CHAR_WIDTH;
+    size_t visible_lines = (size_t)(height - TEXT_TITLE_HEIGHT - TEXT_FOOTER_HEIGHT) / TEXT_CHAR_HEIGHT;
     if (visible_columns == 0) visible_columns = 1;
     if (visible_lines == 0) visible_lines = 1;
 
@@ -219,15 +223,15 @@ static void text__render(const char *path, text_editor_t *editor) {
     }
 
     (void)display__begin_frame();
-    (void)display__fill_screen(BRUCE_COLOR_BLACK);
+    (void)display__fill_screen(background);
+    (void)display__fill_rect(0, 0, (int16_t)width, TEXT_TITLE_HEIGHT, foreground);
     (void)display__set_text_size(1);
-    (void)display__set_text_bg_color(BRUCE_COLOR_BLACK);
-    (void)display__set_text_color(BRUCE_COLOR_CYAN);
-    (void)display__set_cursor(4, 1);
+    (void)display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
+    (void)display__set_text_color(background);
+    (void)display__set_cursor(TEXT_FRAME_MARGIN, TEXT_FRAME_MARGIN);
     (void)display__print(text__basename(path));
     if (editor->read_only) (void)display__print(" [RO]");
     if (editor->dirty) (void)display__print(" *");
-    (void)display__draw_line(0, 16, (int16_t)(width - 1), 16, BRUCE_COLOR_DARKGREY);
 
     size_t position = 0;
     size_t line = 0;
@@ -249,33 +253,35 @@ static void text__render(const char *path, text_editor_t *editor) {
             }
         }
         visible[count] = '\0';
-        (void)display__set_text_color(BRUCE_COLOR_WHITE);
-        (void)display__set_cursor(4, (int16_t)(TEXT_BODY_TOP + row * TEXT_GLYPH_HEIGHT));
+        (void)display__set_text_color(foreground);
+        (void)display__set_cursor(TEXT_FRAME_MARGIN, (int16_t)(TEXT_TITLE_HEIGHT + row * TEXT_CHAR_HEIGHT));
         (void)display__print(visible);
         if (end == editor->length) break;
         position = end + 1u;
     }
 
-    int cursor_x = 4 + (int)(cursor_column - editor->left_column) * TEXT_GLYPH_WIDTH;
-    int cursor_y = TEXT_BODY_TOP + (int)(cursor_line - editor->top_line) * TEXT_GLYPH_HEIGHT;
-    (void)display__draw_line(
-        (int16_t)cursor_x,
-        (int16_t)(cursor_y + TEXT_GLYPH_HEIGHT - 2),
-        (int16_t)(cursor_x + TEXT_GLYPH_WIDTH - 2),
-        (int16_t)(cursor_y + TEXT_GLYPH_HEIGHT - 2),
-        BRUCE_COLOR_YELLOW
+    int cursor_x = TEXT_FRAME_MARGIN + (int)(cursor_column - editor->left_column) * TEXT_CHAR_WIDTH;
+    int cursor_y = TEXT_TITLE_HEIGHT + (int)(cursor_line - editor->top_line) * TEXT_CHAR_HEIGHT;
+    (void)display__fill_rect(
+        (int16_t)cursor_x, (int16_t)(cursor_y + TEXT_CHAR_HEIGHT - 1), TEXT_CHAR_WIDTH - 1, 1, foreground
     );
 
     char status[32];
-    snprintf(status, sizeof(status), "Ln %u Col %u", (unsigned)(cursor_line + 1u),
-             (unsigned)(cursor_column + 1u));
-    (void)display__draw_line(0, (int16_t)(height - TEXT_BODY_BOTTOM), (int16_t)(width - 1),
-                             (int16_t)(height - TEXT_BODY_BOTTOM), BRUCE_COLOR_DARKGREY);
+    snprintf(
+        status, sizeof(status), "Ln %u Col %u", (unsigned)(cursor_line + 1u), (unsigned)(cursor_column + 1u)
+    );
+    (void)display__draw_line(
+        0,
+        (int16_t)(height - TEXT_FOOTER_HEIGHT),
+        (int16_t)(width - 1),
+        (int16_t)(height - TEXT_FOOTER_HEIGHT),
+        foreground
+    );
     (void)display__set_text_color(BRUCE_COLOR_LIGHTGREY);
-    (void)display__set_cursor(4, (int16_t)(height - 29));
+    (void)display__set_cursor(TEXT_FRAME_MARGIN, (int16_t)(height - TEXT_FOOTER_HEIGHT + 2));
     (void)display__print(status);
-    (void)display__set_text_color(BRUCE_COLOR_CYAN);
-    (void)display__set_cursor(4, (int16_t)(height - 13));
+    (void)display__set_text_color(foreground);
+    (void)display__set_cursor(TEXT_FRAME_MARGIN, (int16_t)(height - TEXT_CHAR_HEIGHT));
     (void)display__print(editor->read_only ? "^X Exit  RO" : "^S Save  ^X Exit");
     (void)display__present();
 }
