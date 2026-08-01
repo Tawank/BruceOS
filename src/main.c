@@ -1,4 +1,3 @@
-#include <ctype.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -7,7 +6,6 @@
 
 #include "core/config/config.h"
 #include "core/event_loop/event_loop.h"
-#include "core/stdio/stdio.h"
 #include "core/storage/storage.h"
 #include "core_sdk/loader.h"
 
@@ -110,53 +108,25 @@ void app_runner__register_defaults(void) {
     elf_loader__init();
 }
 
-static int main__run_startup_command(const char *command_line) {
-    if (command_line == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
-    while (isspace((unsigned char)*command_line)) command_line++;
-    const char *end = command_line;
-    while (*end != '\0' && !isspace((unsigned char)*end)) end++;
-    if (end == command_line) return BRUCE_ERR_INVALID_ARGUMENT;
-
-    char command[BRUCE_CONFIG_HOTKEY_ACTION_MAX_LEN + 1];
-    size_t length = (size_t)(end - command_line);
-    if (length >= sizeof(command)) return BRUCE_ERR_INVALID_ARGUMENT;
-    memcpy(command, command_line, length);
-    command[length] = '\0';
-    while (isspace((unsigned char)*end)) end++;
-    const char *args = *end != '\0' ? end : NULL;
-    if (command[0] == '/' || strncmp(command, "./", 2) == 0) {
-        return app_runner__run_path(command, args, true);
-    }
-    return app_runner__run(command, args, true);
-}
-
-static void main__start_configured_apps(void) {
+static void run_apps_autostart(void) {
     const bruce_config_startup_apps_t *apps = config__get_startup_apps();
     if (apps == NULL) return;
     for (size_t i = 0; i < apps->count; ++i) {
-        int result = main__run_startup_command(apps->items[i]);
-        if (result < 0) printf("Startup app \"%s\" failed with code %d\n", apps->items[i], result);
+        int result = app_runner__run(apps->items[i], NULL, true);
+        if (result < 0) { printf("Startup app \"%s\" failed with code %d\n", apps->items[i], result); }
     }
-}
-
-void set_log_level() {
-    // esp_log_level_set("wifi", ESP_LOG_WARN);
-    // esp_log_level_set("wifi_init", ESP_LOG_WARN);
-    // esp_log_level_set("phy_init", ESP_LOG_WARN);
-    esp_log_level_set("*", ESP_LOG_WARN);
 }
 
 void app_main(void) {
     bool storage_ok = storage__init();
     if (!storage_ok) printf("Storage initialization failed\n");
     if (storage_ok && !config__init()) printf("Configuration is unavailable; using in-memory defaults\n");
-    if (stdio__init() != BRUCE_OK) printf("USB serial console initialization failed\n");
     if (event_loop__init() != BRUCE_OK) printf("Core event loop initialization failed\n");
 
     (void)init_user_interface();
 
     app_runner__register_defaults();
-    main__start_configured_apps();
+    run_apps_autostart();
 
 #if CONFIG_BRUCE_QEMU_TEST_MODE
     if (!serial_commands__wait_ready(MAIN_SERIAL_READY_TIMEOUT_MS)) {
@@ -167,5 +137,5 @@ void app_main(void) {
     return;
 #endif
 
-    set_log_level();
+    esp_log_level_set("*", ESP_LOG_WARN);
 }
