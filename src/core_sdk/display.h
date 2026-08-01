@@ -29,11 +29,7 @@
 extern "C" {
 #endif
 
-/* Default logical dimensions after applying the board's default rotation. */
-#define BRUCE_DISPLAY_NATIVE_WIDTH 135
-#define BRUCE_DISPLAY_NATIVE_HEIGHT 240
-
-/* Some common RGB565 colors matching the legacy JS display constants. */
+/* Common RGB565 colors. */
 #define BRUCE_COLOR_BLACK 0x0000
 #define BRUCE_COLOR_NAVY 0x000F
 #define BRUCE_COLOR_DARKGREEN 0x03E0
@@ -51,8 +47,6 @@ extern "C" {
 #define BRUCE_COLOR_YELLOW 0xFFE0
 #define BRUCE_COLOR_WHITE 0xFFFF
 #define BRUCE_COLOR_ORANGE 0xFD20
-#define BRUCE_COLOR_GREENYELLOW 0xAFE5
-#define BRUCE_COLOR_PINK 0xF81F
 #define BRUCE_COLOR_TRANSPARENT 0x10000
 
 typedef uint16_t bruce_display_color_t;
@@ -72,21 +66,6 @@ typedef struct {
 } bruce_display_tile_t;
 
 /* -------------------------------------------------------------------------- */
-/* Lifecycle                                                                  */
-/* -------------------------------------------------------------------------- */
-
-/*
- * Initialize the LCD controller, backlight, and framebuffer.  Safe to call
- * more than once; subsequent calls return BRUCE_OK without re-initializing.
- * This is normally called once by Core boot (main.c) before the launcher
- * starts; applications do not need to call it.
- */
-bruce_result_t display__init(void);
-
-/* Release the LCD panel, SPI bus, backlight PWM, and framebuffer. */
-void display__deinit(void);
-
-/* -------------------------------------------------------------------------- */
 /* Screen dimensions and colors                                               */
 /* -------------------------------------------------------------------------- */
 
@@ -98,11 +77,6 @@ int display__height(void);
 
 /* Convert 8-bit RGB components to an RGB565 color value. */
 bruce_display_color_t display__color565(uint8_t r, uint8_t g, uint8_t b);
-
-/* Legacy alias for display__color565(). */
-static inline bruce_display_color_t display__color(uint8_t r, uint8_t g, uint8_t b) {
-    return display__color565(r, g, b);
-}
 
 /* -------------------------------------------------------------------------- */
 /* Screen fill / clear                                                        */
@@ -251,12 +225,6 @@ bruce_result_t display__present(void);
 
 /* Built-in launcher layout operation. Not exported to external runtimes. */
 bruce_result_t display__set_tiles(const bruce_display_tile_t *tiles, size_t count);
-
-/*
- * Compatibility presentation. If no explicit frame is active, this creates
- * and presents an implicit one around pixels already drawn by legacy code.
- */
-bruce_result_t display__flush(void);
 
 #ifdef __cplusplus
 }

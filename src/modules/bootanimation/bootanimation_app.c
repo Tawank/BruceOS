@@ -123,10 +123,15 @@ int bootanimation_app_main(int argc, char **argv) {
     if (result != BRUCE_OK) return result;
 
     const char *image_path = NULL;
-    if (storage__exists("/sdcard/boot.jpg")) image_path = "/sdcard/boot.jpg";
-    else if (storage__exists("/sdcard/boot.gif")) image_path = "/sdcard/boot.gif";
-    else if (storage__exists("/boot.jpg")) image_path = "/boot.jpg";
-    else if (storage__exists("/boot.gif")) image_path = "/boot.gif";
+    bool exists = false;
+    if (storage__exists("/sdcard/boot.jpg", &exists) == BRUCE_OK && exists)
+        image_path = "/sdcard/boot.jpg";
+    else if (storage__exists("/sdcard/boot.gif", &exists) == BRUCE_OK && exists)
+        image_path = "/sdcard/boot.gif";
+    else if (storage__exists("/boot.jpg", &exists) == BRUCE_OK && exists)
+        image_path = "/boot.jpg";
+    else if (storage__exists("/boot.gif", &exists) == BRUCE_OK && exists)
+        image_path = "/boot.gif";
 
     uint64_t started = runtime__now();
     bool content_drawn = false;

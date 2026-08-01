@@ -8,6 +8,7 @@
 #include "bruce_launcher_icons.h"
 #include "bruce_launcher_menu.h"
 #include "core_sdk/app_runner.h"
+#include "core_sdk/clock.h"
 #include "core_sdk/config.h"
 #include "core_sdk/device.h"
 #include "core_sdk/dialog.h"
@@ -71,8 +72,8 @@ static uint32_t bruce_launcher__draw_status_bar(const bruce_launcher_theme_t *th
     display__set_text_size(BRUCE_LAUNCHER_FONT_SMALL);
 
     char clock_text[13] = "--:--:--";
-    bruce_device_time_t time;
-    if (device__get_time(&time) == BRUCE_OK) {
+    bruce_clock_datetime_t time;
+    if (clock__get_local(&time) == BRUCE_OK) {
         bool clock24 = config__get_clock24hr();
         int hour = time.hour;
         if (!clock24) {

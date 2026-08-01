@@ -3,10 +3,12 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "core_sdk/permission.h"
+
 #define BRUCE_CORE_ABI_VERSION 3u
 #define BRUCE_MANIFEST_APP_NAME_MAX 64
 #define BRUCE_MANIFEST_ICON_BYTES 128
-#define BRUCE_MANIFEST_MAX_PERMISSIONS 17
+#define BRUCE_MANIFEST_MAX_PERMISSIONS BRUCE_PERMISSION_COUNT
 #define BRUCE_MANIFEST_PERMISSION_NAME_MAX 16
 
 typedef struct {
@@ -35,14 +37,15 @@ typedef struct {
  * stackSize (4096-16384 inclusive), and an optional permissions array (each
  * name must be a known bruce_permission_t name, no duplicates).  Every
  * caller extracts raw manifest bytes from the file format and calls this one
- * shared parser instead of reimplementing JSON/base64 handling.  Returns
- * BRUCE_OK or BRUCE_ERR_MANIFEST_INVALID. */
+ * shared parser instead of reimplementing JSON/base64 handling. Returns a
+ * process-owned manifest that must be released with memory__free(), or NULL
+ * for invalid input or allocation failure. */
 bruce_manifest_t *manifest__parse(const char *json, size_t json_len);
 
 /* Universal manifest JSON extractor (see migration_plan.md, "Loader
  * modules").  Opens `path`, auto-detects the file format (ELF section, JS
- * comment block, etc.), and returns the raw manifest JSON bytes in
- * *out_json (malloc'd, caller must free with free()).  Never launches an
+ * comment block, etc.), and returns raw NUL-terminated manifest JSON. The
+ * returned buffer is process-owned and must be released with memory__free(). Never launches an
  * app.  This is the one function every program — the launcher, file
  * manager, terminal tools — uses to extract the manifest from any file.
  *
@@ -51,9 +54,9 @@ bruce_manifest_t *manifest__parse(const char *json, size_t json_len);
  * on the returned bytes.  Format-specific full inspection is handled by
  * manifest__inspect_elf() and similar per-format functions.
  *
- * Returns BRUCE_OK on success, BRUCE_ERR_INVALID_PATH, BRUCE_ERR_NOT_FOUND,
- * or BRUCE_ERR_MANIFEST_INVALID (no extractable manifest in this file). */
-const char *manifest__inspect_path(const char *path);
+ * Returns NULL for an invalid path, inaccessible file, unsupported format,
+ * missing manifest, or allocation failure. */
+char *manifest__inspect_path(const char *path);
 
 /* ELF-specific manifest inspection (see migration_plan.md, "ELF
  * contract").  Opens `path`, validates the ELF32 header (magic, e_machine
@@ -65,8 +68,9 @@ const char *manifest__inspect_path(const char *path);
  * that know they are loading an ELF file (the built-in ELF loader, for
  * example) call this directly.
  *
- * Return NULL for invalid paths, missing files, malformed ELF headers,
- * target mismatches, or allocation failures. */
+ * The returned inspection is process-owned and must be released with
+ * memory__free(). Returns NULL for invalid paths, missing files, malformed ELF
+ * headers, target mismatches, or allocation failures. */
 bruce_app_inspection_t *manifest__inspect_elf(const char *path);
 
 /* JavaScript-specific manifest inspection (see migration_plan.md,
@@ -78,6 +82,7 @@ bruce_app_inspection_t *manifest__inspect_elf(const char *path);
  * still gets a valid inspection using its filename as the app name, a generic
  * icon, the current ABI version, and zero permissions.
  *
- * Returns BRUCE_OK on success, or BRUCE_ERR_INVALID_PATH, BRUCE_ERR_NOT_FOUND,
- * BRUCE_ERR_MANIFEST_INVALID. */
+ * The returned inspection is process-owned and must be released with
+ * memory__free(). Returns NULL for invalid paths, inaccessible files, or
+ * allocation failures. */
 bruce_app_inspection_t *manifest__inspect_javascript(const char *path);

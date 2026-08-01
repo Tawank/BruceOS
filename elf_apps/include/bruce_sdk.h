@@ -8,10 +8,18 @@
  */
 
 #include "core_sdk/app_runner.h"   // IWYU pragma: export
+#include "core_sdk/bluetooth.h"    // IWYU pragma: export
+#include "core_sdk/bluetooth_hid.h" // IWYU pragma: export
 #include "core_sdk/clock.h"        // IWYU pragma: export
+#include "core_sdk/device.h"       // IWYU pragma: export
+#include "core_sdk/dialog.h"       // IWYU pragma: export
 #include "core_sdk/display.h"      // IWYU pragma: export
 #include "core_sdk/gpio.h"         // IWYU pragma: export
+#include "core_sdk/http.h"         // IWYU pragma: export
 #include "core_sdk/i2c.h"          // IWYU pragma: export
+#include "core_sdk/icon.h"         // IWYU pragma: export
+#include "core_sdk/image.h"        // IWYU pragma: export
+#include "core_sdk/input.h"        // IWYU pragma: export
 #include "core_sdk/loader.h"       // IWYU pragma: export
 #include "core_sdk/ir.h"           // IWYU pragma: export
 #include "core_sdk/manifest.h"     // IWYU pragma: export
@@ -28,6 +36,7 @@
 #include "core_sdk/status_icon.h"  // IWYU pragma: export
 #include "core_sdk/stdio.h"        // IWYU pragma: export
 #include "core_sdk/tcp.h"          // IWYU pragma: export
+#include "core_sdk/wifi.h"         // IWYU pragma: export
 
 /* Embed the canonical manifest JSON in the non-loadable .bruce.manifest
  * section.  The JSON string must be valid UTF-8 and contain the required
@@ -35,7 +44,7 @@
  *
  * Example:
  *   BRUCE_APP_MANIFEST("{\"appName\":\"My app\",\"appIcon\":\"...\","
- *                       "\"coreAbiVersion\":2,\"stackSize\":8192}");
+ *                       "\"coreAbiVersion\":3,\"stackSize\":8192}");
  */
 #define BRUCE_APP_MANIFEST(json) \
     __attribute__((section(".bruce.manifest"), used)) \

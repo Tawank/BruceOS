@@ -4,7 +4,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "core/stdio/stdio.h"
 #include "core_sdk/app_runner.h"
 #include "core_sdk/loader.h"
 #include "core_sdk/process.h"
@@ -40,8 +39,6 @@ int serial_commands__run_line(const char *line, bool in_background) {
 int serial_commands_app_main(int argc, char **argv) {
     (void)argc;
     (void)argv;
-
-    if (stdio__init() != BRUCE_OK) printf("USB serial console initialization failed\n");
 
     shell_console__reset_ready();
     int result = app_runner__run("shell", "-i", true);

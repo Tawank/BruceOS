@@ -378,5 +378,5 @@ bool permission__test_reset(void) {
     permission__unlock();
 
     if (storage__remove_internal(PERMISSION__FILE_PATH)) return true;
-    return !storage__exists(PERMISSION__FILE_PATH);
+    return !storage__exists_internal(PERMISSION__FILE_PATH);
 }

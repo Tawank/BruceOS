@@ -39,7 +39,12 @@ JSValue native_flush(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv)
     (void)this_val;
     (void)argc;
     (void)argv;
-    return JS_NewInt32(ctx, display__flush());
+    bruce_result_t result = display__present();
+    if (result == BRUCE_ERR_INVALID_STATE) {
+        result = display__begin_frame();
+        if (result == BRUCE_OK) result = display__present();
+    }
+    return JS_NewInt32(ctx, result);
 }
 
 JSValue native_color(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {

@@ -6,6 +6,10 @@
 
 #include "core_sdk/display.h"
 
+bruce_result_t display__init(void);
+void display__deinit(void);
+bruce_result_t display__flush(void);
+
 void display__process_created(bruce_process_id_t process_id, bool gui_requested);
 void display__process_set_gui_requested(bruce_process_id_t process_id);
 void display__process_state_changed(bruce_process_id_t process_id, bruce_process_state_t state);

@@ -45,7 +45,8 @@ bool selftest__run_display_compositor_case(void) {
         printf("[selftest] display/compositor: FAIL, present\n");
         return false;
     }
-    if (display__draw_pixel(1, 1, BRUCE_COLOR_WHITE) != BRUCE_OK || display__flush() != BRUCE_OK) {
+    if (display__begin_frame() != BRUCE_OK || display__draw_pixel(1, 1, BRUCE_COLOR_WHITE) != BRUCE_OK ||
+        display__present() != BRUCE_OK) {
         printf("[selftest] display/compositor: FAIL, compatibility flush\n");
         return false;
     }

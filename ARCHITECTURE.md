@@ -228,7 +228,7 @@ int app_runner__spawn_loader_process(const char *permission_key, bool gui_reques
 ```
 
 ```c
-const char *manifest__inspect_path(const char *path);
+char *manifest__inspect_path(const char *path);
 ```
 
 ```c
@@ -253,7 +253,7 @@ follows the same naming convention as a regular `app_main`.
 `manifest__inspect_path()` is the universal manifest JSON extractor provided
 by `core/manifest`.  It auto-detects file format (ELF magic, JS comment
 block, or whatever a future format uses) and returns the raw manifest bytes as
-a heap-allocated string.  The caller must `free()` the returned string.  The
+a process-owned string. The caller must call `memory__free()`. The
 launcher, file-manager apps, and terminal tools call this one function to
 extract manifest JSON from any file uniformly.
 
@@ -261,12 +261,12 @@ extract manifest JSON from any file uniformly.
 the ELF32 header (magic, `e_machine` vs. this build's target), extracts and
 parses the `.bruce.manifest` section, and returns a complete
 `bruce_app_inspection_t` with kind, parsed manifest, and ABI-warning flag.
-The returned structure is heap-allocated; the caller must free it with
+The returned structure is process-owned; the caller must free it with
 `memory__free()`.  The ELF loader module calls this directly at launch time.
 
 `manifest__inspect_javascript()` extracts the optional leading manifest comment
-block from a JS file and returns the raw JSON bytes; the caller must `free()`
-the result.  `manifest__parse()` parses a JSON string into a `bruce_manifest_t`
+block from a JS file and returns the raw JSON bytes; the caller must call
+`memory__free()`. `manifest__parse()` parses a JSON string into a `bruce_manifest_t`
 that the caller must free with `memory__free()`.
 
 Loader modules do not provide their own inspection — `core/manifest` owns
@@ -341,9 +341,9 @@ elapsed-time measurement and must not be interpreted as wall-clock time.
 `device__get_battery()` returns a battery percentage from 0 through 100. The
 current Cardputer and StickC Plus2 backends estimate charge from calibrated ADC
 voltage; unsupported hardware returns `BRUCE_ERR_UNSUPPORTED` rather than a fake
-percentage. `device__get_time()` and `device__get_date()` return configured local
-wall time and fail with `BRUCE_ERR_INVALID_STATE` until the system clock contains
-a valid date. These APIs expose state only; launcher status-bar rendering remains
+percentage. Configured local wall time comes from `clock__get_local()`, which
+fails with `BRUCE_ERR_INVALID_STATE` until the system clock contains a valid
+date. These APIs expose state only; launcher status-bar rendering remains
 module-owned.
 
 ### Clock and time
@@ -550,7 +550,7 @@ Permissions are coarse-grained.  The current vocabulary is:
 
 ```
 http, wifi, bt, gps, rf, input, gpio, ir, rfid, microphone,
-hid, execute, process, storage, config, serial
+hid, execute, process, storage, config, serial, ssh
 ```
 
 `gpio` includes raw GPIO, I²C, and SPI. `rf` includes Sub-GHz, LoRa, and NRF24. `audio` is not
@@ -698,8 +698,7 @@ use trusted private GPIO/bus entry points so their capability-specific
 permission remains authoritative.
 
 Display Core owns one RGB565 framebuffer and transfers run synchronously in
-the caller's task: `display__present()` (and the `display__flush()`
-implicit-frame path) pushes the viewport rect to the panel before returning,
+the caller's task: `display__present()` pushes the viewport rect to the panel before returning,
 serialized by the display lock, so transfers never race with drawing or with
 each other. GUI processes draw in local coordinates into a fullscreen
 foreground viewport, one of up to four launcher-assigned non-overlapping
@@ -710,12 +709,11 @@ the default configuration streams the framebuffer directly over DMA
 (`displayDmaFramebuffer` in `bruce.json`, default true); any partial rect,
 overlay composition, or a `false` setting falls back to row-packed transfers.
 Text and cursor state are process-local, rotation is global, and no resize event is
-emitted. Drawing primitives include legacy-compatible circular arcs whose zero
+emitted. Drawing primitives include circular arcs whose zero
 angle is at six o'clock and increases clockwise.
 `display__draw_bitmap_scaled()` blits a 1bpp MSB-first bitmap of any size into
 a destination rectangle with nearest-neighbor scaling and transparent clear
 bits, using only integer math, and is the preferred way to draw filled icons.
-`display__flush()` provides an implicit-frame compatibility path.
 
 Icon Core stores a small set of built-in 24x24 Material Design Icons as
 pre-rasterized 1bpp bitmaps (72 bytes each, MSB-first) in read-only firmware
@@ -896,7 +894,7 @@ Maintain two header layers:
 `app_runner__spawn_loader_process()`) that any loader module uses.  Manifest
 inspection is provided by the universal `manifest__inspect_path()` in
 `core_sdk/manifest.h` / `core/manifest/`; it returns a heap-allocated raw JSON
-string that the caller must `free()`, auto-detects file format, and replaces
+string that the caller must release with `memory__free()`, auto-detects file format, and replaces
 per-loader inspection functions so the launcher, file manager, and any other
 tool can inspect any file uniformly.  Built-in ELF and JavaScript
 loader modules live under `src/modules/loaders/elf/` and

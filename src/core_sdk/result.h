@@ -3,10 +3,10 @@
 /*
  * Stable result vocabulary for the public Bruce SDK.
  *
- * A fallible SDK function returns BRUCE_OK on success and one of the negative
- * BRUCE_ERR_* values below on failure, unless its individual documentation
- * explicitly says it returns a positive process ID on success.  Result values
- * are part of the Core ABI and must not be renumbered.
+ * Functions returning bruce_result_t use BRUCE_OK on success and one of the
+ * negative BRUCE_ERR_* values below on failure. Other return conventions are
+ * documented on the individual function. Result values are part of the Core
+ * ABI and must not be renumbered.
  */
 typedef enum {
     BRUCE_OK = 0,
@@ -30,5 +30,3 @@ typedef enum {
     BRUCE_ERR_NOT_INITIALIZED = -18,
     BRUCE_ERR_INTERNAL = -19,
 } bruce_result_t;
-
-static inline int bruce__result_is_ok(bruce_result_t result) { return result == BRUCE_OK; }

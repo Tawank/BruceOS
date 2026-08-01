@@ -175,7 +175,8 @@ bool selftest__run_ssh_keygen_case(void) {
     char public_key[BRUCE_SSH_PUBLIC_KEY_MAX_SIZE];
     size_t private_size = 0;
     size_t public_size = 0;
-    bruce_result_t result = ssh__generate_keypair(
+    bruce_result_t result = ssh__generate_keypair_ex(
+        BRUCE_SSH_KEY_ECDSA_P256,
         private_key, sizeof(private_key), &private_size, public_key, sizeof(public_key), &public_size
     );
     bool ok = result == BRUCE_OK && private_size > 0 && public_size > 0 &&

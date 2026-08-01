@@ -191,7 +191,8 @@ bool selftest__run_apprunner_resolution_case(void) {
         printf("[selftest] apprunner/resolution: could not create %s\n", js_path);
         return false;
     }
-    if (!storage__exists(js_path)) {
+    bool exists = false;
+    if (storage__exists(js_path, &exists) != BRUCE_OK || !exists) {
         printf("[selftest] apprunner/resolution: created JS path is not visible\n");
         return false;
     }

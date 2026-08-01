@@ -33,13 +33,6 @@ bruce_result_t ssh__verify_host_key_sha256(
 bruce_result_t ssh__authenticate_password(
     bruce_ssh_id_t session, const char *username, const char *password, uint32_t timeout_ms
 );
-/* Generates an unencrypted ECDSA P-256 private key in SEC1 PEM format and its
- * OpenSSH public-key line (without a comment). Text sizes exclude the trailing
- * NUL. The caller owns both buffers. */
-bruce_result_t ssh__generate_keypair(
-    char *private_key, size_t private_capacity, size_t *out_private_size,
-    char *public_key, size_t public_capacity, size_t *out_public_size
-);
 /* Generates the selected key type. Ed25519 private keys use the unencrypted
  * OpenSSH format; ECDSA P-256 uses SEC1 PEM. Text sizes exclude the trailing
  * NUL, and the caller owns both buffers. */

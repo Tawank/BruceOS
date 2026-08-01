@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "args.h"
+#include "core_sdk/config.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/wifi.h"
 
@@ -36,7 +37,7 @@ static int wifi_app_connect(ArgParser *parser) {
     }
 
     if (wifi__connect(ssid, password, 10000) != BRUCE_OK) { return -1; }
-    return wifi__add_credential(ssid, password) == BRUCE_OK ? 0 : -1;
+    return config__add_or_update_wifi_credential(ssid, password) == BRUCE_OK ? 0 : -1;
 }
 
 static int wifi_app_ap_info(void) {
@@ -53,7 +54,10 @@ static int wifi_app_ap_info(void) {
 static int wifi_app_add(ArgParser *parser) {
     char *ssid = ap_get_arg(parser, "ssid");
     char *password = ap_get_arg(parser, "password");
-    return ssid != NULL && password != NULL && wifi__add_credential(ssid, password) == BRUCE_OK ? 0 : -1;
+    return ssid != NULL && password != NULL &&
+                   config__add_or_update_wifi_credential(ssid, password) == BRUCE_OK
+               ? 0
+               : -1;
 }
 
 static void wifi_app_add_common_options(ArgParser *parser) {
@@ -71,15 +75,12 @@ int wifi_app_main(int argc, char **argv) {
     ArgParser *off = ap_new_cmd(root, "off disconnect");
     ArgParser *add = ap_new_cmd(root, "add");
     ArgParser *ap = ap_new_cmd(root, "ap");
-    ArgParser *arp = ap_new_cmd(root, "arp");
-    ArgParser *listen = ap_new_cmd(root, "listen");
-    ArgParser *sniffer = ap_new_cmd(root, "sniffer");
     ArgParser *scan = ap_new_cmd(root, "scan");
     ArgParser *connect = ap_new_cmd(root, "connect");
     ArgParser *ap_start = ap != NULL ? ap_new_cmd(ap, "start") : NULL;
     ArgParser *ap_info = ap != NULL ? ap_new_cmd(ap, "info") : NULL;
 
-    ArgParser *commands[] = {on, off, add, ap, arp, listen, sniffer, scan, connect, ap_start, ap_info};
+    ArgParser *commands[] = {on, off, add, ap, scan, connect, ap_start, ap_info};
     for (size_t i = 0; i < sizeof(commands) / sizeof(commands[0]); ++i) {
         if (commands[i] == NULL) {
             ap_free(root);
@@ -97,9 +98,6 @@ int wifi_app_main(int argc, char **argv) {
     ap_set_helptext(ap, "Manage access-point mode.");
     ap_set_helptext(ap_start, "Start the configured access point.");
     ap_set_helptext(ap_info, "Show access-point status and addresses.");
-    ap_set_helptext(arp, "Scan hosts on the connected network.");
-    ap_set_helptext(listen, "Start the Wi-Fi TCP listener.");
-    ap_set_helptext(sniffer, "Start Wi-Fi packet capture.");
     ap_set_helptext(scan, "List nearby Wi-Fi networks.");
     ap_set_helptext(connect, "Connect saved credentials or provide a network and password.");
     ap_add_optional_arg(connect, "ssid", "Network name");
@@ -119,9 +117,6 @@ int wifi_app_main(int argc, char **argv) {
         result = wifi__connect_known() == BRUCE_OK ? 0 : wifi__setup_ap() == BRUCE_OK ? 0 : -1;
     else if (command == off) result = wifi__disconnect() == BRUCE_OK ? 0 : -1;
     else if (command == add) result = wifi_app_add(add);
-    else if (command == arp) result = wifi__scan_hosts() == BRUCE_OK ? 0 : -1;
-    else if (command == listen) result = wifi__listen_tcp() == BRUCE_OK ? 0 : -1;
-    else if (command == sniffer) result = wifi__start_sniffer() == BRUCE_OK ? 0 : -1;
     else if (command == scan) result = wifi_app_scan();
     else if (command == connect) result = wifi_app_connect(connect);
     else if (command == ap) {

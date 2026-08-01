@@ -54,7 +54,7 @@ int image_viewer_app_main(int argc, char **argv) {
         char message[48];
         snprintf(message, sizeof(message), "Image error (%d)", (int)result);
         (void)display__println(message);
-        (void)display__flush();
+        (void)display__present();
     }
 
     (void)input__flush();

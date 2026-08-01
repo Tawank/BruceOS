@@ -381,7 +381,7 @@ int app_runner__run(const char *app_name, const char *arg, bool in_background) {
             char path[APP_RUNNER_PATH_MAX];
             int written = snprintf(path, sizeof(path), "/bin/%s%s", app_name, loader->extension);
             if (written < 0 || (size_t)written >= sizeof(path)) { continue; }
-            if (storage__exists(path)) {
+            if (storage__exists_internal(path)) {
                 result = loader->run_fn(path, arg, in_background);
                 break;
             }

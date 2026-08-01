@@ -40,6 +40,9 @@ static int s_sd_host;
 static sdmmc_card_t *s_sd_card;
 static const esp_partition_t *s_littlefs_partition;
 
+static bool storage__is_protected_path(const char *path);
+static bool storage__is_valid_public_path(const char *path);
+
 static void storage__lock(void) {
     if (s_storage_mutex == NULL) {
         portENTER_CRITICAL(&s_storage_init_mux);
@@ -191,12 +194,33 @@ static bool storage__write_file_atomic_locked(const char *path, const void *data
     return true;
 }
 
-bool storage__exists(const char *path) {
+bool storage__exists_internal(const char *path) {
     storage__lock();
     struct stat path_stat;
     bool exists = storage__is_ready(path) && stat(path, &path_stat) == 0;
     storage__unlock();
     return exists;
+}
+
+bruce_result_t storage__exists(const char *path, bool *out_exists) {
+    if (out_exists == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    *out_exists = false;
+    bruce_result_t permission = permission__check(BRUCE_PERMISSION_STORAGE);
+    if (permission != BRUCE_OK) return permission;
+    if (!storage__is_valid_public_path(path)) return BRUCE_ERR_INVALID_PATH;
+    if (storage__is_protected_path(path)) return BRUCE_ERR_PERMISSION;
+
+    storage__lock();
+    if (!storage__is_ready(path)) {
+        storage__unlock();
+        return BRUCE_ERR_INVALID_STATE;
+    }
+    struct stat path_stat;
+    int status = stat(path, &path_stat);
+    if (status == 0) *out_exists = true;
+    bruce_result_t result = status == 0 || errno == ENOENT ? BRUCE_OK : BRUCE_ERR_IO;
+    storage__unlock();
+    return result;
 }
 
 bool storage__read_file(const char *path, char **data, size_t *size) {

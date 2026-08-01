@@ -3,9 +3,9 @@
 #include <string.h>
 
 #include "core_sdk/app_runner.h"
-#include "core_sdk/display.h"
 
 #include "core/config/config.h"
+#include "core/display/display.h"
 #include "core/event_loop/event_loop.h"
 #include "core/stdio/stdio.h"
 #include "core/storage/storage.h"

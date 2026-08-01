@@ -114,7 +114,7 @@ if (display__width() > 0 && display__begin_frame() == BRUCE_OK) {
 }
 ```
 
-`display__flush()` remains available for legacy one-shot drawing. Tile layout
+Use `display__begin_frame()` and `display__present()` around each frame. Tile layout
 management is launcher-only and is not exported to ELF applications.
 
 ELF applications may call the unrestricted `notification__push()` and

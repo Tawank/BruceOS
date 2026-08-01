@@ -955,16 +955,6 @@ bruce_result_t ssh__generate_keypair_ex(
     return BRUCE_ERR_INVALID_ARGUMENT;
 }
 
-bruce_result_t ssh__generate_keypair(
-    char *private_key, size_t private_capacity, size_t *out_private_size,
-    char *public_key, size_t public_capacity, size_t *out_public_size
-) {
-    return ssh__generate_keypair_ex(
-        BRUCE_SSH_KEY_ECDSA_P256, private_key, private_capacity, out_private_size,
-        public_key, public_capacity, out_public_size
-    );
-}
-
 bruce_result_t ssh__authenticate_key(
     bruce_ssh_id_t session, const char *username, const void *private_key,
     size_t private_key_size, uint32_t timeout_ms

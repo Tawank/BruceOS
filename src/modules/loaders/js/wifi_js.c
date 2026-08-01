@@ -283,7 +283,7 @@ JSValue native_wifiMACAddress(JSContext *ctx, JSValue *this_val, int argc, JSVal
     (void)this_val;
     (void)argc;
     (void)argv;
-    char *mac = wifi__get_mac();
+    const char *mac = wifi__get_mac();
     return JS_NewString(ctx, mac != NULL ? mac : "");
 }
 
@@ -291,7 +291,7 @@ JSValue native_ipAddress(JSContext *ctx, JSValue *this_val, int argc, JSValue *a
     (void)this_val;
     (void)argc;
     (void)argv;
-    char *ip = wifi__get_ip();
+    const char *ip = wifi__get_ip();
     if (ip != NULL) { return JS_NewString(ctx, ip); }
     return JS_NULL;
 }

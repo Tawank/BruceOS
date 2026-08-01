@@ -24,6 +24,7 @@
 #include "core_sdk/dialog.h"
 #include "core_sdk/display.h"
 #include "core_sdk/gpio.h"
+#include "core_sdk/http.h"
 #include "core_sdk/i2c.h"
 #include "core_sdk/icon.h"
 #include "core_sdk/image.h"
@@ -43,6 +44,7 @@
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
 #include "core_sdk/tcp.h"
+#include "core_sdk/wifi.h"
 
 /* GCC emits these libgcc helpers for floating-point operations in ELF apps.
  * Keep them in the restricted resolver so portable C code does not need to
@@ -90,8 +92,7 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
 
     /* Device state */
     ESP_ELFSYM_EXPORT(device__get_battery),
-    ESP_ELFSYM_EXPORT(device__get_time),
-    ESP_ELFSYM_EXPORT(device__get_date),
+    ESP_ELFSYM_EXPORT(device__restart),
 
     /* Wall clock */
     ESP_ELFSYM_EXPORT(clock__get_utc),
@@ -102,6 +103,7 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(clock__get_ntp_server),
 
     /* AppRunner / loader */
+    ESP_ELFSYM_EXPORT(app_runner__run),
     ESP_ELFSYM_EXPORT(app_runner__run_path),
     ESP_ELFSYM_EXPORT(loader__stage_path),
     ESP_ELFSYM_EXPORT(loader__release_image),
@@ -125,6 +127,20 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(permission__check),
     ESP_ELFSYM_EXPORT(permission__from_name),
     ESP_ELFSYM_EXPORT(permission__name),
+
+    /* Wi-Fi and HTTP client */
+    ESP_ELFSYM_EXPORT(wifi__disconnect),
+    ESP_ELFSYM_EXPORT(wifi__connect),
+    ESP_ELFSYM_EXPORT(wifi__connect_known),
+    ESP_ELFSYM_EXPORT(wifi__setup_ap),
+    ESP_ELFSYM_EXPORT(wifi__scan),
+    ESP_ELFSYM_EXPORT(wifi__is_connected),
+    ESP_ELFSYM_EXPORT(wifi__is_ap_running),
+    ESP_ELFSYM_EXPORT(wifi__get_ssid),
+    ESP_ELFSYM_EXPORT(wifi__get_ip),
+    ESP_ELFSYM_EXPORT(wifi__get_mac),
+    ESP_ELFSYM_EXPORT(http__request),
+    ESP_ELFSYM_EXPORT(http__response_free),
 
     /* Input (read is foreground-only; inject requires input permission) */
     ESP_ELFSYM_EXPORT(input__read),
@@ -211,7 +227,6 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(display__display_on_off),
     ESP_ELFSYM_EXPORT(display__begin_frame),
     ESP_ELFSYM_EXPORT(display__present),
-    ESP_ELFSYM_EXPORT(display__flush),
 
     /* Built-in vector icons */
     ESP_ELFSYM_EXPORT(icon__get),
@@ -244,6 +259,7 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(manifest__parse),
     ESP_ELFSYM_EXPORT(manifest__inspect_path),
     ESP_ELFSYM_EXPORT(manifest__inspect_elf),
+    ESP_ELFSYM_EXPORT(manifest__inspect_javascript),
 
     /* Storage */
     ESP_ELFSYM_EXPORT(storage__open),
@@ -253,6 +269,10 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(storage__close),
     ESP_ELFSYM_EXPORT(storage__list),
     ESP_ELFSYM_EXPORT(storage__mkdir),
+    ESP_ELFSYM_EXPORT(storage__exists),
+    ESP_ELFSYM_EXPORT(storage__remove),
+    ESP_ELFSYM_EXPORT(storage__rename),
+    ESP_ELFSYM_EXPORT(storage__get_usage),
 
     /* TCP and console streams */
     ESP_ELFSYM_EXPORT(tcp__connect),
@@ -265,7 +285,6 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(ssh__host_key_sha256),
     ESP_ELFSYM_EXPORT(ssh__verify_host_key_sha256),
     ESP_ELFSYM_EXPORT(ssh__authenticate_password),
-    ESP_ELFSYM_EXPORT(ssh__generate_keypair),
     ESP_ELFSYM_EXPORT(ssh__generate_keypair_ex),
     ESP_ELFSYM_EXPORT(ssh__authenticate_key),
     ESP_ELFSYM_EXPORT(ssh__open_shell),

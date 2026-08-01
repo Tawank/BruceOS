@@ -148,7 +148,16 @@ bruce_result_t display__fill_screen(bruce_display_color_t color) {
     return BRUCE_OK;
 }
 
-bruce_result_t display__clear(void) { return display__fill_screen(BRUCE_COLOR_NAVY); }
+bruce_result_t display__clear(void) {
+    display__process_context_t *context;
+    bruce_result_t result = display_internal__begin_draw(&context);
+    if (result != BRUCE_OK) return result;
+    display_internal__fill_rect(
+        0, 0, context->viewport.width, context->viewport.height, context->text_bg_color
+    );
+    display_internal__unlock();
+    return BRUCE_OK;
+}
 
 bruce_result_t display__draw_pixel(int16_t x, int16_t y, bruce_display_color_t color) {
     bruce_result_t result = display_internal__begin_draw(NULL);

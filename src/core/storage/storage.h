@@ -23,6 +23,7 @@ typedef struct {
 } storage__sdspi_config_t;
 
 bool storage__init(void);
+bool storage__exists_internal(const char *path);
 bool storage__read_file(const char *path, char **data, size_t *size);
 bool storage__write_file_atomic(const char *path, const void *data, size_t size);
 bool storage__remove_internal(const char *path);

@@ -1,6 +1,5 @@
 #include "device.h"
 
-#include "core_sdk/clock.h"
 #include "core_sdk/device.h"
 #include "core_sdk/permission.h"
 #include "core_sdk/runtime.h" // IWYU pragma: keep
@@ -169,26 +168,4 @@ int device__get_battery(void) {
     xSemaphoreGive(s_lock);
     return percent;
 #endif
-}
-
-bruce_result_t device__get_time(bruce_device_time_t *out) {
-    if (out == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
-    bruce_clock_datetime_t local;
-    bruce_result_t result = clock__get_local(&local);
-    if (result != BRUCE_OK) return result;
-    out->hour = local.hour;
-    out->minute = local.minute;
-    out->second = local.second;
-    return BRUCE_OK;
-}
-
-bruce_result_t device__get_date(bruce_device_date_t *out) {
-    if (out == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
-    bruce_clock_datetime_t local;
-    bruce_result_t result = clock__get_local(&local);
-    if (result != BRUCE_OK) return result;
-    out->year = local.year;
-    out->month = local.month;
-    out->day = local.day;
-    return BRUCE_OK;
 }

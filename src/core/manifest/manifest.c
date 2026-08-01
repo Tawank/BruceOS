@@ -247,7 +247,7 @@ static const char *manifest__elf_read_failure(manifest_elf_read_stage_t stage) {
 
 /* Reads the .bruce.manifest section raw bytes from an already-open ELF
  * file.  Does NOT validate e_machine or ELF magic — the caller is
- * responsible for that.  Returns malloc'd bytes in *out_bytes. */
+ * responsible for that. Returns process-owned bytes in *out_bytes. */
 static bruce_result_t manifest__read_elf_manifest_bytes(
     bruce_file_id_t file, char **out_bytes, size_t *out_len, manifest_elf_read_stage_t *out_stage
 ) {
@@ -287,11 +287,11 @@ static bruce_result_t manifest__read_elf_manifest_bytes(
             return BRUCE_ERR_MANIFEST_INVALID;
         }
 
-        char *bytes = malloc(section.sh_size + 1);
+        char *bytes = memory__malloc(section.sh_size + 1);
         if (bytes == NULL) { return BRUCE_ERR_NO_MEMORY; }
         if (out_stage != NULL) *out_stage = MANIFEST_ELF_READ_SECTION_PAYLOAD;
         if (!manifest__pread(file, section.sh_offset, bytes, section.sh_size)) {
-            free(bytes);
+            memory__free(bytes);
             return BRUCE_ERR_MANIFEST_INVALID;
         }
         bytes[section.sh_size] = '\0';
@@ -329,7 +329,7 @@ static bool manifest__normalize_path(const char *path, char *out, size_t out_siz
 static bruce_result_t
 manifest__read_js_manifest_bytes(bruce_file_id_t file, char **out_bytes, size_t *out_len);
 
-const char *manifest__inspect_path(const char *path) {
+char *manifest__inspect_path(const char *path) {
     char normalized_path[BRUCE_STORAGE_PATH_MAX];
     if (!manifest__normalize_path(path, normalized_path, sizeof(normalized_path))) { return NULL; }
 
@@ -403,7 +403,7 @@ bruce_app_inspection_t *manifest__inspect_elf(const char *path) {
         result = manifest__read_elf_manifest_bytes(file, &bytes, &bytes_len, &read_stage);
         if (result == BRUCE_OK) {
             bruce_manifest_t *parsed = manifest__parse(bytes, bytes_len);
-            free(bytes);
+            memory__free(bytes);
             if (parsed != NULL) {
                 out_inspection->kind = BRUCE_APP_KIND_ELF;
                 out_inspection->manifest = *parsed;
@@ -457,16 +457,16 @@ bruce_app_inspection_t *manifest__inspect_elf(const char *path) {
 /* ----------------------------------------------------------------------- */
 
 /* Reads up to MANIFEST_JS_MAX_BYTES from the beginning of `file` into a
- * malloc'd, NUL-terminated buffer.  Returns BRUCE_OK or an error code. */
+ * process-owned, NUL-terminated buffer. Returns BRUCE_OK or an error code. */
 static bruce_result_t manifest__read_js_head(bruce_file_id_t file, char **out_bytes, size_t *out_len) {
-    char *bytes = malloc(MANIFEST_JS_MAX_BYTES + 1);
+    char *bytes = memory__malloc(MANIFEST_JS_MAX_BYTES + 1);
     if (bytes == NULL) { return BRUCE_ERR_NO_MEMORY; }
 
     size_t total = 0;
     while (total < MANIFEST_JS_MAX_BYTES) {
         size_t chunk = 0;
         if (storage__read(file, bytes + total, MANIFEST_JS_MAX_BYTES - total, &chunk) != BRUCE_OK) {
-            free(bytes);
+            memory__free(bytes);
             return BRUCE_ERR_IO;
         }
         if (chunk == 0) { break; }
@@ -492,7 +492,7 @@ static const char *manifest__extract_js_block_comment(const char *head, size_t h
 }
 
 /* Tries to parse the content of a leading JS comment block as canonical
- * manifest JSON.  Returns a malloc'd manifest on success, NULL otherwise. */
+ * manifest JSON. Returns a process-owned manifest on success, NULL otherwise. */
 static bruce_manifest_t *manifest__parse_js_manifest_comment(const char *comment, size_t comment_len) {
     /* Skip leading whitespace; the trailing block-comment terminator is already excluded. */
     while (comment_len > 0 && (*comment == ' ' || *comment == '\t' || *comment == '\n' || *comment == '\r')) {
@@ -561,7 +561,7 @@ bruce_app_inspection_t *manifest__inspect_javascript(const char *path) {
         } else {
             result = BRUCE_ERR_MANIFEST_INVALID;
         }
-        free(head);
+        memory__free(head);
     } else {
         result = BRUCE_ERR_MANIFEST_INVALID;
     }
@@ -585,18 +585,18 @@ manifest__read_js_manifest_bytes(bruce_file_id_t file, char **out_bytes, size_t 
     size_t comment_len = 0;
     const char *comment = manifest__extract_js_block_comment(head, head_len, &comment_len);
     if (comment == NULL) {
-        free(head);
+        memory__free(head);
         return BRUCE_ERR_MANIFEST_INVALID;
     }
 
-    char *bytes = malloc(comment_len + 1);
+    char *bytes = memory__malloc(comment_len + 1);
     if (bytes == NULL) {
-        free(head);
+        memory__free(head);
         return BRUCE_ERR_NO_MEMORY;
     }
     memcpy(bytes, comment, comment_len);
     bytes[comment_len] = '\0';
-    free(head);
+    memory__free(head);
     *out_bytes = bytes;
     *out_len = comment_len;
     return BRUCE_OK;

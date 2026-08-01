@@ -203,10 +203,10 @@ static int bruce_launcher__discover_apps(bruce_launcher_menu_t *menu, const char
         int printed = snprintf(full_path, sizeof(full_path), "%s/%s", path, entries[i].name);
         if (printed < 0 || (size_t)printed >= sizeof(full_path)) continue;
 
-        const char *json = manifest__inspect_path(full_path);
+        char *json = manifest__inspect_path(full_path);
         if (json == NULL) continue;
         bruce_manifest_t *manifest = manifest__parse(json, strlen(json));
-        free((void *)json);
+        memory__free(json);
         if (manifest == NULL) continue;
 
         if (menu == NULL || bruce_launcher__menu_add_command(menu, manifest->app_name, full_path)) {

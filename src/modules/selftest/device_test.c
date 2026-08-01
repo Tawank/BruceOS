@@ -2,34 +2,28 @@
 
 #include <stdio.h>
 
+#include "core_sdk/clock.h"
 #include "core_sdk/device.h"
 
 bool selftest__run_device_state_case(void) {
-    if (device__get_time(NULL) != BRUCE_ERR_INVALID_ARGUMENT ||
-        device__get_date(NULL) != BRUCE_ERR_INVALID_ARGUMENT) {
+    if (clock__get_local(NULL) != BRUCE_ERR_INVALID_ARGUMENT) {
         printf("[selftest] device/state: NULL output was accepted\n");
         return false;
     }
 
-    bruce_device_time_t time;
-    bruce_result_t time_result = device__get_time(&time);
-    if (time_result != BRUCE_OK && time_result != BRUCE_ERR_INVALID_STATE) {
-        printf("[selftest] device/state: time read failed (%d)\n", time_result);
+    bruce_clock_datetime_t local;
+    bruce_result_t clock_result = clock__get_local(&local);
+    if (clock_result != BRUCE_OK && clock_result != BRUCE_ERR_INVALID_STATE) {
+        printf("[selftest] device/state: clock read failed (%d)\n", clock_result);
         return false;
     }
-    if (time_result == BRUCE_OK && (time.hour > 23 || time.minute > 59 || time.second > 59)) {
+    if (clock_result == BRUCE_OK && (local.hour > 23 || local.minute > 59 || local.second > 59)) {
         printf("[selftest] device/state: invalid time fields\n");
         return false;
     }
 
-    bruce_device_date_t date;
-    bruce_result_t date_result = device__get_date(&date);
-    if (date_result != BRUCE_OK && date_result != BRUCE_ERR_INVALID_STATE) {
-        printf("[selftest] device/state: date read failed (%d)\n", date_result);
-        return false;
-    }
-    if (date_result == BRUCE_OK &&
-        (date.year < 2020 || date.month < 1 || date.month > 12 || date.day < 1 || date.day > 31)) {
+    if (clock_result == BRUCE_OK &&
+        (local.year < 2020 || local.month < 1 || local.month > 12 || local.day < 1 || local.day > 31)) {
         printf("[selftest] device/state: invalid date fields\n");
         return false;
     }

@@ -44,7 +44,9 @@ typedef struct {
  * A file handle can only be used by the process that opened it; any other process
  * (or a stale/unknown id) gets BRUCE_ERR_NOT_FOUND/BRUCE_ERR_PERMISSION from
  * storage__read()/write()/seek()/close(). */
-bool storage__exists(const char *path);
+/* Reports whether a path exists. Applies the same permission, normalization,
+ * and protected-path policy as storage__open(). */
+bruce_result_t storage__exists(const char *path, bool *out_exists);
 bruce_result_t storage__open(const char *path, uint32_t flags, bruce_file_id_t *out_file);
 bruce_result_t storage__read(bruce_file_id_t file, void *buffer, size_t capacity, size_t *out_size);
 bruce_result_t storage__write(bruce_file_id_t file, const void *buffer, size_t size, size_t *out_size);

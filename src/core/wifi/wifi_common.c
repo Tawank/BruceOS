@@ -360,7 +360,7 @@ bool wifi__is_ap_running(void) {
     return s_wifi_events != NULL && (xEventGroupGetBits(s_wifi_events) & WIFI__AP_BIT) != 0;
 }
 
-char *wifi__get_ssid(void) {
+const char *wifi__get_ssid(void) {
     if (permission__check(BRUCE_PERMISSION_WIFI) != BRUCE_OK) return NULL;
     if (wifi__init() != BRUCE_OK) return NULL;
     xSemaphoreTake(s_wifi_mutex, portMAX_DELAY);
@@ -369,7 +369,7 @@ char *wifi__get_ssid(void) {
     return present ? s_active_ssid : NULL;
 }
 
-char *wifi__get_ip(void) {
+const char *wifi__get_ip(void) {
     if (permission__check(BRUCE_PERMISSION_WIFI) != BRUCE_OK) return NULL;
     if (wifi__init() != BRUCE_OK) return NULL;
     esp_netif_t *netif = NULL;
@@ -383,7 +383,7 @@ char *wifi__get_ip(void) {
     return inet_ntoa_r(info.ip, s_ip_buffer, sizeof(s_ip_buffer)) != NULL ? s_ip_buffer : NULL;
 }
 
-char *wifi__get_mac(void) {
+const char *wifi__get_mac(void) {
     if (permission__check(BRUCE_PERMISSION_WIFI) != BRUCE_OK) return NULL;
     uint8_t address[6];
     if (wifi__init() != BRUCE_OK) return NULL;
@@ -400,32 +400,4 @@ char *wifi__get_mac(void) {
         address[5]
     );
     return s_mac_buffer;
-}
-
-bruce_result_t wifi__add_credential(const char *ssid, const char *password) {
-    bruce_result_t result = permission__check(BRUCE_PERMISSION_WIFI);
-    if (result != BRUCE_OK) return result;
-    if (ssid == NULL || password == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
-    return config__add_or_update_wifi_credential(ssid, password);
-}
-
-bruce_result_t wifi__scan_hosts(void) {
-    bruce_result_t result = permission__check(BRUCE_PERMISSION_WIFI);
-    if (result != BRUCE_OK) return result;
-    ESP_LOGW(TAG, "host scanning belongs to a Wi-Fi application module");
-    return wifi__is_connected() ? BRUCE_OK : BRUCE_ERR_INVALID_STATE;
-}
-
-bruce_result_t wifi__start_sniffer(void) {
-    bruce_result_t result = permission__check(BRUCE_PERMISSION_WIFI);
-    if (result != BRUCE_OK) return result;
-    ESP_LOGW(TAG, "sniffer belongs to a Wi-Fi application module");
-    return BRUCE_ERR_UNSUPPORTED;
-}
-
-bruce_result_t wifi__listen_tcp(void) {
-    bruce_result_t result = permission__check(BRUCE_PERMISSION_WIFI);
-    if (result != BRUCE_OK) return result;
-    ESP_LOGW(TAG, "TCP listener belongs to a Wi-Fi application module");
-    return BRUCE_ERR_UNSUPPORTED;
 }
