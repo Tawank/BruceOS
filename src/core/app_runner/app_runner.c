@@ -159,15 +159,9 @@ int app_runner__run_path(const char *path, const char *arg, bool in_background) 
 
     app_runner_loader_t *loader = app_runner__find_loader_for_path(normalized_path);
     if (loader == NULL) {
-        printf("app_runner__run_path: normalized_path=%s, loader=NULL\n", normalized_path);
+        // printf("app_runner__run_path: normalized_path=%s, loader=NULL\n", normalized_path);
         return BRUCE_ERR_NOT_FOUND;
     }
-    printf(
-        "app_runner__run_path: normalized_path=%s, loader=%p, priority=%d\n",
-        normalized_path,
-        (void *)loader,
-        loader->priority
-    );
     return loader->run_fn(normalized_path, arg, in_background);
 }
 

@@ -43,7 +43,9 @@
 
 #define MAIN_SERIAL_READY_TIMEOUT_MS 1000
 
-#define INPUT_STACK_BYTES CONFIG_BRUCE_INPUT_TASK_STACK
+#define LAUNCHER_STACK_BYTES 3072u
+#define INPUT_STACK_BYTES 3072u
+#define SERIAL_COMMANDS_STACK_BYTES 3072u
 #define SELFTEST_STACK_BYTES 8192u
 #define SHELL_STACK_BYTES 4096u
 #define SSH_STACK_BYTES 16384u
@@ -56,7 +58,7 @@ bool init_user_interface(void) {
 }
 
 void app_runner__register_defaults(void) {
-    (void)app_runner__register("launcher", launcher_app_main, 0);
+    (void)app_runner__register("launcher", launcher_app_main, LAUNCHER_STACK_BYTES);
     (void)app_runner__register("bootanimation", bootanimation_app_main, 0);
     (void)app_runner__register("input", input_app_main, INPUT_STACK_BYTES);
     (void)app_runner__register("bruce_launcher", bruce_launcher_app_main, 0);
@@ -73,7 +75,7 @@ void app_runner__register_defaults(void) {
     (void)app_runner__register("selftest", selftest_app_main, SELFTEST_STACK_BYTES);
     (void)app_runner__register("terminal", terminal_app_main, 0);
     (void)app_runner__register("shell", shell_app_main, SHELL_STACK_BYTES);
-    (void)app_runner__register("serial_commands", serial_commands_app_main, 0);
+    (void)app_runner__register("serial_commands", serial_commands_app_main, SERIAL_COMMANDS_STACK_BYTES);
     (void)app_runner__register("process", process_app_main, 0);
     (void)app_runner__register("help", help_app_main, 0);
     (void)app_runner__register("pwd", bnu_pwd_app_main, 0);
@@ -138,9 +140,10 @@ static void main__start_configured_apps(void) {
 }
 
 void set_log_level() {
-    esp_log_level_set("wifi", ESP_LOG_WARN);
-    esp_log_level_set("wifi_init", ESP_LOG_WARN);
-    esp_log_level_set("phy_init", ESP_LOG_WARN);
+    // esp_log_level_set("wifi", ESP_LOG_WARN);
+    // esp_log_level_set("wifi_init", ESP_LOG_WARN);
+    // esp_log_level_set("phy_init", ESP_LOG_WARN);
+    esp_log_level_set("*", ESP_LOG_WARN);
 }
 
 void app_main(void) {
