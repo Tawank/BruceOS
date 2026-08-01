@@ -145,7 +145,9 @@ static void bnu__format_block_size(uint64_t bytes, char *output, size_t capacity
     if (unit == 0 || tenth == 0) {
         snprintf(output, capacity, "%llu%c", (unsigned long long)whole, units[unit]);
     } else {
-        snprintf(output, capacity, "%llu.%llu%c", (unsigned long long)whole, (unsigned long long)tenth, units[unit]);
+        snprintf(
+            output, capacity, "%llu.%llu%c", (unsigned long long)whole, (unsigned long long)tenth, units[unit]
+        );
     }
 }
 
@@ -166,7 +168,7 @@ int bnu_lsblk_app_main(int argc, char **argv) {
         return result;
     }
 
-    stdio__printf("%-18s %7s %2s %6s %2s %-4s %s\n", "NAME", "MAJ:MIN", "RM", "SIZE", "RO", "TYPE", "MOUNTPOINTS");
+    stdio__printf("%-18s %2s %6s %2s %-4s %s\n", "NAME", "RM", "SIZE", "RO", "TYPE", "MOUNTPOINTS");
     for (size_t i = 0; i < count; ++i) {
         char size[16];
         char name[BRUCE_DISK_NAME_MAX + 3];
@@ -175,14 +177,14 @@ int bnu_lsblk_app_main(int argc, char **argv) {
             name,
             sizeof(name),
             "%s%s",
-            entries[i].type == BRUCE_DISK_TYPE_PARTITION ? (i + 1 == count || entries[i + 1].parent[0] == '\0' ? "`-" : "|-") : "",
+            entries[i].type == BRUCE_DISK_TYPE_PARTITION
+                ? (i + 1 == count || entries[i + 1].parent[0] == '\0' ? "`-" : "|-")
+                : "",
             entries[i].name
         );
         stdio__printf(
-            "%-18s %3u:%-3u %2u %6s %2u %-4s %s\n",
+            "%-18s %2u %6s %2u %-4s %s\n",
             name,
-            0u,
-            (unsigned)i,
             entries[i].removable ? 1u : 0u,
             size,
             entries[i].read_only ? 1u : 0u,
