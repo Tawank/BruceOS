@@ -1,8 +1,10 @@
 #include "ssh_app.h"
 
+#include <ctype.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <strings.h>
 #include <string.h>
 
 #include "args.h"
@@ -21,11 +23,29 @@
 #define SSH_APP_HOST_MAX 64u
 #define SSH_APP_USERNAME_MAX 64u
 #define SSH_APP_PASSWORD_MAX 128u
+#define SSH_APP_PATH_MAX BRUCE_STORAGE_PATH_MAX
+#define SSH_APP_COMMENT_MAX 64u
 #define SSH_APP_KEY_MAX 96u
 #define SSH_APP_DEFAULT_COLUMNS 80u
 #define SSH_APP_DEFAULT_ROWS 24u
-#define SSH_APP_KNOWN_HOSTS_PATH "/ssh_known_hosts"
+#define SSH_APP_DIRECTORY "/.ssh"
+#define SSH_APP_KNOWN_HOSTS_PATH "/.ssh/known_hosts"
+#define SSH_APP_LEGACY_KNOWN_HOSTS_PATH "/ssh_known_hosts"
+#define SSH_APP_CONFIG_PATH "/.ssh/config"
+#define SSH_APP_DEFAULT_IDENTITY_PATH "/.ssh/id_ecdsa"
 #define SSH_APP_KNOWN_HOSTS_MAX_BYTES 4096u
+#define SSH_APP_CONFIG_MAX_BYTES 4096u
+
+typedef struct {
+    char hostname[SSH_APP_HOST_MAX];
+    char username[SSH_APP_USERNAME_MAX];
+    char identity[SSH_APP_PATH_MAX];
+    uint16_t port;
+    bool hostname_set;
+    bool username_set;
+    bool identity_set;
+    bool port_set;
+} ssh_app__config_t;
 
 static bool ssh_app__parse_port(const char *text, uint16_t *out_port) {
     if (text == NULL || out_port == NULL || text[0] == '\0') return false;
@@ -34,6 +54,113 @@ static bool ssh_app__parse_port(const char *text, uint16_t *out_port) {
     if (*end != '\0' || value == 0 || value > UINT16_MAX) return false;
     *out_port = (uint16_t)value;
     return true;
+}
+
+static bool ssh_app__host_pattern_matches(const char *pattern, const char *host) {
+    while (*pattern != '\0') {
+        if (*pattern == '*') {
+            while (*pattern == '*') ++pattern;
+            if (*pattern == '\0') return true;
+            while (*host != '\0') {
+                if (ssh_app__host_pattern_matches(pattern, host)) return true;
+                ++host;
+            }
+            return false;
+        }
+        if (*host == '\0' || (*pattern != '?' && tolower((unsigned char)*pattern) != tolower((unsigned char)*host)))
+            return false;
+        ++pattern;
+        ++host;
+    }
+    return *host == '\0';
+}
+
+static bool ssh_app__host_list_matches(char *patterns, const char *host) {
+    bool matched = false;
+    char *save = NULL;
+    for (char *pattern = strtok_r(patterns, " \t", &save); pattern != NULL;
+         pattern = strtok_r(NULL, " \t", &save)) {
+        bool negated = pattern[0] == '!';
+        if (negated) ++pattern;
+        if (ssh_app__host_pattern_matches(pattern, host)) {
+            if (negated) return false;
+            matched = true;
+        }
+    }
+    return matched;
+}
+
+static char *ssh_app__trim(char *text) {
+    while (isspace((unsigned char)*text)) ++text;
+    char *end = text + strlen(text);
+    while (end > text && isspace((unsigned char)end[-1])) --end;
+    *end = '\0';
+    return text;
+}
+
+static void ssh_app__copy_config_value(char *out, size_t capacity, const char *value, bool *was_set) {
+    if (*was_set) return;
+    int length = snprintf(out, capacity, "%s", value);
+    if (length >= 0 && (size_t)length < capacity) *was_set = true;
+}
+
+static bruce_result_t ssh_app__load_config(const char *alias, ssh_app__config_t *config) {
+    char *buffer = memory__malloc(SSH_APP_CONFIG_MAX_BYTES + 1u);
+    if (buffer == NULL) return BRUCE_ERR_NO_MEMORY;
+    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
+    bruce_result_t result = storage__open(SSH_APP_CONFIG_PATH, BRUCE_STORAGE_OPEN_READ, &file);
+    if (result == BRUCE_ERR_NOT_FOUND) {
+        memory__free(buffer);
+        return BRUCE_OK;
+    }
+    if (result != BRUCE_OK) {
+        memory__free(buffer);
+        return result;
+    }
+    size_t size = 0;
+    while (size < SSH_APP_CONFIG_MAX_BYTES + 1u) {
+        size_t chunk = 0;
+        result = storage__read(file, buffer + size, SSH_APP_CONFIG_MAX_BYTES + 1u - size, &chunk);
+        if (result != BRUCE_OK || chunk == 0) break;
+        size += chunk;
+    }
+    storage__close(file);
+    if (result != BRUCE_OK || size > SSH_APP_CONFIG_MAX_BYTES) {
+        memory__free(buffer);
+        return result != BRUCE_OK ? result : BRUCE_ERR_RESOURCE_LIMIT;
+    }
+    buffer[size] = '\0';
+
+    bool active = true;
+    char *line_save = NULL;
+    for (char *line = strtok_r(buffer, "\n", &line_save); line != NULL;
+         line = strtok_r(NULL, "\n", &line_save)) {
+        char *comment = strchr(line, '#');
+        if (comment != NULL) *comment = '\0';
+        line = ssh_app__trim(line);
+        if (*line == '\0') continue;
+        char *value = line;
+        while (*value != '\0' && !isspace((unsigned char)*value) && *value != '=') ++value;
+        if (*value == '\0') continue;
+        *value++ = '\0';
+        while (isspace((unsigned char)*value) || *value == '=') ++value;
+        value = ssh_app__trim(value);
+        if (strcasecmp(line, "Host") == 0) {
+            active = ssh_app__host_list_matches(value, alias);
+            continue;
+        }
+        if (!active || *value == '\0') continue;
+        if (strcasecmp(line, "HostName") == 0)
+            ssh_app__copy_config_value(config->hostname, sizeof(config->hostname), value, &config->hostname_set);
+        else if (strcasecmp(line, "User") == 0)
+            ssh_app__copy_config_value(config->username, sizeof(config->username), value, &config->username_set);
+        else if (strcasecmp(line, "IdentityFile") == 0)
+            ssh_app__copy_config_value(config->identity, sizeof(config->identity), value, &config->identity_set);
+        else if (strcasecmp(line, "Port") == 0 && !config->port_set)
+            config->port_set = ssh_app__parse_port(value, &config->port);
+    }
+    memory__free(buffer);
+    return BRUCE_OK;
 }
 
 static void ssh_app__hex_encode(const uint8_t *bytes, size_t size, char *out) {
@@ -69,6 +196,11 @@ static bruce_result_t ssh_app__read_known_hosts(char *buffer, size_t capacity, s
     *out_size = 0;
     bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
     bruce_result_t result = storage__open(SSH_APP_KNOWN_HOSTS_PATH, BRUCE_STORAGE_OPEN_READ, &file);
+    bool legacy = false;
+    if (result == BRUCE_ERR_NOT_FOUND) {
+        result = storage__open(SSH_APP_LEGACY_KNOWN_HOSTS_PATH, BRUCE_STORAGE_OPEN_READ, &file);
+        legacy = result == BRUCE_OK;
+    }
     if (result == BRUCE_ERR_NOT_FOUND) return BRUCE_OK;
     if (result != BRUCE_OK) return result;
 
@@ -85,6 +217,10 @@ static bruce_result_t ssh_app__read_known_hosts(char *buffer, size_t capacity, s
     }
     storage__close(file);
     *out_size = total;
+    if (legacy) {
+        (void)storage__mkdir(SSH_APP_DIRECTORY);
+        (void)storage__rename(SSH_APP_LEGACY_KNOWN_HOSTS_PATH, SSH_APP_KNOWN_HOSTS_PATH);
+    }
     return BRUCE_OK;
 }
 
@@ -163,6 +299,11 @@ ssh_app__store_known_fingerprint(const char *key, const uint8_t fingerprint[BRUC
     }
 
     bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
+    result = storage__mkdir(SSH_APP_DIRECTORY);
+    if (result != BRUCE_OK) {
+        memory__free(rebuilt);
+        return result;
+    }
     result = storage__open(
         SSH_APP_KNOWN_HOSTS_PATH,
         BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE | BRUCE_STORAGE_OPEN_TRUNCATE,
@@ -322,7 +463,54 @@ static void ssh_app__log_heap_state(const char *label) {
 }
 
 static bruce_result_t
-ssh_app__client(const char *host, uint16_t port, const char *username, const char *password) {
+ssh_app__read_private_key(const char *path, char *buffer, size_t capacity, size_t *out_size) {
+    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
+    bruce_result_t result = storage__open(path, BRUCE_STORAGE_OPEN_READ, &file);
+    if (result != BRUCE_OK) return result;
+    size_t total = 0;
+    while (total < capacity) {
+        size_t read_size = 0;
+        result = storage__read(file, buffer + total, capacity - total, &read_size);
+        if (result != BRUCE_OK || read_size == 0) break;
+        total += read_size;
+    }
+    storage__close(file);
+    if (result != BRUCE_OK) return result;
+    if (total == capacity) return BRUCE_ERR_RESOURCE_LIMIT;
+    *out_size = total;
+    return BRUCE_OK;
+}
+
+static bruce_result_t ssh_app__write_file(const char *path, const void *data, size_t size) {
+    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
+    bruce_result_t result = storage__open(
+        path,
+        BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE | BRUCE_STORAGE_OPEN_TRUNCATE,
+        &file
+    );
+    if (result != BRUCE_OK) return result;
+    size_t total = 0;
+    while (total < size) {
+        size_t written = 0;
+        result = storage__write(file, (const char *)data + total, size - total, &written);
+        if (result != BRUCE_OK || written == 0) break;
+        total += written;
+    }
+    storage__close(file);
+    return result == BRUCE_OK && total == size ? BRUCE_OK : result == BRUCE_OK ? BRUCE_ERR_IO : result;
+}
+
+static bool ssh_app__file_exists(const char *path) {
+    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
+    if (storage__open(path, BRUCE_STORAGE_OPEN_READ, &file) != BRUCE_OK) return false;
+    storage__close(file);
+    return true;
+}
+
+static bruce_result_t ssh_app__client(
+    const char *host, uint16_t port, const char *username, const char *password,
+    const char *identity
+) {
     if (!wifi__is_connected()) {
         stdio__printf("SSH client: Wi-Fi is not connected\n");
         return BRUCE_ERR_INVALID_STATE;
@@ -344,23 +532,34 @@ ssh_app__client(const char *host, uint16_t port, const char *username, const cha
         return result;
     }
 
-    char password_buffer[SSH_APP_PASSWORD_MAX];
-    const char *effective_password = password;
-    if (password == NULL || password[0] == '\0') {
-        char prompt[96];
-        snprintf(prompt, sizeof(prompt), "Password for %s@%s", username, host);
-        result = dialog__text_input("SSH", prompt, NULL, true, password_buffer, sizeof(password_buffer));
-        if (result != BRUCE_OK) {
-            (void)ssh__close(session);
-            return result;
+    char password_buffer[SSH_APP_PASSWORD_MAX] = {0};
+    if (identity != NULL && identity[0] != '\0') {
+        char private_key[BRUCE_SSH_PRIVATE_KEY_MAX_SIZE + 1u];
+        size_t private_key_size = 0;
+        result = ssh_app__read_private_key(identity, private_key, sizeof(private_key), &private_key_size);
+        if (result == BRUCE_OK)
+            result = ssh__authenticate_key(session, username, private_key, private_key_size, 10000);
+        memset(private_key, 0, sizeof(private_key));
+    } else {
+        const char *effective_password = password;
+        if (password == NULL || password[0] == '\0') {
+            char prompt[96];
+            snprintf(prompt, sizeof(prompt), "Password for %s@%s", username, host);
+            result = dialog__text_input("SSH", prompt, NULL, true, password_buffer, sizeof(password_buffer));
+            if (result != BRUCE_OK) {
+                (void)ssh__close(session);
+                return result;
+            }
+            effective_password = password_buffer;
         }
-        effective_password = password_buffer;
+        result = ssh__authenticate_password(session, username, effective_password, 10000);
+        memset(password_buffer, 0, sizeof(password_buffer));
     }
-
-    result = ssh__authenticate_password(session, username, effective_password, 10000);
-    memset(password_buffer, 0, sizeof(password_buffer));
     if (result != BRUCE_OK) {
-        stdio__printf("SSH client: authentication failed (%d)\n", result);
+        if (identity != NULL && identity[0] != '\0')
+            stdio__printf("SSH client: key authentication with %s failed (%d)\n", identity, result);
+        else
+            stdio__printf("SSH client: authentication failed (%d)\n", result);
         (void)ssh__close(session);
         return result;
     }
@@ -387,13 +586,15 @@ int ssh_app_main(int argc, char **argv) {
         root,
         "Open an interactive SSH session. Verifies the host key fingerprint against a persistent "
         "known_hosts store before authenticating, then forwards stdin/stdout to/from the remote "
-        "shell. Press Ctrl+] to close."
+        "shell. Use --identity with a key created by ssh-keygen. Press Ctrl+] to close."
     );
     ap_add_required_arg(root, "host", "Remote host name or address");
-    ap_add_required_arg(root, "port", "Remote SSH port (1-65535)");
-    ap_add_required_arg(root, "username", "Login username");
+    ap_add_optional_arg(root, "port", "Remote SSH port (default 22 or value from ~/.ssh/config)");
+    ap_add_optional_arg(root, "username", "Login username (or value from ~/.ssh/config)");
     ap_add_str_opt(root, "password", "");
     ap_set_opt_help(root, "password", "Password (prompted securely if omitted)");
+    ap_add_str_opt(root, "identity", "");
+    ap_set_opt_help(root, "identity", "Path to an ECDSA private key; disables password authentication");
 
     if (!ap_parse(root, argc, argv)) {
         ap_status_t status = ap_get_status(root);
@@ -405,30 +606,130 @@ int ssh_app_main(int argc, char **argv) {
         return result;
     }
 
-    uint16_t port = 0;
+    uint16_t port = 22;
     const char *port_text = ap_get_arg(root, "port");
-    if (!ssh_app__parse_port(port_text, &port)) {
+    if (port_text != NULL && !ssh_app__parse_port(port_text, &port)) {
         ap_print_help(root);
         ap_free(root);
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
 
+    char alias[SSH_APP_HOST_MAX];
     char host[SSH_APP_HOST_MAX];
     char username[SSH_APP_USERNAME_MAX];
     char password_copy[SSH_APP_PASSWORD_MAX];
-    int host_len = snprintf(host, sizeof(host), "%s", ap_get_arg(root, "host"));
-    int username_len = snprintf(username, sizeof(username), "%s", ap_get_arg(root, "username"));
+    char identity_copy[SSH_APP_PATH_MAX];
+    int alias_len = snprintf(alias, sizeof(alias), "%s", ap_get_arg(root, "host"));
+    ssh_app__config_t config = {0};
+    bruce_result_t config_result = alias_len > 0 && (size_t)alias_len < sizeof(alias)
+                                       ? ssh_app__load_config(alias, &config)
+                                       : BRUCE_ERR_INVALID_ARGUMENT;
+    int host_len = snprintf(host, sizeof(host), "%s", config.hostname_set ? config.hostname : alias);
+    const char *username_arg = ap_get_arg(root, "username");
+    int username_len = snprintf(
+        username, sizeof(username), "%s", username_arg != NULL ? username_arg : config.username_set ? config.username : ""
+    );
+    if (port_text == NULL && config.port_set) port = config.port;
     const char *password = ap_get_str_value(root, "password");
     snprintf(password_copy, sizeof(password_copy), "%s", password != NULL ? password : "");
+    const char *identity = ap_get_str_value(root, "identity");
+    bool password_supplied = ap_found(root, "password");
+    bool identity_supplied = identity != NULL && identity[0] != '\0';
+    const char *effective_identity = identity_supplied
+                                         ? identity
+                                         : !password_supplied && config.identity_set
+                                               ? config.identity
+                                         : !password_supplied && ssh_app__file_exists(SSH_APP_DEFAULT_IDENTITY_PATH)
+                                               ? SSH_APP_DEFAULT_IDENTITY_PATH
+                                               : "";
+    if (strncmp(effective_identity, "~/", 2) == 0) ++effective_identity;
+    int identity_len = snprintf(identity_copy, sizeof(identity_copy), "%s", effective_identity);
+    bool conflicting_auth = password_supplied && identity_supplied;
     ap_free(root);
 
-    if (host_len < 0 || (size_t)host_len >= sizeof(host) || username_len < 0 ||
-        (size_t)username_len >= sizeof(username)) {
+    if (config_result != BRUCE_OK || alias_len <= 0 || (size_t)alias_len >= sizeof(alias) ||
+        host_len < 0 || (size_t)host_len >= sizeof(host) || username_len <= 0 ||
+        (size_t)username_len >= sizeof(username) || identity_len < 0 ||
+        (size_t)identity_len >= sizeof(identity_copy) ||
+        (identity_copy[0] != '\0' && identity_copy[0] != '/') || conflicting_auth) {
         memset(password_copy, 0, sizeof(password_copy));
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
 
-    int result = ssh_app__client(host, port, username, password_copy);
+    int result = ssh_app__client(host, port, username, password_copy, identity_copy);
     memset(password_copy, 0, sizeof(password_copy));
     return result;
+}
+
+int ssh_keygen_app_main(int argc, char **argv) {
+    ArgParser *parser = ap_new_parser();
+    if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
+    ap_set_helptext(parser, "Generate an ECDSA P-256 SSH keypair. Writes the private key to --file and the OpenSSH public key to <file>.pub.");
+    ap_add_str_opt(parser, "file", SSH_APP_DEFAULT_IDENTITY_PATH);
+    ap_set_opt_help(parser, "file", "Private-key output path (default /.ssh/id_ecdsa)");
+    ap_add_str_opt(parser, "comment", "bruce");
+    ap_set_opt_help(parser, "comment", "Comment appended to the public key");
+    ap_add_flag(parser, "force");
+    ap_set_opt_help(parser, "force", "Overwrite existing key files");
+    if (!ap_parse(parser, argc, argv)) {
+        ap_status_t status = ap_get_status(parser);
+        if (status != AP_STATUS_HELP && status != AP_STATUS_VERSION) ap_print_help(parser);
+        int result = status == AP_STATUS_HELP || status == AP_STATUS_VERSION ? BRUCE_OK
+                     : status == AP_STATUS_NO_MEMORY                         ? BRUCE_ERR_NO_MEMORY
+                                                                             : BRUCE_ERR_INVALID_ARGUMENT;
+        ap_free(parser);
+        return result;
+    }
+
+    char path[SSH_APP_PATH_MAX];
+    char public_path[SSH_APP_PATH_MAX];
+    char comment[SSH_APP_COMMENT_MAX];
+    const char *path_arg = ap_get_str_value(parser, "file");
+    const char *comment_arg = ap_get_str_value(parser, "comment");
+    bool force = ap_found(parser, "force");
+    int path_len = snprintf(path, sizeof(path), "%s", path_arg != NULL ? path_arg : SSH_APP_DEFAULT_IDENTITY_PATH);
+    int public_path_len = snprintf(public_path, sizeof(public_path), "%s.pub", path);
+    int comment_len = snprintf(comment, sizeof(comment), "%s", comment_arg != NULL ? comment_arg : "");
+    ap_free(parser);
+    if (path_len <= 0 || (size_t)path_len >= sizeof(path) || public_path_len <= 0 ||
+        (size_t)public_path_len >= sizeof(public_path) || comment_len < 0 ||
+        (size_t)comment_len >= sizeof(comment))
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    if (!force && (ssh_app__file_exists(path) || ssh_app__file_exists(public_path))) {
+        stdio__printf("ssh-keygen: output exists; use --force to overwrite\n");
+        return BRUCE_ERR_INVALID_STATE;
+    }
+    if (strncmp(path, SSH_APP_DIRECTORY "/", sizeof(SSH_APP_DIRECTORY)) == 0) {
+        bruce_result_t mkdir_result = storage__mkdir(SSH_APP_DIRECTORY);
+        if (mkdir_result != BRUCE_OK) return mkdir_result;
+    }
+
+    char private_key[BRUCE_SSH_PRIVATE_KEY_MAX_SIZE];
+    char public_key[BRUCE_SSH_PUBLIC_KEY_MAX_SIZE];
+    size_t private_size = 0;
+    size_t public_size = 0;
+    bruce_result_t result = ssh__generate_keypair(
+        private_key, sizeof(private_key), &private_size, public_key, sizeof(public_key), &public_size
+    );
+    if (result == BRUCE_OK && comment[0] != '\0') {
+        size_t required = public_size + 1u + strlen(comment) + 1u;
+        if (required > sizeof(public_key)) result = BRUCE_ERR_RESOURCE_LIMIT;
+        else {
+            public_key[public_size++] = ' ';
+            memcpy(public_key + public_size, comment, strlen(comment));
+            public_size += strlen(comment);
+            public_key[public_size++] = '\n';
+        }
+    } else if (result == BRUCE_OK) {
+        public_key[public_size++] = '\n';
+    }
+    if (result == BRUCE_OK) result = ssh_app__write_file(path, private_key, private_size);
+    if (result == BRUCE_OK) result = ssh_app__write_file(public_path, public_key, public_size);
+    memset(private_key, 0, sizeof(private_key));
+    if (result != BRUCE_OK) {
+        stdio__printf("ssh-keygen: failed (%d)\n", result);
+        return result;
+    }
+    stdio__printf("Private key: %s\nPublic key: %s\n", path, public_path);
+    return BRUCE_OK;
 }

@@ -8,8 +8,11 @@
 #include "core_sdk/memory.h"
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
+#include "core_sdk/runtime.h"
 #include "core_sdk/stdio.h"
 #include "shell_builtins.h"
+
+#define SHELL_PIPE_MAX_BYTES (32u * 1024u)
 
 static const char *shell_executor__lookup(void *context, const char *name) {
     return shell_builtins__get((const shell_state_t *)context, name);
@@ -58,7 +61,7 @@ static int shell_executor__wait(bruce_process_id_t child) {
     return status.exit_code & 0xff;
 }
 
-static int shell_executor__external(int argc, char **argv) {
+static int shell_executor__launch_external(int argc, char **argv, const char *prefix) {
     size_t capacity = SHELL__LINE_MAX * 2;
     char *arguments = memory__malloc(capacity);
     if (arguments == NULL) {
@@ -67,6 +70,15 @@ static int shell_executor__external(int argc, char **argv) {
     }
     size_t used = 0;
     arguments[0] = '\0';
+    if (prefix != NULL) {
+        size_t prefix_length = strlen(prefix);
+        if (prefix_length >= capacity) {
+            memory__free(arguments);
+            return BRUCE_ERR_RESOURCE_LIMIT;
+        }
+        memcpy(arguments, prefix, prefix_length + 1u);
+        used = prefix_length;
+    }
     for (int i = 1; i < argc; ++i) {
         if (!shell_executor__append_arg(arguments, capacity, &used, argv[i])) {
             stdio__printf("shell: arguments too long\n");
@@ -81,6 +93,11 @@ static int shell_executor__external(int argc, char **argv) {
         launched = app_runner__run(argv[0], used > 0 ? arguments : NULL, true);
     }
     memory__free(arguments);
+    return launched;
+}
+
+static int shell_executor__external(int argc, char **argv) {
+    int launched = shell_executor__launch_external(argc, argv, NULL);
     if (launched == BRUCE_ERR_NOT_FOUND || launched == BRUCE_ERR_INVALID_PATH) {
         stdio__printf("shell: %s: not found\n", argv[0]);
         return 127;
@@ -90,6 +107,166 @@ static int shell_executor__external(int argc, char **argv) {
         return 1;
     }
     return shell_executor__wait((bruce_process_id_t)launched);
+}
+
+static bool shell_executor__pipe_append(char **data, size_t *length, size_t *capacity, const void *bytes, size_t size) {
+    if (size > SHELL_PIPE_MAX_BYTES - *length) return false;
+    if (*length + size > *capacity) {
+        size_t next = *capacity == 0 ? 512u : *capacity;
+        while (next < *length + size) next *= 2u;
+        if (next > SHELL_PIPE_MAX_BYTES) next = SHELL_PIPE_MAX_BYTES;
+        char *grown = memory__realloc(*data, next);
+        if (grown == NULL) return false;
+        *data = grown;
+        *capacity = next;
+    }
+    memcpy(*data + *length, bytes, size);
+    *length += size;
+    return true;
+}
+
+static int shell_executor__capture_external(int argc, char **argv, char **out_data, size_t *out_size) {
+    bruce_stdio_session_t session = BRUCE_STDIO_SESSION_INVALID;
+    if (stdio__session_create(&session) != BRUCE_OK) return 1;
+    if (stdio__session_route_children(session) != BRUCE_OK) {
+        (void)stdio__session_close(session);
+        return 1;
+    }
+    int launched = shell_executor__launch_external(argc, argv, NULL);
+    (void)stdio__session_route_children(BRUCE_STDIO_SESSION_INVALID);
+    if (launched <= 0) {
+        (void)stdio__session_close(session);
+        return 1;
+    }
+
+    char *data = NULL;
+    size_t length = 0;
+    size_t capacity = 0;
+    bruce_process_status_t status = {0};
+    bool complete = false;
+    while (!complete) {
+        char chunk[256];
+        size_t size = 0;
+        while (stdio__session_read_output(session, chunk, sizeof(chunk), &size) == BRUCE_OK) {
+            if (!shell_executor__pipe_append(&data, &length, &capacity, chunk, size)) {
+                (void)process__kill((bruce_process_id_t)launched);
+                (void)process__wait_status((bruce_process_id_t)launched, 500, &status);
+                memory__free(data);
+                (void)stdio__session_close(session);
+                stdio__printf("shell: pipe exceeds %u bytes\n", (unsigned)SHELL_PIPE_MAX_BYTES);
+                return 1;
+            }
+        }
+        bruce_result_t waited = process__wait_status((bruce_process_id_t)launched, 0, &status);
+        complete = waited == BRUCE_OK;
+        if (!complete && waited != BRUCE_ERR_TIMEOUT) break;
+        if (!complete) (void)runtime__delay(1);
+    }
+    char chunk[256];
+    size_t size = 0;
+    while (stdio__session_read_output(session, chunk, sizeof(chunk), &size) == BRUCE_OK) {
+        if (!shell_executor__pipe_append(&data, &length, &capacity, chunk, size)) {
+            memory__free(data);
+            data = NULL;
+            length = 0;
+            break;
+        }
+    }
+    (void)stdio__session_close(session);
+    if (!complete || status.reason != BRUCE_PROCESS_EXITED || status.exit_code != 0) {
+        memory__free(data);
+        return status.exit_code != 0 ? status.exit_code : 1;
+    }
+    *out_data = data;
+    *out_size = length;
+    return 0;
+}
+
+static int shell_executor__pipe_to_text(shell_state_t *state, const shell_command_t *source, const shell_command_t *target) {
+    char **source_words = NULL;
+    char **target_words = NULL;
+    int source_argc = 0;
+    int target_argc = 0;
+    const char *error = NULL;
+    if (shell_parser__words(source, &source_words, &source_argc, shell_executor__lookup, state, state->last_status,
+                            &error) != 0 ||
+        shell_parser__words(target, &target_words, &target_argc, shell_executor__lookup, state, state->last_status,
+                            &error) != 0) {
+        stdio__printf("shell: %s\n", error != NULL ? error : "pipe parse error");
+        shell_parser__free_words(source_words, source_argc);
+        shell_parser__free_words(target_words, target_argc);
+        return 2;
+    }
+    bool source_is_echo = source_argc > 0 && strcmp(source_words[0], "echo") == 0;
+    if (source_argc == 0 || target_argc == 0 || strcmp(target_words[0], "text") != 0 ||
+        (shell_builtins__is_builtin(source_words[0]) && !source_is_echo)) {
+        stdio__printf("shell: pipes currently require an external producer and text as the destination\n");
+        shell_parser__free_words(source_words, source_argc);
+        shell_parser__free_words(target_words, target_argc);
+        return 2;
+    }
+
+    char *data = NULL;
+    size_t size = 0;
+    size_t capacity = 0;
+    int status = 0;
+    if (source_is_echo) {
+        for (int i = 1; status == 0 && i < source_argc; ++i) {
+            if (i > 1 && !shell_executor__pipe_append(&data, &size, &capacity, " ", 1u)) status = 1;
+            if (status == 0 && !shell_executor__pipe_append(
+                                   &data, &size, &capacity, source_words[i], strlen(source_words[i])
+                               )) {
+                status = 1;
+            }
+        }
+        if (status == 0 && !shell_executor__pipe_append(&data, &size, &capacity, "\n", 1u)) status = 1;
+    } else {
+        status = shell_executor__capture_external(source_argc, source_words, &data, &size);
+    }
+    if (status == 0) {
+        bruce_stdio_session_t session = BRUCE_STDIO_SESSION_INVALID;
+        if (stdio__session_create(&session) != BRUCE_OK) {
+            status = 1;
+        } else if (stdio__session_route_children(session) != BRUCE_OK) {
+            (void)stdio__session_close(session);
+            session = BRUCE_STDIO_SESSION_INVALID;
+            status = 1;
+        } else {
+            char prefix[48];
+            snprintf(prefix, sizeof(prefix), "--stdin-size %u --gui", (unsigned)size);
+            int launched = shell_executor__launch_external(target_argc, target_words, prefix);
+            (void)stdio__session_route_children(BRUCE_STDIO_SESSION_INVALID);
+            if (launched <= 0) {
+                status = 1;
+            } else {
+                size_t offset = 0;
+                while (offset < size) {
+                    size_t chunk = size - offset > 128u ? 128u : size - offset;
+                    bruce_result_t written = stdio__session_write_input(session, data + offset, chunk);
+                    if (written == BRUCE_OK) {
+                        offset += chunk;
+                    } else if (written == BRUCE_ERR_RESOURCE_LIMIT) {
+                        (void)runtime__delay(1);
+                    } else {
+                        status = 1;
+                        break;
+                    }
+                }
+                if (status == 0) {
+                    status = shell_executor__wait((bruce_process_id_t)launched);
+                } else {
+                    (void)process__kill((bruce_process_id_t)launched);
+                    bruce_process_status_t child_status;
+                    (void)process__wait_status((bruce_process_id_t)launched, 500, &child_status);
+                }
+            }
+            if (session != BRUCE_STDIO_SESSION_INVALID) (void)stdio__session_close(session);
+        }
+    }
+    memory__free(data);
+    shell_parser__free_words(source_words, source_argc);
+    shell_parser__free_words(target_words, target_argc);
+    return status;
 }
 
 /* Consumes leading NAME=value assignment words, then dispatches the
@@ -145,7 +322,19 @@ int shell_executor__plan(shell_state_t *state, const shell_plan_t *plan) {
                    (connector == SHELL_CONNECT_AND && status == 0) ||
                    (connector == SHELL_CONNECT_OR && status != 0);
         if (!run) continue;
-        status = shell_executor__command(state, &plan->commands[i]);
+        if (i + 1u < plan->count && plan->commands[i + 1u].connector == SHELL_CONNECT_PIPE) {
+            if (i + 2u < plan->count && plan->commands[i + 2u].connector == SHELL_CONNECT_PIPE) {
+                stdio__printf("shell: chained pipes are unsupported\n");
+                status = 2;
+            } else {
+                status = shell_executor__pipe_to_text(state, &plan->commands[i], &plan->commands[i + 1u]);
+            }
+            i++;
+        } else if (connector == SHELL_CONNECT_PIPE) {
+            status = 2;
+        } else {
+            status = shell_executor__command(state, &plan->commands[i]);
+        }
         state->last_status = status;
     }
     return status;

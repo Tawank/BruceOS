@@ -173,6 +173,6 @@ int shell_builtins__run(shell_state_t *state, int argc, char **argv) {
         return status;
     }
     stdio__printf("Builtins: echo true false set unset export exit\n");
-    stdio__printf("Operators: ; && ||. Pipes and redirection are unsupported.\n");
+    stdio__printf("Operators: ; && || and producer | text. Redirection is unsupported.\n");
     return 0;
 }

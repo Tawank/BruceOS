@@ -14,6 +14,7 @@ typedef enum {
     SHELL_CONNECT_SEQUENCE,
     SHELL_CONNECT_AND,
     SHELL_CONNECT_OR,
+    SHELL_CONNECT_PIPE,
 } shell_connector_t;
 
 typedef struct {

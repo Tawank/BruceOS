@@ -265,6 +265,8 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(ssh__host_key_sha256),
     ESP_ELFSYM_EXPORT(ssh__verify_host_key_sha256),
     ESP_ELFSYM_EXPORT(ssh__authenticate_password),
+    ESP_ELFSYM_EXPORT(ssh__generate_keypair),
+    ESP_ELFSYM_EXPORT(ssh__authenticate_key),
     ESP_ELFSYM_EXPORT(ssh__open_shell),
     ESP_ELFSYM_EXPORT(ssh__resize_pty),
     ESP_ELFSYM_EXPORT(ssh__read),

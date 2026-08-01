@@ -550,14 +550,18 @@ static void input__poll_keyboard(void) {
                     } else if (s_kb_fn_held) {
                         int32_t nav = input__kb_decode_fn_nav(x, y);
                         if (nav != 0) {
+                            /* Keep Fn navigation distinguishable from punctuation
+                             * keys that share these legacy input codes. */
                             (void)input__push_event_locked(
-                                BRUCE_INPUT_KEY, BRUCE_INPUT_PRESS, nav, 0, BRUCE_PROCESS_ID_INVALID
+                                BRUCE_INPUT_KEY, BRUCE_INPUT_PRESS, nav, -1, BRUCE_PROCESS_ID_INVALID
                             );
                         }
                     } else {
                         const char *normal_label = s_kb_normal[y][x];
                         const char *label = s_kb_shift_held ? s_kb_shifted[y][x] : normal_label;
                         int32_t code = input__kb_char_code(label);
+                        if (s_kb_ctrl_held && code >= 'a' && code <= 'z') code &= 0x1f;
+                        if (s_kb_ctrl_held && code >= 'A' && code <= 'Z') code &= 0x1f;
                         if (code != 0) {
                             (void)input__push_event_locked(
                                 BRUCE_INPUT_KEY, BRUCE_INPUT_PRESS, code, code, BRUCE_PROCESS_ID_INVALID

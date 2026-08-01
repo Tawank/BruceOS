@@ -169,3 +169,25 @@ bool selftest__run_ssh_permission_denied_case(void) {
     printf("[selftest] ssh/permission-denied: %s (result=%d)\n", ok ? "OK" : "FAIL", result);
     return ok;
 }
+
+bool selftest__run_ssh_keygen_case(void) {
+    char private_key[BRUCE_SSH_PRIVATE_KEY_MAX_SIZE];
+    char public_key[BRUCE_SSH_PUBLIC_KEY_MAX_SIZE];
+    size_t private_size = 0;
+    size_t public_size = 0;
+    bruce_result_t result = ssh__generate_keypair(
+        private_key, sizeof(private_key), &private_size, public_key, sizeof(public_key), &public_size
+    );
+    bool ok = result == BRUCE_OK && private_size > 0 && public_size > 0 &&
+              strncmp(private_key, "-----BEGIN EC PRIVATE KEY-----\n", 31) == 0 &&
+              strncmp(public_key, "ecdsa-sha2-nistp256 ", 20) == 0;
+    memset(private_key, 0, sizeof(private_key));
+    printf(
+        "[selftest] ssh/keygen: %s (result=%d private=%u public=%u)\n",
+        ok ? "OK" : "FAIL",
+        result,
+        (unsigned)private_size,
+        (unsigned)public_size
+    );
+    return ok;
+}

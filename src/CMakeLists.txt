@@ -95,7 +95,8 @@ idf_component_register(SRCS
                     "modules/shell/shell_builtins.c"
                     ${BRUCE_SELFTEST_SOURCES}
                     "modules/ssh/ssh_app.c"
-                    "modules/tcp/tcp_app.c"
+                     "modules/tcp/tcp_app.c"
+                     "modules/text/text_app.c"
                      "modules/utils/launcher/launcher_app.c"
                      "modules/utils/help/help_app.c"
                      "modules/utils/serial_commands/serial_commands_app.c"
@@ -293,6 +294,11 @@ target_include_directories(bruce_sdk_builtin_image_loader_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/loaders/image")
 
+add_library(bruce_sdk_builtin_text_check OBJECT "modules/text/text_app.c")
+target_include_directories(bruce_sdk_builtin_text_check PRIVATE
+                           "${CMAKE_CURRENT_LIST_DIR}"
+                           "${CMAKE_CURRENT_LIST_DIR}/modules/text")
+
 add_library(bruce_sdk_builtin_utils_launcher_check OBJECT "modules/utils/launcher/launcher_app.c")
 target_include_directories(bruce_sdk_builtin_utils_launcher_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
@@ -394,6 +400,7 @@ set(BRUCE_ARGS_SDK_CHECK_TARGETS
     bruce_sdk_builtin_ir_check
     bruce_sdk_builtin_nrf24_check
     bruce_sdk_builtin_image_loader_check
+    bruce_sdk_builtin_text_check
     bruce_sdk_builtin_utils_help_check
     bruce_sdk_builtin_utils_process_check
     bruce_sdk_builtin_utils_terminal_check

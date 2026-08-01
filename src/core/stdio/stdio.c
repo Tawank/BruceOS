@@ -281,23 +281,26 @@ static bruce_result_t
 stdio__session_write_output(bruce_stdio_session_t session, const void *data, size_t size) {
     if (data == NULL || size == 0) return BRUCE_ERR_INVALID_ARGUMENT;
     stdio__ensure_init();
-    xSemaphoreTake(s_lock, portMAX_DELAY);
-    stdio__session_t *entry = stdio__find_locked(session);
-    if (entry == NULL) {
-        xSemaphoreGive(s_lock);
-        return BRUCE_ERR_NOT_FOUND;
-    }
     const char *buffer = data;
-    for (size_t i = 0; i < size; ++i) {
-        if (entry->output_size == STDIO__OUTPUT_CAPACITY) {
-            entry->output_read = (entry->output_read + 1) % STDIO__OUTPUT_CAPACITY;
-            entry->output_size--;
+    size_t offset = 0;
+    while (offset < size) {
+        xSemaphoreTake(s_lock, portMAX_DELAY);
+        stdio__session_t *entry = stdio__find_locked(session);
+        if (entry == NULL) {
+            xSemaphoreGive(s_lock);
+            return BRUCE_ERR_NOT_FOUND;
         }
-        size_t write_at = (entry->output_read + entry->output_size) % STDIO__OUTPUT_CAPACITY;
-        entry->output[write_at] = buffer[i];
-        entry->output_size++;
+        size_t available = STDIO__OUTPUT_CAPACITY - entry->output_size;
+        size_t copied = size - offset < available ? size - offset : available;
+        for (size_t i = 0; i < copied; ++i) {
+            size_t write_at = (entry->output_read + entry->output_size) % STDIO__OUTPUT_CAPACITY;
+            entry->output[write_at] = buffer[offset + i];
+            entry->output_size++;
+        }
+        xSemaphoreGive(s_lock);
+        offset += copied;
+        if (copied == 0 && runtime__delay(1) != BRUCE_OK) return BRUCE_ERR_CANCELLED;
     }
-    xSemaphoreGive(s_lock);
     return BRUCE_OK;
 }
 

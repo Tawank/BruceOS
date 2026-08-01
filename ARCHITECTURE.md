@@ -490,14 +490,24 @@ handles erase-screen/erase-line sequences within its bounded transcript.
 The built-in `shell` module owns command-language parsing and execution. It
 supports whitespace-delimited words, literal single quotes, expandable double
 quotes, backslash escaping, `NAME=value`, `$NAME`, `${NAME}`, `$?`, token-boundary
-comments, and left-to-right `;`, `&&`, and `||`. Its bounded variables persist
+comments, and left-to-right `;`, `&&`, and `||`. A single bounded pipeline may
+feed `text` from `echo` or an external producer, for example
+`cat /notes.txt | text` or `cat /notes.txt | text /copy.txt`. Its bounded variables persist
 across interactive input and script lines. Builtins are `echo`, `true`, `false`,
 `set`, `unset`, `export`, `exit`, and `help`; other names and absolute/`./` paths
 launch through AppRunner in Core-background mode and are synchronously reaped.
 The `.sh` loader invokes this built-in for absolute scripts. Command
-substitution, globbing, subshells, functions, positional parameters, pipes, and
-redirection are deferred. Unquoted, unescaped `|`, `<`, and `>` are explicit
-syntax errors rather than emulated features.
+substitution, globbing, subshells, functions, positional parameters, general or
+chained pipelines, and redirection are deferred. Unsupported pipeline forms and
+unquoted, unescaped `<` and `>` are explicit syntax errors.
+
+The built-in `text` editor opens `.txt`, `.json`, and `.conf` paths through the
+loader registry. It also accepts the shell's exact-size piped stdin handoff,
+prompts for a destination when unsaved piped text is saved, and limits editable
+content to 32 KiB. `text -r <path>` (`--read-only`) and piped input with the same flag
+disable mutation and saving, providing a lightweight `less`-style viewer. The
+editor binds Ctrl+S to save and Ctrl+X to exit, with both shortcuts shown in its
+footer; read-only mode exposes only Ctrl+X.
 
 The built-in BNU (Bruce is Not Unix) module provides the direct commands
 `pwd`, `cd [directory]`, `ls [path]`, `mkdir <directory>`, `touch <file>`,
@@ -753,11 +763,20 @@ SSH client sessions are Core-owned opaque handles backed by the managed
 `wolfssl`/`wolfssh` components. They require the independent `ssh` permission, belong
 to the creating process, and close automatically at process teardown. The
 public API exposes handshake, SHA-256 host-key fingerprint retrieval and
-verification, password authentication, PTY shell open/resize, and nonblocking
+verification, password or ECDSA P-256 key authentication, keypair generation,
+PTY shell open/resize, and nonblocking
 channel byte I/O with caller-supplied timeouts. Core refuses authentication
 until `ssh__verify_host_key_sha256()` succeeds; callers may not silently bypass
 host-key verification. Library sessions, channels, and native sockets remain
 private to Core and are never exported through the ELF SDK.
+The built-in `ssh-keygen` command defaults to `/.ssh/id_ecdsa`, writing an
+unencrypted SEC1 PEM private key and an OpenSSH-compatible `.pub` file. Host keys
+are stored in `/.ssh/known_hosts` (the former `/ssh_known_hosts` is migrated on
+first use). The SSH app reads `/.ssh/config` global and matching `Host` sections,
+including `HostName`, `User`, `Port`, and `IdentityFile`; command-line values take
+precedence. The `ssh --identity <path>` option authenticates with such a private
+key after the same mandatory host-key verification flow; the default identity
+is also selected automatically when it exists unless `--password` is supplied.
 
 Inbound HTTP is a generic Core service exposed through `http_server__*`. A
 caller with `http` permission supplies bounded fixed or dynamic route

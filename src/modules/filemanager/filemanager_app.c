@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 
 #include "core_sdk/app_runner.h"
 #include "core_sdk/dialog.h"
@@ -34,6 +35,13 @@ static bool filemanager__resume_after_handoff(void) {
 static const char *filemanager__basename(const char *path) {
     const char *slash = strrchr(path, '/');
     return slash != NULL ? slash + 1 : path;
+}
+
+static bool filemanager__is_editable_text(const char *path) {
+    const char *dot = strrchr(path, '.');
+    return dot != NULL &&
+           (strcasecmp(dot, ".txt") == 0 || strcasecmp(dot, ".json") == 0 ||
+            strcasecmp(dot, ".conf") == 0);
 }
 
 static bruce_result_t filemanager__read_preview(const char *path, char **out_text, bool *out_truncated) {
@@ -71,7 +79,7 @@ static bruce_result_t filemanager__read_preview(const char *path, char **out_tex
 }
 
 static bruce_result_t filemanager__view_file(const char *path, bool gui) {
-    if (image__is_supported_path(path)) {
+    if (image__is_supported_path(path) || filemanager__is_editable_text(path)) {
         int process = app_runner__run_path(path, NULL, true);
         if (process <= 0) return (bruce_result_t)process;
         return process__wait((bruce_process_id_t)process, UINT32_MAX);

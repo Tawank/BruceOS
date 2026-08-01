@@ -23,7 +23,8 @@ typedef enum {
  * Common input codes.
  *
  * For BRUCE_INPUT_KEY events the code is normally the ASCII value of the
- * character (0x00-0x7F).  Navigation and action codes are defined below so that
+ * character (0x00-0x7F); Ctrl+letter uses its standard ASCII control code
+ * (Ctrl+A = 0x01 through Ctrl+Z = 0x1A). Navigation and action codes are defined below so that
  * physical buttons and Fn-chord keyboard bindings can emit the same
  * semantic events.
  */

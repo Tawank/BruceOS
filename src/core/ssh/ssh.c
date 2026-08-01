@@ -11,7 +11,10 @@
 #include "lwip/netdb.h"
 #include "lwip/sockets.h"
 #include "wolfssh/ssh.h"
+#include "wolfssl/wolfcrypt/asn_public.h"
+#include "wolfssl/wolfcrypt/ecc.h"
 #include "wolfssl/wolfcrypt/hash.h"
+#include "wolfssl/wolfcrypt/random.h"
 
 #include "core/network/network.h"
 #include "core/process/process.h"
@@ -24,6 +27,10 @@ static const char *const TAG = "bruce_ssh";
 #define SSH__MAX_SESSIONS 4
 #define SSH__DEFAULT_CONNECT_TIMEOUT_MS 10000u
 #define SSH__HOST_MAX 64u
+#define SSH__ECDSA_ALGORITHM "ecdsa-sha2-nistp256"
+#define SSH__ECDSA_CURVE "nistp256"
+#define SSH__ECDSA_DER_MAX 160u
+#define SSH__ECDSA_BLOB_MAX 128u
 
 /* Bruce's SDK contract is a strict connect -> verify host key -> authenticate
  * sequence, but wolfSSH_connect() drives KEX, userauth, and channel/PTY setup
@@ -36,7 +43,8 @@ static const char *const TAG = "bruce_ssh";
  *      host_key_verified is still false), which aborts wolfSSH_connect()
  *      right after KEX -- before any credentials would be needed. The
  *      throwaway session/socket is torn down immediately after.
- *   2. ssh__authenticate_password() -- reachable only once the caller has
+ *   2. ssh__authenticate_password() or ssh__authenticate_key() -- reachable
+ *      only once the caller has
  *      independently confirmed the fingerprint via ssh__verify_host_key_sha256()
  *      -- opens a second, real connection. Its public-key-check callback now
  *      accepts (same verified fingerprint), and its userauth callback supplies
@@ -58,6 +66,10 @@ typedef struct {
     uint8_t host_key_fingerprint[BRUCE_SSH_HOST_KEY_SHA256_SIZE];
     const char *auth_password;
     size_t auth_password_len;
+    const uint8_t *auth_private_key;
+    size_t auth_private_key_len;
+    const uint8_t *auth_public_key;
+    size_t auth_public_key_len;
     bruce_ssh_id_t id;
     bruce_resource_id_t resource_id;
     bruce_process_id_t owner;
@@ -101,11 +113,105 @@ static int ssh__public_key_check_cb(const byte *pub_key, word32 pub_key_size, vo
 
 static int ssh__user_auth_cb(byte auth_type, WS_UserAuthData *auth_data, void *ctx) {
     ssh__slot_t *slot = ctx;
-    if (slot == NULL || auth_type != WOLFSSH_USERAUTH_PASSWORD || slot->auth_password == NULL)
-        return WOLFSSH_USERAUTH_FAILURE;
-    auth_data->sf.password.password = (const byte *)slot->auth_password;
-    auth_data->sf.password.passwordSz = (word32)slot->auth_password_len;
-    return WOLFSSH_USERAUTH_SUCCESS;
+    if (slot == NULL) return WOLFSSH_USERAUTH_FAILURE;
+    if (auth_type == WOLFSSH_USERAUTH_PASSWORD && slot->auth_password != NULL) {
+        auth_data->sf.password.password = (const byte *)slot->auth_password;
+        auth_data->sf.password.passwordSz = (word32)slot->auth_password_len;
+        return WOLFSSH_USERAUTH_SUCCESS;
+    }
+    if (auth_type == WOLFSSH_USERAUTH_PUBLICKEY && slot->auth_private_key != NULL &&
+        slot->auth_public_key != NULL) {
+        auth_data->sf.publicKey.publicKeyType = (const byte *)SSH__ECDSA_ALGORITHM;
+        auth_data->sf.publicKey.publicKeyTypeSz = sizeof(SSH__ECDSA_ALGORITHM) - 1;
+        auth_data->sf.publicKey.publicKey = slot->auth_public_key;
+        auth_data->sf.publicKey.publicKeySz = (word32)slot->auth_public_key_len;
+        auth_data->sf.publicKey.privateKey = slot->auth_private_key;
+        auth_data->sf.publicKey.privateKeySz = (word32)slot->auth_private_key_len;
+        return WOLFSSH_USERAUTH_SUCCESS;
+    }
+    return WOLFSSH_USERAUTH_FAILURE;
+}
+
+static void ssh__put_u32(uint8_t *out, uint32_t value) {
+    out[0] = (uint8_t)(value >> 24);
+    out[1] = (uint8_t)(value >> 16);
+    out[2] = (uint8_t)(value >> 8);
+    out[3] = (uint8_t)value;
+}
+
+static size_t ssh__append_string(uint8_t *out, const void *value, size_t size) {
+    ssh__put_u32(out, (uint32_t)size);
+    memcpy(out + 4, value, size);
+    return size + 4;
+}
+
+static bruce_result_t ssh__public_blob(ecc_key *key, uint8_t *out, size_t capacity, size_t *out_size) {
+    uint8_t point[65];
+    word32 point_size = sizeof(point);
+    if (wc_ecc_export_x963(key, point, &point_size) != 0) return BRUCE_ERR_IO;
+    size_t required = 12u + sizeof(SSH__ECDSA_ALGORITHM) - 1u + sizeof(SSH__ECDSA_CURVE) - 1u + point_size;
+    if (required > capacity) return BRUCE_ERR_RESOURCE_LIMIT;
+    size_t offset = 0;
+    offset += ssh__append_string(out + offset, SSH__ECDSA_ALGORITHM, sizeof(SSH__ECDSA_ALGORITHM) - 1);
+    offset += ssh__append_string(out + offset, SSH__ECDSA_CURVE, sizeof(SSH__ECDSA_CURVE) - 1);
+    offset += ssh__append_string(out + offset, point, point_size);
+    *out_size = offset;
+    return BRUCE_OK;
+}
+
+static const char s_base64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+static size_t ssh__base64_encode(const uint8_t *input, size_t size, char *out) {
+    size_t written = 0;
+    for (size_t i = 0; i < size; i += 3) {
+        uint32_t value = (uint32_t)input[i] << 16;
+        if (i + 1 < size) value |= (uint32_t)input[i + 1] << 8;
+        if (i + 2 < size) value |= input[i + 2];
+        out[written++] = s_base64[(value >> 18) & 0x3f];
+        out[written++] = s_base64[(value >> 12) & 0x3f];
+        out[written++] = i + 1 < size ? s_base64[(value >> 6) & 0x3f] : '=';
+        out[written++] = i + 2 < size ? s_base64[value & 0x3f] : '=';
+    }
+    return written;
+}
+
+static int ssh__base64_value(char value) {
+    const char *match = strchr(s_base64, value);
+    return match == NULL ? -1 : (int)(match - s_base64);
+}
+
+static bruce_result_t ssh__pem_decode(
+    const char *pem, size_t pem_size, uint8_t *der, size_t capacity, size_t *out_size
+) {
+    static const char header[] = "-----BEGIN EC PRIVATE KEY-----";
+    static const char footer[] = "-----END EC PRIVATE KEY-----";
+    if (pem_size < sizeof(header) + sizeof(footer) - 1 ||
+        memcmp(pem, header, sizeof(header) - 1) != 0)
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    size_t i = sizeof(header) - 1;
+    size_t written = 0;
+    uint32_t value = 0;
+    unsigned bits = 0;
+    while (i < pem_size) {
+        if (i + sizeof(footer) - 1 <= pem_size && memcmp(pem + i, footer, sizeof(footer) - 1) == 0) {
+            *out_size = written;
+            return written > 0 ? BRUCE_OK : BRUCE_ERR_INVALID_ARGUMENT;
+        }
+        char c = pem[i++];
+        if (c == ' ' || c == '\r' || c == '\n' || c == '\t') continue;
+        if (c == '=') continue;
+        int digit = ssh__base64_value(c);
+        if (digit < 0) return BRUCE_ERR_INVALID_ARGUMENT;
+        value = (value << 6) | (uint32_t)digit;
+        bits += 6;
+        if (bits >= 8) {
+            bits -= 8;
+            if (written >= capacity) return BRUCE_ERR_RESOURCE_LIMIT;
+            der[written++] = (uint8_t)(value >> bits);
+            value &= bits == 0 ? 0u : (1u << bits) - 1u;
+        }
+    }
+    return BRUCE_ERR_INVALID_ARGUMENT;
 }
 
 static void ssh__destroy_handles(WOLFSSH *ssh, int fd) {
@@ -421,21 +527,14 @@ bruce_result_t ssh__verify_host_key_sha256(
     return BRUCE_OK;
 }
 
-bruce_result_t ssh__authenticate_password(
-    bruce_ssh_id_t session, const char *username, const char *password, uint32_t timeout_ms
-) {
-    bruce_result_t permission = permission__check(BRUCE_PERMISSION_SSH);
-    if (permission != BRUCE_OK) return permission;
-    if (username == NULL || username[0] == '\0' || password == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
-    ssh__slot_t *slot;
-    bruce_result_t result = ssh__owned_slot(session, &slot);
-    if (result != BRUCE_OK) return result;
+static bruce_result_t ssh__authenticate(ssh__slot_t *slot, const char *username, uint32_t timeout_ms) {
     if (!slot->host_key_verified) return BRUCE_ERR_INVALID_STATE;
     if (slot->ssh != NULL) return BRUCE_ERR_INVALID_STATE; /* already authenticated */
 
     uint32_t effective_timeout = timeout_ms == 0 ? SSH__DEFAULT_CONNECT_TIMEOUT_MS : timeout_ms;
     uint64_t deadline = runtime__now() + effective_timeout;
 
+    bruce_result_t result;
     int fd;
     result = ssh__connect_socket(slot->host, slot->port, deadline, &fd);
     if (result != BRUCE_OK) return result;
@@ -462,9 +561,6 @@ bruce_result_t ssh__authenticate_password(
      * caller's requested PTY size) isn't called until later. */
     (void)wolfSSH_SetChannelType(slot->ssh, WOLFSSH_SESSION_TERMINAL, NULL, 0);
 
-    slot->auth_password = password;
-    slot->auth_password_len = strlen(password);
-
     int rc;
     while ((rc = wolfSSH_connect(slot->ssh)) != WS_SUCCESS) {
         int wolfssh_err = wolfSSH_get_error(slot->ssh);
@@ -474,6 +570,10 @@ bruce_result_t ssh__authenticate_password(
     }
     slot->auth_password = NULL;
     slot->auth_password_len = 0;
+    slot->auth_private_key = NULL;
+    slot->auth_private_key_len = 0;
+    slot->auth_public_key = NULL;
+    slot->auth_public_key_len = 0;
 
     if (result == BRUCE_OK && rc != WS_SUCCESS) {
         ESP_LOGE(
@@ -491,6 +591,142 @@ bruce_result_t ssh__authenticate_password(
     return BRUCE_OK;
 }
 
+bruce_result_t ssh__authenticate_password(
+    bruce_ssh_id_t session, const char *username, const char *password, uint32_t timeout_ms
+) {
+    bruce_result_t permission = permission__check(BRUCE_PERMISSION_SSH);
+    if (permission != BRUCE_OK) return permission;
+    if (username == NULL || username[0] == '\0' || password == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    ssh__slot_t *slot;
+    bruce_result_t result = ssh__owned_slot(session, &slot);
+    if (result != BRUCE_OK) return result;
+    slot->auth_password = password;
+    slot->auth_password_len = strlen(password);
+    result = ssh__authenticate(slot, username, timeout_ms);
+    slot->auth_password = NULL;
+    slot->auth_password_len = 0;
+    return result;
+}
+
+bruce_result_t ssh__generate_keypair(
+    char *private_key, size_t private_capacity, size_t *out_private_size,
+    char *public_key, size_t public_capacity, size_t *out_public_size
+) {
+    bruce_result_t permission = permission__check(BRUCE_PERMISSION_SSH);
+    if (permission != BRUCE_OK) return permission;
+    if (private_key == NULL || out_private_size == NULL || public_key == NULL || out_public_size == NULL)
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    *out_private_size = 0;
+    *out_public_size = 0;
+
+    WC_RNG rng;
+    ecc_key key;
+    bool rng_ready = false;
+    bool key_ready = false;
+    bruce_result_t result = BRUCE_ERR_IO;
+    uint8_t der[SSH__ECDSA_DER_MAX];
+    uint8_t blob[SSH__ECDSA_BLOB_MAX];
+    if (wc_InitRng(&rng) != 0) goto cleanup;
+    rng_ready = true;
+    if (wc_ecc_init(&key) != 0) goto cleanup;
+    key_ready = true;
+    if (wc_ecc_make_key_ex(&rng, 32, &key, ECC_SECP256R1) != 0) goto cleanup;
+    int der_size = wc_EccKeyToDer(&key, der, sizeof(der));
+    if (der_size <= 0) goto cleanup;
+    size_t blob_size = 0;
+    result = ssh__public_blob(&key, blob, sizeof(blob), &blob_size);
+    if (result != BRUCE_OK) goto cleanup;
+
+    static const char pem_header[] = "-----BEGIN EC PRIVATE KEY-----\n";
+    static const char pem_footer[] = "-----END EC PRIVATE KEY-----\n";
+    size_t encoded_size = ((size_t)der_size + 2u) / 3u * 4u;
+    size_t line_count = (encoded_size + 63u) / 64u;
+    size_t private_size = sizeof(pem_header) - 1u + encoded_size + line_count + sizeof(pem_footer) - 1u;
+    size_t public_encoded_size = (blob_size + 2u) / 3u * 4u;
+    size_t public_size = sizeof(SSH__ECDSA_ALGORITHM) - 1u + 1u + public_encoded_size;
+    if (private_size + 1u > private_capacity || public_size + 1u > public_capacity) {
+        result = BRUCE_ERR_RESOURCE_LIMIT;
+        goto cleanup;
+    }
+
+    size_t offset = 0;
+    memcpy(private_key + offset, pem_header, sizeof(pem_header) - 1u);
+    offset += sizeof(pem_header) - 1u;
+    char encoded[256];
+    ssh__base64_encode(der, (size_t)der_size, encoded);
+    for (size_t i = 0; i < encoded_size; i += 64u) {
+        size_t chunk = encoded_size - i > 64u ? 64u : encoded_size - i;
+        memcpy(private_key + offset, encoded + i, chunk);
+        offset += chunk;
+        private_key[offset++] = '\n';
+    }
+    memcpy(private_key + offset, pem_footer, sizeof(pem_footer) - 1u);
+    offset += sizeof(pem_footer) - 1u;
+    private_key[offset] = '\0';
+    *out_private_size = offset;
+
+    memcpy(public_key, SSH__ECDSA_ALGORITHM, sizeof(SSH__ECDSA_ALGORITHM) - 1u);
+    public_key[sizeof(SSH__ECDSA_ALGORITHM) - 1u] = ' ';
+    offset = sizeof(SSH__ECDSA_ALGORITHM);
+    offset += ssh__base64_encode(blob, blob_size, public_key + offset);
+    public_key[offset] = '\0';
+    *out_public_size = offset;
+    result = BRUCE_OK;
+
+cleanup:
+    memset(der, 0, sizeof(der));
+    if (key_ready) wc_ecc_free(&key);
+    if (rng_ready) wc_FreeRng(&rng);
+    return result;
+}
+
+bruce_result_t ssh__authenticate_key(
+    bruce_ssh_id_t session, const char *username, const void *private_key,
+    size_t private_key_size, uint32_t timeout_ms
+) {
+    bruce_result_t permission = permission__check(BRUCE_PERMISSION_SSH);
+    if (permission != BRUCE_OK) return permission;
+    if (username == NULL || username[0] == '\0' || private_key == NULL || private_key_size == 0)
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    ssh__slot_t *slot;
+    bruce_result_t result = ssh__owned_slot(session, &slot);
+    if (result != BRUCE_OK) return result;
+
+    uint8_t der[SSH__ECDSA_DER_MAX];
+    size_t der_size = 0;
+    result = ssh__pem_decode(private_key, private_key_size, der, sizeof(der), &der_size);
+    if (result != BRUCE_OK) return result;
+    ecc_key key;
+    if (wc_ecc_init(&key) != 0) {
+        memset(der, 0, sizeof(der));
+        return BRUCE_ERR_IO;
+    }
+    word32 index = 0;
+    if (wc_EccPrivateKeyDecode(der, &index, &key, (word32)der_size) != 0) {
+        wc_ecc_free(&key);
+        memset(der, 0, sizeof(der));
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    uint8_t blob[SSH__ECDSA_BLOB_MAX];
+    size_t blob_size = 0;
+    result = ssh__public_blob(&key, blob, sizeof(blob), &blob_size);
+    wc_ecc_free(&key);
+    if (result == BRUCE_OK) {
+        slot->auth_private_key = der;
+        slot->auth_private_key_len = der_size;
+        slot->auth_public_key = blob;
+        slot->auth_public_key_len = blob_size;
+        result = ssh__authenticate(slot, username, timeout_ms);
+    }
+    slot->auth_private_key = NULL;
+    slot->auth_private_key_len = 0;
+    slot->auth_public_key = NULL;
+    slot->auth_public_key_len = 0;
+    memset(der, 0, sizeof(der));
+    memset(blob, 0, sizeof(blob));
+    return result;
+}
+
 bruce_result_t ssh__open_shell(
     bruce_ssh_id_t session, const char *terminal_type, uint16_t columns, uint16_t rows, uint32_t timeout_ms
 ) {
@@ -503,7 +739,7 @@ bruce_result_t ssh__open_shell(
     if (result != BRUCE_OK) return result;
     if (slot->ssh == NULL) return BRUCE_ERR_INVALID_STATE;
     /* The shell/PTY channel is already open by the time
-     * ssh__authenticate_password() returns (see the comment there); this
+     * authentication returns (see the comment there); this
      * just applies the caller's requested size. wolfSSH's public API has no
      * separate control for the terminal-type string, so it's accepted for
      * SDK-contract compatibility but not otherwise used. */

@@ -58,10 +58,8 @@ int shell_parser__plan(const char *line, shell_plan_t *plan, const char **error)
             length = i;
             c = '\0';
         }
-        if (c == '|' && i + 1 < length && line[i + 1] == '|') {
-            /* handled below as a supported connector */
-        } else if (c == '|' || c == '<' || c == '>') {
-            *error = "pipes and redirection are unsupported";
+        if (c == '<' || c == '>') {
+            *error = "redirection is unsupported";
             return -1;
         }
 
@@ -76,6 +74,9 @@ int shell_parser__plan(const char *line, shell_plan_t *plan, const char **error)
         } else if (c == '|' && i + 1 < length && line[i + 1] == '|') {
             connector = SHELL_CONNECT_OR;
             operator_size = 2;
+        } else if (c == '|') {
+            connector = SHELL_CONNECT_PIPE;
+            operator_size = 1;
         } else if (c == '&') {
             *error = "unsupported operator";
             return -1;

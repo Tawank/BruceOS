@@ -19,7 +19,7 @@
 #define APP_RUNNER_MAX_APPS 40
 #define APP_RUNNER_PATH_MAX 160
 #define APP_RUNNER_MAX_LOADERS 12
-#define APP_RUNNER_LOADER_EXTENSION_MAX 5
+#define APP_RUNNER_LOADER_EXTENSION_MAX 16
 
 typedef struct {
     const char *name;
