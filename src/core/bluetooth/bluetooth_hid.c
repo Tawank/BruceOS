@@ -564,16 +564,8 @@ int bluetooth_hid__scan(bluetooth_hid__device_t *devices, size_t capacity, uint3
         return initialized;
     }
     size_t scan_capacity = capacity < BLUETOOTH_HID__MAX_RESULTS ? capacity : BLUETOOTH_HID__MAX_RESULTS;
-    bluetooth_hid__device_t *scan_devices = NULL;
-    if (scan_capacity > 0) {
-        scan_devices = calloc(scan_capacity, sizeof(*scan_devices));
-        if (scan_devices == NULL) {
-            bluetooth_hid__operation_unlock();
-            return BRUCE_ERR_NO_MEMORY;
-        }
-    }
     portENTER_CRITICAL(&s_state_mux);
-    s_scan_devices = scan_devices;
+    s_scan_devices = devices;
     s_scan_capacity = scan_capacity;
     s_scan_count = 0;
     s_scanning = true;
@@ -588,7 +580,6 @@ int bluetooth_hid__scan(bluetooth_hid__device_t *devices, size_t capacity, uint3
         s_scan_capacity = 0;
         s_scan_count = 0;
         portEXIT_CRITICAL(&s_state_mux);
-        free(scan_devices);
         bluetooth_hid__operation_unlock();
         return error == ESP_ERR_INVALID_STATE ? BRUCE_ERR_BUSY : BRUCE_ERR_IO;
     }
@@ -608,8 +599,6 @@ int bluetooth_hid__scan(bluetooth_hid__device_t *devices, size_t capacity, uint3
     s_scan_capacity = 0;
     s_scan_count = 0;
     portEXIT_CRITICAL(&s_state_mux);
-    if (devices != NULL && count > 0) memcpy(devices, scan_devices, (size_t)count * sizeof(*devices));
-    free(scan_devices);
     bluetooth_hid__operation_unlock();
     if ((bits & BLUETOOTH_HID__SCAN_DONE_BIT) == 0) return BRUCE_ERR_TIMEOUT;
     if (count > 1) qsort(devices, (size_t)count, sizeof(*devices), bluetooth_hid__compare_rssi);

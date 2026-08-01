@@ -147,7 +147,7 @@ int elf_loader__run_path(const char *path, const char *arg, bool in_background) 
     }
     strcpy(full_argv[0], cmd_name);
     for (int i = 0; i < argc; ++i) { full_argv[i + 1] = argv[i]; }
-    memory__free(argv);
+    free(argv);
     argv = NULL;
     argc = 0;
 

@@ -489,7 +489,7 @@ static bool config__save_locked(void) {
     cJSON *root = config__build_json(&s_config);
     if (root == NULL) return false;
 
-    char *text = cJSON_Print(root);
+    char *text = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     if (text == NULL) return false;
 

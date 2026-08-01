@@ -49,14 +49,23 @@ static bruce_result_t filemanager__read_preview(const char *path, char **out_tex
     bruce_result_t result = storage__open(path, BRUCE_STORAGE_OPEN_READ, &file);
     if (result != BRUCE_OK) return result;
 
-    char *text = memory__calloc(FILEMANAGER_PREVIEW_MAX + 1, 1);
+    uint64_t file_size = 0;
+    result = storage__seek(file, 0, SEEK_END, &file_size);
+    if (result == BRUCE_OK) result = storage__seek(file, 0, SEEK_SET, NULL);
+    if (result != BRUCE_OK) {
+        (void)storage__close(file);
+        return result;
+    }
+
+    size_t preview_size = file_size < FILEMANAGER_PREVIEW_MAX ? (size_t)file_size : FILEMANAGER_PREVIEW_MAX;
+    char *text = memory__malloc(preview_size + 1u);
     if (text == NULL) {
         (void)storage__close(file);
         return BRUCE_ERR_NO_MEMORY;
     }
 
     size_t read_size = 0;
-    result = storage__read(file, text, FILEMANAGER_PREVIEW_MAX, &read_size);
+    result = storage__read(file, text, preview_size, &read_size);
     if (result == BRUCE_OK) {
         char extra;
         size_t extra_size = 0;

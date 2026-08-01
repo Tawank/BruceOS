@@ -180,7 +180,7 @@ static bool permission__save_locked(void) {
         }
     }
 
-    char *text = cJSON_Print(root);
+    char *text = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     if (text == NULL) return false;
     bool saved = storage__write_file_atomic(PERMISSION__FILE_PATH, text, strlen(text));

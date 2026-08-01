@@ -227,15 +227,7 @@ int bluetooth__scan_ble(bluetooth__device_t *devices, size_t capacity, uint32_t 
         return BRUCE_ERR_BUSY;
     }
     size_t scan_capacity = capacity < BLUETOOTH__MAX_RESULTS ? capacity : BLUETOOTH__MAX_RESULTS;
-    bluetooth__device_t *scan_devices = NULL;
-    if (scan_capacity > 0) {
-        scan_devices = calloc(scan_capacity, sizeof(*scan_devices));
-        if (scan_devices == NULL) {
-            bluetooth__unlock();
-            return BRUCE_ERR_NO_MEMORY;
-        }
-    }
-    s_scan_devices = scan_devices;
+    s_scan_devices = devices;
     s_scan_capacity = scan_capacity;
     s_scan_count = 0;
     s_scan_seconds = (timeout_ms + 999) / 1000;
@@ -261,7 +253,6 @@ int bluetooth__scan_ble(bluetooth__device_t *devices, size_t capacity, uint32_t 
         s_scan_capacity = 0;
         s_scan_count = 0;
         bluetooth__unlock();
-        free(scan_devices);
         return error == ESP_ERR_INVALID_STATE ? BRUCE_ERR_BUSY : BRUCE_ERR_IO;
     }
 
@@ -282,8 +273,6 @@ int bluetooth__scan_ble(bluetooth__device_t *devices, size_t capacity, uint32_t 
     s_scan_capacity = 0;
     s_scan_count = 0;
     bluetooth__unlock();
-    if (devices != NULL && count > 0) memcpy(devices, scan_devices, (size_t)count * sizeof(*devices));
-    free(scan_devices);
     if (count > 1) qsort(devices, (size_t)count, sizeof(*devices), bluetooth__compare_rssi);
     if (start_error != ESP_OK) return BRUCE_ERR_IO;
     return (bits & BLUETOOTH__SCAN_DONE_BIT) != 0 ? count : BRUCE_ERR_TIMEOUT;

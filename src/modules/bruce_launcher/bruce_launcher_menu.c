@@ -136,23 +136,35 @@ static char *bruce_launcher__read_file(const char *path) {
     bruce_file_id_t file;
     if (storage__open(path, BRUCE_STORAGE_OPEN_READ, &file) != BRUCE_OK) return NULL;
 
-    char *buffer = (char *)memory__malloc(BRUCE_LAUNCHER_JSON_MAX);
+    uint64_t file_size = 0;
+    bruce_result_t result = storage__seek(file, 0, SEEK_END, &file_size);
+    if (result == BRUCE_OK && file_size >= BRUCE_LAUNCHER_JSON_MAX) result = BRUCE_ERR_RESOURCE_LIMIT;
+    if (result == BRUCE_OK) result = storage__seek(file, 0, SEEK_SET, NULL);
+    if (result != BRUCE_OK) {
+        storage__close(file);
+        return NULL;
+    }
+
+    size_t size = (size_t)file_size;
+    char *buffer = (char *)memory__malloc(size + 1u);
     if (buffer == NULL) {
         storage__close(file);
         return NULL;
     }
 
     size_t total = 0;
-    for (;;) {
+    while (total < size) {
         size_t chunk = 0;
-        bruce_result_t result =
-            storage__read(file, buffer + total, BRUCE_LAUNCHER_JSON_MAX - total - 1, &chunk);
+        result = storage__read(file, buffer + total, size - total, &chunk);
         if (result != BRUCE_OK || chunk == 0) break;
         total += chunk;
-        if (total >= BRUCE_LAUNCHER_JSON_MAX - 1) break;
+    }
+    storage__close(file);
+    if (result != BRUCE_OK || total != size) {
+        memory__free(buffer);
+        return NULL;
     }
     buffer[total] = '\0';
-    storage__close(file);
     return buffer;
 }
 

@@ -482,20 +482,18 @@ static bruce_result_t webui__remove_tree(const char *path, unsigned depth) {
     if (result == BRUCE_ERR_INVALID_ARGUMENT || result == BRUCE_ERR_IO) return storage__remove(path);
     if (result != BRUCE_OK) return result;
     if (count > WEBUI_DELETE_ENTRIES_MAX) return BRUCE_ERR_RESOURCE_LIMIT;
-    bruce_storage_entry_t *entries = count > 0 ? malloc(count * sizeof(*entries)) : NULL;
-    if (count > 0 && entries == NULL) return BRUCE_ERR_NO_MEMORY;
-    size_t capacity = count;
-    result = storage__list(path, entries, capacity, &count);
-    if (result == BRUCE_OK && count > capacity) result = BRUCE_ERR_BUSY;
-    for (size_t i = 0; result == BRUCE_OK && i < count; i++) {
+
+    while (result == BRUCE_OK && count > 0) {
+        bruce_storage_entry_t entry;
+        result = storage__list(path, &entry, 1, &count);
+        if (result != BRUCE_OK || count == 0) break;
         char child[BRUCE_STORAGE_PATH_MAX];
-        int length = snprintf(child, sizeof(child), "%s/%s", path, entries[i].name);
+        int length = snprintf(child, sizeof(child), "%s/%s", path, entry.name);
         if (length < 0 || (size_t)length >= sizeof(child)) result = BRUCE_ERR_INVALID_PATH;
-        else if (entries[i].type == BRUCE_STORAGE_ENTRY_DIRECTORY)
+        else if (entry.type == BRUCE_STORAGE_ENTRY_DIRECTORY)
             result = webui__remove_tree(child, depth + 1u);
         else result = storage__remove(child);
     }
-    free(entries);
     return result == BRUCE_OK ? storage__remove(path) : result;
 }
 
