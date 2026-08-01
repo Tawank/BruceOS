@@ -1,6 +1,6 @@
 #include "shell_builtins.h"
 
-#include <errno.h>
+#include <errno.h> // IWYU pragma: export
 #include <limits.h>
 #include <stdlib.h>
 #include <string.h>
@@ -100,7 +100,7 @@ static int shell_builtins__assignment(shell_state_t *state, const char *assignme
 }
 
 bool shell_builtins__is_builtin(const char *name) {
-    static const char *const names[] = {"echo", "true", "false", "set", "unset", "export", "exit", "help"};
+    static const char *const names[] = {"echo", "true", "false", "set", "unset", "export", "exit"};
     for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); ++i) {
         if (strcmp(name, names[i]) == 0) return true;
     }
@@ -172,7 +172,7 @@ int shell_builtins__run(shell_state_t *state, int argc, char **argv) {
         state->exit_status = status;
         return status;
     }
-    stdio__printf("Builtins: echo true false set unset export exit help\n");
+    stdio__printf("Builtins: echo true false set unset export exit\n");
     stdio__printf("Operators: ; && ||. Pipes and redirection are unsupported.\n");
     return 0;
 }

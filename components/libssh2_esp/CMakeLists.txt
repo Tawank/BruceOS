@@ -11,7 +11,9 @@ set(LIBSSH2_UPSTREAM_COMMIT "74bb307bd52a26c8b579ed0e0b5c197388bb8a46")
 FetchContent_Declare(libssh2_upstream
     GIT_REPOSITORY https://github.com/vszakats/libssh2.git
     GIT_TAG ${LIBSSH2_UPSTREAM_COMMIT}
-    GIT_SHALLOW FALSE)
+    GIT_SHALLOW FALSE
+    PATCH_COMMAND ${CMAKE_COMMAND} -DSOURCE_DIR=<SOURCE_DIR>
+                  -P "${CMAKE_CURRENT_LIST_DIR}/patch_max_packet_len.cmake")
 
 cmake_policy(PUSH)
 cmake_policy(SET CMP0169 OLD)

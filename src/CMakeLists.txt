@@ -91,6 +91,7 @@ idf_component_register(SRCS
                     "modules/shell/shell_executor.c"
                     "modules/shell/shell_builtins.c"
                     ${BRUCE_SELFTEST_SOURCES}
+                    "modules/ssh/ssh_app.c"
                     "modules/tcp/tcp_app.c"
                      "modules/utils/launcher/launcher_app.c"
                      "modules/utils/help/help_app.c"
@@ -283,6 +284,11 @@ target_include_directories(bruce_sdk_builtin_tcp_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/tcp")
 
+add_library(bruce_sdk_builtin_ssh_check OBJECT "modules/ssh/ssh_app.c")
+target_include_directories(bruce_sdk_builtin_ssh_check PRIVATE
+                           "${CMAKE_CURRENT_LIST_DIR}"
+                           "${CMAKE_CURRENT_LIST_DIR}/modules/ssh")
+
 add_library(bruce_sdk_builtin_elf_loader_check OBJECT
             "modules/loaders/elf/elf_loader_app.c"
             "modules/loaders/elf/elf_loader_sdk_symbols.c")
@@ -334,6 +340,7 @@ set(BRUCE_ARGS_SDK_CHECK_TARGETS
     bruce_sdk_builtin_shell_check
     bruce_sdk_builtin_notification_check
     bruce_sdk_builtin_tcp_check
+    bruce_sdk_builtin_ssh_check
     bruce_sdk_builtin_elf_loader_check
     bruce_sdk_builtin_js_loader_check)
 foreach(target IN LISTS BRUCE_ARGS_SDK_CHECK_TARGETS)

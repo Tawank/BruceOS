@@ -62,8 +62,7 @@ void *memory__realloc(void *ptr, size_t size) {
 
     size_t old_size = header->size;
     bruce_resource_id_t resource_id = header->resource_id;
-    memory__header_t *grown =
-        process_registry__resource_realloc(resource_id, header, sizeof(*grown) + size);
+    memory__header_t *grown = process_registry__resource_realloc(resource_id, header, sizeof(*grown) + size);
     if (grown == NULL) return NULL;
     grown->magic = MEMORY__MAGIC;
     grown->size = size;

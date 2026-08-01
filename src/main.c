@@ -24,6 +24,7 @@
 #include "modules/nrf24/nrf24_app.h"
 #include "modules/selftest/selftest.h"
 #include "modules/shell/shell_app.h"
+#include "modules/ssh/ssh_app.h"
 #include "modules/tcp/tcp_app.h"
 #include "modules/utils/help/help_app.h"
 #include "modules/utils/launcher/launcher_app.h"
@@ -87,6 +88,7 @@ void app_runner__register_defaults(void) {
     (void)app_runner__register("image_viewer", image_viewer_app_main, 0);
     (void)app_runner__register("notification", notification_app_main, 0);
     (void)app_runner__register("tcp", tcp_app_main, 0);
+    (void)app_runner__register("ssh", ssh_app_main, 0);
 
     (void)app_runner__register_loader(".elf", 10, elf_loader__run_path);
     (void)app_runner__register_loader(".js", 20, js_loader__run_path);

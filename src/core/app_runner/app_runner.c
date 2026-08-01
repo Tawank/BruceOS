@@ -16,7 +16,7 @@
 #include <string.h>
 #include <strings.h>
 
-#define APP_RUNNER_MAX_APPS 30
+#define APP_RUNNER_MAX_APPS 40
 #define APP_RUNNER_PATH_MAX 160
 #define APP_RUNNER_MAX_LOADERS 12
 #define APP_RUNNER_LOADER_EXTENSION_MAX 5
@@ -24,7 +24,7 @@
 typedef struct {
     const char *name;
     bruce_app_entry_t entry;
-    uint32_t stack_bytes;
+    uint16_t stack_bytes;
 } app_runner_app_t;
 
 static app_runner_app_t s_apps[APP_RUNNER_MAX_APPS];
@@ -40,13 +40,22 @@ static app_runner_loader_t s_loaders[APP_RUNNER_MAX_LOADERS];
 static int s_loader_count;
 
 bruce_result_t app_runner__register(const char *name, bruce_app_entry_t entry, uint32_t stack_bytes) {
-    if (name == NULL || name[0] == '\0' || entry == NULL) { return BRUCE_ERR_INVALID_ARGUMENT; }
-
-    for (int i = 0; i < s_app_count; ++i) {
-        if (strcmp(s_apps[i].name, name) == 0) { return BRUCE_ERR_ALREADY_EXISTS; }
+    if (name == NULL || name[0] == '\0' || entry == NULL) {
+        printf("BRUCE_ERR_INVALID_ARGUMENT");
+        return BRUCE_ERR_INVALID_ARGUMENT;
     }
 
-    if (s_app_count >= APP_RUNNER_MAX_APPS) { return BRUCE_ERR_RESOURCE_LIMIT; }
+    for (int i = 0; i < s_app_count; ++i) {
+        if (strcmp(s_apps[i].name, name) == 0) {
+            printf("BRUCE_ERR_ALREADY_EXISTS");
+            return BRUCE_ERR_ALREADY_EXISTS;
+        }
+    }
+
+    if (s_app_count >= APP_RUNNER_MAX_APPS) {
+        printf("BRUCE_ERR_RESOURCE_LIMIT");
+        return BRUCE_ERR_RESOURCE_LIMIT;
+    }
 
     s_apps[s_app_count].name = name;
     s_apps[s_app_count].entry = entry;

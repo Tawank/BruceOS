@@ -1,12 +1,12 @@
 #include "ssh.h"
 
-#include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
 #include <stdbool.h>
 #include <string.h>
 #include <unistd.h>
 
+#include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "libssh2.h"
@@ -18,6 +18,8 @@
 #include "core_sdk/permission.h"
 #include "core_sdk/runtime.h"
 #include "core_sdk/ssh.h"
+
+static const char *const TAG = "bruce_ssh";
 
 #define SSH__MAX_SESSIONS 4
 #define SSH__DEFAULT_CONNECT_TIMEOUT_MS 10000u
@@ -254,7 +256,16 @@ bruce_result_t ssh__connect(
             result = ssh__wait_socket(slot, deadline);
             if (result != BRUCE_OK) break;
         }
-        if (result == BRUCE_OK && rc != 0) result = BRUCE_ERR_IO;
+        if (result == BRUCE_OK && rc != 0) {
+            char *errmsg = NULL;
+            int errmsg_len = 0;
+            int last_error = libssh2_session_last_error(slot->session, &errmsg, &errmsg_len, 0);
+            ESP_LOGE(
+                TAG, "handshake with %s:%u failed: rc=%d libssh2_error=%d msg=%.*s", host,
+                (unsigned int)port, rc, last_error, errmsg_len, errmsg != NULL ? errmsg : ""
+            );
+            result = BRUCE_ERR_IO;
+        }
     }
     if (result != BRUCE_OK) {
         (void)ssh__close_internal(id, false);
