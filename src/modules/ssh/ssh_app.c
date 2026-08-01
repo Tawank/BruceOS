@@ -115,9 +115,8 @@ static bool ssh_app__find_known_fingerprint(
 /* Rewrites the known_hosts file with any prior entry for `key` replaced.
  * Entries beyond SSH_APP_KNOWN_HOSTS_MAX_BYTES are silently dropped; this
  * store is meant for a handful of personally-managed hosts, not a fleet. */
-static bruce_result_t ssh_app__store_known_fingerprint(
-    const char *key, const uint8_t fingerprint[BRUCE_SSH_HOST_KEY_SHA256_SIZE]
-) {
+static bruce_result_t
+ssh_app__store_known_fingerprint(const char *key, const uint8_t fingerprint[BRUCE_SSH_HOST_KEY_SHA256_SIZE]) {
     char *existing = memory__malloc(SSH_APP_KNOWN_HOSTS_MAX_BYTES);
     char *rebuilt = memory__malloc(SSH_APP_KNOWN_HOSTS_MAX_BYTES);
     if (existing == NULL || rebuilt == NULL) {
@@ -127,7 +126,8 @@ static bruce_result_t ssh_app__store_known_fingerprint(
     }
 
     size_t existing_size = 0;
-    bruce_result_t result = ssh_app__read_known_hosts(existing, SSH_APP_KNOWN_HOSTS_MAX_BYTES, &existing_size);
+    bruce_result_t result =
+        ssh_app__read_known_hosts(existing, SSH_APP_KNOWN_HOSTS_MAX_BYTES, &existing_size);
     if (result != BRUCE_OK) {
         memory__free(existing);
         memory__free(rebuilt);
@@ -142,8 +142,8 @@ static bruce_result_t ssh_app__store_known_fingerprint(
         const void *newline = memchr(line, '\n', existing_size - pos);
         size_t line_len = newline != NULL ? (size_t)((const char *)newline - line) : existing_size - pos;
         const void *space = memchr(line, ' ', line_len);
-        bool is_match =
-            space != NULL && (size_t)((const char *)space - line) == key_len && memcmp(line, key, key_len) == 0;
+        bool is_match = space != NULL && (size_t)((const char *)space - line) == key_len &&
+                        memcmp(line, key, key_len) == 0;
         if (!is_match && line_len > 0 && rebuilt_size + line_len + 1 <= SSH_APP_KNOWN_HOSTS_MAX_BYTES) {
             memcpy(rebuilt + rebuilt_size, line, line_len);
             rebuilt_size += line_len;
@@ -165,7 +165,8 @@ static bruce_result_t ssh_app__store_known_fingerprint(
     bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
     result = storage__open(
         SSH_APP_KNOWN_HOSTS_PATH,
-        BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE | BRUCE_STORAGE_OPEN_TRUNCATE, &file
+        BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE | BRUCE_STORAGE_OPEN_TRUNCATE,
+        &file
     );
     if (result == BRUCE_OK) {
         size_t written = 0;
@@ -218,17 +219,29 @@ static bruce_result_t ssh_app__verify_host_key(bruce_ssh_id_t session, const cha
         stdio__printf(
             "WARNING: host key for %s changed! New fingerprint SHA256:%s\n"
             "This can mean someone is intercepting the connection, or the host was reinstalled.\n",
-            key, hex
+            key,
+            hex
         );
         choices[0].label = "Trust new key & continue";
-        choice_result =
-            dialog__choice("SSH host key changed", "The remote host key does not match the saved one.", choices,
-                            2, &selected, NULL);
-    } else {
-        stdio__printf("The authenticity of host '%s' can't be established.\nSHA256 fingerprint: %s\n", key, hex);
         choice_result = dialog__choice(
-            "Unknown SSH host key", "Verify this fingerprint out-of-band before trusting it.", choices, 2,
-            &selected, NULL
+            "SSH host key changed",
+            "The remote host key does not match the saved one.",
+            choices,
+            2,
+            &selected,
+            NULL
+        );
+    } else {
+        stdio__printf(
+            "The authenticity of host '%s' can't be established.\nSHA256 fingerprint: %s\n", key, hex
+        );
+        choice_result = dialog__choice(
+            "Unknown SSH host key",
+            "Verify this fingerprint out-of-band before trusting it.",
+            choices,
+            2,
+            &selected,
+            NULL
         );
     }
     if (choice_result != BRUCE_OK || selected != 0) return BRUCE_ERR_PERMISSION;
@@ -264,9 +277,8 @@ static bruce_result_t ssh_app__session(bruce_ssh_id_t session, bool *out_local_e
     char received[SSH_APP_BUFFER_SIZE + 1];
     for (;;) {
         size_t received_size = 0;
-        bruce_result_t result = ssh__read(
-            session, false, received, SSH_APP_BUFFER_SIZE, SSH_APP_IO_TIMEOUT_MS, &received_size
-        );
+        bruce_result_t result =
+            ssh__read(session, false, received, SSH_APP_BUFFER_SIZE, SSH_APP_IO_TIMEOUT_MS, &received_size);
         if (result == BRUCE_OK) {
             if (received_size == 0) return BRUCE_OK;
             received[received_size] = '\0';
@@ -287,28 +299,30 @@ static bruce_result_t ssh_app__session(bruce_ssh_id_t session, bool *out_local_e
 }
 
 /* TODO(remove): temporary diagnostic for tracking down BRUCE_ERR_NO_MEMORY
- * failures from libssh2_session_init() on PSRAM-less boards. */
+ * failures on PSRAM-less boards. */
 static void ssh_app__log_heap_state(const char *label) {
     bruce_memory_stats_t stats;
     if (memory__get_stats(&stats) != BRUCE_OK) return;
     stdio__printf(
-        "[ssh mem] %s: internal free=%u largest=%u (total=%u); dram(8-bit) free=%u largest=%u (total=%u)",
-        label, (unsigned)stats.internal_free, (unsigned)stats.internal_largest_block,
-        (unsigned)stats.internal_total, (unsigned)stats.dram_8bit_free, (unsigned)stats.dram_8bit_largest_block,
-        (unsigned)stats.dram_8bit_total
+        "[ssh mem] %s: internal free=%u largest=%u (total=%u)",
+        label,
+        (unsigned)stats.internal_free,
+        (unsigned)stats.internal_largest_block,
+        (unsigned)stats.internal_total
     );
     if (stats.psram_total > 0) {
         stdio__printf(
-            ", psram free=%u largest=%u (total=%u)", (unsigned)stats.psram_free,
-            (unsigned)stats.psram_largest_block, (unsigned)stats.psram_total
+            ", psram free=%u largest=%u (total=%u)",
+            (unsigned)stats.psram_free,
+            (unsigned)stats.psram_largest_block,
+            (unsigned)stats.psram_total
         );
     }
     stdio__printf("\n");
 }
 
-static bruce_result_t ssh_app__client(
-    const char *host, uint16_t port, const char *username, const char *password
-) {
+static bruce_result_t
+ssh_app__client(const char *host, uint16_t port, const char *username, const char *password) {
     if (!wifi__is_connected()) {
         stdio__printf("SSH client: Wi-Fi is not connected\n");
         return BRUCE_ERR_INVALID_STATE;

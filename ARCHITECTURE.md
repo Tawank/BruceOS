@@ -739,8 +739,8 @@ bytes to stdout; Ctrl+] closes the active mode. The terminal waits for a
 launched foreground command to exit, preventing its prompt from competing for
 stdin.
 
-SSH client sessions are Core-owned opaque handles backed by the in-tree
-`libssh2_esp` component. They require the independent `ssh` permission, belong
+SSH client sessions are Core-owned opaque handles backed by the managed
+`wolfssl`/`wolfssh` components. They require the independent `ssh` permission, belong
 to the creating process, and close automatically at process teardown. The
 public API exposes handshake, SHA-256 host-key fingerprint retrieval and
 verification, password authentication, PTY shell open/resize, and nonblocking

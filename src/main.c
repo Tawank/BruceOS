@@ -39,6 +39,7 @@
 
 #define SELFTEST_STACK_BYTES 8192u
 #define SHELL_STACK_BYTES 4096u
+#define SSH_STACK_BYTES 8192u
 
 static void main__launch_launcher(void) {
     int result = app_runner__run("launcher", "--gui", true);
@@ -88,7 +89,7 @@ void app_runner__register_defaults(void) {
     (void)app_runner__register("image_viewer", image_viewer_app_main, 0);
     (void)app_runner__register("notification", notification_app_main, 0);
     (void)app_runner__register("tcp", tcp_app_main, 0);
-    (void)app_runner__register("ssh", ssh_app_main, 0);
+    (void)app_runner__register("ssh", ssh_app_main, SSH_STACK_BYTES);
 
     (void)app_runner__register_loader(".elf", 10, elf_loader__run_path);
     (void)app_runner__register_loader(".js", 20, js_loader__run_path);

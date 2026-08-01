@@ -1,6 +1,0 @@
-version: "1.2.0-bruce.1"
-description: "Temporary BruceOS ESP-IDF wrapper for libssh2"
-url: "https://github.com/skuodi/libssh2_esp"
-license: "BSD-3-Clause"
-dependencies:
-  idf: ">=6.0"

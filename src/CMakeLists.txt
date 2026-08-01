@@ -133,13 +133,64 @@ idf_component_register(SRCS
                      spi_flash
                      littlefs
                      libpng
-                     libssh2_esp
+                     wolfssl
+                     wolfssh
                     elf_loader
                     mquickjs
                     INCLUDE_DIRS
                     "."
                      PRIV_INCLUDE_DIRS
                      ".")
+
+# wolfSSH/wolfSSL build fixups for this ESP-IDF v6 / PSRAM-less / software-crypto
+# configuration; see components/wolfssl_esp_patches/patch_wolfssl_esp_idf6.cmake
+# for the four upstream bugs this patches, and sdkconfig.defaults for the
+# CONFIG_ESP_WOLFSSL_* options this build relies on.
+set(WOLFSSL_COMPONENT_DIR "${CMAKE_CURRENT_LIST_DIR}/../managed_components/wolfssl__wolfssl")
+include("${CMAKE_CURRENT_LIST_DIR}/../components/wolfssl_esp_patches/patch_wolfssl_esp_idf6.cmake")
+
+idf_component_get_property(bruce_wolfssl_lib wolfssl__wolfssl COMPONENT_LIB)
+# Kconfig's CONFIG_ESP_WOLFSSL_NO_ESP32_CRYPT only takes effect if
+# esp32-crypt.h is processed before wolfssl/wolfcrypt/settings.h derives
+# WOLFSSL_ESP32_CRYPT from it; settings.h is included first in the normal
+# header chain, so force esp32-crypt.h in ahead of everything via -include.
+target_compile_options(${bruce_wolfssl_lib} PRIVATE
+    -include "${WOLFSSL_COMPONENT_DIR}/wolfssl/wolfcrypt/port/Espressif/esp32-crypt.h")
+# wolfSSH calls wc_SSH_KDF(), only compiled into wolfssl when this is defined.
+target_compile_definitions(${bruce_wolfssl_lib} PUBLIC WOLFSSL_WOLFSSH)
+
+# wolfSSH's PTY/terminal support (pty-req + shell channel, requested together
+# via wolfSSH_SetChannelType(..., WOLFSSH_SESSION_TERMINAL, ...) in
+# src/core/ssh/ssh.c) is compiled out unless this is defined. It is further
+# gated by `!defined(NO_FILESYSTEM)` upstream (NO_FILESYSTEM is unconditionally
+# set for this board in wolfssl__wolfssl's user_settings.h); see
+# patch_wolfssh_esp_idf6.cmake for why that half of the guard is dropped.
+# NO_TERMIOS skips wolfSSH's CreateMode() branch that mirrors the *local*
+# client's tcgetattr(STDIN_FILENO, ...) terminal settings to the server --
+# meaningless on a board with no attached host tty -- in favor of its fallback
+# fixed-baud-rate mode string.
+set(WOLFSSH_COMPONENT_DIR "${CMAKE_CURRENT_LIST_DIR}/../managed_components/wolfssl__wolfssh")
+include("${CMAKE_CURRENT_LIST_DIR}/../components/wolfssl_esp_patches/patch_wolfssh_esp_idf6.cmake")
+
+idf_component_get_property(bruce_wolfssh_lib wolfssl__wolfssh COMPONENT_LIB)
+target_compile_definitions(${bruce_wolfssh_lib} PRIVATE WOLFSSH_TERM NO_TERMIOS)
+
+# wolfSSH's default per-channel flow-control window (DEFAULT_WINDOW_SZ,
+# wolfssh/internal.h) is 128KB, allocated as a single WMALLOC() in ChannelNew()
+# -- far larger than this PSRAM-less board's largest free heap block
+# (~72KB even with ~120KB total free), so channel creation reliably fails
+# with a memory allocation error right after a successful authenticate. Same
+# class of problem as MAX_SSH_PACKET_LEN in the old libssh2 backend. 2000 is
+# the value wolfSSL's own Espressif user_settings.h template recommends for
+# embedded targets (see the ESP_ENABLE_WOLFSSH block there); we set it
+# directly rather than opting into that whole Kconfig-gated block.
+target_compile_definitions(${bruce_wolfssh_lib} PRIVATE DEFAULT_WINDOW_SZ=2000)
+
+# This component's own sources (core/ssh/ssh.c) include wolfssh/wolfssl headers
+# directly and must take the WOLFSSL_USER_SETTINGS_DIR path rather than
+# expecting a ./configure-generated wolfssl/options.h that this managed
+# component packaging never produces.
+target_compile_definitions(${COMPONENT_LIB} PRIVATE WOLFSSL_USER_SETTINGS)
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 set(BRUCE_WEBUI_ASSET_DIR "${CMAKE_CURRENT_LIST_DIR}/../embedded_resources/web_interface")

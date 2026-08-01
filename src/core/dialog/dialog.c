@@ -70,7 +70,7 @@ static const char *dialog__kind_label(bruce_dialog_kind_t kind) {
 /* -------------------------------------------------------------------------- */
 
 static bruce_result_t dialog__term_message(bruce_dialog_kind_t kind, const char *title, const char *message) {
-    printf(
+    stdio__printf(
         "[dialog:%s:%s] %s%s%s\n",
         "term",
         dialog__kind_label(kind),
@@ -89,13 +89,12 @@ static bruce_result_t dialog__term_choice(
     const char *title, const char *message, const bruce_dialog_choice_t *choices, size_t choice_count,
     size_t *out_selected
 ) {
-    if (title != NULL) { printf("%s\n", title); }
-    if (message != NULL) { printf("%s\n", message); }
+    if (title != NULL) { stdio__printf("%s\n", title); }
+    if (message != NULL) { stdio__printf("%s\n", message); }
     for (size_t i = 0; i < choice_count; ++i) {
-        printf("%u. %s\n", (unsigned int)(i + 1), choices[i].label != NULL ? choices[i].label : "");
+        stdio__printf("%u. %s\n", (unsigned int)(i + 1), choices[i].label != NULL ? choices[i].label : "");
     }
-    printf("pick: ");
-    fflush(stdout);
+    stdio__printf("pick: ");
 
     char line[16];
     if (dialog__term_read_line(line, sizeof(line), false) < 0) { return BRUCE_ERR_CANCELLED; }
@@ -110,11 +109,10 @@ static bruce_result_t dialog__term_input(
     const char *title, const char *prompt, const char *initial_text, bool mask_input, char *buffer,
     size_t buffer_size, bool (*validate)(const char *text, size_t len)
 ) {
-    if (title != NULL) { printf("%s\n", title); }
-    if (prompt != NULL) { printf("%s", prompt); }
-    if (initial_text != NULL && initial_text[0] != '\0') { printf(" [%s]", initial_text); }
-    printf(": ");
-    fflush(stdout);
+    if (title != NULL) { stdio__printf("%s\n", title); }
+    if (prompt != NULL) { stdio__printf("%s", prompt); }
+    if (initial_text != NULL && initial_text[0] != '\0') { stdio__printf(" [%s]", initial_text); }
+    stdio__printf(": ");
 
     char tmp[256];
     size_t tmp_size = buffer_size < sizeof(tmp) ? buffer_size : sizeof(tmp);
@@ -130,7 +128,7 @@ static bruce_result_t dialog__term_input(
     }
 
     if (validate != NULL && !validate(buffer, strlen(buffer))) {
-        printf("Invalid input.\n");
+        stdio__printf("Invalid input.\n");
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
 
@@ -165,10 +163,9 @@ static bruce_result_t dialog__term_pick_file(
     const char *initial_path, const char *extension_filter, char *out_path, size_t out_path_size
 ) {
     const char *path = initial_path != NULL && initial_path[0] != '\0' ? initial_path : "/";
-    printf("Enter file path");
-    if (extension_filter != NULL) { printf(" (%s)", extension_filter); }
-    printf(" [%s]: ", path);
-    fflush(stdout);
+    stdio__printf("Enter file path");
+    if (extension_filter != NULL) { stdio__printf(" (%s)", extension_filter); }
+    stdio__printf(" [%s]: ", path);
 
     char line[BRUCE_STORAGE_PATH_MAX];
     int len = dialog__term_read_line(line, sizeof(line), false);
@@ -1061,9 +1058,9 @@ static bruce_result_t dialog__viewer_draw(dialog__viewer_t *viewer, bool gui) {
             return frame_result == BRUCE_ERR_NOT_FOREGROUND ? BRUCE_ERR_CANCELLED : frame_result;
         }
     } else {
-        printf("--- %s ---\n", viewer->title != NULL ? viewer->title : "viewer");
-        printf("%s\n", viewer->text != NULL ? viewer->text : "");
-        printf("---\n");
+        stdio__printf("--- %s ---\n", viewer->title != NULL ? viewer->title : "viewer");
+        stdio__printf("%s\n", viewer->text != NULL ? viewer->text : "");
+        stdio__printf("---\n");
     }
     return BRUCE_OK;
 }

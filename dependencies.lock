@@ -86,6 +86,20 @@ dependencies:
       registry_url: https://components.espressif.com/
       type: service
     version: 1.22.3
+  wolfssl/wolfssh:
+    component_hash: 24d623360c07374a90b1ade8d1218b24bb7b661fd51ace9135dccf510a338927
+    dependencies: []
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.4.20
+  wolfssl/wolfssl:
+    component_hash: 4d619e882c19d967bbaa53302e3bd2bdb8c611b5efb13302171aace809fccfdf
+    dependencies: []
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 5.8.2~1
 direct_dependencies:
 - espressif/cjson
 - espressif/elf_loader
@@ -93,6 +107,8 @@ direct_dependencies:
 - espressif/libpng
 - idf
 - joltwallet/littlefs
-manifest_hash: 9a35328581d1e5f90179e8af7f8ceb50dc96a07a706c262414eb50b9f7607585
+- wolfssl/wolfssh
+- wolfssl/wolfssl
+manifest_hash: 772ab45b2d4f7a3f3fca3d54631f6adf068a9d2fcfd02bec3faeaf61d29a6bf0
 target: esp32s3
 version: 3.0.0
