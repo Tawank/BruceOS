@@ -9,6 +9,7 @@
 #include "core/storage/storage.h"
 #include "core_sdk/loader.h"
 
+#include "esp_log_level.h"
 #include "modules/apps/apps_app.h"
 #include "modules/bluetooth/bluetooth_app.h"
 #include "modules/bluetooth_hid/bluetooth_hid_app.h"
@@ -41,7 +42,7 @@
 
 #define SELFTEST_STACK_BYTES 8192u
 #define SHELL_STACK_BYTES 4096u
-#define SSH_STACK_BYTES 8192u
+#define SSH_STACK_BYTES 16384u
 #define SSH_KEYGEN_STACK_BYTES 12288u
 
 static void main__launch_launcher(void) {
@@ -110,6 +111,12 @@ void app_runner__register_defaults(void) {
     elf_loader__init();
 }
 
+void set_log_level() {
+    esp_log_level_set("wifi", ESP_LOG_WARN);
+    esp_log_level_set("wifi_init", ESP_LOG_WARN);
+    esp_log_level_set("phy_init", ESP_LOG_WARN);
+}
+
 void app_main(void) {
     bool storage_ok = storage__init();
     if (!storage_ok) printf("Storage initialization failed\n");
@@ -134,4 +141,6 @@ void app_main(void) {
     if (!ui_ok) return;
 
     main__launch_launcher();
+
+    set_log_level();
 }

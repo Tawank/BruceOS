@@ -178,6 +178,30 @@ bool selftest__run_terminal_stdio_case(void) {
     bool ok = waited == BRUCE_OK && status.reason == BRUCE_PROCESS_EXITED && status.exit_code == 0 &&
               read_result == BRUCE_OK && strstr(output, "hello") != NULL &&
               strstr(output, "received:hello") != NULL;
+
+    session = BRUCE_STDIO_SESSION_INVALID;
+    if (ok && stdio__session_create(&session) == BRUCE_OK &&
+        stdio__session_route_children(session) == BRUCE_OK) {
+        result = app_runner__run("shell", "-i", true);
+        (void)stdio__session_route_children(BRUCE_STDIO_SESSION_INVALID);
+        static const char shell_input[] = "echo interactive-ok\rexit\r";
+        if (result <= 0 ||
+            stdio__session_write_input(session, shell_input, sizeof(shell_input) - 1) != BRUCE_OK) {
+            ok = false;
+        } else {
+            waited = process__wait_status((bruce_process_id_t)result, 2000, &status);
+            memset(output, 0, sizeof(output));
+            output_size = 0;
+            read_result = stdio__session_read_output(session, output, sizeof(output) - 1, &output_size);
+            ok = waited == BRUCE_OK && status.reason == BRUCE_PROCESS_EXITED &&
+                 status.exit_code == 0 && read_result == BRUCE_OK &&
+                 strstr(output, "interactive-ok") != NULL;
+        }
+        (void)stdio__session_close(session);
+    } else {
+        ok = false;
+        if (session != BRUCE_STDIO_SESSION_INVALID) (void)stdio__session_close(session);
+    }
     printf("[selftest] terminal/stdio: %s\n", ok ? "OK" : "failed");
     return ok;
 }
@@ -252,6 +276,18 @@ bool selftest__run_terminal_editing_case(void) {
     bool ansi_ok = strcmp(transcript, "plainred") == 0 &&
                    colors[0] == TERMINAL_ANSI_DEFAULT_COLOR && colors[5] == 1 &&
                    ansi.color == TERMINAL_ANSI_DEFAULT_COLOR;
+
+    char cursor_text[16] = {0};
+    uint8_t cursor_colors[16] = {0};
+    size_t cursor_size = 0;
+    terminal_ansi_parser_t cursor_ansi;
+    terminal_ansi__init(&cursor_ansi);
+    static const char cursor_input[] = "abc\r\nx\033[D!\r\033[2Kbruce$ x";
+    terminal_ansi__consume(
+        &cursor_ansi, cursor_input, sizeof(cursor_input) - 1, cursor_text, cursor_colors,
+        &cursor_size, sizeof(cursor_text)
+    );
+    ansi_ok = ansi_ok && strcmp(cursor_text, "abc\nbruce$ x") == 0 && cursor_ansi.cursor == cursor_size;
 
     static const char history_path[] = "/terminal_history_test";
     (void)storage__remove(history_path);

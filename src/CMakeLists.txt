@@ -162,7 +162,7 @@ idf_component_get_property(bruce_wolfssl_lib wolfssl__wolfssl COMPONENT_LIB)
 target_compile_options(${bruce_wolfssl_lib} PRIVATE
     -include "${WOLFSSL_COMPONENT_DIR}/wolfssl/wolfcrypt/port/Espressif/esp32-crypt.h")
 # wolfSSH calls wc_SSH_KDF(), only compiled into wolfssl when this is defined.
-target_compile_definitions(${bruce_wolfssl_lib} PUBLIC WOLFSSL_WOLFSSH)
+target_compile_definitions(${bruce_wolfssl_lib} PUBLIC WOLFSSL_WOLFSSH WOLFSSL_ED25519_STREAMING_VERIFY)
 
 # wolfSSH's PTY/terminal support (pty-req + shell channel, requested together
 # via wolfSSH_SetChannelType(..., WOLFSSH_SESSION_TERMINAL, ...) in
@@ -178,7 +178,7 @@ set(WOLFSSH_COMPONENT_DIR "${CMAKE_CURRENT_LIST_DIR}/../managed_components/wolfs
 include("${CMAKE_CURRENT_LIST_DIR}/../components/wolfssl_esp_patches/patch_wolfssh_esp_idf6.cmake")
 
 idf_component_get_property(bruce_wolfssh_lib wolfssl__wolfssh COMPONENT_LIB)
-target_compile_definitions(${bruce_wolfssh_lib} PRIVATE WOLFSSH_TERM NO_TERMIOS)
+target_compile_definitions(${bruce_wolfssh_lib} PRIVATE WOLFSSH_TERM NO_TERMIOS WOLFSSL_ED25519_STREAMING_VERIFY)
 
 # wolfSSH's default per-channel flow-control window (DEFAULT_WINDOW_SZ,
 # wolfssh/internal.h) is 128KB, allocated as a single WMALLOC() in ChannelNew()

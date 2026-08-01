@@ -100,7 +100,7 @@ static int shell_builtins__assignment(shell_state_t *state, const char *assignme
 }
 
 bool shell_builtins__is_builtin(const char *name) {
-    static const char *const names[] = {"echo", "true", "false", "set", "unset", "export", "exit"};
+    static const char *const names[] = {"echo", "true", "false", "set", "unset", "export", "clear", "exit"};
     for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); ++i) {
         if (strcmp(name, names[i]) == 0) return true;
     }
@@ -151,6 +151,14 @@ int shell_builtins__run(shell_state_t *state, int argc, char **argv) {
         }
         return 0;
     }
+    if (strcmp(argv[0], "clear") == 0) {
+        if (argc != 1) {
+            stdio__printf("shell: clear takes no arguments\n");
+            return 2;
+        }
+        (void)stdio__write("\033[2J", 4);
+        return 0;
+    }
     if (strcmp(argv[0], "exit") == 0) {
         int status = state->last_status;
         if (argc > 2) {
@@ -172,7 +180,7 @@ int shell_builtins__run(shell_state_t *state, int argc, char **argv) {
         state->exit_status = status;
         return status;
     }
-    stdio__printf("Builtins: echo true false set unset export exit\n");
+    stdio__printf("Builtins: echo true false set unset export clear exit\n");
     stdio__printf("Operators: ; && || and producer | text. Redirection is unsupported.\n");
     return 0;
 }

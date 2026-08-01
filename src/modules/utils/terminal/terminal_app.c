@@ -15,8 +15,6 @@
 #include "core_sdk/result.h"
 #include "core_sdk/runtime.h"
 #include "core_sdk/stdio.h"
-#include "modules/shell/shell_history.h"
-#include "modules/shell/shell_line_editor.h"
 #include "terminal_ansi.h"
 
 #define TERMINAL__TRANSCRIPT_CAPACITY 4096
@@ -26,21 +24,16 @@
 #define TERMINAL__TITLE_H 12
 #define TERMINAL__MAX_VISIBLE_ROWS 40
 #define TERMINAL__FRAME_MARGIN 2
-#define TERMINAL__PROMPT_COLUMNS 2
-#define TERMINAL__CURSOR_COLUMNS 1
 #define TERMINAL__INPUT_TIMEOUT_MS 50
 #define TERMINAL__HIDDEN_DELAY_MS 20
 #define TERMINAL__CHILD_STOP_TIMEOUT_MS 500
+#define TERMINAL__ASCII_ESCAPE 0x1b
 #define TERMINAL__ASCII_DELETE 0x7f
 
 typedef struct {
     char *transcript;
     uint8_t *transcript_colors;
     size_t transcript_size;
-    char input[TERMINAL__LINE_CAPACITY];
-    shell_line_editor_t editor;
-    char history_draft[TERMINAL__LINE_CAPACITY];
-    shell_history_browser_t history;
     terminal_ansi_parser_t ansi;
     bruce_stdio_session_t session;
     bruce_process_id_t child;
@@ -85,6 +78,16 @@ static int terminal__collect_lines(
         if (start < state->transcript_size && state->transcript[start] == '\n') start++;
         if (length == 0 && start == state->transcript_size) break;
     }
+    bool cursor_needs_row = state->transcript_size == 0 ||
+                            state->transcript[state->transcript_size - 1] == '\n' ||
+                            (count > 0 && lines[count - 1].length == (size_t)columns);
+    if (cursor_needs_row) {
+        if (count == rows) {
+            memmove(lines, lines + 1, sizeof(*lines) * (size_t)(rows - 1));
+            count--;
+        }
+        lines[count++] = (terminal__visual_line_t){.start = state->transcript_size, .length = 0};
+    }
     return count;
 }
 
@@ -118,31 +121,24 @@ static void terminal__draw_transcript(
     }
 }
 
-static void terminal__draw_prompt(
-    const terminal__state_t *state, int width, int height, int columns, uint16_t foreground
+static void terminal__draw_cursor(
+    const terminal__state_t *state, const terminal__visual_line_t *lines, int line_count,
+    uint16_t foreground
 ) {
-    int prompt_y = height - TERMINAL__CHAR_H - TERMINAL__FRAME_MARGIN;
-    display__draw_line(0, prompt_y - TERMINAL__FRAME_MARGIN, width, prompt_y - TERMINAL__FRAME_MARGIN, foreground);
-    display__set_cursor(TERMINAL__FRAME_MARGIN, prompt_y);
-    display__set_text_color(foreground);
-    display__print(state->child != BRUCE_PROCESS_ID_INVALID ? "> " : "$ ");
-
-    int reserved = TERMINAL__PROMPT_COLUMNS + TERMINAL__CURSOR_COLUMNS;
-    size_t visible = (size_t)(columns > reserved ? columns - reserved : 1);
-    size_t start = state->editor.cursor > visible ? state->editor.cursor - visible : 0;
-    if (start + visible > state->editor.length && state->editor.length > visible) {
-        start = state->editor.length - visible;
+    if (line_count == 0) return;
+    int cursor_row = line_count - 1;
+    size_t cursor_column = lines[cursor_row].length;
+    for (int row = line_count - 1; row >= 0; --row) {
+        size_t end = lines[row].start + lines[row].length;
+        if (state->ansi.cursor >= lines[row].start && state->ansi.cursor <= end) {
+            cursor_row = row;
+            cursor_column = state->ansi.cursor - lines[row].start;
+            break;
+        }
     }
-    size_t shown = state->editor.length - start;
-    if (shown > visible) shown = visible;
-    char text[TERMINAL__LINE_CAPACITY];
-    memcpy(text, state->input + start, shown);
-    text[shown] = '\0';
-    display__print(text);
-
-    int cursor_x = TERMINAL__FRAME_MARGIN + TERMINAL__PROMPT_COLUMNS * TERMINAL__CHAR_W +
-                   (int)(state->editor.cursor - start) * TERMINAL__CHAR_W;
-    display__fill_rect(cursor_x, prompt_y + TERMINAL__CHAR_H - 1, TERMINAL__CHAR_W - 1, 1, foreground);
+    int cursor_x = TERMINAL__FRAME_MARGIN + (int)cursor_column * TERMINAL__CHAR_W;
+    int cursor_y = TERMINAL__TITLE_H + cursor_row * TERMINAL__CHAR_H;
+    display__fill_rect(cursor_x, cursor_y + TERMINAL__CHAR_H - 1, TERMINAL__CHAR_W - 1, 1, foreground);
 }
 
 static bruce_result_t terminal__draw(const terminal__state_t *state) {
@@ -151,8 +147,7 @@ static bruce_result_t terminal__draw(const terminal__state_t *state) {
     int width = display__width();
     int height = display__height();
     int columns = (width - 2 * TERMINAL__FRAME_MARGIN) / TERMINAL__CHAR_W;
-    int rows = (height - TERMINAL__TITLE_H - TERMINAL__CHAR_H - 2 * TERMINAL__FRAME_MARGIN) /
-               TERMINAL__CHAR_H;
+    int rows = (height - TERMINAL__TITLE_H - 2 * TERMINAL__FRAME_MARGIN) / TERMINAL__CHAR_H;
     if (columns < 1) columns = 1;
     if (rows < 1) rows = 1;
     if (rows > TERMINAL__MAX_VISIBLE_ROWS) rows = TERMINAL__MAX_VISIBLE_ROWS;
@@ -169,7 +164,7 @@ static bruce_result_t terminal__draw(const terminal__state_t *state) {
     display__set_cursor(TERMINAL__FRAME_MARGIN, TERMINAL__FRAME_MARGIN);
     display__print(state->child != BRUCE_PROCESS_ID_INVALID ? "Terminal [running]" : "Terminal");
     terminal__draw_transcript(state, lines, line_count, foreground);
-    terminal__draw_prompt(state, width, height, columns, foreground);
+    terminal__draw_cursor(state, lines, line_count, foreground);
     return display__present();
 }
 
@@ -181,64 +176,53 @@ static void terminal__drain_output(terminal__state_t *state) {
     }
 }
 
-static void terminal__submit(terminal__state_t *state) {
-    if (state->editor.length == 0) return;
-    if (strcmp(state->input, "clear") == 0) {
-        state->transcript_size = 0;
-        state->transcript[0] = '\0';
-    } else if (strcmp(state->input, "exit") == 0) {
-        state->exit_requested = true;
-    } else {
-        terminal__append(state, state->input, state->editor.length);
-        terminal__append(state, "\n", 1);
-        (void)stdio__session_write_input(state->session, state->input, state->editor.length);
-        (void)stdio__session_write_input(state->session, "\n", 1);
-    }
-    shell_line_editor__set(&state->editor, "");
-    shell_history_browser__reset(&state->history);
-    state->dirty = true;
+static void terminal__write_input(terminal__state_t *state, const char *bytes, size_t size) {
+    (void)stdio__session_write_input(state->session, bytes, size);
 }
 
 static void terminal__open_text_input(terminal__state_t *state) {
     char entered[TERMINAL__LINE_CAPACITY];
-    if (dialog__text_input("Terminal", "command", state->input, false, entered, sizeof(entered)) == BRUCE_OK) {
-        shell_line_editor__set(&state->editor, entered);
-        terminal__submit(state);
+    if (dialog__text_input("Terminal", "input", NULL, false, entered, sizeof(entered)) == BRUCE_OK) {
+        terminal__write_input(state, entered, strlen(entered));
+        terminal__write_input(state, "\r", 1);
     }
     state->dirty = true;
-}
-
-static bool terminal__handle_navigation(terminal__state_t *state, int32_t code) {
-    switch (code) {
-        case BRUCE_INPUT_CODE_DELETE: (void)shell_line_editor__delete(&state->editor); break;
-        case BRUCE_INPUT_CODE_LEFT: (void)shell_line_editor__left(&state->editor); break;
-        case BRUCE_INPUT_CODE_RIGHT: (void)shell_line_editor__right(&state->editor); break;
-        case BRUCE_INPUT_CODE_UP: (void)shell_history_browser__previous(&state->history, &state->editor); break;
-        case BRUCE_INPUT_CODE_DOWN: (void)shell_history_browser__next(&state->history, &state->editor); break;
-        default: return false;
-    }
-    state->dirty = true;
-    return true;
 }
 
 static void terminal__handle_input(terminal__state_t *state, const bruce_input_event_t *event) {
-    bool semantic_key = event->type == BRUCE_INPUT_KEY && event->value == 0;
-    if ((semantic_key && event->code == BRUCE_INPUT_CODE_BACK) || event->code == BRUCE_INPUT_CODE_BUTTON_B) {
+    bool semantic_key = event->type == BRUCE_INPUT_KEY && event->value != event->code;
+    if ((semantic_key && event->code == BRUCE_INPUT_CODE_BACK) ||
+        (event->type == BRUCE_INPUT_KEY && event->code == TERMINAL__ASCII_ESCAPE) ||
+        event->code == BRUCE_INPUT_CODE_BUTTON_B) {
         state->exit_requested = true;
-    } else if (event->type == BRUCE_INPUT_KEY && (event->code == '\n' || event->code == '\r')) {
-        terminal__submit(state);
-    } else if (event->type == BRUCE_INPUT_KEY &&
-               (event->code == '\b' || event->code == TERMINAL__ASCII_DELETE)) {
-        (void)shell_line_editor__backspace(&state->editor);
-        state->dirty = true;
-    } else if (semantic_key && terminal__handle_navigation(state, event->code)) {
         return;
-    } else if (event->type == BRUCE_INPUT_KEY && event->code >= ' ' && event->code <= '~' && !semantic_key) {
-        shell_history_browser__reset(&state->history);
-        (void)shell_line_editor__insert(&state->editor, (char)event->code);
-        state->dirty = true;
-    } else if (event->code == BRUCE_INPUT_CODE_SELECT || event->code == BRUCE_INPUT_CODE_BUTTON_A) {
+    }
+    if ((event->code == BRUCE_INPUT_CODE_SELECT && (semantic_key || event->type != BRUCE_INPUT_KEY)) ||
+        event->code == BRUCE_INPUT_CODE_BUTTON_A) {
         terminal__open_text_input(state);
+        return;
+    }
+    if (semantic_key || event->type != BRUCE_INPUT_KEY) {
+        const char *sequence = NULL;
+        switch (event->code) {
+            case BRUCE_INPUT_CODE_UP: sequence = "\033[A"; break;
+            case BRUCE_INPUT_CODE_DOWN: sequence = "\033[B"; break;
+            case BRUCE_INPUT_CODE_RIGHT: sequence = "\033[C"; break;
+            case BRUCE_INPUT_CODE_LEFT: sequence = "\033[D"; break;
+            case BRUCE_INPUT_CODE_HOME: sequence = "\033[H"; break;
+            case BRUCE_INPUT_CODE_DELETE: sequence = "\033[3~"; break;
+            default: break;
+        }
+        if (sequence != NULL) terminal__write_input(state, sequence, strlen(sequence));
+        return;
+    }
+    if (event->code == '\n' || event->code == '\r') {
+        terminal__write_input(state, "\r", 1);
+    } else if (event->code == '\b' || event->code == TERMINAL__ASCII_DELETE) {
+        terminal__write_input(state, "\177", 1);
+    } else if (event->code > 0 && event->code <= TERMINAL__ASCII_DELETE) {
+        char byte = (char)event->code;
+        terminal__write_input(state, &byte, 1);
     }
 }
 
@@ -298,8 +282,6 @@ int terminal_app_main(int argc, char **argv) {
 
     terminal__state_t state = {0};
     state.child = BRUCE_PROCESS_ID_INVALID;
-    shell_line_editor__init(&state.editor, state.input, sizeof(state.input));
-    shell_history_browser__init(&state.history, state.history_draft, sizeof(state.history_draft));
     terminal_ansi__init(&state.ansi);
     state.transcript = memory__calloc(TERMINAL__TRANSCRIPT_CAPACITY, 1);
     state.transcript_colors = memory__calloc(TERMINAL__TRANSCRIPT_CAPACITY, 1);
@@ -317,7 +299,7 @@ int terminal_app_main(int argc, char **argv) {
     (void)input__flush();
 
     (void)stdio__session_route_children(state.session);
-    int shell_process = app_runner__run("shell", "-i --no-echo", true);
+    int shell_process = app_runner__run("shell", "-i", true);
     (void)stdio__session_route_children(BRUCE_STDIO_SESSION_INVALID);
     if (shell_process <= 0) {
         (void)stdio__session_close(state.session);
@@ -328,8 +310,8 @@ int terminal_app_main(int argc, char **argv) {
     state.child = (bruce_process_id_t)shell_process;
 
     if (has_startup_command) {
-        shell_line_editor__set(&state.editor, startup_line);
-        terminal__submit(&state);
+        terminal__write_input(&state, startup_line, strlen(startup_line));
+        terminal__write_input(&state, "\r", 1);
     }
 
     while (!state.exit_requested) {

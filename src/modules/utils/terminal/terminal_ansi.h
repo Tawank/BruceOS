@@ -16,6 +16,7 @@ typedef enum {
 
 typedef struct {
     terminal_ansi_parse_state_t state;
+    size_t cursor;
     uint16_t value;
     uint16_t params[8];
     uint8_t param_count;

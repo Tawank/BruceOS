@@ -41,22 +41,45 @@ static void terminal_ansi__apply_sgr(terminal_ansi_parser_t *parser, unsigned va
 }
 
 static void terminal_ansi__append_char(
-    const terminal_ansi_parser_t *parser, char c, char *transcript, uint8_t *colors,
+    terminal_ansi_parser_t *parser, char c, char *transcript, uint8_t *colors,
     size_t *size, size_t capacity
 ) {
     if (c == '\b') {
-        if (*size > 0 && transcript[*size - 1] != '\n') (*size)--;
+        if (parser->cursor > 0 && transcript[parser->cursor - 1] != '\n') parser->cursor--;
         return;
     }
-    if (c == '\r' || ((unsigned char)c < ' ' && c != '\n' && c != '\t')) return;
+    if (c == '\r') {
+        while (parser->cursor > 0 && transcript[parser->cursor - 1] != '\n') parser->cursor--;
+        return;
+    }
+    if ((unsigned char)c < ' ' && c != '\n' && c != '\t') return;
     if (c == '\t') c = ' ';
+    if (c == '\n' && parser->cursor < *size) {
+        while (parser->cursor < *size && transcript[parser->cursor] != '\n') parser->cursor++;
+        if (parser->cursor < *size) {
+            parser->cursor++;
+            return;
+        }
+    }
     if (*size == capacity - 1) {
         memmove(transcript, transcript + 1, *size - 1);
         memmove(colors, colors + 1, *size - 1);
         (*size)--;
+        if (parser->cursor > 0) parser->cursor--;
+    }
+    if (parser->cursor < *size && transcript[parser->cursor] == '\n') {
+        memmove(transcript + parser->cursor + 1, transcript + parser->cursor, *size - parser->cursor);
+        memmove(colors + parser->cursor + 1, colors + parser->cursor, *size - parser->cursor);
+        (*size)++;
+    }
+    if (parser->cursor < *size) {
+        transcript[parser->cursor] = c;
+        colors[parser->cursor++] = parser->color;
+        return;
     }
     transcript[*size] = c;
     colors[(*size)++] = parser->color;
+    parser->cursor = *size;
 }
 
 static void terminal_ansi__push_param(terminal_ansi_parser_t *parser) {
@@ -75,8 +98,26 @@ static void terminal_ansi__finish_csi(
         for (uint8_t i = 0; i < parser->param_count; ++i) terminal_ansi__apply_sgr(parser, parser->params[i]);
     } else if (final == 'J' && parser->value == TERMINAL_ANSI_ERASE_ALL) {
         *size = 0;
+        parser->cursor = 0;
     } else if (final == 'K' && parser->value == TERMINAL_ANSI_ERASE_ALL) {
         while (*size > 0 && transcript[*size - 1] != '\n') (*size)--;
+        if (parser->cursor > *size) parser->cursor = *size;
+    } else if (final == 'D') {
+        size_t amount = parser->has_value && parser->value > 0 ? parser->value : 1;
+        while (amount-- > 0 && parser->cursor > 0 && transcript[parser->cursor - 1] != '\n') {
+            parser->cursor--;
+        }
+    } else if (final == 'C') {
+        size_t amount = parser->has_value && parser->value > 0 ? parser->value : 1;
+        while (amount-- > 0 && parser->cursor < *size && transcript[parser->cursor] != '\n') {
+            parser->cursor++;
+        }
+    } else if (final == 'G') {
+        size_t column = parser->has_value && parser->value > 0 ? parser->value - 1u : 0;
+        while (parser->cursor > 0 && transcript[parser->cursor - 1] != '\n') parser->cursor--;
+        while (column-- > 0 && parser->cursor < *size && transcript[parser->cursor] != '\n') {
+            parser->cursor++;
+        }
     }
     parser->state = TERMINAL_ANSI_TEXT;
 }

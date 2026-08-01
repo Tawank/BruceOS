@@ -11,6 +11,11 @@
 #define BRUCE_SSH_PRIVATE_KEY_MAX_SIZE 512
 #define BRUCE_SSH_PUBLIC_KEY_MAX_SIZE 256
 
+typedef enum {
+    BRUCE_SSH_KEY_ECDSA_P256 = 0,
+    BRUCE_SSH_KEY_ED25519,
+} bruce_ssh_key_type_t;
+
 /* SSH sessions are opaque, owned by the calling process, require the `ssh`
  * permission, and close automatically when that process exits. The caller
  * must verify the host-key fingerprint before authenticating. */
@@ -35,7 +40,16 @@ bruce_result_t ssh__generate_keypair(
     char *private_key, size_t private_capacity, size_t *out_private_size,
     char *public_key, size_t public_capacity, size_t *out_public_size
 );
-/* Authenticates with an unencrypted ECDSA P-256 SEC1 PEM private key. */
+/* Generates the selected key type. Ed25519 private keys use the unencrypted
+ * OpenSSH format; ECDSA P-256 uses SEC1 PEM. Text sizes exclude the trailing
+ * NUL, and the caller owns both buffers. */
+bruce_result_t ssh__generate_keypair_ex(
+    bruce_ssh_key_type_t type, char *private_key, size_t private_capacity,
+    size_t *out_private_size, char *public_key, size_t public_capacity,
+    size_t *out_public_size
+);
+/* Authenticates with an unencrypted ECDSA P-256 SEC1 PEM key or an unencrypted
+ * OpenSSH Ed25519 private key. */
 bruce_result_t ssh__authenticate_key(
     bruce_ssh_id_t session, const char *username, const void *private_key,
     size_t private_key_size, uint32_t timeout_ms

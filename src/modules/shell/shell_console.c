@@ -4,14 +4,13 @@
 #include <stdint.h>
 
 #include "core_sdk/result.h"
-#include "core_sdk/runtime.h"
 #include "core_sdk/stdio.h"
 #include "shell_history.h"
 #include "shell_internal.h"
 #include "shell_line_editor.h"
 
 #define SHELL_CONSOLE_ESCAPE_MAX 8
-#define SHELL_CONSOLE_IDLE_DELAY_MS 10
+#define SHELL_CONSOLE_ESCAPE_TIMEOUT_MS 50
 
 #define SHELL_CONSOLE_CTRL_A 0x01
 #define SHELL_CONSOLE_CTRL_E 0x05
@@ -30,11 +29,18 @@ static void shell_console__redraw(const shell_line_editor_t *editor) {
     }
 }
 
+static int shell_console__read_byte(uint32_t timeout_ms) {
+    unsigned char byte;
+    size_t size = 0;
+    bruce_result_t result = stdio__read(&byte, 1, timeout_ms, &size);
+    return result == BRUCE_OK && size == 1 ? byte : result;
+}
+
 static size_t shell_console__read_escape(unsigned char *sequence, size_t capacity) {
     size_t used = 0;
     while (used < capacity) {
-        int input = getchar();
-        if (input == EOF) break;
+        int input = shell_console__read_byte(SHELL_CONSOLE_ESCAPE_TIMEOUT_MS);
+        if (input < 0) break;
         unsigned char byte = (unsigned char)input;
         sequence[used++] = byte;
         if (byte >= 0x40 && byte <= 0x7e) break;
@@ -104,11 +110,8 @@ int shell_console__read_line(char *line, size_t capacity, bool *skip_lf) {
     s_shell_console_ready = true;
 
     for (;;) {
-        int input = getchar();
-        if (input == EOF) {
-            if (runtime__delay(SHELL_CONSOLE_IDLE_DELAY_MS) != BRUCE_OK) return BRUCE_ERR_CANCELLED;
-            continue;
-        }
+        int input = shell_console__read_byte(UINT32_MAX);
+        if (input < 0) return input;
         unsigned char byte = (unsigned char)input;
         if (*skip_lf && byte == '\n') {
             *skip_lf = false;

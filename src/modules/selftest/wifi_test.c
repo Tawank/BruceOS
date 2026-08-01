@@ -182,10 +182,22 @@ bool selftest__run_ssh_keygen_case(void) {
               strncmp(private_key, "-----BEGIN EC PRIVATE KEY-----\n", 31) == 0 &&
               strncmp(public_key, "ecdsa-sha2-nistp256 ", 20) == 0;
     memset(private_key, 0, sizeof(private_key));
+    private_size = 0;
+    public_size = 0;
+    bruce_result_t ed25519_result = ssh__generate_keypair_ex(
+        BRUCE_SSH_KEY_ED25519, private_key, sizeof(private_key), &private_size,
+        public_key, sizeof(public_key), &public_size
+    );
+    bool ed25519_ok = ed25519_result == BRUCE_OK && private_size > 0 && public_size > 0 &&
+                      strncmp(private_key, "-----BEGIN OPENSSH PRIVATE KEY-----\n", 36) == 0 &&
+                      strncmp(public_key, "ssh-ed25519 ", 12) == 0;
+    ok = ok && ed25519_ok;
+    memset(private_key, 0, sizeof(private_key));
     printf(
-        "[selftest] ssh/keygen: %s (result=%d private=%u public=%u)\n",
+        "[selftest] ssh/keygen: %s (ecdsa=%d ed25519=%d private=%u public=%u)\n",
         ok ? "OK" : "FAIL",
         result,
+        ed25519_result,
         (unsigned)private_size,
         (unsigned)public_size
     );

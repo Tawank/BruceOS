@@ -32,7 +32,8 @@
 #define SSH_APP_KNOWN_HOSTS_PATH "/.ssh/known_hosts"
 #define SSH_APP_LEGACY_KNOWN_HOSTS_PATH "/ssh_known_hosts"
 #define SSH_APP_CONFIG_PATH "/.ssh/config"
-#define SSH_APP_DEFAULT_IDENTITY_PATH "/.ssh/id_ecdsa"
+#define SSH_APP_DEFAULT_ECDSA_IDENTITY_PATH "/.ssh/id_ecdsa"
+#define SSH_APP_DEFAULT_ED25519_IDENTITY_PATH "/.ssh/id_ed25519"
 #define SSH_APP_KNOWN_HOSTS_MAX_BYTES 4096u
 #define SSH_APP_CONFIG_MAX_BYTES 4096u
 
@@ -507,6 +508,16 @@ static bool ssh_app__file_exists(const char *path) {
     return true;
 }
 
+static const char *ssh_app__default_identity(void) {
+    if (ssh_app__file_exists(SSH_APP_DEFAULT_ECDSA_IDENTITY_PATH)) {
+        return SSH_APP_DEFAULT_ECDSA_IDENTITY_PATH;
+    }
+    if (ssh_app__file_exists(SSH_APP_DEFAULT_ED25519_IDENTITY_PATH)) {
+        return SSH_APP_DEFAULT_ED25519_IDENTITY_PATH;
+    }
+    return "";
+}
+
 static bruce_result_t ssh_app__client(
     const char *host, uint16_t port, const char *username, const char *password,
     const char *identity
@@ -557,7 +568,13 @@ static bruce_result_t ssh_app__client(
     }
     if (result != BRUCE_OK) {
         if (identity != NULL && identity[0] != '\0')
-            stdio__printf("SSH client: key authentication with %s failed (%d)\n", identity, result);
+            stdio__printf(
+                result == BRUCE_ERR_INVALID_ARGUMENT || result == BRUCE_ERR_UNSUPPORTED
+                    ? "SSH client: %s is not a valid unencrypted ECDSA P-256 or OpenSSH Ed25519 key (%d)\n"
+                    : "SSH client: key authentication with %s failed (%d)\n",
+                identity,
+                result
+            );
         else
             stdio__printf("SSH client: authentication failed (%d)\n", result);
         (void)ssh__close(session);
@@ -639,8 +656,8 @@ int ssh_app_main(int argc, char **argv) {
                                          ? identity
                                          : !password_supplied && config.identity_set
                                                ? config.identity
-                                         : !password_supplied && ssh_app__file_exists(SSH_APP_DEFAULT_IDENTITY_PATH)
-                                               ? SSH_APP_DEFAULT_IDENTITY_PATH
+                                          : !password_supplied
+                                               ? ssh_app__default_identity()
                                                : "";
     if (strncmp(effective_identity, "~/", 2) == 0) ++effective_identity;
     int identity_len = snprintf(identity_copy, sizeof(identity_copy), "%s", effective_identity);
@@ -664,9 +681,11 @@ int ssh_app_main(int argc, char **argv) {
 int ssh_keygen_app_main(int argc, char **argv) {
     ArgParser *parser = ap_new_parser();
     if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
-    ap_set_helptext(parser, "Generate an ECDSA P-256 SSH keypair. Writes the private key to --file and the OpenSSH public key to <file>.pub.");
-    ap_add_str_opt(parser, "file", SSH_APP_DEFAULT_IDENTITY_PATH);
-    ap_set_opt_help(parser, "file", "Private-key output path (default /.ssh/id_ecdsa)");
+    ap_set_helptext(parser, "Generate an ECDSA P-256 or Ed25519 SSH keypair. Writes the private key to --file and the OpenSSH public key to <file>.pub.");
+    ap_add_str_opt(parser, "file", "");
+    ap_set_opt_help(parser, "file", "Private-key output path (default depends on --type)");
+    ap_add_str_opt(parser, "type", "ecdsa");
+    ap_set_opt_help(parser, "type", "Key type: ecdsa or ed25519 (default ecdsa)");
     ap_add_str_opt(parser, "comment", "bruce");
     ap_set_opt_help(parser, "comment", "Comment appended to the public key");
     ap_add_flag(parser, "force");
@@ -685,15 +704,26 @@ int ssh_keygen_app_main(int argc, char **argv) {
     char public_path[SSH_APP_PATH_MAX];
     char comment[SSH_APP_COMMENT_MAX];
     const char *path_arg = ap_get_str_value(parser, "file");
+    const char *type_arg = ap_get_str_value(parser, "type");
     const char *comment_arg = ap_get_str_value(parser, "comment");
     bool force = ap_found(parser, "force");
-    int path_len = snprintf(path, sizeof(path), "%s", path_arg != NULL ? path_arg : SSH_APP_DEFAULT_IDENTITY_PATH);
+    bruce_ssh_key_type_t key_type = type_arg != NULL && strcasecmp(type_arg, "ed25519") == 0
+                                        ? BRUCE_SSH_KEY_ED25519
+                                        : BRUCE_SSH_KEY_ECDSA_P256;
+    bool valid_type = type_arg != NULL &&
+                      (strcasecmp(type_arg, "ecdsa") == 0 || strcasecmp(type_arg, "ed25519") == 0);
+    const char *effective_path = path_arg != NULL && path_arg[0] != '\0'
+                                     ? path_arg
+                                     : key_type == BRUCE_SSH_KEY_ED25519
+                                           ? SSH_APP_DEFAULT_ED25519_IDENTITY_PATH
+                                           : SSH_APP_DEFAULT_ECDSA_IDENTITY_PATH;
+    int path_len = snprintf(path, sizeof(path), "%s", effective_path);
     int public_path_len = snprintf(public_path, sizeof(public_path), "%s.pub", path);
     int comment_len = snprintf(comment, sizeof(comment), "%s", comment_arg != NULL ? comment_arg : "");
     ap_free(parser);
     if (path_len <= 0 || (size_t)path_len >= sizeof(path) || public_path_len <= 0 ||
         (size_t)public_path_len >= sizeof(public_path) || comment_len < 0 ||
-        (size_t)comment_len >= sizeof(comment))
+        (size_t)comment_len >= sizeof(comment) || !valid_type)
         return BRUCE_ERR_INVALID_ARGUMENT;
     if (!force && (ssh_app__file_exists(path) || ssh_app__file_exists(public_path))) {
         stdio__printf("ssh-keygen: output exists; use --force to overwrite\n");
@@ -708,8 +738,9 @@ int ssh_keygen_app_main(int argc, char **argv) {
     char public_key[BRUCE_SSH_PUBLIC_KEY_MAX_SIZE];
     size_t private_size = 0;
     size_t public_size = 0;
-    bruce_result_t result = ssh__generate_keypair(
-        private_key, sizeof(private_key), &private_size, public_key, sizeof(public_key), &public_size
+    bruce_result_t result = ssh__generate_keypair_ex(
+        key_type, private_key, sizeof(private_key), &private_size,
+        public_key, sizeof(public_key), &public_size
     );
     if (result == BRUCE_OK && comment[0] != '\0') {
         size_t required = public_size + 1u + strlen(comment) + 1u;

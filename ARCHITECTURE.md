@@ -469,23 +469,25 @@ the normal JS lifecycle entry.  `serial.cmd(command)` delegates to the same
 ## Terminal and stdio sessions
 
 `terminal` is a GUI-by-default built-in. It owns one persistent background
-`shell` child, displays the child's captured stdout/stderr, and routes entered
-lines to its stdin. Shell variables therefore persist for the terminal lifetime.
+`shell` child, displays the child's captured stdout/stderr, and routes input
+bytes to its stdin. Shell variables therefore persist for the terminal lifetime.
 Graphical commands explicitly claim foreground and return to the terminal when
-they exit. The terminal intercepts `clear` and `exit` as UI actions and Back
-terminates the shell before closing. The physical `serial_commands` frontend
-runs the same interactive shell language. The configured ESP-IDF console
-transport and its input driver remain Core-owned.
+they exit. Back terminates the shell before closing. The physical
+`serial_commands` frontend runs the same interactive shell language. The
+configured ESP-IDF console transport and its input driver remain Core-owned.
 
 Interactive shell input supports insertion and deletion at the cursor, Left,
 Right, Home, End, and Up/Down history navigation. The physical console consumes
-the corresponding ANSI/VT100 escape sequences; the GUI terminal uses normalized
-input events and draws its cursor in the prompt. Non-empty interactive commands
+ANSI/VT100 escape sequences; the GUI terminal translates normalized input events
+to those same byte sequences and renders the shell's inline prompt. Non-empty interactive commands
 are appended to `/shell_history`. History entries are fetched from storage only
 when navigating, rather than retained in a RAM history ring, and the active file
 rotates to `/shell_history.old` at 64 KiB. The GUI transcript interprets ANSI SGR
 foreground colors and reset/bold variants, strips OSC/control sequences, and
-handles erase-screen/erase-line sequences within its bounded transcript.
+handles erase-screen/erase-line sequences within its bounded transcript. The GUI
+terminal forwards character and navigation-key bytes directly to its interactive
+shell, which renders and edits its prompt inline with command output just like
+the physical console. Interactive children such as SSH use that same terminal.
 
 The built-in `shell` module owns command-language parsing and execution. It
 supports whitespace-delimited words, literal single quotes, expandable double
@@ -494,7 +496,7 @@ comments, and left-to-right `;`, `&&`, and `||`. A single bounded pipeline may
 feed `text` from `echo` or an external producer, for example
 `cat /notes.txt | text` or `cat /notes.txt | text /copy.txt`. Its bounded variables persist
 across interactive input and script lines. Builtins are `echo`, `true`, `false`,
-`set`, `unset`, `export`, `exit`, and `help`; other names and absolute/`./` paths
+`set`, `unset`, `export`, `clear`, `exit`, and `help`; other names and absolute/`./` paths
 launch through AppRunner in Core-background mode and are synchronously reaped.
 The `.sh` loader invokes this built-in for absolute scripts. Command
 substitution, globbing, subshells, functions, positional parameters, general or
@@ -769,13 +771,15 @@ channel byte I/O with caller-supplied timeouts. Core refuses authentication
 until `ssh__verify_host_key_sha256()` succeeds; callers may not silently bypass
 host-key verification. Library sessions, channels, and native sockets remain
 private to Core and are never exported through the ELF SDK.
-The built-in `ssh-keygen` command defaults to `/.ssh/id_ecdsa`, writing an
-unencrypted SEC1 PEM private key and an OpenSSH-compatible `.pub` file. Host keys
+The built-in `ssh-keygen` command defaults to an ECDSA P-256 key at
+`/.ssh/id_ecdsa`; `--type ed25519` generates an unencrypted OpenSSH Ed25519
+private key at `/.ssh/id_ed25519` instead. Both write an OpenSSH-compatible `.pub` file. Host keys
 are stored in `/.ssh/known_hosts` (the former `/ssh_known_hosts` is migrated on
 first use). The SSH app reads `/.ssh/config` global and matching `Host` sections,
 including `HostName`, `User`, `Port`, and `IdentityFile`; command-line values take
 precedence. The `ssh --identity <path>` option authenticates with such a private
-key after the same mandatory host-key verification flow; the default identity
+key after the same mandatory host-key verification flow. Authentication accepts
+unencrypted ECDSA P-256 SEC1 PEM and OpenSSH Ed25519 private keys; the default identity
 is also selected automatically when it exists unless `--password` is supplied.
 
 Inbound HTTP is a generic Core service exposed through `http_server__*`. A

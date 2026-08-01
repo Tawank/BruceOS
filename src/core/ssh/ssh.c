@@ -13,6 +13,7 @@
 #include "wolfssh/ssh.h"
 #include "wolfssl/wolfcrypt/asn_public.h"
 #include "wolfssl/wolfcrypt/ecc.h"
+#include "wolfssl/wolfcrypt/ed25519.h"
 #include "wolfssl/wolfcrypt/hash.h"
 #include "wolfssl/wolfcrypt/random.h"
 
@@ -29,6 +30,8 @@ static const char *const TAG = "bruce_ssh";
 #define SSH__HOST_MAX 64u
 #define SSH__ECDSA_ALGORITHM "ecdsa-sha2-nistp256"
 #define SSH__ECDSA_CURVE "nistp256"
+#define SSH__ED25519_ALGORITHM "ssh-ed25519"
+#define SSH__OPENSSH_MAGIC "openssh-key-v1"
 #define SSH__ECDSA_DER_MAX 160u
 #define SSH__ECDSA_BLOB_MAX 128u
 
@@ -70,6 +73,8 @@ typedef struct {
     size_t auth_private_key_len;
     const uint8_t *auth_public_key;
     size_t auth_public_key_len;
+    const char *auth_public_key_type;
+    size_t auth_public_key_type_len;
     bruce_ssh_id_t id;
     bruce_resource_id_t resource_id;
     bruce_process_id_t owner;
@@ -120,9 +125,9 @@ static int ssh__user_auth_cb(byte auth_type, WS_UserAuthData *auth_data, void *c
         return WOLFSSH_USERAUTH_SUCCESS;
     }
     if (auth_type == WOLFSSH_USERAUTH_PUBLICKEY && slot->auth_private_key != NULL &&
-        slot->auth_public_key != NULL) {
-        auth_data->sf.publicKey.publicKeyType = (const byte *)SSH__ECDSA_ALGORITHM;
-        auth_data->sf.publicKey.publicKeyTypeSz = sizeof(SSH__ECDSA_ALGORITHM) - 1;
+        slot->auth_public_key != NULL && slot->auth_public_key_type != NULL) {
+        auth_data->sf.publicKey.publicKeyType = (const byte *)slot->auth_public_key_type;
+        auth_data->sf.publicKey.publicKeyTypeSz = (word32)slot->auth_public_key_type_len;
         auth_data->sf.publicKey.publicKey = slot->auth_public_key;
         auth_data->sf.publicKey.publicKeySz = (word32)slot->auth_public_key_len;
         auth_data->sf.publicKey.privateKey = slot->auth_private_key;
@@ -212,6 +217,98 @@ static bruce_result_t ssh__pem_decode(
         }
     }
     return BRUCE_ERR_INVALID_ARGUMENT;
+}
+
+static bool ssh__read_u32(const uint8_t *data, size_t size, size_t *offset, uint32_t *out) {
+    if (*offset > size || size - *offset < 4u) return false;
+    const uint8_t *value = data + *offset;
+    *out = ((uint32_t)value[0] << 24) | ((uint32_t)value[1] << 16) |
+           ((uint32_t)value[2] << 8) | value[3];
+    *offset += 4u;
+    return true;
+}
+
+static bool ssh__read_string(
+    const uint8_t *data, size_t size, size_t *offset, const uint8_t **out, size_t *out_size
+) {
+    uint32_t length = 0;
+    if (!ssh__read_u32(data, size, offset, &length) || *offset > size || length > size - *offset) {
+        return false;
+    }
+    *out = data + *offset;
+    *out_size = length;
+    *offset += length;
+    return true;
+}
+
+static bool ssh__string_equals(const uint8_t *value, size_t size, const char *expected) {
+    size_t expected_size = strlen(expected);
+    return size == expected_size && memcmp(value, expected, size) == 0;
+}
+
+static bruce_result_t ssh__decode_openssh_ed25519(
+    const void *private_key, size_t private_key_size, uint8_t *decoded,
+    size_t decoded_capacity, size_t *out_decoded_size, uint8_t *public_blob,
+    size_t public_capacity, size_t *out_public_size
+) {
+    byte *decoded_ptr = decoded;
+    word32 decoded_size = (word32)decoded_capacity;
+    const byte *key_type = NULL;
+    word32 key_type_size = 0;
+    int rc = wolfSSH_ReadKey_buffer(
+        private_key, (word32)private_key_size, WOLFSSH_FORMAT_OPENSSH, &decoded_ptr,
+        &decoded_size, &key_type, &key_type_size, NULL
+    );
+    if (rc != WS_SUCCESS) return BRUCE_ERR_INVALID_ARGUMENT;
+    if (decoded_ptr != decoded || !ssh__string_equals(key_type, key_type_size, SSH__ED25519_ALGORITHM)) {
+        return BRUCE_ERR_UNSUPPORTED;
+    }
+
+    static const uint8_t magic[] = SSH__OPENSSH_MAGIC "\0";
+    if (decoded_size < sizeof(magic) - 1u || memcmp(decoded, magic, sizeof(magic) - 1u) != 0) {
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    size_t offset = sizeof(magic) - 1u;
+    const uint8_t *cipher = NULL;
+    const uint8_t *kdf = NULL;
+    const uint8_t *kdf_options = NULL;
+    size_t cipher_size = 0;
+    size_t kdf_size = 0;
+    size_t kdf_options_size = 0;
+    uint32_t key_count = 0;
+    if (!ssh__read_string(decoded, decoded_size, &offset, &cipher, &cipher_size) ||
+        !ssh__read_string(decoded, decoded_size, &offset, &kdf, &kdf_size) ||
+        !ssh__read_string(decoded, decoded_size, &offset, &kdf_options, &kdf_options_size) ||
+        !ssh__read_u32(decoded, decoded_size, &offset, &key_count)) {
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    if (!ssh__string_equals(cipher, cipher_size, "none") ||
+        !ssh__string_equals(kdf, kdf_size, "none") || kdf_options_size != 0 || key_count != 1) {
+        return BRUCE_ERR_UNSUPPORTED;
+    }
+
+    const uint8_t *blob = NULL;
+    size_t blob_size = 0;
+    if (!ssh__read_string(decoded, decoded_size, &offset, &blob, &blob_size) ||
+        blob_size > public_capacity) {
+        return blob_size > public_capacity ? BRUCE_ERR_RESOURCE_LIMIT : BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    size_t blob_offset = 0;
+    const uint8_t *blob_type = NULL;
+    const uint8_t *raw_public = NULL;
+    size_t blob_type_size = 0;
+    size_t raw_public_size = 0;
+    if (!ssh__read_string(blob, blob_size, &blob_offset, &blob_type, &blob_type_size) ||
+        !ssh__read_string(blob, blob_size, &blob_offset, &raw_public, &raw_public_size) ||
+        blob_offset != blob_size ||
+        !ssh__string_equals(blob_type, blob_type_size, SSH__ED25519_ALGORITHM) ||
+        raw_public_size != ED25519_PUB_KEY_SIZE) {
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    memcpy(public_blob, blob, blob_size);
+    *out_decoded_size = decoded_size;
+    *out_public_size = blob_size;
+    return BRUCE_OK;
 }
 
 static void ssh__destroy_handles(WOLFSSH *ssh, int fd) {
@@ -574,6 +671,8 @@ static bruce_result_t ssh__authenticate(ssh__slot_t *slot, const char *username,
     slot->auth_private_key_len = 0;
     slot->auth_public_key = NULL;
     slot->auth_public_key_len = 0;
+    slot->auth_public_key_type = NULL;
+    slot->auth_public_key_type_len = 0;
 
     if (result == BRUCE_OK && rc != WS_SUCCESS) {
         ESP_LOGE(
@@ -608,17 +707,10 @@ bruce_result_t ssh__authenticate_password(
     return result;
 }
 
-bruce_result_t ssh__generate_keypair(
+static bruce_result_t ssh__generate_ecdsa_keypair(
     char *private_key, size_t private_capacity, size_t *out_private_size,
     char *public_key, size_t public_capacity, size_t *out_public_size
 ) {
-    bruce_result_t permission = permission__check(BRUCE_PERMISSION_SSH);
-    if (permission != BRUCE_OK) return permission;
-    if (private_key == NULL || out_private_size == NULL || public_key == NULL || out_public_size == NULL)
-        return BRUCE_ERR_INVALID_ARGUMENT;
-    *out_private_size = 0;
-    *out_public_size = 0;
-
     WC_RNG rng;
     ecc_key key;
     bool rng_ready = false;
@@ -680,6 +772,199 @@ cleanup:
     return result;
 }
 
+static bool ssh__append_bytes(
+    uint8_t *out, size_t capacity, size_t *offset, const void *value, size_t size
+) {
+    if (*offset > capacity || size > capacity - *offset) return false;
+    if (size == 0) return true;
+    memcpy(out + *offset, value, size);
+    *offset += size;
+    return true;
+}
+
+static bool ssh__append_u32(uint8_t *out, size_t capacity, size_t *offset, uint32_t value) {
+    if (*offset > capacity || capacity - *offset < 4u) return false;
+    ssh__put_u32(out + *offset, value);
+    *offset += 4u;
+    return true;
+}
+
+static bool ssh__append_binary_string(
+    uint8_t *out, size_t capacity, size_t *offset, const void *value, size_t size
+) {
+    return size <= UINT32_MAX && ssh__append_u32(out, capacity, offset, (uint32_t)size) &&
+           ssh__append_bytes(out, capacity, offset, value, size);
+}
+
+static bruce_result_t ssh__generate_ed25519_keypair(
+    char *private_key, size_t private_capacity, size_t *out_private_size,
+    char *public_key, size_t public_capacity, size_t *out_public_size
+) {
+    WC_RNG rng;
+    ed25519_key key;
+    bool rng_ready = false;
+    bool key_ready = false;
+    bruce_result_t result = BRUCE_ERR_IO;
+    uint8_t raw_private[ED25519_PRV_KEY_SIZE];
+    uint8_t raw_public[ED25519_PUB_KEY_SIZE];
+    uint8_t public_blob[64];
+    uint8_t private_section[160];
+    uint8_t container[256];
+    word32 private_size = sizeof(raw_private);
+    word32 public_size = sizeof(raw_public);
+
+    if (wc_InitRng(&rng) != 0) goto cleanup;
+    rng_ready = true;
+    if (wc_ed25519_init(&key) != 0) goto cleanup;
+    key_ready = true;
+    if (wc_ed25519_make_key(&rng, ED25519_KEY_SIZE, &key) != 0 ||
+        wc_ed25519_export_key(&key, raw_private, &private_size, raw_public, &public_size) != 0 ||
+        private_size != ED25519_PRV_KEY_SIZE || public_size != ED25519_PUB_KEY_SIZE) {
+        goto cleanup;
+    }
+
+    size_t public_blob_size = 0;
+    if (!ssh__append_binary_string(
+            public_blob, sizeof(public_blob), &public_blob_size,
+            SSH__ED25519_ALGORITHM, sizeof(SSH__ED25519_ALGORITHM) - 1u
+        ) ||
+        !ssh__append_binary_string(
+            public_blob, sizeof(public_blob), &public_blob_size, raw_public, sizeof(raw_public)
+        )) {
+        result = BRUCE_ERR_INTERNAL;
+        goto cleanup;
+    }
+
+    uint8_t check_bytes[4];
+    if (wc_RNG_GenerateBlock(&rng, check_bytes, sizeof(check_bytes)) != 0) goto cleanup;
+    uint32_t check = ((uint32_t)check_bytes[0] << 24) | ((uint32_t)check_bytes[1] << 16) |
+                     ((uint32_t)check_bytes[2] << 8) | check_bytes[3];
+    size_t section_size = 0;
+    if (!ssh__append_u32(private_section, sizeof(private_section), &section_size, check) ||
+        !ssh__append_u32(private_section, sizeof(private_section), &section_size, check) ||
+        !ssh__append_binary_string(
+            private_section, sizeof(private_section), &section_size,
+            SSH__ED25519_ALGORITHM, sizeof(SSH__ED25519_ALGORITHM) - 1u
+        ) ||
+        !ssh__append_binary_string(
+            private_section, sizeof(private_section), &section_size, raw_public, sizeof(raw_public)
+        ) ||
+        !ssh__append_binary_string(
+            private_section, sizeof(private_section), &section_size, raw_private, sizeof(raw_private)
+        ) ||
+        !ssh__append_binary_string(private_section, sizeof(private_section), &section_size, NULL, 0)) {
+        result = BRUCE_ERR_INTERNAL;
+        goto cleanup;
+    }
+    uint8_t padding = 1;
+    while (section_size % 8u != 0) {
+        if (!ssh__append_bytes(private_section, sizeof(private_section), &section_size, &padding, 1)) {
+            result = BRUCE_ERR_INTERNAL;
+            goto cleanup;
+        }
+        padding++;
+    }
+
+    static const uint8_t magic[] = SSH__OPENSSH_MAGIC "\0";
+    static const char none[] = "none";
+    size_t container_size = 0;
+    if (!ssh__append_bytes(container, sizeof(container), &container_size, magic, sizeof(magic) - 1u) ||
+        !ssh__append_binary_string(container, sizeof(container), &container_size, none, sizeof(none) - 1u) ||
+        !ssh__append_binary_string(container, sizeof(container), &container_size, none, sizeof(none) - 1u) ||
+        !ssh__append_binary_string(container, sizeof(container), &container_size, NULL, 0) ||
+        !ssh__append_u32(container, sizeof(container), &container_size, 1) ||
+        !ssh__append_binary_string(
+            container, sizeof(container), &container_size, public_blob, public_blob_size
+        ) ||
+        !ssh__append_binary_string(
+            container, sizeof(container), &container_size, private_section, section_size
+        )) {
+        result = BRUCE_ERR_INTERNAL;
+        goto cleanup;
+    }
+
+    static const char private_header[] = "-----BEGIN OPENSSH PRIVATE KEY-----\n";
+    static const char private_footer[] = "-----END OPENSSH PRIVATE KEY-----\n";
+    size_t encoded_size = (container_size + 2u) / 3u * 4u;
+    size_t line_count = (encoded_size + 69u) / 70u;
+    size_t required_private = sizeof(private_header) - 1u + encoded_size + line_count +
+                              sizeof(private_footer) - 1u;
+    size_t public_encoded_size = (public_blob_size + 2u) / 3u * 4u;
+    size_t required_public = sizeof(SSH__ED25519_ALGORITHM) + public_encoded_size;
+    if (required_private + 1u > private_capacity || required_public + 1u > public_capacity) {
+        result = BRUCE_ERR_RESOURCE_LIMIT;
+        goto cleanup;
+    }
+
+    char encoded[352];
+    size_t actual_encoded = ssh__base64_encode(container, container_size, encoded);
+    size_t offset = 0;
+    memcpy(private_key + offset, private_header, sizeof(private_header) - 1u);
+    offset += sizeof(private_header) - 1u;
+    for (size_t i = 0; i < actual_encoded; i += 70u) {
+        size_t chunk = actual_encoded - i > 70u ? 70u : actual_encoded - i;
+        memcpy(private_key + offset, encoded + i, chunk);
+        offset += chunk;
+        private_key[offset++] = '\n';
+    }
+    memcpy(private_key + offset, private_footer, sizeof(private_footer) - 1u);
+    offset += sizeof(private_footer) - 1u;
+    private_key[offset] = '\0';
+    *out_private_size = offset;
+
+    memcpy(public_key, SSH__ED25519_ALGORITHM, sizeof(SSH__ED25519_ALGORITHM) - 1u);
+    public_key[sizeof(SSH__ED25519_ALGORITHM) - 1u] = ' ';
+    offset = sizeof(SSH__ED25519_ALGORITHM);
+    offset += ssh__base64_encode(public_blob, public_blob_size, public_key + offset);
+    public_key[offset] = '\0';
+    *out_public_size = offset;
+    result = BRUCE_OK;
+
+cleanup:
+    memset(raw_private, 0, sizeof(raw_private));
+    memset(private_section, 0, sizeof(private_section));
+    memset(container, 0, sizeof(container));
+    if (key_ready) wc_ed25519_free(&key);
+    if (rng_ready) wc_FreeRng(&rng);
+    return result;
+}
+
+bruce_result_t ssh__generate_keypair_ex(
+    bruce_ssh_key_type_t type, char *private_key, size_t private_capacity,
+    size_t *out_private_size, char *public_key, size_t public_capacity,
+    size_t *out_public_size
+) {
+    bruce_result_t permission = permission__check(BRUCE_PERMISSION_SSH);
+    if (permission != BRUCE_OK) return permission;
+    if (private_key == NULL || out_private_size == NULL || public_key == NULL || out_public_size == NULL)
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    *out_private_size = 0;
+    *out_public_size = 0;
+    if (type == BRUCE_SSH_KEY_ECDSA_P256) {
+        return ssh__generate_ecdsa_keypair(
+            private_key, private_capacity, out_private_size,
+            public_key, public_capacity, out_public_size
+        );
+    }
+    if (type == BRUCE_SSH_KEY_ED25519) {
+        return ssh__generate_ed25519_keypair(
+            private_key, private_capacity, out_private_size,
+            public_key, public_capacity, out_public_size
+        );
+    }
+    return BRUCE_ERR_INVALID_ARGUMENT;
+}
+
+bruce_result_t ssh__generate_keypair(
+    char *private_key, size_t private_capacity, size_t *out_private_size,
+    char *public_key, size_t public_capacity, size_t *out_public_size
+) {
+    return ssh__generate_keypair_ex(
+        BRUCE_SSH_KEY_ECDSA_P256, private_key, private_capacity, out_private_size,
+        public_key, public_capacity, out_public_size
+    );
+}
+
 bruce_result_t ssh__authenticate_key(
     bruce_ssh_id_t session, const char *username, const void *private_key,
     size_t private_key_size, uint32_t timeout_ms
@@ -692,37 +977,58 @@ bruce_result_t ssh__authenticate_key(
     bruce_result_t result = ssh__owned_slot(session, &slot);
     if (result != BRUCE_OK) return result;
 
-    uint8_t der[SSH__ECDSA_DER_MAX];
-    size_t der_size = 0;
-    result = ssh__pem_decode(private_key, private_key_size, der, sizeof(der), &der_size);
-    if (result != BRUCE_OK) return result;
-    ecc_key key;
-    if (wc_ecc_init(&key) != 0) {
-        memset(der, 0, sizeof(der));
-        return BRUCE_ERR_IO;
-    }
-    word32 index = 0;
-    if (wc_EccPrivateKeyDecode(der, &index, &key, (word32)der_size) != 0) {
-        wc_ecc_free(&key);
-        memset(der, 0, sizeof(der));
-        return BRUCE_ERR_INVALID_ARGUMENT;
-    }
+    uint8_t decoded[BRUCE_SSH_PRIVATE_KEY_MAX_SIZE];
+    size_t decoded_size = 0;
     uint8_t blob[SSH__ECDSA_BLOB_MAX];
     size_t blob_size = 0;
-    result = ssh__public_blob(&key, blob, sizeof(blob), &blob_size);
-    wc_ecc_free(&key);
+    const char *algorithm = NULL;
+    size_t algorithm_size = 0;
+
+    static const char openssh_header[] = "-----BEGIN OPENSSH PRIVATE KEY-----";
+    bool openssh = private_key_size >= sizeof(openssh_header) - 1u &&
+                   memcmp(private_key, openssh_header, sizeof(openssh_header) - 1u) == 0;
+    if (openssh) {
+        result = ssh__decode_openssh_ed25519(
+            private_key, private_key_size, decoded, sizeof(decoded), &decoded_size,
+            blob, sizeof(blob), &blob_size
+        );
+        algorithm = SSH__ED25519_ALGORITHM;
+        algorithm_size = sizeof(SSH__ED25519_ALGORITHM) - 1u;
+    } else {
+        result = ssh__pem_decode(
+            private_key, private_key_size, decoded, SSH__ECDSA_DER_MAX, &decoded_size
+        );
+        if (result == BRUCE_OK) {
+            ecc_key key;
+            if (wc_ecc_init(&key) != 0) result = BRUCE_ERR_IO;
+            else {
+                word32 index = 0;
+                if (wc_EccPrivateKeyDecode(decoded, &index, &key, (word32)decoded_size) != 0)
+                    result = BRUCE_ERR_INVALID_ARGUMENT;
+                else
+                    result = ssh__public_blob(&key, blob, sizeof(blob), &blob_size);
+                wc_ecc_free(&key);
+            }
+        }
+        algorithm = SSH__ECDSA_ALGORITHM;
+        algorithm_size = sizeof(SSH__ECDSA_ALGORITHM) - 1u;
+    }
     if (result == BRUCE_OK) {
-        slot->auth_private_key = der;
-        slot->auth_private_key_len = der_size;
+        slot->auth_private_key = decoded;
+        slot->auth_private_key_len = decoded_size;
         slot->auth_public_key = blob;
         slot->auth_public_key_len = blob_size;
+        slot->auth_public_key_type = algorithm;
+        slot->auth_public_key_type_len = algorithm_size;
         result = ssh__authenticate(slot, username, timeout_ms);
     }
     slot->auth_private_key = NULL;
     slot->auth_private_key_len = 0;
     slot->auth_public_key = NULL;
     slot->auth_public_key_len = 0;
-    memset(der, 0, sizeof(der));
+    slot->auth_public_key_type = NULL;
+    slot->auth_public_key_type_len = 0;
+    memset(decoded, 0, sizeof(decoded));
     memset(blob, 0, sizeof(blob));
     return result;
 }
