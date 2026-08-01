@@ -9,6 +9,7 @@
 #include "core_sdk/permission.h"
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
+#include "core_sdk/storage.h"
 
 #include <stdbool.h>
 #include <stdio.h>

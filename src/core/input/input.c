@@ -548,24 +548,37 @@ static void input__poll_keyboard(void) {
                         s_kb_hotkey_consumed[y][x] = true;
                         input__kb_discard_modifier_events_locked();
                     } else if (s_kb_fn_held) {
-                        int32_t nav = input__kb_decode_fn_nav(x, y);
-                        if (nav != 0) {
-                            /* Keep Fn navigation distinguishable from punctuation
-                             * keys that share these legacy input codes. */
+                        if (y == 0 && x == 0) {
                             (void)input__push_event_locked(
-                                BRUCE_INPUT_KEY, BRUCE_INPUT_PRESS, nav, -1, BRUCE_PROCESS_ID_INVALID
+                                BRUCE_INPUT_KEY, BRUCE_INPUT_PRESS, '`', '`', BRUCE_PROCESS_ID_INVALID
                             );
+                        } else {
+                            int32_t nav = input__kb_decode_fn_nav(x, y);
+                            if (nav != 0) {
+                                /* Keep Fn navigation distinguishable from punctuation
+                                 * keys that share these legacy input codes. */
+                                (void)input__push_event_locked(
+                                    BRUCE_INPUT_KEY, BRUCE_INPUT_PRESS, nav, -1, BRUCE_PROCESS_ID_INVALID
+                                );
+                            }
                         }
                     } else {
                         const char *normal_label = s_kb_normal[y][x];
                         const char *label = s_kb_shift_held ? s_kb_shifted[y][x] : normal_label;
                         int32_t code = input__kb_char_code(label);
-                        if (s_kb_ctrl_held && code >= 'a' && code <= 'z') code &= 0x1f;
-                        if (s_kb_ctrl_held && code >= 'A' && code <= 'Z') code &= 0x1f;
-                        if (code != 0) {
+                        if (y == 0 && x == 0 && !s_kb_shift_held) {
                             (void)input__push_event_locked(
-                                BRUCE_INPUT_KEY, BRUCE_INPUT_PRESS, code, code, BRUCE_PROCESS_ID_INVALID
+                                BRUCE_INPUT_KEY, BRUCE_INPUT_PRESS, BRUCE_INPUT_CODE_BACK, -1,
+                                BRUCE_PROCESS_ID_INVALID
                             );
+                        } else {
+                            if (s_kb_ctrl_held && code >= 'a' && code <= 'z') code &= 0x1f;
+                            if (s_kb_ctrl_held && code >= 'A' && code <= 'Z') code &= 0x1f;
+                            if (code != 0) {
+                                (void)input__push_event_locked(
+                                    BRUCE_INPUT_KEY, BRUCE_INPUT_PRESS, code, code, BRUCE_PROCESS_ID_INVALID
+                                );
+                            }
                         }
                     }
                 }

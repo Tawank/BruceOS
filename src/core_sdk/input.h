@@ -64,6 +64,11 @@ typedef struct {
     bruce_process_id_t source_process_id;
 } bruce_input_event_t;
 
+/* Built-in boot lifecycle. Applications normally only consume the event API
+ * below; the registered `input` startup command initializes the physical input
+ * service once and then exits. */
+bruce_result_t input__init(void);
+
 /* input__read pops the next input event for the foreground process.
  *
  * `timeout_ms` controls blocking:

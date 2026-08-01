@@ -143,6 +143,16 @@ static void config__set_defaults(config__t *cfg) {
     config__assign(&cfg->wifiMAC, "");
     cfg->terminalLog = true;
 
+    static const char *const default_startup_apps[] = {
+        "bootanimation",
+        "input",
+        "serial_commands",
+        "launcher -s",
+    };
+    for (size_t i = 0; i < sizeof(default_startup_apps) / sizeof(default_startup_apps[0]); ++i) {
+        config__assign(&cfg->startupApps.items[i], default_startup_apps[i]);
+    }
+    cfg->startupApps.count = sizeof(default_startup_apps) / sizeof(default_startup_apps[0]);
     config__assign(&cfg->startupAppJSInterpreterFile, "");
     config__assign(&cfg->wigleBasicToken, "");
     config__assign(&cfg->wdgwarsApiKey, "your 64-char hex key from wdgwars.pl/profile");

@@ -1,10 +1,11 @@
 #include <stdio.h>
+#include <ctype.h>
+#include <string.h>
 
 #include "core_sdk/app_runner.h"
 #include "core_sdk/display.h"
 
 #include "core/config/config.h"
-#include "core/input/input.h"
 #include "core/stdio/stdio.h"
 #include "core/storage/storage.h"
 #include "core_sdk/loader.h"
@@ -13,12 +14,14 @@
 #include "modules/apps/apps_app.h"
 #include "modules/bluetooth/bluetooth_app.h"
 #include "modules/bluetooth_hid/bluetooth_hid_app.h"
+#include "modules/bootanimation/bootanimation_app.h"
 #include "modules/bnu/bnu_app.h"
 #include "modules/bruce_launcher/bruce_launcher_app.h"
 #include "modules/clock/clock_app.h"
 #include "modules/config/config_app.h"
 #include "modules/filemanager/filemanager_app.h"
 #include "modules/ir/ir_app.h"
+#include "modules/input/input_app.h"
 #include "modules/loaders/elf/elf_loader_app.h"
 #include "modules/loaders/image/image_loader_app.h"
 #include "modules/loaders/js/js_loader_app.h"
@@ -37,7 +40,6 @@
 #include "modules/webui/webui_app.h"
 #include "modules/wifi/wifi_app.h"
 
-#define MAIN_LAUNCHER_CHECK_INTERVAL_MS 1000
 #define MAIN_SERIAL_READY_TIMEOUT_MS 1000
 
 #define SELFTEST_STACK_BYTES 8192u
@@ -45,23 +47,16 @@
 #define SSH_STACK_BYTES 16384u
 #define SSH_KEYGEN_STACK_BYTES 12288u
 
-static void main__launch_launcher(void) {
-    int result = app_runner__run("launcher", "--gui", true);
-    if (result < 0) { printf("Launcher failed to start with code %d\n", result); }
-}
-
 bool init_user_interface(void) {
     bool display_ok = display__init() == BRUCE_OK;
     if (!display_ok) printf("Display initialization failed; continuing without LCD\n");
-
-    bool input_ok = input__init() == BRUCE_OK;
-    if (!input_ok) printf("Input initialization failed; continuing without physical input\n");
-
-    return display_ok && input_ok;
+    return display_ok;
 }
 
 void app_runner__register_defaults(void) {
     (void)app_runner__register("launcher", launcher_app_main, 0);
+    (void)app_runner__register("bootanimation", bootanimation_app_main, 0);
+    (void)app_runner__register("input", input_app_main, 0);
     (void)app_runner__register("bruce_launcher", bruce_launcher_app_main, 0);
     (void)app_runner__register("apps", apps_app_main, 0);
     (void)app_runner__register("filemanager", filemanager_app_main, 0);
@@ -111,6 +106,35 @@ void app_runner__register_defaults(void) {
     elf_loader__init();
 }
 
+static int main__run_startup_command(const char *command_line) {
+    if (command_line == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    while (isspace((unsigned char)*command_line)) command_line++;
+    const char *end = command_line;
+    while (*end != '\0' && !isspace((unsigned char)*end)) end++;
+    if (end == command_line) return BRUCE_ERR_INVALID_ARGUMENT;
+
+    char command[BRUCE_CONFIG_HOTKEY_ACTION_MAX_LEN + 1];
+    size_t length = (size_t)(end - command_line);
+    if (length >= sizeof(command)) return BRUCE_ERR_INVALID_ARGUMENT;
+    memcpy(command, command_line, length);
+    command[length] = '\0';
+    while (isspace((unsigned char)*end)) end++;
+    const char *args = *end != '\0' ? end : NULL;
+    if (command[0] == '/' || strncmp(command, "./", 2) == 0) {
+        return app_runner__run_path(command, args, true);
+    }
+    return app_runner__run(command, args, true);
+}
+
+static void main__start_configured_apps(void) {
+    const bruce_config_startup_apps_t *apps = config__get_startup_apps();
+    if (apps == NULL) return;
+    for (size_t i = 0; i < apps->count; ++i) {
+        int result = main__run_startup_command(apps->items[i]);
+        if (result < 0) printf("Startup app \"%s\" failed with code %d\n", apps->items[i], result);
+    }
+}
+
 void set_log_level() {
     esp_log_level_set("wifi", ESP_LOG_WARN);
     esp_log_level_set("wifi_init", ESP_LOG_WARN);
@@ -123,11 +147,10 @@ void app_main(void) {
     if (storage_ok && !config__init()) printf("Configuration is unavailable; using in-memory defaults\n");
     if (stdio__init() != BRUCE_OK) printf("USB serial console initialization failed\n");
 
-    bool ui_ok = init_user_interface();
+    (void)init_user_interface();
 
     app_runner__register_defaults();
-
-    app_runner__run("serial_commands", NULL, true);
+    main__start_configured_apps();
 
 #if CONFIG_BRUCE_QEMU_TEST_MODE
     if (!serial_commands__wait_ready(MAIN_SERIAL_READY_TIMEOUT_MS)) {
@@ -137,10 +160,6 @@ void app_main(void) {
     fflush(stdout);
     return;
 #endif
-
-    if (!ui_ok) return;
-
-    main__launch_launcher();
 
     set_log_level();
 }

@@ -6,7 +6,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#include "core_sdk/storage.h"
+#include "core_sdk/storage.h" // IWYU pragma: export
 
 /* All paths are VFS paths: internal files use /..., SD files use /sdcard/....
  * An empty mount path registers LittleFS as the fallback VFS (root filesystem).
@@ -23,7 +23,6 @@ typedef struct {
 } storage__sdspi_config_t;
 
 bool storage__init(void);
-bool storage__exists(const char *path);
 bool storage__read_file(const char *path, char **data, size_t *size);
 bool storage__write_file_atomic(const char *path, const void *data, size_t size);
 bool storage__remove_internal(const char *path);

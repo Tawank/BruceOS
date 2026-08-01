@@ -15,6 +15,7 @@
 #include "core/process/process.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/result.h"
+#include "core_sdk/storage.h"
 
 #define PERMISSION__FILE_PATH "/permissions.json"
 #define PERMISSION__MAX_FILES 32

@@ -69,19 +69,21 @@ built-in gets this exemption.
 
 ## Bootstrap and launcher selection
 
-`main.c` initializes Core services (including display and configuration), then
-runs the built-in utility command `launcher`.
+`main.c` initializes storage, configuration, stdio, and display, registers the
+built-ins, then starts each command line in `startupApps` in order. The default
+list is `bootanimation`, `input`, `serial_commands`, and `launcher -s`.
 
 `launcher` is a small module under `modules/utils/`.  Its
-`run_launcher_app()` helper reads `launcherApp` from `bruce.json` using the
+`launcher_app_main()` entry reads `launcherApp` from `bruce.json` using the
 public Config API and starts that command with app_runner.  The default is
 `bruce_launcher`; an empty or unstartable configured value falls back to
 `bruce_launcher`.
 
-After boot, Main monitors Core foreground ownership. If UI initialization
-succeeded and the foreground stack becomes empty, Main starts the configured
-`launcher --gui` command again. Closing or killing the launcher therefore
-returns the device to its launcher instead of leaving an unowned display.
+At boot, `launcher -s` waits for the boot animation or another foreground app
+to finish, then starts the configured launcher as a GUI. It remains resident and
+restarts that launcher whenever it exits and the foreground stack is empty.
+Closing or killing the launcher therefore returns the device to its launcher
+instead of leaving an unowned display.
 
 `bruce_launcher` is an application, not Core.  It reads `/launcher.json` and
 builds a nested menu from it.  Top-level keys are menu labels; values are either
@@ -803,8 +805,10 @@ string, string-array, and credential getters return read-only pointers into the
 singleton without allocating or copying. Those pointers remain valid until the
 configuration is changed, loaded, or reset and callers must not free them.
 `config__get_startup_apps()` returns the singleton's `startupApps` array and
-count. `config__add_startup_app()` appends a key only when it is not already
-present, and `config__remove_startup_app()` removes a key while preserving the
+count. Each entry is an AppRunner command line; Main starts all entries in order
+and leaves successfully created processes running concurrently.
+`config__add_startup_app()` appends a command line only when it is not already
+present, and `config__remove_startup_app()` removes one while preserving the
 order of the remaining entries. `hotkeys` is a bounded key-to-action object.
 `displayDmaFramebuffer` defaults to true and is applied at boot. When false,
 the full compositing framebuffer is ordinary internal memory and display

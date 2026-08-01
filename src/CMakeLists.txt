@@ -63,6 +63,7 @@ idf_component_register(SRCS
                     "core/wifi/wifi_common.c"
                      "core/http_server/http_server.c"
                      "modules/apps/apps_app.c"
+                     "modules/bootanimation/bootanimation_app.c"
                      "modules/bruce_launcher/bruce_launcher_app.c"
                     "modules/bruce_launcher/bruce_launcher_icons.c"
                     "modules/bruce_launcher/bruce_launcher_menu.c"
@@ -71,7 +72,8 @@ idf_component_register(SRCS
                     "modules/bluetooth_hid/bluetooth_hid_app.c"
                     "modules/clock/clock_app.c"
                     "modules/config/config_app.c"
-                    "modules/filemanager/filemanager_app.c"
+                     "modules/filemanager/filemanager_app.c"
+                     "modules/input/input_app.c"
                     "modules/loaders/elf/elf_loader_app.c"
                     "modules/loaders/elf/elf_loader_sdk_symbols.c"
                     "modules/loaders/image/image_loader_app.c"
@@ -242,6 +244,16 @@ add_library(bruce_sdk_builtin_apps_check OBJECT "modules/apps/apps_app.c")
 target_include_directories(bruce_sdk_builtin_apps_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/apps")
+
+add_library(bruce_sdk_builtin_bootanimation_check OBJECT "modules/bootanimation/bootanimation_app.c")
+target_include_directories(bruce_sdk_builtin_bootanimation_check PRIVATE
+                           "${CMAKE_CURRENT_LIST_DIR}"
+                           "${CMAKE_CURRENT_LIST_DIR}/modules/bootanimation")
+
+add_library(bruce_sdk_builtin_input_check OBJECT "modules/input/input_app.c")
+target_include_directories(bruce_sdk_builtin_input_check PRIVATE
+                           "${CMAKE_CURRENT_LIST_DIR}"
+                           "${CMAKE_CURRENT_LIST_DIR}/modules/input")
 
 add_library(bruce_sdk_builtin_clock_check OBJECT "modules/clock/clock_app.c")
 target_include_directories(bruce_sdk_builtin_clock_check PRIVATE
