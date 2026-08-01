@@ -36,6 +36,7 @@
 #include "modules/wifi/wifi_app.h"
 
 #define MAIN_LAUNCHER_CHECK_INTERVAL_MS 1000
+#define MAIN_SERIAL_READY_TIMEOUT_MS 1000
 
 #define SELFTEST_STACK_BYTES 8192u
 #define SHELL_STACK_BYTES 4096u
@@ -115,6 +116,9 @@ void app_main(void) {
     app_runner__run("serial_commands", NULL, true);
 
 #if CONFIG_BRUCE_QEMU_TEST_MODE
+    if (!serial_commands__wait_ready(MAIN_SERIAL_READY_TIMEOUT_MS)) {
+        printf("Serial command frontend failed to start\n");
+    }
     printf("SELFTEST READY\n");
     fflush(stdout);
     return;

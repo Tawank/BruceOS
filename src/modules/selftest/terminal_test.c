@@ -11,7 +11,10 @@
 #include "core_sdk/stdio.h"
 #include "fake_elf.h"
 #include "modules/loaders/elf/elf_loader_app.h"
+#include "modules/shell/shell_history.h"
+#include "modules/shell/shell_line_editor.h"
 #include "modules/utils/serial_commands/serial_commands_app.h"
+#include "modules/utils/terminal/terminal_ansi.h"
 
 /* ------------------------------------------------------------------------ */
 /* Terminal parser: named built-in dispatch                                  */
@@ -217,5 +220,57 @@ bool selftest__run_terminal_stdio_cancel_case(void) {
               s_stdio_cancel_result == BRUCE_ERR_CANCELLED && status.reason == BRUCE_PROCESS_TERMINATED &&
               status.exit_code == 0 && status.signal == BRUCE_PROCESS_SIGNAL_TERM;
     printf("[selftest] terminal/stdio-cancel: %s\n", ok ? "OK" : "failed");
+    return ok;
+}
+
+bool selftest__run_terminal_editing_case(void) {
+    char line[32];
+    shell_line_editor_t editor;
+    shell_line_editor__init(&editor, line, sizeof(line));
+    bool editor_ok = shell_line_editor__insert(&editor, 'a') &&
+                     shell_line_editor__insert(&editor, 'c') &&
+                     shell_line_editor__left(&editor) &&
+                     shell_line_editor__insert(&editor, 'b') &&
+                     strcmp(line, "abc") == 0 &&
+                     shell_line_editor__backspace(&editor) &&
+                     shell_line_editor__delete(&editor) &&
+                     strcmp(line, "a") == 0;
+
+    char transcript[32] = {0};
+    uint8_t colors[32] = {0};
+    size_t transcript_size = 0;
+    terminal_ansi_parser_t ansi;
+    terminal_ansi__init(&ansi);
+    static const char ansi_part_one[] = "plain\033[3";
+    static const char ansi_part_two[] = "1mred\033[0m";
+    terminal_ansi__consume(
+        &ansi, ansi_part_one, sizeof(ansi_part_one) - 1, transcript, colors, &transcript_size, sizeof(transcript)
+    );
+    terminal_ansi__consume(
+        &ansi, ansi_part_two, sizeof(ansi_part_two) - 1, transcript, colors, &transcript_size, sizeof(transcript)
+    );
+    bool ansi_ok = strcmp(transcript, "plainred") == 0 &&
+                   colors[0] == TERMINAL_ANSI_DEFAULT_COLOR && colors[5] == 1 &&
+                   ansi.color == TERMINAL_ANSI_DEFAULT_COLOR;
+
+    static const char history_path[] = "/terminal_history_test";
+    (void)storage__remove(history_path);
+    bool history_ok = shell_history__append(history_path, "first") == BRUCE_OK &&
+                      shell_history__append(history_path, "second") == BRUCE_OK &&
+                      shell_history__append(history_path, "third") == BRUCE_OK;
+    uint64_t third = 0;
+    uint64_t second = 0;
+    if (history_ok) {
+        history_ok = shell_history__previous(history_path, UINT64_MAX, line, sizeof(line), &third) == BRUCE_OK &&
+                     strcmp(line, "third") == 0 &&
+                     shell_history__previous(history_path, third, line, sizeof(line), &second) == BRUCE_OK &&
+                     strcmp(line, "second") == 0 &&
+                     shell_history__next(history_path, second, line, sizeof(line), &third) == BRUCE_OK &&
+                     strcmp(line, "third") == 0;
+    }
+    (void)storage__remove(history_path);
+
+    bool ok = editor_ok && ansi_ok && history_ok;
+    printf("[selftest] terminal/editing: %s\n", ok ? "OK" : "failed");
     return ok;
 }

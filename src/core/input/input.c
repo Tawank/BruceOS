@@ -442,7 +442,7 @@ static int32_t input__kb_decode_fn_nav(int x, int y) {
     if (y == 3 && x == 10) { return BRUCE_INPUT_CODE_LEFT; }
     if (y == 3 && x == 12) { return BRUCE_INPUT_CODE_RIGHT; }
     if (y == 0 && x == 1) { return BRUCE_INPUT_CODE_BACK; }
-    if (y == 0 && x == 13) { return BRUCE_INPUT_CODE_BACK; }
+    if (y == 0 && x == 13) { return BRUCE_INPUT_CODE_DELETE; }
     return 0;
 }
 

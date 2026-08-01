@@ -12,6 +12,8 @@
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
 #include "shell_executor.h"
+#include "shell_console.h"
+#include "shell_history.h"
 #include "shell_internal.h"
 #include "shell_parser.h"
 
@@ -108,15 +110,21 @@ static int shell__interactive(shell_state_t *state, bool suppress_echo) {
         stdio__printf("shell: out of memory\n");
         return 1;
     }
+    bool skip_lf = false;
     while (!state->exit_requested) {
-        stdio__printf("bruce$ ");
-        int length = stdio__read_line(line, SHELL__LINE_MAX, suppress_echo);
+        int length;
+        if (suppress_echo) {
+            length = stdio__read_line(line, SHELL__LINE_MAX, true);
+        } else {
+            length = shell_console__read_line(line, SHELL__LINE_MAX, &skip_lf);
+        }
         if (length == BRUCE_ERR_CANCELLED) {
             int status = 128 + (int)process__current_signal();
             memory__free(line);
             return status;
         }
         if (length < 0) break;
+        if (length > 0) (void)shell_history__append(SHELL_HISTORY_PATH, line);
         (void)shell__execute_line(state, line);
     }
     memory__free(line);

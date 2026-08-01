@@ -477,6 +477,16 @@ terminates the shell before closing. The physical `serial_commands` frontend
 runs the same interactive shell language. The configured ESP-IDF console
 transport and its input driver remain Core-owned.
 
+Interactive shell input supports insertion and deletion at the cursor, Left,
+Right, Home, End, and Up/Down history navigation. The physical console consumes
+the corresponding ANSI/VT100 escape sequences; the GUI terminal uses normalized
+input events and draws its cursor in the prompt. Non-empty interactive commands
+are appended to `/shell_history`. History entries are fetched from storage only
+when navigating, rather than retained in a RAM history ring, and the active file
+rotates to `/shell_history.old` at 64 KiB. The GUI transcript interprets ANSI SGR
+foreground colors and reset/bold variants, strips OSC/control sequences, and
+handles erase-screen/erase-line sequences within its bounded transcript.
+
 The built-in `shell` module owns command-language parsing and execution. It
 supports whitespace-delimited words, literal single quotes, expandable double
 quotes, backslash escaping, `NAME=value`, `$NAME`, `${NAME}`, `$?`, token-boundary

@@ -91,6 +91,7 @@ int selftest_app_main(int argc, char **argv) {
     RUN_SELFTEST(selftest__run_terminal_invalid_case);
     RUN_SELFTEST(selftest__run_terminal_stdio_case);
     RUN_SELFTEST(selftest__run_terminal_stdio_cancel_case);
+    RUN_SELFTEST(selftest__run_terminal_editing_case);
     RUN_SELFTEST(selftest__run_shell_language_case);
     RUN_SELFTEST(selftest__run_shell_script_case);
     RUN_SELFTEST(selftest__run_shell_stdio_inheritance_case);

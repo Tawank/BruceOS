@@ -9,11 +9,10 @@
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
 #include "core_sdk/runtime.h"
-#include "core_sdk/stdio.h"
-#include "modules/shell/shell_app.h"
+#include "modules/shell/shell_console.h"
 
 #define SERIAL_COMMANDS__LINE_MAX 256
-#define SERIAL_COMMANDS__SHELL_ARG_MAX (SERIAL_COMMANDS__LINE_MAX * 2 + 8)
+#define SERIAL_COMMANDS__WAIT_INTERVAL_MS 1
 
 static const char *serial_commands__split_line(const char *line, char *token, size_t token_size) {
     const char *p = line;
@@ -37,38 +36,22 @@ int serial_commands__run_line(const char *line, bool in_background) {
     return app_runner__run(token, arg, in_background);
 }
 
-/* Dispatches `line` to the shell as a single `-c` command, run in a
- * background process (so it gets the shell's own registered stack) rather
- * than executed inline on this task's stack. */
-static int serial_commands__run_via_shell(const char *line) {
-    char quoted[SERIAL_COMMANDS__LINE_MAX * 2 + 4];
-    if (!shell__quote_arg(line, quoted, sizeof(quoted))) return BRUCE_ERR_INVALID_ARGUMENT;
-    char arguments[SERIAL_COMMANDS__SHELL_ARG_MAX];
-    int written = snprintf(arguments, sizeof(arguments), "-c %s", quoted);
-    if (written < 0 || (size_t)written >= sizeof(arguments)) return BRUCE_ERR_INVALID_ARGUMENT;
-    return app_runner__run("shell", arguments, true);
-}
-
 int serial_commands_app_main(int argc, char **argv) {
     (void)argc;
     (void)argv;
-    char line[SERIAL_COMMANDS__LINE_MAX];
-    for (;;) {
-        stdio__printf("bruce> ");
-        fflush(stdout);
-        int length = stdio__read_line(line, sizeof(line), false);
-        if (length < 0) break;
-        if (line[0] == '\0') continue;
-        if (strcmp(line, "exit") == 0) return 0;
-        // int result = serial_commands__run_via_shell(line);
-        int result = serial_commands__run_via_shell(line);
-        if (result > 0) {
-            while (process__wait((bruce_process_id_t)result, 100) == BRUCE_ERR_TIMEOUT) {
-                if (runtime__delay(10) != BRUCE_OK) return BRUCE_ERR_CANCELLED;
-            }
-        } else {
-            stdio__printf("error %d\n", result);
-        }
+    shell_console__reset_ready();
+    int result = app_runner__run("shell", "-i", true);
+    if (result < 0) return result;
+    while (process__wait((bruce_process_id_t)result, 100) == BRUCE_ERR_TIMEOUT) {
+        if (runtime__delay(10) != BRUCE_OK) return BRUCE_ERR_CANCELLED;
     }
     return 0;
+}
+
+bool serial_commands__wait_ready(uint32_t timeout_ms) {
+    uint64_t started = runtime__now();
+    while (!shell_console__is_ready() && runtime__now() - started < timeout_ms) {
+        if (runtime__delay(SERIAL_COMMANDS__WAIT_INTERVAL_MS) != BRUCE_OK) return false;
+    }
+    return shell_console__is_ready();
 }

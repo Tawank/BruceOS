@@ -86,7 +86,10 @@ idf_component_register(SRCS
                     "modules/loaders/js/runtime_js.c"
                     "modules/loaders/js/serial_js.c"
                      "modules/loaders/js/wifi_js.c"
-                    "modules/shell/shell_app.c"
+                     "modules/shell/shell_app.c"
+                     "modules/shell/shell_console.c"
+                     "modules/shell/shell_history.c"
+                     "modules/shell/shell_line_editor.c"
                     "modules/shell/shell_parser.c"
                     "modules/shell/shell_executor.c"
                     "modules/shell/shell_builtins.c"
@@ -97,6 +100,7 @@ idf_component_register(SRCS
                      "modules/utils/help/help_app.c"
                      "modules/utils/serial_commands/serial_commands_app.c"
                      "modules/utils/terminal/terminal_app.c"
+                     "modules/utils/terminal/terminal_ansi.c"
                      "modules/utils/process/process_app.c"
                     "modules/utils/notification/notification_app.c"
                     "modules/ir/ir_app.c"
@@ -299,7 +303,9 @@ target_include_directories(bruce_sdk_builtin_utils_help_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/utils/help")
 
-add_library(bruce_sdk_builtin_utils_terminal_check OBJECT "modules/utils/terminal/terminal_app.c")
+add_library(bruce_sdk_builtin_utils_terminal_check OBJECT
+            "modules/utils/terminal/terminal_app.c"
+            "modules/utils/terminal/terminal_ansi.c")
 target_include_directories(bruce_sdk_builtin_utils_terminal_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/utils/terminal")
@@ -318,6 +324,9 @@ target_include_directories(bruce_sdk_builtin_utils_serial_commands_check PRIVATE
 
 add_library(bruce_sdk_builtin_shell_check OBJECT
             "modules/shell/shell_app.c"
+            "modules/shell/shell_console.c"
+            "modules/shell/shell_history.c"
+            "modules/shell/shell_line_editor.c"
             "modules/shell/shell_parser.c"
             "modules/shell/shell_executor.c"
             "modules/shell/shell_builtins.c")
