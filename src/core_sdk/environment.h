@@ -13,6 +13,14 @@ typedef struct {
     const char *value;
 } bruce_environment_variable_t;
 
+/* Global values are runtime defaults for processes created after the change.
+ * They are overridden by inherited parent values and launch assignments.
+ * Persistent defaults are loaded from /config/.env during boot; these setters
+ * intentionally do not modify that file. */
+const char *environment__global_get(const char *name);
+bruce_result_t environment__global_set(const char *name, const char *value);
+bruce_result_t environment__global_unset(const char *name);
+
 /* Process environments are runtime-only and inherited as a deep copy when a
  * child is launched. Returned values are borrowed until the calling process
  * changes its environment or exits. */

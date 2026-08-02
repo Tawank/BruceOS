@@ -105,6 +105,11 @@ bool selftest__run_apprunner_args_case(void) {
         printf("[selftest] apprunner/args: register failed (%d)\n", registered);
         return false;
     }
+    if (environment__global_set("TEST_VALUE", "global") != BRUCE_OK ||
+        strcmp(environment__global_get("TEST_VALUE"), "global") != 0) {
+        printf("[selftest] apprunner/args: global environment setup failed\n");
+        return false;
+    }
 
     memset(&s_echo, 0, sizeof(s_echo));
     int background_result = app_runner__run_command(
@@ -160,7 +165,8 @@ bool selftest__run_apprunner_args_case(void) {
     }
     if (s_echo.argc != 3 || strcmp(s_echo.argv_buf[0], "selftest_echo") != 0 ||
         strcmp(s_echo.argv_buf[1], "one") != 0 || strcmp(s_echo.argv_buf[2], "two") != 0 ||
-        !s_echo.argv_terminated || s_echo.gui_requested || s_echo.state != BRUCE_PROCESS_FOREGROUND) {
+        !s_echo.argv_terminated || s_echo.gui_requested || s_echo.state != BRUCE_PROCESS_FOREGROUND ||
+        strcmp(s_echo.environment, "global") != 0) {
         printf(
             "[selftest] apprunner/args: foreground argc=%d gui=%d state=%d\n",
             s_echo.argc,
@@ -169,6 +175,7 @@ bool selftest__run_apprunner_args_case(void) {
         );
         return false;
     }
+    (void)environment__global_unset("TEST_VALUE");
     if (app_runner__run_command("BG=invalid selftest_echo", BRUCE_LAUNCH_BACKGROUND) !=
         BRUCE_ERR_INVALID_ARGUMENT) {
         printf("[selftest] apprunner/args: invalid BG value was accepted\n");

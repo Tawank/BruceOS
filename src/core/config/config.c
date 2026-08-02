@@ -519,6 +519,7 @@ void config__init_defaults(void) {
 bool config__init(void) {
     config__ensure_mutex();
     config__init_defaults();
+    if (!storage__mkdir_internal(CONFIG__DIRECTORY)) return false;
     return config__load();
 }
 

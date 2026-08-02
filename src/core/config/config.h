@@ -7,7 +7,8 @@
 #include "core_sdk/config.h"
 
 /* Core-private representation of the configuration singleton. */
-#define CONFIG__FILE_PATH "/bruce.json"
+#define CONFIG__DIRECTORY "/config"
+#define CONFIG__FILE_PATH CONFIG__DIRECTORY "/bruce.json"
 
 #define CONFIG__WIFI_SSID_MAX_LEN 32
 #define CONFIG__WIFI_PASSWORD_MAX_LEN 64
@@ -109,7 +110,7 @@ typedef struct {
 
 } config__t;
 
-/* Mounts persistent storage, loads bruce.json, and creates it with defaults if absent. */
+/* Loads /config/bruce.json and creates it with defaults if absent. */
 bool config__init(void);
 bool config__load(void);
 bool config__save(void);

@@ -6,6 +6,7 @@
 #include "core/config/config.h"
 #include "core/display/display.h"
 #include "core/event_loop/event_loop.h"
+#include "core/process/process.h"
 #include "core/stdio/stdio.h"
 #include "core/storage/storage.h"
 #include "core_sdk/loader.h"
@@ -132,6 +133,9 @@ void app_main(void) {
     bool storage_ok = storage__init();
     if (!storage_ok) printf("Storage initialization failed\n");
     if (storage_ok && !config__init()) printf("Configuration is unavailable; using in-memory defaults\n");
+    if (storage_ok && !process_registry__environment_init()) {
+        printf("Global environment configuration is unavailable\n");
+    }
     if (stdio__init() != BRUCE_OK) printf("USB serial console initialization failed\n");
     if (event_loop__init() != BRUCE_OK) printf("Core event loop initialization failed\n");
 

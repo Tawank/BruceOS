@@ -11,7 +11,7 @@
 #include "core_sdk/result.h"
 #include "core_sdk/storage.h"
 
-#define BRUCE_LAUNCHER_CONFIG_PATH "/launcher.json"
+#define BRUCE_LAUNCHER_CONFIG_PATH "/config/launcher.json"
 #define BRUCE_LAUNCHER_JSON_MAX 8192
 #define BRUCE_LAUNCHER_MAX_DEPTH 4
 #define BRUCE_LAUNCHER_TITLE "Main Menu"
@@ -21,7 +21,7 @@ typedef struct {
     size_t remaining;
 } bruce_launcher_menu_arena_t;
 
-/* Default launcher configuration written when /launcher.json is missing. */
+/* Default launcher configuration written when /config/launcher.json is missing. */
 static const char *BRUCE_LAUNCHER_DEFAULT_JSON =
     "{\n"
     "  \"WiFi@wifi\": {\n"

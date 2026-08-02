@@ -10,7 +10,7 @@
  *
  * Getters return zero, false, or NULL if initialization or permission checks
  * fail. Setters return BRUCE_OK or a BRUCE_ERR_* result, validate input, and
- * persist immediately to bruce.json. Built-in modules always pass permission
+ * persist immediately to /config/bruce.json. Built-in modules always pass permission
  * checks; external ELF/JS processes require `config`, except that protected
  * credentials are never exposed to external processes.
  */

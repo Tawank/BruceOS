@@ -132,6 +132,16 @@ bool storage__init(void) {
     return ready;
 }
 
+bool storage__mkdir_internal(const char *path) {
+    if (path == NULL || path[0] != '/') return false;
+    storage__lock();
+    struct stat path_stat;
+    bool created = s_ready &&
+                   ((stat(path, &path_stat) == 0 && S_ISDIR(path_stat.st_mode)) || mkdir(path, 0775) == 0);
+    storage__unlock();
+    return created;
+}
+
 static bool storage__is_sd_path(const char *path) {
     size_t mount_length = strlen(STORAGE__SD_MOUNT_PATH);
     return path != NULL && strncmp(path, STORAGE__SD_MOUNT_PATH, mount_length) == 0 &&
@@ -397,7 +407,7 @@ static bool storage__has_open_sd_files_locked(void) {
     return false;
 }
 
-/* /bruce.json and /permissions.json (plus their atomic-write .tmp siblings)
+/* /config/bruce.json and /permissions.json (plus their atomic-write .tmp siblings)
  * are the only paths this public API refuses, per migration_plan.md -
  * "Input, display, storage, and Config". Everything else mounted (LittleFS or
  * SD) is reachable by a storage-granted caller. Core itself still reads/
@@ -405,7 +415,10 @@ static bool storage__has_open_sd_files_locked(void) {
  * storage__write_file_atomic() above, which this check does not apply to. */
 static bool storage__is_protected_path(const char *path) {
     static const char *const protected_paths[] = {
+        "/config/bruce.json",
+        "/config/bruce.json.tmp",
         "/permissions.json",
+        "/permissions.json.tmp",
     };
     if (path == NULL) return false;
     for (size_t i = 0; i < sizeof(protected_paths) / sizeof(protected_paths[0]); ++i) {

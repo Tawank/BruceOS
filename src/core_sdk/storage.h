@@ -35,7 +35,7 @@ typedef struct {
  * process exit/kill even if the caller never calls storage__close() itself.
  *
  * storage__open()/storage__list() check the calling process's `storage`
- * permission (built-ins always pass) and additionally refuse "/bruce.json",
+ * permission (built-ins always pass) and additionally refuse "/config/bruce.json",
  * "/permissions.json", and their atomic-write ".tmp" siblings entirely -
  * BRUCE_ERR_PERMISSION - regardless of any granted permission; storage__list()
  * silently omits those two names rather than erroring. Every other mounted
