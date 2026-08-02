@@ -1,6 +1,7 @@
 set(BRUCE_SELFTEST_SOURCES
     "modules/selftest/args_test.c"
     "modules/selftest/app_runner_test.c"
+    "modules/selftest/audio_test.c"
     "modules/selftest/bluetooth_test.c"
     "modules/selftest/clock_test.c"
     "modules/selftest/bnu_test.c"
@@ -29,7 +30,8 @@ set(BRUCE_SELFTEST_SOURCES
 
 idf_component_register(SRCS
                     "main.c"
-                    "core/app_runner/app_runner.c"
+                     "core/app_runner/app_runner.c"
+                     "core/audio/audio.c"
                     "core/bluetooth/bluetooth.c"
                     "core/bluetooth/bluetooth_hid.c"
                     "core/clock/clock.c"
@@ -80,7 +82,8 @@ idf_component_register(SRCS
                     "modules/loaders/elf/elf_loader_app.c"
                     "modules/loaders/elf/elf_loader_sdk_symbols.c"
                     "modules/loaders/image/image_loader_app.c"
-                    "modules/loaders/js/dialog_js.c"
+                     "modules/loaders/js/audio_js.c"
+                     "modules/loaders/js/dialog_js.c"
                     "modules/loaders/js/display_js.c"
                     "modules/loaders/js/icon_js.c"
                     "modules/loaders/js/js_stdlib.c"
@@ -121,8 +124,9 @@ idf_component_register(SRCS
                     driver
                     esp_adc
                     esp_driver_gpio
-                    esp_driver_i2c
-                    esp_driver_ledc
+                     esp_driver_i2c
+                     esp_driver_i2s
+                     esp_driver_ledc
                     esp_driver_rmt
                     esp_driver_spi
                     esp_driver_usb_serial_jtag
@@ -387,6 +391,7 @@ target_include_directories(bruce_sdk_builtin_elf_loader_check PRIVATE
 target_link_libraries(bruce_sdk_builtin_elf_loader_check PRIVATE elf_loader)
 
 add_library(bruce_sdk_builtin_js_loader_check OBJECT
+            "modules/loaders/js/audio_js.c"
             "modules/loaders/js/dialog_js.c"
             "modules/loaders/js/display_js.c"
             "modules/loaders/js/icon_js.c"

@@ -58,7 +58,7 @@ static bruce_result_t display_driver__backlight_init(void) {
         .duty_resolution = DISPLAY__LEDC_TIMER_RESOLUTION,
         .timer_num = DISPLAY__BL_LEDC_TIMER,
         .freq_hz = DISPLAY__BL_FREQ,
-        .clk_cfg = LEDC_AUTO_CLK,
+        .clk_cfg = LEDC_USE_APB_CLK,
     };
     if (ledc_timer_config(&timer) != ESP_OK) {
         ESP_LOGE(TAG, "failed to configure LEDC timer");

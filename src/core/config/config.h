@@ -115,6 +115,9 @@ bool config__load(void);
 bool config__save(void);
 bool config__factory_reset(void);
 
+/* Reads settings needed by Core audio without applying app config permission. */
+void config__get_audio_settings(bool *enabled, int *volume);
+
 /* Compatibility initializer. New callers should use config__init(). */
 void config__init_defaults(void);
 

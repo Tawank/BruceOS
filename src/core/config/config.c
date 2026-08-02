@@ -854,6 +854,19 @@ CONFIG__DEFINE_BOOL_FIELD(dst, dst)
 CONFIG__DEFINE_BOOL_FIELD(clock24hr, clock24hr)
 CONFIG__DEFINE_BOOL_INT_FIELD(sound_enabled, soundEnabled)
 CONFIG__DEFINE_INT_FIELD(sound_volume, soundVolume)
+
+void config__get_audio_settings(bool *enabled, int *volume) {
+    if (enabled == NULL || volume == NULL) return;
+    if (!config__init()) {
+        *enabled = false;
+        *volume = 0;
+        return;
+    }
+    config__lock();
+    *enabled = s_config.soundEnabled != 0;
+    *volume = s_config.soundVolume;
+    config__unlock();
+}
 CONFIG__DEFINE_BOOL_INT_FIELD(wifi_at_startup, wifiAtStartup)
 CONFIG__DEFINE_BOOL_INT_FIELD(instant_boot, instantBoot)
 CONFIG__DEFINE_STRING_FIELD(keyboard_lang, keyboardLang, CONFIG__KEYBOARD_LANG_MAX_LEN)

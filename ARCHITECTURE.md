@@ -481,6 +481,9 @@ Preserve the existing JS surface as much as possible: `wifi.scan()`,
 `dialog.choice()`, `display.*`, `runtime.*`, `serial.cmd()`, and similar APIs
 remain.  Their bindings are replaced internally to call the public Core APIs;
 they are not renamed to a new `bruce.*` namespace.
+JavaScript apps may access available module globals through `require(name)` and
+use the global monotonic `now()`, cooperative `delay(milliseconds)`, and
+upper-exclusive `random([min,] max)` helpers.
 
 `runtime.main()` is retained for now even though optional `app_main(argv)` is
 the normal JS lifecycle entry.  `serial.cmd(command)` delegates to the same
@@ -565,6 +568,13 @@ hid, execute, process, storage, config, serial, ssh
 
 `gpio` includes raw GPIO, I²C, and SPI. `rf` includes Sub-GHz, LoRa, and NRF24. `audio` is not
 permission-gated.  Unknown permission names are invalid.
+
+Core exposes `audio__tone(frequency_hz, duration_ms, non_blocking)` for
+20-20000 Hz tones lasting up to 60 seconds. It honors the configured sound
+enable and volume settings without exposing configuration access to the caller.
+The JavaScript `audio` module exposes the same capability as
+`audio.tone(frequencyHz, durationMs, nonBlocking=false)`; audio file playback is
+not part of the current public API.
 
 Permissions are stored in Core-owned `/permissions.json`, keyed only by the
 filename including extension and without its path:

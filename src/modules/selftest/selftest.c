@@ -9,6 +9,7 @@
 
 #include "app_runner_test.h"
 #include "args_test.h"
+#include "audio_test.h"
 #include "bluetooth_test.h"
 #include "bnu_test.h"
 #include "clock_test.h"
@@ -107,6 +108,7 @@ int selftest_app_main(int argc, char **argv) {
     RUN_SELFTEST(selftest__run_ssh_keygen_case);
     RUN_SELFTEST(selftest__run_ir_permission_denied_case);
     RUN_SELFTEST(selftest__run_ir_validation_case);
+    RUN_SELFTEST(selftest__run_audio_validation_case);
     RUN_SELFTEST(selftest__run_nrf24_permission_denied_case);
     RUN_SELFTEST(selftest__run_nrf24_validation_case);
     RUN_SELFTEST(selftest__run_gpio_bus_permission_denied_case);

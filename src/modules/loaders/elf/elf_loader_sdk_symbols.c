@@ -17,6 +17,7 @@
 #include "esp_elf.h" // IWYU pragma: export
 
 #include "core_sdk/app_runner.h"
+#include "core_sdk/audio.h"
 #include "core_sdk/bluetooth.h"
 #include "core_sdk/bluetooth_hid.h"
 #include "core_sdk/clock.h"
@@ -90,6 +91,9 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(process__current_signal),
     ESP_ELFSYM_EXPORT(process__snapshot),
     ESP_ELFSYM_EXPORT(process__list),
+
+    /* Audio */
+    ESP_ELFSYM_EXPORT(audio__tone),
 
     /* Device state */
     ESP_ELFSYM_EXPORT(device__get_battery),

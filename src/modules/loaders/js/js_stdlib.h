@@ -13,3 +13,7 @@ JSValue js_gc(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
 JSValue js_load(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
 JSValue js_setTimeout(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
 JSValue js_clearTimeout(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
+JSValue js_require(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
+JSValue js_now(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
+JSValue js_delay(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
+JSValue js_random(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);

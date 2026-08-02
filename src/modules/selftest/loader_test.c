@@ -270,7 +270,9 @@ bool selftest__run_js_loader_case(void) {
                               "{\"appName\":\"Selftest JS\",\"appIcon\":\"%s\",\"coreAbiVersion\":2,"
                              "\"stackSize\":8192,\"permissions\":[]}\n"
                              "*/\n"
-                             "print('selftest_js_ok');\n";
+                              "var audio = require('audio');\n"
+                              "print(typeof audio.tone);\n"
+                              "print('selftest_js_ok');\n";
     char script[512];
     int len = snprintf(script, sizeof(script), script_fmt, icon_b64);
     if (len <= 0 || (size_t)len >= sizeof(script)) {

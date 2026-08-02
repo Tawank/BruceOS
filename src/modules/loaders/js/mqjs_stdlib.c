@@ -348,14 +348,12 @@ static const JSPropDef js_exports[] = {
 };
 static const JSClassDef js_exports_obj = JS_OBJECT_DEF("Exports", js_exports);
 
-/* const JSPropDef js_audio[] = {
-    JS_CFUNC_DEF("playFile", 1, native_playAudioFile),
+const JSPropDef js_audio[] = {
     JS_CFUNC_DEF("tone", 3, native_tone),
     JS_PROP_END,
 };
 
 const JSClassDef js_audio_obj = JS_OBJECT_DEF("Audio", js_audio);
-*/
 const JSPropDef js_keyboard[] = {
     JS_CFUNC_DEF("keyboard", 4, native_keyboard),
     JS_CFUNC_DEF("numKeyboard", 4, native_num_keyboard),
@@ -879,13 +877,14 @@ static const JSPropDef js_global_object[] = {
     /* Global functions */
     JS_PROP_CLASS_DEF("exports", &js_exports_obj),
 
+    JS_CFUNC_DEF("require", 1, js_require),
+    JS_CFUNC_DEF("now", 0, js_now),
+    JS_CFUNC_DEF("delay", 1, js_delay),
+    JS_CFUNC_DEF("random", 2, js_random),
+
 /* The following global Bruce helpers are not implemented yet */
 #if 0
     JS_CFUNC_DEF("assert", 2, native_assert ),
-    JS_CFUNC_DEF("require", 1, native_require ),
-    JS_CFUNC_DEF("now", 0, native_now ),
-    JS_CFUNC_DEF("delay", 1, native_delay ),
-    JS_CFUNC_DEF("random", 2, native_random ),
     JS_CFUNC_DEF("parse_int", 1, native_parse_int ),
     JS_CFUNC_DEF("to_string", 1, native_to_string ),
     JS_CFUNC_DEF("to_hex_string", 1, native_to_hex_string ),
@@ -909,10 +908,10 @@ static const JSPropDef js_global_object[] = {
     JS_PROP_CLASS_DEF("notification", &js_notification_obj),
     JS_PROP_CLASS_DEF("statusIcon", &js_status_icon_obj),
     JS_PROP_CLASS_DEF("ir", &js_ir_obj),
+    JS_PROP_CLASS_DEF("audio", &js_audio_obj),
 
 /* The following Bruce modules are not implemented yet */
 #if 0
-    JS_PROP_CLASS_DEF("audio", &js_audio_obj),
     JS_PROP_CLASS_DEF("badusb", &js_badusb_obj),
     JS_PROP_CLASS_DEF("device", &js_device_obj),
     JS_PROP_CLASS_DEF("gpio", &js_gpio_obj),

@@ -288,7 +288,6 @@ function main() {
   // Ground properties
   var groundX = 0; // Track ground position
   var groundSpeed = 4; // Speed of ground movement
-  var sprite = display.createSprite();
 
   var deltaTime = 0;
   var nowTime = now();
@@ -315,10 +314,10 @@ function main() {
 
   var score = 0;
 
-  sprite.fill(background);
-  sprite.setTextColor(foreground);
-  sprite.setTextSize(2);
-  sprite.setTextAlign(2);
+  display.fill(background);
+  display.setTextColor(foreground);
+  display.setTextSize(2);
+  display.setTextAlign(2);
   keyboard.setLongPress(true);
   while (true) {
     if (keyboard.getPrevPress(true)) {
@@ -430,15 +429,16 @@ function main() {
     }
 
     // Draw the scene
-    sprite.fill(background);
+    display.beginFrame();
+    display.fill(background);
     for (var i = 0; i < 2; i++) {
-      sprite.drawXBitmap(clouds[i].x, clouds[i].y, cloudSprite, 46, 13, grey);
+      display.drawXBitmap(clouds[i].x, clouds[i].y, cloudSprite, 46, 13, grey);
     }
-    sprite.drawXBitmap(groundX, 118, groundSprite, 623, 12, foreground);
+    display.drawXBitmap(groundX, 118, groundSprite, 623, 12, foreground);
     if ((displayWidth > 240) && ((623 + groundX) < displayWidth)) {
-      sprite.drawXBitmap(623 + groundX, 118, groundSprite, 623, 12, foreground);
+      display.drawXBitmap(623 + groundX, 118, groundSprite, 623, 12, foreground);
     }
-    sprite.drawXBitmap(
+    display.drawXBitmap(
       obstacleX,
       obstacleY,
       obstacle.sprites[
@@ -449,7 +449,7 @@ function main() {
       foreground
     );
     if (dinoIsDucking) {
-      sprite.drawXBitmap(
+      display.drawXBitmap(
         10,
         dinoY + 17,
         dinoDuckSprite[Math.floor((nowTime % 200) / 100)],
@@ -458,7 +458,7 @@ function main() {
         foreground
       );
     } else {
-      sprite.drawXBitmap(
+      display.drawXBitmap(
         10,
         dinoY,
         dinoRunSprite[Math.floor((nowTime % 200) / 100)],
@@ -467,9 +467,9 @@ function main() {
         foreground
       );
     }
-    sprite.setTextColor(foreground);
-    sprite.drawText(score, 235, 5);
-    sprite.pushSprite();
+    display.setTextColor(foreground);
+    display.drawText(score, 235, 5);
+    display.present();
 
     // Collision detection
     if (
@@ -489,10 +489,13 @@ function main() {
       audio.tone(60, 100); // 50
       delay(20);
       audio.tone(60, 180); // 90
+      display.beginFrame();
+      display.fill(background);
       display.setTextColor(foreground);
       display.setTextSize(2);
       display.setTextAlign(0);
       display.drawText('GAME OVER', 70, 40);
+      display.present();
       delay(500);
       while (!keyboard.getAnyPress()) {
         delay(10);

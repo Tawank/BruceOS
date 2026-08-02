@@ -12,10 +12,11 @@
 #include "core_sdk/manifest.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/permission.h"
+#include "core_sdk/process.h"
 #include "core_sdk/result.h"
 #include "core_sdk/storage.h"
-#include "core_sdk/process.h"
 
+#include "audio_js.h"        // IWYU pragma: export
 #include "dialog_js.h"       // IWYU pragma: export
 #include "display_js.h"      // IWYU pragma: export
 #include "icon_js.h"         // IWYU pragma: export
@@ -31,9 +32,9 @@
 #include "mqjs_stdlib.h"
 
 #define JS_LOADER_PATH_MAX BRUCE_STORAGE_PATH_MAX
-#define JS_LOADER_SOURCE_MAX (64 * 1024u)
-#define JS_LOADER_VM_MEMORY (16 * 1024u)
-#define JS_LOADER_STACK_SIZE 8192u
+#define JS_LOADER_SOURCE_MAX (32 * 1024u)
+#define JS_LOADER_VM_MEMORY (32 * 1024u)
+#define JS_LOADER_STACK_SIZE 4096u
 
 typedef struct {
     char path[BRUCE_STORAGE_PATH_MAX];
@@ -131,6 +132,19 @@ static const char *js_loader__skip_manifest_comment(const char *s) {
     return end + 2;
 }
 
+static void js_loader__print_exception(JSContext *js_ctx, JSValue exception) {
+    JSValue text = JS_ToString(js_ctx, exception);
+    if (!JS_IsException(text)) {
+        JSCStringBuf text_buf;
+        const char *message = JS_ToCString(js_ctx, text, &text_buf);
+        if (message != NULL) {
+            printf("%s", message);
+            return;
+        }
+    }
+    JS_PrintValueF(js_ctx, exception, JS_DUMP_LONG);
+}
+
 static void js__app_main(void *context) {
     js_loader_process_ctx_t *ctx = (js_loader_process_ctx_t *)context;
 
@@ -161,7 +175,7 @@ static void js__app_main(void *context) {
     if (JS_IsException(val)) {
         JSValue obj = JS_GetException(js_ctx);
         printf("[js_loader] %s: runtime error: ", ctx->permission_key);
-        JS_PrintValueF(js_ctx, obj, JS_DUMP_LONG);
+        js_loader__print_exception(js_ctx, obj);
         printf("\n");
     }
 
@@ -185,7 +199,7 @@ static void js__app_main(void *context) {
                 if (JS_IsException(ret)) {
                     JSValue obj = JS_GetException(js_ctx);
                     printf("[js_loader] %s: app_main error: ", ctx->permission_key);
-                    JS_PrintValueF(js_ctx, obj, JS_DUMP_LONG);
+                    js_loader__print_exception(js_ctx, obj);
                     printf("\n");
                 }
             } else {
