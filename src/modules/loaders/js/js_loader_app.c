@@ -35,7 +35,8 @@
 
 #define JS_LOADER_PATH_MAX BRUCE_STORAGE_PATH_MAX
 #define JS_LOADER_SOURCE_MAX (32 * 1024u)
-#define JS_LOADER_VM_MEMORY (32 * 1024u)
+#define JS_LOADER_VM_MEMORY_MIN (32 * 1024u)
+#define JS_LOADER_VM_MEMORY_PREFERRED 100000u
 #define JS_LOADER_STACK_SIZE 4096u
 
 typedef struct {
@@ -91,6 +92,17 @@ static size_t js_loader__skip_manifest_comment(const uint8_t *source, size_t sou
     return 0;
 }
 
+static size_t js_loader__vm_memory_size(void) {
+    bruce_memory_stats_t stats;
+    if (memory__get_stats(&stats) != BRUCE_OK) return JS_LOADER_VM_MEMORY_PREFERRED;
+
+    size_t largest = stats.internal_largest_block;
+    if (largest >= 150000u) return JS_LOADER_VM_MEMORY_PREFERRED;
+    if (largest <= 8192u) return 0;
+    size_t adaptive = largest / 2u < 65536u ? largest - 8192u : 65536u;
+    return adaptive >= JS_LOADER_VM_MEMORY_MIN ? adaptive : 0;
+}
+
 static void js_loader__print_exception(JSContext *js_ctx, JSValue exception) {
     JSValue text = JS_ToString(js_ctx, exception);
     if (!JS_IsException(text)) {
@@ -128,7 +140,12 @@ static void js__app_main(void *context) {
     const char *script = (const char *)source->data + script_offset;
     size_t script_len = source->size - script_offset;
 
-    size_t mem_size = JS_LOADER_VM_MEMORY;
+    size_t mem_size = js_loader__vm_memory_size();
+    if (mem_size == 0) {
+        printf("[js_loader] %s: insufficient writable memory for VM\n", ctx->permission_key);
+        js_loader__free_process_ctx(ctx);
+        return;
+    }
     uint8_t *mem_buf = memory__malloc(mem_size);
     if (mem_buf == NULL) {
         printf("[js_loader] %s: failed to allocate VM memory\n", ctx->permission_key);

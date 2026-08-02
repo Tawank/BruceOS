@@ -466,7 +466,8 @@ allocates VM/context memory with `memory__malloc()`.
 The JS loader stages source in external memory before spawning, then transfers
 that allocation to `js__app_main(void *context)` with `loader__adopt_image()`.
 Staged mappings include a trailing NUL outside their reported image size, as
-required by mQuickJS. VM/context memory remains writable internal memory. Like
+required by mQuickJS. VM/context memory remains writable internal memory and is
+sized adaptively up to the no-PSRAM 100,000-byte legacy target. Like
 any other program entry, the spawned process receives the script path,
 arguments, permissions, and GUI context through the spawn parameters and its
 opaque context struct.
