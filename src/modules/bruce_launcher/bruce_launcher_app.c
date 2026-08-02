@@ -14,7 +14,6 @@
 #include "core_sdk/dialog.h"
 #include "core_sdk/display.h"
 #include "core_sdk/input.h"
-#include "core_sdk/loader.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
@@ -33,7 +32,7 @@
 #define BRUCE_LAUNCHER_STATUS_REFRESH_MS 1000
 #define BRUCE_LAUNCHER_STATUS_TEXT_Y 11
 
-/* Theme colors cached from bruce.json. */
+/* Theme colors cached from bruce.conf. */
 typedef struct {
     uint16_t pri;
     uint16_t sec;

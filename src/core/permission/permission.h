@@ -9,7 +9,7 @@
 
 #include <stdbool.h>
 
-/* Clears every in-memory decision and deletes /permissions.json so the next
+/* Clears every in-memory decision and deletes /config/permissions.json so the next
  * permission__check()/permission__preflight() call starts from a clean
  * slate. Returns false only if the file existed and could not be removed. */
 bool permission__test_reset(void);

@@ -9,10 +9,9 @@
 #include "core_sdk/permission.h"
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
-#include "core_sdk/storage.h"
 
-#include <stdbool.h>
 #include <ctype.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -423,8 +422,7 @@ int app_runner__run(const char *app_name, const char *arg, bruce_launch_mode_t m
 }
 
 static bool app_runner__environment_name_valid(const char *name) {
-    if (name == NULL || name[0] == '\0' ||
-        !(isalpha((unsigned char)name[0]) || name[0] == '_')) return false;
+    if (name == NULL || name[0] == '\0' || !(isalpha((unsigned char)name[0]) || name[0] == '_')) return false;
     for (size_t i = 1; name[i] != '\0'; ++i) {
         if (!(isalnum((unsigned char)name[i]) || name[i] == '_')) return false;
     }
@@ -505,13 +503,16 @@ int app_runner__run_command(const char *command_line, bruce_launch_mode_t defaul
         }
     }
     const char *command = words[command_index];
-    int result = command[0] == '/' || strncmp(command, "./", 2) == 0
-                     ? app_runner__run_path_with_environment(
-                           command, used > 0 ? arguments : NULL, mode, environment, environment_count
-                       )
-                     : app_runner__run_with_environment(
-                           command, used > 0 ? arguments : NULL, mode, environment, environment_count
-                       );
+    int result;
+    if (command[0] == '/' || strncmp(command, "./", 2) == 0) {
+        result = app_runner__run_path_with_environment(
+            command, used > 0 ? arguments : NULL, mode, environment, environment_count
+        );
+    } else {
+        result = app_runner__run_with_environment(
+            command, used > 0 ? arguments : NULL, mode, environment, environment_count
+        );
+    }
     free(arguments);
     app_runner__free_args(words, word_count);
     return result;

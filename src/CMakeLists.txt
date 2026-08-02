@@ -30,6 +30,7 @@ set(BRUCE_SELFTEST_SOURCES
 
 idf_component_register(SRCS
                     "main.c"
+                     "core/app_config/app_config.c"
                      "core/app_runner/app_runner.c"
                      "core/audio/audio.c"
                     "core/bluetooth/bluetooth.c"

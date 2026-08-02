@@ -1,6 +1,6 @@
 var display = require('display');
 var keyboard = require('keyboard');
-var audio = require('audio');
+// var audio = require('audio');
 
 // I am putting all code in function to optimise, if variables are outside
 // functions they are put in global namespace, and it's slower to get
@@ -328,7 +328,7 @@ function main() {
     if (selPressed && !dinoIsJumping && !dinoIsDucking) {
       dinoVelocity = dinoJumpStrength; // Start the jump
       dinoIsJumping = true;
-      audio.tone(494, 40, true);
+      // audio.tone(494, 40, true);
     }
 
     var nextPressed = keyboard.getNextPress(true) || keyboard.getEscPress(true);
@@ -348,9 +348,9 @@ function main() {
 
     if (playPointSound === 0 && score % 100 < 10 && score > 50) {
       playPointSound = 1;
-      audio.tone(784, 80, true);
+      // audio.tone(784, 80, true);
     } else if (playPointSound === 1) {
-      audio.tone(784, 220, true);
+      // audio.tone(784, 220, true);
       playPointSound = 2;
     } else if (score % 100 > 50 && playPointSound === 2) {
       playPointSound = 0;
@@ -486,9 +486,9 @@ function main() {
         }
       }
 
-      audio.tone(60, 100); // 50
+      // audio.tone(60, 100); // 50
       delay(20);
-      audio.tone(60, 180); // 90
+      // audio.tone(60, 180); // 90
       display.beginFrame();
       display.fill(background);
       display.setTextColor(foreground);

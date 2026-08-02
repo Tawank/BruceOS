@@ -9,7 +9,6 @@
 #include "core/storage/storage.h"
 #include "core_sdk/config.h"
 #include "core_sdk/permission.h"
-#include "esp_random.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h"
 #include "freertos/semphr.h"
@@ -80,9 +79,6 @@ static void config__free_config(config__t *cfg) {
         config__release(&cfg->hotkeys.items[i].key);
         config__release(&cfg->hotkeys.items[i].action);
     }
-    config__release(&cfg->webUIUser);
-    config__release(&cfg->webUIPassword);
-    for (size_t i = 0; i < CONFIG__WEBUI_MAX_SESSIONS; ++i) config__release(&cfg->webUISessions[i]);
     config__release(&cfg->wifiApSsid);
     config__release(&cfg->wifiApPassword);
     for (size_t i = 0; i < CONFIG__WIFI_MAX_CREDENTIALS; ++i) {
@@ -91,10 +87,6 @@ static void config__free_config(config__t *cfg) {
     }
     config__release(&cfg->wifiMAC);
     for (size_t i = 0; i < CONFIG__STARTUP_APP_MAX_COUNT; ++i) config__release(&cfg->startupApps.items[i]);
-    config__release(&cfg->startupAppJSInterpreterFile);
-    config__release(&cfg->wigleBasicToken);
-    config__release(&cfg->wdgwarsApiKey);
-    for (size_t i = 0; i < CONFIG__DISABLED_MENU_MAX_COUNT; ++i) config__release(&cfg->disabledMenus[i]);
 }
 
 static void config__set_defaults(config__t *cfg) {
@@ -105,7 +97,6 @@ static void config__set_defaults(config__t *cfg) {
     cfg->secColor = 0xA80F - 0x2000;
     cfg->bgColor = 0x0000;
     config__assign(&cfg->themePath, "");
-    cfg->themeOnSd = false;
     cfg->displayBufferedRendering = true;
     cfg->displayDmaFramebuffer = true;
     config__assign(&cfg->launcherApp, "");
@@ -118,8 +109,6 @@ static void config__set_defaults(config__t *cfg) {
     cfg->clock24hr = true;
     cfg->soundEnabled = 1;
     cfg->soundVolume = 100;
-    cfg->wifiAtStartup = 0;
-    cfg->instantBoot = 0;
     config__assign(&cfg->keyboardLang, "QWERTY");
     config__assign(&cfg->hotkeys.items[0].key, "alt + tab");
     config__assign(&cfg->hotkeys.items[0].action, "process switch next");
@@ -136,9 +125,6 @@ static void config__set_defaults(config__t *cfg) {
     cfg->ledEffectSpeed = 5;
     cfg->ledEffectDirection = 1;
 
-    config__assign(&cfg->webUIUser, "admin");
-    config__assign(&cfg->webUIPassword, "bruce");
-
     config__assign(&cfg->wifiApSsid, "BruceNet");
     config__assign(&cfg->wifiApPassword, "brucenet");
     config__assign(&cfg->wifiMAC, "");
@@ -154,15 +140,8 @@ static void config__set_defaults(config__t *cfg) {
         config__assign(&cfg->startupApps.items[i], default_startup_apps[i]);
     }
     cfg->startupApps.count = sizeof(default_startup_apps) / sizeof(default_startup_apps[0]);
-    config__assign(&cfg->startupAppJSInterpreterFile, "");
-    config__assign(&cfg->wigleBasicToken, "");
-    config__assign(&cfg->wdgwarsApiKey, "your 64-char hex key from wdgwars.pl/profile");
     cfg->devMode = 0;
     cfg->colorInverted = 1;
-
-    cfg->badUSBBLEKeyboardLayout = 0;
-    cfg->badUSBBLEKeyDelay = 10;
-    cfg->badUSBBLEShowOutput = true;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -179,7 +158,6 @@ static void config__validate(config__t *cfg) {
 
     if (cfg->soundEnabled > 1) cfg->soundEnabled = 1;
     if (cfg->soundVolume > 100) cfg->soundVolume = 100;
-    if (cfg->wifiAtStartup > 1) cfg->wifiAtStartup = 1;
 
     if (cfg->ledBright < 0) cfg->ledBright = 0;
     if (cfg->ledBright > 100) cfg->ledBright = 100;
@@ -196,11 +174,6 @@ static void config__validate(config__t *cfg) {
 
     if (cfg->devMode > 1) cfg->devMode = 1;
     if (cfg->colorInverted > 1) cfg->colorInverted = 1;
-
-    if (cfg->badUSBBLEKeyboardLayout < 0 || cfg->badUSBBLEKeyboardLayout > 13) {
-        cfg->badUSBBLEKeyboardLayout = 0;
-    }
-    if (cfg->badUSBBLEKeyDelay > 500) cfg->badUSBBLEKeyDelay = 500;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -215,11 +188,6 @@ static void json_get_string(const cJSON *object, const char *key, const char **o
 static void json_get_int(const cJSON *object, const char *key, int *out) {
     const cJSON *item = cJSON_GetObjectItemCaseSensitive(object, key);
     if (cJSON_IsNumber(item)) *out = item->valueint;
-}
-
-static void json_get_uint16(const cJSON *object, const char *key, uint16_t *out) {
-    const cJSON *item = cJSON_GetObjectItemCaseSensitive(object, key);
-    if (cJSON_IsNumber(item)) *out = (uint16_t)item->valueint;
 }
 
 static void json_get_float(const cJSON *object, const char *key, float *out) {
@@ -255,7 +223,6 @@ static void config__parse_json(config__t *cfg, const cJSON *root) {
     json_get_hex16(root, "secColor", &cfg->secColor);
     json_get_hex16(root, "bgColor", &cfg->bgColor);
     json_get_string(root, "themeFile", &cfg->themePath);
-    json_get_bool(root, "themeOnSd", &cfg->themeOnSd);
     json_get_bool(root, "displayBufferedRendering", &cfg->displayBufferedRendering);
     json_get_bool(root, "displayDmaFramebuffer", &cfg->displayDmaFramebuffer);
     json_get_string(root, "launcherApp", &cfg->launcherApp);
@@ -268,8 +235,6 @@ static void config__parse_json(config__t *cfg, const cJSON *root) {
     json_get_bool(root, "clock24hr", &cfg->clock24hr);
     json_get_int(root, "soundEnabled", &cfg->soundEnabled);
     json_get_int(root, "soundVolume", &cfg->soundVolume);
-    json_get_int(root, "wifiAtStartup", &cfg->wifiAtStartup);
-    json_get_int(root, "instantBoot", &cfg->instantBoot);
     json_get_string(root, "keyboardLang", &cfg->keyboardLang);
 
     const cJSON *hotkeys = cJSON_GetObjectItemCaseSensitive(root, "hotkeys");
@@ -305,25 +270,6 @@ static void config__parse_json(config__t *cfg, const cJSON *root) {
     json_get_int(root, "ledEffect", &cfg->ledEffect);
     json_get_int(root, "ledEffectSpeed", &cfg->ledEffectSpeed);
     json_get_int(root, "ledEffectDirection", &cfg->ledEffectDirection);
-
-    const cJSON *web_ui = cJSON_GetObjectItemCaseSensitive(root, "webUI");
-    if (cJSON_IsObject(web_ui)) {
-        json_get_string(web_ui, "user", &cfg->webUIUser);
-        json_get_string(web_ui, "pwd", &cfg->webUIPassword);
-    }
-
-    const cJSON *web_ui_sessions = cJSON_GetObjectItemCaseSensitive(root, "webUISessions");
-    if (cJSON_IsObject(web_ui_sessions)) {
-        config__clear_string_array(cfg->webUISessions, CONFIG__WEBUI_MAX_SESSIONS);
-        cfg->webUISessionCount = 0;
-        const cJSON *session;
-        cJSON_ArrayForEach(session, web_ui_sessions) {
-            if (cfg->webUISessionCount >= CONFIG__WEBUI_MAX_SESSIONS) break;
-            if (!cJSON_IsString(session) || session->valuestring == NULL) continue;
-            cfg->webUISessions[cfg->webUISessionCount] = config__strdup(session->valuestring);
-            ++cfg->webUISessionCount;
-        }
-    }
 
     const cJSON *wifi_ap = cJSON_GetObjectItemCaseSensitive(root, "wifiAp");
     if (cJSON_IsObject(wifi_ap)) {
@@ -364,28 +310,8 @@ static void config__parse_json(config__t *cfg, const cJSON *root) {
             ++cfg->startupApps.count;
         }
     }
-    json_get_string(root, "startupAppJSInterpreterFile", &cfg->startupAppJSInterpreterFile);
-    json_get_string(root, "wigleBasicToken", &cfg->wigleBasicToken);
-    json_get_string(root, "wdgwarsApiKey", &cfg->wdgwarsApiKey);
     json_get_int(root, "devMode", &cfg->devMode);
     json_get_int(root, "colorInverted", &cfg->colorInverted);
-
-    json_get_int(root, "badUSBBLEKeyboardLayout", &cfg->badUSBBLEKeyboardLayout);
-    json_get_uint16(root, "badUSBBLEKeyDelay", &cfg->badUSBBLEKeyDelay);
-    json_get_bool(root, "badUSBBLEShowOutput", &cfg->badUSBBLEShowOutput);
-
-    const cJSON *disabled_menus = cJSON_GetObjectItemCaseSensitive(root, "disabledMenus");
-    if (cJSON_IsArray(disabled_menus)) {
-        config__clear_string_array(cfg->disabledMenus, CONFIG__DISABLED_MENU_MAX_COUNT);
-        cfg->disabledMenuCount = 0;
-        const cJSON *menu;
-        cJSON_ArrayForEach(menu, disabled_menus) {
-            if (cfg->disabledMenuCount >= CONFIG__DISABLED_MENU_MAX_COUNT) break;
-            if (!cJSON_IsString(menu) || menu->valuestring == NULL) continue;
-            cfg->disabledMenus[cfg->disabledMenuCount] = config__strdup(menu->valuestring);
-            ++cfg->disabledMenuCount;
-        }
-    }
 }
 
 static cJSON *config__build_json(const config__t *cfg) {
@@ -400,7 +326,6 @@ static cJSON *config__build_json(const config__t *cfg) {
     snprintf(hex, sizeof(hex), "%x", cfg->bgColor);
     cJSON_AddStringToObject(root, "bgColor", hex);
     cJSON_AddStringToObject(root, "themeFile", config__or_empty(cfg->themePath));
-    cJSON_AddBoolToObject(root, "themeOnSd", cfg->themeOnSd);
     cJSON_AddBoolToObject(root, "displayBufferedRendering", cfg->displayBufferedRendering);
     cJSON_AddBoolToObject(root, "displayDmaFramebuffer", cfg->displayDmaFramebuffer);
     cJSON_AddStringToObject(root, "launcherApp", config__or_empty(cfg->launcherApp));
@@ -413,8 +338,6 @@ static cJSON *config__build_json(const config__t *cfg) {
     cJSON_AddBoolToObject(root, "clock24hr", cfg->clock24hr);
     cJSON_AddNumberToObject(root, "soundEnabled", cfg->soundEnabled);
     cJSON_AddNumberToObject(root, "soundVolume", cfg->soundVolume);
-    cJSON_AddNumberToObject(root, "wifiAtStartup", cfg->wifiAtStartup);
-    cJSON_AddNumberToObject(root, "instantBoot", cfg->instantBoot);
     cJSON_AddStringToObject(root, "keyboardLang", config__or_empty(cfg->keyboardLang));
 
     cJSON *hotkeys = cJSON_AddObjectToObject(root, "hotkeys");
@@ -433,17 +356,6 @@ static cJSON *config__build_json(const config__t *cfg) {
     cJSON_AddNumberToObject(root, "ledEffect", cfg->ledEffect);
     cJSON_AddNumberToObject(root, "ledEffectSpeed", cfg->ledEffectSpeed);
     cJSON_AddNumberToObject(root, "ledEffectDirection", cfg->ledEffectDirection);
-
-    cJSON *web_ui = cJSON_AddObjectToObject(root, "webUI");
-    cJSON_AddStringToObject(web_ui, "user", config__or_empty(cfg->webUIUser));
-    cJSON_AddStringToObject(web_ui, "pwd", config__or_empty(cfg->webUIPassword));
-
-    cJSON *web_ui_sessions = cJSON_AddObjectToObject(root, "webUISessions");
-    for (size_t i = 0; i < cfg->webUISessionCount; ++i) {
-        char key[12];
-        snprintf(key, sizeof(key), "%u", (unsigned int)(i + 1));
-        cJSON_AddStringToObject(web_ui_sessions, key, config__or_empty(cfg->webUISessions[i]));
-    }
 
     cJSON *wifi_ap = cJSON_AddObjectToObject(root, "wifiAp");
     cJSON_AddStringToObject(wifi_ap, "ssid", config__or_empty(cfg->wifiApSsid));
@@ -464,22 +376,8 @@ static cJSON *config__build_json(const config__t *cfg) {
     for (size_t i = 0; i < cfg->startupApps.count; ++i) {
         cJSON_AddItemToArray(startup_apps, cJSON_CreateString(config__or_empty(cfg->startupApps.items[i])));
     }
-    cJSON_AddStringToObject(
-        root, "startupAppJSInterpreterFile", config__or_empty(cfg->startupAppJSInterpreterFile)
-    );
-    cJSON_AddStringToObject(root, "wigleBasicToken", config__or_empty(cfg->wigleBasicToken));
-    cJSON_AddStringToObject(root, "wdgwarsApiKey", config__or_empty(cfg->wdgwarsApiKey));
     cJSON_AddNumberToObject(root, "devMode", cfg->devMode);
     cJSON_AddNumberToObject(root, "colorInverted", cfg->colorInverted);
-
-    cJSON_AddNumberToObject(root, "badUSBBLEKeyboardLayout", cfg->badUSBBLEKeyboardLayout);
-    cJSON_AddNumberToObject(root, "badUSBBLEKeyDelay", cfg->badUSBBLEKeyDelay);
-    cJSON_AddBoolToObject(root, "badUSBBLEShowOutput", cfg->badUSBBLEShowOutput);
-
-    cJSON *disabled_menus = cJSON_AddArrayToObject(root, "disabledMenus");
-    for (size_t i = 0; i < cfg->disabledMenuCount; ++i) {
-        cJSON_AddItemToArray(disabled_menus, cJSON_CreateString(config__or_empty(cfg->disabledMenus[i])));
-    }
 
     return root;
 }
@@ -497,8 +395,7 @@ static bool config__save_locked(void) {
     if (text == NULL) return false;
 
     /* cJSON pretty printing uses a tab after each object key. */
-    for (char *separator = strstr(text, ":\t"); separator != NULL;
-         separator = strstr(separator + 2, ":\t")) {
+    for (char *separator = strstr(text, ":\t"); separator != NULL; separator = strstr(separator + 2, ":\t")) {
         separator[1] = ' ';
     }
 
@@ -829,12 +726,6 @@ bruce_result_t config__add_or_update_wifi_credential(const char *ssid, const cha
 }
 
 CONFIG__DEFINE_STRING_FIELD_GUARDED(wifi_mac, wifiMAC, CONFIG__WIFI_MAC_MAX_LEN, config__guard_protected)
-CONFIG__DEFINE_STRING_FIELD_GUARDED(
-    web_ui_user, webUIUser, CONFIG__WEBUI_USER_MAX_LEN, config__guard_protected
-)
-CONFIG__DEFINE_STRING_FIELD_GUARDED(
-    web_ui_password, webUIPassword, CONFIG__WEBUI_PASSWORD_MAX_LEN, config__guard_protected
-)
 
 /* ---- `config`-permission-gated fields ------------------------------------ */
 
@@ -842,7 +733,6 @@ CONFIG__DEFINE_UINT16_FIELD(pri_color, priColor)
 CONFIG__DEFINE_UINT16_FIELD(sec_color, secColor)
 CONFIG__DEFINE_UINT16_FIELD(bg_color, bgColor)
 CONFIG__DEFINE_STRING_FIELD(theme_path, themePath, CONFIG__THEME_PATH_MAX_LEN)
-CONFIG__DEFINE_BOOL_FIELD(theme_on_sd, themeOnSd)
 CONFIG__DEFINE_BOOL_FIELD(display_buffered_rendering, displayBufferedRendering)
 CONFIG__DEFINE_BOOL_FIELD(display_dma_framebuffer, displayDmaFramebuffer)
 CONFIG__DEFINE_STRING_FIELD(launcher_app, launcherApp, CONFIG__LAUNCHER_APP_MAX_LEN)
@@ -868,8 +758,6 @@ void config__get_audio_settings(bool *enabled, int *volume) {
     *volume = s_config.soundVolume;
     config__unlock();
 }
-CONFIG__DEFINE_BOOL_INT_FIELD(wifi_at_startup, wifiAtStartup)
-CONFIG__DEFINE_BOOL_INT_FIELD(instant_boot, instantBoot)
 CONFIG__DEFINE_STRING_FIELD(keyboard_lang, keyboardLang, CONFIG__KEYBOARD_LANG_MAX_LEN)
 
 const bruce_config_hotkeys_t *config__get_hotkeys(void) {
@@ -1024,101 +912,5 @@ bruce_result_t config__remove_startup_app(const char *key) {
     return saved ? BRUCE_OK : BRUCE_ERR_IO;
 }
 
-CONFIG__DEFINE_STRING_GETTER_GUARDED(
-    startup_app_js_interpreter_file, startupAppJSInterpreterFile, config__guard
-)
-CONFIG__DEFINE_STRING_GETTER_GUARDED(wigle_basic_token, wigleBasicToken, config__guard)
-CONFIG__DEFINE_STRING_GETTER_GUARDED(wdgwars_api_key, wdgwarsApiKey, config__guard)
 CONFIG__DEFINE_BOOL_INT_FIELD(dev_mode, devMode)
 CONFIG__DEFINE_BOOL_INT_FIELD(color_inverted, colorInverted)
-
-/* ------------------------------------------------------------------------ */
-/* List helpers                                                              */
-/* ------------------------------------------------------------------------ */
-
-bool config__add_disabled_menu(const char *value) {
-    if (!config__init() || !config__valid_value(value, CONFIG__DISABLED_MENU_MAX_LEN, false)) return false;
-    config__lock();
-    if (s_config.disabledMenuCount == CONFIG__DISABLED_MENU_MAX_COUNT) {
-        config__unlock();
-        return false;
-    }
-    s_config.disabledMenus[s_config.disabledMenuCount] = config__strdup(value);
-    ++s_config.disabledMenuCount;
-    bool saved = config__save_locked();
-    config__unlock();
-    return saved;
-}
-
-bool config__add_web_ui_session(const char *token) {
-    if (!config__init() || !config__valid_value(token, CONFIG__WEBUI_SESSION_TOKEN_MAX_LEN, false))
-        return false;
-    config__lock();
-    if (s_config.webUISessionCount == CONFIG__WEBUI_MAX_SESSIONS) {
-        /* FIFO eviction: drop the oldest session, matching BruceConfig::addWebUISession. */
-        config__release(&s_config.webUISessions[0]);
-        memmove(
-            &s_config.webUISessions[0],
-            &s_config.webUISessions[1],
-            (CONFIG__WEBUI_MAX_SESSIONS - 1) * sizeof(s_config.webUISessions[0])
-        );
-        --s_config.webUISessionCount;
-    }
-    s_config.webUISessions[s_config.webUISessionCount] = config__strdup(token);
-    ++s_config.webUISessionCount;
-    bool saved = config__save_locked();
-    config__unlock();
-    return saved;
-}
-
-bruce_result_t config__create_web_ui_session(char *out_token, size_t capacity) {
-    static const char alphabet[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    if (config__guard_protected() != BRUCE_OK) return BRUCE_ERR_PERMISSION;
-    if (out_token == NULL || capacity < BRUCE_CONFIG_WEB_UI_SESSION_TOKEN_LEN + 1u) {
-        return BRUCE_ERR_INVALID_ARGUMENT;
-    }
-    for (size_t i = 0; i < BRUCE_CONFIG_WEB_UI_SESSION_TOKEN_LEN; ++i) {
-        out_token[i] = alphabet[esp_random() % (sizeof(alphabet) - 1u)];
-    }
-    out_token[BRUCE_CONFIG_WEB_UI_SESSION_TOKEN_LEN] = '\0';
-    return config__add_web_ui_session(out_token) ? BRUCE_OK : BRUCE_ERR_IO;
-}
-
-bruce_result_t config__remove_web_ui_session(const char *token) {
-    if (config__guard_protected() != BRUCE_OK) return BRUCE_ERR_PERMISSION;
-    if (!config__init() || token == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
-    config__lock();
-    size_t write_index = 0;
-    bool removed = false;
-    for (size_t read_index = 0; read_index < s_config.webUISessionCount; ++read_index) {
-        if (strcmp(s_config.webUISessions[read_index], token) == 0) {
-            config__release(&s_config.webUISessions[read_index]);
-            removed = true;
-            continue;
-        }
-        if (write_index != read_index) {
-            s_config.webUISessions[write_index] = s_config.webUISessions[read_index];
-            s_config.webUISessions[read_index] = NULL;
-        }
-        ++write_index;
-    }
-    s_config.webUISessionCount = write_index;
-    bool saved = config__save_locked();
-    config__unlock();
-    if (!removed) return BRUCE_ERR_NOT_FOUND;
-    return saved ? BRUCE_OK : BRUCE_ERR_IO;
-}
-
-bool config__is_valid_web_ui_session(const char *token) {
-    if (config__guard_protected() != BRUCE_OK || !config__init() || token == NULL) return false;
-    config__lock();
-    bool found = false;
-    for (size_t i = 0; i < s_config.webUISessionCount; ++i) {
-        if (strcmp(s_config.webUISessions[i], token) == 0) {
-            found = true;
-            break;
-        }
-    }
-    config__unlock();
-    return found;
-}

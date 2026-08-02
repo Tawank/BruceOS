@@ -3,6 +3,7 @@
 #include <stdlib.h>
 
 #include "core/config/config.h"
+#include "core/process/process.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -105,6 +106,12 @@ static bruce_result_t audio__play_cardputer(const audio__tone_params_t *params) 
 #endif
 
 static bruce_result_t audio__play(const audio__tone_params_t *params) {
+    /* Force-kill must not delete this task while it holds s_audio_mutex or has
+     * the I2S/LEDC peripheral enabled: that would leave the speaker driving its
+     * last DMA buffer/duty cycle forever and deadlock every later audio__tone()
+     * call on the now-unreleasable mutex. operation_begin/end makes
+     * process__kill() wait for audio__play() to finish its own teardown first. */
+    if (!process_registry__operation_begin()) return BRUCE_ERR_CANCELLED;
     audio__ensure_mutex();
     xSemaphoreTake(s_audio_mutex, portMAX_DELAY);
 
@@ -144,6 +151,7 @@ static bruce_result_t audio__play(const audio__tone_params_t *params) {
 #endif
 
     xSemaphoreGive(s_audio_mutex);
+    process_registry__operation_end();
     return result;
 }
 

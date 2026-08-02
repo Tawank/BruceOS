@@ -4,7 +4,6 @@
 #include "core_sdk/display.h"
 #include "core_sdk/image.h"
 #include "core_sdk/input.h"
-#include "core_sdk/process.h"
 #include "core_sdk/runtime.h"
 #include "core_sdk/storage.h"
 
@@ -297,9 +296,7 @@ static void bootanimation__draw_scaled_silhouette(
         for (int16_t dx = 0; dx < width; dx++) {
             int source_x = dx * bits_width / width;
             uint8_t source = bits[source_y * source_stride + source_x / 8];
-            if ((source & (1u << (source_x & 7))) == 0) {
-                (void)display__draw_pixel(x + dx, y + dy, color);
-            }
+            if ((source & (1u << (source_x & 7))) == 0) { (void)display__draw_pixel(x + dx, y + dy, color); }
         }
     }
 }
@@ -355,7 +352,6 @@ static bruce_result_t bootanimation__finish(bruce_result_t result) {
 int bootanimation_app_main(int argc, char **argv) {
     (void)argc;
     (void)argv;
-    if (config__get_instant_boot()) return BRUCE_OK;
 
     bruce_result_t result = bootanimation__draw_title();
     if (result != BRUCE_OK) return result;

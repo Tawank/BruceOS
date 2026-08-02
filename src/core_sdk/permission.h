@@ -5,7 +5,7 @@
  *
  * Every ELF/JS app is identified, for permission purposes, by its filename
  * including extension and without its path (e.g. "game.elf", "weather.js").
- * Decisions are persisted in Core-owned /permissions.json, keyed by that
+ * Decisions are persisted in Core-owned /config/permissions.json, keyed by that
  * filename; apps sharing a basename deliberately share the same decision.
  * Built-in modules are implicitly granted every permission and never
  * consult the saved-decision store.
@@ -40,7 +40,7 @@ typedef enum {
 } bruce_permission_t;
 
 /* Returns the canonical lowercase name ("wifi", "http", ...) used in
- * manifests and /permissions.json, or NULL for an out-of-range value. */
+ * manifests and /config/permissions.json, or NULL for an out-of-range value. */
 const char *permission__name(bruce_permission_t permission);
 
 /* Resolves a manifest/JSON permission name to its enum value. Returns false

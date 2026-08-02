@@ -82,7 +82,7 @@ loop, registers the built-ins, then starts each command line in `startupApps` in
 list is `bootanimation`, `input`, `serial_commands`, and `launcher -s`.
 
 `launcher` is a small module under `modules/utils/`.  Its
-`launcher_app_main()` entry reads `launcherApp` from `/config/bruce.json` using the
+`launcher_app_main()` entry reads `launcherApp` from `/config/bruce.conf` using the
 public Config API and starts that command with app_runner.  The default is
 `bruce_launcher`; an empty or unstartable configured value falls back to
 `bruce_launcher`.
@@ -313,7 +313,7 @@ FreeRTOS task-local-storage pointer identifies the Core process record; the
 record owns environment entries and releases them on normal exit or force-kill.
 Process-local environment mutations are not persisted. Persistent global
 defaults live only in `/config/.env`; device settings remain Config state in
-`/config/bruce.json`.
+`/config/bruce.conf`.
 
 Backgrounding changes state and physical-input ownership. A background GUI process
 is hidden unless the launcher assigns it a compositor tile; hidden drawing is a
@@ -594,7 +594,7 @@ The JavaScript `audio` module exposes the same capability as
 `audio.tone(frequencyHz, durationMs, nonBlocking=false)`; audio file playback is
 not part of the current public API.
 
-Permissions are stored in Core-owned `/permissions.json`, keyed only by the
+Permissions are stored in Core-owned `/config/permissions.json`, keyed only by the
 filename including extension and without its path:
 
 ```json
@@ -662,7 +662,7 @@ there is no separate dynamic process interaction-mode API.
 
 Retain the JS `dialog.message`, `info`, `success`, `warning`, `error`, and
 `choice` APIs as wrappers.  Keep `dialog.pickFile()` as a Core renderer-neutral
-API: it requires `storage` and hides `/config/bruce.json` and `/permissions.json`.
+API: it requires `storage` and hides `/config/bruce.conf` and `/config/permissions.json`.
 Do not migrate `dialog.viewFile()`.  `dialog__create_text_viewer()` returns an
 opaque viewer ID with draw, scroll, set-text, and close operations; it is a
 tracked resource.
@@ -751,7 +751,7 @@ use trusted private GPIO/bus entry points so their capability-specific
 permission remains authoritative.
 
 Display Core supports buffered and direct rendering, selected at boot by
-`displayBufferedRendering` in `/config/bruce.json` (default true). Buffered mode owns
+`displayBufferedRendering` in `/config/bruce.conf` (default true). Buffered mode owns
 one RGB565 framebuffer. Direct mode allocates no retained framebuffer and
 streams clipped primitives through a quarter-screen DMA staging buffer to the
 ST7789 as they are drawn. The 16,320-byte staging buffer reduces persistent
@@ -766,7 +766,7 @@ into a shared DMA scratch row buffer. In direct mode drawing is progressively
 visible, `display__present()` completes the viewport lease, and framebuffer
 snapshots and pixel readback return `BRUCE_ERR_UNSUPPORTED`. A full-screen
 buffered `display__present()` with the default configuration streams the framebuffer directly over DMA
-(`displayDmaFramebuffer` in `/config/bruce.json`, default true); any partial rect,
+(`displayDmaFramebuffer` in `/config/bruce.conf`, default true); any partial rect,
 overlay composition, or a `false` setting falls back to row-packed transfers.
 Text and cursor state are process-local, rotation is global, and no resize event is
 emitted. Drawing primitives include circular arcs whose zero
@@ -818,7 +818,7 @@ station obtains an IP address and removes it when that station disconnects.
 
 `storage` grants access to Core `storage__*` APIs.  Public file handles are
 opaque IDs and are closed automatically at process teardown.  The only v1
-protected paths are `/config/bruce.json`, `/permissions.json`, and their atomic-write
+protected paths are `/config/bruce.conf`, `/config/permissions.json`, and their atomic-write
 temporary files; all other mounted paths are usable by a storage-granted app.
 `storage__mkdir()` creates one directory at a time through the same path and
 permission policy and succeeds when that directory already exists. Public

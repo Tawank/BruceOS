@@ -5,6 +5,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "esp_random.h"
+
+#include "core_sdk/app_config.h"
 #include "core_sdk/app_runner.h"
 #include "core_sdk/config.h"
 #include "core_sdk/device.h"
@@ -12,10 +15,10 @@
 #include "core_sdk/display.h"
 #include "core_sdk/http_server.h"
 #include "core_sdk/input.h"
+#include "core_sdk/process.h"
 #include "core_sdk/result.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
-#include "core_sdk/process.h"
 #include "core_sdk/wifi.h"
 #include "webfiles.h"
 
@@ -25,6 +28,13 @@
 #define WEBUI_IO_CHUNK 2048u
 #define WEBUI_DELETE_DEPTH_MAX 16u
 #define WEBUI_DELETE_ENTRIES_MAX 256u
+
+/* Local per-app config (see core_sdk/app_config.h); persisted at
+ * /config/webui.conf, separate from the shared /config/bruce.conf. */
+#define WEBUI_CONFIG_APP_NAME "webui"
+#define WEBUI_CREDENTIAL_MAX_LEN 64u
+#define WEBUI_SESSION_TOKEN_LEN 48u
+#define WEBUI_MAX_SESSIONS 5u
 
 typedef enum {
     WEBUI_APP_NETWORK_EXISTING = 0,
@@ -114,9 +124,64 @@ static bool webui__cookie_token(bruce_http_server_request_t *request, char *toke
     return found;
 }
 
+/* Reads the "sessions" string array from /config/webui.conf into a fixed
+ * WEBUI_MAX_SESSIONS x (WEBUI_SESSION_TOKEN_LEN + 1) buffer. */
+static size_t webui__load_sessions(char sessions[][WEBUI_SESSION_TOKEN_LEN + 1u]) {
+    char *slots[WEBUI_MAX_SESSIONS];
+    for (size_t i = 0; i < WEBUI_MAX_SESSIONS; ++i) slots[i] = sessions[i];
+    return app_config__get_string_array(
+        WEBUI_CONFIG_APP_NAME, "sessions", slots, WEBUI_SESSION_TOKEN_LEN + 1u, WEBUI_MAX_SESSIONS
+    );
+}
+
+static bool webui__is_valid_session(const char *token) {
+    char sessions[WEBUI_MAX_SESSIONS][WEBUI_SESSION_TOKEN_LEN + 1u];
+    size_t count = webui__load_sessions(sessions);
+    for (size_t i = 0; i < count; ++i) {
+        if (strcmp(sessions[i], token) == 0) return true;
+    }
+    return false;
+}
+
+/* Generates a random session token, appends it (FIFO-evicting the oldest
+ * once WEBUI_MAX_SESSIONS is reached), and persists the session list. */
+static bruce_result_t webui__create_session(char *out_token, size_t capacity) {
+    static const char alphabet[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    if (out_token == NULL || capacity < WEBUI_SESSION_TOKEN_LEN + 1u) return BRUCE_ERR_INVALID_ARGUMENT;
+    for (size_t i = 0; i < WEBUI_SESSION_TOKEN_LEN; ++i) {
+        out_token[i] = alphabet[esp_random() % (sizeof(alphabet) - 1u)];
+    }
+    out_token[WEBUI_SESSION_TOKEN_LEN] = '\0';
+
+    char sessions[WEBUI_MAX_SESSIONS][WEBUI_SESSION_TOKEN_LEN + 1u];
+    size_t count = webui__load_sessions(sessions);
+    const char *values[WEBUI_MAX_SESSIONS];
+    size_t start = count == WEBUI_MAX_SESSIONS ? 1u : 0u;
+    size_t new_count = 0;
+    for (size_t i = start; i < count; ++i) values[new_count++] = sessions[i];
+    values[new_count++] = out_token;
+    return app_config__set_string_array(WEBUI_CONFIG_APP_NAME, "sessions", values, new_count);
+}
+
+static void webui__remove_session(const char *token) {
+    char sessions[WEBUI_MAX_SESSIONS][WEBUI_SESSION_TOKEN_LEN + 1u];
+    size_t count = webui__load_sessions(sessions);
+    const char *values[WEBUI_MAX_SESSIONS];
+    size_t new_count = 0;
+    bool removed = false;
+    for (size_t i = 0; i < count; ++i) {
+        if (!removed && strcmp(sessions[i], token) == 0) {
+            removed = true;
+            continue;
+        }
+        values[new_count++] = sessions[i];
+    }
+    if (removed) (void)app_config__set_string_array(WEBUI_CONFIG_APP_NAME, "sessions", values, new_count);
+}
+
 static bool webui__authenticated(bruce_http_server_request_t *request) {
-    char token[BRUCE_CONFIG_WEB_UI_SESSION_TOKEN_LEN + 1u];
-    return webui__cookie_token(request, token, sizeof(token)) && config__is_valid_web_ui_session(token);
+    char token[WEBUI_SESSION_TOKEN_LEN + 1u];
+    return webui__cookie_token(request, token, sizeof(token)) && webui__is_valid_session(token);
 }
 
 static bool webui__require_auth(bruce_http_server_request_t *request, bruce_result_t *response_result) {
@@ -316,14 +381,19 @@ static bruce_result_t webui__login(bruce_http_server_request_t *request, void *c
     bool valid = webui__form_value(body, "username", username, sizeof(username)) &&
                  webui__form_value(body, "password", password, sizeof(password));
     free(body);
-    const char *expected_user = config__get_web_ui_user();
-    const char *expected_password = config__get_web_ui_password();
-    valid = valid && expected_user != NULL && expected_password != NULL &&
-            strcmp(username, expected_user) == 0 && strcmp(password, expected_password) == 0;
+    char expected_user[WEBUI_CREDENTIAL_MAX_LEN + 1u];
+    char expected_password[WEBUI_CREDENTIAL_MAX_LEN + 1u];
+    app_config__get_string(
+        WEBUI_CONFIG_APP_NAME, "user", "admin", expected_user, sizeof(expected_user)
+    );
+    app_config__get_string(
+        WEBUI_CONFIG_APP_NAME, "password", "bruce", expected_password, sizeof(expected_password)
+    );
+    valid = valid && strcmp(username, expected_user) == 0 && strcmp(password, expected_password) == 0;
     if (!valid) return webui__redirect(request, "/?failed");
 
-    char token[BRUCE_CONFIG_WEB_UI_SESSION_TOKEN_LEN + 1u];
-    bruce_result_t result = config__create_web_ui_session(token, sizeof(token));
+    char token[WEBUI_SESSION_TOKEN_LEN + 1u];
+    bruce_result_t result = webui__create_session(token, sizeof(token));
     if (result != BRUCE_OK) return webui__reply_error(request, result);
     char cookie[128];
     int length =
@@ -339,8 +409,8 @@ static bruce_result_t webui__login(bruce_http_server_request_t *request, void *c
 
 static bruce_result_t webui__logout(bruce_http_server_request_t *request, void *context) {
     (void)context;
-    char token[BRUCE_CONFIG_WEB_UI_SESSION_TOKEN_LEN + 1u];
-    if (webui__cookie_token(request, token, sizeof(token))) (void)config__remove_web_ui_session(token);
+    char token[WEBUI_SESSION_TOKEN_LEN + 1u];
+    if (webui__cookie_token(request, token, sizeof(token))) webui__remove_session(token);
     bruce_result_t result = http_server_request__set_status(request, 302);
     if (result == BRUCE_OK) result = http_server_request__set_header(request, "Location", "/?loggedout");
     if (result == BRUCE_OK)
@@ -490,8 +560,7 @@ static bruce_result_t webui__remove_tree(const char *path, unsigned depth) {
         char child[BRUCE_STORAGE_PATH_MAX];
         int length = snprintf(child, sizeof(child), "%s/%s", path, entry.name);
         if (length < 0 || (size_t)length >= sizeof(child)) result = BRUCE_ERR_INVALID_PATH;
-        else if (entry.type == BRUCE_STORAGE_ENTRY_DIRECTORY)
-            result = webui__remove_tree(child, depth + 1u);
+        else if (entry.type == BRUCE_STORAGE_ENTRY_DIRECTORY) result = webui__remove_tree(child, depth + 1u);
         else result = storage__remove(child);
     }
     return result == BRUCE_OK ? storage__remove(path) : result;
@@ -743,8 +812,8 @@ static bruce_result_t webui__wifi(bruce_http_server_request_t *request, void *co
     free(form);
     if (!valid || user[0] == '\0' || password[0] == '\0')
         return webui__reply_text(request, 400, "Username and password required");
-    bruce_result_t result = config__set_web_ui_user(user);
-    if (result == BRUCE_OK) result = config__set_web_ui_password(password);
+    bruce_result_t result = app_config__set_string(WEBUI_CONFIG_APP_NAME, "user", user);
+    if (result == BRUCE_OK) result = app_config__set_string(WEBUI_CONFIG_APP_NAME, "password", password);
     if (result != BRUCE_OK) return webui__reply_error(request, result);
     return webui__reply_text(request, 200, "Credentials updated");
 }
@@ -956,7 +1025,8 @@ static int webui_app__gui(void) {
             {.label = "Cancel",             .value = "cancel"},
         };
         size_t network = 0;
-        result = dialog__choice("Start WebUI", "Existing Wi-Fi unavailable", network_choices, 2, &network, NULL);
+        result =
+            dialog__choice("Start WebUI", "Existing Wi-Fi unavailable", network_choices, 2, &network, NULL);
         if (result == BRUCE_ERR_CANCELLED || (result == BRUCE_OK && network == 1u)) continue;
         if (result != BRUCE_OK) return result;
         (void)webui_app__start(WEBUI_APP_NETWORK_AP, true);
@@ -966,9 +1036,7 @@ static int webui_app__gui(void) {
 static void webui_app__print_help(void) { stdio__printf("Usage: webui [status|stop|start ap|start sta]\n"); }
 
 int webui_app_main(int argc, char **argv) {
-    if (app_runner__args_have_gui(argc, argv)) {
-        return webui_app__gui();
-    }
+    if (app_runner__args_have_gui(argc, argv)) { return webui_app__gui(); }
     if (argc <= 1 || (argc == 2 && strcmp(argv[1], "status") == 0)) return webui_app__status(false);
     if (argc == 2 && strcmp(argv[1], "stop") == 0) {
         bruce_result_t result = http_server__stop();

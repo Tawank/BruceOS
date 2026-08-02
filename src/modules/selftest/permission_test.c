@@ -1,4 +1,4 @@
-/* A4 acceptance coverage: coarse permission checks, /permissions.json
+/* A4 acceptance coverage: coarse permission checks, /config/permissions.json
  * persistence, manifest preflight, and GUI/terminal dialog dispatch.
  *
  * Every test drives permission__check()/permission__preflight() through the

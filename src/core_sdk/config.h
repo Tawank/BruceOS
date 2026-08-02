@@ -10,7 +10,7 @@
  *
  * Getters return zero, false, or NULL if initialization or permission checks
  * fail. Setters return BRUCE_OK or a BRUCE_ERR_* result, validate input, and
- * persist immediately to /config/bruce.json. Built-in modules always pass permission
+ * persist immediately to /config/bruce.conf. Built-in modules always pass permission
  * checks; external ELF/JS processes require `config`, except that protected
  * credentials are never exposed to external processes.
  */
@@ -65,19 +65,6 @@ bruce_result_t config__add_or_update_wifi_credential(const char *ssid, const cha
 const char *config__get_wifi_mac(void);
 bruce_result_t config__set_wifi_mac(const char *value);
 
-const char *config__get_web_ui_user(void);
-bruce_result_t config__set_web_ui_user(const char *value);
-const char *config__get_web_ui_password(void);
-bruce_result_t config__set_web_ui_password(const char *value);
-
-#define BRUCE_CONFIG_WEB_UI_SESSION_TOKEN_LEN 48
-
-/* Built-in-only WebUI session operations. Tokens are generated from the ESP
- * hardware RNG and persisted with the rest of the protected WebUI settings. */
-bruce_result_t config__create_web_ui_session(char *out_token, size_t capacity);
-bruce_result_t config__remove_web_ui_session(const char *token);
-bool config__is_valid_web_ui_session(const char *token);
-
 /* ------------------------------------------------------------------------ */
 /* `config`-permission-gated fields                                          */
 /* ------------------------------------------------------------------------ */
@@ -91,8 +78,6 @@ uint16_t config__get_bg_color(void);
 bruce_result_t config__set_bg_color(uint16_t value);
 const char *config__get_theme_path(void);
 bruce_result_t config__set_theme_path(const char *value);
-bool config__get_theme_on_sd(void);
-bruce_result_t config__set_theme_on_sd(bool value);
 /* Controls whether Core retains a full RGB565 framebuffer. Changes apply
  * after reboot. When false, drawing is streamed directly to the panel and
  * framebuffer-dependent features such as snapshots are unavailable. */
@@ -124,10 +109,6 @@ bool config__get_sound_enabled(void);
 bruce_result_t config__set_sound_enabled(bool value);
 int config__get_sound_volume(void);
 bruce_result_t config__set_sound_volume(int value);
-bool config__get_wifi_at_startup(void);
-bruce_result_t config__set_wifi_at_startup(bool value);
-bool config__get_instant_boot(void);
-bruce_result_t config__set_instant_boot(bool value);
 const char *config__get_keyboard_lang(void);
 bruce_result_t config__set_keyboard_lang(const char *value);
 const bruce_config_hotkeys_t *config__get_hotkeys(void);
@@ -154,9 +135,6 @@ bruce_result_t config__set_startup_apps(const char *const *values, size_t count)
  * BRUCE_ERR_NOT_FOUND. */
 bruce_result_t config__add_startup_app(const char *key);
 bruce_result_t config__remove_startup_app(const char *key);
-const char *config__get_startup_app_js_interpreter_file(void);
-const char *config__get_wigle_basic_token(void);
-const char *config__get_wdgwars_api_key(void);
 bool config__get_dev_mode(void);
 bruce_result_t config__set_dev_mode(bool value);
 bool config__get_color_inverted(void);

@@ -124,7 +124,7 @@ load an ELF by path and an ELF loader app can load another ELF.
 
 Deliver the policy boundary used by every later capability.
 
-- Implement `/permissions.json` using filename-with-extension keys.
+- Implement `/config/permissions.json` using filename-with-extension keys.
 - Implement manifest preflight requests, runtime first-use prompts, persistent
   allow/deny decisions, and built-in implicit grants.
 - Implement renderer-neutral `dialog__*`, GUI/terminal selection by `--gui`,

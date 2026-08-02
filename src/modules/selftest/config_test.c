@@ -1,9 +1,8 @@
 /* Config acceptance coverage: type-safe singleton getters/setters, `config`
  * permission enforcement, and the
  * permanently-protected field group
- * (wifiApSsid/wifiApPassword, wifiCredentials, wifiMAC, webUIUser,
- * webUIPassword) that stays denied to an external process no matter what it
- * has been granted.
+ * (wifiApSsid/wifiApPassword, wifiCredentials, wifiMAC) that stays denied to
+ * an external process no matter what it has been granted.
  *
  * Like permission_test.c/storage_test.c, the "external app" processes these
  * tests need are created directly via the Core-private
@@ -13,11 +12,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "core/dialog/dialog.h"
 #include "core/config/config.h"
+#include "core/dialog/dialog.h"
 #include "core/permission/permission.h"
-#include "core/storage/storage.h"
 #include "core/process/process.h"
+#include "core/storage/storage.h"
 #include "core_sdk/config.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/process.h"
@@ -166,7 +165,7 @@ static int selftest__config_protected_entry(int argc, char **argv) {
     (void)argc;
     (void)argv;
     s_config_get_result = config__get_wifi_ap_ssid() == NULL ? BRUCE_ERR_PERMISSION : BRUCE_OK;
-    s_config_set_result = config__set_web_ui_password("not-allowed");
+    s_config_set_result = config__set_wifi_mac("aa:bb:cc:dd:ee:ff");
     return 0;
 }
 
@@ -233,8 +232,18 @@ bool selftest__run_config_builtin_manage_case(void) {
         original_apps[i] = original_app_storage[i];
     }
     for (size_t i = 0; i < original_hotkey_count; ++i) {
-        snprintf(original_hotkey_storage[i], sizeof(original_hotkey_storage[i]), "%s", current_hotkeys->items[i].key);
-        snprintf(original_action_storage[i], sizeof(original_action_storage[i]), "%s", current_hotkeys->items[i].action);
+        snprintf(
+            original_hotkey_storage[i],
+            sizeof(original_hotkey_storage[i]),
+            "%s",
+            current_hotkeys->items[i].key
+        );
+        snprintf(
+            original_action_storage[i],
+            sizeof(original_action_storage[i]),
+            "%s",
+            current_hotkeys->items[i].action
+        );
         original_hotkeys[i].key = original_hotkey_storage[i];
         original_hotkeys[i].action = original_action_storage[i];
     }
@@ -259,8 +268,8 @@ bool selftest__run_config_builtin_manage_case(void) {
     bruce_result_t set_array = config__set_startup_apps(new_apps, 3);
     const bruce_config_startup_apps_t *apps = config__get_startup_apps();
     bool array_values = set_array == BRUCE_OK && apps != NULL && apps->count == 3 &&
-                         strcmp(apps->items[0], "clock") == 0 && strcmp(apps->items[1], "terminal") == 0 &&
-                         strcmp(apps->items[2], "webui") == 0;
+                        strcmp(apps->items[0], "clock") == 0 && strcmp(apps->items[1], "terminal") == 0 &&
+                        strcmp(apps->items[2], "webui") == 0;
 
     bruce_result_t add_duplicate = config__add_startup_app("clock");
     bruce_result_t add_app = config__add_startup_app("settings");
@@ -270,7 +279,7 @@ bool selftest__run_config_builtin_manage_case(void) {
     bool list_mutations = add_duplicate == BRUCE_OK && add_app == BRUCE_OK && remove_app == BRUCE_OK &&
                           remove_missing == BRUCE_ERR_NOT_FOUND && apps != NULL && apps->count == 3 &&
                           strcmp(apps->items[0], "clock") == 0 && strcmp(apps->items[1], "webui") == 0 &&
-                           strcmp(apps->items[2], "settings") == 0;
+                          strcmp(apps->items[2], "settings") == 0;
 
     char *startup_add_argv[] = {"config", "startup", "add", "selftest-startup"};
     char *startup_remove_argv[] = {"config", "startup", "remove", "selftest-startup"};
@@ -279,7 +288,9 @@ bool selftest__run_config_builtin_manage_case(void) {
     apps = config__get_startup_apps();
     bool cli_mutations = cli_add == BRUCE_OK && cli_remove == BRUCE_OK && apps != NULL && apps->count == 3;
 
-    const bruce_config_hotkey_t test_hotkeys[] = {{"ctrl + x", "process switch next"}};
+    const bruce_config_hotkey_t test_hotkeys[] = {
+        {"ctrl + x", "process switch next"}
+    };
     bruce_result_t set_hotkeys = config__set_hotkeys(test_hotkeys, 1);
     const bruce_config_hotkeys_t *hotkeys = config__get_hotkeys();
     bool hotkey_values = set_hotkeys == BRUCE_OK && hotkeys != NULL && hotkeys->count == 1 &&
@@ -289,19 +300,18 @@ bool selftest__run_config_builtin_manage_case(void) {
     char *json = NULL;
     size_t json_size = 0;
     bool read_json = storage__read_file(CONFIG__FILE_PATH, &json, &json_size);
-    bool schema = read_json && json_size > 0 && strstr(json, "\"startupApps\"") != NULL &&
-                   strstr(json, "\"hotkeys\"") != NULL &&
-                   strstr(json, "\"displayBufferedRendering\"") != NULL &&
-                   strstr(json, "\"displayDmaFramebuffer\"") != NULL &&
-                   strstr(json, ":\t") == NULL &&
-                   strstr(json, "\"startupApp\":") == NULL && strstr(json, "\"qrCodes\"") == NULL &&
-                  strstr(json, "\"evilWifiNames\"") == NULL && strstr(json, "\"evilWifiEndpoints\"") == NULL &&
-                  strstr(json, "\"evilWifiPasswordMode\"") == NULL;
+    bool schema =
+        read_json && json_size > 0 && strstr(json, "\"startupApps\"") != NULL &&
+        strstr(json, "\"hotkeys\"") != NULL && strstr(json, "\"displayBufferedRendering\"") != NULL &&
+        strstr(json, "\"displayDmaFramebuffer\"") != NULL && strstr(json, ":\t") == NULL &&
+        strstr(json, "\"startupApp\":") == NULL && strstr(json, "\"qrCodes\"") == NULL &&
+        strstr(json, "\"evilWifiNames\"") == NULL && strstr(json, "\"evilWifiEndpoints\"") == NULL &&
+        strstr(json, "\"evilWifiPasswordMode\"") == NULL;
     storage__free(json);
 
     bool restored = config__set_sound_volume(original_volume) == BRUCE_OK &&
-                     config__set_display_buffered_rendering(original_buffered_rendering) == BRUCE_OK &&
-                      config__set_display_dma_framebuffer(original_dma_framebuffer) == BRUCE_OK &&
+                    config__set_display_buffered_rendering(original_buffered_rendering) == BRUCE_OK &&
+                    config__set_display_dma_framebuffer(original_dma_framebuffer) == BRUCE_OK &&
                     config__set_wifi_ap(original_ssid, original_password) == BRUCE_OK &&
                     config__set_startup_apps(original_apps, original_app_count) == BRUCE_OK &&
                     config__set_hotkeys(original_hotkeys, original_hotkey_count) == BRUCE_OK;
@@ -309,7 +319,7 @@ bool selftest__run_config_builtin_manage_case(void) {
     bool ok = set_general == BRUCE_OK && general_value == 42 && set_buffered_rendering == BRUCE_OK &&
               !buffered_rendering_value && cli_display == BRUCE_OK && set_dma_framebuffer == BRUCE_OK &&
               !dma_framebuffer_value && set_protected == BRUCE_OK && string_values && array_values &&
-               list_mutations && cli_mutations && hotkey_values && schema && restored;
+              list_mutations && cli_mutations && hotkey_values && schema && restored;
     printf(
         "[selftest] config/builtin-manage: %s (general=%d array=%d schema=%d)\n",
         ok ? "OK" : "FAIL",

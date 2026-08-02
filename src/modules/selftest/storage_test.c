@@ -1,6 +1,6 @@
 /* A5 acceptance coverage: process-owned opaque Storage handles, `storage`
- * permission enforcement, the permanently-protected /config/bruce.json and
- * /permissions.json paths, per-owner isolation, and automatic cleanup at
+ * permission enforcement, the permanently-protected /config/bruce.conf and
+ * /config/permissions.json paths, per-owner isolation, and automatic cleanup at
  * normal exit and force-kill.
  *
  * Like permission_test.c, the "external app" processes these tests need are
@@ -119,14 +119,15 @@ bool selftest__run_storage_protected_path_case(void) {
      * processes always pass the `storage` permission check, so a denial here can
      * only come from the permanently-protected-path rule itself. */
     bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
-    bruce_result_t bruce_json = storage__open("/config/bruce.json", BRUCE_STORAGE_OPEN_READ, &file);
-    bruce_result_t permissions_json = storage__open("/permissions.json", BRUCE_STORAGE_OPEN_READ, &file);
+    bruce_result_t bruce_conf = storage__open("/config/bruce.conf", BRUCE_STORAGE_OPEN_READ, &file);
+    bruce_result_t permissions_json =
+        storage__open("/config/permissions.json", BRUCE_STORAGE_OPEN_READ, &file);
 
-    bool ok = bruce_json == BRUCE_ERR_PERMISSION && permissions_json == BRUCE_ERR_PERMISSION;
+    bool ok = bruce_conf == BRUCE_ERR_PERMISSION && permissions_json == BRUCE_ERR_PERMISSION;
     printf(
-        "[selftest] storage/protected-path: %s (bruce.json=%d permissions.json=%d)\n",
+        "[selftest] storage/protected-path: %s (bruce.conf=%d permissions.json=%d)\n",
         ok ? "OK" : "FAIL",
-        bruce_json,
+        bruce_conf,
         permissions_json
     );
     return ok;
@@ -193,7 +194,7 @@ bool selftest__run_storage_mkdir_case(void) {
     bruce_result_t created = storage__mkdir(path);
     bruce_result_t existing = storage__mkdir(path);
     bruce_result_t missing_parent = storage__mkdir("/selftest_missing/child");
-    bruce_result_t protected_path = storage__mkdir("/config/bruce.json");
+    bruce_result_t protected_path = storage__mkdir("/config/bruce.conf");
 
     size_t count = 0;
     bruce_result_t listed = storage__list(path, NULL, 0, &count);

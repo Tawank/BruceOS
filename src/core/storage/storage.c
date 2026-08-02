@@ -407,18 +407,19 @@ static bool storage__has_open_sd_files_locked(void) {
     return false;
 }
 
-/* /config/bruce.json and /permissions.json (plus their atomic-write .tmp siblings)
- * are the only paths this public API refuses, per migration_plan.md -
- * "Input, display, storage, and Config". Everything else mounted (LittleFS or
- * SD) is reachable by a storage-granted caller. Core itself still reads/
- * writes those two files directly through storage__read_file()/
- * storage__write_file_atomic() above, which this check does not apply to. */
+/* /config/bruce.conf and /config/permissions.json (plus their atomic-write
+ * .tmp siblings) are the only paths this public API refuses, per
+ * migration_plan.md - "Input, display, storage, and Config". Everything else
+ * mounted (LittleFS or SD) is reachable by a storage-granted caller. Core
+ * itself still reads/writes those two files directly through
+ * storage__read_file()/storage__write_file_atomic() above, which this check
+ * does not apply to. */
 static bool storage__is_protected_path(const char *path) {
     static const char *const protected_paths[] = {
-        "/config/bruce.json",
-        "/config/bruce.json.tmp",
-        "/permissions.json",
-        "/permissions.json.tmp",
+        "/config/bruce.conf",
+        "/config/bruce.conf.tmp",
+        "/config/permissions.json",
+        "/config/permissions.json.tmp",
     };
     if (path == NULL) return false;
     for (size_t i = 0; i < sizeof(protected_paths) / sizeof(protected_paths[0]); ++i) {

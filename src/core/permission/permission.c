@@ -17,7 +17,8 @@
 #include "core_sdk/result.h"
 #include "core_sdk/storage.h"
 
-#define PERMISSION__FILE_PATH "/permissions.json"
+#define PERMISSION__DIRECTORY "/config"
+#define PERMISSION__FILE_PATH PERMISSION__DIRECTORY "/permissions.json"
 #define PERMISSION__MAX_FILES 32
 
 typedef struct {
@@ -183,6 +184,7 @@ static bool permission__save_locked(void) {
     char *text = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     if (text == NULL) return false;
+    if (!storage__mkdir_internal(PERMISSION__DIRECTORY)) return false;
     bool saved = storage__write_file_atomic(PERMISSION__FILE_PATH, text, strlen(text));
     cJSON_free(text);
     return saved;

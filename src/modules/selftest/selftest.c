@@ -109,6 +109,7 @@ int selftest_app_main(int argc, char **argv) {
     RUN_SELFTEST(selftest__run_ir_permission_denied_case);
     RUN_SELFTEST(selftest__run_ir_validation_case);
     RUN_SELFTEST(selftest__run_audio_validation_case);
+    RUN_SELFTEST(selftest__run_audio_kill_mid_tone_case);
     RUN_SELFTEST(selftest__run_nrf24_permission_denied_case);
     RUN_SELFTEST(selftest__run_nrf24_validation_case);
     RUN_SELFTEST(selftest__run_gpio_bus_permission_denied_case);

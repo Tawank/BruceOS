@@ -3,18 +3,17 @@
 #include "core_sdk/app_runner.h"
 #include "core_sdk/config.h"
 #include "core_sdk/input.h"
-#include "core_sdk/loader.h"
 #include "core_sdk/process.h"
 #include "core_sdk/runtime.h"
 
 #include <ctype.h>
-#include <string.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "esp_rom_sys.h"
-#include "freertos/FreeRTOS.h"
+#include "freertos/FreeRTOS.h" // IWYU pragma: keep
 #include "freertos/task.h"
 
 #define TAG "bruce_input"
@@ -103,9 +102,7 @@
 
 static uint64_t input__now_ms(void) { return (uint64_t)xTaskGetTickCount() * portTICK_PERIOD_MS; }
 
-static void input__emit(
-    bruce_input_type_t type, bruce_input_action_t action, int32_t code, int32_t value
-) {
+static void input__emit(bruce_input_type_t type, bruce_input_action_t action, int32_t code, int32_t value) {
     bruce_input_event_t event = {
         .type = type,
         .action = action,
@@ -382,8 +379,8 @@ static bool input__kb_match_hotkey(const char *key, char *out_action, size_t act
     size_t used = 0;
 #define INPUT__APPEND_CHORD_PART(part)                                                                       \
     do {                                                                                                     \
-        int written = snprintf(chord + used, sizeof(chord) - used, "%s%s", used == 0 ? "" : " + ", part); \
-        if (written < 0 || (size_t)written >= sizeof(chord) - used) return false;                             \
+        int written = snprintf(chord + used, sizeof(chord) - used, "%s%s", used == 0 ? "" : " + ", part);    \
+        if (written < 0 || (size_t)written >= sizeof(chord) - used) return false;                            \
         used += (size_t)written;                                                                             \
     } while (0)
     if (s_kb_fn_held) INPUT__APPEND_CHORD_PART("fn");
@@ -438,7 +435,8 @@ static void input__poll_keyboard(void) {
                     bool is_modifier = input__kb_is_modifier(x, y);
                     char matched_action[BRUCE_CONFIG_HOTKEY_ACTION_MAX_LEN + 1] = {0};
                     bool matched_hotkey =
-                        !is_modifier && input__kb_match_hotkey(s_kb_normal[y][x], matched_action, sizeof(matched_action));
+                        !is_modifier &&
+                        input__kb_match_hotkey(s_kb_normal[y][x], matched_action, sizeof(matched_action));
 
                     if (is_modifier) {
                         /* Modifier state is folded into normalized key events. */
@@ -465,9 +463,7 @@ static void input__poll_keyboard(void) {
                         } else {
                             if (s_kb_ctrl_held && code >= 'a' && code <= 'z') code &= 0x1f;
                             if (s_kb_ctrl_held && code >= 'A' && code <= 'Z') code &= 0x1f;
-                            if (code != 0) {
-                                input__emit(BRUCE_INPUT_KEY, BRUCE_INPUT_PRESS, code, code);
-                            }
+                            if (code != 0) { input__emit(BRUCE_INPUT_KEY, BRUCE_INPUT_PRESS, code, code); }
                         }
                     }
                 }
@@ -483,9 +479,7 @@ static void input__poll_keyboard(void) {
                     } else {
                         const char *label = s_kb_shift_held ? s_kb_shifted[y][x] : s_kb_normal[y][x];
                         int32_t code = input__kb_char_code(label);
-                        if (code != 0) {
-                            input__emit(BRUCE_INPUT_KEY, BRUCE_INPUT_RELEASE, code, code);
-                        }
+                        if (code != 0) { input__emit(BRUCE_INPUT_KEY, BRUCE_INPUT_RELEASE, code, code); }
                     }
                 }
             }

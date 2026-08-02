@@ -4,7 +4,7 @@
 
 #include "core/process/process.h"
 #include "core/storage/storage.h"
-#include "driver/spi_master.h"
+#include "driver/spi_master.h" // IWYU pragma: export
 #include "esp_flash.h"
 #include "esp_partition.h"
 
@@ -42,7 +42,9 @@ bruce_result_t disk__list(bruce_disk_entry_t *entries, size_t capacity, size_t *
     if (esp_flash_get_size(NULL, &flash_size) != ESP_OK) return BRUCE_ERR_IO;
 
     size_t count = 0;
-    disk__write_entry(entries, capacity, count++, "flash0", "", "", BRUCE_DISK_TYPE_DISK, 0, flash_size, false);
+    disk__write_entry(
+        entries, capacity, count++, "flash0", "", "", BRUCE_DISK_TYPE_DISK, 0, flash_size, false
+    );
 
     esp_partition_iterator_t iterator =
         esp_partition_find(ESP_PARTITION_TYPE_ANY, ESP_PARTITION_SUBTYPE_ANY, NULL);
