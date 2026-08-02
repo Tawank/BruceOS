@@ -5,8 +5,9 @@
  *
  * This is the Core-side implementation of the JavaScript `display.*`
  * surface used by the bjs_interpreter.  It is intentionally small and
- * immediate-mode: drawing primitives update a Core-owned framebuffer and
- * are sent to the LCD only when a frame is presented. GUI processes render in
+ * immediate-mode: buffered drawing updates a Core-owned framebuffer and is
+ * sent to the LCD when a frame is presented; direct drawing is streamed to
+ * the panel immediately. GUI processes render in
  * process-local coordinates into a Core-assigned fullscreen or tiled viewport.
  * Hidden processes see a zero-sized viewport and drawing is a successful no-op.
  *
@@ -192,7 +193,8 @@ bruce_result_t display__set_rotation(uint8_t rotation);
 uint8_t display__get_rotation(void);
 
 /* Copies the composed RGB565 framebuffer for remote display tools. Pass NULL
- * with capacity 0 to query dimensions and required pixel count. */
+ * with capacity 0 to query dimensions and required pixel count. Returns
+ * BRUCE_ERR_UNSUPPORTED when buffered rendering is disabled. */
 bruce_result_t display__snapshot(
     uint16_t *pixels,
     size_t capacity,
@@ -217,10 +219,13 @@ bruce_result_t display__display_on_off(bool on);
 /* Framebuffer flush                                                          */
 /* -------------------------------------------------------------------------- */
 
-/* Lease the caller's current viewport for one complete frame. */
+/* Lease the caller's current viewport for one complete frame. In direct mode,
+ * drawing is visible before the frame is presented. */
 bruce_result_t display__begin_frame(void);
 
-/* Present an active frame and wait until its LCD transfer completes. */
+/* Present an active frame and wait until its LCD transfer completes. Direct
+ * mode has no retained frame to transfer, but still completes the lease and
+ * draws an active notification over the caller's viewport. */
 bruce_result_t display__present(void);
 
 /* Built-in launcher layout operation. Not exported to external runtimes. */

@@ -61,31 +61,29 @@ const uint8_t *display_internal__font_glyph(char c) {
 static void display__draw_char(display__process_context_t *context, int16_t x, int16_t y, char c) {
     const uint8_t *glyph = display_internal__font_glyph(c);
     if (glyph == NULL) { return; }
-    for (int16_t col = 0; col < DISPLAY__FONT_WIDTH; ++col) {
-        uint8_t column = glyph[col];
-        for (int16_t row = 0; row <= DISPLAY__FONT_HEIGHT; ++row) {
-            bool foreground = (column & (1 << row)) != 0;
-            if (!foreground && context->text_bg_transparent) { continue; }
-            bruce_display_color_t color = foreground ? context->text_color : context->text_bg_color;
-            for (int16_t dy = 0; dy < context->text_size; ++dy) {
-                for (int16_t dx = 0; dx < context->text_size; ++dx) {
-                    display_internal__set_pixel(
-                        x + col * context->text_size + dx, y + row * context->text_size + dy, color
-                    );
-                }
-            }
-        }
-    }
     if (!context->text_bg_transparent) {
-        for (int16_t row = 0; row <= DISPLAY__FONT_HEIGHT; ++row) {
-            for (int16_t dy = 0; dy < context->text_size; ++dy) {
-                for (int16_t dx = 0; dx < context->text_size; ++dx) {
-                    display_internal__set_pixel(
-                        x + DISPLAY__FONT_WIDTH * context->text_size + dx,
-                        y + row * context->text_size + dy,
-                        context->text_bg_color
-                    );
-                }
+        display_internal__fill_rect(
+            x,
+            y,
+            (DISPLAY__FONT_WIDTH + 1) * context->text_size,
+            (DISPLAY__FONT_HEIGHT + 1) * context->text_size,
+            context->text_bg_color
+        );
+    }
+    for (int16_t row = 0; row <= DISPLAY__FONT_HEIGHT; ++row) {
+        int16_t col = 0;
+        while (col < DISPLAY__FONT_WIDTH) {
+            while (col < DISPLAY__FONT_WIDTH && !(glyph[col] & (1 << row))) ++col;
+            int16_t start = col;
+            while (col < DISPLAY__FONT_WIDTH && (glyph[col] & (1 << row))) ++col;
+            if (col > start) {
+                display_internal__fill_rect(
+                    x + start * context->text_size,
+                    y + row * context->text_size,
+                    (col - start) * context->text_size,
+                    context->text_size,
+                    context->text_color
+                );
             }
         }
     }

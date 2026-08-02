@@ -215,6 +215,7 @@ bool selftest__run_config_builtin_manage_case(void) {
     }
 
     int original_volume = config__get_sound_volume();
+    bool original_buffered_rendering = config__get_display_buffered_rendering();
     bool original_dma_framebuffer = config__get_display_dma_framebuffer();
     char original_ssid[CONFIG__WIFI_SSID_MAX_LEN + 1];
     char original_password[CONFIG__WIFI_PASSWORD_MAX_LEN + 1];
@@ -240,6 +241,10 @@ bool selftest__run_config_builtin_manage_case(void) {
 
     bruce_result_t set_general = config__set_sound_volume(42);
     int general_value = config__get_sound_volume();
+    bruce_result_t set_buffered_rendering = config__set_display_buffered_rendering(false);
+    bool buffered_rendering_value = config__get_display_buffered_rendering();
+    char *display_buffered_argv[] = {"config", "display", "buffered", "off"};
+    bruce_result_t cli_display = config_app_main(4, display_buffered_argv);
     bruce_result_t set_dma_framebuffer = config__set_display_dma_framebuffer(false);
     bool dma_framebuffer_value = config__get_display_dma_framebuffer();
 
@@ -285,20 +290,23 @@ bool selftest__run_config_builtin_manage_case(void) {
     size_t json_size = 0;
     bool read_json = storage__read_file(CONFIG__FILE_PATH, &json, &json_size);
     bool schema = read_json && json_size > 0 && strstr(json, "\"startupApps\"") != NULL &&
-                  strstr(json, "\"hotkeys\"") != NULL &&
-                  strstr(json, "\"displayDmaFramebuffer\"") != NULL &&
+                   strstr(json, "\"hotkeys\"") != NULL &&
+                   strstr(json, "\"displayBufferedRendering\"") != NULL &&
+                   strstr(json, "\"displayDmaFramebuffer\"") != NULL &&
                   strstr(json, "\"startupApp\":") == NULL && strstr(json, "\"qrCodes\"") == NULL &&
                   strstr(json, "\"evilWifiNames\"") == NULL && strstr(json, "\"evilWifiEndpoints\"") == NULL &&
                   strstr(json, "\"evilWifiPasswordMode\"") == NULL;
     storage__free(json);
 
     bool restored = config__set_sound_volume(original_volume) == BRUCE_OK &&
-                     config__set_display_dma_framebuffer(original_dma_framebuffer) == BRUCE_OK &&
+                     config__set_display_buffered_rendering(original_buffered_rendering) == BRUCE_OK &&
+                      config__set_display_dma_framebuffer(original_dma_framebuffer) == BRUCE_OK &&
                     config__set_wifi_ap(original_ssid, original_password) == BRUCE_OK &&
                     config__set_startup_apps(original_apps, original_app_count) == BRUCE_OK &&
                     config__set_hotkeys(original_hotkeys, original_hotkey_count) == BRUCE_OK;
 
-    bool ok = set_general == BRUCE_OK && general_value == 42 && set_dma_framebuffer == BRUCE_OK &&
+    bool ok = set_general == BRUCE_OK && general_value == 42 && set_buffered_rendering == BRUCE_OK &&
+              !buffered_rendering_value && cli_display == BRUCE_OK && set_dma_framebuffer == BRUCE_OK &&
               !dma_framebuffer_value && set_protected == BRUCE_OK && string_values && array_values &&
                list_mutations && cli_mutations && hotkey_values && schema && restored;
     printf(

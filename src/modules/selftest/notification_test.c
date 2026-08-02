@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "core/display/display.h"
+#include "core_sdk/config.h"
 #include "core_sdk/display.h"
 #include "core_sdk/notification.h"
 #include "core_sdk/status_icon.h"
@@ -13,7 +14,8 @@ bool selftest__run_notification_case(void) {
     int height = display__height();
     bruce_display_color_t before = 0;
     bruce_display_color_t after = 0;
-    if (display__test_read_pixel(width - 3, height - 3, &before) != BRUCE_OK) return false;
+    bool buffered = config__get_display_buffered_rendering();
+    if (buffered && display__test_read_pixel(width - 3, height - 3, &before) != BRUCE_OK) return false;
     if (notification__push("first", 1) != BRUCE_OK ||
         notification__push("replacement", UINT32_MAX) != BRUCE_OK) {
         return false;
@@ -29,7 +31,8 @@ bool selftest__run_notification_case(void) {
         printf("[selftest] notification: state/copy/clamp/placement failed\n");
         return false;
     }
-    if (display__test_read_pixel(width - 3, height - 3, &after) != BRUCE_OK || after != before) {
+    if (buffered &&
+        (display__test_read_pixel(width - 3, height - 3, &after) != BRUCE_OK || after != before)) {
         printf("[selftest] notification: application framebuffer was modified\n");
         return false;
     }

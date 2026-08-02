@@ -171,6 +171,53 @@ static int config_app__startup_cli(ArgParser *startup_parser, ArgParser *add, Ar
     return BRUCE_ERR_INVALID_ARGUMENT;
 }
 
+static int config_app__display_gui(void) {
+    for (;;) {
+        bool buffered = config__get_display_buffered_rendering();
+        char buffered_label[48];
+        snprintf(buffered_label, sizeof(buffered_label), "Buffered rendering: %s", buffered ? "ON" : "OFF");
+        const bruce_dialog_choice_t choices[] = {
+            {.label = buffered_label, .value = "buffered"},
+            {.label = "Back", .value = "back"},
+        };
+        size_t selected = 0;
+        bruce_result_t result = dialog__choice(
+            "Display rendering",
+            buffered ? "Smooth complete frames; uses about 65 KB RAM"
+                     : "Direct drawing saves RAM; screenshots unavailable",
+            choices,
+            2,
+            &selected,
+            NULL
+        );
+        if (result == BRUCE_ERR_CANCELLED || selected == 1) return BRUCE_OK;
+        if (result != BRUCE_OK) return result;
+        result = config__set_display_buffered_rendering(!buffered);
+        if (result != BRUCE_OK) return result;
+        (void)dialog__message(BRUCE_DIALOG_INFO, "Display rendering", "Setting saved; reboot to apply");
+    }
+}
+
+static int config_app__display_cli(ArgParser *display_parser, ArgParser *buffered) {
+    ArgParser *action = ap_get_cmd_parser(display_parser);
+    if (action == NULL) {
+        stdio__printf(
+            "Buffered rendering: %s (reboot required after changes)\n",
+            config__get_display_buffered_rendering() ? "on" : "off"
+        );
+        return BRUCE_OK;
+    }
+    if (action != buffered) return BRUCE_ERR_INVALID_ARGUMENT;
+    const char *state = ap_get_arg(buffered, "state");
+    if (state == NULL) {
+        stdio__printf("Buffered rendering: %s\n", config__get_display_buffered_rendering() ? "on" : "off");
+        return BRUCE_OK;
+    }
+    bool value;
+    return config_app__parse_on_off(state, &value) ? config__set_display_buffered_rendering(value)
+                                                   : BRUCE_ERR_INVALID_ARGUMENT;
+}
+
 static void config_app__add_gui_option(ArgParser *parser) {
     ap_add_flag(parser, "gui");
     ap_set_opt_help(parser, "gui", "Use GUI interaction mode");
@@ -196,8 +243,11 @@ int config_app_main(int argc, char **argv) {
     ArgParser *startup = ap_new_cmd(root, "startup");
     ArgParser *startup_add = startup != NULL ? ap_new_cmd(startup, "add") : NULL;
     ArgParser *startup_remove = startup != NULL ? ap_new_cmd(startup, "remove") : NULL;
+    ArgParser *display = ap_new_cmd(root, "display");
+    ArgParser *display_buffered = display != NULL ? ap_new_cmd(display, "buffered") : NULL;
     ArgParser *parsers[] = {
         system, clock, show, sync, ntp, timezone, dst, format, set, startup, startup_add, startup_remove,
+        display, display_buffered,
     };
     for (size_t i = 0; i < sizeof(parsers) / sizeof(parsers[0]); ++i) {
         if (parsers[i] == NULL) {
@@ -228,6 +278,9 @@ int config_app_main(int argc, char **argv) {
     ap_add_required_arg(startup_add, "name", "Application name or quoted command line");
     ap_set_helptext(startup_remove, "Remove an application command from the startup list.");
     ap_add_required_arg(startup_remove, "name", "Application name or quoted command line");
+    ap_set_helptext(display, "Configure display rendering.");
+    ap_set_helptext(display_buffered, "Enable smooth buffered rendering or direct low-memory drawing.");
+    ap_add_optional_arg(display_buffered, "state", "on or off");
 
     if (!ap_parse(root, argc, argv)) {
         ap_status_t status = ap_get_status(root);
@@ -239,7 +292,9 @@ int config_app_main(int argc, char **argv) {
     ArgParser *root_action = ap_get_cmd_parser(root);
     bool clock_hierarchy = root_action == system && ap_get_cmd_parser(system) == clock;
     bool startup_hierarchy = root_action == startup;
-    bool gui = ap_found(root, "gui") || ap_found(system, "gui") || ap_found(clock, "gui");
+    bool display_hierarchy = root_action == display;
+    bool gui = ap_found(root, "gui") || ap_found(system, "gui") || ap_found(clock, "gui") ||
+               ap_found(display, "gui") || ap_found(display_buffered, "gui");
     ArgParser *action = clock_hierarchy ? ap_get_cmd_parser(clock) : NULL;
     if (action != NULL) gui = gui || ap_found(action, "gui");
     if (gui && !app_runner__args_have_background(argc, argv)) {
@@ -255,6 +310,8 @@ int config_app_main(int argc, char **argv) {
                      : config_app__clock_cli(clock, show, sync, ntp, timezone, dst, format, set);
     } else if (startup_hierarchy && !gui) {
         result = config_app__startup_cli(startup, startup_add, startup_remove);
+    } else if (display_hierarchy) {
+        result = gui ? config_app__display_gui() : config_app__display_cli(display, display_buffered);
     } else {
         result = BRUCE_ERR_INVALID_ARGUMENT;
     }

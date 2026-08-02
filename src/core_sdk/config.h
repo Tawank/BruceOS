@@ -93,8 +93,13 @@ const char *config__get_theme_path(void);
 bruce_result_t config__set_theme_path(const char *value);
 bool config__get_theme_on_sd(void);
 bruce_result_t config__set_theme_on_sd(bool value);
+/* Controls whether Core retains a full RGB565 framebuffer. Changes apply
+ * after reboot. When false, drawing is streamed directly to the panel and
+ * framebuffer-dependent features such as snapshots are unavailable. */
+bool config__get_display_buffered_rendering(void);
+bruce_result_t config__set_display_buffered_rendering(bool value);
 /* Controls whether the full framebuffer is DMA-capable. Changes apply after
- * reboot; when false, display transfers use a small DMA row buffer instead. */
+ * reboot and only affects buffered rendering. */
 bool config__get_display_dma_framebuffer(void);
 bruce_result_t config__set_display_dma_framebuffer(bool value);
 

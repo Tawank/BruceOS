@@ -3,6 +3,7 @@
 #include <stdio.h>
 
 #include "core/display/display.h"
+#include "core_sdk/config.h"
 #include "core_sdk/display.h"
 #include "core_sdk/result.h"
 
@@ -25,19 +26,22 @@ bool selftest__run_display_compositor_case(void) {
         return false;
     }
     bruce_display_color_t pixel = 0;
-    if (display__test_read_pixel(0, 0, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_GREEN) {
+    bool buffered = config__get_display_buffered_rendering();
+    if (buffered && (display__test_read_pixel(0, 0, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_GREEN)) {
         printf("[selftest] display/compositor: FAIL, local pixel translation\n");
         return false;
     }
-    if (display__test_read_pixel(10, 15, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_YELLOW ||
-        display__test_read_pixel(5, 10, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_YELLOW ||
-        display__test_read_pixel(10, 5, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_YELLOW ||
-        display__test_read_pixel(15, 10, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_BLACK) {
+    if (buffered &&
+        (display__test_read_pixel(10, 15, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_YELLOW ||
+         display__test_read_pixel(5, 10, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_YELLOW ||
+         display__test_read_pixel(10, 5, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_YELLOW ||
+         display__test_read_pixel(15, 10, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_BLACK)) {
         printf("[selftest] display/compositor: FAIL, arc geometry\n");
         return false;
     }
-    if (display__test_read_pixel(23, 20, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_CYAN ||
-        display__test_read_pixel(26, 23, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_BLACK) {
+    if (buffered &&
+        (display__test_read_pixel(23, 20, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_CYAN ||
+         display__test_read_pixel(26, 23, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_BLACK)) {
         printf("[selftest] display/compositor: FAIL, rounded rectangle corners\n");
         return false;
     }
@@ -69,9 +73,11 @@ bool selftest__run_display_rendering_case(void) {
     int16_t cursor_x = 0;
     int16_t cursor_y = 0;
     bruce_display_color_t pixel = 0;
+    bool buffered = config__get_display_buffered_rendering();
     if (display__get_cursor(&cursor_x, &cursor_y) != BRUCE_OK || cursor_x != 7 || cursor_y != 1 ||
-        display__test_read_pixel(1, 3, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_WHITE ||
-        display__test_read_pixel(1, 1, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_BLACK) {
+        (buffered &&
+         (display__test_read_pixel(1, 3, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_WHITE ||
+          display__test_read_pixel(1, 1, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_BLACK))) {
         printf("[selftest] display/rendering: FAIL, glyph or cursor\n");
         (void)display__present();
         return false;
@@ -79,16 +85,18 @@ bool selftest__run_display_rendering_case(void) {
 
     if (display__set_text_bg_color(BRUCE_COLOR_RED) != BRUCE_OK ||
         display__draw_bitmap(20, 1, bitmap, 8, 1, BRUCE_COLOR_GREEN) != BRUCE_OK ||
-        display__test_read_pixel(20, 1, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_GREEN ||
-        display__test_read_pixel(21, 1, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_RED) {
+        (buffered &&
+         (display__test_read_pixel(20, 1, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_GREEN ||
+          display__test_read_pixel(21, 1, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_RED))) {
         printf("[selftest] display/rendering: FAIL, bitmap colors\n");
         (void)display__present();
         return false;
     }
 
     if (display__draw_bitmap_scaled(30, 1, bitmap, 8, 1, 16, 2, BRUCE_COLOR_CYAN) != BRUCE_OK ||
-        display__test_read_pixel(30, 1, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_CYAN ||
-        display__test_read_pixel(32, 1, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_BLACK ||
+        (buffered &&
+         (display__test_read_pixel(30, 1, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_CYAN ||
+          display__test_read_pixel(32, 1, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_BLACK)) ||
         display__color565(255, 0, 0) != BRUCE_COLOR_RED || display__present() != BRUCE_OK) {
         printf("[selftest] display/rendering: FAIL, scaled bitmap, color conversion, or present\n");
         return false;

@@ -3,16 +3,16 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "display_driver.h"
-#include "display_internal.h"
 #include "core/process/process.h"
 #include "core_sdk/config.h"
 #include "core_sdk/notification.h"
 #include "core_sdk/process.h"
-#include "esp_heap_caps.h"
+#include "display_driver.h"
+#include "display_internal.h"
 #include "esp_attr.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
-#include "freertos/FreeRTOS.h"
+#include "freertos/FreeRTOS.h" // IWYU pragma: keep
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
@@ -40,7 +40,9 @@ typedef struct {
 
 static SemaphoreHandle_t s_mutex;
 static bool s_initialized;
+static bool s_buffered_rendering;
 static bruce_display_color_t *s_framebuffer;
+static bruce_display_color_t *s_direct_buffer;
 static DMA_ATTR bruce_display_color_t s_row_buffer[DISPLAY__ROW_BUF_PIXELS];
 static bool s_dma_framebuffer;
 static uint8_t s_rotation;
@@ -59,11 +61,7 @@ static inline void display__unlock(void) { xSemaphoreGiveRecursive(s_mutex); }
 static void display__ensure_lock(void);
 
 bruce_result_t display__snapshot(
-    uint16_t *pixels,
-    size_t capacity,
-    uint16_t *out_width,
-    uint16_t *out_height,
-    size_t *out_pixel_count
+    uint16_t *pixels, size_t capacity, uint16_t *out_width, uint16_t *out_height, size_t *out_pixel_count
 ) {
     if (out_width == NULL || out_height == NULL || out_pixel_count == NULL ||
         (pixels == NULL && capacity != 0)) {
@@ -71,9 +69,13 @@ bruce_result_t display__snapshot(
     }
     display__ensure_lock();
     display__lock();
-    if (!s_initialized || s_framebuffer == NULL) {
+    if (!s_initialized) {
         display__unlock();
         return BRUCE_ERR_INVALID_STATE;
+    }
+    if (!s_buffered_rendering) {
+        display__unlock();
+        return BRUCE_ERR_UNSUPPORTED;
     }
     size_t count = (size_t)s_fb_width * (size_t)s_fb_height;
     *out_width = (uint16_t)s_fb_width;
@@ -136,9 +138,8 @@ static bruce_display_rect_t display__notification_rect(const char *text) {
     int width = (int)strlen(text) * (DISPLAY__FONT_WIDTH + 1) + 8;
     if (width > s_fb_width - 4) width = s_fb_width - 4;
     if (width < 20) width = 20;
-    return (bruce_display_rect_t){
-        s_fb_width - width - 2, s_fb_height - DISPLAY__FONT_HEIGHT - 10, width, DISPLAY__FONT_HEIGHT + 8
-    };
+    return (bruce_display_rect_t
+    ){s_fb_width - width - 2, s_fb_height - DISPLAY__FONT_HEIGHT - 10, width, DISPLAY__FONT_HEIGHT + 8};
 }
 
 static bool display__overlay_conflicts_locked(bruce_display_rect_t rect) {
@@ -231,23 +232,123 @@ void display_internal__set_pixel(int16_t x, int16_t y, bruce_display_color_t col
     int screen_x = s_draw_context->viewport.x + x;
     int screen_y = s_draw_context->viewport.y + y;
     if (screen_x >= 0 && screen_x < s_fb_width && screen_y >= 0 && screen_y < s_fb_height) {
-        s_framebuffer[screen_y * s_fb_width + screen_x] = color;
+        if (s_buffered_rendering) {
+            s_framebuffer[screen_y * s_fb_width + screen_x] = color;
+        } else {
+#if !CONFIG_BRUCE_QEMU_TEST_MODE
+            while (xSemaphoreTake(s_transfer_done, 0) == pdTRUE) {}
+            s_direct_buffer[0] = color;
+            bruce_result_t result =
+                display_driver__draw_bitmap(screen_x, screen_y, screen_x + 1, screen_y + 1, s_direct_buffer);
+            if (result == BRUCE_OK && xSemaphoreTake(s_transfer_done, portMAX_DELAY) != pdTRUE) {
+                result = BRUCE_ERR_IO;
+            }
+            if (s_draw_context->draw_result == BRUCE_OK && result != BRUCE_OK)
+                s_draw_context->draw_result = result;
+#endif
+        }
     }
 }
 
 void display_internal__fill_rect(int16_t x, int16_t y, int16_t w, int16_t h, bruce_display_color_t color) {
-    if (x < 0) { w += x; x = 0; }
-    if (y < 0) { h += y; y = 0; }
+    if (x < 0) {
+        w += x;
+        x = 0;
+    }
+    if (y < 0) {
+        h += y;
+        y = 0;
+    }
     if (s_draw_context == NULL || s_draw_context->hidden) return;
     if (x + w > s_draw_context->viewport.width) w = s_draw_context->viewport.width - x;
     if (y + h > s_draw_context->viewport.height) h = s_draw_context->viewport.height - y;
     if (w <= 0 || h <= 0) return;
     x += s_draw_context->viewport.x;
     y += s_draw_context->viewport.y;
+    if (!s_buffered_rendering) {
+#if !CONFIG_BRUCE_QEMU_TEST_MODE
+        int16_t rows_per_transfer = DISPLAY__DIRECT_BUF_PIXELS / w;
+        if (rows_per_transfer > h) rows_per_transfer = h;
+        size_t transfer_pixels = (size_t)w * (size_t)rows_per_transfer;
+        for (size_t pixel = 0; pixel < transfer_pixels; ++pixel) s_direct_buffer[pixel] = color;
+        for (int16_t row = y; row < y + h; row += rows_per_transfer) {
+            int16_t rows = y + h - row;
+            if (rows > rows_per_transfer) rows = rows_per_transfer;
+            while (xSemaphoreTake(s_transfer_done, 0) == pdTRUE) {}
+            bruce_result_t result = display_driver__draw_bitmap(x, row, x + w, row + rows, s_direct_buffer);
+            if (result == BRUCE_OK && xSemaphoreTake(s_transfer_done, portMAX_DELAY) != pdTRUE) {
+                result = BRUCE_ERR_IO;
+            }
+            if (result != BRUCE_OK) {
+                if (s_draw_context->draw_result == BRUCE_OK) s_draw_context->draw_result = result;
+                break;
+            }
+        }
+#endif
+        return;
+    }
     for (int16_t row = y; row < y + h; ++row) {
         bruce_display_color_t *pixels = &s_framebuffer[row * s_fb_width + x];
         for (int16_t col = 0; col < w; ++col) pixels[col] = color;
     }
+}
+
+void display_internal__draw_rgb_bitmap(int16_t x, int16_t y, const uint16_t *bitmap, int16_t w, int16_t h) {
+    if (s_draw_context == NULL || s_draw_context->hidden) return;
+    int16_t source_stride = w;
+    int16_t src_x = 0;
+    int16_t src_y = 0;
+    if (x < 0) {
+        src_x = -x;
+        w += x;
+        x = 0;
+    }
+    if (y < 0) {
+        src_y = -y;
+        h += y;
+        y = 0;
+    }
+    if (x + w > s_draw_context->viewport.width) w = s_draw_context->viewport.width - x;
+    if (y + h > s_draw_context->viewport.height) h = s_draw_context->viewport.height - y;
+    if (w <= 0 || h <= 0) return;
+    int16_t screen_x = x + s_draw_context->viewport.x;
+    int16_t screen_y = y + s_draw_context->viewport.y;
+    if (s_buffered_rendering) {
+        for (int16_t row = 0; row < h; ++row) {
+            memcpy(
+                &s_framebuffer[(screen_y + row) * s_fb_width + screen_x],
+                &bitmap[(src_y + row) * source_stride + src_x],
+                (size_t)w * sizeof(*bitmap)
+            );
+        }
+        return;
+    }
+#if !CONFIG_BRUCE_QEMU_TEST_MODE
+    int16_t rows_per_transfer = DISPLAY__DIRECT_BUF_PIXELS / w;
+    if (rows_per_transfer > h) rows_per_transfer = h;
+    for (int16_t row = 0; row < h; row += rows_per_transfer) {
+        int16_t rows = h - row;
+        if (rows > rows_per_transfer) rows = rows_per_transfer;
+        for (int16_t copy_row = 0; copy_row < rows; ++copy_row) {
+            memcpy(
+                &s_direct_buffer[(size_t)copy_row * (size_t)w],
+                &bitmap[(src_y + row + copy_row) * source_stride + src_x],
+                (size_t)w * sizeof(*bitmap)
+            );
+        }
+        while (xSemaphoreTake(s_transfer_done, 0) == pdTRUE) {}
+        bruce_result_t result = display_driver__draw_bitmap(
+            screen_x, screen_y + row, screen_x + w, screen_y + row + rows, s_direct_buffer
+        );
+        if (result == BRUCE_OK && xSemaphoreTake(s_transfer_done, portMAX_DELAY) != pdTRUE) {
+            result = BRUCE_ERR_IO;
+        }
+        if (result != BRUCE_OK) {
+            if (s_draw_context->draw_result == BRUCE_OK) s_draw_context->draw_result = result;
+            break;
+        }
+    }
+#endif
 }
 
 bool display_internal__on_transfer_done_from_isr(void) {
@@ -299,11 +400,40 @@ static bruce_result_t display__transfer_locked(bruce_display_rect_t rect, bool f
         }
         return BRUCE_OK;
     }
-    bruce_result_t result = display_driver__draw_bitmap(
-        rect.x, rect.y, rect.x + rect.width, rect.y + rect.height, s_framebuffer
-    );
+    bruce_result_t result =
+        display_driver__draw_bitmap(rect.x, rect.y, rect.x + rect.width, rect.y + rect.height, s_framebuffer);
     if (result == BRUCE_OK && xSemaphoreTake(s_transfer_done, portMAX_DELAY) != pdTRUE) result = BRUCE_ERR_IO;
     return result;
+#endif
+}
+
+static bruce_result_t display__draw_notification_direct_locked(bruce_display_rect_t clip) {
+#if CONFIG_BRUCE_QEMU_TEST_MODE
+    (void)clip;
+    return BRUCE_OK;
+#else
+    display__expire_notification_locked();
+    if (!s_notification.active || !display__rects_overlap(clip, s_notification.rect)) return BRUCE_OK;
+    bruce_display_rect_t notification_rect = s_notification.rect;
+    int left = notification_rect.x > clip.x ? notification_rect.x : clip.x;
+    int right = notification_rect.x + notification_rect.width < clip.x + clip.width
+                    ? notification_rect.x + notification_rect.width
+                    : clip.x + clip.width;
+    int top = notification_rect.y > clip.y ? notification_rect.y : clip.y;
+    int bottom = notification_rect.y + notification_rect.height < clip.y + clip.height
+                     ? notification_rect.y + notification_rect.height
+                     : clip.y + clip.height;
+    bruce_display_rect_t transfer = {left, top, right - left, bottom - top};
+    for (int screen_y = top; screen_y < bottom; ++screen_y) {
+        for (int x = 0; x < transfer.width; ++x) s_row_buffer[x] = BRUCE_COLOR_NAVY;
+        display__compose_notification_row(transfer, &s_notification, screen_y);
+        while (xSemaphoreTake(s_transfer_done, 0) == pdTRUE) {}
+        if (display_driver__draw_bitmap(left, screen_y, right, screen_y + 1, s_row_buffer) != BRUCE_OK ||
+            xSemaphoreTake(s_transfer_done, portMAX_DELAY) != pdTRUE) {
+            return BRUCE_ERR_IO;
+        }
+    }
+    return BRUCE_OK;
 #endif
 }
 
@@ -326,27 +456,57 @@ static void display__configure_rotation(void) {
 }
 
 static void display__release_resources_locked(void) {
-    if (s_transfer_done != NULL) { vSemaphoreDelete(s_transfer_done); s_transfer_done = NULL; }
-    if (s_framebuffer != NULL) { heap_caps_free(s_framebuffer); s_framebuffer = NULL; }
+    if (s_transfer_done != NULL) {
+        vSemaphoreDelete(s_transfer_done);
+        s_transfer_done = NULL;
+    }
+    if (s_direct_buffer != NULL) {
+        heap_caps_free(s_direct_buffer);
+        s_direct_buffer = NULL;
+    }
+    if (s_framebuffer != NULL) {
+        heap_caps_free(s_framebuffer);
+        s_framebuffer = NULL;
+    }
     display_driver__deinit();
 }
 
 bruce_result_t display__init(void) {
     display__ensure_lock();
     display__lock();
-    if (s_initialized) { display__unlock(); return BRUCE_OK; }
+    if (s_initialized) {
+        display__unlock();
+        return BRUCE_OK;
+    }
 #if !CONFIG_BRUCE_QEMU_TEST_MODE
     bruce_result_t result = display_driver__init();
-    if (result != BRUCE_OK) { display__unlock(); return result; }
-#endif
-    s_dma_framebuffer = config__get_display_dma_framebuffer();
-    uint32_t framebuffer_caps = MALLOC_CAP_INTERNAL | (s_dma_framebuffer ? MALLOC_CAP_DMA : MALLOC_CAP_8BIT);
-    s_framebuffer = heap_caps_malloc(DISPLAY__FB_SIZE, framebuffer_caps);
-    if (s_framebuffer == NULL) {
-        ESP_LOGE(TAG, "failed to allocate framebuffer");
-        display_driver__deinit();
+    if (result != BRUCE_OK) {
         display__unlock();
-        return BRUCE_ERR_NO_MEMORY;
+        return result;
+    }
+#endif
+    s_buffered_rendering = config__get_display_buffered_rendering();
+    s_dma_framebuffer = s_buffered_rendering && config__get_display_dma_framebuffer();
+    if (s_buffered_rendering) {
+        uint32_t framebuffer_caps =
+            MALLOC_CAP_INTERNAL | (s_dma_framebuffer ? MALLOC_CAP_DMA : MALLOC_CAP_8BIT);
+        s_framebuffer = heap_caps_malloc(DISPLAY__FB_SIZE, framebuffer_caps);
+        if (s_framebuffer == NULL) {
+            ESP_LOGE(TAG, "failed to allocate framebuffer");
+            display_driver__deinit();
+            display__unlock();
+            return BRUCE_ERR_NO_MEMORY;
+        }
+    } else {
+        s_direct_buffer = heap_caps_malloc(
+            DISPLAY__DIRECT_BUF_PIXELS * sizeof(*s_direct_buffer), MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA
+        );
+        if (s_direct_buffer == NULL) {
+            ESP_LOGE(TAG, "failed to allocate direct rendering buffer");
+            display_driver__deinit();
+            display__unlock();
+            return BRUCE_ERR_NO_MEMORY;
+        }
     }
     s_rotation = DISPLAY__DEFAULT_ROTATION;
     display__configure_rotation();
@@ -366,7 +526,7 @@ bruce_result_t display__init(void) {
     for (int i = 0; i < DISPLAY__MAX_CONTEXTS; ++i) {
         if (s_contexts[i].in_use) display__set_visibility_locked(&s_contexts[i]);
     }
-    memset(s_framebuffer, 0, DISPLAY__FB_SIZE);
+    if (s_framebuffer != NULL) memset(s_framebuffer, 0, DISPLAY__FB_SIZE);
     int configured_brightness = config__get_bright();
     s_brightness = (uint8_t)((configured_brightness * 255) / 100);
 #if !CONFIG_BRUCE_QEMU_TEST_MODE
@@ -374,14 +534,21 @@ bruce_result_t display__init(void) {
 #endif
     s_initialized = true;
     display__unlock();
-    display__flush();
-    return BRUCE_OK;
+    if (s_buffered_rendering) return display__flush();
+    bruce_result_t direct_result = display__begin_frame();
+    if (direct_result == BRUCE_OK) direct_result = display__fill_screen(BRUCE_COLOR_BLACK);
+    if (direct_result == BRUCE_OK) direct_result = display__present();
+    if (direct_result != BRUCE_OK) display__deinit();
+    return direct_result;
 }
 
 void display__deinit(void) {
     if (s_mutex == NULL) return;
     display__lock();
-    if (!s_initialized) { display__unlock(); return; }
+    if (!s_initialized) {
+        display__unlock();
+        return;
+    }
     s_initialized = false;
     display__release_resources_locked();
     display__unlock();
@@ -408,20 +575,32 @@ int display__height(void) {
 bruce_result_t display__set_rotation(uint8_t rotation) {
     bruce_process_id_t caller_id = process__current_id();
     display__lock();
-    if (!s_initialized) { display__unlock(); return BRUCE_ERR_NOT_INITIALIZED; }
-    display__process_context_t *caller = display__find_context_locked(caller_id);
-    if (caller == NULL || caller->tiled) { display__unlock(); return BRUCE_ERR_PERMISSION; }
-    for (int i = 0; i < DISPLAY__MAX_CONTEXTS; ++i) {
-        if (s_contexts[i].in_use && s_contexts[i].frame_active) { display__unlock(); return BRUCE_ERR_BUSY; }
+    if (!s_initialized) {
+        display__unlock();
+        return BRUCE_ERR_NOT_INITIALIZED;
     }
-    if (s_system_context.frame_active) { display__unlock(); return BRUCE_ERR_BUSY; }
+    display__process_context_t *caller = display__find_context_locked(caller_id);
+    if (caller == NULL || caller->tiled) {
+        display__unlock();
+        return BRUCE_ERR_PERMISSION;
+    }
+    for (int i = 0; i < DISPLAY__MAX_CONTEXTS; ++i) {
+        if (s_contexts[i].in_use && s_contexts[i].frame_active) {
+            display__unlock();
+            return BRUCE_ERR_BUSY;
+        }
+    }
+    if (s_system_context.frame_active) {
+        display__unlock();
+        return BRUCE_ERR_BUSY;
+    }
     s_rotation = rotation & 3;
     display__configure_rotation();
     if (s_notification.active) {
         s_notification.rect = display__notification_rect(s_notification.text);
         s_notification.generation++;
     }
-    memset(s_framebuffer, 0, DISPLAY__FB_SIZE);
+    if (s_framebuffer != NULL) memset(s_framebuffer, 0, DISPLAY__FB_SIZE);
     s_system_context.viewport = display__fullscreen_rect();
     s_system_context.viewport_generation++;
     s_dashboard_layout = false;
@@ -443,7 +622,10 @@ uint8_t display__get_rotation(void) {
 
 bruce_result_t display__invert_display(bool invert) {
     display__lock();
-    if (!s_initialized) { display__unlock(); return BRUCE_ERR_NOT_INITIALIZED; }
+    if (!s_initialized) {
+        display__unlock();
+        return BRUCE_ERR_NOT_INITIALIZED;
+    }
 #if CONFIG_BRUCE_QEMU_TEST_MODE
     bruce_result_t result = BRUCE_OK;
 #else
@@ -456,7 +638,10 @@ bruce_result_t display__invert_display(bool invert) {
 
 bruce_result_t display__set_brightness(uint8_t brightness) {
     display__lock();
-    if (!s_initialized) { display__unlock(); return BRUCE_ERR_NOT_INITIALIZED; }
+    if (!s_initialized) {
+        display__unlock();
+        return BRUCE_ERR_NOT_INITIALIZED;
+    }
     display__unlock();
     bruce_result_t result = config__set_bright((int)brightness * 100 / 255);
     if (result == BRUCE_OK) {
@@ -483,7 +668,10 @@ uint8_t display__get_brightness(void) {
 
 bruce_result_t display__display_on_off(bool on) {
     display__lock();
-    if (!s_initialized) { display__unlock(); return BRUCE_ERR_NOT_INITIALIZED; }
+    if (!s_initialized) {
+        display__unlock();
+        return BRUCE_ERR_NOT_INITIALIZED;
+    }
 #if CONFIG_BRUCE_QEMU_TEST_MODE
     bruce_result_t result = BRUCE_OK;
 #else
@@ -497,10 +685,19 @@ bruce_result_t display__display_on_off(bool on) {
 bruce_result_t display__begin_frame(void) {
     bruce_process_id_t caller = process__current_id();
     display__lock();
-    if (!s_initialized) { display__unlock(); return BRUCE_ERR_NOT_INITIALIZED; }
+    if (!s_initialized) {
+        display__unlock();
+        return BRUCE_ERR_NOT_INITIALIZED;
+    }
     display__process_context_t *context = display__find_context_locked(caller);
-    if (context == NULL) { display__unlock(); return BRUCE_ERR_PERMISSION; }
-    if (context->frame_active) { display__unlock(); return BRUCE_ERR_INVALID_STATE; }
+    if (context == NULL) {
+        display__unlock();
+        return BRUCE_ERR_PERMISSION;
+    }
+    if (context->frame_active) {
+        display__unlock();
+        return BRUCE_ERR_INVALID_STATE;
+    }
     context->frame_active = true;
     context->frame_noop = context->hidden;
     context->frame_generation = context->viewport_generation;
@@ -516,7 +713,9 @@ bruce_result_t display__begin_frame(void) {
         }
         if (context->clear_on_next_frame) {
             s_draw_context = context;
-            display_internal__fill_rect(0, 0, context->viewport.width, context->viewport.height, BRUCE_COLOR_BLACK);
+            display_internal__fill_rect(
+                0, 0, context->viewport.width, context->viewport.height, BRUCE_COLOR_BLACK
+            );
             context->clear_on_next_frame = false;
         }
     }
@@ -528,8 +727,14 @@ bruce_result_t display__present(void) {
     bruce_process_id_t caller = process__current_id();
     display__lock();
     display__process_context_t *context = display__find_context_locked(caller);
-    if (!s_initialized) { display__unlock(); return BRUCE_ERR_NOT_INITIALIZED; }
-    if (context == NULL || !context->frame_active) { display__unlock(); return BRUCE_ERR_INVALID_STATE; }
+    if (!s_initialized) {
+        display__unlock();
+        return BRUCE_ERR_NOT_INITIALIZED;
+    }
+    if (context == NULL || !context->frame_active) {
+        display__unlock();
+        return BRUCE_ERR_INVALID_STATE;
+    }
     if (context->frame_noop) {
         display__finish_frame_locked(context);
         display__unlock();
@@ -542,7 +747,15 @@ bruce_result_t display__present(void) {
     }
     bool fullscreen = context->viewport.x == 0 && context->viewport.y == 0 &&
                       context->viewport.width == s_fb_width && context->viewport.height == s_fb_height;
-    bruce_result_t result = display__transfer_locked(context->viewport, fullscreen);
+    bruce_result_t result;
+    if (s_buffered_rendering) {
+        result = display__transfer_locked(context->viewport, fullscreen);
+    } else {
+        result = context->draw_result;
+        context->draw_result = BRUCE_OK;
+        bruce_result_t notification_result = display__draw_notification_direct_locked(context->viewport);
+        if (result == BRUCE_OK) result = notification_result;
+    }
     display__finish_frame_locked(context);
     display__unlock();
     return result;
@@ -569,7 +782,10 @@ bruce_result_t display__set_tiles(const bruce_display_tile_t *tiles, size_t coun
     }
     bruce_process_id_t caller = process__current_id();
     display__lock();
-    if (!s_initialized) { display__unlock(); return BRUCE_ERR_NOT_INITIALIZED; }
+    if (!s_initialized) {
+        display__unlock();
+        return BRUCE_ERR_NOT_INITIALIZED;
+    }
     display__process_context_t *owner = display__find_context_locked(caller);
     if (owner == NULL || owner->state != BRUCE_PROCESS_FOREGROUND) {
         display__unlock();
@@ -584,7 +800,8 @@ bruce_result_t display__set_tiles(const bruce_display_tile_t *tiles, size_t coun
             return BRUCE_ERR_INVALID_ARGUMENT;
         }
         targets[i] = display__find_context_locked(tiles[i].process_id);
-        if (targets[i] == NULL || !targets[i]->gui_requested || targets[i]->state != BRUCE_PROCESS_BACKGROUND) {
+        if (targets[i] == NULL || !targets[i]->gui_requested ||
+            targets[i]->state != BRUCE_PROCESS_BACKGROUND) {
             display__unlock();
             return BRUCE_ERR_NOT_FOUND;
         }
@@ -602,7 +819,10 @@ bruce_result_t display__set_tiles(const bruce_display_tile_t *tiles, size_t coun
         }
     }
     for (size_t i = 0; i < count; ++i) {
-        if (targets[i]->frame_active) { display__unlock(); return BRUCE_ERR_BUSY; }
+        if (targets[i]->frame_active) {
+            display__unlock();
+            return BRUCE_ERR_BUSY;
+        }
     }
     for (int i = 0; i < DISPLAY__MAX_CONTEXTS; ++i) {
         if (!s_contexts[i].in_use) continue;
@@ -614,12 +834,14 @@ bruce_result_t display__set_tiles(const bruce_display_tile_t *tiles, size_t coun
         targets[i]->viewport = tiles[i].rect;
         targets[i]->hidden = false;
         targets[i]->viewport_generation++;
-        for (int row = 0; row < tiles[i].rect.height; ++row) {
-            memset(
-                &s_framebuffer[(tiles[i].rect.y + row) * s_fb_width + tiles[i].rect.x],
-                0,
-                (size_t)tiles[i].rect.width * sizeof(*s_framebuffer)
-            );
+        if (s_framebuffer != NULL) {
+            for (int row = 0; row < tiles[i].rect.height; ++row) {
+                memset(
+                    &s_framebuffer[(tiles[i].rect.y + row) * s_fb_width + tiles[i].rect.x],
+                    0,
+                    (size_t)tiles[i].rect.width * sizeof(*s_framebuffer)
+                );
+            }
         }
     }
     s_dashboard_layout = count > 0;
@@ -661,11 +883,13 @@ void display__process_state_changed(bruce_process_id_t process_id, bruce_process
     display__lock();
     display__process_context_t *context = display__find_context_locked(process_id);
     if (context != NULL) {
-        if (context->gui_requested && state == BRUCE_PROCESS_FOREGROUND && context->state != BRUCE_PROCESS_FOREGROUND) {
+        if (context->gui_requested && state == BRUCE_PROCESS_FOREGROUND &&
+            context->state != BRUCE_PROCESS_FOREGROUND) {
             context->clear_on_next_frame = true;
         }
         context->state = state;
-        if (state != BRUCE_PROCESS_FOREGROUND && context->frame_active && !context->tiled) context->frame_noop = true;
+        if (state != BRUCE_PROCESS_FOREGROUND && context->frame_active && !context->tiled)
+            context->frame_noop = true;
         if (!context->frame_active) display__set_visibility_locked(context);
     }
     display__unlock();
@@ -691,6 +915,10 @@ bruce_result_t display__test_read_pixel(int16_t x, int16_t y, bruce_display_colo
         display__unlock();
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
+    if (!s_buffered_rendering) {
+        display__unlock();
+        return BRUCE_ERR_UNSUPPORTED;
+    }
     *out_color = s_framebuffer[y * s_fb_width + x];
     display__unlock();
     return BRUCE_OK;
@@ -704,7 +932,10 @@ bruce_result_t display__notification_push(const char *text, uint32_t duration_ms
     if (duration_ms > BRUCE_NOTIFICATION_DURATION_MAX_MS) duration_ms = BRUCE_NOTIFICATION_DURATION_MAX_MS;
     display__ensure_lock();
     display__lock();
-    if (!s_initialized) { display__unlock(); return BRUCE_ERR_NOT_INITIALIZED; }
+    if (!s_initialized) {
+        display__unlock();
+        return BRUCE_ERR_NOT_INITIALIZED;
+    }
     bruce_display_rect_t old_rect = s_notification.active ? s_notification.rect : (bruce_display_rect_t){0};
     strncpy(s_notification.text, text, sizeof(s_notification.text) - 1);
     s_notification.text[sizeof(s_notification.text) - 1] = '\0';
@@ -715,7 +946,10 @@ bruce_result_t display__notification_push(const char *text, uint32_t duration_ms
     s_notification.generation++;
     bruce_result_t result = BRUCE_OK;
     bruce_display_rect_t repaint = display__rect_union(old_rect, s_notification.rect);
-    if (!display__overlay_conflicts_locked(repaint)) result = display__transfer_locked(repaint, false);
+    if (!display__overlay_conflicts_locked(repaint)) {
+        result = s_buffered_rendering ? display__transfer_locked(repaint, false)
+                                      : display__draw_notification_direct_locked(repaint);
+    }
     display__unlock();
     return result;
 }
@@ -723,13 +957,21 @@ bruce_result_t display__notification_push(const char *text, uint32_t duration_ms
 bruce_result_t display__notification_dismiss(void) {
     display__ensure_lock();
     display__lock();
-    if (!s_initialized) { display__unlock(); return BRUCE_ERR_NOT_INITIALIZED; }
-    if (!s_notification.active) { display__unlock(); return BRUCE_OK; }
+    if (!s_initialized) {
+        display__unlock();
+        return BRUCE_ERR_NOT_INITIALIZED;
+    }
+    if (!s_notification.active) {
+        display__unlock();
+        return BRUCE_OK;
+    }
     bruce_display_rect_t repaint = s_notification.rect;
     s_notification.active = false;
     s_notification.generation++;
     bruce_result_t result = BRUCE_OK;
-    if (!display__overlay_conflicts_locked(repaint)) result = display__transfer_locked(repaint, false);
+    if (s_buffered_rendering && !display__overlay_conflicts_locked(repaint)) {
+        result = display__transfer_locked(repaint, false);
+    }
     display__unlock();
     return result;
 }

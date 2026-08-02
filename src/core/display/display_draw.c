@@ -8,6 +8,16 @@
 static void display__draw_line_bresenham(
     int16_t x0, int16_t y0, int16_t x1, int16_t y1, bruce_display_color_t color
 ) {
+    if (y0 == y1) {
+        if (x0 > x1) { int16_t swap = x0; x0 = x1; x1 = swap; }
+        display_internal__fill_rect(x0, y0, x1 - x0 + 1, 1, color);
+        return;
+    }
+    if (x0 == x1) {
+        if (y0 > y1) { int16_t swap = y0; y0 = y1; y1 = swap; }
+        display_internal__fill_rect(x0, y0, 1, y1 - y0 + 1, color);
+        return;
+    }
     int16_t dx = abs(x1 - x0);
     int16_t dy = abs(y1 - y0);
     int16_t sx = (x0 < x1) ? 1 : -1;
@@ -297,12 +307,15 @@ bruce_result_t display__draw_bitmap(
     if (result != BRUCE_OK) { return result; }
     int16_t byte_width = (w + 7) / 8;
     for (int16_t row = 0; row < h; ++row) {
-        for (int16_t col = 0; col < w; ++col) {
-            uint8_t byte = bitmap[row * byte_width + col / 8];
-            if (byte & (0x80 >> (col & 7))) display_internal__set_pixel(x + col, y + row, color);
-            else if (!context->text_bg_transparent) {
-                display_internal__set_pixel(x + col, y + row, context->text_bg_color);
-            }
+        if (!context->text_bg_transparent) {
+            display_internal__fill_rect(x, y + row, w, 1, context->text_bg_color);
+        }
+        int16_t col = 0;
+        while (col < w) {
+            while (col < w && !(bitmap[row * byte_width + col / 8] & (0x80 >> (col & 7)))) ++col;
+            int16_t start = col;
+            while (col < w && (bitmap[row * byte_width + col / 8] & (0x80 >> (col & 7)))) ++col;
+            if (col > start) display_internal__fill_rect(x + start, y + row, col - start, 1, color);
         }
     }
     display_internal__unlock();
@@ -317,9 +330,12 @@ bruce_result_t display__draw_xbitmap(
     if (result != BRUCE_OK) { return result; }
     int16_t byte_width = (w + 7) / 8;
     for (int16_t row = 0; row < h; ++row) {
-        for (int16_t col = 0; col < w; ++col) {
-            uint8_t byte = bitmap[row * byte_width + col / 8];
-            if (byte & (1 << (col & 7))) display_internal__set_pixel(x + col, y + row, color);
+        int16_t col = 0;
+        while (col < w) {
+            while (col < w && !(bitmap[row * byte_width + col / 8] & (1 << (col & 7)))) ++col;
+            int16_t start = col;
+            while (col < w && (bitmap[row * byte_width + col / 8] & (1 << (col & 7)))) ++col;
+            if (col > start) display_internal__fill_rect(x + start, y + row, col - start, 1, color);
         }
     }
     display_internal__unlock();
@@ -336,11 +352,20 @@ bruce_result_t display__draw_bitmap_scaled(
     int16_t byte_width = (w + 7) / 8;
     for (int16_t row = 0; row < dh; ++row) {
         const uint8_t *src_row = bitmap + (int32_t)row * h / dh * byte_width;
-        for (int16_t col = 0; col < dw; ++col) {
-            int16_t src_col = (int16_t)((int32_t)col * w / dw);
-            if (src_row[src_col / 8] & (0x80 >> (src_col & 7))) {
-                display_internal__set_pixel(x + col, y + row, color);
+        int16_t col = 0;
+        while (col < dw) {
+            while (col < dw) {
+                int16_t src_col = (int16_t)((int32_t)col * w / dw);
+                if (src_row[src_col / 8] & (0x80 >> (src_col & 7))) break;
+                ++col;
             }
+            int16_t start = col;
+            while (col < dw) {
+                int16_t src_col = (int16_t)((int32_t)col * w / dw);
+                if (!(src_row[src_col / 8] & (0x80 >> (src_col & 7)))) break;
+                ++col;
+            }
+            if (col > start) display_internal__fill_rect(x + start, y + row, col - start, 1, color);
         }
     }
     display_internal__unlock();
@@ -348,14 +373,10 @@ bruce_result_t display__draw_bitmap_scaled(
 }
 
 bruce_result_t display__draw_rgb_bitmap(int16_t x, int16_t y, const uint16_t *bitmap, int16_t w, int16_t h) {
-    if (bitmap == NULL) { return BRUCE_ERR_INVALID_ARGUMENT; }
+    if (bitmap == NULL || w <= 0 || h <= 0) { return BRUCE_ERR_INVALID_ARGUMENT; }
     bruce_result_t result = display_internal__begin_draw(NULL);
     if (result != BRUCE_OK) { return result; }
-    for (int16_t row = 0; row < h; ++row) {
-        for (int16_t col = 0; col < w; ++col) {
-            display_internal__set_pixel(x + col, y + row, bitmap[row * w + col]);
-        }
-    }
+    display_internal__draw_rgb_bitmap(x, y, bitmap, w, h);
     display_internal__unlock();
     return BRUCE_OK;
 }

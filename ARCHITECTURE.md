@@ -697,15 +697,22 @@ own `SPI2_HOST` and is never attached through this API. Core hardware drivers
 use trusted private GPIO/bus entry points so their capability-specific
 permission remains authoritative.
 
-Display Core owns one RGB565 framebuffer and transfers run synchronously in
-the caller's task: `display__present()` pushes the viewport rect to the panel before returning,
+Display Core supports buffered and direct rendering, selected at boot by
+`displayBufferedRendering` in `bruce.json` (default true). Buffered mode owns
+one RGB565 framebuffer. Direct mode allocates no retained framebuffer and
+streams clipped primitives through a quarter-screen DMA staging buffer to the
+ST7789 as they are drawn. The 16,320-byte staging buffer reduces persistent
+display pixel memory by 48,480 bytes. Transfers run synchronously in
+the caller's task: in buffered mode `display__present()` pushes the viewport rect to the panel before returning,
 serialized by the display lock, so transfers never race with drawing or with
 each other. GUI processes draw in local coordinates into a fullscreen
 foreground viewport, one of up to four launcher-assigned non-overlapping
 tiles, or a hidden zero-sized viewport. `display__begin_frame()` leases the
 viewport through the completion of `display__present()`; tile rows are packed
-into a shared DMA scratch row buffer. A full-screen `display__present()` with
-the default configuration streams the framebuffer directly over DMA
+into a shared DMA scratch row buffer. In direct mode drawing is progressively
+visible, `display__present()` completes the viewport lease, and framebuffer
+snapshots and pixel readback return `BRUCE_ERR_UNSUPPORTED`. A full-screen
+buffered `display__present()` with the default configuration streams the framebuffer directly over DMA
 (`displayDmaFramebuffer` in `bruce.json`, default true); any partial rect,
 overlay composition, or a `false` setting falls back to row-packed transfers.
 Text and cursor state are process-local, rotation is global, and no resize event is
@@ -729,8 +736,8 @@ Image Core decodes JPEG, PNG, and the first frame of GIF data from memory or a
 Core storage path into the caller's viewport. `image__draw_memory()` and
 `image__draw_path()` optionally fit without upscaling, preserve aspect ratio,
 center relative to caller coordinates, and composite transparency over a
-caller-selected RGB565 background. They update the framebuffer but leave frame
-presentation to the caller. The image loader registers `.jpg`, `.jpeg`, `.png`,
+caller-selected RGB565 background. They update the active render target but
+leave frame presentation to the caller. The image loader registers `.jpg`, `.jpeg`, `.png`,
 and `.gif` case-insensitively; its viewer fits, centers, presents, and remains
 open until input. File manager image viewing and terminal/serial direct paths
 use this same loader. GIF animation is not part of this initial contract.
@@ -743,6 +750,10 @@ application framebuffer pixels. Push and dismiss repaint the overlay rect
 immediately unless a frame is mid-flight over it, in which case the overlay
 appears on that app's next `display__present()`; expiry is lazy and the
 overlay disappears on the next transfer that overlaps its rect.
+In direct mode the notification is painted immediately and again when an
+overlapping frame is presented. Dismissal cannot restore panel pixels without
+a retained framebuffer, so the underlying application removes it on its next
+redraw.
 
 The unrestricted status-icon service is a separate runtime-only global keyed
 registry. Any process may replace or remove any key, including one created by a
@@ -833,7 +844,12 @@ order of the remaining entries. The built-in command exposes these operations as
 `config startup add <name>` and `config startup remove <name>`; command lines
 containing spaces must be passed as one quoted argument. `hotkeys` is a bounded
 key-to-action object.
-`displayDmaFramebuffer` defaults to true and is applied at boot. When false,
+`displayBufferedRendering` defaults to true and is applied at boot. When false,
+Core does not allocate the full framebuffer; drawing is direct, screenshots are
+unavailable, and `config display buffered on|off` changes the setting for the
+next boot. The GUI configuration screen exposes the same toggle with its RAM
+and behavior tradeoff. `displayDmaFramebuffer` only affects buffered mode and
+defaults to true. When false,
 the full compositing framebuffer is ordinary internal memory and display
 updates are copied through a small DMA-capable row buffer instead of issuing a
 full-frame DMA transfer.
