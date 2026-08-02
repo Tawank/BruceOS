@@ -89,14 +89,15 @@ static int process_app__signal(const char *signal_name, const char *target) {
 
 /* Collect background GUI processes eligible for a compositor tile. */
 static size_t process_app__preview_candidates(bruce_process_snapshot_t *processes, size_t capacity) {
-    bruce_process_snapshot_t all[PROCESS_APP__MAX_PROCESSES];
     size_t count = 0;
     size_t written = 0;
     bruce_process_id_t self = process__current_id();
-    if (process__list(all, PROCESS_APP__MAX_PROCESSES, &count) != BRUCE_OK) { return 0; }
-    for (size_t i = 0; i < count && written < capacity; ++i) {
-        if (all[i].id != self && all[i].gui_requested && all[i].state == BRUCE_PROCESS_BACKGROUND) {
-            processes[written++] = all[i];
+    if (process__list(processes, capacity, &count) != BRUCE_OK) { return 0; }
+    for (size_t i = 0; i < count; ++i) {
+        if (processes[i].id != self && processes[i].gui_requested &&
+            processes[i].state == BRUCE_PROCESS_BACKGROUND) {
+            if (written != i) processes[written] = processes[i];
+            written++;
         }
     }
     return written;

@@ -308,14 +308,15 @@ static bruce_result_t bruce_launcher__animate_root_menu(
 }
 
 static size_t bruce_launcher__process_candidates(bruce_process_snapshot_t *processes, size_t capacity) {
-    bruce_process_snapshot_t all[16];
     size_t count = 0;
     size_t written = 0;
     bruce_process_id_t self = process__current_id();
-    if (process__list(all, sizeof(all) / sizeof(all[0]), &count) != BRUCE_OK) { return 0; }
-    for (size_t i = 0; i < count && written < capacity; ++i) {
-        if (all[i].id != self && all[i].gui_requested && all[i].state == BRUCE_PROCESS_BACKGROUND) {
-            processes[written++] = all[i];
+    if (process__list(processes, capacity, &count) != BRUCE_OK) { return 0; }
+    for (size_t i = 0; i < count; ++i) {
+        if (processes[i].id != self && processes[i].gui_requested &&
+            processes[i].state == BRUCE_PROCESS_BACKGROUND) {
+            if (written != i) processes[written] = processes[i];
+            written++;
         }
     }
     return written;
@@ -509,9 +510,7 @@ static int bruce_launcher__run_gui_menu(bruce_launcher_menu_t *menu) {
 
         (void)input__flush();
         for (;;) {
-            bruce_process_snapshot_t self;
-            if (process__snapshot(process__current_id(), &self) != BRUCE_OK ||
-                self.state != BRUCE_PROCESS_FOREGROUND) {
+            if (display__width() <= 0 || display__height() <= 0) {
                 (void)runtime__delay(20);
                 continue;
             }
@@ -538,6 +537,10 @@ static int bruce_launcher__run_gui_menu(bruce_launcher_menu_t *menu) {
                 menu->title, NULL, choices, (size_t)menu->entry_count, &selected, &render_params
             );
             if (result == BRUCE_ERR_CANCELLED) break;
+            if (result == BRUCE_ERR_NOT_FOREGROUND) {
+                (void)runtime__delay(20);
+                continue;
+            }
             if (result != BRUCE_OK) continue;
 
             const bruce_launcher_entry_t *entry = &menu->entries[selected];
@@ -557,15 +560,24 @@ static int bruce_launcher__run_gui_menu(bruce_launcher_menu_t *menu) {
 
     int selected = 0;
     int last_drawn = -1;
+    int last_width = -1;
+    int last_height = -1;
     uint32_t icon_revision = UINT32_MAX;
     uint64_t status_drawn_at = 0;
     for (;;) {
-        bruce_process_snapshot_t self;
-        if (process__snapshot(process__current_id(), &self) != BRUCE_OK ||
-            self.state != BRUCE_PROCESS_FOREGROUND) {
+        int width = display__width();
+        int height = display__height();
+        if (width <= 0 || height <= 0) {
             last_drawn = -1;
+            last_width = width;
+            last_height = height;
             (void)runtime__delay(20);
             continue;
+        }
+        if (width != last_width || height != last_height) {
+            last_drawn = -1;
+            last_width = width;
+            last_height = height;
         }
 
         if (selected != last_drawn) {
@@ -600,6 +612,10 @@ static int bruce_launcher__run_gui_menu(bruce_launcher_menu_t *menu) {
 
         bruce_input_event_t ev;
         bruce_result_t result = input__read(&ev, 100);
+        if (result == BRUCE_ERR_NOT_FOREGROUND) {
+            (void)runtime__delay(20);
+            continue;
+        }
         if (result != BRUCE_OK || ev.action != BRUCE_INPUT_PRESS) { continue; }
 
         switch (ev.code) {
