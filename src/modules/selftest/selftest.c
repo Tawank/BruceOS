@@ -23,6 +23,7 @@
 #include "ir_test.h"
 #include "launcher_test.h"
 #include "loader_test.h"
+#include "memory_test.h"
 #include "notification_test.h"
 #include "nrf24_test.h"
 #include "permission_test.h"
@@ -56,6 +57,7 @@ int selftest_app_main(int argc, char **argv) {
     RUN_SELFTEST(selftest__run_process_status_case);
     RUN_SELFTEST(selftest__run_process_killed_case);
     RUN_SELFTEST(selftest__run_runtime_now_case);
+    RUN_SELFTEST(selftest__run_external_memory_case);
     RUN_SELFTEST(selftest__run_process_app_switch_case);
     RUN_SELFTEST(selftest__run_process_app_kill_case);
     RUN_SELFTEST(selftest__run_device_state_case);

@@ -7,6 +7,7 @@
 #include "esp_heap_caps.h"
 
 #include "core/process/process.h"
+#include "core/memory/memory.h"
 #include "core_sdk/process.h"
 
 #define MEMORY__MAGIC 0x42524d31u /* "BRM1" */
@@ -91,5 +92,8 @@ bruce_result_t memory__get_stats(bruce_memory_stats_t *out_stats) {
         .psram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
         .psram_largest_block = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM),
     };
+    memory_external__get_swap_stats(
+        &out_stats->swap_total, &out_stats->swap_free, &out_stats->swap_largest_block
+    );
     return BRUCE_OK;
 }

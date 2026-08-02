@@ -60,6 +60,7 @@ typedef struct {
      * Exactly one of `entry` or `process_entry` must be non-NULL. */
     void (*process_entry)(void *context);
     void *process_entry_context;
+    void (*process_entry_cleanup)(void *context);
 } process_create_params_t;
 
 /* Creates and starts a new Core-tracked process.  Exactly one of
@@ -87,9 +88,23 @@ void *process_registry__resource_realloc(bruce_resource_id_t resource_id, void *
  * BRUCE_ERR_NOT_FOUND if it does not. */
 bruce_result_t process_registry__resource_release(bruce_resource_id_t resource_id);
 
+/* Atomically moves one resource and its memory accounting from another live
+ * process to the calling process. Used when a loader prepares an image before
+ * its child process exists. */
+bruce_result_t process_registry__resource_transfer(
+    bruce_process_id_t owner_id, bruce_resource_id_t resource_id, size_t memory_bytes,
+    bruce_resource_id_t *out_resource_id
+);
+
 /* Adds (positive) or removes (negative) bytes from the calling process's
  * tracked-memory statistic.  A no-op if there is no current Core process. */
 void process_registry__account_memory(int64_t delta_bytes);
+
+/* Prevents force-kill from deleting the calling task while it owns a Core
+ * service lock. begin returns false once process shutdown has started. Calls
+ * outside a managed process are accepted and end is then a no-op. */
+bool process_registry__operation_begin(void);
+void process_registry__operation_end(void);
 
 /* Fills in permission-relevant context for the *calling* process: whether it is
  * built_in, its permission_key (copied, NUL-terminated, truncated to fit;

@@ -15,6 +15,7 @@
 #include <stdint.h>
 
 #include "core_sdk/result.h"
+#include "core_sdk/memory.h"
 
 /* Matches app_runner__run_path()'s signature. */
 typedef int (*bruce_loader_run_fn)(const char *path, const char *arg, bool in_background);
@@ -23,18 +24,34 @@ typedef int (*bruce_loader_run_fn)(const char *path, const char *arg, bool in_ba
  * `context` is the loader's own opaque pointer (e.g. a struct holding the
  * decoded image or script source and its own argc/argv). */
 typedef void (*bruce_loader_process_entry_fn)(void *context);
+typedef void (*bruce_loader_process_cleanup_fn)(void *context);
 
 typedef struct {
     const uint8_t *data;
     size_t size;
-    uint32_t handle;
+    bruce_memory_object_t memory;
 } bruce_loader_image_t;
 
-/* Streams a file into the dedicated loader staging partition, verifies it,
- * and returns a temporary read-only flash mapping. Only one staged image may
- * be active at a time. The caller must release successful mappings promptly. */
+typedef struct {
+    const uint8_t *instruction;
+    const uint8_t *data;
+    size_t size;
+    bruce_memory_object_t memory;
+} bruce_loader_xip_image_t;
+
+/* Streams a file into process-owned external memory, verifies it, and returns
+ * a read-only mapping. The caller must release successful mappings promptly. */
 bruce_result_t loader__stage_path(const char *path, bruce_loader_image_t *out_image);
 bruce_result_t loader__release_image(bruce_loader_image_t *image);
+
+/* Allocates executable MMU-page-exclusive space in memory_swap. The mapping
+ * remains valid until release; writes are bounds checked and cache coherent. */
+bruce_result_t loader__allocate_xip(size_t size, bruce_loader_xip_image_t *out_image);
+bruce_result_t loader__write_xip(
+    const bruce_loader_xip_image_t *image, size_t offset, const void *data, size_t size
+);
+bruce_result_t loader__adopt_xip(bruce_loader_xip_image_t *image);
+bruce_result_t loader__release_xip(bruce_loader_xip_image_t *image);
 
 /* Registers a loader for `extension` (must start with '.', e.g. ".elf").
  * `priority` breaks ties when app_runner__run()'s named resolution finds
@@ -65,4 +82,11 @@ int app_runner__run_path(const char *path, const char *arg, bool in_background);
 int app_runner__spawn_loader_process(
     const char *permission_key, bool gui_requested, bool in_background, uint32_t stack_size,
     bruce_loader_process_entry_fn entry, void *context
+);
+
+/* Variant that transfers ownership of context to Core. cleanup runs exactly
+ * once after normal return, force-kill, or cancellation before entry starts. */
+int app_runner__spawn_loader_process_owned(
+    const char *permission_key, bool gui_requested, bool in_background, uint32_t stack_size,
+    bruce_loader_process_entry_fn entry, void *context, bruce_loader_process_cleanup_fn cleanup
 );

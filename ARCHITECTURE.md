@@ -225,6 +225,12 @@ primitives:
 int app_runner__spawn_loader_process(const char *permission_key, bool gui_requested,
                                    bool in_background, uint32_t stack_size,
                                    bruce_loader_process_entry_fn entry, void *ctx);
+
+int app_runner__spawn_loader_process_owned(const char *permission_key,
+                                   bool gui_requested, bool in_background,
+                                   uint32_t stack_size,
+                                   bruce_loader_process_entry_fn entry, void *ctx,
+                                   bruce_loader_process_cleanup_fn cleanup);
 ```
 
 ```c
@@ -249,6 +255,9 @@ registry, and permission checks (`permission_key`, e.g. `"game.elf"`) as any
 other process.  Its `entry` is the loader's own `elf_loader__app_main`,
 `js__app_main`, or equivalent for future formats, so every loader process entry
 follows the same naming convention as a regular `app_main`.
+The owned variant additionally runs `cleanup(ctx)` exactly once after normal
+return, force-kill, or cancellation before entry, and is used for loader state
+that must survive until process teardown.
 
 `manifest__inspect_path()` is the universal manifest JSON extractor provided
 by `core/manifest`.  It auto-detects file format (ELF magic, JS comment
@@ -383,15 +392,16 @@ permissions. Invalid ELF headers and mismatching chip architectures remain
 launch errors.
 
 The ELF loader module's process entry is `elf_loader__app_main(void *context)`.
-It is started by `app_runner__spawn_loader_process()` when an ELF app is launched.
+It is started by `app_runner__spawn_loader_process_owned()` when an ELF app is launched.
 Like any other program entry, it receives the app path, arguments, permissions,
 and GUI context through the spawn parameters and its opaque context struct.
-Before relocation, Core streams the source file through a 512 KiB `elf_stage`
-partition, verifies the staged bytes, and exposes a temporary read-only flash
-mapping. Relocation consumes that mapping directly, then releases it before the
-ELF process starts, so the complete source file is never retained in RAM. Only
-one image can be staged or relocated at a time; this does not prevent already
-relocated ELF processes from running concurrently.
+Before relocation, Core streams the source file into a temporary external-memory
+object, preferring PSRAM and otherwise using the 512 KiB `memory_swap` partition,
+verifies the staged bytes, and exposes a read-only mapping. The loader relocates `.text` in a temporary RAM work buffer
+against its final flash address, then writes `.text` and plain `.rodata` to a
+process-lifetime executable allocation in `memory_swap`. Writable sections remain in RAM.
+Allocations own complete 64 KiB MMU pages, allowing multiple ELF processes to
+execute concurrently and their space to be reused after exit.
 
 The manifest is canonical UTF-8 JSON with fixed field order and no
 insignificant whitespace.  Permission array order is author-controlled, but
@@ -633,14 +643,28 @@ tracked resource.
 
 ELF apps never receive libc `malloc` or `free`.  They use
 `memory__malloc()`/`memory__calloc()`/`memory__realloc()`/`memory__free()`.
-Core allocates ELF images, BSS, loader bookkeeping, and JS VM/context memory
-through this same process-owned allocator.
+Writable ELF sections, loader bookkeeping, and JS VM/context memory remain
+process-owned RAM allocations.
+
+Large read-mostly payloads use `memory__external_alloc()`. It prefers PSRAM and
+falls back to complete 64 KiB pages in `memory_swap`; it never places payload
+bytes in internal RAM. External objects are opaque handles rather than writable
+pointers. `memory__external_write()` supports PSRAM writes and flash-sector
+rewrites, `memory__external_map()` exposes a read-only pointer valid until
+release, and `memory__external_free()` releases the object without zeroing its
+contents. Core records every object in the owning process resource registry.
+Boot starts with an empty in-RAM swap allocation table, and free only unmaps and
+marks pages reusable. Stale flash is erased lazily when those pages are next
+allocated, as required by flash write semantics.
 
 Every process has one universal resource registry in thread-local storage.  Core
 services register opaque handles and Core-owned cleanup callbacks for memory,
 files, sockets, viewers, radios, and similar resources.  Apps cannot register
 arbitrary callbacks.  At normal exit or kill, Core reads the registry before
 the process disappears and cleans resources in reverse acquisition order.
+External-memory operations use a process guard, so force-kill closes new
+operations and waits for any operation holding the external-memory lock to
+leave its guarded section before deleting the task.
 
 ## Bluetooth
 
@@ -871,12 +895,13 @@ values are permanently protected from ELF and JS, even with `config`:
 
 Core registers internal LittleFS at runtime over all sector-aligned flash after
 the final static partition. The factory partition is 2.5 MiB and the following
-512 KiB `elf_stage` partition ends at the former 3 MiB factory boundary, so the
-LittleFS start address remains unchanged. The flashed partition table therefore remains
+512 KiB `memory_swap` partition ends at the former 3 MiB factory boundary, so the
+LittleFS start address remains unchanged. It provides general external-memory
+fallback, source staging, and process-lifetime flash-backed ELF code. The flashed partition table remains
 usable on 4, 8, 16, and 32 MiB devices while LittleFS consumes the available
-remainder reported by the flash driver. Existing filesystems at the same start
-address grow on mount; Core formats only when the LittleFS metadata area is
-erased, so a failed migration mount does not silently erase nonblank data.
+remainder reported by the flash driver. Core formats only when the LittleFS
+metadata area is erased, so a failed migration mount does not silently erase
+nonblank data.
 
 `ir` grants access to synchronous ESP-IDF RMT infrared capture and transmit
 through `ir__receive()`, `ir__transmit()`, and `ir__transmit_raw()`. Captures

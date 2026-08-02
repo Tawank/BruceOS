@@ -27,6 +27,7 @@
 #define PROCESS__EVT_EXITED (1u << 1)
 #define PROCESS__EVT_EVENT_WAKE (1u << 2)
 #define PROCESS__EVT_WAITER_WAKE (1u << 3)
+#define PROCESS__EVT_OPERATION_IDLE (1u << 4)
 
 typedef struct {
     bruce_resource_id_t id;
@@ -56,6 +57,7 @@ typedef struct {
 
     void (*process_entry)(void *context);
     void *process_entry_context;
+    void (*process_entry_cleanup)(void *context);
     volatile bool stop_requested;
     bruce_process_signal_t pending_signal;
     volatile bool pause_requested;
@@ -69,6 +71,7 @@ typedef struct {
     bruce_resource_id_t next_resource_id;
     size_t resource_count;
     size_t memory_bytes;
+    size_t operation_count;
 
     uint32_t last_runtime_counter;
     uint32_t cpu_percent;
@@ -354,6 +357,10 @@ static void process__teardown_locked(process__record_t *record, const bruce_proc
     }
     record->resource_count = 0;
     record->memory_bytes = 0;
+    if (record->process_entry_cleanup != NULL) {
+        record->process_entry_cleanup(record->process_entry_context);
+        record->process_entry_context = NULL;
+    }
 
     process__foreground_remove_locked(record->id);
     display__process_removed(record->id);
@@ -483,6 +490,7 @@ bruce_result_t process_registry__create(const process_create_params_t *params, b
     record->entry = params->entry;
     record->process_entry = params->process_entry;
     record->process_entry_context = params->process_entry_context;
+    record->process_entry_cleanup = params->process_entry_cleanup;
     record->argc = params->argc > 0 ? params->argc : 0;
     record->argv = argv_copy;
     record->next_resource_id = 1;
@@ -603,6 +611,53 @@ bruce_result_t process_registry__resource_release(bruce_resource_id_t resource_i
     return BRUCE_ERR_NOT_FOUND;
 }
 
+bruce_result_t process_registry__resource_transfer(
+    bruce_process_id_t owner_id, bruce_resource_id_t resource_id, size_t memory_bytes,
+    bruce_resource_id_t *out_resource_id
+) {
+    if (owner_id == BRUCE_PROCESS_ID_INVALID || resource_id == BRUCE_RESOURCE_ID_INVALID ||
+        out_resource_id == NULL) {
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    process__ensure_init();
+    process__lock();
+    process__record_t *owner = process__find_by_id_locked(owner_id);
+    process__record_t *self = process__find_by_handle_locked(xTaskGetCurrentTaskHandle());
+    if (owner == NULL || self == NULL || owner == self) {
+        process__unlock();
+        return BRUCE_ERR_NOT_FOUND;
+    }
+
+    int source_slot = -1;
+    int destination_slot = -1;
+    for (int i = 0; i < PROCESS__MAX_RESOURCES; ++i) {
+        if (owner->resources[i].active && owner->resources[i].id == resource_id) source_slot = i;
+        if (destination_slot < 0 && !self->resources[i].active) destination_slot = i;
+    }
+    if (source_slot < 0) {
+        process__unlock();
+        return BRUCE_ERR_NOT_FOUND;
+    }
+    if (destination_slot < 0) {
+        process__unlock();
+        return BRUCE_ERR_RESOURCE_LIMIT;
+    }
+
+    bruce_resource_id_t new_id = self->next_resource_id++;
+    if (self->next_resource_id == BRUCE_RESOURCE_ID_INVALID) self->next_resource_id = 1;
+    self->resources[destination_slot] = owner->resources[source_slot];
+    self->resources[destination_slot].id = new_id;
+    memset(&owner->resources[source_slot], 0, sizeof(owner->resources[source_slot]));
+    owner->resource_count--;
+    self->resource_count++;
+    if (memory_bytes <= owner->memory_bytes) owner->memory_bytes -= memory_bytes;
+    else owner->memory_bytes = 0;
+    self->memory_bytes += memory_bytes;
+    *out_resource_id = new_id;
+    process__unlock();
+    return BRUCE_OK;
+}
+
 void process_registry__account_memory(int64_t delta_bytes) {
     process__ensure_init();
     process__lock();
@@ -613,6 +668,39 @@ void process_registry__account_memory(int64_t delta_bytes) {
         } else {
             self->memory_bytes = 0;
         }
+    }
+    process__unlock();
+}
+
+bool process_registry__operation_begin(void) {
+    process__ensure_init();
+    process__lock();
+    process__record_t *self = process__find_by_handle_locked(xTaskGetCurrentTaskHandle());
+    if (self == NULL) {
+        process__unlock();
+        return true;
+    }
+    if (self->stop_requested || self->state == BRUCE_PROCESS_STOPPING) {
+        process__unlock();
+        return false;
+    }
+    if (self->operation_count++ == 0) {
+        xEventGroupClearBits(
+            s_process_events[process__slot_index_locked(self)], PROCESS__EVT_OPERATION_IDLE
+        );
+    }
+    process__unlock();
+    return true;
+}
+
+void process_registry__operation_end(void) {
+    process__ensure_init();
+    process__lock();
+    process__record_t *self = process__find_by_handle_locked(xTaskGetCurrentTaskHandle());
+    if (self != NULL && self->operation_count > 0 && --self->operation_count == 0) {
+        xEventGroupSetBits(
+            s_process_events[process__slot_index_locked(self)], PROCESS__EVT_OPERATION_IDLE
+        );
     }
     process__unlock();
 }
@@ -1009,6 +1097,21 @@ bruce_result_t process__kill(bruce_process_id_t process_id) {
     xEventGroupSetBits(s_process_events[process__slot_index_locked(record)], PROCESS__EVT_EVENT_WAKE);
     display__process_state_changed(record->id, record->state);
     process__foreground_recompute_locked();
+
+    int slot = process__slot_index_locked(record);
+    if (record->operation_count > 0) {
+        process__unlock();
+        (void)xEventGroupWaitBits(
+            s_process_events[slot], PROCESS__EVT_OPERATION_IDLE, pdFALSE, pdTRUE, portMAX_DELAY
+        );
+        process__lock();
+        record = process__find_by_id_locked(process_id);
+        if (record == NULL) {
+            process__unlock();
+            return BRUCE_OK;
+        }
+        handle = record->handle;
+    }
 
     /* Arbitrary application-owned mutexes cannot be recovered after a force
      * delete, which remains the documented limitation of process__kill(). */

@@ -16,6 +16,7 @@
 #include "core_sdk/memory.h"
 #include "core_sdk/permission.h"
 #include "core_sdk/process.h"
+#include "core_sdk/runtime.h"
 #include "core_sdk/storage.h"
 
 static size_t s_call_count;
@@ -67,6 +68,7 @@ typedef struct {
     char **argv;
     esp_elf_t elf;
     bool elf_initialized;
+    bruce_loader_xip_image_t xip;
 } elf_loader_process_ctx_t;
 
 /* Public SDK symbol allowlist. ELF apps may only resolve these names; selected
@@ -89,12 +91,49 @@ static void elf_loader__free_process_ctx(elf_loader_process_ctx_t *ctx) {
     free(ctx);
 }
 
+static void elf_loader__cleanup_context(void *context) {
+    elf_loader__free_process_ctx((elf_loader_process_ctx_t *)context);
+}
+
 /* Process entry for an ELF already relocated by elf_loader__run_path(). */
 static void elf_loader__entry(void *context) {
     elf_loader_process_ctx_t *ctx = (elf_loader_process_ctx_t *)context;
-    (void)esp_elf_request(&ctx->elf, 0, ctx->argc, ctx->argv);
-    elf_loader__free_process_ctx(ctx);
+    if (loader__adopt_xip(&ctx->xip) == BRUCE_OK) {
+        (void)esp_elf_request(&ctx->elf, 0, ctx->argc, ctx->argv);
+    }
 }
+
+static int elf_loader__xip_allocate(
+    void *context, size_t size, const uint8_t **instruction, const uint8_t **data, uint32_t *handle
+) {
+    elf_loader_process_ctx_t *ctx = context;
+    bruce_result_t result = loader__allocate_xip(size, &ctx->xip);
+    if (result != BRUCE_OK) return result == BRUCE_ERR_NO_MEMORY ? -ENOMEM : -ENOSPC;
+    *instruction = ctx->xip.instruction;
+    *data = ctx->xip.data;
+    *handle = ctx->xip.memory.handle;
+    return 0;
+}
+
+static int elf_loader__xip_write(
+    void *context, uint32_t handle, size_t offset, const void *data, size_t size
+) {
+    elf_loader_process_ctx_t *ctx = context;
+    if (ctx->xip.memory.handle != handle) return -EINVAL;
+    bruce_result_t result = loader__write_xip(&ctx->xip, offset, data, size);
+    return result == BRUCE_OK ? 0 : (result == BRUCE_ERR_INVALID_ARGUMENT ? -EINVAL : -EIO);
+}
+
+static void elf_loader__xip_release(void *context, uint32_t handle) {
+    elf_loader_process_ctx_t *ctx = context;
+    if (ctx->xip.memory.handle == handle) (void)loader__release_xip(&ctx->xip);
+}
+
+static const esp_elf_xip_ops_t s_xip_ops = {
+    .allocate = elf_loader__xip_allocate,
+    .write = elf_loader__xip_write,
+    .release = elf_loader__xip_release,
+};
 
 /* Loader registry run function: called by app_runner__run_path() or by the
  * built-in "elf" command. */
@@ -177,7 +216,7 @@ int elf_loader__run_path(const char *path, const char *arg, bool in_background) 
     int relocate_result = esp_elf_init(&ctx->elf);
     if (relocate_result == 0) {
         ctx->elf_initialized = true;
-        relocate_result = esp_elf_relocate(&ctx->elf, image.data);
+        relocate_result = esp_elf_relocate_xip(&ctx->elf, image.data, image.size, &s_xip_ops, ctx);
     }
     bruce_result_t release_result = loader__release_image(&image);
     if (relocate_result != 0 || release_result != BRUCE_OK) {
@@ -190,14 +229,32 @@ int elf_loader__run_path(const char *path, const char *arg, bool in_background) 
         elf_loader__free_process_ctx(ctx);
         memory__free(inspection);
         return relocate_result != 0
-                   ? (relocate_result == -ENOMEM ? BRUCE_ERR_NO_MEMORY : BRUCE_ERR_INVALID_ARGUMENT)
+                   ? (relocate_result == -ENOMEM
+                          ? BRUCE_ERR_NO_MEMORY
+                          : (relocate_result == -ENOSPC ? BRUCE_ERR_RESOURCE_LIMIT
+                                                       : BRUCE_ERR_INVALID_ARGUMENT))
                    : release_result;
     }
 
-    int result = app_runner__spawn_loader_process(
-        permission_key, gui_requested, in_background, inspection->manifest.stack_size, elf_loader__entry, ctx
+    bruce_loader_xip_image_t parent_xip = ctx->xip;
+    int result = app_runner__spawn_loader_process_owned(
+        permission_key, gui_requested, in_background, inspection->manifest.stack_size,
+        elf_loader__entry, ctx, elf_loader__cleanup_context
     );
-    if (result <= 0) { elf_loader__free_process_ctx(ctx); }
+    if (result <= 0) {
+        elf_loader__free_process_ctx(ctx);
+    } else {
+        for (;;) {
+            bruce_process_snapshot_t snapshot;
+            bruce_result_t snapshot_result = process__snapshot(result, &snapshot);
+            if (snapshot_result != BRUCE_OK) {
+                (void)loader__release_xip(&parent_xip);
+                break;
+            }
+            if (snapshot.resource_count > 0) break;
+            if (runtime__delay(1) != BRUCE_OK) break;
+        }
+    }
     memory__free(inspection);
     return result;
 }

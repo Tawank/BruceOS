@@ -169,6 +169,15 @@ int app_runner__spawn_loader_process(
     const char *permission_key, bool gui_requested, bool in_background, uint32_t stack_size,
     bruce_loader_process_entry_fn entry, void *context
 ) {
+    return app_runner__spawn_loader_process_owned(
+        permission_key, gui_requested, in_background, stack_size, entry, context, NULL
+    );
+}
+
+int app_runner__spawn_loader_process_owned(
+    const char *permission_key, bool gui_requested, bool in_background, uint32_t stack_size,
+    bruce_loader_process_entry_fn entry, void *context, bruce_loader_process_cleanup_fn cleanup
+) {
     if (entry == NULL) { return BRUCE_ERR_INVALID_ARGUMENT; }
     process_create_params_t params = {
         .name = (permission_key != NULL && permission_key[0] != '\0') ? permission_key : "app",
@@ -182,6 +191,7 @@ int app_runner__spawn_loader_process(
         .stack_bytes = stack_size,
         .process_entry = entry,
         .process_entry_context = context,
+        .process_entry_cleanup = cleanup,
     };
     bruce_process_id_t process_id = BRUCE_PROCESS_ID_INVALID;
     bruce_result_t create_result = process_registry__create(&params, &process_id);

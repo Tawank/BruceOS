@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stddef.h>
+#include <stdint.h>
 
 #include "core_sdk/result.h"
 
@@ -11,7 +12,22 @@ typedef struct {
     size_t psram_total;
     size_t psram_free;
     size_t psram_largest_block;
+    size_t swap_total;
+    size_t swap_free;
+    size_t swap_largest_block;
 } bruce_memory_stats_t;
+
+typedef enum {
+    BRUCE_MEMORY_BACKEND_INVALID = 0,
+    BRUCE_MEMORY_BACKEND_PSRAM,
+    BRUCE_MEMORY_BACKEND_SWAP,
+} bruce_memory_backend_t;
+
+typedef struct {
+    uint32_t handle;
+    size_t size;
+    bruce_memory_backend_t backend;
+} bruce_memory_object_t;
 
 /*
  * Process-owned tracked heap allocator.
@@ -39,5 +55,29 @@ void *memory__realloc(void *ptr, size_t size);
  * memory__realloc(). NULL is a no-op. Passing any other pointer, or one
  * already freed, is undefined behaviour, matching libc free(). */
 void memory__free(void *ptr);
+
+/* Allocates a process-owned external-memory object. PSRAM is preferred when a
+ * sufficiently large block is available; otherwise complete 64 KiB pages are
+ * allocated from memory_swap. Internal RAM is never used for the payload.
+ * The returned object is released automatically when its process exits. */
+bruce_result_t memory__external_alloc(size_t size, bruce_memory_object_t *out_object);
+
+/* Writes or replaces bytes through the object's backend without exposing a
+ * writable flash pointer. Swap updates that require changing a zero bit back
+ * to one rewrite the affected flash sectors. Callers must synchronize writes
+ * with readers of an already shared mapping. */
+bruce_result_t memory__external_write(
+    const bruce_memory_object_t *object, size_t offset, const void *data, size_t size
+);
+
+/* Returns a read-only mapping that remains valid until memory__external_free()
+ * or process teardown. */
+bruce_result_t memory__external_map(
+    const bruce_memory_object_t *object, const void **out_data
+);
+
+/* Releases an external object. NULL is invalid; a successful call clears the
+ * caller's object. Payload bytes are not zeroed. */
+bruce_result_t memory__external_free(bruce_memory_object_t *object);
 
 bruce_result_t memory__get_stats(bruce_memory_stats_t *out_stats);

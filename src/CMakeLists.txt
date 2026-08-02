@@ -16,6 +16,7 @@ set(BRUCE_SELFTEST_SOURCES
     "modules/selftest/ir_test.c"
     "modules/selftest/launcher_test.c"
     "modules/selftest/loader_test.c"
+    "modules/selftest/memory_test.c"
     "modules/selftest/notification_test.c"
     "modules/selftest/nrf24_test.c"
     "modules/selftest/permission_test.c"
@@ -50,6 +51,7 @@ idf_component_register(SRCS
                     "core/loader_image/loader_image.c"
                      "core/manifest/manifest.c"
                     "core/memory/memory.c"
+                    "core/memory/memory_external.c"
                     "core/network/network.c"
                     "core/notification/notification.c"
                     "core/nrf24/nrf24.c"
@@ -378,7 +380,7 @@ add_library(bruce_sdk_builtin_elf_loader_check OBJECT
 target_include_directories(bruce_sdk_builtin_elf_loader_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/loaders/elf"
-                           "${CMAKE_CURRENT_LIST_DIR}/../managed_components/espressif__elf_loader/include")
+                           "${CMAKE_CURRENT_LIST_DIR}/../components/elf_loader/include")
 # The ELF loader module legitimately uses the third-party espressif/elf_loader
 # component API; the core_sdk-only check is about rejecting Core-private headers,
 # not component dependencies.
