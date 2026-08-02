@@ -43,7 +43,7 @@ static size_t shell_console__read_escape(unsigned char *sequence, size_t capacit
         if (input < 0) break;
         unsigned char byte = (unsigned char)input;
         sequence[used++] = byte;
-        if (byte >= 0x40 && byte <= 0x7e) break;
+        if (used > 1 && byte >= 0x40 && byte <= 0x7e) break;
     }
     return used;
 }
