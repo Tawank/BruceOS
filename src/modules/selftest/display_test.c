@@ -60,6 +60,7 @@ bool selftest__run_display_compositor_case(void) {
 
 bool selftest__run_display_rendering_case(void) {
     static const uint8_t bitmap[] = {0x80};
+    static const uint8_t symmetric_bitmap[] = {0x90};
 
     if (display__begin_frame() != BRUCE_OK || display__fill_screen(BRUCE_COLOR_BLACK) != BRUCE_OK ||
         display__set_text_color(BRUCE_COLOR_WHITE) != BRUCE_OK ||
@@ -106,9 +107,14 @@ bool selftest__run_display_rendering_case(void) {
     }
 
     if (display__draw_bitmap_scaled(30, 1, bitmap, 8, 1, 16, 2, BRUCE_COLOR_CYAN) != BRUCE_OK ||
+        display__draw_bitmap_scaled(50, 1, symmetric_bitmap, 4, 1, 6, 1, BRUCE_COLOR_CYAN) != BRUCE_OK ||
         (buffered &&
          (display__test_read_pixel(30, 1, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_CYAN ||
-          display__test_read_pixel(32, 1, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_BLACK)) ||
+          display__test_read_pixel(32, 1, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_BLACK ||
+          display__test_read_pixel(50, 1, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_CYAN ||
+          display__test_read_pixel(51, 1, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_BLACK ||
+          display__test_read_pixel(54, 1, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_BLACK ||
+          display__test_read_pixel(55, 1, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_CYAN)) ||
         display__color565(255, 0, 0) != BRUCE_COLOR_RED || display__present() != BRUCE_OK) {
         printf("[selftest] display/rendering: FAIL, scaled bitmap, color conversion, or present\n");
         return false;

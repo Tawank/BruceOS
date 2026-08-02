@@ -342,6 +342,14 @@ bruce_result_t display__draw_xbitmap(
     return BRUCE_OK;
 }
 
+static int16_t display_internal__scaled_coordinate(int16_t position, int16_t source_size, int16_t dest_size) {
+    bool mirrored = position >= (dest_size + 1) / 2;
+    int16_t near_position = mirrored ? dest_size - 1 - position : position;
+    int16_t source_position =
+        (int16_t)(((int32_t)(2 * near_position + 1) * source_size) / (2 * dest_size));
+    return mirrored ? source_size - 1 - source_position : source_position;
+}
+
 bruce_result_t display__draw_bitmap_scaled(
     int16_t x, int16_t y, const uint8_t *bitmap, int16_t w, int16_t h, int16_t dw, int16_t dh,
     bruce_display_color_t color
@@ -351,17 +359,18 @@ bruce_result_t display__draw_bitmap_scaled(
     if (result != BRUCE_OK) { return result; }
     int16_t byte_width = (w + 7) / 8;
     for (int16_t row = 0; row < dh; ++row) {
-        const uint8_t *src_row = bitmap + (int32_t)row * h / dh * byte_width;
+        int16_t src_y = display_internal__scaled_coordinate(row, h, dh);
+        const uint8_t *src_row = bitmap + src_y * byte_width;
         int16_t col = 0;
         while (col < dw) {
             while (col < dw) {
-                int16_t src_col = (int16_t)((int32_t)col * w / dw);
+                int16_t src_col = display_internal__scaled_coordinate(col, w, dw);
                 if (src_row[src_col / 8] & (0x80 >> (src_col & 7))) break;
                 ++col;
             }
             int16_t start = col;
             while (col < dw) {
-                int16_t src_col = (int16_t)((int32_t)col * w / dw);
+                int16_t src_col = display_internal__scaled_coordinate(col, w, dw);
                 if (!(src_row[src_col / 8] & (0x80 >> (src_col & 7)))) break;
                 ++col;
             }

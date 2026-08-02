@@ -12,7 +12,6 @@
 #include "core_sdk/dialog.h"
 #include "core_sdk/display.h"
 #include "core_sdk/input.h"
-#include "core_sdk/loader.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
@@ -66,8 +65,7 @@ static bruce_result_t text__load_stdin(size_t size, text_editor_t *editor) {
 static bool text__has_supported_extension(const char *path) {
     const char *dot = path != NULL ? strrchr(path, '.') : NULL;
     return dot != NULL &&
-           (strcasecmp(dot, ".txt") == 0 || strcasecmp(dot, ".json") == 0 ||
-            strcasecmp(dot, ".conf") == 0);
+           (strcasecmp(dot, ".txt") == 0 || strcasecmp(dot, ".json") == 0 || strcasecmp(dot, ".conf") == 0);
 }
 
 static bruce_result_t text__reserve(text_editor_t *editor, size_t required) {
@@ -143,11 +141,7 @@ static bruce_result_t text__replace(
     bruce_result_t result = text__reserve(editor, new_length + 1u);
     if (result != BRUCE_OK) return result;
 
-    memmove(
-        editor->data + start + replacement_length,
-        editor->data + end,
-        editor->length - end + 1u
-    );
+    memmove(editor->data + start + replacement_length, editor->data + end, editor->length - end + 1u);
     if (replacement_length > 0) memcpy(editor->data + start, replacement, replacement_length);
     editor->length = new_length;
     editor->cursor = start + replacement_length;
@@ -295,7 +289,8 @@ static bruce_result_t text__edit_line(text_editor_t *editor) {
     memcpy(line, editor->data + start, length);
     line[length] = '\0';
 
-    bruce_result_t result = dialog__text_input("Text editor", "Edit current line", line, false, line, sizeof(line));
+    bruce_result_t result =
+        dialog__text_input("Text editor", "Edit current line", line, false, line, sizeof(line));
     if (result != BRUCE_OK) return result;
     return text__replace(editor, start, end, line, strlen(line));
 }
@@ -328,13 +323,18 @@ static bruce_result_t text__exit_prompt(char *path, size_t path_size, text_edito
         return BRUCE_OK;
     }
     const bruce_dialog_choice_t choices[] = {
-        {.label = "Save and exit", .value = "save"},
+        {.label = "Save and exit",   .value = "save"   },
         {.label = "Discard changes", .value = "discard"},
-        {.label = "Cancel", .value = "cancel"},
+        {.label = "Cancel",          .value = "cancel" },
     };
     size_t selected = 0;
     bruce_result_t result = dialog__choice(
-        "Unsaved changes", text__basename(path), choices, sizeof(choices) / sizeof(choices[0]), &selected, NULL
+        "Unsaved changes",
+        text__basename(path),
+        choices,
+        sizeof(choices) / sizeof(choices[0]),
+        &selected,
+        NULL
     );
     if (result == BRUCE_ERR_CANCELLED || selected == 2) return BRUCE_OK;
     if (result != BRUCE_OK) return result;
@@ -353,10 +353,10 @@ static bruce_result_t text__actions(char *path, size_t path_size, text_editor_t 
         return BRUCE_OK;
     }
     const bruce_dialog_choice_t choices[] = {
-        {.label = "Edit current line", .value = "edit"},
-        {.label = "Save", .value = "save"},
-        {.label = "Exit", .value = "exit"},
-        {.label = "Cancel", .value = "cancel"},
+        {.label = "Edit current line", .value = "edit"  },
+        {.label = "Save",              .value = "save"  },
+        {.label = "Exit",              .value = "exit"  },
+        {.label = "Cancel",            .value = "cancel"},
     };
     size_t selected = 0;
     *out_exit = false;
@@ -418,9 +418,8 @@ static bruce_result_t text__run_editor(char *path, size_t path_size, text_editor
                    (event.code == BRUCE_INPUT_CODE_SELECT || event.code == BRUCE_INPUT_CODE_BUTTON_A)) {
             result = text__edit_line(editor);
             if (result == BRUCE_ERR_CANCELLED) result = BRUCE_OK;
-        } else if (semantic &&
-                   (event.code == BRUCE_INPUT_CODE_MENU || event.code == BRUCE_INPUT_CODE_BACK ||
-                    event.code == BRUCE_INPUT_CODE_BUTTON_B)) {
+        } else if (semantic && (event.code == BRUCE_INPUT_CODE_MENU || event.code == BRUCE_INPUT_CODE_BACK ||
+                                event.code == BRUCE_INPUT_CODE_BUTTON_B)) {
             result = text__actions(path, path_size, editor, &exit_editor);
         } else if (!editor->read_only && !semantic && (event.code == '\b' || event.code == 0x7f)) {
             if (editor->cursor > 0) {
@@ -459,7 +458,8 @@ int text_app_main(int argc, char **argv) {
     }
     const char *path_arg = ap_get_arg(parser, "path");
     bool read_only = ap_found(parser, "r") || ap_found(parser, "read-only");
-    const char *stdin_size_arg = ap_found(parser, "stdin-size") ? ap_get_str_value(parser, "stdin-size") : NULL;
+    const char *stdin_size_arg =
+        ap_found(parser, "stdin-size") ? ap_get_str_value(parser, "stdin-size") : NULL;
     char *end = NULL;
     unsigned long parsed_stdin_size = stdin_size_arg != NULL ? strtoul(stdin_size_arg, &end, 10) : 0;
     bool stdin_requested = stdin_size_arg != NULL;
@@ -469,8 +469,7 @@ int text_app_main(int argc, char **argv) {
     int path_length = path_arg != NULL ? snprintf(path, sizeof(path), "%s", path_arg) : 0;
     ap_free(parser);
     if ((stdin_requested && !from_stdin) || path_length < 0 || (size_t)path_length >= sizeof(path) ||
-        (!from_stdin && path[0] == '\0') ||
-        (path[0] != '\0' && !text__has_supported_extension(path))) {
+        (!from_stdin && path[0] == '\0') || (path[0] != '\0' && !text__has_supported_extension(path))) {
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
     if (!app_runner__args_have_background(argc, argv)) {
@@ -479,8 +478,8 @@ int text_app_main(int argc, char **argv) {
     }
 
     text_editor_t editor = {.read_only = read_only};
-    bruce_result_t result = from_stdin ? text__load_stdin((size_t)parsed_stdin_size, &editor)
-                                       : text__load(path, &editor);
+    bruce_result_t result =
+        from_stdin ? text__load_stdin((size_t)parsed_stdin_size, &editor) : text__load(path, &editor);
     if (read_only) editor.dirty = false;
     if (result != BRUCE_OK) {
         (void)text__show_error(result == BRUCE_ERR_RESOURCE_LIMIT ? "File too large" : "Open", result);

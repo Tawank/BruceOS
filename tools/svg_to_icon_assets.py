@@ -31,11 +31,6 @@ class State:
     initialized: bool = False
 
 
-def c_round(value: float) -> int:
-    """Match C lround() for the coordinates used by the firmware renderer."""
-    return math.floor(value + 0.5) if value >= 0 else math.ceil(value - 0.5)
-
-
 def tokenize(path_data: str) -> list[str]:
     tokens = TOKEN_RE.findall(path_data)
     remainder = TOKEN_RE.sub("", path_data).replace(",", "")
@@ -53,7 +48,7 @@ class PathRasterizer:
         self.min_x = min_x
         self.min_y = min_y
         self.scale = ICON_SIZE / width
-        self.edges: list[tuple[int, int, int, int]] = []
+        self.edges: list[tuple[float, float, float, float]] = []
 
     def point(self, x: float, y: float) -> tuple[float, float]:
         return (x - self.min_x) * self.scale, (y - self.min_y) * self.scale
@@ -61,7 +56,7 @@ class PathRasterizer:
     def add_edge(self, x0: float, y0: float, x1: float, y1: float) -> None:
         x0, y0 = self.point(x0, y0)
         x1, y1 = self.point(x1, y1)
-        self.edges.append((c_round(x0), c_round(y0), c_round(x1), c_round(y1)))
+        self.edges.append((x0, y0, x1, y1))
 
     def close_for_fill(self, state: State) -> None:
         if state.initialized and (state.x != state.start_x or state.y != state.start_y):
