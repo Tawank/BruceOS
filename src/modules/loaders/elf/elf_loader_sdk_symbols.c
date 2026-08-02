@@ -111,6 +111,7 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(app_runner__run),
     ESP_ELFSYM_EXPORT(app_runner__run_path),
     ESP_ELFSYM_EXPORT(loader__stage_path),
+    ESP_ELFSYM_EXPORT(loader__adopt_image),
     ESP_ELFSYM_EXPORT(loader__release_image),
     ESP_ELFSYM_EXPORT(app_runner__parse_args),
     ESP_ELFSYM_EXPORT(app_runner__free_args),

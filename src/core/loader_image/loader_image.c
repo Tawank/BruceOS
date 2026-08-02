@@ -20,7 +20,7 @@ bruce_result_t loader__stage_path(const char *path, bruce_loader_image_t *out_im
     bruce_result_t result = storage__open(path, BRUCE_STORAGE_OPEN_READ, &file);
     uint64_t file_size = 0;
     if (result == BRUCE_OK) result = storage__seek(file, 0, SEEK_END, &file_size);
-    if (result == BRUCE_OK && (file_size == 0 || file_size > SIZE_MAX)) {
+    if (result == BRUCE_OK && (file_size == 0 || file_size >= SIZE_MAX)) {
         result = BRUCE_ERR_RESOURCE_LIMIT;
     }
     if (result == BRUCE_OK) result = storage__seek(file, 0, SEEK_SET, NULL);
@@ -29,7 +29,7 @@ bruce_result_t loader__stage_path(const char *path, bruce_loader_image_t *out_im
         return result;
     }
 
-    result = memory__external_alloc((size_t)file_size, &out_image->memory);
+    result = memory__external_alloc((size_t)file_size + 1u, &out_image->memory);
     uint8_t *buffer = NULL;
     if (result == BRUCE_OK) {
         buffer = malloc(LOADER_IMAGE__IO_CHUNK);
@@ -38,9 +38,9 @@ bruce_result_t loader__stage_path(const char *path, bruce_loader_image_t *out_im
 
     uint32_t source_crc = 0;
     size_t offset = 0;
-    while (result == BRUCE_OK && offset < out_image->memory.size) {
-        size_t wanted = out_image->memory.size - offset < LOADER_IMAGE__IO_CHUNK
-                            ? out_image->memory.size - offset
+    while (result == BRUCE_OK && offset < (size_t)file_size) {
+        size_t wanted = (size_t)file_size - offset < LOADER_IMAGE__IO_CHUNK
+                            ? (size_t)file_size - offset
                             : LOADER_IMAGE__IO_CHUNK;
         size_t received = 0;
         result = storage__read(file, buffer, wanted, &received);
@@ -52,6 +52,10 @@ bruce_result_t loader__stage_path(const char *path, bruce_loader_image_t *out_im
         result = memory__external_write(&out_image->memory, offset, buffer, received);
         offset += received;
     }
+    static const uint8_t terminator = 0;
+    if (result == BRUCE_OK) {
+        result = memory__external_write(&out_image->memory, (size_t)file_size, &terminator, 1);
+    }
     free(buffer);
     bruce_result_t close_result = storage__close(file);
     if (result == BRUCE_OK) result = close_result;
@@ -59,12 +63,12 @@ bruce_result_t loader__stage_path(const char *path, bruce_loader_image_t *out_im
         const void *data = NULL;
         result = memory__external_map(&out_image->memory, &data);
         if (result == BRUCE_OK &&
-            esp_rom_crc32_le(0, data, out_image->memory.size) != source_crc) {
+            esp_rom_crc32_le(0, data, (size_t)file_size) != source_crc) {
             result = BRUCE_ERR_IO;
         }
         if (result == BRUCE_OK) {
             out_image->data = data;
-            out_image->size = out_image->memory.size;
+            out_image->size = (size_t)file_size;
         }
     }
     if (result != BRUCE_OK) {
@@ -79,6 +83,11 @@ bruce_result_t loader__release_image(bruce_loader_image_t *image) {
     bruce_result_t result = memory__external_free(&image->memory);
     if (result == BRUCE_OK) memset(image, 0, sizeof(*image));
     return result;
+}
+
+bruce_result_t loader__adopt_image(bruce_loader_image_t *image) {
+    if (image == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    return memory_external__adopt(&image->memory);
 }
 
 bruce_result_t loader__allocate_xip(size_t size, bruce_loader_xip_image_t *out_image) {

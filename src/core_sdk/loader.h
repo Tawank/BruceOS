@@ -40,8 +40,12 @@ typedef struct {
 } bruce_loader_xip_image_t;
 
 /* Streams a file into process-owned external memory, verifies it, and returns
- * a read-only mapping. The caller must release successful mappings promptly. */
+ * a read-only mapping. data[size] is a trailing NUL byte outside the image
+ * size, allowing parsers that require sentinel-terminated input to use the
+ * mapping directly. The caller must release successful mappings promptly. */
 bruce_result_t loader__stage_path(const char *path, bruce_loader_image_t *out_image);
+/* Transfers a staged image to the current process after a loader spawns it. */
+bruce_result_t loader__adopt_image(bruce_loader_image_t *image);
 bruce_result_t loader__release_image(bruce_loader_image_t *image);
 
 /* Allocates executable MMU-page-exclusive space in memory_swap. The mapping

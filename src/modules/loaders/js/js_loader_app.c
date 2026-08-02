@@ -14,6 +14,7 @@
 #include "core_sdk/permission.h"
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
+#include "core_sdk/runtime.h"
 #include "core_sdk/storage.h"
 
 #include "audio_js.h"        // IWYU pragma: export
@@ -21,6 +22,7 @@
 #include "display_js.h"      // IWYU pragma: export
 #include "icon_js.h"         // IWYU pragma: export
 #include "ir_js.h"           // IWYU pragma: export
+#include "js_source.h"
 #include "js_stdlib.h"       // IWYU pragma: export
 #include "keyboard_js.h"     // IWYU pragma: export
 #include "notification_js.h" // IWYU pragma: export
@@ -39,8 +41,7 @@
 typedef struct {
     char path[BRUCE_STORAGE_PATH_MAX];
     char permission_key[BRUCE_PERMISSION_FILE_NAME_MAX];
-    char *source;
-    size_t source_len;
+    js_source_t source;
     int argc;
     char **argv;
 } js_loader_process_ctx_t;
@@ -74,62 +75,20 @@ static bool js_loader__normalize_path(const char *path, char *out, size_t out_si
 
 static void js_loader__free_process_ctx(js_loader_process_ctx_t *ctx) {
     if (ctx == NULL) { return; }
-    free(ctx->source);
+    js_source__release(&ctx->source);
     app_runner__free_args(ctx->argv, ctx->argc);
     free(ctx);
-}
-
-static int js_loader__load_source(const char *path, js_loader_process_ctx_t *ctx) {
-    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
-    bruce_result_t open_result = storage__open(path, BRUCE_STORAGE_OPEN_READ, &file);
-    if (open_result != BRUCE_OK) { return (int)open_result; }
-
-    int result = BRUCE_OK;
-    uint64_t size = 0;
-    if (storage__seek(file, 0, SEEK_END, &size) != BRUCE_OK || size == 0 || size > JS_LOADER_SOURCE_MAX) {
-        result = BRUCE_ERR_IO;
-    } else {
-        ctx->source = malloc((size_t)size + 1);
-        if (ctx->source == NULL) {
-            result = BRUCE_ERR_NO_MEMORY;
-        } else {
-            ctx->source_len = (size_t)size;
-            if (storage__seek(file, 0, SEEK_SET, NULL) != BRUCE_OK) {
-                result = BRUCE_ERR_IO;
-            } else {
-                size_t total = 0;
-                while (total < ctx->source_len) {
-                    size_t chunk = 0;
-                    if (storage__read(file, ctx->source + total, ctx->source_len - total, &chunk) !=
-                            BRUCE_OK ||
-                        chunk == 0) {
-                        result = BRUCE_ERR_IO;
-                        break;
-                    }
-                    total += chunk;
-                }
-                ctx->source[ctx->source_len] = '\0';
-            }
-        }
-    }
-
-    storage__close(file);
-    if (result != BRUCE_OK && ctx->source != NULL) {
-        free(ctx->source);
-        ctx->source = NULL;
-        ctx->source_len = 0;
-    }
-    return result;
 }
 
 /* Advance *s past a leading block comment (slash-asterisk ... asterisk-slash).
  * Returns a pointer to the first code byte after the comment, or the original
  * string if no comment starts at the beginning. */
-static const char *js_loader__skip_manifest_comment(const char *s) {
-    if (s == NULL || s[0] != '/' || s[1] != '*') { return s; }
-    const char *end = strstr(s + 2, "*/");
-    if (end == NULL) { return s; }
-    return end + 2;
+static size_t js_loader__skip_manifest_comment(const uint8_t *source, size_t source_len) {
+    if (source == NULL || source_len < 2 || source[0] != '/' || source[1] != '*') return 0;
+    for (size_t i = 2; i + 1 < source_len; ++i) {
+        if (source[i] == '*' && source[i + 1] == '/') return i + 2;
+    }
+    return 0;
 }
 
 static void js_loader__print_exception(JSContext *js_ctx, JSValue exception) {
@@ -148,8 +107,26 @@ static void js_loader__print_exception(JSContext *js_ctx, JSValue exception) {
 static void js__app_main(void *context) {
     js_loader_process_ctx_t *ctx = (js_loader_process_ctx_t *)context;
 
-    const char *script = js_loader__skip_manifest_comment(ctx->source);
-    while (*script == '\n' || *script == '\r' || *script == ' ' || *script == '\t') { script++; }
+    bruce_result_t adopt_result = js_source__adopt(&ctx->source);
+    if (adopt_result != BRUCE_OK) {
+        printf(
+            "[js_loader] %s: failed to adopt source (%d)\n",
+            ctx->permission_key,
+            (int)adopt_result
+        );
+        js_loader__free_process_ctx(ctx);
+        return;
+    }
+    js_source_t *source = &ctx->source;
+
+    size_t script_offset = js_loader__skip_manifest_comment(source->data, source->size);
+    while (script_offset < source->size &&
+           (source->data[script_offset] == '\n' || source->data[script_offset] == '\r' ||
+            source->data[script_offset] == ' ' || source->data[script_offset] == '\t')) {
+        script_offset++;
+    }
+    const char *script = (const char *)source->data + script_offset;
+    size_t script_len = source->size - script_offset;
 
     size_t mem_size = JS_LOADER_VM_MEMORY;
     uint8_t *mem_buf = memory__malloc(mem_size);
@@ -167,11 +144,8 @@ static void js__app_main(void *context) {
         return;
     }
 
-    size_t script_len = strlen(script);
     JSValue val = JS_Eval(js_ctx, script, script_len, ctx->path, 0);
-    free(ctx->source);
-    ctx->source = NULL;
-    ctx->source_len = 0;
+    js_source__release(source);
     if (JS_IsException(val)) {
         JSValue obj = JS_GetException(js_ctx);
         printf("[js_loader] %s: runtime error: ", ctx->permission_key);
@@ -256,19 +230,40 @@ int js_loader__run_path(const char *path, const char *arg, bool in_background) {
     ctx->argc = argc;
     ctx->argv = argv;
 
-    int load_result = js_loader__load_source(ctx->path, ctx);
-    if (load_result != BRUCE_OK) {
+    bruce_result_t source_result =
+        js_source__load_transferable(ctx->path, JS_LOADER_SOURCE_MAX, &ctx->source);
+    if (source_result != BRUCE_OK) {
+        printf(
+            "[js_loader] %s: failed to load source (%d, external %d)\n",
+            ctx->permission_key,
+            (int)source_result,
+            (int)ctx->source.external_result
+        );
         js_loader__free_process_ctx(ctx);
         memory__free(inspection);
-        return load_result;
+        return source_result;
     }
 
     bool gui_requested = app_runner__args_have_gui(argc, argv);
 
+    bruce_loader_image_t parent_image = ctx->source.external;
     int result = app_runner__spawn_loader_process(
         permission_key, gui_requested, in_background, inspection->manifest.stack_size, js__app_main, ctx
     );
-    if (result <= 0) { js_loader__free_process_ctx(ctx); }
+    if (result <= 0) {
+        js_loader__free_process_ctx(ctx);
+    } else if (parent_image.memory.handle != 0) {
+        for (;;) {
+            bruce_process_snapshot_t snapshot;
+            bruce_result_t snapshot_result = process__snapshot(result, &snapshot);
+            if (snapshot_result != BRUCE_OK) {
+                (void)loader__release_image(&parent_image);
+                break;
+            }
+            if (snapshot.resource_count > 0) break;
+            if (runtime__delay(1) != BRUCE_OK) break;
+        }
+    }
     memory__free(inspection);
     return result;
 }

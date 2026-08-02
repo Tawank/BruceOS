@@ -463,11 +463,13 @@ mQuickJS event loop.  JavaScript timers and `runtime.main()` remain
 JavaScript-runtime features; they are not moved into Core.  The loader
 allocates VM/context memory with `memory__malloc()`.
 
-The JS loader module's process entry is `js__app_main(void *context)`.  It is
-started by `app_runner__spawn_loader_process()` when a JS script is launched.
-Like any other program entry, it receives the script path, arguments,
-permissions, and GUI context through the spawn parameters and its opaque
-context struct.
+The JS loader stages source in external memory before spawning, then transfers
+that allocation to `js__app_main(void *context)` with `loader__adopt_image()`.
+Staged mappings include a trailing NUL outside their reported image size, as
+required by mQuickJS. VM/context memory remains writable internal memory. Like
+any other program entry, the spawned process receives the script path,
+arguments, permissions, and GUI context through the spawn parameters and its
+opaque context struct.
 
 A JS file may start with the same canonical manifest in a comment block.  It
 is optional.  An unmanifested script starts with zero grants, uses its filename
