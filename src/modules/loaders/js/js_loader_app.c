@@ -206,7 +206,10 @@ static void js__app_main(void *context) {
 
 /* Loader registry run function: called by app_runner__run_path() or by the
  * built-in "js" command. */
-int js_loader__run_path(const char *path, const char *arg, bool in_background) {
+int js_loader__run_path(
+    const char *path, const char *arg, bruce_launch_mode_t mode,
+    const bruce_environment_variable_t *environment, size_t environment_count
+) {
     if (!js_loader__path_is_valid(path)) { return BRUCE_ERR_INVALID_PATH; }
 
     char normalized_path[BRUCE_STORAGE_PATH_MAX];
@@ -265,7 +268,8 @@ int js_loader__run_path(const char *path, const char *arg, bool in_background) {
 
     bruce_loader_image_t parent_image = ctx->source.external;
     int result = app_runner__spawn_loader_process(
-        permission_key, gui_requested, in_background, inspection->manifest.stack_size, js__app_main, ctx
+        permission_key, gui_requested, mode, inspection->manifest.stack_size, environment,
+        environment_count, js__app_main, ctx
     );
     if (result <= 0) {
         js_loader__free_process_ctx(ctx);
@@ -333,9 +337,9 @@ int js_loader__app_main(int argc, char **argv) {
     ap_free(parser);
 
     bruce_process_snapshot_t snapshot;
-    bool in_background = false;
+    bruce_launch_mode_t mode = BRUCE_LAUNCH_FOREGROUND;
     if (process__snapshot(process__current_id(), &snapshot) == BRUCE_OK) {
-        in_background = (snapshot.state == BRUCE_PROCESS_BACKGROUND);
+        mode = snapshot.state == BRUCE_PROCESS_BACKGROUND ? BRUCE_LAUNCH_BACKGROUND : BRUCE_LAUNCH_FOREGROUND;
     }
-    return js_loader__run_path(path, arg[0] != '\0' ? arg : NULL, in_background);
+    return js_loader__run_path(path, arg[0] != '\0' ? arg : NULL, mode, NULL, 0);
 }

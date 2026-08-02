@@ -28,28 +28,33 @@ static bool launcher__has_foreground(void) {
     return false;
 }
 
-static int launcher__start(bool gui, bool background) {
+static int launcher__start(bool gui, bruce_launch_mode_t mode) {
     const char *configured = config__get_launcher_app();
     const char *target = (configured != NULL && configured[0] != '\0') ? configured : LAUNCHER__FALLBACK_APP;
-    const char *lifecycle_args = gui ? (background ? "--gui --bg" : "--gui") : (background ? "--bg" : "");
+    const char *lifecycle_args = gui ? "--gui" : "";
 
-    int result = app_runner__run(target, lifecycle_args, true);
+    int result = app_runner__run(target, lifecycle_args, mode);
     if (result < 0 && strcmp(target, LAUNCHER__FALLBACK_APP) != 0) {
         stdio__printf(
             "launcherApp \"%s\" failed to start (%d); falling back to " LAUNCHER__FALLBACK_APP "\n",
             target,
             result
         );
-        result = app_runner__run(LAUNCHER__FALLBACK_APP, lifecycle_args, true);
+        result = app_runner__run(LAUNCHER__FALLBACK_APP, lifecycle_args, mode);
     }
     return result;
 }
 
 int launcher_app_main(int argc, char **argv) {
     bool gui = app_runner__args_have_gui(argc, argv);
-    bool background = app_runner__args_have_background(argc, argv);
     if (!launcher__has_arg(argc, argv, "-s")) {
-        int result = launcher__start(gui, background);
+        bruce_process_snapshot_t snapshot;
+        bruce_launch_mode_t mode = BRUCE_LAUNCH_FOREGROUND;
+        if (process__snapshot(process__current_id(), &snapshot) == BRUCE_OK &&
+            snapshot.state == BRUCE_PROCESS_BACKGROUND) {
+            mode = BRUCE_LAUNCH_BACKGROUND;
+        }
+        int result = launcher__start(gui, mode);
         return result < 0 ? result : 0;
     }
 
@@ -65,7 +70,7 @@ int launcher_app_main(int argc, char **argv) {
             if (runtime__delay(LAUNCHER__SUPERVISOR_INTERVAL_MS) != BRUCE_OK) return BRUCE_ERR_CANCELLED;
             continue;
         }
-        int result = launcher__start(true, false);
+        int result = launcher__start(true, BRUCE_LAUNCH_FOREGROUND);
         if (result >= 0) child = (bruce_process_id_t)result;
         else {
             stdio__printf("Launcher failed to start with code %d\n", result);

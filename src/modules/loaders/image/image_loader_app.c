@@ -32,11 +32,6 @@ int image_viewer_app_main(int argc, char **argv) {
     if (!image__is_supported_path(path)) {
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
-    if (!app_runner__args_have_background(argc, argv)) {
-        bruce_result_t foreground = process__to_foreground();
-        if (foreground != BRUCE_OK) return foreground;
-    }
-
     bruce_image_draw_options_t options = {
         .center = true,
         .fit = true,
@@ -83,7 +78,10 @@ static bool image_loader__escape_arg(const char *path, char *out, size_t out_siz
     return true;
 }
 
-int image_loader__run_path(const char *path, const char *arg, bool in_background) {
+int image_loader__run_path(
+    const char *path, const char *arg, bruce_launch_mode_t mode,
+    const bruce_environment_variable_t *environment, size_t environment_count
+) {
     (void)arg;
     if (path == NULL || !image__is_supported_path(path)) return BRUCE_ERR_INVALID_PATH;
 
@@ -91,7 +89,9 @@ int image_loader__run_path(const char *path, const char *arg, bool in_background
     if (!image_loader__escape_arg(path, escaped_path, sizeof(escaped_path))) {
         return BRUCE_ERR_INVALID_PATH;
     }
-    return app_runner__run("image_viewer", escaped_path, in_background);
+    return app_runner__run_with_environment(
+        "image_viewer", escaped_path, mode, environment, environment_count
+    );
 }
 
 int image_app_main(int argc, char **argv) {
@@ -109,5 +109,11 @@ int image_app_main(int argc, char **argv) {
     }
     char *path = ap_get_arg(parser, "path");
     ap_free(parser);
-    return image_loader__run_path(path, NULL, true);
+    bruce_process_snapshot_t snapshot;
+    bruce_launch_mode_t mode = BRUCE_LAUNCH_FOREGROUND;
+    if (process__snapshot(process__current_id(), &snapshot) == BRUCE_OK &&
+        snapshot.state == BRUCE_PROCESS_BACKGROUND) {
+        mode = BRUCE_LAUNCH_BACKGROUND;
+    }
+    return image_loader__run_path(path, NULL, mode, NULL, 0);
 }

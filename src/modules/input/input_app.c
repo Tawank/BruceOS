@@ -410,21 +410,9 @@ static void input__kb_run_hotkey(const char *action) {
     }
 
     while (isspace((unsigned char)*action)) action++;
-    char command[BRUCE_CONFIG_HOTKEY_ACTION_MAX_LEN + 1];
-    size_t command_size = 0;
-    while (action[command_size] != '\0' && !isspace((unsigned char)action[command_size])) command_size++;
-    if (command_size == 0 || command_size >= sizeof(command)) return;
-    memcpy(command, action, command_size);
-    command[command_size] = '\0';
-
-    const char *arg = action + command_size;
-    while (isspace((unsigned char)*arg)) arg++;
-    if (*arg == '\0') arg = NULL;
-    if (strcmp(command, "launcher") == 0 && arg == NULL) arg = "--gui";
-
-    int result = command[0] == '/' || strncmp(command, "./", 2) == 0
-                     ? app_runner__run_path(command, arg, true)
-                     : app_runner__run(command, arg, true);
+    int result = strcmp(action, "launcher") == 0
+                     ? app_runner__run("launcher", "--gui", BRUCE_LAUNCH_FOREGROUND)
+                     : app_runner__run_command(action, BRUCE_LAUNCH_FOREGROUND);
     if (result < 0) ESP_LOGW(TAG, "hotkey action '%s' failed: %d", action, result);
 }
 

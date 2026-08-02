@@ -12,6 +12,8 @@ CONFIG_ESPTOOLPY_HEADER_FLASHSIZE_UPDATE=y
 # per-process CPU accounting via uxTaskGetSystemState()/TaskStatus_t.
 CONFIG_FREERTOS_USE_TRACE_FACILITY=y
 CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y
+# One Core process-context pointer is attached to each managed task.
+CONFIG_FREERTOS_THREAD_LOCAL_STORAGE_POINTERS=2
 
 # espressif/elf_loader needs executable memory; memory protection in ESP-IDF
 # v6 hides MALLOC_CAP_EXEC when enabled.  Disable it for the ELF loader slice.

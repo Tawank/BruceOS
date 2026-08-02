@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "core_sdk/app_runner.h"
+#include "core_sdk/environment.h"
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
 #include "core_sdk/stdio.h"
@@ -13,10 +14,17 @@
 
 static volatile int s_probe_calls;
 static char s_probe_arg[64];
+static char s_probe_environment[64];
 
 static int selftest__shell_probe(int argc, char **argv) {
     s_probe_calls++;
     snprintf(s_probe_arg, sizeof(s_probe_arg), "%s", argc > 1 ? argv[1] : "");
+    const char *exported = environment__get("EXPORTED");
+    const char *temporary = environment__get("TEMPORARY");
+    snprintf(
+        s_probe_environment, sizeof(s_probe_environment), "%s|%s",
+        exported != NULL ? exported : "", temporary != NULL ? temporary : ""
+    );
     if (argc > 1 && strcmp(argv[1], "nonzero") == 0) return 37;
     if (argc > 1 && strcmp(argv[1], "routed") == 0) stdio__printf("shell-grandchild-routed\n");
     return argc > 2 && strcmp(argv[1], argv[2]) == 0 ? 0 : (argc > 2 ? 1 : 0);
@@ -29,6 +37,7 @@ static bool selftest__shell_register_probe(void) {
 
 bool selftest__run_shell_language_case(void) {
     if (!selftest__shell_register_probe()) return false;
+    if (environment__set("INHERITED_SHELL", "visible") != BRUCE_OK) return false;
     shell_state_t state;
     shell__state_init(&state);
     s_probe_calls = 0;
@@ -44,12 +53,21 @@ bool selftest__run_shell_language_case(void) {
             1 &&
         s_probe_calls == 4 && shell__execute_line(&state, "false || true && false") == 1 &&
         shell__execute_line(&state, "echo ok; true") == 0 &&
-        shell__execute_line(&state, "export EXPORTED=yes; unset EXPORTED; set") == 0 &&
+        shell__execute_line(&state, "LOCAL_ONLY=yes; shell_test_probe env") == 0 &&
+        strcmp(s_probe_environment, "|") == 0 &&
+        shell__execute_line(&state, "export EXPORTED=yes; shell_test_probe env") == 0 &&
+        strcmp(s_probe_environment, "yes|") == 0 &&
+        shell__execute_line(&state, "TEMPORARY=once shell_test_probe env") == 0 &&
+        strcmp(s_probe_environment, "yes|once") == 0 &&
+        shell__execute_line(&state, "unset EXPORTED; shell_test_probe env") == 0 &&
+        strcmp(s_probe_environment, "|") == 0 &&
         shell__execute_line(&state, "shell_test_probe nonzero") == 37 &&
         shell__execute_line(&state, "echo broken | echo nope") == 2 &&
         shell__execute_line(&state, "echo > file") == 2 &&
         shell__execute_line(&state, "echo 'unterminated") == 2;
+    if (ok) ok = shell__execute_line(&state, "shell_test_probe $INHERITED_SHELL visible") == 0;
     shell__state_free(&state);
+    (void)environment__unset("INHERITED_SHELL");
     printf("[selftest] shell/language: %s\n", ok ? "OK" : "failed");
     return ok;
 }
@@ -85,7 +103,9 @@ bool selftest__run_shell_stdio_inheritance_case(void) {
     if (stdio__session_create(&session) != BRUCE_OK || stdio__session_route_children(session) != BRUCE_OK) {
         return false;
     }
-    int launched = app_runner__run("shell", "-c \"shell_test_probe routed\"", true);
+    int launched = app_runner__run(
+        "shell", "-c \"shell_test_probe routed\"", BRUCE_LAUNCH_BACKGROUND
+    );
     (void)stdio__session_route_children(BRUCE_STDIO_SESSION_INVALID);
     bruce_process_status_t status;
     bool completed =

@@ -21,7 +21,7 @@ static int help_app__list_commands(void) {
 }
 
 static int help_app__show_command(const char *command) {
-    int process_id = app_runner__run(command, "--help", true);
+    int process_id = app_runner__run(command, "--help", BRUCE_LAUNCH_BACKGROUND);
     if (process_id < 0) return process_id;
 
     for (;;) {

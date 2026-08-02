@@ -16,9 +16,13 @@
 
 #include "core_sdk/result.h"
 #include "core_sdk/memory.h"
+#include "core_sdk/app_runner.h"
 
-/* Matches app_runner__run_path()'s signature. */
-typedef int (*bruce_loader_run_fn)(const char *path, const char *arg, bool in_background);
+/* Matches app_runner__run_path_with_environment()'s internal dispatch. */
+typedef int (*bruce_loader_run_fn)(
+    const char *path, const char *arg, bruce_launch_mode_t mode,
+    const bruce_environment_variable_t *environment, size_t environment_count
+);
 
 /* Entry point for a process created by app_runner__spawn_loader_process();
  * `context` is the loader's own opaque pointer (e.g. a struct holding the
@@ -74,7 +78,11 @@ bruce_result_t app_runner__register_loader(const char *extension, int priority, 
  * BRUCE_ERR_NOT_FOUND (no loader registered for the extension), or the
  * loader's own negative BRUCE_ERR_* on failure. External callers require the
  * `execute` permission. */
-int app_runner__run_path(const char *path, const char *arg, bool in_background);
+int app_runner__run_path(const char *path, const char *arg, bruce_launch_mode_t mode);
+int app_runner__run_path_with_environment(
+    const char *path, const char *arg, bruce_launch_mode_t mode,
+    const bruce_environment_variable_t *environment, size_t environment_count
+);
 
 /* The one extra public primitive a loader module needs beyond
  * app_runner__register(): creates and starts a real Core process that calls
@@ -84,13 +92,15 @@ int app_runner__run_path(const char *path, const char *arg, bool in_background);
  * `stack_size` of 0 selects a Core default.  Returns a positive
  * bruce_process_id_t on success or a negative BRUCE_ERR_*. */
 int app_runner__spawn_loader_process(
-    const char *permission_key, bool gui_requested, bool in_background, uint32_t stack_size,
+    const char *permission_key, bool gui_requested, bruce_launch_mode_t mode, uint32_t stack_size,
+    const bruce_environment_variable_t *environment, size_t environment_count,
     bruce_loader_process_entry_fn entry, void *context
 );
 
 /* Variant that transfers ownership of context to Core. cleanup runs exactly
  * once after normal return, force-kill, or cancellation before entry starts. */
 int app_runner__spawn_loader_process_owned(
-    const char *permission_key, bool gui_requested, bool in_background, uint32_t stack_size,
+    const char *permission_key, bool gui_requested, bruce_launch_mode_t mode, uint32_t stack_size,
+    const bruce_environment_variable_t *environment, size_t environment_count,
     bruce_loader_process_entry_fn entry, void *context, bruce_loader_process_cleanup_fn cleanup
 );

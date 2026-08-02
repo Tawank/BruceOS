@@ -1,4 +1,3 @@
-#include <ctype.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -113,31 +112,11 @@ void app_runner__register_defaults(void) {
     elf_loader__init();
 }
 
-static int startup_command_parse(const char *command_line) {
-    if (command_line == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
-    while (isspace((unsigned char)*command_line)) command_line++;
-    const char *end = command_line;
-    while (*end != '\0' && !isspace((unsigned char)*end)) end++;
-    if (end == command_line) return BRUCE_ERR_INVALID_ARGUMENT;
-
-    char command[BRUCE_CONFIG_HOTKEY_ACTION_MAX_LEN + 1];
-    size_t length = (size_t)(end - command_line);
-    if (length >= sizeof(command)) return BRUCE_ERR_INVALID_ARGUMENT;
-    memcpy(command, command_line, length);
-    command[length] = '\0';
-    while (isspace((unsigned char)*end)) end++;
-    const char *args = *end != '\0' ? end : NULL;
-    if (command[0] == '/' || strncmp(command, "./", 2) == 0) {
-        return app_runner__run_path(command, args, true);
-    }
-    return app_runner__run(command, args, true);
-}
-
 static void run_apps_autostart(void) {
     const bruce_config_startup_apps_t *apps = config__get_startup_apps();
     if (apps == NULL) return;
     for (size_t i = 0; i < apps->count; ++i) {
-        int result = startup_command_parse(apps->items[i]);
+        int result = app_runner__run_command(apps->items[i], BRUCE_LAUNCH_BACKGROUND);
         if (result < 0) printf("Startup app \"%s\" failed with code %d\n", apps->items[i], result);
     }
 }

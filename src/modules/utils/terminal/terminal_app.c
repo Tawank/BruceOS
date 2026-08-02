@@ -256,7 +256,6 @@ int terminal_app_main(int argc, char **argv) {
     if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
     ap_set_helptext(parser, "Open the terminal and optionally run a startup command.");
     ap_add_flag(parser, "gui");
-    ap_add_flag(parser, "bg");
     ap_add_optional_arg(parser, "command", "Command to run on startup");
     ap_unknown_options_as_args(parser);
     ap_allow_extra_args(parser);
@@ -274,11 +273,6 @@ int terminal_app_main(int argc, char **argv) {
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
     ap_free(parser);
-
-    if (!app_runner__args_have_background(argc, argv)) {
-        bruce_result_t foreground = process__to_foreground();
-        if (foreground != BRUCE_OK) return foreground;
-    }
 
     terminal__state_t state = {0};
     state.child = BRUCE_PROCESS_ID_INVALID;
@@ -299,7 +293,7 @@ int terminal_app_main(int argc, char **argv) {
     (void)input__flush();
 
     (void)stdio__session_route_children(state.session);
-    int shell_process = app_runner__run("shell", "-i", true);
+    int shell_process = app_runner__run("shell", "-i", BRUCE_LAUNCH_BACKGROUND);
     (void)stdio__session_route_children(BRUCE_STDIO_SESSION_INVALID);
     if (shell_process <= 0) {
         (void)stdio__session_close(state.session);

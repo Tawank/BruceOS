@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stddef.h>
+#include "core_sdk/app_runner.h"
 
 /*
  * Built-in ELF loader module (see migration_plan.md, "Loader modules" /
@@ -10,7 +11,10 @@
  */
 void elf_loader__init(void);
 int elf_loader__app_main(int argc, char **argv);
-int elf_loader__run_path(const char *path, const char *arg, bool in_background);
+int elf_loader__run_path(
+    const char *path, const char *arg, bruce_launch_mode_t mode,
+    const bruce_environment_variable_t *environment, size_t environment_count
+);
 
 /* Test-only observability for modules/selftest (exempt from the
  * core_sdk-only-headers rule); not part of any public contract.  Counts

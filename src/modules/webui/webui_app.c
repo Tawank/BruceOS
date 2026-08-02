@@ -723,16 +723,8 @@ static bruce_result_t webui__command(bruce_http_server_request_t *request, void 
         if (result != BRUCE_OK) return webui__reply_error(request, result);
         return webui__reply_text(request, 200, "OK");
     }
-    char *name = cursor;
-    while (*cursor != '\0' && !isspace((unsigned char)*cursor)) cursor++;
-    if (cursor == name) return webui__reply_text(request, 400, "Missing command");
-    char *argument = cursor;
-    if (*cursor != '\0') {
-        *cursor++ = '\0';
-        while (isspace((unsigned char)*cursor)) cursor++;
-        argument = cursor;
-    } else argument = NULL;
-    int process = app_runner__run(name, argument, true);
+    if (*cursor == '\0') return webui__reply_text(request, 400, "Missing command");
+    int process = app_runner__run_command(cursor, BRUCE_LAUNCH_BACKGROUND);
     if (process < 0) return webui__reply_error(request, (bruce_result_t)process);
     return webui__reply_text(request, 202, "Command queued");
 }
@@ -975,10 +967,6 @@ static void webui_app__print_help(void) { stdio__printf("Usage: webui [status|st
 
 int webui_app_main(int argc, char **argv) {
     if (app_runner__args_have_gui(argc, argv)) {
-        if (!app_runner__args_have_background(argc, argv)) {
-            bruce_result_t foreground = process__to_foreground();
-            if (foreground != BRUCE_OK) return foreground;
-        }
         return webui_app__gui();
     }
     if (argc <= 1 || (argc == 2 && strcmp(argv[1], "status") == 0)) return webui_app__status(false);

@@ -128,10 +128,15 @@ bool selftest__run_manifest_parse_case(void) {
 
 static int s_throwaway_loader_calls;
 
-static int selftest__throwaway_loader_run(const char *path, const char *arg, bool in_background) {
+static int selftest__throwaway_loader_run(
+    const char *path, const char *arg, bruce_launch_mode_t mode,
+    const bruce_environment_variable_t *environment, size_t environment_count
+) {
     (void)path;
     (void)arg;
-    (void)in_background;
+    (void)mode;
+    (void)environment;
+    (void)environment_count;
     s_throwaway_loader_calls++;
     return 777; /* sentinel "process id" so the test can prove dispatch happened */
 }
@@ -149,7 +154,7 @@ bool selftest__run_loader_registry_extensibility_case(void) {
         return false;
     }
 
-    int result = app_runner__run_path("/tmp/whatever.selftest_ext", "some arg", true);
+    int result = app_runner__run_path("/tmp/whatever.selftest_ext", "some arg", BRUCE_LAUNCH_BACKGROUND);
     if (result != 777 || s_throwaway_loader_calls != 1) {
         printf(
             "[selftest] loader/registry: run_path did not dispatch to the new loader (%d, calls=%d)\n",
@@ -159,11 +164,11 @@ bool selftest__run_loader_registry_extensibility_case(void) {
         return false;
     }
 
-    if (app_runner__run_path("relative.selftest_ext", "", true) != BRUCE_ERR_INVALID_PATH) {
+    if (app_runner__run_path("relative.selftest_ext", "", BRUCE_LAUNCH_BACKGROUND) != BRUCE_ERR_INVALID_PATH) {
         printf("[selftest] loader/registry: relative path was accepted\n");
         return false;
     }
-    if (app_runner__run_path("/tmp/whatever.unknown_ext", "", true) != BRUCE_ERR_NOT_FOUND) {
+    if (app_runner__run_path("/tmp/whatever.unknown_ext", "", BRUCE_LAUNCH_BACKGROUND) != BRUCE_ERR_NOT_FOUND) {
         printf("[selftest] loader/registry: unknown extension did not return BRUCE_ERR_NOT_FOUND\n");
         return false;
     }
@@ -220,7 +225,7 @@ bool selftest__run_elf_loader_case(void) {
 
     dialog__test_set_choice_provider(selftest__elf_dialog_allow_provider);
     size_t calls_before = elf_loader__debug_call_count();
-    int result = app_runner__run_path(path, "--gui", true);
+    int result = app_runner__run_path(path, "--gui", BRUCE_LAUNCH_BACKGROUND);
     dialog__test_set_choice_provider(NULL);
 
     bool run_ok = result == BRUCE_ERR_INVALID_ARGUMENT && elf_loader__debug_call_count() == calls_before + 1;
@@ -242,7 +247,7 @@ bool selftest__run_elf_loader_case(void) {
                        inspection->manifest.stack_size == 8192 && inspection->manifest.permission_count == 0;
     if (inspection != NULL) memory__free(inspection);
     if (fallback_ok) {
-        result = app_runner__run_path(path, "--gui", true);
+        result = app_runner__run_path(path, "--gui", BRUCE_LAUNCH_BACKGROUND);
         fallback_ok = result == BRUCE_ERR_INVALID_ARGUMENT;
     }
     storage__remove(path);
@@ -302,7 +307,7 @@ bool selftest__run_js_loader_case(void) {
         return false;
     }
 
-    int result = app_runner__run_path(path, NULL, true);
+    int result = app_runner__run_path(path, NULL, BRUCE_LAUNCH_BACKGROUND);
     bool run_ok = result > 0;
     if (run_ok) { run_ok = (process__wait((bruce_process_id_t)result, 2000) == BRUCE_OK); }
     storage__remove(path);

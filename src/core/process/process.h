@@ -11,6 +11,7 @@
 #include <stdint.h>
 
 #include "core_sdk/app_runner.h"
+#include "core_sdk/environment.h"
 #include "core_sdk/result.h"
 #include "core_sdk/process.h"
 
@@ -50,6 +51,10 @@ typedef struct {
      * BRUCE_PROCESS_FOREGROUND, displacing the current top; true => becomes
      * BRUCE_PROCESS_BACKGROUND without touching the stack. */
     bool start_in_background;
+    /* Temporary assignments applied after inheriting the parent's exported
+     * environment. The strings are borrowed only for this call. */
+    const bruce_environment_variable_t *environment;
+    size_t environment_count;
     /* 0 selects a Core default (4096 bytes). */
     uint32_t stack_bytes;
     /* Alternative entry point used by loader modules via

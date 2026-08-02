@@ -244,8 +244,6 @@ static int clock_app__alarm(const char *argument, bool gui) {
 static void clock_app__add_gui_option(ArgParser *parser) {
     ap_add_flag(parser, "gui");
     ap_set_opt_help(parser, "gui", "Use GUI interaction mode");
-    ap_add_flag(parser, "bg");
-    ap_set_opt_help(parser, "bg", "Do not claim foreground at startup");
 }
 
 static int clock_app__gui(void) {
@@ -309,13 +307,6 @@ int clock_app_main(int argc, char **argv) {
 
     ArgParser *command = ap_get_cmd_parser(root);
     bool gui = ap_found(root, "gui") || (command != NULL && ap_found(command, "gui"));
-    if (gui && !app_runner__args_have_background(argc, argv)) {
-        bruce_result_t foreground = process__to_foreground();
-        if (foreground != BRUCE_OK) {
-            ap_free(root);
-            return foreground;
-        }
-    }
     int result;
     if (command == NULL || command == show) result = gui ? clock_app__gui() : clock_app__show(false);
     else if (command == timer) result = clock_app__timer(ap_get_arg(timer, "duration"), gui);

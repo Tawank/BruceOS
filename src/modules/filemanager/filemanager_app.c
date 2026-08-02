@@ -89,7 +89,7 @@ static bruce_result_t filemanager__read_preview(const char *path, char **out_tex
 
 static bruce_result_t filemanager__view_file(const char *path, bool gui) {
     if (image__is_supported_path(path) || filemanager__is_editable_text(path)) {
-        int process = app_runner__run_path(path, NULL, true);
+        int process = app_runner__run_path(path, NULL, BRUCE_LAUNCH_FOREGROUND);
         if (process <= 0) return (bruce_result_t)process;
         return process__wait((bruce_process_id_t)process, UINT32_MAX);
     }
@@ -157,10 +157,6 @@ static void filemanager__show_error(const char *action, bruce_result_t result) {
 
 int filemanager_app_main(int argc, char **argv) {
     bool gui = app_runner__args_have_gui(argc, argv);
-    if (gui && !app_runner__args_have_background(argc, argv)) {
-        bruce_result_t foreground = process__to_foreground();
-        if (foreground != BRUCE_OK) return foreground;
-    }
     const bruce_dialog_choice_t actions[] = {
         {.label = "Open / view", .value = "view"},
         {.label = "File info",   .value = "info"},
@@ -203,7 +199,7 @@ int filemanager_app_main(int argc, char **argv) {
         } else if (selected == 1) {
             result = filemanager__show_info(path);
         } else {
-            int process = app_runner__run_path(path, gui ? "--gui" : "", true);
+            int process = app_runner__run_path(path, gui ? "--gui" : "", BRUCE_LAUNCH_FOREGROUND);
             result = process > 0 ? BRUCE_OK : (bruce_result_t)process;
         }
         if (result != BRUCE_OK) filemanager__show_error(actions[selected].label, result);

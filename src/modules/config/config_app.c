@@ -221,8 +221,6 @@ static int config_app__display_cli(ArgParser *display_parser, ArgParser *buffere
 static void config_app__add_gui_option(ArgParser *parser) {
     ap_add_flag(parser, "gui");
     ap_set_opt_help(parser, "gui", "Use GUI interaction mode");
-    ap_add_flag(parser, "bg");
-    ap_set_opt_help(parser, "bg", "Do not claim foreground at startup");
 }
 
 int config_app_main(int argc, char **argv) {
@@ -297,13 +295,6 @@ int config_app_main(int argc, char **argv) {
                ap_found(display, "gui") || ap_found(display_buffered, "gui");
     ArgParser *action = clock_hierarchy ? ap_get_cmd_parser(clock) : NULL;
     if (action != NULL) gui = gui || ap_found(action, "gui");
-    if (gui && !app_runner__args_have_background(argc, argv)) {
-        bruce_result_t foreground = process__to_foreground();
-        if (foreground != BRUCE_OK) {
-            ap_free(root);
-            return foreground;
-        }
-    }
     int result;
     if (clock_hierarchy) {
         result = gui ? config_app__clock_gui()

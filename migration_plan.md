@@ -45,6 +45,8 @@ Deliver the lifetime model before adding dynamic apps.
 - Implement process creation, foreground stack, backgrounding, foregrounding,
   cooperative stop/pause/resume, force kill, process listing, and live-only wait.
 - Implement process-local universal resource registry and reverse-order cleanup.
+- Attach each managed task to its process record through FreeRTOS TLS and add a
+  bounded, inherited, runtime-only process environment.
 - Implement `memory__malloc()`/`memory__free()` accounting and automatic leak
   cleanup.
 - Implement `runtime__sleep()` and `runtime__delay()`.
@@ -60,6 +62,8 @@ Deliver uniform launch behavior.
 - Implement built-in registration and deterministic named resolution.
 - Implement `app_runner__run()`, shell-style argument parsing, and process-ID
   result/error behavior.
+- Implement complete command parsing with temporary `NAME=value` overlays and
+  `BG=0`/`BG=1` launch-mode selection.
 - Implement placeholder `.elf`/`.js` path validation ahead of Stage 3's
   loader registry (`app_runner__register_loader()`, `app_runner__run_path()`).
 - Implement app_runner `STARTING` state and `--gui` process context.
@@ -172,6 +176,8 @@ app receives it; GUI and terminal dialog paths both work.
 - Implement `serial_commands` as a thin parser: first token is app name,
   remainder is app_runner `arg`; the GUI terminal uses the same parser through
   a captured Core stdio session.
+- Distinguish shell-local variables from exported process environment and make
+  `NAME=value command` a temporary child overlay.
 - Route JS `serial.cmd()` to the same parser.
 - Port `bruce_launcher` menu composition from legacy `menu_items`; each feature
   becomes a module command instead of Core menu code.

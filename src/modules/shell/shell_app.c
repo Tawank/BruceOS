@@ -6,18 +6,32 @@
 
 #include "args.h"
 #include "core_sdk/app_runner.h"
+#include "core_sdk/environment.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
 #include "shell_executor.h"
+#include "shell_builtins.h"
 #include "shell_console.h"
 #include "shell_history.h"
 #include "shell_internal.h"
 #include "shell_parser.h"
 
-void shell__state_init(shell_state_t *state) { memset(state, 0, sizeof(*state)); }
+void shell__state_init(shell_state_t *state) {
+    memset(state, 0, sizeof(*state));
+    size_t count = environment__count();
+    for (size_t i = 0; i < count; ++i) {
+        const char *name = NULL;
+        const char *value = NULL;
+        if (environment__get_at(i, &name, &value) != BRUCE_OK ||
+            shell_builtins__set(state, name, value) != 0) {
+            continue;
+        }
+        state->variables[state->variable_count - 1].exported = true;
+    }
+}
 
 void shell__state_free(shell_state_t *state) {
     if (state == NULL) return;
@@ -228,10 +242,13 @@ bool shell__quote_arg(const char *text, char *out, size_t capacity) {
     return true;
 }
 
-int shell_loader__run_path(const char *path, const char *arg, bool in_background) {
+int shell_loader__run_path(
+    const char *path, const char *arg, bruce_launch_mode_t mode,
+    const bruce_environment_variable_t *environment, size_t environment_count
+) {
     if (path == NULL) return BRUCE_ERR_INVALID_PATH;
     if (arg != NULL && arg[0] != '\0') return BRUCE_ERR_UNSUPPORTED;
     char arguments[BRUCE_STORAGE_PATH_MAX * 2];
     if (!shell__quote_arg(path, arguments, sizeof(arguments))) return BRUCE_ERR_INVALID_PATH;
-    return app_runner__run("shell", arguments, in_background);
+    return app_runner__run_with_environment("shell", arguments, mode, environment, environment_count);
 }

@@ -17,6 +17,7 @@
 typedef struct {
     char *name;
     char *value;
+    bool exported;
 } shell_variable_t;
 
 typedef struct {

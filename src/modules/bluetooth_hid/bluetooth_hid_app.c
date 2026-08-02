@@ -158,10 +158,6 @@ static int bluetooth_hid_app__gui(void) {
 
 int bluetooth_hid_app_main(int argc, char **argv) {
     if (app_runner__args_have_gui(argc, argv)) {
-        if (!app_runner__args_have_background(argc, argv)) {
-            bruce_result_t foreground = process__to_foreground();
-            if (foreground != BRUCE_OK) return foreground;
-        }
         return bluetooth_hid_app__gui();
     }
 

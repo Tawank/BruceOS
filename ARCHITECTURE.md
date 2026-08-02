@@ -95,17 +95,17 @@ instead of leaving an unowned display.
 
 `bruce_launcher` is an application, not Core.  It reads `/launcher.json` and
 builds a nested menu from it.  Top-level keys are menu labels; values are either
-a command string (dispatched as-is to `app_runner__run()` or
-`app_runner__run_path()`), a string path starting with `/` that enumerates a
+ a command string (dispatched as-is to `app_runner__run_command()`), a string path starting with `/` that enumerates a
 directory (e.g., `"Apps@apps": "/apps"`), or another object defining a submenu.
 Labels may end with `@icon-name`; the suffix is hidden from the displayed label
 and resolved directly through `icon__get()`. Labels without a suffix have no
 launcher icon.
 Every submenu automatically appends a `"Back"` entry.  The command strings are
 passed exactly as written; the launcher does not append `--gui` automatically.
-The launcher starts every command and discovered path in the background. An
-application that wants to draw calls `process__to_foreground()` itself; an exact
-`--bg` argument lets the application suppress that startup claim.
+The launcher starts commands in the foreground by default. A leading `BG=1`
+assignment starts one in the background; `BG=0` explicitly selects foreground.
+Applications begin in the final state chosen by AppRunner and do not repair
+their own startup state.
 If `/launcher.json` is missing, the launcher writes a default configuration.
 
 The built-in `apps` module provides the default launcher's application browser.
@@ -138,7 +138,7 @@ it was itself launched with `--gui` and resumes when the child yields or exits.
 The public named-run API is:
 
 ```c
-int app_runner__run(const char *app_name, const char *arg, bool in_background);
+int app_runner__run(const char *app_name, const char *arg, bruce_launch_mode_t mode);
 ```
 
 It returns a positive Core process ID on success and a negative `BRUCE_ERR_*`
@@ -185,7 +185,7 @@ Any caller — including `app_runner__run()` itself — that needs to start an
 arbitrary path rather than a `/bin/<name>` command uses the loader-agnostic:
 
 ```c
-int app_runner__run_path(const char *path, const char *arg, bool in_background);
+int app_runner__run_path(const char *path, const char *arg, bruce_launch_mode_t mode);
 ```
 
 which accepts normalized absolute paths and `./` relative paths (which are
@@ -212,7 +212,8 @@ bruce_result_t app_runner__register_loader(const char *extension, int priority,
 
 `extension` includes the leading dot (for example `.elf`); `priority` breaks
 ties when more than one candidate file matches an app name, lower first.
-`run_fn` matches `app_runner__run_path()`'s signature e.g., `elf_loader__app_main`.  
+`run_fn` receives the path, argument text, launch mode, and temporary environment
+overlay used by `app_runner__run_path_with_environment()`.
 Registration happens once at boot, alongside built-in command registration, in main.c, 
 before the first named-run or path-run call. A duplicate extension registration is a startup
 error, the same as a duplicate built-in command name.
@@ -222,15 +223,10 @@ gets from `app_runner__register()`, so loaders get two extra public
 primitives:
 
 ```c
-int app_runner__spawn_loader_process(const char *permission_key, bool gui_requested,
-                                   bool in_background, uint32_t stack_size,
-                                   bruce_loader_process_entry_fn entry, void *ctx);
+int app_runner__spawn_loader_process(/* permission, GUI, launch mode,
+                                      environment overlay, entry, context */);
 
-int app_runner__spawn_loader_process_owned(const char *permission_key,
-                                   bool gui_requested, bool in_background,
-                                   uint32_t stack_size,
-                                   bruce_loader_process_entry_fn entry, void *ctx,
-                                   bruce_loader_process_cleanup_fn cleanup);
+int app_runner__spawn_loader_process_owned(/* same, plus cleanup callback */);
 ```
 
 ```c
@@ -291,17 +287,27 @@ third-party loader someone else registers the same way.
 
 ### Process lifecycle
 
-Every run creates a Core-managed process.  A normal named run starts foreground;
-`in_background` supports autostart and services.  The Core keeps a foreground
+Every run creates a Core-managed process. The caller supplies a foreground or
+background default. The Core keeps a foreground
 stack: foregrounding a new process pushes the prior process; exit or
 `process__to_background()` restores the most recent foreground process, falling
 back to `bruce_launcher`.
 
-Launcher and terminal front ends use background-first dispatch. Graphical apps
-claim foreground with `process__to_foreground()` immediately before interaction;
-this also dynamically marks the caller GUI-capable. Built-ins honor exact
-`--bg` by not making that startup claim. `--gui` selects a GUI frontend but does
-not itself determine foreground ownership.
+Complete command lines use `app_runner__run_command()`. Leading `NAME=value`
+assignments form a temporary child environment overlay. Exact `BG=0` and `BG=1`
+override the caller's default launch mode; other values are rejected. Launcher
+commands default to foreground, autostart and WebUI commands default to
+background, and `--gui` selects a GUI frontend without determining ownership.
+The initial state is established before application entry. Later cooperative
+foreground/background transitions remain available through the Process API.
+
+Each managed process has a runtime-only exported environment. Core deep-copies
+the parent's environment and applies temporary launch assignments before task
+creation, so parent, child, and sibling mutations are isolated. A single
+FreeRTOS task-local-storage pointer identifies the Core process record; the
+record owns environment entries and releases them on normal exit or force-kill.
+Environment is not stored in NVS, LittleFS, or `/bruce.json`; persistent device
+settings remain Config state.
 
 Backgrounding changes state and physical-input ownership. A background GUI process
 is hidden unless the launcher assigns it a compositor tile; hidden drawing is a
@@ -413,7 +419,7 @@ empty array.  A complete example is:
 {
   "appName": "Example app",
   "appIcon": "<Base64 128-byte bitmap>",
-  "coreAbiVersion": 3,
+  "coreAbiVersion": 4,
   "permissions": ["wifi", "http"],
   "stackSize": 8192
 }
@@ -497,8 +503,8 @@ the normal JS lifecycle entry.  `serial.cmd(command)` delegates to the same
 `terminal` is a GUI-by-default built-in. It owns one persistent background
 `shell` child, displays the child's captured stdout/stderr, and routes input
 bytes to its stdin. Shell variables therefore persist for the terminal lifetime.
-Graphical commands explicitly claim foreground and return to the terminal when
-they exit. Back terminates the shell before closing. The physical
+Foreground commands displace the terminal and return to it when they exit. Back
+terminates the shell before closing. The physical
 `serial_commands` frontend runs the same interactive shell language. The
 configured ESP-IDF console transport and its input driver remain Core-owned.
 
@@ -520,10 +526,13 @@ supports whitespace-delimited words, literal single quotes, expandable double
 quotes, backslash escaping, `NAME=value`, `$NAME`, `${NAME}`, `$?`, token-boundary
 comments, and left-to-right `;`, `&&`, and `||`. A single bounded pipeline may
 feed `text` from `echo` or an external producer, for example
-`cat /notes.txt | text` or `cat /notes.txt | text /copy.txt`. Its bounded variables persist
-across interactive input and script lines. Builtins are `echo`, `true`, `false`,
+`cat /notes.txt | text` or `cat /notes.txt | text /copy.txt`. Its bounded local
+variables persist across interactive input and script lines. `export NAME=value`
+or `export NAME` publishes a value to the shell process environment, and
+`NAME=value command` applies only to that child. Builtins are `echo`, `true`, `false`,
 `set`, `unset`, `export`, `clear`, `exit`, and `help`; other names and absolute/`./` paths
-launch through AppRunner in Core-background mode and are synchronously reaped.
+launch through AppRunner in foreground mode and are synchronously reaped. `BG=1`
+changes the process state but does not turn synchronous shell execution into job control.
 The `.sh` loader invokes this built-in for absolute scripts. Command
 substitution, globbing, subshells, functions, positional parameters, general or
 chained pipelines, and redirection are deferred. Unsupported pipeline forms and
@@ -670,8 +679,9 @@ Boot starts with an empty in-RAM swap allocation table, and free only unmaps and
 marks pages reusable. Stale flash is erased lazily when those pages are next
 allocated, as required by flash write semantics.
 
-Every process has one universal resource registry in thread-local storage.  Core
-services register opaque handles and Core-owned cleanup callbacks for memory,
+Every process record owns one universal resource registry, and one FreeRTOS TLS
+pointer associates the current task with that record. Core services register
+opaque handles and Core-owned cleanup callbacks for memory,
 files, sockets, viewers, radios, and similar resources.  Apps cannot register
 arbitrary callbacks.  At normal exit or kill, Core reads the registry before
 the process disappears and cleans resources in reverse acquisition order.

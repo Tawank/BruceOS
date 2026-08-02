@@ -15,6 +15,7 @@
 #include "core_sdk/dialog.h"       // IWYU pragma: export
 #include "core_sdk/disk.h"         // IWYU pragma: export
 #include "core_sdk/display.h"      // IWYU pragma: export
+#include "core_sdk/environment.h"  // IWYU pragma: export
 #include "core_sdk/gpio.h"         // IWYU pragma: export
 #include "core_sdk/http.h"         // IWYU pragma: export
 #include "core_sdk/i2c.h"          // IWYU pragma: export
@@ -45,7 +46,7 @@
  *
  * Example:
  *   BRUCE_APP_MANIFEST("{\"appName\":\"My app\",\"appIcon\":\"...\","
- *                       "\"coreAbiVersion\":3,\"stackSize\":8192}");
+ *                       "\"coreAbiVersion\":4,\"stackSize\":8192}");
  */
 #define BRUCE_APP_MANIFEST(json) \
     __attribute__((section(".bruce.manifest"), used)) \

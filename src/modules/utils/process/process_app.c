@@ -168,12 +168,7 @@ process_app__preview_draw_page(const bruce_process_snapshot_t *processes, size_t
     return display__set_tiles(tiles, count);
 }
 
-static int process_app__preview(bool background) {
-    if (!background) {
-        bruce_result_t foreground = process__to_foreground();
-        if (foreground != BRUCE_OK) { return foreground; }
-    }
-
+static int process_app__preview(void) {
     size_t page = 0;
     int selected = 0;
     bool redraw = true;
@@ -277,8 +272,6 @@ int process_app_main(int argc, char **argv) {
     ap_add_required_arg(kill_command, "target", "Process ID or exact process name");
     ap_unknown_options_as_args(kill_command);
     ap_set_helptext(preview_command, "Tile background GUI apps in a live preview grid");
-    ap_add_flag(preview_command, "bg");
-    ap_set_opt_help(preview_command, "bg", "Do not claim foreground at startup");
 
     if (!ap_parse(root, argc, argv)) {
         ap_status_t status = ap_get_status(root);
@@ -302,7 +295,7 @@ int process_app_main(int argc, char **argv) {
     } else if (command == kill_command) {
         result = process_app__kill(ap_get_arg(kill_command, "target"));
     } else if (command == preview_command) {
-        result = process_app__preview(app_runner__args_have_background(argc, argv));
+        result = process_app__preview();
     } else {
         ap_print_help(root);
         result = BRUCE_ERR_INVALID_ARGUMENT;

@@ -1,5 +1,6 @@
 #include "core/storage/storage.h"
 #include "core_sdk/app_runner.h"
+#include "core_sdk/environment.h"
 #include "core_sdk/process.h"
 #include "fake_elf.h"
 #include "modules/loaders/elf/elf_loader_app.h"
@@ -37,7 +38,7 @@ bool selftest__run_apprunner_registration_case(void) {
         printf("[selftest] apprunner/registration: NULL name was accepted\n");
         return false;
     }
-    if (app_runner__run("selftest_apprunner_unregistered_app", "", false) != BRUCE_ERR_NOT_FOUND) {
+    if (app_runner__run("selftest_apprunner_unregistered_app", "", BRUCE_LAUNCH_FOREGROUND) != BRUCE_ERR_NOT_FOUND) {
         printf("[selftest] apprunner/registration: unknown app did not return BRUCE_ERR_NOT_FOUND\n");
         return false;
     }
@@ -62,6 +63,8 @@ typedef struct {
     volatile bool argv_terminated;
     volatile bool gui_requested;
     volatile bruce_process_state_t state;
+    char environment[32];
+    char inherited[32];
 } selftest__apprunner_echo_t;
 
 static selftest__apprunner_echo_t s_echo;
@@ -76,6 +79,13 @@ static int selftest__apprunner_echo_entry(int argc, char **argv) {
         s_echo.gui_requested = snapshot.gui_requested;
     }
     s_echo.argc = argc;
+    const char *environment = environment__get("TEST_VALUE");
+    snprintf(s_echo.environment, sizeof(s_echo.environment), "%s", environment != NULL ? environment : "");
+    const char *inherited = environment__get("INHERITED_VALUE");
+    snprintf(s_echo.inherited, sizeof(s_echo.inherited), "%s", inherited != NULL ? inherited : "");
+    if (argc > 1 && strcmp(argv[1], "mutate-environment") == 0) {
+        (void)environment__set("INHERITED_VALUE", "child");
+    }
     s_echo.argv_terminated = argv != NULL && argv[argc] == NULL;
     for (int i = 0; i < argc && i < 5; ++i) {
         strncpy(s_echo.argv_buf[i], argv[i], sizeof(s_echo.argv_buf[i]) - 1);
@@ -85,11 +95,9 @@ static int selftest__apprunner_echo_entry(int argc, char **argv) {
 }
 
 bool selftest__run_apprunner_args_case(void) {
-    char *lifecycle_argv[] = {"app", "--gui-mode", "--bg", "--gui", NULL};
-    if (!app_runner__args_have_gui(4, lifecycle_argv) ||
-        !app_runner__args_have_background(4, lifecycle_argv) ||
-        app_runner__args_have_gui(2, lifecycle_argv) || app_runner__args_have_background(2, lifecycle_argv)) {
-        printf("[selftest] apprunner/args: lifecycle flags were not matched exactly\n");
+    char *lifecycle_argv[] = {"app", "--gui-mode", "--gui", NULL};
+    if (!app_runner__args_have_gui(3, lifecycle_argv) || app_runner__args_have_gui(2, lifecycle_argv)) {
+        printf("[selftest] apprunner/args: GUI flag was not matched exactly\n");
         return false;
     }
     bruce_result_t registered = app_runner__register("selftest_echo", selftest__apprunner_echo_entry, 0);
@@ -99,7 +107,10 @@ bool selftest__run_apprunner_args_case(void) {
     }
 
     memset(&s_echo, 0, sizeof(s_echo));
-    int background_result = app_runner__run("selftest_echo", "--gui foo \"bar baz\" escaped\\ space", true);
+    int background_result = app_runner__run_command(
+        "TEST_VALUE=inherited BG=1 selftest_echo --gui foo \"bar baz\" escaped\\ space",
+        BRUCE_LAUNCH_FOREGROUND
+    );
     bruce_result_t background_wait = background_result > 0
                                          ? process__wait((bruce_process_id_t)background_result, 2000)
                                          : BRUCE_ERR_INVALID_ARGUMENT;
@@ -115,7 +126,8 @@ bool selftest__run_apprunner_args_case(void) {
                          strcmp(s_echo.argv_buf[1], "--gui") == 0 && strcmp(s_echo.argv_buf[2], "foo") == 0 &&
                          strcmp(s_echo.argv_buf[3], "bar baz") == 0 &&
                          strcmp(s_echo.argv_buf[4], "escaped space") == 0 && s_echo.argv_terminated &&
-                         s_echo.gui_requested && s_echo.state == BRUCE_PROCESS_BACKGROUND;
+                          s_echo.gui_requested && s_echo.state == BRUCE_PROCESS_BACKGROUND &&
+                          strcmp(s_echo.environment, "inherited") == 0;
     if (!background_ok) {
         printf(
             "[selftest] apprunner/args: background argc=%d gui=%d state=%d argv=[%s|%s|%s|%s|%s]\n",
@@ -132,7 +144,9 @@ bool selftest__run_apprunner_args_case(void) {
     }
 
     memset(&s_echo, 0, sizeof(s_echo));
-    int foreground_result = app_runner__run("selftest_echo", "one two", false);
+    int foreground_result = app_runner__run_command(
+        "BG=0 selftest_echo one two", BRUCE_LAUNCH_BACKGROUND
+    );
     bruce_result_t foreground_wait = foreground_result > 0
                                          ? process__wait((bruce_process_id_t)foreground_result, 2000)
                                          : BRUCE_ERR_INVALID_ARGUMENT;
@@ -155,6 +169,24 @@ bool selftest__run_apprunner_args_case(void) {
         );
         return false;
     }
+    if (app_runner__run_command("BG=invalid selftest_echo", BRUCE_LAUNCH_BACKGROUND) !=
+        BRUCE_ERR_INVALID_ARGUMENT) {
+        printf("[selftest] apprunner/args: invalid BG value was accepted\n");
+        return false;
+    }
+
+    if (environment__set("INHERITED_VALUE", "parent") != BRUCE_OK) return false;
+    memset(&s_echo, 0, sizeof(s_echo));
+    int inherited_result = app_runner__run(
+        "selftest_echo", "mutate-environment", BRUCE_LAUNCH_BACKGROUND
+    );
+    if (inherited_result <= 0 || process__wait((bruce_process_id_t)inherited_result, 2000) != BRUCE_OK ||
+        strcmp(s_echo.inherited, "parent") != 0 ||
+        strcmp(environment__get("INHERITED_VALUE"), "parent") != 0) {
+        printf("[selftest] apprunner/args: environment inheritance was not isolated\n");
+        return false;
+    }
+    (void)environment__unset("INHERITED_VALUE");
 
     printf("[selftest] apprunner/args: OK\n");
     return true;
@@ -168,7 +200,7 @@ bool selftest__run_apprunner_resolution_case(void) {
     storage__remove(elf_path);
     storage__remove(js_path);
 
-    int result = app_runner__run(SELFTEST_APPRUNNER_RESOLUTION_NAME, "", true);
+    int result = app_runner__run(SELFTEST_APPRUNNER_RESOLUTION_NAME, "", BRUCE_LAUNCH_BACKGROUND);
     if (result != BRUCE_ERR_NOT_FOUND) {
         printf("[selftest] apprunner/resolution: missing target returned %d\n", result);
         return false;
@@ -196,7 +228,7 @@ bool selftest__run_apprunner_resolution_case(void) {
         printf("[selftest] apprunner/resolution: created JS path is not visible\n");
         return false;
     }
-    result = app_runner__run(SELFTEST_APPRUNNER_RESOLUTION_NAME, "", true);
+    result = app_runner__run(SELFTEST_APPRUNNER_RESOLUTION_NAME, "", BRUCE_LAUNCH_BACKGROUND);
     if (result <= 0) {
         printf("[selftest] apprunner/resolution: JS-only target did not spawn (%d)\n", result);
         storage__remove(js_path);
@@ -212,7 +244,7 @@ bool selftest__run_apprunner_resolution_case(void) {
         return false;
     }
     size_t elf_calls = elf_loader__debug_call_count();
-    result = app_runner__run(SELFTEST_APPRUNNER_RESOLUTION_NAME, "", true);
+    result = app_runner__run(SELFTEST_APPRUNNER_RESOLUTION_NAME, "", BRUCE_LAUNCH_BACKGROUND);
     elf_calls++;
     bool spawned = result > 0 && elf_loader__debug_call_count() == elf_calls;
     if (spawned) { (void)process__wait((bruce_process_id_t)result, 2000); }

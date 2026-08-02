@@ -5,8 +5,14 @@
 #include <stdint.h>
 
 #include "core_sdk/result.h"
+#include "core_sdk/environment.h"
 
 typedef int (*bruce_app_entry_t)(int argc, char **argv);
+
+typedef enum {
+    BRUCE_LAUNCH_FOREGROUND = 0,
+    BRUCE_LAUNCH_BACKGROUND = 1,
+} bruce_launch_mode_t;
 
 /* Registers a built-in command.  Returns BRUCE_ERR_ALREADY_EXISTS for a
  * duplicate name and BRUCE_ERR_RESOURCE_LIMIT if the registry is full. */
@@ -26,7 +32,19 @@ const char *app_runner__command_name(size_t index);
  * conventional C arguments: argv[0] is `app_name`, argv[argc] is NULL, and
  * NULL or an empty `arg` therefore creates argc == 1. Loader-resolved
  * applications define their own argv[0] convention. */
-int app_runner__run(const char *app_name, const char *arg, bool in_background);
+int app_runner__run(const char *app_name, const char *arg, bruce_launch_mode_t mode);
+
+/* Launches with temporary child environment assignments. The overlay is
+ * deep-copied before this function returns. */
+int app_runner__run_with_environment(
+    const char *app_name, const char *arg, bruce_launch_mode_t mode,
+    const bruce_environment_variable_t *environment, size_t environment_count
+);
+
+/* Parses a complete command line, including leading NAME=value assignments.
+ * An explicit BG=0 or BG=1 selects foreground/background; otherwise
+ * default_mode is used. BG is still included in the child's environment. */
+int app_runner__run_command(const char *command_line, bruce_launch_mode_t default_mode);
 
 /* Shell-style tokenizer shared by app_runner__run()'s own named resolution
  * and by every loader module's run_fn, so quoting/escaping rules are
@@ -50,7 +68,3 @@ void app_runner__free_args(char **argv, int argc);
  * this for the process context they spawn (see migration_plan.md, "Dialog
  * and process interaction"). */
 bool app_runner__args_have_gui(int argc, char *const *argv);
-
-/* Returns true if any argv element is exactly "--bg". GUI applications use
- * this to suppress their normal startup foreground claim. */
-bool app_runner__args_have_background(int argc, char *const *argv);

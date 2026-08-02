@@ -12,12 +12,13 @@
 #include "core_sdk/storage.h"
 
 #include <stdbool.h>
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 
-#define APP_RUNNER_MAX_APPS 40
+#define APP_RUNNER_MAX_APPS 48
 #define APP_RUNNER_PATH_MAX 160
 #define APP_RUNNER_MAX_LOADERS 12
 #define APP_RUNNER_LOADER_EXTENSION_MAX 16
@@ -39,6 +40,10 @@ typedef struct {
 
 static app_runner_loader_t s_loaders[APP_RUNNER_MAX_LOADERS];
 static int s_loader_count;
+
+static bool app_runner__mode_valid(bruce_launch_mode_t mode) {
+    return mode == BRUCE_LAUNCH_FOREGROUND || mode == BRUCE_LAUNCH_BACKGROUND;
+}
 
 bruce_result_t app_runner__register(const char *name, bruce_app_entry_t entry, uint32_t stack_bytes) {
     if (name == NULL || name[0] == '\0' || entry == NULL) {
@@ -146,7 +151,11 @@ static int app_runner__loader_priority_order(int *order) {
     return s_loader_count;
 }
 
-int app_runner__run_path(const char *path, const char *arg, bool in_background) {
+int app_runner__run_path_with_environment(
+    const char *path, const char *arg, bruce_launch_mode_t mode,
+    const bruce_environment_variable_t *environment, size_t environment_count
+) {
+    if (!app_runner__mode_valid(mode)) return BRUCE_ERR_INVALID_ARGUMENT;
     if (!app_runner__path_is_valid(path)) { return BRUCE_ERR_INVALID_PATH; }
 
     bruce_result_t permission_result = permission__check(BRUCE_PERMISSION_EXECUTE);
@@ -162,23 +171,29 @@ int app_runner__run_path(const char *path, const char *arg, bool in_background) 
         // printf("app_runner__run_path: normalized_path=%s, loader=NULL\n", normalized_path);
         return BRUCE_ERR_NOT_FOUND;
     }
-    return loader->run_fn(normalized_path, arg, in_background);
+    return loader->run_fn(normalized_path, arg, mode, environment, environment_count);
+}
+
+int app_runner__run_path(const char *path, const char *arg, bruce_launch_mode_t mode) {
+    return app_runner__run_path_with_environment(path, arg, mode, NULL, 0);
 }
 
 int app_runner__spawn_loader_process(
-    const char *permission_key, bool gui_requested, bool in_background, uint32_t stack_size,
+    const char *permission_key, bool gui_requested, bruce_launch_mode_t mode, uint32_t stack_size,
+    const bruce_environment_variable_t *environment, size_t environment_count,
     bruce_loader_process_entry_fn entry, void *context
 ) {
     return app_runner__spawn_loader_process_owned(
-        permission_key, gui_requested, in_background, stack_size, entry, context, NULL
+        permission_key, gui_requested, mode, stack_size, environment, environment_count, entry, context, NULL
     );
 }
 
 int app_runner__spawn_loader_process_owned(
-    const char *permission_key, bool gui_requested, bool in_background, uint32_t stack_size,
+    const char *permission_key, bool gui_requested, bruce_launch_mode_t mode, uint32_t stack_size,
+    const bruce_environment_variable_t *environment, size_t environment_count,
     bruce_loader_process_entry_fn entry, void *context, bruce_loader_process_cleanup_fn cleanup
 ) {
-    if (entry == NULL) { return BRUCE_ERR_INVALID_ARGUMENT; }
+    if (entry == NULL || !app_runner__mode_valid(mode)) { return BRUCE_ERR_INVALID_ARGUMENT; }
     process_create_params_t params = {
         .name = (permission_key != NULL && permission_key[0] != '\0') ? permission_key : "app",
         .entry = NULL,
@@ -187,7 +202,9 @@ int app_runner__spawn_loader_process_owned(
         .built_in = false,
         .gui_requested = gui_requested,
         .permission_key = permission_key,
-        .start_in_background = in_background,
+        .start_in_background = mode == BRUCE_LAUNCH_BACKGROUND,
+        .environment = environment,
+        .environment_count = environment_count,
         .stack_bytes = stack_size,
         .process_entry = entry,
         .process_entry_context = context,
@@ -317,14 +334,11 @@ bool app_runner__args_have_gui(int argc, char *const *argv) {
     return false;
 }
 
-bool app_runner__args_have_background(int argc, char *const *argv) {
-    for (int i = 0; i < argc; ++i) {
-        if (argv[i] != NULL && strcmp(argv[i], "--bg") == 0) return true;
-    }
-    return false;
-}
-
-int app_runner__run(const char *app_name, const char *arg, bool in_background) {
+int app_runner__run_with_environment(
+    const char *app_name, const char *arg, bruce_launch_mode_t mode,
+    const bruce_environment_variable_t *environment, size_t environment_count
+) {
+    if (!app_runner__mode_valid(mode)) return BRUCE_ERR_INVALID_ARGUMENT;
     if (app_name == NULL || app_name[0] == '\0') { return BRUCE_ERR_INVALID_ARGUMENT; }
 
     bruce_result_t permission_result = permission__check(BRUCE_PERMISSION_EXECUTE);
@@ -365,7 +379,9 @@ int app_runner__run(const char *app_name, const char *arg, bool in_background) {
             .argv = argv,
             .built_in = true,
             .gui_requested = app_runner__args_have_gui(argc, argv),
-            .start_in_background = in_background,
+            .start_in_background = mode == BRUCE_LAUNCH_BACKGROUND,
+            .environment = environment,
+            .environment_count = environment_count,
             .stack_bytes = 0,
         };
         for (int i = 0; i < s_app_count; ++i) {
@@ -392,12 +408,111 @@ int app_runner__run(const char *app_name, const char *arg, bool in_background) {
             int written = snprintf(path, sizeof(path), "/bin/%s%s", app_name, loader->extension);
             if (written < 0 || (size_t)written >= sizeof(path)) { continue; }
             if (storage__exists_internal(path)) {
-                result = loader->run_fn(path, arg, in_background);
+                result = loader->run_fn(path, arg, mode, environment, environment_count);
                 break;
             }
         }
     }
 
     app_runner__free_args(argv, argc);
+    return result;
+}
+
+int app_runner__run(const char *app_name, const char *arg, bruce_launch_mode_t mode) {
+    return app_runner__run_with_environment(app_name, arg, mode, NULL, 0);
+}
+
+static bool app_runner__environment_name_valid(const char *name) {
+    if (name == NULL || name[0] == '\0' ||
+        !(isalpha((unsigned char)name[0]) || name[0] == '_')) return false;
+    for (size_t i = 1; name[i] != '\0'; ++i) {
+        if (!(isalnum((unsigned char)name[i]) || name[i] == '_')) return false;
+    }
+    return strlen(name) < BRUCE_ENVIRONMENT_NAME_MAX;
+}
+
+static bool app_runner__append_quoted(char *out, size_t capacity, size_t *used, const char *value) {
+    size_t needed = *used > 0 ? 1u : 0u;
+    needed += 2u;
+    for (const char *p = value; *p != '\0'; ++p) needed += (*p == '\\' || *p == '"') ? 2u : 1u;
+    if (*used + needed >= capacity) return false;
+    if (*used > 0) out[(*used)++] = ' ';
+    out[(*used)++] = '"';
+    for (const char *p = value; *p != '\0'; ++p) {
+        if (*p == '\\' || *p == '"') out[(*used)++] = '\\';
+        out[(*used)++] = *p;
+    }
+    out[(*used)++] = '"';
+    out[*used] = '\0';
+    return true;
+}
+
+int app_runner__run_command(const char *command_line, bruce_launch_mode_t default_mode) {
+    if (command_line == NULL || !app_runner__mode_valid(default_mode)) return BRUCE_ERR_INVALID_ARGUMENT;
+    char **words = NULL;
+    int word_count = 0;
+    bruce_result_t parsed = app_runner__parse_args(command_line, &words, &word_count);
+    if (parsed != BRUCE_OK) return parsed;
+    if (word_count == 0) {
+        app_runner__free_args(words, word_count);
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+
+    bruce_environment_variable_t environment[BRUCE_ENVIRONMENT_MAX_VARIABLES];
+    size_t environment_count = 0;
+    int command_index = 0;
+    bruce_launch_mode_t mode = default_mode;
+    while (command_index < word_count) {
+        char *equals = strchr(words[command_index], '=');
+        if (equals == NULL) break;
+        *equals = '\0';
+        const char *name = words[command_index];
+        const char *value = equals + 1;
+        if (!app_runner__environment_name_valid(name) || strlen(value) >= BRUCE_ENVIRONMENT_VALUE_MAX ||
+            environment_count >= BRUCE_ENVIRONMENT_MAX_VARIABLES) {
+            app_runner__free_args(words, word_count);
+            return BRUCE_ERR_INVALID_ARGUMENT;
+        }
+        if (strcmp(name, "BG") == 0) {
+            if (strcmp(value, "0") == 0) mode = BRUCE_LAUNCH_FOREGROUND;
+            else if (strcmp(value, "1") == 0) mode = BRUCE_LAUNCH_BACKGROUND;
+            else {
+                app_runner__free_args(words, word_count);
+                return BRUCE_ERR_INVALID_ARGUMENT;
+            }
+        }
+        environment[environment_count++] = (bruce_environment_variable_t){.name = name, .value = value};
+        command_index++;
+    }
+    if (command_index >= word_count) {
+        app_runner__free_args(words, word_count);
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+
+    size_t argument_capacity = strlen(command_line) * 2u + 1u;
+    char *arguments = malloc(argument_capacity);
+    if (arguments == NULL) {
+        app_runner__free_args(words, word_count);
+        return BRUCE_ERR_NO_MEMORY;
+    }
+    arguments[0] = '\0';
+    size_t used = 0;
+    for (int i = command_index + 1; i < word_count; ++i) {
+        if (!app_runner__append_quoted(arguments, argument_capacity, &used, words[i])) {
+            free(arguments);
+            app_runner__free_args(words, word_count);
+            return BRUCE_ERR_RESOURCE_LIMIT;
+        }
+    }
+    const char *command = words[command_index];
+    int result = command[0] == '/' || strncmp(command, "./", 2) == 0
+                     ? app_runner__run_path_with_environment(
+                           command, used > 0 ? arguments : NULL, mode, environment, environment_count
+                       )
+                     : app_runner__run_with_environment(
+                           command, used > 0 ? arguments : NULL, mode, environment, environment_count
+                       );
+    free(arguments);
+    app_runner__free_args(words, word_count);
     return result;
 }

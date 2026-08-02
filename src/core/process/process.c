@@ -4,6 +4,7 @@
 #include "core/event_loop/event_loop.h"
 #include "core/stdio/stdio.h"
 #include "core_sdk/display.h"
+#include "core_sdk/environment.h"
 #include "core_sdk/permission.h"
 #include "core_sdk/process.h"
 #include "core_sdk/runtime.h"
@@ -28,6 +29,16 @@
 #define PROCESS__EVT_EVENT_WAKE (1u << 2)
 #define PROCESS__EVT_WAITER_WAKE (1u << 3)
 #define PROCESS__EVT_OPERATION_IDLE (1u << 4)
+/* ESP-IDF pthread reserves slot 0 in pthread_local_storage.c. */
+#define PROCESS__TLS_SLOT 1
+#if CONFIG_FREERTOS_THREAD_LOCAL_STORAGE_POINTERS <= PROCESS__TLS_SLOT
+#error "Bruce Core requires a dedicated FreeRTOS TLS pointer after the pthread slot"
+#endif
+
+typedef struct {
+    char *name;
+    char *value;
+} process__environment_entry_t;
 
 typedef struct {
     bruce_resource_id_t id;
@@ -76,6 +87,9 @@ typedef struct {
     uint32_t last_runtime_counter;
     uint32_t cpu_percent;
     uint32_t stack_high_water_bytes;
+    process__environment_entry_t *environment;
+    size_t environment_count;
+    size_t environment_capacity;
 } process__record_t;
 
 typedef struct {
@@ -327,6 +341,99 @@ static void process__free_argv(int argc, char **argv) {
     free(argv);
 }
 
+static bool process__environment_name_valid(const char *name) {
+    if (name == NULL || name[0] == '\0') return false;
+    size_t length = strlen(name);
+    if (length >= BRUCE_ENVIRONMENT_NAME_MAX ||
+        !((name[0] >= 'A' && name[0] <= 'Z') || (name[0] >= 'a' && name[0] <= 'z') || name[0] == '_')) {
+        return false;
+    }
+    for (size_t i = 1; i < length; ++i) {
+        char c = name[i];
+        if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_')) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static int process__environment_find(const process__record_t *record, const char *name) {
+    for (size_t i = 0; i < record->environment_count; ++i) {
+        if (strcmp(record->environment[i].name, name) == 0) return (int)i;
+    }
+    return -1;
+}
+
+static void process__environment_free(process__record_t *record) {
+    for (size_t i = 0; i < record->environment_count; ++i) {
+        free(record->environment[i].name);
+        free(record->environment[i].value);
+    }
+    free(record->environment);
+    record->environment = NULL;
+    record->environment_count = 0;
+    record->environment_capacity = 0;
+}
+
+static bruce_result_t process__environment_set_locked(process__record_t *record, const char *name, const char *value) {
+    if (!process__environment_name_valid(name) || value == NULL || strlen(value) >= BRUCE_ENVIRONMENT_VALUE_MAX) {
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    char *value_copy = strdup(value);
+    if (value_copy == NULL) return BRUCE_ERR_NO_MEMORY;
+    int index = process__environment_find(record, name);
+    if (index >= 0) {
+        free(record->environment[index].value);
+        record->environment[index].value = value_copy;
+        return BRUCE_OK;
+    }
+    if (record->environment_count >= BRUCE_ENVIRONMENT_MAX_VARIABLES) {
+        free(value_copy);
+        return BRUCE_ERR_RESOURCE_LIMIT;
+    }
+    if (record->environment_count == record->environment_capacity) {
+        size_t capacity = record->environment_capacity == 0 ? 4 : record->environment_capacity * 2;
+        if (capacity > BRUCE_ENVIRONMENT_MAX_VARIABLES) capacity = BRUCE_ENVIRONMENT_MAX_VARIABLES;
+        process__environment_entry_t *grown = realloc(record->environment, capacity * sizeof(*grown));
+        if (grown == NULL) {
+            free(value_copy);
+            return BRUCE_ERR_NO_MEMORY;
+        }
+        record->environment = grown;
+        record->environment_capacity = capacity;
+    }
+    char *name_copy = strdup(name);
+    if (name_copy == NULL) {
+        free(value_copy);
+        return BRUCE_ERR_NO_MEMORY;
+    }
+    record->environment[record->environment_count++] = (process__environment_entry_t){
+        .name = name_copy,
+        .value = value_copy,
+    };
+    return BRUCE_OK;
+}
+
+static bruce_result_t process__environment_inherit_locked(
+    process__record_t *record, const process__record_t *parent,
+    const bruce_environment_variable_t *overlay, size_t overlay_count
+) {
+    if (overlay_count > 0 && overlay == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    if (parent != NULL) {
+        for (size_t i = 0; i < parent->environment_count; ++i) {
+            bruce_result_t result = process__environment_set_locked(
+                record, parent->environment[i].name, parent->environment[i].value
+            );
+            if (result != BRUCE_OK) return result;
+        }
+    }
+    for (size_t i = 0; i < overlay_count; ++i) {
+        bruce_result_t result = process__environment_set_locked(record, overlay[i].name, overlay[i].value);
+        if (result != BRUCE_OK) return result;
+    }
+    return BRUCE_OK;
+}
+
 static bool process__dup_argv(int argc, char *const *src_argv, char ***out_argv) {
     *out_argv = NULL;
     if (argc <= 0) { return true; }
@@ -370,6 +477,10 @@ static void process__teardown_locked(process__record_t *record, const bruce_proc
     process__foreground_recompute_locked();
     process__free_argv(record->argc, record->argv);
     record->argv = NULL;
+    if (record->handle != NULL && record->handle == xTaskGetCurrentTaskHandle()) {
+        vTaskSetThreadLocalStoragePointer(record->handle, PROCESS__TLS_SLOT, NULL);
+    }
+    process__environment_free(record);
 
     process__publish_completion_locked(record, status);
     record->in_use = false;
@@ -383,6 +494,8 @@ static void process__trampoline(void *arg) {
     FILE *stdio_input = NULL;
     FILE *stdio_output = NULL;
     FILE *stdio_error = NULL;
+
+    vTaskSetThreadLocalStoragePointer(NULL, PROCESS__TLS_SLOT, record);
 
     /* The record was created in BRUCE_PROCESS_STARTING; this is the first thing
      * the new process does once FreeRTOS actually schedules it, and still runs
@@ -398,13 +511,6 @@ static void process__trampoline(void *arg) {
         process__unlock();
         vTaskDelete(NULL);
         return;
-    }
-    if (record->start_in_background) {
-        record->state = BRUCE_PROCESS_BACKGROUND;
-        display__process_state_changed(record->id, record->state);
-    } else {
-        record->state = BRUCE_PROCESS_BACKGROUND;
-        process__foreground_push_locked(record->id);
     }
     process__unlock();
 
@@ -479,6 +585,16 @@ process_registry__create(const process_create_params_t *params, bruce_process_id
          * launches, not only use it for the shell's own stdin/stdout. */
         record->child_stdio_session = parent->child_stdio_session;
     }
+    bruce_result_t environment_result = process__environment_inherit_locked(
+        record, parent, params->environment, params->environment_count
+    );
+    if (environment_result != BRUCE_OK) {
+        process__environment_free(record);
+        record->in_use = false;
+        process__unlock();
+        process__free_argv(params->argc, argv_copy);
+        return environment_result;
+    }
     strncpy(
         record->name,
         params->name != NULL && params->name[0] != '\0' ? params->name : "app",
@@ -503,23 +619,87 @@ process_registry__create(const process_create_params_t *params, bruce_process_id
         PROCESS__EVT_WAKE | PROCESS__EVT_EXITED | PROCESS__EVT_EVENT_WAKE | PROCESS__EVT_WAITER_WAKE
     );
 
-    /* record->state is already BRUCE_PROCESS_STARTING from the memset above
-     * (BRUCE_PROCESS_STARTING == 0); process__trampoline() performs the actual
-     * foreground/background transition once the process begins running. */
-
     uint32_t stack_bytes = params->stack_bytes != 0 ? params->stack_bytes : PROCESS__DEFAULT_STACK_BYTES;
     BaseType_t created = xTaskCreate(
         process__trampoline, record->name, stack_bytes, record, tskIDLE_PRIORITY + 1, &record->handle
     );
     if (created != pdPASS) {
         process__free_argv(record->argc, record->argv);
+        process__environment_free(record);
         record->in_use = false;
         process__unlock();
         return BRUCE_ERR_NO_MEMORY;
     }
 
     display__process_created(record->id, record->gui_requested);
+    record->state = BRUCE_PROCESS_BACKGROUND;
+    if (record->start_in_background) {
+        display__process_state_changed(record->id, record->state);
+    } else {
+        process__foreground_push_locked(record->id);
+    }
     *out_process_id = record->id;
+    process__unlock();
+    return BRUCE_OK;
+}
+
+static process__record_t *process__current_record(void) {
+    return (process__record_t *)pvTaskGetThreadLocalStoragePointer(NULL, PROCESS__TLS_SLOT);
+}
+
+const char *environment__get(const char *name) {
+    if (!process__environment_name_valid(name)) return NULL;
+    process__record_t *record = process__current_record();
+    if (record == NULL) return NULL;
+    process__lock();
+    int index = process__environment_find(record, name);
+    const char *value = index >= 0 ? record->environment[index].value : NULL;
+    process__unlock();
+    return value;
+}
+
+bruce_result_t environment__set(const char *name, const char *value) {
+    process__record_t *record = process__current_record();
+    if (record == NULL) return BRUCE_ERR_INVALID_STATE;
+    process__lock();
+    bruce_result_t result = process__environment_set_locked(record, name, value);
+    process__unlock();
+    return result;
+}
+
+bruce_result_t environment__unset(const char *name) {
+    if (!process__environment_name_valid(name)) return BRUCE_ERR_INVALID_ARGUMENT;
+    process__record_t *record = process__current_record();
+    if (record == NULL) return BRUCE_ERR_INVALID_STATE;
+    process__lock();
+    int index = process__environment_find(record, name);
+    if (index >= 0) {
+        free(record->environment[index].name);
+        free(record->environment[index].value);
+        size_t last = record->environment_count - 1;
+        if ((size_t)index != last) record->environment[index] = record->environment[last];
+        record->environment_count--;
+    }
+    process__unlock();
+    return BRUCE_OK;
+}
+
+size_t environment__count(void) {
+    process__record_t *record = process__current_record();
+    return record != NULL ? record->environment_count : 0;
+}
+
+bruce_result_t environment__get_at(size_t index, const char **out_name, const char **out_value) {
+    if (out_name == NULL || out_value == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    process__record_t *record = process__current_record();
+    if (record == NULL) return BRUCE_ERR_INVALID_STATE;
+    process__lock();
+    if (index >= record->environment_count) {
+        process__unlock();
+        return BRUCE_ERR_NOT_FOUND;
+    }
+    *out_name = record->environment[index].name;
+    *out_value = record->environment[index].value;
     process__unlock();
     return BRUCE_OK;
 }
@@ -1116,7 +1296,10 @@ bruce_result_t process__kill(bruce_process_id_t process_id) {
 
     /* Arbitrary application-owned mutexes cannot be recovered after a force
      * delete, which remains the documented limitation of process__kill(). */
-    if (handle != NULL) { vTaskDelete(handle); }
+    if (handle != NULL) {
+        vTaskSetThreadLocalStoragePointer(handle, PROCESS__TLS_SLOT, NULL);
+        vTaskDelete(handle);
+    }
     bruce_process_status_t status = {
         .reason = BRUCE_PROCESS_KILLED,
         .exit_code = 0,

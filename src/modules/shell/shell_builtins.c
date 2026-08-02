@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "core_sdk/memory.h"
+#include "core_sdk/environment.h"
 #include "core_sdk/stdio.h"
 #include "shell_parser.h"
 
@@ -52,6 +53,10 @@ int shell_builtins__set(shell_state_t *state, const char *name, const char *valu
     }
     int index = shell_builtins__find_index(state, name);
     if (index >= 0) {
+        if (state->variables[index].exported && environment__set(name, value) != BRUCE_OK) {
+            memory__free(value_copy);
+            return 1;
+        }
         memory__free(state->variables[index].value);
         state->variables[index].value = value_copy;
         return 0;
@@ -81,7 +86,24 @@ int shell_builtins__set(shell_state_t *state, const char *name, const char *valu
     }
     state->variables[state->variable_count].name = name_copy;
     state->variables[state->variable_count].value = value_copy;
+    state->variables[state->variable_count].exported = false;
     state->variable_count++;
+    return 0;
+}
+
+int shell_builtins__export(shell_state_t *state, const char *name) {
+    int index = shell_builtins__find_index(state, name);
+    if (index < 0) {
+        int status = shell_builtins__set(state, name, "");
+        if (status != 0) return status;
+        index = shell_builtins__find_index(state, name);
+    }
+    bruce_result_t result = environment__set(name, state->variables[index].value);
+    if (result != BRUCE_OK) {
+        stdio__printf("shell: could not export %s (%d)\n", name, result);
+        return 1;
+    }
+    state->variables[index].exported = true;
     return 0;
 }
 
@@ -137,6 +159,7 @@ int shell_builtins__run(shell_state_t *state, int argc, char **argv) {
             }
             int index = shell_builtins__find_index(state, argv[arg]);
             if (index >= 0) shell_builtins__remove_at(state, (size_t)index);
+            (void)environment__unset(argv[arg]);
         }
         return 0;
     }
@@ -146,7 +169,21 @@ int shell_builtins__run(shell_state_t *state, int argc, char **argv) {
             return 2;
         }
         for (int i = 1; i < argc; ++i) {
-            int status = shell_builtins__assignment(state, argv[i]);
+            char *equals = strchr(argv[i], '=');
+            int status = equals != NULL ? shell_builtins__assignment(state, argv[i]) : 0;
+            const char *name = argv[i];
+            char name_buffer[SHELL__VARIABLE_NAME_MAX];
+            if (equals != NULL) {
+                size_t length = (size_t)(equals - argv[i]);
+                if (length >= sizeof(name_buffer)) return 2;
+                memcpy(name_buffer, argv[i], length);
+                name_buffer[length] = '\0';
+                name = name_buffer;
+            } else if (!shell_parser__valid_name(name, strlen(name))) {
+                stdio__printf("shell: invalid variable name\n");
+                return 2;
+            }
+            if (status == 0) status = shell_builtins__export(state, name);
             if (status != 0) return status;
         }
         return 0;

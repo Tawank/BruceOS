@@ -137,7 +137,10 @@ static const esp_elf_xip_ops_t s_xip_ops = {
 
 /* Loader registry run function: called by app_runner__run_path() or by the
  * built-in "elf" command. */
-int elf_loader__run_path(const char *path, const char *arg, bool in_background) {
+int elf_loader__run_path(
+    const char *path, const char *arg, bruce_launch_mode_t mode,
+    const bruce_environment_variable_t *environment, size_t environment_count
+) {
     s_call_count++;
 
     if (!elf_loader__path_is_valid(path)) { return BRUCE_ERR_INVALID_PATH; }
@@ -238,8 +241,8 @@ int elf_loader__run_path(const char *path, const char *arg, bool in_background) 
 
     bruce_loader_xip_image_t parent_xip = ctx->xip;
     int result = app_runner__spawn_loader_process_owned(
-        permission_key, gui_requested, in_background, inspection->manifest.stack_size,
-        elf_loader__entry, ctx, elf_loader__cleanup_context
+        permission_key, gui_requested, mode, inspection->manifest.stack_size, environment,
+        environment_count, elf_loader__entry, ctx, elf_loader__cleanup_context
     );
     if (result <= 0) {
         elf_loader__free_process_ctx(ctx);
@@ -313,11 +316,11 @@ int elf_loader__app_main(int argc, char **argv) {
     /* Inherit the background/foreground mode of the calling "elf" command
      * process so the loaded ELF follows the same context. */
     bruce_process_snapshot_t snapshot;
-    bool in_background = false;
+    bruce_launch_mode_t mode = BRUCE_LAUNCH_FOREGROUND;
     if (process__snapshot(process__current_id(), &snapshot) == BRUCE_OK) {
-        in_background = (snapshot.state == BRUCE_PROCESS_BACKGROUND);
+        mode = snapshot.state == BRUCE_PROCESS_BACKGROUND ? BRUCE_LAUNCH_BACKGROUND : BRUCE_LAUNCH_FOREGROUND;
     }
-    return elf_loader__run_path(path, arg[0] != '\0' ? arg : NULL, in_background);
+    return elf_loader__run_path(path, arg[0] != '\0' ? arg : NULL, mode, NULL, 0);
 }
 
 void elf_loader__init(void) { elf_set_symbol_resolver(elf_loader__find_symbol); }

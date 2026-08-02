@@ -102,7 +102,7 @@ bool selftest__run_launcher_apps_discovery_case(void) {
 
     dialog__test_set_choice_provider(selftest__launcher_choice_provider);
     size_t calls_before = elf_loader__debug_call_count();
-    int result = app_runner__run("bruce_launcher", "", true);
+    int result = app_runner__run("bruce_launcher", "", BRUCE_LAUNCH_BACKGROUND);
     bruce_result_t wait_result =
         result > 0 ? process__wait((bruce_process_id_t)result, 5000) : BRUCE_ERR_INVALID_ARGUMENT;
     dialog__test_set_choice_provider(NULL);

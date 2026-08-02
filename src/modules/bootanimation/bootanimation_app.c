@@ -357,9 +357,7 @@ int bootanimation_app_main(int argc, char **argv) {
     (void)argv;
     if (config__get_instant_boot()) return BRUCE_OK;
 
-    bruce_result_t result = process__to_foreground();
-    if (result != BRUCE_OK) return result;
-    result = bootanimation__draw_title();
+    bruce_result_t result = bootanimation__draw_title();
     if (result != BRUCE_OK) return result;
 
     const char *image_path = NULL;

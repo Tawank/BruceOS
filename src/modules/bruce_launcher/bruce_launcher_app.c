@@ -448,36 +448,13 @@ static int bruce_launcher__run_process_switcher(const bruce_launcher_theme_t *th
 /* Command dispatch                                                           */
 /* -------------------------------------------------------------------------- */
 
-static void
-bruce_launcher__split_command(const char *command, char *first, size_t first_size, const char **rest) {
-    const char *p = command;
-    while (*p == ' ' || *p == '\t') { p++; }
-
-    size_t i = 0;
-    while (*p != '\0' && *p != ' ' && *p != '\t' && i + 1 < first_size) { first[i++] = *p++; }
-    first[i] = '\0';
-
-    while (*p == ' ' || *p == '\t') { p++; }
-    *rest = p;
-}
-
 static int bruce_launcher__run_entry(const bruce_launcher_entry_t *entry) {
     if (strcmp(entry->command, BRUCE_LAUNCHER_PROCESSES_APP) == 0) {
         bruce_launcher_theme_t theme;
         bruce_launcher__get_theme(&theme);
         return bruce_launcher__run_process_switcher(&theme);
     }
-    int result;
-
-    if (entry->command[0] == '/') {
-        result = app_runner__run_path(entry->command, NULL, true);
-    } else {
-        char first[BRUCE_LAUNCHER_LABEL_MAX];
-        const char *rest = NULL;
-        bruce_launcher__split_command(entry->command, first, sizeof(first), &rest);
-        if (first[0] == '\0') { return BRUCE_ERR_INVALID_ARGUMENT; }
-        result = app_runner__run(first, rest[0] != '\0' ? rest : NULL, true);
-    }
+    int result = app_runner__run_command(entry->command, BRUCE_LAUNCH_FOREGROUND);
 
     if (result < 0) {
         char message[128];
@@ -723,13 +700,6 @@ int bruce_launcher_app_main(int argc, char **argv) {
 
     int result;
     if (app_runner__args_have_gui(argc, argv)) {
-        if (!app_runner__args_have_background(argc, argv)) {
-            result = process__to_foreground();
-            if (result != BRUCE_OK) {
-                bruce_launcher__menu_free(root);
-                return result;
-            }
-        }
         const bruce_dialog_window_renderer_t window_renderer = {
             .padding_top = BRUCE_LAUNCHER_STATUS_H + 1,
             .padding_right = BRUCE_LAUNCHER_BORDER_PAD + 1,

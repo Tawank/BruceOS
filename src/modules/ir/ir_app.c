@@ -730,10 +730,6 @@ static int ir_app__learn_cli(ArgParser *parser) {
 
 int ir_app_main(int argc, char **argv) {
     if (app_runner__args_have_gui(argc, argv)) {
-        if (!app_runner__args_have_background(argc, argv)) {
-            bruce_result_t foreground = process__to_foreground();
-            if (foreground != BRUCE_OK) return foreground;
-        }
         return ir_app__gui();
     }
 

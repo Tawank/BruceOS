@@ -162,7 +162,7 @@ bool selftest__run_terminal_stdio_case(void) {
     if (stdio__session_create(&session) != BRUCE_OK || stdio__session_route_children(session) != BRUCE_OK) {
         return false;
     }
-    int result = app_runner__run("terminal_test_stdio", NULL, true);
+    int result = app_runner__run("terminal_test_stdio", NULL, BRUCE_LAUNCH_BACKGROUND);
     (void)stdio__session_route_children(BRUCE_STDIO_SESSION_INVALID);
     if (result <= 0 || stdio__session_write_input(session, "hello\n", 6) != BRUCE_OK) {
         (void)stdio__session_close(session);
@@ -182,7 +182,7 @@ bool selftest__run_terminal_stdio_case(void) {
     session = BRUCE_STDIO_SESSION_INVALID;
     if (ok && stdio__session_create(&session) == BRUCE_OK &&
         stdio__session_route_children(session) == BRUCE_OK) {
-        result = app_runner__run("shell", "-i", true);
+        result = app_runner__run("shell", "-i", BRUCE_LAUNCH_BACKGROUND);
         (void)stdio__session_route_children(BRUCE_STDIO_SESSION_INVALID);
         static const char shell_input[] = "echo interactive-ok\rexit\r";
         if (result <= 0 ||
@@ -219,7 +219,7 @@ bool selftest__run_terminal_stdio_cancel_case(void) {
         return false;
     }
 
-    int launched = app_runner__run("terminal_test_stdio_cancel", NULL, true);
+    int launched = app_runner__run("terminal_test_stdio_cancel", NULL, BRUCE_LAUNCH_BACKGROUND);
     (void)stdio__session_route_children(BRUCE_STDIO_SESSION_INVALID);
     if (launched <= 0) {
         (void)stdio__session_close(session);

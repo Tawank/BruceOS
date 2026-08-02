@@ -25,6 +25,7 @@
 #include "core_sdk/dialog.h"
 #include "core_sdk/disk.h"
 #include "core_sdk/display.h"
+#include "core_sdk/environment.h"
 #include "core_sdk/gpio.h"
 #include "core_sdk/http.h"
 #include "core_sdk/i2c.h"
@@ -110,13 +111,22 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     /* AppRunner / loader */
     ESP_ELFSYM_EXPORT(app_runner__run),
     ESP_ELFSYM_EXPORT(app_runner__run_path),
+    ESP_ELFSYM_EXPORT(app_runner__run_with_environment),
+    ESP_ELFSYM_EXPORT(app_runner__run_path_with_environment),
     ESP_ELFSYM_EXPORT(loader__stage_path),
     ESP_ELFSYM_EXPORT(loader__adopt_image),
     ESP_ELFSYM_EXPORT(loader__release_image),
     ESP_ELFSYM_EXPORT(app_runner__parse_args),
     ESP_ELFSYM_EXPORT(app_runner__free_args),
     ESP_ELFSYM_EXPORT(app_runner__args_have_gui),
-    ESP_ELFSYM_EXPORT(app_runner__args_have_background),
+    ESP_ELFSYM_EXPORT(app_runner__run_command),
+
+    /* Process environment */
+    ESP_ELFSYM_EXPORT(environment__get),
+    ESP_ELFSYM_EXPORT(environment__set),
+    ESP_ELFSYM_EXPORT(environment__unset),
+    ESP_ELFSYM_EXPORT(environment__count),
+    ESP_ELFSYM_EXPORT(environment__get_at),
 
     /* Memory */
     ESP_ELFSYM_EXPORT(memory__malloc),

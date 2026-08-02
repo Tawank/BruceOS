@@ -104,10 +104,6 @@ static void apps__show_error(const char *action, bruce_result_t result) {
 
 int apps_app_main(int argc, char **argv) {
     bool gui = app_runner__args_have_gui(argc, argv);
-    if (gui && !app_runner__args_have_background(argc, argv)) {
-        bruce_result_t foreground = process__to_foreground();
-        if (foreground != BRUCE_OK) return foreground;
-    }
 
     const char *directories[] = {"/apps", "/scripts"};
     size_t capacity = 0;
@@ -160,7 +156,9 @@ int apps_app_main(int argc, char **argv) {
             break;
         }
 
-        int process = app_runner__run_path(apps[selected].path, gui ? "--gui" : NULL, true);
+        int process = app_runner__run_path(
+            apps[selected].path, gui ? "--gui" : NULL, BRUCE_LAUNCH_FOREGROUND
+        );
         if (process <= 0) apps__show_error("Launch", (bruce_result_t)process);
     }
 

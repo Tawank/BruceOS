@@ -264,7 +264,9 @@ static int selftest__boundary_entry(int argc, char **argv) {
     (void)argc;
     (void)argv;
     if (s_boundary.operation == SELFTEST_BOUNDARY_EXECUTE) {
-        s_boundary.result = (bruce_result_t)app_runner__run("selftest_missing_command", "", true);
+        s_boundary.result = (bruce_result_t)app_runner__run(
+            "selftest_missing_command", "", BRUCE_LAUNCH_BACKGROUND
+        );
     } else {
         s_boundary.result = process__pause(s_boundary.target);
     }

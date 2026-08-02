@@ -61,7 +61,10 @@ static int shell_executor__wait(bruce_process_id_t child) {
     return status.exit_code & 0xff;
 }
 
-static int shell_executor__launch_external(int argc, char **argv, const char *prefix) {
+static int shell_executor__launch_external(
+    int argc, char **argv, const char *prefix, const bruce_environment_variable_t *environment,
+    size_t environment_count, bruce_launch_mode_t mode
+) {
     size_t capacity = SHELL__LINE_MAX * 2;
     char *arguments = memory__malloc(capacity);
     if (arguments == NULL) {
@@ -88,16 +91,23 @@ static int shell_executor__launch_external(int argc, char **argv, const char *pr
     }
     int launched;
     if (argv[0][0] == '/' || strncmp(argv[0], "./", 2) == 0) {
-        launched = app_runner__run_path(argv[0], used > 0 ? arguments : NULL, true);
+        launched = app_runner__run_path_with_environment(
+            argv[0], used > 0 ? arguments : NULL, mode, environment, environment_count
+        );
     } else {
-        launched = app_runner__run(argv[0], used > 0 ? arguments : NULL, true);
+        launched = app_runner__run_with_environment(
+            argv[0], used > 0 ? arguments : NULL, mode, environment, environment_count
+        );
     }
     memory__free(arguments);
     return launched;
 }
 
-static int shell_executor__external(int argc, char **argv) {
-    int launched = shell_executor__launch_external(argc, argv, NULL);
+static int shell_executor__external(
+    int argc, char **argv, const bruce_environment_variable_t *environment, size_t environment_count,
+    bruce_launch_mode_t mode
+) {
+    int launched = shell_executor__launch_external(argc, argv, NULL, environment, environment_count, mode);
     if (launched == BRUCE_ERR_NOT_FOUND || launched == BRUCE_ERR_INVALID_PATH) {
         stdio__printf("shell: %s: not found\n", argv[0]);
         return 127;
@@ -132,7 +142,9 @@ static int shell_executor__capture_external(int argc, char **argv, char **out_da
         (void)stdio__session_close(session);
         return 1;
     }
-    int launched = shell_executor__launch_external(argc, argv, NULL);
+    int launched = shell_executor__launch_external(
+        argc, argv, NULL, NULL, 0, BRUCE_LAUNCH_FOREGROUND
+    );
     (void)stdio__session_route_children(BRUCE_STDIO_SESSION_INVALID);
     if (launched <= 0) {
         (void)stdio__session_close(session);
@@ -234,7 +246,9 @@ static int shell_executor__pipe_to_text(shell_state_t *state, const shell_comman
         } else {
             char prefix[48];
             snprintf(prefix, sizeof(prefix), "--stdin-size %u --gui", (unsigned)size);
-            int launched = shell_executor__launch_external(target_argc, target_words, prefix);
+            int launched = shell_executor__launch_external(
+                target_argc, target_words, prefix, NULL, 0, BRUCE_LAUNCH_FOREGROUND
+            );
             (void)stdio__session_route_children(BRUCE_STDIO_SESSION_INVALID);
             if (launched <= 0) {
                 status = 1;
@@ -274,6 +288,9 @@ static int shell_executor__pipe_to_text(shell_state_t *state, const shell_comman
  * borrowed; the caller owns and frees it. */
 static int shell_executor__dispatch(shell_state_t *state, char **words, int argc) {
     int first_command = 0;
+    bruce_environment_variable_t environment[SHELL__MAX_VARIABLES];
+    size_t environment_count = 0;
+    bruce_launch_mode_t mode = BRUCE_LAUNCH_FOREGROUND;
     while (first_command < argc) {
         char *equals = strchr(words[first_command], '=');
         if (equals == NULL) break;
@@ -282,22 +299,37 @@ static int shell_executor__dispatch(shell_state_t *state, char **words, int argc
             stdio__printf("shell: invalid variable name\n");
             return 2;
         }
-        char name[SHELL__VARIABLE_NAME_MAX];
-        if (name_length >= sizeof(name)) {
+        if (name_length >= SHELL__VARIABLE_NAME_MAX || environment_count >= SHELL__MAX_VARIABLES) {
             stdio__printf("shell: variable name too long\n");
             return 2;
         }
-        memcpy(name, words[first_command], name_length);
-        name[name_length] = '\0';
-        int assigned = shell_builtins__set(state, name, equals + 1);
-        if (assigned != 0) return assigned;
+        *equals = '\0';
+        const char *name = words[first_command];
+        const char *value = equals + 1;
+        if (strcmp(name, "BG") == 0) {
+            if (strcmp(value, "0") == 0) mode = BRUCE_LAUNCH_FOREGROUND;
+            else if (strcmp(value, "1") == 0) mode = BRUCE_LAUNCH_BACKGROUND;
+            else {
+                stdio__printf("shell: BG must be 0 or 1\n");
+                return 2;
+            }
+        }
+        environment[environment_count++] = (bruce_environment_variable_t){.name = name, .value = value};
         first_command++;
     }
-    if (first_command == argc) return 0;
+    if (first_command == argc) {
+        for (size_t i = 0; i < environment_count; ++i) {
+            int assigned = shell_builtins__set(state, environment[i].name, environment[i].value);
+            if (assigned != 0) return assigned;
+        }
+        return 0;
+    }
     int remaining = argc - first_command;
     char **argv = words + first_command;
     return shell_builtins__is_builtin(argv[0]) ? shell_builtins__run(state, remaining, argv)
-                                                : shell_executor__external(remaining, argv);
+                                                : shell_executor__external(
+                                                      remaining, argv, environment, environment_count, mode
+                                                  );
 }
 
 static int shell_executor__command(shell_state_t *state, const shell_command_t *command) {

@@ -13,7 +13,7 @@ int app_main(int argc, char **argv)
     const char *target = argv[1];
     printf("elf_loader: loading %s\n", target);
 
-    int result = app_runner__run_path(target, NULL, false);
+    int result = app_runner__run_path(target, NULL, BRUCE_LAUNCH_FOREGROUND);
     printf("elf_loader: app_runner__run_path returned %d\n", result);
     return 0;
 }

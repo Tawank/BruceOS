@@ -472,11 +472,6 @@ int text_app_main(int argc, char **argv) {
         (!from_stdin && path[0] == '\0') || (path[0] != '\0' && !text__has_supported_extension(path))) {
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
-    if (!app_runner__args_have_background(argc, argv)) {
-        bruce_result_t foreground = process__to_foreground();
-        if (foreground != BRUCE_OK) return foreground;
-    }
-
     text_editor_t editor = {.read_only = read_only};
     bruce_result_t result =
         from_stdin ? text__load_stdin((size_t)parsed_stdin_size, &editor) : text__load(path, &editor);
@@ -507,10 +502,13 @@ static bool text__escape_arg(const char *path, char *out, size_t out_size) {
     return true;
 }
 
-int text__run_path(const char *path, const char *arg, bool in_background) {
+int text__run_path(
+    const char *path, const char *arg, bruce_launch_mode_t mode,
+    const bruce_environment_variable_t *environment, size_t environment_count
+) {
     (void)arg;
     if (path == NULL || !text__has_supported_extension(path)) return BRUCE_ERR_INVALID_PATH;
     char escaped_path[BRUCE_STORAGE_PATH_MAX * 2 + 8];
     if (!text__escape_arg(path, escaped_path, sizeof(escaped_path))) return BRUCE_ERR_INVALID_PATH;
-    return app_runner__run("text", escaped_path, in_background);
+    return app_runner__run_with_environment("text", escaped_path, mode, environment, environment_count);
 }
