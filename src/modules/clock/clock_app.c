@@ -7,10 +7,10 @@
 #include "core_sdk/dialog.h"
 #include "core_sdk/display.h"
 #include "core_sdk/input.h"
-#include "core_sdk/result.h"
-#include "core_sdk/stdio.h"
 #include "core_sdk/process.h"
+#include "core_sdk/result.h"
 #include "core_sdk/runtime.h"
+#include "core_sdk/stdio.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -53,20 +53,16 @@ static bruce_result_t clock_app__draw(const char *title, const char *main_text, 
     (void)display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
     (void)display__set_text_color(secondary);
     (void)display__set_text_size(1);
-    (void)display__set_cursor((width - (int)strlen(title) * 8) / 2, 14);
-    (void)display__print(title);
+    (void)display__draw_centre_string(title, width / 2, 14);
     int text_size = 4;
-    while (text_size > 1 && (int)strlen(main_text) * 8 * text_size > width - 16) text_size--;
+    while (text_size > 1 && (int)strlen(main_text) * 6 * text_size > width - 16) text_size--;
     (void)display__set_text_color(primary);
     (void)display__set_text_size((uint8_t)text_size);
-    (void
-    )display__set_cursor((width - (int)strlen(main_text) * 8 * text_size) / 2, (height - 16 * text_size) / 2);
-    (void)display__print(main_text);
+    (void)display__draw_centre_string(main_text, width / 2, (height - 8 * text_size) / 2);
     if (footer != NULL) {
         (void)display__set_text_color(secondary);
         (void)display__set_text_size(1);
-        (void)display__set_cursor((width - (int)strlen(footer) * 8) / 2, height - 24);
-        (void)display__print(footer);
+        (void)display__draw_centre_string(footer, width / 2, height - 24);
     }
     return display__present();
 }

@@ -119,6 +119,15 @@ bruce_result_t display__print(const char *text);
 /* Same as display__print() but appends a newline. */
 bruce_result_t display__println(const char *text);
 
+/* Draw a single-line string with (x, y) at its left edge. */
+bruce_result_t display__draw_string(const char *text, int16_t x, int16_t y);
+
+/* Draw a single-line string horizontally centered on x. */
+bruce_result_t display__draw_centre_string(const char *text, int16_t x, int16_t y);
+
+/* Draw a single-line string with its right edge at x. */
+bruce_result_t display__draw_right_string(const char *text, int16_t x, int16_t y);
+
 /* -------------------------------------------------------------------------- */
 /* Primitive drawing                                                          */
 /* -------------------------------------------------------------------------- */

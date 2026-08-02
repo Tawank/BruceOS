@@ -4,10 +4,9 @@
 
 #include "driver/gpio.h"
 #include "driver/ledc.h"
-#include "driver/spi_master.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
-#include "esp_lcd_panel_vendor.h"
+#include "esp_lcd_panel_vendor.h" // IWYU pragma: keep
 #include "esp_log.h"
 
 #define TAG "bruce_display"
@@ -183,10 +182,28 @@ void display_driver__configure_rotation(uint8_t rotation) {
     int x_gap = 0;
     int y_gap = 0;
     switch (rotation & 3) {
-        case 0: x_gap = 52; y_gap = 40; break;
-        case 1: swap_xy = true; mirror_x = true; x_gap = 40; y_gap = 53; break;
-        case 2: mirror_x = true; mirror_y = true; x_gap = 53; y_gap = 40; break;
-        case 3: swap_xy = true; mirror_y = true; x_gap = 40; y_gap = 52; break;
+        case 0:
+            x_gap = 52;
+            y_gap = 40;
+            break;
+        case 1:
+            swap_xy = true;
+            mirror_x = true;
+            x_gap = 40;
+            y_gap = 53;
+            break;
+        case 2:
+            mirror_x = true;
+            mirror_y = true;
+            x_gap = 53;
+            y_gap = 40;
+            break;
+        case 3:
+            swap_xy = true;
+            mirror_y = true;
+            x_gap = 40;
+            y_gap = 52;
+            break;
     }
     if (s_panel != NULL) {
         esp_lcd_panel_swap_xy(s_panel, swap_xy);
@@ -198,8 +215,9 @@ void display_driver__configure_rotation(uint8_t rotation) {
 bruce_result_t display_driver__draw_bitmap(
     int x_start, int y_start, int x_end, int y_end, const bruce_display_color_t *pixels
 ) {
-    return esp_lcd_panel_draw_bitmap(s_panel, x_start, y_start, x_end, y_end, pixels) == ESP_OK ? BRUCE_OK
-                                                                                                 : BRUCE_ERR_IO;
+    return esp_lcd_panel_draw_bitmap(s_panel, x_start, y_start, x_end, y_end, pixels) == ESP_OK
+               ? BRUCE_OK
+               : BRUCE_ERR_IO;
 }
 
 void display_driver__set_backlight(uint8_t brightness) {

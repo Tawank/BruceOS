@@ -83,6 +83,18 @@ bool selftest__run_display_rendering_case(void) {
         return false;
     }
 
+    if (display__draw_string("A", 10, 10) != BRUCE_OK ||
+        display__get_cursor(&cursor_x, &cursor_y) != BRUCE_OK || cursor_x != 16 || cursor_y != 10 ||
+        display__draw_centre_string("A", 20, 11) != BRUCE_OK ||
+        display__get_cursor(&cursor_x, &cursor_y) != BRUCE_OK || cursor_x != 23 || cursor_y != 11 ||
+        display__draw_right_string("A", 30, 12) != BRUCE_OK ||
+        display__get_cursor(&cursor_x, &cursor_y) != BRUCE_OK || cursor_x != 30 || cursor_y != 12 ||
+        display__draw_string(NULL, 0, 0) != BRUCE_ERR_INVALID_ARGUMENT) {
+        printf("[selftest] display/rendering: FAIL, aligned text\n");
+        (void)display__present();
+        return false;
+    }
+
     if (display__set_text_bg_color(BRUCE_COLOR_RED) != BRUCE_OK ||
         display__draw_bitmap(20, 1, bitmap, 8, 1, BRUCE_COLOR_GREEN) != BRUCE_OK ||
         (buffered &&

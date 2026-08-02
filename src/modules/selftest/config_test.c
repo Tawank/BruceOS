@@ -293,7 +293,8 @@ bool selftest__run_config_builtin_manage_case(void) {
                    strstr(json, "\"hotkeys\"") != NULL &&
                    strstr(json, "\"displayBufferedRendering\"") != NULL &&
                    strstr(json, "\"displayDmaFramebuffer\"") != NULL &&
-                  strstr(json, "\"startupApp\":") == NULL && strstr(json, "\"qrCodes\"") == NULL &&
+                   strstr(json, ":\t") == NULL &&
+                   strstr(json, "\"startupApp\":") == NULL && strstr(json, "\"qrCodes\"") == NULL &&
                   strstr(json, "\"evilWifiNames\"") == NULL && strstr(json, "\"evilWifiEndpoints\"") == NULL &&
                   strstr(json, "\"evilWifiPasswordMode\"") == NULL;
     storage__free(json);

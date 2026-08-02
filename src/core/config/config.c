@@ -5,8 +5,8 @@
 #include <string.h>
 
 #include "cJSON.h"
-#include "core/storage/storage.h"
 #include "core/process/process.h"
+#include "core/storage/storage.h"
 #include "core_sdk/config.h"
 #include "core_sdk/permission.h"
 #include "esp_random.h"
@@ -492,9 +492,15 @@ static bool config__save_locked(void) {
     cJSON *root = config__build_json(&s_config);
     if (root == NULL) return false;
 
-    char *text = cJSON_PrintUnformatted(root);
+    char *text = cJSON_Print(root);
     cJSON_Delete(root);
     if (text == NULL) return false;
+
+    /* cJSON pretty printing uses a tab after each object key. */
+    for (char *separator = strstr(text, ":\t"); separator != NULL;
+         separator = strstr(separator + 2, ":\t")) {
+        separator[1] = ' ';
+    }
 
     bool saved = storage__write_file_atomic(CONFIG__FILE_PATH, text, strlen(text));
     cJSON_free(text);
