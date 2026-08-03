@@ -22,7 +22,7 @@
 #include "core_sdk/wifi.h"
 #include "webfiles.h"
 
-#define WEBUI_FORM_MAX (64u * 1024u)
+#define WEBUI_FORM_MAX (128u * 1024u)
 #define WEBUI_QUERY_MAX 1024u
 #define WEBUI_UPLOAD_MAX (8u * 1024u * 1024u)
 #define WEBUI_IO_CHUNK 2048u
@@ -383,9 +383,7 @@ static bruce_result_t webui__login(bruce_http_server_request_t *request, void *c
     free(body);
     char expected_user[WEBUI_CREDENTIAL_MAX_LEN + 1u];
     char expected_password[WEBUI_CREDENTIAL_MAX_LEN + 1u];
-    app_config__get_string(
-        WEBUI_CONFIG_APP_NAME, "user", "admin", expected_user, sizeof(expected_user)
-    );
+    app_config__get_string(WEBUI_CONFIG_APP_NAME, "user", "admin", expected_user, sizeof(expected_user));
     app_config__get_string(
         WEBUI_CONFIG_APP_NAME, "password", "bruce", expected_password, sizeof(expected_password)
     );
@@ -644,7 +642,7 @@ static bruce_result_t webui__edit(bruce_http_server_request_t *request, void *co
     bruce_result_t auth_response;
     if (!webui__require_auth(request, &auth_response)) return auth_response;
     char *body = webui__read_body(request, WEBUI_FORM_MAX * 3u + 1024u);
-    if (body == NULL) return webui__reply_text(request, 413, "Editor content exceeds 64 KiB");
+    if (body == NULL) return webui__reply_text(request, 413, "Editor content exceeds 128 KiB");
     char fs[16], name[BRUCE_STORAGE_PATH_MAX], path[BRUCE_STORAGE_PATH_MAX];
     size_t body_length = strlen(body);
     size_t content_capacity = body_length < WEBUI_FORM_MAX ? body_length + 1u : WEBUI_FORM_MAX + 1u;

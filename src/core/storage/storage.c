@@ -136,8 +136,8 @@ bool storage__mkdir_internal(const char *path) {
     if (path == NULL || path[0] != '/') return false;
     storage__lock();
     struct stat path_stat;
-    bool created = s_ready &&
-                   ((stat(path, &path_stat) == 0 && S_ISDIR(path_stat.st_mode)) || mkdir(path, 0775) == 0);
+    bool created =
+        s_ready && ((stat(path, &path_stat) == 0 && S_ISDIR(path_stat.st_mode)) || mkdir(path, 0775) == 0);
     storage__unlock();
     return created;
 }
@@ -416,8 +416,6 @@ static bool storage__has_open_sd_files_locked(void) {
  * does not apply to. */
 static bool storage__is_protected_path(const char *path) {
     static const char *const protected_paths[] = {
-        "/config/bruce.conf",
-        "/config/bruce.conf.tmp",
         "/config/permissions.json",
         "/config/permissions.json.tmp",
     };

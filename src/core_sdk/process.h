@@ -61,8 +61,10 @@ typedef struct {
     bruce_process_state_t state;
     char name[BRUCE_PROCESS_NAME_MAX];
     uint32_t stack_high_water_bytes;
+    uint32_t stack_total_bytes;
     uint32_t cpu_percent;
     size_t memory_bytes;
+    size_t swap_bytes;
     size_t resource_count;
     bool built_in;
     bool gui_requested;

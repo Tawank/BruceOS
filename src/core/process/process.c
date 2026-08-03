@@ -92,11 +92,13 @@ typedef struct {
     bruce_resource_id_t next_resource_id;
     size_t resource_count;
     size_t memory_bytes;
+    size_t swap_bytes;
     size_t operation_count;
 
     uint32_t last_runtime_counter;
     uint32_t cpu_percent;
     uint32_t stack_high_water_bytes;
+    uint32_t stack_total_bytes;
     process__environment_t environment;
 } process__record_t;
 
@@ -337,8 +339,10 @@ process__fill_snapshot_locked(const process__record_t *record, bruce_process_sna
     out_snapshot->state = record->state;
     strncpy(out_snapshot->name, record->name, BRUCE_PROCESS_NAME_MAX - 1);
     out_snapshot->stack_high_water_bytes = record->stack_high_water_bytes;
+    out_snapshot->stack_total_bytes = record->stack_total_bytes;
     out_snapshot->cpu_percent = record->cpu_percent;
     out_snapshot->memory_bytes = record->memory_bytes;
+    out_snapshot->swap_bytes = record->swap_bytes;
     out_snapshot->resource_count = record->resource_count;
     out_snapshot->built_in = record->built_in;
     out_snapshot->gui_requested = record->gui_requested;
@@ -553,6 +557,7 @@ static void process__teardown_locked(process__record_t *record, const bruce_proc
     }
     record->resource_count = 0;
     record->memory_bytes = 0;
+    record->swap_bytes = 0;
     if (record->process_entry_cleanup != NULL) {
         record->process_entry_cleanup(record->process_entry_context);
         record->process_entry_context = NULL;
@@ -706,6 +711,7 @@ process_registry__create(const process_create_params_t *params, bruce_process_id
     );
 
     uint32_t stack_bytes = params->stack_bytes != 0 ? params->stack_bytes : PROCESS__DEFAULT_STACK_BYTES;
+    record->stack_total_bytes = stack_bytes;
     BaseType_t created = xTaskCreate(
         process__trampoline, record->name, stack_bytes, record, tskIDLE_PRIORITY + 1, &record->handle
     );
@@ -917,7 +923,7 @@ bruce_result_t process_registry__resource_release(bruce_resource_id_t resource_i
 }
 
 bruce_result_t process_registry__resource_transfer(
-    bruce_process_id_t owner_id, bruce_resource_id_t resource_id, size_t memory_bytes,
+    bruce_process_id_t owner_id, bruce_resource_id_t resource_id, size_t memory_bytes, bool swap_memory,
     bruce_resource_id_t *out_resource_id
 ) {
     if (owner_id == BRUCE_PROCESS_ID_INVALID || resource_id == BRUCE_RESOURCE_ID_INVALID ||
@@ -958,6 +964,11 @@ bruce_result_t process_registry__resource_transfer(
     if (memory_bytes <= owner->memory_bytes) owner->memory_bytes -= memory_bytes;
     else owner->memory_bytes = 0;
     self->memory_bytes += memory_bytes;
+    if (swap_memory) {
+        if (memory_bytes <= owner->swap_bytes) owner->swap_bytes -= memory_bytes;
+        else owner->swap_bytes = 0;
+        self->swap_bytes += memory_bytes;
+    }
     *out_resource_id = new_id;
     process__unlock();
     return BRUCE_OK;
@@ -972,6 +983,20 @@ void process_registry__account_memory(int64_t delta_bytes) {
             self->memory_bytes = (size_t)((int64_t)self->memory_bytes + delta_bytes);
         } else {
             self->memory_bytes = 0;
+        }
+    }
+    process__unlock();
+}
+
+void process_registry__account_swap_memory(int64_t delta_bytes) {
+    process__ensure_init();
+    process__lock();
+    process__record_t *self = process__find_by_handle_locked(xTaskGetCurrentTaskHandle());
+    if (self != NULL) {
+        if (delta_bytes >= 0 || (size_t)(-delta_bytes) <= self->swap_bytes) {
+            self->swap_bytes = (size_t)((int64_t)self->swap_bytes + delta_bytes);
+        } else {
+            self->swap_bytes = 0;
         }
     }
     process__unlock();

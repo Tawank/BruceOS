@@ -101,13 +101,18 @@ bruce_result_t process_registry__resource_release(bruce_resource_id_t resource_i
  * process to the calling process. Used when a loader prepares an image before
  * its child process exists. */
 bruce_result_t process_registry__resource_transfer(
-    bruce_process_id_t owner_id, bruce_resource_id_t resource_id, size_t memory_bytes,
+    bruce_process_id_t owner_id, bruce_resource_id_t resource_id, size_t memory_bytes, bool swap_memory,
     bruce_resource_id_t *out_resource_id
 );
 
 /* Adds (positive) or removes (negative) bytes from the calling process's
  * tracked-memory statistic.  A no-op if there is no current Core process. */
 void process_registry__account_memory(int64_t delta_bytes);
+
+/* Adds (positive) or removes (negative) bytes from the calling process's
+ * tracked-swap-memory statistic (flash-backed memory_swap allocations only).
+ * A no-op if there is no current Core process. */
+void process_registry__account_swap_memory(int64_t delta_bytes);
 
 /* Prevents force-kill from deleting the calling task while it owns a Core
  * service lock. begin returns false once process shutdown has started. Calls

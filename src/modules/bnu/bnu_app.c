@@ -302,16 +302,19 @@ int bnu_top_app_main(int argc, char **argv) {
     result = process__list(processes, sizeof(processes) / sizeof(processes[0]), &process_count);
     if (result != BRUCE_OK) return result;
 
-    stdio__printf("\n%2s %3s %4s %4s %-5s %s", "", "", "stack", "", "", "");
-    stdio__printf("\n%2s %3s %4s %4s %-5s %s\n", "id", "cpu", "free", "heap", "state", "name");
+    stdio__printf("\n%1s %2s %3s %4s %4s %4s %s\n", "s", "id", "cpu", "stck", "heap", "swap", "name");
     for (size_t i = 0; i < process_count; ++i) {
+        uint32_t stack_used_bytes = processes[i].stack_total_bytes > processes[i].stack_high_water_bytes
+                                        ? processes[i].stack_total_bytes - processes[i].stack_high_water_bytes
+                                        : 0;
         stdio__printf(
-            "%2u %3u %4u %4u %-5s %s\n",
+            "%1s %2u %3u %4u %4u %4u %s\n",
+            bnu__process_state_name(processes[i].state),
             (unsigned)processes[i].id,
             (unsigned)processes[i].cpu_percent,
-            (unsigned)processes[i].stack_high_water_bytes,
+            (unsigned)stack_used_bytes,
             (unsigned)processes[i].memory_bytes,
-            bnu__process_state_name(processes[i].state),
+            (unsigned)processes[i].swap_bytes,
             processes[i].name
         );
     }

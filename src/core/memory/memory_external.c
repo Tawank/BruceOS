@@ -231,6 +231,7 @@ bruce_result_t memory_external__alloc(
     record->resource_id = resource_id;
     xSemaphoreGive(s_mutex);
     process_registry__account_memory((int64_t)size);
+    if (record->backend == BRUCE_MEMORY_BACKEND_SWAP) process_registry__account_swap_memory((int64_t)size);
 
     *out_object = (bruce_memory_object_t){
         .handle = record->handle,
@@ -388,7 +389,7 @@ bruce_result_t memory_external__adopt(bruce_memory_object_t *object) {
 
     bruce_resource_id_t resource_id = BRUCE_RESOURCE_ID_INVALID;
     bruce_result_t ownership_result = process_registry__resource_transfer(
-        old_owner_id, old_resource_id, object->size, &resource_id
+        old_owner_id, old_resource_id, object->size, object->backend == BRUCE_MEMORY_BACKEND_SWAP, &resource_id
     );
     if (ownership_result != BRUCE_OK) {
         process_registry__operation_end();
@@ -433,6 +434,9 @@ bruce_result_t memory_external__release(bruce_memory_object_t *object) {
             return result;
         }
         process_registry__account_memory(-(int64_t)object->size);
+        if (object->backend == BRUCE_MEMORY_BACKEND_SWAP) {
+            process_registry__account_swap_memory(-(int64_t)object->size);
+        }
     }
     memory_external__cleanup(record);
     memset(object, 0, sizeof(*object));
