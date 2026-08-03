@@ -173,7 +173,7 @@ filemanager__delete_file(const char *path, const bruce_dialog_render_params_t *r
 }
 
 int filemanager_app_main(int argc, char **argv) {
-    bool gui = app_runner__gui_requested();
+    bool gui = runtime__gui_requested();
     const bruce_dialog_choice_t actions[] = {
         {.label = "Open / view", .value = "view"},
         {.label = "File info",   .value = "info"},

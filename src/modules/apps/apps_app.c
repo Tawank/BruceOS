@@ -103,7 +103,7 @@ static void apps__show_error(const char *action, bruce_result_t result) {
 }
 
 int apps_app_main(int argc, char **argv) {
-    bool gui = app_runner__gui_requested();
+    bool gui = runtime__gui_requested();
 
     const char *directories[] = {"/apps", "/scripts"};
     size_t capacity = 0;

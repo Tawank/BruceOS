@@ -17,6 +17,7 @@
 #include "core_sdk/input.h"
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
+#include "core_sdk/runtime.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
 #include "core_sdk/wifi.h"
@@ -1034,7 +1035,7 @@ static int webui_app__gui(void) {
 static void webui_app__print_help(void) { stdio__printf("Usage: webui [status|stop|start ap|start sta]\n"); }
 
 int webui_app_main(int argc, char **argv) {
-    if (app_runner__gui_requested()) { return webui_app__gui(); }
+    if (runtime__gui_requested()) { return webui_app__gui(); }
     if (argc <= 1 || (argc == 2 && strcmp(argv[1], "status") == 0)) return webui_app__status(false);
     if (argc == 2 && strcmp(argv[1], "stop") == 0) {
         bruce_result_t result = http_server__stop();

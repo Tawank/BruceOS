@@ -76,6 +76,7 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(runtime__now),
     ESP_ELFSYM_EXPORT(runtime__sleep),
     ESP_ELFSYM_EXPORT(runtime__delay),
+    ESP_ELFSYM_EXPORT(runtime__gui_requested),
     ESP_ELFSYM_EXPORT(process__current_id),
     ESP_ELFSYM_EXPORT(process__switch_next),
     ESP_ELFSYM_EXPORT(process__switch_previous),
@@ -118,7 +119,7 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(loader__release_image),
     ESP_ELFSYM_EXPORT(app_runner__parse_args),
     ESP_ELFSYM_EXPORT(app_runner__free_args),
-    ESP_ELFSYM_EXPORT(app_runner__gui_requested),
+    ESP_ELFSYM_EXPORT(app_runner__environment_requests_gui),
     ESP_ELFSYM_EXPORT(app_runner__run_command),
 
     /* Process environment */

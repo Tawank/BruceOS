@@ -1619,3 +1619,8 @@ uint64_t runtime__now(void) { return (uint64_t)esp_timer_get_time() / 1000u; }
 bruce_result_t runtime__sleep(uint32_t milliseconds) { return process__wait_ms(milliseconds, true); }
 
 bruce_result_t runtime__delay(uint32_t milliseconds) { return process__wait_ms(milliseconds, false); }
+
+bool runtime__gui_requested(void) {
+    const char *value = environment__get("GUI");
+    return value != NULL && strcmp(value, "1") == 0;
+}

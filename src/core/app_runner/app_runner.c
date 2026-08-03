@@ -337,11 +337,6 @@ bool app_runner__environment_requests_gui(
     return requested;
 }
 
-bool app_runner__gui_requested(void) {
-    const char *value = environment__get("GUI");
-    return value != NULL && strcmp(value, "1") == 0;
-}
-
 int app_runner__run_with_environment(
     const char *app_name, const char *arg, bruce_launch_mode_t mode,
     const bruce_environment_variable_t *environment, size_t environment_count

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "core_sdk/result.h"
@@ -16,3 +17,9 @@ uint64_t runtime__now(void);
  * interrupted merely by foregrounding; it waits its requested duration. */
 bruce_result_t runtime__sleep(uint32_t milliseconds);
 bruce_result_t runtime__delay(uint32_t milliseconds);
+
+/* Returns true iff the calling process's own "GUI" environment variable is
+ * "1" (see core_sdk/environment.h). This is the app-facing self-check;
+ * app_runner__environment_requests_gui() is the loader-facing variant used
+ * to decide a child's gui_requested before that child's process exists. */
+bool runtime__gui_requested(void);

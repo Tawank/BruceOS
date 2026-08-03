@@ -704,7 +704,7 @@ int bruce_launcher_app_main(int argc, char **argv) {
     }
 
     int result;
-    if (app_runner__gui_requested()) {
+    if (runtime__gui_requested()) {
         const bruce_dialog_window_renderer_t window_renderer = {
             .padding_top = BRUCE_LAUNCHER_STATUS_H + 1,
             .padding_right = BRUCE_LAUNCHER_BORDER_PAD + 1,

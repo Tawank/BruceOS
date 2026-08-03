@@ -4,11 +4,11 @@
 #include <stdlib.h>
 
 #include "args.h"
-#include "core_sdk/app_runner.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/nrf24.h"
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
+#include "core_sdk/runtime.h"
 #include "core_sdk/stdio.h"
 
 #define NRF24_APP_SPECTRUM_CHANNELS 80u
@@ -124,7 +124,7 @@ static int nrf24_app__gui(void) {
 }
 
 int nrf24_app_main(int argc, char **argv) {
-    if (app_runner__gui_requested()) {
+    if (runtime__gui_requested()) {
         return nrf24_app__gui();
     }
 

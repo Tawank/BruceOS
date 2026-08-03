@@ -71,7 +71,3 @@ void app_runner__free_args(char **argv, int argc);
 bool app_runner__environment_requests_gui(
     const bruce_environment_variable_t *environment, size_t environment_count
 );
-
-/* Returns true iff the calling process's own "GUI" environment variable is
- * "1". Drop-in replacement for the old argv-scanning self-check. */
-bool app_runner__gui_requested(void);

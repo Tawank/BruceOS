@@ -306,7 +306,7 @@ int clock_app_main(int argc, char **argv) {
     }
 
     ArgParser *command = ap_get_cmd_parser(root);
-    bool gui = ap_found(root, "gui") || (command != NULL && ap_found(command, "gui"));
+    bool gui = runtime__gui_requested();
     int result;
     if (command == NULL || command == show) result = gui ? clock_app__gui() : clock_app__show(false);
     else if (command == timer) result = clock_app__timer(ap_get_arg(timer, "duration"), gui);

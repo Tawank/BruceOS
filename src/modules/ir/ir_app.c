@@ -7,7 +7,6 @@
 #include <strings.h>
 
 #include "args.h"
-#include "core_sdk/app_runner.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/input.h"
 #include "core_sdk/ir.h"
@@ -729,7 +728,7 @@ static int ir_app__learn_cli(ArgParser *parser) {
 }
 
 int ir_app_main(int argc, char **argv) {
-    if (app_runner__gui_requested()) {
+    if (runtime__gui_requested()) {
         return ir_app__gui();
     }
 

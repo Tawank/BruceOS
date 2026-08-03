@@ -3,7 +3,6 @@
 #include <stdio.h>
 
 #include "args.h"
-#include "core_sdk/app_runner.h"
 #include "core_sdk/bluetooth.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/result.h"
@@ -125,7 +124,7 @@ static int bluetooth_app__scan_gui(void) {
 }
 
 int bluetooth_app_main(int argc, char **argv) {
-    if (app_runner__gui_requested()) {
+    if (runtime__gui_requested()) {
         const bruce_dialog_choice_t choices[] = {
             {"BLE advertisement scan", "scan"}
         };

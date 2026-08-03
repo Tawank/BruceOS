@@ -3,7 +3,6 @@
 #include <stdio.h>
 
 #include "args.h"
-#include "core_sdk/app_runner.h"
 #include "core_sdk/bluetooth_hid.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/result.h"
@@ -157,7 +156,7 @@ static int bluetooth_hid_app__gui(void) {
 }
 
 int bluetooth_hid_app_main(int argc, char **argv) {
-    if (app_runner__gui_requested()) {
+    if (runtime__gui_requested()) {
         return bluetooth_hid_app__gui();
     }
 
