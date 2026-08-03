@@ -873,6 +873,33 @@ static bool dialog__matches_extension_filter(const char *name, const char *exten
     return strcasecmp(name + name_len - filter_len, extension_filter) == 0;
 }
 
+/* True if the picker's choice dialog was cancelled because the process lost
+ * (and has now regained) foreground - e.g. the user alt-tabbed away and
+ * back - rather than a genuine Back/Esc press. Blocks until foreground
+ * returns so the caller can redraw the same listing instead of unwinding. */
+static bool dialog__pick_file_resume_after_handoff(void) {
+    bruce_process_snapshot_t snapshot;
+    bruce_process_id_t self = process__current_id();
+    if (self == BRUCE_PROCESS_ID_INVALID || process__snapshot(self, &snapshot) != BRUCE_OK ||
+        snapshot.state != BRUCE_PROCESS_BACKGROUND) {
+        return false;
+    }
+    do {
+        if (runtime__delay(20) != BRUCE_OK || process__snapshot(self, &snapshot) != BRUCE_OK) return false;
+    } while (snapshot.state == BRUCE_PROCESS_BACKGROUND);
+    return snapshot.state == BRUCE_PROCESS_FOREGROUND;
+}
+
+/* Strips the last path component in place, e.g. "/a/b" -> "/a", "/a" -> "/". */
+static void dialog__pick_file_go_up(char *current_path) {
+    char *last_slash = strrchr(current_path, '/');
+    if (last_slash != NULL && last_slash != current_path) {
+        *last_slash = '\0';
+    } else {
+        current_path[1] = '\0';
+    }
+}
+
 static bruce_result_t dialog__gui_pick_file(
     const char *initial_path, const char *extension_filter, char *out_path, size_t out_path_size,
     const bruce_dialog_render_params_t *render_params
@@ -948,17 +975,20 @@ static bruce_result_t dialog__gui_pick_file(
 
         if (choice_result != BRUCE_OK) {
             memory__free(entries);
+            /* Foreground was lost (e.g. alt-tab) and has now returned:
+             * redraw the same directory instead of unwinding the picker. */
+            if (dialog__pick_file_resume_after_handoff()) { continue; }
+            /* Genuine Back/Esc: step up a directory rather than exiting the
+             * picker outright, unless already at the root. */
+            if (strcmp(current_path, "/") != 0) {
+                dialog__pick_file_go_up(current_path);
+                continue;
+            }
             return BRUCE_ERR_CANCELLED;
         }
 
         if (strcmp(picked, "..") == 0) {
-            /* Strip last path component. */
-            char *last_slash = strrchr(current_path, '/');
-            if (last_slash != NULL && last_slash != current_path) {
-                *last_slash = '\0';
-            } else {
-                current_path[1] = '\0';
-            }
+            dialog__pick_file_go_up(current_path);
             memory__free(entries);
             continue;
         }

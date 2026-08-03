@@ -37,6 +37,14 @@ static const char *filemanager__basename(const char *path) {
     return slash != NULL ? slash + 1 : path;
 }
 
+static void filemanager__dirname(const char *path, char *out_dir, size_t out_dir_size) {
+    const char *slash = strrchr(path, '/');
+    size_t len = (slash != NULL && slash != path) ? (size_t)(slash - path) : 1;
+    if (len >= out_dir_size) { len = out_dir_size - 1; }
+    memcpy(out_dir, path, len);
+    out_dir[len] = '\0';
+}
+
 static bool filemanager__is_editable_text(const char *path) {
     const char *dot = strrchr(path, '.');
     return dot != NULL &&
@@ -184,10 +192,11 @@ int filemanager_app_main(int argc, char **argv) {
     /* File manager stays full screen (no window chrome) but reads better
      * with a larger font than the default. */
     const bruce_dialog_render_params_t action_params = dialog__default_render_params(2);
+    char last_dir[BRUCE_STORAGE_PATH_MAX] = "/";
 
     for (;;) {
         char path[BRUCE_STORAGE_PATH_MAX];
-        bruce_result_t result = dialog__pick_file_ex("/", NULL, path, sizeof(path), &action_params);
+        bruce_result_t result = dialog__pick_file_ex(last_dir, NULL, path, sizeof(path), &action_params);
         if (result == BRUCE_ERR_CANCELLED && filemanager__resume_after_handoff()) {
             (void)input__flush();
             continue;
@@ -197,6 +206,7 @@ int filemanager_app_main(int argc, char **argv) {
             filemanager__show_error("Browse", result);
             return result;
         }
+        filemanager__dirname(path, last_dir, sizeof(last_dir));
 
         size_t selected = 0;
         result = dialog__choice(
