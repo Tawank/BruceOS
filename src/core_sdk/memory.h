@@ -58,7 +58,7 @@ void memory__free(void *ptr);
 
 /* Allocates a process-owned external-memory object. PSRAM is preferred when a
  * sufficiently large block is available; otherwise complete 64 KiB pages are
- * allocated from memory_swap. Internal RAM is never used for the payload.
+ * allocated from swap. Internal RAM is never used for the payload.
  * The returned object is released automatically when its process exits. */
 bruce_result_t memory__external_alloc(size_t size, bruce_memory_object_t *out_object);
 
@@ -66,15 +66,12 @@ bruce_result_t memory__external_alloc(size_t size, bruce_memory_object_t *out_ob
  * writable flash pointer. Swap updates that require changing a zero bit back
  * to one rewrite the affected flash sectors. Callers must synchronize writes
  * with readers of an already shared mapping. */
-bruce_result_t memory__external_write(
-    const bruce_memory_object_t *object, size_t offset, const void *data, size_t size
-);
+bruce_result_t
+memory__external_write(const bruce_memory_object_t *object, size_t offset, const void *data, size_t size);
 
 /* Returns a read-only mapping that remains valid until memory__external_free()
  * or process teardown. */
-bruce_result_t memory__external_map(
-    const bruce_memory_object_t *object, const void **out_data
-);
+bruce_result_t memory__external_map(const bruce_memory_object_t *object, const void **out_data);
 
 /* Releases an external object. NULL is invalid; a successful call clears the
  * caller's object. Payload bytes are not zeroed. */

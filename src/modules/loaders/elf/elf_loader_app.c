@@ -121,6 +121,12 @@ static int elf_loader__xip_write(
     elf_loader_process_ctx_t *ctx = context;
     if (ctx->xip.memory.handle != handle) return -EINVAL;
     bruce_result_t result = loader__write_xip(&ctx->xip, offset, data, size);
+    if (result != BRUCE_OK) {
+        printf(
+            "[elf_loader] %s: xip write failed at offset %u size %u (result=%d)\n",
+            ctx->permission_key, (unsigned)offset, (unsigned)size, (int)result
+        );
+    }
     return result == BRUCE_OK ? 0 : (result == BRUCE_ERR_INVALID_ARGUMENT ? -EINVAL : -EIO);
 }
 

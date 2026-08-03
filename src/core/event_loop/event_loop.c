@@ -24,9 +24,7 @@ static void event_loop__lock(void) { xSemaphoreTakeRecursive(s_mutex, portMAX_DE
 
 static void event_loop__unlock(void) { xSemaphoreGiveRecursive(s_mutex); }
 
-static uint64_t event_loop__now_ms(void) {
-    return (uint64_t)xTaskGetTickCount() * portTICK_PERIOD_MS;
-}
+static uint64_t event_loop__now_ms(void) { return (uint64_t)xTaskGetTickCount() * portTICK_PERIOD_MS; }
 
 static bool event_loop__caller_is_foreground_locked(bruce_process_id_t caller) {
     return caller != BRUCE_PROCESS_ID_INVALID && caller == s_foreground_process_id;

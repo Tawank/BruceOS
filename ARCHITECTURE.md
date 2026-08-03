@@ -408,10 +408,10 @@ It is started by `app_runner__spawn_loader_process_owned()` when an ELF app is l
 Like any other program entry, it receives the app path, arguments, permissions,
 and GUI context through the spawn parameters and its opaque context struct.
 Before relocation, Core streams the source file into a temporary external-memory
-object, preferring PSRAM and otherwise using the 512 KiB `memory_swap` partition,
+object, preferring PSRAM and otherwise using the 512 KiB `swap` partition,
 verifies the staged bytes, and exposes a read-only mapping. The loader relocates `.text` in a temporary RAM work buffer
 against its final flash address, then writes `.text` and plain `.rodata` to a
-process-lifetime executable allocation in `memory_swap`. Writable sections remain in RAM.
+process-lifetime executable allocation in `swap`. Writable sections remain in RAM.
 Allocations own complete 64 KiB MMU pages, allowing multiple ELF processes to
 execute concurrently and their space to be reused after exit.
 
@@ -675,7 +675,7 @@ Writable ELF sections, loader bookkeeping, and JS VM/context memory remain
 process-owned RAM allocations.
 
 Large read-mostly payloads use `memory__external_alloc()`. It prefers PSRAM and
-falls back to complete 64 KiB pages in `memory_swap`; it never places payload
+falls back to complete 64 KiB pages in `swap`; it never places payload
 bytes in internal RAM. External objects are opaque handles rather than writable
 pointers. `memory__external_write()` supports PSRAM writes and flash-sector
 rewrites, `memory__external_map()` exposes a read-only pointer valid until
@@ -924,7 +924,7 @@ values are permanently protected from ELF and JS, even with `config`:
 
 Core registers internal LittleFS at runtime over all sector-aligned flash after
 the final static partition. The factory partition is 2.5 MiB and the following
-512 KiB `memory_swap` partition ends at the former 3 MiB factory boundary, so the
+512 KiB `swap` partition ends at the former 3 MiB factory boundary, so the
 LittleFS start address remains unchanged. It provides general external-memory
 fallback, source staging, and process-lifetime flash-backed ELF code. The flashed partition table remains
 usable on 4, 8, 16, and 32 MiB devices while LittleFS consumes the available

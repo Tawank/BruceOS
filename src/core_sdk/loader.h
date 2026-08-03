@@ -14,9 +14,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "core_sdk/result.h"
-#include "core_sdk/memory.h"
 #include "core_sdk/app_runner.h"
+#include "core_sdk/memory.h"
+#include "core_sdk/result.h"
 
 /* Matches app_runner__run_path_with_environment()'s internal dispatch. */
 typedef int (*bruce_loader_run_fn)(
@@ -52,12 +52,11 @@ bruce_result_t loader__stage_path(const char *path, bruce_loader_image_t *out_im
 bruce_result_t loader__adopt_image(bruce_loader_image_t *image);
 bruce_result_t loader__release_image(bruce_loader_image_t *image);
 
-/* Allocates executable MMU-page-exclusive space in memory_swap. The mapping
+/* Allocates executable MMU-page-exclusive space in swap. The mapping
  * remains valid until release; writes are bounds checked and cache coherent. */
 bruce_result_t loader__allocate_xip(size_t size, bruce_loader_xip_image_t *out_image);
-bruce_result_t loader__write_xip(
-    const bruce_loader_xip_image_t *image, size_t offset, const void *data, size_t size
-);
+bruce_result_t
+loader__write_xip(const bruce_loader_xip_image_t *image, size_t offset, const void *data, size_t size);
 bruce_result_t loader__adopt_xip(bruce_loader_xip_image_t *image);
 bruce_result_t loader__release_xip(bruce_loader_xip_image_t *image);
 

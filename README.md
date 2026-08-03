@@ -23,6 +23,15 @@ idf.py build
 
 ## :test_tube: How to run tests
 
+Perequisites:
+```sh
+source ~/.espressif/v6.0.2/esp-idf/export.sh
+python -m pip install pytest pytest-embedded pytest-embedded-idf pytest-embedded-qemu
+python $IDF_PATH/tools/idf_tools.py install qemu-xtensa qemu-riscv32
+
+```
+
+Then run the tests with:
 ```sh
 source ~/.espressif/v6.0.2/esp-idf/export.sh
 idf.py -B build-qemu build

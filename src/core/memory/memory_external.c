@@ -15,7 +15,7 @@
 
 #define MEMORY_EXTERNAL__PARTITION_TYPE ((esp_partition_type_t)0x40)
 #define MEMORY_EXTERNAL__PARTITION_SUBTYPE ((esp_partition_subtype_t)0x00)
-#define MEMORY_EXTERNAL__PARTITION_LABEL "memory_swap"
+#define MEMORY_EXTERNAL__PARTITION_LABEL "swap"
 #define MEMORY_EXTERNAL__FLASH_SECTOR 4096u
 #define MEMORY_EXTERNAL__MMU_PAGE 65536u
 #define MEMORY_EXTERNAL__MAX_PAGES 32u
@@ -30,6 +30,7 @@ typedef struct {
     const uint8_t *data;
     const uint8_t *instruction;
     esp_partition_mmap_handle_t mmap_handle;
+    esp_partition_mmap_handle_t data_mmap_handle;
     bruce_resource_id_t resource_id;
     bruce_process_id_t owner_id;
     uint32_t handle;
@@ -53,25 +54,22 @@ static void memory_external__ensure_mutex(void) {
 
 static const esp_partition_t *memory_external__partition(void) {
     return esp_partition_find_first(
-        MEMORY_EXTERNAL__PARTITION_TYPE, MEMORY_EXTERNAL__PARTITION_SUBTYPE,
-        MEMORY_EXTERNAL__PARTITION_LABEL
+        MEMORY_EXTERNAL__PARTITION_TYPE, MEMORY_EXTERNAL__PARTITION_SUBTYPE, MEMORY_EXTERNAL__PARTITION_LABEL
     );
 }
 
 static memory_external__record_t *memory_external__find_locked(uint32_t handle) {
     if (handle == 0) return NULL;
     for (size_t i = 0; i < MEMORY_EXTERNAL__MAX_OBJECTS; ++i) {
-        if (s_records[i].backend != BRUCE_MEMORY_BACKEND_INVALID &&
-            s_records[i].handle == handle) {
+        if (s_records[i].backend != BRUCE_MEMORY_BACKEND_INVALID && s_records[i].handle == handle) {
             return &s_records[i];
         }
     }
     return NULL;
 }
 
-static bool memory_external__matches(
-    const memory_external__record_t *record, const bruce_memory_object_t *object
-) {
+static bool
+memory_external__matches(const memory_external__record_t *record, const bruce_memory_object_t *object) {
     return record != NULL && object != NULL && record->size == object->size &&
            record->backend == object->backend;
 }
@@ -95,6 +93,7 @@ static void memory_external__cleanup(void *context) {
     } else {
         if (record->data != NULL || record->instruction != NULL) {
             esp_partition_munmap(record->mmap_handle);
+            if (record->executable) esp_partition_munmap(record->data_mmap_handle);
         }
         size_t first_page = record->offset / MEMORY_EXTERNAL__MMU_PAGE;
         for (size_t i = 0; i < record->page_count; ++i) s_pages[first_page + i] = false;
@@ -110,9 +109,7 @@ static memory_external__record_t *memory_external__free_record_locked(void) {
     return NULL;
 }
 
-static bool memory_external__allocate_psram_locked(
-    memory_external__record_t *record, size_t size
-) {
+static bool memory_external__allocate_psram_locked(memory_external__record_t *record, size_t size) {
     if (heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < size) return false;
     void *data = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (data == NULL) return false;
@@ -123,9 +120,8 @@ static bool memory_external__allocate_psram_locked(
     return true;
 }
 
-static bool memory_external__allocate_swap_locked(
-    memory_external__record_t *record, size_t size, bool executable
-) {
+static bool
+memory_external__allocate_swap_locked(memory_external__record_t *record, size_t size, bool executable) {
     const esp_partition_t *partition = memory_external__partition();
     if (partition == NULL || partition->size % MEMORY_EXTERNAL__MMU_PAGE != 0) return false;
     size_t total_pages = partition->size / MEMORY_EXTERNAL__MMU_PAGE;
@@ -138,7 +134,10 @@ static bool memory_external__allocate_swap_locked(
         if (candidate + wanted > total_pages) continue;
         bool available = true;
         for (size_t i = 0; i < wanted; ++i) available = available && !s_pages[candidate + i];
-        if (available) { first = candidate; break; }
+        if (available) {
+            first = candidate;
+            break;
+        }
     }
     if (first == SIZE_MAX) return false;
 
@@ -150,21 +149,16 @@ static bool memory_external__allocate_swap_locked(
     record->executable = executable;
     s_next_page = (first + wanted) % total_pages;
 
-    if (esp_partition_erase_range(
-            partition, record->offset, wanted * MEMORY_EXTERNAL__MMU_PAGE
-        ) != ESP_OK) {
+    if (esp_partition_erase_range(partition, record->offset, wanted * MEMORY_EXTERNAL__MMU_PAGE) != ESP_OK) {
         for (size_t i = 0; i < wanted; ++i) s_pages[first + i] = false;
         memset(record, 0, sizeof(*record));
         return false;
     }
 
     const void *mapped = NULL;
-    esp_partition_mmap_memory_t mapping = executable
-                                              ? ESP_PARTITION_MMAP_INST
-                                              : ESP_PARTITION_MMAP_DATA;
-    if (esp_partition_mmap(
-            partition, record->offset, record->size, mapping, &mapped, &record->mmap_handle
-        ) != ESP_OK) {
+    esp_partition_mmap_memory_t mapping = executable ? ESP_PARTITION_MMAP_INST : ESP_PARTITION_MMAP_DATA;
+    if (esp_partition_mmap(partition, record->offset, record->size, mapping, &mapped, &record->mmap_handle) !=
+        ESP_OK) {
         for (size_t i = 0; i < wanted; ++i) s_pages[first + i] = false;
         memset(record, 0, sizeof(*record));
         return false;
@@ -172,24 +166,24 @@ static bool memory_external__allocate_swap_locked(
 
     if (executable) {
         record->instruction = mapped;
-        record->data = spi_flash_phys2cache(
-            partition->address + record->offset, SPI_FLASH_MMAP_DATA
-        );
-        if (record->data == NULL) {
+        const void *data_mapped = NULL;
+        if (esp_partition_mmap(
+                partition, record->offset, record->size, ESP_PARTITION_MMAP_DATA, &data_mapped,
+                &record->data_mmap_handle
+            ) != ESP_OK) {
             esp_partition_munmap(record->mmap_handle);
             for (size_t i = 0; i < wanted; ++i) s_pages[first + i] = false;
             memset(record, 0, sizeof(*record));
             return false;
         }
+        record->data = data_mapped;
     } else {
         record->data = mapped;
     }
     return true;
 }
 
-bruce_result_t memory_external__alloc(
-    size_t size, bool executable, bruce_memory_object_t *out_object
-) {
+bruce_result_t memory_external__alloc(size_t size, bool executable, bruce_memory_object_t *out_object) {
     if (size == 0 || out_object == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     if (size > SIZE_MAX - (MEMORY_EXTERNAL__MMU_PAGE - 1u)) return BRUCE_ERR_RESOURCE_LIMIT;
     if (!process_registry__operation_begin()) return BRUCE_ERR_CANCELLED;
@@ -199,9 +193,7 @@ bruce_result_t memory_external__alloc(
     xSemaphoreTake(s_mutex, portMAX_DELAY);
     memory_external__record_t *record = memory_external__free_record_locked();
     bool allocated = false;
-    if (record != NULL && !executable) {
-        allocated = memory_external__allocate_psram_locked(record, size);
-    }
+    if (record != NULL && !executable) { allocated = memory_external__allocate_psram_locked(record, size); }
     if (record != NULL && !allocated) {
         allocated = memory_external__allocate_swap_locked(record, size, executable);
     }
@@ -220,8 +212,7 @@ bruce_result_t memory_external__alloc(
         return BRUCE_ERR_RESOURCE_LIMIT;
     }
 
-    bruce_resource_id_t resource_id =
-        process_registry__resource_register(memory_external__cleanup, record);
+    bruce_resource_id_t resource_id = process_registry__resource_register(memory_external__cleanup, record);
     if (resource_id == BRUCE_RESOURCE_ID_INVALID) {
         memory_external__cleanup(record);
         process_registry__operation_end();
@@ -246,17 +237,15 @@ bruce_result_t memory__external_alloc(size_t size, bruce_memory_object_t *out_ob
     return memory_external__alloc(size, false, out_object);
 }
 
-bruce_result_t memory__external_write(
-    const bruce_memory_object_t *object, size_t offset, const void *data, size_t size
-) {
+bruce_result_t
+memory__external_write(const bruce_memory_object_t *object, size_t offset, const void *data, size_t size) {
     if (object == NULL || (data == NULL && size != 0)) return BRUCE_ERR_INVALID_ARGUMENT;
     if (!process_registry__operation_begin()) return BRUCE_ERR_CANCELLED;
     bruce_process_id_t owner_id = process__current_id();
     memory_external__ensure_mutex();
     xSemaphoreTake(s_mutex, portMAX_DELAY);
     memory_external__record_t *record = memory_external__find_locked(object->handle);
-    if (!memory_external__matches(record, object) || record->owner_id != owner_id ||
-        offset > record->size ||
+    if (!memory_external__matches(record, object) || record->owner_id != owner_id || offset > record->size ||
         size > record->size - offset) {
         xSemaphoreGive(s_mutex);
         process_registry__operation_end();
@@ -300,16 +289,14 @@ bruce_result_t memory__external_write(
                     if (chunk > MEMORY_EXTERNAL__FLASH_SECTOR - in_sector) {
                         chunk = MEMORY_EXTERNAL__FLASH_SECTOR - in_sector;
                     }
-                    if (esp_partition_read(
-                            partition, sector_offset, sector, MEMORY_EXTERNAL__FLASH_SECTOR
-                        ) != ESP_OK) {
+                    if (esp_partition_read(partition, sector_offset, sector, MEMORY_EXTERNAL__FLASH_SECTOR) !=
+                        ESP_OK) {
                         result = BRUCE_ERR_IO;
                         break;
                     }
                     memcpy(sector + in_sector, bytes + written, chunk);
-                    if (esp_partition_erase_range(
-                            partition, sector_offset, MEMORY_EXTERNAL__FLASH_SECTOR
-                        ) != ESP_OK ||
+                    if (esp_partition_erase_range(partition, sector_offset, MEMORY_EXTERNAL__FLASH_SECTOR) !=
+                            ESP_OK ||
                         esp_partition_write(
                             partition, sector_offset, sector, MEMORY_EXTERNAL__FLASH_SECTOR
                         ) != ESP_OK) {
@@ -329,9 +316,7 @@ bruce_result_t memory__external_write(
     return result;
 }
 
-bruce_result_t memory__external_map(
-    const bruce_memory_object_t *object, const void **out_data
-) {
+bruce_result_t memory__external_map(const bruce_memory_object_t *object, const void **out_data) {
     if (object == NULL || out_data == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     if (!process_registry__operation_begin()) return BRUCE_ERR_CANCELLED;
     bruce_process_id_t owner_id = process__current_id();
@@ -349,17 +334,15 @@ bruce_result_t memory__external_map(
     return BRUCE_OK;
 }
 
-bruce_result_t memory_external__instruction_map(
-    const bruce_memory_object_t *object, const void **out_instruction
-) {
+bruce_result_t
+memory_external__instruction_map(const bruce_memory_object_t *object, const void **out_instruction) {
     if (object == NULL || out_instruction == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     if (!process_registry__operation_begin()) return BRUCE_ERR_CANCELLED;
     bruce_process_id_t owner_id = process__current_id();
     memory_external__ensure_mutex();
     xSemaphoreTake(s_mutex, portMAX_DELAY);
     memory_external__record_t *record = memory_external__find_locked(object->handle);
-    if (!memory_external__matches(record, object) || record->owner_id != owner_id ||
-        !record->executable ||
+    if (!memory_external__matches(record, object) || record->owner_id != owner_id || !record->executable ||
         record->instruction == NULL) {
         xSemaphoreGive(s_mutex);
         process_registry__operation_end();
@@ -389,7 +372,11 @@ bruce_result_t memory_external__adopt(bruce_memory_object_t *object) {
 
     bruce_resource_id_t resource_id = BRUCE_RESOURCE_ID_INVALID;
     bruce_result_t ownership_result = process_registry__resource_transfer(
-        old_owner_id, old_resource_id, object->size, object->backend == BRUCE_MEMORY_BACKEND_SWAP, &resource_id
+        old_owner_id,
+        old_resource_id,
+        object->size,
+        object->backend == BRUCE_MEMORY_BACKEND_SWAP,
+        &resource_id
     );
     if (ownership_result != BRUCE_OK) {
         process_registry__operation_end();

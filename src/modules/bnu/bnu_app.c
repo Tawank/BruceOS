@@ -308,7 +308,7 @@ int bnu_top_app_main(int argc, char **argv) {
                                         ? processes[i].stack_total_bytes - processes[i].stack_high_water_bytes
                                         : 0;
         stdio__printf(
-            "%1s %2u %3u %4u %4u %4u %s\n",
+            "%1.1s %2u %3u %4u %4u %4u %s\n",
             bnu__process_state_name(processes[i].state),
             (unsigned)processes[i].id,
             (unsigned)processes[i].cpu_percent,

@@ -12,8 +12,8 @@
 
 #include "core_sdk/app_runner.h"
 #include "core_sdk/environment.h"
-#include "core_sdk/result.h"
 #include "core_sdk/process.h"
+#include "core_sdk/result.h"
 
 /* Cleanup callback invoked automatically, in reverse-registration order, when
  * the owning process exits or is killed without releasing the resource itself.
@@ -73,7 +73,8 @@ typedef struct {
  * On success returns BRUCE_OK and the new process's id via *out_process_id.  On
  * failure returns BRUCE_ERR_INVALID_ARGUMENT, BRUCE_ERR_RESOURCE_LIMIT (process
  * table full), or BRUCE_ERR_NO_MEMORY (FreeRTOS task creation failed). */
-bruce_result_t process_registry__create(const process_create_params_t *params, bruce_process_id_t *out_process_id);
+bruce_result_t
+process_registry__create(const process_create_params_t *params, bruce_process_id_t *out_process_id);
 
 /* Loads process-global environment defaults from /config/.env. Missing files
  * are created with an explanatory template. Call once after storage init. */
@@ -82,14 +83,16 @@ bool process_registry__environment_init(void);
 /* Registers a cleanup callback against the *calling* process.  Returns
  * BRUCE_RESOURCE_ID_INVALID if there is no current Core process or the process's
  * resource table is full. */
-bruce_resource_id_t process_registry__resource_register(bruce_process_resource_cleanup_t cleanup, void *context);
+bruce_resource_id_t
+process_registry__resource_register(bruce_process_resource_cleanup_t cleanup, void *context);
 
 /* Replaces the cleanup context for a resource owned by the calling process. */
 bruce_result_t process_registry__resource_update(bruce_resource_id_t resource_id, void *context);
 
 /* Reallocates a cleanup context while holding the registry lock so process
  * teardown cannot observe a pointer that libc has moved. */
-void *process_registry__resource_realloc(bruce_resource_id_t resource_id, void *context, size_t allocation_size);
+void *
+process_registry__resource_realloc(bruce_resource_id_t resource_id, void *context, size_t allocation_size);
 
 /* Releases a resource early because the owner already cleaned it up itself
  * (e.g. an explicit storage__close()); this does NOT invoke the cleanup
@@ -110,7 +113,7 @@ bruce_result_t process_registry__resource_transfer(
 void process_registry__account_memory(int64_t delta_bytes);
 
 /* Adds (positive) or removes (negative) bytes from the calling process's
- * tracked-swap-memory statistic (flash-backed memory_swap allocations only).
+ * tracked-swap-memory statistic (flash-backed swap allocations only).
  * A no-op if there is no current Core process. */
 void process_registry__account_swap_memory(int64_t delta_bytes);
 
