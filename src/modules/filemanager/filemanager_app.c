@@ -155,12 +155,30 @@ static void filemanager__show_error(const char *action, bruce_result_t result) {
     (void)dialog__message(BRUCE_DIALOG_ERROR, "File manager", message);
 }
 
+static bruce_result_t
+filemanager__delete_file(const char *path, const bruce_dialog_render_params_t *render_params) {
+    const bruce_dialog_choice_t confirm_actions[] = {
+        {.label = "Delete", .value = "delete"},
+        {.label = "Cancel", .value = "cancel"},
+    };
+    size_t selected = 0;
+    bruce_result_t result = dialog__choice(
+        "Delete file?", path, confirm_actions, sizeof(confirm_actions) / sizeof(confirm_actions[0]),
+        &selected, render_params
+    );
+    if (result != BRUCE_OK) return result;
+    if (selected != 0) return BRUCE_ERR_CANCELLED;
+
+    return storage__remove(path);
+}
+
 int filemanager_app_main(int argc, char **argv) {
     bool gui = app_runner__args_have_gui(argc, argv);
     const bruce_dialog_choice_t actions[] = {
         {.label = "Open / view", .value = "view"},
         {.label = "File info",   .value = "info"},
         {.label = "Run",         .value = "run" },
+        {.label = "Delete",      .value = "delete"},
         {.label = "Back",        .value = "back"},
     };
     /* File manager stays full screen (no window chrome) but reads better
@@ -188,7 +206,7 @@ int filemanager_app_main(int argc, char **argv) {
             (void)input__flush();
             continue;
         }
-        if (result == BRUCE_ERR_CANCELLED || selected == 3) continue;
+        if (result == BRUCE_ERR_CANCELLED || selected == 4) continue;
         if (result != BRUCE_OK) {
             filemanager__show_error("Action", result);
             continue;
@@ -198,11 +216,15 @@ int filemanager_app_main(int argc, char **argv) {
             result = filemanager__view_file(path, gui);
         } else if (selected == 1) {
             result = filemanager__show_info(path);
-        } else {
+        } else if (selected == 2) {
             int process = app_runner__run_path(path, gui ? "--gui" : "", BRUCE_LAUNCH_FOREGROUND);
             result = process > 0 ? BRUCE_OK : (bruce_result_t)process;
+        } else {
+            result = filemanager__delete_file(path, &action_params);
         }
-        if (result != BRUCE_OK) filemanager__show_error(actions[selected].label, result);
+        if (result != BRUCE_OK && result != BRUCE_ERR_CANCELLED) {
+            filemanager__show_error(actions[selected].label, result);
+        }
         (void)input__flush();
     }
 }
