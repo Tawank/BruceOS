@@ -131,10 +131,10 @@ static void config__set_defaults(config__t *cfg) {
     cfg->terminalLog = true;
 
     static const char *const default_startup_apps[] = {
-        "BG=0 bootanimation",
         "input",
-        "serial_commands",
+        "BG=0 bootanimation --gui",
         "launcher -s",
+        "serial_commands",
     };
     for (size_t i = 0; i < sizeof(default_startup_apps) / sizeof(default_startup_apps[0]); ++i) {
         config__assign(&cfg->startupApps.items[i], default_startup_apps[i]);
