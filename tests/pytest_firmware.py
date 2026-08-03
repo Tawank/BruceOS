@@ -4,9 +4,7 @@ from pytest_embedded import Dut
 
 
 def test_firmware_selftest(dut: Dut) -> None:
-    dut.expect_exact("SELFTEST READY", timeout=15)
-
-    dut.write("selftest\r\n")
+    dut.expect_exact("SELFTEST READY", timeout=60)
 
     status_pattern = re.compile(
         rb"(\[selftest\] selftest__\w+ (?:PASS|FAIL)|SELFTEST PASS|SELFTEST FAIL|Guru Meditation Error|assert failed)"

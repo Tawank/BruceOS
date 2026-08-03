@@ -148,8 +148,9 @@ void app_main(void) {
     if (!serial_commands__wait_ready(MAIN_SERIAL_READY_TIMEOUT_MS)) {
         printf("Serial command frontend failed to start\n");
     }
-    printf("SELFTEST READY\n");
+    printf("\n\nSELFTEST READY\n\n");
     fflush(stdout);
+    app_runner__run_command("selftest", BRUCE_LAUNCH_BACKGROUND);
     return;
 #endif
 

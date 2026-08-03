@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "esp_cache.h"
 #include "esp_heap_caps.h"
 #include "esp_partition.h"
 #include "freertos/FreeRTOS.h"
@@ -30,7 +31,6 @@ typedef struct {
     const uint8_t *data;
     const uint8_t *instruction;
     esp_partition_mmap_handle_t mmap_handle;
-    esp_partition_mmap_handle_t data_mmap_handle;
     bruce_resource_id_t resource_id;
     bruce_process_id_t owner_id;
     uint32_t handle;
@@ -93,7 +93,6 @@ static void memory_external__cleanup(void *context) {
     } else {
         if (record->data != NULL || record->instruction != NULL) {
             esp_partition_munmap(record->mmap_handle);
-            if (record->executable) esp_partition_munmap(record->data_mmap_handle);
         }
         size_t first_page = record->offset / MEMORY_EXTERNAL__MMU_PAGE;
         for (size_t i = 0; i < record->page_count; ++i) s_pages[first_page + i] = false;
@@ -107,6 +106,42 @@ static memory_external__record_t *memory_external__free_record_locked(void) {
         if (s_records[i].backend == BRUCE_MEMORY_BACKEND_INVALID) return &s_records[i];
     }
     return NULL;
+}
+
+/*
+ * esp_partition_write() only invalidates the cache alias matching the
+ * physical page's MMU capability (see spi_flash_check_and_flush_cache() /
+ * is_page_mapped_in_cache() in IDF's flash_mmap.c): pages mapped executable
+ * (ESP_PARTITION_MMAP_INST, used for XIP records here) only get their
+ * instruction-bus line invalidated. record->data for an executable record is
+ * a separate data-bus alias of the same physical page (spi_flash_phys2cache()
+ * with SPI_FLASH_MMAP_DATA), so IDF never invalidates it on write -- any read
+ * through it (including the direct_write check below) can keep returning
+ * pre-write bytes indefinitely. Invalidate that alias ourselves after writing,
+ * and once right after allocating (a fresh mapping can recycle a virtual
+ * address a previous, already-torn-down executable record left cached).
+ *
+ * esp_cache_get_line_size_by_addr() cannot be used to size this: it only
+ * recognizes PSRAM (esp_ptr_external_ram) and internal RAM (esp_ptr_internal)
+ * addresses and returns 0 -- silently skipping the invalidate -- for a flash
+ * mmap alias like this one, which is neither. esp_cache_msync() itself
+ * resolves the cache level/line size for any address the cache HAL
+ * recognizes (mmu_hal-backed, including flash mmap windows) via
+ * cache_hal_vaddr_to_cache_level_id(), so it doesn't need that helper; we
+ * only need a conservative alignment for the address range we pass in. 64
+ * bytes is a multiple of every supported ESP32-S3 D-cache line size (16/32/64).
+ */
+#define MEMORY_EXTERNAL__CACHE_ALIGN 64u
+
+static void memory_external__invalidate_data_alias(
+    const memory_external__record_t *record, size_t offset, size_t size
+) {
+    if (!record->executable || record->data == NULL || size == 0) return;
+    uintptr_t start = (uintptr_t)(record->data + offset);
+    uintptr_t end = (start + size + MEMORY_EXTERNAL__CACHE_ALIGN - 1) &
+                    ~(uintptr_t)(MEMORY_EXTERNAL__CACHE_ALIGN - 1);
+    start &= ~(uintptr_t)(MEMORY_EXTERNAL__CACHE_ALIGN - 1);
+    esp_cache_msync((void *)start, end - start, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
 }
 
 static bool memory_external__allocate_psram_locked(memory_external__record_t *record, size_t size) {
@@ -166,17 +201,14 @@ memory_external__allocate_swap_locked(memory_external__record_t *record, size_t 
 
     if (executable) {
         record->instruction = mapped;
-        const void *data_mapped = NULL;
-        if (esp_partition_mmap(
-                partition, record->offset, record->size, ESP_PARTITION_MMAP_DATA, &data_mapped,
-                &record->data_mmap_handle
-            ) != ESP_OK) {
+        record->data = spi_flash_phys2cache(partition->address + record->offset, SPI_FLASH_MMAP_DATA);
+        if (record->data == NULL) {
             esp_partition_munmap(record->mmap_handle);
             for (size_t i = 0; i < wanted; ++i) s_pages[first + i] = false;
             memset(record, 0, sizeof(*record));
             return false;
         }
-        record->data = data_mapped;
+        memory_external__invalidate_data_alias(record, 0, record->size);
     } else {
         record->data = mapped;
     }
@@ -310,6 +342,7 @@ memory__external_write(const bruce_memory_object_t *object, size_t offset, const
         } else {
             result = BRUCE_ERR_IO;
         }
+        if (result == BRUCE_OK) memory_external__invalidate_data_alias(record, offset, size);
     }
     xSemaphoreGive(s_mutex);
     process_registry__operation_end();

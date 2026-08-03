@@ -9,6 +9,7 @@ set(BRUCE_SELFTEST_SOURCES
     "modules/selftest/device_test.c"
     "modules/selftest/dialog_test.c"
     "modules/selftest/display_test.c"
+    "modules/selftest/elf_loader_test.c"
     "modules/selftest/fake_elf.c"
     "modules/selftest/gpio_bus_test.c"
     "modules/selftest/icon_test.c"
@@ -118,6 +119,8 @@ idf_component_register(SRCS
                     "modules/nrf24/nrf24_app.c"
                     "modules/wifi/wifi_app.c"
                     "modules/webui/webui_app.c"
+                    EMBED_FILES
+                    "../elf_apps/examples/game.elf"
                     REQUIRES
                     args
                     cjson
@@ -139,6 +142,7 @@ idf_component_register(SRCS
                     esp_timer
                     esp_jpeg
                     esp_hid
+                     esp_mm
                      esp_netif
                      esp_partition
                      esp_wifi

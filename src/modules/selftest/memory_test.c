@@ -49,10 +49,12 @@ bool selftest__run_external_memory_case(void) {
 /* Regression coverage for the flash-backed (XIP) allocation path used by the
  * ELF loader: writes must be visible through the *data-bus* mapping the
  * caller reads back through, not just on the instruction-bus mapping used to
- * execute the code. A prior bug obtained that data-bus pointer via
- * spi_flash_phys2cache() instead of a tracked esp_partition_mmap(), so the
- * flash cache was never invalidated on write and read-back always returned
- * stale (pre-write) bytes. */
+ * execute the code. esp_partition_write()'s automatic cache invalidation only
+ * flushes the alias matching the physical page's tracked MMU capability
+ * (instruction, for an XIP record) -- it never touches a separate data-bus
+ * alias of the same page, regardless of whether that alias came from
+ * spi_flash_phys2cache() or a second tracked esp_partition_mmap(). The data
+ * alias must be invalidated manually after every write. */
 bool selftest__run_external_memory_xip_case(void) {
     bruce_loader_xip_image_t image;
     if (loader__allocate_xip(64, &image) != BRUCE_OK || image.instruction == NULL || image.data == NULL ||

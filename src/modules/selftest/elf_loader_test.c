@@ -1,0 +1,48 @@
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+
+#include "core/storage/storage.h"
+#include "core_sdk/app_runner.h"
+#include "core_sdk/runtime.h"
+#include "modules/loaders/elf/elf_loader_app.h"
+
+#include "elf_loader_test.h"
+
+/* elf_apps/examples/game.elf, embedded via EMBED_FILES (src/CMakeLists.txt). */
+extern const uint8_t game_elf_start[] asm("_binary_game_elf_start");
+extern const uint8_t game_elf_end[] asm("_binary_game_elf_end");
+
+/*
+ * Regression coverage for the flash-backed (XIP) ELF relocation path: stages
+ * a real, small, executable ELF app (committed at elf_apps/examples/game.elf)
+ * and runs it through the exact same elf_loader__run_path() ->
+ * esp_elf_relocate_xip() -> memory_external swap allocator pipeline that
+ * "elf ./apps/game.elf" uses on real hardware. This is the pipeline that
+ * regressed with "flash-backed relocation failed (relocate=-5, release=0)":
+ * selftest__run_elf_loader_case()'s fake ELF fixture is intentionally
+ * invalid manifest-only bytes and is rejected before relocation is ever
+ * attempted, so it cannot catch this class of bug.
+ */
+bool selftest__run_elf_loader_xip_case(void) {
+    const char *path = "/bin/selftest_elf_loader_xip.elf";
+    storage__remove(path);
+
+    size_t elf_size = (size_t)(game_elf_end - game_elf_start);
+    if (!storage__write_file_atomic(path, game_elf_start, elf_size)) {
+        printf("[selftest] loader/elf_xip: could not stage embedded fixture\n");
+        return false;
+    }
+
+    int result = elf_loader__run_path(path, NULL, BRUCE_LAUNCH_FOREGROUND, NULL, 0);
+    if (result > 0) (void)runtime__delay(50);
+    storage__remove(path);
+
+    if (result <= 0) {
+        printf("[selftest] loader/elf_xip: run_path failed (result=%d)\n", result);
+        return false;
+    }
+
+    printf("[selftest] loader/elf_xip: OK\n");
+    return true;
+}

@@ -17,6 +17,7 @@
 #include "device_test.h"
 #include "dialog_test.h"
 #include "display_test.h"
+#include "elf_loader_test.h"
 #include "gpio_bus_test.h"
 #include "icon_test.h"
 #include "image_test.h"
@@ -89,6 +90,7 @@ int selftest_app_main(int argc, char **argv) {
     RUN_SELFTEST(selftest__run_manifest_parse_case);
     RUN_SELFTEST(selftest__run_loader_registry_extensibility_case);
     RUN_SELFTEST(selftest__run_elf_loader_case);
+    RUN_SELFTEST(selftest__run_elf_loader_xip_case);
     RUN_SELFTEST(selftest__run_js_loader_case);
     RUN_SELFTEST(selftest__run_terminal_named_case);
     RUN_SELFTEST(selftest__run_terminal_path_case);
