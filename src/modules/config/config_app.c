@@ -6,6 +6,7 @@
 #include "core_sdk/config.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/result.h"
+#include "core_sdk/runtime.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/process.h"
 
@@ -218,16 +219,10 @@ static int config_app__display_cli(ArgParser *display_parser, ArgParser *buffere
                                                    : BRUCE_ERR_INVALID_ARGUMENT;
 }
 
-static void config_app__add_gui_option(ArgParser *parser) {
-    ap_add_flag(parser, "gui");
-    ap_set_opt_help(parser, "gui", "Use GUI interaction mode");
-}
-
 int config_app_main(int argc, char **argv) {
     ArgParser *root = ap_new_parser();
     if (root == NULL) return BRUCE_ERR_NO_MEMORY;
     ap_set_helptext(root, "Configure BruceOS settings.");
-    config_app__add_gui_option(root);
 
     ArgParser *system = ap_new_cmd(root, "system");
     ArgParser *clock = system != NULL ? ap_new_cmd(system, "clock") : NULL;
@@ -252,7 +247,6 @@ int config_app_main(int argc, char **argv) {
             ap_free(root);
             return BRUCE_ERR_NO_MEMORY;
         }
-        config_app__add_gui_option(parsers[i]);
     }
 
     ap_set_helptext(system, "Configure system settings.");
@@ -291,10 +285,7 @@ int config_app_main(int argc, char **argv) {
     bool clock_hierarchy = root_action == system && ap_get_cmd_parser(system) == clock;
     bool startup_hierarchy = root_action == startup;
     bool display_hierarchy = root_action == display;
-    bool gui = ap_found(root, "gui") || ap_found(system, "gui") || ap_found(clock, "gui") ||
-               ap_found(display, "gui") || ap_found(display_buffered, "gui");
-    ArgParser *action = clock_hierarchy ? ap_get_cmd_parser(clock) : NULL;
-    if (action != NULL) gui = gui || ap_found(action, "gui");
+    bool gui = runtime__gui_requested();
     int result;
     if (clock_hierarchy) {
         result = gui ? config_app__clock_gui()
