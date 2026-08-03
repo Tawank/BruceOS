@@ -407,9 +407,13 @@ static void input__kb_run_hotkey(const char *action) {
     }
 
     while (isspace((unsigned char)*action)) action++;
-    int result = strcmp(action, "launcher") == 0
-                     ? app_runner__run("launcher", "--gui", BRUCE_LAUNCH_FOREGROUND)
-                     : app_runner__run_command(action, BRUCE_LAUNCH_FOREGROUND);
+    int result;
+    if (strcmp(action, "launcher") == 0) {
+        const bruce_environment_variable_t gui_env[] = {{.name = "GUI", .value = "1"}};
+        result = app_runner__run_with_environment("launcher", NULL, BRUCE_LAUNCH_FOREGROUND, gui_env, 1);
+    } else {
+        result = app_runner__run_command(action, BRUCE_LAUNCH_FOREGROUND);
+    }
     if (result < 0) ESP_LOGW(TAG, "hotkey action '%s' failed: %d", action, result);
 }
 

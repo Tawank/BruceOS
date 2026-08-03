@@ -72,9 +72,8 @@ static bool image_loader__escape_arg(const char *path, char *out, size_t out_siz
         if (written + 1 >= out_size) return false;
         out[written++] = path[i];
     }
-    static const char gui_arg[] = " --gui";
-    if (written + sizeof(gui_arg) > out_size) return false;
-    memcpy(out + written, gui_arg, sizeof(gui_arg));
+    if (written + 1u > out_size) return false;
+    out[written] = '\0';
     return true;
 }
 
@@ -89,9 +88,14 @@ int image_loader__run_path(
     if (!image_loader__escape_arg(path, escaped_path, sizeof(escaped_path))) {
         return BRUCE_ERR_INVALID_PATH;
     }
-    return app_runner__run_with_environment(
-        "image_viewer", escaped_path, mode, environment, environment_count
-    );
+
+    bruce_environment_variable_t merged[BRUCE_ENVIRONMENT_MAX_VARIABLES];
+    size_t merged_count = 0;
+    for (size_t i = 0; i < environment_count && merged_count < BRUCE_ENVIRONMENT_MAX_VARIABLES - 1u; ++i) {
+        merged[merged_count++] = environment[i];
+    }
+    merged[merged_count++] = (bruce_environment_variable_t){.name = "GUI", .value = "1"};
+    return app_runner__run_with_environment("image_viewer", escaped_path, mode, merged, merged_count);
 }
 
 int image_app_main(int argc, char **argv) {

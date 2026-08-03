@@ -453,7 +453,13 @@ static int bruce_launcher__run_entry(const bruce_launcher_entry_t *entry) {
         bruce_launcher__get_theme(&theme);
         return bruce_launcher__run_process_switcher(&theme);
     }
-    int result = app_runner__run_command(entry->command, BRUCE_LAUNCH_FOREGROUND);
+    char command[BRUCE_LAUNCHER_COMMAND_MAX + 8];
+    if (strncmp(entry->command, "GUI=", 4) == 0) {
+        snprintf(command, sizeof(command), "%s", entry->command);
+    } else {
+        snprintf(command, sizeof(command), "GUI=1 %s", entry->command);
+    }
+    int result = app_runner__run_command(command, BRUCE_LAUNCH_FOREGROUND);
 
     if (result < 0) {
         char message[128];
@@ -649,7 +655,7 @@ static int bruce_launcher__run_gui_menu(bruce_launcher_menu_t *menu) {
 /* Terminal menu runner                                                       */
 /* -------------------------------------------------------------------------- */
 
-/* Terminal fallback used when the launcher is started without --gui. Keeps
+/* Terminal fallback used when the launcher is started without GUI=1. Keeps
  * the original renderer-agnostic dialog__choice() path so serial/terminal
  * usage and the host selftest continue to work. */
 static int bruce_launcher__run_terminal_menu(bruce_launcher_menu_t *menu) {
@@ -698,7 +704,7 @@ int bruce_launcher_app_main(int argc, char **argv) {
     }
 
     int result;
-    if (app_runner__args_have_gui(argc, argv)) {
+    if (app_runner__gui_requested()) {
         const bruce_dialog_window_renderer_t window_renderer = {
             .padding_top = BRUCE_LAUNCHER_STATUS_H + 1,
             .padding_right = BRUCE_LAUNCHER_BORDER_PAD + 1,

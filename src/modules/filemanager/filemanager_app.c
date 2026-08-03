@@ -173,7 +173,7 @@ filemanager__delete_file(const char *path, const bruce_dialog_render_params_t *r
 }
 
 int filemanager_app_main(int argc, char **argv) {
-    bool gui = app_runner__args_have_gui(argc, argv);
+    bool gui = app_runner__gui_requested();
     const bruce_dialog_choice_t actions[] = {
         {.label = "Open / view", .value = "view"},
         {.label = "File info",   .value = "info"},
@@ -217,7 +217,10 @@ int filemanager_app_main(int argc, char **argv) {
         } else if (selected == 1) {
             result = filemanager__show_info(path);
         } else if (selected == 2) {
-            int process = app_runner__run_path(path, gui ? "--gui" : "", BRUCE_LAUNCH_FOREGROUND);
+            const bruce_environment_variable_t gui_env[] = {{.name = "GUI", .value = "1"}};
+            int process = app_runner__run_path_with_environment(
+                path, NULL, BRUCE_LAUNCH_FOREGROUND, gui ? gui_env : NULL, gui ? 1u : 0u
+            );
             result = process > 0 ? BRUCE_OK : (bruce_result_t)process;
         } else {
             result = filemanager__delete_file(path, &action_params);

@@ -33,8 +33,8 @@ Final ELF files are written to:
 Nofrendo can be launched with a ROM path or without one to open the file picker:
 
 ```
-elf ./nes.elf --gui /roms/game.nes
-elf ./nes.elf --gui
+elf ./nes.elf /roms/game.nes
+elf ./nes.elf
 ```
 
 The Back input exits. D-pad/gamepad inputs are mapped directly; keyboard controls

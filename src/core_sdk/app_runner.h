@@ -62,9 +62,16 @@ bruce_result_t app_runner__parse_args(const char *arg, char ***out_argv, int *ou
  * argv == NULL (e.g. when argc == 0). */
 void app_runner__free_args(char **argv, int argc);
 
-/* Returns true if any element of argv is exactly "--gui".  Shared by
- * app_runner__run()'s built-in path and by loader modules, which must parse
- * their own raw `arg` string (see app_runner__parse_args()) to determine
- * this for the process context they spawn (see migration_plan.md, "Dialog
- * and process interaction"). */
-bool app_runner__args_have_gui(int argc, char *const *argv);
+/* Scans an environment overlay array (not yet applied to any process) for
+ * name "GUI"; returns true iff the last matching entry's value is "1".
+ * Shared by app_runner__run()'s built-in path and by loader modules, which
+ * must determine this for the process context they are about to spawn
+ * before it exists (see migration_plan.md, "Dialog and process
+ * interaction"). */
+bool app_runner__environment_requests_gui(
+    const bruce_environment_variable_t *environment, size_t environment_count
+);
+
+/* Returns true iff the calling process's own "GUI" environment variable is
+ * "1". Drop-in replacement for the old argv-scanning self-check. */
+bool app_runner__gui_requested(void);

@@ -199,7 +199,7 @@ int elf_loader__run_path(
     argv = NULL;
     argc = 0;
 
-    bool gui_requested = app_runner__args_have_gui(full_argc, full_argv);
+    bool gui_requested = app_runner__environment_requests_gui(environment, environment_count);
 
     elf_loader_process_ctx_t *ctx = malloc(sizeof(*ctx));
     if (ctx == NULL) {

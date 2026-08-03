@@ -324,13 +324,22 @@ bruce_result_t app_runner__parse_args(const char *arg, char ***out_argv, int *ou
 }
 
 /* AppRunner records this process context ahead of any launch-time permission
- * check (see migration_plan.md, "Dialog and process interaction"); the
- * "--gui" token is left in argv, not stripped. */
-bool app_runner__args_have_gui(int argc, char *const *argv) {
-    for (int i = 0; i < argc; ++i) {
-        if (argv[i] != NULL && strcmp(argv[i], "--gui") == 0) { return true; }
+ * check (see migration_plan.md, "Dialog and process interaction"). */
+bool app_runner__environment_requests_gui(
+    const bruce_environment_variable_t *environment, size_t environment_count
+) {
+    bool requested = false;
+    for (size_t i = 0; i < environment_count; ++i) {
+        if (environment[i].name != NULL && strcmp(environment[i].name, "GUI") == 0) {
+            requested = environment[i].value != NULL && strcmp(environment[i].value, "1") == 0;
+        }
     }
-    return false;
+    return requested;
+}
+
+bool app_runner__gui_requested(void) {
+    const char *value = environment__get("GUI");
+    return value != NULL && strcmp(value, "1") == 0;
 }
 
 int app_runner__run_with_environment(
@@ -377,7 +386,7 @@ int app_runner__run_with_environment(
             .argc = argc,
             .argv = argv,
             .built_in = true,
-            .gui_requested = app_runner__args_have_gui(argc, argv),
+            .gui_requested = app_runner__environment_requests_gui(environment, environment_count),
             .start_in_background = mode == BRUCE_LAUNCH_BACKGROUND,
             .environment = environment,
             .environment_count = environment_count,

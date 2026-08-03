@@ -103,7 +103,7 @@ static void apps__show_error(const char *action, bruce_result_t result) {
 }
 
 int apps_app_main(int argc, char **argv) {
-    bool gui = app_runner__args_have_gui(argc, argv);
+    bool gui = app_runner__gui_requested();
 
     const char *directories[] = {"/apps", "/scripts"};
     size_t capacity = 0;
@@ -156,8 +156,9 @@ int apps_app_main(int argc, char **argv) {
             break;
         }
 
-        int process = app_runner__run_path(
-            apps[selected].path, gui ? "--gui" : NULL, BRUCE_LAUNCH_FOREGROUND
+        const bruce_environment_variable_t gui_env[] = {{.name = "GUI", .value = "1"}};
+        int process = app_runner__run_path_with_environment(
+            apps[selected].path, NULL, BRUCE_LAUNCH_FOREGROUND, gui ? gui_env : NULL, gui ? 1u : 0u
         );
         if (process <= 0) apps__show_error("Launch", (bruce_result_t)process);
     }

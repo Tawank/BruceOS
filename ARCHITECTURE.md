@@ -101,7 +101,9 @@ Labels may end with `@icon-name`; the suffix is hidden from the displayed label
 and resolved directly through `icon__get()`. Labels without a suffix have no
 launcher icon.
 Every submenu automatically appends a `"Back"` entry.  The command strings are
-passed exactly as written; the launcher does not append `--gui` automatically.
+passed as written, except that the launcher prepends a `GUI=1` environment
+assignment unless the command already starts with an explicit `GUI=`
+assignment (an opt-out, e.g. `"GUI=0 wifi ap start"`).
 The launcher starts commands in the foreground by default. A leading `BG=1`
 assignment starts one in the background; `BG=0` explicitly selects foreground.
 Applications begin in the final state chosen by AppRunner and do not repair
@@ -112,8 +114,9 @@ The built-in `apps` module provides the default launcher's application browser.
 It enumerates regular `.elf` and `.js` files from `/apps` and `/scripts`, sorts
 them by display name, and starts the selected path through the loader registry.
 Valid manifests provide display names; files without usable metadata remain
-visible under their filename. The browser passes `--gui` to selected apps when
-it was itself launched with `--gui` and resumes when the child yields or exits.
+visible under their filename. The browser passes a `GUI=1` environment
+assignment to selected apps when it was itself launched with `GUI=1` and
+resumes when the child yields or exits.
 
 ## Applications and app_runner
 
@@ -297,7 +300,8 @@ Complete command lines use `app_runner__run_command()`. Leading `NAME=value`
 assignments form a temporary child environment overlay. Exact `BG=0` and `BG=1`
 override the caller's default launch mode; other values are rejected. Launcher
 commands default to foreground, autostart and WebUI commands default to
-background, and `--gui` selects a GUI frontend without determining ownership.
+background, and a `GUI=1` assignment selects a GUI frontend without
+determining ownership.
 The initial state is established before application entry. Later cooperative
 foreground/background transitions remain available through the Process API.
 
@@ -382,10 +386,10 @@ IP event starts the same synchronization asynchronously only when
 local epoch, so changing timezone or DST does not rewrite the clock.
 
 The built-in `clock` module provides `show`, monotonic `timer`, and daily
-local-time `alarm` actions. `clock --gui` opens the clock face; Select opens its
+local-time `alarm` actions. `GUI=1 clock` opens the clock face; Select opens its
 Timer/Alarm menu and Back exits. Timer and alarm are foreground workflows and
 can be cancelled with Back; persistent/background alarms and hardware RTC wake
-are outside this initial contract. The built-in `config system clock --gui`
+are outside this initial contract. The built-in `GUI=1 config system clock`
 screen and its terminal equivalents configure NTP, timezone, DST, format, and
 full manual date/time through the same Core API.
 
@@ -639,7 +643,7 @@ headers and buffered body share one process-owned allocation released by `http__
 ## Dialog and process interaction
 
 `dialog__*` is renderer-agnostic.  `dialog__choice()` displays a GUI choice
-for processes launched with `--gui`, or a terminal choice such as:
+for processes launched with `GUI=1`, or a terminal choice such as:
 
 ```
 1. yes
@@ -655,10 +659,10 @@ caller-selected refresh interval, so surrounding UI outside the padded
 viewport can remain current while the choice is open. Terminal rendering
 ignores these parameters.
 
-app_runner records the initial `--gui` launch context in process-local storage
-before launch-time permission checks, but leaves the argument in the app’s
-`argv`.  A background serial-monitor-style process decides its own behavior;
-there is no separate dynamic process interaction-mode API.
+app_runner records the initial `GUI` environment request in process-local
+storage before launch-time permission checks. A background serial-monitor-style
+process decides its own behavior; there is no separate dynamic process
+interaction-mode API.
 
 Retain the JS `dialog.message`, `info`, `success`, `warning`, `error`, and
 `choice` APIs as wrappers.  Keep `dialog.pickFile()` as a Core renderer-neutral

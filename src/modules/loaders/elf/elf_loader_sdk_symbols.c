@@ -118,7 +118,7 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(loader__release_image),
     ESP_ELFSYM_EXPORT(app_runner__parse_args),
     ESP_ELFSYM_EXPORT(app_runner__free_args),
-    ESP_ELFSYM_EXPORT(app_runner__args_have_gui),
+    ESP_ELFSYM_EXPORT(app_runner__gui_requested),
     ESP_ELFSYM_EXPORT(app_runner__run_command),
 
     /* Process environment */

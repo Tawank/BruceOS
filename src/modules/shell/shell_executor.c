@@ -245,9 +245,10 @@ static int shell_executor__pipe_to_text(shell_state_t *state, const shell_comman
             status = 1;
         } else {
             char prefix[48];
-            snprintf(prefix, sizeof(prefix), "--stdin-size %u --gui", (unsigned)size);
+            snprintf(prefix, sizeof(prefix), "--stdin-size %u", (unsigned)size);
+            const bruce_environment_variable_t gui_env[] = {{.name = "GUI", .value = "1"}};
             int launched = shell_executor__launch_external(
-                target_argc, target_words, prefix, NULL, 0, BRUCE_LAUNCH_FOREGROUND
+                target_argc, target_words, prefix, gui_env, 1, BRUCE_LAUNCH_FOREGROUND
             );
             (void)stdio__session_route_children(BRUCE_STDIO_SESSION_INVALID);
             if (launched <= 0) {

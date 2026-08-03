@@ -8,7 +8,7 @@
 #include <string.h>
 
 /* ------------------------------------------------------------------------ */
-/* AppRunner (A3): registration, named resolution, arg parsing, --gui/state */
+/* AppRunner (A3): registration, named resolution, arg parsing, GUI env/state */
 /* ------------------------------------------------------------------------ */
 
 static int selftest__apprunner_dummy_entry(int argc, char **argv) {
@@ -95,9 +95,17 @@ static int selftest__apprunner_echo_entry(int argc, char **argv) {
 }
 
 bool selftest__run_apprunner_args_case(void) {
-    char *lifecycle_argv[] = {"app", "--gui-mode", "--gui", NULL};
-    if (!app_runner__args_have_gui(3, lifecycle_argv) || app_runner__args_have_gui(2, lifecycle_argv)) {
-        printf("[selftest] apprunner/args: GUI flag was not matched exactly\n");
+    const bruce_environment_variable_t gui_env_last_1[] = {
+        {.name = "GUI", .value = "0"},
+        {.name = "GUI", .value = "1"},
+    };
+    const bruce_environment_variable_t gui_env_last_0[] = {
+        {.name = "GUI", .value = "1"},
+        {.name = "GUI", .value = "0"},
+    };
+    if (!app_runner__environment_requests_gui(gui_env_last_1, 2) ||
+        app_runner__environment_requests_gui(gui_env_last_0, 2)) {
+        printf("[selftest] apprunner/args: GUI environment flag was not matched exactly\n");
         return false;
     }
     bruce_result_t registered = app_runner__register("selftest_echo", selftest__apprunner_echo_entry, 0);
@@ -113,7 +121,7 @@ bool selftest__run_apprunner_args_case(void) {
 
     memset(&s_echo, 0, sizeof(s_echo));
     int background_result = app_runner__run_command(
-        "TEST_VALUE=inherited BG=1 selftest_echo --gui foo \"bar baz\" escaped\\ space",
+        "TEST_VALUE=inherited BG=1 GUI=1 selftest_echo foo \"bar baz\" escaped\\ space",
         BRUCE_LAUNCH_FOREGROUND
     );
     bruce_result_t background_wait = background_result > 0
@@ -127,23 +135,22 @@ bool selftest__run_apprunner_args_case(void) {
         );
         return false;
     }
-    bool background_ok = s_echo.argc == 5 && strcmp(s_echo.argv_buf[0], "selftest_echo") == 0 &&
-                         strcmp(s_echo.argv_buf[1], "--gui") == 0 && strcmp(s_echo.argv_buf[2], "foo") == 0 &&
-                         strcmp(s_echo.argv_buf[3], "bar baz") == 0 &&
-                         strcmp(s_echo.argv_buf[4], "escaped space") == 0 && s_echo.argv_terminated &&
+    bool background_ok = s_echo.argc == 4 && strcmp(s_echo.argv_buf[0], "selftest_echo") == 0 &&
+                         strcmp(s_echo.argv_buf[1], "foo") == 0 &&
+                         strcmp(s_echo.argv_buf[2], "bar baz") == 0 &&
+                         strcmp(s_echo.argv_buf[3], "escaped space") == 0 && s_echo.argv_terminated &&
                           s_echo.gui_requested && s_echo.state == BRUCE_PROCESS_BACKGROUND &&
                           strcmp(s_echo.environment, "inherited") == 0;
     if (!background_ok) {
         printf(
-            "[selftest] apprunner/args: background argc=%d gui=%d state=%d argv=[%s|%s|%s|%s|%s]\n",
+            "[selftest] apprunner/args: background argc=%d gui=%d state=%d argv=[%s|%s|%s|%s]\n",
             s_echo.argc,
             s_echo.gui_requested,
             s_echo.state,
             s_echo.argv_buf[0],
             s_echo.argv_buf[1],
             s_echo.argv_buf[2],
-            s_echo.argv_buf[3],
-            s_echo.argv_buf[4]
+            s_echo.argv_buf[3]
         );
         return false;
     }

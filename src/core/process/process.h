@@ -34,7 +34,7 @@ typedef struct {
     char **argv;
     bool built_in;
     /* Recorded on the process record immediately, before the process's first
-     * instruction runs (this is the "--gui process context" AppRunner records
+     * instruction runs (this is the "GUI environment context" AppRunner records
      * ahead of any launch-time permission check). */
     bool gui_requested;
     /* Filename with extension (e.g. "game.elf"), used as the
@@ -125,7 +125,7 @@ void process_registry__operation_end(void);
 
 /* Fills in permission-relevant context for the *calling* process: whether it is
  * built_in, its permission_key (copied, NUL-terminated, truncated to fit;
- * empty if unset), and whether it was launched with --gui. Any of the three
+ * empty if unset), and whether it was launched with GUI=1. Any of the three
  * output pointers may be NULL to skip that field. Returns BRUCE_ERR_NOT_FOUND
  * if there is no current Core process (e.g. this runs on the boot/init process,
  * before any process_registry__create() call). Used by permission__check() and

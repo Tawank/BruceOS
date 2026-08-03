@@ -132,7 +132,7 @@ static void config__set_defaults(config__t *cfg) {
 
     static const char *const default_startup_apps[] = {
         "input",
-        "BG=0 bootanimation --gui",
+        "BG=0 bootanimation",
         "launcher -s",
         "serial_commands",
     };

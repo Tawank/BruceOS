@@ -225,7 +225,7 @@ bool selftest__run_elf_loader_case(void) {
 
     dialog__test_set_choice_provider(selftest__elf_dialog_allow_provider);
     size_t calls_before = elf_loader__debug_call_count();
-    int result = app_runner__run_path(path, "--gui", BRUCE_LAUNCH_BACKGROUND);
+    int result = app_runner__run_path(path, NULL, BRUCE_LAUNCH_BACKGROUND);
     dialog__test_set_choice_provider(NULL);
 
     bool run_ok = result == BRUCE_ERR_INVALID_ARGUMENT && elf_loader__debug_call_count() == calls_before + 1;
@@ -247,7 +247,7 @@ bool selftest__run_elf_loader_case(void) {
                        inspection->manifest.stack_size == 8192 && inspection->manifest.permission_count == 0;
     if (inspection != NULL) memory__free(inspection);
     if (fallback_ok) {
-        result = app_runner__run_path(path, "--gui", BRUCE_LAUNCH_BACKGROUND);
+        result = app_runner__run_path(path, NULL, BRUCE_LAUNCH_BACKGROUND);
         fallback_ok = result == BRUCE_ERR_INVALID_ARGUMENT;
     }
     storage__remove(path);

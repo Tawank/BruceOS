@@ -31,22 +31,24 @@ static bool launcher__has_foreground(void) {
 static int launcher__start(bool gui, bruce_launch_mode_t mode) {
     const char *configured = config__get_launcher_app();
     const char *target = (configured != NULL && configured[0] != '\0') ? configured : LAUNCHER__FALLBACK_APP;
-    const char *lifecycle_args = gui ? "--gui" : "";
+    const bruce_environment_variable_t gui_env[] = {{.name = "GUI", .value = "1"}};
 
-    int result = app_runner__run(target, lifecycle_args, mode);
+    int result = app_runner__run_with_environment(target, NULL, mode, gui ? gui_env : NULL, gui ? 1u : 0u);
     if (result < 0 && strcmp(target, LAUNCHER__FALLBACK_APP) != 0) {
         stdio__printf(
             "launcherApp \"%s\" failed to start (%d); falling back to " LAUNCHER__FALLBACK_APP "\n",
             target,
             result
         );
-        result = app_runner__run(LAUNCHER__FALLBACK_APP, lifecycle_args, mode);
+        result = app_runner__run_with_environment(
+            LAUNCHER__FALLBACK_APP, NULL, mode, gui ? gui_env : NULL, gui ? 1u : 0u
+        );
     }
     return result;
 }
 
 int launcher_app_main(int argc, char **argv) {
-    bool gui = app_runner__args_have_gui(argc, argv);
+    bool gui = app_runner__gui_requested();
     if (!launcher__has_arg(argc, argv, "-s")) {
         bruce_process_snapshot_t snapshot;
         bruce_launch_mode_t mode = BRUCE_LAUNCH_FOREGROUND;

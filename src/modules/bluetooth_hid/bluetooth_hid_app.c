@@ -157,7 +157,7 @@ static int bluetooth_hid_app__gui(void) {
 }
 
 int bluetooth_hid_app_main(int argc, char **argv) {
-    if (app_runner__args_have_gui(argc, argv)) {
+    if (app_runner__gui_requested()) {
         return bluetooth_hid_app__gui();
     }
 
