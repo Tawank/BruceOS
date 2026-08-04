@@ -21,6 +21,10 @@ typedef struct {
     size_t remaining;
 } bruce_launcher_menu_arena_t;
 
+/* bruce_launcher loads exactly one menu tree at a time (load, run, free), so
+ * a single handle is enough to release its memory__external block later. */
+static bruce_memory_object_t s_menu_object;
+
 /* Default launcher configuration written when /config/launcher.json is missing. */
 static const char *BRUCE_LAUNCHER_DEFAULT_JSON =
     "{\n"
@@ -77,8 +81,22 @@ static void bruce_launcher__parse_label(
     icon_name[icon_name_size - 1] = '\0';
 }
 
+static bruce_launcher_entry_t *bruce_launcher__menu_entries_mut(bruce_launcher_menu_t *menu) {
+    return menu->capacity > 0 ? (bruce_launcher_entry_t *)(menu + 1) : NULL;
+}
+
+const bruce_launcher_entry_t *bruce_launcher__menu_entries(const bruce_launcher_menu_t *menu) {
+    return menu->capacity > 0 ? (const bruce_launcher_entry_t *)(menu + 1) : NULL;
+}
+
+const bruce_launcher_menu_t *
+bruce_launcher__entry_submenu(const bruce_launcher_menu_t *menu, const bruce_launcher_entry_t *entry) {
+    if (entry->kind != BRUCE_LAUNCHER_ENTRY_SUBMENU) return NULL;
+    return (const bruce_launcher_menu_t *)((const uint8_t *)menu + entry->submenu_offset);
+}
+
 static bruce_launcher_menu_t *bruce_launcher__menu_create(
-    bruce_launcher_menu_arena_t *arena, const char *title, bruce_launcher_menu_t *parent, int capacity
+    bruce_launcher_menu_arena_t *arena, const char *title, bool is_root, int capacity
 ) {
     size_t entries_size = (size_t)capacity * sizeof(bruce_launcher_entry_t);
     size_t allocation_size = sizeof(bruce_launcher_menu_t) + entries_size;
@@ -90,17 +108,21 @@ static bruce_launcher_menu_t *bruce_launcher__menu_create(
 
     bruce_launcher__parse_label(title, menu->title, sizeof(menu->title), NULL, 0);
     menu->capacity = capacity;
-    menu->entries = capacity > 0 ? (bruce_launcher_entry_t *)(menu + 1) : NULL;
-    menu->parent = parent;
+    menu->is_root = is_root;
     return menu;
 }
 
-void bruce_launcher__menu_free(bruce_launcher_menu_t *menu) { memory__free(menu); }
+/* menu is the mapping returned by menu_load(); the block behind it is
+ * released via the handle load() stashed in s_menu_object. */
+void bruce_launcher__menu_free(bruce_launcher_menu_t *menu) {
+    if (menu == NULL) return;
+    (void)memory__external_free(&s_menu_object);
+}
 
 static bool
 bruce_launcher__menu_add_command(bruce_launcher_menu_t *menu, const char *label, const char *command) {
     if (menu->entry_count >= menu->capacity) return false;
-    bruce_launcher_entry_t *entry = &menu->entries[menu->entry_count++];
+    bruce_launcher_entry_t *entry = &bruce_launcher__menu_entries_mut(menu)[menu->entry_count++];
     bruce_launcher__parse_label(
         label, entry->label, sizeof(entry->label), entry->icon_name, sizeof(entry->icon_name)
     );
@@ -109,22 +131,26 @@ bruce_launcher__menu_add_command(bruce_launcher_menu_t *menu, const char *label,
     return true;
 }
 
+/* submenu is always allocated later in the arena's bump sequence than its
+ * containing menu (menu is created before any of its children), so the
+ * offset is always positive and stays valid after the arena is relocated
+ * into external memory verbatim. */
 static bool bruce_launcher__menu_add_submenu(
     bruce_launcher_menu_t *menu, const char *label, bruce_launcher_menu_t *submenu
 ) {
     if (menu->entry_count >= menu->capacity) return false;
-    bruce_launcher_entry_t *entry = &menu->entries[menu->entry_count++];
+    bruce_launcher_entry_t *entry = &bruce_launcher__menu_entries_mut(menu)[menu->entry_count++];
     bruce_launcher__parse_label(
         label, entry->label, sizeof(entry->label), entry->icon_name, sizeof(entry->icon_name)
     );
-    entry->submenu = submenu;
+    entry->submenu_offset = (uint32_t)((uint8_t *)submenu - (uint8_t *)menu);
     entry->kind = BRUCE_LAUNCHER_ENTRY_SUBMENU;
     return true;
 }
 
 static bool bruce_launcher__menu_add_back(bruce_launcher_menu_t *menu) {
     if (menu->entry_count >= menu->capacity) return false;
-    bruce_launcher_entry_t *entry = &menu->entries[menu->entry_count++];
+    bruce_launcher_entry_t *entry = &bruce_launcher__menu_entries_mut(menu)[menu->entry_count++];
     strncpy(entry->label, "Back", sizeof(entry->label) - 1);
     entry->kind = BRUCE_LAUNCHER_ENTRY_BACK;
     return true;
@@ -276,7 +302,7 @@ static bool bruce_launcher__parse_json_value(
         if (value->valuestring[0] != '/') {
             return bruce_launcher__menu_add_command(menu, key, value->valuestring);
         }
-        bruce_launcher_menu_t *submenu = bruce_launcher__menu_create(arena, key, menu, value->valueint);
+        bruce_launcher_menu_t *submenu = bruce_launcher__menu_create(arena, key, false, value->valueint);
         if (submenu == NULL) return false;
         (void)bruce_launcher__discover_apps(submenu, value->valuestring);
         (void)bruce_launcher__menu_add_back(submenu);
@@ -299,7 +325,7 @@ static bruce_launcher_menu_t *bruce_launcher__parse_json_object(
     int depth
 ) {
     int capacity = bruce_launcher__json_entry_count(root, parent != NULL, depth);
-    bruce_launcher_menu_t *menu = bruce_launcher__menu_create(arena, title, parent, capacity);
+    bruce_launcher_menu_t *menu = bruce_launcher__menu_create(arena, title, parent == NULL, capacity);
     if (menu == NULL) return NULL;
 
     cJSON *child;
@@ -312,20 +338,50 @@ static bruce_launcher_menu_t *bruce_launcher__parse_json_object(
     return menu;
 }
 
+/* Builds the tree in a scratch internal-heap buffer (unchanged parsing logic
+ * above), then copies the finished, self-relative-offset-only blob verbatim
+ * into a memory__external block (PSRAM, falling back to flash swap) and
+ * frees the scratch copy. This moves the tree's ~8KB out of the small
+ * internal heap for as long as the launcher runs, which is effectively the
+ * whole time the device is on. The tree is never mutated after this point,
+ * so returning the read-only external mapping as a plain pointer is safe. */
 static bruce_launcher_menu_t *bruce_launcher__parse_json(cJSON *root) {
     size_t allocation_size = bruce_launcher__json_allocation_size(root, false, 0);
     if (allocation_size == 0) return NULL;
 
-    void *allocation = memory__calloc(1, allocation_size);
-    if (allocation == NULL) return NULL;
+    void *scratch = memory__calloc(1, allocation_size);
+    if (scratch == NULL) return NULL;
     bruce_launcher_menu_arena_t arena = {
-        .next = (uint8_t *)allocation,
+        .next = (uint8_t *)scratch,
         .remaining = allocation_size,
     };
     bruce_launcher_menu_t *menu =
         bruce_launcher__parse_json_object(&arena, root, BRUCE_LAUNCHER_TITLE, NULL, 0);
-    if (menu == NULL) memory__free(allocation);
-    return menu;
+    if (menu == NULL) {
+        memory__free(scratch);
+        return NULL;
+    }
+
+    bruce_memory_object_t object;
+    if (memory__external_alloc(allocation_size, &object) != BRUCE_OK) {
+        memory__free(scratch);
+        return NULL;
+    }
+    bruce_result_t write_result = memory__external_write(&object, 0, scratch, allocation_size);
+    memory__free(scratch);
+    if (write_result != BRUCE_OK) {
+        (void)memory__external_free(&object);
+        return NULL;
+    }
+
+    const void *mapped = NULL;
+    if (memory__external_map(&object, &mapped) != BRUCE_OK) {
+        (void)memory__external_free(&object);
+        return NULL;
+    }
+
+    s_menu_object = object;
+    return (bruce_launcher_menu_t *)mapped;
 }
 
 bruce_launcher_menu_t *bruce_launcher__menu_load(void) {

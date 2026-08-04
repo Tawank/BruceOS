@@ -194,14 +194,15 @@ static void bruce_launcher__draw_root_menu(
     int previous = (selected + menu->entry_count - 1) % menu->entry_count;
     int next = (selected + 1) % menu->entry_count;
 
+    const bruce_launcher_entry_t *entries = bruce_launcher__menu_entries(menu);
     if (menu->entry_count > 1) {
-        bruce_launcher__draw_entry_icon(&menu->entries[previous], w / 7, cy, small, theme->sec);
-        bruce_launcher__draw_entry_icon(&menu->entries[next], w - w / 7, cy, small, theme->sec);
+        bruce_launcher__draw_entry_icon(&entries[previous], w / 7, cy, small, theme->sec);
+        bruce_launcher__draw_entry_icon(&entries[next], w - w / 7, cy, small, theme->sec);
     }
-    bruce_launcher__draw_entry_icon(&menu->entries[selected], w / 2, cy, large, theme->pri);
+    bruce_launcher__draw_entry_icon(&entries[selected], w / 2, cy, large, theme->pri);
 
     bruce_launcher__draw_centered_text(
-        menu->entries[selected].label, cy + large / 2 + 10, BRUCE_LAUNCHER_FONT_MEDIUM, theme
+        entries[selected].label, cy + large / 2 + 10, BRUCE_LAUNCHER_FONT_MEDIUM, theme
     );
 }
 
@@ -229,7 +230,7 @@ static void bruce_launcher__draw_sliding_icon(
     uint16_t color = bruce_launcher__blend_color(theme->pri, theme->sec, distance);
     int x = center_x + position * spacing / BRUCE_LAUNCHER_EASING_SCALE;
     int entry = bruce_launcher__wrap_index(from + relative, menu->entry_count);
-    bruce_launcher__draw_entry_icon(&menu->entries[entry], x, cy, size, color);
+    bruce_launcher__draw_entry_icon(&bruce_launcher__menu_entries(menu)[entry], x, cy, size, color);
 }
 
 static void bruce_launcher__draw_root_transition(
@@ -273,7 +274,8 @@ static void bruce_launcher__draw_root_transition(
                           ? from
                           : bruce_launcher__wrap_index(from + direction, menu->entry_count);
     bruce_launcher__draw_centered_text(
-        menu->entries[label_entry].label, cy + large / 2 + 10, BRUCE_LAUNCHER_FONT_MEDIUM, theme
+        bruce_launcher__menu_entries(menu)[label_entry].label, cy + large / 2 + 10, BRUCE_LAUNCHER_FONT_MEDIUM,
+        theme
     );
 }
 
@@ -475,17 +477,18 @@ static int bruce_launcher__run_entry(const bruce_launcher_entry_t *entry) {
 
 /* The root is a horizontal carousel. Nested menus use Core's choice renderer
  * inside the launcher's status bar and outer border. */
-static int bruce_launcher__run_gui_menu(bruce_launcher_menu_t *menu) {
+static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
     bruce_launcher_theme_t theme;
     bruce_launcher__get_theme(&theme);
 
-    if (menu->parent != NULL) {
+    if (!menu->is_root) {
+        const bruce_launcher_entry_t *entries = bruce_launcher__menu_entries(menu);
         bruce_dialog_choice_t *choices =
             (bruce_dialog_choice_t *)memory__malloc(sizeof(*choices) * (size_t)menu->entry_count);
         if (choices == NULL) return BRUCE_ERR_NO_MEMORY;
         for (int i = 0; i < menu->entry_count; ++i) {
-            choices[i].label = menu->entries[i].label;
-            choices[i].value = menu->entries[i].label;
+            choices[i].label = entries[i].label;
+            choices[i].value = entries[i].label;
         }
 
         const bruce_dialog_render_params_t render_params = {.window_chrome = true};
@@ -525,10 +528,10 @@ static int bruce_launcher__run_gui_menu(bruce_launcher_menu_t *menu) {
             }
             if (result != BRUCE_OK) continue;
 
-            const bruce_launcher_entry_t *entry = &menu->entries[selected];
+            const bruce_launcher_entry_t *entry = &entries[selected];
             if (entry->kind == BRUCE_LAUNCHER_ENTRY_BACK) break;
             if (entry->kind == BRUCE_LAUNCHER_ENTRY_SUBMENU) {
-                (void)bruce_launcher__run_gui_menu(entry->submenu);
+                (void)bruce_launcher__run_gui_menu(bruce_launcher__entry_submenu(menu, entry));
             } else {
                 (void)bruce_launcher__run_entry(entry);
             }
@@ -603,7 +606,7 @@ static int bruce_launcher__run_gui_menu(bruce_launcher_menu_t *menu) {
         switch (ev.code) {
             case BRUCE_INPUT_CODE_LEFT:
             case BRUCE_INPUT_CODE_UP:
-                if (menu->parent == NULL && menu->entry_count > 0) {
+                if (menu->is_root && menu->entry_count > 0) {
                     int previous = selected;
                     selected = (selected + menu->entry_count - 1) % menu->entry_count;
                     if (menu->entry_count > 1) {
@@ -618,7 +621,7 @@ static int bruce_launcher__run_gui_menu(bruce_launcher_menu_t *menu) {
                 break;
             case BRUCE_INPUT_CODE_RIGHT:
             case BRUCE_INPUT_CODE_DOWN:
-                if (menu->parent == NULL && menu->entry_count > 0) {
+                if (menu->is_root && menu->entry_count > 0) {
                     int previous = selected;
                     selected = (selected + 1) % menu->entry_count;
                     if (menu->entry_count > 1) {
@@ -633,10 +636,10 @@ static int bruce_launcher__run_gui_menu(bruce_launcher_menu_t *menu) {
             case BRUCE_INPUT_CODE_SELECT:
             case BRUCE_INPUT_CODE_BUTTON_A: {
                 if (menu->entry_count == 0) { break; }
-                const bruce_launcher_entry_t *entry = &menu->entries[selected];
+                const bruce_launcher_entry_t *entry = &bruce_launcher__menu_entries(menu)[selected];
                 if (entry->kind == BRUCE_LAUNCHER_ENTRY_BACK) { return 0; }
                 if (entry->kind == BRUCE_LAUNCHER_ENTRY_SUBMENU) {
-                    (void)bruce_launcher__run_gui_menu(entry->submenu);
+                    (void)bruce_launcher__run_gui_menu(bruce_launcher__entry_submenu(menu, entry));
                 } else {
                     (void)bruce_launcher__run_entry(entry);
                 }
@@ -658,15 +661,16 @@ static int bruce_launcher__run_gui_menu(bruce_launcher_menu_t *menu) {
 /* Terminal fallback used when the launcher is started without GUI=1. Keeps
  * the original renderer-agnostic dialog__choice() path so serial/terminal
  * usage and the host selftest continue to work. */
-static int bruce_launcher__run_terminal_menu(bruce_launcher_menu_t *menu) {
+static int bruce_launcher__run_terminal_menu(const bruce_launcher_menu_t *menu) {
+    const bruce_launcher_entry_t *entries = bruce_launcher__menu_entries(menu);
     bruce_dialog_choice_t *choices =
         (bruce_dialog_choice_t *)memory__malloc(sizeof(*choices) * (size_t)menu->capacity);
     if (choices == NULL) { return BRUCE_ERR_NO_MEMORY; }
 
     for (;;) {
         for (int i = 0; i < menu->entry_count; ++i) {
-            choices[i].label = menu->entries[i].label;
-            choices[i].value = menu->entries[i].label;
+            choices[i].label = entries[i].label;
+            choices[i].value = entries[i].label;
         }
 
         size_t choice = 0;
@@ -679,10 +683,10 @@ static int bruce_launcher__run_terminal_menu(bruce_launcher_menu_t *menu) {
             continue;
         }
 
-        const bruce_launcher_entry_t *entry = &menu->entries[(int)choice];
+        const bruce_launcher_entry_t *entry = &entries[(int)choice];
         if (entry->kind == BRUCE_LAUNCHER_ENTRY_BACK) { break; }
         if (entry->kind == BRUCE_LAUNCHER_ENTRY_SUBMENU) {
-            (void)bruce_launcher__run_terminal_menu(entry->submenu);
+            (void)bruce_launcher__run_terminal_menu(bruce_launcher__entry_submenu(menu, entry));
         } else {
             (void)bruce_launcher__run_entry(entry);
         }

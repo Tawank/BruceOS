@@ -37,9 +37,51 @@ typedef struct {
     terminal_ansi_parser_t ansi;
     bruce_stdio_session_t session;
     bruce_process_id_t child;
+    bruce_memory_object_t transcript_object;
+    bruce_memory_object_t colors_object;
+    bool transcript_external;
+    bool colors_external;
     bool dirty;
     bool exit_requested;
 } terminal__state_t;
+
+/* Prefers a PSRAM-backed memory__external block (a plain, directly
+ * addressable buffer) so the parser can keep mutating it in place with
+ * ordinary pointer writes. Falls back to internal heap when PSRAM isn't
+ * available, since a flash-backed swap block is not safely writable through
+ * a raw pointer -- only through memory__external_write(). */
+static bruce_result_t
+terminal__alloc_buffer(void **out_data, bruce_memory_object_t *out_object, bool *out_external, size_t size) {
+    bruce_memory_object_t object;
+    if (memory__external_alloc(size, &object) == BRUCE_OK) {
+        const void *mapped = NULL;
+        if (object.backend == BRUCE_MEMORY_BACKEND_PSRAM &&
+            memory__external_map(&object, &mapped) == BRUCE_OK) {
+            memset((void *)mapped, 0, size);
+            *out_data = (void *)mapped;
+            *out_object = object;
+            *out_external = true;
+            return BRUCE_OK;
+        }
+        (void)memory__external_free(&object);
+    }
+    *out_data = memory__calloc(size, 1);
+    *out_external = false;
+    return *out_data != NULL ? BRUCE_OK : BRUCE_ERR_NO_MEMORY;
+}
+
+static void terminal__free_buffer(void *data, bruce_memory_object_t *object, bool external) {
+    if (external) {
+        (void)memory__external_free(object);
+    } else {
+        memory__free(data);
+    }
+}
+
+static void terminal__free_buffers(terminal__state_t *state) {
+    terminal__free_buffer(state->transcript, &state->transcript_object, state->transcript_external);
+    terminal__free_buffer(state->transcript_colors, &state->colors_object, state->colors_external);
+}
 
 typedef struct {
     size_t start;
@@ -277,16 +319,27 @@ int terminal_app_main(int argc, char **argv) {
     terminal__state_t state = {0};
     state.child = BRUCE_PROCESS_ID_INVALID;
     terminal_ansi__init(&state.ansi);
-    state.transcript = memory__calloc(TERMINAL__TRANSCRIPT_CAPACITY, 1);
-    state.transcript_colors = memory__calloc(TERMINAL__TRANSCRIPT_CAPACITY, 1);
-    if (state.transcript == NULL || state.transcript_colors == NULL) {
-        memory__free(state.transcript);
-        memory__free(state.transcript_colors);
+    void *transcript_data = NULL;
+    void *colors_data = NULL;
+    bruce_result_t transcript_alloc = terminal__alloc_buffer(
+        &transcript_data, &state.transcript_object, &state.transcript_external, TERMINAL__TRANSCRIPT_CAPACITY
+    );
+    state.transcript = transcript_data;
+    bruce_result_t colors_alloc = terminal__alloc_buffer(
+        &colors_data, &state.colors_object, &state.colors_external, TERMINAL__TRANSCRIPT_CAPACITY
+    );
+    state.transcript_colors = colors_data;
+    if (transcript_alloc != BRUCE_OK || colors_alloc != BRUCE_OK) {
+        if (transcript_alloc == BRUCE_OK) {
+            terminal__free_buffer(state.transcript, &state.transcript_object, state.transcript_external);
+        }
+        if (colors_alloc == BRUCE_OK) {
+            terminal__free_buffer(state.transcript_colors, &state.colors_object, state.colors_external);
+        }
         return BRUCE_ERR_NO_MEMORY;
     }
     if (stdio__session_create(&state.session) != BRUCE_OK) {
-        memory__free(state.transcript);
-        memory__free(state.transcript_colors);
+        terminal__free_buffers(&state);
         return BRUCE_ERR_RESOURCE_LIMIT;
     }
     terminal__append_text(&state, "Bruce terminal\nType a command and press Enter.\n");
@@ -297,8 +350,7 @@ int terminal_app_main(int argc, char **argv) {
     (void)stdio__session_route_children(BRUCE_STDIO_SESSION_INVALID);
     if (shell_process <= 0) {
         (void)stdio__session_close(state.session);
-        memory__free(state.transcript);
-        memory__free(state.transcript_colors);
+        terminal__free_buffers(&state);
         return shell_process;
     }
     state.child = (bruce_process_id_t)shell_process;
@@ -345,7 +397,6 @@ int terminal_app_main(int argc, char **argv) {
         }
     }
     (void)stdio__session_close(state.session);
-    memory__free(state.transcript);
-    memory__free(state.transcript_colors);
+    terminal__free_buffers(&state);
     return 0;
 }
