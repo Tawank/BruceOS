@@ -315,20 +315,48 @@ function main() {
   var startTime = nowTime;
   var deltaTime = 0;
 
+  // Input codes, matching core_sdk/input.h (BRUCE_INPUT_CODE_*).
+  var INPUT_CODE_UP = 0x03b;
+  var INPUT_CODE_DOWN = 0x02e;
+  var INPUT_CODE_SELECT = 0x00a;
+  var INPUT_CODE_BACK = 0x060;
+
+  // Held state for each logical action, updated from the raw press/release
+  // event stream so it reflects how long a key is actually held rather than
+  // a single edge/repeat event.
+  var jumpKeyDown = false; // Enter or Up
+  var duckKeyDown = false; // Down
+  var exitRequested = false; // Esc
+
+  // Drains every queued input event (see core_sdk/input.h's event loop).
+  // This must run every frame regardless of which keys are relevant: any
+  // event left unconsumed sits in the fixed-size event queue forever, and
+  // once it fills up no further input is delivered at all.
+  function pollInputEvents() {
+    var event;
+    while ((event = keyboard.pollEvent()) !== null) {
+      if (event.action !== 'press' && event.action !== 'release') continue;
+      var isDown = event.action === 'press';
+      if (event.code === INPUT_CODE_SELECT || event.code === INPUT_CODE_UP) {
+        jumpKeyDown = isDown;
+      } else if (event.code === INPUT_CODE_DOWN) {
+        duckKeyDown = isDown;
+      } else if (event.code === INPUT_CODE_BACK && isDown) {
+        exitRequested = true;
+      }
+    }
+  }
+
   function handleInput() {
-    var jumpPressed = keyboard.getSelPress(true);
-    if (jumpPressed && !dinoIsJumping && !dinoIsDucking) {
+    pollInputEvents();
+
+    if (jumpKeyDown && !dinoIsJumping && !dinoIsDucking) {
       dinoVelocity = JUMP_VELOCITY;
       dinoIsJumping = true;
       // audio.tone(494, 40, true);
     }
 
-    var duckPressed = keyboard.getNextPress(true) || keyboard.getEscPress(true);
-    if (duckPressed && !dinoIsJumping) {
-      dinoIsDucking = true;
-    } else if (!duckPressed && dinoIsDucking) {
-      dinoIsDucking = false;
-    }
+    dinoIsDucking = duckKeyDown && !dinoIsJumping;
   }
 
   // ---------------------------------------------------------------------
@@ -456,7 +484,11 @@ function main() {
 
     display.setTextSize(1);
     display.setTextColor(foreground, COLOR_TRANSPARENT);
-    display.drawText(String(score), 235, 5);
+    var scoreText = String(score);
+    while (scoreText.length < 5) {
+      scoreText = '0' + scoreText;
+    }
+    display.drawText(scoreText, displayWidth - 10 - textWidth(scoreText, 1), 5);
   }
 
   function textWidth(text, size) {
@@ -489,6 +521,21 @@ function main() {
 
   }
 
+  // Drains every queued input event, same as pollInputEvents(), while the
+  // game loop itself is paused. Returns true once any key is pressed, so
+  // the game-over screen can wait for a restart without ever leaving
+  // events unconsumed in the queue.
+  function drainAndCheckAnyPress() {
+    var event;
+    var pressed = false;
+    while ((event = keyboard.pollEvent()) !== null) {
+      if (event.action !== 'press') continue;
+      pressed = true;
+      if (event.code === INPUT_CODE_BACK) { exitRequested = true; }
+    }
+    return pressed;
+  }
+
   function showGameOverAndWait() {
     // audio.tone(60, 100); // 50
     delay(20);
@@ -496,7 +543,7 @@ function main() {
     drawGameOverOverlay();
     display.present();
     delay(500);
-    while (!keyboard.getAnyPress()) {
+    while (!drainAndCheckAnyPress() && !exitRequested) {
       display.beginFrame();
       drawScene();
       drawGameOverOverlay();
@@ -504,19 +551,19 @@ function main() {
       delay(100);
     }
 
+    if (exitRequested) return;
+
     obstacleX = displayWidth + 50;
     delay(500);
     startTime = now();
   }
 
   display.fill(background);
-  keyboard.setLongPress(true);
   while (true) {
-    if (keyboard.getPrevPress(true)) {
-      break; // exits the game when a prev button is pressed
-    }
-
     handleInput();
+    if (exitRequested) {
+      break; // exits the game when Esc is pressed
+    }
 
     nowTime = now();
     deltaTime = (nowTime - oldTime) / 1000;
@@ -536,8 +583,8 @@ function main() {
 
     if (dinoHitObstacle()) {
       showGameOverAndWait();
+      if (exitRequested) break;
     }
   }
-  keyboard.setLongPress(false);
 }
 main();

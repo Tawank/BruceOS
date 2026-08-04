@@ -365,6 +365,7 @@ const JSPropDef js_keyboard[] = {
     JS_CFUNC_DEF("getNextPress", 1, native_getNextPress),
     JS_CFUNC_DEF("getAnyPress", 1, native_getAnyPress),
     JS_CFUNC_DEF("setLongPress", 1, native_setLongPress),
+    JS_CFUNC_DEF("pollEvent", 0, native_pollEvent),
     JS_PROP_END,
 };
 

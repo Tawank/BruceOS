@@ -173,3 +173,30 @@ JSValue native_setLongPress(JSContext *ctx, JSValue *this_val, int argc, JSValue
     /* Long-press handling is not exposed by the Core input HAL. */
     return JS_UNDEFINED;
 }
+
+/* Drains one event from the Core input event loop (see core_sdk/input.h).
+ * Unlike the getXPress() helpers, which only remove a press event matching
+ * one specific code, this surfaces every queued event (press, release, and
+ * any code) so a caller can fully drain the queue each frame. Returns null
+ * when no event is queued. */
+JSValue native_pollEvent(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
+    (void)this_val;
+    (void)argc;
+    (void)argv;
+
+    bruce_input_event_t event;
+    if (input__poll(&event) != BRUCE_OK) { return JS_NULL; }
+
+    const char *action = "change";
+    if (event.action == BRUCE_INPUT_PRESS) {
+        action = "press";
+    } else if (event.action == BRUCE_INPUT_RELEASE) {
+        action = "release";
+    }
+
+    JSValue obj = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, obj, "code", JS_NewInt32(ctx, event.code));
+    JS_SetPropertyStr(ctx, obj, "action", JS_NewString(ctx, action));
+    JS_SetPropertyStr(ctx, obj, "value", JS_NewInt32(ctx, event.value));
+    return obj;
+}

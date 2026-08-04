@@ -12,3 +12,4 @@ JSValue native_getEscPress(JSContext *ctx, JSValue *this_val, int argc, JSValue 
 JSValue native_getNextPress(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
 JSValue native_getAnyPress(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
 JSValue native_setLongPress(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
+JSValue native_pollEvent(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
