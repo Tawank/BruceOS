@@ -1,8 +1,8 @@
 #include <stdio.h>
-#include <string.h>
 
 #include "core_sdk/app_runner.h"
 
+#include "core/autostart/autostart.h"
 #include "core/config/config.h"
 #include "core/display/display.h"
 #include "core/event_loop/event_loop.h"
@@ -113,27 +113,6 @@ void app_runner__register_defaults(void) {
     elf_loader__init();
 }
 
-static bool main__command_is_serial_commands(const char *command) {
-    static const char name[] = "serial_commands";
-    size_t len = sizeof(name) - 1u;
-    return strncmp(command, name, len) == 0 && (command[len] == '\0' || command[len] == ' ');
-}
-
-static void run_apps_autostart(bool display_ok) {
-    const bruce_config_startup_apps_t *apps = config__get_startup_apps();
-    if (apps == NULL) return;
-    for (size_t i = 0; i < apps->count; ++i) {
-        const char *command = apps->items[i];
-        char with_gui[CONFIG__STARTUP_APP_MAX_LEN + 8];
-        if (display_ok && !main__command_is_serial_commands(command) && strncmp(command, "GUI=", 4) != 0) {
-            snprintf(with_gui, sizeof(with_gui), "GUI=1 %s", command);
-            command = with_gui;
-        }
-        int result = app_runner__run_command(command, BRUCE_LAUNCH_BACKGROUND);
-        if (result < 0) printf("Startup app \"%s\" failed with code %d\n", apps->items[i], result);
-    }
-}
-
 void set_log_level() {
     // esp_log_level_set("wifi", ESP_LOG_WARN);
     // esp_log_level_set("wifi_init", ESP_LOG_WARN);
@@ -154,7 +133,7 @@ void app_main(void) {
     bool display_ok = init_user_interface();
 
     app_runner__register_defaults();
-    run_apps_autostart(display_ok);
+    autostart__run(display_ok);
 
 #if CONFIG_BRUCE_QEMU_TEST_MODE
     if (!serial_commands__wait_ready(MAIN_SERIAL_READY_TIMEOUT_MS)) {

@@ -34,6 +34,7 @@ idf_component_register(SRCS
                      "core/app_config/app_config.c"
                      "core/app_runner/app_runner.c"
                      "core/audio/audio.c"
+                    "core/autostart/autostart.c"
                     "core/bluetooth/bluetooth.c"
                     "core/bluetooth/bluetooth_hid.c"
                     "core/clock/clock.c"

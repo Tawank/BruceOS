@@ -449,6 +449,25 @@ static int bruce_launcher__run_process_switcher(const bruce_launcher_theme_t *th
 /* Command dispatch                                                           */
 /* -------------------------------------------------------------------------- */
 
+/* True iff the command's leading "key=value" environment tokens (the same
+ * ones app_runner__run_command() parses off the front of the line) include
+ * "BG=1". Entries that already request background execution are one-shot
+ * CLI actions with no screen of their own (e.g. "BG=1 wifi connect"); tagging
+ * them GUI=1 too would make process switch next/prev cycle onto a background
+ * process that never draws anything. */
+static bool bruce_launcher__command_requests_background(const char *command) {
+    const char *cursor = command;
+    for (;;) {
+        while (*cursor == ' ') cursor++;
+        const char *token_end = cursor;
+        while (*token_end != '\0' && *token_end != ' ') token_end++;
+        size_t token_len = (size_t)(token_end - cursor);
+        if (token_len == 0 || memchr(cursor, '=', token_len) == NULL) return false;
+        if (token_len == 4 && strncmp(cursor, "BG=1", 4) == 0) return true;
+        cursor = token_end;
+    }
+}
+
 static int bruce_launcher__run_entry(const bruce_launcher_entry_t *entry) {
     if (strcmp(entry->command, BRUCE_LAUNCHER_PROCESSES_APP) == 0) {
         bruce_launcher_theme_t theme;
@@ -456,7 +475,7 @@ static int bruce_launcher__run_entry(const bruce_launcher_entry_t *entry) {
         return bruce_launcher__run_process_switcher(&theme);
     }
     char command[BRUCE_LAUNCHER_COMMAND_MAX + 8];
-    if (strncmp(entry->command, "GUI=", 4) == 0) {
+    if (strncmp(entry->command, "GUI=", 4) == 0 || bruce_launcher__command_requests_background(entry->command)) {
         snprintf(command, sizeof(command), "%s", entry->command);
     } else {
         snprintf(command, sizeof(command), "GUI=1 %s", entry->command);
