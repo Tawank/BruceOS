@@ -105,7 +105,7 @@ void app_runner__register_defaults(void) {
 }
 
 bool init_storage(void) {
-    bool storage_ok = storage__init() == BRUCE_OK;
+    bool storage_ok = storage__init();
     if (!storage_ok) printf("Storage initialization failed\n");
     return storage_ok;
 }

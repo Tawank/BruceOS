@@ -31,14 +31,30 @@ fails or silently targets the wrong chip:
 Usage:
     python tools/board.py <board> [idf.py args...]
     python tools/board.py --list
+    python tools/board.py --set-default <board>
 
 Examples:
     python tools/board.py m5stack-cardputer build
     python tools/board.py m5stack-cplus2 build flash monitor -p /dev/ttyUSB0
     python tools/board.py m5stack-cplus2          # defaults to "build"
+    python tools/board.py --set-default m5stack-cplus2
+
+--set-default makes a board the project-wide default instead of building it
+into its own build-board/<id> directory: it regenerates the root sdkconfig
+(and the root build/ dir) from that board's sdkconfig.defaults, which is
+what a bare `idf.py build` (e.g. the VS Code ESP-IDF extension's build
+button) and IntelliSense (.clangd points CompilationDatabase at build/, so
+build/compile_commands.json is what clangd reads) both use. It also syncs
+the personal, gitignored .vscode/settings.json's idf.customExtraVars.
+IDF_TARGET and idf.openOcdConfigs target file to match, so the ESP-IDF
+extension doesn't fight the new default the way IDF_TARGET env var
+mismatches did for build-board/<id> builds (see below). The regenerated
+root sdkconfig/sdkconfig.old are ordinary tracked files - commit them to
+make the new default apply for everyone who clones the repo.
 """
 
 import argparse
+import json
 import os
 import shutil
 import subprocess
@@ -90,12 +106,80 @@ def print_board_list(boards: dict[str, Path]) -> None:
         print(f"  {name.ljust(width)}  {summary}" if summary else f"  {name}")
 
 
+def update_vscode_intellisense(target: str) -> None:
+    """Point the personal (gitignored) VS Code ESP-IDF/OpenOCD target at `target`.
+
+    Best-effort: does nothing if .vscode/settings.json doesn't exist, since
+    it's a per-developer file this repo doesn't check in.
+    """
+    settings_file = REPO_ROOT / ".vscode" / "settings.json"
+    if not settings_file.is_file():
+        return
+    data = json.loads(settings_file.read_text())
+
+    extra_vars = data.setdefault("idf.customExtraVars", {})
+    extra_vars["IDF_TARGET"] = target
+
+    ocd_configs = data.get("idf.openOcdConfigs")
+    if isinstance(ocd_configs, list):
+        data["idf.openOcdConfigs"] = [
+            f"target/{target}.cfg" if entry.startswith("target/") else entry
+            for entry in ocd_configs
+        ]
+
+    settings_file.write_text(json.dumps(data, indent=2) + "\n")
+    print(f"+ updated .vscode/settings.json for IDF_TARGET={target}")
+
+
+def set_default(board: str) -> int:
+    target = board_target(board)
+    defaults = f"sdkconfig.defaults;boards/{board}/sdkconfig.defaults"
+
+    # Wipe the previous default's generated state so set-target regenerates the
+    # root sdkconfig purely from these defaults, instead of merging on top of
+    # whatever board used to be the default.
+    for stale in (REPO_ROOT / "build", REPO_ROOT / "sdkconfig", REPO_ROOT / "sdkconfig.old"):
+        if stale.is_dir():
+            shutil.rmtree(stale)
+        elif stale.is_file():
+            stale.unlink()
+
+    command = [
+        "idf.py",
+        "-C",
+        str(REPO_ROOT),
+        "-D",
+        f"SDKCONFIG_DEFAULTS={defaults}",
+        "set-target",
+        target,
+    ]
+    env = dict(os.environ)
+    env["IDF_TARGET"] = target
+    print(f"+ IDF_TARGET={target} {' '.join(command)}")
+    ret = subprocess.call(command, env=env)
+    if ret == 0:
+        update_vscode_intellisense(target)
+        print(f"\n'{board}' is now the project-wide default (root sdkconfig + build/).")
+        print("Review and commit the regenerated sdkconfig/sdkconfig.old to make this")
+        print("the default for everyone who clones the repo.")
+    return ret
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Build Bruce for a specific board via idf.py.",
         usage="%(prog)s [-h] [--list] <board> [idf.py args...]",
     )
     parser.add_argument("--list", action="store_true", help="list available board ids and exit")
+    parser.add_argument(
+        "--set-default",
+        action="store_true",
+        help=(
+            "make <board> the project-wide default: regenerate the root sdkconfig "
+            "and build/ dir (used by a bare `idf.py build` and by IntelliSense) "
+            "instead of building into build-board/<id>"
+        ),
+    )
     parser.add_argument("board", nargs="?", help="board id, e.g. m5stack-cplus2")
     parser.add_argument("idf_args", nargs=argparse.REMAINDER, help="idf.py action(s)/flags; default: build")
     args = parser.parse_args()
@@ -125,6 +209,9 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
+
+    if args.set_default:
+        return set_default(args.board)
 
     build_dir = REPO_ROOT / "build-board" / args.board
     target = board_target(args.board)
