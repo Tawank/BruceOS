@@ -1,21 +1,16 @@
 #include "serial_commands_app.h"
 
-#include <stdio.h>
-
 #include "core_sdk/app_runner.h"
-#include "core_sdk/loader.h"
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
 #include "core_sdk/runtime.h"
 #include "modules/shell/shell_console.h"
 
 #define SERIAL_COMMANDS__LINE_MAX 256
-#define SERIAL_COMMANDS__WAIT_INTERVAL_MS 1
+#define SERIAL_COMMANDS__WAIT_INTERVAL_MS 10
 
 int serial_commands__run_line(const char *line, bool in_background) {
-    return app_runner__run_command(
-        line, in_background ? BRUCE_LAUNCH_BACKGROUND : BRUCE_LAUNCH_FOREGROUND
-    );
+    return app_runner__run_command(line, in_background ? BRUCE_LAUNCH_BACKGROUND : BRUCE_LAUNCH_FOREGROUND);
 }
 
 int serial_commands_app_main(int argc, char **argv) {

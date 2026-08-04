@@ -2,8 +2,8 @@
 
 #include "core/display/display.h"
 #include "core/event_loop/event_loop.h"
-#include "core/storage/storage.h"
 #include "core/stdio/stdio.h"
+#include "core/storage/storage.h"
 #include "core_sdk/display.h"
 #include "core_sdk/environment.h"
 #include "core_sdk/permission.h"
@@ -386,10 +386,10 @@ static void process__environment_free(process__environment_t *environment) {
     memset(environment, 0, sizeof(*environment));
 }
 
-static bruce_result_t process__environment_set_locked(
-    process__environment_t *environment, const char *name, const char *value
-) {
-    if (!process__environment_name_valid(name) || value == NULL || strlen(value) >= BRUCE_ENVIRONMENT_VALUE_MAX) {
+static bruce_result_t
+process__environment_set_locked(process__environment_t *environment, const char *name, const char *value) {
+    if (!process__environment_name_valid(name) || value == NULL ||
+        strlen(value) >= BRUCE_ENVIRONMENT_VALUE_MAX) {
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
     char *value_copy = strdup(value);
@@ -428,15 +428,13 @@ static bruce_result_t process__environment_set_locked(
 }
 
 static bruce_result_t process__environment_inherit_locked(
-    process__record_t *record, const process__record_t *parent,
-    const bruce_environment_variable_t *overlay, size_t overlay_count
+    process__record_t *record, const process__record_t *parent, const bruce_environment_variable_t *overlay,
+    size_t overlay_count
 ) {
     if (overlay_count > 0 && overlay == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     for (size_t i = 0; i < s_global_environment.count; ++i) {
         bruce_result_t result = process__environment_set_locked(
-            &record->environment,
-            s_global_environment.entries[i].name,
-            s_global_environment.entries[i].value
+            &record->environment, s_global_environment.entries[i].name, s_global_environment.entries[i].value
         );
         if (result != BRUCE_OK) return result;
     }
@@ -466,10 +464,9 @@ static char *process__environment_trim(char *text) {
     return text;
 }
 
-bool process_registry__environment_init(void) {
-    static const char default_file[] =
-        "# Global process environment defaults.\n"
-        "# Use NAME=value; blank lines and comments are ignored.\n";
+bool process__environment_init(void) {
+    static const char default_file[] = "# Global process environment defaults.\n"
+                                       "# Use NAME=value; blank lines and comments are ignored.\n";
 
     process__ensure_init();
     char *text = NULL;
@@ -676,9 +673,8 @@ process_registry__create(const process_create_params_t *params, bruce_process_id
          * launches, not only use it for the shell's own stdin/stdout. */
         record->child_stdio_session = parent->child_stdio_session;
     }
-    bruce_result_t environment_result = process__environment_inherit_locked(
-        record, parent, params->environment, params->environment_count
-    );
+    bruce_result_t environment_result =
+        process__environment_inherit_locked(record, parent, params->environment, params->environment_count);
     if (environment_result != BRUCE_OK) {
         process__environment_free(&record->environment);
         record->in_use = false;

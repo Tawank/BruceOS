@@ -1,6 +1,7 @@
+#include "esp_log_level.h"
 #include <stdio.h>
 
-#include "core_sdk/app_runner.h"
+#include "core_sdk/loader.h"
 
 #include "core/autostart/autostart.h"
 #include "core/config/config.h"
@@ -9,9 +10,7 @@
 #include "core/process/process.h"
 #include "core/stdio/stdio.h"
 #include "core/storage/storage.h"
-#include "core_sdk/loader.h"
 
-#include "esp_log_level.h"
 #include "modules/apps/apps_app.h"
 #include "modules/bluetooth/bluetooth_app.h"
 #include "modules/bluetooth_hid/bluetooth_hid_app.h"
@@ -41,8 +40,6 @@
 #include "modules/webui/webui_app.h"
 #include "modules/wifi/wifi_app.h"
 
-#define MAIN_SERIAL_READY_TIMEOUT_MS 1000
-
 #define LAUNCHER_STACK_BYTES 3072u
 #define INPUT_STACK_BYTES 3072u
 #define SERIAL_COMMANDS_STACK_BYTES 3072u
@@ -50,12 +47,6 @@
 #define SHELL_STACK_BYTES 4096u
 #define SSH_STACK_BYTES 16384u
 #define SSH_KEYGEN_STACK_BYTES 12288u
-
-bool init_user_interface(void) {
-    bool display_ok = display__init() == BRUCE_OK;
-    if (!display_ok) printf("Display initialization failed; continuing without LCD\n");
-    return display_ok;
-}
 
 void app_runner__register_defaults(void) {
     (void)app_runner__register("launcher", launcher_app_main, LAUNCHER_STACK_BYTES);
@@ -113,29 +104,34 @@ void app_runner__register_defaults(void) {
     elf_loader__init();
 }
 
-void set_log_level() {
-    // esp_log_level_set("wifi", ESP_LOG_WARN);
-    // esp_log_level_set("wifi_init", ESP_LOG_WARN);
-    // esp_log_level_set("phy_init", ESP_LOG_WARN);
-    esp_log_level_set("*", ESP_LOG_WARN);
+bool init_storage(void) {
+    bool storage_ok = storage__init() == BRUCE_OK;
+    if (!storage_ok) printf("Storage initialization failed\n");
+    return storage_ok;
+}
+
+bool init_user_interface(void) {
+    bool ui_ok = display__init() == BRUCE_OK;
+    if (!ui_ok) printf("Display initialization failed; continuing without LCD\n");
+    return ui_ok;
 }
 
 void app_main(void) {
-    bool storage_ok = storage__init();
-    if (!storage_ok) printf("Storage initialization failed\n");
+    bool storage_ok = init_storage();
     if (storage_ok && !config__init()) printf("Configuration is unavailable; using in-memory defaults\n");
-    if (storage_ok && !process_registry__environment_init()) {
+    if (storage_ok && !process__environment_init()) {
         printf("Global environment configuration is unavailable\n");
     }
     if (stdio__init() != BRUCE_OK) printf("USB serial console initialization failed\n");
     if (event_loop__init() != BRUCE_OK) printf("Core event loop initialization failed\n");
 
-    bool display_ok = init_user_interface();
+    bool ui_ok = init_user_interface();
 
     app_runner__register_defaults();
-    autostart__run(display_ok);
+    autostart__run(ui_ok);
 
 #if CONFIG_BRUCE_QEMU_TEST_MODE
+#define MAIN_SERIAL_READY_TIMEOUT_MS 1000
     if (!serial_commands__wait_ready(MAIN_SERIAL_READY_TIMEOUT_MS)) {
         printf("Serial command frontend failed to start\n");
     }
@@ -145,5 +141,5 @@ void app_main(void) {
     return;
 #endif
 
-    set_log_level();
+    esp_log_level_set("*", ESP_LOG_WARN);
 }

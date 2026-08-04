@@ -28,7 +28,7 @@
 #define STDIO__MAX_SESSIONS 4
 #define STDIO__OUTPUT_CAPACITY 1024
 #define STDIO__INPUT_CAPACITY 256
-#define STDIO__READ_POLL_MS 20u
+#define STDIO__READ_POLL_MS 100u
 
 typedef struct {
     bruce_stdio_session_t id;
@@ -486,7 +486,7 @@ int stdio__read_line(char *buffer, size_t buffer_size, bool mask_input) {
         } else {
             int ch = getchar();
             if (ch == EOF) {
-                vTaskDelay(pdMS_TO_TICKS(50));
+                vTaskDelay(pdMS_TO_TICKS(200));
                 continue;
             }
             c = ch;

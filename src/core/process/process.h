@@ -78,7 +78,7 @@ process_registry__create(const process_create_params_t *params, bruce_process_id
 
 /* Loads process-global environment defaults from /config/.env. Missing files
  * are created with an explanatory template. Call once after storage init. */
-bool process_registry__environment_init(void);
+bool process__environment_init(void);
 
 /* Registers a cleanup callback against the *calling* process.  Returns
  * BRUCE_RESOURCE_ID_INVALID if there is no current Core process or the process's

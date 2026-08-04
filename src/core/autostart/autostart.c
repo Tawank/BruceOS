@@ -32,13 +32,13 @@ static bool autostart__command_requests_foreground(const char *command) {
     }
 }
 
-void autostart__run(bool display_ok) {
+void autostart__run(bool ui_ok) {
     const bruce_config_startup_apps_t *apps = config__get_startup_apps();
     if (apps == NULL) return;
     for (size_t i = 0; i < apps->count; ++i) {
         const char *command = apps->items[i];
         char with_gui[CONFIG__STARTUP_APP_MAX_LEN + 8];
-        if (display_ok && !autostart__command_is_serial_commands(command) && strncmp(command, "GUI=", 4) != 0 &&
+        if (ui_ok && !autostart__command_is_serial_commands(command) && strncmp(command, "GUI=", 4) != 0 &&
             autostart__command_requests_foreground(command)) {
             snprintf(with_gui, sizeof(with_gui), "GUI=1 %s", command);
             command = with_gui;
