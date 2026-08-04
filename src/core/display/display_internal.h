@@ -2,8 +2,8 @@
 
 #include "core_sdk/display.h"
 
-#define DISPLAY__NATIVE_WIDTH 135
-#define DISPLAY__NATIVE_HEIGHT 240
+#define DISPLAY__NATIVE_WIDTH CONFIG_BRUCE_DISPLAY_WIDTH
+#define DISPLAY__NATIVE_HEIGHT CONFIG_BRUCE_DISPLAY_HEIGHT
 #define DISPLAY__FB_SIZE (DISPLAY__NATIVE_WIDTH * DISPLAY__NATIVE_HEIGHT * sizeof(bruce_display_color_t))
 #define DISPLAY__DIRECT_BUF_PIXELS                                                                        \
     (DISPLAY__NATIVE_HEIGHT * ((DISPLAY__NATIVE_WIDTH + 3) / 4))

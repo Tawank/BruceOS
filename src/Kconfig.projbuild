@@ -7,92 +7,393 @@ menu "Bruce hardware configuration"
             Skip physical display and input initialization and expose the
             serial self-test protocol used by the QEMU pytest suite.
 
-    choice BRUCE_BOARD
-        prompt "Target board"
-        default BRUCE_BOARD_M5_CARDPUTER
-        help
-            Select the M5Stack target board. This determines the LCD pinout,
-            default screen orientation, backlight GPIO, and input hardware.
+    menu "Display"
+        config BRUCE_DISPLAY_WIDTH
+            int "Panel native width (px)"
+            default 135
+            help
+                Native panel width before rotation, i.e. the shorter side on
+                every board shipped so far (both use a 135x240 ST7789V2).
 
-        config BRUCE_BOARD_M5_CARDPUTER
-            bool "M5 Cardputer (ESP32-S3, ST7789V2 240x135)"
+        config BRUCE_DISPLAY_HEIGHT
+            int "Panel native height (px)"
+            default 240
 
-        config BRUCE_BOARD_M5_STICKC_PLUS2
-            bool "M5 StickC Plus2 (ESP32-PICO-V3-02, ST7789V2 135x240)"
-    endchoice
+        config BRUCE_DISPLAY_DEFAULT_ROTATION
+            int "Default rotation"
+            default 1
+            range 0 3
+            help
+                0-3, passed to display_driver__configure_rotation(). Rotation
+                1/3 swap X/Y (landscape); 0/2 do not (portrait).
 
-    config BRUCE_INPUT_POLL_PERIOD_MS
-        int "Input poll period (ms)"
-        default 20
-        range 5 100
-        help
-            Period between physical input polls. Lower values reduce latency
-            but use more CPU.
+        config BRUCE_DISPLAY_SPI_HOST
+            int "LCD SPI host"
+            default 1
+            range 0 2
+            help
+                Numeric spi_host_device_t value (SPI1_HOST=0, SPI2_HOST=1,
+                SPI3_HOST=2) the LCD panel is wired to.
 
-    config BRUCE_INPUT_DEBOUNCE_MS
-        int "Input debounce time (ms)"
-        default 30
-        range 10 200
-        help
-            Minimum time between accepted state changes for a single button
-            or key. Increase this if you see spurious repeated events.
+        config BRUCE_DISPLAY_PIN_MOSI
+            int "LCD MOSI GPIO"
+            default 35
+            range 0 48
 
-    config BRUCE_INPUT_SCAN_SETTLE_US
-        int "Keyboard scan settle time (us)"
-        default 30
-        range 10 200
-        depends on BRUCE_BOARD_M5_CARDPUTER
-        help
-            Delay after changing the Cardputer keyboard scan outputs before
-             reading the sense lines. Increase this if keys are missed.
+        config BRUCE_DISPLAY_PIN_SCK
+            int "LCD SCK GPIO"
+            default 36
+            range 0 48
 
-    config BRUCE_IR_TX_GPIO
-        int "Infrared transmit GPIO"
-        default 44 if BRUCE_BOARD_M5_CARDPUTER
-        default 19 if BRUCE_BOARD_M5_STICKC_PLUS2
-        range 0 48
-        help
-            GPIO connected to the active-high infrared transmitter.
+        config BRUCE_DISPLAY_PIN_CS
+            int "LCD CS GPIO"
+            default 37
+            range 0 48
 
-    config BRUCE_IR_RX_GPIO
-        int "Infrared receive GPIO"
-        default 1 if BRUCE_BOARD_M5_CARDPUTER
-        default 33 if BRUCE_BOARD_M5_STICKC_PLUS2
-        range 0 48
-        help
-             GPIO connected to the active-low infrared receiver output.
+        config BRUCE_DISPLAY_PIN_DC
+            int "LCD DC GPIO"
+            default 34
+            range 0 48
 
-    config BRUCE_NRF24_SCK_GPIO
-        int "NRF24 SPI clock GPIO"
-        default 40 if BRUCE_BOARD_M5_CARDPUTER
-        default 0 if BRUCE_BOARD_M5_STICKC_PLUS2
-        range 0 48
+        config BRUCE_DISPLAY_PIN_RST
+            int "LCD RST GPIO"
+            default 33
+            range 0 48
 
-    config BRUCE_NRF24_MISO_GPIO
-        int "NRF24 SPI MISO GPIO"
-        default 39 if BRUCE_BOARD_M5_CARDPUTER
-        default 33 if BRUCE_BOARD_M5_STICKC_PLUS2
-        range 0 48
+        config BRUCE_DISPLAY_PIN_BL
+            int "LCD backlight GPIO"
+            default 38
+            range 0 48
+    endmenu
 
-    config BRUCE_NRF24_MOSI_GPIO
-        int "NRF24 SPI MOSI GPIO"
-        default 14 if BRUCE_BOARD_M5_CARDPUTER
-        default 32 if BRUCE_BOARD_M5_STICKC_PLUS2
-        range 0 48
+    menu "Audio"
+        choice BRUCE_AUDIO_BACKEND
+            prompt "Audio output backend"
+            default BRUCE_AUDIO_BACKEND_I2S
+            help
+                Boards wire audio output very differently: an I2S DAC, a
+                GPIO driven through LEDC as a PWM buzzer, or nothing at all.
 
-    config BRUCE_NRF24_CS_GPIO
-        int "NRF24 chip-select GPIO"
-        default 1 if BRUCE_BOARD_M5_CARDPUTER
-        default 26 if BRUCE_BOARD_M5_STICKC_PLUS2
-        range 0 48
+            config BRUCE_AUDIO_BACKEND_NONE
+                bool "None"
 
-    config BRUCE_NRF24_CE_GPIO
-        int "NRF24 chip-enable GPIO"
-        default 2 if BRUCE_BOARD_M5_CARDPUTER
-        default 25 if BRUCE_BOARD_M5_STICKC_PLUS2
-        range 0 48
-        help
-            NRF24 defaults match the external SPI wiring used by Bruce legacy
-            builds. The radio uses SPI3_HOST; IRQ is not required.
+            config BRUCE_AUDIO_BACKEND_I2S
+                bool "I2S DAC"
+
+            config BRUCE_AUDIO_BACKEND_LEDC_BUZZER
+                bool "LEDC PWM buzzer"
+        endchoice
+
+        config BRUCE_AUDIO_I2S_BCLK_GPIO
+            int "I2S BCLK GPIO"
+            depends on BRUCE_AUDIO_BACKEND_I2S
+            default 41
+            range 0 48
+
+        config BRUCE_AUDIO_I2S_DATA_GPIO
+            int "I2S DATA (DOUT) GPIO"
+            depends on BRUCE_AUDIO_BACKEND_I2S
+            default 42
+            range 0 48
+
+        config BRUCE_AUDIO_I2S_LRCLK_GPIO
+            int "I2S LRCLK (WS) GPIO"
+            depends on BRUCE_AUDIO_BACKEND_I2S
+            default 43
+            range 0 48
+
+        config BRUCE_AUDIO_BUZZER_GPIO
+            int "Buzzer GPIO"
+            depends on BRUCE_AUDIO_BACKEND_LEDC_BUZZER
+            range 0 48
+    endmenu
+
+    menu "Battery"
+        config BRUCE_BATTERY_ENABLED
+            bool "Battery voltage sense available"
+            default y
+
+        config BRUCE_BATTERY_ADC_CHANNEL
+            int "Battery sense ADC1 channel"
+            depends on BRUCE_BATTERY_ENABLED
+            default 9
+            range 0 9
+    endmenu
+
+    menu "SD card"
+        config BRUCE_SD_ENABLED
+            bool "SD card slot available"
+            default y
+
+        config BRUCE_SD_SPI_HOST
+            int "SD card SPI host"
+            depends on BRUCE_SD_ENABLED
+            default 2
+            range 0 2
+            help
+                Numeric spi_host_device_t value. Bruce's radio peripherals
+                (core/spi/spi.c) fix their bus to SPI3_HOST (2); boards that
+                share that bus with the SD card (as the Cardputer does over
+                its Grove port) should use the same value here.
+
+        config BRUCE_SD_PIN_MOSI
+            int "SD card MOSI GPIO"
+            depends on BRUCE_SD_ENABLED
+            default 14
+            range 0 48
+
+        config BRUCE_SD_PIN_MISO
+            int "SD card MISO GPIO"
+            depends on BRUCE_SD_ENABLED
+            default 39
+            range 0 48
+
+        config BRUCE_SD_PIN_SCK
+            int "SD card SCK GPIO"
+            depends on BRUCE_SD_ENABLED
+            default 40
+            range 0 48
+
+        config BRUCE_SD_PIN_CS
+            int "SD card CS GPIO"
+            depends on BRUCE_SD_ENABLED
+            default 12
+            range 0 48
+    endmenu
+
+    menu "Input"
+        config BRUCE_INPUT_POLL_PERIOD_MS
+            int "Input poll period (ms)"
+            default 20
+            range 5 100
+            help
+                Period between physical input polls. Lower values reduce
+                latency but use more CPU.
+
+        config BRUCE_INPUT_DEBOUNCE_MS
+            int "Input debounce time (ms)"
+            default 30
+            range 10 200
+            help
+                Minimum time between accepted state changes for a single
+                button or key. Increase this if you see spurious repeated
+                events.
+
+        config BRUCE_BUTTON_SELECT_ENABLED
+            bool "Select button available"
+            default y
+            help
+                A single central/select button, reported as
+                BRUCE_INPUT_CODE_SELECT (e.g. the Cardputer's G0 button).
+
+        config BRUCE_BUTTON_SELECT_GPIO
+            int "Select button GPIO"
+            depends on BRUCE_BUTTON_SELECT_ENABLED
+            default 0
+            range 0 48
+
+        config BRUCE_BUTTON_A_ENABLED
+            bool "Button A available"
+            default n
+
+        config BRUCE_BUTTON_A_GPIO
+            int "Button A GPIO"
+            depends on BRUCE_BUTTON_A_ENABLED
+            range 0 48
+
+        config BRUCE_BUTTON_B_ENABLED
+            bool "Button B available"
+            default n
+
+        config BRUCE_BUTTON_B_GPIO
+            int "Button B GPIO"
+            depends on BRUCE_BUTTON_B_ENABLED
+            range 0 48
+
+        config BRUCE_BUTTON_C_ENABLED
+            bool "Button C available"
+            default n
+
+        config BRUCE_BUTTON_C_GPIO
+            int "Button C GPIO"
+            depends on BRUCE_BUTTON_C_ENABLED
+            range 0 48
+
+        config BRUCE_KEYBOARD_ENABLED
+            bool "GPIO matrix keyboard available"
+            default y
+            help
+                A 3-output/7-input GPIO scan matrix keyboard, wired and
+                decoded the way the Cardputer's keyboard is. A board with a
+                different keyboard peripheral (e.g. an I2C co-processor, as
+                on the LilyGO T-Deck) needs its own driver, not this option.
+
+        config BRUCE_INPUT_SCAN_SETTLE_US
+            int "Keyboard scan settle time (us)"
+            default 30
+            range 10 200
+            depends on BRUCE_KEYBOARD_ENABLED
+            help
+                Delay after changing the keyboard scan outputs before reading
+                the sense lines. Increase this if keys are missed.
+
+        config BRUCE_KEYBOARD_AUTODETECT_ALT
+            bool "Autodetect alternate IN0/IN1 pins"
+            depends on BRUCE_KEYBOARD_ENABLED
+            default y
+            help
+                Some Cardputer keyboard membranes use a different pair of
+                sense pins for the first column; when enabled, the scanner
+                falls back to BRUCE_KEYBOARD_IN_ALT*_GPIO if the primary pins
+                read nothing.
+
+        config BRUCE_KEYBOARD_OUT0_GPIO
+            int "Keyboard OUT0 GPIO"
+            depends on BRUCE_KEYBOARD_ENABLED
+            default 8
+            range 0 48
+
+        config BRUCE_KEYBOARD_OUT1_GPIO
+            int "Keyboard OUT1 GPIO"
+            depends on BRUCE_KEYBOARD_ENABLED
+            default 9
+            range 0 48
+
+        config BRUCE_KEYBOARD_OUT2_GPIO
+            int "Keyboard OUT2 GPIO"
+            depends on BRUCE_KEYBOARD_ENABLED
+            default 11
+            range 0 48
+
+        config BRUCE_KEYBOARD_IN0_GPIO
+            int "Keyboard IN0 GPIO"
+            depends on BRUCE_KEYBOARD_ENABLED
+            default 13
+            range 0 48
+
+        config BRUCE_KEYBOARD_IN1_GPIO
+            int "Keyboard IN1 GPIO"
+            depends on BRUCE_KEYBOARD_ENABLED
+            default 15
+            range 0 48
+
+        config BRUCE_KEYBOARD_IN2_GPIO
+            int "Keyboard IN2 GPIO"
+            depends on BRUCE_KEYBOARD_ENABLED
+            default 3
+            range 0 48
+
+        config BRUCE_KEYBOARD_IN3_GPIO
+            int "Keyboard IN3 GPIO"
+            depends on BRUCE_KEYBOARD_ENABLED
+            default 4
+            range 0 48
+
+        config BRUCE_KEYBOARD_IN4_GPIO
+            int "Keyboard IN4 GPIO"
+            depends on BRUCE_KEYBOARD_ENABLED
+            default 5
+            range 0 48
+
+        config BRUCE_KEYBOARD_IN5_GPIO
+            int "Keyboard IN5 GPIO"
+            depends on BRUCE_KEYBOARD_ENABLED
+            default 6
+            range 0 48
+
+        config BRUCE_KEYBOARD_IN6_GPIO
+            int "Keyboard IN6 GPIO"
+            depends on BRUCE_KEYBOARD_ENABLED
+            default 7
+            range 0 48
+
+        config BRUCE_KEYBOARD_IN_ALT0_GPIO
+            int "Keyboard alternate IN0 GPIO"
+            depends on BRUCE_KEYBOARD_AUTODETECT_ALT
+            default 1
+            range 0 48
+
+        config BRUCE_KEYBOARD_IN_ALT1_GPIO
+            int "Keyboard alternate IN1 GPIO"
+            depends on BRUCE_KEYBOARD_AUTODETECT_ALT
+            default 2
+            range 0 48
+
+        config BRUCE_KEYBOARD_IN_ALT2_GPIO
+            int "Keyboard alternate IN2 GPIO"
+            depends on BRUCE_KEYBOARD_AUTODETECT_ALT
+            default 3
+            range 0 48
+
+        config BRUCE_KEYBOARD_IN_ALT3_GPIO
+            int "Keyboard alternate IN3 GPIO"
+            depends on BRUCE_KEYBOARD_AUTODETECT_ALT
+            default 4
+            range 0 48
+
+        config BRUCE_KEYBOARD_IN_ALT4_GPIO
+            int "Keyboard alternate IN4 GPIO"
+            depends on BRUCE_KEYBOARD_AUTODETECT_ALT
+            default 5
+            range 0 48
+
+        config BRUCE_KEYBOARD_IN_ALT5_GPIO
+            int "Keyboard alternate IN5 GPIO"
+            depends on BRUCE_KEYBOARD_AUTODETECT_ALT
+            default 6
+            range 0 48
+
+        config BRUCE_KEYBOARD_IN_ALT6_GPIO
+            int "Keyboard alternate IN6 GPIO"
+            depends on BRUCE_KEYBOARD_AUTODETECT_ALT
+            default 7
+            range 0 48
+    endmenu
+
+    menu "Infrared"
+        config BRUCE_IR_TX_GPIO
+            int "Infrared transmit GPIO"
+            default 44
+            range 0 48
+            help
+                GPIO connected to the active-high infrared transmitter.
+
+        config BRUCE_IR_RX_GPIO
+            int "Infrared receive GPIO"
+            default 1
+            range 0 48
+            help
+                GPIO connected to the active-low infrared receiver output.
+    endmenu
+
+    menu "NRF24"
+        config BRUCE_NRF24_SCK_GPIO
+            int "NRF24 SPI clock GPIO"
+            default 40
+            range 0 48
+
+        config BRUCE_NRF24_MISO_GPIO
+            int "NRF24 SPI MISO GPIO"
+            default 39
+            range 0 48
+
+        config BRUCE_NRF24_MOSI_GPIO
+            int "NRF24 SPI MOSI GPIO"
+            default 14
+            range 0 48
+
+        config BRUCE_NRF24_CS_GPIO
+            int "NRF24 chip-select GPIO"
+            default 1
+            range 0 48
+
+        config BRUCE_NRF24_CE_GPIO
+            int "NRF24 chip-enable GPIO"
+            default 2
+            range 0 48
+            help
+                NRF24 defaults match the external SPI wiring used by Bruce
+                legacy builds. The radio uses SPI3_HOST; IRQ is not required.
+    endmenu
 
 endmenu

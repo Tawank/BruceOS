@@ -9,22 +9,20 @@
 #include "freertos/task.h"
 #include "sdkconfig.h"
 
-#if defined(CONFIG_BRUCE_BOARD_M5_CARDPUTER)
+#if CONFIG_BRUCE_AUDIO_BACKEND_I2S
 #include "driver/i2s_std.h"
 #define AUDIO__I2S_SAMPLE_RATE 48000u
 #define AUDIO__I2S_BUFFER_FRAMES 256u
-#define AUDIO__I2S_BCLK_GPIO GPIO_NUM_41
-#define AUDIO__I2S_DATA_GPIO GPIO_NUM_42
-#define AUDIO__I2S_LRCLK_GPIO GPIO_NUM_43
-#elif defined(CONFIG_BRUCE_BOARD_M5_STICKC_PLUS2)
+#define AUDIO__I2S_BCLK_GPIO ((gpio_num_t)CONFIG_BRUCE_AUDIO_I2S_BCLK_GPIO)
+#define AUDIO__I2S_DATA_GPIO ((gpio_num_t)CONFIG_BRUCE_AUDIO_I2S_DATA_GPIO)
+#define AUDIO__I2S_LRCLK_GPIO ((gpio_num_t)CONFIG_BRUCE_AUDIO_I2S_LRCLK_GPIO)
+#elif CONFIG_BRUCE_AUDIO_BACKEND_LEDC_BUZZER
 #include "driver/ledc.h"
-#define AUDIO__OUTPUT_GPIO 2
+#define AUDIO__OUTPUT_GPIO CONFIG_BRUCE_AUDIO_BUZZER_GPIO
 #define AUDIO__LEDC_MODE LEDC_LOW_SPEED_MODE
 #define AUDIO__LEDC_TIMER LEDC_TIMER_1
 #define AUDIO__LEDC_CHANNEL LEDC_CHANNEL_6
 #define AUDIO__MAX_FREQUENCY_13_BIT_HZ 9765u
-#else
-#error "No Bruce board selected; set CONFIG_BRUCE_BOARD_* via menuconfig or sdkconfig"
 #endif
 
 #define AUDIO__MAX_ASYNC_TONES 4u
@@ -47,8 +45,8 @@ static void audio__ensure_mutex(void) {
     portEXIT_CRITICAL(&s_audio_init_mux);
 }
 
-#if defined(CONFIG_BRUCE_BOARD_M5_CARDPUTER) && !CONFIG_BRUCE_QEMU_TEST_MODE
-static bruce_result_t audio__play_cardputer(const audio__tone_params_t *params) {
+#if CONFIG_BRUCE_AUDIO_BACKEND_I2S && !CONFIG_BRUCE_QEMU_TEST_MODE
+static bruce_result_t audio__play_i2s(const audio__tone_params_t *params) {
     i2s_chan_handle_t tx_channel = NULL;
     i2s_chan_config_t channel_config = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_AUTO, I2S_ROLE_MASTER);
     if (i2s_new_channel(&channel_config, &tx_channel, NULL) != ESP_OK) return BRUCE_ERR_BUSY;
@@ -118,9 +116,9 @@ static bruce_result_t audio__play(const audio__tone_params_t *params) {
 #if CONFIG_BRUCE_QEMU_TEST_MODE
     vTaskDelay(pdMS_TO_TICKS(params->duration_ms));
     bruce_result_t result = BRUCE_OK;
-#elif defined(CONFIG_BRUCE_BOARD_M5_CARDPUTER)
-    bruce_result_t result = audio__play_cardputer(params);
-#else
+#elif CONFIG_BRUCE_AUDIO_BACKEND_I2S
+    bruce_result_t result = audio__play_i2s(params);
+#elif CONFIG_BRUCE_AUDIO_BACKEND_LEDC_BUZZER
     ledc_timer_bit_t resolution = params->frequency_hz <= AUDIO__MAX_FREQUENCY_13_BIT_HZ
                                       ? LEDC_TIMER_13_BIT
                                       : LEDC_TIMER_10_BIT;
@@ -148,6 +146,9 @@ static bruce_result_t audio__play(const audio__tone_params_t *params) {
         ledc_stop(AUDIO__LEDC_MODE, AUDIO__LEDC_CHANNEL, 0);
     }
     ledc_timer_rst(AUDIO__LEDC_MODE, AUDIO__LEDC_TIMER);
+#else
+    (void)params;
+    bruce_result_t result = BRUCE_OK;
 #endif
 
     xSemaphoreGive(s_audio_mutex);

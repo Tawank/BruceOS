@@ -15,8 +15,8 @@
  * display__set_rotation().  The framebuffer is stored in the logical
  * orientation for the current rotation; the ST7789 controller maps it to the
  * physical panel via esp_lcd_panel_swap_xy() / esp_lcd_panel_mirror().  The
- * default rotation is board-specific (portrait for M5 StickC Plus2, landscape
- * for M5 Cardputer).
+ * default rotation is set per board by CONFIG_BRUCE_DISPLAY_DEFAULT_ROTATION
+ * (see src/Kconfig.projbuild and boards/<board>/sdkconfig.defaults).
  */
 
 #include <stdbool.h>

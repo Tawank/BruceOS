@@ -83,13 +83,13 @@ bruce_result_t disk__mount(const char *name, const char *mount_point) {
     if (strcmp(name, "sd0") != 0) return BRUCE_ERR_NOT_FOUND;
     if (strcmp(mount_point, "/sdcard") != 0) return BRUCE_ERR_INVALID_PATH;
 
-#if defined(CONFIG_BRUCE_BOARD_M5_CARDPUTER)
+#if CONFIG_BRUCE_SD_ENABLED
     const storage__sdspi_config_t config = {
-        .host = SPI3_HOST,
-        .mosi_gpio = 14,
-        .miso_gpio = 39,
-        .sck_gpio = 40,
-        .cs_gpio = 12,
+        .host = (spi_host_device_t)CONFIG_BRUCE_SD_SPI_HOST,
+        .mosi_gpio = CONFIG_BRUCE_SD_PIN_MOSI,
+        .miso_gpio = CONFIG_BRUCE_SD_PIN_MISO,
+        .sck_gpio = CONFIG_BRUCE_SD_PIN_SCK,
+        .cs_gpio = CONFIG_BRUCE_SD_PIN_CS,
     };
     return storage__sd_mount_spi(&config) ? BRUCE_OK : BRUCE_ERR_IO;
 #else

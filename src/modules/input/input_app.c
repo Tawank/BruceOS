@@ -27,53 +27,51 @@
 #endif
 
 /* -------------------------------------------------------------------------- */
-/* Board-specific pinout and feature selection.  Defaults come from the     */
-/* M5Stack Cardputer and StickC Plus2 reference schematics.                     */
+/* Board pinout and feature selection, from Kconfig (see src/Kconfig.projbuild). */
 /* -------------------------------------------------------------------------- */
 
-#if defined(CONFIG_BRUCE_BOARD_M5_CARDPUTER)
-#define INPUT__HAS_BUTTON_0 1
-#define INPUT__PIN_BUTTON_0 GPIO_NUM_0
+#define INPUT__HAS_BUTTON_0 CONFIG_BRUCE_BUTTON_SELECT_ENABLED
+#if CONFIG_BRUCE_BUTTON_SELECT_ENABLED
+#define INPUT__PIN_BUTTON_0 ((gpio_num_t)CONFIG_BRUCE_BUTTON_SELECT_GPIO)
 #define INPUT__BUTTON_0_CODE BRUCE_INPUT_CODE_SELECT
-#define INPUT__HAS_KEYBOARD 1
-#define INPUT__KB_OUT_PINS {GPIO_NUM_8, GPIO_NUM_9, GPIO_NUM_11}
-#define INPUT__KB_IN_PINS                                                                                    \
-    {GPIO_NUM_13, GPIO_NUM_15, GPIO_NUM_3, GPIO_NUM_4, GPIO_NUM_5, GPIO_NUM_6, GPIO_NUM_7}
-#define INPUT__KB_IN_ALT_PINS                                                                                \
-    {GPIO_NUM_1, GPIO_NUM_2, GPIO_NUM_3, GPIO_NUM_4, GPIO_NUM_5, GPIO_NUM_6, GPIO_NUM_7}
-#define INPUT__KB_AUTODETECT_ALT 1
-#elif defined(CONFIG_BRUCE_BOARD_M5_STICKC_PLUS2)
-#define INPUT__HAS_BUTTON_A 1
-#define INPUT__PIN_BUTTON_A GPIO_NUM_37
-#define INPUT__BUTTON_A_CODE BRUCE_INPUT_CODE_BUTTON_A
-#define INPUT__HAS_BUTTON_B 1
-#define INPUT__PIN_BUTTON_B GPIO_NUM_39
-#define INPUT__BUTTON_B_CODE BRUCE_INPUT_CODE_BUTTON_B
-#define INPUT__HAS_BUTTON_C 1
-#define INPUT__PIN_BUTTON_C GPIO_NUM_35
-#define INPUT__BUTTON_C_CODE BRUCE_INPUT_CODE_BUTTON_C
-#else
-#define INPUT__NO_HARDWARE 1
 #endif
 
-/* Ensure all feature flags are defined for #if use. */
-#ifndef INPUT__HAS_BUTTON_0
-#define INPUT__HAS_BUTTON_0 0
+#define INPUT__HAS_BUTTON_A CONFIG_BRUCE_BUTTON_A_ENABLED
+#if CONFIG_BRUCE_BUTTON_A_ENABLED
+#define INPUT__PIN_BUTTON_A ((gpio_num_t)CONFIG_BRUCE_BUTTON_A_GPIO)
+#define INPUT__BUTTON_A_CODE BRUCE_INPUT_CODE_BUTTON_A
 #endif
-#ifndef INPUT__HAS_BUTTON_A
-#define INPUT__HAS_BUTTON_A 0
+
+#define INPUT__HAS_BUTTON_B CONFIG_BRUCE_BUTTON_B_ENABLED
+#if CONFIG_BRUCE_BUTTON_B_ENABLED
+#define INPUT__PIN_BUTTON_B ((gpio_num_t)CONFIG_BRUCE_BUTTON_B_GPIO)
+#define INPUT__BUTTON_B_CODE BRUCE_INPUT_CODE_BUTTON_B
 #endif
-#ifndef INPUT__HAS_BUTTON_B
-#define INPUT__HAS_BUTTON_B 0
+
+#define INPUT__HAS_BUTTON_C CONFIG_BRUCE_BUTTON_C_ENABLED
+#if CONFIG_BRUCE_BUTTON_C_ENABLED
+#define INPUT__PIN_BUTTON_C ((gpio_num_t)CONFIG_BRUCE_BUTTON_C_GPIO)
+#define INPUT__BUTTON_C_CODE BRUCE_INPUT_CODE_BUTTON_C
 #endif
-#ifndef INPUT__HAS_BUTTON_C
-#define INPUT__HAS_BUTTON_C 0
+
+#define INPUT__HAS_KEYBOARD CONFIG_BRUCE_KEYBOARD_ENABLED
+#if CONFIG_BRUCE_KEYBOARD_ENABLED
+#define INPUT__KB_OUT_PINS                                                                                   \
+    {(gpio_num_t)CONFIG_BRUCE_KEYBOARD_OUT0_GPIO, (gpio_num_t)CONFIG_BRUCE_KEYBOARD_OUT1_GPIO,                \
+     (gpio_num_t)CONFIG_BRUCE_KEYBOARD_OUT2_GPIO}
+#define INPUT__KB_IN_PINS                                                                                    \
+    {(gpio_num_t)CONFIG_BRUCE_KEYBOARD_IN0_GPIO, (gpio_num_t)CONFIG_BRUCE_KEYBOARD_IN1_GPIO,                  \
+     (gpio_num_t)CONFIG_BRUCE_KEYBOARD_IN2_GPIO, (gpio_num_t)CONFIG_BRUCE_KEYBOARD_IN3_GPIO,                  \
+     (gpio_num_t)CONFIG_BRUCE_KEYBOARD_IN4_GPIO, (gpio_num_t)CONFIG_BRUCE_KEYBOARD_IN5_GPIO,                  \
+     (gpio_num_t)CONFIG_BRUCE_KEYBOARD_IN6_GPIO}
+#define INPUT__KB_AUTODETECT_ALT CONFIG_BRUCE_KEYBOARD_AUTODETECT_ALT
+#if CONFIG_BRUCE_KEYBOARD_AUTODETECT_ALT
+#define INPUT__KB_IN_ALT_PINS                                                                                \
+    {(gpio_num_t)CONFIG_BRUCE_KEYBOARD_IN_ALT0_GPIO, (gpio_num_t)CONFIG_BRUCE_KEYBOARD_IN_ALT1_GPIO,          \
+     (gpio_num_t)CONFIG_BRUCE_KEYBOARD_IN_ALT2_GPIO, (gpio_num_t)CONFIG_BRUCE_KEYBOARD_IN_ALT3_GPIO,          \
+     (gpio_num_t)CONFIG_BRUCE_KEYBOARD_IN_ALT4_GPIO, (gpio_num_t)CONFIG_BRUCE_KEYBOARD_IN_ALT5_GPIO,          \
+     (gpio_num_t)CONFIG_BRUCE_KEYBOARD_IN_ALT6_GPIO}
 #endif
-#ifndef INPUT__HAS_KEYBOARD
-#define INPUT__HAS_KEYBOARD 0
-#endif
-#ifndef INPUT__KB_AUTODETECT_ALT
-#define INPUT__KB_AUTODETECT_ALT 0
 #endif
 
 /* -------------------------------------------------------------------------- */

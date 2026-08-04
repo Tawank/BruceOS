@@ -21,6 +21,18 @@ source ~/.espressif/v6.0.2/esp-idf/export.sh
 idf.py build
 ```
 
+This builds the default board (M5 Cardputer). To build for a specific board,
+use `tools/board.py` instead, which picks the right chip target and
+board-specific `sdkconfig.defaults` (see `boards/<board>/`) and puts the
+build output in its own `build-board/<board>/` directory:
+
+```sh
+source ~/.espressif/v6.0.2/esp-idf/export.sh
+python tools/board.py --list                 # show available board ids
+python tools/board.py m5stack-cplus2 build
+python tools/board.py m5stack-cplus2 flash monitor -p PORT
+```
+
 ## :test_tube: How to run tests
 
 Perequisites:

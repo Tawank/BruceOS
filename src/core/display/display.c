@@ -21,13 +21,7 @@
 #define DISPLAY__ROW_BUF_PIXELS                                                                              \
     (DISPLAY__NATIVE_WIDTH > DISPLAY__NATIVE_HEIGHT ? DISPLAY__NATIVE_WIDTH : DISPLAY__NATIVE_HEIGHT)
 
-#if defined(CONFIG_BRUCE_BOARD_M5_CARDPUTER)
-#define DISPLAY__DEFAULT_ROTATION 1
-#elif defined(CONFIG_BRUCE_BOARD_M5_STICKC_PLUS2)
-#define DISPLAY__DEFAULT_ROTATION 3
-#else
-#error "No Bruce board selected; set CONFIG_BRUCE_BOARD_* via menuconfig or sdkconfig"
-#endif
+#define DISPLAY__DEFAULT_ROTATION CONFIG_BRUCE_DISPLAY_DEFAULT_ROTATION
 
 typedef struct {
     bool active;

@@ -35,8 +35,13 @@ CONFIG_LIBC_PICOLIBC_NEWLIB_COMPATIBILITY=y
 CONFIG_ELF_LOADER_LIBC_SYMBOLS=n
 CONFIG_ELF_LOADER_ESPIDF_SYMBOLS=n
 
-# Default target board for the display HAL (src/core/display/display.c).
-CONFIG_BRUCE_BOARD_M5_CARDPUTER=y
+# Every board-specific pin and peripheral choice (display, audio, battery,
+# SD card, buttons, keyboard, IR, NRF24 - see src/Kconfig.projbuild) lives in
+# boards/<board>/sdkconfig.defaults, one file per supported board, selected
+# via `python tools/board.py <board> build` (see tools/board.py --list for
+# the available board ids). Plain `idf.py build` with no board-specific
+# defaults falls back to each option's own Kconfig default, which matches
+# the M5 Cardputer's wiring.
 
 # BLE advertisement scanning uses Bluedroid on every supported target.
 CONFIG_BT_ENABLED=y
