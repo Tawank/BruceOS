@@ -170,7 +170,7 @@ int bnu_lsblk_app_main(int argc, char **argv) {
 
     stdio__printf("%-18s %2s %6s %2s %-4s %s\n", "NAME", "RM", "SIZE", "RO", "TYPE", "MOUNTPOINTS");
     for (size_t i = 0; i < count; ++i) {
-        char size[16];
+        char size[32];
         char name[BRUCE_DISK_NAME_MAX + 3];
         bnu__format_block_size(entries[i].size, size, sizeof(size));
         snprintf(

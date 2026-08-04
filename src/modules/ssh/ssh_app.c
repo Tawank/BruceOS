@@ -4,8 +4,8 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <strings.h>
 #include <string.h>
+#include <strings.h>
 
 #include "args.h"
 #include "core_sdk/dialog.h"
@@ -68,7 +68,8 @@ static bool ssh_app__host_pattern_matches(const char *pattern, const char *host)
             }
             return false;
         }
-        if (*host == '\0' || (*pattern != '?' && tolower((unsigned char)*pattern) != tolower((unsigned char)*host)))
+        if (*host == '\0' ||
+            (*pattern != '?' && tolower((unsigned char)*pattern) != tolower((unsigned char)*host)))
             return false;
         ++pattern;
         ++host;
@@ -152,11 +153,17 @@ static bruce_result_t ssh_app__load_config(const char *alias, ssh_app__config_t 
         }
         if (!active || *value == '\0') continue;
         if (strcasecmp(line, "HostName") == 0)
-            ssh_app__copy_config_value(config->hostname, sizeof(config->hostname), value, &config->hostname_set);
+            ssh_app__copy_config_value(
+                config->hostname, sizeof(config->hostname), value, &config->hostname_set
+            );
         else if (strcasecmp(line, "User") == 0)
-            ssh_app__copy_config_value(config->username, sizeof(config->username), value, &config->username_set);
+            ssh_app__copy_config_value(
+                config->username, sizeof(config->username), value, &config->username_set
+            );
         else if (strcasecmp(line, "IdentityFile") == 0)
-            ssh_app__copy_config_value(config->identity, sizeof(config->identity), value, &config->identity_set);
+            ssh_app__copy_config_value(
+                config->identity, sizeof(config->identity), value, &config->identity_set
+            );
         else if (strcasecmp(line, "Port") == 0 && !config->port_set)
             config->port_set = ssh_app__parse_port(value, &config->port);
     }
@@ -485,9 +492,7 @@ ssh_app__read_private_key(const char *path, char *buffer, size_t capacity, size_
 static bruce_result_t ssh_app__write_file(const char *path, const void *data, size_t size) {
     bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
     bruce_result_t result = storage__open(
-        path,
-        BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE | BRUCE_STORAGE_OPEN_TRUNCATE,
-        &file
+        path, BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE | BRUCE_STORAGE_OPEN_TRUNCATE, &file
     );
     if (result != BRUCE_OK) return result;
     size_t total = 0;
@@ -519,8 +524,7 @@ static const char *ssh_app__default_identity(void) {
 }
 
 static bruce_result_t ssh_app__client(
-    const char *host, uint16_t port, const char *username, const char *password,
-    const char *identity
+    const char *host, uint16_t port, const char *username, const char *password, const char *identity
 ) {
     if (!wifi__is_connected()) {
         stdio__printf("SSH client: Wi-Fi is not connected\n");
@@ -554,7 +558,7 @@ static bruce_result_t ssh_app__client(
     } else {
         const char *effective_password = password;
         if (password == NULL || password[0] == '\0') {
-            char prompt[96];
+            char prompt[sizeof("Password for @") + SSH_APP_USERNAME_MAX + SSH_APP_HOST_MAX];
             snprintf(prompt, sizeof(prompt), "Password for %s@%s", username, host);
             result = dialog__text_input("SSH", prompt, NULL, true, password_buffer, sizeof(password_buffer));
             if (result != BRUCE_OK) {
@@ -575,8 +579,7 @@ static bruce_result_t ssh_app__client(
                 identity,
                 result
             );
-        else
-            stdio__printf("SSH client: authentication failed (%d)\n", result);
+        else stdio__printf("SSH client: authentication failed (%d)\n", result);
         (void)ssh__close(session);
         return result;
     }
@@ -644,7 +647,12 @@ int ssh_app_main(int argc, char **argv) {
     int host_len = snprintf(host, sizeof(host), "%s", config.hostname_set ? config.hostname : alias);
     const char *username_arg = ap_get_arg(root, "username");
     int username_len = snprintf(
-        username, sizeof(username), "%s", username_arg != NULL ? username_arg : config.username_set ? config.username : ""
+        username,
+        sizeof(username),
+        "%s",
+        username_arg != NULL  ? username_arg
+        : config.username_set ? config.username
+                              : ""
     );
     if (port_text == NULL && config.port_set) port = config.port;
     const char *password = ap_get_str_value(root, "password");
@@ -652,22 +660,18 @@ int ssh_app_main(int argc, char **argv) {
     const char *identity = ap_get_str_value(root, "identity");
     bool password_supplied = ap_found(root, "password");
     bool identity_supplied = identity != NULL && identity[0] != '\0';
-    const char *effective_identity = identity_supplied
-                                         ? identity
-                                         : !password_supplied && config.identity_set
-                                               ? config.identity
-                                          : !password_supplied
-                                               ? ssh_app__default_identity()
-                                               : "";
+    const char *effective_identity = identity_supplied                           ? identity
+                                     : !password_supplied && config.identity_set ? config.identity
+                                     : !password_supplied                        ? ssh_app__default_identity()
+                                                                                 : "";
     if (strncmp(effective_identity, "~/", 2) == 0) ++effective_identity;
     int identity_len = snprintf(identity_copy, sizeof(identity_copy), "%s", effective_identity);
     bool conflicting_auth = password_supplied && identity_supplied;
     ap_free(root);
 
-    if (config_result != BRUCE_OK || alias_len <= 0 || (size_t)alias_len >= sizeof(alias) ||
-        host_len < 0 || (size_t)host_len >= sizeof(host) || username_len <= 0 ||
-        (size_t)username_len >= sizeof(username) || identity_len < 0 ||
-        (size_t)identity_len >= sizeof(identity_copy) ||
+    if (config_result != BRUCE_OK || alias_len <= 0 || (size_t)alias_len >= sizeof(alias) || host_len < 0 ||
+        (size_t)host_len >= sizeof(host) || username_len <= 0 || (size_t)username_len >= sizeof(username) ||
+        identity_len < 0 || (size_t)identity_len >= sizeof(identity_copy) ||
         (identity_copy[0] != '\0' && identity_copy[0] != '/') || conflicting_auth) {
         memset(password_copy, 0, sizeof(password_copy));
         return BRUCE_ERR_INVALID_ARGUMENT;
@@ -681,7 +685,11 @@ int ssh_app_main(int argc, char **argv) {
 int ssh_keygen_app_main(int argc, char **argv) {
     ArgParser *parser = ap_new_parser();
     if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
-    ap_set_helptext(parser, "Generate an ECDSA P-256 or Ed25519 SSH keypair. Writes the private key to --file and the OpenSSH public key to <file>.pub.");
+    ap_set_helptext(
+        parser,
+        "Generate an ECDSA P-256 or Ed25519 SSH keypair. Writes the private key to --file and the OpenSSH "
+        "public key to <file>.pub."
+    );
     ap_add_str_opt(parser, "file", "");
     ap_set_opt_help(parser, "file", "Private-key output path (default depends on --type)");
     ap_add_str_opt(parser, "type", "ecdsa");
@@ -710,13 +718,11 @@ int ssh_keygen_app_main(int argc, char **argv) {
     bruce_ssh_key_type_t key_type = type_arg != NULL && strcasecmp(type_arg, "ed25519") == 0
                                         ? BRUCE_SSH_KEY_ED25519
                                         : BRUCE_SSH_KEY_ECDSA_P256;
-    bool valid_type = type_arg != NULL &&
-                      (strcasecmp(type_arg, "ecdsa") == 0 || strcasecmp(type_arg, "ed25519") == 0);
-    const char *effective_path = path_arg != NULL && path_arg[0] != '\0'
-                                     ? path_arg
-                                     : key_type == BRUCE_SSH_KEY_ED25519
-                                           ? SSH_APP_DEFAULT_ED25519_IDENTITY_PATH
-                                           : SSH_APP_DEFAULT_ECDSA_IDENTITY_PATH;
+    bool valid_type =
+        type_arg != NULL && (strcasecmp(type_arg, "ecdsa") == 0 || strcasecmp(type_arg, "ed25519") == 0);
+    const char *effective_path = path_arg != NULL && path_arg[0] != '\0' ? path_arg
+                                 : key_type == BRUCE_SSH_KEY_ED25519 ? SSH_APP_DEFAULT_ED25519_IDENTITY_PATH
+                                                                     : SSH_APP_DEFAULT_ECDSA_IDENTITY_PATH;
     int path_len = snprintf(path, sizeof(path), "%s", effective_path);
     int public_path_len = snprintf(public_path, sizeof(public_path), "%s.pub", path);
     int comment_len = snprintf(comment, sizeof(comment), "%s", comment_arg != NULL ? comment_arg : "");
@@ -739,8 +745,13 @@ int ssh_keygen_app_main(int argc, char **argv) {
     size_t private_size = 0;
     size_t public_size = 0;
     bruce_result_t result = ssh__generate_keypair_ex(
-        key_type, private_key, sizeof(private_key), &private_size,
-        public_key, sizeof(public_key), &public_size
+        key_type,
+        private_key,
+        sizeof(private_key),
+        &private_size,
+        public_key,
+        sizeof(public_key),
+        &public_size
     );
     if (result == BRUCE_OK && comment[0] != '\0') {
         size_t required = public_size + 1u + strlen(comment) + 1u;
