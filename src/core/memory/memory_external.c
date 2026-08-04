@@ -269,20 +269,12 @@ bruce_result_t memory__external_alloc(size_t size, bruce_memory_object_t *out_ob
     return memory_external__alloc(size, false, out_object);
 }
 
-bruce_result_t
-memory__external_write(const bruce_memory_object_t *object, size_t offset, const void *data, size_t size) {
-    if (object == NULL || (data == NULL && size != 0)) return BRUCE_ERR_INVALID_ARGUMENT;
-    if (!process_registry__operation_begin()) return BRUCE_ERR_CANCELLED;
-    bruce_process_id_t owner_id = process__current_id();
-    memory_external__ensure_mutex();
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
-    memory_external__record_t *record = memory_external__find_locked(object->handle);
-    if (!memory_external__matches(record, object) || record->owner_id != owner_id || offset > record->size ||
-        size > record->size - offset) {
-        xSemaphoreGive(s_mutex);
-        process_registry__operation_end();
-        return BRUCE_ERR_INVALID_ARGUMENT;
-    }
+/* Caller must hold s_mutex and have already validated offset/size against
+ * record->size. Shared by the process-owned and Core-owned write entry
+ * points below. */
+static bruce_result_t memory_external__write_locked(
+    memory_external__record_t *record, size_t offset, const void *data, size_t size
+) {
     bruce_result_t result = BRUCE_OK;
     if (size != 0 && record->backend == BRUCE_MEMORY_BACKEND_PSRAM) {
         memmove((uint8_t *)record->psram + offset, data, size);
@@ -295,8 +287,6 @@ memory__external_write(const bruce_memory_object_t *object, size_t offset, const
         uintptr_t mapping_end = mapping_start + record->size;
         if (source_end < source_start || mapping_end < mapping_start ||
             (source_start < mapping_end && source_end > mapping_start)) {
-            xSemaphoreGive(s_mutex);
-            process_registry__operation_end();
             return BRUCE_ERR_INVALID_ARGUMENT;
         }
         bool direct_write = partition != NULL;
@@ -344,6 +334,24 @@ memory__external_write(const bruce_memory_object_t *object, size_t offset, const
         }
         if (result == BRUCE_OK) memory_external__invalidate_data_alias(record, offset, size);
     }
+    return result;
+}
+
+bruce_result_t
+memory__external_write(const bruce_memory_object_t *object, size_t offset, const void *data, size_t size) {
+    if (object == NULL || (data == NULL && size != 0)) return BRUCE_ERR_INVALID_ARGUMENT;
+    if (!process_registry__operation_begin()) return BRUCE_ERR_CANCELLED;
+    bruce_process_id_t owner_id = process__current_id();
+    memory_external__ensure_mutex();
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    memory_external__record_t *record = memory_external__find_locked(object->handle);
+    if (!memory_external__matches(record, object) || record->owner_id != owner_id || offset > record->size ||
+        size > record->size - offset) {
+        xSemaphoreGive(s_mutex);
+        process_registry__operation_end();
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    bruce_result_t result = memory_external__write_locked(record, offset, data, size);
     xSemaphoreGive(s_mutex);
     process_registry__operation_end();
     return result;
@@ -501,4 +509,105 @@ void memory_external__get_swap_stats(size_t *out_total, size_t *out_free, size_t
     if (out_total != NULL) *out_total = total;
     if (out_free != NULL) *out_free = free_bytes;
     if (out_largest != NULL) *out_largest = largest;
+}
+
+/*
+ * Core-owned variants: BRUCE_PROCESS_ID_INVALID marks a record as having no
+ * process owner, so these never register a process_registry resource and
+ * are never touched by process teardown. process_registry__operation_begin()/
+ * end() are still used around every entry point (matching the process-owned
+ * path above) purely so a force-kill of whatever task happens to be calling
+ * in still waits for that task to leave the guarded section before deleting
+ * it - otherwise a kill mid-write could delete the task while it holds
+ * s_mutex and wedge every future external-memory call, process-owned or not.
+ */
+
+bruce_result_t memory_external_core__alloc(size_t size, bruce_memory_object_t *out_object) {
+    if (size == 0 || out_object == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    if (size > SIZE_MAX - (MEMORY_EXTERNAL__MMU_PAGE - 1u)) return BRUCE_ERR_RESOURCE_LIMIT;
+    if (!process_registry__operation_begin()) return BRUCE_ERR_CANCELLED;
+    memset(out_object, 0, sizeof(*out_object));
+    memory_external__ensure_mutex();
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    memory_external__record_t *record = memory_external__free_record_locked();
+    bool allocated = false;
+    if (record != NULL) allocated = memory_external__allocate_psram_locked(record, size);
+    if (record != NULL && !allocated) allocated = memory_external__allocate_swap_locked(record, size, false);
+    if (allocated) {
+        record->resource_id = BRUCE_RESOURCE_ID_INVALID;
+        record->owner_id = BRUCE_PROCESS_ID_INVALID;
+        record->handle = memory_external__next_handle_locked();
+        allocated = record->handle != 0;
+    }
+    xSemaphoreGive(s_mutex);
+    if (!allocated) {
+        if (record != NULL && record->backend != BRUCE_MEMORY_BACKEND_INVALID) {
+            memory_external__cleanup(record);
+        }
+        process_registry__operation_end();
+        return BRUCE_ERR_RESOURCE_LIMIT;
+    }
+
+    *out_object = (bruce_memory_object_t){
+        .handle = record->handle,
+        .size = record->size,
+        .backend = record->backend,
+    };
+    process_registry__operation_end();
+    return BRUCE_OK;
+}
+
+bruce_result_t memory_external_core__write(
+    const bruce_memory_object_t *object, size_t offset, const void *data, size_t size
+) {
+    if (object == NULL || (data == NULL && size != 0)) return BRUCE_ERR_INVALID_ARGUMENT;
+    if (!process_registry__operation_begin()) return BRUCE_ERR_CANCELLED;
+    memory_external__ensure_mutex();
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    memory_external__record_t *record = memory_external__find_locked(object->handle);
+    if (!memory_external__matches(record, object) || record->owner_id != BRUCE_PROCESS_ID_INVALID ||
+        offset > record->size || size > record->size - offset) {
+        xSemaphoreGive(s_mutex);
+        process_registry__operation_end();
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    bruce_result_t result = memory_external__write_locked(record, offset, data, size);
+    xSemaphoreGive(s_mutex);
+    process_registry__operation_end();
+    return result;
+}
+
+bruce_result_t memory_external_core__map(const bruce_memory_object_t *object, const void **out_data) {
+    if (object == NULL || out_data == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    if (!process_registry__operation_begin()) return BRUCE_ERR_CANCELLED;
+    memory_external__ensure_mutex();
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    memory_external__record_t *record = memory_external__find_locked(object->handle);
+    if (!memory_external__matches(record, object) || record->owner_id != BRUCE_PROCESS_ID_INVALID) {
+        xSemaphoreGive(s_mutex);
+        process_registry__operation_end();
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    *out_data = record->data;
+    xSemaphoreGive(s_mutex);
+    process_registry__operation_end();
+    return BRUCE_OK;
+}
+
+bruce_result_t memory_external_core__free(bruce_memory_object_t *object) {
+    if (object == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    if (!process_registry__operation_begin()) return BRUCE_ERR_CANCELLED;
+    memory_external__ensure_mutex();
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    memory_external__record_t *record = memory_external__find_locked(object->handle);
+    bool valid = memory_external__matches(record, object) && record->owner_id == BRUCE_PROCESS_ID_INVALID;
+    xSemaphoreGive(s_mutex);
+    if (!valid) {
+        process_registry__operation_end();
+        return BRUCE_ERR_PERMISSION;
+    }
+    memory_external__cleanup(record);
+    memset(object, 0, sizeof(*object));
+    process_registry__operation_end();
+    return BRUCE_OK;
 }
