@@ -62,6 +62,7 @@ idf_component_register(SRCS
                     "core/notification/notification.c"
                     "core/nrf24/nrf24.c"
                     "core/permission/permission.c"
+                    "core/pubsub/pubsub.c"
                     "core/stdio/stdio.c"
                      "core/spi/spi.c"
                      "core/ssh/ssh.c"
@@ -81,8 +82,13 @@ idf_component_register(SRCS
                     "modules/bluetooth_hid/bluetooth_hid_app.c"
                     "modules/clock/clock_app.c"
                     "modules/config/config_app.c"
+                    "modules/device_bus/device_bus_app.c"
                      "modules/filemanager/filemanager_app.c"
                      "modules/input/input_app.c"
+                    "modules/input/input_buttons.c"
+                    "modules/input/input_encoder.c"
+                    "modules/input/input_keyboard.c"
+                    "modules/input/input_touch.c"
                     "modules/loaders/elf/elf_loader_app.c"
                     "modules/loaders/elf/elf_loader_sdk_symbols.c"
                     "modules/loaders/image/image_loader_app.c"
@@ -268,17 +274,20 @@ target_include_directories(bruce_sdk_builtin_bootanimation_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/bootanimation")
 
-add_library(bruce_sdk_builtin_input_check OBJECT "modules/input/input_app.c")
+add_library(bruce_sdk_builtin_input_check OBJECT
+           "modules/input/input_app.c"
+           "modules/input/input_buttons.c"
+           "modules/input/input_encoder.c"
+           "modules/input/input_keyboard.c"
+           "modules/input/input_touch.c")
 target_include_directories(bruce_sdk_builtin_input_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/input")
-# The input module is the documented hardware-adapter exception: it uses GPIO,
-# I2C/touch and timing APIs directly while remaining isolated from Core-private
-# headers (board_i2c.h only forwards the i2c_master_bus_handle_t type).
-target_link_libraries(bruce_sdk_builtin_input_check PRIVATE
-                      idf::esp_driver_gpio idf::esp_driver_i2c idf::esp_lcd
-                      idf::espressif__esp_lcd_touch idf::espressif__esp_lcd_touch_ft5x06
-                      idf::esp_rom idf::freertos idf::log)
+# GPIO and touch access go through core_sdk/gpio.h and core_sdk/pubsub.h only;
+# the one remaining direct ESP-IDF dependency is the keyboard matrix scan's
+# microsecond settle delay (esp_rom_delay_us), which has no core_sdk
+# equivalent and isn't hardware access requiring a permission gate.
+target_link_libraries(bruce_sdk_builtin_input_check PRIVATE idf::esp_rom idf::freertos idf::log)
 
 add_library(bruce_sdk_builtin_clock_check OBJECT "modules/clock/clock_app.c")
 target_include_directories(bruce_sdk_builtin_clock_check PRIVATE
@@ -453,7 +462,14 @@ foreach(target IN LISTS BRUCE_ARGS_SDK_CHECK_TARGETS)
     target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../components/args")
 endforeach()
 
-# modules/selftest is intentionally NOT added to the core_sdk-only compile
-# check above: it is the one built-in explicitly permitted to include
-# Core-private headers and call FreeRTOS/ESP-IDF directly (see selftest.h
-# and migration_plan.md) so it can validate Core's private internals.
+# modules/selftest and modules/device_bus are intentionally NOT added
+# to the core_sdk-only compile check above.
+# - selftest is explicitly permitted to include Core-private headers and call
+#   FreeRTOS/ESP-IDF directly (see selftest.h and migration_plan.md) so it can
+#   validate Core's private internals.
+# - device_bus owns the shared board I2C bus via the same Core-private
+#   core/device/board_i2c.h that core/display/display_driver.c also depends
+#   on for its boot-time (pre-process) backlight init; core_sdk/i2c.h's
+#   process-scoped i2c__open() cannot be used at that boot stage, so this
+#   module is Core-private by necessity rather than SDK-only like other
+#   built-ins.

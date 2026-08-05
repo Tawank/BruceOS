@@ -20,6 +20,7 @@
 #include "modules/bruce_launcher/bruce_launcher_app.h"
 #include "modules/clock/clock_app.h"
 #include "modules/config/config_app.h"
+#include "modules/device_bus/device_bus_app.h"
 #include "modules/filemanager/filemanager_app.h"
 #include "modules/input/input_app.h"
 #include "modules/ir/ir_app.h"
@@ -43,6 +44,7 @@
 
 #define LAUNCHER_STACK_BYTES 3072u
 #define INPUT_STACK_BYTES 3072u
+#define DEVICE_BUS_STACK_BYTES 3072u
 #define SERIAL_COMMANDS_STACK_BYTES 3072u
 #define SELFTEST_STACK_BYTES 8192u
 #define SHELL_STACK_BYTES 4096u
@@ -53,6 +55,7 @@ void app_runner__register_defaults(void) {
     (void)app_runner__register("launcher", launcher_app_main, LAUNCHER_STACK_BYTES);
     (void)app_runner__register("bootanimation", bootanimation_app_main, 0);
     (void)app_runner__register("input", input_app_main, INPUT_STACK_BYTES);
+    (void)app_runner__register("device_bus", device_bus_app_main, DEVICE_BUS_STACK_BYTES);
     (void)app_runner__register("bruce_launcher", bruce_launcher_app_main, 0);
     (void)app_runner__register("apps", apps_app_main, 0);
     (void)app_runner__register("filemanager", filemanager_app_main, 0);

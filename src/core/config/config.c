@@ -131,6 +131,7 @@ static void config__set_defaults(config__t *cfg) {
     cfg->terminalLog = true;
 
     static const char *const default_startup_apps[] = {
+        "device_bus",
         "input",
         "BG=0 bootanimation",
         "launcher -s",

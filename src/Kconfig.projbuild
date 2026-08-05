@@ -363,7 +363,9 @@ menu "Bruce hardware configuration"
                 Most boards expose a raw ADC1 channel across a voltage
                 divider. Some (M5Stack CoreS3/Core2/StickC-family) instead
                 have an AXP2101 PMIC with a built-in fuel gauge, read over
-                the shared board I2C bus.
+                the shared board I2C bus. Others (LilyGO T-Embed CC1101) use
+                a standalone BQ27220 fuel-gauge IC on that same bus instead
+                of a PMIC.
 
             config BRUCE_BATTERY_BACKEND_ADC
                 bool "Raw ADC1 channel"
@@ -381,6 +383,16 @@ menu "Bruce hardware configuration"
                     it reports raw battery voltage (register 0x78/0x79),
                     converted to a percentage with the same linear
                     empty/full millivolt estimate as the ADC backend.
+
+            config BRUCE_BATTERY_BACKEND_BQ27220
+                bool "BQ27220 fuel gauge (I2C)"
+                depends on BRUCE_BOARD_I2C_ENABLED
+                help
+                    TI BQ27220 standalone fuel-gauge IC (e.g. LilyGO
+                    T-Embed CC1101). Like AXP2101 this has a direct
+                    battery-percentage command - StateOfCharge(), standard
+                    command 0x2C, a 16-bit little-endian 0-100 value - so no
+                    voltage-to-percent math is needed.
         endchoice
 
         config BRUCE_BATTERY_ADC_CHANNEL
@@ -398,6 +410,11 @@ menu "Bruce hardware configuration"
             hex "AXP192 I2C address"
             depends on BRUCE_BATTERY_ENABLED && BRUCE_BATTERY_BACKEND_AXP192
             default 0x34
+
+        config BRUCE_BATTERY_BQ27220_I2C_ADDR
+            hex "BQ27220 I2C address"
+            depends on BRUCE_BATTERY_ENABLED && BRUCE_BATTERY_BACKEND_BQ27220
+            default 0x55
     endmenu
 
     menu "SD card"

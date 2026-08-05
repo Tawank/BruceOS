@@ -1,12 +1,12 @@
 #include "device.h"
 
-#include "board_i2c.h"
-
 #include "core_sdk/device.h"
 #include "core_sdk/permission.h"
+#include "core_sdk/pubsub.h"
 #include "core_sdk/runtime.h" // IWYU pragma: keep
 
 #include <stdbool.h>
+#include <string.h>
 
 #include "driver/gpio.h"
 #include "esp_adc/adc_cali.h"        // IWYU pragma: keep
@@ -24,30 +24,15 @@
 #define DEVICE__BATTERY_CACHE_MS 30000
 #define DEVICE__VALID_EPOCH_MIN 1577836800
 
-/* AXP2101 registers (see e.g. M5Unified's AXP2101_Class.cpp): 0x30 enables
- * the fuel-gauge ADCs, 0xA4 is a direct 0-100 battery percentage once
- * they're running - no voltage-to-percent math needed on this path. */
-#define DEVICE__AXP2101_REG_ADC_ENABLE 0x30
-#define DEVICE__AXP2101_ADC_ENABLE_MASK 0x0F
-#define DEVICE__AXP2101_REG_BATTERY_PERCENT 0xA4
-
-/* AXP192 registers (see M5Unified's AXP192_Class.cpp): 0x82 enables all
- * ADCs (0xFF is the documented "enable everything" value), 0x78/0x79 hold a
- * 12-bit battery voltage reading - raw = (byte0 << 4) | byte1, mV = raw *
- * 1.1. Unlike AXP2101 there's no direct percentage register, so this reuses
- * the same linear empty/full millivolt estimate as the ADC backend below. */
-#define DEVICE__AXP192_REG_ADC_ENABLE 0x82
-#define DEVICE__AXP192_ADC_ENABLE_ALL 0xFF
-#define DEVICE__AXP192_REG_BATTERY_VOLTAGE 0x78
-#define DEVICE__AXP192_VOLTAGE_LSB_MV_NUM 11
-#define DEVICE__AXP192_VOLTAGE_LSB_MV_DEN 10
-
 #if CONFIG_BRUCE_QEMU_TEST_MODE || !CONFIG_BRUCE_BATTERY_ENABLED
 #define DEVICE__NO_BATTERY 1
-#elif CONFIG_BRUCE_BATTERY_BACKEND_AXP2101
-#define DEVICE__BATTERY_BACKEND_AXP2101 1
-#elif CONFIG_BRUCE_BATTERY_BACKEND_AXP192
-#define DEVICE__BATTERY_BACKEND_AXP192 1
+#elif CONFIG_BRUCE_BATTERY_BACKEND_AXP2101 || CONFIG_BRUCE_BATTERY_BACKEND_AXP192 ||                             \
+    CONFIG_BRUCE_BATTERY_BACKEND_BQ27220
+/* All I2C fuel-gauge/PMIC backends are read the same way from here: the
+ * device_bus process (modules/device_bus/) is the sole
+ * owner of the shared board I2C bus and publishes readings on
+ * BRUCE_DEVICE_TOPIC_BATTERY; this file just caches the latest one. */
+#define DEVICE__BATTERY_BACKEND_I2C 1
 #else
 #define DEVICE__BATTERY_CHANNEL ((adc_channel_t)CONFIG_BRUCE_BATTERY_ADC_CHANNEL)
 #endif
@@ -89,163 +74,34 @@ static bool device__ensure_lock(void) {
     return s_lock != NULL;
 }
 
-#if defined(DEVICE__BATTERY_BACKEND_AXP2101)
+#if defined(DEVICE__BATTERY_BACKEND_I2C)
 
-static bool s_battery_initialized;
+static bruce_pubsub_id_t s_battery_sub = BRUCE_PUBSUB_ID_INVALID;
 static bool s_cached_battery_valid;
 static int s_cached_battery;
-static uint64_t s_battery_read_at;
-
-static bruce_result_t device__init_battery(void) {
-    if (s_battery_initialized) return BRUCE_OK;
-    i2c_master_bus_handle_t bus = board_i2c__acquire();
-    if (bus == NULL) return BRUCE_ERR_IO;
-
-    i2c_device_config_t dev_config = {
-        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-        .device_address = CONFIG_BRUCE_BATTERY_AXP2101_I2C_ADDR,
-        .scl_speed_hz = CONFIG_BRUCE_BOARD_I2C_FREQ_HZ,
-    };
-    i2c_master_dev_handle_t dev = NULL;
-    if (i2c_master_bus_add_device(bus, &dev_config, &dev) != ESP_OK) return BRUCE_ERR_IO;
-
-    uint8_t enable_adc[] = {DEVICE__AXP2101_REG_ADC_ENABLE, DEVICE__AXP2101_ADC_ENABLE_MASK};
-    esp_err_t error = i2c_master_transmit(dev, enable_adc, sizeof(enable_adc), -1);
-    (void)i2c_master_bus_rm_device(dev);
-    if (error != ESP_OK) return BRUCE_ERR_IO;
-
-    s_battery_initialized = true;
-    return BRUCE_OK;
-}
 
 int device__get_battery(void) {
     if (!device__ensure_lock()) return BRUCE_ERR_NO_MEMORY;
     xSemaphoreTake(s_lock, portMAX_DELAY);
 
-    uint64_t now = runtime__now();
-    if (s_cached_battery_valid && now - s_battery_read_at < DEVICE__BATTERY_CACHE_MS) {
-        int cached = s_cached_battery;
-        xSemaphoreGive(s_lock);
-        return cached;
-    }
-
-    bruce_result_t init = device__init_battery();
-    if (init != BRUCE_OK) {
-        xSemaphoreGive(s_lock);
-        return init;
-    }
-
-    i2c_master_bus_handle_t bus = board_i2c__acquire();
-    i2c_device_config_t dev_config = {
-        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-        .device_address = CONFIG_BRUCE_BATTERY_AXP2101_I2C_ADDR,
-        .scl_speed_hz = CONFIG_BRUCE_BOARD_I2C_FREQ_HZ,
-    };
-    i2c_master_dev_handle_t dev = NULL;
-    if (bus == NULL || i2c_master_bus_add_device(bus, &dev_config, &dev) != ESP_OK) {
+    if (s_battery_sub == BRUCE_PUBSUB_ID_INVALID &&
+        pubsub__subscribe(BRUCE_DEVICE_TOPIC_BATTERY, &s_battery_sub) != BRUCE_OK) {
         xSemaphoreGive(s_lock);
         return BRUCE_ERR_IO;
     }
 
-    uint8_t reg = DEVICE__AXP2101_REG_BATTERY_PERCENT;
-    int8_t raw = 0;
-    esp_err_t error = i2c_master_transmit_receive(dev, &reg, 1, (uint8_t *)&raw, 1, -1);
-    (void)i2c_master_bus_rm_device(dev);
-    if (error != ESP_OK) {
-        xSemaphoreGive(s_lock);
-        return BRUCE_ERR_IO;
+    bruce_pubsub_message_t message;
+    while (pubsub__read(s_battery_sub, &message, 0) == BRUCE_OK) {
+        if (message.size != sizeof(bruce_device_battery_message_t)) continue;
+        bruce_device_battery_message_t battery;
+        memcpy(&battery, message.data, sizeof(battery));
+        s_cached_battery = battery.percent;
+        s_cached_battery_valid = true;
     }
 
-    int percent = raw;
-    if (percent < 0) percent = 0;
-    if (percent > 100) percent = 100;
-
-    s_cached_battery = percent;
-    s_cached_battery_valid = true;
-    s_battery_read_at = now;
+    int result = s_cached_battery_valid ? s_cached_battery : BRUCE_ERR_NOT_FOUND;
     xSemaphoreGive(s_lock);
-    return percent;
-}
-
-#elif defined(DEVICE__BATTERY_BACKEND_AXP192)
-
-static bool s_battery_initialized;
-static bool s_cached_battery_valid;
-static int s_cached_battery;
-static uint64_t s_battery_read_at;
-
-static bruce_result_t device__init_battery(void) {
-    if (s_battery_initialized) return BRUCE_OK;
-    i2c_master_bus_handle_t bus = board_i2c__acquire();
-    if (bus == NULL) return BRUCE_ERR_IO;
-
-    i2c_device_config_t dev_config = {
-        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-        .device_address = CONFIG_BRUCE_BATTERY_AXP192_I2C_ADDR,
-        .scl_speed_hz = CONFIG_BRUCE_BOARD_I2C_FREQ_HZ,
-    };
-    i2c_master_dev_handle_t dev = NULL;
-    if (i2c_master_bus_add_device(bus, &dev_config, &dev) != ESP_OK) return BRUCE_ERR_IO;
-
-    uint8_t enable_adc[] = {DEVICE__AXP192_REG_ADC_ENABLE, DEVICE__AXP192_ADC_ENABLE_ALL};
-    esp_err_t error = i2c_master_transmit(dev, enable_adc, sizeof(enable_adc), -1);
-    (void)i2c_master_bus_rm_device(dev);
-    if (error != ESP_OK) return BRUCE_ERR_IO;
-
-    s_battery_initialized = true;
-    return BRUCE_OK;
-}
-
-int device__get_battery(void) {
-    if (!device__ensure_lock()) return BRUCE_ERR_NO_MEMORY;
-    xSemaphoreTake(s_lock, portMAX_DELAY);
-
-    uint64_t now = runtime__now();
-    if (s_cached_battery_valid && now - s_battery_read_at < DEVICE__BATTERY_CACHE_MS) {
-        int cached = s_cached_battery;
-        xSemaphoreGive(s_lock);
-        return cached;
-    }
-
-    bruce_result_t init = device__init_battery();
-    if (init != BRUCE_OK) {
-        xSemaphoreGive(s_lock);
-        return init;
-    }
-
-    i2c_master_bus_handle_t bus = board_i2c__acquire();
-    i2c_device_config_t dev_config = {
-        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-        .device_address = CONFIG_BRUCE_BATTERY_AXP192_I2C_ADDR,
-        .scl_speed_hz = CONFIG_BRUCE_BOARD_I2C_FREQ_HZ,
-    };
-    i2c_master_dev_handle_t dev = NULL;
-    if (bus == NULL || i2c_master_bus_add_device(bus, &dev_config, &dev) != ESP_OK) {
-        xSemaphoreGive(s_lock);
-        return BRUCE_ERR_IO;
-    }
-
-    uint8_t reg = DEVICE__AXP192_REG_BATTERY_VOLTAGE;
-    uint8_t raw[2] = {0};
-    esp_err_t error = i2c_master_transmit_receive(dev, &reg, 1, raw, sizeof(raw), -1);
-    (void)i2c_master_bus_rm_device(dev);
-    if (error != ESP_OK) {
-        xSemaphoreGive(s_lock);
-        return BRUCE_ERR_IO;
-    }
-
-    int adc12 = ((int)raw[0] << 4) | (raw[1] & 0x0F);
-    int battery_mv = adc12 * DEVICE__AXP192_VOLTAGE_LSB_MV_NUM / DEVICE__AXP192_VOLTAGE_LSB_MV_DEN;
-    int percent =
-        (battery_mv - DEVICE__BATTERY_EMPTY_MV) * 100 / (DEVICE__BATTERY_FULL_MV - DEVICE__BATTERY_EMPTY_MV);
-    if (percent < 0) percent = 0;
-    if (percent > 100) percent = 100;
-
-    s_cached_battery = percent;
-    s_cached_battery_valid = true;
-    s_battery_read_at = now;
-    xSemaphoreGive(s_lock);
-    return percent;
+    return result;
 }
 
 #elif !defined(DEVICE__NO_BATTERY)
@@ -255,10 +111,6 @@ static bool s_battery_initialized;
 static bool s_cached_battery_valid;
 static int s_cached_battery;
 static uint64_t s_battery_read_at;
-#endif
-
-#if !defined(DEVICE__NO_BATTERY) && !defined(DEVICE__BATTERY_BACKEND_AXP2101) &&                                 \
-    !defined(DEVICE__BATTERY_BACKEND_AXP192)
 
 static bruce_result_t device__init_battery(void) {
     if (s_battery_initialized) return BRUCE_OK;
@@ -357,7 +209,7 @@ int device__get_battery(void) {
     return percent;
 }
 
-#elif defined(DEVICE__NO_BATTERY)
+#else /* DEVICE__NO_BATTERY */
 
 int device__get_battery(void) { return BRUCE_ERR_UNSUPPORTED; }
 

@@ -40,6 +40,7 @@
 #include "core_sdk/nrf24.h"
 #include "core_sdk/permission.h"
 #include "core_sdk/process.h"
+#include "core_sdk/pubsub.h"
 #include "core_sdk/runtime.h"
 #include "core_sdk/spi.h"
 #include "core_sdk/ssh.h"
@@ -214,6 +215,12 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(spi__open),
     ESP_ELFSYM_EXPORT(spi__transfer),
     ESP_ELFSYM_EXPORT(spi__close),
+
+    /* Named-topic pub/sub (e.g. BRUCE_DEVICE_TOPIC_TOUCH) */
+    ESP_ELFSYM_EXPORT(pubsub__publish),
+    ESP_ELFSYM_EXPORT(pubsub__subscribe),
+    ESP_ELFSYM_EXPORT(pubsub__unsubscribe),
+    ESP_ELFSYM_EXPORT(pubsub__read),
 
     /* Display (layout management remains built-in-only) */
     ESP_ELFSYM_EXPORT(display__width),

@@ -3,8 +3,7 @@
 # Translated from the legacy PlatformIO env (boards/lilygo-t-embed-cc1101/
 # lilygo-t-embed-cc1101.ini + pins_arduino.h's T_EMBED_1101 branch in
 # BrucePIO_legacy). Peripherals with no equivalent in this HAL yet (CC1101,
-# W5500 ethernet, PN532, mic, RGB LED, BadUSB, and - see Input/Battery notes
-# below - the rotary encoder and I2C fuel gauge) are not ported.
+# W5500 ethernet, PN532, mic, RGB LED, BadUSB) are not ported.
 #
 # Selected via `python tools/board.py lilygo-t-embed-cc1101 build` (see
 # tools/board.py), which passes this file through SDKCONFIG_DEFAULTS after
@@ -12,6 +11,13 @@
 # sdkconfig.defaults.esp32s3 if present, per ESP-IDF's target-dependent
 # sdkconfig defaults rule.
 CONFIG_IDF_TARGET="esp32s3"
+
+# Board I2C bus (legacy GROVE_SDA/GROVE_SCL, also aliased SYS_I2C_SDA/
+# SYS_I2C_SCL in pins_arduino.h): shared by the BQ27220 fuel gauge below.
+# Not used by the display/SD/NRF24 SPI buses, so no pin conflicts.
+CONFIG_BRUCE_BOARD_I2C_ENABLED=y
+CONFIG_BRUCE_BOARD_I2C_SDA_GPIO=8
+CONFIG_BRUCE_BOARD_I2C_SCL_GPIO=18
 
 # Display: SPI2_HOST, ST7789 170x320 physical panel, portrait (rotation 3).
 # The 170-wide panel needs a different addressable-RAM offset table than the
@@ -44,10 +50,11 @@ CONFIG_BRUCE_AUDIO_I2S_BCLK_GPIO=46
 CONFIG_BRUCE_AUDIO_I2S_DATA_GPIO=7
 CONFIG_BRUCE_AUDIO_I2S_LRCLK_GPIO=40
 
-# Battery: this board reads charge via an I2C fuel gauge (BQ27220), which
-# this HAL has no driver for (it only supports a raw ADC1 channel) - no
-# usable substitute pin, so battery reporting is disabled outright.
-# CONFIG_BRUCE_BATTERY_ENABLED is not set
+# Battery: BQ27220 fuel gauge, read over the board I2C bus above (legacy
+# BQ27220_I2C_ADDRESS 0x55).
+CONFIG_BRUCE_BATTERY_ENABLED=y
+CONFIG_BRUCE_BATTERY_BACKEND_BQ27220=y
+CONFIG_BRUCE_BATTERY_BQ27220_I2C_ADDR=0x55
 
 # SD card: shares the SPI3_HOST radio bus (same pins as NRF24 below).
 CONFIG_BRUCE_SD_ENABLED=y
@@ -57,11 +64,11 @@ CONFIG_BRUCE_SD_PIN_MISO=10
 CONFIG_BRUCE_SD_PIN_SCK=11
 CONFIG_BRUCE_SD_PIN_CS=13
 
-# Buttons: this board's primary input is a rotary encoder (turn + press)
-# plus a back button; this HAL has no encoder driver, so only the two press
-# buttons are wired up - the encoder's turn/scroll motion is not available.
-# The encoder's center press becomes SELECT (OK/confirm); the back button
-# becomes button A.
+# Buttons: this board's primary input is a rotary encoder (turn + press,
+# legacy ENCODER_INA/INB/KEY) plus a back button (legacy BK_BTN). The
+# encoder's center press (legacy ENCODER_KEY/SEL_BTN) becomes SELECT
+# (OK/confirm); the back button becomes button A. Turn motion is handled by
+# the Rotary encoder section below.
 CONFIG_BRUCE_BUTTON_SELECT_ENABLED=y
 CONFIG_BRUCE_BUTTON_SELECT_GPIO=0
 CONFIG_BRUCE_BUTTON_A_ENABLED=y
@@ -71,6 +78,14 @@ CONFIG_BRUCE_BUTTON_A_GPIO=6
 
 # No GPIO matrix keyboard on this board.
 # CONFIG_BRUCE_KEYBOARD_ENABLED is not set
+
+# Rotary encoder: quadrature turn (legacy ENCODER_INA/INB), synthesized as
+# UP/DOWN presses (see BRUCE_ENCODER_ENABLED's help text) - every existing
+# menu that already handles up/down navigation works here with no app-side
+# changes. The center-press part is the SELECT button above, not here.
+CONFIG_BRUCE_ENCODER_ENABLED=y
+CONFIG_BRUCE_ENCODER_PIN_A=4
+CONFIG_BRUCE_ENCODER_PIN_B=5
 
 # Infrared.
 CONFIG_BRUCE_IR_TX_GPIO=2

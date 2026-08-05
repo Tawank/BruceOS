@@ -166,7 +166,8 @@ static bruce_result_t display_driver__backlight_init(void) {
 }
 
 static bruce_result_t display_driver__panel_init(void) {
-    if (DISPLAY__PIN_BL != (gpio_num_t)-1) {
+#if CONFIG_BRUCE_DISPLAY_PIN_BL >= 0
+    {
         gpio_config_t bl_gpio = {
             .mode = GPIO_MODE_OUTPUT,
             .pin_bit_mask = 1ULL << DISPLAY__PIN_BL,
@@ -174,6 +175,7 @@ static bruce_result_t display_driver__panel_init(void) {
         gpio_config(&bl_gpio);
         gpio_set_level(DISPLAY__PIN_BL, 0);
     }
+#endif
 
 #if CONFIG_BRUCE_DISPLAY_BUS_I80
     esp_lcd_i80_bus_config_t bus_config = {

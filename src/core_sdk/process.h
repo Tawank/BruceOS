@@ -16,6 +16,7 @@ typedef uint32_t bruce_tcp_id_t;
 typedef uint32_t bruce_i2c_id_t;
 typedef uint32_t bruce_spi_id_t;
 typedef uint32_t bruce_ssh_id_t;
+typedef uint32_t bruce_pubsub_id_t;
 
 #define BRUCE_PROCESS_ID_INVALID ((bruce_process_id_t)0)
 #define BRUCE_RESOURCE_ID_INVALID ((bruce_resource_id_t)0)
@@ -25,6 +26,7 @@ typedef uint32_t bruce_ssh_id_t;
 #define BRUCE_I2C_ID_INVALID ((bruce_i2c_id_t)0)
 #define BRUCE_SPI_ID_INVALID ((bruce_spi_id_t)0)
 #define BRUCE_SSH_ID_INVALID ((bruce_ssh_id_t)0)
+#define BRUCE_PUBSUB_ID_INVALID ((bruce_pubsub_id_t)0)
 
 #define BRUCE_PROCESS_NAME_MAX 64
 
