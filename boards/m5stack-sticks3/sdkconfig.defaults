@@ -1,0 +1,78 @@
+# M5StickS3 (ESP32-S3, ST7789 135x240).
+#
+# Translated from the legacy PlatformIO env (boards/m5stack-sticks3/
+# m5stack-sticks3.ini + pins_arduino.h in BrucePIO_legacy, which itself
+# relies on M5Unified/M5GFX for bring-up). Peripherals with no equivalent
+# in this HAL (FM radio, USB-HID BadUSB) are not ported - see the
+# Audio/Battery notes below for two more, board-specific ones.
+#
+# Selected via `python tools/board.py m5stack-sticks3 build` (see
+# tools/board.py), which passes this file through SDKCONFIG_DEFAULTS after
+# the shared sdkconfig.defaults. The build system automatically also loads
+# sdkconfig.defaults.esp32s3 if present, per ESP-IDF's target-dependent
+# sdkconfig defaults rule.
+CONFIG_IDF_TARGET="esp32s3"
+
+# Display: SPI2_HOST, ST7789 135x240 physical panel (same size as
+# Cardputer/StickC Plus2/DinMeter, so the default panel-gap table applies
+# unchanged), portrait (rotation 3). Unlike the StickC Plus/CoreS3/Core2
+# family, this board's backlight is a plain GPIO, not PMIC/expander-driven.
+CONFIG_BRUCE_DISPLAY_WIDTH=135
+CONFIG_BRUCE_DISPLAY_HEIGHT=240
+CONFIG_BRUCE_DISPLAY_DEFAULT_ROTATION=3
+CONFIG_BRUCE_DISPLAY_SPI_HOST=1
+CONFIG_BRUCE_DISPLAY_PIN_MOSI=39
+CONFIG_BRUCE_DISPLAY_PIN_SCK=40
+CONFIG_BRUCE_DISPLAY_PIN_CS=41
+CONFIG_BRUCE_DISPLAY_PIN_DC=45
+CONFIG_BRUCE_DISPLAY_PIN_RST=21
+CONFIG_BRUCE_DISPLAY_PIN_BL=38
+
+# Audio: this board has an ES8311 I2C audio codec (not a plain I2S DAC/amp
+# like NS4168 elsewhere in this tree) - it needs its own I2C register
+# init/unmute sequence to produce sound, which this HAL doesn't model, so
+# audio is left off rather than wiring an I2S backend that would stay
+# silent.
+CONFIG_BRUCE_AUDIO_BACKEND_NONE=y
+
+# Battery: this board's PMIC is M5Stack's own "M5PM1" chip (see
+# M5Unified's Power_Class.cpp pmic_m5pm1), a newer, proprietary,
+# sparsely-documented design distinct from AXP192/AXP2101 - no reliable
+# register map to build a backend from, so battery reporting is disabled
+# rather than guessing.
+# CONFIG_BRUCE_BATTERY_ENABLED is not set
+
+# SD card: its own SPI host, shared with NRF24/CC1101 below (matches the
+# legacy wiring - see connections.md in the legacy tree).
+CONFIG_BRUCE_SD_ENABLED=y
+CONFIG_BRUCE_SD_SPI_HOST=2
+CONFIG_BRUCE_SD_PIN_MOSI=6
+CONFIG_BRUCE_SD_PIN_MISO=4
+CONFIG_BRUCE_SD_PIN_SCK=5
+CONFIG_BRUCE_SD_PIN_CS=7
+
+# Buttons: SEL is the front button (OK/confirm); A is the side button (DW
+# in the legacy naming). Legacy's "HAS_3_BUTTONS" flag is this board's
+# 2-physical-button navigation scheme, not a 3rd GPIO - same situation as
+# lilygo-t-display-ttgo.
+CONFIG_BRUCE_BUTTON_SELECT_ENABLED=y
+CONFIG_BRUCE_BUTTON_SELECT_GPIO=11
+CONFIG_BRUCE_BUTTON_A_ENABLED=y
+CONFIG_BRUCE_BUTTON_A_GPIO=12
+
+# No GPIO matrix keyboard on this board.
+# CONFIG_BRUCE_KEYBOARD_ENABLED is not set
+
+# Infrared.
+CONFIG_BRUCE_IR_TX_GPIO=46
+CONFIG_BRUCE_IR_RX_GPIO=42
+
+# NRF24: shares the SD card's SPI bus above, on its own CS/CE (this board's
+# radio bus is fully separate from the display's, so - unlike
+# m5stack-core/core2/cores3 - this one isn't blocked by the SPI3_HOST
+# conflict).
+CONFIG_BRUCE_NRF24_SCK_GPIO=5
+CONFIG_BRUCE_NRF24_MISO_GPIO=4
+CONFIG_BRUCE_NRF24_MOSI_GPIO=6
+CONFIG_BRUCE_NRF24_CS_GPIO=8
+CONFIG_BRUCE_NRF24_CE_GPIO=1

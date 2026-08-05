@@ -40,6 +40,7 @@ idf_component_register(SRCS
                     "core/clock/clock.c"
                     "core/config/config.c"
                     "core/dialog/dialog.c"
+                    "core/device/board_i2c.c"
                     "core/device/device.c"
                     "core/display/display.c"
                     "core/display/display_draw.c"
@@ -140,6 +141,9 @@ idf_component_register(SRCS
                     esp_http_client
                     esp_http_server
                     esp_lcd
+                    esp_lcd_ili9341
+                    esp_lcd_touch
+                    esp_lcd_touch_ft5x06
                     esp_timer
                     esp_jpeg
                     esp_hid
@@ -268,10 +272,13 @@ add_library(bruce_sdk_builtin_input_check OBJECT "modules/input/input_app.c")
 target_include_directories(bruce_sdk_builtin_input_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/input")
-# The input module is the documented hardware-adapter exception: it uses GPIO
-# and timing APIs directly while remaining isolated from Core-private headers.
+# The input module is the documented hardware-adapter exception: it uses GPIO,
+# I2C/touch and timing APIs directly while remaining isolated from Core-private
+# headers (board_i2c.h only forwards the i2c_master_bus_handle_t type).
 target_link_libraries(bruce_sdk_builtin_input_check PRIVATE
-                      idf::esp_driver_gpio idf::esp_rom idf::freertos idf::log)
+                      idf::esp_driver_gpio idf::esp_driver_i2c idf::esp_lcd
+                      idf::espressif__esp_lcd_touch idf::espressif__esp_lcd_touch_ft5x06
+                      idf::esp_rom idf::freertos idf::log)
 
 add_library(bruce_sdk_builtin_clock_check OBJECT "modules/clock/clock_app.c")
 target_include_directories(bruce_sdk_builtin_clock_check PRIVATE

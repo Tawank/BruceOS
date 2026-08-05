@@ -55,6 +55,13 @@ typedef enum {
 #define BRUCE_INPUT_CODE_GAMEPAD_AXIS_RX 0x302
 #define BRUCE_INPUT_CODE_GAMEPAD_AXIS_RY 0x303
 
+/*
+ * For BRUCE_INPUT_TOUCH events, `code` is the tap's X coordinate and `value`
+ * is its Y coordinate (panel pixel space, after any swap/mirror configured
+ * for the board - see BRUCE_TOUCH_SWAP_XY/MIRROR_X/MIRROR_Y in Kconfig).
+ * BRUCE_INPUT_PRESS/RELEASE mark the start/end of a touch; BRUCE_INPUT_CHANGE
+ * is emitted while a touch moves without lifting (a drag).
+ */
 typedef struct {
     bruce_input_type_t type;
     bruce_input_action_t action;

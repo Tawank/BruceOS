@@ -1,0 +1,70 @@
+# LilyGO T-Display (original TTGO, ESP32, ST7789 135x240).
+#
+# Translated from the legacy PlatformIO env (boards/lilygo-t-display-ttgo/
+# lilygo-t-display-s3.ini + pins_arduino.h in BrucePIO_legacy). Peripherals
+# with no equivalent in this HAL (CC1101, W5500 ethernet) are not ported.
+#
+# Selected via `python tools/board.py lilygo-t-display-ttgo build` (see
+# tools/board.py), which passes this file through SDKCONFIG_DEFAULTS after
+# the shared sdkconfig.defaults. The build system automatically also loads
+# sdkconfig.defaults.esp32 if present, per ESP-IDF's target-dependent
+# sdkconfig defaults rule.
+CONFIG_IDF_TARGET="esp32"
+
+# Display: SPI2_HOST, ST7789 135x240 physical panel (same size as
+# Cardputer/StickC Plus2, so the default panel-gap table applies
+# unchanged), portrait (rotation 3).
+CONFIG_BRUCE_DISPLAY_WIDTH=135
+CONFIG_BRUCE_DISPLAY_HEIGHT=240
+CONFIG_BRUCE_DISPLAY_DEFAULT_ROTATION=3
+CONFIG_BRUCE_DISPLAY_SPI_HOST=1
+CONFIG_BRUCE_DISPLAY_PIN_MOSI=19
+CONFIG_BRUCE_DISPLAY_PIN_SCK=18
+CONFIG_BRUCE_DISPLAY_PIN_CS=5
+CONFIG_BRUCE_DISPLAY_PIN_DC=16
+CONFIG_BRUCE_DISPLAY_PIN_RST=23
+CONFIG_BRUCE_DISPLAY_PIN_BL=4
+
+# Audio: no speaker/buzzer on this board.
+CONFIG_BRUCE_AUDIO_BACKEND_NONE=y
+
+# Battery: GPIO14 must be driven high to enable the battery-sense voltage
+# divider (legacy ADC_EN) - see BRUCE_POWER_HOLD_GPIO's help text.
+# ANALOG_BAT_PIN (GPIO34) is ESP32 ADC1 channel 6.
+CONFIG_BRUCE_POWER_HOLD_GPIO=14
+CONFIG_BRUCE_BATTERY_ENABLED=y
+CONFIG_BRUCE_BATTERY_ADC_CHANNEL=6
+
+# SD card: its own SPI host, shared with NRF24 below (matches the legacy
+# wiring - SD/CC1101/NRF24 all share this bus, on separate CS pins).
+CONFIG_BRUCE_SD_ENABLED=y
+CONFIG_BRUCE_SD_SPI_HOST=2
+CONFIG_BRUCE_SD_PIN_MOSI=26
+CONFIG_BRUCE_SD_PIN_MISO=27
+CONFIG_BRUCE_SD_PIN_SCK=25
+CONFIG_BRUCE_SD_PIN_CS=33
+
+# Buttons: this board has 2 physical buttons; legacy's "HAS_3_BUTTONS" flag
+# is its 3-way navigation scheme layered on top, not a 3rd GPIO. SELECT is
+# the primary button (UP_BTN in the legacy naming, doubles as boot/OK);
+# button A is the secondary one (DW_BTN).
+CONFIG_BRUCE_BUTTON_SELECT_ENABLED=y
+CONFIG_BRUCE_BUTTON_SELECT_GPIO=0
+CONFIG_BRUCE_BUTTON_A_ENABLED=y
+CONFIG_BRUCE_BUTTON_A_GPIO=35
+# CONFIG_BRUCE_BUTTON_B_ENABLED is not set
+# CONFIG_BRUCE_BUTTON_C_ENABLED is not set
+
+# No GPIO matrix keyboard on this board.
+# CONFIG_BRUCE_KEYBOARD_ENABLED is not set
+
+# Infrared.
+CONFIG_BRUCE_IR_TX_GPIO=2
+CONFIG_BRUCE_IR_RX_GPIO=15
+
+# NRF24 (shares the SD card's SPI bus above, on its own CS/CE).
+CONFIG_BRUCE_NRF24_SCK_GPIO=25
+CONFIG_BRUCE_NRF24_MISO_GPIO=27
+CONFIG_BRUCE_NRF24_MOSI_GPIO=26
+CONFIG_BRUCE_NRF24_CS_GPIO=38
+CONFIG_BRUCE_NRF24_CE_GPIO=37

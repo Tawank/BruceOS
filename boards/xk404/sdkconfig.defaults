@@ -1,0 +1,88 @@
+# XK404 (ESP32-S3, ST7789 240x280).
+#
+# Translated from the legacy PlatformIO env (boards/xk404/xk404.ini +
+# pins_arduino.h in BrucePIO_legacy). Peripherals with no equivalent in
+# this HAL (CC1101, W5500 ethernet, USB-HID BadUSB) are not ported - see
+# the Battery and NRF24 notes below for two more, board-specific ones.
+#
+# Selected via `python tools/board.py xk404 build` (see tools/board.py),
+# which passes this file through SDKCONFIG_DEFAULTS after the shared
+# sdkconfig.defaults. The build system automatically also loads
+# sdkconfig.defaults.esp32s3 if present, per ESP-IDF's target-dependent
+# sdkconfig defaults rule.
+CONFIG_IDF_TARGET="esp32s3"
+
+# Display: SPI2_HOST, ST7789 240x280 physical panel, portrait (rotation 3).
+# No panel-gap offset: the legacy pinout doesn't define CGRAM_OFFSET, which
+# is what gates TFT_eSPI's whole per-panel offset table (see
+# TFT_Drivers/ST7789_Rotation.h in the legacy tree) - without it TFT_eSPI
+# leaves colstart/rowstart at 0 for every rotation, same as this board's
+# all-zero gap options below.
+CONFIG_BRUCE_DISPLAY_WIDTH=240
+CONFIG_BRUCE_DISPLAY_HEIGHT=280
+CONFIG_BRUCE_DISPLAY_DEFAULT_ROTATION=3
+CONFIG_BRUCE_DISPLAY_SPI_HOST=1
+CONFIG_BRUCE_DISPLAY_PIN_MOSI=18
+CONFIG_BRUCE_DISPLAY_PIN_SCK=17
+CONFIG_BRUCE_DISPLAY_PIN_CS=7
+CONFIG_BRUCE_DISPLAY_PIN_DC=15
+CONFIG_BRUCE_DISPLAY_PIN_RST=16
+CONFIG_BRUCE_DISPLAY_PIN_BL=6
+CONFIG_BRUCE_DISPLAY_GAP_X_ROTATION0=0
+CONFIG_BRUCE_DISPLAY_GAP_Y_ROTATION0=0
+CONFIG_BRUCE_DISPLAY_GAP_X_ROTATION1=0
+CONFIG_BRUCE_DISPLAY_GAP_Y_ROTATION1=0
+CONFIG_BRUCE_DISPLAY_GAP_X_ROTATION2=0
+CONFIG_BRUCE_DISPLAY_GAP_Y_ROTATION2=0
+CONFIG_BRUCE_DISPLAY_GAP_X_ROTATION3=0
+CONFIG_BRUCE_DISPLAY_GAP_Y_ROTATION3=0
+
+# Audio: LEDC PWM buzzer.
+CONFIG_BRUCE_AUDIO_BACKEND_LEDC_BUZZER=y
+CONFIG_BRUCE_AUDIO_BUZZER_GPIO=40
+
+# Battery: this board charges through a BQ25896 charger IC (XPowersLib in
+# the legacy build), a different chip from the AXP2101 fuel gauge this HAL
+# supports - no direct battery-percentage register the way AXP2101 has, so
+# it would need its own driver. Left disabled rather than reading garbage.
+# CONFIG_BRUCE_BATTERY_ENABLED is not set
+
+# SD card: shares the display's SPI host/pins (same physical bus as TFT
+# MOSI/SCK/MISO above) - see BRUCE_SD_SPI_HOST's help text for why this is
+# safe (the SD driver attaches as a second device on an already-initialized
+# host rather than erroring).
+CONFIG_BRUCE_SD_ENABLED=y
+CONFIG_BRUCE_SD_SPI_HOST=1
+CONFIG_BRUCE_SD_PIN_MOSI=18
+CONFIG_BRUCE_SD_PIN_MISO=8
+CONFIG_BRUCE_SD_PIN_SCK=17
+CONFIG_BRUCE_SD_PIN_CS=3
+
+# Buttons: 5 physical buttons (legacy "HAS_5_BUTTONS") - SEL is the
+# select/OK button; A/B are UP/DW; C/D are the R/L side buttons (button D
+# reports as BRUCE_INPUT_CODE_BUTTON_X - see its Kconfig help text).
+CONFIG_BRUCE_BUTTON_SELECT_ENABLED=y
+CONFIG_BRUCE_BUTTON_SELECT_GPIO=0
+CONFIG_BRUCE_BUTTON_A_ENABLED=y
+CONFIG_BRUCE_BUTTON_A_GPIO=39
+CONFIG_BRUCE_BUTTON_B_ENABLED=y
+CONFIG_BRUCE_BUTTON_B_GPIO=38
+CONFIG_BRUCE_BUTTON_C_ENABLED=y
+CONFIG_BRUCE_BUTTON_C_GPIO=11
+CONFIG_BRUCE_BUTTON_D_ENABLED=y
+CONFIG_BRUCE_BUTTON_D_GPIO=10
+
+# No GPIO matrix keyboard on this board.
+# CONFIG_BRUCE_KEYBOARD_ENABLED is not set
+
+# Infrared.
+CONFIG_BRUCE_IR_TX_GPIO=2
+CONFIG_BRUCE_IR_RX_GPIO=1
+
+# NRF24: NOT wired on this board. The legacy config shares it with the
+# display/SD SPI bus (same MOSI/SCK/MISO), but this HAL's NRF24 driver
+# (core/spi/spi.c) hardcodes a dedicated SPI3_HOST for it - forcing that
+# onto pins already driven by the display's SPI2_HOST peripheral would
+# contend on the GPIO matrix, not safely share a bus the way the SD card
+# above does. Left at Kconfig defaults (unconnected) rather than wiring
+# something that would conflict.

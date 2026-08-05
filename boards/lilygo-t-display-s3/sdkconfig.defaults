@@ -1,0 +1,95 @@
+# LilyGO T-Display S3 (ESP32-S3, ST7789 170x320, 8-bit parallel/i80 bus).
+#
+# Translated from the legacy PlatformIO env (boards/lilygo-t-display-s3/
+# lilygo-t-display-s3.ini + pins_arduino.h's default, non-MMC/non-touch
+# branch in BrucePIO_legacy - the -touch and -mmc variants change GPIO
+# assignments and aren't ported). Peripherals with no equivalent in this HAL
+# yet (CC1101, W5500 ethernet, BadUSB, and the PDM mic - see the Audio note
+# below) are not ported.
+#
+# Selected via `python tools/board.py lilygo-t-display-s3 build` (see
+# tools/board.py), which passes this file through SDKCONFIG_DEFAULTS after
+# the shared sdkconfig.defaults. The build system automatically also loads
+# sdkconfig.defaults.esp32s3 if present, per ESP-IDF's target-dependent
+# sdkconfig defaults rule.
+CONFIG_IDF_TARGET="esp32s3"
+
+# Display: ST7789 170x320 physical panel over an 8-bit parallel (i80) bus,
+# not SPI - this board wires TFT_D0-D7/WR/RD directly instead of
+# MOSI/SCK, so BRUCE_DISPLAY_BUS is I80 here (see src/Kconfig.projbuild).
+# Portrait wiring, rotation 3 (matches the legacy ROTATION 3). The panel-gap
+# table is the same 170-wide one as lilygo-t-embed-cc1101 (identical
+# TFT_WIDTH/TFT_HEIGHT and TFT_eSPI ST7789_Rotation.h entry).
+CONFIG_BRUCE_DISPLAY_WIDTH=170
+CONFIG_BRUCE_DISPLAY_HEIGHT=320
+CONFIG_BRUCE_DISPLAY_DEFAULT_ROTATION=3
+CONFIG_BRUCE_DISPLAY_BUS_I80=y
+CONFIG_BRUCE_DISPLAY_PIN_D0=39
+CONFIG_BRUCE_DISPLAY_PIN_D1=40
+CONFIG_BRUCE_DISPLAY_PIN_D2=41
+CONFIG_BRUCE_DISPLAY_PIN_D3=42
+CONFIG_BRUCE_DISPLAY_PIN_D4=45
+CONFIG_BRUCE_DISPLAY_PIN_D5=46
+CONFIG_BRUCE_DISPLAY_PIN_D6=47
+CONFIG_BRUCE_DISPLAY_PIN_D7=48
+CONFIG_BRUCE_DISPLAY_PIN_WR=8
+CONFIG_BRUCE_DISPLAY_PIN_CS=6
+CONFIG_BRUCE_DISPLAY_PIN_DC=7
+CONFIG_BRUCE_DISPLAY_PIN_RST=5
+CONFIG_BRUCE_DISPLAY_PIN_BL=38
+CONFIG_BRUCE_DISPLAY_GAP_X_ROTATION0=35
+CONFIG_BRUCE_DISPLAY_GAP_Y_ROTATION0=0
+CONFIG_BRUCE_DISPLAY_GAP_X_ROTATION1=0
+CONFIG_BRUCE_DISPLAY_GAP_Y_ROTATION1=35
+CONFIG_BRUCE_DISPLAY_GAP_X_ROTATION2=35
+CONFIG_BRUCE_DISPLAY_GAP_Y_ROTATION2=0
+CONFIG_BRUCE_DISPLAY_GAP_X_ROTATION3=0
+CONFIG_BRUCE_DISPLAY_GAP_Y_ROTATION3=35
+
+# Audio: this board has a PDM mic (SPM1423) but no speaker, and the mic's
+# CLK/DATA pins (GPIO39/42) are the same physical pins as the LCD's D0/D3
+# parallel data lines in the legacy pinout - this HAL has no PDM mic driver
+# regardless, so audio output is left off entirely rather than picking a
+# backend that doesn't apply.
+CONFIG_BRUCE_AUDIO_BACKEND_NONE=y
+
+# Battery: GPIO15 must be driven high at boot to enable the battery-sense
+# path (legacy PIN_POWER_ON) - see BRUCE_POWER_HOLD_GPIO's help text.
+# ANALOG_BAT_PIN (GPIO4) is ESP32-S3 ADC1 channel 3.
+CONFIG_BRUCE_POWER_HOLD_GPIO=15
+CONFIG_BRUCE_BATTERY_ENABLED=y
+CONFIG_BRUCE_BATTERY_ADC_CHANNEL=3
+
+# SD card: its own SPI host (does not share with the display, which is on
+# the parallel bus here, not SPI).
+CONFIG_BRUCE_SD_ENABLED=y
+CONFIG_BRUCE_SD_SPI_HOST=2
+CONFIG_BRUCE_SD_PIN_MOSI=11
+CONFIG_BRUCE_SD_PIN_MISO=13
+CONFIG_BRUCE_SD_PIN_SCK=12
+CONFIG_BRUCE_SD_PIN_CS=1
+
+# Buttons: SEL is the front button (OK/confirm); A/B are the two side
+# buttons (UP/DW in the legacy naming). No button C.
+CONFIG_BRUCE_BUTTON_SELECT_ENABLED=y
+CONFIG_BRUCE_BUTTON_SELECT_GPIO=16
+CONFIG_BRUCE_BUTTON_A_ENABLED=y
+CONFIG_BRUCE_BUTTON_A_GPIO=0
+CONFIG_BRUCE_BUTTON_B_ENABLED=y
+CONFIG_BRUCE_BUTTON_B_GPIO=14
+# CONFIG_BRUCE_BUTTON_C_ENABLED is not set
+
+# No GPIO matrix keyboard on this board.
+# CONFIG_BRUCE_KEYBOARD_ENABLED is not set
+
+# Infrared.
+CONFIG_BRUCE_IR_TX_GPIO=17
+CONFIG_BRUCE_IR_RX_GPIO=18
+
+# NRF24 (external, over the same SPI bus/pins as the SD card above, on a
+# separate CS/CE).
+CONFIG_BRUCE_NRF24_SCK_GPIO=12
+CONFIG_BRUCE_NRF24_MISO_GPIO=13
+CONFIG_BRUCE_NRF24_MOSI_GPIO=11
+CONFIG_BRUCE_NRF24_CS_GPIO=10
+CONFIG_BRUCE_NRF24_CE_GPIO=3

@@ -1,5 +1,5 @@
 dependencies:
-  idf: '>=5.1'
+  idf: '>=5.2'
   espressif/cjson: ^1.7.19~2
   espressif/elf_loader:
     override_path: ../components/elf_loader
@@ -8,3 +8,9 @@ dependencies:
   joltwallet/littlefs: ^1.22.3
   wolfssl/wolfssl: ^5.7.4
   wolfssl/wolfssh: ^1.4.20
+  # ILI9341 isn't built into esp_lcd's core (unlike ST7789); needed for
+  # boards with BRUCE_DISPLAY_PANEL_ILI9341 selected (e.g. m5stack-cores3).
+  espressif/esp_lcd_ili9341: ^2.0.2
+  # Touch controller driver for boards with BRUCE_TOUCH_ENABLED (e.g.
+  # m5stack-cores3's FT6336U, which is FT5x06-register-compatible).
+  espressif/esp_lcd_touch_ft5x06: ^1.0.7

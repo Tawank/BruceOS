@@ -1,0 +1,120 @@
+# M5Stack CoreS3 (ESP32-S3, ILI9341 240x320, AXP2101 PMIC, FT6336U touch).
+#
+# Translated from the legacy PlatformIO env (boards/m5stack-cores3/
+# m5stack-cores3.ini + pins_arduino.h in BrucePIO_legacy, which itself
+# relies on M5Unified/M5GFX for the ILI9341/AXP2101/AW9523 bring-up this
+# file reproduces directly). Peripherals with no equivalent in this HAL yet
+# (camera, RTC, USB-HID BadUSB, mic/speaker codec, CC1101, W5500 ethernet)
+# are not ported - see the per-item notes below for what else is dropped
+# and why.
+#
+# IMPORTANT: this board has NO physical buttons (legacy BTN_PIN=-1) - the
+# only input is the touchscreen. The AXP2101/AW9523/FT6336 register
+# sequences below are transcribed from M5Unified's public source, not
+# verified against real hardware in this environment (idf.py can't run in
+# this sandbox - see tools/board.py). Please build and flash-test this one
+# carefully, especially the backlight-enable and touch-orientation bits;
+# if the backlight doesn't come on, try flipping
+# CONFIG_BRUCE_DISPLAY_BACKLIGHT_I2C_BIT to another P1 bit.
+#
+# Selected via `python tools/board.py m5stack-cores3 build` (see
+# tools/board.py), which passes this file through SDKCONFIG_DEFAULTS after
+# the shared sdkconfig.defaults. The build system automatically also loads
+# sdkconfig.defaults.esp32s3 if present, per ESP-IDF's target-dependent
+# sdkconfig defaults rule.
+CONFIG_IDF_TARGET="esp32s3"
+
+# Board I2C bus (SYS_I2C in the legacy pinout): shared by the AXP2101 PMIC
+# (battery), the AW9523 GPIO expander (backlight enable), and the FT6336U
+# touch controller below - all three are fixed-address chips on this one
+# bus, matching the legacy pins_arduino.h's SYS_I2C_SDA/SYS_I2C_SCL (NOT the
+# separate external GROVE_SDA/GROVE_SCL port pins).
+CONFIG_BRUCE_BOARD_I2C_ENABLED=y
+CONFIG_BRUCE_BOARD_I2C_SDA_GPIO=12
+CONFIG_BRUCE_BOARD_I2C_SCL_GPIO=11
+
+# Display: ILI9341 240x320 physical panel over SPI, landscape (rotation 1,
+# matching the legacy ROTATION 1). No RAM-offset gap - the ILI9341's
+# addressable RAM matches this panel's resolution exactly (unlike the
+# ST7789 boards elsewhere in this tree), so all eight gap options are 0.
+# RST is -1 (not wired - the legacy TFT_RST is -1 too; the driver falls
+# back to a software reset). DC (GPIO35) is also this bus's MISO pin in the
+# legacy wiring: that's fine here since our SPI bus is configured MISO-less
+# (write-only) and DC is just a plain GPIO output, never an SPI signal.
+CONFIG_BRUCE_DISPLAY_PANEL_ILI9341=y
+CONFIG_BRUCE_DISPLAY_WIDTH=240
+CONFIG_BRUCE_DISPLAY_HEIGHT=320
+CONFIG_BRUCE_DISPLAY_DEFAULT_ROTATION=1
+CONFIG_BRUCE_DISPLAY_SPI_HOST=1
+CONFIG_BRUCE_DISPLAY_PIN_MOSI=37
+CONFIG_BRUCE_DISPLAY_PIN_SCK=36
+CONFIG_BRUCE_DISPLAY_PIN_CS=3
+CONFIG_BRUCE_DISPLAY_PIN_DC=35
+CONFIG_BRUCE_DISPLAY_PIN_RST=-1
+CONFIG_BRUCE_DISPLAY_PIN_BL=-1
+CONFIG_BRUCE_DISPLAY_GAP_X_ROTATION0=0
+CONFIG_BRUCE_DISPLAY_GAP_Y_ROTATION0=0
+CONFIG_BRUCE_DISPLAY_GAP_X_ROTATION1=0
+CONFIG_BRUCE_DISPLAY_GAP_Y_ROTATION1=0
+CONFIG_BRUCE_DISPLAY_GAP_X_ROTATION2=0
+CONFIG_BRUCE_DISPLAY_GAP_Y_ROTATION2=0
+CONFIG_BRUCE_DISPLAY_GAP_X_ROTATION3=0
+CONFIG_BRUCE_DISPLAY_GAP_Y_ROTATION3=0
+
+# Backlight: gated through an AW9523 I2C GPIO expander's P1.7 pin (the
+# "SY7088 BOOST_EN" write in M5Unified's Power_Class.cpp), not a GPIO -
+# on/off only, no dimming.
+CONFIG_BRUCE_DISPLAY_BACKLIGHT_I2C_EXPANDER_ENABLED=y
+CONFIG_BRUCE_DISPLAY_BACKLIGHT_I2C_ADDR=0x58
+CONFIG_BRUCE_DISPLAY_BACKLIGHT_I2C_BIT=7
+
+# Touch: FT6336U over the board I2C bus above. x_max/y_max reuse the
+# panel's native (pre-rotation) width/height from the Display section;
+# swap_xy/mirror_x match rotation 1 exactly (see
+# display_driver__configure_rotation()'s case 1) since touch orientation
+# here is fixed, not remapped if the app changes display rotation.
+CONFIG_BRUCE_TOUCH_ENABLED=y
+CONFIG_BRUCE_TOUCH_SWAP_XY=y
+CONFIG_BRUCE_TOUCH_MIRROR_X=y
+
+# Audio: CoreS3 has an AW88298 speaker amp and ES7210 mic ADC, both
+# configured over I2C/I2S codec registers this HAL doesn't model (no plain
+# I2S GPIO pins for either are even listed in the legacy pinout) - left off
+# rather than picking a backend that doesn't apply.
+CONFIG_BRUCE_AUDIO_BACKEND_NONE=y
+
+# Battery: AXP2101 PMIC fuel gauge, read over the board I2C bus above.
+CONFIG_BRUCE_BATTERY_ENABLED=y
+CONFIG_BRUCE_BATTERY_BACKEND_AXP2101=y
+CONFIG_BRUCE_BATTERY_AXP2101_I2C_ADDR=0x34
+
+# SD card: shares the display's SPI host/pins (same physical bus as TFT
+# MOSI/SCK/MISO above, matching the legacy SDCARD_* pins) - see
+# BRUCE_SD_SPI_HOST's help text for why this is safe (the SD driver attaches
+# as a second device on an already-initialized host rather than erroring).
+CONFIG_BRUCE_SD_ENABLED=y
+CONFIG_BRUCE_SD_SPI_HOST=1
+CONFIG_BRUCE_SD_PIN_MOSI=37
+CONFIG_BRUCE_SD_PIN_MISO=35
+CONFIG_BRUCE_SD_PIN_SCK=36
+CONFIG_BRUCE_SD_PIN_CS=4
+
+# No physical buttons on this board (legacy BTN_PIN=-1) - touch above is
+# the only input.
+# CONFIG_BRUCE_BUTTON_SELECT_ENABLED is not set
+
+# No GPIO matrix keyboard on this board.
+# CONFIG_BRUCE_KEYBOARD_ENABLED is not set
+
+# Infrared: routed through the external GROVE port pins in the legacy
+# config (M5 IR Module on Port A), not the internal SYS_I2C bus above.
+CONFIG_BRUCE_IR_TX_GPIO=2
+CONFIG_BRUCE_IR_RX_GPIO=1
+
+# NRF24: NOT wired on this board. The legacy config shares it with the
+# display's SPI bus (same MOSI/SCK/MISO, using GROVE_SDA/GROVE_SCL as
+# CE/CS), but this HAL's NRF24 driver (core/spi/spi.c) hardcodes a
+# dedicated SPI3_HOST for it - forcing that onto pins already driven by the
+# display's SPI2_HOST peripheral would contend on the GPIO matrix, not
+# safely share a bus the way the SD card above does. Left at Kconfig
+# defaults (unconnected) rather than wiring something that would conflict.

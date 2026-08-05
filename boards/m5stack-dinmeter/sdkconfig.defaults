@@ -1,0 +1,79 @@
+# M5Stack DinMeter (ESP32-S3, ST7789 135x240, rotary encoder).
+#
+# Translated from the legacy PlatformIO env (boards/m5stack-dinmeter/
+# m5stack-dinmeter.ini in BrucePIO_legacy). Unlike every other board in
+# this tree, DinMeter's display pins aren't in its pins_arduino.h at all -
+# it relies entirely on M5GFX's internal per-board panel autodetect, so
+# these are transcribed from M5GFX.cpp's board_M5DinMeter case instead
+# (M5MOSI/SCLK/CS/DC/RST/BL = GPIO5/6/7/4/8/9). Peripherals with no
+# equivalent in this HAL (FM radio, PDM mic, USB-HID BadUSB) are not
+# ported.
+#
+# Selected via `python tools/board.py m5stack-dinmeter build` (see
+# tools/board.py), which passes this file through SDKCONFIG_DEFAULTS after
+# the shared sdkconfig.defaults. The build system automatically also loads
+# sdkconfig.defaults.esp32s3 if present, per ESP-IDF's target-dependent
+# sdkconfig defaults rule.
+CONFIG_IDF_TARGET="esp32s3"
+
+# Display: SPI2_HOST, ST7789 135x240 physical panel - same size as
+# Cardputer/StickC Plus2/StickS3, so the default panel-gap table applies
+# unchanged (M5GFX's own offset_x=52/offset_y=40 for this exact panel size
+# matches those defaults too, just expressed through M5GFX's differently-
+# shaped per-rotation offset model rather than TFT_eSPI's 4-tuple one - see
+# src/Kconfig.projbuild's gap option help text). Portrait, rotation 3.
+# Backlight is a plain GPIO (M5GFX drives it as a normal PWM channel, no
+# PMIC/expander involved).
+CONFIG_BRUCE_DISPLAY_WIDTH=135
+CONFIG_BRUCE_DISPLAY_HEIGHT=240
+CONFIG_BRUCE_DISPLAY_DEFAULT_ROTATION=3
+CONFIG_BRUCE_DISPLAY_SPI_HOST=1
+CONFIG_BRUCE_DISPLAY_PIN_MOSI=5
+CONFIG_BRUCE_DISPLAY_PIN_SCK=6
+CONFIG_BRUCE_DISPLAY_PIN_CS=7
+CONFIG_BRUCE_DISPLAY_PIN_DC=4
+CONFIG_BRUCE_DISPLAY_PIN_RST=8
+CONFIG_BRUCE_DISPLAY_PIN_BL=9
+
+# Audio: LEDC PWM buzzer.
+CONFIG_BRUCE_AUDIO_BACKEND_LEDC_BUZZER=y
+CONFIG_BRUCE_AUDIO_BUZZER_GPIO=3
+
+# Battery: plain ADC1 channel 9 (GPIO10) - M5Unified's own Power_Class.cpp
+# uses pmic_adc (no PMIC chip at all) for this board.
+CONFIG_BRUCE_BATTERY_ENABLED=y
+CONFIG_BRUCE_BATTERY_ADC_CHANNEL=9
+
+# SD card: its own SPI host, shared with CC1101 (NRF24 is left
+# disconnected - see the note below).
+CONFIG_BRUCE_SD_ENABLED=y
+CONFIG_BRUCE_SD_SPI_HOST=2
+CONFIG_BRUCE_SD_PIN_MOSI=1
+CONFIG_BRUCE_SD_PIN_MISO=2
+CONFIG_BRUCE_SD_PIN_SCK=15
+CONFIG_BRUCE_SD_PIN_CS=13
+
+# Buttons: this board's primary input is a rotary encoder (turn + press) -
+# see the Rotary encoder section below for the turn part. The press part
+# (legacy ENCODER_KEY) is a plain button, wired here as SELECT like any
+# other board's primary button.
+CONFIG_BRUCE_BUTTON_SELECT_ENABLED=y
+CONFIG_BRUCE_BUTTON_SELECT_GPIO=42
+
+# Rotary encoder: quadrature turn, synthesized as UP/DOWN presses (see
+# BRUCE_ENCODER_ENABLED's help text) - every existing menu that already
+# handles up/down navigation works here with no app-side changes.
+CONFIG_BRUCE_ENCODER_ENABLED=y
+CONFIG_BRUCE_ENCODER_PIN_A=41
+CONFIG_BRUCE_ENCODER_PIN_B=40
+
+# No GPIO matrix keyboard on this board.
+# CONFIG_BRUCE_KEYBOARD_ENABLED is not set
+
+# Infrared.
+CONFIG_BRUCE_IR_TX_GPIO=1
+CONFIG_BRUCE_IR_RX_GPIO=2
+
+# NRF24: NOT wired on this board - the legacy config itself ships it
+# disabled by default (NRF24_CE_PIN=-1), so this matches that rather than
+# inventing a working pin assignment.

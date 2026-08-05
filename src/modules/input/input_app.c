@@ -54,22 +54,35 @@
 #define INPUT__BUTTON_C_CODE BRUCE_INPUT_CODE_BUTTON_C
 #endif
 
+#define INPUT__HAS_BUTTON_D CONFIG_BRUCE_BUTTON_D_ENABLED
+#if CONFIG_BRUCE_BUTTON_D_ENABLED
+#define INPUT__PIN_BUTTON_D ((gpio_num_t)CONFIG_BRUCE_BUTTON_D_GPIO)
+#define INPUT__BUTTON_D_CODE BRUCE_INPUT_CODE_BUTTON_X
+#endif
+
 #define INPUT__HAS_KEYBOARD CONFIG_BRUCE_KEYBOARD_ENABLED
 #if CONFIG_BRUCE_KEYBOARD_ENABLED
 #define INPUT__KB_OUT_PINS                                                                                   \
-    {(gpio_num_t)CONFIG_BRUCE_KEYBOARD_OUT0_GPIO, (gpio_num_t)CONFIG_BRUCE_KEYBOARD_OUT1_GPIO,                \
+    {(gpio_num_t)CONFIG_BRUCE_KEYBOARD_OUT0_GPIO,                                                            \
+     (gpio_num_t)CONFIG_BRUCE_KEYBOARD_OUT1_GPIO,                                                            \
      (gpio_num_t)CONFIG_BRUCE_KEYBOARD_OUT2_GPIO}
 #define INPUT__KB_IN_PINS                                                                                    \
-    {(gpio_num_t)CONFIG_BRUCE_KEYBOARD_IN0_GPIO, (gpio_num_t)CONFIG_BRUCE_KEYBOARD_IN1_GPIO,                  \
-     (gpio_num_t)CONFIG_BRUCE_KEYBOARD_IN2_GPIO, (gpio_num_t)CONFIG_BRUCE_KEYBOARD_IN3_GPIO,                  \
-     (gpio_num_t)CONFIG_BRUCE_KEYBOARD_IN4_GPIO, (gpio_num_t)CONFIG_BRUCE_KEYBOARD_IN5_GPIO,                  \
+    {(gpio_num_t)CONFIG_BRUCE_KEYBOARD_IN0_GPIO,                                                             \
+     (gpio_num_t)CONFIG_BRUCE_KEYBOARD_IN1_GPIO,                                                             \
+     (gpio_num_t)CONFIG_BRUCE_KEYBOARD_IN2_GPIO,                                                             \
+     (gpio_num_t)CONFIG_BRUCE_KEYBOARD_IN3_GPIO,                                                             \
+     (gpio_num_t)CONFIG_BRUCE_KEYBOARD_IN4_GPIO,                                                             \
+     (gpio_num_t)CONFIG_BRUCE_KEYBOARD_IN5_GPIO,                                                             \
      (gpio_num_t)CONFIG_BRUCE_KEYBOARD_IN6_GPIO}
 #define INPUT__KB_AUTODETECT_ALT CONFIG_BRUCE_KEYBOARD_AUTODETECT_ALT
 #if CONFIG_BRUCE_KEYBOARD_AUTODETECT_ALT
 #define INPUT__KB_IN_ALT_PINS                                                                                \
-    {(gpio_num_t)CONFIG_BRUCE_KEYBOARD_IN_ALT0_GPIO, (gpio_num_t)CONFIG_BRUCE_KEYBOARD_IN_ALT1_GPIO,          \
-     (gpio_num_t)CONFIG_BRUCE_KEYBOARD_IN_ALT2_GPIO, (gpio_num_t)CONFIG_BRUCE_KEYBOARD_IN_ALT3_GPIO,          \
-     (gpio_num_t)CONFIG_BRUCE_KEYBOARD_IN_ALT4_GPIO, (gpio_num_t)CONFIG_BRUCE_KEYBOARD_IN_ALT5_GPIO,          \
+    {(gpio_num_t)CONFIG_BRUCE_KEYBOARD_IN_ALT0_GPIO,                                                         \
+     (gpio_num_t)CONFIG_BRUCE_KEYBOARD_IN_ALT1_GPIO,                                                         \
+     (gpio_num_t)CONFIG_BRUCE_KEYBOARD_IN_ALT2_GPIO,                                                         \
+     (gpio_num_t)CONFIG_BRUCE_KEYBOARD_IN_ALT3_GPIO,                                                         \
+     (gpio_num_t)CONFIG_BRUCE_KEYBOARD_IN_ALT4_GPIO,                                                         \
+     (gpio_num_t)CONFIG_BRUCE_KEYBOARD_IN_ALT5_GPIO,                                                         \
      (gpio_num_t)CONFIG_BRUCE_KEYBOARD_IN_ALT6_GPIO}
 #endif
 #endif
@@ -114,7 +127,8 @@ static void input__emit(bruce_input_type_t type, bruce_input_action_t action, in
 /* GPIO buttons                                                               */
 /* -------------------------------------------------------------------------- */
 
-#if INPUT__HAS_BUTTON_A || INPUT__HAS_BUTTON_B || INPUT__HAS_BUTTON_C || INPUT__HAS_BUTTON_0
+#if INPUT__HAS_BUTTON_A || INPUT__HAS_BUTTON_B || INPUT__HAS_BUTTON_C || INPUT__HAS_BUTTON_D ||              \
+    INPUT__HAS_BUTTON_0
 
 /* Per-button state. */
 typedef struct {
@@ -134,6 +148,9 @@ static input__button_t s_buttons[] = {
 #endif
 #if INPUT__HAS_BUTTON_C
     {INPUT__PIN_BUTTON_C, INPUT__BUTTON_C_CODE, true, true, 0},
+#endif
+#if INPUT__HAS_BUTTON_D
+    {INPUT__PIN_BUTTON_D, INPUT__BUTTON_D_CODE, true, true, 0},
 #endif
 #if INPUT__HAS_BUTTON_0
     {INPUT__PIN_BUTTON_0, INPUT__BUTTON_0_CODE, true, true, 0},
@@ -407,7 +424,9 @@ static void input__kb_run_hotkey(const char *action) {
     while (isspace((unsigned char)*action)) action++;
     int result;
     if (strcmp(action, "launcher") == 0) {
-        const bruce_environment_variable_t gui_env[] = {{.name = "GUI", .value = "1"}};
+        const bruce_environment_variable_t gui_env[] = {
+            {.name = "GUI", .value = "1"}
+        };
         result = app_runner__run_with_environment("launcher", NULL, BRUCE_LAUNCH_FOREGROUND, gui_env, 1);
     } else {
         result = app_runner__run_command(action, BRUCE_LAUNCH_FOREGROUND);
@@ -501,6 +520,174 @@ static void input__poll_keyboard(void) {}
 #endif
 
 /* -------------------------------------------------------------------------- */
+/* Touchscreen (FT5x06/FT6336 family, I2C)                                    */
+/* -------------------------------------------------------------------------- */
+
+#if CONFIG_BRUCE_TOUCH_ENABLED
+
+static esp_lcd_touch_handle_t s_touch;
+static bool s_touch_prev_pressed;
+static int32_t s_touch_prev_x;
+static int32_t s_touch_prev_y;
+
+static void input__touch_init(void) {
+    i2c_master_bus_handle_t bus = board_i2c__acquire();
+    if (bus == NULL) {
+        ESP_LOGE(TAG, "touch: board I2C bus unavailable");
+        return;
+    }
+
+    esp_lcd_panel_io_i2c_config_t io_config = ESP_LCD_TOUCH_IO_I2C_FT5x06_CONFIG(CONFIG_BRUCE_TOUCH_I2C_ADDR);
+    esp_lcd_panel_io_handle_t io = NULL;
+    if (esp_lcd_new_panel_io_i2c(bus, &io_config, &io) != ESP_OK) {
+        ESP_LOGE(TAG, "touch: failed to create I2C panel IO");
+        return;
+    }
+
+    esp_lcd_touch_config_t touch_config = {
+        .x_max = CONFIG_BRUCE_DISPLAY_WIDTH,
+        .y_max = CONFIG_BRUCE_DISPLAY_HEIGHT,
+        .rst_gpio_num = (gpio_num_t)CONFIG_BRUCE_TOUCH_PIN_RST,
+        .int_gpio_num = (gpio_num_t)CONFIG_BRUCE_TOUCH_PIN_INT,
+        .flags = {
+                  .swap_xy = CONFIG_BRUCE_TOUCH_SWAP_XY,
+                  .mirror_x = CONFIG_BRUCE_TOUCH_MIRROR_X,
+                  .mirror_y = CONFIG_BRUCE_TOUCH_MIRROR_Y,
+                  },
+    };
+    if (esp_lcd_touch_new_i2c_ft5x06(io, &touch_config, &s_touch) != ESP_OK) {
+        ESP_LOGE(TAG, "touch: failed to initialize FT5x06-family controller");
+        s_touch = NULL;
+    }
+}
+
+static void input__poll_touch(void) {
+    if (s_touch == NULL) return;
+    if (esp_lcd_touch_read_data(s_touch) != ESP_OK) return;
+
+    uint16_t x[1] = {0};
+    uint16_t y[1] = {0};
+    uint16_t strength[1] = {0};
+    uint8_t count = 0;
+/* esp_lcd_touch_get_coordinates() is deprecated in favor of
+ * esp_lcd_touch_get_data() as of newer esp_lcd_touch releases, but remains
+ * functional; this is the simpler, longer-established API of the two. */
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+    bool pressed = esp_lcd_touch_get_coordinates(s_touch, x, y, strength, &count, 1);
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
+
+    if (pressed && !s_touch_prev_pressed) {
+        input__emit(BRUCE_INPUT_TOUCH, BRUCE_INPUT_PRESS, x[0], y[0]);
+    } else if (pressed && s_touch_prev_pressed &&
+               ((int32_t)x[0] != s_touch_prev_x || (int32_t)y[0] != s_touch_prev_y)) {
+        input__emit(BRUCE_INPUT_TOUCH, BRUCE_INPUT_CHANGE, x[0], y[0]);
+    } else if (!pressed && s_touch_prev_pressed) {
+        input__emit(BRUCE_INPUT_TOUCH, BRUCE_INPUT_RELEASE, s_touch_prev_x, s_touch_prev_y);
+    }
+    s_touch_prev_pressed = pressed;
+    if (pressed) {
+        s_touch_prev_x = x[0];
+        s_touch_prev_y = y[0];
+    }
+}
+
+#else
+
+static void input__touch_init(void) {}
+static void input__poll_touch(void) {}
+
+#endif
+
+/* -------------------------------------------------------------------------- */
+/* Rotary encoder (quadrature, e.g. M5Stack DinMeter)                         */
+/* -------------------------------------------------------------------------- */
+
+#if CONFIG_BRUCE_ENCODER_ENABLED
+
+#define INPUT__ENCODER_PIN_A ((gpio_num_t)CONFIG_BRUCE_ENCODER_PIN_A)
+#define INPUT__ENCODER_PIN_B ((gpio_num_t)CONFIG_BRUCE_ENCODER_PIN_B)
+/* One full detent is 4 quadrature sub-steps on a typical mechanical
+ * encoder. */
+#define INPUT__ENCODER_STEPS_PER_DETENT 4
+
+/* Standard quadrature gray-code transition table: index is
+ * (old_state << 2 | new_state), where each state is (A << 1 | B). Value is
+ * -1/0/+1 sub-steps. This table (or an equivalent) shows up across most
+ * embedded rotary-encoder decoders (e.g. PJRC's Encoder library, Ben
+ * Buxton's Rotary library) - it's the well-known solution, not something
+ * specific to any one board here. */
+static const int8_t s_encoder_table[16] = {
+    0,
+    -1,
+    1,
+    0,
+    1,
+    0,
+    0,
+    -1,
+    -1,
+    0,
+    0,
+    1,
+    0,
+    1,
+    -1,
+    0,
+};
+
+static uint8_t s_encoder_prev_state;
+static int s_encoder_accum;
+
+static void input__encoder_init(void) {
+    gpio_config_t cfg = {
+        .pin_bit_mask = (1ULL << INPUT__ENCODER_PIN_A) | (1ULL << INPUT__ENCODER_PIN_B),
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    gpio_config(&cfg);
+    bool a = gpio_get_level(INPUT__ENCODER_PIN_A) == 0;
+    bool b = gpio_get_level(INPUT__ENCODER_PIN_B) == 0;
+    s_encoder_prev_state = (uint8_t)((a << 1) | b);
+}
+
+static void input__poll_encoder(void) {
+    bool a = gpio_get_level(INPUT__ENCODER_PIN_A) == 0;
+    bool b = gpio_get_level(INPUT__ENCODER_PIN_B) == 0;
+    uint8_t new_state = (uint8_t)((a << 1) | b);
+    int8_t step = s_encoder_table[(s_encoder_prev_state << 2) | new_state];
+    s_encoder_prev_state = new_state;
+    if (step == 0) return;
+
+    /* Clockwise vs counter-clockwise -> DOWN vs UP is a guess (not verified
+     * against real hardware); if a board's encoder feels reversed, swap the
+     * two blocks below rather than the A/B pins. */
+    s_encoder_accum += step;
+    while (s_encoder_accum >= INPUT__ENCODER_STEPS_PER_DETENT) {
+        s_encoder_accum -= INPUT__ENCODER_STEPS_PER_DETENT;
+        input__emit(BRUCE_INPUT_BUTTON, BRUCE_INPUT_PRESS, BRUCE_INPUT_CODE_DOWN, 1);
+        input__emit(BRUCE_INPUT_BUTTON, BRUCE_INPUT_RELEASE, BRUCE_INPUT_CODE_DOWN, 0);
+    }
+    while (s_encoder_accum <= -INPUT__ENCODER_STEPS_PER_DETENT) {
+        s_encoder_accum += INPUT__ENCODER_STEPS_PER_DETENT;
+        input__emit(BRUCE_INPUT_BUTTON, BRUCE_INPUT_PRESS, BRUCE_INPUT_CODE_UP, 1);
+        input__emit(BRUCE_INPUT_BUTTON, BRUCE_INPUT_RELEASE, BRUCE_INPUT_CODE_UP, 0);
+    }
+}
+
+#else
+
+static void input__encoder_init(void) {}
+static void input__poll_encoder(void) {}
+
+#endif
+
+/* -------------------------------------------------------------------------- */
 /* Public module adapter                                                       */
 /* -------------------------------------------------------------------------- */
 
@@ -508,6 +695,8 @@ static bruce_result_t input_app__init(void) {
 #if !CONFIG_BRUCE_QEMU_TEST_MODE
     input__buttons_init();
     input__kb_gpio_init();
+    input__touch_init();
+    input__encoder_init();
 #endif
     return BRUCE_OK;
 }
@@ -516,6 +705,8 @@ static void input_app__poll(void) {
 #if !CONFIG_BRUCE_QEMU_TEST_MODE
     input__poll_buttons();
     input__poll_keyboard();
+    input__poll_touch();
+    input__poll_encoder();
 #endif
 }
 

@@ -1,0 +1,86 @@
+# M5Stack Core / Basic / Gray / Go (ESP32, ILI9341 240x320).
+#
+# Translated from the legacy PlatformIO env (boards/m5stack-core/
+# m5stack-core.ini + pins_arduino.h in BrucePIO_legacy, which itself relies
+# on M5Unified for bring-up). Peripherals with no equivalent in this HAL
+# (FM radio, CC1101, W5500 ethernet, USB-HID BadUSB) are not ported - see
+# the Buttons/Battery/NRF24 notes below for board-specific ones.
+#
+# Selected via `python tools/board.py m5stack-core build` (see
+# tools/board.py), which passes this file through SDKCONFIG_DEFAULTS after
+# the shared sdkconfig.defaults. The build system automatically also loads
+# sdkconfig.defaults.esp32 if present, per ESP-IDF's target-dependent
+# sdkconfig defaults rule.
+CONFIG_IDF_TARGET="esp32"
+
+# Display: SPI2_HOST, ILI9341 240x320 physical panel, landscape (rotation
+# 1, matching legacy). No panel-gap offset needed - the ILI9341's
+# addressable RAM matches this panel's resolution exactly (see
+# m5stack-cores3's sdkconfig.defaults for the same reasoning), so all eight
+# gap options are 0. Unlike CoreS3/Core2, this board has a plain GPIO
+# backlight and reset line - no PMIC/expander involved at all.
+CONFIG_BRUCE_DISPLAY_PANEL_ILI9341=y
+CONFIG_BRUCE_DISPLAY_WIDTH=240
+CONFIG_BRUCE_DISPLAY_HEIGHT=320
+CONFIG_BRUCE_DISPLAY_DEFAULT_ROTATION=1
+CONFIG_BRUCE_DISPLAY_SPI_HOST=1
+CONFIG_BRUCE_DISPLAY_PIN_MOSI=23
+CONFIG_BRUCE_DISPLAY_PIN_SCK=18
+CONFIG_BRUCE_DISPLAY_PIN_CS=14
+CONFIG_BRUCE_DISPLAY_PIN_DC=27
+CONFIG_BRUCE_DISPLAY_PIN_RST=33
+CONFIG_BRUCE_DISPLAY_PIN_BL=32
+CONFIG_BRUCE_DISPLAY_GAP_X_ROTATION0=0
+CONFIG_BRUCE_DISPLAY_GAP_Y_ROTATION0=0
+CONFIG_BRUCE_DISPLAY_GAP_X_ROTATION1=0
+CONFIG_BRUCE_DISPLAY_GAP_Y_ROTATION1=0
+CONFIG_BRUCE_DISPLAY_GAP_X_ROTATION2=0
+CONFIG_BRUCE_DISPLAY_GAP_Y_ROTATION2=0
+CONFIG_BRUCE_DISPLAY_GAP_X_ROTATION3=0
+CONFIG_BRUCE_DISPLAY_GAP_Y_ROTATION3=0
+
+# Audio: LEDC PWM buzzer.
+CONFIG_BRUCE_AUDIO_BACKEND_LEDC_BUZZER=y
+CONFIG_BRUCE_AUDIO_BUZZER_GPIO=25
+
+# Battery: this board charges through an IP5306 power-bank IC, which has no
+# battery-percentage register the way AXP2101 does (it's a simple
+# boost/charge controller, not a fuel gauge) - the legacy config itself
+# ships with battery reporting disabled (BAT_PIN commented out), so this
+# matches that rather than inventing an unsupported reading.
+# CONFIG_BRUCE_BATTERY_ENABLED is not set
+
+# SD card: shares the display's SPI host/pins.
+CONFIG_BRUCE_SD_ENABLED=y
+CONFIG_BRUCE_SD_SPI_HOST=1
+CONFIG_BRUCE_SD_PIN_MOSI=23
+CONFIG_BRUCE_SD_PIN_MISO=19
+CONFIG_BRUCE_SD_PIN_SCK=18
+CONFIG_BRUCE_SD_PIN_CS=4
+
+# Buttons: BtnA/B/C, the classic M5Stack Basic 3-button row (this exact
+# GPIO39/38/37 pinout is standard across the whole M5Stack Basic/Gray/Go
+# family - M5Unified hardcodes it per-board-type rather than exposing it as
+# a plain pins_arduino.h define, unlike newer boards).
+CONFIG_BRUCE_BUTTON_SELECT_ENABLED=y
+CONFIG_BRUCE_BUTTON_SELECT_GPIO=39
+CONFIG_BRUCE_BUTTON_A_ENABLED=y
+CONFIG_BRUCE_BUTTON_A_GPIO=38
+CONFIG_BRUCE_BUTTON_B_ENABLED=y
+CONFIG_BRUCE_BUTTON_B_GPIO=37
+
+# No GPIO matrix keyboard on this board.
+# CONFIG_BRUCE_KEYBOARD_ENABLED is not set
+
+# Infrared: routed through the external GROVE port pins in the legacy
+# config (M5 IR Module on Port A).
+CONFIG_BRUCE_IR_TX_GPIO=21
+CONFIG_BRUCE_IR_RX_GPIO=22
+
+# NRF24: NOT wired on this board. The legacy config shares it with the
+# display's SPI bus (same MOSI/SCK/MISO, using GROVE_SDA/GROVE_SCL as
+# CE/CS), but this HAL's NRF24 driver (core/spi/spi.c) hardcodes a
+# dedicated SPI3_HOST for it - forcing that onto pins already driven by the
+# display's SPI2_HOST peripheral would contend on the GPIO matrix, not
+# safely share a bus the way the SD card above does. Left at Kconfig
+# defaults (unconnected) rather than wiring something that would conflict.

@@ -5,6 +5,7 @@
 
 #include "core/autostart/autostart.h"
 #include "core/config/config.h"
+#include "core/device/device.h"
 #include "core/display/display.h"
 #include "core/event_loop/event_loop.h"
 #include "core/process/process.h"
@@ -117,6 +118,8 @@ bool init_user_interface(void) {
 }
 
 void app_main(void) {
+    device__power_hold_init();
+
     bool storage_ok = init_storage();
     if (storage_ok && !config__init()) printf("Configuration is unavailable; using in-memory defaults\n");
     if (storage_ok && !process__environment_init()) {

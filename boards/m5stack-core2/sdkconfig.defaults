@@ -1,0 +1,104 @@
+# M5Stack Core2 (ESP32, ILI9341 240x320, AXP192 PMIC, FT6336 touch).
+#
+# Translated from the legacy PlatformIO env (boards/m5stack-core2/
+# m5stack-core2.ini + pins_arduino.h in BrucePIO_legacy, which itself
+# relies on M5Unified/M5GFX for the ILI9341/AXP192 bring-up this file
+# reproduces directly). Peripherals with no equivalent in this HAL yet
+# (RTC, PDM mic, FM radio, CC1101, W5500 ethernet, USB-HID BadUSB) are not
+# ported.
+#
+# IMPORTANT: this board has NO physical buttons (legacy BTN_PIN=-1) - the
+# only input is the touchscreen (like m5stack-cores3). The AXP192 register
+# sequence below is transcribed from M5Unified's public source, not
+# verified against real hardware in this environment (idf.py can't run in
+# this sandbox - see tools/board.py).
+#
+# Selected via `python tools/board.py m5stack-core2 build` (see
+# tools/board.py), which passes this file through SDKCONFIG_DEFAULTS after
+# the shared sdkconfig.defaults. The build system automatically also loads
+# sdkconfig.defaults.esp32 if present, per ESP-IDF's target-dependent
+# sdkconfig defaults rule.
+CONFIG_IDF_TARGET="esp32"
+
+# Board I2C bus (SYS_I2C in the legacy pinout, NOT the separate external
+# GROVE_SDA/GROVE_SCL port pins): shared by the AXP192 PMIC (battery,
+# backlight) and the FT6336 touch controller below.
+CONFIG_BRUCE_BOARD_I2C_ENABLED=y
+CONFIG_BRUCE_BOARD_I2C_SDA_GPIO=21
+CONFIG_BRUCE_BOARD_I2C_SCL_GPIO=22
+
+# Display: ILI9341 240x320 physical panel over SPI, landscape (rotation 1).
+# No RAM-offset gap, same reasoning as m5stack-cores3/m5stack-core. RST is
+# -1 (not wired, same as CoreS3 - software reset fallback).
+CONFIG_BRUCE_DISPLAY_PANEL_ILI9341=y
+CONFIG_BRUCE_DISPLAY_WIDTH=240
+CONFIG_BRUCE_DISPLAY_HEIGHT=320
+CONFIG_BRUCE_DISPLAY_DEFAULT_ROTATION=1
+CONFIG_BRUCE_DISPLAY_SPI_HOST=1
+CONFIG_BRUCE_DISPLAY_PIN_MOSI=23
+CONFIG_BRUCE_DISPLAY_PIN_SCK=18
+CONFIG_BRUCE_DISPLAY_PIN_CS=5
+CONFIG_BRUCE_DISPLAY_PIN_DC=15
+CONFIG_BRUCE_DISPLAY_PIN_RST=-1
+CONFIG_BRUCE_DISPLAY_PIN_BL=-1
+CONFIG_BRUCE_DISPLAY_GAP_X_ROTATION0=0
+CONFIG_BRUCE_DISPLAY_GAP_Y_ROTATION0=0
+CONFIG_BRUCE_DISPLAY_GAP_X_ROTATION1=0
+CONFIG_BRUCE_DISPLAY_GAP_Y_ROTATION1=0
+CONFIG_BRUCE_DISPLAY_GAP_X_ROTATION2=0
+CONFIG_BRUCE_DISPLAY_GAP_Y_ROTATION2=0
+CONFIG_BRUCE_DISPLAY_GAP_X_ROTATION3=0
+CONFIG_BRUCE_DISPLAY_GAP_Y_ROTATION3=0
+
+# Backlight: powered from AXP192 LDO2 (which also feeds the LCD/SD logic
+# rail itself on this board) - on/off only, no dimming.
+CONFIG_BRUCE_DISPLAY_BACKLIGHT_AXP192_LDO2_ENABLED=y
+CONFIG_BRUCE_DISPLAY_BACKLIGHT_AXP192_I2C_ADDR=0x34
+
+# Touch: FT6336 over the board I2C bus above. x_max/y_max reuse the
+# panel's native width/height from the Display section; swap_xy/mirror_x
+# match rotation 1 (see display_driver__configure_rotation()'s case 1),
+# same as m5stack-cores3.
+CONFIG_BRUCE_TOUCH_ENABLED=y
+CONFIG_BRUCE_TOUCH_SWAP_XY=y
+CONFIG_BRUCE_TOUCH_MIRROR_X=y
+
+# Audio: I2S DAC (NS4168 amp). The legacy .ini ships this commented out by
+# default, but the pins are a real, working I2S circuit (not a codec chip
+# needing extra I2C setup, unlike some other boards) so it's enabled here.
+CONFIG_BRUCE_AUDIO_BACKEND_I2S=y
+CONFIG_BRUCE_AUDIO_I2S_BCLK_GPIO=12
+CONFIG_BRUCE_AUDIO_I2S_DATA_GPIO=2
+CONFIG_BRUCE_AUDIO_I2S_LRCLK_GPIO=0
+
+# Battery: AXP192 PMIC, read over the board I2C bus above (raw voltage
+# register, not a direct percentage - see BRUCE_BATTERY_BACKEND_AXP192's
+# help text).
+CONFIG_BRUCE_BATTERY_ENABLED=y
+CONFIG_BRUCE_BATTERY_BACKEND_AXP192=y
+CONFIG_BRUCE_BATTERY_AXP192_I2C_ADDR=0x34
+
+# SD card: shares the display's SPI host/pins.
+CONFIG_BRUCE_SD_ENABLED=y
+CONFIG_BRUCE_SD_SPI_HOST=1
+CONFIG_BRUCE_SD_PIN_MOSI=23
+CONFIG_BRUCE_SD_PIN_MISO=38
+CONFIG_BRUCE_SD_PIN_SCK=18
+CONFIG_BRUCE_SD_PIN_CS=4
+
+# No physical buttons on this board (legacy BTN_PIN=-1) - touch above is
+# the only input.
+# CONFIG_BRUCE_BUTTON_SELECT_ENABLED is not set
+
+# No GPIO matrix keyboard on this board.
+# CONFIG_BRUCE_KEYBOARD_ENABLED is not set
+
+# Infrared: routed through the external GROVE port pins in the legacy
+# config (M5 IR Module on Port A) - GROVE_SDA/SCL here are 32/33, distinct
+# from the board I2C bus above.
+CONFIG_BRUCE_IR_TX_GPIO=32
+CONFIG_BRUCE_IR_RX_GPIO=33
+
+# NRF24: NOT wired on this board, for the same reason as m5stack-core /
+# m5stack-cores3 - the legacy config shares it with the display's SPI bus,
+# which would contend with this HAL's NRF24 driver's hardcoded SPI3_HOST.
