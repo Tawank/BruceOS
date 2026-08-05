@@ -45,6 +45,7 @@ idf_component_register(SRCS
                     "core/display/display.c"
                     "core/display/display_draw.c"
                     "core/display/display_driver.c"
+                    "core/display/display_overlay.c"
                     "core/display/display_text.c"
                     "core/disk/disk.c"
                     "core/gpio/gpio.c"
@@ -123,6 +124,7 @@ idf_component_register(SRCS
                      "modules/utils/terminal/terminal_ansi.c"
                      "modules/utils/process/process_app.c"
                     "modules/utils/notification/notification_app.c"
+                    "modules/notification/notification_service.c"
                     "modules/ir/ir_app.c"
                     "modules/nrf24/nrf24_app.c"
                     "modules/wifi/wifi_app.c"
@@ -390,6 +392,12 @@ add_library(bruce_sdk_builtin_notification_check OBJECT "modules/utils/notificat
 target_include_directories(bruce_sdk_builtin_notification_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/utils/notification")
+
+add_library(bruce_sdk_builtin_notification_service_check OBJECT
+            "modules/notification/notification_service.c")
+target_include_directories(bruce_sdk_builtin_notification_service_check PRIVATE
+                           "${CMAKE_CURRENT_LIST_DIR}"
+                           "${CMAKE_CURRENT_LIST_DIR}/modules/notification")
 
 add_library(bruce_sdk_builtin_tcp_check OBJECT "modules/tcp/tcp_app.c")
 target_include_directories(bruce_sdk_builtin_tcp_check PRIVATE

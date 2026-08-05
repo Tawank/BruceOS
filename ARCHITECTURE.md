@@ -760,9 +760,17 @@ one RGB565 framebuffer. Direct mode allocates no retained framebuffer and
 streams clipped primitives through a quarter-screen DMA staging buffer to the
 ST7789 as they are drawn. The 16,320-byte staging buffer reduces persistent
 display pixel memory by 48,480 bytes. Transfers run synchronously in
-the caller's task: in buffered mode `display__present()` pushes the viewport rect to the panel before returning,
-serialized by the display lock, so transfers never race with drawing or with
-each other. GUI processes draw in local coordinates into a fullscreen
+the caller's task: in buffered mode `display__present()` pushes the viewport rect to the panel before returning.
+Locking is two-tiered so unrelated processes' draws never block each other:
+a short-lived registry lock guards only structural state (the process/overlay
+tables, viewport and visibility transitions, frame leases), while each
+process's viewport and each overlay's private buffer has its own lock, held
+only for the duration of one draw primitive on that surface. Two processes
+(or a process and an overlay) with disjoint regions -- guaranteed by the tile/
+overlay model, checked under the registry lock -- can therefore draw and even
+present concurrently; only the actual panel DMA transfer and teardown are
+still serialized, via a separate transfer lock, since there is one physical
+bus. GUI processes draw in local coordinates into a fullscreen
 foreground viewport, one of up to four launcher-assigned non-overlapping
 tiles, or a hidden zero-sized viewport. `display__begin_frame()` leases the
 viewport through the completion of `display__present()`; tile rows are packed
@@ -778,6 +786,24 @@ angle is at six o'clock and increases clockwise.
 `display__draw_bitmap_scaled()` blits a 1bpp MSB-first bitmap of any size into
 a destination rectangle with nearest-neighbor scaling and transparent clear
 bits, using only integer math, and is the preferred way to draw filled icons.
+
+Any process may also create an overlay (`display__overlay_create()`): a
+small, opaque, always-on-top drawing surface with its own private pixel
+buffer, positioned in absolute screen coordinates and composed into every
+subsequent flush -- into transfer scratch rows in buffered mode, painted
+directly after the underlying content in direct mode -- so it never touches
+another process's framebuffer region and never needs the registry lock's
+structural involvement beyond its own create/show/hide/move/destroy calls.
+`display__overlay_begin()`/`display__overlay_end()` bracket a drawing session
+during which the normal `display__*` primitives (and `display__width()`/
+`display__height()`) target the overlay's own buffer instead of the caller's
+viewport. Only the owning process may draw into, move, show, hide, or destroy
+its overlay; an overlay is destroyed automatically when its owner exits.
+Overlays composite in creation order with no explicit z-order or
+transparency key in v1 -- an owner that wants a border or background paints
+it itself. `display__screen_width()`/`display__screen_height()` expose the
+physical screen size (independent of the caller's own viewport, which an
+overlay owner commonly doesn't have) for positioning one.
 
 Icon Core stores a small set of built-in 24x24 Material Design Icons as
 pre-rasterized 1bpp bitmaps (72 bytes each, MSB-first) in read-only firmware
@@ -799,18 +825,24 @@ and `.gif` case-insensitively; its viewer fits, centers, presents, and remains
 open until input. File manager image viewing and terminal/serial direct paths
 use this same loader. GIF animation is not part of this initial contract.
 
-Core also owns one transient notification overlay. `notification__push()` and
-`notification__dismiss()` are unrestricted, last-writer-wins operations; text
-is copied into fixed storage and duration is clamped to 250 through 30000 ms.
-The overlay is composed only into transfer scratch rows, so it never changes
-application framebuffer pixels. Push and dismiss repaint the overlay rect
-immediately unless a frame is mid-flight over it, in which case the overlay
-appears on that app's next `display__present()`; expiry is lazy and the
-overlay disappears on the next transfer that overlaps its rect.
-In direct mode the notification is painted immediately and again when an
-overlapping frame is presented. Dismissal cannot restore panel pixels without
-a retained framebuffer, so the underlying application removes it on its next
-redraw.
+The transient notification banner is not special-cased in Core at all: Core
+only knows about the generic overlay primitive above. `notification__push()`
+and `notification__dismiss()` (unrestricted, last-writer-wins; text is copied
+into fixed storage and duration is clamped to 250 through 30000 ms) are a
+thin mailbox in `core/notification` -- a depth-one queue any process may
+write to, always returning immediately. The one built-in reader is
+`modules/notification`'s background service, started at boot like the
+launcher or input service, which renders the banner using only
+`display__overlay_*`/`display__draw_*`, the same public primitive any other
+app has. Because rendering is just another consumer of `display__overlay_*`,
+a user who wants a different notification UI does not need Core's cooperation
+at all: they can ignore `notification__push()` and drive their own overlay
+directly from a JS or ELF app instead. Push/dismiss repaint the overlay rect
+immediately unless a frame is mid-flight over it, in which case it appears on
+that app's next `display__present()`; the service hides the overlay once its
+duration elapses. Dismissal cannot restore direct-mode panel pixels without a
+retained framebuffer, so the underlying application removes it on its next
+redraw, same as before.
 
 The unrestricted status-icon service is a separate runtime-only global keyed
 registry. Any process may replace or remove any key, including one created by a

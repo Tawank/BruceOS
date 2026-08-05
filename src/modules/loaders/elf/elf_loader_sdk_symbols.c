@@ -258,6 +258,18 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(display__display_on_off),
     ESP_ELFSYM_EXPORT(display__begin_frame),
     ESP_ELFSYM_EXPORT(display__present),
+    ESP_ELFSYM_EXPORT(display__screen_width),
+    ESP_ELFSYM_EXPORT(display__screen_height),
+
+    /* Overlays: a small always-on-top drawing surface any process may
+     * create for its own menu/notification/HUD (see core_sdk/display.h). */
+    ESP_ELFSYM_EXPORT(display__overlay_create),
+    ESP_ELFSYM_EXPORT(display__overlay_destroy),
+    ESP_ELFSYM_EXPORT(display__overlay_show),
+    ESP_ELFSYM_EXPORT(display__overlay_hide),
+    ESP_ELFSYM_EXPORT(display__overlay_move),
+    ESP_ELFSYM_EXPORT(display__overlay_begin),
+    ESP_ELFSYM_EXPORT(display__overlay_end),
 
     /* Built-in vector icons */
     ESP_ELFSYM_EXPORT(icon__get),

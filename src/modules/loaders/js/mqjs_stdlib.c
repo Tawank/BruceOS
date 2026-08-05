@@ -702,6 +702,19 @@ static const JSPropDef js_display[] = {
     JS_CFUNC_DEF("getBrightness", 0, native_getBrightness),
     JS_CFUNC_DEF("setBrightness", 2, native_setBrightness),
     JS_CFUNC_DEF("restoreBrightness", 0, native_restoreBrightness),
+    /* Physical screen size and overlays -- see core_sdk/display.h. An
+     * overlay is a small always-on-top drawing surface any script can
+     * create for its own menu/notification/HUD, composited into every
+     * flush independently of the screen's normal foreground/tile system. */
+    JS_CFUNC_DEF("screenWidth", 0, native_screenWidth),
+    JS_CFUNC_DEF("screenHeight", 0, native_screenHeight),
+    JS_CFUNC_DEF("overlayCreate", 4, native_overlayCreate),
+    JS_CFUNC_DEF("overlayDestroy", 1, native_overlayDestroy),
+    JS_CFUNC_DEF("overlayShow", 1, native_overlayShow),
+    JS_CFUNC_DEF("overlayHide", 1, native_overlayHide),
+    JS_CFUNC_DEF("overlayMove", 3, native_overlayMove),
+    JS_CFUNC_DEF("overlayBegin", 1, native_overlayBegin),
+    JS_CFUNC_DEF("overlayEnd", 1, native_overlayEnd),
     JS_PROP_END,
 };
 

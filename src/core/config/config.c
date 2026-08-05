@@ -133,6 +133,7 @@ static void config__set_defaults(config__t *cfg) {
     static const char *const default_startup_apps[] = {
         "device_bus",
         "input",
+        "notification_service",
         "BG=0 bootanimation",
         "launcher -s",
         "serial_commands",

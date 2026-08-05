@@ -488,3 +488,76 @@ JSValue native_deleteSprite(JSContext *ctx, JSValue *this_val, int argc, JSValue
     (void)argv;
     return JS_UNDEFINED;
 }
+
+/* -------------------------------------------------------------------------- */
+/* Overlays (see core_sdk/display.h)                                          */
+/* -------------------------------------------------------------------------- */
+
+JSValue native_screenWidth(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
+    (void)this_val;
+    (void)argc;
+    (void)argv;
+    return JS_NewInt32(ctx, display__screen_width());
+}
+
+JSValue native_screenHeight(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
+    (void)this_val;
+    (void)argc;
+    (void)argv;
+    return JS_NewInt32(ctx, display__screen_height());
+}
+
+/* Overlay ids returned by display__overlay_create() are always > 0 (see
+ * BRUCE_DISPLAY_OVERLAY_ID_INVALID), so the JS surface returns the id
+ * itself (a positive int32) on success and a negative bruce_result_t on
+ * failure, the same "non-negative is the value, negative is BRUCE_ERR_*"
+ * convention bruce_result_t itself uses. */
+JSValue native_overlayCreate(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
+    (void)this_val;
+    int x = native_arg_int(ctx, argc, argv, 0, 0);
+    int y = native_arg_int(ctx, argc, argv, 1, 0);
+    int w = native_arg_int(ctx, argc, argv, 2, 0);
+    int h = native_arg_int(ctx, argc, argv, 3, 0);
+    bruce_display_overlay_id_t overlay = BRUCE_DISPLAY_OVERLAY_ID_INVALID;
+    bruce_result_t result =
+        display__overlay_create((int16_t)x, (int16_t)y, (int16_t)w, (int16_t)h, &overlay);
+    return JS_NewInt32(ctx, result == BRUCE_OK ? (int32_t)overlay : (int32_t)result);
+}
+
+JSValue native_overlayDestroy(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
+    (void)this_val;
+    int id = native_arg_int(ctx, argc, argv, 0, 0);
+    return JS_NewInt32(ctx, display__overlay_destroy((bruce_display_overlay_id_t)id));
+}
+
+JSValue native_overlayShow(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
+    (void)this_val;
+    int id = native_arg_int(ctx, argc, argv, 0, 0);
+    return JS_NewInt32(ctx, display__overlay_show((bruce_display_overlay_id_t)id));
+}
+
+JSValue native_overlayHide(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
+    (void)this_val;
+    int id = native_arg_int(ctx, argc, argv, 0, 0);
+    return JS_NewInt32(ctx, display__overlay_hide((bruce_display_overlay_id_t)id));
+}
+
+JSValue native_overlayMove(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
+    (void)this_val;
+    int id = native_arg_int(ctx, argc, argv, 0, 0);
+    int x = native_arg_int(ctx, argc, argv, 1, 0);
+    int y = native_arg_int(ctx, argc, argv, 2, 0);
+    return JS_NewInt32(ctx, display__overlay_move((bruce_display_overlay_id_t)id, (int16_t)x, (int16_t)y));
+}
+
+JSValue native_overlayBegin(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
+    (void)this_val;
+    int id = native_arg_int(ctx, argc, argv, 0, 0);
+    return JS_NewInt32(ctx, display__overlay_begin((bruce_display_overlay_id_t)id));
+}
+
+JSValue native_overlayEnd(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
+    (void)this_val;
+    int id = native_arg_int(ctx, argc, argv, 0, 0);
+    return JS_NewInt32(ctx, display__overlay_end((bruce_display_overlay_id_t)id));
+}

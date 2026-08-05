@@ -76,6 +76,14 @@ int display__width(void);
 /* Height of the caller's current viewport, or zero while hidden. */
 int display__height(void);
 
+/* Full physical screen width/height, independent of the caller's own
+ * viewport (which may be smaller, tiled, or zero while hidden/background).
+ * Meant for positioning an overlay (see "Overlays" below): an overlay owner
+ * commonly has no normal viewport of its own to measure against. Zero
+ * before display__init(). */
+int display__screen_width(void);
+int display__screen_height(void);
+
 /* Convert 8-bit RGB components to an RGB565 color value. */
 bruce_display_color_t display__color565(uint8_t r, uint8_t g, uint8_t b);
 
@@ -239,6 +247,57 @@ bruce_result_t display__present(void);
 
 /* Built-in launcher layout operation. Not exported to external runtimes. */
 bruce_result_t display__set_tiles(const bruce_display_tile_t *tiles, size_t count);
+
+/* -------------------------------------------------------------------------- */
+/* Overlays                                                                   */
+/* -------------------------------------------------------------------------- */
+
+/*
+ * A generic always-on-top drawing surface any process may create for a menu,
+ * notification, HUD, etc. Overlays are composed into every presented frame
+ * (buffered mode: into transfer scratch rows; direct mode: painted right
+ * after the underlying content) without ever touching another process's
+ * framebuffer region or requiring the screen-wide lock, so drawing an
+ * overlay never contends with whatever else is being drawn underneath it.
+ *
+ * Only the owning process may draw into, move, show, hide, or destroy its
+ * own overlay. An overlay is automatically destroyed when its owning
+ * process exits. There is no explicit z-order API in v1: overlays composite
+ * in creation order, later-created on top of earlier ones.
+ */
+
+#define BRUCE_DISPLAY_MAX_OVERLAYS 8
+
+typedef uint32_t bruce_display_overlay_id_t;
+#define BRUCE_DISPLAY_OVERLAY_ID_INVALID ((bruce_display_overlay_id_t)0)
+
+/* Creates a hidden overlay at `x, y` sized `w` x `h` (must fit on the
+ * physical screen). Returns BRUCE_ERR_RESOURCE_LIMIT once
+ * BRUCE_DISPLAY_MAX_OVERLAYS are live. */
+bruce_result_t
+display__overlay_create(int16_t x, int16_t y, int16_t w, int16_t h, bruce_display_overlay_id_t *out_overlay);
+
+/* Destroys an overlay early. Also happens automatically on process exit. */
+bruce_result_t display__overlay_destroy(bruce_display_overlay_id_t overlay);
+
+/* Shows/hides an overlay without destroying it; content persists while
+ * hidden. Both are idempotent. */
+bruce_result_t display__overlay_show(bruce_display_overlay_id_t overlay);
+bruce_result_t display__overlay_hide(bruce_display_overlay_id_t overlay);
+
+/* Repositions an overlay's on-screen origin; size is fixed at creation. */
+bruce_result_t display__overlay_move(bruce_display_overlay_id_t overlay, int16_t x, int16_t y);
+
+/* Opens a drawing session on `overlay` for the calling (owning) process.
+ * While open, every display__* draw call below (fill_rect, draw_string,
+ * draw_bitmap, ...) plus display__width()/display__height() target the
+ * overlay's own w x h buffer in overlay-local coordinates instead of the
+ * caller's normal viewport. Sessions do not nest. */
+bruce_result_t display__overlay_begin(bruce_display_overlay_id_t overlay);
+
+/* Closes the drawing session opened by display__overlay_begin() and, if the
+ * overlay is currently shown, repaints its rect. */
+bruce_result_t display__overlay_end(bruce_display_overlay_id_t overlay);
 
 #ifdef __cplusplus
 }

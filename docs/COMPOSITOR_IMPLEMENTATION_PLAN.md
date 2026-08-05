@@ -1,5 +1,17 @@
 # BruceIDF Small Compositor Implementation Plan
 
+> **Status: implemented, then extended.** The single "display state mutex"
+> described in "Logical Region Locking" below has since been split into a
+> short-lived structural registry lock plus a per-surface (per-process-
+> viewport or per-overlay) lock, so unrelated processes/overlays with
+> disjoint regions can draw concurrently instead of only being non-blocking
+> around the DMA transfer. A generic `display__overlay_*` primitive was also
+> added on top of this compositor (see `ARCHITECTURE.md`), and the
+> notification banner this document mentions moved off of Core onto it (see
+> `docs/NOTIFICATIONS_AND_STATUS_ICONS_PLAN.md`). The rest of this document
+> (viewport/tile/frame-lease model, packed partial transfers) is still
+> accurate.
+
 ## Purpose
 
 This document is an implementation handoff for replacing the current shared,

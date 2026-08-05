@@ -45,3 +45,12 @@ JSValue native_restoreBrightness(JSContext *ctx, JSValue *this_val, int argc, JS
 JSValue native_createSprite(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
 JSValue native_pushSprite(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
 JSValue native_deleteSprite(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
+JSValue native_screenWidth(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
+JSValue native_screenHeight(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
+JSValue native_overlayCreate(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
+JSValue native_overlayDestroy(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
+JSValue native_overlayShow(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
+JSValue native_overlayHide(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
+JSValue native_overlayMove(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
+JSValue native_overlayBegin(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);
+JSValue native_overlayEnd(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv);

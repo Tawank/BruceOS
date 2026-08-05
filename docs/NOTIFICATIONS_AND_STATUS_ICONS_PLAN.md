@@ -1,5 +1,15 @@
 # Notifications and Status Icons Plan
 
+> **Superseded (notification half only):** this document's decision to keep
+> notification composition inside Core display (`core/display`) has been
+> replaced. Core now exposes only a generic `display__overlay_*` primitive
+> (see `core_sdk/display.h`); the notification banner itself moved to
+> `modules/notification`, a background service built on that primitive, with
+> `notification__push()`/`notification__dismiss()` reduced to a mailbox in
+> `core/notification`. See `ARCHITECTURE.md`'s display/overlay and
+> notification paragraphs for the current design. The status-icon half below
+> is unaffected and still accurate.
+
 ## Scope
 
 This document defines two separate services:

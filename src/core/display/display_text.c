@@ -110,6 +110,7 @@ static void display__draw_char(display__process_context_t *context, int16_t x, i
     if (glyph == NULL) { return; }
     if (!context->text_bg_transparent) {
         display_internal__fill_rect(
+            context,
             x,
             y,
             (DISPLAY__FONT_WIDTH + 1) * context->text_size,
@@ -125,6 +126,7 @@ static void display__draw_char(display__process_context_t *context, int16_t x, i
             while (col < DISPLAY__FONT_WIDTH && (glyph[col] & (1 << row))) ++col;
             if (col > start) {
                 display_internal__fill_rect(
+                    context,
                     x + start * context->text_size,
                     y + row * context->text_size,
                     (col - start) * context->text_size,
@@ -169,7 +171,7 @@ display__draw_aligned_string(const char *text, int16_t x, int16_t y, uint8_t ali
     if (alignment == 1) draw_x -= width / 2;
     else if (alignment == 2) draw_x -= width;
     display__draw_single_line(context, text, draw_x, y);
-    display_internal__unlock();
+    display_internal__unlock(context);
     return BRUCE_OK;
 }
 
@@ -178,7 +180,7 @@ bruce_result_t display__set_text_color(bruce_display_color_t color) {
     bruce_result_t result = display_internal__begin_draw(&context);
     if (result != BRUCE_OK) { return result; }
     context->text_color = color;
-    display_internal__unlock();
+    display_internal__unlock(context);
     return BRUCE_OK;
 }
 
@@ -188,7 +190,7 @@ bruce_result_t display__set_text_bg_color(uint32_t color) {
     if (result != BRUCE_OK) { return result; }
     context->text_bg_transparent = color >= 0x10000;
     if (!context->text_bg_transparent) context->text_bg_color = (bruce_display_color_t)color;
-    display_internal__unlock();
+    display_internal__unlock(context);
     return BRUCE_OK;
 }
 
@@ -197,7 +199,7 @@ bruce_result_t display__set_text_size(uint8_t size) {
     bruce_result_t result = display_internal__begin_draw(&context);
     if (result != BRUCE_OK) { return result; }
     context->text_size = size < 1 ? 1 : (size > 8 ? 8 : size);
-    display_internal__unlock();
+    display_internal__unlock(context);
     return BRUCE_OK;
 }
 
@@ -207,7 +209,7 @@ bruce_result_t display__set_cursor(int16_t x, int16_t y) {
     if (result != BRUCE_OK) { return result; }
     context->cursor_x = x;
     context->cursor_y = y;
-    display_internal__unlock();
+    display_internal__unlock(context);
     return BRUCE_OK;
 }
 
@@ -218,7 +220,7 @@ bruce_result_t display__get_cursor(int16_t *x, int16_t *y) {
     if (result != BRUCE_OK) { return result; }
     *x = context->cursor_x;
     *y = context->cursor_y;
-    display_internal__unlock();
+    display_internal__unlock(context);
     return BRUCE_OK;
 }
 
@@ -239,7 +241,7 @@ bruce_result_t display__print(const char *text) {
             context->cursor_x += (DISPLAY__FONT_WIDTH + 1) * context->text_size;
         }
     }
-    display_internal__unlock();
+    display_internal__unlock(context);
     return BRUCE_OK;
 }
 

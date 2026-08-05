@@ -123,6 +123,26 @@ ELF applications may call the unrestricted `notification__push()` and
 `status_icon__list()`. Status icons are runtime-only and are rendered by the
 launcher or by applications, not by Core.
 
+Any ELF application may also create its own overlay: a small always-on-top
+drawing surface composited into every flush independently of the normal
+foreground/tile system, so drawing into it never contends with whatever else
+is on screen. This is what `notification__push()` itself is built on (see
+`src/modules/notification/notification_service.c`) -- an app that wants a
+different notification UI, a HUD, or a floating menu can just use the same
+primitive directly instead:
+
+```c
+bruce_display_overlay_id_t overlay;
+display__overlay_create(display__screen_width() - 60, 4, 56, 16, &overlay);
+display__overlay_begin(overlay);
+display__fill_rect(0, 0, 56, 16, BRUCE_COLOR_NAVY);
+display__draw_string("HUD", 4, 4);
+display__overlay_end(overlay);
+display__overlay_show(overlay);
+/* ... display__overlay_move()/hide()/show() as needed ... */
+display__overlay_destroy(overlay); /* also happens automatically on exit */
+```
+
 ## ESP-IDF v6 compatibility note
 
 `espressif/elf_loader` v1.3.1 originally required a small patch to build against
