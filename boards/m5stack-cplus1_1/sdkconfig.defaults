@@ -1,0 +1,69 @@
+# M5StickC Plus1.1 (ESP32-PICO, ST7789V2 135x240).
+#
+# Translated from the legacy PlatformIO env (boards/m5stack-cplus1_1/*.ini +
+# pins_arduino.h in BrucePIO_legacy). Peripherals with no equivalent in this
+# HAL yet (built-in mic, RTC, USB-HID BadUSB, CC1101, W5500 ethernet) are not
+# ported - see the per-item notes below for which of this board's legacy
+# pins are dropped.
+#
+# Selected via `python tools/board.py m5stack-cplus1_1 build` (see
+# tools/board.py), which passes this file through SDKCONFIG_DEFAULTS after
+# the shared sdkconfig.defaults. The build system automatically also loads
+# sdkconfig.defaults.esp32 (classic-BT / IRAM tuning) since this target is
+# plain esp32, per ESP-IDF's target-dependent sdkconfig defaults rule.
+CONFIG_IDF_TARGET="esp32"
+
+# Display: SPI2_HOST, ST7789V2 135x240 physical panel (same size as
+# Cardputer/StickC Plus2, so the default panel-gap table applies unchanged),
+# portrait (rotation 3). No backlight GPIO - TFT_BL is not wired on this
+# board (backlight is always on once the display is powered), so BL is left
+# at -1 and the driver skips backlight PWM setup for it.
+CONFIG_BRUCE_DISPLAY_WIDTH=135
+CONFIG_BRUCE_DISPLAY_HEIGHT=240
+CONFIG_BRUCE_DISPLAY_DEFAULT_ROTATION=3
+CONFIG_BRUCE_DISPLAY_SPI_HOST=1
+CONFIG_BRUCE_DISPLAY_PIN_MOSI=15
+CONFIG_BRUCE_DISPLAY_PIN_SCK=13
+CONFIG_BRUCE_DISPLAY_PIN_CS=5
+CONFIG_BRUCE_DISPLAY_PIN_DC=23
+CONFIG_BRUCE_DISPLAY_PIN_RST=18
+CONFIG_BRUCE_DISPLAY_PIN_BL=-1
+
+# Audio: LEDC PWM buzzer.
+CONFIG_BRUCE_AUDIO_BACKEND_LEDC_BUZZER=y
+CONFIG_BRUCE_AUDIO_BUZZER_GPIO=2
+
+# Battery: the legacy .ini's BAT_PIN=10 is not a valid ESP32 ADC-capable
+# GPIO (likely stale/unused there); this reuses the M5StickC Plus2 battery
+# ADC channel, since both boards share the same StickC PCB battery-sense
+# design (ADC1 channel 2 = GPIO38).
+CONFIG_BRUCE_BATTERY_ENABLED=y
+CONFIG_BRUCE_BATTERY_ADC_CHANNEL=2
+
+# No SD card slot on this board (the legacy SD pins double as an optional
+# HAT/module and conflict with Button A's GPIO0 below when not in use).
+# CONFIG_BRUCE_SD_ENABLED is not set
+
+# Buttons: SEL is the big front "M5" button (OK/confirm); A/B are the two
+# side buttons (UP/DW in the legacy naming). No button C.
+CONFIG_BRUCE_BUTTON_SELECT_ENABLED=y
+CONFIG_BRUCE_BUTTON_SELECT_GPIO=37
+CONFIG_BRUCE_BUTTON_A_ENABLED=y
+CONFIG_BRUCE_BUTTON_A_GPIO=0
+CONFIG_BRUCE_BUTTON_B_ENABLED=y
+CONFIG_BRUCE_BUTTON_B_GPIO=39
+# CONFIG_BRUCE_BUTTON_C_ENABLED is not set
+
+# No GPIO matrix keyboard on this board.
+# CONFIG_BRUCE_KEYBOARD_ENABLED is not set
+
+# Infrared.
+CONFIG_BRUCE_IR_TX_GPIO=9
+CONFIG_BRUCE_IR_RX_GPIO=33
+
+# NRF24 (external, over the Grove/SPI expansion pins).
+CONFIG_BRUCE_NRF24_SCK_GPIO=0
+CONFIG_BRUCE_NRF24_MISO_GPIO=33
+CONFIG_BRUCE_NRF24_MOSI_GPIO=32
+CONFIG_BRUCE_NRF24_CS_GPIO=26
+CONFIG_BRUCE_NRF24_CE_GPIO=25

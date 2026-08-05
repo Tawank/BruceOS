@@ -41,6 +41,8 @@ static bool display_driver__on_color_trans_done(
 }
 
 static bruce_result_t display_driver__backlight_init(void) {
+    if (DISPLAY__PIN_BL == (gpio_num_t)-1) return BRUCE_OK;
+
     ledc_timer_config_t timer = {
         .speed_mode = DISPLAY__BL_LEDC_MODE,
         .duty_resolution = DISPLAY__LEDC_TIMER_RESOLUTION,
@@ -71,12 +73,14 @@ static bruce_result_t display_driver__backlight_init(void) {
 }
 
 static bruce_result_t display_driver__panel_init(void) {
-    gpio_config_t bl_gpio = {
-        .mode = GPIO_MODE_OUTPUT,
-        .pin_bit_mask = 1ULL << DISPLAY__PIN_BL,
-    };
-    gpio_config(&bl_gpio);
-    gpio_set_level(DISPLAY__PIN_BL, 0);
+    if (DISPLAY__PIN_BL != (gpio_num_t)-1) {
+        gpio_config_t bl_gpio = {
+            .mode = GPIO_MODE_OUTPUT,
+            .pin_bit_mask = 1ULL << DISPLAY__PIN_BL,
+        };
+        gpio_config(&bl_gpio);
+        gpio_set_level(DISPLAY__PIN_BL, 0);
+    }
 
     spi_bus_config_t bus_config = {
         .sclk_io_num = DISPLAY__PIN_SCK,
@@ -128,7 +132,9 @@ static bruce_result_t display_driver__panel_init(void) {
 
     esp_lcd_panel_reset(s_panel);
     esp_lcd_panel_init(s_panel);
-    esp_lcd_panel_set_gap(s_panel, 52, 40);
+    esp_lcd_panel_set_gap(
+        s_panel, CONFIG_BRUCE_DISPLAY_GAP_X_ROTATION0, CONFIG_BRUCE_DISPLAY_GAP_Y_ROTATION0
+    );
     esp_lcd_panel_invert_color(s_panel, true);
     esp_lcd_panel_disp_on_off(s_panel, true);
     return BRUCE_OK;
@@ -171,26 +177,26 @@ void display_driver__configure_rotation(uint8_t rotation) {
     int y_gap = 0;
     switch (rotation & 3) {
         case 0:
-            x_gap = 52;
-            y_gap = 40;
+            x_gap = CONFIG_BRUCE_DISPLAY_GAP_X_ROTATION0;
+            y_gap = CONFIG_BRUCE_DISPLAY_GAP_Y_ROTATION0;
             break;
         case 1:
             swap_xy = true;
             mirror_x = true;
-            x_gap = 40;
-            y_gap = 53;
+            x_gap = CONFIG_BRUCE_DISPLAY_GAP_X_ROTATION1;
+            y_gap = CONFIG_BRUCE_DISPLAY_GAP_Y_ROTATION1;
             break;
         case 2:
             mirror_x = true;
             mirror_y = true;
-            x_gap = 53;
-            y_gap = 40;
+            x_gap = CONFIG_BRUCE_DISPLAY_GAP_X_ROTATION2;
+            y_gap = CONFIG_BRUCE_DISPLAY_GAP_Y_ROTATION2;
             break;
         case 3:
             swap_xy = true;
             mirror_y = true;
-            x_gap = 40;
-            y_gap = 52;
+            x_gap = CONFIG_BRUCE_DISPLAY_GAP_X_ROTATION3;
+            y_gap = CONFIG_BRUCE_DISPLAY_GAP_Y_ROTATION3;
             break;
     }
     if (s_panel != NULL) {
@@ -209,6 +215,7 @@ bruce_result_t display_driver__draw_bitmap(
 }
 
 void display_driver__set_backlight(uint8_t brightness) {
+    if (!s_backlight_initialized) return;
     uint32_t duty = ((uint32_t)brightness * DISPLAY__LEDC_MAX_DUTY) / 255;
     ledc_set_duty(DISPLAY__BL_LEDC_MODE, DISPLAY__BL_LEDC_CHANNEL, duty);
     ledc_update_duty(DISPLAY__BL_LEDC_MODE, DISPLAY__BL_LEDC_CHANNEL);

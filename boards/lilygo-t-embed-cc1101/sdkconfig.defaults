@@ -1,0 +1,84 @@
+# LilyGO T-Embed CC1101 (ESP32-S3, ST7789 170x320 round-corner bar display).
+#
+# Translated from the legacy PlatformIO env (boards/lilygo-t-embed-cc1101/
+# lilygo-t-embed-cc1101.ini + pins_arduino.h's T_EMBED_1101 branch in
+# BrucePIO_legacy). Peripherals with no equivalent in this HAL yet (CC1101,
+# W5500 ethernet, PN532, mic, RGB LED, BadUSB, and - see Input/Battery notes
+# below - the rotary encoder and I2C fuel gauge) are not ported.
+#
+# Selected via `python tools/board.py lilygo-t-embed-cc1101 build` (see
+# tools/board.py), which passes this file through SDKCONFIG_DEFAULTS after
+# the shared sdkconfig.defaults. The build system automatically also loads
+# sdkconfig.defaults.esp32s3 if present, per ESP-IDF's target-dependent
+# sdkconfig defaults rule.
+CONFIG_IDF_TARGET="esp32s3"
+
+# Display: SPI2_HOST, ST7789 170x320 physical panel, portrait (rotation 3).
+# The 170-wide panel needs a different addressable-RAM offset table than the
+# 135-wide Cardputer/StickC panels (see src/Kconfig.projbuild's help text),
+# taken from TFT_eSPI's own ST7789_Rotation.h table for TFT_WIDTH==170.
+CONFIG_BRUCE_DISPLAY_WIDTH=170
+CONFIG_BRUCE_DISPLAY_HEIGHT=320
+CONFIG_BRUCE_DISPLAY_DEFAULT_ROTATION=3
+CONFIG_BRUCE_DISPLAY_SPI_HOST=1
+CONFIG_BRUCE_DISPLAY_PIN_MOSI=9
+CONFIG_BRUCE_DISPLAY_PIN_SCK=11
+CONFIG_BRUCE_DISPLAY_PIN_CS=41
+CONFIG_BRUCE_DISPLAY_PIN_DC=16
+CONFIG_BRUCE_DISPLAY_PIN_RST=40
+CONFIG_BRUCE_DISPLAY_PIN_BL=21
+CONFIG_BRUCE_DISPLAY_GAP_X_ROTATION0=35
+CONFIG_BRUCE_DISPLAY_GAP_Y_ROTATION0=0
+CONFIG_BRUCE_DISPLAY_GAP_X_ROTATION1=0
+CONFIG_BRUCE_DISPLAY_GAP_Y_ROTATION1=35
+CONFIG_BRUCE_DISPLAY_GAP_X_ROTATION2=35
+CONFIG_BRUCE_DISPLAY_GAP_Y_ROTATION2=0
+CONFIG_BRUCE_DISPLAY_GAP_X_ROTATION3=0
+CONFIG_BRUCE_DISPLAY_GAP_Y_ROTATION3=35
+
+# Audio: I2S DAC (NS4168 amp). LRCLK/WS shares GPIO40 with the display reset
+# line above; this matches the legacy pins_arduino.h exactly (display reset
+# only pulses once at boot, before I2S ever drives the pin).
+CONFIG_BRUCE_AUDIO_BACKEND_I2S=y
+CONFIG_BRUCE_AUDIO_I2S_BCLK_GPIO=46
+CONFIG_BRUCE_AUDIO_I2S_DATA_GPIO=7
+CONFIG_BRUCE_AUDIO_I2S_LRCLK_GPIO=40
+
+# Battery: this board reads charge via an I2C fuel gauge (BQ27220), which
+# this HAL has no driver for (it only supports a raw ADC1 channel) - no
+# usable substitute pin, so battery reporting is disabled outright.
+# CONFIG_BRUCE_BATTERY_ENABLED is not set
+
+# SD card: shares the SPI3_HOST radio bus (same pins as NRF24 below).
+CONFIG_BRUCE_SD_ENABLED=y
+CONFIG_BRUCE_SD_SPI_HOST=2
+CONFIG_BRUCE_SD_PIN_MOSI=9
+CONFIG_BRUCE_SD_PIN_MISO=10
+CONFIG_BRUCE_SD_PIN_SCK=11
+CONFIG_BRUCE_SD_PIN_CS=13
+
+# Buttons: this board's primary input is a rotary encoder (turn + press)
+# plus a back button; this HAL has no encoder driver, so only the two press
+# buttons are wired up - the encoder's turn/scroll motion is not available.
+# The encoder's center press becomes SELECT (OK/confirm); the back button
+# becomes button A.
+CONFIG_BRUCE_BUTTON_SELECT_ENABLED=y
+CONFIG_BRUCE_BUTTON_SELECT_GPIO=0
+CONFIG_BRUCE_BUTTON_A_ENABLED=y
+CONFIG_BRUCE_BUTTON_A_GPIO=6
+# CONFIG_BRUCE_BUTTON_B_ENABLED is not set
+# CONFIG_BRUCE_BUTTON_C_ENABLED is not set
+
+# No GPIO matrix keyboard on this board.
+# CONFIG_BRUCE_KEYBOARD_ENABLED is not set
+
+# Infrared.
+CONFIG_BRUCE_IR_TX_GPIO=2
+CONFIG_BRUCE_IR_RX_GPIO=1
+
+# NRF24: shares the SPI3_HOST radio bus (same pins as the SD card above).
+CONFIG_BRUCE_NRF24_SCK_GPIO=11
+CONFIG_BRUCE_NRF24_MISO_GPIO=10
+CONFIG_BRUCE_NRF24_MOSI_GPIO=9
+CONFIG_BRUCE_NRF24_CS_GPIO=44
+CONFIG_BRUCE_NRF24_CE_GPIO=43

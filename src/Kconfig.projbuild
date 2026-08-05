@@ -63,7 +63,57 @@ menu "Bruce hardware configuration"
         config BRUCE_DISPLAY_PIN_BL
             int "LCD backlight GPIO"
             default 38
-            range 0 48
+            range -1 48
+            help
+                -1 if the panel's backlight is not switched through a GPIO
+                (e.g. tied to a PMIC rail that is always on once powered);
+                the driver skips backlight PWM setup entirely in that case.
+
+        # ST7789's addressable RAM is a fixed 240x320; a physically smaller
+        # panel is offset within it, and the offset swaps per rotation. These
+        # four (x, y) pairs are the same per-panel constants TFT_eSPI ships in
+        # TFT_Drivers/ST7789_Rotation.h for each known panel size - e.g. the
+        # 135x240 panel (Cardputer/StickC Plus2, defaults below) needs a
+        # different table than the 170x320 panel some other boards use.
+        config BRUCE_DISPLAY_GAP_X_ROTATION0
+            int "Panel gap X, rotation 0 (portrait)"
+            default 52
+            range 0 200
+
+        config BRUCE_DISPLAY_GAP_Y_ROTATION0
+            int "Panel gap Y, rotation 0 (portrait)"
+            default 40
+            range 0 200
+
+        config BRUCE_DISPLAY_GAP_X_ROTATION1
+            int "Panel gap X, rotation 1 (landscape)"
+            default 40
+            range 0 200
+
+        config BRUCE_DISPLAY_GAP_Y_ROTATION1
+            int "Panel gap Y, rotation 1 (landscape)"
+            default 53
+            range 0 200
+
+        config BRUCE_DISPLAY_GAP_X_ROTATION2
+            int "Panel gap X, rotation 2 (portrait, inverted)"
+            default 53
+            range 0 200
+
+        config BRUCE_DISPLAY_GAP_Y_ROTATION2
+            int "Panel gap Y, rotation 2 (portrait, inverted)"
+            default 40
+            range 0 200
+
+        config BRUCE_DISPLAY_GAP_X_ROTATION3
+            int "Panel gap X, rotation 3 (landscape, inverted)"
+            default 40
+            range 0 200
+
+        config BRUCE_DISPLAY_GAP_Y_ROTATION3
+            int "Panel gap Y, rotation 3 (landscape, inverted)"
+            default 52
+            range 0 200
     endmenu
 
     menu "Audio"
