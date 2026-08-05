@@ -4,14 +4,15 @@
 #include "input_common.h"
 #include "input_encoder.h"
 #include "input_keyboard.h"
+#if CONFIG_BRUCE_TOUCH_ENABLED
 #include "input_touch.h"
+#endif
 
 #include "core_sdk/input.h"
 #include "core_sdk/process.h"
 #include "core_sdk/runtime.h"
 
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
+#include "freertos/FreeRTOS.h" // IWYU pragma: keep
 #include "sdkconfig.h"
 
 #ifndef INPUT__POLL_PERIOD_MS
@@ -38,7 +39,9 @@ static bruce_result_t input_app__init(void) {
 #if !CONFIG_BRUCE_QEMU_TEST_MODE
     input_buttons__init();
     input_keyboard__init();
+#if CONFIG_BRUCE_TOUCH_ENABLED
     input_touch__init();
+#endif
     input_encoder__init();
 #endif
     return BRUCE_OK;
@@ -48,7 +51,9 @@ static void input_app__poll(void) {
 #if !CONFIG_BRUCE_QEMU_TEST_MODE
     input_buttons__poll();
     input_keyboard__poll();
+#if CONFIG_BRUCE_TOUCH_ENABLED
     input_touch__poll();
+#endif
     input_encoder__poll();
 #endif
 }

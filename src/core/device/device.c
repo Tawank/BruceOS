@@ -2,13 +2,13 @@
 
 #include "core_sdk/device.h"
 #include "core_sdk/permission.h"
-#include "core_sdk/pubsub.h"
+#include "core_sdk/pubsub.h"  // IWYU pragma: keep
 #include "core_sdk/runtime.h" // IWYU pragma: keep
 
 #include <stdbool.h>
-#include <string.h>
+#include <string.h> // IWYU pragma: keep
 
-#include "driver/gpio.h"
+#include "driver/gpio.h"             // IWYU pragma: keep
 #include "esp_adc/adc_cali.h"        // IWYU pragma: keep
 #include "esp_adc/adc_cali_scheme.h" // IWYU pragma: keep
 #include "esp_adc/adc_oneshot.h"     // IWYU pragma: keep
@@ -26,7 +26,7 @@
 
 #if CONFIG_BRUCE_QEMU_TEST_MODE || !CONFIG_BRUCE_BATTERY_ENABLED
 #define DEVICE__NO_BATTERY 1
-#elif CONFIG_BRUCE_BATTERY_BACKEND_AXP2101 || CONFIG_BRUCE_BATTERY_BACKEND_AXP192 ||                             \
+#elif CONFIG_BRUCE_BATTERY_BACKEND_AXP2101 || CONFIG_BRUCE_BATTERY_BACKEND_AXP192 ||                         \
     CONFIG_BRUCE_BATTERY_BACKEND_BQ27220
 /* All I2C fuel-gauge/PMIC backends are read the same way from here: the
  * device_bus process (modules/device_bus/) is the sole
@@ -50,7 +50,8 @@ static void device__restart_task(void *context) {
 bruce_result_t device__restart(uint32_t delay_ms) {
     bruce_result_t permission = permission__check(BRUCE_PERMISSION_PROCESS);
     if (permission != BRUCE_OK) return permission;
-    return xTaskCreate(device__restart_task, "device_restart", 2048, (void *)(uintptr_t)delay_ms, 5, NULL) == pdPASS
+    return xTaskCreate(device__restart_task, "device_restart", 2048, (void *)(uintptr_t)delay_ms, 5, NULL) ==
+                   pdPASS
                ? BRUCE_OK
                : BRUCE_ERR_NO_MEMORY;
 }

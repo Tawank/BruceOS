@@ -2,12 +2,12 @@
 
 #include "display_internal.h"
 
-#include "core/device/board_i2c.h"
+#include "core/device/board_i2c.h" // IWYU pragma: keep
 
 #include "driver/gpio.h"
 #include "driver/ledc.h"
-#include "esp_lcd_ili9341.h"
-#include "esp_lcd_io_i80.h"
+#include "esp_lcd_ili9341.h" // IWYU pragma: keep
+#include "esp_lcd_io_i80.h"  // IWYU pragma: keep
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_panel_vendor.h" // IWYU pragma: keep
@@ -184,15 +184,15 @@ static bruce_result_t display_driver__panel_init(void) {
         .clk_src = LCD_CLK_SRC_DEFAULT,
         .data_gpio_nums =
             {
-                (gpio_num_t)CONFIG_BRUCE_DISPLAY_PIN_D0,
-                (gpio_num_t)CONFIG_BRUCE_DISPLAY_PIN_D1,
-                (gpio_num_t)CONFIG_BRUCE_DISPLAY_PIN_D2,
-                (gpio_num_t)CONFIG_BRUCE_DISPLAY_PIN_D3,
-                (gpio_num_t)CONFIG_BRUCE_DISPLAY_PIN_D4,
-                (gpio_num_t)CONFIG_BRUCE_DISPLAY_PIN_D5,
-                (gpio_num_t)CONFIG_BRUCE_DISPLAY_PIN_D6,
-                (gpio_num_t)CONFIG_BRUCE_DISPLAY_PIN_D7,
-            },
+                             (gpio_num_t)CONFIG_BRUCE_DISPLAY_PIN_D0,
+                             (gpio_num_t)CONFIG_BRUCE_DISPLAY_PIN_D1,
+                             (gpio_num_t)CONFIG_BRUCE_DISPLAY_PIN_D2,
+                             (gpio_num_t)CONFIG_BRUCE_DISPLAY_PIN_D3,
+                             (gpio_num_t)CONFIG_BRUCE_DISPLAY_PIN_D4,
+                             (gpio_num_t)CONFIG_BRUCE_DISPLAY_PIN_D5,
+                             (gpio_num_t)CONFIG_BRUCE_DISPLAY_PIN_D6,
+                             (gpio_num_t)CONFIG_BRUCE_DISPLAY_PIN_D7,
+                             },
         .bus_width = 8,
         .max_transfer_bytes = DISPLAY__FB_SIZE + 8,
         .dma_burst_size = 64,

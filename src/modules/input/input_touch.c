@@ -1,6 +1,9 @@
 #include "input_touch.h"
 
 #include <stdbool.h>
+
+#if CONFIG_BRUCE_TOUCH_ENABLED
+
 #include <string.h>
 
 #include "input_common.h"
@@ -8,8 +11,6 @@
 #include "core_sdk/device.h"
 #include "core_sdk/pubsub.h"
 #include "sdkconfig.h"
-
-#if CONFIG_BRUCE_TOUCH_ENABLED
 
 /* The touch controller and the board I2C bus it shares with the PMIC are
  * owned exclusively by the device_bus process (see

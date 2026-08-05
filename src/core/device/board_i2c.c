@@ -1,6 +1,6 @@
 #include "board_i2c.h"
 
-#include "freertos/FreeRTOS.h"
+#include "freertos/FreeRTOS.h" // IWYU pragma: keep
 #include "freertos/semphr.h"
 
 #if CONFIG_BRUCE_BOARD_I2C_ENABLED
