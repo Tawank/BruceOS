@@ -1,6 +1,6 @@
 #pragma once
 
-#include "driver/i2c_master.h"
+#include "driver/i2c_master.h" // IWYU pragma: keep
 
 /* Lazily creates and returns the shared "board I2C" bus (BRUCE_BOARD_I2C_*
  * in Kconfig), used internally by HAL drivers that talk to a PMIC, a
