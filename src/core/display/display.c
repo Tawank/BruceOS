@@ -33,6 +33,13 @@ typedef struct {
 } notification__state_t;
 
 static SemaphoreHandle_t s_mutex;
+/* Serializes the actual panel DMA transfer (and its shared s_row_buffer /
+ * s_transfer_done usage) across processes and against teardown, independent
+ * of s_mutex. display__transfer_locked() releases s_mutex for the duration
+ * of the transfer so other processes' draw calls are not blocked while one
+ * process is presenting; this mutex keeps concurrent transfers themselves
+ * (and display__deinit()) from racing on the single physical display bus. */
+static SemaphoreHandle_t s_transfer_mutex;
 static bool s_initialized;
 static bool s_buffered_rendering;
 static bruce_display_color_t *s_framebuffer;
@@ -86,6 +93,7 @@ bruce_result_t display__snapshot(
 
 static void display__ensure_lock(void) {
     if (s_mutex == NULL) s_mutex = xSemaphoreCreateRecursiveMutex();
+    if (s_transfer_mutex == NULL) s_transfer_mutex = xSemaphoreCreateMutex();
 }
 
 static bruce_display_rect_t display__fullscreen_rect(void) {
@@ -363,9 +371,16 @@ static void display__expire_notification_locked(void) {
 }
 
 /* Pushes `rect` from the framebuffer to the panel, compositing the active
- * notification overlay into the transferred rows.  Runs synchronously in the
- * caller's task with the display lock held, so transfers are serialized and
- * can never race with drawing or with each other. */
+ * notification overlay into the transferred rows.  Called with the display
+ * lock held (as its "_locked" name implies): it snapshots the state it needs
+ * from shared context under that lock, then releases the lock for the
+ * duration of the actual DMA transfer so other processes' draw calls are not
+ * blocked while this one is presenting, and reacquires it before returning.
+ *
+ * The transfer itself is still serialized -- against concurrent transfers
+ * from other processes, and against display__deinit() freeing the
+ * framebuffer/row buffer out from under it -- via s_transfer_mutex, since
+ * there is only one physical display bus and one shared row buffer. */
 static bruce_result_t display__transfer_locked(bruce_display_rect_t rect, bool fullscreen) {
 #if CONFIG_BRUCE_QEMU_TEST_MODE
     (void)rect;
@@ -376,6 +391,11 @@ static bruce_result_t display__transfer_locked(bruce_display_rect_t rect, bool f
     notification__state_t notification = s_notification;
     bool compose = notification.active && display__rects_overlap(rect, notification.rect);
     bool packed = !s_dma_framebuffer || !fullscreen || compose;
+
+    display__unlock();
+    xSemaphoreTake(s_transfer_mutex, portMAX_DELAY);
+
+    bruce_result_t result = BRUCE_OK;
     while (xSemaphoreTake(s_transfer_done, 0) == pdTRUE) {}
     if (packed) {
         for (int row = 0; row < rect.height; ++row) {
@@ -389,14 +409,18 @@ static bruce_result_t display__transfer_locked(bruce_display_rect_t rect, bool f
             if (display_driver__draw_bitmap(rect.x, screen_y, rect.x + rect.width, screen_y + 1, pixels) !=
                     BRUCE_OK ||
                 xSemaphoreTake(s_transfer_done, portMAX_DELAY) != pdTRUE) {
-                return BRUCE_ERR_IO;
+                result = BRUCE_ERR_IO;
+                break;
             }
         }
-        return BRUCE_OK;
+    } else {
+        result =
+            display_driver__draw_bitmap(rect.x, rect.y, rect.x + rect.width, rect.y + rect.height, s_framebuffer);
+        if (result == BRUCE_OK && xSemaphoreTake(s_transfer_done, portMAX_DELAY) != pdTRUE) result = BRUCE_ERR_IO;
     }
-    bruce_result_t result =
-        display_driver__draw_bitmap(rect.x, rect.y, rect.x + rect.width, rect.y + rect.height, s_framebuffer);
-    if (result == BRUCE_OK && xSemaphoreTake(s_transfer_done, portMAX_DELAY) != pdTRUE) result = BRUCE_ERR_IO;
+
+    xSemaphoreGive(s_transfer_mutex);
+    display__lock();
     return result;
 #endif
 }
@@ -450,6 +474,12 @@ static void display__configure_rotation(void) {
 }
 
 static void display__release_resources_locked(void) {
+    /* display__transfer_locked() runs its actual DMA transfer with s_mutex
+     * released, holding only s_transfer_mutex. s_initialized is already
+     * false by the time callers reach here (see display__deinit()), so no
+     * new transfer can start, but one already in flight must be allowed to
+     * finish before we free the buffers/semaphore it's using. */
+    if (s_transfer_mutex != NULL) xSemaphoreTake(s_transfer_mutex, portMAX_DELAY);
     if (s_transfer_done != NULL) {
         vSemaphoreDelete(s_transfer_done);
         s_transfer_done = NULL;
@@ -463,6 +493,7 @@ static void display__release_resources_locked(void) {
         s_framebuffer = NULL;
     }
     display_driver__deinit();
+    if (s_transfer_mutex != NULL) xSemaphoreGive(s_transfer_mutex);
 }
 
 bruce_result_t display__init(void) {
