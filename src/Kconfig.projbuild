@@ -122,6 +122,18 @@ menu "Bruce hardware configuration"
             default 36
             range 0 48
 
+        config BRUCE_DISPLAY_SPI_PCLK_HZ
+            int "LCD SPI clock (Hz)"
+            depends on BRUCE_DISPLAY_BUS_SPI
+            default 40000000
+            range 1000000 80000000
+            help
+                40 MHz is a conservative default that works on short,
+                PCB-routed traces. Many ST7789/ILI9341 panels are rated for
+                60-80 MHz and raising this shortens every frame transfer;
+                lower it instead on jumper-wired prototypes or long/noisy
+                SPI runs if the panel shows tearing or garbage pixels.
+
         config BRUCE_DISPLAY_PIN_D0
             int "LCD i80 data GPIO 0"
             depends on BRUCE_DISPLAY_BUS_I80

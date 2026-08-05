@@ -43,6 +43,13 @@ static bool s_initialized;
 static bool s_buffered_rendering;
 static bruce_display_color_t *s_framebuffer;
 static bruce_display_color_t *s_direct_buffer;
+/* Multi-row scratch buffer for display__transfer_locked()'s packed path
+ * (buffered mode only, allocated alongside s_framebuffer) -- lets a
+ * non-contiguous or overlay-composited partial rect go out as one DMA
+ * transfer per several rows instead of one per row. Same pixel budget as
+ * s_direct_buffer, whose allocation it never overlaps with (that one is
+ * direct-mode-only), so peak RAM use does not increase. */
+static bruce_display_color_t *s_pack_buffer;
 static DMA_ATTR bruce_display_color_t s_row_buffer[DISPLAY__ROW_BUF_PIXELS];
 static bool s_dma_framebuffer;
 static uint8_t s_rotation;
@@ -371,7 +378,7 @@ bool display_internal__on_transfer_done_from_isr(void) {
  * "_locked" name implies).
  *
  * When no visible overlay intersects `rect` (the common case), the transfer
- * touches only the framebuffer and s_row_buffer, so the registry lock is
+ * touches only the framebuffer and s_pack_buffer, so the registry lock is
  * released for the duration of the actual DMA transfer and other processes'
  * draw calls are not blocked while this one is presenting; it is reacquired
  * before returning.
@@ -388,10 +395,14 @@ bool display_internal__on_transfer_done_from_isr(void) {
  * overlay-covered region -- typically a small notification banner -- is
  * being presented, not on every frame.
  *
+ * The non-fullscreen "packed" path below (see its own comment) chunks
+ * several rows per DMA transfer instead of one, via s_pack_buffer, whenever
+ * rows can't be read straight out of s_framebuffer in one contiguous block.
+ *
  * The transfer itself is also serialized -- against concurrent transfers
  * from other processes, and against display__deinit() freeing the
- * framebuffer/row buffer out from under it -- via s_transfer_mutex, since
- * there is only one physical display bus and one shared row buffer. */
+ * framebuffer/pack buffer out from under it -- via s_transfer_mutex, since
+ * there is only one physical display bus and one shared pack buffer. */
 static bruce_result_t display__transfer_locked(bruce_display_rect_t rect, bool fullscreen) {
 #if CONFIG_BRUCE_QEMU_TEST_MODE
     (void)rect;
@@ -407,20 +418,48 @@ static bruce_result_t display__transfer_locked(bruce_display_rect_t rect, bool f
     bruce_result_t result = BRUCE_OK;
     while (xSemaphoreTake(s_transfer_done, 0) == pdTRUE) {}
     if (packed) {
-        for (int row = 0; row < rect.height; ++row) {
+        bool needs_copy = compose || !s_dma_framebuffer;
+        /* When the framebuffer itself is DMA-capable and nothing is being
+         * composited over it, a row's pixels don't need to move through any
+         * scratch buffer at all -- and if `rect` is also full-width, its
+         * rows are contiguous in s_framebuffer (row N's last pixel is
+         * immediately followed by row N+1's first), so the whole remaining
+         * block can go out as a single transfer, exactly like the
+         * already-fullscreen case below. Only a genuinely narrower rect (or
+         * one needing composition/copy) is chunked through s_pack_buffer,
+         * several rows at a time, to cut DMA round trips per row down to
+         * one per chunk. */
+        int chunk_rows = 1;
+        if (!needs_copy) {
+            if (rect.width == s_fb_width) chunk_rows = rect.height;
+        } else {
+            chunk_rows = (int)(DISPLAY__DIRECT_BUF_PIXELS / rect.width);
+            if (chunk_rows < 1) chunk_rows = 1;
+        }
+        for (int row = 0; row < rect.height;) {
             int screen_y = rect.y + row;
+            int rows = rect.height - row;
+            if (rows > chunk_rows) rows = chunk_rows;
             const bruce_display_color_t *pixels = &s_framebuffer[screen_y * s_fb_width + rect.x];
-            if (compose || !s_dma_framebuffer) {
-                memcpy(s_row_buffer, pixels, (size_t)rect.width * sizeof(*pixels));
-                if (compose) display_overlay__compose_row_locked(rect, screen_y, s_row_buffer);
-                pixels = s_row_buffer;
+            if (needs_copy) {
+                for (int r = 0; r < rows; ++r) {
+                    bruce_display_color_t *dst = &s_pack_buffer[(size_t)r * rect.width];
+                    memcpy(
+                        dst, &s_framebuffer[(size_t)(screen_y + r) * s_fb_width + rect.x],
+                        (size_t)rect.width * sizeof(*dst)
+                    );
+                    if (compose) display_overlay__compose_row_locked(rect, screen_y + r, dst);
+                }
+                pixels = s_pack_buffer;
             }
-            if (display_driver__draw_bitmap(rect.x, screen_y, rect.x + rect.width, screen_y + 1, pixels) !=
-                    BRUCE_OK ||
+            if (display_driver__draw_bitmap(
+                    rect.x, screen_y, rect.x + rect.width, screen_y + rows, pixels
+                ) != BRUCE_OK ||
                 xSemaphoreTake(s_transfer_done, portMAX_DELAY) != pdTRUE) {
                 result = BRUCE_ERR_IO;
                 break;
             }
+            row += rows;
         }
     } else {
         result =
@@ -494,6 +533,10 @@ static void display__release_resources_locked(void) {
         heap_caps_free(s_direct_buffer);
         s_direct_buffer = NULL;
     }
+    if (s_pack_buffer != NULL) {
+        heap_caps_free(s_pack_buffer);
+        s_pack_buffer = NULL;
+    }
     if (s_framebuffer != NULL) {
         heap_caps_free(s_framebuffer);
         s_framebuffer = NULL;
@@ -537,6 +580,15 @@ bruce_result_t display__init(void) {
         if (s_framebuffer == NULL) {
             ESP_LOGE(TAG, "failed to allocate framebuffer");
             display_driver__deinit();
+            display__unlock();
+            return BRUCE_ERR_NO_MEMORY;
+        }
+        s_pack_buffer = heap_caps_malloc(
+            DISPLAY__DIRECT_BUF_PIXELS * sizeof(*s_pack_buffer), MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA
+        );
+        if (s_pack_buffer == NULL) {
+            ESP_LOGE(TAG, "failed to allocate transfer pack buffer");
+            display__release_resources_locked();
             display__unlock();
             return BRUCE_ERR_NO_MEMORY;
         }

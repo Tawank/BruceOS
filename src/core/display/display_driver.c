@@ -239,7 +239,7 @@ static bruce_result_t display_driver__panel_init(void) {
     esp_lcd_panel_io_spi_config_t io_config = {
         .dc_gpio_num = DISPLAY__PIN_DC,
         .cs_gpio_num = DISPLAY__PIN_CS,
-        .pclk_hz = 40 * 1000 * 1000,
+        .pclk_hz = CONFIG_BRUCE_DISPLAY_SPI_PCLK_HZ,
         .spi_mode = 0,
         .trans_queue_depth = 1,
         .lcd_cmd_bits = 8,

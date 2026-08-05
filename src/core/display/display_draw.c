@@ -33,41 +33,47 @@ static void display__draw_line_bresenham(
     }
 }
 
-static void display__draw_circle_helper(
-    display__process_context_t *context, int16_t cx, int16_t cy, int16_t r, bruce_display_color_t color,
-    bool fill
-) {
-    int16_t x = 0;
-    int16_t y = r;
-    int16_t d = 3 - 2 * r;
-    while (x <= y) {
-        if (fill) {
-            display__draw_line_bresenham(context, cx - x, cy + y, cx + x, cy + y, color);
-            display__draw_line_bresenham(context, cx - x, cy - y, cx + x, cy - y, color);
-            display__draw_line_bresenham(context, cx - y, cy + x, cx + y, cy + x, color);
-            display__draw_line_bresenham(context, cx - y, cy - x, cx + y, cy - x, color);
-        } else {
-            display_internal__set_pixel(context, cx + x, cy + y, color);
-            display_internal__set_pixel(context, cx - x, cy + y, color);
-            display_internal__set_pixel(context, cx + x, cy - y, color);
-            display_internal__set_pixel(context, cx - x, cy - y, color);
-            display_internal__set_pixel(context, cx + y, cy + x, color);
-            display_internal__set_pixel(context, cx - y, cy + x, color);
-            display_internal__set_pixel(context, cx + y, cy - x, color);
-            display_internal__set_pixel(context, cx - y, cy - x, color);
-        }
-        if (d < 0) d += 4 * x + 6;
-        else { d += 4 * (x - y) + 10; y--; }
-        x++;
-    }
-}
-
 enum {
     DISPLAY__CIRCLE_TOP_LEFT = 1 << 0,
     DISPLAY__CIRCLE_TOP_RIGHT = 1 << 1,
     DISPLAY__CIRCLE_BOTTOM_LEFT = 1 << 2,
     DISPLAY__CIRCLE_BOTTOM_RIGHT = 1 << 3,
+    DISPLAY__CIRCLE_ALL_QUADRANTS = DISPLAY__CIRCLE_TOP_LEFT | DISPLAY__CIRCLE_TOP_RIGHT |
+                                     DISPLAY__CIRCLE_BOTTOM_LEFT | DISPLAY__CIRCLE_BOTTOM_RIGHT,
 };
+
+/* A midpoint-circle Bresenham step holds its "y" register fixed across
+ * several consecutive "x" steps whenever the arc is nearly flat there (most
+ * of all near the poles/equator). Per-pixel plotting throws that away and
+ * pays for one display_internal__set_pixel call -- one full DMA round trip
+ * per pixel in unbuffered/direct mode -- per point. This flushes a whole
+ * such run in one shot: [run_start, run_end] are the "x" register values
+ * that shared "run_y" as their "y" register, so per quadrant that is one
+ * horizontal run (the octant where the register maps straight to screen-x)
+ * and one vertical run (the mirrored octant, where it maps to screen-y). */
+static void display__flush_circle_octant_run(
+    display__process_context_t *context, int16_t cx, int16_t cy, int16_t run_start, int16_t run_end,
+    int16_t run_y, uint8_t quadrants, bruce_display_color_t color
+) {
+    if (run_end < run_start) return;
+    int16_t run_len = run_end - run_start + 1;
+    if (quadrants & DISPLAY__CIRCLE_TOP_LEFT) {
+        display_internal__fill_rect(context, cx - run_end, cy - run_y, run_len, 1, color);
+        display_internal__fill_rect(context, cx - run_y, cy - run_end, 1, run_len, color);
+    }
+    if (quadrants & DISPLAY__CIRCLE_TOP_RIGHT) {
+        display_internal__fill_rect(context, cx + run_start, cy - run_y, run_len, 1, color);
+        display_internal__fill_rect(context, cx + run_y, cy - run_end, 1, run_len, color);
+    }
+    if (quadrants & DISPLAY__CIRCLE_BOTTOM_LEFT) {
+        display_internal__fill_rect(context, cx - run_end, cy + run_y, run_len, 1, color);
+        display_internal__fill_rect(context, cx - run_y, cy + run_start, 1, run_len, color);
+    }
+    if (quadrants & DISPLAY__CIRCLE_BOTTOM_RIGHT) {
+        display_internal__fill_rect(context, cx + run_start, cy + run_y, run_len, 1, color);
+        display_internal__fill_rect(context, cx + run_y, cy + run_start, 1, run_len, color);
+    }
+}
 
 static void display__draw_circle_quadrants(
     display__process_context_t *context, int16_t cx, int16_t cy, int16_t r, uint8_t quadrants,
@@ -76,23 +82,37 @@ static void display__draw_circle_quadrants(
     int16_t x = 0;
     int16_t y = r;
     int16_t d = 3 - 2 * r;
+    int16_t run_start = 0;
     while (x <= y) {
-        if (quadrants & DISPLAY__CIRCLE_TOP_LEFT) {
-            display_internal__set_pixel(context, cx - x, cy - y, color);
-            display_internal__set_pixel(context, cx - y, cy - x, color);
+        if (d < 0) {
+            d += 4 * x + 6;
+        } else {
+            display__flush_circle_octant_run(context, cx, cy, run_start, x, y, quadrants, color);
+            d += 4 * (x - y) + 10;
+            y--;
+            run_start = x + 1;
         }
-        if (quadrants & DISPLAY__CIRCLE_TOP_RIGHT) {
-            display_internal__set_pixel(context, cx + x, cy - y, color);
-            display_internal__set_pixel(context, cx + y, cy - x, color);
-        }
-        if (quadrants & DISPLAY__CIRCLE_BOTTOM_LEFT) {
-            display_internal__set_pixel(context, cx - x, cy + y, color);
-            display_internal__set_pixel(context, cx - y, cy + x, color);
-        }
-        if (quadrants & DISPLAY__CIRCLE_BOTTOM_RIGHT) {
-            display_internal__set_pixel(context, cx + x, cy + y, color);
-            display_internal__set_pixel(context, cx + y, cy + x, color);
-        }
+        x++;
+    }
+    display__flush_circle_octant_run(context, cx, cy, run_start, x - 1, y, quadrants, color);
+}
+
+static void display__draw_circle_helper(
+    display__process_context_t *context, int16_t cx, int16_t cy, int16_t r, bruce_display_color_t color,
+    bool fill
+) {
+    if (!fill) {
+        display__draw_circle_quadrants(context, cx, cy, r, DISPLAY__CIRCLE_ALL_QUADRANTS, color);
+        return;
+    }
+    int16_t x = 0;
+    int16_t y = r;
+    int16_t d = 3 - 2 * r;
+    while (x <= y) {
+        display__draw_line_bresenham(context, cx - x, cy + y, cx + x, cy + y, color);
+        display__draw_line_bresenham(context, cx - x, cy - y, cx + x, cy - y, color);
+        display__draw_line_bresenham(context, cx - y, cy + x, cx + y, cy + x, color);
+        display__draw_line_bresenham(context, cx - y, cy - x, cx + y, cy - x, color);
         if (d < 0) d += 4 * x + 6;
         else { d += 4 * (x - y) + 10; y--; }
         x++;
