@@ -1,4 +1,4 @@
-#include "notification_app.h"
+#include "notify_app.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,7 +9,7 @@
 #include "core_sdk/status_icon.h"
 #include "core_sdk/stdio.h"
 
-int notification_app_main(int argc, char **argv) {
+int notify_app_main(int argc, char **argv) {
     ArgParser *root = ap_new_parser();
     if (root == NULL) return BRUCE_ERR_NO_MEMORY;
     ap_set_helptext(root, "Manage transient notifications and status icons.");

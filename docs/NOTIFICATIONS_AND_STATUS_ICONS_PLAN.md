@@ -4,7 +4,7 @@
 > notification composition inside Core display (`core/display`) has been
 > replaced. Core now exposes only a generic `display__overlay_*` primitive
 > (see `core_sdk/display.h`); the notification banner itself moved to
-> `modules/notification`, a background service built on that primitive, with
+> `modules/notification_service`, a background service built on that primitive, with
 > `notification__push()`/`notification__dismiss()` reduced to a mailbox in
 > `core/notification`. See `ARCHITECTURE.md`'s display/overlay and
 > notification paragraphs for the current design. The status-icon half below
@@ -230,10 +230,10 @@ The APIs are intentionally available without permission checks.
 Provide thin terminal-accessible commands over the same Core APIs:
 
 ```text
-notification push <duration-ms> <text>
-notification dismiss
-notification icon-list
-notification icon-remove <key>
+notify push <duration-ms> <text>
+notify dismiss
+notify icon-list
+notify icon-remove <key>
 ```
 
 Bitmap push is optional in the terminal because entering binary bitmap data is

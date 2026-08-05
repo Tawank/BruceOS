@@ -127,7 +127,7 @@ Any ELF application may also create its own overlay: a small always-on-top
 drawing surface composited into every flush independently of the normal
 foreground/tile system, so drawing into it never contends with whatever else
 is on screen. This is what `notification__push()` itself is built on (see
-`src/modules/notification/notification_service.c`) -- an app that wants a
+`src/modules/notification_service/notification_service.c`) -- an app that wants a
 different notification UI, a HUD, or a floating menu can just use the same
 primitive directly instead:
 

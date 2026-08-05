@@ -225,6 +225,24 @@ static bool input__kb_match_hotkey(const char *key, char *out_action, size_t act
     return false;
 }
 
+/* True iff `command`'s leading "key=value" environment tokens (the same ones
+ * app_runner__run_command() parses off the front of the line) include
+ * "BG=1" -- mirrors bruce_launcher__command_requests_background() in
+ * modules/bruce_launcher/bruce_launcher_app.c. A one-shot CLI action with no
+ * screen of its own (e.g. "BG=1 wifi connect") must not be tagged GUI=1. */
+static bool input__kb_command_requests_background(const char *command) {
+    const char *cursor = command;
+    for (;;) {
+        while (*cursor == ' ') cursor++;
+        const char *token_end = cursor;
+        while (*token_end != '\0' && *token_end != ' ') token_end++;
+        size_t token_len = (size_t)(token_end - cursor);
+        if (token_len == 0 || memchr(cursor, '=', token_len) == NULL) return false;
+        if (token_len == 4 && strncmp(cursor, "BG=1", 4) == 0) return true;
+        cursor = token_end;
+    }
+}
+
 static void input__kb_run_hotkey(const char *action) {
     if (strcmp(action, "process switch next") == 0 || strcmp(action, "task switch next") == 0) {
         (void)process__switch_next();
@@ -232,15 +250,20 @@ static void input__kb_run_hotkey(const char *action) {
     }
 
     while (isspace((unsigned char)*action)) action++;
-    int result;
-    if (strcmp(action, "launcher") == 0) {
-        const bruce_environment_variable_t gui_env[] = {
-            {.name = "GUI", .value = "1"}
-        };
-        result = app_runner__run_with_environment("launcher", NULL, BRUCE_LAUNCH_FOREGROUND, gui_env, 1);
+    /* Every other hotkey action launches a foreground command that draws its
+     * own screen (e.g. "process preview", "launcher"), so it needs GUI=1 the
+     * same way a launcher menu entry does -- see
+     * bruce_launcher__run_entry() -- unless it already requests one itself
+     * or asks to run in the background. Without this, the launched
+     * process's display context stays gui_requested=false, its viewport
+     * stays hidden, and every draw call it makes is a silent no-op. */
+    char command[BRUCE_CONFIG_HOTKEY_ACTION_MAX_LEN + 8];
+    if (strncmp(action, "GUI=", 4) == 0 || input__kb_command_requests_background(action)) {
+        snprintf(command, sizeof(command), "%s", action);
     } else {
-        result = app_runner__run_command(action, BRUCE_LAUNCH_FOREGROUND);
+        snprintf(command, sizeof(command), "GUI=1 %s", action);
     }
+    int result = app_runner__run_command(command, BRUCE_LAUNCH_FOREGROUND);
     if (result < 0) ESP_LOGW(TAG, "hotkey action '%s' failed: %d", action, result);
 }
 

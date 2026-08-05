@@ -368,12 +368,27 @@ bool display_internal__on_transfer_done_from_isr(void) {
 
 /* Pushes `rect` from the framebuffer to the panel, compositing overlays
  * into the transferred rows.  Called with the display lock held (as its
- * "_locked" name implies): it snapshots the state it needs from shared
- * context under that lock, then releases the lock for the duration of the
- * actual DMA transfer so other processes' draw calls are not blocked while
- * this one is presenting, and reacquires it before returning.
+ * "_locked" name implies).
  *
- * The transfer itself is still serialized -- against concurrent transfers
+ * When no visible overlay intersects `rect` (the common case), the transfer
+ * touches only the framebuffer and s_row_buffer, so the registry lock is
+ * released for the duration of the actual DMA transfer and other processes'
+ * draw calls are not blocked while this one is presenting; it is reacquired
+ * before returning.
+ *
+ * When an overlay does intersect `rect`, composition
+ * (display_overlay__compose_row_locked()) reads the live s_overlays[] table
+ * and each overlay's separately heap-allocated pixel buffer directly --
+ * unlike the old single fixed-size notification struct this replaced, there
+ * is no cheap self-contained snapshot to take before releasing the lock, so
+ * the registry lock stays held for this transfer's whole duration instead:
+ * releasing it here would let a concurrent display__overlay_destroy() (or
+ * _move()) on another task free or resize that buffer while this loop is
+ * still reading it. This only blocks other processes' draws while an
+ * overlay-covered region -- typically a small notification banner -- is
+ * being presented, not on every frame.
+ *
+ * The transfer itself is also serialized -- against concurrent transfers
  * from other processes, and against display__deinit() freeing the
  * framebuffer/row buffer out from under it -- via s_transfer_mutex, since
  * there is only one physical display bus and one shared row buffer. */
@@ -386,7 +401,7 @@ static bruce_result_t display__transfer_locked(bruce_display_rect_t rect, bool f
     bool compose = display_overlay__intersects_locked(rect);
     bool packed = !s_dma_framebuffer || !fullscreen || compose;
 
-    display__unlock();
+    if (!compose) display__unlock();
     xSemaphoreTake(s_transfer_mutex, portMAX_DELAY);
 
     bruce_result_t result = BRUCE_OK;
@@ -414,7 +429,7 @@ static bruce_result_t display__transfer_locked(bruce_display_rect_t rect, bool f
     }
 
     xSemaphoreGive(s_transfer_mutex);
-    display__lock();
+    if (!compose) display__lock();
     return result;
 #endif
 }

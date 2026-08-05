@@ -770,7 +770,13 @@ only for the duration of one draw primitive on that surface. Two processes
 overlay model, checked under the registry lock -- can therefore draw and even
 present concurrently; only the actual panel DMA transfer and teardown are
 still serialized, via a separate transfer lock, since there is one physical
-bus. GUI processes draw in local coordinates into a fullscreen
+bus. The registry lock is the exception when a transfer's rect is covered by
+a visible overlay: compositing reads that overlay's live rect and pixel
+buffer directly (there is no cheap self-contained snapshot to take first, as
+there is for the process/tile framebuffer case), so the registry lock stays
+held for that transfer's whole duration rather than being released around
+it, blocking other processes' draws for as long as presenting that one
+region takes. GUI processes draw in local coordinates into a fullscreen
 foreground viewport, one of up to four launcher-assigned non-overlapping
 tiles, or a hidden zero-sized viewport. `display__begin_frame()` leases the
 viewport through the completion of `display__present()`; tile rows are packed

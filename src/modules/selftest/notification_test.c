@@ -9,12 +9,12 @@
 #include "core_sdk/notification.h"
 #include "core_sdk/runtime.h"
 #include "core_sdk/status_icon.h"
-#include "modules/notification/notification_service.h"
+#include "modules/notification_service/notification_service.h"
 
 #define NOTIFICATION_TEST__POLL_TIMEOUT_MS 2000u
 #define NOTIFICATION_TEST__POLL_STEP_MS 10u
 
-/* modules/notification/notification_service.c renders asynchronously: it is
+/* modules/notification_service/notification_service.c renders asynchronously: it is
  * a separate background process woken by notification__push()/dismiss(),
  * so its effect on the overlay is not visible the instant those calls
  * return. Polls until the service's overlay reaches the wanted visibility,

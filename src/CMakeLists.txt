@@ -123,8 +123,8 @@ idf_component_register(SRCS
                      "modules/utils/terminal/terminal_app.c"
                      "modules/utils/terminal/terminal_ansi.c"
                      "modules/utils/process/process_app.c"
-                    "modules/utils/notification/notification_app.c"
-                    "modules/notification/notification_service.c"
+                    "modules/utils/notify/notify_app.c"
+                    "modules/notification_service/notification_service.c"
                     "modules/ir/ir_app.c"
                     "modules/nrf24/nrf24_app.c"
                     "modules/wifi/wifi_app.c"
@@ -388,16 +388,16 @@ target_include_directories(bruce_sdk_builtin_shell_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/shell")
 
-add_library(bruce_sdk_builtin_notification_check OBJECT "modules/utils/notification/notification_app.c")
+add_library(bruce_sdk_builtin_notification_check OBJECT "modules/utils/notify/notify_app.c")
 target_include_directories(bruce_sdk_builtin_notification_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
-                           "${CMAKE_CURRENT_LIST_DIR}/modules/utils/notification")
+                           "${CMAKE_CURRENT_LIST_DIR}/modules/utils/notify")
 
 add_library(bruce_sdk_builtin_notification_service_check OBJECT
-            "modules/notification/notification_service.c")
+            "modules/notification_service/notification_service.c")
 target_include_directories(bruce_sdk_builtin_notification_service_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
-                           "${CMAKE_CURRENT_LIST_DIR}/modules/notification")
+                           "${CMAKE_CURRENT_LIST_DIR}/modules/notification_service")
 
 add_library(bruce_sdk_builtin_tcp_check OBJECT "modules/tcp/tcp_app.c")
 target_include_directories(bruce_sdk_builtin_tcp_check PRIVATE

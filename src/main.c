@@ -27,7 +27,7 @@
 #include "modules/loaders/elf/elf_loader_app.h"
 #include "modules/loaders/image/image_loader_app.h"
 #include "modules/loaders/js/js_loader_app.h"
-#include "modules/notification/notification_service.h"
+#include "modules/notification_service/notification_service.h"
 #include "modules/nrf24/nrf24_app.h"
 #include "modules/selftest/selftest.h"
 #include "modules/shell/shell_app.h"
@@ -36,7 +36,7 @@
 #include "modules/text/text_app.h"
 #include "modules/utils/help/help_app.h"
 #include "modules/utils/launcher/launcher_app.h"
-#include "modules/utils/notification/notification_app.h"
+#include "modules/utils/notify/notify_app.h"
 #include "modules/utils/process/process_app.h"
 #include "modules/utils/serial_commands/serial_commands_app.h"
 #include "modules/utils/terminal/terminal_app.h"
@@ -90,7 +90,7 @@ void app_runner__register_defaults(void) {
     (void)app_runner__register("image", image_app_main, 0);
     (void)app_runner__register("image_viewer", image_viewer_app_main, 0);
     (void)app_runner__register("text", text_app_main, 0);
-    (void)app_runner__register("notification", notification_app_main, 0);
+    (void)app_runner__register("notify", notify_app_main, 0);
     (void)app_runner__register("notification_service", notification_service_main, 0);
     (void)app_runner__register("tcp", tcp_app_main, 0);
     (void)app_runner__register("ssh", ssh_app_main, SSH_STACK_BYTES);
