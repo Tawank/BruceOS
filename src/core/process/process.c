@@ -66,6 +66,7 @@ typedef struct {
     bruce_process_state_t state_before_pause;
     bool built_in;
     bool gui_requested;
+    bool presentable;
     char permission_key[BRUCE_PERMISSION_FILE_NAME_MAX];
     bool start_in_background;
     bruce_stdio_session_t stdio_session;
@@ -296,6 +297,8 @@ static void process__foreground_remove_locked(bruce_process_id_t id) {
 static void process__foreground_push_locked(bruce_process_id_t id) {
     process__foreground_remove_locked(id);
     if (s_fg_depth < PROCESS__FOREGROUND_STACK_MAX) { s_fg_stack[s_fg_depth++] = id; }
+    process__record_t *record = process__find_by_id_locked(id);
+    if (record != NULL) record->presentable = true;
     process__foreground_recompute_locked();
 }
 
@@ -346,6 +349,7 @@ process__fill_snapshot_locked(const process__record_t *record, bruce_process_sna
     out_snapshot->resource_count = record->resource_count;
     out_snapshot->built_in = record->built_in;
     out_snapshot->gui_requested = record->gui_requested;
+    out_snapshot->presentable = record->presentable;
 }
 
 static void process__free_argv(int argc, char **argv) {
@@ -1165,11 +1169,11 @@ static bruce_result_t process__switch_relative(int direction) {
     process__lock();
     bruce_process_id_t anchor_id = s_effective_foreground;
     process__record_t *anchor = process__find_by_id_locked(anchor_id);
-    if (anchor == NULL || !anchor->gui_requested) {
+    if (anchor == NULL || !anchor->presentable) {
         anchor_id = BRUCE_PROCESS_ID_INVALID;
         for (int i = s_fg_depth - 1; i >= 0; --i) {
             process__record_t *stacked = process__find_by_id_locked(s_fg_stack[i]);
-            if (stacked != NULL && stacked->gui_requested) {
+            if (stacked != NULL && stacked->presentable) {
                 anchor_id = stacked->id;
                 break;
             }
@@ -1188,7 +1192,7 @@ static bruce_result_t process__switch_relative(int direction) {
                                                 PROCESS__MAX_RECORDS
                                           : (direction > 0 ? offset - 1 : PROCESS__MAX_RECORDS - offset);
         process__record_t *candidate = &s_processes[index];
-        if (candidate->in_use && candidate->gui_requested && candidate->state == BRUCE_PROCESS_BACKGROUND) {
+        if (candidate->in_use && candidate->presentable && candidate->state == BRUCE_PROCESS_BACKGROUND) {
             process__foreground_push_locked(candidate->id);
             process__unlock();
             return BRUCE_OK;

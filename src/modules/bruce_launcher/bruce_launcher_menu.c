@@ -10,6 +10,7 @@
 #include "core_sdk/memory.h"
 #include "core_sdk/result.h"
 #include "core_sdk/storage.h"
+#include "core_sdk/wifi.h"
 
 #define BRUCE_LAUNCHER_CONFIG_PATH "/config/launcher.json"
 #define BRUCE_LAUNCHER_JSON_MAX 8192
@@ -29,10 +30,10 @@ static bruce_memory_object_t s_menu_object;
 static const char *BRUCE_LAUNCHER_DEFAULT_JSON =
     "{\n"
     "  \"WiFi@wifi\": {\n"
-    "    \"Connect to Wifi\": \"BG=1 wifi connect\",\n"
-    "    \"Start WiFi AP\": \"BG=1 wifi ap start\",\n"
-    "    \"Turn Off WiFi\": \"BG=1 wifi disconnect\",\n"
-    "    \"AP info\": \"wifi ap info\",\n"
+    "    \"$WIFI_CONNECT_TEXT\": \"BG=1 wifi toggle\",\n"
+    "    \"$WIFI_AP_CONNECT_TEXT\": \"BG=1 wifi ap toggle\",\n"
+    "    \"Scan\": \"terminal wifi scan\",\n"
+    "    \"AP info\": \"terminal wifi ap info\",\n"
     "    \"WebUI\": \"webui\",\n"
     "    \"Wifi Atks\": {\n"
     "      \"Target Atks\": \"wifiatks target\",\n"
@@ -112,6 +113,23 @@ static bruce_launcher_menu_t *bruce_launcher__menu_create(
     menu->capacity = capacity;
     menu->is_root = is_root;
     return menu;
+}
+
+/* Entries whose action toggles carry a "$NAME" placeholder as their label in
+ * launcher.json and get their text resolved here, at render time rather than
+ * at parse time: the menu tree is parsed once per launcher session and then
+ * mapped read-only, so a label baked in at load would still read "Connect
+ * WiFi" after the user connected. Every substitution is a string literal, so
+ * the returned pointer outlives the caller either way. */
+const char *bruce_launcher__entry_label(const bruce_launcher_entry_t *entry) {
+    if (entry == NULL) return "";
+    if (strcmp(entry->label, "$WIFI_CONNECT_TEXT") == 0) {
+        return wifi__is_connected() ? "Disconnect WiFi" : "Connect WiFi";
+    }
+    if (strcmp(entry->label, "$WIFI_AP_CONNECT_TEXT") == 0) {
+        return wifi__is_ap_running() ? "Stop AP" : "Start AP";
+    }
+    return entry->label;
 }
 
 /* menu is the mapping returned by menu_load(); the block behind it is

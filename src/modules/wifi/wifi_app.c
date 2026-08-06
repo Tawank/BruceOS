@@ -126,6 +126,32 @@ static void wifi_app_add_common_options(ArgParser *parser) {
     ap_set_opt_help(parser, "gui", "Use GUI interaction mode");
 }
 
+static int wifi_app_ap_start(void) {
+    wifi_app_notify_ap_starting();
+    bruce_result_t ap_result = wifi__setup_ap();
+    wifi_app_notify_ap_result(ap_result);
+    return ap_result == BRUCE_OK ? 0 : -1;
+}
+
+/* Saved network first, configured AP as the fallback -- "wifi on" means "get
+ * this device on a network somehow", not "join a network". */
+static int wifi_app_on(void) {
+    wifi_app_notify_connecting(WIFI_APP_KNOWN_CONNECT_BANNER_MS);
+    if (wifi__connect_known() == BRUCE_OK) {
+        (void)notification__push("Wi-Fi connected", 3000);
+        return 0;
+    }
+    return wifi_app_ap_start();
+}
+
+/* wifi__disconnect() tears the whole driver down, station and AP alike (see
+ * core/wifi/wifi_common.c), so this is also how the AP is stopped. */
+static int wifi_app_off(const char *notice) {
+    bruce_result_t disconnect_result = wifi__disconnect();
+    (void)notification__push(disconnect_result == BRUCE_OK ? notice : "Wi-Fi disconnect failed", 3000);
+    return disconnect_result == BRUCE_OK ? 0 : -1;
+}
+
 int wifi_app_main(int argc, char **argv) {
     ArgParser *root = ap_new_parser();
     if (root == NULL) return -1;
@@ -134,14 +160,16 @@ int wifi_app_main(int argc, char **argv) {
 
     ArgParser *on = ap_new_cmd(root, "on");
     ArgParser *off = ap_new_cmd(root, "off disconnect");
+    ArgParser *toggle = ap_new_cmd(root, "toggle");
     ArgParser *add = ap_new_cmd(root, "add");
     ArgParser *ap = ap_new_cmd(root, "ap");
     ArgParser *scan = ap_new_cmd(root, "scan");
     ArgParser *connect = ap_new_cmd(root, "connect");
     ArgParser *ap_start = ap != NULL ? ap_new_cmd(ap, "start") : NULL;
+    ArgParser *ap_toggle = ap != NULL ? ap_new_cmd(ap, "toggle") : NULL;
     ArgParser *ap_info = ap != NULL ? ap_new_cmd(ap, "info") : NULL;
 
-    ArgParser *commands[] = {on, off, add, ap, scan, connect, ap_start, ap_info};
+    ArgParser *commands[] = {on, off, toggle, add, ap, scan, connect, ap_start, ap_toggle, ap_info};
     for (size_t i = 0; i < sizeof(commands) / sizeof(commands[0]); ++i) {
         if (commands[i] == NULL) {
             ap_free(root);
@@ -152,12 +180,14 @@ int wifi_app_main(int argc, char **argv) {
 
     ap_set_helptext(on, "Connect using saved credentials, or start the configured AP.");
     ap_set_helptext(off, "Disconnect Wi-Fi.");
+    ap_set_helptext(toggle, "Toggle Wi-Fi state.");
     ap_set_helptext(add, "Save a Wi-Fi credential.");
     ap_add_required_arg(add, "ssid", "Network name");
     ap_add_required_arg(add, "password", "Network password");
     ap_unknown_options_as_args(add);
     ap_set_helptext(ap, "Manage access-point mode.");
     ap_set_helptext(ap_start, "Start the configured access point.");
+    ap_set_helptext(ap_toggle, "Toggle the configured access point.");
     ap_set_helptext(ap_info, "Show access-point status and addresses.");
     ap_set_helptext(scan, "List nearby Wi-Fi networks.");
     ap_set_helptext(connect, "Connect saved credentials or provide a network and password.");
@@ -174,36 +204,22 @@ int wifi_app_main(int argc, char **argv) {
     int result = -1;
     ArgParser *command = ap_get_cmd_parser(root);
     if (command == NULL) result = wifi_app_default();
-    else if (command == on) {
-        wifi_app_notify_connecting(WIFI_APP_KNOWN_CONNECT_BANNER_MS);
-        bruce_result_t connect_result = wifi__connect_known();
-        if (connect_result == BRUCE_OK) {
-            (void)notification__push("Wi-Fi connected", 3000);
-            result = 0;
-        } else {
-            wifi_app_notify_ap_starting();
-            bruce_result_t ap_result = wifi__setup_ap();
-            wifi_app_notify_ap_result(ap_result);
-            result = ap_result == BRUCE_OK ? 0 : -1;
-        }
-    } else if (command == off) {
-        bruce_result_t disconnect_result = wifi__disconnect();
-        (void)notification__push(
-            disconnect_result == BRUCE_OK ? "Wi-Fi disconnected" : "Wi-Fi disconnect failed", 3000
-        );
-        result = disconnect_result == BRUCE_OK ? 0 : -1;
-    } else if (command == add) result = wifi_app_add(add);
+    else if (command == on) result = wifi_app_on();
+    else if (command == off) result = wifi_app_off("Wi-Fi disconnected");
+    /* Keyed on the same predicate the launcher's "$WIFI_CONNECT_TEXT" label
+     * reads, so the label always names what pressing it will do. */
+    else if (command == toggle) result = wifi__is_connected() ? wifi_app_off("Wi-Fi disconnected")
+                                                              : wifi_app_on();
+    else if (command == add) result = wifi_app_add(add);
     else if (command == scan) result = wifi_app_scan();
     else if (command == connect) result = wifi_app_connect(connect);
     else if (command == ap) {
         ArgParser *ap_command = ap_get_cmd_parser(ap);
-        if (ap_command == ap_start) {
-            wifi_app_notify_ap_starting();
-            bruce_result_t ap_result = wifi__setup_ap();
-            wifi_app_notify_ap_result(ap_result);
-            result = ap_result == BRUCE_OK ? 0 : -1;
-        } else if (ap_command == ap_info) result = wifi_app_ap_info();
-        else {
+        if (ap_command == ap_start) result = wifi_app_ap_start();
+        else if (ap_command == ap_info) result = wifi_app_ap_info();
+        else if (ap_command == ap_toggle) {
+            result = wifi__is_ap_running() ? wifi_app_off("Wi-Fi AP stopped") : wifi_app_ap_start();
+        } else {
             ap_print_help(ap);
             result = -1;
         }

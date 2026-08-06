@@ -70,6 +70,7 @@ typedef struct {
     size_t resource_count;
     bool built_in;
     bool gui_requested;
+    bool presentable;
 } bruce_process_snapshot_t;
 
 /* All process APIs below return BRUCE_OK or a documented BRUCE_ERR_* result.
@@ -101,6 +102,5 @@ bruce_result_t process__wait(bruce_process_id_t process_id, uint32_t timeout_ms)
 /* Atomically consumes one retained completion. Exactly one concurrent caller
  * can succeed; the `process` permission is required. UINT32_MAX waits forever
  * and zero polls. On failure, *out_status is unchanged. */
-bruce_result_t process__wait_status(
-    bruce_process_id_t process_id, uint32_t timeout_ms, bruce_process_status_t *out_status
-);
+bruce_result_t
+process__wait_status(bruce_process_id_t process_id, uint32_t timeout_ms, bruce_process_status_t *out_status);

@@ -45,6 +45,13 @@ void bruce_launcher__menu_free(bruce_launcher_menu_t *menu);
  * memory__external block. */
 const bruce_launcher_entry_t *bruce_launcher__menu_entries(const bruce_launcher_menu_t *menu);
 
+/* The text to display for `entry`. Usually entry->label verbatim, but entries
+ * whose action toggles carry a "$NAME" placeholder that resolves against live
+ * state (e.g. "$WIFI_CONNECT_TEXT" -> "Connect WiFi"/"Disconnect WiFi"), so
+ * call this every time the label is drawn rather than caching the result.
+ * The returned pointer is either into `entry` or a string literal. */
+const char *bruce_launcher__entry_label(const bruce_launcher_entry_t *entry);
+
 /* Resolves an entry's submenu from its parent-relative offset. Returns NULL
  * if entry is not a submenu entry. */
 const bruce_launcher_menu_t *

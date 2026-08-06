@@ -156,8 +156,29 @@ static void bruce_launcher__window_draw_border(void *context) {
     bruce_launcher__draw_main_border(&theme);
 }
 
+/* The choice array of the launcher submenu dialog currently on screen, or
+ * {0} when none is. dialog__choice() re-reads choices[i].label on every frame
+ * it draws, so re-resolving the labels here -- from the status redraw it
+ * already runs on a timer -- is what keeps a toggle entry ("Connect WiFi" vs
+ * "Disconnect WiFi") honest while the user sits in the menu watching the
+ * BG=1 command behind it finish. Set only for the duration of the
+ * dialog__choice() call that owns it; see bruce_launcher__run_gui_menu(). */
+static struct {
+    bruce_dialog_choice_t *choices;
+    const bruce_launcher_entry_t *entries;
+    int count;
+} s_live_choices;
+
+static void bruce_launcher__refresh_live_choices(void) {
+    for (int i = 0; i < s_live_choices.count; ++i) {
+        s_live_choices.choices[i].label = bruce_launcher__entry_label(&s_live_choices.entries[i]);
+        s_live_choices.choices[i].value = s_live_choices.choices[i].label;
+    }
+}
+
 static void bruce_launcher__window_draw_status(void *context) {
     (void)context;
+    bruce_launcher__refresh_live_choices();
     bruce_launcher_theme_t theme;
     bruce_launcher__get_theme(&theme);
     (void)bruce_launcher__draw_status_bar(&theme);
@@ -202,7 +223,8 @@ static void bruce_launcher__draw_root_menu(
     bruce_launcher__draw_entry_icon(&entries[selected], w / 2, cy, large, theme->pri);
 
     bruce_launcher__draw_centered_text(
-        entries[selected].label, cy + large / 2 + 10, BRUCE_LAUNCHER_FONT_MEDIUM, theme
+        bruce_launcher__entry_label(&entries[selected]), cy + large / 2 + 10, BRUCE_LAUNCHER_FONT_MEDIUM,
+        theme
     );
 }
 
@@ -274,7 +296,9 @@ static void bruce_launcher__draw_root_transition(
                           ? from
                           : bruce_launcher__wrap_index(from + direction, menu->entry_count);
     bruce_launcher__draw_centered_text(
-        bruce_launcher__menu_entries(menu)[label_entry].label, cy + large / 2 + 10, BRUCE_LAUNCHER_FONT_MEDIUM,
+        bruce_launcher__entry_label(&bruce_launcher__menu_entries(menu)[label_entry]),
+        cy + large / 2 + 10,
+        BRUCE_LAUNCHER_FONT_MEDIUM,
         theme
     );
 }
@@ -314,7 +338,7 @@ static size_t bruce_launcher__process_candidates(bruce_process_snapshot_t *proce
     bruce_process_id_t self = process__current_id();
     if (process__list(processes, capacity, &count) != BRUCE_OK) { return 0; }
     for (size_t i = 0; i < count; ++i) {
-        if (processes[i].id != self && processes[i].gui_requested &&
+        if (processes[i].id != self && processes[i].presentable &&
             processes[i].state == BRUCE_PROCESS_BACKGROUND) {
             if (written != i) processes[written] = processes[i];
             written++;
@@ -449,13 +473,10 @@ static int bruce_launcher__run_process_switcher(const bruce_launcher_theme_t *th
 /* Command dispatch                                                           */
 /* -------------------------------------------------------------------------- */
 
-/* True iff the command's leading "key=value" environment tokens (the same
- * ones app_runner__run_command() parses off the front of the line) include
- * "BG=1". Entries that already request background execution are one-shot
- * CLI actions with no screen of their own (e.g. "BG=1 wifi connect"); tagging
- * them GUI=1 too would make process switch next/prev cycle onto a background
- * process that never draws anything. */
-static bool bruce_launcher__command_requests_background(const char *command) {
+/* True iff the command's leading "key=value" environment tokens (the same ones
+ * app_runner__run_command() parses off the front of the line) assign `name`. */
+static bool bruce_launcher__command_sets(const char *command, const char *name) {
+    size_t name_len = strlen(name);
     const char *cursor = command;
     for (;;) {
         while (*cursor == ' ') cursor++;
@@ -463,7 +484,9 @@ static bool bruce_launcher__command_requests_background(const char *command) {
         while (*token_end != '\0' && *token_end != ' ') token_end++;
         size_t token_len = (size_t)(token_end - cursor);
         if (token_len == 0 || memchr(cursor, '=', token_len) == NULL) return false;
-        if (token_len == 4 && strncmp(cursor, "BG=1", 4) == 0) return true;
+        if (token_len > name_len && cursor[name_len] == '=' && strncmp(cursor, name, name_len) == 0) {
+            return true;
+        }
         cursor = token_end;
     }
 }
@@ -474,8 +497,19 @@ static int bruce_launcher__run_entry(const bruce_launcher_entry_t *entry) {
         bruce_launcher__get_theme(&theme);
         return bruce_launcher__run_process_switcher(&theme);
     }
+
+    /* Everything launched from the GUI menu is GUI=1 unless the entry opts out
+     * explicitly, including "BG=1" entries: those run headless (they never take
+     * the foreground, so the launcher stays on screen), but GUI=1 is what makes
+     * their notification__push()es render as banners instead of going to a
+     * console nobody is looking at. process__foreground_push_locked() -- not
+     * gui_requested -- is what makes a process a switch target, so a background
+     * worker with no screen still never appears in the process switcher.
+     *
+     * BG itself is left to app_runner__run_command() to parse off the line; the
+     * launcher only picks the default for entries that don't say. */
     char command[BRUCE_LAUNCHER_COMMAND_MAX + 8];
-    if (strncmp(entry->command, "GUI=", 4) == 0 || bruce_launcher__command_requests_background(entry->command)) {
+    if (bruce_launcher__command_sets(entry->command, "GUI")) {
         snprintf(command, sizeof(command), "%s", entry->command);
     } else {
         snprintf(command, sizeof(command), "GUI=1 %s", entry->command);
@@ -484,7 +518,9 @@ static int bruce_launcher__run_entry(const bruce_launcher_entry_t *entry) {
 
     if (result < 0) {
         char message[128];
-        snprintf(message, sizeof(message), "Could not start %s (%d)", entry->label, result);
+        snprintf(
+            message, sizeof(message), "Could not start %s (%d)", bruce_launcher__entry_label(entry), result
+        );
         (void)dialog__message(BRUCE_DIALOG_ERROR, "Launch failed", message);
     }
     return result;
@@ -505,10 +541,6 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
         bruce_dialog_choice_t *choices =
             (bruce_dialog_choice_t *)memory__malloc(sizeof(*choices) * (size_t)menu->entry_count);
         if (choices == NULL) return BRUCE_ERR_NO_MEMORY;
-        for (int i = 0; i < menu->entry_count; ++i) {
-            choices[i].label = entries[i].label;
-            choices[i].value = entries[i].label;
-        }
 
         const bruce_dialog_render_params_t render_params = {.window_chrome = true};
 
@@ -537,9 +569,17 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
             }
 
             size_t selected = 0;
+            /* Published only across the dialog call: bruce_launcher__window_draw_status()
+             * runs on other processes' dialogs too, and must not touch this
+             * array once it goes out of scope. */
+            s_live_choices.choices = choices;
+            s_live_choices.entries = entries;
+            s_live_choices.count = menu->entry_count;
+            bruce_launcher__refresh_live_choices();
             bruce_result_t result = dialog__choice(
                 menu->title, NULL, choices, (size_t)menu->entry_count, &selected, &render_params
             );
+            s_live_choices.count = 0;
             if (result == BRUCE_ERR_CANCELLED) break;
             if (result == BRUCE_ERR_NOT_FOREGROUND) {
                 (void)runtime__delay(20);
@@ -688,8 +728,8 @@ static int bruce_launcher__run_terminal_menu(const bruce_launcher_menu_t *menu) 
 
     for (;;) {
         for (int i = 0; i < menu->entry_count; ++i) {
-            choices[i].label = entries[i].label;
-            choices[i].value = entries[i].label;
+            choices[i].label = bruce_launcher__entry_label(&entries[i]);
+            choices[i].value = choices[i].label;
         }
 
         size_t choice = 0;
