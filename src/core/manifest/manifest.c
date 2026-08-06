@@ -15,9 +15,9 @@
 /* JSON manifest parser (shared)                                            */
 /* ----------------------------------------------------------------------- */
 
-#define MANIFEST__STACK_MIN 4096u
-#define MANIFEST__STACK_MAX 16384u
-#define MANIFEST__STACK_DEFAULT 32768u
+#define MANIFEST__STACK_MIN 1024u
+#define MANIFEST__STACK_MAX 2097152u
+#define MANIFEST__STACK_DEFAULT 4096u
 
 #define MANIFEST_JS_MAX_BYTES 2048u
 #define MANIFEST_JS_GENERIC_ICON_BYTE 0xAAu

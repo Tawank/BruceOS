@@ -236,7 +236,7 @@ bruce_result_t stdio__session_read_input(
     *out_size = 0;
     uint64_t started = runtime__now();
     for (;;) {
-        if (runtime__delay(0) != BRUCE_OK) return BRUCE_ERR_CANCELLED;
+        if (runtime__delay(0) != BRUCE_OK) { return BRUCE_ERR_CANCELLED; }
         stdio__ensure_init();
         xSemaphoreTake(s_lock, portMAX_DELAY);
         stdio__session_t *entry = stdio__find_locked(session);

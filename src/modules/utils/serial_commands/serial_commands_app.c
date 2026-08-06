@@ -6,7 +6,6 @@
 #include "core_sdk/runtime.h"
 #include "core_sdk/stdio.h"
 #include "modules/shell/shell_console.h"
-#include "sdkconfig.h"
 
 #define SERIAL_COMMANDS__LINE_MAX 256
 #define SERIAL_COMMANDS__WAIT_INTERVAL_MS 10
