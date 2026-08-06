@@ -852,6 +852,21 @@ static bruce_result_t dialog__gui_input(
         if (input_result == BRUCE_ERR_NOT_FOREGROUND) { return BRUCE_ERR_CANCELLED; }
         if (input_result != BRUCE_OK || ev.action != BRUCE_INPUT_PRESS) { continue; }
 
+        /* Physical Enter always submits the typed buffer, regardless of
+         * where the on-screen grid cursor happens to be sitting.
+         * BRUCE_INPUT_CODE_SELECT (0x00A) is defined to equal '\n' so a
+         * dedicated physical keyboard's Enter key reuses the same code as a
+         * D-pad/button "select" press (see core_sdk/input.h) - but the two
+         * mean different things: a D-pad SELECT should activate whatever
+         * grid cell is highlighted (handled below), while a keyboard user
+         * who typed the whole buffer via the direct-typing fast path never
+         * touched that cursor, so falling into the same grid-cell-activate
+         * logic "presses" an arbitrary cell (often inserting a stray
+         * character) instead of submitting - i.e. Enter appeared to do
+         * nothing useful. Only intercept it here for real BRUCE_INPUT_KEY
+         * events so BUTTON-sourced SELECT still drives the grid as before. */
+        if (ev.type == BRUCE_INPUT_KEY && ev.code == '\n') { return BRUCE_OK; }
+
         /* Semantic navigation/action codes always win over raw typing, and
          * must be handled before the "direct typing" fallback below.
          * BRUCE_INPUT_CODE_UP/DOWN/LEFT/RIGHT/BACK deliberately alias
