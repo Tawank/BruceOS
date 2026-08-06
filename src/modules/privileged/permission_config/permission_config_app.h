@@ -8,4 +8,9 @@
  * storage__read_file()/storage__write_file_atomic() can see it. See
  * permission_config_app.c for the full rationale. */
 
+/* Register with a stack well above the app_runner default (see
+ * PERMISSION_CONFIG_STACK_BYTES in main.c): the GUI's app/choice lists are
+ * fixed-size on-stack arrays (up to 32 apps), and combined with the
+ * fopen()-based Core-private storage__read_file() call chain that easily
+ * overflows the 4096-byte default into a guard page (StoreProhibited). */
 int permission_config_app_main(int argc, char **argv);

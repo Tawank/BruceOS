@@ -49,6 +49,7 @@
 #define DEVICE_BUS_STACK_BYTES 3072u
 #define SERIAL_COMMANDS_STACK_BYTES 3072u
 #define SELFTEST_STACK_BYTES 8192u
+#define PERMISSION_CONFIG_STACK_BYTES 8192u
 #define SHELL_STACK_BYTES 4096u
 #define SSH_STACK_BYTES 16384u
 #define SSH_KEYGEN_STACK_BYTES 12288u
@@ -63,7 +64,9 @@ void app_runner__register_defaults(void) {
     (void)app_runner__register("filemanager", filemanager_app_main, 0);
     (void)app_runner__register("clock", clock_app_main, 0);
     (void)app_runner__register("config", config_app_main, 0);
-    (void)app_runner__register("permission_config", permission_config_app_main, 0);
+    (void)app_runner__register(
+        "permission_config", permission_config_app_main, PERMISSION_CONFIG_STACK_BYTES
+    );
     (void)app_runner__register("wifi", wifi_app_main, 0);
     (void)app_runner__register("webui", webui_app_main, 0);
     (void)app_runner__register("bluetooth", bluetooth_app_main, 0);
