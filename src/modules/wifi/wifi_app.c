@@ -143,6 +143,7 @@ static void wifi_app_gui__connect(const wifi__network_t *net) {
  * (blank SSID) are left out -- there is nothing to select or connect to by
  * name. */
 static int wifi_app__gui(void) {
+    (void)notification__push("Wi-Fi scanning...", WIFI_APP_KNOWN_CONNECT_BANNER_MS);
     for (;;) {
         wifi__network_t networks[WIFI_APP_GUI_SCAN_MAX];
         int count = wifi__scan(networks, WIFI_APP_GUI_SCAN_MAX);
@@ -178,6 +179,7 @@ static int wifi_app__gui(void) {
         if (count == 0) snprintf(subtitle, sizeof(subtitle), "No networks found");
         else snprintf(subtitle, sizeof(subtitle), "%d network%s found", count, count == 1 ? "" : "s");
 
+        (void)notification__push("Wi-Fi scan ended", 1000);
         size_t selected = 0;
         bruce_result_t result =
             dialog__choice("Wi-Fi networks", subtitle, choices, exit_index + 1, &selected, &s_window_chrome);
@@ -315,10 +317,8 @@ int wifi_app_main(int argc, char **argv) {
     if (command == NULL) result = wifi_app_default();
     else if (command == on) result = wifi_app_on();
     else if (command == off) result = wifi_app_off("Wi-Fi disconnected");
-    /* Keyed on the same predicate the launcher's "$WIFI_CONNECT_TEXT" label
-     * reads, so the label always names what pressing it will do. */
-    else if (command == toggle) result = wifi__is_connected() ? wifi_app_off("Wi-Fi disconnected")
-                                                              : wifi_app_on();
+    else if (command == toggle)
+        result = wifi__is_connected() ? wifi_app_off("Wi-Fi disconnected") : wifi_app_on();
     else if (command == add) result = wifi_app_add(add);
     else if (command == scan) result = runtime__gui_requested() ? wifi_app__gui() : wifi_app_scan();
     else if (command == connect) result = wifi_app_connect(connect);

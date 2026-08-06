@@ -56,10 +56,7 @@
 #define SHELL_STACK_BYTES 4096u
 #define SSH_STACK_BYTES 16384u
 #define SSH_KEYGEN_STACK_BYTES 12288u
-/* bparted's GUI holds its whole screen - the running layout, the next-boot
- * layout, and every rendered row - in one ~3 KB frame that stays live while
- * dialog__choice() draws on top of it; comfortably over the default 4096
- * bytes. */
+#define WIFI_STACK_BYTES 8192u
 #define BPARTED_STACK_BYTES 8192u
 
 void app_runner__register_defaults(void) {
@@ -73,7 +70,7 @@ void app_runner__register_defaults(void) {
     (void)app_runner__register("clock", clock_app_main, 0);
     (void)app_runner__register("config", config_app_main, 0);
     (void)app_runner__register("permissions", permissions_app_main, PERMISSIONS_STACK_BYTES);
-    (void)app_runner__register("wifi", wifi_app_main, 0);
+    (void)app_runner__register("wifi", wifi_app_main, WIFI_STACK_BYTES);
     (void)app_runner__register("webui", webui_app_main, 0);
     (void)app_runner__register("bluetooth", bluetooth_app_main, 0);
     (void)app_runner__register("bluetooth_hid_app", bluetooth_hid_app_main, 0);

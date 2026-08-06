@@ -1,7 +1,6 @@
 #include "dialog.h"
 
 #include "core/config/config.h"
-#include "core_sdk/config.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/display.h"
 #include "core_sdk/input.h"
@@ -198,7 +197,8 @@ static bruce_result_t dialog__term_pick_file(
 #define DIALOG__LIST_TEXT_SIZE_WIDE 2
 
 static int dialog__default_list_text_size(void) {
-    return display__width() >= DIALOG__WIDE_DISPLAY_MIN_WIDTH ? DIALOG__LIST_TEXT_SIZE_WIDE : DIALOG__TEXT_SIZE;
+    return display__width() >= DIALOG__WIDE_DISPLAY_MIN_WIDTH ? DIALOG__LIST_TEXT_SIZE_WIDE
+                                                              : DIALOG__TEXT_SIZE;
 }
 
 static void dialog__get_theme_colors(uint16_t *pri, uint16_t *sec, uint16_t *bg) {
@@ -354,19 +354,19 @@ static bruce_result_t dialog__gui_choice(
     int w = display__width();
     int h = display__height();
     int left = window_chrome ? s_window_renderer.padding_left
-                              : (render_params != NULL ? render_params->padding_left : 0);
+                             : (render_params != NULL ? render_params->padding_left : 0);
     int top = window_chrome ? s_window_renderer.padding_top
-                             : (render_params != NULL ? render_params->padding_top : 0);
+                            : (render_params != NULL ? render_params->padding_top : 0);
     int right = w - (window_chrome ? s_window_renderer.padding_right
-                                    : (render_params != NULL ? render_params->padding_right : 0));
+                                   : (render_params != NULL ? render_params->padding_right : 0));
     int bottom = h - (window_chrome ? s_window_renderer.padding_bottom
-                                     : (render_params != NULL ? render_params->padding_bottom : 0));
+                                    : (render_params != NULL ? render_params->padding_bottom : 0));
     bool render_borders = !window_chrome && (render_params == NULL || render_params->render_borders);
     int viewport_w = right - left;
     int viewport_h = bottom - top;
     int text_size = render_params != NULL && render_params->text_size > 0 ? render_params->text_size
-                     : window_chrome && s_window_renderer.text_size > 0   ? s_window_renderer.text_size
-                     : window_chrome                                     ? 1
+                    : window_chrome && s_window_renderer.text_size > 0    ? s_window_renderer.text_size
+                    : window_chrome                                       ? 1
                                                                           : dialog__default_list_text_size();
 
     uint16_t pri, sec, bg;
@@ -375,9 +375,9 @@ static bruce_result_t dialog__gui_choice(
         window_chrome ? bg : (render_params != NULL ? render_params->background_color : bg);
     bruce_display_color_t text_color =
         window_chrome ? pri : (render_params != NULL ? render_params->text_color : pri);
-    uint32_t refresh_interval_ms = window_chrome ? s_window_renderer.status_refresh_interval_ms
-                                    : render_params != NULL ? render_params->refresh_interval_ms
-                                                             : 0u;
+    uint32_t refresh_interval_ms = window_chrome           ? s_window_renderer.status_refresh_interval_ms
+                                   : render_params != NULL ? render_params->refresh_interval_ms
+                                                           : 0u;
     int row_h = DIALOG__CHAR_H * text_size + 2;
     int title_h = render_borders || (title != NULL && title[0] != '\0') ? DIALOG__CHAR_H + 4 : 0;
     int footer_h = render_borders ? DIALOG__CHAR_H + 4 : 0;
@@ -388,8 +388,9 @@ static bruce_result_t dialog__gui_choice(
     bool redraw = true;
     bool chrome_border_drawn = false;
     uint64_t rendered_at = 0;
-    bool wants_periodic_refresh = window_chrome ? s_window_renderer.draw_status != NULL
-                                                 : render_params != NULL && render_params->render_callback != NULL;
+    bool wants_periodic_refresh = window_chrome
+                                      ? s_window_renderer.draw_status != NULL
+                                      : render_params != NULL && render_params->render_callback != NULL;
 
     /* Discard whatever's still queued (typically the press that navigated
      * into this screen) so it can't be replayed as an immediate selection on
@@ -414,7 +415,9 @@ static bruce_result_t dialog__gui_choice(
             }
 
             if (window_chrome && !chrome_border_drawn) {
-                if (s_window_renderer.draw_border != NULL) { s_window_renderer.draw_border(s_window_renderer_context); }
+                if (s_window_renderer.draw_border != NULL) {
+                    s_window_renderer.draw_border(s_window_renderer_context);
+                }
                 chrome_border_drawn = true;
             }
 
@@ -456,7 +459,9 @@ static bruce_result_t dialog__gui_choice(
 
             if (render_borders) { display__fill_rect(left, bottom - footer_h, viewport_w, footer_h, sec); }
             if (window_chrome) {
-                if (s_window_renderer.draw_status != NULL) { s_window_renderer.draw_status(s_window_renderer_context); }
+                if (s_window_renderer.draw_status != NULL) {
+                    s_window_renderer.draw_status(s_window_renderer_context);
+                }
             } else if (render_params != NULL && render_params->render_callback != NULL) {
                 render_params->render_callback(render_params->render_callback_context);
             }
