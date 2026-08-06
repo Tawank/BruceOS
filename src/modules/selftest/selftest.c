@@ -87,6 +87,7 @@ int selftest_app_main(int argc, char **argv) {
     RUN_SELFTEST(selftest__run_partition_manager_default_layout_case);
     RUN_SELFTEST(selftest__run_partition_manager_validation_case);
     RUN_SELFTEST(selftest__run_partition_manager_stage_lifecycle_case);
+    RUN_SELFTEST(selftest__run_partition_manager_pending_changes_case);
     RUN_SELFTEST(selftest__run_config_permission_denied_case);
     RUN_SELFTEST(selftest__run_config_permission_allowed_case);
     RUN_SELFTEST(selftest__run_config_protected_field_denied_case);

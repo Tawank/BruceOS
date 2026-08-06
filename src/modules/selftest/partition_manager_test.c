@@ -103,3 +103,45 @@ bool selftest__run_partition_manager_stage_lifecycle_case(void) {
     if (!ok) printf("[selftest] partition_manager/stage_lifecycle: staged entry did not round-trip\n");
     return ok;
 }
+
+/* list_committed()/has_pending_changes()/discard_pending() never touch
+ * flash by themselves (only commit() does) - this never calls commit()
+ * either, so it has no persisted or on-flash side effects. */
+bool selftest__run_partition_manager_pending_changes_case(void) {
+    static const char *const label = "selftest_pend";
+
+    uint64_t free_before = 0;
+    if (partition_manager__free_space(&free_before) != BRUCE_OK || free_before < 8192) {
+        printf("[selftest] partition_manager/pending_changes: not enough free space to test with\n");
+        return false;
+    }
+
+    size_t committed_before = 0;
+    bool ok = partition_manager__list_committed(NULL, 0, &committed_before) == BRUCE_OK;
+    ok = ok && !partition_manager__has_pending_changes();
+
+    ok = ok && partition_manager__stage_create(label, BRUCE_PARTITION_KIND_LITTLEFS, 4096) == BRUCE_OK;
+    ok = ok && partition_manager__has_pending_changes();
+
+    /* list_committed() must stay exactly as it was - the new entry only
+     * shows up in list(), never in list_committed(), until a commit(). */
+    size_t committed_after_stage = 0;
+    ok = ok && partition_manager__list_committed(NULL, 0, &committed_after_stage) == BRUCE_OK;
+    ok = ok && committed_after_stage == committed_before;
+
+    size_t pending_count = 0;
+    ok = ok && partition_manager__list(NULL, 0, &pending_count) == BRUCE_OK;
+    ok = ok && pending_count == committed_before + 1;
+
+    /* Discarding drops the staged entry and clears the dirty flag, without
+     * ever having called commit(). */
+    ok = ok && partition_manager__discard_pending() == BRUCE_OK;
+    ok = ok && !partition_manager__has_pending_changes();
+
+    size_t pending_after_discard = 0;
+    ok = ok && partition_manager__list(NULL, 0, &pending_after_discard) == BRUCE_OK;
+    ok = ok && pending_after_discard == committed_before;
+
+    if (!ok) printf("[selftest] partition_manager/pending_changes: staged/committed views did not agree\n");
+    return ok;
+}

@@ -31,7 +31,9 @@ static bool launcher__has_foreground(void) {
 static int launcher__start(bool gui, bruce_launch_mode_t mode) {
     const char *configured = config__get_launcher_app();
     const char *target = (configured != NULL && configured[0] != '\0') ? configured : LAUNCHER__FALLBACK_APP;
-    const bruce_environment_variable_t gui_env[] = {{.name = "GUI", .value = "1"}};
+    const bruce_environment_variable_t gui_env[] = {
+        {.name = "GUI", .value = "1"}
+    };
 
     int result = app_runner__run_with_environment(target, NULL, mode, gui ? gui_env : NULL, gui ? 1u : 0u);
     if (result < 0 && strcmp(target, LAUNCHER__FALLBACK_APP) != 0) {
