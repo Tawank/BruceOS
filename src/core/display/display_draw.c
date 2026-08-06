@@ -5,6 +5,76 @@
 
 #include "core_sdk/display.h"
 
+/* Diagonal Bresenham stepping visits pixels one at a time, but consecutive
+ * points frequently share a row (or column) before the line steps to the
+ * next one -- plotting each individually throws that away and pays for one
+ * display_internal__set_pixel call, one full DMA round trip per pixel in
+ * unbuffered/direct mode, per point (this is what makes direct-mode arcs and
+ * diagonal lines visibly draw themselves pixel by pixel). This accumulator
+ * mirrors display__flush_circle_octant_run() below: it replays the exact
+ * same pixel trace the caller feeds it, but coalesces each contiguous
+ * horizontal or vertical run into one display_internal__fill_rect call
+ * instead, only falling back to a single-pixel plot for genuinely isolated
+ * (diagonal-jump) points. The set of pixels plotted is unchanged. */
+typedef enum {
+    DISPLAY__RUN_NONE,
+    DISPLAY__RUN_POINT,
+    DISPLAY__RUN_HORIZONTAL,
+    DISPLAY__RUN_VERTICAL,
+} display__run_state_t;
+
+typedef struct {
+    display__process_context_t *context;
+    bruce_display_color_t color;
+    display__run_state_t state;
+    int16_t x, y;   /* DISPLAY__RUN_POINT: the one pending pixel */
+    int16_t fixed;  /* DISPLAY__RUN_HORIZONTAL: fixed y; DISPLAY__RUN_VERTICAL: fixed x */
+    int16_t lo, hi; /* inclusive range of the varying coordinate, lo <= hi */
+} display__run_t;
+
+static void display__run_flush(display__run_t *run) {
+    switch (run->state) {
+    case DISPLAY__RUN_POINT: display_internal__set_pixel(run->context, run->x, run->y, run->color); break;
+    case DISPLAY__RUN_HORIZONTAL:
+        display_internal__fill_rect(run->context, run->lo, run->fixed, run->hi - run->lo + 1, 1, run->color);
+        break;
+    case DISPLAY__RUN_VERTICAL:
+        display_internal__fill_rect(run->context, run->fixed, run->lo, 1, run->hi - run->lo + 1, run->color);
+        break;
+    default: break;
+    }
+    run->state = DISPLAY__RUN_NONE;
+}
+
+static void display__run_add(display__run_t *run, int16_t x, int16_t y) {
+    if (run->state == DISPLAY__RUN_HORIZONTAL && y == run->fixed) {
+        if (x == run->hi + 1) { run->hi = x; return; }
+        if (x == run->lo - 1) { run->lo = x; return; }
+    } else if (run->state == DISPLAY__RUN_VERTICAL && x == run->fixed) {
+        if (y == run->hi + 1) { run->hi = y; return; }
+        if (y == run->lo - 1) { run->lo = y; return; }
+    } else if (run->state == DISPLAY__RUN_POINT) {
+        if (y == run->y && (x == run->x + 1 || x == run->x - 1)) {
+            run->state = DISPLAY__RUN_HORIZONTAL;
+            run->fixed = y;
+            run->lo = x < run->x ? x : run->x;
+            run->hi = x > run->x ? x : run->x;
+            return;
+        }
+        if (x == run->x && (y == run->y + 1 || y == run->y - 1)) {
+            run->state = DISPLAY__RUN_VERTICAL;
+            run->fixed = x;
+            run->lo = y < run->y ? y : run->y;
+            run->hi = y > run->y ? y : run->y;
+            return;
+        }
+    }
+    display__run_flush(run);
+    run->state = DISPLAY__RUN_POINT;
+    run->x = x;
+    run->y = y;
+}
+
 static void display__draw_line_bresenham(
     display__process_context_t *context, int16_t x0, int16_t y0, int16_t x1, int16_t y1,
     bruce_display_color_t color
@@ -24,13 +94,15 @@ static void display__draw_line_bresenham(
     int16_t sx = (x0 < x1) ? 1 : -1;
     int16_t sy = (y0 < y1) ? 1 : -1;
     int16_t err = dx - dy;
+    display__run_t run = {.context = context, .color = color, .state = DISPLAY__RUN_NONE};
     for (;;) {
-        display_internal__set_pixel(context, x0, y0, color);
+        display__run_add(&run, x0, y0);
         if (x0 == x1 && y0 == y1) { break; }
         int16_t e2 = 2 * err;
         if (e2 > -dy) { err -= dy; x0 += sx; }
         if (e2 < dx) { err += dx; y0 += sy; }
     }
+    display__run_flush(&run);
 }
 
 enum {
