@@ -6,7 +6,9 @@
 
 #include "args.h"
 #include "core_sdk/config.h"
+#include "core_sdk/dialog.h"
 #include "core_sdk/notification.h"
+#include "core_sdk/runtime.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/wifi.h"
 
@@ -18,6 +20,25 @@
  * wifi__connect() attempt each), so give its "Connecting..." banner more
  * headroom than a single explicit connect gets. */
 #define WIFI_APP_KNOWN_CONNECT_BANNER_MS 20000u
+
+/* Renders inside the launcher's window chrome (same border, status bar, and
+ * font as every other GUI tool menu -- see modules/ir/ir_app.c,
+ * modules/nrf24/nrf24_app.c); a no-op outside GUI mode. */
+static const bruce_dialog_render_params_t s_window_chrome = {.window_chrome = true};
+
+/* Networks a single scan can hold on screen at once, and the width of one
+ * formatted row ("<ssid> <rssi> dBm [<tag>]"). */
+#define WIFI_APP_GUI_SCAN_MAX 24
+#define WIFI_APP_GUI_ROW_TEXT 40
+/* Mirrors CONFIG__WIFI_PASSWORD_MAX_LEN (core/config/config.h) -- same
+ * rationale as WIFI_APP_CONNECT_TIMEOUT_MS above: no public accessor, so
+ * this is just the buffer's upper bound. */
+#define WIFI_APP_GUI_PASSWORD_MAX 64
+/* wifi_ap_record_t.authmode is copied straight through by wifi__scan() (see
+ * core/wifi/wifi_common.c). WIFI_AUTH_OPEN is 0 in every ESP-IDF
+ * wifi_auth_mode_t Bruce targets, and wifi__network_t exposes only the raw
+ * byte (no public enum), so that's the value checked here. */
+#define WIFI_APP_GUI_AUTH_OPEN 0u
 
 static const char *wifi_app_result_label(bruce_result_t result) {
     switch (result) {
@@ -78,6 +99,94 @@ static int wifi_app_scan(void) {
         );
     }
     return 0;
+}
+
+/* "<ssid> <rssi> dBm [<tag>]", tag naming what selecting the row will do:
+ * "open" connects straight away, "saved" reuses the stored password (still
+ * editable), "locked" prompts for a new one. */
+static void wifi_app_gui__format_row(const wifi__network_t *net, bool known, char *out, size_t capacity) {
+    const char *tag = net->authmode == WIFI_APP_GUI_AUTH_OPEN ? "open" : (known ? "saved" : "locked");
+    snprintf(out, capacity, "%-20.20s %4d dBm [%s]", net->ssid, (int)net->rssi, tag);
+}
+
+/* Prompts for a password when the network is secured (pre-filled with the
+ * saved one, if any, so confirming as-is just reuses it), connects, and
+ * saves the credential on success -- the same save wifi_app_connect() does
+ * for an explicit "wifi connect <ssid> <password>". Open networks skip the
+ * prompt and connect with an empty password. */
+static void wifi_app_gui__connect(const wifi__network_t *net) {
+    char password[WIFI_APP_GUI_PASSWORD_MAX + 1] = {0};
+    if (net->authmode != WIFI_APP_GUI_AUTH_OPEN) {
+        const bruce_config_wifi_credential_t *known = config__find_wifi_credential(net->ssid);
+        const char *initial = known != NULL && known->password != NULL ? known->password : "";
+        if (dialog__text_input("Wi-Fi password", net->ssid, initial, true, password, sizeof(password)) !=
+            BRUCE_OK) {
+            return; /* cancelled */
+        }
+    }
+
+    bruce_result_t result = wifi__connect(net->ssid, password, WIFI_APP_CONNECT_TIMEOUT_MS);
+    char message[BRUCE_WIFI_SSID_MAX_LEN + 32];
+    if (result == BRUCE_OK) {
+        (void)config__add_or_update_wifi_credential(net->ssid, password);
+        snprintf(message, sizeof(message), "Connected to %s", net->ssid);
+        (void)dialog__message(BRUCE_DIALOG_SUCCESS, "Wi-Fi", message);
+    } else {
+        snprintf(message, sizeof(message), "%s: %s", net->ssid, wifi_app_result_label(result));
+        (void)dialog__message(BRUCE_DIALOG_ERROR, "Wi-Fi", message);
+    }
+}
+
+/* Interactive picker: scan, list every visible network with its saved/open/
+ * locked state, connect on selection, and rescan so the list (and any
+ * change the connect attempt caused) is current again. Hidden networks
+ * (blank SSID) are left out -- there is nothing to select or connect to by
+ * name. */
+static int wifi_app__gui(void) {
+    for (;;) {
+        wifi__network_t networks[WIFI_APP_GUI_SCAN_MAX];
+        int count = wifi__scan(networks, WIFI_APP_GUI_SCAN_MAX);
+        if (count < 0) {
+            (void)dialog__message(BRUCE_DIALOG_ERROR, "Wi-Fi scan", "Scan failed.");
+            return -1;
+        }
+
+        int visible = 0;
+        for (int i = 0; i < count; ++i) {
+            if (networks[i].ssid[0] == '\0') continue;
+            if (visible != i) networks[visible] = networks[i];
+            visible++;
+        }
+        count = visible;
+
+        char rows[WIFI_APP_GUI_SCAN_MAX][WIFI_APP_GUI_ROW_TEXT];
+        bruce_dialog_choice_t choices[WIFI_APP_GUI_SCAN_MAX + 2];
+        for (int i = 0; i < count; ++i) {
+            bool known = config__find_wifi_credential(networks[i].ssid) != NULL;
+            wifi_app_gui__format_row(&networks[i], known, rows[i], sizeof(rows[i]));
+            choices[i].label = rows[i];
+            choices[i].value = rows[i];
+        }
+        size_t rescan_index = (size_t)count;
+        size_t exit_index = rescan_index + 1;
+        choices[rescan_index].label = "Rescan";
+        choices[rescan_index].value = "rescan";
+        choices[exit_index].label = "Exit";
+        choices[exit_index].value = "exit";
+
+        char subtitle[32];
+        if (count == 0) snprintf(subtitle, sizeof(subtitle), "No networks found");
+        else snprintf(subtitle, sizeof(subtitle), "%d network%s found", count, count == 1 ? "" : "s");
+
+        size_t selected = 0;
+        bruce_result_t result =
+            dialog__choice("Wi-Fi networks", subtitle, choices, exit_index + 1, &selected, &s_window_chrome);
+        if (result == BRUCE_ERR_CANCELLED || selected == exit_index) return 0;
+        if (result != BRUCE_OK) return -1;
+        if (selected == rescan_index) continue;
+
+        wifi_app_gui__connect(&networks[selected]);
+    }
 }
 
 static int wifi_app_connect(ArgParser *parser) {
@@ -189,7 +298,7 @@ int wifi_app_main(int argc, char **argv) {
     ap_set_helptext(ap_start, "Start the configured access point.");
     ap_set_helptext(ap_toggle, "Toggle the configured access point.");
     ap_set_helptext(ap_info, "Show access-point status and addresses.");
-    ap_set_helptext(scan, "List nearby Wi-Fi networks.");
+    ap_set_helptext(scan, "List nearby Wi-Fi networks (interactive picker in GUI mode).");
     ap_set_helptext(connect, "Connect saved credentials or provide a network and password.");
     ap_add_optional_arg(connect, "ssid", "Network name");
     ap_add_optional_arg(connect, "password", "Network password");
@@ -211,7 +320,7 @@ int wifi_app_main(int argc, char **argv) {
     else if (command == toggle) result = wifi__is_connected() ? wifi_app_off("Wi-Fi disconnected")
                                                               : wifi_app_on();
     else if (command == add) result = wifi_app_add(add);
-    else if (command == scan) result = wifi_app_scan();
+    else if (command == scan) result = runtime__gui_requested() ? wifi_app__gui() : wifi_app_scan();
     else if (command == connect) result = wifi_app_connect(connect);
     else if (command == ap) {
         ArgParser *ap_command = ap_get_cmd_parser(ap);

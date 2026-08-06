@@ -32,7 +32,7 @@ static const char *BRUCE_LAUNCHER_DEFAULT_JSON =
     "  \"WiFi@wifi\": {\n"
     "    \"$WIFI_CONNECT_TEXT\": \"BG=1 wifi toggle\",\n"
     "    \"$WIFI_AP_CONNECT_TEXT\": \"BG=1 wifi ap toggle\",\n"
-    "    \"Scan\": \"terminal wifi scan\",\n"
+    "    \"Scan\": \"wifi scan\",\n"
     "    \"AP info\": \"terminal wifi ap info\",\n"
     "    \"WebUI\": \"webui\",\n"
     "    \"Wifi Atks\": {\n"
