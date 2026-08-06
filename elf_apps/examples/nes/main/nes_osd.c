@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "core_sdk/audio.h"
 #include "core_sdk/display.h"
 #include "core_sdk/input.h"
 #include "core_sdk/memory.h"
@@ -24,6 +25,28 @@ static uint16_t palette[256];
 static uint64_t next_frame_ms;
 static uint32_t next_frame_remainder_us;
 static void (*timer_callback)(void);
+
+/* Audio: nofrendo hands us its APU's fill function (nes.apu->process, see
+ * nes_emulate() in nes/nes.c) via osd_setsound() and expects the OSD layer
+ * to pull PCM from it periodically -- on most ports that happens from a
+ * real sound-card callback; here pace_frame() is the closest thing to a
+ * steady clock, so audio is pulled once per video frame, sized to keep the
+ * emulated APU's internal envelope/sweep timing (which is derived from
+ * samples-per-frame, see apu_setparams()) consistent with the real audio
+ * rate. 960 covers the largest case (48kHz / 50Hz PAL); the actual count
+ * used is recomputed from audio__stream_sample_rate() once the stream opens,
+ * since that can differ per audio backend. */
+#define BRUCE_NES_AUDIO_MAX_SAMPLES_PER_FRAME 960
+static int16_t audio_samples[BRUCE_NES_AUDIO_MAX_SAMPLES_PER_FRAME];
+static void (*audio_playfunc)(void *buffer, int size);
+static uint32_t audio_samples_per_frame;
+static bool audio_stream_open;
+
+static void audio_pump(void) {
+    if (!audio_stream_open || audio_playfunc == NULL || audio_samples_per_frame == 0) return;
+    audio_playfunc(audio_samples, (int)audio_samples_per_frame);
+    audio__stream_write(audio_samples, audio_samples_per_frame);
+}
 
 #define BRUCE_NES_VISIBLE_HEIGHT 224
 #define BRUCE_NES_BLIT_MAX_WIDTH 320
@@ -168,6 +191,7 @@ static void pace_frame(void) {
         runtime__delay(1);
     }
     if (timer_callback != NULL) timer_callback();
+    audio_pump();
 }
 
 static void video_blit(bitmap_t *bitmap, int num_dirties, rect_t *dirty_rects) {
@@ -338,7 +362,16 @@ void osd_getmouse(int *x, int *y, int *button) {
 
 int osd_init(void) { return 0; }
 
-void osd_shutdown(void) { bmp_destroy(&screen_bitmap); }
+void osd_shutdown(void) {
+    /* nofrendo never calls osd_stopsound() itself (it's dead weight left
+     * over from another port's OSD interface), so this is the only in-band
+     * chance to close the stream before the process exits. If it's missed
+     * (a crash, a forced kill), Core's automatic per-process resource
+     * cleanup (see audio__stream_open() in core_sdk/audio.h) closes it
+     * anyway. */
+    osd_stopsound();
+    bmp_destroy(&screen_bitmap);
+}
 
 int osd_main(int argc, char *argv[]) {
     if (argc < 1 || argv == NULL || argv[0] == NULL) return -1;
@@ -399,9 +432,40 @@ int osd_makesnapname(char *filename, int len) {
 }
 
 int osd_init_sound(void) { return 0; }
-void osd_stopsound(void) {}
-void osd_setsound(void (*playfunc)(void *buffer, int length)) { (void)playfunc; }
+
+void osd_stopsound(void) {
+    audio_playfunc = NULL;
+    if (audio_stream_open) {
+        audio_stream_open = false;
+        audio__stream_close();
+    }
+}
+
+/* nofrendo calls this once, right before nes_emulate()'s main loop, handing
+ * over the APU's own sample-fill function (see nes_emulate() in nes/nes.c).
+ * That's also the right moment to open the actual output stream: by now
+ * osd_getsoundinfo() has already run (nes_create() calls it to size the
+ * APU), so audio__stream_sample_rate() is already the rate the APU was
+ * built against. Mono, matching the bps=16/single-channel info reported
+ * below -- nofrendo's APU mixes all channels down to one before this ever
+ * gets called. */
+void osd_setsound(void (*playfunc)(void *buffer, int length)) {
+    audio_playfunc = playfunc;
+    if (playfunc == NULL) {
+        osd_stopsound();
+        return;
+    }
+    if (audio_stream_open) return;
+    if (audio__stream_open(1) != BRUCE_OK) return;
+    audio_stream_open = true;
+    uint32_t rate = audio__stream_sample_rate();
+    uint32_t samples_per_frame = rate / (uint32_t)NES_REFRESH_RATE;
+    audio_samples_per_frame = samples_per_frame > BRUCE_NES_AUDIO_MAX_SAMPLES_PER_FRAME
+                                   ? BRUCE_NES_AUDIO_MAX_SAMPLES_PER_FRAME
+                                   : samples_per_frame;
+}
+
 void osd_getsoundinfo(sndinfo_t *info) {
-    info->sample_rate = 22050;
+    info->sample_rate = (int)audio__stream_sample_rate();
     info->bps = 16;
 }

@@ -1,6 +1,7 @@
 #include "core_sdk/audio.h"
 
 #include <stdlib.h>
+#include <string.h>
 
 #include "core/config/config.h"
 #include "core/process/process.h"
@@ -38,6 +39,15 @@ static SemaphoreHandle_t s_audio_mutex;
 static portMUX_TYPE s_audio_init_mux = portMUX_INITIALIZER_UNLOCKED;
 static size_t s_async_tone_count;
 
+/* Streaming-PCM state (audio__stream_open/write/close below), guarded by
+ * s_audio_mutex like everything else in this file. Exactly one stream may be
+ * open device-wide at a time, same exclusivity as tone playback -- both
+ * ultimately drive the same physical bus. */
+static bool s_stream_open;
+static bruce_process_id_t s_stream_owner;
+static bruce_resource_id_t s_stream_resource;
+static uint8_t s_stream_channels;
+
 static void audio__ensure_mutex(void) {
     if (s_audio_mutex != NULL) return;
     portENTER_CRITICAL(&s_audio_init_mux);
@@ -46,10 +56,31 @@ static void audio__ensure_mutex(void) {
 }
 
 #if CONFIG_BRUCE_AUDIO_BACKEND_I2S && !CONFIG_BRUCE_QEMU_TEST_MODE
-static bruce_result_t audio__play_i2s(const audio__tone_params_t *params) {
-    i2s_chan_handle_t tx_channel = NULL;
+static i2s_chan_handle_t s_i2s_tx_channel;
+static bool s_i2s_tx_ready;
+
+/* Lazily creates and enables the one persistent TX channel, reused by every
+ * tone and every stream write instead of being torn down between them.
+ *
+ * This used to be a create-enable-...-disable-delete cycle run fresh on
+ * every single tone. i2s_del_channel() releases the BCLK/WS/DOUT GPIOs back
+ * to plain, floating inputs once nothing is being played -- and the board's
+ * I2S amplifier chip apparently free-runs off whatever noise it picks up on
+ * a floating clock/data line rather than actually muting, which is what was
+ * behind the "speaker keeps hissing until the board is fully power-cycled"
+ * report: nothing on the ESP32 side is stuck (the channel really is gone),
+ * but a soft reset reinitializes those pins the exact same way at boot --
+ * floating until the first tone -- so it never cleared the amp's noise
+ * either. Keeping the channel allocated and enabled for good means those
+ * pins are always actively driven by the I2S peripheral, either with real
+ * audio or with the explicit silence written at the end of every call below,
+ * so the amp always sees a valid, defined signal and never has a floating
+ * input to react to. */
+static bruce_result_t audio__i2s_ensure_channel_locked(void) {
+    if (s_i2s_tx_ready) return BRUCE_OK;
+
     i2s_chan_config_t channel_config = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_AUTO, I2S_ROLE_MASTER);
-    if (i2s_new_channel(&channel_config, &tx_channel, NULL) != ESP_OK) return BRUCE_ERR_BUSY;
+    if (i2s_new_channel(&channel_config, &s_i2s_tx_channel, NULL) != ESP_OK) return BRUCE_ERR_BUSY;
 
     i2s_std_config_t config = {
         .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(AUDIO__I2S_SAMPLE_RATE),
@@ -67,16 +98,36 @@ static bruce_result_t audio__play_i2s(const audio__tone_params_t *params) {
             },
         },
     };
-    if (i2s_channel_init_std_mode(tx_channel, &config) != ESP_OK || i2s_channel_enable(tx_channel) != ESP_OK) {
-        i2s_del_channel(tx_channel);
+    if (i2s_channel_init_std_mode(s_i2s_tx_channel, &config) != ESP_OK ||
+        i2s_channel_enable(s_i2s_tx_channel) != ESP_OK) {
+        i2s_del_channel(s_i2s_tx_channel);
+        s_i2s_tx_channel = NULL;
         return BRUCE_ERR_INTERNAL;
     }
+    s_i2s_tx_ready = true;
+    return BRUCE_OK;
+}
+
+/* Writes `frames` of interleaved stereo samples, blocking until the hardware
+ * has accepted them (the same backpressure a real sound card gives you). */
+static bruce_result_t audio__i2s_write_locked(const int16_t *interleaved_stereo, uint32_t frames) {
+    size_t bytes_written = 0;
+    size_t bytes = (size_t)frames * 2u * sizeof(int16_t);
+    if (i2s_channel_write(s_i2s_tx_channel, interleaved_stereo, bytes, &bytes_written, portMAX_DELAY) != ESP_OK ||
+        bytes_written != bytes) {
+        return BRUCE_ERR_IO;
+    }
+    return BRUCE_OK;
+}
+
+static bruce_result_t audio__play_i2s(const audio__tone_params_t *params) {
+    bruce_result_t result = audio__i2s_ensure_channel_locked();
+    if (result != BRUCE_OK) return result;
 
     int16_t samples[AUDIO__I2S_BUFFER_FRAMES * 2u];
     int16_t amplitude = (int16_t)((INT16_MAX * params->volume) / 100u);
     uint32_t phase = 0;
     uint32_t frames_remaining = (AUDIO__I2S_SAMPLE_RATE * params->duration_ms) / 1000u;
-    bruce_result_t result = BRUCE_OK;
     while (frames_remaining > 0) {
         uint32_t frames = frames_remaining < AUDIO__I2S_BUFFER_FRAMES ? frames_remaining : AUDIO__I2S_BUFFER_FRAMES;
         for (uint32_t i = 0; i < frames; ++i) {
@@ -86,20 +137,44 @@ static bruce_result_t audio__play_i2s(const audio__tone_params_t *params) {
             phase += params->frequency_hz;
             phase %= AUDIO__I2S_SAMPLE_RATE;
         }
-        size_t bytes_written = 0;
-        size_t bytes = frames * 2u * sizeof(samples[0]);
-        if (i2s_channel_write(tx_channel, samples, bytes, &bytes_written, portMAX_DELAY) != ESP_OK ||
-            bytes_written != bytes) {
-            result = BRUCE_ERR_IO;
-            break;
-        }
+        result = audio__i2s_write_locked(samples, frames);
+        if (result != BRUCE_OK) break;
         frames_remaining -= frames;
     }
 
-    vTaskDelay(pdMS_TO_TICKS(6));
-    i2s_channel_disable(tx_channel);
-    i2s_del_channel(tx_channel);
-    return result;
+    /* The tone's last written sample almost never lands on a zero crossing
+     * (phase is wherever it happens to be when frames_remaining hits 0), so
+     * without this the DMA ring's steady-state content after this call would
+     * be the tail of a square wave sitting at the amplitude peak, not
+     * silence -- and since the channel is no longer torn down between calls,
+     * that would keep looping audibly instead of stopping. Writing one
+     * buffer of true zero closes the waveform out cleanly and leaves the bus
+     * driving real silence until the next tone or stream. */
+    memset(samples, 0, sizeof(samples));
+    bruce_result_t silence_result = audio__i2s_write_locked(samples, AUDIO__I2S_BUFFER_FRAMES);
+    return result == BRUCE_OK ? silence_result : result;
+}
+
+/* Tears down whatever stream is currently open, best-effort. Called both
+ * from audio__stream_close() and from the automatic per-process resource
+ * cleanup below; must be called with s_audio_mutex held. */
+static void audio__stream_teardown_locked(void) {
+    if (s_i2s_tx_ready) {
+        int16_t silence[AUDIO__I2S_BUFFER_FRAMES * 2u];
+        memset(silence, 0, sizeof(silence));
+        (void)audio__i2s_write_locked(silence, AUDIO__I2S_BUFFER_FRAMES);
+    }
+    s_stream_open = false;
+    s_stream_owner = BRUCE_PROCESS_ID_INVALID;
+    s_stream_resource = BRUCE_RESOURCE_ID_INVALID;
+    s_stream_channels = 0;
+}
+#else
+static void audio__stream_teardown_locked(void) {
+    s_stream_open = false;
+    s_stream_owner = BRUCE_PROCESS_ID_INVALID;
+    s_stream_resource = BRUCE_RESOURCE_ID_INVALID;
+    s_stream_channels = 0;
 }
 #endif
 
@@ -209,4 +284,125 @@ bruce_result_t audio__tone(uint32_t frequency_hz, uint32_t duration_ms, bool non
         return BRUCE_ERR_NO_MEMORY;
     }
     return BRUCE_OK;
+}
+
+#if CONFIG_BRUCE_AUDIO_BACKEND_I2S && !CONFIG_BRUCE_QEMU_TEST_MODE
+#define AUDIO__STREAM_SAMPLE_RATE_HZ AUDIO__I2S_SAMPLE_RATE
+#else
+/* No PCM-capable backend: audio__stream_write() below is a silent no-op, but
+ * a caller (e.g. an emulated sound chip) still needs a nonzero rate to pace
+ * its own synthesis against. */
+#define AUDIO__STREAM_SAMPLE_RATE_HZ 22050u
+#endif
+
+uint32_t audio__stream_sample_rate(void) { return AUDIO__STREAM_SAMPLE_RATE_HZ; }
+
+/* Automatic per-process cleanup: runs if the stream's owner exits or is
+ * force-killed without calling audio__stream_close() itself. See the
+ * warning on bruce_process_resource_cleanup_t (core/process/process.h) --
+ * this must not block on anything other than briefly-held locks, which is
+ * exactly what every other process_registry__resource_register() cleanup in
+ * Core (spi__cleanup, storage__file_cleanup, ...) already does. */
+static void audio__stream_cleanup(void *context) {
+    (void)context;
+    audio__ensure_mutex();
+    xSemaphoreTake(s_audio_mutex, portMAX_DELAY);
+    audio__stream_teardown_locked();
+    xSemaphoreGive(s_audio_mutex);
+}
+
+bruce_result_t audio__stream_open(uint8_t channels) {
+    if (channels != 1 && channels != 2) return BRUCE_ERR_INVALID_ARGUMENT;
+
+    /* Same force-kill protection as audio__play(): a stream write blocks on
+     * the mutex/peripheral, and force-kill must wait for that to finish
+     * before deleting the task out from under it. */
+    if (!process_registry__operation_begin()) return BRUCE_ERR_CANCELLED;
+    audio__ensure_mutex();
+    xSemaphoreTake(s_audio_mutex, portMAX_DELAY);
+
+    bruce_result_t result = BRUCE_OK;
+    if (s_stream_open) {
+        result = BRUCE_ERR_BUSY;
+    } else {
+#if CONFIG_BRUCE_AUDIO_BACKEND_I2S && !CONFIG_BRUCE_QEMU_TEST_MODE
+        result = audio__i2s_ensure_channel_locked();
+#endif
+        if (result == BRUCE_OK) {
+            s_stream_open = true;
+            s_stream_owner = process__current_id();
+            s_stream_resource = process_registry__resource_register(audio__stream_cleanup, NULL);
+            s_stream_channels = channels;
+        }
+    }
+
+    xSemaphoreGive(s_audio_mutex);
+    process_registry__operation_end();
+    return result;
+}
+
+bruce_result_t audio__stream_write(const int16_t *samples, size_t frame_count) {
+    if (samples == NULL || frame_count == 0) return BRUCE_ERR_INVALID_ARGUMENT;
+
+    if (!process_registry__operation_begin()) return BRUCE_ERR_CANCELLED;
+    audio__ensure_mutex();
+    xSemaphoreTake(s_audio_mutex, portMAX_DELAY);
+
+    bruce_result_t result = BRUCE_OK;
+    if (!s_stream_open || s_stream_owner != process__current_id()) {
+        result = BRUCE_ERR_INVALID_STATE;
+    } else {
+        bool enabled = false;
+        int volume = 0;
+        config__get_audio_settings(&enabled, &volume);
+        if (!enabled || volume <= 0) {
+            /* Muted: drop the audio silently, same as audio__tone(). */
+        } else {
+#if CONFIG_BRUCE_AUDIO_BACKEND_I2S && !CONFIG_BRUCE_QEMU_TEST_MODE
+            if (volume > 100) volume = 100;
+            bool stereo = s_stream_channels == 2;
+            int16_t chunk[AUDIO__I2S_BUFFER_FRAMES * 2u];
+            size_t offset = 0;
+            while (offset < frame_count) {
+                size_t frames = frame_count - offset;
+                if (frames > AUDIO__I2S_BUFFER_FRAMES) frames = AUDIO__I2S_BUFFER_FRAMES;
+                for (size_t i = 0; i < frames; ++i) {
+                    int32_t left = stereo ? samples[(offset + i) * 2u] : samples[offset + i];
+                    int32_t right = stereo ? samples[(offset + i) * 2u + 1u] : left;
+                    chunk[i * 2u] = (int16_t)((left * volume) / 100);
+                    chunk[i * 2u + 1u] = (int16_t)((right * volume) / 100);
+                }
+                result = audio__i2s_write_locked(chunk, (uint32_t)frames);
+                if (result != BRUCE_OK) break;
+                offset += frames;
+            }
+#endif
+        }
+    }
+
+    xSemaphoreGive(s_audio_mutex);
+    process_registry__operation_end();
+    return result;
+}
+
+bruce_result_t audio__stream_close(void) {
+    if (!process_registry__operation_begin()) return BRUCE_ERR_CANCELLED;
+    audio__ensure_mutex();
+    xSemaphoreTake(s_audio_mutex, portMAX_DELAY);
+
+    bruce_result_t result = BRUCE_OK;
+    bruce_resource_id_t resource = BRUCE_RESOURCE_ID_INVALID;
+    if (!s_stream_open || s_stream_owner != process__current_id()) {
+        result = BRUCE_ERR_INVALID_STATE;
+    } else {
+        resource = s_stream_resource;
+        audio__stream_teardown_locked();
+    }
+
+    xSemaphoreGive(s_audio_mutex);
+    if (result == BRUCE_OK && resource != BRUCE_RESOURCE_ID_INVALID) {
+        process_registry__resource_release(resource);
+    }
+    process_registry__operation_end();
+    return result;
 }
