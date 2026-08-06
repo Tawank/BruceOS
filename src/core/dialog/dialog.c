@@ -847,32 +847,31 @@ static bruce_result_t dialog__gui_input(
         if (input_result == BRUCE_ERR_NOT_FOREGROUND) { return BRUCE_ERR_CANCELLED; }
         if (input_result != BRUCE_OK || ev.action != BRUCE_INPUT_PRESS) { continue; }
 
-        /* Direct physical keyboard typing for text modes. */
-        if (kind == BRUCE_DIALOG_INPUT_TEXT && ev.type == BRUCE_INPUT_KEY && ev.code >= 0x20 &&
-            ev.code <= 0x7E) {
-            dialog__keyboard_add_char(&st, (char)ev.code);
-            continue;
-        }
-        if (kind == BRUCE_DIALOG_INPUT_HEX && ev.type == BRUCE_INPUT_KEY &&
-            isxdigit((unsigned char)ev.code)) {
-            dialog__keyboard_add_char(&st, (char)ev.code);
-            continue;
-        }
-        if (kind == BRUCE_DIALOG_INPUT_NUMBER && ev.type == BRUCE_INPUT_KEY &&
-            dialog__keyboard_validate_char(&st, (char)ev.code, kind)) {
-            dialog__keyboard_add_char(&st, (char)ev.code);
-            continue;
-        }
-
+        /* Semantic navigation/action codes always win over raw typing, and
+         * must be handled before the "direct typing" fallback below.
+         * BRUCE_INPUT_CODE_UP/DOWN/LEFT/RIGHT/BACK deliberately alias
+         * printable ASCII punctuation (';', '.', ',', '/', '`' - see
+         * core_sdk/input.h) so that physical D-pad/button hardware can reuse
+         * the same event codes as keyboard bindings. On keyboards that emit
+         * navigation via an Fn-chord over those same punctuation keys (e.g.
+         * Cardputer's Fn+;/./,// and the bare backtick for Back - see
+         * input__kb_decode_fn_nav() in modules/input/input_keyboard.c), the
+         * resulting event is byte-for-byte identical to the literal
+         * character; there is no way to tell them apart downstream. Checking
+         * this switch first means those five characters must be entered via
+         * the on-screen grid instead of typed directly, but arrows/Back/OK
+         * and Delete work the same way as every other dialog (dialog__gui_choice
+         * included), instead of being silently swallowed as typed punctuation
+         * before ever reaching this switch. */
         switch (ev.code) {
-            case BRUCE_INPUT_CODE_UP: dialog__keyboard_find_valid_cell(&st, -1, 0); break;
-            case BRUCE_INPUT_CODE_DOWN: dialog__keyboard_find_valid_cell(&st, 1, 0); break;
-            case BRUCE_INPUT_CODE_LEFT: dialog__keyboard_find_valid_cell(&st, 0, -1); break;
-            case BRUCE_INPUT_CODE_RIGHT: dialog__keyboard_find_valid_cell(&st, 0, 1); break;
+            case BRUCE_INPUT_CODE_UP: dialog__keyboard_find_valid_cell(&st, -1, 0); continue;
+            case BRUCE_INPUT_CODE_DOWN: dialog__keyboard_find_valid_cell(&st, 1, 0); continue;
+            case BRUCE_INPUT_CODE_LEFT: dialog__keyboard_find_valid_cell(&st, 0, -1); continue;
+            case BRUCE_INPUT_CODE_RIGHT: dialog__keyboard_find_valid_cell(&st, 0, 1); continue;
             case BRUCE_INPUT_CODE_SELECT:
             case BRUCE_INPUT_CODE_BUTTON_A: {
                 const dialog__key_t *key = dialog__current_key(&st);
-                if (key == NULL || key->label == NULL) { break; }
+                if (key == NULL || key->label == NULL) { continue; }
                 if (key->special == DIALOG__KEY_OK) { return BRUCE_OK; }
                 if (key->special == DIALOG__KEY_CANCEL) { return BRUCE_ERR_CANCELLED; }
                 if (key->special == DIALOG__KEY_DELETE) {
@@ -888,11 +887,40 @@ static bruce_result_t dialog__gui_input(
                     }
                     if (dialog__keyboard_validate_char(&st, c, kind)) { dialog__keyboard_add_char(&st, c); }
                 }
-                break;
+                continue;
             }
             case BRUCE_INPUT_CODE_BACK:
             case BRUCE_INPUT_CODE_BUTTON_B: return BRUCE_ERR_CANCELLED;
+            /* Physical Backspace/Delete: a bare "del" key press (no Fn) emits
+             * '\b' as a normal BRUCE_INPUT_KEY (see input__kb_char_code() in
+             * input_keyboard.c); Fn+del emits the semantic
+             * BRUCE_INPUT_CODE_DELETE instead. Neither was ever handled here
+             * previously, so the physical key silently did nothing - the
+             * on-screen "<-"/"DEL" grid key was the only way to delete. 0x7F
+             * (ASCII DEL) is accepted too for keyboards/terminals that send
+             * that instead of '\b'. */
+            case '\b':
+            case 0x7F:
+            case BRUCE_INPUT_CODE_DELETE: dialog__keyboard_delete(&st); continue;
             default: break;
+        }
+
+        /* Direct physical keyboard typing for text modes: only reached for
+         * codes the switch above didn't claim as navigation/action/delete. */
+        if (kind == BRUCE_DIALOG_INPUT_TEXT && ev.type == BRUCE_INPUT_KEY && ev.code >= 0x20 &&
+            ev.code <= 0x7E) {
+            dialog__keyboard_add_char(&st, (char)ev.code);
+            continue;
+        }
+        if (kind == BRUCE_DIALOG_INPUT_HEX && ev.type == BRUCE_INPUT_KEY &&
+            isxdigit((unsigned char)ev.code)) {
+            dialog__keyboard_add_char(&st, (char)ev.code);
+            continue;
+        }
+        if (kind == BRUCE_DIALOG_INPUT_NUMBER && ev.type == BRUCE_INPUT_KEY &&
+            dialog__keyboard_validate_char(&st, (char)ev.code, kind)) {
+            dialog__keyboard_add_char(&st, (char)ev.code);
+            continue;
         }
     }
 }
