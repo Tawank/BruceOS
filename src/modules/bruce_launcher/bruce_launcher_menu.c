@@ -60,6 +60,7 @@ static const char *BRUCE_LAUNCHER_DEFAULT_JSON =
     "    \"Power\": \"config power\",\n"
     "    \"Install App Store\": \"appstore install\",\n"
     "    \"App Permissions\": \"permission_config\",\n"
+    "    \"Partitions\": \"partition_manager\",\n"
     "    \"About\": \"config about\"\n"
     "  },\n"
     "  \"Selftest@test-tube\": \"terminal selftest\",\n"

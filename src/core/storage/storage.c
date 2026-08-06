@@ -12,7 +12,6 @@
 
 #include "driver/sdspi_host.h"
 #include "esp_err.h"
-#include "esp_flash.h"
 #include "esp_littlefs.h"
 #include "esp_log.h"
 #include "esp_partition.h"
@@ -22,6 +21,7 @@
 #include "freertos/task.h"
 #include "spi_flash_mmap.h"
 
+#include "core/partition_manager/partition_manager.h"
 #include "core/process/process.h"
 #include "core_sdk/permission.h"
 #include "core_sdk/storage.h"
@@ -55,19 +55,6 @@ static void storage__lock(void) {
 
 static void storage__unlock(void) { xSemaphoreGive(s_storage_mutex); }
 
-static size_t storage__static_partition_end(void) {
-    size_t end = 0;
-    esp_partition_iterator_t iterator =
-        esp_partition_find(ESP_PARTITION_TYPE_ANY, ESP_PARTITION_SUBTYPE_ANY, NULL);
-    while (iterator != NULL) {
-        const esp_partition_t *partition = esp_partition_get(iterator);
-        size_t partition_end = partition->address + partition->size;
-        if (partition->flash_chip == esp_flash_default_chip && partition_end > end) end = partition_end;
-        iterator = esp_partition_next(iterator);
-    }
-    return (end + SPI_FLASH_SEC_SIZE - 1) & ~(SPI_FLASH_SEC_SIZE - 1);
-}
-
 static bool storage__littlefs_metadata_erased(const esp_partition_t *partition) {
     uint8_t buffer[256];
     size_t check_size = partition->size < 2 * SPI_FLASH_SEC_SIZE ? partition->size : 2 * SPI_FLASH_SEC_SIZE;
@@ -82,23 +69,16 @@ static bool storage__littlefs_metadata_erased(const esp_partition_t *partition) 
 }
 
 static esp_err_t storage__mount_internal(void) {
-    uint32_t flash_size = 0;
-    esp_err_t err = esp_flash_get_size(NULL, &flash_size);
-    if (err != ESP_OK) return err;
-
-    size_t start = storage__static_partition_end();
-    if (start >= flash_size) return ESP_ERR_INVALID_SIZE;
-
-    err = esp_partition_register_external(
-        NULL,
-        start,
-        flash_size - start,
-        "littlefs",
-        ESP_PARTITION_TYPE_DATA,
-        ESP_PARTITION_SUBTYPE_DATA_LITTLEFS,
-        &s_littlefs_partition
-    );
-    if (err != ESP_OK) return err;
+    /* core/partition_manager owns everything after the static partitions in
+     * partitions.csv: by default (no user partition table ever committed)
+     * that's the exact legacy layout below - one littlefs partition
+     * spanning all remaining flash - but a committed table can carve that
+     * space into a "swap" partition, additional labeled littlefs volumes,
+     * etc. Either way it hands back the entry labeled "littlefs" already
+     * registered as an esp_partition_t, ready to mount exactly as before. */
+    if (partition_manager__init_for_storage(&s_littlefs_partition) != BRUCE_OK || s_littlefs_partition == NULL) {
+        return ESP_FAIL;
+    }
 
     const esp_vfs_littlefs_conf_t config = {
         .base_path = STORAGE__MOUNT_PATH,
@@ -107,14 +87,17 @@ static esp_err_t storage__mount_internal(void) {
         .format_if_mount_failed = false,
         .grow_on_mount = true,
     };
-    err = esp_vfs_littlefs_register(&config);
+    esp_err_t err = esp_vfs_littlefs_register(&config);
     if (err != ESP_OK && storage__littlefs_metadata_erased(s_littlefs_partition)) {
         ESP_LOGI(TAG, "formatting empty internal storage");
         err = esp_littlefs_format_partition(s_littlefs_partition);
         if (err == ESP_OK) err = esp_vfs_littlefs_register(&config);
     }
     if (err == ESP_OK) {
-        ESP_LOGI(TAG, "mounted internal storage at 0x%zx (%zu bytes)", start, s_littlefs_partition->size);
+        ESP_LOGI(
+            TAG, "mounted internal storage at 0x%zx (%zu bytes)", (size_t)s_littlefs_partition->address,
+            s_littlefs_partition->size
+        );
     }
     return err;
 }

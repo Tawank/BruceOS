@@ -29,6 +29,8 @@
 #include "modules/loaders/js/js_loader_app.h"
 #include "modules/notification_service/notification_service.h"
 #include "modules/nrf24/nrf24_app.h"
+#include "modules/partition_manager/bparted.h"
+#include "modules/partition_manager/partition_manager_gui.h"
 #include "modules/privileged/permission_config/permission_config_app.h"
 #include "modules/selftest/selftest.h"
 #include "modules/shell/shell_app.h"
@@ -73,6 +75,8 @@ void app_runner__register_defaults(void) {
     (void)app_runner__register("bluetooth_hid_app", bluetooth_hid_app_main, 0);
     (void)app_runner__register("ir", ir_app_main, 0);
     (void)app_runner__register("nrf24", nrf24_app_main, 0);
+    (void)app_runner__register("bparted", bparted_app_main, 0);
+    (void)app_runner__register("partition_manager", partition_manager_gui_app_main, 0);
     (void)app_runner__register("selftest", selftest_app_main, SELFTEST_STACK_BYTES);
     (void)app_runner__register("terminal", terminal_app_main, 0);
     (void)app_runner__register("shell", shell_app_main, SHELL_STACK_BYTES);

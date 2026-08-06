@@ -21,6 +21,7 @@ set(BRUCE_SELFTEST_SOURCES
     "modules/selftest/memory_test.c"
     "modules/selftest/notification_test.c"
     "modules/selftest/nrf24_test.c"
+    "modules/selftest/partition_manager_test.c"
     "modules/selftest/permission_test.c"
     "modules/selftest/selftest.c"
     "modules/selftest/storage_test.c"
@@ -62,6 +63,7 @@ idf_component_register(SRCS
                     "core/network/network.c"
                     "core/notification/notification.c"
                     "core/nrf24/nrf24.c"
+                    "core/partition_manager/partition_manager.c"
                     "core/permission/permission.c"
                     "core/pubsub/pubsub.c"
                     "core/stdio/stdio.c"
@@ -127,6 +129,9 @@ idf_component_register(SRCS
                     "modules/notification_service/notification_service.c"
                     "modules/ir/ir_app.c"
                     "modules/nrf24/nrf24_app.c"
+                    "modules/partition_manager/bparted.c"
+                    "modules/partition_manager/partition_manager_common.c"
+                    "modules/partition_manager/partition_manager_gui.c"
                     "modules/wifi/wifi_app.c"
                     "modules/webui/webui_app.c"
                     "modules/privileged/permission_config/permission_config_app.c"
@@ -333,6 +338,20 @@ target_include_directories(bruce_sdk_builtin_nrf24_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/nrf24")
 
+add_library(bruce_sdk_builtin_bparted_check OBJECT
+            "modules/partition_manager/bparted.c"
+            "modules/partition_manager/partition_manager_common.c")
+target_include_directories(bruce_sdk_builtin_bparted_check PRIVATE
+                           "${CMAKE_CURRENT_LIST_DIR}"
+                           "${CMAKE_CURRENT_LIST_DIR}/modules/partition_manager")
+
+add_library(bruce_sdk_builtin_partition_manager_gui_check OBJECT
+            "modules/partition_manager/partition_manager_gui.c"
+            "modules/partition_manager/partition_manager_common.c")
+target_include_directories(bruce_sdk_builtin_partition_manager_gui_check PRIVATE
+                           "${CMAKE_CURRENT_LIST_DIR}"
+                           "${CMAKE_CURRENT_LIST_DIR}/modules/partition_manager")
+
 add_library(bruce_sdk_builtin_filemanager_check OBJECT "modules/filemanager/filemanager_app.c")
 target_include_directories(bruce_sdk_builtin_filemanager_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
@@ -456,6 +475,7 @@ set(BRUCE_ARGS_SDK_CHECK_TARGETS
     bruce_sdk_builtin_bluetooth_hid_check
     bruce_sdk_builtin_ir_check
     bruce_sdk_builtin_nrf24_check
+    bruce_sdk_builtin_bparted_check
     bruce_sdk_builtin_image_loader_check
     bruce_sdk_builtin_text_check
     bruce_sdk_builtin_utils_help_check
