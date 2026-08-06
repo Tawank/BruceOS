@@ -170,7 +170,16 @@ static int internal_insert(const char *filename, system_t type)
       if (nes_insertcart(console.filename, console.machine.nes))
          return -1;
 
-      vid_setmode(NES_SCREEN_WIDTH, NES_SCREEN_HEIGHT);
+      if (vid_setmode(NES_SCREEN_WIDTH, NES_SCREEN_HEIGHT))
+      {
+         /* vid_setmode() fails when bmp_create() can't allocate the primary
+          * framebuffer -- e.g. the process-owned tracked allocator is out of
+          * resource slots. Left unchecked, primary_buffer stays NULL and gets
+          * handed straight into the PPU's per-scanline render path, which
+          * crashes on the very first frame. Fail cleanly here instead. */
+         nofrendo_log_printf("Failed to set video mode.\n");
+         return -1;
+      }
 
       if (install_timer(NES_REFRESH_RATE))
          return -1;
