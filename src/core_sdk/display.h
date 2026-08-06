@@ -232,6 +232,28 @@ uint8_t display__get_brightness(void);
 /* Turn the panel display on or off (backlight is controlled separately). */
 bruce_result_t display__display_on_off(bool on);
 
+/*
+ * Frees the off-screen DMA framebuffer and switches rendering to direct
+ * (unbuffered) mode, or reverts back -- entirely at runtime, no reboot
+ * required. Meant to be called by a memory-hungry ELF/JS app (an emulator, a
+ * game with a large asset set, ...) right before it starts allocating, to
+ * hand back the RAM the buffered/DMA framebuffer would otherwise be holding
+ * for the whole time the app runs.
+ *
+ * display__game_mode(true) tears down the current s_framebuffer/pack buffer
+ * (if buffered rendering was in use) and allocates only the small direct-mode
+ * scratch buffer instead; the calling process becomes game mode's owner.
+ * display__game_mode(false), called by that same owning process, restores
+ * whatever rendering mode was active before game mode was turned on. Calling
+ * it again with the same value the caller already holds is a no-op. Only the
+ * owning process may turn its own game mode back off; if the owner exits (or
+ * is killed) without doing so, the display core reverts it automatically.
+ *
+ * Fails with BRUCE_ERR_BUSY if another process currently owns game mode, or
+ * while any process has an active (begun but not yet presented) frame.
+ */
+bruce_result_t display__game_mode(bool enable);
+
 /* -------------------------------------------------------------------------- */
 /* Framebuffer flush                                                          */
 /* -------------------------------------------------------------------------- */

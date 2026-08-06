@@ -256,6 +256,7 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(display__set_brightness),
     ESP_ELFSYM_EXPORT(display__get_brightness),
     ESP_ELFSYM_EXPORT(display__display_on_off),
+    ESP_ELFSYM_EXPORT(display__game_mode),
     ESP_ELFSYM_EXPORT(display__begin_frame),
     ESP_ELFSYM_EXPORT(display__present),
     ESP_ELFSYM_EXPORT(display__screen_width),
