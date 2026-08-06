@@ -760,6 +760,21 @@ void config__get_audio_settings(bool *enabled, int *volume) {
     *volume = s_config.soundVolume;
     config__unlock();
 }
+
+void config__get_theme_colors_internal(uint16_t *pri, uint16_t *sec, uint16_t *bg) {
+    if (pri == NULL || sec == NULL || bg == NULL) return;
+    if (!config__init()) {
+        *pri = 0;
+        *sec = 0;
+        *bg = 0;
+        return;
+    }
+    config__lock();
+    *pri = s_config.priColor;
+    *sec = s_config.secColor;
+    *bg = s_config.bgColor;
+    config__unlock();
+}
 CONFIG__DEFINE_STRING_FIELD(keyboard_lang, keyboardLang, CONFIG__KEYBOARD_LANG_MAX_LEN)
 
 const bruce_config_hotkeys_t *config__get_hotkeys(void) {

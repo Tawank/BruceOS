@@ -89,6 +89,15 @@ bool config__factory_reset(void);
 /* Reads settings needed by Core audio without applying app config permission. */
 void config__get_audio_settings(bool *enabled, int *volume);
 
+/* Reads the theme colors Core's own dialog renderer needs to draw any UI
+ * chrome (title bars, footers, backgrounds) without applying app config
+ * permission - see config__get_theme_colors_internal() in config.c for why:
+ * the public core_sdk/config.h getters return black (0) when the calling
+ * process lacks "config", which would make dialog.c draw every screen -
+ * including the permission-request dialog itself - in unreadable black on
+ * black. */
+void config__get_theme_colors_internal(uint16_t *pri, uint16_t *sec, uint16_t *bg);
+
 /* Compatibility initializer. New callers should use config__init(). */
 void config__init_defaults(void);
 

@@ -1,5 +1,6 @@
 #include "dialog.h"
 
+#include "core/config/config.h"
 #include "core_sdk/config.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/display.h"
@@ -201,9 +202,16 @@ static int dialog__default_list_text_size(void) {
 }
 
 static void dialog__get_theme_colors(uint16_t *pri, uint16_t *sec, uint16_t *bg) {
-    *pri = config__get_pri_color();
-    *bg = config__get_bg_color();
-    *sec = config__get_sec_color();
+    /* Core-private, ungated: dialog.c draws its own UI chrome (title bars,
+     * footers, backgrounds, and permission-request prompts themselves), not
+     * config the calling process asked to read. Going through the public
+     * core_sdk/config.h getters here would make every getter return black
+     * (0) whenever the caller lacks "config" - rendering every dialog,
+     * including the "config" permission prompt itself, in unreadable black
+     * on black (the prompt can never be answered because it can't be seen,
+     * and its own theme lookup nested inside the same prompt fails closed via
+     * permission__prompt_guarded()'s reentrancy guard - see permission.c). */
+    config__get_theme_colors_internal(pri, sec, bg);
 }
 
 static void dialog__gui_clear(void) {
