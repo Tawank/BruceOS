@@ -291,7 +291,23 @@ static int shell_executor__dispatch(shell_state_t *state, char **words, int argc
     int first_command = 0;
     bruce_environment_variable_t environment[SHELL__MAX_VARIABLES];
     size_t environment_count = 0;
-    bruce_launch_mode_t mode = BRUCE_LAUNCH_FOREGROUND;
+    /* Defaults to background: the shell itself is always a background
+     * process piping text through a stdio session (see terminal_app.c and
+     * serial_commands_app.c, which both only ever launch "shell" with
+     * BRUCE_LAUNCH_BACKGROUND), and a plain external command (ssh, cat,
+     * ping, an ELF app run without GUI=1, ...) has no screen of its own --
+     * its I/O already flows through that same inherited stdio session.
+     * Foreground mode instead makes the process claim the *physical*
+     * display/keyboard (see process_registry__create()), which a non-GUI
+     * command can't productively use; while it holds that claim, whatever
+     * actually owns the screen (e.g. the Terminal app hosting this shell)
+     * goes dark/unresponsive until something else cycles foreground away
+     * from it. An explicit "BG=0" still forces foreground below, and a
+     * command that wants the physical screen tags itself "GUI=1" the same
+     * way autostart__run() and input_keyboard__run_hotkey() do for their
+     * own foreground launches. */
+    bruce_launch_mode_t mode = BRUCE_LAUNCH_BACKGROUND;
+    bool bg_explicit = false;
     while (first_command < argc) {
         char *equals = strchr(words[first_command], '=');
         if (equals == NULL) break;
@@ -308,6 +324,7 @@ static int shell_executor__dispatch(shell_state_t *state, char **words, int argc
         const char *name = words[first_command];
         const char *value = equals + 1;
         if (strcmp(name, "BG") == 0) {
+            bg_explicit = true;
             if (strcmp(value, "0") == 0) mode = BRUCE_LAUNCH_FOREGROUND;
             else if (strcmp(value, "1") == 0) mode = BRUCE_LAUNCH_BACKGROUND;
             else {
@@ -317,6 +334,9 @@ static int shell_executor__dispatch(shell_state_t *state, char **words, int argc
         }
         environment[environment_count++] = (bruce_environment_variable_t){.name = name, .value = value};
         first_command++;
+    }
+    if (!bg_explicit && app_runner__environment_requests_gui(environment, environment_count)) {
+        mode = BRUCE_LAUNCH_FOREGROUND;
     }
     if (first_command == argc) {
         for (size_t i = 0; i < environment_count; ++i) {

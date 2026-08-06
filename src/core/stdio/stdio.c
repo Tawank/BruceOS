@@ -491,8 +491,12 @@ int stdio__read_line(char *buffer, size_t buffer_size, bool mask_input) {
             }
             c = ch;
         }
-        if (c == '\n') break;
-        if (c == '\r') continue;
+        /* Terminal (see terminal_app.c's terminal__handle_input()) forwards a
+         * physical Enter keypress as a bare '\r', never '\n', so both must
+         * end the line here or a session-routed read (e.g. the terminal-mode
+         * permission Allow/Deny prompt in dialog.c) waits for a '\n' that
+         * never arrives and Enter appears to do nothing. */
+        if (c == '\n' || c == '\r') break;
         if (c == '\b' || c == 0x7f) {
             if (i > 0) {
                 i--;
