@@ -129,6 +129,7 @@ idf_component_register(SRCS
                     "modules/nrf24/nrf24_app.c"
                     "modules/wifi/wifi_app.c"
                     "modules/webui/webui_app.c"
+                    "modules/privileged/permission_config/permission_config_app.c"
                     EMBED_FILES
                     "../elf_apps/examples/game.elf"
                     REQUIRES
@@ -470,8 +471,8 @@ foreach(target IN LISTS BRUCE_ARGS_SDK_CHECK_TARGETS)
     target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../components/args")
 endforeach()
 
-# modules/selftest and modules/device_bus are intentionally NOT added
-# to the core_sdk-only compile check above.
+# modules/selftest, modules/device_bus, and modules/privileged/* are
+# intentionally NOT added to the core_sdk-only compile check above.
 # - selftest is explicitly permitted to include Core-private headers and call
 #   FreeRTOS/ESP-IDF directly (see selftest.h and migration_plan.md) so it can
 #   validate Core's private internals.
@@ -481,3 +482,12 @@ endforeach()
 #   process-scoped i2c__open() cannot be used at that boot stage, so this
 #   module is Core-private by necessity rather than SDK-only like other
 #   built-ins.
+# - modules/privileged/permission_config reads/writes /config/permissions.json
+#   directly via core/storage/storage.h's storage__read_file()/
+#   storage__write_file_atomic(); that path is unconditionally refused by the
+#   public core_sdk/storage.h storage__open()/storage__list() (see
+#   storage__is_protected_path() in core/storage/storage.c), so a permissions
+#   management UI has no core_sdk-only way to enumerate saved decisions. Any
+#   future modules/privileged/* module inherits the same Core-private
+#   exemption for the same class of reason - a built-in that legitimately
+#   needs to see something the public SDK deliberately hides from apps.

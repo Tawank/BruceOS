@@ -187,6 +187,18 @@ static bruce_result_t dialog__term_pick_file(
 #define DIALOG__CHAR_H 8
 #define DIALOG__TEXT_SIZE 1
 #define DIALOG__MARGIN 2
+/* Width threshold above which choice-list rows step up to a larger font,
+ * matching bruce_launcher__submenu_font_size() in bruce_launcher_app.c so a
+ * menu screen (e.g. Config, App Permissions) reads at the same size whether
+ * it's rendered by the launcher's own submenu list or by dialog__choice().
+ * Title bars/footers/messages stay at DIALOG__TEXT_SIZE, same as the
+ * launcher's small header/status text. */
+#define DIALOG__WIDE_DISPLAY_MIN_WIDTH 200
+#define DIALOG__LIST_TEXT_SIZE_WIDE 2
+
+static int dialog__default_list_text_size(void) {
+    return display__width() >= DIALOG__WIDE_DISPLAY_MIN_WIDTH ? DIALOG__LIST_TEXT_SIZE_WIDE : DIALOG__TEXT_SIZE;
+}
 
 static void dialog__get_theme_colors(uint16_t *pri, uint16_t *sec, uint16_t *bg) {
     *pri = config__get_pri_color();
@@ -251,7 +263,7 @@ bruce_dialog_render_params_t dialog__default_render_params(int text_size) {
     dialog__get_theme_colors(&pri, &sec, &bg);
     bruce_dialog_render_params_t params = {0};
     params.render_borders = true;
-    params.text_size = text_size > 0 ? text_size : DIALOG__TEXT_SIZE;
+    params.text_size = text_size > 0 ? text_size : dialog__default_list_text_size();
     params.background_color = bg;
     params.text_color = pri;
     return params;
@@ -340,7 +352,7 @@ static bruce_result_t dialog__gui_choice(
     int text_size = render_params != NULL && render_params->text_size > 0 ? render_params->text_size
                      : window_chrome && s_window_renderer.text_size > 0   ? s_window_renderer.text_size
                      : window_chrome                                     ? 1
-                                                                          : DIALOG__TEXT_SIZE;
+                                                                          : dialog__default_list_text_size();
 
     uint16_t pri, sec, bg;
     dialog__get_theme_colors(&pri, &sec, &bg);

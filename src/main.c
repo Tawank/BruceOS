@@ -29,6 +29,7 @@
 #include "modules/loaders/js/js_loader_app.h"
 #include "modules/notification_service/notification_service.h"
 #include "modules/nrf24/nrf24_app.h"
+#include "modules/privileged/permission_config/permission_config_app.h"
 #include "modules/selftest/selftest.h"
 #include "modules/shell/shell_app.h"
 #include "modules/ssh/ssh_app.h"
@@ -62,6 +63,7 @@ void app_runner__register_defaults(void) {
     (void)app_runner__register("filemanager", filemanager_app_main, 0);
     (void)app_runner__register("clock", clock_app_main, 0);
     (void)app_runner__register("config", config_app_main, 0);
+    (void)app_runner__register("permission_config", permission_config_app_main, 0);
     (void)app_runner__register("wifi", wifi_app_main, 0);
     (void)app_runner__register("webui", webui_app_main, 0);
     (void)app_runner__register("bluetooth", bluetooth_app_main, 0);
