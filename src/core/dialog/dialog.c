@@ -270,6 +270,10 @@ bruce_dialog_render_params_t dialog__default_render_params(int text_size) {
 }
 
 static bruce_result_t dialog__gui_wait_for_any_key(void) {
+    /* Discard whatever's still queued (e.g. the press that opened this
+     * screen) so it can't be misread as the dismiss key before the user has
+     * even seen the message. */
+    (void)input__flush();
     for (;;) {
         bruce_input_event_t ev;
         bruce_result_t result = input__read(&ev, 100);
@@ -334,7 +338,10 @@ static bruce_result_t dialog__gui_choice(
      * no border/status bar to draw around, so the choice list just uses
      * whatever plain fields the caller also set (typically none). */
     bool window_chrome = render_params != NULL && render_params->window_chrome && s_window_renderer_set;
-    int selected = 0;
+    /* Honor the caller's requested starting highlight (e.g.
+     * permission__prompt() pre-selects "Deny" as the safe default for a
+     * security prompt) instead of always opening on choice 0. */
+    int selected = out_selected != NULL && *out_selected < choice_count ? (int)*out_selected : 0;
     int first_visible = 0;
     int w = display__width();
     int h = display__height();
@@ -376,6 +383,12 @@ static bruce_result_t dialog__gui_choice(
     bool wants_periodic_refresh = window_chrome ? s_window_renderer.draw_status != NULL
                                                  : render_params != NULL && render_params->render_callback != NULL;
 
+    /* Discard whatever's still queued (typically the press that navigated
+     * into this screen) so it can't be replayed as an immediate selection on
+     * the freshly drawn list before the user has seen it - e.g. a permission
+     * prompt silently auto-confirming "Allow" on the stale press that
+     * launched the requesting app. */
+    (void)input__flush();
     for (;;) {
         uint64_t now = runtime__now();
         if (wants_periodic_refresh && refresh_interval_ms > 0 && now - rendered_at >= refresh_interval_ms) {
@@ -813,6 +826,9 @@ static bruce_result_t dialog__gui_input(
 
     dialog__keyboard_ensure_valid(&st);
 
+    /* See dialog__gui_choice()'s matching flush: discard whatever's still
+     * queued from before this keyboard screen appeared. */
+    (void)input__flush();
     for (;;) {
         bruce_result_t draw_result = dialog__keyboard_draw(&st, kind);
         if (draw_result == BRUCE_ERR_NOT_FOREGROUND) { return BRUCE_ERR_CANCELLED; }
