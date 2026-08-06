@@ -59,3 +59,28 @@ bool bparted_common__parse_size(const char *text, uint64_t *out_bytes) {
     *out_bytes = value * multiplier;
     return true;
 }
+
+/* Only the results core/partition_manager actually produces get their own
+ * wording; anything else falls through to the generic line rather than
+ * claiming something specific that may not be true. */
+const char *bparted_common__error_text(bruce_result_t result) {
+    switch (result) {
+    case BRUCE_OK: return "ok";
+    case BRUCE_ERR_INVALID_ARGUMENT:
+        return "bad label, type or size (labels are 1-16 of A-Z a-z 0-9 _ -, and only a swap partition may "
+               "be called 'swap')";
+    case BRUCE_ERR_NOT_FOUND: return "no partition with that label";
+    case BRUCE_ERR_PERMISSION: return "not allowed (the root partition cannot be deleted - format it instead)";
+    case BRUCE_ERR_ALREADY_EXISTS: return "a partition with that label already exists";
+    case BRUCE_ERR_RESOURCE_LIMIT: return "not enough free space, or the layout is already full";
+    case BRUCE_ERR_INVALID_STATE: return "that partition does not exist on flash yet";
+    case BRUCE_ERR_IO: return "writing the partition table failed";
+    case BRUCE_ERR_NO_MEMORY: return "out of memory";
+    default: return "unexpected error";
+    }
+}
+
+bruce_result_t bparted_common__clamp_list(bruce_result_t result, size_t *count, size_t capacity) {
+    if (*count > capacity) *count = capacity;
+    return result == BRUCE_ERR_RESOURCE_LIMIT ? BRUCE_OK : result;
+}

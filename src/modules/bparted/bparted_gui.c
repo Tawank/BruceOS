@@ -1,464 +1,573 @@
 #include "bparted_gui.h"
 
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
-#include "core_sdk/app_runner.h"
+#include "core_sdk/device.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/partition_manager.h"
-#include "core_sdk/process.h"
 #include "core_sdk/result.h"
 
 #include "bparted_common.h"
 
-#define BPARTED_GUI_MAX_ENTRIES 8
-/* Worst case: every committed entry plus every pending entry are disjoint
- * (all creates and all deletes staged at once), plus the fixed action rows
- * (Create/Apply/Cancel/Reboot/Back). */
-#define BPARTED_GUI_MAX_ROWS (BPARTED_GUI_MAX_ENTRIES * 2 + 5)
-
-/* Every mutation drives the "bparted" CLI mode (bparted_cli.c) via
- * app_runner__run_command(), the same shell-command-from-GUI mechanism
- * modules/bruce_launcher/bruce_launcher_app.c and modules/webui/webui_app.c
- * already use - so all validation/flash logic lives in one place and this
- * file only ever builds a command line. Running "bparted ..." without
- * GUI=1 (the default for a child launched this way) routes back into the
- * CLI, not this GUI, via bparted_app.c's dispatch.
+/* One screen showing both layouts at once - what the device is running
+ * right now, and what it will be running after the next boot - over a fixed
+ * row of actions (Create/Delete/Format/Apply/Cancel/Exit). That pairing is
+ * the whole point of the app: every edit only ever moves the second list,
+ * and the first one cannot change until the device reboots, so the two
+ * lists side by side are the answer to "what did I just change, and has it
+ * happened yet?".
  *
- * Create/Delete/Format here all go through "bparted stage ..." - which
- * only edits the in-RAM working table (core_sdk/partition_manager.h's
- * partition_manager__list()) - never "bparted create/delete/format", which
- * would write to flash immediately. Only the main menu's "Apply changes"
- * ("bparted apply") ever commits; "Cancel changes" ("bparted cancel")
- * drops every staged edit instead. Read-only queries (list()/
- * list_committed()/has_pending_changes()/reboot_required()) are cheap and
- * safe to call directly from this process - see the plan this app was
- * built from - so only state-changing calls go through a command line. */
-static bruce_result_t bparted_gui__run(const char *command_line) {
-    int launched = app_runner__run_command(command_line, BRUCE_LAUNCH_BACKGROUND);
-    if (launched <= 0) return (bruce_result_t)launched;
+ * Everything here calls core_sdk/partition_manager.h directly. Editing is
+ * restricted to built-in modules and this is one, so there is nothing to
+ * gain from bouncing each action through a "bparted ..." child process: a
+ * stage_*() call is a mutex and a memcpy, while spawning a process to make
+ * it costs a task, a stack and a wait. The CLI front end is a peer of this
+ * file, not a back end for it.
+ *
+ * Nothing on this screen touches flash except Apply, and nothing touches
+ * user data at all until the next boot - see core_sdk/partition_manager.h. */
 
-    bruce_process_status_t status;
-    for (;;) {
-        bruce_result_t waited = process__wait_status((bruce_process_id_t)launched, 100, &status);
-        if (waited == BRUCE_OK) break;
-        if (waited == BRUCE_ERR_TIMEOUT) continue;
-        return waited;
-    }
-    if (status.reason != BRUCE_PROCESS_EXITED) return BRUCE_ERR_INTERNAL;
-    return status.exit_code == 0 ? BRUCE_OK : BRUCE_ERR_IO;
+/* Longest "<label> <size> [<change>]" row rendered below. */
+#define BPARTED_GUI_ROW_TEXT 40
+
+/* Partition rows the page can show at once: the running layout plus the
+ * next-boot one, which is the longer of the two (see BPARTED_PLANNED_MAX). */
+#define BPARTED_GUI_ENTRY_ROWS (BPARTED_LAYOUT_MAX + BPARTED_PLANNED_MAX)
+
+/* Those, plus the three headings, the "(same as above)" placeholder, and
+ * the seven action rows. */
+#define BPARTED_GUI_MAX_ROWS (BPARTED_GUI_ENTRY_ROWS + 11)
+
+/* Below this a partition is too small to be worth offering to create; it is
+ * also the flash sector size every size is rounded up to. */
+#define BPARTED_GUI_MIN_NEW_BYTES 4096u
+
+typedef enum {
+    /* Headings and the layout rows themselves: selecting one does nothing
+     * but redraw. The two lists are a readout, not a menu - every edit goes
+     * through a named action below, so there is never a hidden gesture that
+     * changes the layout. */
+    BPARTED_GUI_ACTION_NONE,
+    BPARTED_GUI_ACTION_CREATE,
+    BPARTED_GUI_ACTION_DELETE,
+    BPARTED_GUI_ACTION_FORMAT,
+    BPARTED_GUI_ACTION_APPLY,
+    BPARTED_GUI_ACTION_CANCEL,
+    BPARTED_GUI_ACTION_REBOOT,
+    BPARTED_GUI_ACTION_EXIT,
+} bparted_gui_action_t;
+
+/* The whole screen in one allocation, built once per redraw and owned by
+ * bparted_gui__main()'s frame: the choice list points into row_text, so the
+ * text has to outlive the dialog__choice() call that renders it. */
+typedef struct {
+    bruce_partition_entry_t current[BPARTED_LAYOUT_MAX];
+    size_t current_count;
+    bruce_partition_entry_t planned[BPARTED_PLANNED_MAX];
+    size_t planned_count;
+    bruce_partition_status_t status;
+
+    char row_text[BPARTED_GUI_ENTRY_ROWS][BPARTED_GUI_ROW_TEXT];
+    size_t text_count;
+    bruce_dialog_choice_t choices[BPARTED_GUI_MAX_ROWS];
+    uint8_t actions[BPARTED_GUI_MAX_ROWS];
+    size_t row_count;
+
+    char summary[64];
+} bparted_gui_page_t;
+
+static void bparted_gui__notify(bruce_dialog_kind_t kind, const char *message) {
+    (void)dialog__message(kind, "Partitions", message);
 }
 
-static void bparted_gui__show_error(const char *action, bruce_result_t result) {
-    char message[80];
-    snprintf(message, sizeof(message), "%s failed (%d)", action, result);
-    (void)dialog__message(BRUCE_DIALOG_ERROR, "Partitions", message);
+static void bparted_gui__report(const char *action, bruce_result_t result) {
+    char message[128];
+    snprintf(message, sizeof(message), "%s: %s", action, bparted_common__error_text(result));
+    bparted_gui__notify(BRUCE_DIALOG_ERROR, message);
 }
 
-static bool bparted_gui__find(
-    const bruce_partition_entry_t *entries, size_t count, const char *label, size_t *out_index
-) {
+/* A two-way "go ahead / back out" prompt that always starts on backing out,
+ * so a stray confirm press can never be what destroys someone's data. */
+static bool bparted_gui__confirm(const char *title, const char *message, const char *confirm_label) {
+    const bruce_dialog_choice_t choices[] = {
+        {.label = confirm_label, .value = "confirm"},
+        {.label = "Back",        .value = "back"   },
+    };
+    size_t selected = 1;
+    bruce_result_t result = dialog__choice(title, message, choices, 2, &selected, NULL);
+    return result == BRUCE_OK && selected == 0;
+}
+
+/* "<label> <size> [<change>]", with the root entry marked by the path it is
+ * mounted at. Used for both lists and for the Delete/Format pickers, so a
+ * partition looks the same everywhere it appears. */
+static void bparted_gui__format_row(const bruce_partition_entry_t *entry, char *out, size_t capacity) {
+    char size_text[16];
+    bparted_common__format_size(entry->size, size_text, sizeof(size_text));
+
+    const char *state = bparted_common__state_name(entry->state);
+    char change[12];
+    if (state[0] != '\0') snprintf(change, sizeof(change), " [%s]", state);
+    else change[0] = '\0';
+
+    /* The label is padded to 12 so the size column lines up on the common
+     * short labels, and capped at its real 16-char maximum so a long one is
+     * still shown whole. Every conversion is bounded rather than left open:
+     * it keeps the row narrow enough to read on a small display, and it is
+     * what lets the compiler prove the whole row fits in `capacity`. */
+    snprintf(
+        out, capacity, "%-12.16s %7.7s%s%.9s", entry->label, size_text, entry->is_root ? " /" : "", change
+    );
+}
+
+static bool
+bparted_gui__has_label(const bruce_partition_entry_t *entries, size_t count, const char *label) {
     for (size_t i = 0; i < count; ++i) {
-        if (strcmp(entries[i].label, label) == 0) {
-            if (out_index != NULL) *out_index = i;
-            return true;
-        }
+        if (entries[i].state == BRUCE_PARTITION_STATE_DELETED) continue;
+        if (strcmp(entries[i].label, label) == 0) return true;
     }
     return false;
 }
 
-static bruce_result_t bparted_gui__offer_reboot(void) {
-    if (!partition_manager__reboot_required()) return BRUCE_OK;
-    const bruce_dialog_choice_t choices[] = {
-        {.label = "Reboot now", .value = "yes"},
-        {.label = "Later",      .value = "no" },
-    };
-    size_t selected = 1;
-    bruce_result_t result = dialog__choice(
-        "Partitions", "Changes are staged. Reboot now to apply them?", choices, 2, &selected, NULL
+/* ------------------------------------------------------------------------ */
+/* Page                                                                      */
+/* ------------------------------------------------------------------------ */
+
+static void bparted_gui__add_row(bparted_gui_page_t *page, const char *label, bparted_gui_action_t action) {
+    if (page->row_count >= BPARTED_GUI_MAX_ROWS) return;
+    page->choices[page->row_count].label = label;
+    page->choices[page->row_count].value = label;
+    page->actions[page->row_count] = (uint8_t)action;
+    page->row_count++;
+}
+
+static void bparted_gui__add_entry_row(bparted_gui_page_t *page, const bruce_partition_entry_t *entry) {
+    if (page->text_count >= BPARTED_GUI_ENTRY_ROWS) return;
+    char *text = page->row_text[page->text_count];
+    bparted_gui__format_row(entry, text, BPARTED_GUI_ROW_TEXT);
+    page->text_count++;
+    bparted_gui__add_row(page, text, BPARTED_GUI_ACTION_NONE);
+}
+
+/* Re-reads both layouts and rebuilds every row. Called before each frame
+ * rather than patched incrementally: the tables are a few hundred bytes and
+ * a redraw only happens when someone pressed a key, so re-reading is both
+ * cheaper to reason about and immune to the page drifting out of sync with
+ * what core actually staged. */
+static bruce_result_t bparted_gui__refresh(bparted_gui_page_t *page) {
+    page->row_count = 0;
+    page->text_count = 0;
+    page->current_count = 0;
+    page->planned_count = 0;
+
+    bruce_result_t result = bparted_common__clamp_list(
+        partition_manager__list_current(page->current, BPARTED_LAYOUT_MAX, &page->current_count),
+        &page->current_count, BPARTED_LAYOUT_MAX
     );
-    if (result != BRUCE_OK || selected != 0) return BRUCE_OK;
-    result = bparted_gui__run("bparted reboot");
-    if (result != BRUCE_OK) bparted_gui__show_error("Reboot", result);
+    if (result != BRUCE_OK) return result;
+
+    result = bparted_common__clamp_list(
+        partition_manager__list_planned(page->planned, BPARTED_PLANNED_MAX, &page->planned_count),
+        &page->planned_count, BPARTED_PLANNED_MAX
+    );
+    if (result != BRUCE_OK) return result;
+
+    result = partition_manager__status(&page->status);
+    if (result != BRUCE_OK) return result;
+
+    bool changed = page->status.has_pending_changes || page->status.reboot_required;
+
+    bparted_gui__add_row(page, "-- Running now --", BPARTED_GUI_ACTION_NONE);
+    for (size_t i = 0; i < page->current_count; ++i) bparted_gui__add_entry_row(page, &page->current[i]);
+
+    bparted_gui__add_row(page, "-- After next boot --", BPARTED_GUI_ACTION_NONE);
+    if (changed) {
+        for (size_t i = 0; i < page->planned_count; ++i) bparted_gui__add_entry_row(page, &page->planned[i]);
+    } else {
+        /* Identical to the list above by definition (nothing staged, nothing
+         * committed since boot), so repeating it would only cost screen. */
+        bparted_gui__add_row(page, "  (unchanged)", BPARTED_GUI_ACTION_NONE);
+    }
+
+    bparted_gui__add_row(page, "-- Actions --", BPARTED_GUI_ACTION_NONE);
+    bparted_gui__add_row(page, "Create", BPARTED_GUI_ACTION_CREATE);
+    bparted_gui__add_row(page, "Delete", BPARTED_GUI_ACTION_DELETE);
+    bparted_gui__add_row(page, "Format", BPARTED_GUI_ACTION_FORMAT);
+    bparted_gui__add_row(page, "Apply", BPARTED_GUI_ACTION_APPLY);
+    bparted_gui__add_row(page, "Cancel", BPARTED_GUI_ACTION_CANCEL);
+    if (page->status.reboot_required) bparted_gui__add_row(page, "Reboot now", BPARTED_GUI_ACTION_REBOOT);
+    bparted_gui__add_row(page, "Exit", BPARTED_GUI_ACTION_EXIT);
+
+    char free_text[16];
+    char total_text[16];
+    bparted_common__format_size(page->status.unallocated_bytes, free_text, sizeof(free_text));
+    bparted_common__format_size(page->status.total_bytes, total_text, sizeof(total_text));
+    if (page->status.has_pending_changes) {
+        snprintf(page->summary, sizeof(page->summary), "Not applied yet - %s free of %s", free_text, total_text);
+    } else if (page->status.reboot_required) {
+        snprintf(page->summary, sizeof(page->summary), "Applied - reboot to take effect");
+    } else {
+        snprintf(page->summary, sizeof(page->summary), "%s free of %s", free_text, total_text);
+    }
     return BRUCE_OK;
 }
 
-/* Shared by the main menu's "Apply changes" button and confirm_exit()'s
- * "Apply and exit" choice. No confirmation dialog of its own - Apply only
- * writes what Create/Delete/Format already staged (and showed their own
- * "staged" confirmation for), so it isn't a surprising action the way
- * discarding staged work is. */
-static void bparted_gui__do_apply(void) {
-    bruce_result_t result = bparted_gui__run("bparted apply");
+/* ------------------------------------------------------------------------ */
+/* Actions                                                                   */
+/* ------------------------------------------------------------------------ */
+
+static void bparted_gui__reboot(void) {
+    if (!bparted_gui__confirm("Reboot", "Reboot now to apply the saved layout?", "Reboot now")) return;
+    bruce_result_t result = device__restart(500);
+    /* Only reached when the restart request itself was refused; a successful
+     * one never comes back. */
+    if (result != BRUCE_OK) bparted_gui__report("Reboot", result);
+}
+
+static bool bparted_gui__commit(void) {
+    bruce_result_t result = partition_manager__commit();
     if (result != BRUCE_OK) {
-        bparted_gui__show_error("Apply", result);
+        bparted_gui__report("Apply", result);
+        return false;
+    }
+    bparted_gui__notify(BRUCE_DIALOG_SUCCESS, "Saved. It takes effect on the next boot.");
+    return true;
+}
+
+static void bparted_gui__apply(const bparted_gui_page_t *page) {
+    if (!page->status.has_pending_changes) {
+        bparted_gui__notify(BRUCE_DIALOG_INFO, "Nothing to apply.");
         return;
     }
-    (void)dialog__message(BRUCE_DIALOG_SUCCESS, "Partitions", "Changes applied.");
-    (void)bparted_gui__offer_reboot();
-}
-
-/* Shared by the main menu's "Cancel changes" button (which confirms first,
- * see below) and confirm_exit()'s "Discard changes and exit" choice (whose
- * own wording already is the confirmation). */
-static void bparted_gui__do_cancel(void) {
-    bruce_result_t result = bparted_gui__run("bparted cancel");
-    if (result != BRUCE_OK) {
-        bparted_gui__show_error("Cancel", result);
+    if (!bparted_gui__confirm(
+            "Apply", "Save this layout? Partitions marked new, delete or format are erased on the next boot.",
+            "Apply"
+        )) {
         return;
     }
-    (void)dialog__message(BRUCE_DIALOG_SUCCESS, "Partitions", "Staged changes discarded.");
+    if (!bparted_gui__commit()) return;
+    bparted_gui__reboot();
 }
 
-static void bparted_gui__cancel(void) {
-    const bruce_dialog_choice_t confirm_actions[] = {
-        {.label = "Discard changes", .value = "confirm"},
-        {.label = "Keep editing",    .value = "cancel" },
-    };
-    size_t selected = 1;
-    bruce_result_t result =
-        dialog__choice("Partitions", "Discard every staged change?", confirm_actions, 2, &selected, NULL);
-    if (result != BRUCE_OK || selected != 0) return;
-    bparted_gui__do_cancel();
-}
-
-static bruce_result_t bparted_gui__pick_size(char *out_text, size_t out_size) {
-    const bruce_dialog_choice_t choices[] = {
-        {.label = "64K",      .value = "64K"   },
-        {.label = "128K",     .value = "128K"  },
-        {.label = "256K",     .value = "256K"  },
-        {.label = "512K",     .value = "512K"  },
-        {.label = "1M",       .value = "1M"    },
-        {.label = "2M",       .value = "2M"    },
-        {.label = "4M",       .value = "4M"    },
-        {.label = "Custom...", .value = "custom"},
-        {.label = "Cancel",   .value = "cancel"},
-    };
-    size_t count = sizeof(choices) / sizeof(choices[0]);
-    size_t selected = 0;
-    bruce_result_t result = dialog__choice("Create partition", "Size", choices, count, &selected, NULL);
-    if (result != BRUCE_OK) return result;
-    if (selected == count - 1) return BRUCE_ERR_CANCELLED;
-    if (selected != count - 2) {
-        snprintf(out_text, out_size, "%s", choices[selected].value);
-        return BRUCE_OK;
+static void bparted_gui__cancel(const bparted_gui_page_t *page) {
+    if (!page->status.has_pending_changes) {
+        bparted_gui__notify(BRUCE_DIALOG_INFO, "Nothing to cancel.");
+        return;
     }
-    return dialog__text_input("Create partition", "Size (e.g. 768K, 3M)", "", false, out_text, out_size);
+    if (!bparted_gui__confirm("Cancel", "Throw away every change that has not been applied?", "Discard")) {
+        return;
+    }
+    bruce_result_t result = partition_manager__discard();
+    if (result != BRUCE_OK) {
+        bparted_gui__report("Cancel", result);
+        return;
+    }
+    bparted_gui__notify(BRUCE_DIALOG_SUCCESS, "Changes discarded.");
 }
 
-/* Every early return here is the user backing out of one step of this
- * wizard (ESC, "Cancel") - that's normal, expected navigation, not an app
- * error, so this never propagates anything to the caller; it always just
- * returns to the main menu. */
-static void bparted_gui__create(void) {
-    const bruce_dialog_choice_t kind_choices[] = {
-        {.label = "Swap",                    .value = "swap"           },
-        {.label = "LittleFS (root)",         .value = "littlefs-root"  },
-        {.label = "Custom label (LittleFS)", .value = "littlefs-custom"},
-        {.label = "Cancel",                  .value = "cancel"         },
+/* Offers the preset sizes that would actually fit, then the whole remaining
+ * gap, then free text - so the quick path cannot pick something
+ * stage_create() is only going to reject. */
+static bool bparted_gui__pick_size(uint64_t max_bytes, uint64_t *out_bytes) {
+    static const uint64_t presets[] = {
+        64ull * 1024ull,   128ull * 1024ull,  256ull * 1024ull,       512ull * 1024ull,
+        1024ull * 1024ull, 2048ull * 1024ull, 4096ull * 1024ull,
     };
-    size_t count = sizeof(kind_choices) / sizeof(kind_choices[0]);
+    enum { BPARTED_GUI_PRESETS = sizeof(presets) / sizeof(presets[0]) };
+
+    char labels[BPARTED_GUI_PRESETS][16];
+    bruce_dialog_choice_t choices[BPARTED_GUI_PRESETS + 3];
+    size_t count = 0;
+    for (size_t i = 0; i < BPARTED_GUI_PRESETS && presets[i] <= max_bytes; ++i) {
+        bparted_common__format_size(presets[i], labels[count], sizeof(labels[count]));
+        choices[count].label = labels[count];
+        choices[count].value = labels[count];
+        count++;
+    }
+    size_t preset_count = count;
+
+    char max_label[32];
+    char max_text[16];
+    bparted_common__format_size(max_bytes, max_text, sizeof(max_text));
+    snprintf(max_label, sizeof(max_label), "All free space (%.7s)", max_text);
+    choices[count].label = max_label;
+    choices[count].value = "max";
+    count++;
+
+    choices[count].label = "Custom...";
+    choices[count].value = "custom";
+    count++;
+    choices[count].label = "Back";
+    choices[count].value = "back";
+    count++;
+
     size_t selected = 0;
-    bruce_result_t result = dialog__choice("Create partition", "Type", kind_choices, count, &selected, NULL);
-    if (result != BRUCE_OK || selected == count - 1) return;
+    if (dialog__choice("New partition", "Size", choices, count, &selected, NULL) != BRUCE_OK) return false;
+    if (selected == count - 1) return false;
+    if (selected < preset_count) {
+        *out_bytes = presets[selected];
+        return true;
+    }
+    if (selected == preset_count) {
+        *out_bytes = max_bytes;
+        return true;
+    }
+
+    char text[24];
+    text[0] = '\0';
+    if (dialog__text_input("New partition", "Size (e.g. 768K, 3M)", "", false, text, sizeof(text)) !=
+        BRUCE_OK) {
+        return false;
+    }
+    if (!bparted_common__parse_size(text, out_bytes)) {
+        bparted_gui__notify(BRUCE_DIALOG_ERROR, "Size must look like 512K, 2M, or a plain byte count.");
+        return false;
+    }
+    return true;
+}
+
+static void bparted_gui__create(const bparted_gui_page_t *page) {
+    if (page->status.max_new_size < BPARTED_GUI_MIN_NEW_BYTES) {
+        bparted_gui__notify(
+            BRUCE_DIALOG_WARNING, "No room for another partition. Delete one first, then Apply."
+        );
+        return;
+    }
+
+    /* A second swap partition is meaningless - core/memory looks for exactly
+     * one - and stage_create() would reject it, so it is not offered. */
+    bool offer_swap =
+        !bparted_gui__has_label(page->planned, page->planned_count, BRUCE_PARTITION_SWAP_LABEL);
+
+    bruce_dialog_choice_t kinds[3];
+    size_t kind_count = 0;
+    if (offer_swap) {
+        kinds[kind_count].label = "Swap (extra RAM)";
+        kinds[kind_count].value = "swap";
+        kind_count++;
+    }
+    kinds[kind_count].label = "LittleFS volume";
+    kinds[kind_count].value = "littlefs";
+    kind_count++;
+    kinds[kind_count].label = "Back";
+    kinds[kind_count].value = "back";
+    kind_count++;
+
+    size_t selected = 0;
+    if (dialog__choice("New partition", "Type", kinds, kind_count, &selected, NULL) != BRUCE_OK) return;
+    if (selected == kind_count - 1) return;
 
     char label[BRUCE_PARTITION_LABEL_MAX];
-    const char *kind_arg;
-    if (selected == 0) {
-        snprintf(label, sizeof(label), "swap");
-        kind_arg = "swap";
-    } else if (selected == 1) {
-        snprintf(label, sizeof(label), "littlefs");
-        kind_arg = "littlefs";
+    bruce_partition_kind_t kind;
+    if (offer_swap && selected == 0) {
+        kind = BRUCE_PARTITION_KIND_SWAP;
+        snprintf(label, sizeof(label), "%s", BRUCE_PARTITION_SWAP_LABEL);
     } else {
+        kind = BRUCE_PARTITION_KIND_LITTLEFS;
         label[0] = '\0';
-        result = dialog__text_input(
-            "Create partition", "Label (letters/numbers/_/-)", "", false, label, sizeof(label)
-        );
-        if (result != BRUCE_OK) return;
-        if (label[0] == '\0' || strpbrk(label, " \t\"'\\") != NULL) {
-            (void)dialog__message(BRUCE_DIALOG_ERROR, "Partitions", "Invalid label");
-            return;
-        }
-        kind_arg = "littlefs";
+        /* Left to stage_create() to validate: one rule, in one place, and
+         * bparted_common__error_text() already spells it out on rejection. */
+        if (dialog__text_input("New partition", "Label", "", false, label, sizeof(label)) != BRUCE_OK) return;
     }
 
-    char size_text[24];
-    result = bparted_gui__pick_size(size_text, sizeof(size_text));
-    if (result != BRUCE_OK) return;
+    uint64_t size_bytes = 0;
+    if (!bparted_gui__pick_size(page->status.max_new_size, &size_bytes)) return;
 
-    char command[96];
-    snprintf(command, sizeof(command), "bparted stage create %s %s %s", label, kind_arg, size_text);
-    result = bparted_gui__run(command);
+    bruce_result_t result = partition_manager__stage_create(label, kind, size_bytes);
     if (result != BRUCE_OK) {
-        bparted_gui__show_error("Create", result);
+        bparted_gui__report("Create", result);
         return;
     }
-    (void)dialog__message(BRUCE_DIALOG_SUCCESS, "Partitions", "Staged. Apply from the main menu to write it.");
+    bparted_gui__notify(BRUCE_DIALOG_SUCCESS, "Added to the next-boot layout. Press Apply to save it.");
 }
 
-/* `is_new`: staged this session, not on flash at all yet (Format makes no
- * sense - it's already going to be freshly formatted on creation).
- * `is_staged_delete`: on flash, but staged for removal - list() no longer
- * has it, so there's nothing left here to Format/Delete; only Apply/Cancel
- * (from the main menu) can resolve it. Like create(), this always returns
- * to the main menu itself; it never propagates cancellation or errors. */
-static void bparted_gui__manage(const char *label, bool is_new, bool is_staged_delete) {
-    if (is_staged_delete) {
-        char message[96];
-        snprintf(
-            message, sizeof(message), "'%s' is staged for deletion. Apply or Cancel from the main menu.", label
-        );
-        (void)dialog__message(BRUCE_DIALOG_INFO, "Partitions", message);
-        return;
-    }
-
-    bool is_root = strcmp(label, "littlefs") == 0;
-    bruce_dialog_choice_t choices[3];
-    size_t choice_count = 0;
-    if (!is_new) {
-        choices[choice_count].label = "Format";
-        choices[choice_count].value = "format";
-        choice_count++;
-    }
-    choices[choice_count].label = "Delete";
-    choices[choice_count].value = "delete";
-    choice_count++;
-    choices[choice_count].label = "Back";
-    choices[choice_count].value = "back";
-    choice_count++;
-
-    size_t selected = choice_count - 1;
-    bruce_result_t result = dialog__choice(label, "Action", choices, choice_count, &selected, NULL);
-    if (result != BRUCE_OK) return;
-    const char *value = choices[selected].value;
-    if (strcmp(value, "back") == 0) return;
-
-    bool is_format = strcmp(value, "format") == 0;
-    if (!is_format && is_root) {
-        (void)dialog__message(
-            BRUCE_DIALOG_ERROR, "Partitions", "The root 'littlefs' partition cannot be deleted; format it instead."
-        );
-        return;
-    }
-
-    const bruce_dialog_choice_t confirm_actions[] = {
-        {.label = is_format ? "Format" : "Delete", .value = "confirm"},
-        {.label = "Cancel",                        .value = "cancel"},
-    };
-    size_t confirm_selected = 1;
-    char message[64];
-    if (is_format) snprintf(message, sizeof(message), "Stage a format of '%s'?", label);
-    else snprintf(message, sizeof(message), "Stage deletion of '%s'?", label);
-    result = dialog__choice("Partitions", message, confirm_actions, 2, &confirm_selected, NULL);
-    if (result != BRUCE_OK || confirm_selected != 0) return;
-
-    char command[64];
-    snprintf(command, sizeof(command), "bparted stage %s %s", is_format ? "format" : "delete", label);
-    result = bparted_gui__run(command);
-    if (result != BRUCE_OK) {
-        bparted_gui__show_error(is_format ? "Format" : "Delete", result);
-        return;
-    }
-    (void)dialog__message(BRUCE_DIALOG_SUCCESS, "Partitions", "Staged. Apply from the main menu to write it.");
-}
-
-/* The root list's own Back/ESC (as opposed to ESC inside a submenu, which
- * just returns here - see bparted_gui__main_menu()). Leaving with unsaved
- * or unapplied work is surprising, so this is the one place that warns and
- * offers to resolve it before actually exiting; "nothing staged, nothing
- * to apply" exits immediately with no prompt. Returns BRUCE_ERR_CANCELLED
- * only once the user has confirmed they want to leave. */
-static bruce_result_t bparted_gui__confirm_exit(void) {
-    bool dirty = partition_manager__has_pending_changes();
-    bool reboot = partition_manager__reboot_required();
-    if (!dirty && !reboot) return BRUCE_ERR_CANCELLED;
-
-    bruce_dialog_choice_t choices[4];
-    size_t count = 0;
-    if (dirty) {
-        choices[count].label = "Apply and exit";
-        choices[count].value = "apply";
-        count++;
-        choices[count].label = "Discard changes and exit";
-        choices[count].value = "discard";
-        count++;
-    }
-    if (reboot) {
-        choices[count].label = "Reboot now";
-        choices[count].value = "reboot";
-        count++;
-    }
-    choices[count].label = "Stay";
-    choices[count].value = "stay";
-    count++;
-
-    size_t selected = count - 1;
-    const char *message =
-        dirty ? "Unsaved partition changes will be lost." : "Partition changes are staged; reboot to apply them.";
-    bruce_result_t result = dialog__choice("Exit Partitions?", message, choices, count, &selected, NULL);
-    /* Backing out of the warning itself (another ESC): stay, don't exit. */
-    if (result != BRUCE_OK) return BRUCE_OK;
-
-    const char *value = choices[selected].value;
-    if (strcmp(value, "apply") == 0) {
-        bparted_gui__do_apply();
-        return BRUCE_ERR_CANCELLED;
-    }
-    if (strcmp(value, "discard") == 0) {
-        bparted_gui__do_cancel();
-        return BRUCE_ERR_CANCELLED;
-    }
-    if (strcmp(value, "reboot") == 0) {
-        bruce_result_t reboot_result = bparted_gui__run("bparted reboot");
-        /* Only reached if the reboot itself failed to start; a successful
-         * one never returns. */
-        if (reboot_result != BRUCE_OK) bparted_gui__show_error("Reboot", reboot_result);
-        return BRUCE_OK;
-    }
-    return BRUCE_OK; /* "stay" */
-}
-
-/* Builds one flat list showing both the current (list_committed()) and
- * pending (list()) layouts at once, diffed against each other: every row
- * is a pending-table entry, tagged "[new]"/"[format]" when it differs from
- * what's committed, plus one "[delete]" row per committed entry pending()
- * no longer has. Rows unaffected by any staged edit show plainly, with no
- * tag - current and pending agree there. */
-static bruce_result_t bparted_gui__main_menu(void) {
-    bruce_partition_entry_t committed[BPARTED_GUI_MAX_ENTRIES];
-    size_t committed_count = 0;
-    (void)partition_manager__list_committed(committed, BPARTED_GUI_MAX_ENTRIES, &committed_count);
-    if (committed_count > BPARTED_GUI_MAX_ENTRIES) committed_count = BPARTED_GUI_MAX_ENTRIES;
-
-    bruce_partition_entry_t pending[BPARTED_GUI_MAX_ENTRIES];
-    size_t pending_count = 0;
-    (void)partition_manager__list(pending, BPARTED_GUI_MAX_ENTRIES, &pending_count);
-    if (pending_count > BPARTED_GUI_MAX_ENTRIES) pending_count = BPARTED_GUI_MAX_ENTRIES;
-
-    bool dirty = partition_manager__has_pending_changes();
-    bool reboot = partition_manager__reboot_required();
-
-    /* Worst case: 16-char label + " (" + 8-char "littlefs" + ", " +
-     * up to 15-char size_text + ")" + up to 9-char " [format]" tag + NUL =
-     * 54; rounded up for headroom. */
-    char entry_labels[BPARTED_GUI_MAX_ROWS][64];
-    bruce_dialog_choice_t choices[BPARTED_GUI_MAX_ROWS];
+/* Picks a partition out of the next-boot layout for Delete or Format,
+ * listing only the ones that verb can actually act on: Delete skips the
+ * root entry (it can only be reformatted) and Format skips entries that do
+ * not exist on flash yet (a new partition is formatted when it is created).
+ * Rows already staged for deletion are gone from that layout and so are
+ * skipped by both. */
+static bool bparted_gui__pick_target(
+    const bparted_gui_page_t *page, bool for_format, char *out_label, size_t out_size
+) {
+    /* Bounded by one layout, not by the planned list: everything skipped
+     * below is exactly what makes the planned list the longer of the two. */
+    char labels[BPARTED_LAYOUT_MAX][BPARTED_GUI_ROW_TEXT];
+    bruce_dialog_choice_t choices[BPARTED_LAYOUT_MAX + 1];
+    const bruce_partition_entry_t *targets[BPARTED_LAYOUT_MAX];
     size_t count = 0;
 
-    for (size_t i = 0; i < pending_count && count < BPARTED_GUI_MAX_ENTRIES; ++i) {
-        /* Copied into a plain, statically-sized local first (rather than
-         * formatting straight from pending[i].label): some GCC versions
-         * can't bound a %s read from a struct-array element reached via a
-         * runtime index and assume an unbounded string, flagging a bogus
-         * -Wformat-truncation below despite label's real 17-byte bound. A
-         * flat local array sidesteps that ambiguity entirely. */
-        char label[BRUCE_PARTITION_LABEL_MAX];
-        memcpy(label, pending[i].label, sizeof(label));
-        label[sizeof(label) - 1] = '\0';
+    for (size_t i = 0; i < page->planned_count && count < BPARTED_LAYOUT_MAX; ++i) {
+        const bruce_partition_entry_t *entry = &page->planned[i];
+        if (entry->state == BRUCE_PARTITION_STATE_DELETED) continue;
+        if (for_format ? entry->state == BRUCE_PARTITION_STATE_NEW : entry->is_root) continue;
 
-        bool exists_committed = bparted_gui__find(committed, committed_count, pending[i].label, NULL);
-        const char *tag = !exists_committed ? " [new]" : (pending[i].format_pending ? " [format]" : "");
+        bparted_gui__format_row(entry, labels[count], sizeof(labels[count]));
+        choices[count].label = labels[count];
+        choices[count].value = labels[count];
+        targets[count] = entry;
+        count++;
+    }
 
-        char size_text[16];
-        bparted_common__format_size(pending[i].size, size_text, sizeof(size_text));
-        snprintf(
-            entry_labels[count], sizeof(entry_labels[count]), "%s (%s, %s)%s", label,
-            bparted_common__kind_name(pending[i].kind), size_text, tag
+    if (count == 0) {
+        bparted_gui__notify(
+            BRUCE_DIALOG_INFO, for_format ? "Nothing here can be formatted."
+                                          : "Nothing here can be deleted - '/' can only be formatted."
         );
-        choices[count].label = entry_labels[count];
-        choices[count].value = pending[i].label;
-        count++;
+        return false;
     }
 
-    for (size_t i = 0; i < committed_count && count < BPARTED_GUI_MAX_ENTRIES * 2; ++i) {
-        if (bparted_gui__find(pending, pending_count, committed[i].label, NULL)) continue;
-
-        char label[BRUCE_PARTITION_LABEL_MAX];
-        memcpy(label, committed[i].label, sizeof(label));
-        label[sizeof(label) - 1] = '\0';
-
-        char size_text[16];
-        bparted_common__format_size(committed[i].size, size_text, sizeof(size_text));
-        snprintf(
-            entry_labels[count], sizeof(entry_labels[count]), "%s (%s, %s) [delete]", label,
-            bparted_common__kind_name(committed[i].kind), size_text
-        );
-        choices[count].label = entry_labels[count];
-        choices[count].value = committed[i].label;
-        count++;
-    }
-
-    choices[count].label = "Create partition...";
-    choices[count].value = "__create";
-    count++;
-    if (dirty) {
-        choices[count].label = "Apply changes";
-        choices[count].value = "__apply";
-        count++;
-        choices[count].label = "Cancel changes";
-        choices[count].value = "__cancel";
-        count++;
-    }
-    if (reboot) {
-        choices[count].label = "Reboot now";
-        choices[count].value = "__reboot";
-        count++;
-    }
     choices[count].label = "Back";
-    choices[count].value = "__back";
+    choices[count].value = "back";
     count++;
-
-    const char *message;
-    if (dirty) message = "Unsaved changes: Apply or Cancel below";
-    else if (reboot) message = "Staged changes: reboot to apply them";
-    else message = "Select a partition or action";
 
     size_t selected = 0;
-    bruce_result_t result = dialog__choice("Partitions", message, choices, count, &selected, NULL);
+    if (dialog__choice(
+            for_format ? "Format" : "Delete", "Which partition?", choices, count, &selected, NULL
+        ) != BRUCE_OK) {
+        return false;
+    }
+    if (selected == count - 1) return false;
+    snprintf(out_label, out_size, "%s", targets[selected]->label);
+    return true;
+}
+
+static void bparted_gui__delete(const bparted_gui_page_t *page) {
+    char label[BRUCE_PARTITION_LABEL_MAX];
+    if (!bparted_gui__pick_target(page, false, label, sizeof(label))) return;
+
+    char message[128];
+    snprintf(message, sizeof(message), "Delete '%s'? Everything on it is erased on the next boot.", label);
+    if (!bparted_gui__confirm("Delete", message, "Delete")) return;
+
+    bruce_result_t result = partition_manager__stage_delete(label);
     if (result != BRUCE_OK) {
-        /* Physical Back/ESC pressed on the root list itself: this is the
-         * only place that can actually end the app (see confirm_exit()). */
-        return bparted_gui__confirm_exit();
+        bparted_gui__report("Delete", result);
+        return;
+    }
+    bparted_gui__notify(BRUCE_DIALOG_SUCCESS, "Removed from the next-boot layout. Press Apply to save it.");
+}
+
+static void bparted_gui__format(const bparted_gui_page_t *page) {
+    char label[BRUCE_PARTITION_LABEL_MAX];
+    if (!bparted_gui__pick_target(page, true, label, sizeof(label))) return;
+
+    char message[128];
+    snprintf(
+        message, sizeof(message), "Erase and reformat '%s'? Everything on it is lost on the next boot.", label
+    );
+    if (!bparted_gui__confirm("Format", message, "Format")) return;
+
+    bruce_result_t result = partition_manager__stage_format(label);
+    if (result != BRUCE_OK) {
+        bparted_gui__report("Format", result);
+        return;
+    }
+    bparted_gui__notify(BRUCE_DIALOG_SUCCESS, "Marked for format. Press Apply to save it.");
+}
+
+/* The only way out of the app, reached by the Exit row and by the physical
+ * Back/ESC button alike. Walking away from an edit that was never applied
+ * silently loses it, and walking away from an applied one hides the fact
+ * that it has not happened yet - so both get a prompt offering to finish
+ * the job. A layout with nothing outstanding leaves with no prompt at all.
+ * Returns true once the user has actually chosen to leave. */
+static bool bparted_gui__confirm_exit(const bparted_gui_page_t *page) {
+    if (page->status.has_pending_changes) {
+        const bruce_dialog_choice_t choices[] = {
+            {.label = "Apply and exit",   .value = "apply"  },
+            {.label = "Discard and exit", .value = "discard"},
+            {.label = "Stay",             .value = "stay"   },
+        };
+        size_t selected = 2;
+        /* Backing out of the warning itself is another way of saying "stay". */
+        if (dialog__choice(
+                "Unapplied changes", "The next-boot layout has changes you have not applied.", choices, 3,
+                &selected, NULL
+            ) != BRUCE_OK) {
+            return false;
+        }
+        if (selected == 0) {
+            /* Choosing "Apply and exit" is itself the confirmation, so this
+             * skips the extra prompt bparted_gui__apply() would show. */
+            if (!bparted_gui__commit()) return false;
+            bparted_gui__reboot();
+            return true;
+        }
+        if (selected == 1) {
+            bruce_result_t result = partition_manager__discard();
+            if (result != BRUCE_OK) {
+                bparted_gui__report("Discard", result);
+                return false;
+            }
+            return true;
+        }
+        return false;
     }
 
-    const char *value = choices[selected].value;
-    if (strcmp(value, "__back") == 0) return bparted_gui__confirm_exit();
-    if (strcmp(value, "__create") == 0) {
-        bparted_gui__create();
-        return BRUCE_OK;
-    }
-    if (strcmp(value, "__apply") == 0) {
-        bparted_gui__do_apply();
-        return BRUCE_OK;
-    }
-    if (strcmp(value, "__cancel") == 0) {
-        bparted_gui__cancel();
-        return BRUCE_OK;
-    }
-    if (strcmp(value, "__reboot") == 0) {
-        bruce_result_t reboot_result = bparted_gui__run("bparted reboot");
-        if (reboot_result != BRUCE_OK) bparted_gui__show_error("Reboot", reboot_result);
-        return BRUCE_OK;
+    if (page->status.reboot_required) {
+        const bruce_dialog_choice_t choices[] = {
+            {.label = "Reboot now",  .value = "reboot"},
+            {.label = "Exit anyway", .value = "exit"  },
+            {.label = "Stay",        .value = "stay"  },
+        };
+        size_t selected = 2;
+        if (dialog__choice(
+                "Not applied yet", "The saved layout only takes effect after a reboot.", choices, 3,
+                &selected, NULL
+            ) != BRUCE_OK) {
+            return false;
+        }
+        if (selected == 0) {
+            bparted_gui__reboot();
+            return false;
+        }
+        return selected == 1;
     }
 
-    /* Anything else is a partition label (a row built above). */
-    bool in_pending = bparted_gui__find(pending, pending_count, value, NULL);
-    bool in_committed = bparted_gui__find(committed, committed_count, value, NULL);
-    bparted_gui__manage(value, in_pending && !in_committed, !in_pending);
-    return BRUCE_OK;
+    return true;
 }
 
 int bparted_gui__main(int argc, char **argv) {
     (void)argc;
     (void)argv;
+
+    bparted_gui_page_t page;
+    size_t selected = 0;
     for (;;) {
-        bruce_result_t result = bparted_gui__main_menu();
-        if (result == BRUCE_ERR_CANCELLED) return 0;
+        bruce_result_t result = bparted_gui__refresh(&page);
         if (result != BRUCE_OK) {
-            bparted_gui__show_error("Partitions", result);
+            bparted_gui__report("Partitions", result);
             return result;
+        }
+        /* Keeps the cursor where it was across a redraw, so repeated edits
+         * do not send it back to the top of the layout every time. */
+        if (selected >= page.row_count) selected = 0;
+
+        result = dialog__choice("Partitions", page.summary, page.choices, page.row_count, &selected, NULL);
+        if (result != BRUCE_OK && result != BRUCE_ERR_CANCELLED) {
+            bparted_gui__report("Partitions", result);
+            return result;
+        }
+
+        /* Back/ESC means the same thing as the Exit row, warning included. */
+        bparted_gui_action_t action =
+            result == BRUCE_OK ? (bparted_gui_action_t)page.actions[selected] : BPARTED_GUI_ACTION_EXIT;
+        switch (action) {
+        case BPARTED_GUI_ACTION_CREATE: bparted_gui__create(&page); break;
+        case BPARTED_GUI_ACTION_DELETE: bparted_gui__delete(&page); break;
+        case BPARTED_GUI_ACTION_FORMAT: bparted_gui__format(&page); break;
+        case BPARTED_GUI_ACTION_APPLY: bparted_gui__apply(&page); break;
+        case BPARTED_GUI_ACTION_CANCEL: bparted_gui__cancel(&page); break;
+        case BPARTED_GUI_ACTION_REBOOT: bparted_gui__reboot(); break;
+        case BPARTED_GUI_ACTION_EXIT:
+            if (bparted_gui__confirm_exit(&page)) return 0;
+            break;
+        case BPARTED_GUI_ACTION_NONE: break;
         }
     }
 }

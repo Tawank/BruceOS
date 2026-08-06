@@ -32,11 +32,35 @@ static bool autostart__command_requests_foreground(const char *command) {
     }
 }
 
-void autostart__run(bool ui_ok) {
+/* True when `command`'s command word - what is left after any leading
+ * "key=value" environment tokens, and before any arguments - is exactly
+ * `name`, so a caller can name an app to skip ("launcher") without having
+ * to know how the user spelled it in their startup list ("launcher -s",
+ * "BG=0 launcher"). */
+static bool autostart__command_is(const char *command, const char *name) {
+    const char *cursor = command;
+    for (;;) {
+        while (*cursor == ' ') cursor++;
+        const char *token_end = cursor;
+        while (*token_end != '\0' && *token_end != ' ') token_end++;
+        size_t token_len = (size_t)(token_end - cursor);
+        if (token_len == 0) return false;
+        if (memchr(cursor, '=', token_len) == NULL) {
+            return token_len == strlen(name) && strncmp(cursor, name, token_len) == 0;
+        }
+        cursor = token_end;
+    }
+}
+
+void autostart__run(bool ui_ok, const char *skip_command) {
     const bruce_config_startup_apps_t *apps = config__get_startup_apps();
     if (apps == NULL) return;
     for (size_t i = 0; i < apps->count; ++i) {
         const char *command = apps->items[i];
+        if (skip_command != NULL && autostart__command_is(command, skip_command)) {
+            printf("Startup app \"%s\" skipped\n", apps->items[i]);
+            continue;
+        }
         char with_gui[CONFIG__STARTUP_APP_MAX_LEN + 8];
         if (ui_ok && !autostart__command_is_serial_commands(command) && strncmp(command, "GUI=", 4) != 0 &&
             autostart__command_requests_foreground(command)) {

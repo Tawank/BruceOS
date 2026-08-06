@@ -965,14 +965,54 @@ values are permanently protected from ELF and JS, even with `config`:
 `webUI.user`. Built-ins may use those APIs.
 
 Core registers internal LittleFS at runtime over all sector-aligned flash after
-the final static partition. The factory partition is 2.5 MiB and the following
-512 KiB `swap` partition ends at the former 3 MiB factory boundary, so the
-LittleFS start address remains unchanged. It provides general external-memory
+the final static partition. The factory partition is 2.5 MiB. It provides
+general external-memory
 fallback, source staging, and process-lifetime flash-backed ELF code. The flashed partition table remains
 usable on 4, 8, 16, and 32 MiB devices while LittleFS consumes the available
 remainder reported by the flash driver. Core formats only when the LittleFS
 metadata area is erased, so a failed migration mount does not silently erase
 nonblank data.
+
+Everything past the final static partition is the *user area*, owned at runtime
+by Core's partition manager rather than by `partitions.csv`; the last sector of
+flash holds the committed user partition table. The user area always contains
+exactly one LittleFS partition labeled `littlefs` at offset 0, mounted at `/`.
+That root entry is elastic: it is never given a size, it spans everything below
+the lowest extra partition and always keeps at least 64 KiB. A layout holds at
+most 8 entries, labels are 1 to 16 characters of `A-Za-z0-9_-`, and sizes round
+up to the 4096-byte sector. `swap` is a reserved label carrying the exact
+type/subtype core/memory's flash-backed swap allocator looks for, so creating
+one is all that is needed to enable swap; any other label is an additional
+LittleFS volume that is formatted but not auto-mounted. Because a fresh device
+has no `swap` partition, boards without PSRAM start with none until one is
+created.
+
+`partition_manager__list_current()` reports the layout this boot is running and
+`partition_manager__list_planned()` the layout the next boot will have, tagging
+each entry `NEW`, `DELETED`, `FORMAT`, or `UNCHANGED`; `partition_manager__status()`
+adds space accounting plus `has_pending_changes` (staged but not committed) and
+`reboot_required` (committed but not yet booted into). `stage_create()`,
+`stage_delete()`, and `stage_format()` only edit an in-RAM working table,
+`commit()` persists it, and `discard()` takes staged edits back. Nothing mounts,
+erases, or reformats storage the running system is using: the work a committed
+table describes happens once, automatically, early on the next boot. The root
+entry can be reformatted but never deleted, and shrinking it reformats it
+because LittleFS cannot shrink in place. Mutating calls are restricted to
+built-in modules, the same rule `disk__mount()` uses; any app may read the
+layout.
+
+The built-in `bparted` app is the front end for that API, in the usual
+dual-mode form. Its GUI shows the running layout and the next-boot layout on one
+screen over Create, Delete, Format, Apply, and Cancel actions, and warns before
+exiting whenever changes are unapplied or applied but not yet booted into. Its
+terminal mode offers `list`, `status`, `create`, `delete`, `format`, `apply`,
+`cancel`, and `reboot`, where the three mutating verbs stage by default and
+`--apply` commits in the same command. Both call the partition manager directly;
+neither is layered on the other. When storage is unusable or no external memory
+is available, `app_main()` runs `bparted` before autostart so the problem can be
+fixed before anything that depends on it starts, and skips the configured
+`launcher` startup app for that boot, since it could only fail the same way in a
+loop.
 
 `ir` grants access to synchronous ESP-IDF RMT infrared capture and transmit
 through `ir__receive()`, `ir__transmit()`, and `ir__transmit_raw()`. Captures

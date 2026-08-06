@@ -56,9 +56,10 @@
 #define SHELL_STACK_BYTES 4096u
 #define SSH_STACK_BYTES 16384u
 #define SSH_KEYGEN_STACK_BYTES 12288u
-/* bparted's GUI builds a current-vs-pending diff view (two 8-entry
- * bruce_partition_entry_t arrays plus up to 21 rendered 64-byte label
- * rows) in one stack frame; comfortably over the default 4096 bytes. */
+/* bparted's GUI holds its whole screen - the running layout, the next-boot
+ * layout, and every rendered row - in one ~3 KB frame that stays live while
+ * dialog__choice() draws on top of it; comfortably over the default 4096
+ * bytes. */
 #define BPARTED_STACK_BYTES 8192u
 
 void app_runner__register_defaults(void) {
