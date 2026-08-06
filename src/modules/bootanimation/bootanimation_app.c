@@ -287,16 +287,35 @@ static bruce_result_t bootanimation__draw_custom_image(const char *path) {
     return result;
 }
 
+/* Scales the shared `bits` silhouette (nearest-neighbor) into [width x
+ * height] at (x, y), painting `color` wherever the source bit is 0. Source_x
+ * is non-decreasing as dx increases, so consecutive dx's sharing a source
+ * bit value form a contiguous run of screen columns -- coalescing each such
+ * run into one display__fill_rect() call instead of one display__draw_pixel()
+ * per pixel avoids paying a full DMA round trip (direct mode) for every one
+ * of this icon's ~2000 pixels, matching how display__draw_xbitmap() and
+ * display__draw_bitmap_scaled() already draw 1bpp bitmaps elsewhere. */
 static void bootanimation__draw_scaled_silhouette(
     int16_t x, int16_t y, int16_t width, int16_t height, bruce_display_color_t color
 ) {
     const int source_stride = (bits_width + 7) / 8;
     for (int16_t dy = 0; dy < height; dy++) {
         int source_y = dy * bits_height / height;
-        for (int16_t dx = 0; dx < width; dx++) {
-            int source_x = dx * bits_width / width;
-            uint8_t source = bits[source_y * source_stride + source_x / 8];
-            if ((source & (1u << (source_x & 7))) == 0) { (void)display__draw_pixel(x + dx, y + dy, color); }
+        const uint8_t *source_row = &bits[source_y * source_stride];
+        int16_t dx = 0;
+        while (dx < width) {
+            while (dx < width) {
+                int source_x = dx * bits_width / width;
+                if ((source_row[source_x / 8] & (1u << (source_x & 7))) == 0) break;
+                ++dx;
+            }
+            int16_t start = dx;
+            while (dx < width) {
+                int source_x = dx * bits_width / width;
+                if ((source_row[source_x / 8] & (1u << (source_x & 7))) != 0) break;
+                ++dx;
+            }
+            if (dx > start) (void)display__fill_rect(x + start, y + dy, dx - start, 1, color);
         }
     }
 }
