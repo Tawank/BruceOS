@@ -3,7 +3,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/../../../../components/nofrendo/nofrendo_sour
 # project_elf() links only libmain.a, so compile the reusable component sources
 # into this archive instead of relying on an ordinary component dependency.
 idf_component_register(
-    SRCS "main.c" "nes_osd.c" "nes_video.c" "nes_input.c" "nes_sound.c" "bruce_stdio.c" ${NOFRENDO_SOURCES}
+    SRCS "main.c" "nes_osd.c" "nes_video.c" "nes_input.c" "bruce_stdio.c" ${NOFRENDO_SOURCES}
     INCLUDE_DIRS "." "${NOFRENDO_DIR}" "../../../include" "../../../../src")
 
 target_compile_options(${COMPONENT_LIB} PRIVATE
