@@ -2,6 +2,7 @@
 #include <stdio.h>
 
 #include "core_sdk/loader.h"
+#include "core_sdk/process.h"
 
 #include "core/autostart/autostart.h"
 #include "core/config/config.h"
@@ -17,6 +18,7 @@
 #include "modules/bluetooth_hid/bluetooth_hid_app.h"
 #include "modules/bnu/bnu_app.h"
 #include "modules/bootanimation/bootanimation_app.h"
+#include "modules/bparted/bparted_app.h"
 #include "modules/bruce_launcher/bruce_launcher_app.h"
 #include "modules/clock/clock_app.h"
 #include "modules/config/config_app.h"
@@ -29,9 +31,7 @@
 #include "modules/loaders/js/js_loader_app.h"
 #include "modules/notification_service/notification_service.h"
 #include "modules/nrf24/nrf24_app.h"
-#include "modules/partition_manager/bparted.h"
-#include "modules/partition_manager/partition_manager_gui.h"
-#include "modules/privileged/permission_config/permission_config_app.h"
+#include "modules/privileged/permissions/permissions_app.h"
 #include "modules/selftest/selftest.h"
 #include "modules/shell/shell_app.h"
 #include "modules/ssh/ssh_app.h"
@@ -51,7 +51,7 @@
 #define DEVICE_BUS_STACK_BYTES 3072u
 #define SERIAL_COMMANDS_STACK_BYTES 3072u
 #define SELFTEST_STACK_BYTES 8192u
-#define PERMISSION_CONFIG_STACK_BYTES 8192u
+#define PERMISSIONS_STACK_BYTES 8192u
 #define SHELL_STACK_BYTES 4096u
 #define SSH_STACK_BYTES 16384u
 #define SSH_KEYGEN_STACK_BYTES 12288u
@@ -66,9 +66,7 @@ void app_runner__register_defaults(void) {
     (void)app_runner__register("filemanager", filemanager_app_main, 0);
     (void)app_runner__register("clock", clock_app_main, 0);
     (void)app_runner__register("config", config_app_main, 0);
-    (void)app_runner__register(
-        "permission_config", permission_config_app_main, PERMISSION_CONFIG_STACK_BYTES
-    );
+    (void)app_runner__register("permissions", permissions_app_main, PERMISSIONS_STACK_BYTES);
     (void)app_runner__register("wifi", wifi_app_main, 0);
     (void)app_runner__register("webui", webui_app_main, 0);
     (void)app_runner__register("bluetooth", bluetooth_app_main, 0);
@@ -76,7 +74,6 @@ void app_runner__register_defaults(void) {
     (void)app_runner__register("ir", ir_app_main, 0);
     (void)app_runner__register("nrf24", nrf24_app_main, 0);
     (void)app_runner__register("bparted", bparted_app_main, 0);
-    (void)app_runner__register("partition_manager", partition_manager_gui_app_main, 0);
     (void)app_runner__register("selftest", selftest_app_main, SELFTEST_STACK_BYTES);
     (void)app_runner__register("terminal", terminal_app_main, 0);
     (void)app_runner__register("shell", shell_app_main, SHELL_STACK_BYTES);
@@ -131,6 +128,32 @@ bool init_user_interface(void) {
     return ui_ok;
 }
 
+/* storage_ok false means core/partition_manager couldn't hand storage__init()
+ * a usable "littlefs" root partition - no user partition table has ever been
+ * committed and the leftover flash doesn't read back as empty either (stale
+ * data from a previous layout), so every subsequent boot would otherwise
+ * retry and fail the exact same way (autostart apps - the launcher included
+ * - all depend on config/storage, hence the repeated "Failed to load
+ * launcher configuration"). Run "bparted" here, before autostart__run(),
+ * so the user can wipe/create the partitions the rest of boot needs; "GUI=1"
+ * only when there's a screen to drive it (see autostart__run()'s own
+ * ui_ok-gated "GUI=1" convention), otherwise this just leaves storage
+ * unusable for the user to fix over a serial "bparted create ..." session,
+ * same as it does today without this hook. */
+static void app_main__recover_missing_partitions(bool ui_ok) {
+    printf("No usable partitions found; run \"bparted\" to create them\n");
+    if (!ui_ok) return;
+
+    int launched = app_runner__run_command("GUI=1 bparted", BRUCE_LAUNCH_FOREGROUND);
+    if (launched <= 0) return;
+
+    bruce_process_status_t status;
+    for (;;) {
+        bruce_result_t waited = process__wait_status((bruce_process_id_t)launched, 200, &status);
+        if (waited != BRUCE_ERR_TIMEOUT) return;
+    }
+}
+
 void app_main(void) {
     device__power_hold_init();
 
@@ -145,6 +168,7 @@ void app_main(void) {
     bool ui_ok = init_user_interface();
 
     app_runner__register_defaults();
+    if (!storage_ok) app_main__recover_missing_partitions(ui_ok);
     autostart__run(ui_ok);
 
 #if CONFIG_BRUCE_QEMU_TEST_MODE

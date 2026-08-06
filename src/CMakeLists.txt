@@ -129,12 +129,13 @@ idf_component_register(SRCS
                     "modules/notification_service/notification_service.c"
                     "modules/ir/ir_app.c"
                     "modules/nrf24/nrf24_app.c"
-                    "modules/partition_manager/bparted.c"
-                    "modules/partition_manager/partition_manager_common.c"
-                    "modules/partition_manager/partition_manager_gui.c"
+                    "modules/bparted/bparted_app.c"
+                    "modules/bparted/bparted_cli.c"
+                    "modules/bparted/bparted_gui.c"
+                    "modules/bparted/bparted_common.c"
                     "modules/wifi/wifi_app.c"
                     "modules/webui/webui_app.c"
-                    "modules/privileged/permission_config/permission_config_app.c"
+                    "modules/privileged/permissions/permissions_app.c"
                     EMBED_FILES
                     "../elf_apps/examples/game.elf"
                     REQUIRES
@@ -339,18 +340,13 @@ target_include_directories(bruce_sdk_builtin_nrf24_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}/modules/nrf24")
 
 add_library(bruce_sdk_builtin_bparted_check OBJECT
-            "modules/partition_manager/bparted.c"
-            "modules/partition_manager/partition_manager_common.c")
+            "modules/bparted/bparted_app.c"
+            "modules/bparted/bparted_cli.c"
+            "modules/bparted/bparted_gui.c"
+            "modules/bparted/bparted_common.c")
 target_include_directories(bruce_sdk_builtin_bparted_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
-                           "${CMAKE_CURRENT_LIST_DIR}/modules/partition_manager")
-
-add_library(bruce_sdk_builtin_partition_manager_gui_check OBJECT
-            "modules/partition_manager/partition_manager_gui.c"
-            "modules/partition_manager/partition_manager_common.c")
-target_include_directories(bruce_sdk_builtin_partition_manager_gui_check PRIVATE
-                           "${CMAKE_CURRENT_LIST_DIR}"
-                           "${CMAKE_CURRENT_LIST_DIR}/modules/partition_manager")
+                           "${CMAKE_CURRENT_LIST_DIR}/modules/bparted")
 
 add_library(bruce_sdk_builtin_filemanager_check OBJECT "modules/filemanager/filemanager_app.c")
 target_include_directories(bruce_sdk_builtin_filemanager_check PRIVATE
@@ -502,7 +498,7 @@ endforeach()
 #   process-scoped i2c__open() cannot be used at that boot stage, so this
 #   module is Core-private by necessity rather than SDK-only like other
 #   built-ins.
-# - modules/privileged/permission_config reads/writes /config/permissions.json
+# - modules/privileged/permissions reads/writes /config/permissions.json
 #   directly via core/storage/storage.h's storage__read_file()/
 #   storage__write_file_atomic(); that path is unconditionally refused by the
 #   public core_sdk/storage.h storage__open()/storage__list() (see

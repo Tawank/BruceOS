@@ -1,4 +1,4 @@
-#include "partition_manager_gui.h"
+#include "bparted_gui.h"
 
 #include <stdbool.h>
 #include <stdio.h>
@@ -9,16 +9,19 @@
 #include "core_sdk/partition_manager.h"
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
-#include "partition_manager_common.h"
 
-#define PARTITION_MANAGER_GUI_MAX_ENTRIES 8
+#include "bparted_common.h"
 
-/* Every mutation drives the "bparted" CLI command (modules/partition_manager
- * /bparted.c) via app_runner__run_command(), the same shell-command-from-GUI
- * mechanism modules/bruce_launcher/bruce_launcher_app.c and
- * modules/webui/webui_app.c already use - so all validation/flash logic
- * lives in one place and this file only ever builds a command line. */
-static bruce_result_t partition_manager_gui__run(const char *command_line) {
+#define BPARTED_GUI_MAX_ENTRIES 8
+
+/* Every mutation drives the "bparted" CLI mode (bparted_cli.c) via
+ * app_runner__run_command(), the same shell-command-from-GUI mechanism
+ * modules/bruce_launcher/bruce_launcher_app.c and modules/webui/webui_app.c
+ * already use - so all validation/flash logic lives in one place and this
+ * file only ever builds a command line. Running "bparted ..." without
+ * GUI=1 (the default for a child launched this way) routes back into the
+ * CLI, not this GUI, via bparted_app.c's dispatch. */
+static bruce_result_t bparted_gui__run(const char *command_line) {
     int launched = app_runner__run_command(command_line, BRUCE_LAUNCH_BACKGROUND);
     if (launched <= 0) return (bruce_result_t)launched;
 
@@ -33,13 +36,13 @@ static bruce_result_t partition_manager_gui__run(const char *command_line) {
     return status.exit_code == 0 ? BRUCE_OK : BRUCE_ERR_IO;
 }
 
-static void partition_manager_gui__show_error(const char *action, bruce_result_t result) {
+static void bparted_gui__show_error(const char *action, bruce_result_t result) {
     char message[80];
     snprintf(message, sizeof(message), "%s failed (%d)", action, result);
     (void)dialog__message(BRUCE_DIALOG_ERROR, "Partitions", message);
 }
 
-static bruce_result_t partition_manager_gui__offer_reboot(void) {
+static bruce_result_t bparted_gui__offer_reboot(void) {
     if (!partition_manager__reboot_required()) return BRUCE_OK;
     const bruce_dialog_choice_t choices[] = {
         {.label = "Reboot now", .value = "yes"},
@@ -50,12 +53,12 @@ static bruce_result_t partition_manager_gui__offer_reboot(void) {
         "Partitions", "Changes are staged. Reboot now to apply them?", choices, 2, &selected, NULL
     );
     if (result != BRUCE_OK || selected != 0) return BRUCE_OK;
-    result = partition_manager_gui__run("bparted reboot");
-    if (result != BRUCE_OK) partition_manager_gui__show_error("Reboot", result);
+    result = bparted_gui__run("bparted reboot");
+    if (result != BRUCE_OK) bparted_gui__show_error("Reboot", result);
     return BRUCE_OK;
 }
 
-static bruce_result_t partition_manager_gui__pick_size(char *out_text, size_t out_size) {
+static bruce_result_t bparted_gui__pick_size(char *out_text, size_t out_size) {
     const bruce_dialog_choice_t choices[] = {
         {.label = "64K",      .value = "64K"   },
         {.label = "128K",     .value = "128K"  },
@@ -79,7 +82,7 @@ static bruce_result_t partition_manager_gui__pick_size(char *out_text, size_t ou
     return dialog__text_input("Create partition", "Size (e.g. 768K, 3M)", "", false, out_text, out_size);
 }
 
-static bruce_result_t partition_manager_gui__create(void) {
+static bruce_result_t bparted_gui__create(void) {
     const bruce_dialog_choice_t kind_choices[] = {
         {.label = "Swap",                     .value = "swap"           },
         {.label = "LittleFS (root)",          .value = "littlefs-root"  },
@@ -114,21 +117,21 @@ static bruce_result_t partition_manager_gui__create(void) {
     }
 
     char size_text[24];
-    result = partition_manager_gui__pick_size(size_text, sizeof(size_text));
+    result = bparted_gui__pick_size(size_text, sizeof(size_text));
     if (result != BRUCE_OK) return result;
 
     char command[96];
     snprintf(command, sizeof(command), "bparted create %s %s %s", label, kind_arg, size_text);
-    result = partition_manager_gui__run(command);
+    result = bparted_gui__run(command);
     if (result != BRUCE_OK) {
-        partition_manager_gui__show_error("Create", result);
+        bparted_gui__show_error("Create", result);
         return BRUCE_OK;
     }
     (void)dialog__message(BRUCE_DIALOG_SUCCESS, "Partitions", "Partition staged.");
-    return partition_manager_gui__offer_reboot();
+    return bparted_gui__offer_reboot();
 }
 
-static bruce_result_t partition_manager_gui__manage(const char *label) {
+static bruce_result_t bparted_gui__manage(const char *label) {
     bool is_root = strcmp(label, "littlefs") == 0;
     const bruce_dialog_choice_t choices[] = {
         {.label = "Format", .value = "format"},
@@ -159,30 +162,40 @@ static bruce_result_t partition_manager_gui__manage(const char *label) {
 
     char command[64];
     snprintf(command, sizeof(command), "bparted %s %s", selected == 0 ? "format" : "delete", label);
-    result = partition_manager_gui__run(command);
+    result = bparted_gui__run(command);
     if (result != BRUCE_OK) {
-        partition_manager_gui__show_error(selected == 0 ? "Format" : "Delete", result);
+        bparted_gui__show_error(selected == 0 ? "Format" : "Delete", result);
         return BRUCE_OK;
     }
     (void)dialog__message(BRUCE_DIALOG_SUCCESS, "Partitions", "Change staged.");
-    return partition_manager_gui__offer_reboot();
+    return bparted_gui__offer_reboot();
 }
 
-static bruce_result_t partition_manager_gui__main_menu(void) {
-    bruce_partition_entry_t entries[PARTITION_MANAGER_GUI_MAX_ENTRIES];
+static bruce_result_t bparted_gui__main_menu(void) {
+    bruce_partition_entry_t entries[BPARTED_GUI_MAX_ENTRIES];
     size_t entry_count = 0;
-    (void)partition_manager__list(entries, PARTITION_MANAGER_GUI_MAX_ENTRIES, &entry_count);
-    if (entry_count > PARTITION_MANAGER_GUI_MAX_ENTRIES) entry_count = PARTITION_MANAGER_GUI_MAX_ENTRIES;
+    (void)partition_manager__list(entries, BPARTED_GUI_MAX_ENTRIES, &entry_count);
+    if (entry_count > BPARTED_GUI_MAX_ENTRIES) entry_count = BPARTED_GUI_MAX_ENTRIES;
 
-    char entry_labels[PARTITION_MANAGER_GUI_MAX_ENTRIES][40];
-    bruce_dialog_choice_t choices[PARTITION_MANAGER_GUI_MAX_ENTRIES + 3];
+    char entry_labels[BPARTED_GUI_MAX_ENTRIES][48];
+    bruce_dialog_choice_t choices[BPARTED_GUI_MAX_ENTRIES + 3];
     size_t count = 0;
     for (size_t i = 0; i < entry_count; ++i) {
+        /* Copied into a plain, statically-sized local first (rather than
+         * formatting straight from entries[i].label): some GCC versions
+         * can't bound a %s read from a struct-array element reached via a
+         * runtime index and assume an unbounded string, flagging a bogus
+         * -Wformat-truncation below despite label's real 17-byte bound. A
+         * flat local array sidesteps that ambiguity entirely. */
+        char label[BRUCE_PARTITION_LABEL_MAX];
+        memcpy(label, entries[i].label, sizeof(label));
+        label[sizeof(label) - 1] = '\0';
+
         char size_text[16];
-        partition_manager_common__format_size(entries[i].size, size_text, sizeof(size_text));
+        bparted_common__format_size(entries[i].size, size_text, sizeof(size_text));
         snprintf(
-            entry_labels[count], sizeof(entry_labels[count]), "%s (%s, %s)", entries[i].label,
-            partition_manager_common__kind_name(entries[i].kind), size_text
+            entry_labels[count], sizeof(entry_labels[count]), "%s (%s, %s)", label,
+            bparted_common__kind_name(entries[i].kind), size_text
         );
         choices[count].label = entry_labels[count];
         choices[count].value = entries[i].label;
@@ -207,23 +220,23 @@ static bruce_result_t partition_manager_gui__main_menu(void) {
 
     const char *value = choices[selected].value;
     if (strcmp(value, "__back") == 0) return BRUCE_ERR_CANCELLED;
-    if (strcmp(value, "__create") == 0) return partition_manager_gui__create();
+    if (strcmp(value, "__create") == 0) return bparted_gui__create();
     if (strcmp(value, "__reboot") == 0) {
-        result = partition_manager_gui__run("bparted reboot");
-        if (result != BRUCE_OK) partition_manager_gui__show_error("Reboot", result);
+        result = bparted_gui__run("bparted reboot");
+        if (result != BRUCE_OK) bparted_gui__show_error("Reboot", result);
         return BRUCE_OK;
     }
-    return partition_manager_gui__manage(value);
+    return bparted_gui__manage(value);
 }
 
-int partition_manager_gui_app_main(int argc, char **argv) {
+int bparted_gui__main(int argc, char **argv) {
     (void)argc;
     (void)argv;
     for (;;) {
-        bruce_result_t result = partition_manager_gui__main_menu();
+        bruce_result_t result = bparted_gui__main_menu();
         if (result == BRUCE_ERR_CANCELLED) return 0;
         if (result != BRUCE_OK) {
-            partition_manager_gui__show_error("Partitions", result);
+            bparted_gui__show_error("Partitions", result);
             return result;
         }
     }

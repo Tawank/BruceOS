@@ -76,7 +76,8 @@ static esp_err_t storage__mount_internal(void) {
      * space into a "swap" partition, additional labeled littlefs volumes,
      * etc. Either way it hands back the entry labeled "littlefs" already
      * registered as an esp_partition_t, ready to mount exactly as before. */
-    if (partition_manager__init_for_storage(&s_littlefs_partition) != BRUCE_OK || s_littlefs_partition == NULL) {
+    if (partition_manager__init_for_storage(&s_littlefs_partition) != BRUCE_OK ||
+        s_littlefs_partition == NULL) {
         return ESP_FAIL;
     }
 
@@ -95,7 +96,9 @@ static esp_err_t storage__mount_internal(void) {
     }
     if (err == ESP_OK) {
         ESP_LOGI(
-            TAG, "mounted internal storage at 0x%zx (%zu bytes)", (size_t)s_littlefs_partition->address,
+            TAG,
+            "mounted internal storage at 0x%zx (%zu bytes)",
+            (size_t)s_littlefs_partition->address,
             s_littlefs_partition->size
         );
     }

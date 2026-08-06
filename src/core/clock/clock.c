@@ -1,11 +1,11 @@
 #include "clock.h"
 
+#include "core/wifi/wifi_common.h"
 #include "core_sdk/clock.h"
 #include "core_sdk/config.h"
 #include "core_sdk/permission.h"
 #include "core_sdk/runtime.h"
 #include "core_sdk/wifi.h"
-#include "core/wifi/wifi_common.h"
 
 #include <stdbool.h>
 #include <sys/time.h>
@@ -35,14 +35,12 @@ static bool clock__ensure_lock(void) {
     return s_sync_lock != NULL;
 }
 
-static bool clock__is_leap_year(int year) {
-    return (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
-}
+static bool clock__is_leap_year(int year) { return (year % 4 == 0 && year % 100 != 0) || year % 400 == 0; }
 
 static bool clock__datetime_valid(const bruce_clock_datetime_t *value) {
     static const uint8_t days_per_month[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
-    if (value == NULL || value->year < 2020 || value->year > 2099 || value->month < 1 ||
-        value->month > 12 || value->hour > 23 || value->minute > 59 || value->second > 59) {
+    if (value == NULL || value->year < 2020 || value->year > 2099 || value->month < 1 || value->month > 12 ||
+        value->hour > 23 || value->minute > 59 || value->second > 59) {
         return false;
     }
     uint8_t max_day = days_per_month[value->month - 1];
@@ -143,9 +141,7 @@ static bruce_result_t clock__sync_ntp_internal(uint32_t timeout_ms, bool check_p
     return result;
 }
 
-bruce_result_t clock__sync_ntp(uint32_t timeout_ms) {
-    return clock__sync_ntp_internal(timeout_ms, true);
-}
+bruce_result_t clock__sync_ntp(uint32_t timeout_ms) { return clock__sync_ntp_internal(timeout_ms, true); }
 
 bruce_clock_sync_status_t clock__get_sync_status(void) { return s_sync_status; }
 

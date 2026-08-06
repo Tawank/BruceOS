@@ -1,4 +1,4 @@
-#include "permission_config_app.h"
+#include "permissions_app.h"
 
 #include "args.h"
 #include "cJSON.h"
@@ -28,24 +28,24 @@
 #include <stdio.h>
 #include <string.h>
 
-#define PERMISSION_CONFIG__FILE_PATH "/config/permissions.json"
-#define PERMISSION_CONFIG__MAX_APPS 32
+#define PERMISSIONS__FILE_PATH "/config/permissions.json"
+#define PERMISSIONS__MAX_APPS 32
 
 typedef struct {
     char name[BRUCE_PERMISSION_FILE_NAME_MAX];
-} permission_config__app_t;
+} permissions__app_t;
 
 typedef struct {
     bruce_permission_t permission;
-} permission_config__entry_t;
+} permissions__entry_t;
 
 /* Parses /config/permissions.json, returning an empty object if the file is
  * missing or unreadable so callers can treat "nothing saved yet" uniformly.
  * Caller owns the returned cJSON and must cJSON_Delete() it. */
-static cJSON *permission_config__load_raw(void) {
+static cJSON *permissions__load_raw(void) {
     char *text = NULL;
     size_t size = 0;
-    if (!storage__read_file(PERMISSION_CONFIG__FILE_PATH, &text, &size) || size == 0) {
+    if (!storage__read_file(PERMISSIONS__FILE_PATH, &text, &size) || size == 0) {
         if (text != NULL) storage__free(text);
         return cJSON_CreateObject();
     }
@@ -58,18 +58,17 @@ static cJSON *permission_config__load_raw(void) {
     return root;
 }
 
-static bool permission_config__save_raw(cJSON *root) {
+static bool permissions__save_raw(cJSON *root) {
     char *text = cJSON_PrintUnformatted(root);
     if (text == NULL) return false;
-    bool saved = storage__mkdir_internal("/config") && storage__write_file_atomic(
-                     PERMISSION_CONFIG__FILE_PATH, text, strlen(text)
-                 );
+    bool saved = storage__mkdir_internal("/config") &&
+                 storage__write_file_atomic(PERMISSIONS__FILE_PATH, text, strlen(text));
     cJSON_free(text);
     return saved;
 }
 
-static size_t permission_config__list_apps(permission_config__app_t *out, size_t capacity) {
-    cJSON *root = permission_config__load_raw();
+static size_t permissions__list_apps(permissions__app_t *out, size_t capacity) {
+    cJSON *root = permissions__load_raw();
     size_t count = 0;
     cJSON *item;
     cJSON_ArrayForEach(item, root) {
@@ -81,9 +80,8 @@ static size_t permission_config__list_apps(permission_config__app_t *out, size_t
     return count;
 }
 
-static size_t
-permission_config__list_permissions(const char *app, permission_config__entry_t *out, size_t capacity) {
-    cJSON *root = permission_config__load_raw();
+static size_t permissions__list_permissions(const char *app, permissions__entry_t *out, size_t capacity) {
+    cJSON *root = permissions__load_raw();
     cJSON *app_obj = cJSON_GetObjectItemCaseSensitive(root, app);
     size_t count = 0;
     if (app_obj != NULL && cJSON_IsObject(app_obj)) {
@@ -109,8 +107,8 @@ permission_config__list_permissions(const char *app, permission_config__entry_t 
  * this boot keeps answering from that cache (and would clobber this edit back
  * on its next unrelated permission__set() elsewhere) until reboot. Callers
  * are told this via the CLI/GUI copy below. */
-static bool permission_config__forget(const char *app, const bruce_permission_t *permission) {
-    cJSON *root = permission_config__load_raw();
+static bool permissions__forget(const char *app, const bruce_permission_t *permission) {
+    cJSON *root = permissions__load_raw();
     cJSON *app_obj = cJSON_GetObjectItemCaseSensitive(root, app);
     bool changed = false;
     if (app_obj != NULL) {
@@ -125,12 +123,12 @@ static bool permission_config__forget(const char *app, const bruce_permission_t 
             }
         }
     }
-    bool saved = !changed || permission_config__save_raw(root);
+    bool saved = !changed || permissions__save_raw(root);
     cJSON_Delete(root);
     return changed && saved;
 }
 
-static bool permission_config__parse_state(const char *text, bool *out) {
+static bool permissions__parse_state(const char *text, bool *out) {
     if (text == NULL) return false;
     if (strcmp(text, "allow") == 0) {
         *out = true;
@@ -147,22 +145,23 @@ static bool permission_config__parse_state(const char *text, bool *out) {
 /* CLI                                                                        */
 /* -------------------------------------------------------------------------- */
 
-static int permission_config_app__list_cli(void) {
-    permission_config__app_t apps[PERMISSION_CONFIG__MAX_APPS];
-    size_t app_count = permission_config__list_apps(apps, PERMISSION_CONFIG__MAX_APPS);
+static int permissions_app__list_cli(void) {
+    permissions__app_t apps[PERMISSIONS__MAX_APPS];
+    size_t app_count = permissions__list_apps(apps, PERMISSIONS__MAX_APPS);
     if (app_count == 0) {
         stdio__printf("No app has requested a permission yet\n");
         return BRUCE_OK;
     }
     for (size_t i = 0; i < app_count; ++i) {
         stdio__printf("%s\n", apps[i].name);
-        permission_config__entry_t entries[BRUCE_PERMISSION_COUNT];
-        size_t entry_count = permission_config__list_permissions(apps[i].name, entries, BRUCE_PERMISSION_COUNT);
+        permissions__entry_t entries[BRUCE_PERMISSION_COUNT];
+        size_t entry_count = permissions__list_permissions(apps[i].name, entries, BRUCE_PERMISSION_COUNT);
         for (size_t j = 0; j < entry_count; ++j) {
             bool allowed = false;
             bruce_result_t saved = permission__get_saved(apps[i].name, entries[j].permission, &allowed);
             stdio__printf(
-                "  %-10s %s\n", permission__name(entries[j].permission),
+                "  %-10s %s\n",
+                permission__name(entries[j].permission),
                 saved == BRUCE_OK ? (allowed ? "allow" : "deny") : "unknown"
             );
         }
@@ -170,7 +169,7 @@ static int permission_config_app__list_cli(void) {
     return BRUCE_OK;
 }
 
-static int permission_config_app__get_cli(const char *app, const char *permission_name) {
+static int permissions_app__get_cli(const char *app, const char *permission_name) {
     bruce_permission_t permission;
     if (app == NULL || permission_name == NULL || !permission__from_name(permission_name, &permission)) {
         stdio__printf("Unknown permission: %s\n", permission_name != NULL ? permission_name : "(none)");
@@ -186,12 +185,12 @@ static int permission_config_app__get_cli(const char *app, const char *permissio
     return BRUCE_OK;
 }
 
-static int permission_config_app__set_cli(const char *app, const char *permission_name, const char *state) {
+static int permissions_app__set_cli(const char *app, const char *permission_name, const char *state) {
     bruce_permission_t permission;
     bool allowed = false;
     if (app == NULL || permission_name == NULL || !permission__from_name(permission_name, &permission) ||
-        !permission_config__parse_state(state, &allowed)) {
-        stdio__printf("Usage: permission_config set <app> <permission> <allow|deny>\n");
+        !permissions__parse_state(state, &allowed)) {
+        stdio__printf("Usage: permissions set <app> <permission> <allow|deny>\n");
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
     bruce_result_t result = permission__set(app, permission, allowed);
@@ -203,7 +202,7 @@ static int permission_config_app__set_cli(const char *app, const char *permissio
     return BRUCE_OK;
 }
 
-static int permission_config_app__forget_cli(const char *app, const char *permission_name) {
+static int permissions_app__forget_cli(const char *app, const char *permission_name) {
     if (app == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     bruce_permission_t permission;
     bool has_permission = permission_name != NULL;
@@ -211,7 +210,7 @@ static int permission_config_app__forget_cli(const char *app, const char *permis
         stdio__printf("Unknown permission: %s\n", permission_name);
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
-    bool forgot = permission_config__forget(app, has_permission ? &permission : NULL);
+    bool forgot = permissions__forget(app, has_permission ? &permission : NULL);
     if (!forgot) {
         stdio__printf("%s: nothing to forget\n", app);
         return BRUCE_OK;
@@ -224,13 +223,13 @@ static int permission_config_app__forget_cli(const char *app, const char *permis
     return BRUCE_OK;
 }
 
-static int permission_config_app__wipe_cli(const char *confirm) {
+static int permissions_app__wipe_cli(const char *confirm) {
     if (confirm == NULL || strcmp(confirm, "confirm") != 0) {
         stdio__printf("Refusing to wipe every saved decision without 'confirm'\n");
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
     bool removed =
-        storage__remove_internal(PERMISSION_CONFIG__FILE_PATH) || !storage__exists_internal(PERMISSION_CONFIG__FILE_PATH);
+        storage__remove_internal(PERMISSIONS__FILE_PATH) || !storage__exists_internal(PERMISSIONS__FILE_PATH);
     stdio__printf(
         removed ? "All saved permission decisions cleared. Apps already checked this boot keep answering "
                   "from cache until reboot.\n"
@@ -243,10 +242,10 @@ static int permission_config_app__wipe_cli(const char *confirm) {
 /* GUI                                                                        */
 /* -------------------------------------------------------------------------- */
 
-static void permission_config_app__gui_app(const char *app) {
+static void permissions_app__gui_app(const char *app) {
     for (;;) {
-        permission_config__entry_t entries[BRUCE_PERMISSION_COUNT];
-        size_t entry_count = permission_config__list_permissions(app, entries, BRUCE_PERMISSION_COUNT);
+        permissions__entry_t entries[BRUCE_PERMISSION_COUNT];
+        size_t entry_count = permissions__list_permissions(app, entries, BRUCE_PERMISSION_COUNT);
         if (entry_count == 0) return;
 
         char labels[BRUCE_PERMISSION_COUNT][40];
@@ -255,7 +254,10 @@ static void permission_config_app__gui_app(const char *app) {
             bool allowed = false;
             bruce_result_t saved = permission__get_saved(app, entries[i].permission, &allowed);
             snprintf(
-                labels[i], sizeof(labels[i]), "%s: %s", permission__name(entries[i].permission),
+                labels[i],
+                sizeof(labels[i]),
+                "%s: %s",
+                permission__name(entries[i].permission),
                 saved == BRUCE_OK ? (allowed ? "Allow" : "Deny") : "Unknown"
             );
             choices[i].label = labels[i];
@@ -269,14 +271,13 @@ static void permission_config_app__gui_app(const char *app) {
         char title[BRUCE_PERMISSION_FILE_NAME_MAX + 16];
         snprintf(title, sizeof(title), "%s permissions", app);
         size_t selected = 0;
-        bruce_result_t result = dialog__choice(
-            title, "Select to toggle Allow/Deny", choices, entry_count + 2, &selected, NULL
-        );
+        bruce_result_t result =
+            dialog__choice(title, "Select to toggle Allow/Deny", choices, entry_count + 2, &selected, NULL);
         if (result == BRUCE_ERR_CANCELLED || selected == entry_count + 1) return;
         if (result != BRUCE_OK) return;
 
         if (selected == entry_count) {
-            (void)permission_config__forget(app, NULL);
+            (void)permissions__forget(app, NULL);
             return;
         }
 
@@ -286,16 +287,17 @@ static void permission_config_app__gui_app(const char *app) {
     }
 }
 
-static int permission_config_app__gui(void) {
+static int permissions_app__gui(void) {
     for (;;) {
-        permission_config__app_t apps[PERMISSION_CONFIG__MAX_APPS];
-        size_t app_count = permission_config__list_apps(apps, PERMISSION_CONFIG__MAX_APPS);
+        permissions__app_t apps[PERMISSIONS__MAX_APPS];
+        size_t app_count = permissions__list_apps(apps, PERMISSIONS__MAX_APPS);
         if (app_count == 0) {
-            (void)dialog__message(BRUCE_DIALOG_INFO, "App permissions", "No app has requested a permission yet");
+            (void
+            )dialog__message(BRUCE_DIALOG_INFO, "App permissions", "No app has requested a permission yet");
             return BRUCE_OK;
         }
 
-        bruce_dialog_choice_t choices[PERMISSION_CONFIG__MAX_APPS + 2];
+        bruce_dialog_choice_t choices[PERMISSIONS__MAX_APPS + 2];
         for (size_t i = 0; i < app_count; ++i) {
             choices[i].label = apps[i].name;
             choices[i].value = apps[i].name;
@@ -313,21 +315,25 @@ static int permission_config_app__gui(void) {
 
         if (selected == app_count) {
             bruce_dialog_choice_t confirm_choices[2] = {
-                {.label = "Cancel",    .value = "cancel"},
-                {.label = "Wipe all", .value = "wipe"   },
+                {.label = "Cancel",   .value = "cancel"},
+                {.label = "Wipe all", .value = "wipe"  },
             };
             size_t confirm_selected = 0;
             if (dialog__choice(
-                    "Wipe all?", "Clears every app's saved permission decisions", confirm_choices, 2,
-                    &confirm_selected, NULL
+                    "Wipe all?",
+                    "Clears every app's saved permission decisions",
+                    confirm_choices,
+                    2,
+                    &confirm_selected,
+                    NULL
                 ) == BRUCE_OK &&
                 confirm_selected == 1) {
-                (void)permission_config_app__wipe_cli("confirm");
+                (void)permissions_app__wipe_cli("confirm");
             }
             continue;
         }
 
-        permission_config_app__gui_app(apps[selected].name);
+        permissions_app__gui_app(apps[selected].name);
     }
 }
 
@@ -335,7 +341,7 @@ static int permission_config_app__gui(void) {
 /* Entry point                                                               */
 /* -------------------------------------------------------------------------- */
 
-int permission_config_app_main(int argc, char **argv) {
+int permissions_app_main(int argc, char **argv) {
     ArgParser *root = ap_new_parser();
     if (root == NULL) return BRUCE_ERR_NO_MEMORY;
     ap_set_helptext(root, "View and manage saved app permission decisions.");
@@ -363,7 +369,9 @@ int permission_config_app_main(int argc, char **argv) {
     ap_add_required_arg(set, "state", "allow or deny");
     ap_set_helptext(forget, "Clear a saved decision so the app is re-prompted on its next launch.");
     ap_add_required_arg(forget, "app", "App file name, e.g. game.elf");
-    ap_add_optional_arg(forget, "permission", "Permission name; omit to forget every permission for this app");
+    ap_add_optional_arg(
+        forget, "permission", "Permission name; omit to forget every permission for this app"
+    );
     ap_set_helptext(wipe, "Delete every saved permission decision for every app.");
     ap_add_required_arg(wipe, "confirm", "Must be the literal word 'confirm'");
 
@@ -378,19 +386,19 @@ int permission_config_app_main(int argc, char **argv) {
     bool gui = runtime__gui_requested();
     int result;
     if (root_action == NULL) {
-        result = gui ? permission_config_app__gui() : permission_config_app__list_cli();
+        result = gui ? permissions_app__gui() : permissions_app__list_cli();
     } else if (root_action == list) {
-        result = permission_config_app__list_cli();
+        result = permissions_app__list_cli();
     } else if (root_action == get) {
-        result = permission_config_app__get_cli(ap_get_arg(get, "app"), ap_get_arg(get, "permission"));
+        result = permissions_app__get_cli(ap_get_arg(get, "app"), ap_get_arg(get, "permission"));
     } else if (root_action == set) {
-        result = permission_config_app__set_cli(
+        result = permissions_app__set_cli(
             ap_get_arg(set, "app"), ap_get_arg(set, "permission"), ap_get_arg(set, "state")
         );
     } else if (root_action == forget) {
-        result = permission_config_app__forget_cli(ap_get_arg(forget, "app"), ap_get_arg(forget, "permission"));
+        result = permissions_app__forget_cli(ap_get_arg(forget, "app"), ap_get_arg(forget, "permission"));
     } else if (root_action == wipe) {
-        result = permission_config_app__wipe_cli(ap_get_arg(wipe, "confirm"));
+        result = permissions_app__wipe_cli(ap_get_arg(wipe, "confirm"));
     } else {
         result = BRUCE_ERR_INVALID_ARGUMENT;
     }

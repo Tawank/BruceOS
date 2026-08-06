@@ -11,11 +11,10 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
-#include "core/storage/storage.h"
 #include "core/process/process.h"
+#include "core/storage/storage.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/result.h"
-#include "core_sdk/storage.h"
 
 #define PERMISSION__DIRECTORY "/config"
 #define PERMISSION__FILE_PATH PERMISSION__DIRECTORY "/permissions.json"
@@ -220,7 +219,8 @@ static bool permission__prompt(const char *file_name, bruce_permission_t permiss
  * config__get_pri_color -> config__guard), and re-prompting there would
  * recurse until the task stack overflows. A nested attempt reports
  * "unanswered" so callers fail closed without showing a second dialog. */
-static bool permission__prompt_guarded(const char *file_name, bruce_permission_t permission, bool *out_answered) {
+static bool
+permission__prompt_guarded(const char *file_name, bruce_permission_t permission, bool *out_answered) {
     if (s_prompt_task == xTaskGetCurrentTaskHandle()) {
         *out_answered = false;
         return false;

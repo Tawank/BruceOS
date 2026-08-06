@@ -1,4 +1,4 @@
-#include "bparted.h"
+#include "bparted_cli.h"
 
 #include <stdint.h>
 
@@ -8,15 +8,16 @@
 #include "core_sdk/partition_manager.h"
 #include "core_sdk/result.h"
 #include "core_sdk/stdio.h"
-#include "partition_manager_common.h"
 
-static void bparted__print_reboot_note(void) {
+#include "bparted_common.h"
+
+static void bparted_cli__print_reboot_note(void) {
     if (partition_manager__reboot_required()) {
         stdio__printf("Changes are staged; run 'bparted reboot' (or reboot manually) to apply them.\n");
     }
 }
 
-static int bparted__list(void) {
+static int bparted_cli__list(void) {
     size_t count = 0;
     bruce_result_t result = partition_manager__list(NULL, 0, &count);
     if (result != BRUCE_OK) return result;
@@ -32,11 +33,11 @@ static int bparted__list(void) {
     for (size_t i = 0; i < count; ++i) {
         char offset[32];
         char size[32];
-        partition_manager_common__format_size(entries[i].offset, offset, sizeof(offset));
-        partition_manager_common__format_size(entries[i].size, size, sizeof(size));
+        bparted_common__format_size(entries[i].offset, offset, sizeof(offset));
+        bparted_common__format_size(entries[i].size, size, sizeof(size));
         stdio__printf(
-            "%-16s %-8s %10s %10s %s\n", entries[i].label, partition_manager_common__kind_name(entries[i].kind),
-            offset, size, entries[i].format_pending ? "pending format" : ""
+            "%-16s %-8s %10s %10s %s\n", entries[i].label, bparted_common__kind_name(entries[i].kind), offset,
+            size, entries[i].format_pending ? "pending format" : ""
         );
     }
     memory__free(entries);
@@ -44,25 +45,25 @@ static int bparted__list(void) {
     uint64_t free_bytes = 0;
     if (partition_manager__free_space(&free_bytes) == BRUCE_OK) {
         char free_size[32];
-        partition_manager_common__format_size(free_bytes, free_size, sizeof(free_size));
+        bparted_common__format_size(free_bytes, free_size, sizeof(free_size));
         stdio__printf("free: %s\n", free_size);
     }
-    bparted__print_reboot_note();
+    bparted_cli__print_reboot_note();
     return 0;
 }
 
-static int bparted__create(ArgParser *parser) {
+static int bparted_cli__create(ArgParser *parser) {
     const char *label = ap_get_arg(parser, "label");
     const char *kind_text = ap_get_arg(parser, "kind");
     const char *size_text = ap_get_arg(parser, "size");
 
     bruce_partition_kind_t kind;
     uint64_t size_bytes = 0;
-    if (!partition_manager_common__parse_kind(kind_text, &kind)) {
+    if (!bparted_common__parse_kind(kind_text, &kind)) {
         stdio__printf("bparted: kind must be 'swap' or 'littlefs'\n");
         return -1;
     }
-    if (!partition_manager_common__parse_size(size_text, &size_bytes)) {
+    if (!bparted_common__parse_size(size_text, &size_bytes)) {
         stdio__printf("bparted: invalid size '%s' (expected e.g. 512K, 2M)\n", size_text);
         return -1;
     }
@@ -78,11 +79,11 @@ static int bparted__create(ArgParser *parser) {
         return -1;
     }
     stdio__printf("Staged '%s' (%s).\n", label, kind_text);
-    bparted__print_reboot_note();
+    bparted_cli__print_reboot_note();
     return 0;
 }
 
-static int bparted__delete(ArgParser *parser) {
+static int bparted_cli__delete(ArgParser *parser) {
     const char *label = ap_get_arg(parser, "label");
     bruce_result_t result = partition_manager__stage_delete(label);
     if (result != BRUCE_OK) {
@@ -95,11 +96,11 @@ static int bparted__delete(ArgParser *parser) {
         return -1;
     }
     stdio__printf("Staged deletion of '%s'.\n", label);
-    bparted__print_reboot_note();
+    bparted_cli__print_reboot_note();
     return 0;
 }
 
-static int bparted__format(ArgParser *parser) {
+static int bparted_cli__format(ArgParser *parser) {
     const char *label = ap_get_arg(parser, "label");
     bruce_result_t result = partition_manager__stage_format(label);
     if (result != BRUCE_OK) {
@@ -112,16 +113,16 @@ static int bparted__format(ArgParser *parser) {
         return -1;
     }
     stdio__printf("Staged format of '%s'.\n", label);
-    bparted__print_reboot_note();
+    bparted_cli__print_reboot_note();
     return 0;
 }
 
-static int bparted__reboot(void) {
+static int bparted_cli__reboot(void) {
     stdio__printf("Rebooting...\n");
     return device__restart(500) == BRUCE_OK ? 0 : -1;
 }
 
-int bparted_app_main(int argc, char **argv) {
+int bparted_cli__main(int argc, char **argv) {
     ArgParser *root = ap_new_parser();
     if (root == NULL) return -1;
     ap_set_helptext(root, "Manage the user flash area beyond the static partition table.");
@@ -159,11 +160,11 @@ int bparted_app_main(int argc, char **argv) {
 
     int result = -1;
     ArgParser *command = ap_get_cmd_parser(root);
-    if (command == NULL || command == list) result = bparted__list();
-    else if (command == create) result = bparted__create(create);
-    else if (command == delete_cmd) result = bparted__delete(delete_cmd);
-    else if (command == format_cmd) result = bparted__format(format_cmd);
-    else if (command == reboot) result = bparted__reboot();
+    if (command == NULL || command == list) result = bparted_cli__list();
+    else if (command == create) result = bparted_cli__create(create);
+    else if (command == delete_cmd) result = bparted_cli__delete(delete_cmd);
+    else if (command == format_cmd) result = bparted_cli__format(format_cmd);
+    else if (command == reboot) result = bparted_cli__reboot();
 
     ap_free(root);
     return result;
