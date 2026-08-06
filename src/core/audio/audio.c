@@ -59,6 +59,16 @@ static void audio__ensure_mutex(void) {
 static i2s_chan_handle_t s_i2s_tx_channel;
 static bool s_i2s_tx_ready;
 
+/* i2s_new_channel()'s own default (I2S_CHANNEL_DEFAULT_CONFIG) is 6
+ * descriptors x 240 frames, but that default is IDF's to change; pinning it
+ * explicitly below means AUDIO__I2S_DMA_RING_FRAMES is guaranteed to
+ * actually match the hardware ring, not just whatever IDF happened to
+ * default to when this was written -- audio__i2s_flush_silence_locked()
+ * further down relies on that to fully silence the ring. */
+#define AUDIO__I2S_DMA_DESC_COUNT 6u
+#define AUDIO__I2S_DMA_FRAME_COUNT 240u
+#define AUDIO__I2S_DMA_RING_FRAMES (AUDIO__I2S_DMA_DESC_COUNT * AUDIO__I2S_DMA_FRAME_COUNT)
+
 /* Lazily creates and enables the one persistent TX channel, reused by every
  * tone and every stream write instead of being torn down between them.
  *
@@ -80,6 +90,8 @@ static bruce_result_t audio__i2s_ensure_channel_locked(void) {
     if (s_i2s_tx_ready) return BRUCE_OK;
 
     i2s_chan_config_t channel_config = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_AUTO, I2S_ROLE_MASTER);
+    channel_config.dma_desc_num = AUDIO__I2S_DMA_DESC_COUNT;
+    channel_config.dma_frame_num = AUDIO__I2S_DMA_FRAME_COUNT;
     if (i2s_new_channel(&channel_config, &s_i2s_tx_channel, NULL) != ESP_OK) return BRUCE_ERR_BUSY;
 
     i2s_std_config_t config = {
@@ -120,6 +132,30 @@ static bruce_result_t audio__i2s_write_locked(const int16_t *interleaved_stereo,
     return BRUCE_OK;
 }
 
+/* Writes enough true-zero frames to cover the *entire* DMA ring
+ * (AUDIO__I2S_DMA_RING_FRAMES), not just one AUDIO__I2S_BUFFER_FRAMES
+ * chunk. i2s_channel_write() only overwrites as many ring descriptors as
+ * the frames it's given -- a write smaller than the ring leaves whatever
+ * *other* descriptors were still holding real, non-zero audio (e.g. because
+ * a producer fell behind and the ring had genuinely filled with several
+ * frames' worth of real samples) untouched, and the DMA keeps circulating
+ * and replaying those forever once nothing writes anything newer. That's
+ * exactly the "one sound repeats constantly until the board is
+ * power-cycled" failure mode this exists to prevent: a flush has to reach
+ * every descriptor, not just the next one in line. Writing a bit more than
+ * the ring's total capacity guarantees that regardless of where the ring's
+ * write pointer currently is. */
+static bruce_result_t audio__i2s_flush_silence_locked(void) {
+    int16_t silence[AUDIO__I2S_BUFFER_FRAMES * 2u];
+    memset(silence, 0, sizeof(silence));
+    bruce_result_t result = BRUCE_OK;
+    for (uint32_t frames_written = 0; frames_written < AUDIO__I2S_DMA_RING_FRAMES && result == BRUCE_OK;
+         frames_written += AUDIO__I2S_BUFFER_FRAMES) {
+        result = audio__i2s_write_locked(silence, AUDIO__I2S_BUFFER_FRAMES);
+    }
+    return result;
+}
+
 static bruce_result_t audio__play_i2s(const audio__tone_params_t *params) {
     bruce_result_t result = audio__i2s_ensure_channel_locked();
     if (result != BRUCE_OK) return result;
@@ -147,11 +183,10 @@ static bruce_result_t audio__play_i2s(const audio__tone_params_t *params) {
      * without this the DMA ring's steady-state content after this call would
      * be the tail of a square wave sitting at the amplitude peak, not
      * silence -- and since the channel is no longer torn down between calls,
-     * that would keep looping audibly instead of stopping. Writing one
-     * buffer of true zero closes the waveform out cleanly and leaves the bus
-     * driving real silence until the next tone or stream. */
-    memset(samples, 0, sizeof(samples));
-    bruce_result_t silence_result = audio__i2s_write_locked(samples, AUDIO__I2S_BUFFER_FRAMES);
+     * that would keep looping audibly instead of stopping. Flushing the
+     * whole ring with true zero closes the waveform out cleanly and leaves
+     * the bus driving real silence until the next tone or stream. */
+    bruce_result_t silence_result = audio__i2s_flush_silence_locked();
     return result == BRUCE_OK ? silence_result : result;
 }
 
@@ -159,11 +194,7 @@ static bruce_result_t audio__play_i2s(const audio__tone_params_t *params) {
  * from audio__stream_close() and from the automatic per-process resource
  * cleanup below; must be called with s_audio_mutex held. */
 static void audio__stream_teardown_locked(void) {
-    if (s_i2s_tx_ready) {
-        int16_t silence[AUDIO__I2S_BUFFER_FRAMES * 2u];
-        memset(silence, 0, sizeof(silence));
-        (void)audio__i2s_write_locked(silence, AUDIO__I2S_BUFFER_FRAMES);
-    }
+    if (s_i2s_tx_ready) { (void)audio__i2s_flush_silence_locked(); }
     s_stream_open = false;
     s_stream_owner = BRUCE_PROCESS_ID_INVALID;
     s_stream_resource = BRUCE_RESOURCE_ID_INVALID;
