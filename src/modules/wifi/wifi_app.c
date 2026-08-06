@@ -1,14 +1,67 @@
 #include "wifi_app.h"
 
 #include <stdbool.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "args.h"
 #include "core_sdk/config.h"
+#include "core_sdk/notification.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/wifi.h"
 
-static int wifi_app_default(void) { return wifi__connect_known() == BRUCE_OK ? 0 : -1; }
+/* Mirrors wifi__connect()'s own default (core/wifi/wifi_common.c) -- there's
+ * no accessor for it, so this is just the upper bound used to size the
+ * "Connecting..." banner's lifetime, not a behavioral dependency. */
+#define WIFI_APP_CONNECT_TIMEOUT_MS 10000u
+/* wifi__connect_known() may try several saved networks in turn (one
+ * wifi__connect() attempt each), so give its "Connecting..." banner more
+ * headroom than a single explicit connect gets. */
+#define WIFI_APP_KNOWN_CONNECT_BANNER_MS 20000u
+
+static const char *wifi_app_result_label(bruce_result_t result) {
+    switch (result) {
+        case BRUCE_ERR_TIMEOUT: return "timed out";
+        case BRUCE_ERR_INVALID_ARGUMENT: return "bad credentials";
+        case BRUCE_ERR_PERMISSION: return "not permitted";
+        case BRUCE_ERR_NOT_FOUND: return "no saved network in range";
+        default: return "failed";
+    }
+}
+
+/* Announces the start of a connect attempt. Kept as its own push (rather
+ * than folded into the result notification) so the user sees the attempt
+ * start, not just its outcome -- notification__push() is last-writer-wins,
+ * so this is replaced by wifi_app_notify_connect_result() the moment
+ * wifi__connect()/wifi__connect_known() returns. How (or whether) this
+ * actually reaches the user -- a GUI banner or a console line -- is decided
+ * by notification__push()/modules/notification_service, not here. */
+static void wifi_app_notify_connecting(uint32_t banner_duration_ms) {
+    (void)notification__push("Connecting to Wi-Fi...", banner_duration_ms);
+}
+
+static void wifi_app_notify_connect_result(bruce_result_t result) {
+    if (result == BRUCE_OK) {
+        (void)notification__push("Wi-Fi connected", 3000);
+        return;
+    }
+    char message[BRUCE_NOTIFICATION_TEXT_MAX];
+    snprintf(message, sizeof(message), "Wi-Fi connect failed: %s", wifi_app_result_label(result));
+    (void)notification__push(message, 4000);
+}
+
+static void wifi_app_notify_ap_starting(void) { (void)notification__push("Starting Wi-Fi AP...", 8000); }
+
+static void wifi_app_notify_ap_result(bruce_result_t result) {
+    (void)notification__push(result == BRUCE_OK ? "Wi-Fi AP started" : "Wi-Fi AP failed to start", 4000);
+}
+
+static int wifi_app_default(void) {
+    wifi_app_notify_connecting(WIFI_APP_KNOWN_CONNECT_BANNER_MS);
+    bruce_result_t result = wifi__connect_known();
+    wifi_app_notify_connect_result(result);
+    return result == BRUCE_OK ? 0 : -1;
+}
 
 static int wifi_app_scan(void) {
     wifi__network_t networks[32];
@@ -30,13 +83,21 @@ static int wifi_app_scan(void) {
 static int wifi_app_connect(ArgParser *parser) {
     char *ssid = ap_get_arg(parser, "ssid");
     char *password = ap_get_arg(parser, "password");
-    if (ssid == NULL && password == NULL) { return wifi__connect_known() == BRUCE_OK ? 0 : -1; }
+    if (ssid == NULL && password == NULL) {
+        wifi_app_notify_connecting(WIFI_APP_KNOWN_CONNECT_BANNER_MS);
+        bruce_result_t result = wifi__connect_known();
+        wifi_app_notify_connect_result(result);
+        return result == BRUCE_OK ? 0 : -1;
+    }
     if (ssid == NULL || password == NULL) {
         stdio__printf("wifi connect requires ssid and password\n");
         return -1;
     }
 
-    if (wifi__connect(ssid, password, 10000) != BRUCE_OK) { return -1; }
+    wifi_app_notify_connecting(WIFI_APP_CONNECT_TIMEOUT_MS + 3000);
+    bruce_result_t result = wifi__connect(ssid, password, WIFI_APP_CONNECT_TIMEOUT_MS);
+    wifi_app_notify_connect_result(result);
+    if (result != BRUCE_OK) { return -1; }
     return config__add_or_update_wifi_credential(ssid, password) == BRUCE_OK ? 0 : -1;
 }
 
@@ -113,16 +174,35 @@ int wifi_app_main(int argc, char **argv) {
     int result = -1;
     ArgParser *command = ap_get_cmd_parser(root);
     if (command == NULL) result = wifi_app_default();
-    else if (command == on)
-        result = wifi__connect_known() == BRUCE_OK ? 0 : wifi__setup_ap() == BRUCE_OK ? 0 : -1;
-    else if (command == off) result = wifi__disconnect() == BRUCE_OK ? 0 : -1;
-    else if (command == add) result = wifi_app_add(add);
+    else if (command == on) {
+        wifi_app_notify_connecting(WIFI_APP_KNOWN_CONNECT_BANNER_MS);
+        bruce_result_t connect_result = wifi__connect_known();
+        if (connect_result == BRUCE_OK) {
+            (void)notification__push("Wi-Fi connected", 3000);
+            result = 0;
+        } else {
+            wifi_app_notify_ap_starting();
+            bruce_result_t ap_result = wifi__setup_ap();
+            wifi_app_notify_ap_result(ap_result);
+            result = ap_result == BRUCE_OK ? 0 : -1;
+        }
+    } else if (command == off) {
+        bruce_result_t disconnect_result = wifi__disconnect();
+        (void)notification__push(
+            disconnect_result == BRUCE_OK ? "Wi-Fi disconnected" : "Wi-Fi disconnect failed", 3000
+        );
+        result = disconnect_result == BRUCE_OK ? 0 : -1;
+    } else if (command == add) result = wifi_app_add(add);
     else if (command == scan) result = wifi_app_scan();
     else if (command == connect) result = wifi_app_connect(connect);
     else if (command == ap) {
         ArgParser *ap_command = ap_get_cmd_parser(ap);
-        if (ap_command == ap_start) result = wifi__setup_ap() == BRUCE_OK ? 0 : -1;
-        else if (ap_command == ap_info) result = wifi_app_ap_info();
+        if (ap_command == ap_start) {
+            wifi_app_notify_ap_starting();
+            bruce_result_t ap_result = wifi__setup_ap();
+            wifi_app_notify_ap_result(ap_result);
+            result = ap_result == BRUCE_OK ? 0 : -1;
+        } else if (ap_command == ap_info) result = wifi_app_ap_info();
         else {
             ap_print_help(ap);
             result = -1;

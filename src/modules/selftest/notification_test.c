@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "core/display/display.h"
+#include "core/process/process.h"
 #include "core_sdk/config.h"
 #include "core_sdk/display.h"
 #include "core_sdk/notification.h"
@@ -38,6 +39,56 @@ static bool notification_test__wait_visible(bool want_visible, bruce_display_rec
     return false;
 }
 
+/* notification__push() decides GUI-banner-vs-console by reading the
+ * *calling* process's own GUI=1 flag (see process_registry__current_context()
+ * in core/notification/notification.c). The selftest runner itself is
+ * launched in the background without GUI=1 (see app_runner__run_command()
+ * for "selftest"), so pushing directly from it would always exercise the
+ * console fallback rather than whichever path a given case wants to test.
+ * These helpers spawn a short-lived child with an explicit gui_requested
+ * flag to push from, mirroring the pattern
+ * selftest__run_dialog_dispatch_as() (permission_test.c) already uses for
+ * the analogous dialog__* GUI/terminal dispatch check. */
+static bool s_push_ran;
+static bool s_push_ok;
+
+static int selftest__notification_push_pair_entry(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    s_push_ok =
+        notification__push("first", 1) == BRUCE_OK && notification__push("replacement", UINT32_MAX) == BRUCE_OK;
+    s_push_ran = true;
+    return 0;
+}
+
+static int selftest__notification_push_one_entry(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    s_push_ok = notification__push("console only", 1) == BRUCE_OK;
+    s_push_ran = true;
+    return 0;
+}
+
+static bool selftest__push_notifications_as(bool gui_requested, bruce_app_entry_t entry) {
+    s_push_ran = false;
+    s_push_ok = false;
+    process_create_params_t params = {
+        .name = "selftest_notification_push",
+        .entry = entry,
+        .argc = 0,
+        .argv = NULL,
+        .built_in = false,
+        .gui_requested = gui_requested,
+        .permission_key = "",
+        .start_in_background = true,
+        .stack_bytes = 4096,
+    };
+    bruce_process_id_t id = BRUCE_PROCESS_ID_INVALID;
+    if (process_registry__create(&params, &id) != BRUCE_OK) return false;
+    bruce_result_t wait_result = process__wait(id, 2000);
+    return (wait_result == BRUCE_OK || wait_result == BRUCE_ERR_NOT_FOUND) && s_push_ran && s_push_ok;
+}
+
 bool selftest__run_notification_case(void) {
     int width = display__width();
     int height = display__height();
@@ -46,7 +97,7 @@ bool selftest__run_notification_case(void) {
     bool buffered = config__get_display_buffered_rendering();
     if (buffered && display__test_read_pixel(width - 3, height - 3, &before) != BRUCE_OK) return false;
 
-    if (notification__push("first", 1) != BRUCE_OK || notification__push("replacement", UINT32_MAX) != BRUCE_OK) {
+    if (!selftest__push_notifications_as(true, selftest__notification_push_pair_entry)) {
         printf("[selftest] notification: push failed\n");
         return false;
     }
@@ -90,6 +141,24 @@ bool selftest__run_notification_case(void) {
     if (notification__dismiss() != BRUCE_OK || notification__dismiss() != BRUCE_OK) return false;
     if (!notification_test__wait_visible(false, NULL)) {
         printf("[selftest] notification: service never hid the overlay\n");
+        return false;
+    }
+    return true;
+}
+
+/* Companion to selftest__run_notification_case(): pushes from a process
+ * launched *without* GUI interaction and asserts the service never draws a
+ * banner for it -- the console-fallback branch (modules/notification_service
+ * printing via stdio__printf() instead of display__overlay_*) is exercised
+ * here by omission: if it ever regressed back to always drawing an overlay,
+ * this would start failing. */
+bool selftest__run_notification_console_fallback_case(void) {
+    if (!selftest__push_notifications_as(false, selftest__notification_push_one_entry)) {
+        printf("[selftest] notification/console-fallback: push failed\n");
+        return false;
+    }
+    if (notification_test__wait_visible(true, NULL)) {
+        printf("[selftest] notification/console-fallback: overlay shown for a non-GUI push\n");
         return false;
     }
     return true;

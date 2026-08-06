@@ -7,9 +7,18 @@
 #include "freertos/queue.h"
 
 typedef struct {
-    bool dismiss; /* false: text/duration_ms below are the push payload. */
+    bool dismiss; /* false: text/duration_ms/gui_requested below are the push payload. */
     char text[BRUCE_NOTIFICATION_TEXT_MAX];
     uint32_t duration_ms;
+    /* Whether the *pushing* process was launched with GUI=1, captured once
+     * here at push time (see process_registry__current_context()) since
+     * that's the only place the queue crosses from the pusher's task into
+     * the consumer's -- the consumer has no way to ask afterwards which
+     * process a given queued message came from. Lets the consumer (see
+     * notification__wait_request()) decide whether to render a GUI banner
+     * or print to console without needing to know anything about wifi,
+     * bluetooth, or any other specific pusher. */
+    bool gui_requested;
 } notification__message_t;
 
 /* Depth-1 "mailbox" queue: xQueueOverwrite() always replaces whatever
@@ -33,10 +42,13 @@ bruce_result_t notification__push(const char *text, uint32_t duration_ms) {
     if (duration_ms > BRUCE_NOTIFICATION_DURATION_MAX_MS) duration_ms = BRUCE_NOTIFICATION_DURATION_MAX_MS;
     QueueHandle_t queue = notification__ensure_queue();
     if (queue == NULL) return BRUCE_ERR_NO_MEMORY;
+    bool gui_requested = false;
+    (void)process_registry__current_context(NULL, NULL, 0, &gui_requested);
     notification__message_t message = {0};
     message.dismiss = false;
     strncpy(message.text, text, sizeof(message.text) - 1);
     message.duration_ms = duration_ms;
+    message.gui_requested = gui_requested;
     (void)xQueueOverwrite(queue, &message);
     return BRUCE_OK;
 }
@@ -51,10 +63,11 @@ bruce_result_t notification__dismiss(void) {
 }
 
 bruce_result_t notification__wait_request(
-    char *out_text, size_t text_size, uint32_t *out_duration_ms, bool *out_dismiss, uint32_t timeout_ms
+    char *out_text, size_t text_size, uint32_t *out_duration_ms, bool *out_dismiss, bool *out_gui_requested,
+    uint32_t timeout_ms
 ) {
     if (out_dismiss == NULL || (out_text != NULL) != (text_size > 0) ||
-        (out_text != NULL) != (out_duration_ms != NULL)) {
+        (out_text != NULL) != (out_duration_ms != NULL) || (out_text != NULL) != (out_gui_requested != NULL)) {
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
     bool built_in = false;
@@ -71,6 +84,7 @@ bruce_result_t notification__wait_request(
         strncpy(out_text, message.text, text_size - 1);
         out_text[text_size - 1] = '\0';
         *out_duration_ms = message.duration_ms;
+        *out_gui_requested = message.gui_requested;
     }
     return BRUCE_OK;
 }

@@ -6,6 +6,7 @@
 #include "core_sdk/notification.h"
 #include "core_sdk/result.h"
 #include "core_sdk/runtime.h"
+#include "core_sdk/stdio.h"
 
 /* Font metrics mirror Core's built-in (and only) fixed 5x7 font used by
  * display__draw_string(): there is no public text-measurement API, so this
@@ -81,20 +82,28 @@ int notification_service_main(int argc, char **argv) {
         char text[BRUCE_NOTIFICATION_TEXT_MAX];
         uint32_t duration_ms = 0;
         bool dismiss = false;
+        bool gui_requested = false;
         uint32_t wait_ms = UINT32_MAX;
         if (visible) {
             uint64_t now = runtime__now();
             wait_ms = deadline_ms > now ? (uint32_t)(deadline_ms - now) : 0;
         }
-        bruce_result_t result = notification__wait_request(text, sizeof(text), &duration_ms, &dismiss, wait_ms);
+        bruce_result_t result =
+            notification__wait_request(text, sizeof(text), &duration_ms, &dismiss, &gui_requested, wait_ms);
         if (result == BRUCE_OK && dismiss) {
             notification_service__hide();
             visible = false;
-        } else if (result == BRUCE_OK) {
+        } else if (result == BRUCE_OK && gui_requested) {
             if (notification_service__show(text) == BRUCE_OK) {
                 visible = true;
                 deadline_ms = runtime__now() + duration_ms;
             }
+        } else if (result == BRUCE_OK) {
+            /* Pushed by a process launched without GUI interaction (a typed
+             * console command): print straight to its routed stdio session
+             * instead of drawing a banner nobody watching the console would
+             * see. */
+            (void)stdio__printf("%s\n", text);
         } else if (visible) {
             /* Timed out waiting for the next request: this notification's
              * duration has elapsed with nothing new queued behind it. */

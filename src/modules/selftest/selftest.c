@@ -136,6 +136,7 @@ int selftest_app_main(int argc, char **argv) {
     RUN_SELFTEST(selftest__run_icon_registry_case);
     RUN_SELFTEST(selftest__run_image_decode_case);
     RUN_SELFTEST(selftest__run_notification_case);
+    RUN_SELFTEST(selftest__run_notification_console_fallback_case);
     RUN_SELFTEST(selftest__run_status_icon_case);
 
 #undef RUN_SELFTEST
