@@ -102,8 +102,21 @@ static void pace_frame(void) {
     uint64_t now = runtime__now();
     if (next_frame_ms == 0) next_frame_ms = now;
     next_frame_ms += 1000u / NES_REFRESH_RATE;
-    if (next_frame_ms > now) runtime__delay((uint32_t)(next_frame_ms - now));
-    else if (now - next_frame_ms > 100) next_frame_ms = now;
+    if (next_frame_ms > now) {
+        runtime__delay((uint32_t)(next_frame_ms - now));
+    } else {
+        if (now - next_frame_ms > 100) next_frame_ms = now;
+        /* Emulation + blit ran over budget: there is no actual idle time to
+         * spend, but this task must still hit a real scheduling point every
+         * frame. Without it, once emulation can't keep up with
+         * NES_REFRESH_RATE this branch runs every frame forever and the task
+         * never blocks -- starving IDLE0 (this task is CPU0-pinned) and
+         * tripping the task watchdog. A 1ms runtime__delay() always blocks
+         * for at least one tick (see process__wait_ms()), so this yields the
+         * core each frame while only slightly slowing an already-behind
+         * emulator. */
+        runtime__delay(1);
+    }
     if (timer_callback != NULL) timer_callback();
 }
 
