@@ -42,6 +42,13 @@ static void (*audio_playfunc)(void *buffer, int size);
 static uint32_t audio_samples_per_frame;
 static bool audio_stream_open;
 
+/* Not part of nofrendo's public OSD interface (osd.h only declares
+ * osd_setsound()/osd_getsoundinfo()), so unlike those two this has no
+ * prototype pulled in from elsewhere. Forward-declared here so
+ * osd_shutdown() below can call it ahead of its own definition further down
+ * the file. */
+void osd_stopsound(void);
+
 static void audio_pump(void) {
     if (!audio_stream_open || audio_playfunc == NULL || audio_samples_per_frame == 0) return;
     audio_playfunc(audio_samples, (int)audio_samples_per_frame);
