@@ -340,30 +340,51 @@ void display_internal__draw_rgb_bitmap(
         return;
     }
 #if !CONFIG_BRUCE_QEMU_TEST_MODE
-    int16_t rows_per_transfer = DISPLAY__DIRECT_BUF_PIXELS / w;
+    /* Ping-pong s_direct_buffer's two halves so this chunk's pixels are
+     * packed (memcpy from the caller's bitmap) while the *previous* chunk's
+     * DMA transfer is still in flight, instead of packing and transferring
+     * strictly one after another. Only one physical transfer can be
+     * outstanding on the bus at a time, so the wait for it is deferred until
+     * right before the next chunk needs to be kicked off -- by then the
+     * packing above has already spent some or all of that wait, which is
+     * what removes the visible chunk-by-chunk "drawing itself" stall on
+     * large direct-mode blits (e.g. full-frame game/emulator redraws). */
+    int16_t rows_per_transfer = DISPLAY__DIRECT_CHUNK_PIXELS / w;
     if (rows_per_transfer > h) rows_per_transfer = h;
+    if (rows_per_transfer < 1) rows_per_transfer = 1;
+    while (xSemaphoreTake(s_transfer_done, 0) == pdTRUE) {}
+    bruce_result_t result = BRUCE_OK;
+    bool pending = false;
+    int buf_half = 0;
     for (int16_t row = 0; row < h; row += rows_per_transfer) {
         int16_t rows = h - row;
         if (rows > rows_per_transfer) rows = rows_per_transfer;
+        bruce_display_color_t *buf =
+            s_direct_buffer + (buf_half == 0 ? 0 : DISPLAY__DIRECT_CHUNK_PIXELS);
         for (int16_t copy_row = 0; copy_row < rows; ++copy_row) {
             memcpy(
-                &s_direct_buffer[(size_t)copy_row * (size_t)w],
+                &buf[(size_t)copy_row * (size_t)w],
                 &bitmap[(src_y + row + copy_row) * source_stride + src_x],
                 (size_t)w * sizeof(*bitmap)
             );
         }
-        while (xSemaphoreTake(s_transfer_done, 0) == pdTRUE) {}
-        bruce_result_t result = display_driver__draw_bitmap(
-            screen_x, screen_y + row, screen_x + w, screen_y + row + rows, s_direct_buffer
-        );
-        if (result == BRUCE_OK && xSemaphoreTake(s_transfer_done, portMAX_DELAY) != pdTRUE) {
-            result = BRUCE_ERR_IO;
+        if (pending) {
+            pending = false;
+            if (xSemaphoreTake(s_transfer_done, portMAX_DELAY) != pdTRUE) {
+                result = BRUCE_ERR_IO;
+                break;
+            }
         }
-        if (result != BRUCE_OK) {
-            if (context->draw_result == BRUCE_OK) context->draw_result = result;
-            break;
-        }
+        result =
+            display_driver__draw_bitmap(screen_x, screen_y + row, screen_x + w, screen_y + row + rows, buf);
+        if (result != BRUCE_OK) break;
+        pending = true;
+        buf_half ^= 1;
     }
+    if (pending && xSemaphoreTake(s_transfer_done, portMAX_DELAY) != pdTRUE && result == BRUCE_OK) {
+        result = BRUCE_ERR_IO;
+    }
+    if (result != BRUCE_OK && context->draw_result == BRUCE_OK) context->draw_result = result;
 #endif
 }
 

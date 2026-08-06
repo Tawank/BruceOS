@@ -21,11 +21,29 @@
 static uint8_t framebuffer_dummy;
 static bitmap_t *screen_bitmap;
 static uint16_t palette[256];
-static uint16_t scaled_line[320];
 static uint64_t next_frame_ms;
 static void (*timer_callback)(void);
 
 #define BRUCE_NES_VISIBLE_HEIGHT 224
+#define BRUCE_NES_BLIT_MAX_WIDTH 320
+/* Rows batched into one display__draw_rgb_bitmap() call. Blitting one
+ * scanline at a time (h=1) turned every frame into 200+ separate DMA
+ * transactions, each paying its own address-window/ISR round-trip and each
+ * becoming visible on the physical panel the instant it landed -- the
+ * visible top-to-bottom "drawing itself" effect. Batching cuts that to a
+ * handful of transfers per frame; the buffer below is intentionally small
+ * (a few KB) rather than a full offscreen frame. */
+#define BRUCE_NES_BLIT_ROWS 8
+static uint16_t scaled_lines[BRUCE_NES_BLIT_ROWS * BRUCE_NES_BLIT_MAX_WIDTH];
+
+/* Last geometry the letterbox borders were cleared for -- see video_blit()'s
+ * border clear below. Impossible values force a clear on the first frame. */
+static int s_last_origin_x = -1;
+static int s_last_origin_y = -1;
+static int s_last_draw_width = -1;
+static int s_last_draw_height = -1;
+static int s_last_screen_width = -1;
+static int s_last_screen_height = -1;
 
 void *mem_alloc(int size, bool prefer_fast_memory) {
     (void)prefer_fast_memory;
@@ -139,20 +157,52 @@ static void video_blit(bitmap_t *bitmap, int num_dirties, rect_t *dirty_rects) {
         draw_height = screen_height;
         draw_width = draw_height * NES_SCREEN_WIDTH / source_height;
     }
-    if (draw_width > (int)(sizeof(scaled_line) / sizeof(scaled_line[0]))) {
-        draw_width = sizeof(scaled_line) / sizeof(scaled_line[0]);
-    }
+    if (draw_width > BRUCE_NES_BLIT_MAX_WIDTH) { draw_width = BRUCE_NES_BLIT_MAX_WIDTH; }
     int origin_x = (screen_width - draw_width) / 2;
     int origin_y = (screen_height - draw_height) / 2;
 
     if (display__begin_frame() == BRUCE_OK) {
-        display__fill_screen(BRUCE_COLOR_BLACK);
-        for (int y = 0; y < draw_height; ++y) {
-            const uint8_t *source = bitmap->line[source_y + y * source_height / draw_height];
-            for (int x = 0; x < draw_width; ++x) {
-                scaled_line[x] = palette[source[x * NES_SCREEN_WIDTH / draw_width]];
+        /* The NES image covers [origin_x, origin_y, draw_width, draw_height]
+         * every frame, so only the letterbox borders around it ever need
+         * clearing -- and only once, when that geometry first appears or
+         * changes, not on every redraw (painting the whole screen black
+         * before every frame was the dominant source of visible flicker). */
+        if (origin_x != s_last_origin_x || origin_y != s_last_origin_y || draw_width != s_last_draw_width ||
+            draw_height != s_last_draw_height || screen_width != s_last_screen_width ||
+            screen_height != s_last_screen_height) {
+            if (origin_y > 0) display__fill_rect(0, 0, screen_width, origin_y, BRUCE_COLOR_BLACK);
+            if (origin_y + draw_height < screen_height) {
+                display__fill_rect(
+                    0, origin_y + draw_height, screen_width, screen_height - (origin_y + draw_height),
+                    BRUCE_COLOR_BLACK
+                );
             }
-            display__draw_rgb_bitmap(origin_x, origin_y + y, scaled_line, draw_width, 1);
+            if (origin_x > 0) display__fill_rect(0, origin_y, origin_x, draw_height, BRUCE_COLOR_BLACK);
+            if (origin_x + draw_width < screen_width) {
+                display__fill_rect(
+                    origin_x + draw_width, origin_y, screen_width - (origin_x + draw_width), draw_height,
+                    BRUCE_COLOR_BLACK
+                );
+            }
+            s_last_origin_x = origin_x;
+            s_last_origin_y = origin_y;
+            s_last_draw_width = draw_width;
+            s_last_draw_height = draw_height;
+            s_last_screen_width = screen_width;
+            s_last_screen_height = screen_height;
+        }
+
+        for (int y = 0; y < draw_height; y += BRUCE_NES_BLIT_ROWS) {
+            int rows = draw_height - y;
+            if (rows > BRUCE_NES_BLIT_ROWS) rows = BRUCE_NES_BLIT_ROWS;
+            for (int row = 0; row < rows; ++row) {
+                const uint8_t *source = bitmap->line[source_y + (y + row) * source_height / draw_height];
+                uint16_t *dst = &scaled_lines[row * draw_width];
+                for (int x = 0; x < draw_width; ++x) {
+                    dst[x] = palette[source[x * NES_SCREEN_WIDTH / draw_width]];
+                }
+            }
+            display__draw_rgb_bitmap(origin_x, origin_y + y, scaled_lines, draw_width, rows);
         }
         display__present();
     }

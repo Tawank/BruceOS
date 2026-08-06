@@ -10,6 +10,12 @@
 #define DISPLAY__FB_SIZE (DISPLAY__NATIVE_WIDTH * DISPLAY__NATIVE_HEIGHT * sizeof(bruce_display_color_t))
 #define DISPLAY__DIRECT_BUF_PIXELS                                                                        \
     (DISPLAY__NATIVE_HEIGHT * ((DISPLAY__NATIVE_WIDTH + 3) / 4))
+/* s_direct_buffer (display.c) is split into two chunks of this size -- a
+ * ping-pong pair reusing the same total allocation as before, not extra RAM.
+ * display_internal__draw_rgb_bitmap() packs the next chunk's pixels into
+ * whichever half isn't currently mid-DMA-transfer, so that packing overlaps
+ * the previous chunk's transfer instead of happening strictly after it. */
+#define DISPLAY__DIRECT_CHUNK_PIXELS (DISPLAY__DIRECT_BUF_PIXELS / 2)
 
 #define DISPLAY__FONT_WIDTH 5
 #define DISPLAY__FONT_HEIGHT 7
