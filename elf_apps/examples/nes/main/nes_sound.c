@@ -119,12 +119,15 @@ void nes_sound_pump(void) {
     uint32_t elapsed_frames = (uint32_t)elapsed_ms * audio_sample_rate_hz / 1000u;
     uint32_t due_frames = audio_carry_frames + elapsed_frames;
     uint32_t generate = due_frames > BRUCE_NES_AUDIO_MAX_SAMPLES_PER_FRAME
-                             ? BRUCE_NES_AUDIO_MAX_SAMPLES_PER_FRAME
-                             : due_frames;
+                            ? BRUCE_NES_AUDIO_MAX_SAMPLES_PER_FRAME
+                            : due_frames;
     audio_carry_frames = due_frames - generate;
     if (generate == 0) return;
 
     audio_playfunc(audio_samples, (int)generate);
+
+    for (uint32_t i = 0; i < generate; i++) { audio_samples[i] = (int16_t)(audio_samples[i] >> 2); }
+
     audio__stream_write(audio_samples, generate);
 }
 
