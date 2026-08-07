@@ -26,7 +26,7 @@ import sys
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 SDK_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
 APPS_DIR = os.path.join(SDK_DIR, "examples")
-APPS = ["elf_loader", "game", "nes"]
+APPS = ["nes"]  # "elf_loader", "game",
 
 
 def run(cmd, cwd, env=None):
