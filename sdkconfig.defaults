@@ -1,5 +1,5 @@
 CONFIG_PARTITION_TABLE_CUSTOM=y
-CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_swap.csv"
 
 # Target board has 8 MB flash; use the full size instead of the default 2 MB.
 CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y

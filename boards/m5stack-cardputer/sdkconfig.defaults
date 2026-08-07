@@ -6,6 +6,7 @@
 # sdkconfig.defaults.esp32s3 if present, per ESP-IDF's target-dependent
 # sdkconfig defaults rule.
 CONFIG_IDF_TARGET="esp32s3"
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_swap.csv"
 
 # Display: SPI2_HOST, ST7789V2 135x240 physical panel, landscape (rotation 1).
 CONFIG_BRUCE_DISPLAY_WIDTH=135
