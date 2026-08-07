@@ -7,7 +7,6 @@
 
 #include "esp_cache.h"
 #include "esp_heap_caps.h"
-#include "esp_log.h"
 #include "esp_partition.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -89,7 +88,7 @@ static void memory_external__cleanup(void *context) {
     if (record == NULL || record->backend == BRUCE_MEMORY_BACKEND_INVALID) return;
     memory_external__ensure_mutex();
     xSemaphoreTake(s_mutex, portMAX_DELAY);
-    if (record->backend == BRUCE_MEMORY_BACKEND_PSRAM || record->backend == BRUCE_MEMORY_BACKEND_INTERNAL) {
+    if (record->backend == BRUCE_MEMORY_BACKEND_PSRAM) {
         heap_caps_free(record->psram);
     } else {
         if (record->data != NULL || record->instruction != NULL) {
@@ -122,18 +121,6 @@ static memory_external__record_t *memory_external__free_record_locked(void) {
  * and once right after allocating (a fresh mapping can recycle a virtual
  * address a previous, already-torn-down executable record left cached).
  *
- * This alias MUST be obtained via spi_flash_phys2cache(), not a second
- * esp_partition_mmap(..., ESP_PARTITION_MMAP_DATA, ...) of the same range:
- * that was tried and crashed on real hardware (LoadStoreError, unaligned
- * access). esp_mmu_map() detects the physical range is already mapped
- * (ESP_MMU_MMAP_FLAG_PADDR_SHARED) and hands back the *existing* mapping
- * instead of creating an independent one -- so the "data" pointer silently
- * aliased the instruction-bus mapping, which only permits 4-byte-aligned
- * access, and the first single-byte read through it faulted. ESP32-S3 does
- * not support two independent live mmaps of one physical flash range via the
- * public API; spi_flash_phys2cache() is the sanctioned way to get the other
- * bus's address for an already-mapped page.
- *
  * esp_cache_get_line_size_by_addr() cannot be used to size this: it only
  * recognizes PSRAM (esp_ptr_external_ram) and internal RAM (esp_ptr_internal)
  * addresses and returns 0 -- silently skipping the invalidate -- for a flash
@@ -146,26 +133,14 @@ static memory_external__record_t *memory_external__free_record_locked(void) {
  */
 #define MEMORY_EXTERNAL__CACHE_ALIGN 64u
 
-static void memory_external__invalidate_data_alias(
-    const memory_external__record_t *record, size_t offset, size_t size
-) {
+static void
+memory_external__invalidate_data_alias(const memory_external__record_t *record, size_t offset, size_t size) {
     if (!record->executable || record->data == NULL || size == 0) return;
     uintptr_t start = (uintptr_t)(record->data + offset);
-    uintptr_t end = (start + size + MEMORY_EXTERNAL__CACHE_ALIGN - 1) &
-                    ~(uintptr_t)(MEMORY_EXTERNAL__CACHE_ALIGN - 1);
+    uintptr_t end =
+        (start + size + MEMORY_EXTERNAL__CACHE_ALIGN - 1) & ~(uintptr_t)(MEMORY_EXTERNAL__CACHE_ALIGN - 1);
     start &= ~(uintptr_t)(MEMORY_EXTERNAL__CACHE_ALIGN - 1);
-    /* Diagnostic only, temporary: this call's return value was never checked.
-     * If it's silently failing (e.g. ESP_ERR_INVALID_ARG because the cache
-     * HAL doesn't recognize this spi_flash_phys2cache() address the way the
-     * comment above assumed), the invalidate is a no-op and the alias stays
-     * stale forever -- which would fully explain the XIP verify mismatches. */
-    esp_err_t sync_result = esp_cache_msync((void *)start, end - start, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
-    if (sync_result != ESP_OK) {
-        ESP_LOGE(
-            "memory_external", "esp_cache_msync(0x%08x, 0x%x) failed: %d", (unsigned)start,
-            (unsigned)(end - start), (int)sync_result
-        );
-    }
+    esp_cache_msync((void *)start, end - start, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
 }
 
 static bool memory_external__allocate_psram_locked(memory_external__record_t *record, size_t size) {
@@ -173,26 +148,6 @@ static bool memory_external__allocate_psram_locked(memory_external__record_t *re
     void *data = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (data == NULL) return false;
     record->backend = BRUCE_MEMORY_BACKEND_PSRAM;
-    record->size = size;
-    record->psram = data;
-    record->data = data;
-    return true;
-}
-
-/* Last-resort backend for boards with no PSRAM and no "swap" partition
- * committed yet (see partitions.csv -- the whole user area is a single
- * "littlefs" partition until a user table carves a "swap" one out of it).
- * Without this, memory__external_alloc() would fail outright for every
- * caller on such a board, e.g. bruce_launcher couldn't even build its menu
- * tree to let the user reach the Partitions app that would fix that.
- * Reuses the record's psram/data fields verbatim: the pointer is plain
- * malloc'd internal RAM either way, so cleanup/write/map treat this exactly
- * like BRUCE_MEMORY_BACKEND_PSRAM. */
-static bool memory_external__allocate_internal_locked(memory_external__record_t *record, size_t size) {
-    if (heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) < size) return false;
-    void *data = heap_caps_malloc(size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    if (data == NULL) return false;
-    record->backend = BRUCE_MEMORY_BACKEND_INTERNAL;
     record->size = size;
     record->psram = data;
     record->data = data;
@@ -273,13 +228,6 @@ bruce_result_t memory_external__alloc(size_t size, bool executable, bruce_memory
     if (record != NULL && !allocated) {
         allocated = memory_external__allocate_swap_locked(record, size, executable);
     }
-    /* Executable objects (XIP code) still need the flash mmap swap gives them
-     * -- plain heap memory can't be run from safely here -- so this fallback
-     * is non-executable-only, matching what memory__external_alloc() (the
-     * only public, non-executable entry point) promises callers. */
-    if (record != NULL && !allocated && !executable) {
-        allocated = memory_external__allocate_internal_locked(record, size);
-    }
     if (allocated) {
         record->resource_id = BRUCE_RESOURCE_ID_INVALID;
         record->owner_id = owner_id;
@@ -320,15 +268,22 @@ bruce_result_t memory__external_alloc(size_t size, bruce_memory_object_t *out_ob
     return memory_external__alloc(size, false, out_object);
 }
 
-/* Caller must hold s_mutex and have already validated offset/size against
- * record->size. Shared by the process-owned and Core-owned write entry
- * points below. */
-static bruce_result_t memory_external__write_locked(
-    memory_external__record_t *record, size_t offset, const void *data, size_t size
-) {
+bruce_result_t
+memory__external_write(const bruce_memory_object_t *object, size_t offset, const void *data, size_t size) {
+    if (object == NULL || (data == NULL && size != 0)) return BRUCE_ERR_INVALID_ARGUMENT;
+    if (!process_registry__operation_begin()) return BRUCE_ERR_CANCELLED;
+    bruce_process_id_t owner_id = process__current_id();
+    memory_external__ensure_mutex();
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    memory_external__record_t *record = memory_external__find_locked(object->handle);
+    if (!memory_external__matches(record, object) || record->owner_id != owner_id || offset > record->size ||
+        size > record->size - offset) {
+        xSemaphoreGive(s_mutex);
+        process_registry__operation_end();
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
     bruce_result_t result = BRUCE_OK;
-    if (size != 0 &&
-        (record->backend == BRUCE_MEMORY_BACKEND_PSRAM || record->backend == BRUCE_MEMORY_BACKEND_INTERNAL)) {
+    if (size != 0 && record->backend == BRUCE_MEMORY_BACKEND_PSRAM) {
         memmove((uint8_t *)record->psram + offset, data, size);
     } else if (size != 0) {
         const esp_partition_t *partition = memory_external__partition();
@@ -339,6 +294,8 @@ static bruce_result_t memory_external__write_locked(
         uintptr_t mapping_end = mapping_start + record->size;
         if (source_end < source_start || mapping_end < mapping_start ||
             (source_start < mapping_end && source_end > mapping_start)) {
+            xSemaphoreGive(s_mutex);
+            process_registry__operation_end();
             return BRUCE_ERR_INVALID_ARGUMENT;
         }
         bool direct_write = partition != NULL;
@@ -386,24 +343,6 @@ static bruce_result_t memory_external__write_locked(
         }
         if (result == BRUCE_OK) memory_external__invalidate_data_alias(record, offset, size);
     }
-    return result;
-}
-
-bruce_result_t
-memory__external_write(const bruce_memory_object_t *object, size_t offset, const void *data, size_t size) {
-    if (object == NULL || (data == NULL && size != 0)) return BRUCE_ERR_INVALID_ARGUMENT;
-    if (!process_registry__operation_begin()) return BRUCE_ERR_CANCELLED;
-    bruce_process_id_t owner_id = process__current_id();
-    memory_external__ensure_mutex();
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
-    memory_external__record_t *record = memory_external__find_locked(object->handle);
-    if (!memory_external__matches(record, object) || record->owner_id != owner_id || offset > record->size ||
-        size > record->size - offset) {
-        xSemaphoreGive(s_mutex);
-        process_registry__operation_end();
-        return BRUCE_ERR_INVALID_ARGUMENT;
-    }
-    bruce_result_t result = memory_external__write_locked(record, offset, data, size);
     xSemaphoreGive(s_mutex);
     process_registry__operation_end();
     return result;
@@ -561,105 +500,4 @@ void memory_external__get_swap_stats(size_t *out_total, size_t *out_free, size_t
     if (out_total != NULL) *out_total = total;
     if (out_free != NULL) *out_free = free_bytes;
     if (out_largest != NULL) *out_largest = largest;
-}
-
-/*
- * Core-owned variants: BRUCE_PROCESS_ID_INVALID marks a record as having no
- * process owner, so these never register a process_registry resource and
- * are never touched by process teardown. process_registry__operation_begin()/
- * end() are still used around every entry point (matching the process-owned
- * path above) purely so a force-kill of whatever task happens to be calling
- * in still waits for that task to leave the guarded section before deleting
- * it - otherwise a kill mid-write could delete the task while it holds
- * s_mutex and wedge every future external-memory call, process-owned or not.
- */
-
-bruce_result_t memory_external_core__alloc(size_t size, bruce_memory_object_t *out_object) {
-    if (size == 0 || out_object == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
-    if (size > SIZE_MAX - (MEMORY_EXTERNAL__MMU_PAGE - 1u)) return BRUCE_ERR_RESOURCE_LIMIT;
-    if (!process_registry__operation_begin()) return BRUCE_ERR_CANCELLED;
-    memset(out_object, 0, sizeof(*out_object));
-    memory_external__ensure_mutex();
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
-    memory_external__record_t *record = memory_external__free_record_locked();
-    bool allocated = false;
-    if (record != NULL) allocated = memory_external__allocate_psram_locked(record, size);
-    if (record != NULL && !allocated) allocated = memory_external__allocate_swap_locked(record, size, false);
-    if (allocated) {
-        record->resource_id = BRUCE_RESOURCE_ID_INVALID;
-        record->owner_id = BRUCE_PROCESS_ID_INVALID;
-        record->handle = memory_external__next_handle_locked();
-        allocated = record->handle != 0;
-    }
-    xSemaphoreGive(s_mutex);
-    if (!allocated) {
-        if (record != NULL && record->backend != BRUCE_MEMORY_BACKEND_INVALID) {
-            memory_external__cleanup(record);
-        }
-        process_registry__operation_end();
-        return BRUCE_ERR_RESOURCE_LIMIT;
-    }
-
-    *out_object = (bruce_memory_object_t){
-        .handle = record->handle,
-        .size = record->size,
-        .backend = record->backend,
-    };
-    process_registry__operation_end();
-    return BRUCE_OK;
-}
-
-bruce_result_t memory_external_core__write(
-    const bruce_memory_object_t *object, size_t offset, const void *data, size_t size
-) {
-    if (object == NULL || (data == NULL && size != 0)) return BRUCE_ERR_INVALID_ARGUMENT;
-    if (!process_registry__operation_begin()) return BRUCE_ERR_CANCELLED;
-    memory_external__ensure_mutex();
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
-    memory_external__record_t *record = memory_external__find_locked(object->handle);
-    if (!memory_external__matches(record, object) || record->owner_id != BRUCE_PROCESS_ID_INVALID ||
-        offset > record->size || size > record->size - offset) {
-        xSemaphoreGive(s_mutex);
-        process_registry__operation_end();
-        return BRUCE_ERR_INVALID_ARGUMENT;
-    }
-    bruce_result_t result = memory_external__write_locked(record, offset, data, size);
-    xSemaphoreGive(s_mutex);
-    process_registry__operation_end();
-    return result;
-}
-
-bruce_result_t memory_external_core__map(const bruce_memory_object_t *object, const void **out_data) {
-    if (object == NULL || out_data == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
-    if (!process_registry__operation_begin()) return BRUCE_ERR_CANCELLED;
-    memory_external__ensure_mutex();
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
-    memory_external__record_t *record = memory_external__find_locked(object->handle);
-    if (!memory_external__matches(record, object) || record->owner_id != BRUCE_PROCESS_ID_INVALID) {
-        xSemaphoreGive(s_mutex);
-        process_registry__operation_end();
-        return BRUCE_ERR_INVALID_ARGUMENT;
-    }
-    *out_data = record->data;
-    xSemaphoreGive(s_mutex);
-    process_registry__operation_end();
-    return BRUCE_OK;
-}
-
-bruce_result_t memory_external_core__free(bruce_memory_object_t *object) {
-    if (object == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
-    if (!process_registry__operation_begin()) return BRUCE_ERR_CANCELLED;
-    memory_external__ensure_mutex();
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
-    memory_external__record_t *record = memory_external__find_locked(object->handle);
-    bool valid = memory_external__matches(record, object) && record->owner_id == BRUCE_PROCESS_ID_INVALID;
-    xSemaphoreGive(s_mutex);
-    if (!valid) {
-        process_registry__operation_end();
-        return BRUCE_ERR_PERMISSION;
-    }
-    memory_external__cleanup(record);
-    memset(object, 0, sizeof(*object));
-    process_registry__operation_end();
-    return BRUCE_OK;
 }

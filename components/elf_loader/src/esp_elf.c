@@ -15,6 +15,7 @@
 
 #include "esp_elf.h"
 #include "esp_log.h"
+#include "soc/soc_caps.h"
 
 #if SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE
 #include "hal/cache_ll.h"
@@ -565,29 +566,6 @@ int esp_elf_init(esp_elf_t *elf) {
 }
 
 /**
- * @brief Byte-compares two buffers like memcmp(), but reports where the
- *        first mismatch was found instead of just whether one exists -- used
- *        by the XIP write-verify retry loop below to log a diagnosable
- *        offset instead of a bare -EIO.
- *
- * @param a, b   - Buffers to compare
- * @param size   - Number of bytes to compare
- * @param out_offset - Set to the offset of the first mismatching byte when
- *                      this returns false; untouched when it returns true.
- *
- * @return true if the buffers are identical over `size` bytes.
- */
-static bool esp_elf_bytes_equal(const uint8_t *a, const uint8_t *b, size_t size, size_t *out_offset) {
-    for (size_t i = 0; i < size; i++) {
-        if (a[i] != b[i]) {
-            *out_offset = i;
-            return false;
-        }
-    }
-    return true;
-}
-
-/**
  * @brief Decode and relocate ELF data.
  *
  * @param elf - ELF object pointer
@@ -760,67 +738,27 @@ static int esp_elf_relocate_internal(esp_elf_t *elf, const uint8_t *pbuf) {
 #endif
 
     if (elf->xip_ops) {
-        /* The post-write readback below reads .text/.rodata back through the
-         * data-bus alias (xip_ops->write()'s caller-owned storage backend is
-         * responsible for invalidating that alias -- see
-         * memory_external__invalidate_data_alias() in memory_external.c) to
-         * catch a partition write that silently didn't land. On real
-         * hardware this has occasionally still mismatched on the first pass
-         * with no error from either write() call, which points at a stale
-         * cache line surviving the first invalidate rather than a genuine
-         * write failure -- so this retries the write+verify a few times
-         * (each attempt re-invalidates, since it goes through the same
-         * xip_ops->write() path) before giving up. A mismatch that persists
-         * across every attempt is logged with the offset and byte values so
-         * a report of ELF_LOADER_XIP_VERIFY_RETRY_MAX exhausted attempts
-         * (rather than just "-EIO") can be diagnosed without hardware
-         * access. */
-#define ELF_LOADER_XIP_VERIFY_RETRY_MAX 3
-        bool matched = false;
-        for (int attempt = 0; attempt < ELF_LOADER_XIP_VERIFY_RETRY_MAX && !matched; attempt++) {
+        ret = elf->xip_ops->write(
+            elf->xip_context, elf->xip_handle, 0, elf->ptext, elf->sec[ELF_SEC_TEXT].size
+        );
+        if (ret == 0 && elf->sec[ELF_SEC_RODATA].size) {
             ret = elf->xip_ops->write(
-                elf->xip_context, elf->xip_handle, 0, elf->ptext, elf->sec[ELF_SEC_TEXT].size
+                elf->xip_context,
+                elf->xip_handle,
+                elf->xip_rodata_offset,
+                (const void *)elf->sec[ELF_SEC_RODATA].reloc_addr,
+                elf->sec[ELF_SEC_RODATA].size
             );
-            if (ret == 0 && elf->sec[ELF_SEC_RODATA].size) {
-                ret = elf->xip_ops->write(
-                    elf->xip_context,
-                    elf->xip_handle,
-                    elf->xip_rodata_offset,
-                    (const void *)elf->sec[ELF_SEC_RODATA].reloc_addr,
-                    elf->sec[ELF_SEC_RODATA].size
-                );
-            }
-            if (ret != 0) return ret;
-
-            size_t mismatch_offset;
-            matched =
-                esp_elf_bytes_equal(elf->xip_data, elf->ptext, elf->sec[ELF_SEC_TEXT].size, &mismatch_offset);
-            if (matched && elf->sec[ELF_SEC_RODATA].size) {
-                matched = esp_elf_bytes_equal(
-                    elf->xip_data + elf->xip_rodata_offset,
-                    (const void *)elf->sec[ELF_SEC_RODATA].reloc_addr,
-                    elf->sec[ELF_SEC_RODATA].size,
-                    &mismatch_offset
-                );
-                if (!matched) mismatch_offset += elf->xip_rodata_offset;
-            }
-            if (!matched) {
-                bool will_retry = attempt + 1 < ELF_LOADER_XIP_VERIFY_RETRY_MAX;
-                ESP_LOGW(
-                    TAG,
-                    "XIP verify mismatch at offset 0x%x on attempt %d/%d "
-                    "(wrote 0x%02x, read 0x%02x)%s",
-                    (unsigned)mismatch_offset,
-                    attempt + 1,
-                    ELF_LOADER_XIP_VERIFY_RETRY_MAX,
-                    elf->ptext[mismatch_offset],
-                    elf->xip_data[mismatch_offset],
-                    will_retry ? ", retrying" : ", giving up"
-                );
-            }
         }
-        if (!matched) return -EIO;
-#undef ELF_LOADER_XIP_VERIFY_RETRY_MAX
+        if (ret != 0) return ret;
+        if (memcmp(elf->xip_data, elf->ptext, elf->sec[ELF_SEC_TEXT].size) != 0 ||
+            (elf->sec[ELF_SEC_RODATA].size && memcmp(
+                                                  elf->xip_data + elf->xip_rodata_offset,
+                                                  (const void *)elf->sec[ELF_SEC_RODATA].reloc_addr,
+                                                  elf->sec[ELF_SEC_RODATA].size
+                                              ) != 0)) {
+            return -EIO;
+        }
         esp_elf_free(elf->ptext);
         elf->ptext = NULL;
     }
