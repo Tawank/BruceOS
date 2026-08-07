@@ -7,6 +7,7 @@
 
 #include "esp_cache.h"
 #include "esp_heap_caps.h"
+#include "esp_log.h"
 #include "esp_partition.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -121,6 +122,18 @@ static memory_external__record_t *memory_external__free_record_locked(void) {
  * and once right after allocating (a fresh mapping can recycle a virtual
  * address a previous, already-torn-down executable record left cached).
  *
+ * This alias MUST be obtained via spi_flash_phys2cache(), not a second
+ * esp_partition_mmap(..., ESP_PARTITION_MMAP_DATA, ...) of the same range:
+ * that was tried and crashed on real hardware (LoadStoreError, unaligned
+ * access). esp_mmu_map() detects the physical range is already mapped
+ * (ESP_MMU_MMAP_FLAG_PADDR_SHARED) and hands back the *existing* mapping
+ * instead of creating an independent one -- so the "data" pointer silently
+ * aliased the instruction-bus mapping, which only permits 4-byte-aligned
+ * access, and the first single-byte read through it faulted. ESP32-S3 does
+ * not support two independent live mmaps of one physical flash range via the
+ * public API; spi_flash_phys2cache() is the sanctioned way to get the other
+ * bus's address for an already-mapped page.
+ *
  * esp_cache_get_line_size_by_addr() cannot be used to size this: it only
  * recognizes PSRAM (esp_ptr_external_ram) and internal RAM (esp_ptr_internal)
  * addresses and returns 0 -- silently skipping the invalidate -- for a flash
@@ -141,7 +154,18 @@ static void memory_external__invalidate_data_alias(
     uintptr_t end = (start + size + MEMORY_EXTERNAL__CACHE_ALIGN - 1) &
                     ~(uintptr_t)(MEMORY_EXTERNAL__CACHE_ALIGN - 1);
     start &= ~(uintptr_t)(MEMORY_EXTERNAL__CACHE_ALIGN - 1);
-    esp_cache_msync((void *)start, end - start, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
+    /* Diagnostic only, temporary: this call's return value was never checked.
+     * If it's silently failing (e.g. ESP_ERR_INVALID_ARG because the cache
+     * HAL doesn't recognize this spi_flash_phys2cache() address the way the
+     * comment above assumed), the invalidate is a no-op and the alias stays
+     * stale forever -- which would fully explain the XIP verify mismatches. */
+    esp_err_t sync_result = esp_cache_msync((void *)start, end - start, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
+    if (sync_result != ESP_OK) {
+        ESP_LOGE(
+            "memory_external", "esp_cache_msync(0x%08x, 0x%x) failed: %d", (unsigned)start,
+            (unsigned)(end - start), (int)sync_result
+        );
+    }
 }
 
 static bool memory_external__allocate_psram_locked(memory_external__record_t *record, size_t size) {

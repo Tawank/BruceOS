@@ -4,18 +4,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include <fcntl.h>
+#include <inttypes.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/errno.h>
 #include <sys/param.h>
-#include <inttypes.h>
-#include <fcntl.h>
 
-#include "esp_log.h"
 #include "esp_elf.h"
-#include "soc/soc_caps.h"
+#include "esp_log.h"
 
 #if SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE
 #include "hal/cache_ll.h"
@@ -23,20 +22,20 @@
 
 #include "private/elf_platform.h"
 
-#define stype(_s, _t)               ((_s)->type == (_t))
-#define sflags(_s, _f)              (((_s)->flags & (_f)) == (_f))
-#define ADDR_OFFSET                 (0x400)
+#define stype(_s, _t) ((_s)->type == (_t))
+#define sflags(_s, _f) (((_s)->flags & (_f)) == (_f))
+#define ADDR_OFFSET (0x400)
 
 #ifdef CONFIG_ELF_LOADER_NUMBER_SYMBOLS
-#define SYMBOL_TABLES_NO            CONFIG_ELF_LOADER_NUMBER_SYMBOLS
+#define SYMBOL_TABLES_NO CONFIG_ELF_LOADER_NUMBER_SYMBOLS
 #else
-#define SYMBOL_TABLES_NO            (32)
+#define SYMBOL_TABLES_NO (32)
 #endif
 
 #ifdef CONFIG_ELF_FILE_SYSTEM_BASE_PATH
-#define FS_PATH                     CONFIG_ELF_FILE_SYSTEM_BASE_PATH
+#define FS_PATH CONFIG_ELF_FILE_SYSTEM_BASE_PATH
 #else
-#define FS_PATH                     "/storage"
+#define FS_PATH "/storage"
 #endif
 
 static const char *TAG = "ELF";
@@ -58,8 +57,7 @@ static _Atomic(symbol_resolver) current_resolver = elf_find_sym_default;
  * @note The actual file path will be constructed as "FS_PATH/name"
  * @note Allocates memory for file content using esp_elf_malloc()
  */
-int esp_elf_open(elf_file_t *file, const char *name)
-{
+int esp_elf_open(elf_file_t *file, const char *name) {
     ssize_t ret;
     int fd;
     char *file_path;
@@ -71,7 +69,7 @@ int esp_elf_open(elf_file_t *file, const char *name)
         return -1;
     }
 
-    ret = asprintf(&file_path, FS_PATH"/%s", name);
+    ret = asprintf(&file_path, FS_PATH "/%s", name);
     if (ret < 0) {
         ESP_LOGE(TAG, "Failed to generate path errno=%d", errno);
         return -1;
@@ -132,11 +130,8 @@ errout_open_file:
  * @note Should be called paired with esp_elf_open() to prevent memory leaks
  * @note If file is NULL, this function does nothing (null-safe)
  */
-void esp_elf_close(elf_file_t *file)
-{
-    if (!file) {
-        return;
-    }
+void esp_elf_close(elf_file_t *file) {
+    if (!file) { return; }
 
     esp_elf_free(file->payload);
     file->payload = NULL;
@@ -150,8 +145,7 @@ void esp_elf_close(elf_file_t *file)
  *
  * @return Symbol address if success or 0 if failed.
  */
-uintptr_t elf_find_sym(const char *sym_name)
-{
+uintptr_t elf_find_sym(const char *sym_name) {
     if (!sym_name) {
         ESP_LOGE(TAG, "Invalid parameter: sym_name is NULL");
         return 0;
@@ -171,8 +165,7 @@ uintptr_t elf_find_sym(const char *sym_name)
  *
  * @return ESP_OK if success or other if failed.
  */
-static int esp_elf_load_section(esp_elf_t *elf, const uint8_t *pbuf)
-{
+static int esp_elf_load_section(esp_elf_t *elf, const uint8_t *pbuf) {
     uint32_t entry;
     uint32_t size;
 
@@ -187,92 +180,127 @@ static int esp_elf_load_section(esp_elf_t *elf, const uint8_t *pbuf)
 
         if (stype(&shdr[i], SHT_PROGBITS) && sflags(&shdr[i], SHF_ALLOC)) {
             if (sflags(&shdr[i], SHF_EXECINSTR) && !strcmp(ELF_TEXT, name)) {
-                ESP_LOGD(TAG, ".text   sec addr=0x%08x size=0x%08x offset=0x%08x",
-                         shdr[i].addr, shdr[i].size, shdr[i].offset);
+                ESP_LOGD(
+                    TAG,
+                    ".text   sec addr=0x%08x size=0x%08x offset=0x%08x",
+                    shdr[i].addr,
+                    shdr[i].size,
+                    shdr[i].offset
+                );
 
-                elf->sec[ELF_SEC_TEXT].v_addr  = shdr[i].addr;
-                elf->sec[ELF_SEC_TEXT].size    = ELF_ALIGN(shdr[i].size, 4);
-                elf->sec[ELF_SEC_TEXT].offset  = shdr[i].offset;
+                elf->sec[ELF_SEC_TEXT].v_addr = shdr[i].addr;
+                elf->sec[ELF_SEC_TEXT].size = ELF_ALIGN(shdr[i].size, 4);
+                elf->sec[ELF_SEC_TEXT].offset = shdr[i].offset;
 
-                ESP_LOGD(TAG, ".text   offset is 0x%lx size is 0x%x",
-                         elf->sec[ELF_SEC_TEXT].offset,
-                         elf->sec[ELF_SEC_TEXT].size);
+                ESP_LOGD(
+                    TAG,
+                    ".text   offset is 0x%lx size is 0x%x",
+                    elf->sec[ELF_SEC_TEXT].offset,
+                    elf->sec[ELF_SEC_TEXT].size
+                );
             } else if (sflags(&shdr[i], SHF_WRITE) && !strcmp(ELF_DATA, name)) {
-                ESP_LOGD(TAG, ".data   sec addr=0x%08x size=0x%08x offset=0x%08x",
-                         shdr[i].addr, shdr[i].size, shdr[i].offset);
+                ESP_LOGD(
+                    TAG,
+                    ".data   sec addr=0x%08x size=0x%08x offset=0x%08x",
+                    shdr[i].addr,
+                    shdr[i].size,
+                    shdr[i].offset
+                );
 
-                elf->sec[ELF_SEC_DATA].v_addr  = shdr[i].addr;
-                elf->sec[ELF_SEC_DATA].size    = shdr[i].size;
-                elf->sec[ELF_SEC_DATA].offset  = shdr[i].offset;
+                elf->sec[ELF_SEC_DATA].v_addr = shdr[i].addr;
+                elf->sec[ELF_SEC_DATA].size = shdr[i].size;
+                elf->sec[ELF_SEC_DATA].offset = shdr[i].offset;
 
-                ESP_LOGD(TAG, ".data   offset is 0x%lx size is 0x%x",
-                         elf->sec[ELF_SEC_DATA].offset,
-                         elf->sec[ELF_SEC_DATA].size);
+                ESP_LOGD(
+                    TAG,
+                    ".data   offset is 0x%lx size is 0x%x",
+                    elf->sec[ELF_SEC_DATA].offset,
+                    elf->sec[ELF_SEC_DATA].size
+                );
             } else if (!strcmp(ELF_RODATA, name)) {
-                ESP_LOGD(TAG, ".rodata sec addr=0x%08x size=0x%08x offset=0x%08x",
-                         shdr[i].addr, shdr[i].size, shdr[i].offset);
+                ESP_LOGD(
+                    TAG,
+                    ".rodata sec addr=0x%08x size=0x%08x offset=0x%08x",
+                    shdr[i].addr,
+                    shdr[i].size,
+                    shdr[i].offset
+                );
 
-                elf->sec[ELF_SEC_RODATA].v_addr  = shdr[i].addr;
-                elf->sec[ELF_SEC_RODATA].size    = shdr[i].size;
-                elf->sec[ELF_SEC_RODATA].offset  = shdr[i].offset;
+                elf->sec[ELF_SEC_RODATA].v_addr = shdr[i].addr;
+                elf->sec[ELF_SEC_RODATA].size = shdr[i].size;
+                elf->sec[ELF_SEC_RODATA].offset = shdr[i].offset;
 
-                ESP_LOGD(TAG, ".rodata offset is 0x%lx size is 0x%x",
-                         elf->sec[ELF_SEC_RODATA].offset,
-                         elf->sec[ELF_SEC_RODATA].size);
+                ESP_LOGD(
+                    TAG,
+                    ".rodata offset is 0x%lx size is 0x%x",
+                    elf->sec[ELF_SEC_RODATA].offset,
+                    elf->sec[ELF_SEC_RODATA].size
+                );
             } else if (!strcmp(ELF_DATA_REL_RO, name)) {
-                ESP_LOGD(TAG, ".data.rel.ro sec addr=0x%08x size=0x%08x offset=0x%08x",
-                         shdr[i].addr, shdr[i].size, shdr[i].offset);
+                ESP_LOGD(
+                    TAG,
+                    ".data.rel.ro sec addr=0x%08x size=0x%08x offset=0x%08x",
+                    shdr[i].addr,
+                    shdr[i].size,
+                    shdr[i].offset
+                );
 
-                elf->sec[ELF_SEC_DRLRO].v_addr  = shdr[i].addr;
-                elf->sec[ELF_SEC_DRLRO].size    = shdr[i].size;
-                elf->sec[ELF_SEC_DRLRO].offset  = shdr[i].offset;
+                elf->sec[ELF_SEC_DRLRO].v_addr = shdr[i].addr;
+                elf->sec[ELF_SEC_DRLRO].size = shdr[i].size;
+                elf->sec[ELF_SEC_DRLRO].offset = shdr[i].offset;
 
-                ESP_LOGD(TAG, ".data.rel.ro offset is 0x%lx size is 0x%x",
-                         elf->sec[ELF_SEC_DRLRO].offset,
-                         elf->sec[ELF_SEC_DRLRO].size);
+                ESP_LOGD(
+                    TAG,
+                    ".data.rel.ro offset is 0x%lx size is 0x%x",
+                    elf->sec[ELF_SEC_DRLRO].offset,
+                    elf->sec[ELF_SEC_DRLRO].size
+                );
             }
-        } else if (stype(&shdr[i], SHT_NOBITS) &&
-                   sflags(&shdr[i], SHF_ALLOC | SHF_WRITE) &&
+        } else if (stype(&shdr[i], SHT_NOBITS) && sflags(&shdr[i], SHF_ALLOC | SHF_WRITE) &&
                    !strcmp(ELF_BSS, name)) {
-            ESP_LOGD(TAG, ".bss    sec addr=0x%08x size=0x%08x offset=0x%08x",
-                     shdr[i].addr, shdr[i].size, shdr[i].offset);
+            ESP_LOGD(
+                TAG,
+                ".bss    sec addr=0x%08x size=0x%08x offset=0x%08x",
+                shdr[i].addr,
+                shdr[i].size,
+                shdr[i].offset
+            );
 
-            elf->sec[ELF_SEC_BSS].v_addr  = shdr[i].addr;
-            elf->sec[ELF_SEC_BSS].size    = shdr[i].size;
-            elf->sec[ELF_SEC_BSS].offset  = shdr[i].offset;
+            elf->sec[ELF_SEC_BSS].v_addr = shdr[i].addr;
+            elf->sec[ELF_SEC_BSS].size = shdr[i].size;
+            elf->sec[ELF_SEC_BSS].offset = shdr[i].offset;
 
-            ESP_LOGD(TAG, ".bss    offset is 0x%lx size is 0x%x",
-                     elf->sec[ELF_SEC_BSS].offset,
-                     elf->sec[ELF_SEC_BSS].size);
+            ESP_LOGD(
+                TAG,
+                ".bss    offset is 0x%lx size is 0x%x",
+                elf->sec[ELF_SEC_BSS].offset,
+                elf->sec[ELF_SEC_BSS].size
+            );
         }
     }
 
     /* No .text on image */
 
-    if (!elf->sec[ELF_SEC_TEXT].size) {
-        return -EINVAL;
-    }
+    if (!elf->sec[ELF_SEC_TEXT].size) { return -EINVAL; }
 
     bool xip = elf->xip_ops != NULL;
     elf->xip_rodata_offset = ELF_ALIGN(elf->sec[ELF_SEC_TEXT].size, 4);
-    size_t text_work_size = xip
-                                ? elf->xip_rodata_offset + elf->sec[ELF_SEC_RODATA].size
-                                : elf->sec[ELF_SEC_TEXT].size;
+    size_t text_work_size =
+        xip ? elf->xip_rodata_offset + elf->sec[ELF_SEC_RODATA].size : elf->sec[ELF_SEC_TEXT].size;
     elf->ptext = esp_elf_malloc(text_work_size, !xip);
     if (!elf->ptext) {
-        ESP_LOGE(TAG, "Failed to malloc %"PRIu32" bytes for text section",
-                 (uint32_t)elf->sec[ELF_SEC_TEXT].size);
+        ESP_LOGE(
+            TAG, "Failed to malloc %" PRIu32 " bytes for text section", (uint32_t)elf->sec[ELF_SEC_TEXT].size
+        );
         return -ENOMEM;
     }
 
-    size = elf->sec[ELF_SEC_DATA].size +
-           (xip ? 0 : elf->sec[ELF_SEC_RODATA].size) +
-           elf->sec[ELF_SEC_BSS].size +
-           elf->sec[ELF_SEC_DRLRO].size;
+    size = elf->sec[ELF_SEC_DATA].size + (xip ? 0 : elf->sec[ELF_SEC_RODATA].size) +
+           elf->sec[ELF_SEC_BSS].size + elf->sec[ELF_SEC_DRLRO].size;
     if (size) {
         elf->pdata = esp_elf_malloc(size, false);
         if (!elf->pdata) {
-            ESP_LOGE(TAG, "Failed to malloc %"PRIu32" bytes for data section", size);
+            ESP_LOGE(TAG, "Failed to malloc %" PRIu32 " bytes for data section", size);
             esp_elf_free(elf->ptext);
             return -ENOMEM;
         }
@@ -282,25 +310,23 @@ static int esp_elf_load_section(esp_elf_t *elf, const uint8_t *pbuf)
 
     elf->sec[ELF_SEC_TEXT].addr = (Elf32_Addr)elf->ptext;
     elf->sec[ELF_SEC_TEXT].reloc_addr = (uintptr_t)elf->ptext;
-    memcpy(elf->ptext, pbuf + elf->sec[ELF_SEC_TEXT].offset,
-           elf->sec[ELF_SEC_TEXT].size);
+    memcpy(elf->ptext, pbuf + elf->sec[ELF_SEC_TEXT].offset, elf->sec[ELF_SEC_TEXT].size);
 
     if (xip) {
         const uint8_t *instruction = NULL;
         const uint8_t *data = NULL;
-        int ret = elf->xip_ops->allocate(elf->xip_context, text_work_size, &instruction,
-                                         &data, &elf->xip_handle);
-        if (ret != 0 || !instruction || !data || !elf->xip_handle) {
-            return ret != 0 ? ret : -ENOMEM;
-        }
+        int ret =
+            elf->xip_ops->allocate(elf->xip_context, text_work_size, &instruction, &data, &elf->xip_handle);
+        if (ret != 0 || !instruction || !data || !elf->xip_handle) { return ret != 0 ? ret : -ENOMEM; }
         elf->xip_data = data;
         elf->sec[ELF_SEC_TEXT].addr = (uintptr_t)instruction;
         elf->sec[ELF_SEC_RODATA].addr = (uintptr_t)(data + elf->xip_rodata_offset);
-        elf->sec[ELF_SEC_RODATA].reloc_addr =
-            (uintptr_t)(elf->ptext + elf->xip_rodata_offset);
-        memcpy((void *)elf->sec[ELF_SEC_RODATA].reloc_addr,
-               pbuf + elf->sec[ELF_SEC_RODATA].offset,
-               elf->sec[ELF_SEC_RODATA].size);
+        elf->sec[ELF_SEC_RODATA].reloc_addr = (uintptr_t)(elf->ptext + elf->xip_rodata_offset);
+        memcpy(
+            (void *)elf->sec[ELF_SEC_RODATA].reloc_addr,
+            pbuf + elf->sec[ELF_SEC_RODATA].offset,
+            elf->sec[ELF_SEC_RODATA].size
+        );
     }
 
 #ifdef CONFIG_ELF_LOADER_SET_MMU
@@ -324,8 +350,7 @@ static int esp_elf_load_section(esp_elf_t *elf, const uint8_t *pbuf)
             elf->sec[ELF_SEC_DATA].addr = (uint32_t)pdata;
             elf->sec[ELF_SEC_DATA].reloc_addr = (uintptr_t)pdata;
 
-            memcpy(pdata, pbuf + elf->sec[ELF_SEC_DATA].offset,
-                   elf->sec[ELF_SEC_DATA].size);
+            memcpy(pdata, pbuf + elf->sec[ELF_SEC_DATA].offset, elf->sec[ELF_SEC_DATA].size);
 
             pdata += elf->sec[ELF_SEC_DATA].size;
         }
@@ -334,8 +359,7 @@ static int esp_elf_load_section(esp_elf_t *elf, const uint8_t *pbuf)
             elf->sec[ELF_SEC_RODATA].addr = (uint32_t)pdata;
             elf->sec[ELF_SEC_RODATA].reloc_addr = (uintptr_t)pdata;
 
-            memcpy(pdata, pbuf + elf->sec[ELF_SEC_RODATA].offset,
-                   elf->sec[ELF_SEC_RODATA].size);
+            memcpy(pdata, pbuf + elf->sec[ELF_SEC_RODATA].offset, elf->sec[ELF_SEC_RODATA].size);
 
             pdata += elf->sec[ELF_SEC_RODATA].size;
         }
@@ -344,8 +368,7 @@ static int esp_elf_load_section(esp_elf_t *elf, const uint8_t *pbuf)
             elf->sec[ELF_SEC_DRLRO].addr = (uint32_t)pdata;
             elf->sec[ELF_SEC_DRLRO].reloc_addr = (uintptr_t)pdata;
 
-            memcpy(pdata, pbuf + elf->sec[ELF_SEC_DRLRO].offset,
-                   elf->sec[ELF_SEC_DRLRO].size);
+            memcpy(pdata, pbuf + elf->sec[ELF_SEC_DRLRO].offset, elf->sec[ELF_SEC_DRLRO].size);
 
             pdata += elf->sec[ELF_SEC_DRLRO].size;
         }
@@ -359,8 +382,7 @@ static int esp_elf_load_section(esp_elf_t *elf, const uint8_t *pbuf)
 
     /* Set ELF entry */
 
-    entry = ehdr->entry + elf->sec[ELF_SEC_TEXT].addr -
-            elf->sec[ELF_SEC_TEXT].v_addr;
+    entry = ehdr->entry + elf->sec[ELF_SEC_TEXT].addr - elf->sec[ELF_SEC_TEXT].v_addr;
 
 #ifdef CONFIG_ELF_LOADER_CACHE_OFFSET
     elf->entry = (void *)elf_remap_text(elf, (uintptr_t)entry);
@@ -381,8 +403,7 @@ static int esp_elf_load_section(esp_elf_t *elf, const uint8_t *pbuf)
  *
  * @return ESP_OK if success or other if failed.
  */
-static int esp_elf_load_segment(esp_elf_t *elf, const uint8_t *pbuf)
-{
+static int esp_elf_load_segment(esp_elf_t *elf, const uint8_t *pbuf) {
     uint32_t size;
     bool first_segment = false;
     Elf32_Addr vaddr_s = 0;
@@ -392,13 +413,10 @@ static int esp_elf_load_segment(esp_elf_t *elf, const uint8_t *pbuf)
     const elf32_phdr_t *phdr = (const elf32_phdr_t *)(pbuf + ehdr->phoff);
 
     for (int i = 0; i < ehdr->phnum; i++) {
-        if (phdr[i].type != PT_LOAD) {
-            continue;
-        }
+        if (phdr[i].type != PT_LOAD) { continue; }
 
         if (phdr[i].memsz < phdr[i].filesz) {
-            ESP_LOGE(TAG, "Invalid segment[%d], memsz: %d, filesz: %d",
-                     i, phdr[i].memsz, phdr[i].filesz);
+            ESP_LOGE(TAG, "Invalid segment[%d], memsz: %d, filesz: %d", i, phdr[i].memsz, phdr[i].filesz);
             return -EINVAL;
         }
 
@@ -407,44 +425,47 @@ static int esp_elf_load_segment(esp_elf_t *elf, const uint8_t *pbuf)
             vaddr_e = phdr[i].vaddr + phdr[i].memsz;
             first_segment = true;
             if (vaddr_e < vaddr_s) {
-                ESP_LOGE(TAG, "Invalid segment[%d], vaddr: 0x%x, memsz: %d",
-                         i, phdr[i].vaddr, phdr[i].memsz);
+                ESP_LOGE(TAG, "Invalid segment[%d], vaddr: 0x%x, memsz: %d", i, phdr[i].vaddr, phdr[i].memsz);
                 return -EINVAL;
             }
         } else {
             if (phdr[i].vaddr < vaddr_e) {
-                ESP_LOGE(TAG, "Invalid segment[%d], should not overlap, vaddr: 0x%x, vaddr_e: 0x%x",
-                         i, phdr[i].vaddr, vaddr_e);
+                ESP_LOGE(
+                    TAG,
+                    "Invalid segment[%d], should not overlap, vaddr: 0x%x, vaddr_e: 0x%x",
+                    i,
+                    phdr[i].vaddr,
+                    vaddr_e
+                );
                 return -EINVAL;
             }
 
             if (phdr[i].vaddr > vaddr_e + ADDR_OFFSET) {
-                ESP_LOGI(TAG, "Too much padding before segment[%d], padding: %d",
-                         i, phdr[i].vaddr - vaddr_e);
+                ESP_LOGI(TAG, "Too much padding before segment[%d], padding: %d", i, phdr[i].vaddr - vaddr_e);
             }
 
             vaddr_e = phdr[i].vaddr + phdr[i].memsz;
             if (vaddr_e < phdr[i].vaddr) {
-                ESP_LOGE(TAG, "Invalid segment[%d], address overflow, vaddr: 0x%x, vaddr_e: 0x%x",
-                         i, phdr[i].vaddr, vaddr_e);
+                ESP_LOGE(
+                    TAG,
+                    "Invalid segment[%d], address overflow, vaddr: 0x%x, vaddr_e: 0x%x",
+                    i,
+                    phdr[i].vaddr,
+                    vaddr_e
+                );
                 return -EINVAL;
             }
         }
 
-        ESP_LOGD(TAG, "LOAD segment[%d], vaddr: 0x%x, memsize: 0x%08x",
-                 i, phdr[i].vaddr, phdr[i].memsz);
+        ESP_LOGD(TAG, "LOAD segment[%d], vaddr: 0x%x, memsize: 0x%08x", i, phdr[i].vaddr, phdr[i].memsz);
     }
 
     size = vaddr_e - vaddr_s;
-    if (size == 0) {
-        return -EINVAL;
-    }
+    if (size == 0) { return -EINVAL; }
 
     elf->svaddr = vaddr_s;
     elf->psegment = esp_elf_malloc(size, true);
-    if (!elf->psegment) {
-        return -ENOMEM;
-    }
+    if (!elf->psegment) { return -ENOMEM; }
 
     memset(elf->psegment, 0, size);
 
@@ -452,10 +473,14 @@ static int esp_elf_load_segment(esp_elf_t *elf, const uint8_t *pbuf)
 
     for (int i = 0; i < ehdr->phnum; i++) {
         if (phdr[i].type == PT_LOAD) {
-            memcpy(elf->psegment + phdr[i].vaddr - vaddr_s,
-                   (uint8_t *)pbuf + phdr[i].offset, phdr[i].filesz);
-            ESP_LOGD(TAG, "Copy segment[%d], mem_addr: %p, size: 0x%08x",
-                     i, (void *)((uint8_t *)elf->psegment + phdr[i].vaddr - vaddr_s), phdr[i].filesz);
+            memcpy(elf->psegment + phdr[i].vaddr - vaddr_s, (uint8_t *)pbuf + phdr[i].offset, phdr[i].filesz);
+            ESP_LOGD(
+                TAG,
+                "Copy segment[%d], mem_addr: %p, size: 0x%08x",
+                i,
+                (void *)((uint8_t *)elf->psegment + phdr[i].vaddr - vaddr_s),
+                phdr[i].filesz
+            );
         }
     }
 
@@ -476,8 +501,7 @@ static int esp_elf_load_segment(esp_elf_t *elf, const uint8_t *pbuf)
  *
  * @param resolver the resolver function
  */
-void elf_set_symbol_resolver(symbol_resolver resolver)
-{
+void elf_set_symbol_resolver(symbol_resolver resolver) {
     if (!resolver) {
         ESP_LOGE(TAG, "Invalid resolver: cannot set NULL resolver");
         return;
@@ -491,10 +515,7 @@ void elf_set_symbol_resolver(symbol_resolver resolver)
  *
  * Equivalent to elf_set_symbol_resolver(elf_find_sym_default).
  */
-void elf_reset_symbol_resolver(void)
-{
-    atomic_store(&current_resolver, elf_find_sym_default);
-}
+void elf_reset_symbol_resolver(void) { atomic_store(&current_resolver, elf_find_sym_default); }
 
 /**
  * @brief Map symbol's address of ELF to physic space.
@@ -504,11 +525,9 @@ void elf_reset_symbol_resolver(void)
  *
  * @return ESP_OK if success or other if failed.
  */
-uintptr_t esp_elf_map_sym(esp_elf_t *elf, uintptr_t sym)
-{
+uintptr_t esp_elf_map_sym(esp_elf_t *elf, uintptr_t sym) {
     for (int i = 0; i < ELF_SECS; i++) {
-        if ((sym >= elf->sec[i].v_addr) &&
-                (sym < (elf->sec[i].v_addr + elf->sec[i].size))) {
+        if ((sym >= elf->sec[i].v_addr) && (sym < (elf->sec[i].v_addr + elf->sec[i].size))) {
             return sym - elf->sec[i].v_addr + elf->sec[i].addr;
         }
     }
@@ -516,12 +535,10 @@ uintptr_t esp_elf_map_sym(esp_elf_t *elf, uintptr_t sym)
     return 0;
 }
 
-uintptr_t esp_elf_map_reloc(esp_elf_t *elf, uintptr_t sym)
-{
+uintptr_t esp_elf_map_reloc(esp_elf_t *elf, uintptr_t sym) {
     for (int i = 0; i < ELF_SECS; i++) {
-        if ((sym >= elf->sec[i].v_addr) &&
-                (sym < (elf->sec[i].v_addr + elf->sec[i].size)) &&
-                elf->sec[i].reloc_addr) {
+        if ((sym >= elf->sec[i].v_addr) && (sym < (elf->sec[i].v_addr + elf->sec[i].size)) &&
+            elf->sec[i].reloc_addr) {
             return sym - elf->sec[i].v_addr + elf->sec[i].reloc_addr;
         }
     }
@@ -535,17 +552,39 @@ uintptr_t esp_elf_map_reloc(esp_elf_t *elf, uintptr_t sym)
  *
  * @return ESP_OK if success or other if failed.
  */
-int esp_elf_init(esp_elf_t *elf)
-{
-    ESP_LOGI(TAG, "ELF loader version: %d.%d.%d", ELF_LOADER_VER_MAJOR, ELF_LOADER_VER_MINOR, ELF_LOADER_VER_PATCH);
+int esp_elf_init(esp_elf_t *elf) {
+    ESP_LOGI(
+        TAG, "ELF loader version: %d.%d.%d", ELF_LOADER_VER_MAJOR, ELF_LOADER_VER_MINOR, ELF_LOADER_VER_PATCH
+    );
 
-    if (!elf) {
-        return -EINVAL;
-    }
+    if (!elf) { return -EINVAL; }
 
     memset(elf, 0, sizeof(esp_elf_t));
 
     return 0;
+}
+
+/**
+ * @brief Byte-compares two buffers like memcmp(), but reports where the
+ *        first mismatch was found instead of just whether one exists -- used
+ *        by the XIP write-verify retry loop below to log a diagnosable
+ *        offset instead of a bare -EIO.
+ *
+ * @param a, b   - Buffers to compare
+ * @param size   - Number of bytes to compare
+ * @param out_offset - Set to the offset of the first mismatching byte when
+ *                      this returns false; untouched when it returns true.
+ *
+ * @return true if the buffers are identical over `size` bytes.
+ */
+static bool esp_elf_bytes_equal(const uint8_t *a, const uint8_t *b, size_t size, size_t *out_offset) {
+    for (size_t i = 0; i < size; i++) {
+        if (a[i] != b[i]) {
+            *out_offset = i;
+            return false;
+        }
+    }
+    return true;
 }
 
 /**
@@ -556,8 +595,7 @@ int esp_elf_init(esp_elf_t *elf)
  *
  * @return ESP_OK if success or other if failed.
  */
-static int esp_elf_relocate_internal(esp_elf_t *elf, const uint8_t *pbuf)
-{
+static int esp_elf_relocate_internal(esp_elf_t *elf, const uint8_t *pbuf) {
     int ret;
 
     const elf32_hdr_t *ehdr;
@@ -566,12 +604,10 @@ static int esp_elf_relocate_internal(esp_elf_t *elf, const uint8_t *pbuf)
     const elf32_sym_t *symtab;
     const char *strtab;
 
-    if (!elf || !pbuf) {
-        return -EINVAL;
-    }
+    if (!elf || !pbuf) { return -EINVAL; }
 
-    ehdr    = (const elf32_hdr_t *)pbuf;
-    shdr    = (const elf32_shdr_t *)(pbuf + ehdr->shoff);
+    ehdr = (const elf32_hdr_t *)pbuf;
+    shdr = (const elf32_shdr_t *)(pbuf + ehdr->shoff);
     shstrab = (const char *)pbuf + shdr[ehdr->shstrndx].offset;
 
     /* Load section or segment to memory space */
@@ -597,9 +633,9 @@ static int esp_elf_relocate_internal(esp_elf_t *elf, const uint8_t *pbuf)
             const elf32_rela_t *rela;
 
             nr_reloc = shdr[i].size / sizeof(elf32_rela_t);
-            rela     = (const elf32_rela_t *)(pbuf + shdr[i].offset);
-            symtab   = (const elf32_sym_t *)(pbuf + shdr[shdr[i].link].offset);
-            strtab   = (const char *)(pbuf + shdr[shdr[shdr[i].link].link].offset);
+            rela = (const elf32_rela_t *)(pbuf + shdr[i].offset);
+            symtab = (const elf32_sym_t *)(pbuf + shdr[shdr[i].link].offset);
+            strtab = (const char *)(pbuf + shdr[shdr[shdr[i].link].link].offset);
 
             ESP_LOGD(TAG, "Section %s has %d symbol tables", shstrab + shdr[i].name, (int)nr_reloc);
 
@@ -621,7 +657,8 @@ static int esp_elf_relocate_internal(esp_elf_t *elf, const uint8_t *pbuf)
 #if CONFIG_ELF_DYNAMIC_LOAD_SHARED_OBJECT
                         if (!addr && sym->shndx != SHN_UNDEF) {
 #if CONFIG_ELF_LOADER_BUS_ADDRESS_MIRROR
-                            addr = (uintptr_t)(elf->sec[ELF_SEC_DATA].addr + sym->value - elf->sec[ELF_SEC_DATA].v_addr);
+                            addr = (uintptr_t)(elf->sec[ELF_SEC_DATA].addr + sym->value -
+                                               elf->sec[ELF_SEC_DATA].v_addr);
 #else
                             addr = (uintptr_t)(elf->psegment + sym->value - elf->svaddr);
 #endif
@@ -646,7 +683,8 @@ static int esp_elf_relocate_internal(esp_elf_t *elf, const uint8_t *pbuf)
 #if CONFIG_ELF_DYNAMIC_LOAD_SHARED_OBJECT
                     if (!addr && sym->shndx != SHN_UNDEF) {
 #if CONFIG_ELF_LOADER_BUS_ADDRESS_MIRROR
-                        addr = (uintptr_t)(elf->sec[ELF_SEC_TEXT].addr + sym->value - elf->sec[ELF_SEC_TEXT].v_addr);
+                        addr = (uintptr_t)(elf->sec[ELF_SEC_TEXT].addr + sym->value -
+                                           elf->sec[ELF_SEC_TEXT].v_addr);
 #else
                         addr = (uintptr_t)(elf->psegment + sym->value - elf->svaddr);
 #endif
@@ -661,9 +699,7 @@ static int esp_elf_relocate_internal(esp_elf_t *elf, const uint8_t *pbuf)
                 }
 
                 ret = esp_elf_arch_relocate(elf, &rela_buf, sym, addr);
-                if (ret != 0) {
-                    return ret;
-                }
+                if (ret != 0) { return ret; }
             }
 #if CONFIG_ELF_DYNAMIC_LOAD_SHARED_OBJECT
         } else {
@@ -672,11 +708,11 @@ static int esp_elf_relocate_internal(esp_elf_t *elf, const uint8_t *pbuf)
                 uint32_t len;
                 uint16_t num = 0;
                 elf->num = 0;
-                symtab   = (const elf32_sym_t *)(pbuf + shdr[i].offset);
-                strtab   = (const char *)(pbuf + shdr[shdr[i].link].offset);
+                symtab = (const elf32_sym_t *)(pbuf + shdr[i].offset);
+                strtab = (const char *)(pbuf + shdr[shdr[i].link].offset);
                 for (j = 0; j < shdr[i].size / sizeof(elf32_sym_t); j++) {
                     if ((ELF_ST_BIND(symtab[j].info) == STB_GLOBAL) &&
-                            (ELF_ST_TYPE(symtab[j].info) == STT_FUNC)) {
+                        (ELF_ST_TYPE(symtab[j].info) == STT_FUNC)) {
                         elf->num++;
                     }
                 }
@@ -693,14 +729,13 @@ static int esp_elf_relocate_internal(esp_elf_t *elf, const uint8_t *pbuf)
 
                 for (j = 0; j < shdr[i].size / sizeof(elf32_sym_t); j++) {
                     if ((ELF_ST_BIND(symtab[j].info) == STB_GLOBAL) &&
-                            (ELF_ST_TYPE(symtab[j].info) == STT_FUNC)) {
+                        (ELF_ST_TYPE(symtab[j].info) == STT_FUNC)) {
                         len = strlen((const char *)(strtab + symtab[j].name)) + 1;
 #if CONFIG_ELF_LOADER_BUS_ADDRESS_MIRROR
                         elf->symtab[num].addr =
                             (void *)(elf->ptext + symtab[j].value - elf->sec[ELF_SEC_TEXT].v_addr);
 #else
-                        elf->symtab[num].addr =
-                            (void *)(elf->psegment + symtab[j].value - elf->svaddr);
+                        elf->symtab[num].addr = (void *)(elf->psegment + symtab[j].value - elf->svaddr);
 #endif
                         elf->symtab[num].name = esp_elf_malloc(len, false);
                         if (!elf->symtab[num].name) {
@@ -725,22 +760,67 @@ static int esp_elf_relocate_internal(esp_elf_t *elf, const uint8_t *pbuf)
 #endif
 
     if (elf->xip_ops) {
-        ret = elf->xip_ops->write(elf->xip_context, elf->xip_handle, 0,
-                                  elf->ptext, elf->sec[ELF_SEC_TEXT].size);
-        if (ret == 0 && elf->sec[ELF_SEC_RODATA].size) {
+        /* The post-write readback below reads .text/.rodata back through the
+         * data-bus alias (xip_ops->write()'s caller-owned storage backend is
+         * responsible for invalidating that alias -- see
+         * memory_external__invalidate_data_alias() in memory_external.c) to
+         * catch a partition write that silently didn't land. On real
+         * hardware this has occasionally still mismatched on the first pass
+         * with no error from either write() call, which points at a stale
+         * cache line surviving the first invalidate rather than a genuine
+         * write failure -- so this retries the write+verify a few times
+         * (each attempt re-invalidates, since it goes through the same
+         * xip_ops->write() path) before giving up. A mismatch that persists
+         * across every attempt is logged with the offset and byte values so
+         * a report of ELF_LOADER_XIP_VERIFY_RETRY_MAX exhausted attempts
+         * (rather than just "-EIO") can be diagnosed without hardware
+         * access. */
+#define ELF_LOADER_XIP_VERIFY_RETRY_MAX 3
+        bool matched = false;
+        for (int attempt = 0; attempt < ELF_LOADER_XIP_VERIFY_RETRY_MAX && !matched; attempt++) {
             ret = elf->xip_ops->write(
-                elf->xip_context, elf->xip_handle, elf->xip_rodata_offset,
-                (const void *)elf->sec[ELF_SEC_RODATA].reloc_addr,
-                elf->sec[ELF_SEC_RODATA].size);
+                elf->xip_context, elf->xip_handle, 0, elf->ptext, elf->sec[ELF_SEC_TEXT].size
+            );
+            if (ret == 0 && elf->sec[ELF_SEC_RODATA].size) {
+                ret = elf->xip_ops->write(
+                    elf->xip_context,
+                    elf->xip_handle,
+                    elf->xip_rodata_offset,
+                    (const void *)elf->sec[ELF_SEC_RODATA].reloc_addr,
+                    elf->sec[ELF_SEC_RODATA].size
+                );
+            }
+            if (ret != 0) return ret;
+
+            size_t mismatch_offset;
+            matched =
+                esp_elf_bytes_equal(elf->xip_data, elf->ptext, elf->sec[ELF_SEC_TEXT].size, &mismatch_offset);
+            if (matched && elf->sec[ELF_SEC_RODATA].size) {
+                matched = esp_elf_bytes_equal(
+                    elf->xip_data + elf->xip_rodata_offset,
+                    (const void *)elf->sec[ELF_SEC_RODATA].reloc_addr,
+                    elf->sec[ELF_SEC_RODATA].size,
+                    &mismatch_offset
+                );
+                if (!matched) mismatch_offset += elf->xip_rodata_offset;
+            }
+            if (!matched) {
+                bool will_retry = attempt + 1 < ELF_LOADER_XIP_VERIFY_RETRY_MAX;
+                ESP_LOGW(
+                    TAG,
+                    "XIP verify mismatch at offset 0x%x on attempt %d/%d "
+                    "(wrote 0x%02x, read 0x%02x)%s",
+                    (unsigned)mismatch_offset,
+                    attempt + 1,
+                    ELF_LOADER_XIP_VERIFY_RETRY_MAX,
+                    elf->ptext[mismatch_offset],
+                    elf->xip_data[mismatch_offset],
+                    will_retry ? ", retrying" : ", giving up"
+                );
+            }
         }
-        if (ret != 0) return ret;
-        if (memcmp(elf->xip_data, elf->ptext, elf->sec[ELF_SEC_TEXT].size) != 0 ||
-                (elf->sec[ELF_SEC_RODATA].size &&
-                 memcmp(elf->xip_data + elf->xip_rodata_offset,
-                        (const void *)elf->sec[ELF_SEC_RODATA].reloc_addr,
-                        elf->sec[ELF_SEC_RODATA].size) != 0)) {
-            return -EIO;
-        }
+        if (!matched) return -EIO;
+#undef ELF_LOADER_XIP_VERIFY_RETRY_MAX
         esp_elf_free(elf->ptext);
         elf->ptext = NULL;
     }
@@ -748,14 +828,11 @@ static int esp_elf_relocate_internal(esp_elf_t *elf, const uint8_t *pbuf)
     return 0;
 }
 
-int esp_elf_relocate(esp_elf_t *elf, const uint8_t *pbuf)
-{
-    return esp_elf_relocate_internal(elf, pbuf);
-}
+int esp_elf_relocate(esp_elf_t *elf, const uint8_t *pbuf) { return esp_elf_relocate_internal(elf, pbuf); }
 
-int esp_elf_relocate_xip(esp_elf_t *elf, const uint8_t *pbuf, size_t size,
-                         const esp_elf_xip_ops_t *ops, void *context)
-{
+int esp_elf_relocate_xip(
+    esp_elf_t *elf, const uint8_t *pbuf, size_t size, const esp_elf_xip_ops_t *ops, void *context
+) {
 #if !CONFIG_ELF_LOADER_BUS_ADDRESS_MIRROR
     (void)elf;
     (void)pbuf;
@@ -765,21 +842,24 @@ int esp_elf_relocate_xip(esp_elf_t *elf, const uint8_t *pbuf, size_t size,
     return -ENOTSUP;
 #else
     if (!elf || !pbuf || !ops || !ops->allocate || !ops->write || !ops->release ||
-            size < sizeof(elf32_hdr_t)) {
+        size < sizeof(elf32_hdr_t)) {
         return -EINVAL;
     }
     const elf32_hdr_t *ehdr = (const elf32_hdr_t *)pbuf;
-    if (memcmp(ehdr->ident, "\x7f" "ELF", 4) != 0 || ehdr->ident[4] != 1 ||
-            ehdr->ident[5] != 1 || ehdr->machine != 94 ||
-            ehdr->shentsize != sizeof(elf32_shdr_t) || ehdr->shnum == 0 ||
-            ehdr->shstrndx >= ehdr->shnum || ehdr->shoff > size ||
-            (size_t)ehdr->shnum > (size - ehdr->shoff) / sizeof(elf32_shdr_t)) {
+    if (memcmp(
+            ehdr->ident,
+            "\x7f"
+            "ELF",
+            4
+        ) != 0 ||
+        ehdr->ident[4] != 1 || ehdr->ident[5] != 1 || ehdr->machine != 94 ||
+        ehdr->shentsize != sizeof(elf32_shdr_t) || ehdr->shnum == 0 || ehdr->shstrndx >= ehdr->shnum ||
+        ehdr->shoff > size || (size_t)ehdr->shnum > (size - ehdr->shoff) / sizeof(elf32_shdr_t)) {
         return -EINVAL;
     }
     const elf32_shdr_t *shdr = (const elf32_shdr_t *)(pbuf + ehdr->shoff);
     for (uint32_t i = 0; i < ehdr->shnum; ++i) {
-        if (shdr[i].type != SHT_NOBITS &&
-                (shdr[i].offset > size || shdr[i].size > size - shdr[i].offset)) {
+        if (shdr[i].type != SHT_NOBITS && (shdr[i].offset > size || shdr[i].size > size - shdr[i].offset)) {
             return -EINVAL;
         }
     }
@@ -788,7 +868,7 @@ int esp_elf_relocate_xip(esp_elf_t *elf, const uint8_t *pbuf, size_t size,
     const char *section_names = (const char *)pbuf + shstr->offset;
     for (uint32_t i = 0; i < ehdr->shnum; ++i) {
         if (shdr[i].name >= shstr->size ||
-                memchr(section_names + shdr[i].name, '\0', shstr->size - shdr[i].name) == NULL) {
+            memchr(section_names + shdr[i].name, '\0', shstr->size - shdr[i].name) == NULL) {
             return -EINVAL;
         }
         if (shdr[i].type != SHT_RELA) continue;
@@ -803,8 +883,11 @@ int esp_elf_relocate_xip(esp_elf_t *elf, const uint8_t *pbuf, size_t size,
         for (size_t j = 0; j < shdr[i].size / sizeof(elf32_rela_t); ++j) {
             size_t symbol_index = ELF_R_SYM(relocations[j].info);
             if (symbol_index >= symbol_count || symbol_table[symbol_index].name >= strings->size ||
-                    memchr(string_table + symbol_table[symbol_index].name, '\0',
-                           strings->size - symbol_table[symbol_index].name) == NULL) {
+                memchr(
+                    string_table + symbol_table[symbol_index].name,
+                    '\0',
+                    strings->size - symbol_table[symbol_index].name
+                ) == NULL) {
                 return -EINVAL;
             }
         }
@@ -827,11 +910,8 @@ int esp_elf_relocate_xip(esp_elf_t *elf, const uint8_t *pbuf, size_t size,
  *
  * @return ESP_OK if success or other if failed.
  */
-int esp_elf_request(esp_elf_t *elf, int opt, int argc, char *argv[])
-{
-    if (!elf || !(elf->entry)) {
-        return -EINVAL;
-    }
+int esp_elf_request(esp_elf_t *elf, int opt, int argc, char *argv[]) {
+    if (!elf || !(elf->entry)) { return -EINVAL; }
 
     elf->entry(argc, argv);
 
@@ -848,11 +928,8 @@ int esp_elf_request(esp_elf_t *elf, int opt, int argc, char *argv[])
  * @note This function frees all resources allocated by esp_elf_relocate() and
  *       resets the structure to its initial state (same as after esp_elf_init()).
  */
-void esp_elf_deinit(esp_elf_t *elf)
-{
-    if (!elf) {
-        return;
-    }
+void esp_elf_deinit(esp_elf_t *elf) {
+    if (!elf) { return; }
 
     if (elf->xip_handle && elf->xip_ops && elf->xip_ops->release) {
         elf->xip_ops->release(elf->xip_context, elf->xip_handle);
@@ -883,9 +960,7 @@ void esp_elf_deinit(esp_elf_t *elf)
 #if CONFIG_ELF_DYNAMIC_LOAD_SHARED_OBJECT
     if (elf->num && elf->symtab) {
         for (int i = 0; i < elf->num; i++) {
-            if (elf->symtab[i].name) {
-                esp_elf_free(elf->symtab[i].name);
-            }
+            if (elf->symtab[i].name) { esp_elf_free(elf->symtab[i].name); }
         }
 
         esp_elf_free(elf->symtab);
@@ -906,55 +981,42 @@ void esp_elf_deinit(esp_elf_t *elf)
  *
  * @return None
  */
-void esp_elf_print_ehdr(const uint8_t *pbuf)
-{
+void esp_elf_print_ehdr(const uint8_t *pbuf) {
     const char *s_bits, *s_endian;
     const elf32_hdr_t *hdr = (const elf32_hdr_t *)pbuf;
 
     switch (hdr->ident[4]) {
-    case 1:
-        s_bits = "32-bit";
-        break;
-    case 2:
-        s_bits = "64-bit";
-        break;
-    default:
-        s_bits = "invalid bits";
-        break;
+        case 1: s_bits = "32-bit"; break;
+        case 2: s_bits = "64-bit"; break;
+        default: s_bits = "invalid bits"; break;
     }
 
     switch (hdr->ident[5]) {
-    case 1:
-        s_endian = "little-endian";
-        break;
-    case 2:
-        s_endian = "big-endian";
-        break;
-    default:
-        s_endian = "invalid endian";
-        break;
+        case 1: s_endian = "little-endian"; break;
+        case 2: s_endian = "big-endian"; break;
+        default: s_endian = "invalid endian"; break;
     }
 
     if (hdr->ident[0] == 0x7f) {
-        ESP_LOGI(TAG, "%-40s %c%c%c", "Class:",                     hdr->ident[1], hdr->ident[2], hdr->ident[3]);
+        ESP_LOGI(TAG, "%-40s %c%c%c", "Class:", hdr->ident[1], hdr->ident[2], hdr->ident[3]);
     }
 
-    ESP_LOGI(TAG, "%-40s %s, %s", "Format:",                        s_bits, s_endian);
-    ESP_LOGI(TAG, "%-40s %x", "Version(current):",                  hdr->ident[6]);
+    ESP_LOGI(TAG, "%-40s %s, %s", "Format:", s_bits, s_endian);
+    ESP_LOGI(TAG, "%-40s %x", "Version(current):", hdr->ident[6]);
 
-    ESP_LOGI(TAG, "%-40s %d", "Type:",                              hdr->type);
-    ESP_LOGI(TAG, "%-40s %d", "Machine:",                           hdr->machine);
-    ESP_LOGI(TAG, "%-40s %x", "Version:",                           hdr->version);
-    ESP_LOGI(TAG, "%-40s %x", "Entry point address:",               hdr->entry);
-    ESP_LOGI(TAG, "%-40s %x", "Start of program headers:",          hdr->phoff);
-    ESP_LOGI(TAG, "%-40s %d", "Start of section headers:",          hdr->shoff);
-    ESP_LOGI(TAG, "%-40s 0x%x", "Flags:",                           hdr->flags);
-    ESP_LOGI(TAG, "%-40s %d", "Size of this header(bytes):",        hdr->ehsize);
-    ESP_LOGI(TAG, "%-40s %d", "Size of program headers(bytes):",    hdr->phentsize);
-    ESP_LOGI(TAG, "%-40s %d", "Number of program headers:",         hdr->phnum);
-    ESP_LOGI(TAG, "%-40s %d", "Size of section headers(bytes):",    hdr->shentsize);
-    ESP_LOGI(TAG, "%-40s %d", "Number of section headers:",         hdr->shnum);
-    ESP_LOGI(TAG, "%-40s %d", "Section header string table i:",     hdr->shstrndx);
+    ESP_LOGI(TAG, "%-40s %d", "Type:", hdr->type);
+    ESP_LOGI(TAG, "%-40s %d", "Machine:", hdr->machine);
+    ESP_LOGI(TAG, "%-40s %x", "Version:", hdr->version);
+    ESP_LOGI(TAG, "%-40s %x", "Entry point address:", hdr->entry);
+    ESP_LOGI(TAG, "%-40s %x", "Start of program headers:", hdr->phoff);
+    ESP_LOGI(TAG, "%-40s %d", "Start of section headers:", hdr->shoff);
+    ESP_LOGI(TAG, "%-40s 0x%x", "Flags:", hdr->flags);
+    ESP_LOGI(TAG, "%-40s %d", "Size of this header(bytes):", hdr->ehsize);
+    ESP_LOGI(TAG, "%-40s %d", "Size of program headers(bytes):", hdr->phentsize);
+    ESP_LOGI(TAG, "%-40s %d", "Number of program headers:", hdr->phnum);
+    ESP_LOGI(TAG, "%-40s %d", "Size of section headers(bytes):", hdr->shentsize);
+    ESP_LOGI(TAG, "%-40s %d", "Number of section headers:", hdr->shnum);
+    ESP_LOGI(TAG, "%-40s %d", "Section header string table i:", hdr->shstrndx);
 }
 
 /**
@@ -964,20 +1026,19 @@ void esp_elf_print_ehdr(const uint8_t *pbuf)
  *
  * @return None
  */
-void esp_elf_print_phdr(const uint8_t *pbuf)
-{
+void esp_elf_print_phdr(const uint8_t *pbuf) {
     const elf32_hdr_t *ehdr = (const elf32_hdr_t *)pbuf;
     const elf32_phdr_t *phdr = (const elf32_phdr_t *)((size_t)pbuf + ehdr->phoff);
 
     for (int i = 0; i < ehdr->phnum; i++) {
-        ESP_LOGI(TAG, "%-40s %d", "type:",                          phdr->type);
-        ESP_LOGI(TAG, "%-40s 0x%x", "offset:",                      phdr->offset);
-        ESP_LOGI(TAG, "%-40s 0x%x", "vaddr",                        phdr->vaddr);
-        ESP_LOGI(TAG, "%-40s 0x%x", "paddr:",                       phdr->paddr);
-        ESP_LOGI(TAG, "%-40s %d", "filesz",                         phdr->filesz);
-        ESP_LOGI(TAG, "%-40s %d", "memsz",                          phdr->memsz);
-        ESP_LOGI(TAG, "%-40s %d", "flags",                          phdr->flags);
-        ESP_LOGI(TAG, "%-40s 0x%x", "align",                        phdr->align);
+        ESP_LOGI(TAG, "%-40s %d", "type:", phdr->type);
+        ESP_LOGI(TAG, "%-40s 0x%x", "offset:", phdr->offset);
+        ESP_LOGI(TAG, "%-40s 0x%x", "vaddr", phdr->vaddr);
+        ESP_LOGI(TAG, "%-40s 0x%x", "paddr:", phdr->paddr);
+        ESP_LOGI(TAG, "%-40s %d", "filesz", phdr->filesz);
+        ESP_LOGI(TAG, "%-40s %d", "memsz", phdr->memsz);
+        ESP_LOGI(TAG, "%-40s %d", "flags", phdr->flags);
+        ESP_LOGI(TAG, "%-40s 0x%x", "align", phdr->align);
 
         phdr = (const elf32_phdr_t *)((size_t)phdr + sizeof(elf32_phdr_t));
     }
@@ -990,21 +1051,20 @@ void esp_elf_print_phdr(const uint8_t *pbuf)
  *
  * @return None
  */
-void esp_elf_print_shdr(const uint8_t *pbuf)
-{
+void esp_elf_print_shdr(const uint8_t *pbuf) {
     const elf32_hdr_t *ehdr = (const elf32_hdr_t *)pbuf;
     const elf32_shdr_t *shdr = (const elf32_shdr_t *)((size_t)pbuf + ehdr->shoff);
 
     for (int i = 0; i < ehdr->shnum; i++) {
-        ESP_LOGI(TAG, "%-40s %d", "name:",                          shdr->name);
-        ESP_LOGI(TAG, "%-40s %d", "type:",                          shdr->type);
-        ESP_LOGI(TAG, "%-40s 0x%x", "flags:",                       shdr->flags);
-        ESP_LOGI(TAG, "%-40s %x", "addr",                           shdr->addr);
-        ESP_LOGI(TAG, "%-40s %x", "offset:",                        shdr->offset);
-        ESP_LOGI(TAG, "%-40s %d", "size",                           shdr->size);
-        ESP_LOGI(TAG, "%-40s 0x%x", "link",                         shdr->link);
-        ESP_LOGI(TAG, "%-40s %d", "addralign",                      shdr->addralign);
-        ESP_LOGI(TAG, "%-40s %d", "entsize",                        shdr->entsize);
+        ESP_LOGI(TAG, "%-40s %d", "name:", shdr->name);
+        ESP_LOGI(TAG, "%-40s %d", "type:", shdr->type);
+        ESP_LOGI(TAG, "%-40s 0x%x", "flags:", shdr->flags);
+        ESP_LOGI(TAG, "%-40s %x", "addr", shdr->addr);
+        ESP_LOGI(TAG, "%-40s %x", "offset:", shdr->offset);
+        ESP_LOGI(TAG, "%-40s %d", "size", shdr->size);
+        ESP_LOGI(TAG, "%-40s 0x%x", "link", shdr->link);
+        ESP_LOGI(TAG, "%-40s %d", "addralign", shdr->addralign);
+        ESP_LOGI(TAG, "%-40s %d", "entsize", shdr->entsize);
 
         shdr = (const elf32_shdr_t *)((size_t)shdr + sizeof(elf32_shdr_t));
     }
@@ -1017,11 +1077,8 @@ void esp_elf_print_shdr(const uint8_t *pbuf)
  *
  * @return None
  */
-void esp_elf_print_sec(esp_elf_t *elf)
-{
-    const char *sec_names[ELF_SECS] = {
-        "text", "bss", "data", "rodata"
-    };
+void esp_elf_print_sec(esp_elf_t *elf) {
+    const char *sec_names[ELF_SECS] = {"text", "bss", "data", "rodata"};
 
     for (int i = 0; i < ELF_SECS; i++) {
         ESP_LOGI(TAG, "%s:   0x%08x size 0x%08x", sec_names[i], elf->sec[i].addr, elf->sec[i].size);
@@ -1040,11 +1097,8 @@ void esp_elf_print_sec(esp_elf_t *elf)
  * @note This function is not thread-safe. External synchronization must be used if calling
  *       this function concurrently from multiple threads.
  */
-int esp_elf_register_symbol(esp_elf_symbol_table_t *symbol_table)
-{
-    if (!symbol_table) {
-        return -EINVAL;
-    }
+int esp_elf_register_symbol(esp_elf_symbol_table_t *symbol_table) {
+    if (!symbol_table) { return -EINVAL; }
 
     for (int i = 0; i < SYMBOL_TABLES_NO; i++) {
         if (g_symbol_tables[i] == symbol_table) {
@@ -1068,11 +1122,8 @@ int esp_elf_register_symbol(esp_elf_symbol_table_t *symbol_table)
  * @note This function is not thread-safe. External synchronization must be used if calling
  *       this function concurrently from multiple threads.
  */
-int esp_elf_unregister_symbol(esp_elf_symbol_table_t *symbol_table)
-{
-    if (!symbol_table) {
-        return -EINVAL;
-    }
+int esp_elf_unregister_symbol(esp_elf_symbol_table_t *symbol_table) {
+    if (!symbol_table) { return -EINVAL; }
 
     for (int i = 0; i < SYMBOL_TABLES_NO; i++) {
         if (g_symbol_tables[i] == symbol_table) {
@@ -1092,20 +1143,15 @@ int esp_elf_unregister_symbol(esp_elf_symbol_table_t *symbol_table)
  * @return Symbol address if found, 0 if not found.
  * @note Search order is registration order (earliest registered first).
  */
-uintptr_t esp_elf_find_symbol(const char *sym_name)
-{
-    if (!sym_name) {
-        return 0;
-    }
+uintptr_t esp_elf_find_symbol(const char *sym_name) {
+    if (!sym_name) { return 0; }
 
     esp_elf_symbol_table_t *syms;
     for (int i = 0; i < SYMBOL_TABLES_NO; i++) {
         if (g_symbol_tables[i]) {
             syms = g_symbol_tables[i];
             while (syms->name) {
-                if (!strcmp(syms->name, sym_name)) {
-                    return (uintptr_t)syms->sym;
-                }
+                if (!strcmp(syms->name, sym_name)) { return (uintptr_t)syms->sym; }
 
                 syms++;
             }

@@ -48,13 +48,26 @@ typedef struct {
 /* Prefers a PSRAM- or plain-internal-RAM-backed memory__external block (both
  * are plain, directly addressable buffers) so the parser can keep mutating it
  * in place with ordinary pointer writes. Falls back to a separate, untracked
- * internal heap allocation only when memory__external_alloc() itself lands on
- * flash-backed swap, since that block is not safely writable through a raw
- * pointer -- only through memory__external_write(). */
+ * internal heap allocation when PSRAM has no room for `size`, without ever
+ * calling memory__external_alloc() in that case: on a board where a "swap"
+ * partition has been committed (see partition_manager__commit()),
+ * memory__external_alloc() would otherwise land on it whenever PSRAM is
+ * short, which means erasing a real 64 KiB flash region just to get a
+ * SWAP-backed object this function immediately frees because it's not
+ * safely writable through a raw pointer -- only through
+ * memory__external_write(). That erase is real hardware time (a 64 KiB
+ * region is 16 flash sectors) wasted on a result this never uses, and was
+ * the whole cause of a plain terminal open going from instant to ~700ms
+ * once a swap partition existed to find. memory__get_stats() only reads
+ * already-tracked heap/page-bitmap counters, so checking it first is cheap
+ * regardless of which way it comes out. */
 static bruce_result_t
 terminal__alloc_buffer(void **out_data, bruce_memory_object_t *out_object, bool *out_external, size_t size) {
+    bruce_memory_stats_t stats;
+    bool psram_has_room =
+        memory__get_stats(&stats) == BRUCE_OK && stats.psram_largest_block >= size;
     bruce_memory_object_t object;
-    if (memory__external_alloc(size, &object) == BRUCE_OK) {
+    if (psram_has_room && memory__external_alloc(size, &object) == BRUCE_OK) {
         const void *mapped = NULL;
         if ((object.backend == BRUCE_MEMORY_BACKEND_PSRAM ||
              object.backend == BRUCE_MEMORY_BACKEND_INTERNAL) &&
