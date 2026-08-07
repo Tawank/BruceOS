@@ -88,7 +88,7 @@ static void memory_external__cleanup(void *context) {
     if (record == NULL || record->backend == BRUCE_MEMORY_BACKEND_INVALID) return;
     memory_external__ensure_mutex();
     xSemaphoreTake(s_mutex, portMAX_DELAY);
-    if (record->backend == BRUCE_MEMORY_BACKEND_PSRAM) {
+    if (record->backend == BRUCE_MEMORY_BACKEND_PSRAM || record->backend == BRUCE_MEMORY_BACKEND_INTERNAL) {
         heap_caps_free(record->psram);
     } else {
         if (record->data != NULL || record->instruction != NULL) {
@@ -149,6 +149,26 @@ static bool memory_external__allocate_psram_locked(memory_external__record_t *re
     void *data = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (data == NULL) return false;
     record->backend = BRUCE_MEMORY_BACKEND_PSRAM;
+    record->size = size;
+    record->psram = data;
+    record->data = data;
+    return true;
+}
+
+/* Last-resort backend for boards with no PSRAM and no "swap" partition
+ * committed yet (see partitions.csv -- the whole user area is a single
+ * "littlefs" partition until a user table carves a "swap" one out of it).
+ * Without this, memory__external_alloc() would fail outright for every
+ * caller on such a board, e.g. bruce_launcher couldn't even build its menu
+ * tree to let the user reach the Partitions app that would fix that.
+ * Reuses the record's psram/data fields verbatim: the pointer is plain
+ * malloc'd internal RAM either way, so cleanup/write/map treat this exactly
+ * like BRUCE_MEMORY_BACKEND_PSRAM. */
+static bool memory_external__allocate_internal_locked(memory_external__record_t *record, size_t size) {
+    if (heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) < size) return false;
+    void *data = heap_caps_malloc(size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (data == NULL) return false;
+    record->backend = BRUCE_MEMORY_BACKEND_INTERNAL;
     record->size = size;
     record->psram = data;
     record->data = data;
@@ -229,6 +249,13 @@ bruce_result_t memory_external__alloc(size_t size, bool executable, bruce_memory
     if (record != NULL && !allocated) {
         allocated = memory_external__allocate_swap_locked(record, size, executable);
     }
+    /* Executable objects (XIP code) still need the flash mmap swap gives them
+     * -- plain heap memory can't be run from safely here -- so this fallback
+     * is non-executable-only, matching what memory__external_alloc() (the
+     * only public, non-executable entry point) promises callers. */
+    if (record != NULL && !allocated && !executable) {
+        allocated = memory_external__allocate_internal_locked(record, size);
+    }
     if (allocated) {
         record->resource_id = BRUCE_RESOURCE_ID_INVALID;
         record->owner_id = owner_id;
@@ -276,7 +303,8 @@ static bruce_result_t memory_external__write_locked(
     memory_external__record_t *record, size_t offset, const void *data, size_t size
 ) {
     bruce_result_t result = BRUCE_OK;
-    if (size != 0 && record->backend == BRUCE_MEMORY_BACKEND_PSRAM) {
+    if (size != 0 &&
+        (record->backend == BRUCE_MEMORY_BACKEND_PSRAM || record->backend == BRUCE_MEMORY_BACKEND_INTERNAL)) {
         memmove((uint8_t *)record->psram + offset, data, size);
     } else if (size != 0) {
         const esp_partition_t *partition = memory_external__partition();

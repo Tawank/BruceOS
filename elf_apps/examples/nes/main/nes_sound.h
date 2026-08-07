@@ -19,7 +19,7 @@
  * per-sample envelope/sweep/length-counter work only happens inside the
  * osd_setsound() fill callback, so skipping it here skips that CPU cost too,
  * not just the I2S write. */
-#define SOUND_ENABLED 1
+#define SOUND_ENABLED 0
 
 /* Pulls PCM from nofrendo's APU and feeds it to the Bruce audio stream, sized
  * from real elapsed time since the last call rather than a fixed per-frame

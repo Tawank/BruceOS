@@ -45,17 +45,19 @@ typedef struct {
     bool exit_requested;
 } terminal__state_t;
 
-/* Prefers a PSRAM-backed memory__external block (a plain, directly
- * addressable buffer) so the parser can keep mutating it in place with
- * ordinary pointer writes. Falls back to internal heap when PSRAM isn't
- * available, since a flash-backed swap block is not safely writable through
- * a raw pointer -- only through memory__external_write(). */
+/* Prefers a PSRAM- or plain-internal-RAM-backed memory__external block (both
+ * are plain, directly addressable buffers) so the parser can keep mutating it
+ * in place with ordinary pointer writes. Falls back to a separate, untracked
+ * internal heap allocation only when memory__external_alloc() itself lands on
+ * flash-backed swap, since that block is not safely writable through a raw
+ * pointer -- only through memory__external_write(). */
 static bruce_result_t
 terminal__alloc_buffer(void **out_data, bruce_memory_object_t *out_object, bool *out_external, size_t size) {
     bruce_memory_object_t object;
     if (memory__external_alloc(size, &object) == BRUCE_OK) {
         const void *mapped = NULL;
-        if (object.backend == BRUCE_MEMORY_BACKEND_PSRAM &&
+        if ((object.backend == BRUCE_MEMORY_BACKEND_PSRAM ||
+             object.backend == BRUCE_MEMORY_BACKEND_INTERNAL) &&
             memory__external_map(&object, &mapped) == BRUCE_OK) {
             memset((void *)mapped, 0, size);
             *out_data = (void *)mapped;

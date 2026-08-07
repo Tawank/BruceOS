@@ -21,6 +21,7 @@ typedef enum {
     BRUCE_MEMORY_BACKEND_INVALID = 0,
     BRUCE_MEMORY_BACKEND_PSRAM,
     BRUCE_MEMORY_BACKEND_SWAP,
+    BRUCE_MEMORY_BACKEND_INTERNAL,
 } bruce_memory_backend_t;
 
 typedef struct {
@@ -58,7 +59,10 @@ void memory__free(void *ptr);
 
 /* Allocates a process-owned external-memory object. PSRAM is preferred when a
  * sufficiently large block is available; otherwise complete 64 KiB pages are
- * allocated from swap. Internal RAM is never used for the payload.
+ * allocated from swap. If neither is available -- no PSRAM on this board, and
+ * no "swap" partition has been committed yet (see partitions.csv) -- plain
+ * internal RAM is used as a last resort so callers of this function still get
+ * a usable object instead of BRUCE_ERR_RESOURCE_LIMIT.
  * The returned object is released automatically when its process exits. */
 bruce_result_t memory__external_alloc(size_t size, bruce_memory_object_t *out_object);
 

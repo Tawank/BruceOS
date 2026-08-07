@@ -8,6 +8,7 @@
 #include "cJSON.h"
 #include "core_sdk/manifest.h"
 #include "core_sdk/memory.h"
+#include "core_sdk/notification.h"
 #include "core_sdk/result.h"
 #include "core_sdk/storage.h"
 #include "core_sdk/wifi.h"
@@ -407,8 +408,13 @@ static bruce_launcher_menu_t *bruce_launcher__parse_json(cJSON *root) {
 bruce_launcher_menu_t *bruce_launcher__menu_load(void) {
     char *text = bruce_launcher__read_file(BRUCE_LAUNCHER_CONFIG_PATH);
     if (text == NULL) {
-        (void)bruce_launcher__write_default_config();
-        text = bruce_launcher__read_file(BRUCE_LAUNCHER_CONFIG_PATH);
+        if (bruce_launcher__write_default_config()) {
+            text = bruce_launcher__read_file(BRUCE_LAUNCHER_CONFIG_PATH);
+        } else {
+            (void)notification__push(
+                "Storage unavailable: launcher config not saved", BRUCE_NOTIFICATION_DURATION_MAX_MS
+            );
+        }
     }
 
     cJSON *root = text != NULL ? cJSON_Parse(text) : NULL;

@@ -69,6 +69,7 @@ int launcher_app_main(int argc, char **argv) {
             bruce_result_t wait_result = process__wait(child, LAUNCHER__SUPERVISOR_INTERVAL_MS);
             if (wait_result == BRUCE_ERR_TIMEOUT) continue;
             child = BRUCE_PROCESS_ID_INVALID;
+            if (runtime__delay(LAUNCHER__SUPERVISOR_INTERVAL_MS) != BRUCE_OK) return BRUCE_ERR_CANCELLED;
         }
         if (launcher__has_foreground()) {
             if (runtime__delay(LAUNCHER__SUPERVISOR_INTERVAL_MS) != BRUCE_OK) return BRUCE_ERR_CANCELLED;
