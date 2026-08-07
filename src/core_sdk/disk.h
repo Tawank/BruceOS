@@ -29,7 +29,11 @@ typedef struct {
  * each disk before its partitions. Pass NULL with capacity 0 to query count. */
 bruce_result_t disk__list(bruce_disk_entry_t *entries, size_t capacity, size_t *out_count);
 
-/* Mount and unmount are global built-in operations. Currently only sd0 at
- * /sdcard is supported; external applications receive BRUCE_ERR_PERMISSION. */
+/* Mount and unmount are global built-in operations; external applications
+ * receive BRUCE_ERR_PERMISSION. `name` "sd0" always mounts at "/sdcard";
+ * any other name is looked up among core/partition_manager's extra
+ * partitions (the "bparted" command) and mounted at the given path, which
+ * must be an absolute path other than "/" or "/sdcard". `unmount` accepts
+ * either the name or the mount point. */
 bruce_result_t disk__mount(const char *name, const char *mount_point);
 bruce_result_t disk__unmount(const char *name_or_mount_point);

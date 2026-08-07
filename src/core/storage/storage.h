@@ -38,4 +38,24 @@ bool storage__sd_is_ready(void);
 bool storage__get_sd_capacity(uint64_t *out_size);
 bool storage__is_internal_partition_mounted(const char *label);
 
+/* Mounts an extra internal LittleFS partition - one core/partition_manager
+ * (the "bparted" command) created with a label other than the root
+ * "littlefs" or the reserved "swap" - at `mount_point`. Formats it first if
+ * it has never been formatted, exactly as the root partition is. Returns
+ * BRUCE_ERR_NOT_FOUND when no such partition exists, BRUCE_ERR_ALREADY_EXISTS
+ * when `label` is already mounted (root included) or `mount_point` is
+ * already in use, and BRUCE_ERR_IO if the mount itself fails. */
+bruce_result_t storage__mount_partition(const char *label, const char *mount_point);
+
+/* Reverses storage__mount_partition(), addressed by either the label or the
+ * mount point it was given. BRUCE_ERR_NOT_FOUND if neither matches a
+ * currently-mounted extra partition; BRUCE_ERR_BUSY while a file opened
+ * through storage__open() is still under it. */
+bruce_result_t storage__unmount_partition(const char *label_or_mount_point);
+
+/* Where `label` is mounted right now: "/" for the root partition, the path
+ * it was given for one mounted via storage__mount_partition(). Returns false
+ * (leaving `out` untouched) when `label` is not mounted internally. */
+bool storage__internal_mount_point(const char *label, char *out, size_t capacity);
+
 void storage__free(void *data);

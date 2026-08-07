@@ -40,9 +40,28 @@ static int s_sd_host;
 static sdmmc_card_t *s_sd_card;
 static const esp_partition_t *s_littlefs_partition;
 
+/* Extra internal LittleFS partitions mounted via storage__mount_partition()
+ * (core/partition_manager entries besides the root "littlefs" and "swap").
+ * At most BRUCE_PARTITION_MAX_ENTRIES can ever exist, root and swap included,
+ * so that bounds this table too. label/mount_point are heap-allocated: they
+ * are set once per mount and freed on unmount, so there is no point paying
+ * for BRUCE_PARTITION_LABEL_MAX/STORAGE__PATH_MAX of static storage per slot. */
+typedef struct {
+    bool in_use;
+    char *label;
+    char *mount_point;
+} storage__extra_mount_t;
+
+static storage__extra_mount_t s_extra_mounts[BRUCE_PARTITION_MAX_ENTRIES];
+
 static bool storage__is_protected_path(const char *path);
 static bool storage__is_valid_public_path(const char *path);
+static bool storage__is_sd_path(const char *path);
 static bool storage__has_open_sd_files_locked(void);
+static int storage__extra_mount_find_by_label_locked(const char *label);
+static int storage__extra_mount_find_by_point_locked(const char *mount_point);
+static int storage__extra_mount_index_for_path_locked(const char *path);
+static bool storage__extra_mount_has_open_files_locked(int index);
 
 static void storage__lock(void) {
     if (s_storage_mutex == NULL) {
@@ -54,6 +73,13 @@ static void storage__lock(void) {
 }
 
 static void storage__unlock(void) { xSemaphoreGive(s_storage_mutex); }
+
+static char *storage__strdup(const char *value) {
+    size_t length = strlen(value) + 1;
+    char *copy = malloc(length);
+    if (copy != NULL) memcpy(copy, value, length);
+    return copy;
+}
 
 static bool storage__littlefs_metadata_erased(const esp_partition_t *partition) {
     uint8_t buffer[256];
@@ -135,7 +161,42 @@ static bool storage__is_sd_path(const char *path) {
 }
 
 static bool storage__is_ready(const char *path) {
-    return path != NULL && (storage__is_sd_path(path) ? s_sd_ready : s_ready);
+    if (path == NULL) return false;
+    if (storage__is_sd_path(path)) return s_sd_ready;
+    if (storage__extra_mount_index_for_path_locked(path) >= 0) return true;
+    return s_ready;
+}
+
+static int storage__extra_mount_find_by_label_locked(const char *label) {
+    if (label == NULL) return -1;
+    for (int i = 0; i < (int)BRUCE_PARTITION_MAX_ENTRIES; ++i) {
+        if (s_extra_mounts[i].in_use && strcmp(s_extra_mounts[i].label, label) == 0) return i;
+    }
+    return -1;
+}
+
+static int storage__extra_mount_find_by_point_locked(const char *mount_point) {
+    if (mount_point == NULL) return -1;
+    for (int i = 0; i < (int)BRUCE_PARTITION_MAX_ENTRIES; ++i) {
+        if (s_extra_mounts[i].in_use && strcmp(s_extra_mounts[i].mount_point, mount_point) == 0) return i;
+    }
+    return -1;
+}
+
+/* Longest-prefix match at a path-component boundary, mirroring
+ * storage__is_sd_path()'s rule so a path under an extra mount is recognized
+ * the same way one under /sdcard is. */
+static int storage__extra_mount_index_for_path_locked(const char *path) {
+    if (path == NULL) return -1;
+    for (int i = 0; i < (int)BRUCE_PARTITION_MAX_ENTRIES; ++i) {
+        if (!s_extra_mounts[i].in_use) continue;
+        size_t mount_length = strlen(s_extra_mounts[i].mount_point);
+        if (strncmp(path, s_extra_mounts[i].mount_point, mount_length) == 0 &&
+            (path[mount_length] == '\0' || path[mount_length] == '/')) {
+            return i;
+        }
+    }
+    return -1;
 }
 
 static bool storage__read_file_locked(const char *path, char **data, size_t *size) {
@@ -255,6 +316,7 @@ bool storage__get_usage_internal(const char *path, size_t *total_bytes, size_t *
     storage__lock();
     bool known = false;
     if (total_bytes != NULL && used_bytes != NULL && path != NULL) {
+        int extra_index = storage__extra_mount_index_for_path_locked(path);
         if (storage__is_sd_path(path) && s_sd_ready) {
             uint64_t total = 0;
             uint64_t free_bytes = 0;
@@ -263,6 +325,8 @@ bool storage__get_usage_internal(const char *path, size_t *total_bytes, size_t *
                 *used_bytes = (size_t)(total - free_bytes);
                 known = true;
             }
+        } else if (extra_index >= 0) {
+            known = esp_littlefs_info(s_extra_mounts[extra_index].label, total_bytes, used_bytes) == ESP_OK;
         } else if (!storage__is_sd_path(path) && s_ready) {
             known = esp_littlefs_partition_info(s_littlefs_partition, total_bytes, used_bytes) == ESP_OK;
         }
@@ -359,10 +423,133 @@ bool storage__get_sd_capacity(uint64_t *out_size) {
 
 bool storage__is_internal_partition_mounted(const char *label) {
     storage__lock();
-    bool mounted = s_ready && s_littlefs_partition != NULL && label != NULL &&
-                   strcmp(s_littlefs_partition->label, label) == 0;
+    bool mounted = (s_ready && s_littlefs_partition != NULL && label != NULL &&
+                     strcmp(s_littlefs_partition->label, label) == 0) ||
+                   storage__extra_mount_find_by_label_locked(label) >= 0;
     storage__unlock();
     return mounted;
+}
+
+bool storage__internal_mount_point(const char *label, char *out, size_t capacity) {
+    if (label == NULL || out == NULL || capacity == 0) return false;
+    storage__lock();
+    const char *point = NULL;
+    if (s_ready && s_littlefs_partition != NULL && strcmp(s_littlefs_partition->label, label) == 0) {
+        point = "/";
+    } else {
+        int index = storage__extra_mount_find_by_label_locked(label);
+        if (index >= 0) point = s_extra_mounts[index].mount_point;
+    }
+    if (point != NULL) snprintf(out, capacity, "%s", point);
+    storage__unlock();
+    return point != NULL;
+}
+
+/* core/partition_manager already formats a newly-created entry the boot it
+ * first registers it (see partition_manager__register_and_apply()), so the
+ * mount below normally just succeeds; the erased-metadata fallback mirrors
+ * storage__mount_internal()'s and only matters if that format was missed. */
+bruce_result_t storage__mount_partition(const char *label, const char *mount_point) {
+    if (label == NULL || mount_point == NULL || mount_point[0] != '/') return BRUCE_ERR_INVALID_ARGUMENT;
+    size_t mount_point_length = strlen(mount_point);
+    if (mount_point_length >= STORAGE__PATH_MAX) return BRUCE_ERR_INVALID_ARGUMENT;
+
+    storage__lock();
+    if (!s_ready) {
+        storage__unlock();
+        return BRUCE_ERR_INVALID_STATE;
+    }
+    bool label_taken = (s_littlefs_partition != NULL && strcmp(s_littlefs_partition->label, label) == 0) ||
+                        storage__extra_mount_find_by_label_locked(label) >= 0;
+    bool point_taken = strcmp(mount_point, "/") == 0 || storage__is_sd_path(mount_point) ||
+                        storage__extra_mount_find_by_point_locked(mount_point) >= 0;
+    if (label_taken || point_taken) {
+        storage__unlock();
+        return BRUCE_ERR_ALREADY_EXISTS;
+    }
+    int slot = -1;
+    for (int i = 0; i < (int)BRUCE_PARTITION_MAX_ENTRIES; ++i) {
+        if (!s_extra_mounts[i].in_use) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot < 0) {
+        storage__unlock();
+        return BRUCE_ERR_RESOURCE_LIMIT;
+    }
+
+    const esp_partition_t *partition =
+        esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_LITTLEFS, label);
+    if (partition == NULL) {
+        storage__unlock();
+        return BRUCE_ERR_NOT_FOUND;
+    }
+
+    /* Copied before touching the VFS so a failed allocation never leaves a
+     * mount registered with nothing in s_extra_mounts to unregister it. */
+    char *label_copy = storage__strdup(label);
+    char *mount_point_copy = label_copy != NULL ? storage__strdup(mount_point) : NULL;
+    if (label_copy == NULL || mount_point_copy == NULL) {
+        free(label_copy);
+        free(mount_point_copy);
+        storage__unlock();
+        return BRUCE_ERR_NO_MEMORY;
+    }
+
+    const esp_vfs_littlefs_conf_t config = {
+        .base_path = mount_point,
+        .partition_label = NULL,
+        .partition = partition,
+        .format_if_mount_failed = false,
+        .grow_on_mount = true,
+    };
+    esp_err_t err = esp_vfs_littlefs_register(&config);
+    if (err != ESP_OK && storage__littlefs_metadata_erased(partition)) {
+        ESP_LOGI(TAG, "formatting empty partition '%s'", label);
+        err = esp_littlefs_format_partition(partition);
+        if (err == ESP_OK) err = esp_vfs_littlefs_register(&config);
+    }
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "could not mount '%s' at %s: %s", label, mount_point, esp_err_to_name(err));
+        free(label_copy);
+        free(mount_point_copy);
+        storage__unlock();
+        return BRUCE_ERR_IO;
+    }
+
+    s_extra_mounts[slot].in_use = true;
+    s_extra_mounts[slot].label = label_copy;
+    s_extra_mounts[slot].mount_point = mount_point_copy;
+    storage__unlock();
+    return BRUCE_OK;
+}
+
+bruce_result_t storage__unmount_partition(const char *label_or_mount_point) {
+    if (label_or_mount_point == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    storage__lock();
+    int index = storage__extra_mount_find_by_label_locked(label_or_mount_point);
+    if (index < 0) index = storage__extra_mount_find_by_point_locked(label_or_mount_point);
+    if (index < 0) {
+        storage__unlock();
+        return BRUCE_ERR_NOT_FOUND;
+    }
+    if (storage__extra_mount_has_open_files_locked(index)) {
+        storage__unlock();
+        return BRUCE_ERR_BUSY;
+    }
+    esp_err_t err = esp_vfs_littlefs_unregister(s_extra_mounts[index].label);
+    if (err != ESP_OK) {
+        storage__unlock();
+        return BRUCE_ERR_IO;
+    }
+    free(s_extra_mounts[index].label);
+    free(s_extra_mounts[index].mount_point);
+    s_extra_mounts[index].label = NULL;
+    s_extra_mounts[index].mount_point = NULL;
+    s_extra_mounts[index].in_use = false;
+    storage__unlock();
+    return BRUCE_OK;
 }
 
 void storage__free(void *data) { free(data); }
@@ -376,6 +563,7 @@ void storage__free(void *data) { free(data); }
 typedef struct {
     bool in_use;
     bool sd;
+    int extra_mount; /* Index into s_extra_mounts, or -1 when not under one. */
     int fd;
     bruce_file_id_t id;
     bruce_resource_id_t resource_id;
@@ -389,6 +577,13 @@ static uint32_t s_next_file_id = 1;
 static bool storage__has_open_sd_files_locked(void) {
     for (int i = 0; i < STORAGE__MAX_OPEN_FILES; ++i) {
         if (s_open_files[i].in_use && s_open_files[i].sd) return true;
+    }
+    return false;
+}
+
+static bool storage__extra_mount_has_open_files_locked(int index) {
+    for (int i = 0; i < STORAGE__MAX_OPEN_FILES; ++i) {
+        if (s_open_files[i].in_use && s_open_files[i].extra_mount == index) return true;
     }
     return false;
 }
@@ -513,6 +708,7 @@ bruce_result_t storage__open(const char *path, uint32_t flags, bruce_file_id_t *
      * be a lock-order inversion. */
     s_open_files[slot_index].in_use = true;
     s_open_files[slot_index].sd = storage__is_sd_path(path);
+    s_open_files[slot_index].extra_mount = storage__extra_mount_index_for_path_locked(path);
     s_open_files[slot_index].id = BRUCE_FILE_ID_INVALID;
     s_open_files[slot_index].fd = -1;
     storage__unlock();
