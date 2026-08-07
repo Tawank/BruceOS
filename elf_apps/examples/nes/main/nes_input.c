@@ -2,7 +2,10 @@
 
 #include "core_sdk/input.h"
 
+#include "noftypes.h"
+
 #include "event.h"
+#include "nes/nesinput.h"
 #include "nes_input.h"
 #include "osd.h"
 

@@ -6,6 +6,7 @@
 
 #include "bitmap.h"
 #include "nes/nes.h"
+#include "nes_sound.h"
 #include "nes_video.h"
 #include "nofrendo.h"
 #include "osd.h"
@@ -112,6 +113,7 @@ static void pace_frame(void) {
         runtime__delay(1);
     }
     if (s_timer_callback != NULL) s_timer_callback();
+    nes_sound_pump();
 }
 
 #define BRUCE_NES_VISIBLE_HEIGHT 224

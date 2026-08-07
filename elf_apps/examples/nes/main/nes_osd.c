@@ -10,6 +10,7 @@
 #include "core_sdk/memory.h"
 
 #include "nes/nes.h"
+#include "nes_sound.h"
 #include "nes_video.h"
 #include "nofconfig.h"
 #include "nofrendo.h"
@@ -61,7 +62,8 @@ void osd_shutdown(void) {
      * chance to close the stream before the process exits. If it's missed
      * (a crash, a forced kill), Core's automatic per-process resource
      * cleanup (see audio__stream_open() in core_sdk/audio.h) closes it
-     * anyway. */
+     * anyway. See nes_sound.c for the definition. */
+    osd_stopsound();
     nes_video_destroy_bitmap();
 }
 
