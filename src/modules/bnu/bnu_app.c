@@ -5,6 +5,7 @@
 
 #include "args.h"
 #include "core_sdk/disk.h"
+#include "core_sdk/format.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
@@ -132,25 +133,6 @@ int bnu_ls_app_main(int argc, char **argv) {
     return result;
 }
 
-static void bnu__format_block_size(uint64_t bytes, char *output, size_t capacity) {
-    static const char units[] = {'B', 'K', 'M', 'G', 'T'};
-    uint64_t divisor = 1;
-    size_t unit = 0;
-    while (unit + 1 < sizeof(units) && bytes >= divisor * 1024) {
-        divisor *= 1024;
-        unit++;
-    }
-    uint64_t whole = bytes / divisor;
-    uint64_t tenth = ((bytes % divisor) * 10) / divisor;
-    if (unit == 0 || tenth == 0) {
-        snprintf(output, capacity, "%llu%c", (unsigned long long)whole, units[unit]);
-    } else {
-        snprintf(
-            output, capacity, "%llu.%llu%c", (unsigned long long)whole, (unsigned long long)tenth, units[unit]
-        );
-    }
-}
-
 int bnu_lsblk_app_main(int argc, char **argv) {
     ArgParser *parser = bnu__new_parser("List block devices and partitions.");
     if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
@@ -172,7 +154,7 @@ int bnu_lsblk_app_main(int argc, char **argv) {
     for (size_t i = 0; i < count; ++i) {
         char size[32];
         char name[BRUCE_DISK_NAME_MAX + 3];
-        bnu__format_block_size(entries[i].size, size, sizeof(size));
+        format__bytes_human(entries[i].size, size, sizeof(size));
         snprintf(
             name,
             sizeof(name),
@@ -286,10 +268,20 @@ static const char *bnu__process_state_name(bruce_process_state_t state) {
     }
 }
 
+/* -h is reserved by ArgParser for --help, so human-readable output uses -H
+ * (matching du/df/ls's -h intent, just on a free letter). */
+static void bnu__format_size(uint32_t bytes, bool human, char *output, size_t capacity) {
+    if (human) format__bytes_human(bytes, output, capacity);
+    else snprintf(output, capacity, "%u", (unsigned)bytes);
+}
+
 int bnu_top_app_main(int argc, char **argv) {
     ArgParser *parser = bnu__new_parser("Show runtime process resource usage.");
     if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
+    ap_add_flag(parser, "H");
+    ap_set_opt_help(parser, "H", "Show stck/heap/swap sizes in human-readable units (e.g. 8.2K, 1.3M)");
     if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
+    bool human = ap_found(parser, "H");
     ap_free(parser);
 
     bruce_process_snapshot_t processes[16];
@@ -307,14 +299,26 @@ int bnu_top_app_main(int argc, char **argv) {
         uint32_t stack_used_bytes = processes[i].stack_total_bytes > processes[i].stack_high_water_bytes
                                         ? processes[i].stack_total_bytes - processes[i].stack_high_water_bytes
                                         : 0;
+        /* memory_bytes tracks everything the process owns, swap included;
+         * subtract swap_bytes here so the displayed "heap" is RAM only
+         * (internal heap + PSRAM) and doesn't double-count the swap column. */
+        uint32_t ram_bytes = processes[i].memory_bytes > processes[i].swap_bytes
+                                 ? processes[i].memory_bytes - processes[i].swap_bytes
+                                 : 0;
+        char stack_text[16];
+        char heap_text[16];
+        char swap_text[16];
+        bnu__format_size(stack_used_bytes, human, stack_text, sizeof(stack_text));
+        bnu__format_size(ram_bytes, human, heap_text, sizeof(heap_text));
+        bnu__format_size((uint32_t)processes[i].swap_bytes, human, swap_text, sizeof(swap_text));
         stdio__printf(
-            "%1.1s %2u %3u %4u %4u %4u %s\n",
+            "%1.1s %2u %3u %4s %4s %4s %.16s\n",
             bnu__process_state_name(processes[i].state),
             (unsigned)processes[i].id,
             (unsigned)processes[i].cpu_percent,
-            (unsigned)stack_used_bytes,
-            (unsigned)processes[i].memory_bytes,
-            (unsigned)processes[i].swap_bytes,
+            stack_text,
+            heap_text,
+            swap_text,
             processes[i].name
         );
     }

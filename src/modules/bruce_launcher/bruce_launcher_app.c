@@ -519,7 +519,8 @@ static int bruce_launcher__run_entry(const bruce_launcher_entry_t *entry) {
     if (result < 0) {
         char message[128];
         snprintf(
-            message, sizeof(message), "Could not start %s (%d)", bruce_launcher__entry_label(entry), result
+            message, sizeof(message), "Could not start %s: %s", bruce_launcher__entry_label(entry),
+            app_runner__result_to_string(result)
         );
         (void)dialog__message(BRUCE_DIALOG_ERROR, "Launch failed", message);
     }

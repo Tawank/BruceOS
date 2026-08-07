@@ -57,6 +57,7 @@
 #define SSH_KEYGEN_STACK_BYTES 12288u
 #define WIFI_STACK_BYTES 8192u
 #define BPARTED_STACK_BYTES 8192u
+#define NOTIFICATION_SERVICE_STACK_BYTES 2048u
 
 void app_runner__register_defaults(void) {
     (void)app_runner__register("launcher", launcher_app_main, LAUNCHER_STACK_BYTES);

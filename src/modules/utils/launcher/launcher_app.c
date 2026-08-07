@@ -50,7 +50,6 @@ static int launcher__start(bool gui, bruce_launch_mode_t mode) {
 }
 
 int launcher_app_main(int argc, char **argv) {
-    bool gui = runtime__gui_requested();
     if (!launcher__has_arg(argc, argv, "-s")) {
         bruce_process_snapshot_t snapshot;
         bruce_launch_mode_t mode = BRUCE_LAUNCH_FOREGROUND;
@@ -58,6 +57,7 @@ int launcher_app_main(int argc, char **argv) {
             snapshot.state == BRUCE_PROCESS_BACKGROUND) {
             mode = BRUCE_LAUNCH_BACKGROUND;
         }
+        bool gui = runtime__gui_requested();
         int result = launcher__start(gui, mode);
         return result < 0 ? result : 0;
     }

@@ -4,8 +4,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "core_sdk/result.h"
 #include "core_sdk/environment.h"
+#include "core_sdk/result.h"
 
 typedef int (*bruce_app_entry_t)(int argc, char **argv);
 
@@ -44,7 +44,7 @@ int app_runner__run_with_environment(
 /* Parses a complete command line, including leading NAME=value assignments.
  * An explicit BG=0 or BG=1 selects foreground/background; otherwise
  * default_mode is used. BG is still included in the child's environment. */
-int app_runner__run_command(const char *command_line, bruce_launch_mode_t default_mode);
+bruce_result_t app_runner__run_command(const char *command_line, bruce_launch_mode_t default_mode);
 
 /* Shell-style tokenizer shared by app_runner__run()'s own named resolution
  * and by every loader module's run_fn, so quoting/escaping rules are
@@ -61,6 +61,13 @@ bruce_result_t app_runner__parse_args(const char *arg, char ***out_argv, int *ou
 /* Frees an argv produced by app_runner__parse_args().  Safe to call with
  * argv == NULL (e.g. when argc == 0). */
 void app_runner__free_args(char **argv, int argc);
+
+/* Translates a bruce_result_t (or the BRUCE_OK/BRUCE_ERR_* range of any int
+ * returned by the app_runner__run*() family) into a short human-readable
+ * description, e.g. BRUCE_ERR_NOT_FOUND -> "Not found". Positive values
+ * (process ids) and unrecognized codes return "Unknown error". Always
+ * returns a non-NULL, statically-allocated string. */
+const char *app_runner__result_to_string(int result);
 
 /* Scans an environment overlay array (not yet applied to any process) for
  * name "GUI"; returns true iff the last matching entry's value is "1".
