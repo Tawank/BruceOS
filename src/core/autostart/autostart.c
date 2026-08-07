@@ -52,15 +52,11 @@ static bool autostart__command_is(const char *command, const char *name) {
     }
 }
 
-void autostart__run(bool ui_ok, const char *skip_command) {
+void autostart__run(bool ui_ok) {
     const bruce_config_startup_apps_t *apps = config__get_startup_apps();
     if (apps == NULL) return;
     for (size_t i = 0; i < apps->count; ++i) {
         const char *command = apps->items[i];
-        if (skip_command != NULL && autostart__command_is(command, skip_command)) {
-            printf("Startup app \"%s\" skipped\n", apps->items[i]);
-            continue;
-        }
         char with_gui[CONFIG__STARTUP_APP_MAX_LEN + 8];
         if (ui_ok && !autostart__command_is_serial_commands(command) && strncmp(command, "GUI=", 4) != 0 &&
             autostart__command_requests_foreground(command)) {

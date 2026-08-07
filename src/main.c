@@ -2,7 +2,6 @@
 #include <stdio.h>
 
 #include "core_sdk/loader.h"
-#include "core_sdk/memory.h"
 #include "core_sdk/process.h"
 
 #include "core/autostart/autostart.h"
@@ -131,26 +130,6 @@ bool init_user_interface(void) {
     return ui_ok;
 }
 
-/* True when nothing in this boot can back memory__external_alloc(): no PSRAM
- * (boards like m5stack-cplus2 don't have any) and no "swap" partition either
- * (partitions.csv no longer carries one - see its header comment - so a
- * fresh device has none until core/partition_manager's user table stages
- * one). bruce_launcher builds its whole menu tree through
- * memory__external_alloc() (see bruce_launcher_menu.c's
- * bruce_launcher__parse_json()), so this is exactly the state that makes
- * "launcher -s" (a default startup app) fail every single time it's
- * (re)started, printing "Failed to load launcher configuration" in a tight
- * respawn loop and never actually booting. */
-static bool app_main__external_memory_missing(void) {
-    bruce_memory_stats_t stats;
-    if (memory__get_stats(&stats) != BRUCE_OK) return false;
-    return stats.psram_total == 0 && stats.swap_total == 0;
-}
-
-/* Blocks until `process_id` (a positive app_runner__run_command() result)
- * exits, discarding its status; a non-positive id is a no-op. Shared by
- * app_main__recover_missing_partitions() for both the services it starts
- * ahead of bparted and bparted itself. */
 static void app_main__wait_for_exit(int process_id) {
     if (process_id <= 0) return;
     bruce_process_status_t status;
@@ -162,30 +141,15 @@ static void app_main__wait_for_exit(int process_id) {
 
 /* Runs "bparted" before autostart__run() so the user can create a "swap"
  * partition (or fix up storage) while nothing that needs it - the launcher
- * included - has started yet. "GUI=1" only when there's a screen to drive it
- * (see autostart__run()'s own ui_ok-gated "GUI=1" convention); headless
- * boards are left to fix this over a serial "bparted create ..." session,
- * same as any other storage problem today. */
+ * included - has started yet.  */
 static void app_main__recover_missing_partitions(const char *reason, bool ui_ok) {
     printf("%s; run \"bparted\" to create a partition\n", reason);
 #if CONFIG_BRUCE_QEMU_TEST_MODE
-    /* Nothing here can answer an interactive dialog on an unattended/CI
-     * boot - dialog__choice() would just block forever waiting for input
-     * nobody is going to send, wedging app_main() before it ever reaches
-     * this file's "#if CONFIG_BRUCE_QEMU_TEST_MODE" selftest launch below. */
     (void)ui_ok;
     return;
 #else
     if (!ui_ok) return;
 
-    /* bparted's GUI reads button/touch events through the "input" service
-     * (which itself needs "device_bus" for I2C), same as every other GUI
-     * app - but this runs ahead of autostart__run(), before config's
-     * startup list would normally bring them up. Start both here, run
-     * bparted, then stop them again so autostart__run() right after this
-     * starts them (and everything else the user has configured) exactly as
-     * it would on a boot that never needed this recovery path, with no two
-     * instances of either ever fighting over the same hardware. */
     int device_bus_id = app_runner__run_command("device_bus", BRUCE_LAUNCH_BACKGROUND);
     int input_id = app_runner__run_command("input", BRUCE_LAUNCH_BACKGROUND);
 
@@ -217,25 +181,9 @@ void app_main(void) {
     bool ui_ok = init_user_interface();
 
     app_runner__register_defaults();
-    /* Neither condition can change without a reboot (see
-     * app_main__recover_missing_partitions()'s doc comment), so whichever is
-     * true now is still true after that call returns - whether the user
-     * fixed it (and rebooted from inside bparted, in which case app_main()
-     * never gets this far again this boot) or backed out without fixing it.
-     * In the latter case "launcher" (config's default "launcher -s") is
-     * skipped below: it can only fail the exact same way again, and its own
-     * "-s" supervisor has no backoff (see modules/utils/launcher/
-     * launcher_app.c), so starting it anyway is just an infinite "Failed to
-     * load launcher configuration" print loop, not a real attempt. */
-    const char *skip_command = NULL;
-    if (!storage_ok) {
-        app_main__recover_missing_partitions("No usable partitions found", ui_ok);
-        skip_command = "launcher";
-    } else if (app_main__external_memory_missing()) {
-        app_main__recover_missing_partitions("No PSRAM or swap partition found", ui_ok);
-        skip_command = "launcher";
-    }
-    autostart__run(ui_ok, skip_command);
+    if (!storage_ok) { app_main__recover_missing_partitions("No usable partitions found", ui_ok); }
+
+    autostart__run(ui_ok);
 
 #if CONFIG_BRUCE_QEMU_TEST_MODE
 #define MAIN_SERIAL_READY_TIMEOUT_MS 1000
