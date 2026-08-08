@@ -48,29 +48,31 @@
  * cap's worth of real time -- true here even after most frames' *blit* is
  * skipped, see nes_video.c's skip_track_debt() -- `due_frames` sits above
  * the cap on essentially every call, so `generate` saturates at the cap
- * every single time. At that point this is indistinguishable from "always
- * write exactly cap-sized chunks", and because audio__stream_write() blocks
- * until the hardware has room (it paces to real playback speed once the
- * ring can't absorb a write immediately), a saturated loop settles into
- * spending very close to (cap / sample_rate) seconds *blocked inside this
- * call* every iteration -- the cap becomes a floor on iteration time, not
- * just a ceiling on catch-up. Raising it from 960 (20ms) to 1440 (30ms)
- * measured out to raising that floor from ~20ms to ~30ms, i.e. made the
- * game slower, not faster -- the opposite of the intent. Keeping the cap
- * close to *one nominal NES frame's worth* (audio_sample_rate_hz /
- * NES_REFRESH_RATE, ~800 for NTSC @ 48kHz) bounds that floor close to the
- * frame budget itself; 960 (1.2x nominal) leaves a little slack for jitter
- * without letting a chronic backlog turn into a chronic ~2x slowdown.
- * The tradeoff this leaves in place: whenever CPU/PPU emulation + blit
- * genuinely can't keep up with real time on their own (a real, separate
- * bottleneck -- see nes_video.c's perf report for whether that's the case
- * here), the ring still can't be kept fully fed and will underrun/glitch.
- * That's a real limit of pulling audio from a single task that also does
- * the emulation and blocking on a real-time output device; it can't be
- * fixed by turning the knob in this file, only masked at the cost of
- * exactly the resonant slowdown above. Any backlog beyond what the cap
- * covers in one call is carried forward in audio_carry_frames and paid down
- * over subsequent calls instead of blowing out the audio_samples buffer. */
+ * every single time. Back when this pulled samples via the blocking
+ * audio__stream_write(), that made this cap a *floor on this task's own
+ * iteration time*, not just a ceiling on catch-up: a saturated loop settled
+ * into spending very close to (cap / sample_rate) seconds blocked inside
+ * this very call, every iteration, and raising the cap from 960 (20ms) to
+ * 1440 (30ms) measured out to raising that floor from ~20ms to ~30ms --
+ * made the game slower, not faster.
+ *
+ * This now calls audio__stream_write_async() (core_sdk/audio.h) instead,
+ * which moves that blocking real-time wait onto its own background task, so
+ * a saturated cap no longer directly stalls *this* task the same way -- see
+ * audio_last_write_us's comment below for what can still make this call
+ * take real time despite that. The cap still matters for two other reasons
+ * that have nothing to do with blocking: it bounds how many samples one
+ * call's apu_process()/scaling loop has to churn through, and it bounds how
+ * large a single chunk gets hashed into the async ring at once (a giant
+ * `generate` value would otherwise dump one huge burst on the ring instead
+ * of several smaller ones, defeating the "handful of chunks' worth of
+ * slack" it's sized for -- see AUDIO__ASYNC_RING_BYTES in core/audio/
+ * audio.c). Keeping the cap close to *one nominal NES frame's worth*
+ * (audio_sample_rate_hz / NES_REFRESH_RATE, ~800 for NTSC @ 48kHz) keeps
+ * both of those reasonable; 960 (1.2x nominal) leaves a little slack for
+ * jitter. Any backlog beyond what the cap covers in one call is carried
+ * forward in audio_carry_frames and paid down over subsequent calls instead
+ * of blowing out the audio_samples buffer. */
 #define BRUCE_NES_AUDIO_MAX_SAMPLES_PER_FRAME 960
 /* A single gap this large or more (paused in a menu, a very long stall) is
  * treated as "resume from here", not "generate everything that was missed"
@@ -84,12 +86,19 @@ static uint64_t audio_last_pump_ms;
 static uint32_t audio_carry_frames;
 static bool audio_stream_open;
 
-/* Wall-clock time the most recent nes_sound_pump() call spent blocked
- * inside audio__stream_write(), in microseconds -- exposed so nes_video.c's
- * perf report can show it alongside blit/iteration time, telling apart "the
- * loop is slow because emulation is slow" from "the loop is slow because
- * it's stuck waiting on the audio backend" (see the cap-saturation comment
- * above BRUCE_NES_AUDIO_MAX_SAMPLES_PER_FRAME). */
+/* Wall-clock time the most recent nes_sound_pump() call spent inside
+ * audio__stream_write_async(), in microseconds -- exposed so nes_video.c's
+ * perf report can show it alongside blit/iteration time. With the blocking
+ * audio__stream_write() this used to be a direct read of how long this task
+ * was stuck waiting on the audio backend; audio__stream_write_async()
+ * (core_sdk/audio.h) moves that real-time wait onto its own background task
+ * instead, so under normal conditions this call returns quickly and this
+ * value stays small -- it only grows if the async ring itself fills up
+ * (this task producing audio faster than the background writer, plus
+ * whatever's already queued, can drain), which is exactly the condition
+ * worth seeing here: everything above the ring's slack still shows up as
+ * real time spent in this call, same as before, just with a couple frames'
+ * worth of headroom before it does. */
 static uint32_t audio_last_write_us;
 
 uint32_t nes_sound_last_write_us(void) { return audio_last_write_us; }
@@ -161,7 +170,7 @@ void nes_sound_pump(void) {
     for (uint32_t i = 0; i < generate; i++) { audio_samples[i] = (int16_t)(audio_samples[i] >> 2); }
 
     uint64_t write_start_ms = runtime__now();
-    audio__stream_write(audio_samples, generate);
+    audio__stream_write_async(audio_samples, generate);
     audio_last_write_us = (uint32_t)(runtime__now() - write_start_ms) * 1000u;
 }
 

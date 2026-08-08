@@ -100,6 +100,7 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(audio__stream_sample_rate),
     ESP_ELFSYM_EXPORT(audio__stream_open),
     ESP_ELFSYM_EXPORT(audio__stream_write),
+    ESP_ELFSYM_EXPORT(audio__stream_write_async),
     ESP_ELFSYM_EXPORT(audio__stream_close),
 
     /* Device state */

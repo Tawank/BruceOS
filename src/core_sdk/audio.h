@@ -44,3 +44,32 @@ uint32_t audio__stream_sample_rate(void);
 bruce_result_t audio__stream_open(uint8_t channels);
 bruce_result_t audio__stream_write(const int16_t *samples, size_t frame_count);
 bruce_result_t audio__stream_close(void);
+
+/* Same contract as audio__stream_write() (signed 16-bit PCM, `channels`
+ * interleaved, audio__stream_sample_rate() Hz), except the wait for the
+ * backend's real-time backpressure happens on a dedicated background task
+ * instead of the calling task. audio__stream_write() ties up its caller for
+ * as long as the hardware takes to physically drain the samples -- fine for
+ * a caller with nothing else to do, but a caller that alternates between
+ * synthesizing audio and other real-time work (an emulator's CPU/PPU core,
+ * a game loop) pays that wait serially on top of its own work every single
+ * call. audio__stream_write_async() instead copies into a small internal
+ * ring and returns as soon as the ring has room, so the caller can go on to
+ * its next unit of work (e.g. the next emulated frame) while the actual
+ * hardware write happens concurrently on the other core.
+ *
+ * This still blocks -- same backpressure guarantee as audio__stream_write()
+ * -- but only once the caller has produced enough audio to fill the ring
+ * without the background writer draining it in time, i.e. only once the
+ * caller is genuinely running ahead of real time by more than the ring's
+ * capacity affords. Under normal conditions (production and consumption
+ * roughly keeping pace with each other) this returns quickly.
+ *
+ * Samples enqueued but not yet written to hardware are discarded, not
+ * played, if the stream is closed (or its owning process exits/is killed)
+ * before the background writer reaches them -- closing a stream always ends
+ * in real silence on the output, never stale queued audio, at the cost of
+ * dropping at most the ring's-worth of already-buffered-but-unplayed tail.
+ * On a backend with no PCM support this is a no-op, like
+ * audio__stream_write(). */
+bruce_result_t audio__stream_write_async(const int16_t *samples, size_t frame_count);
