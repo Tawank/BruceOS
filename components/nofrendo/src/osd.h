@@ -55,6 +55,18 @@
 /* memory allocation */
 extern void *mem_alloc(int size, bool prefer_fast_memory);
 
+/* Called once after mem_alloc()+fread() finish loading a ROM/VROM bank
+ * image that nofrendo never writes again past this point (rom_loadrom() in
+ * nes_rom.c -- unlike the sram/vram buffers, which stay on plain
+ * mem_alloc()/NOFRENDO_FREE()). May return `buffer` unchanged, or free it
+ * and return a different pointer backed by whatever read-only storage the
+ * platform prefers for data that's written once and only read from then on.
+ * `buffer` is still owned by the caller if this returns NULL. Whatever
+ * pointer it returns must be released with mem_free_readonly(), not
+ * NOFRENDO_FREE()/free(). */
+extern void *mem_commit_readonly(void *buffer, int size);
+extern void mem_free_readonly(void *buffer, int size);
+
 /* audio */
 extern void osd_setsound(void (*playfunc)(void *buffer, int size));
 

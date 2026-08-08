@@ -21,6 +21,74 @@ void *mem_alloc(int size, bool prefer_fast_memory) {
     return size > 0 ? memory__malloc((size_t)size) : NULL;
 }
 
+/* mem_commit_readonly()/mem_free_readonly() back the ROM and VROM bank
+ * images rom_loadrom() (nes_rom.c) loads once via mem_alloc()+fread() and
+ * never writes again -- unlike the sram/vram buffers, which stay on plain
+ * mem_alloc()/NOFRENDO_FREE() because the emulator does keep writing
+ * through those. memory__external's PSRAM-preferred, swap-backed allocator
+ * fits that read-only-after-load shape better than the general-purpose
+ * tracked heap mem_alloc() routes everything else through, but
+ * memory__external_map() only ever hands back a `const void *` (nothing but
+ * memory__external_write() may mutate the backing store) -- so committing a
+ * freshly loaded buffer means allocating a second, external object, copying
+ * the bytes across, and swapping the pointer nofrendo keeps from then on.
+ *
+ * At most two such regions are ever live at once (one ROM, one VROM), so a
+ * two-slot table is all the bookkeeping mem_free_readonly() needs to tell
+ * "this pointer migrated to an external object" apart from "commit fell
+ * back to the original mem_alloc()'d buffer" (PSRAM/swap unavailable, or
+ * both slots already taken by a still-loaded ROM). */
+#define NES_OSD__READONLY_SLOTS 2
+static struct {
+    const void *pointer;
+    bruce_memory_object_t object;
+} s_readonly_slots[NES_OSD__READONLY_SLOTS];
+
+void *mem_commit_readonly(void *buffer, int size) {
+    if (buffer == NULL || size <= 0) return buffer;
+
+    int slot = -1;
+    for (int i = 0; i < NES_OSD__READONLY_SLOTS; ++i) {
+        if (s_readonly_slots[i].pointer == NULL) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot < 0) return buffer;
+
+    bruce_memory_object_t object;
+    if (memory__external_alloc((size_t)size, &object) != BRUCE_OK) return buffer;
+    if (memory__external_write(&object, 0, buffer, (size_t)size) != BRUCE_OK) {
+        memory__external_free(&object);
+        return buffer;
+    }
+    const void *mapped = NULL;
+    if (memory__external_map(&object, &mapped) != BRUCE_OK) {
+        memory__external_free(&object);
+        return buffer;
+    }
+
+    memory__free(buffer);
+    s_readonly_slots[slot].pointer = mapped;
+    s_readonly_slots[slot].object = object;
+    return (void *)mapped;
+}
+
+void mem_free_readonly(void *buffer, int size) {
+    (void)size;
+    if (buffer == NULL) return;
+    for (int i = 0; i < NES_OSD__READONLY_SLOTS; ++i) {
+        if (s_readonly_slots[i].pointer == buffer) {
+            memory__external_free(&s_readonly_slots[i].object);
+            s_readonly_slots[i].pointer = NULL;
+            return;
+        }
+    }
+    /* Never migrated (alloc/write/map failed, or both slots were taken) --
+     * still the original mem_alloc()'d buffer. */
+    memory__free(buffer);
+}
+
 static bool config_open(void) { return false; }
 static void config_close(void) {}
 static int config_read_int(const char *group, const char *key, int value) {

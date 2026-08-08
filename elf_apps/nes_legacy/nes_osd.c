@@ -30,6 +30,20 @@ extern void *mem_alloc(int size, bool prefer_fast_memory) {
     }
 }
 
+/* mem_alloc(..., false) already prefers PSRAM for ROM/VROM banks here, so
+ * there's no second read-only backend to migrate into -- pass the buffer
+ * mem_alloc() returned straight through, matching mem_alloc()'s own
+ * heap_caps allocation/release pair. */
+extern void *mem_commit_readonly(void *buffer, int size) {
+    (void)size;
+    return buffer;
+}
+
+extern void mem_free_readonly(void *buffer, int size) {
+    (void)size;
+    heap_caps_free(buffer);
+}
+
 /* sound */
 extern int osd_init_sound();
 extern void osd_stopsound();
