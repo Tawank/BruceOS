@@ -82,25 +82,67 @@ void nes_video_destroy_bitmap(void) { bmp_destroy(&s_screen_bitmap); }
 #define NES_FRAME_PERIOD_US 16639u /* NTSC: real refresh rate is 60.0988Hz */
 #endif
 
+/* A single pace_frame() call used to bump nofrendo_ticks by a flat 1 no
+ * matter how long the frame it just finished actually took in real time.
+ * That was harmless while autoframeskip was permanently forced off (see
+ * nes_osd.c's osd_installtimer()) -- with autoframeskip off nes_emulate()
+ * renders every call regardless of ticks, so the tick value was never
+ * actually load-bearing. It matters now: nofrendo's own frame-skip logic
+ * decides whether to render pixels this frame purely by comparing elapsed
+ * ticks against frames actually drawn, and a flat +1 told it "exactly one
+ * frame period passed" even when the previous render+blit took two or three
+ * times that long. nofrendo then dutifully rendered and blitted every single
+ * one of those slow frames in full, so the *whole game* -- not just the
+ * frame rate -- ran in slow motion, and nes_sound_pump() (also only called
+ * from here) could never pull more than one frame's worth of audio per call
+ * to match, so the output ring chronically underran into distortion. Ticks
+ * bumped here now reflect how many real NES_FRAME_PERIOD_US periods actually
+ * elapsed, so nes_emulate() can tell it's behind and skip pixel rendering
+ * (nes_renderframe(false), still real CPU/PPU emulation, just no draw) on
+ * some frames to let game logic catch back up to real time -- see
+ * osd_installtimer() for how the very first frame bootstraps this. */
+#define NES_MAX_TICKS_PER_PACE 6u
+
 static void pace_frame(void) {
     static uint64_t next_frame_ms;
     static uint32_t next_frame_remainder_us;
+    static bool autoframeskip_restored;
 
     uint64_t now_ms = runtime__now();
     if (next_frame_ms == 0) next_frame_ms = now_ms;
-    next_frame_ms += NES_FRAME_PERIOD_US / 1000u;
-    next_frame_remainder_us += NES_FRAME_PERIOD_US % 1000u;
-    if (next_frame_remainder_us >= 1000u) {
-        next_frame_remainder_us -= 1000u;
-        next_frame_ms += 1;
+
+    uint32_t ticks = 0;
+    while (next_frame_ms <= now_ms && ticks < NES_MAX_TICKS_PER_PACE) {
+        next_frame_ms += NES_FRAME_PERIOD_US / 1000u;
+        next_frame_remainder_us += NES_FRAME_PERIOD_US % 1000u;
+        if (next_frame_remainder_us >= 1000u) {
+            next_frame_remainder_us -= 1000u;
+            next_frame_ms += 1;
+        }
+        ticks++;
     }
+    if (ticks == 0) {
+        /* Ahead of schedule: still owe the one period this frame covers. */
+        next_frame_ms += NES_FRAME_PERIOD_US / 1000u;
+        next_frame_remainder_us += NES_FRAME_PERIOD_US % 1000u;
+        if (next_frame_remainder_us >= 1000u) {
+            next_frame_remainder_us -= 1000u;
+            next_frame_ms += 1;
+        }
+        ticks = 1;
+    } else if (ticks >= NES_MAX_TICKS_PER_PACE && next_frame_ms <= now_ms) {
+        /* Behind by more than NES_MAX_TICKS_PER_PACE periods (backgrounded,
+         * a long stall, ...): fully replaying the missed time would itself
+         * look like a multi-frame freeze once caught up. Resume pacing from
+         * now instead, the same way nes_sound.c's BRUCE_NES_AUDIO_MAX_GAP_MS
+         * caps its own catch-up. */
+        next_frame_ms = now_ms + NES_FRAME_PERIOD_US / 1000u;
+        next_frame_remainder_us = NES_FRAME_PERIOD_US % 1000u;
+    }
+
     if (next_frame_ms > now_ms) {
         runtime__delay((uint32_t)(next_frame_ms - now_ms));
     } else {
-        if (now_ms > next_frame_ms && now_ms - next_frame_ms > 100) {
-            next_frame_ms = now_ms;
-            next_frame_remainder_us = 0;
-        }
         /* Emulation + blit ran over budget: there is no actual idle time to
          * spend, but this task must still hit a real scheduling point every
          * frame. Without it, once emulation can't keep up with
@@ -112,7 +154,23 @@ static void pace_frame(void) {
          * emulator. */
         runtime__delay(1);
     }
-    if (s_timer_callback != NULL) s_timer_callback();
+
+    for (uint32_t i = 0; i < ticks; i++) {
+        if (s_timer_callback != NULL) s_timer_callback();
+    }
+
+    if (!autoframeskip_restored) {
+        /* osd_installtimer() forced autoframeskip off for exactly the
+         * bootstrap frame nofrendo renders before nes_emulate() has ever
+         * observed a tick change. A real tick has now been bumped above and
+         * nes_emulate()'s frames_to_render bookkeeping is live, so hand
+         * control back to nofrendo's own autoframeskip (its nes_create()
+         * default) for every frame from here on. */
+        autoframeskip_restored = true;
+        nes_t *machine = nes_getcontextptr();
+        if (machine != NULL) machine->autoframeskip = true;
+    }
+
     nes_sound_pump();
 }
 
@@ -232,6 +290,17 @@ static void video_blit(bitmap_t *bitmap, int num_dirties, rect_t *dirty_rects) {
                 for (int x = 0; x < draw_width; ++x) { dst[x] = s_palette[source[x]]; }
             }
             display__draw_rgb_bitmap(origin_x, origin_y + y, s_scaled_lines, draw_width, rows);
+            /* Pump audio between row batches too, not just once via
+             * pace_frame() after the whole blit (and its own
+             * display__present() wait) completes. nes_sound_pump() sizes
+             * each pull from real elapsed time and is cheap to call with
+             * little or nothing due yet, so this just spreads the same total
+             * catch-up across smaller, more frequent pulls instead of one
+             * lump sized by however long this entire frame's DMA transfers
+             * take -- keeping any one pull well under
+             * BRUCE_NES_AUDIO_MAX_SAMPLES_PER_FRAME even on a frame slow
+             * enough to need several row batches. */
+            nes_sound_pump();
         }
         display__present();
     }
