@@ -40,15 +40,37 @@
  * countdown *tables* built once at startup, in units of samples, so it stays
  * correct however the samples arrive.
  *
- * 960 covers the largest single pull this bothers attempting (48kHz for
- * 250ms, the elapsed-time cap below); any additional backlog beyond that is
- * carried forward in audio_carry_frames and paid down over the next calls
- * instead of blowing out this buffer. A backlog large enough to need several
- * calls to pay down (e.g. right after a long stall) doesn't run away or spin
- * the loop hot: audio__stream_write() blocks until the hardware actually
- * accepts each 960-frame chunk, which takes roughly as long as that chunk's
- * real playback time, so each catch-up call still yields to the scheduler
- * for about as long as the audio it just queued. */
+ * This cap was briefly raised to 1440 (the full I2S DMA ring depth, see
+ * AUDIO__I2S_DMA_RING_FRAMES in core/audio/audio.c) on the theory that a
+ * bigger cap lets one call fully drain any backlog instead of dribbling
+ * behind. Measurement (nes_video.c's perf report) on real hardware showed
+ * that backfired: once render+CPU/PPU-emulation alone are slower than the
+ * cap's worth of real time -- true here even after most frames' *blit* is
+ * skipped, see nes_video.c's skip_track_debt() -- `due_frames` sits above
+ * the cap on essentially every call, so `generate` saturates at the cap
+ * every single time. At that point this is indistinguishable from "always
+ * write exactly cap-sized chunks", and because audio__stream_write() blocks
+ * until the hardware has room (it paces to real playback speed once the
+ * ring can't absorb a write immediately), a saturated loop settles into
+ * spending very close to (cap / sample_rate) seconds *blocked inside this
+ * call* every iteration -- the cap becomes a floor on iteration time, not
+ * just a ceiling on catch-up. Raising it from 960 (20ms) to 1440 (30ms)
+ * measured out to raising that floor from ~20ms to ~30ms, i.e. made the
+ * game slower, not faster -- the opposite of the intent. Keeping the cap
+ * close to *one nominal NES frame's worth* (audio_sample_rate_hz /
+ * NES_REFRESH_RATE, ~800 for NTSC @ 48kHz) bounds that floor close to the
+ * frame budget itself; 960 (1.2x nominal) leaves a little slack for jitter
+ * without letting a chronic backlog turn into a chronic ~2x slowdown.
+ * The tradeoff this leaves in place: whenever CPU/PPU emulation + blit
+ * genuinely can't keep up with real time on their own (a real, separate
+ * bottleneck -- see nes_video.c's perf report for whether that's the case
+ * here), the ring still can't be kept fully fed and will underrun/glitch.
+ * That's a real limit of pulling audio from a single task that also does
+ * the emulation and blocking on a real-time output device; it can't be
+ * fixed by turning the knob in this file, only masked at the cost of
+ * exactly the resonant slowdown above. Any backlog beyond what the cap
+ * covers in one call is carried forward in audio_carry_frames and paid down
+ * over subsequent calls instead of blowing out the audio_samples buffer. */
 #define BRUCE_NES_AUDIO_MAX_SAMPLES_PER_FRAME 960
 /* A single gap this large or more (paused in a menu, a very long stall) is
  * treated as "resume from here", not "generate everything that was missed"
@@ -61,6 +83,16 @@ static uint32_t audio_sample_rate_hz;
 static uint64_t audio_last_pump_ms;
 static uint32_t audio_carry_frames;
 static bool audio_stream_open;
+
+/* Wall-clock time the most recent nes_sound_pump() call spent blocked
+ * inside audio__stream_write(), in microseconds -- exposed so nes_video.c's
+ * perf report can show it alongside blit/iteration time, telling apart "the
+ * loop is slow because emulation is slow" from "the loop is slow because
+ * it's stuck waiting on the audio backend" (see the cap-saturation comment
+ * above BRUCE_NES_AUDIO_MAX_SAMPLES_PER_FRAME). */
+static uint32_t audio_last_write_us;
+
+uint32_t nes_sound_last_write_us(void) { return audio_last_write_us; }
 
 void osd_stopsound(void) {
     audio_playfunc = NULL;
@@ -128,7 +160,9 @@ void nes_sound_pump(void) {
 
     for (uint32_t i = 0; i < generate; i++) { audio_samples[i] = (int16_t)(audio_samples[i] >> 2); }
 
+    uint64_t write_start_ms = runtime__now();
     audio__stream_write(audio_samples, generate);
+    audio_last_write_us = (uint32_t)(runtime__now() - write_start_ms) * 1000u;
 }
 
 #else /* !SOUND_ENABLED */
@@ -149,5 +183,7 @@ void osd_getsoundinfo(sndinfo_t *info) {
 void osd_setsound(void (*playfunc)(void *buffer, int length)) { (void)playfunc; }
 
 void nes_sound_pump(void) {}
+
+uint32_t nes_sound_last_write_us(void) { return 0; }
 
 #endif /* !SOUND_ENABLED */

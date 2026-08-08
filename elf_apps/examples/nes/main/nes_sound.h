@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdint.h>
+
 /* NES audio: implements nofrendo's OSD sound interface (osd_setsound(),
  * osd_getsoundinfo(), see osd.h) plus osd_stopsound() -- not part of osd.h's
  * declared interface, but nofrendo's own convention for the function that
@@ -33,3 +35,9 @@ void nes_sound_pump(void);
  * from nes_osd.c's osd_shutdown() as the one in-band chance to close the
  * stream before the process exits. */
 void osd_stopsound(void);
+
+/* Wall-clock microseconds the most recent nes_sound_pump() call spent
+ * blocked inside audio__stream_write() -- 0 if SOUND_ENABLED is 0 or no
+ * pump has run yet. For nes_video.c's perf report; see nes_sound.c for why
+ * this number matters for frame pacing, not just audio quality. */
+uint32_t nes_sound_last_write_us(void);
