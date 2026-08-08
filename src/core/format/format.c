@@ -15,7 +15,7 @@ void format__bytes_human(uint64_t bytes, char *output, size_t capacity) {
     uint64_t tenth = ((bytes % divisor) * 10) / divisor;
     if (unit == 0 || bytes < 10000) {
         /* Plain byte counts get no unit suffix -- just the number. */
-        snprintf(output, capacity, "%llu", (unsigned long long)whole);
+        snprintf(output, capacity, "%llu", (unsigned long long)bytes);
     } else if (tenth == 0) {
         snprintf(output, capacity, "%llu%c", (unsigned long long)whole, units[unit]);
     } else {

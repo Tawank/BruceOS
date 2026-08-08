@@ -312,7 +312,7 @@ int bnu_top_app_main(int argc, char **argv) {
         bnu__format_size(ram_bytes, human, heap_text, sizeof(heap_text));
         bnu__format_size((uint32_t)processes[i].swap_bytes, human, swap_text, sizeof(swap_text));
         stdio__printf(
-            "%1.1s %2u %3u %4s %4s %4s %.16s\n",
+            "%1.1s %2u %3u %4s %4s %4s %.15s\n",
             bnu__process_state_name(processes[i].state),
             (unsigned)processes[i].id,
             (unsigned)processes[i].cpu_percent,
