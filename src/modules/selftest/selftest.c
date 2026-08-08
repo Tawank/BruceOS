@@ -129,6 +129,10 @@ int selftest_app_main(int argc, char **argv) {
     RUN_SELFTEST(selftest__run_input_peek_case);
     RUN_SELFTEST(selftest__run_input_wait_case);
     RUN_SELFTEST(selftest__run_input_check_case);
+    RUN_SELFTEST(selftest__run_input_hotkey_duration_case);
+    RUN_SELFTEST(selftest__run_input_hotkey_code_name_case);
+    RUN_SELFTEST(selftest__run_input_hotkey_find_case);
+    RUN_SELFTEST(selftest__run_input_hotkey_emit_case);
     RUN_SELFTEST(selftest__run_bluetooth_hid_keyboard_translation_case);
     RUN_SELFTEST(selftest__run_bluetooth_hid_validation_case);
     RUN_SELFTEST(selftest__run_dialog_text_input_case);

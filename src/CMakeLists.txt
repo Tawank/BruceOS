@@ -91,6 +91,7 @@ idf_component_register(SRCS
                      "modules/input/input_app.c"
                     "modules/input/input_buttons.c"
                     "modules/input/input_encoder.c"
+                    "modules/input/input_hotkey.c"
                     "modules/input/input_keyboard.c"
                     "modules/input/input_touch.c"
                     "modules/loaders/elf/elf_loader_app.c"
@@ -288,6 +289,7 @@ add_library(bruce_sdk_builtin_input_check OBJECT
            "modules/input/input_app.c"
            "modules/input/input_buttons.c"
            "modules/input/input_encoder.c"
+           "modules/input/input_hotkey.c"
            "modules/input/input_keyboard.c"
            "modules/input/input_touch.c")
 target_include_directories(bruce_sdk_builtin_input_check PRIVATE
