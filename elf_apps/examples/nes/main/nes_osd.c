@@ -147,31 +147,25 @@ int osd_installtimer(int frequency, void *func, int funcsize, void *counter, int
     (void)countersize;
     void (*callback)(void) = (void (*)(void))func;
     nes_video_install_timer(callback);
+    if (callback != NULL) callback();
 
-    /* nofrendo's nes_emulate() (nes/nes.c) only renders a frame once
-     * nofrendo_ticks has advanced past the value it last observed, and
-     * normally expects osd_installtimer() to arm a real, independent
-     * periodic interrupt that bumps nofrendo_ticks regardless of whether a
-     * frame is being rendered. The ELF app SDK exposes no such primitive --
-     * this app is a single cooperative task with no ISR/thread of its own --
-     * so nofrendo_ticks can only ever advance from inside nes_video.c's
-     * pace_frame(), which only runs *after* video_blit() renders a frame.
-     * nes_emulate() won't render the very first frame (the only way to ever
-     * reach pace_frame() at all) until it has already seen nofrendo_ticks
-     * change once: a cycle that can't get started on its own.
-     *
-     * Force autoframeskip off for exactly this bootstrap frame so
-     * nes_emulate() renders it unconditionally instead of waiting on a tick
-     * counter it has no way to see move yet. pace_frame() flips autoframeskip
-     * back on right after that first frame completes, once a real tick has
-     * been bumped and nes_emulate()'s frames_to_render bookkeeping is live.
-     * From then on nofrendo's own autoframeskip logic (its nes_create()
-     * default) decides per frame whether to render pixels or just step
-     * emulation, based on how many real frame periods pace_frame() reports
-     * have actually elapsed since the last one -- see the comment there for
-     * why that (not a permanently-disabled autoframeskip) is what keeps game
-     * speed correct when the display blit alone takes longer than one NES
-     * frame period. */
+    /* nofrendo's nes_emulate() only renders a frame once nofrendo_ticks has
+     * advanced past the value it last observed, and normally expects
+     * osd_installtimer() to arm a real, independent periodic interrupt that
+     * bumps nofrendo_ticks regardless of whether a frame is being rendered.
+     * The ELF app SDK exposes no such primitive, so here nofrendo_ticks can
+     * only ever advance from inside nes_video.c's pace_frame(), which only
+     * runs *after* a frame render completes. With nes.autoframeskip left at
+     * its nes_create() default of true, nes_emulate()'s "render one frame"
+     * branch requires frames_to_render > 0, which requires nofrendo_ticks to
+     * have already moved -- a cycle that never gets going after the
+     * one-time bump above, so the emulator hangs in nes_emulate()'s idle
+     * spin forever, starving whichever core it lands on and eventually
+     * tripping the task watchdog. Forcing autoframeskip off makes
+     * nes_emulate() render unconditionally every loop iteration instead of
+     * waiting on the tick counter; pace_frame (via runtime__delay()) is then
+     * the only thing pacing frame rate, which is exactly what it already
+     * does. */
     nes_t *machine = nes_getcontextptr();
     if (machine != NULL) machine->autoframeskip = false;
 
