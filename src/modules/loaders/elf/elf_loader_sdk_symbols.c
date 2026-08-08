@@ -106,6 +106,7 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     /* Device state */
     ESP_ELFSYM_EXPORT(device__get_battery),
     ESP_ELFSYM_EXPORT(device__restart),
+    ESP_ELFSYM_EXPORT(device__power_off),
 
     /* Wall clock */
     ESP_ELFSYM_EXPORT(clock__get_utc),

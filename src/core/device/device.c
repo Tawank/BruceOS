@@ -12,6 +12,7 @@
 #include "esp_adc/adc_cali.h"        // IWYU pragma: keep
 #include "esp_adc/adc_cali_scheme.h" // IWYU pragma: keep
 #include "esp_adc/adc_oneshot.h"     // IWYU pragma: keep
+#include "esp_sleep.h"
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -54,6 +55,24 @@ bruce_result_t device__restart(uint32_t delay_ms) {
                    pdPASS
                ? BRUCE_OK
                : BRUCE_ERR_NO_MEMORY;
+}
+
+bruce_result_t device__power_off(void) {
+    bruce_result_t permission = permission__check(BRUCE_PERMISSION_PROCESS);
+    if (permission != BRUCE_OK) return permission;
+#if CONFIG_BRUCE_POWER_HOLD_GPIO >= 0
+    gpio_config_t cfg = {
+        .pin_bit_mask = 1ULL << CONFIG_BRUCE_POWER_HOLD_GPIO,
+        .mode = GPIO_MODE_OUTPUT,
+    };
+    gpio_config(&cfg);
+    gpio_set_level((gpio_num_t)CONFIG_BRUCE_POWER_HOLD_GPIO, 0);
+    vTaskDelay(pdMS_TO_TICKS(250));
+    esp_deep_sleep_start();
+    return BRUCE_OK;
+#else
+    return BRUCE_ERR_UNSUPPORTED;
+#endif
 }
 
 void device__power_hold_init(void) {

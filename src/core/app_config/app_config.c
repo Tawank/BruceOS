@@ -243,6 +243,35 @@ bruce_result_t app_config__set_string(const char *app_name, const char *json_pat
     return result;
 }
 
+bool app_config__get_json(
+    const char *app_name, const char *json_path, const char *default_json, char *out_json,
+    size_t capacity
+) {
+    if (out_json == NULL || capacity == 0) return false;
+    app_config__lock();
+    cJSON *root = app_config__load(app_name);
+    bool found = false;
+    char *printed = NULL;
+    cJSON *parent = NULL;
+    char key[APP_CONFIG__SEGMENT_MAX_LEN + 1];
+    if (root != NULL && app_config__navigate(root, json_path, false, &parent, key, sizeof(key))) {
+        cJSON *item = cJSON_GetObjectItemCaseSensitive(parent, key);
+        if (item != NULL) {
+            printed = cJSON_PrintUnformatted(item);
+            found = printed != NULL;
+        }
+    }
+    const char *source = found ? printed : (default_json != NULL ? default_json : "null");
+    size_t length = strlen(source);
+    if (length >= capacity) length = capacity - 1;
+    memcpy(out_json, source, length);
+    out_json[length] = '\0';
+    if (printed != NULL) cJSON_free(printed);
+    cJSON_Delete(root);
+    app_config__unlock();
+    return found;
+}
+
 /* ------------------------------------------------------------------------ */
 /* Arrays                                                                    */
 /* ------------------------------------------------------------------------ */

@@ -35,6 +35,7 @@
 #include "modules/selftest/selftest.h"
 #include "modules/shell/shell_app.h"
 #include "modules/ssh/ssh_app.h"
+#include "modules/system_menu/system_menu_app.h"
 #include "modules/tcp/tcp_app.h"
 #include "modules/text/text_app.h"
 #include "modules/utils/help/help_app.h"
@@ -83,6 +84,7 @@ void app_runner__register_defaults(void) {
     (void)app_runner__register("serial_commands", serial_commands_app_main, SERIAL_COMMANDS_STACK_BYTES);
     (void)app_runner__register("process", process_app_main, 0);
     (void)app_runner__register("help", help_app_main, 0);
+    (void)app_runner__register("menu", system_menu_app_main, 0);
     (void)app_runner__register("pwd", bnu_pwd_app_main, 0);
     (void)app_runner__register("cd", bnu_cd_app_main, 0);
     (void)app_runner__register("ls", bnu_ls_app_main, 0);

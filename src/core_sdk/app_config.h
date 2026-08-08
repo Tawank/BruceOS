@@ -37,6 +37,15 @@ bool app_config__get_string(
 );
 bruce_result_t app_config__set_string(const char *app_name, const char *json_path, const char *value);
 
+/* Serializes the stored JSON value at json_path into out_json, or default_json
+ * when the path is absent. This is intended for structured per-app values such
+ * as arrays of objects while keeping the public app_config API small. Returns
+ * whether a stored value was found. */
+bool app_config__get_json(
+    const char *app_name, const char *json_path, const char *default_json, char *out_json,
+    size_t capacity
+);
+
 size_t app_config__get_bool_array(
     const char *app_name, const char *json_path, bool *out_values, size_t capacity
 );
