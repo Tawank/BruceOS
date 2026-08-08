@@ -230,29 +230,48 @@ int bnu_unmount_app_main(int argc, char **argv) {
     return result;
 }
 
-static void bnu__print_memory_row(const char *name, size_t total, size_t free_size, size_t largest) {
-    stdio__printf(
-        "%-5s %7u %7u %6u %6u\n",
-        name,
-        (unsigned)total,
-        (unsigned)(total - free_size),
-        (unsigned)free_size,
-        (unsigned)largest
-    );
+/* -h is reserved by ArgParser for --help, so human-readable output uses -H
+ * (matching du/df/ls's -h intent, just on a free letter). */
+static void bnu__format_size(uint32_t bytes, bool human, char *output, size_t capacity) {
+    if (human) format__bytes_human(bytes, output, capacity);
+    else snprintf(output, capacity, "%u", (unsigned)bytes);
+}
+
+static void
+bnu__print_memory_row(const char *name, size_t total, size_t free_size, size_t largest, bool human) {
+    char total_text[16];
+    char used_text[16];
+    char free_text[16];
+    char largest_text[16];
+    bnu__format_size((uint32_t)total, human, total_text, sizeof(total_text));
+    bnu__format_size((uint32_t)(total - free_size), human, used_text, sizeof(used_text));
+    bnu__format_size((uint32_t)free_size, human, free_text, sizeof(free_text));
+    bnu__format_size((uint32_t)largest, human, largest_text, sizeof(largest_text));
+    stdio__printf("%-5s %7s %7s %6s %6s\n", name, total_text, used_text, free_text, largest_text);
 }
 
 int bnu_free_app_main(int argc, char **argv) {
-    ArgParser *parser = bnu__new_parser("Show internal memory and PSRAM usage.");
+    ArgParser *parser = bnu__new_parser("Show internal memory, PSRAM, and swap usage.");
     if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
+    ap_add_flag(parser, "H");
+    ap_set_opt_help(parser, "H", "Show sizes in human-readable units (e.g. 8.2K, 1.3M)");
     if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
+    bool human = ap_found(parser, "H");
     ap_free(parser);
     bruce_memory_stats_t stats;
     bruce_result_t result = memory__get_stats(&stats);
     if (result != BRUCE_OK) return result;
     stdio__printf("%-5s %7s %7s %6s %6s\n", "mem", "total", "used", "free", "lrgst");
-    bnu__print_memory_row("int", stats.internal_total, stats.internal_free, stats.internal_largest_block);
+    bnu__print_memory_row(
+        "int", stats.internal_total, stats.internal_free, stats.internal_largest_block, human
+    );
     if (stats.psram_total > 0) {
-        bnu__print_memory_row("psram", stats.psram_total, stats.psram_free, stats.psram_largest_block);
+        bnu__print_memory_row(
+            "psram", stats.psram_total, stats.psram_free, stats.psram_largest_block, human
+        );
+    }
+    if (stats.swap_total > 0) {
+        bnu__print_memory_row("swap", stats.swap_total, stats.swap_free, stats.swap_largest_block, human);
     }
     return BRUCE_OK;
 }
@@ -266,13 +285,6 @@ static const char *bnu__process_state_name(bruce_process_state_t state) {
         case BRUCE_PROCESS_STOPPING: return "stop";
         default: return "?";
     }
-}
-
-/* -h is reserved by ArgParser for --help, so human-readable output uses -H
- * (matching du/df/ls's -h intent, just on a free letter). */
-static void bnu__format_size(uint32_t bytes, bool human, char *output, size_t capacity) {
-    if (human) format__bytes_human(bytes, output, capacity);
-    else snprintf(output, capacity, "%u", (unsigned)bytes);
 }
 
 int bnu_top_app_main(int argc, char **argv) {
