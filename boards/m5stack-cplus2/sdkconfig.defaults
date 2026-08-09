@@ -6,6 +6,7 @@
 # sdkconfig.defaults.esp32 (classic-BT / IRAM tuning) since this target is
 # plain esp32, per ESP-IDF's target-dependent sdkconfig defaults rule.
 CONFIG_IDF_TARGET="esp32"
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 
 # Display: SPI2_HOST, ST7789V2 135x240 physical panel, portrait (rotation 3).
 CONFIG_BRUCE_DISPLAY_WIDTH=135
