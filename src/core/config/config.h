@@ -15,7 +15,6 @@
 #define CONFIG__WIFI_MAX_CREDENTIALS 8
 #define CONFIG__WIFI_MAC_MAX_LEN 17
 
-#define CONFIG__THEME_PATH_MAX_LEN 64
 #define CONFIG__KEYBOARD_LANG_MAX_LEN 15
 #define CONFIG__LAUNCHER_APP_MAX_LEN 64
 #define CONFIG__HOTKEY_MAX_LEN BRUCE_CONFIG_HOTKEY_MAX_LEN
@@ -25,7 +24,7 @@
 #define CONFIG__STARTUP_APP_MAX_LEN 32
 #define CONFIG__STARTUP_APP_MAX_COUNT BRUCE_CONFIG_STARTUP_APP_MAX_COUNT
 
-/* In-memory bruce.conf representation. Field names preserve BrucePIO's BruceConfig casing.
+/* In-memory bruce.conf representation. Field names mirror the JSON groups.
  *
  * Every string is a heap-allocated, NUL-terminated `const char *` (no fixed
  * arrays). Ownership rules:
@@ -37,28 +36,29 @@
  * enforced when a value is set, not fixed buffer sizes. */
 typedef struct {
     /* Theme / display (RGB565 colors) */
-    uint16_t priColor;
-    uint16_t secColor;
-    uint16_t bgColor;
-    const char *themePath;
+    uint16_t themePrimaryColor;
+    uint16_t themeSecondaryColor;
+    uint16_t themeBackgroundColor;
+    int displayRotation;
     bool displayBufferedRendering;
     bool displayDmaFramebuffer;
 
-    const char *launcherApp;
+    const char *launcher;
 
     /* General settings */
-    int dimmerSet;
-    int bright;
-    bool automaticTimeUpdateViaNTP;
-    float tmz;
-    bool dst;
-    bool clock24hr;
-    int soundEnabled;
+    int displayDimTimeout;
+    int displayBrightness;
+    bool timeAutomaticUpdateViaNTP;
+    float timeTimezone;
+    bool timeDst;
+    bool timeClock24hr;
+    bool soundEnabled;
     int soundVolume;
     const char *keyboardLang; /* "QWERTY" | "AZERTY" | "QWERTZ" */
     bruce_config_hotkeys_t hotkeys;
 
-    int ledBright;
+    int ledBrightness;
+    bool ledEnabled;
     uint32_t ledColor;
     int ledBlinkEnabled;
     int ledEffect;
@@ -70,12 +70,11 @@ typedef struct {
     const char *wifiApPassword;
     bruce_config_wifi_credential_t wifiCredentials[CONFIG__WIFI_MAX_CREDENTIALS];
     size_t wifiCredentialCount;
-    const char *wifiMAC;
+    const char *wifiMac;
 
     /* Misc */
-    bruce_config_startup_apps_t startupApps;
+    bruce_config_startup_apps_t startup;
     int devMode;
-    int colorInverted;
 
 } config__t;
 

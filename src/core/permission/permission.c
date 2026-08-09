@@ -216,7 +216,7 @@ static bool permission__prompt(const char *file_name, bruce_permission_t permiss
 
 /* Runs permission__prompt() with a reentrancy guard: the dialog re-enters
  * permission__check() through Core UI paths (dialog theme colors ->
- * config__get_pri_color -> config__guard), and re-prompting there would
+ * config__get_theme_primary -> config__guard), and re-prompting there would
  * recurse until the task stack overflows. A nested attempt reports
  * "unanswered" so callers fail closed without showing a second dialog. */
 static bool

@@ -223,7 +223,7 @@ bruce_result_t display__snapshot(
 /* Invert the panel colors (independent of color_inverted config). */
 bruce_result_t display__invert_display(bool invert);
 
-/* Set backlight brightness, 0..255.  Persists via config__set_bright(). */
+/* Set backlight brightness, 0..255. Persists via config__set_display_brightness(). */
 bruce_result_t display__set_brightness(uint8_t brightness);
 
 /* Return the current backlight brightness, 0..255. */

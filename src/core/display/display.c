@@ -710,7 +710,7 @@ bruce_result_t display__init(void) {
     }
     display_overlay__init();
     if (s_framebuffer != NULL) memset(s_framebuffer, 0, DISPLAY__FB_SIZE);
-    int configured_brightness = config__get_bright();
+    int configured_brightness = config__get_display_brightness();
     s_brightness = (uint8_t)((configured_brightness * 255) / 100);
 #if !CONFIG_BRUCE_QEMU_TEST_MODE
     display_driver__set_backlight(s_brightness);
@@ -855,7 +855,7 @@ bruce_result_t display__set_brightness(uint8_t brightness) {
         return BRUCE_ERR_NOT_INITIALIZED;
     }
     display__unlock();
-    bruce_result_t result = config__set_bright((int)brightness * 100 / 255);
+    bruce_result_t result = config__set_display_brightness((int)brightness * 100 / 255);
     if (result == BRUCE_OK) {
         display__lock();
         if (!s_initialized) {

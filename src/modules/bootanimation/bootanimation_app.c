@@ -258,8 +258,8 @@ static bruce_result_t bootanimation__draw_title(void) {
     const char *subtitle = "PREDATORY FIRMWARE";
     int width = display__width();
     int height = display__height();
-    bruce_display_color_t primary = config__get_pri_color();
-    bruce_display_color_t background = config__get_bg_color();
+    bruce_display_color_t primary = config__get_theme_primary();
+    bruce_display_color_t background = config__get_theme_background();
 
     bruce_result_t result = display__begin_frame();
     if (result != BRUCE_OK) return result;
@@ -278,7 +278,7 @@ static bruce_result_t bootanimation__draw_custom_image(const char *path) {
     bruce_image_draw_options_t options = {
         .center = true,
         .fit = true,
-        .background = config__get_bg_color(),
+        .background = config__get_theme_background(),
     };
     bruce_result_t result = display__begin_frame();
     if (result == BRUCE_OK) result = display__fill_screen(options.background);
@@ -323,8 +323,8 @@ static void bootanimation__draw_scaled_silhouette(
 static bruce_result_t bootanimation__draw_native_stage(unsigned int stage) {
     int width = display__width();
     int height = display__height();
-    bruce_display_color_t primary = config__get_pri_color();
-    bruce_display_color_t background = config__get_bg_color();
+    bruce_display_color_t primary = config__get_theme_primary();
+    bruce_display_color_t background = config__get_theme_background();
 
     bruce_result_t result = display__begin_frame();
     if (result != BRUCE_OK) return result;
@@ -362,7 +362,7 @@ static bool bootanimation__skip_requested(void) {
 static bruce_result_t bootanimation__finish(bruce_result_t result) {
     bruce_result_t frame_result = display__begin_frame();
     if (frame_result == BRUCE_OK) {
-        (void)display__fill_screen(config__get_bg_color());
+        (void)display__fill_screen(config__get_theme_background());
         frame_result = display__present();
     }
     return result == BRUCE_OK ? frame_result : result;

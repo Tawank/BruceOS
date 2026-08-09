@@ -199,8 +199,8 @@ static void terminal__draw_cursor(
 }
 
 static bruce_result_t terminal__draw(const terminal__state_t *state) {
-    uint16_t foreground = config__get_pri_color();
-    uint16_t background = config__get_bg_color();
+    uint16_t foreground = config__get_theme_primary();
+    uint16_t background = config__get_theme_background();
     int width = display__width();
     int height = display__height();
     int columns = (width - 2 * TERMINAL__FRAME_MARGIN) / TERMINAL__CHAR_W;

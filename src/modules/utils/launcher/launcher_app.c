@@ -29,7 +29,7 @@ static bool launcher__has_foreground(void) {
 }
 
 static int launcher__start(bool gui, bruce_launch_mode_t mode) {
-    const char *configured = config__get_launcher_app();
+    const char *configured = config__get_launcher();
     const char *target = (configured != NULL && configured[0] != '\0') ? configured : LAUNCHER__FALLBACK_APP;
     const bruce_environment_variable_t gui_env[] = {
         {.name = "GUI", .value = "1"}

@@ -70,41 +70,42 @@ bruce_result_t config__set_wifi_mac(const char *value);
 /* ------------------------------------------------------------------------ */
 
 /* Theme / display */
-uint16_t config__get_pri_color(void);
-bruce_result_t config__set_pri_color(uint16_t value);
-uint16_t config__get_sec_color(void);
-bruce_result_t config__set_sec_color(uint16_t value);
-uint16_t config__get_bg_color(void);
-bruce_result_t config__set_bg_color(uint16_t value);
-const char *config__get_theme_path(void);
-bruce_result_t config__set_theme_path(const char *value);
+uint16_t config__get_theme_primary(void);
+bruce_result_t config__set_theme_primary(uint16_t value);
+uint16_t config__get_theme_secondary(void);
+bruce_result_t config__set_theme_secondary(uint16_t value);
+uint16_t config__get_theme_background(void);
+bruce_result_t config__set_theme_background(uint16_t value);
 /* Controls whether Core retains a full RGB565 framebuffer. Changes apply
  * after reboot. When false, drawing is streamed directly to the panel and
  * framebuffer-dependent features such as snapshots are unavailable. */
 bool config__get_display_buffered_rendering(void);
 bruce_result_t config__set_display_buffered_rendering(bool value);
+/* Display rotation in quarter turns clockwise (0..3). Changes apply after reboot. */
+int config__get_display_rotation(void);
+bruce_result_t config__set_display_rotation(int value);
 /* Controls whether the full framebuffer is DMA-capable. Changes apply after
  * reboot and only affects buffered rendering. */
 bool config__get_display_dma_framebuffer(void);
 bruce_result_t config__set_display_dma_framebuffer(bool value);
 
 /* Launcher */
-const char *config__get_launcher_app(void);
-bruce_result_t config__set_launcher_app(const char *value);
+const char *config__get_launcher(void);
+bruce_result_t config__set_launcher(const char *value);
 
 /* General settings */
-int config__get_dimmer_set(void);
-bruce_result_t config__set_dimmer_set(int value);
-int config__get_bright(void);
-bruce_result_t config__set_bright(int value);
-bool config__get_automatic_time_update_via_ntp(void);
-bruce_result_t config__set_automatic_time_update_via_ntp(bool value);
-float config__get_tmz(void);
-bruce_result_t config__set_tmz(float value);
-bool config__get_dst(void);
-bruce_result_t config__set_dst(bool value);
-bool config__get_clock24hr(void);
-bruce_result_t config__set_clock24hr(bool value);
+int config__get_display_dim_timeout(void);
+bruce_result_t config__set_display_dim_timeout(int value);
+int config__get_display_brightness(void);
+bruce_result_t config__set_display_brightness(int value);
+bool config__get_time_automatic_update_via_ntp(void);
+bruce_result_t config__set_time_automatic_update_via_ntp(bool value);
+float config__get_time_timezone(void);
+bruce_result_t config__set_time_timezone(float value);
+bool config__get_time_dst(void);
+bruce_result_t config__set_time_dst(bool value);
+bool config__get_time_clock24hr(void);
+bruce_result_t config__set_time_clock24hr(bool value);
 bool config__get_sound_enabled(void);
 bruce_result_t config__set_sound_enabled(bool value);
 int config__get_sound_volume(void);
@@ -115,8 +116,10 @@ const bruce_config_hotkeys_t *config__get_hotkeys(void);
 bruce_result_t config__set_hotkeys(const bruce_config_hotkey_t *values, size_t count);
 
 /* LED */
-int config__get_led_bright(void);
-bruce_result_t config__set_led_bright(int value);
+bool config__get_led_enabled(void);
+bruce_result_t config__set_led_enabled(bool value);
+int config__get_led_brightness(void);
+bruce_result_t config__set_led_brightness(int value);
 uint32_t config__get_led_color(void);
 bruce_result_t config__set_led_color(uint32_t value);
 bool config__get_led_blink_enabled(void);
@@ -137,5 +140,3 @@ bruce_result_t config__add_startup_app(const char *key);
 bruce_result_t config__remove_startup_app(const char *key);
 bool config__get_dev_mode(void);
 bruce_result_t config__set_dev_mode(bool value);
-bool config__get_color_inverted(void);
-bruce_result_t config__set_color_inverted(bool value);

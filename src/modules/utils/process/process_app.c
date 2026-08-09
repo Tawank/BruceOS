@@ -108,9 +108,9 @@ static size_t process_app__preview_candidates(bruce_process_snapshot_t *processe
  * once display__set_tiles() assigns the rectangles. */
 static void
 process_app__preview_layout(const bruce_process_snapshot_t *processes, size_t count, int selected, bruce_display_tile_t *tiles) {
-    uint16_t pri = config__get_pri_color();
-    uint16_t sec = config__get_sec_color();
-    uint16_t bg = config__get_bg_color();
+    uint16_t pri = config__get_theme_primary();
+    uint16_t sec = config__get_theme_secondary();
+    uint16_t bg = config__get_theme_background();
     int w = display__width();
     int h = display__height();
     int top = PROCESS_APP__PREVIEW_HEADER_H + 2;

@@ -91,8 +91,8 @@ static volatile bruce_result_t s_config_set_result;
 static int selftest__config_bright_entry(int argc, char **argv) {
     (void)argc;
     (void)argv;
-    s_config_set_result = config__set_bright(55);
-    s_config_get_result = config__get_bright() == 0 ? BRUCE_ERR_PERMISSION : BRUCE_OK;
+    s_config_set_result = config__set_display_brightness(55);
+    s_config_get_result = config__get_display_brightness() == 0 ? BRUCE_ERR_PERMISSION : BRUCE_OK;
     return 0;
 }
 
@@ -126,8 +126,8 @@ static volatile int s_config_bright_value;
 static int selftest__config_bright_allowed_entry(int argc, char **argv) {
     (void)argc;
     (void)argv;
-    s_config_set_result = config__set_bright(66);
-    int value = config__get_bright();
+    s_config_set_result = config__set_display_brightness(66);
+    int value = config__get_display_brightness();
     s_config_get_result = value == 66 ? BRUCE_OK : BRUCE_ERR_INTERNAL;
     s_config_bright_value = value;
     return 0;
@@ -260,8 +260,7 @@ bool selftest__run_config_builtin_manage_case(void) {
     bruce_result_t set_protected = config__set_wifi_ap("SelftestNet", "selftestpwd");
     const char *ssid = config__get_wifi_ap_ssid();
     const char *password = config__get_wifi_ap_password();
-    const char *theme = config__get_theme_path();
-    bool string_values = ssid != NULL && password != NULL && theme != NULL &&
+    bool string_values = ssid != NULL && password != NULL &&
                          strcmp(ssid, "SelftestNet") == 0 && strcmp(password, "selftestpwd") == 0;
 
     const char *new_apps[] = {"clock", "terminal", "webui"};
@@ -301,9 +300,12 @@ bool selftest__run_config_builtin_manage_case(void) {
     size_t json_size = 0;
     bool read_json = storage__read_file(CONFIG__FILE_PATH, &json, &json_size);
     bool schema =
-        read_json && json_size > 0 && strstr(json, "\"startupApps\"") != NULL &&
-        strstr(json, "\"hotkeys\"") != NULL && strstr(json, "\"displayBufferedRendering\"") != NULL &&
-        strstr(json, "\"displayDmaFramebuffer\"") != NULL && strstr(json, ":\t") == NULL &&
+        read_json && json_size > 0 && strstr(json, "\"startup\"") != NULL &&
+        strstr(json, "\"hotkeys\"") != NULL && strstr(json, "\"bufferedRendering\"") != NULL &&
+        strstr(json, "\"dmaFramebuffer\"") != NULL && strstr(json, "\"theme\"") != NULL &&
+        strstr(json, "\"display\"") != NULL && strstr(json, "\"time\"") != NULL &&
+        strstr(json, "\"sound\"") != NULL && strstr(json, "\"led\"") != NULL && strstr(json, ":\t") == NULL &&
+        strstr(json, "\"priColor\"") == NULL && strstr(json, "\"displayBufferedRendering\"") == NULL &&
         strstr(json, "\"startupApp\":") == NULL && strstr(json, "\"qrCodes\"") == NULL &&
         strstr(json, "\"evilWifiNames\"") == NULL && strstr(json, "\"evilWifiEndpoints\"") == NULL &&
         strstr(json, "\"evilWifiPasswordMode\"") == NULL;

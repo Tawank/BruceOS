@@ -77,8 +77,8 @@ static bruce_result_t clock__from_epoch(time_t epoch, bruce_clock_datetime_t *ou
 }
 
 static time_t clock__local_offset_seconds(void) {
-    float timezone = config__get_tmz();
-    bool dst = config__get_dst();
+    float timezone = config__get_time_timezone();
+    bool dst = config__get_time_dst();
     return (time_t)(timezone * 3600.0f) + (dst ? 3600 : 0);
 }
 
@@ -155,7 +155,7 @@ static void clock__auto_sync_task(void *context) {
 }
 
 void clock__notify_network_connected(void) {
-    if (!config__get_automatic_time_update_via_ntp() || s_auto_sync_running) return;
+    if (!config__get_time_automatic_update_via_ntp() || s_auto_sync_running) return;
     s_auto_sync_running = true;
     if (xTaskCreate(clock__auto_sync_task, "clock_ntp", 3072, NULL, 4, NULL) != pdPASS) {
         s_auto_sync_running = false;

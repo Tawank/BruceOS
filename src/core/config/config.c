@@ -72,8 +72,7 @@ static const char *config__or_empty(const char *value) { return value != NULL ? 
 
 /* Frees every heap string owned by cfg (safe to call on a zeroed struct). */
 static void config__free_config(config__t *cfg) {
-    config__release(&cfg->themePath);
-    config__release(&cfg->launcherApp);
+    config__release(&cfg->launcher);
     config__release(&cfg->keyboardLang);
     for (size_t i = 0; i < CONFIG__HOTKEY_MAX_COUNT; ++i) {
         config__release(&cfg->hotkeys.items[i].key);
@@ -85,29 +84,29 @@ static void config__free_config(config__t *cfg) {
         config__release(&cfg->wifiCredentials[i].ssid);
         config__release(&cfg->wifiCredentials[i].password);
     }
-    config__release(&cfg->wifiMAC);
-    for (size_t i = 0; i < CONFIG__STARTUP_APP_MAX_COUNT; ++i) config__release(&cfg->startupApps.items[i]);
+    config__release(&cfg->wifiMac);
+    for (size_t i = 0; i < CONFIG__STARTUP_APP_MAX_COUNT; ++i) config__release(&cfg->startup.items[i]);
 }
 
 static void config__set_defaults(config__t *cfg) {
     config__free_config(cfg);
     memset(cfg, 0, sizeof(*cfg));
 
-    cfg->priColor = 0xA80F;
-    cfg->secColor = 0xA80F - 0x2000;
-    cfg->bgColor = 0x0000;
-    config__assign(&cfg->themePath, "");
+    cfg->themePrimaryColor = 0xA80F;
+    cfg->themeSecondaryColor = 0xA80F - 0x2000;
+    cfg->themeBackgroundColor = 0x0000;
+    cfg->displayRotation = 0;
     cfg->displayBufferedRendering = true;
     cfg->displayDmaFramebuffer = true;
-    config__assign(&cfg->launcherApp, "");
+    config__assign(&cfg->launcher, "");
 
-    cfg->dimmerSet = 60;
-    cfg->bright = 100;
-    cfg->automaticTimeUpdateViaNTP = true;
-    cfg->tmz = 0;
-    cfg->dst = false;
-    cfg->clock24hr = true;
-    cfg->soundEnabled = 1;
+    cfg->displayDimTimeout = 60;
+    cfg->displayBrightness = 100;
+    cfg->timeAutomaticUpdateViaNTP = true;
+    cfg->timeTimezone = 0;
+    cfg->timeDst = false;
+    cfg->timeClock24hr = true;
+    cfg->soundEnabled = true;
     cfg->soundVolume = 100;
     config__assign(&cfg->keyboardLang, "QWERTY");
     config__assign(&cfg->hotkeys.items[0].key, "alt + tab");
@@ -126,7 +125,8 @@ static void config__set_defaults(config__t *cfg) {
     config__assign(&cfg->hotkeys.items[6].action, "emit NEXT");
     cfg->hotkeys.count = 7;
 
-    cfg->ledBright = 50;
+    cfg->ledBrightness = 50;
+    cfg->ledEnabled = true;
     cfg->ledColor = 0x960064;
     cfg->ledBlinkEnabled = 1;
     cfg->ledEffect = 0;
@@ -135,7 +135,7 @@ static void config__set_defaults(config__t *cfg) {
 
     config__assign(&cfg->wifiApSsid, "BruceNet");
     config__assign(&cfg->wifiApPassword, "brucenet");
-    config__assign(&cfg->wifiMAC, "");
+    config__assign(&cfg->wifiMac, "");
 
     static const char *const default_startup_apps[] = {
         "device_bus",
@@ -146,30 +146,30 @@ static void config__set_defaults(config__t *cfg) {
         "serial_commands",
     };
     for (size_t i = 0; i < sizeof(default_startup_apps) / sizeof(default_startup_apps[0]); ++i) {
-        config__assign(&cfg->startupApps.items[i], default_startup_apps[i]);
+        config__assign(&cfg->startup.items[i], default_startup_apps[i]);
     }
-    cfg->startupApps.count = sizeof(default_startup_apps) / sizeof(default_startup_apps[0]);
+    cfg->startup.count = sizeof(default_startup_apps) / sizeof(default_startup_apps[0]);
     cfg->devMode = 0;
-    cfg->colorInverted = 1;
 }
 
 /* ------------------------------------------------------------------------ */
-/* Validation (mirrors BruceConfig::validateConfig)                         */
+/* Validation                                                                */
 /* ------------------------------------------------------------------------ */
 
 static void config__validate(config__t *cfg) {
-    if (cfg->dimmerSet < 0) cfg->dimmerSet = 10;
-    if (cfg->dimmerSet > 60) cfg->dimmerSet = 0;
+    if (cfg->displayRotation < 0 || cfg->displayRotation > 3) cfg->displayRotation = 0;
 
-    if (cfg->bright > 100) cfg->bright = 100;
+    if (cfg->displayDimTimeout < 0) cfg->displayDimTimeout = 10;
+    if (cfg->displayDimTimeout > 60) cfg->displayDimTimeout = 0;
 
-    if (cfg->tmz < -12 || cfg->tmz > 14) cfg->tmz = 0;
+    if (cfg->displayBrightness > 100) cfg->displayBrightness = 100;
 
-    if (cfg->soundEnabled > 1) cfg->soundEnabled = 1;
+    if (cfg->timeTimezone < -12 || cfg->timeTimezone > 14) cfg->timeTimezone = 0;
+
     if (cfg->soundVolume > 100) cfg->soundVolume = 100;
 
-    if (cfg->ledBright < 0) cfg->ledBright = 0;
-    if (cfg->ledBright > 100) cfg->ledBright = 100;
+    if (cfg->ledBrightness < 0) cfg->ledBrightness = 0;
+    if (cfg->ledBrightness > 100) cfg->ledBrightness = 100;
     if (cfg->ledBlinkEnabled > 1) cfg->ledBlinkEnabled = 1;
     if (cfg->ledEffect < 0 || cfg->ledEffect > 9) cfg->ledEffect = 0;
 #ifdef HAS_ENCODER_LED
@@ -182,7 +182,6 @@ static void config__validate(config__t *cfg) {
     if (cfg->ledEffectDirection < -1) cfg->ledEffectDirection = -1;
 
     if (cfg->devMode > 1) cfg->devMode = 1;
-    if (cfg->colorInverted > 1) cfg->colorInverted = 1;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -228,23 +227,38 @@ static void config__clear_string_array(const char **array, size_t max_count) {
 static void config__parse_json(config__t *cfg, const cJSON *root) {
     if (!cJSON_IsObject(root)) return;
 
-    json_get_hex16(root, "priColor", &cfg->priColor);
-    json_get_hex16(root, "secColor", &cfg->secColor);
-    json_get_hex16(root, "bgColor", &cfg->bgColor);
-    json_get_string(root, "themeFile", &cfg->themePath);
-    json_get_bool(root, "displayBufferedRendering", &cfg->displayBufferedRendering);
-    json_get_bool(root, "displayDmaFramebuffer", &cfg->displayDmaFramebuffer);
-    json_get_string(root, "launcherApp", &cfg->launcherApp);
+    const cJSON *theme = cJSON_GetObjectItemCaseSensitive(root, "theme");
+    if (cJSON_IsObject(theme)) {
+        json_get_hex16(theme, "primary", &cfg->themePrimaryColor);
+        json_get_hex16(theme, "secondary", &cfg->themeSecondaryColor);
+        json_get_hex16(theme, "background", &cfg->themeBackgroundColor);
+    }
 
-    json_get_int(root, "dimmerSet", &cfg->dimmerSet);
-    json_get_int(root, "bright", &cfg->bright);
-    json_get_bool(root, "automaticTimeUpdateViaNTP", &cfg->automaticTimeUpdateViaNTP);
-    json_get_float(root, "tmz", &cfg->tmz);
-    json_get_bool(root, "dst", &cfg->dst);
-    json_get_bool(root, "clock24hr", &cfg->clock24hr);
-    json_get_int(root, "soundEnabled", &cfg->soundEnabled);
-    json_get_int(root, "soundVolume", &cfg->soundVolume);
+    const cJSON *display = cJSON_GetObjectItemCaseSensitive(root, "display");
+    if (cJSON_IsObject(display)) {
+        json_get_int(display, "rotation", &cfg->displayRotation);
+        json_get_int(display, "dimTimeout", &cfg->displayDimTimeout);
+        json_get_int(display, "brightness", &cfg->displayBrightness);
+        json_get_bool(display, "bufferedRendering", &cfg->displayBufferedRendering);
+        json_get_bool(display, "dmaFramebuffer", &cfg->displayDmaFramebuffer);
+    }
+
+    const cJSON *time = cJSON_GetObjectItemCaseSensitive(root, "time");
+    if (cJSON_IsObject(time)) {
+        json_get_bool(time, "automaticUpdateViaNTP", &cfg->timeAutomaticUpdateViaNTP);
+        json_get_float(time, "timezone", &cfg->timeTimezone);
+        json_get_bool(time, "dst", &cfg->timeDst);
+        json_get_bool(time, "clock24hr", &cfg->timeClock24hr);
+    }
+
+    const cJSON *sound = cJSON_GetObjectItemCaseSensitive(root, "sound");
+    if (cJSON_IsObject(sound)) {
+        json_get_bool(sound, "enabled", &cfg->soundEnabled);
+        json_get_int(sound, "volume", &cfg->soundVolume);
+    }
+
     json_get_string(root, "keyboardLang", &cfg->keyboardLang);
+    json_get_string(root, "launcher", &cfg->launcher);
 
     const cJSON *hotkeys = cJSON_GetObjectItemCaseSensitive(root, "hotkeys");
     if (cJSON_IsObject(hotkeys)) {
@@ -273,29 +287,34 @@ static void config__parse_json(config__t *cfg, const cJSON *root) {
         }
     }
 
-    json_get_int(root, "ledBright", &cfg->ledBright);
-    json_get_hex32(root, "ledColor", &cfg->ledColor);
-    json_get_int(root, "ledBlinkEnabled", &cfg->ledBlinkEnabled);
-    json_get_int(root, "ledEffect", &cfg->ledEffect);
-    json_get_int(root, "ledEffectSpeed", &cfg->ledEffectSpeed);
-    json_get_int(root, "ledEffectDirection", &cfg->ledEffectDirection);
+    const cJSON *led = cJSON_GetObjectItemCaseSensitive(root, "led");
+    if (cJSON_IsObject(led)) {
+        json_get_bool(led, "enabled", &cfg->ledEnabled);
+        json_get_int(led, "bright", &cfg->ledBrightness);
+        json_get_hex32(led, "color", &cfg->ledColor);
+        json_get_int(led, "blinkEnabled", &cfg->ledBlinkEnabled);
+        json_get_int(led, "effect", &cfg->ledEffect);
+        json_get_int(led, "effectSpeed", &cfg->ledEffectSpeed);
+        json_get_int(led, "effectDirection", &cfg->ledEffectDirection);
+    }
 
-    const cJSON *wifi_ap = cJSON_GetObjectItemCaseSensitive(root, "wifiAp");
+    const cJSON *wifi = cJSON_GetObjectItemCaseSensitive(root, "wifi");
+    const cJSON *wifi_ap = cJSON_IsObject(wifi) ? cJSON_GetObjectItemCaseSensitive(wifi, "ap") : NULL;
     if (cJSON_IsObject(wifi_ap)) {
         json_get_string(wifi_ap, "ssid", &cfg->wifiApSsid);
         json_get_string(wifi_ap, "pwd", &cfg->wifiApPassword);
     }
-    json_get_string(root, "wifiMAC", &cfg->wifiMAC);
+    if (cJSON_IsObject(wifi)) json_get_string(wifi, "mac", &cfg->wifiMac);
 
-    const cJSON *wifi = cJSON_GetObjectItemCaseSensitive(root, "wifi");
-    if (cJSON_IsObject(wifi)) {
+    const cJSON *wifi_credentials = cJSON_IsObject(wifi) ? cJSON_GetObjectItemCaseSensitive(wifi, "credentials") : NULL;
+    if (cJSON_IsObject(wifi_credentials)) {
         for (size_t i = 0; i < CONFIG__WIFI_MAX_CREDENTIALS; ++i) {
             config__release(&cfg->wifiCredentials[i].ssid);
             config__release(&cfg->wifiCredentials[i].password);
         }
         cfg->wifiCredentialCount = 0;
         const cJSON *entry;
-        cJSON_ArrayForEach(entry, wifi) {
+        cJSON_ArrayForEach(entry, wifi_credentials) {
             if (cfg->wifiCredentialCount >= CONFIG__WIFI_MAX_CREDENTIALS) break;
             if (entry->string == NULL || !cJSON_IsString(entry) || entry->valuestring == NULL) continue;
             bruce_config_wifi_credential_t *credential = &cfg->wifiCredentials[cfg->wifiCredentialCount];
@@ -305,21 +324,20 @@ static void config__parse_json(config__t *cfg, const cJSON *root) {
         }
     }
 
-    const cJSON *startup_apps = cJSON_GetObjectItemCaseSensitive(root, "startupApps");
+    const cJSON *startup_apps = cJSON_GetObjectItemCaseSensitive(root, "startup");
     if (cJSON_IsArray(startup_apps)) {
-        config__clear_string_array(cfg->startupApps.items, CONFIG__STARTUP_APP_MAX_COUNT);
-        cfg->startupApps.count = 0;
+        config__clear_string_array(cfg->startup.items, CONFIG__STARTUP_APP_MAX_COUNT);
+        cfg->startup.count = 0;
         const cJSON *app;
         cJSON_ArrayForEach(app, startup_apps) {
-            if (cfg->startupApps.count >= CONFIG__STARTUP_APP_MAX_COUNT) break;
+            if (cfg->startup.count >= CONFIG__STARTUP_APP_MAX_COUNT) break;
             if (!cJSON_IsString(app) || app->valuestring == NULL) continue;
             if (!config__valid_value(app->valuestring, CONFIG__STARTUP_APP_MAX_LEN, false)) continue;
-            cfg->startupApps.items[cfg->startupApps.count] = config__strdup(app->valuestring);
-            ++cfg->startupApps.count;
+            cfg->startup.items[cfg->startup.count] = config__strdup(app->valuestring);
+            ++cfg->startup.count;
         }
     }
     json_get_int(root, "devMode", &cfg->devMode);
-    json_get_int(root, "colorInverted", &cfg->colorInverted);
 }
 
 static cJSON *config__build_json(const config__t *cfg) {
@@ -327,25 +345,30 @@ static cJSON *config__build_json(const config__t *cfg) {
     if (root == NULL) return NULL;
 
     char hex[16];
-    snprintf(hex, sizeof(hex), "%x", cfg->priColor);
-    cJSON_AddStringToObject(root, "priColor", hex);
-    snprintf(hex, sizeof(hex), "%x", cfg->secColor);
-    cJSON_AddStringToObject(root, "secColor", hex);
-    snprintf(hex, sizeof(hex), "%x", cfg->bgColor);
-    cJSON_AddStringToObject(root, "bgColor", hex);
-    cJSON_AddStringToObject(root, "themeFile", config__or_empty(cfg->themePath));
-    cJSON_AddBoolToObject(root, "displayBufferedRendering", cfg->displayBufferedRendering);
-    cJSON_AddBoolToObject(root, "displayDmaFramebuffer", cfg->displayDmaFramebuffer);
-    cJSON_AddStringToObject(root, "launcherApp", config__or_empty(cfg->launcherApp));
+    cJSON *theme = cJSON_AddObjectToObject(root, "theme");
+    snprintf(hex, sizeof(hex), "%x", cfg->themePrimaryColor);
+    cJSON_AddStringToObject(theme, "primary", hex);
+    snprintf(hex, sizeof(hex), "%x", cfg->themeSecondaryColor);
+    cJSON_AddStringToObject(theme, "secondary", hex);
+    snprintf(hex, sizeof(hex), "%x", cfg->themeBackgroundColor);
+    cJSON_AddStringToObject(theme, "background", hex);
 
-    cJSON_AddNumberToObject(root, "dimmerSet", cfg->dimmerSet);
-    cJSON_AddNumberToObject(root, "bright", cfg->bright);
-    cJSON_AddBoolToObject(root, "automaticTimeUpdateViaNTP", cfg->automaticTimeUpdateViaNTP);
-    cJSON_AddNumberToObject(root, "tmz", cfg->tmz);
-    cJSON_AddBoolToObject(root, "dst", cfg->dst);
-    cJSON_AddBoolToObject(root, "clock24hr", cfg->clock24hr);
-    cJSON_AddNumberToObject(root, "soundEnabled", cfg->soundEnabled);
-    cJSON_AddNumberToObject(root, "soundVolume", cfg->soundVolume);
+    cJSON *display = cJSON_AddObjectToObject(root, "display");
+    cJSON_AddNumberToObject(display, "rotation", cfg->displayRotation);
+    cJSON_AddNumberToObject(display, "dimTimeout", cfg->displayDimTimeout);
+    cJSON_AddNumberToObject(display, "brightness", cfg->displayBrightness);
+    cJSON_AddBoolToObject(display, "bufferedRendering", cfg->displayBufferedRendering);
+    cJSON_AddBoolToObject(display, "dmaFramebuffer", cfg->displayDmaFramebuffer);
+
+    cJSON *time = cJSON_AddObjectToObject(root, "time");
+    cJSON_AddBoolToObject(time, "automaticUpdateViaNTP", cfg->timeAutomaticUpdateViaNTP);
+    cJSON_AddNumberToObject(time, "timezone", cfg->timeTimezone);
+    cJSON_AddBoolToObject(time, "dst", cfg->timeDst);
+    cJSON_AddBoolToObject(time, "clock24hr", cfg->timeClock24hr);
+
+    cJSON *sound = cJSON_AddObjectToObject(root, "sound");
+    cJSON_AddBoolToObject(sound, "enabled", cfg->soundEnabled);
+    cJSON_AddNumberToObject(sound, "volume", cfg->soundVolume);
     cJSON_AddStringToObject(root, "keyboardLang", config__or_empty(cfg->keyboardLang));
 
     cJSON *hotkeys = cJSON_AddObjectToObject(root, "hotkeys");
@@ -357,34 +380,39 @@ static cJSON *config__build_json(const config__t *cfg) {
         );
     }
 
-    cJSON_AddNumberToObject(root, "ledBright", cfg->ledBright);
+    cJSON *led = cJSON_AddObjectToObject(root, "led");
+    cJSON_AddBoolToObject(led, "enabled", cfg->ledEnabled);
+    cJSON_AddNumberToObject(led, "bright", cfg->ledBrightness);
     snprintf(hex, sizeof(hex), "%lx", (unsigned long)cfg->ledColor);
-    cJSON_AddStringToObject(root, "ledColor", hex);
-    cJSON_AddNumberToObject(root, "ledBlinkEnabled", cfg->ledBlinkEnabled);
-    cJSON_AddNumberToObject(root, "ledEffect", cfg->ledEffect);
-    cJSON_AddNumberToObject(root, "ledEffectSpeed", cfg->ledEffectSpeed);
-    cJSON_AddNumberToObject(root, "ledEffectDirection", cfg->ledEffectDirection);
-
-    cJSON *wifi_ap = cJSON_AddObjectToObject(root, "wifiAp");
-    cJSON_AddStringToObject(wifi_ap, "ssid", config__or_empty(cfg->wifiApSsid));
-    cJSON_AddStringToObject(wifi_ap, "pwd", config__or_empty(cfg->wifiApPassword));
-    cJSON_AddStringToObject(root, "wifiMAC", config__or_empty(cfg->wifiMAC));
+    cJSON_AddStringToObject(led, "color", hex);
+    cJSON_AddNumberToObject(led, "blinkEnabled", cfg->ledBlinkEnabled);
+    cJSON_AddNumberToObject(led, "effect", cfg->ledEffect);
+    cJSON_AddNumberToObject(led, "effectSpeed", cfg->ledEffectSpeed);
+    cJSON_AddNumberToObject(led, "effectDirection", cfg->ledEffectDirection);
 
     cJSON *wifi = cJSON_AddObjectToObject(root, "wifi");
-    for (size_t i = 0; i < cfg->wifiCredentialCount; ++i) {
-        cJSON_AddStringToObject(
-            wifi,
-            config__or_empty(cfg->wifiCredentials[i].ssid),
-            config__or_empty(cfg->wifiCredentials[i].password)
-        );
+    cJSON_AddStringToObject(wifi, "mac", config__or_empty(cfg->wifiMac));
+    cJSON *wifi_ap = cJSON_AddObjectToObject(wifi, "ap");
+    cJSON_AddStringToObject(wifi_ap, "ssid", config__or_empty(cfg->wifiApSsid));
+    cJSON_AddStringToObject(wifi_ap, "pwd", config__or_empty(cfg->wifiApPassword));
+
+    if (cfg->wifiCredentialCount > 0) {
+        cJSON *credentials = cJSON_AddObjectToObject(wifi, "credentials");
+        for (size_t i = 0; i < cfg->wifiCredentialCount; ++i) {
+            cJSON_AddStringToObject(
+                credentials,
+                config__or_empty(cfg->wifiCredentials[i].ssid),
+                config__or_empty(cfg->wifiCredentials[i].password)
+            );
+        }
     }
 
-    cJSON *startup_apps = cJSON_AddArrayToObject(root, "startupApps");
-    for (size_t i = 0; i < cfg->startupApps.count; ++i) {
-        cJSON_AddItemToArray(startup_apps, cJSON_CreateString(config__or_empty(cfg->startupApps.items[i])));
+    cJSON *startup_apps = cJSON_AddArrayToObject(root, "startup");
+    for (size_t i = 0; i < cfg->startup.count; ++i) {
+        cJSON_AddItemToArray(startup_apps, cJSON_CreateString(config__or_empty(cfg->startup.items[i])));
     }
     cJSON_AddNumberToObject(root, "devMode", cfg->devMode);
-    cJSON_AddNumberToObject(root, "colorInverted", cfg->colorInverted);
+    cJSON_AddStringToObject(root, "launcher", config__or_empty(cfg->launcher));
 
     return root;
 }
@@ -732,25 +760,25 @@ bruce_result_t config__add_or_update_wifi_credential(const char *ssid, const cha
     return saved ? BRUCE_OK : BRUCE_ERR_IO;
 }
 
-CONFIG__DEFINE_STRING_FIELD_GUARDED(wifi_mac, wifiMAC, CONFIG__WIFI_MAC_MAX_LEN, config__guard_protected)
+CONFIG__DEFINE_STRING_FIELD_GUARDED(wifi_mac, wifiMac, CONFIG__WIFI_MAC_MAX_LEN, config__guard_protected)
 
 /* ---- `config`-permission-gated fields ------------------------------------ */
 
-CONFIG__DEFINE_UINT16_FIELD(pri_color, priColor)
-CONFIG__DEFINE_UINT16_FIELD(sec_color, secColor)
-CONFIG__DEFINE_UINT16_FIELD(bg_color, bgColor)
-CONFIG__DEFINE_STRING_FIELD(theme_path, themePath, CONFIG__THEME_PATH_MAX_LEN)
+CONFIG__DEFINE_UINT16_FIELD(theme_primary, themePrimaryColor)
+CONFIG__DEFINE_UINT16_FIELD(theme_secondary, themeSecondaryColor)
+CONFIG__DEFINE_UINT16_FIELD(theme_background, themeBackgroundColor)
+CONFIG__DEFINE_INT_FIELD(display_rotation, displayRotation)
 CONFIG__DEFINE_BOOL_FIELD(display_buffered_rendering, displayBufferedRendering)
 CONFIG__DEFINE_BOOL_FIELD(display_dma_framebuffer, displayDmaFramebuffer)
-CONFIG__DEFINE_STRING_FIELD(launcher_app, launcherApp, CONFIG__LAUNCHER_APP_MAX_LEN)
+CONFIG__DEFINE_STRING_FIELD(launcher, launcher, CONFIG__LAUNCHER_APP_MAX_LEN)
 
-CONFIG__DEFINE_INT_FIELD(dimmer_set, dimmerSet)
-CONFIG__DEFINE_INT_FIELD(bright, bright)
-CONFIG__DEFINE_BOOL_FIELD(automatic_time_update_via_ntp, automaticTimeUpdateViaNTP)
-CONFIG__DEFINE_FLOAT_FIELD(tmz, tmz)
-CONFIG__DEFINE_BOOL_FIELD(dst, dst)
-CONFIG__DEFINE_BOOL_FIELD(clock24hr, clock24hr)
-CONFIG__DEFINE_BOOL_INT_FIELD(sound_enabled, soundEnabled)
+CONFIG__DEFINE_INT_FIELD(display_dim_timeout, displayDimTimeout)
+CONFIG__DEFINE_INT_FIELD(display_brightness, displayBrightness)
+CONFIG__DEFINE_BOOL_FIELD(time_automatic_update_via_ntp, timeAutomaticUpdateViaNTP)
+CONFIG__DEFINE_FLOAT_FIELD(time_timezone, timeTimezone)
+CONFIG__DEFINE_BOOL_FIELD(time_dst, timeDst)
+CONFIG__DEFINE_BOOL_FIELD(time_clock24hr, timeClock24hr)
+CONFIG__DEFINE_BOOL_FIELD(sound_enabled, soundEnabled)
 CONFIG__DEFINE_INT_FIELD(sound_volume, soundVolume)
 
 void config__get_audio_settings(bool *enabled, int *volume) {
@@ -761,7 +789,7 @@ void config__get_audio_settings(bool *enabled, int *volume) {
         return;
     }
     config__lock();
-    *enabled = s_config.soundEnabled != 0;
+    *enabled = s_config.soundEnabled;
     *volume = s_config.soundVolume;
     config__unlock();
 }
@@ -775,9 +803,9 @@ void config__get_theme_colors_internal(uint16_t *pri, uint16_t *sec, uint16_t *b
         return;
     }
     config__lock();
-    *pri = s_config.priColor;
-    *sec = s_config.secColor;
-    *bg = s_config.bgColor;
+    *pri = s_config.themePrimaryColor;
+    *sec = s_config.themeSecondaryColor;
+    *bg = s_config.themeBackgroundColor;
     config__unlock();
 }
 CONFIG__DEFINE_STRING_FIELD(keyboard_lang, keyboardLang, CONFIG__KEYBOARD_LANG_MAX_LEN)
@@ -830,7 +858,8 @@ bruce_result_t config__set_hotkeys(const bruce_config_hotkey_t *values, size_t c
     return saved ? BRUCE_OK : BRUCE_ERR_IO;
 }
 
-CONFIG__DEFINE_INT_FIELD(led_bright, ledBright)
+CONFIG__DEFINE_BOOL_FIELD(led_enabled, ledEnabled)
+CONFIG__DEFINE_INT_FIELD(led_brightness, ledBrightness)
 CONFIG__DEFINE_UINT32_FIELD(led_color, ledColor)
 CONFIG__DEFINE_BOOL_INT_FIELD(led_blink_enabled, ledBlinkEnabled)
 CONFIG__DEFINE_INT_FIELD(led_effect, ledEffect)
@@ -840,7 +869,7 @@ CONFIG__DEFINE_INT_FIELD(led_effect_direction, ledEffectDirection)
 const bruce_config_startup_apps_t *config__get_startup_apps(void) {
     if (config__guard() != BRUCE_OK || !config__init()) return NULL;
     config__lock();
-    const bruce_config_startup_apps_t *apps = &s_config.startupApps;
+    const bruce_config_startup_apps_t *apps = &s_config.startup;
     config__unlock();
     return apps;
 }
@@ -866,9 +895,9 @@ bruce_result_t config__set_startup_apps(const char *const *values, size_t count)
     }
 
     config__lock();
-    config__clear_string_array(s_config.startupApps.items, CONFIG__STARTUP_APP_MAX_COUNT);
-    memcpy(s_config.startupApps.items, copies, sizeof(copies));
-    s_config.startupApps.count = count;
+    config__clear_string_array(s_config.startup.items, CONFIG__STARTUP_APP_MAX_COUNT);
+    memcpy(s_config.startup.items, copies, sizeof(copies));
+    s_config.startup.count = count;
     bool saved = config__save_locked();
     config__unlock();
     return saved ? BRUCE_OK : BRUCE_ERR_IO;
@@ -882,13 +911,13 @@ bruce_result_t config__add_startup_app(const char *key) {
     }
 
     config__lock();
-    for (size_t i = 0; i < s_config.startupApps.count; ++i) {
-        if (strcmp(s_config.startupApps.items[i], key) == 0) {
+    for (size_t i = 0; i < s_config.startup.count; ++i) {
+        if (strcmp(s_config.startup.items[i], key) == 0) {
             config__unlock();
             return BRUCE_OK;
         }
     }
-    if (s_config.startupApps.count == CONFIG__STARTUP_APP_MAX_COUNT) {
+    if (s_config.startup.count == CONFIG__STARTUP_APP_MAX_COUNT) {
         config__unlock();
         return BRUCE_ERR_RESOURCE_LIMIT;
     }
@@ -898,7 +927,7 @@ bruce_result_t config__add_startup_app(const char *key) {
         config__unlock();
         return BRUCE_ERR_NO_MEMORY;
     }
-    s_config.startupApps.items[s_config.startupApps.count++] = copy;
+    s_config.startup.items[s_config.startup.count++] = copy;
     bool saved = config__save_locked();
     config__unlock();
     return saved ? BRUCE_OK : BRUCE_ERR_IO;
@@ -913,26 +942,25 @@ bruce_result_t config__remove_startup_app(const char *key) {
 
     config__lock();
     size_t index = 0;
-    while (index < s_config.startupApps.count && strcmp(s_config.startupApps.items[index], key) != 0) {
+    while (index < s_config.startup.count && strcmp(s_config.startup.items[index], key) != 0) {
         ++index;
     }
-    if (index == s_config.startupApps.count) {
+    if (index == s_config.startup.count) {
         config__unlock();
         return BRUCE_ERR_NOT_FOUND;
     }
 
-    config__release(&s_config.startupApps.items[index]);
-    --s_config.startupApps.count;
+    config__release(&s_config.startup.items[index]);
+    --s_config.startup.count;
     memmove(
-        &s_config.startupApps.items[index],
-        &s_config.startupApps.items[index + 1],
-        (s_config.startupApps.count - index) * sizeof(s_config.startupApps.items[0])
+        &s_config.startup.items[index],
+        &s_config.startup.items[index + 1],
+        (s_config.startup.count - index) * sizeof(s_config.startup.items[0])
     );
-    s_config.startupApps.items[s_config.startupApps.count] = NULL;
+    s_config.startup.items[s_config.startup.count] = NULL;
     bool saved = config__save_locked();
     config__unlock();
     return saved ? BRUCE_OK : BRUCE_ERR_IO;
 }
 
 CONFIG__DEFINE_BOOL_INT_FIELD(dev_mode, devMode)
-CONFIG__DEFINE_BOOL_INT_FIELD(color_inverted, colorInverted)

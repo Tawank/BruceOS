@@ -30,7 +30,7 @@ static bool clock_app__resume_after_handoff(void) {
 }
 
 static void clock_app__format_time(const bruce_clock_datetime_t *now, char *out, size_t size) {
-    bool format24 = config__get_clock24hr();
+    bool format24 = config__get_time_clock24hr();
     if (format24) {
         snprintf(out, size, "%02u:%02u:%02u", now->hour, now->minute, now->second);
         return;
@@ -43,9 +43,9 @@ static void clock_app__format_time(const bruce_clock_datetime_t *now, char *out,
 static bruce_result_t clock_app__draw(const char *title, const char *main_text, const char *footer) {
     int width = display__width();
     int height = display__height();
-    uint16_t primary = config__get_pri_color();
-    uint16_t secondary = config__get_sec_color();
-    uint16_t background = config__get_bg_color();
+    uint16_t primary = config__get_theme_primary();
+    uint16_t secondary = config__get_theme_secondary();
+    uint16_t background = config__get_theme_background();
     bruce_result_t result = display__begin_frame();
     if (result != BRUCE_OK) return result;
     (void)display__fill_screen(background);

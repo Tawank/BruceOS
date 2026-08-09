@@ -13,10 +13,10 @@
 #include <string.h>
 
 static int config_app__show_clock(void) {
-    bool automatic = config__get_automatic_time_update_via_ntp();
-    bool dst = config__get_dst();
-    bool format24 = config__get_clock24hr();
-    float timezone = config__get_tmz();
+    bool automatic = config__get_time_automatic_update_via_ntp();
+    bool dst = config__get_time_dst();
+    bool format24 = config__get_time_clock24hr();
+    float timezone = config__get_time_timezone();
     bruce_clock_datetime_t now;
     bruce_result_t clock_result = clock__get_local(&now);
     if (clock_result == BRUCE_OK) {
@@ -65,16 +65,16 @@ static bruce_result_t config_app__manual_dialog(void) {
     bruce_clock_datetime_t value;
     if (!config_app__parse_datetime(date, time, &value)) return BRUCE_ERR_INVALID_ARGUMENT;
     bruce_result_t result = clock__set_local(&value);
-    if (result == BRUCE_OK) (void)config__set_automatic_time_update_via_ntp(false);
+    if (result == BRUCE_OK) (void)config__set_time_automatic_update_via_ntp(false);
     return result;
 }
 
 static int config_app__clock_gui(void) {
     for (;;) {
-        bool automatic = config__get_automatic_time_update_via_ntp();
-        bool dst = config__get_dst();
-        bool format24 = config__get_clock24hr();
-        float timezone = config__get_tmz();
+        bool automatic = config__get_time_automatic_update_via_ntp();
+        bool dst = config__get_time_dst();
+        bool format24 = config__get_time_clock24hr();
+        float timezone = config__get_time_timezone();
         char ntp_label[40], timezone_label[40], dst_label[32], format_label[32];
         snprintf(ntp_label, sizeof(ntp_label), "Automatic NTP: %s", automatic ? "ON" : "OFF");
         snprintf(timezone_label, sizeof(timezone_label), "Timezone: UTC%+.2f", timezone);
@@ -102,7 +102,7 @@ static int config_app__clock_gui(void) {
                 result == BRUCE_OK ? "Clock synchronized" : "Connect Wi-Fi and try again"
             );
         } else if (selected == 1) {
-            (void)config__set_automatic_time_update_via_ntp(!automatic);
+            (void)config__set_time_automatic_update_via_ntp(!automatic);
         } else if (selected == 2) {
             char initial[16], entered[16];
             snprintf(initial, sizeof(initial), "%.2f", timezone);
@@ -112,13 +112,13 @@ static int config_app__clock_gui(void) {
                 char *end = NULL;
                 float value = strtof(entered, &end);
                 if (end != entered && *end == '\0' && value >= -12.0f && value <= 14.0f)
-                    (void)config__set_tmz(value);
+                    (void)config__set_time_timezone(value);
                 else (void)dialog__message(BRUCE_DIALOG_ERROR, "Timezone", "Offset must be from -12 to +14");
             }
         } else if (selected == 3) {
-            (void)config__set_dst(!dst);
+            (void)config__set_time_dst(!dst);
         } else if (selected == 4) {
-            (void)config__set_clock24hr(!format24);
+            (void)config__set_time_clock24hr(!format24);
         } else {
             result = config_app__manual_dialog();
             if (result != BRUCE_OK && result != BRUCE_ERR_CANCELLED)
@@ -151,7 +151,7 @@ static int config_app__clock_cli(
     if (action == ntp) {
         bool value;
         return config_app__parse_on_off(ap_get_arg(ntp, "state"), &value)
-                   ? config__set_automatic_time_update_via_ntp(value)
+                    ? config__set_time_automatic_update_via_ntp(value)
                    : BRUCE_ERR_INVALID_ARGUMENT;
     }
     if (action == timezone) {
@@ -161,18 +161,18 @@ static int config_app__clock_cli(
         float value = strtof(offset, &end);
         if (end == offset || *end != '\0' || value < -12.0f || value > 14.0f)
             return BRUCE_ERR_INVALID_ARGUMENT;
-        return config__set_tmz(value);
+        return config__set_time_timezone(value);
     }
     if (action == dst) {
         bool value;
-        return config_app__parse_on_off(ap_get_arg(dst, "state"), &value) ? config__set_dst(value)
+        return config_app__parse_on_off(ap_get_arg(dst, "state"), &value) ? config__set_time_dst(value)
                                                                           : BRUCE_ERR_INVALID_ARGUMENT;
     }
     if (action == format) {
         const char *value = ap_get_arg(format, "hours");
         if (value == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
-        if (strcmp(value, "12") == 0) return config__set_clock24hr(false);
-        if (strcmp(value, "24") == 0) return config__set_clock24hr(true);
+        if (strcmp(value, "12") == 0) return config__set_time_clock24hr(false);
+        if (strcmp(value, "24") == 0) return config__set_time_clock24hr(true);
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
     if (action == set) {
@@ -180,7 +180,7 @@ static int config_app__clock_cli(
         if (!config_app__parse_datetime(ap_get_arg(set, "date"), ap_get_arg(set, "time"), &value))
             return BRUCE_ERR_INVALID_ARGUMENT;
         bruce_result_t result = clock__set_local(&value);
-        if (result == BRUCE_OK) (void)config__set_automatic_time_update_via_ntp(false);
+        if (result == BRUCE_OK) (void)config__set_time_automatic_update_via_ntp(false);
         return result;
     }
     return BRUCE_ERR_INVALID_ARGUMENT;

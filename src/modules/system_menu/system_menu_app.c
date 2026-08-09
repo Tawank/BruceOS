@@ -87,9 +87,9 @@ static bruce_result_t system_menu__draw(
 
     int width = display__width();
     int height = display__height();
-    uint16_t primary = config__get_pri_color();
-    uint16_t secondary = config__get_sec_color();
-    uint16_t background = config__get_bg_color();
+    uint16_t primary = config__get_theme_primary();
+    uint16_t secondary = config__get_theme_secondary();
+    uint16_t background = config__get_theme_background();
 
     (void)display__fill_screen(secondary);
     (void)display__draw_line(0, height - 1, width - 1, height - 1, primary);

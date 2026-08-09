@@ -341,7 +341,9 @@ static bruce_result_t webui__asset(bruce_http_server_request_t *request, void *c
 
 static bruce_result_t webui__theme(bruce_http_server_request_t *request, void *context) {
     (void)context;
-    uint16_t colors[] = {config__get_pri_color(), config__get_sec_color(), config__get_bg_color()};
+    uint16_t colors[] = {
+        config__get_theme_primary(), config__get_theme_secondary(), config__get_theme_background()
+    };
     char css[96];
     char *cursor = css;
     size_t left = sizeof(css);
