@@ -59,6 +59,7 @@
 #define WIFI_STACK_BYTES 8192u
 #define BPARTED_STACK_BYTES 8192u
 #define NOTIFICATION_SERVICE_STACK_BYTES 2048u
+#define MENU_STACK_BYTES 4096u
 
 void app_runner__register_defaults(void) {
     (void)app_runner__register("launcher", launcher_app_main, LAUNCHER_STACK_BYTES);
@@ -84,7 +85,7 @@ void app_runner__register_defaults(void) {
     (void)app_runner__register("serial_commands", serial_commands_app_main, SERIAL_COMMANDS_STACK_BYTES);
     (void)app_runner__register("process", process_app_main, 0);
     (void)app_runner__register("help", help_app_main, 0);
-    (void)app_runner__register("menu", system_menu_app_main, 0);
+    (void)app_runner__register("menu", system_menu_app_main, MENU_STACK_BYTES);
     (void)app_runner__register("pwd", bnu_pwd_app_main, 0);
     (void)app_runner__register("cd", bnu_cd_app_main, 0);
     (void)app_runner__register("ls", bnu_ls_app_main, 0);

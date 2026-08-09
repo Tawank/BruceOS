@@ -173,9 +173,9 @@ bool selftest__run_process_status_case(void) {
         .exit_code = -123,
         .signal = BRUCE_PROCESS_SIGNAL_KILL,
     };
-    if (process__snapshot(exit_id, &snapshot) != BRUCE_ERR_NOT_FOUND || process__wait(exit_id, 0) != BRUCE_OK ||
-        process__wait_status(exit_id, 0, &status) != BRUCE_OK || status.reason != BRUCE_PROCESS_EXITED ||
-        status.exit_code != 37 || status.signal != 0) {
+    if (process__snapshot(exit_id, &snapshot) != BRUCE_ERR_NOT_FOUND ||
+        process__wait(exit_id, 0) != BRUCE_OK || process__wait_status(exit_id, 0, &status) != BRUCE_OK ||
+        status.reason != BRUCE_PROCESS_EXITED || status.exit_code != 37 || status.signal != 0) {
         printf("[selftest] process/status: delayed nonzero status failed\n");
         return false;
     }
@@ -313,9 +313,17 @@ bool selftest__run_process_app_switch_case(void) {
     bool registry_foreground = process_registry__foreground_id() == target;
 
     (void)process__foreground(self);
+    bool caller_not_reselected = false;
+    if (process__to_background() == BRUCE_OK) {
+        bruce_result_t relative = process__switch_next();
+        caller_not_reselected = (relative == BRUCE_OK || relative == BRUCE_ERR_NOT_FOUND) &&
+                                process__snapshot(self, &snapshot) == BRUCE_OK &&
+                                snapshot.state == BRUCE_PROCESS_BACKGROUND;
+    }
     (void)process__kill(target);
-    bool ok =
-        switched == BRUCE_OK && foreground && registry_foreground && process_registry__foreground_id() == self;
+    (void)process__foreground(self);
+    bool ok = switched == BRUCE_OK && foreground && registry_foreground && caller_not_reselected &&
+              process_registry__foreground_id() == self;
     printf("[selftest] process/app-switch: %s\n", ok ? "OK" : "FAIL");
     return ok;
 }

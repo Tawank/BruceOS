@@ -12,6 +12,7 @@
 #include "core_sdk/display.h"
 #include "core_sdk/icon.h"
 #include "core_sdk/input.h"
+#include "core_sdk/memory.h"
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
 #include "core_sdk/runtime.h"
@@ -29,7 +30,7 @@ static const char *const SYSTEM_MENU__DEFAULT_ITEMS_JSON =
     "{\"icon\":\"close\",\"label\":\"Cancel\",\"action\":\"cancel\"},"
     "{\"icon\":\"swap-horizontal\",\"label\":\"Next\",\"action\":\"process.next\"},"
     "{\"icon\":\"apps\",\"label\":\"Launcher\",\"action\":\"launcher\"},"
-    "{\"icon\":\"power\",\"label\":\"Off\",\"action\":\"device.power_off\"}"
+    "{\"icon\":\"power\",\"label\":\"Off\",\"action\":\"shutdown now\"}"
     "]";
 
 typedef struct {
@@ -45,12 +46,17 @@ static void system_menu__copy_json_string(cJSON *object, const char *key, char *
 }
 
 static size_t system_menu__load_items(system_menu__item_t *items, size_t capacity) {
-    char json[SYSTEM_MENU__CONFIG_MAX];
-    (void)app_config__get_json(
-        SYSTEM_MENU__APP_NAME, "items", SYSTEM_MENU__DEFAULT_ITEMS_JSON, json, sizeof(json)
+    char *json = memory__malloc(SYSTEM_MENU__CONFIG_MAX);
+    if (json == NULL) return 0;
+    bool configured = app_config__get_json(
+        SYSTEM_MENU__APP_NAME, "items", SYSTEM_MENU__DEFAULT_ITEMS_JSON, json, SYSTEM_MENU__CONFIG_MAX
     );
+    if (!configured) {
+        (void)app_config__set_json(SYSTEM_MENU__APP_NAME, "items", SYSTEM_MENU__DEFAULT_ITEMS_JSON);
+    }
 
     cJSON *root = cJSON_Parse(json);
+    memory__free(json);
     if (!cJSON_IsArray(root)) {
         cJSON_Delete(root);
         root = cJSON_Parse(SYSTEM_MENU__DEFAULT_ITEMS_JSON);
@@ -71,7 +77,8 @@ static size_t system_menu__load_items(system_menu__item_t *items, size_t capacit
     return count;
 }
 
-static bruce_result_t system_menu__draw(const system_menu__item_t *items, size_t count, int selected, const char *status) {
+static bruce_result_t
+system_menu__draw(const system_menu__item_t *items, size_t count, int selected, const char *status) {
     bruce_result_t result = display__begin_frame();
     if (result != BRUCE_OK) return result;
 
@@ -99,8 +106,14 @@ static bruce_result_t system_menu__draw(const system_menu__item_t *items, size_t
         if (icon != NULL) {
             int icon_x = x + (w - SYSTEM_MENU__ICON_SIZE) / 2;
             (void)display__draw_bitmap_scaled(
-                icon_x, 4, icon->bits, icon->width, icon->height, SYSTEM_MENU__ICON_SIZE,
-                SYSTEM_MENU__ICON_SIZE, fg
+                icon_x,
+                4,
+                icon->bits,
+                icon->width,
+                icon->height,
+                SYSTEM_MENU__ICON_SIZE,
+                SYSTEM_MENU__ICON_SIZE,
+                fg
             );
         } else {
             char fallback[2] = {items[i].label[0], '\0'};
@@ -127,15 +140,19 @@ static bruce_result_t system_menu__draw(const system_menu__item_t *items, size_t
 
 static int system_menu__run_action(const char *action) {
     if (strcmp(action, "cancel") == 0) return BRUCE_ERR_CANCELLED;
-    if (strcmp(action, "process.next") == 0) return process__switch_next();
-    if (strcmp(action, "process.previous") == 0) return process__switch_previous();
-    if (strcmp(action, "launcher") == 0) return app_runner__run_command("GUI=1 launcher", BRUCE_LAUNCH_FOREGROUND);
-    if (strcmp(action, "device.power_off") == 0) return device__power_off();
-    if (strncmp(action, "command:", 8) == 0) {
-        const char *command = action + 8;
-        while (*command == ' ') command++;
-        return app_runner__run_command(command, BRUCE_LAUNCH_FOREGROUND);
+    if (strcmp(action, "process.next") == 0 || strcmp(action, "process.previous") == 0) {
+        /* The menu is a temporary foreground process. Remove it before choosing
+         * a neighbor so the process that opened the menu becomes the anchor,
+         * rather than selecting according to the menu's recycled slot. */
+        bruce_result_t result = process__to_background();
+        if (result != BRUCE_OK) return result;
+        result = strcmp(action, "process.next") == 0 ? process__switch_next() : process__switch_previous();
+        return result == BRUCE_ERR_NOT_FOUND ? BRUCE_OK : result;
     }
+    if (strcmp(action, "launcher") == 0)
+        return app_runner__run_command("GUI=1 launcher", BRUCE_LAUNCH_FOREGROUND);
+    if (strcmp(action, "device.power_off") == 0) return device__power_off(0);
+    else { return app_runner__run_command(action, BRUCE_LAUNCH_FOREGROUND); }
     return BRUCE_ERR_INVALID_ARGUMENT;
 }
 
@@ -143,13 +160,18 @@ int system_menu_app_main(int argc, char **argv) {
     (void)argc;
     (void)argv;
 
-    system_menu__item_t items[SYSTEM_MENU__MAX_ITEMS] = {0};
+    system_menu__item_t *items = memory__calloc(SYSTEM_MENU__MAX_ITEMS, sizeof(*items));
+    if (items == NULL) return BRUCE_ERR_NO_MEMORY;
     size_t count = system_menu__load_items(items, SYSTEM_MENU__MAX_ITEMS);
-    if (count == 0) return BRUCE_ERR_NOT_FOUND;
+    if (count == 0) {
+        memory__free(items);
+        return BRUCE_ERR_NOT_FOUND;
+    }
 
     int selected = 0;
     char status[48] = {0};
     bool redraw = true;
+    bruce_result_t result = BRUCE_OK;
     while (process__current_signal() == 0) {
         if (redraw) {
             bruce_result_t draw = system_menu__draw(items, count, selected, status);
@@ -157,17 +179,20 @@ int system_menu_app_main(int argc, char **argv) {
                 (void)runtime__delay(20);
                 continue;
             }
-            if (draw != BRUCE_OK) return draw;
+            if (draw != BRUCE_OK) {
+                result = draw;
+                break;
+            }
             redraw = false;
         }
 
         bruce_input_event_t event;
         bruce_result_t input = input__read(&event, 100);
-        if (input == BRUCE_ERR_NOT_FOREGROUND) return BRUCE_OK;
+        if (input == BRUCE_ERR_NOT_FOREGROUND) break;
         if (input != BRUCE_OK || event.action != BRUCE_INPUT_PRESS) continue;
         status[0] = '\0';
 
-        if (event.code == BRUCE_INPUT_CODE_BACK || event.code == BRUCE_INPUT_CODE_MENU) return BRUCE_OK;
+        if (event.code == BRUCE_INPUT_CODE_BACK || event.code == BRUCE_INPUT_CODE_MENU) break;
         if (event.code == BRUCE_INPUT_CODE_LEFT) {
             selected = (selected + (int)count - 1) % (int)count;
             redraw = true;
@@ -175,11 +200,12 @@ int system_menu_app_main(int argc, char **argv) {
             selected = (selected + 1) % (int)count;
             redraw = true;
         } else if (event.code == BRUCE_INPUT_CODE_SELECT) {
-            int result = system_menu__run_action(items[selected].action);
-            if (result == BRUCE_OK || result == BRUCE_ERR_CANCELLED) return BRUCE_OK;
-            snprintf(status, sizeof(status), "%s", app_runner__result_to_string(result));
+            int action_result = system_menu__run_action(items[selected].action);
+            if (action_result == BRUCE_OK || action_result == BRUCE_ERR_CANCELLED) break;
+            snprintf(status, sizeof(status), "%s", app_runner__result_to_string(action_result));
             redraw = true;
         }
     }
-    return BRUCE_OK;
+    memory__free(items);
+    return result;
 }

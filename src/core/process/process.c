@@ -1167,6 +1167,8 @@ bruce_result_t process__snapshot(bruce_process_id_t process_id, bruce_process_sn
 static bruce_result_t process__switch_relative(int direction) {
     process__ensure_init();
     process__lock();
+    process__record_t *self = process__find_by_handle_locked(xTaskGetCurrentTaskHandle());
+    bruce_process_id_t self_id = self != NULL ? self->id : BRUCE_PROCESS_ID_INVALID;
     bruce_process_id_t anchor_id = s_effective_foreground;
     process__record_t *anchor = process__find_by_id_locked(anchor_id);
     if (anchor == NULL || !anchor->presentable) {
@@ -1192,7 +1194,8 @@ static bruce_result_t process__switch_relative(int direction) {
                                                 PROCESS__MAX_RECORDS
                                           : (direction > 0 ? offset - 1 : PROCESS__MAX_RECORDS - offset);
         process__record_t *candidate = &s_processes[index];
-        if (candidate->in_use && candidate->presentable && candidate->state == BRUCE_PROCESS_BACKGROUND) {
+        if (candidate->in_use && candidate->id != self_id && candidate->presentable &&
+            candidate->state == BRUCE_PROCESS_BACKGROUND) {
             process__foreground_push_locked(candidate->id);
             process__unlock();
             return BRUCE_OK;
