@@ -447,11 +447,9 @@ static int bruce_launcher__run_process_switcher(const bruce_launcher_theme_t *th
             selected > 0) {
             selected--;
             redraw = true;
-        } else if (
-            (event.code == BRUCE_INPUT_CODE_DOWN || event.code == BRUCE_INPUT_CODE_NEXT ||
-             event.code == BRUCE_INPUT_CODE_RIGHT) &&
-            selected + 1 < (int)page_count
-        ) {
+        } else if ((event.code == BRUCE_INPUT_CODE_DOWN || event.code == BRUCE_INPUT_CODE_NEXT ||
+                    event.code == BRUCE_INPUT_CODE_RIGHT) &&
+                   selected + 1 < (int)page_count) {
             selected++;
             redraw = true;
         } else if (event.code == BRUCE_INPUT_CODE_LEFT && page > 0) {
