@@ -127,7 +127,7 @@ JSValue native_getPrevPress(JSContext *ctx, JSValue *this_val, int argc, JSValue
     (void)this_val;
     (void)argc;
     (void)argv;
-    return JS_NewBool(input__check(BRUCE_INPUT_CODE_UP, true));
+    return JS_NewBool(input__check(BRUCE_INPUT_CODE_PREV, true) || input__check(BRUCE_INPUT_CODE_UP, true));
 }
 
 JSValue native_getSelPress(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
@@ -148,13 +148,15 @@ JSValue native_getNextPress(JSContext *ctx, JSValue *this_val, int argc, JSValue
     (void)this_val;
     (void)argc;
     (void)argv;
-    return JS_NewBool(input__check(BRUCE_INPUT_CODE_DOWN, true));
+    return JS_NewBool(input__check(BRUCE_INPUT_CODE_NEXT, true) || input__check(BRUCE_INPUT_CODE_DOWN, true));
 }
 
 JSValue native_getAnyPress(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
     (void)this_val;
     (void)argc;
     (void)argv;
+    if (input__check(BRUCE_INPUT_CODE_PREV, true)) return JS_NewBool(1);
+    if (input__check(BRUCE_INPUT_CODE_NEXT, true)) return JS_NewBool(1);
     if (input__check(BRUCE_INPUT_CODE_UP, true)) return JS_NewBool(1);
     if (input__check(BRUCE_INPUT_CODE_DOWN, true)) return JS_NewBool(1);
     if (input__check(BRUCE_INPUT_CODE_LEFT, true)) return JS_NewBool(1);

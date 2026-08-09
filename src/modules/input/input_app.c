@@ -25,21 +25,7 @@
 
 uint64_t input__now_ms(void) { return (uint64_t)xTaskGetTickCount() * portTICK_PERIOD_MS; }
 
-static int32_t input_app__remap_button_code(int32_t code) {
-#if CONFIG_BRUCE_BUTTON_A_ENABLED
-    if (code == BRUCE_INPUT_CODE_BUTTON_A) return CONFIG_BRUCE_BUTTON_A_REMAP_CODE;
-#endif
-#if CONFIG_BRUCE_BUTTON_B_ENABLED
-    if (code == BRUCE_INPUT_CODE_BUTTON_B) return CONFIG_BRUCE_BUTTON_B_REMAP_CODE;
-#endif
-#if CONFIG_BRUCE_BUTTON_C_ENABLED
-    if (code == BRUCE_INPUT_CODE_BUTTON_C) return CONFIG_BRUCE_BUTTON_C_REMAP_CODE;
-#endif
-    return code;
-}
-
 void input__emit(bruce_input_type_t type, bruce_input_action_t action, int32_t code, int32_t value) {
-    if (type == BRUCE_INPUT_BUTTON) code = input_app__remap_button_code(code);
     bruce_input_event_t event = {
         .type = type,
         .action = action,

@@ -117,6 +117,31 @@ bool input_hotkey__find(const char *name, uint32_t *out_hold_ms, char *out_actio
     return false;
 }
 
+bool input_hotkey__find_by_hold(
+    const char *name,
+    bool want_hold,
+    uint32_t *out_hold_ms,
+    char *out_action,
+    size_t action_size
+) {
+    if (name == NULL) return false;
+    const bruce_config_hotkeys_t *hotkeys = config__get_hotkeys();
+    if (hotkeys == NULL) return false;
+
+    for (size_t i = 0; i < hotkeys->count; ++i) {
+        uint32_t hold_ms = 0;
+        const char *rest = NULL;
+        input_hotkey__split_duration(hotkeys->items[i].key, &hold_ms, &rest);
+        if (strcmp(rest, name) != 0 || (hold_ms > 0) != want_hold) continue;
+
+        int written = snprintf(out_action, action_size, "%s", hotkeys->items[i].action);
+        if (written < 0 || (size_t)written >= action_size) return false;
+        *out_hold_ms = hold_ms;
+        return true;
+    }
+    return false;
+}
+
 /* True iff `command`'s leading "key=value" environment tokens (the same
  * ones app_runner__run_command() parses off the front of the line) include
  * "BG=1" -- mirrors bruce_launcher__command_requests_background() in

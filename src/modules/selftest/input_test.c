@@ -333,10 +333,12 @@ bool selftest__run_input_hotkey_find_case(void) {
     }
 
     const bruce_config_hotkey_t test_hotkeys[] = {
-        {"2s BTN_B", "menu top"           },
-        {"BTN_C",    "emit NEXT"},
+        {"BTN_A",       "emit PREV"},
+        {"500ms BTN_A", "menu top"},
+        {"2s BTN_B",    "menu top"},
+        {"BTN_C",       "emit NEXT"},
     };
-    bool set_ok = config__set_hotkeys(test_hotkeys, 2) == BRUCE_OK;
+    bool set_ok = config__set_hotkeys(test_hotkeys, 4) == BRUCE_OK;
 
     uint32_t hold_ms = 0;
     char action[BRUCE_CONFIG_HOTKEY_ACTION_MAX_LEN + 1] = {0};
@@ -346,11 +348,15 @@ bool selftest__run_input_hotkey_find_case(void) {
     bool instant_match =
         input_hotkey__find("BTN_C", &hold_ms, action, sizeof(action)) && hold_ms == 0 &&
         strcmp(action, "emit NEXT") == 0;
-    bool no_match = !input_hotkey__find("BTN_A", &hold_ms, action, sizeof(action));
+    bool instant_a = input_hotkey__find_by_hold("BTN_A", false, &hold_ms, action, sizeof(action)) &&
+                     hold_ms == 0 && strcmp(action, "emit PREV") == 0;
+    bool hold_a = input_hotkey__find_by_hold("BTN_A", true, &hold_ms, action, sizeof(action)) &&
+                  hold_ms == 500 && strcmp(action, "menu top") == 0;
+    bool no_match = !input_hotkey__find("BTN_X", &hold_ms, action, sizeof(action));
 
     bool restored = config__set_hotkeys(original, original_count) == BRUCE_OK;
 
-    bool ok = set_ok && hold_match && instant_match && no_match && restored;
+    bool ok = set_ok && hold_match && instant_match && instant_a && hold_a && no_match && restored;
     printf("[selftest] input/hotkey-find: %s\n", ok ? "OK" : "FAIL");
     return ok;
 }

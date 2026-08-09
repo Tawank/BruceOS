@@ -223,7 +223,9 @@ static void bruce_launcher__draw_root_menu(
     bruce_launcher__draw_entry_icon(&entries[selected], w / 2, cy, large, theme->pri);
 
     bruce_launcher__draw_centered_text(
-        bruce_launcher__entry_label(&entries[selected]), cy + large / 2 + 10, BRUCE_LAUNCHER_FONT_MEDIUM,
+        bruce_launcher__entry_label(&entries[selected]),
+        cy + large / 2 + 10,
+        BRUCE_LAUNCHER_FONT_MEDIUM,
         theme
     );
 }
@@ -440,11 +442,16 @@ static int bruce_launcher__run_process_switcher(const bruce_launcher_theme_t *th
             (void)display__set_tiles(NULL, 0);
             return 0;
         }
-        if ((event.code == BRUCE_INPUT_CODE_UP || event.code == BRUCE_INPUT_CODE_LEFT) && selected > 0) {
+        if ((event.code == BRUCE_INPUT_CODE_UP || event.code == BRUCE_INPUT_CODE_PREV ||
+             event.code == BRUCE_INPUT_CODE_LEFT) &&
+            selected > 0) {
             selected--;
             redraw = true;
-        } else if ((event.code == BRUCE_INPUT_CODE_DOWN || event.code == BRUCE_INPUT_CODE_RIGHT) &&
-                   selected + 1 < (int)page_count) {
+        } else if (
+            (event.code == BRUCE_INPUT_CODE_DOWN || event.code == BRUCE_INPUT_CODE_NEXT ||
+             event.code == BRUCE_INPUT_CODE_RIGHT) &&
+            selected + 1 < (int)page_count
+        ) {
             selected++;
             redraw = true;
         } else if (event.code == BRUCE_INPUT_CODE_LEFT && page > 0) {
@@ -519,7 +526,10 @@ static int bruce_launcher__run_entry(const bruce_launcher_entry_t *entry) {
     if (result < 0) {
         char message[128];
         snprintf(
-            message, sizeof(message), "Could not start %s: %s", bruce_launcher__entry_label(entry),
+            message,
+            sizeof(message),
+            "Could not start %s: %s",
+            bruce_launcher__entry_label(entry),
             app_runner__result_to_string(result)
         );
         (void)dialog__message(BRUCE_DIALOG_ERROR, "Launch failed", message);
@@ -666,6 +676,7 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
         switch (ev.code) {
             case BRUCE_INPUT_CODE_LEFT:
             case BRUCE_INPUT_CODE_UP:
+            case BRUCE_INPUT_CODE_PREV:
                 if (menu->is_root && menu->entry_count > 0) {
                     int previous = selected;
                     selected = (selected + menu->entry_count - 1) % menu->entry_count;
@@ -681,6 +692,7 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
                 break;
             case BRUCE_INPUT_CODE_RIGHT:
             case BRUCE_INPUT_CODE_DOWN:
+            case BRUCE_INPUT_CODE_NEXT:
                 if (menu->is_root && menu->entry_count > 0) {
                     int previous = selected;
                     selected = (selected + 1) % menu->entry_count;
@@ -693,8 +705,7 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
                     selected++;
                 }
                 break;
-            case BRUCE_INPUT_CODE_SELECT:
-            case BRUCE_INPUT_CODE_BUTTON_A: {
+            case BRUCE_INPUT_CODE_SELECT: {
                 if (menu->entry_count == 0) { break; }
                 const bruce_launcher_entry_t *entry = &bruce_launcher__menu_entries(menu)[selected];
                 if (entry->kind == BRUCE_LAUNCHER_ENTRY_BACK) { return 0; }
@@ -707,8 +718,7 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
                 last_drawn = -1;
                 break;
             }
-            case BRUCE_INPUT_CODE_BACK:
-            case BRUCE_INPUT_CODE_BUTTON_B: return 0;
+            case BRUCE_INPUT_CODE_BACK: return 0;
             default: break;
         }
     }

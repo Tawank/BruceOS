@@ -53,6 +53,16 @@ const char *input_hotkey__name_for_code(int32_t code);
  * Returns false if none match or the action does not fit action_size. */
 bool input_hotkey__find(const char *name, uint32_t *out_hold_ms, char *out_action, size_t action_size);
 
+/* Finds the first configured instant (`want_hold` false) or hold (`want_hold`
+ * true) hotkey for `name`. This lets physical buttons have one of each. */
+bool input_hotkey__find_by_hold(
+    const char *name,
+    bool want_hold,
+    uint32_t *out_hold_ms,
+    char *out_action,
+    size_t action_size
+);
+
 /* Runs a matched hotkey action: "emit <NAME>" injects a press+release of
  * the named code; anything else is an AppRunner command line, launched
  * foreground the same way a launcher entry is. No-op for NULL/empty. */

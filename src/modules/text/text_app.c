@@ -400,9 +400,9 @@ static bruce_result_t text__run_editor(char *path, size_t path_size, text_editor
             }
         } else if (!semantic && event.code == 0x18) {
             result = text__exit_prompt(path, path_size, editor, &exit_editor);
-        } else if (semantic && event.code == BRUCE_INPUT_CODE_UP) {
+        } else if (semantic && (event.code == BRUCE_INPUT_CODE_UP || event.code == BRUCE_INPUT_CODE_PREV)) {
             text__move_vertical(editor, -1);
-        } else if (semantic && event.code == BRUCE_INPUT_CODE_DOWN) {
+        } else if (semantic && (event.code == BRUCE_INPUT_CODE_DOWN || event.code == BRUCE_INPUT_CODE_NEXT)) {
             text__move_vertical(editor, 1);
         } else if (semantic && event.code == BRUCE_INPUT_CODE_LEFT) {
             if (editor->cursor > 0) editor->cursor--;

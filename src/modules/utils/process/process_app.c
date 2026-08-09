@@ -215,11 +215,14 @@ static int process_app__preview(void) {
             (void)display__set_tiles(NULL, 0);
             return 0;
         }
-        if ((event.code == BRUCE_INPUT_CODE_UP || event.code == BRUCE_INPUT_CODE_LEFT) && selected > 0) {
+        if ((event.code == BRUCE_INPUT_CODE_UP || event.code == BRUCE_INPUT_CODE_PREV ||
+             event.code == BRUCE_INPUT_CODE_LEFT) &&
+            selected > 0) {
             selected--;
             redraw = true;
         } else if (
-            (event.code == BRUCE_INPUT_CODE_DOWN || event.code == BRUCE_INPUT_CODE_RIGHT) &&
+            (event.code == BRUCE_INPUT_CODE_DOWN || event.code == BRUCE_INPUT_CODE_NEXT ||
+             event.code == BRUCE_INPUT_CODE_RIGHT) &&
             selected + 1 < (int)page_count
         ) {
             selected++;

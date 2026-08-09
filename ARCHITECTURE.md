@@ -980,14 +980,14 @@ uppercase token names `input_hotkey__name_for_code()` defines: `BTN_A`, `BTN_B`,
 `BTN_L2`/`BTN_R2`/`BTN_START`/`BTN_SELECT`/`BTN_THUMB_L`/`BTN_THUMB_R` for future
 input sources. Prefixing a keyboard chord or button key with `<N>s ` or `<N>ms `
 (e.g. `2s space` or `2s BTN_B`) turns it into a hold binding: the action runs
-once the key has been held that long, and releasing early behaves exactly as if
-no hotkey were configured (a normal tap). Only one instant and one hold binding
-can usefully target the same key or chord per config, since the first configured
-entry whose key matches wins. Besides an AppRunner command line, a button
+once the key has been held that long; releasing early emits the normal tap and
+runs an instant binding for the same key if configured. Only one instant and one hold binding
+can usefully target the same key or chord per config; the first configured
+instant binding and the first configured hold binding each win. Besides an AppRunner command line, a button
 hotkey's action may be
 `emit <NAME>`, which rebinds it to inject a press+release of a different
 semantic code instead of launching anything -- e.g. `"BTN_C": "emit
-NEXT"` emits the independent `NEXT` semantic code. Setters
+NEXT"` preserves BTN_C and emits the independent `NEXT` semantic code. Setters
 validate and atomically persist immediately. The following
 values are permanently protected from ELF and JS, even with `config`:
 `wifiAp.ssid`, `wifiAp.pwd`, `webUI.pwd`, `wifiCredentials`, `wifiMAC`, and

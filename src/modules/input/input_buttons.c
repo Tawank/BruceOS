@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "input_common.h"
 #include "input_hotkey.h"
@@ -50,11 +51,11 @@
  * syntax (see input_hotkey.h): a button with such a binding configured
  * defers its normal press event until the outcome is known -- either the
  * hold threshold is reached (the hotkey action runs instead) or the button
- * is released early (a normal tap is emitted as if there were no binding
- * at all). Buttons with no hold binding are unaffected and behave exactly
- * as before, with zero added latency. hotkey_consumed tracks an *instant*
- * (no duration prefix) hotkey/rebind match, which replaces the press+release
- * pair outright, same as the keyboard's chord hotkeys. */
+ * is released early (the raw tap and any instant hotkey action run). Buttons
+ * with no hold binding are unaffected and behave exactly as before, with
+ * zero added latency. Instant command hotkeys consume their press+release
+ * pair, while `emit` rebindings preserve the raw pair and add their
+ * configured semantic pair. */
 typedef struct {
     int pin;
     int32_t code;
@@ -67,6 +68,7 @@ typedef struct {
     bool hold_fired;
     bool hotkey_consumed;
     char hold_action[BRUCE_CONFIG_HOTKEY_ACTION_MAX_LEN + 1];
+    char instant_action[BRUCE_CONFIG_HOTKEY_ACTION_MAX_LEN + 1];
 } input__button_t;
 
 static input__button_t s_buttons[] = {
@@ -119,34 +121,49 @@ void input_buttons__poll(void) {
 
                     const char *name = input_hotkey__name_for_code(btn->code);
                     uint32_t hold_ms = 0;
-                    char action[BRUCE_CONFIG_HOTKEY_ACTION_MAX_LEN + 1] = {0};
-                    bool matched = name != NULL && input_hotkey__find(name, &hold_ms, action, sizeof(action));
+                    uint32_t instant_hold_ms = 0;
+                    char hold_action[BRUCE_CONFIG_HOTKEY_ACTION_MAX_LEN + 1] = {0};
+                    btn->instant_action[0] = '\0';
+                    bool hold_matched = name != NULL && input_hotkey__find_by_hold(
+                                                               name, true, &hold_ms, hold_action, sizeof(hold_action)
+                                                           );
+                    bool instant_matched = name != NULL && input_hotkey__find_by_hold(
+                                                                  name,
+                                                                  false,
+                                                                  &instant_hold_ms,
+                                                                  btn->instant_action,
+                                                                  sizeof(btn->instant_action)
+                                                              );
 
-                    if (matched && hold_ms > 0) {
+                    if (hold_matched) {
                         /* Hold hotkey: defer the press until we know whether
                          * this becomes a hold or a quick tap. */
                         btn->hold_pending = true;
                         btn->hold_ms = hold_ms;
-                        snprintf(btn->hold_action, sizeof(btn->hold_action), "%s", action);
+                        snprintf(btn->hold_action, sizeof(btn->hold_action), "%s", hold_action);
                     } else {
                         btn->hold_pending = false;
-                        if (matched) {
-                            /* Instant hotkey/rebind: replaces the press+release
-                             * pair, same as a keyboard chord hotkey. */
-                            input_hotkey__run_action(action);
-                            btn->hotkey_consumed = true;
+                        if (instant_matched) {
+                            bool rebind = strncmp(btn->instant_action, "emit ", 5) == 0;
+                            if (rebind) {
+                                input__emit(BRUCE_INPUT_BUTTON, BRUCE_INPUT_PRESS, btn->code, 1);
+                            }
+                            input_hotkey__run_action(btn->instant_action);
+                            btn->hotkey_consumed = !rebind;
                         } else {
                             input__emit(BRUCE_INPUT_BUTTON, BRUCE_INPUT_PRESS, btn->code, 1);
                         }
                     }
                 } else if (btn->hold_pending) {
                     if (!btn->hold_fired) {
-                        /* Released before the hold threshold: behave as if
-                         * there were no binding at all. */
+                        /* Released before the hold threshold: emit the raw
+                         * tap, then run its instant action if configured. */
                         input__emit(BRUCE_INPUT_BUTTON, BRUCE_INPUT_PRESS, btn->code, 1);
                         input__emit(BRUCE_INPUT_BUTTON, BRUCE_INPUT_RELEASE, btn->code, 0);
+                        if (btn->instant_action[0] != '\0') input_hotkey__run_action(btn->instant_action);
                     }
                     btn->hold_pending = false;
+                    btn->instant_action[0] = '\0';
                 } else if (btn->hotkey_consumed) {
                     btn->hotkey_consumed = false;
                 } else {

@@ -481,9 +481,11 @@ static bruce_result_t dialog__gui_choice(
         int previous_selected = selected;
         switch (ev.code) {
             case BRUCE_INPUT_CODE_UP:
+            case BRUCE_INPUT_CODE_PREV:
                 if (selected > 0) { selected--; }
                 break;
             case BRUCE_INPUT_CODE_DOWN:
+            case BRUCE_INPUT_CODE_NEXT:
                 if ((size_t)selected + 1 < choice_count) { selected++; }
                 break;
             case BRUCE_INPUT_CODE_LEFT:
@@ -884,8 +886,10 @@ static bruce_result_t dialog__gui_input(
          * included), instead of being silently swallowed as typed punctuation
          * before ever reaching this switch. */
         switch (ev.code) {
-            case BRUCE_INPUT_CODE_UP: dialog__keyboard_find_valid_cell(&st, -1, 0); continue;
-            case BRUCE_INPUT_CODE_DOWN: dialog__keyboard_find_valid_cell(&st, 1, 0); continue;
+            case BRUCE_INPUT_CODE_UP:
+            case BRUCE_INPUT_CODE_PREV: dialog__keyboard_find_valid_cell(&st, -1, 0); continue;
+            case BRUCE_INPUT_CODE_DOWN:
+            case BRUCE_INPUT_CODE_NEXT: dialog__keyboard_find_valid_cell(&st, 1, 0); continue;
             case BRUCE_INPUT_CODE_LEFT: dialog__keyboard_find_valid_cell(&st, 0, -1); continue;
             case BRUCE_INPUT_CODE_RIGHT: dialog__keyboard_find_valid_cell(&st, 0, 1); continue;
             case BRUCE_INPUT_CODE_SELECT:

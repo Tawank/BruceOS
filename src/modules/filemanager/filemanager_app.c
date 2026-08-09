@@ -126,9 +126,9 @@ static bruce_result_t filemanager__view_file(const char *path, bool gui) {
         if (result == BRUCE_ERR_NOT_FOREGROUND) break;
         if (result != BRUCE_OK || event.action != BRUCE_INPUT_PRESS) continue;
 
-        if (event.code == BRUCE_INPUT_CODE_UP) {
+        if (event.code == BRUCE_INPUT_CODE_UP || event.code == BRUCE_INPUT_CODE_PREV) {
             (void)dialog__viewer_scroll(viewer, -1);
-        } else if (event.code == BRUCE_INPUT_CODE_DOWN) {
+        } else if (event.code == BRUCE_INPUT_CODE_DOWN || event.code == BRUCE_INPUT_CODE_NEXT) {
             (void)dialog__viewer_scroll(viewer, 1);
         } else if (event.code == BRUCE_INPUT_CODE_LEFT) {
             (void)dialog__viewer_scroll(viewer, -5);
