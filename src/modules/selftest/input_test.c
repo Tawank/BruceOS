@@ -297,14 +297,19 @@ bool selftest__run_input_hotkey_duration_case(void) {
 bool selftest__run_input_hotkey_code_name_case(void) {
     int32_t code = 0;
     bool button_b = input_hotkey__code_for_name("BTN_B", &code) && code == BRUCE_INPUT_CODE_BUTTON_B;
-    bool nav_next = input_hotkey__code_for_name("NAVIGATION_NEXT", &code) && code == BRUCE_INPUT_CODE_DOWN;
-    bool unknown = !input_hotkey__code_for_name("NOT_A_BUTTON", &code);
+    bool next = input_hotkey__code_for_name("NEXT", &code) && code == BRUCE_INPUT_CODE_NEXT;
+    bool prev = input_hotkey__code_for_name("PREV", &code) && code == BRUCE_INPUT_CODE_PREV;
+    bool independent = BRUCE_INPUT_CODE_PREV != BRUCE_INPUT_CODE_UP && BRUCE_INPUT_CODE_NEXT != BRUCE_INPUT_CODE_DOWN;
+    bool unknown = !input_hotkey__code_for_name("NOT_A_BUTTON", &code) &&
+                   !input_hotkey__code_for_name("NAVIGATION_NEXT", &code);
 
     const char *button_b_name = input_hotkey__name_for_code(BRUCE_INPUT_CODE_BUTTON_B);
     bool reverse_lookup = button_b_name != NULL && strcmp(button_b_name, "BTN_B") == 0;
+    const char *prev_name = input_hotkey__name_for_code(BRUCE_INPUT_CODE_PREV);
+    bool reverse_prev = prev_name != NULL && strcmp(prev_name, "PREV") == 0;
     bool reverse_unknown = input_hotkey__name_for_code(0x7FFFFFFF) == NULL;
 
-    bool ok = button_b && nav_next && unknown && reverse_lookup && reverse_unknown;
+    bool ok = button_b && next && prev && independent && unknown && reverse_lookup && reverse_prev && reverse_unknown;
     printf("[selftest] input/hotkey-code-name: %s\n", ok ? "OK" : "FAIL");
     return ok;
 }
@@ -329,7 +334,7 @@ bool selftest__run_input_hotkey_find_case(void) {
 
     const bruce_config_hotkey_t test_hotkeys[] = {
         {"2s BTN_B", "menu top"           },
-        {"BTN_C",    "emit NAVIGATION_NEXT"},
+        {"BTN_C",    "emit NEXT"},
     };
     bool set_ok = config__set_hotkeys(test_hotkeys, 2) == BRUCE_OK;
 
@@ -340,7 +345,7 @@ bool selftest__run_input_hotkey_find_case(void) {
         strcmp(action, "menu top") == 0;
     bool instant_match =
         input_hotkey__find("BTN_C", &hold_ms, action, sizeof(action)) && hold_ms == 0 &&
-        strcmp(action, "emit NAVIGATION_NEXT") == 0;
+        strcmp(action, "emit NEXT") == 0;
     bool no_match = !input_hotkey__find("BTN_A", &hold_ms, action, sizeof(action));
 
     bool restored = config__set_hotkeys(original, original_count) == BRUCE_OK;
@@ -353,15 +358,15 @@ bool selftest__run_input_hotkey_find_case(void) {
 bool selftest__run_input_hotkey_emit_case(void) {
     (void)input__flush();
 
-    input_hotkey__run_action("emit NAVIGATION_NEXT");
+    input_hotkey__run_action("emit NEXT");
 
     bruce_input_event_t press;
     bruce_input_event_t release;
     bruce_result_t press_result = input__read(&press, 0);
     bruce_result_t release_result = input__read(&release, 0);
     bool emitted = press_result == BRUCE_OK && press.action == BRUCE_INPUT_PRESS &&
-                   press.code == BRUCE_INPUT_CODE_DOWN && release_result == BRUCE_OK &&
-                   release.action == BRUCE_INPUT_RELEASE && release.code == BRUCE_INPUT_CODE_DOWN;
+                    press.code == BRUCE_INPUT_CODE_NEXT && release_result == BRUCE_OK &&
+                    release.action == BRUCE_INPUT_RELEASE && release.code == BRUCE_INPUT_CODE_NEXT;
     if (!emitted) {
         printf(
             "[selftest] input/hotkey-emit: FAIL, press=%d/%" PRId32 " release=%d/%" PRId32 "\n",

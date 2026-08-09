@@ -32,6 +32,8 @@ static const input_hotkey__code_entry_t s_canonical_codes[] = {
     {"MENU",         BRUCE_INPUT_CODE_MENU        },
     {"HOME",         BRUCE_INPUT_CODE_HOME        },
     {"DELETE",       BRUCE_INPUT_CODE_DELETE      },
+    {"PREV",         BRUCE_INPUT_CODE_PREV        },
+    {"NEXT",         BRUCE_INPUT_CODE_NEXT        },
     {"BTN_A",        BRUCE_INPUT_CODE_BUTTON_A    },
     {"BTN_B",        BRUCE_INPUT_CODE_BUTTON_B    },
     {"BTN_C",        BRUCE_INPUT_CODE_BUTTON_C    },
@@ -45,16 +47,6 @@ static const input_hotkey__code_entry_t s_canonical_codes[] = {
     {"BTN_SELECT",   BRUCE_INPUT_CODE_BUTTON_SELECT},
     {"BTN_THUMB_L",  BRUCE_INPUT_CODE_BUTTON_THUMB_L},
     {"BTN_THUMB_R",  BRUCE_INPUT_CODE_BUTTON_THUMB_R},
-};
-
-/* Friendly aliases accepted as hotkey keys or "emit" targets, resolving to
- * the same codes as some canonical entry above. Never returned by
- * input_hotkey__name_for_code(). */
-static const input_hotkey__code_entry_t s_alias_codes[] = {
-    {"NAVIGATION_NEXT",   BRUCE_INPUT_CODE_DOWN  },
-    {"NAVIGATION_PREV",   BRUCE_INPUT_CODE_UP    },
-    {"NAVIGATION_SELECT", BRUCE_INPUT_CODE_SELECT},
-    {"NAVIGATION_BACK",   BRUCE_INPUT_CODE_BACK  },
 };
 
 void input_hotkey__split_duration(const char *key, uint32_t *out_hold_ms, const char **out_rest) {
@@ -93,12 +85,6 @@ bool input_hotkey__code_for_name(const char *name, int32_t *out_code) {
     for (size_t i = 0; i < sizeof(s_canonical_codes) / sizeof(s_canonical_codes[0]); ++i) {
         if (strcmp(s_canonical_codes[i].name, name) == 0) {
             *out_code = s_canonical_codes[i].code;
-            return true;
-        }
-    }
-    for (size_t i = 0; i < sizeof(s_alias_codes) / sizeof(s_alias_codes[0]); ++i) {
-        if (strcmp(s_alias_codes[i].name, name) == 0) {
-            *out_code = s_alias_codes[i].code;
             return true;
         }
     }

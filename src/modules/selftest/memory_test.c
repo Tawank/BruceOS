@@ -9,8 +9,8 @@
 
 bool selftest__run_external_memory_case(void) {
     bruce_memory_stats_t before;
-    if (memory__get_stats(&before) != BRUCE_OK || before.swap_total == 0) {
-        printf("[selftest] memory/external: swap partition unavailable\n");
+    if (memory__get_stats(&before) != BRUCE_OK) {
+        printf("[selftest] memory/external: statistics unavailable\n");
         return false;
     }
 

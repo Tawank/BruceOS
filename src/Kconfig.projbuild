@@ -510,6 +510,12 @@ menu "Bruce hardware configuration"
             depends on BRUCE_BUTTON_A_ENABLED
             range 0 48
 
+        config BRUCE_BUTTON_A_REMAP_CODE
+            int "Button A remapped input code"
+            depends on BRUCE_BUTTON_A_ENABLED
+            default 512
+            range 0 4095
+
         config BRUCE_BUTTON_B_ENABLED
             bool "Button B available"
             default n
@@ -519,6 +525,12 @@ menu "Bruce hardware configuration"
             depends on BRUCE_BUTTON_B_ENABLED
             range 0 48
 
+        config BRUCE_BUTTON_B_REMAP_CODE
+            int "Button B remapped input code"
+            depends on BRUCE_BUTTON_B_ENABLED
+            default 513
+            range 0 4095
+
         config BRUCE_BUTTON_C_ENABLED
             bool "Button C available"
             default n
@@ -527,6 +539,12 @@ menu "Bruce hardware configuration"
             int "Button C GPIO"
             depends on BRUCE_BUTTON_C_ENABLED
             range 0 48
+
+        config BRUCE_BUTTON_C_REMAP_CODE
+            int "Button C remapped input code"
+            depends on BRUCE_BUTTON_C_ENABLED
+            default 514
+            range 0 4095
 
         config BRUCE_BUTTON_D_ENABLED
             bool "Button D available"

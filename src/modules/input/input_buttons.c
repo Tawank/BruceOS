@@ -89,10 +89,12 @@ static input__button_t s_buttons[] = {
 
 void input_buttons__init(void) {
     for (size_t i = 0; i < sizeof(s_buttons) / sizeof(s_buttons[0]); ++i) {
-        (void)gpio__configure(
-            s_buttons[i].pin, BRUCE_GPIO_MODE_INPUT,
-            s_buttons[i].active_low ? BRUCE_GPIO_PULL_UP : BRUCE_GPIO_PULL_DOWN
-        );
+        bruce_gpio_pull_t pull = s_buttons[i].active_low ? BRUCE_GPIO_PULL_UP : BRUCE_GPIO_PULL_DOWN;
+#if CONFIG_IDF_TARGET_ESP32
+        /* GPIO34-39 are input-only pads with no internal pull resistors. */
+        if (s_buttons[i].pin >= 34) pull = BRUCE_GPIO_PULL_NONE;
+#endif
+        (void)gpio__configure(s_buttons[i].pin, BRUCE_GPIO_MODE_INPUT, pull);
     }
 }
 

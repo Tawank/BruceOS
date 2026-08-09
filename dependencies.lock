@@ -149,5 +149,5 @@ direct_dependencies:
 - wolfssl/wolfssh
 - wolfssl/wolfssl
 manifest_hash: b5bf6961ca0f6bdf7437bb893646ea105964a7aaded106669c6ec7221c208eb5
-target: esp32s3
+target: esp32
 version: 3.0.0

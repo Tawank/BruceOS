@@ -88,7 +88,7 @@ static void memory_external__cleanup(void *context) {
     if (record == NULL || record->backend == BRUCE_MEMORY_BACKEND_INVALID) return;
     memory_external__ensure_mutex();
     xSemaphoreTake(s_mutex, portMAX_DELAY);
-    if (record->backend == BRUCE_MEMORY_BACKEND_PSRAM) {
+    if (record->backend == BRUCE_MEMORY_BACKEND_PSRAM || record->backend == BRUCE_MEMORY_BACKEND_INTERNAL) {
         heap_caps_free(record->psram);
     } else {
         if (record->data != NULL || record->instruction != NULL) {
@@ -148,6 +148,16 @@ static bool memory_external__allocate_psram_locked(memory_external__record_t *re
     void *data = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (data == NULL) return false;
     record->backend = BRUCE_MEMORY_BACKEND_PSRAM;
+    record->size = size;
+    record->psram = data;
+    record->data = data;
+    return true;
+}
+
+static bool memory_external__allocate_internal_locked(memory_external__record_t *record, size_t size) {
+    void *data = heap_caps_malloc(size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (data == NULL) return false;
+    record->backend = BRUCE_MEMORY_BACKEND_INTERNAL;
     record->size = size;
     record->psram = data;
     record->data = data;
@@ -228,6 +238,9 @@ bruce_result_t memory_external__alloc(size_t size, bool executable, bruce_memory
     if (record != NULL && !allocated) {
         allocated = memory_external__allocate_swap_locked(record, size, executable);
     }
+    if (record != NULL && !allocated && !executable) {
+        allocated = memory_external__allocate_internal_locked(record, size);
+    }
     if (allocated) {
         record->resource_id = BRUCE_RESOURCE_ID_INVALID;
         record->owner_id = owner_id;
@@ -283,7 +296,8 @@ memory__external_write(const bruce_memory_object_t *object, size_t offset, const
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
     bruce_result_t result = BRUCE_OK;
-    if (size != 0 && record->backend == BRUCE_MEMORY_BACKEND_PSRAM) {
+    if (size != 0 &&
+        (record->backend == BRUCE_MEMORY_BACKEND_PSRAM || record->backend == BRUCE_MEMORY_BACKEND_INTERNAL)) {
         memmove((uint8_t *)record->psram + offset, data, size);
     } else if (size != 0) {
         const esp_partition_t *partition = memory_external__partition();
