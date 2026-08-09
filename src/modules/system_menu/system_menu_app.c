@@ -28,6 +28,7 @@
 static const char *const SYSTEM_MENU__DEFAULT_ITEMS_JSON =
     "["
     "{\"icon\":\"close\",\"label\":\"Cancel\",\"action\":\"cancel\"},"
+    "{\"icon\":\"close\",\"label\":\"Esc\",\"action\":\"input.esc\"},"
     "{\"icon\":\"swap-horizontal\",\"label\":\"Next\",\"action\":\"process.next\"},"
     "{\"icon\":\"apps\",\"label\":\"Launcher\",\"action\":\"launcher\"},"
     "{\"icon\":\"power\",\"label\":\"Off\",\"action\":\"shutdown now\"}"
@@ -141,6 +142,17 @@ static bruce_result_t system_menu__draw(
 
 static int system_menu__run_action(const char *action) {
     if (strcmp(action, "cancel") == 0) return BRUCE_ERR_CANCELLED;
+    if (strcmp(action, "input.esc") == 0) {
+        bruce_result_t result = process__to_background();
+        if (result != BRUCE_OK) return result;
+        const bruce_input_event_t event = {
+            .type = BRUCE_INPUT_KEY,
+            .action = BRUCE_INPUT_PRESS,
+            .code = BRUCE_INPUT_CODE_BACK,
+            .value = -1,
+        };
+        return input__inject(&event);
+    }
     if (strcmp(action, "process.next") == 0 || strcmp(action, "process.previous") == 0) {
         /* The menu is a temporary foreground process. Remove it before choosing
          * a neighbor so the process that opened the menu becomes the anchor,

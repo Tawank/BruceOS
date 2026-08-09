@@ -2,8 +2,8 @@
 
 #include <stdint.h>
 
-#include "core_sdk/result.h"
 #include "core_sdk/process.h"
+#include "core_sdk/result.h"
 
 typedef enum {
     BRUCE_INPUT_KEY,

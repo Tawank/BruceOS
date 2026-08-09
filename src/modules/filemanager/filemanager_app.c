@@ -11,11 +11,11 @@
 #include "core_sdk/input.h"
 #include "core_sdk/loader.h"
 #include "core_sdk/memory.h"
+#include "core_sdk/process.h"
 #include "core_sdk/result.h"
+#include "core_sdk/runtime.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
-#include "core_sdk/process.h"
-#include "core_sdk/runtime.h"
 
 #define FILEMANAGER_PREVIEW_MAX 4096
 
@@ -48,8 +48,7 @@ static void filemanager__dirname(const char *path, char *out_dir, size_t out_dir
 static bool filemanager__is_editable_text(const char *path) {
     const char *dot = strrchr(path, '.');
     return dot != NULL &&
-           (strcasecmp(dot, ".txt") == 0 || strcasecmp(dot, ".json") == 0 ||
-            strcasecmp(dot, ".conf") == 0);
+           (strcasecmp(dot, ".txt") == 0 || strcasecmp(dot, ".json") == 0 || strcasecmp(dot, ".conf") == 0);
 }
 
 static bruce_result_t filemanager__read_preview(const char *path, char **out_text, bool *out_truncated) {
@@ -134,8 +133,7 @@ static bruce_result_t filemanager__view_file(const char *path, bool gui) {
             (void)dialog__viewer_scroll(viewer, -5);
         } else if (event.code == BRUCE_INPUT_CODE_RIGHT) {
             (void)dialog__viewer_scroll(viewer, 5);
-        } else if (event.code == BRUCE_INPUT_CODE_BACK || event.code == BRUCE_INPUT_CODE_BUTTON_B ||
-                   event.code == BRUCE_INPUT_CODE_SELECT || event.code == BRUCE_INPUT_CODE_BUTTON_A) {
+        } else if (event.code == BRUCE_INPUT_CODE_BACK || event.code == BRUCE_INPUT_CODE_SELECT) {
             break;
         }
     }
@@ -171,8 +169,12 @@ filemanager__delete_file(const char *path, const bruce_dialog_render_params_t *r
     };
     size_t selected = 0;
     bruce_result_t result = dialog__choice(
-        "Delete file?", path, confirm_actions, sizeof(confirm_actions) / sizeof(confirm_actions[0]),
-        &selected, render_params
+        "Delete file?",
+        path,
+        confirm_actions,
+        sizeof(confirm_actions) / sizeof(confirm_actions[0]),
+        &selected,
+        render_params
     );
     if (result != BRUCE_OK) return result;
     if (selected != 0) return BRUCE_ERR_CANCELLED;
@@ -183,11 +185,11 @@ filemanager__delete_file(const char *path, const bruce_dialog_render_params_t *r
 int filemanager_app_main(int argc, char **argv) {
     bool gui = runtime__gui_requested();
     const bruce_dialog_choice_t actions[] = {
-        {.label = "Open / view", .value = "view"},
-        {.label = "File info",   .value = "info"},
-        {.label = "Run",         .value = "run" },
+        {.label = "Open / view", .value = "view"  },
+        {.label = "File info",   .value = "info"  },
+        {.label = "Run",         .value = "run"   },
         {.label = "Delete",      .value = "delete"},
-        {.label = "Back",        .value = "back"},
+        {.label = "Back",        .value = "back"  },
     };
     /* File manager stays full screen (no window chrome) but reads better
      * with a larger font than the default. */
@@ -227,7 +229,9 @@ int filemanager_app_main(int argc, char **argv) {
         } else if (selected == 1) {
             result = filemanager__show_info(path);
         } else if (selected == 2) {
-            const bruce_environment_variable_t gui_env[] = {{.name = "GUI", .value = "1"}};
+            const bruce_environment_variable_t gui_env[] = {
+                {.name = "GUI", .value = "1"}
+            };
             int process = app_runner__run_path_with_environment(
                 path, NULL, BRUCE_LAUNCH_FOREGROUND, gui ? gui_env : NULL, gui ? 1u : 0u
             );

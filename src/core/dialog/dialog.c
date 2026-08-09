@@ -502,10 +502,8 @@ static bruce_result_t dialog__gui_choice(
                 }
                 break;
             case BRUCE_INPUT_CODE_SELECT:
-            case BRUCE_INPUT_CODE_BUTTON_A:
             case '\r': *out_selected = (size_t)selected; return BRUCE_OK;
-            case BRUCE_INPUT_CODE_BACK:
-            case BRUCE_INPUT_CODE_BUTTON_B: return BRUCE_ERR_CANCELLED;
+            case BRUCE_INPUT_CODE_BACK: return BRUCE_ERR_CANCELLED;
             default: break;
         }
         redraw = selected != previous_selected;
@@ -1175,66 +1173,67 @@ static void dialog__viewer_cleanup(void *context) {
 }
 
 static bruce_result_t dialog__viewer_draw(dialog__viewer_t *viewer, bool gui) {
-    if (gui) {
-        bruce_result_t frame_result = display__begin_frame();
-        if (frame_result != BRUCE_OK) {
-            return frame_result == BRUCE_ERR_NOT_FOREGROUND ? BRUCE_ERR_CANCELLED : frame_result;
-        }
-        int w = display__width();
-        int h = display__height();
-        int usable_h = h - (DIALOG__CHAR_H + 4);
-        int lines_per_screen = usable_h / (DIALOG__CHAR_H + 1);
-        if (lines_per_screen < 1) { lines_per_screen = 1; }
-        int max_chars = (w - 2 * DIALOG__MARGIN) / DIALOG__CHAR_W;
-        if (max_chars < 1) { max_chars = 1; }
-
-        dialog__gui_clear();
-        dialog__gui_title_bar(viewer->title);
-
-        display__set_text_color(BRUCE_COLOR_WHITE);
-        display__set_text_size(DIALOG__TEXT_SIZE);
-        display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
-
-        int y = DIALOG__CHAR_H + 6;
-        int line = 0;
-        int drawn = 0;
-        const char *p = viewer->text != NULL ? viewer->text : "";
-        while (*p != '\0' && drawn < lines_per_screen) {
-            if (line >= viewer->scroll_y) {
-                display__set_cursor(DIALOG__MARGIN, y);
-                int col = 0;
-                while (*p != '\0' && *p != '\n' && col < max_chars) {
-                    char ch[2] = {*p, '\0'};
-                    display__print(ch);
-                    col++;
-                    p++;
-                }
-                y += DIALOG__CHAR_H + 1;
-                drawn++;
-            } else {
-                while (*p != '\0' && *p != '\n') { p++; }
-            }
-            if (*p == '\n') { p++; }
-            line++;
-        }
-
-        char footer[32];
-        int total_lines = 0;
-        const char *q = viewer->text != NULL ? viewer->text : "";
-        while (*q != '\0') {
-            if (*q == '\n') { total_lines++; }
-            q++;
-        }
-        snprintf(footer, sizeof(footer), "%d/%d", viewer->scroll_y + 1, total_lines + 1);
-        dialog__gui_footer(footer);
-        frame_result = display__present();
-        if (frame_result != BRUCE_OK) {
-            return frame_result == BRUCE_ERR_NOT_FOREGROUND ? BRUCE_ERR_CANCELLED : frame_result;
-        }
-    } else {
+    if (!gui) {
         stdio__printf("--- %s ---\n", viewer->title != NULL ? viewer->title : "viewer");
         stdio__printf("%s\n", viewer->text != NULL ? viewer->text : "");
         stdio__printf("---\n");
+        return BRUCE_OK;
+    }
+
+    bruce_result_t frame_result = display__begin_frame();
+    if (frame_result != BRUCE_OK) {
+        return frame_result == BRUCE_ERR_NOT_FOREGROUND ? BRUCE_ERR_CANCELLED : frame_result;
+    }
+    int w = display__width();
+    int h = display__height();
+    int usable_h = h - (DIALOG__CHAR_H + 4);
+    int lines_per_screen = usable_h / (DIALOG__CHAR_H + 1);
+    if (lines_per_screen < 1) { lines_per_screen = 1; }
+    int max_chars = (w - 2 * DIALOG__MARGIN) / DIALOG__CHAR_W;
+    if (max_chars < 1) { max_chars = 1; }
+
+    dialog__gui_clear();
+    dialog__gui_title_bar(viewer->title);
+
+    display__set_text_color(BRUCE_COLOR_WHITE);
+    display__set_text_size(DIALOG__TEXT_SIZE);
+    display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
+
+    int y = DIALOG__CHAR_H + 6;
+    int line = 0;
+    int drawn = 0;
+    const char *p = viewer->text != NULL ? viewer->text : "";
+    while (*p != '\0' && drawn < lines_per_screen) {
+        if (line >= viewer->scroll_y) {
+            display__set_cursor(DIALOG__MARGIN, y);
+            int col = 0;
+            while (*p != '\0' && *p != '\n' && col < max_chars) {
+                char ch[2] = {*p, '\0'};
+                display__print(ch);
+                col++;
+                p++;
+            }
+            y += DIALOG__CHAR_H + 1;
+            drawn++;
+        } else {
+            while (*p != '\0' && *p != '\n') { p++; }
+        }
+        if (*p == '\n') { p++; }
+        line++;
+    }
+
+    char footer[32];
+    int total_lines = 0;
+    const char *q = viewer->text != NULL ? viewer->text : "";
+    while (*q != '\0') {
+        if (*q == '\n') { total_lines++; }
+        q++;
+    }
+    snprintf(footer, sizeof(footer), "%d/%d", viewer->scroll_y + 1, total_lines + 1);
+    dialog__gui_footer(footer);
+    frame_result = display__present();
+    if (frame_result != BRUCE_OK) {
+        return frame_result == BRUCE_ERR_NOT_FOREGROUND ? BRUCE_ERR_CANCELLED : frame_result;
     }
     return BRUCE_OK;
 }
