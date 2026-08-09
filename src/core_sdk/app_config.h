@@ -32,8 +32,7 @@ bruce_result_t app_config__set_int(const char *app_name, const char *json_path, 
  * capacity), or default_value if the path is absent/not a string. Returns
  * whether a stored value was found. */
 bool app_config__get_string(
-    const char *app_name, const char *json_path, const char *default_value, char *out_value,
-    size_t capacity
+    const char *app_name, const char *json_path, const char *default_value, char *out_value, size_t capacity
 );
 bruce_result_t app_config__set_string(const char *app_name, const char *json_path, const char *value);
 
@@ -42,13 +41,12 @@ bruce_result_t app_config__set_string(const char *app_name, const char *json_pat
  * as arrays of objects while keeping the public app_config API small. Returns
  * whether a stored value was found. */
 bool app_config__get_json(
-    const char *app_name, const char *json_path, const char *default_json, char *out_json,
-    size_t capacity
+    const char *app_name, const char *json_path, const char *default_json, char *out_json, size_t capacity
 );
+bruce_result_t app_config__set_json(const char *app_name, const char *json_path, const char *value_json);
 
-size_t app_config__get_bool_array(
-    const char *app_name, const char *json_path, bool *out_values, size_t capacity
-);
+size_t
+app_config__get_bool_array(const char *app_name, const char *json_path, bool *out_values, size_t capacity);
 bruce_result_t
 app_config__set_bool_array(const char *app_name, const char *json_path, const bool *values, size_t count);
 
@@ -60,8 +58,7 @@ app_config__set_int_array(const char *app_name, const char *json_path, const int
 /* out_values[i] must point at a writable buffer of at least value_size bytes;
  * up to `capacity` entries are filled. Returns the number of entries filled. */
 size_t app_config__get_string_array(
-    const char *app_name, const char *json_path, char *const *out_values, size_t value_size,
-    size_t capacity
+    const char *app_name, const char *json_path, char *const *out_values, size_t value_size, size_t capacity
 );
 bruce_result_t app_config__set_string_array(
     const char *app_name, const char *json_path, const char *const *values, size_t count

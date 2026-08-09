@@ -128,7 +128,6 @@ static void config__set_defaults(config__t *cfg) {
     config__assign(&cfg->wifiApSsid, "BruceNet");
     config__assign(&cfg->wifiApPassword, "brucenet");
     config__assign(&cfg->wifiMAC, "");
-    cfg->terminalLog = true;
 
     static const char *const default_startup_apps[] = {
         "device_bus",
@@ -279,7 +278,6 @@ static void config__parse_json(config__t *cfg, const cJSON *root) {
         json_get_string(wifi_ap, "pwd", &cfg->wifiApPassword);
     }
     json_get_string(root, "wifiMAC", &cfg->wifiMAC);
-    json_get_bool(root, "TerminalLog", &cfg->terminalLog);
 
     const cJSON *wifi = cJSON_GetObjectItemCaseSensitive(root, "wifi");
     if (cJSON_IsObject(wifi)) {
@@ -363,7 +361,6 @@ static cJSON *config__build_json(const config__t *cfg) {
     cJSON_AddStringToObject(wifi_ap, "ssid", config__or_empty(cfg->wifiApSsid));
     cJSON_AddStringToObject(wifi_ap, "pwd", config__or_empty(cfg->wifiApPassword));
     cJSON_AddStringToObject(root, "wifiMAC", config__or_empty(cfg->wifiMAC));
-    cJSON_AddBoolToObject(root, "TerminalLog", cfg->terminalLog);
 
     cJSON *wifi = cJSON_AddObjectToObject(root, "wifi");
     for (size_t i = 0; i < cfg->wifiCredentialCount; ++i) {

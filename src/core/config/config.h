@@ -71,7 +71,6 @@ typedef struct {
     bruce_config_wifi_credential_t wifiCredentials[CONFIG__WIFI_MAX_CREDENTIALS];
     size_t wifiCredentialCount;
     const char *wifiMAC;
-    bool terminalLog;
 
     /* Misc */
     bruce_config_startup_apps_t startupApps;

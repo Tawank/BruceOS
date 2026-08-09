@@ -11,7 +11,8 @@
 #include "freertos/semphr.h"
 
 #define APP_CONFIG__DIRECTORY "/config"
-#define APP_CONFIG__PATH_MAX (8u + BRUCE_APP_CONFIG_NAME_MAX_LEN + 5u + 1u) /* "/config/" NAME ".conf" NUL */
+#define APP_CONFIG__PATH_MAX (8u + BRUCE_APP_CONFIG_NAME_MAX_LEN + 5u + 1u) /* "/config/" NAME ".conf" NUL   \
+                                                                             */
 #define APP_CONFIG__SEGMENT_MAX_LEN 31
 
 static StaticSemaphore_t s_app_config_mutex_storage;
@@ -100,9 +101,7 @@ static cJSON *app_config__load(const char *app_name) {
     char *text = NULL;
     size_t size = 0;
     cJSON *root = NULL;
-    if (storage__read_file(path, &text, &size) && size > 0) {
-        root = cJSON_ParseWithLength(text, size);
-    }
+    if (storage__read_file(path, &text, &size) && size > 0) { root = cJSON_ParseWithLength(text, size); }
     if (text != NULL) storage__free(text);
 
     if (root == NULL || !cJSON_IsObject(root)) {
@@ -193,8 +192,7 @@ bruce_result_t app_config__set_int(const char *app_name, const char *json_path, 
 }
 
 bool app_config__get_string(
-    const char *app_name, const char *json_path, const char *default_value, char *out_value,
-    size_t capacity
+    const char *app_name, const char *json_path, const char *default_value, char *out_value, size_t capacity
 ) {
     if (out_value == NULL || capacity == 0) return false;
     app_config__lock();
@@ -244,8 +242,7 @@ bruce_result_t app_config__set_string(const char *app_name, const char *json_pat
 }
 
 bool app_config__get_json(
-    const char *app_name, const char *json_path, const char *default_json, char *out_json,
-    size_t capacity
+    const char *app_name, const char *json_path, const char *default_json, char *out_json, size_t capacity
 ) {
     if (out_json == NULL || capacity == 0) return false;
     app_config__lock();
@@ -272,13 +269,37 @@ bool app_config__get_json(
     return found;
 }
 
+bruce_result_t app_config__set_json(const char *app_name, const char *json_path, const char *value_json) {
+    if (value_json == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    cJSON *value = cJSON_Parse(value_json);
+    if (value == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+
+    app_config__lock();
+    cJSON *root = app_config__load(app_name);
+    cJSON *parent = NULL;
+    char key[APP_CONFIG__SEGMENT_MAX_LEN + 1];
+    bruce_result_t result = BRUCE_ERR_INVALID_ARGUMENT;
+    if (root != NULL && app_config__navigate(root, json_path, true, &parent, key, sizeof(key))) {
+        cJSON_DeleteItemFromObjectCaseSensitive(parent, key);
+        if (cJSON_AddItemToObject(parent, key, value)) {
+            value = NULL;
+            result = app_config__save(app_name, root) ? BRUCE_OK : BRUCE_ERR_IO;
+        } else {
+            result = BRUCE_ERR_NO_MEMORY;
+        }
+    }
+    cJSON_Delete(value);
+    cJSON_Delete(root);
+    app_config__unlock();
+    return result;
+}
+
 /* ------------------------------------------------------------------------ */
 /* Arrays                                                                    */
 /* ------------------------------------------------------------------------ */
 
-size_t app_config__get_bool_array(
-    const char *app_name, const char *json_path, bool *out_values, size_t capacity
-) {
+size_t
+app_config__get_bool_array(const char *app_name, const char *json_path, bool *out_values, size_t capacity) {
     if (out_values == NULL || capacity == 0) return 0;
     app_config__lock();
     cJSON *root = app_config__load(app_name);
@@ -384,8 +405,7 @@ app_config__set_int_array(const char *app_name, const char *json_path, const int
 }
 
 size_t app_config__get_string_array(
-    const char *app_name, const char *json_path, char *const *out_values, size_t value_size,
-    size_t capacity
+    const char *app_name, const char *json_path, char *const *out_values, size_t value_size, size_t capacity
 ) {
     if (out_values == NULL || value_size == 0 || capacity == 0) return 0;
     app_config__lock();

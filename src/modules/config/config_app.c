@@ -1,14 +1,12 @@
 #include "config_app.h"
 
 #include "args.h"
-#include "core_sdk/app_runner.h"
 #include "core_sdk/clock.h"
 #include "core_sdk/config.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/result.h"
 #include "core_sdk/runtime.h"
 #include "core_sdk/stdio.h"
-#include "core_sdk/process.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,12 +20,23 @@ static int config_app__show_clock(void) {
     bruce_clock_datetime_t now;
     bruce_result_t clock_result = clock__get_local(&now);
     if (clock_result == BRUCE_OK) {
-        stdio__printf("Local time: %04u-%02u-%02u %02u:%02u:%02u\n", now.year, now.month, now.day, now.hour,
-                      now.minute, now.second);
+        stdio__printf(
+            "Local time: %04u-%02u-%02u %02u:%02u:%02u\n",
+            now.year,
+            now.month,
+            now.day,
+            now.hour,
+            now.minute,
+            now.second
+        );
     } else stdio__printf("Local time: not set\n");
     stdio__printf("NTP: %s (%s)\n", automatic ? "automatic" : "manual", clock__get_ntp_server());
-    stdio__printf("Timezone: UTC%+.2f\nDST: %s\nFormat: %s\n", timezone, dst ? "on" : "off",
-                  format24 ? "24-hour" : "12-hour");
+    stdio__printf(
+        "Timezone: UTC%+.2f\nDST: %s\nFormat: %s\n",
+        timezone,
+        dst ? "on" : "off",
+        format24 ? "24-hour" : "12-hour"
+    );
     return BRUCE_OK;
 }
 
@@ -35,7 +44,8 @@ static bool config_app__parse_datetime(const char *date, const char *time, bruce
     unsigned int year, month, day, hour, minute, second;
     char extra;
     if (date == NULL || time == NULL || sscanf(date, "%u-%u-%u%c", &year, &month, &day, &extra) != 3 ||
-        sscanf(time, "%u:%u:%u%c", &hour, &minute, &second, &extra) != 3) return false;
+        sscanf(time, "%u:%u:%u%c", &hour, &minute, &second, &extra) != 3)
+        return false;
     *out = (bruce_clock_datetime_t){year, month, day, hour, minute, second};
     return true;
 }
@@ -46,8 +56,10 @@ static bruce_result_t config_app__manual_dialog(void) {
     char initial_date[16], initial_time[16], date[16], time[16];
     snprintf(initial_date, sizeof(initial_date), "%04u-%02u-%02u", now.year, now.month, now.day);
     snprintf(initial_time, sizeof(initial_time), "%02u:%02u:%02u", now.hour, now.minute, now.second);
-    if (dialog__text_input("Manual clock", "Date YYYY-MM-DD", initial_date, false, date, sizeof(date)) != BRUCE_OK ||
-        dialog__text_input("Manual clock", "Time HH:MM:SS", initial_time, false, time, sizeof(time)) != BRUCE_OK) {
+    if (dialog__text_input("Manual clock", "Date YYYY-MM-DD", initial_date, false, date, sizeof(date)) !=
+            BRUCE_OK ||
+        dialog__text_input("Manual clock", "Time HH:MM:SS", initial_time, false, time, sizeof(time)) !=
+            BRUCE_OK) {
         return BRUCE_ERR_CANCELLED;
     }
     bruce_clock_datetime_t value;
@@ -69,30 +81,34 @@ static int config_app__clock_gui(void) {
         snprintf(dst_label, sizeof(dst_label), "Daylight savings: %s", dst ? "ON" : "OFF");
         snprintf(format_label, sizeof(format_label), "Clock format: %s", format24 ? "24-hour" : "12-hour");
         const bruce_dialog_choice_t choices[] = {
-            {.label = "Sync from NTP now", .value = "sync"},
-            {.label = ntp_label, .value = "automatic"},
-            {.label = timezone_label, .value = "timezone"},
-            {.label = dst_label, .value = "dst"},
-            {.label = format_label, .value = "format"},
-            {.label = "Set date and time manually", .value = "manual"},
-            {.label = "Back", .value = "back"},
+            {.label = "Sync from NTP now",          .value = "sync"     },
+            {.label = ntp_label,                    .value = "automatic"},
+            {.label = timezone_label,               .value = "timezone" },
+            {.label = dst_label,                    .value = "dst"      },
+            {.label = format_label,                 .value = "format"   },
+            {.label = "Set date and time manually", .value = "manual"   },
+            {.label = "Back",                       .value = "back"     },
         };
         size_t selected = 0;
-        bruce_result_t result = dialog__choice("System clock", "UTC system time, local display", choices, 7,
-                                               &selected, NULL);
+        bruce_result_t result =
+            dialog__choice("System clock", "UTC system time, local display", choices, 7, &selected, NULL);
         if (result == BRUCE_ERR_CANCELLED || selected == 6) return BRUCE_OK;
         if (result != BRUCE_OK) return result;
         if (selected == 0) {
             result = clock__sync_ntp(10000);
-            (void)dialog__message(result == BRUCE_OK ? BRUCE_DIALOG_SUCCESS : BRUCE_DIALOG_ERROR, "NTP sync",
-                                  result == BRUCE_OK ? "Clock synchronized" : "Connect Wi-Fi and try again");
+            (void)dialog__message(
+                result == BRUCE_OK ? BRUCE_DIALOG_SUCCESS : BRUCE_DIALOG_ERROR,
+                "NTP sync",
+                result == BRUCE_OK ? "Clock synchronized" : "Connect Wi-Fi and try again"
+            );
         } else if (selected == 1) {
             (void)config__set_automatic_time_update_via_ntp(!automatic);
         } else if (selected == 2) {
             char initial[16], entered[16];
             snprintf(initial, sizeof(initial), "%.2f", timezone);
-            if (dialog__number_input("Timezone", "UTC offset (-12 to +14)", initial, entered, sizeof(entered)) ==
-                BRUCE_OK) {
+            if (dialog__number_input(
+                    "Timezone", "UTC offset (-12 to +14)", initial, entered, sizeof(entered)
+                ) == BRUCE_OK) {
                 char *end = NULL;
                 float value = strtof(entered, &end);
                 if (end != entered && *end == '\0' && value >= -12.0f && value <= 14.0f)
@@ -119,13 +135,17 @@ static bool config_app__parse_on_off(const char *text, bool *out) {
     return true;
 }
 
-static int config_app__clock_cli(ArgParser *clock_parser, ArgParser *show, ArgParser *sync, ArgParser *ntp,
-                                 ArgParser *timezone, ArgParser *dst, ArgParser *format, ArgParser *set) {
+static int config_app__clock_cli(
+    ArgParser *clock_parser, ArgParser *show, ArgParser *sync, ArgParser *ntp, ArgParser *timezone,
+    ArgParser *dst, ArgParser *format, ArgParser *set
+) {
     ArgParser *action = ap_get_cmd_parser(clock_parser);
     if (action == NULL || action == show) return config_app__show_clock();
     if (action == sync) {
         bruce_result_t result = clock__sync_ntp(10000);
-        stdio__printf(result == BRUCE_OK ? "Clock synchronized\n" : "NTP synchronization failed: %d\n", result);
+        stdio__printf(
+            result == BRUCE_OK ? "Clock synchronized\n" : "NTP synchronization failed: %d\n", result
+        );
         return result;
     }
     if (action == ntp) {
@@ -139,7 +159,8 @@ static int config_app__clock_cli(ArgParser *clock_parser, ArgParser *show, ArgPa
         if (offset == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
         char *end = NULL;
         float value = strtof(offset, &end);
-        if (end == offset || *end != '\0' || value < -12.0f || value > 14.0f) return BRUCE_ERR_INVALID_ARGUMENT;
+        if (end == offset || *end != '\0' || value < -12.0f || value > 14.0f)
+            return BRUCE_ERR_INVALID_ARGUMENT;
         return config__set_tmz(value);
     }
     if (action == dst) {
@@ -179,7 +200,7 @@ static int config_app__display_gui(void) {
         snprintf(buffered_label, sizeof(buffered_label), "Buffered rendering: %s", buffered ? "ON" : "OFF");
         const bruce_dialog_choice_t choices[] = {
             {.label = buffered_label, .value = "buffered"},
-            {.label = "Back", .value = "back"},
+            {.label = "Back",         .value = "back"    },
         };
         size_t selected = 0;
         bruce_result_t result = dialog__choice(
@@ -239,8 +260,20 @@ int config_app_main(int argc, char **argv) {
     ArgParser *display = ap_new_cmd(root, "display");
     ArgParser *display_buffered = display != NULL ? ap_new_cmd(display, "buffered") : NULL;
     ArgParser *parsers[] = {
-        system, clock, show, sync, ntp, timezone, dst, format, set, startup, startup_add, startup_remove,
-        display, display_buffered,
+        system,
+        clock,
+        show,
+        sync,
+        ntp,
+        timezone,
+        dst,
+        format,
+        set,
+        startup,
+        startup_add,
+        startup_remove,
+        display,
+        display_buffered,
     };
     for (size_t i = 0; i < sizeof(parsers) / sizeof(parsers[0]); ++i) {
         if (parsers[i] == NULL) {
