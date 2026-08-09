@@ -69,6 +69,7 @@ typedef struct {
     bool presentable;
     char permission_key[BRUCE_PERMISSION_FILE_NAME_MAX];
     bool start_in_background;
+    bool preserve_display;
     bruce_stdio_session_t stdio_session;
     bruce_stdio_session_t child_stdio_session;
     TaskHandle_t handle;
@@ -610,7 +611,9 @@ static void process__trampoline(void *arg) {
      * foreground process's completed panel frame. Clear and present once before
      * application code starts; normal app redraw throttling can then remain
      * event-driven. */
-    if (record->gui_requested && !record->start_in_background) process__clear_foreground_display();
+    if (record->gui_requested && !record->start_in_background && !record->preserve_display) {
+        process__clear_foreground_display();
+    }
 
     stdio__process_attach(record->stdio_session, &stdio_input, &stdio_output, &stdio_error);
 
@@ -698,6 +701,7 @@ process_registry__create(const process_create_params_t *params, bruce_process_id
         record->permission_key[BRUCE_PERMISSION_FILE_NAME_MAX - 1] = '\0';
     }
     record->start_in_background = params->start_in_background;
+    record->preserve_display = params->preserve_display;
     record->entry = params->entry;
     record->process_entry = params->process_entry;
     record->process_entry_context = params->process_entry_context;

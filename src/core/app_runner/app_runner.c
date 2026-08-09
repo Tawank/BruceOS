@@ -44,6 +44,18 @@ static bool app_runner__mode_valid(bruce_launch_mode_t mode) {
     return mode == BRUCE_LAUNCH_FOREGROUND || mode == BRUCE_LAUNCH_BACKGROUND;
 }
 
+static bool app_runner__environment_requests_overlay(
+    const bruce_environment_variable_t *environment, size_t environment_count
+) {
+    bool requested = false;
+    for (size_t i = 0; i < environment_count; ++i) {
+        if (environment[i].name != NULL && strcmp(environment[i].name, "OVERLAY") == 0) {
+            requested = environment[i].value != NULL && strcmp(environment[i].value, "1") == 0;
+        }
+    }
+    return requested;
+}
+
 bruce_result_t app_runner__register(const char *name, bruce_app_entry_t entry, uint32_t stack_bytes) {
     if (name == NULL || name[0] == '\0' || entry == NULL) {
         printf("BRUCE_ERR_INVALID_ARGUMENT");
@@ -202,6 +214,7 @@ int app_runner__spawn_loader_process_owned(
         .gui_requested = gui_requested,
         .permission_key = permission_key,
         .start_in_background = mode == BRUCE_LAUNCH_BACKGROUND,
+        .preserve_display = app_runner__environment_requests_overlay(environment, environment_count),
         .environment = environment,
         .environment_count = environment_count,
         .stack_bytes = stack_size,
@@ -409,6 +422,7 @@ int app_runner__run_with_environment(
             .built_in = true,
             .gui_requested = app_runner__environment_requests_gui(environment, environment_count),
             .start_in_background = mode == BRUCE_LAUNCH_BACKGROUND,
+            .preserve_display = app_runner__environment_requests_overlay(environment, environment_count),
             .environment = environment,
             .environment_count = environment_count,
             .stack_bytes = 0,

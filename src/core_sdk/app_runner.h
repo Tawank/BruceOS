@@ -43,7 +43,9 @@ int app_runner__run_with_environment(
 
 /* Parses a complete command line, including leading NAME=value assignments.
  * An explicit BG=0 or BG=1 selects foreground/background; otherwise
- * default_mode is used. BG is still included in the child's environment. */
+ * default_mode is used. GUI=1 requests a GUI process. OVERLAY=1 preserves the
+ * visible framebuffer for an overlay-only GUI process. These assignments are
+ * still included in the child's environment. */
 bruce_result_t app_runner__run_command(const char *command_line, bruce_launch_mode_t default_mode);
 
 /* Shell-style tokenizer shared by app_runner__run()'s own named resolution

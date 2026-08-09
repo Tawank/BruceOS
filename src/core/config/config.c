@@ -116,7 +116,9 @@ static void config__set_defaults(config__t *cfg) {
     config__assign(&cfg->hotkeys.items[1].action, "process preview");
     config__assign(&cfg->hotkeys.items[2].key, "ctrl + space");
     config__assign(&cfg->hotkeys.items[2].action, "launcher");
-    cfg->hotkeys.count = 3;
+    config__assign(&cfg->hotkeys.items[3].key, "500ms BTN_A");
+    config__assign(&cfg->hotkeys.items[3].action, "GUI=1 OVERLAY=1 menu");
+    cfg->hotkeys.count = 4;
 
     cfg->ledBright = 50;
     cfg->ledColor = 0x960064;

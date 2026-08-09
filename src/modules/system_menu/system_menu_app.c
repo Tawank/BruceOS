@@ -77,9 +77,11 @@ static size_t system_menu__load_items(system_menu__item_t *items, size_t capacit
     return count;
 }
 
-static bruce_result_t
-system_menu__draw(const system_menu__item_t *items, size_t count, int selected, const char *status) {
-    bruce_result_t result = display__begin_frame();
+static bruce_result_t system_menu__draw(
+    bruce_display_overlay_id_t overlay, const system_menu__item_t *items, size_t count, int selected,
+    const char *status
+) {
+    bruce_result_t result = display__overlay_begin(overlay);
     if (result != BRUCE_OK) return result;
 
     int width = display__width();
@@ -88,9 +90,8 @@ system_menu__draw(const system_menu__item_t *items, size_t count, int selected, 
     uint16_t secondary = config__get_sec_color();
     uint16_t background = config__get_bg_color();
 
-    (void)display__fill_screen(background);
-    (void)display__fill_rect(0, 0, width, SYSTEM_MENU__BAR_H, secondary);
-    (void)display__draw_line(0, SYSTEM_MENU__BAR_H - 1, width - 1, SYSTEM_MENU__BAR_H - 1, primary);
+    (void)display__fill_screen(secondary);
+    (void)display__draw_line(0, height - 1, width - 1, height - 1, primary);
 
     int cell_w = count > 0 ? width / (int)count : width;
     if (cell_w < 1) cell_w = 1;
@@ -126,7 +127,7 @@ system_menu__draw(const system_menu__item_t *items, size_t count, int selected, 
         (void)display__set_text_color(fg);
         (void)display__set_text_bg_color(bg);
         (void)display__set_text_size(1);
-        (void)display__draw_centre_string(items[i].label, x + w / 2, 29);
+        (void)display__draw_centre_string(items[i].label, x + w / 2, height - 13);
     }
 
     if (status != NULL && status[0] != '\0') {
@@ -135,7 +136,7 @@ system_menu__draw(const system_menu__item_t *items, size_t count, int selected, 
         (void)display__set_text_size(1);
         (void)display__draw_centre_string(status, width / 2, height / 2);
     }
-    return display__present();
+    return display__overlay_end(overlay);
 }
 
 static int system_menu__run_action(const char *action) {
@@ -168,13 +169,22 @@ int system_menu_app_main(int argc, char **argv) {
         return BRUCE_ERR_NOT_FOUND;
     }
 
+    bruce_display_overlay_id_t overlay = BRUCE_DISPLAY_OVERLAY_ID_INVALID;
+    bruce_result_t overlay_result =
+        display__overlay_create(0, 0, display__width(), SYSTEM_MENU__BAR_H, &overlay);
+    if (overlay_result != BRUCE_OK) {
+        memory__free(items);
+        return overlay_result;
+    }
+
     int selected = 0;
     char status[48] = {0};
     bool redraw = true;
+    bool overlay_shown = false;
     bruce_result_t result = BRUCE_OK;
     while (process__current_signal() == 0) {
         if (redraw) {
-            bruce_result_t draw = system_menu__draw(items, count, selected, status);
+            bruce_result_t draw = system_menu__draw(overlay, items, count, selected, status);
             if (draw == BRUCE_ERR_BUSY) {
                 (void)runtime__delay(20);
                 continue;
@@ -182,6 +192,11 @@ int system_menu_app_main(int argc, char **argv) {
             if (draw != BRUCE_OK) {
                 result = draw;
                 break;
+            }
+            if (!overlay_shown) {
+                result = display__overlay_show(overlay);
+                if (result != BRUCE_OK) break;
+                overlay_shown = true;
             }
             redraw = false;
         }
@@ -206,6 +221,7 @@ int system_menu_app_main(int argc, char **argv) {
             redraw = true;
         }
     }
+    (void)display__overlay_destroy(overlay);
     memory__free(items);
     return result;
 }

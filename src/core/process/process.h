@@ -51,6 +51,9 @@ typedef struct {
      * BRUCE_PROCESS_FOREGROUND, displacing the current top; true => becomes
      * BRUCE_PROCESS_BACKGROUND without touching the stack. */
     bool start_in_background;
+    /* Starts over the currently visible framebuffer instead of clearing it.
+     * Used by system UI that renders exclusively through display overlays. */
+    bool preserve_display;
     /* Temporary assignments applied after inheriting the parent's exported
      * environment. The strings are borrowed only for this call. */
     const bruce_environment_variable_t *environment;

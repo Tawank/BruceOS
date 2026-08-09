@@ -965,6 +965,12 @@ time through the compositor (`display__set_tiles()`); arrows move the selection
 across the grid (paging when more than four qualify), Select foregrounds the
 highlighted process, and Back clears the tiles and exits. Kill names are exact
 matches and ambiguous duplicate names fail without killing either process.
+The built-in `menu` command launched as `GUI=1 OVERLAY=1 menu` is a transient
+top-bar overlay: it preserves the current app's framebuffer beneath the menu.
+`OVERLAY=1` is an AppRunner launch assignment for any GUI process that renders
+exclusively through display overlays. The menu's `process.next` and
+`process.previous` actions cycle relative to the app that opened the menu, not
+the temporary menu process.
 A hotkey `key` is normally a keyboard chord (`fn`/`ctrl`/`alt`/`shift` joined with
 `+`, matched by `modules/input/input_keyboard.c`), but the physical A/B/C/X/SELECT
 buttons scanned by `modules/input/input_buttons.c` accept it too, using the
