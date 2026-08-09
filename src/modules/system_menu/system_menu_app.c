@@ -208,10 +208,10 @@ int system_menu_app_main(int argc, char **argv) {
         status[0] = '\0';
 
         if (event.code == BRUCE_INPUT_CODE_BACK || event.code == BRUCE_INPUT_CODE_MENU) break;
-        if (event.code == BRUCE_INPUT_CODE_LEFT) {
+        if (event.code == BRUCE_INPUT_CODE_LEFT || event.code == BRUCE_INPUT_CODE_PREV) {
             selected = (selected + (int)count - 1) % (int)count;
             redraw = true;
-        } else if (event.code == BRUCE_INPUT_CODE_RIGHT) {
+        } else if (event.code == BRUCE_INPUT_CODE_RIGHT || event.code == BRUCE_INPUT_CODE_NEXT) {
             selected = (selected + 1) % (int)count;
             redraw = true;
         } else if (event.code == BRUCE_INPUT_CODE_SELECT) {
