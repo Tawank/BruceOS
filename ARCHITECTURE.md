@@ -972,12 +972,13 @@ uppercase token names `input_hotkey__name_for_code()` defines: `BTN_A`, `BTN_B`,
 `BTN_C`, `BTN_X`, `SELECT`, plus the semantic codes `UP`/`DOWN`/`LEFT`/`RIGHT`/
 `BACK`/`MENU`/`HOME`/`DELETE` and the gamepad-only `BTN_Y`/`BTN_L1`/`BTN_R1`/
 `BTN_L2`/`BTN_R2`/`BTN_START`/`BTN_SELECT`/`BTN_THUMB_L`/`BTN_THUMB_R` for future
-input sources. Prefixing a button key with `<N>s ` or `<N>ms ` (e.g. `2s BTN_B`)
-turns it into a hold binding: the action runs once the button has been held that
-long, and releasing early behaves exactly as if no hotkey were configured (a
-normal tap). Only one instant and one hold binding can usefully target the same
-button token per config, since the first configured entry whose key matches
-wins. Besides an AppRunner command line, a button hotkey's action may be
+input sources. Prefixing a keyboard chord or button key with `<N>s ` or `<N>ms `
+(e.g. `2s space` or `2s BTN_B`) turns it into a hold binding: the action runs
+once the key has been held that long, and releasing early behaves exactly as if
+no hotkey were configured (a normal tap). Only one instant and one hold binding
+can usefully target the same key or chord per config, since the first configured
+entry whose key matches wins. Besides an AppRunner command line, a button
+hotkey's action may be
 `emit <NAME>`, which rebinds it to inject a press+release of a different
 semantic code instead of launching anything -- e.g. `"BTN_C": "emit
 NAVIGATION_NEXT"` makes BTN_C behave like Down (`NAVIGATION_NEXT`/`PREV`/

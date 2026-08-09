@@ -270,6 +270,7 @@ bool selftest__run_input_hotkey_duration_case(void) {
         {"500ms BTN_B",  500,  "BTN_B"    },
         {"BTN_B",        0,    "BTN_B"    },
         {"alt + tab",    0,    "alt + tab"},
+        {"2s space",     2000, "space"    },
         {"2s",           0,    "2s"       }, /* no token to bind to: left alone */
         {"",              0,    ""         },
     };

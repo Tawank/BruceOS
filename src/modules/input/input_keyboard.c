@@ -20,16 +20,23 @@
 #if CONFIG_BRUCE_KEYBOARD_ENABLED
 #define INPUT__KB_OUT_PINS                                                                                   \
     {CONFIG_BRUCE_KEYBOARD_OUT0_GPIO, CONFIG_BRUCE_KEYBOARD_OUT1_GPIO, CONFIG_BRUCE_KEYBOARD_OUT2_GPIO}
-#define INPUT__KB_IN_PINS                                                                                   \
-    {CONFIG_BRUCE_KEYBOARD_IN0_GPIO, CONFIG_BRUCE_KEYBOARD_IN1_GPIO, CONFIG_BRUCE_KEYBOARD_IN2_GPIO,         \
-     CONFIG_BRUCE_KEYBOARD_IN3_GPIO, CONFIG_BRUCE_KEYBOARD_IN4_GPIO, CONFIG_BRUCE_KEYBOARD_IN5_GPIO,         \
+#define INPUT__KB_IN_PINS                                                                                    \
+    {CONFIG_BRUCE_KEYBOARD_IN0_GPIO,                                                                         \
+     CONFIG_BRUCE_KEYBOARD_IN1_GPIO,                                                                         \
+     CONFIG_BRUCE_KEYBOARD_IN2_GPIO,                                                                         \
+     CONFIG_BRUCE_KEYBOARD_IN3_GPIO,                                                                         \
+     CONFIG_BRUCE_KEYBOARD_IN4_GPIO,                                                                         \
+     CONFIG_BRUCE_KEYBOARD_IN5_GPIO,                                                                         \
      CONFIG_BRUCE_KEYBOARD_IN6_GPIO}
 #define INPUT__KB_AUTODETECT_ALT CONFIG_BRUCE_KEYBOARD_AUTODETECT_ALT
 #if CONFIG_BRUCE_KEYBOARD_AUTODETECT_ALT
 #define INPUT__KB_IN_ALT_PINS                                                                                \
-    {CONFIG_BRUCE_KEYBOARD_IN_ALT0_GPIO, CONFIG_BRUCE_KEYBOARD_IN_ALT1_GPIO,                                 \
-     CONFIG_BRUCE_KEYBOARD_IN_ALT2_GPIO, CONFIG_BRUCE_KEYBOARD_IN_ALT3_GPIO,                                 \
-     CONFIG_BRUCE_KEYBOARD_IN_ALT4_GPIO, CONFIG_BRUCE_KEYBOARD_IN_ALT5_GPIO,                                 \
+    {CONFIG_BRUCE_KEYBOARD_IN_ALT0_GPIO,                                                                     \
+     CONFIG_BRUCE_KEYBOARD_IN_ALT1_GPIO,                                                                     \
+     CONFIG_BRUCE_KEYBOARD_IN_ALT2_GPIO,                                                                     \
+     CONFIG_BRUCE_KEYBOARD_IN_ALT3_GPIO,                                                                     \
+     CONFIG_BRUCE_KEYBOARD_IN_ALT4_GPIO,                                                                     \
+     CONFIG_BRUCE_KEYBOARD_IN_ALT5_GPIO,                                                                     \
      CONFIG_BRUCE_KEYBOARD_IN_ALT6_GPIO}
 #endif
 #endif
@@ -73,7 +80,12 @@ static const int s_kb_in_alt_pins[INPUT__KB_IN_COUNT] = INPUT__KB_IN_ALT_PINS;
 static bool s_kb_use_alt_in_pins;
 static bool s_kb_prev_pressed[INPUT__KB_ROWS][INPUT__KB_COLS];
 static bool s_kb_hotkey_consumed[INPUT__KB_ROWS][INPUT__KB_COLS];
+static bool s_kb_hold_pending[INPUT__KB_ROWS][INPUT__KB_COLS];
+static bool s_kb_hold_fired[INPUT__KB_ROWS][INPUT__KB_COLS];
 static uint64_t s_kb_last_event_ms[INPUT__KB_ROWS][INPUT__KB_COLS];
+static uint64_t s_kb_press_start_ms[INPUT__KB_ROWS][INPUT__KB_COLS];
+static uint32_t s_kb_hold_ms[INPUT__KB_ROWS][INPUT__KB_COLS];
+static char s_kb_hold_action[INPUT__KB_ROWS][INPUT__KB_COLS][BRUCE_CONFIG_HOTKEY_ACTION_MAX_LEN + 1];
 static bool s_kb_fn_held;
 static bool s_kb_shift_held;
 static bool s_kb_ctrl_held;
@@ -197,7 +209,8 @@ static int32_t input__kb_decode_fn_nav(int x, int y) {
     return 0;
 }
 
-static bool input__kb_match_hotkey(const char *key, char *out_action, size_t action_size) {
+static bool
+input__kb_match_hotkey(const char *key, uint32_t *out_hold_ms, char *out_action, size_t action_size) {
     char chord[BRUCE_CONFIG_HOTKEY_MAX_LEN + 1] = {0};
     size_t used = 0;
 #define INPUT__APPEND_CHORD_PART(part)                                                                       \
@@ -213,14 +226,7 @@ static bool input__kb_match_hotkey(const char *key, char *out_action, size_t act
     INPUT__APPEND_CHORD_PART(key);
 #undef INPUT__APPEND_CHORD_PART
 
-    const bruce_config_hotkeys_t *hotkeys = config__get_hotkeys();
-    if (hotkeys == NULL) return false;
-    for (size_t i = 0; i < hotkeys->count; ++i) {
-        if (strcmp(hotkeys->items[i].key, chord) != 0) continue;
-        int written = snprintf(out_action, action_size, "%s", hotkeys->items[i].action);
-        return written > 0 && (size_t)written < action_size;
-    }
-    return false;
+    return input_hotkey__find(chord, out_hold_ms, out_action, action_size);
 }
 
 void input_keyboard__init(void) {
@@ -265,15 +271,27 @@ void input_keyboard__poll(void) {
                     s_kb_last_event_ms[y][x] = now;
                     bool is_modifier = input__kb_is_modifier(x, y);
                     char matched_action[BRUCE_CONFIG_HOTKEY_ACTION_MAX_LEN + 1] = {0};
+                    uint32_t hold_ms = 0;
                     bool matched_hotkey =
                         !is_modifier &&
-                        input__kb_match_hotkey(s_kb_normal[y][x], matched_action, sizeof(matched_action));
+                        input__kb_match_hotkey(
+                            s_kb_normal[y][x], &hold_ms, matched_action, sizeof(matched_action)
+                        );
 
                     if (is_modifier) {
                         /* Modifier state is folded into normalized key events. */
                     } else if (matched_hotkey) {
-                        memcpy(hotkey_action, matched_action, sizeof(hotkey_action));
-                        s_kb_hotkey_consumed[y][x] = true;
+                        if (hold_ms > 0) {
+                            /* Defer normal input so a short press remains a normal key. */
+                            s_kb_hold_pending[y][x] = true;
+                            s_kb_hold_fired[y][x] = false;
+                            s_kb_press_start_ms[y][x] = now;
+                            s_kb_hold_ms[y][x] = hold_ms;
+                            memcpy(s_kb_hold_action[y][x], matched_action, sizeof(matched_action));
+                        } else {
+                            memcpy(hotkey_action, matched_action, sizeof(hotkey_action));
+                            s_kb_hotkey_consumed[y][x] = true;
+                        }
                     } else if (s_kb_fn_held) {
                         if (y == 0 && x == 0) {
                             input__emit(BRUCE_INPUT_KEY, BRUCE_INPUT_PRESS, '`', '`');
@@ -305,7 +323,16 @@ void input_keyboard__poll(void) {
                 /* Emit release events only for character keys (not for
                  * modifiers or Fn chords). */
                 if (!input__kb_is_modifier(x, y)) {
-                    if (s_kb_hotkey_consumed[y][x]) {
+                    if (s_kb_hold_pending[y][x]) {
+                        if (!s_kb_hold_fired[y][x]) {
+                            int32_t code = input__kb_char_code(s_kb_normal[y][x]);
+                            if (code != 0) {
+                                input__emit(BRUCE_INPUT_KEY, BRUCE_INPUT_PRESS, code, code);
+                                input__emit(BRUCE_INPUT_KEY, BRUCE_INPUT_RELEASE, code, code);
+                            }
+                        }
+                        s_kb_hold_pending[y][x] = false;
+                    } else if (s_kb_hotkey_consumed[y][x]) {
                         s_kb_hotkey_consumed[y][x] = false;
                     } else {
                         const char *label = s_kb_shift_held ? s_kb_shifted[y][x] : s_kb_normal[y][x];
@@ -313,6 +340,12 @@ void input_keyboard__poll(void) {
                         if (code != 0) { input__emit(BRUCE_INPUT_KEY, BRUCE_INPUT_RELEASE, code, code); }
                     }
                 }
+            }
+
+            if (is_pressed && s_kb_hold_pending[y][x] && !s_kb_hold_fired[y][x] &&
+                now - s_kb_press_start_ms[y][x] >= s_kb_hold_ms[y][x]) {
+                s_kb_hold_fired[y][x] = true;
+                input_hotkey__run_action(s_kb_hold_action[y][x]);
             }
 
             s_kb_prev_pressed[y][x] = is_pressed;
