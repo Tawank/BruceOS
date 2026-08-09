@@ -557,12 +557,18 @@ editor binds Ctrl+S to save and Ctrl+X to exit, with both shortcuts shown in its
 footer; read-only mode exposes only Ctrl+X.
 
 The built-in BNU (Bruce is Not Unix) module provides the direct commands
-`pwd`, `cd [directory]`, `ls [path]`, `mkdir <directory>`, `touch <file>`,
-`cat <file>...`, `free`, and `top`. BNU keeps a shell working directory for
+`pwd`, `cd [directory]`, `ls [path]`, `lsblk`, `mount [device] [mount-point]`,
+`unmount <target>`, `mkdir <directory>`, `touch <file>`, `cat <file>...`,
+`free`, `top`, `shutdown`, and `reboot`. BNU keeps a shell working directory for
 relative storage paths; it is independent of libc process cwd. `cat` streams
 files unchanged to app-visible stdout. `free` reports Core-provided internal RAM
 and PSRAM heap statistics. `top` reports the same system heaps plus CPU usage,
 stack high-water bytes, and tracked heap usage for each Core-managed process.
+`shutdown <now|+minutes|HH:MM>` releases a board power-hold latch when present
+and enters deep sleep on every board. Its time syntax follows Linux: `now`
+shuts down immediately, `+minutes` waits that many minutes, and a 24-hour
+`HH:MM` time schedules the next occurrence in local time. `reboot` restarts
+immediately.
 
 Core owns bounded, process-owned stdio sessions. A session owner may route newly
 created child processes to the session, drain captured output, and enqueue input.

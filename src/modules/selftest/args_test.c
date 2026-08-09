@@ -86,6 +86,8 @@ static bool selftest__args_module_help(void) {
         bluetooth_app_main,
         bluetooth_hid_app_main,
         bnu_pwd_app_main,
+        bnu_shutdown_app_main,
+        bnu_reboot_app_main,
         clock_app_main,
         config_app_main,
         ir_app_main,

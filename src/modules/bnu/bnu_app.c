@@ -1,9 +1,13 @@
 #include "bnu_app.h"
 
+#include <errno.h> // IWYU pragma: keep
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "args.h"
+#include "core_sdk/clock.h"
+#include "core_sdk/device.h"
 #include "core_sdk/disk.h"
 #include "core_sdk/format.h"
 #include "core_sdk/memory.h"
@@ -28,6 +32,41 @@ static ArgParser *bnu__new_parser(const char *helptext) {
     ArgParser *parser = ap_new_parser();
     if (parser != NULL) ap_set_helptext(parser, helptext);
     return parser;
+}
+
+static bruce_result_t bnu__parse_shutdown_time(const char *text, uint32_t *out_delay_ms) {
+    if (text == NULL || out_delay_ms == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    if (strcmp(text, "now") == 0) {
+        *out_delay_ms = 0;
+        return BRUCE_OK;
+    }
+
+    if (text[0] == '+') {
+        errno = 0;
+        char *end = NULL;
+        unsigned long minutes = strtoul(text + 1, &end, 10);
+        if (errno != 0 || end == text + 1 || *end != '\0' || minutes > UINT32_MAX / 60000u) {
+            return BRUCE_ERR_INVALID_ARGUMENT;
+        }
+        *out_delay_ms = (uint32_t)minutes * 60000u;
+        return BRUCE_OK;
+    }
+
+    if (strlen(text) != 5 || text[2] != ':' || text[0] < '0' || text[0] > '9' || text[1] < '0' ||
+        text[1] > '9' || text[3] < '0' || text[3] > '9' || text[4] < '0' || text[4] > '9') {
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    unsigned hour = (unsigned)(text[0] - '0') * 10u + (unsigned)(text[1] - '0');
+    unsigned minute = (unsigned)(text[3] - '0') * 10u + (unsigned)(text[4] - '0');
+    if (hour > 23 || minute > 59) return BRUCE_ERR_INVALID_ARGUMENT;
+
+    bruce_clock_datetime_t now;
+    bruce_result_t result = clock__get_local(&now);
+    if (result != BRUCE_OK) return result;
+    int delay_minutes = (int)(hour * 60u + minute) - (int)(now.hour * 60u + now.minute);
+    if (delay_minutes <= 0) delay_minutes += 24 * 60;
+    *out_delay_ms = (uint32_t)delay_minutes * 60000u;
+    return BRUCE_OK;
 }
 
 static bool bnu__resolve_path(const char *path, char *out_path) {
@@ -266,9 +305,7 @@ int bnu_free_app_main(int argc, char **argv) {
         "int", stats.internal_total, stats.internal_free, stats.internal_largest_block, human
     );
     if (stats.psram_total > 0) {
-        bnu__print_memory_row(
-            "psram", stats.psram_total, stats.psram_free, stats.psram_largest_block, human
-        );
+        bnu__print_memory_row("psram", stats.psram_total, stats.psram_free, stats.psram_largest_block, human);
     }
     if (stats.swap_total > 0) {
         bnu__print_memory_row("swap", stats.swap_total, stats.swap_free, stats.swap_largest_block, human);
@@ -335,6 +372,28 @@ int bnu_top_app_main(int argc, char **argv) {
         );
     }
     return BRUCE_OK;
+}
+
+int bnu_shutdown_app_main(int argc, char **argv) {
+    ArgParser *parser = bnu__new_parser("Power off the device at the specified time.");
+    if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
+    ap_add_required_arg(parser, "time", "'now', '+minutes', or 24-hour 'HH:MM'");
+    if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
+    uint32_t delay_ms = 0;
+    bruce_result_t result = bnu__parse_shutdown_time(ap_get_arg(parser, "time"), &delay_ms);
+    ap_free(parser);
+    if (result != BRUCE_OK) return result;
+    stdio__printf("Shutting down...\n");
+    return device__power_off(delay_ms);
+}
+
+int bnu_reboot_app_main(int argc, char **argv) {
+    ArgParser *parser = bnu__new_parser("Restart the device.");
+    if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
+    if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
+    ap_free(parser);
+    stdio__printf("Rebooting...\n");
+    return device__restart(0);
 }
 
 int bnu_mkdir_app_main(int argc, char **argv) {

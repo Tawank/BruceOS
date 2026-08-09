@@ -48,6 +48,21 @@ static void device__restart_task(void *context) {
     esp_restart();
 }
 
+static void device__power_off_task(void *context) {
+    uint32_t delay_ms = (uint32_t)(uintptr_t)context;
+    if (delay_ms > 0) vTaskDelay(pdMS_TO_TICKS(delay_ms));
+#if CONFIG_BRUCE_POWER_HOLD_GPIO >= 0
+    gpio_config_t cfg = {
+        .pin_bit_mask = 1ULL << CONFIG_BRUCE_POWER_HOLD_GPIO,
+        .mode = GPIO_MODE_OUTPUT,
+    };
+    gpio_config(&cfg);
+    gpio_set_level((gpio_num_t)CONFIG_BRUCE_POWER_HOLD_GPIO, 0);
+    vTaskDelay(pdMS_TO_TICKS(250));
+#endif
+    esp_deep_sleep_start();
+}
+
 bruce_result_t device__restart(uint32_t delay_ms) {
     bruce_result_t permission = permission__check(BRUCE_PERMISSION_PROCESS);
     if (permission != BRUCE_OK) return permission;
@@ -57,22 +72,13 @@ bruce_result_t device__restart(uint32_t delay_ms) {
                : BRUCE_ERR_NO_MEMORY;
 }
 
-bruce_result_t device__power_off(void) {
+bruce_result_t device__power_off(uint32_t delay_ms) {
     bruce_result_t permission = permission__check(BRUCE_PERMISSION_PROCESS);
     if (permission != BRUCE_OK) return permission;
-#if CONFIG_BRUCE_POWER_HOLD_GPIO >= 0
-    gpio_config_t cfg = {
-        .pin_bit_mask = 1ULL << CONFIG_BRUCE_POWER_HOLD_GPIO,
-        .mode = GPIO_MODE_OUTPUT,
-    };
-    gpio_config(&cfg);
-    gpio_set_level((gpio_num_t)CONFIG_BRUCE_POWER_HOLD_GPIO, 0);
-    vTaskDelay(pdMS_TO_TICKS(250));
-    esp_deep_sleep_start();
-    return BRUCE_OK;
-#else
-    return BRUCE_ERR_UNSUPPORTED;
-#endif
+    return xTaskCreate(device__power_off_task, "device_power_off", 2048, (void *)(uintptr_t)delay_ms, 5, NULL) ==
+                   pdPASS
+               ? BRUCE_OK
+               : BRUCE_ERR_NO_MEMORY;
 }
 
 void device__power_hold_init(void) {

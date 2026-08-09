@@ -19,6 +19,8 @@ bool selftest__run_bnu_case(void) {
     char *unmount_argv[] = {"unmount", "missing"};
     char *free_argv[] = {"free"};
     char *top_argv[] = {"top"};
+    char *shutdown_invalid_argv[] = {"shutdown", "later"};
+    char *reboot_invalid_argv[] = {"reboot", "later"};
     char *cat_argv[] = {"cat", "/selftest_bnu_cat.txt"};
     static const char cat_text[] = "bnu cat selftest\n";
     bruce_file_id_t cat_file = BRUCE_FILE_ID_INVALID;
@@ -38,9 +40,12 @@ bool selftest__run_bnu_case(void) {
               bnu_pwd_app_main(1, pwd_argv) == BRUCE_OK && bnu_ls_app_main(1, ls_argv) == BRUCE_OK &&
               bnu_lsblk_app_main(1, lsblk_argv) == BRUCE_OK &&
               bnu_mount_app_main(1, mount_argv) == BRUCE_OK &&
-              bnu_unmount_app_main(2, unmount_argv) == BRUCE_ERR_NOT_FOUND &&
-              bnu_free_app_main(1, free_argv) == BRUCE_OK && bnu_top_app_main(1, top_argv) == BRUCE_OK &&
-              cat_open == BRUCE_OK && cat_write == BRUCE_OK && cat_written == sizeof(cat_text) - 1 &&
+               bnu_unmount_app_main(2, unmount_argv) == BRUCE_ERR_NOT_FOUND &&
+               bnu_free_app_main(1, free_argv) == BRUCE_OK && bnu_top_app_main(1, top_argv) == BRUCE_OK &&
+               bnu_shutdown_app_main(1, shutdown_invalid_argv) == BRUCE_ERR_INVALID_ARGUMENT &&
+               bnu_shutdown_app_main(2, shutdown_invalid_argv) == BRUCE_ERR_INVALID_ARGUMENT &&
+               bnu_reboot_app_main(2, reboot_invalid_argv) == BRUCE_ERR_INVALID_ARGUMENT &&
+               cat_open == BRUCE_OK && cat_write == BRUCE_OK && cat_written == sizeof(cat_text) - 1 &&
               cat_close == BRUCE_OK && bnu_cat_app_main(2, cat_argv) == BRUCE_OK;
     storage__remove(cat_argv[1]);
     printf("[selftest] bnu: %s\n", ok ? "OK" : "failed");

@@ -12,11 +12,10 @@ int device__get_battery(void);
 /* Schedules a device restart after delay_ms. Requires the `process` permission. */
 bruce_result_t device__restart(uint32_t delay_ms);
 
-/* Powers off boards with a configured power-hold latch GPIO by releasing that
- * latch, then enters deep sleep as a fallback while external power is present.
- * Requires the `process` permission. Returns BRUCE_ERR_UNSUPPORTED on boards
- * without BRUCE_POWER_HOLD_GPIO. */
-bruce_result_t device__power_off(void);
+/* Schedules device power-off after delay_ms. Releases a configured power-hold
+ * latch, then enters deep sleep. Boards without a latch enter deep sleep
+ * directly. Requires the `process` permission. */
+bruce_result_t device__power_off(uint32_t delay_ms);
 
 /* On boards with a touchscreen or an I2C fuel-gauge/PMIC battery backend,
  * the device_bus built-in process owns the shared board I2C bus

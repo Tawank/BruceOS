@@ -93,6 +93,8 @@ void app_runner__register_defaults(void) {
     (void)app_runner__register("unmount", bnu_unmount_app_main, 0);
     (void)app_runner__register("free", bnu_free_app_main, 0);
     (void)app_runner__register("top", bnu_top_app_main, 0);
+    (void)app_runner__register("shutdown", bnu_shutdown_app_main, 0);
+    (void)app_runner__register("reboot", bnu_reboot_app_main, 0);
     (void)app_runner__register("mkdir", bnu_mkdir_app_main, 0);
     (void)app_runner__register("touch", bnu_touch_app_main, 0);
     (void)app_runner__register("cat", bnu_cat_app_main, 0);
