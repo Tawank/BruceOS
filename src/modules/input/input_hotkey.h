@@ -49,9 +49,12 @@ const char *input_hotkey__name_for_code(int32_t code);
 /* Finds the configured hotkey whose key, after stripping any duration
  * prefix, equals `name` exactly (first match in configured order wins).
  * On a match, copies its action into out_action, sets *out_hold_ms to that
- * entry's duration prefix (0 for an instant hotkey), and returns true.
+ * entry's duration prefix (0 for an instant hotkey), optionally stores the
+ * configured entry index in out_index, and returns true.
  * Returns false if none match or the action does not fit action_size. */
-bool input_hotkey__find(const char *name, uint32_t *out_hold_ms, char *out_action, size_t action_size);
+bool input_hotkey__find(
+    const char *name, uint32_t *out_hold_ms, char *out_action, size_t action_size, size_t *out_index
+);
 
 /* Finds the first configured instant (`want_hold` false) or hold (`want_hold`
  * true) hotkey for `name`. This lets physical buttons have one of each. */

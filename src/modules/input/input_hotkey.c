@@ -98,7 +98,9 @@ const char *input_hotkey__name_for_code(int32_t code) {
     return NULL;
 }
 
-bool input_hotkey__find(const char *name, uint32_t *out_hold_ms, char *out_action, size_t action_size) {
+bool input_hotkey__find(
+    const char *name, uint32_t *out_hold_ms, char *out_action, size_t action_size, size_t *out_index
+) {
     if (name == NULL) return false;
     const bruce_config_hotkeys_t *hotkeys = config__get_hotkeys();
     if (hotkeys == NULL) return false;
@@ -112,6 +114,7 @@ bool input_hotkey__find(const char *name, uint32_t *out_hold_ms, char *out_actio
         int written = snprintf(out_action, action_size, "%s", hotkeys->items[i].action);
         if (written < 0 || (size_t)written >= action_size) return false;
         *out_hold_ms = hold_ms;
+        if (out_index != NULL) *out_index = i;
         return true;
     }
     return false;

@@ -55,6 +55,7 @@
 #define INPUT__KB_IN_COUNT 7
 #define INPUT__KB_COLS 14
 #define INPUT__KB_ROWS 4
+#define INPUT__KB_HOTKEY_NONE BRUCE_CONFIG_HOTKEY_MAX_COUNT
 
 /* Visual layout (row 0 is the top `123... row). */
 static const char *const s_kb_normal[INPUT__KB_ROWS][INPUT__KB_COLS] = {
@@ -85,7 +86,8 @@ static bool s_kb_hold_fired[INPUT__KB_ROWS][INPUT__KB_COLS];
 static uint64_t s_kb_last_event_ms[INPUT__KB_ROWS][INPUT__KB_COLS];
 static uint64_t s_kb_press_start_ms[INPUT__KB_ROWS][INPUT__KB_COLS];
 static uint32_t s_kb_hold_ms[INPUT__KB_ROWS][INPUT__KB_COLS];
-static char s_kb_hold_action[INPUT__KB_ROWS][INPUT__KB_COLS][BRUCE_CONFIG_HOTKEY_ACTION_MAX_LEN + 1];
+static uint8_t s_kb_hold_hotkey[INPUT__KB_ROWS][INPUT__KB_COLS];
+static char s_kb_hotkey_actions[BRUCE_CONFIG_HOTKEY_MAX_COUNT][BRUCE_CONFIG_HOTKEY_ACTION_MAX_LEN + 1];
 static bool s_kb_fn_held;
 static bool s_kb_shift_held;
 static bool s_kb_ctrl_held;
@@ -209,8 +211,9 @@ static int32_t input__kb_decode_fn_nav(int x, int y) {
     return 0;
 }
 
-static bool
-input__kb_match_hotkey(const char *key, uint32_t *out_hold_ms, char *out_action, size_t action_size) {
+static bool input__kb_match_hotkey(
+    const char *key, uint32_t *out_hold_ms, char *out_action, size_t action_size, size_t *out_hotkey_index
+) {
     char chord[BRUCE_CONFIG_HOTKEY_MAX_LEN + 1] = {0};
     size_t used = 0;
 #define INPUT__APPEND_CHORD_PART(part)                                                                       \
@@ -226,7 +229,7 @@ input__kb_match_hotkey(const char *key, uint32_t *out_hold_ms, char *out_action,
     INPUT__APPEND_CHORD_PART(key);
 #undef INPUT__APPEND_CHORD_PART
 
-    return input_hotkey__find(chord, out_hold_ms, out_action, action_size);
+    return input_hotkey__find(chord, out_hold_ms, out_action, action_size, out_hotkey_index);
 }
 
 void input_keyboard__init(void) {
@@ -248,6 +251,7 @@ void input_keyboard__init(void) {
 #endif
 
     s_kb_initialized = true;
+    memset(s_kb_hold_hotkey, INPUT__KB_HOTKEY_NONE, sizeof(s_kb_hold_hotkey));
 }
 
 void input_keyboard__poll(void) {
@@ -272,10 +276,11 @@ void input_keyboard__poll(void) {
                     bool is_modifier = input__kb_is_modifier(x, y);
                     char matched_action[BRUCE_CONFIG_HOTKEY_ACTION_MAX_LEN + 1] = {0};
                     uint32_t hold_ms = 0;
+                    size_t hotkey_index = INPUT__KB_HOTKEY_NONE;
                     bool matched_hotkey =
                         !is_modifier &&
                         input__kb_match_hotkey(
-                            s_kb_normal[y][x], &hold_ms, matched_action, sizeof(matched_action)
+                            s_kb_normal[y][x], &hold_ms, matched_action, sizeof(matched_action), &hotkey_index
                         );
 
                     if (is_modifier) {
@@ -287,7 +292,8 @@ void input_keyboard__poll(void) {
                             s_kb_hold_fired[y][x] = false;
                             s_kb_press_start_ms[y][x] = now;
                             s_kb_hold_ms[y][x] = hold_ms;
-                            memcpy(s_kb_hold_action[y][x], matched_action, sizeof(matched_action));
+                            s_kb_hold_hotkey[y][x] = (uint8_t)hotkey_index;
+                            memcpy(s_kb_hotkey_actions[hotkey_index], matched_action, sizeof(matched_action));
                         } else {
                             memcpy(hotkey_action, matched_action, sizeof(hotkey_action));
                             s_kb_hotkey_consumed[y][x] = true;
@@ -332,6 +338,7 @@ void input_keyboard__poll(void) {
                             }
                         }
                         s_kb_hold_pending[y][x] = false;
+                        s_kb_hold_hotkey[y][x] = INPUT__KB_HOTKEY_NONE;
                     } else if (s_kb_hotkey_consumed[y][x]) {
                         s_kb_hotkey_consumed[y][x] = false;
                     } else {
@@ -345,7 +352,7 @@ void input_keyboard__poll(void) {
             if (is_pressed && s_kb_hold_pending[y][x] && !s_kb_hold_fired[y][x] &&
                 now - s_kb_press_start_ms[y][x] >= s_kb_hold_ms[y][x]) {
                 s_kb_hold_fired[y][x] = true;
-                input_hotkey__run_action(s_kb_hold_action[y][x]);
+                input_hotkey__run_action(s_kb_hotkey_actions[s_kb_hold_hotkey[y][x]]);
             }
 
             s_kb_prev_pressed[y][x] = is_pressed;
