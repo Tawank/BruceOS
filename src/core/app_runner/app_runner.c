@@ -17,7 +17,7 @@
 #include <string.h>
 #include <strings.h>
 
-#define APP_RUNNER_MAX_APPS 48
+#define APP_RUNNER_MAX_APPS 64
 #define APP_RUNNER_PATH_MAX 160
 #define APP_RUNNER_MAX_LOADERS 12
 #define APP_RUNNER_LOADER_EXTENSION_MAX 16

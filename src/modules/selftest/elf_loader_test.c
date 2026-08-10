@@ -4,6 +4,7 @@
 
 #include "core/storage/storage.h"
 #include "core_sdk/app_runner.h"
+#include "core_sdk/permission.h"
 #include "core_sdk/runtime.h"
 #include "modules/loaders/elf/elf_loader_app.h"
 
@@ -27,6 +28,13 @@ extern const uint8_t game_elf_end[] asm("_binary_game_elf_end");
 bool selftest__run_elf_loader_xip_case(void) {
     const char *path = "/bin/selftest_elf_loader_xip.elf";
     storage__remove(path);
+
+    /* The external fixture writes to storage while running; selftests must
+     * never wait for a user to answer its first-use permission prompt. */
+    if (permission__set("selftest_elf_loader_xip.elf", BRUCE_PERMISSION_STORAGE, true) != BRUCE_OK) {
+        printf("[selftest] loader/elf_xip: could not grant storage permission\n");
+        return false;
+    }
 
     size_t elf_size = (size_t)(game_elf_end - game_elf_start);
     if (!storage__write_file_atomic(path, game_elf_start, elf_size)) {

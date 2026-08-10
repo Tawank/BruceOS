@@ -680,9 +680,6 @@ bruce_result_t display__init(void) {
 #endif
     s_buffered_rendering = config__get_display_buffered_rendering();
     s_dma_framebuffer = s_buffered_rendering && config__get_display_dma_framebuffer();
-    ESP_LOGW(
-        "display", "Buffered rendering: %d, DMA framebuffer: %d", s_buffered_rendering, s_dma_framebuffer
-    );
     if (s_buffered_rendering) {
         uint32_t framebuffer_caps =
             MALLOC_CAP_INTERNAL | (s_dma_framebuffer ? MALLOC_CAP_DMA : MALLOC_CAP_8BIT);

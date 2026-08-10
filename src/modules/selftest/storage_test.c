@@ -116,14 +116,15 @@ bool selftest__run_storage_permission_denied_case(void) {
 
 bool selftest__run_storage_protected_path_case(void) {
     /* Called directly within selftest's own built-in process context: built-in
-     * processes always pass the `storage` permission check, so a denial here can
-     * only come from the permanently-protected-path rule itself. */
+     * processes always pass the `storage` permission check. bruce.conf is
+     * user-editable; only the permission store is permanently protected. */
     bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
     bruce_result_t bruce_conf = storage__open("/config/bruce.conf", BRUCE_STORAGE_OPEN_READ, &file);
+    if (bruce_conf == BRUCE_OK) (void)storage__close(file);
     bruce_result_t permissions_json =
         storage__open("/config/permissions.json", BRUCE_STORAGE_OPEN_READ, &file);
 
-    bool ok = bruce_conf == BRUCE_ERR_PERMISSION && permissions_json == BRUCE_ERR_PERMISSION;
+    bool ok = bruce_conf == BRUCE_OK && permissions_json == BRUCE_ERR_PERMISSION;
     printf(
         "[selftest] storage/protected-path: %s (bruce.conf=%d permissions.json=%d)\n",
         ok ? "OK" : "FAIL",
@@ -194,20 +195,20 @@ bool selftest__run_storage_mkdir_case(void) {
     bruce_result_t created = storage__mkdir(path);
     bruce_result_t existing = storage__mkdir(path);
     bruce_result_t missing_parent = storage__mkdir("/selftest_missing/child");
-    bruce_result_t protected_path = storage__mkdir("/config/bruce.conf");
+    bruce_result_t config_file_path = storage__mkdir("/config/bruce.conf");
 
     size_t count = 0;
     bruce_result_t listed = storage__list(path, NULL, 0, &count);
     bruce_result_t removed = storage__remove(path);
     bool ok = created == BRUCE_OK && existing == BRUCE_OK && missing_parent == BRUCE_ERR_NOT_FOUND &&
-              protected_path == BRUCE_ERR_PERMISSION && listed == BRUCE_OK && removed == BRUCE_OK;
+               config_file_path == BRUCE_ERR_INVALID_PATH && listed == BRUCE_OK && removed == BRUCE_OK;
     printf(
-        "[selftest] storage/mkdir: %s (create=%d existing=%d missing=%d protected=%d list=%d remove=%d)\n",
+        "[selftest] storage/mkdir: %s (create=%d existing=%d missing=%d config-file=%d list=%d remove=%d)\n",
         ok ? "OK" : "FAIL",
         created,
         existing,
         missing_parent,
-        protected_path,
+        config_file_path,
         listed,
         removed
     );

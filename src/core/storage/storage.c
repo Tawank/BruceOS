@@ -111,7 +111,14 @@ static esp_err_t storage__mount_internal(void) {
         .base_path = STORAGE__MOUNT_PATH,
         .partition_label = NULL,
         .partition = s_littlefs_partition,
+#ifdef CONFIG_BRUCE_QEMU_TEST_MODE
+        /* QEMU's offline flash image does not preserve erased bytes in the
+         * dynamically registered root volume. It must be formatted on first
+         * boot, unlike a physical device where mount corruption is retained. */
+        .format_if_mount_failed = true,
+#else
         .format_if_mount_failed = false,
+#endif
         .grow_on_mount = true,
     };
     esp_err_t err = esp_vfs_littlefs_register(&config);
@@ -588,13 +595,11 @@ static bool storage__extra_mount_has_open_files_locked(int index) {
     return false;
 }
 
-/* /config/bruce.conf and /config/permissions.json (plus their atomic-write
- * .tmp siblings) are the only paths this public API refuses, per
- * migration_plan.md - "Input, display, storage, and Config". Everything else
- * mounted (LittleFS or SD) is reachable by a storage-granted caller. Core
- * itself still reads/writes those two files directly through
- * storage__read_file()/storage__write_file_atomic() above, which this check
- * does not apply to. */
+/* The permission store and its atomic-write sibling are not accessible through
+ * the public storage API. Everything else mounted (LittleFS or SD), including
+ * the user-editable Bruce configuration, is reachable by a storage-granted
+ * caller. Core still reads/writes the permission store directly through
+ * storage__read_file()/storage__write_file_atomic() above. */
 static bool storage__is_protected_path(const char *path) {
     static const char *const protected_paths[] = {
         "/config/permissions.json",
