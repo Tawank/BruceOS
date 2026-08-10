@@ -563,7 +563,7 @@ menu "Bruce hardware configuration"
         config BRUCE_KEYBOARD_AUTODETECT_ALT
             bool "Autodetect alternate IN0/IN1 pins"
             depends on BRUCE_KEYBOARD_ENABLED
-            default y
+            default n
             help
                 Some Cardputer keyboard membranes use a different pair of
                 sense pins for the first column; when enabled, the scanner

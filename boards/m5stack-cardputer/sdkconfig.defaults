@@ -8,6 +8,13 @@
 CONFIG_IDF_TARGET="esp32s3"
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_swap.csv"
 
+# Run the supported ESP32 targets at their maximum CPU frequency.
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ=240
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_ESPTOOLPY_FLASHFREQ="80m"
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+
 # The shell and built-in apps use Wi-Fi interactively, rather than as a
 # high-throughput router. Four static RX buffers and four buffers in each
 # dynamic pool keep ordinary WPA2, HTTP, and AP traffic responsive while
@@ -63,8 +70,10 @@ CONFIG_BRUCE_BUTTON_SELECT_GPIO=0
 # CONFIG_BRUCE_BUTTON_B_ENABLED is not set
 # CONFIG_BRUCE_BUTTON_C_ENABLED is not set
 
-# Keyboard: 3-output/7-input GPIO scan matrix, with alternate IN0/IN1 pins
-# autodetected for keyboard membrane variants.
+# Keyboard: 3-output/7-input GPIO scan matrix.
+# GPIO1/GPIO2 are shared with peripheral functions, so they must not be used
+# as alternate keyboard inputs: a peripheral signal could permanently switch
+# the scanner away from the actual keyboard pins.
 CONFIG_BRUCE_KEYBOARD_ENABLED=y
 CONFIG_BRUCE_KEYBOARD_OUT0_GPIO=8
 CONFIG_BRUCE_KEYBOARD_OUT1_GPIO=9
@@ -76,14 +85,7 @@ CONFIG_BRUCE_KEYBOARD_IN3_GPIO=4
 CONFIG_BRUCE_KEYBOARD_IN4_GPIO=5
 CONFIG_BRUCE_KEYBOARD_IN5_GPIO=6
 CONFIG_BRUCE_KEYBOARD_IN6_GPIO=7
-CONFIG_BRUCE_KEYBOARD_AUTODETECT_ALT=y
-CONFIG_BRUCE_KEYBOARD_IN_ALT0_GPIO=1
-CONFIG_BRUCE_KEYBOARD_IN_ALT1_GPIO=2
-CONFIG_BRUCE_KEYBOARD_IN_ALT2_GPIO=3
-CONFIG_BRUCE_KEYBOARD_IN_ALT3_GPIO=4
-CONFIG_BRUCE_KEYBOARD_IN_ALT4_GPIO=5
-CONFIG_BRUCE_KEYBOARD_IN_ALT5_GPIO=6
-CONFIG_BRUCE_KEYBOARD_IN_ALT6_GPIO=7
+# CONFIG_BRUCE_KEYBOARD_AUTODETECT_ALT is not set
 
 # Infrared.
 CONFIG_BRUCE_IR_TX_GPIO=44

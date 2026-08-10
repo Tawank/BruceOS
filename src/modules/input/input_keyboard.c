@@ -78,7 +78,9 @@ static const int s_kb_in_pins[INPUT__KB_IN_COUNT] = INPUT__KB_IN_PINS;
 static const int s_kb_in_alt_pins[INPUT__KB_IN_COUNT] = INPUT__KB_IN_ALT_PINS;
 #endif
 
+#if INPUT__KB_AUTODETECT_ALT
 static bool s_kb_use_alt_in_pins;
+#endif
 static bool s_kb_prev_pressed[INPUT__KB_ROWS][INPUT__KB_COLS];
 static bool s_kb_hotkey_consumed[INPUT__KB_ROWS][INPUT__KB_COLS];
 static bool s_kb_hold_pending[INPUT__KB_ROWS][INPUT__KB_COLS];
@@ -120,7 +122,11 @@ static bool input__kb_scan(bool out_pressed[INPUT__KB_ROWS][INPUT__KB_COLS]) {
         input__kb_set_output(scan_state);
         esp_rom_delay_us(INPUT__KB_SCAN_SETTLE_US);
 
-        uint8_t in_mask = input__kb_read_inputs(s_kb_use_alt_in_pins ? s_kb_in_alt_pins : s_kb_in_pins);
+        const int *in_pins = s_kb_in_pins;
+#if INPUT__KB_AUTODETECT_ALT
+        if (s_kb_use_alt_in_pins) in_pins = s_kb_in_alt_pins;
+#endif
+        uint8_t in_mask = input__kb_read_inputs(in_pins);
 
 #if INPUT__KB_AUTODETECT_ALT
         /* If primary pins show nothing, try the alternate IN0/IN1 pins. */
