@@ -1,149 +1,58 @@
-#include "process.h"
+#include "process_internal.h"
 
 #include "core/display/display.h"
 #include "core/event_loop/event_loop.h"
 #include "core/stdio/stdio.h"
-#include "core/storage/storage.h"
 #include "core_sdk/display.h"
-#include "core_sdk/environment.h"
 #include "core_sdk/permission.h"
 #include "core_sdk/process.h"
-#include "core_sdk/runtime.h"
 
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
 #define PROCESS__DEFAULT_STACK_BYTES 4096u
-#define PROCESS__EVT_WAKE (1u << 0)
-#define PROCESS__EVT_EXITED (1u << 1)
-#define PROCESS__EVT_EVENT_WAKE (1u << 2)
-#define PROCESS__EVT_WAITER_WAKE (1u << 3)
-#define PROCESS__EVT_OPERATION_IDLE (1u << 4)
-#define PROCESS__ENVIRONMENT_FILE_PATH "/config/.env"
-#define PROCESS__ENVIRONMENT_FILE_MAX 4096u
 /* ESP-IDF pthread reserves slot 0 in pthread_local_storage.c. */
-#define PROCESS__TLS_SLOT 1
 #if CONFIG_FREERTOS_THREAD_LOCAL_STORAGE_POINTERS <= PROCESS__TLS_SLOT
 #error "Bruce Core requires a dedicated FreeRTOS TLS pointer after the pthread slot"
 #endif
-
-typedef struct {
-    char *name;
-    char *value;
-} process__environment_entry_t;
-
-typedef struct {
-    process__environment_entry_t *entries;
-    size_t count;
-    size_t capacity;
-} process__environment_t;
-
-typedef struct process__resource {
-    bruce_resource_id_t id;
-    bruce_process_resource_cleanup_t cleanup;
-    void *context;
-    struct process__resource *next;
-} process__resource_t;
-
-typedef struct process__record {
-    bool in_use;
-    bruce_process_id_t id;
-    char name[BRUCE_PROCESS_NAME_MAX];
-    bruce_process_state_t state;
-    bool built_in;
-    bool gui_requested;
-    bool presentable;
-    char permission_key[BRUCE_PERMISSION_FILE_NAME_MAX];
-    bool start_in_background;
-    bool preserve_display;
-    bruce_stdio_session_t stdio_session;
-    bruce_stdio_session_t child_stdio_session;
-    TaskHandle_t handle;
-
-    bruce_app_entry_t entry;
-    int argc;
-    char **argv;
-
-    void (*process_entry)(void *context);
-    void *process_entry_context;
-    void (*process_entry_cleanup)(void *context);
-    volatile bool stop_requested;
-    bruce_process_signal_t pending_signal;
-    volatile bool pause_requested;
-    size_t waiter_count;
-    size_t status_waiter_count;
-    bool wait_attached;
-    struct process__record *wait_target;
-    bool wait_for_status;
-
-    process__resource_t *resources;
-    bruce_resource_id_t next_resource_id;
-    size_t resource_count;
-    size_t memory_bytes;
-    size_t swap_bytes;
-    size_t operation_count;
-
-    uint32_t last_runtime_counter;
-    uint32_t cpu_percent;
-    uint32_t stack_high_water_bytes;
-    uint32_t stack_total_bytes;
-    process__environment_t environment;
-    EventGroupHandle_t events;
-    struct process__record *previous;
-    struct process__record *next;
-    struct process__record *fg_previous;
-    struct process__record *fg_next;
-} process__record_t;
-
-typedef struct process__completion {
-    bool in_use;
-    bruce_process_id_t id;
-    bruce_process_status_t status;
-    uint64_t sequence;
-    size_t waiter_pins;
-    struct process__completion *next;
-} process__completion_t;
 
 static StaticSemaphore_t s_lock_storage;
 static SemaphoreHandle_t s_lock;
 static portMUX_TYPE s_init_mux = portMUX_INITIALIZER_UNLOCKED;
 
-static process__record_t *s_processes;
-static process__record_t *s_process_tail;
+process__record_t *s_processes;
+process__record_t *s_process_tail;
 static process__completion_t *s_completions;
 static bruce_process_id_t s_next_process_id = 1;
 static uint64_t s_next_completion_sequence = 1;
 
 static process__record_t *s_fg_head;
-static process__record_t *s_fg_tail;
-static bruce_process_id_t s_effective_foreground;
+process__record_t *s_fg_tail;
+bruce_process_id_t s_effective_foreground;
 
 static uint32_t s_last_total_runtime;
-static process__environment_t s_global_environment;
+process__environment_t s_global_environment;
 
-static void process__ensure_init(void) {
+void process__ensure_init(void) {
     if (s_lock != NULL) { return; }
     portENTER_CRITICAL(&s_init_mux);
-    if (s_lock == NULL) {
-        s_lock = xSemaphoreCreateRecursiveMutexStatic(&s_lock_storage);
-    }
+    if (s_lock == NULL) { s_lock = xSemaphoreCreateRecursiveMutexStatic(&s_lock_storage); }
     portEXIT_CRITICAL(&s_init_mux);
 }
 
-static void process__lock(void) { xSemaphoreTakeRecursive(s_lock, portMAX_DELAY); }
+void process__lock(void) { xSemaphoreTakeRecursive(s_lock, portMAX_DELAY); }
 
-static void process__unlock(void) { xSemaphoreGiveRecursive(s_lock); }
+void process__unlock(void) { xSemaphoreGiveRecursive(s_lock); }
 
 /* Caller must hold the lock. */
-static process__record_t *process__find_by_id_locked(bruce_process_id_t id) {
+process__record_t *process__find_by_id_locked(bruce_process_id_t id) {
     if (id == BRUCE_PROCESS_ID_INVALID) { return NULL; }
     for (process__record_t *record = s_processes; record != NULL; record = record->next) {
         if (record->in_use && record->id == id) { return record; }
@@ -152,7 +61,7 @@ static process__record_t *process__find_by_id_locked(bruce_process_id_t id) {
 }
 
 /* Caller must hold the lock. */
-static process__record_t *process__find_by_handle_locked(TaskHandle_t handle) {
+process__record_t *process__find_by_handle_locked(TaskHandle_t handle) {
     if (handle == NULL) { return NULL; }
     for (process__record_t *record = s_processes; record != NULL; record = record->next) {
         if (record->in_use && record->handle == handle) { return record; }
@@ -161,8 +70,9 @@ static process__record_t *process__find_by_handle_locked(TaskHandle_t handle) {
 }
 
 /* Caller must hold the lock. */
-static process__completion_t *process__find_completion_locked(bruce_process_id_t id) {
-    for (process__completion_t *completion = s_completions; completion != NULL; completion = completion->next) {
+process__completion_t *process__find_completion_locked(bruce_process_id_t id) {
+    for (process__completion_t *completion = s_completions; completion != NULL;
+         completion = completion->next) {
         if (completion->in_use && completion->id == id) { return completion; }
     }
     return NULL;
@@ -183,16 +93,14 @@ static bruce_process_id_t process__allocate_id_locked(void) {
     }
 }
 
-static void process__wake_locked(process__record_t *record) {
+void process__wake_locked(process__record_t *record) {
     xEventGroupSetBits(record->events, PROCESS__EVT_WAKE);
-    if (record->wait_attached) {
-        xEventGroupSetBits(record->wait_target->events, PROCESS__EVT_WAITER_WAKE);
-    }
+    if (record->wait_attached) { xEventGroupSetBits(record->wait_target->events, PROCESS__EVT_WAITER_WAKE); }
 }
 
 /* Caller must hold the lock. Dead records remain until all waiters have
  * released their event-group references. */
-static void process__dispose_if_unused_locked(process__record_t *record) {
+void process__dispose_if_unused_locked(process__record_t *record) {
     if (record->in_use || record->waiter_count != 0) return;
     if (record->previous != NULL) record->previous->next = record->next;
     else s_processes = record->next;
@@ -207,7 +115,8 @@ static void process__dispose_if_unused_locked(process__record_t *record) {
 static void
 process__publish_completion_locked(process__record_t *record, const bruce_process_status_t *status) {
     process__completion_t *target = NULL;
-    for (process__completion_t *completion = s_completions; completion != NULL; completion = completion->next) {
+    for (process__completion_t *completion = s_completions; completion != NULL;
+         completion = completion->next) {
         if (!completion->in_use) {
             target = completion;
             break;
@@ -230,7 +139,7 @@ process__publish_completion_locked(process__record_t *record, const bruce_proces
     target->waiter_pins = record->status_waiter_count;
 }
 
-static void process__completion_clear_locked(process__completion_t *completion) {
+void process__completion_clear_locked(process__completion_t *completion) {
     completion->in_use = false;
     completion->id = BRUCE_PROCESS_ID_INVALID;
     memset(&completion->status, 0, sizeof(completion->status));
@@ -241,7 +150,7 @@ static void process__completion_clear_locked(process__completion_t *completion) 
 /* Releases a wait owned by a tracked process. This is also called from forced
  * teardown because deleting a blocked task prevents process__wait_common()
  * from releasing its own pin. */
-static void process__detach_wait_locked(process__record_t *waiter) {
+void process__detach_wait_locked(process__record_t *waiter) {
     if (!waiter->wait_attached) return;
     process__record_t *target = waiter->wait_target;
     process__completion_t *completion = process__find_completion_locked(target->id);
@@ -262,21 +171,17 @@ static void process__foreground_notify_locked(bruce_process_id_t previous, bruce
     event_loop__foreground_changed(current);
     if (previous != BRUCE_PROCESS_ID_INVALID) {
         process__record_t *record = process__find_by_id_locked(previous);
-        if (record != NULL) {
-            xEventGroupSetBits(record->events, PROCESS__EVT_EVENT_WAKE);
-        }
+        if (record != NULL) { xEventGroupSetBits(record->events, PROCESS__EVT_EVENT_WAKE); }
     }
     if (current != BRUCE_PROCESS_ID_INVALID) {
         process__record_t *record = process__find_by_id_locked(current);
-        if (record != NULL) {
-            xEventGroupSetBits(record->events, PROCESS__EVT_EVENT_WAKE);
-        }
+        if (record != NULL) { xEventGroupSetBits(record->events, PROCESS__EVT_EVENT_WAKE); }
     }
 }
 
 /* Compact the stack and derive all runnable foreground/background states from
  * it. Paused processes retain their position but are temporarily ineligible. */
-static void process__foreground_recompute_locked(void) {
+void process__foreground_recompute_locked(void) {
     bruce_process_id_t next = BRUCE_PROCESS_ID_INVALID;
     for (process__record_t *record = s_fg_head; record != NULL;) {
         process__record_t *following = record->fg_next;
@@ -314,9 +219,10 @@ static void process__foreground_recompute_locked(void) {
     }
 }
 
-static void process__foreground_remove_locked(bruce_process_id_t id) {
+void process__foreground_remove_locked(bruce_process_id_t id) {
     process__record_t *record = process__find_by_id_locked(id);
-    if (record == NULL || (record->fg_previous == NULL && record->fg_next == NULL && s_fg_head != record)) return;
+    if (record == NULL || (record->fg_previous == NULL && record->fg_next == NULL && s_fg_head != record))
+        return;
     if (record->fg_previous != NULL) record->fg_previous->fg_next = record->fg_next;
     else s_fg_head = record->fg_next;
     if (record->fg_next != NULL) record->fg_next->fg_previous = record->fg_previous;
@@ -325,7 +231,7 @@ static void process__foreground_remove_locked(bruce_process_id_t id) {
     record->fg_next = NULL;
 }
 
-static void process__foreground_push_locked(bruce_process_id_t id) {
+void process__foreground_push_locked(bruce_process_id_t id) {
     process__foreground_remove_locked(id);
     process__record_t *record = process__find_by_id_locked(id);
     if (record != NULL) {
@@ -338,14 +244,14 @@ static void process__foreground_push_locked(bruce_process_id_t id) {
     process__foreground_recompute_locked();
 }
 
-static void process__clear_foreground_display(void) {
+void process__clear_foreground_display(void) {
     if (display__begin_frame() == BRUCE_OK) {
         (void)display__fill_screen(BRUCE_COLOR_BLACK);
         (void)display__present();
     }
 }
 
-static void process__refresh_cpu_samples_locked(void) {
+void process__refresh_cpu_samples_locked(void) {
     const size_t status_capacity = uxTaskGetNumberOfTasks();
     TaskStatus_t *status_buf = malloc(status_capacity * sizeof(*status_buf));
     if (status_buf == NULL) return;
@@ -371,8 +277,7 @@ static void process__refresh_cpu_samples_locked(void) {
     free(status_buf);
 }
 
-static void
-process__fill_snapshot_locked(const process__record_t *record, bruce_process_snapshot_t *out_snapshot) {
+void process__fill_snapshot_locked(const process__record_t *record, bruce_process_snapshot_t *out_snapshot) {
     memset(out_snapshot, 0, sizeof(*out_snapshot));
     out_snapshot->id = record->id;
     out_snapshot->state = record->state;
@@ -392,173 +297,6 @@ static void process__free_argv(int argc, char **argv) {
     if (argv == NULL) { return; }
     for (int i = 0; i < argc; ++i) { free(argv[i]); }
     free(argv);
-}
-
-static bool process__environment_name_valid(const char *name) {
-    if (name == NULL || name[0] == '\0') return false;
-    size_t length = strlen(name);
-    if (length >= BRUCE_ENVIRONMENT_NAME_MAX ||
-        !((name[0] >= 'A' && name[0] <= 'Z') || (name[0] >= 'a' && name[0] <= 'z') || name[0] == '_')) {
-        return false;
-    }
-    for (size_t i = 1; i < length; ++i) {
-        char c = name[i];
-        if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_')) {
-            return false;
-        }
-    }
-    return true;
-}
-
-static int process__environment_find(const process__environment_t *environment, const char *name) {
-    for (size_t i = 0; i < environment->count; ++i) {
-        if (strcmp(environment->entries[i].name, name) == 0) return (int)i;
-    }
-    return -1;
-}
-
-static void process__environment_free(process__environment_t *environment) {
-    for (size_t i = 0; i < environment->count; ++i) {
-        free(environment->entries[i].name);
-        free(environment->entries[i].value);
-    }
-    free(environment->entries);
-    memset(environment, 0, sizeof(*environment));
-}
-
-static bruce_result_t
-process__environment_set_locked(process__environment_t *environment, const char *name, const char *value) {
-    if (!process__environment_name_valid(name) || value == NULL ||
-        strlen(value) >= BRUCE_ENVIRONMENT_VALUE_MAX) {
-        return BRUCE_ERR_INVALID_ARGUMENT;
-    }
-    char *value_copy = strdup(value);
-    if (value_copy == NULL) return BRUCE_ERR_NO_MEMORY;
-    int index = process__environment_find(environment, name);
-    if (index >= 0) {
-        free(environment->entries[index].value);
-        environment->entries[index].value = value_copy;
-        return BRUCE_OK;
-    }
-    if (environment->count >= BRUCE_ENVIRONMENT_MAX_VARIABLES) {
-        free(value_copy);
-        return BRUCE_ERR_RESOURCE_LIMIT;
-    }
-    if (environment->count == environment->capacity) {
-        size_t capacity = environment->capacity == 0 ? 4 : environment->capacity * 2;
-        if (capacity > BRUCE_ENVIRONMENT_MAX_VARIABLES) capacity = BRUCE_ENVIRONMENT_MAX_VARIABLES;
-        process__environment_entry_t *grown = realloc(environment->entries, capacity * sizeof(*grown));
-        if (grown == NULL) {
-            free(value_copy);
-            return BRUCE_ERR_NO_MEMORY;
-        }
-        environment->entries = grown;
-        environment->capacity = capacity;
-    }
-    char *name_copy = strdup(name);
-    if (name_copy == NULL) {
-        free(value_copy);
-        return BRUCE_ERR_NO_MEMORY;
-    }
-    environment->entries[environment->count++] = (process__environment_entry_t){
-        .name = name_copy,
-        .value = value_copy,
-    };
-    return BRUCE_OK;
-}
-
-static bruce_result_t process__environment_inherit_locked(
-    process__record_t *record, const process__record_t *parent, const bruce_environment_variable_t *overlay,
-    size_t overlay_count
-) {
-    if (overlay_count > 0 && overlay == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
-    for (size_t i = 0; i < s_global_environment.count; ++i) {
-        bruce_result_t result = process__environment_set_locked(
-            &record->environment, s_global_environment.entries[i].name, s_global_environment.entries[i].value
-        );
-        if (result != BRUCE_OK) return result;
-    }
-    if (parent != NULL) {
-        for (size_t i = 0; i < parent->environment.count; ++i) {
-            bruce_result_t result = process__environment_set_locked(
-                &record->environment,
-                parent->environment.entries[i].name,
-                parent->environment.entries[i].value
-            );
-            if (result != BRUCE_OK) return result;
-        }
-    }
-    for (size_t i = 0; i < overlay_count; ++i) {
-        bruce_result_t result =
-            process__environment_set_locked(&record->environment, overlay[i].name, overlay[i].value);
-        if (result != BRUCE_OK) return result;
-    }
-    return BRUCE_OK;
-}
-
-static char *process__environment_trim(char *text) {
-    while (*text == ' ' || *text == '\t' || *text == '\r') ++text;
-    char *end = text + strlen(text);
-    while (end > text && (end[-1] == ' ' || end[-1] == '\t' || end[-1] == '\r')) --end;
-    *end = '\0';
-    return text;
-}
-
-bool process__environment_init(void) {
-    static const char default_file[] = "# Global process environment defaults.\n"
-                                       "# Use NAME=value; blank lines and comments are ignored.\n";
-
-    process__ensure_init();
-    char *text = NULL;
-    size_t size = 0;
-    if (!storage__read_file(PROCESS__ENVIRONMENT_FILE_PATH, &text, &size)) {
-        return storage__write_file_atomic(
-            PROCESS__ENVIRONMENT_FILE_PATH, default_file, sizeof(default_file) - 1
-        );
-    }
-    if (size > PROCESS__ENVIRONMENT_FILE_MAX) {
-        printf("Global environment file exceeds %u bytes\n", (unsigned int)PROCESS__ENVIRONMENT_FILE_MAX);
-        storage__free(text);
-        return false;
-    }
-
-    process__environment_t loaded = {0};
-    bool success = true;
-    unsigned int line_number = 0;
-    char *save = NULL;
-    for (char *line = strtok_r(text, "\n", &save); line != NULL; line = strtok_r(NULL, "\n", &save)) {
-        ++line_number;
-        line = process__environment_trim(line);
-        if (line[0] == '\0' || line[0] == '#') continue;
-        char *separator = strchr(line, '=');
-        if (separator == NULL) {
-            printf("Ignoring invalid %s line %u\n", PROCESS__ENVIRONMENT_FILE_PATH, line_number);
-            continue;
-        }
-        *separator = '\0';
-        char *name = process__environment_trim(line);
-        char *value = process__environment_trim(separator + 1);
-        bruce_result_t result = process__environment_set_locked(&loaded, name, value);
-        if (result == BRUCE_ERR_NO_MEMORY) {
-            success = false;
-            break;
-        }
-        if (result != BRUCE_OK) {
-            printf("Ignoring invalid %s line %u\n", PROCESS__ENVIRONMENT_FILE_PATH, line_number);
-        }
-    }
-    storage__free(text);
-    if (!success) {
-        process__environment_free(&loaded);
-        return false;
-    }
-
-    process__lock();
-    process__environment_t previous = s_global_environment;
-    s_global_environment = loaded;
-    process__unlock();
-    process__environment_free(&previous);
-    return true;
 }
 
 static bool process__dup_argv(int argc, char *const *src_argv, char ***out_argv) {
@@ -582,7 +320,7 @@ static bool process__dup_argv(int argc, char *const *src_argv, char ***out_argv)
 
 /* Runs cleanup before atomically publishing completion and making the process
  * absent. Its dynamically allocated record remains available to waiters. */
-static void process__teardown_locked(process__record_t *record, const bruce_process_status_t *status) {
+void process__teardown_locked(process__record_t *record, const bruce_process_status_t *status) {
     process__detach_wait_locked(record);
     while (record->resources != NULL) {
         process__resource_t *resource = record->resources;
@@ -769,99 +507,8 @@ process_registry__create(const process_create_params_t *params, bruce_process_id
     return BRUCE_OK;
 }
 
-static process__record_t *process__current_record(void) {
+process__record_t *process__current_record(void) {
     return (process__record_t *)pvTaskGetThreadLocalStoragePointer(NULL, PROCESS__TLS_SLOT);
-}
-
-const char *environment__global_get(const char *name) {
-    if (!process__environment_name_valid(name)) return NULL;
-    process__ensure_init();
-    process__lock();
-    int index = process__environment_find(&s_global_environment, name);
-    const char *value = index >= 0 ? s_global_environment.entries[index].value : NULL;
-    process__unlock();
-    return value;
-}
-
-bruce_result_t environment__global_set(const char *name, const char *value) {
-    process__ensure_init();
-    process__lock();
-    bruce_result_t result = process__environment_set_locked(&s_global_environment, name, value);
-    process__unlock();
-    return result;
-}
-
-bruce_result_t environment__global_unset(const char *name) {
-    if (!process__environment_name_valid(name)) return BRUCE_ERR_INVALID_ARGUMENT;
-    process__ensure_init();
-    process__lock();
-    int index = process__environment_find(&s_global_environment, name);
-    if (index >= 0) {
-        free(s_global_environment.entries[index].name);
-        free(s_global_environment.entries[index].value);
-        size_t last = s_global_environment.count - 1;
-        if ((size_t)index != last) s_global_environment.entries[index] = s_global_environment.entries[last];
-        s_global_environment.count--;
-    }
-    process__unlock();
-    return BRUCE_OK;
-}
-
-const char *environment__get(const char *name) {
-    if (!process__environment_name_valid(name)) return NULL;
-    process__record_t *record = process__current_record();
-    if (record == NULL) return NULL;
-    process__lock();
-    int index = process__environment_find(&record->environment, name);
-    const char *value = index >= 0 ? record->environment.entries[index].value : NULL;
-    process__unlock();
-    return value;
-}
-
-bruce_result_t environment__set(const char *name, const char *value) {
-    process__record_t *record = process__current_record();
-    if (record == NULL) return BRUCE_ERR_INVALID_STATE;
-    process__lock();
-    bruce_result_t result = process__environment_set_locked(&record->environment, name, value);
-    process__unlock();
-    return result;
-}
-
-bruce_result_t environment__unset(const char *name) {
-    if (!process__environment_name_valid(name)) return BRUCE_ERR_INVALID_ARGUMENT;
-    process__record_t *record = process__current_record();
-    if (record == NULL) return BRUCE_ERR_INVALID_STATE;
-    process__lock();
-    int index = process__environment_find(&record->environment, name);
-    if (index >= 0) {
-        free(record->environment.entries[index].name);
-        free(record->environment.entries[index].value);
-        size_t last = record->environment.count - 1;
-        if ((size_t)index != last) record->environment.entries[index] = record->environment.entries[last];
-        record->environment.count--;
-    }
-    process__unlock();
-    return BRUCE_OK;
-}
-
-size_t environment__count(void) {
-    process__record_t *record = process__current_record();
-    return record != NULL ? record->environment.count : 0;
-}
-
-bruce_result_t environment__get_at(size_t index, const char **out_name, const char **out_value) {
-    if (out_name == NULL || out_value == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
-    process__record_t *record = process__current_record();
-    if (record == NULL) return BRUCE_ERR_INVALID_STATE;
-    process__lock();
-    if (index >= record->environment.count) {
-        process__unlock();
-        return BRUCE_ERR_NOT_FOUND;
-    }
-    *out_name = record->environment.entries[index].name;
-    *out_value = record->environment.entries[index].value;
-    process__unlock();
-    return BRUCE_OK;
 }
 
 bruce_resource_id_t
@@ -880,7 +527,8 @@ process_registry__resource_register(bruce_process_resource_cleanup_t cleanup, vo
     }
     bruce_resource_id_t id = self->next_resource_id++;
     if (self->next_resource_id == BRUCE_RESOURCE_ID_INVALID) { self->next_resource_id = 1; }
-    *resource = (process__resource_t){.id = id, .cleanup = cleanup, .context = context, .next = self->resources};
+    *resource =
+        (process__resource_t){.id = id, .cleanup = cleanup, .context = context, .next = self->resources};
     self->resources = resource;
     self->resource_count++;
     process__unlock();
@@ -1037,9 +685,7 @@ bool process_registry__operation_begin(void) {
         process__unlock();
         return false;
     }
-    if (self->operation_count++ == 0) {
-        xEventGroupClearBits(self->events, PROCESS__EVT_OPERATION_IDLE);
-    }
+    if (self->operation_count++ == 0) { xEventGroupClearBits(self->events, PROCESS__EVT_OPERATION_IDLE); }
     process__unlock();
     return true;
 }
@@ -1128,518 +774,6 @@ void process_registry__event_wake(bruce_process_id_t process_id) {
     process__ensure_init();
     process__lock();
     process__record_t *record = process__find_by_id_locked(process_id);
-    if (record != NULL) {
-        xEventGroupSetBits(record->events, PROCESS__EVT_EVENT_WAKE);
-    }
+    if (record != NULL) { xEventGroupSetBits(record->events, PROCESS__EVT_EVENT_WAKE); }
     process__unlock();
-}
-
-/* ---- Public core_sdk/process.h API ---- */
-
-bruce_process_id_t process__current_id(void) {
-    process__ensure_init();
-    process__lock();
-    process__record_t *self = process__find_by_handle_locked(xTaskGetCurrentTaskHandle());
-    bruce_process_id_t id = self != NULL ? self->id : BRUCE_PROCESS_ID_INVALID;
-    process__unlock();
-    return id;
-}
-
-bruce_process_signal_t process__current_signal(void) {
-    process__ensure_init();
-    process__lock();
-    process__record_t *self = process__find_by_handle_locked(xTaskGetCurrentTaskHandle());
-    bruce_process_signal_t signal =
-        self != NULL && self->stop_requested ? self->pending_signal : (bruce_process_signal_t)0;
-    process__unlock();
-    return signal;
-}
-
-bruce_result_t process__list(bruce_process_snapshot_t *snapshots, size_t capacity, size_t *out_count) {
-    process__ensure_init();
-    if (out_count == NULL || (capacity != 0 && snapshots == NULL)) { return BRUCE_ERR_INVALID_ARGUMENT; }
-    process__lock();
-    process__refresh_cpu_samples_locked();
-    size_t written = 0;
-    for (process__record_t *record = s_processes; record != NULL && written < capacity; record = record->next) {
-        if (record->in_use) {
-            process__fill_snapshot_locked(record, &snapshots[written]);
-            written++;
-        }
-    }
-    *out_count = written;
-    process__unlock();
-    return BRUCE_OK;
-}
-
-bruce_result_t process__snapshot(bruce_process_id_t process_id, bruce_process_snapshot_t *out_snapshot) {
-    process__ensure_init();
-    if (out_snapshot == NULL) { return BRUCE_ERR_INVALID_ARGUMENT; }
-    process__lock();
-    process__refresh_cpu_samples_locked();
-    process__record_t *record = process__find_by_id_locked(process_id);
-    if (record == NULL) {
-        process__unlock();
-        return BRUCE_ERR_NOT_FOUND;
-    }
-    process__fill_snapshot_locked(record, out_snapshot);
-    process__unlock();
-    return BRUCE_OK;
-}
-
-static bruce_result_t process__switch_relative(int direction) {
-    process__ensure_init();
-    process__lock();
-    process__record_t *self = process__find_by_handle_locked(xTaskGetCurrentTaskHandle());
-    bruce_process_id_t self_id = self != NULL ? self->id : BRUCE_PROCESS_ID_INVALID;
-    bruce_process_id_t anchor_id = s_effective_foreground;
-    process__record_t *anchor = process__find_by_id_locked(anchor_id);
-    if (anchor == NULL || !anchor->presentable) {
-        anchor_id = BRUCE_PROCESS_ID_INVALID;
-        for (process__record_t *stacked = s_fg_tail; stacked != NULL; stacked = stacked->fg_previous) {
-            if (stacked->presentable) {
-                anchor_id = stacked->id;
-                break;
-            }
-        }
-    }
-
-    process__record_t *anchor_record = process__find_by_id_locked(anchor_id);
-    process__record_t *candidate = anchor_record;
-    process__record_t *start = NULL;
-    for (;;) {
-        if (candidate == NULL) candidate = direction > 0 ? s_processes : s_process_tail;
-        else candidate = direction > 0 ? candidate->next : candidate->previous;
-        if (candidate == NULL) candidate = direction > 0 ? s_processes : s_process_tail;
-        if (candidate == NULL) break;
-        if (start == NULL) start = candidate;
-        else if (candidate == start) break;
-        if (candidate->in_use && candidate->id != self_id && candidate->presentable &&
-            candidate->state == BRUCE_PROCESS_BACKGROUND) {
-            process__foreground_push_locked(candidate->id);
-            process__unlock();
-            return BRUCE_OK;
-        }
-    }
-    process__unlock();
-    return BRUCE_ERR_NOT_FOUND;
-}
-
-bruce_result_t process_registry__switch_next(void) { return process__switch_relative(1); }
-
-bruce_result_t process_registry__switch_previous(void) { return process__switch_relative(-1); }
-
-bruce_process_id_t process_registry__foreground_id(void) {
-    process__ensure_init();
-    process__lock();
-    bruce_process_id_t process_id = s_effective_foreground;
-    process__unlock();
-    return process_id;
-}
-
-bruce_result_t process__switch_next(void) {
-    bruce_result_t permission_result = permission__check(BRUCE_PERMISSION_PROCESS);
-    if (permission_result != BRUCE_OK) return permission_result;
-    return process_registry__switch_next();
-}
-
-bruce_result_t process__switch_previous(void) {
-    bruce_result_t permission_result = permission__check(BRUCE_PERMISSION_PROCESS);
-    if (permission_result != BRUCE_OK) return permission_result;
-    return process_registry__switch_previous();
-}
-
-bruce_result_t process__to_background(void) {
-    process__ensure_init();
-    process__lock();
-    process__record_t *self = process__find_by_handle_locked(xTaskGetCurrentTaskHandle());
-    if (self == NULL) {
-        process__unlock();
-        return BRUCE_ERR_NOT_FOUND;
-    }
-    if (self->state != BRUCE_PROCESS_FOREGROUND) {
-        process__unlock();
-        return BRUCE_ERR_INVALID_STATE;
-    }
-    process__foreground_remove_locked(self->id);
-    self->state = BRUCE_PROCESS_BACKGROUND;
-    display__process_state_changed(self->id, self->state);
-    process__foreground_recompute_locked();
-    process__unlock();
-    return BRUCE_OK;
-}
-
-bruce_result_t process__to_foreground(void) {
-    process__ensure_init();
-    process__lock();
-    process__record_t *self = process__find_by_handle_locked(xTaskGetCurrentTaskHandle());
-    if (self == NULL) {
-        process__unlock();
-        return BRUCE_ERR_NOT_FOUND;
-    }
-    if (self->state != BRUCE_PROCESS_BACKGROUND && self->state != BRUCE_PROCESS_FOREGROUND) {
-        process__unlock();
-        return BRUCE_ERR_INVALID_STATE;
-    }
-    if (!self->gui_requested) {
-        self->gui_requested = true;
-        display__process_set_gui_requested(self->id);
-    }
-    bool promoted = self->state == BRUCE_PROCESS_BACKGROUND;
-    if (promoted) process__foreground_push_locked(self->id);
-    process__unlock();
-    if (promoted) process__clear_foreground_display();
-    return BRUCE_OK;
-}
-
-bruce_result_t process__foreground(bruce_process_id_t process_id) {
-    if (process_id != process__current_id()) {
-        bruce_result_t permission_result = permission__check(BRUCE_PERMISSION_PROCESS);
-        if (permission_result != BRUCE_OK) return permission_result;
-    }
-    process__ensure_init();
-    process__lock();
-    process__record_t *target = process__find_by_id_locked(process_id);
-    if (target == NULL) {
-        process__unlock();
-        return BRUCE_ERR_NOT_FOUND;
-    }
-    if (target->state == BRUCE_PROCESS_FOREGROUND) {
-        process__unlock();
-        return BRUCE_OK;
-    }
-    if (target->state != BRUCE_PROCESS_BACKGROUND) {
-        process__unlock();
-        return BRUCE_ERR_INVALID_STATE;
-    }
-    process__foreground_push_locked(process_id);
-    process__unlock();
-    return BRUCE_OK;
-}
-
-bruce_result_t process__signal(bruce_process_id_t process_id, bruce_process_signal_t signal) {
-    if (process_id == BRUCE_PROCESS_ID_INVALID || process_id > (bruce_process_id_t)INT_MAX ||
-        (signal != BRUCE_PROCESS_SIGNAL_INT && signal != BRUCE_PROCESS_SIGNAL_KILL &&
-         signal != BRUCE_PROCESS_SIGNAL_TERM)) {
-        return BRUCE_ERR_INVALID_ARGUMENT;
-    }
-    if (signal == BRUCE_PROCESS_SIGNAL_KILL) { return process__kill(process_id); }
-    if (process_id != process__current_id()) {
-        bruce_result_t permission_result = permission__check(BRUCE_PERMISSION_PROCESS);
-        if (permission_result != BRUCE_OK) return permission_result;
-    }
-    process__ensure_init();
-    process__lock();
-    process__record_t *record = process__find_by_id_locked(process_id);
-    if (record == NULL) {
-        process__unlock();
-        return BRUCE_ERR_NOT_FOUND;
-    }
-    record->stop_requested = true;
-    record->pending_signal = signal;
-    record->state = BRUCE_PROCESS_STOPPING;
-    process__wake_locked(record);
-    xEventGroupSetBits(record->events, PROCESS__EVT_EVENT_WAKE);
-    display__process_state_changed(record->id, record->state);
-    process__foreground_recompute_locked();
-    process__unlock();
-    return BRUCE_OK;
-}
-
-bruce_result_t process__terminate(bruce_process_id_t process_id) {
-    return process__signal(process_id, BRUCE_PROCESS_SIGNAL_TERM);
-}
-
-bruce_result_t process__pause(bruce_process_id_t process_id) {
-    if (process_id != process__current_id()) {
-        bruce_result_t permission_result = permission__check(BRUCE_PERMISSION_PROCESS);
-        if (permission_result != BRUCE_OK) return permission_result;
-    }
-    process__ensure_init();
-    process__lock();
-    process__record_t *record = process__find_by_id_locked(process_id);
-    if (record == NULL) {
-        process__unlock();
-        return BRUCE_ERR_NOT_FOUND;
-    }
-    if (record->state == BRUCE_PROCESS_PAUSED) {
-        process__unlock();
-        return BRUCE_OK;
-    }
-    if (record->state != BRUCE_PROCESS_FOREGROUND && record->state != BRUCE_PROCESS_BACKGROUND) {
-        process__unlock();
-        return BRUCE_ERR_INVALID_STATE;
-    }
-    record->state = BRUCE_PROCESS_PAUSED;
-    record->pause_requested = true;
-    process__wake_locked(record);
-    display__process_state_changed(record->id, record->state);
-    process__foreground_recompute_locked();
-    process__unlock();
-    return BRUCE_OK;
-}
-
-bruce_result_t process__resume(bruce_process_id_t process_id) {
-    if (process_id != process__current_id()) {
-        bruce_result_t permission_result = permission__check(BRUCE_PERMISSION_PROCESS);
-        if (permission_result != BRUCE_OK) return permission_result;
-    }
-    process__ensure_init();
-    process__lock();
-    process__record_t *record = process__find_by_id_locked(process_id);
-    if (record == NULL) {
-        process__unlock();
-        return BRUCE_ERR_NOT_FOUND;
-    }
-    if (record->state != BRUCE_PROCESS_PAUSED) {
-        process__unlock();
-        return BRUCE_ERR_INVALID_STATE;
-    }
-    record->pause_requested = false;
-    record->state = BRUCE_PROCESS_BACKGROUND;
-    process__wake_locked(record);
-    display__process_state_changed(record->id, record->state);
-    process__foreground_recompute_locked();
-    process__unlock();
-    return BRUCE_OK;
-}
-
-bruce_result_t process__kill(bruce_process_id_t process_id) {
-    if (process_id == BRUCE_PROCESS_ID_INVALID || process_id > (bruce_process_id_t)INT_MAX) {
-        return BRUCE_ERR_INVALID_ARGUMENT;
-    }
-    if (process_id != process__current_id()) {
-        bruce_result_t permission_result = permission__check(BRUCE_PERMISSION_PROCESS);
-        if (permission_result != BRUCE_OK) return permission_result;
-    }
-    process__ensure_init();
-    process__lock();
-    process__record_t *record = process__find_by_id_locked(process_id);
-    if (record == NULL) {
-        process__unlock();
-        return BRUCE_ERR_NOT_FOUND;
-    }
-    TaskHandle_t handle = record->handle;
-    bool is_self = handle != NULL && handle == xTaskGetCurrentTaskHandle();
-
-    if (is_self) {
-        /* Self-kill: tear down first, then delete; this call never returns. */
-        bruce_process_status_t status = {
-            .reason = BRUCE_PROCESS_KILLED,
-            .exit_code = 0,
-            .signal = BRUCE_PROCESS_SIGNAL_KILL,
-        };
-        process__teardown_locked(record, &status);
-        process__unlock();
-        vTaskDelete(NULL);
-        return BRUCE_OK; /* unreachable */
-    }
-
-    /* Close Core service gates before deletion. The display hook waits past
-     * any short raster critical section and transfers an in-flight frame to
-     * worker ownership; foreground recomputation similarly revokes input. */
-    record->stop_requested = true;
-    record->pending_signal = BRUCE_PROCESS_SIGNAL_KILL;
-    record->state = BRUCE_PROCESS_STOPPING;
-    process__wake_locked(record);
-    xEventGroupSetBits(record->events, PROCESS__EVT_EVENT_WAKE);
-    display__process_state_changed(record->id, record->state);
-    process__foreground_recompute_locked();
-
-    if (record->operation_count > 0) {
-        process__unlock();
-        (void)xEventGroupWaitBits(
-            record->events, PROCESS__EVT_OPERATION_IDLE, pdFALSE, pdTRUE, portMAX_DELAY
-        );
-        process__lock();
-        record = process__find_by_id_locked(process_id);
-        if (record == NULL) {
-            process__unlock();
-            return BRUCE_OK;
-        }
-        handle = record->handle;
-    }
-
-    /* Arbitrary application-owned mutexes cannot be recovered after a force
-     * delete, which remains the documented limitation of process__kill(). */
-    if (handle != NULL) {
-        vTaskSetThreadLocalStoragePointer(handle, PROCESS__TLS_SLOT, NULL);
-        vTaskDelete(handle);
-    }
-    bruce_process_status_t status = {
-        .reason = BRUCE_PROCESS_KILLED,
-        .exit_code = 0,
-        .signal = BRUCE_PROCESS_SIGNAL_KILL,
-    };
-    process__teardown_locked(record, &status);
-    process__unlock();
-    return BRUCE_OK;
-}
-
-static bruce_result_t
-process__wait_common(bruce_process_id_t process_id, uint32_t timeout_ms, bruce_process_status_t *out_status) {
-    process__ensure_init();
-    process__lock();
-    process__completion_t *completion = process__find_completion_locked(process_id);
-    if (completion != NULL) {
-        if (out_status != NULL) {
-            bruce_process_status_t status = completion->status;
-            process__completion_clear_locked(completion);
-            *out_status = status;
-        }
-        process__unlock();
-        return BRUCE_OK;
-    }
-    process__record_t *record = process__find_by_id_locked(process_id);
-    if (record == NULL) {
-        process__unlock();
-        return BRUCE_ERR_NOT_FOUND;
-    }
-    record->waiter_count++;
-    if (out_status != NULL) record->status_waiter_count++;
-    process__record_t *waiter = process__find_by_handle_locked(xTaskGetCurrentTaskHandle());
-    if (waiter != NULL) {
-        waiter->wait_attached = true;
-        waiter->wait_target = record;
-        waiter->wait_for_status = out_status != NULL;
-    }
-    bool cancelled = waiter != NULL && waiter->stop_requested;
-    EventGroupHandle_t events = record->events;
-    process__unlock();
-
-    int64_t deadline_us =
-        timeout_ms == UINT32_MAX ? INT64_MAX : esp_timer_get_time() + (int64_t)timeout_ms * 1000;
-    EventBits_t bits = 0;
-    for (;;) {
-        TickType_t ticks = portMAX_DELAY;
-        if (timeout_ms != UINT32_MAX) {
-            int64_t remaining_us = deadline_us - esp_timer_get_time();
-            if (remaining_us <= 0) {
-                ticks = 0;
-            } else {
-                uint64_t remaining_ms = ((uint64_t)remaining_us + 999u) / 1000u;
-                ticks = pdMS_TO_TICKS(remaining_ms);
-                if (ticks == 0) ticks = 1;
-            }
-        }
-        if (!cancelled) {
-            bits |= xEventGroupWaitBits(
-                events, PROCESS__EVT_EXITED | PROCESS__EVT_WAITER_WAKE, pdTRUE, pdFALSE, ticks
-            );
-        }
-
-        process__lock();
-        completion = process__find_completion_locked(process_id);
-        cancelled = waiter != NULL && waiter->stop_requested;
-        bool absent = !record->in_use;
-        bool timed_out = timeout_ms != UINT32_MAX && esp_timer_get_time() >= deadline_us;
-        if (completion != NULL || cancelled || absent || timed_out) break;
-        process__unlock();
-    }
-
-    bruce_result_t result = BRUCE_ERR_TIMEOUT;
-    bruce_process_status_t status;
-    if (out_status != NULL && completion != NULL) {
-        status = completion->status;
-        process__completion_clear_locked(completion);
-        result = BRUCE_OK;
-    } else if (out_status == NULL && (completion != NULL || (bits & PROCESS__EVT_EXITED) != 0)) {
-        result = BRUCE_OK;
-    } else if (cancelled) {
-        result = BRUCE_ERR_CANCELLED;
-    } else if (!record->in_use) {
-        /* Another status waiter may have consumed the completion first. */
-        result = BRUCE_ERR_NOT_FOUND;
-    }
-
-    if (waiter != NULL) {
-        process__detach_wait_locked(waiter);
-    } else {
-        if (out_status != NULL && completion != NULL && completion->in_use && completion->waiter_pins > 0) {
-            completion->waiter_pins--;
-        }
-        if (record->waiter_count > 0) record->waiter_count--;
-        if (out_status != NULL && record->status_waiter_count > 0) {
-            record->status_waiter_count--;
-        }
-        process__dispose_if_unused_locked(record);
-    }
-    process__unlock();
-
-    if (result == BRUCE_OK && out_status != NULL) *out_status = status;
-    return result;
-}
-
-bruce_result_t process__wait(bruce_process_id_t process_id, uint32_t timeout_ms) {
-    if (process_id == BRUCE_PROCESS_ID_INVALID || process_id > (bruce_process_id_t)INT_MAX) {
-        return BRUCE_ERR_INVALID_ARGUMENT;
-    }
-    if (process_id == process__current_id()) { return BRUCE_ERR_INVALID_STATE; }
-    return process__wait_common(process_id, timeout_ms, NULL);
-}
-
-bruce_result_t
-process__wait_status(bruce_process_id_t process_id, uint32_t timeout_ms, bruce_process_status_t *out_status) {
-    if (process_id == BRUCE_PROCESS_ID_INVALID || process_id > (bruce_process_id_t)INT_MAX ||
-        out_status == NULL) {
-        return BRUCE_ERR_INVALID_ARGUMENT;
-    }
-    if (process_id == process__current_id()) { return BRUCE_ERR_INVALID_STATE; }
-    bruce_result_t permission_result = permission__check(BRUCE_PERMISSION_PROCESS);
-    if (permission_result != BRUCE_OK) return permission_result;
-    return process__wait_common(process_id, timeout_ms, out_status);
-}
-
-/* Shared implementation for runtime__sleep()/runtime__delay(): blocks while
- * paused (until resumed or stopped), returns BRUCE_ERR_CANCELLED as soon as a
- * stop is requested, and otherwise waits out `ms`.  When `interruptible` is
- * true and the process is background when the wait begins, being foregrounded
- * mid-wait also returns BRUCE_ERR_CANCELLED early. */
-static bruce_result_t process__wait_ms(uint32_t ms, bool interruptible) {
-    process__ensure_init();
-    process__lock();
-    process__record_t *self = process__find_by_handle_locked(xTaskGetCurrentTaskHandle());
-    process__unlock();
-    if (self == NULL) {
-        vTaskDelay(pdMS_TO_TICKS(ms));
-        return BRUCE_OK;
-    }
-    process__lock();
-    bool was_background = self->state == BRUCE_PROCESS_BACKGROUND;
-    process__unlock();
-
-    int64_t deadline_us = esp_timer_get_time() + (int64_t)ms * 1000;
-    for (;;) {
-        process__lock();
-        bool stopped = self->stop_requested;
-        bool paused = self->pause_requested;
-        bool now_foreground = self->state == BRUCE_PROCESS_FOREGROUND;
-        process__unlock();
-
-        if (stopped) { return BRUCE_ERR_CANCELLED; }
-        if (paused) {
-            xEventGroupWaitBits(self->events, PROCESS__EVT_WAKE, pdTRUE, pdFALSE, portMAX_DELAY);
-            continue;
-        }
-        if (interruptible && was_background && now_foreground) { return BRUCE_ERR_CANCELLED; }
-
-        int64_t remaining_us = deadline_us - esp_timer_get_time();
-        if (remaining_us <= 0) { return BRUCE_OK; }
-        uint64_t remaining_ms = ((uint64_t)remaining_us + 999u) / 1000u;
-        TickType_t wait_ticks = pdMS_TO_TICKS(remaining_ms);
-        if (wait_ticks == 0) wait_ticks = 1;
-        (void)xEventGroupWaitBits(self->events, PROCESS__EVT_WAKE, pdTRUE, pdFALSE, wait_ticks);
-        /* Woken early; loop to re-check stop/pause/foreground state. */
-    }
-}
-
-uint64_t runtime__now(void) { return (uint64_t)esp_timer_get_time() / 1000u; }
-
-bruce_result_t runtime__sleep(uint32_t milliseconds) { return process__wait_ms(milliseconds, true); }
-
-bruce_result_t runtime__delay(uint32_t milliseconds) { return process__wait_ms(milliseconds, false); }
-
-bool runtime__gui_requested(void) {
-    const char *value = environment__get("GUI");
-    return value != NULL && strcmp(value, "1") == 0;
 }
