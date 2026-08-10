@@ -8,13 +8,6 @@
  * (osd_getvideoinfo(), declared in osd.h) is the only entry point the rest
  * of the app calls directly. */
 
-/* Real hardware has no periodic-timer primitive for nofrendo's
- * osd_installtimer() to arm (see nes_osd.c), so frame pacing instead rides
- * along on video_blit(), the one thing nofrendo already calls once per
- * frame. nes_osd.c's osd_installtimer() hands the callback nofrendo wants
- * ticked here, once, at startup. */
-void nes_video_install_timer(void (*callback)(void));
-
 /* Releases the bitmap handed out by the video driver's lock_write callback.
  * nofrendo does not free it itself on shutdown; nes_osd.c's osd_shutdown()
  * calls this as the one place that owns doing so. */

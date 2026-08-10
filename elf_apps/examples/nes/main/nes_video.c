@@ -19,10 +19,6 @@ static bitmap_t *s_screen_bitmap;
 static uint16_t *s_scaled_lines;
 static size_t s_scaled_lines_capacity;
 static uint16_t s_palette[256];
-static void (*s_timer_callback)(void);
-
-void nes_video_install_timer(void (*callback)(void)) { s_timer_callback = callback; }
-
 static int video_init(int width, int height) {
     (void)width;
     (void)height;
@@ -95,9 +91,7 @@ void nes_video_destroy_bitmap(void) { bmp_destroy(&s_screen_bitmap); }
  *
  * Every video_blit() call is one full loop iteration: nofrendo has already
  * finished emulating CPU+PPU for this frame by the time this callback runs
- * (nes_emulate() in nes/nes.c calls nes_renderframe() unconditionally before
- * blitting, see osd_installtimer()'s comment in nes_osd.c for why
- * autoframeskip can't be used to skip that part on this port), so the only
+ * (nes_emulate() in nes/nes.c may call nes_renderframe() before blitting), so the only
  * cost this OSD layer can shed here is its own palette conversion + DMA
  * blit below. Two independent things are tracked from the same wall-clock
  * reading:
@@ -310,7 +304,6 @@ static void pace_frame(void) {
             last_yield_ms = now_ms;
         }
     }
-    if (s_timer_callback != NULL) s_timer_callback();
     nes_sound_pump();
 }
 

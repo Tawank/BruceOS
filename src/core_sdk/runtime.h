@@ -5,6 +5,10 @@
 
 #include "core_sdk/result.h"
 
+typedef uint32_t bruce_timer_id_t;
+
+#define BRUCE_TIMER_ID_INVALID ((bruce_timer_id_t)0)
+
 /* Monotonic milliseconds since boot. Use differences between readings for
  * elapsed-time measurement; this is not wall-clock time. */
 uint64_t runtime__now(void);
@@ -17,6 +21,16 @@ uint64_t runtime__now(void);
  * interrupted merely by foregrounding; it waits its requested duration. */
 bruce_result_t runtime__sleep(uint32_t milliseconds);
 bruce_result_t runtime__delay(uint32_t milliseconds);
+
+/* Starts a process-owned periodic timer that atomically increments `counter`
+ * every `period_us` microseconds. Timer callbacks execute entirely inside Core
+ * and never call application code, so one process's timer cannot block another.
+ * The timer is automatically stopped when its owner exits or is killed; callers
+ * may stop it early with runtime__timer_stop(). */
+bruce_result_t runtime__timer_start(
+    uint32_t period_us, volatile uint32_t *counter, bruce_timer_id_t *out_timer_id
+);
+bruce_result_t runtime__timer_stop(bruce_timer_id_t timer_id);
 
 /* Returns true iff the calling process's own "GUI" environment variable is
  * "1" (see core_sdk/environment.h). This is the app-facing self-check;

@@ -88,6 +88,7 @@ int selftest_app_main(int argc, char **argv) {
     RUN_SELFTEST(selftest__run_process_registry_growth_case);
     RUN_SELFTEST(selftest__run_process_resource_growth_case);
     RUN_SELFTEST(selftest__run_runtime_now_case);
+    RUN_SELFTEST(selftest__run_runtime_timer_case);
     RUN_SELFTEST(selftest__run_audio_stream_nonblocking_case);
     RUN_SELFTEST(selftest__run_external_memory_case);
     RUN_SELFTEST(selftest__run_external_memory_xip_case);

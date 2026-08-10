@@ -360,6 +360,11 @@ foreground processes sleep for the full duration.  `runtime__delay(ms)` waits th
 requested duration regardless of state.  Both are Core APIs; they hide FreeRTOS
 from apps. `runtime__now()` returns monotonic milliseconds since boot for
 elapsed-time measurement and must not be interpreted as wall-clock time.
+`runtime__timer_start()` creates a process-owned periodic counter: Core
+increments the supplied counter at the requested microsecond interval without
+calling application code. Timers are independent across processes and are
+automatically stopped on normal exit or forced teardown; owners may stop them
+early with `runtime__timer_stop()`.
 
 ### Device state
 

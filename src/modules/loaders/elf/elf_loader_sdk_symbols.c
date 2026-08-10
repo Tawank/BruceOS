@@ -77,6 +77,8 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(runtime__now),
     ESP_ELFSYM_EXPORT(runtime__sleep),
     ESP_ELFSYM_EXPORT(runtime__delay),
+    ESP_ELFSYM_EXPORT(runtime__timer_start),
+    ESP_ELFSYM_EXPORT(runtime__timer_stop),
     ESP_ELFSYM_EXPORT(runtime__gui_requested),
     ESP_ELFSYM_EXPORT(process__current_id),
     ESP_ELFSYM_EXPORT(process__switch_next),
