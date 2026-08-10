@@ -142,6 +142,9 @@ static uint32_t s_perf_frames_skipped;
  * build fine but fail to relocate at load time. */
 static uint32_t s_perf_sum_iter_us;
 static uint32_t s_perf_sum_blit_us;
+static uint32_t s_perf_sum_convert_us;
+static uint32_t s_perf_sum_submit_us;
+static uint32_t s_perf_sum_present_us;
 /* nes_sound_last_write_us() reflects the *previous* iteration's pace_frame()
  * -> nes_sound_pump() call (this function runs before pace_frame() in
  * video_blit(), so this iteration's own write hasn't happened yet) -- a
@@ -157,11 +160,15 @@ static uint32_t s_perf_sum_batches_total;
  * from video_blit() so it shares that function's `now_ms` reading rather
  * than taking a fresh one. */
 static void perf_track_and_report(
-    uint64_t now_ms, bool stall, uint32_t blit_us, bool drew, uint32_t batches_drawn, uint32_t batches_total
+    uint64_t now_ms, bool stall, uint32_t blit_us, uint32_t convert_us, uint32_t submit_us, uint32_t present_us,
+    bool drew, uint32_t batches_drawn, uint32_t batches_total
 ) {
     if (drew) {
         s_perf_frames_drawn++;
         s_perf_sum_blit_us += blit_us;
+        s_perf_sum_convert_us += convert_us;
+        s_perf_sum_submit_us += submit_us;
+        s_perf_sum_present_us += present_us;
         s_perf_sum_batches_drawn += batches_drawn;
         s_perf_sum_batches_total += batches_total;
     } else {
@@ -187,19 +194,25 @@ static void perf_track_and_report(
     if (total_frames > 0 && window_ms > 0) {
         uint32_t avg_iter_us = s_perf_sum_iter_us / total_frames;
         uint32_t avg_blit_us = s_perf_frames_drawn > 0 ? s_perf_sum_blit_us / s_perf_frames_drawn : 0;
+        uint32_t avg_convert_us = s_perf_frames_drawn > 0 ? s_perf_sum_convert_us / s_perf_frames_drawn : 0;
+        uint32_t avg_submit_us = s_perf_frames_drawn > 0 ? s_perf_sum_submit_us / s_perf_frames_drawn : 0;
+        uint32_t avg_present_us = s_perf_frames_drawn > 0 ? s_perf_sum_present_us / s_perf_frames_drawn : 0;
         uint32_t avg_audio_us = s_perf_sum_audio_us / total_frames;
         /* x100 for one fractional digit without floating point or a 64-bit
          * divide (total_frames * 100000 comfortably fits uint32_t at this
          * report interval and any plausible frame rate). */
         uint32_t fps_x100 = total_frames * 100000u / window_ms;
         printf(
-            "nes: %lu.%02lu fps  iter=%luus (budget %luus)  blit=%luus  audio_write=%luus  skipped=%lu/%lu  "
-            "batches=%lu/%lu\n",
+            "nes: %lu.%02lu fps  iter=%luus (budget %luus)  blit=%luus (convert=%lu submit=%lu present=%lu)  "
+            "audio_write=%luus  skipped=%lu/%lu  batches=%lu/%lu\n",
             (unsigned long)(fps_x100 / 100u),
             (unsigned long)(fps_x100 % 100u),
             (unsigned long)avg_iter_us,
             (unsigned long)NES_FRAME_PERIOD_US,
             (unsigned long)avg_blit_us,
+            (unsigned long)avg_convert_us,
+            (unsigned long)avg_submit_us,
+            (unsigned long)avg_present_us,
             (unsigned long)avg_audio_us,
             (unsigned long)s_perf_frames_skipped,
             (unsigned long)total_frames,
@@ -212,6 +225,9 @@ static void perf_track_and_report(
     s_perf_frames_skipped = 0;
     s_perf_sum_iter_us = 0;
     s_perf_sum_blit_us = 0;
+    s_perf_sum_convert_us = 0;
+    s_perf_sum_submit_us = 0;
+    s_perf_sum_present_us = 0;
     s_perf_sum_audio_us = 0;
     s_perf_sum_batches_drawn = 0;
     s_perf_sum_batches_total = 0;
@@ -368,7 +384,7 @@ static void video_blit(bitmap_t *bitmap, int num_dirties, rect_t *dirty_rects) {
     }
 
     if (skip_blit) {
-        perf_track_and_report(now_ms, stall, 0, false, 0, 0);
+        perf_track_and_report(now_ms, stall, 0, 0, 0, 0, false, 0, 0);
         s_last_iter_ms = now_ms;
         pace_frame();
         return;
@@ -405,7 +421,7 @@ static void video_blit(bitmap_t *bitmap, int num_dirties, rect_t *dirty_rects) {
     if (scaled_lines_needed > s_scaled_lines_capacity) {
         uint16_t *scaled_lines = memory__realloc(s_scaled_lines, scaled_lines_needed * sizeof(*scaled_lines));
         if (scaled_lines == NULL) {
-            perf_track_and_report(now_ms, stall, 0, false, 0, 0);
+            perf_track_and_report(now_ms, stall, 0, 0, 0, 0, false, 0, 0);
             s_last_iter_ms = now_ms;
             pace_frame();
             return;
@@ -415,6 +431,8 @@ static void video_blit(bitmap_t *bitmap, int num_dirties, rect_t *dirty_rects) {
     }
 
     uint32_t blit_us = 0;
+    uint32_t submit_us = 0;
+    uint32_t present_us = 0;
     if (display__begin_frame() == BRUCE_OK) {
         uint64_t blit_start_ms = runtime__now();
         /* The NES image covers [origin_x, origin_y, draw_width, draw_height]
@@ -503,17 +521,24 @@ static void video_blit(bitmap_t *bitmap, int num_dirties, rect_t *dirty_rects) {
                 uint16_t *dst = &s_scaled_lines[row * draw_width];
                 for (int x = 0; x < draw_width; ++x) { dst[x] = s_palette[source[x]]; }
             }
+            uint64_t submit_start_ms = runtime__now();
             display__draw_rgb_bitmap(origin_x, origin_y + y, s_scaled_lines, draw_width, rows);
+            submit_us += (uint32_t)(runtime__now() - submit_start_ms) * 1000u;
             batches_drawn++;
         }
+        uint64_t present_start_ms = runtime__now();
         display__present();
+        present_us = (uint32_t)(runtime__now() - present_start_ms) * 1000u;
         blit_us = (uint32_t)(runtime__now() - blit_start_ms) * 1000u;
-        perf_track_and_report(now_ms, stall, blit_us, true, batches_drawn, batches_total);
+        uint32_t convert_us = blit_us > submit_us + present_us ? blit_us - submit_us - present_us : 0;
+        perf_track_and_report(
+            now_ms, stall, blit_us, convert_us, submit_us, present_us, true, batches_drawn, batches_total
+        );
         s_last_iter_ms = now_ms;
         pace_frame();
         return;
     }
-    perf_track_and_report(now_ms, stall, blit_us, true, 0, 0);
+    perf_track_and_report(now_ms, stall, blit_us, 0, 0, 0, true, 0, 0);
     s_last_iter_ms = now_ms;
     pace_frame();
 }

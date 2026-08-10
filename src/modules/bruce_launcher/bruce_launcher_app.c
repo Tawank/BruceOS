@@ -31,6 +31,7 @@
 #define BRUCE_LAUNCHER_EASING_SCALE 1000
 #define BRUCE_LAUNCHER_STATUS_REFRESH_MS 1000
 #define BRUCE_LAUNCHER_STATUS_TEXT_Y 11
+#define BRUCE_LAUNCHER_BACKGROUND_WAIT_MS 1000
 
 /* Theme colors cached from bruce.conf. */
 typedef struct {
@@ -321,7 +322,7 @@ static bruce_result_t bruce_launcher__animate_root_menu(
         bruce_result_t frame;
         do {
             frame = display__begin_frame();
-            if (frame == BRUCE_ERR_NOT_FOREGROUND) { runtime__delay(20); }
+            if (frame == BRUCE_ERR_NOT_FOREGROUND) { runtime__sleep(BRUCE_LAUNCHER_BACKGROUND_WAIT_MS); }
         } while (frame == BRUCE_ERR_NOT_FOREGROUND);
         if (frame != BRUCE_OK) { return frame; }
 
@@ -562,7 +563,7 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
 
             bruce_result_t frame = display__begin_frame();
             if (frame == BRUCE_ERR_NOT_FOREGROUND) {
-                (void)runtime__delay(20);
+                (void)runtime__sleep(BRUCE_LAUNCHER_BACKGROUND_WAIT_MS);
                 continue;
             }
             if (frame != BRUCE_OK) {
@@ -591,7 +592,7 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
             s_live_choices.count = 0;
             if (result == BRUCE_ERR_CANCELLED) break;
             if (result == BRUCE_ERR_NOT_FOREGROUND) {
-                (void)runtime__delay(20);
+                (void)runtime__sleep(BRUCE_LAUNCHER_BACKGROUND_WAIT_MS);
                 continue;
             }
             if (result != BRUCE_OK) continue;
@@ -636,7 +637,7 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
         if (selected != last_drawn) {
             bruce_result_t frame = display__begin_frame();
             if (frame == BRUCE_ERR_NOT_FOREGROUND) {
-                (void)runtime__delay(20);
+                (void)runtime__sleep(BRUCE_LAUNCHER_BACKGROUND_WAIT_MS);
                 continue;
             }
             if (frame != BRUCE_OK) { return frame; }
@@ -666,7 +667,7 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
         bruce_input_event_t ev;
         bruce_result_t result = input__read(&ev, 100);
         if (result == BRUCE_ERR_NOT_FOREGROUND) {
-            (void)runtime__delay(20);
+            (void)runtime__sleep(BRUCE_LAUNCHER_BACKGROUND_WAIT_MS);
             continue;
         }
         if (result != BRUCE_OK || ev.action != BRUCE_INPUT_PRESS) { continue; }

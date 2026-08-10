@@ -522,7 +522,13 @@ bruce_result_t audio__stream_write_async(const int16_t *samples, size_t frame_co
 
     if (!process_registry__operation_begin()) return BRUCE_ERR_CANCELLED;
     audio__ensure_mutex();
-    xSemaphoreTake(s_audio_mutex, portMAX_DELAY);
+    /* The writer holds this mutex while i2s_channel_write() waits for a DMA
+     * descriptor. Waiting behind it here defeats an async producer, so drop
+     * this interval just as we do when its message ring is full. */
+    if (xSemaphoreTake(s_audio_mutex, 0) != pdTRUE) {
+        process_registry__operation_end();
+        return BRUCE_ERR_BUSY;
+    }
 
     bruce_result_t result = BRUCE_OK;
     /* should_send/stereo/generation are only ever read back under the same
@@ -582,13 +588,13 @@ bruce_result_t audio__stream_write_async(const int16_t *samples, size_t frame_co
                 chunk.samples[i * 2u + 1u] = (int16_t)((right * volume) / 100);
             }
             size_t chunk_bytes = sizeof(chunk.generation) + frames * 2u * sizeof(int16_t);
-            /* Blocks here only once the ring is genuinely full -- the caller
-             * has run far enough ahead of the writer task that further
-             * buffering would mean unbounded latency, not just occasional
-             * jitter. Same backpressure guarantee audio__stream_write()
-             * gives on every call, applied lazily instead. */
-            if (xMessageBufferSend(s_async_msg_buffer, &chunk, chunk_bytes, portMAX_DELAY) != chunk_bytes) {
-                result = BRUCE_ERR_IO;
+            /* A real-time producer must not wait for audio: once it misses a
+             * frame deadline, waiting for queue space only makes the next
+             * frame later and locks the queue full indefinitely. Drop new
+             * audio instead; the writer drains the already-buffered interval
+             * and the producer can recover its video timing. */
+            if (xMessageBufferSend(s_async_msg_buffer, &chunk, chunk_bytes, 0) != chunk_bytes) {
+                result = BRUCE_ERR_BUSY;
                 break;
             }
             offset += frames;

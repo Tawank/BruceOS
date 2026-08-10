@@ -366,8 +366,7 @@ void display_internal__draw_rgb_bitmap(
     for (int16_t row = 0; row < h; row += rows_per_transfer) {
         int16_t rows = h - row;
         if (rows > rows_per_transfer) rows = rows_per_transfer;
-        bruce_display_color_t *buf =
-            s_direct_buffer + (buf_half == 0 ? 0 : DISPLAY__DIRECT_CHUNK_PIXELS);
+        bruce_display_color_t *buf = s_direct_buffer + (buf_half == 0 ? 0 : DISPLAY__DIRECT_CHUNK_PIXELS);
         for (int16_t copy_row = 0; copy_row < rows; ++copy_row) {
             memcpy(
                 &buf[(size_t)copy_row * (size_t)w],
@@ -473,16 +472,16 @@ static bruce_result_t display__transfer_locked(bruce_display_rect_t rect, bool f
                 for (int r = 0; r < rows; ++r) {
                     bruce_display_color_t *dst = &s_pack_buffer[(size_t)r * rect.width];
                     memcpy(
-                        dst, &s_framebuffer[(size_t)(screen_y + r) * s_fb_width + rect.x],
+                        dst,
+                        &s_framebuffer[(size_t)(screen_y + r) * s_fb_width + rect.x],
                         (size_t)rect.width * sizeof(*dst)
                     );
                     if (compose) display_overlay__compose_row_locked(rect, screen_y + r, dst);
                 }
                 pixels = s_pack_buffer;
             }
-            if (display_driver__draw_bitmap(
-                    rect.x, screen_y, rect.x + rect.width, screen_y + rows, pixels
-                ) != BRUCE_OK ||
+            if (display_driver__draw_bitmap(rect.x, screen_y, rect.x + rect.width, screen_y + rows, pixels) !=
+                    BRUCE_OK ||
                 xSemaphoreTake(s_transfer_done, portMAX_DELAY) != pdTRUE) {
                 result = BRUCE_ERR_IO;
                 break;
@@ -490,9 +489,11 @@ static bruce_result_t display__transfer_locked(bruce_display_rect_t rect, bool f
             row += rows;
         }
     } else {
-        result =
-            display_driver__draw_bitmap(rect.x, rect.y, rect.x + rect.width, rect.y + rect.height, s_framebuffer);
-        if (result == BRUCE_OK && xSemaphoreTake(s_transfer_done, portMAX_DELAY) != pdTRUE) result = BRUCE_ERR_IO;
+        result = display_driver__draw_bitmap(
+            rect.x, rect.y, rect.x + rect.width, rect.y + rect.height, s_framebuffer
+        );
+        if (result == BRUCE_OK && xSemaphoreTake(s_transfer_done, portMAX_DELAY) != pdTRUE)
+            result = BRUCE_ERR_IO;
     }
 
     xSemaphoreGive(s_transfer_mutex);
@@ -507,8 +508,9 @@ bruce_result_t display_internal__repaint_rect_locked(bruce_display_rect_t rect) 
     return display_overlay__paint_direct_locked(rect);
 }
 
-bruce_result_t
-display_internal__stream_row_locked(int16_t x, int16_t y, int16_t width, const bruce_display_color_t *pixels) {
+bruce_result_t display_internal__stream_row_locked(
+    int16_t x, int16_t y, int16_t width, const bruce_display_color_t *pixels
+) {
 #if CONFIG_BRUCE_QEMU_TEST_MODE
     (void)x;
     (void)y;
@@ -656,6 +658,9 @@ bruce_result_t display__init(void) {
 #endif
     s_buffered_rendering = config__get_display_buffered_rendering();
     s_dma_framebuffer = s_buffered_rendering && config__get_display_dma_framebuffer();
+    ESP_LOGW(
+        "display", "Buffered rendering: %d, DMA framebuffer: %d", s_buffered_rendering, s_dma_framebuffer
+    );
     if (s_buffered_rendering) {
         uint32_t framebuffer_caps =
             MALLOC_CAP_INTERNAL | (s_dma_framebuffer ? MALLOC_CAP_DMA : MALLOC_CAP_8BIT);

@@ -58,12 +58,10 @@ bruce_result_t audio__stream_close(void);
  * its next unit of work (e.g. the next emulated frame) while the actual
  * hardware write happens concurrently on the other core.
  *
- * This still blocks -- same backpressure guarantee as audio__stream_write()
- * -- but only once the caller has produced enough audio to fill the ring
- * without the background writer draining it in time, i.e. only once the
- * caller is genuinely running ahead of real time by more than the ring's
- * capacity affords. Under normal conditions (production and consumption
- * roughly keeping pace with each other) this returns quickly.
+ * It never waits for ring space. If the ring is full, no further samples from
+ * that call are queued and BRUCE_ERR_BUSY is returned. Real-time callers
+ * should treat that as a dropped audio interval and continue their video or
+ * emulation work rather than turning audio congestion into a feedback loop.
  *
  * Samples enqueued but not yet written to hardware are discarded, not
  * played, if the stream is closed (or its owning process exits/is killed)
