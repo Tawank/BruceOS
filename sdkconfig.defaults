@@ -8,6 +8,24 @@ CONFIG_ESPTOOLPY_FLASHSIZE="8MB"
 # runtime storage uses that detected size for its LittleFS partition.
 CONFIG_ESPTOOLPY_HEADER_FLASHSIZE_UPDATE=y
 
+# Run the supported ESP32 targets at their maximum CPU frequency.
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ=240
+
+# Production build settings: favor compact optimized code and retain warnings
+# without compiling INFO/DEBUG logs into the firmware.
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+CONFIG_LOG_DEFAULT_LEVEL_WARN=y
+
+# Reduce peak RAM retained by HTTPS clients while allowing 8 KiB TLS records.
+CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
+CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=8192
+
+# Limit Wi-Fi buffering to reduce RAM use; 16 buffers remains adequate for
+# interactive use while avoiding the default 32-buffer allocation per direction.
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=16
+CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=16
+
 # Required by the Core process registry (src/core/process/process.c) for sampled
 # per-process CPU accounting via uxTaskGetSystemState()/TaskStatus_t.
 CONFIG_FREERTOS_USE_TRACE_FACILITY=y
