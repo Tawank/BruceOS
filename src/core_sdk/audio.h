@@ -37,37 +37,11 @@ bruce_result_t audio__tone(uint32_t frequency_hz, uint32_t duration_ms, bool non
  *
  * audio__stream_write() takes signed 16-bit PCM interleaved per the
  * `channels` passed to audio__stream_open() (1 = mono, 2 = stereo), always
- * at audio__stream_sample_rate() Hz, and blocks until the backend has
- * accepted the whole buffer -- that backpressure is what paces the caller to
- * real playback speed, the same way writing to a real sound card would. */
+ * at audio__stream_sample_rate() Hz. It never blocks: it returns the number
+ * of frames copied to the bounded stream FIFO. Apps that cannot drop audio
+ * can consult audio__stream_writable_frames() before synthesizing it. */
 uint32_t audio__stream_sample_rate(void);
 bruce_result_t audio__stream_open(uint8_t channels);
-bruce_result_t audio__stream_write(const int16_t *samples, size_t frame_count);
+size_t audio__stream_writable_frames(void);
+size_t audio__stream_write(const int16_t *samples, size_t frame_count);
 bruce_result_t audio__stream_close(void);
-
-/* Same contract as audio__stream_write() (signed 16-bit PCM, `channels`
- * interleaved, audio__stream_sample_rate() Hz), except the wait for the
- * backend's real-time backpressure happens on a dedicated background task
- * instead of the calling task. audio__stream_write() ties up its caller for
- * as long as the hardware takes to physically drain the samples -- fine for
- * a caller with nothing else to do, but a caller that alternates between
- * synthesizing audio and other real-time work (an emulator's CPU/PPU core,
- * a game loop) pays that wait serially on top of its own work every single
- * call. audio__stream_write_async() instead copies into a small internal
- * ring and returns as soon as the ring has room, so the caller can go on to
- * its next unit of work (e.g. the next emulated frame) while the actual
- * hardware write happens concurrently on the other core.
- *
- * It never waits for ring space. If the ring is full, no further samples from
- * that call are queued and BRUCE_ERR_BUSY is returned. Real-time callers
- * should treat that as a dropped audio interval and continue their video or
- * emulation work rather than turning audio congestion into a feedback loop.
- *
- * Samples enqueued but not yet written to hardware are discarded, not
- * played, if the stream is closed (or its owning process exits/is killed)
- * before the background writer reaches them -- closing a stream always ends
- * in real silence on the output, never stale queued audio, at the cost of
- * dropping at most the ring's-worth of already-buffered-but-unplayed tail.
- * On a backend with no PCM support this is a no-op, like
- * audio__stream_write(). */
-bruce_result_t audio__stream_write_async(const int16_t *samples, size_t frame_count);

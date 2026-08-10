@@ -2,11 +2,11 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <stdatomic.h>
 
 #include "core/config/config.h"
 #include "core/process/process.h"
 #include "freertos/FreeRTOS.h"
-#include "freertos/message_buffer.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "sdkconfig.h"
@@ -44,24 +44,10 @@ static size_t s_async_tone_count;
  * s_audio_mutex like everything else in this file. Exactly one stream may be
  * open device-wide at a time, same exclusivity as tone playback -- both
  * ultimately drive the same physical bus. */
-static bool s_stream_open;
+static volatile bool s_stream_open;
 static bruce_process_id_t s_stream_owner;
 static bruce_resource_id_t s_stream_resource;
 static uint8_t s_stream_channels;
-
-/* Bumped every time a stream is torn down (audio__stream_close() or the
- * automatic force-kill/exit cleanup), while s_audio_mutex is held. Chunks
- * queued for the async writer task below (audio__stream_write_async()) are
- * tagged with whatever generation was live when they were enqueued; the
- * writer only actually writes a chunk to hardware if the generation still
- * matches at the moment it's about to write it, checked in the same
- * mutex-held section as the write itself. That makes "close a stream" and
- * "the writer is about to play this chunk" mutually exclusive: whichever
- * gets s_audio_mutex first fully happens first, so a close can never be
- * followed by a stale queued chunk still reaching the hardware afterward --
- * every close ends in real silence, not a trailing blip of old audio. See
- * audio__stream_teardown_locked() and audio__stream_writer_task(). */
-static volatile uint32_t s_stream_generation;
 
 static void audio__ensure_mutex(void) {
     if (s_audio_mutex != NULL) return;
@@ -83,6 +69,36 @@ static bool s_i2s_tx_ready;
 #define AUDIO__I2S_DMA_DESC_COUNT 6u
 #define AUDIO__I2S_DMA_FRAME_COUNT 240u
 #define AUDIO__I2S_DMA_RING_FRAMES (AUDIO__I2S_DMA_DESC_COUNT * AUDIO__I2S_DMA_FRAME_COUNT)
+#define AUDIO__STREAM_RING_FRAMES 4096u
+
+/* A single producer app writes the FIFO while the I2S ISR consumes it. The
+ * cursors are monotonically increasing, so each side owns one cursor and no
+ * lock or scheduler handoff is needed on the real-time path. */
+static int16_t s_stream_ring[AUDIO__STREAM_RING_FRAMES * 2u];
+static atomic_uint_fast32_t s_stream_write_cursor;
+static atomic_uint_fast32_t s_stream_read_cursor;
+
+static bool IRAM_ATTR audio__i2s_on_sent(i2s_chan_handle_t handle, i2s_event_data_t *event, void *context) {
+    (void)handle;
+    (void)context;
+    int16_t *output = event->dma_buf;
+    size_t frames = event->size / (2u * sizeof(*output));
+    if (!s_stream_open) return false;
+    uint32_t read_cursor = atomic_load_explicit(&s_stream_read_cursor, memory_order_relaxed);
+    uint32_t write_cursor = atomic_load_explicit(&s_stream_write_cursor, memory_order_acquire);
+    uint32_t available = write_cursor - read_cursor;
+    if (available > AUDIO__STREAM_RING_FRAMES) available = 0;
+    if (available > frames) available = (uint32_t)frames;
+
+    for (uint32_t i = 0; i < available; ++i) {
+        uint32_t ring_index = (read_cursor + i) % AUDIO__STREAM_RING_FRAMES;
+        output[i * 2u] = s_stream_ring[ring_index * 2u];
+        output[i * 2u + 1u] = s_stream_ring[ring_index * 2u + 1u];
+    }
+    if (available < frames) memset(&output[available * 2u], 0, (frames - available) * 2u * sizeof(*output));
+    atomic_store_explicit(&s_stream_read_cursor, read_cursor + available, memory_order_release);
+    return false;
+}
 
 /* Lazily creates and enables the one persistent TX channel, reused by every
  * tone and every stream write instead of being torn down between them.
@@ -107,6 +123,7 @@ static bruce_result_t audio__i2s_ensure_channel_locked(void) {
     i2s_chan_config_t channel_config = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_AUTO, I2S_ROLE_MASTER);
     channel_config.dma_desc_num = AUDIO__I2S_DMA_DESC_COUNT;
     channel_config.dma_frame_num = AUDIO__I2S_DMA_FRAME_COUNT;
+    channel_config.auto_clear_after_cb = false;
     if (i2s_new_channel(&channel_config, &s_i2s_tx_channel, NULL) != ESP_OK) return BRUCE_ERR_BUSY;
 
     i2s_std_config_t config = {
@@ -125,7 +142,9 @@ static bruce_result_t audio__i2s_ensure_channel_locked(void) {
             },
         },
     };
+    const i2s_event_callbacks_t callbacks = {.on_sent = audio__i2s_on_sent};
     if (i2s_channel_init_std_mode(s_i2s_tx_channel, &config) != ESP_OK ||
+        i2s_channel_register_event_callback(s_i2s_tx_channel, &callbacks, NULL) != ESP_OK ||
         i2s_channel_enable(s_i2s_tx_channel) != ESP_OK) {
         i2s_del_channel(s_i2s_tx_channel);
         s_i2s_tx_channel = NULL;
@@ -171,83 +190,6 @@ static bruce_result_t audio__i2s_flush_silence_locked(void) {
     return result;
 }
 
-/* Background writer for audio__stream_write_async() (core_sdk/audio.h):
- * dequeues chunks queued by that function and performs the actual blocking
- * hardware write here instead of on the calling task, so a caller that
- * alternates between synthesizing audio and other real-time work (e.g. an
- * emulator's CPU/PPU core) can move on to its next unit of work while this
- * task blocks on the real-time write concurrently. Pinned to APP_CPU (core
- * 1): the more common convention in this project is realtime app work
- * (single-task game/emulator loops) on PRO_CPU (core 0), so core 1 is the
- * more reliably free place for this rather than leaving it unpinned and
- * risking the scheduler co-locating it with the very producer it exists to
- * run alongside. */
-#define AUDIO__ASYNC_CHUNK_FRAMES AUDIO__I2S_BUFFER_FRAMES
-typedef struct {
-    uint32_t generation;
-    int16_t samples[AUDIO__ASYNC_CHUNK_FRAMES * 2u];
-} audio__async_chunk_t;
-
-/* A message buffer, not a plain byte ring: each xMessageBufferReceive() in
- * the writer task below returns exactly one xMessageBufferSend()'s worth of
- * bytes -- one whole chunk, never a partial one that would misalign the
- * interleaved stereo pairs packed inside it. Sized for a handful of chunks'
- * worth of slack -- enough for a producer's burst of work to run ahead of
- * the writer without blocking on every call -- without holding an
- * unreasonable amount of audio in RAM at once. */
-/* Four maximum stereo chunks give real-time producers enough slack for short
- * display/DMA stalls without immediately blocking their emulation loop. */
-#define AUDIO__ASYNC_RING_BYTES (16u * 1024u)
-static MessageBufferHandle_t s_async_msg_buffer;
-static TaskHandle_t s_async_writer_task;
-
-static void audio__stream_writer_task(void *context) {
-    (void)context;
-    for (;;) {
-        audio__async_chunk_t chunk;
-        size_t received = xMessageBufferReceive(s_async_msg_buffer, &chunk, sizeof(chunk), portMAX_DELAY);
-        if (received <= sizeof(chunk.generation)) continue; /* malformed/empty, ignore */
-        uint32_t frames = (uint32_t)((received - sizeof(chunk.generation)) / (2u * sizeof(int16_t)));
-        if (frames == 0) continue;
-
-        xSemaphoreTake(s_audio_mutex, portMAX_DELAY);
-        /* Only actually write if no audio__stream_close() has happened
-         * since this chunk was queued -- see s_stream_generation's comment
-         * above. Checked inside this same mutex-held section as the write
-         * itself so a concurrent close() can never land between the check
-         * and the write: whichever of the two gets the mutex first fully
-         * happens first, so a close is never followed by a stale chunk
-         * still reaching the hardware afterward. */
-        if (chunk.generation == s_stream_generation) { (void)audio__i2s_write_locked(chunk.samples, frames); }
-        xSemaphoreGive(s_audio_mutex);
-    }
-}
-
-/* Lazily creates the async writer task + its message buffer on first use.
- * Must be called with s_audio_mutex held (matches
- * audio__i2s_ensure_channel_locked()'s convention). Once created, both are
- * kept for the life of the process -- same "create once, keep forever"
- * reasoning as the persistent I2S channel above -- so later
- * audio__stream_write_async() calls, even across separate
- * open/close/reopen cycles, never pay task/queue creation cost again. */
-static bruce_result_t audio__ensure_async_writer_locked(void) {
-    if (s_async_writer_task != NULL) return BRUCE_OK;
-
-    s_async_msg_buffer = xMessageBufferCreate(AUDIO__ASYNC_RING_BYTES);
-    if (s_async_msg_buffer == NULL) return BRUCE_ERR_NO_MEMORY;
-
-    TaskHandle_t task = NULL;
-    if (xTaskCreatePinnedToCore(
-            audio__stream_writer_task, "audio_async_writer", 4096, NULL, 5, &task, 1
-        ) != pdPASS) {
-        vMessageBufferDelete(s_async_msg_buffer);
-        s_async_msg_buffer = NULL;
-        return BRUCE_ERR_NO_MEMORY;
-    }
-    s_async_writer_task = task;
-    return BRUCE_OK;
-}
-
 static bruce_result_t audio__play_i2s(const audio__tone_params_t *params) {
     bruce_result_t result = audio__i2s_ensure_channel_locked();
     if (result != BRUCE_OK) return result;
@@ -286,23 +228,16 @@ static bruce_result_t audio__play_i2s(const audio__tone_params_t *params) {
  * from audio__stream_close() and from the automatic per-process resource
  * cleanup below; must be called with s_audio_mutex held. */
 static void audio__stream_teardown_locked(void) {
-    /* Invalidate any chunks audio__stream_write_async() queued but the
-     * writer task hasn't reached yet -- see s_stream_generation's comment
-     * above. Bumped before the silence flush below (though, both running
-     * inside this same mutex-held section, the two could equally be
-     * swapped: what actually matters is that this whole function runs
-     * atomically with respect to the writer task's own mutex-held
-     * generation check + write). */
-    s_stream_generation++;
-    if (s_i2s_tx_ready) { (void)audio__i2s_flush_silence_locked(); }
     s_stream_open = false;
+    atomic_store(&s_stream_read_cursor, 0);
+    atomic_store(&s_stream_write_cursor, 0);
+    if (s_i2s_tx_ready) { (void)audio__i2s_flush_silence_locked(); }
     s_stream_owner = BRUCE_PROCESS_ID_INVALID;
     s_stream_resource = BRUCE_RESOURCE_ID_INVALID;
     s_stream_channels = 0;
 }
 #else
 static void audio__stream_teardown_locked(void) {
-    s_stream_generation++;
     s_stream_open = false;
     s_stream_owner = BRUCE_PROCESS_ID_INVALID;
     s_stream_resource = BRUCE_RESOURCE_ID_INVALID;
@@ -461,6 +396,8 @@ bruce_result_t audio__stream_open(uint8_t channels) {
         result = audio__i2s_ensure_channel_locked();
 #endif
         if (result == BRUCE_OK) {
+            atomic_store(&s_stream_read_cursor, 0);
+            atomic_store(&s_stream_write_cursor, 0);
             s_stream_open = true;
             s_stream_owner = process__current_id();
             s_stream_resource = process_registry__resource_register(audio__stream_cleanup, NULL);
@@ -473,137 +410,42 @@ bruce_result_t audio__stream_open(uint8_t channels) {
     return result;
 }
 
-bruce_result_t audio__stream_write(const int16_t *samples, size_t frame_count) {
-    if (samples == NULL || frame_count == 0) return BRUCE_ERR_INVALID_ARGUMENT;
-
-    if (!process_registry__operation_begin()) return BRUCE_ERR_CANCELLED;
-    audio__ensure_mutex();
-    xSemaphoreTake(s_audio_mutex, portMAX_DELAY);
-
-    bruce_result_t result = BRUCE_OK;
-    if (!s_stream_open || s_stream_owner != process__current_id()) {
-        result = BRUCE_ERR_INVALID_STATE;
-    } else {
-        bool enabled = false;
-        int volume = 0;
-        config__get_audio_settings(&enabled, &volume);
-        if (!enabled || volume <= 0) {
-            /* Muted: drop the audio silently, same as audio__tone(). */
-        } else {
+size_t audio__stream_writable_frames(void) {
+    if (!s_stream_open || s_stream_owner != process__current_id()) return 0;
 #if CONFIG_BRUCE_AUDIO_BACKEND_I2S && !CONFIG_BRUCE_QEMU_TEST_MODE
-            if (volume > 100) volume = 100;
-            bool stereo = s_stream_channels == 2;
-            int16_t chunk[AUDIO__I2S_BUFFER_FRAMES * 2u];
-            size_t offset = 0;
-            while (offset < frame_count) {
-                size_t frames = frame_count - offset;
-                if (frames > AUDIO__I2S_BUFFER_FRAMES) frames = AUDIO__I2S_BUFFER_FRAMES;
-                for (size_t i = 0; i < frames; ++i) {
-                    int32_t left = stereo ? samples[(offset + i) * 2u] : samples[offset + i];
-                    int32_t right = stereo ? samples[(offset + i) * 2u + 1u] : left;
-                    chunk[i * 2u] = (int16_t)((left * volume) / 100);
-                    chunk[i * 2u + 1u] = (int16_t)((right * volume) / 100);
-                }
-                result = audio__i2s_write_locked(chunk, (uint32_t)frames);
-                if (result != BRUCE_OK) break;
-                offset += frames;
-            }
+    uint32_t write_cursor = atomic_load_explicit(&s_stream_write_cursor, memory_order_relaxed);
+    uint32_t read_cursor = atomic_load_explicit(&s_stream_read_cursor, memory_order_acquire);
+    uint32_t queued = write_cursor - read_cursor;
+    return queued >= AUDIO__STREAM_RING_FRAMES ? 0 : AUDIO__STREAM_RING_FRAMES - queued;
+#else
+    return SIZE_MAX;
 #endif
-        }
-    }
-
-    xSemaphoreGive(s_audio_mutex);
-    process_registry__operation_end();
-    return result;
 }
 
-bruce_result_t audio__stream_write_async(const int16_t *samples, size_t frame_count) {
-    if (samples == NULL || frame_count == 0) return BRUCE_ERR_INVALID_ARGUMENT;
-
-    if (!process_registry__operation_begin()) return BRUCE_ERR_CANCELLED;
-    audio__ensure_mutex();
-    /* The writer holds this mutex while i2s_channel_write() waits for a DMA
-     * descriptor. Waiting behind it here defeats an async producer, so drop
-     * this interval just as we do when its message ring is full. */
-    if (xSemaphoreTake(s_audio_mutex, 0) != pdTRUE) {
-        process_registry__operation_end();
-        return BRUCE_ERR_BUSY;
-    }
-
-    bruce_result_t result = BRUCE_OK;
-    /* should_send/stereo/generation are only ever read back under the same
-     * CONFIG_BRUCE_AUDIO_BACKEND_I2S && !CONFIG_BRUCE_QEMU_TEST_MODE guard
-     * they're set under below; on a backend without that (LEDC buzzer,
-     * QEMU), they're set once and never read again -- (void) them so that
-     * doesn't trip an unused-but-set warning there. */
-    bool should_send = false;
-    bool stereo = false;
-    uint32_t generation = 0;
+size_t audio__stream_write(const int16_t *samples, size_t frame_count) {
+    if (samples == NULL || frame_count == 0 || !s_stream_open || s_stream_owner != process__current_id()) return 0;
+    bool enabled = false;
     int volume = 0;
-    (void)should_send;
-    (void)stereo;
-    (void)generation;
-    if (!s_stream_open || s_stream_owner != process__current_id()) {
-        result = BRUCE_ERR_INVALID_STATE;
-    } else {
-        bool enabled = false;
-        config__get_audio_settings(&enabled, &volume);
-        if (enabled && volume > 0) {
+    config__get_audio_settings(&enabled, &volume);
+    if (!enabled || volume <= 0) return frame_count;
 #if CONFIG_BRUCE_AUDIO_BACKEND_I2S && !CONFIG_BRUCE_QEMU_TEST_MODE
-            result = audio__ensure_async_writer_locked();
-            if (result == BRUCE_OK) {
-                if (volume > 100) volume = 100;
-                should_send = true;
-                stereo = s_stream_channels == 2;
-                generation = s_stream_generation;
-            }
-#endif
-            /* Muted, or no PCM-capable backend compiled in: drop the audio
-             * silently, same as audio__stream_write(). */
-        }
+    if (volume > 100) volume = 100;
+    size_t writable = audio__stream_writable_frames();
+    if (frame_count < writable) writable = frame_count;
+    bool stereo = s_stream_channels == 2;
+    uint32_t write_cursor = atomic_load_explicit(&s_stream_write_cursor, memory_order_relaxed);
+    for (size_t i = 0; i < writable; ++i) {
+        uint32_t ring_index = (write_cursor + i) % AUDIO__STREAM_RING_FRAMES;
+        int32_t left = stereo ? samples[i * 2u] : samples[i];
+        int32_t right = stereo ? samples[i * 2u + 1u] : left;
+        s_stream_ring[ring_index * 2u] = (int16_t)((left * volume) / 100);
+        s_stream_ring[ring_index * 2u + 1u] = (int16_t)((right * volume) / 100);
     }
-
-    xSemaphoreGive(s_audio_mutex);
-
-#if CONFIG_BRUCE_AUDIO_BACKEND_I2S && !CONFIG_BRUCE_QEMU_TEST_MODE
-    if (should_send) {
-        /* Deliberately done without s_audio_mutex held: xMessageBufferSend()
-         * has its own internal thread-safety and never touches the I2S
-         * peripheral, so there's no need to serialize it against tone/write/
-         * close calls the way the actual hardware access below is. Holding
-         * the mutex across this loop instead would block the writer task's
-         * own (brief, mutex-protected) hardware write for this call's whole
-         * duration, serializing the two right back together and defeating
-         * the reason this function exists. */
-        audio__async_chunk_t chunk;
-        size_t offset = 0;
-        while (offset < frame_count) {
-            size_t frames = frame_count - offset;
-            if (frames > AUDIO__ASYNC_CHUNK_FRAMES) frames = AUDIO__ASYNC_CHUNK_FRAMES;
-            chunk.generation = generation;
-            for (size_t i = 0; i < frames; ++i) {
-                int32_t left = stereo ? samples[(offset + i) * 2u] : samples[offset + i];
-                int32_t right = stereo ? samples[(offset + i) * 2u + 1u] : left;
-                chunk.samples[i * 2u] = (int16_t)((left * volume) / 100);
-                chunk.samples[i * 2u + 1u] = (int16_t)((right * volume) / 100);
-            }
-            size_t chunk_bytes = sizeof(chunk.generation) + frames * 2u * sizeof(int16_t);
-            /* A real-time producer must not wait for audio: once it misses a
-             * frame deadline, waiting for queue space only makes the next
-             * frame later and locks the queue full indefinitely. Drop new
-             * audio instead; the writer drains the already-buffered interval
-             * and the producer can recover its video timing. */
-            if (xMessageBufferSend(s_async_msg_buffer, &chunk, chunk_bytes, 0) != chunk_bytes) {
-                result = BRUCE_ERR_BUSY;
-                break;
-            }
-            offset += frames;
-        }
-    }
+    atomic_store_explicit(&s_stream_write_cursor, write_cursor + writable, memory_order_release);
+    return writable;
+#else
+    return frame_count;
 #endif
-
-    process_registry__operation_end();
-    return result;
 }
 
 bruce_result_t audio__stream_close(void) {

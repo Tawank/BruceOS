@@ -19,6 +19,17 @@ bool selftest__run_audio_validation_case(void) {
     return ok;
 }
 
+bool selftest__run_audio_stream_nonblocking_case(void) {
+    int16_t samples[32] = {0};
+    bool opened = audio__stream_open(1) == BRUCE_OK;
+    size_t writable = audio__stream_writable_frames();
+    size_t accepted = opened ? audio__stream_write(samples, 32) : 0;
+    bruce_result_t closed = opened ? audio__stream_close() : BRUCE_ERR_INTERNAL;
+    bool ok = opened && writable >= 32 && accepted == 32 && closed == BRUCE_OK;
+    printf("[selftest] audio/stream-nonblocking: %s\n", ok ? "OK" : "FAIL");
+    return ok;
+}
+
 /* ------------------------------------------------------------------------ */
 /* selftest__run_audio_kill_mid_tone_case                                    */
 /* ------------------------------------------------------------------------ */

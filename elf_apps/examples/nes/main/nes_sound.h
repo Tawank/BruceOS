@@ -23,11 +23,9 @@
  * not just the I2S write. */
 #define SOUND_ENABLED 1
 
-/* Pulls PCM from nofrendo's APU and feeds it to the Bruce audio stream, sized
- * from real elapsed time since the last call rather than a fixed per-frame
- * amount -- see nes_sound.c for why. Call once per video frame; a no-op if no
- * stream is open (i.e. before osd_setsound() or after osd_stopsound(), or
- * whenever SOUND_ENABLED is 0). */
+/* Pulls one emulated frame's PCM from nofrendo's APU and submits it to the
+ * non-blocking Bruce audio stream. Call once per video frame; a no-op if no
+ * stream is open or whenever SOUND_ENABLED is 0. */
 void nes_sound_pump(void);
 
 /* Closes the audio stream opened by osd_setsound(), if any. Not part of
@@ -36,8 +34,6 @@ void nes_sound_pump(void);
  * stream before the process exits. */
 void osd_stopsound(void);
 
-/* Wall-clock microseconds the most recent nes_sound_pump() call spent
- * blocked inside audio__stream_write() -- 0 if SOUND_ENABLED is 0 or no
- * pump has run yet. For nes_video.c's perf report; see nes_sound.c for why
- * this number matters for frame pacing, not just audio quality. */
+/* Always zero with the non-blocking audio stream. Retained for the video
+ * performance report's stable interface. */
 uint32_t nes_sound_last_write_us(void);

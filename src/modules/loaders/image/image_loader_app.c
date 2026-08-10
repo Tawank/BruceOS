@@ -8,10 +8,9 @@
 #include "core_sdk/display.h"
 #include "core_sdk/image.h"
 #include "core_sdk/input.h"
-#include "core_sdk/result.h"
-#include "core_sdk/stdio.h"
-#include "core_sdk/storage.h"
 #include "core_sdk/process.h"
+#include "core_sdk/result.h"
+#include "core_sdk/storage.h"
 
 int image_viewer_app_main(int argc, char **argv) {
     ArgParser *parser = ap_new_parser();
@@ -29,9 +28,7 @@ int image_viewer_app_main(int argc, char **argv) {
     }
     const char *path = ap_get_arg(parser, "path");
     ap_free(parser);
-    if (!image__is_supported_path(path)) {
-        return BRUCE_ERR_INVALID_ARGUMENT;
-    }
+    if (!image__is_supported_path(path)) { return BRUCE_ERR_INVALID_ARGUMENT; }
     bruce_image_draw_options_t options = {
         .center = true,
         .fit = true,
