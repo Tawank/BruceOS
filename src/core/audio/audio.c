@@ -195,7 +195,9 @@ typedef struct {
  * worth of slack -- enough for a producer's burst of work to run ahead of
  * the writer without blocking on every call -- without holding an
  * unreasonable amount of audio in RAM at once. */
-#define AUDIO__ASYNC_RING_BYTES (8u * 1024u)
+/* Four maximum stereo chunks give real-time producers enough slack for short
+ * display/DMA stalls without immediately blocking their emulation loop. */
+#define AUDIO__ASYNC_RING_BYTES (16u * 1024u)
 static MessageBufferHandle_t s_async_msg_buffer;
 static TaskHandle_t s_async_writer_task;
 

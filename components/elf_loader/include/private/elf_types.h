@@ -262,6 +262,7 @@ typedef struct esp_elf {
     uint32_t        xip_handle;
     const uint8_t   *xip_data;
     size_t          xip_rodata_offset;
+    bool            xip_rodata_staged;
 
     int (*entry)(int argc, char *argv[]);               /*!< Entry pointer of ELF */
 

@@ -3,6 +3,7 @@
 #include "core_sdk/dialog.h"
 #include "core_sdk/display.h"
 #include "core_sdk/result.h"
+#include "core_sdk/runtime.h"
 #include "nofrendo.h"
 
 int app_main(int argc, char **argv) {
@@ -27,7 +28,13 @@ int app_main(int argc, char **argv) {
      * direct mode, so there is no rendering-path change here. Best-effort:
      * if game mode can't be entered (e.g. another process already owns it),
      * nofrendo still runs, just without the extra headroom. */
-    bool game_mode = display__game_mode(true) == BRUCE_OK;
+    bruce_result_t game_mode_result = display__game_mode(true);
+    for (int attempt = 0; game_mode_result == BRUCE_ERR_BUSY && attempt < 10; ++attempt) {
+        runtime__delay(10);
+        game_mode_result = display__game_mode(true);
+    }
+    bool game_mode = game_mode_result == BRUCE_OK;
+    if (!game_mode) printf("Nofrendo: display game mode unavailable (%d)\n", (int)game_mode_result);
     int result = nofrendo_main(1, nofrendo_argv);
     if (game_mode) display__game_mode(false);
     return result;

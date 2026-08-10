@@ -6,7 +6,6 @@
 
 #include <assert.h>
 #include <sys/errno.h>
-#include "esp_idf_version.h"
 #include "esp_attr.h"
 #include "esp_heap_caps.h"
 #include "soc/soc.h"
@@ -41,9 +40,6 @@ void *esp_elf_malloc(uint32_t n, bool exec)
     caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
 #else
     caps = MALLOC_CAP_8BIT;
-#endif
-#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 3, 0)
-    caps |= MALLOC_CAP_CACHE_ALIGNED;
 #endif
 #endif
 

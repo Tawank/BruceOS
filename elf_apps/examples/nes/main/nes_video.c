@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "core_sdk/display.h"
+#include "core_sdk/memory.h"
 #include "core_sdk/runtime.h"
 
 #include "bitmap.h"
@@ -15,6 +16,8 @@
 
 static uint8_t s_framebuffer_dummy;
 static bitmap_t *s_screen_bitmap;
+static uint16_t *s_scaled_lines;
+static size_t s_scaled_lines_capacity;
 static uint16_t s_palette[256];
 static void (*s_timer_callback)(void);
 
@@ -26,7 +29,11 @@ static int video_init(int width, int height) {
     return 0;
 }
 
-static void video_shutdown(void) {}
+static void video_shutdown(void) {
+    memory__free(s_scaled_lines);
+    s_scaled_lines = NULL;
+    s_scaled_lines_capacity = 0;
+}
 
 static int video_set_mode(int width, int height) {
     (void)width;
@@ -298,10 +305,9 @@ static void pace_frame(void) {
  * transactions, each paying its own address-window/ISR round-trip and each
  * becoming visible on the physical panel the instant it landed -- the
  * visible top-to-bottom "drawing itself" effect. Batching cuts that to a
- * handful of transfers per frame; the buffer below is intentionally small
- * (a few KB) rather than a full offscreen frame. */
-#define BRUCE_NES_BLIT_ROWS 8
-static uint16_t s_scaled_lines[BRUCE_NES_BLIT_ROWS * BRUCE_NES_BLIT_MAX_WIDTH];
+ * handful of transfers per frame. The buffer is sized at runtime to the
+ * active display width, so narrow displays do not pay for a 320-pixel row. */
+#define BRUCE_NES_BLIT_ROWS 32
 
 /* nofrendo's own dirty-rect tracking is dead code: vid_flush() in vid_drv.c
  * hardcodes num_dirties = -1 ("full blit required") unconditionally --
@@ -394,6 +400,19 @@ static void video_blit(bitmap_t *bitmap, int num_dirties, rect_t *dirty_rects) {
     int draw_height = screen_height;
     int origin_x = (screen_width - draw_width) / 2;
     int origin_y = (screen_height - draw_height) / 2;
+
+    size_t scaled_lines_needed = (size_t)BRUCE_NES_BLIT_ROWS * (size_t)draw_width;
+    if (scaled_lines_needed > s_scaled_lines_capacity) {
+        uint16_t *scaled_lines = memory__realloc(s_scaled_lines, scaled_lines_needed * sizeof(*scaled_lines));
+        if (scaled_lines == NULL) {
+            perf_track_and_report(now_ms, stall, 0, false, 0, 0);
+            s_last_iter_ms = now_ms;
+            pace_frame();
+            return;
+        }
+        s_scaled_lines = scaled_lines;
+        s_scaled_lines_capacity = scaled_lines_needed;
+    }
 
     uint32_t blit_us = 0;
     if (display__begin_frame() == BRUCE_OK) {

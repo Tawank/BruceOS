@@ -173,6 +173,7 @@ static int esp_elf_load_section(esp_elf_t *elf, const uint8_t *pbuf) {
     const elf32_hdr_t *ehdr = (const elf32_hdr_t *)pbuf;
     const elf32_shdr_t *shdr = (const elf32_shdr_t *)(pbuf + ehdr->shoff);
     const char *shstrab = (const char *)pbuf + shdr[ehdr->shstrndx].offset;
+    uint32_t rodata_index = ehdr->shnum;
 
     /* Calculate ELF image size */
 
@@ -219,6 +220,7 @@ static int esp_elf_load_section(esp_elf_t *elf, const uint8_t *pbuf) {
                     elf->sec[ELF_SEC_DATA].size
                 );
             } else if (!strcmp(ELF_RODATA, name)) {
+                rodata_index = i;
                 ESP_LOGD(
                     TAG,
                     ".rodata sec addr=0x%08x size=0x%08x offset=0x%08x",
@@ -286,8 +288,19 @@ static int esp_elf_load_section(esp_elf_t *elf, const uint8_t *pbuf) {
 
     bool xip = elf->xip_ops != NULL;
     elf->xip_rodata_offset = ELF_ALIGN(elf->sec[ELF_SEC_TEXT].size, 4);
+    elf->xip_rodata_staged = false;
+    if (xip && elf->sec[ELF_SEC_RODATA].size) {
+        for (uint32_t i = 0; i < ehdr->shnum; ++i) {
+            if (stype(&shdr[i], SHT_RELA) && shdr[i].info == rodata_index) {
+                elf->xip_rodata_staged = true;
+                break;
+            }
+        }
+    }
     size_t text_work_size =
-        xip ? elf->xip_rodata_offset + elf->sec[ELF_SEC_RODATA].size : elf->sec[ELF_SEC_TEXT].size;
+        xip && elf->xip_rodata_staged ? elf->xip_rodata_offset + elf->sec[ELF_SEC_RODATA].size
+                                      : elf->sec[ELF_SEC_TEXT].size;
+    size_t xip_size = elf->xip_rodata_offset + elf->sec[ELF_SEC_RODATA].size;
     elf->ptext = esp_elf_malloc(text_work_size, !xip);
     if (!elf->ptext) {
         ESP_LOGE(
@@ -318,17 +331,25 @@ static int esp_elf_load_section(esp_elf_t *elf, const uint8_t *pbuf) {
         const uint8_t *instruction = NULL;
         const uint8_t *data = NULL;
         int ret =
-            elf->xip_ops->allocate(elf->xip_context, text_work_size, &instruction, &data, &elf->xip_handle);
+            elf->xip_ops->allocate(elf->xip_context, xip_size, &instruction, &data, &elf->xip_handle);
         if (ret != 0 || !instruction || !data || !elf->xip_handle) { return ret != 0 ? ret : -ENOMEM; }
         elf->xip_data = data;
         elf->sec[ELF_SEC_TEXT].addr = (uintptr_t)instruction;
         elf->sec[ELF_SEC_RODATA].addr = (uintptr_t)(data + elf->xip_rodata_offset);
-        elf->sec[ELF_SEC_RODATA].reloc_addr = (uintptr_t)(elf->ptext + elf->xip_rodata_offset);
-        memcpy(
-            (void *)elf->sec[ELF_SEC_RODATA].reloc_addr,
-            pbuf + elf->sec[ELF_SEC_RODATA].offset,
-            elf->sec[ELF_SEC_RODATA].size
-        );
+        if (elf->sec[ELF_SEC_RODATA].size && elf->xip_rodata_staged) {
+            elf->sec[ELF_SEC_RODATA].reloc_addr = (uintptr_t)(elf->ptext + elf->xip_rodata_offset);
+            memcpy(
+                (void *)elf->sec[ELF_SEC_RODATA].reloc_addr,
+                pbuf + elf->sec[ELF_SEC_RODATA].offset,
+                elf->sec[ELF_SEC_RODATA].size
+            );
+        } else if (elf->sec[ELF_SEC_RODATA].size) {
+            int ret = elf->xip_ops->write(
+                elf->xip_context, elf->xip_handle, elf->xip_rodata_offset,
+                pbuf + elf->sec[ELF_SEC_RODATA].offset, elf->sec[ELF_SEC_RODATA].size
+            );
+            if (ret != 0) return ret;
+        }
     }
 
 #ifdef CONFIG_ELF_LOADER_SET_MMU
@@ -744,7 +765,7 @@ static int esp_elf_relocate_internal(esp_elf_t *elf, const uint8_t *pbuf) {
         ret = elf->xip_ops->write(
             elf->xip_context, elf->xip_handle, 0, elf->ptext, elf->sec[ELF_SEC_TEXT].size
         );
-        if (ret == 0 && elf->sec[ELF_SEC_RODATA].size) {
+        if (ret == 0 && elf->sec[ELF_SEC_RODATA].size && elf->xip_rodata_staged) {
             ret = elf->xip_ops->write(
                 elf->xip_context,
                 elf->xip_handle,
@@ -755,7 +776,7 @@ static int esp_elf_relocate_internal(esp_elf_t *elf, const uint8_t *pbuf) {
         }
         if (ret != 0) return ret;
         if (memcmp(elf->xip_data, elf->ptext, elf->sec[ELF_SEC_TEXT].size) != 0 ||
-            (elf->sec[ELF_SEC_RODATA].size && memcmp(
+            (elf->sec[ELF_SEC_RODATA].size && elf->xip_rodata_staged && memcmp(
                                                   elf->xip_data + elf->xip_rodata_offset,
                                                   (const void *)elf->sec[ELF_SEC_RODATA].reloc_addr,
                                                   elf->sec[ELF_SEC_RODATA].size

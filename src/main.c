@@ -1,4 +1,5 @@
 #include "esp_log_level.h"
+#include "esp_system.h"
 #include <stdio.h>
 
 #include "core_sdk/loader.h"
@@ -174,6 +175,7 @@ static void app_main__recover_missing_partitions(const char *reason, bool ui_ok)
 }
 
 void app_main(void) {
+    printf("[boot] reset reason: %d\n", (int)esp_reset_reason());
     device__power_hold_init();
 
     bool storage_ok = init_storage();
