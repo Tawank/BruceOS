@@ -1,0 +1,4 @@
+# Use the native USB Serial/JTAG interface as the interactive console on S3.
+# UART0 remains unused, and no secondary console output is configured.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
