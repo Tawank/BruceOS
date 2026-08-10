@@ -74,8 +74,8 @@ typedef struct {
 /* Creates and starts a new Core-tracked process.  Exactly one of
  * params->entry or params->process_entry must be set (see process_create_params_t).
  * On success returns BRUCE_OK and the new process's id via *out_process_id.  On
- * failure returns BRUCE_ERR_INVALID_ARGUMENT, BRUCE_ERR_RESOURCE_LIMIT (process
- * table full), or BRUCE_ERR_NO_MEMORY (FreeRTOS task creation failed). */
+ * failure returns BRUCE_ERR_INVALID_ARGUMENT or BRUCE_ERR_NO_MEMORY (registry
+ * allocation or FreeRTOS task creation failed). */
 bruce_result_t
 process_registry__create(const process_create_params_t *params, bruce_process_id_t *out_process_id);
 
@@ -83,9 +83,9 @@ process_registry__create(const process_create_params_t *params, bruce_process_id
  * are created with an explanatory template. Call once after storage init. */
 bool process__environment_init(void);
 
-/* Registers a cleanup callback against the *calling* process.  Returns
- * BRUCE_RESOURCE_ID_INVALID if there is no current Core process or the process's
- * resource table is full. */
+/* Registers a cleanup callback against the *calling* process. Returns
+ * BRUCE_RESOURCE_ID_INVALID if there is no current Core process or allocation
+ * fails. */
 bruce_resource_id_t
 process_registry__resource_register(bruce_process_resource_cleanup_t cleanup, void *context);
 

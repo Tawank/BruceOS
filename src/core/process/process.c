@@ -21,10 +21,6 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
-#define PROCESS__MAX_RECORDS 16
-#define PROCESS__MAX_COMPLETIONS 16
-#define PROCESS__MAX_RESOURCES 32
-#define PROCESS__FOREGROUND_STACK_MAX PROCESS__MAX_RECORDS
 #define PROCESS__DEFAULT_STACK_BYTES 4096u
 #define PROCESS__EVT_WAKE (1u << 0)
 #define PROCESS__EVT_EXITED (1u << 1)
@@ -50,20 +46,18 @@ typedef struct {
     size_t capacity;
 } process__environment_t;
 
-typedef struct {
+typedef struct process__resource {
     bruce_resource_id_t id;
     bruce_process_resource_cleanup_t cleanup;
     void *context;
-    bool active;
-} process__resource_slot_t;
+    struct process__resource *next;
+} process__resource_t;
 
-typedef struct {
+typedef struct process__record {
     bool in_use;
-    uint32_t generation;
     bruce_process_id_t id;
     char name[BRUCE_PROCESS_NAME_MAX];
     bruce_process_state_t state;
-    bruce_process_state_t state_before_pause;
     bool built_in;
     bool gui_requested;
     bool presentable;
@@ -87,10 +81,10 @@ typedef struct {
     size_t waiter_count;
     size_t status_waiter_count;
     bool wait_attached;
-    int wait_slot;
+    struct process__record *wait_target;
     bool wait_for_status;
 
-    process__resource_slot_t resources[PROCESS__MAX_RESOURCES];
+    process__resource_t *resources;
     bruce_resource_id_t next_resource_id;
     size_t resource_count;
     size_t memory_bytes;
@@ -102,28 +96,34 @@ typedef struct {
     uint32_t stack_high_water_bytes;
     uint32_t stack_total_bytes;
     process__environment_t environment;
+    EventGroupHandle_t events;
+    struct process__record *previous;
+    struct process__record *next;
+    struct process__record *fg_previous;
+    struct process__record *fg_next;
 } process__record_t;
 
-typedef struct {
+typedef struct process__completion {
     bool in_use;
     bruce_process_id_t id;
     bruce_process_status_t status;
     uint64_t sequence;
     size_t waiter_pins;
+    struct process__completion *next;
 } process__completion_t;
 
 static StaticSemaphore_t s_lock_storage;
 static SemaphoreHandle_t s_lock;
 static portMUX_TYPE s_init_mux = portMUX_INITIALIZER_UNLOCKED;
 
-static process__record_t s_processes[PROCESS__MAX_RECORDS];
-static process__completion_t s_completions[PROCESS__MAX_COMPLETIONS];
-static EventGroupHandle_t s_process_events[PROCESS__MAX_RECORDS];
+static process__record_t *s_processes;
+static process__record_t *s_process_tail;
+static process__completion_t *s_completions;
 static bruce_process_id_t s_next_process_id = 1;
 static uint64_t s_next_completion_sequence = 1;
 
-static bruce_process_id_t s_fg_stack[PROCESS__FOREGROUND_STACK_MAX];
-static int s_fg_depth;
+static process__record_t *s_fg_head;
+static process__record_t *s_fg_tail;
 static bruce_process_id_t s_effective_foreground;
 
 static uint32_t s_last_total_runtime;
@@ -134,7 +134,6 @@ static void process__ensure_init(void) {
     portENTER_CRITICAL(&s_init_mux);
     if (s_lock == NULL) {
         s_lock = xSemaphoreCreateRecursiveMutexStatic(&s_lock_storage);
-        for (int i = 0; i < PROCESS__MAX_RECORDS; ++i) { s_process_events[i] = xEventGroupCreate(); }
     }
     portEXIT_CRITICAL(&s_init_mux);
 }
@@ -146,8 +145,8 @@ static void process__unlock(void) { xSemaphoreGiveRecursive(s_lock); }
 /* Caller must hold the lock. */
 static process__record_t *process__find_by_id_locked(bruce_process_id_t id) {
     if (id == BRUCE_PROCESS_ID_INVALID) { return NULL; }
-    for (int i = 0; i < PROCESS__MAX_RECORDS; ++i) {
-        if (s_processes[i].in_use && s_processes[i].id == id) { return &s_processes[i]; }
+    for (process__record_t *record = s_processes; record != NULL; record = record->next) {
+        if (record->in_use && record->id == id) { return record; }
     }
     return NULL;
 }
@@ -155,16 +154,16 @@ static process__record_t *process__find_by_id_locked(bruce_process_id_t id) {
 /* Caller must hold the lock. */
 static process__record_t *process__find_by_handle_locked(TaskHandle_t handle) {
     if (handle == NULL) { return NULL; }
-    for (int i = 0; i < PROCESS__MAX_RECORDS; ++i) {
-        if (s_processes[i].in_use && s_processes[i].handle == handle) { return &s_processes[i]; }
+    for (process__record_t *record = s_processes; record != NULL; record = record->next) {
+        if (record->in_use && record->handle == handle) { return record; }
     }
     return NULL;
 }
 
 /* Caller must hold the lock. */
 static process__completion_t *process__find_completion_locked(bruce_process_id_t id) {
-    for (int i = 0; i < PROCESS__MAX_COMPLETIONS; ++i) {
-        if (s_completions[i].in_use && s_completions[i].id == id) { return &s_completions[i]; }
+    for (process__completion_t *completion = s_completions; completion != NULL; completion = completion->next) {
+        if (completion->in_use && completion->id == id) { return completion; }
     }
     return NULL;
 }
@@ -184,29 +183,44 @@ static bruce_process_id_t process__allocate_id_locked(void) {
     }
 }
 
-static int process__slot_index_locked(const process__record_t *record) { return (int)(record - s_processes); }
-
 static void process__wake_locked(process__record_t *record) {
-    xEventGroupSetBits(s_process_events[process__slot_index_locked(record)], PROCESS__EVT_WAKE);
+    xEventGroupSetBits(record->events, PROCESS__EVT_WAKE);
     if (record->wait_attached) {
-        xEventGroupSetBits(s_process_events[record->wait_slot], PROCESS__EVT_WAITER_WAKE);
+        xEventGroupSetBits(record->wait_target->events, PROCESS__EVT_WAITER_WAKE);
     }
 }
 
-/* Caller must hold the lock. Completion capacity exceeds the maximum live
- * process count, so pinned entries cannot exhaust the table. */
+/* Caller must hold the lock. Dead records remain until all waiters have
+ * released their event-group references. */
+static void process__dispose_if_unused_locked(process__record_t *record) {
+    if (record->in_use || record->waiter_count != 0) return;
+    if (record->previous != NULL) record->previous->next = record->next;
+    else s_processes = record->next;
+    if (record->next != NULL) record->next->previous = record->previous;
+    else s_process_tail = record->previous;
+    vEventGroupDelete(record->events);
+    free(record);
+}
+
+/* Caller must hold the lock. Pinned completions allocate independently so a
+ * large set of simultaneous status waiters cannot prevent process teardown. */
 static void
 process__publish_completion_locked(process__record_t *record, const bruce_process_status_t *status) {
     process__completion_t *target = NULL;
-    for (int i = 0; i < PROCESS__MAX_COMPLETIONS; ++i) {
-        if (!s_completions[i].in_use) {
-            target = &s_completions[i];
+    for (process__completion_t *completion = s_completions; completion != NULL; completion = completion->next) {
+        if (!completion->in_use) {
+            target = completion;
             break;
         }
-        if (s_completions[i].waiter_pins == 0 &&
-            (target == NULL || s_completions[i].sequence < target->sequence)) {
-            target = &s_completions[i];
+        if (completion->waiter_pins == 0 && (target == NULL || completion->sequence < target->sequence)) {
+            target = completion;
         }
+    }
+    if (target == NULL) {
+        target = calloc(1, sizeof(*target));
+        if (target == NULL) return;
+        target->next = s_completions;
+        s_completions = target;
     }
 
     target->in_use = true;
@@ -216,12 +230,20 @@ process__publish_completion_locked(process__record_t *record, const bruce_proces
     target->waiter_pins = record->status_waiter_count;
 }
 
+static void process__completion_clear_locked(process__completion_t *completion) {
+    completion->in_use = false;
+    completion->id = BRUCE_PROCESS_ID_INVALID;
+    memset(&completion->status, 0, sizeof(completion->status));
+    completion->sequence = 0;
+    completion->waiter_pins = 0;
+}
+
 /* Releases a wait owned by a tracked process. This is also called from forced
  * teardown because deleting a blocked task prevents process__wait_common()
  * from releasing its own pin. */
 static void process__detach_wait_locked(process__record_t *waiter) {
     if (!waiter->wait_attached) return;
-    process__record_t *target = &s_processes[waiter->wait_slot];
+    process__record_t *target = waiter->wait_target;
     process__completion_t *completion = process__find_completion_locked(target->id);
     if (waiter->wait_for_status && completion != NULL && completion->waiter_pins > 0) {
         completion->waiter_pins--;
@@ -229,6 +251,8 @@ static void process__detach_wait_locked(process__record_t *waiter) {
     if (target->waiter_count > 0) target->waiter_count--;
     if (waiter->wait_for_status && target->status_waiter_count > 0) target->status_waiter_count--;
     waiter->wait_attached = false;
+    waiter->wait_target = NULL;
+    process__dispose_if_unused_locked(target);
 }
 
 /* Removes `id` from the foreground stack if (and only if) it is currently on
@@ -239,13 +263,13 @@ static void process__foreground_notify_locked(bruce_process_id_t previous, bruce
     if (previous != BRUCE_PROCESS_ID_INVALID) {
         process__record_t *record = process__find_by_id_locked(previous);
         if (record != NULL) {
-            xEventGroupSetBits(s_process_events[process__slot_index_locked(record)], PROCESS__EVT_EVENT_WAKE);
+            xEventGroupSetBits(record->events, PROCESS__EVT_EVENT_WAKE);
         }
     }
     if (current != BRUCE_PROCESS_ID_INVALID) {
         process__record_t *record = process__find_by_id_locked(current);
         if (record != NULL) {
-            xEventGroupSetBits(s_process_events[process__slot_index_locked(record)], PROCESS__EVT_EVENT_WAKE);
+            xEventGroupSetBits(record->events, PROCESS__EVT_EVENT_WAKE);
         }
     }
 }
@@ -253,20 +277,23 @@ static void process__foreground_notify_locked(bruce_process_id_t previous, bruce
 /* Compact the stack and derive all runnable foreground/background states from
  * it. Paused processes retain their position but are temporarily ineligible. */
 static void process__foreground_recompute_locked(void) {
-    int write = 0;
     bruce_process_id_t next = BRUCE_PROCESS_ID_INVALID;
-    for (int i = 0; i < s_fg_depth; ++i) {
-        process__record_t *record = process__find_by_id_locked(s_fg_stack[i]);
-        if (record == NULL || record->state == BRUCE_PROCESS_STOPPING) { continue; }
-        s_fg_stack[write++] = record->id;
-        if (record->state != BRUCE_PROCESS_PAUSED && record->state != BRUCE_PROCESS_STARTING) {
+    for (process__record_t *record = s_fg_head; record != NULL;) {
+        process__record_t *following = record->fg_next;
+        if (!record->in_use || record->state == BRUCE_PROCESS_STOPPING) {
+            if (record->fg_previous != NULL) record->fg_previous->fg_next = record->fg_next;
+            else s_fg_head = record->fg_next;
+            if (record->fg_next != NULL) record->fg_next->fg_previous = record->fg_previous;
+            else s_fg_tail = record->fg_previous;
+            record->fg_previous = NULL;
+            record->fg_next = NULL;
+        } else if (record->state != BRUCE_PROCESS_PAUSED && record->state != BRUCE_PROCESS_STARTING) {
             next = record->id;
         }
+        record = following;
     }
-    s_fg_depth = write;
 
-    for (int i = 0; i < PROCESS__MAX_RECORDS; ++i) {
-        process__record_t *record = &s_processes[i];
+    for (process__record_t *record = s_processes; record != NULL; record = record->next) {
         if (!record->in_use || record->state == BRUCE_PROCESS_STARTING ||
             record->state == BRUCE_PROCESS_PAUSED || record->state == BRUCE_PROCESS_STOPPING) {
             continue;
@@ -288,18 +315,26 @@ static void process__foreground_recompute_locked(void) {
 }
 
 static void process__foreground_remove_locked(bruce_process_id_t id) {
-    int write = 0;
-    for (int i = 0; i < s_fg_depth; ++i) {
-        if (s_fg_stack[i] != id) { s_fg_stack[write++] = s_fg_stack[i]; }
-    }
-    s_fg_depth = write;
+    process__record_t *record = process__find_by_id_locked(id);
+    if (record == NULL || (record->fg_previous == NULL && record->fg_next == NULL && s_fg_head != record)) return;
+    if (record->fg_previous != NULL) record->fg_previous->fg_next = record->fg_next;
+    else s_fg_head = record->fg_next;
+    if (record->fg_next != NULL) record->fg_next->fg_previous = record->fg_previous;
+    else s_fg_tail = record->fg_previous;
+    record->fg_previous = NULL;
+    record->fg_next = NULL;
 }
 
 static void process__foreground_push_locked(bruce_process_id_t id) {
     process__foreground_remove_locked(id);
-    if (s_fg_depth < PROCESS__FOREGROUND_STACK_MAX) { s_fg_stack[s_fg_depth++] = id; }
     process__record_t *record = process__find_by_id_locked(id);
-    if (record != NULL) record->presentable = true;
+    if (record != NULL) {
+        record->fg_previous = s_fg_tail;
+        if (s_fg_tail != NULL) s_fg_tail->fg_next = record;
+        else s_fg_head = record;
+        s_fg_tail = record;
+        record->presentable = true;
+    }
     process__foreground_recompute_locked();
 }
 
@@ -311,23 +346,23 @@ static void process__clear_foreground_display(void) {
 }
 
 static void process__refresh_cpu_samples_locked(void) {
-    const size_t status_capacity = PROCESS__MAX_RECORDS + 8u;
+    const size_t status_capacity = uxTaskGetNumberOfTasks();
     TaskStatus_t *status_buf = malloc(status_capacity * sizeof(*status_buf));
     if (status_buf == NULL) return;
     uint32_t total_runtime = 0;
     UBaseType_t count = uxTaskGetSystemState(status_buf, status_capacity, &total_runtime);
     uint32_t total_delta = total_runtime - s_last_total_runtime;
 
-    for (int i = 0; i < PROCESS__MAX_RECORDS; ++i) {
-        if (!s_processes[i].in_use || s_processes[i].handle == NULL) { continue; }
+    for (process__record_t *record = s_processes; record != NULL; record = record->next) {
+        if (!record->in_use || record->handle == NULL) { continue; }
         for (UBaseType_t j = 0; j < count; ++j) {
-            if (status_buf[j].xHandle == s_processes[i].handle) {
-                uint32_t delta = status_buf[j].ulRunTimeCounter - s_processes[i].last_runtime_counter;
-                s_processes[i].cpu_percent =
+            if (status_buf[j].xHandle == record->handle) {
+                uint32_t delta = status_buf[j].ulRunTimeCounter - record->last_runtime_counter;
+                record->cpu_percent =
                     total_delta > 0 ? (uint32_t)(((uint64_t)delta * 100u) / total_delta) : 0u;
-                s_processes[i].last_runtime_counter = status_buf[j].ulRunTimeCounter;
-                s_processes[i].stack_high_water_bytes =
-                    (uint32_t)(uxTaskGetStackHighWaterMark(s_processes[i].handle) * sizeof(StackType_t));
+                record->last_runtime_counter = status_buf[j].ulRunTimeCounter;
+                record->stack_high_water_bytes =
+                    (uint32_t)(uxTaskGetStackHighWaterMark(record->handle) * sizeof(StackType_t));
                 break;
             }
         }
@@ -546,16 +581,14 @@ static bool process__dup_argv(int argc, char *const *src_argv, char ***out_argv)
 }
 
 /* Runs cleanup before atomically publishing completion and making the process
- * absent. The slot remains unavailable until every attached waiter returns. */
+ * absent. Its dynamically allocated record remains available to waiters. */
 static void process__teardown_locked(process__record_t *record, const bruce_process_status_t *status) {
     process__detach_wait_locked(record);
-    for (int i = PROCESS__MAX_RESOURCES - 1; i >= 0; --i) {
-        if (record->resources[i].active) {
-            bruce_process_resource_cleanup_t cleanup = record->resources[i].cleanup;
-            void *context = record->resources[i].context;
-            record->resources[i].active = false;
-            if (cleanup != NULL) { cleanup(context); }
-        }
+    while (record->resources != NULL) {
+        process__resource_t *resource = record->resources;
+        record->resources = resource->next;
+        if (resource->cleanup != NULL) { resource->cleanup(resource->context); }
+        free(resource);
     }
     record->resource_count = 0;
     record->memory_bytes = 0;
@@ -578,8 +611,8 @@ static void process__teardown_locked(process__record_t *record, const bruce_proc
     process__publish_completion_locked(record, status);
     record->in_use = false;
     record->handle = NULL;
-    record->generation++;
-    xEventGroupSetBits(s_process_events[process__slot_index_locked(record)], PROCESS__EVT_EXITED);
+    xEventGroupSetBits(record->events, PROCESS__EVT_EXITED);
+    process__dispose_if_unused_locked(record);
 }
 
 static void process__trampoline(void *arg) {
@@ -654,23 +687,23 @@ process_registry__create(const process_create_params_t *params, bruce_process_id
     if (!process__dup_argv(params->argc, params->argv, &argv_copy)) { return BRUCE_ERR_NO_MEMORY; }
 
     process__lock();
-    int slot = -1;
-    for (int i = 0; i < PROCESS__MAX_RECORDS; ++i) {
-        if (!s_processes[i].in_use && s_processes[i].waiter_count == 0) {
-            slot = i;
-            break;
-        }
-    }
-    if (slot < 0) {
+    process__record_t *record = calloc(1, sizeof(*record));
+    if (record == NULL) {
         process__unlock();
         process__free_argv(params->argc, argv_copy);
-        return BRUCE_ERR_RESOURCE_LIMIT;
+        return BRUCE_ERR_NO_MEMORY;
     }
-
-    process__record_t *record = &s_processes[slot];
-    uint32_t generation = record->generation;
-    memset(record, 0, sizeof(*record));
-    record->generation = generation;
+    record->events = xEventGroupCreate();
+    if (record->events == NULL) {
+        free(record);
+        process__unlock();
+        process__free_argv(params->argc, argv_copy);
+        return BRUCE_ERR_NO_MEMORY;
+    }
+    record->previous = s_process_tail;
+    if (s_process_tail != NULL) s_process_tail->next = record;
+    else s_processes = record;
+    s_process_tail = record;
     record->in_use = true;
     record->id = process__allocate_id_locked();
     process__record_t *parent = process__find_by_handle_locked(xTaskGetCurrentTaskHandle());
@@ -685,6 +718,7 @@ process_registry__create(const process_create_params_t *params, bruce_process_id
     if (environment_result != BRUCE_OK) {
         process__environment_free(&record->environment);
         record->in_use = false;
+        process__dispose_if_unused_locked(record);
         process__unlock();
         process__free_argv(params->argc, argv_copy);
         return environment_result;
@@ -709,11 +743,6 @@ process_registry__create(const process_create_params_t *params, bruce_process_id
     record->argc = params->argc > 0 ? params->argc : 0;
     record->argv = argv_copy;
     record->next_resource_id = 1;
-    xEventGroupClearBits(
-        s_process_events[slot],
-        PROCESS__EVT_WAKE | PROCESS__EVT_EXITED | PROCESS__EVT_EVENT_WAKE | PROCESS__EVT_WAITER_WAKE
-    );
-
     uint32_t stack_bytes = params->stack_bytes != 0 ? params->stack_bytes : PROCESS__DEFAULT_STACK_BYTES;
     record->stack_total_bytes = stack_bytes;
     BaseType_t created = xTaskCreate(
@@ -723,6 +752,7 @@ process_registry__create(const process_create_params_t *params, bruce_process_id
         process__free_argv(record->argc, record->argv);
         process__environment_free(&record->environment);
         record->in_use = false;
+        process__dispose_if_unused_locked(record);
         process__unlock();
         return BRUCE_ERR_NO_MEMORY;
     }
@@ -843,23 +873,15 @@ process_registry__resource_register(bruce_process_resource_cleanup_t cleanup, vo
         process__unlock();
         return BRUCE_RESOURCE_ID_INVALID;
     }
-    int free_slot = -1;
-    for (int i = 0; i < PROCESS__MAX_RESOURCES; ++i) {
-        if (!self->resources[i].active) {
-            free_slot = i;
-            break;
-        }
-    }
-    if (free_slot < 0) {
+    process__resource_t *resource = malloc(sizeof(*resource));
+    if (resource == NULL) {
         process__unlock();
         return BRUCE_RESOURCE_ID_INVALID;
     }
     bruce_resource_id_t id = self->next_resource_id++;
     if (self->next_resource_id == BRUCE_RESOURCE_ID_INVALID) { self->next_resource_id = 1; }
-    self->resources[free_slot].id = id;
-    self->resources[free_slot].cleanup = cleanup;
-    self->resources[free_slot].context = context;
-    self->resources[free_slot].active = true;
+    *resource = (process__resource_t){.id = id, .cleanup = cleanup, .context = context, .next = self->resources};
+    self->resources = resource;
     self->resource_count++;
     process__unlock();
     return id;
@@ -873,9 +895,9 @@ bruce_result_t process_registry__resource_update(bruce_resource_id_t resource_id
         process__unlock();
         return BRUCE_ERR_NOT_FOUND;
     }
-    for (int i = 0; i < PROCESS__MAX_RESOURCES; ++i) {
-        if (self->resources[i].active && self->resources[i].id == resource_id) {
-            self->resources[i].context = context;
+    for (process__resource_t *resource = self->resources; resource != NULL; resource = resource->next) {
+        if (resource->id == resource_id) {
+            resource->context = context;
             process__unlock();
             return BRUCE_OK;
         }
@@ -893,11 +915,10 @@ process_registry__resource_realloc(bruce_resource_id_t resource_id, void *contex
         process__unlock();
         return NULL;
     }
-    for (int i = 0; i < PROCESS__MAX_RESOURCES; ++i) {
-        if (self->resources[i].active && self->resources[i].id == resource_id &&
-            self->resources[i].context == context) {
+    for (process__resource_t *resource = self->resources; resource != NULL; resource = resource->next) {
+        if (resource->id == resource_id && resource->context == context) {
             void *resized = realloc(context, allocation_size);
-            if (resized != NULL) self->resources[i].context = resized;
+            if (resized != NULL) resource->context = resized;
             process__unlock();
             return resized;
         }
@@ -914,13 +935,17 @@ bruce_result_t process_registry__resource_release(bruce_resource_id_t resource_i
         process__unlock();
         return BRUCE_ERR_NOT_FOUND;
     }
-    for (int i = 0; i < PROCESS__MAX_RESOURCES; ++i) {
-        if (self->resources[i].active && self->resources[i].id == resource_id) {
-            self->resources[i].active = false;
+    process__resource_t **link = &self->resources;
+    while (*link != NULL) {
+        process__resource_t *resource = *link;
+        if (resource->id == resource_id) {
+            *link = resource->next;
+            free(resource);
             self->resource_count--;
             process__unlock();
             return BRUCE_OK;
         }
+        link = &resource->next;
     }
     process__unlock();
     return BRUCE_ERR_NOT_FOUND;
@@ -943,26 +968,20 @@ bruce_result_t process_registry__resource_transfer(
         return BRUCE_ERR_NOT_FOUND;
     }
 
-    int source_slot = -1;
-    int destination_slot = -1;
-    for (int i = 0; i < PROCESS__MAX_RESOURCES; ++i) {
-        if (owner->resources[i].active && owner->resources[i].id == resource_id) source_slot = i;
-        if (destination_slot < 0 && !self->resources[i].active) destination_slot = i;
-    }
-    if (source_slot < 0) {
+    process__resource_t **source_link = &owner->resources;
+    while (*source_link != NULL && (*source_link)->id != resource_id) source_link = &(*source_link)->next;
+    if (*source_link == NULL) {
         process__unlock();
         return BRUCE_ERR_NOT_FOUND;
-    }
-    if (destination_slot < 0) {
-        process__unlock();
-        return BRUCE_ERR_RESOURCE_LIMIT;
     }
 
     bruce_resource_id_t new_id = self->next_resource_id++;
     if (self->next_resource_id == BRUCE_RESOURCE_ID_INVALID) self->next_resource_id = 1;
-    self->resources[destination_slot] = owner->resources[source_slot];
-    self->resources[destination_slot].id = new_id;
-    memset(&owner->resources[source_slot], 0, sizeof(owner->resources[source_slot]));
+    process__resource_t *resource = *source_link;
+    *source_link = resource->next;
+    resource->id = new_id;
+    resource->next = self->resources;
+    self->resources = resource;
     owner->resource_count--;
     self->resource_count++;
     if (memory_bytes <= owner->memory_bytes) owner->memory_bytes -= memory_bytes;
@@ -1019,7 +1038,7 @@ bool process_registry__operation_begin(void) {
         return false;
     }
     if (self->operation_count++ == 0) {
-        xEventGroupClearBits(s_process_events[process__slot_index_locked(self)], PROCESS__EVT_OPERATION_IDLE);
+        xEventGroupClearBits(self->events, PROCESS__EVT_OPERATION_IDLE);
     }
     process__unlock();
     return true;
@@ -1030,7 +1049,7 @@ void process_registry__operation_end(void) {
     process__lock();
     process__record_t *self = process__find_by_handle_locked(xTaskGetCurrentTaskHandle());
     if (self != NULL && self->operation_count > 0 && --self->operation_count == 0) {
-        xEventGroupSetBits(s_process_events[process__slot_index_locked(self)], PROCESS__EVT_OPERATION_IDLE);
+        xEventGroupSetBits(self->events, PROCESS__EVT_OPERATION_IDLE);
     }
     process__unlock();
 }
@@ -1085,7 +1104,7 @@ bruce_result_t process_registry__event_wake_clear(bruce_process_id_t process_id)
         process__unlock();
         return BRUCE_ERR_NOT_FOUND;
     }
-    xEventGroupClearBits(s_process_events[process__slot_index_locked(record)], PROCESS__EVT_EVENT_WAKE);
+    xEventGroupClearBits(record->events, PROCESS__EVT_EVENT_WAKE);
     process__unlock();
     return BRUCE_OK;
 }
@@ -1098,7 +1117,7 @@ bruce_result_t process_registry__event_wake_wait(bruce_process_id_t process_id, 
         process__unlock();
         return BRUCE_ERR_NOT_FOUND;
     }
-    EventGroupHandle_t events = s_process_events[process__slot_index_locked(record)];
+    EventGroupHandle_t events = record->events;
     process__unlock();
     TickType_t ticks = timeout_ms == portMAX_DELAY ? portMAX_DELAY : pdMS_TO_TICKS(timeout_ms);
     EventBits_t bits = xEventGroupWaitBits(events, PROCESS__EVT_EVENT_WAKE, pdTRUE, pdFALSE, ticks);
@@ -1110,7 +1129,7 @@ void process_registry__event_wake(bruce_process_id_t process_id) {
     process__lock();
     process__record_t *record = process__find_by_id_locked(process_id);
     if (record != NULL) {
-        xEventGroupSetBits(s_process_events[process__slot_index_locked(record)], PROCESS__EVT_EVENT_WAKE);
+        xEventGroupSetBits(record->events, PROCESS__EVT_EVENT_WAKE);
     }
     process__unlock();
 }
@@ -1142,9 +1161,9 @@ bruce_result_t process__list(bruce_process_snapshot_t *snapshots, size_t capacit
     process__lock();
     process__refresh_cpu_samples_locked();
     size_t written = 0;
-    for (int i = 0; i < PROCESS__MAX_RECORDS && written < capacity; ++i) {
-        if (s_processes[i].in_use) {
-            process__fill_snapshot_locked(&s_processes[i], &snapshots[written]);
+    for (process__record_t *record = s_processes; record != NULL && written < capacity; record = record->next) {
+        if (record->in_use) {
+            process__fill_snapshot_locked(record, &snapshots[written]);
             written++;
         }
     }
@@ -1177,27 +1196,24 @@ static bruce_result_t process__switch_relative(int direction) {
     process__record_t *anchor = process__find_by_id_locked(anchor_id);
     if (anchor == NULL || !anchor->presentable) {
         anchor_id = BRUCE_PROCESS_ID_INVALID;
-        for (int i = s_fg_depth - 1; i >= 0; --i) {
-            process__record_t *stacked = process__find_by_id_locked(s_fg_stack[i]);
-            if (stacked != NULL && stacked->presentable) {
+        for (process__record_t *stacked = s_fg_tail; stacked != NULL; stacked = stacked->fg_previous) {
+            if (stacked->presentable) {
                 anchor_id = stacked->id;
                 break;
             }
         }
     }
 
-    int foreground_index = -1;
-    for (int i = 0; i < PROCESS__MAX_RECORDS; ++i) {
-        if (s_processes[i].in_use && s_processes[i].id == anchor_id) {
-            foreground_index = i;
-            break;
-        }
-    }
-    for (int offset = 1; offset <= PROCESS__MAX_RECORDS; ++offset) {
-        int index = foreground_index >= 0 ? (foreground_index + direction * offset + PROCESS__MAX_RECORDS) %
-                                                PROCESS__MAX_RECORDS
-                                          : (direction > 0 ? offset - 1 : PROCESS__MAX_RECORDS - offset);
-        process__record_t *candidate = &s_processes[index];
+    process__record_t *anchor_record = process__find_by_id_locked(anchor_id);
+    process__record_t *candidate = anchor_record;
+    process__record_t *start = NULL;
+    for (;;) {
+        if (candidate == NULL) candidate = direction > 0 ? s_processes : s_process_tail;
+        else candidate = direction > 0 ? candidate->next : candidate->previous;
+        if (candidate == NULL) candidate = direction > 0 ? s_processes : s_process_tail;
+        if (candidate == NULL) break;
+        if (start == NULL) start = candidate;
+        else if (candidate == start) break;
         if (candidate->in_use && candidate->id != self_id && candidate->presentable &&
             candidate->state == BRUCE_PROCESS_BACKGROUND) {
             process__foreground_push_locked(candidate->id);
@@ -1323,7 +1339,7 @@ bruce_result_t process__signal(bruce_process_id_t process_id, bruce_process_sign
     record->pending_signal = signal;
     record->state = BRUCE_PROCESS_STOPPING;
     process__wake_locked(record);
-    xEventGroupSetBits(s_process_events[process__slot_index_locked(record)], PROCESS__EVT_EVENT_WAKE);
+    xEventGroupSetBits(record->events, PROCESS__EVT_EVENT_WAKE);
     display__process_state_changed(record->id, record->state);
     process__foreground_recompute_locked();
     process__unlock();
@@ -1354,7 +1370,6 @@ bruce_result_t process__pause(bruce_process_id_t process_id) {
         process__unlock();
         return BRUCE_ERR_INVALID_STATE;
     }
-    record->state_before_pause = record->state;
     record->state = BRUCE_PROCESS_PAUSED;
     record->pause_requested = true;
     process__wake_locked(record);
@@ -1427,15 +1442,14 @@ bruce_result_t process__kill(bruce_process_id_t process_id) {
     record->pending_signal = BRUCE_PROCESS_SIGNAL_KILL;
     record->state = BRUCE_PROCESS_STOPPING;
     process__wake_locked(record);
-    xEventGroupSetBits(s_process_events[process__slot_index_locked(record)], PROCESS__EVT_EVENT_WAKE);
+    xEventGroupSetBits(record->events, PROCESS__EVT_EVENT_WAKE);
     display__process_state_changed(record->id, record->state);
     process__foreground_recompute_locked();
 
-    int slot = process__slot_index_locked(record);
     if (record->operation_count > 0) {
         process__unlock();
         (void)xEventGroupWaitBits(
-            s_process_events[slot], PROCESS__EVT_OPERATION_IDLE, pdFALSE, pdTRUE, portMAX_DELAY
+            record->events, PROCESS__EVT_OPERATION_IDLE, pdFALSE, pdTRUE, portMAX_DELAY
         );
         process__lock();
         record = process__find_by_id_locked(process_id);
@@ -1470,7 +1484,7 @@ process__wait_common(bruce_process_id_t process_id, uint32_t timeout_ms, bruce_p
     if (completion != NULL) {
         if (out_status != NULL) {
             bruce_process_status_t status = completion->status;
-            memset(completion, 0, sizeof(*completion));
+            process__completion_clear_locked(completion);
             *out_status = status;
         }
         process__unlock();
@@ -1481,17 +1495,16 @@ process__wait_common(bruce_process_id_t process_id, uint32_t timeout_ms, bruce_p
         process__unlock();
         return BRUCE_ERR_NOT_FOUND;
     }
-    int slot = process__slot_index_locked(record);
     record->waiter_count++;
     if (out_status != NULL) record->status_waiter_count++;
     process__record_t *waiter = process__find_by_handle_locked(xTaskGetCurrentTaskHandle());
     if (waiter != NULL) {
         waiter->wait_attached = true;
-        waiter->wait_slot = slot;
+        waiter->wait_target = record;
         waiter->wait_for_status = out_status != NULL;
     }
     bool cancelled = waiter != NULL && waiter->stop_requested;
-    EventGroupHandle_t events = s_process_events[slot];
+    EventGroupHandle_t events = record->events;
     process__unlock();
 
     int64_t deadline_us =
@@ -1518,7 +1531,7 @@ process__wait_common(bruce_process_id_t process_id, uint32_t timeout_ms, bruce_p
         process__lock();
         completion = process__find_completion_locked(process_id);
         cancelled = waiter != NULL && waiter->stop_requested;
-        bool absent = !s_processes[slot].in_use;
+        bool absent = !record->in_use;
         bool timed_out = timeout_ms != UINT32_MAX && esp_timer_get_time() >= deadline_us;
         if (completion != NULL || cancelled || absent || timed_out) break;
         process__unlock();
@@ -1528,13 +1541,13 @@ process__wait_common(bruce_process_id_t process_id, uint32_t timeout_ms, bruce_p
     bruce_process_status_t status;
     if (out_status != NULL && completion != NULL) {
         status = completion->status;
-        memset(completion, 0, sizeof(*completion));
+        process__completion_clear_locked(completion);
         result = BRUCE_OK;
     } else if (out_status == NULL && (completion != NULL || (bits & PROCESS__EVT_EXITED) != 0)) {
         result = BRUCE_OK;
     } else if (cancelled) {
         result = BRUCE_ERR_CANCELLED;
-    } else if (!s_processes[slot].in_use) {
+    } else if (!record->in_use) {
         /* Another status waiter may have consumed the completion first. */
         result = BRUCE_ERR_NOT_FOUND;
     }
@@ -1545,10 +1558,11 @@ process__wait_common(bruce_process_id_t process_id, uint32_t timeout_ms, bruce_p
         if (out_status != NULL && completion != NULL && completion->in_use && completion->waiter_pins > 0) {
             completion->waiter_pins--;
         }
-        if (s_processes[slot].waiter_count > 0) s_processes[slot].waiter_count--;
-        if (out_status != NULL && s_processes[slot].status_waiter_count > 0) {
-            s_processes[slot].status_waiter_count--;
+        if (record->waiter_count > 0) record->waiter_count--;
+        if (out_status != NULL && record->status_waiter_count > 0) {
+            record->status_waiter_count--;
         }
+        process__dispose_if_unused_locked(record);
     }
     process__unlock();
 
@@ -1590,23 +1604,21 @@ static bruce_result_t process__wait_ms(uint32_t ms, bool interruptible) {
         vTaskDelay(pdMS_TO_TICKS(ms));
         return BRUCE_OK;
     }
-    int slot;
     process__lock();
-    slot = process__slot_index_locked(self);
     bool was_background = self->state == BRUCE_PROCESS_BACKGROUND;
     process__unlock();
 
     int64_t deadline_us = esp_timer_get_time() + (int64_t)ms * 1000;
     for (;;) {
         process__lock();
-        bool stopped = s_processes[slot].stop_requested;
-        bool paused = s_processes[slot].pause_requested;
-        bool now_foreground = s_processes[slot].state == BRUCE_PROCESS_FOREGROUND;
+        bool stopped = self->stop_requested;
+        bool paused = self->pause_requested;
+        bool now_foreground = self->state == BRUCE_PROCESS_FOREGROUND;
         process__unlock();
 
         if (stopped) { return BRUCE_ERR_CANCELLED; }
         if (paused) {
-            xEventGroupWaitBits(s_process_events[slot], PROCESS__EVT_WAKE, pdTRUE, pdFALSE, portMAX_DELAY);
+            xEventGroupWaitBits(self->events, PROCESS__EVT_WAKE, pdTRUE, pdFALSE, portMAX_DELAY);
             continue;
         }
         if (interruptible && was_background && now_foreground) { return BRUCE_ERR_CANCELLED; }
@@ -1616,7 +1628,7 @@ static bruce_result_t process__wait_ms(uint32_t ms, bool interruptible) {
         uint64_t remaining_ms = ((uint64_t)remaining_us + 999u) / 1000u;
         TickType_t wait_ticks = pdMS_TO_TICKS(remaining_ms);
         if (wait_ticks == 0) wait_ticks = 1;
-        (void)xEventGroupWaitBits(s_process_events[slot], PROCESS__EVT_WAKE, pdTRUE, pdFALSE, wait_ticks);
+        (void)xEventGroupWaitBits(self->events, PROCESS__EVT_WAKE, pdTRUE, pdFALSE, wait_ticks);
         /* Woken early; loop to re-check stop/pause/foreground state. */
     }
 }

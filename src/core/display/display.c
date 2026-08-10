@@ -364,12 +364,7 @@ void display_internal__draw_rgb_bitmap(
     int16_t rows_per_transfer = DISPLAY__DIRECT_CHUNK_PIXELS / w;
     if (rows_per_transfer > h) rows_per_transfer = h;
     if (rows_per_transfer < 1) rows_per_transfer = 1;
-    int64_t lock_start = esp_timer_get_time();
     xSemaphoreTake(s_transfer_mutex, portMAX_DELAY);
-    int64_t lock_wait_us = esp_timer_get_time() - lock_start;
-    if (lock_wait_us > 10000) {
-        ESP_LOGW(TAG, "direct display transfer waited %lld us for the transfer lock", (long long)lock_wait_us);
-    }
     while (xSemaphoreTake(s_transfer_done, 0) == pdTRUE) {}
     bruce_result_t result = BRUCE_OK;
     bool pending = false;
@@ -405,7 +400,8 @@ void display_internal__draw_rgb_bitmap(
     }
     if (pending) {
         int64_t dma_wait_start = esp_timer_get_time();
-        if (xSemaphoreTake(s_transfer_done, portMAX_DELAY) != pdTRUE && result == BRUCE_OK) result = BRUCE_ERR_IO;
+        if (xSemaphoreTake(s_transfer_done, portMAX_DELAY) != pdTRUE && result == BRUCE_OK)
+            result = BRUCE_ERR_IO;
         int64_t dma_wait_us = esp_timer_get_time() - dma_wait_start;
         if (dma_wait_us > 10000) {
             ESP_LOGW(TAG, "direct display DMA completion took %lld us", (long long)dma_wait_us);
@@ -544,11 +540,10 @@ bruce_result_t display_internal__stream_row_locked(
     xSemaphoreTake(s_transfer_mutex, portMAX_DELAY);
     memcpy(s_row_buffer, pixels, (size_t)width * sizeof(*pixels));
     while (xSemaphoreTake(s_transfer_done, 0) == pdTRUE) {}
-    bruce_result_t result =
-        display_driver__draw_bitmap(x, y, x + width, y + 1, s_row_buffer) != BRUCE_OK ||
-                xSemaphoreTake(s_transfer_done, portMAX_DELAY) != pdTRUE
-            ? BRUCE_ERR_IO
-            : BRUCE_OK;
+    bruce_result_t result = display_driver__draw_bitmap(x, y, x + width, y + 1, s_row_buffer) != BRUCE_OK ||
+                                    xSemaphoreTake(s_transfer_done, portMAX_DELAY) != pdTRUE
+                                ? BRUCE_ERR_IO
+                                : BRUCE_OK;
     xSemaphoreGive(s_transfer_mutex);
     return result;
 #endif

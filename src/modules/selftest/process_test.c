@@ -15,6 +15,11 @@
 static selftest__shared_t s_shared;
 static volatile bool s_status_worker_started;
 
+#define SELFTEST__PROCESS_STRESS_COUNT 17
+#define SELFTEST__RESOURCE_STRESS_COUNT 33
+
+static volatile size_t s_resource_cleanup_count;
+
 bool selftest__run_runtime_now_case(void) {
     uint64_t before = runtime__now();
     if (runtime__delay(2) != BRUCE_OK || runtime__now() <= before) {
@@ -91,6 +96,85 @@ static int selftest__worker_killed(int argc, char **argv) {
     s_shared.registered_resource = true;
 
     for (;;) { runtime__delay(1000); }
+}
+
+static int selftest__worker_wait_for_kill(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    while (runtime__delay(1000) == BRUCE_OK) {}
+    return 0;
+}
+
+static void selftest__count_resource_cleanup(void *context) {
+    (void)context;
+    s_resource_cleanup_count++;
+}
+
+static int selftest__worker_resource_growth(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    for (size_t i = 0; i < SELFTEST__RESOURCE_STRESS_COUNT; ++i) {
+        if (process_registry__resource_register(selftest__count_resource_cleanup, NULL) == BRUCE_RESOURCE_ID_INVALID) {
+            return -1;
+        }
+    }
+    bruce_process_snapshot_t snapshot;
+    return process__snapshot(process__current_id(), &snapshot) == BRUCE_OK &&
+                   snapshot.resource_count == SELFTEST__RESOURCE_STRESS_COUNT
+               ? 0
+               : -1;
+}
+
+bool selftest__run_process_registry_growth_case(void) {
+    process_create_params_t params = {
+        .name = "selftest_grow",
+        .entry = selftest__worker_wait_for_kill,
+        .built_in = true,
+        .start_in_background = true,
+        .stack_bytes = 2048,
+    };
+    bruce_process_id_t ids[SELFTEST__PROCESS_STRESS_COUNT] = {0};
+    for (size_t i = 0; i < SELFTEST__PROCESS_STRESS_COUNT; ++i) {
+        if (process_registry__create(&params, &ids[i]) != BRUCE_OK) {
+            for (size_t j = 0; j < i; ++j) (void)process__kill(ids[j]);
+            printf("[selftest] process/registry-growth: create %u failed\n", (unsigned int)i);
+            return false;
+        }
+    }
+
+    bool ok = true;
+    for (size_t i = 0; i < SELFTEST__PROCESS_STRESS_COUNT; ++i) {
+        bruce_process_snapshot_t snapshot;
+        ok = ok && process__snapshot(ids[i], &snapshot) == BRUCE_OK &&
+             snapshot.state == BRUCE_PROCESS_BACKGROUND;
+    }
+    for (size_t i = 0; i < SELFTEST__PROCESS_STRESS_COUNT; ++i) {
+        ok = ok && process__kill(ids[i]) == BRUCE_OK;
+        bruce_process_status_t status;
+        ok = ok && process__wait_status(ids[i], 0, &status) == BRUCE_OK &&
+             status.reason == BRUCE_PROCESS_KILLED;
+    }
+    printf("[selftest] process/registry-growth: %s\n", ok ? "OK" : "FAIL");
+    return ok;
+}
+
+bool selftest__run_process_resource_growth_case(void) {
+    s_resource_cleanup_count = 0;
+    process_create_params_t params = {
+        .name = "selftest_resources",
+        .entry = selftest__worker_resource_growth,
+        .built_in = true,
+        .start_in_background = true,
+        .stack_bytes = 2048,
+    };
+    bruce_process_id_t id = BRUCE_PROCESS_ID_INVALID;
+    bruce_process_status_t status;
+    bool ok = process_registry__create(&params, &id) == BRUCE_OK &&
+              process__wait_status(id, 2000, &status) == BRUCE_OK &&
+              status.reason == BRUCE_PROCESS_EXITED && status.exit_code == 0 &&
+              s_resource_cleanup_count == SELFTEST__RESOURCE_STRESS_COUNT;
+    printf("[selftest] process/resource-growth: %s\n", ok ? "OK" : "FAIL");
+    return ok;
 }
 
 bool selftest__run_process_normal_exit_case(void) {

@@ -304,11 +304,6 @@ int bnu_free_app_main(int argc, char **argv) {
     bnu__print_memory_row(
         "int", stats.internal_total, stats.internal_free, stats.internal_largest_block, human
     );
-    stdio__printf(
-        "int: %u free blocks; low-water mark %u\n",
-        (unsigned)stats.internal_free_blocks,
-        (unsigned)stats.internal_minimum_free
-    );
     if (stats.psram_total > 0) {
         bnu__print_memory_row("psram", stats.psram_total, stats.psram_free, stats.psram_largest_block, human);
     }
