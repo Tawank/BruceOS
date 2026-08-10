@@ -262,7 +262,7 @@ int js_loader__run_path(
 
     bool gui_requested = app_runner__environment_requests_gui(environment, environment_count);
 
-    bruce_loader_t parent_image = ctx->source.external;
+    bruce_loader_image_t parent_image = ctx->source.external;
     int result = app_runner__spawn_loader_process(
         permission_key,
         gui_requested,

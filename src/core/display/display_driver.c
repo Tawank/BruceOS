@@ -245,7 +245,10 @@ static bruce_result_t display_driver__panel_init(void) {
         .cs_gpio_num = DISPLAY__PIN_CS,
         .pclk_hz = CONFIG_BRUCE_DISPLAY_SPI_PCLK_HZ,
         .spi_mode = 0,
-        .trans_queue_depth = 1,
+        /* Direct rendering ping-pongs two DMA buffers. Keeping both panel
+         * transactions queued lets callers prepare the next chunk while the
+         * SPI peripheral transfers the previous two. */
+        .trans_queue_depth = 2,
         .lcd_cmd_bits = 8,
         .lcd_param_bits = 8,
     };

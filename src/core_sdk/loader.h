@@ -34,7 +34,7 @@ typedef struct {
     const uint8_t *data;
     size_t size;
     bruce_memory_object_t memory;
-} bruce_loader_t;
+} bruce_loader_image_t;
 
 typedef struct {
     const uint8_t *instruction;
@@ -47,10 +47,10 @@ typedef struct {
  * a read-only mapping. data[size] is a trailing NUL byte outside the image
  * size, allowing parsers that require sentinel-terminated input to use the
  * mapping directly. The caller must release successful mappings promptly. */
-bruce_result_t loader__stage_path(const char *path, bruce_loader_t *out_image);
+bruce_result_t loader__stage_path(const char *path, bruce_loader_image_t *out_image);
 /* Transfers a staged image to the current process after a loader spawns it. */
-bruce_result_t loader__adopt_image(bruce_loader_t *image);
-bruce_result_t loader__release_image(bruce_loader_t *image);
+bruce_result_t loader__adopt_image(bruce_loader_image_t *image);
+bruce_result_t loader__release_image(bruce_loader_image_t *image);
 
 /* Allocates executable MMU-page-exclusive space in swap. The mapping
  * remains valid until release; writes are bounds checked and cache coherent. */

@@ -49,7 +49,7 @@ void loader__format_error_message(const char *action, int result, char *out_mess
     );
 }
 
-bruce_result_t loader__stage_path(const char *path, bruce_loader_t *out_image) {
+bruce_result_t loader__stage_path(const char *path, bruce_loader_image_t *out_image) {
     if (path == NULL || out_image == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     memset(out_image, 0, sizeof(*out_image));
 
@@ -115,14 +115,14 @@ bruce_result_t loader__stage_path(const char *path, bruce_loader_t *out_image) {
     return result;
 }
 
-bruce_result_t loader__release_image(bruce_loader_t *image) {
+bruce_result_t loader__release_image(bruce_loader_image_t *image) {
     if (image == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     bruce_result_t result = memory__external_free(&image->memory);
     if (result == BRUCE_OK) memset(image, 0, sizeof(*image));
     return result;
 }
 
-bruce_result_t loader__adopt_image(bruce_loader_t *image) {
+bruce_result_t loader__adopt_image(bruce_loader_image_t *image) {
     if (image == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     return memory_external__adopt(&image->memory);
 }

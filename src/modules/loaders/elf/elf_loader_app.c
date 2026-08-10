@@ -224,7 +224,7 @@ int elf_loader__run_path(
     ctx->argc = full_argc;
     ctx->argv = full_argv;
 
-    bruce_loader_t image;
+    bruce_loader_image_t image;
     bruce_result_t stage_result = loader__stage_path(normalized_path, &image);
     if (stage_result != BRUCE_OK) {
         elf_loader__free_process_ctx(ctx);

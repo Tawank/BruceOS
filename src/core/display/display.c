@@ -352,36 +352,23 @@ void display_internal__draw_rgb_bitmap(
         return;
     }
 #if !CONFIG_BRUCE_QEMU_TEST_MODE
-    /* Ping-pong s_direct_buffer's two halves so this chunk's pixels are
-     * packed (memcpy from the caller's bitmap) while the *previous* chunk's
-     * DMA transfer is still in flight, instead of packing and transferring
-     * strictly one after another. Only one physical transfer can be
-     * outstanding on the bus at a time, so the wait for it is deferred until
-     * right before the next chunk needs to be kicked off -- by then the
-     * packing above has already spent some or all of that wait, which is
-     * what removes the visible chunk-by-chunk "drawing itself" stall on
-     * large direct-mode blits (e.g. full-frame game/emulator redraws). */
+    /* Ping-pong s_direct_buffer's two halves. The panel queue accepts both
+     * halves, so packing and submitting the second chunk doesn't wait for
+     * the first transfer. We wait only when reusing a half, after its earlier
+     * transfer has completed. */
     int16_t rows_per_transfer = DISPLAY__DIRECT_CHUNK_PIXELS / w;
     if (rows_per_transfer > h) rows_per_transfer = h;
     if (rows_per_transfer < 1) rows_per_transfer = 1;
     xSemaphoreTake(s_transfer_mutex, portMAX_DELAY);
     while (xSemaphoreTake(s_transfer_done, 0) == pdTRUE) {}
     bruce_result_t result = BRUCE_OK;
-    bool pending = false;
+    bool pending[2] = {false, false};
     int buf_half = 0;
     for (int16_t row = 0; row < h; row += rows_per_transfer) {
         int16_t rows = h - row;
         if (rows > rows_per_transfer) rows = rows_per_transfer;
-        bruce_display_color_t *buf = s_direct_buffer + (buf_half == 0 ? 0 : DISPLAY__DIRECT_CHUNK_PIXELS);
-        for (int16_t copy_row = 0; copy_row < rows; ++copy_row) {
-            memcpy(
-                &buf[(size_t)copy_row * (size_t)w],
-                &bitmap[(src_y + row + copy_row) * source_stride + src_x],
-                (size_t)w * sizeof(*bitmap)
-            );
-        }
-        if (pending) {
-            pending = false;
+        if (pending[buf_half]) {
+            pending[buf_half] = false;
             int64_t dma_wait_start = esp_timer_get_time();
             if (xSemaphoreTake(s_transfer_done, portMAX_DELAY) != pdTRUE) {
                 result = BRUCE_ERR_IO;
@@ -392,13 +379,22 @@ void display_internal__draw_rgb_bitmap(
                 ESP_LOGW(TAG, "direct display DMA completion took %lld us", (long long)dma_wait_us);
             }
         }
+        bruce_display_color_t *buf = s_direct_buffer + (buf_half == 0 ? 0 : DISPLAY__DIRECT_CHUNK_PIXELS);
+        for (int16_t copy_row = 0; copy_row < rows; ++copy_row) {
+            memcpy(
+                &buf[(size_t)copy_row * (size_t)w],
+                &bitmap[(src_y + row + copy_row) * source_stride + src_x],
+                (size_t)w * sizeof(*bitmap)
+            );
+        }
         result =
             display_driver__draw_bitmap(screen_x, screen_y + row, screen_x + w, screen_y + row + rows, buf);
         if (result != BRUCE_OK) break;
-        pending = true;
+        pending[buf_half] = true;
         buf_half ^= 1;
     }
-    if (pending) {
+    for (int half = 0; half < 2; ++half) {
+        if (!pending[half]) continue;
         int64_t dma_wait_start = esp_timer_get_time();
         if (xSemaphoreTake(s_transfer_done, portMAX_DELAY) != pdTRUE && result == BRUCE_OK)
             result = BRUCE_ERR_IO;
@@ -722,7 +718,10 @@ bruce_result_t display__init(void) {
     s_system_context.state = BRUCE_PROCESS_FOREGROUND;
     s_system_context.viewport = display__fullscreen_rect();
     display__context_defaults(&s_system_context);
-    s_transfer_done = xSemaphoreCreateBinary();
+    /* Direct mode can have two panel transfers queued at once. A counting
+     * semaphore preserves both completion notifications if they arrive before
+     * the renderer next needs either DMA buffer. */
+    s_transfer_done = xSemaphoreCreateCounting(2, 0);
     if (s_transfer_done == NULL) {
         display__release_resources_locked();
         display__unlock();

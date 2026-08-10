@@ -119,9 +119,13 @@ void nes_video_destroy_bitmap(void) { bmp_destroy(&s_screen_bitmap); }
  * skipping at all -- bounds the worst case to "every other frame" rather
  * than a long unbroken run of blank-looking frames. */
 #define NES_SKIP_MAX_DEBT_US (NES_FRAME_PERIOD_US * 3u)
+/* Keep NES emulation/audio at the native rate, but cap expensive panel
+ * updates at every second emulated frame. */
+#define NES_DISPLAY_FRAME_DIVISOR 2u
 
 static uint64_t s_last_iter_ms;
 static uint32_t s_skip_debt_us;
+static uint8_t s_display_frame_phase;
 
 static uint64_t s_perf_report_ms;
 static uint32_t s_perf_frames_drawn;
@@ -196,11 +200,15 @@ static void perf_track_and_report(
          * divide (total_frames * 100000 comfortably fits uint32_t at this
          * report interval and any plausible frame rate). */
         uint32_t fps_x100 = total_frames * 100000u / window_ms;
+        uint32_t display_fps_x100 = s_perf_frames_drawn * 100000u / window_ms;
         printf(
-            "nes: %lu.%02lu fps  iter=%luus (budget %luus)  blit=%luus (convert=%lu submit=%lu present=%lu)  "
+            "nes: emu=%lu.%02lu fps display=%lu.%02lu fps  iter=%luus (budget %luus)  "
+            "blit=%luus (convert=%lu submit=%lu present=%lu)  "
             "audio_write=%luus  skipped=%lu/%lu  batches=%lu/%lu\n",
             (unsigned long)(fps_x100 / 100u),
             (unsigned long)(fps_x100 % 100u),
+            (unsigned long)(display_fps_x100 / 100u),
+            (unsigned long)(display_fps_x100 % 100u),
             (unsigned long)avg_iter_us,
             (unsigned long)NES_FRAME_PERIOD_US,
             (unsigned long)avg_blit_us,
@@ -254,6 +262,14 @@ static bool skip_track_debt(uint64_t now_ms, bool stall) {
         return true;
     }
     return false;
+}
+
+static bool skip_display_frame(bool stall) {
+    if (stall) s_display_frame_phase = 0;
+    bool skip = s_display_frame_phase != 0;
+    s_display_frame_phase++;
+    if (s_display_frame_phase == NES_DISPLAY_FRAME_DIVISOR) s_display_frame_phase = 0;
+    return skip;
 }
 
 /* Minimum real time between the forced watchdog-safety yields below. This
@@ -366,7 +382,9 @@ static void video_blit(bitmap_t *bitmap, int num_dirties, rect_t *dirty_rects) {
 
     uint64_t now_ms = runtime__now();
     bool stall = s_last_iter_ms != 0 && (now_ms - s_last_iter_ms) >= NES_PERF_STALL_MS;
-    bool skip_blit = skip_track_debt(now_ms, stall);
+    bool late = skip_track_debt(now_ms, stall);
+    bool display_capped = skip_display_frame(stall);
+    bool skip_blit = late || display_capped;
 
     int screen_width = display__width();
     int screen_height = display__height();
