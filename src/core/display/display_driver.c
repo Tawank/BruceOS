@@ -63,7 +63,11 @@ static bool display_driver__on_color_trans_done(
     (void)panel_io;
     (void)event_data;
     (void)user_ctx;
-    return display_internal__on_transfer_done_from_isr();
+    bool task_woken = display_internal__on_transfer_done_from_isr();
+#if CONFIG_BRUCE_DISPLAY_BUS_SPI
+    if (task_woken) portYIELD_FROM_ISR();
+#endif
+    return task_woken;
 }
 
 static bruce_result_t display_driver__backlight_init(void) {

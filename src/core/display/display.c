@@ -11,6 +11,7 @@
 #include "esp_attr.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h" // IWYU pragma: keep
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -238,6 +239,7 @@ void display_internal__set_pixel(
             s_framebuffer[screen_y * s_fb_width + screen_x] = color;
         } else {
 #if !CONFIG_BRUCE_QEMU_TEST_MODE
+            xSemaphoreTake(s_transfer_mutex, portMAX_DELAY);
             while (xSemaphoreTake(s_transfer_done, 0) == pdTRUE) {}
             s_direct_buffer[0] = color;
             bruce_result_t result =
@@ -245,6 +247,7 @@ void display_internal__set_pixel(
             if (result == BRUCE_OK && xSemaphoreTake(s_transfer_done, portMAX_DELAY) != pdTRUE) {
                 result = BRUCE_ERR_IO;
             }
+            xSemaphoreGive(s_transfer_mutex);
             if (context->draw_result == BRUCE_OK && result != BRUCE_OK) context->draw_result = result;
 #endif
         }
@@ -278,6 +281,7 @@ void display_internal__fill_rect(
     }
     if (!s_buffered_rendering) {
 #if !CONFIG_BRUCE_QEMU_TEST_MODE
+        xSemaphoreTake(s_transfer_mutex, portMAX_DELAY);
         int16_t rows_per_transfer = DISPLAY__DIRECT_BUF_PIXELS / w;
         if (rows_per_transfer > h) rows_per_transfer = h;
         size_t transfer_pixels = (size_t)w * (size_t)rows_per_transfer;
@@ -295,6 +299,7 @@ void display_internal__fill_rect(
                 break;
             }
         }
+        xSemaphoreGive(s_transfer_mutex);
 #endif
         return;
     }
@@ -359,6 +364,12 @@ void display_internal__draw_rgb_bitmap(
     int16_t rows_per_transfer = DISPLAY__DIRECT_CHUNK_PIXELS / w;
     if (rows_per_transfer > h) rows_per_transfer = h;
     if (rows_per_transfer < 1) rows_per_transfer = 1;
+    int64_t lock_start = esp_timer_get_time();
+    xSemaphoreTake(s_transfer_mutex, portMAX_DELAY);
+    int64_t lock_wait_us = esp_timer_get_time() - lock_start;
+    if (lock_wait_us > 10000) {
+        ESP_LOGW(TAG, "direct display transfer waited %lld us for the transfer lock", (long long)lock_wait_us);
+    }
     while (xSemaphoreTake(s_transfer_done, 0) == pdTRUE) {}
     bruce_result_t result = BRUCE_OK;
     bool pending = false;
@@ -376,9 +387,14 @@ void display_internal__draw_rgb_bitmap(
         }
         if (pending) {
             pending = false;
+            int64_t dma_wait_start = esp_timer_get_time();
             if (xSemaphoreTake(s_transfer_done, portMAX_DELAY) != pdTRUE) {
                 result = BRUCE_ERR_IO;
                 break;
+            }
+            int64_t dma_wait_us = esp_timer_get_time() - dma_wait_start;
+            if (dma_wait_us > 10000) {
+                ESP_LOGW(TAG, "direct display DMA completion took %lld us", (long long)dma_wait_us);
             }
         }
         result =
@@ -387,14 +403,20 @@ void display_internal__draw_rgb_bitmap(
         pending = true;
         buf_half ^= 1;
     }
-    if (pending && xSemaphoreTake(s_transfer_done, portMAX_DELAY) != pdTRUE && result == BRUCE_OK) {
-        result = BRUCE_ERR_IO;
+    if (pending) {
+        int64_t dma_wait_start = esp_timer_get_time();
+        if (xSemaphoreTake(s_transfer_done, portMAX_DELAY) != pdTRUE && result == BRUCE_OK) result = BRUCE_ERR_IO;
+        int64_t dma_wait_us = esp_timer_get_time() - dma_wait_start;
+        if (dma_wait_us > 10000) {
+            ESP_LOGW(TAG, "direct display DMA completion took %lld us", (long long)dma_wait_us);
+        }
     }
+    xSemaphoreGive(s_transfer_mutex);
     if (result != BRUCE_OK && context->draw_result == BRUCE_OK) context->draw_result = result;
 #endif
 }
 
-bool display_internal__on_transfer_done_from_isr(void) {
+IRAM_ATTR bool display_internal__on_transfer_done_from_isr(void) {
     BaseType_t high_priority_woken = pdFALSE;
     if (s_transfer_done != NULL) xSemaphoreGiveFromISR(s_transfer_done, &high_priority_woken);
     return high_priority_woken == pdTRUE;
@@ -519,13 +541,16 @@ bruce_result_t display_internal__stream_row_locked(
     return BRUCE_OK;
 #else
     if (width <= 0 || width > DISPLAY__ROW_BUF_PIXELS) return BRUCE_ERR_INVALID_ARGUMENT;
+    xSemaphoreTake(s_transfer_mutex, portMAX_DELAY);
     memcpy(s_row_buffer, pixels, (size_t)width * sizeof(*pixels));
     while (xSemaphoreTake(s_transfer_done, 0) == pdTRUE) {}
-    if (display_driver__draw_bitmap(x, y, x + width, y + 1, s_row_buffer) != BRUCE_OK ||
-        xSemaphoreTake(s_transfer_done, portMAX_DELAY) != pdTRUE) {
-        return BRUCE_ERR_IO;
-    }
-    return BRUCE_OK;
+    bruce_result_t result =
+        display_driver__draw_bitmap(x, y, x + width, y + 1, s_row_buffer) != BRUCE_OK ||
+                xSemaphoreTake(s_transfer_done, portMAX_DELAY) != pdTRUE
+            ? BRUCE_ERR_IO
+            : BRUCE_OK;
+    xSemaphoreGive(s_transfer_mutex);
+    return result;
 #endif
 }
 
@@ -544,7 +569,9 @@ static void display__configure_rotation(void) {
         s_fb_width = DISPLAY__NATIVE_HEIGHT;
         s_fb_height = DISPLAY__NATIVE_WIDTH;
     }
+    xSemaphoreTake(s_transfer_mutex, portMAX_DELAY);
     display_driver__configure_rotation(s_rotation);
+    xSemaphoreGive(s_transfer_mutex);
 }
 
 static void display__release_resources_locked(void) {
@@ -846,7 +873,9 @@ bruce_result_t display__invert_display(bool invert) {
 #if CONFIG_BRUCE_QEMU_TEST_MODE
     bruce_result_t result = BRUCE_OK;
 #else
+    xSemaphoreTake(s_transfer_mutex, portMAX_DELAY);
     (void)display_driver__invert(invert);
+    xSemaphoreGive(s_transfer_mutex);
     bruce_result_t result = BRUCE_OK;
 #endif
     display__unlock();
@@ -892,7 +921,9 @@ bruce_result_t display__display_on_off(bool on) {
 #if CONFIG_BRUCE_QEMU_TEST_MODE
     bruce_result_t result = BRUCE_OK;
 #else
+    xSemaphoreTake(s_transfer_mutex, portMAX_DELAY);
     (void)display_driver__set_enabled(on);
+    xSemaphoreGive(s_transfer_mutex);
     bruce_result_t result = BRUCE_OK;
 #endif
     display__unlock();
