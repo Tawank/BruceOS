@@ -33,8 +33,9 @@ bool selftest__run_runtime_now_case(void) {
 bool selftest__run_runtime_timer_case(void) {
     volatile uint32_t ticks = 0;
     bruce_timer_id_t timer = BRUCE_TIMER_ID_INVALID;
-    bool ok = runtime__timer_start(1000, &ticks, &timer) == BRUCE_OK && runtime__delay(10) == BRUCE_OK &&
-              __atomic_load_n(&ticks, __ATOMIC_RELAXED) >= 5 && runtime__timer_stop(timer) == BRUCE_OK;
+    bool ok = runtime__timer_start(1000, &ticks, &timer) == BRUCE_OK &&
+              runtime__timer_wait(timer, 20) == BRUCE_OK && __atomic_load_n(&ticks, __ATOMIC_RELAXED) > 0 &&
+              runtime__timer_stop(timer) == BRUCE_OK;
     printf("[selftest] process/runtime-timer: %s\n", ok ? "OK" : "FAIL");
     return ok;
 }

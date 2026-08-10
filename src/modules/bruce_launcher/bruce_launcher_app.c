@@ -8,6 +8,7 @@
 #include "bruce_launcher_icons.h"
 #include "bruce_launcher_menu.h"
 #include "core_sdk/app_runner.h"
+#include "core_sdk/loader.h"
 #include "core_sdk/clock.h"
 #include "core_sdk/config.h"
 #include "core_sdk/device.h"
@@ -524,13 +525,7 @@ static int bruce_launcher__run_entry(const bruce_launcher_entry_t *entry) {
 
     if (result < 0) {
         char message[128];
-        snprintf(
-            message,
-            sizeof(message),
-            "Could not start %s: %s",
-            bruce_launcher__entry_label(entry),
-            app_runner__result_to_string(result)
-        );
+        loader__format_error_message(bruce_launcher__entry_label(entry), result, message, sizeof(message));
         (void)dialog__message(BRUCE_DIALOG_ERROR, "Launch failed", message);
     }
     return result;

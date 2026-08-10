@@ -100,6 +100,7 @@ extern int osd_installtimer(int frequency, void *func, int funcsize,
 
 /* input */
 extern void osd_getinput(void);
+extern void osd_waittimer(void);
 extern void osd_getmouse(int *x, int *y, int *button);
 
 /* filename manipulation */

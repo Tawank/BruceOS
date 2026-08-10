@@ -34,7 +34,7 @@ typedef struct {
     const uint8_t *data;
     size_t size;
     bruce_memory_object_t memory;
-} bruce_loader_image_t;
+} bruce_loader_t;
 
 typedef struct {
     const uint8_t *instruction;
@@ -47,10 +47,10 @@ typedef struct {
  * a read-only mapping. data[size] is a trailing NUL byte outside the image
  * size, allowing parsers that require sentinel-terminated input to use the
  * mapping directly. The caller must release successful mappings promptly. */
-bruce_result_t loader__stage_path(const char *path, bruce_loader_image_t *out_image);
+bruce_result_t loader__stage_path(const char *path, bruce_loader_t *out_image);
 /* Transfers a staged image to the current process after a loader spawns it. */
-bruce_result_t loader__adopt_image(bruce_loader_image_t *image);
-bruce_result_t loader__release_image(bruce_loader_image_t *image);
+bruce_result_t loader__adopt_image(bruce_loader_t *image);
+bruce_result_t loader__release_image(bruce_loader_t *image);
 
 /* Allocates executable MMU-page-exclusive space in swap. The mapping
  * remains valid until release; writes are bounds checked and cache coherent. */
@@ -59,6 +59,15 @@ bruce_result_t
 loader__write_xip(const bruce_loader_xip_image_t *image, size_t offset, const void *data, size_t size);
 bruce_result_t loader__adopt_xip(bruce_loader_xip_image_t *image);
 bruce_result_t loader__release_xip(bruce_loader_xip_image_t *image);
+
+/* Loader implementations may retain a concise diagnostic for the launcher to
+ * show when their launch attempt fails. The text is cleared by passing NULL. */
+void loader__set_error_message(const char *message);
+const char *loader__last_error_message(void);
+
+/* Formats a user-facing launch failure. ABI mismatches explain that the app
+ * needs a newer Bruce version; other results use the SDK error description. */
+void loader__format_error_message(const char *action, int result, char *out_message, size_t out_size);
 
 /* Registers a loader for `extension` (must start with '.', e.g. ".elf").
  * `priority` breaks ties when app_runner__run()'s named resolution finds

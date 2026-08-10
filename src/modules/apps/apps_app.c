@@ -54,8 +54,8 @@ static size_t apps__directory_count(const char *path) {
 }
 
 static void apps__set_label(apps_entry_t *app, const char *filename, bool javascript) {
-    bruce_app_inspection_t *inspection = javascript ? manifest__inspect_javascript(app->path)
-                                                    : manifest__inspect_elf(app->path);
+    bruce_app_inspection_t *inspection =
+        javascript ? manifest__inspect_javascript(app->path) : manifest__inspect_elf(app->path);
     const char *name = inspection != NULL && inspection->manifest.app_name[0] != '\0'
                            ? inspection->manifest.app_name
                            : filename;
@@ -63,9 +63,8 @@ static void apps__set_label(apps_entry_t *app, const char *filename, bool javasc
     memory__free(inspection);
 }
 
-static bruce_result_t apps__scan_directory(
-    const char *directory, apps_entry_t *apps, size_t capacity, size_t *in_out_count
-) {
+static bruce_result_t
+apps__scan_directory(const char *directory, apps_entry_t *apps, size_t capacity, size_t *in_out_count) {
     size_t entry_count = apps__directory_count(directory);
     if (entry_count == 0) return BRUCE_OK;
 
@@ -97,8 +96,8 @@ static int apps__compare(const void *left, const void *right) {
 }
 
 static void apps__show_error(const char *action, bruce_result_t result) {
-    char message[80];
-    snprintf(message, sizeof(message), "%s failed (%d)", action, result);
+    char message[160];
+    loader__format_error_message(action, result, message, sizeof(message));
     (void)dialog__message(BRUCE_DIALOG_ERROR, "Apps", message);
 }
 
@@ -156,7 +155,9 @@ int apps_app_main(int argc, char **argv) {
             break;
         }
 
-        const bruce_environment_variable_t gui_env[] = {{.name = "GUI", .value = "1"}};
+        const bruce_environment_variable_t gui_env[] = {
+            {.name = "GUI", .value = "1"}
+        };
         int process = app_runner__run_path_with_environment(
             apps[selected].path, NULL, BRUCE_LAUNCH_FOREGROUND, gui ? gui_env : NULL, gui ? 1u : 0u
         );

@@ -156,8 +156,8 @@ static bruce_result_t filemanager__show_info(const char *path) {
 }
 
 static void filemanager__show_error(const char *action, bruce_result_t result) {
-    char message[80];
-    snprintf(message, sizeof(message), "%s failed (%d)", action, result);
+    char message[160];
+    loader__format_error_message(action, result, message, sizeof(message));
     (void)dialog__message(BRUCE_DIALOG_ERROR, "File manager", message);
 }
 

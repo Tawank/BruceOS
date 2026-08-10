@@ -364,7 +364,8 @@ elapsed-time measurement and must not be interpreted as wall-clock time.
 increments the supplied counter at the requested microsecond interval without
 calling application code. Timers are independent across processes and are
 automatically stopped on normal exit or forced teardown; owners may stop them
-early with `runtime__timer_stop()`.
+early with `runtime__timer_stop()` or block until the next tick with
+`runtime__timer_wait()`.
 
 ### Device state
 

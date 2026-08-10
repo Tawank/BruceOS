@@ -159,6 +159,12 @@ int osd_installtimer(int frequency, void *func, int funcsize, void *counter, int
                : -1;
 }
 
+void osd_waittimer(void) {
+    if (s_nofrendo_timer != BRUCE_TIMER_ID_INVALID) {
+        (void)runtime__timer_wait(s_nofrendo_timer, UINT32_MAX);
+    }
+}
+
 void osd_fullname(char *fullname, const char *shortname) {
     if (fullname == NULL) return;
     strncpy(fullname, shortname != NULL ? shortname : "", PATH_MAX);

@@ -30,6 +30,9 @@ bruce_result_t runtime__delay(uint32_t milliseconds);
 bruce_result_t runtime__timer_start(
     uint32_t period_us, volatile uint32_t *counter, bruce_timer_id_t *out_timer_id
 );
+/* Waits for the next tick from a timer owned by the calling process. A zero
+ * timeout polls; UINT32_MAX waits indefinitely. */
+bruce_result_t runtime__timer_wait(bruce_timer_id_t timer_id, uint32_t timeout_ms);
 bruce_result_t runtime__timer_stop(bruce_timer_id_t timer_id);
 
 /* Returns true iff the calling process's own "GUI" environment variable is

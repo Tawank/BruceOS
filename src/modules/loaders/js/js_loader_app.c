@@ -17,11 +17,11 @@
 #include "core_sdk/runtime.h"
 #include "core_sdk/storage.h"
 
-#include "audio_js.h"        // IWYU pragma: export
-#include "dialog_js.h"       // IWYU pragma: export
-#include "display_js.h"      // IWYU pragma: export
-#include "icon_js.h"         // IWYU pragma: export
-#include "ir_js.h"           // IWYU pragma: export
+#include "audio_js.h"   // IWYU pragma: export
+#include "dialog_js.h"  // IWYU pragma: export
+#include "display_js.h" // IWYU pragma: export
+#include "icon_js.h"    // IWYU pragma: export
+#include "ir_js.h"      // IWYU pragma: export
 #include "js_source.h"
 #include "js_stdlib.h"       // IWYU pragma: export
 #include "keyboard_js.h"     // IWYU pragma: export
@@ -121,11 +121,7 @@ static void js__app_main(void *context) {
 
     bruce_result_t adopt_result = js_source__adopt(&ctx->source);
     if (adopt_result != BRUCE_OK) {
-        printf(
-            "[js_loader] %s: failed to adopt source (%d)\n",
-            ctx->permission_key,
-            (int)adopt_result
-        );
+        printf("[js_loader] %s: failed to adopt source (%d)\n", ctx->permission_key, (int)adopt_result);
         js_loader__free_process_ctx(ctx);
         return;
     }
@@ -266,10 +262,16 @@ int js_loader__run_path(
 
     bool gui_requested = app_runner__environment_requests_gui(environment, environment_count);
 
-    bruce_loader_image_t parent_image = ctx->source.external;
+    bruce_loader_t parent_image = ctx->source.external;
     int result = app_runner__spawn_loader_process(
-        permission_key, gui_requested, mode, inspection->manifest.stack_size, environment,
-        environment_count, js__app_main, ctx
+        permission_key,
+        gui_requested,
+        mode,
+        inspection->manifest.stack_size,
+        environment,
+        environment_count,
+        js__app_main,
+        ctx
     );
     if (result <= 0) {
         js_loader__free_process_ctx(ctx);

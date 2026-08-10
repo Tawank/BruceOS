@@ -401,9 +401,15 @@ void nes_emulate(void)
       }
       else if ((1 == frames_to_render && true == nes.autoframeskip) || false == nes.autoframeskip)
       {
-         frames_to_render = 0;
-         nes_renderframe(true);
-         system_video(true);
+          frames_to_render = 0;
+          nes_renderframe(true);
+          system_video(true);
+      }
+      else
+      {
+          /* A real OSD timer can wake us exactly on the next emulation tick;
+           * polling here otherwise consumes an entire core between frames. */
+          osd_waittimer();
       }
    }
 }

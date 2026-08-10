@@ -20,6 +20,7 @@
 #include "core_sdk/storage.h"
 
 static size_t s_call_count;
+static char s_missing_symbol[64];
 
 size_t elf_loader__debug_call_count(void) { return s_call_count; }
 
@@ -81,6 +82,10 @@ static uintptr_t elf_loader__find_symbol(const char *sym_name) {
         if (strcmp(syms->name, sym_name) == 0) { return (uintptr_t)syms->sym; }
         syms++;
     }
+    if (sym_name != NULL) {
+        strncpy(s_missing_symbol, sym_name, sizeof(s_missing_symbol) - 1);
+        s_missing_symbol[sizeof(s_missing_symbol) - 1] = '\0';
+    }
     return 0;
 }
 
@@ -115,16 +120,18 @@ static int elf_loader__xip_allocate(
     return 0;
 }
 
-static int elf_loader__xip_write(
-    void *context, uint32_t handle, size_t offset, const void *data, size_t size
-) {
+static int
+elf_loader__xip_write(void *context, uint32_t handle, size_t offset, const void *data, size_t size) {
     elf_loader_process_ctx_t *ctx = context;
     if (ctx->xip.memory.handle != handle) return -EINVAL;
     bruce_result_t result = loader__write_xip(&ctx->xip, offset, data, size);
     if (result != BRUCE_OK) {
         printf(
             "[elf_loader] %s: xip write failed at offset %u size %u (result=%d)\n",
-            ctx->permission_key, (unsigned)offset, (unsigned)size, (int)result
+            ctx->permission_key,
+            (unsigned)offset,
+            (unsigned)size,
+            (int)result
         );
     }
     return result == BRUCE_OK ? 0 : (result == BRUCE_ERR_INVALID_ARGUMENT ? -EINVAL : -EIO);
@@ -148,6 +155,8 @@ int elf_loader__run_path(
     const bruce_environment_variable_t *environment, size_t environment_count
 ) {
     s_call_count++;
+    s_missing_symbol[0] = '\0';
+    loader__set_error_message(NULL);
 
     if (!elf_loader__path_is_valid(path)) { return BRUCE_ERR_INVALID_PATH; }
 
@@ -215,7 +224,7 @@ int elf_loader__run_path(
     ctx->argc = full_argc;
     ctx->argv = full_argv;
 
-    bruce_loader_image_t image;
+    bruce_loader_t image;
     bruce_result_t stage_result = loader__stage_path(normalized_path, &image);
     if (stage_result != BRUCE_OK) {
         elf_loader__free_process_ctx(ctx);
@@ -237,18 +246,30 @@ int elf_loader__run_path(
         );
         elf_loader__free_process_ctx(ctx);
         memory__free(inspection);
+        if (s_missing_symbol[0] != '\0') {
+            char message[128];
+            snprintf(message, sizeof(message), "ELF: Can't find symbol %s", s_missing_symbol);
+            loader__set_error_message(message);
+            return BRUCE_ERR_ABI_MISMATCH;
+        }
         return relocate_result != 0
-                   ? (relocate_result == -ENOMEM
-                          ? BRUCE_ERR_NO_MEMORY
-                          : (relocate_result == -ENOSPC ? BRUCE_ERR_RESOURCE_LIMIT
-                                                       : BRUCE_ERR_INVALID_ARGUMENT))
+                   ? (relocate_result == -ENOMEM ? BRUCE_ERR_NO_MEMORY
+                                                 : (relocate_result == -ENOSPC ? BRUCE_ERR_RESOURCE_LIMIT
+                                                                               : BRUCE_ERR_INVALID_ARGUMENT))
                    : release_result;
     }
 
     bruce_loader_xip_image_t parent_xip = ctx->xip;
     int result = app_runner__spawn_loader_process_owned(
-        permission_key, gui_requested, mode, inspection->manifest.stack_size, environment,
-        environment_count, elf_loader__entry, ctx, elf_loader__cleanup_context
+        permission_key,
+        gui_requested,
+        mode,
+        inspection->manifest.stack_size,
+        environment,
+        environment_count,
+        elf_loader__entry,
+        ctx,
+        elf_loader__cleanup_context
     );
     if (result <= 0) {
         elf_loader__free_process_ctx(ctx);

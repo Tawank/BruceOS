@@ -6,12 +6,14 @@
 
 #include "esp_err.h"
 #include "esp_timer.h"
+#include "freertos/semphr.h"
 
 typedef struct runtime__timer {
     bruce_process_id_t owner;
     bruce_timer_id_t id;
     volatile uint32_t *counter;
     esp_timer_handle_t handle;
+    SemaphoreHandle_t ticks;
     struct runtime__timer *next;
 } runtime__timer_t;
 
@@ -21,7 +23,10 @@ static portMUX_TYPE s_timers_lock = portMUX_INITIALIZER_UNLOCKED;
 static void runtime__timer_alarm(void *argument) {
     runtime__timer_t *timer = argument;
     taskENTER_CRITICAL(&s_timers_lock);
-    if (timer->counter != NULL) __atomic_fetch_add(timer->counter, 1u, __ATOMIC_RELAXED);
+    if (timer->counter != NULL) {
+        __atomic_fetch_add(timer->counter, 1u, __ATOMIC_RELAXED);
+        (void)xSemaphoreGive(timer->ticks);
+    }
     taskEXIT_CRITICAL(&s_timers_lock);
 }
 
@@ -40,6 +45,7 @@ static void runtime__timer_cleanup(void *context) {
 
     (void)esp_timer_stop(timer->handle);
     (void)esp_timer_delete(timer->handle);
+    vSemaphoreDelete(timer->ticks);
     free(timer);
 }
 
@@ -56,6 +62,11 @@ bruce_result_t runtime__timer_start(
     if (timer == NULL) return BRUCE_ERR_NO_MEMORY;
     timer->owner = owner;
     timer->counter = counter;
+    timer->ticks = xSemaphoreCreateBinary();
+    if (timer->ticks == NULL) {
+        free(timer);
+        return BRUCE_ERR_NO_MEMORY;
+    }
 
     esp_timer_create_args_t arguments = {
         .callback = runtime__timer_alarm,
@@ -65,6 +76,7 @@ bruce_result_t runtime__timer_start(
         .skip_unhandled_events = false,
     };
     if (esp_timer_create(&arguments, &timer->handle) != ESP_OK) {
+        vSemaphoreDelete(timer->ticks);
         free(timer);
         return BRUCE_ERR_NO_MEMORY;
     }
@@ -72,6 +84,7 @@ bruce_result_t runtime__timer_start(
     timer->id = process_registry__resource_register(runtime__timer_cleanup, timer);
     if (timer->id == BRUCE_TIMER_ID_INVALID) {
         (void)esp_timer_delete(timer->handle);
+        vSemaphoreDelete(timer->ticks);
         free(timer);
         return BRUCE_ERR_NO_MEMORY;
     }
@@ -90,6 +103,22 @@ bruce_result_t runtime__timer_start(
 
     *out_timer_id = timer->id;
     return BRUCE_OK;
+}
+
+bruce_result_t runtime__timer_wait(bruce_timer_id_t timer_id, uint32_t timeout_ms) {
+    if (timer_id == BRUCE_TIMER_ID_INVALID) return BRUCE_ERR_INVALID_ARGUMENT;
+    bruce_process_id_t owner = process__current_id();
+    if (owner == BRUCE_PROCESS_ID_INVALID) return BRUCE_ERR_INVALID_STATE;
+
+    taskENTER_CRITICAL(&s_timers_lock);
+    runtime__timer_t *timer = s_timers;
+    while (timer != NULL && (timer->owner != owner || timer->id != timer_id)) timer = timer->next;
+    SemaphoreHandle_t ticks = timer != NULL ? timer->ticks : NULL;
+    taskEXIT_CRITICAL(&s_timers_lock);
+    if (ticks == NULL) return BRUCE_ERR_NOT_FOUND;
+
+    TickType_t timeout = timeout_ms == UINT32_MAX ? portMAX_DELAY : pdMS_TO_TICKS(timeout_ms);
+    return xSemaphoreTake(ticks, timeout) == pdTRUE ? BRUCE_OK : BRUCE_ERR_TIMEOUT;
 }
 
 bruce_result_t runtime__timer_stop(bruce_timer_id_t timer_id) {
