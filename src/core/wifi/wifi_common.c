@@ -36,6 +36,7 @@ static esp_netif_t *s_ap_netif;
 static bool s_initialized;
 static bool s_started;
 static bool s_ap_running;
+static bool s_event_loop_owned;
 static char s_active_ssid[CONFIG__WIFI_SSID_MAX_LEN + 1];
 static char s_ip_buffer[16];
 static char s_mac_buffer[18];
@@ -141,7 +142,9 @@ bruce_result_t wifi__init(void) {
         return network_result;
     }
     err = esp_event_loop_create_default();
-    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+    if (err == ESP_OK) {
+        s_event_loop_owned = true;
+    } else if (err != ESP_ERR_INVALID_STATE) {
         ESP_LOGE(TAG, "could not create event loop: %s", esp_err_to_name(err));
         xSemaphoreGive(s_wifi_mutex);
         return BRUCE_ERR_IO;
@@ -209,6 +212,7 @@ bruce_result_t wifi__disconnect(void) {
         esp_netif_destroy_default_wifi(s_ap_netif);
         s_ap_netif = NULL;
     }
+    if (s_event_loop_owned && esp_event_loop_delete_default() == ESP_OK) s_event_loop_owned = false;
     vEventGroupDelete(s_wifi_events);
     s_wifi_events = NULL;
     s_initialized = false;

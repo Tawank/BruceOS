@@ -84,10 +84,14 @@ void memory__free(void *ptr) {
 
 bruce_result_t memory__get_stats(bruce_memory_stats_t *out_stats) {
     if (out_stats == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    multi_heap_info_t internal_info;
+    heap_caps_get_info(&internal_info, MALLOC_CAP_INTERNAL);
     *out_stats = (bruce_memory_stats_t){
         .internal_total = heap_caps_get_total_size(MALLOC_CAP_INTERNAL),
         .internal_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
         .internal_largest_block = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+        .internal_minimum_free = internal_info.minimum_free_bytes,
+        .internal_free_blocks = internal_info.free_blocks,
         .psram_total = heap_caps_get_total_size(MALLOC_CAP_SPIRAM),
         .psram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
         .psram_largest_block = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM),

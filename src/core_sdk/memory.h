@@ -9,6 +9,8 @@ typedef struct {
     size_t internal_total;
     size_t internal_free;
     size_t internal_largest_block;
+    size_t internal_minimum_free;
+    size_t internal_free_blocks;
     size_t psram_total;
     size_t psram_free;
     size_t psram_largest_block;
@@ -81,4 +83,7 @@ bruce_result_t memory__external_map(const bruce_memory_object_t *object, const v
  * caller's object. Payload bytes are not zeroed. */
 bruce_result_t memory__external_free(bruce_memory_object_t *object);
 
+/* Returns current heap capacity plus fragmentation/high-water diagnostics.
+ * `internal_free_blocks` counts currently free allocator blocks across all
+ * internal-capable heap regions; it includes the regions' natural boundaries. */
 bruce_result_t memory__get_stats(bruce_memory_stats_t *out_stats);
