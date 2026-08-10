@@ -11,6 +11,10 @@ CONFIG_ESPTOOLPY_HEADER_FLASHSIZE_UPDATE=y
 # Run the supported ESP32 targets at their maximum CPU frequency.
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ=240
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_ESPTOOLPY_FLASHFREQ="80m"
+CONFIG_SPI_MASTER_ISR_IN_IRAM=y
+CONFIG_SPI_SLAVE_ISR_IN_IRAM=y
 
 # Production build settings: favor compact optimized code and retain warnings
 # without compiling INFO/DEBUG logs into the firmware.
@@ -32,6 +36,7 @@ CONFIG_FREERTOS_USE_TRACE_FACILITY=y
 CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y
 # One Core process-context pointer is attached to each managed task.
 CONFIG_FREERTOS_THREAD_LOCAL_STORAGE_POINTERS=2
+CONFIG_FREERTOS_IN_IRAM=y
 
 # espressif/elf_loader needs executable memory; memory protection in ESP-IDF
 # v6 hides MALLOC_CAP_EXEC when enabled.  Disable it for the ELF loader slice.
