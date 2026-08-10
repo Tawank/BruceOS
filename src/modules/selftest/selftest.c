@@ -6,6 +6,8 @@
 #include "freertos/task.h"
 
 #include "core_sdk/storage.h"
+#include "core_sdk/app_runner.h"
+#include "core_sdk/process.h"
 
 #include "app_runner_test.h"
 #include "args_test.h"
@@ -39,6 +41,30 @@
 void selftest__resource_cleanup(void *context) {
     selftest__shared_t *shared = (selftest__shared_t *)context;
     shared->resource_cleanup_ran = true;
+}
+
+static int selftest__visual_entry(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    int failures = 0;
+    failures += !selftest__run_display_compositor_case();
+    failures += !selftest__run_display_rendering_case();
+    failures += !selftest__run_icon_registry_case();
+    failures += !selftest__run_image_decode_case();
+    failures += !selftest__run_notification_case();
+    return failures == 0 ? 0 : 1;
+}
+
+static bool selftest__run_visual_cases(void) {
+    bruce_result_t registered = app_runner__register("selftest_visual", selftest__visual_entry, 0);
+    if (registered != BRUCE_OK && registered != BRUCE_ERR_ALREADY_EXISTS) return false;
+
+    int launched = app_runner__run_command("GUI=1 selftest_visual", BRUCE_LAUNCH_FOREGROUND);
+    bruce_process_status_t status;
+    bool ok = launched > 0 && process__wait_status((bruce_process_id_t)launched, 5000, &status) == BRUCE_OK &&
+              status.reason == BRUCE_PROCESS_EXITED && status.exit_code == 0;
+    if (!ok) printf("[selftest] visual: foreground GUI child failed\n");
+    return ok;
 }
 
 int selftest_app_main(int argc, char **argv) {
@@ -142,11 +168,7 @@ int selftest_app_main(int argc, char **argv) {
     RUN_SELFTEST(selftest__run_dialog_number_input_case);
     RUN_SELFTEST(selftest__run_dialog_pick_file_case);
     RUN_SELFTEST(selftest__run_dialog_viewer_case);
-    RUN_SELFTEST(selftest__run_display_compositor_case);
-    RUN_SELFTEST(selftest__run_display_rendering_case);
-    RUN_SELFTEST(selftest__run_icon_registry_case);
-    RUN_SELFTEST(selftest__run_image_decode_case);
-    RUN_SELFTEST(selftest__run_notification_case);
+    RUN_SELFTEST(selftest__run_visual_cases);
     RUN_SELFTEST(selftest__run_notification_console_fallback_case);
     RUN_SELFTEST(selftest__run_status_icon_case);
 

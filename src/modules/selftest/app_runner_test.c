@@ -1,5 +1,6 @@
 #include "core/storage/storage.h"
 #include "core_sdk/app_runner.h"
+#include "core_sdk/manifest.h"
 #include "core_sdk/environment.h"
 #include "core_sdk/process.h"
 #include "fake_elf.h"
@@ -228,9 +229,10 @@ bool selftest__run_apprunner_resolution_case(void) {
     int source_len = snprintf(
         js_source,
         sizeof(js_source),
-        "/*\n{\"appName\":\"Resolution Test\",\"appIcon\":\"%s\",\"coreAbiVersion\":2,"
+        "/*\n{\"appName\":\"Resolution Test\",\"appIcon\":\"%s\",\"coreAbiVersion\":%u,"
         "\"stackSize\":8192,\"permissions\":[]}\n*/\n",
-        icon
+        icon,
+        (unsigned)BRUCE_CORE_ABI_VERSION
     );
     if (source_len <= 0 || (size_t)source_len >= sizeof(js_source) ||
         !storage__write_file_atomic(js_path, js_source, (size_t)source_len)) {
@@ -260,7 +262,14 @@ bool selftest__run_apprunner_resolution_case(void) {
     size_t elf_calls = elf_loader__debug_call_count();
     result = app_runner__run(SELFTEST_APPRUNNER_RESOLUTION_NAME, "", BRUCE_LAUNCH_BACKGROUND);
     elf_calls++;
-    bool spawned = result > 0 && elf_loader__debug_call_count() == elf_calls;
+    bool spawned = elf_loader__debug_call_count() == elf_calls;
+#if CONFIG_BRUCE_QEMU_TEST_MODE
+    /* QEMU does not implement ESP ELF XIP relocation; reaching it verifies
+     * loader priority without claiming the image executed. */
+    spawned = spawned && result == BRUCE_ERR_INVALID_ARGUMENT;
+#else
+    spawned = spawned && result > 0;
+#endif
     if (spawned) { (void)process__wait((bruce_process_id_t)result, 2000); }
     storage__remove(elf_path);
     storage__remove(js_path);

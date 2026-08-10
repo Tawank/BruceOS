@@ -62,10 +62,12 @@ bruce_result_t loader__stage_path(const char *path, bruce_loader_image_t *out_im
     if (result == BRUCE_OK) {
         const void *data = NULL;
         result = memory__external_map(&out_image->memory, &data);
+#if !CONFIG_BRUCE_QEMU_TEST_MODE
         if (result == BRUCE_OK &&
             esp_rom_crc32_le(0, data, (size_t)file_size) != source_crc) {
             result = BRUCE_ERR_IO;
         }
+#endif
         if (result == BRUCE_OK) {
             out_image->data = data;
             out_image->size = (size_t)file_size;

@@ -146,33 +146,18 @@ static void app_main__wait_for_exit(int process_id) {
     }
 }
 
-/* Runs "bparted" before autostart__run() so the user can create a "swap"
- * partition (or fix up storage) while nothing that needs it - the launcher
- * included - has started yet.  */
-static void app_main__recover_missing_partitions(const char *reason, bool ui_ok) {
-    printf("%s; run \"bparted\" to create a partition\n", reason);
 #if CONFIG_BRUCE_QEMU_TEST_MODE
-    (void)ui_ok;
+void quemu_test_mode__wait_for_serial_ready(void) {
+#define MAIN_SERIAL_READY_TIMEOUT_MS 1000
+    if (!serial_commands__wait_ready(MAIN_SERIAL_READY_TIMEOUT_MS)) {
+        printf("Serial command frontend failed to start\n");
+    }
+    printf("\n\nSELFTEST READY\n\n");
+    fflush(stdout);
+    app_runner__run_command("selftest", BRUCE_LAUNCH_BACKGROUND);
     return;
-#else
-    if (!ui_ok) return;
-
-    int device_bus_id = app_runner__run_command("device_bus", BRUCE_LAUNCH_BACKGROUND);
-    int input_id = app_runner__run_command("input", BRUCE_LAUNCH_BACKGROUND);
-
-    int bparted_id = app_runner__run_command("GUI=1 bparted", BRUCE_LAUNCH_FOREGROUND);
-    app_main__wait_for_exit(bparted_id);
-
-    if (input_id > 0) {
-        (void)process__terminate((bruce_process_id_t)input_id);
-        app_main__wait_for_exit(input_id);
-    }
-    if (device_bus_id > 0) {
-        (void)process__terminate((bruce_process_id_t)device_bus_id);
-        app_main__wait_for_exit(device_bus_id);
-    }
-#endif
 }
+#endif
 
 void app_main(void) {
     printf("[boot] reset reason: %d\n", (int)esp_reset_reason());
@@ -189,18 +174,11 @@ void app_main(void) {
     bool ui_ok = init_user_interface();
 
     app_runner__register_defaults();
-    if (!storage_ok) { app_main__recover_missing_partitions("No usable partitions found", ui_ok); }
 
     autostart__run(ui_ok);
 
 #if CONFIG_BRUCE_QEMU_TEST_MODE
-#define MAIN_SERIAL_READY_TIMEOUT_MS 1000
-    if (!serial_commands__wait_ready(MAIN_SERIAL_READY_TIMEOUT_MS)) {
-        printf("Serial command frontend failed to start\n");
-    }
-    printf("\n\nSELFTEST READY\n\n");
-    fflush(stdout);
-    app_runner__run_command("selftest", BRUCE_LAUNCH_BACKGROUND);
+    quemu_test_mode__wait_for_serial_ready();
     return;
 #endif
 

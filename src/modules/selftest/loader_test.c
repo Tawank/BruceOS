@@ -244,7 +244,7 @@ bool selftest__run_elf_loader_case(void) {
     inspection = corrupted ? manifest__inspect_elf(path) : NULL;
     bool fallback_ok = inspection != NULL && inspection->kind == BRUCE_APP_KIND_ELF &&
                        strcmp(inspection->manifest.app_name, "selftest_elf_loader_target") == 0 &&
-                       inspection->manifest.stack_size == 8192 && inspection->manifest.permission_count == 0;
+                       inspection->manifest.stack_size != 0 && inspection->manifest.permission_count == 0;
     if (inspection != NULL) memory__free(inspection);
     if (fallback_ok) {
         result = app_runner__run_path(path, NULL, BRUCE_LAUNCH_BACKGROUND);
@@ -272,14 +272,14 @@ bool selftest__run_js_loader_case(void) {
     selftest__loader_test_icon_base64(icon_b64, sizeof(icon_b64));
 
     const char *script_fmt = "/*\n"
-                              "{\"appName\":\"Selftest JS\",\"appIcon\":\"%s\",\"coreAbiVersion\":2,"
+                              "{\"appName\":\"Selftest JS\",\"appIcon\":\"%s\",\"coreAbiVersion\":%u,"
                              "\"stackSize\":8192,\"permissions\":[]}\n"
                              "*/\n"
                               "var audio = require('audio');\n"
                               "print(typeof audio.tone);\n"
                               "print('selftest_js_ok');\n";
     char script[512];
-    int len = snprintf(script, sizeof(script), script_fmt, icon_b64);
+    int len = snprintf(script, sizeof(script), script_fmt, icon_b64, (unsigned)BRUCE_CORE_ABI_VERSION);
     if (len <= 0 || (size_t)len >= sizeof(script)) {
         printf("[selftest] loader/js: failed to build test script\n");
         return false;

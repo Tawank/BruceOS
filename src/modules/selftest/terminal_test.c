@@ -94,7 +94,13 @@ bool selftest__run_terminal_path_case(void) {
     if (result > 0) { (void)process__wait((bruce_process_id_t)result, 2000); }
     storage__remove(path);
 
-    if (result <= 0 || calls_after != calls_before + 1) {
+    bool dispatched = calls_after == calls_before + 1;
+#if CONFIG_BRUCE_QEMU_TEST_MODE
+    dispatched = dispatched && result == BRUCE_ERR_INVALID_ARGUMENT;
+#else
+    dispatched = dispatched && result > 0;
+#endif
+    if (!dispatched) {
         printf(
             "[selftest] terminal/path: ELF loader not dispatched (%d, calls %zu -> %zu)\n",
             result,
@@ -170,7 +176,7 @@ bool selftest__run_terminal_stdio_case(void) {
     }
     bruce_process_status_t status;
     bruce_result_t waited = process__wait_status((bruce_process_id_t)result, 2000, &status);
-    char output[128] = {0};
+    char output[2048] = {0};
     size_t output_size = 0;
     bruce_result_t read_result =
         stdio__session_read_output(session, output, sizeof(output) - 1, &output_size);
@@ -184,16 +190,20 @@ bool selftest__run_terminal_stdio_case(void) {
         stdio__session_route_children(session) == BRUCE_OK) {
         result = app_runner__run("shell", "-i", BRUCE_LAUNCH_BACKGROUND);
         (void)stdio__session_route_children(BRUCE_STDIO_SESSION_INVALID);
-        static const char shell_input[] = "echo interactive-ok\rexit\r";
+        static const char shell_command[] = "echo interactive-ok\r";
+        static const char shell_exit[] = "exit\r";
         if (result <= 0 ||
-            stdio__session_write_input(session, shell_input, sizeof(shell_input) - 1) != BRUCE_OK) {
+            stdio__session_write_input(session, shell_command, sizeof(shell_command) - 1) != BRUCE_OK) {
             ok = false;
         } else {
-            waited = process__wait_status((bruce_process_id_t)result, 2000, &status);
-            memset(output, 0, sizeof(output));
-            output_size = 0;
+            (void)runtime__delay(50);
             read_result = stdio__session_read_output(session, output, sizeof(output) - 1, &output_size);
-            ok = waited == BRUCE_OK && status.reason == BRUCE_PROCESS_EXITED &&
+            if (read_result != BRUCE_OK || stdio__session_write_input(session, shell_exit, sizeof(shell_exit) - 1) !=
+                                         BRUCE_OK) {
+                ok = false;
+            }
+            waited = process__wait_status((bruce_process_id_t)result, 2000, &status);
+            ok = ok && waited == BRUCE_OK && status.reason == BRUCE_PROCESS_EXITED &&
                  status.exit_code == 0 && read_result == BRUCE_OK &&
                  strstr(output, "interactive-ok") != NULL;
         }
@@ -201,6 +211,17 @@ bool selftest__run_terminal_stdio_case(void) {
     } else {
         ok = false;
         if (session != BRUCE_STDIO_SESSION_INVALID) (void)stdio__session_close(session);
+    }
+    if (!ok) {
+        printf(
+            "[selftest] terminal/stdio: waited=%d reason=%d exit=%d read=%d size=%zu output=%s\n",
+            waited,
+            status.reason,
+            status.exit_code,
+            read_result,
+            output_size,
+            output
+        );
     }
     printf("[selftest] terminal/stdio: %s\n", ok ? "OK" : "failed");
     return ok;

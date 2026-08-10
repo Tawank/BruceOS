@@ -515,7 +515,7 @@ static int bruce_launcher__run_entry(const bruce_launcher_entry_t *entry) {
      * BG itself is left to app_runner__run_command() to parse off the line; the
      * launcher only picks the default for entries that don't say. */
     char command[BRUCE_LAUNCHER_COMMAND_MAX + 8];
-    if (bruce_launcher__command_sets(entry->command, "GUI")) {
+    if (!runtime__gui_requested() || bruce_launcher__command_sets(entry->command, "GUI")) {
         snprintf(command, sizeof(command), "%s", entry->command);
     } else {
         snprintf(command, sizeof(command), "GUI=1 %s", entry->command);

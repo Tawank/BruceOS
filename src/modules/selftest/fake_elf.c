@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "core/storage/storage.h"
+#include "core_sdk/manifest.h"
 
 #if CONFIG_IDF_TARGET_ARCH_RISCV
 #define SELFTEST_FAKE_ELF_MACHINE 243u /* EM_RISCV, must match elf_loader.c */
@@ -69,10 +70,11 @@ bool selftest__write_fake_elf(
     int offset = snprintf(
         manifest,
         sizeof(manifest),
-        "{\"appName\":\"%s\",\"appIcon\":\"%s\",\"coreAbiVersion\":2,\"stackSize\":8192,"
+        "{\"appName\":\"%s\",\"appIcon\":\"%s\",\"coreAbiVersion\":%u,\"stackSize\":8192,"
         "\"permissions\":[",
         app_name,
-        icon_b64
+        icon_b64,
+        (unsigned)BRUCE_CORE_ABI_VERSION
     );
     for (size_t i = 0; i < permission_count && offset > 0 && (size_t)offset < sizeof(manifest); ++i) {
         offset += snprintf(

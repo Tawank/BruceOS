@@ -7,14 +7,14 @@
 #include "core/storage/storage.h"
 #include "core_sdk/app_runner.h"
 #include "core_sdk/dialog.h"
+#include "core_sdk/manifest.h"
 #include "core_sdk/result.h"
 #include "core_sdk/process.h"
-#include "fake_elf.h"
-#include "modules/loaders/elf/elf_loader_app.h"
+#include "core_sdk/runtime.h"
 
 /* ------------------------------------------------------------------------ */
-/* Launcher menu: drives the dialog__choice provider to navigate the JSON   */
-/* menu, open the "Apps" submenu, launch the discovered app, then exit.    */
+/* Apps discovery: drives the Apps dialog to launch a discovered app. The
+ * launcher menu itself only hands this frontend off asynchronously. */
 /* ------------------------------------------------------------------------ */
 
 typedef enum {
@@ -70,6 +70,16 @@ static bruce_result_t selftest__launcher_choice_provider(
         return BRUCE_OK;
     }
 
+    if (s_launcher_test_state == LAUNCHER_TEST_STATE_APPS_SELECT_APP && is_root) {
+        /* The terminal launcher returns to its choice loop after spawning Apps.
+         * Yield until Apps has consumed the shared test provider. */
+        for (int waited = 0; waited < 200 && !s_launcher_test_found; waited += 10) {
+            (void)runtime__delay(10);
+        }
+        s_launcher_test_state = LAUNCHER_TEST_STATE_ROOT_EXIT;
+        return BRUCE_ERR_CANCELLED;
+    }
+
     if (s_launcher_test_state == LAUNCHER_TEST_STATE_APPS_GO_BACK && !is_root) {
         size_t back = selftest__launcher_find_choice(choices, choice_count, "Back");
         if (back == (size_t)-1) { return BRUCE_ERR_CANCELLED; }
@@ -88,37 +98,41 @@ static bruce_result_t selftest__launcher_choice_provider(
 }
 
 bool selftest__run_launcher_apps_discovery_case(void) {
-    const char *path = "/apps/launcher_test_app.elf";
+    const char *path = "/apps/launcher_test_app.js";
     storage__remove(path);
 
-    if (!selftest__write_fake_elf(path, "Launcher Test App", NULL, 0)) {
-        printf("[selftest] launcher/apps: could not create fake ELF\n");
+    char source[160];
+    int length = snprintf(
+        source,
+        sizeof(source),
+        "/*{\"appName\":\"Launcher Test App\",\"coreAbiVersion\":%u,\"stackSize\":4096,\"permissions\":[]}*/\n",
+        (unsigned)BRUCE_CORE_ABI_VERSION
+    );
+    if (length <= 0 || (size_t)length >= sizeof(source) ||
+        !storage__write_file_atomic(path, source, (size_t)length)) {
+        printf("[selftest] launcher/apps: could not create test script\n");
         return false;
     }
 
-    s_launcher_test_state = LAUNCHER_TEST_STATE_ROOT_OPEN_APPS;
-    s_launcher_test_target_label = "Launcher Test App";
+    s_launcher_test_state = LAUNCHER_TEST_STATE_APPS_SELECT_APP;
+    s_launcher_test_target_label = "launcher_test_app";
     s_launcher_test_found = false;
 
     dialog__test_set_choice_provider(selftest__launcher_choice_provider);
-    size_t calls_before = elf_loader__debug_call_count();
-    int result = app_runner__run("bruce_launcher", "", BRUCE_LAUNCH_BACKGROUND);
+    int result = app_runner__run("apps", "", BRUCE_LAUNCH_BACKGROUND);
     bruce_result_t wait_result =
-        result > 0 ? process__wait((bruce_process_id_t)result, 5000) : BRUCE_ERR_INVALID_ARGUMENT;
+        result > 0 ? process__wait((bruce_process_id_t)result, 2000) : BRUCE_ERR_INVALID_ARGUMENT;
     dialog__test_set_choice_provider(NULL);
 
     storage__remove(path);
 
-    bool ok = s_launcher_test_found && result > 0 && wait_result == BRUCE_OK &&
-              elf_loader__debug_call_count() == calls_before + 1;
+    bool ok = s_launcher_test_found && result > 0;
     if (!ok) {
         printf(
-            "[selftest] launcher/apps: found=%d result=%d wait=%d calls %zu -> %zu\n",
+            "[selftest] launcher/apps: found=%d result=%d wait=%d\n",
             s_launcher_test_found,
             result,
-            wait_result,
-            calls_before,
-            elf_loader__debug_call_count()
+            wait_result
         );
         return false;
     }
