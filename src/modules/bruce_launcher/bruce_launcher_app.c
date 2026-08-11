@@ -662,6 +662,10 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
         bruce_input_event_t ev;
         bruce_result_t result = input__read(&ev, 100);
         if (result == BRUCE_ERR_NOT_FOREGROUND) {
+            /* Core clears this process's display on its first frame after it
+             * regains foreground. Invalidate the cached selection so that
+             * frame repaints the whole launcher, not only the status bar. */
+            last_drawn = -1;
             (void)runtime__sleep(BRUCE_LAUNCHER_BACKGROUND_WAIT_MS);
             continue;
         }
