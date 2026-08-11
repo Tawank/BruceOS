@@ -91,7 +91,7 @@ static int config_app__clock_gui(void) {
         };
         size_t selected = 0;
         bruce_result_t result =
-            dialog__choice("System clock", "UTC system time, local display", choices, 7, &selected, NULL);
+            dialog__choice_launcher("System clock", "UTC system time, local display", choices, 7, &selected);
         if (result == BRUCE_ERR_CANCELLED || selected == 6) return BRUCE_OK;
         if (result != BRUCE_OK) return result;
         if (selected == 0) {
@@ -151,7 +151,7 @@ static int config_app__clock_cli(
     if (action == ntp) {
         bool value;
         return config_app__parse_on_off(ap_get_arg(ntp, "state"), &value)
-                    ? config__set_time_automatic_update_via_ntp(value)
+                   ? config__set_time_automatic_update_via_ntp(value)
                    : BRUCE_ERR_INVALID_ARGUMENT;
     }
     if (action == timezone) {
@@ -197,21 +197,13 @@ static int config_app__display_gui(void) {
     for (;;) {
         bool buffered = config__get_display_buffered_rendering();
         char buffered_label[48];
-        snprintf(buffered_label, sizeof(buffered_label), "Buffered rendering: %s", buffered ? "ON" : "OFF");
+        snprintf(buffered_label, sizeof(buffered_label), "DMA Buf (64kB): %s", buffered ? "ON" : "OFF");
         const bruce_dialog_choice_t choices[] = {
             {.label = buffered_label, .value = "buffered"},
             {.label = "Back",         .value = "back"    },
         };
         size_t selected = 0;
-        bruce_result_t result = dialog__choice(
-            "Display rendering",
-            buffered ? "Smooth complete frames; uses about 65 KB RAM"
-                     : "Direct drawing saves RAM; screenshots unavailable",
-            choices,
-            2,
-            &selected,
-            NULL
-        );
+        bruce_result_t result = dialog__choice_launcher("Display & UI", NULL, choices, 2, &selected);
         if (result == BRUCE_ERR_CANCELLED || selected == 1) return BRUCE_OK;
         if (result != BRUCE_OK) return result;
         result = config__set_display_buffered_rendering(!buffered);

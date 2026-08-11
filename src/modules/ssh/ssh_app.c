@@ -373,12 +373,7 @@ static bruce_result_t ssh_app__verify_host_key(bruce_ssh_id_t session, const cha
         );
         choices[0].label = "Trust new key & continue";
         choice_result = dialog__choice(
-            "SSH host key changed",
-            "The remote host key does not match the saved one.",
-            choices,
-            2,
-            &selected,
-            NULL
+            "SSH host key changed", "The remote host key does not match the saved one.", choices, 2, &selected
         );
     } else {
         stdio__printf(
@@ -389,8 +384,7 @@ static bruce_result_t ssh_app__verify_host_key(bruce_ssh_id_t session, const cha
             "Verify this fingerprint out-of-band before trusting it.",
             choices,
             2,
-            &selected,
-            NULL
+            &selected
         );
     }
     if (choice_result != BRUCE_OK || selected != 0) return BRUCE_ERR_PERMISSION;

@@ -202,15 +202,6 @@ static int dialog__default_list_text_size(void) {
 }
 
 static void dialog__get_theme_colors(uint16_t *pri, uint16_t *sec, uint16_t *bg) {
-    /* Core-private, ungated: dialog.c draws its own UI chrome (title bars,
-     * footers, backgrounds, and permission-request prompts themselves), not
-     * config the calling process asked to read. Going through the public
-     * core_sdk/config.h getters here would make every getter return black
-     * (0) whenever the caller lacks "config" - rendering every dialog,
-     * including the "config" permission prompt itself, in unreadable black
-     * on black (the prompt can never be answered because it can't be seen,
-     * and its own theme lookup nested inside the same prompt fails closed via
-     * permission__prompt_guarded()'s reentrancy guard - see permission.c). */
     config__get_theme_colors_internal(pri, sec, bg);
 }
 
@@ -248,7 +239,7 @@ static void dialog__gui_footer(const char *hint) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Window chrome renderer registry                                           */
+/* Window renderer registry                                           */
 /* -------------------------------------------------------------------------- */
 
 static bruce_dialog_window_renderer_t s_window_renderer;
@@ -341,41 +332,34 @@ static bruce_result_t dialog__gui_choice(
     const char *title, const char *message, const bruce_dialog_choice_t *choices, size_t choice_count,
     size_t *out_selected, const bruce_dialog_render_params_t *render_params
 ) {
-    /* window_chrome degrades to the plain layout below if nothing ever
-     * registered a renderer (dialog__set_window_renderer()) - there is then
-     * no border/status bar to draw around, so the choice list just uses
-     * whatever plain fields the caller also set (typically none). */
-    bool window_chrome = render_params != NULL && render_params->window_chrome && s_window_renderer_set;
-    /* Honor the caller's requested starting highlight (e.g.
-     * permission__prompt() pre-selects "Deny" as the safe default for a
-     * security prompt) instead of always opening on choice 0. */
+    bool render_launcher = render_params != NULL && render_params->render_launcher && s_window_renderer_set;
     int selected = out_selected != NULL && *out_selected < choice_count ? (int)*out_selected : 0;
     int first_visible = 0;
     int w = display__width();
     int h = display__height();
-    int left = window_chrome ? s_window_renderer.padding_left
-                             : (render_params != NULL ? render_params->padding_left : 0);
-    int top = window_chrome ? s_window_renderer.padding_top
-                            : (render_params != NULL ? render_params->padding_top : 0);
-    int right = w - (window_chrome ? s_window_renderer.padding_right
-                                   : (render_params != NULL ? render_params->padding_right : 0));
-    int bottom = h - (window_chrome ? s_window_renderer.padding_bottom
-                                    : (render_params != NULL ? render_params->padding_bottom : 0));
-    bool render_borders = !window_chrome && (render_params == NULL || render_params->render_borders);
+    int left = render_launcher ? s_window_renderer.padding_left
+                               : (render_params != NULL ? render_params->padding_left : 0);
+    int top = render_launcher ? s_window_renderer.padding_top
+                              : (render_params != NULL ? render_params->padding_top : 0);
+    int right = w - (render_launcher ? s_window_renderer.padding_right
+                                     : (render_params != NULL ? render_params->padding_right : 0));
+    int bottom = h - (render_launcher ? s_window_renderer.padding_bottom
+                                      : (render_params != NULL ? render_params->padding_bottom : 0));
+    bool render_borders = !render_launcher && (render_params == NULL || render_params->render_borders);
     int viewport_w = right - left;
     int viewport_h = bottom - top;
     int text_size = render_params != NULL && render_params->text_size > 0 ? render_params->text_size
-                    : window_chrome && s_window_renderer.text_size > 0    ? s_window_renderer.text_size
-                    : window_chrome                                       ? 1
+                    : render_launcher && s_window_renderer.text_size > 0  ? s_window_renderer.text_size
+                    : render_launcher                                     ? 1
                                                                           : dialog__default_list_text_size();
 
     uint16_t pri, sec, bg;
     dialog__get_theme_colors(&pri, &sec, &bg);
     bruce_display_color_t background_color =
-        window_chrome ? bg : (render_params != NULL ? render_params->background_color : bg);
+        render_launcher ? bg : (render_params != NULL ? render_params->background_color : bg);
     bruce_display_color_t text_color =
-        window_chrome ? pri : (render_params != NULL ? render_params->text_color : pri);
-    uint32_t refresh_interval_ms = window_chrome           ? s_window_renderer.status_refresh_interval_ms
+        render_launcher ? pri : (render_params != NULL ? render_params->text_color : pri);
+    uint32_t refresh_interval_ms = render_launcher         ? s_window_renderer.status_refresh_interval_ms
                                    : render_params != NULL ? render_params->refresh_interval_ms
                                                            : 0u;
     int row_h = DIALOG__CHAR_H * text_size + 2;
@@ -386,9 +370,9 @@ static bruce_result_t dialog__gui_choice(
     if (usable_h < row_h) { return BRUCE_ERR_INVALID_ARGUMENT; }
     int items_per_page = usable_h / row_h;
     bool redraw = true;
-    bool chrome_border_drawn = false;
+    bool launcher_border_drawn = false;
     uint64_t rendered_at = 0;
-    bool wants_periodic_refresh = window_chrome
+    bool wants_periodic_refresh = render_launcher
                                       ? s_window_renderer.draw_status != NULL
                                       : render_params != NULL && render_params->render_callback != NULL;
 
@@ -414,11 +398,11 @@ static bruce_result_t dialog__gui_choice(
                 first_visible = selected - items_per_page + 1;
             }
 
-            if (window_chrome && !chrome_border_drawn) {
+            if (render_launcher && !launcher_border_drawn) {
                 if (s_window_renderer.draw_border != NULL) {
                     s_window_renderer.draw_border(s_window_renderer_context);
                 }
-                chrome_border_drawn = true;
+                launcher_border_drawn = true;
             }
 
             display__fill_rect(left, top, viewport_w, viewport_h, background_color);
@@ -458,7 +442,7 @@ static bruce_result_t dialog__gui_choice(
             }
 
             if (render_borders) { display__fill_rect(left, bottom - footer_h, viewport_w, footer_h, sec); }
-            if (window_chrome) {
+            if (render_launcher) {
                 if (s_window_renderer.draw_status != NULL) {
                     s_window_renderer.draw_status(s_window_renderer_context);
                 }
@@ -1250,7 +1234,47 @@ bruce_result_t dialog__message(bruce_dialog_kind_t kind, const char *title, cons
     return dialog__term_message(kind, title, message);
 }
 
+static const bruce_dialog_render_params_t s_window_popup = {
+    .padding_top = 24, .padding_bottom = 24, .padding_left = 48, .padding_right = 48, .render_borders = true
+};
 bruce_result_t dialog__choice(
+    const char *title, const char *message, const bruce_dialog_choice_t *choices, size_t choice_count,
+    size_t *out_selected
+) {
+    if (choices == NULL || choice_count == 0 || out_selected == NULL) { return BRUCE_ERR_INVALID_ARGUMENT; }
+    bool gui = dialog__current_process_wants_gui();
+    s_last_call_was_gui = gui;
+
+    if (s_test_choice_provider != NULL) {
+        return s_test_choice_provider(title, message, choices, choice_count, out_selected);
+    }
+
+    if (gui) {
+        return dialog__gui_choice(title, message, choices, choice_count, out_selected, &s_window_popup);
+    }
+    return dialog__term_choice(title, message, choices, choice_count, out_selected);
+}
+
+static const bruce_dialog_render_params_t s_window_launcher = {.render_launcher = true};
+bruce_result_t dialog__choice_launcher(
+    const char *title, const char *message, const bruce_dialog_choice_t *choices, size_t choice_count,
+    size_t *out_selected
+) {
+    if (choices == NULL || choice_count == 0 || out_selected == NULL) { return BRUCE_ERR_INVALID_ARGUMENT; }
+    bool gui = dialog__current_process_wants_gui();
+    s_last_call_was_gui = gui;
+
+    if (s_test_choice_provider != NULL) {
+        return s_test_choice_provider(title, message, choices, choice_count, out_selected);
+    }
+
+    if (gui) {
+        return dialog__gui_choice(title, message, choices, choice_count, out_selected, &s_window_launcher);
+    }
+    return dialog__term_choice(title, message, choices, choice_count, out_selected);
+}
+
+bruce_result_t dialog__choice_ex(
     const char *title, const char *message, const bruce_dialog_choice_t *choices, size_t choice_count,
     size_t *out_selected, const bruce_dialog_render_params_t *render_params
 ) {

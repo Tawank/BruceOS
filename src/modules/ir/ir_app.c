@@ -11,18 +11,14 @@
 #include "core_sdk/input.h"
 #include "core_sdk/ir.h"
 #include "core_sdk/memory.h"
+#include "core_sdk/process.h"
 #include "core_sdk/result.h"
+#include "core_sdk/runtime.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
-#include "core_sdk/process.h"
-#include "core_sdk/runtime.h"
 
 #define IR_APP_CAPTURE_SIZE 8192u
 #define IR_APP_LIBRARY_PATH "/BruceIR"
-
-/* Renders IR's GUI menus inside the launcher's window chrome (same border,
- * status bar, and font as the WiFi submenu); a no-op outside GUI mode. */
-static const bruce_dialog_render_params_t s_window_chrome = {.window_chrome = true};
 
 typedef struct {
     const char *protocol;
@@ -190,7 +186,7 @@ static bruce_result_t ir_app__prepare_learning_file(
                 {.label = "Cancel",        .value = "cancel"   },
             };
             size_t selected = 0;
-            result = dialog__choice("Remote exists", path, collision, 4, &selected, &s_window_chrome);
+            result = dialog__choice_launcher("Remote exists", path, collision, 4, &selected);
             if (result != BRUCE_OK || selected == 3) return BRUCE_ERR_CANCELLED;
             if (selected == 0) {
                 bool available = false;
@@ -253,7 +249,7 @@ static bruce_result_t ir_app__custom_learn(void) {
         {.label = "Cancel",         .value = "cancel" },
     };
     size_t mode = 0;
-    bruce_result_t result = dialog__choice("Custom learn", "Capture format", modes, 3, &mode, &s_window_chrome);
+    bruce_result_t result = dialog__choice_launcher("Custom learn", "Capture format", modes, 3, &mode);
     if (result != BRUCE_OK || mode == 2) return BRUCE_ERR_CANCELLED;
 
     char *capture = memory__malloc(IR_APP_CAPTURE_SIZE);
@@ -265,8 +261,8 @@ static bruce_result_t ir_app__custom_learn(void) {
             {.label = "Cancel",       .value = "cancel"},
         };
         size_t selected = 0;
-        if (dialog__choice(
-                "Unknown protocol", "Capture this signal as raw timings?", retry, 2, &selected, &s_window_chrome
+        if (dialog__choice_launcher(
+                "Unknown protocol", "Capture this signal as raw timings?", retry, 2, &selected
             ) == BRUCE_OK &&
             selected == 0) {
             result = ir_app__capture_signal(true, "the button again", capture);
@@ -285,7 +281,7 @@ static bruce_result_t ir_app__custom_learn(void) {
             {.label = "Discard",     .value = "discard"},
         };
         size_t action = 0;
-        result = dialog__choice("Signal captured", "Choose an action", actions, 4, &action, &s_window_chrome);
+        result = dialog__choice_launcher("Signal captured", "Choose an action", actions, 4, &action);
         if (result != BRUCE_OK || action == 3) break;
         if (action == 1) {
             result = ir__transmit_record(capture, 0);
@@ -335,7 +331,7 @@ static bruce_result_t ir_app__quick_learn(void) {
     };
     size_t device = 0;
     bruce_result_t result =
-        dialog__choice("Quick remote setup", "Device template", devices, 6, &device, &s_window_chrome);
+        dialog__choice_launcher("Quick remote setup", "Device template", devices, 6, &device);
     if (result != BRUCE_OK || device == 5) return BRUCE_ERR_CANCELLED;
 
     const char *const *buttons = s_tv_buttons;
@@ -359,7 +355,7 @@ static bruce_result_t ir_app__quick_learn(void) {
         {.label = "Decoded NEC",       .value = "decoded"},
     };
     size_t format = 0;
-    result = dialog__choice("Quick remote setup", "Capture format", formats, 2, &format, &s_window_chrome);
+    result = dialog__choice_launcher("Quick remote setup", "Capture format", formats, 2, &format);
     if (result != BRUCE_OK) return result;
 
     char remote[BRUCE_STORAGE_NAME_MAX];
@@ -380,7 +376,7 @@ static bruce_result_t ir_app__quick_learn(void) {
                 {.label = "Finish", .value = "finish"},
             };
             size_t action = 0;
-            if (dialog__choice("No signal", buttons[button], failed, 3, &action, &s_window_chrome) != BRUCE_OK ||
+            if (dialog__choice_launcher("No signal", buttons[button], failed, 3, &action) != BRUCE_OK ||
                 action == 2)
                 break;
             if (action == 1) button++;
@@ -395,7 +391,7 @@ static bruce_result_t ir_app__quick_learn(void) {
             {.label = "Finish", .value = "finish"},
         };
         size_t action = 0;
-        if (dialog__choice("Captured", buttons[button], captured, 5, &action, &s_window_chrome) != BRUCE_OK ||
+        if (dialog__choice_launcher("Captured", buttons[button], captured, 5, &action) != BRUCE_OK ||
             action == 4)
             break;
         if (action == 1) {
@@ -576,7 +572,7 @@ static int ir_app__gui(void) {
     };
     for (;;) {
         size_t selected = 0;
-        bruce_result_t result = dialog__choice("Infrared", message, choices, 7, &selected, &s_window_chrome);
+        bruce_result_t result = dialog__choice_launcher("Infrared", message, choices, 7, &selected);
         if (result == BRUCE_ERR_CANCELLED || selected == 6) return 0;
         if (result != BRUCE_OK) return result;
         if (selected == 0) {
@@ -586,7 +582,7 @@ static int ir_app__gui(void) {
                 {.label = "Cancel",               .value = "cancel"},
             };
             size_t region = 0;
-            if (dialog__choice("TV-B-Gone", "Select region", regions, 3, &region, &s_window_chrome) == BRUCE_OK &&
+            if (dialog__choice_launcher("TV-B-Gone", "Select region", regions, 3, &region) == BRUCE_OK &&
                 region < 2) {
                 (void)ir_app__tvbgone(region == 1, true);
             }
@@ -600,7 +596,7 @@ static int ir_app__gui(void) {
                 {.label = "Cancel",         .value = "cancel"  },
             };
             size_t mode = 0;
-            if (dialog__choice("IR jammer", "Select pattern", modes, 6, &mode, &s_window_chrome) == BRUCE_OK &&
+            if (dialog__choice_launcher("IR jammer", "Select pattern", modes, 6, &mode) == BRUCE_OK &&
                 mode < 5) {
                 (void)ir_app__jammer(38000, 0, (unsigned int)mode, true);
             }
@@ -624,7 +620,7 @@ static int ir_app__gui(void) {
                 {.label = "Cancel",         .value = "cancel" },
             };
             size_t read_mode = 0;
-            if (dialog__choice("Read signal", "Capture format", read_modes, 3, &read_mode, &s_window_chrome) ==
+            if (dialog__choice_launcher("Read signal", "Capture format", read_modes, 3, &read_mode) ==
                     BRUCE_OK &&
                 read_mode < 2) {
                 (void)ir_app__receive(read_mode == 1, 10000, true);
@@ -728,9 +724,7 @@ static int ir_app__learn_cli(ArgParser *parser) {
 }
 
 int ir_app_main(int argc, char **argv) {
-    if (runtime__gui_requested()) {
-        return ir_app__gui();
-    }
+    if (runtime__gui_requested()) { return ir_app__gui(); }
 
     ArgParser *root = ap_new_parser();
     if (root == NULL) return BRUCE_ERR_NO_MEMORY;
@@ -766,7 +760,9 @@ int ir_app_main(int argc, char **argv) {
     ap_add_required_arg(tx, "data_or_address", "Hex data or protocol address");
     ap_add_optional_arg(tx, "bits_or_command", "Bit count or protocol command");
     ap_add_optional_arg(tx, "repeats", "Repeat count (0-255)");
-    ap_set_helptext(tx_raw, "Transmit raw timings: tx_raw <frequency_hz> <timing_us> [...]. Commas are accepted.");
+    ap_set_helptext(
+        tx_raw, "Transmit raw timings: tx_raw <frequency_hz> <timing_us> [...]. Commas are accepted."
+    );
     ap_add_required_arg(tx_raw, "frequency_hz", "Carrier frequency in Hz");
     ap_allow_extra_args(tx_raw);
     ap_first_pos_arg_ends_option_parsing(tx_raw);

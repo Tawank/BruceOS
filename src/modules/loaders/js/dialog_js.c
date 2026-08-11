@@ -53,7 +53,7 @@ JSValue native_dialogMessage(JSContext *ctx, JSValue *this_val, int argc, JSValu
     }
 
     size_t selected = 0;
-    bruce_result_t result = dialog__choice(NULL, msg, choices, choice_count, &selected, NULL);
+    bruce_result_t result = dialog__choice(NULL, msg, choices, choice_count, &selected);
     if (result != BRUCE_OK) { return JS_NewString(ctx, ""); }
 
     const char *rv = "right";
@@ -177,7 +177,7 @@ JSValue native_dialogChoice(JSContext *ctx, JSValue *this_val, int argc, JSValue
     }
 
     size_t selected = 0;
-    bruce_result_t result = dialog__choice(NULL, NULL, choices, choice_count, &selected, NULL);
+    bruce_result_t result = dialog__choice(NULL, NULL, choices, choice_count, &selected);
     if (result != BRUCE_OK || selected >= choice_count) { return JS_NewString(ctx, ""); }
     return JS_NewString(ctx, choices[selected].value);
 }

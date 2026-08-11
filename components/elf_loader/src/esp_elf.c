@@ -15,7 +15,6 @@
 
 #include "esp_elf.h"
 #include "esp_log.h"
-#include "soc/soc_caps.h"
 
 #if SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE
 #include "hal/cache_ll.h"
@@ -297,9 +296,9 @@ static int esp_elf_load_section(esp_elf_t *elf, const uint8_t *pbuf) {
             }
         }
     }
-    size_t text_work_size =
-        xip && elf->xip_rodata_staged ? elf->xip_rodata_offset + elf->sec[ELF_SEC_RODATA].size
-                                      : elf->sec[ELF_SEC_TEXT].size;
+    size_t text_work_size = xip && elf->xip_rodata_staged
+                                ? elf->xip_rodata_offset + elf->sec[ELF_SEC_RODATA].size
+                                : elf->sec[ELF_SEC_TEXT].size;
     size_t xip_size = elf->xip_rodata_offset + elf->sec[ELF_SEC_RODATA].size;
     elf->ptext = esp_elf_malloc(text_work_size, !xip);
     if (!elf->ptext) {
@@ -330,8 +329,7 @@ static int esp_elf_load_section(esp_elf_t *elf, const uint8_t *pbuf) {
     if (xip) {
         const uint8_t *instruction = NULL;
         const uint8_t *data = NULL;
-        int ret =
-            elf->xip_ops->allocate(elf->xip_context, xip_size, &instruction, &data, &elf->xip_handle);
+        int ret = elf->xip_ops->allocate(elf->xip_context, xip_size, &instruction, &data, &elf->xip_handle);
         if (ret != 0 || !instruction || !data || !elf->xip_handle) { return ret != 0 ? ret : -ENOMEM; }
         elf->xip_data = data;
         elf->sec[ELF_SEC_TEXT].addr = (uintptr_t)instruction;
@@ -345,8 +343,11 @@ static int esp_elf_load_section(esp_elf_t *elf, const uint8_t *pbuf) {
             );
         } else if (elf->sec[ELF_SEC_RODATA].size) {
             int ret = elf->xip_ops->write(
-                elf->xip_context, elf->xip_handle, elf->xip_rodata_offset,
-                pbuf + elf->sec[ELF_SEC_RODATA].offset, elf->sec[ELF_SEC_RODATA].size
+                elf->xip_context,
+                elf->xip_handle,
+                elf->xip_rodata_offset,
+                pbuf + elf->sec[ELF_SEC_RODATA].offset,
+                elf->sec[ELF_SEC_RODATA].size
             );
             if (ret != 0) return ret;
         }
@@ -776,11 +777,12 @@ static int esp_elf_relocate_internal(esp_elf_t *elf, const uint8_t *pbuf) {
         }
         if (ret != 0) return ret;
         if (memcmp(elf->xip_data, elf->ptext, elf->sec[ELF_SEC_TEXT].size) != 0 ||
-            (elf->sec[ELF_SEC_RODATA].size && elf->xip_rodata_staged && memcmp(
-                                                  elf->xip_data + elf->xip_rodata_offset,
-                                                  (const void *)elf->sec[ELF_SEC_RODATA].reloc_addr,
-                                                  elf->sec[ELF_SEC_RODATA].size
-                                              ) != 0)) {
+            (elf->sec[ELF_SEC_RODATA].size && elf->xip_rodata_staged &&
+             memcmp(
+                 elf->xip_data + elf->xip_rodata_offset,
+                 (const void *)elf->sec[ELF_SEC_RODATA].reloc_addr,
+                 elf->sec[ELF_SEC_RODATA].size
+             ) != 0)) {
             return -EIO;
         }
         esp_elf_free(elf->ptext);

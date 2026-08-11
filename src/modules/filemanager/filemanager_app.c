@@ -161,20 +161,14 @@ static void filemanager__show_error(const char *action, bruce_result_t result) {
     (void)dialog__message(BRUCE_DIALOG_ERROR, "Apps", message);
 }
 
-static bruce_result_t
-filemanager__delete_file(const char *path, const bruce_dialog_render_params_t *render_params) {
+static bruce_result_t filemanager__delete_file(const char *path) {
     const bruce_dialog_choice_t confirm_actions[] = {
         {.label = "Delete", .value = "delete"},
         {.label = "Cancel", .value = "cancel"},
     };
     size_t selected = 0;
     bruce_result_t result = dialog__choice(
-        "Delete file?",
-        path,
-        confirm_actions,
-        sizeof(confirm_actions) / sizeof(confirm_actions[0]),
-        &selected,
-        render_params
+        "Delete file?", path, confirm_actions, sizeof(confirm_actions) / sizeof(confirm_actions[0]), &selected
     );
     if (result != BRUCE_OK) return result;
     if (selected != 0) return BRUCE_ERR_CANCELLED;
@@ -211,7 +205,7 @@ int filemanager_app_main(int argc, char **argv) {
         filemanager__dirname(path, last_dir, sizeof(last_dir));
 
         size_t selected = 0;
-        result = dialog__choice(
+        result = dialog__choice_ex(
             "File manager", path, actions, sizeof(actions) / sizeof(actions[0]), &selected, &action_params
         );
         if (result == BRUCE_ERR_CANCELLED && filemanager__resume_after_handoff()) {
@@ -237,7 +231,7 @@ int filemanager_app_main(int argc, char **argv) {
             );
             result = process > 0 ? BRUCE_OK : (bruce_result_t)process;
         } else {
-            result = filemanager__delete_file(path, &action_params);
+            result = filemanager__delete_file(path);
         }
         if (result != BRUCE_OK && result != BRUCE_ERR_CANCELLED) {
             filemanager__show_error(actions[selected].label, result);

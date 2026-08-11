@@ -299,6 +299,8 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     /* Dialog */
     ESP_ELFSYM_EXPORT(dialog__message),
     ESP_ELFSYM_EXPORT(dialog__choice),
+    ESP_ELFSYM_EXPORT(dialog__choice_launcher),
+    ESP_ELFSYM_EXPORT(dialog__choice_ex),
     ESP_ELFSYM_EXPORT(dialog__pick_file),
     ESP_ELFSYM_EXPORT(dialog__text_input),
     ESP_ELFSYM_EXPORT(dialog__hex_input),

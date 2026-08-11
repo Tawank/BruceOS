@@ -21,11 +21,6 @@
  * headroom than a single explicit connect gets. */
 #define WIFI_APP_KNOWN_CONNECT_BANNER_MS 20000u
 
-/* Renders inside the launcher's window chrome (same border, status bar, and
- * font as every other GUI tool menu -- see modules/ir/ir_app.c,
- * modules/nrf24/nrf24_app.c); a no-op outside GUI mode. */
-static const bruce_dialog_render_params_t s_window_chrome = {.window_chrome = true};
-
 /* Networks a single scan can hold on screen at once, and the width of one
  * formatted row ("<ssid> <rssi> dBm [<tag>]"). */
 #define WIFI_APP_GUI_SCAN_MAX 24
@@ -182,7 +177,7 @@ static int wifi_app__gui(void) {
         (void)notification__push("Wi-Fi scan ended", 1000);
         size_t selected = 0;
         bruce_result_t result =
-            dialog__choice("Wi-Fi networks", subtitle, choices, exit_index + 1, &selected, &s_window_chrome);
+            dialog__choice_launcher("Wi-Fi networks", subtitle, choices, exit_index + 1, &selected);
         if (result == BRUCE_ERR_CANCELLED || selected == exit_index) return 0;
         if (result != BRUCE_OK) return -1;
         if (selected == rescan_index) continue;

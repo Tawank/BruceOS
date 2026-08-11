@@ -996,7 +996,7 @@ static int webui_app__gui(void) {
             {.label = "Stop and exit",                          .value = "stop-exit"},
         };
         size_t selected = 0;
-        bruce_result_t result = dialog__choice("WebUI", "Browser access", choices, 3, &selected, NULL);
+        bruce_result_t result = dialog__choice_launcher("WebUI", "Browser access", choices, 3, &selected);
         if (result == BRUCE_ERR_CANCELLED || selected == 1u) return BRUCE_OK;
         if (result != BRUCE_OK) return result;
         if (selected == 2u) {
@@ -1026,8 +1026,9 @@ static int webui_app__gui(void) {
             {.label = "Cancel",             .value = "cancel"},
         };
         size_t network = 0;
-        result =
-            dialog__choice("Start WebUI", "Existing Wi-Fi unavailable", network_choices, 2, &network, NULL);
+        result = dialog__choice_launcher(
+            "Start WebUI", "Existing Wi-Fi unavailable", network_choices, 2, &network
+        );
         if (result == BRUCE_ERR_CANCELLED || (result == BRUCE_OK && network == 1u)) continue;
         if (result != BRUCE_OK) return result;
         (void)webui_app__start(WEBUI_APP_NETWORK_AP, true);

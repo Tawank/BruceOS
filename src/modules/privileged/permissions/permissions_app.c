@@ -271,8 +271,9 @@ static void permissions_app__gui_app(const char *app) {
         char title[BRUCE_PERMISSION_FILE_NAME_MAX + 16];
         snprintf(title, sizeof(title), "%s permissions", app);
         size_t selected = 0;
-        bruce_result_t result =
-            dialog__choice(title, "Select to toggle Allow/Deny", choices, entry_count + 2, &selected, NULL);
+        bruce_result_t result = dialog__choice_launcher(
+            title, "Select to toggle Allow/Deny", choices, entry_count + 2, &selected
+        );
         if (result == BRUCE_ERR_CANCELLED || selected == entry_count + 1) return;
         if (result != BRUCE_OK) return;
 
@@ -309,7 +310,7 @@ static int permissions_app__gui(void) {
 
         size_t selected = 0;
         bruce_result_t result =
-            dialog__choice("App permissions", "Select an app", choices, app_count + 2, &selected, NULL);
+            dialog__choice_launcher("App permissions", "Select an app", choices, app_count + 2, &selected);
         if (result == BRUCE_ERR_CANCELLED || selected == app_count + 1) return BRUCE_OK;
         if (result != BRUCE_OK) return result;
 
@@ -319,13 +320,12 @@ static int permissions_app__gui(void) {
                 {.label = "Wipe all", .value = "wipe"  },
             };
             size_t confirm_selected = 0;
-            if (dialog__choice(
+            if (dialog__choice_launcher(
                     "Wipe all?",
                     "Clears every app's saved permission decisions",
                     confirm_choices,
                     2,
-                    &confirm_selected,
-                    NULL
+                    &confirm_selected
                 ) == BRUCE_OK &&
                 confirm_selected == 1) {
                 (void)permissions_app__wipe_cli("confirm");

@@ -1,3 +1,4 @@
+#include "esp_log.h"
 #include "esp_log_level.h"
 #include "esp_system.h"
 #include <stdio.h>
@@ -160,7 +161,7 @@ void quemu_test_mode__wait_for_serial_ready(void) {
 #endif
 
 void app_main(void) {
-    printf("[boot] reset reason: %d\n", (int)esp_reset_reason());
+    ESP_LOGI("boot", "reset reason: %d\n", (int)esp_reset_reason());
     device__power_hold_init();
 
     bool storage_ok = init_storage();

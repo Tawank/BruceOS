@@ -5,16 +5,12 @@
 #include "args.h"
 #include "core_sdk/bluetooth.h"
 #include "core_sdk/dialog.h"
-#include "core_sdk/result.h"
-#include "core_sdk/stdio.h"
 #include "core_sdk/process.h"
+#include "core_sdk/result.h"
 #include "core_sdk/runtime.h"
+#include "core_sdk/stdio.h"
 
 #define BLUETOOTH_APP__MAX_RESULTS 32
-
-/* Renders Bluetooth's GUI menus inside the launcher's window chrome (same
- * border, status bar, and font as the WiFi submenu); a no-op outside GUI mode. */
-static const bruce_dialog_render_params_t s_window_chrome = {.window_chrome = true};
 
 static bool bluetooth_app__resume_after_handoff(void) {
     bruce_process_snapshot_t snapshot;
@@ -29,9 +25,8 @@ static bool bluetooth_app__resume_after_handoff(void) {
     return snapshot.state == BRUCE_PROCESS_FOREGROUND;
 }
 
-static bruce_result_t bluetooth_app__message(
-    bruce_dialog_kind_t type, const char *title, const char *message
-) {
+static bruce_result_t
+bluetooth_app__message(bruce_dialog_kind_t type, const char *title, const char *message) {
     bruce_result_t result;
     do {
         result = dialog__message(type, title, message);
@@ -97,10 +92,9 @@ static int bluetooth_app__scan_gui(void) {
     size_t selected = 0;
     bruce_result_t choice_result;
     do {
-        choice_result =
-            dialog__choice(
-                "BLE Advertisements", "Select a device", choices, (size_t)count, &selected, &s_window_chrome
-            );
+        choice_result = dialog__choice_launcher(
+            "BLE Advertisements", "Select a device", choices, (size_t)count, &selected
+        );
     } while (choice_result == BRUCE_ERR_CANCELLED && bluetooth_app__resume_after_handoff());
     if (choice_result == BRUCE_OK) {
         char details[160];
@@ -131,12 +125,9 @@ int bluetooth_app_main(int argc, char **argv) {
         size_t selected = 0;
         bruce_result_t choice_result;
         do {
-            choice_result =
-                dialog__choice("Bluetooth", "Select an action", choices, 1, &selected, &s_window_chrome);
+            choice_result = dialog__choice_launcher("Bluetooth", "Select an action", choices, 1, &selected);
         } while (choice_result == BRUCE_ERR_CANCELLED && bluetooth_app__resume_after_handoff());
-        if (choice_result == BRUCE_OK) {
-            return bluetooth_app__scan_gui();
-        }
+        if (choice_result == BRUCE_OK) { return bluetooth_app__scan_gui(); }
         return 0;
     }
 
@@ -149,9 +140,9 @@ int bluetooth_app_main(int argc, char **argv) {
         ap_status_t status = ap_get_status(root);
         if (status != AP_STATUS_HELP && status != AP_STATUS_VERSION)
             ap_print_help(ap_get_cmd_parser(root) != NULL ? ap_get_cmd_parser(root) : root);
-        int result = status == AP_STATUS_HELP || status == AP_STATUS_VERSION
-                         ? BRUCE_OK
-                         : status == AP_STATUS_NO_MEMORY ? BRUCE_ERR_NO_MEMORY : BRUCE_ERR_INVALID_ARGUMENT;
+        int result = status == AP_STATUS_HELP || status == AP_STATUS_VERSION ? BRUCE_OK
+                     : status == AP_STATUS_NO_MEMORY                         ? BRUCE_ERR_NO_MEMORY
+                                                                             : BRUCE_ERR_INVALID_ARGUMENT;
         ap_free(root);
         return result;
     }

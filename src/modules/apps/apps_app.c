@@ -19,10 +19,6 @@
 
 #define APPS_LABEL_MAX (BRUCE_MANIFEST_APP_NAME_MAX + 16u)
 
-/* Renders the Apps browser inside the launcher's window chrome (same border,
- * status bar, and font as the WiFi submenu) in GUI mode; ignored otherwise. */
-static const bruce_dialog_render_params_t s_window_chrome = {.window_chrome = true};
-
 typedef struct {
     char label[APPS_LABEL_MAX];
     char path[BRUCE_STORAGE_PATH_MAX];
@@ -146,8 +142,7 @@ int apps_app_main(int argc, char **argv) {
 
     for (;;) {
         size_t selected = 0;
-        result =
-            dialog__choice("Apps", "Installed apps and scripts", choices, count, &selected, &s_window_chrome);
+        result = dialog__choice_launcher("Apps", "Installed apps and scripts", choices, count, &selected);
         if (result == BRUCE_ERR_CANCELLED && apps__resume_after_handoff()) continue;
         if (result == BRUCE_ERR_CANCELLED) break;
         if (result != BRUCE_OK) {

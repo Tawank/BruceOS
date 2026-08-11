@@ -5,10 +5,10 @@
 #include "args.h"
 #include "core_sdk/bluetooth_hid.h"
 #include "core_sdk/dialog.h"
-#include "core_sdk/result.h"
-#include "core_sdk/stdio.h"
 #include "core_sdk/process.h"
+#include "core_sdk/result.h"
 #include "core_sdk/runtime.h"
+#include "core_sdk/stdio.h"
 
 #define BLUETOOTH_HID_APP__MAX_RESULTS 24
 
@@ -131,8 +131,8 @@ static int bluetooth_hid_app__scan_and_connect_gui(void) {
         choices[i].value = labels[i];
     }
     size_t selected = 0;
-    bruce_result_t choice = dialog__choice(
-        "Classic Bluetooth HID", "Select a controller", choices, (size_t)count, &selected, NULL
+    bruce_result_t choice = dialog__choice_launcher(
+        "Classic Bluetooth HID", "Select a controller", choices, (size_t)count, &selected
     );
     return choice == BRUCE_OK ? bluetooth_hid_app__connect(devices[selected].address, true) : 0;
 }
@@ -149,16 +149,14 @@ static int bluetooth_hid_app__gui(void) {
         {"Disconnect",       "disconnect"},
     };
     size_t selected = 0;
-    if (dialog__choice("Bluetooth HID", "Keyboards and gamepads", choices, 2, &selected, NULL) != BRUCE_OK)
+    if (dialog__choice_launcher("Bluetooth HID", "Keyboards and gamepads", choices, 2, &selected) != BRUCE_OK)
         return 0;
     if (selected == 1) return bluetooth_hid__disconnect();
     return bluetooth_hid_app__scan_and_connect_gui();
 }
 
 int bluetooth_hid_app_main(int argc, char **argv) {
-    if (runtime__gui_requested()) {
-        return bluetooth_hid_app__gui();
-    }
+    if (runtime__gui_requested()) { return bluetooth_hid_app__gui(); }
 
     ArgParser *root = ap_new_parser();
     if (root == NULL) return BRUCE_ERR_NO_MEMORY;
@@ -176,9 +174,9 @@ int bluetooth_hid_app_main(int argc, char **argv) {
         ap_status_t parse_status = ap_get_status(root);
         if (parse_status != AP_STATUS_HELP && parse_status != AP_STATUS_VERSION)
             ap_print_help(ap_get_cmd_parser(root) != NULL ? ap_get_cmd_parser(root) : root);
-        int result = parse_status == AP_STATUS_HELP || parse_status == AP_STATUS_VERSION
-                         ? BRUCE_OK
-                         : parse_status == AP_STATUS_NO_MEMORY ? BRUCE_ERR_NO_MEMORY : BRUCE_ERR_INVALID_ARGUMENT;
+        int result = parse_status == AP_STATUS_HELP || parse_status == AP_STATUS_VERSION ? BRUCE_OK
+                     : parse_status == AP_STATUS_NO_MEMORY                               ? BRUCE_ERR_NO_MEMORY
+                                                           : BRUCE_ERR_INVALID_ARGUMENT;
         ap_free(root);
         return result;
     }

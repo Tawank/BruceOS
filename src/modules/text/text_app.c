@@ -329,12 +329,7 @@ static bruce_result_t text__exit_prompt(char *path, size_t path_size, text_edito
     };
     size_t selected = 0;
     bruce_result_t result = dialog__choice(
-        "Unsaved changes",
-        text__basename(path),
-        choices,
-        sizeof(choices) / sizeof(choices[0]),
-        &selected,
-        NULL
+        "Unsaved changes", text__basename(path), choices, sizeof(choices) / sizeof(choices[0]), &selected
     );
     if (result == BRUCE_ERR_CANCELLED || selected == 2) return BRUCE_OK;
     if (result != BRUCE_OK) return result;
@@ -361,7 +356,7 @@ static bruce_result_t text__actions(char *path, size_t path_size, text_editor_t 
     size_t selected = 0;
     *out_exit = false;
     bruce_result_t result = dialog__choice(
-        "Text editor", text__basename(path), choices, sizeof(choices) / sizeof(choices[0]), &selected, NULL
+        "Text editor", text__basename(path), choices, sizeof(choices) / sizeof(choices[0]), &selected
     );
     if (result == BRUCE_ERR_CANCELLED || selected == 3) return BRUCE_OK;
     if (result != BRUCE_OK) return result;

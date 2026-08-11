@@ -61,9 +61,6 @@ typedef enum {
     BPARTED_GUI_ACTION_EXIT,
 } bparted_gui_action_t;
 
-/* The whole screen in one allocation, built once per redraw and owned by
- * bparted_gui__main()'s frame: the choice list points into row_text, so the
- * text has to outlive the dialog__choice() call that renders it. */
 typedef struct {
     bruce_partition_entry_t current[BPARTED_LAYOUT_MAX];
     size_t current_count;
@@ -98,7 +95,7 @@ static bool bparted_gui__confirm(const char *title, const char *message, const c
         {.label = "Back",        .value = "back"   },
     };
     size_t selected = 1;
-    bruce_result_t result = dialog__choice(title, message, choices, 2, &selected, NULL);
+    bruce_result_t result = dialog__choice_launcher(title, message, choices, 2, &selected);
     return result == BRUCE_OK && selected == 0;
 }
 
@@ -124,8 +121,7 @@ static void bparted_gui__format_row(const bruce_partition_entry_t *entry, char *
     );
 }
 
-static bool
-bparted_gui__has_label(const bruce_partition_entry_t *entries, size_t count, const char *label) {
+static bool bparted_gui__has_label(const bruce_partition_entry_t *entries, size_t count, const char *label) {
     for (size_t i = 0; i < count; ++i) {
         if (entries[i].state == BRUCE_PARTITION_STATE_DELETED) continue;
         if (strcmp(entries[i].label, label) == 0) return true;
@@ -166,13 +162,15 @@ static bruce_result_t bparted_gui__refresh(bparted_gui_page_t *page) {
 
     bruce_result_t result = bparted_common__clamp_list(
         partition_manager__list_current(page->current, BPARTED_LAYOUT_MAX, &page->current_count),
-        &page->current_count, BPARTED_LAYOUT_MAX
+        &page->current_count,
+        BPARTED_LAYOUT_MAX
     );
     if (result != BRUCE_OK) return result;
 
     result = bparted_common__clamp_list(
         partition_manager__list_planned(page->planned, BPARTED_PLANNED_MAX, &page->planned_count),
-        &page->planned_count, BPARTED_PLANNED_MAX
+        &page->planned_count,
+        BPARTED_PLANNED_MAX
     );
     if (result != BRUCE_OK) return result;
 
@@ -207,7 +205,9 @@ static bruce_result_t bparted_gui__refresh(bparted_gui_page_t *page) {
     bparted_common__format_size(page->status.unallocated_bytes, free_text, sizeof(free_text));
     bparted_common__format_size(page->status.total_bytes, total_text, sizeof(total_text));
     if (page->status.has_pending_changes) {
-        snprintf(page->summary, sizeof(page->summary), "Not applied yet - %s free of %s", free_text, total_text);
+        snprintf(
+            page->summary, sizeof(page->summary), "Not applied yet - %s free of %s", free_text, total_text
+        );
     } else if (page->status.reboot_required) {
         snprintf(page->summary, sizeof(page->summary), "Applied - reboot to take effect");
     } else {
@@ -244,7 +244,8 @@ static void bparted_gui__apply(const bparted_gui_page_t *page) {
         return;
     }
     if (!bparted_gui__confirm(
-            "Apply", "Save this layout? Partitions marked new, delete or format are erased on the next boot.",
+            "Apply",
+            "Save this layout? Partitions marked new, delete or format are erased on the next boot.",
             "Apply"
         )) {
         return;
@@ -274,8 +275,13 @@ static void bparted_gui__cancel(const bparted_gui_page_t *page) {
  * stage_create() is only going to reject. */
 static bool bparted_gui__pick_size(uint64_t max_bytes, uint64_t *out_bytes) {
     static const uint64_t presets[] = {
-        64ull * 1024ull,   128ull * 1024ull,  256ull * 1024ull,       512ull * 1024ull,
-        1024ull * 1024ull, 2048ull * 1024ull, 4096ull * 1024ull,
+        64ull * 1024ull,
+        128ull * 1024ull,
+        256ull * 1024ull,
+        512ull * 1024ull,
+        1024ull * 1024ull,
+        2048ull * 1024ull,
+        4096ull * 1024ull,
     };
     enum { BPARTED_GUI_PRESETS = sizeof(presets) / sizeof(presets[0]) };
 
@@ -306,7 +312,7 @@ static bool bparted_gui__pick_size(uint64_t max_bytes, uint64_t *out_bytes) {
     count++;
 
     size_t selected = 0;
-    if (dialog__choice("New partition", "Size", choices, count, &selected, NULL) != BRUCE_OK) return false;
+    if (dialog__choice("New partition", "Size", choices, count, &selected) != BRUCE_OK) return false;
     if (selected == count - 1) return false;
     if (selected < preset_count) {
         *out_bytes = presets[selected];
@@ -340,8 +346,7 @@ static void bparted_gui__create(const bparted_gui_page_t *page) {
 
     /* A second swap partition is meaningless - core/memory looks for exactly
      * one - and stage_create() would reject it, so it is not offered. */
-    bool offer_swap =
-        !bparted_gui__has_label(page->planned, page->planned_count, BRUCE_PARTITION_SWAP_LABEL);
+    bool offer_swap = !bparted_gui__has_label(page->planned, page->planned_count, BRUCE_PARTITION_SWAP_LABEL);
 
     bruce_dialog_choice_t kinds[3];
     size_t kind_count = 0;
@@ -358,7 +363,7 @@ static void bparted_gui__create(const bparted_gui_page_t *page) {
     kind_count++;
 
     size_t selected = 0;
-    if (dialog__choice("New partition", "Type", kinds, kind_count, &selected, NULL) != BRUCE_OK) return;
+    if (dialog__choice("New partition", "Type", kinds, kind_count, &selected) != BRUCE_OK) return;
     if (selected == kind_count - 1) return;
 
     char label[BRUCE_PARTITION_LABEL_MAX];
@@ -391,9 +396,8 @@ static void bparted_gui__create(const bparted_gui_page_t *page) {
  * not exist on flash yet (a new partition is formatted when it is created).
  * Rows already staged for deletion are gone from that layout and so are
  * skipped by both. */
-static bool bparted_gui__pick_target(
-    const bparted_gui_page_t *page, bool for_format, char *out_label, size_t out_size
-) {
+static bool
+bparted_gui__pick_target(const bparted_gui_page_t *page, bool for_format, char *out_label, size_t out_size) {
     /* Bounded by one layout, not by the planned list: everything skipped
      * below is exactly what makes the planned list the longer of the two. */
     char labels[BPARTED_LAYOUT_MAX][BPARTED_GUI_ROW_TEXT];
@@ -415,8 +419,9 @@ static bool bparted_gui__pick_target(
 
     if (count == 0) {
         bparted_gui__notify(
-            BRUCE_DIALOG_INFO, for_format ? "Nothing here can be formatted."
-                                          : "Nothing here can be deleted - '/' can only be formatted."
+            BRUCE_DIALOG_INFO,
+            for_format ? "Nothing here can be formatted."
+                       : "Nothing here can be deleted - '/' can only be formatted."
         );
         return false;
     }
@@ -426,9 +431,8 @@ static bool bparted_gui__pick_target(
     count++;
 
     size_t selected = 0;
-    if (dialog__choice(
-            for_format ? "Format" : "Delete", "Which partition?", choices, count, &selected, NULL
-        ) != BRUCE_OK) {
+    if (dialog__choice(for_format ? "Format" : "Delete", "Which partition?", choices, count, &selected) !=
+        BRUCE_OK) {
         return false;
     }
     if (selected == count - 1) return false;
@@ -486,8 +490,11 @@ static bool bparted_gui__confirm_exit(const bparted_gui_page_t *page) {
         size_t selected = 2;
         /* Backing out of the warning itself is another way of saying "stay". */
         if (dialog__choice(
-                "Unapplied changes", "The next-boot layout has changes you have not applied.", choices, 3,
-                &selected, NULL
+                "Unapplied changes",
+                "The next-boot layout has changes you have not applied.",
+                choices,
+                3,
+                &selected
             ) != BRUCE_OK) {
             return false;
         }
@@ -517,8 +524,7 @@ static bool bparted_gui__confirm_exit(const bparted_gui_page_t *page) {
         };
         size_t selected = 2;
         if (dialog__choice(
-                "Not applied yet", "The saved layout only takes effect after a reboot.", choices, 3,
-                &selected, NULL
+                "Not applied yet", "The saved layout only takes effect after a reboot.", choices, 3, &selected
             ) != BRUCE_OK) {
             return false;
         }
@@ -548,7 +554,7 @@ int bparted_gui__main(int argc, char **argv) {
          * do not send it back to the top of the layout every time. */
         if (selected >= page.row_count) selected = 0;
 
-        result = dialog__choice("Partitions", page.summary, page.choices, page.row_count, &selected, NULL);
+        result = dialog__choice_launcher("Partitions", page.summary, page.choices, page.row_count, &selected);
         if (result != BRUCE_OK && result != BRUCE_ERR_CANCELLED) {
             bparted_gui__report("Partitions", result);
             return result;
@@ -558,16 +564,16 @@ int bparted_gui__main(int argc, char **argv) {
         bparted_gui_action_t action =
             result == BRUCE_OK ? (bparted_gui_action_t)page.actions[selected] : BPARTED_GUI_ACTION_EXIT;
         switch (action) {
-        case BPARTED_GUI_ACTION_CREATE: bparted_gui__create(&page); break;
-        case BPARTED_GUI_ACTION_DELETE: bparted_gui__delete(&page); break;
-        case BPARTED_GUI_ACTION_FORMAT: bparted_gui__format(&page); break;
-        case BPARTED_GUI_ACTION_APPLY: bparted_gui__apply(&page); break;
-        case BPARTED_GUI_ACTION_CANCEL: bparted_gui__cancel(&page); break;
-        case BPARTED_GUI_ACTION_REBOOT: bparted_gui__reboot(); break;
-        case BPARTED_GUI_ACTION_EXIT:
-            if (bparted_gui__confirm_exit(&page)) return 0;
-            break;
-        case BPARTED_GUI_ACTION_NONE: break;
+            case BPARTED_GUI_ACTION_CREATE: bparted_gui__create(&page); break;
+            case BPARTED_GUI_ACTION_DELETE: bparted_gui__delete(&page); break;
+            case BPARTED_GUI_ACTION_FORMAT: bparted_gui__format(&page); break;
+            case BPARTED_GUI_ACTION_APPLY: bparted_gui__apply(&page); break;
+            case BPARTED_GUI_ACTION_CANCEL: bparted_gui__cancel(&page); break;
+            case BPARTED_GUI_ACTION_REBOOT: bparted_gui__reboot(); break;
+            case BPARTED_GUI_ACTION_EXIT:
+                if (bparted_gui__confirm_exit(&page)) return 0;
+                break;
+            case BPARTED_GUI_ACTION_NONE: break;
         }
     }
 }

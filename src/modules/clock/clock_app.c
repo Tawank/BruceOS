@@ -1,7 +1,6 @@
 #include "clock_app.h"
 
 #include "args.h"
-#include "core_sdk/app_runner.h"
 #include "core_sdk/clock.h"
 #include "core_sdk/config.h"
 #include "core_sdk/dialog.h"
@@ -258,7 +257,7 @@ static int clock_app__gui(void) {
         if (result != CLOCK_APP_OPEN_MENU) return result;
 
         size_t selected = 0;
-        bruce_result_t choice_result = dialog__choice("Clock", "Clock tools", choices, 4, &selected, NULL);
+        bruce_result_t choice_result = dialog__choice("Clock", "Clock tools", choices, 4, &selected);
         if (choice_result == BRUCE_ERR_CANCELLED && clock_app__resume_after_handoff()) {
             (void)input__flush();
             continue;

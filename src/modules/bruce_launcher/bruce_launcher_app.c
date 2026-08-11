@@ -547,8 +547,6 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
             (bruce_dialog_choice_t *)memory__malloc(sizeof(*choices) * (size_t)menu->entry_count);
         if (choices == NULL) return BRUCE_ERR_NO_MEMORY;
 
-        const bruce_dialog_render_params_t render_params = {.window_chrome = true};
-
         (void)input__flush();
         for (;;) {
             if (display__width() <= 0 || display__height() <= 0) {
@@ -581,9 +579,8 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
             s_live_choices.entries = entries;
             s_live_choices.count = menu->entry_count;
             bruce_launcher__refresh_live_choices();
-            bruce_result_t result = dialog__choice(
-                menu->title, NULL, choices, (size_t)menu->entry_count, &selected, &render_params
-            );
+            bruce_result_t result =
+                dialog__choice_launcher(menu->title, NULL, choices, (size_t)menu->entry_count, &selected);
             s_live_choices.count = 0;
             if (result == BRUCE_ERR_CANCELLED) break;
             if (result == BRUCE_ERR_NOT_FOREGROUND) {
@@ -732,7 +729,7 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
 static int bruce_launcher__run_terminal_menu(const bruce_launcher_menu_t *menu) {
     const bruce_launcher_entry_t *entries = bruce_launcher__menu_entries(menu);
     bruce_dialog_choice_t *choices =
-        (bruce_dialog_choice_t *)memory__malloc(sizeof(*choices) * (size_t)menu->capacity);
+        (bruce_dialog_choice_t *)memory__malloc(sizeof(*choices) * ((size_t)menu->capacity + 1));
     if (choices == NULL) { return BRUCE_ERR_NO_MEMORY; }
 
     for (;;) {
@@ -741,9 +738,12 @@ static int bruce_launcher__run_terminal_menu(const bruce_launcher_menu_t *menu) 
             choices[i].value = choices[i].label;
         }
 
+        choices[menu->entry_count].label = "Back";
+        choices[menu->entry_count].value = choices[menu->entry_count].label;
+
         size_t choice = 0;
         bruce_result_t choice_result =
-            dialog__choice(menu->title, "Select an app", choices, (size_t)menu->entry_count, &choice, NULL);
+            dialog__choice(menu->title, "Select an app", choices, (size_t)menu->entry_count + 1, &choice);
 
         if (choice_result == BRUCE_ERR_CANCELLED) { break; }
         if (choice_result != BRUCE_OK) {

@@ -6,17 +6,12 @@
 #include "args.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/nrf24.h"
-#include "core_sdk/process.h"
 #include "core_sdk/result.h"
 #include "core_sdk/runtime.h"
 #include "core_sdk/stdio.h"
 
 #define NRF24_APP_SPECTRUM_CHANNELS 80u
 #define NRF24_APP_SPECTRUM_SAMPLES 8u
-
-/* Renders NRF24's GUI menu inside the launcher's window chrome (same border,
- * status bar, and font as the WiFi submenu); a no-op outside GUI mode. */
-static const bruce_dialog_render_params_t s_window_chrome = {.window_chrome = true};
 
 static bool nrf24_app__parse_channel(const char *text, uint8_t *out) {
     if (text == NULL || out == NULL) return false;
@@ -107,7 +102,7 @@ static int nrf24_app__gui(void) {
     for (;;) {
         size_t selected = 0;
         bruce_result_t result =
-            dialog__choice("NRF24", "2.4 GHz radio tools", choices, 4, &selected, &s_window_chrome);
+            dialog__choice_launcher("NRF24", "2.4 GHz radio tools", choices, 4, &selected);
         if (result == BRUCE_ERR_CANCELLED || selected == 3) return 0;
         if (result != BRUCE_OK) return result;
         if (selected == 0)
@@ -124,9 +119,7 @@ static int nrf24_app__gui(void) {
 }
 
 int nrf24_app_main(int argc, char **argv) {
-    if (runtime__gui_requested()) {
-        return nrf24_app__gui();
-    }
+    if (runtime__gui_requested()) { return nrf24_app__gui(); }
 
     ArgParser *root = ap_new_parser();
     if (root == NULL) return BRUCE_ERR_NO_MEMORY;

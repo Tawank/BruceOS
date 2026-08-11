@@ -174,7 +174,8 @@ bool selftest__run_permission_shared_basename_case(void) {
 
     selftest__dialog_mock_clear();
 
-    bool ok = first_process == BRUCE_OK && calls_after_first == 1 && second_process == BRUCE_OK && !trap_violated;
+    bool ok =
+        first_process == BRUCE_OK && calls_after_first == 1 && second_process == BRUCE_OK && !trap_violated;
     printf(
         "[selftest] permission/shared-basename: %s (first=%d second=%d trap_violated=%d)\n",
         ok ? "OK" : "FAIL",
@@ -264,9 +265,8 @@ static int selftest__boundary_entry(int argc, char **argv) {
     (void)argc;
     (void)argv;
     if (s_boundary.operation == SELFTEST_BOUNDARY_EXECUTE) {
-        s_boundary.result = (bruce_result_t)app_runner__run(
-            "selftest_missing_command", "", BRUCE_LAUNCH_BACKGROUND
-        );
+        s_boundary.result =
+            (bruce_result_t)app_runner__run("selftest_missing_command", "", BRUCE_LAUNCH_BACKGROUND);
     } else {
         s_boundary.result = process__pause(s_boundary.target);
     }
@@ -374,7 +374,7 @@ static int selftest__dialog_dispatch_entry(int argc, char **argv) {
         {.label = "B", .value = "b"},
     };
     size_t selected = 0;
-    dialog__choice("t", "m", choices, 2, &selected, NULL);
+    dialog__choice("t", "m", choices, 2, &selected);
     s_dispatch.observed_gui = dialog__test_last_call_was_gui();
     s_dispatch.ran = true;
     return 0;
