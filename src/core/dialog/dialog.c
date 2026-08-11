@@ -195,6 +195,8 @@ static bruce_result_t dialog__term_pick_file(
  * launcher's small header/status text. */
 #define DIALOG__WIDE_DISPLAY_MIN_WIDTH 200
 #define DIALOG__LIST_TEXT_SIZE_WIDE 2
+#define DIALOG__WINDOW_RADIUS 5
+#define DIALOG__WINDOW_INSET 4
 
 static int dialog__default_list_text_size(void) {
     return display__width() >= DIALOG__WIDE_DISPLAY_MIN_WIDTH ? DIALOG__LIST_TEXT_SIZE_WIDE
@@ -346,6 +348,9 @@ static bruce_result_t dialog__gui_choice(
     int bottom = h - (render_launcher ? s_window_renderer.padding_bottom
                                       : (render_params != NULL ? render_params->padding_bottom : 0));
     bool render_borders = !render_launcher && (render_params == NULL || render_params->render_borders);
+    bool render_window = render_borders && render_params != NULL &&
+                         (render_params->padding_top > 0 || render_params->padding_right > 0 ||
+                          render_params->padding_bottom > 0 || render_params->padding_left > 0);
     int viewport_w = right - left;
     int viewport_h = bottom - top;
     int text_size = render_params != NULL && render_params->text_size > 0 ? render_params->text_size
@@ -362,11 +367,19 @@ static bruce_result_t dialog__gui_choice(
     uint32_t refresh_interval_ms = render_launcher         ? s_window_renderer.status_refresh_interval_ms
                                    : render_params != NULL ? render_params->refresh_interval_ms
                                                            : 0u;
+    int content_left = left + (render_window ? DIALOG__WINDOW_INSET : 0);
+    int content_top = top + (render_window ? DIALOG__WINDOW_INSET : 0);
+    int content_w = viewport_w - (render_window ? 2 * DIALOG__WINDOW_INSET : 0);
+    int content_h = viewport_h - (render_window ? 2 * DIALOG__WINDOW_INSET : 0);
+    if (content_w <= 0 || content_h <= 0) { return BRUCE_ERR_INVALID_ARGUMENT; }
+
     int row_h = DIALOG__CHAR_H * text_size + 2;
-    int title_h = render_borders || (title != NULL && title[0] != '\0') ? DIALOG__CHAR_H + 4 : 0;
-    int footer_h = render_borders ? DIALOG__CHAR_H + 4 : 0;
+    int title_h = render_window ? (title != NULL && title[0] != '\0' ? DIALOG__CHAR_H + 4 : 0)
+                  : render_borders || (title != NULL && title[0] != '\0') ? DIALOG__CHAR_H + 4
+                                                                          : 0;
+    int footer_h = render_window ? 0 : (render_borders ? DIALOG__CHAR_H + 4 : 0);
     int message_h = (message != NULL && message[0] != '\0') ? (DIALOG__CHAR_H + 2) : 0;
-    int usable_h = viewport_h - title_h - message_h - footer_h;
+    int usable_h = content_h - title_h - message_h - footer_h;
     if (usable_h < row_h) { return BRUCE_ERR_INVALID_ARGUMENT; }
     int items_per_page = usable_h / row_h;
     bool redraw = true;
@@ -405,13 +418,22 @@ static bruce_result_t dialog__gui_choice(
                 launcher_border_drawn = true;
             }
 
-            display__fill_rect(left, top, viewport_w, viewport_h, background_color);
+            if (render_window) {
+                display__fill_round_rect(
+                    left, top, viewport_w, viewport_h, DIALOG__WINDOW_RADIUS, background_color
+                );
+                display__draw_round_rect(left, top, viewport_w, viewport_h, DIALOG__WINDOW_RADIUS, pri);
+            } else {
+                display__fill_rect(left, top, viewport_w, viewport_h, background_color);
+            }
             if (title_h > 0) {
-                if (render_borders) { display__fill_rect(left, top, viewport_w, title_h, pri); }
+                if (render_borders && !render_window) {
+                    display__fill_rect(left, top, viewport_w, title_h, pri);
+                }
                 display__set_text_color(text_color);
                 display__set_text_size(DIALOG__TEXT_SIZE);
-                display__set_text_bg_color(render_borders ? pri : background_color);
-                display__set_cursor(left + DIALOG__MARGIN, top + DIALOG__MARGIN);
+                display__set_text_bg_color(render_borders && !render_window ? pri : background_color);
+                display__set_cursor(content_left + DIALOG__MARGIN, content_top + DIALOG__MARGIN);
                 display__print(title != NULL ? title : "");
             }
 
@@ -419,29 +441,31 @@ static bruce_result_t dialog__gui_choice(
                 display__set_text_color(text_color);
                 display__set_text_size(DIALOG__TEXT_SIZE);
                 display__set_text_bg_color(background_color);
-                display__set_cursor(left + DIALOG__MARGIN, top + title_h + 1);
+                display__set_cursor(content_left + DIALOG__MARGIN, content_top + title_h + 1);
                 display__print(message);
             }
 
-            int list_y = top + title_h + message_h;
+            int list_y = content_top + title_h + message_h;
             int last_visible = first_visible + items_per_page - 1;
             if ((size_t)last_visible >= choice_count) { last_visible = (int)choice_count - 1; }
 
             for (int i = first_visible; i <= last_visible; ++i) {
                 int y = list_y + (i - first_visible) * row_h;
                 if (i == selected) {
-                    display__fill_rect(left, y, viewport_w, row_h, text_color);
+                    display__fill_rect(content_left, y, content_w, row_h, text_color);
                     display__set_text_color(background_color);
                 } else {
                     display__set_text_color(text_color);
                 }
                 display__set_text_size(text_size);
                 display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
-                display__set_cursor(left + DIALOG__MARGIN, y + 1);
+                display__set_cursor(content_left + DIALOG__MARGIN, y + 1);
                 display__print(choices[i].label != NULL ? choices[i].label : "");
             }
 
-            if (render_borders) { display__fill_rect(left, bottom - footer_h, viewport_w, footer_h, sec); }
+            if (render_borders && !render_window) {
+                display__fill_rect(left, bottom - footer_h, viewport_w, footer_h, sec);
+            }
             if (render_launcher) {
                 if (s_window_renderer.draw_status != NULL) {
                     s_window_renderer.draw_status(s_window_renderer_context);
@@ -1234,9 +1258,6 @@ bruce_result_t dialog__message(bruce_dialog_kind_t kind, const char *title, cons
     return dialog__term_message(kind, title, message);
 }
 
-static const bruce_dialog_render_params_t s_window_popup = {
-    .padding_top = 24, .padding_bottom = 24, .padding_left = 48, .padding_right = 48, .render_borders = true
-};
 bruce_result_t dialog__choice(
     const char *title, const char *message, const bruce_dialog_choice_t *choices, size_t choice_count,
     size_t *out_selected
@@ -1250,7 +1271,12 @@ bruce_result_t dialog__choice(
     }
 
     if (gui) {
-        return dialog__gui_choice(title, message, choices, choice_count, out_selected, &s_window_popup);
+        bruce_dialog_render_params_t params = dialog__default_render_params(2);
+        params.padding_top = 8;
+        params.padding_bottom = 8;
+        params.padding_left = 12;
+        params.padding_right = 12;
+        return dialog__gui_choice(title, message, choices, choice_count, out_selected, &params);
     }
     return dialog__term_choice(title, message, choices, choice_count, out_selected);
 }
