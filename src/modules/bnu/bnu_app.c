@@ -11,15 +11,23 @@
 #include "core_sdk/disk.h"
 #include "core_sdk/format.h"
 #include "core_sdk/memory.h"
+#include "core_sdk/environment.h"
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
 #include "core_sdk/runtime.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
 
-static char s_working_directory[BRUCE_STORAGE_PATH_MAX] = "/";
+#define BNU__PWD_NAME "PWD"
 
-const char *bnu__get_working_directory(void) { return s_working_directory; }
+const char *bnu__get_working_directory(void) {
+    const char *value = environment__get(BNU__PWD_NAME);
+    return value != NULL && value[0] == '/' ? value : "/";
+}
+
+static bruce_result_t bnu__set_working_directory(const char *path) {
+    return environment__set(BNU__PWD_NAME, path);
+}
 
 static int bnu__parse_failure(ArgParser *parser) {
     ap_status_t status = ap_get_status(parser);
@@ -71,14 +79,15 @@ static bruce_result_t bnu__parse_shutdown_time(const char *text, uint32_t *out_d
 
 static bool bnu__resolve_path(const char *path, char *out_path) {
     char combined[BRUCE_STORAGE_PATH_MAX * 2];
-    if (path == NULL || path[0] == '\0') path = s_working_directory;
+    const char *working_directory = bnu__get_working_directory();
+    if (path == NULL || path[0] == '\0') path = working_directory;
     int written = path[0] == '/' ? snprintf(combined, sizeof(combined), "%s", path)
                                  : snprintf(
                                        combined,
                                        sizeof(combined),
                                        "%s%s%s",
-                                       s_working_directory,
-                                       strcmp(s_working_directory, "/") == 0 ? "" : "/",
+                                       working_directory,
+                                       strcmp(working_directory, "/") == 0 ? "" : "/",
                                        path
                                    );
     if (written < 0 || (size_t)written >= sizeof(combined)) return false;
@@ -114,7 +123,7 @@ int bnu_pwd_app_main(int argc, char **argv) {
     if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
     if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
     ap_free(parser);
-    stdio__printf("%s\n", s_working_directory);
+    stdio__printf("%s\n", bnu__get_working_directory());
     return BRUCE_OK;
 }
 
@@ -135,8 +144,7 @@ int bnu_cd_app_main(int argc, char **argv) {
         stdio__printf("cd: %s: error %d\n", path, result);
         return result;
     }
-    snprintf(s_working_directory, sizeof(s_working_directory), "%s", path);
-    return BRUCE_OK;
+    return bnu__set_working_directory(path);
 }
 
 int bnu_ls_app_main(int argc, char **argv) {

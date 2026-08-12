@@ -10,6 +10,10 @@
 #include "core_sdk/stdio.h"
 #include "shell_parser.h"
 
+static const char *const s_shell_builtin_names[] = {
+    "echo", "true", "false", "set", "unset", "export", "clear", "exit"
+};
+
 static int shell_builtins__find_index(const shell_state_t *state, const char *name) {
     for (size_t i = 0; i < state->variable_count; ++i) {
         if (strcmp(state->variables[i].name, name) == 0) return (int)i;
@@ -122,11 +126,18 @@ static int shell_builtins__assignment(shell_state_t *state, const char *assignme
 }
 
 bool shell_builtins__is_builtin(const char *name) {
-    static const char *const names[] = {"echo", "true", "false", "set", "unset", "export", "clear", "exit"};
-    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); ++i) {
-        if (strcmp(name, names[i]) == 0) return true;
+    for (size_t i = 0; i < sizeof(s_shell_builtin_names) / sizeof(s_shell_builtin_names[0]); ++i) {
+        if (strcmp(name, s_shell_builtin_names[i]) == 0) return true;
     }
     return false;
+}
+
+size_t shell_builtins__count(void) {
+    return sizeof(s_shell_builtin_names) / sizeof(s_shell_builtin_names[0]);
+}
+
+const char *shell_builtins__name(size_t index) {
+    return index < shell_builtins__count() ? s_shell_builtin_names[index] : NULL;
 }
 
 int shell_builtins__run(shell_state_t *state, int argc, char **argv) {

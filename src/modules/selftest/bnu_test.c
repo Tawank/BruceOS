@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "core_sdk/environment.h"
 #include "core_sdk/result.h"
 #include "core_sdk/disk.h"
 #include "core_sdk/storage.h"
@@ -10,6 +11,7 @@
 #include "modules/bnu/bnu_app.h"
 
 bool selftest__run_bnu_case(void) {
+    (void)environment__unset("PWD");
     char *cd_root_argv[] = {"cd"};
     char *cd_dot_argv[] = {"cd", "."};
     char *pwd_argv[] = {"pwd"};
