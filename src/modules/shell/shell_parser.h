@@ -24,13 +24,15 @@ typedef struct {
 } shell_command_t;
 
 typedef struct {
-    shell_command_t commands[SHELL__MAX_COMMANDS];
+    shell_command_t *commands;
     size_t count;
+    size_t capacity;
 } shell_plan_t;
 
 typedef const char *(*shell_variable_lookup_fn)(void *context, const char *name);
 
 int shell_parser__plan(const char *line, shell_plan_t *plan, const char **error);
+void shell_parser__plan_free(shell_plan_t *plan);
 
 /* Tokenizes `command` into a heap-allocated, NULL-terminated argv-style array:
  * each word is allocated to its exact final length. On success *out_words is

@@ -40,14 +40,58 @@ typedef struct {
 typedef struct {
     size_t token_start;
     bool first_token;
-    char decoded[SHELL__LINE_MAX];
+    char *decoded;
+    size_t decoded_capacity;
 } shell_console_token_t;
 
 typedef struct {
     bool pending;
     size_t cursor;
-    char line[SHELL__LINE_MAX];
+    char *line;
+    size_t line_capacity;
 } shell_console_tab_state_t;
+
+static void shell_console__token_free(shell_console_token_t *token) {
+    if (token == NULL) return;
+    memory__free(token->decoded);
+    token->decoded = NULL;
+    token->decoded_capacity = 0;
+}
+
+static bool shell_console__token_reserve(shell_console_token_t *token, size_t needed) {
+    if (needed <= token->decoded_capacity) return true;
+    size_t capacity = token->decoded_capacity == 0 ? 32u : token->decoded_capacity;
+    while (capacity < needed) capacity *= 2u;
+    if (capacity > SHELL__LINE_MAX) capacity = SHELL__LINE_MAX;
+    if (needed > capacity) return false;
+    char *grown = memory__realloc(token->decoded, capacity);
+    if (grown == NULL) return false;
+    token->decoded = grown;
+    token->decoded_capacity = capacity;
+    return true;
+}
+
+static void shell_console__tab_state_free(shell_console_tab_state_t *tab_state) {
+    if (tab_state == NULL) return;
+    memory__free(tab_state->line);
+    tab_state->line = NULL;
+    tab_state->line_capacity = 0;
+    tab_state->pending = false;
+    tab_state->cursor = 0;
+}
+
+static bool shell_console__tab_state_remember_capacity(shell_console_tab_state_t *tab_state, size_t needed) {
+    if (needed <= tab_state->line_capacity) return true;
+    size_t capacity = tab_state->line_capacity == 0 ? 32u : tab_state->line_capacity;
+    while (capacity < needed) capacity *= 2u;
+    if (capacity > SHELL__LINE_MAX) capacity = SHELL__LINE_MAX;
+    if (needed > capacity) return false;
+    char *grown = memory__realloc(tab_state->line, capacity);
+    if (grown == NULL) return false;
+    tab_state->line = grown;
+    tab_state->line_capacity = capacity;
+    return true;
+}
 
 static void shell_console__redraw(const shell_line_editor_t *editor) {
     (void)stdio__write(SHELL_CONSOLE_PROMPT, sizeof(SHELL_CONSOLE_PROMPT) - 1);
@@ -140,6 +184,7 @@ static bool shell_console__resolve_path(const char *path, char *out_path) {
 }
 
 static bool shell_console__tokenize(const shell_line_editor_t *editor, shell_console_token_t *token) {
+    shell_console__token_free(token);
     bool single = false;
     bool double_quote = false;
     bool escaped = false;
@@ -156,7 +201,7 @@ static bool shell_console__tokenize(const shell_line_editor_t *editor, shell_con
                 token_start = i - 1;
                 decoded_length = 0;
             }
-            if (decoded_length + 1 >= sizeof(token->decoded)) return false;
+            if (!shell_console__token_reserve(token, decoded_length + 2)) return false;
             token->decoded[decoded_length++] = c;
             escaped = false;
             continue;
@@ -190,7 +235,7 @@ static bool shell_console__tokenize(const shell_line_editor_t *editor, shell_con
         }
         if (c == ' ' || c == '\t') {
             if (single || double_quote) {
-                if (decoded_length + 1 >= sizeof(token->decoded)) return false;
+                if (!shell_console__token_reserve(token, decoded_length + 2)) return false;
                 token->decoded[decoded_length++] = c;
                 continue;
             }
@@ -205,7 +250,7 @@ static bool shell_console__tokenize(const shell_line_editor_t *editor, shell_con
             token_start = i;
             decoded_length = 0;
         }
-        if (decoded_length + 1 >= sizeof(token->decoded)) return false;
+        if (!shell_console__token_reserve(token, decoded_length + 2)) return false;
         token->decoded[decoded_length++] = c;
     }
 
@@ -330,10 +375,15 @@ static bool shell_console__replace_token(
 static bool shell_console__tab_is_repeated(
     const shell_console_tab_state_t *tab_state, const shell_line_editor_t *editor
 ) {
-    return tab_state->pending && tab_state->cursor == editor->cursor && strcmp(tab_state->line, editor->text) == 0;
+    return tab_state->pending && tab_state->line != NULL && tab_state->cursor == editor->cursor &&
+           strcmp(tab_state->line, editor->text) == 0;
 }
 
 static void shell_console__tab_remember(shell_console_tab_state_t *tab_state, const shell_line_editor_t *editor) {
+    if (!shell_console__tab_state_remember_capacity(tab_state, editor->length + 1)) {
+        tab_state->pending = false;
+        return;
+    }
     tab_state->pending = true;
     tab_state->cursor = editor->cursor;
     memcpy(tab_state->line, editor->text, editor->length + 1);
@@ -344,24 +394,35 @@ static void shell_console__tab_reset(shell_console_tab_state_t *tab_state) { tab
 static bool shell_console__complete(shell_line_editor_t *editor, shell_console_tab_state_t *tab_state) {
     if (editor->cursor != editor->length || editor->cursor == 0) return false;
 
-    shell_console_token_t token;
-    if (!shell_console__tokenize(editor, &token)) return false;
+    shell_console_token_t token = {0};
+    if (!shell_console__tokenize(editor, &token)) {
+        shell_console__token_free(&token);
+        return false;
+    }
 
     shell_console_matches_t matches = {0};
-    char file_prefix[SHELL__LINE_MAX] = {0};
+    char *file_prefix = memory__calloc(SHELL__LINE_MAX, 1u);
+    if (file_prefix == NULL) {
+        shell_console__token_free(&token);
+        return false;
+    }
     bool use_files = !token.first_token || strchr(token.decoded, '/') != NULL;
-    bool ok = use_files ? shell_console__collect_file_matches(token.decoded, &matches, file_prefix, sizeof(file_prefix))
+    bool ok = use_files ? shell_console__collect_file_matches(token.decoded, &matches, file_prefix, SHELL__LINE_MAX)
                         : shell_console__collect_command_matches(token.decoded, &matches);
     if (!ok) {
+        memory__free(file_prefix);
         shell_console__matches_free(&matches);
+        shell_console__token_free(&token);
         return false;
     }
     if (matches.count == 0 && token.first_token && strchr(token.decoded, '/') == NULL) {
-        ok = shell_console__collect_file_matches(token.decoded, &matches, file_prefix, sizeof(file_prefix));
+        ok = shell_console__collect_file_matches(token.decoded, &matches, file_prefix, SHELL__LINE_MAX);
         use_files = true;
     }
     if (!ok || matches.count == 0) {
+        memory__free(file_prefix);
         shell_console__matches_free(&matches);
+        shell_console__token_free(&token);
         return false;
     }
 
@@ -372,9 +433,9 @@ static bool shell_console__complete(shell_line_editor_t *editor, shell_console_t
     bool changed = false;
 
     if (matches.count == 1 || common_length > typed_length) {
-        char replacement[SHELL__LINE_MAX];
+        char *replacement = memory__malloc(SHELL__LINE_MAX);
         size_t prefix_length = strlen(use_files ? file_prefix : "");
-        if (prefix_length + common_length + 2 < sizeof(replacement)) {
+        if (replacement != NULL && prefix_length + common_length + 2 < SHELL__LINE_MAX) {
             if (prefix_length > 0) memcpy(replacement, file_prefix, prefix_length);
             memcpy(replacement + prefix_length, matches.items[0].name, common_length);
             prefix_length += common_length;
@@ -390,13 +451,16 @@ static bool shell_console__complete(shell_line_editor_t *editor, shell_console_t
                 matches.count == 1 && !matches.items[0].directory
             );
         }
+        memory__free(replacement);
     }
 
     if (!changed && repeated) shell_console__print_matches(&matches);
     if (changed || matches.count > 1) shell_console__tab_remember(tab_state, editor);
     else shell_console__tab_reset(tab_state);
     bool redraw = changed || (!changed && repeated);
+    memory__free(file_prefix);
     shell_console__matches_free(&matches);
+    shell_console__token_free(&token);
     return redraw;
 }
 
@@ -469,16 +533,22 @@ static bool shell_console__handle_byte(
 int shell_console__read_line(char *line, size_t capacity, bool *skip_lf) {
     shell_line_editor_t editor;
     shell_line_editor__init(&editor, line, capacity);
-    char draft[SHELL__LINE_MAX] = {0};
+    size_t draft_capacity = capacity > 0 ? capacity : 1u;
+    char *draft = memory__calloc(draft_capacity, 1u);
+    if (draft == NULL) return BRUCE_ERR_NO_MEMORY;
     shell_history_browser_t history;
     shell_console_tab_state_t tab_state = {0};
-    shell_history_browser__init(&history, draft, sizeof(draft));
+    shell_history_browser__init(&history, draft, draft_capacity);
     shell_console__redraw(&editor);
     s_shell_console_ready = true;
 
     for (;;) {
         int input = shell_console__read_byte(UINT32_MAX);
-        if (input < 0) return input;
+        if (input < 0) {
+            shell_console__tab_state_free(&tab_state);
+            memory__free(draft);
+            return input;
+        }
         unsigned char byte = (unsigned char)input;
         if (*skip_lf && byte == '\n') {
             *skip_lf = false;
@@ -488,6 +558,8 @@ int shell_console__read_line(char *line, size_t capacity, bool *skip_lf) {
         if (byte == '\r' || byte == '\n') {
             *skip_lf = byte == '\r';
             (void)stdio__write("\r\n", 2);
+            shell_console__tab_state_free(&tab_state);
+            memory__free(draft);
             return (int)editor.length;
         }
         bool redraw = shell_console__handle_byte(&editor, &history, &tab_state, byte);

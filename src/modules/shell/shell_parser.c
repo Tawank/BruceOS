@@ -7,6 +7,28 @@
 
 #include "core_sdk/memory.h"
 
+static bool shell_parser__plan_push(shell_plan_t *plan, const shell_command_t *command) {
+    if (plan->count >= SHELL__MAX_COMMANDS) return false;
+    if (plan->count >= plan->capacity) {
+        size_t new_capacity = plan->capacity == 0 ? 4u : plan->capacity * 2u;
+        if (new_capacity > SHELL__MAX_COMMANDS) new_capacity = SHELL__MAX_COMMANDS;
+        shell_command_t *grown = memory__realloc(plan->commands, new_capacity * sizeof(*grown));
+        if (grown == NULL) return false;
+        plan->commands = grown;
+        plan->capacity = new_capacity;
+    }
+    plan->commands[plan->count++] = *command;
+    return true;
+}
+
+void shell_parser__plan_free(shell_plan_t *plan) {
+    if (plan == NULL) return;
+    memory__free(plan->commands);
+    plan->commands = NULL;
+    plan->count = 0;
+    plan->capacity = 0;
+}
+
 bool shell_parser__valid_name(const char *name, size_t length) {
     if (name == NULL || length == 0 || !(isalpha((unsigned char)name[0]) || name[0] == '_')) return false;
     for (size_t i = 1; i < length; ++i) {
@@ -87,15 +109,19 @@ int shell_parser__plan(const char *line, shell_plan_t *plan, const char **error)
             while (start < end && isspace((unsigned char)line[start])) start++;
             while (end > start && isspace((unsigned char)line[end - 1])) end--;
             if (end > start) {
-                if (plan->count >= SHELL__MAX_COMMANDS) {
-                    *error = "too many commands";
-                    return -1;
-                }
-                plan->commands[plan->count++] = (shell_command_t){
+                shell_command_t command = {
                     .text = line + start,
                     .length = end - start,
                     .connector = next_connector,
                 };
+                if (plan->count >= SHELL__MAX_COMMANDS) {
+                    *error = "too many commands";
+                    return -1;
+                }
+                if (!shell_parser__plan_push(plan, &command)) {
+                    *error = "out of memory";
+                    return -1;
+                }
                 next_connector = SHELL_CONNECT_NONE;
             } else if (operator_size != 0 && (plan->count == 0 || next_connector != SHELL_CONNECT_NONE)) {
                 *error = "unexpected operator";

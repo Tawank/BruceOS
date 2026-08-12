@@ -18,6 +18,36 @@ static const char *shell_executor__lookup(void *context, const char *name) {
     return shell_builtins__get((const shell_state_t *)context, name);
 }
 
+typedef struct {
+    bruce_environment_variable_t *items;
+    size_t count;
+    size_t capacity;
+} shell_executor__environment_t;
+
+static void shell_executor__environment_free(shell_executor__environment_t *environment) {
+    if (environment == NULL) return;
+    memory__free(environment->items);
+    environment->items = NULL;
+    environment->count = 0;
+    environment->capacity = 0;
+}
+
+static bool shell_executor__environment_push(
+    shell_executor__environment_t *environment, const bruce_environment_variable_t *variable
+) {
+    if (environment->count >= SHELL__MAX_VARIABLES) return false;
+    if (environment->count >= environment->capacity) {
+        size_t new_capacity = environment->capacity == 0 ? 4u : environment->capacity * 2u;
+        if (new_capacity > SHELL__MAX_VARIABLES) new_capacity = SHELL__MAX_VARIABLES;
+        bruce_environment_variable_t *grown = memory__realloc(environment->items, new_capacity * sizeof(*grown));
+        if (grown == NULL) return false;
+        environment->items = grown;
+        environment->capacity = new_capacity;
+    }
+    environment->items[environment->count++] = *variable;
+    return true;
+}
+
 static bool shell_executor__append_arg(char *out, size_t capacity, size_t *used, const char *arg) {
     size_t needed = *used > 0 ? 1u : 0u;
     needed += 2;
@@ -289,8 +319,7 @@ static int shell_executor__pipe_to_text(shell_state_t *state, const shell_comman
  * borrowed; the caller owns and frees it. */
 static int shell_executor__dispatch(shell_state_t *state, char **words, int argc) {
     int first_command = 0;
-    bruce_environment_variable_t environment[SHELL__MAX_VARIABLES];
-    size_t environment_count = 0;
+    shell_executor__environment_t environment = {0};
     /* Defaults to background: the shell itself is always a background
      * process piping text through a stdio session (see terminal_app.c and
      * serial_commands_app.c, which both only ever launch "shell" with
@@ -314,10 +343,12 @@ static int shell_executor__dispatch(shell_state_t *state, char **words, int argc
         size_t name_length = (size_t)(equals - words[first_command]);
         if (!shell_parser__valid_name(words[first_command], name_length)) {
             stdio__printf("shell: invalid variable name\n");
+            shell_executor__environment_free(&environment);
             return 2;
         }
-        if (name_length >= SHELL__VARIABLE_NAME_MAX || environment_count >= SHELL__MAX_VARIABLES) {
+        if (name_length >= SHELL__VARIABLE_NAME_MAX || environment.count >= SHELL__MAX_VARIABLES) {
             stdio__printf("shell: variable name too long\n");
+            shell_executor__environment_free(&environment);
             return 2;
         }
         *equals = '\0';
@@ -329,28 +360,40 @@ static int shell_executor__dispatch(shell_state_t *state, char **words, int argc
             else if (strcmp(value, "1") == 0) mode = BRUCE_LAUNCH_BACKGROUND;
             else {
                 stdio__printf("shell: BG must be 0 or 1\n");
+                shell_executor__environment_free(&environment);
                 return 2;
             }
         }
-        environment[environment_count++] = (bruce_environment_variable_t){.name = name, .value = value};
+        bruce_environment_variable_t variable = {.name = name, .value = value};
+        if (!shell_executor__environment_push(&environment, &variable)) {
+            stdio__printf("shell: out of memory\n");
+            shell_executor__environment_free(&environment);
+            return 1;
+        }
         first_command++;
     }
-    if (!bg_explicit && app_runner__environment_requests_gui(environment, environment_count)) {
+    if (!bg_explicit && app_runner__environment_requests_gui(environment.items, environment.count)) {
         mode = BRUCE_LAUNCH_FOREGROUND;
     }
     if (first_command == argc) {
-        for (size_t i = 0; i < environment_count; ++i) {
-            int assigned = shell_builtins__set(state, environment[i].name, environment[i].value);
-            if (assigned != 0) return assigned;
+        for (size_t i = 0; i < environment.count; ++i) {
+            int assigned = shell_builtins__set(state, environment.items[i].name, environment.items[i].value);
+            if (assigned != 0) {
+                shell_executor__environment_free(&environment);
+                return assigned;
+            }
         }
+        shell_executor__environment_free(&environment);
         return 0;
     }
     int remaining = argc - first_command;
     char **argv = words + first_command;
-    return shell_builtins__is_builtin(argv[0]) ? shell_builtins__run(state, remaining, argv)
-                                                : shell_executor__external(
-                                                      remaining, argv, environment, environment_count, mode
-                                                  );
+    int result = shell_builtins__is_builtin(argv[0]) ? shell_builtins__run(state, remaining, argv)
+                                                     : shell_executor__external(
+                                                           remaining, argv, environment.items, environment.count, mode
+                                                       );
+    shell_executor__environment_free(&environment);
+    return result;
 }
 
 static int shell_executor__command(shell_state_t *state, const shell_command_t *command) {

@@ -47,15 +47,21 @@ void shell__state_free(shell_state_t *state) {
 
 int shell__execute_line(shell_state_t *state, const char *line) {
     if (state == NULL || line == NULL) return 2;
-    shell_plan_t plan;
+    shell_plan_t plan = {0};
     const char *error = NULL;
     if (shell_parser__plan(line, &plan, &error) != 0) {
+        shell_parser__plan_free(&plan);
         stdio__printf("shell: %s\n", error != NULL ? error : "syntax error");
         state->last_status = 2;
         return 2;
     }
-    if (plan.count == 0) return 0;
-    return shell_executor__plan(state, &plan);
+    if (plan.count == 0) {
+        shell_parser__plan_free(&plan);
+        return 0;
+    }
+    int status = shell_executor__plan(state, &plan);
+    shell_parser__plan_free(&plan);
+    return status;
 }
 
 static int shell__run_script(shell_state_t *state, const char *path) {

@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "core_sdk/memory.h"
 #include "core_sdk/storage.h"
 
 #define SHELL_HISTORY_MAX_BYTES (64u * 1024u)
@@ -168,14 +169,19 @@ bool shell_history_browser__previous(shell_history_browser_t *browser, shell_lin
         memcpy(browser->draft, editor->text, length);
         browser->draft[length] = '\0';
     }
-    char recalled[capacity];
+    char *recalled = memory__malloc(capacity);
+    if (recalled == NULL) return false;
     uint64_t start = 0;
     bruce_result_t result = shell_history__previous(
         SHELL_HISTORY_PATH, browser->browsing ? browser->offset : UINT64_MAX,
-        recalled, sizeof(recalled), &start
+        recalled, capacity, &start
     );
-    if (result != BRUCE_OK) return false;
+    if (result != BRUCE_OK) {
+        memory__free(recalled);
+        return false;
+    }
     shell_line_editor__set(editor, recalled);
+    memory__free(recalled);
     browser->offset = start;
     browser->browsing = true;
     return true;
@@ -185,15 +191,17 @@ bool shell_history_browser__next(shell_history_browser_t *browser, shell_line_ed
     if (!browser->browsing) return false;
     size_t capacity = browser->capacity < editor->capacity ? browser->capacity : editor->capacity;
     if (capacity == 0) return false;
-    char recalled[capacity];
+    char *recalled = memory__malloc(capacity);
+    if (recalled == NULL) return false;
     uint64_t start = 0;
-    if (shell_history__next(SHELL_HISTORY_PATH, browser->offset, recalled, sizeof(recalled), &start) == BRUCE_OK) {
+    if (shell_history__next(SHELL_HISTORY_PATH, browser->offset, recalled, capacity, &start) == BRUCE_OK) {
         shell_line_editor__set(editor, recalled);
         browser->offset = start;
     } else {
         shell_line_editor__set(editor, browser->draft);
         browser->browsing = false;
     }
+    memory__free(recalled);
     return true;
 }
 
