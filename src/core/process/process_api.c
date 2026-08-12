@@ -111,6 +111,21 @@ bruce_process_id_t process_registry__foreground_id(void) {
     return process_id;
 }
 
+void process_registry__mark_presentable(bruce_process_id_t process_id) {
+    if (process_id == BRUCE_PROCESS_ID_INVALID) return;
+    process__ensure_init();
+    process__lock();
+    process__record_t *record = process__find_by_id_locked(process_id);
+    if (record != NULL) {
+        record->presentable = true;
+        if (!record->gui_requested) {
+            record->gui_requested = true;
+            display__process_set_gui_requested(record->id);
+        }
+    }
+    process__unlock();
+}
+
 bruce_result_t process__switch_next(void) {
     bruce_result_t permission_result = permission__check(BRUCE_PERMISSION_PROCESS);
     if (permission_result != BRUCE_OK) return permission_result;

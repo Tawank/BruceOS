@@ -152,5 +152,9 @@ bruce_result_t process_registry__switch_previous(void);
  * the foreground stack is empty. */
 bruce_process_id_t process_registry__foreground_id(void);
 
+/* Marks an existing process as GUI-capable/presentable without foregrounding
+ * it. Used when a process launched without GUI first attempts a real frame. */
+void process_registry__mark_presentable(bruce_process_id_t process_id);
+
 bruce_result_t process_registry__set_child_stdio_session(uint32_t session);
 uint32_t process_registry__current_stdio_session(void);

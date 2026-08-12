@@ -1005,6 +1005,7 @@ bruce_result_t display__game_mode(bool enable) {
 
 bruce_result_t display__begin_frame(void) {
     bruce_process_id_t caller = process__current_id();
+    process_registry__mark_presentable(caller);
     display__lock();
     if (!s_initialized) {
         display__unlock();
