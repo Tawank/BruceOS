@@ -21,7 +21,7 @@ static bruce_result_t js_source__load_impl(
     if (result != BRUCE_OK) return result;
     if (file_size == 0 || file_size > max_size) return BRUCE_ERR_RESOURCE_LIMIT;
 
-    out_source->external_result = loader__stage_path(path, &out_source->external);
+    out_source->external_result = ext_mem_loader__stage_path(path, &out_source->external);
     if (out_source->external_result == BRUCE_OK) {
         if (out_source->external.size > max_size) {
             js_source__release(out_source);
@@ -75,12 +75,12 @@ bruce_result_t js_source__load_transferable(
 bruce_result_t js_source__adopt(js_source_t *source) {
     if (source == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     if (source->external.memory.handle == 0) return BRUCE_OK;
-    return loader__adopt_image(&source->external);
+    return ext_mem_loader__adopt_image(&source->external);
 }
 
 void js_source__release(js_source_t *source) {
     if (source == NULL) return;
-    if (source->external.memory.handle != 0) (void)loader__release_image(&source->external);
+    if (source->external.memory.handle != 0) (void)ext_mem_loader__release_image(&source->external);
     if (source->internal_tracked) {
         memory__free(source->internal);
     } else {

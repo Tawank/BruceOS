@@ -14,7 +14,7 @@
 #include "core_sdk/dialog.h"
 #include "core_sdk/display.h"
 #include "core_sdk/input.h"
-#include "core_sdk/loader.h"
+#include "core_sdk/ext_mem_loader.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
@@ -525,7 +525,7 @@ static int bruce_launcher__run_entry(const bruce_launcher_entry_t *entry) {
 
     if (result < 0) {
         char message[128];
-        loader__format_error_message(bruce_launcher__entry_label(entry), result, message, sizeof(message));
+        ext_mem_loader__format_error_message(bruce_launcher__entry_label(entry), result, message, sizeof(message));
         (void)dialog__message(BRUCE_DIALOG_ERROR, "Launch failed", message);
     }
     return result;

@@ -7,7 +7,7 @@
 #include "core/dialog/dialog.h"
 #include "core/storage/storage.h"
 #include "core_sdk/dialog.h"
-#include "core_sdk/loader.h"
+#include "core_sdk/ext_mem_loader.h"
 #include "core_sdk/manifest.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/storage.h"

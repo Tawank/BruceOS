@@ -22,7 +22,7 @@
 #include "core_sdk/icon.h"         // IWYU pragma: export
 #include "core_sdk/image.h"        // IWYU pragma: export
 #include "core_sdk/input.h"        // IWYU pragma: export
-#include "core_sdk/loader.h"       // IWYU pragma: export
+#include "core_sdk/ext_mem_loader.h" // IWYU pragma: export
 #include "core_sdk/ir.h"           // IWYU pragma: export
 #include "core_sdk/manifest.h"     // IWYU pragma: export
 #include "core_sdk/memory.h"       // IWYU pragma: export

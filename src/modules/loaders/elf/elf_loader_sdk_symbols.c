@@ -33,7 +33,7 @@
 #include "core_sdk/image.h"
 #include "core_sdk/input.h"
 #include "core_sdk/ir.h"
-#include "core_sdk/loader.h"
+#include "core_sdk/ext_mem_loader.h"
 #include "core_sdk/manifest.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/notification.h"
@@ -124,9 +124,9 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(app_runner__run_path),
     ESP_ELFSYM_EXPORT(app_runner__run_with_environment),
     ESP_ELFSYM_EXPORT(app_runner__run_path_with_environment),
-    ESP_ELFSYM_EXPORT(loader__stage_path),
-    ESP_ELFSYM_EXPORT(loader__adopt_image),
-    ESP_ELFSYM_EXPORT(loader__release_image),
+    ESP_ELFSYM_EXPORT(ext_mem_loader__stage_path),
+    ESP_ELFSYM_EXPORT(ext_mem_loader__adopt_image),
+    ESP_ELFSYM_EXPORT(ext_mem_loader__release_image),
     ESP_ELFSYM_EXPORT(app_runner__parse_args),
     ESP_ELFSYM_EXPORT(app_runner__free_args),
     ESP_ELFSYM_EXPORT(app_runner__environment_requests_gui),

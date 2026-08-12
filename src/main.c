@@ -3,7 +3,7 @@
 #include "esp_system.h"
 #include <stdio.h>
 
-#include "core_sdk/loader.h"
+#include "core_sdk/ext_mem_loader.h"
 #include "core_sdk/process.h"
 
 #include "core/autostart/autostart.h"

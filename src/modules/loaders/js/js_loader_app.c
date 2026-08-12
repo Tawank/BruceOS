@@ -8,7 +8,7 @@
 
 #include "args.h"
 #include "core_sdk/app_runner.h"
-#include "core_sdk/loader.h"
+#include "core_sdk/ext_mem_loader.h"
 #include "core_sdk/manifest.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/permission.h"
@@ -262,7 +262,7 @@ int js_loader__run_path(
 
     bool gui_requested = app_runner__environment_requests_gui(environment, environment_count);
 
-    bruce_loader_image_t parent_image = ctx->source.external;
+    bruce_ext_mem_loader_image_t parent_image = ctx->source.external;
     int result = app_runner__spawn_loader_process(
         permission_key,
         gui_requested,
@@ -280,7 +280,7 @@ int js_loader__run_path(
             bruce_process_snapshot_t snapshot;
             bruce_result_t snapshot_result = process__snapshot(result, &snapshot);
             if (snapshot_result != BRUCE_OK) {
-                (void)loader__release_image(&parent_image);
+                (void)ext_mem_loader__release_image(&parent_image);
                 break;
             }
             if (snapshot.resource_count > 0) break;

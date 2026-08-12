@@ -9,7 +9,7 @@
 
 #include "core_sdk/app_runner.h"
 #include "core_sdk/dialog.h"
-#include "core_sdk/loader.h"
+#include "core_sdk/ext_mem_loader.h"
 #include "core_sdk/manifest.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/process.h"
@@ -93,7 +93,7 @@ static int apps__compare(const void *left, const void *right) {
 
 static void apps__show_error(const char *action, bruce_result_t result) {
     char message[160];
-    loader__format_error_message(action, result, message, sizeof(message));
+    ext_mem_loader__format_error_message(action, result, message, sizeof(message));
     (void)dialog__message(BRUCE_DIALOG_ERROR, "Apps", message);
 }
 

@@ -5,7 +5,7 @@
 #include "core/storage/storage.h"
 
 #include "core_sdk/app_runner.h"
-#include "core_sdk/loader.h"
+#include "core_sdk/ext_mem_loader.h"
 #include "core_sdk/permission.h"
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"

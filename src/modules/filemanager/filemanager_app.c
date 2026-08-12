@@ -9,7 +9,7 @@
 #include "core_sdk/dialog.h"
 #include "core_sdk/image.h"
 #include "core_sdk/input.h"
-#include "core_sdk/loader.h"
+#include "core_sdk/ext_mem_loader.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
@@ -157,7 +157,7 @@ static bruce_result_t filemanager__show_info(const char *path) {
 
 static void filemanager__show_error(const char *action, bruce_result_t result) {
     char message[160];
-    loader__format_error_message(action, result, message, sizeof(message));
+    ext_mem_loader__format_error_message(action, result, message, sizeof(message));
     (void)dialog__message(BRUCE_DIALOG_ERROR, "Apps", message);
 }
 

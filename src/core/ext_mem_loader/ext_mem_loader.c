@@ -1,4 +1,4 @@
-#include "core_sdk/loader.h"
+#include "core_sdk/ext_mem_loader.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,7 +15,7 @@
 
 static char s_error_message[LOADER__ERROR_MESSAGE_MAX];
 
-void loader__set_error_message(const char *message) {
+void ext_mem_loader__set_error_message(const char *message) {
     if (message == NULL) {
         s_error_message[0] = '\0';
         return;
@@ -24,11 +24,11 @@ void loader__set_error_message(const char *message) {
     s_error_message[sizeof(s_error_message) - 1] = '\0';
 }
 
-const char *loader__last_error_message(void) { return s_error_message; }
+const char *ext_mem_loader__last_error_message(void) { return s_error_message; }
 
-void loader__format_error_message(const char *action, int result, char *out_message, size_t out_size) {
+void ext_mem_loader__format_error_message(const char *action, int result, char *out_message, size_t out_size) {
     if (out_message == NULL || out_size == 0) return;
-    const char *detail = result == BRUCE_ERR_ABI_MISMATCH ? loader__last_error_message() : NULL;
+    const char *detail = result == BRUCE_ERR_ABI_MISMATCH ? ext_mem_loader__last_error_message() : NULL;
     if (detail != NULL && detail[0] != '\0') {
         snprintf(
             out_message,
@@ -49,7 +49,7 @@ void loader__format_error_message(const char *action, int result, char *out_mess
     );
 }
 
-bruce_result_t loader__stage_path(const char *path, bruce_loader_image_t *out_image) {
+bruce_result_t ext_mem_loader__stage_path(const char *path, bruce_ext_mem_loader_image_t *out_image) {
     if (path == NULL || out_image == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     memset(out_image, 0, sizeof(*out_image));
 
@@ -115,19 +115,19 @@ bruce_result_t loader__stage_path(const char *path, bruce_loader_image_t *out_im
     return result;
 }
 
-bruce_result_t loader__release_image(bruce_loader_image_t *image) {
+bruce_result_t ext_mem_loader__release_image(bruce_ext_mem_loader_image_t *image) {
     if (image == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     bruce_result_t result = memory__external_free(&image->memory);
     if (result == BRUCE_OK) memset(image, 0, sizeof(*image));
     return result;
 }
 
-bruce_result_t loader__adopt_image(bruce_loader_image_t *image) {
+bruce_result_t ext_mem_loader__adopt_image(bruce_ext_mem_loader_image_t *image) {
     if (image == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     return memory_external__adopt(&image->memory);
 }
 
-bruce_result_t loader__allocate_xip(size_t size, bruce_loader_xip_image_t *out_image) {
+bruce_result_t ext_mem_loader__allocate_xip(size_t size, bruce_ext_mem_loader_xip_image_t *out_image) {
     if (out_image == NULL || size == 0) return BRUCE_ERR_INVALID_ARGUMENT;
     memset(out_image, 0, sizeof(*out_image));
     bruce_result_t result = memory_external__alloc(size, true, &out_image->memory);
@@ -146,17 +146,19 @@ bruce_result_t loader__allocate_xip(size_t size, bruce_loader_xip_image_t *out_i
 }
 
 bruce_result_t
-loader__write_xip(const bruce_loader_xip_image_t *image, size_t offset, const void *data, size_t size) {
+ext_mem_loader__write_xip(
+    const bruce_ext_mem_loader_xip_image_t *image, size_t offset, const void *data, size_t size
+) {
     if (image == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     return memory__external_write(&image->memory, offset, data, size);
 }
 
-bruce_result_t loader__adopt_xip(bruce_loader_xip_image_t *image) {
+bruce_result_t ext_mem_loader__adopt_xip(bruce_ext_mem_loader_xip_image_t *image) {
     if (image == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     return memory_external__adopt(&image->memory);
 }
 
-bruce_result_t loader__release_xip(bruce_loader_xip_image_t *image) {
+bruce_result_t ext_mem_loader__release_xip(bruce_ext_mem_loader_xip_image_t *image) {
     if (image == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     bruce_result_t result = memory_external__release(&image->memory);
     if (result == BRUCE_OK) memset(image, 0, sizeof(*image));

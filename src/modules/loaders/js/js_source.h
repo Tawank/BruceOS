@@ -4,13 +4,13 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "core_sdk/loader.h"
+#include "core_sdk/ext_mem_loader.h"
 #include "core_sdk/result.h"
 
 typedef struct {
     const uint8_t *data;
     size_t size;
-    bruce_loader_image_t external;
+    bruce_ext_mem_loader_image_t external;
     uint8_t *internal;
     bruce_result_t external_result;
     bool internal_tracked;

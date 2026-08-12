@@ -61,7 +61,7 @@ typedef struct {
     /* 0 selects a Core default (4096 bytes). */
     uint32_t stack_bytes;
     /* Alternative entry point used by loader modules via
-     * app_runner__spawn_loader_process() (see core_sdk/loader.h) instead of
+     * app_runner__spawn_loader_process() (see core_sdk/ext_mem_loader.h) instead of
      * `entry` above: called as process_entry(process_entry_context) on the new
      * process's own stack, with no argc/argv handling of its own - a loader
      * hands its own decoded image/context through process_entry_context.

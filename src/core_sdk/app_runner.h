@@ -25,7 +25,7 @@ size_t app_runner__command_count(void);
 const char *app_runner__command_name(size_t index);
 
 /* Starts a named built-in or loader-registered application (see
- * core_sdk/loader.h).  On success this returns a positive bruce_process_id_t.
+ * core_sdk/ext_mem_loader.h).  On success this returns a positive bruce_process_id_t.
  * On failure it returns a negative BRUCE_ERR_* value (including
  * BRUCE_ERR_NOT_FOUND and BRUCE_ERR_BUSY). External callers require the
  * `execute` permission. `arg` is shell-style text. Registered built-ins use

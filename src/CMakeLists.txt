@@ -57,7 +57,7 @@ idf_component_register(SRCS
                     "core/i2c/i2c.c"
                     "core/event_loop/event_loop.c"
                      "core/ir/ir.c"
-                    "core/loader/loader.c"
+                    "core/ext_mem_loader/ext_mem_loader.c"
                      "core/manifest/manifest.c"
                     "core/memory/memory.c"
                     "core/memory/memory_external.c"

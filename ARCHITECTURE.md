@@ -486,7 +486,7 @@ JavaScript-runtime features; they are not moved into Core.  The loader
 allocates VM/context memory with `memory__malloc()`.
 
 The JS loader stages source in external memory before spawning, then transfers
-that allocation to `js__app_main(void *context)` with `loader__adopt_image()`.
+that allocation to `js__app_main(void *context)` with `ext_mem_loader__adopt_image()`.
 Staged mappings include a trailing NUL outside their reported image size, as
 required by mQuickJS. VM/context memory remains writable internal memory and is
 sized adaptively up to the no-PSRAM 100,000-byte legacy target. Like
@@ -1087,7 +1087,7 @@ Maintain two header layers:
   module and external ELF app.  SDK callers include them with their full,
   unambiguous namespace, for example `"core_sdk/app_runner.h"`.
 
-`core_sdk/loader.h` declares the loader registry
+`core_sdk/ext_mem_loader.h` declares the loader registry
 (`app_runner__register_loader()`, `app_runner__run_path()`,
 `app_runner__spawn_loader_process()`) that any loader module uses.  Manifest
 inspection is provided by the universal `manifest__inspect_path()` in

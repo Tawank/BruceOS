@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "core_sdk/loader.h"
+#include "core_sdk/ext_mem_loader.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/process.h"
 
@@ -67,8 +67,8 @@ bool selftest__run_external_memory_case(void) {
  * spi_flash_phys2cache() or a second tracked esp_partition_mmap(). The data
  * alias must be invalidated manually after every write. */
 bool selftest__run_external_memory_xip_case(void) {
-    bruce_loader_xip_image_t image;
-    bruce_result_t allocation = loader__allocate_xip(64, &image);
+    bruce_ext_mem_loader_xip_image_t image;
+    bruce_result_t allocation = ext_mem_loader__allocate_xip(64, &image);
     if (allocation != BRUCE_OK || image.instruction == NULL || image.data == NULL ||
         image.size != 64) {
         printf("[selftest] memory/external_xip: allocation failed (%d)\n", allocation);
@@ -80,8 +80,8 @@ bool selftest__run_external_memory_xip_case(void) {
     uint8_t second_chunk[24];
     memset(second_chunk, 0xC3, sizeof(second_chunk));
 
-    bool ok = loader__write_xip(&image, 0, first_chunk, sizeof(first_chunk)) == BRUCE_OK &&
-              loader__write_xip(&image, sizeof(first_chunk), second_chunk, sizeof(second_chunk)) == BRUCE_OK;
+    bool ok = ext_mem_loader__write_xip(&image, 0, first_chunk, sizeof(first_chunk)) == BRUCE_OK &&
+              ext_mem_loader__write_xip(&image, sizeof(first_chunk), second_chunk, sizeof(second_chunk)) == BRUCE_OK;
 
 #if !CONFIG_BRUCE_QEMU_TEST_MODE
     ok = ok && memcmp(image.data, first_chunk, sizeof(first_chunk)) == 0 &&
@@ -90,7 +90,7 @@ bool selftest__run_external_memory_xip_case(void) {
          memcmp(image.instruction + sizeof(first_chunk), second_chunk, sizeof(second_chunk)) == 0;
 #endif
 
-    ok = loader__release_xip(&image) == BRUCE_OK && ok;
+    ok = ext_mem_loader__release_xip(&image) == BRUCE_OK && ok;
 
     printf("[selftest] memory/external_xip: %s\n", ok ? "OK" : "failed");
     return ok;
