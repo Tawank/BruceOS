@@ -3,9 +3,44 @@
  * SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
  */
 
-#include "platform_api_extension.h"
 #include "libc_errno.h"
+#include "platform_api_extension.h"
+#include <limits.h>
 #include <unistd.h>
+
+/* ESP-IDF 6's libc provides renameat(), but may hide its declaration. */
+#if defined(ESP_PLATFORM)
+extern int renameat(int old_fd, const char *old_path, int new_fd, const char *new_path);
+#endif
+
+static bool wasi_filesize_to_off_t(__wasi_filesize_t value, off_t *out) {
+    const uintmax_t off_max = ((uintmax_t)1 << (sizeof(off_t) * CHAR_BIT - 1)) - 1;
+
+    if ((uintmax_t)value > off_max) return false;
+
+    *out = (off_t)value;
+    return true;
+}
+
+static bool wasi_filedelta_to_off_t(__wasi_filedelta_t value, off_t *out) {
+    const uintmax_t off_max_unsigned = ((uintmax_t)1 << (sizeof(off_t) * CHAR_BIT - 1)) - 1;
+    const intmax_t off_max = (intmax_t)off_max_unsigned;
+    const intmax_t off_min = -off_max - 1;
+
+    if ((intmax_t)value < off_min || (intmax_t)value > off_max) return false;
+
+    *out = (off_t)value;
+    return true;
+}
+
+static bool wasi_dircookie_to_long(__wasi_dircookie_t value, long *out) {
+    const uintmax_t long_max = ((uintmax_t)1 << (sizeof(long) * CHAR_BIT - 1)) - 1;
+
+    if ((uintmax_t)value > long_max) return false;
+
+    *out = (long)value;
+    return true;
+}
 
 #if !defined(__APPLE__) && !defined(ESP_PLATFORM)
 #define CONFIG_HAS_PWRITEV 1
@@ -67,22 +102,14 @@
 #endif
 
 // Converts a POSIX timespec to a WASI timestamp.
-static __wasi_timestamp_t
-convert_timespec(const struct timespec *ts)
-{
-    if (ts->tv_sec < 0)
-        return 0;
-    if ((__wasi_timestamp_t)ts->tv_sec >= UINT64_MAX / 1000000000)
-        return UINT64_MAX;
-    return (__wasi_timestamp_t)ts->tv_sec * 1000000000
-           + (__wasi_timestamp_t)ts->tv_nsec;
+static __wasi_timestamp_t convert_timespec(const struct timespec *ts) {
+    if (ts->tv_sec < 0) return 0;
+    if ((__wasi_timestamp_t)ts->tv_sec >= UINT64_MAX / 1000000000) return UINT64_MAX;
+    return ((__wasi_timestamp_t)ts->tv_sec * 1000000000) + (__wasi_timestamp_t)ts->tv_nsec;
 }
 
 // Converts a POSIX stat structure to a WASI filestat structure
-static void
-convert_stat(os_file_handle handle, const struct stat *in,
-             __wasi_filestat_t *out)
-{
+static void convert_stat(os_file_handle handle, const struct stat *in, __wasi_filestat_t *out) {
     out->st_dev = in->st_dev;
     out->st_ino = in->st_ino;
     out->st_nlink = (__wasi_linkcount_t)in->st_nlink;
@@ -101,52 +128,36 @@ convert_stat(os_file_handle handle, const struct stat *in,
     // can easily determine the exact socket type.
     if (S_ISBLK(in->st_mode)) {
         out->st_filetype = __WASI_FILETYPE_BLOCK_DEVICE;
-    }
-    else if (S_ISCHR(in->st_mode)) {
+    } else if (S_ISCHR(in->st_mode)) {
         out->st_filetype = __WASI_FILETYPE_CHARACTER_DEVICE;
-    }
-    else if (S_ISDIR(in->st_mode)) {
+    } else if (S_ISDIR(in->st_mode)) {
         out->st_filetype = __WASI_FILETYPE_DIRECTORY;
-    }
-    else if (S_ISFIFO(in->st_mode)) {
+    } else if (S_ISFIFO(in->st_mode)) {
         out->st_filetype = __WASI_FILETYPE_SOCKET_STREAM;
-    }
-    else if (S_ISLNK(in->st_mode)) {
+    } else if (S_ISLNK(in->st_mode)) {
         out->st_filetype = __WASI_FILETYPE_SYMBOLIC_LINK;
-    }
-    else if (S_ISREG(in->st_mode)) {
+    } else if (S_ISREG(in->st_mode)) {
         out->st_filetype = __WASI_FILETYPE_REGULAR_FILE;
-    }
-    else if (S_ISSOCK(in->st_mode)) {
+    } else if (S_ISSOCK(in->st_mode)) {
         int socktype;
         socklen_t socktypelen = sizeof(socktype);
 
-        if (getsockopt(handle, SOL_SOCKET, SO_TYPE, &socktype, &socktypelen)
-            < 0) {
+        if (getsockopt(handle, SOL_SOCKET, SO_TYPE, &socktype, &socktypelen) < 0) {
             out->st_filetype = __WASI_FILETYPE_UNKNOWN;
             return;
         }
 
         switch (socktype) {
-            case SOCK_DGRAM:
-                out->st_filetype = __WASI_FILETYPE_SOCKET_DGRAM;
-                break;
-            case SOCK_STREAM:
-                out->st_filetype = __WASI_FILETYPE_SOCKET_STREAM;
-                break;
-            default:
-                out->st_filetype = __WASI_FILETYPE_UNKNOWN;
-                return;
+            case SOCK_DGRAM: out->st_filetype = __WASI_FILETYPE_SOCKET_DGRAM; break;
+            case SOCK_STREAM: out->st_filetype = __WASI_FILETYPE_SOCKET_STREAM; break;
+            default: out->st_filetype = __WASI_FILETYPE_UNKNOWN; return;
         }
-    }
-    else {
+    } else {
         out->st_filetype = __WASI_FILETYPE_UNKNOWN;
     }
 }
 
-static void
-convert_timestamp(__wasi_timestamp_t in, struct timespec *out)
-{
+static void convert_timestamp(__wasi_timestamp_t in, struct timespec *out) {
     // Store sub-second remainder.
 #if defined(__SYSCALL_SLONG_TYPE)
     out->tv_nsec = (__SYSCALL_SLONG_TYPE)(in % 1000000000);
@@ -161,109 +172,88 @@ convert_timestamp(__wasi_timestamp_t in, struct timespec *out)
 
 // Converts the provided timestamps and flags to a set of arguments for
 // futimens() and utimensat().
-static void
-convert_utimens_arguments(__wasi_timestamp_t st_atim,
-                          __wasi_timestamp_t st_mtim,
-                          __wasi_fstflags_t fstflags, struct timespec *ts)
-{
+static void convert_utimens_arguments(
+    __wasi_timestamp_t st_atim, __wasi_timestamp_t st_mtim, __wasi_fstflags_t fstflags, struct timespec *ts
+) {
     if ((fstflags & __WASI_FILESTAT_SET_ATIM_NOW) != 0) {
         ts[0].tv_nsec = UTIME_NOW;
-    }
-    else if ((fstflags & __WASI_FILESTAT_SET_ATIM) != 0) {
+    } else if ((fstflags & __WASI_FILESTAT_SET_ATIM) != 0) {
         convert_timestamp(st_atim, &ts[0]);
-    }
-    else {
+    } else {
         ts[0].tv_nsec = UTIME_OMIT;
     }
 
     if ((fstflags & __WASI_FILESTAT_SET_MTIM_NOW) != 0) {
         ts[1].tv_nsec = UTIME_NOW;
-    }
-    else if ((fstflags & __WASI_FILESTAT_SET_MTIM) != 0) {
+    } else if ((fstflags & __WASI_FILESTAT_SET_MTIM) != 0) {
         convert_timestamp(st_mtim, &ts[1]);
-    }
-    else {
+    } else {
         ts[1].tv_nsec = UTIME_OMIT;
     }
 }
 
-__wasi_errno_t
-os_fstat(os_file_handle handle, struct __wasi_filestat_t *buf)
-{
+__wasi_errno_t os_fstat(os_file_handle handle, struct __wasi_filestat_t *buf) {
     struct stat stat_buf;
     int ret = fstat(handle, &stat_buf);
 
-    if (ret < 0)
-        return convert_errno(errno);
+    if (ret < 0) return convert_errno(errno);
 
     convert_stat(handle, &stat_buf, buf);
 
     return __WASI_ESUCCESS;
 }
 
-__wasi_errno_t
-os_fstatat(os_file_handle handle, const char *path,
-           struct __wasi_filestat_t *buf, __wasi_lookupflags_t lookup_flags)
-{
+__wasi_errno_t os_fstatat(
+    os_file_handle handle, const char *path, struct __wasi_filestat_t *buf, __wasi_lookupflags_t lookup_flags
+) {
     struct stat stat_buf;
-    int ret = fstatat(handle, path, &stat_buf,
-                      (lookup_flags & __WASI_LOOKUP_SYMLINK_FOLLOW)
-                          ? AT_SYMLINK_FOLLOW
-                          : AT_SYMLINK_NOFOLLOW);
+    int ret = fstatat(
+        handle,
+        path,
+        &stat_buf,
+        (lookup_flags & __WASI_LOOKUP_SYMLINK_FOLLOW) ? AT_SYMLINK_FOLLOW : AT_SYMLINK_NOFOLLOW
+    );
 
-    if (ret < 0)
-        return convert_errno(errno);
+    if (ret < 0) return convert_errno(errno);
 
     convert_stat(handle, &stat_buf, buf);
 
     return __WASI_ESUCCESS;
 }
 
-__wasi_errno_t
-os_file_get_fdflags(os_file_handle handle, __wasi_fdflags_t *flags)
-{
+__wasi_errno_t os_file_get_fdflags(os_file_handle handle, __wasi_fdflags_t *flags) {
     int ret = fcntl(handle, F_GETFL);
 
-    if (ret < 0)
-        return convert_errno(errno);
+    if (ret < 0) return convert_errno(errno);
 
     *flags = 0;
 
-    if ((ret & O_APPEND) != 0)
-        *flags |= __WASI_FDFLAG_APPEND;
+    if ((ret & O_APPEND) != 0) *flags |= __WASI_FDFLAG_APPEND;
 #ifdef CONFIG_HAS_O_DSYNC
-    if ((ret & O_DSYNC) != 0)
-        *flags |= __WASI_FDFLAG_DSYNC;
+    if ((ret & O_DSYNC) != 0) *flags |= __WASI_FDFLAG_DSYNC;
 #endif
-    if ((ret & O_NONBLOCK) != 0)
-        *flags |= __WASI_FDFLAG_NONBLOCK;
+    if ((ret & O_NONBLOCK) != 0) *flags |= __WASI_FDFLAG_NONBLOCK;
 #ifdef CONFIG_HAS_O_RSYNC
-    if ((ret & O_RSYNC) != 0)
-        *flags |= __WASI_FDFLAG_RSYNC;
+    if ((ret & O_RSYNC) != 0) *flags |= __WASI_FDFLAG_RSYNC;
 #endif
 #ifdef CONFIG_HAS_O_SYNC
-    if ((ret & O_SYNC) != 0)
-        *flags |= __WASI_FDFLAG_SYNC;
+    if ((ret & O_SYNC) != 0) *flags |= __WASI_FDFLAG_SYNC;
 #endif
 
     return __WASI_ESUCCESS;
 }
 
-__wasi_errno_t
-os_file_set_fdflags(os_file_handle handle, __wasi_fdflags_t flags)
-{
+__wasi_errno_t os_file_set_fdflags(os_file_handle handle, __wasi_fdflags_t flags) {
     int fcntl_flags = 0;
 
-    if ((flags & __WASI_FDFLAG_APPEND) != 0)
-        fcntl_flags |= O_APPEND;
+    if ((flags & __WASI_FDFLAG_APPEND) != 0) fcntl_flags |= O_APPEND;
     if ((flags & __WASI_FDFLAG_DSYNC) != 0)
 #ifdef CONFIG_HAS_O_DSYNC
         fcntl_flags |= O_DSYNC;
 #else
         return __WASI_ENOTSUP;
 #endif
-    if ((flags & __WASI_FDFLAG_NONBLOCK) != 0)
-        fcntl_flags |= O_NONBLOCK;
+    if ((flags & __WASI_FDFLAG_NONBLOCK) != 0) fcntl_flags |= O_NONBLOCK;
     if ((flags & __WASI_FDFLAG_RSYNC) != 0)
 #ifdef CONFIG_HAS_O_RSYNC
         fcntl_flags |= O_RSYNC;
@@ -279,91 +269,72 @@ os_file_set_fdflags(os_file_handle handle, __wasi_fdflags_t flags)
 
     int ret = fcntl(handle, F_SETFL, fcntl_flags);
 
-    if (ret < 0)
-        return convert_errno(errno);
+    if (ret < 0) return convert_errno(errno);
 
     return __WASI_ESUCCESS;
 }
 
-__wasi_errno_t
-os_fdatasync(os_file_handle handle)
-{
+__wasi_errno_t os_fdatasync(os_file_handle handle) {
 #if CONFIG_HAS_FDATASYNC
     int ret = fdatasync(handle);
 #else
     int ret = fsync(handle);
 #endif
 
-    if (ret < 0)
-        return convert_errno(errno);
+    if (ret < 0) return convert_errno(errno);
 
     return __WASI_ESUCCESS;
 }
 
-__wasi_errno_t
-os_fsync(os_file_handle handle)
-{
+__wasi_errno_t os_fsync(os_file_handle handle) {
     int ret = fsync(handle);
 
-    if (ret < 0)
-        return convert_errno(errno);
+    if (ret < 0) return convert_errno(errno);
 
     return __WASI_ESUCCESS;
 }
 
-__wasi_errno_t
-os_open_preopendir(const char *path, os_file_handle *out)
-{
+__wasi_errno_t os_open_preopendir(const char *path, os_file_handle *out) {
 
     int fd = open(path, O_RDONLY | O_DIRECTORY, 0);
 
-    if (fd < 0)
-        return convert_errno(errno);
+    if (fd < 0) return convert_errno(errno);
 
     *out = fd;
 
     return __WASI_ESUCCESS;
 }
 
-__wasi_errno_t
-os_openat(os_file_handle handle, const char *path, __wasi_oflags_t oflags,
-          __wasi_fdflags_t fs_flags, __wasi_lookupflags_t lookup_flags,
-          wasi_libc_file_access_mode read_write_mode, os_file_handle *out)
-{
+__wasi_errno_t os_openat(
+    os_file_handle handle, const char *path, __wasi_oflags_t oflags, __wasi_fdflags_t fd_flags,
+    __wasi_lookupflags_t lookup_flags, wasi_libc_file_access_mode access_mode, os_file_handle *out
+) {
     int open_flags = 0;
 
     // Convert open flags.
-    if ((oflags & __WASI_O_CREAT) != 0) {
-        open_flags |= O_CREAT;
-    }
-    if ((oflags & __WASI_O_DIRECTORY) != 0)
-        open_flags |= O_DIRECTORY;
-    if ((oflags & __WASI_O_EXCL) != 0)
-        open_flags |= O_EXCL;
-    if ((oflags & __WASI_O_TRUNC) != 0) {
-        open_flags |= O_TRUNC;
-    }
+    if ((oflags & __WASI_O_CREAT) != 0) { open_flags |= O_CREAT; }
+    if ((oflags & __WASI_O_DIRECTORY) != 0) open_flags |= O_DIRECTORY;
+    if ((oflags & __WASI_O_EXCL) != 0) open_flags |= O_EXCL;
+    if ((oflags & __WASI_O_TRUNC) != 0) { open_flags |= O_TRUNC; }
 
     // Convert file descriptor flags.
-    if ((fs_flags & __WASI_FDFLAG_APPEND) != 0)
-        open_flags |= O_APPEND;
-    if ((fs_flags & __WASI_FDFLAG_DSYNC) != 0) {
+    if ((fd_flags & __WASI_FDFLAG_APPEND) != 0) open_flags |= O_APPEND;
+    if ((fd_flags & __WASI_FDFLAG_DSYNC) != 0) {
 #ifdef CONFIG_HAS_O_DSYNC
         open_flags |= O_DSYNC;
 #else
         return __WASI_ENOTSUP;
 #endif
     }
-    if ((fs_flags & __WASI_FDFLAG_NONBLOCK) != 0)
-        open_flags |= O_NONBLOCK;
-    if ((fs_flags & __WASI_FDFLAG_RSYNC) != 0) {
+    if ((fd_flags & __WASI_FDFLAG_NONBLOCK) != 0) open_flags |= O_NONBLOCK;
+    if ((fd_flags & __WASI_FDFLAG_RSYNC) != 0) {
 #ifdef CONFIG_HAS_O_RSYNC
         open_flags |= O_RSYNC;
 #else
         return __WASI_ENOTSUP;
 #endif
     }
-    if ((fs_flags & __WASI_FDFLAG_SYNC) != 0) {
+    if ((fd_flags & __WASI_FDFLAG_SYNC) != 0) {
 #ifdef CONFIG_HAS_O_SYNC
         open_flags |= O_SYNC;
 #else
@@ -371,22 +342,13 @@ os_openat(os_file_handle handle, const char *path, __wasi_oflags_t oflags,
 #endif
     }
 
-    if ((lookup_flags & __WASI_LOOKUP_SYMLINK_FOLLOW) == 0) {
-        open_flags |= O_NOFOLLOW;
-    }
+    if ((lookup_flags & __WASI_LOOKUP_SYMLINK_FOLLOW) == 0) { open_flags |= O_NOFOLLOW; }
 
-    switch (read_write_mode) {
-        case WASI_LIBC_ACCESS_MODE_READ_WRITE:
-            open_flags |= O_RDWR;
-            break;
-        case WASI_LIBC_ACCESS_MODE_READ_ONLY:
-            open_flags |= O_RDONLY;
-            break;
-        case WASI_LIBC_ACCESS_MODE_WRITE_ONLY:
-            open_flags |= O_WRONLY;
-            break;
-        default:
-            return __WASI_EINVAL;
+    switch (access_mode) {
+        case WASI_LIBC_ACCESS_MODE_READ_WRITE: open_flags |= O_RDWR; break;
+        case WASI_LIBC_ACCESS_MODE_READ_ONLY: open_flags |= O_RDONLY; break;
+        case WASI_LIBC_ACCESS_MODE_WRITE_ONLY: open_flags |= O_WRONLY; break;
+        default: return __WASI_EINVAL;
     }
 
     int fd = openat(handle, path, open_flags, 0666);
@@ -396,29 +358,22 @@ os_openat(os_file_handle handle, const char *path, __wasi_oflags_t oflags,
         // Linux returns ENXIO instead of EOPNOTSUPP when opening a socket.
         if (openat_errno == ENXIO) {
             struct stat sb;
-            int ret = fstatat(handle, path, &sb,
-                              (lookup_flags & __WASI_LOOKUP_SYMLINK_FOLLOW)
-                                  ? 0
-                                  : AT_SYMLINK_NOFOLLOW);
-            return ret == 0 && S_ISSOCK(sb.st_mode) ? __WASI_ENOTSUP
-                                                    : __WASI_ENXIO;
+            int ret = fstatat(
+                handle, path, &sb, (lookup_flags & __WASI_LOOKUP_SYMLINK_FOLLOW) ? 0 : AT_SYMLINK_NOFOLLOW
+            );
+            return ret == 0 && S_ISSOCK(sb.st_mode) ? __WASI_ENOTSUP : __WASI_ENXIO;
         }
         // Linux returns ENOTDIR instead of ELOOP when using
         // O_NOFOLLOW|O_DIRECTORY on a symlink.
-        if (openat_errno == ENOTDIR
-            && (open_flags & (O_NOFOLLOW | O_DIRECTORY)) != 0) {
+        if (openat_errno == ENOTDIR && (open_flags & (O_NOFOLLOW | O_DIRECTORY)) != 0) {
             struct stat sb;
             int ret = fstatat(handle, path, &sb, AT_SYMLINK_NOFOLLOW);
-            if (S_ISLNK(sb.st_mode)) {
-                return __WASI_ELOOP;
-            }
+            if (S_ISLNK(sb.st_mode)) { return __WASI_ELOOP; }
             (void)ret;
         }
         // FreeBSD returns EMLINK instead of ELOOP when using O_NOFOLLOW on
         // a symlink.
-        if ((lookup_flags & __WASI_LOOKUP_SYMLINK_FOLLOW) == 0
-            && openat_errno == EMLINK)
-            return __WASI_ELOOP;
+        if ((lookup_flags & __WASI_LOOKUP_SYMLINK_FOLLOW) == 0 && openat_errno == EMLINK) return __WASI_ELOOP;
 
         return convert_errno(openat_errno);
     }
@@ -428,64 +383,49 @@ os_openat(os_file_handle handle, const char *path, __wasi_oflags_t oflags,
     return __WASI_ESUCCESS;
 }
 
-__wasi_errno_t
-os_file_get_access_mode(os_file_handle handle,
-                        wasi_libc_file_access_mode *access_mode)
-{
+__wasi_errno_t os_file_get_access_mode(os_file_handle handle, wasi_libc_file_access_mode *access_mode) {
     int ret = fcntl(handle, F_GETFL, 0);
 
-    if (ret < 0)
-        return convert_errno(errno);
+    if (ret < 0) return convert_errno(errno);
 
     switch (ret & O_ACCMODE) {
-        case O_RDONLY:
-            *access_mode = WASI_LIBC_ACCESS_MODE_READ_ONLY;
-            break;
-        case O_WRONLY:
-            *access_mode = WASI_LIBC_ACCESS_MODE_WRITE_ONLY;
-            break;
-        case O_RDWR:
-            *access_mode = WASI_LIBC_ACCESS_MODE_READ_WRITE;
-            break;
-        default:
-            return __WASI_EINVAL;
+        case O_RDONLY: *access_mode = WASI_LIBC_ACCESS_MODE_READ_ONLY; break;
+        case O_WRONLY: *access_mode = WASI_LIBC_ACCESS_MODE_WRITE_ONLY; break;
+        case O_RDWR: *access_mode = WASI_LIBC_ACCESS_MODE_READ_WRITE; break;
+        default: return __WASI_EINVAL;
     }
 
     return __WASI_ESUCCESS;
 }
 
-__wasi_errno_t
-os_close(os_file_handle handle, bool is_stdio)
-{
-    if (is_stdio)
-        return __WASI_ESUCCESS;
+__wasi_errno_t os_close(os_file_handle handle, bool is_stdio) {
+    if (is_stdio) return __WASI_ESUCCESS;
 
     int ret = close(handle);
 
-    if (ret < 0)
-        return convert_errno(errno);
+    if (ret < 0) return convert_errno(errno);
 
     return __WASI_ESUCCESS;
 }
 
-__wasi_errno_t
-os_preadv(os_file_handle handle, const struct __wasi_iovec_t *iov, int iovcnt,
-          __wasi_filesize_t offset, size_t *nread)
-{
+__wasi_errno_t os_preadv(
+    os_file_handle handle, const struct __wasi_iovec_t *iov, int iovcnt, __wasi_filesize_t offset,
+    size_t *nread
+) {
+    off_t posix_offset;
+    if (!wasi_filesize_to_off_t(offset, &posix_offset)) return __WASI_EOVERFLOW;
+
 #if CONFIG_HAS_PREADV
-    ssize_t len =
-        preadv(handle, (const struct iovec *)iov, (int)iovcnt, (off_t)offset);
-    if (len < 0)
-        return convert_errno(errno);
+    ssize_t len = preadv(handle, (const struct iovec *)iov, (int)iovcnt, posix_offset);
+    if (len < 0) return convert_errno(errno);
 
     *nread = (size_t)len;
     return __WASI_ESUCCESS;
 #else
     if (iovcnt == 1) {
-        ssize_t len = pread(handle, iov->buf, iov->buf_len, offset);
+        ssize_t len = pread(handle, iov->buf, iov->buf_len, posix_offset);
 
-        if (len < 0)
-            return convert_errno(errno);
+        if (len < 0) return convert_errno(errno);
 
         *nread = len;
         return __WASI_ESUCCESS;
@@ -493,17 +433,14 @@ os_preadv(os_file_handle handle, const struct __wasi_iovec_t *iov, int iovcnt,
 
     // Allocate a single buffer to fit all data.
     size_t totalsize = 0;
-    for (int i = 0; i < iovcnt; ++i)
-        totalsize += iov[i].buf_len;
+    for (int i = 0; i < iovcnt; ++i) totalsize += iov[i].buf_len;
 
     char *buf = BH_MALLOC(totalsize);
 
-    if (buf == NULL) {
-        return __WASI_ENOMEM;
-    }
+    if (buf == NULL) { return __WASI_ENOMEM; }
 
     // Perform a single read operation.
-    ssize_t len = pread(handle, buf, totalsize, offset);
+    ssize_t len = pread(handle, buf, totalsize, posix_offset);
 
     if (len < 0) {
         BH_FREE(buf);
@@ -516,8 +453,7 @@ os_preadv(os_file_handle handle, const struct __wasi_iovec_t *iov, int iovcnt,
         if (bufoff + iov[i].buf_len < (size_t)len) {
             memcpy(iov[i].buf, buf + bufoff, iov[i].buf_len);
             bufoff += iov[i].buf_len;
-        }
-        else {
+        } else {
             memcpy(iov[i].buf, buf + bufoff, len - bufoff);
             break;
         }
@@ -529,30 +465,27 @@ os_preadv(os_file_handle handle, const struct __wasi_iovec_t *iov, int iovcnt,
 #endif
 }
 
-__wasi_errno_t
-os_pwritev(os_file_handle handle, const struct __wasi_ciovec_t *iov, int iovcnt,
-           __wasi_filesize_t offset, size_t *nwritten)
-{
-    if (iovcnt == 0)
-        return __WASI_EINVAL;
+__wasi_errno_t os_pwritev(
+    os_file_handle handle, const struct __wasi_ciovec_t *iov, int iovcnt, __wasi_filesize_t offset,
+    size_t *nwritten
+) {
+    if (iovcnt == 0) return __WASI_EINVAL;
+
+    off_t posix_offset;
+    if (!wasi_filesize_to_off_t(offset, &posix_offset)) return __WASI_EOVERFLOW;
 
     ssize_t len = 0;
 #if CONFIG_HAS_PWRITEV
-    len =
-        pwritev(handle, (const struct iovec *)iov, (int)iovcnt, (off_t)offset);
+    len = pwritev(handle, (const struct iovec *)iov, (int)iovcnt, posix_offset);
 #else
     if (iovcnt == 1) {
-        len = pwrite(handle, iov->buf, iov->buf_len, offset);
-    }
-    else {
+        len = pwrite(handle, iov->buf, iov->buf_len, posix_offset);
+    } else {
         // Allocate a single buffer to fit all data.
         size_t totalsize = 0;
-        for (int i = 0; i < iovcnt; ++i)
-            totalsize += iov[i].buf_len;
+        for (int i = 0; i < iovcnt; ++i) totalsize += iov[i].buf_len;
         char *buf = BH_MALLOC(totalsize);
-        if (buf == NULL) {
-            return __WASI_ENOMEM;
-        }
+        if (buf == NULL) { return __WASI_ENOMEM; }
         size_t bufoff = 0;
         for (int i = 0; i < iovcnt; ++i) {
             memcpy(buf + bufoff, iov[i].buf, iov[i].buf_len);
@@ -560,25 +493,20 @@ os_pwritev(os_file_handle handle, const struct __wasi_ciovec_t *iov, int iovcnt,
         }
 
         // Perform a single write operation.
-        len = pwrite(handle, buf, totalsize, offset);
+        len = pwrite(handle, buf, totalsize, posix_offset);
         BH_FREE(buf);
     }
 #endif
-    if (len < 0)
-        return convert_errno(errno);
+    if (len < 0) return convert_errno(errno);
 
     *nwritten = (size_t)len;
     return __WASI_ESUCCESS;
 }
 
-__wasi_errno_t
-os_readv(os_file_handle handle, const struct __wasi_iovec_t *iov, int iovcnt,
-         size_t *nread)
-{
-    ssize_t len = readv(handle, (const struct iovec *)iov, (int)iovcnt);
+__wasi_errno_t os_readv(os_file_handle handle, const struct __wasi_iovec_t *iov, int iovcnt, size_t *nread) {
+    ssize_t len = readv(handle, (const struct iovec *)iov, iovcnt);
 
-    if (len < 0)
-        return convert_errno(errno);
+    if (len < 0) return convert_errno(errno);
 
     *nread = (size_t)len;
 
@@ -586,161 +514,146 @@ os_readv(os_file_handle handle, const struct __wasi_iovec_t *iov, int iovcnt,
 }
 
 __wasi_errno_t
-os_writev(os_file_handle handle, const struct __wasi_ciovec_t *iov, int iovcnt,
-          size_t *nwritten)
-{
-    ssize_t len = writev(handle, (const struct iovec *)iov, (int)iovcnt);
+os_writev(os_file_handle handle, const struct __wasi_ciovec_t *iov, int iovcnt, size_t *nwritten) {
+    ssize_t len = writev(handle, (const struct iovec *)iov, iovcnt);
 
-    if (len < 0)
-        return convert_errno(errno);
+    if (len < 0) return convert_errno(errno);
 
     *nwritten = (size_t)len;
 
     return __WASI_ESUCCESS;
 }
 
-__wasi_errno_t
-os_fallocate(os_file_handle handle, __wasi_filesize_t offset,
-             __wasi_filesize_t length)
-{
+__wasi_errno_t os_fallocate(os_file_handle handle, __wasi_filesize_t offset, __wasi_filesize_t length) {
+    off_t posix_offset;
+    off_t posix_length;
+    if (!wasi_filesize_to_off_t(offset, &posix_offset) || !wasi_filesize_to_off_t(length, &posix_length))
+        return __WASI_EOVERFLOW;
+
 #if CONFIG_HAS_POSIX_FALLOCATE
-    int ret = posix_fallocate(handle, (off_t)offset, (off_t)length);
+    int ret = posix_fallocate(handle, posix_offset, posix_length);
 #else
     // At least ensure that the file is grown to the right size.
     // TODO(ed): See if this can somehow be implemented without any race
     // conditions. We may end up shrinking the file right now.
     struct stat sb;
     int ret = fstat(handle, &sb);
-    off_t newsize = (off_t)(offset + length);
+    const uintmax_t off_max = ((uintmax_t)1 << (sizeof(off_t) * CHAR_BIT - 1)) - 1;
+    if ((uintmax_t)posix_offset + (uintmax_t)posix_length > off_max) return __WASI_EOVERFLOW;
+    off_t newsize = posix_offset + posix_length;
 
-    if (ret == 0 && sb.st_size < newsize)
-        ret = ftruncate(handle, newsize);
+    if (ret == 0 && sb.st_size < newsize) ret = ftruncate(handle, newsize);
 #endif
 
-    if (ret != 0)
-        return convert_errno(ret);
+    if (ret != 0) return convert_errno(ret);
 
     return __WASI_ESUCCESS;
 }
 
-__wasi_errno_t
-os_ftruncate(os_file_handle handle, __wasi_filesize_t size)
-{
-    int ret = ftruncate(handle, (off_t)size);
+__wasi_errno_t os_ftruncate(os_file_handle handle, __wasi_filesize_t size) {
+    off_t posix_size;
+    if (!wasi_filesize_to_off_t(size, &posix_size)) return __WASI_EOVERFLOW;
 
-    if (ret < 0)
-        return convert_errno(errno);
+    int ret = ftruncate(handle, posix_size);
+
+    if (ret < 0) return convert_errno(errno);
 
     return __WASI_ESUCCESS;
 }
 
-__wasi_errno_t
-os_futimens(os_file_handle handle, __wasi_timestamp_t access_time,
-            __wasi_timestamp_t modification_time, __wasi_fstflags_t fstflags)
-{
+__wasi_errno_t os_futimens(
+    os_file_handle handle, __wasi_timestamp_t access_time, __wasi_timestamp_t modification_time,
+    __wasi_fstflags_t fstflags
+) {
     struct timespec ts[2];
     convert_utimens_arguments(access_time, modification_time, fstflags, ts);
 
     int ret = futimens(handle, ts);
 
-    if (ret < 0)
-        return convert_errno(errno);
+    if (ret < 0) return convert_errno(errno);
 
     return __WASI_ESUCCESS;
 }
 
-__wasi_errno_t
-os_utimensat(os_file_handle handle, const char *path,
-             __wasi_timestamp_t access_time,
-             __wasi_timestamp_t modification_time, __wasi_fstflags_t fstflags,
-             __wasi_lookupflags_t lookup_flags)
-{
+__wasi_errno_t os_utimensat(
+    os_file_handle handle, const char *path, __wasi_timestamp_t access_time,
+    __wasi_timestamp_t modification_time, __wasi_fstflags_t fstflags, __wasi_lookupflags_t lookup_flags
+) {
     struct timespec ts[2];
     convert_utimens_arguments(access_time, modification_time, fstflags, ts);
 
-    int ret = utimensat(handle, path, ts,
-                        (lookup_flags & __WASI_LOOKUP_SYMLINK_FOLLOW)
-                            ? 0
-                            : AT_SYMLINK_NOFOLLOW);
+    int ret =
+        utimensat(handle, path, ts, (lookup_flags & __WASI_LOOKUP_SYMLINK_FOLLOW) ? 0 : AT_SYMLINK_NOFOLLOW);
 
-    if (ret < 0)
-        return convert_errno(errno);
+    if (ret < 0) return convert_errno(errno);
 
     return __WASI_ESUCCESS;
 }
 
 __wasi_errno_t
-os_readlinkat(os_file_handle handle, const char *path, char *buf,
-              size_t bufsize, size_t *nread)
-{
+os_readlinkat(os_file_handle handle, const char *path, char *buf, size_t bufsize, size_t *nread) {
     // Linux requires that the buffer size is positive. whereas POSIX does
     // not. Use a fake buffer to store the results if the size is zero.
     char fakebuf[1];
-    ssize_t len = readlinkat(handle, path, bufsize == 0 ? fakebuf : buf,
-                             bufsize == 0 ? sizeof(fakebuf) : bufsize);
+    ssize_t len =
+        readlinkat(handle, path, bufsize == 0 ? fakebuf : buf, bufsize == 0 ? sizeof(fakebuf) : bufsize);
 
-    if (len < 0)
-        return convert_errno(errno);
+    if (len < 0) return convert_errno(errno);
 
     *nread = (size_t)len < bufsize ? (size_t)len : bufsize;
 
     return __WASI_ESUCCESS;
 }
 
-__wasi_errno_t
-os_linkat(os_file_handle from_handle, const char *from_path,
-          os_file_handle to_handle, const char *to_path,
-          __wasi_lookupflags_t lookup_flags)
-{
+__wasi_errno_t os_linkat(
+    os_file_handle from_handle, const char *from_path, os_file_handle to_handle, const char *to_path,
+    __wasi_lookupflags_t lookup_flags
+) {
     int ret = linkat(
-        from_handle, from_path, to_handle, to_path,
-        (lookup_flags & __WASI_LOOKUP_SYMLINK_FOLLOW) ? AT_SYMLINK_FOLLOW : 0);
+        from_handle,
+        from_path,
+        to_handle,
+        to_path,
+        (lookup_flags & __WASI_LOOKUP_SYMLINK_FOLLOW) ? AT_SYMLINK_FOLLOW : 0
+    );
 
-    if (ret < 0)
-        return convert_errno(errno);
+    if (ret < 0) return convert_errno(errno);
 
     return __WASI_ESUCCESS;
 }
 
-__wasi_errno_t
-os_symlinkat(const char *old_path, os_file_handle handle, const char *new_path)
-{
+__wasi_errno_t os_symlinkat(const char *old_path, os_file_handle handle, const char *new_path) {
     int ret = symlinkat(old_path, handle, new_path);
 
-    if (ret < 0)
-        return convert_errno(errno);
+    if (ret < 0) return convert_errno(errno);
 
     return __WASI_ESUCCESS;
 }
 
-__wasi_errno_t
-os_mkdirat(os_file_handle handle, const char *path)
-{
+__wasi_errno_t os_mkdirat(os_file_handle handle, const char *path) {
     int ret = mkdirat(handle, path, 0777);
 
-    if (ret < 0)
-        return convert_errno(errno);
+    if (ret < 0) return convert_errno(errno);
 
     return __WASI_ESUCCESS;
 }
 
-__wasi_errno_t
-os_renameat(os_file_handle old_handle, const char *old_path,
-            os_file_handle new_handle, const char *new_path)
-{
+__wasi_errno_t os_renameat(
+    os_file_handle old_handle, const char *old_path, os_file_handle new_handle, const char *new_path
+) {
 
     int ret = renameat(old_handle, old_path, new_handle, new_path);
 
-    if (ret < 0)
-        return convert_errno(errno);
+    if (ret < 0) return convert_errno(errno);
 
     return __WASI_ESUCCESS;
 }
 
-__wasi_errno_t
-os_unlinkat(os_file_handle handle, const char *path, bool is_dir)
-{
-    int ret = unlinkat(handle, path, is_dir ? AT_REMOVEDIR : 0);
+__wasi_errno_t os_unlinkat(os_file_handle handle, const char *path, bool is_dir) {
+    int unlink_flags = 0;
+    if ((int)is_dir == true) unlink_flags = AT_REMOVEDIR;
+
+    int ret = unlinkat(handle, path, unlink_flags);
 
 #ifndef __linux__
     if (ret < 0) {
@@ -753,8 +666,7 @@ os_unlinkat(os_file_handle handle, const char *path, bool is_dir)
         // if the race had turned out differently.
         if (errno == EPERM) {
             struct stat statbuf;
-            if (fstatat(handle, path, &statbuf, AT_SYMLINK_NOFOLLOW) == 0
-                && S_ISDIR(statbuf.st_mode)) {
+            if (fstatat(handle, path, &statbuf, AT_SYMLINK_NOFOLLOW) == 0 && S_ISDIR(statbuf.st_mode)) {
                 errno = EISDIR;
             }
         }
@@ -768,75 +680,53 @@ os_unlinkat(os_file_handle handle, const char *path, bool is_dir)
     }
 #endif
 
-    if (ret < 0)
-        return convert_errno(errno);
+    if (ret < 0) return convert_errno(errno);
 
     return __WASI_ESUCCESS;
 }
 
-__wasi_errno_t
-os_lseek(os_file_handle handle, __wasi_filedelta_t offset,
-         __wasi_whence_t whence, __wasi_filesize_t *new_offset)
-{
+__wasi_errno_t os_lseek(
+    os_file_handle handle, __wasi_filedelta_t offset, __wasi_whence_t whence, __wasi_filesize_t *new_offset
+) {
     int nwhence;
 
     switch (whence) {
-        case __WASI_WHENCE_CUR:
-            nwhence = SEEK_CUR;
-            break;
-        case __WASI_WHENCE_END:
-            nwhence = SEEK_END;
-            break;
-        case __WASI_WHENCE_SET:
-            nwhence = SEEK_SET;
-            break;
-        default:
-            return __WASI_EINVAL;
+        case __WASI_WHENCE_CUR: nwhence = SEEK_CUR; break;
+        case __WASI_WHENCE_END: nwhence = SEEK_END; break;
+        case __WASI_WHENCE_SET: nwhence = SEEK_SET; break;
+        default: return __WASI_EINVAL;
     }
 
-    off_t ret = lseek(handle, offset, nwhence);
+    off_t posix_offset;
+    if (!wasi_filedelta_to_off_t(offset, &posix_offset)) return __WASI_EOVERFLOW;
 
-    if (ret < 0)
-        return convert_errno(errno);
+    off_t ret = lseek(handle, posix_offset, nwhence);
+
+    if (ret < 0) return convert_errno(errno);
 
     *new_offset = (__wasi_filesize_t)ret;
 
     return __WASI_ESUCCESS;
 }
 
-__wasi_errno_t
-os_fadvise(os_file_handle handle, __wasi_filesize_t offset,
-           __wasi_filesize_t length, __wasi_advice_t advice)
-{
+__wasi_errno_t os_fadvise(
+    os_file_handle handle, __wasi_filesize_t offset, __wasi_filesize_t length, __wasi_advice_t advice
+) {
 #ifdef POSIX_FADV_NORMAL
     int nadvice;
     switch (advice) {
-        case __WASI_ADVICE_DONTNEED:
-            nadvice = POSIX_FADV_DONTNEED;
-            break;
-        case __WASI_ADVICE_NOREUSE:
-            nadvice = POSIX_FADV_NOREUSE;
-            break;
-        case __WASI_ADVICE_NORMAL:
-            nadvice = POSIX_FADV_NORMAL;
-            break;
-        case __WASI_ADVICE_RANDOM:
-            nadvice = POSIX_FADV_RANDOM;
-            break;
-        case __WASI_ADVICE_SEQUENTIAL:
-            nadvice = POSIX_FADV_SEQUENTIAL;
-            break;
-        case __WASI_ADVICE_WILLNEED:
-            nadvice = POSIX_FADV_WILLNEED;
-            break;
-        default:
-            return __WASI_EINVAL;
+        case __WASI_ADVICE_DONTNEED: nadvice = POSIX_FADV_DONTNEED; break;
+        case __WASI_ADVICE_NOREUSE: nadvice = POSIX_FADV_NOREUSE; break;
+        case __WASI_ADVICE_NORMAL: nadvice = POSIX_FADV_NORMAL; break;
+        case __WASI_ADVICE_RANDOM: nadvice = POSIX_FADV_RANDOM; break;
+        case __WASI_ADVICE_SEQUENTIAL: nadvice = POSIX_FADV_SEQUENTIAL; break;
+        case __WASI_ADVICE_WILLNEED: nadvice = POSIX_FADV_WILLNEED; break;
+        default: return __WASI_EINVAL;
     }
 
     int ret = posix_fadvise(handle, (off_t)offset, (off_t)length, nadvice);
 
-    if (ret != 0)
-        return convert_errno(ret);
+    if (ret != 0) return convert_errno(ret);
 
     return __WASI_ESUCCESS;
 #else
@@ -847,22 +737,17 @@ os_fadvise(os_file_handle handle, __wasi_filesize_t offset,
         case __WASI_ADVICE_NORMAL:
         case __WASI_ADVICE_RANDOM:
         case __WASI_ADVICE_SEQUENTIAL:
-        case __WASI_ADVICE_WILLNEED:
-            return __WASI_ESUCCESS;
-        default:
-            return __WASI_EINVAL;
+        case __WASI_ADVICE_WILLNEED: return __WASI_ESUCCESS;
+        default: return __WASI_EINVAL;
     }
 #endif
 }
 
-__wasi_errno_t
-os_isatty(os_file_handle handle)
-{
+__wasi_errno_t os_isatty(os_file_handle handle) {
 #if CONFIG_HAS_ISATTY
     int ret = isatty(handle);
 
-    if (ret == 1)
-        return __WASI_ESUCCESS;
+    if (ret == 1) return __WASI_ESUCCESS;
 
     return __WASI_ENOTTY;
 #else
@@ -870,86 +755,60 @@ os_isatty(os_file_handle handle)
 #endif
 }
 
-bool
-os_is_stdin_handle(os_file_handle fd)
-{
-    return fd == STDIN_FILENO;
-}
+bool os_is_stdin_handle(os_file_handle fd) { return fd == STDIN_FILENO; }
 
-bool
-os_is_stdout_handle(os_file_handle fd)
-{
-    return fd == STDOUT_FILENO;
-}
+bool os_is_stdout_handle(os_file_handle fd) { return fd == STDOUT_FILENO; }
 
-bool
-os_is_stderr_handle(os_file_handle fd)
-{
-    return fd == STDERR_FILENO;
-}
+bool os_is_stderr_handle(os_file_handle fd) { return fd == STDERR_FILENO; }
 
-os_file_handle
-os_convert_stdin_handle(os_raw_file_handle raw_stdin)
-{
+os_file_handle os_convert_stdin_handle(os_raw_file_handle raw_stdin) {
     return raw_stdin >= 0 ? raw_stdin : STDIN_FILENO;
 }
 
-os_file_handle
-os_convert_stdout_handle(os_raw_file_handle raw_stdout)
-{
+os_file_handle os_convert_stdout_handle(os_raw_file_handle raw_stdout) {
     return raw_stdout >= 0 ? raw_stdout : STDOUT_FILENO;
 }
 
-os_file_handle
-os_convert_stderr_handle(os_raw_file_handle raw_stderr)
-{
+os_file_handle os_convert_stderr_handle(os_raw_file_handle raw_stderr) {
     return raw_stderr >= 0 ? raw_stderr : STDERR_FILENO;
 }
 
-__wasi_errno_t
-os_fdopendir(os_file_handle handle, os_dir_stream *dir_stream)
-{
+__wasi_errno_t os_fdopendir(os_file_handle handle, os_dir_stream *dir_stream) {
     *dir_stream = fdopendir(handle);
 
-    if (*dir_stream == NULL)
-        return convert_errno(errno);
+    if (*dir_stream == NULL) return convert_errno(errno);
 
     return __WASI_ESUCCESS;
 }
 
-__wasi_errno_t
-os_rewinddir(os_dir_stream dir_stream)
-{
+__wasi_errno_t os_rewinddir(os_dir_stream dir_stream) {
     rewinddir(dir_stream);
     return __WASI_ESUCCESS;
 }
 
-__wasi_errno_t
-os_seekdir(os_dir_stream dir_stream, __wasi_dircookie_t position)
-{
-    seekdir(dir_stream, (long)position);
+__wasi_errno_t os_seekdir(os_dir_stream dir_stream, __wasi_dircookie_t position) {
+    long posix_position;
+    if (!wasi_dircookie_to_long(position, &posix_position)) return __WASI_EOVERFLOW;
+
+    seekdir(dir_stream, posix_position);
     return __WASI_ESUCCESS;
 }
 
-__wasi_errno_t
-os_readdir(os_dir_stream dir_stream, __wasi_dirent_t *entry,
-           const char **d_name)
-{
+__wasi_errno_t os_readdir(os_dir_stream dir_stream, __wasi_dirent_t *entry, const char **d_name) {
     errno = 0;
 
-    struct dirent *dent = readdir(dir_stream);
+    struct dirent *dent = readdir(dir_stream); /* NOLINT(concurrency-mt-unsafe) */
 
     if (dent == NULL) {
-        *d_name = NULL;
+        *d_name = NULL; /* NOLINT(modernize-use-nullptr) */
         if (errno != 0) {
             return convert_errno(errno);
-        }
-        else {
+        } else {
             return 0;
         }
     }
 
-    long offset = (__wasi_dircookie_t)telldir(dir_stream);
+    long offset = telldir(dir_stream);
 
     size_t namlen = strlen(dent->d_name);
 
@@ -963,91 +822,52 @@ os_readdir(os_dir_stream dir_stream, __wasi_dirent_t *entry,
 #endif
 
     switch (dent->d_type) {
-        case DT_BLK:
-            entry->d_type = __WASI_FILETYPE_BLOCK_DEVICE;
-            break;
-        case DT_CHR:
-            entry->d_type = __WASI_FILETYPE_CHARACTER_DEVICE;
-            break;
-        case DT_DIR:
-            entry->d_type = __WASI_FILETYPE_DIRECTORY;
-            break;
-        case DT_FIFO:
-            entry->d_type = __WASI_FILETYPE_SOCKET_STREAM;
-            break;
-        case DT_LNK:
-            entry->d_type = __WASI_FILETYPE_SYMBOLIC_LINK;
-            break;
-        case DT_REG:
-            entry->d_type = __WASI_FILETYPE_REGULAR_FILE;
-            break;
+        case DT_BLK: entry->d_type = __WASI_FILETYPE_BLOCK_DEVICE; break;
+        case DT_CHR: entry->d_type = __WASI_FILETYPE_CHARACTER_DEVICE; break;
+        case DT_DIR: entry->d_type = __WASI_FILETYPE_DIRECTORY; break;
+        case DT_FIFO: entry->d_type = __WASI_FILETYPE_SOCKET_STREAM; break;
+        case DT_LNK: entry->d_type = __WASI_FILETYPE_SYMBOLIC_LINK; break;
+        case DT_REG: entry->d_type = __WASI_FILETYPE_REGULAR_FILE; break;
 #ifdef DT_SOCK
         case DT_SOCK:
             // Technically not correct, but good enough.
             entry->d_type = __WASI_FILETYPE_SOCKET_STREAM;
             break;
 #endif
-        default:
-            entry->d_type = __WASI_FILETYPE_UNKNOWN;
-            break;
+        default: entry->d_type = __WASI_FILETYPE_UNKNOWN; break;
     }
 
     return __WASI_ESUCCESS;
 }
 
-__wasi_errno_t
-os_closedir(os_dir_stream dir_stream)
-{
+__wasi_errno_t os_closedir(os_dir_stream dir_stream) {
     int ret = closedir(dir_stream);
 
-    if (ret < 0)
-        return convert_errno(errno);
+    if (ret < 0) return convert_errno(errno);
 
     return __WASI_ESUCCESS;
 }
 
-os_dir_stream
-os_get_invalid_dir_stream()
-{
-    return NULL;
-}
+os_dir_stream os_get_invalid_dir_stream() { return nullptr; }
 
-bool
-os_is_dir_stream_valid(os_dir_stream *dir_stream)
-{
+bool os_is_dir_stream_valid(os_dir_stream *dir_stream) {
     assert(dir_stream != NULL);
 
     return *dir_stream != NULL;
 }
 
-bool
-os_is_handle_valid(os_file_handle *handle)
-{
+bool os_is_handle_valid(os_file_handle *handle) {
     assert(handle != NULL);
 
     return *handle > -1;
 }
 
-char *
-os_realpath(const char *path, char *resolved_path)
-{
-    return realpath(path, resolved_path);
-}
+char *os_realpath(const char *path, char *resolved_path) { return realpath(path, resolved_path); }
 
-os_raw_file_handle
-os_invalid_raw_handle(void)
-{
-    return -1;
-}
+os_raw_file_handle os_invalid_raw_handle(void) { return -1; }
 
-int
-os_ioctl(os_file_handle handle, int request, ...)
-{
-    return BHT_ERROR;
-}
+int os_ioctl(os_file_handle handle, int request, ...) { return BHT_ERROR; }
 
-int
-os_poll(os_poll_file_handle *fds, os_nfds_t nfs, int timeout)
-{
-    return BHT_ERROR;
-}
+int os_poll(os_poll_file_handle *fds, os_nfds_t nfs, int timeout) { return BHT_ERROR; }
+
+bool os_compare_file_handle(os_file_handle handle1, os_file_handle handle2) { return handle1 == handle2; }

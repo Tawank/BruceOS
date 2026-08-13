@@ -127,7 +127,7 @@ dependencies:
     source:
       path: components/wasm-micro-runtime
       type: local
-    version: 2.4.0~1
+    version: 2.2.0~3
   wolfssl/wolfssh:
     component_hash: 24d623360c07374a90b1ade8d1218b24bb7b661fd51ace9135dccf510a338927
     dependencies: []
@@ -155,6 +155,6 @@ direct_dependencies:
 - wasm-micro-runtime
 - wolfssl/wolfssh
 - wolfssl/wolfssl
-manifest_hash: 056c57bfa9b90f7d4b161a345f3f5298f427c038adb615e737360c3c7615ae09
+manifest_hash: e38d322d18609e66d0f74c639a0199d567ceb0624dda03ce08936700d669969a
 target: esp32s3
 version: 3.0.0
