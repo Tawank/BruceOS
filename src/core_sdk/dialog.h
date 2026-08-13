@@ -15,8 +15,10 @@ typedef enum {
 } bruce_dialog_kind_t;
 
 typedef struct {
-    const char *label;
-    const char *value;
+    const char *label;      /* Primary row text. */
+    const char *value;      /* Stable action/identifier for the choice. */
+    const char *icon_name;  /* Optional built-in icon name, drawn on GUI. */
+    const char *right_text; /* Optional short GUI/terminal status text. */
 } bruce_dialog_choice_t;
 
 typedef void (*bruce_dialog_render_callback_t)(void *context);

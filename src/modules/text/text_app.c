@@ -331,9 +331,10 @@ static bruce_result_t text__exit_prompt(char *path, size_t path_size, text_edito
     bruce_result_t result = dialog__choice(
         "Unsaved changes", text__basename(path), choices, sizeof(choices) / sizeof(choices[0]), &selected
     );
-    if (result == BRUCE_ERR_CANCELLED || selected == 2) return BRUCE_OK;
+    if (result == BRUCE_ERR_CANCELLED) return BRUCE_OK;
     if (result != BRUCE_OK) return result;
-    if (selected == 0) {
+    if (strcmp(choices[selected].value, "cancel") == 0) return BRUCE_OK;
+    if (strcmp(choices[selected].value, "save") == 0) {
         result = text__save_to_path(path, path_size, editor);
         if (result == BRUCE_ERR_CANCELLED) return BRUCE_OK;
         if (result != BRUCE_OK) return text__show_error("Save", result);
@@ -358,13 +359,14 @@ static bruce_result_t text__actions(char *path, size_t path_size, text_editor_t 
     bruce_result_t result = dialog__choice(
         "Text editor", text__basename(path), choices, sizeof(choices) / sizeof(choices[0]), &selected
     );
-    if (result == BRUCE_ERR_CANCELLED || selected == 3) return BRUCE_OK;
+    if (result == BRUCE_ERR_CANCELLED) return BRUCE_OK;
     if (result != BRUCE_OK) return result;
-    if (selected == 0) {
+    if (strcmp(choices[selected].value, "cancel") == 0) return BRUCE_OK;
+    if (strcmp(choices[selected].value, "edit") == 0) {
         result = text__edit_line(editor);
         return result == BRUCE_ERR_CANCELLED ? BRUCE_OK : result;
     }
-    if (selected == 1) {
+    if (strcmp(choices[selected].value, "save") == 0) {
         result = text__save_to_path(path, path_size, editor);
         if (result == BRUCE_ERR_CANCELLED) return BRUCE_OK;
         if (result == BRUCE_OK) (void)dialog__message(BRUCE_DIALOG_SUCCESS, "Text editor", "File saved");

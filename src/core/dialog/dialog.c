@@ -4,6 +4,7 @@
 #include "core_sdk/dialog.h"
 #include "core_sdk/display.h"
 #include "core_sdk/input.h"
+#include "core_sdk/icon.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
@@ -92,7 +93,11 @@ static bruce_result_t dialog__term_choice(
     if (title != NULL) { stdio__printf("%s\n", title); }
     if (message != NULL) { stdio__printf("%s\n", message); }
     for (size_t i = 0; i < choice_count; ++i) {
-        stdio__printf("%u. %s\n", (unsigned int)(i + 1), choices[i].label != NULL ? choices[i].label : "");
+        stdio__printf("%u. %s", (unsigned int)(i + 1), choices[i].label != NULL ? choices[i].label : "");
+        if (choices[i].right_text != NULL && choices[i].right_text[0] != '\0') {
+            stdio__printf("  %s", choices[i].right_text);
+        }
+        stdio__printf("\n");
     }
     stdio__printf("pick: ");
 
@@ -238,6 +243,36 @@ static void dialog__gui_footer(const char *hint) {
     display__set_text_bg_color(sec);
     display__set_cursor(DIALOG__MARGIN, h - DIALOG__CHAR_H - 2);
     display__print(hint != NULL ? hint : "");
+}
+
+/* The display text API wraps at the viewport edge. Limit a row label before
+ * drawing it so optional icons and right-aligned text never overlap it. */
+static void dialog__gui_draw_row_label(const char *label, int x, int y, int max_width, int text_size) {
+    if (label == NULL || max_width <= 0) { return; }
+    int max_chars = max_width / (DIALOG__CHAR_W * text_size);
+    if (max_chars <= 0) { return; }
+
+    size_t label_len = strlen(label);
+    size_t draw_len = label_len < (size_t)max_chars ? label_len : (size_t)max_chars;
+    if (draw_len == label_len) {
+        display__set_cursor(x, y);
+        display__print(label);
+        return;
+    }
+
+    if (max_chars <= 3) {
+        display__set_cursor(x, y);
+        for (int i = 0; i < max_chars; ++i) { display__print("."); }
+        return;
+    }
+
+    char truncated[128];
+    draw_len = (size_t)(max_chars - 3);
+    if (draw_len >= sizeof(truncated) - 4) { draw_len = sizeof(truncated) - 4; }
+    memcpy(truncated, label, draw_len);
+    memcpy(truncated + draw_len, "...", 4);
+    display__set_cursor(x, y);
+    display__print(truncated);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -459,8 +494,24 @@ static bruce_result_t dialog__gui_choice(
                 }
                 display__set_text_size(text_size);
                 display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
-                display__set_cursor(content_left + DIALOG__MARGIN, y + 1);
-                display__print(choices[i].label != NULL ? choices[i].label : "");
+                int label_left = content_left + DIALOG__MARGIN;
+                int label_right = content_left + content_w - DIALOG__MARGIN;
+                const bruce_icon_t *icon = icon__get(choices[i].icon_name);
+                if (icon != NULL) {
+                    int icon_size = row_h - 2;
+                    display__draw_bitmap_scaled(
+                        label_left, y + 1, icon->bits, icon->width, icon->height, icon_size, icon_size,
+                        i == selected ? background_color : text_color
+                    );
+                    label_left += icon_size + DIALOG__MARGIN;
+                }
+                if (choices[i].right_text != NULL && choices[i].right_text[0] != '\0') {
+                    display__draw_right_string(choices[i].right_text, label_right, y + 1);
+                    label_right -= (int)strlen(choices[i].right_text) * DIALOG__CHAR_W * text_size + DIALOG__MARGIN;
+                }
+                dialog__gui_draw_row_label(
+                    choices[i].label, label_left, y + 1, label_right - label_left, text_size
+                );
             }
 
             if (render_borders && !render_window) {
@@ -1027,7 +1078,7 @@ static bruce_result_t dialog__gui_pick_file(
         if (items_per_page < 1) { items_per_page = 1; }
         (void)items_per_page;
 
-        bruce_dialog_choice_t *choices = memory__malloc((count + 1) * sizeof(bruce_dialog_choice_t));
+        bruce_dialog_choice_t *choices = memory__calloc(count + 1, sizeof(bruce_dialog_choice_t));
         if (choices == NULL) {
             memory__free(entries);
             return BRUCE_ERR_NO_MEMORY;

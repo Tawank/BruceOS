@@ -29,7 +29,7 @@ JSValue native_dialogMessage(JSContext *ctx, JSValue *this_val, int argc, JSValu
         if (JS_IsString(ctx, v)) { right = JS_ToCString(ctx, v, &right_buf); }
     }
 
-    bruce_dialog_choice_t choices[3];
+    bruce_dialog_choice_t choices[3] = {0};
     size_t choice_count = 0;
     if (left != NULL) {
         choices[choice_count].label = left;
@@ -123,7 +123,7 @@ JSValue native_dialogChoice(JSContext *ctx, JSValue *this_val, int argc, JSValue
     }
 
     JSValue choices_in = argv[0];
-    bruce_dialog_choice_t choices[32];
+    bruce_dialog_choice_t choices[32] = {0};
     size_t choice_count = 0;
     char value_storage[32][64];
 

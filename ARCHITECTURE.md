@@ -669,7 +669,11 @@ derives its visible row count from the remaining padded viewport and scaled
 row height. An optional render callback runs inside the dialog frame, with a
 caller-selected refresh interval, so surrounding UI outside the padded
 viewport can remain current while the choice is open. Terminal rendering
-ignores these parameters.
+ignores these parameters. Each choice has a display `label`, a stable semantic
+`value`, and optional `icon_name` and `right_text` metadata. GUI uses
+`icon_name` with the built-in icon registry and right-aligns `right_text`;
+terminal output appends `right_text`. Callers retain the selected index for
+locating the selected row, then branch on its `value` rather than its position.
 
 app_runner records the initial `GUI` environment request in process-local
 storage before launch-time permission checks. A background serial-monitor-style

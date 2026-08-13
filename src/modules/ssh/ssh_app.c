@@ -387,7 +387,7 @@ static bruce_result_t ssh_app__verify_host_key(bruce_ssh_id_t session, const cha
             &selected
         );
     }
-    if (choice_result != BRUCE_OK || selected != 0) return BRUCE_ERR_PERMISSION;
+    if (choice_result != BRUCE_OK || strcmp(choices[selected].value, "trust") != 0) return BRUCE_ERR_PERMISSION;
 
     result = ssh__verify_host_key_sha256(session, fingerprint);
     if (result != BRUCE_OK) return result;

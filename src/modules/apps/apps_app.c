@@ -138,6 +138,8 @@ int apps_app_main(int argc, char **argv) {
     for (size_t i = 0; i < count; ++i) {
         choices[i].label = apps[i].label;
         choices[i].value = apps[i].path;
+        choices[i].icon_name = NULL;
+        choices[i].right_text = NULL;
     }
 
     for (;;) {

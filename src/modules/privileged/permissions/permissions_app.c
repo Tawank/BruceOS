@@ -262,11 +262,17 @@ static void permissions_app__gui_app(const char *app) {
             );
             choices[i].label = labels[i];
             choices[i].value = permission__name(entries[i].permission);
+            choices[i].icon_name = NULL;
+            choices[i].right_text = saved == BRUCE_OK ? (allowed ? "Allow" : "Deny") : "Unknown";
         }
         choices[entry_count].label = "Forget this app";
         choices[entry_count].value = "forget";
+        choices[entry_count].icon_name = NULL;
+        choices[entry_count].right_text = NULL;
         choices[entry_count + 1].label = "Back";
         choices[entry_count + 1].value = "back";
+        choices[entry_count + 1].icon_name = NULL;
+        choices[entry_count + 1].right_text = NULL;
 
         char title[BRUCE_PERMISSION_FILE_NAME_MAX + 16];
         snprintf(title, sizeof(title), "%s permissions", app);
@@ -274,10 +280,10 @@ static void permissions_app__gui_app(const char *app) {
         bruce_result_t result = dialog__choice_launcher(
             title, "Select to toggle Allow/Deny", choices, entry_count + 2, &selected
         );
-        if (result == BRUCE_ERR_CANCELLED || selected == entry_count + 1) return;
+        if (result == BRUCE_ERR_CANCELLED || strcmp(choices[selected].value, "back") == 0) return;
         if (result != BRUCE_OK) return;
 
-        if (selected == entry_count) {
+        if (strcmp(choices[selected].value, "forget") == 0) {
             (void)permissions__forget(app, NULL);
             return;
         }
@@ -302,19 +308,25 @@ static int permissions_app__gui(void) {
         for (size_t i = 0; i < app_count; ++i) {
             choices[i].label = apps[i].name;
             choices[i].value = apps[i].name;
+            choices[i].icon_name = NULL;
+            choices[i].right_text = NULL;
         }
         choices[app_count].label = "Wipe all saved decisions";
         choices[app_count].value = "wipe";
+        choices[app_count].icon_name = NULL;
+        choices[app_count].right_text = NULL;
         choices[app_count + 1].label = "Back";
         choices[app_count + 1].value = "back";
+        choices[app_count + 1].icon_name = NULL;
+        choices[app_count + 1].right_text = NULL;
 
         size_t selected = 0;
         bruce_result_t result =
             dialog__choice_launcher("App permissions", "Select an app", choices, app_count + 2, &selected);
-        if (result == BRUCE_ERR_CANCELLED || selected == app_count + 1) return BRUCE_OK;
+        if (result == BRUCE_ERR_CANCELLED || strcmp(choices[selected].value, "back") == 0) return BRUCE_OK;
         if (result != BRUCE_OK) return result;
 
-        if (selected == app_count) {
+        if (strcmp(choices[selected].value, "wipe") == 0) {
             bruce_dialog_choice_t confirm_choices[2] = {
                 {.label = "Cancel",   .value = "cancel"},
                 {.label = "Wipe all", .value = "wipe"  },
@@ -327,7 +339,7 @@ static int permissions_app__gui(void) {
                     2,
                     &confirm_selected
                 ) == BRUCE_OK &&
-                confirm_selected == 1) {
+                strcmp(confirm_choices[confirm_selected].value, "wipe") == 0) {
                 (void)permissions_app__wipe_cli("confirm");
             }
             continue;

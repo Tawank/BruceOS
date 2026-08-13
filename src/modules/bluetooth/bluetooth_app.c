@@ -1,6 +1,7 @@
 #include "bluetooth_app.h"
 
 #include <stdio.h>
+#include <string.h>
 
 #include "args.h"
 #include "core_sdk/bluetooth.h"
@@ -77,7 +78,7 @@ static int bluetooth_app__scan_gui(void) {
     }
 
     char labels[BLUETOOTH_APP__MAX_RESULTS][96];
-    bruce_dialog_choice_t choices[BLUETOOTH_APP__MAX_RESULTS];
+    bruce_dialog_choice_t choices[BLUETOOTH_APP__MAX_RESULTS] = {0};
     for (int i = 0; i < count; ++i) {
         snprintf(
             labels[i],
@@ -88,6 +89,8 @@ static int bluetooth_app__scan_gui(void) {
         );
         choices[i].label = labels[i];
         choices[i].value = labels[i];
+        choices[i].icon_name = "bluetooth";
+        choices[i].right_text = NULL;
     }
     size_t selected = 0;
     bruce_result_t choice_result;
@@ -120,14 +123,16 @@ static int bluetooth_app__scan_gui(void) {
 int bluetooth_app_main(int argc, char **argv) {
     if (runtime__gui_requested()) {
         const bruce_dialog_choice_t choices[] = {
-            {"BLE advertisement scan", "scan"}
+            {.label = "BLE advertisement scan", .value = "scan", .icon_name = "bluetooth"}
         };
         size_t selected = 0;
         bruce_result_t choice_result;
         do {
             choice_result = dialog__choice_launcher("Bluetooth", "Select an action", choices, 1, &selected);
         } while (choice_result == BRUCE_ERR_CANCELLED && bluetooth_app__resume_after_handoff());
-        if (choice_result == BRUCE_OK) { return bluetooth_app__scan_gui(); }
+        if (choice_result == BRUCE_OK && strcmp(choices[selected].value, "scan") == 0) {
+            return bluetooth_app__scan_gui();
+        }
         return 0;
     }
 

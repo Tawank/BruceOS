@@ -262,14 +262,19 @@ static int clock_app__gui(void) {
             (void)input__flush();
             continue;
         }
-        if (choice_result == BRUCE_ERR_CANCELLED || selected == 2) {
+        if (choice_result == BRUCE_ERR_CANCELLED) {
             (void)input__flush();
             continue;
         }
         if (choice_result != BRUCE_OK) return choice_result;
-        if (selected == 3) return BRUCE_OK;
+        const char *action = choices[selected].value;
+        if (strcmp(action, "back") == 0) {
+            (void)input__flush();
+            continue;
+        }
+        if (strcmp(action, "exit") == 0) return BRUCE_OK;
 
-        result = selected == 0 ? clock_app__timer(NULL, true) : clock_app__alarm(NULL, true);
+        result = strcmp(action, "timer") == 0 ? clock_app__timer(NULL, true) : clock_app__alarm(NULL, true);
         if (result != BRUCE_OK) return result;
         (void)input__flush();
     }

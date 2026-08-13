@@ -2,6 +2,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "args.h"
 #include "core_sdk/dialog.h"
@@ -103,11 +104,13 @@ static int nrf24_app__gui(void) {
         size_t selected = 0;
         bruce_result_t result =
             dialog__choice_launcher("NRF24", "2.4 GHz radio tools", choices, 4, &selected);
-        if (result == BRUCE_ERR_CANCELLED || selected == 3) return 0;
+        if (result == BRUCE_ERR_CANCELLED) return 0;
         if (result != BRUCE_OK) return result;
-        if (selected == 0)
+        const char *action = choices[selected].value;
+        if (strcmp(action, "exit") == 0) return 0;
+        if (strcmp(action, "scan") == 0)
             (void)nrf24_app__scan(0, NRF24_APP_SPECTRUM_CHANNELS - 1u, NRF24_APP_SPECTRUM_SAMPLES, true);
-        else if (selected == 1) (void)nrf24_app__status(true);
+        else if (strcmp(action, "status") == 0) (void)nrf24_app__status(true);
         else
             (void)dialog__message(
                 BRUCE_DIALOG_INFO,

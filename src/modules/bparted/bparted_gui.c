@@ -96,7 +96,7 @@ static bool bparted_gui__confirm(const char *title, const char *message, const c
     };
     size_t selected = 1;
     bruce_result_t result = dialog__choice_launcher(title, message, choices, 2, &selected);
-    return result == BRUCE_OK && selected == 0;
+    return result == BRUCE_OK && strcmp(choices[selected].value, "confirm") == 0;
 }
 
 /* "<label> <size> [<change>]", with the root entry marked by the path it is
@@ -286,12 +286,14 @@ static bool bparted_gui__pick_size(uint64_t max_bytes, uint64_t *out_bytes) {
     enum { BPARTED_GUI_PRESETS = sizeof(presets) / sizeof(presets[0]) };
 
     char labels[BPARTED_GUI_PRESETS][16];
-    bruce_dialog_choice_t choices[BPARTED_GUI_PRESETS + 3];
+    bruce_dialog_choice_t choices[BPARTED_GUI_PRESETS + 3] = {0};
     size_t count = 0;
     for (size_t i = 0; i < BPARTED_GUI_PRESETS && presets[i] <= max_bytes; ++i) {
         bparted_common__format_size(presets[i], labels[count], sizeof(labels[count]));
         choices[count].label = labels[count];
         choices[count].value = labels[count];
+        choices[count].icon_name = NULL;
+        choices[count].right_text = NULL;
         count++;
     }
     size_t preset_count = count;
@@ -302,23 +304,29 @@ static bool bparted_gui__pick_size(uint64_t max_bytes, uint64_t *out_bytes) {
     snprintf(max_label, sizeof(max_label), "All free space (%.7s)", max_text);
     choices[count].label = max_label;
     choices[count].value = "max";
+    choices[count].icon_name = NULL;
+    choices[count].right_text = NULL;
     count++;
 
     choices[count].label = "Custom...";
     choices[count].value = "custom";
+    choices[count].icon_name = NULL;
+    choices[count].right_text = NULL;
     count++;
     choices[count].label = "Back";
     choices[count].value = "back";
+    choices[count].icon_name = NULL;
+    choices[count].right_text = NULL;
     count++;
 
     size_t selected = 0;
     if (dialog__choice("New partition", "Size", choices, count, &selected) != BRUCE_OK) return false;
-    if (selected == count - 1) return false;
+    if (strcmp(choices[selected].value, "back") == 0) return false;
     if (selected < preset_count) {
         *out_bytes = presets[selected];
         return true;
     }
-    if (selected == preset_count) {
+    if (strcmp(choices[selected].value, "max") == 0) {
         *out_bytes = max_bytes;
         return true;
     }
@@ -348,27 +356,33 @@ static void bparted_gui__create(const bparted_gui_page_t *page) {
      * one - and stage_create() would reject it, so it is not offered. */
     bool offer_swap = !bparted_gui__has_label(page->planned, page->planned_count, BRUCE_PARTITION_SWAP_LABEL);
 
-    bruce_dialog_choice_t kinds[3];
+    bruce_dialog_choice_t kinds[3] = {0};
     size_t kind_count = 0;
     if (offer_swap) {
         kinds[kind_count].label = "Swap (extra RAM)";
         kinds[kind_count].value = "swap";
+        kinds[kind_count].icon_name = NULL;
+        kinds[kind_count].right_text = NULL;
         kind_count++;
     }
     kinds[kind_count].label = "LittleFS volume";
     kinds[kind_count].value = "littlefs";
+    kinds[kind_count].icon_name = NULL;
+    kinds[kind_count].right_text = NULL;
     kind_count++;
     kinds[kind_count].label = "Back";
     kinds[kind_count].value = "back";
+    kinds[kind_count].icon_name = NULL;
+    kinds[kind_count].right_text = NULL;
     kind_count++;
 
     size_t selected = 0;
     if (dialog__choice("New partition", "Type", kinds, kind_count, &selected) != BRUCE_OK) return;
-    if (selected == kind_count - 1) return;
+    if (strcmp(kinds[selected].value, "back") == 0) return;
 
     char label[BRUCE_PARTITION_LABEL_MAX];
     bruce_partition_kind_t kind;
-    if (offer_swap && selected == 0) {
+    if (strcmp(kinds[selected].value, "swap") == 0) {
         kind = BRUCE_PARTITION_KIND_SWAP;
         snprintf(label, sizeof(label), "%s", BRUCE_PARTITION_SWAP_LABEL);
     } else {
@@ -401,7 +415,7 @@ bparted_gui__pick_target(const bparted_gui_page_t *page, bool for_format, char *
     /* Bounded by one layout, not by the planned list: everything skipped
      * below is exactly what makes the planned list the longer of the two. */
     char labels[BPARTED_LAYOUT_MAX][BPARTED_GUI_ROW_TEXT];
-    bruce_dialog_choice_t choices[BPARTED_LAYOUT_MAX + 1];
+    bruce_dialog_choice_t choices[BPARTED_LAYOUT_MAX + 1] = {0};
     const bruce_partition_entry_t *targets[BPARTED_LAYOUT_MAX];
     size_t count = 0;
 
@@ -413,6 +427,8 @@ bparted_gui__pick_target(const bparted_gui_page_t *page, bool for_format, char *
         bparted_gui__format_row(entry, labels[count], sizeof(labels[count]));
         choices[count].label = labels[count];
         choices[count].value = labels[count];
+        choices[count].icon_name = NULL;
+        choices[count].right_text = NULL;
         targets[count] = entry;
         count++;
     }
@@ -428,6 +444,8 @@ bparted_gui__pick_target(const bparted_gui_page_t *page, bool for_format, char *
 
     choices[count].label = "Back";
     choices[count].value = "back";
+    choices[count].icon_name = NULL;
+    choices[count].right_text = NULL;
     count++;
 
     size_t selected = 0;
@@ -435,7 +453,7 @@ bparted_gui__pick_target(const bparted_gui_page_t *page, bool for_format, char *
         BRUCE_OK) {
         return false;
     }
-    if (selected == count - 1) return false;
+    if (strcmp(choices[selected].value, "back") == 0) return false;
     snprintf(out_label, out_size, "%s", targets[selected]->label);
     return true;
 }
@@ -498,14 +516,14 @@ static bool bparted_gui__confirm_exit(const bparted_gui_page_t *page) {
             ) != BRUCE_OK) {
             return false;
         }
-        if (selected == 0) {
+        if (strcmp(choices[selected].value, "apply") == 0) {
             /* Choosing "Apply and exit" is itself the confirmation, so this
              * skips the extra prompt bparted_gui__apply() would show. */
             if (!bparted_gui__commit()) return false;
             bparted_gui__reboot();
             return true;
         }
-        if (selected == 1) {
+        if (strcmp(choices[selected].value, "discard") == 0) {
             bruce_result_t result = partition_manager__discard();
             if (result != BRUCE_OK) {
                 bparted_gui__report("Discard", result);
@@ -528,11 +546,11 @@ static bool bparted_gui__confirm_exit(const bparted_gui_page_t *page) {
             ) != BRUCE_OK) {
             return false;
         }
-        if (selected == 0) {
+        if (strcmp(choices[selected].value, "reboot") == 0) {
             bparted_gui__reboot();
             return false;
         }
-        return selected == 1;
+        return strcmp(choices[selected].value, "exit") == 0;
     }
 
     return true;

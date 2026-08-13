@@ -175,6 +175,8 @@ static void bruce_launcher__refresh_live_choices(void) {
     for (int i = 0; i < s_live_choices.count; ++i) {
         s_live_choices.choices[i].label = bruce_launcher__entry_label(&s_live_choices.entries[i]);
         s_live_choices.choices[i].value = s_live_choices.choices[i].label;
+        s_live_choices.choices[i].icon_name = s_live_choices.entries[i].icon_name;
+        s_live_choices.choices[i].right_text = NULL;
     }
 }
 
@@ -544,7 +546,7 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
     if (!menu->is_root) {
         const bruce_launcher_entry_t *entries = bruce_launcher__menu_entries(menu);
         bruce_dialog_choice_t *choices =
-            (bruce_dialog_choice_t *)memory__malloc(sizeof(*choices) * (size_t)menu->entry_count);
+            (bruce_dialog_choice_t *)memory__calloc((size_t)menu->entry_count, sizeof(*choices));
         if (choices == NULL) return BRUCE_ERR_NO_MEMORY;
 
         (void)input__flush();
@@ -729,17 +731,21 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
 static int bruce_launcher__run_terminal_menu(const bruce_launcher_menu_t *menu) {
     const bruce_launcher_entry_t *entries = bruce_launcher__menu_entries(menu);
     bruce_dialog_choice_t *choices =
-        (bruce_dialog_choice_t *)memory__malloc(sizeof(*choices) * ((size_t)menu->capacity + 1));
+        (bruce_dialog_choice_t *)memory__calloc((size_t)menu->capacity + 1, sizeof(*choices));
     if (choices == NULL) { return BRUCE_ERR_NO_MEMORY; }
 
     for (;;) {
         for (int i = 0; i < menu->entry_count; ++i) {
             choices[i].label = bruce_launcher__entry_label(&entries[i]);
             choices[i].value = choices[i].label;
+            choices[i].icon_name = entries[i].icon_name;
+            choices[i].right_text = NULL;
         }
 
         choices[menu->entry_count].label = "Back";
         choices[menu->entry_count].value = choices[menu->entry_count].label;
+        choices[menu->entry_count].icon_name = NULL;
+        choices[menu->entry_count].right_text = NULL;
 
         size_t choice = 0;
         bruce_result_t choice_result =

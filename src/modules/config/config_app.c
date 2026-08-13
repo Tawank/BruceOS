@@ -92,18 +92,20 @@ static int config_app__clock_gui(void) {
         size_t selected = 0;
         bruce_result_t result =
             dialog__choice_launcher("System clock", "UTC system time, local display", choices, 7, &selected);
-        if (result == BRUCE_ERR_CANCELLED || selected == 6) return BRUCE_OK;
+        if (result == BRUCE_ERR_CANCELLED) return BRUCE_OK;
         if (result != BRUCE_OK) return result;
-        if (selected == 0) {
+        const char *action = choices[selected].value;
+        if (strcmp(action, "back") == 0) return BRUCE_OK;
+        if (strcmp(action, "sync") == 0) {
             result = clock__sync_ntp(10000);
             (void)dialog__message(
                 result == BRUCE_OK ? BRUCE_DIALOG_SUCCESS : BRUCE_DIALOG_ERROR,
                 "NTP sync",
                 result == BRUCE_OK ? "Clock synchronized" : "Connect Wi-Fi and try again"
             );
-        } else if (selected == 1) {
+        } else if (strcmp(action, "automatic") == 0) {
             (void)config__set_time_automatic_update_via_ntp(!automatic);
-        } else if (selected == 2) {
+        } else if (strcmp(action, "timezone") == 0) {
             char initial[16], entered[16];
             snprintf(initial, sizeof(initial), "%.2f", timezone);
             if (dialog__number_input(
@@ -115,9 +117,9 @@ static int config_app__clock_gui(void) {
                     (void)config__set_time_timezone(value);
                 else (void)dialog__message(BRUCE_DIALOG_ERROR, "Timezone", "Offset must be from -12 to +14");
             }
-        } else if (selected == 3) {
+        } else if (strcmp(action, "dst") == 0) {
             (void)config__set_time_dst(!dst);
-        } else if (selected == 4) {
+        } else if (strcmp(action, "format") == 0) {
             (void)config__set_time_clock24hr(!format24);
         } else {
             result = config_app__manual_dialog();
@@ -204,8 +206,9 @@ static int config_app__display_gui(void) {
         };
         size_t selected = 0;
         bruce_result_t result = dialog__choice_launcher("Display & UI", NULL, choices, 2, &selected);
-        if (result == BRUCE_ERR_CANCELLED || selected == 1) return BRUCE_OK;
+        if (result == BRUCE_ERR_CANCELLED) return BRUCE_OK;
         if (result != BRUCE_OK) return result;
+        if (strcmp(choices[selected].value, "back") == 0) return BRUCE_OK;
         result = config__set_display_buffered_rendering(!buffered);
         if (result != BRUCE_OK) return result;
         (void)dialog__message(BRUCE_DIALOG_INFO, "Display rendering", "Setting saved; reboot to apply");

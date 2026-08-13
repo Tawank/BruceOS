@@ -1,6 +1,7 @@
 #include "bluetooth_hid_app.h"
 
 #include <stdio.h>
+#include <string.h>
 
 #include "args.h"
 #include "core_sdk/bluetooth_hid.h"
@@ -117,7 +118,7 @@ static int bluetooth_hid_app__scan_and_connect_gui(void) {
         return 0;
     }
     char labels[BLUETOOTH_HID_APP__MAX_RESULTS][96];
-    bruce_dialog_choice_t choices[BLUETOOTH_HID_APP__MAX_RESULTS];
+    bruce_dialog_choice_t choices[BLUETOOTH_HID_APP__MAX_RESULTS] = {0};
     for (int i = 0; i < count; ++i) {
         snprintf(
             labels[i],
@@ -129,6 +130,8 @@ static int bluetooth_hid_app__scan_and_connect_gui(void) {
         );
         choices[i].label = labels[i];
         choices[i].value = labels[i];
+        choices[i].icon_name = "bluetooth";
+        choices[i].right_text = NULL;
     }
     size_t selected = 0;
     bruce_result_t choice = dialog__choice_launcher(
@@ -145,13 +148,13 @@ static int bluetooth_hid_app__gui(void) {
         return BRUCE_ERR_UNSUPPORTED;
     }
     const bruce_dialog_choice_t choices[] = {
-        {"Scan and connect", "connect"   },
-        {"Disconnect",       "disconnect"},
+        {.label = "Scan and connect", .value = "connect", .icon_name = "bluetooth"},
+        {.label = "Disconnect", .value = "disconnect", .icon_name = "bluetooth"},
     };
     size_t selected = 0;
     if (dialog__choice_launcher("Bluetooth HID", "Keyboards and gamepads", choices, 2, &selected) != BRUCE_OK)
         return 0;
-    if (selected == 1) return bluetooth_hid__disconnect();
+    if (strcmp(choices[selected].value, "disconnect") == 0) return bluetooth_hid__disconnect();
     return bluetooth_hid_app__scan_and_connect_gui();
 }
 

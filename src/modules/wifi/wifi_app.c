@@ -156,19 +156,25 @@ static int wifi_app__gui(void) {
         count = visible;
 
         char rows[WIFI_APP_GUI_SCAN_MAX][WIFI_APP_GUI_ROW_TEXT];
-        bruce_dialog_choice_t choices[WIFI_APP_GUI_SCAN_MAX + 2];
+        bruce_dialog_choice_t choices[WIFI_APP_GUI_SCAN_MAX + 2] = {0};
         for (int i = 0; i < count; ++i) {
             bool known = config__find_wifi_credential(networks[i].ssid) != NULL;
             wifi_app_gui__format_row(&networks[i], known, rows[i], sizeof(rows[i]));
             choices[i].label = rows[i];
             choices[i].value = rows[i];
+            choices[i].icon_name = "wifi";
+            choices[i].right_text = NULL;
         }
         size_t rescan_index = (size_t)count;
         size_t exit_index = rescan_index + 1;
         choices[rescan_index].label = "Rescan";
         choices[rescan_index].value = "rescan";
+        choices[rescan_index].icon_name = NULL;
+        choices[rescan_index].right_text = NULL;
         choices[exit_index].label = "Exit";
         choices[exit_index].value = "exit";
+        choices[exit_index].icon_name = NULL;
+        choices[exit_index].right_text = NULL;
 
         char subtitle[32];
         if (count == 0) snprintf(subtitle, sizeof(subtitle), "No networks found");
@@ -178,9 +184,10 @@ static int wifi_app__gui(void) {
         size_t selected = 0;
         bruce_result_t result =
             dialog__choice_launcher("Wi-Fi networks", subtitle, choices, exit_index + 1, &selected);
-        if (result == BRUCE_ERR_CANCELLED || selected == exit_index) return 0;
+        if (result == BRUCE_ERR_CANCELLED) return 0;
         if (result != BRUCE_OK) return -1;
-        if (selected == rescan_index) continue;
+        if (strcmp(choices[selected].value, "exit") == 0) return 0;
+        if (strcmp(choices[selected].value, "rescan") == 0) continue;
 
         wifi_app_gui__connect(&networks[selected]);
     }
