@@ -46,9 +46,10 @@ typedef struct process__record {
     int argc;
     char **argv;
 
-    void (*process_entry)(void *context);
+    int (*process_entry)(void *context);
     void *process_entry_context;
     void (*process_entry_cleanup)(void *context);
+    void (*process_entry_stop)(void *context, bruce_process_signal_t signal);
     volatile bool stop_requested;
     bruce_process_signal_t pending_signal;
     volatile bool pause_requested;

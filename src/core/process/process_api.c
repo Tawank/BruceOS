@@ -227,6 +227,11 @@ bruce_result_t process__signal(bruce_process_id_t process_id, bruce_process_sign
     record->stop_requested = true;
     record->pending_signal = signal;
     record->state = BRUCE_PROCESS_STOPPING;
+    if (record->process_entry_stop != NULL) {
+        /* Stop hooks are non-blocking runtime interruption requests. Calling
+         * under the registry lock keeps their owned context alive. */
+        record->process_entry_stop(record->process_entry_context, signal);
+    }
     process__wake_locked(record);
     xEventGroupSetBits(record->events, PROCESS__EVT_EVENT_WAKE);
     display__process_state_changed(record->id, record->state);

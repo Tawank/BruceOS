@@ -3,7 +3,7 @@
 /*
  * Coarse-grained app permission model (public SDK surface).
  *
- * Every ELF/JS app is identified, for permission purposes, by its filename
+ * Every ELF/JS/WASM app is identified, for permission purposes, by its filename
  * including extension and without its path (e.g. "game.elf", "weather.js").
  * Decisions are persisted in Core-owned /config/permissions.json, keyed by that
  * filename; apps sharing a basename deliberately share the same decision.
@@ -52,7 +52,7 @@ bool permission__from_name(const char *name, bruce_permission_t *out_permission)
  * config__*, process__* control of another process, app_runner__run, ...) calls
  * internally; app/module code never needs to call it directly.
  *
- * A built-in process always returns BRUCE_OK. An external (ELF/JS) process with an
+ * A built-in process always returns BRUCE_OK. An external (ELF/JS/WASM) process with an
  * existing saved decision returns immediately (BRUCE_OK or
  * BRUCE_ERR_PERMISSION) with no prompt. With no saved decision yet, this is
  * the dynamic first-use request: it shows an allow/deny dialog__choice(),
@@ -66,7 +66,7 @@ bruce_result_t permission__check(bruce_permission_t permission);
 /* Pre-launch batch request: for every name in `permission_names` that
  * `file_name` has no saved decision for yet, prompts (unchecked/undecided by
  * default) and persists the user's choice; already-known permissions are
- * left untouched and not re-prompted. Intended for the ELF/JS loaders
+ * left untouched and not re-prompted. Intended for the ELF/JS/WASM loaders
  * (Stage 3) to call with the manifest's declared permission list before a
  * new process's first instruction runs. Returns BRUCE_OK once every name has
  * been processed (regardless of individual allow/deny outcomes) or

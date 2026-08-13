@@ -116,14 +116,14 @@ static void js_loader__print_exception(JSContext *js_ctx, JSValue exception) {
     JS_PrintValueF(js_ctx, exception, JS_DUMP_LONG);
 }
 
-static void js__app_main(void *context) {
+static int js__app_main(void *context) {
     js_loader_process_ctx_t *ctx = (js_loader_process_ctx_t *)context;
 
     bruce_result_t adopt_result = js_source__adopt(&ctx->source);
     if (adopt_result != BRUCE_OK) {
         printf("[js_loader] %s: failed to adopt source (%d)\n", ctx->permission_key, (int)adopt_result);
         js_loader__free_process_ctx(ctx);
-        return;
+        return adopt_result;
     }
     js_source_t *source = &ctx->source;
 
@@ -140,13 +140,13 @@ static void js__app_main(void *context) {
     if (mem_size == 0) {
         printf("[js_loader] %s: insufficient writable memory for VM\n", ctx->permission_key);
         js_loader__free_process_ctx(ctx);
-        return;
+        return BRUCE_ERR_NO_MEMORY;
     }
     uint8_t *mem_buf = memory__malloc(mem_size);
     if (mem_buf == NULL) {
         printf("[js_loader] %s: failed to allocate VM memory\n", ctx->permission_key);
         js_loader__free_process_ctx(ctx);
-        return;
+        return BRUCE_ERR_NO_MEMORY;
     }
 
     JSContext *js_ctx = JS_NewContext(mem_buf, mem_size, &js_stdlib);
@@ -154,7 +154,7 @@ static void js__app_main(void *context) {
         printf("[js_loader] %s: JS_NewContext failed\n", ctx->permission_key);
         memory__free(mem_buf);
         js_loader__free_process_ctx(ctx);
-        return;
+        return BRUCE_ERR_NO_MEMORY;
     }
 
     JSValue val = JS_Eval(js_ctx, script, script_len, ctx->path, 0);
@@ -198,6 +198,7 @@ static void js__app_main(void *context) {
     JS_FreeContext(js_ctx);
     memory__free(mem_buf);
     js_loader__free_process_ctx(ctx);
+    return 0;
 }
 
 /* Loader registry run function: called by app_runner__run_path() or by the

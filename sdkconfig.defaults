@@ -82,3 +82,11 @@ CONFIG_ESP_WOLFSSL_NO_STACK_SIZE_BUILD_WARNING=y
 # Bruce uses WAMR directly through wasm_export.h; its optional application
 # manager is not needed and does not support ESP-IDF 6's POSIX surface.
 CONFIG_WAMR_ENABLE_APP_FRAMEWORK=n
+# WASM apps use only Bruce's explicit `bruce_sdk` imports. WAMR's WASI/libc
+# and pthread layers would bypass Core stdio, storage, process identity, and
+# permission enforcement.
+CONFIG_WAMR_ENABLE_LIB_PTHREAD=n
+CONFIG_WAMR_ENABLE_LIBC_BUILTIN=n
+CONFIG_WAMR_ENABLE_LIBC_WASI=n
+CONFIG_WAMR_ENABLE_MULTI_MODULE=n
+CONFIG_WAMR_ENABLE_SHARED_MEMORY=n

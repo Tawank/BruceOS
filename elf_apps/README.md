@@ -24,6 +24,14 @@ Set `IDF_PATH` and run:
 python3 elf_apps/tools/build_elf_apps.py --target esp32s3
 ```
 
+By default the script builds every example. Use `--app` to build a subset; the
+option may be repeated:
+
+```bash
+python3 elf_apps/tools/build_elf_apps.py --target esp32s3 --app game
+python3 elf_apps/tools/build_elf_apps.py --target esp32s3 --app game --app nes
+```
+
 Final ELF files are written to:
 
 - `elf_apps/examples/elf_loader.elf`

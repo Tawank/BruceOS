@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #include "cJSON.h"
 #include "core_sdk/memory.h"
@@ -192,6 +193,8 @@ static bool manifest__pread(bruce_file_id_t file, uint64_t offset, void *buffer,
 #define MANIFEST_ELF_SECTION_NAME ".bruce.manifest"
 #define MANIFEST_ELF_SHF_ALLOC 0x2u
 #define MANIFEST_ELF_MAX_MANIFEST_BYTES 2048u
+#define MANIFEST_WASM_SECTION_NAME "bruce.manifest"
+#define MANIFEST_WASM_MAX_MANIFEST_BYTES 2048u
 
 typedef struct __attribute__((packed)) {
     uint8_t e_ident[16];
@@ -328,6 +331,9 @@ static bool manifest__normalize_path(const char *path, char *out, size_t out_siz
 
 static bruce_result_t
 manifest__read_js_manifest_bytes(bruce_file_id_t file, char **out_bytes, size_t *out_len);
+static bruce_result_t manifest__read_wasm_manifest_bytes(
+    bruce_file_id_t file, char **out_bytes, size_t *out_len, bool *out_module_valid
+);
 
 char *manifest__inspect_path(const char *path) {
     char normalized_path[BRUCE_STORAGE_PATH_MAX];
@@ -342,14 +348,18 @@ char *manifest__inspect_path(const char *path) {
     uint8_t magic[4];
     size_t path_len = strlen(normalized_path);
     bool is_js = path_len > 3 && strcmp(normalized_path + path_len - 3, ".js") == 0;
-    if (manifest__pread(file, 0, magic, sizeof(magic)) && memcmp(
-                                                              magic,
-                                                              "\x7f"
-                                                              "ELF",
-                                                              4
-                                                          ) == 0) {
+    bool magic_read = manifest__pread(file, 0, magic, sizeof(magic));
+    if (magic_read && memcmp(
+                          magic,
+                          "\x7f"
+                          "ELF",
+                          4
+                      ) == 0) {
         size_t out_len = 0;
         result = manifest__read_elf_manifest_bytes(file, &out_json, &out_len, NULL);
+    } else if (magic_read && memcmp(magic, "\0asm", sizeof(magic)) == 0) {
+        size_t out_len = 0;
+        result = manifest__read_wasm_manifest_bytes(file, &out_json, &out_len, NULL);
     } else if (is_js) {
         size_t out_len = 0;
         result = manifest__read_js_manifest_bytes(file, &out_json, &out_len);
@@ -548,6 +558,109 @@ static bruce_manifest_t *manifest__default_wasm_manifest(const char *path) {
     return manifest;
 }
 
+static bool
+manifest__read_wasm_u32(bruce_file_id_t file, uint64_t limit, uint64_t *offset, uint32_t *out_value) {
+    uint32_t value = 0;
+    for (unsigned i = 0; i < 5; ++i) {
+        if (*offset >= limit) { return false; }
+        uint8_t byte;
+        if (!manifest__pread(file, *offset, &byte, sizeof(byte))) { return false; }
+        (*offset)++;
+        if (i == 4 && (byte & 0xf0u) != 0) { return false; }
+        value |= (uint32_t)(byte & 0x7fu) << (i * 7);
+        if ((byte & 0x80u) == 0) {
+            *out_value = value;
+            return true;
+        }
+    }
+    return false;
+}
+
+static bruce_result_t manifest__read_wasm_manifest_bytes(
+    bruce_file_id_t file, char **out_bytes, size_t *out_len, bool *out_module_valid
+) {
+    if (out_bytes != NULL) *out_bytes = NULL;
+    if (out_len != NULL) *out_len = 0;
+    if (out_module_valid != NULL) *out_module_valid = false;
+
+    uint64_t file_size = 0;
+    if (storage__seek(file, 0, SEEK_END, &file_size) != BRUCE_OK || file_size < 8) {
+        return BRUCE_ERR_MANIFEST_INVALID;
+    }
+
+    static const uint8_t wasm_header[8] = {0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00};
+    uint8_t header[sizeof(wasm_header)];
+    if (!manifest__pread(file, 0, header, sizeof(header)) ||
+        memcmp(header, wasm_header, sizeof(header)) != 0) {
+        return BRUCE_ERR_MANIFEST_INVALID;
+    }
+
+    char *manifest_bytes = NULL;
+    size_t manifest_len = 0;
+    bool manifest_invalid = false;
+    uint64_t offset = sizeof(header);
+    while (offset < file_size) {
+        uint8_t section_id;
+        if (!manifest__pread(file, offset, &section_id, sizeof(section_id))) { goto malformed; }
+        offset++;
+
+        uint32_t section_size;
+        if (!manifest__read_wasm_u32(file, file_size, &offset, &section_size) ||
+            (uint64_t)section_size > file_size - offset) {
+            goto malformed;
+        }
+        uint64_t section_end = offset + section_size;
+
+        if (section_id == 0) {
+            uint32_t name_len;
+            if (!manifest__read_wasm_u32(file, section_end, &offset, &name_len) ||
+                (uint64_t)name_len > section_end - offset) {
+                goto malformed;
+            }
+
+            bool is_manifest = name_len == sizeof(MANIFEST_WASM_SECTION_NAME) - 1;
+            char name[sizeof(MANIFEST_WASM_SECTION_NAME)];
+            if (is_manifest) {
+                if (!manifest__pread(file, offset, name, name_len)) { goto malformed; }
+                name[name_len] = '\0';
+                is_manifest = strcmp(name, MANIFEST_WASM_SECTION_NAME) == 0;
+            }
+            offset += name_len;
+
+            if (is_manifest) {
+                size_t payload_len = (size_t)(section_end - offset);
+                if (manifest_bytes != NULL || payload_len == 0 ||
+                    payload_len > MANIFEST_WASM_MAX_MANIFEST_BYTES) {
+                    manifest_invalid = true;
+                    memory__free(manifest_bytes);
+                    manifest_bytes = NULL;
+                    manifest_len = 0;
+                } else if (!manifest_invalid) {
+                    manifest_bytes = memory__malloc(payload_len + 1);
+                    if (manifest_bytes == NULL) { return BRUCE_ERR_NO_MEMORY; }
+                    if (!manifest__pread(file, offset, manifest_bytes, payload_len)) { goto malformed; }
+                    manifest_bytes[payload_len] = '\0';
+                    manifest_len = payload_len;
+                }
+            }
+        }
+        offset = section_end;
+    }
+
+    if (out_module_valid != NULL) *out_module_valid = true;
+    if (manifest_invalid || manifest_bytes == NULL) {
+        memory__free(manifest_bytes);
+        return BRUCE_ERR_MANIFEST_INVALID;
+    }
+    *out_bytes = manifest_bytes;
+    *out_len = manifest_len;
+    return BRUCE_OK;
+
+malformed:
+    memory__free(manifest_bytes);
+    return BRUCE_ERR_MANIFEST_INVALID;
+}
+
 bruce_app_inspection_t *manifest__inspect_javascript(const char *path) {
     char normalized_path[BRUCE_STORAGE_PATH_MAX];
     if (!manifest__normalize_path(path, normalized_path, sizeof(normalized_path))) { return NULL; }
@@ -604,7 +717,23 @@ bruce_app_inspection_t *manifest__inspect_wasm(const char *path) {
     if (out_inspection == NULL) { return NULL; }
     memset(out_inspection, 0, sizeof(*out_inspection));
 
-    bruce_manifest_t *manifest = manifest__default_wasm_manifest(normalized_path);
+    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
+    if (storage__open(normalized_path, BRUCE_STORAGE_OPEN_READ, &file) != BRUCE_OK) {
+        memory__free(out_inspection);
+        return NULL;
+    }
+
+    char *bytes = NULL;
+    size_t bytes_len = 0;
+    bool module_valid = false;
+    bruce_result_t result = manifest__read_wasm_manifest_bytes(file, &bytes, &bytes_len, &module_valid);
+    storage__close(file);
+
+    bruce_manifest_t *manifest = result == BRUCE_OK ? manifest__parse(bytes, bytes_len) : NULL;
+    memory__free(bytes);
+    if (manifest == NULL && module_valid && result != BRUCE_ERR_NO_MEMORY) {
+        manifest = manifest__default_wasm_manifest(normalized_path);
+    }
     if (manifest == NULL) {
         memory__free(out_inspection);
         return NULL;

@@ -14,7 +14,8 @@ The design goal is one implementation per capability:
 
 ```
 ELF application ─┐
-JavaScript app ──┼─> public Core API ─> ESP-IDF / hardware
+JavaScript app ──┤
+WebAssembly app ─┼─> public Core API ─> ESP-IDF / hardware
 terminal command ┤
 launcher module ─┘
 ```
@@ -55,7 +56,7 @@ themselves (see "Loader modules" below).
 - physical-input adapters, including board scanning, key normalization, and
   configured hotkey dispatch. Adapters inject events into Core's event loop.
 
-Built-in modules are compiled into firmware.  ELF and JavaScript apps are
+Built-in modules are compiled into firmware.  ELF, JavaScript, and WebAssembly apps are
 external applications.  Built-ins use the same public SDK API and lifecycle as
 external apps, but their permission checks always pass.  Neither kind of app
 uses private Core headers or ESP-IDF directly.
@@ -111,7 +112,7 @@ their own startup state.
 If `/config/launcher.json` is missing, the launcher writes a default configuration.
 
 The built-in `apps` module provides the default launcher's application browser.
-It enumerates regular `.elf` and `.js` files from `/apps` and `/scripts`, sorts
+It enumerates regular `.elf`, `.wasm`, and `.js` files from `/apps` and `/scripts`, sorts
 them by display name, and starts the selected path through the loader registry.
 Valid manifests provide display names; files without usable metadata remain
 visible under their filename. The browser passes a `GUI=1` environment
@@ -134,7 +135,10 @@ resumes when the child yields or exits.
   such as `elf ./elf_loader.elf ./game.elf` followed by `elf_loader` loading
   `game.elf`.
 - A JavaScript file is evaluated first.  If it defines `app_main(argv)`, the
-  JavaScript event loop invokes it; it is optional.
+   JavaScript event loop invokes it; it is optional.
+- A WebAssembly module exports `main` and imports supported SDK functions from
+  the `bruce_sdk` module. WASM pointers are offsets in validated linear memory,
+  never native ESP pointers.
 
 ### Named execution
 
@@ -253,7 +257,8 @@ bruce_manifest_t *manifest__parse(const char *json, size_t len);
 registry, and permission checks (`permission_key`, e.g. `"game.elf"`) as any
 other process.  Its `entry` is the loader's own `elf_loader__app_main`,
 `js__app_main`, or equivalent for future formats, so every loader process entry
-follows the same naming convention as a regular `app_main`.
+follows the same naming convention as a regular `app_main`. The entry returns
+an exit code available through `process__wait_status()`.
 The owned variant additionally runs `cleanup(ctx)` exactly once after normal
 return, force-kill, or cancellation before entry, and is used for loader state
 that must survive until process teardown.

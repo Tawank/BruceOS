@@ -390,7 +390,7 @@ static void process__trampoline(void *arg) {
 
     int exit_code = 0;
     if (record->process_entry != NULL) {
-        record->process_entry(record->process_entry_context);
+        exit_code = record->process_entry(record->process_entry_context);
     } else if (record->entry != NULL) {
         exit_code = record->entry(record->argc, record->argv);
     }
@@ -413,10 +413,9 @@ bruce_result_t
 process_registry__create(const process_create_params_t *params, bruce_process_id_t *out_process_id) {
     process__ensure_init();
     if (params == NULL || out_process_id == NULL) { return BRUCE_ERR_INVALID_ARGUMENT; }
-    bool has_entry = params->entry != NULL;
-    bool has_process_entry = params->process_entry != NULL;
-    if (has_entry == has_process_entry) {
-        /* exactly one of the two entry kinds must be set */
+    unsigned entry_count = (params->entry != NULL) + (params->process_entry != NULL);
+    if (entry_count != 1) {
+        /* exactly one entry kind must be set */
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
     *out_process_id = BRUCE_PROCESS_ID_INVALID;
@@ -478,6 +477,7 @@ process_registry__create(const process_create_params_t *params, bruce_process_id
     record->process_entry = params->process_entry;
     record->process_entry_context = params->process_entry_context;
     record->process_entry_cleanup = params->process_entry_cleanup;
+    record->process_entry_stop = params->process_entry_stop;
     record->argc = params->argc > 0 ? params->argc : 0;
     record->argv = argv_copy;
     record->next_resource_id = 1;

@@ -41,7 +41,7 @@ typedef struct {
      * permission__* lookup key for this process. Ignored for built_in processes,
      * which are always granted every permission regardless of this field.
      * NULL or empty means "no permission key": permission__check() denies
-     * every permission for such an external process. The ELF/JS loaders
+     * every permission for such an external process. The ELF/JS/WASM loaders
      * (Stage 3 / A6-A7) are expected to pass the launched file's basename
      * here. */
     const char *permission_key;
@@ -60,15 +60,16 @@ typedef struct {
     size_t environment_count;
     /* 0 selects a Core default (4096 bytes). */
     uint32_t stack_bytes;
-    /* Alternative entry point used by loader modules via
+    /* Alternative entry points used by loader modules via
      * app_runner__spawn_loader_process() (see core_sdk/ext_mem_loader.h) instead of
      * `entry` above: called as process_entry(process_entry_context) on the new
      * process's own stack, with no argc/argv handling of its own - a loader
      * hands its own decoded image/context through process_entry_context.
-     * Exactly one of `entry` or `process_entry` must be non-NULL. */
-    void (*process_entry)(void *context);
+     * Exactly one entry kind must be non-NULL. */
+    int (*process_entry)(void *context);
     void *process_entry_context;
     void (*process_entry_cleanup)(void *context);
+    void (*process_entry_stop)(void *context, bruce_process_signal_t signal);
 } process_create_params_t;
 
 /* Creates and starts a new Core-tracked process.  Exactly one of

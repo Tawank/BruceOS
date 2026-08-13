@@ -45,7 +45,8 @@ bruce_manifest_t *manifest__parse(const char *json, size_t json_len);
 
 /* Universal manifest JSON extractor (see migration_plan.md, "Loader
  * modules").  Opens `path`, auto-detects the file format (ELF section, JS
- * comment block, etc.), and returns raw NUL-terminated manifest JSON. The
+ * comment block, or WebAssembly `bruce.manifest` custom section), and returns
+ * raw NUL-terminated manifest JSON. The
  * returned buffer is process-owned and must be released with memory__free(). Never launches an
  * app.  This is the one function every program — the launcher, file
  * manager, terminal tools — uses to extract the manifest from any file.
@@ -88,6 +89,16 @@ bruce_app_inspection_t *manifest__inspect_elf(const char *path);
  * allocation failures. */
 bruce_app_inspection_t *manifest__inspect_javascript(const char *path);
 
-/* WebAssembly-specific manifest inspection. Uses filename fallback metadata
- * so .wasm files can participate in launcher discovery. */
+/* WebAssembly-specific manifest inspection. Opens a `.wasm` path, validates
+ * the standard WebAssembly magic and version, safely walks bounded u32 LEB128
+ * section lengths, and parses the payload of a `bruce.manifest` custom section
+ * as canonical manifest JSON. The returned inspection has
+ * BRUCE_APP_KIND_WEBASSEMBLY and an ABI-warning flag.
+ *
+ * A structurally valid WebAssembly module with a missing, duplicate, oversized,
+ * or invalid manifest receives filename fallback metadata with a generic icon,
+ * current Core ABI, an 8192-byte stack, and no permissions. Malformed modules,
+ * invalid paths, inaccessible files, and allocation failures return NULL. The
+ * returned inspection is process-owned and must be released with
+ * memory__free(). */
 bruce_app_inspection_t *manifest__inspect_wasm(const char *path);

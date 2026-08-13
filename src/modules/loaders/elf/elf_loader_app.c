@@ -101,11 +101,11 @@ static void elf_loader__cleanup_context(void *context) {
 }
 
 /* Process entry for an ELF already relocated by elf_loader__run_path(). */
-static void elf_loader__entry(void *context) {
+static int elf_loader__entry(void *context) {
     elf_loader_process_ctx_t *ctx = (elf_loader_process_ctx_t *)context;
-    if (ext_mem_loader__adopt_xip(&ctx->xip) == BRUCE_OK) {
-        (void)esp_elf_request(&ctx->elf, 0, ctx->argc, ctx->argv);
-    }
+    bruce_result_t adopt_result = ext_mem_loader__adopt_xip(&ctx->xip);
+    if (adopt_result != BRUCE_OK) return adopt_result;
+    return esp_elf_request(&ctx->elf, 0, ctx->argc, ctx->argv);
 }
 
 static int elf_loader__xip_allocate(

@@ -261,6 +261,109 @@ bool selftest__run_elf_loader_case(void) {
 }
 
 /* ------------------------------------------------------------------------ */
+/* WebAssembly manifest custom section                                      */
+/* ------------------------------------------------------------------------ */
+
+static size_t selftest__wasm_u32(uint8_t *out, uint32_t value) {
+    size_t len = 0;
+    do {
+        uint8_t byte = (uint8_t)(value & 0x7fu);
+        value >>= 7;
+        if (value != 0) byte |= 0x80u;
+        out[len++] = byte;
+    } while (value != 0);
+    return len;
+}
+
+static bool
+selftest__write_wasm(const char *path, const char *manifest, const uint8_t *suffix, size_t suffix_len) {
+    static const uint8_t header[] = {0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00};
+    static const char section_name[] = "bruce.manifest";
+    uint8_t bytes[768];
+    size_t len = 0;
+    memcpy(bytes + len, header, sizeof(header));
+    len += sizeof(header);
+    if (manifest != NULL) {
+        size_t manifest_len = strlen(manifest);
+        size_t section_size = 1 + sizeof(section_name) - 1 + manifest_len;
+        bytes[len++] = 0;
+        len += selftest__wasm_u32(bytes + len, (uint32_t)section_size);
+        len += selftest__wasm_u32(bytes + len, sizeof(section_name) - 1);
+        memcpy(bytes + len, section_name, sizeof(section_name) - 1);
+        len += sizeof(section_name) - 1;
+        memcpy(bytes + len, manifest, manifest_len);
+        len += manifest_len;
+    }
+    if (len + suffix_len > sizeof(bytes)) { return false; }
+    if (suffix_len != 0) memcpy(bytes + len, suffix, suffix_len);
+    len += suffix_len;
+    return storage__write_file_atomic(path, bytes, len);
+}
+
+bool selftest__run_wasm_manifest_case(void) {
+    const char *path = "/bin/selftest_manifest.wasm";
+    char icon_b64[200];
+    char json[512];
+    selftest__loader_test_icon_base64(icon_b64, sizeof(icon_b64));
+    int json_len = snprintf(
+        json,
+        sizeof(json),
+        "{\"appName\":\"Selftest WASM\",\"appIcon\":\"%s\",\"coreAbiVersion\":%u,"
+        "\"stackSize\":8192,\"permissions\":[\"wifi\"]}",
+        icon_b64,
+        (unsigned)BRUCE_CORE_ABI_VERSION
+    );
+    if (json_len <= 0 || (size_t)json_len >= sizeof(json) || !selftest__write_wasm(path, json, NULL, 0)) {
+        printf("[selftest] loader/wasm_manifest: could not build fixture\n");
+        return false;
+    }
+
+    char *raw = manifest__inspect_path(path);
+    bruce_app_inspection_t *inspection = manifest__inspect_wasm(path);
+    bool ok = raw != NULL && strcmp(raw, json) == 0 && inspection != NULL &&
+              inspection->kind == BRUCE_APP_KIND_WEBASSEMBLY && !inspection->abi_warning &&
+              strcmp(inspection->manifest.app_name, "Selftest WASM") == 0 &&
+              inspection->manifest.permission_count == 1;
+    memory__free(raw);
+    memory__free(inspection);
+
+    if (!selftest__write_wasm(path, "not json", NULL, 0)) ok = false;
+    inspection = ok ? manifest__inspect_wasm(path) : NULL;
+    ok = ok && inspection != NULL && strcmp(inspection->manifest.app_name, "selftest_manifest") == 0 &&
+         inspection->manifest.permission_count == 0;
+    memory__free(inspection);
+
+    if (!selftest__write_wasm(path, NULL, NULL, 0)) ok = false;
+    inspection = ok ? manifest__inspect_wasm(path) : NULL;
+    ok = ok && inspection != NULL && strcmp(inspection->manifest.app_name, "selftest_manifest") == 0;
+    memory__free(inspection);
+
+    static const uint8_t bad_leb[] = {0x01, 0x80, 0x80, 0x80, 0x80, 0x10};
+    if (!selftest__write_wasm(path, NULL, bad_leb, sizeof(bad_leb))) ok = false;
+    inspection = ok ? manifest__inspect_wasm(path) : NULL;
+    ok = ok && inspection == NULL;
+    memory__free(inspection);
+
+    static const uint8_t truncated_section[] = {0x01, 0x02, 0x00};
+    if (!selftest__write_wasm(path, NULL, truncated_section, sizeof(truncated_section))) ok = false;
+    inspection = ok ? manifest__inspect_wasm(path) : NULL;
+    ok = ok && inspection == NULL;
+    memory__free(inspection);
+
+    static const uint8_t bad_version[] = {0x00, 0x61, 0x73, 0x6d, 0x02, 0x00, 0x00, 0x00};
+    if (!storage__write_file_atomic(path, bad_version, sizeof(bad_version))) ok = false;
+    inspection = ok ? manifest__inspect_wasm(path) : NULL;
+    raw = manifest__inspect_path(path);
+    ok = ok && inspection == NULL && raw == NULL;
+    memory__free(inspection);
+    memory__free(raw);
+    storage__remove(path);
+
+    printf("[selftest] loader/wasm_manifest: %s\n", ok ? "OK" : "FAILED");
+    return ok;
+}
+
+/* ------------------------------------------------------------------------ */
 /* Built-in JavaScript loader module                                        */
 /* ------------------------------------------------------------------------ */
 

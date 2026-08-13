@@ -16,6 +16,7 @@
 
 #include "core_sdk/app_runner.h"
 #include "core_sdk/memory.h"
+#include "core_sdk/process.h"
 #include "core_sdk/result.h"
 
 /* Matches app_runner__run_path_with_environment()'s internal dispatch. */
@@ -27,8 +28,12 @@ typedef int (*bruce_loader_run_fn)(
 /* Entry point for a process created by app_runner__spawn_loader_process();
  * `context` is the loader's own opaque pointer (e.g. a struct holding the
  * decoded image or script source and its own argc/argv). */
-typedef void (*bruce_loader_process_entry_fn)(void *context);
+typedef int (*bruce_loader_process_entry_fn)(void *context);
 typedef void (*bruce_loader_process_cleanup_fn)(void *context);
+/* Optional non-blocking hook invoked when INT/TERM is delivered. It must only
+ * request interruption; owned cleanup still runs through the normal process
+ * teardown path. */
+typedef void (*bruce_loader_process_stop_fn)(void *context, bruce_process_signal_t signal);
 
 typedef struct {
     const uint8_t *data;
@@ -113,4 +118,13 @@ int app_runner__spawn_loader_process_owned(
     const char *permission_key, bool gui_requested, bruce_launch_mode_t mode, uint32_t stack_size,
     const bruce_environment_variable_t *environment, size_t environment_count,
     bruce_loader_process_entry_fn entry, void *context, bruce_loader_process_cleanup_fn cleanup
+);
+
+/* Owned variant for runtimes which must be explicitly interrupted to observe
+ * cooperative INT/TERM (for example, a compute-bound WebAssembly VM). */
+int app_runner__spawn_loader_process_owned_with_stop(
+    const char *permission_key, bool gui_requested, bruce_launch_mode_t mode, uint32_t stack_size,
+    const bruce_environment_variable_t *environment, size_t environment_count,
+    bruce_loader_process_entry_fn entry, void *context, bruce_loader_process_cleanup_fn cleanup,
+    bruce_loader_process_stop_fn stop
 );

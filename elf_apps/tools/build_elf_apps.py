@@ -2,9 +2,9 @@
 """Build the SDK ELF app templates and inject the .bruce.manifest section.
 
 Usage:
-    python3 elf_apps/tools/build_elf_apps.py [--target esp32s3]
+    python3 elf_apps/tools/build_elf_apps.py [--target esp32s3] [--app APP]
 
-The script builds the ELF examples listed in APPS, then
+The script builds all ELF examples, or only those selected with --app, then
 injects their manifest.json files into the resulting ELF images as a
 non-allocatable .bruce.manifest section.  Final outputs are written to:
 
@@ -26,7 +26,14 @@ import sys
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 SDK_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
 APPS_DIR = os.path.join(SDK_DIR, "examples")
-APPS = ["nes"]  # "elf_loader", "game",
+
+
+def available_apps():
+    return sorted(
+        entry.name
+        for entry in os.scandir(APPS_DIR)
+        if entry.is_dir() and os.path.isfile(os.path.join(entry.path, "CMakeLists.txt"))
+    )
 
 
 def run(cmd, cwd, env=None):
@@ -103,20 +110,30 @@ def build_app(app, target, idf_path):
 
 
 def main():
+    apps = available_apps()
     parser = argparse.ArgumentParser(description="Build Bruce ELF app templates")
     parser.add_argument("--target", default="esp32s3", help="ESP-IDF target (default: esp32s3)")
     parser.add_argument("--idf-path", default=os.environ.get("IDF_PATH", ""), help="Path to ESP-IDF")
+    parser.add_argument(
+        "--app",
+        action="append",
+        choices=apps,
+        dest="apps",
+        metavar="APP",
+        help="App to build; may be repeated (default: all apps)",
+    )
     args = parser.parse_args()
+    selected_apps = list(dict.fromkeys(args.apps)) if args.apps else apps
 
     if not args.idf_path or not os.path.isdir(args.idf_path):
         print("IDF_PATH not set or invalid", file=sys.stderr)
         sys.exit(1)
 
-    for app in APPS:
+    for app in selected_apps:
         build_app(app, args.target, args.idf_path)
 
     print("Done. Outputs:")
-    for app in APPS:
+    for app in selected_apps:
         print(f"  {os.path.join(APPS_DIR, app + '.elf')}")
 
 

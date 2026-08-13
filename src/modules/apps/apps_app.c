@@ -49,9 +49,15 @@ static size_t apps__directory_count(const char *path) {
     return storage__list(path, NULL, 0, &count) == BRUCE_OK ? count : 0;
 }
 
-static void apps__set_label(apps_entry_t *app, const char *filename, bool javascript) {
-    bruce_app_inspection_t *inspection =
-        javascript ? manifest__inspect_javascript(app->path) : manifest__inspect_elf(app->path);
+static void apps__set_label(apps_entry_t *app, const char *filename, const char *extension) {
+    bruce_app_inspection_t *inspection;
+    if (strcasecmp(extension, ".js") == 0) {
+        inspection = manifest__inspect_javascript(app->path);
+    } else if (strcasecmp(extension, ".wasm") == 0) {
+        inspection = manifest__inspect_wasm(app->path);
+    } else {
+        inspection = manifest__inspect_elf(app->path);
+    }
     const char *name = inspection != NULL && inspection->manifest.app_name[0] != '\0'
                            ? inspection->manifest.app_name
                            : filename;
@@ -69,8 +75,10 @@ apps__scan_directory(const char *directory, apps_entry_t *apps, size_t capacity,
     bruce_result_t result = storage__list(directory, entries, entry_count, &entry_count);
     for (size_t i = 0; result == BRUCE_OK && i < entry_count && *in_out_count < capacity; ++i) {
         if (entries[i].type != BRUCE_STORAGE_ENTRY_FILE) continue;
-        bool javascript = apps__has_extension(entries[i].name, ".js");
-        if (!javascript && !apps__has_extension(entries[i].name, ".elf")) continue;
+        const char *extension = apps__has_extension(entries[i].name, ".js")
+                                    ? ".js"
+                                    : (apps__has_extension(entries[i].name, ".wasm") ? ".wasm" : ".elf");
+        if (!apps__has_extension(entries[i].name, extension)) continue;
 
         apps_entry_t *app = &apps[(*in_out_count)++];
         int length = snprintf(app->path, sizeof(app->path), "%s/%s", directory, entries[i].name);
@@ -78,7 +86,7 @@ apps__scan_directory(const char *directory, apps_entry_t *apps, size_t capacity,
             --(*in_out_count);
             continue;
         }
-        apps__set_label(app, entries[i].name, javascript);
+        apps__set_label(app, entries[i].name, extension);
     }
     memory__free(entries);
     return result;
@@ -108,7 +116,7 @@ int apps_app_main(int argc, char **argv) {
         capacity += count;
     }
     if (capacity == 0) {
-        (void)dialog__message(BRUCE_DIALOG_INFO, "Apps", "No .elf or .js files in /apps or /scripts");
+        (void)dialog__message(BRUCE_DIALOG_INFO, "Apps", "No .elf, .wasm, or .js files in /apps or /scripts");
         return BRUCE_OK;
     }
 
@@ -125,7 +133,7 @@ int apps_app_main(int argc, char **argv) {
     }
     if (count == 0) {
         memory__free(apps);
-        (void)dialog__message(BRUCE_DIALOG_INFO, "Apps", "No .elf or .js files in /apps or /scripts");
+        (void)dialog__message(BRUCE_DIALOG_INFO, "Apps", "No .elf, .wasm, or .js files in /apps or /scripts");
         return BRUCE_OK;
     }
 
