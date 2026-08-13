@@ -396,8 +396,10 @@ bruce_result_t audio__stream_open(uint8_t channels) {
         result = audio__i2s_ensure_channel_locked();
 #endif
         if (result == BRUCE_OK) {
+#if CONFIG_BRUCE_AUDIO_BACKEND_I2S && !CONFIG_BRUCE_QEMU_TEST_MODE
             atomic_store(&s_stream_read_cursor, 0);
             atomic_store(&s_stream_write_cursor, 0);
+#endif
             s_stream_open = true;
             s_stream_owner = process__current_id();
             s_stream_resource = process_registry__resource_register(audio__stream_cleanup, NULL);

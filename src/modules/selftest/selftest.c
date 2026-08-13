@@ -126,6 +126,7 @@ int selftest_app_main(int argc, char **argv) {
     RUN_SELFTEST(selftest__run_loader_registry_extensibility_case);
     RUN_SELFTEST(selftest__run_elf_loader_case);
     RUN_SELFTEST(selftest__run_elf_loader_xip_case);
+    RUN_SELFTEST(selftest__run_wasm_loader_case);
     RUN_SELFTEST(selftest__run_js_loader_case);
     RUN_SELFTEST(selftest__run_terminal_named_case);
     RUN_SELFTEST(selftest__run_terminal_path_case);

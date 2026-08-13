@@ -7,9 +7,9 @@
 
 #include "core_sdk/app_runner.h"
 #include "core_sdk/dialog.h"
+#include "core_sdk/ext_mem_loader.h"
 #include "core_sdk/image.h"
 #include "core_sdk/input.h"
-#include "core_sdk/ext_mem_loader.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
@@ -45,10 +45,91 @@ static void filemanager__dirname(const char *path, char *out_dir, size_t out_dir
     out_dir[len] = '\0';
 }
 
-static bool filemanager__is_editable_text(const char *path) {
+static const char *filemanager__extension(const char *path) {
     const char *dot = strrchr(path, '.');
-    return dot != NULL &&
+    return dot != NULL ? dot : "";
+}
+
+static bool filemanager__is_editable_text(const char *path) {
+    const char *dot = filemanager__extension(path);
+    return dot[0] != '\0' &&
            (strcasecmp(dot, ".txt") == 0 || strcasecmp(dot, ".json") == 0 || strcasecmp(dot, ".conf") == 0);
+}
+
+static bool filemanager__is_previewable_text(const char *path) {
+    const char *dot = filemanager__extension(path);
+    return dot[0] != '\0' &&
+           (strcasecmp(dot, ".txt") == 0 || strcasecmp(dot, ".json") == 0 || strcasecmp(dot, ".conf") == 0 ||
+            strcasecmp(dot, ".wasm") == 0);
+}
+
+static bool filemanager__is_openable_in_text(const char *path) {
+    return filemanager__is_editable_text(path) || strcasecmp(filemanager__extension(path), ".wasm") == 0;
+}
+
+static bool filemanager__escape_arg(const char *path, char *out, size_t out_size) {
+    size_t written = 0;
+    for (size_t i = 0; path[i] != '\0'; ++i) {
+        if (path[i] == ' ' || path[i] == '\t' || path[i] == '\\' || path[i] == '\'' || path[i] == '"') {
+            if (written + 1u >= out_size) return false;
+            out[written++] = '\\';
+        }
+        if (written + 1u >= out_size) return false;
+        out[written++] = path[i];
+    }
+    if (written + 1u > out_size) return false;
+    out[written] = '\0';
+    return true;
+}
+
+static bruce_result_t filemanager__run_named_app(const char *app, const char *path, bool gui, bool read_only) {
+    char escaped_path[BRUCE_STORAGE_PATH_MAX * 2 + 8];
+    char args[BRUCE_STORAGE_PATH_MAX * 2 + 16];
+    const char *arg_string = NULL;
+
+    if (!filemanager__escape_arg(path, escaped_path, sizeof(escaped_path))) return BRUCE_ERR_INVALID_PATH;
+    if (read_only) {
+        int written = snprintf(args, sizeof(args), "-r %s", escaped_path);
+        if (written < 0 || (size_t)written >= sizeof(args)) return BRUCE_ERR_RESOURCE_LIMIT;
+        arg_string = args;
+    } else {
+        arg_string = escaped_path;
+    }
+
+    const bruce_environment_variable_t gui_env[] = {{.name = "GUI", .value = "1"}};
+    int process = app_runner__run_with_environment(app, arg_string, BRUCE_LAUNCH_FOREGROUND, gui ? gui_env : NULL, gui ? 1u : 0u);
+    if (process <= 0) return (bruce_result_t)process;
+    return process__wait((bruce_process_id_t)process, UINT32_MAX);
+}
+
+static bruce_result_t filemanager__open_default(const char *path, bool gui) {
+    const bruce_environment_variable_t gui_env[] = {{.name = "GUI", .value = "1"}};
+    int process = app_runner__run_path_with_environment(path, NULL, BRUCE_LAUNCH_FOREGROUND, gui ? gui_env : NULL, gui ? 1u : 0u);
+    if (process <= 0) return (bruce_result_t)process;
+    return process__wait((bruce_process_id_t)process, UINT32_MAX);
+}
+
+static bruce_result_t filemanager__pick_open_with_app(const char *path, bool gui) {
+    const bruce_dialog_choice_t choices[] = {
+        {.label = "Text",   .value = "text"  },
+        {.label = "Image",  .value = "image" },
+        {.label = "Wasm",   .value = "wasm"  },
+        {.label = "ELF",    .value = "elf"   },
+        {.label = "JavaScript", .value = "js"},
+        {.label = "Cancel", .value = "cancel"},
+    };
+    size_t selected = 0;
+    bruce_result_t result = dialog__choice("Open with", filemanager__basename(path), choices, sizeof(choices) / sizeof(choices[0]), &selected);
+    if (result != BRUCE_OK || strcmp(choices[selected].value, "cancel") == 0)
+        return result == BRUCE_OK ? BRUCE_ERR_CANCELLED : result;
+
+    const char *app = choices[selected].value;
+    if (strcmp(app, "text") == 0) return filemanager__run_named_app("text", path, gui, false);
+    if (strcmp(app, "image") == 0) return filemanager__run_named_app("image", path, gui, false);
+    if (strcmp(app, "wasm") == 0) return filemanager__run_named_app("wasm", path, gui, false);
+    if (strcmp(app, "elf") == 0) return filemanager__run_named_app("elf", path, gui, false);
+    if (strcmp(app, "js") == 0) return filemanager__run_named_app("js", path, gui, false);
+    return BRUCE_ERR_NOT_FOUND;
 }
 
 static bruce_result_t filemanager__read_preview(const char *path, char **out_text, bool *out_truncated) {
@@ -95,10 +176,11 @@ static bruce_result_t filemanager__read_preview(const char *path, char **out_tex
 }
 
 static bruce_result_t filemanager__view_file(const char *path, bool gui) {
-    if (image__is_supported_path(path) || filemanager__is_editable_text(path)) {
-        int process = app_runner__run_path(path, NULL, BRUCE_LAUNCH_FOREGROUND);
-        if (process <= 0) return (bruce_result_t)process;
-        return process__wait((bruce_process_id_t)process, UINT32_MAX);
+    if (image__is_supported_path(path)) {
+        return filemanager__open_default(path, gui);
+    }
+    if (filemanager__is_editable_text(path)) {
+        return filemanager__run_named_app("text", path, gui, true);
     }
 
     char *text = NULL;
@@ -140,6 +222,11 @@ static bruce_result_t filemanager__view_file(const char *path, bool gui) {
     return dialog__viewer_close(viewer);
 }
 
+static bruce_result_t filemanager__edit_file(const char *path, bool gui) {
+    if (!filemanager__is_editable_text(path)) return BRUCE_ERR_INVALID_ARGUMENT;
+    return filemanager__run_named_app("text", path, gui, false);
+}
+
 static bruce_result_t filemanager__show_info(const char *path) {
     bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
     bruce_result_t result = storage__open(path, BRUCE_STORAGE_OPEN_READ, &file);
@@ -171,7 +258,7 @@ static bruce_result_t filemanager__delete_file(const char *path) {
         "Delete file?", path, confirm_actions, sizeof(confirm_actions) / sizeof(confirm_actions[0]), &selected
     );
     if (result != BRUCE_OK) return result;
-    if (selected != 0) return BRUCE_ERR_CANCELLED;
+    if (strcmp(confirm_actions[selected].value, "delete") != 0) return BRUCE_ERR_CANCELLED;
 
     return storage__remove(path);
 }
@@ -179,14 +266,17 @@ static bruce_result_t filemanager__delete_file(const char *path) {
 int filemanager_app_main(int argc, char **argv) {
     bool gui = runtime__gui_requested();
     const bruce_dialog_choice_t actions[] = {
-        {.label = "Open / view", .value = "view"  },
+        {.label = "Open",        .value = "open"  },
+        {.label = "Open with...", .value = "openw" },
+        {.label = "View",        .value = "view"  },
+        {.label = "Edit",        .value = "edit"  },
         {.label = "File info",   .value = "info"  },
-        {.label = "Run",         .value = "run"   },
         {.label = "Delete",      .value = "delete"},
         {.label = "Back",        .value = "back"  },
     };
-    /* File manager stays full screen (no window chrome) but reads better
-     * with a larger font than the default. */
+    (void)argc;
+    (void)argv;
+
     const bruce_dialog_render_params_t action_params = dialog__default_render_params(2);
     char last_dir[BRUCE_STORAGE_PATH_MAX] = "/";
 
@@ -212,25 +302,25 @@ int filemanager_app_main(int argc, char **argv) {
             (void)input__flush();
             continue;
         }
-        if (result == BRUCE_ERR_CANCELLED || selected == 4) continue;
+        if (result == BRUCE_ERR_CANCELLED) continue;
         if (result != BRUCE_OK) {
             filemanager__show_error("Action", result);
             continue;
         }
 
-        if (selected == 0) {
+        const char *action = actions[selected].value;
+        if (strcmp(action, "back") == 0) continue;
+        if (strcmp(action, "open") == 0) {
+            result = filemanager__open_default(path, gui);
+        } else if (strcmp(action, "openw") == 0) {
+            result = filemanager__pick_open_with_app(path, gui);
+        } else if (strcmp(action, "view") == 0) {
             result = filemanager__view_file(path, gui);
-        } else if (selected == 1) {
+        } else if (strcmp(action, "edit") == 0) {
+            result = filemanager__edit_file(path, gui);
+        } else if (strcmp(action, "info") == 0) {
             result = filemanager__show_info(path);
-        } else if (selected == 2) {
-            const bruce_environment_variable_t gui_env[] = {
-                {.name = "GUI", .value = "1"}
-            };
-            int process = app_runner__run_path_with_environment(
-                path, NULL, BRUCE_LAUNCH_FOREGROUND, gui ? gui_env : NULL, gui ? 1u : 0u
-            );
-            result = process > 0 ? BRUCE_OK : (bruce_result_t)process;
-        } else {
+        } else if (strcmp(action, "delete") == 0) {
             result = filemanager__delete_file(path);
         }
         if (result != BRUCE_OK && result != BRUCE_ERR_CANCELLED) {

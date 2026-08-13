@@ -23,6 +23,7 @@ typedef struct {
 typedef enum {
     BRUCE_APP_KIND_ELF,
     BRUCE_APP_KIND_JAVASCRIPT,
+    BRUCE_APP_KIND_WEBASSEMBLY,
 } bruce_app_kind_t;
 
 typedef struct {
@@ -86,3 +87,7 @@ bruce_app_inspection_t *manifest__inspect_elf(const char *path);
  * memory__free(). Returns NULL for invalid paths, inaccessible files, or
  * allocation failures. */
 bruce_app_inspection_t *manifest__inspect_javascript(const char *path);
+
+/* WebAssembly-specific manifest inspection. Uses filename fallback metadata
+ * so .wasm files can participate in launcher discovery. */
+bruce_app_inspection_t *manifest__inspect_wasm(const char *path);

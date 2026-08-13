@@ -79,3 +79,6 @@ CONFIG_ESP_WOLFSSL_NO_ESP32_CRYPT=y
 # Benign: wolfSSL's RSA-primitive stack-size warning for this main task size;
 # not applicable once ESP32 HW crypto (incl. the RSA primitive) is disabled above.
 CONFIG_ESP_WOLFSSL_NO_STACK_SIZE_BUILD_WARNING=y
+# Bruce uses WAMR directly through wasm_export.h; its optional application
+# manager is not needed and does not support ESP-IDF 6's POSIX surface.
+CONFIG_WAMR_ENABLE_APP_FRAMEWORK=n

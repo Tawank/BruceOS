@@ -97,10 +97,11 @@ idf_component_register(SRCS
                     "modules/input/input_hotkey.c"
                     "modules/input/input_keyboard.c"
                     "modules/input/input_touch.c"
-                    "modules/loaders/elf/elf_loader_app.c"
-                    "modules/loaders/elf/elf_loader_sdk_symbols.c"
-                    "modules/loaders/image/image_loader_app.c"
-                     "modules/loaders/js/audio_js.c"
+                     "modules/loaders/elf/elf_loader_app.c"
+                     "modules/loaders/elf/elf_loader_sdk_symbols.c"
+                     "modules/loaders/image/image_loader_app.c"
+                     "modules/loaders/wasm/wasm_loader_app.c"
+                      "modules/loaders/js/audio_js.c"
                      "modules/loaders/js/dialog_js.c"
                     "modules/loaders/js/display_js.c"
                      "modules/loaders/js/icon_js.c"
@@ -181,8 +182,9 @@ idf_component_register(SRCS
                      libpng
                      wolfssl
                      wolfssh
-                    elf_loader
-                    mquickjs
+                     elf_loader
+                     mquickjs
+                     wasm-micro-runtime
                     INCLUDE_DIRS
                     "."
                      PRIV_INCLUDE_DIRS
@@ -473,6 +475,14 @@ target_link_libraries(bruce_sdk_builtin_js_loader_check PRIVATE mquickjs)
 # so make sure the generator runs before it is compiled.
 add_dependencies(bruce_sdk_builtin_js_loader_check mquickjs_generate_stdlib)
 
+add_library(bruce_sdk_builtin_wasm_loader_check OBJECT
+            "modules/loaders/wasm/wasm_loader_app.c")
+target_include_directories(bruce_sdk_builtin_wasm_loader_check PRIVATE
+                           "${CMAKE_CURRENT_LIST_DIR}"
+                           "${CMAKE_CURRENT_LIST_DIR}/modules/loaders/wasm"
+                           "${CMAKE_CURRENT_LIST_DIR}/../components/wasm-micro-runtime/core/iwasm/include")
+target_link_libraries(bruce_sdk_builtin_wasm_loader_check PRIVATE wasm-micro-runtime)
+
 set(BRUCE_ARGS_SDK_CHECK_TARGETS
     bruce_sdk_builtin_apps_check
     bruce_sdk_builtin_bnu_check
@@ -496,7 +506,8 @@ set(BRUCE_ARGS_SDK_CHECK_TARGETS
     bruce_sdk_builtin_ssh_check
     bruce_sdk_builtin_system_menu_check
     bruce_sdk_builtin_elf_loader_check
-    bruce_sdk_builtin_js_loader_check)
+    bruce_sdk_builtin_js_loader_check
+    bruce_sdk_builtin_wasm_loader_check)
 foreach(target IN LISTS BRUCE_ARGS_SDK_CHECK_TARGETS)
     target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../components/args")
 endforeach()

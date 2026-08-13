@@ -4,9 +4,11 @@
 
 #include "core/storage/storage.h"
 #include "core_sdk/app_runner.h"
+#include "core_sdk/ext_mem_loader.h"
 #include "core_sdk/permission.h"
 #include "core_sdk/runtime.h"
 #include "modules/loaders/elf/elf_loader_app.h"
+#include "modules/loaders/wasm/wasm_loader_app.h"
 
 #include "elf_loader_test.h"
 
@@ -58,5 +60,20 @@ bool selftest__run_elf_loader_xip_case(void) {
     }
 
     printf("[selftest] loader/elf_xip: OK\n");
+    return true;
+}
+
+bool selftest__run_wasm_loader_case(void) {
+    const char *path = "/bin/selftest_wasm_loader_target.wasm";
+    storage__remove(path);
+
+    size_t calls_before = wasm_loader__debug_call_count();
+    int result = app_runner__run_path(path, NULL, BRUCE_LAUNCH_BACKGROUND);
+    if (result != BRUCE_ERR_NOT_FOUND || wasm_loader__debug_call_count() != calls_before + 1) {
+        printf("[selftest] loader/wasm: loader was not dispatched (%d)\n", result);
+        return false;
+    }
+
+    printf("[selftest] loader/wasm: OK\n");
     return true;
 }

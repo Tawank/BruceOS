@@ -31,6 +31,7 @@
 #include "modules/loaders/elf/elf_loader_app.h"
 #include "modules/loaders/image/image_loader_app.h"
 #include "modules/loaders/js/js_loader_app.h"
+#include "modules/loaders/wasm/wasm_loader_app.h"
 #include "modules/notification_service/notification_service.h"
 #include "modules/nrf24/nrf24_app.h"
 #include "modules/privileged/permissions/permissions_app.h"
@@ -103,6 +104,7 @@ void app_runner__register_defaults(void) {
     (void)app_runner__register("cat", bnu_cat_app_main, 0);
     (void)app_runner__register("elf", elf_loader__app_main, 0);
     (void)app_runner__register("js", js_loader__app_main, 0);
+    (void)app_runner__register("wasm", wasm_loader__app_main, 0);
     (void)app_runner__register("image", image_app_main, 0);
     (void)app_runner__register("image_viewer", image_viewer_app_main, 0);
     (void)app_runner__register("text", text_app_main, 0);
@@ -113,6 +115,7 @@ void app_runner__register_defaults(void) {
     (void)app_runner__register("ssh-keygen", ssh_keygen_app_main, SSH_KEYGEN_STACK_BYTES);
 
     (void)app_runner__register_loader(".elf", 10, elf_loader__run_path);
+    (void)app_runner__register_loader(".wasm", 15, wasm_loader__run_path);
     (void)app_runner__register_loader(".js", 20, js_loader__run_path);
     (void)app_runner__register_loader(".sh", 25, shell_loader__run_path);
     (void)app_runner__register_loader(".jpg", 30, image_loader__run_path);
@@ -124,6 +127,7 @@ void app_runner__register_defaults(void) {
     (void)app_runner__register_loader(".conf", 40, text__run_path);
 
     elf_loader__init();
+    wasm_loader__init();
 }
 
 bool init_storage(void) {

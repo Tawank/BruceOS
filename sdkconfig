@@ -4408,6 +4408,44 @@ CONFIG_ELF_LOADER_NUMBER_SYMBOLS=32
 # end of Espressif ELF Loader Configuration
 
 #
+# WASM Micro Runtime
+#
+# default:
+CONFIG_WAMR_BUILD_RELEASE=y
+# default:
+# CONFIG_WAMR_BUILD_DEBUG is not set
+# default:
+CONFIG_WAMR_ENABLE_AOT=y
+# default:
+CONFIG_WAMR_ENABLE_INTERP=y
+# default:
+# CONFIG_WAMR_INTERP_CLASSIC is not set
+# default:
+CONFIG_WAMR_INTERP_FAST=y
+# default:
+CONFIG_WAMR_INTERP_LOADER_NORMAL=y
+# default:
+# CONFIG_WAMR_INTERP_LOADER_MINI is not set
+# default:
+CONFIG_WAMR_ENABLE_LIB_PTHREAD=y
+# default:
+CONFIG_WAMR_ENABLE_LIBC_BUILTIN=y
+# default:
+CONFIG_WAMR_ENABLE_LIBC_WASI=y
+# default:
+# CONFIG_WAMR_ENABLE_MEMORY_PROFILING is not set
+# default:
+# CONFIG_WAMR_ENABLE_MULTI_MODULE is not set
+# default:
+# CONFIG_WAMR_ENABLE_PERF_PROFILING is not set
+# default:
+# CONFIG_WAMR_ENABLE_REF_TYPES is not set
+# default:
+# CONFIG_WAMR_ENABLE_SHARED_MEMORY is not set
+# CONFIG_WAMR_ENABLE_APP_FRAMEWORK is not set
+# end of WASM Micro Runtime
+
+#
 # cJSON
 #
 # default:

@@ -528,6 +528,26 @@ static bruce_manifest_t *manifest__default_js_manifest(const char *path) {
     return manifest;
 }
 
+static bruce_manifest_t *manifest__default_wasm_manifest(const char *path) {
+    bruce_manifest_t *manifest = memory__malloc(sizeof(*manifest));
+    if (manifest == NULL) { return NULL; }
+    memset(manifest, 0, sizeof(*manifest));
+
+    const char *base = strrchr(path, '/');
+    base = base != NULL ? base + 1 : path;
+    const char *dot = strrchr(base, '.');
+    size_t name_len = dot != NULL && dot != base ? (size_t)(dot - base) : strlen(base);
+    if (name_len >= BRUCE_MANIFEST_APP_NAME_MAX) { name_len = BRUCE_MANIFEST_APP_NAME_MAX - 1; }
+    memcpy(manifest->app_name, base, name_len);
+    manifest->app_name[name_len] = '\0';
+
+    memcpy(manifest->app_icon, s_generic_icon, BRUCE_MANIFEST_ICON_BYTES);
+    manifest->core_abi_version = BRUCE_CORE_ABI_VERSION;
+    manifest->stack_size = 8192;
+    manifest->permission_count = 0;
+    return manifest;
+}
+
 bruce_app_inspection_t *manifest__inspect_javascript(const char *path) {
     char normalized_path[BRUCE_STORAGE_PATH_MAX];
     if (!manifest__normalize_path(path, normalized_path, sizeof(normalized_path))) { return NULL; }
@@ -571,6 +591,29 @@ bruce_app_inspection_t *manifest__inspect_javascript(const char *path) {
         memory__free(out_inspection);
         return NULL;
     }
+    return out_inspection;
+}
+
+bruce_app_inspection_t *manifest__inspect_wasm(const char *path) {
+    char normalized_path[BRUCE_STORAGE_PATH_MAX];
+    if (!manifest__normalize_path(path, normalized_path, sizeof(normalized_path))) { return NULL; }
+    size_t path_len = strlen(normalized_path);
+    if (path_len <= 5 || strcasecmp(normalized_path + path_len - 5, ".wasm") != 0) { return NULL; }
+
+    bruce_app_inspection_t *out_inspection = memory__malloc(sizeof(*out_inspection));
+    if (out_inspection == NULL) { return NULL; }
+    memset(out_inspection, 0, sizeof(*out_inspection));
+
+    bruce_manifest_t *manifest = manifest__default_wasm_manifest(normalized_path);
+    if (manifest == NULL) {
+        memory__free(out_inspection);
+        return NULL;
+    }
+
+    out_inspection->kind = BRUCE_APP_KIND_WEBASSEMBLY;
+    out_inspection->manifest = *manifest;
+    out_inspection->abi_warning = out_inspection->manifest.core_abi_version != BRUCE_CORE_ABI_VERSION;
+    memory__free(manifest);
     return out_inspection;
 }
 

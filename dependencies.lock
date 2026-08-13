@@ -122,6 +122,12 @@ dependencies:
       registry_url: https://components.espressif.com/
       type: service
     version: 1.22.3
+  wasm-micro-runtime:
+    dependencies: []
+    source:
+      path: components/wasm-micro-runtime
+      type: local
+    version: 2.4.0~1
   wolfssl/wolfssh:
     component_hash: 24d623360c07374a90b1ade8d1218b24bb7b661fd51ace9135dccf510a338927
     dependencies: []
@@ -146,8 +152,9 @@ direct_dependencies:
 - espressif/libpng
 - idf
 - joltwallet/littlefs
+- wasm-micro-runtime
 - wolfssl/wolfssh
 - wolfssl/wolfssl
-manifest_hash: b5bf6961ca0f6bdf7437bb893646ea105964a7aaded106669c6ec7221c208eb5
+manifest_hash: 056c57bfa9b90f7d4b161a345f3f5298f427c038adb615e737360c3c7615ae09
 target: esp32s3
 version: 3.0.0

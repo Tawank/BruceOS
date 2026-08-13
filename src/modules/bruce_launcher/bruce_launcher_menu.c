@@ -249,10 +249,20 @@ static int bruce_launcher__discover_apps(bruce_launcher_menu_t *menu, const char
         if (printed < 0 || (size_t)printed >= sizeof(full_path)) continue;
 
         char *json = manifest__inspect_path(full_path);
-        if (json == NULL) continue;
-        bruce_manifest_t *manifest = manifest__parse(json, strlen(json));
-        memory__free(json);
-        if (manifest == NULL) continue;
+        bruce_manifest_t *manifest = NULL;
+        if (json != NULL) {
+            manifest = manifest__parse(json, strlen(json));
+            memory__free(json);
+        }
+        if (manifest == NULL) {
+            bruce_app_inspection_t *inspection = manifest__inspect_wasm(full_path);
+            if (inspection == NULL) continue;
+            if (menu == NULL || bruce_launcher__menu_add_command(menu, inspection->manifest.app_name, full_path)) {
+                added++;
+            }
+            memory__free(inspection);
+            continue;
+        }
 
         if (menu == NULL || bruce_launcher__menu_add_command(menu, manifest->app_name, full_path)) {
             added++;
