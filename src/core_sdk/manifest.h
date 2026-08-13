@@ -10,6 +10,8 @@
 #define BRUCE_MANIFEST_ICON_BYTES 128
 #define BRUCE_MANIFEST_MAX_PERMISSIONS BRUCE_PERMISSION_COUNT
 #define BRUCE_MANIFEST_PERMISSION_NAME_MAX 16
+#define BRUCE_MANIFEST_STACK_MIN 4096u
+#define BRUCE_MANIFEST_STACK_MAX 16384u
 
 typedef struct {
     char app_name[BRUCE_MANIFEST_APP_NAME_MAX];
@@ -35,7 +37,7 @@ typedef struct {
 /* Parses and validates canonical manifest JSON bytes (see
  * migration_plan.md, "ELF contract"): required appName/appIcon (base64,
  * decodes to exactly BRUCE_MANIFEST_ICON_BYTES bytes)/coreAbiVersion/
- * stackSize (4096-16384 inclusive), and an optional permissions array (each
+ * stackSize (BRUCE_MANIFEST_STACK_MIN-BRUCE_MANIFEST_STACK_MAX inclusive), and an optional permissions array (each
  * name must be a known bruce_permission_t name, no duplicates).  Every
  * caller extracts raw manifest bytes from the file format and calls this one
  * shared parser instead of reimplementing JSON/base64 handling. Returns a
@@ -91,11 +93,12 @@ bruce_app_inspection_t *manifest__inspect_javascript(const char *path);
 
 /* WebAssembly-specific manifest inspection. Opens a `.wasm` path, validates
  * the standard WebAssembly magic and version, safely walks bounded u32 LEB128
- * section lengths, and parses the payload of a `bruce.manifest` custom section
- * as canonical manifest JSON. The returned inspection has
+ * section envelopes, and parses the payload of a `bruce.manifest` custom section
+ * as canonical manifest JSON. This is envelope validation only; WAMR performs
+ * full WebAssembly semantic validation at launch. The returned inspection has
  * BRUCE_APP_KIND_WEBASSEMBLY and an ABI-warning flag.
  *
- * A structurally valid WebAssembly module with a missing, duplicate, oversized,
+ * An envelope-valid WebAssembly module with a missing, duplicate, oversized,
  * or invalid manifest receives filename fallback metadata with a generic icon,
  * current Core ABI, an 8192-byte stack, and no permissions. Malformed modules,
  * invalid paths, inaccessible files, and allocation failures return NULL. The

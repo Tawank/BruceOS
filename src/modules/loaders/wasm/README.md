@@ -14,9 +14,18 @@ loading fail.
 - WAMR WASI, built-in host libc, pthreads, shared memory, and multi-module
   loading are disabled. Raw host files, sockets, and threads are unavailable.
 - Module files are limited to 1 MiB. Instances use an 8 KiB WAMR execution
-  stack, a 64 KiB application heap, and at most four 64 KiB linear-memory pages.
+   stack, a 64 KiB application heap, and at most four 64 KiB linear-memory pages.
+   The heap is additional host-managed WAMR instance memory; it is not part of
+   the four-page linear-memory policy. Modules must declare one wasm32 memory,
+   with initial and declared maximum sizes no greater than four pages.
   The manifest `stackSize` controls the separate Core process stack.
 - INT and TERM interrupt WAMR execution and then use normal process teardown.
+- The restricted Bruce ABI requires an exported `int main(int argc, char **argv)`
+  entry. `_start`, void main, and WASI entry points are not accepted.
+- Manifest inspection checks the v1 header, bounded section envelopes, and the
+  Bruce custom-section bounds. It does not claim full WebAssembly validation;
+  WAMR validates module semantics at launch. Missing, duplicate, oversized, or
+  malformed Bruce manifest payloads use filename fallback when envelopes are valid.
 
 ## Allocation
 

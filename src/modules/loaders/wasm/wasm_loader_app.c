@@ -24,6 +24,7 @@
 #define WASM_LOADER_EXEC_STACK_BYTES 8192u
 #define WASM_LOADER_APP_HEAP_BYTES (64u * 1024u)
 #define WASM_LOADER_MAX_MEMORY_PAGES 4u
+#define WASM_LOADER_MANIFEST_STACK_MAX 16384u
 
 static size_t s_call_count;
 static bool s_runtime_initialized;
@@ -39,6 +40,123 @@ typedef struct {
     wasm_module_t module;
     wasm_module_inst_t module_inst;
 } wasm_loader_process_ctx_t;
+
+typedef enum {
+    WASM_MEMORY_PREFLIGHT_OK,
+    WASM_MEMORY_PREFLIGHT_INVALID,
+    WASM_MEMORY_PREFLIGHT_LIMIT,
+} wasm_memory_preflight_result_t;
+
+static bool wasm_loader__read_u32_leb(const uint8_t **cursor, const uint8_t *end, uint32_t *out) {
+    uint32_t value = 0;
+    for (unsigned shift = 0; shift < 35; shift += 7) {
+        if (*cursor >= end || shift == 35) return false;
+        uint8_t byte = *(*cursor)++;
+        if (shift == 28 && (byte & 0x7fu) > 0x0fu) return false;
+        value |= (uint32_t)(byte & 0x7fu) << shift;
+        if ((byte & 0x80u) == 0) {
+            *out = value;
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool wasm_loader__skip_bytes(const uint8_t **cursor, const uint8_t *end, size_t count) {
+    if (count > (size_t)(end - *cursor)) return false;
+    *cursor += count;
+    return true;
+}
+
+static bool wasm_loader__skip_name(const uint8_t **cursor, const uint8_t *end) {
+    uint32_t length;
+    return wasm_loader__read_u32_leb(cursor, end, &length) &&
+           wasm_loader__skip_bytes(cursor, end, length);
+}
+
+static wasm_memory_preflight_result_t wasm_loader__read_memory_limits(
+    const uint8_t **cursor, const uint8_t *end, unsigned *memory_count
+) {
+    uint32_t flags;
+    uint32_t initial;
+    if (!wasm_loader__read_u32_leb(cursor, end, &flags) ||
+        (flags & ~0x07u) != 0 || (flags & 0x06u) != 0 ||
+        !wasm_loader__read_u32_leb(cursor, end, &initial)) {
+        return WASM_MEMORY_PREFLIGHT_INVALID;
+    }
+    (*memory_count)++;
+    if (initial > WASM_LOADER_MAX_MEMORY_PAGES || *memory_count > 1) {
+        return WASM_MEMORY_PREFLIGHT_LIMIT;
+    }
+    if ((flags & 0x01u) != 0) {
+        uint32_t maximum;
+        if (!wasm_loader__read_u32_leb(cursor, end, &maximum)) return WASM_MEMORY_PREFLIGHT_INVALID;
+        if (maximum > WASM_LOADER_MAX_MEMORY_PAGES || maximum < initial) {
+            return WASM_MEMORY_PREFLIGHT_LIMIT;
+        }
+    }
+    return WASM_MEMORY_PREFLIGHT_OK;
+}
+
+static wasm_memory_preflight_result_t wasm_loader__preflight_memory(const uint8_t *bytes, size_t size) {
+    if (bytes == NULL || size < 8 || memcmp(bytes, "\0asm\1\0\0\0", 8) != 0) {
+        return WASM_MEMORY_PREFLIGHT_INVALID;
+    }
+    const uint8_t *cursor = bytes + 8;
+    const uint8_t *end = bytes + size;
+    unsigned memory_count = 0;
+    while (cursor < end) {
+        uint8_t section_id = *cursor++;
+        uint32_t section_size;
+        if (!wasm_loader__read_u32_leb(&cursor, end, &section_size) ||
+            section_size > (size_t)(end - cursor)) return WASM_MEMORY_PREFLIGHT_INVALID;
+        const uint8_t *section_end = cursor + section_size;
+        bool valid = true;
+        wasm_memory_preflight_result_t memory_result = WASM_MEMORY_PREFLIGHT_OK;
+        if (section_id == 2) {
+            uint32_t import_count;
+            valid = wasm_loader__read_u32_leb(&cursor, section_end, &import_count);
+            for (uint32_t i = 0; valid && i < import_count; ++i) {
+                uint8_t kind;
+                valid = wasm_loader__skip_name(&cursor, section_end) &&
+                        wasm_loader__skip_name(&cursor, section_end) &&
+                        wasm_loader__skip_bytes(&cursor, section_end, 1);
+                if (!valid) break;
+                kind = cursor[-1];
+                if (kind == WASM_IMPORT_EXPORT_KIND_FUNC) {
+                    uint32_t type_index;
+                    valid = wasm_loader__read_u32_leb(&cursor, section_end, &type_index);
+                } else if (kind == WASM_IMPORT_EXPORT_KIND_TABLE) {
+                    uint32_t element_type, flags, initial;
+                    valid = wasm_loader__read_u32_leb(&cursor, section_end, &element_type) &&
+                            wasm_loader__read_u32_leb(&cursor, section_end, &flags) &&
+                            wasm_loader__read_u32_leb(&cursor, section_end, &initial);
+                    if (valid && (flags & 1u)) valid = wasm_loader__read_u32_leb(&cursor, section_end, &initial);
+                } else if (kind == WASM_IMPORT_EXPORT_KIND_MEMORY) {
+                    memory_result = wasm_loader__read_memory_limits(&cursor, section_end, &memory_count);
+                    valid = memory_result == WASM_MEMORY_PREFLIGHT_OK;
+                } else if (kind == WASM_IMPORT_EXPORT_KIND_GLOBAL) {
+                    valid = wasm_loader__skip_bytes(&cursor, section_end, 2);
+                } else {
+                    valid = false;
+                }
+            }
+        } else if (section_id == 5) {
+            uint32_t count;
+            valid = wasm_loader__read_u32_leb(&cursor, section_end, &count);
+            for (uint32_t i = 0; valid && i < count; ++i) {
+                memory_result = wasm_loader__read_memory_limits(&cursor, section_end, &memory_count);
+                valid = memory_result == WASM_MEMORY_PREFLIGHT_OK;
+            }
+        }
+        if (!valid) {
+            return memory_result == WASM_MEMORY_PREFLIGHT_LIMIT ?
+                       WASM_MEMORY_PREFLIGHT_LIMIT : WASM_MEMORY_PREFLIGHT_INVALID;
+        }
+        cursor = section_end;
+    }
+    return WASM_MEMORY_PREFLIGHT_OK;
+}
 
 static const char *wasm_loader__basename(const char *path) {
     const char *slash = strrchr(path, '/');
@@ -62,7 +180,7 @@ static bool wasm_loader__path_is_valid(const char *path) {
     size_t length = strlen(path);
     static const char extension[] = ".wasm";
     size_t extension_length = sizeof(extension) - 1;
-    return length > extension_length && strcmp(path + length - extension_length, extension) == 0;
+    return length > extension_length && strcasecmp(path + length - extension_length, extension) == 0;
 }
 
 static bool wasm_loader__normalize_path(const char *path, char *out, size_t out_size) {
@@ -122,17 +240,69 @@ static int wasm_loader__entry(void *context) {
 
     if (ctx->module == NULL || ctx->module_inst == NULL || process__current_signal() != 0) { return BRUCE_ERR_CANCELLED; }
 
-    char **execution_argv = calloc((size_t)ctx->argc + 1u, sizeof(char *));
-    if (execution_argv == NULL) return BRUCE_ERR_NO_MEMORY;
-    memcpy(execution_argv, ctx->argv, (size_t)ctx->argc * sizeof(char *));
-    char *original_argv0 = execution_argv[0];
-    bool executed = wasm_application_execute_main(ctx->module_inst, ctx->argc, execution_argv);
-    int exit_code = BRUCE_ERR_INVALID_STATE;
-    if (executed) {
-        /* WAMR stores a returned i32 in argv[0]; a void main leaves it alone. */
-        exit_code = execution_argv[0] == original_argv0 ? 0 : (int)(uintptr_t)execution_argv[0];
+    wasm_function_inst_t main_function = wasm_runtime_lookup_function(ctx->module_inst, "main");
+    if (main_function == NULL) return BRUCE_ERR_ABI_MISMATCH;
+    if (wasm_func_get_param_count(main_function, ctx->module_inst) != 2 ||
+        wasm_func_get_result_count(main_function, ctx->module_inst) != 1) {
+        return BRUCE_ERR_ABI_MISMATCH;
     }
-    free(execution_argv);
+    wasm_valkind_t param_types[2];
+    wasm_valkind_t result_type[1];
+    wasm_func_get_param_types(main_function, ctx->module_inst, param_types);
+    wasm_func_get_result_types(main_function, ctx->module_inst, result_type);
+    if (param_types[0] != WASM_I32 || param_types[1] != WASM_I32 || result_type[0] != WASM_I32) {
+        return BRUCE_ERR_ABI_MISMATCH;
+    }
+
+    uint32_t *guest_strings = calloc((size_t)ctx->argc, sizeof(*guest_strings));
+    if (guest_strings == NULL) return BRUCE_ERR_NO_MEMORY;
+    bool guest_args_ok = true;
+    for (int i = 0; i < ctx->argc; ++i) {
+        uint8_t *native = NULL;
+        guest_strings[i] = wasm_runtime_module_malloc(
+            ctx->module_inst, strlen(ctx->argv[i]) + 1u, (void **)&native
+        );
+        if (guest_strings[i] == 0 || native == NULL) {
+            guest_args_ok = false;
+            break;
+        }
+        memcpy(native, ctx->argv[i], strlen(ctx->argv[i]) + 1u);
+    }
+    uint32_t guest_argv = 0;
+    if (guest_args_ok) {
+        uint8_t *native = NULL;
+        guest_argv = wasm_runtime_module_malloc(
+            ctx->module_inst, (size_t)ctx->argc * sizeof(uint32_t), (void **)&native
+        );
+        if (guest_argv == 0 || native == NULL) guest_args_ok = false;
+        else memcpy(native, guest_strings, (size_t)ctx->argc * sizeof(uint32_t));
+    }
+    if (!guest_args_ok) {
+        for (int i = 0; i < ctx->argc; ++i) {
+            if (guest_strings[i] != 0) wasm_runtime_module_free(ctx->module_inst, guest_strings[i]);
+        }
+        free(guest_strings);
+        return BRUCE_ERR_NO_MEMORY;
+    }
+    wasm_exec_env_t exec_env = wasm_runtime_create_exec_env(ctx->module_inst, WASM_LOADER_EXEC_STACK_BYTES);
+    if (exec_env == NULL) {
+        for (int i = 0; i < ctx->argc; ++i) {
+            if (guest_strings[i] != 0) wasm_runtime_module_free(ctx->module_inst, guest_strings[i]);
+        }
+        free(guest_strings);
+        return BRUCE_ERR_NO_MEMORY;
+    }
+    wasm_val_t args[2] = {{.kind = WASM_I32, .of.i32 = ctx->argc},
+                          {.kind = WASM_I32, .of.i32 = (int32_t)guest_argv}};
+    wasm_val_t result = {.kind = WASM_I32};
+    bool executed = wasm_runtime_call_wasm_a(exec_env, main_function, 1, &result, 2, args);
+    int exit_code = executed ? result.of.i32 : BRUCE_ERR_INVALID_STATE;
+    wasm_runtime_destroy_exec_env(exec_env);
+    wasm_runtime_module_free(ctx->module_inst, guest_argv);
+    for (int i = 0; i < ctx->argc; ++i) {
+        if (guest_strings[i] != 0) wasm_runtime_module_free(ctx->module_inst, guest_strings[i]);
+    }
+    free(guest_strings);
 
     if (!executed &&
         process__current_signal() == 0) {
@@ -162,6 +332,18 @@ static int wasm_loader__process_entry(void *context) {
 
     if (ctx->module_bytes == NULL || ctx->module_size == 0) {
         return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+
+    wasm_memory_preflight_result_t memory_result =
+        wasm_loader__preflight_memory(ctx->module_bytes, ctx->module_size);
+    if (memory_result != WASM_MEMORY_PREFLIGHT_OK) {
+        stdio__printf(
+            "[wasm_loader] %s: %s\n", wasm_loader__basename(ctx->path),
+            memory_result == WASM_MEMORY_PREFLIGHT_LIMIT ?
+                "linear memory exceeds the four-page limit" : "invalid linear memory declaration"
+        );
+        return memory_result == WASM_MEMORY_PREFLIGHT_LIMIT ?
+                   BRUCE_ERR_RESOURCE_LIMIT : BRUCE_ERR_INVALID_ARGUMENT;
     }
 
     ctx->module = wasm_runtime_load(ctx->module_bytes, (uint32_t)ctx->module_size, error_buf, sizeof(error_buf));
@@ -318,6 +500,11 @@ int wasm_loader__run_path(
     }
 
     bool gui_requested = app_runner__environment_requests_gui(environment, environment_count);
+    if (inspection->manifest.stack_size > WASM_LOADER_MANIFEST_STACK_MAX) {
+        memory__free(inspection);
+        wasm_loader__free_process_ctx(ctx);
+        return BRUCE_ERR_RESOURCE_LIMIT;
+    }
     int process_id = app_runner__spawn_loader_process_owned_with_stop(
         permission_key,
         gui_requested,

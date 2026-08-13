@@ -227,16 +227,36 @@ bruce_result_t process__signal(bruce_process_id_t process_id, bruce_process_sign
     record->stop_requested = true;
     record->pending_signal = signal;
     record->state = BRUCE_PROCESS_STOPPING;
-    if (record->process_entry_stop != NULL) {
-        /* Stop hooks are non-blocking runtime interruption requests. Calling
-         * under the registry lock keeps their owned context alive. */
-        record->process_entry_stop(record->process_entry_context, signal);
+    void (*stop)(void *, bruce_process_signal_t) = record->process_entry_stop;
+    void *stop_context = record->process_entry_context;
+    if (stop != NULL) {
+        if (record->stop_callback_count++ == 0) {
+            xEventGroupClearBits(record->events, PROCESS__EVT_STOP_CALLBACK_IDLE);
+        }
     }
     process__wake_locked(record);
     xEventGroupSetBits(record->events, PROCESS__EVT_EVENT_WAKE);
     display__process_state_changed(record->id, record->state);
     process__foreground_recompute_locked();
     process__unlock();
+
+    /* Runtime stop hooks may enter WAMR and must never run under the registry
+     * lock. The callback pin keeps its owned context alive until it returns. */
+    if (stop != NULL) {
+        stop(stop_context, signal);
+        process__lock();
+        record = process__find_by_id_locked(process_id);
+        if (record != NULL && record->stop_callback_count > 0 &&
+            --record->stop_callback_count == 0) {
+            xEventGroupSetBits(record->events, PROCESS__EVT_STOP_CALLBACK_IDLE);
+            if (record->teardown_pending) {
+                bruce_process_status_t status = record->pending_status;
+                record->teardown_pending = false;
+                process__teardown_locked(record, &status);
+            }
+        }
+        process__unlock();
+    }
     return BRUCE_OK;
 }
 
@@ -340,10 +360,12 @@ bruce_result_t process__kill(bruce_process_id_t process_id) {
     display__process_state_changed(record->id, record->state);
     process__foreground_recompute_locked();
 
-    if (record->operation_count > 0) {
+    for (;;) {
+        if (record->operation_count == 0 && record->stop_callback_count == 0) { break; }
         process__unlock();
         (void)xEventGroupWaitBits(
-            record->events, PROCESS__EVT_OPERATION_IDLE, pdFALSE, pdTRUE, portMAX_DELAY
+            record->events, PROCESS__EVT_OPERATION_IDLE | PROCESS__EVT_STOP_CALLBACK_IDLE,
+            pdFALSE, pdTRUE, portMAX_DELAY
         );
         process__lock();
         record = process__find_by_id_locked(process_id);

@@ -52,6 +52,10 @@ typedef struct process__record {
     void (*process_entry_stop)(void *context, bruce_process_signal_t signal);
     volatile bool stop_requested;
     bruce_process_signal_t pending_signal;
+    /* Pins the owned context while a stop hook runs outside the registry lock. */
+    size_t stop_callback_count;
+    bool teardown_pending;
+    bruce_process_status_t pending_status;
     volatile bool pause_requested;
     size_t waiter_count;
     size_t status_waiter_count;
@@ -98,6 +102,7 @@ extern bruce_process_id_t s_effective_foreground;
 #define PROCESS__EVT_EVENT_WAKE (1u << 2)
 #define PROCESS__EVT_WAITER_WAKE (1u << 3)
 #define PROCESS__EVT_OPERATION_IDLE (1u << 4)
+#define PROCESS__EVT_STOP_CALLBACK_IDLE (1u << 5)
 #define PROCESS__TLS_SLOT 1
 
 void process__ensure_init(void);

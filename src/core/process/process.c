@@ -321,6 +321,11 @@ static bool process__dup_argv(int argc, char *const *src_argv, char ***out_argv)
 /* Runs cleanup before atomically publishing completion and making the process
  * absent. Its dynamically allocated record remains available to waiters. */
 void process__teardown_locked(process__record_t *record, const bruce_process_status_t *status) {
+    if (record->stop_callback_count != 0) {
+        record->teardown_pending = true;
+        record->pending_status = *status;
+        return;
+    }
     process__detach_wait_locked(record);
     while (record->resources != NULL) {
         process__resource_t *resource = record->resources;
@@ -398,6 +403,11 @@ static void process__trampoline(void *arg) {
     stdio__process_detach(stdio_input, stdio_output, stdio_error);
 
     process__lock();
+    if (!record->in_use) {
+        process__unlock();
+        vTaskDelete(NULL);
+        return;
+    }
     bruce_process_status_t status = {
         .reason = record->stop_requested ? BRUCE_PROCESS_TERMINATED : BRUCE_PROCESS_EXITED,
         .exit_code = record->stop_requested ? 0 : exit_code,
@@ -437,6 +447,7 @@ process_registry__create(const process_create_params_t *params, bruce_process_id
         process__free_argv(params->argc, argv_copy);
         return BRUCE_ERR_NO_MEMORY;
     }
+    xEventGroupSetBits(record->events, PROCESS__EVT_OPERATION_IDLE | PROCESS__EVT_STOP_CALLBACK_IDLE);
     record->previous = s_process_tail;
     if (s_process_tail != NULL) s_process_tail->next = record;
     else s_processes = record;
