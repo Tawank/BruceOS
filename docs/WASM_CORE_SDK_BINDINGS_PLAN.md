@@ -55,7 +55,7 @@ pointers.
 
 ## Existing Code To Preserve
 
-- `src/modules/loaders/wasm/wasm_bruce_sdk.c` registers imports in the existing
+- `src/modules/loaders/wasm/wasm_bruce_host_adapter.c` registers imports in the existing
   `bruce_sdk` module. Keep that module name and extend its symbol table.
 - `src/modules/loaders/wasm/wasm_loader_app.c` owns WAMR initialization,
   instance limits, process startup, argument copying, and teardown.
@@ -78,16 +78,16 @@ Keep host and guest sides visibly separate even though both are WASM-specific:
 ```text
 src/modules/loaders/wasm/
   wasm_loader_app.c              existing WAMR/process loader
-  wasm_bruce_sdk.c               host import wrappers and registration
-  wasm_bruce_sdk.h               host registration declaration
+  wasm_bruce_host_adapter.c      host import wrappers and registration
+  wasm_bruce_host_adapter.h      host registration declaration
   wasm_bruce_abi.h               private wasm32 layouts and limits
-  wasm_bruce_guest.c             compiled into WASM apps, never firmware
+  wasm_bruce_guest_adapter.c     compiled into WASM apps, never firmware
 ```
 
-`wasm_bruce_guest.c` is not added to `src/CMakeLists.txt` firmware sources. The
+`wasm_bruce_guest_adapter.c` is not added to `src/CMakeLists.txt` firmware sources. The
 two Python WASM build paths compile it into each WASM application.
 
-If `wasm_bruce_guest.c` becomes unwieldy, split it under
+If `wasm_bruce_guest_adapter.c` becomes unwieldy, split it under
 `src/modules/loaders/wasm/guest/`. Do not split it before that is useful.
 
 ## Guest Adapter
@@ -179,7 +179,7 @@ Required changes:
 
 1. Accept a configured WASM compiler/sysroot rather than assuming the host
    Clang resource headers are a usable libc.
-2. Compile `wasm_bruce_guest.c` for every WASM app.
+2. Compile `wasm_bruce_guest_adapter.c` for every WASM app.
 3. Compile `components/args/args.c` for modules/apps that use the parser. It is
    acceptable initially to include it in every WASM artifact if dead-code
    elimination removes it when unused.
@@ -206,7 +206,7 @@ this firmware.
 
 ## Host Binding Helpers
 
-Extend `wasm_bruce_sdk.c` with a small set of private helpers. Keep pointer
+Extend `wasm_bruce_host_adapter.c` with a small set of private helpers. Keep pointer
 signatures as WAMR `i32` values and explicitly validate every range before
 calling `wasm_runtime_addr_app_to_native()`.
 
@@ -422,7 +422,7 @@ existing loader path.
 ## Registration
 
 Add each host wrapper to the existing `s_native_symbols` array in
-`wasm_bruce_sdk.c`. Keep the existing comment and policy that pointer
+`wasm_bruce_host_adapter.c`. Keep the existing comment and policy that pointer
 parameters use `i32` WAMR signatures and are manually validated.
 
 Do not register:
@@ -574,12 +574,12 @@ Update `src/modules/loaders/wasm/README.md` when the implementation lands:
 Update the WASM portion of `ARCHITECTURE.md` to state that the loader binding is
 the pointer-validation boundary. Do not duplicate all individual imports in
 the architecture contract; the definitive list remains
-`wasm_bruce_sdk.c` as documented today.
+`wasm_bruce_host_adapter.c` as documented today.
 
 ## Implementation Order
 
 1. Add private wasm32 layout constants and reusable host validation helpers.
-2. Add `wasm_bruce_guest.c` for all existing imports and wire it into both WASM
+2. Add `wasm_bruce_guest_adapter.c` for all existing imports and wire it into both WASM
    build scripts.
 3. Add/configure freestanding wasm32 libc and reject all non-Bruce imports.
 4. Implement guest allocator and formatted stdio.

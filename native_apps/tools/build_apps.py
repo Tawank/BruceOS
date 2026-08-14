@@ -11,6 +11,9 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 APPS_DIR = SCRIPT_DIR.parent / "examples"
+WASM_GUEST_SOURCE = (
+    SCRIPT_DIR.parent.parent / "src" / "modules" / "loaders" / "wasm" / "wasm_bruce_guest_adapter.c"
+)
 
 
 def available_apps():
@@ -98,6 +101,12 @@ def build_wasm(app, compiler):
         raise RuntimeError(
             f"{app} has no C/C++ sources under {source_dir}"
         )
+    cxx_sources = [path for path in sources if path.suffix != ".c"]
+    if cxx_sources:
+        raise RuntimeError(
+            "C++ WASM inputs are not supported yet: "
+            + ", ".join(str(path.relative_to(app_dir)) for path in cxx_sources)
+        )
     output = APPS_DIR / f"{app}.wasm"
     run([
         compiler, "--target=wasm32", "-O2", "-nostdlib", "-ffreestanding",
@@ -106,7 +115,7 @@ def build_wasm(app, compiler):
         "-Wl,--export-memory", "-Wl,--initial-memory=65536",
         "-Wl,--max-memory=262144", "-I", SCRIPT_DIR.parent / "include",
         "-I", SCRIPT_DIR.parent.parent / "src",
-        "-o", output, *sources,
+        "-o", output, *sources, WASM_GUEST_SOURCE,
     ], app_dir)
     add_wasm_manifest(output, manifest)
     print(f"Built {output}")

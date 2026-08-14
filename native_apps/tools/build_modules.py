@@ -16,6 +16,7 @@ REPO_ROOT = SCRIPT_DIR.parent.parent
 MODULES_DIR = REPO_ROOT / "src" / "modules"
 OUTPUT_DIR = SCRIPT_DIR.parent / "build_modules"
 SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".cxx"}
+WASM_GUEST_SOURCE = MODULES_DIR / "loaders" / "wasm" / "wasm_bruce_guest_adapter.c"
 
 
 @dataclass(frozen=True)
@@ -212,6 +213,12 @@ def add_wasm_manifest(wasm_path, manifest_path):
 
 
 def build_wasm(module, compiler):
+    cxx_sources = [source for source in module.sources if source.suffix.lower() != ".c"]
+    if cxx_sources:
+        raise RuntimeError(
+            "C++ WASM inputs are not supported yet: "
+            + ", ".join(str(source.relative_to(REPO_ROOT)) for source in cxx_sources)
+        )
     output = OUTPUT_DIR / f"{module.name}.wasm"
     include_dirs = (REPO_ROOT / "native_apps" / "include", REPO_ROOT / "src", *module.include_dirs)
     command = [
@@ -222,7 +229,7 @@ def build_wasm(module, compiler):
         "-Wl,--no-entry", "-Wl,--allow-undefined", "-Wl,--export=main",
         "-Wl,--export-memory", "-Wl,--initial-memory=65536", "-Wl,--max-memory=262144",
         *[part for path in include_dirs for part in ("-I", path)],
-        "-o", output, *module.sources,
+        "-o", output, *module.sources, WASM_GUEST_SOURCE,
     ]
     run(command, module.directory)
     add_wasm_manifest(output, module.manifest_path)

@@ -102,7 +102,7 @@ idf_component_register(SRCS
                      "modules/loaders/elf/elf_loader_sdk_symbols.c"
                      "modules/loaders/image/image_loader_app.c"
                      "modules/loaders/wasm/wasm_loader_app.c"
-                     "modules/loaders/wasm/wasm_bruce_sdk.c"
+                     "modules/loaders/wasm/wasm_bruce_host_adapter.c"
                       "modules/loaders/js/audio_js.c"
                      "modules/loaders/js/dialog_js.c"
                     "modules/loaders/js/display_js.c"
@@ -479,7 +479,7 @@ add_dependencies(bruce_sdk_builtin_js_loader_check mquickjs_generate_stdlib)
 
 add_library(bruce_sdk_builtin_wasm_loader_check OBJECT
              "modules/loaders/wasm/wasm_loader_app.c"
-             "modules/loaders/wasm/wasm_bruce_sdk.c")
+             "modules/loaders/wasm/wasm_bruce_host_adapter.c")
 target_include_directories(bruce_sdk_builtin_wasm_loader_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/loaders/wasm"

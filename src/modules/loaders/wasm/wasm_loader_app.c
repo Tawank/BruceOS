@@ -1,5 +1,5 @@
 #include "wasm_loader_app.h"
-#include "wasm_bruce_sdk.h"
+#include "wasm_bruce_host_adapter.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -209,7 +209,7 @@ static bool wasm_loader__init_runtime(void) {
         printf("[wasm_loader] failed to initialize runtime\n");
         return false;
     }
-    if (!wasm_bruce_sdk__register()) {
+    if (!wasm_bruce_host_adapter__register()) {
         printf("[wasm_loader] failed to register Bruce SDK imports\n");
         wasm_runtime_destroy();
         return false;
@@ -381,6 +381,11 @@ int wasm_loader__run_path(
     }
 
     if (!wasm_loader__init_runtime()) { return BRUCE_ERR_INVALID_STATE; }
+
+    bool exists = false;
+    bruce_result_t exists_result = storage__exists(normalized_path, &exists);
+    if (exists_result != BRUCE_OK) { return exists_result; }
+    if (!exists) { return BRUCE_ERR_NOT_FOUND; }
 
     bruce_app_inspection_t *inspection = manifest__inspect_wasm(normalized_path);
     if (inspection == NULL) { return BRUCE_ERR_MANIFEST_INVALID; }

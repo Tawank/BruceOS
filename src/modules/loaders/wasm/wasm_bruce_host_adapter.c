@@ -1,4 +1,4 @@
-#include "wasm_bruce_sdk.h"
+#include "wasm_bruce_host_adapter.h"
 #include "wasm_bruce_abi.h"
 
 #include <limits.h>
@@ -19,13 +19,14 @@ _Static_assert(WASM_BRUCE_MEMORY_STATS_SIZE == 11 * sizeof(uint32_t), "wasm32 me
 
 static bool s_registered;
 
-static wasm_module_inst_t wasm_bruce_sdk__instance(wasm_exec_env_t exec_env) {
+static wasm_module_inst_t wasm_bruce_host_adapter__instance(wasm_exec_env_t exec_env) {
     if (exec_env == NULL) return NULL;
     return wasm_runtime_get_module_inst(exec_env);
 }
 
-static void *wasm_bruce_sdk__required_span(wasm_exec_env_t exec_env, uint32_t offset, uint32_t size) {
-    wasm_module_inst_t instance = wasm_bruce_sdk__instance(exec_env);
+static void *
+wasm_bruce_host_adapter__required_span(wasm_exec_env_t exec_env, uint32_t offset, uint32_t size) {
+    wasm_module_inst_t instance = wasm_bruce_host_adapter__instance(exec_env);
     if (instance == NULL || !wasm_bruce_abi__required_span(offset, size)) return NULL;
     if (!wasm_runtime_validate_app_addr(instance, offset, size)) {
         wasm_runtime_clear_exception(instance);
@@ -34,8 +35,8 @@ static void *wasm_bruce_sdk__required_span(wasm_exec_env_t exec_env, uint32_t of
     return wasm_runtime_addr_app_to_native(instance, offset);
 }
 
-static uint32_t *wasm_bruce_sdk__app_u32(wasm_exec_env_t exec_env, uint32_t offset) {
-    return wasm_bruce_sdk__required_span(exec_env, offset, sizeof(uint32_t));
+static uint32_t *wasm_bruce_host_adapter__app_u32(wasm_exec_env_t exec_env, uint32_t offset) {
+    return wasm_bruce_host_adapter__required_span(exec_env, offset, sizeof(uint32_t));
 }
 
 static uint64_t wasm_runtime__now(wasm_exec_env_t exec_env) {
@@ -110,8 +111,8 @@ static int32_t wasm_stdio__read(
     uint32_t out_size_offset
 ) {
     if (capacity == 0) return BRUCE_ERR_INVALID_ARGUMENT;
-    void *buffer = wasm_bruce_sdk__required_span(exec_env, buffer_offset, capacity);
-    uint32_t *out_size = wasm_bruce_sdk__app_u32(exec_env, out_size_offset);
+    void *buffer = wasm_bruce_host_adapter__required_span(exec_env, buffer_offset, capacity);
+    uint32_t *out_size = wasm_bruce_host_adapter__app_u32(exec_env, out_size_offset);
     if (buffer == NULL || out_size == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
 
     size_t size = 0;
@@ -125,19 +126,19 @@ static int32_t wasm_stdio__read_line(
     wasm_exec_env_t exec_env, uint32_t buffer_offset, uint32_t buffer_size, int32_t mask_input
 ) {
     if (buffer_size == 0) return BRUCE_ERR_INVALID_ARGUMENT;
-    char *buffer = wasm_bruce_sdk__required_span(exec_env, buffer_offset, buffer_size);
+    char *buffer = wasm_bruce_host_adapter__required_span(exec_env, buffer_offset, buffer_size);
     if (buffer == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     return stdio__read_line(buffer, buffer_size, mask_input != 0);
 }
 
 static int32_t wasm_stdio__write(wasm_exec_env_t exec_env, uint32_t data_offset, uint32_t size) {
     if (size == 0) return stdio__write(NULL, 0);
-    const void *data = wasm_bruce_sdk__required_span(exec_env, data_offset, size);
+    const void *data = wasm_bruce_host_adapter__required_span(exec_env, data_offset, size);
     return data != NULL ? stdio__write(data, size) : BRUCE_ERR_INVALID_ARGUMENT;
 }
 
 static int32_t wasm_stdio__session_create(wasm_exec_env_t exec_env, uint32_t out_session_offset) {
-    uint32_t *out_session = wasm_bruce_sdk__app_u32(exec_env, out_session_offset);
+    uint32_t *out_session = wasm_bruce_host_adapter__app_u32(exec_env, out_session_offset);
     if (out_session == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     bruce_stdio_session_t session = BRUCE_STDIO_SESSION_INVALID;
     bruce_result_t result = stdio__session_create(&session);
@@ -159,7 +160,7 @@ static int32_t wasm_stdio__session_write_input(
     wasm_exec_env_t exec_env, uint32_t session, uint32_t data_offset, uint32_t size
 ) {
     if (size == 0) return BRUCE_ERR_INVALID_ARGUMENT;
-    const void *data = wasm_bruce_sdk__required_span(exec_env, data_offset, size);
+    const void *data = wasm_bruce_host_adapter__required_span(exec_env, data_offset, size);
     if (data == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     return stdio__session_write_input((bruce_stdio_session_t)session, data, size);
 }
@@ -169,8 +170,8 @@ static int32_t wasm_stdio__session_read_output(
     uint32_t out_size_offset
 ) {
     if (capacity == 0) return BRUCE_ERR_INVALID_ARGUMENT;
-    void *buffer = wasm_bruce_sdk__required_span(exec_env, buffer_offset, capacity);
-    uint32_t *out_size = wasm_bruce_sdk__app_u32(exec_env, out_size_offset);
+    void *buffer = wasm_bruce_host_adapter__required_span(exec_env, buffer_offset, capacity);
+    uint32_t *out_size = wasm_bruce_host_adapter__app_u32(exec_env, out_size_offset);
     if (buffer == NULL || out_size == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
 
     size_t size = 0;
@@ -182,7 +183,8 @@ static int32_t wasm_stdio__session_read_output(
 }
 
 static int32_t wasm_memory__get_stats(wasm_exec_env_t exec_env, uint32_t stats_offset) {
-    uint8_t *output = wasm_bruce_sdk__required_span(exec_env, stats_offset, WASM_BRUCE_MEMORY_STATS_SIZE);
+    uint8_t *output =
+        wasm_bruce_host_adapter__required_span(exec_env, stats_offset, WASM_BRUCE_MEMORY_STATS_SIZE);
     if (output == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
 
     bruce_memory_stats_t stats;
@@ -245,7 +247,7 @@ static NativeSymbol s_native_symbols[] = {
     BRUCE_WASM_NATIVE("memory__get_stats", wasm_memory__get_stats, "(i)i"),
 };
 
-bool wasm_bruce_sdk__register(void) {
+bool wasm_bruce_host_adapter__register(void) {
     if (s_registered) return true;
     if (!wasm_runtime_register_natives(
             "bruce_sdk", s_native_symbols, (uint32_t)(sizeof(s_native_symbols) / sizeof(s_native_symbols[0]))

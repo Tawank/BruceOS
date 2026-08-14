@@ -55,7 +55,7 @@ Pointer parameters are wasm32 offsets. Wrappers validate every complete buffer
 before calling Core. Native variadic functions, host-pointer allocation APIs,
 permission mutation, and APIs that retain caller pointers are not exported.
 
-The exact WAMR signatures are maintained in `wasm_bruce_sdk.c`. A WASM SDK
+The exact WAMR signatures are maintained in `wasm_bruce_host_adapter.c`. A WASM SDK
 header/toolchain should declare matching imports using Clang's `import_module`
 and `import_name` attributes and format text inside linear memory before calling
 `stdio__write`.
