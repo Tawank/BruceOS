@@ -728,10 +728,8 @@ bruce_result_t display__init(void) {
         return BRUCE_ERR_NO_MEMORY;
     }
     for (int i = 0; i < DISPLAY__MAX_CONTEXTS; ++i) {
-        if (s_contexts[i].lock == NULL) s_contexts[i].lock = xSemaphoreCreateMutex();
         if (s_contexts[i].in_use) display__set_visibility_locked(&s_contexts[i]);
     }
-    display_overlay__init();
     if (s_framebuffer != NULL) memset(s_framebuffer, 0, DISPLAY__FB_SIZE);
     int configured_brightness = config__get_display_brightness();
     s_brightness = (uint8_t)((configured_brightness * 255) / 100);

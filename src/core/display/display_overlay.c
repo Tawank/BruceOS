@@ -44,12 +44,6 @@ static display__overlay_t *display_overlay__find_locked(bruce_display_overlay_id
     return NULL;
 }
 
-void display_overlay__init(void) {
-    for (int i = 0; i < DISPLAY__MAX_OVERLAYS; ++i) {
-        if (s_overlays[i].surface.lock == NULL) s_overlays[i].surface.lock = xSemaphoreCreateMutex();
-    }
-}
-
 void display_overlay__deinit(void) {
     /* Overlays are owned by processes, not by the display subsystem's
      * init/deinit cycle -- process exit is what frees one, via the
@@ -160,6 +154,13 @@ display__overlay_create(int16_t x, int16_t y, int16_t w, int16_t h, bruce_displa
         return BRUCE_ERR_RESOURCE_LIMIT;
     }
     display__overlay_t *overlay = &s_overlays[slot];
+    if (overlay->surface.lock == NULL) {
+        overlay->surface.lock = xSemaphoreCreateMutex();
+        if (overlay->surface.lock == NULL) {
+            display_internal__unlock_registry();
+            return BRUCE_ERR_NO_MEMORY;
+        }
+    }
     overlay->in_use = true; /* reserve the slot before releasing the lock */
     overlay->owner = caller;
     if (++s_next_overlay_id == BRUCE_DISPLAY_OVERLAY_ID_INVALID) ++s_next_overlay_id;

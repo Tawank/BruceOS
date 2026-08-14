@@ -127,7 +127,6 @@ void app_runner__register_defaults(void) {
     (void)app_runner__register_loader(".conf", 40, text__run_path);
 
     elf_loader__init();
-    wasm_loader__init();
 }
 
 bool init_storage(void) {

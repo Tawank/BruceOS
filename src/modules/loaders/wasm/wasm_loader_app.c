@@ -9,6 +9,8 @@
 
 #include "args.h"
 #include "esp_heap_caps.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "wasm_export.h"
 
 #include "core_sdk/app_runner.h"
@@ -29,6 +31,9 @@
 
 static size_t s_call_count;
 static bool s_runtime_initialized;
+static StaticSemaphore_t s_runtime_mutex_storage;
+static SemaphoreHandle_t s_runtime_mutex;
+static portMUX_TYPE s_runtime_mutex_init = portMUX_INITIALIZER_UNLOCKED;
 
 size_t wasm_loader__debug_call_count(void) { return s_call_count; }
 
@@ -244,7 +249,19 @@ static bool wasm_loader__normalize_path(const char *path, char *out, size_t out_
 }
 
 static bool wasm_loader__init_runtime(void) {
-    if (s_runtime_initialized) { return true; }
+    if (s_runtime_initialized) return true;
+    if (s_runtime_mutex == NULL) {
+        portENTER_CRITICAL(&s_runtime_mutex_init);
+        if (s_runtime_mutex == NULL) {
+            s_runtime_mutex = xSemaphoreCreateMutexStatic(&s_runtime_mutex_storage);
+        }
+        portEXIT_CRITICAL(&s_runtime_mutex_init);
+    }
+    xSemaphoreTake(s_runtime_mutex, portMAX_DELAY);
+    if (s_runtime_initialized) {
+        xSemaphoreGive(s_runtime_mutex);
+        return true;
+    }
 
     RuntimeInitArgs init_args;
     memset(&init_args, 0, sizeof(init_args));
@@ -254,14 +271,17 @@ static bool wasm_loader__init_runtime(void) {
     init_args.mem_alloc_option.allocator.free_func = wasm_loader__runtime_free;
     if (!wasm_runtime_full_init(&init_args)) {
         printf("[wasm_loader] failed to initialize runtime\n");
+        xSemaphoreGive(s_runtime_mutex);
         return false;
     }
     if (!wasm_bruce_host_adapter__register()) {
         printf("[wasm_loader] failed to register Bruce SDK imports\n");
         wasm_runtime_destroy();
+        xSemaphoreGive(s_runtime_mutex);
         return false;
     }
     s_runtime_initialized = true;
+    xSemaphoreGive(s_runtime_mutex);
     return true;
 }
 

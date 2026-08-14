@@ -118,7 +118,6 @@ bool display_internal__on_transfer_done_from_isr(void);
 /* buffers and DMA sequencing.                                               */
 /* -------------------------------------------------------------------------- */
 
-void display_overlay__init(void);
 void display_overlay__deinit(void);
 
 /* -------------------------------------------------------------------------- */

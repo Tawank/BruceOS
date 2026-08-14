@@ -13,6 +13,7 @@
 
 #if CONFIG_BRUCE_AUDIO_BACKEND_I2S
 #include "driver/i2s_std.h"
+#include "esp_heap_caps.h"
 #define AUDIO__I2S_SAMPLE_RATE 48000u
 #define AUDIO__I2S_BUFFER_FRAMES 256u
 #define AUDIO__I2S_BCLK_GPIO ((gpio_num_t)CONFIG_BRUCE_AUDIO_I2S_BCLK_GPIO)
@@ -74,7 +75,7 @@ static bool s_i2s_tx_ready;
 /* A single producer app writes the FIFO while the I2S ISR consumes it. The
  * cursors are monotonically increasing, so each side owns one cursor and no
  * lock or scheduler handoff is needed on the real-time path. */
-static int16_t s_stream_ring[AUDIO__STREAM_RING_FRAMES * 2u];
+static int16_t *s_stream_ring;
 static atomic_uint_fast32_t s_stream_write_cursor;
 static atomic_uint_fast32_t s_stream_read_cursor;
 
@@ -232,6 +233,8 @@ static void audio__stream_teardown_locked(void) {
     atomic_store(&s_stream_read_cursor, 0);
     atomic_store(&s_stream_write_cursor, 0);
     if (s_i2s_tx_ready) { (void)audio__i2s_flush_silence_locked(); }
+    heap_caps_free(s_stream_ring);
+    s_stream_ring = NULL;
     s_stream_owner = BRUCE_PROCESS_ID_INVALID;
     s_stream_resource = BRUCE_RESOURCE_ID_INVALID;
     s_stream_channels = 0;
@@ -393,7 +396,18 @@ bruce_result_t audio__stream_open(uint8_t channels) {
         result = BRUCE_ERR_BUSY;
     } else {
 #if CONFIG_BRUCE_AUDIO_BACKEND_I2S && !CONFIG_BRUCE_QEMU_TEST_MODE
-        result = audio__i2s_ensure_channel_locked();
+        s_stream_ring = heap_caps_malloc(
+            AUDIO__STREAM_RING_FRAMES * 2u * sizeof(*s_stream_ring), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT
+        );
+        if (s_stream_ring == NULL) {
+            result = BRUCE_ERR_NO_MEMORY;
+        } else {
+            result = audio__i2s_ensure_channel_locked();
+            if (result != BRUCE_OK) {
+                heap_caps_free(s_stream_ring);
+                s_stream_ring = NULL;
+            }
+        }
 #endif
         if (result == BRUCE_OK) {
 #if CONFIG_BRUCE_AUDIO_BACKEND_I2S && !CONFIG_BRUCE_QEMU_TEST_MODE
