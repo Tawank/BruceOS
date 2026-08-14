@@ -1,7 +1,7 @@
-# Bruce ELF SDK
+# Bruce External App SDK
 
 This directory provides the public SDK surface and build tooling for Bruce
-ELF applications.
+external applications.
 
 ## Layout
 
@@ -13,23 +13,24 @@ ELF applications.
 - `elf_apps/examples/game/` — template for a simple ELF app (`game.elf`).
 - `elf_apps/examples/nes/` — Nofrendo NES emulator port using Bruce display, input, and storage APIs.
 - `components/nofrendo/` — reusable ESP-IDF component containing the emulator core.
-- `tools/build_elf_apps.py` — builds the templates and injects the
-  `.bruce.manifest` section from each app's `manifest.json`.
+- `tools/build_apps.py` — builds ELF or WASM apps from the same
+  `examples/<app>/main/` sources and the same `manifest.json`.
 
 ## Building
 
 Set `IDF_PATH` and run:
 
 ```bash
-python3 elf_apps/tools/build_elf_apps.py --target esp32s3
+python3 elf_apps/tools/build_apps.py --target elf --idf-target esp32s3
 ```
 
 By default the script builds every example. Use `--app` to build a subset; the
 option may be repeated:
 
 ```bash
-python3 elf_apps/tools/build_elf_apps.py --target esp32s3 --app game
-python3 elf_apps/tools/build_elf_apps.py --target esp32s3 --app game --app nes
+python3 elf_apps/tools/build_apps.py --target elf --idf-target esp32s3 --app game
+python3 elf_apps/tools/build_apps.py --target elf --idf-target esp32s3 --app game --app nes
+python3 elf_apps/tools/build_apps.py --target wasm --app game
 ```
 
 Final ELF files are written to:
@@ -37,6 +38,15 @@ Final ELF files are written to:
 - `elf_apps/examples/elf_loader.elf`
 - `elf_apps/examples/game.elf`
 - `elf_apps/examples/nes.elf`
+
+WASM output is written beside the native output, for example
+`elf_apps/examples/game.wasm`.
+
+The WASM target uses exactly the same sources and manifest as the ELF target.
+The manifest's optional `entryPoint` (default `app_main`) is exported as WASM
+`main`; no target-specific source directory is used. APIs used by an app must
+therefore have equivalent ELF and WASM SDK implementations. The current
+ESP-IDF/Nofrendo NES integration does not yet satisfy that requirement.
 
 Nofrendo can be launched with a ROM path or without one to open the file picker:
 
@@ -73,7 +83,7 @@ elf ./game.elf
 
 ## Writing your own ELF app
 
-1. Create a new ESP-IDF project.
+1. Create an app project with `main/` sources and a `manifest.json`.
 2. Add `espressif/elf_loader` as a dependency.
 3. Disable memory protection and the default symbol tables in
    `sdkconfig.defaults`:
@@ -98,9 +108,10 @@ elf ./game.elf
                           INCLUDE_DIRS "path/to/sdk/include"
                                        "path/to/src")
    ```
-6. Include `bruce_sdk.h` and export `int app_main(int argc, char **argv)`.
+6. Include `bruce_sdk.h` and export the manifest's `entryPoint` function,
+   normally `int app_main(int argc, char **argv)`.
 7. Provide a `manifest.json` in the project root (see the templates) and use
-   `elf_apps/tools/build_elf_apps.py` as a reference for injecting the
+   `elf_apps/tools/build_apps.py` as a reference for injecting the
    `.bruce.manifest` section after linking.
 
 Alternatively, you can skip the external `manifest.json` and use the

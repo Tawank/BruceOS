@@ -106,7 +106,7 @@ registration contract and no format gets special Core access.
   ELF app itself act as a loader (e.g. `elf ./elf_loader.elf ./game.elf`),
   with the loaded app calling `app_runner__run_path()` to load another ELF.
 - Provide SDK ELF build tooling (`elf_apps/include/bruce_sdk.h`,
-  `elf_apps/tools/build_elf_apps.py`) and template apps in `elf_apps/examples/`.
+  `elf_apps/tools/build_apps.py`) and template apps in `elf_apps/examples/`.
 - Add the built-in JavaScript loader module (`src/modules/loaders/js/`):
   registers `.js` at priority 20, parses an optional leading manifest with
   zero-permission defaults, and uses `memory__malloc()` for the mQuickJS

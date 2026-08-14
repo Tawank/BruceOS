@@ -458,7 +458,7 @@ Build ELF examples:
 
 ```bash
 source ~/esp/idf/export.sh
-python3 elf_apps/tools/build_elf_apps.py --target esp32s3
+python3 elf_apps/tools/build_apps.py --target esp32s3
 ```
 
 Firmware selftests must also be run on hardware after flashing.
