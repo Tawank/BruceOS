@@ -10,13 +10,18 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from wasm_imports import validate_bruce_module
+
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent.parent
 MODULES_DIR = REPO_ROOT / "src" / "modules"
 OUTPUT_DIR = SCRIPT_DIR.parent / "build_modules"
 SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".cxx"}
-WASM_GUEST_SOURCE = MODULES_DIR / "loaders" / "wasm" / "wasm_bruce_guest_adapter.c"
+WASM_GUEST_SOURCE = SCRIPT_DIR.parent / "wasm" / "wasm_bruce_guest_adapter.c"
+ARGS_SOURCE = REPO_ROOT / "components" / "args" / "args.c"
+WASM_GUEST_LIBC_SOURCE = WASM_GUEST_SOURCE.with_name("wasm_bruce_guest_libc.c")
+WASM_GUEST_INCLUDE = WASM_GUEST_SOURCE.parent / "include"
 
 
 @dataclass(frozen=True)
@@ -29,6 +34,10 @@ class Module:
     include_dirs: tuple[Path, ...]
     definitions: tuple[str, ...]
     compile_options: tuple[str, ...]
+    component_dirs: tuple[Path, ...]
+    component_dependencies: tuple[str, ...]
+    link_options: tuple[str, ...]
+    sdkconfig_defaults: tuple[str, ...]
     targets: tuple[str, ...]
 
 
@@ -93,6 +102,25 @@ def load_module(manifest_path):
     targets = read_string_list(build, "targets", manifest_path) or ("elf", "wasm")
     if any(target not in ("elf", "wasm") for target in targets):
         raise RuntimeError(f"build.targets may only contain elf and wasm in {manifest_path}")
+    component_dirs = tuple(
+        resolve_module_path(module_dir, value, manifest_path)
+        for value in read_string_list(build, "componentDirs", manifest_path)
+    )
+    for component_dir in component_dirs:
+        if not (component_dir / "CMakeLists.txt").is_file():
+            raise RuntimeError(f"ESP-IDF component directory not found: {component_dir}")
+    component_dependencies = read_string_list(build, "componentDependencies", manifest_path)
+    if any(
+        not all(character.isalnum() or character in "_-" for character in dependency)
+        for dependency in component_dependencies
+    ):
+        raise RuntimeError(f"Invalid build.componentDependencies in {manifest_path}")
+    sdkconfig_defaults = read_string_list(build, "sdkconfigDefaults", manifest_path)
+    if any(
+        not value.startswith("CONFIG_") or "=" not in value or "\n" in value or "\r" in value
+        for value in sdkconfig_defaults
+    ):
+        raise RuntimeError(f"Invalid build.sdkconfigDefaults in {manifest_path}")
     return Module(
         name=name,
         directory=module_dir,
@@ -102,6 +130,10 @@ def load_module(manifest_path):
         include_dirs=include_dirs,
         definitions=read_string_list(build, "compileDefinitions", manifest_path),
         compile_options=read_string_list(build, "compileOptions", manifest_path),
+        component_dirs=component_dirs,
+        component_dependencies=component_dependencies,
+        link_options=read_string_list(build, "linkOptions", manifest_path),
+        sdkconfig_defaults=sdkconfig_defaults,
         targets=targets,
     )
 
@@ -127,13 +159,17 @@ def cmake_quote(value):
 def write_elf_project(module, project_dir):
     main_dir = project_dir / "main"
     main_dir.mkdir(parents=True, exist_ok=True)
-    component_dir = REPO_ROOT / "components" / "elf_loader"
+    component_dirs = (REPO_ROOT / "components" / "elf_loader", *module.component_dirs)
     top_level = "\n".join([
         "cmake_minimum_required(VERSION 3.16)",
-        f"set(EXTRA_COMPONENT_DIRS {cmake_quote(component_dir)})",
+        "set(EXTRA_COMPONENT_DIRS " + " ".join(cmake_quote(path) for path in component_dirs) + ")",
         "include($ENV{IDF_PATH}/tools/cmake/project.cmake)",
         f"project({module.name})",
         "include(elf_loader)",
+        "set(ELF_COMPONENTS "
+        + " ".join(cmake_quote(dependency) for dependency in module.component_dependencies)
+        + ")",
+        "set(ELF_LIBS " + " ".join(cmake_quote(value) for value in module.link_options) + ")",
         f"project_elf({module.name})",
         "",
     ])
@@ -142,6 +178,7 @@ def write_elf_project(module, project_dir):
         "idf_component_register(",
         "    SRCS " + " ".join(cmake_quote(source) for source in module.sources),
         "    INCLUDE_DIRS " + " ".join(cmake_quote(path) for path in include_dirs),
+        "    REQUIRES " + " ".join(cmake_quote(value) for value in module.component_dependencies),
         ")",
     ]
     definitions = (*module.definitions, f"{module.entry_point}=app_main")
@@ -159,7 +196,8 @@ def write_elf_project(module, project_dir):
     (project_dir / "sdkconfig.defaults").write_text(
         "CONFIG_ESP_SYSTEM_MEMPROT=n\n"
         "CONFIG_ELF_LOADER_LIBC_SYMBOLS=n\n"
-        "CONFIG_ELF_LOADER_ESPIDF_SYMBOLS=n\n",
+        "CONFIG_ELF_LOADER_ESPIDF_SYMBOLS=n\n"
+        + "".join(f"{value}\n" for value in module.sdkconfig_defaults),
         encoding="utf-8",
     )
 
@@ -220,18 +258,23 @@ def build_wasm(module, compiler):
             + ", ".join(str(source.relative_to(REPO_ROOT)) for source in cxx_sources)
         )
     output = OUTPUT_DIR / f"{module.name}.wasm"
-    include_dirs = (REPO_ROOT / "native_apps" / "include", REPO_ROOT / "src", *module.include_dirs)
+    include_dirs = (
+        REPO_ROOT / "native_apps" / "include", REPO_ROOT / "src", REPO_ROOT / "components" / "args",
+        *module.include_dirs,
+    )
     command = [
-        compiler, "--target=wasm32", "-O2", "-nostdlib", "-ffreestanding",
-        f"-D{module.entry_point}=main",
+        compiler, "--target=wasm32", "-mcpu=mvp", "-O2", "-ffreestanding", "-fno-builtin", "-nostdlib",
+        f"-DBRUCE_WASM_ENTRY={module.entry_point}",
         *[f"-D{value}" for value in module.definitions],
         *module.compile_options,
-        "-Wl,--no-entry", "-Wl,--allow-undefined", "-Wl,--export=main",
-        "-Wl,--export-memory", "-Wl,--initial-memory=65536", "-Wl,--max-memory=262144",
+        "-Wl,--no-entry", "-Wl,--allow-undefined",
+        "-Wl,--export-memory", "-Wl,--initial-memory=131072", "-Wl,--max-memory=262144",
         *[part for path in include_dirs for part in ("-I", path)],
-        "-o", output, *module.sources, WASM_GUEST_SOURCE,
+        "-isystem", WASM_GUEST_INCLUDE,
+        "-o", output, *module.sources, WASM_GUEST_SOURCE, WASM_GUEST_LIBC_SOURCE, ARGS_SOURCE,
     ]
     run(command, module.directory)
+    validate_bruce_module(output.read_bytes())
     add_wasm_manifest(output, module.manifest_path)
     print(f"Built {output}")
 

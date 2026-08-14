@@ -17,6 +17,8 @@ external applications.
   `examples/<app>/main/` sources and the same `manifest.json`.
 - `tools/build_modules.py` — discovers build-enabled manifests below
   `src/modules/` and writes artifacts to `native_apps/build_modules/`.
+- `wasm/` — private guest adapter, freestanding C runtime, and headers linked
+  into WASM applications; these files are never compiled into firmware.
 
 ## Building
 
@@ -32,7 +34,7 @@ option may be repeated:
 ```bash
 python3 native_apps/tools/build_apps.py --target elf --idf-target esp32s3 --app game
 python3 native_apps/tools/build_apps.py --target elf --idf-target esp32s3 --app game --app nes
-python3 native_apps/tools/build_apps.py --target wasm --app game
+python3 native_apps/tools/build_modules.py --target wasm --module clock
 ```
 
 Final ELF files are written to:
@@ -41,8 +43,16 @@ Final ELF files are written to:
 - `native_apps/examples/game.elf`
 - `native_apps/examples/nes.elf`
 
-WASM output is written beside the native output, for example
-`native_apps/examples/game.wasm`.
+WASM module output is written under `native_apps/build_modules/`, for example
+`native_apps/build_modules/clock.wasm`. External examples are written beside
+their native output when all APIs they use have bindings.
+
+WASM builds require Clang with the `wasm32` target. Builds target the WebAssembly
+MVP instruction set supported by the firmware's restricted WAMR configuration.
+The freestanding guest support under `native_apps/wasm/` supplies the standard C
+subset used by supported apps, so no WASI sysroot is required. The post-link
+validator rejects every WASI or `env` import and accepts only exact allowlisted
+`bruce_sdk` function signatures.
 
 ## Building built-in modules as external apps
 
@@ -74,10 +84,23 @@ directory. `sources` is required; all other fields are optional:
     "includeDirs": ["."],
     "compileDefinitions": ["FEATURE=1"],
     "compileOptions": ["-Os"],
+    "componentDirs": ["../../../components/example_runtime"],
+    "componentDependencies": ["example_runtime"],
+    "linkOptions": ["-lm"],
+    "sdkconfigDefaults": ["CONFIG_EXAMPLE_RUNTIME_FEATURE=y"],
     "targets": ["elf", "wasm"]
   }
 }
 ```
+
+`componentDirs`, `componentDependencies`, `linkOptions`, and
+`sdkconfigDefaults` add local ESP-IDF components to ELF builds, statically link
+their component archives and supporting libraries into the loadable image, and
+configure those dependencies. They do not apply to WASM builds.
+
+An ELF app that spawns a loader child with callbacks implemented inside its own
+ELF must remain alive until that child exits. Returning from the parent entry
+unloads its code and invalidates the child's entry, stop, and cleanup callbacks.
 
 The tool generates disposable ESP-IDF project files below
 `native_apps/build_modules/.work/` and writes final files such as

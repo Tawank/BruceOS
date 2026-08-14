@@ -10,6 +10,6 @@
       "clock_app.c"
     ],
     "includeDirs": ["."],
-    "targets": ["elf"]
+    "targets": ["elf", "wasm"]
   }
 }

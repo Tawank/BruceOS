@@ -586,5 +586,11 @@ int wasm_loader__app_main(int argc, char **argv) {
         snapshot.state == BRUCE_PROCESS_BACKGROUND) {
         mode = BRUCE_LAUNCH_BACKGROUND;
     }
-    return wasm_loader__run_path(path, arg[0] != '\0' ? arg : NULL, mode, NULL, 0);
+    int result = wasm_loader__run_path(path, arg[0] != '\0' ? arg : NULL, mode, NULL, 0);
+#if defined(BRUCE_WASM_EXTERNAL_ELF) && BRUCE_WASM_EXTERNAL_ELF
+    /* Child callbacks execute from this ELF image, so keep its parent process
+     * alive until Core has finished the child and its owned cleanup. */
+    if (result > 0) return process__wait((bruce_process_id_t)result, UINT32_MAX);
+#endif
+    return result;
 }

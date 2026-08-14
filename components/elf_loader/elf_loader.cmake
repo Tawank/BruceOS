@@ -77,7 +77,7 @@ macro(project_elf project_name)
     # Define how to build the ELF file
     add_custom_command(
         OUTPUT ${elf_app}
-        COMMAND ${CMAKE_C_COMPILER} ${cflags} ${elf_libs} -o ${elf_app}
+        COMMAND ${CMAKE_C_COMPILER} ${cflags} -Wl,--start-group ${elf_libs} -Wl,--end-group -o ${elf_app}
         COMMAND ${CMAKE_STRIP} ${strip_flags} ${elf_app}
         DEPENDS ${elf_dependencies}
         COMMENT "Build ELF: ${elf_app}"

@@ -22,6 +22,8 @@ bool selftest__run_wasm_bruce_abi_case(void) {
     if (!wasm_bruce_abi__required_span(1, 1) || wasm_bruce_abi__required_span(0, 1) ||
         wasm_bruce_abi__required_span(1, 0) || wasm_bruce_abi__required_span(UINT32_MAX, 1) ||
         wasm_bruce_abi__required_span(UINT32_MAX - 1, 2) ||
+        !wasm_bruce_abi__optional_span(0, 1) || !wasm_bruce_abi__optional_span(16, 4) ||
+        wasm_bruce_abi__optional_span(UINT32_MAX, 1) ||
         !wasm_bruce_abi__array_span(16, 3, 4, &span_size) || span_size != 12 ||
         wasm_bruce_abi__array_span(16, UINT32_MAX, 2, &span_size)) {
         printf("[selftest] wasm ABI: span validation failed\n");

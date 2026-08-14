@@ -2,11 +2,17 @@
 #include "wasm_bruce_abi.h"
 
 #include <limits.h>
+#include <string.h>
 #include <stddef.h>
 #include <stdint.h>
 
 #include "wasm_export.h"
 
+#include "core_sdk/clock.h"
+#include "core_sdk/config.h"
+#include "core_sdk/dialog.h"
+#include "core_sdk/display.h"
+#include "core_sdk/input.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/permission.h"
 #include "core_sdk/process.h"
@@ -37,6 +43,20 @@ wasm_bruce_host_adapter__required_span(wasm_exec_env_t exec_env, uint32_t offset
 
 static uint32_t *wasm_bruce_host_adapter__app_u32(wasm_exec_env_t exec_env, uint32_t offset) {
     return wasm_bruce_host_adapter__required_span(exec_env, offset, sizeof(uint32_t));
+}
+
+static const char *wasm_bruce_host_adapter__string(wasm_exec_env_t exec_env, uint32_t offset, bool optional) {
+    if (offset == 0) return optional ? NULL : (const char *)UINTPTR_MAX;
+    wasm_module_inst_t instance = wasm_bruce_host_adapter__instance(exec_env);
+    if (instance == NULL || !wasm_runtime_validate_app_str_addr(instance, offset)) {
+        if (instance != NULL) wasm_runtime_clear_exception(instance);
+        return (const char *)UINTPTR_MAX;
+    }
+    return wasm_runtime_addr_app_to_native(instance, offset);
+}
+
+static bool wasm_bruce_host_adapter__valid_string(const char *value) {
+    return value != (const char *)UINTPTR_MAX;
 }
 
 static uint64_t wasm_runtime__now(wasm_exec_env_t exec_env) {
@@ -212,6 +232,210 @@ static int32_t wasm_memory__get_stats(wasm_exec_env_t exec_env, uint32_t stats_o
     return BRUCE_OK;
 }
 
+static uint32_t wasm_memory__malloc(wasm_exec_env_t exec_env, uint32_t size) {
+    wasm_module_inst_t instance = wasm_bruce_host_adapter__instance(exec_env);
+    if (instance == NULL || size == 0) return 0;
+    return wasm_runtime_module_malloc(instance, size, NULL);
+}
+
+static void wasm_memory__free(wasm_exec_env_t exec_env, uint32_t pointer_offset) {
+    wasm_module_inst_t instance = wasm_bruce_host_adapter__instance(exec_env);
+    if (instance != NULL && pointer_offset != 0) wasm_runtime_module_free(instance, pointer_offset);
+}
+
+static uint32_t wasm_config__get_time_clock24hr(wasm_exec_env_t exec_env) {
+    (void)exec_env;
+    return config__get_time_clock24hr() ? 1u : 0u;
+}
+
+#define WASM_SCALAR_U32_WRAPPER(wrapper, function)                                                            \
+    static uint32_t wrapper(wasm_exec_env_t exec_env) {                                                       \
+        (void)exec_env;                                                                                       \
+        return (uint32_t)function();                                                                          \
+    }
+
+WASM_SCALAR_U32_WRAPPER(wasm_config__get_theme_primary, config__get_theme_primary)
+WASM_SCALAR_U32_WRAPPER(wasm_config__get_theme_secondary, config__get_theme_secondary)
+WASM_SCALAR_U32_WRAPPER(wasm_config__get_theme_background, config__get_theme_background)
+WASM_SCALAR_U32_WRAPPER(wasm_display__width, display__width)
+WASM_SCALAR_U32_WRAPPER(wasm_display__height, display__height)
+WASM_NO_ARG_RESULT_WRAPPER(wasm_display__begin_frame, display__begin_frame)
+WASM_NO_ARG_RESULT_WRAPPER(wasm_display__present, display__present)
+WASM_NO_ARG_RESULT_WRAPPER(wasm_input__flush, input__flush)
+
+static int32_t wasm_display__fill_screen(wasm_exec_env_t exec_env, uint32_t color) {
+    (void)exec_env;
+    return display__fill_screen((bruce_display_color_t)color);
+}
+
+static int32_t wasm_display__draw_rect(
+    wasm_exec_env_t exec_env, int32_t x, int32_t y, int32_t width, int32_t height, uint32_t color
+) {
+    (void)exec_env;
+    return display__draw_rect(
+        (int16_t)x, (int16_t)y, (int16_t)width, (int16_t)height, (bruce_display_color_t)color
+    );
+}
+
+static int32_t wasm_display__set_text_bg_color(wasm_exec_env_t exec_env, uint32_t color) {
+    (void)exec_env;
+    return display__set_text_bg_color(color);
+}
+
+static int32_t wasm_display__set_text_color(wasm_exec_env_t exec_env, uint32_t color) {
+    (void)exec_env;
+    return display__set_text_color((bruce_display_color_t)color);
+}
+
+static int32_t wasm_display__set_text_size(wasm_exec_env_t exec_env, uint32_t size) {
+    (void)exec_env;
+    return display__set_text_size((uint8_t)size);
+}
+
+static int32_t
+wasm_display__draw_centre_string(wasm_exec_env_t exec_env, uint32_t text_offset, int32_t x, int32_t y) {
+    const char *text = wasm_bruce_host_adapter__string(exec_env, text_offset, false);
+    if (!wasm_bruce_host_adapter__valid_string(text)) return BRUCE_ERR_INVALID_ARGUMENT;
+    return display__draw_centre_string(text, (int16_t)x, (int16_t)y);
+}
+
+static int32_t wasm_clock__get_local(wasm_exec_env_t exec_env, uint32_t output_offset) {
+    uint8_t *output = wasm_bruce_host_adapter__required_span(
+        exec_env, output_offset, WASM_BRUCE_CLOCK_DATETIME_SIZE
+    );
+    if (output == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    bruce_clock_datetime_t value;
+    bruce_result_t result = clock__get_local(&value);
+    if (result != BRUCE_OK) return result;
+    memset(output, 0, WASM_BRUCE_CLOCK_DATETIME_SIZE);
+    wasm_bruce_abi__store_u16(output + WASM_BRUCE_CLOCK_DATETIME_YEAR_OFFSET, value.year);
+    output[WASM_BRUCE_CLOCK_DATETIME_MONTH_OFFSET] = value.month;
+    output[WASM_BRUCE_CLOCK_DATETIME_DAY_OFFSET] = value.day;
+    output[WASM_BRUCE_CLOCK_DATETIME_HOUR_OFFSET] = value.hour;
+    output[WASM_BRUCE_CLOCK_DATETIME_MINUTE_OFFSET] = value.minute;
+    output[WASM_BRUCE_CLOCK_DATETIME_SECOND_OFFSET] = value.second;
+    return BRUCE_OK;
+}
+
+static int32_t
+wasm_process__snapshot(wasm_exec_env_t exec_env, uint32_t process_id, uint32_t output_offset) {
+    uint8_t *output = wasm_bruce_host_adapter__required_span(
+        exec_env, output_offset, WASM_BRUCE_PROCESS_SNAPSHOT_SIZE
+    );
+    if (output == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    bruce_process_snapshot_t snapshot;
+    bruce_result_t result = process__snapshot((bruce_process_id_t)process_id, &snapshot);
+    if (result != BRUCE_OK) return result;
+    if (snapshot.memory_bytes > UINT32_MAX || snapshot.swap_bytes > UINT32_MAX ||
+        snapshot.resource_count > UINT32_MAX) {
+        return BRUCE_ERR_RESOURCE_LIMIT;
+    }
+    memset(output, 0, WASM_BRUCE_PROCESS_SNAPSHOT_SIZE);
+    wasm_bruce_abi__store_u32(output + WASM_BRUCE_PROCESS_SNAPSHOT_ID_OFFSET, snapshot.id);
+    wasm_bruce_abi__store_u32(output + WASM_BRUCE_PROCESS_SNAPSHOT_STATE_OFFSET, (uint32_t)snapshot.state);
+    memcpy(output + WASM_BRUCE_PROCESS_SNAPSHOT_NAME_OFFSET, snapshot.name, WASM_BRUCE_PROCESS_SNAPSHOT_NAME_SIZE);
+    output[WASM_BRUCE_PROCESS_SNAPSHOT_NAME_OFFSET + WASM_BRUCE_PROCESS_SNAPSHOT_NAME_SIZE - 1] = '\0';
+    wasm_bruce_abi__store_u32(
+        output + WASM_BRUCE_PROCESS_SNAPSHOT_STACK_HIGH_WATER_OFFSET, snapshot.stack_high_water_bytes
+    );
+    wasm_bruce_abi__store_u32(output + WASM_BRUCE_PROCESS_SNAPSHOT_STACK_TOTAL_OFFSET, snapshot.stack_total_bytes);
+    wasm_bruce_abi__store_u32(output + WASM_BRUCE_PROCESS_SNAPSHOT_CPU_PERCENT_OFFSET, snapshot.cpu_percent);
+    wasm_bruce_abi__store_u32(output + WASM_BRUCE_PROCESS_SNAPSHOT_MEMORY_BYTES_OFFSET, (uint32_t)snapshot.memory_bytes);
+    wasm_bruce_abi__store_u32(output + WASM_BRUCE_PROCESS_SNAPSHOT_SWAP_BYTES_OFFSET, (uint32_t)snapshot.swap_bytes);
+    wasm_bruce_abi__store_u32(
+        output + WASM_BRUCE_PROCESS_SNAPSHOT_RESOURCE_COUNT_OFFSET, (uint32_t)snapshot.resource_count
+    );
+    output[WASM_BRUCE_PROCESS_SNAPSHOT_BUILT_IN_OFFSET] = snapshot.built_in ? 1 : 0;
+    output[WASM_BRUCE_PROCESS_SNAPSHOT_GUI_REQUESTED_OFFSET] = snapshot.gui_requested ? 1 : 0;
+    output[WASM_BRUCE_PROCESS_SNAPSHOT_PRESENTABLE_OFFSET] = snapshot.presentable ? 1 : 0;
+    return BRUCE_OK;
+}
+
+static int32_t wasm_input__wait(wasm_exec_env_t exec_env, uint32_t timeout_ms, uint32_t output_offset) {
+    uint32_t *output = wasm_bruce_host_adapter__app_u32(exec_env, output_offset);
+    if (output == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    int32_t code;
+    bruce_result_t result = input__wait(timeout_ms, &code);
+    if (result == BRUCE_OK) wasm_bruce_abi__store_u32(output, (uint32_t)code);
+    return result;
+}
+
+static int32_t
+wasm_dialog__message(wasm_exec_env_t exec_env, int32_t kind, uint32_t title_offset, uint32_t message_offset) {
+    const char *title = wasm_bruce_host_adapter__string(exec_env, title_offset, true);
+    const char *message = wasm_bruce_host_adapter__string(exec_env, message_offset, true);
+    if (!wasm_bruce_host_adapter__valid_string(title) || !wasm_bruce_host_adapter__valid_string(message)) {
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    return dialog__message((bruce_dialog_kind_t)kind, title, message);
+}
+
+static int32_t wasm_dialog__choice(
+    wasm_exec_env_t exec_env, uint32_t title_offset, uint32_t message_offset, uint32_t choices_offset,
+    uint32_t choice_count, uint32_t selected_offset
+) {
+    if (choice_count == 0) return BRUCE_ERR_INVALID_ARGUMENT;
+    if (choice_count > WASM_BRUCE_MAX_DIALOG_CHOICES) return BRUCE_ERR_RESOURCE_LIMIT;
+    uint32_t choices_size;
+    if (!wasm_bruce_abi__array_span(
+            choices_offset, choice_count, WASM_BRUCE_DIALOG_CHOICE_SIZE, &choices_size
+        )) {
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    const uint8_t *guest_choices = wasm_bruce_host_adapter__required_span(exec_env, choices_offset, choices_size);
+    uint32_t *guest_selected = wasm_bruce_host_adapter__app_u32(exec_env, selected_offset);
+    const char *title = wasm_bruce_host_adapter__string(exec_env, title_offset, true);
+    const char *message = wasm_bruce_host_adapter__string(exec_env, message_offset, true);
+    if (guest_choices == NULL || guest_selected == NULL || !wasm_bruce_host_adapter__valid_string(title) ||
+        !wasm_bruce_host_adapter__valid_string(message)) {
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    bruce_dialog_choice_t choices[WASM_BRUCE_MAX_DIALOG_CHOICES];
+    size_t text_bytes = 0;
+    for (uint32_t i = 0; i < choice_count; ++i) {
+        const uint8_t *record = guest_choices + i * WASM_BRUCE_DIALOG_CHOICE_SIZE;
+        const uint32_t offsets[] = {
+            wasm_bruce_abi__load_u32(record + WASM_BRUCE_DIALOG_CHOICE_LABEL_OFFSET),
+            wasm_bruce_abi__load_u32(record + WASM_BRUCE_DIALOG_CHOICE_VALUE_OFFSET),
+            wasm_bruce_abi__load_u32(record + WASM_BRUCE_DIALOG_CHOICE_ICON_NAME_OFFSET),
+            wasm_bruce_abi__load_u32(record + WASM_BRUCE_DIALOG_CHOICE_RIGHT_TEXT_OFFSET),
+        };
+        const char **fields[] = {&choices[i].label, &choices[i].value, &choices[i].icon_name, &choices[i].right_text};
+        for (size_t field = 0; field < 4; ++field) {
+            *fields[field] = wasm_bruce_host_adapter__string(exec_env, offsets[field], field >= 2);
+            if (!wasm_bruce_host_adapter__valid_string(*fields[field])) return BRUCE_ERR_INVALID_ARGUMENT;
+            if (*fields[field] != NULL) {
+                size_t length = strlen(*fields[field]) + 1;
+                if (length > WASM_BRUCE_MAX_DIALOG_TEXT_BYTES - text_bytes) return BRUCE_ERR_RESOURCE_LIMIT;
+                text_bytes += length;
+            }
+        }
+    }
+    size_t selected = wasm_bruce_abi__load_u32(guest_selected);
+    bruce_result_t result = dialog__choice(title, message, choices, choice_count, &selected);
+    if (result == BRUCE_OK) {
+        if (selected > UINT32_MAX) return BRUCE_ERR_RESOURCE_LIMIT;
+        wasm_bruce_abi__store_u32(guest_selected, (uint32_t)selected);
+    }
+    return result;
+}
+
+static int32_t wasm_dialog__number_input(
+    wasm_exec_env_t exec_env, uint32_t title_offset, uint32_t prompt_offset, uint32_t initial_offset,
+    uint32_t buffer_offset, uint32_t buffer_size
+) {
+    if (buffer_size == 0) return BRUCE_ERR_INVALID_ARGUMENT;
+    const char *title = wasm_bruce_host_adapter__string(exec_env, title_offset, true);
+    const char *prompt = wasm_bruce_host_adapter__string(exec_env, prompt_offset, true);
+    const char *initial = wasm_bruce_host_adapter__string(exec_env, initial_offset, true);
+    char *buffer = wasm_bruce_host_adapter__required_span(exec_env, buffer_offset, buffer_size);
+    if (!wasm_bruce_host_adapter__valid_string(title) || !wasm_bruce_host_adapter__valid_string(prompt) ||
+        !wasm_bruce_host_adapter__valid_string(initial) || buffer == NULL) {
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    return dialog__number_input(title, prompt, initial, buffer, buffer_size);
+}
+
 #define BRUCE_WASM_NATIVE(name, function, signature) {name, (void *)(function), signature, NULL}
 
 /* WAMR sorts this array in place and retains it after registration. Pointer
@@ -245,6 +469,29 @@ static NativeSymbol s_native_symbols[] = {
     BRUCE_WASM_NATIVE("stdio__session_write_input", wasm_stdio__session_write_input, "(iii)i"),
     BRUCE_WASM_NATIVE("stdio__session_read_output", wasm_stdio__session_read_output, "(iiii)i"),
     BRUCE_WASM_NATIVE("memory__get_stats", wasm_memory__get_stats, "(i)i"),
+    BRUCE_WASM_NATIVE("memory__malloc", wasm_memory__malloc, "(i)i"),
+    BRUCE_WASM_NATIVE("memory__free", wasm_memory__free, "(i)"),
+    BRUCE_WASM_NATIVE("config__get_time_clock24hr", wasm_config__get_time_clock24hr, "()i"),
+    BRUCE_WASM_NATIVE("config__get_theme_primary", wasm_config__get_theme_primary, "()i"),
+    BRUCE_WASM_NATIVE("config__get_theme_secondary", wasm_config__get_theme_secondary, "()i"),
+    BRUCE_WASM_NATIVE("config__get_theme_background", wasm_config__get_theme_background, "()i"),
+    BRUCE_WASM_NATIVE("display__width", wasm_display__width, "()i"),
+    BRUCE_WASM_NATIVE("display__height", wasm_display__height, "()i"),
+    BRUCE_WASM_NATIVE("display__begin_frame", wasm_display__begin_frame, "()i"),
+    BRUCE_WASM_NATIVE("display__fill_screen", wasm_display__fill_screen, "(i)i"),
+    BRUCE_WASM_NATIVE("display__draw_rect", wasm_display__draw_rect, "(iiiii)i"),
+    BRUCE_WASM_NATIVE("display__set_text_bg_color", wasm_display__set_text_bg_color, "(i)i"),
+    BRUCE_WASM_NATIVE("display__set_text_color", wasm_display__set_text_color, "(i)i"),
+    BRUCE_WASM_NATIVE("display__set_text_size", wasm_display__set_text_size, "(i)i"),
+    BRUCE_WASM_NATIVE("display__draw_centre_string", wasm_display__draw_centre_string, "(iii)i"),
+    BRUCE_WASM_NATIVE("display__present", wasm_display__present, "()i"),
+    BRUCE_WASM_NATIVE("clock__get_local", wasm_clock__get_local, "(i)i"),
+    BRUCE_WASM_NATIVE("process__snapshot", wasm_process__snapshot, "(ii)i"),
+    BRUCE_WASM_NATIVE("input__flush", wasm_input__flush, "()i"),
+    BRUCE_WASM_NATIVE("input__wait", wasm_input__wait, "(ii)i"),
+    BRUCE_WASM_NATIVE("dialog__message", wasm_dialog__message, "(iii)i"),
+    BRUCE_WASM_NATIVE("dialog__choice", wasm_dialog__choice, "(iiiii)i"),
+    BRUCE_WASM_NATIVE("dialog__number_input", wasm_dialog__number_input, "(iiiii)i"),
 };
 
 bool wasm_bruce_host_adapter__register(void) {

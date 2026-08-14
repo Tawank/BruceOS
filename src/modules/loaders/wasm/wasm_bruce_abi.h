@@ -7,6 +7,8 @@
 /* Private wasm32 layouts. Host wrappers must encode fields individually rather
  * than copying native Core structures into guest memory. */
 enum {
+    WASM_BRUCE_MAX_DIALOG_CHOICES = 16,
+    WASM_BRUCE_MAX_DIALOG_TEXT_BYTES = 2048,
     WASM_BRUCE_MEMORY_STATS_SIZE = 44,
 
     WASM_BRUCE_CLOCK_DATETIME_YEAR_OFFSET = 0,
@@ -41,6 +43,10 @@ enum {
 
 static inline bool wasm_bruce_abi__required_span(uint32_t offset, uint32_t size) {
     return offset != 0 && size != 0 && size <= UINT32_MAX - offset;
+}
+
+static inline bool wasm_bruce_abi__optional_span(uint32_t offset, uint32_t size) {
+    return offset == 0 || wasm_bruce_abi__required_span(offset, size);
 }
 
 static inline bool

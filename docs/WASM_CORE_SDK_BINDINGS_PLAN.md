@@ -81,14 +81,16 @@ src/modules/loaders/wasm/
   wasm_bruce_host_adapter.c      host import wrappers and registration
   wasm_bruce_host_adapter.h      host registration declaration
   wasm_bruce_abi.h               private wasm32 layouts and limits
+
+native_apps/wasm/
   wasm_bruce_guest_adapter.c     compiled into WASM apps, never firmware
+  wasm_bruce_guest_libc.c        freestanding guest C runtime
+  include/                       private freestanding C headers
 ```
 
-`wasm_bruce_guest_adapter.c` is not added to `src/CMakeLists.txt` firmware sources. The
-two Python WASM build paths compile it into each WASM application.
-
-If `wasm_bruce_guest_adapter.c` becomes unwieldy, split it under
-`src/modules/loaders/wasm/guest/`. Do not split it before that is useful.
+The files under `native_apps/wasm/` are not added to `src/CMakeLists.txt`
+firmware sources. The two Python WASM build paths compile the adapter and C
+runtime into each WASM application.
 
 ## Guest Adapter
 
@@ -124,8 +126,9 @@ Some public functions cannot cross the native boundary with their C ABI and
 must be implemented inside the guest:
 
 - `memory__malloc`, `memory__calloc`, `memory__realloc`, and `memory__free`
-  delegate to the guest libc allocator. WAMR instance teardown remains the
-  final cleanup boundary.
+  import the matching `bruce_sdk` names. Their host wrappers use WAMR's module
+  allocator so returned values are guest offsets rather than native pointers.
+  WAMR instance teardown remains the final cleanup boundary.
 - `stdio__printf` and `stdio__vprintf` format in guest memory with
   `vsnprintf`, then call the imported `stdio__write` function.
 - Standard libc functions such as `snprintf`, `sscanf`, `strcmp`, `strlen`,
@@ -136,11 +139,11 @@ Preserve the documented `stdio__printf` result: return the formatted byte count
 on success and a negative `BRUCE_ERR_*` result when output fails. Handle
 `va_list` with `va_copy`; do not reuse a consumed list.
 
-Guest allocator calls cannot be represented as individual Core-tracked native
-allocations because Core pointers are not addressable from linear memory.
-Document that WASM allocation is accounted and reclaimed at the WAMR instance
-level, not as individual `memory__*` resources in process snapshots. Do not
-pretend that native allocation pointers can preserve the tracking semantics.
+Guest allocator calls cannot be represented as individual Core pointers because
+native pointers are not addressable from linear memory. Individual allocations
+remain offsets within the process-owned WAMR module heap, which is reclaimed at
+loader cleanup. Shared runtime-global allocations remain on WAMR's global
+allocator.
 
 ### Argument Parser
 
@@ -159,16 +162,13 @@ currently used by Clock.
 
 ## Freestanding Libc And Linker Work
 
-The current `--target=wasm32 -nostdlib -ffreestanding` command cannot compile
-Clock because the toolchain has no `stdio.h`, `stdlib.h`, or `string.h` target
-headers. A complete implementation must provide a wasm32 freestanding libc
-sysroot/archive, not native libc imports.
+The `--target=wasm32 -nostdlib -ffreestanding` command uses the private in-tree
+guest headers and freestanding C subset under the WASM loader. It must not use
+host-platform headers or native libc imports.
 
-Use a wasm32 libc capable of providing the pure in-module functionality needed
-by Clock and `components/args/args.c`. A WASI SDK libc may be used only when the
-linked result has no `wasi_snapshot_preview1` imports. An embedded wasm32 libc
-such as picolibc is also acceptable. The deciding acceptance condition is the
-final import set, not the libc vendor.
+Keep pure pointer-heavy operations such as formatting, scanning, ctype, and
+string handling inside the guest. The deciding acceptance condition is the
+final import set: no WASI, `env`, or native libc imports.
 
 Update both build scripts:
 
@@ -177,13 +177,13 @@ Update both build scripts:
 
 Required changes:
 
-1. Accept a configured WASM compiler/sysroot rather than assuming the host
-   Clang resource headers are a usable libc.
+1. Use Clang's wasm32 target with the private guest include directory; no
+   external libc sysroot is required.
 2. Compile `wasm_bruce_guest_adapter.c` for every WASM app.
 3. Compile `components/args/args.c` for modules/apps that use the parser. It is
    acceptable initially to include it in every WASM artifact if dead-code
    elimination removes it when unused.
-4. Link the guest libc and allocator.
+4. Compile the guest C subset and import the WAMR-backed Bruce allocator.
 5. Keep exporting only `main` and the module memory.
 6. Replace unrestricted unresolved-symbol acceptance with an explicit check of
    the final import section.
@@ -379,10 +379,11 @@ string where it expects one. Core writes directly only after the entire range
 has been validated. If implementation inspection shows Core retains any input
 pointer, copy that input to temporary native storage instead.
 
-### Guest-Only Calls
+### Guest Runtime Calls
 
 - All `ap_*` functions through the existing parser source
-- `memory__malloc`, `memory__calloc`, `memory__realloc`, `memory__free`
+- `memory__malloc`, `memory__calloc`, `memory__realloc`, `memory__free` import
+  the matching `bruce_sdk` functions backed by WAMR's module allocator.
 - `stdio__printf`, `stdio__vprintf`
 - `snprintf`, `vsnprintf`, `sscanf`, `strcmp`, `strlen`, `memcpy`, `memset`,
   `memcmp`, `strchr`, `strtol`, `strtod`, and other libc dependencies pulled by
@@ -428,7 +429,6 @@ parameters use `i32` WAMR signatures and are manually validated.
 Do not register:
 
 - `ap_*`
-- guest allocator functions
 - variadic stdio functions
 - libc functions
 
@@ -569,7 +569,7 @@ Update `src/modules/loaders/wasm/README.md` when the implementation lands:
 - Document that libc and the argument parser execute in guest memory.
 - Document which Core APIs remain unavailable because they return/retain native
   pointers or require callbacks.
-- Document the WASM compiler/sysroot requirement and import allowlist.
+- Document the wasm32 compiler requirement and import allowlist.
 
 Update the WASM portion of `ARCHITECTURE.md` to state that the loader binding is
 the pointer-validation boundary. Do not duplicate all individual imports in
@@ -600,7 +600,8 @@ the architecture contract; the definitive list remains
 - Built-in and ELF Clock source/build behavior is unchanged.
 - The same `clock_app.c` builds for WASM without WASM conditionals.
 - The artifact imports only allowlisted names from `bruce_sdk`.
-- No libc, WASI, allocator, variadic, or `ap_*` name is a host import.
+- No WASI, `env`, variadic, or `ap_*` name is a host import; allocator imports
+  are exact `bruce_sdk.memory__*` functions.
 - Every host API pointer is validated before translation or serialization.
 - No native pointer is returned to or retained from the guest.
 - Invalid guest pointers return errors without crashing firmware.

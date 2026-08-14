@@ -9,11 +9,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+from wasm_imports import validate_bruce_module
+
 SCRIPT_DIR = Path(__file__).resolve().parent
 APPS_DIR = SCRIPT_DIR.parent / "examples"
-WASM_GUEST_SOURCE = (
-    SCRIPT_DIR.parent.parent / "src" / "modules" / "loaders" / "wasm" / "wasm_bruce_guest_adapter.c"
-)
+WASM_GUEST_SOURCE = SCRIPT_DIR.parent / "wasm" / "wasm_bruce_guest_adapter.c"
+ARGS_SOURCE = SCRIPT_DIR.parent.parent / "components" / "args" / "args.c"
+WASM_GUEST_LIBC_SOURCE = WASM_GUEST_SOURCE.with_name("wasm_bruce_guest_libc.c")
+WASM_GUEST_INCLUDE = WASM_GUEST_SOURCE.parent / "include"
 
 
 def available_apps():
@@ -109,14 +112,16 @@ def build_wasm(app, compiler):
         )
     output = APPS_DIR / f"{app}.wasm"
     run([
-        compiler, "--target=wasm32", "-O2", "-nostdlib", "-ffreestanding",
-        f"-D{entry}=main",
-        "-Wl,--no-entry", "-Wl,--allow-undefined", "-Wl,--export=main",
-        "-Wl,--export-memory", "-Wl,--initial-memory=65536",
+        compiler, "--target=wasm32", "-mcpu=mvp", "-O2", "-ffreestanding", "-fno-builtin", "-nostdlib",
+        f"-DBRUCE_WASM_ENTRY={entry}",
+        "-Wl,--no-entry", "-Wl,--allow-undefined",
+        "-Wl,--export-memory", "-Wl,--initial-memory=131072",
         "-Wl,--max-memory=262144", "-I", SCRIPT_DIR.parent / "include",
         "-I", SCRIPT_DIR.parent.parent / "src",
-        "-o", output, *sources, WASM_GUEST_SOURCE,
+        "-I", SCRIPT_DIR.parent.parent / "components" / "args", "-isystem", WASM_GUEST_INCLUDE,
+        "-o", output, *sources, WASM_GUEST_SOURCE, WASM_GUEST_LIBC_SOURCE, ARGS_SOURCE,
     ], app_dir)
+    validate_bruce_module(output.read_bytes())
     add_wasm_manifest(output, manifest)
     print(f"Built {output}")
 

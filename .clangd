@@ -3,3 +3,15 @@
 CompileFlags:
     CompilationDatabase: build
     Remove: [-f*, -m*]
+
+---
+# These sources are linked into freestanding WASM applications, not firmware.
+If:
+    PathMatch: native_apps/wasm/wasm_bruce_guest_(adapter|libc)\.c
+CompileFlags:
+    Remove: [-I]
+    Add:
+        - --target=wasm32
+        - -DBRUCE_WASM_ENTRY=wasm_bruce_guest_adapter__clangd_entry
+        - -I../native_apps/wasm/include
+        - -I../src

@@ -9,6 +9,7 @@
  * if ELF apps are expected to call them directly.
  */
 
+#include <pthread.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,6 +29,7 @@
 #include "core_sdk/disk.h"
 #include "core_sdk/display.h"
 #include "core_sdk/environment.h"
+#include "core_sdk/ext_mem_loader.h"
 #include "core_sdk/gpio.h"
 #include "core_sdk/http.h"
 #include "core_sdk/i2c.h"
@@ -35,7 +37,6 @@
 #include "core_sdk/image.h"
 #include "core_sdk/input.h"
 #include "core_sdk/ir.h"
-#include "core_sdk/ext_mem_loader.h"
 #include "core_sdk/manifest.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/notification.h"
@@ -56,14 +57,37 @@
  * Keep them in the restricted resolver so portable C code does not need to
  * carry target-specific libgcc objects inside every loadable image. */
 extern int __eqdf2(double left, double right);
+extern double __adddf3(double left, double right);
+extern long long __divdi3(long long dividend, long long divisor);
+extern int *__errno(void);
 extern float __divsf3(float left, float right);
+extern long long __fixdfdi(double value);
 extern double __floatsidf(int value);
+extern float __floatdisf(long long value);
+extern double __floatdidf(long long value);
+extern double __floatundidf(unsigned long long value);
+extern float __floatundisf(unsigned long long value);
+extern double __floatunsidf(unsigned int value);
 extern double __extendsfdf2(float value);
 extern int __fixdfsi(double value);
+extern unsigned int __fixunsdfsi(double value);
+extern unsigned long long __fixunsdfdi(double value);
+extern long long __fixsfdi(float value);
+extern unsigned long long __fixunssfdi(float value);
+extern int __gedf2(double left, double right);
+extern int __gtdf2(double left, double right);
+extern int __ledf2(double left, double right);
+extern int __ltdf2(double left, double right);
+extern long long __moddi3(long long dividend, long long divisor);
+extern int __nedf2(double left, double right);
+extern int __unorddf2(double left, double right);
+extern unsigned long long __umoddi3(unsigned long long dividend, unsigned long long divisor);
 extern double __divdf3(double left, double right);
 extern double __muldf3(double left, double right);
+extern double __subdf3(double left, double right);
 extern float __truncdfsf2(double value);
 extern unsigned long long __udivdi3(unsigned long long dividend, unsigned long long divisor);
+extern float __ieee754_sqrtf(float value);
 
 static int bruce_elf__puts(const char *text) {
     if (text == NULL || stdio__write(text, strlen(text)) != BRUCE_OK) return EOF;
@@ -140,7 +164,21 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(app_runner__parse_args),
     ESP_ELFSYM_EXPORT(app_runner__free_args),
     ESP_ELFSYM_EXPORT(app_runner__environment_requests_gui),
+    ESP_ELFSYM_EXPORT(app_runner__spawn_loader_process),
+    ESP_ELFSYM_EXPORT(app_runner__spawn_loader_process_owned),
+    ESP_ELFSYM_EXPORT(app_runner__spawn_loader_process_owned_with_stop),
     ESP_ELFSYM_EXPORT(app_runner__run_command),
+
+    /* Runtime dependencies used by statically linked external interpreters. */
+    ESP_ELFSYM_EXPORT(pthread_self),
+    ESP_ELFSYM_EXPORT(pthread_mutex_init),
+    ESP_ELFSYM_EXPORT(pthread_mutex_destroy),
+    ESP_ELFSYM_EXPORT(pthread_mutex_lock),
+    ESP_ELFSYM_EXPORT(pthread_mutex_unlock),
+    ESP_ELFSYM_EXPORT(bsearch),
+    ESP_ELFSYM_EXPORT(qsort),
+    ESP_ELFSYM_EXPORT(__errno),
+    ESP_ELFSYM_EXPORT(__ieee754_sqrtf),
 
     /* Argument parser */
     ESP_ELFSYM_EXPORT(ap_new_parser),
@@ -306,6 +344,9 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(display__get_cursor),
     ESP_ELFSYM_EXPORT(display__print),
     ESP_ELFSYM_EXPORT(display__println),
+    ESP_ELFSYM_EXPORT(display__draw_string),
+    ESP_ELFSYM_EXPORT(display__draw_centre_string),
+    ESP_ELFSYM_EXPORT(display__draw_right_string),
     ESP_ELFSYM_EXPORT(display__draw_pixel),
     ESP_ELFSYM_EXPORT(display__draw_line),
     ESP_ELFSYM_EXPORT(display__draw_rect),
@@ -377,6 +418,7 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(manifest__inspect_path),
     ESP_ELFSYM_EXPORT(manifest__inspect_elf),
     ESP_ELFSYM_EXPORT(manifest__inspect_javascript),
+    ESP_ELFSYM_EXPORT(manifest__inspect_wasm),
 
     /* Storage */
     ESP_ELFSYM_EXPORT(storage__open),
@@ -462,12 +504,33 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
 
     /* GCC runtime helpers used by freestanding ELF code. */
     ESP_ELFSYM_EXPORT(__eqdf2),
+    ESP_ELFSYM_EXPORT(__adddf3),
+    ESP_ELFSYM_EXPORT(__divdi3),
     ESP_ELFSYM_EXPORT(__divsf3),
+    ESP_ELFSYM_EXPORT(__fixdfdi),
     ESP_ELFSYM_EXPORT(__floatsidf),
+    ESP_ELFSYM_EXPORT(__floatdisf),
+    ESP_ELFSYM_EXPORT(__floatdidf),
+    ESP_ELFSYM_EXPORT(__floatundidf),
+    ESP_ELFSYM_EXPORT(__floatundisf),
+    ESP_ELFSYM_EXPORT(__floatunsidf),
     ESP_ELFSYM_EXPORT(__extendsfdf2),
     ESP_ELFSYM_EXPORT(__fixdfsi),
+    ESP_ELFSYM_EXPORT(__fixunsdfsi),
+    ESP_ELFSYM_EXPORT(__fixunsdfdi),
+    ESP_ELFSYM_EXPORT(__fixsfdi),
+    ESP_ELFSYM_EXPORT(__fixunssfdi),
+    ESP_ELFSYM_EXPORT(__gedf2),
+    ESP_ELFSYM_EXPORT(__gtdf2),
+    ESP_ELFSYM_EXPORT(__ledf2),
+    ESP_ELFSYM_EXPORT(__ltdf2),
+    ESP_ELFSYM_EXPORT(__moddi3),
+    ESP_ELFSYM_EXPORT(__nedf2),
+    ESP_ELFSYM_EXPORT(__unorddf2),
+    ESP_ELFSYM_EXPORT(__umoddi3),
     ESP_ELFSYM_EXPORT(__divdf3),
     ESP_ELFSYM_EXPORT(__muldf3),
+    ESP_ELFSYM_EXPORT(__subdf3),
     ESP_ELFSYM_EXPORT(__truncdfsf2),
     ESP_ELFSYM_EXPORT(__udivdi3),
 

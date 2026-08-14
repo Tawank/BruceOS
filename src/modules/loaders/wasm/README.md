@@ -29,10 +29,12 @@ loading fail.
 
 ## Allocation
 
-Application `malloc`, `calloc`, `realloc`, and `free` must operate in WASM
-linear memory. They are supplied by the application's freestanding toolchain,
-not imported from Bruce. The ELF mapping to `memory__malloc()` cannot be used:
-that function returns a native ESP pointer, which is not addressable by WASM.
+Application `malloc`, `calloc`, `realloc`, and `free` operate in WASM linear
+memory through `bruce_sdk.memory__malloc/calloc/realloc/free`. Their host
+wrappers use WAMR's module allocator and return guest offsets, never native ESP
+pointers. The module heap belongs to the process-owned WAMR instance and is
+reclaimed when that instance is deinstantiated during loader cleanup. Shared
+WAMR runtime storage remains on WAMR's global allocator.
 
 `memory__get_stats` is available for system memory diagnostics. It writes eleven
 little-endian `uint32_t` fields in the order declared by
@@ -41,7 +43,7 @@ little-endian `uint32_t` fields in the order declared by
 
 ## Imports
 
-The initial SDK slice exports:
+The supported SDK slice exports:
 
 - runtime: `runtime__now`, `runtime__sleep`, `runtime__delay`,
   `runtime__gui_requested`;
@@ -50,15 +52,31 @@ The initial SDK slice exports:
 - permissions: `permission__check` for introspection;
 - stdio: raw read/write, line input, and process-owned stdio sessions;
 - memory: `memory__get_stats`.
+- Clock: local time reads;
+- Config: Clock's 12/24-hour and theme color getters;
+- Display: dimensions, frame begin/present, fill, rectangle, text state, and
+  centered strings;
+- Input: flush and wait-for-press;
+- Dialog: message, bounded choice, and number input.
+
+Application source includes the normal `core_sdk` headers. The WASM build links
+the private guest adapter and freestanding C runtime under `native_apps/wasm/`,
+plus the existing argument parser. Individual guest allocations share WAMR's
+process-owned module heap and are reclaimed together at instance teardown.
 
 Pointer parameters are wasm32 offsets. Wrappers validate every complete buffer
 before calling Core. Native variadic functions, host-pointer allocation APIs,
 permission mutation, and APIs that retain caller pointers are not exported.
 
-The exact WAMR signatures are maintained in `wasm_bruce_host_adapter.c`. A WASM SDK
-header/toolchain should declare matching imports using Clang's `import_module`
-and `import_name` attributes and format text inside linear memory before calling
-`stdio__write`.
+The exact WAMR signatures are maintained in `wasm_bruce_host_adapter.c`. The
+build validates the linked type and import sections before adding the manifest;
+only exact function imports from `bruce_sdk` are accepted. APIs that return or
+retain native pointers, callbacks, variadic host calls, and external-memory
+mapping remain unavailable.
+
+WASM builds require a Clang installation with the `wasm32` target. They target
+WebAssembly MVP to match the restricted WAMR feature set, do not require a WASI
+sysroot, and may not contain WASI imports.
 
 ## Manifest Section
 

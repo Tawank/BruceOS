@@ -138,7 +138,8 @@ resumes when the child yields or exits.
    JavaScript event loop invokes it; it is optional.
 - A WebAssembly module exports `main` and imports supported SDK functions from
   the `bruce_sdk` module. WASM pointers are offsets in validated linear memory,
-  never native ESP pointers.
+  never native ESP pointers. The WASM host adapter is the sole translation
+  boundary and validates complete guest ranges before calling Core.
 
 ### Named execution
 
@@ -234,6 +235,9 @@ int app_runner__spawn_loader_process(/* permission, GUI, launch mode,
                                       environment overlay, entry, context */);
 
 int app_runner__spawn_loader_process_owned(/* same, plus cleanup callback */);
+
+int app_runner__spawn_loader_process_owned_with_stop(/* same, plus cleanup and
+                                                       cooperative stop callbacks */);
 ```
 
 ```c
@@ -245,7 +249,9 @@ bruce_app_inspection_t *manifest__inspect_elf(const char *path);
 ```
 
 ```c
-const char *manifest__inspect_javascript(const char *path);
+bruce_app_inspection_t *manifest__inspect_javascript(const char *path);
+
+bruce_app_inspection_t *manifest__inspect_wasm(const char *path);
 ```
 
 ```c
@@ -263,6 +269,12 @@ The owned variant additionally runs `cleanup(ctx)` exactly once after normal
 return, force-kill, or cancellation before entry, and is used for loader state
 that must survive until process teardown.
 
+These spawn primitives and all format inspectors are part of the ELF SDK export
+surface so third-party ELF applications can implement loaders. If a child entry,
+stop, or cleanup callback is code inside the parent ELF, that parent must remain
+alive until the child exits; returning unloads the ELF image and invalidates its
+callbacks.
+
 `manifest__inspect_path()` is the universal manifest JSON extractor provided
 by `core/manifest`.  It auto-detects file format (ELF magic, JS comment
 block, or whatever a future format uses) and returns the raw manifest bytes as
@@ -277,21 +289,33 @@ parses the `.bruce.manifest` section, and returns a complete
 The returned structure is process-owned; the caller must free it with
 `memory__free()`.  The ELF loader module calls this directly at launch time.
 
-`manifest__inspect_javascript()` extracts the optional leading manifest comment
-block from a JS file and returns the raw JSON bytes; the caller must call
+`manifest__inspect_javascript()` parses the optional leading manifest comment
+from a JS file and returns complete inspection metadata; the caller must call
 `memory__free()`. `manifest__parse()` parses a JSON string into a `bruce_manifest_t`
 that the caller must free with `memory__free()`.
+
+`manifest__inspect_wasm()` validates bounded WebAssembly section envelopes and
+returns parsed or filename-fallback metadata. It remains in Core so launchers,
+file managers, and external loaders can inspect WASM apps even when the built-in
+WASM runtime is omitted.
 
 Loader modules do not provide their own inspection — `core/manifest` owns
 that capability, so format-aware manifest extraction is not duplicated across
 loaders.
 
-A loader module still includes only `core_sdk/...` headers — it gets no
-private-header exemption, unlike `modules/selftest`.
+A loader module still includes only `core_sdk/...` headers and the public API of
+the third-party runtime it adapts. It gets no Core-private-header exemption,
+unlike `modules/selftest`.
 
-Built-in ELF and JavaScript loader modules live under `src/modules/loaders/`,
+Built-in ELF, JavaScript, and WebAssembly loader modules live under `src/modules/loaders/`,
 the same as any other module; they have no special standing over a
 third-party loader someone else registers the same way.
+
+External ELF module manifests may declare local ESP-IDF component directories,
+component archives, linker options, and component `sdkconfig` defaults. Those
+dependencies are compiled and linked into the ELF rather than exported from
+Core. The external WebAssembly loader uses this mechanism to carry WAMR in its
+own image.
 
 ### Process lifecycle
 

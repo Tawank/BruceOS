@@ -1,0 +1,40 @@
+{
+  "appName": "WebAssembly loader",
+  "entryPoint": "wasm_loader__app_main",
+  "appIcon": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+  "coreAbiVersion": 4,
+  "permissions": ["execute", "storage"],
+  "stackSize": 16384,
+  "build": {
+    "name": "wasm_loader",
+    "sources": [
+      "wasm_loader_app.c",
+      "wasm_bruce_host_adapter.c",
+      "wasm_bruce_elf_platform.c"
+    ],
+    "includeDirs": [
+      ".",
+      "../../../../components/args"
+    ],
+    "componentDirs": [
+      "../../../../components/wasm-micro-runtime"
+    ],
+    "componentDependencies": [
+      "wasm-micro-runtime"
+    ],
+    "compileDefinitions": ["BRUCE_WASM_EXTERNAL_ELF=1"],
+    "linkOptions": ["-lm"],
+    "sdkconfigDefaults": [
+      "CONFIG_WAMR_ENABLE_AOT=n",
+      "CONFIG_WAMR_ENABLE_INTERP=y",
+      "CONFIG_WAMR_INTERP_FAST=y",
+      "CONFIG_WAMR_INTERP_LOADER_NORMAL=y",
+      "CONFIG_WAMR_ENABLE_LIB_PTHREAD=n",
+      "CONFIG_WAMR_ENABLE_LIBC_BUILTIN=n",
+      "CONFIG_WAMR_ENABLE_LIBC_WASI=n",
+      "CONFIG_WAMR_ENABLE_MULTI_MODULE=n",
+      "CONFIG_WAMR_ENABLE_SHARED_MEMORY=n"
+    ],
+    "targets": ["elf"]
+  }
+}
