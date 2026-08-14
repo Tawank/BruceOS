@@ -16,6 +16,8 @@
 #include "core_sdk/permission.h"
 #include "core_sdk/process.h"
 #include "core_sdk/runtime.h"
+#include "core_sdk/storage.h"
+#include "core_sdk/audio.h"
 #include "core_sdk/stdio.h"
 
 #define BRUCE_WASM_IMPORT(name) __attribute__((import_module("bruce_sdk"), import_name(name)))
@@ -411,4 +413,87 @@ bruce_result_t dialog__number_input(
         wasm_bruce_guest_adapter__offset(buffer),
         (uint32_t)buffer_size
     );
+}
+
+/* NES compatibility imports. The host-side binding owns all guest range
+ * validation; these wrappers only lower the public SDK ABI to wasm32 values. */
+BRUCE_WASM_IMPORT("storage__open") extern int32_t wasm_import__storage_open(uint32_t, uint32_t, uint32_t);
+BRUCE_WASM_IMPORT("storage__read") extern int32_t wasm_import__storage_read(uint32_t, uint32_t, uint32_t, uint32_t);
+BRUCE_WASM_IMPORT("storage__write") extern int32_t wasm_import__storage_write(uint32_t, uint32_t, uint32_t, uint32_t);
+BRUCE_WASM_IMPORT("storage__seek") extern int32_t wasm_import__storage_seek(uint32_t, int64_t, int32_t, uint32_t);
+BRUCE_WASM_IMPORT("storage__close") extern int32_t wasm_import__storage_close(uint32_t);
+BRUCE_WASM_IMPORT("dialog__pick_file") extern int32_t wasm_import__dialog_pick_file(uint32_t, uint32_t, uint32_t, uint32_t);
+BRUCE_WASM_IMPORT("display__game_mode") extern int32_t wasm_import__display_game_mode(int32_t);
+BRUCE_WASM_IMPORT("display__color565") extern int32_t wasm_import__display_color565(int32_t, int32_t, int32_t);
+BRUCE_WASM_IMPORT("display__fill_rect") extern int32_t wasm_import__display_fill_rect(int32_t, int32_t, int32_t, int32_t, int32_t);
+BRUCE_WASM_IMPORT("display__draw_rgb_bitmap") extern int32_t wasm_import__display_draw_rgb_bitmap(int32_t, int32_t, uint32_t, int32_t, int32_t);
+BRUCE_WASM_IMPORT("input__read") extern int32_t wasm_import__input_read(uint32_t, uint32_t);
+BRUCE_WASM_IMPORT("audio__stream_sample_rate") extern int32_t wasm_import__audio_stream_sample_rate(void);
+BRUCE_WASM_IMPORT("audio__stream_open") extern int32_t wasm_import__audio_stream_open(int32_t);
+BRUCE_WASM_IMPORT("audio__stream_write") extern int32_t wasm_import__audio_stream_write(uint32_t, uint32_t);
+BRUCE_WASM_IMPORT("audio__stream_close") extern int32_t wasm_import__audio_stream_close(void);
+BRUCE_WASM_IMPORT("runtime__timer_start") extern int32_t wasm_import__runtime_timer_start(uint32_t, uint32_t, uint32_t);
+BRUCE_WASM_IMPORT("runtime__timer_wait") extern int32_t wasm_import__runtime_timer_wait(uint32_t, uint32_t);
+BRUCE_WASM_IMPORT("runtime__timer_stop") extern int32_t wasm_import__runtime_timer_stop(uint32_t);
+
+bruce_result_t storage__open(const char *path, uint32_t flags, bruce_file_id_t *out_file) {
+    return (bruce_result_t)wasm_import__storage_open(wasm_bruce_guest_adapter__offset(path), flags,
+                                                       wasm_bruce_guest_adapter__offset(out_file));
+}
+bruce_result_t storage__read(bruce_file_id_t file, void *buffer, size_t capacity, size_t *out_size) {
+    return (bruce_result_t)wasm_import__storage_read(file, wasm_bruce_guest_adapter__offset(buffer),
+                                                       (uint32_t)capacity, wasm_bruce_guest_adapter__offset(out_size));
+}
+bruce_result_t storage__write(bruce_file_id_t file, const void *buffer, size_t size, size_t *out_size) {
+    return (bruce_result_t)wasm_import__storage_write(file, wasm_bruce_guest_adapter__offset(buffer),
+                                                       (uint32_t)size, wasm_bruce_guest_adapter__offset(out_size));
+}
+bruce_result_t storage__seek(bruce_file_id_t file, int64_t offset, int whence, uint64_t *out_position) {
+    return (bruce_result_t)wasm_import__storage_seek(file, offset, whence, wasm_bruce_guest_adapter__offset(out_position));
+}
+bruce_result_t storage__close(bruce_file_id_t file) { return (bruce_result_t)wasm_import__storage_close(file); }
+bruce_result_t dialog__pick_file(const char *initial, const char *filter, char *path, size_t size) {
+    return (bruce_result_t)wasm_import__dialog_pick_file(wasm_bruce_guest_adapter__offset(initial),
+                                                          wasm_bruce_guest_adapter__offset(filter),
+                                                          wasm_bruce_guest_adapter__offset(path), (uint32_t)size);
+}
+bruce_result_t display__game_mode(bool enabled) { return (bruce_result_t)wasm_import__display_game_mode(enabled); }
+bruce_display_color_t display__color565(uint8_t r, uint8_t g, uint8_t b) {
+    return (bruce_display_color_t)wasm_import__display_color565(r, g, b);
+}
+bruce_result_t display__fill_rect(int16_t x, int16_t y, int16_t w, int16_t h, bruce_display_color_t color) {
+    return (bruce_result_t)wasm_import__display_fill_rect(x, y, w, h, color);
+}
+bruce_result_t display__draw_rgb_bitmap(int16_t x, int16_t y, const uint16_t *bitmap, int16_t w, int16_t h) {
+    return (bruce_result_t)wasm_import__display_draw_rgb_bitmap(x, y, wasm_bruce_guest_adapter__offset(bitmap), w, h);
+}
+bruce_result_t input__read(bruce_input_event_t *event, uint32_t timeout) {
+    return (bruce_result_t)wasm_import__input_read(wasm_bruce_guest_adapter__offset(event), timeout);
+}
+uint32_t audio__stream_sample_rate(void) { return (uint32_t)wasm_import__audio_stream_sample_rate(); }
+bruce_result_t audio__stream_open(uint8_t channels) { return (bruce_result_t)wasm_import__audio_stream_open(channels); }
+size_t audio__stream_write(const int16_t *samples, size_t frames) {
+    return (size_t)wasm_import__audio_stream_write(wasm_bruce_guest_adapter__offset(samples), (uint32_t)frames);
+}
+bruce_result_t audio__stream_close(void) { return (bruce_result_t)wasm_import__audio_stream_close(); }
+bruce_result_t runtime__timer_start(uint32_t period, volatile uint32_t *counter, uint32_t *timer) {
+    return (bruce_result_t)wasm_import__runtime_timer_start(period, wasm_bruce_guest_adapter__offset(counter),
+                                                             wasm_bruce_guest_adapter__offset(timer));
+}
+bruce_result_t runtime__timer_wait(uint32_t timer, uint32_t timeout) {
+    return (bruce_result_t)wasm_import__runtime_timer_wait(timer, timeout);
+}
+bruce_result_t runtime__timer_stop(uint32_t timer) { return (bruce_result_t)wasm_import__runtime_timer_stop(timer); }
+
+bruce_result_t memory__external_alloc(size_t size, bruce_memory_object_t *object) {
+    (void)size; (void)object; return BRUCE_ERR_UNSUPPORTED;
+}
+bruce_result_t memory__external_write(const bruce_memory_object_t *object, size_t offset, const void *data, size_t size) {
+    (void)object; (void)offset; (void)data; (void)size; return BRUCE_ERR_UNSUPPORTED;
+}
+bruce_result_t memory__external_map(const bruce_memory_object_t *object, const void **data) {
+    (void)object; (void)data; return BRUCE_ERR_UNSUPPORTED;
+}
+bruce_result_t memory__external_free(bruce_memory_object_t *object) {
+    (void)object; return BRUCE_ERR_UNSUPPORTED;
 }

@@ -4,5 +4,24 @@
   "appIcon": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
   "coreAbiVersion": 4,
   "permissions": ["storage"],
-  "stackSize": 8192
+  "stackSize": 8192,
+  "build": {
+    "sources": [
+      "main/*.c",
+      "../../../components/nofrendo/src/*.c",
+      "../../../components/nofrendo/src/cpu/*.c",
+      "../../../components/nofrendo/src/libsnss/*.c",
+      "../../../components/nofrendo/src/mappers/*.c",
+      "../../../components/nofrendo/src/nes/*.c",
+      "../../../components/nofrendo/src/sndhrdw/*.c"
+    ],
+    "exclude": ["../../../components/nofrendo/src/config.c"],
+    "includeDirs": ["main", "../../../components/nofrendo/src", "../../../src", "../../include"],
+    "cFlags": [
+      "-Wno-error=attributes", "-Wno-error=format", "-Wno-error=implicit-fallthrough",
+      "-Wno-error=incompatible-pointer-types", "-Wno-error=int-to-pointer-cast",
+      "-Wno-error=nonnull-compare", "-Wno-error=pointer-to-int-cast",
+      "-Wno-error=stringop-truncation", "-Wno-error=unused-const-variable", "-Wno-unused-function"
+    ]
+  }
 }

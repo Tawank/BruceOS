@@ -58,7 +58,19 @@ def read_manifest(app_dir):
     entry = manifest.get("entryPoint", "app_main")
     if not isinstance(entry, str) or not entry.isidentifier():
         raise RuntimeError(f"Invalid entryPoint in {manifest_path}")
-    return manifest_path, entry
+    return manifest_path, manifest, entry
+
+
+def wasm_build_inputs(app_dir, manifest):
+    build = manifest.get("build", {})
+    if not isinstance(build, dict):
+        raise RuntimeError(f"Invalid build object in {app_dir / 'manifest.json'}")
+    fields = {name: build.get(name, []) for name in ("sources", "exclude", "includeDirs", "cFlags")}
+    if not all(isinstance(value, list) and all(isinstance(item, str) for item in value) for value in fields.values()):
+        raise RuntimeError(f"WASM build fields must be string arrays in {app_dir / 'manifest.json'}")
+    sources = {path.resolve() for pattern in fields["sources"] for path in app_dir.glob(pattern) if path.is_file()}
+    sources.difference_update(path.resolve() for pattern in fields["exclude"] for path in app_dir.glob(pattern))
+    return sorted(sources), [app_dir / path for path in fields["includeDirs"]], fields["cFlags"]
 
 
 def build_native(app, target, idf_path):
@@ -75,7 +87,7 @@ def build_native(app, target, idf_path):
     run([sys.executable, idf_py, "-B", build_dir, "elf"], app_dir, env)
 
     source_elf = build_dir / f"{app}.app.elf"
-    manifest, _ = read_manifest(app_dir)
+    manifest, _, _ = read_manifest(app_dir)
     if not source_elf.exists():
         raise RuntimeError(f"Missing ELF output or manifest for {app}")
 
@@ -96,11 +108,13 @@ def build_native(app, target, idf_path):
 def build_wasm(app, compiler):
     app_dir = APPS_DIR / app
     source_dir = app_dir / "main"
-    manifest, entry = read_manifest(app_dir)
-    sources = sorted(
-        path for path in source_dir.rglob("*")
-        if path.suffix in (".c", ".cc", ".cpp", ".cxx")
-    )
+    manifest, manifest_data, entry = read_manifest(app_dir)
+    if manifest_data.get("build"):
+        sources, include_dirs, cflags = wasm_build_inputs(app_dir, manifest_data)
+    else:
+        sources = sorted(path for path in source_dir.rglob("*") if path.suffix in (".c", ".cc", ".cpp", ".cxx"))
+        include_dirs = []
+        cflags = []
     if not sources:
         raise RuntimeError(
             f"{app} has no C/C++ sources under {source_dir}"
@@ -113,12 +127,14 @@ def build_wasm(app, compiler):
         )
     output = APPS_DIR / f"{app}.wasm"
     run([
-        compiler, "--target=wasm32", "-mcpu=mvp", "-O2", "-ffreestanding", "-fno-builtin", "-nostdlib",
+        compiler, "--target=wasm32", "-mcpu=mvp", "-O2", "-ffreestanding", "-fno-builtin", "-nostdlib", *cflags,
         f"-DBRUCE_WASM_ENTRY={entry}",
         "-Wl,--no-entry", "-Wl,--allow-undefined",
         "-Wl,--export-memory", "-Wl,--export=__data_end", "-Wl,--export=__heap_base",
         "-Wl,-z,stack-size=8192", "-Wl,--initial-memory=65536",
-        "-Wl,--max-memory=262144", "-I", SCRIPT_DIR.parent / "include",
+        "-Wl,--max-memory=262144",
+        *[item for path in include_dirs for item in ("-I", path)],
+        "-I", SCRIPT_DIR.parent / "include",
         "-I", SCRIPT_DIR.parent.parent / "src",
         "-I", SCRIPT_DIR.parent.parent / "components" / "args", "-isystem", WASM_GUEST_INCLUDE,
         "-o", output, *sources, WASM_GUEST_SOURCE, WASM_GUEST_LIBC_SOURCE, ARGS_SOURCE,

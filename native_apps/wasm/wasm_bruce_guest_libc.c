@@ -9,12 +9,31 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "core_sdk/memory.h"
 #include "core_sdk/result.h"
 #include "core_sdk/stdio.h"
 
 int errno;
+
+int printf(const char *format, ...) {
+    va_list args;
+    va_start(args, format);
+    int result = stdio__vprintf(format, args);
+    va_end(args);
+    return result;
+}
+
+void exit(int status) { (void)status; }
+
+int sprintf(char *buffer, const char *format, ...) {
+    va_list args;
+    va_start(args, format);
+    int result = vsnprintf(buffer, SIZE_MAX, format, args);
+    va_end(args);
+    return result;
+}
 
 void *malloc(size_t size) { return memory__malloc(size); }
 void *calloc(size_t count, size_t size) { return memory__calloc(count, size); }
@@ -43,6 +62,24 @@ int memcmp(const void *left, const void *right, size_t size) {
     return 0;
 }
 
+char *strcpy(char *destination, const char *source) {
+    char *result = destination;
+    while ((*destination++ = *source++) != '\0') {}
+    return result;
+}
+
+char *strncpy(char *destination, const char *source, size_t size) {
+    char *result = destination;
+    while (size > 0 && (*destination++ = *source++) != '\0') size--;
+    while (size-- > 0) *destination++ = '\0';
+    return result;
+}
+
+char *strcat(char *destination, const char *source) {
+    strcpy(destination + strlen(destination), source);
+    return destination;
+}
+
 size_t strlen(const char *text) {
     size_t length = 0;
     while (text[length] != '\0') length++;
@@ -57,12 +94,36 @@ int strcmp(const char *left, const char *right) {
     return (unsigned char)*left - (unsigned char)*right;
 }
 
+int strncmp(const char *left, const char *right, size_t size) {
+    while (size-- > 0 && *left != '\0' && *left == *right) {
+        left++;
+        right++;
+    }
+    return size == SIZE_MAX ? 0 : (unsigned char)*left - (unsigned char)*right;
+}
+
 char *strchr(const char *text, int value) {
     char match = (char)value;
     do {
         if (*text == match) return (char *)text;
     } while (*text++ != '\0');
     return NULL;
+}
+
+char *strrchr(const char *text, int value) {
+    const char *result = NULL;
+    do {
+        if (*text == (char)value) result = text;
+    } while (*text++ != '\0');
+    return (char *)result;
+}
+
+char *strncat(char *destination, const char *source, size_t size) {
+    char *result = destination;
+    while (*destination != '\0') destination++;
+    while (size-- > 0 && (*destination++ = *source++) != '\0') {}
+    if (destination[-1] != '\0') *destination = '\0';
+    return result;
 }
 
 int isdigit(int value) { return value >= '0' && value <= '9'; }
