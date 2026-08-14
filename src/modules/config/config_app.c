@@ -4,6 +4,7 @@
 #include "core_sdk/clock.h"
 #include "core_sdk/config.h"
 #include "core_sdk/dialog.h"
+#include "core_sdk/memory.h"
 #include "core_sdk/result.h"
 #include "core_sdk/runtime.h"
 #include "core_sdk/stdio.h"
@@ -198,18 +199,24 @@ static int config_app__startup_cli(ArgParser *startup_parser, ArgParser *add, Ar
 static int config_app__display_gui(void) {
     for (;;) {
         bool buffered = config__get_display_buffered_rendering();
-        char buffered_label[48];
-        snprintf(buffered_label, sizeof(buffered_label), "DMA Buf (64kB): %s", buffered ? "ON" : "OFF");
-        const bruce_dialog_choice_t choices[] = {
-            {.label = buffered_label, .value = "buffered"},
-            {.label = "Back",         .value = "back"    },
-        };
+        char *buffered_label = memory__malloc(48);
+        bruce_dialog_choice_t *choices = memory__calloc(2, sizeof(*choices));
+        if (buffered_label == NULL || choices == NULL) {
+            memory__free(buffered_label);
+            memory__free(choices);
+            return BRUCE_ERR_NO_MEMORY;
+        }
+        snprintf(buffered_label, 48, "DMA Buf (64kB): %s", buffered ? "ON" : "OFF");
+        choices[0] = (bruce_dialog_choice_t){.label = buffered_label, .value = "buffered"};
+        choices[1] = (bruce_dialog_choice_t){.label = "Back", .value = "back"};
         size_t selected = 0;
         bruce_result_t result = dialog__choice_launcher("Display & UI", NULL, choices, 2, &selected);
-        if (result == BRUCE_ERR_CANCELLED) return BRUCE_OK;
-        if (result != BRUCE_OK) return result;
-        if (strcmp(choices[selected].value, "back") == 0) return BRUCE_OK;
-        result = config__set_display_buffered_rendering(!buffered);
+        bool back = result == BRUCE_ERR_CANCELLED ||
+                    (result == BRUCE_OK && selected < 2 && strcmp(choices[selected].value, "back") == 0);
+        if (!back && result == BRUCE_OK) result = config__set_display_buffered_rendering(!buffered);
+        memory__free(buffered_label);
+        memory__free(choices);
+        if (back) return BRUCE_OK;
         if (result != BRUCE_OK) return result;
         (void)dialog__message(BRUCE_DIALOG_INFO, "Display rendering", "Setting saved; reboot to apply");
     }

@@ -63,6 +63,7 @@
 #define BPARTED_STACK_BYTES 8192u
 #define NOTIFICATION_SERVICE_STACK_BYTES 2048u
 #define MENU_STACK_BYTES 4096u
+#define CONFIG_STACK_BYTES 8192u
 
 void app_runner__register_defaults(void) {
     (void)app_runner__register("launcher", launcher_app_main, LAUNCHER_STACK_BYTES);
@@ -73,7 +74,7 @@ void app_runner__register_defaults(void) {
     (void)app_runner__register("apps", apps_app_main, 0);
     (void)app_runner__register("filemanager", filemanager_app_main, 0);
     (void)app_runner__register("clock", clock_app_main, 0);
-    (void)app_runner__register("config", config_app_main, 0);
+    (void)app_runner__register("config", config_app_main, CONFIG_STACK_BYTES);
     (void)app_runner__register("permissions", permissions_app_main, PERMISSIONS_STACK_BYTES);
     (void)app_runner__register("wifi", wifi_app_main, WIFI_STACK_BYTES);
     (void)app_runner__register("webui", webui_app_main, 0);

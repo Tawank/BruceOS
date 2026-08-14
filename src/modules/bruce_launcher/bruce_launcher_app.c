@@ -544,13 +544,25 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
     bruce_launcher__get_theme(&theme);
 
     if (!menu->is_root) {
-        const bruce_launcher_entry_t *entries = bruce_launcher__menu_entries(menu);
+        /* Keep submenu navigation on one stack frame. The previous implementation
+         * called this function again for every nested submenu, so a deep menu
+         * tree exhausted the launcher task stack even though choices were heap
+         * allocated. */
+        const bruce_launcher_menu_t **parents =
+            (const bruce_launcher_menu_t **)memory__calloc(BRUCE_LAUNCHER_MAX_ENTRIES, sizeof(*parents));
         bruce_dialog_choice_t *choices =
-            (bruce_dialog_choice_t *)memory__calloc((size_t)menu->entry_count, sizeof(*choices));
-        if (choices == NULL) return BRUCE_ERR_NO_MEMORY;
+            (bruce_dialog_choice_t *)memory__calloc(BRUCE_LAUNCHER_MAX_ENTRIES, sizeof(*choices));
+        if (parents == NULL || choices == NULL) {
+            memory__free(parents);
+            memory__free(choices);
+            return BRUCE_ERR_NO_MEMORY;
+        }
 
         (void)input__flush();
+        size_t depth = 0;
+        const bruce_launcher_menu_t *current = menu;
         for (;;) {
+            const bruce_launcher_entry_t *entries = bruce_launcher__menu_entries(current);
             if (display__width() <= 0 || display__height() <= 0) {
                 (void)runtime__delay(20);
                 continue;
@@ -562,6 +574,7 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
                 continue;
             }
             if (frame != BRUCE_OK) {
+                memory__free(parents);
                 memory__free(choices);
                 return frame;
             }
@@ -569,6 +582,7 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
             (void)bruce_launcher__draw_status_bar(&theme);
             frame = display__present();
             if (frame != BRUCE_OK) {
+                memory__free(parents);
                 memory__free(choices);
                 return frame;
             }
@@ -579,10 +593,10 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
              * array once it goes out of scope. */
             s_live_choices.choices = choices;
             s_live_choices.entries = entries;
-            s_live_choices.count = menu->entry_count;
+            s_live_choices.count = current->entry_count;
             bruce_launcher__refresh_live_choices();
             bruce_result_t result =
-                dialog__choice_launcher(menu->title, NULL, choices, (size_t)menu->entry_count, &selected);
+                dialog__choice_launcher(current->title, NULL, choices, (size_t)current->entry_count, &selected);
             s_live_choices.count = 0;
             if (result == BRUCE_ERR_CANCELLED) break;
             if (result == BRUCE_ERR_NOT_FOREGROUND) {
@@ -592,14 +606,22 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
             if (result != BRUCE_OK) continue;
 
             const bruce_launcher_entry_t *entry = &entries[selected];
-            if (entry->kind == BRUCE_LAUNCHER_ENTRY_BACK) break;
+            if (entry->kind == BRUCE_LAUNCHER_ENTRY_BACK) {
+                if (depth == 0) break;
+                current = parents[--depth];
+                (void)input__flush();
+                continue;
+            }
             if (entry->kind == BRUCE_LAUNCHER_ENTRY_SUBMENU) {
-                (void)bruce_launcher__run_gui_menu(bruce_launcher__entry_submenu(menu, entry));
+                if (depth >= BRUCE_LAUNCHER_MAX_ENTRIES) continue;
+                parents[depth++] = current;
+                current = bruce_launcher__entry_submenu(current, entry);
             } else {
                 (void)bruce_launcher__run_entry(entry);
             }
             (void)input__flush();
         }
+        memory__free(parents);
         memory__free(choices);
         return 0;
     }
