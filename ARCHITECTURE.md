@@ -162,11 +162,11 @@ names remain owned by AppRunner. The built-in `help` utility uses this registry:
 command with `--help` and waits for it to finish.
 
 AppRunner owns only the shell-style conversion from command text to `argc` and
-`argv`. Built-in modules use the local `components/args` parser when they need
-commands, options, or named positional arguments. The parser uses process-owned
-Core memory, routes help and diagnostics through Bruce stdio, and reports help,
-version, invalid input, and allocation failure as statuses instead of exiting
-the application process. Named positional getters return borrowed `argv` strings
+`argv`. Built-in modules and ELF apps use the public `core_sdk/args.h` parser
+when they need commands, options, or named positional arguments. The parser uses
+process-owned Core memory, routes help and diagnostics through Bruce stdio, and
+reports help, version, invalid input, and allocation failure as statuses instead
+of exiting the application process. Named positional getters return borrowed `argv` strings
 and return `NULL` when an optional value is absent. Wi-Fi, Bluetooth, clock,
 configuration, IR, NRF24, TCP, WebUI, BNU, notification, image, ELF/JavaScript
 loader, and terminal commands all use this parser. Commands that forward an

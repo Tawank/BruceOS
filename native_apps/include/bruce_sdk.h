@@ -8,6 +8,7 @@
  */
 
 #include "core_sdk/app_runner.h"   // IWYU pragma: export
+#include "core_sdk/args.h"         // IWYU pragma: export
 #include "core_sdk/bluetooth.h"    // IWYU pragma: export
 #include "core_sdk/bluetooth_hid.h" // IWYU pragma: export
 #include "core_sdk/clock.h"        // IWYU pragma: export

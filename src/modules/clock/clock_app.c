@@ -1,6 +1,6 @@
 #include "clock_app.h"
 
-#include "args.h"
+#include "core_sdk/args.h"
 #include "core_sdk/clock.h"
 #include "core_sdk/config.h"
 #include "core_sdk/dialog.h"

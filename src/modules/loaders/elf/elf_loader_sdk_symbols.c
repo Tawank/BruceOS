@@ -17,10 +17,12 @@
 #include "esp_elf.h" // IWYU pragma: export
 
 #include "core_sdk/app_runner.h"
+#include "core_sdk/args.h"
 #include "core_sdk/audio.h"
 #include "core_sdk/bluetooth.h"
 #include "core_sdk/bluetooth_hid.h"
 #include "core_sdk/clock.h"
+#include "core_sdk/config.h"
 #include "core_sdk/device.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/disk.h"
@@ -61,6 +63,7 @@ extern int __fixdfsi(double value);
 extern double __divdf3(double left, double right);
 extern double __muldf3(double left, double right);
 extern float __truncdfsf2(double value);
+extern unsigned long long __udivdi3(unsigned long long dividend, unsigned long long divisor);
 
 static int bruce_elf__puts(const char *text) {
     if (text == NULL || stdio__write(text, strlen(text)) != BRUCE_OK) return EOF;
@@ -119,6 +122,13 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(clock__get_sync_status),
     ESP_ELFSYM_EXPORT(clock__get_ntp_server),
 
+    /* Read-only application preferences. Protected values enforce config
+     * permission in Core. */
+    ESP_ELFSYM_EXPORT(config__get_theme_primary),
+    ESP_ELFSYM_EXPORT(config__get_theme_secondary),
+    ESP_ELFSYM_EXPORT(config__get_theme_background),
+    ESP_ELFSYM_EXPORT(config__get_time_clock24hr),
+
     /* AppRunner / loader */
     ESP_ELFSYM_EXPORT(app_runner__run),
     ESP_ELFSYM_EXPORT(app_runner__run_path),
@@ -131,6 +141,58 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(app_runner__free_args),
     ESP_ELFSYM_EXPORT(app_runner__environment_requests_gui),
     ESP_ELFSYM_EXPORT(app_runner__run_command),
+
+    /* Argument parser */
+    ESP_ELFSYM_EXPORT(ap_new_parser),
+    ESP_ELFSYM_EXPORT(ap_free),
+    ESP_ELFSYM_EXPORT(ap_set_helptext),
+    ESP_ELFSYM_EXPORT(ap_get_helptext),
+    ESP_ELFSYM_EXPORT(ap_set_version),
+    ESP_ELFSYM_EXPORT(ap_get_version),
+    ESP_ELFSYM_EXPORT(ap_parse),
+    ESP_ELFSYM_EXPORT(ap_get_status),
+    ESP_ELFSYM_EXPORT(ap_print_help),
+    ESP_ELFSYM_EXPORT(ap_first_pos_arg_ends_option_parsing),
+    ESP_ELFSYM_EXPORT(ap_all_args_as_pos_args),
+    ESP_ELFSYM_EXPORT(ap_allow_extra_args),
+    ESP_ELFSYM_EXPORT(ap_unknown_options_as_args),
+    ESP_ELFSYM_EXPORT(ap_add_flag),
+    ESP_ELFSYM_EXPORT(ap_add_str_opt),
+    ESP_ELFSYM_EXPORT(ap_add_int_opt),
+    ESP_ELFSYM_EXPORT(ap_add_dbl_opt),
+    ESP_ELFSYM_EXPORT(ap_add_greedy_str_opt),
+    ESP_ELFSYM_EXPORT(ap_set_opt_help),
+    ESP_ELFSYM_EXPORT(ap_count),
+    ESP_ELFSYM_EXPORT(ap_found),
+    ESP_ELFSYM_EXPORT(ap_get_str_value),
+    ESP_ELFSYM_EXPORT(ap_get_str_value_at_index),
+    ESP_ELFSYM_EXPORT(ap_get_str_values),
+    ESP_ELFSYM_EXPORT(ap_get_int_value),
+    ESP_ELFSYM_EXPORT(ap_get_int_value_at_index),
+    ESP_ELFSYM_EXPORT(ap_get_int_values),
+    ESP_ELFSYM_EXPORT(ap_get_dbl_value),
+    ESP_ELFSYM_EXPORT(ap_get_dbl_value_at_index),
+    ESP_ELFSYM_EXPORT(ap_get_dbl_values),
+    ESP_ELFSYM_EXPORT(ap_add_required_arg),
+    ESP_ELFSYM_EXPORT(ap_add_optional_arg),
+    ESP_ELFSYM_EXPORT(ap_get_arg),
+    ESP_ELFSYM_EXPORT(ap_has_args),
+    ESP_ELFSYM_EXPORT(ap_count_args),
+    ESP_ELFSYM_EXPORT(ap_get_arg_at_index),
+    ESP_ELFSYM_EXPORT(ap_get_args),
+    ESP_ELFSYM_EXPORT(ap_get_args_as_ints),
+    ESP_ELFSYM_EXPORT(ap_get_args_as_doubles),
+    ESP_ELFSYM_EXPORT(ap_new_cmd),
+    ESP_ELFSYM_EXPORT(ap_set_cmd_callback),
+    ESP_ELFSYM_EXPORT(ap_found_cmd),
+    ESP_ELFSYM_EXPORT(ap_get_cmd_name),
+    ESP_ELFSYM_EXPORT(ap_get_cmd_parser),
+    ESP_ELFSYM_EXPORT(ap_get_cmd_exit_code),
+    ESP_ELFSYM_EXPORT(ap_enable_help_command),
+    ESP_ELFSYM_EXPORT(ap_get_parent),
+    ESP_ELFSYM_EXPORT(ap_print),
+    ESP_ELFSYM_EXPORT(ap_had_memory_error),
+    ESP_ELFSYM_EXPORT(ap_get_zeroth_root_arg),
 
     /* Process environment */
     ESP_ELFSYM_EXPORT(environment__global_get),
@@ -372,6 +434,7 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(snprintf),
     ESP_ELFSYM_EXPORT(sprintf),
     ESP_ELFSYM_EXPORT(vsnprintf),
+    ESP_ELFSYM_EXPORT(sscanf),
     ESP_ELFSYM_EXPORT(memcpy),
     ESP_ELFSYM_EXPORT(memmove),
     ESP_ELFSYM_EXPORT(memset),
@@ -406,6 +469,7 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(__divdf3),
     ESP_ELFSYM_EXPORT(__muldf3),
     ESP_ELFSYM_EXPORT(__truncdfsf2),
+    ESP_ELFSYM_EXPORT(__udivdi3),
 
     ESP_ELFSYM_END,
 };

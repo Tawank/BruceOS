@@ -1,0 +1,15 @@
+{
+  "appName": "Clock",
+  "entryPoint": "clock_app_main",
+  "appIcon": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+  "coreAbiVersion": 4,
+  "permissions": ["config"],
+  "stackSize": 8192,
+  "build": {
+    "sources": [
+      "clock_app.c"
+    ],
+    "includeDirs": ["."],
+    "targets": ["elf"]
+  }
+}

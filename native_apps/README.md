@@ -5,7 +5,7 @@ external applications.
 
 ## Layout
 
-- `include/bruce_sdk.h` pulls in the runtime/loader/manifest/process/memory/permission/result/storage/display
+- `include/bruce_sdk.h` pulls in the args/runtime/loader/manifest/process/memory/permission/result/storage/display
   public Core SDK APIs and the `BRUCE_APP_MANIFEST()` macro.  Apps that need
   `config`, `dialog`, `display`, `http`, `input`, `stdio`, or `wifi` should also
   include the corresponding `core_sdk/*.h` headers.
@@ -15,6 +15,8 @@ external applications.
 - `components/nofrendo/` — reusable ESP-IDF component containing the emulator core.
 - `tools/build_apps.py` — builds ELF or WASM apps from the same
   `examples/<app>/main/` sources and the same `manifest.json`.
+- `tools/build_modules.py` — discovers build-enabled manifests below
+  `src/modules/` and writes artifacts to `native_apps/build_modules/`.
 
 ## Building
 
@@ -41,6 +43,46 @@ Final ELF files are written to:
 
 WASM output is written beside the native output, for example
 `native_apps/examples/game.wasm`.
+
+## Building built-in modules as external apps
+
+Modules opt into external builds by adding a `manifest.json` with a `build`
+object. Discovery is recursive, so nested module directories are supported.
+Build every compatible module or select one with `--module`:
+
+```bash
+python3 native_apps/tools/build_modules.py --list
+python3 native_apps/tools/build_modules.py --target elf --idf-target esp32s3
+python3 native_apps/tools/build_modules.py --target elf --module clock
+python3 native_apps/tools/build_modules.py --target wasm --module my_module
+```
+
+The `build` object accepts source and include paths relative to the module
+directory. `sources` is required; all other fields are optional:
+
+```json
+{
+  "appName": "My module",
+  "entryPoint": "my_module_main",
+  "appIcon": "...base64 32x32 1bpp icon...",
+  "coreAbiVersion": 4,
+  "permissions": [],
+  "stackSize": 8192,
+  "build": {
+    "name": "my_module",
+    "sources": ["my_module_app.c"],
+    "includeDirs": ["."],
+    "compileDefinitions": ["FEATURE=1"],
+    "compileOptions": ["-Os"],
+    "targets": ["elf", "wasm"]
+  }
+}
+```
+
+The tool generates disposable ESP-IDF project files below
+`native_apps/build_modules/.work/` and writes final files such as
+`native_apps/build_modules/clock.elf`. A module should only declare `wasm` when
+every SDK API it uses is available from the WASM runtime.
 
 The WASM target uses exactly the same sources and manifest as the ELF target.
 The manifest's optional `entryPoint` (default `app_main`) is exported as WASM
