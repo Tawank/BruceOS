@@ -28,6 +28,7 @@ set(BRUCE_SELFTEST_SOURCES
     "modules/selftest/process_test.c"
     "modules/selftest/shell_test.c"
     "modules/selftest/terminal_test.c"
+    "modules/selftest/wasm_bruce_sdk_test.c"
     "modules/selftest/wifi_test.c")
 
 idf_component_register(SRCS

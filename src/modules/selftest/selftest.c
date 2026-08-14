@@ -36,6 +36,7 @@
 #include "process_test.h"
 #include "shell_test.h"
 #include "terminal_test.h"
+#include "wasm_bruce_sdk_test.h"
 #include "wifi_test.h"
 
 void selftest__resource_cleanup(void *context) {
@@ -128,6 +129,7 @@ int selftest_app_main(int argc, char **argv) {
     RUN_SELFTEST(selftest__run_elf_loader_xip_case);
     RUN_SELFTEST(selftest__run_wasm_loader_case);
     RUN_SELFTEST(selftest__run_wasm_manifest_case);
+    RUN_SELFTEST(selftest__run_wasm_bruce_abi_case);
     RUN_SELFTEST(selftest__run_js_loader_case);
     RUN_SELFTEST(selftest__run_terminal_named_case);
     RUN_SELFTEST(selftest__run_terminal_path_case);
