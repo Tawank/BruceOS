@@ -33,9 +33,9 @@ os_thread_wrapper(void *arg)
 korp_tid
 os_self_thread(void)
 {
-    /* only allowed if this is a thread, xTaskCreate is not enough look at
-     * product_mini for how to use this*/
-    return pthread_self();
+    /* ESP-IDF's pthread_self() asserts for tasks created directly by FreeRTOS.
+     * WAMR needs the underlying task identity here, not a joinable pthread. */
+    return (korp_tid)(uintptr_t)xTaskGetCurrentTaskHandle();
 }
 
 int

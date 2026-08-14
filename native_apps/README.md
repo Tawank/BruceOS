@@ -49,6 +49,9 @@ their native output when all APIs they use have bindings.
 
 WASM builds require Clang with the `wasm32` target. Builds target the WebAssembly
 MVP instruction set supported by the firmware's restricted WAMR configuration.
+The build tools verify target support and fall back from ESP-IDF's target-limited
+Clang to a system or versioned Clang when available. Use `--compiler` or
+`WASM_CLANG` to select another LLVM installation explicitly.
 The freestanding guest support under `native_apps/wasm/` supplies the standard C
 subset used by supported apps, so no WASI sysroot is required. The post-link
 validator rejects every WASI or `env` import and accepts only exact allowlisted

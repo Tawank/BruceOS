@@ -14,10 +14,13 @@ loading fail.
 - WAMR WASI, built-in host libc, pthreads, shared memory, and multi-module
   loading are disabled. Raw host files, sockets, and threads are unavailable.
 - Module files are limited to 1 MiB. Instances use an 8 KiB WAMR execution
-   stack, a 64 KiB application heap, and at most four 64 KiB linear-memory pages.
-   The heap is additional host-managed WAMR instance memory; it is not part of
-   the four-page linear-memory policy. Modules must declare one wasm32 memory,
-   with initial and declared maximum sizes no greater than four pages.
+   stack, an 8 KiB guest shadow stack, a 16 KiB application heap, and at most
+   four declared 64 KiB linear-memory pages. WAMR appends the heap to compacted
+   fixed linear memory; the build exports `__data_end` and `__heap_base` so
+   unused declared memory is not allocated. Modules must declare one wasm32
+   memory, with initial and declared maximum sizes no greater than four pages.
+   The classic interpreter avoids the fast interpreter's additional
+   precompiled-bytecode memory on constrained ESP32 targets.
   The manifest `stackSize` controls the separate Core process stack.
 - INT and TERM interrupt WAMR execution and then use normal process teardown.
 - The restricted Bruce ABI requires an exported `int main(int argc, char **argv)`

@@ -197,6 +197,8 @@ def validate_bruce_module(wasm):
         raise WasmImportError("missing WebAssembly export section")
     found_main = False
     found_memory = False
+    found_data_end = False
+    found_heap_base = False
     for _ in range(exports.u32()):
         name = exports.text()
         kind = exports.u8()
@@ -214,9 +216,15 @@ def validate_bruce_module(wasm):
             found_main = True
         elif name == "memory" and kind == 2 and not found_memory:
             found_memory = True
+        elif name == "__data_end" and kind == 3 and not found_data_end:
+            found_data_end = True
+        elif name == "__heap_base" and kind == 3 and not found_heap_base:
+            found_heap_base = True
         else:
             raise WasmImportError(f"unsupported WebAssembly export {name}")
     if not exports.done():
         raise WasmImportError("trailing WebAssembly export-section data")
-    if not found_main or not found_memory:
-        raise WasmImportError("WebAssembly module must export main and memory")
+    if not found_main or not found_memory or not found_data_end or not found_heap_base:
+        raise WasmImportError(
+            "WebAssembly module must export main, memory, __data_end, and __heap_base"
+        )

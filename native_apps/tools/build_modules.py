@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from wasm_imports import validate_bruce_module
+from wasm_compiler import resolve_wasm_compiler
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -268,7 +269,8 @@ def build_wasm(module, compiler):
         *[f"-D{value}" for value in module.definitions],
         *module.compile_options,
         "-Wl,--no-entry", "-Wl,--allow-undefined",
-        "-Wl,--export-memory", "-Wl,--initial-memory=131072", "-Wl,--max-memory=262144",
+        "-Wl,--export-memory", "-Wl,--export=__data_end", "-Wl,--export=__heap_base",
+        "-Wl,-z,stack-size=8192", "-Wl,--initial-memory=65536", "-Wl,--max-memory=262144",
         *[part for path in include_dirs for part in ("-I", path)],
         "-isystem", WASM_GUEST_INCLUDE,
         "-o", output, *module.sources, WASM_GUEST_SOURCE, WASM_GUEST_LIBC_SOURCE, ARGS_SOURCE,
@@ -307,10 +309,12 @@ def main():
         raise SystemExit(f"Target {args.target} is not supported by: {', '.join(unsupported)}")
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     if args.target == "wasm":
-        if shutil.which(args.compiler) is None:
-            raise SystemExit(f"WASM compiler not found: {args.compiler}")
+        try:
+            compiler = resolve_wasm_compiler(args.compiler)
+        except RuntimeError as error:
+            raise SystemExit(str(error)) from error
         for name in selected:
-            build_wasm(modules[name], args.compiler)
+            build_wasm(modules[name], compiler)
     else:
         if not args.idf_path or not Path(args.idf_path).is_dir():
             raise SystemExit("IDF_PATH not set or invalid")

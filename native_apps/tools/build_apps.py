@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 from wasm_imports import validate_bruce_module
+from wasm_compiler import resolve_wasm_compiler
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 APPS_DIR = SCRIPT_DIR.parent / "examples"
@@ -115,7 +116,8 @@ def build_wasm(app, compiler):
         compiler, "--target=wasm32", "-mcpu=mvp", "-O2", "-ffreestanding", "-fno-builtin", "-nostdlib",
         f"-DBRUCE_WASM_ENTRY={entry}",
         "-Wl,--no-entry", "-Wl,--allow-undefined",
-        "-Wl,--export-memory", "-Wl,--initial-memory=131072",
+        "-Wl,--export-memory", "-Wl,--export=__data_end", "-Wl,--export=__heap_base",
+        "-Wl,-z,stack-size=8192", "-Wl,--initial-memory=65536",
         "-Wl,--max-memory=262144", "-I", SCRIPT_DIR.parent / "include",
         "-I", SCRIPT_DIR.parent.parent / "src",
         "-I", SCRIPT_DIR.parent.parent / "components" / "args", "-isystem", WASM_GUEST_INCLUDE,
@@ -137,10 +139,12 @@ def main():
     apps = list(dict.fromkeys(args.app or available_apps()))
 
     if args.target == "wasm":
-        if shutil.which(args.compiler) is None:
-            raise SystemExit(f"WASM compiler not found: {args.compiler}")
+        try:
+            compiler = resolve_wasm_compiler(args.compiler)
+        except RuntimeError as error:
+            raise SystemExit(str(error)) from error
         for app in apps:
-            build_wasm(app, args.compiler)
+            build_wasm(app, compiler)
     else:
         if not args.idf_path or not Path(args.idf_path).is_dir():
             raise SystemExit("IDF_PATH not set or invalid")

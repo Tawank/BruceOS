@@ -9,6 +9,7 @@
 #include "core_sdk/runtime.h"
 #include "modules/loaders/elf/elf_loader_app.h"
 #include "modules/loaders/wasm/wasm_loader_app.h"
+#include "platform_api_vmcore.h"
 
 #include "elf_loader_test.h"
 
@@ -66,6 +67,12 @@ bool selftest__run_elf_loader_xip_case(void) {
 bool selftest__run_wasm_loader_case(void) {
     const char *path = "/bin/selftest_wasm_loader_target.wasm";
     storage__remove(path);
+
+    korp_tid task = os_self_thread();
+    if (task == 0 || task != os_self_thread()) {
+        printf("[selftest] loader/wasm: unstable WAMR task identity\n");
+        return false;
+    }
 
     size_t calls_before = wasm_loader__debug_call_count();
     int result = app_runner__run_path(path, NULL, BRUCE_LAUNCH_BACKGROUND);

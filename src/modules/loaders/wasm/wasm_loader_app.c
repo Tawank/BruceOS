@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "args.h"
+#include "esp_heap_caps.h"
 #include "wasm_export.h"
 
 #include "core_sdk/app_runner.h"
@@ -22,7 +23,7 @@
 
 #define WASM_LOADER_MAX_MODULE_BYTES (1024u * 1024u)
 #define WASM_LOADER_EXEC_STACK_BYTES 8192u
-#define WASM_LOADER_APP_HEAP_BYTES (64u * 1024u)
+#define WASM_LOADER_APP_HEAP_BYTES (16u * 1024u)
 #define WASM_LOADER_MAX_MEMORY_PAGES 4u
 #define WASM_LOADER_MANIFEST_STACK_MAX 16384u
 
@@ -30,6 +31,52 @@ static size_t s_call_count;
 static bool s_runtime_initialized;
 
 size_t wasm_loader__debug_call_count(void) { return s_call_count; }
+
+typedef struct {
+    void *base;
+    uint32_t size;
+} wasm_loader_allocation_header_t;
+
+_Static_assert(sizeof(wasm_loader_allocation_header_t) == 8, "WAMR allocation header ABI changed");
+
+static void *wasm_loader__runtime_malloc(unsigned int size) {
+    if (size > UINT32_MAX - sizeof(wasm_loader_allocation_header_t) - 7u) return NULL;
+    void *base = malloc(size + sizeof(wasm_loader_allocation_header_t) + 7u);
+    if (base == NULL) {
+        printf(
+            "[wasm_loader] allocation failed: request=%u free=%u largest=%u\n",
+            size,
+            (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+            (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)
+        );
+        return NULL;
+    }
+    uintptr_t address = ((uintptr_t)base + sizeof(wasm_loader_allocation_header_t) + 7u) & ~(uintptr_t)7u;
+    wasm_loader_allocation_header_t *header = (wasm_loader_allocation_header_t *)address - 1;
+    header->base = base;
+    header->size = size;
+    return (void *)address;
+}
+
+static void wasm_loader__runtime_free(void *pointer) {
+    if (pointer == NULL) return;
+    wasm_loader_allocation_header_t *header = (wasm_loader_allocation_header_t *)pointer - 1;
+    free(header->base);
+}
+
+static void *wasm_loader__runtime_realloc(void *pointer, unsigned int size) {
+    if (pointer == NULL) return wasm_loader__runtime_malloc(size);
+    if (size == 0) {
+        wasm_loader__runtime_free(pointer);
+        return NULL;
+    }
+    wasm_loader_allocation_header_t *header = (wasm_loader_allocation_header_t *)pointer - 1;
+    void *replacement = wasm_loader__runtime_malloc(size);
+    if (replacement == NULL) return NULL;
+    memcpy(replacement, pointer, header->size < size ? header->size : size);
+    wasm_loader__runtime_free(pointer);
+    return replacement;
+}
 
 typedef struct {
     char path[BRUCE_STORAGE_PATH_MAX];
@@ -202,9 +249,9 @@ static bool wasm_loader__init_runtime(void) {
     RuntimeInitArgs init_args;
     memset(&init_args, 0, sizeof(init_args));
     init_args.mem_alloc_type = Alloc_With_Allocator;
-    init_args.mem_alloc_option.allocator.malloc_func = malloc;
-    init_args.mem_alloc_option.allocator.realloc_func = realloc;
-    init_args.mem_alloc_option.allocator.free_func = free;
+    init_args.mem_alloc_option.allocator.malloc_func = wasm_loader__runtime_malloc;
+    init_args.mem_alloc_option.allocator.realloc_func = wasm_loader__runtime_realloc;
+    init_args.mem_alloc_option.allocator.free_func = wasm_loader__runtime_free;
     if (!wasm_runtime_full_init(&init_args)) {
         printf("[wasm_loader] failed to initialize runtime\n");
         return false;
@@ -355,7 +402,9 @@ static int wasm_loader__process_entry(void *context) {
     const InstantiationArgs instantiate_args = {
         .default_stack_size = WASM_LOADER_EXEC_STACK_BYTES,
         .host_managed_heap_size = WASM_LOADER_APP_HEAP_BYTES,
-        .max_memory_pages = WASM_LOADER_MAX_MEMORY_PAGES,
+        /* Preflight enforces the declaration limit. Zero preserves WAMR's
+         * compacted physical page layout for modules that cannot grow. */
+        .max_memory_pages = 0,
     };
     ctx->module_inst = wasm_runtime_instantiate_ex(
         ctx->module, &instantiate_args, error_buf, sizeof(error_buf)

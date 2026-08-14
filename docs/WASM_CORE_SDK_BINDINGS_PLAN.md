@@ -184,7 +184,8 @@ Required changes:
    acceptable initially to include it in every WASM artifact if dead-code
    elimination removes it when unused.
 4. Compile the guest C subset and import the WAMR-backed Bruce allocator.
-5. Keep exporting only `main` and the module memory.
+5. Export `main`, the module memory, and the standard `__data_end` and
+   `__heap_base` globals WAMR uses to compact fixed linear memory.
 6. Replace unrestricted unresolved-symbol acceptance with an explicit check of
    the final import section.
 7. Fail the build if an import module is not `bruce_sdk`, or if a symbol is not
