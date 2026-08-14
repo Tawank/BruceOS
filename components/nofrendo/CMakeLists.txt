@@ -14,7 +14,7 @@ target_compile_options(${COMPONENT_LIB} PRIVATE
     -Wno-error=stringop-truncation
     -Wno-error=unused-const-variable
     # See the matching -O2 override (and rationale) in
-    # elf_apps/examples/nes/main/CMakeLists.txt: that's where these sources
+    # native_apps/examples/nes/main/CMakeLists.txt: that's where these sources
     # actually get compiled for the nes ELF app (project_elf() only links
     # libmain.a, so the app's own main component compiles NOFRENDO_SOURCES
     # directly instead of depending on this component) -- this CMakeLists.txt

@@ -219,7 +219,7 @@ Validate JavaScript bitmap buffer length before passing data to Core.
 
 ## ELF
 
-Add both headers to `elf_apps/include/bruce_sdk.h` and export all notification
+Add both headers to `native_apps/include/bruce_sdk.h` and export all notification
 and status-icon functions from
 `src/modules/loaders/elf/elf_loader_sdk_symbols.c`.
 
@@ -255,8 +255,8 @@ selftest commands for this built-in.
 - `src/modules/loaders/js/mqjs_stdlib.c`
 - New JavaScript binding sources
 - `src/modules/loaders/elf/elf_loader_sdk_symbols.c`
-- `elf_apps/include/bruce_sdk.h`
-- `elf_apps/README.md`
+- `native_apps/include/bruce_sdk.h`
+- `native_apps/README.md`
 - `src/modules/selftest/selftest.c`
 - New selftest sources
 - `ARCHITECTURE.md`

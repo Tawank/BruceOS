@@ -10,5 +10,5 @@ Bruce ELF applications must instead include `nofrendo_sources.cmake` and add
 links only `libmain.a`, so a regular component dependency would not be included
 in the loadable ELF.
 
-The Bruce implementation is in `elf_apps/examples/nes/main/nes_osd.c` and uses
+The Bruce implementation is in `native_apps/examples/nes/main/nes_osd.c` and uses
 only public `core_sdk` APIs for display, input, storage, memory, and timing.

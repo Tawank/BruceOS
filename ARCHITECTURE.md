@@ -409,9 +409,9 @@ full manual date/time through the same Core API.
 Every ELF contains a non-loadable `.bruce.manifest` section.  The built-in ELF
 loader module reads and validates it before relocation or entry.  The SDK
 macro/tool `BRUCE_APP_MANIFEST(...)` emits this section; authors do not
-hand-write ELF section attributes.  The SDK build tooling in `elf_apps/tools/`
+hand-write ELF section attributes.  The SDK build tooling in `native_apps/tools/`
 post-processes linked ELF files with `objcopy` to add the section as
-non-allocatable and provides template apps in `elf_apps/examples/`.
+non-allocatable and provides template apps in `native_apps/examples/`.
 For recovery and compatibility, a valid ELF32 file for the current chip may
 still launch when its manifest is missing or invalid. The loader logs a warning
 and uses the filename, current Core ABI, an 8 KiB stack, and no predeclared

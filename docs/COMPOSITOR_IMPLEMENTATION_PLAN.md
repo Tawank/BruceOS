@@ -362,8 +362,8 @@ The ELF resolver currently exports no display symbols despite `display.h`
 being public. Update:
 
 - `src/modules/loaders/elf/elf_loader_sdk_symbols.c`.
-- `elf_apps/include/bruce_sdk.h`.
-- `elf_apps/README.md`.
+- `native_apps/include/bruce_sdk.h`.
+- `native_apps/README.md`.
 
 Export existing display primitives plus begin, present, and flush. Do not
 export tile management.
@@ -381,8 +381,8 @@ export tile management.
 - `src/modules/loaders/js/display_js.h`
 - `src/modules/loaders/js/mqjs_stdlib.c`
 - `src/modules/loaders/elf/elf_loader_sdk_symbols.c`
-- `elf_apps/include/bruce_sdk.h`
-- `elf_apps/README.md`
+- `native_apps/include/bruce_sdk.h`
+- `native_apps/README.md`
 - `ARCHITECTURE.md`
 - `migration_plan.md`
 
@@ -458,7 +458,7 @@ Build ELF examples:
 
 ```bash
 source ~/esp/idf/export.sh
-python3 elf_apps/tools/build_apps.py --target esp32s3
+python3 native_apps/tools/build_apps.py --target esp32s3
 ```
 
 Firmware selftests must also be run on hardware after flashing.

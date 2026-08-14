@@ -145,7 +145,7 @@ idf_component_register(SRCS
                     "modules/webui/webui_app.c"
                     "modules/privileged/permissions/permissions_app.c"
                     EMBED_FILES
-                    "../elf_apps/examples/game.elf"
+                    "../native_apps/examples/game.elf"
                     REQUIRES
                     args
                     cjson

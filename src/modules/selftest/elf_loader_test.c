@@ -12,13 +12,13 @@
 
 #include "elf_loader_test.h"
 
-/* elf_apps/examples/game.elf, embedded via EMBED_FILES (src/CMakeLists.txt). */
+/* native_apps/examples/game.elf, embedded via EMBED_FILES (src/CMakeLists.txt). */
 extern const uint8_t game_elf_start[] asm("_binary_game_elf_start");
 extern const uint8_t game_elf_end[] asm("_binary_game_elf_end");
 
 /*
  * Regression coverage for the flash-backed (XIP) ELF relocation path: stages
- * a real, small, executable ELF app (committed at elf_apps/examples/game.elf)
+ * a real, small, executable ELF app (committed at native_apps/examples/game.elf)
  * and runs it through the exact same elf_loader__run_path() ->
  * esp_elf_relocate_xip() -> memory_external swap allocator pipeline that
  * "elf ./apps/game.elf" uses on real hardware. This is the pipeline that

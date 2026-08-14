@@ -9,9 +9,9 @@ external applications.
   public Core SDK APIs and the `BRUCE_APP_MANIFEST()` macro.  Apps that need
   `config`, `dialog`, `display`, `http`, `input`, `stdio`, or `wifi` should also
   include the corresponding `core_sdk/*.h` headers.
-- `elf_apps/examples/elf_loader/` — template for a loader ELF app (`elf_loader.elf`).
-- `elf_apps/examples/game/` — template for a simple ELF app (`game.elf`).
-- `elf_apps/examples/nes/` — Nofrendo NES emulator port using Bruce display, input, and storage APIs.
+- `native_apps/examples/elf_loader/` — template for a loader ELF app (`elf_loader.elf`).
+- `native_apps/examples/game/` — template for a simple ELF app (`game.elf`).
+- `native_apps/examples/nes/` — Nofrendo NES emulator port using Bruce display, input, and storage APIs.
 - `components/nofrendo/` — reusable ESP-IDF component containing the emulator core.
 - `tools/build_apps.py` — builds ELF or WASM apps from the same
   `examples/<app>/main/` sources and the same `manifest.json`.
@@ -21,26 +21,26 @@ external applications.
 Set `IDF_PATH` and run:
 
 ```bash
-python3 elf_apps/tools/build_apps.py --target elf --idf-target esp32s3
+python3 native_apps/tools/build_apps.py --target elf --idf-target esp32s3
 ```
 
 By default the script builds every example. Use `--app` to build a subset; the
 option may be repeated:
 
 ```bash
-python3 elf_apps/tools/build_apps.py --target elf --idf-target esp32s3 --app game
-python3 elf_apps/tools/build_apps.py --target elf --idf-target esp32s3 --app game --app nes
-python3 elf_apps/tools/build_apps.py --target wasm --app game
+python3 native_apps/tools/build_apps.py --target elf --idf-target esp32s3 --app game
+python3 native_apps/tools/build_apps.py --target elf --idf-target esp32s3 --app game --app nes
+python3 native_apps/tools/build_apps.py --target wasm --app game
 ```
 
 Final ELF files are written to:
 
-- `elf_apps/examples/elf_loader.elf`
-- `elf_apps/examples/game.elf`
-- `elf_apps/examples/nes.elf`
+- `native_apps/examples/elf_loader.elf`
+- `native_apps/examples/game.elf`
+- `native_apps/examples/nes.elf`
 
 WASM output is written beside the native output, for example
-`elf_apps/examples/game.wasm`.
+`native_apps/examples/game.wasm`.
 
 The WASM target uses exactly the same sources and manifest as the ELF target.
 The manifest's optional `entryPoint` (default `app_main`) is exported as WASM
@@ -111,14 +111,14 @@ elf ./game.elf
 6. Include `bruce_sdk.h` and export the manifest's `entryPoint` function,
    normally `int app_main(int argc, char **argv)`.
 7. Provide a `manifest.json` in the project root (see the templates) and use
-   `elf_apps/tools/build_apps.py` as a reference for injecting the
+   `native_apps/tools/build_apps.py` as a reference for injecting the
    `.bruce.manifest` section after linking.
 
 Alternatively, you can skip the external `manifest.json` and use the
 `BRUCE_APP_MANIFEST(...)` macro once in your main file to embed the manifest
 section at build time.
 
-See `elf_apps/examples/` for complete examples.
+See `native_apps/examples/` for complete examples.
 
 GUI applications should query their viewport every render loop because a
 background application may be tiled or hidden. Hidden applications receive
