@@ -87,8 +87,10 @@ typedef struct {
     char path[BRUCE_STORAGE_PATH_MAX];
     int argc;
     char **argv;
-    uint8_t *module_bytes;
+    const uint8_t *module_bytes;
+    uint8_t *module_buffer;
     size_t module_size;
+    bruce_ext_mem_loader_image_t module_image;
     wasm_module_t module;
     wasm_module_inst_t module_inst;
 } wasm_loader_process_ctx_t;
@@ -294,7 +296,8 @@ static void wasm_loader__free_process_ctx(wasm_loader_process_ctx_t *ctx) {
     if (ctx->module_inst != NULL) wasm_runtime_deinstantiate(ctx->module_inst);
     if (ctx->module != NULL) wasm_runtime_unload(ctx->module);
     app_runner__free_args(ctx->argv, ctx->argc);
-    free(ctx->module_bytes);
+    free(ctx->module_buffer);
+    if (ctx->module_image.memory.handle != 0) (void)ext_mem_loader__release_image(&ctx->module_image);
     free(ctx);
 }
 
@@ -393,31 +396,18 @@ static int wasm_loader__process_entry(void *context) {
     wasm_loader_process_ctx_t *ctx = (wasm_loader_process_ctx_t *)context;
     char error_buf[128];
 
+    if (ctx->module_image.memory.handle != 0) {
+        bruce_result_t adopt_result = ext_mem_loader__adopt_image(&ctx->module_image);
+        if (adopt_result != BRUCE_OK) return adopt_result;
+        ctx->module_bytes = ctx->module_image.data;
+        ctx->module_size = ctx->module_image.size;
+    }
+
     if (!wasm_loader__init_runtime()) {
         return BRUCE_ERR_INVALID_STATE;
     }
 
-    if (ctx->module_bytes == NULL || ctx->module_size == 0) {
-        return BRUCE_ERR_INVALID_ARGUMENT;
-    }
-
-    wasm_memory_preflight_result_t memory_result =
-        wasm_loader__preflight_memory(ctx->module_bytes, ctx->module_size);
-    if (memory_result != WASM_MEMORY_PREFLIGHT_OK) {
-        stdio__printf(
-            "[wasm_loader] %s: %s\n", wasm_loader__basename(ctx->path),
-            memory_result == WASM_MEMORY_PREFLIGHT_LIMIT ?
-                "linear memory exceeds the four-page limit" : "invalid linear memory declaration"
-        );
-        return memory_result == WASM_MEMORY_PREFLIGHT_LIMIT ?
-                   BRUCE_ERR_RESOURCE_LIMIT : BRUCE_ERR_INVALID_ARGUMENT;
-    }
-
-    ctx->module = wasm_runtime_load(ctx->module_bytes, (uint32_t)ctx->module_size, error_buf, sizeof(error_buf));
-    if (ctx->module == NULL) {
-        stdio__printf("[wasm_loader] %s: %s\n", wasm_loader__basename(ctx->path), error_buf);
-        return BRUCE_ERR_INVALID_ARGUMENT;
-    }
+    if (ctx->module == NULL) return BRUCE_ERR_INVALID_STATE;
 
     const InstantiationArgs instantiate_args = {
         .default_stack_size = WASM_LOADER_EXEC_STACK_BYTES,
@@ -509,68 +499,55 @@ int wasm_loader__run_path(
     ctx->argc = argc + 1;
     ctx->argv = full_argv;
 
-    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
-    bruce_result_t open_result = storage__open(normalized_path, BRUCE_STORAGE_OPEN_READ, &file);
-    if (open_result != BRUCE_OK) {
+    bruce_result_t stage_result = ext_mem_loader__stage_path(normalized_path, &ctx->module_image);
+    if (stage_result != BRUCE_OK) {
         wasm_loader__free_process_ctx(ctx);
         memory__free(inspection);
-        return open_result;
+        return stage_result;
     }
-
-    uint64_t file_size = 0;
-    bruce_result_t seek_result = storage__seek(file, 0, SEEK_END, &file_size);
-    if (seek_result != BRUCE_OK) {
-        storage__close(file);
-        wasm_loader__free_process_ctx(ctx);
-        memory__free(inspection);
-        return seek_result;
-    }
-    if (file_size == 0) {
-        storage__close(file);
-        wasm_loader__free_process_ctx(ctx);
-        memory__free(inspection);
-        return BRUCE_ERR_INVALID_ARGUMENT;
-    }
-    if (file_size > WASM_LOADER_MAX_MODULE_BYTES || file_size >= SIZE_MAX) {
-        storage__close(file);
+    if (ctx->module_image.size > WASM_LOADER_MAX_MODULE_BYTES) {
         wasm_loader__free_process_ctx(ctx);
         memory__free(inspection);
         return BRUCE_ERR_RESOURCE_LIMIT;
     }
-
-    if (file_size > 0) {
-        ctx->module_bytes = malloc((size_t)file_size);
-        if (ctx->module_bytes == NULL) {
-            storage__close(file);
+    ctx->module_bytes = ctx->module_image.data;
+    ctx->module_size = ctx->module_image.size;
+    if (ctx->module_image.memory.backend == BRUCE_MEMORY_BACKEND_SWAP) {
+        size_t module_size = ctx->module_image.size;
+        ctx->module_buffer = malloc(module_size);
+        if (ctx->module_buffer == NULL) {
             wasm_loader__free_process_ctx(ctx);
             memory__free(inspection);
             return BRUCE_ERR_NO_MEMORY;
         }
-        if (storage__seek(file, 0, SEEK_SET, NULL) != BRUCE_OK) {
-            storage__close(file);
-            wasm_loader__free_process_ctx(ctx);
-            memory__free(inspection);
-            return BRUCE_ERR_IO;
-        }
-        size_t total = 0;
-        while (total < (size_t)file_size) {
-            size_t chunk = 0;
-            bruce_result_t read_result = storage__read(file, ctx->module_bytes + total, (size_t)file_size - total, &chunk);
-            if (read_result != BRUCE_OK || chunk == 0) {
-                storage__close(file);
-                wasm_loader__free_process_ctx(ctx);
-                memory__free(inspection);
-                return read_result == BRUCE_OK ? BRUCE_ERR_IO : read_result;
-            }
-            total += chunk;
-        }
-        ctx->module_size = (size_t)file_size;
+        memcpy(ctx->module_buffer, ctx->module_image.data, module_size);
+        (void)ext_mem_loader__release_image(&ctx->module_image);
+        ctx->module_bytes = ctx->module_buffer;
+        ctx->module_size = module_size;
     }
-    storage__close(file);
-    if (ctx->module_bytes == NULL || ctx->module_size == 0) {
+
+    char error_buf[128];
+    wasm_memory_preflight_result_t memory_result =
+        wasm_loader__preflight_memory(ctx->module_bytes, ctx->module_size);
+    if (memory_result != WASM_MEMORY_PREFLIGHT_OK) {
+        stdio__printf(
+            "[wasm_loader] %s: %s\n", wasm_loader__basename(ctx->path),
+            memory_result == WASM_MEMORY_PREFLIGHT_LIMIT ?
+                "linear memory exceeds the four-page limit" : "invalid linear memory declaration"
+        );
         wasm_loader__free_process_ctx(ctx);
         memory__free(inspection);
-        return BRUCE_ERR_NOT_FOUND;
+        return memory_result == WASM_MEMORY_PREFLIGHT_LIMIT ?
+                   BRUCE_ERR_RESOURCE_LIMIT : BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    ctx->module = wasm_runtime_load(
+        (uint8_t *)ctx->module_bytes, (uint32_t)ctx->module_size, error_buf, sizeof(error_buf)
+    );
+    if (ctx->module == NULL) {
+        stdio__printf("[wasm_loader] %s: %s\n", wasm_loader__basename(ctx->path), error_buf);
+        wasm_loader__free_process_ctx(ctx);
+        memory__free(inspection);
+        return BRUCE_ERR_INVALID_ARGUMENT;
     }
 
     bool gui_requested = app_runner__environment_requests_gui(environment, environment_count);

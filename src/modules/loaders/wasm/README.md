@@ -19,8 +19,9 @@ loading fail.
    fixed linear memory; the build exports `__data_end` and `__heap_base` so
    unused declared memory is not allocated. Modules must declare one wasm32
    memory, with initial and declared maximum sizes no greater than four pages.
-   The classic interpreter avoids the fast interpreter's additional
-   precompiled-bytecode memory on constrained ESP32 targets.
+   The classic interpreter is used to minimize runtime memory overhead. When a
+   module is staged in read-only flash swap, the loader copies it to writable
+   RAM before WAMR parses it.
   The manifest `stackSize` controls the separate Core process stack.
 - INT and TERM interrupt WAMR execution and then use normal process teardown.
 - The restricted Bruce ABI requires an exported `int main(int argc, char **argv)`
@@ -38,6 +39,11 @@ wrappers use WAMR's module allocator and return guest offsets, never native ESP
 pointers. The module heap belongs to the process-owned WAMR instance and is
 reclaimed when that instance is deinstantiated during loader cleanup. Shared
 WAMR runtime storage remains on WAMR's global allocator.
+
+The WASM module image is staged through the external-memory loader, so large
+modules can use PSRAM or flash swap instead of consuming one contiguous
+internal-RAM allocation. WAMR runtime state and writable linear memory still
+require RAM-capable allocations.
 
 `memory__get_stats` is available for system memory diagnostics. It writes eleven
 little-endian `uint32_t` fields in the order declared by

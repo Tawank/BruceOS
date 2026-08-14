@@ -20,8 +20,10 @@
 #define APPS_LABEL_MAX (BRUCE_MANIFEST_APP_NAME_MAX + 16u)
 
 typedef struct {
-    char label[APPS_LABEL_MAX];
+    char name[APPS_LABEL_MAX];
+    char label[APPS_LABEL_MAX + 7];
     char path[BRUCE_STORAGE_PATH_MAX];
+    const char *type;
 } apps_entry_t;
 
 static bool apps__has_extension(const char *name, const char *extension) {
@@ -61,8 +63,41 @@ static void apps__set_label(apps_entry_t *app, const char *filename, const char 
     const char *name = inspection != NULL && inspection->manifest.app_name[0] != '\0'
                            ? inspection->manifest.app_name
                            : filename;
-    snprintf(app->label, sizeof(app->label), "%s", name);
+    snprintf(app->name, sizeof(app->name), "%s", name);
+    snprintf(app->label, sizeof(app->label), "%s", app->name);
+    app->type =
+        strcasecmp(extension, ".wasm") == 0 ? "wasm" : (strcasecmp(extension, ".js") == 0 ? "js" : "elf");
     memory__free(inspection);
+}
+
+static void apps__disambiguate_labels(apps_entry_t *apps, size_t count) {
+    for (size_t i = 0; i < count; ++i) {
+        bool duplicate = false;
+        for (size_t j = 0; j < count; ++j) {
+            if (i != j && strcasecmp(apps[i].name, apps[j].name) == 0) {
+                duplicate = true;
+                break;
+            }
+        }
+        if (duplicate) {
+            char name[sizeof(apps[i].label)];
+            const char *type = apps[i].type;
+            size_t suffix_length = strlen(type) + 3u;
+            size_t name_length;
+            snprintf(name, sizeof(name), "%s", apps[i].label);
+            name_length = strlen(name);
+            if (name_length + suffix_length >= sizeof(apps[i].label)) {
+                name_length = sizeof(apps[i].label) - suffix_length - 1u;
+            }
+            memcpy(apps[i].label, name, name_length);
+            apps[i].label[name_length++] = ' ';
+            apps[i].label[name_length++] = '(';
+            memcpy(apps[i].label + name_length, type, strlen(type));
+            name_length += strlen(type);
+            apps[i].label[name_length++] = ')';
+            apps[i].label[name_length] = '\0';
+        }
+    }
 }
 
 static bruce_result_t
@@ -137,6 +172,7 @@ int apps_app_main(int argc, char **argv) {
         return BRUCE_OK;
     }
 
+    apps__disambiguate_labels(apps, count);
     qsort(apps, count, sizeof(*apps), apps__compare);
     bruce_dialog_choice_t *choices = memory__calloc(count, sizeof(*choices));
     if (choices == NULL) {
