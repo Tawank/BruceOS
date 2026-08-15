@@ -7,7 +7,6 @@
 #include "core_sdk/ext_mem_loader.h"
 #include "core_sdk/permission.h"
 #include "core_sdk/runtime.h"
-#include "modules/loaders/elf/elf_loader_app.h"
 #include "modules/loaders/wasm/wasm_loader_app.h"
 #include "platform_api_vmcore.h"
 
@@ -20,7 +19,7 @@ extern const uint8_t game_elf_end[] asm("_binary_game_elf_end");
 /*
  * Regression coverage for the flash-backed (XIP) ELF relocation path: stages
  * a real, small, executable ELF app (committed at native_apps/examples/game.elf)
- * and runs it through the exact same elf_loader__run_path() ->
+ * and runs it through the exact same AppRunner path dispatch ->
  * esp_elf_relocate_xip() -> memory_external swap allocator pipeline that
  * "elf ./apps/game.elf" uses on real hardware. This is the pipeline that
  * regressed with "flash-backed relocation failed (relocate=-5, release=0)":
@@ -45,7 +44,7 @@ bool selftest__run_elf_loader_xip_case(void) {
         return false;
     }
 
-    int result = elf_loader__run_path(path, NULL, BRUCE_LAUNCH_FOREGROUND, NULL, 0);
+    int result = app_runner__run_path(path, NULL, BRUCE_LAUNCH_FOREGROUND);
     if (result > 0) (void)runtime__delay(50);
     storage__remove(path);
 
@@ -56,7 +55,7 @@ bool selftest__run_elf_loader_xip_case(void) {
             return true;
         }
 #endif
-        printf("[selftest] loader/elf_xip: run_path failed (result=%d)\n", result);
+        printf("[selftest] loader/elf_xip: open failed (result=%d)\n", result);
         return false;
     }
 

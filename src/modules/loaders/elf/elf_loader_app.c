@@ -100,7 +100,7 @@ static void elf_loader__cleanup_context(void *context) {
     elf_loader__free_process_ctx((elf_loader_process_ctx_t *)context);
 }
 
-/* Process entry for an ELF already relocated by elf_loader__run_path(). */
+/* Process entry for an ELF already relocated by elf_loader__open(). */
 static int elf_loader__entry(void *context) {
     elf_loader_process_ctx_t *ctx = (elf_loader_process_ctx_t *)context;
     bruce_result_t adopt_result = ext_mem_loader__adopt_xip(&ctx->xip);
@@ -148,9 +148,7 @@ static const esp_elf_xip_ops_t s_xip_ops = {
     .release = elf_loader__xip_release,
 };
 
-/* Loader registry run function: called by app_runner__run_path() or by the
- * built-in "elf" command. */
-int elf_loader__run_path(
+static int elf_loader__open(
     const char *path, const char *arg, bruce_launch_mode_t mode,
     const bruce_environment_variable_t *environment, size_t environment_count
 ) {
@@ -293,7 +291,7 @@ int elf_loader__run_path(
  * named ELF file and passes the remaining arguments to it.  This lets users
  * (and ELF apps themselves) chain loaders: the first loader can be the
  * built-in "elf" command, and a loaded ELF app can call
- * app_runner__run_path() to load another ELF. */
+ * app_runner__run() to load another ELF. */
 static bool elf_loader__append_arg(char *out, size_t out_size, size_t *used, const char *value) {
     size_t needed = *used > 0 ? 1u : 0u;
     needed += 2;
@@ -347,7 +345,7 @@ int elf_loader__app_main(int argc, char **argv) {
     if (process__snapshot(process__current_id(), &snapshot) == BRUCE_OK) {
         mode = snapshot.state == BRUCE_PROCESS_BACKGROUND ? BRUCE_LAUNCH_BACKGROUND : BRUCE_LAUNCH_FOREGROUND;
     }
-    return elf_loader__run_path(path, arg[0] != '\0' ? arg : NULL, mode, NULL, 0);
+    return elf_loader__open(path, arg[0] != '\0' ? arg : NULL, mode, NULL, 0);
 }
 
 void elf_loader__init(void) { elf_set_symbol_resolver(elf_loader__find_symbol); }

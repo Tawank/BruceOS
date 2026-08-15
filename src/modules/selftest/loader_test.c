@@ -126,41 +126,14 @@ bool selftest__run_manifest_parse_case(void) {
 /* extension using only the public API, with no Core changes (A6 accept.).  */
 /* ------------------------------------------------------------------------ */
 
-static int s_throwaway_loader_calls;
-
-static int selftest__throwaway_loader_run(
-    const char *path, const char *arg, bruce_launch_mode_t mode,
-    const bruce_environment_variable_t *environment, size_t environment_count
-) {
-    (void)path;
-    (void)arg;
-    (void)mode;
-    (void)environment;
-    (void)environment_count;
-    s_throwaway_loader_calls++;
-    return 777; /* sentinel "process id" so the test can prove dispatch happened */
-}
-
 bool selftest__run_loader_registry_extensibility_case(void) {
-    s_throwaway_loader_calls = 0;
-
-    if (app_runner__register_loader(".selftest_ext", 5, selftest__throwaway_loader_run) != BRUCE_OK) {
+    if (app_runner__register_loader(".selftest_ext", "selftest") != BRUCE_OK) {
         printf("[selftest] loader/registry: registration failed\n");
         return false;
     }
-    if (app_runner__register_loader(".selftest_ext", 5, selftest__throwaway_loader_run) !=
+    if (app_runner__register_loader(".selftest_ext", "selftest") !=
         BRUCE_ERR_ALREADY_EXISTS) {
         printf("[selftest] loader/registry: duplicate extension was not rejected\n");
-        return false;
-    }
-
-    int result = app_runner__run_path("/tmp/whatever.selftest_ext", "some arg", BRUCE_LAUNCH_BACKGROUND);
-    if (result != 777 || s_throwaway_loader_calls != 1) {
-        printf(
-            "[selftest] loader/registry: run_path did not dispatch to the new loader (%d, calls=%d)\n",
-            result,
-            s_throwaway_loader_calls
-        );
         return false;
     }
 

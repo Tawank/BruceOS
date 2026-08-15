@@ -265,7 +265,7 @@ bool selftest__run_apprunner_resolution_case(void) {
     bool spawned = elf_loader__debug_call_count() == elf_calls;
 #if CONFIG_BRUCE_QEMU_TEST_MODE
     /* QEMU does not implement ESP ELF XIP relocation; reaching it verifies
-     * loader priority without claiming the image executed. */
+     * loader registration without claiming the image executed. */
     spawned = spawned && result == BRUCE_ERR_INVALID_ARGUMENT;
 #else
     spawned = spawned && result > 0;

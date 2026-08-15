@@ -201,9 +201,7 @@ static int js__app_main(void *context) {
     return 0;
 }
 
-/* Loader registry run function: called by app_runner__run_path() or by the
- * built-in "js" command. */
-int js_loader__run_path(
+static int js_loader__open(
     const char *path, const char *arg, bruce_launch_mode_t mode,
     const bruce_environment_variable_t *environment, size_t environment_count
 ) {
@@ -344,5 +342,5 @@ int js_loader__app_main(int argc, char **argv) {
     if (process__snapshot(process__current_id(), &snapshot) == BRUCE_OK) {
         mode = snapshot.state == BRUCE_PROCESS_BACKGROUND ? BRUCE_LAUNCH_BACKGROUND : BRUCE_LAUNCH_FOREGROUND;
     }
-    return js_loader__run_path(path, arg[0] != '\0' ? arg : NULL, mode, NULL, 0);
+    return js_loader__open(path, arg[0] != '\0' ? arg : NULL, mode, NULL, 0);
 }

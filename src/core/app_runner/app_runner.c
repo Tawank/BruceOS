@@ -19,8 +19,9 @@
 
 #define APP_RUNNER_MAX_APPS 64
 #define APP_RUNNER_PATH_MAX 160
-#define APP_RUNNER_MAX_LOADERS 12
-#define APP_RUNNER_LOADER_EXTENSION_MAX 16
+#define APP_RUNNER_MAX_LOADERS 32
+#define APP_RUNNER_LOADER_EXTENSION_MAX 5
+#define APP_RUNNER_LOADER_PROGRAM_MAX 32
 
 typedef struct {
     const char *name;
@@ -33,12 +34,56 @@ static int s_app_count;
 
 typedef struct {
     char extension[APP_RUNNER_LOADER_EXTENSION_MAX];
-    int priority;
-    bruce_loader_run_fn run_fn;
+    char program[APP_RUNNER_LOADER_PROGRAM_MAX];
 } app_runner_loader_t;
 
 static app_runner_loader_t s_loaders[APP_RUNNER_MAX_LOADERS];
 static int s_loader_count;
+
+static bool app_runner__path_has_extension(const char *path, const char *extension);
+
+/* Looks up an override for one opened file. The registry remains unchanged;
+ * missing or unreadable configuration falls back to the built-in mapping. */
+static bool
+app_runner__config_program_for_extension(const char *path, char *program_out, size_t program_out_size) {
+    char *text = NULL;
+    size_t size = 0;
+    if (!storage__read_file("/config/extensions.conf", &text, &size) || text == NULL) return false;
+    bool found = false;
+
+    char *line = text;
+    char *end = text + size;
+    while (line < end) {
+        char *next = memchr(line, '\n', (size_t)(end - line));
+        if (next != NULL) *next = '\0';
+        char *comment = strchr(line, '#');
+        if (comment != NULL) *comment = '\0';
+        char *config_extension = line;
+        while (*config_extension == ' ' || *config_extension == '\t' || *config_extension == '\r')
+            config_extension++;
+        char *program = config_extension;
+        while (*program != '\0' && *program != ' ' && *program != '\t') program++;
+        if (*program != '\0') {
+            *program++ = '\0';
+            while (*program == ' ' || *program == '\t') program++;
+            char *program_end = program + strlen(program);
+            while (program_end > program &&
+                   (program_end[-1] == ' ' || program_end[-1] == '\t' || program_end[-1] == '\r')) {
+                *--program_end = '\0';
+            }
+            if (app_runner__path_has_extension(path, config_extension) &&
+                strlen(program) < program_out_size) {
+                strncpy(program_out, program, program_out_size - 1);
+                program_out[program_out_size - 1] = '\0';
+                found = true;
+            }
+        }
+        if (next == NULL) break;
+        line = next + 1;
+    }
+    storage__free(text);
+    return found;
+}
 
 static bool app_runner__mode_valid(bruce_launch_mode_t mode) {
     return mode == BRUCE_LAUNCH_FOREGROUND || mode == BRUCE_LAUNCH_BACKGROUND;
@@ -94,9 +139,10 @@ static bruce_app_entry_t app_runner__find_builtin(const char *app_name) {
     return NULL;
 }
 
-bruce_result_t app_runner__register_loader(const char *extension, int priority, bruce_loader_run_fn run_fn) {
-    if (extension == NULL || extension[0] != '.' || extension[1] == '\0' || run_fn == NULL ||
-        strlen(extension) >= APP_RUNNER_LOADER_EXTENSION_MAX) {
+bruce_result_t app_runner__register_loader(const char *extension, const char *program) {
+    if (extension == NULL || extension[0] != '.' || extension[1] == '\0' || program == NULL ||
+        program[0] == '\0' || strlen(extension) >= APP_RUNNER_LOADER_EXTENSION_MAX ||
+        strlen(program) >= APP_RUNNER_LOADER_PROGRAM_MAX) {
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
 
@@ -109,8 +155,8 @@ bruce_result_t app_runner__register_loader(const char *extension, int priority, 
     app_runner_loader_t *loader = &s_loaders[s_loader_count++];
     strncpy(loader->extension, extension, APP_RUNNER_LOADER_EXTENSION_MAX - 1);
     loader->extension[APP_RUNNER_LOADER_EXTENSION_MAX - 1] = '\0';
-    loader->priority = priority;
-    loader->run_fn = run_fn;
+    strncpy(loader->program, program, APP_RUNNER_LOADER_PROGRAM_MAX - 1);
+    loader->program[APP_RUNNER_LOADER_PROGRAM_MAX - 1] = '\0';
     return BRUCE_OK;
 }
 
@@ -145,23 +191,6 @@ static app_runner_loader_t *app_runner__find_loader_for_path(const char *path) {
     return NULL;
 }
 
-/* Fills `order` (capacity APP_RUNNER_MAX_LOADERS) with s_loaders indices
- * sorted by ascending priority (stable for equal priorities). Returns the
- * loader count. */
-static int app_runner__loader_priority_order(int *order) {
-    for (int i = 0; i < s_loader_count; ++i) { order[i] = i; }
-    for (int i = 1; i < s_loader_count; ++i) {
-        int key = order[i];
-        int j = i - 1;
-        while (j >= 0 && s_loaders[order[j]].priority > s_loaders[key].priority) {
-            order[j + 1] = order[j];
-            j--;
-        }
-        order[j + 1] = key;
-    }
-    return s_loader_count;
-}
-
 int app_runner__run_path_with_environment(
     const char *path, const char *arg, bruce_launch_mode_t mode,
     const bruce_environment_variable_t *environment, size_t environment_count
@@ -178,11 +207,28 @@ int app_runner__run_path_with_environment(
     }
 
     app_runner_loader_t *loader = app_runner__find_loader_for_path(normalized_path);
-    if (loader == NULL) {
+    char configured_program[APP_RUNNER_LOADER_PROGRAM_MAX];
+    const char *program = loader != NULL ? loader->program : NULL;
+    if (app_runner__config_program_for_extension(
+            normalized_path, configured_program, sizeof(configured_program)
+        )) {
+        program = configured_program;
+    }
+    if (program == NULL) {
         // printf("app_runner__run_path: normalized_path=%s, loader=NULL\n", normalized_path);
         return BRUCE_ERR_NOT_FOUND;
     }
-    return loader->run_fn(normalized_path, arg, mode, environment, environment_count);
+    char loader_arg[APP_RUNNER_PATH_MAX + 1 + 256];
+    int written = snprintf(
+        loader_arg,
+        sizeof(loader_arg),
+        "\"%s\"%s%s",
+        normalized_path,
+        arg != NULL && arg[0] != '\0' ? " " : "",
+        arg != NULL ? arg : ""
+    );
+    if (written < 0 || (size_t)written >= sizeof(loader_arg)) return BRUCE_ERR_INVALID_ARGUMENT;
+    return app_runner__run_with_environment(program, loader_arg, mode, environment, environment_count);
 }
 
 int app_runner__run_path(const char *path, const char *arg, bruce_launch_mode_t mode) {
@@ -205,8 +251,16 @@ int app_runner__spawn_loader_process_owned(
     bruce_loader_process_entry_fn entry, void *context, bruce_loader_process_cleanup_fn cleanup
 ) {
     return app_runner__spawn_loader_process_owned_with_stop(
-        permission_key, gui_requested, mode, stack_size, environment, environment_count,
-        entry, context, cleanup, NULL
+        permission_key,
+        gui_requested,
+        mode,
+        stack_size,
+        environment,
+        environment_count,
+        entry,
+        context,
+        cleanup,
+        NULL
     );
 }
 
@@ -451,20 +505,31 @@ int app_runner__run_with_environment(
         bruce_result_t create_result = process_registry__create(&params, &process_id);
         result = create_result == BRUCE_OK ? (int)process_id : (int)create_result;
     } else {
-        /* 2. every registered loader, tried in ascending priority order,
-         * matching /bin/<app_name><extension>.  Core ships ELF at priority
-         * 10 and JS at priority 20, so ELF still wins if both exist; a
-         * third-party loader slots in the same way at its own priority. */
-        int order[APP_RUNNER_MAX_LOADERS];
-        int loader_count = app_runner__loader_priority_order(order);
+        /* 2. every registered loader, in registration order, matching
+         * /bin/<app_name><extension>. */
         result = BRUCE_ERR_NOT_FOUND;
-        for (int i = 0; i < loader_count; ++i) {
-            app_runner_loader_t *loader = &s_loaders[order[i]];
+        for (int i = 0; i < s_loader_count; ++i) {
+            app_runner_loader_t *loader = &s_loaders[i];
             char path[APP_RUNNER_PATH_MAX];
             int written = snprintf(path, sizeof(path), "/bin/%s%s", app_name, loader->extension);
             if (written < 0 || (size_t)written >= sizeof(path)) { continue; }
             if (storage__exists_internal(path)) {
-                result = loader->run_fn(path, arg, mode, environment, environment_count);
+                char loader_arg[APP_RUNNER_PATH_MAX + 1 + 256];
+                int written_arg = snprintf(
+                    loader_arg,
+                    sizeof(loader_arg),
+                    "\"%s\"%s%s",
+                    path,
+                    arg != NULL && arg[0] != '\0' ? " " : "",
+                    arg != NULL ? arg : ""
+                );
+                if (written_arg < 0 || (size_t)written_arg >= sizeof(loader_arg)) {
+                    result = BRUCE_ERR_INVALID_ARGUMENT;
+                } else {
+                    result = app_runner__run_with_environment(
+                        loader->program, loader_arg, mode, environment, environment_count
+                    );
+                }
                 break;
             }
         }

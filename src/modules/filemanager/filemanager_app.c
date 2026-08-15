@@ -56,17 +56,6 @@ static bool filemanager__is_editable_text(const char *path) {
            (strcasecmp(dot, ".txt") == 0 || strcasecmp(dot, ".json") == 0 || strcasecmp(dot, ".conf") == 0);
 }
 
-static bool filemanager__is_previewable_text(const char *path) {
-    const char *dot = filemanager__extension(path);
-    return dot[0] != '\0' &&
-           (strcasecmp(dot, ".txt") == 0 || strcasecmp(dot, ".json") == 0 || strcasecmp(dot, ".conf") == 0 ||
-            strcasecmp(dot, ".wasm") == 0);
-}
-
-static bool filemanager__is_openable_in_text(const char *path) {
-    return filemanager__is_editable_text(path) || strcasecmp(filemanager__extension(path), ".wasm") == 0;
-}
-
 static bool filemanager__escape_arg(const char *path, char *out, size_t out_size) {
     size_t written = 0;
     for (size_t i = 0; path[i] != '\0'; ++i) {
@@ -82,7 +71,8 @@ static bool filemanager__escape_arg(const char *path, char *out, size_t out_size
     return true;
 }
 
-static bruce_result_t filemanager__run_named_app(const char *app, const char *path, bool gui, bool read_only) {
+static bruce_result_t
+filemanager__run_named_app(const char *app, const char *path, bool gui, bool read_only) {
     char escaped_path[BRUCE_STORAGE_PATH_MAX * 2 + 8];
     char args[BRUCE_STORAGE_PATH_MAX * 2 + 16];
     const char *arg_string = NULL;
@@ -96,30 +86,40 @@ static bruce_result_t filemanager__run_named_app(const char *app, const char *pa
         arg_string = escaped_path;
     }
 
-    const bruce_environment_variable_t gui_env[] = {{.name = "GUI", .value = "1"}};
-    int process = app_runner__run_with_environment(app, arg_string, BRUCE_LAUNCH_FOREGROUND, gui ? gui_env : NULL, gui ? 1u : 0u);
+    const bruce_environment_variable_t gui_env[] = {
+        {.name = "GUI", .value = "1"}
+    };
+    int process = app_runner__run_with_environment(
+        app, arg_string, BRUCE_LAUNCH_FOREGROUND, gui ? gui_env : NULL, gui ? 1u : 0u
+    );
     if (process <= 0) return (bruce_result_t)process;
     return process__wait((bruce_process_id_t)process, UINT32_MAX);
 }
 
 static bruce_result_t filemanager__open_default(const char *path, bool gui) {
-    const bruce_environment_variable_t gui_env[] = {{.name = "GUI", .value = "1"}};
-    int process = app_runner__run_path_with_environment(path, NULL, BRUCE_LAUNCH_FOREGROUND, gui ? gui_env : NULL, gui ? 1u : 0u);
+    const bruce_environment_variable_t gui_env[] = {
+        {.name = "GUI", .value = "1"}
+    };
+    int process = app_runner__run_path_with_environment(
+        path, NULL, BRUCE_LAUNCH_FOREGROUND, gui ? gui_env : NULL, gui ? 1u : 0u
+    );
     if (process <= 0) return (bruce_result_t)process;
     return process__wait((bruce_process_id_t)process, UINT32_MAX);
 }
 
 static bruce_result_t filemanager__pick_open_with_app(const char *path, bool gui) {
     const bruce_dialog_choice_t choices[] = {
-        {.label = "Text",   .value = "text"  },
-        {.label = "Image",  .value = "image" },
-        {.label = "Wasm",   .value = "wasm"  },
-        {.label = "ELF",    .value = "elf"   },
-        {.label = "JavaScript", .value = "js"},
-        {.label = "Cancel", .value = "cancel"},
+        {.label = "Text",       .value = "text"  },
+        {.label = "Image",      .value = "image" },
+        {.label = "Wasm",       .value = "wasm"  },
+        {.label = "ELF",        .value = "elf"   },
+        {.label = "JavaScript", .value = "js"    },
+        {.label = "Cancel",     .value = "cancel"},
     };
     size_t selected = 0;
-    bruce_result_t result = dialog__choice("Open with", filemanager__basename(path), choices, sizeof(choices) / sizeof(choices[0]), &selected);
+    bruce_result_t result = dialog__choice(
+        "Open with", filemanager__basename(path), choices, sizeof(choices) / sizeof(choices[0]), &selected
+    );
     if (result != BRUCE_OK || strcmp(choices[selected].value, "cancel") == 0)
         return result == BRUCE_OK ? BRUCE_ERR_CANCELLED : result;
 
@@ -176,12 +176,8 @@ static bruce_result_t filemanager__read_preview(const char *path, char **out_tex
 }
 
 static bruce_result_t filemanager__view_file(const char *path, bool gui) {
-    if (image__is_supported_path(path)) {
-        return filemanager__open_default(path, gui);
-    }
-    if (filemanager__is_editable_text(path)) {
-        return filemanager__run_named_app("text", path, gui, true);
-    }
+    if (image__is_supported_path(path)) { return filemanager__open_default(path, gui); }
+    if (filemanager__is_editable_text(path)) { return filemanager__run_named_app("text", path, gui, true); }
 
     char *text = NULL;
     bool truncated = false;
@@ -266,13 +262,13 @@ static bruce_result_t filemanager__delete_file(const char *path) {
 int filemanager_app_main(int argc, char **argv) {
     bool gui = runtime__gui_requested();
     const bruce_dialog_choice_t actions[] = {
-        {.label = "Open",        .value = "open"  },
+        {.label = "Open",         .value = "open"  },
         {.label = "Open with...", .value = "openw" },
-        {.label = "View",        .value = "view"  },
-        {.label = "Edit",        .value = "edit"  },
-        {.label = "File info",   .value = "info"  },
-        {.label = "Delete",      .value = "delete"},
-        {.label = "Back",        .value = "back"  },
+        {.label = "View",         .value = "view"  },
+        {.label = "Edit",         .value = "edit"  },
+        {.label = "File info",    .value = "info"  },
+        {.label = "Delete",       .value = "delete"},
+        {.label = "Back",         .value = "back"  },
     };
     (void)argc;
     (void)argv;

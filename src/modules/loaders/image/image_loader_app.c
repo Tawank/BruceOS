@@ -74,7 +74,7 @@ static bool image_loader__escape_arg(const char *path, char *out, size_t out_siz
     return true;
 }
 
-int image_loader__run_path(
+static int image_loader__open(
     const char *path, const char *arg, bruce_launch_mode_t mode,
     const bruce_environment_variable_t *environment, size_t environment_count
 ) {
@@ -116,5 +116,5 @@ int image_app_main(int argc, char **argv) {
         snapshot.state == BRUCE_PROCESS_BACKGROUND) {
         mode = BRUCE_LAUNCH_BACKGROUND;
     }
-    return image_loader__run_path(path, NULL, mode, NULL, 0);
+    return image_loader__open(path, NULL, mode, NULL, 0);
 }

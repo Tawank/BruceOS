@@ -4,7 +4,6 @@
 #include <stdio.h>
 
 #include "core_sdk/ext_mem_loader.h"
-#include "core_sdk/process.h"
 
 #include "core/autostart/autostart.h"
 #include "core/config/config.h"
@@ -115,17 +114,17 @@ void app_runner__register_defaults(void) {
     (void)app_runner__register("ssh", ssh_app_main, SSH_STACK_BYTES);
     (void)app_runner__register("ssh-keygen", ssh_keygen_app_main, SSH_KEYGEN_STACK_BYTES);
 
-    (void)app_runner__register_loader(".elf", 10, elf_loader__run_path);
-    (void)app_runner__register_loader(".wasm", 15, wasm_loader__run_path);
-    (void)app_runner__register_loader(".js", 20, js_loader__run_path);
-    (void)app_runner__register_loader(".sh", 25, shell_loader__run_path);
-    (void)app_runner__register_loader(".jpg", 30, image_loader__run_path);
-    (void)app_runner__register_loader(".jpeg", 30, image_loader__run_path);
-    (void)app_runner__register_loader(".png", 30, image_loader__run_path);
-    (void)app_runner__register_loader(".gif", 30, image_loader__run_path);
-    (void)app_runner__register_loader(".txt", 40, text__run_path);
-    (void)app_runner__register_loader(".json", 40, text__run_path);
-    (void)app_runner__register_loader(".conf", 40, text__run_path);
+    (void)app_runner__register_loader(".elf", "elf");
+    (void)app_runner__register_loader(".wasm", "wasm");
+    (void)app_runner__register_loader(".js", "js");
+    (void)app_runner__register_loader(".sh", "shell");
+    (void)app_runner__register_loader(".jpg", "image");
+    (void)app_runner__register_loader(".jpeg", "image");
+    (void)app_runner__register_loader(".png", "image");
+    (void)app_runner__register_loader(".gif", "image");
+    (void)app_runner__register_loader(".txt", "text");
+    (void)app_runner__register_loader(".json", "text");
+    (void)app_runner__register_loader(".conf", "text");
 
     elf_loader__init();
 }
@@ -140,15 +139,6 @@ bool init_user_interface(void) {
     bool ui_ok = display__init() == BRUCE_OK;
     if (!ui_ok) printf("Display initialization failed; continuing without LCD\n");
     return ui_ok;
-}
-
-static void app_main__wait_for_exit(int process_id) {
-    if (process_id <= 0) return;
-    bruce_process_status_t status;
-    for (;;) {
-        bruce_result_t waited = process__wait_status((bruce_process_id_t)process_id, 200, &status);
-        if (waited != BRUCE_ERR_TIMEOUT) return;
-    }
 }
 
 #if CONFIG_BRUCE_QEMU_TEST_MODE

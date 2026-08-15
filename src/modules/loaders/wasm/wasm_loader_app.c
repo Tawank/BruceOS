@@ -427,7 +427,7 @@ static int wasm_loader__process_entry(void *context) {
     return wasm_loader__entry(ctx);
 }
 
-int wasm_loader__run_path(
+static int wasm_loader__open(
     const char *path, const char *arg, bruce_launch_mode_t mode,
     const bruce_environment_variable_t *environment, size_t environment_count
 ) {
@@ -632,7 +632,7 @@ int wasm_loader__app_main(int argc, char **argv) {
         snapshot.state == BRUCE_PROCESS_BACKGROUND) {
         mode = BRUCE_LAUNCH_BACKGROUND;
     }
-    int result = wasm_loader__run_path(path, arg[0] != '\0' ? arg : NULL, mode, NULL, 0);
+    int result = wasm_loader__open(path, arg[0] != '\0' ? arg : NULL, mode, NULL, 0);
 #if defined(BRUCE_WASM_EXTERNAL_ELF) && BRUCE_WASM_EXTERNAL_ELF
     /* Child callbacks execute from this ELF image, so keep its parent process
      * alive until Core has finished the child and its owned cleanup. */

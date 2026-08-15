@@ -231,30 +231,3 @@ int shell_app_main(int argc, char **argv) {
     memory__free(script);
     return status;
 }
-
-bool shell__quote_arg(const char *text, char *out, size_t capacity) {
-    size_t used = 0;
-    if (capacity < 3) return false;
-    out[used++] = '"';
-    for (const char *p = text; *p != '\0'; ++p) {
-        if ((*p == '\\' || *p == '"') && used + 1 >= capacity) return false;
-        if (*p == '\\' || *p == '"') out[used++] = '\\';
-        if (used + 1 >= capacity) return false;
-        out[used++] = *p;
-    }
-    if (used + 2 > capacity) return false;
-    out[used++] = '"';
-    out[used] = '\0';
-    return true;
-}
-
-int shell_loader__run_path(
-    const char *path, const char *arg, bruce_launch_mode_t mode,
-    const bruce_environment_variable_t *environment, size_t environment_count
-) {
-    if (path == NULL) return BRUCE_ERR_INVALID_PATH;
-    if (arg != NULL && arg[0] != '\0') return BRUCE_ERR_UNSUPPORTED;
-    char arguments[BRUCE_STORAGE_PATH_MAX * 2];
-    if (!shell__quote_arg(path, arguments, sizeof(arguments))) return BRUCE_ERR_INVALID_PATH;
-    return app_runner__run_with_environment("shell", arguments, mode, environment, environment_count);
-}

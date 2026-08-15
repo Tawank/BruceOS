@@ -96,7 +96,7 @@ registration contract and no format gets special Core access.
   needed — `core/manifest` owns format-aware extraction so it is never
   duplicated.
 - Add the built-in ELF loader module (`src/modules/loaders/elf/`): registers
-  `.elf` at priority 10, calls `manifest__inspect_elf()` for mandatory
+  `.elf`, calls `manifest__inspect_elf()` for mandatory
   manifest validation, integrates the Espressif ELF loader with
   `app_runner__spawn_loader_process()`-owned allocations, exposes a public
   symbol allowlist, and rejects imported `malloc`/`free`.  Its
@@ -108,7 +108,7 @@ registration contract and no format gets special Core access.
 - Provide SDK ELF build tooling (`native_apps/include/bruce_sdk.h`,
   `native_apps/tools/build_apps.py`) and template apps in `native_apps/examples/`.
 - Add the built-in JavaScript loader module (`src/modules/loaders/js/`):
-  registers `.js` at priority 20, parses an optional leading manifest with
+  registers `.js`, parses an optional leading manifest with
   zero-permission defaults, and uses `memory__malloc()` for the mQuickJS
   VM/context; preserves JS timers, `runtime.main()`, and optional
   `app_main(argv)`.  Its process entry is `js__app_main(void *context)`.

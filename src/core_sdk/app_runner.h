@@ -49,7 +49,7 @@ int app_runner__run_with_environment(
 bruce_result_t app_runner__run_command(const char *command_line, bruce_launch_mode_t default_mode);
 
 /* Shell-style tokenizer shared by app_runner__run()'s own named resolution
- * and by every loader module's run_fn, so quoting/escaping rules are
+ * and by loader commands, so quoting/escaping rules are
  * identical everywhere: splits on runs of spaces/tabs; supports single
  * quotes (fully literal), double quotes (backslash escapes only `\"` and
  * `\\`), and a bare backslash outside quotes to escape the next character.

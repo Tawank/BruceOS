@@ -5,7 +5,7 @@
  *
  * A loader module turns a file of one specific extension into a running
  * Core process by registering itself here.  Core ships built-in ELF
- * (".elf", priority 10) and JavaScript (".js", priority 20) loader modules,
+ * (".elf") and JavaScript (".js") loader modules,
  * but neither gets any Core access that a third-party loader module (a
  * ".py" loader, for example) registering the same way would not also get.
  */
@@ -18,12 +18,6 @@
 #include "core_sdk/memory.h"
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
-
-/* Matches app_runner__run_path_with_environment()'s internal dispatch. */
-typedef int (*bruce_loader_run_fn)(
-    const char *path, const char *arg, bruce_launch_mode_t mode,
-    const bruce_environment_variable_t *environment, size_t environment_count
-);
 
 /* Entry point for a process created by app_runner__spawn_loader_process();
  * `context` is the loader's own opaque pointer (e.g. a struct holding the
@@ -76,14 +70,11 @@ const char *ext_mem_loader__last_error_message(void);
  * needs a newer Bruce version; other results use the SDK error description. */
 void ext_mem_loader__format_error_message(const char *action, int result, char *out_message, size_t out_size);
 
-/* Registers a loader for `extension` (must start with '.', e.g. ".elf").
- * `priority` breaks ties when app_runner__run()'s named resolution finds
- * more than one candidate file for the same app name; lower values are
- * tried first.  Registration happens once at boot, before the first
- * named-run or path-run call.  Returns BRUCE_ERR_ALREADY_EXISTS for a
- * duplicate extension and BRUCE_ERR_RESOURCE_LIMIT if the registry is
- * full. */
-bruce_result_t app_runner__register_loader(const char *extension, int priority, bruce_loader_run_fn run_fn);
+/* Registers `program` to handle files ending in `extension` (which must start
+ * with '.', e.g. ".elf"). `program` is resolved through the normal AppRunner
+ * command registry and receives the matched path as its first argument.
+ * Registration order determines named resolution. */
+bruce_result_t app_runner__register_loader(const char *extension, const char *program);
 
 /* Starts an arbitrary absolute path via whichever loader is registered for
  * its extension.  Used directly by `execute`-permission callers (file

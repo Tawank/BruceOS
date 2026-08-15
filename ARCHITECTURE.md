@@ -177,17 +177,19 @@ stop at the first positional so forwarded `--` tokens remain data.
 Resolution is deterministic and never scans directories:
 
 1. registered built-in module;
-2. every registered loader, tried in ascending priority order, matching
+2. every registered loader, tried in registration order, matching
    `/bin/<app_name><extension>`;
 3. `BRUCE_ERR_NOT_FOUND`.
 
-Core ships a built-in ELF loader module registered at priority 10 and a
-built-in JavaScript loader module registered at priority 20, so ELF still
-wins if both `/bin/<app_name>.elf` and `/bin/<app_name>.js` exist.  A
-third-party loader module (a `.py` loader, for example) registers its own
-extension and priority the same way and is resolved by the same loop, with no
-Core change required.  Duplicate built-in command names and duplicate loader
-extensions are both startup registration errors.
+Core ships built-in ELF and JavaScript loader mappings, so ELF still wins if
+both `/bin/<app_name>.elf` and `/bin/<app_name>.js` exist. A third-party loader
+can register an extension and the name of the program that handles it, with no
+Core change required. Duplicate built-in command names and duplicate loader
+extensions are both startup registration errors. Mappings in
+`/config/extensions.conf` is read when AppRunner opens a path, allowing users to
+replace defaults or add extensions without a restart. If the file has no
+matching entry, the built-in mapping is used. Each non-comment line contains an
+extension and program name separated by whitespace, for example `.py python`.
 
 Any caller — including `app_runner__run()` itself — that needs to start an
 arbitrary path rather than a `/bin/<name>` command uses the loader-agnostic:
@@ -214,14 +216,13 @@ decoding/relocating/interpreting its content and running it.  It registers
 itself with:
 
 ```c
-bruce_result_t app_runner__register_loader(const char *extension, int priority,
-                                            bruce_loader_run_fn run_fn);
+bruce_result_t app_runner__register_loader(const char *extension,
+                                            const char *program);
 ```
 
-`extension` includes the leading dot (for example `.elf`); `priority` breaks
-ties when more than one candidate file matches an app name, lower first.
-`run_fn` receives the path, argument text, launch mode, and temporary environment
-overlay used by `app_runner__run_path_with_environment()`.
+`extension` includes the leading dot (for example `.elf`). `program` names the
+AppRunner command that receives the matched path as its first argument, along
+with any forwarded argument text and environment overlay.
 Registration happens once at boot, alongside built-in command registration, in main.c, 
 before the first named-run or path-run call. A duplicate extension registration is a startup
 error, the same as a duplicate built-in command name.

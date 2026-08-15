@@ -482,36 +482,3 @@ int text_app_main(int argc, char **argv) {
     memory__free(editor.data);
     return result;
 }
-
-static bool text__escape_arg(const char *path, char *out, size_t out_size) {
-    size_t written = 0;
-    for (size_t i = 0; path[i] != '\0'; ++i) {
-        if (path[i] == ' ' || path[i] == '\t' || path[i] == '\\' || path[i] == '\'' || path[i] == '"') {
-            if (written + 1u >= out_size) return false;
-            out[written++] = '\\';
-        }
-        if (written + 1u >= out_size) return false;
-        out[written++] = path[i];
-    }
-    if (written + 1u > out_size) return false;
-    out[written] = '\0';
-    return true;
-}
-
-int text__run_path(
-    const char *path, const char *arg, bruce_launch_mode_t mode,
-    const bruce_environment_variable_t *environment, size_t environment_count
-) {
-    (void)arg;
-    if (path == NULL || !text__has_supported_extension(path)) return BRUCE_ERR_INVALID_PATH;
-    char escaped_path[BRUCE_STORAGE_PATH_MAX * 2 + 8];
-    if (!text__escape_arg(path, escaped_path, sizeof(escaped_path))) return BRUCE_ERR_INVALID_PATH;
-
-    bruce_environment_variable_t merged[BRUCE_ENVIRONMENT_MAX_VARIABLES];
-    size_t merged_count = 0;
-    for (size_t i = 0; i < environment_count && merged_count < BRUCE_ENVIRONMENT_MAX_VARIABLES - 1u; ++i) {
-        merged[merged_count++] = environment[i];
-    }
-    merged[merged_count++] = (bruce_environment_variable_t){.name = "GUI", .value = "1"};
-    return app_runner__run_with_environment("text", escaped_path, mode, merged, merged_count);
-}
