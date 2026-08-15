@@ -34,7 +34,8 @@ static void image__png_read(png_structp png, png_bytep out, size_t count) {
 
 typedef struct {
     uint8_t *row;
-    uint16_t *pixels;
+    uint16_t *out_row;
+    bruce_memory_object_t pixels;
 } png_allocations_t;
 
 static bruce_result_t image__decode_png_input(
@@ -81,40 +82,66 @@ static bruce_result_t image__decode_png_input(
     }
     size_t row_size = png_get_rowbytes(png, png_info);
     allocations.row = memory__malloc(row_size);
-    allocations.pixels = memory__malloc((size_t)out_width * out_height * sizeof(*allocations.pixels));
-    if (allocations.row == NULL || allocations.pixels == NULL) {
+    allocations.out_row = memory__malloc((size_t)out_width * sizeof(*allocations.out_row));
+    if (allocations.row == NULL || allocations.out_row == NULL) {
         result = BRUCE_ERR_NO_MEMORY;
         goto cleanup;
     }
+    /* Inflate the first IDAT row before reserving the output so libpng's lazy
+     * zlib window allocation gets the largest available internal block. */
+    png_read_row(png, allocations.row, NULL);
+    result = memory__external_alloc(
+        (size_t)out_width * out_height * sizeof(*allocations.out_row), &allocations.pixels
+    );
+    if (result != BRUCE_OK) goto cleanup;
+    uint8_t bg_r = (uint8_t)(((options->background >> 11) & 0x1f) * 255 / 31);
+    uint8_t bg_g = (uint8_t)(((options->background >> 5) & 0x3f) * 255 / 63);
+    uint8_t bg_b = (uint8_t)((options->background & 0x1f) * 255 / 31);
+    uint32_t oy = 0;
     for (png_uint_32 sy = 0; sy < source_height; ++sy) {
-        png_read_row(png, allocations.row, NULL);
-        uint32_t oy = (uint32_t)(((uint64_t)sy * out_height) / source_height);
-        uint16_t *out = allocations.pixels + (size_t)oy * out_width;
-        for (png_uint_32 sx = 0; sx < source_width; ++sx) {
-            uint32_t ox = (uint32_t)(((uint64_t)sx * out_width) / source_width);
-            const uint8_t *rgba = allocations.row + sx * 4;
-            uint8_t alpha = rgba[3];
-            uint8_t bg_r = (uint8_t)(((options->background >> 11) & 0x1f) * 255 / 31);
-            uint8_t bg_g = (uint8_t)(((options->background >> 5) & 0x3f) * 255 / 63);
-            uint8_t bg_b = (uint8_t)((options->background & 0x1f) * 255 / 31);
-            out[ox] = display__color565(
-                (uint8_t)((rgba[0] * alpha + bg_r * (255 - alpha)) / 255),
-                (uint8_t)((rgba[1] * alpha + bg_g * (255 - alpha)) / 255),
-                (uint8_t)((rgba[2] * alpha + bg_b * (255 - alpha)) / 255)
+        bool row_converted = false;
+        while (oy < out_height && (uint32_t)(((uint64_t)oy * source_height) / out_height) == sy) {
+            if (!row_converted) {
+                for (uint32_t ox = 0; ox < out_width; ++ox) {
+                    uint32_t sx = (uint32_t)(((uint64_t)ox * source_width) / out_width);
+                    const uint8_t *rgba = allocations.row + sx * 4;
+                    uint8_t alpha = rgba[3];
+                    allocations.out_row[ox] = display__color565(
+                        (uint8_t)((rgba[0] * alpha + bg_r * (255 - alpha)) / 255),
+                        (uint8_t)((rgba[1] * alpha + bg_g * (255 - alpha)) / 255),
+                        (uint8_t)((rgba[2] * alpha + bg_b * (255 - alpha)) / 255)
+                    );
+                }
+                row_converted = true;
+            }
+            result = memory__external_write(
+                &allocations.pixels,
+                (size_t)oy * out_width * sizeof(*allocations.out_row),
+                allocations.out_row,
+                (size_t)out_width * sizeof(*allocations.out_row)
             );
+            if (result != BRUCE_OK) goto cleanup;
+            ++oy;
         }
+        if (sy + 1 < source_height) png_read_row(png, allocations.row, NULL);
     }
     png_read_end(png, NULL);
-    bitmap->pixels = allocations.pixels;
+    const void *pixels = NULL;
+    result = memory__external_map(&allocations.pixels, &pixels);
+    if (result != BRUCE_OK) goto cleanup;
+    bitmap->pixels = (uint16_t *)pixels;
     bitmap->width = out_width;
     bitmap->height = out_height;
     bitmap->source_width = (uint16_t)source_width;
     bitmap->source_height = (uint16_t)source_height;
     bitmap->format = BRUCE_IMAGE_FORMAT_PNG;
-    allocations.pixels = NULL;
+    bitmap->backing = allocations.pixels;
+    allocations.pixels = (bruce_memory_object_t){0};
     result = BRUCE_OK;
 cleanup:
-    memory__free(allocations.pixels);
+    if (allocations.pixels.backend != BRUCE_MEMORY_BACKEND_INVALID)
+        (void)memory__external_free(&allocations.pixels);
+    memory__free(allocations.out_row);
     memory__free(allocations.row);
     png_destroy_read_struct(&png, &png_info, NULL);
     return (bruce_result_t)result;

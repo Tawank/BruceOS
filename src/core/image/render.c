@@ -6,7 +6,9 @@
 
 void image__bitmap_release(image_bitmap_t *bitmap) {
     if (bitmap == NULL) return;
-    memory__free(bitmap->pixels);
+    if (bitmap->backing.backend != BRUCE_MEMORY_BACKEND_INVALID)
+        (void)memory__external_free(&bitmap->backing);
+    else memory__free(bitmap->pixels);
     *bitmap = (image_bitmap_t){0};
 }
 
@@ -15,8 +17,7 @@ void image__fit_size(
 ) {
     uint32_t width = source_width, height = source_height;
     uint32_t viewport_width = (uint32_t)display__width(), viewport_height = (uint32_t)display__height();
-    if (fit && viewport_width > 0 && viewport_height > 0 &&
-        (width > viewport_width || height > viewport_height)) {
+    if (fit && viewport_width > 0 && viewport_height > 0) {
         if ((uint64_t)viewport_width * height <= (uint64_t)viewport_height * width) {
             height = (height * viewport_width) / width;
             width = viewport_width;
