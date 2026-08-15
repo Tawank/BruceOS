@@ -1,4 +1,0 @@
-# Point clangd at this example's own ESP-IDF compile database so it does not
-# fall back to the firmware-wide build/compile_commands.json at the repo root.
-CompileFlags:
-  CompilationDatabase: build/
