@@ -71,6 +71,10 @@ void app_runner__free_args(char **argv, int argc);
  * returns a non-NULL, statically-allocated string. */
 const char *app_runner__result_to_string(int result);
 
+/* Returns the configured icon for a file path, or "file" when no icon is
+ * configured for its extension. The returned string is owned by Core. */
+const char *app_runner__icon_for_path(const char *path);
+
 /* Scans an environment overlay array (not yet applied to any process) for
  * name "GUI"; returns true iff the last matching entry's value is "1".
  * Shared by app_runner__run()'s built-in path and by loader modules, which

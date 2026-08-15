@@ -5,6 +5,7 @@
 #include "core_sdk/display.h"
 #include "core_sdk/input.h"
 #include "core_sdk/icon.h"
+#include "core_sdk/app_runner.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
@@ -1096,6 +1097,7 @@ static bruce_result_t dialog__gui_pick_file(
             values[choice_count] = "..";
             choices[choice_count].label = "[..]";
             choices[choice_count].value = "..";
+            choices[choice_count].icon_name = "folder-open";
             choice_count++;
         }
         for (size_t i = 0; i < count && (size_t)choice_count < count + 1; ++i) {
@@ -1106,6 +1108,9 @@ static bruce_result_t dialog__gui_pick_file(
             values[choice_count] = entries[i].name;
             choices[choice_count].label = entries[i].name;
             choices[choice_count].value = entries[i].name;
+            choices[choice_count].icon_name = entries[i].type == BRUCE_STORAGE_ENTRY_DIRECTORY
+                                                   ? "folder"
+                                                   : app_runner__icon_for_path(entries[i].name);
             choice_count++;
         }
 

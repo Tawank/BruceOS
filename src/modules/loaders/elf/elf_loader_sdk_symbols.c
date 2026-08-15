@@ -168,6 +168,7 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(app_runner__spawn_loader_process_owned),
     ESP_ELFSYM_EXPORT(app_runner__spawn_loader_process_owned_with_stop),
     ESP_ELFSYM_EXPORT(app_runner__run_command),
+    ESP_ELFSYM_EXPORT(app_runner__icon_for_path),
 
     /* Runtime dependencies used by statically linked external interpreters. */
     ESP_ELFSYM_EXPORT(pthread_self),

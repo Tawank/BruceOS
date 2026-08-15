@@ -6,6 +6,7 @@
 
 #include "core_sdk/app_runner.h"
 #include "core_sdk/ext_mem_loader.h"
+#include "core_sdk/icon.h"
 #include "core_sdk/permission.h"
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
@@ -17,11 +18,53 @@
 #include <string.h>
 #include <strings.h>
 
+#include "cJSON.h"
+
 #define APP_RUNNER_MAX_APPS 64
 #define APP_RUNNER_PATH_MAX 160
 #define APP_RUNNER_MAX_LOADERS 32
 #define APP_RUNNER_LOADER_EXTENSION_MAX 5
 #define APP_RUNNER_LOADER_PROGRAM_MAX 32
+
+static const char *APP_RUNNER_DEFAULT_EXTENSIONS_JSON =
+    "{\"extensions\":{"
+    "\".elf\":{\"program\":\"elf\",\"icon\":\"application\"},"
+    "\".wasm\":{\"program\":\"wasm\",\"icon\":\"application\"},"
+    "\".js\":{\"program\":\"js\",\"icon\":\"file-code\"},"
+    "\".sh\":{\"program\":\"shell\",\"icon\":\"file-code\"},"
+    "\".jpg\":{\"program\":\"image\",\"icon\":\"file-image\"},"
+    "\".jpeg\":{\"program\":\"image\",\"icon\":\"file-image\"},"
+    "\".png\":{\"program\":\"image\",\"icon\":\"file-image\"},"
+    "\".gif\":{\"program\":\"image\",\"icon\":\"file-image\"},"
+    "\".bmp\":{\"icon\":\"file-image\"},"
+    "\".webp\":{\"icon\":\"file-image\"},"
+    "\".txt\":{\"program\":\"text\",\"icon\":\"file-document\"},"
+    "\".md\":{\"icon\":\"file-document\"},"
+    "\".log\":{\"icon\":\"file-document\"},"
+    "\".json\":{\"program\":\"text\",\"icon\":\"application-braces\"},"
+    "\".conf\":{\"program\":\"text\",\"icon\":\"file-cog\"},"
+    "\".cfg\":{\"icon\":\"file-cog\"},"
+    "\".ini\":{\"icon\":\"file-cog\"},"
+    "\".c\":{\"icon\":\"file-code\"},"
+    "\".h\":{\"icon\":\"file-code\"},"
+    "\".cpp\":{\"icon\":\"file-code\"},"
+    "\".py\":{\"icon\":\"file-code\"},"
+    "\".html\":{\"icon\":\"file-code\"},"
+    "\".css\":{\"icon\":\"file-code\"},"
+    "\".mp3\":{\"icon\":\"file-music\"},"
+    "\".wav\":{\"icon\":\"file-music\"},"
+    "\".ogg\":{\"icon\":\"file-music\"},"
+    "\".flac\":{\"icon\":\"file-music\"},"
+    "\".mp4\":{\"icon\":\"file-video\"},"
+    "\".avi\":{\"icon\":\"file-video\"},"
+    "\".mkv\":{\"icon\":\"file-video\"},"
+    "\".mov\":{\"icon\":\"file-video\"},"
+    "\".zip\":{\"icon\":\"zip-box\"},"
+    "\".7z\":{\"icon\":\"zip-box\"},"
+    "\".rar\":{\"icon\":\"zip-box\"},"
+    "\".tar\":{\"icon\":\"zip-box\"},"
+    "\".gz\":{\"icon\":\"zip-box\"}"
+    "}}";
 
 typedef struct {
     const char *name;
@@ -39,50 +82,69 @@ typedef struct {
 
 static app_runner_loader_t s_loaders[APP_RUNNER_MAX_LOADERS];
 static int s_loader_count;
+static cJSON *s_extension_config;
+static bool s_extension_config_loaded;
 
 static bool app_runner__path_has_extension(const char *path, const char *extension);
 
-/* Looks up an override for one opened file. The registry remains unchanged;
- * missing or unreadable configuration falls back to the built-in mapping. */
-static bool
-app_runner__config_program_for_extension(const char *path, char *program_out, size_t program_out_size) {
+static void app_runner__load_extension_config(void) {
+    if (s_extension_config_loaded) return;
+    s_extension_config_loaded = true;
+
     char *text = NULL;
     size_t size = 0;
-    if (!storage__read_file("/config/extensions.conf", &text, &size) || text == NULL) return false;
-    bool found = false;
-
-    char *line = text;
-    char *end = text + size;
-    while (line < end) {
-        char *next = memchr(line, '\n', (size_t)(end - line));
-        if (next != NULL) *next = '\0';
-        char *comment = strchr(line, '#');
-        if (comment != NULL) *comment = '\0';
-        char *config_extension = line;
-        while (*config_extension == ' ' || *config_extension == '\t' || *config_extension == '\r')
-            config_extension++;
-        char *program = config_extension;
-        while (*program != '\0' && *program != ' ' && *program != '\t') program++;
-        if (*program != '\0') {
-            *program++ = '\0';
-            while (*program == ' ' || *program == '\t') program++;
-            char *program_end = program + strlen(program);
-            while (program_end > program &&
-                   (program_end[-1] == ' ' || program_end[-1] == '\t' || program_end[-1] == '\r')) {
-                *--program_end = '\0';
-            }
-            if (app_runner__path_has_extension(path, config_extension) &&
-                strlen(program) < program_out_size) {
-                strncpy(program_out, program, program_out_size - 1);
-                program_out[program_out_size - 1] = '\0';
-                found = true;
-            }
-        }
-        if (next == NULL) break;
-        line = next + 1;
+    if (storage__read_file("/config/extensions.conf", &text, &size) && text != NULL) {
+        s_extension_config = cJSON_ParseWithLength(text, size);
+        storage__free(text);
+        if (s_extension_config != NULL && cJSON_IsObject(s_extension_config)) return;
+        cJSON_Delete(s_extension_config);
+        s_extension_config = NULL;
     }
-    storage__free(text);
-    return found;
+
+    s_extension_config = cJSON_Parse(APP_RUNNER_DEFAULT_EXTENSIONS_JSON);
+    if (s_extension_config != NULL) {
+        (void)storage__mkdir_internal("/config");
+        (void)storage__write_file_atomic(
+            "/config/extensions.conf",
+            APP_RUNNER_DEFAULT_EXTENSIONS_JSON,
+            strlen(APP_RUNNER_DEFAULT_EXTENSIONS_JSON)
+        );
+    }
+}
+
+static cJSON *app_runner__extension_entry(const char *path) {
+    app_runner__load_extension_config();
+    if (s_extension_config == NULL) return NULL;
+    cJSON *extensions = cJSON_GetObjectItemCaseSensitive(s_extension_config, "extensions");
+    if (!cJSON_IsObject(extensions)) return NULL;
+    const char *dot = strrchr(path, '.');
+    if (dot == NULL) return NULL;
+    return cJSON_GetObjectItemCaseSensitive(extensions, dot);
+}
+
+/* Looks up an override for one opened file. */
+static bool app_runner__config_program_for_extension(
+    const char *path, char *program_out, size_t program_out_size
+) {
+    cJSON *entry = app_runner__extension_entry(path);
+    cJSON *program = cJSON_IsObject(entry) ? cJSON_GetObjectItemCaseSensitive(entry, "program") : NULL;
+    if (cJSON_IsString(program) && program->valuestring != NULL &&
+        strlen(program->valuestring) < program_out_size) {
+        strncpy(program_out, program->valuestring, program_out_size - 1);
+        program_out[program_out_size - 1] = '\0';
+        return true;
+    }
+    return false;
+}
+
+const char *app_runner__icon_for_path(const char *path) {
+    cJSON *entry = path != NULL ? app_runner__extension_entry(path) : NULL;
+    cJSON *icon = cJSON_IsObject(entry) ? cJSON_GetObjectItemCaseSensitive(entry, "icon") : NULL;
+    if (cJSON_IsString(icon) && icon->valuestring != NULL && icon->valuestring[0] != '\0' &&
+        icon__get(icon->valuestring) != NULL) {
+        return icon->valuestring;
+    }
+    return "file";
 }
 
 static bool app_runner__mode_valid(bruce_launch_mode_t mode) {
