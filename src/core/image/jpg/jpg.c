@@ -1,5 +1,6 @@
 #include "jpg.h"
 
+#include <limits.h>
 #include <setjmp.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -43,7 +44,11 @@ static const char *const TAG = "bruce_jpeg";
 void *__real_jpeg_get_large(j_common_ptr decoder, size_t size);
 
 void *__wrap_jpeg_get_large(j_common_ptr decoder, size_t size) {
-    void *allocation = __real_jpeg_get_large(decoder, size);
+    void *allocation = NULL;
+    if (heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) >= size) {
+        allocation = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    }
+    if (allocation == NULL) allocation = __real_jpeg_get_large(decoder, size);
     if (allocation == NULL) {
         ESP_LOGE(
             TAG,
@@ -225,6 +230,7 @@ static bruce_result_t image__decode_jpeg_progressive(
         }
     }
     size_t coefficient_size = 0;
+    size_t largest_component = 0;
     for (int i = 0; i < decoder.num_components; ++i) {
         jpeg_component_info *component = &decoder.comp_info[i];
         size_t blocks = (size_t)component->width_in_blocks * component->height_in_blocks;
@@ -232,11 +238,24 @@ static bruce_result_t image__decode_jpeg_progressive(
             jpeg_destroy_decompress(&decoder);
             return BRUCE_ERR_RESOURCE_LIMIT;
         }
-        coefficient_size += blocks * sizeof(JBLOCK);
+        size_t component_size = blocks * sizeof(JBLOCK);
+        coefficient_size += component_size;
+        if (component_size > largest_component) largest_component = component_size;
     }
-    if (decoder.progressive_mode && options->fit && coefficient_size > decoder.mem->max_memory_to_use) {
-        decoder.scale_denom = 8;
+    bool full_quality = coefficient_size <= decoder.mem->max_memory_to_use;
+    if (decoder.progressive_mode && !full_quality && coefficient_size <= LONG_MAX - 64u * 1024u) {
+        bruce_memory_stats_t stats;
+        if (memory__get_stats(&stats) == BRUCE_OK) {
+            size_t required = coefficient_size + 64u * 1024u;
+            size_t largest_required = largest_component + 32u;
+            full_quality =
+                (stats.psram_free >= required && stats.psram_largest_block >= largest_required) ||
+                (stats.internal_free >= required && stats.internal_largest_block >= largest_required);
+        }
     }
+    if (decoder.progressive_mode && full_quality && coefficient_size <= LONG_MAX - 64u * 1024u)
+        decoder.mem->max_memory_to_use = (long)(coefficient_size + 64u * 1024u);
+    if (decoder.progressive_mode && !full_quality && options->fit) { decoder.scale_denom = 8; }
     jpeg_calc_output_dimensions(&decoder);
     if (decoder.output_width == 0 || decoder.output_height == 0 ||
         decoder.output_width > SIZE_MAX / (decoder.output_height * sizeof(uint16_t))) {
@@ -244,15 +263,17 @@ static bruce_result_t image__decode_jpeg_progressive(
         return BRUCE_ERR_RESOURCE_LIMIT;
     }
 
-    bool dc_scan_only = decoder.progressive_mode && decoder.scale_denom == 8;
+    bool dc_scan_only = decoder.progressive_mode && !full_quality && decoder.scale_denom == 8;
+    bool upscale_output = decoder.progressive_mode && options->fit && decoder.scale_denom == 8;
     decoder.buffered_image = dc_scan_only;
     ESP_LOGI(
         TAG,
-        "progressive=%d arithmetic=%d scale=1/%u buffered=%d color=%d",
+        "progressive=%d arithmetic=%d scale=1/%u buffered=%d full_quality=%d color=%d",
         decoder.progressive_mode,
         decoder.arith_code,
         decoder.scale_denom,
         decoder.buffered_image,
+        full_quality,
         decoder.out_color_space
     );
     stage = "start decompression";
@@ -301,7 +322,7 @@ static bruce_result_t image__decode_jpeg_progressive(
     uint16_t decoded_height = (uint16_t)decoder.output_height;
     jpeg_destroy_decompress(&decoder);
 
-    if (dc_scan_only && options->fit) {
+    if (upscale_output) {
         uint16_t target_width = display__width();
         uint16_t target_height = (uint16_t)(((uint32_t)source_height * target_width) / source_width);
         if (target_height == 0) target_height = 1;
