@@ -1,3 +1,9 @@
+if(TARGET idf::espressif__libjpeg-turbo AND NOT TARGET idf::libjpeg-turbo)
+    # libjpeg-turbo 3.1.1~2 still references its pre-namespace component target.
+    get_target_property(LIBJPEG_TURBO_TARGET idf::espressif__libjpeg-turbo ALIASED_TARGET)
+    add_library(idf::libjpeg-turbo ALIAS ${LIBJPEG_TURBO_TARGET})
+endif()
+
 set(BRUCE_SELFTEST_SOURCES
     "modules/selftest/args_test.c"
     "modules/selftest/app_runner_test.c"
@@ -55,6 +61,11 @@ idf_component_register(SRCS
                     "core/icon/icon.c"
                     "core/http/http.c"
                     "core/image/image.c"
+                    "core/image/gif/gif.c"
+                    "core/image/jpg/jpg.c"
+                    "core/image/png/png.c"
+                    "core/image/reader.c"
+                    "core/image/render.c"
                     "core/i2c/i2c.c"
                     "core/event_loop/event_loop.c"
                      "core/ir/ir.c"
@@ -181,6 +192,7 @@ idf_component_register(SRCS
                      nvs_flash
                      spi_flash
                      littlefs
+                     espressif__libjpeg-turbo
                      libpng
                      wolfssl
                      wolfssh
@@ -189,8 +201,12 @@ idf_component_register(SRCS
                      wasm-micro-runtime
                     INCLUDE_DIRS
                     "."
-                     PRIV_INCLUDE_DIRS
-                     ".")
+                      PRIV_INCLUDE_DIRS
+                      ".")
+
+target_link_options(${COMPONENT_LIB} INTERFACE
+                    "LINKER:--wrap=jpeg_get_large"
+                    "LINKER:--wrap=jpeg_open_backing_store")
 
 # wolfSSH/wolfSSL build fixups for this ESP-IDF v6 / PSRAM-less / software-crypto
 # configuration; see components/wolfssl_esp_patches/patch_wolfssl_esp_idf6.cmake

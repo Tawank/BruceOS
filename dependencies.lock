@@ -84,6 +84,16 @@ dependencies:
       registry_url: https://components.espressif.com/
       type: service
     version: 1.1.0~2
+  espressif/libjpeg-turbo:
+    component_hash: c83f32040e4dab9f424fddd0efdeb47552eba38d3f8e83bb16253a2ebc9aa483
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 3.1.1~2
   espressif/libpng:
     component_hash: 30b1f2f8ddf13754b3e21d7ac134b3cc8f02957bb01d0c6deb5e9a68080d69d5
     dependencies:
@@ -149,12 +159,13 @@ direct_dependencies:
 - espressif/esp_jpeg
 - espressif/esp_lcd_ili9341
 - espressif/esp_lcd_touch_ft5x06
+- espressif/libjpeg-turbo
 - espressif/libpng
 - idf
 - joltwallet/littlefs
 - wasm-micro-runtime
 - wolfssl/wolfssh
 - wolfssl/wolfssl
-manifest_hash: e38d322d18609e66d0f74c639a0199d567ceb0624dda03ce08936700d669969a
+manifest_hash: 8495edbc3d763ce1b96dca86fe7dfdb94b4ba090427386421d354ec5ad8853b2
 target: esp32s3
 version: 3.0.0

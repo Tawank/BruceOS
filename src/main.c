@@ -106,7 +106,7 @@ void app_runner__register_defaults(void) {
     (void)app_runner__register("js", js_loader__app_main, 0);
     (void)app_runner__register("wasm", wasm_loader__app_main, 0);
     (void)app_runner__register("image", image_app_main, 0);
-    (void)app_runner__register("image_viewer", image_viewer_app_main, 0);
+    (void)app_runner__register("image_viewer", image_viewer_app_main, 8192);
     (void)app_runner__register("text", text_app_main, 0);
     (void)app_runner__register("notify", notify_app_main, 0);
     (void)app_runner__register("notification_service", notification_service_main, 0);
