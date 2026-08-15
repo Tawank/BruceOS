@@ -45,7 +45,7 @@ static const char *BRUCE_LAUNCHER_DEFAULT_JSON =
     "  \"Bluetooth@bluetooth\": \"bluetooth\",\n"
     "  \"Infrared@infrared\": \"ir\",\n"
     "  \"NRF24@radio-handheld\": \"nrf24\",\n"
-    "  \"Files@folder\": \"filemanager\",\n"
+    "  \"Files@folder-open\": \"filemanager\",\n"
     "  \"Terminal@console\": \"terminal\",\n"
     "  \"Clock@clock-outline\": \"clock\",\n"
     "  \"Config@cog\": {\n"
@@ -257,7 +257,8 @@ static int bruce_launcher__discover_apps(bruce_launcher_menu_t *menu, const char
         if (manifest == NULL) {
             bruce_app_inspection_t *inspection = manifest__inspect_wasm(full_path);
             if (inspection == NULL) continue;
-            if (menu == NULL || bruce_launcher__menu_add_command(menu, inspection->manifest.app_name, full_path)) {
+            if (menu == NULL ||
+                bruce_launcher__menu_add_command(menu, inspection->manifest.app_name, full_path)) {
                 added++;
             }
             memory__free(inspection);
