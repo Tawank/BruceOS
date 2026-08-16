@@ -8,7 +8,6 @@
 #include "core_sdk/app_runner.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/ext_mem_loader.h"
-#include "core_sdk/image.h"
 #include "core_sdk/input.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/process.h"
@@ -182,9 +181,6 @@ static bruce_result_t filemanager__read_preview(const char *path, char **out_tex
 }
 
 static bruce_result_t filemanager__view_file(const char *path, bool gui) {
-    if (image__is_supported_path(path)) { return filemanager__open_default(path, gui); }
-    if (filemanager__is_editable_text(path)) { return filemanager__run_named_app("text", path, gui, true); }
-
     char *text = NULL;
     bool truncated = false;
     bruce_result_t result = filemanager__read_preview(path, &text, &truncated);
@@ -202,6 +198,7 @@ static bruce_result_t filemanager__view_file(const char *path, bool gui) {
     if (result != BRUCE_OK) return result;
 
     (void)input__flush();
+    int text_size = 1;
     for (;;) {
         bruce_input_event_t event;
         result = input__read(&event, 100);
@@ -209,7 +206,11 @@ static bruce_result_t filemanager__view_file(const char *path, bool gui) {
         if (result == BRUCE_ERR_NOT_FOREGROUND) break;
         if (result != BRUCE_OK || event.action != BRUCE_INPUT_PRESS) continue;
 
-        if (event.code == BRUCE_INPUT_CODE_UP || event.code == BRUCE_INPUT_CODE_PREV) {
+        if (event.type == BRUCE_INPUT_KEY && event.code == '-' && text_size > 1) {
+            (void)dialog__viewer_set_text_size(viewer, --text_size);
+        } else if (event.type == BRUCE_INPUT_KEY && event.code == '=' && text_size < 8) {
+            (void)dialog__viewer_set_text_size(viewer, ++text_size);
+        } else if (event.code == BRUCE_INPUT_CODE_UP || event.code == BRUCE_INPUT_CODE_PREV) {
             (void)dialog__viewer_scroll(viewer, -1);
         } else if (event.code == BRUCE_INPUT_CODE_DOWN || event.code == BRUCE_INPUT_CODE_NEXT) {
             (void)dialog__viewer_scroll(viewer, 1);

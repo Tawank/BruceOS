@@ -145,6 +145,13 @@ bool selftest__run_dialog_viewer_case(void) {
         return false;
     }
 
+    result = dialog__viewer_set_text_size(viewer, 2);
+    if (result != BRUCE_OK || dialog__viewer_set_text_size(viewer, 0) != BRUCE_ERR_INVALID_ARGUMENT) {
+        printf("[selftest] dialog/viewer: FAIL, text size returned %d\n", result);
+        dialog__viewer_close(viewer);
+        return false;
+    }
+
     result = dialog__viewer_close(viewer);
     if (result != BRUCE_OK) {
         printf("[selftest] dialog/viewer: FAIL, close returned %d\n", result);

@@ -138,5 +138,7 @@ bruce_result_t dialog__number_input(
 
 bruce_result_t dialog__create_text_viewer(const char *title, const char *text, bruce_viewer_id_t *out_viewer);
 bruce_result_t dialog__viewer_set_text(bruce_viewer_id_t viewer, const char *text);
+/* Sets the GUI body font multiplier (1..8) and redraws the viewer. */
+bruce_result_t dialog__viewer_set_text_size(bruce_viewer_id_t viewer, int text_size);
 bruce_result_t dialog__viewer_scroll(bruce_viewer_id_t viewer, int lines);
 bruce_result_t dialog__viewer_close(bruce_viewer_id_t viewer);

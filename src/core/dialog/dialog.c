@@ -1232,6 +1232,7 @@ typedef struct {
     char *title;
     char *text;
     int scroll_y;
+    int text_size;
 } dialog__viewer_t;
 
 static dialog__viewer_t s_viewers[DIALOG__VIEWER_MAX];
@@ -1271,6 +1272,7 @@ static void dialog__viewer_free(dialog__viewer_t *viewer) {
     viewer->owner = BRUCE_PROCESS_ID_INVALID;
     viewer->resource_id = BRUCE_RESOURCE_ID_INVALID;
     viewer->scroll_y = 0;
+    viewer->text_size = DIALOG__TEXT_SIZE;
 }
 
 static void dialog__viewer_cleanup(void *context) {
@@ -1294,20 +1296,21 @@ static bruce_result_t dialog__viewer_draw(dialog__viewer_t *viewer, bool gui) {
     }
     int w = display__width();
     int h = display__height();
-    int usable_h = h - (DIALOG__CHAR_H + 4);
-    int lines_per_screen = usable_h / (DIALOG__CHAR_H + 1);
+    int body_y = DIALOG__CHAR_H + 6;
+    int usable_h = h - body_y - (DIALOG__CHAR_H + 4);
+    int lines_per_screen = usable_h / (DIALOG__CHAR_H * viewer->text_size + 1);
     if (lines_per_screen < 1) { lines_per_screen = 1; }
-    int max_chars = (w - 2 * DIALOG__MARGIN) / DIALOG__CHAR_W;
+    int max_chars = (w - 2 * DIALOG__MARGIN) / (DIALOG__CHAR_W * viewer->text_size);
     if (max_chars < 1) { max_chars = 1; }
 
     dialog__gui_clear();
     dialog__gui_title_bar(viewer->title);
 
     display__set_text_color(BRUCE_COLOR_WHITE);
-    display__set_text_size(DIALOG__TEXT_SIZE);
+    display__set_text_size((uint8_t)viewer->text_size);
     display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
 
-    int y = DIALOG__CHAR_H + 6;
+    int y = body_y;
     int line = 0;
     int drawn = 0;
     const char *p = viewer->text != NULL ? viewer->text : "";
@@ -1323,7 +1326,7 @@ static bruce_result_t dialog__viewer_draw(dialog__viewer_t *viewer, bool gui) {
                 col++;
                 p += bytes;
             }
-            y += DIALOG__CHAR_H + 1;
+            y += DIALOG__CHAR_H * viewer->text_size + 1;
             drawn++;
         } else {
             while (*p != '\0' && *p != '\n') { p++; }
@@ -1541,6 +1544,7 @@ dialog__create_text_viewer(const char *title, const char *text, bruce_viewer_id_
     slot->title = title != NULL ? dialog__strdup(title) : dialog__strdup("");
     slot->text = text != NULL ? dialog__strdup(text) : dialog__strdup("");
     slot->scroll_y = 0;
+    slot->text_size = DIALOG__TEXT_SIZE;
     slot->resource_id = BRUCE_RESOURCE_ID_INVALID;
 
     if (slot->title == NULL || slot->text == NULL) {
@@ -1605,6 +1609,29 @@ bruce_result_t dialog__viewer_scroll(bruce_viewer_id_t viewer, int lines) {
     slot->scroll_y += lines;
     if (slot->scroll_y < 0) { slot->scroll_y = 0; }
 
+    bool gui = dialog__current_process_wants_gui();
+    s_last_call_was_gui = gui;
+    bruce_result_t result = dialog__viewer_draw(slot, gui);
+
+    dialog__viewer_unlock();
+    return result;
+}
+
+bruce_result_t dialog__viewer_set_text_size(bruce_viewer_id_t viewer, int text_size) {
+    if (text_size < 1 || text_size > 8) return BRUCE_ERR_INVALID_ARGUMENT;
+
+    dialog__viewer_lock();
+    dialog__viewer_t *slot = dialog__viewer_find(viewer);
+    if (slot == NULL) {
+        dialog__viewer_unlock();
+        return BRUCE_ERR_NOT_FOUND;
+    }
+    if (slot->owner != process__current_id()) {
+        dialog__viewer_unlock();
+        return BRUCE_ERR_PERMISSION;
+    }
+
+    slot->text_size = text_size;
     bool gui = dialog__current_process_wants_gui();
     s_last_call_was_gui = gui;
     bruce_result_t result = dialog__viewer_draw(slot, gui);

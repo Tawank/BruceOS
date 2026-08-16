@@ -418,6 +418,7 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(dialog__number_input),
     ESP_ELFSYM_EXPORT(dialog__create_text_viewer),
     ESP_ELFSYM_EXPORT(dialog__viewer_set_text),
+    ESP_ELFSYM_EXPORT(dialog__viewer_set_text_size),
     ESP_ELFSYM_EXPORT(dialog__viewer_scroll),
     ESP_ELFSYM_EXPORT(dialog__viewer_close),
 

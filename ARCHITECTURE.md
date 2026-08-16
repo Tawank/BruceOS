@@ -715,8 +715,8 @@ Retain the JS `dialog.message`, `info`, `success`, `warning`, `error`, and
 `choice` APIs as wrappers.  Keep `dialog.pickFile()` as a Core renderer-neutral
 API: it requires `storage` and hides `/config/bruce.conf` and `/config/permissions.json`.
 Do not migrate `dialog.viewFile()`.  `dialog__create_text_viewer()` returns an
-opaque viewer ID with draw, scroll, set-text, and close operations; it is a
-tracked resource.
+opaque viewer ID with draw, scroll, set-text, text-size (1..8), and close
+operations; it is a tracked resource.
 
 ## Memory and resource ownership
 
