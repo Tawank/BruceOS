@@ -254,8 +254,27 @@ static void dialog__gui_draw_row_label(const char *label, int x, int y, int max_
     if (max_chars <= 0) { return; }
 
     size_t label_len = strlen(label);
-    size_t draw_len = label_len < (size_t)max_chars ? label_len : (size_t)max_chars;
-    if (draw_len == label_len) {
+    size_t columns = 0;
+    for (size_t i = 0; i < label_len;) {
+        unsigned char c = (unsigned char)label[i];
+        size_t bytes = c < 0x80 ? 1 : (c >= 0xF0 ? 4 : c >= 0xE0 ? 3 : 2);
+        if (i + bytes > label_len) bytes = 1;
+        i += bytes;
+        columns++;
+    }
+    size_t draw_len = label_len;
+    if (columns > (size_t)max_chars) {
+        size_t column = 0;
+        draw_len = 0;
+        while (draw_len < label_len && column < (size_t)max_chars) {
+            unsigned char c = (unsigned char)label[draw_len];
+            size_t bytes = c < 0x80 ? 1 : (c >= 0xF0 ? 4 : c >= 0xE0 ? 3 : 2);
+            if (draw_len + bytes > label_len) bytes = 1;
+            draw_len += bytes;
+            column++;
+        }
+    }
+    if (columns <= (size_t)max_chars) {
         display__set_cursor(x, y);
         display__print(label);
         return;
@@ -268,8 +287,17 @@ static void dialog__gui_draw_row_label(const char *label, int x, int y, int max_
     }
 
     char truncated[128];
-    draw_len = (size_t)(max_chars - 3);
-    if (draw_len >= sizeof(truncated) - 4) { draw_len = sizeof(truncated) - 4; }
+    size_t wanted = (size_t)(max_chars - 3);
+    draw_len = 0;
+    size_t column = 0;
+    while (draw_len < label_len && column < wanted) {
+        unsigned char c = (unsigned char)label[draw_len];
+        size_t bytes = c < 0x80 ? 1 : (c >= 0xF0 ? 4 : c >= 0xE0 ? 3 : 2);
+        if (draw_len + bytes > label_len) bytes = 1;
+        if (draw_len + bytes >= sizeof(truncated) - 4) break;
+        draw_len += bytes;
+        column++;
+    }
     memcpy(truncated, label, draw_len);
     memcpy(truncated + draw_len, "...", 4);
     display__set_cursor(x, y);
@@ -508,7 +536,13 @@ static bruce_result_t dialog__gui_choice(
                 }
                 if (choices[i].right_text != NULL && choices[i].right_text[0] != '\0') {
                     display__draw_right_string(choices[i].right_text, label_right, y + 1);
-                    label_right -= (int)strlen(choices[i].right_text) * DIALOG__CHAR_W * text_size + DIALOG__MARGIN;
+                    size_t right_columns = 0;
+                    for (const unsigned char *p = (const unsigned char *)choices[i].right_text; *p != '\0';) {
+                        size_t bytes = *p < 0x80 ? 1 : (*p >= 0xF0 ? 4 : *p >= 0xE0 ? 3 : 2);
+                        p += bytes;
+                        right_columns++;
+                    }
+                    label_right -= (int)right_columns * DIALOG__CHAR_W * text_size + DIALOG__MARGIN;
                 }
                 dialog__gui_draw_row_label(
                     choices[i].label, label_left, y + 1, label_right - label_left, text_size
@@ -1282,10 +1316,12 @@ static bruce_result_t dialog__viewer_draw(dialog__viewer_t *viewer, bool gui) {
             display__set_cursor(DIALOG__MARGIN, y);
             int col = 0;
             while (*p != '\0' && *p != '\n' && col < max_chars) {
-                char ch[2] = {*p, '\0'};
+                size_t bytes = (unsigned char)*p < 0x80 ? 1 : ((unsigned char)*p >= 0xF0 ? 4 : (unsigned char)*p >= 0xE0 ? 3 : 2);
+                char ch[5] = {0};
+                memcpy(ch, p, bytes);
                 display__print(ch);
                 col++;
-                p++;
+                p += bytes;
             }
             y += DIALOG__CHAR_H + 1;
             drawn++;
