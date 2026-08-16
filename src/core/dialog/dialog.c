@@ -1019,6 +1019,15 @@ static bool dialog__matches_extension_filter(const char *name, const char *exten
     return strcasecmp(name + name_len - filter_len, extension_filter) == 0;
 }
 
+static int dialog__compare_file_picker_entries(const void *left, const void *right) {
+    const bruce_storage_entry_t *left_entry = left;
+    const bruce_storage_entry_t *right_entry = right;
+    if (left_entry->type != right_entry->type) {
+        return left_entry->type == BRUCE_STORAGE_ENTRY_DIRECTORY ? -1 : 1;
+    }
+    return strcasecmp(left_entry->name, right_entry->name);
+}
+
 /* True if the picker's choice dialog was cancelled because the process lost
  * (and has now regained) foreground - e.g. the user alt-tabbed away and
  * back - rather than a genuine Back/Esc press. Blocks until foreground
@@ -1071,6 +1080,7 @@ static bruce_result_t dialog__gui_pick_file(
                 memory__free(entries);
                 return list_result;
             }
+            qsort(entries, count, sizeof(*entries), dialog__compare_file_picker_entries);
         }
 
         int h = display__height();
