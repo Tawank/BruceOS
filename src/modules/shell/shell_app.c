@@ -31,6 +31,12 @@ void shell__state_init(shell_state_t *state) {
         }
         state->variables[state->variable_count - 1].exported = true;
     }
+    const char *working_directory = shell_builtins__get(state, "PWD");
+    if (working_directory == NULL || working_directory[0] != '/') {
+        if (shell_builtins__set(state, "PWD", "/") == 0) {
+            (void)shell_builtins__export(state, "PWD");
+        }
+    }
 }
 
 void shell__state_free(shell_state_t *state) {

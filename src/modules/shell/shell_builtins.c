@@ -2,16 +2,18 @@
 
 #include <errno.h> // IWYU pragma: export
 #include <limits.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "core_sdk/memory.h"
 #include "core_sdk/environment.h"
 #include "core_sdk/stdio.h"
+#include "core_sdk/storage.h"
 #include "shell_parser.h"
 
 static const char *const s_shell_builtin_names[] = {
-    "echo", "true", "false", "set", "unset", "export", "clear", "exit"
+    "echo", "true", "false", "cd", "set", "unset", "export", "clear", "exit"
 };
 
 static int shell_builtins__find_index(const shell_state_t *state, const char *name) {
@@ -125,6 +127,68 @@ static int shell_builtins__assignment(shell_state_t *state, const char *assignme
     return shell_builtins__set(state, name, equals + 1);
 }
 
+static bool shell_builtins__resolve_path(const shell_state_t *state, const char *path, char *out_path) {
+    char combined[BRUCE_STORAGE_PATH_MAX * 2];
+    const char *working_directory = shell_builtins__get(state, "PWD");
+    if (working_directory == NULL || working_directory[0] != '/') working_directory = "/";
+    if (path == NULL || path[0] == '\0') path = working_directory;
+    int written = path[0] == '/' ? snprintf(combined, sizeof(combined), "%s", path)
+                                 : snprintf(
+                                       combined,
+                                       sizeof(combined),
+                                       "%s%s%s",
+                                       working_directory,
+                                       strcmp(working_directory, "/") == 0 ? "" : "/",
+                                       path
+                                   );
+    if (written < 0 || (size_t)written >= sizeof(combined)) return false;
+
+    size_t out_length = 1;
+    out_path[0] = '/';
+    out_path[1] = '\0';
+    const char *cursor = combined;
+    while (*cursor != '\0') {
+        while (*cursor == '/') cursor++;
+        const char *component = cursor;
+        while (*cursor != '\0' && *cursor != '/') cursor++;
+        size_t length = (size_t)(cursor - component);
+        if (length == 0 || (length == 1 && component[0] == '.')) continue;
+        if (length == 2 && component[0] == '.' && component[1] == '.') {
+            while (out_length > 1 && out_path[out_length - 1] != '/') out_length--;
+            if (out_length > 1) out_length--;
+            out_path[out_length] = '\0';
+            continue;
+        }
+        size_t separator = out_length > 1 ? 1u : 0u;
+        if (out_length + separator + length >= BRUCE_STORAGE_PATH_MAX) return false;
+        if (separator != 0) out_path[out_length++] = '/';
+        memcpy(out_path + out_length, component, length);
+        out_length += length;
+        out_path[out_length] = '\0';
+    }
+    return true;
+}
+
+static int shell_builtins__cd(shell_state_t *state, int argc, char **argv) {
+    if (argc > 2) {
+        stdio__printf("shell: cd: too many arguments\n");
+        return 2;
+    }
+    char path[BRUCE_STORAGE_PATH_MAX];
+    if (!shell_builtins__resolve_path(state, argc == 2 ? argv[1] : "/", path)) {
+        stdio__printf("cd: invalid path\n");
+        return 1;
+    }
+    size_t count = 0;
+    bruce_result_t result = storage__list(path, NULL, 0, &count);
+    if (result != BRUCE_OK) {
+        stdio__printf("cd: %s: error %d\n", path, result);
+        return 1;
+    }
+    int status = shell_builtins__set(state, "PWD", path);
+    return status == 0 ? shell_builtins__export(state, "PWD") : status;
+}
+
 bool shell_builtins__is_builtin(const char *name) {
     for (size_t i = 0; i < sizeof(s_shell_builtin_names) / sizeof(s_shell_builtin_names[0]); ++i) {
         if (strcmp(name, s_shell_builtin_names[i]) == 0) return true;
@@ -148,6 +212,7 @@ int shell_builtins__run(shell_state_t *state, int argc, char **argv) {
     }
     if (strcmp(argv[0], "true") == 0) return 0;
     if (strcmp(argv[0], "false") == 0) return 1;
+    if (strcmp(argv[0], "cd") == 0) return shell_builtins__cd(state, argc, argv);
     if (strcmp(argv[0], "set") == 0) {
         if (argc != 1) {
             stdio__printf("shell: set takes no arguments\n");
@@ -228,7 +293,7 @@ int shell_builtins__run(shell_state_t *state, int argc, char **argv) {
         state->exit_status = status;
         return status;
     }
-    stdio__printf("Builtins: echo true false set unset export clear exit\n");
+    stdio__printf("Builtins: echo true false cd set unset export clear exit\n");
     stdio__printf("Operators: ; && || and producer | text. Redirection is unsupported.\n");
     return 0;
 }

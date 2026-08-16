@@ -90,7 +90,6 @@ void app_runner__register_defaults(void) {
     (void)app_runner__register("help", help_app_main, 0);
     (void)app_runner__register("menu", system_menu_app_main, MENU_STACK_BYTES);
     (void)app_runner__register("pwd", bnu_pwd_app_main, 0);
-    (void)app_runner__register("cd", bnu_cd_app_main, 0);
     (void)app_runner__register("ls", bnu_ls_app_main, 0);
     (void)app_runner__register("lsblk", bnu_lsblk_app_main, 0);
     (void)app_runner__register("mount", bnu_mount_app_main, 0);

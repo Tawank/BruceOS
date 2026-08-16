@@ -576,7 +576,7 @@ feed `text` from `echo` or an external producer, for example
 variables persist across interactive input and script lines. `export NAME=value`
 or `export NAME` publishes a value to the shell process environment, and
 `NAME=value command` applies only to that child. Builtins are `echo`, `true`, `false`,
-`set`, `unset`, `export`, `clear`, `exit`, and `help`; other names and absolute/`./` paths
+`cd`, `set`, `unset`, `export`, `clear`, `exit`, and `help`; other names and absolute/`./` paths
 launch through AppRunner in foreground mode and are synchronously reaped. `BG=1`
 changes the process state but does not turn synchronous shell execution into job control.
 The `.sh` loader invokes this built-in for absolute scripts. Command
@@ -593,10 +593,11 @@ editor binds Ctrl+S to save and Ctrl+X to exit, with both shortcuts shown in its
 footer; read-only mode exposes only Ctrl+X.
 
 The built-in BNU (Bruce is Not Unix) module provides the direct commands
-`pwd`, `cd [directory]`, `ls [path]`, `lsblk`, `mount [device] [mount-point]`,
+`pwd`, `ls [path]`, `lsblk`, `mount [device] [mount-point]`,
 `unmount <target>`, `mkdir <directory>`, `touch <file>`, `cat <file>...`,
-`free`, `top`, `shutdown`, and `reboot`. BNU keeps a shell working directory for
-relative storage paths; it is independent of libc process cwd. `cat` streams
+`free`, `top`, `shutdown`, and `reboot`. The shell's `cd [directory]` builtin
+updates and exports `PWD`; BNU commands inherit it and use it to resolve relative
+storage paths independently of libc process cwd. `cat` streams
 files unchanged to app-visible stdout. `free` reports Core-provided internal RAM
 and PSRAM heap statistics. `top` reports the same system heaps plus CPU usage,
 stack high-water bytes, and tracked heap usage for each Core-managed process.

@@ -15,6 +15,7 @@
 static volatile int s_probe_calls;
 static char s_probe_arg[64];
 static char s_probe_environment[64];
+static char s_probe_pwd[BRUCE_STORAGE_PATH_MAX];
 
 static int selftest__shell_probe(int argc, char **argv) {
     s_probe_calls++;
@@ -25,6 +26,8 @@ static int selftest__shell_probe(int argc, char **argv) {
         s_probe_environment, sizeof(s_probe_environment), "%s|%s",
         exported != NULL ? exported : "", temporary != NULL ? temporary : ""
     );
+    const char *pwd = environment__get("PWD");
+    snprintf(s_probe_pwd, sizeof(s_probe_pwd), "%s", pwd != NULL ? pwd : "");
     if (argc > 1 && strcmp(argv[1], "nonzero") == 0) return 37;
     if (argc > 1 && strcmp(argv[1], "routed") == 0) stdio__printf("shell-grandchild-routed\n");
     return argc > 2 && strcmp(argv[1], argv[2]) == 0 ? 0 : (argc > 2 ? 1 : 0);
@@ -42,6 +45,7 @@ bool selftest__run_shell_language_case(void) {
     shell__state_init(&state);
     s_probe_calls = 0;
     memset(s_probe_arg, 0, sizeof(s_probe_arg));
+    memset(s_probe_pwd, 0, sizeof(s_probe_pwd));
 
     bool ok =
         shell__execute_line(&state, "shell_test_probe 'a b' \"a b\"") == 0 &&
@@ -61,6 +65,10 @@ bool selftest__run_shell_language_case(void) {
         strcmp(s_probe_environment, "yes|once") == 0 &&
         shell__execute_line(&state, "unset EXPORTED; shell_test_probe env") == 0 &&
         strcmp(s_probe_environment, "|") == 0 &&
+        shell__execute_line(&state, "cd /apps; shell_test_probe $PWD /apps") == 0 &&
+        strcmp(s_probe_pwd, "/apps") == 0 &&
+        shell__execute_line(&state, "cd ..; shell_test_probe $PWD /") == 0 &&
+        strcmp(s_probe_pwd, "/") == 0 &&
         shell__execute_line(&state, "shell_test_probe nonzero") == 37 &&
         shell__execute_line(&state, "echo broken | echo nope") == 2 &&
         shell__execute_line(&state, "echo > file") == 2 &&

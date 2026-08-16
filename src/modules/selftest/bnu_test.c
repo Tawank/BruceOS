@@ -12,8 +12,6 @@
 
 bool selftest__run_bnu_case(void) {
     (void)environment__unset("PWD");
-    char *cd_root_argv[] = {"cd"};
-    char *cd_dot_argv[] = {"cd", "."};
     char *pwd_argv[] = {"pwd"};
     char *ls_argv[] = {"ls"};
     char *lsblk_argv[] = {"lsblk"};
@@ -36,9 +34,7 @@ bool selftest__run_bnu_case(void) {
     bruce_result_t cat_close = cat_open == BRUCE_OK ? storage__close(cat_file) : cat_open;
     size_t disk_count = 0;
     bool ok = disk__list(NULL, 0, &disk_count) == BRUCE_OK && disk_count > 1 &&
-              bnu_cd_app_main(1, cd_root_argv) == BRUCE_OK &&
-              bnu_cd_app_main(2, cd_dot_argv) == BRUCE_OK &&
-              strcmp(bnu__get_working_directory(), "/") == 0 &&
+               strcmp(bnu__get_working_directory(), "/") == 0 &&
               bnu_pwd_app_main(1, pwd_argv) == BRUCE_OK && bnu_ls_app_main(1, ls_argv) == BRUCE_OK &&
               bnu_lsblk_app_main(1, lsblk_argv) == BRUCE_OK &&
               bnu_mount_app_main(1, mount_argv) == BRUCE_OK &&

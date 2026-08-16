@@ -25,10 +25,6 @@ const char *bnu__get_working_directory(void) {
     return value != NULL && value[0] == '/' ? value : "/";
 }
 
-static bruce_result_t bnu__set_working_directory(const char *path) {
-    return environment__set(BNU__PWD_NAME, path);
-}
-
 static int bnu__parse_failure(ArgParser *parser) {
     ap_status_t status = ap_get_status(parser);
     ap_free(parser);
@@ -125,26 +121,6 @@ int bnu_pwd_app_main(int argc, char **argv) {
     ap_free(parser);
     stdio__printf("%s\n", bnu__get_working_directory());
     return BRUCE_OK;
-}
-
-int bnu_cd_app_main(int argc, char **argv) {
-    ArgParser *parser = bnu__new_parser("Change the current working directory.");
-    if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
-    ap_add_optional_arg(parser, "directory", "Directory path (defaults to /)");
-    ap_unknown_options_as_args(parser);
-    if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
-    char path[BRUCE_STORAGE_PATH_MAX];
-    char *directory = ap_get_arg(parser, "directory");
-    bool resolved = bnu__resolve_path(directory != NULL ? directory : "/", path);
-    ap_free(parser);
-    if (!resolved) return BRUCE_ERR_INVALID_PATH;
-    size_t count = 0;
-    bruce_result_t result = storage__list(path, NULL, 0, &count);
-    if (result != BRUCE_OK) {
-        stdio__printf("cd: %s: error %d\n", path, result);
-        return result;
-    }
-    return bnu__set_working_directory(path);
 }
 
 int bnu_ls_app_main(int argc, char **argv) {
