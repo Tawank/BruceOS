@@ -65,11 +65,19 @@ int image_viewer_app_main(int argc, char **argv) {
         .fit = true,
         .background = BRUCE_COLOR_BLACK,
     };
-    bruce_result_t result;
+    bruce_result_t result = display__begin_frame();
+    if (result == BRUCE_OK) result = display__fill_screen(options.background);
+    if (result == BRUCE_OK) result = display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
+    if (result == BRUCE_OK) result = display__set_text_color(BRUCE_COLOR_WHITE);
+    if (result == BRUCE_OK) result = display__set_text_size(2);
+    if (result == BRUCE_OK) {
+        result = display__draw_centre_string("Loading...", display__width() / 2, (display__height() - 8) / 2);
+    }
+    if (result == BRUCE_OK) result = display__present();
     if (image_viewer__is_gif(path)) {
-        result = image_viewer__draw_gif(path, &options);
+        if (result == BRUCE_OK) result = image_viewer__draw_gif(path, &options);
     } else {
-        result = display__begin_frame();
+        if (result == BRUCE_OK) result = display__begin_frame();
         if (result == BRUCE_OK) result = display__fill_screen(options.background);
         if (result == BRUCE_OK) result = image__draw_path(path, &options, NULL);
         if (result == BRUCE_OK) result = display__present();

@@ -389,8 +389,11 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(icon__get),
 
     /* Encoded images */
-    ESP_ELFSYM_EXPORT(image__draw_memory),
+    ESP_ELFSYM_EXPORT(image__get_bitmap_from_memory),
+    ESP_ELFSYM_EXPORT(image__get_bitmap_from_file),
     ESP_ELFSYM_EXPORT(image__draw_path),
+    ESP_ELFSYM_EXPORT(image__draw_bitmap),
+    ESP_ELFSYM_EXPORT(image__bitmap_release),
     ESP_ELFSYM_EXPORT(image__is_supported_path),
     ESP_ELFSYM_EXPORT(image__gif_open),
     ESP_ELFSYM_EXPORT(image__gif_draw),

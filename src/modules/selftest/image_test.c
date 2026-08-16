@@ -38,14 +38,14 @@ bool selftest__run_image_decode_case(void) {
     };
     static const uint8_t invalid[] = {'n', 'o', 't', 'i', 'm', 'g'};
     bruce_image_draw_options_t options = {.background = BRUCE_COLOR_BLACK};
-    bruce_image_info_t info;
+    image_bitmap_t bitmap = {0};
 
     if (!image__is_supported_path("/photo.JPEG") || !image__is_supported_path("/icon.png") ||
         !image__is_supported_path("/anim.GIF") || image__is_supported_path("/notes.txt")) {
         printf("[selftest] image/decode: FAIL, extension matching\n");
         return false;
     }
-    if (image__draw_memory(invalid, sizeof(invalid), &options, NULL) != BRUCE_ERR_UNSUPPORTED) {
+    if (image__get_bitmap_from_memory(invalid, sizeof(invalid), &options, &bitmap) != BRUCE_ERR_UNSUPPORTED) {
         printf("[selftest] image/decode: FAIL, unsupported signature\n");
         return false;
     }
@@ -54,14 +54,18 @@ bool selftest__run_image_decode_case(void) {
         return false;
     }
     if (display__fill_screen(BRUCE_COLOR_BLACK) != BRUCE_OK ||
-        image__draw_memory(red_gif, sizeof(red_gif), &options, &info) != BRUCE_OK) {
+        image__get_bitmap_from_memory(red_gif, sizeof(red_gif), &options, &bitmap) != BRUCE_OK ||
+        image__draw_bitmap(&bitmap, &options) != BRUCE_OK) {
+        image__bitmap_release(&bitmap);
         (void)display__present();
         printf("[selftest] image/decode: FAIL, GIF decode\n");
         return false;
     }
     bruce_display_color_t pixel = 0;
-    bool valid = info.format == BRUCE_IMAGE_FORMAT_GIF && info.width == 1 && info.height == 1 &&
-                 display__test_read_pixel(0, 0, &pixel) == BRUCE_OK && pixel == BRUCE_COLOR_RED;
+    bool valid = bitmap.format == BRUCE_IMAGE_FORMAT_GIF && bitmap.source_width == 1 &&
+                  bitmap.source_height == 1 &&
+                  display__test_read_pixel(0, 0, &pixel) == BRUCE_OK && pixel == BRUCE_COLOR_RED;
+    image__bitmap_release(&bitmap);
     bruce_gif_t *gif = NULL;
     uint32_t delay_ms = 0;
     bool looped = false;
@@ -76,11 +80,14 @@ bool selftest__run_image_decode_case(void) {
     image__gif_close(gif);
     if (valid) {
         valid = display__fill_screen(BRUCE_COLOR_BLACK) == BRUCE_OK &&
-                image__draw_memory(white_progressive_jpeg, sizeof(white_progressive_jpeg), &options, &info) ==
-                    BRUCE_OK &&
-                info.format == BRUCE_IMAGE_FORMAT_JPEG && info.width == 1 && info.height == 1 &&
+                image__get_bitmap_from_memory(
+                    white_progressive_jpeg, sizeof(white_progressive_jpeg), &options, &bitmap
+                ) == BRUCE_OK &&
+                image__draw_bitmap(&bitmap, &options) == BRUCE_OK && bitmap.format == BRUCE_IMAGE_FORMAT_JPEG &&
+                bitmap.source_width == 1 && bitmap.source_height == 1 &&
                 display__test_read_pixel(0, 0, &pixel) == BRUCE_OK && pixel == BRUCE_COLOR_WHITE;
     }
+    image__bitmap_release(&bitmap);
     (void)display__present();
     if (!valid) printf("[selftest] image/decode: FAIL, decoded output\n");
     return valid;

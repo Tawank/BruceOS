@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "core_sdk/display.h"
+#include "core_sdk/memory.h"
 #include "core_sdk/result.h"
 
 typedef enum {
@@ -27,20 +28,42 @@ typedef struct {
     bruce_display_color_t background;
 } bruce_image_draw_options_t;
 
+typedef struct {
+    uint16_t *pixels;
+    uint16_t width;
+    uint16_t height;
+    uint16_t source_width;
+    uint16_t source_height;
+    bruce_image_format_t format;
+    bruce_memory_object_t backing;
+} image_bitmap_t;
+
 typedef struct bruce_gif bruce_gif_t;
 
-/* Draws JPEG, PNG, or the first frame of a GIF into the caller's viewport.
+/* Decodes JPEG, PNG, or the first frame of a GIF into an owned RGB565 bitmap.
  * `fit` preserves aspect ratio and only scales down. Transparent pixels are
- * composited over `background`. The caller controls frame presentation. */
-bruce_result_t image__draw_memory(
-    const void *data, size_t size, const bruce_image_draw_options_t *options, bruce_image_info_t *out_info
+ * composited over `background`. Release a successful result with
+ * image__bitmap_release(). */
+bruce_result_t image__get_bitmap_from_memory(
+    const void *data, size_t size, const bruce_image_draw_options_t *options, image_bitmap_t *out_bitmap
 );
 
-/* Reads and draws an image through process-owned Core storage. */
+/* Opens and decodes an image through process-owned Core storage. */
+bruce_result_t image__get_bitmap_from_file(
+    const char *path, const bruce_image_draw_options_t *options, image_bitmap_t *out_bitmap
+);
+
+/* Decodes, draws, and releases an image from Core storage. */
 bruce_result_t
 image__draw_path(const char *path, const bruce_image_draw_options_t *options, bruce_image_info_t *out_info);
 
-/* Returns true for the filename extensions accepted by image__draw_path(). */
+/* Draws an owned bitmap into the active render target without releasing it.
+ * The caller controls frame presentation. */
+bruce_result_t image__draw_bitmap(const image_bitmap_t *bitmap, const bruce_image_draw_options_t *options);
+
+void image__bitmap_release(image_bitmap_t *bitmap);
+
+/* Returns true for the filename extensions accepted by image__get_bitmap_from_file(). */
 bool image__is_supported_path(const char *path);
 
 /* Opens an animated GIF from Core storage and decodes its first frame. The

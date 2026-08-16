@@ -390,17 +390,20 @@ static JSValue native_drawImageCommon(JSContext *ctx, int argc, JSValue *argv) {
         .background = BRUCE_COLOR_BLACK,
     };
     bruce_result_t result;
+    image_bitmap_t bitmap = {0};
     if (JS_IsString(ctx, argv[0])) {
         JSCStringBuf path_buffer;
         const char *path = JS_ToCString(ctx, argv[0], &path_buffer);
         if (path == NULL) return JS_ThrowTypeError(ctx, "invalid image path");
-        result = image__draw_path(path, &options, NULL);
+        result = image__get_bitmap_from_file(path, &options, &bitmap);
     } else {
         size_t size = 0;
         const uint8_t *data = (const uint8_t *)JS_GetTypedArrayBuffer(ctx, &size, argv[0]);
         if (data == NULL || size == 0) return JS_ThrowTypeError(ctx, "empty image data");
-        result = image__draw_memory(data, size, &options, NULL);
+        result = image__get_bitmap_from_memory(data, size, &options, &bitmap);
     }
+    if (result == BRUCE_OK) result = image__draw_bitmap(&bitmap, &options);
+    image__bitmap_release(&bitmap);
     if (result != BRUCE_OK) return JS_ThrowInternalError(ctx, "image decode failed: %d", (int)result);
     return JS_NewBool(true);
 }

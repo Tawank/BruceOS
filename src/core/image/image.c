@@ -39,19 +39,6 @@ bool image__is_supported_path(const char *path) {
            strcasecmp(extension, ".png") == 0 || strcasecmp(extension, ".gif") == 0;
 }
 
-static bruce_result_t image__draw_bitmap(
-    image_bitmap_t *bitmap, const bruce_image_draw_options_t *options, bruce_image_info_t *out_info
-) {
-    bruce_result_t result = image__draw_pixels(bitmap->pixels, bitmap->width, bitmap->height, options);
-    if (result == BRUCE_OK && out_info != NULL) {
-        out_info->format = bitmap->format;
-        out_info->width = bitmap->source_width;
-        out_info->height = bitmap->source_height;
-    }
-    image__bitmap_release(bitmap);
-    return result;
-}
-
 static bruce_result_t image__decode_memory(
     const uint8_t *bytes, size_t size, const bruce_image_draw_options_t *options, image_bitmap_t *bitmap
 ) {
@@ -65,16 +52,24 @@ static bruce_result_t image__decode_memory(
     return BRUCE_ERR_UNSUPPORTED;
 }
 
-bruce_result_t image__draw_memory(
-    const void *data, size_t size, const bruce_image_draw_options_t *options, bruce_image_info_t *out_info
+bruce_result_t image__get_bitmap_from_memory(
+    const void *data, size_t size, const bruce_image_draw_options_t *options, image_bitmap_t *out_bitmap
 ) {
-    if (data == NULL || size < 6) return BRUCE_ERR_INVALID_ARGUMENT;
+    if (data == NULL || size < 6 || out_bitmap == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    *out_bitmap = (image_bitmap_t){0};
     bruce_image_draw_options_t defaults = {.center = false, .fit = false, .background = BRUCE_COLOR_BLACK};
     if (options == NULL) options = &defaults;
-    image_bitmap_t bitmap = {0};
-    bruce_result_t result = image__decode_memory(data, size, options, &bitmap);
-    if (result != BRUCE_OK) return result;
-    return image__draw_bitmap(&bitmap, options, out_info);
+    return image__decode_memory(data, size, options, out_bitmap);
+}
+
+bruce_result_t image__draw_bitmap(
+    const image_bitmap_t *bitmap, const bruce_image_draw_options_t *options
+) {
+    if (bitmap == NULL || bitmap->pixels == NULL || bitmap->width == 0 || bitmap->height == 0)
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    bruce_image_draw_options_t defaults = {.center = false, .fit = false, .background = BRUCE_COLOR_BLACK};
+    if (options == NULL) options = &defaults;
+    return image__draw_pixels(bitmap->pixels, bitmap->width, bitmap->height, options);
 }
 
 static bruce_result_t image__read_file(bruce_file_id_t file, void *data, size_t size) {
@@ -148,19 +143,17 @@ bruce_result_t image__gif_open(
     return result;
 }
 
-static bruce_result_t image__draw_png_file(
-    bruce_file_id_t file, const bruce_image_draw_options_t *options, bruce_image_info_t *out_info
+static bruce_result_t image__decode_png_from_file(
+    bruce_file_id_t file, const bruce_image_draw_options_t *options, image_bitmap_t *out_bitmap
 ) {
     bruce_result_t result = storage__seek(file, 0, SEEK_SET, NULL);
-    image_bitmap_t bitmap = {0};
-    if (result == BRUCE_OK) result = image__decode_png_file(file, options, &bitmap);
-    if (result == BRUCE_OK) result = image__draw_bitmap(&bitmap, options, out_info);
+    if (result == BRUCE_OK) result = image__decode_png_file(file, options, out_bitmap);
     return result;
 }
 
-static bruce_result_t image__draw_jpeg_file(
+static bruce_result_t image__decode_jpeg_from_file(
     bruce_file_id_t file, size_t file_size, const bruce_image_draw_options_t *options,
-    bruce_image_info_t *out_info
+    image_bitmap_t *out_bitmap
 ) {
     bruce_memory_object_t object = {0};
     bruce_result_t result = memory__external_alloc(file_size, &object);
@@ -187,18 +180,16 @@ static bruce_result_t image__draw_jpeg_file(
     }
     memory__free(chunk);
 
-    image_bitmap_t bitmap = {0};
     const void *data = NULL;
     if (result == BRUCE_OK) result = memory__external_map(&object, &data);
-    if (result == BRUCE_OK) result = image__decode_jpeg(data, total, options, &bitmap);
-    if (result == BRUCE_OK) result = image__draw_bitmap(&bitmap, options, out_info);
+    if (result == BRUCE_OK) result = image__decode_jpeg(data, total, options, out_bitmap);
     bruce_result_t free_result = memory__external_free(&object);
     return result == BRUCE_OK ? free_result : result;
 }
 
-static bruce_result_t image__draw_gif_file(
+static bruce_result_t image__decode_gif_from_file(
     bruce_file_id_t file, size_t file_size, const bruce_image_draw_options_t *options,
-    bruce_image_info_t *out_info
+    image_bitmap_t *out_bitmap
 ) {
     bruce_memory_object_t object = {0};
     bruce_result_t result = memory__external_alloc(file_size, &object);
@@ -227,18 +218,19 @@ static bruce_result_t image__draw_gif_file(
 
     if (result == BRUCE_OK) {
         const void *data = NULL;
-        image_bitmap_t bitmap = {0};
         result = memory__external_map(&object, &data);
-        if (result == BRUCE_OK) result = image__decode_gif(data, total, options, &bitmap);
-        if (result == BRUCE_OK) result = image__draw_bitmap(&bitmap, options, out_info);
+        if (result == BRUCE_OK) result = image__decode_gif(data, total, options, out_bitmap);
     }
     bruce_result_t free_result = memory__external_free(&object);
     return result == BRUCE_OK ? free_result : result;
 }
 
-bruce_result_t
-image__draw_path(const char *path, const bruce_image_draw_options_t *options, bruce_image_info_t *out_info) {
+bruce_result_t image__get_bitmap_from_file(
+    const char *path, const bruce_image_draw_options_t *options, image_bitmap_t *out_bitmap
+) {
     if (path == NULL || !image__is_supported_path(path)) return BRUCE_ERR_INVALID_PATH;
+    if (out_bitmap == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    *out_bitmap = (image_bitmap_t){0};
     bruce_image_draw_options_t defaults = {.center = false, .fit = false, .background = BRUCE_COLOR_BLACK};
     if (options == NULL) options = &defaults;
     bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
@@ -256,16 +248,31 @@ image__draw_path(const char *path, const bruce_image_draw_options_t *options, br
     result = image__read_file(file, signature, signature_size);
     if (result == BRUCE_OK) {
         switch (image__detect_format(signature, signature_size)) {
-            case IMAGE_FORMAT_PNG: result = image__draw_png_file(file, options, out_info); break;
+            case IMAGE_FORMAT_PNG: result = image__decode_png_from_file(file, options, out_bitmap); break;
             case IMAGE_FORMAT_JPEG:
-                result = image__draw_jpeg_file(file, (size_t)file_size, options, out_info);
+                result = image__decode_jpeg_from_file(file, (size_t)file_size, options, out_bitmap);
                 break;
             case IMAGE_FORMAT_GIF:
-                result = image__draw_gif_file(file, (size_t)file_size, options, out_info);
+                result = image__decode_gif_from_file(file, (size_t)file_size, options, out_bitmap);
                 break;
             case IMAGE_FORMAT_UNKNOWN: result = BRUCE_ERR_UNSUPPORTED; break;
         }
     }
     (void)storage__close(file);
+    if (result != BRUCE_OK) image__bitmap_release(out_bitmap);
+    return result;
+}
+
+bruce_result_t
+image__draw_path(const char *path, const bruce_image_draw_options_t *options, bruce_image_info_t *out_info) {
+    image_bitmap_t bitmap = {0};
+    bruce_result_t result = image__get_bitmap_from_file(path, options, &bitmap);
+    if (result == BRUCE_OK) result = image__draw_bitmap(&bitmap, options);
+    if (result == BRUCE_OK && out_info != NULL) {
+        out_info->format = bitmap.format;
+        out_info->width = bitmap.source_width;
+        out_info->height = bitmap.source_height;
+    }
+    image__bitmap_release(&bitmap);
     return result;
 }

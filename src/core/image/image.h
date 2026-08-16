@@ -5,23 +5,12 @@
 #include <stdint.h>
 
 #include "core_sdk/image.h"
-#include "core_sdk/memory.h"
 
 typedef struct {
     const uint8_t *data;
     size_t size;
     size_t offset;
 } image_reader_t;
-
-typedef struct {
-    uint16_t *pixels;
-    uint16_t width;
-    uint16_t height;
-    uint16_t source_width;
-    uint16_t source_height;
-    bruce_image_format_t format;
-    bruce_memory_object_t backing;
-} image_bitmap_t;
 
 bool image__reader_read(image_reader_t *reader, void *out, size_t size);
 bool image__reader_read_u8(image_reader_t *reader, uint8_t *out);
@@ -37,4 +26,3 @@ bruce_result_t image__draw_pixels(
 bruce_result_t image__draw_scaled_pixels(
     const uint16_t *pixels, uint16_t width, uint16_t height, const bruce_image_draw_options_t *options
 );
-void image__bitmap_release(image_bitmap_t *bitmap);
