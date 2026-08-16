@@ -112,7 +112,8 @@ bruce_result_t display__set_text_color(bruce_display_color_t color);
  */
 bruce_result_t display__set_text_bg_color(uint32_t color);
 
-/* Text size multiplier (1 = 6x8 character cells, 2 = 12x16, ...). Clamped to 1..8. */
+/* Text size multiplier (1 = native character cells, 2 = 2x that, ...).
+ * Clamped to 1..8. See display__get_font_metrics() for the native cell size. */
 bruce_result_t display__set_text_size(uint8_t size);
 
 /* Position the text cursor in logical coordinates. */
@@ -135,6 +136,17 @@ bruce_result_t display__draw_centre_string(const char *text, int16_t x, int16_t 
 
 /* Draw a single-line string with its right edge at x. */
 bruce_result_t display__draw_right_string(const char *text, int16_t x, int16_t y);
+
+/*
+ * The active font's fixed advance width/height, in px, before text_size
+ * scaling (multiply by the value passed to display__set_text_size() to get
+ * on-screen pixels). Every built-in font is monospace today, so this single
+ * width/height pair is exact for any string; callers doing their own layout
+ * math (row heights, column counts, cursor placement) should use this
+ * instead of a hardcoded guess, so they stay correct if the active font
+ * ever changes.
+ */
+bruce_result_t display__get_font_metrics(int16_t *out_char_width, int16_t *out_char_height);
 
 /* -------------------------------------------------------------------------- */
 /* Primitive drawing                                                          */

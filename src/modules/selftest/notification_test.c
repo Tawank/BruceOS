@@ -121,7 +121,9 @@ bool selftest__run_notification_case(void) {
         printf("[selftest] notification: border color failed\n");
         return false;
     }
-    for (int16_t y = 4; y < 11 && !saw_glyph_pixel; ++y) {
+    /* Scans the whole glyph cell (see display__get_font_metrics()): text is
+     * drawn at local (4, 4), and the cell is 10px tall. */
+    for (int16_t y = 4; y < 14 && !saw_glyph_pixel; ++y) {
         for (int16_t x = 4; x < rect.width - 3 && !saw_glyph_pixel; ++x) {
             bruce_display_color_t pixel = 0;
             if (display__test_overlay_pixel(overlay, x, y, &pixel) == BRUCE_OK && pixel == BRUCE_COLOR_WHITE) {

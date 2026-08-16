@@ -20,8 +20,10 @@
 
 #define TEXT_MAX_BYTES (32u * 1024u)
 #define TEXT_LINE_INPUT_MAX 512u
+/* Mirrors the active font's cell size (display__get_font_metrics()) as
+ * compile-time constants -- every built-in font is monospace 6x10 today. */
 #define TEXT_CHAR_WIDTH 6
-#define TEXT_CHAR_HEIGHT 8
+#define TEXT_CHAR_HEIGHT 10
 #define TEXT_TITLE_HEIGHT 12
 #define TEXT_FOOTER_HEIGHT 20
 #define TEXT_FRAME_MARGIN 2

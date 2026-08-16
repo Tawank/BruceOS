@@ -13,8 +13,8 @@
 #include "core_sdk/device.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/display.h"
-#include "core_sdk/input.h"
 #include "core_sdk/ext_mem_loader.h"
+#include "core_sdk/input.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
@@ -227,10 +227,7 @@ static void bruce_launcher__draw_root_menu(
     bruce_launcher__draw_entry_icon(&entries[selected], w / 2, cy, large, theme->pri);
 
     bruce_launcher__draw_centered_text(
-        bruce_launcher__entry_label(&entries[selected]),
-        cy + large / 2 + 10,
-        BRUCE_LAUNCHER_FONT_MEDIUM,
-        theme
+        bruce_launcher__entry_label(&entries[selected]), cy + large / 2 + 6, BRUCE_LAUNCHER_FONT_MEDIUM, theme
     );
 }
 
@@ -303,7 +300,7 @@ static void bruce_launcher__draw_root_transition(
                           : bruce_launcher__wrap_index(from + direction, menu->entry_count);
     bruce_launcher__draw_centered_text(
         bruce_launcher__entry_label(&bruce_launcher__menu_entries(menu)[label_entry]),
-        cy + large / 2 + 10,
+        cy + large / 2 + 6,
         BRUCE_LAUNCHER_FONT_MEDIUM,
         theme
     );
@@ -527,7 +524,9 @@ static int bruce_launcher__run_entry(const bruce_launcher_entry_t *entry) {
 
     if (result < 0) {
         char message[128];
-        ext_mem_loader__format_error_message(bruce_launcher__entry_label(entry), result, message, sizeof(message));
+        ext_mem_loader__format_error_message(
+            bruce_launcher__entry_label(entry), result, message, sizeof(message)
+        );
         (void)dialog__message(BRUCE_DIALOG_ERROR, "Launch failed", message);
     }
     return result;
@@ -595,8 +594,9 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
             s_live_choices.entries = entries;
             s_live_choices.count = current->entry_count;
             bruce_launcher__refresh_live_choices();
-            bruce_result_t result =
-                dialog__choice_launcher(current->title, NULL, choices, (size_t)current->entry_count, &selected);
+            bruce_result_t result = dialog__choice_launcher(
+                current->title, NULL, choices, (size_t)current->entry_count, &selected
+            );
             s_live_choices.count = 0;
             if (result == BRUCE_ERR_CANCELLED) break;
             if (result == BRUCE_ERR_NOT_FOREGROUND) {

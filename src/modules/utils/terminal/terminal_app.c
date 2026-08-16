@@ -19,8 +19,10 @@
 
 #define TERMINAL__TRANSCRIPT_CAPACITY 4096
 #define TERMINAL__LINE_CAPACITY 512
+/* Mirrors the active font's cell size (display__get_font_metrics()) as
+ * compile-time constants -- every built-in font is monospace 6x10 today. */
 #define TERMINAL__CHAR_W 6
-#define TERMINAL__CHAR_H 8
+#define TERMINAL__CHAR_H 10
 #define TERMINAL__TITLE_H 12
 #define TERMINAL__MAX_VISIBLE_ROWS 40
 #define TERMINAL__FRAME_MARGIN 2

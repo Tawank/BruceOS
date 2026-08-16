@@ -53,6 +53,7 @@ idf_component_register(SRCS
                     "core/display/display.c"
                     "core/display/display_draw.c"
                     "core/display/display_driver.c"
+                    "core/display/display_font_bitmap.c"
                     "core/display/display_overlay.c"
                     "core/display/display_text.c"
                     "core/disk/disk.c"

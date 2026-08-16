@@ -1031,7 +1031,8 @@ static int webui_app__gui(void) {
             "Start WebUI", "Existing Wi-Fi unavailable", network_choices, 2, &network
         );
         if (result == BRUCE_ERR_CANCELLED ||
-            (result == BRUCE_OK && strcmp(network_choices[network].value, "cancel") == 0)) continue;
+            (result == BRUCE_OK && strcmp(network_choices[network].value, "cancel") == 0))
+            continue;
         if (result != BRUCE_OK) return result;
         (void)webui_app__start(WEBUI_APP_NETWORK_AP, true);
     }

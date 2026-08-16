@@ -77,7 +77,7 @@ bool selftest__run_display_rendering_case(void) {
     bool buffered = config__get_display_buffered_rendering();
     if (display__get_cursor(&cursor_x, &cursor_y) != BRUCE_OK || cursor_x != 7 || cursor_y != 1 ||
         (buffered &&
-         (display__test_read_pixel(1, 3, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_WHITE ||
+         (display__test_read_pixel(1, 6, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_WHITE ||
           display__test_read_pixel(1, 1, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_BLACK))) {
         printf("[selftest] display/rendering: FAIL, glyph or cursor\n");
         (void)display__present();
@@ -89,18 +89,24 @@ bool selftest__run_display_rendering_case(void) {
         (buffered &&
          (display__test_read_pixel(72, 1, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_BLACK ||
           display__test_read_pixel(73, 8, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_WHITE ||
-          display__test_read_pixel(79, 1, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_WHITE))) {
+          display__test_read_pixel(79, 3, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_WHITE))) {
         printf("[selftest] display/rendering: FAIL, UTF-8 glyphs or cursor\n");
         (void)display__present();
         return false;
     }
 
+    /* È = E + grave: rows 0-1 of the cell are reserved for the accent, so it
+     * must land clear of E's own ink (which starts at row 2) instead of
+     * merging into/vanishing against the letter's top stroke the way the old
+     * draw-time accent overlay did (see display_font_bitmap.c). */
     if (display__draw_string("ZÈ", 40, 10) != BRUCE_OK ||
         (buffered &&
          (display__test_read_pixel(41, 13, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_BLACK ||
-          display__test_read_pixel(46, 10, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_WHITE ||
+          display__test_read_pixel(46, 10, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_BLACK ||
+          display__test_read_pixel(47, 10, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_WHITE ||
+          display__test_read_pixel(48, 11, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_WHITE ||
           display__test_read_pixel(46, 16, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_WHITE ||
-          display__test_read_pixel(46, 17, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_BLACK))) {
+          display__test_read_pixel(46, 19, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_BLACK))) {
         printf("[selftest] display/rendering: FAIL, capital glyph geometry\n");
         (void)display__present();
         return false;
@@ -125,11 +131,11 @@ bool selftest__run_display_rendering_case(void) {
 
     if (display__set_cursor(1, 30) != BRUCE_OK || display__print("Příliš žluťou") != BRUCE_OK ||
         (buffered &&
-         (display__test_read_pixel(73, 32, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_WHITE)) ||
+         (display__test_read_pixel(73, 34, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_WHITE)) ||
         display__print("č") != BRUCE_OK || display__get_cursor(&cursor_x, &cursor_y) != BRUCE_OK ||
         cursor_x != 85 || cursor_y != 30 ||
         (buffered &&
-         (display__test_read_pixel(73, 32, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_WHITE))) {
+         (display__test_read_pixel(73, 34, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_WHITE))) {
         printf("[selftest] display/rendering: FAIL, Czech caron damaged preceding text\n");
         (void)display__present();
         return false;

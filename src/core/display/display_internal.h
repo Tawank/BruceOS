@@ -2,6 +2,7 @@
 
 #include "core_sdk/display.h"
 #include "core_sdk/process.h"
+#include "display_font.h"
 #include "freertos/FreeRTOS.h" // IWYU pragma: keep
 #include "freertos/semphr.h"
 
@@ -17,8 +18,16 @@
  * the previous chunk's transfer instead of happening strictly after it. */
 #define DISPLAY__DIRECT_CHUNK_PIXELS (DISPLAY__DIRECT_BUF_PIXELS / 2)
 
+/* Nominal cell of the *active* font (display_internal__active_font()), used
+ * by the small set of callers still asking for it in whole-pixel terms
+ * (dialog/text/terminal layout, notification sizing). DISPLAY__FONT_HEIGHT
+ * is a max row index (real height is DISPLAY__FONT_HEIGHT + 1): rows 0-1 are
+ * reserved so accented glyphs (display_font_bitmap.c) have real headroom for
+ * a diacritic instead of overlapping the letter's own ink -- see
+ * display_font.h for why that matters and how a second font provider (e.g.
+ * a future FreeType-backed one) would plug in. */
 #define DISPLAY__FONT_WIDTH 5
-#define DISPLAY__FONT_HEIGHT 7
+#define DISPLAY__FONT_HEIGHT 9
 #define DISPLAY__FONT_FIRST 32
 #define DISPLAY__FONT_LAST 126
 
@@ -109,8 +118,16 @@ void display_internal__fill_rect(
 void display_internal__draw_rgb_bitmap(
     display__process_context_t *context, int16_t x, int16_t y, const uint16_t *bitmap, int16_t w, int16_t h
 );
-const uint8_t *display_internal__font_glyph(char c);
 bool display_internal__on_transfer_done_from_isr(void);
+
+/* The font every display__* text primitive currently renders through.
+ * Defaults to display_font_bitmap__instance(); swappable at runtime so a
+ * second provider can be added later (see display_font.h) without changing
+ * display_text.c's rendering loop or its core_sdk callers. No core_sdk API
+ * exposes the setter yet -- add one only once a second provider exists and
+ * needs to be user-selectable. */
+void display_internal__set_font(const display__font_t *font);
+const display__font_t *display_internal__active_font(void);
 
 /* -------------------------------------------------------------------------- */
 /* Overlay pool (display_overlay.c): owns s_overlays[], exposes pure         */

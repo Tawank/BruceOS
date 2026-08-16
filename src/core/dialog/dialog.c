@@ -189,8 +189,10 @@ static bruce_result_t dialog__term_pick_file(
 /* GUI common helpers                                                         */
 /* -------------------------------------------------------------------------- */
 
+/* Mirrors the active font's cell size (display__get_font_metrics()) as
+ * compile-time constants -- every built-in font is monospace 6x10 today. */
 #define DIALOG__CHAR_W 6
-#define DIALOG__CHAR_H 8
+#define DIALOG__CHAR_H 10
 #define DIALOG__TEXT_SIZE 1
 #define DIALOG__MARGIN 2
 /* Width threshold above which choice-list rows step up to a larger font,
