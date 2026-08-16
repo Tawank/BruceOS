@@ -867,15 +867,18 @@ and `apps`. Unknown names and `NULL` return `NULL`. The intended consumer is
 `display__draw_bitmap_scaled()`; the bitmaps are generated from the MDI source
 assets at development time.
 
-Image Core decodes JPEG, PNG, and the first frame of GIF data from memory or a
-Core storage path into the caller's viewport. `image__draw_memory()` and
+Image Core decodes JPEG, PNG, and GIF data from memory or a Core storage path
+into the caller's viewport. `image__draw_memory()` and
 `image__draw_path()` optionally fit without upscaling, preserve aspect ratio,
 center relative to caller coordinates, and composite transparency over a
 caller-selected RGB565 background. They update the active render target but
 leave frame presentation to the caller. The image loader registers `.jpg`, `.jpeg`, `.png`,
-and `.gif` case-insensitively; its viewer fits, centers, presents, and remains
-open until input. File manager image viewing and terminal/serial direct paths
-use this same loader. GIF animation is not part of this initial contract.
+and `.gif` case-insensitively; its viewer fits, centers, presents, animates GIF
+frames, and remains open until input. File manager image viewing and
+terminal/serial direct paths use this same loader. Callers can independently
+open, draw, increment (looping at the trailer), and close an animated GIF with
+the `image__gif_*` API; drawing reports the current frame delay and leaves
+presentation to the caller.
 
 The transient notification banner is not special-cased in Core at all: Core
 only knows about the generic overlay primitive above. `notification__push()`

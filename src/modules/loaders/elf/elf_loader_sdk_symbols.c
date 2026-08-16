@@ -392,6 +392,10 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(image__draw_memory),
     ESP_ELFSYM_EXPORT(image__draw_path),
     ESP_ELFSYM_EXPORT(image__is_supported_path),
+    ESP_ELFSYM_EXPORT(image__gif_open),
+    ESP_ELFSYM_EXPORT(image__gif_draw),
+    ESP_ELFSYM_EXPORT(image__gif_increment),
+    ESP_ELFSYM_EXPORT(image__gif_close),
 
     /* Unrestricted global UI services */
     ESP_ELFSYM_EXPORT(notification__push),

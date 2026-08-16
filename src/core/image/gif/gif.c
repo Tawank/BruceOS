@@ -28,8 +28,9 @@ typedef struct {
     uint16_t *pixels, canvas_width, canvas_height, source_width, source_height;
     uint16_t left, top, frame_width, frame_height;
     uint16_t palette[256];
+    size_t palette_count;
     int transparent_index;
-    bool interlaced, too_many_pixels;
+    bool interlaced, invalid_output;
     size_t pixel_index;
 } gif_output_t;
 
@@ -44,8 +45,9 @@ static uint16_t gif__interlaced_row(uint16_t row, uint16_t height) {
 }
 
 static void gif__emit(gif_output_t *output, uint8_t color) {
-    if (output->pixel_index >= (size_t)output->frame_width * output->frame_height) {
-        output->too_many_pixels = true;
+    if (output->pixel_index >= (size_t)output->frame_width * output->frame_height ||
+        color >= output->palette_count) {
+        output->invalid_output = true;
         return;
     }
     uint16_t x = (uint16_t)(output->pixel_index % output->frame_width);
@@ -155,91 +157,226 @@ static bool gif__lzw(image_reader_t *reader, uint8_t minimum_code_size, gif_outp
     memory__free(suffix);
     memory__free(prefix);
     memory__free(compressed);
-    return ok && saw_end && !output->too_many_pixels &&
+    return ok && saw_end && !output->invalid_output &&
            output->pixel_index == (size_t)output->frame_width * output->frame_height;
+}
+
+static void gif__fill_canvas(bruce_gif_t *gif) {
+    size_t count = (size_t)gif->canvas_width * gif->canvas_height;
+    for (size_t i = 0; i < count; ++i) gif->canvas[i] = gif->options.background;
+}
+
+static void gif__restore_previous(bruce_gif_t *gif) {
+    if (gif->previous_disposal == 3 && gif->restore_canvas != NULL) {
+        memcpy(
+            gif->canvas,
+            gif->restore_canvas,
+            (size_t)gif->canvas_width * gif->canvas_height * sizeof(*gif->canvas)
+        );
+    } else if (gif->previous_disposal == 2) {
+        uint32_t x0 = ((uint32_t)gif->previous_left * gif->canvas_width) / gif->source_width;
+        uint32_t y0 = ((uint32_t)gif->previous_top * gif->canvas_height) / gif->source_height;
+        uint32_t x1 = ((uint32_t)(gif->previous_left + gif->previous_width) * gif->canvas_width +
+                       gif->source_width - 1u) /
+                      gif->source_width;
+        uint32_t y1 = ((uint32_t)(gif->previous_top + gif->previous_height) * gif->canvas_height +
+                       gif->source_height - 1u) /
+                      gif->source_height;
+        if (x1 > gif->canvas_width) x1 = gif->canvas_width;
+        if (y1 > gif->canvas_height) y1 = gif->canvas_height;
+        for (uint32_t y = y0; y < y1; ++y)
+            for (uint32_t x = x0; x < x1; ++x)
+                gif->canvas[(size_t)y * gif->canvas_width + x] = gif->options.background;
+    }
+    gif->previous_disposal = 0;
+}
+
+static bruce_result_t gif__decode_next(bruce_gif_t *gif, bool *out_trailer) {
+    int transparent_index = -1;
+    uint8_t disposal = 0;
+    uint32_t delay_ms = 0;
+    *out_trailer = false;
+    gif__restore_previous(gif);
+    for (;;) {
+        uint8_t marker;
+        if (!image__reader_read_u8(&gif->reader, &marker)) return BRUCE_ERR_IO;
+        if (marker == 0x3b) {
+            *out_trailer = true;
+            return BRUCE_OK;
+        }
+        if (marker == 0x21) {
+            uint8_t label;
+            if (!image__reader_read_u8(&gif->reader, &label)) return BRUCE_ERR_IO;
+            if (label == 0xf9) {
+                uint8_t block_size, control[4], terminator;
+                if (!image__reader_read_u8(&gif->reader, &block_size) || block_size != 4 ||
+                    !image__reader_read(&gif->reader, control, sizeof(control)) ||
+                    !image__reader_read_u8(&gif->reader, &terminator) || terminator != 0)
+                    return BRUCE_ERR_IO;
+                disposal = (control[0] >> 2) & 7;
+                transparent_index = (control[0] & 1) != 0 ? control[3] : -1;
+                delay_ms = (uint32_t)(control[1] | ((uint16_t)control[2] << 8)) * 10u;
+            } else if (!gif__skip_blocks(&gif->reader)) return BRUCE_ERR_IO;
+            continue;
+        }
+        if (marker != 0x2c) return BRUCE_ERR_IO;
+        gif_output_t output = {
+            .pixels = gif->canvas,
+            .canvas_width = gif->canvas_width,
+            .canvas_height = gif->canvas_height,
+            .source_width = gif->source_width,
+            .source_height = gif->source_height,
+            .transparent_index = transparent_index,
+        };
+        uint8_t image_packed;
+        if (!image__reader_read_u16(&gif->reader, &output.left) ||
+            !image__reader_read_u16(&gif->reader, &output.top) ||
+            !image__reader_read_u16(&gif->reader, &output.frame_width) ||
+            !image__reader_read_u16(&gif->reader, &output.frame_height) ||
+            !image__reader_read_u8(&gif->reader, &image_packed) || output.frame_width == 0 ||
+            output.frame_height == 0)
+            return BRUCE_ERR_IO;
+        output.interlaced = (image_packed & 0x40) != 0;
+        if ((image_packed & 0x80) != 0) {
+            output.palette_count = (size_t)1 << ((image_packed & 7) + 1);
+            if (!gif__palette(&gif->reader, output.palette, output.palette_count)) return BRUCE_ERR_IO;
+        } else {
+            if (gif->global_palette_count == 0) return BRUCE_ERR_IO;
+            output.palette_count = gif->global_palette_count;
+            memcpy(output.palette, gif->global_palette, sizeof(gif->global_palette));
+        }
+        if (disposal == 3) {
+            if (gif->restore_canvas == NULL) {
+                gif->restore_canvas = memory__malloc(
+                    (size_t)gif->canvas_width * gif->canvas_height * sizeof(*gif->restore_canvas)
+                );
+                if (gif->restore_canvas == NULL) return BRUCE_ERR_NO_MEMORY;
+            }
+            memcpy(
+                gif->restore_canvas,
+                gif->canvas,
+                (size_t)gif->canvas_width * gif->canvas_height * sizeof(*gif->canvas)
+            );
+        }
+        uint8_t code_size;
+        if (!image__reader_read_u8(&gif->reader, &code_size) || !gif__lzw(&gif->reader, code_size, &output))
+            return BRUCE_ERR_IO;
+        gif->previous_left = output.left;
+        gif->previous_top = output.top;
+        gif->previous_width = output.frame_width;
+        gif->previous_height = output.frame_height;
+        gif->previous_disposal = disposal;
+        gif->delay_ms = delay_ms;
+        return BRUCE_OK;
+    }
+}
+
+bruce_result_t gif__open_memory(
+    const uint8_t *data, size_t size, const bruce_image_draw_options_t *options,
+    const bruce_memory_object_t *backing, bruce_gif_t **out_gif
+) {
+    if (data == NULL || size < 13 || options == NULL || out_gif == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    *out_gif = NULL;
+    bruce_gif_t *gif = memory__malloc(sizeof(*gif));
+    if (gif == NULL) return BRUCE_ERR_NO_MEMORY;
+    *gif = (bruce_gif_t){
+        .data = data,
+        .size = size,
+        .reader = {.data = data, .size = size},
+        .options = *options,
+    };
+    uint8_t header[6], packed, background_index, aspect;
+    if (!image__reader_read(&gif->reader, header, sizeof(header)) ||
+        (memcmp(header, "GIF87a", 6) != 0 && memcmp(header, "GIF89a", 6) != 0) ||
+        !image__reader_read_u16(&gif->reader, &gif->source_width) ||
+        !image__reader_read_u16(&gif->reader, &gif->source_height) ||
+        !image__reader_read_u8(&gif->reader, &packed) ||
+        !image__reader_read_u8(&gif->reader, &background_index) ||
+        !image__reader_read_u8(&gif->reader, &aspect) || gif->source_width == 0 || gif->source_height == 0) {
+        image__gif_close(gif);
+        return BRUCE_ERR_IO;
+    }
+    (void)background_index;
+    (void)aspect;
+    if ((packed & 0x80) != 0) {
+        gif->global_palette_count = (size_t)1 << ((packed & 7) + 1);
+        if (!gif__palette(&gif->reader, gif->global_palette, gif->global_palette_count)) {
+            image__gif_close(gif);
+            return BRUCE_ERR_IO;
+        }
+    }
+    gif->frames_offset = gif->reader.offset;
+    image__fit_size(
+        gif->source_width, gif->source_height, options->fit, &gif->canvas_width, &gif->canvas_height
+    );
+    if (gif->canvas_width == 0 || gif->canvas_height == 0 ||
+        (size_t)gif->canvas_width > SIZE_MAX / ((size_t)gif->canvas_height * sizeof(*gif->canvas))) {
+        image__gif_close(gif);
+        return BRUCE_ERR_RESOURCE_LIMIT;
+    }
+    gif->canvas = memory__malloc((size_t)gif->canvas_width * gif->canvas_height * sizeof(*gif->canvas));
+    if (gif->canvas == NULL) {
+        image__gif_close(gif);
+        return BRUCE_ERR_NO_MEMORY;
+    }
+    gif__fill_canvas(gif);
+    bool trailer = false;
+    bruce_result_t result = gif__decode_next(gif, &trailer);
+    if (result != BRUCE_OK || trailer) {
+        image__gif_close(gif);
+        return result != BRUCE_OK ? result : BRUCE_ERR_IO;
+    }
+    if (backing != NULL) gif->backing = *backing;
+    *out_gif = gif;
+    return BRUCE_OK;
+}
+
+bruce_result_t image__gif_draw(bruce_gif_t *gif, uint32_t *out_delay_ms) {
+    if (gif == NULL || gif->canvas == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    bruce_result_t result =
+        image__draw_pixels(gif->canvas, gif->canvas_width, gif->canvas_height, &gif->options);
+    if (result == BRUCE_OK && out_delay_ms != NULL) *out_delay_ms = gif->delay_ms;
+    return result;
+}
+
+bruce_result_t image__gif_increment(bruce_gif_t *gif, bool *out_looped) {
+    if (gif == NULL || gif->canvas == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    bool trailer = false;
+    bruce_result_t result = gif__decode_next(gif, &trailer);
+    if (result != BRUCE_OK) return result;
+    bool looped = trailer;
+    if (looped) {
+        gif->reader.offset = gif->frames_offset;
+        gif->previous_disposal = 0;
+        gif__fill_canvas(gif);
+        result = gif__decode_next(gif, &trailer);
+        if (result != BRUCE_OK || trailer) return result != BRUCE_OK ? result : BRUCE_ERR_IO;
+    }
+    if (out_looped != NULL) *out_looped = looped;
+    return BRUCE_OK;
+}
+
+void image__gif_close(bruce_gif_t *gif) {
+    if (gif == NULL) return;
+    memory__free(gif->restore_canvas);
+    memory__free(gif->canvas);
+    if (gif->backing.backend != BRUCE_MEMORY_BACKEND_INVALID) (void)memory__external_free(&gif->backing);
+    memory__free(gif);
 }
 
 bruce_result_t image__decode_gif(
     const uint8_t *data, size_t size, const bruce_image_draw_options_t *options, image_bitmap_t *bitmap
 ) {
-    image_reader_t reader = {.data = data, .size = size};
-    uint8_t header[6], packed, background_index, aspect;
-    uint16_t source_width, source_height;
-    if (!image__reader_read(&reader, header, sizeof(header)) ||
-        (memcmp(header, "GIF87a", 6) != 0 && memcmp(header, "GIF89a", 6) != 0) ||
-        !image__reader_read_u16(&reader, &source_width) || !image__reader_read_u16(&reader, &source_height) ||
-        !image__reader_read_u8(&reader, &packed) || !image__reader_read_u8(&reader, &background_index) ||
-        !image__reader_read_u8(&reader, &aspect) || source_width == 0 || source_height == 0)
-        return BRUCE_ERR_IO;
-    (void)background_index;
-    (void)aspect;
-    uint16_t global_palette[256] = {0};
-    size_t global_count = 0;
-    if ((packed & 0x80) != 0) {
-        global_count = (size_t)1 << ((packed & 7) + 1);
-        if (!gif__palette(&reader, global_palette, global_count)) return BRUCE_ERR_IO;
-    }
-    int transparent_index = -1;
-    for (;;) {
-        uint8_t marker;
-        if (!image__reader_read_u8(&reader, &marker)) return BRUCE_ERR_IO;
-        if (marker == 0x3b) return BRUCE_ERR_IO;
-        if (marker == 0x21) {
-            uint8_t label;
-            if (!image__reader_read_u8(&reader, &label)) return BRUCE_ERR_IO;
-            if (label == 0xf9) {
-                uint8_t block_size, control[4], terminator;
-                if (!image__reader_read_u8(&reader, &block_size) || block_size != 4 ||
-                    !image__reader_read(&reader, control, sizeof(control)) ||
-                    !image__reader_read_u8(&reader, &terminator) || terminator != 0)
-                    return BRUCE_ERR_IO;
-                transparent_index = (control[0] & 1) != 0 ? control[3] : -1;
-            } else if (!gif__skip_blocks(&reader)) return BRUCE_ERR_IO;
-            continue;
-        }
-        if (marker != 0x2c) return BRUCE_ERR_IO;
-        gif_output_t output = {
-            .source_width = source_width,
-            .source_height = source_height,
-            .transparent_index = transparent_index
-        };
-        uint8_t image_packed;
-        if (!image__reader_read_u16(&reader, &output.left) || !image__reader_read_u16(&reader, &output.top) ||
-            !image__reader_read_u16(&reader, &output.frame_width) ||
-            !image__reader_read_u16(&reader, &output.frame_height) ||
-            !image__reader_read_u8(&reader, &image_packed) || output.frame_width == 0 ||
-            output.frame_height == 0)
-            return BRUCE_ERR_IO;
-        output.interlaced = (image_packed & 0x40) != 0;
-        if ((image_packed & 0x80) != 0) {
-            size_t local_count = (size_t)1 << ((image_packed & 7) + 1);
-            if (!gif__palette(&reader, output.palette, local_count)) return BRUCE_ERR_IO;
-        } else {
-            if (global_count == 0) return BRUCE_ERR_IO;
-            memcpy(output.palette, global_palette, sizeof(global_palette));
-        }
-        image__fit_size(
-            source_width, source_height, options->fit, &output.canvas_width, &output.canvas_height
-        );
-        if (output.canvas_width == 0 || output.canvas_height == 0 ||
-            (size_t)output.canvas_width > SIZE_MAX / ((size_t)output.canvas_height * sizeof(uint16_t)))
-            return BRUCE_ERR_RESOURCE_LIMIT;
-        size_t pixel_count = (size_t)output.canvas_width * output.canvas_height;
-        output.pixels = memory__malloc(pixel_count * sizeof(*output.pixels));
-        if (output.pixels == NULL) return BRUCE_ERR_NO_MEMORY;
-        for (size_t i = 0; i < pixel_count; ++i) output.pixels[i] = options->background;
-        uint8_t code_size;
-        bool decoded = image__reader_read_u8(&reader, &code_size) && gif__lzw(&reader, code_size, &output);
-        if (!decoded) {
-            memory__free(output.pixels);
-            return BRUCE_ERR_IO;
-        }
-        bitmap->pixels = output.pixels;
-        bitmap->width = output.canvas_width;
-        bitmap->height = output.canvas_height;
-        bitmap->source_width = source_width;
-        bitmap->source_height = source_height;
-        bitmap->format = BRUCE_IMAGE_FORMAT_GIF;
-        return BRUCE_OK;
-    }
+    bruce_gif_t *gif = NULL;
+    bruce_result_t result = gif__open_memory(data, size, options, NULL, &gif);
+    if (result != BRUCE_OK) return result;
+    bitmap->pixels = gif->canvas;
+    bitmap->width = gif->canvas_width;
+    bitmap->height = gif->canvas_height;
+    bitmap->source_width = gif->source_width;
+    bitmap->source_height = gif->source_height;
+    bitmap->format = BRUCE_IMAGE_FORMAT_GIF;
+    gif->canvas = NULL;
+    image__gif_close(gif);
+    return BRUCE_OK;
 }

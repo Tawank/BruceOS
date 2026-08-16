@@ -89,6 +89,65 @@ static bruce_result_t image__read_file(bruce_file_id_t file, void *data, size_t 
     return result;
 }
 
+bruce_result_t image__gif_open(
+    const char *path, const bruce_image_draw_options_t *options, bruce_gif_t **out_gif,
+    bruce_image_info_t *out_info
+) {
+    if (path == NULL || out_gif == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    *out_gif = NULL;
+    bruce_image_draw_options_t defaults = {.center = false, .fit = false, .background = BRUCE_COLOR_BLACK};
+    if (options == NULL) options = &defaults;
+
+    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
+    bruce_result_t result = storage__open(path, BRUCE_STORAGE_OPEN_READ, &file);
+    if (result != BRUCE_OK) return result;
+    uint64_t file_size = 0;
+    result = storage__seek(file, 0, SEEK_END, &file_size);
+    if (result != BRUCE_OK || file_size < 13 || file_size > IMAGE_FILE_SIZE_MAX || file_size > SIZE_MAX) {
+        (void)storage__close(file);
+        return result != BRUCE_OK ? result : BRUCE_ERR_RESOURCE_LIMIT;
+    }
+
+    bruce_memory_object_t object = {0};
+    result = memory__external_alloc((size_t)file_size, &object);
+    uint8_t *chunk = NULL;
+    if (result == BRUCE_OK) {
+        chunk = memory__malloc(IMAGE_READ_CHUNK_SIZE);
+        if (chunk == NULL) result = BRUCE_ERR_NO_MEMORY;
+    }
+    result = result == BRUCE_OK ? storage__seek(file, 0, SEEK_SET, NULL) : result;
+    size_t total = 0;
+    while (result == BRUCE_OK && total < file_size) {
+        size_t wanted = (size_t)file_size - total;
+        if (wanted > IMAGE_READ_CHUNK_SIZE) wanted = IMAGE_READ_CHUNK_SIZE;
+        size_t count = 0;
+        result = storage__read(file, chunk, wanted, &count);
+        if (result == BRUCE_OK && count == 0) result = BRUCE_ERR_IO;
+        if (result == BRUCE_OK) {
+            result = memory__external_write(&object, total, chunk, count);
+            total += count;
+        }
+    }
+    memory__free(chunk);
+    (void)storage__close(file);
+
+    const void *data = NULL;
+    if (result == BRUCE_OK) result = memory__external_map(&object, &data);
+    if (result == BRUCE_OK && image__detect_format(data, total) != IMAGE_FORMAT_GIF)
+        result = BRUCE_ERR_UNSUPPORTED;
+    if (result == BRUCE_OK) {
+        result = gif__open_memory(data, total, options, &object, out_gif);
+        if (result == BRUCE_OK) object = (bruce_memory_object_t){0};
+    }
+    if (object.backend != BRUCE_MEMORY_BACKEND_INVALID) (void)memory__external_free(&object);
+    if (result == BRUCE_OK && out_info != NULL) {
+        out_info->format = BRUCE_IMAGE_FORMAT_GIF;
+        out_info->width = (*out_gif)->source_width;
+        out_info->height = (*out_gif)->source_height;
+    }
+    return result;
+}
+
 static bruce_result_t image__draw_png_file(
     bruce_file_id_t file, const bruce_image_draw_options_t *options, bruce_image_info_t *out_info
 ) {

@@ -3,6 +3,7 @@
 #include <stdio.h>
 
 #include "core/display/display.h"
+#include "core/image/gif/gif.h"
 #include "core_sdk/display.h"
 #include "core_sdk/image.h"
 
@@ -10,6 +11,11 @@ bool selftest__run_image_decode_case(void) {
     static const uint8_t red_gif[] = {
         'G', 'I',  'F', '8', '9', 'a', 1, 0, 1, 0, 0x80, 0, 0, 0xff, 0,    0, 0,    0,
         0,   0x2c, 0,   0,   0,   0,   1, 0, 1, 0, 0,    2, 2, 0x44, 0x01, 0, 0x3b,
+    };
+    static const uint8_t animated_gif[] = {
+        'G', 'I', 'F', '8', '9', 'a',  1,    0, 1, 0, 0x80, 0, 0, 0xff, 0, 0, 0, 0,    0xff, 0x21, 0xf9, 4,
+        0,   5,   0,   0,   0,   0x2c, 0,    0, 0, 0, 1,    0, 1, 0,    0, 2, 2, 0x44, 0x01, 0,    0x21, 0xf9,
+        4,   0,   5,   0,   0,   0,    0x2c, 0, 0, 0, 0,    1, 0, 1,    0, 0, 2, 2,    0x4c, 0x01, 0,    0x3b,
     };
     static const uint8_t white_progressive_jpeg[] = {
         0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01, 0x00,
@@ -56,6 +62,18 @@ bool selftest__run_image_decode_case(void) {
     bruce_display_color_t pixel = 0;
     bool valid = info.format == BRUCE_IMAGE_FORMAT_GIF && info.width == 1 && info.height == 1 &&
                  display__test_read_pixel(0, 0, &pixel) == BRUCE_OK && pixel == BRUCE_COLOR_RED;
+    bruce_gif_t *gif = NULL;
+    uint32_t delay_ms = 0;
+    bool looped = false;
+    if (valid) {
+        valid = gif__open_memory(animated_gif, sizeof(animated_gif), &options, NULL, &gif) == BRUCE_OK &&
+                image__gif_draw(gif, &delay_ms) == BRUCE_OK && delay_ms == 50 &&
+                image__gif_increment(gif, &looped) == BRUCE_OK && !looped &&
+                image__gif_draw(gif, &delay_ms) == BRUCE_OK &&
+                display__test_read_pixel(0, 0, &pixel) == BRUCE_OK && pixel == BRUCE_COLOR_BLUE &&
+                image__gif_increment(gif, &looped) == BRUCE_OK && looped;
+    }
+    image__gif_close(gif);
     if (valid) {
         valid = display__fill_screen(BRUCE_COLOR_BLACK) == BRUCE_OK &&
                 image__draw_memory(white_progressive_jpeg, sizeof(white_progressive_jpeg), &options, &info) ==

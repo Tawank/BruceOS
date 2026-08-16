@@ -2,6 +2,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 
 #include "args.h"
 #include "core_sdk/app_runner.h"
@@ -11,6 +12,36 @@
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
 #include "core_sdk/storage.h"
+
+static bool image_viewer__is_gif(const char *path) {
+    const char *extension = path != NULL ? strrchr(path, '.') : NULL;
+    return extension != NULL && strcasecmp(extension, ".gif") == 0;
+}
+
+static bruce_result_t image_viewer__draw_gif(const char *path, const bruce_image_draw_options_t *options) {
+    bruce_gif_t *gif = NULL;
+    bruce_result_t result = image__gif_open(path, options, &gif, NULL);
+    if (result != BRUCE_OK) return result;
+
+    (void)input__flush();
+    while (result == BRUCE_OK) {
+        uint32_t delay_ms = 0;
+        result = display__begin_frame();
+        if (result == BRUCE_OK) result = display__fill_screen(options->background);
+        if (result == BRUCE_OK) result = image__gif_draw(gif, &delay_ms);
+        if (result == BRUCE_OK) result = display__present();
+        if (result != BRUCE_OK) break;
+
+        bruce_input_event_t event;
+        bruce_result_t input_result = input__read(&event, delay_ms == 0 ? 100 : delay_ms);
+        if (input_result == BRUCE_ERR_NOT_FOREGROUND ||
+            (input_result == BRUCE_OK && event.action == BRUCE_INPUT_PRESS))
+            break;
+        result = image__gif_increment(gif, NULL);
+    }
+    image__gif_close(gif);
+    return result;
+}
 
 int image_viewer_app_main(int argc, char **argv) {
     ArgParser *parser = ap_new_parser();
@@ -34,12 +65,17 @@ int image_viewer_app_main(int argc, char **argv) {
         .fit = true,
         .background = BRUCE_COLOR_BLACK,
     };
-    bruce_result_t result = display__begin_frame();
-    if (result == BRUCE_OK) result = display__fill_screen(options.background);
-    if (result == BRUCE_OK) result = image__draw_path(path, &options, NULL);
-    if (result == BRUCE_OK) {
-        result = display__present();
+    bruce_result_t result;
+    if (image_viewer__is_gif(path)) {
+        result = image_viewer__draw_gif(path, &options);
     } else {
+        result = display__begin_frame();
+        if (result == BRUCE_OK) result = display__fill_screen(options.background);
+        if (result == BRUCE_OK) result = image__draw_path(path, &options, NULL);
+        if (result == BRUCE_OK) result = display__present();
+    }
+    if (result != BRUCE_OK) {
+        (void)display__begin_frame();
         (void)display__fill_screen(BRUCE_COLOR_BLACK);
         (void)display__set_text_color(BRUCE_COLOR_RED);
         (void)display__set_cursor(4, 4);
@@ -49,12 +85,14 @@ int image_viewer_app_main(int argc, char **argv) {
         (void)display__present();
     }
 
-    (void)input__flush();
-    for (;;) {
-        bruce_input_event_t event;
-        bruce_result_t input_result = input__read(&event, 100);
-        if (input_result == BRUCE_ERR_NOT_FOREGROUND) break;
-        if (input_result == BRUCE_OK && event.action == BRUCE_INPUT_PRESS) break;
+    if (!image_viewer__is_gif(path) || result != BRUCE_OK) {
+        (void)input__flush();
+        for (;;) {
+            bruce_input_event_t event;
+            bruce_result_t input_result = input__read(&event, 100);
+            if (input_result == BRUCE_ERR_NOT_FOREGROUND) break;
+            if (input_result == BRUCE_OK && event.action == BRUCE_INPUT_PRESS) break;
+        }
     }
     return result;
 }
