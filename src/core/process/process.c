@@ -494,9 +494,9 @@ process_registry__create(const process_create_params_t *params, bruce_process_id
     record->next_resource_id = 1;
     uint32_t stack_bytes = params->stack_bytes != 0 ? params->stack_bytes : PROCESS__DEFAULT_STACK_BYTES;
     record->stack_total_bytes = stack_bytes;
-    BaseType_t created = xTaskCreate(
-        process__trampoline, record->name, stack_bytes, record, tskIDLE_PRIORITY + 1, &record->handle
-    );
+    UBaseType_t priority = params->priority != 0 ? (UBaseType_t)params->priority : tskIDLE_PRIORITY + 1;
+    BaseType_t created =
+        xTaskCreate(process__trampoline, record->name, stack_bytes, record, priority, &record->handle);
     if (created != pdPASS) {
         process__free_argv(record->argc, record->argv);
         process__environment_free(&record->environment);

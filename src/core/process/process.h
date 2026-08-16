@@ -60,6 +60,12 @@ typedef struct {
     size_t environment_count;
     /* 0 selects a Core default (4096 bytes). */
     uint32_t stack_bytes;
+    /* 0 selects a Core default (tskIDLE_PRIORITY + 1, the FreeRTOS priority
+     * every process ran at before this field existed). Set explicitly only
+     * for Core-owned worker pools (e.g. http_server's async workers) that
+     * need to keep a specific FreeRTOS priority across the switch to being
+     * process_registry-tracked. */
+    uint32_t priority;
     /* Alternative entry points used by loader modules via
      * app_runner__spawn_loader_process() (see core_sdk/ext_mem_loader.h) instead of
      * `entry` above: called as process_entry(process_entry_context) on the new

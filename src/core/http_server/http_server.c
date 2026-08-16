@@ -7,6 +7,9 @@
 #include <string.h>
 
 #include "core_sdk/permission.h"
+#include "core_sdk/process.h"
+
+#include "core/process/process.h"
 
 #include "esp_http_server.h"
 #include "esp_log.h"
@@ -21,7 +24,12 @@
 #define HTTP_SERVER__MAX_BODY_SIZE (32u * 1024u)
 #define HTTP_SERVER__WORKER_COUNT 2u
 #define HTTP_SERVER__WORKER_QUEUE_LENGTH HTTP_SERVER__WORKER_COUNT
-#define HTTP_SERVER__WORKER_STACK_SIZE 4096u
+/* Above the 4096-byte Core process default: workers are now
+ * process_registry-tracked processes (see http_server__start_workers()), so
+ * every route callback's frame sits on top of process bookkeeping calls
+ * (memory__malloc()/memory__external_alloc() et al.) that didn't used to run
+ * on this stack. */
+#define HTTP_SERVER__WORKER_STACK_SIZE 6144u
 #define HTTP_SERVER__WORKER_PRIORITY 5u
 #define HTTP_SERVER__WORKER_POLL_MS 50u
 #define HTTP_SERVER__WORKER_STOP_TIMEOUT_MS 5000u
@@ -66,7 +74,7 @@ static size_t s_route_count;
 static QueueHandle_t s_worker_queue;
 static SemaphoreHandle_t s_worker_capacity;
 static SemaphoreHandle_t s_worker_exited;
-static TaskHandle_t s_worker_tasks[HTTP_SERVER__WORKER_COUNT];
+static bruce_process_id_t s_worker_process_ids[HTTP_SERVER__WORKER_COUNT];
 static size_t s_workers_remaining;
 static bool s_workers_accepting;
 static atomic_bool s_workers_stopping;
@@ -302,7 +310,15 @@ static esp_err_t http_server__invoke_dynamic(
     return ESP_FAIL;
 }
 
-static void http_server__worker(void *argument) {
+/* Runs as a process_registry-tracked process (see http_server__start_workers())
+ * rather than a bare FreeRTOS task, so route callbacks -- which run
+ * synchronously on this stack via http_server__invoke_dynamic() below -- get
+ * a real current-process context. That's what lets webui's route handlers
+ * call memory__malloc()/memory__external_alloc(): both require
+ * process__current_id() to resolve, which only happens on a task
+ * process_registry__create() itself spawned. Returning (rather than calling
+ * vTaskDelete()) lets process__trampoline() tear the process down normally. */
+static int http_server__worker(void *argument) {
     size_t index = (size_t)(uintptr_t)argument;
     for (;;) {
         http_server__job_t job;
@@ -321,9 +337,9 @@ static void http_server__worker(void *argument) {
         }
         if (atomic_load(&s_workers_stopping)) break;
     }
-    s_worker_tasks[index] = NULL;
+    s_worker_process_ids[index] = BRUCE_PROCESS_ID_INVALID;
     xSemaphoreGive(s_worker_exited);
-    vTaskDelete(NULL);
+    return 0;
 }
 
 static void http_server__release_workers(void) {
@@ -358,9 +374,14 @@ static void http_server__abort_idle_workers(void) {
     if (s_worker_queue == NULL) return;
     if (http_server__wait_for_workers(pdMS_TO_TICKS(1000)) == BRUCE_OK) return;
     for (size_t worker = 0; worker < HTTP_SERVER__WORKER_COUNT; ++worker) {
-        if (s_worker_tasks[worker] != NULL) {
-            vTaskDelete(s_worker_tasks[worker]);
-            s_worker_tasks[worker] = NULL;
+        if (s_worker_process_ids[worker] != BRUCE_PROCESS_ID_INVALID) {
+            /* Force-kill rather than vTaskDelete(): the worker is a tracked
+             * process now, and process__kill() releases whatever
+             * process_registry resources (memory__malloc/memory__external_
+             * alloc allocations, mainly) it still owned instead of leaking
+             * them. */
+            (void)process__kill(s_worker_process_ids[worker]);
+            s_worker_process_ids[worker] = BRUCE_PROCESS_ID_INVALID;
         }
     }
     http_server__release_workers();
@@ -381,17 +402,23 @@ static bruce_result_t http_server__start_workers(void) {
     atomic_store(&s_workers_stopping, false);
     s_workers_remaining = 0;
     for (size_t index = 0; index < HTTP_SERVER__WORKER_COUNT; ++index) {
-        if (xTaskCreate(
-                http_server__worker,
-                "http_async",
-                HTTP_SERVER__WORKER_STACK_SIZE,
-                (void *)(uintptr_t)index,
-                HTTP_SERVER__WORKER_PRIORITY,
-                &s_worker_tasks[index]
-            ) != pdPASS) {
+        char name[BRUCE_PROCESS_NAME_MAX];
+        snprintf(name, sizeof(name), "http-worker-%u", (unsigned)index);
+        const process_create_params_t params = {
+            .name = name,
+            .built_in = true,
+            .start_in_background = true,
+            .stack_bytes = HTTP_SERVER__WORKER_STACK_SIZE,
+            .priority = HTTP_SERVER__WORKER_PRIORITY,
+            .process_entry = http_server__worker,
+            .process_entry_context = (void *)(uintptr_t)index,
+        };
+        bruce_process_id_t process_id = BRUCE_PROCESS_ID_INVALID;
+        if (process_registry__create(&params, &process_id) != BRUCE_OK) {
             http_server__abort_idle_workers();
             return BRUCE_ERR_NO_MEMORY;
         }
+        s_worker_process_ids[index] = process_id;
         ++s_workers_remaining;
     }
     return BRUCE_OK;

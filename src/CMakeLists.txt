@@ -156,6 +156,11 @@ idf_component_register(SRCS
                     "modules/bparted/bparted_common.c"
                     "modules/wifi/wifi_app.c"
                     "modules/webui/webui_app.c"
+                    "modules/webui/webui_http.c"
+                    "modules/webui/webui_memory.c"
+                    "modules/webui/webui_auth.c"
+                    "modules/webui/webui_files.c"
+                    "modules/webui/webui_system.c"
                     "modules/privileged/permissions/permissions_app.c"
                     EMBED_FILES
                     "../native_apps/examples/game.elf"
@@ -341,7 +346,13 @@ target_include_directories(bruce_sdk_builtin_wifi_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/wifi")
 
-add_library(bruce_sdk_builtin_webui_check OBJECT "modules/webui/webui_app.c")
+add_library(bruce_sdk_builtin_webui_check OBJECT
+           "modules/webui/webui_app.c"
+           "modules/webui/webui_http.c"
+           "modules/webui/webui_memory.c"
+           "modules/webui/webui_auth.c"
+           "modules/webui/webui_files.c"
+           "modules/webui/webui_system.c")
 add_dependencies(bruce_sdk_builtin_webui_check bruce_webui_assets)
 target_include_directories(bruce_sdk_builtin_webui_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
