@@ -345,7 +345,13 @@ int elf_loader__app_main(int argc, char **argv) {
     if (process__snapshot(process__current_id(), &snapshot) == BRUCE_OK) {
         mode = snapshot.state == BRUCE_PROCESS_BACKGROUND ? BRUCE_LAUNCH_BACKGROUND : BRUCE_LAUNCH_FOREGROUND;
     }
-    return elf_loader__open(path, arg[0] != '\0' ? arg : NULL, mode, NULL, 0);
+    const bruce_environment_variable_t gui_env[] = {
+        {.name = "GUI", .value = "1"}
+    };
+    bool gui = runtime__gui_requested();
+    return elf_loader__open(
+        path, arg[0] != '\0' ? arg : NULL, mode, gui ? gui_env : NULL, gui ? 1u : 0u
+    );
 }
 
 void elf_loader__init(void) { elf_set_symbol_resolver(elf_loader__find_symbol); }

@@ -56,6 +56,11 @@ static bool filemanager__is_editable_text(const char *path) {
            (strcasecmp(dot, ".txt") == 0 || strcasecmp(dot, ".json") == 0 || strcasecmp(dot, ".conf") == 0);
 }
 
+static bool filemanager__is_gui_executable(const char *path) {
+    const char *extension = filemanager__extension(path);
+    return strcasecmp(extension, ".wasm") == 0 || strcasecmp(extension, ".elf") == 0;
+}
+
 static bool filemanager__escape_arg(const char *path, char *out, size_t out_size) {
     size_t written = 0;
     for (size_t i = 0; path[i] != '\0'; ++i) {
@@ -97,6 +102,7 @@ filemanager__run_named_app(const char *app, const char *path, bool gui, bool rea
 }
 
 static bruce_result_t filemanager__open_default(const char *path, bool gui) {
+    gui = gui || filemanager__is_gui_executable(path);
     const bruce_environment_variable_t gui_env[] = {
         {.name = "GUI", .value = "1"}
     };
@@ -126,8 +132,8 @@ static bruce_result_t filemanager__pick_open_with_app(const char *path, bool gui
     const char *app = choices[selected].value;
     if (strcmp(app, "text") == 0) return filemanager__run_named_app("text", path, gui, false);
     if (strcmp(app, "image") == 0) return filemanager__run_named_app("image", path, gui, false);
-    if (strcmp(app, "wasm") == 0) return filemanager__run_named_app("wasm", path, gui, false);
-    if (strcmp(app, "elf") == 0) return filemanager__run_named_app("elf", path, gui, false);
+    if (strcmp(app, "wasm") == 0) return filemanager__run_named_app("wasm", path, true, false);
+    if (strcmp(app, "elf") == 0) return filemanager__run_named_app("elf", path, true, false);
     if (strcmp(app, "js") == 0) return filemanager__run_named_app("js", path, gui, false);
     return BRUCE_ERR_NOT_FOUND;
 }

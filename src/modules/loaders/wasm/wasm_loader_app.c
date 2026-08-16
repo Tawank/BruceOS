@@ -20,6 +20,7 @@
 #include "core_sdk/permission.h"
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
+#include "core_sdk/runtime.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
 
@@ -632,7 +633,13 @@ int wasm_loader__app_main(int argc, char **argv) {
         snapshot.state == BRUCE_PROCESS_BACKGROUND) {
         mode = BRUCE_LAUNCH_BACKGROUND;
     }
-    int result = wasm_loader__open(path, arg[0] != '\0' ? arg : NULL, mode, NULL, 0);
+    const bruce_environment_variable_t gui_env[] = {
+        {.name = "GUI", .value = "1"}
+    };
+    bool gui = runtime__gui_requested();
+    int result = wasm_loader__open(
+        path, arg[0] != '\0' ? arg : NULL, mode, gui ? gui_env : NULL, gui ? 1u : 0u
+    );
 #if defined(BRUCE_WASM_EXTERNAL_ELF) && BRUCE_WASM_EXTERNAL_ELF
     /* Child callbacks execute from this ELF image, so keep its parent process
      * alive until Core has finished the child and its owned cleanup. */
