@@ -84,6 +84,57 @@ bool selftest__run_display_rendering_case(void) {
         return false;
     }
 
+    if (display__set_cursor(70, 1) != BRUCE_OK || display__print("ąóý čťŕ “ èûığş") != BRUCE_OK ||
+        display__get_cursor(&cursor_x, &cursor_y) != BRUCE_OK || cursor_x != 160 || cursor_y != 1 ||
+        (buffered &&
+         (display__test_read_pixel(72, 1, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_BLACK ||
+          display__test_read_pixel(73, 8, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_WHITE ||
+          display__test_read_pixel(79, 1, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_WHITE))) {
+        printf("[selftest] display/rendering: FAIL, UTF-8 glyphs or cursor\n");
+        (void)display__present();
+        return false;
+    }
+
+    if (display__draw_string("ZÈ", 40, 10) != BRUCE_OK ||
+        (buffered &&
+         (display__test_read_pixel(41, 13, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_BLACK ||
+          display__test_read_pixel(46, 10, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_WHITE ||
+          display__test_read_pixel(46, 16, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_WHITE ||
+          display__test_read_pixel(46, 17, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_BLACK))) {
+        printf("[selftest] display/rendering: FAIL, capital glyph geometry\n");
+        (void)display__present();
+        return false;
+    }
+
+    if (display__draw_string("ťů", 60, 10) != BRUCE_OK ||
+        (buffered &&
+         (display__test_read_pixel(61, 10, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_BLACK ||
+          display__test_read_pixel(64, 10, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_WHITE ||
+          display__test_read_pixel(68, 10, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_BLACK))) {
+        printf("[selftest] display/rendering: FAIL, Czech accent geometry\n");
+        (void)display__present();
+        return false;
+    }
+
+    if (display__draw_string("Příliš žluťoučký ků", 1, 20) != BRUCE_OK ||
+        display__get_cursor(&cursor_x, &cursor_y) != BRUCE_OK || cursor_x != 115 || cursor_y != 20) {
+        printf("[selftest] display/rendering: FAIL, Czech UTF-8 text\n");
+        (void)display__present();
+        return false;
+    }
+
+    if (display__set_cursor(1, 30) != BRUCE_OK || display__print("Příliš žluťou") != BRUCE_OK ||
+        (buffered &&
+         (display__test_read_pixel(73, 32, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_WHITE)) ||
+        display__print("č") != BRUCE_OK || display__get_cursor(&cursor_x, &cursor_y) != BRUCE_OK ||
+        cursor_x != 85 || cursor_y != 30 ||
+        (buffered &&
+         (display__test_read_pixel(73, 32, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_WHITE))) {
+        printf("[selftest] display/rendering: FAIL, Czech caron damaged preceding text\n");
+        (void)display__present();
+        return false;
+    }
+
     if (display__draw_string("A", 10, 10) != BRUCE_OK ||
         display__get_cursor(&cursor_x, &cursor_y) != BRUCE_OK || cursor_x != 16 || cursor_y != 10 ||
         display__draw_centre_string("A", 20, 11) != BRUCE_OK ||
