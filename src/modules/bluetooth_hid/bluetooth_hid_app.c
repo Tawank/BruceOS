@@ -6,12 +6,28 @@
 #include "args.h"
 #include "core_sdk/bluetooth_hid.h"
 #include "core_sdk/dialog.h"
+#include "core_sdk/display.h"
+#include "core_sdk/memory.h"
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
 #include "core_sdk/runtime.h"
 #include "core_sdk/stdio.h"
 
 #define BLUETOOTH_HID_APP__MAX_RESULTS 24
+
+/* bluetooth_hid__scan() blocks for the whole scan window (10s here); paint a
+ * status screen first so the display isn't left blank for that whole
+ * stretch, matching image_viewer_app's "Loading..." screen. Best-effort:
+ * scanning still proceeds even if a draw call fails. */
+static void bluetooth_hid_app__show_scanning(void) {
+    if (display__begin_frame() != BRUCE_OK) return;
+    (void)display__fill_screen(BRUCE_COLOR_BLACK);
+    (void)display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
+    (void)display__set_text_color(BRUCE_COLOR_WHITE);
+    (void)display__set_text_size(2);
+    (void)display__draw_centre_string("Scanning...", display__width() / 2, (display__height() - 8) / 2);
+    (void)display__present();
+}
 
 static bool bluetooth_hid_app__parse_address(const char *text, uint8_t address[BRUCE_BLUETOOTH_ADDRESS_LEN]) {
     unsigned int bytes[BRUCE_BLUETOOTH_ADDRESS_LEN];
@@ -104,21 +120,35 @@ static int bluetooth_hid_app__scan_terminal(void) {
     return 0;
 }
 
+/* devices/labels/choices are heap-allocated (rather than kept as ~6 KB of
+ * combined locals) so this fits comfortably in the app's small process
+ * stack; see memory__malloc()'s process-scoped allocator in core_sdk/memory.h. */
 static int bluetooth_hid_app__scan_and_connect_gui(void) {
-    bluetooth_hid__device_t devices[BLUETOOTH_HID_APP__MAX_RESULTS];
+    bluetooth_hid__device_t *devices = memory__calloc(BLUETOOTH_HID_APP__MAX_RESULTS, sizeof(*devices));
+    if (devices == NULL) return BRUCE_ERR_NO_MEMORY;
+
+    bluetooth_hid_app__show_scanning();
     int count = bluetooth_hid__scan(devices, BLUETOOTH_HID_APP__MAX_RESULTS, 10000);
     if (count < 0) {
         char message[64];
         snprintf(message, sizeof(message), "Classic HID scan failed (%d)", count);
         (void)dialog__message(BRUCE_DIALOG_ERROR, "Bluetooth HID", message);
+        memory__free(devices);
         return count;
     }
     if (count == 0) {
         (void)dialog__message(BRUCE_DIALOG_INFO, "Bluetooth HID", "No keyboards or gamepads found");
+        memory__free(devices);
         return 0;
     }
-    char labels[BLUETOOTH_HID_APP__MAX_RESULTS][96];
-    bruce_dialog_choice_t choices[BLUETOOTH_HID_APP__MAX_RESULTS] = {0};
+    char (*labels)[96] = memory__calloc((size_t)count, sizeof(*labels));
+    bruce_dialog_choice_t *choices = memory__calloc((size_t)count, sizeof(*choices));
+    if (labels == NULL || choices == NULL) {
+        memory__free(labels);
+        memory__free(choices);
+        memory__free(devices);
+        return BRUCE_ERR_NO_MEMORY;
+    }
     for (int i = 0; i < count; ++i) {
         snprintf(
             labels[i],
@@ -137,7 +167,11 @@ static int bluetooth_hid_app__scan_and_connect_gui(void) {
     bruce_result_t choice = dialog__choice_launcher(
         "Classic Bluetooth HID", "Select a controller", choices, (size_t)count, &selected
     );
-    return choice == BRUCE_OK ? bluetooth_hid_app__connect(devices[selected].address, true) : 0;
+    int result = choice == BRUCE_OK ? bluetooth_hid_app__connect(devices[selected].address, true) : 0;
+    memory__free(labels);
+    memory__free(choices);
+    memory__free(devices);
+    return result;
 }
 
 static int bluetooth_hid_app__gui(void) {

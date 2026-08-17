@@ -558,6 +558,64 @@ static bruce_result_t ir_app__jammer(uint32_t frequency, uint32_t duration_ms, u
     return BRUCE_OK;
 }
 
+/* Each of these wraps one ir_app__gui() menu item's follow-up picker, so the
+ * same flow can be launched either from that internal menu (bare app icon,
+ * no launcher.json subcommand) or directly by an argv command declared in
+ * launcher.json (Infrared submenu), matching the WiFi module's pattern. */
+static bruce_result_t ir_app__tvbgone_pick(void) {
+    const bruce_dialog_choice_t regions[] = {
+        {.label = "North America / Asia", .value = "na"    },
+        {.label = "Europe / other",       .value = "eu"    },
+        {.label = "Cancel",               .value = "cancel"},
+    };
+    size_t region = 0;
+    bruce_result_t result = dialog__choice_launcher("TV-B-Gone", "Select region", regions, 3, &region);
+    if (result == BRUCE_OK && region < 2) return ir_app__tvbgone(region == 1, true);
+    return result == BRUCE_ERR_CANCELLED ? BRUCE_OK : result;
+}
+
+static bruce_result_t ir_app__jammer_pick(void) {
+    const bruce_dialog_choice_t modes[] = {
+        {.label = "Basic",          .value = "basic"   },
+        {.label = "Enhanced basic", .value = "enhanced"},
+        {.label = "Sweep",          .value = "sweep"   },
+        {.label = "Random",         .value = "random"  },
+        {.label = "Empty",          .value = "empty"   },
+        {.label = "Cancel",         .value = "cancel"  },
+    };
+    size_t mode = 0;
+    bruce_result_t result = dialog__choice_launcher("IR jammer", "Select pattern", modes, 6, &mode);
+    if (result == BRUCE_OK && mode < 5) return ir_app__jammer(38000, 0, (unsigned int)mode, true);
+    return result == BRUCE_ERR_CANCELLED ? BRUCE_OK : result;
+}
+
+static bruce_result_t ir_app__transmit_file_pick(void) {
+    char path[BRUCE_STORAGE_PATH_MAX];
+    bruce_result_t result = dialog__pick_file("/", ".ir", path, sizeof(path));
+    if (result == BRUCE_OK) result = ir__transmit_file(path, 0);
+    if (result != BRUCE_ERR_CANCELLED) {
+        (void)dialog__message(
+            result == BRUCE_OK ? BRUCE_DIALOG_SUCCESS : BRUCE_DIALOG_ERROR,
+            "Infrared",
+            result == BRUCE_OK ? "Transmission complete" : "Transmission failed"
+        );
+    }
+    return result == BRUCE_ERR_CANCELLED ? BRUCE_OK : result;
+}
+
+static bruce_result_t ir_app__read_signal_pick(void) {
+    const bruce_dialog_choice_t read_modes[] = {
+        {.label = "Decoded signal", .value = "decoded"},
+        {.label = "Raw signal",     .value = "raw"    },
+        {.label = "Cancel",         .value = "cancel" },
+    };
+    size_t read_mode = 0;
+    bruce_result_t result =
+        dialog__choice_launcher("Read signal", "Capture format", read_modes, 3, &read_mode);
+    if (result == BRUCE_OK && read_mode < 2) return ir_app__receive(read_mode == 1, 10000, true);
+    return result == BRUCE_ERR_CANCELLED ? BRUCE_OK : result;
+}
+
 static int ir_app__gui(void) {
     char message[80];
     snprintf(message, sizeof(message), "TX GPIO %d, RX GPIO %d", ir__tx_pin(), ir__rx_pin());
@@ -573,78 +631,37 @@ static int ir_app__gui(void) {
     for (;;) {
         size_t selected = 0;
         bruce_result_t result = dialog__choice_launcher("Infrared", message, choices, 7, &selected);
-        if (result == BRUCE_ERR_CANCELLED || selected == 6) return 0;
+        const char *action = choices[selected].value;
+        if (result == BRUCE_ERR_CANCELLED || strcmp(action, "exit") == 0) return 0;
         if (result != BRUCE_OK) return result;
-        if (selected == 0) {
-            const bruce_dialog_choice_t regions[] = {
-                {.label = "North America / Asia", .value = "na"    },
-                {.label = "Europe / other",       .value = "eu"    },
-                {.label = "Cancel",               .value = "cancel"},
-            };
-            size_t region = 0;
-            if (dialog__choice_launcher("TV-B-Gone", "Select region", regions, 3, &region) == BRUCE_OK &&
-                region < 2) {
-                (void)ir_app__tvbgone(region == 1, true);
-            }
-        } else if (selected == 1) {
-            const bruce_dialog_choice_t modes[] = {
-                {.label = "Basic",          .value = "basic"   },
-                {.label = "Enhanced basic", .value = "enhanced"},
-                {.label = "Sweep",          .value = "sweep"   },
-                {.label = "Random",         .value = "random"  },
-                {.label = "Empty",          .value = "empty"   },
-                {.label = "Cancel",         .value = "cancel"  },
-            };
-            size_t mode = 0;
-            if (dialog__choice_launcher("IR jammer", "Select pattern", modes, 6, &mode) == BRUCE_OK &&
-                mode < 5) {
-                (void)ir_app__jammer(38000, 0, (unsigned int)mode, true);
-            }
-        } else if (selected == 2) (void)ir_app__custom_learn();
-        else if (selected == 3) (void)ir_app__quick_learn();
-        else if (selected == 4) {
-            char path[BRUCE_STORAGE_PATH_MAX];
-            result = dialog__pick_file("/", ".ir", path, sizeof(path));
-            if (result == BRUCE_OK) result = ir__transmit_file(path, 0);
-            if (result != BRUCE_ERR_CANCELLED) {
-                (void)dialog__message(
-                    result == BRUCE_OK ? BRUCE_DIALOG_SUCCESS : BRUCE_DIALOG_ERROR,
-                    "Infrared",
-                    result == BRUCE_OK ? "Transmission complete" : "Transmission failed"
-                );
-            }
-        } else if (selected == 5) {
-            const bruce_dialog_choice_t read_modes[] = {
-                {.label = "Decoded signal", .value = "decoded"},
-                {.label = "Raw signal",     .value = "raw"    },
-                {.label = "Cancel",         .value = "cancel" },
-            };
-            size_t read_mode = 0;
-            if (dialog__choice_launcher("Read signal", "Capture format", read_modes, 3, &read_mode) ==
-                    BRUCE_OK &&
-                read_mode < 2) {
-                (void)ir_app__receive(read_mode == 1, 10000, true);
-            }
-        }
+        if (strcmp(action, "tvbgone") == 0) (void)ir_app__tvbgone_pick();
+        else if (strcmp(action, "jammer") == 0) (void)ir_app__jammer_pick();
+        else if (strcmp(action, "learn") == 0) (void)ir_app__custom_learn();
+        else if (strcmp(action, "quick") == 0) (void)ir_app__quick_learn();
+        else if (strcmp(action, "file") == 0) (void)ir_app__transmit_file_pick();
+        else if (strcmp(action, "read") == 0) (void)ir_app__read_signal_pick();
     }
 }
 
-static int ir_app__rx(ArgParser *parser) {
+static int ir_app__rx(ArgParser *parser, bool gui) {
+    int argcount = ap_count_args(parser);
+    if (argcount == 0 && gui) return ir_app__read_signal_pick();
+
     bool raw = false;
     uint32_t timeout_seconds = 10;
     int index = 0;
-    if (ap_count_args(parser) > index && strcmp(ap_get_arg_at_index(parser, index), "raw") == 0) {
+    if (argcount > index && strcmp(ap_get_arg_at_index(parser, index), "raw") == 0) {
         raw = true;
         index++;
     }
-    if (ap_count_args(parser) > index) {
+    if (argcount > index) {
         if (!ir_app__parse_u32(ap_get_arg_at_index(parser, index), UINT32_MAX / 1000u, &timeout_seconds) ||
             timeout_seconds == 0) {
             return BRUCE_ERR_INVALID_ARGUMENT;
         }
     }
     stdio__printf("Waiting for IR signal...\n");
-    return ir_app__receive(raw, timeout_seconds * 1000u, false);
+    return ir_app__receive(raw, timeout_seconds * 1000u, gui);
 }
 
 static int ir_app__tx(ArgParser *parser) {
@@ -724,22 +741,23 @@ static int ir_app__learn_cli(ArgParser *parser) {
 }
 
 int ir_app_main(int argc, char **argv) {
-    if (runtime__gui_requested()) { return ir_app__gui(); }
-
     ArgParser *root = ap_new_parser();
     if (root == NULL) return BRUCE_ERR_NO_MEMORY;
     ap_set_helptext(root, "Receive, learn, transmit, and generate infrared signals.");
-    ap_add_flag(root, "gui");
-    ap_set_opt_help(root, "gui", "Use GUI interaction mode");
 
     ArgParser *rx = ap_new_cmd(root, "rx");
     ArgParser *learn = ap_new_cmd(root, "learn");
     ArgParser *tx = ap_new_cmd(root, "tx");
     ArgParser *tx_raw = ap_new_cmd(root, "tx_raw");
     ArgParser *tx_from_file = ap_new_cmd(root, "tx_from_file");
+    ArgParser *tx_pick_file = ap_new_cmd(root, "tx_pick_file");
     ArgParser *tvbgone = ap_new_cmd(root, "tvbgone");
     ArgParser *jam = ap_new_cmd(root, "jam");
-    ArgParser *commands[] = {rx, learn, tx, tx_raw, tx_from_file, tvbgone, jam};
+    ArgParser *learn_custom = ap_new_cmd(root, "learn_custom");
+    ArgParser *quick_setup = ap_new_cmd(root, "quick_learn");
+    ArgParser *commands[] = {
+        rx, learn, tx, tx_raw, tx_from_file, tx_pick_file, tvbgone, jam, learn_custom, quick_setup
+    };
     for (size_t i = 0; i < sizeof(commands) / sizeof(commands[0]); ++i) {
         if (commands[i] == NULL) {
             ap_free(root);
@@ -769,12 +787,15 @@ int ir_app_main(int argc, char **argv) {
     ap_set_helptext(tx_from_file, "Transmit every signal in a Bruce IR file.");
     ap_add_required_arg(tx_from_file, "absolute_path", "Source .ir file path");
     ap_add_optional_arg(tx_from_file, "repeats", "Repeat count (0-255)");
+    ap_set_helptext(tx_pick_file, "Pick a Bruce IR file and transmit every signal in it (GUI only).");
     ap_set_helptext(tvbgone, "Send regional TV power codes.");
-    ap_add_required_arg(tvbgone, "region", "na or eu (case-insensitive)");
+    ap_add_optional_arg(tvbgone, "region", "na or eu (case-insensitive); omitted shows a picker in GUI mode");
     ap_set_helptext(jam, "Transmit an IR jamming pattern.");
-    ap_add_required_arg(jam, "frequency_hz", "Carrier frequency from 20000 to 100000 Hz");
-    ap_add_required_arg(jam, "seconds", "Duration in seconds");
+    ap_add_optional_arg(jam, "frequency_hz", "Carrier frequency from 20000 to 100000 Hz");
+    ap_add_optional_arg(jam, "seconds", "Duration in seconds; omitted with frequency_hz shows a picker in GUI mode");
     ap_add_optional_arg(jam, "mode", "basic, enhanced, sweep, random, or empty");
+    ap_set_helptext(learn_custom, "Interactively capture and save a signal (GUI only).");
+    ap_set_helptext(quick_setup, "Interactively capture a full remote from a device template (GUI only).");
 
     if (!ap_parse(root, argc, argv)) {
         ap_status_t status = ap_get_status(root);
@@ -783,13 +804,24 @@ int ir_app_main(int argc, char **argv) {
         return status == AP_STATUS_NO_MEMORY ? BRUCE_ERR_NO_MEMORY : BRUCE_ERR_INVALID_ARGUMENT;
     }
 
-    bruce_result_t result = BRUCE_ERR_INVALID_ARGUMENT;
     ArgParser *command = ap_get_cmd_parser(root);
+    bool gui = runtime__gui_requested();
+    /* Bare "ir" with no launcher.json subcommand (e.g. launched directly from
+     * the Apps list) still falls back to the app's own interactive menu. Any
+     * subcommand -- whether typed at a terminal or declared in launcher.json
+     * under Infrared -- is dispatched below instead, GUI or not, the same
+     * way wifi_app_main() dispatches "wifi scan" et al. */
+    if (command == NULL && gui) {
+        ap_free(root);
+        return ir_app__gui();
+    }
+
+    bruce_result_t result = BRUCE_ERR_INVALID_ARGUMENT;
     bool is_rx = command == rx;
     if (command == NULL) {
         ap_print_help(root);
         result = BRUCE_OK;
-    } else if (command == rx) result = ir_app__rx(rx);
+    } else if (command == rx) result = ir_app__rx(rx, gui);
     else if (command == learn) result = ir_app__learn_cli(learn);
     else if (command == tx) result = ir_app__tx(tx);
     else if (command == tx_raw) result = ir_app__tx_raw(tx_raw);
@@ -799,32 +831,44 @@ int ir_app_main(int argc, char **argv) {
         if (repeats_arg != NULL && !ir_app__parse_u32(repeats_arg, UINT8_MAX, &repeats)) {
             result = BRUCE_ERR_INVALID_ARGUMENT;
         } else result = ir__transmit_file(ap_get_arg(tx_from_file, "absolute_path"), (uint8_t)repeats);
+    } else if (command == tx_pick_file) {
+        result = gui ? ir_app__transmit_file_pick() : BRUCE_ERR_UNSUPPORTED;
+    } else if (command == learn_custom) {
+        result = gui ? ir_app__custom_learn() : BRUCE_ERR_UNSUPPORTED;
+    } else if (command == quick_setup) {
+        result = gui ? ir_app__quick_learn() : BRUCE_ERR_UNSUPPORTED;
     } else if (command == tvbgone) {
         const char *region = ap_get_arg(tvbgone, "region");
-        if (strcasecmp(region, "na") != 0 && strcasecmp(region, "eu") != 0) {
+        if (region == NULL) {
+            result = gui ? ir_app__tvbgone_pick() : BRUCE_ERR_INVALID_ARGUMENT;
+        } else if (strcasecmp(region, "na") != 0 && strcasecmp(region, "eu") != 0) {
             result = BRUCE_ERR_INVALID_ARGUMENT;
-        } else result = ir_app__tvbgone(strcasecmp(region, "eu") == 0, false);
+        } else result = ir_app__tvbgone(strcasecmp(region, "eu") == 0, gui);
     } else if (command == jam) {
-        uint32_t frequency = 0;
-        uint32_t seconds = 0;
-        unsigned int mode = 0;
         const char *frequency_arg = ap_get_arg(jam, "frequency_hz");
         const char *seconds_arg = ap_get_arg(jam, "seconds");
         const char *mode_arg = ap_get_arg(jam, "mode");
-        if (!ir_app__parse_u32(frequency_arg, 100000, &frequency) || frequency < 20000 ||
-            !ir_app__parse_u32(seconds_arg, UINT32_MAX / 1000u, &seconds) || seconds == 0) {
-            result = BRUCE_ERR_INVALID_ARGUMENT;
+        if (frequency_arg == NULL && seconds_arg == NULL) {
+            result = gui ? ir_app__jammer_pick() : BRUCE_ERR_INVALID_ARGUMENT;
         } else {
-            static const char *const modes[] = {"basic", "enhanced", "sweep", "random", "empty"};
-            if (mode_arg != NULL) {
-                for (mode = 0; mode < 5 && strcasecmp(mode_arg, modes[mode]) != 0; ++mode) {}
+            uint32_t frequency = 0;
+            uint32_t seconds = 0;
+            unsigned int mode = 0;
+            if (!ir_app__parse_u32(frequency_arg, 100000, &frequency) || frequency < 20000 ||
+                !ir_app__parse_u32(seconds_arg, UINT32_MAX / 1000u, &seconds) || seconds == 0) {
+                result = BRUCE_ERR_INVALID_ARGUMENT;
+            } else {
+                static const char *const modes[] = {"basic", "enhanced", "sweep", "random", "empty"};
+                if (mode_arg != NULL) {
+                    for (mode = 0; mode < 5 && strcasecmp(mode_arg, modes[mode]) != 0; ++mode) {}
+                }
+                result = mode == 5 ? BRUCE_ERR_INVALID_ARGUMENT
+                                   : ir_app__jammer(frequency, seconds * 1000u, mode, gui);
             }
-            result = mode == 5 ? BRUCE_ERR_INVALID_ARGUMENT
-                               : ir_app__jammer(frequency, seconds * 1000u, mode, false);
         }
     }
     ap_free(root);
-    if (!is_rx && command != NULL)
+    if (!is_rx && command != NULL && !gui)
         stdio__printf(result == BRUCE_OK ? "IR operation complete\n" : "IR operation failed: %d\n", result);
     return result;
 }

@@ -12,10 +12,21 @@
     }
   },
   "Bluetooth@bluetooth": {
-    "BLE scan": "ble scan"
+    "BLE scan": "bluetooth scan"
   },
-  "Infrared@infrared": "ir",
-  "NRF24@radio-handheld": "nrf24",
+  "Infrared@infrared": {
+    "TV-B-Gone": "ir tvbgone",
+    "IR jammer": "ir jam",
+    "Learn signal": "ir learn_custom",
+    "Quick remote setup": "ir quick_learn",
+    "Transmit .ir file": "ir tx_pick_file",
+    "Read/view signal": "ir rx"
+  },
+  "NRF24@radio-handheld": {
+    "Spectrum scan": "nrf24 scan",
+    "Radio status": "nrf24 status",
+    "Information": "nrf24 info"
+  },
   "Files@folder-open": "filemanager",
   "Terminal@console": "terminal",
   "Clock@clock-outline": "clock",

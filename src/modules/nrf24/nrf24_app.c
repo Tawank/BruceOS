@@ -93,6 +93,15 @@ static int nrf24_app__scan(uint8_t first, uint8_t last, uint8_t samples, bool gu
     return BRUCE_OK;
 }
 
+static bruce_result_t nrf24_app__info(bool gui) {
+    static const char text[] =
+        "Passive spectrum scan shows threshold activity, not RSSI or decoded packets.\n\n"
+        "Use short wiring and a stable 3.3 V supply. PA/LNA radios should have local decoupling.";
+    if (gui) (void)dialog__message(BRUCE_DIALOG_INFO, "NRF24", text);
+    else stdio__printf("%s\n", text);
+    return BRUCE_OK;
+}
+
 static int nrf24_app__gui(void) {
     const bruce_dialog_choice_t choices[] = {
         {.label = "Spectrum scan", .value = "scan"  },
@@ -110,25 +119,24 @@ static int nrf24_app__gui(void) {
         if (strcmp(action, "scan") == 0)
             (void)nrf24_app__scan(0, NRF24_APP_SPECTRUM_CHANNELS - 1u, NRF24_APP_SPECTRUM_SAMPLES, true);
         else if (strcmp(action, "status") == 0) (void)nrf24_app__status(true);
-        else
-            (void)dialog__message(
-                BRUCE_DIALOG_INFO,
-                "NRF24",
-                "Passive spectrum scan shows threshold activity, not RSSI or decoded packets.\n\n"
-                "Use short wiring and a stable 3.3 V supply. PA/LNA radios should have local decoupling."
-            );
+        else (void)nrf24_app__info(true);
     }
 }
 
+/* The launcher's NRF24 submenu (see embedded_resources/json/launcher.json)
+ * declares each action as "nrf24 scan"/"status"/"info", the same way WiFi's
+ * submenu declares "wifi scan" etc. -- so, like wifi_app_main(), this
+ * dispatches on the parsed subcommand in both GUI and terminal mode. A bare
+ * "nrf24" invocation with no subcommand (e.g. launched directly from the
+ * Apps list) still falls back to the app's own interactive menu. */
 int nrf24_app_main(int argc, char **argv) {
-    if (runtime__gui_requested()) { return nrf24_app__gui(); }
-
     ArgParser *root = ap_new_parser();
     if (root == NULL) return BRUCE_ERR_NO_MEMORY;
     ap_set_helptext(root, "Inspect and configure an NRF24 2.4 GHz radio.");
     ArgParser *status = ap_new_cmd(root, "status");
     ArgParser *channel_command = ap_new_cmd(root, "channel");
     ArgParser *scan = ap_new_cmd(root, "scan");
+    ArgParser *info = ap_new_cmd(root, "info");
     ap_set_helptext(status, "Show radio and pin status.");
     ap_set_helptext(channel_command, "Set the active NRF24 channel.");
     ap_add_required_arg(channel_command, "channel", "Radio channel (0-125)");
@@ -136,6 +144,7 @@ int nrf24_app_main(int argc, char **argv) {
     ap_add_optional_arg(scan, "first", "First channel (default 0)");
     ap_add_optional_arg(scan, "last", "Last channel (default 79)");
     ap_add_optional_arg(scan, "samples", "Samples per channel (default 8, maximum 255)");
+    ap_set_helptext(info, "Show usage notes for passive spectrum scanning.");
     if (!ap_parse(root, argc, argv)) {
         ap_status_t parse_status = ap_get_status(root);
         if (parse_status != AP_STATUS_HELP && parse_status != AP_STATUS_VERSION)
@@ -147,10 +156,16 @@ int nrf24_app_main(int argc, char **argv) {
         return result;
     }
 
-    int result;
     ArgParser *command = ap_get_cmd_parser(root);
+    bool gui = runtime__gui_requested();
+    if (command == NULL && gui) {
+        ap_free(root);
+        return nrf24_app__gui();
+    }
+
+    int result;
     if (command == NULL || command == status) {
-        result = nrf24_app__status(false);
+        result = nrf24_app__status(gui);
     } else if (command == channel_command) {
         uint8_t channel = 0;
         if (!nrf24_app__parse_channel(ap_get_arg(channel_command, "channel"), &channel)) {
@@ -160,6 +175,8 @@ int nrf24_app_main(int argc, char **argv) {
             if (result == BRUCE_OK) stdio__printf("NRF24 channel set to %u\n", channel);
             else stdio__printf("NRF24 channel failed: %d\n", result);
         }
+    } else if (command == info) {
+        result = nrf24_app__info(gui);
     } else {
         uint8_t first = 0;
         uint8_t last = NRF24_APP_SPECTRUM_CHANNELS - 1u;
@@ -177,10 +194,10 @@ int nrf24_app_main(int argc, char **argv) {
                 result = BRUCE_ERR_INVALID_ARGUMENT;
             else {
                 samples = (uint8_t)value;
-                result = nrf24_app__scan(first, last, samples, false);
+                result = nrf24_app__scan(first, last, samples, gui);
             }
         } else {
-            result = nrf24_app__scan(first, last, samples, false);
+            result = nrf24_app__scan(first, last, samples, gui);
         }
     }
     ap_free(root);
