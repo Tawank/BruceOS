@@ -215,11 +215,7 @@ static int permissions_app__forget_cli(const char *app, const char *permission_n
         stdio__printf("%s: nothing to forget\n", app);
         return BRUCE_OK;
     }
-    stdio__printf(
-        "%s: forgotten. Takes effect on this app's next launch, unless its permissions were already "
-        "checked this boot - then it takes effect after reboot.\n",
-        app
-    );
+    stdio__printf("%s: forgotten. Takes effect after reboot.\n", app);
     return BRUCE_OK;
 }
 
@@ -282,7 +278,12 @@ static void permissions_app__gui_app(const char *app) {
         if (result != BRUCE_OK) return;
 
         if (strcmp(choices[selected].value, "forget") == 0) {
-            (void)permissions__forget(app, NULL);
+            bool forgot = permissions__forget(app, NULL);
+            (void)dialog__message(
+                forgot ? BRUCE_DIALOG_INFO : BRUCE_DIALOG_ERROR,
+                "App permissions",
+                forgot ? "Forgotten. Takes effect after reboot." : "Nothing to forget."
+            );
             return;
         }
 

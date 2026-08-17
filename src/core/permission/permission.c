@@ -295,6 +295,7 @@ permission__preflight(const char *file_name, const char *const *permission_names
     bruce_result_t loaded = permission__ensure_loaded();
     if (loaded != BRUCE_OK) return loaded;
 
+    bool changed = false;
     for (size_t i = 0; i < count; ++i) {
         permission__lock();
         permission__file_entry_t *entry = permission__find_locked(file_name);
@@ -317,9 +318,19 @@ permission__preflight(const char *file_name, const char *const *permission_names
         entry->known[resolved[i]] = true;
         entry->allowed[resolved[i]] = allowed;
         permission__unlock();
+        changed = true;
     }
 
-    permission__save();
+    /* Only persist when this call actually recorded a new decision. An
+     * unconditional save here would re-serialize the whole in-memory cache -
+     * including entries this process's earlier launches already cached -
+     * back over /config/permissions.json on every single app launch. That
+     * would silently resurrect decisions removed out-of-band (e.g.
+     * modules/privileged/permissions's "forget", which edits the file
+     * directly and has no way to invalidate this cache), undoing a forget on
+     * the very next launch instead of letting it take effect on reboot as
+     * documented. */
+    if (changed) permission__save();
     return BRUCE_OK;
 }
 
