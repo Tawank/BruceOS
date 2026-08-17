@@ -321,7 +321,7 @@ static int permissions_app__gui(void) {
 
         size_t selected = 0;
         bruce_result_t result =
-            dialog__choice_launcher("App permissions", "Select an app", choices, app_count + 2, &selected);
+            dialog__choice_launcher("App permissions", NULL, choices, app_count + 2, &selected);
         if (result == BRUCE_ERR_CANCELLED || strcmp(choices[selected].value, "back") == 0) return BRUCE_OK;
         if (result != BRUCE_OK) return result;
 
