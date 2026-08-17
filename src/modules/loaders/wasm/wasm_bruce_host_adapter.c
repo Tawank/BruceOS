@@ -19,6 +19,7 @@
 #include "core_sdk/result.h"
 #include "core_sdk/runtime.h"
 #include "core_sdk/stdio.h"
+#include "core_sdk/tty.h"
 
 _Static_assert(sizeof(uint32_t) == 4, "Bruce WASM SDK requires 32-bit uint32_t");
 _Static_assert(WASM_BRUCE_MEMORY_STATS_SIZE == 11 * sizeof(uint32_t), "wasm32 memory stats ABI changed");
@@ -200,6 +201,41 @@ static int32_t wasm_stdio__session_read_output(
     if (size > UINT32_MAX) return BRUCE_ERR_RESOURCE_LIMIT;
     wasm_bruce_abi__store_u32(out_size, (uint32_t)size);
     return result;
+}
+
+static int32_t wasm_tty__isatty(wasm_exec_env_t exec_env) {
+    (void)exec_env;
+    return tty__isatty() ? 1 : 0;
+}
+
+static int32_t wasm_tty__get_size(wasm_exec_env_t exec_env, uint32_t out_size_offset) {
+    uint8_t *output =
+        wasm_bruce_host_adapter__required_span(exec_env, out_size_offset, WASM_BRUCE_TTY_SIZE_SIZE);
+    if (output == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    bruce_tty_size_t size;
+    bruce_result_t result = tty__get_size(&size);
+    if (result != BRUCE_OK) return result;
+    wasm_bruce_abi__store_u32(output + WASM_BRUCE_TTY_SIZE_COLUMNS_OFFSET, size.columns);
+    wasm_bruce_abi__store_u32(output + WASM_BRUCE_TTY_SIZE_ROWS_OFFSET, size.rows);
+    wasm_bruce_abi__store_u32(output + WASM_BRUCE_TTY_SIZE_GENERATION_OFFSET, size.generation);
+    return BRUCE_OK;
+}
+
+static int32_t
+wasm_tty__set_size(wasm_exec_env_t exec_env, uint32_t session, uint32_t columns, uint32_t rows) {
+    (void)exec_env;
+    if (columns > UINT16_MAX || rows > UINT16_MAX) return BRUCE_ERR_INVALID_ARGUMENT;
+    return tty__set_size((bruce_stdio_session_t)session, (uint16_t)columns, (uint16_t)rows);
+}
+
+static int32_t wasm_tty__get_mode(wasm_exec_env_t exec_env) {
+    (void)exec_env;
+    return (int32_t)tty__get_mode();
+}
+
+static int32_t wasm_tty__set_mode(wasm_exec_env_t exec_env, uint32_t mode) {
+    (void)exec_env;
+    return tty__set_mode((bruce_tty_mode_t)mode);
 }
 
 static int32_t wasm_memory__get_stats(wasm_exec_env_t exec_env, uint32_t stats_offset) {
@@ -468,6 +504,11 @@ static NativeSymbol s_native_symbols[] = {
     BRUCE_WASM_NATIVE("stdio__session_route_children", wasm_stdio__session_route_children, "(i)i"),
     BRUCE_WASM_NATIVE("stdio__session_write_input", wasm_stdio__session_write_input, "(iii)i"),
     BRUCE_WASM_NATIVE("stdio__session_read_output", wasm_stdio__session_read_output, "(iiii)i"),
+    BRUCE_WASM_NATIVE("tty__isatty", wasm_tty__isatty, "()i"),
+    BRUCE_WASM_NATIVE("tty__get_size", wasm_tty__get_size, "(i)i"),
+    BRUCE_WASM_NATIVE("tty__set_size", wasm_tty__set_size, "(iii)i"),
+    BRUCE_WASM_NATIVE("tty__get_mode", wasm_tty__get_mode, "()i"),
+    BRUCE_WASM_NATIVE("tty__set_mode", wasm_tty__set_mode, "(i)i"),
     BRUCE_WASM_NATIVE("memory__get_stats", wasm_memory__get_stats, "(i)i"),
     BRUCE_WASM_NATIVE("memory__malloc", wasm_memory__malloc, "(i)i"),
     BRUCE_WASM_NATIVE("memory__free", wasm_memory__free, "(i)"),

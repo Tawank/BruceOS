@@ -24,6 +24,7 @@
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
 #include "core_sdk/runtime.h"
+#include "core_sdk/tty.h"
 
 #define STDIO__MAX_SESSIONS 4
 #define STDIO__OUTPUT_CAPACITY 1024
@@ -40,6 +41,10 @@ typedef struct {
     char input[STDIO__INPUT_CAPACITY];
     size_t input_read;
     size_t input_size;
+    uint16_t tty_columns;
+    uint16_t tty_rows;
+    uint32_t tty_generation; /* 0 == size never set (not a tty) */
+    bruce_tty_mode_t tty_mode;
 } stdio__session_t;
 
 static StaticSemaphore_t s_lock_storage;
@@ -513,4 +518,79 @@ int stdio__read_line(char *buffer, size_t buffer_size, bool mask_input) {
     buffer[i] = '\0';
     (void)stdio__write("\n", 1);
     return eof && i == 0 ? -1 : (int)i;
+}
+
+bool tty__isatty(void) {
+    bruce_stdio_session_t session = process_registry__current_stdio_session();
+    if (session == BRUCE_STDIO_SESSION_INVALID) return false;
+    stdio__ensure_init();
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    stdio__session_t *entry = stdio__find_locked(session);
+    bool is_tty = entry != NULL && entry->tty_generation != 0;
+    xSemaphoreGive(s_lock);
+    return is_tty;
+}
+
+bruce_result_t tty__get_size(bruce_tty_size_t *out_size) {
+    if (out_size == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    bruce_stdio_session_t session = process_registry__current_stdio_session();
+    if (session == BRUCE_STDIO_SESSION_INVALID) return BRUCE_ERR_NOT_FOUND;
+    stdio__ensure_init();
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    stdio__session_t *entry = stdio__find_locked(session);
+    if (entry == NULL) {
+        xSemaphoreGive(s_lock);
+        return BRUCE_ERR_NOT_FOUND;
+    }
+    out_size->columns = entry->tty_columns;
+    out_size->rows = entry->tty_rows;
+    out_size->generation = entry->tty_generation;
+    xSemaphoreGive(s_lock);
+    return BRUCE_OK;
+}
+
+bruce_result_t tty__set_size(bruce_stdio_session_t session, uint16_t columns, uint16_t rows) {
+    if (columns == 0 || rows == 0) return BRUCE_ERR_INVALID_ARGUMENT;
+    bruce_process_id_t owner = process__current_id();
+    stdio__ensure_init();
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    stdio__session_t *entry = stdio__find_locked(session);
+    if (!stdio__owned_locked(entry, owner)) {
+        xSemaphoreGive(s_lock);
+        return entry == NULL ? BRUCE_ERR_NOT_FOUND : BRUCE_ERR_PERMISSION;
+    }
+    if (entry->tty_columns != columns || entry->tty_rows != rows) {
+        entry->tty_columns = columns;
+        entry->tty_rows = rows;
+        entry->tty_generation++;
+    }
+    xSemaphoreGive(s_lock);
+    return BRUCE_OK;
+}
+
+bruce_tty_mode_t tty__get_mode(void) {
+    bruce_stdio_session_t session = process_registry__current_stdio_session();
+    if (session == BRUCE_STDIO_SESSION_INVALID) return BRUCE_TTY_MODE_COOKED;
+    stdio__ensure_init();
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    stdio__session_t *entry = stdio__find_locked(session);
+    bruce_tty_mode_t mode = entry != NULL ? entry->tty_mode : BRUCE_TTY_MODE_COOKED;
+    xSemaphoreGive(s_lock);
+    return mode;
+}
+
+bruce_result_t tty__set_mode(bruce_tty_mode_t mode) {
+    if (mode != BRUCE_TTY_MODE_COOKED && mode != BRUCE_TTY_MODE_RAW) return BRUCE_ERR_INVALID_ARGUMENT;
+    bruce_stdio_session_t session = process_registry__current_stdio_session();
+    if (session == BRUCE_STDIO_SESSION_INVALID) return BRUCE_ERR_NOT_FOUND;
+    stdio__ensure_init();
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    stdio__session_t *entry = stdio__find_locked(session);
+    if (entry == NULL) {
+        xSemaphoreGive(s_lock);
+        return BRUCE_ERR_NOT_FOUND;
+    }
+    entry->tty_mode = mode;
+    xSemaphoreGive(s_lock);
+    return BRUCE_OK;
 }

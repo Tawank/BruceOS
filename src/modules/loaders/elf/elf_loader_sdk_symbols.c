@@ -51,6 +51,7 @@
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
 #include "core_sdk/tcp.h"
+#include "core_sdk/tty.h"
 #include "core_sdk/wifi.h"
 
 /* GCC emits these libgcc helpers for floating-point operations in ELF apps.
@@ -475,6 +476,11 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(stdio__session_route_children),
     ESP_ELFSYM_EXPORT(stdio__session_write_input),
     ESP_ELFSYM_EXPORT(stdio__session_read_output),
+    ESP_ELFSYM_EXPORT(tty__isatty),
+    ESP_ELFSYM_EXPORT(tty__get_size),
+    ESP_ELFSYM_EXPORT(tty__set_size),
+    ESP_ELFSYM_EXPORT(tty__get_mode),
+    ESP_ELFSYM_EXPORT(tty__set_mode),
 
     /* Standard C library subset. Console and heap calls are routed through
      * process-aware Bruce SDK functions rather than firmware libc. */
