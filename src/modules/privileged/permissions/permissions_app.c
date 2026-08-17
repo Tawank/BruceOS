@@ -277,9 +277,7 @@ static void permissions_app__gui_app(const char *app) {
         char title[BRUCE_PERMISSION_FILE_NAME_MAX + 16];
         snprintf(title, sizeof(title), "%s permissions", app);
         size_t selected = 0;
-        bruce_result_t result = dialog__choice_launcher(
-            title, "Select to toggle Allow/Deny", choices, entry_count + 2, &selected
-        );
+        bruce_result_t result = dialog__choice_launcher(title, NULL, choices, entry_count + 2, &selected);
         if (result == BRUCE_ERR_CANCELLED || strcmp(choices[selected].value, "back") == 0) return;
         if (result != BRUCE_OK) return;
 

@@ -102,8 +102,7 @@ static int nrf24_app__gui(void) {
     };
     for (;;) {
         size_t selected = 0;
-        bruce_result_t result =
-            dialog__choice_launcher("NRF24", "2.4 GHz radio tools", choices, 4, &selected);
+        bruce_result_t result = dialog__choice_launcher("NRF24", NULL, choices, 4, &selected);
         if (result == BRUCE_ERR_CANCELLED) return 0;
         if (result != BRUCE_OK) return result;
         const char *action = choices[selected].value;

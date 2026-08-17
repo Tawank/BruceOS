@@ -91,8 +91,7 @@ static int config_app__clock_gui(void) {
             {.label = "Back",                       .value = "back"     },
         };
         size_t selected = 0;
-        bruce_result_t result =
-            dialog__choice_launcher("System clock", "UTC system time, local display", choices, 7, &selected);
+        bruce_result_t result = dialog__choice_launcher("System clock", NULL, choices, 7, &selected);
         if (result == BRUCE_ERR_CANCELLED) return BRUCE_OK;
         if (result != BRUCE_OK) return result;
         const char *action = choices[selected].value;

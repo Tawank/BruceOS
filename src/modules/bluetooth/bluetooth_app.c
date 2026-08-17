@@ -128,7 +128,7 @@ int bluetooth_app_main(int argc, char **argv) {
         size_t selected = 0;
         bruce_result_t choice_result;
         do {
-            choice_result = dialog__choice_launcher("Bluetooth", "Select an action", choices, 1, &selected);
+            choice_result = dialog__choice_launcher("Bluetooth", NULL, choices, 1, &selected);
         } while (choice_result == BRUCE_ERR_CANCELLED && bluetooth_app__resume_after_handoff());
         if (choice_result == BRUCE_OK && strcmp(choices[selected].value, "scan") == 0) {
             return bluetooth_app__scan_gui();

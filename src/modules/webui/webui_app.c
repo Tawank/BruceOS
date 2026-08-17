@@ -3,7 +3,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "core_sdk/app_runner.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/http_server.h"
 #include "core_sdk/result.h"
@@ -118,7 +117,7 @@ static int webui_app__gui(void) {
             {.label = "Stop and exit",                          .value = "stop-exit"},
         };
         size_t selected = 0;
-        bruce_result_t result = dialog__choice_launcher("WebUI", "Browser access", choices, 3, &selected);
+        bruce_result_t result = dialog__choice_launcher("WebUI", NULL, choices, 3, &selected);
         if (result == BRUCE_ERR_CANCELLED) return BRUCE_OK;
         if (result != BRUCE_OK) return result;
         if (strcmp(choices[selected].value, "exit") == 0) return BRUCE_OK;
