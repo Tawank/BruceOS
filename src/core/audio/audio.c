@@ -346,7 +346,7 @@ bruce_result_t audio__tone(uint32_t frequency_hz, uint32_t duration_ms, bool non
         return BRUCE_ERR_NO_MEMORY;
     }
     *task_params = params;
-    if (xTaskCreate(audio__tone_task, "audio_tone", 2048, task_params, 4, NULL) != pdPASS) {
+    if (xTaskCreate(audio__tone_task, "audio_tone", 4096, task_params, 4, NULL) != pdPASS) {
         free(task_params);
         portENTER_CRITICAL(&s_audio_init_mux);
         s_async_tone_count--;
