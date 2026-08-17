@@ -188,7 +188,7 @@ int apps_app_main(int argc, char **argv) {
 
     for (;;) {
         size_t selected = 0;
-        result = dialog__choice_launcher("Apps", "Installed apps and scripts", choices, count, &selected);
+        result = dialog__choice_launcher("Apps", NULL, choices, count, &selected);
         if (result == BRUCE_ERR_CANCELLED && apps__resume_after_handoff()) continue;
         if (result == BRUCE_ERR_CANCELLED) break;
         if (result != BRUCE_OK) {
