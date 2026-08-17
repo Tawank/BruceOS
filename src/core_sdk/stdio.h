@@ -30,6 +30,15 @@ bruce_result_t stdio__read(void *buffer, size_t capacity, uint32_t timeout_ms, s
  * continue to use the normal logging/stdio functions. */
 bruce_result_t stdio__write(const void *data, size_t size);
 
+/* Same as stdio__write(), but targets an explicit session instead of the
+ * calling process's own routed session -- for the rare case (e.g. a
+ * background service rendering console fallback output on another
+ * process's behalf, see modules/notification_service) where the writer and
+ * the intended reader are not the same process. BRUCE_STDIO_SESSION_INVALID
+ * writes to the physical serial console, same as stdio__write() with no
+ * session routed. */
+bruce_result_t stdio__write_to(bruce_stdio_session_t session, const void *data, size_t size);
+
 /* printf-style form of bruce_stdio_write(). Returns the number of formatted
  * bytes written, or a negative BRUCE_ERR_* value. */
 int stdio__printf(const char *format, ...) __attribute__((format(printf, 1, 2)));

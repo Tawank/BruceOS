@@ -3,11 +3,12 @@
 #include <string.h>
 
 #include "core/process/process.h"
+#include "core_sdk/stdio.h"
 #include "freertos/FreeRTOS.h" // IWYU pragma: keep
 #include "freertos/queue.h"
 
 typedef struct {
-    bool dismiss; /* false: text/duration_ms/gui_requested below are the push payload. */
+    bool dismiss; /* false: text/duration_ms/gui_requested/session below are the push payload. */
     char text[BRUCE_NOTIFICATION_TEXT_MAX];
     uint32_t duration_ms;
     /* Whether the *pushing* process was launched with GUI=1, captured once
@@ -19,6 +20,15 @@ typedef struct {
      * or print to console without needing to know anything about wifi,
      * bluetooth, or any other specific pusher. */
     bool gui_requested;
+    /* The pushing process's own routed stdio session (see
+     * process_registry__current_stdio_session()), captured for the same
+     * reason as gui_requested above: the consumer runs as its own
+     * background process, so its *own* routed session (if any) has nothing
+     * to do with the pusher's. Without this, a console-fallback print would
+     * land on whatever the consumer happens to be routed to -- normally
+     * nothing, i.e. the physical serial console -- instead of the terminal
+     * (or other session) the pusher was actually running in. */
+    bruce_stdio_session_t session;
 } notification__message_t;
 
 /* Depth-1 "mailbox" queue: xQueueOverwrite() always replaces whatever
@@ -49,6 +59,7 @@ bruce_result_t notification__push(const char *text, uint32_t duration_ms) {
     strncpy(message.text, text, sizeof(message.text) - 1);
     message.duration_ms = duration_ms;
     message.gui_requested = gui_requested;
+    message.session = process_registry__current_stdio_session();
     (void)xQueueOverwrite(queue, &message);
     return BRUCE_OK;
 }
@@ -64,10 +75,11 @@ bruce_result_t notification__dismiss(void) {
 
 bruce_result_t notification__wait_request(
     char *out_text, size_t text_size, uint32_t *out_duration_ms, bool *out_dismiss, bool *out_gui_requested,
-    uint32_t timeout_ms
+    bruce_stdio_session_t *out_session, uint32_t timeout_ms
 ) {
     if (out_dismiss == NULL || (out_text != NULL) != (text_size > 0) ||
-        (out_text != NULL) != (out_duration_ms != NULL) || (out_text != NULL) != (out_gui_requested != NULL)) {
+        (out_text != NULL) != (out_duration_ms != NULL) || (out_text != NULL) != (out_gui_requested != NULL) ||
+        (out_text != NULL) != (out_session != NULL)) {
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
     bool built_in = false;
@@ -85,6 +97,7 @@ bruce_result_t notification__wait_request(
         out_text[text_size - 1] = '\0';
         *out_duration_ms = message.duration_ms;
         *out_gui_requested = message.gui_requested;
+        *out_session = message.session;
     }
     return BRUCE_OK;
 }

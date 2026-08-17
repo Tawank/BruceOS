@@ -425,10 +425,9 @@ void stdio__process_detach(FILE *input, FILE *output, FILE *error) {
 #endif
 }
 
-bruce_result_t stdio__write(const void *data, size_t size) {
+bruce_result_t stdio__write_to(bruce_stdio_session_t session, const void *data, size_t size) {
     if (size == 0) return BRUCE_OK;
     if (data == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
-    bruce_stdio_session_t session = process_registry__current_stdio_session();
     if (session != BRUCE_STDIO_SESSION_INVALID) { return stdio__session_write_output(session, data, size); }
 
     const char *bytes = data;
@@ -439,6 +438,10 @@ bruce_result_t stdio__write(const void *data, size_t size) {
         offset += (size_t)written;
     }
     return BRUCE_OK;
+}
+
+bruce_result_t stdio__write(const void *data, size_t size) {
+    return stdio__write_to(process_registry__current_stdio_session(), data, size);
 }
 
 int stdio__vprintf(const char *format, va_list args) {

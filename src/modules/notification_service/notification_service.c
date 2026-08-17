@@ -81,13 +81,15 @@ int notification_service_main(int argc, char **argv) {
         uint32_t duration_ms = 0;
         bool dismiss = false;
         bool gui_requested = false;
+        bruce_stdio_session_t session = BRUCE_STDIO_SESSION_INVALID;
         uint32_t wait_ms = UINT32_MAX;
         if (visible) {
             uint64_t now = runtime__now();
             wait_ms = deadline_ms > now ? (uint32_t)(deadline_ms - now) : 0;
         }
-        bruce_result_t result =
-            notification__wait_request(text, sizeof(text), &duration_ms, &dismiss, &gui_requested, wait_ms);
+        bruce_result_t result = notification__wait_request(
+            text, sizeof(text), &duration_ms, &dismiss, &gui_requested, &session, wait_ms
+        );
         if (result == BRUCE_OK && dismiss) {
             notification_service__hide();
             visible = false;
@@ -100,8 +102,14 @@ int notification_service_main(int argc, char **argv) {
             /* Pushed by a process launched without GUI interaction (a typed
              * console command): print straight to its routed stdio session
              * instead of drawing a banner nobody watching the console would
-             * see. */
-            (void)stdio__printf("%s\n", text);
+             * see. That has to be the *pusher's* session, captured at push
+             * time (see notification__push()/notification__wait_request()) --
+             * this service is its own background process, so stdio__printf()
+             * here would route to this process's own (normally absent)
+             * session instead, landing on the physical serial console no
+             * matter which session actually pushed the notification. */
+            (void)stdio__write_to(session, text, strlen(text));
+            (void)stdio__write_to(session, "\n", 1);
         } else if (visible) {
             /* Timed out waiting for the next request: this notification's
              * duration has elapsed with nothing new queued behind it. */
