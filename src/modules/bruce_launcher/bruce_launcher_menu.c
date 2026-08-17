@@ -12,6 +12,7 @@
 #include "core_sdk/result.h"
 #include "core_sdk/storage.h"
 #include "core_sdk/wifi.h"
+#include "embedded_resources.h"
 
 #define BRUCE_LAUNCHER_CONFIG_PATH "/config/launcher.json"
 #define BRUCE_LAUNCHER_JSON_MAX 8192
@@ -27,47 +28,10 @@ typedef struct {
  * a single handle is enough to release its memory__external block later. */
 static bruce_memory_object_t s_menu_object;
 
-/* Default launcher configuration written when /config/launcher.json is missing. */
-static const char *BRUCE_LAUNCHER_DEFAULT_JSON =
-    "{\n"
-    "  \"WiFi@wifi\": {\n"
-    "    \"$WIFI_CONNECT_TEXT\": \"BG=1 wifi toggle\",\n"
-    "    \"$WIFI_AP_CONNECT_TEXT\": \"BG=1 wifi ap toggle\",\n"
-    "    \"Scan\": \"wifi scan\",\n"
-    "    \"AP info\": \"terminal wifi ap info\",\n"
-    "    \"WebUI\": \"webui\",\n"
-    "    \"Wifi Atks\": {\n"
-    "      \"Target Atks\": \"wifiatks target\",\n"
-    "      \"Karma Attack\": \"wifiatks karma\",\n"
-    "      \"Beacon SPAM\": \"wifiatks beacon\"\n"
-    "    }\n"
-    "  },\n"
-    "  \"Bluetooth@bluetooth\": \"bluetooth\",\n"
-    "  \"Infrared@infrared\": \"ir\",\n"
-    "  \"NRF24@radio-handheld\": \"nrf24\",\n"
-    "  \"Files@folder-open\": \"filemanager\",\n"
-    "  \"Terminal@console\": \"terminal\",\n"
-    "  \"Clock@clock-outline\": \"clock\",\n"
-    "  \"Config@cog\": {\n"
-    "    \"Display & UI\": \"config display\",\n"
-    "    \"LED Config\": \"config led\",\n"
-    "    \"Audio Config\": \"config audio\",\n"
-    "    \"System Config\": {"
-    "      \"Startup Apps\": \"config system startup_apps\",\n"
-    "      \"Clock\": \"config system clock\",\n"
-    "      \"Advanced\": {\n"
-    "        \"Factory reset\": \"config system reset_defaults confirm\"\n"
-    "      }\n"
-    "    },\n"
-    "    \"Power\": \"config power\",\n"
-    "    \"Install App Store\": \"appstore install\",\n"
-    "    \"App Permissions\": \"permissions\",\n"
-    "    \"Partitions\": \"bparted\",\n"
-    "    \"About\": \"config about\"\n"
-    "  },\n"
-    "  \"Selftest@test-tube\": \"terminal selftest\",\n"
-    "  \"Apps@apps\": \"apps\"\n"
-    "}\n";
+/* Default launcher configuration written when /config/launcher.json is
+ * missing. Sourced from embedded_resources/json/launcher.json at build time;
+ * edit that file, not this line -- see modules/bruce_launcher/embedded_resources.h. */
+static const char *BRUCE_LAUNCHER_DEFAULT_JSON = json_launcher_json;
 
 static void bruce_launcher__parse_label(
     const char *source, char *label, size_t label_size, char *icon_name, size_t icon_name_size

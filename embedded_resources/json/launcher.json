@@ -1,0 +1,41 @@
+{
+  "WiFi@wifi": {
+    "$WIFI_CONNECT_TEXT": "BG=1 wifi toggle",
+    "$WIFI_AP_CONNECT_TEXT": "BG=1 wifi ap toggle",
+    "Scan": "wifi scan",
+    "AP info": "terminal wifi ap info",
+    "WebUI": "webui",
+    "Wifi Atks": {
+      "Target Atks": "wifiatks target",
+      "Karma Attack": "wifiatks karma",
+      "Beacon SPAM": "wifiatks beacon"
+    }
+  },
+  "Bluetooth@bluetooth": {
+    "BLE scan": "ble scan"
+  },
+  "Infrared@infrared": "ir",
+  "NRF24@radio-handheld": "nrf24",
+  "Files@folder-open": "filemanager",
+  "Terminal@console": "terminal",
+  "Clock@clock-outline": "clock",
+  "Config@cog": {
+    "Display & UI": "config display",
+    "LED Config": "config led",
+    "Audio Config": "config audio",
+    "System Config": {
+      "Startup Apps": "config system startup_apps",
+      "Clock": "config system clock",
+      "Advanced": {
+        "Factory reset": "config system reset_defaults confirm"
+      }
+    },
+    "Power": "config power",
+    "Install App Store": "appstore install",
+    "App Permissions": "permissions",
+    "Partitions": "bparted",
+    "About": "config about"
+  },
+  "Selftest@test-tube": "terminal selftest",
+  "Apps@apps": "apps"
+}

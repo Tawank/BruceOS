@@ -9,7 +9,7 @@
 #include "core_sdk/runtime.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/wifi.h"
-#include "webfiles.h"
+#include "embedded_resources.h"
 #include "webui_internal.h"
 
 static webui_app_network_mode_t s_network_mode;
@@ -17,16 +17,16 @@ static webui_app_network_mode_t s_network_mode;
 webui_app_network_mode_t webui__get_network_mode(void) { return s_network_mode; }
 
 static const webui_asset_t s_index_asset = {
-    webui_index_html_gz, webui_index_html_gz_size, "text/html; charset=utf-8"
+    web_interface_index_html_gz, web_interface_index_html_gz_size, "text/html; charset=utf-8"
 };
 static const webui_asset_t s_login_asset = {
-    webui_login_html_gz, webui_login_html_gz_size, "text/html; charset=utf-8"
+    web_interface_login_html_gz, web_interface_login_html_gz_size, "text/html; charset=utf-8"
 };
 static const webui_asset_t s_css_asset = {
-    webui_index_css_gz, webui_index_css_gz_size, "text/css; charset=utf-8"
+    web_interface_index_css_gz, web_interface_index_css_gz_size, "text/css; charset=utf-8"
 };
 static const webui_asset_t s_js_asset = {
-    webui_index_js_gz, webui_index_js_gz_size, "text/javascript; charset=utf-8"
+    web_interface_index_js_gz, web_interface_index_js_gz_size, "text/javascript; charset=utf-8"
 };
 
 static bruce_result_t webui__root(bruce_http_server_request_t *request, void *context) {

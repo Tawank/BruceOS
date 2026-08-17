@@ -264,22 +264,43 @@ target_compile_definitions(${bruce_wolfssh_lib} PRIVATE DEFAULT_WINDOW_SZ=2000)
 # component packaging never produces.
 target_compile_definitions(${COMPONENT_LIB} PRIVATE WOLFSSL_USER_SETTINGS)
 
+# Each module-local embedded_resources.h (e.g. modules/webui/, modules/
+# bruce_launcher/) is generated from tools/generate_embedded_resources.py's
+# RESOURCES list -- a plain Python list of (source file under
+# embedded_resources/, header it belongs in, gzip?) tuples. Adding or
+# changing an embedded resource is a one-line edit to that list; this file
+# never needs to change for it. The header/source paths below are queried
+# from the script itself (--print-headers/--print-sources) rather than
+# duplicated here, so they can't drift out of sync with RESOURCES.
+#
+# The custom command only reruns when the script or one of the listed
+# source files is actually newer than the header it produces (ordinary
+# add_custom_command OUTPUT/DEPENDS tracking -- not on every build), and the
+# script additionally skips the write when a header's content would be
+# byte-identical, so its mtime -- and anything that would recompile because
+# of it -- stays untouched.
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
-set(BRUCE_WEBUI_ASSET_DIR "${CMAKE_CURRENT_LIST_DIR}/../embedded_resources/web_interface")
-set(BRUCE_WEBUI_HEADER "${CMAKE_CURRENT_LIST_DIR}/modules/webui/webfiles.h")
-set(BRUCE_WEBUI_ASSETS
-    "${BRUCE_WEBUI_ASSET_DIR}/index.html"
-    "${BRUCE_WEBUI_ASSET_DIR}/login.html"
-    "${BRUCE_WEBUI_ASSET_DIR}/index.css"
-    "${BRUCE_WEBUI_ASSET_DIR}/index.js")
+set(BRUCE_EMBEDDED_RESOURCES_SCRIPT "${CMAKE_CURRENT_LIST_DIR}/../tools/generate_embedded_resources.py")
+execute_process(
+    COMMAND "${Python3_EXECUTABLE}" "${BRUCE_EMBEDDED_RESOURCES_SCRIPT}" --print-headers
+    OUTPUT_VARIABLE BRUCE_EMBEDDED_RESOURCES_HEADERS
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    COMMAND_ERROR_IS_FATAL ANY)
+execute_process(
+    COMMAND "${Python3_EXECUTABLE}" "${BRUCE_EMBEDDED_RESOURCES_SCRIPT}" --print-sources
+    OUTPUT_VARIABLE BRUCE_EMBEDDED_RESOURCES_SOURCES
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    COMMAND_ERROR_IS_FATAL ANY)
+string(REPLACE "\n" ";" BRUCE_EMBEDDED_RESOURCES_HEADERS "${BRUCE_EMBEDDED_RESOURCES_HEADERS}")
+string(REPLACE "\n" ";" BRUCE_EMBEDDED_RESOURCES_SOURCES "${BRUCE_EMBEDDED_RESOURCES_SOURCES}")
 add_custom_command(
-    OUTPUT "${BRUCE_WEBUI_HEADER}"
-    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_LIST_DIR}/../tools/generate_webfiles.py"
-    DEPENDS "${CMAKE_CURRENT_LIST_DIR}/../tools/generate_webfiles.py" ${BRUCE_WEBUI_ASSETS}
-    COMMENT "Generating compressed WebUI assets"
+    OUTPUT ${BRUCE_EMBEDDED_RESOURCES_HEADERS}
+    COMMAND "${Python3_EXECUTABLE}" "${BRUCE_EMBEDDED_RESOURCES_SCRIPT}"
+    DEPENDS ${BRUCE_EMBEDDED_RESOURCES_SOURCES}
+    COMMENT "Generating embedded_resources.h headers"
     VERBATIM)
-add_custom_target(bruce_webui_assets DEPENDS "${BRUCE_WEBUI_HEADER}")
-add_dependencies(${COMPONENT_LIB} bruce_webui_assets)
+add_custom_target(bruce_embedded_resources DEPENDS ${BRUCE_EMBEDDED_RESOURCES_HEADERS})
+add_dependencies(${COMPONENT_LIB} bruce_embedded_resources)
 
 set_source_files_properties(${BRUCE_SELFTEST_SOURCES} PROPERTIES
                             COMPILE_OPTIONS
@@ -292,6 +313,7 @@ add_library(bruce_sdk_builtin_launcher_check OBJECT
             "modules/bruce_launcher/bruce_launcher_app.c"
             "modules/bruce_launcher/bruce_launcher_icons.c"
             "modules/bruce_launcher/bruce_launcher_menu.c")
+add_dependencies(bruce_sdk_builtin_launcher_check bruce_embedded_resources)
 target_include_directories(bruce_sdk_builtin_launcher_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/bruce_launcher"
@@ -353,7 +375,7 @@ add_library(bruce_sdk_builtin_webui_check OBJECT
            "modules/webui/webui_auth.c"
            "modules/webui/webui_files.c"
            "modules/webui/webui_system.c")
-add_dependencies(bruce_sdk_builtin_webui_check bruce_webui_assets)
+add_dependencies(bruce_sdk_builtin_webui_check bruce_embedded_resources)
 target_include_directories(bruce_sdk_builtin_webui_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/webui")
