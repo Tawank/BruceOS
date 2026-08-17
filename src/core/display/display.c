@@ -766,6 +766,16 @@ void display__deinit(void) {
 
 int display__width(void) {
     bruce_process_id_t caller = process__current_id();
+    /* A process's viewport isn't sized until it's promoted to a real GUI
+     * surface (see process_registry__mark_presentable(); display__begin_frame()
+     * triggers the same promotion for the same reason). Without this, a
+     * script that asks for its own width/height before its first draw -- the
+     * natural place to size sprite layout, e.g. dino_game.js's startup code
+     * -- would read back a stale (0, 0) from a context that is still hidden,
+     * even though it's the sole foreground process and about to be given the
+     * whole screen. Callers that want the physical panel size without this
+     * side effect already have display__screen_width()/height() for that. */
+    process_registry__mark_presentable(caller);
     display__lock();
     display__process_context_t *context = display__find_context_locked(caller);
     if (context != NULL && context->active_overlay != NULL) context = &context->active_overlay->surface;
@@ -776,6 +786,10 @@ int display__width(void) {
 
 int display__height(void) {
     bruce_process_id_t caller = process__current_id();
+    /* See display__width() -- promotes the caller to a real GUI surface
+     * before reading its viewport, for the same reason display__begin_frame()
+     * does. */
+    process_registry__mark_presentable(caller);
     display__lock();
     display__process_context_t *context = display__find_context_locked(caller);
     if (context != NULL && context->active_overlay != NULL) context = &context->active_overlay->surface;
