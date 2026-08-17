@@ -416,7 +416,8 @@ static bruce_result_t ssh_app__forward_stdin(bruce_ssh_id_t session, bool *out_e
     return BRUCE_OK;
 }
 
-static bruce_result_t ssh_app__session(bruce_ssh_id_t session, bool *out_local_exit) {
+static bruce_result_t
+ssh_app__session(bruce_ssh_id_t session, uint32_t tty_generation, bool *out_local_exit) {
     *out_local_exit = false;
     char received[SSH_APP_BUFFER_SIZE + 1];
     for (;;) {
@@ -429,6 +430,19 @@ static bruce_result_t ssh_app__session(bruce_ssh_id_t session, bool *out_local_e
             (void)stdio__write(received, received_size);
         } else if (result != BRUCE_ERR_TIMEOUT) {
             return result;
+        }
+
+        /* Forwards local terminal resizes to the remote pty so full-screen
+         * programs (htop, less, tmux, ...) re-layout immediately, mirroring
+         * how a real ssh client reacts to SIGWINCH. tty__get_size()'s
+         * generation only changes when the owning session's size actually
+         * changed, so this is a cheap comparison on every idle poll rather
+         * than an unconditional resize call. */
+        bruce_tty_size_t local_size;
+        if (tty__isatty() && tty__get_size(&local_size) == BRUCE_OK &&
+            local_size.generation != tty_generation) {
+            tty_generation = local_size.generation;
+            (void)ssh__resize_pty(session, local_size.columns, local_size.rows, 2000);
         }
 
         bool exit_requested = false;
@@ -587,10 +601,12 @@ static bruce_result_t ssh_app__client(
      * session size is known yet (e.g. run from the physical serial console). */
     uint16_t pty_columns = SSH_APP_DEFAULT_COLUMNS;
     uint16_t pty_rows = SSH_APP_DEFAULT_ROWS;
+    uint32_t pty_tty_generation = 0;
     bruce_tty_size_t local_size;
     if (tty__isatty() && tty__get_size(&local_size) == BRUCE_OK) {
         pty_columns = local_size.columns;
         pty_rows = local_size.rows;
+        pty_tty_generation = local_size.generation;
     }
     result = ssh__open_shell(session, "xterm", pty_columns, pty_rows, 10000);
     if (result != BRUCE_OK) {
@@ -601,7 +617,7 @@ static bruce_result_t ssh_app__client(
 
     stdio__printf("Connected. Press Ctrl+] to close.\n");
     bool local_exit = false;
-    result = ssh_app__session(session, &local_exit);
+    result = ssh_app__session(session, pty_tty_generation, &local_exit);
     (void)ssh__close(session);
     stdio__printf("\nConnection closed%s\n", result == BRUCE_OK ? "." : " with an error.");
     return result;
