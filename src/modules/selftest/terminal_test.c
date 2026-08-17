@@ -16,6 +16,27 @@
 #include "modules/utils/serial_commands/serial_commands_app.h"
 #include "modules/utils/terminal/terminal_ansi.h"
 
+/* Copies a grid row's glyphs (blank cells as spaces) into a NUL-terminated
+ * string with trailing spaces trimmed, so it can be compared with strcmp()
+ * the same way the old flat-transcript test data did. */
+static void
+selftest__terminal_row_text(const terminal_grid_t *grid, uint16_t row, char *out, size_t out_size) {
+    const terminal_cell_t *cells = terminal_grid__active_cells(grid);
+    const terminal_cell_t *cell_row = cells + (size_t)row * grid->columns;
+    size_t used = 0;
+    for (uint16_t x = 0; x < grid->columns && used + 4 < out_size; ++x) {
+        const terminal_cell_t *cell = &cell_row[x];
+        if (cell->utf8_len == 0) {
+            out[used++] = ' ';
+        } else {
+            memcpy(out + used, cell->utf8, cell->utf8_len);
+            used += cell->utf8_len;
+        }
+    }
+    while (used > 0 && out[used - 1] == ' ') used--;
+    out[used] = '\0';
+}
+
 /* ------------------------------------------------------------------------ */
 /* Terminal parser: named built-in dispatch                                  */
 /* ------------------------------------------------------------------------ */
@@ -281,34 +302,32 @@ bool selftest__run_terminal_editing_case(void) {
                      shell_line_editor__delete(&editor) &&
                      strcmp(line, "a") == 0;
 
-    char transcript[32] = {0};
-    uint8_t colors[32] = {0};
-    size_t transcript_size = 0;
-    terminal_ansi_parser_t ansi;
-    terminal_ansi__init(&ansi);
+    terminal_cell_t sgr_cells[16];
+    terminal_cell_t sgr_alt_cells[16];
+    terminal_grid_t sgr_grid;
+    terminal_grid__init(&sgr_grid, sgr_cells, sgr_alt_cells, 16, 1);
     static const char ansi_part_one[] = "plain\033[3";
     static const char ansi_part_two[] = "1mred\033[0m";
-    terminal_ansi__consume(
-        &ansi, ansi_part_one, sizeof(ansi_part_one) - 1, transcript, colors, &transcript_size, sizeof(transcript)
-    );
-    terminal_ansi__consume(
-        &ansi, ansi_part_two, sizeof(ansi_part_two) - 1, transcript, colors, &transcript_size, sizeof(transcript)
-    );
-    bool ansi_ok = strcmp(transcript, "plainred") == 0 &&
-                   colors[0] == TERMINAL_ANSI_DEFAULT_COLOR && colors[5] == 1 &&
-                   ansi.color == TERMINAL_ANSI_DEFAULT_COLOR;
+    terminal_grid__feed(&sgr_grid, ansi_part_one, sizeof(ansi_part_one) - 1);
+    terminal_grid__feed(&sgr_grid, ansi_part_two, sizeof(ansi_part_two) - 1);
+    char sgr_text[17] = {0};
+    selftest__terminal_row_text(&sgr_grid, 0, sgr_text, sizeof(sgr_text));
+    bool ansi_ok = strcmp(sgr_text, "plainred") == 0 && sgr_cells[0].fg == TERMINAL_ANSI_COLOR_DEFAULT &&
+                   sgr_cells[5].fg == 1 && sgr_grid.fg == TERMINAL_ANSI_COLOR_DEFAULT &&
+                   sgr_grid.cursor_x == 8 && sgr_grid.cursor_y == 0;
 
-    char cursor_text[16] = {0};
-    uint8_t cursor_colors[16] = {0};
-    size_t cursor_size = 0;
-    terminal_ansi_parser_t cursor_ansi;
-    terminal_ansi__init(&cursor_ansi);
+    terminal_cell_t cursor_cells[32];
+    terminal_cell_t cursor_alt_cells[32];
+    terminal_grid_t cursor_grid;
+    terminal_grid__init(&cursor_grid, cursor_cells, cursor_alt_cells, 16, 2);
     static const char cursor_input[] = "abc\r\nx\033[D!\r\033[2Kbruce$ x";
-    terminal_ansi__consume(
-        &cursor_ansi, cursor_input, sizeof(cursor_input) - 1, cursor_text, cursor_colors,
-        &cursor_size, sizeof(cursor_text)
-    );
-    ansi_ok = ansi_ok && strcmp(cursor_text, "abc\nbruce$ x") == 0 && cursor_ansi.cursor == cursor_size;
+    terminal_grid__feed(&cursor_grid, cursor_input, sizeof(cursor_input) - 1);
+    char cursor_row0[17] = {0};
+    char cursor_row1[17] = {0};
+    selftest__terminal_row_text(&cursor_grid, 0, cursor_row0, sizeof(cursor_row0));
+    selftest__terminal_row_text(&cursor_grid, 1, cursor_row1, sizeof(cursor_row1));
+    ansi_ok = ansi_ok && strcmp(cursor_row0, "abc") == 0 && strcmp(cursor_row1, "bruce$ x") == 0 &&
+              cursor_grid.cursor_x == 8 && cursor_grid.cursor_y == 1;
 
     static const char history_path[] = "/terminal_history_test";
     (void)storage__remove(history_path);

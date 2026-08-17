@@ -17,15 +17,17 @@
 #include "core_sdk/stdio.h"
 #include "terminal_ansi.h"
 
-#define TERMINAL__TRANSCRIPT_CAPACITY 4096
 #define TERMINAL__LINE_CAPACITY 512
 /* Mirrors the active font's cell size (display__get_font_metrics()) as
  * compile-time constants -- every built-in font is monospace 6x10 today. */
 #define TERMINAL__CHAR_W 6
 #define TERMINAL__CHAR_H 10
 #define TERMINAL__TITLE_H 12
-#define TERMINAL__MAX_VISIBLE_ROWS 40
 #define TERMINAL__FRAME_MARGIN 2
+/* Generous upper bound on grid size, purely to keep the cell-buffer
+ * allocation bounded; no real board's display comes close to this. */
+#define TERMINAL__MAX_COLUMNS 200
+#define TERMINAL__MAX_ROWS 80
 #define TERMINAL__INPUT_TIMEOUT_MS 50
 #define TERMINAL__HIDDEN_DELAY_MS 20
 #define TERMINAL__CHILD_STOP_TIMEOUT_MS 500
@@ -33,22 +35,21 @@
 #define TERMINAL__ASCII_DELETE 0x7f
 
 typedef struct {
-    char *transcript;
-    uint8_t *transcript_colors;
-    size_t transcript_size;
-    terminal_ansi_parser_t ansi;
+    terminal_cell_t *cells;
+    terminal_cell_t *alt_cells;
+    bruce_memory_object_t cells_object;
+    bruce_memory_object_t alt_cells_object;
+    bool cells_external;
+    bool alt_cells_external;
+    terminal_grid_t grid;
     bruce_stdio_session_t session;
     bruce_process_id_t child;
-    bruce_memory_object_t transcript_object;
-    bruce_memory_object_t colors_object;
-    bool transcript_external;
-    bool colors_external;
     bool dirty;
     bool exit_requested;
 } terminal__state_t;
 
 /* Prefers a PSRAM- or plain-internal-RAM-backed memory__external block (both
- * are plain, directly addressable buffers) so the parser can keep mutating it
+ * are plain, directly addressable buffers) so the grid can keep mutating it
  * in place with ordinary pointer writes. Falls back to a separate, untracked
  * internal heap allocation when PSRAM has no room for `size`, without ever
  * calling memory__external_alloc() in that case: on a board where a "swap"
@@ -96,123 +97,106 @@ static void terminal__free_buffer(void *data, bruce_memory_object_t *object, boo
 }
 
 static void terminal__free_buffers(terminal__state_t *state) {
-    terminal__free_buffer(state->transcript, &state->transcript_object, state->transcript_external);
-    terminal__free_buffer(state->transcript_colors, &state->colors_object, state->colors_external);
+    terminal__free_buffer(state->cells, &state->cells_object, state->cells_external);
+    terminal__free_buffer(state->alt_cells, &state->alt_cells_object, state->alt_cells_external);
 }
 
-typedef struct {
-    size_t start;
-    size_t length;
-} terminal__visual_line_t;
-
-static void terminal__append(terminal__state_t *state, const char *text, size_t size) {
-    terminal_ansi__consume(
-        &state->ansi, text, size, state->transcript, state->transcript_colors,
-        &state->transcript_size, TERMINAL__TRANSCRIPT_CAPACITY
-    );
-    state->dirty = true;
-}
-
-static void terminal__append_text(terminal__state_t *state, const char *text) {
-    terminal__append(state, text, strlen(text));
-}
-
-static int terminal__collect_lines(
-    const terminal__state_t *state, int columns, int rows, terminal__visual_line_t *lines
-) {
-    int count = 0;
-    size_t start = 0;
-    while (start < state->transcript_size) {
-        size_t length = 0;
-        while (start + length < state->transcript_size && state->transcript[start + length] != '\n' &&
-               length < (size_t)columns) {
-            length++;
-        }
-        if (count == rows) {
-            memmove(lines, lines + 1, sizeof(*lines) * (size_t)(rows - 1));
-            count--;
-        }
-        lines[count++] = (terminal__visual_line_t){.start = start, .length = length};
-        start += length;
-        if (start < state->transcript_size && state->transcript[start] == '\n') start++;
-        if (length == 0 && start == state->transcript_size) break;
+static void terminal__drain_output(terminal__state_t *state) {
+    char output[256];
+    size_t size = 0;
+    while (stdio__session_read_output(state->session, output, sizeof(output), &size) == BRUCE_OK) {
+        terminal_grid__feed(&state->grid, output, size);
+        state->dirty = true;
+        char response[TERMINAL_ANSI_RESPONSE_CAPACITY];
+        size_t response_len = terminal_grid__take_response(&state->grid, response, sizeof(response));
+        if (response_len > 0) (void)stdio__session_write_input(state->session, response, response_len);
     }
-    bool cursor_needs_row = state->transcript_size == 0 ||
-                            state->transcript[state->transcript_size - 1] == '\n' ||
-                            (count > 0 && lines[count - 1].length == (size_t)columns);
-    if (cursor_needs_row) {
-        if (count == rows) {
-            memmove(lines, lines + 1, sizeof(*lines) * (size_t)(rows - 1));
-            count--;
-        }
-        lines[count++] = (terminal__visual_line_t){.start = state->transcript_size, .length = 0};
-    }
-    return count;
 }
 
-static void terminal__draw_transcript(
-    const terminal__state_t *state, const terminal__visual_line_t *lines, int line_count, uint16_t foreground
-) {
-    static const uint16_t ansi_colors[TERMINAL_ANSI_COLOR_COUNT] = {
-        BRUCE_COLOR_BLACK, BRUCE_COLOR_MAROON, BRUCE_COLOR_DARKGREEN, BRUCE_COLOR_OLIVE,
-        BRUCE_COLOR_NAVY, BRUCE_COLOR_PURPLE, BRUCE_COLOR_DARKCYAN, BRUCE_COLOR_LIGHTGREY,
-        BRUCE_COLOR_DARKGREY, BRUCE_COLOR_RED, BRUCE_COLOR_GREEN, BRUCE_COLOR_YELLOW,
-        BRUCE_COLOR_BLUE, BRUCE_COLOR_MAGENTA, BRUCE_COLOR_CYAN, BRUCE_COLOR_WHITE,
-    };
-    char text[TERMINAL__LINE_CAPACITY];
-    for (int row = 0; row < line_count; ++row) {
-        size_t consumed = 0;
-        while (consumed < lines[row].length) {
-            uint8_t color = state->transcript_colors[lines[row].start + consumed];
-            size_t run = 1;
-            while (consumed + run < lines[row].length &&
-                   state->transcript_colors[lines[row].start + consumed + run] == color) run++;
-            memcpy(text, state->transcript + lines[row].start + consumed, run);
-            text[run] = '\0';
-            display__set_text_color(color < TERMINAL_ANSI_COLOR_COUNT ? ansi_colors[color] : foreground);
+static void terminal__write_input(terminal__state_t *state, const char *bytes, size_t size) {
+    (void)stdio__session_write_input(state->session, bytes, size);
+}
+
+/* Draws the active grid a row at a time, run-length-encoding consecutive
+ * cells that share the same resolved (post-reverse-video) colors and
+ * underline state into a single display__print() call. Erased/blank cells
+ * are rendered as a real space so an opaque background (reverse video, a
+ * colored status bar) still paints correctly. */
+static void terminal__draw_grid(const terminal__state_t *state, uint16_t theme_fg, uint16_t theme_bg) {
+    const terminal_grid_t *grid = &state->grid;
+    const terminal_cell_t *cells = terminal_grid__active_cells(grid);
+    char text[TERMINAL__MAX_COLUMNS * 4 + 1];
+    for (uint16_t y = 0; y < grid->rows; ++y) {
+        const terminal_cell_t *row = cells + (size_t)y * grid->columns;
+        uint16_t x = 0;
+        while (x < grid->columns) {
+            const terminal_cell_t *first = &row[x];
+            bool reverse = (first->attrs & TERMINAL_ANSI_ATTR_REVERSE) != 0;
+            bool underline = (first->attrs & TERMINAL_ANSI_ATTR_UNDERLINE) != 0;
+            uint16_t fg565 = terminal_ansi__color565(reverse ? first->bg : first->fg, reverse ? theme_bg : theme_fg);
+            uint16_t bg565 = terminal_ansi__color565(reverse ? first->fg : first->bg, reverse ? theme_fg : theme_bg);
+            uint16_t run = 0;
+            size_t text_len = 0;
+            while (x + run < grid->columns) {
+                const terminal_cell_t *cell = &row[x + run];
+                bool cell_reverse = (cell->attrs & TERMINAL_ANSI_ATTR_REVERSE) != 0;
+                bool cell_underline = (cell->attrs & TERMINAL_ANSI_ATTR_UNDERLINE) != 0;
+                if (cell_reverse != reverse || cell_underline != underline) break;
+                int16_t cell_fg = cell_reverse ? cell->bg : cell->fg;
+                int16_t cell_bg = cell_reverse ? cell->fg : cell->bg;
+                int16_t first_fg = reverse ? first->bg : first->fg;
+                int16_t first_bg = reverse ? first->fg : first->bg;
+                if (cell_fg != first_fg || cell_bg != first_bg) break;
+                if (cell->utf8_len == 0) {
+                    text[text_len++] = ' ';
+                } else {
+                    memcpy(text + text_len, cell->utf8, cell->utf8_len);
+                    text_len += cell->utf8_len;
+                }
+                run++;
+            }
+            text[text_len] = '\0';
+            display__set_text_color(fg565);
+            display__set_text_bg_color(bg565);
             display__set_cursor(
-                TERMINAL__FRAME_MARGIN + (int16_t)(consumed * TERMINAL__CHAR_W),
-                TERMINAL__TITLE_H + row * TERMINAL__CHAR_H
+                TERMINAL__FRAME_MARGIN + (int16_t)(x * TERMINAL__CHAR_W), TERMINAL__TITLE_H + y * TERMINAL__CHAR_H
             );
             display__print(text);
-            consumed += run;
+            if (underline) {
+                display__fill_rect(
+                    TERMINAL__FRAME_MARGIN + (int16_t)(x * TERMINAL__CHAR_W),
+                    TERMINAL__TITLE_H + y * TERMINAL__CHAR_H + TERMINAL__CHAR_H - 1, (int16_t)(run * TERMINAL__CHAR_W),
+                    1, fg565
+                );
+            }
+            x = (uint16_t)(x + run);
         }
     }
 }
 
-static void terminal__draw_cursor(
-    const terminal__state_t *state, const terminal__visual_line_t *lines, int line_count,
-    uint16_t foreground
-) {
-    if (line_count == 0) return;
-    int cursor_row = line_count - 1;
-    size_t cursor_column = lines[cursor_row].length;
-    for (int row = line_count - 1; row >= 0; --row) {
-        size_t end = lines[row].start + lines[row].length;
-        if (state->ansi.cursor >= lines[row].start && state->ansi.cursor <= end) {
-            cursor_row = row;
-            cursor_column = state->ansi.cursor - lines[row].start;
-            break;
-        }
+static void terminal__draw_cursor(const terminal__state_t *state, uint16_t theme_fg, uint16_t theme_bg) {
+    const terminal_grid_t *grid = &state->grid;
+    if (!grid->cursor_visible) return;
+    int16_t x = TERMINAL__FRAME_MARGIN + (int16_t)(grid->cursor_x * TERMINAL__CHAR_W);
+    int16_t y = TERMINAL__TITLE_H + grid->cursor_y * TERMINAL__CHAR_H;
+    display__fill_rect(x, y, TERMINAL__CHAR_W, TERMINAL__CHAR_H, theme_fg);
+    const terminal_cell_t *cells = terminal_grid__active_cells(grid);
+    const terminal_cell_t *cell = &cells[(size_t)grid->cursor_y * grid->columns + grid->cursor_x];
+    if (cell->utf8_len > 0) {
+        char glyph[5];
+        memcpy(glyph, cell->utf8, cell->utf8_len);
+        glyph[cell->utf8_len] = '\0';
+        display__set_text_color(theme_bg);
+        display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
+        display__set_cursor(x, y);
+        display__print(glyph);
     }
-    int cursor_x = TERMINAL__FRAME_MARGIN + (int)cursor_column * TERMINAL__CHAR_W;
-    int cursor_y = TERMINAL__TITLE_H + cursor_row * TERMINAL__CHAR_H;
-    display__fill_rect(cursor_x, cursor_y + TERMINAL__CHAR_H - 1, TERMINAL__CHAR_W - 1, 1, foreground);
 }
 
 static bruce_result_t terminal__draw(const terminal__state_t *state) {
     uint16_t foreground = config__get_theme_primary();
     uint16_t background = config__get_theme_background();
     int width = display__width();
-    int height = display__height();
-    int columns = (width - 2 * TERMINAL__FRAME_MARGIN) / TERMINAL__CHAR_W;
-    int rows = (height - TERMINAL__TITLE_H - 2 * TERMINAL__FRAME_MARGIN) / TERMINAL__CHAR_H;
-    if (columns < 1) columns = 1;
-    if (rows < 1) rows = 1;
-    if (rows > TERMINAL__MAX_VISIBLE_ROWS) rows = TERMINAL__MAX_VISIBLE_ROWS;
-
-    terminal__visual_line_t lines[TERMINAL__MAX_VISIBLE_ROWS];
-    int line_count = terminal__collect_lines(state, columns, rows, lines);
     bruce_result_t result = display__begin_frame();
     if (result != BRUCE_OK) return result;
     display__fill_screen(background);
@@ -222,21 +206,9 @@ static bruce_result_t terminal__draw(const terminal__state_t *state) {
     display__set_text_color(background);
     display__set_cursor(TERMINAL__FRAME_MARGIN, TERMINAL__FRAME_MARGIN);
     display__print(state->child != BRUCE_PROCESS_ID_INVALID ? "Terminal [running]" : "Terminal");
-    terminal__draw_transcript(state, lines, line_count, foreground);
-    terminal__draw_cursor(state, lines, line_count, foreground);
+    terminal__draw_grid(state, foreground, background);
+    terminal__draw_cursor(state, foreground, background);
     return display__present();
-}
-
-static void terminal__drain_output(terminal__state_t *state) {
-    char output[256];
-    size_t size = 0;
-    while (stdio__session_read_output(state->session, output, sizeof(output), &size) == BRUCE_OK) {
-        terminal__append(state, output, size);
-    }
-}
-
-static void terminal__write_input(terminal__state_t *state, const char *bytes, size_t size) {
-    (void)stdio__session_write_input(state->session, bytes, size);
 }
 
 static void terminal__open_text_input(terminal__state_t *state) {
@@ -270,6 +242,8 @@ static void terminal__handle_input(terminal__state_t *state, const bruce_input_e
             case BRUCE_INPUT_CODE_LEFT: sequence = "\033[D"; break;
             case BRUCE_INPUT_CODE_HOME: sequence = "\033[H"; break;
             case BRUCE_INPUT_CODE_DELETE: sequence = "\033[3~"; break;
+            case BRUCE_INPUT_CODE_PREV: sequence = "\033[5~"; break; /* Page Up */
+            case BRUCE_INPUT_CODE_NEXT: sequence = "\033[6~"; break; /* Page Down */
             default: break;
         }
         if (sequence != NULL) terminal__write_input(state, sequence, strlen(sequence));
@@ -335,32 +309,43 @@ int terminal_app_main(int argc, char **argv) {
 
     terminal__state_t state = {0};
     state.child = BRUCE_PROCESS_ID_INVALID;
-    terminal_ansi__init(&state.ansi);
-    void *transcript_data = NULL;
-    void *colors_data = NULL;
-    bruce_result_t transcript_alloc = terminal__alloc_buffer(
-        &transcript_data, &state.transcript_object, &state.transcript_external, TERMINAL__TRANSCRIPT_CAPACITY
-    );
-    state.transcript = transcript_data;
-    bruce_result_t colors_alloc = terminal__alloc_buffer(
-        &colors_data, &state.colors_object, &state.colors_external, TERMINAL__TRANSCRIPT_CAPACITY
-    );
-    state.transcript_colors = colors_data;
-    if (transcript_alloc != BRUCE_OK || colors_alloc != BRUCE_OK) {
-        if (transcript_alloc == BRUCE_OK) {
-            terminal__free_buffer(state.transcript, &state.transcript_object, state.transcript_external);
-        }
-        if (colors_alloc == BRUCE_OK) {
-            terminal__free_buffer(state.transcript_colors, &state.colors_object, state.colors_external);
+
+    int width = display__width();
+    int height = display__height();
+    int columns = (width - 2 * TERMINAL__FRAME_MARGIN) / TERMINAL__CHAR_W;
+    int rows = (height - TERMINAL__TITLE_H - 2 * TERMINAL__FRAME_MARGIN) / TERMINAL__CHAR_H;
+    if (columns < 1) columns = 1;
+    if (rows < 1) rows = 1;
+    if (columns > TERMINAL__MAX_COLUMNS) columns = TERMINAL__MAX_COLUMNS;
+    if (rows > TERMINAL__MAX_ROWS) rows = TERMINAL__MAX_ROWS;
+
+    size_t cell_buffer_size = (size_t)columns * (size_t)rows * sizeof(terminal_cell_t);
+    void *cells_data = NULL;
+    void *alt_cells_data = NULL;
+    bruce_result_t cells_alloc =
+        terminal__alloc_buffer(&cells_data, &state.cells_object, &state.cells_external, cell_buffer_size);
+    state.cells = cells_data;
+    bruce_result_t alt_cells_alloc =
+        terminal__alloc_buffer(&alt_cells_data, &state.alt_cells_object, &state.alt_cells_external, cell_buffer_size);
+    state.alt_cells = alt_cells_data;
+    if (cells_alloc != BRUCE_OK || alt_cells_alloc != BRUCE_OK) {
+        if (cells_alloc == BRUCE_OK) terminal__free_buffer(state.cells, &state.cells_object, state.cells_external);
+        if (alt_cells_alloc == BRUCE_OK) {
+            terminal__free_buffer(state.alt_cells, &state.alt_cells_object, state.alt_cells_external);
         }
         return BRUCE_ERR_NO_MEMORY;
     }
+    terminal_grid__init(&state.grid, state.cells, state.alt_cells, (uint16_t)columns, (uint16_t)rows);
+    terminal_grid__feed(
+        &state.grid, "Bruce terminal\r\nType a command and press Enter.\r\n",
+        strlen("Bruce terminal\r\nType a command and press Enter.\r\n")
+    );
+    (void)input__flush();
+
     if (stdio__session_create(&state.session) != BRUCE_OK) {
         terminal__free_buffers(&state);
         return BRUCE_ERR_RESOURCE_LIMIT;
     }
-    terminal__append_text(&state, "Bruce terminal\nType a command and press Enter.\n");
-    (void)input__flush();
 
     (void)stdio__session_route_children(state.session);
     int shell_process = app_runner__run("shell", "-i", BRUCE_LAUNCH_BACKGROUND);
@@ -371,6 +356,7 @@ int terminal_app_main(int argc, char **argv) {
         return shell_process;
     }
     state.child = (bruce_process_id_t)shell_process;
+    state.dirty = true;
 
     if (has_startup_command) {
         terminal__write_input(&state, startup_line, strlen(startup_line));
