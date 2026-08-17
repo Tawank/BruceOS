@@ -1,6 +1,6 @@
 var display = require('display');
 var keyboard = require('keyboard');
-// var audio = require('audio');
+var audio = require('audio');
 
 // I am putting all code in function to optimise, if variables are outside
 // functions they are put in global namespace, and it's slower to get
@@ -293,7 +293,7 @@ function main() {
   var dinoIsDucking = false;
 
   var obstacle = obstacles[1];
-  var obstacleX = 300; // start off-screen
+  var obstacleX = displayWidth + 50; // start off-screen
   var obstacleY = obstacle.spawnsY[0];
 
   var groundX = 0;
@@ -353,7 +353,7 @@ function main() {
     if (jumpKeyDown && !dinoIsJumping && !dinoIsDucking) {
       dinoVelocity = JUMP_VELOCITY;
       dinoIsJumping = true;
-      // audio.tone(494, 40, true);
+      audio.tone(494, 40, true);
     }
 
     dinoIsDucking = duckKeyDown && !dinoIsJumping;
@@ -367,9 +367,9 @@ function main() {
 
     if (playPointSound === 0 && score % 100 < 10 && score > 50) {
       playPointSound = 1;
-      // audio.tone(784, 80, true);
+      audio.tone(784, 80, true);
     } else if (playPointSound === 1) {
-      // audio.tone(784, 220, true);
+      audio.tone(784, 220, true);
       playPointSound = 2;
     } else if (score % 100 > 50 && playPointSound === 2) {
       playPointSound = 0;
@@ -482,7 +482,7 @@ function main() {
       display.drawXBitmap(10, dinoY, dinoRunSprite[dinoFrame], dinoRunWidth, dinoRunHeight, foreground);
     }
 
-    display.setTextSize(1);
+    display.setTextSize(2);
     display.setTextColor(foreground, COLOR_TRANSPARENT);
     var scoreText = String(score);
     while (scoreText.length < 5) {
@@ -537,9 +537,9 @@ function main() {
   }
 
   function showGameOverAndWait() {
-    // audio.tone(60, 100); // 50
+    audio.tone(60, 100); // 50
     delay(20);
-    // audio.tone(60, 180); // 90
+    audio.tone(60, 180); // 90
     drawGameOverOverlay();
     display.present();
     delay(500);
@@ -552,6 +552,11 @@ function main() {
     }
 
     if (exitRequested) return;
+
+    dinoY = GROUND_Y;
+    dinoVelocity = 0;
+    dinoIsJumping = false;
+    dinoIsDucking = false;
 
     obstacleX = displayWidth + 50;
     delay(500);
