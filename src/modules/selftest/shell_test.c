@@ -9,6 +9,7 @@
 #include "core_sdk/result.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
+#include "core_sdk/tty.h"
 #include "modules/shell/shell_app.h"
 #include "modules/shell/shell_internal.h"
 
@@ -125,5 +126,36 @@ bool selftest__run_shell_stdio_inheritance_case(void) {
     bool ok = completed && status.reason == BRUCE_PROCESS_EXITED && status.exit_code == 0 &&
               read == BRUCE_OK && strstr(output, "shell-grandchild-routed") != NULL;
     printf("[selftest] shell/stdio-inheritance: %s\n", ok ? "OK" : "failed");
+    return ok;
+}
+
+/* Confirms shell_app.c's shell__sync_tty_size actually exports $COLUMNS and
+ * $LINES from the routed session's tty__get_size() -- the mechanism real
+ * full-screen programs (htop, less, tmux) fall back to when they can't
+ * query the terminal directly. Owns the session the same way terminal_app.c
+ * does: tty__set_size() before routing children, so the spawned "shell -i"
+ * (and its own "shell_test_probe" grandchild) see the size from their very
+ * first read. */
+static bool
+selftest__shell_tty_size_probe(bruce_stdio_session_t session, const char *command, const char *expected) {
+    memset(s_probe_arg, 0, sizeof(s_probe_arg));
+    if (stdio__session_route_children(session) != BRUCE_OK) return false;
+    int launched = app_runner__run("shell", command, BRUCE_LAUNCH_BACKGROUND);
+    (void)stdio__session_route_children(BRUCE_STDIO_SESSION_INVALID);
+    bruce_process_status_t status;
+    return launched > 0 &&
+           process__wait_status((bruce_process_id_t)launched, 2000, &status) == BRUCE_OK &&
+           status.reason == BRUCE_PROCESS_EXITED && status.exit_code == 0 && strcmp(s_probe_arg, expected) == 0;
+}
+
+bool selftest__run_shell_tty_size_case(void) {
+    if (!selftest__shell_register_probe()) return false;
+    bruce_stdio_session_t session = BRUCE_STDIO_SESSION_INVALID;
+    if (stdio__session_create(&session) != BRUCE_OK) return false;
+    bool ok = tty__set_size(session, 100, 40) == BRUCE_OK &&
+              selftest__shell_tty_size_probe(session, "-c \"shell_test_probe $COLUMNS\"", "100") &&
+              selftest__shell_tty_size_probe(session, "-c \"shell_test_probe $LINES\"", "40");
+    (void)stdio__session_close(session);
+    printf("[selftest] shell/tty-size: %s\n", ok ? "OK" : "failed");
     return ok;
 }

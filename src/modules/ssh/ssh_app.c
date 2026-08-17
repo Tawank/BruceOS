@@ -15,6 +15,7 @@
 #include "core_sdk/ssh.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
+#include "core_sdk/tty.h"
 #include "core_sdk/wifi.h"
 
 #define SSH_APP_BUFFER_SIZE 256u
@@ -578,7 +579,20 @@ static bruce_result_t ssh_app__client(
         return result;
     }
 
-    result = ssh__open_shell(session, "xterm", SSH_APP_DEFAULT_COLUMNS, SSH_APP_DEFAULT_ROWS, 10000);
+    /* Opens the remote pty at the local screen's actual size (inherited from
+     * whatever owns our routed stdio session -- typically terminal_app.c,
+     * see its tty__set_size call) instead of a fixed guess, so full-screen
+     * remote programs (htop, less, tmux, ...) render correctly from the
+     * first frame. Falls back to the historical 80x24 default when no
+     * session size is known yet (e.g. run from the physical serial console). */
+    uint16_t pty_columns = SSH_APP_DEFAULT_COLUMNS;
+    uint16_t pty_rows = SSH_APP_DEFAULT_ROWS;
+    bruce_tty_size_t local_size;
+    if (tty__isatty() && tty__get_size(&local_size) == BRUCE_OK) {
+        pty_columns = local_size.columns;
+        pty_rows = local_size.rows;
+    }
+    result = ssh__open_shell(session, "xterm", pty_columns, pty_rows, 10000);
     if (result != BRUCE_OK) {
         stdio__printf("SSH client: failed to open shell (%d)\n", result);
         (void)ssh__close(session);

@@ -140,6 +140,7 @@ int selftest_app_main(int argc, char **argv) {
     RUN_SELFTEST(selftest__run_shell_language_case);
     RUN_SELFTEST(selftest__run_shell_script_case);
     RUN_SELFTEST(selftest__run_shell_stdio_inheritance_case);
+    RUN_SELFTEST(selftest__run_shell_tty_size_case);
     RUN_SELFTEST(selftest__run_bnu_case);
     RUN_SELFTEST(selftest__run_launcher_apps_discovery_case);
     RUN_SELFTEST(selftest__run_wifi_permission_denied_case);

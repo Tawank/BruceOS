@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "args.h"
@@ -12,12 +13,31 @@
 #include "core_sdk/result.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
+#include "core_sdk/tty.h"
 #include "shell_executor.h"
 #include "shell_builtins.h"
 #include "shell_console.h"
 #include "shell_history.h"
 #include "shell_internal.h"
 #include "shell_parser.h"
+
+/* Keeps $COLUMNS/$LINES in sync with the routed session's terminal size
+ * (see core_sdk/tty.h). Cheap no-op once nothing has changed, so it's safe
+ * to call before every interactive read -- that's the only way a resize
+ * becomes visible without a SIGWINCH equivalent (see tty.h's generation
+ * counter). Also a no-op when the session has no known size at all (a
+ * plain pipe, or the physical serial console), same as a real tty check. */
+static void shell__sync_tty_size(shell_state_t *state) {
+    bruce_tty_size_t size;
+    if (!tty__isatty() || tty__get_size(&size) != BRUCE_OK || size.generation == state->tty_generation) return;
+    state->tty_generation = size.generation;
+    char columns[8];
+    char rows[8];
+    snprintf(columns, sizeof(columns), "%u", (unsigned)size.columns);
+    snprintf(rows, sizeof(rows), "%u", (unsigned)size.rows);
+    if (shell_builtins__set(state, "COLUMNS", columns) == 0) (void)shell_builtins__export(state, "COLUMNS");
+    if (shell_builtins__set(state, "LINES", rows) == 0) (void)shell_builtins__export(state, "LINES");
+}
 
 void shell__state_init(shell_state_t *state) {
     memset(state, 0, sizeof(*state));
@@ -37,6 +57,7 @@ void shell__state_init(shell_state_t *state) {
             (void)shell_builtins__export(state, "PWD");
         }
     }
+    shell__sync_tty_size(state);
 }
 
 void shell__state_free(shell_state_t *state) {
@@ -138,6 +159,7 @@ static int shell__interactive(shell_state_t *state, bool suppress_echo) {
     }
     bool skip_lf = false;
     while (!state->exit_requested) {
+        shell__sync_tty_size(state);
         int length;
         if (suppress_echo) {
             length = stdio__read_line(line, SHELL__LINE_MAX, true);

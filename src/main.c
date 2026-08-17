@@ -101,6 +101,7 @@ void app_runner__register_defaults(void) {
     (void)app_runner__register("mkdir", bnu_mkdir_app_main, 0);
     (void)app_runner__register("touch", bnu_touch_app_main, 0);
     (void)app_runner__register("cat", bnu_cat_app_main, 0);
+    (void)app_runner__register("stty", bnu_stty_app_main, 0);
     (void)app_runner__register("elf", elf_loader__app_main, 0);
     (void)app_runner__register("js", js_loader__app_main, 0);
     (void)app_runner__register("wasm", wasm_loader__app_main, 0);

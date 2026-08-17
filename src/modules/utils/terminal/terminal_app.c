@@ -15,6 +15,7 @@
 #include "core_sdk/result.h"
 #include "core_sdk/runtime.h"
 #include "core_sdk/stdio.h"
+#include "core_sdk/tty.h"
 #include "terminal_ansi.h"
 
 #define TERMINAL__LINE_CAPACITY 512
@@ -346,6 +347,11 @@ int terminal_app_main(int argc, char **argv) {
         terminal__free_buffers(&state);
         return BRUCE_ERR_RESOURCE_LIMIT;
     }
+    /* Establishes the session's tty geometry before the shell (and every
+     * descendant it launches) starts, so $COLUMNS/$LINES and stty/tty__*
+     * queries all see the real screen size from their very first read --
+     * see core_sdk/tty.h and shell_app.c's shell__sync_tty_size. */
+    (void)tty__set_size(state.session, (uint16_t)columns, (uint16_t)rows);
 
     (void)stdio__session_route_children(state.session);
     int shell_process = app_runner__run("shell", "-i", BRUCE_LAUNCH_BACKGROUND);

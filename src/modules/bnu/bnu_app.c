@@ -17,6 +17,7 @@
 #include "core_sdk/runtime.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
+#include "core_sdk/tty.h"
 
 #define BNU__PWD_NAME "PWD"
 
@@ -460,4 +461,47 @@ int bnu_cat_app_main(int argc, char **argv) {
 
     ap_free(parser);
     return BRUCE_OK;
+}
+
+int bnu_stty_app_main(int argc, char **argv) {
+    ArgParser *parser = bnu__new_parser(
+        "Show or change the calling process's terminal settings (rows, columns, raw/cooked mode)."
+    );
+    if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
+    ap_add_optional_arg(parser, "setting", "'size', 'raw', or '-raw'/'cooked'/'sane'");
+    ap_unknown_options_as_args(parser);
+    if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
+    const char *setting = ap_get_arg(parser, "setting");
+    ap_free(parser);
+
+    if (!tty__isatty()) {
+        stdio__printf("stty: standard input is not a tty\n");
+        return BRUCE_ERR_NOT_FOUND;
+    }
+
+    if (setting == NULL) {
+        bruce_tty_size_t size;
+        bruce_result_t result = tty__get_size(&size);
+        if (result != BRUCE_OK) return result;
+        stdio__printf(
+            "speed 0 baud; rows %u; columns %u; line = 0;\n%s\n",
+            (unsigned)size.rows,
+            (unsigned)size.columns,
+            tty__get_mode() == BRUCE_TTY_MODE_RAW ? "raw -echo -icanon" : "-raw echo icanon"
+        );
+        return BRUCE_OK;
+    }
+    if (strcmp(setting, "size") == 0) {
+        bruce_tty_size_t size;
+        bruce_result_t result = tty__get_size(&size);
+        if (result != BRUCE_OK) return result;
+        stdio__printf("%u %u\n", (unsigned)size.rows, (unsigned)size.columns);
+        return BRUCE_OK;
+    }
+    if (strcmp(setting, "raw") == 0) return tty__set_mode(BRUCE_TTY_MODE_RAW);
+    if (strcmp(setting, "-raw") == 0 || strcmp(setting, "cooked") == 0 || strcmp(setting, "sane") == 0) {
+        return tty__set_mode(BRUCE_TTY_MODE_COOKED);
+    }
+    stdio__printf("stty: unknown setting '%s'\n", setting);
+    return BRUCE_ERR_INVALID_ARGUMENT;
 }
