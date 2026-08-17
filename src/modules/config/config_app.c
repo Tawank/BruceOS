@@ -4,6 +4,7 @@
 #include "core_sdk/clock.h"
 #include "core_sdk/config.h"
 #include "core_sdk/dialog.h"
+#include "core_sdk/display.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/result.h"
 #include "core_sdk/runtime.h"
@@ -195,50 +196,209 @@ static int config_app__startup_cli(ArgParser *startup_parser, ArgParser *add, Ar
     return BRUCE_ERR_INVALID_ARGUMENT;
 }
 
+/* Returns the index into `values` closest to `current`, for pre-selecting a choice dialog. */
+static size_t config_app__closest_index(const int *values, size_t count, int current) {
+    size_t best = 0;
+    int best_diff = abs(values[0] - current);
+    for (size_t i = 1; i < count; ++i) {
+        int diff = abs(values[i] - current);
+        if (diff < best_diff) {
+            best_diff = diff;
+            best = i;
+        }
+    }
+    return best;
+}
+
+/* display__set_brightness() re-derives the percent it persists from the 0-255
+ * byte value it was given, which truncates (e.g. 75% -> byte 191 -> back to
+ * 74%). Re-apply the exact percent afterwards so the persisted setting
+ * matches what was actually requested; the backlight itself is set to the
+ * closest achievable byte value (display__set_brightness() also floors very
+ * low nonzero requests so they stay visibly lit). */
+static bruce_result_t config_app__set_brightness_percent(int percent) {
+    bruce_result_t result = display__set_brightness((uint8_t)(percent * 255 / 100));
+    if (result == BRUCE_OK) result = config__set_display_brightness(percent);
+    return result;
+}
+
+/* Persists the rotation and, best-effort, applies it live via
+ * display__set_rotation() so a GUI process doesn't need a reboot to see it.
+ * Live apply can fail (e.g. no display context yet, mid-frame, or no display
+ * subsystem at all when called from a headless CLI) without that being a
+ * real error -- the persisted setting still took, it just won't show up
+ * until the next display init. `out_live_applied`, if non-NULL, reports
+ * whether the live change actually took effect. */
+static bruce_result_t config_app__set_rotation(int turns, bool *out_live_applied) {
+    bruce_result_t result = config__set_display_rotation(turns);
+    bool live_applied = result == BRUCE_OK && display__set_rotation((uint8_t)turns) == BRUCE_OK;
+    if (out_live_applied != NULL) *out_live_applied = live_applied;
+    return result;
+}
+
 static int config_app__display_gui(void) {
+    static const int brightness_percents[5] = {100, 75, 50, 25, 1};
+    static const char *const brightness_labels[5] = {"100%", "75%", "50%", "25%", "1%"};
+    static const int dim_seconds[5] = {10, 20, 30, 60, 0};
+    static const char *const dim_labels[5] = {"10s", "20s", "30s", "60s", "Disabled"};
+    static const char *const rotation_labels[4] = {
+        "0 deg (portrait)",
+        "90 deg (landscape)",
+        "180 deg (portrait)",
+        "270 deg (landscape)",
+    };
     for (;;) {
         bool buffered = config__get_display_buffered_rendering();
+        int brightness = config__get_display_brightness();
+        int dim_timeout = config__get_display_dim_timeout();
+        int rotation = config__get_display_rotation() & 3;
+        char *brightness_label = memory__malloc(32);
+        char *dim_label = memory__malloc(32);
+        char *rotation_label = memory__malloc(48);
         char *buffered_label = memory__malloc(48);
-        bruce_dialog_choice_t *choices = memory__calloc(2, sizeof(*choices));
-        if (buffered_label == NULL || choices == NULL) {
+        bruce_dialog_choice_t *choices = memory__calloc(5, sizeof(*choices));
+        if (brightness_label == NULL || dim_label == NULL || rotation_label == NULL ||
+            buffered_label == NULL || choices == NULL) {
+            memory__free(brightness_label);
+            memory__free(dim_label);
+            memory__free(rotation_label);
             memory__free(buffered_label);
             memory__free(choices);
             return BRUCE_ERR_NO_MEMORY;
         }
+        snprintf(brightness_label, 32, "Brightness: %d%%", brightness);
+        if (dim_timeout > 0) snprintf(dim_label, 32, "Dim time: %ds", dim_timeout);
+        else snprintf(dim_label, 32, "Dim time: Disabled");
+        snprintf(rotation_label, 48, "Orientation: %s", rotation_labels[rotation]);
         snprintf(buffered_label, 48, "DMA Buf (64kB): %s", buffered ? "ON" : "OFF");
-        choices[0] = (bruce_dialog_choice_t){.label = buffered_label, .value = "buffered"};
-        choices[1] = (bruce_dialog_choice_t){.label = "Back", .value = "back"};
+        choices[0] = (bruce_dialog_choice_t){.label = brightness_label, .value = "brightness"};
+        choices[1] = (bruce_dialog_choice_t){.label = dim_label, .value = "dim"};
+        choices[2] = (bruce_dialog_choice_t){.label = rotation_label, .value = "rotation"};
+        choices[3] = (bruce_dialog_choice_t){.label = buffered_label, .value = "buffered"};
+        choices[4] = (bruce_dialog_choice_t){.label = "Back", .value = "back"};
         size_t selected = 0;
-        bruce_result_t result = dialog__choice_launcher("Display & UI", NULL, choices, 2, &selected);
-        bool back = result == BRUCE_ERR_CANCELLED ||
-                    (result == BRUCE_OK && selected < 2 && strcmp(choices[selected].value, "back") == 0);
-        if (!back && result == BRUCE_OK) result = config__set_display_buffered_rendering(!buffered);
+        bruce_result_t result = dialog__choice_launcher("Display & UI", NULL, choices, 5, &selected);
+        const char *action = result == BRUCE_OK && selected < 5 ? choices[selected].value : "back";
+        bool back = result == BRUCE_ERR_CANCELLED || (result == BRUCE_OK && strcmp(action, "back") == 0);
+        bool reboot_notice = false;
+        if (!back && result == BRUCE_OK) {
+            if (strcmp(action, "brightness") == 0) {
+                bruce_dialog_choice_t brightness_choices[5];
+                for (size_t i = 0; i < 5; ++i)
+                    brightness_choices[i] =
+                        (bruce_dialog_choice_t){.label = brightness_labels[i], .value = brightness_labels[i]};
+                size_t brightness_selected = config_app__closest_index(brightness_percents, 5, brightness);
+                bruce_result_t brightness_result = dialog__choice_launcher(
+                    "Brightness", NULL, brightness_choices, 5, &brightness_selected
+                );
+                if (brightness_result == BRUCE_OK && brightness_selected < 5)
+                    result = config_app__set_brightness_percent(brightness_percents[brightness_selected]);
+            } else if (strcmp(action, "dim") == 0) {
+                bruce_dialog_choice_t dim_choices[5];
+                for (size_t i = 0; i < 5; ++i)
+                    dim_choices[i] = (bruce_dialog_choice_t){.label = dim_labels[i], .value = dim_labels[i]};
+                size_t dim_selected = config_app__closest_index(dim_seconds, 5, dim_timeout);
+                bruce_result_t dim_result =
+                    dialog__choice_launcher("Dim time", NULL, dim_choices, 5, &dim_selected);
+                if (dim_result == BRUCE_OK && dim_selected < 5)
+                    result = config__set_display_dim_timeout(dim_seconds[dim_selected]);
+            } else if (strcmp(action, "rotation") == 0) {
+                bruce_dialog_choice_t rotation_choices[4];
+                for (size_t i = 0; i < 4; ++i)
+                    rotation_choices[i] =
+                        (bruce_dialog_choice_t){.label = rotation_labels[i], .value = rotation_labels[i]};
+                size_t rotation_selected = (size_t)rotation;
+                bruce_result_t rotation_result =
+                    dialog__choice_launcher("Orientation", NULL, rotation_choices, 4, &rotation_selected);
+                if (rotation_result == BRUCE_OK && rotation_selected < 4) {
+                    bool live_applied = false;
+                    result = config_app__set_rotation((int)rotation_selected, &live_applied);
+                    reboot_notice = result == BRUCE_OK && !live_applied;
+                }
+            } else if (strcmp(action, "buffered") == 0) {
+                result = config__set_display_buffered_rendering(!buffered);
+                reboot_notice = true;
+            }
+        }
+        memory__free(brightness_label);
+        memory__free(dim_label);
+        memory__free(rotation_label);
         memory__free(buffered_label);
         memory__free(choices);
         if (back) return BRUCE_OK;
         if (result != BRUCE_OK) return result;
-        (void)dialog__message(BRUCE_DIALOG_INFO, "Display rendering", "Setting saved; reboot to apply");
+        if (reboot_notice)
+            (void)dialog__message(BRUCE_DIALOG_INFO, "Display & UI", "Setting saved; reboot to apply");
     }
 }
 
-static int config_app__display_cli(ArgParser *display_parser, ArgParser *buffered) {
+static int config_app__display_cli(
+    ArgParser *display_parser, ArgParser *buffered, ArgParser *brightness, ArgParser *dim, ArgParser *rotation
+) {
     ArgParser *action = ap_get_cmd_parser(display_parser);
     if (action == NULL) {
+        int dim_timeout = config__get_display_dim_timeout();
         stdio__printf(
-            "Buffered rendering: %s (reboot required after changes)\n",
-            config__get_display_buffered_rendering() ? "on" : "off"
+            "Buffered rendering: %s (reboot required after changes)\n"
+            "Brightness: %d%%\n"
+            "Dim time: %ds (0 = off)\n"
+            "Orientation: %d deg\n",
+            config__get_display_buffered_rendering() ? "on" : "off",
+            config__get_display_brightness(),
+            dim_timeout,
+            config__get_display_rotation() * 90
         );
         return BRUCE_OK;
     }
-    if (action != buffered) return BRUCE_ERR_INVALID_ARGUMENT;
-    const char *state = ap_get_arg(buffered, "state");
-    if (state == NULL) {
-        stdio__printf("Buffered rendering: %s\n", config__get_display_buffered_rendering() ? "on" : "off");
-        return BRUCE_OK;
+    if (action == buffered) {
+        const char *state = ap_get_arg(buffered, "state");
+        if (state == NULL) {
+            stdio__printf(
+                "Buffered rendering: %s\n", config__get_display_buffered_rendering() ? "on" : "off"
+            );
+            return BRUCE_OK;
+        }
+        bool value;
+        return config_app__parse_on_off(state, &value) ? config__set_display_buffered_rendering(value)
+                                                        : BRUCE_ERR_INVALID_ARGUMENT;
     }
-    bool value;
-    return config_app__parse_on_off(state, &value) ? config__set_display_buffered_rendering(value)
-                                                   : BRUCE_ERR_INVALID_ARGUMENT;
+    if (action == brightness) {
+        const char *percent = ap_get_arg(brightness, "percent");
+        if (percent == NULL) {
+            stdio__printf("Brightness: %d%%\n", config__get_display_brightness());
+            return BRUCE_OK;
+        }
+        char *end = NULL;
+        long value = strtol(percent, &end, 10);
+        if (end == percent || *end != '\0' || value < 0 || value > 100) return BRUCE_ERR_INVALID_ARGUMENT;
+        return config_app__set_brightness_percent((int)value);
+    }
+    if (action == dim) {
+        const char *seconds = ap_get_arg(dim, "seconds");
+        if (seconds == NULL) {
+            stdio__printf("Dim time: %ds (0 = off)\n", config__get_display_dim_timeout());
+            return BRUCE_OK;
+        }
+        char *end = NULL;
+        long value = strtol(seconds, &end, 10);
+        if (end == seconds || *end != '\0' || value < 0 || value > 60) return BRUCE_ERR_INVALID_ARGUMENT;
+        return config__set_display_dim_timeout((int)value);
+    }
+    if (action == rotation) {
+        const char *degrees = ap_get_arg(rotation, "degrees");
+        if (degrees == NULL) {
+            stdio__printf("Orientation: %d deg\n", config__get_display_rotation() * 90);
+            return BRUCE_OK;
+        }
+        int turns;
+        if (strcmp(degrees, "0") == 0) turns = 0;
+        else if (strcmp(degrees, "90") == 0) turns = 1;
+        else if (strcmp(degrees, "180") == 0) turns = 2;
+        else if (strcmp(degrees, "270") == 0) turns = 3;
+        else return BRUCE_ERR_INVALID_ARGUMENT;
+        return config_app__set_rotation(turns, NULL);
+    }
+    return BRUCE_ERR_INVALID_ARGUMENT;
 }
 
 int config_app_main(int argc, char **argv) {
@@ -260,6 +420,9 @@ int config_app_main(int argc, char **argv) {
     ArgParser *startup_remove = startup != NULL ? ap_new_cmd(startup, "remove") : NULL;
     ArgParser *display = ap_new_cmd(root, "display");
     ArgParser *display_buffered = display != NULL ? ap_new_cmd(display, "buffered") : NULL;
+    ArgParser *display_brightness = display != NULL ? ap_new_cmd(display, "brightness") : NULL;
+    ArgParser *display_dim = display != NULL ? ap_new_cmd(display, "dim") : NULL;
+    ArgParser *display_rotation = display != NULL ? ap_new_cmd(display, "rotation") : NULL;
     ArgParser *parsers[] = {
         system,
         clock,
@@ -275,6 +438,9 @@ int config_app_main(int argc, char **argv) {
         startup_remove,
         display,
         display_buffered,
+        display_brightness,
+        display_dim,
+        display_rotation,
     };
     for (size_t i = 0; i < sizeof(parsers) / sizeof(parsers[0]); ++i) {
         if (parsers[i] == NULL) {
@@ -307,6 +473,12 @@ int config_app_main(int argc, char **argv) {
     ap_set_helptext(display, "Configure display rendering.");
     ap_set_helptext(display_buffered, "Enable smooth buffered rendering or direct low-memory drawing.");
     ap_add_optional_arg(display_buffered, "state", "on or off");
+    ap_set_helptext(display_brightness, "Set the backlight brightness.");
+    ap_add_optional_arg(display_brightness, "percent", "0 to 100 (required outside GUI mode)");
+    ap_set_helptext(display_dim, "Set the idle time before the display dims.");
+    ap_add_optional_arg(display_dim, "seconds", "0 to 60, 0 = off (required outside GUI mode)");
+    ap_set_helptext(display_rotation, "Set the display orientation.");
+    ap_add_optional_arg(display_rotation, "degrees", "0, 90, 180, or 270 (required outside GUI mode)");
 
     if (!ap_parse(root, argc, argv)) {
         ap_status_t status = ap_get_status(root);
@@ -327,7 +499,10 @@ int config_app_main(int argc, char **argv) {
     } else if (startup_hierarchy && !gui) {
         result = config_app__startup_cli(startup, startup_add, startup_remove);
     } else if (display_hierarchy) {
-        result = gui ? config_app__display_gui() : config_app__display_cli(display, display_buffered);
+        result = gui ? config_app__display_gui()
+                     : config_app__display_cli(
+                           display, display_buffered, display_brightness, display_dim, display_rotation
+                       );
     } else {
         result = BRUCE_ERR_INVALID_ARGUMENT;
     }
