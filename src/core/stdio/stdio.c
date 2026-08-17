@@ -45,6 +45,7 @@ typedef struct {
     uint16_t tty_rows;
     uint32_t tty_generation; /* 0 == size never set (not a tty) */
     bruce_tty_mode_t tty_mode;
+    bool output_last_was_cr; /* tracks '\r' across write() calls, for ONLCR translation */
 } stdio__session_t;
 
 static StaticSemaphore_t s_lock_storage;
@@ -282,29 +283,59 @@ static int stdio__stream_read(void *cookie, char *buffer, int size) {
 }
 #endif
 
+/* Appends a single raw byte to the session's output ring buffer, blocking
+ * (with backpressure) until room is available, and updates the session's
+ * ONLCR tracking state. Returns false if the session is gone or the wait
+ * was cancelled. */
+static bool stdio__session_push_output_byte(bruce_stdio_session_t session, char byte) {
+    for (;;) {
+        xSemaphoreTake(s_lock, portMAX_DELAY);
+        stdio__session_t *entry = stdio__find_locked(session);
+        if (entry == NULL) {
+            xSemaphoreGive(s_lock);
+            return false;
+        }
+        if (entry->output_size < STDIO__OUTPUT_CAPACITY) {
+            size_t write_at = (entry->output_read + entry->output_size) % STDIO__OUTPUT_CAPACITY;
+            entry->output[write_at] = byte;
+            entry->output_size++;
+            entry->output_last_was_cr = byte == '\r';
+            xSemaphoreGive(s_lock);
+            return true;
+        }
+        xSemaphoreGive(s_lock);
+        if (runtime__delay(1) != BRUCE_OK) return false;
+    }
+}
+
+/* Terminal apps (see terminal_app.c) render a fixed grid where '\r' and '\n'
+ * are independent ANSI actions, same as a real terminal: '\n' alone only
+ * moves down a row, it does not return to column 0. A real serial console
+ * gets that translation for free from the OS tty/VFS driver (ONLCR), but a
+ * session's output is consumed directly by the terminal grid with no such
+ * layer in between, so callers writing a bare '\n' (as every stdio__printf
+ * caller does) would print a staircase instead of a newline. Applying the
+ * same ONLCR translation here keeps session output behaving like a normal
+ * terminal without requiring every caller to spell out "\r\n". */
 static bruce_result_t
 stdio__session_write_output(bruce_stdio_session_t session, const void *data, size_t size) {
     if (data == NULL || size == 0) return BRUCE_ERR_INVALID_ARGUMENT;
     stdio__ensure_init();
     const char *buffer = data;
-    size_t offset = 0;
-    while (offset < size) {
-        xSemaphoreTake(s_lock, portMAX_DELAY);
-        stdio__session_t *entry = stdio__find_locked(session);
-        if (entry == NULL) {
+    for (size_t i = 0; i < size; ++i) {
+        char byte = buffer[i];
+        if (byte == '\n') {
+            xSemaphoreTake(s_lock, portMAX_DELAY);
+            stdio__session_t *entry = stdio__find_locked(session);
+            if (entry == NULL) {
+                xSemaphoreGive(s_lock);
+                return BRUCE_ERR_NOT_FOUND;
+            }
+            bool need_cr = !entry->output_last_was_cr;
             xSemaphoreGive(s_lock);
-            return BRUCE_ERR_NOT_FOUND;
+            if (need_cr && !stdio__session_push_output_byte(session, '\r')) return BRUCE_ERR_CANCELLED;
         }
-        size_t available = STDIO__OUTPUT_CAPACITY - entry->output_size;
-        size_t copied = size - offset < available ? size - offset : available;
-        for (size_t i = 0; i < copied; ++i) {
-            size_t write_at = (entry->output_read + entry->output_size) % STDIO__OUTPUT_CAPACITY;
-            entry->output[write_at] = buffer[offset + i];
-            entry->output_size++;
-        }
-        xSemaphoreGive(s_lock);
-        offset += copied;
-        if (copied == 0 && runtime__delay(1) != BRUCE_OK) return BRUCE_ERR_CANCELLED;
+        if (!stdio__session_push_output_byte(session, byte)) return BRUCE_ERR_CANCELLED;
     }
     return BRUCE_OK;
 }
