@@ -163,6 +163,50 @@ bool selftest__run_display_rendering_case(void) {
         return false;
     }
 
+    /* Cyrillic/Greek/emoji glyph coverage (see display_font_bitmap.c). The
+     * bitmap-colors check just above left text_bg_color = RED; restore
+     * transparent so these checks can assume "not ink" reads back as the
+     * BLACK screen fill, like every other check in this function does. */
+    if (display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT) != BRUCE_OK ||
+        display__set_cursor(1, 50) != BRUCE_OK || display__print("\xd0\x98") != BRUCE_OK ||
+        /* U+0418 "И" is a mirrored "N" (see tools/gen_display_font.py's
+         * mirror()) -- checking both that the diagonal is actually mirrored
+         * (col 3 lit, not col 1) rather than accidentally reusing N's own
+         * bitmap. */
+        (buffered &&
+         (display__test_read_pixel(2, 54, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_BLACK ||
+          display__test_read_pixel(4, 54, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_WHITE))) {
+        printf("[selftest] display/rendering: FAIL, Cyrillic glyph\n");
+        (void)display__present();
+        return false;
+    }
+
+    if (display__set_cursor(20, 50) != BRUCE_OK || display__print("\xce\xa9") != BRUCE_OK ||
+        /* U+03A9 "Ω": arch top (row 2 lit) with an open middle (row 4 not
+         * lit on the sides, row 8 not lit in the center) -- not just a
+         * solid block. */
+        (buffered &&
+         (display__test_read_pixel(21, 52, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_WHITE ||
+          display__test_read_pixel(21, 54, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_BLACK ||
+          display__test_read_pixel(22, 58, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_BLACK))) {
+        printf("[selftest] display/rendering: FAIL, Greek glyph\n");
+        (void)display__present();
+        return false;
+    }
+
+    /* U+1F680 (rocket) is above U+FFFF -- this is the case that would
+     * silently regress to the hollow "tofu" fallback box if
+     * display__extended_glyph_t.codepoint were ever narrowed back to
+     * uint16_t (it would truncate the stored codepoint and the binary
+     * search would miss). Tofu's interior is hollow, so a lit center pixel
+     * only happens if the real glyph was found. */
+    if (display__set_cursor(40, 50) != BRUCE_OK || display__print("\xf0\x9f\x9a\x80") != BRUCE_OK ||
+        (buffered && (display__test_read_pixel(42, 54, &pixel) != BRUCE_OK || pixel != BRUCE_COLOR_WHITE))) {
+        printf("[selftest] display/rendering: FAIL, astral-plane emoji glyph\n");
+        (void)display__present();
+        return false;
+    }
+
     if (display__draw_bitmap_scaled(30, 1, bitmap, 8, 1, 16, 2, BRUCE_COLOR_CYAN) != BRUCE_OK ||
         display__draw_bitmap_scaled(50, 1, symmetric_bitmap, 4, 1, 6, 1, BRUCE_COLOR_CYAN) != BRUCE_OK ||
         (buffered &&

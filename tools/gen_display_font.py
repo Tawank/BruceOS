@@ -90,6 +90,27 @@ def shift(col_bytes):
 ASCII_SHIFTED = [shift(g) for g in ASCII_5X7]
 DOTLESS_I_SHIFTED = shift(DOTLESS_I_5X7)
 
+
+def rows_to_cols(rows):
+    """Converts row-major ASCII art ('#'/'.', top row first) into the
+    column-major bit values the rest of this file works in -- lets a
+    hand-authored glyph be reviewed as a picture instead of as hex math."""
+    cols = [0] * FONT_WIDTH
+    for row_index, row in enumerate(rows):
+        assert len(row) == FONT_WIDTH, row
+        for col_index, ch in enumerate(row):
+            if ch == "#":
+                cols[col_index] |= 1 << row_index
+    return tuple(cols)
+
+
+def mirror(cols):
+    """Horizontal mirror: reverses column order. Several Cyrillic capitals
+    (Cyrillic borrowed some letterforms as literal left-right flips of a
+    Latin/Greek one -- И is a mirrored N, Я a mirrored R) are exact mirrors
+    of an existing glyph rather than a new shape to design."""
+    return tuple(reversed(cols))
+
 # Accent pixel positions in (col, row) units of the 10-row cell -- the same
 # shapes display__draw_accent() used to stamp on at draw time, just re-based:
 # "headroom" marks keep their old row (0 or 1, now genuinely empty); the two
@@ -141,6 +162,18 @@ def base_glyph(letter, dotless=False):
 def with_accent(letter, accent, dotless=False):
     g = base_glyph(letter, dotless)
     row_offset = 2 if accent in HEADROOM_ACCENTS and letter.islower() else 0
+    for col, row in ACCENTS[accent]:
+        g[col] |= 1 << (row + row_offset)
+    return g
+
+
+def stamp_accent(shifted_cols, accent, lowercase):
+    """Same placement rule as with_accent(), but for a glyph that isn't a
+    Latin base letter (e.g. Cyrillic Й/й = И/и + BREVE) and so already has
+    to be built as a final 10-row bitmap up front instead of going through
+    base_glyph()."""
+    g = list(shifted_cols)
+    row_offset = 2 if accent in HEADROOM_ACCENTS and lowercase else 0
     for col, row in ACCENTS[accent]:
         g[col] |= 1 << (row + row_offset)
     return g
@@ -200,9 +233,161 @@ for cp, acc in [(0x00CC, "GRAVE"), (0x00CD, "ACUTE"), (0x00CE, "CIRCUMFLEX"), (0
 for cp, acc in [(0x00EC, "GRAVE"), (0x00ED, "ACUTE"), (0x00EE, "CIRCUMFLEX"), (0x00EF, "DIAERESIS")]:
     add(cp, "i", acc, dotless=True)
 
+# Cyrillic Ё/ё is a diaeresis stamped on Е/е, exactly like the Latin
+# E-with-diaeresis (Ë/ë) already handled above -- same base letter, same
+# accent, so it costs nothing extra to route through the same MAP mechanism.
+add(0x0401, "E", "DIAERESIS")
+add(0x0451, "e", "DIAERESIS")
+
 # Codepoints that render identically to a plain ASCII glyph -- no dedicated
-# bitmap needed, just point at the existing one.
-ALIASES = {0x2018: "'", 0x2019: "'", 0x201C: '"', 0x201D: '"'}
+# bitmap needed, just point at the existing one. Includes the Cyrillic and
+# Greek letters that are (at this resolution) indistinguishable from a Latin
+# letter already in the font -- e.g. Cyrillic "Р" and Greek "Ρ" (Rho) both
+# read as a plain "P" -- rather than drawing a visually-identical second
+# glyph under a different codepoint.
+ALIASES = {
+    0x2018: "'", 0x2019: "'", 0x201C: '"', 0x201D: '"',
+    # Cyrillic uppercase visually identical to a Latin capital.
+    0x0410: "A", 0x0412: "B", 0x0415: "E", 0x041A: "K", 0x041C: "M",
+    0x041D: "H", 0x041E: "O", 0x0420: "P", 0x0421: "C", 0x0422: "T",
+    0x0423: "Y", 0x0425: "X",
+    # Cyrillic lowercase visually identical to a Latin lowercase letter.
+    0x0430: "a", 0x0435: "e", 0x043A: "k", 0x043C: "m", 0x043E: "o",
+    0x0440: "p", 0x0441: "c", 0x0443: "y", 0x0445: "x",
+    # Cyrillic З/з ("Ze") reads as digit 3 at this resolution -- the same
+    # resemblance homoglyph-spoofing abuses in Latin-script domain names.
+    0x0417: "3", 0x0437: "3",
+    # Greek uppercase visually identical to a Latin capital.
+    0x0391: "A", 0x0392: "B", 0x0395: "E", 0x0396: "Z", 0x0397: "H",
+    0x0399: "I", 0x039A: "K", 0x039C: "M", 0x039D: "N", 0x039F: "O",
+    0x03A1: "P", 0x03A4: "T", 0x03A5: "Y", 0x03A7: "X",
+    # Greek lowercase visually identical to a Latin lowercase letter.
+    0x03BA: "k", 0x03BD: "v", 0x03BF: "o", 0x03C1: "p", 0x03C4: "t",
+    0x03C5: "u", 0x03C7: "x", 0x03C9: "w",
+}
+
+# Cyrillic and Greek letters with no honest Latin stand-in: real, distinct
+# shapes, hand-drawn as row-major ASCII art (top row first) via
+# rows_to_cols() so they can be reviewed as pictures. Pre-shift (7 rows,
+# an optional 8th for a descender) like ASCII_5X7 -- shift() moves them
+# into the 10-row cell the same way at merge time in emit().
+#
+# A few letterforms are literal mirrors or composites of a glyph this file
+# already has, rather than a new shape to draw:
+#   - Cyrillic borrowed some letters as left-right flips of a Latin one:
+#     И = mirrored N, Я = mirrored R, Э = mirrored E (all three, upper and
+#     lower case).
+#   - Cyrillic Й/й is И/и with a breve, placed with the same stamp_accent()
+#     logic with_accent() uses for Latin accented letters.
+#   - Greek Γ/Λ/Π/Φ (upper) and л/п/ф's lowercase counterparts share their
+#     Cyrillic look-alike's shape outright (historically the same letter).
+_GAMMA = rows_to_cols(["#####", "#....", "#....", "#....", "#....", "#....", "#...."])
+_LAMBDA = rows_to_cols(["..#..", ".#.#.", ".#.#.", "#...#", "#...#", "#...#", "#...#"])
+_PI = rows_to_cols(["#####", "#...#", "#...#", "#...#", "#...#", "#...#", "#...#"])
+_PHI = rows_to_cols(["..#..", ".###.", "#.#.#", "#.#.#", "#.#.#", ".###.", "..#.."])
+_THETA = rows_to_cols([".###.", "#...#", "#...#", "#####", "#...#", "#...#", ".###."])
+
+
+def _lower(*ink_rows):
+    """x-height lowercase glyph: rows 0-1 blank (same headroom convention
+    every lowercase ASCII letter already uses), ink starts at row 2. Pass 6
+    rows instead of 5 for a letter with a descender -- the 6th lands on
+    row 7, same descender row ASCII g/j/p/q/y use."""
+    return rows_to_cols(["....."] * 2 + list(ink_rows))
+
+
+_PI_LOWER = _lower("#####", "#...#", "#...#", "#...#", "#...#")
+_PHI_LOWER = _lower("..#..", ".###.", "#.#.#", ".###.", "..#..", "..#..")
+_LAMBDA_LOWER = _lower("..#..", ".#.#.", "#...#", "#...#", "#...#")
+
+_N_COLS = tuple(ASCII_5X7[ord("N") - 32])
+_R_COLS = tuple(ASCII_5X7[ord("R") - 32])
+_E_COLS = tuple(ASCII_5X7[ord("E") - 32])
+_n_COLS = tuple(ASCII_5X7[ord("n") - 32])
+_r_COLS = tuple(ASCII_5X7[ord("r") - 32])
+_e_COLS = tuple(ASCII_5X7[ord("e") - 32])
+
+# eta (η) = lowercase n with its right leg extended into a descender.
+_ETA = list(_n_COLS)
+_ETA[4] |= 0x80
+_ETA = tuple(_ETA)
+
+LETTER_GLYPHS = {
+    # Cyrillic uppercase.
+    0x0411: rows_to_cols(["#####", "#....", "#....", "####.", "#...#", "#...#", "#####"]),  # Б
+    0x0413: _GAMMA,  # Г
+    0x0414: rows_to_cols([".###.", "#...#", "#...#", "#...#", "#...#", "#...#", "#####", "#...#"]),  # Д
+    0x0416: rows_to_cols(["#...#", ".#.#.", "..#..", "..#..", "..#..", ".#.#.", "#...#"]),  # Ж
+    0x0418: mirror(_N_COLS),  # И
+    0x041B: _LAMBDA,  # Л
+    0x041F: _PI,  # П
+    0x0424: _PHI,  # Ф
+    0x0426: rows_to_cols(["#...#", "#...#", "#...#", "#...#", "#...#", "#...#", "#####", "....#"]),  # Ц
+    0x0427: rows_to_cols(["#...#", "#...#", "#...#", "#####", "....#", "....#", "....#"]),  # Ч
+    0x0428: rows_to_cols(["#.#.#", "#.#.#", "#.#.#", "#.#.#", "#.#.#", "#.#.#", "#####"]),  # Ш
+    0x0429: rows_to_cols(["#.#.#", "#.#.#", "#.#.#", "#.#.#", "#.#.#", "#.#.#", "#####", "....#"]),  # Щ
+    0x042A: rows_to_cols(["###..", "#....", "#....", "#.###", "#...#", "#...#", ".###."]),  # Ъ
+    0x042B: rows_to_cols(["#...#", "#...#", "#...#", "##..#", "#.#.#", "#.#.#", "##..#"]),  # Ы
+    0x042C: rows_to_cols(["#....", "#....", "#....", "###..", "#..#.", "#..#.", "###.."]),  # Ь
+    0x042D: mirror(_E_COLS),  # Э
+    0x042E: rows_to_cols(["#.###", "#.#.#", "#.#.#", "#.#.#", "#.#.#", "#.#.#", "#.###"]),  # Ю
+    0x042F: mirror(_R_COLS),  # Я
+    # Cyrillic lowercase.
+    0x0431: _lower("#....", "#.##.", "#.#.#", "#.##.", "#...."),  # б
+    0x0432: _lower("###..", "#..#.", "###..", "#..#.", "###.."),  # в
+    0x0433: _lower("####.", "#....", "#....", "#....", "#...."),  # г
+    0x0434: _lower(".###.", "#.#.#", "#.#.#", "#.#.#", "#####", "#...#"),  # д
+    0x0436: _lower("#...#", ".#.#.", "..#..", ".#.#.", "#...#"),  # ж
+    0x0438: mirror(_n_COLS),  # и
+    0x043B: _LAMBDA_LOWER,  # л
+    0x043F: _PI_LOWER,  # п
+    0x0444: _PHI_LOWER,  # ф
+    0x0446: _lower("#...#", "#...#", "#...#", "#...#", "#####", "....#"),  # ц
+    0x0447: _lower("#...#", "#...#", "#...#", "#####", "....#"),  # ч
+    0x0448: _lower("#.#.#", "#.#.#", "#.#.#", "#.#.#", "#####"),  # ш
+    0x0449: _lower("#.#.#", "#.#.#", "#.#.#", "#.#.#", "#####", "....#"),  # щ
+    0x044A: _lower("###..", "#....", "###..", "#..#.", "###.."),  # ъ
+    0x044B: _lower("#...#", "#...#", "##..#", "#.#.#", "##..#"),  # ы
+    0x044C: _lower("#....", "#....", "###..", "#..#.", "###.."),  # ь
+    0x044D: mirror(_e_COLS),  # э
+    0x044E: _lower("#.##.", "#.#.#", "#.#.#", "#.#.#", "#.##."),  # ю
+    # Greek uppercase.
+    0x0393: _GAMMA,  # Γ
+    0x0394: rows_to_cols(["..#..", ".#.#.", ".#.#.", "#...#", "#...#", "#...#", "#####"]),  # Δ
+    0x0398: _THETA,  # Θ
+    0x039B: _LAMBDA,  # Λ
+    0x039E: rows_to_cols(["#####", ".....", ".....", "#####", ".....", ".....", "#####"]),  # Ξ
+    0x03A0: _PI,  # Π
+    0x03A3: rows_to_cols(["#####", "#....", ".#...", "..#..", ".#...", "#....", "#####"]),  # Σ
+    0x03A6: _PHI,  # Φ
+    0x03A8: rows_to_cols(["#.#.#", "#.#.#", "#.#.#", ".###.", "..#..", "..#..", "..#.."]),  # Ψ
+    0x03A9: rows_to_cols([".###.", "#...#", "#...#", "#...#", "#...#", "#...#", "##.##"]),  # Ω
+    # Greek lowercase.
+    0x03B1: _lower(".##.#", "#..#.", "#..#.", "#..#.", ".##.#"),  # α
+    0x03B2: rows_to_cols(["#....", "#.##.", "#.#.#", "#.##.", "#.#.#", "#.##.", "#....", "#...."]),  # β
+    0x03B3: _lower("#...#", "#...#", ".#.#.", "..#..", "..#..", "..#.."),  # γ
+    0x03B4: rows_to_cols(["..#..", ".#...", "#.##.", "#..#.", "#..#.", "#..#.", ".##.."]),  # δ
+    0x03B5: _lower(".##..", "#....", ".##..", "#....", ".##.."),  # ε
+    0x03B6: _lower("####.", "...#.", "..#..", ".#...", "####.", "...#."),  # ζ
+    0x03B7: _ETA,  # η (post-shift-compatible: shares the shift() step, not stamped)
+    0x03B8: _THETA,  # θ
+    0x03B9: tuple(DOTLESS_I_5X7),  # ι
+    0x03BB: _LAMBDA_LOWER,  # λ
+    0x03BC: _lower("#...#", "#...#", "#...#", "#...#", "#.###", "....#"),  # μ
+    0x03BE: _lower(".###.", "#....", ".###.", "....#", ".###.", "..#.."),  # ξ
+    0x03C0: _PI_LOWER,  # π
+    0x03C2: _lower(".##..", "#....", "#....", "#....", ".##..", "..#.."),  # ς (final sigma)
+    0x03C3: _lower(".###.", "#....", "#.##.", "#..#.", ".##.."),  # σ
+    0x03C6: _PHI_LOWER,  # φ
+    0x03C8: rows_to_cols(["#.#.#", "#.#.#", ".###.", "..#..", "..#..", "..#..", "..#..", "..#.."]),  # ψ
+}
+
+# Й/й: И/и (already an entry above) plus a breve, stamped post-shift because
+# stamp_accent() places pixels in the 10-row cell's reserved headroom.
+LETTER_GLYPHS_SHIFTED = {
+    0x0419: stamp_accent(shift(LETTER_GLYPHS[0x0418]), "BREVE", lowercase=False),  # Й
+    0x0439: stamp_accent(shift(LETTER_GLYPHS[0x0438]), "BREVE", lowercase=True),  # й
+}
 
 # Hand-authored pixel art for glyphs that don't derive from a Latin base
 # letter: box-drawing lines/corners, block elements, and the status/spinner
@@ -281,6 +466,35 @@ for _n in range(256):
             _cols[_col] |= 1 << _row
     RAW_GLYPHS[0x2800 + _n] = tuple(_cols)
 
+# Curated emoji icons: a small, single-color pictogram per glyph rather than
+# a faithful reproduction (this font has no room for color -- every glyph
+# here is a 1-bit mask painted in the terminal cell's current foreground
+# color, same as every other character), covering the status/reaction marks
+# these TUI tools print most -- git/CI status, todo lists, "thinking"/done
+# indicators. Several of these codepoints are above U+FFFF (the Unicode
+# "Miscellaneous Symbols and Pictographs" block and friends), which is why
+# display__extended_glyph_t.codepoint is uint32_t below instead of the
+# uint16_t every codepoint so far has fit in. Already a final 10-row bitmap
+# (bit0 = row 0/top), same as RAW_GLYPHS -- not run through shift().
+EMOJI_GLYPHS = {
+    0x1F680: rows_to_cols(["..#..", ".###.", "#.#.#", "#.#.#", "#.#.#", "#.#.#", "#####", ".#.#.", ".....", "....."]),  # rocket
+    0x2705: RAW_GLYPHS[0x2713],  # check mark button -- same tick as U+2713
+    0x274C: RAW_GLYPHS[0x2717],  # cross mark -- same X as U+2717
+    0x26A0: rows_to_cols(["..#..", ".###.", ".#.#.", "#.#.#", "#.#.#", "#.#.#", "#.#.#", "##.##", ".....", "....."]),  # warning
+    0x1F4A1: rows_to_cols([".###.", "#...#", "#...#", "#...#", ".#.#.", "..#..", ".###.", ".###.", "..#..", "....."]),  # light bulb
+    0x1F527: rows_to_cols(["##...", "###..", ".##..", "..##.", "..##.", "...##", "...##", "....#", ".....", "....."]),  # wrench
+    0x1F4E6: rows_to_cols(["#####", "#.#.#", "#.#.#", "#####", "#...#", "#...#", "#...#", "#####", ".....", "....."]),  # package
+    0x1F41B: rows_to_cols(["..#..", ".###.", "#####", "#####", ".###.", "#.#.#", "#.#.#", ".....", ".....", "....."]),  # bug
+    0x1F4DD: rows_to_cols(["#####", "#...#", "#.#.#", "#...#", "#.#.#", "#...#", "#.#.#", "#####", ".....", "....."]),  # memo
+    0x2B50: rows_to_cols(["..#..", ".###.", "#####", ".###.", "#...#", ".....", ".....", ".....", ".....", "....."]),  # star
+    0x1F50D: rows_to_cols([".###.", "#...#", "#...#", "#...#", ".###.", "...##", "....#", ".....", ".....", "....."]),  # magnifying glass
+    0x1F389: RAW_GLYPHS[0x273B],  # party popper -- shares the eight-spoke burst shape
+    0x1F44D: rows_to_cols(["..##.", ".#..#", ".#..#", "#####", "#...#", "#...#", "#####", ".....", ".....", "....."]),  # thumbs up
+    0x2764: rows_to_cols([".#.#.", "#####", "#####", "#####", ".###.", "..#..", ".....", ".....", ".....", "....."]),  # heart
+    0x1F4C1: rows_to_cols([".....", "##...", "#####", "#...#", "#...#", "#...#", "#####", ".....", ".....", "....."]),  # folder
+    0x1F916: rows_to_cols(["..#..", ".###.", "#####", "#.#.#", "#####", "#...#", "#####", ".....", ".....", "....."]),  # robot
+}
+
 
 def c_char_literal(ch):
     if ch == "'":
@@ -300,10 +514,11 @@ def emit():
     w("/* -------------------------------------------------------------------------- */")
     w("/* Built-in font: fixed 5-wide bitmap glyphs, ASCII 32-126 plus the Latin-1   */")
     w("/* Supplement / Latin Extended-A subset this project has historically needed */")
-    w("/* (Western/Central European accented letters, common quote glyphs), plus    */")
-    w("/* box-drawing/block/status glyphs and the full Braille block (U+2800-28FF)  */")
-    w("/* -- the symbols TUI tools like Claude Code and opencode print for panel    */")
-    w("/* borders, progress spinners, and status marks.                            */")
+    w("/* (Western/Central European accented letters, common quote glyphs), the     */")
+    w("/* Cyrillic and Greek alphabets, box-drawing/block/status glyphs, the full   */")
+    w("/* Braille block (U+2800-28FF), and a curated set of emoji icons -- the      */")
+    w("/* symbols TUI tools like Claude Code and opencode print for panel borders,  */")
+    w("/* progress spinners, status marks, and reactions.                          */")
     w("/*                                                                            */")
     w("/* Earlier revisions rendered an accented letter by drawing the plain ASCII  */")
     w("/* base glyph and stamping a hardcoded accent shape on top of it at draw     */")
@@ -324,12 +539,14 @@ def emit():
     w("/* -------------------------------------------------------------------------- */")
     w("")
     w("typedef struct {")
-    w("    uint16_t codepoint;")
+    w("    /* uint32_t, not uint16_t: most emoji live above U+FFFF (e.g. U+1F680")
+    w("     * \"rocket\"), so a 16-bit field would silently truncate them. */")
+    w("    uint32_t codepoint;")
     w("    display__column_t columns[DISPLAY_FONT__WIDTH];")
     w("} display__extended_glyph_t;")
     w("")
     w("typedef struct {")
-    w("    uint16_t codepoint;")
+    w("    uint32_t codepoint;")
     w("    char ascii;")
     w("} display__alias_glyph_t;")
     w("")
@@ -340,11 +557,21 @@ def emit():
         w("    {" + ", ".join(f"0x{v:04X}" for v in g) + "},")
     w("};")
     w("")
-    assert not (set(MAP) & set(RAW_GLYPHS)), "codepoint defined in both MAP and RAW_GLYPHS"
+    bitmap_sources = [MAP, RAW_GLYPHS, EMOJI_GLYPHS, LETTER_GLYPHS, LETTER_GLYPHS_SHIFTED]
+    for i, a in enumerate(bitmap_sources):
+        for b in bitmap_sources[i + 1:]:
+            assert not (set(a) & set(b)), "codepoint defined in more than one glyph table"
+    assert not (set(ALIASES) & set().union(*bitmap_sources)), "codepoint defined as both a bitmap and an alias"
     extended = {}
     for cp, (letter, accent, dotless) in MAP.items():
         extended[cp] = list(with_accent(letter, accent, dotless) if accent else base_glyph(letter, dotless))
     for cp, columns in RAW_GLYPHS.items():
+        extended[cp] = list(columns)
+    for cp, columns in EMOJI_GLYPHS.items():
+        extended[cp] = list(columns)
+    for cp, columns in LETTER_GLYPHS.items():
+        extended[cp] = list(shift(columns))
+    for cp, columns in LETTER_GLYPHS_SHIFTED.items():
         extended[cp] = list(columns)
 
     w("/* Non-ASCII glyphs, real per-codepoint bitmaps (not synthesized at draw time):")
@@ -413,4 +640,5 @@ def emit():
 
 if __name__ == "__main__":
     OUT_PATH.write_text(emit())
-    print(f"wrote {OUT_PATH} ({len(MAP) + len(RAW_GLYPHS)} extended glyphs, {len(ALIASES)} aliases)")
+    total_extended = len(MAP) + len(RAW_GLYPHS) + len(EMOJI_GLYPHS) + len(LETTER_GLYPHS) + len(LETTER_GLYPHS_SHIFTED)
+    print(f"wrote {OUT_PATH} ({total_extended} extended glyphs, {len(ALIASES)} aliases)")
