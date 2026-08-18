@@ -239,6 +239,8 @@ static bruce_result_t config_app__set_rotation(int turns, bool *out_live_applied
     return result;
 }
 
+static int config_app__theme_gui(void);
+
 static int config_app__display_gui(void) {
     static const int brightness_percents[5] = {100, 75, 50, 25, 1};
     static const char *const brightness_labels[5] = {"100%", "75%", "50%", "25%", "1%"};
@@ -259,7 +261,7 @@ static int config_app__display_gui(void) {
         char *dim_label = memory__malloc(32);
         char *rotation_label = memory__malloc(48);
         char *buffered_label = memory__malloc(48);
-        bruce_dialog_choice_t *choices = memory__calloc(5, sizeof(*choices));
+        bruce_dialog_choice_t *choices = memory__calloc(6, sizeof(*choices));
         if (brightness_label == NULL || dim_label == NULL || rotation_label == NULL ||
             buffered_label == NULL || choices == NULL) {
             memory__free(brightness_label);
@@ -278,10 +280,11 @@ static int config_app__display_gui(void) {
         choices[1] = (bruce_dialog_choice_t){.label = dim_label, .value = "dim"};
         choices[2] = (bruce_dialog_choice_t){.label = rotation_label, .value = "rotation"};
         choices[3] = (bruce_dialog_choice_t){.label = buffered_label, .value = "buffered"};
-        choices[4] = (bruce_dialog_choice_t){.label = "Back", .value = "back"};
+        choices[4] = (bruce_dialog_choice_t){.label = "UI Color", .value = "ui_color"};
+        choices[5] = (bruce_dialog_choice_t){.label = "Back", .value = "back"};
         size_t selected = 0;
-        bruce_result_t result = dialog__choice_launcher("Display & UI", NULL, choices, 5, &selected);
-        const char *action = result == BRUCE_OK && selected < 5 ? choices[selected].value : "back";
+        bruce_result_t result = dialog__choice_launcher("Display & UI", NULL, choices, 6, &selected);
+        const char *action = result == BRUCE_OK && selected < 6 ? choices[selected].value : "back";
         bool back = result == BRUCE_ERR_CANCELLED || (result == BRUCE_OK && strcmp(action, "back") == 0);
         bool reboot_notice = false;
         if (!back && result == BRUCE_OK) {
@@ -321,6 +324,8 @@ static int config_app__display_gui(void) {
             } else if (strcmp(action, "buffered") == 0) {
                 result = config__set_display_buffered_rendering(!buffered);
                 reboot_notice = true;
+            } else if (strcmp(action, "ui_color") == 0) {
+                result = config_app__theme_gui();
             }
         }
         memory__free(brightness_label);
