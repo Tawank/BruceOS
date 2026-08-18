@@ -36,6 +36,11 @@ typedef struct {
     bruce_dialog_render_callback_t render_callback;
     void *render_callback_context;
     bool render_launcher;
+    /* Extra vertical space between the title/message block and the first
+     * list row, e.g. so a selected first row doesn't visually fuse with the
+     * title bar above it. 0 (the default) draws the list flush against
+     * them, matching every existing caller. */
+    int list_gap;
 } bruce_dialog_render_params_t;
 
 /* Dialog APIs return BRUCE_OK or BRUCE_ERR_CANCELLED, BRUCE_ERR_BUSY,
@@ -61,15 +66,23 @@ bruce_result_t dialog__choice_ex(
     const char *title, const char *message, const bruce_dialog_choice_t *choices, size_t choice_count,
     size_t *out_selected, const bruce_dialog_render_params_t *render_params
 );
+/* `title`, if non-NULL/non-empty, is shown in the GUI picker's top bar ahead
+ * of the current directory, e.g. "NES - /" or "Filemanager - /roms"
+ * (NULL/"" shows just the directory); the browsed directory no longer gets
+ * its own subtitle line underneath. Ignored on non-GUI/terminal picks. */
 bruce_result_t dialog__pick_file(
-    const char *initial_path, const char *extension_filter, char *out_path, size_t out_path_size
+    const char *initial_path, const char *extension_filter, char *out_path, size_t out_path_size,
+    const char *title
 );
-/* Like dialog__pick_file(), but `render_params` styles the GUI listing the
- * same way it styles dialog__choice() (NULL behaves exactly like
- * dialog__pick_file()). Ignored on non-GUI/terminal picks. */
+/* Like dialog__pick_file(), but `render_params` additionally styles the GUI
+ * listing the same way it styles dialog__choice() (NULL behaves exactly like
+ * dialog__pick_file()) - its `render_callback`/`render_callback_context`
+ * are reserved for the picker's own use (it draws the current volume's
+ * name and used/total space in the bottom bar) and are overridden if set.
+ * Ignored on non-GUI/terminal picks. */
 bruce_result_t dialog__pick_file_ex(
     const char *initial_path, const char *extension_filter, char *out_path, size_t out_path_size,
-    const bruce_dialog_render_params_t *render_params
+    const char *title, const bruce_dialog_render_params_t *render_params
 );
 
 /* Window chrome: a pluggable "look" (rounded border, live status bar, ...)

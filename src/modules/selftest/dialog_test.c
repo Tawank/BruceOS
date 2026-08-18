@@ -117,7 +117,7 @@ bool selftest__run_dialog_pick_file_case(void) {
     dialog__test_set_pick_file_provider(selftest__dialog_pick_file_provider);
 
     char path[BRUCE_STORAGE_PATH_MAX] = {0};
-    bruce_result_t result = dialog__pick_file("/apps", ".elf", path, sizeof(path));
+    bruce_result_t result = dialog__pick_file("/apps", ".elf", path, sizeof(path), NULL);
 
     dialog__test_set_pick_file_provider(NULL);
 

@@ -36,14 +36,6 @@ static const char *filemanager__basename(const char *path) {
     return slash != NULL ? slash + 1 : path;
 }
 
-static void filemanager__dirname(const char *path, char *out_dir, size_t out_dir_size) {
-    const char *slash = strrchr(path, '/');
-    size_t len = (slash != NULL && slash != path) ? (size_t)(slash - path) : 1;
-    if (len >= out_dir_size) { len = out_dir_size - 1; }
-    memcpy(out_dir, path, len);
-    out_dir[len] = '\0';
-}
-
 static const char *filemanager__extension(const char *path) {
     const char *dot = strrchr(path, '.');
     return dot != NULL ? dot : "";
@@ -121,10 +113,21 @@ static bruce_result_t filemanager__pick_open_with_app(const char *path, bool gui
         {.label = "JavaScript", .value = "js"    },
         {.label = "Cancel",     .value = "cancel"},
     };
+    /* Heap, not a local: sized off BRUCE_STORAGE_PATH_MAX, not
+     * BRUCE_STORAGE_NAME_MAX, since `path` (and thus
+     * filemanager__basename(path), when it has no '/') is only ever as long
+     * as a full path but the compiler can't see that bound through the
+     * pointer - a NAME_MAX-sized buffer would warn (-Werror=format-truncation)
+     * on the snprintf below. That makes it too big to keep piling onto the
+     * caller's task stack on top of dialog__choice()'s own frame below. */
+    char *title = memory__malloc(16 + BRUCE_STORAGE_PATH_MAX);
+    if (title == NULL) return BRUCE_ERR_NO_MEMORY;
+    snprintf(title, 16 + BRUCE_STORAGE_PATH_MAX, "Open with %s", filemanager__basename(path));
+
     size_t selected = 0;
-    bruce_result_t result = dialog__choice(
-        "Open with", filemanager__basename(path), choices, sizeof(choices) / sizeof(choices[0]), &selected
-    );
+    bruce_result_t result =
+        dialog__choice(title, NULL, choices, sizeof(choices) / sizeof(choices[0]), &selected);
+    memory__free(title);
     if (result != BRUCE_OK || strcmp(choices[selected].value, "cancel") == 0)
         return result == BRUCE_OK ? BRUCE_ERR_CANCELLED : result;
 
@@ -281,11 +284,16 @@ int filemanager_app_main(int argc, char **argv) {
     (void)argv;
 
     const bruce_dialog_render_params_t action_params = dialog__default_render_params(2);
-    char last_dir[BRUCE_STORAGE_PATH_MAX] = "/";
+    /* The last file picked, re-passed as dialog__pick_file_ex()'s starting
+     * point below: it browses that file's directory with the file itself
+     * pre-selected, so Esc/"Back" out of the action menu lands the browser
+     * back on the same file instead of just the same directory. */
+    char last_path[BRUCE_STORAGE_PATH_MAX] = "/";
 
     for (;;) {
         char path[BRUCE_STORAGE_PATH_MAX];
-        bruce_result_t result = dialog__pick_file_ex(last_dir, NULL, path, sizeof(path), &action_params);
+        bruce_result_t result =
+            dialog__pick_file_ex(last_path, NULL, path, sizeof(path), "Filemanager", &action_params);
         if (result == BRUCE_ERR_CANCELLED && filemanager__resume_after_handoff()) {
             (void)input__flush();
             continue;
@@ -295,12 +303,13 @@ int filemanager_app_main(int argc, char **argv) {
             filemanager__show_error("Browse", result);
             return result;
         }
-        filemanager__dirname(path, last_dir, sizeof(last_dir));
+        snprintf(last_path, sizeof(last_path), "%s", path);
 
         size_t selected = 0;
-        result = dialog__choice_ex(
-            "File manager", path, actions, sizeof(actions) / sizeof(actions[0]), &selected, &action_params
-        );
+        /* Plain dialog__choice(), not the picker's full-bleed action_params:
+         * this is a small action menu over the already-visible file browser,
+         * so it reads better as a popup window than another full screen. */
+        result = dialog__choice("File manager", path, actions, sizeof(actions) / sizeof(actions[0]), &selected);
         if (result == BRUCE_ERR_CANCELLED && filemanager__resume_after_handoff()) {
             (void)input__flush();
             continue;

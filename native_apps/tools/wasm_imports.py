@@ -56,7 +56,7 @@ SUPPORTED_BRUCE_SDK_SIGNATURES = {
     "storage__write": FunctionType((I32, I32, I32, I32), (I32,)),
     "storage__seek": FunctionType((I32, I64, I32, I32), (I32,)),
     "storage__close": FunctionType((I32,), (I32,)),
-    "dialog__pick_file": FunctionType((I32, I32, I32, I32), (I32,)),
+    "dialog__pick_file": FunctionType((I32, I32, I32, I32, I32), (I32,)),
     "display__game_mode": FunctionType((I32,), (I32,)),
     "display__color565": FunctionType((I32, I32, I32), (I32,)),
     "display__fill_rect": FunctionType((I32, I32, I32, I32, I32), (I32,)),

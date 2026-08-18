@@ -14,6 +14,7 @@
 #include "core_sdk/storage.h"
 
 #include "core/process/process.h"
+#include "core/storage/storage.h"
 
 #include <ctype.h>
 #include <stdbool.h>
@@ -205,6 +206,13 @@ static bruce_result_t dialog__term_pick_file(
 #define DIALOG__LIST_TEXT_SIZE_WIDE 2
 #define DIALOG__WINDOW_RADIUS 5
 #define DIALOG__WINDOW_INSET 4
+/* Vertical breathing room dialog__gui_pick_file() requests (via
+ * render_params->list_gap) between its title bar and the first list row -
+ * without it, a selected first row's fill paints flush against the title
+ * bar above it and the two visually merge into one block. Opt-in per
+ * render_params, not a default in dialog__gui_choice(), so plain
+ * dialog__choice()/_ex() callers keep their existing flush layout. */
+#define DIALOG__LIST_GAP 3
 
 static int dialog__default_list_text_size(void) {
     return display__width() >= DIALOG__WIDE_DISPLAY_MIN_WIDTH ? DIALOG__LIST_TEXT_SIZE_WIDE
@@ -349,6 +357,11 @@ bruce_dialog_render_params_t dialog__default_render_params(int text_size) {
     params.render_borders = true;
     params.text_size = text_size > 0 ? text_size : dialog__default_list_text_size();
     params.background_color = bg;
+    /* pri, not `text`: this is also the color list rows (folders/files in
+     * the picker) draw their label in, over background_color, so it should
+     * stay the theme accent. The title bar's own text needs a color that
+     * survives being filled with pri underneath it - dialog__gui_choice()
+     * picks that separately rather than borrowing this field. */
     params.text_color = pri;
     return params;
 }
@@ -469,7 +482,8 @@ static bruce_result_t dialog__gui_choice(
                                                                           : 0;
     int footer_h = render_window ? 0 : (render_borders ? DIALOG__CHAR_H + 4 : 0);
     int message_h = (message != NULL && message[0] != '\0') ? (DIALOG__CHAR_H + 2) : 0;
-    int usable_h = content_h - title_h - message_h - footer_h;
+    int list_gap = (title_h > 0 || message_h > 0) && render_params != NULL ? render_params->list_gap : 0;
+    int usable_h = content_h - title_h - message_h - footer_h - list_gap;
     if (usable_h < row_h) { return BRUCE_ERR_INVALID_ARGUMENT; }
     int items_per_page = usable_h / row_h;
     bool redraw = true;
@@ -523,12 +537,19 @@ static bruce_result_t dialog__gui_choice(
             bruce_display_color_t content_fill_color = render_window ? surface : background_color;
 
             if (title_h > 0) {
-                if (render_borders && !render_window) {
+                bool title_on_pri_fill = render_borders && !render_window;
+                if (title_on_pri_fill) {
                     display__fill_rect(left, top, viewport_w, title_h, pri);
                 }
-                display__set_text_color(text_color);
+                /* Full-bleed layout fills the bar itself with pri, so the
+                 * label needs the readable-over-accent `text` color there
+                 * instead of text_color (which stays pri, for list rows -
+                 * see dialog__default_render_params()); a windowed dialog's
+                 * bar sits on content_fill_color (surface) instead, where
+                 * text_color already reads fine. */
+                display__set_text_color(title_on_pri_fill ? text : text_color);
                 display__set_text_size(DIALOG__TEXT_SIZE);
-                display__set_text_bg_color(render_borders && !render_window ? pri : content_fill_color);
+                display__set_text_bg_color(title_on_pri_fill ? pri : content_fill_color);
                 display__set_cursor(content_left + DIALOG__MARGIN, content_top + DIALOG__MARGIN);
                 display__print(title != NULL ? title : "");
             }
@@ -541,7 +562,7 @@ static bruce_result_t dialog__gui_choice(
                 display__print(message);
             }
 
-            int list_y = content_top + title_h + message_h;
+            int list_y = content_top + title_h + message_h + list_gap;
             int last_visible = first_visible + items_per_page - 1;
             if ((size_t)last_visible >= choice_count) { last_visible = (int)choice_count - 1; }
 
@@ -1121,27 +1142,137 @@ static void dialog__pick_file_go_up(char *current_path) {
     }
 }
 
-static bruce_result_t dialog__gui_pick_file(
-    const char *initial_path, const char *extension_filter, char *out_path, size_t out_path_size,
-    const bruce_dialog_render_params_t *render_params
-) {
+/* Copies `current_path`'s last path component (the directory about to be
+ * left via ".."/Back) into `out_name`, so the next loop iteration - once it
+ * relists the parent - can re-select that entry instead of defaulting back
+ * to the top. Only ever holds the single most recent directory left, not a
+ * full history stack, so this re-selection only reaches one level up. */
+static void dialog__pick_file_note_returning_from(const char *current_path, char *out_name, size_t out_name_size) {
+    const char *last_slash = strrchr(current_path, '/');
+    snprintf(out_name, out_name_size, "%s", last_slash != NULL ? last_slash + 1 : current_path);
+}
+
+/* Whole-number binary-prefix size, e.g. 20480 -> "20KiB", 2097152 -> "2MiB".
+ * Truncates rather than rounding: plenty precise for a status-bar readout. */
+static void dialog__pick_file_format_bytes(uint64_t bytes, char *out, size_t out_size) {
+    static const char *const units[] = {"B", "KiB", "MiB", "GiB", "TiB"};
+    size_t unit = 0;
+    uint64_t divisor = 1;
+    while (unit + 1 < sizeof(units) / sizeof(units[0]) && bytes >= divisor * 1024) {
+        divisor *= 1024;
+        unit++;
+    }
+    snprintf(out, out_size, "%llu%s", (unsigned long long)(bytes / divisor), units[unit]);
+}
+
+/* "sd" under the SD card mount, "littlefs" everywhere else - covers the
+ * common single-internal-partition setup without walking
+ * core/partition_manager's extra-mount table for one status-bar label. */
+static const char *dialog__pick_file_partition_label(const char *path) {
+    size_t sd_len = strlen(STORAGE__SD_MOUNT_PATH);
+    if (strncmp(path, STORAGE__SD_MOUNT_PATH, sd_len) == 0 && (path[sd_len] == '\0' || path[sd_len] == '/')) {
+        return "sd";
+    }
+    return "littlefs";
+}
+
+/* "littlefs 20KiB/2MiB"-style summary of the volume `path` lives on, for the
+ * bottom bar. Leaves `out` empty if usage can't be read. */
+static void dialog__pick_file_format_usage(const char *path, char *out, size_t out_size) {
+    size_t total = 0, used = 0;
+    if (out_size == 0) return;
+    if (storage__get_usage(path, &total, &used) != BRUCE_OK) {
+        out[0] = '\0';
+        return;
+    }
+    char used_text[16];
+    char total_text[16];
+    dialog__pick_file_format_bytes(used, used_text, sizeof(used_text));
+    dialog__pick_file_format_bytes(total, total_text, sizeof(total_text));
+    snprintf(out, out_size, "%s %s/%s", dialog__pick_file_partition_label(path), used_text, total_text);
+}
+
+/* render_callback for the picker's own render_params: right-aligns the
+ * usage summary (context = a `const char *` built by
+ * dialog__pick_file_format_usage() above) into the bottom bar dialog__gui_choice()
+ * just filled. Assumes the plain full-screen bordered layout (the only one
+ * any current caller uses for the picker) - silently draws nothing usable
+ * outside that when the text doesn't fit, rather than fail the dialog. */
+static void dialog__pick_file_draw_footer_usage(void *context) {
+    const char *text = context;
+    if (text == NULL || text[0] == '\0') return;
+    uint16_t pri, sec, bg, surface, txt, text_muted, border, success, warning, error;
+    dialog__get_colors(&pri, &sec, &bg, &surface, &txt, &text_muted, &border, &success, &warning, &error);
+    (void)pri;
+    (void)bg;
+    (void)surface;
+    (void)text_muted;
+    (void)border;
+    (void)success;
+    (void)warning;
+    (void)error;
+    int footer_h = DIALOG__CHAR_H + 4;
+    display__set_text_color(txt);
+    display__set_text_size(DIALOG__TEXT_SIZE);
+    display__set_text_bg_color(sec);
+    display__draw_right_string(
+        text, display__width() - DIALOG__MARGIN, display__height() - footer_h + DIALOG__MARGIN
+    );
+}
+
+/* Every sizable buffer dialog__gui_pick_file() needs, bundled into one
+ * heap allocation instead of individual locals. The picker is invoked from
+ * whichever task called dialog__pick_file[_ex]() - the file manager, an IR
+ * app, a JS/ELF/WASM guest, ... - and stacking ~750 bytes of these on top of
+ * that caller's own frames (plus dialog__gui_choice()'s below them) is
+ * exactly the kind of per-caller cost a shared task stack size can't
+ * absorb; a stack overflow here means every task that ever calls into the
+ * picker would need a bigger stack just to cover it. One malloc/free pair
+ * around the loop keeps that cost off every caller's stack instead. */
+typedef struct {
     char current_path[BRUCE_STORAGE_PATH_MAX];
+    /* Name of the directory/file last left via ".."/Back, so it can be
+     * re-highlighted once its parent's listing is rebuilt below. */
+    char returning_from[BRUCE_STORAGE_NAME_MAX];
+    char next_path[BRUCE_STORAGE_PATH_MAX];
+    char bar_title[BRUCE_STORAGE_PATH_MAX + 32];
+    char usage_text[48];
+} dialog__pick_file_workspace_t;
+
+static bruce_result_t dialog__gui_pick_file_run(
+    dialog__pick_file_workspace_t *ws, const char *initial_path, const char *extension_filter, char *out_path,
+    size_t out_path_size, const char *title, bruce_dialog_render_params_t *effective_params
+) {
     snprintf(
-        current_path,
-        sizeof(current_path),
+        ws->current_path,
+        sizeof(ws->current_path),
         "%s",
         initial_path != NULL && initial_path[0] != '\0' ? initial_path : "/"
     );
+    ws->returning_from[0] = '\0';
+
+    /* A caller (e.g. the file manager, reopening the browser after an
+     * Esc/action out of a file it just picked) may pass a *file* path here
+     * instead of a directory to list. storage__list() can't list a file, so
+     * detect that up front and fall back to browsing its parent with that
+     * file pre-selected, the same way stepping back up out of a directory
+     * pre-selects it below. */
+    size_t initial_list_count = 0;
+    if (storage__list(ws->current_path, NULL, 0, &initial_list_count) != BRUCE_OK) {
+        dialog__pick_file_note_returning_from(ws->current_path, ws->returning_from, sizeof(ws->returning_from));
+        dialog__pick_file_go_up(ws->current_path);
+    }
+    (void)initial_list_count;
 
     for (;;) {
         size_t count = 0;
-        bruce_result_t list_result = storage__list(current_path, NULL, 0, &count);
+        bruce_result_t list_result = storage__list(ws->current_path, NULL, 0, &count);
         if (list_result != BRUCE_OK) { return list_result; }
 
         bruce_storage_entry_t *entries = memory__malloc(count * sizeof(bruce_storage_entry_t));
         if (entries == NULL && count > 0) { return BRUCE_ERR_NO_MEMORY; }
         if (entries != NULL) {
-            list_result = storage__list(current_path, entries, count, &count);
+            list_result = storage__list(ws->current_path, entries, count, &count);
             if (list_result != BRUCE_OK) {
                 memory__free(entries);
                 return list_result;
@@ -1169,7 +1300,7 @@ static bruce_result_t dialog__gui_pick_file(
 
         int choice_count = 0;
         /* ".." entry to go up, except at root. */
-        if (strcmp(current_path, "/") != 0) {
+        if (strcmp(ws->current_path, "/") != 0) {
             values[choice_count] = "..";
             choices[choice_count].label = "[..]";
             choices[choice_count].value = "..";
@@ -1191,8 +1322,35 @@ static bruce_result_t dialog__gui_pick_file(
         }
 
         size_t out_selected = 0;
+        if (ws->returning_from[0] != '\0') {
+            for (int i = 0; i < choice_count; ++i) {
+                if (strcmp(values[i], ws->returning_from) == 0) {
+                    out_selected = (size_t)i;
+                    break;
+                }
+            }
+            /* Deliberately left set rather than cleared here: opening a file
+             * (Open/Open with... an image or JS app, say) hands the display
+             * to a foreground child process, and dialog__gui_choice() below
+             * can lose - and immediately regain - foreground before the
+             * child even runs, which the branch below treats as a handoff
+             * and redraws this same directory via `continue`. Clearing here
+             * would drop the pre-selection on that very first redraw, before
+             * the user ever saw it. It's overwritten fresh on the next
+             * genuine ".."/Back and cleared on actually descending, so it
+             * never leaks into an unrelated directory. */
+        }
+
+        if (title != NULL && title[0] != '\0') {
+            snprintf(ws->bar_title, sizeof(ws->bar_title), "%s - %s", title, ws->current_path);
+        } else {
+            snprintf(ws->bar_title, sizeof(ws->bar_title), "%s", ws->current_path);
+        }
+        dialog__pick_file_format_usage(ws->current_path, ws->usage_text, sizeof(ws->usage_text));
+        effective_params->render_callback_context = ws->usage_text;
+
         bruce_result_t choice_result = dialog__gui_choice(
-            "Pick file", current_path, choices, (size_t)choice_count, &out_selected, render_params
+            ws->bar_title, NULL, choices, (size_t)choice_count, &out_selected, effective_params
         );
 
         const char *picked = values[out_selected];
@@ -1206,27 +1364,28 @@ static bruce_result_t dialog__gui_pick_file(
             if (dialog__pick_file_resume_after_handoff()) { continue; }
             /* Genuine Back/Esc: step up a directory rather than exiting the
              * picker outright, unless already at the root. */
-            if (strcmp(current_path, "/") != 0) {
-                dialog__pick_file_go_up(current_path);
+            if (strcmp(ws->current_path, "/") != 0) {
+                dialog__pick_file_note_returning_from(ws->current_path, ws->returning_from, sizeof(ws->returning_from));
+                dialog__pick_file_go_up(ws->current_path);
                 continue;
             }
             return BRUCE_ERR_CANCELLED;
         }
 
         if (strcmp(picked, "..") == 0) {
-            dialog__pick_file_go_up(current_path);
+            dialog__pick_file_note_returning_from(ws->current_path, ws->returning_from, sizeof(ws->returning_from));
+            dialog__pick_file_go_up(ws->current_path);
             memory__free(entries);
             continue;
         }
 
-        char next_path[BRUCE_STORAGE_PATH_MAX];
         int printed;
-        if (strcmp(current_path, "/") == 0) {
-            printed = snprintf(next_path, sizeof(next_path), "/%s", picked);
+        if (strcmp(ws->current_path, "/") == 0) {
+            printed = snprintf(ws->next_path, sizeof(ws->next_path), "/%s", picked);
         } else {
-            printed = snprintf(next_path, sizeof(next_path), "%s/%s", current_path, picked);
+            printed = snprintf(ws->next_path, sizeof(ws->next_path), "%s/%s", ws->current_path, picked);
         }
-        if (printed < 0 || (size_t)printed >= sizeof(next_path)) {
+        if (printed < 0 || (size_t)printed >= sizeof(ws->next_path)) {
             memory__free(entries);
             return BRUCE_ERR_INVALID_PATH;
         }
@@ -1241,14 +1400,39 @@ static bruce_result_t dialog__gui_pick_file(
         }
 
         if (is_file) {
-            snprintf(out_path, out_path_size, "%s", next_path);
+            snprintf(out_path, out_path_size, "%s", ws->next_path);
             memory__free(entries);
             return BRUCE_OK;
         }
 
-        snprintf(current_path, sizeof(current_path), "%s", next_path);
+        snprintf(ws->current_path, sizeof(ws->current_path), "%s", ws->next_path);
+        ws->returning_from[0] = '\0';
         memory__free(entries);
     }
+}
+
+static bruce_result_t dialog__gui_pick_file(
+    const char *initial_path, const char *extension_filter, char *out_path, size_t out_path_size,
+    const char *title, const bruce_dialog_render_params_t *render_params
+) {
+    /* Own the render_callback slot for the bottom-bar usage summary (see
+     * dialog__pick_file_draw_footer_usage()); everything else in
+     * `render_params` (padding, colors, text size, ...) passes through
+     * unchanged, defaulting the same way a NULL render_params would. Also
+     * own list_gap: only the picker's own listing wants breathing room
+     * below its title bar, not every dialog__choice()/_ex() caller. */
+    bruce_dialog_render_params_t effective_params =
+        render_params != NULL ? *render_params : dialog__default_render_params(0);
+    effective_params.render_callback = dialog__pick_file_draw_footer_usage;
+    effective_params.list_gap = DIALOG__LIST_GAP;
+
+    dialog__pick_file_workspace_t *ws = memory__malloc(sizeof(*ws));
+    if (ws == NULL) { return BRUCE_ERR_NO_MEMORY; }
+    bruce_result_t result = dialog__gui_pick_file_run(
+        ws, initial_path, extension_filter, out_path, out_path_size, title, &effective_params
+    );
+    memory__free(ws);
+    return result;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1474,14 +1658,15 @@ bruce_result_t dialog__choice_ex(
 }
 
 bruce_result_t dialog__pick_file(
-    const char *initial_path, const char *extension_filter, char *out_path, size_t out_path_size
+    const char *initial_path, const char *extension_filter, char *out_path, size_t out_path_size,
+    const char *title
 ) {
-    return dialog__pick_file_ex(initial_path, extension_filter, out_path, out_path_size, NULL);
+    return dialog__pick_file_ex(initial_path, extension_filter, out_path, out_path_size, title, NULL);
 }
 
 bruce_result_t dialog__pick_file_ex(
     const char *initial_path, const char *extension_filter, char *out_path, size_t out_path_size,
-    const bruce_dialog_render_params_t *render_params
+    const char *title, const bruce_dialog_render_params_t *render_params
 ) {
     if (out_path == NULL || out_path_size == 0) { return BRUCE_ERR_INVALID_ARGUMENT; }
 
@@ -1493,7 +1678,7 @@ bruce_result_t dialog__pick_file_ex(
     }
 
     if (gui) {
-        return dialog__gui_pick_file(initial_path, extension_filter, out_path, out_path_size, render_params);
+        return dialog__gui_pick_file(initial_path, extension_filter, out_path, out_path_size, title, render_params);
     }
     return dialog__term_pick_file(initial_path, extension_filter, out_path, out_path_size);
 }

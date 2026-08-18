@@ -591,7 +591,7 @@ static bruce_result_t ir_app__jammer_pick(void) {
 
 static bruce_result_t ir_app__transmit_file_pick(void) {
     char path[BRUCE_STORAGE_PATH_MAX];
-    bruce_result_t result = dialog__pick_file("/", ".ir", path, sizeof(path));
+    bruce_result_t result = dialog__pick_file("/", ".ir", path, sizeof(path), "IR");
     if (result == BRUCE_OK) result = ir__transmit_file(path, 0);
     if (result != BRUCE_ERR_CANCELLED) {
         (void)dialog__message(

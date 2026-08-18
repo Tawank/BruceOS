@@ -436,7 +436,7 @@ BRUCE_WASM_IMPORT("storage__read") extern int32_t wasm_import__storage_read(uint
 BRUCE_WASM_IMPORT("storage__write") extern int32_t wasm_import__storage_write(uint32_t, uint32_t, uint32_t, uint32_t);
 BRUCE_WASM_IMPORT("storage__seek") extern int32_t wasm_import__storage_seek(uint32_t, int64_t, int32_t, uint32_t);
 BRUCE_WASM_IMPORT("storage__close") extern int32_t wasm_import__storage_close(uint32_t);
-BRUCE_WASM_IMPORT("dialog__pick_file") extern int32_t wasm_import__dialog_pick_file(uint32_t, uint32_t, uint32_t, uint32_t);
+BRUCE_WASM_IMPORT("dialog__pick_file") extern int32_t wasm_import__dialog_pick_file(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
 BRUCE_WASM_IMPORT("display__game_mode") extern int32_t wasm_import__display_game_mode(int32_t);
 BRUCE_WASM_IMPORT("display__color565") extern int32_t wasm_import__display_color565(int32_t, int32_t, int32_t);
 BRUCE_WASM_IMPORT("display__fill_rect") extern int32_t wasm_import__display_fill_rect(int32_t, int32_t, int32_t, int32_t, int32_t);
@@ -466,10 +466,11 @@ bruce_result_t storage__seek(bruce_file_id_t file, int64_t offset, int whence, u
     return (bruce_result_t)wasm_import__storage_seek(file, offset, whence, wasm_bruce_guest_adapter__offset(out_position));
 }
 bruce_result_t storage__close(bruce_file_id_t file) { return (bruce_result_t)wasm_import__storage_close(file); }
-bruce_result_t dialog__pick_file(const char *initial, const char *filter, char *path, size_t size) {
-    return (bruce_result_t)wasm_import__dialog_pick_file(wasm_bruce_guest_adapter__offset(initial),
-                                                          wasm_bruce_guest_adapter__offset(filter),
-                                                          wasm_bruce_guest_adapter__offset(path), (uint32_t)size);
+bruce_result_t dialog__pick_file(const char *initial, const char *filter, char *path, size_t size, const char *title) {
+    return (bruce_result_t)wasm_import__dialog_pick_file(
+        wasm_bruce_guest_adapter__offset(initial), wasm_bruce_guest_adapter__offset(filter),
+        wasm_bruce_guest_adapter__offset(path), (uint32_t)size, wasm_bruce_guest_adapter__offset(title)
+    );
 }
 bruce_result_t display__game_mode(bool enabled) { return (bruce_result_t)wasm_import__display_game_mode(enabled); }
 bruce_display_color_t display__color565(uint8_t r, uint8_t g, uint8_t b) {

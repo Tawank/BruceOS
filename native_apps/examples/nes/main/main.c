@@ -11,7 +11,7 @@ int app_main(int argc, char **argv) {
     const char *rom_path = argc > 1 ? argv[1] : NULL;
 
     if (rom_path == NULL) {
-        if (dialog__pick_file("/", ".nes", selected_path, sizeof(selected_path)) != BRUCE_OK) return 0;
+        if (dialog__pick_file("/", ".nes", selected_path, sizeof(selected_path), "NES") != BRUCE_OK) return 0;
         rom_path = selected_path;
     }
 

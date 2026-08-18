@@ -105,13 +105,16 @@ JSValue native_dialogError(JSContext *ctx, JSValue *this_val, int argc, JSValue 
 
 JSValue native_dialogPickFile(JSContext *ctx, JSValue *this_val, int argc, JSValue *argv) {
     (void)this_val;
-    JSCStringBuf path_buf, ext_buf;
+    JSCStringBuf path_buf, ext_buf, title_buf;
     const char *path = js_native_arg_string(ctx, argc, argv, 0, &path_buf);
     const char *ext = js_native_arg_string(ctx, argc, argv, 1, &ext_buf);
+    /* Optional: pickFile(path, ext, title) shows `title` in the GUI picker's
+     * top bar, e.g. dialog.pickFile("/", ".nes", "NES"). */
+    const char *title = js_native_arg_string(ctx, argc, argv, 2, &title_buf);
     char out[BRUCE_STORAGE_PATH_MAX];
     out[0] = '\0';
     bruce_result_t result =
-        dialog__pick_file(path != NULL ? path : "/", ext != NULL ? ext : "*", out, sizeof(out));
+        dialog__pick_file(path != NULL ? path : "/", ext != NULL ? ext : "*", out, sizeof(out), title);
     if (result != BRUCE_OK) { return JS_NewString(ctx, ""); }
     return JS_NewString(ctx, out);
 }
