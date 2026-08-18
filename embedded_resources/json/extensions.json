@@ -1,0 +1,123 @@
+{
+  "extensions": {
+    ".elf": {
+      "program": "elf",
+      "icon": "application"
+    },
+    ".wasm": {
+      "program": "wasm",
+      "icon": "application"
+    },
+    ".js": {
+      "program": "js",
+      "icon": "file-code"
+    },
+    ".sh": {
+      "program": "shell",
+      "icon": "file-code"
+    },
+    ".jpg": {
+      "program": "image",
+      "icon": "file-image"
+    },
+    ".jpeg": {
+      "program": "image",
+      "icon": "file-image"
+    },
+    ".png": {
+      "program": "image",
+      "icon": "file-image"
+    },
+    ".gif": {
+      "program": "image",
+      "icon": "file-image"
+    },
+    ".bmp": {
+      "icon": "file-image"
+    },
+    ".webp": {
+      "icon": "file-image"
+    },
+    ".txt": {
+      "program": "text",
+      "icon": "file-document"
+    },
+    ".md": {
+      "icon": "file-document"
+    },
+    ".log": {
+      "icon": "file-document"
+    },
+    ".json": {
+      "program": "text",
+      "icon": "application-braces"
+    },
+    ".conf": {
+      "program": "text",
+      "icon": "file-cog"
+    },
+    ".cfg": {
+      "icon": "file-cog"
+    },
+    ".ini": {
+      "icon": "file-cog"
+    },
+    ".c": {
+      "icon": "file-code"
+    },
+    ".h": {
+      "icon": "file-code"
+    },
+    ".cpp": {
+      "icon": "file-code"
+    },
+    ".py": {
+      "icon": "file-code"
+    },
+    ".html": {
+      "icon": "file-code"
+    },
+    ".css": {
+      "icon": "file-code"
+    },
+    ".mp3": {
+      "icon": "file-music"
+    },
+    ".wav": {
+      "icon": "file-music"
+    },
+    ".ogg": {
+      "icon": "file-music"
+    },
+    ".flac": {
+      "icon": "file-music"
+    },
+    ".mp4": {
+      "icon": "file-video"
+    },
+    ".avi": {
+      "icon": "file-video"
+    },
+    ".mkv": {
+      "icon": "file-video"
+    },
+    ".mov": {
+      "icon": "file-video"
+    },
+    ".zip": {
+      "icon": "zip-box"
+    },
+    ".7z": {
+      "icon": "zip-box"
+    },
+    ".rar": {
+      "icon": "zip-box"
+    },
+    ".tar": {
+      "icon": "zip-box"
+    },
+    ".gz": {
+      "icon": "zip-box"
+    }
+  }
+}
