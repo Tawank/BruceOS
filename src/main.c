@@ -100,6 +100,7 @@ void app_runner__register_defaults(void) {
     (void)app_runner__register("reboot", bnu_reboot_app_main, 0);
     (void)app_runner__register("mkdir", bnu_mkdir_app_main, 0);
     (void)app_runner__register("touch", bnu_touch_app_main, 0);
+    (void)app_runner__register("rm", bnu_rm_app_main, 0);
     (void)app_runner__register("cat", bnu_cat_app_main, 0);
     (void)app_runner__register("stty", bnu_stty_app_main, 0);
     (void)app_runner__register("elf", elf_loader__app_main, 0);
