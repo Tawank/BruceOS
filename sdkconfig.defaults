@@ -25,6 +25,12 @@ CONFIG_LOG_DEFAULT_LEVEL_WARN=y
 CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
 CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=8192
 
+# Append the legacy GlobalSign Root CA (R1) to the default certificate
+# bundle - see certs/globalsign_root_ca_r1.pem for why it's needed even
+# though ESP-IDF's default bundle no longer ships it.
+CONFIG_MBEDTLS_CUSTOM_CERTIFICATE_BUNDLE=y
+CONFIG_MBEDTLS_CUSTOM_CERTIFICATE_BUNDLE_PATH="certs/globalsign_root_ca_r1.pem"
+
 # Required by the Core process registry (src/core/process/process.c) for sampled
 # per-process CPU accounting via uxTaskGetSystemState()/TaskStatus_t.
 CONFIG_FREERTOS_USE_TRACE_FACILITY=y

@@ -26,6 +26,15 @@
  * that convenience so e.g. `wget example.com` works the way users expect. */
 #define BNU__URL_MAX 256
 
+/* Real wget/curl identify themselves via User-Agent by default, and some
+ * sites (e.g. ysap.sh) sniff that header to serve terminal-friendly output
+ * instead of an HTML page. esp_http_client's own default ("ESP32 HTTP
+ * Client/1.0") doesn't match either tool's UA, so those sites can't tell
+ * these commands apart from a browser. Send a plausible tool UA to match,
+ * overridable via -U/--user-agent (wget) or -A/--user-agent (curl). */
+#define BNU__WGET_DEFAULT_USER_AGENT "Wget/1.21.3"
+#define BNU__CURL_DEFAULT_USER_AGENT "curl/8.5.0"
+
 static bool bnu__normalize_url(const char *url, char *out_url, size_t capacity) {
     if (url == NULL || url[0] == '\0') return false;
     int written = strstr(url, "://") != NULL ? snprintf(out_url, capacity, "%s", url)
@@ -82,9 +91,13 @@ int bnu_wget_app_main(int argc, char **argv) {
     ap_add_required_arg(parser, "url", "URL to download (scheme optional, defaults to http://)");
     ap_add_str_opt(parser, "O", NULL);
     ap_set_opt_help(parser, "O", "Save to this path instead of the URL's file name");
+    ap_add_str_opt(parser, "U user-agent", NULL);
+    ap_set_opt_help(parser, "U user-agent", "Send this User-Agent header instead of the default");
     if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
     const char *raw_url = ap_get_arg(parser, "url");
     const char *output = ap_get_str_value(parser, "O");
+    const char *user_agent = ap_get_str_value(parser, "U");
+    if (user_agent == NULL) user_agent = BNU__WGET_DEFAULT_USER_AGENT;
 
     char url[BNU__URL_MAX];
     char path[BRUCE_STORAGE_PATH_MAX];
@@ -102,9 +115,12 @@ int bnu_wget_app_main(int argc, char **argv) {
     }
 
     stdio__printf("Saving to: '%s'\n", path);
+    const char *headers[] = {"User-Agent", user_agent};
     bruce_http_request_t request = {
         .url = url,
         .method = "GET",
+        .headers = headers,
+        .header_count = 1,
         .max_response_bytes = BNU__HTTP_MAX_RESPONSE_BYTES,
         .on_response_chunk = bnu__wget_chunk,
         .response_chunk_context = &sink,
@@ -141,6 +157,8 @@ int bnu_curl_app_main(int argc, char **argv) {
     ap_set_opt_help(parser, "I", "Fetch headers only (HTTP HEAD)");
     ap_add_flag(parser, "i");
     ap_set_opt_help(parser, "i", "Print response headers before the body");
+    ap_add_str_opt(parser, "A user-agent", NULL);
+    ap_set_opt_help(parser, "A user-agent", "Send this User-Agent header instead of the default");
     if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
 
     const char *raw_url = ap_get_arg(parser, "url");
@@ -149,6 +167,8 @@ int bnu_curl_app_main(int argc, char **argv) {
     const char *output = ap_get_str_value(parser, "o");
     bool head_only = ap_found(parser, "I");
     bool include_headers = ap_found(parser, "i");
+    const char *user_agent = ap_get_str_value(parser, "A");
+    if (user_agent == NULL) user_agent = BNU__CURL_DEFAULT_USER_AGENT;
 
     char url[BNU__URL_MAX];
     char path[BRUCE_STORAGE_PATH_MAX];
@@ -160,11 +180,14 @@ int bnu_curl_app_main(int argc, char **argv) {
     if (head_only) method = "HEAD";
     else if (method == NULL && data != NULL) method = "POST";
 
+    const char *headers[] = {"User-Agent", user_agent};
     bruce_http_request_t request = {
         .url = url,
         .method = method,
         .body = data,
         .body_len = data != NULL ? strlen(data) : 0,
+        .headers = headers,
+        .header_count = 1,
         .max_response_bytes = BNU__HTTP_MAX_RESPONSE_BYTES,
     };
     bruce_http_response_t response = {0};
