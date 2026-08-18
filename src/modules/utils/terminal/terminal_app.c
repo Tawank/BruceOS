@@ -175,9 +175,15 @@ static void terminal__draw_grid(const terminal__state_t *state, uint16_t theme_f
     }
 }
 
-static void terminal__draw_cursor(const terminal__state_t *state, uint16_t theme_fg, uint16_t theme_bg) {
+/* `theme_fg`/`theme_bg` are the ANSI default foreground/background (primary/
+ * background - see terminal__draw_grid()); `theme_text` is the chrome text
+ * color the inverted glyph under the cursor block is drawn in, so it stays
+ * legible against theme_fg regardless of what theme_bg happens to be. */
+static void
+terminal__draw_cursor(const terminal__state_t *state, uint16_t theme_fg, uint16_t theme_bg, uint16_t theme_text) {
     const terminal_grid_t *grid = &state->grid;
     if (!grid->cursor_visible) return;
+    (void)theme_bg;
     int16_t x = TERMINAL__FRAME_MARGIN + (int16_t)(grid->cursor_x * TERMINAL__CHAR_W);
     int16_t y = TERMINAL__TITLE_H + grid->cursor_y * TERMINAL__CHAR_H;
     display__fill_rect(x, y, TERMINAL__CHAR_W, TERMINAL__CHAR_H, theme_fg);
@@ -187,7 +193,7 @@ static void terminal__draw_cursor(const terminal__state_t *state, uint16_t theme
         char glyph[5];
         memcpy(glyph, cell->utf8, cell->utf8_len);
         glyph[cell->utf8_len] = '\0';
-        display__set_text_color(theme_bg);
+        display__set_text_color(theme_text);
         display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
         display__set_cursor(x, y);
         display__print(glyph);
@@ -195,8 +201,9 @@ static void terminal__draw_cursor(const terminal__state_t *state, uint16_t theme
 }
 
 static bruce_result_t terminal__draw(const terminal__state_t *state) {
-    uint16_t foreground = config__get_theme_primary();
-    uint16_t background = config__get_theme_background();
+    uint16_t foreground = config__get_color_primary();
+    uint16_t background = config__get_color_background();
+    uint16_t text_color = config__get_color_text();
     int width = display__width();
     bruce_result_t result = display__begin_frame();
     if (result != BRUCE_OK) return result;
@@ -204,11 +211,11 @@ static bruce_result_t terminal__draw(const terminal__state_t *state) {
     display__fill_rect(0, 0, width, TERMINAL__TITLE_H, foreground);
     display__set_text_size(1);
     display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
-    display__set_text_color(background);
+    display__set_text_color(text_color);
     display__set_cursor(TERMINAL__FRAME_MARGIN, TERMINAL__FRAME_MARGIN);
     display__print(state->child != BRUCE_PROCESS_ID_INVALID ? "Terminal [running]" : "Terminal");
     terminal__draw_grid(state, foreground, background);
-    terminal__draw_cursor(state, foreground, background);
+    terminal__draw_cursor(state, foreground, background, text_color);
     return display__present();
 }
 

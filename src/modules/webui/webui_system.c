@@ -18,17 +18,23 @@
 bruce_result_t webui__theme(bruce_http_server_request_t *request, void *context) {
     (void)context;
     uint16_t colors[] = {
-        config__get_theme_primary(), config__get_theme_secondary(), config__get_theme_background()
+        config__get_color_primary(),   config__get_color_secondary(), config__get_color_background(),
+        config__get_color_surface(),   config__get_color_text(),      config__get_color_text_muted(),
+        config__get_color_border(),    config__get_color_success(),   config__get_color_warning(),
+        config__get_color_error(),
     };
-    char css[96];
+    char css[256];
     char *cursor = css;
     size_t left = sizeof(css);
     int count = snprintf(cursor, left, ":root{");
     if (count < 0 || (size_t)count >= left) return webui__reply_text(request, 500, "Theme failed");
     cursor += count;
     left -= (size_t)count;
-    const char *names[] = {"--color", "--sec-color", "--background"};
-    for (size_t i = 0; i < 3u; i++) {
+    const char *names[] = {
+        "--color",  "--sec-color", "--background", "--surface", "--text",
+        "--text-muted", "--border", "--success", "--warning", "--error",
+    };
+    for (size_t i = 0; i < sizeof(colors) / sizeof(colors[0]); i++) {
         uint16_t color = colors[i];
         unsigned r = ((color >> 11) & 0x1fu) * 255u / 31u;
         unsigned g = ((color >> 5) & 0x3fu) * 255u / 63u;

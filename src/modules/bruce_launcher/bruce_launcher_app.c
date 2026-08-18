@@ -39,6 +39,7 @@ typedef struct {
     uint16_t pri;
     uint16_t sec;
     uint16_t bg;
+    uint16_t text_muted;
 } bruce_launcher_theme_t;
 
 /* -------------------------------------------------------------------------- */
@@ -46,9 +47,10 @@ typedef struct {
 /* -------------------------------------------------------------------------- */
 
 static void bruce_launcher__get_theme(bruce_launcher_theme_t *theme) {
-    theme->pri = config__get_theme_primary();
-    theme->sec = config__get_theme_secondary();
-    theme->bg = config__get_theme_background();
+    theme->pri = config__get_color_primary();
+    theme->sec = config__get_color_secondary();
+    theme->bg = config__get_color_background();
+    theme->text_muted = config__get_color_text_muted();
 }
 
 static int bruce_launcher__submenu_font_size(void) {
@@ -205,9 +207,13 @@ static void bruce_launcher__draw_root_menu(
     int w = display__width();
     int h = display__height();
     if (menu->entry_count == 0) {
-        bruce_launcher__draw_centered_text(
-            "No entries", (h + BRUCE_LAUNCHER_STATUS_H) / 2, BRUCE_LAUNCHER_FONT_SMALL, theme
-        );
+        display__set_text_size(BRUCE_LAUNCHER_FONT_SMALL);
+        display__set_text_color(theme->text_muted);
+        display__set_text_bg_color(theme->bg);
+        const char *empty_label = "No entries";
+        int text_w = (int)strlen(empty_label) * BRUCE_LAUNCHER_FONT_ADVANCE * BRUCE_LAUNCHER_FONT_SMALL;
+        display__set_cursor((w - text_w) / 2, (h + BRUCE_LAUNCHER_STATUS_H) / 2);
+        display__print(empty_label);
         return;
     }
 

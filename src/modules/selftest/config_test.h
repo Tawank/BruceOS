@@ -4,3 +4,4 @@ bool selftest__run_config_permission_denied_case(void);
 bool selftest__run_config_permission_allowed_case(void);
 bool selftest__run_config_protected_field_denied_case(void);
 bool selftest__run_config_builtin_manage_case(void);
+bool selftest__run_config_theme_case(void);

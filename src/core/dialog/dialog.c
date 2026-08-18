@@ -211,37 +211,54 @@ static int dialog__default_list_text_size(void) {
                                                               : DIALOG__TEXT_SIZE;
 }
 
-static void dialog__get_theme_colors(uint16_t *pri, uint16_t *sec, uint16_t *bg) {
-    config__get_theme_colors_internal(pri, sec, bg);
+/* pri/sec/bg are the accent, secondary-accent, and full-screen-canvas
+ * colors; surface/border are for a raised bordered window on top of that
+ * canvas (see the render_window path in dialog__gui_choice()); text is the
+ * readable color drawn over pri/sec-filled chrome (title/footer bars) and
+ * over bg/surface bodies alike - a light theme can set it dark and every
+ * one of those spots stays legible without each caller guessing;
+ * success/warning/error are dialog__gui_message()'s BRUCE_DIALOG_SUCCESS /
+ * _WARNING / _ERROR title-bar accent. */
+static void dialog__get_colors(
+    uint16_t *pri, uint16_t *sec, uint16_t *bg, uint16_t *surface, uint16_t *text, uint16_t *text_muted,
+    uint16_t *border, uint16_t *success, uint16_t *warning, uint16_t *error
+) {
+    config__get_colors_internal(pri, sec, bg, surface, text, text_muted, border, success, warning, error);
 }
 
 static void dialog__gui_clear(void) {
-    uint16_t pri, sec, bg;
-    dialog__get_theme_colors(&pri, &sec, &bg);
+    uint16_t pri, sec, bg, surface, text, text_muted, border, success, warning, error;
+    dialog__get_colors(&pri, &sec, &bg, &surface, &text, &text_muted, &border, &success, &warning, &error);
     (void)display__fill_screen(bg);
 }
 
-static void dialog__gui_title_bar(const char *title) {
-    uint16_t pri, sec, bg;
-    dialog__get_theme_colors(&pri, &sec, &bg);
-
+/* `accent` fills the bar (normally the primary color, but
+ * dialog__gui_message() substitutes success/warning/error for its kind);
+ * `text` is the color its label is drawn in. */
+static void dialog__gui_title_bar_accent(const char *title, uint16_t accent, uint16_t text) {
     int w = display__width();
-    display__fill_rect(0, 0, w, DIALOG__CHAR_H + 4, pri);
-    display__set_text_color(BRUCE_COLOR_WHITE);
+    display__fill_rect(0, 0, w, DIALOG__CHAR_H + 4, accent);
+    display__set_text_color(text);
     display__set_text_size(DIALOG__TEXT_SIZE);
-    display__set_text_bg_color(pri);
+    display__set_text_bg_color(accent);
     display__set_cursor(DIALOG__MARGIN, DIALOG__MARGIN);
     display__print(title != NULL ? title : "");
 }
 
+static void dialog__gui_title_bar(const char *title) {
+    uint16_t pri, sec, bg, surface, text, text_muted, border, success, warning, error;
+    dialog__get_colors(&pri, &sec, &bg, &surface, &text, &text_muted, &border, &success, &warning, &error);
+    dialog__gui_title_bar_accent(title, pri, text);
+}
+
 static void dialog__gui_footer(const char *hint) {
-    uint16_t pri, sec, bg;
-    dialog__get_theme_colors(&pri, &sec, &bg);
+    uint16_t pri, sec, bg, surface, text, text_muted, border, success, warning, error;
+    dialog__get_colors(&pri, &sec, &bg, &surface, &text, &text_muted, &border, &success, &warning, &error);
 
     int w = display__width();
     int h = display__height();
     display__fill_rect(0, h - DIALOG__CHAR_H - 4, w, DIALOG__CHAR_H + 4, sec);
-    display__set_text_color(BRUCE_COLOR_WHITE);
+    display__set_text_color(text);
     display__set_text_size(DIALOG__TEXT_SIZE);
     display__set_text_bg_color(sec);
     display__set_cursor(DIALOG__MARGIN, h - DIALOG__CHAR_H - 2);
@@ -326,8 +343,8 @@ void dialog__set_window_renderer(const bruce_dialog_window_renderer_t *renderer,
 }
 
 bruce_dialog_render_params_t dialog__default_render_params(int text_size) {
-    uint16_t pri, sec, bg;
-    dialog__get_theme_colors(&pri, &sec, &bg);
+    uint16_t pri, sec, bg, surface, text, text_muted, border, success, warning, error;
+    dialog__get_colors(&pri, &sec, &bg, &surface, &text, &text_muted, &border, &success, &warning, &error);
     bruce_dialog_render_params_t params = {0};
     params.render_borders = true;
     params.text_size = text_size > 0 ? text_size : dialog__default_list_text_size();
@@ -350,21 +367,24 @@ static bruce_result_t dialog__gui_wait_for_any_key(void) {
 }
 
 static bruce_result_t dialog__gui_message(bruce_dialog_kind_t kind, const char *title, const char *message) {
-    (void)kind;
-    uint16_t pri, sec, bg;
-    dialog__get_theme_colors(&pri, &sec, &bg);
+    uint16_t pri, sec, bg, surface, text, text_muted, border, success, warning, error;
+    dialog__get_colors(&pri, &sec, &bg, &surface, &text, &text_muted, &border, &success, &warning, &error);
+    uint16_t accent = kind == BRUCE_DIALOG_SUCCESS ? success
+                      : kind == BRUCE_DIALOG_WARNING ? warning
+                      : kind == BRUCE_DIALOG_ERROR   ? error
+                                                      : pri;
 
     bruce_result_t frame_result = display__begin_frame();
     if (frame_result == BRUCE_ERR_NOT_FOREGROUND) { return BRUCE_ERR_CANCELLED; }
     if (frame_result != BRUCE_OK) { return frame_result; }
     (void)display__fill_screen(bg);
-    dialog__gui_title_bar(title);
+    dialog__gui_title_bar_accent(title, accent, text);
 
     int w = display__width();
     int max_chars = (w - 2 * DIALOG__MARGIN) / DIALOG__CHAR_W;
     if (max_chars < 1) { max_chars = 1; }
 
-    display__set_text_color(BRUCE_COLOR_WHITE);
+    display__set_text_color(text);
     display__set_text_size(DIALOG__TEXT_SIZE);
     display__set_text_bg_color(bg);
     display__set_cursor(DIALOG__MARGIN, DIALOG__CHAR_H + 8);
@@ -424,8 +444,12 @@ static bruce_result_t dialog__gui_choice(
                     : render_launcher                                     ? 1
                                                                           : dialog__default_list_text_size();
 
-    uint16_t pri, sec, bg;
-    dialog__get_theme_colors(&pri, &sec, &bg);
+    uint16_t pri, sec, bg, surface, text, text_muted, border, success, warning, error;
+    dialog__get_colors(&pri, &sec, &bg, &surface, &text, &text_muted, &border, &success, &warning, &error);
+    (void)text_muted;
+    (void)success;
+    (void)warning;
+    (void)error;
     bruce_display_color_t background_color =
         render_launcher ? bg : (render_params != NULL ? render_params->background_color : bg);
     bruce_display_color_t text_color =
@@ -485,20 +509,26 @@ static bruce_result_t dialog__gui_choice(
             }
 
             if (render_window) {
-                display__fill_round_rect(
-                    left, top, viewport_w, viewport_h, DIALOG__WINDOW_RADIUS, background_color
-                );
-                display__draw_round_rect(left, top, viewport_w, viewport_h, DIALOG__WINDOW_RADIUS, pri);
+                /* A bordered window floats a raised panel over whatever the
+                 * launcher already drew as background, so it uses the
+                 * surface/border pair rather than background_color/pri -
+                 * see dialog__get_colors(). */
+                display__fill_round_rect(left, top, viewport_w, viewport_h, DIALOG__WINDOW_RADIUS, surface);
+                display__draw_round_rect(left, top, viewport_w, viewport_h, DIALOG__WINDOW_RADIUS, border);
             } else {
                 display__fill_rect(left, top, viewport_w, viewport_h, background_color);
             }
+            /* The color actually painted behind body text: the surface fill
+             * in a bordered window, background_color everywhere else. */
+            bruce_display_color_t content_fill_color = render_window ? surface : background_color;
+
             if (title_h > 0) {
                 if (render_borders && !render_window) {
                     display__fill_rect(left, top, viewport_w, title_h, pri);
                 }
                 display__set_text_color(text_color);
                 display__set_text_size(DIALOG__TEXT_SIZE);
-                display__set_text_bg_color(render_borders && !render_window ? pri : background_color);
+                display__set_text_bg_color(render_borders && !render_window ? pri : content_fill_color);
                 display__set_cursor(content_left + DIALOG__MARGIN, content_top + DIALOG__MARGIN);
                 display__print(title != NULL ? title : "");
             }
@@ -506,7 +536,7 @@ static bruce_result_t dialog__gui_choice(
             if (message_h > 0) {
                 display__set_text_color(text_color);
                 display__set_text_size(DIALOG__TEXT_SIZE);
-                display__set_text_bg_color(background_color);
+                display__set_text_bg_color(content_fill_color);
                 display__set_cursor(content_left + DIALOG__MARGIN, content_top + title_h + 1);
                 display__print(message);
             }
@@ -1308,7 +1338,17 @@ static bruce_result_t dialog__viewer_draw(dialog__viewer_t *viewer, bool gui) {
     dialog__gui_clear();
     dialog__gui_title_bar(viewer->title);
 
-    display__set_text_color(BRUCE_COLOR_WHITE);
+    uint16_t pri, sec, bg, surface, text, text_muted, border, success, warning, error;
+    dialog__get_colors(&pri, &sec, &bg, &surface, &text, &text_muted, &border, &success, &warning, &error);
+    (void)pri;
+    (void)sec;
+    (void)surface;
+    (void)text_muted;
+    (void)border;
+    (void)success;
+    (void)warning;
+    (void)error;
+    display__set_text_color(text);
     display__set_text_size((uint8_t)viewer->text_size);
     display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
 

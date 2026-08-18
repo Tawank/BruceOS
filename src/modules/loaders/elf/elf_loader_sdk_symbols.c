@@ -149,9 +149,16 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
 
     /* Read-only application preferences. Protected values enforce config
      * permission in Core. */
-    ESP_ELFSYM_EXPORT(config__get_theme_primary),
-    ESP_ELFSYM_EXPORT(config__get_theme_secondary),
-    ESP_ELFSYM_EXPORT(config__get_theme_background),
+    ESP_ELFSYM_EXPORT(config__get_color_primary),
+    ESP_ELFSYM_EXPORT(config__get_color_secondary),
+    ESP_ELFSYM_EXPORT(config__get_color_background),
+    ESP_ELFSYM_EXPORT(config__get_color_surface),
+    ESP_ELFSYM_EXPORT(config__get_color_text),
+    ESP_ELFSYM_EXPORT(config__get_color_text_muted),
+    ESP_ELFSYM_EXPORT(config__get_color_border),
+    ESP_ELFSYM_EXPORT(config__get_color_success),
+    ESP_ELFSYM_EXPORT(config__get_color_warning),
+    ESP_ELFSYM_EXPORT(config__get_color_error),
     ESP_ELFSYM_EXPORT(config__get_time_clock24hr),
 
     /* AppRunner / loader */

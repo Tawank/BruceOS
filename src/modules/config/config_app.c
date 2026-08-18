@@ -9,10 +9,13 @@
 #include "core_sdk/result.h"
 #include "core_sdk/runtime.h"
 #include "core_sdk/stdio.h"
+#include "theme_presets.h"
 
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 static int config_app__show_clock(void) {
     bool automatic = config__get_time_automatic_update_via_ntp();
@@ -401,6 +404,144 @@ static int config_app__display_cli(
     return BRUCE_ERR_INVALID_ARGUMENT;
 }
 
+/* Named theme selection. Core (core_sdk/config.h) only stores and validates
+ * the ten color_* roles; the catalog of names in theme_presets.h and the
+ * UI/CLI to pick one are this module's job. */
+
+static bruce_result_t config_app__theme_apply_preset(const config_app__theme_preset_t *preset) {
+    bruce_result_t result = config__set_color_primary(preset->primary);
+    if (result == BRUCE_OK) result = config__set_color_secondary(preset->secondary);
+    if (result == BRUCE_OK) result = config__set_color_background(preset->background);
+    if (result == BRUCE_OK) result = config__set_color_surface(preset->surface);
+    if (result == BRUCE_OK) result = config__set_color_text(preset->text);
+    if (result == BRUCE_OK) result = config__set_color_text_muted(preset->text_muted);
+    if (result == BRUCE_OK) result = config__set_color_border(preset->border);
+    if (result == BRUCE_OK) result = config__set_color_success(preset->success);
+    if (result == BRUCE_OK) result = config__set_color_warning(preset->warning);
+    if (result == BRUCE_OK) result = config__set_color_error(preset->error);
+    return result;
+}
+
+/* Case-insensitive, and treats '-'/'_' as interchangeable with a space, so
+ * "Dark Gray", "dark-gray", and "dark_gray" all match the same preset --
+ * that lets the CLI form skip shell-quoting a multi-word name. */
+static bool config_app__theme_name_matches(const char *a, const char *b) {
+    for (;;) {
+        char ca = *a, cb = *b;
+        if (ca == '-' || ca == '_') ca = ' ';
+        if (cb == '-' || cb == '_') cb = ' ';
+        if (tolower((unsigned char)ca) != tolower((unsigned char)cb)) return false;
+        if (ca == '\0') return true;
+        a++;
+        b++;
+    }
+}
+
+static const config_app__theme_preset_t *config_app__find_theme_preset(const char *name) {
+    if (name == NULL) return NULL;
+    for (size_t i = 0; i < CONFIG_APP__THEME_PRESET_COUNT; ++i) {
+        if (config_app__theme_name_matches(name, CONFIG_APP__THEME_PRESETS[i].name)) {
+            return &CONFIG_APP__THEME_PRESETS[i];
+        }
+    }
+    return NULL;
+}
+
+static int config_app__theme_list_cli(void) {
+    for (size_t i = 0; i < CONFIG_APP__THEME_PRESET_COUNT; ++i) {
+        stdio__printf("%s\n", CONFIG_APP__THEME_PRESETS[i].name);
+    }
+    return BRUCE_OK;
+}
+
+static int config_app__theme_show_colors(void) {
+    stdio__printf(
+        "primary=%04x secondary=%04x background=%04x\n",
+        config__get_color_primary(),
+        config__get_color_secondary(),
+        config__get_color_background()
+    );
+    stdio__printf(
+        "surface=%04x text=%04x textMuted=%04x border=%04x\n",
+        config__get_color_surface(),
+        config__get_color_text(),
+        config__get_color_text_muted(),
+        config__get_color_border()
+    );
+    stdio__printf(
+        "success=%04x warning=%04x error=%04x\n",
+        config__get_color_success(),
+        config__get_color_warning(),
+        config__get_color_error()
+    );
+    return BRUCE_OK;
+}
+
+static int config_app__theme_set_cli(const char *name) {
+    const config_app__theme_preset_t *preset = config_app__find_theme_preset(name);
+    if (preset == NULL) {
+        stdio__printf("theme: unknown preset '%s' (see 'config theme list')\n", name != NULL ? name : "");
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    bruce_result_t result = config_app__theme_apply_preset(preset);
+    if (result != BRUCE_OK) stdio__printf("theme: failed to apply '%s' (%d)\n", preset->name, result);
+    return result;
+}
+
+/* `role` is one of the ten color_* names in core_sdk/config.h (textMuted may
+ * also be written text-muted/text_muted); `hex` is anything
+ * config__parse_theme_color() accepts. */
+static bruce_result_t config_app__theme_set_color(const char *role, const char *hex) {
+    uint16_t value;
+    if (role == NULL || !config__parse_theme_color(hex, &value)) return BRUCE_ERR_INVALID_ARGUMENT;
+    if (strcasecmp(role, "primary") == 0) return config__set_color_primary(value);
+    if (strcasecmp(role, "secondary") == 0) return config__set_color_secondary(value);
+    if (strcasecmp(role, "background") == 0) return config__set_color_background(value);
+    if (strcasecmp(role, "surface") == 0) return config__set_color_surface(value);
+    if (strcasecmp(role, "text") == 0) return config__set_color_text(value);
+    if (strcasecmp(role, "textmuted") == 0 || strcasecmp(role, "text-muted") == 0 ||
+        strcasecmp(role, "text_muted") == 0)
+        return config__set_color_text_muted(value);
+    if (strcasecmp(role, "border") == 0) return config__set_color_border(value);
+    if (strcasecmp(role, "success") == 0) return config__set_color_success(value);
+    if (strcasecmp(role, "warning") == 0) return config__set_color_warning(value);
+    if (strcasecmp(role, "error") == 0) return config__set_color_error(value);
+    return BRUCE_ERR_INVALID_ARGUMENT;
+}
+
+static int config_app__theme_set_color_cli(const char *role, const char *hex) {
+    bruce_result_t result = config_app__theme_set_color(role, hex);
+    if (result != BRUCE_OK) stdio__printf("theme: unknown role or invalid color\n");
+    return result;
+}
+
+static int config_app__theme_gui(void) {
+    for (;;) {
+        size_t capacity = CONFIG_APP__THEME_PRESET_COUNT + 1;
+        bruce_dialog_choice_t *choices = memory__calloc(capacity, sizeof(*choices));
+        if (choices == NULL) return BRUCE_ERR_NO_MEMORY;
+        size_t count = 0;
+        for (; count < CONFIG_APP__THEME_PRESET_COUNT; ++count) {
+            choices[count] = (bruce_dialog_choice_t){
+                .label = CONFIG_APP__THEME_PRESETS[count].name, .value = CONFIG_APP__THEME_PRESETS[count].name
+            };
+        }
+        choices[count] = (bruce_dialog_choice_t){.label = "Back", .value = "back"};
+        count++;
+        size_t selected = 0;
+        bruce_result_t result = dialog__choice_launcher("Theme", NULL, choices, count, &selected);
+        bool back = result == BRUCE_ERR_CANCELLED ||
+                    (result == BRUCE_OK && strcmp(choices[selected].value, "back") == 0);
+        if (!back && result == BRUCE_OK) {
+            const config_app__theme_preset_t *preset = config_app__find_theme_preset(choices[selected].value);
+            if (preset != NULL) result = config_app__theme_apply_preset(preset);
+        }
+        memory__free(choices);
+        if (back) return BRUCE_OK;
+        if (result != BRUCE_OK) return result;
+    }
+}
+
 int config_app_main(int argc, char **argv) {
     ArgParser *root = ap_new_parser();
     if (root == NULL) return BRUCE_ERR_NO_MEMORY;
@@ -423,6 +564,11 @@ int config_app_main(int argc, char **argv) {
     ArgParser *display_brightness = display != NULL ? ap_new_cmd(display, "brightness") : NULL;
     ArgParser *display_dim = display != NULL ? ap_new_cmd(display, "dim") : NULL;
     ArgParser *display_rotation = display != NULL ? ap_new_cmd(display, "rotation") : NULL;
+    ArgParser *theme = ap_new_cmd(root, "theme");
+    ArgParser *theme_list = theme != NULL ? ap_new_cmd(theme, "list") : NULL;
+    ArgParser *theme_set = theme != NULL ? ap_new_cmd(theme, "set") : NULL;
+    ArgParser *theme_get = theme != NULL ? ap_new_cmd(theme, "get") : NULL;
+    ArgParser *theme_set_color = theme != NULL ? ap_new_cmd(theme, "set-color") : NULL;
     ArgParser *parsers[] = {
         system,
         clock,
@@ -441,6 +587,11 @@ int config_app_main(int argc, char **argv) {
         display_brightness,
         display_dim,
         display_rotation,
+        theme,
+        theme_list,
+        theme_set,
+        theme_get,
+        theme_set_color,
     };
     for (size_t i = 0; i < sizeof(parsers) / sizeof(parsers[0]); ++i) {
         if (parsers[i] == NULL) {
@@ -479,6 +630,17 @@ int config_app_main(int argc, char **argv) {
     ap_add_optional_arg(display_dim, "seconds", "0 to 60, 0 = off (required outside GUI mode)");
     ap_set_helptext(display_rotation, "Set the display orientation.");
     ap_add_optional_arg(display_rotation, "degrees", "0, 90, 180, or 270 (required outside GUI mode)");
+    ap_set_helptext(theme, "Select or inspect the UI color theme.");
+    ap_set_helptext(theme_list, "List available theme presets.");
+    ap_set_helptext(theme_set, "Apply a named theme preset (see 'theme list').");
+    ap_add_required_arg(theme_set, "name", "Preset name, e.g. Dracula or \"Dark Gray\"");
+    ap_set_helptext(theme_get, "Show the ten active theme colors as RGB565 hex.");
+    ap_set_helptext(theme_set_color, "Set one theme color role directly.");
+    ap_add_required_arg(
+        theme_set_color, "role",
+        "primary, secondary, background, surface, text, textMuted, border, success, warning, or error"
+    );
+    ap_add_required_arg(theme_set_color, "color", "RGB or RRGGBB hex, with or without '#'");
 
     if (!ap_parse(root, argc, argv)) {
         ap_status_t status = ap_get_status(root);
@@ -491,6 +653,7 @@ int config_app_main(int argc, char **argv) {
     bool clock_hierarchy = root_action == system && ap_get_cmd_parser(system) == clock;
     bool startup_hierarchy = root_action == startup;
     bool display_hierarchy = root_action == display;
+    bool theme_hierarchy = root_action == theme;
     bool gui = runtime__gui_requested();
     int result;
     if (clock_hierarchy) {
@@ -503,6 +666,17 @@ int config_app_main(int argc, char **argv) {
                      : config_app__display_cli(
                            display, display_buffered, display_brightness, display_dim, display_rotation
                        );
+    } else if (theme_hierarchy) {
+        ArgParser *theme_action = ap_get_cmd_parser(theme);
+        if (theme_action == NULL) result = gui ? config_app__theme_gui() : config_app__theme_show_colors();
+        else if (theme_action == theme_list) result = config_app__theme_list_cli();
+        else if (theme_action == theme_get) result = config_app__theme_show_colors();
+        else if (theme_action == theme_set) result = config_app__theme_set_cli(ap_get_arg(theme_set, "name"));
+        else if (theme_action == theme_set_color) {
+            result = config_app__theme_set_color_cli(
+                ap_get_arg(theme_set_color, "role"), ap_get_arg(theme_set_color, "color")
+            );
+        } else result = BRUCE_ERR_INVALID_ARGUMENT;
     } else {
         result = BRUCE_ERR_INVALID_ARGUMENT;
     }

@@ -36,9 +36,16 @@
  * enforced when a value is set, not fixed buffer sizes. */
 typedef struct {
     /* Theme / display (RGB565 colors) */
-    uint16_t themePrimaryColor;
-    uint16_t themeSecondaryColor;
-    uint16_t themeBackgroundColor;
+    uint16_t colorPrimary;
+    uint16_t colorSecondary;
+    uint16_t colorBackground;
+    uint16_t colorSurface;
+    uint16_t colorText;
+    uint16_t colorTextMuted;
+    uint16_t colorBorder;
+    uint16_t colorSuccess;
+    uint16_t colorWarning;
+    uint16_t colorError;
     int displayRotation;
     bool displayBufferedRendering;
     bool displayDmaFramebuffer;
@@ -87,14 +94,18 @@ bool config__factory_reset(void);
 /* Reads settings needed by Core audio without applying app config permission. */
 void config__get_audio_settings(bool *enabled, int *volume);
 
-/* Reads the theme colors Core's own dialog renderer needs to draw any UI
- * chrome (title bars, footers, backgrounds) without applying app config
- * permission - see config__get_theme_colors_internal() in config.c for why:
- * the public core_sdk/config.h getters return black (0) when the calling
- * process lacks "config", which would make dialog.c draw every screen -
- * including the permission-request dialog itself - in unreadable black on
- * black. */
-void config__get_theme_colors_internal(uint16_t *pri, uint16_t *sec, uint16_t *bg);
+/* Reads all ten colors Core's own dialog renderer needs to draw any UI
+ * chrome (title bars, footers, backgrounds, bordered windows, and a
+ * success/warning/error dialog__message() accent) without applying app
+ * config permission - see config__get_colors_internal() in config.c for
+ * why: the public core_sdk/config.h getters return black (0) when the
+ * calling process lacks "config", which would make dialog.c draw every
+ * screen - including the permission-request dialog itself - in unreadable
+ * black on black. */
+void config__get_colors_internal(
+    uint16_t *pri, uint16_t *sec, uint16_t *bg, uint16_t *surface, uint16_t *text, uint16_t *text_muted,
+    uint16_t *border, uint16_t *success, uint16_t *warning, uint16_t *error
+);
 
 /* Compatibility initializer. New callers should use config__init(). */
 void config__init_defaults(void);

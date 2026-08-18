@@ -331,3 +331,103 @@ bool selftest__run_config_builtin_manage_case(void) {
     );
     return ok;
 }
+
+/* ------------------------------------------------------------------------ */
+/* selftest__run_config_theme_case                                          */
+/* ------------------------------------------------------------------------ */
+
+/* Covers Core's ten color_* roles (round-trip + config__parse_theme_color()'s
+ * tolerant hex forms) and modules/config's `theme` subcommand, which owns
+ * the named-preset catalog Core deliberately has no notion of (see
+ * core_sdk/config.h). */
+bool selftest__run_config_theme_case(void) {
+    uint16_t original_primary = config__get_color_primary();
+    uint16_t original_secondary = config__get_color_secondary();
+    uint16_t original_background = config__get_color_background();
+    uint16_t original_surface = config__get_color_surface();
+    uint16_t original_text = config__get_color_text();
+    uint16_t original_text_muted = config__get_color_text_muted();
+    uint16_t original_border = config__get_color_border();
+    uint16_t original_success = config__get_color_success();
+    uint16_t original_warning = config__get_color_warning();
+    uint16_t original_error = config__get_color_error();
+
+    bool set_ok = config__set_color_primary(0x1234) == BRUCE_OK &&
+                 config__set_color_secondary(0x2345) == BRUCE_OK &&
+                 config__set_color_background(0x3456) == BRUCE_OK &&
+                 config__set_color_surface(0x4567) == BRUCE_OK && config__set_color_text(0x5678) == BRUCE_OK &&
+                 config__set_color_text_muted(0x6789) == BRUCE_OK &&
+                 config__set_color_border(0x789A) == BRUCE_OK && config__set_color_success(0x89AB) == BRUCE_OK &&
+                 config__set_color_warning(0x9ABC) == BRUCE_OK && config__set_color_error(0xABCD) == BRUCE_OK;
+    bool roundtrip = set_ok && config__get_color_primary() == 0x1234 &&
+                     config__get_color_secondary() == 0x2345 && config__get_color_background() == 0x3456 &&
+                     config__get_color_surface() == 0x4567 && config__get_color_text() == 0x5678 &&
+                     config__get_color_text_muted() == 0x6789 && config__get_color_border() == 0x789A &&
+                     config__get_color_success() == 0x89AB && config__get_color_warning() == 0x9ABC &&
+                     config__get_color_error() == 0xABCD;
+
+    /* Native RGB565, "#RRGGBB", "RRGGBB", and "#RGB" shorthand all parse;
+     * garbage and empty/NULL input are rejected. */
+    uint16_t parsed = 0;
+    bool parse_native = config__parse_theme_color("a80f", &parsed) && parsed == 0xA80F;
+    bool parse_rgb888_hash = config__parse_theme_color("#FF0000", &parsed) && parsed == 0xF800;
+    bool parse_rgb888 = config__parse_theme_color("00FF00", &parsed) && parsed == 0x07E0;
+    bool parse_shorthand = config__parse_theme_color("#00F", &parsed) && parsed == 0x001F;
+    bool parse_invalid = !config__parse_theme_color("zz", &parsed) && !config__parse_theme_color("", &parsed) &&
+                         !config__parse_theme_color(NULL, &parsed);
+
+    char *json = NULL;
+    size_t json_size = 0;
+    bool read_json = storage__read_file(CONFIG__FILE_PATH, &json, &json_size);
+    bool schema = read_json && json_size > 0 && strstr(json, "\"surface\"") != NULL &&
+                 strstr(json, "\"textMuted\"") != NULL && strstr(json, "\"border\"") != NULL &&
+                 strstr(json, "\"success\"") != NULL && strstr(json, "\"warning\"") != NULL &&
+                 strstr(json, "\"error\"") != NULL;
+    storage__free(json);
+
+    char *theme_set_argv[] = {"config", "theme", "set", "Dracula"};
+    bruce_result_t cli_set = config_app_main(4, theme_set_argv);
+    bool preset_applied = cli_set == BRUCE_OK && config__get_color_primary() == 0xBC9F &&
+                          config__get_color_background() == 0x2946;
+
+    /* "dark-gray" matches the "Dark Gray" preset name case- and
+     * separator-insensitively, so a CLI caller doesn't need to shell-quote
+     * a multi-word name. */
+    char *theme_alias_argv[] = {"config", "theme", "set", "dark-gray"};
+    bruce_result_t cli_alias = config_app_main(4, theme_alias_argv);
+    bool alias_applied = cli_alias == BRUCE_OK && config__get_color_primary() == 0x8430;
+
+    char *theme_set_color_argv[] = {"config", "theme", "set-color", "error", "#123456"};
+    bruce_result_t cli_set_color = config_app_main(5, theme_set_color_argv);
+    bool set_color_applied = cli_set_color == BRUCE_OK && config__get_color_error() == 0x11AA;
+
+    char *theme_bad_argv[] = {"config", "theme", "set", "not-a-real-theme"};
+    bruce_result_t cli_bad = config_app_main(4, theme_bad_argv);
+    bool bad_rejected = cli_bad != BRUCE_OK;
+
+    bool restored = config__set_color_primary(original_primary) == BRUCE_OK &&
+                    config__set_color_secondary(original_secondary) == BRUCE_OK &&
+                    config__set_color_background(original_background) == BRUCE_OK &&
+                    config__set_color_surface(original_surface) == BRUCE_OK &&
+                    config__set_color_text(original_text) == BRUCE_OK &&
+                    config__set_color_text_muted(original_text_muted) == BRUCE_OK &&
+                    config__set_color_border(original_border) == BRUCE_OK &&
+                    config__set_color_success(original_success) == BRUCE_OK &&
+                    config__set_color_warning(original_warning) == BRUCE_OK &&
+                    config__set_color_error(original_error) == BRUCE_OK;
+
+    bool parsing = parse_native && parse_rgb888_hash && parse_rgb888 && parse_shorthand && parse_invalid;
+    bool ok = roundtrip && parsing && schema && preset_applied && alias_applied && set_color_applied &&
+              bad_rejected && restored;
+    printf(
+        "[selftest] config/theme: %s (roundtrip=%d parse=%d preset=%d alias=%d setcolor=%d schema=%d)\n",
+        ok ? "OK" : "FAIL",
+        roundtrip,
+        parsing,
+        preset_applied,
+        alias_applied,
+        set_color_applied,
+        schema
+    );
+    return ok;
+}

@@ -290,9 +290,16 @@ static uint32_t wasm_config__get_time_clock24hr(wasm_exec_env_t exec_env) {
         return (uint32_t)function();                                                                          \
     }
 
-WASM_SCALAR_U32_WRAPPER(wasm_config__get_theme_primary, config__get_theme_primary)
-WASM_SCALAR_U32_WRAPPER(wasm_config__get_theme_secondary, config__get_theme_secondary)
-WASM_SCALAR_U32_WRAPPER(wasm_config__get_theme_background, config__get_theme_background)
+WASM_SCALAR_U32_WRAPPER(wasm_config__get_color_primary, config__get_color_primary)
+WASM_SCALAR_U32_WRAPPER(wasm_config__get_color_secondary, config__get_color_secondary)
+WASM_SCALAR_U32_WRAPPER(wasm_config__get_color_background, config__get_color_background)
+WASM_SCALAR_U32_WRAPPER(wasm_config__get_color_surface, config__get_color_surface)
+WASM_SCALAR_U32_WRAPPER(wasm_config__get_color_text, config__get_color_text)
+WASM_SCALAR_U32_WRAPPER(wasm_config__get_color_text_muted, config__get_color_text_muted)
+WASM_SCALAR_U32_WRAPPER(wasm_config__get_color_border, config__get_color_border)
+WASM_SCALAR_U32_WRAPPER(wasm_config__get_color_success, config__get_color_success)
+WASM_SCALAR_U32_WRAPPER(wasm_config__get_color_warning, config__get_color_warning)
+WASM_SCALAR_U32_WRAPPER(wasm_config__get_color_error, config__get_color_error)
 WASM_SCALAR_U32_WRAPPER(wasm_display__width, display__width)
 WASM_SCALAR_U32_WRAPPER(wasm_display__height, display__height)
 WASM_NO_ARG_RESULT_WRAPPER(wasm_display__begin_frame, display__begin_frame)
@@ -513,9 +520,16 @@ static NativeSymbol s_native_symbols[] = {
     BRUCE_WASM_NATIVE("memory__malloc", wasm_memory__malloc, "(i)i"),
     BRUCE_WASM_NATIVE("memory__free", wasm_memory__free, "(i)"),
     BRUCE_WASM_NATIVE("config__get_time_clock24hr", wasm_config__get_time_clock24hr, "()i"),
-    BRUCE_WASM_NATIVE("config__get_theme_primary", wasm_config__get_theme_primary, "()i"),
-    BRUCE_WASM_NATIVE("config__get_theme_secondary", wasm_config__get_theme_secondary, "()i"),
-    BRUCE_WASM_NATIVE("config__get_theme_background", wasm_config__get_theme_background, "()i"),
+    BRUCE_WASM_NATIVE("config__get_color_primary", wasm_config__get_color_primary, "()i"),
+    BRUCE_WASM_NATIVE("config__get_color_secondary", wasm_config__get_color_secondary, "()i"),
+    BRUCE_WASM_NATIVE("config__get_color_background", wasm_config__get_color_background, "()i"),
+    BRUCE_WASM_NATIVE("config__get_color_surface", wasm_config__get_color_surface, "()i"),
+    BRUCE_WASM_NATIVE("config__get_color_text", wasm_config__get_color_text, "()i"),
+    BRUCE_WASM_NATIVE("config__get_color_text_muted", wasm_config__get_color_text_muted, "()i"),
+    BRUCE_WASM_NATIVE("config__get_color_border", wasm_config__get_color_border, "()i"),
+    BRUCE_WASM_NATIVE("config__get_color_success", wasm_config__get_color_success, "()i"),
+    BRUCE_WASM_NATIVE("config__get_color_warning", wasm_config__get_color_warning, "()i"),
+    BRUCE_WASM_NATIVE("config__get_color_error", wasm_config__get_color_error, "()i"),
     BRUCE_WASM_NATIVE("display__width", wasm_display__width, "()i"),
     BRUCE_WASM_NATIVE("display__height", wasm_display__height, "()i"),
     BRUCE_WASM_NATIVE("display__begin_frame", wasm_display__begin_frame, "()i"),

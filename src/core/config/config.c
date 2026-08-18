@@ -92,9 +92,16 @@ static void config__set_defaults(config__t *cfg) {
     config__free_config(cfg);
     memset(cfg, 0, sizeof(*cfg));
 
-    cfg->themePrimaryColor = 0xA80F;
-    cfg->themeSecondaryColor = 0xA80F - 0x2000;
-    cfg->themeBackgroundColor = 0x0000;
+    cfg->colorPrimary = 0xA80F;
+    cfg->colorSecondary = 0xA80F - 0x2000;
+    cfg->colorBackground = 0x0000;
+    cfg->colorSurface = 0x1082;
+    cfg->colorText = 0xFFFF;
+    cfg->colorTextMuted = 0x8410;
+    cfg->colorBorder = 0x4208;
+    cfg->colorSuccess = 0x07E0;
+    cfg->colorWarning = 0xFD20;
+    cfg->colorError = 0xF800;
     cfg->displayRotation = 0;
     cfg->displayBufferedRendering = true;
     cfg->displayDmaFramebuffer = true;
@@ -208,10 +215,49 @@ static void json_get_bool(const cJSON *object, const char *key, bool *out) {
     if (cJSON_IsBool(item)) *out = cJSON_IsTrue(item);
 }
 
+static int config__hex_nibble(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+/* See core_sdk/config.h for the accepted forms. */
+bool config__parse_theme_color(const char *text, uint16_t *out_rgb565) {
+    if (text == NULL || out_rgb565 == NULL || text[0] == '\0') return false;
+    if (text[0] == '#') text++;
+    size_t length = strlen(text);
+    for (size_t i = 0; i < length; ++i) {
+        if (config__hex_nibble(text[i]) < 0) return false;
+    }
+    if (length == 3) {
+        /* CSS shorthand "RGB": each nibble doubled into a byte (0xA -> 0xAA). */
+        unsigned r = (unsigned)config__hex_nibble(text[0]) * 0x11u;
+        unsigned g = (unsigned)config__hex_nibble(text[1]) * 0x11u;
+        unsigned b = (unsigned)config__hex_nibble(text[2]) * 0x11u;
+        *out_rgb565 = (uint16_t)(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
+        return true;
+    }
+    if (length == 6) {
+        /* 24-bit "RRGGBB" downsampled to RGB565. */
+        unsigned long value = strtoul(text, NULL, 16);
+        unsigned r = (unsigned)((value >> 16) & 0xFFu);
+        unsigned g = (unsigned)((value >> 8) & 0xFFu);
+        unsigned b = (unsigned)(value & 0xFFu);
+        *out_rgb565 = (uint16_t)(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
+        return true;
+    }
+    if (length == 4) {
+        /* Already native RGB565. */
+        *out_rgb565 = (uint16_t)strtoul(text, NULL, 16);
+        return true;
+    }
+    return false;
+}
+
 static void json_get_hex16(const cJSON *object, const char *key, uint16_t *out) {
     const cJSON *item = cJSON_GetObjectItemCaseSensitive(object, key);
-    if (cJSON_IsString(item) && item->valuestring != NULL)
-        *out = (uint16_t)strtoul(item->valuestring, NULL, 16);
+    if (cJSON_IsString(item) && item->valuestring != NULL) config__parse_theme_color(item->valuestring, out);
 }
 
 static void json_get_hex32(const cJSON *object, const char *key, uint32_t *out) {
@@ -229,9 +275,16 @@ static void config__parse_json(config__t *cfg, const cJSON *root) {
 
     const cJSON *theme = cJSON_GetObjectItemCaseSensitive(root, "theme");
     if (cJSON_IsObject(theme)) {
-        json_get_hex16(theme, "primary", &cfg->themePrimaryColor);
-        json_get_hex16(theme, "secondary", &cfg->themeSecondaryColor);
-        json_get_hex16(theme, "background", &cfg->themeBackgroundColor);
+        json_get_hex16(theme, "primary", &cfg->colorPrimary);
+        json_get_hex16(theme, "secondary", &cfg->colorSecondary);
+        json_get_hex16(theme, "background", &cfg->colorBackground);
+        json_get_hex16(theme, "surface", &cfg->colorSurface);
+        json_get_hex16(theme, "text", &cfg->colorText);
+        json_get_hex16(theme, "textMuted", &cfg->colorTextMuted);
+        json_get_hex16(theme, "border", &cfg->colorBorder);
+        json_get_hex16(theme, "success", &cfg->colorSuccess);
+        json_get_hex16(theme, "warning", &cfg->colorWarning);
+        json_get_hex16(theme, "error", &cfg->colorError);
     }
 
     const cJSON *display = cJSON_GetObjectItemCaseSensitive(root, "display");
@@ -346,12 +399,26 @@ static cJSON *config__build_json(const config__t *cfg) {
 
     char hex[16];
     cJSON *theme = cJSON_AddObjectToObject(root, "theme");
-    snprintf(hex, sizeof(hex), "%x", cfg->themePrimaryColor);
+    snprintf(hex, sizeof(hex), "%x", cfg->colorPrimary);
     cJSON_AddStringToObject(theme, "primary", hex);
-    snprintf(hex, sizeof(hex), "%x", cfg->themeSecondaryColor);
+    snprintf(hex, sizeof(hex), "%x", cfg->colorSecondary);
     cJSON_AddStringToObject(theme, "secondary", hex);
-    snprintf(hex, sizeof(hex), "%x", cfg->themeBackgroundColor);
+    snprintf(hex, sizeof(hex), "%x", cfg->colorBackground);
     cJSON_AddStringToObject(theme, "background", hex);
+    snprintf(hex, sizeof(hex), "%x", cfg->colorSurface);
+    cJSON_AddStringToObject(theme, "surface", hex);
+    snprintf(hex, sizeof(hex), "%x", cfg->colorText);
+    cJSON_AddStringToObject(theme, "text", hex);
+    snprintf(hex, sizeof(hex), "%x", cfg->colorTextMuted);
+    cJSON_AddStringToObject(theme, "textMuted", hex);
+    snprintf(hex, sizeof(hex), "%x", cfg->colorBorder);
+    cJSON_AddStringToObject(theme, "border", hex);
+    snprintf(hex, sizeof(hex), "%x", cfg->colorSuccess);
+    cJSON_AddStringToObject(theme, "success", hex);
+    snprintf(hex, sizeof(hex), "%x", cfg->colorWarning);
+    cJSON_AddStringToObject(theme, "warning", hex);
+    snprintf(hex, sizeof(hex), "%x", cfg->colorError);
+    cJSON_AddStringToObject(theme, "error", hex);
 
     cJSON *display = cJSON_AddObjectToObject(root, "display");
     cJSON_AddNumberToObject(display, "rotation", cfg->displayRotation);
@@ -764,9 +831,16 @@ CONFIG__DEFINE_STRING_FIELD_GUARDED(wifi_mac, wifiMac, CONFIG__WIFI_MAC_MAX_LEN,
 
 /* ---- `config`-permission-gated fields ------------------------------------ */
 
-CONFIG__DEFINE_UINT16_FIELD(theme_primary, themePrimaryColor)
-CONFIG__DEFINE_UINT16_FIELD(theme_secondary, themeSecondaryColor)
-CONFIG__DEFINE_UINT16_FIELD(theme_background, themeBackgroundColor)
+CONFIG__DEFINE_UINT16_FIELD(color_primary, colorPrimary)
+CONFIG__DEFINE_UINT16_FIELD(color_secondary, colorSecondary)
+CONFIG__DEFINE_UINT16_FIELD(color_background, colorBackground)
+CONFIG__DEFINE_UINT16_FIELD(color_surface, colorSurface)
+CONFIG__DEFINE_UINT16_FIELD(color_text, colorText)
+CONFIG__DEFINE_UINT16_FIELD(color_text_muted, colorTextMuted)
+CONFIG__DEFINE_UINT16_FIELD(color_border, colorBorder)
+CONFIG__DEFINE_UINT16_FIELD(color_success, colorSuccess)
+CONFIG__DEFINE_UINT16_FIELD(color_warning, colorWarning)
+CONFIG__DEFINE_UINT16_FIELD(color_error, colorError)
 CONFIG__DEFINE_INT_FIELD(display_rotation, displayRotation)
 CONFIG__DEFINE_BOOL_FIELD(display_buffered_rendering, displayBufferedRendering)
 CONFIG__DEFINE_BOOL_FIELD(display_dma_framebuffer, displayDmaFramebuffer)
@@ -794,18 +868,37 @@ void config__get_audio_settings(bool *enabled, int *volume) {
     config__unlock();
 }
 
-void config__get_theme_colors_internal(uint16_t *pri, uint16_t *sec, uint16_t *bg) {
-    if (pri == NULL || sec == NULL || bg == NULL) return;
+void config__get_colors_internal(
+    uint16_t *pri, uint16_t *sec, uint16_t *bg, uint16_t *surface, uint16_t *text, uint16_t *text_muted,
+    uint16_t *border, uint16_t *success, uint16_t *warning, uint16_t *error
+) {
+    if (pri == NULL || sec == NULL || bg == NULL || surface == NULL || text == NULL || text_muted == NULL ||
+        border == NULL || success == NULL || warning == NULL || error == NULL)
+        return;
     if (!config__init()) {
         *pri = 0;
         *sec = 0;
         *bg = 0;
+        *surface = 0;
+        *text = 0;
+        *text_muted = 0;
+        *border = 0;
+        *success = 0;
+        *warning = 0;
+        *error = 0;
         return;
     }
     config__lock();
-    *pri = s_config.themePrimaryColor;
-    *sec = s_config.themeSecondaryColor;
-    *bg = s_config.themeBackgroundColor;
+    *pri = s_config.colorPrimary;
+    *sec = s_config.colorSecondary;
+    *bg = s_config.colorBackground;
+    *surface = s_config.colorSurface;
+    *text = s_config.colorText;
+    *text_muted = s_config.colorTextMuted;
+    *border = s_config.colorBorder;
+    *success = s_config.colorSuccess;
+    *warning = s_config.colorWarning;
+    *error = s_config.colorError;
     config__unlock();
 }
 CONFIG__DEFINE_STRING_FIELD(keyboard_lang, keyboardLang, CONFIG__KEYBOARD_LANG_MAX_LEN)

@@ -234,8 +234,8 @@ static void text__render(const char *path, text_editor_t *editor) {
     int width = display__width();
     int height = display__height();
     if (width <= 0 || height <= TEXT_TITLE_HEIGHT + TEXT_FOOTER_HEIGHT) return;
-    uint16_t foreground = config__get_theme_primary();
-    uint16_t background = config__get_theme_background();
+    uint16_t foreground = config__get_color_primary();
+    uint16_t background = config__get_color_background();
     size_t visible_columns = (size_t)(width - 2 * TEXT_FRAME_MARGIN) / TEXT_CHAR_WIDTH;
     size_t visible_lines = (size_t)(height - TEXT_TITLE_HEIGHT - TEXT_FOOTER_HEIGHT) / TEXT_CHAR_HEIGHT;
     if (visible_columns == 0) visible_columns = 1;

@@ -69,13 +69,50 @@ bruce_result_t config__set_wifi_mac(const char *value);
 /* `config`-permission-gated fields                                          */
 /* ------------------------------------------------------------------------ */
 
-/* Theme / display */
-uint16_t config__get_theme_primary(void);
-bruce_result_t config__set_theme_primary(uint16_t value);
-uint16_t config__get_theme_secondary(void);
-bruce_result_t config__set_theme_secondary(uint16_t value);
-uint16_t config__get_theme_background(void);
-bruce_result_t config__set_theme_background(uint16_t value);
+/* Theme / display
+ *
+ * Ten RGB565 color roles: primary/secondary (accents), background
+ * (full-screen canvas), surface (a raised panel/window on top of that
+ * canvas), text/textMuted (body copy vs. de-emphasized copy), border
+ * (dividers and window strokes), and success/warning/error (status
+ * semantics). Core's own dialog renderer and built-in modules that draw
+ * chrome (bruce_launcher, terminal, notification_service, ...) read these
+ * instead of hard-coding colors. Core only stores and validates the ten
+ * values - it has no notion of a named theme; a catalog of presets (legacy
+ * single-accent sets, community palettes such as Dracula or Nord, ...) and
+ * the UI/CLI to pick one is `modules/config`'s job (see its `theme`
+ * subcommand), which resolves a name to these ten setters. */
+uint16_t config__get_color_primary(void);
+bruce_result_t config__set_color_primary(uint16_t value);
+uint16_t config__get_color_secondary(void);
+bruce_result_t config__set_color_secondary(uint16_t value);
+uint16_t config__get_color_background(void);
+bruce_result_t config__set_color_background(uint16_t value);
+uint16_t config__get_color_surface(void);
+bruce_result_t config__set_color_surface(uint16_t value);
+uint16_t config__get_color_text(void);
+bruce_result_t config__set_color_text(uint16_t value);
+uint16_t config__get_color_text_muted(void);
+bruce_result_t config__set_color_text_muted(uint16_t value);
+uint16_t config__get_color_border(void);
+bruce_result_t config__set_color_border(uint16_t value);
+uint16_t config__get_color_success(void);
+bruce_result_t config__set_color_success(uint16_t value);
+uint16_t config__get_color_warning(void);
+bruce_result_t config__set_color_warning(uint16_t value);
+uint16_t config__get_color_error(void);
+bruce_result_t config__set_color_error(uint16_t value);
+
+/* Parses a color written as CSS-style hex -- "RGB", "#RGB", "RRGGBB",
+ * "#RRGGBB" (24-bit, downsampled to RGB565) or a bare 4-digit RGB565 value
+ * such as "a80f" (native, used as-is) -- into `*out_rgb565`. Leading '#' is
+ * optional and case is ignored. Returns false (leaving `*out_rgb565`
+ * untouched) on a NULL/empty string or a length that matches none of those
+ * forms. This is plain parsing, not a config field: it's exposed so any
+ * caller that lets a user type a hex color (bruce.conf's theme loader, the
+ * WebUI theme editor, `modules/config`'s theme subcommand, ...) gets
+ * identical, forgiving parsing without duplicating it. */
+bool config__parse_theme_color(const char *text, uint16_t *out_rgb565);
 /* Controls whether Core retains a full RGB565 framebuffer. Changes apply
  * after reboot. When false, drawing is streamed directly to the panel and
  * framebuffer-dependent features such as snapshots are unavailable. */

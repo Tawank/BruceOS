@@ -23,9 +23,12 @@ SUPPORTED_BRUCE_SDK_SIGNATURES = {
     **{name: FunctionType((), (I32,)) for name in (
         "runtime__gui_requested", "process__current_id", "process__current_signal",
         "process__switch_next", "process__switch_previous", "process__to_background",
-        "process__to_foreground", "config__get_time_clock24hr", "config__get_theme_primary",
-        "config__get_theme_secondary", "config__get_theme_background", "display__width",
-        "display__height", "display__begin_frame", "display__present", "input__flush",
+        "process__to_foreground", "config__get_time_clock24hr", "config__get_color_primary",
+        "config__get_color_secondary", "config__get_color_background", "config__get_color_surface",
+        "config__get_color_text", "config__get_color_text_muted", "config__get_color_border",
+        "config__get_color_success", "config__get_color_warning", "config__get_color_error",
+        "display__width", "display__height", "display__begin_frame", "display__present",
+        "input__flush",
     )},
     **{name: FunctionType((I32,), (I32,)) for name in (
         "process__foreground", "process__terminate", "process__pause", "process__resume",

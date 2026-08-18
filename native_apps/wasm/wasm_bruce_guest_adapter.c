@@ -312,9 +312,16 @@ int stdio__printf(const char *format, ...) {
 #define BRUCE_WASM_IMPORT_I32_0(name) BRUCE_WASM_IMPORT(#name) extern int32_t wasm_import__##name(void)
 
 BRUCE_WASM_IMPORT_I32_0(config__get_time_clock24hr);
-BRUCE_WASM_IMPORT_I32_0(config__get_theme_primary);
-BRUCE_WASM_IMPORT_I32_0(config__get_theme_secondary);
-BRUCE_WASM_IMPORT_I32_0(config__get_theme_background);
+BRUCE_WASM_IMPORT_I32_0(config__get_color_primary);
+BRUCE_WASM_IMPORT_I32_0(config__get_color_secondary);
+BRUCE_WASM_IMPORT_I32_0(config__get_color_background);
+BRUCE_WASM_IMPORT_I32_0(config__get_color_surface);
+BRUCE_WASM_IMPORT_I32_0(config__get_color_text);
+BRUCE_WASM_IMPORT_I32_0(config__get_color_text_muted);
+BRUCE_WASM_IMPORT_I32_0(config__get_color_border);
+BRUCE_WASM_IMPORT_I32_0(config__get_color_success);
+BRUCE_WASM_IMPORT_I32_0(config__get_color_warning);
+BRUCE_WASM_IMPORT_I32_0(config__get_color_error);
 BRUCE_WASM_IMPORT_I32_0(display__width);
 BRUCE_WASM_IMPORT_I32_0(display__height);
 BRUCE_WASM_IMPORT_I32_0(display__begin_frame);
@@ -322,9 +329,16 @@ BRUCE_WASM_IMPORT_I32_0(display__present);
 BRUCE_WASM_IMPORT_I32_0(input__flush);
 
 bool config__get_time_clock24hr(void) { return wasm_import__config__get_time_clock24hr() != 0; }
-uint16_t config__get_theme_primary(void) { return (uint16_t)wasm_import__config__get_theme_primary(); }
-uint16_t config__get_theme_secondary(void) { return (uint16_t)wasm_import__config__get_theme_secondary(); }
-uint16_t config__get_theme_background(void) { return (uint16_t)wasm_import__config__get_theme_background(); }
+uint16_t config__get_color_primary(void) { return (uint16_t)wasm_import__config__get_color_primary(); }
+uint16_t config__get_color_secondary(void) { return (uint16_t)wasm_import__config__get_color_secondary(); }
+uint16_t config__get_color_background(void) { return (uint16_t)wasm_import__config__get_color_background(); }
+uint16_t config__get_color_surface(void) { return (uint16_t)wasm_import__config__get_color_surface(); }
+uint16_t config__get_color_text(void) { return (uint16_t)wasm_import__config__get_color_text(); }
+uint16_t config__get_color_text_muted(void) { return (uint16_t)wasm_import__config__get_color_text_muted(); }
+uint16_t config__get_color_border(void) { return (uint16_t)wasm_import__config__get_color_border(); }
+uint16_t config__get_color_success(void) { return (uint16_t)wasm_import__config__get_color_success(); }
+uint16_t config__get_color_warning(void) { return (uint16_t)wasm_import__config__get_color_warning(); }
+uint16_t config__get_color_error(void) { return (uint16_t)wasm_import__config__get_color_error(); }
 int display__width(void) { return wasm_import__display__width(); }
 int display__height(void) { return wasm_import__display__height(); }
 bruce_result_t display__begin_frame(void) { return (bruce_result_t)wasm_import__display__begin_frame(); }

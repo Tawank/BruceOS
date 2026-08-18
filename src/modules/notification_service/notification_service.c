@@ -2,6 +2,7 @@
 
 #include <string.h>
 
+#include "core_sdk/config.h"
 #include "core_sdk/display.h"
 #include "core_sdk/notification.h"
 #include "core_sdk/result.h"
@@ -61,10 +62,10 @@ static bruce_result_t notification_service__show(const char *text) {
 
     bruce_result_t result = display__overlay_begin(s_overlay);
     if (result != BRUCE_OK) return result;
-    (void)display__fill_rect(0, 0, (int16_t)width, (int16_t)height, BRUCE_COLOR_NAVY);
-    (void)display__draw_rect(0, 0, (int16_t)width, (int16_t)height, BRUCE_COLOR_WHITE);
+    (void)display__fill_rect(0, 0, (int16_t)width, (int16_t)height, config__get_color_surface());
+    (void)display__draw_rect(0, 0, (int16_t)width, (int16_t)height, config__get_color_border());
     (void)display__set_text_size(1);
-    (void)display__set_text_color(BRUCE_COLOR_WHITE);
+    (void)display__set_text_color(config__get_color_text());
     (void)display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
     (void)display__draw_string(text, 4, 4);
     (void)display__overlay_end(s_overlay);

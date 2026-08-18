@@ -334,9 +334,16 @@ stdio, sessions, or `memory__get_stats`.
 ### Scalar Forwarders
 
 - `config__get_time_clock24hr`
-- `config__get_theme_primary`
-- `config__get_theme_secondary`
-- `config__get_theme_background`
+- `config__get_color_primary`
+- `config__get_color_secondary`
+- `config__get_color_background`
+- `config__get_color_surface`
+- `config__get_color_text`
+- `config__get_color_text_muted`
+- `config__get_color_border`
+- `config__get_color_success`
+- `config__get_color_warning`
+- `config__get_color_error`
 - `display__width`
 - `display__height`
 - `display__begin_frame`
