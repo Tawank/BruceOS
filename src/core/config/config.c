@@ -841,6 +841,29 @@ CONFIG__DEFINE_UINT16_FIELD(color_border, colorBorder)
 CONFIG__DEFINE_UINT16_FIELD(color_success, colorSuccess)
 CONFIG__DEFINE_UINT16_FIELD(color_warning, colorWarning)
 CONFIG__DEFINE_UINT16_FIELD(color_error, colorError)
+
+bruce_result_t config__set_colors(const bruce_config_theme_colors_t *colors) {
+    bruce_result_t guard = config__guard();
+    if (guard != BRUCE_OK) return guard;
+    if (colors == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    if (!config__init()) return BRUCE_ERR_IO;
+    config__lock();
+    s_config.colorPrimary = colors->primary;
+    s_config.colorSecondary = colors->secondary;
+    s_config.colorBackground = colors->background;
+    s_config.colorSurface = colors->surface;
+    s_config.colorText = colors->text;
+    s_config.colorTextMuted = colors->text_muted;
+    s_config.colorBorder = colors->border;
+    s_config.colorSuccess = colors->success;
+    s_config.colorWarning = colors->warning;
+    s_config.colorError = colors->error;
+    config__validate(&s_config);
+    bool saved = config__save_locked();
+    config__unlock();
+    return saved ? BRUCE_OK : BRUCE_ERR_IO;
+}
+
 CONFIG__DEFINE_INT_FIELD(display_rotation, displayRotation)
 CONFIG__DEFINE_BOOL_FIELD(display_buffered_rendering, displayBufferedRendering)
 CONFIG__DEFINE_BOOL_FIELD(display_dma_framebuffer, displayDmaFramebuffer)

@@ -15,8 +15,9 @@
  *    each palette's own published spec (Catppuccin, Dracula, Nord,
  *    Gruvbox), converted from their 24-bit hex to RGB565.
  *
- * config_app__theme_set() (config_app.c) resolves a name from this table
- * to config__set_color_*() calls; that's the only thing that ever reads it. */
+ * config_app__theme_apply_preset() (config_app.c) resolves a name from this
+ * table to one config__set_colors() batch call; that's the only thing that
+ * ever reads it. */
 
 #include <stdint.h>
 

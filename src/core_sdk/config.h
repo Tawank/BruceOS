@@ -81,7 +81,9 @@ bruce_result_t config__set_wifi_mac(const char *value);
  * values - it has no notion of a named theme; a catalog of presets (legacy
  * single-accent sets, community palettes such as Dracula or Nord, ...) and
  * the UI/CLI to pick one is `modules/config`'s job (see its `theme`
- * subcommand), which resolves a name to these ten setters. */
+ * subcommand), which resolves a name to either one of these ten setters
+ * (a single role) or config__set_colors() below (a whole preset, applied
+ * and persisted in one batch). */
 uint16_t config__get_color_primary(void);
 bruce_result_t config__set_color_primary(uint16_t value);
 uint16_t config__get_color_secondary(void);
@@ -102,6 +104,29 @@ uint16_t config__get_color_warning(void);
 bruce_result_t config__set_color_warning(uint16_t value);
 uint16_t config__get_color_error(void);
 bruce_result_t config__set_color_error(uint16_t value);
+
+/* All ten color_* roles at once, in the same order as the setters above.
+ * Used by config__set_colors() below. */
+typedef struct {
+    uint16_t primary;
+    uint16_t secondary;
+    uint16_t background;
+    uint16_t surface;
+    uint16_t text;
+    uint16_t text_muted;
+    uint16_t border;
+    uint16_t success;
+    uint16_t warning;
+    uint16_t error;
+} bruce_config_theme_colors_t;
+
+/* Applies all ten color_* roles and persists once, instead of the ten
+ * separate writes ten config__set_color_*() calls would each incur. Callers
+ * that set a whole theme at once (a named preset, a full WebUI theme
+ * payload, ...) should prefer this over calling the individual setters in a
+ * row; callers changing a single role should keep using that role's own
+ * setter. */
+bruce_result_t config__set_colors(const bruce_config_theme_colors_t *colors);
 
 /* Parses a color written as CSS-style hex -- "RGB", "#RGB", "RRGGBB",
  * "#RRGGBB" (24-bit, downsampled to RGB565) or a bare 4-digit RGB565 value

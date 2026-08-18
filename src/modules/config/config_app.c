@@ -279,8 +279,8 @@ static int config_app__display_gui(void) {
         choices[0] = (bruce_dialog_choice_t){.label = brightness_label, .value = "brightness"};
         choices[1] = (bruce_dialog_choice_t){.label = dim_label, .value = "dim"};
         choices[2] = (bruce_dialog_choice_t){.label = rotation_label, .value = "rotation"};
-        choices[3] = (bruce_dialog_choice_t){.label = buffered_label, .value = "buffered"};
-        choices[4] = (bruce_dialog_choice_t){.label = "UI Color", .value = "ui_color"};
+        choices[3] = (bruce_dialog_choice_t){.label = "UI Color", .value = "ui_color"};
+        choices[4] = (bruce_dialog_choice_t){.label = buffered_label, .value = "buffered"};
         choices[5] = (bruce_dialog_choice_t){.label = "Back", .value = "back"};
         size_t selected = 0;
         bruce_result_t result = dialog__choice_launcher("Display & UI", NULL, choices, 6, &selected);
@@ -294,9 +294,8 @@ static int config_app__display_gui(void) {
                     brightness_choices[i] =
                         (bruce_dialog_choice_t){.label = brightness_labels[i], .value = brightness_labels[i]};
                 size_t brightness_selected = config_app__closest_index(brightness_percents, 5, brightness);
-                bruce_result_t brightness_result = dialog__choice_launcher(
-                    "Brightness", NULL, brightness_choices, 5, &brightness_selected
-                );
+                bruce_result_t brightness_result =
+                    dialog__choice_launcher("Brightness", NULL, brightness_choices, 5, &brightness_selected);
                 if (brightness_result == BRUCE_OK && brightness_selected < 5)
                     result = config_app__set_brightness_percent(brightness_percents[brightness_selected]);
             } else if (strcmp(action, "dim") == 0) {
@@ -321,11 +320,11 @@ static int config_app__display_gui(void) {
                     result = config_app__set_rotation((int)rotation_selected, &live_applied);
                     reboot_notice = result == BRUCE_OK && !live_applied;
                 }
+            } else if (strcmp(action, "ui_color") == 0) {
+                result = config_app__theme_gui();
             } else if (strcmp(action, "buffered") == 0) {
                 result = config__set_display_buffered_rendering(!buffered);
                 reboot_notice = true;
-            } else if (strcmp(action, "ui_color") == 0) {
-                result = config_app__theme_gui();
             }
         }
         memory__free(brightness_label);
@@ -368,7 +367,7 @@ static int config_app__display_cli(
         }
         bool value;
         return config_app__parse_on_off(state, &value) ? config__set_display_buffered_rendering(value)
-                                                        : BRUCE_ERR_INVALID_ARGUMENT;
+                                                       : BRUCE_ERR_INVALID_ARGUMENT;
     }
     if (action == brightness) {
         const char *percent = ap_get_arg(brightness, "percent");
@@ -414,17 +413,19 @@ static int config_app__display_cli(
  * UI/CLI to pick one are this module's job. */
 
 static bruce_result_t config_app__theme_apply_preset(const config_app__theme_preset_t *preset) {
-    bruce_result_t result = config__set_color_primary(preset->primary);
-    if (result == BRUCE_OK) result = config__set_color_secondary(preset->secondary);
-    if (result == BRUCE_OK) result = config__set_color_background(preset->background);
-    if (result == BRUCE_OK) result = config__set_color_surface(preset->surface);
-    if (result == BRUCE_OK) result = config__set_color_text(preset->text);
-    if (result == BRUCE_OK) result = config__set_color_text_muted(preset->text_muted);
-    if (result == BRUCE_OK) result = config__set_color_border(preset->border);
-    if (result == BRUCE_OK) result = config__set_color_success(preset->success);
-    if (result == BRUCE_OK) result = config__set_color_warning(preset->warning);
-    if (result == BRUCE_OK) result = config__set_color_error(preset->error);
-    return result;
+    bruce_config_theme_colors_t colors = {
+        .primary = preset->primary,
+        .secondary = preset->secondary,
+        .background = preset->background,
+        .surface = preset->surface,
+        .text = preset->text,
+        .text_muted = preset->text_muted,
+        .border = preset->border,
+        .success = preset->success,
+        .warning = preset->warning,
+        .error = preset->error,
+    };
+    return config__set_colors(&colors);
 }
 
 /* Case-insensitive, and treats '-'/'_' as interchangeable with a space, so
@@ -521,19 +522,18 @@ static int config_app__theme_set_color_cli(const char *role, const char *hex) {
 }
 
 static int config_app__theme_gui(void) {
+    size_t selected = 0;
     for (;;) {
         size_t capacity = CONFIG_APP__THEME_PRESET_COUNT + 1;
         bruce_dialog_choice_t *choices = memory__calloc(capacity, sizeof(*choices));
         if (choices == NULL) return BRUCE_ERR_NO_MEMORY;
         size_t count = 0;
         for (; count < CONFIG_APP__THEME_PRESET_COUNT; ++count) {
-            choices[count] = (bruce_dialog_choice_t){
-                .label = CONFIG_APP__THEME_PRESETS[count].name, .value = CONFIG_APP__THEME_PRESETS[count].name
-            };
+            choices[count] = (bruce_dialog_choice_t){.label = CONFIG_APP__THEME_PRESETS[count].name,
+                                                     .value = CONFIG_APP__THEME_PRESETS[count].name};
         }
         choices[count] = (bruce_dialog_choice_t){.label = "Back", .value = "back"};
         count++;
-        size_t selected = 0;
         bruce_result_t result = dialog__choice_launcher("Theme", NULL, choices, count, &selected);
         bool back = result == BRUCE_ERR_CANCELLED ||
                     (result == BRUCE_OK && strcmp(choices[selected].value, "back") == 0);
@@ -642,7 +642,8 @@ int config_app_main(int argc, char **argv) {
     ap_set_helptext(theme_get, "Show the ten active theme colors as RGB565 hex.");
     ap_set_helptext(theme_set_color, "Set one theme color role directly.");
     ap_add_required_arg(
-        theme_set_color, "role",
+        theme_set_color,
+        "role",
         "primary, secondary, background, surface, text, textMuted, border, success, warning, or error"
     );
     ap_add_required_arg(theme_set_color, "color", "RGB or RRGGBB hex, with or without '#'");
