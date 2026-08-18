@@ -5,7 +5,7 @@
 
 #include "core_sdk/permission.h"
 
-#define BRUCE_CORE_ABI_VERSION 4u
+#define BRUCE_CORE_ABI_VERSION 5u
 #define BRUCE_MANIFEST_APP_NAME_MAX 64
 #define BRUCE_MANIFEST_ICON_BYTES 128
 #define BRUCE_MANIFEST_MAX_PERMISSIONS BRUCE_PERMISSION_COUNT
@@ -37,12 +37,11 @@ typedef struct {
 /* Parses and validates canonical manifest JSON bytes (see
  * migration_plan.md, "ELF contract"): required appName/appIcon (base64,
  * decodes to exactly BRUCE_MANIFEST_ICON_BYTES bytes)/coreAbiVersion/
- * stackSize (BRUCE_MANIFEST_STACK_MIN-BRUCE_MANIFEST_STACK_MAX inclusive), and an optional permissions array (each
- * name must be a known bruce_permission_t name, no duplicates).  Every
- * caller extracts raw manifest bytes from the file format and calls this one
- * shared parser instead of reimplementing JSON/base64 handling. Returns a
- * process-owned manifest that must be released with memory__free(), or NULL
- * for invalid input or allocation failure. */
+ * stackSize (BRUCE_MANIFEST_STACK_MIN-BRUCE_MANIFEST_STACK_MAX inclusive), and an optional permissions array
+ * (each name must be a known bruce_permission_t name, no duplicates).  Every caller extracts raw manifest
+ * bytes from the file format and calls this one shared parser instead of reimplementing JSON/base64 handling.
+ * Returns a process-owned manifest that must be released with memory__free(), or NULL for invalid input or
+ * allocation failure. */
 bruce_manifest_t *manifest__parse(const char *json, size_t json_len);
 
 /* Universal manifest JSON extractor (see migration_plan.md, "Loader

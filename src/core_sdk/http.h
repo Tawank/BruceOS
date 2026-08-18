@@ -16,6 +16,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "core_sdk/memory.h"
 #include "core_sdk/result.h"
 
 #ifdef __cplusplus
@@ -27,9 +28,7 @@ extern "C" {
 /* Called synchronously as response body chunks arrive. Return BRUCE_OK to
  * continue or any negative BRUCE_ERR_* value to abort the request. The data is
  * valid only for the duration of the callback. */
-typedef bruce_result_t (*bruce_http_response_chunk_cb_t)(
-    const void *data, size_t data_len, void *context
-);
+typedef bruce_result_t (*bruce_http_response_chunk_cb_t)(const void *data, size_t data_len, void *context);
 
 typedef struct {
     const char *url;
@@ -66,13 +65,24 @@ typedef struct {
     char **header_names;
     char **header_values;
     size_t header_count;
+
+    /* Opaque. Set when `body` was captured straight into its own PSRAM/swap
+     * object instead of sharing headers' internal-heap block (a buffered
+     * response whose Content-Length fit in memory__external_alloc() - see
+     * src/core/http/http.c). backend == BRUCE_MEMORY_BACKEND_INVALID (the
+     * zero value) means it wasn't; either way, never touch this field
+     * directly - just pass the whole response to http__response_free(). */
+    bruce_memory_object_t body_object;
 } bruce_http_response_t;
 
 /* Perform a synchronous HTTP request. Requires the `http` permission.
  * On success, fills `response` and returns BRUCE_OK. The body is NUL-terminated
- * in buffered mode, but body_len is authoritative. Body and headers share one
- * process-owned allocation. On failure, leaves `response` zeroed and returns a
- * negative BRUCE_ERR_* value. */
+ * in buffered mode, but body_len is authoritative. Headers are always one
+ * process-owned internal-heap allocation; the body shares it unless it was
+ * large enough to instead go through memory__external_alloc() (PSRAM, or
+ * swap when no PSRAM is fitted) - either way, release both with a single
+ * http__response_free() call. On failure, leaves `response` zeroed and
+ * returns a negative BRUCE_ERR_* value. */
 bruce_result_t http__request(const bruce_http_request_t *request, bruce_http_response_t *response);
 
 /* Release all memory owned by `response`.  NULL or a zero-initialized response
