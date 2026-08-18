@@ -7,7 +7,6 @@
 #include <strings.h>
 
 #include "args.h"
-#include "core_sdk/app_runner.h"
 #include "core_sdk/config.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/display.h"
@@ -46,9 +45,11 @@ static size_t text__utf8_next(const char *text, size_t remaining) {
     if (c < 0x80 || remaining < 2) return 1;
     if (c >= 0xC2 && c <= 0xDF && ((unsigned char)text[1] & 0xC0) == 0x80) return 2;
     if (c >= 0xE0 && c <= 0xEF && remaining >= 3 && ((unsigned char)text[1] & 0xC0) == 0x80 &&
-        ((unsigned char)text[2] & 0xC0) == 0x80) return 3;
+        ((unsigned char)text[2] & 0xC0) == 0x80)
+        return 3;
     if (c >= 0xF0 && c <= 0xF4 && remaining >= 4 && ((unsigned char)text[1] & 0xC0) == 0x80 &&
-        ((unsigned char)text[2] & 0xC0) == 0x80 && ((unsigned char)text[3] & 0xC0) == 0x80) return 4;
+        ((unsigned char)text[2] & 0xC0) == 0x80 && ((unsigned char)text[3] & 0xC0) == 0x80)
+        return 4;
     return 1;
 }
 
@@ -224,9 +225,8 @@ static void text__move_vertical(text_editor_t *editor, int direction) {
             p += text__utf8_next(editor->data + p, next_end - p);
             next_columns++;
         }
-        editor->cursor = text__column_to_byte(
-            editor, next_start, next_end, column < next_columns ? column : next_columns
-        );
+        editor->cursor =
+            text__column_to_byte(editor, next_start, next_end, column < next_columns ? column : next_columns);
     }
 }
 
@@ -271,27 +271,27 @@ static void text__render(const char *path, text_editor_t *editor) {
     }
     for (size_t row = 0; row < visible_lines; ++row) {
         size_t end = text__line_end(editor, position);
-            size_t line_length = 0;
-            for (size_t p = position; p < end;) {
-                p += text__utf8_next(editor->data + p, end - p);
-                line_length++;
+        size_t line_length = 0;
+        for (size_t p = position; p < end;) {
+            p += text__utf8_next(editor->data + p, end - p);
+            line_length++;
+        }
+        char visible[64];
+        size_t count = 0;
+        if (editor->left_column < line_length) {
+            count = line_length - editor->left_column;
+            if (count > visible_columns) count = visible_columns;
+            if (count >= sizeof(visible)) count = sizeof(visible) - 1u;
+            size_t visible_position = text__column_to_byte(editor, position, end, editor->left_column);
+            size_t written = 0;
+            for (size_t i = 0; i < count && visible_position < end; ++i) {
+                size_t bytes = text__utf8_next(editor->data + visible_position, end - visible_position);
+                if (written + bytes >= sizeof(visible)) break;
+                memcpy(visible + written, editor->data + visible_position, bytes);
+                written += bytes;
+                visible_position += bytes;
             }
-            char visible[64];
-            size_t count = 0;
-            if (editor->left_column < line_length) {
-                count = line_length - editor->left_column;
-                if (count > visible_columns) count = visible_columns;
-                if (count >= sizeof(visible)) count = sizeof(visible) - 1u;
-                size_t visible_position = text__column_to_byte(editor, position, end, editor->left_column);
-                size_t written = 0;
-                for (size_t i = 0; i < count && visible_position < end; ++i) {
-                    size_t bytes = text__utf8_next(editor->data + visible_position, end - visible_position);
-                    if (written + bytes >= sizeof(visible)) break;
-                    memcpy(visible + written, editor->data + visible_position, bytes);
-                    written += bytes;
-                    visible_position += bytes;
-                }
-                count = written;
+            count = written;
         }
         visible[count] = '\0';
         (void)display__set_text_color(foreground);
@@ -451,15 +451,19 @@ static bruce_result_t text__run_editor(char *path, size_t path_size, text_editor
         } else if (semantic && event.code == BRUCE_INPUT_CODE_LEFT) {
             if (editor->cursor > 0) {
                 editor->cursor--;
-                while (editor->cursor > 0 && ((unsigned char)editor->data[editor->cursor] & 0xC0) == 0x80) editor->cursor--;
+                while (editor->cursor > 0 && ((unsigned char)editor->data[editor->cursor] & 0xC0) == 0x80)
+                    editor->cursor--;
             }
         } else if (semantic && event.code == BRUCE_INPUT_CODE_RIGHT) {
-            if (editor->cursor < editor->length) editor->cursor += text__utf8_next(editor->data + editor->cursor, editor->length - editor->cursor);
+            if (editor->cursor < editor->length)
+                editor->cursor +=
+                    text__utf8_next(editor->data + editor->cursor, editor->length - editor->cursor);
         } else if (semantic && event.code == BRUCE_INPUT_CODE_HOME) {
             editor->cursor = text__line_start(editor, editor->cursor);
         } else if (!editor->read_only && semantic && event.code == BRUCE_INPUT_CODE_DELETE) {
             if (editor->cursor < editor->length) {
-                size_t next = editor->cursor + text__utf8_next(editor->data + editor->cursor, editor->length - editor->cursor);
+                size_t next = editor->cursor +
+                              text__utf8_next(editor->data + editor->cursor, editor->length - editor->cursor);
                 result = text__replace(editor, editor->cursor, next, NULL, 0);
             }
         } else if (!editor->read_only && semantic &&

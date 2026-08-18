@@ -571,13 +571,26 @@ The built-in `shell` module owns command-language parsing and execution. It
 supports whitespace-delimited words, literal single quotes, expandable double
 quotes, backslash escaping, `NAME=value`, `$NAME`, `${NAME}`, `$?`, token-boundary
 comments, and left-to-right `;`, `&&`, and `||`. A single bounded pipeline may
-feed `text` from `echo` or an external producer, for example
-`cat /notes.txt | text` or `cat /notes.txt | text /copy.txt`. Its bounded local
-variables persist across interactive input and script lines. `export NAME=value`
-or `export NAME` publishes a value to the shell process environment, and
-`NAME=value command` applies only to that child. Builtins are `echo`, `true`, `false`,
-`cd`, `set`, `unset`, `export`, `clear`, `exit`, and `help`; other names and absolute/`./` paths
-launch through AppRunner in foreground mode and are synchronously reaped. `BG=1`
+feed any external command from `echo` or another external producer, for example
+`cat /notes.txt | text`, `cat /notes.txt | text /copy.txt`, or `dmesg | less`.
+The producer's output (or the literal `echo` arguments) is buffered in one
+`memory__external_alloc()` object -- PSRAM, or swap, or as a last resort plain
+internal RAM, per the normal memory__external_alloc() rules -- growing by
+doubling as it fills, so a pipeline isn't bounded by the internal heap's
+largest free block. The destination is launched with a `--stdin-size N`
+argument prefix so it can size its read. `text` is the one destination that
+additionally gets `GUI=1` and runs in the foreground, since it claims the
+physical display directly; every other destination runs in the background and
+is relayed live, byte for byte in both directions, between its own stdio
+session and the shell process's own routed stdio (i.e. whatever real terminal
+the shell itself is running under) until it exits -- which is what lets an
+interactive destination like `less` actually be seen and typed into through
+a pipe. Its bounded local variables persist across interactive input and
+script lines. `export NAME=value` or `export NAME` publishes a value to the
+shell process environment, and `NAME=value command` applies only to that
+child. Builtins are `echo`, `true`, `false`, `cd`, `set`, `unset`, `export`,
+`clear`, `exit`, and `help`; other names and absolute/`./` paths launch
+through AppRunner in foreground mode and are synchronously reaped. `BG=1`
 changes the process state but does not turn synchronous shell execution into job control.
 The `.sh` loader invokes this built-in for absolute scripts. Command
 substitution, globbing, subshells, functions, positional parameters, general or
@@ -588,9 +601,28 @@ The built-in `text` editor opens `.txt`, `.json`, and `.conf` paths through the
 loader registry. It also accepts the shell's exact-size piped stdin handoff,
 prompts for a destination when unsaved piped text is saved, and limits editable
 content to 32 KiB. `text -r <path>` (`--read-only`) and piped input with the same flag
-disable mutation and saving, providing a lightweight `less`-style viewer. The
-editor binds Ctrl+S to save and Ctrl+X to exit, with both shortcuts shown in its
-footer; read-only mode exposes only Ctrl+X.
+disable mutation and saving. The editor binds Ctrl+S to save and Ctrl+X to exit,
+with both shortcuts shown in its footer; read-only mode exposes only Ctrl+X. Unlike
+every other built-in app, it claims the physical display and input directly
+(`core_sdk/display.h`/`core_sdk/input.h`) instead of going through stdio.
+
+The built-in BNU command `less <path>` (or piped stdin via the shell's
+`--stdin-size` handoff, e.g. `dmesg | less`) is a terminal pager: unlike
+`text`, it never touches the physical display. It renders purely through
+ANSI/VT100 escape sequences written to its own routed stdio session -- cursor
+positioning, erase-display, reverse video, and cursor-visibility, the same
+constrained subset `modules/utils/terminal/terminal_ansi.c`'s cell-grid
+emulator supports -- so whatever is actually driving that session (the
+terminal app, an ssh client, a serial console) renders it, the same way
+`cat` or `ssh` do. Content -- capped at 512 KiB, `memory__external_alloc()`-backed
+-- is paged with `space`/`b` (or Page Down/Up), `j`/`k` (or the arrow keys),
+`g`/`G` for top/bottom, and `/pattern` plus `n` for a forward substring
+search; `q` or Esc quits. Navigation re-scans at most a screenful of lines
+per keypress rather than keeping a precomputed line index. When its stdio
+session has no known terminal size (`core_sdk/tty.h`'s `tty__isatty()`
+returns false, e.g. read by a plain, non-terminal consumer), it falls back to
+dumping its content unpaged, matching real `less(1)`'s behavior when its
+output isn't a tty.
 
 The built-in BNU (Bruce is Not Unix) module provides the direct commands
 `pwd`, `ls [path]`, `lsblk`, `mount [device] [mount-point]`,

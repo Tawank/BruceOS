@@ -739,7 +739,16 @@ bruce_result_t process_registry__set_child_stdio_session(uint32_t session) {
         process__unlock();
         return BRUCE_ERR_NOT_FOUND;
     }
-    self->child_stdio_session = session;
+    /* BRUCE_STDIO_SESSION_INVALID means "stop overriding", not "route
+     * children nowhere": it restores the default of routing children into
+     * this process's own session, same as before any override. A caller
+     * that temporarily reroutes children into a private session (a shell
+     * piping to an external pager, a test harness capturing output) and
+     * then calls this with INVALID to clean up must get its own routed
+     * terminal back for every command it launches afterward -- not have
+     * every later child silently fall back to the physical console because
+     * "no session" was taken literally. */
+    self->child_stdio_session = session == BRUCE_STDIO_SESSION_INVALID ? self->stdio_session : session;
     process__unlock();
     return BRUCE_OK;
 }

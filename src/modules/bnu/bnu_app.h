@@ -14,6 +14,7 @@ int bnu_touch_app_main(int argc, char **argv);
 int bnu_rm_app_main(int argc, char **argv);
 int bnu_cat_app_main(int argc, char **argv);
 int bnu_stty_app_main(int argc, char **argv);
+int bnu_less_app_main(int argc, char **argv);
 int bnu_wget_app_main(int argc, char **argv);
 int bnu_curl_app_main(int argc, char **argv);
 const char *bnu__get_working_directory(void);

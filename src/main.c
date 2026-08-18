@@ -104,6 +104,7 @@ void app_runner__register_defaults(void) {
     (void)app_runner__register("rm", bnu_rm_app_main, 0);
     (void)app_runner__register("cat", bnu_cat_app_main, 0);
     (void)app_runner__register("stty", bnu_stty_app_main, 0);
+    (void)app_runner__register("less", bnu_less_app_main, 0);
     (void)app_runner__register("wget", bnu_wget_app_main, BNU_HTTP_STACK_BYTES);
     (void)app_runner__register("curl", bnu_curl_app_main, BNU_HTTP_STACK_BYTES);
     (void)app_runner__register("elf", elf_loader__app_main, 0);

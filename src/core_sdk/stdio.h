@@ -47,7 +47,9 @@ int stdio__vprintf(const char *format, va_list args) __attribute__((format(print
 /* Creates a process-owned, bounded input/output session. Routing a session makes
  * subsequently launched child processes use it through bruce_stdio_read(),
  * bruce_stdio_write(), and stdio__printf(); call route_children(INVALID)
- * after launching. */
+ * after launching to restore the default of routing children into the
+ * calling process's own session -- it does not disconnect them, so plain
+ * commands launched afterward keep going to the same terminal as before. */
 bruce_result_t stdio__session_create(bruce_stdio_session_t *out_session);
 bruce_result_t stdio__session_close(bruce_stdio_session_t session);
 bruce_result_t stdio__session_route_children(bruce_stdio_session_t session);

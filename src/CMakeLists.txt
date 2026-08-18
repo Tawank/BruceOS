@@ -103,6 +103,7 @@ idf_component_register(SRCS
                     "modules/bnu/bnu_disk_app.c"
                     "modules/bnu/bnu_sys_app.c"
                     "modules/bnu/bnu_net_app.c"
+                    "modules/bnu/bnu_pager_app.c"
                     "modules/bluetooth/bluetooth_app.c"
                     "modules/bluetooth_hid/bluetooth_hid_app.c"
                     "modules/clock/clock_app.c"
@@ -333,7 +334,8 @@ add_library(bruce_sdk_builtin_bnu_check OBJECT
             "modules/bnu/bnu_fs_app.c"
             "modules/bnu/bnu_disk_app.c"
             "modules/bnu/bnu_sys_app.c"
-            "modules/bnu/bnu_net_app.c")
+            "modules/bnu/bnu_net_app.c"
+            "modules/bnu/bnu_pager_app.c")
 target_include_directories(bruce_sdk_builtin_bnu_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/bnu")
