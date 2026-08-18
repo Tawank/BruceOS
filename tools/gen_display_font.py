@@ -204,6 +204,83 @@ for cp, acc in [(0x00EC, "GRAVE"), (0x00ED, "ACUTE"), (0x00EE, "CIRCUMFLEX"), (0
 # bitmap needed, just point at the existing one.
 ALIASES = {0x2018: "'", 0x2019: "'", 0x201C: '"', 0x201D: '"'}
 
+# Hand-authored pixel art for glyphs that don't derive from a Latin base
+# letter: box-drawing lines/corners, block elements, and the status/spinner
+# marks TUI apps (Claude Code, opencode, and the CLI-spinner libraries they're
+# built on) print routinely. Each value is already a final 5-column x10-row
+# bitmap (bit0 = row 0/top), not run through the accent-shift pipeline above.
+# A horizontal box rule sits on row 4 (center); a vertical one spans the full
+# cell in the middle column; corners meet them there. The four rounded
+# corners (U+256D-U+2570) leave that meeting pixel empty and instead touch
+# diagonally one row/column off, which reads as a curve rather than a right
+# angle at this resolution without needing a distinct antialiased shape.
+RAW_GLYPHS = {
+    # Box drawing: light lines, square corners, tees, cross.
+    0x2500: (0x0010, 0x0010, 0x0010, 0x0010, 0x0010),  # ─
+    0x2502: (0x0000, 0x0000, 0x03FF, 0x0000, 0x0000),  # │
+    0x250C: (0x0000, 0x0000, 0x03F0, 0x0010, 0x0010),  # ┌
+    0x2510: (0x0010, 0x0010, 0x03F0, 0x0000, 0x0000),  # ┐
+    0x2514: (0x0000, 0x0000, 0x001F, 0x0010, 0x0010),  # └
+    0x2518: (0x0010, 0x0010, 0x001F, 0x0000, 0x0000),  # ┘
+    0x251C: (0x0000, 0x0000, 0x03FF, 0x0010, 0x0010),  # ├
+    0x2524: (0x0010, 0x0010, 0x03FF, 0x0000, 0x0000),  # ┤
+    0x252C: (0x0010, 0x0010, 0x03F0, 0x0010, 0x0010),  # ┬
+    0x2534: (0x0010, 0x0010, 0x001F, 0x0010, 0x0010),  # ┴
+    0x253C: (0x0010, 0x0010, 0x03FF, 0x0010, 0x0010),  # ┼
+    # Box drawing: light rounded corners (Claude Code / opencode panel borders).
+    0x256D: (0x0000, 0x0000, 0x03E0, 0x0010, 0x0010),  # ╭
+    0x256E: (0x0010, 0x0010, 0x03E0, 0x0000, 0x0000),  # ╮
+    0x2570: (0x0000, 0x0000, 0x000F, 0x0010, 0x0010),  # ╰
+    0x256F: (0x0010, 0x0010, 0x000F, 0x0000, 0x0000),  # ╯
+    # Block elements.
+    0x2580: (0x001F, 0x001F, 0x001F, 0x001F, 0x001F),  # ▀ upper half block
+    0x2584: (0x03E0, 0x03E0, 0x03E0, 0x03E0, 0x03E0),  # ▄ lower half block
+    0x2588: (0x03FF, 0x03FF, 0x03FF, 0x03FF, 0x03FF),  # █ full block
+    0x258C: (0x03FF, 0x03FF, 0x0000, 0x0000, 0x0000),  # ▌ left half block
+    0x2590: (0x0000, 0x0000, 0x0000, 0x03FF, 0x03FF),  # ▐ right half block
+    0x2591: (0x0092, 0x0249, 0x0124, 0x0092, 0x0249),  # ░ light shade (~25%)
+    0x2592: (0x0155, 0x02AA, 0x0155, 0x02AA, 0x0155),  # ▒ medium shade (50%)
+    0x2593: (0x036D, 0x01B6, 0x02DB, 0x036D, 0x01B6),  # ▓ dark shade (~75%)
+    0x259B: (0x03FF, 0x03FF, 0x03FF, 0x001F, 0x001F),  # ▛ quadrant UL+UR+LL
+    # Status / navigation marks.
+    0x2022: (0x0000, 0x0030, 0x0030, 0x0030, 0x0000),  # • bullet
+    0x203B: (0x0022, 0x0094, 0x00C8, 0x0094, 0x0022),  # ※ reference mark
+    0x2192: (0x0020, 0x0020, 0x00A8, 0x0070, 0x0020),  # → rightwards arrow
+    0x2190: (0x0020, 0x0070, 0x00A8, 0x0020, 0x0020),  # ← leftwards arrow
+    0x2026: (0x0180, 0x0000, 0x0180, 0x0000, 0x0180),  # … horizontal ellipsis
+    0x2013: (0x0000, 0x0010, 0x0010, 0x0010, 0x0000),  # – en dash
+    0x2014: (0x0010, 0x0010, 0x0010, 0x0010, 0x0010),  # — em dash
+    0x2713: (0x0030, 0x0040, 0x0040, 0x0020, 0x001C),  # ✓ check mark
+    0x2717: (0x0084, 0x0048, 0x0030, 0x0048, 0x0084),  # ✗ ballot X
+    0x2722: (0x0030, 0x0030, 0x00FC, 0x0030, 0x0030),  # ✢ four-spoked asterisk
+    0x25CB: (0x0078, 0x0084, 0x0084, 0x0084, 0x0078),  # ○ white circle
+    0x25CF: (0x0078, 0x00FC, 0x00FC, 0x00FC, 0x0078),  # ● black circle (bullet)
+    0x23F5: (0x01FE, 0x00FC, 0x0078, 0x0030, 0x0000),  # ⏵ play triangle
+    0x23F8: (0x01FE, 0x0000, 0x0000, 0x01FE, 0x0000),  # ⏸ pause bars
+    0x23F9: (0x00FC, 0x00FC, 0x00FC, 0x00FC, 0x0000),  # ⏹ stop square
+}
+
+# Eight-spoked star glyphs used interchangeably as spinner animation frames
+# (e.g. Claude Code's "thinking" indicator cycles through several of these) --
+# indistinguishable from each other at 5x10, so they share one bitmap rather
+# than pretending to be visually distinct shapes.
+_EIGHT_SPOKE_ASTERISK = (0x0231, 0x0132, 0x00FC, 0x0132, 0x0231)  # ✻ etc.
+for _cp in (0x2733, 0x2734, 0x2736, 0x273B, 0x273D):
+    RAW_GLYPHS[_cp] = _EIGHT_SPOKE_ASTERISK
+
+# Braille patterns U+2800-28FF: mechanically derived from the standard 8-dot
+# bit layout (bit0=dot1, bit1=dot2, ..., bit7=dot8; dots 1-3 and 7 in the left
+# column top-to-bottom, dots 4-6 and 8 in the right column), not hand-drawn.
+# Widely used by CLI spinner libraries (e.g. cli-spinners' "dots", which
+# several TUI tools default to) as well as literal braille text.
+_BRAILLE_DOTS = [(1, 2), (1, 4), (1, 6), (3, 2), (3, 4), (3, 6), (1, 8), (3, 8)]
+for _n in range(256):
+    _cols = [0, 0, 0, 0, 0]
+    for _bit, (_col, _row) in enumerate(_BRAILLE_DOTS):
+        if _n & (1 << _bit):
+            _cols[_col] |= 1 << _row
+    RAW_GLYPHS[0x2800 + _n] = tuple(_cols)
+
 
 def c_char_literal(ch):
     if ch == "'":
@@ -223,7 +300,10 @@ def emit():
     w("/* -------------------------------------------------------------------------- */")
     w("/* Built-in font: fixed 5-wide bitmap glyphs, ASCII 32-126 plus the Latin-1   */")
     w("/* Supplement / Latin Extended-A subset this project has historically needed */")
-    w("/* (Western/Central European accented letters, common quote glyphs).         */")
+    w("/* (Western/Central European accented letters, common quote glyphs), plus    */")
+    w("/* box-drawing/block/status glyphs and the full Braille block (U+2800-28FF)  */")
+    w("/* -- the symbols TUI tools like Claude Code and opencode print for panel    */")
+    w("/* borders, progress spinners, and status marks.                            */")
     w("/*                                                                            */")
     w("/* Earlier revisions rendered an accented letter by drawing the plain ASCII  */")
     w("/* base glyph and stamping a hardcoded accent shape on top of it at draw     */")
@@ -260,13 +340,20 @@ def emit():
         w("    {" + ", ".join(f"0x{v:04X}" for v in g) + "},")
     w("};")
     w("")
+    assert not (set(MAP) & set(RAW_GLYPHS)), "codepoint defined in both MAP and RAW_GLYPHS"
+    extended = {}
+    for cp, (letter, accent, dotless) in MAP.items():
+        extended[cp] = list(with_accent(letter, accent, dotless) if accent else base_glyph(letter, dotless))
+    for cp, columns in RAW_GLYPHS.items():
+        extended[cp] = list(columns)
+
     w("/* Non-ASCII glyphs, real per-codepoint bitmaps (not synthesized at draw time):")
-    w(" * each accented letter's own static shape, already composed with its")
-    w(" * diacritic. Sorted by codepoint for binary search. */")
+    w(" * accented Latin letters composed with their diacritic (see MAP above), plus")
+    w(" * hand-authored/algorithmic symbol and Braille glyphs (see RAW_GLYPHS above).")
+    w(" * Sorted by codepoint for binary search. */")
     w("static const display__extended_glyph_t s_extended[] = {")
-    for cp in sorted(MAP.keys()):
-        letter, accent, dotless = MAP[cp]
-        g = with_accent(letter, accent, dotless) if accent else base_glyph(letter, dotless)
+    for cp in sorted(extended.keys()):
+        g = extended[cp]
         w(f"    {{0x{cp:04X}, {{{', '.join(f'0x{v:04X}' for v in g)}}}}}, /* U+{cp:04X} */")
     w("};")
     w("")
@@ -326,4 +413,4 @@ def emit():
 
 if __name__ == "__main__":
     OUT_PATH.write_text(emit())
-    print(f"wrote {OUT_PATH} ({len(MAP)} extended glyphs, {len(ALIASES)} aliases)")
+    print(f"wrote {OUT_PATH} ({len(MAP) + len(RAW_GLYPHS)} extended glyphs, {len(ALIASES)} aliases)")

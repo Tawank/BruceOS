@@ -24,7 +24,13 @@
 #define SHELL_CONSOLE_ESCAPE 0x1b
 #define SHELL_CONSOLE_DELETE 0x7f
 
-static const char SHELL_CONSOLE_PROMPT[] = "\r\033[2K\033[1;36mbruce\033[0m$ ";
+/* Leads with an explicit SGR reset before styling "bruce": a foreground
+ * program that got killed mid-render (Ctrl+C, a crash) can leave the shared
+ * terminal grid's current SGR state dirty -- e.g. underline still on -- and
+ * without this, "\033[1;36m" only adds bold+cyan on top of that leftover
+ * state instead of replacing it, so the prompt word itself would render
+ * underlined until something else (like the `reset` builtin) clears it. */
+static const char SHELL_CONSOLE_PROMPT[] = "\r\033[0m\033[2K\033[1;36mbruce\033[0m$ ";
 static volatile bool s_shell_console_ready;
 
 typedef struct {

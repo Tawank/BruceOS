@@ -13,7 +13,7 @@
 #include "shell_parser.h"
 
 static const char *const s_shell_builtin_names[] = {
-    "echo", "true", "false", "cd", "set", "unset", "export", "clear", "exit"
+    "echo", "true", "false", "cd", "set", "unset", "export", "clear", "reset", "exit"
 };
 
 static int shell_builtins__find_index(const shell_state_t *state, const char *name) {
@@ -269,7 +269,24 @@ int shell_builtins__run(shell_state_t *state, int argc, char **argv) {
             stdio__printf("shell: clear takes no arguments\n");
             return 2;
         }
-        (void)stdio__write("\033[2J", 4);
+        /* Erase the screen and home the cursor, matching a real terminal's
+         * `clear` -- erasing alone leaves the cursor wherever the last
+         * program left it, so the next prompt would draw mid-screen under a
+         * blank top half instead of at row 0. */
+        (void)stdio__write("\033[2J\033[H", 7);
+        return 0;
+    }
+    if (strcmp(argv[0], "reset") == 0) {
+        if (argc != 1) {
+            stdio__printf("shell: reset takes no arguments\n");
+            return 2;
+        }
+        /* Full terminal reset (RIS): unlike `clear`, this also drops any
+         * SGR attributes/colors a foreground program left set (e.g. a TUI
+         * app killed mid-render before it could restore the terminal) and
+         * leaves the alternate screen if it's still active -- the on-device
+         * equivalent of a real terminal's `reset` command. */
+        (void)stdio__write("\033c", 2);
         return 0;
     }
     if (strcmp(argv[0], "exit") == 0) {
