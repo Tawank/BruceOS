@@ -309,7 +309,7 @@ int filemanager_app_main(int argc, char **argv) {
         /* Plain dialog__choice(), not the picker's full-bleed action_params:
          * this is a small action menu over the already-visible file browser,
          * so it reads better as a popup window than another full screen. */
-        result = dialog__choice("File manager", path, actions, sizeof(actions) / sizeof(actions[0]), &selected);
+        result = dialog__choice(path, NULL, actions, sizeof(actions) / sizeof(actions[0]), &selected);
         if (result == BRUCE_ERR_CANCELLED && filemanager__resume_after_handoff()) {
             (void)input__flush();
             continue;

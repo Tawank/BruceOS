@@ -7,6 +7,7 @@
 #include "core_sdk/icon.h"
 #include "core_sdk/app_runner.h"
 #include "core_sdk/memory.h"
+#include "core_sdk/partition_manager.h"
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
 #include "core_sdk/runtime.h"
@@ -1165,15 +1166,51 @@ static void dialog__pick_file_format_bytes(uint64_t bytes, char *out, size_t out
     snprintf(out, out_size, "%llu%s", (unsigned long long)(bytes / divisor), units[unit]);
 }
 
-/* "sd" under the SD card mount, "littlefs" everywhere else - covers the
- * common single-internal-partition setup without walking
- * core/partition_manager's extra-mount table for one status-bar label. */
-static const char *dialog__pick_file_partition_label(const char *path) {
+/* Fills `out` with "sd" under the SD card mount, or the label of whichever
+ * internal partition is mounted on the longest matching path prefix of
+ * `path` - covers every extra partition created via bparted
+ * (storage__mount_partition()), not just the root "littlefs" volume, which
+ * a fixed "sd"-or-"littlefs" guess got wrong for anything mounted
+ * elsewhere. Falls back to the root label if nothing else matches (it
+ * always should, since root mounts at "/"). */
+static void dialog__pick_file_partition_label(const char *path, char *out, size_t out_size) {
     size_t sd_len = strlen(STORAGE__SD_MOUNT_PATH);
     if (strncmp(path, STORAGE__SD_MOUNT_PATH, sd_len) == 0 && (path[sd_len] == '\0' || path[sd_len] == '/')) {
-        return "sd";
+        snprintf(out, out_size, "sd");
+        return;
     }
-    return "littlefs";
+    snprintf(out, out_size, "%s", BRUCE_PARTITION_ROOT_LABEL);
+
+    /* Heap, not stack: BRUCE_PARTITION_MAX_ENTRIES worth of
+     * bruce_partition_entry_t plus a path-sized mount-point buffer add up to
+     * several hundred bytes, and this runs on the picker's redraw path - see
+     * dialog__pick_file_workspace_t below for why that path stays off the
+     * caller's stack. */
+    bruce_partition_entry_t *entries = memory__malloc(BRUCE_PARTITION_MAX_ENTRIES * sizeof(*entries));
+    char *mount_point = memory__malloc(BRUCE_STORAGE_PATH_MAX);
+    if (entries == NULL || mount_point == NULL) {
+        memory__free(entries);
+        memory__free(mount_point);
+        return;
+    }
+
+    size_t count = 0;
+    size_t best_len = 0;
+    if (partition_manager__list_current(entries, BRUCE_PARTITION_MAX_ENTRIES, &count) == BRUCE_OK) {
+        for (size_t i = 0; i < count; ++i) {
+            if (!storage__internal_mount_point(entries[i].label, mount_point, BRUCE_STORAGE_PATH_MAX)) continue;
+            size_t mount_len = strlen(mount_point);
+            bool root_mount = mount_len == 1 && mount_point[0] == '/';
+            bool matches = strncmp(path, mount_point, mount_len) == 0 &&
+                           (root_mount || path[mount_len] == '\0' || path[mount_len] == '/');
+            if (matches && mount_len >= best_len) {
+                best_len = mount_len;
+                snprintf(out, out_size, "%s", entries[i].label);
+            }
+        }
+    }
+    memory__free(entries);
+    memory__free(mount_point);
 }
 
 /* "littlefs 20KiB/2MiB"-style summary of the volume `path` lives on, for the
@@ -1187,9 +1224,11 @@ static void dialog__pick_file_format_usage(const char *path, char *out, size_t o
     }
     char used_text[16];
     char total_text[16];
+    char label[BRUCE_PARTITION_LABEL_MAX];
     dialog__pick_file_format_bytes(used, used_text, sizeof(used_text));
     dialog__pick_file_format_bytes(total, total_text, sizeof(total_text));
-    snprintf(out, out_size, "%s %s/%s", dialog__pick_file_partition_label(path), used_text, total_text);
+    dialog__pick_file_partition_label(path, label, sizeof(label));
+    snprintf(out, out_size, "%s %s/%s", label, used_text, total_text);
 }
 
 /* render_callback for the picker's own render_params: right-aligns the
@@ -1236,7 +1275,11 @@ typedef struct {
     char returning_from[BRUCE_STORAGE_NAME_MAX];
     char next_path[BRUCE_STORAGE_PATH_MAX];
     char bar_title[BRUCE_STORAGE_PATH_MAX + 32];
-    char usage_text[48];
+    /* "<label> <used>/<total>", e.g. "littlefs 20KiB/2MiB" - sized off
+     * BRUCE_PARTITION_LABEL_MAX (a label can now be any bparted partition
+     * name, not just the fixed "sd"/"littlefs" guess) plus two
+     * dialog__pick_file_format_bytes() outputs and their separators. */
+    char usage_text[BRUCE_PARTITION_LABEL_MAX + 2 * 16 + 4];
 } dialog__pick_file_workspace_t;
 
 static bruce_result_t dialog__gui_pick_file_run(
