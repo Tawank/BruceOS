@@ -63,6 +63,7 @@
 #define NOTIFICATION_SERVICE_STACK_BYTES 2048u
 #define MENU_STACK_BYTES 4096u
 #define CONFIG_STACK_BYTES 8192u
+#define BNU_HTTP_STACK_BYTES 16384u
 
 void app_runner__register_defaults(void) {
     (void)app_runner__register("launcher", launcher_app_main, LAUNCHER_STACK_BYTES);
@@ -103,6 +104,8 @@ void app_runner__register_defaults(void) {
     (void)app_runner__register("rm", bnu_rm_app_main, 0);
     (void)app_runner__register("cat", bnu_cat_app_main, 0);
     (void)app_runner__register("stty", bnu_stty_app_main, 0);
+    (void)app_runner__register("wget", bnu_wget_app_main, BNU_HTTP_STACK_BYTES);
+    (void)app_runner__register("curl", bnu_curl_app_main, BNU_HTTP_STACK_BYTES);
     (void)app_runner__register("elf", elf_loader__app_main, 0);
     (void)app_runner__register("js", js_loader__app_main, 0);
     (void)app_runner__register("wasm", wasm_loader__app_main, 0);

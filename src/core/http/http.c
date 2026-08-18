@@ -12,6 +12,7 @@
 #include "core_sdk/permission.h"
 #include "core_sdk/result.h"
 
+#include "esp_crt_bundle.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
 
@@ -104,7 +105,24 @@ static void http__capture_header(http__request_state_t *state, const char *name,
     state->header_bytes += name_size + value_size;
 }
 
-static esp_err_t http__capture_body(http__request_state_t *state, const void *data, size_t data_len) {
+/* Case-insensitive lookup into the headers captured so far. Only valid while
+ * state->arena still holds this attempt's data, i.e. before the next
+ * http__perform_once() reuses it. */
+static const char *http__find_header(const http__request_state_t *state, const char *name) {
+    for (size_t i = 0; i < state->header_count; ++i) {
+        const char *header_name = state->arena + state->headers[i].name_offset;
+        if (strcasecmp(header_name, name) == 0) return state->arena + state->headers[i].value_offset;
+    }
+    return NULL;
+}
+
+static bool http__is_redirect_status(int status_code) {
+    return status_code == 301 || status_code == 302 || status_code == 303 || status_code == 307 ||
+           status_code == 308;
+}
+
+static esp_err_t
+http__capture_body(http__request_state_t *state, const void *data, size_t data_len, bool is_redirect) {
     if (state->result != BRUCE_OK) return ESP_FAIL;
     if (data_len > state->max_response_bytes - state->body_len) {
         state->result = BRUCE_ERR_RESOURCE_LIMIT;
@@ -113,6 +131,11 @@ static esp_err_t http__capture_body(http__request_state_t *state, const void *da
 
     state->body_started = true;
     if (state->request->on_response_chunk != NULL) {
+        /* An intermediate redirect's body (e.g. a 301 landing page) must
+         * never reach the caller's sink - http__request() retries with a
+         * fresh state for the next hop, but a streaming sink (wget writing
+         * straight to a file) has no way to undo bytes it already saw. */
+        if (is_redirect) return ESP_OK;
         bruce_result_t result =
             state->request->on_response_chunk(data, data_len, state->request->response_chunk_context);
         if (result != BRUCE_OK) {
@@ -142,8 +165,13 @@ static esp_err_t http__event_handler(esp_http_client_event_t *evt) {
                 http__capture_header(state, evt->header_key, evt->header_value);
             }
             return state->result == BRUCE_OK ? ESP_OK : ESP_FAIL;
-        case HTTP_EVENT_ON_DATA:
-            return http__capture_body(state, evt->data, (size_t)evt->data_len);
+        case HTTP_EVENT_ON_DATA: {
+            /* The status line and headers are always fully parsed before the
+             * first body byte arrives, so both are already available here. */
+            bool is_redirect = http__is_redirect_status(esp_http_client_get_status_code(evt->client)) &&
+                                http__find_header(state, "Location") != NULL;
+            return http__capture_body(state, evt->data, (size_t)evt->data_len, is_redirect);
+        }
         default: break;
     }
     return ESP_OK;
@@ -187,6 +215,63 @@ static bruce_result_t http__build_response(
     return BRUCE_OK;
 }
 
+/* One HTTP attempt against `url`/`method`/(`send_body` ? request->body : no
+ * body), reusing `state`'s arena. Returns the underlying esp_http_client
+ * result; the parsed status code (once known) is written to *out_status_code
+ * regardless of that result, since a redirect target can be read out of the
+ * response for a request esp_http_client itself reports as failed. */
+static esp_err_t http__perform_once(
+    const bruce_http_request_t *request, const char *url, const char *method, bool send_body,
+    http__request_state_t *state, int *out_status_code
+) {
+    *out_status_code = -1;
+    esp_http_client_config_t config = {
+        .url = url,
+        .method = http__method_from_string(method),
+        .timeout_ms = request->timeout_ms > 0 ? request->timeout_ms : HTTP__DEFAULT_TIMEOUT_MS,
+        .cert_pem = NULL,
+        /* Validate the server cert against IDF's bundled CA store (mbedtls
+         * refuses to proceed at all otherwise: no cert_pem/cacert_buf/
+         * use_global_ca_store means there is nothing to check skip_cert_
+         * common_name_check against, and TLS setup fails outright). */
+        .crt_bundle_attach = esp_crt_bundle_attach,
+        /* Redirects are followed manually below instead: esp_http_client's
+         * own auto-redirect has a known gap on a scheme change (e.g. an
+         * http:// origin redirecting to https://) - it doesn't reopen the
+         * transport as TLS, so it ends up sending a plain-text request at
+         * the target's HTTPS port. */
+        .disable_auto_redirect = true,
+        .event_handler = http__event_handler,
+        .user_data = state,
+    };
+
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (client == NULL) {
+        ESP_LOGE(TAG, "failed to initialize HTTP client for %s", url);
+        return ESP_FAIL;
+    }
+
+    for (size_t i = 0; i < request->header_count; ++i) {
+        const char *key = request->headers[i * 2];
+        const char *value = request->headers[i * 2 + 1];
+        if (key != NULL && value != NULL) { esp_http_client_set_header(client, key, value); }
+    }
+
+    if (send_body && request->body != NULL && request->body_len > 0) {
+        esp_http_client_set_post_field(client, request->body, (int)request->body_len);
+    }
+
+    esp_err_t err = esp_http_client_perform(client);
+    if (err == ESP_OK) *out_status_code = esp_http_client_get_status_code(client);
+    esp_http_client_cleanup(client);
+    return err;
+}
+
+/* Bounds the manual redirect chain below, matching common browser/curl
+ * practice. */
+#define HTTP__MAX_REDIRECTS 5
+#define HTTP__MAX_REDIRECT_URL_LEN 512
+
 bruce_result_t http__request(const bruce_http_request_t *request, bruce_http_response_t *response) {
     if (response == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     memset(response, 0, sizeof(*response));
@@ -203,58 +288,52 @@ bruce_result_t http__request(const bruce_http_request_t *request, bruce_http_res
     if (result != BRUCE_OK) return result;
 
     http__request_state_t state = {
-        .request = request,
         .max_response_bytes = request->max_response_bytes > 0
                                   ? request->max_response_bytes
                                   : BRUCE_HTTP_DEFAULT_MAX_RESPONSE_BYTES,
-        .result = BRUCE_OK,
     };
 
-    esp_http_client_config_t config = {
-        .url = request->url,
-        .method = http__method_from_string(request->method),
-        .timeout_ms = request->timeout_ms > 0 ? request->timeout_ms : HTTP__DEFAULT_TIMEOUT_MS,
-        .cert_pem = NULL,
-        .skip_cert_common_name_check = true,
-        .event_handler = http__event_handler,
-        .user_data = &state,
-    };
+    const char *url = request->url;
+    const char *method = request->method;
+    bool send_body = true;
+    char redirect_url[HTTP__MAX_REDIRECT_URL_LEN];
+    int status = -1;
 
-    esp_http_client_handle_t client = esp_http_client_init(&config);
-    if (client == NULL) {
-        ESP_LOGE(TAG, "failed to initialize HTTP client for %s", request->url);
-        return BRUCE_ERR_IO;
+    for (int redirects = 0;; ++redirects) {
+        state.request = request;
+        state.result = BRUCE_OK;
+        state.body_started = false;
+        state.body_len = 0;
+        state.header_count = 0;
+        state.header_bytes = 0;
+        state.arena_used = 0;
+
+        esp_err_t err = http__perform_once(request, url, method, send_body, &state, &status);
+        if (err != ESP_OK || state.result != BRUCE_OK) {
+            ESP_LOGE(TAG, "HTTP request failed for %s: %s", url, esp_err_to_name(err));
+            memory__free(state.arena);
+            return state.result != BRUCE_OK ? state.result : BRUCE_ERR_IO;
+        }
+
+        const char *location =
+            http__is_redirect_status(status) ? http__find_header(&state, "Location") : NULL;
+        if (location == NULL || redirects >= HTTP__MAX_REDIRECTS || strstr(location, "://") == NULL) break;
+        int written = snprintf(redirect_url, sizeof(redirect_url), "%s", location);
+        if (written < 0 || (size_t)written >= sizeof(redirect_url)) break;
+
+        /* 301/302/303 conventionally downgrade a non-HEAD method to GET and
+         * drop the body on redirect (the same rule curl/browsers apply);
+         * 307/308 preserve both. */
+        if (status != 307 && status != 308) {
+            if (method == NULL || strcasecmp(method, "HEAD") != 0) method = "GET";
+            send_body = false;
+        }
+        url = redirect_url;
     }
 
-    for (size_t i = 0; i < request->header_count; ++i) {
-        const char *key = request->headers[i * 2];
-        const char *value = request->headers[i * 2 + 1];
-        if (key != NULL && value != NULL) { esp_http_client_set_header(client, key, value); }
-    }
-
-    if (request->body != NULL && request->body_len > 0) {
-        esp_http_client_set_post_field(client, request->body, (int)request->body_len);
-    }
-
-    esp_err_t err = esp_http_client_perform(client);
-    if (err != ESP_OK || state.result != BRUCE_OK) {
-        ESP_LOGE(TAG, "HTTP request failed for %s: %s", request->url, esp_err_to_name(err));
-        esp_http_client_cleanup(client);
-        memory__free(state.arena);
-        return state.result != BRUCE_OK ? state.result : BRUCE_ERR_IO;
-    }
-
-    int status = esp_http_client_get_status_code(client);
     result = http__build_response(&state, status, response);
-    if (result != BRUCE_OK) {
-        esp_http_client_cleanup(client);
-        memory__free(state.arena);
-        return result;
-    }
-
-    esp_http_client_cleanup(client);
     memory__free(state.arena);
-    return BRUCE_OK;
+    return result;
 }
 
 void http__response_free(bruce_http_response_t *response) {
