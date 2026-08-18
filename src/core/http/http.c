@@ -310,7 +310,16 @@ bruce_result_t http__request(const bruce_http_request_t *request, bruce_http_res
 
         esp_err_t err = http__perform_once(request, url, method, send_body, &state, &status);
         if (err != ESP_OK || state.result != BRUCE_OK) {
-            ESP_LOGE(TAG, "HTTP request failed for %s: %s", url, esp_err_to_name(err));
+            /* state.result is set by our own capture logic (e.g. running into
+             * max_response_bytes or an allocation failure) and can be BRUCE_OK
+             * while esp_http_client itself reports the transport failure, or
+             * vice versa - log whichever one actually failed instead of
+             * always reading esp_err_to_name(err), which is a misleading
+             * "ESP_OK" when the transport succeeded but our own state didn't. */
+            ESP_LOGE(
+                TAG, "HTTP request failed for %s: %s", url,
+                state.result != BRUCE_OK ? result__to_string(state.result) : esp_err_to_name(err)
+            );
             memory__free(state.arena);
             return state.result != BRUCE_OK ? state.result : BRUCE_ERR_IO;
         }

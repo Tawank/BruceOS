@@ -5,7 +5,6 @@
 #include <string.h>
 
 #include "args.h"
-#include "core_sdk/app_runner.h"
 #include "core_sdk/http.h"
 #include "core_sdk/result.h"
 #include "core_sdk/stdio.h"
@@ -110,7 +109,7 @@ int bnu_wget_app_main(int argc, char **argv) {
         path, BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE | BRUCE_STORAGE_OPEN_TRUNCATE, &sink.file
     );
     if (result != BRUCE_OK) {
-        stdio__printf("wget: %s: %s\n", path, app_runner__result_to_string(result));
+        stdio__printf("wget: %s: %s\n", path, result__to_string(result));
         return result;
     }
 
@@ -130,7 +129,7 @@ int bnu_wget_app_main(int argc, char **argv) {
     storage__close(sink.file);
     if (result == BRUCE_OK && sink.result != BRUCE_OK) result = sink.result;
     if (result != BRUCE_OK) {
-        stdio__printf("wget: %s: %s\n", url, app_runner__result_to_string(result));
+        stdio__printf("wget: %s: %s\n", url, result__to_string(result));
         return result;
     }
     if (response.status_code < 200 || response.status_code >= 300) {
@@ -193,7 +192,7 @@ int bnu_curl_app_main(int argc, char **argv) {
     bruce_http_response_t response = {0};
     bruce_result_t result = http__request(&request, &response);
     if (result != BRUCE_OK) {
-        stdio__printf("curl: %s: error %d\n", url, result);
+        stdio__printf("curl: %s: %s\n", url, result__to_string(result));
         return result;
     }
 
@@ -216,7 +215,7 @@ int bnu_curl_app_main(int argc, char **argv) {
                 result = storage__write(file, response.body, response.body_len, &written);
                 storage__close(file);
             }
-            if (result != BRUCE_OK) stdio__printf("curl: %s: error %d\n", path, result);
+            if (result != BRUCE_OK) stdio__printf("curl: %s: %s\n", path, result__to_string(result));
         } else {
             result = stdio__write(response.body, response.body_len);
         }

@@ -1,7 +1,6 @@
 #pragma once
 
 #include <stddef.h>
-#include "core_sdk/app_runner.h"
 
 /*
  * Built-in ELF loader module (see migration_plan.md, "Loader modules" /

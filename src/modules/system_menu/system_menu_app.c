@@ -229,7 +229,7 @@ int system_menu_app_main(int argc, char **argv) {
         } else if (event.code == BRUCE_INPUT_CODE_SELECT) {
             int action_result = system_menu__run_action(items[selected].action);
             if (action_result == BRUCE_OK || action_result == BRUCE_ERR_CANCELLED) break;
-            snprintf(status, sizeof(status), "%s", app_runner__result_to_string(action_result));
+            snprintf(status, sizeof(status), "%s", result__to_string(action_result));
             redraw = true;
         }
     }

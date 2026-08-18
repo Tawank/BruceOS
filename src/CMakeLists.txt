@@ -80,6 +80,7 @@ idf_component_register(SRCS
                     "core/partition_manager/partition_manager.c"
                     "core/permission/permission.c"
                     "core/pubsub/pubsub.c"
+                    "core/result/result.c"
                     "core/stdio/stdio.c"
                      "core/spi/spi.c"
                      "core/ssh/ssh.c"

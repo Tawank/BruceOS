@@ -44,7 +44,7 @@ void ext_mem_loader__format_error_message(const char *action, int result, char *
         out_size,
         "%s failed: %s (%d)",
         action != NULL && action[0] != '\0' ? action : "Launch",
-        app_runner__result_to_string(result),
+        result__to_string(result),
         result
     );
 }

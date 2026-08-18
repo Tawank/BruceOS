@@ -30,3 +30,10 @@ typedef enum {
     BRUCE_ERR_NOT_INITIALIZED = -18,
     BRUCE_ERR_INTERNAL = -19,
 } bruce_result_t;
+
+/* Translates a bruce_result_t (or the BRUCE_OK/BRUCE_ERR_* range of any int
+ * returned by the app_runner__run*() family) into a short human-readable
+ * description, e.g. BRUCE_ERR_NOT_FOUND -> "Not found". Positive values
+ * (process ids) and unrecognized codes return "Unknown error". Always
+ * returns a non-NULL, statically-allocated string. */
+const char *result__to_string(int result);

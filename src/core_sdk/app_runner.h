@@ -64,13 +64,6 @@ bruce_result_t app_runner__parse_args(const char *arg, char ***out_argv, int *ou
  * argv == NULL (e.g. when argc == 0). */
 void app_runner__free_args(char **argv, int argc);
 
-/* Translates a bruce_result_t (or the BRUCE_OK/BRUCE_ERR_* range of any int
- * returned by the app_runner__run*() family) into a short human-readable
- * description, e.g. BRUCE_ERR_NOT_FOUND -> "Not found". Positive values
- * (process ids) and unrecognized codes return "Unknown error". Always
- * returns a non-NULL, statically-allocated string. */
-const char *app_runner__result_to_string(int result);
-
 /* Returns the configured icon for a file path, or "file" when no icon is
  * configured for its extension. The returned string is owned by Core. */
 const char *app_runner__icon_for_path(const char *path);
