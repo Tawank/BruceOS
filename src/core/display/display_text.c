@@ -25,12 +25,11 @@ static size_t display__utf8_decode(const char *text, uint32_t *out_codepoint) {
     if (p[0] >= 0xC2 && p[0] <= 0xDF && (p[1] & 0xC0) == 0x80) {
         codepoint = ((uint32_t)(p[0] & 0x1F) << 6) | (p[1] & 0x3F);
         length = 2;
-    } else if (p[0] >= 0xE0 && p[0] <= 0xEF && (p[1] & 0xC0) == 0x80 &&
-               (p[2] & 0xC0) == 0x80) {
+    } else if (p[0] >= 0xE0 && p[0] <= 0xEF && (p[1] & 0xC0) == 0x80 && (p[2] & 0xC0) == 0x80) {
         codepoint = ((uint32_t)(p[0] & 0x0F) << 12) | ((uint32_t)(p[1] & 0x3F) << 6) | (p[2] & 0x3F);
         length = 3;
-    } else if (p[0] >= 0xF0 && p[0] <= 0xF4 && (p[1] & 0xC0) == 0x80 &&
-               (p[2] & 0xC0) == 0x80 && (p[3] & 0xC0) == 0x80) {
+    } else if (p[0] >= 0xF0 && p[0] <= 0xF4 && (p[1] & 0xC0) == 0x80 && (p[2] & 0xC0) == 0x80 &&
+               (p[3] & 0xC0) == 0x80) {
         codepoint = ((uint32_t)(p[0] & 7) << 18) | ((uint32_t)(p[1] & 0x3F) << 12) |
                     ((uint32_t)(p[2] & 0x3F) << 6) | (p[3] & 0x3F);
         length = 4;
@@ -76,11 +75,15 @@ static void display__draw_tofu(display__process_context_t *context, int16_t x, i
     int16_t s = context->text_size;
     int16_t w = (int16_t)(font->cell_width * s);
     int16_t h = (int16_t)(font->cell_height * s);
-    display_internal__fill_rect(context, (int16_t)(x + s), (int16_t)(y + s), (int16_t)(w - 3 * s), s, context->text_color);
+    display_internal__fill_rect(
+        context, (int16_t)(x + s), (int16_t)(y + s), (int16_t)(w - 3 * s), s, context->text_color
+    );
     display_internal__fill_rect(
         context, (int16_t)(x + s), (int16_t)(y + h - 2 * s), (int16_t)(w - 3 * s), s, context->text_color
     );
-    display_internal__fill_rect(context, (int16_t)(x + s), (int16_t)(y + s), s, (int16_t)(h - 3 * s), context->text_color);
+    display_internal__fill_rect(
+        context, (int16_t)(x + s), (int16_t)(y + s), s, (int16_t)(h - 3 * s), context->text_color
+    );
     display_internal__fill_rect(
         context, (int16_t)(x + w - 2 * s), (int16_t)(y + s), s, (int16_t)(h - 3 * s), context->text_color
     );
@@ -88,7 +91,8 @@ static void display__draw_tofu(display__process_context_t *context, int16_t x, i
 
 /* Draws one codepoint at (x, y) and returns its advance width in px (already
  * scaled by text_size), for the caller to move the cursor by. */
-static int16_t display__draw_char(display__process_context_t *context, int16_t x, int16_t y, uint32_t codepoint) {
+static int16_t
+display__draw_char(display__process_context_t *context, int16_t x, int16_t y, uint32_t codepoint) {
     const display__font_t *font = display_internal__active_font();
     display__glyph_t glyph;
     bool found = font->get_glyph(codepoint, &glyph);
@@ -96,7 +100,9 @@ static int16_t display__draw_char(display__process_context_t *context, int16_t x
     int16_t advance = (int16_t)((found ? glyph.advance : font->cell_width) * s);
 
     if (!context->text_bg_transparent) {
-        display_internal__fill_rect(context, x, y, advance, (int16_t)(font->cell_height * s), context->text_bg_color);
+        display_internal__fill_rect(
+            context, x, y, advance, (int16_t)(font->cell_height * s), context->text_bg_color
+        );
     }
     if (found) {
         display__blit_glyph(context, x, y, &glyph);

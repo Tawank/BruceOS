@@ -231,6 +231,22 @@ void browser_document__add_image(browser_document_t *doc, const char *url, const
 
 void browser_document__add_break(browser_document_t *doc, bool paragraph) {
     if (doc == NULL) return;
+    if (doc->item_count == 0) return; /* Nothing above to separate from -- would just be leading blank space. */
+
+    /* Several block elements can close back to back (nested <div>s, a
+     * heading forcing a break before it right after a paragraph's own
+     * closing break, an image's own before/after breaks landing next to
+     * markup that already emitted one, ...) -- browsers collapse that whole
+     * run down to a single blank line, not one per closing tag, so do the
+     * same: fold a new break into the last item instead of stacking another
+     * one on, keeping paragraph (the stronger gap) if either call asked for
+     * it. */
+    browser_item_t *last = &doc->items[doc->item_count - 1];
+    if (last->kind == BROWSER_ITEM_LINE_BREAK || last->kind == BROWSER_ITEM_PARAGRAPH_BREAK) {
+        if (paragraph) last->kind = (uint8_t)BROWSER_ITEM_PARAGRAPH_BREAK;
+        return;
+    }
+
     browser_item_t *item = browser_document__new_item(doc);
     if (item == NULL) return;
     item->kind = (uint8_t)(paragraph ? BROWSER_ITEM_PARAGRAPH_BREAK : BROWSER_ITEM_LINE_BREAK);

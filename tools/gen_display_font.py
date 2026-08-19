@@ -247,6 +247,9 @@ add(0x0451, "e", "DIAERESIS")
 # glyph under a different codepoint.
 ALIASES = {
     0x2018: "'", 0x2019: "'", 0x201C: '"', 0x201D: '"',
+    # ℹ information source -- reads the same as a plain lowercase i (dot over
+    # a stem) at this resolution; no room for the circle around it.
+    0x2139: "i",
     # Cyrillic uppercase visually identical to a Latin capital.
     0x0410: "A", 0x0412: "B", 0x0415: "E", 0x041A: "K", 0x041C: "M",
     0x041D: "H", 0x041E: "O", 0x0420: "P", 0x0421: "C", 0x0422: "T",
@@ -443,6 +446,10 @@ RAW_GLYPHS = {
     0x23F5: (0x01FE, 0x00FC, 0x0078, 0x0030, 0x0000),  # ⏵ play triangle
     0x23F8: (0x01FE, 0x0000, 0x0000, 0x01FE, 0x0000),  # ⏸ pause bars
     0x23F9: (0x00FC, 0x00FC, 0x00FC, 0x00FC, 0x0000),  # ⏹ stop square
+    # ☰ trigram for heaven -- the "hamburger menu" glyph, three even bars.
+    0x2630: rows_to_cols([
+        ".....", "#####", "#####", ".....", "#####", "#####", ".....", "#####", "#####", ".....",
+    ]),
 }
 
 # Eight-spoked star glyphs used interchangeably as spinner animation frames
