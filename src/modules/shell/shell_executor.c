@@ -271,15 +271,6 @@ static int shell_executor__capture_external(int argc, char **argv, shell_executo
     return 0;
 }
 
-/* The one pipe destination that bypasses stdio and takes over the *physical*
- * display/input directly is the "text" editor/viewer -- see
- * shell_executor__dispatch()'s big comment on GUI=1/BRUCE_LAUNCH_FOREGROUND.
- * Everything else (a pager like "less", or any other external command) reads
- * and writes through the stdio session like a normal foreground shell
- * command, so shell_executor__pipe_write() relays it live to the shell's own
- * terminal instead of launching it as a physical-display app. */
-static bool shell_executor__pipe_target_wants_display(const char *name) { return strcmp(name, "text") == 0; }
-
 /* Pumps `session` bidirectionally between `child` and the shell process's own
  * routed stdio -- i.e. whatever real terminal (terminal_app.c, ssh, the
  * physical console, ...) the shell itself is running under -- until `child`
@@ -339,10 +330,13 @@ static int shell_executor__pipe_relay(bruce_stdio_session_t session, bruce_proce
  * telling it up front how many bytes are coming via a "--stdin-size N"
  * argument prefix (see text_app.c's --stdin-size handling for the convention
  * this follows) so any external program written to expect a piped shell
- * input can size its read. "text" additionally gets GUI=1 and runs in the
- * foreground (see shell_executor__pipe_target_wants_display()); every other
- * destination runs in the background and is relayed live to the shell's own
- * terminal by shell_executor__pipe_relay() once the buffer is delivered. */
+ * input can size its read. Like any other external command the shell
+ * launches, a pipe destination -- "text", "less", or anything else -- runs
+ * in the background with no GUI env of its own, and is relayed live to the
+ * shell's own terminal by shell_executor__pipe_relay() once the buffer is
+ * delivered; a target that wants the physical display instead needs the
+ * same explicit "GUI=1" its non-piped invocation would (see
+ * shell_executor__dispatch()'s big comment on GUI=1/BRUCE_LAUNCH_FOREGROUND). */
 static int
 shell_executor__pipe_write(int target_argc, char **target_words, const shell_executor__buffer_t *buffer) {
     const void *data = NULL;
@@ -363,16 +357,10 @@ shell_executor__pipe_write(int target_argc, char **target_words, const shell_exe
         (void)stdio__session_close(session);
         return 1;
     }
-    bool wants_display = shell_executor__pipe_target_wants_display(target_words[0]);
     char prefix[48];
     snprintf(prefix, sizeof(prefix), "--stdin-size %u", (unsigned)buffer->length);
-    const bruce_environment_variable_t gui_env[] = {
-        {.name = "GUI", .value = "1"}
-    };
-    int launched = shell_executor__launch_external(
-        target_argc, target_words, prefix, wants_display ? gui_env : NULL, wants_display ? 1u : 0u,
-        wants_display ? BRUCE_LAUNCH_FOREGROUND : BRUCE_LAUNCH_BACKGROUND
-    );
+    int launched =
+        shell_executor__launch_external(target_argc, target_words, prefix, NULL, 0, BRUCE_LAUNCH_BACKGROUND);
     (void)stdio__session_route_children(BRUCE_STDIO_SESSION_INVALID);
     if (launched <= 0) {
         (void)stdio__session_close(session);
@@ -393,8 +381,7 @@ shell_executor__pipe_write(int target_argc, char **target_words, const shell_exe
         }
     }
     if (status == 0) {
-        status = wants_display ? shell_executor__wait((bruce_process_id_t)launched)
-                                : shell_executor__pipe_relay(session, (bruce_process_id_t)launched);
+        status = shell_executor__pipe_relay(session, (bruce_process_id_t)launched);
     } else {
         (void)process__kill((bruce_process_id_t)launched);
         bruce_process_status_t child_status;

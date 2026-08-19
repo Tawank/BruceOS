@@ -578,15 +578,17 @@ The producer's output (or the literal `echo` arguments) is buffered in one
 internal RAM, per the normal memory__external_alloc() rules -- growing by
 doubling as it fills, so a pipeline isn't bounded by the internal heap's
 largest free block. The destination is launched with a `--stdin-size N`
-argument prefix so it can size its read. `text` is the one destination that
-additionally gets `GUI=1` and runs in the foreground, since it claims the
-physical display directly; every other destination runs in the background and
-is relayed live, byte for byte in both directions, between its own stdio
-session and the shell process's own routed stdio (i.e. whatever real terminal
-the shell itself is running under) until it exits -- which is what lets an
-interactive destination like `less` actually be seen and typed into through
-a pipe. Its bounded local variables persist across interactive input and
-script lines. `export NAME=value` or `export NAME` publishes a value to the
+argument prefix so it can size its read, the same way any other external
+command the shell launches is: in the background, with no GUI environment of
+its own. It is relayed live, byte for byte in both directions, between its
+own stdio session and the shell process's own routed stdio (i.e. whatever
+real terminal the shell itself is running under) until it exits -- which is
+what lets an interactive destination like `less` actually be seen and typed
+into through a pipe. A destination that wants the physical display, like
+`text`, needs the same explicit `GUI=1` a non-piped invocation would; a pipe
+target's words aren't scanned for `NAME=value` prefixes, so that can't be
+requested as part of the pipeline itself. Its bounded local variables persist
+across interactive input and script lines. `export NAME=value` or `export NAME` publishes a value to the
 shell process environment, and `NAME=value command` applies only to that
 child. Builtins are `echo`, `true`, `false`, `cd`, `set`, `unset`, `export`,
 `clear`, `exit`, and `help`; other names and absolute/`./` paths launch

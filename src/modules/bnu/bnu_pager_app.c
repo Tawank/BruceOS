@@ -139,8 +139,41 @@ less__find(const char *data, size_t length, size_t from, const char *needle, siz
  * Rendering
  * ------------------------------------------------------------------------- */
 
+/* Renders at most `out_capacity` visible columns of a source line into
+ * `out`: a tab becomes two spaces, and every other C0 control byte or DEL
+ * becomes a single visible placeholder, so control bytes can't reach the
+ * terminal raw. Real less(1) does the same by default (caret notation)
+ * rather than writing them straight through: arbitrary piped/curled content
+ * -- HTML, a script, plain binary -- can otherwise embed ESC sequences the
+ * terminal emulator faithfully executes as real cursor moves or SGR/color
+ * changes, which is what garbled the screen and left a color bleeding into
+ * the reverse-video status bar depending on which lines happened to be on
+ * screen. Column-budgeted (rather than a 1:1 byte copy) because a tab's
+ * two-space expansion means the number of source bytes consumed and the
+ * number of columns produced aren't the same -- returns the latter. */
+static size_t less__sanitize(char *out, size_t out_capacity, const char *in, size_t length) {
+    size_t written = 0;
+    for (size_t i = 0; i < length && written < out_capacity; ++i) {
+        unsigned char byte = (unsigned char)in[i];
+        if (byte == '\t') {
+            out[written++] = ' ';
+            if (written < out_capacity) out[written++] = ' ';
+        } else {
+            out[written++] = (byte < 0x20 || byte == 0x7f) ? '.' : (char)byte;
+        }
+    }
+    return written;
+}
+
 static void less__draw(less__state_t *state, const char *message) {
-    stdio__write("\033[?25l\033[2J\033[H", 10);
+    /* Hide cursor, erase the screen, home the cursor, and reset any SGR
+     * state left over from the previous draw (erase-display alone doesn't
+     * reset colors/attributes -- see less__sanitize()'s comment on why that
+     * otherwise showed up as a status bar with drifting colors). The old
+     * length here (10) silently truncated this string before the "home
+     * cursor" (\033[H) sequence, so every redraw started wherever the
+     * cursor last happened to be instead of the top-left corner. */
+    stdio__write("\033[?25l\033[2J\033[H\033[0m", 17);
     uint16_t visible_rows = less__visible_rows(state->rows);
     size_t offset = state->top;
     for (uint16_t row = 0; row < visible_rows; ++row) {
@@ -148,10 +181,9 @@ static void less__draw(less__state_t *state, const char *message) {
         while (line_end < state->length && state->data[line_end] != '\n') line_end++;
         size_t line_len = line_end - offset;
         size_t start = offset + (state->left_column < line_len ? state->left_column : line_len);
-        size_t show_len = line_end - start;
-        if (show_len > state->columns) show_len = state->columns;
-        memcpy(state->line_buffer, state->data + start, show_len);
-        (void)stdio__write(state->line_buffer, show_len);
+        size_t written =
+            less__sanitize(state->line_buffer, state->columns, state->data + start, line_end - start);
+        (void)stdio__write(state->line_buffer, written);
         if ((uint16_t)(row + 1u) < visible_rows) (void)stdio__write("\r\n", 2);
         offset = line_end < state->length ? line_end + 1u : state->length;
     }
@@ -288,6 +320,14 @@ static void less__run(less__state_t *state) {
     bool dirty = true;
     const char *message = NULL;
     uint32_t last_generation = 0;
+    /* Belt and suspenders alongside less__sanitize()'s per-line clamp to
+     * state->columns: disable the terminal's own autowrap (DECAWM, mode 7 --
+     * supported by terminal_ansi.c) for as long as this pager owns the
+     * screen, so a line this pager means to chop can never instead get
+     * wrapped by the terminal itself onto the row below, which is what
+     * produced the "line is cut and continues below" look. Restored below on
+     * exit -- the shell (and everything after it) expects autowrap on. */
+    (void)stdio__write("\033[?7l", 5);
     while (running) {
         bruce_tty_size_t size;
         if (tty__get_size(&size) == BRUCE_OK && size.generation != last_generation) {
@@ -347,7 +387,11 @@ static void less__run(less__state_t *state) {
             default: break;
         }
     }
-    (void)stdio__write("\033[?25h\033[2J\033[H\033[0m", 14);
+    /* Restore autowrap (see the \033[?7l comment above), show the cursor,
+     * clear the screen, home the cursor, and reset SGR before handing the
+     * terminal back. The old length here (14) was also short by 3 bytes,
+     * silently truncating the trailing "m" off "\033[0m". */
+    (void)stdio__write("\033[?7h\033[?25h\033[2J\033[H\033[0m", 22);
 }
 
 /* -------------------------------------------------------------------------
