@@ -14,6 +14,7 @@
 #include "wasm_export.h"
 
 #include "core_sdk/app_runner.h"
+#include "core_sdk/dialog.h"
 #include "core_sdk/ext_mem_loader.h"
 #include "core_sdk/manifest.h"
 #include "core_sdk/memory.h"
@@ -24,7 +25,15 @@
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
 
-#define WASM_LOADER_MAX_MODULE_BYTES (1024u * 1024u)
+/* Ceiling used only when the module image actually landed in PSRAM
+ * (memory_external prefers PSRAM, see memory_external__alloc()) -- staying
+ * there costs nothing from the internal heap, so a generous fixed ceiling is
+ * fine on boards that have it. */
+#define WASM_LOADER_MAX_MODULE_BYTES_PSRAM (1024u * 1024u)
+/* Floor for the internal-heap budget below, so a device with almost no free
+ * heap right now still gets a chance at a small module rather than an
+ * always-zero cap. */
+#define WASM_LOADER_MODULE_BUDGET_MIN_BYTES (8u * 1024u)
 #define WASM_LOADER_EXEC_STACK_BYTES 8192u
 #define WASM_LOADER_APP_HEAP_BYTES (16u * 1024u)
 #define WASM_LOADER_MAX_MEMORY_PAGES 4u
@@ -64,6 +73,30 @@ static void *wasm_loader__runtime_malloc(unsigned int size) {
     return (void *)address;
 }
 
+/* Reserved on top of the module bytes themselves for the two allocations
+ * that are guaranteed to follow a successful load: the app's own
+ * host-managed heap and WAMR's exec-env stack (both also come out of this
+ * same internal heap, via wasm_loader__runtime_malloc()). Deliberately not
+ * padded further for WAMR's own module metadata -- that scales with module
+ * complexity, not size, and is usually a small fraction of it; the actual
+ * malloc() in the SWAP branch below still fails gracefully with
+ * BRUCE_ERR_NO_MEMORY if this estimate runs short, so an imprecise budget
+ * here is a soft preflight, not the only thing standing between a module
+ * and a crash. */
+#define WASM_LOADER_MODULE_BUDGET_RESERVE_BYTES (WASM_LOADER_APP_HEAP_BYTES + WASM_LOADER_EXEC_STACK_BYTES)
+
+/* Modules that land on the flash-backed "swap" memory__external tier (no
+ * PSRAM, or PSRAM full/fragmented right now) get copied into a plain
+ * malloc() buffer for WAMR's loader to write into (see the SWAP branch
+ * below) -- so on those boards the cap has to track *actual current* free
+ * internal heap, not a fixed number tuned for one board. */
+static size_t wasm_loader__internal_module_budget(void) {
+    size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+    if (largest <= WASM_LOADER_MODULE_BUDGET_RESERVE_BYTES) return WASM_LOADER_MODULE_BUDGET_MIN_BYTES;
+    size_t budget = largest - WASM_LOADER_MODULE_BUDGET_RESERVE_BYTES;
+    return budget < WASM_LOADER_MODULE_BUDGET_MIN_BYTES ? WASM_LOADER_MODULE_BUDGET_MIN_BYTES : budget;
+}
+
 static void wasm_loader__runtime_free(void *pointer) {
     if (pointer == NULL) return;
     wasm_loader_allocation_header_t *header = (wasm_loader_allocation_header_t *)pointer - 1;
@@ -94,6 +127,12 @@ typedef struct {
     bruce_ext_mem_loader_image_t module_image;
     wasm_module_t module;
     wasm_module_inst_t module_inst;
+    /* Whether this launch requested a GUI -- gates the on-screen error
+     * dialog for failures discovered inside the spawned process (import
+     * link failures at call time, instantiate failures), which happen well
+     * after wasm_loader__open()'s own synchronous return already succeeded
+     * and so would otherwise be visible only in the serial log. */
+    bool gui;
 } wasm_loader_process_ctx_t;
 
 typedef enum {
@@ -378,11 +417,19 @@ static int wasm_loader__entry(void *context) {
     if (!executed &&
         process__current_signal() == 0) {
         const char *exception = wasm_runtime_get_exception(ctx->module_inst);
-        stdio__printf(
-            "[wasm_loader] %s: %s\n",
-            wasm_loader__basename(ctx->path),
-            exception != NULL ? exception : "execution failed"
-        );
+        const char *detail = exception != NULL ? exception : "execution failed";
+        stdio__printf("[wasm_loader] %s: %s\n", wasm_loader__basename(ctx->path), detail);
+        if (ctx->gui) {
+            char message[192];
+            snprintf(
+                message,
+                sizeof(message),
+                "Can't run %s. It may be built for a different Bruce version.\n%s",
+                wasm_loader__basename(ctx->path),
+                detail
+            );
+            (void)dialog__message(BRUCE_DIALOG_ERROR, "Launch failed", message);
+        }
     }
     return exit_code;
 }
@@ -422,6 +469,13 @@ static int wasm_loader__process_entry(void *context) {
     );
     if (ctx->module_inst == NULL) {
         stdio__printf("[wasm_loader] %s: %s\n", wasm_loader__basename(ctx->path), error_buf);
+        if (ctx->gui) {
+            char message[192];
+            snprintf(
+                message, sizeof(message), "Can't run %s: %s", wasm_loader__basename(ctx->path), error_buf
+            );
+            (void)dialog__message(BRUCE_DIALOG_ERROR, "Launch failed", message);
+        }
         return BRUCE_ERR_NO_MEMORY;
     }
 
@@ -506,7 +560,10 @@ static int wasm_loader__open(
         memory__free(inspection);
         return stage_result;
     }
-    if (ctx->module_image.size > WASM_LOADER_MAX_MODULE_BYTES) {
+    size_t max_module_bytes = ctx->module_image.memory.backend == BRUCE_MEMORY_BACKEND_PSRAM ?
+                                   WASM_LOADER_MAX_MODULE_BYTES_PSRAM :
+                                   wasm_loader__internal_module_budget();
+    if (ctx->module_image.size > max_module_bytes) {
         wasm_loader__free_process_ctx(ctx);
         memory__free(inspection);
         return BRUCE_ERR_RESOURCE_LIMIT;
@@ -552,6 +609,7 @@ static int wasm_loader__open(
     }
 
     bool gui_requested = app_runner__environment_requests_gui(environment, environment_count);
+    ctx->gui = gui_requested;
     if (inspection->manifest.stack_size > WASM_LOADER_MANIFEST_STACK_MAX) {
         memory__free(inspection);
         wasm_loader__free_process_ctx(ctx);
@@ -640,6 +698,11 @@ int wasm_loader__app_main(int argc, char **argv) {
     int result = wasm_loader__open(
         path, arg[0] != '\0' ? arg : NULL, mode, gui ? gui_env : NULL, gui ? 1u : 0u
     );
+    if (result < 0 && gui) {
+        char message[128];
+        ext_mem_loader__format_error_message(wasm_loader__basename(path), result, message, sizeof(message));
+        (void)dialog__message(BRUCE_DIALOG_ERROR, "Launch failed", message);
+    }
 #if defined(BRUCE_WASM_EXTERNAL_ELF) && BRUCE_WASM_EXTERNAL_ELF
     /* Child callbacks execute from this ELF image, so keep its parent process
      * alive until Core has finished the child and its owned cleanup. */
