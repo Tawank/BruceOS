@@ -9,6 +9,8 @@
 
 #include "core_sdk/app_runner.h"
 #include "core_sdk/config.h"
+#include "core_sdk/dialog.h"
+#include "core_sdk/ext_mem_loader.h"
 #include "core_sdk/process.h"
 
 #include "esp_log.h"
@@ -209,5 +211,17 @@ void input_hotkey__run_action(const char *action) {
         snprintf(command, sizeof(command), "GUI=1 %s", action);
     }
     int result = app_runner__run_command(command, BRUCE_LAUNCH_FOREGROUND);
-    if (result < 0) ESP_LOGW(TAG, "hotkey action '%s' failed: %d", action, result);
+    if (result < 0) {
+        ESP_LOGW(TAG, "hotkey action '%s' failed: %d", action, result);
+        /* Unlike a launcher-menu or Apps-browser launch, a hotkey has no
+         * screen of its own to fail out of -- without this, a failure here
+         * (e.g. an ELF app missing an SDK symbol on stale firmware) is
+         * silent on-device: nothing appears and the serial log is the only
+         * trace. Match bruce_launcher__run_entry()'s dialog so the user
+         * gets the same "can't load this app" message a menu launch would
+         * have shown. */
+        char message[128];
+        ext_mem_loader__format_error_message(action, result, message, sizeof(message));
+        (void)dialog__message(BRUCE_DIALOG_ERROR, "Launch failed", message);
+    }
 }

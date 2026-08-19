@@ -62,6 +62,14 @@ extern double __adddf3(double left, double right);
 extern long long __divdi3(long long dividend, long long divisor);
 extern int *__errno(void);
 extern float __divsf3(float left, float right);
+extern float __addsf3(float left, float right);
+extern float __subsf3(float left, float right);
+extern float __mulsf3(float left, float right);
+extern float __floatsisf(int value);
+extern int __fixsfsi(float value);
+extern unsigned int __fixunssfsi(float value);
+extern int __gesf2(float left, float right);
+extern int __ltsf2(float left, float right);
 extern long long __fixdfdi(double value);
 extern double __floatsidf(int value);
 extern float __floatdisf(long long value);
@@ -529,6 +537,14 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(__adddf3),
     ESP_ELFSYM_EXPORT(__divdi3),
     ESP_ELFSYM_EXPORT(__divsf3),
+    ESP_ELFSYM_EXPORT(__addsf3),
+    ESP_ELFSYM_EXPORT(__subsf3),
+    ESP_ELFSYM_EXPORT(__mulsf3),
+    ESP_ELFSYM_EXPORT(__floatsisf),
+    ESP_ELFSYM_EXPORT(__fixsfsi),
+    ESP_ELFSYM_EXPORT(__fixunssfsi),
+    ESP_ELFSYM_EXPORT(__gesf2),
+    ESP_ELFSYM_EXPORT(__ltsf2),
     ESP_ELFSYM_EXPORT(__fixdfdi),
     ESP_ELFSYM_EXPORT(__floatsidf),
     ESP_ELFSYM_EXPORT(__floatdisf),

@@ -11,6 +11,7 @@
 #include "esp_elf.h"
 
 #include "core_sdk/app_runner.h"
+#include "core_sdk/dialog.h"
 #include "core_sdk/ext_mem_loader.h"
 #include "core_sdk/manifest.h"
 #include "core_sdk/memory.h"
@@ -349,9 +350,24 @@ int elf_loader__app_main(int argc, char **argv) {
         {.name = "GUI", .value = "1"}
     };
     bool gui = runtime__gui_requested();
-    return elf_loader__open(
-        path, arg[0] != '\0' ? arg : NULL, mode, gui ? gui_env : NULL, gui ? 1u : 0u
-    );
+    int result =
+        elf_loader__open(path, arg[0] != '\0' ? arg : NULL, mode, gui ? gui_env : NULL, gui ? 1u : 0u);
+
+    /* elf_loader__open() runs inside this "elf" command's own process,
+     * spawned asynchronously by app_runner__run_with_environment() -- every
+     * caller (Apps browser, launcher menu, file manager, hotkeys, "elf" on
+     * the shell) only sees that spawn succeed and moves on immediately, so
+     * a failure discovered here (e.g. a relocation error like a missing SDK
+     * symbol) would otherwise only ever reach the serial log via the
+     * printf() in elf_loader__open(), never the screen: this is the one
+     * place actually holding the outcome once that gap exists. Show it here
+     * instead of relying on a caller that structurally can't see it. */
+    if (result < 0 && gui) {
+        char message[128];
+        ext_mem_loader__format_error_message(elf_loader__basename(path), result, message, sizeof(message));
+        (void)dialog__message(BRUCE_DIALOG_ERROR, "Launch failed", message);
+    }
+    return result;
 }
 
 void elf_loader__init(void) { elf_set_symbol_resolver(elf_loader__find_symbol); }

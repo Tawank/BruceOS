@@ -2,3 +2,15 @@
 # UART0 remains unused, and no secondary console output is configured.
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+
+# Double the flash instruction cache (16KB -> 32KB; the other 16KB would
+# otherwise just sit in the general heap allocator, per this option's own
+# Kconfig help text). Measured on-device with the NES app (native_apps/examples/nes):
+# with CONFIG_BRUCE_DISPLAY_DMA_FRAMEBUFFER disabled and matched/higher per-frame
+# workload (batches redrawn), 16KB caps iter time at 17000-17391us against a
+# 16639us budget (57.5-59fps); 32KB stays at 16611-16700us (steady 60fps). ELF
+# apps (src/modules/loaders/elf) execute XIP straight out of a flash-mapped
+# partition (memory_external__instruction_map, esp_elf_relocate_xip) rather
+# than from RAM, so the extra headroom benefits any loaded app's hot loop, not
+# just core firmware -- worth the 16KB of heap given the measured win.
+CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y
