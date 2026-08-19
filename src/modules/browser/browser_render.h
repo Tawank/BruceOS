@@ -14,6 +14,14 @@
 #include "browser_image_cache.h"
 #include "core_sdk/result.h"
 
+/* User-adjustable font size, as a delta from the default scale (0) applied on
+ * top of every heading level's base scale -- see
+ * browser_layout__heading_scale(). Clamped to this range on every +/- press;
+ * -1 still leaves body text readable (scale 1), +3 is about as large as fits
+ * without every word wrapping onto its own line at this display width. */
+#define BROWSER_FONT_SCALE_MIN (-1)
+#define BROWSER_FONT_SCALE_MAX 3
+
 typedef struct {
     int scroll_y;       /* Content pixels scrolled past the top. */
     int selected_link;  /* Index into doc->links, or -1 for none selected. */
@@ -22,6 +30,7 @@ typedef struct {
                           * an image row (images are always alone on their own row --
                           * see browser_document.h), or neither. */
     int row_y;           /* Content y of the row Up/Down navigation is on, or -1 before the first move. */
+    int font_scale;       /* User's +/- font size preference; see BROWSER_FONT_SCALE_MIN/MAX above. */
 } browser_view_state_t;
 
 /* Pixel height of the top chrome bar, derived from the active font. */
@@ -33,12 +42,13 @@ int browser_render__content_width(void);
 /* Pixel height of the content viewport below the chrome bar (never negative). */
 int browser_render__view_height(void);
 
-/* Total laid-out height of `doc` at the current content width. */
-int browser_render__content_height(const browser_document_t *doc);
+/* Total laid-out height of `doc` at the current content width and
+ * `font_scale` (see BROWSER_FONT_SCALE_MIN/MAX above). */
+int browser_render__content_height(const browser_document_t *doc, int font_scale);
 
 /* Largest `scroll_y` that still shows content, i.e. content_height minus the
  * viewport height below the chrome bar (never negative). */
-int browser_render__max_scroll(const browser_document_t *doc);
+int browser_render__max_scroll(const browser_document_t *doc, int font_scale);
 
 #define BROWSER_ROW_MAX_LINKS 16
 
@@ -65,7 +75,9 @@ typedef struct {
  * very first (direction > 0) or very last (direction < 0) row of the
  * document. Returns false, `*out_row` untouched, if there's no such row
  * (already at an end, or an empty document). */
-bool browser_render__find_row(const browser_document_t *doc, int after_y, int direction, browser_render_row_t *out_row);
+bool browser_render__find_row(
+    const browser_document_t *doc, int after_y, int direction, int font_scale, browser_render_row_t *out_row
+);
 
 /* Draws one full frame: chrome bar plus the visible slice of `doc` for
  * `view`. Fetches/decodes any inline images newly scrolled into view through

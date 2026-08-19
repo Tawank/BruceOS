@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "args.h"
+#include "browser_debug.h"
 #include "browser_document.h"
 #include "browser_history.h"
 #include "browser_image_cache.h"
@@ -106,7 +107,7 @@ static void browser_app__scroll_into_view(browser_app_state_t *state, int top, i
         if (state->view.scroll_y > top) state->view.scroll_y = top;
     }
 
-    int max_scroll = browser_render__max_scroll(state->doc);
+    int max_scroll = browser_render__max_scroll(state->doc, state->view.font_scale);
     if (state->view.scroll_y > max_scroll) state->view.scroll_y = max_scroll;
     if (state->view.scroll_y < 0) state->view.scroll_y = 0;
 }
@@ -127,7 +128,8 @@ static void browser_app__move_line(browser_app_state_t *state, int direction) {
          * is exactly "the row at row_y" (there's no room for another row's y
          * to fall strictly between row_y - 1 and row_y). */
         browser_render_row_t row;
-        if (browser_render__find_row(state->doc, state->view.row_y - 1, 1, &row) && row.y == state->view.row_y) {
+        if (browser_render__find_row(state->doc, state->view.row_y - 1, 1, state->view.font_scale, &row) &&
+            row.y == state->view.row_y) {
             int pos = -1;
             for (int i = 0; i < row.link_count; ++i) {
                 if (row.link_indices[i] == state->view.selected_link) {
@@ -145,7 +147,7 @@ static void browser_app__move_line(browser_app_state_t *state, int direction) {
     }
 
     browser_render_row_t row;
-    if (!browser_render__find_row(state->doc, state->view.row_y, direction, &row)) return;
+    if (!browser_render__find_row(state->doc, state->view.row_y, direction, state->view.font_scale, &row)) return;
     state->view.row_y = row.y;
     if (row.link_count > 0) {
         state->view.selected_link = row.link_indices[direction > 0 ? 0 : row.link_count - 1];
@@ -160,10 +162,36 @@ static void browser_app__move_line(browser_app_state_t *state, int direction) {
 static void browser_app__page_scroll(browser_app_state_t *state, int direction) {
     int view_height = browser_render__view_height();
     if (view_height <= 0) view_height = 1;
-    int max_scroll = browser_render__max_scroll(state->doc);
+    int max_scroll = browser_render__max_scroll(state->doc, state->view.font_scale);
     state->view.scroll_y += direction * view_height;
     if (state->view.scroll_y < 0) state->view.scroll_y = 0;
     if (state->view.scroll_y > max_scroll) state->view.scroll_y = max_scroll;
+}
+
+/* +/- resizes body/heading text on the fly (see BROWSER_FONT_SCALE_MIN/MAX).
+ * Re-flowing at a new scale moves every row's y, so an exact scroll_y or
+ * row_y/selected_link carried over from the old layout would land on the
+ * wrong content -- keep the same approximate reading position by scaling
+ * scroll_y by how much the total content height changed, and drop row
+ * selection rather than have it silently point at the wrong row. */
+static void browser_app__adjust_font_scale(browser_app_state_t *state, int delta) {
+    int old_scale = state->view.font_scale;
+    int new_scale = old_scale + delta;
+    if (new_scale < BROWSER_FONT_SCALE_MIN) new_scale = BROWSER_FONT_SCALE_MIN;
+    if (new_scale > BROWSER_FONT_SCALE_MAX) new_scale = BROWSER_FONT_SCALE_MAX;
+    if (new_scale == old_scale) return;
+
+    int old_height = browser_render__content_height(state->doc, old_scale);
+    int new_height = browser_render__content_height(state->doc, new_scale);
+    state->view.font_scale = new_scale;
+    state->view.scroll_y = old_height > 0 ? (int)((int64_t)state->view.scroll_y * new_height / old_height) : 0;
+
+    int max_scroll = browser_render__max_scroll(state->doc, new_scale);
+    if (state->view.scroll_y > max_scroll) state->view.scroll_y = max_scroll;
+    if (state->view.scroll_y < 0) state->view.scroll_y = 0;
+    state->view.selected_link = -1;
+    state->view.selected_image = -1;
+    state->view.row_y = -1;
 }
 
 static void browser_app__edit_url(browser_app_state_t *state) {
@@ -196,6 +224,12 @@ static bool browser_app__handle_event(browser_app_state_t *state, const bruce_in
         browser_app__page_scroll(state, 1);
     } else if (event->code == 'b' || event->code == BRUCE_INPUT_CODE_PREV) {
         browser_app__page_scroll(state, -1);
+    } else if (event->code == '-') {
+        browser_app__adjust_font_scale(state, -1);
+    } else if (event->code == '=') {
+        browser_app__adjust_font_scale(state, 1);
+    } else if (event->code == 'p') {
+        browser_debug__dump(state->doc, state->view.font_scale);
     } else if (event->code == 'g') {
         browser_app__edit_url(state);
     } else if (event->code == 'r') {
@@ -221,7 +255,9 @@ int browser_app_main(int argc, char **argv) {
     snprintf(start_url, sizeof(start_url), "%s", arg_url != NULL ? arg_url : BROWSER_HOME_URL);
     ap_free(parser);
 
-    browser_app_state_t state = {.view = {.scroll_y = 0, .selected_link = -1, .selected_image = -1, .row_y = -1}};
+    browser_app_state_t state = {
+        .view = {.scroll_y = 0, .selected_link = -1, .selected_image = -1, .row_y = -1, .font_scale = 0}
+    };
     bruce_result_t result = browser_document__create(&state.doc);
     if (result == BRUCE_OK) result = browser_history__create(&state.history);
     if (result == BRUCE_OK) result = browser_image_cache__create(&state.image_cache);

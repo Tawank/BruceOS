@@ -3,23 +3,28 @@
 #define BROWSER_LAYOUT_LINE_GAP 2
 #define BROWSER_LAYOUT_PARAGRAPH_GAP 6
 
-int browser_layout__heading_scale(int heading_level) {
+int browser_layout__heading_scale(int heading_level, int font_scale_delta) {
+    int base;
     switch (heading_level) {
-    case 1: return 4;
-    case 2: return 3;
-    case 3: return 3;
-    default: return 2;
+    case 1: base = 4; break;
+    case 2: base = 3; break;
+    case 3: base = 3; break;
+    default: base = 2; break;
     }
+    int scale = base + font_scale_delta;
+    if (scale < 1) scale = 1;
+    if (scale > 8) scale = 8; /* display__set_text_size() takes a uint8_t; keep it off the wall too. */
+    return scale;
 }
 
 int browser_layout__walk(
-    const browser_document_t *doc, int width, int char_width, int char_height, browser_layout_visitor_t visitor,
-    void *context
+    const browser_document_t *doc, int width, int char_width, int char_height, int font_scale_delta,
+    browser_layout_visitor_t visitor, void *context
 ) {
     if (doc == NULL || visitor == NULL || width <= 0 || char_width <= 0 || char_height <= 0) return 0;
 
     int x = 0, y = 0;
-    int base_line_height = char_height * 2 + BROWSER_LAYOUT_LINE_GAP;
+    int base_line_height = char_height * browser_layout__heading_scale(0, font_scale_delta) + BROWSER_LAYOUT_LINE_GAP;
     /* Height of whatever's on the current (possibly still-open) line, so the
      * trailing "unterminated last line" fix-up below can use the real line
      * height instead of always assuming default-scale text -- see the tail of
@@ -30,7 +35,7 @@ int browser_layout__walk(
         const browser_item_t *item = &doc->items[i];
         switch (item->kind) {
         case BROWSER_ITEM_TEXT: {
-            int scale = browser_layout__heading_scale(item->heading_level);
+            int scale = browser_layout__heading_scale(item->heading_level, font_scale_delta);
             int line_h = char_height * scale + BROWSER_LAYOUT_LINE_GAP;
             const char *text = doc->text_pool + item->text_offset;
             size_t len = item->text_len;
