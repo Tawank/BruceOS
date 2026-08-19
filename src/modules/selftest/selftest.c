@@ -21,6 +21,7 @@
 #include "display_test.h"
 #include "elf_loader_test.h"
 #include "gpio_bus_test.h"
+#include "html_test.h"
 #include "icon_test.h"
 #include "image_test.h"
 #include "input_test.h"
@@ -125,6 +126,8 @@ int selftest_app_main(int argc, char **argv) {
     RUN_SELFTEST(selftest__run_config_builtin_manage_case);
     RUN_SELFTEST(selftest__run_config_theme_case);
     RUN_SELFTEST(selftest__run_manifest_parse_case);
+    RUN_SELFTEST(selftest__run_html_url_case);
+    RUN_SELFTEST(selftest__run_html_parser_case);
     RUN_SELFTEST(selftest__run_loader_registry_extensibility_case);
     RUN_SELFTEST(selftest__run_elf_loader_case);
     RUN_SELFTEST(selftest__run_elf_loader_xip_case);

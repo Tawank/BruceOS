@@ -18,6 +18,7 @@ set(BRUCE_SELFTEST_SOURCES
     "modules/selftest/elf_loader_test.c"
     "modules/selftest/fake_elf.c"
     "modules/selftest/gpio_bus_test.c"
+    "modules/selftest/html_test.c"
     "modules/selftest/icon_test.c"
     "modules/selftest/image_test.c"
     "modules/selftest/input_test.c"
@@ -59,6 +60,11 @@ idf_component_register(SRCS
                     "core/disk/disk.c"
                     "core/format/format.c"
                     "core/gpio/gpio.c"
+                    "core/html/html_entities.c"
+                    "core/html/html_events.c"
+                    "core/html/html_parser.c"
+                    "core/html/html_tags.c"
+                    "core/html/html_url.c"
                     "core/icon/icon.c"
                     "core/http/http.c"
                     "core/image/image.c"
@@ -110,6 +116,14 @@ idf_component_register(SRCS
                     "modules/config/config_app.c"
                     "modules/device_bus/device_bus_app.c"
                      "modules/filemanager/filemanager_app.c"
+                     "modules/browser/browser_app.c"
+                     "modules/browser/browser_document.c"
+                     "modules/browser/browser_history.c"
+                     "modules/browser/browser_image_cache.c"
+                     "modules/browser/browser_image_draw.c"
+                     "modules/browser/browser_layout.c"
+                     "modules/browser/browser_page.c"
+                     "modules/browser/browser_render.c"
                      "modules/input/input_app.c"
                     "modules/input/input_buttons.c"
                     "modules/input/input_encoder.c"
@@ -427,6 +441,19 @@ target_include_directories(bruce_sdk_builtin_filemanager_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/filemanager")
 
+add_library(bruce_sdk_builtin_browser_check OBJECT
+            "modules/browser/browser_app.c"
+            "modules/browser/browser_document.c"
+            "modules/browser/browser_history.c"
+            "modules/browser/browser_image_cache.c"
+            "modules/browser/browser_image_draw.c"
+            "modules/browser/browser_layout.c"
+            "modules/browser/browser_page.c"
+            "modules/browser/browser_render.c")
+target_include_directories(bruce_sdk_builtin_browser_check PRIVATE
+                           "${CMAKE_CURRENT_LIST_DIR}"
+                           "${CMAKE_CURRENT_LIST_DIR}/modules/browser")
+
 add_library(bruce_sdk_builtin_image_loader_check OBJECT "modules/loaders/image/image_loader_app.c")
 target_include_directories(bruce_sdk_builtin_image_loader_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
@@ -561,6 +588,7 @@ set(BRUCE_ARGS_SDK_CHECK_TARGETS
     bruce_sdk_builtin_ir_check
     bruce_sdk_builtin_nrf24_check
     bruce_sdk_builtin_bparted_check
+    bruce_sdk_builtin_browser_check
     bruce_sdk_builtin_image_loader_check
     bruce_sdk_builtin_text_check
     bruce_sdk_builtin_utils_help_check

@@ -12,7 +12,8 @@ bool selftest__run_icon_registry_case(void) {
     static const char *const names[] = {
         "apps",           "bluetooth", "clock-outline", "cog",     "console",
         "expansion-card", "folder",    "infrared",      "radio-handheld",
-        "remote-tv",      "rfid",      "test-tube",     "wifi",
+        "remote-tv",      "rfid",      "test-tube",     "web",
+        "wifi",
     };
     for (size_t i = 0; i < (sizeof(names) / sizeof(names[0])); ++i) {
         const bruce_icon_t *icon = icon__get(names[i]);

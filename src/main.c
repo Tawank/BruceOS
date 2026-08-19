@@ -20,6 +20,7 @@
 #include "modules/bnu/bnu_app.h"
 #include "modules/bootanimation/bootanimation_app.h"
 #include "modules/bparted/bparted_app.h"
+#include "modules/browser/browser_app.h"
 #include "modules/bruce_launcher/bruce_launcher_app.h"
 #include "modules/clock/clock_app.h"
 #include "modules/config/config_app.h"
@@ -64,6 +65,7 @@
 #define MENU_STACK_BYTES 4096u
 #define CONFIG_STACK_BYTES 8192u
 #define BNU_HTTP_STACK_BYTES 16384u
+#define BROWSER_STACK_BYTES 16384u
 
 void app_runner__register_defaults(void) {
     (void)app_runner__register("launcher", launcher_app_main, LAUNCHER_STACK_BYTES);
@@ -73,6 +75,7 @@ void app_runner__register_defaults(void) {
     (void)app_runner__register("bruce_launcher", bruce_launcher_app_main, 0);
     (void)app_runner__register("apps", apps_app_main, 0);
     (void)app_runner__register("filemanager", filemanager_app_main, 0);
+    (void)app_runner__register("browser", browser_app_main, BROWSER_STACK_BYTES);
     (void)app_runner__register("clock", clock_app_main, 0);
     (void)app_runner__register("config", config_app_main, CONFIG_STACK_BYTES);
     (void)app_runner__register("permissions", permissions_app_main, PERMISSIONS_STACK_BYTES);

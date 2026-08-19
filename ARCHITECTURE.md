@@ -918,6 +918,45 @@ open, draw, increment (looping at the trailer), and close an animated GIF with
 the `image__gif_*` API; drawing reports the current frame delay and leaves
 presentation to the caller.
 
+HTML Core (`core/html`, `core_sdk/html.h`) is a small, hardware-independent
+streaming extractor, not a DOM: it is fed HTML a chunk at a time (directly
+from an `http__request()` `on_response_chunk` callback, so a page's raw
+markup is never buffered whole) and reports a fixed vocabulary of content
+events -- text runs, link/heading boundaries, image references, line/paragraph
+breaks -- through a caller callback, entity-decoding and whitespace-collapsing
+text and resolving `href`/`src` values to absolute URLs against a base URL as
+it goes. `html__resolve_url()` is also exposed standalone. An unrecognized tag
+(`<span>`, `<div class=...>`, and the like) is simply transparent: it
+disappears and its content flows into the surrounding text rather than being
+special-cased, which is what keeps a consumer from needing its own tag
+stripper. `<script>`/`<style>` content is skipped entirely. Any module wanting
+"the readable content of a web page" -- not just the built-in `browser` --
+can reuse this without Core's cooperation.
+
+The built-in `browser` app is a Lynx-style text browser with inline images.
+It owns no HTML/URL parsing of its own: `modules/browser/browser_page.c`
+streams a fetched page through `core/html` directly into a flat
+`browser_document_t` (`modules/browser/browser_document.c`) of text/link/image
+items over a shared text pool, capped and truncated rather than unbounded.
+`modules/browser/browser_layout.c` is a pure word-wrap pass with no display
+calls, reused both to draw and to measure content height/a link's on-screen
+position; `modules/browser/browser_render.c` is the only file that calls
+`core_sdk/display.h`, drawing the top URL/back-forward chrome bar and the
+current scrolled page, highlighting the selected link. Inline images are
+fetched through a small bounded per-URL cache
+(`modules/browser/browser_image_cache.c`) and box-fitted with
+`modules/browser/browser_image_draw.c`, which decodes at `fit=true` (bounding
+memory to the display viewport, the same protection any other `fit` caller
+gets) and then does its own smaller nearest-neighbor scale down into the
+inline image's reserved box -- `core_sdk/image.h`'s own `fit`/`center` only
+scale relative to the caller's whole viewport, which suits a full-screen
+viewer but not one picture among several on a page. Up/Down cycle the
+selected link (auto-scrolling it into view), Left/Back and Right/Select
+navigate history backward and forward (`modules/browser/browser_history.c`,
+a plain array with a current-position cursor), Space/`b` page-scroll, `g`
+opens a `dialog__text_input()` URL bar, and Home returns to the configured
+home page (`bruce.computer`).
+
 The transient notification banner is not special-cased in Core at all: Core
 only knows about the generic overlay primitive above. `notification__push()`
 and `notification__dismiss()` (unrestricted, last-writer-wins; text is copied

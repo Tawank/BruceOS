@@ -28,6 +28,7 @@
     "Information": "nrf24 info"
   },
   "Files@folder-open": "filemanager",
+  "Browser@web": "browser",
   "Terminal@console": "terminal",
   "Clock@clock-outline": "clock",
   "Config@cog": {
