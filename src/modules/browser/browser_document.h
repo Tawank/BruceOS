@@ -10,11 +10,27 @@
  * All storage here is capped (see the BROWSER_MAX_* constants below): a page
  * that exceeds a cap is simply truncated rather than failing outright, and
  * `truncated` is set so the caller can say so.
+ *
+ * text_pool, links, and images are only ever appended to during parsing,
+ * then read-only afterward -- so they live in a memory__external_alloc()
+ * object (PSRAM, or swap carved out of flash where there's no PSRAM) instead
+ * of the process-owned internal heap, the same way core/http/http.c keeps a
+ * response body off the internal heap once it's known to be sizeable. That
+ * leaves more internal RAM free for things that must live there, in
+ * particular mbedTLS's own per-request TLS buffers during an inline image
+ * fetch. items stays on the internal heap: it's walked byte-by-byte on
+ * *every* draw (word-wrap layout re-runs on every redraw, not just once per
+ * navigation, and does so 2-3 times per frame -- see browser_render.c) and
+ * is the one structure where flash-mmap read latency would risk visible
+ * scroll jank; images and links are only touched when a link or image token
+ * is actually being drawn, a much smaller fraction of a walk.
  */
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
+#include "core_sdk/memory.h"
 #include "core_sdk/result.h"
 
 #define BROWSER_URL_MAX 400
@@ -37,14 +53,25 @@ typedef enum {
     BROWSER_ITEM_PARAGRAPH_BREAK,
 } browser_item_kind_t;
 
+/* Packed to 10 bytes (down from 24 as plain `int`/`size_t` fields) -- this is
+ * the one array that's never moved off the internal heap (see the comment
+ * above), and BROWSER_MAX_ITEMS=1024 of them is otherwise the single largest
+ * internal-RAM consumer the browser module has. Every field's range is
+ * already bounded by one of the BROWSER_MAX_* caps below, so the narrower
+ * types lose no information -- see the _Static_assert()s further down that
+ * fail the build if a cap is ever widened past what a field can hold. */
 typedef struct {
-    browser_item_kind_t kind;
-    size_t text_offset; /* BROWSER_ITEM_TEXT: byte offset into text_pool. */
-    size_t text_len;
-    int heading_level; /* 0 = normal text, 1-6 = <h1>-<h6>. */
-    int link_index;    /* -1 when not part of a link, else index into links[]. */
-    int image_index;   /* BROWSER_ITEM_IMAGE only; index into images[]. */
+    uint8_t kind;          /* browser_item_kind_t. */
+    int8_t heading_level;  /* 0 = normal text, 1-6 = <h1>-<h6>. */
+    int16_t link_index;    /* -1 when not part of a link, else index into links[]. */
+    int16_t image_index;   /* BROWSER_ITEM_IMAGE only; index into images[]. */
+    uint16_t text_offset;  /* BROWSER_ITEM_TEXT: byte offset into text_pool. */
+    uint16_t text_len;
 } browser_item_t;
+
+_Static_assert(BROWSER_MAX_TEXT_BYTES - 1 <= 0xFFFFu, "text_offset/text_len no longer fit uint16_t");
+_Static_assert(BROWSER_MAX_LINKS <= 0x7FFFu, "link_index no longer fits int16_t");
+_Static_assert(BROWSER_MAX_IMAGES <= 0x7FFFu, "image_index no longer fits int16_t");
 
 typedef struct {
     char url[BROWSER_URL_MAX];
@@ -56,21 +83,21 @@ typedef struct {
 } browser_image_ref_t;
 
 typedef struct {
-    char *text_pool;
+    const char *text_pool; /* Externally backed -- see the comment above. */
     size_t text_pool_len;
-    size_t text_pool_cap;
+    bruce_memory_object_t text_pool_object;
 
     browser_item_t *items;
     size_t item_count;
     size_t item_cap;
 
-    browser_link_t *links;
+    const browser_link_t *links; /* Externally backed -- see the comment above. */
     size_t link_count;
-    size_t link_cap;
+    bruce_memory_object_t links_object;
 
-    browser_image_ref_t *images;
+    const browser_image_ref_t *images; /* Externally backed -- see the comment above. */
     size_t image_count;
-    size_t image_cap;
+    bruce_memory_object_t images_object;
 
     char title[BROWSER_TITLE_MAX];
     char url[BROWSER_URL_MAX]; /* This page's own resolved URL. */
@@ -101,3 +128,11 @@ int browser_document__add_link(browser_document_t *doc, const char *url);
 void browser_document__add_image(browser_document_t *doc, const char *url, const char *alt, size_t alt_len);
 
 void browser_document__add_break(browser_document_t *doc, bool paragraph);
+
+/* Trims the items array's capacity down to its actual item_count, releasing
+ * whatever doubling-growth slack is left over (up to ~2x item_count worth,
+ * right after the last add_*() call that grew it). Call once after a page is
+ * fully parsed -- there's no reason to keep spare growth headroom around for
+ * a document that won't be added to again until the next navigation resets
+ * it. A no-op if there's nothing to reclaim. */
+void browser_document__shrink_to_fit(browser_document_t *doc);

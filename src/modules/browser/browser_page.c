@@ -96,6 +96,10 @@ bruce_result_t browser_page__fetch(const char *url, browser_document_t *doc, int
     if (result == BRUCE_OK) {
         if (out_status_code != NULL) *out_status_code = response.status_code;
         (void)html__parser_finish(parser);
+        /* The document won't grow again until the next navigation resets it
+         * -- release whatever doubling-growth slack the items array is
+         * still holding from parsing this page. */
+        browser_document__shrink_to_fit(doc);
     }
     http__response_free(&response);
     html__parser_destroy(parser);

@@ -20,6 +20,11 @@ int browser_layout__walk(
 
     int x = 0, y = 0;
     int base_line_height = char_height * 2 + BROWSER_LAYOUT_LINE_GAP;
+    /* Height of whatever's on the current (possibly still-open) line, so the
+     * trailing "unterminated last line" fix-up below can use the real line
+     * height instead of always assuming default-scale text -- see the tail of
+     * this function. */
+    int current_line_height = base_line_height;
 
     for (size_t i = 0; i < doc->item_count; ++i) {
         const browser_item_t *item = &doc->items[i];
@@ -62,6 +67,7 @@ int browser_layout__walk(
                     .image_index = -1,
                 };
                 visitor(&token, context);
+                current_line_height = line_h;
                 x += word_px;
                 /* An overlong single word (no spaces to wrap on, e.g. a bare
                  * URL) is drawn once where it lands and may overflow this one
@@ -103,6 +109,12 @@ int browser_layout__walk(
             break;
         }
     }
-    if (x > 0) y += base_line_height;
+    /* The document ended mid-line (no trailing break/close event flushed
+     * it) -- account for that last open line using its own height, not the
+     * default-scale base_line_height, or a page ending on e.g. a heading
+     * with no closing tag would report a content height shorter than what
+     * actually gets drawn, clipping the bottom of the page when scrolled
+     * all the way down. */
+    if (x > 0) y += current_line_height;
     return y;
 }

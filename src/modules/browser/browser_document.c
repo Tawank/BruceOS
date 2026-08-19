@@ -15,31 +15,72 @@ bruce_result_t browser_document__create(browser_document_t **out_doc) {
     if (out_doc == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     browser_document_t *doc = memory__malloc(sizeof(*doc));
     if (doc == NULL) return BRUCE_ERR_NO_MEMORY;
+    /* Zeroing leaves text_pool_object/links_object at BRUCE_MEMORY_BACKEND_INVALID
+     * (0) -- both are allocated lazily, on the first add_text()/add_link()
+     * call, rather than up front here, so a page with no text or no links
+     * never touches the external allocator at all. */
     memset(doc, 0, sizeof(*doc));
 
-    doc->text_pool = memory__malloc(BROWSER_INITIAL_TEXT_CAP);
     doc->items = memory__malloc(BROWSER_INITIAL_ITEM_CAP * sizeof(*doc->items));
-    doc->links = memory__malloc(BROWSER_INITIAL_LINK_CAP * sizeof(*doc->links));
-    doc->images = memory__malloc(BROWSER_INITIAL_IMAGE_CAP * sizeof(*doc->images));
-    if (doc->text_pool == NULL || doc->items == NULL || doc->links == NULL || doc->images == NULL) {
+    if (doc->items == NULL) {
         browser_document__destroy(doc);
         return BRUCE_ERR_NO_MEMORY;
     }
-    doc->text_pool_cap = BROWSER_INITIAL_TEXT_CAP;
     doc->item_cap = BROWSER_INITIAL_ITEM_CAP;
-    doc->link_cap = BROWSER_INITIAL_LINK_CAP;
-    doc->image_cap = BROWSER_INITIAL_IMAGE_CAP;
     *out_doc = doc;
     return BRUCE_OK;
 }
 
 void browser_document__destroy(browser_document_t *doc) {
     if (doc == NULL) return;
-    memory__free(doc->text_pool);
+    if (doc->text_pool_object.backend != BRUCE_MEMORY_BACKEND_INVALID) {
+        (void)memory__external_free(&doc->text_pool_object);
+    }
+    if (doc->links_object.backend != BRUCE_MEMORY_BACKEND_INVALID) {
+        (void)memory__external_free(&doc->links_object);
+    }
+    if (doc->images_object.backend != BRUCE_MEMORY_BACKEND_INVALID) {
+        (void)memory__external_free(&doc->images_object);
+    }
     memory__free(doc->items);
-    memory__free(doc->links);
-    memory__free(doc->images);
     memory__free(doc);
+}
+
+/* Grows an external (PSRAM/swap, or internal RAM only as a last resort --
+ * see memory__external_alloc()) buffer to hold at least `used + extra`
+ * bytes, migrating the `used` bytes already written across, and updates
+ * `*mapped` to the freshly mapped read pointer. External objects can't be
+ * resized in place, so -- exactly like core/http/http.c's own
+ * http__external_body_reserve() -- each growth step allocates a new, bigger
+ * object and copies the old one across via a read-only map plus a write.
+ * A no-op returning true when the existing object already fits. */
+static bool browser_document__ext_reserve(
+    bruce_memory_object_t *object, const void **mapped, size_t used, size_t extra, size_t initial, size_t hard_max
+) {
+    size_t capacity = object->backend != BRUCE_MEMORY_BACKEND_INVALID ? object->size : 0;
+    size_t required = used + extra;
+    if (required <= capacity) return true;
+    if (required > hard_max) return false;
+
+    size_t new_capacity = capacity == 0 ? initial : capacity;
+    while (new_capacity < required) {
+        new_capacity = new_capacity > hard_max / 2 ? hard_max : new_capacity * 2;
+    }
+    bruce_memory_object_t grown;
+    if (memory__external_alloc(new_capacity, &grown) != BRUCE_OK) return false;
+    if (used > 0 && memory__external_write(&grown, 0, *mapped, used) != BRUCE_OK) {
+        (void)memory__external_free(&grown);
+        return false;
+    }
+    const void *new_map = NULL;
+    if (memory__external_map(&grown, &new_map) != BRUCE_OK) {
+        (void)memory__external_free(&grown);
+        return false;
+    }
+    if (object->backend != BRUCE_MEMORY_BACKEND_INVALID) (void)memory__external_free(object);
+    *object = grown;
+    *mapped = new_map;
+    return true;
 }
 
 void browser_document__reset(browser_document_t *doc) {
@@ -90,80 +131,107 @@ static browser_item_t *browser_document__new_item(browser_document_t *doc) {
         return NULL;
     }
     browser_item_t *item = &doc->items[doc->item_count++];
-    *item = (browser_item_t){.kind = BROWSER_ITEM_TEXT, .link_index = -1, .image_index = -1};
+    *item = (browser_item_t){.kind = (uint8_t)BROWSER_ITEM_TEXT, .link_index = -1, .image_index = -1};
     return item;
+}
+
+void browser_document__shrink_to_fit(browser_document_t *doc) {
+    if (doc == NULL || doc->item_count == 0 || doc->item_count >= doc->item_cap) return;
+    browser_item_t *shrunk = memory__realloc(doc->items, doc->item_count * sizeof(*doc->items));
+    if (shrunk == NULL) return; /* Shrinking realloc failing is harmless; keep the larger buffer. */
+    doc->items = shrunk;
+    doc->item_cap = doc->item_count;
 }
 
 void browser_document__add_text(
     browser_document_t *doc, const char *text, size_t len, int heading_level, int link_index
 ) {
     if (doc == NULL || text == NULL || len == 0) return;
-    while (doc->text_pool_len + len > doc->text_pool_cap) {
-        if (!browser_document__grow(
-                (void **)&doc->text_pool, &doc->text_pool_cap, 1, BROWSER_MAX_TEXT_BYTES
-            )) {
-            doc->truncated = true;
-            /* Fit whatever still fits rather than dropping the whole run. */
-            len = doc->text_pool_len < doc->text_pool_cap ? doc->text_pool_cap - doc->text_pool_len : 0;
-            if (len == 0) return;
-            break;
-        }
+    if (!browser_document__ext_reserve(
+            &doc->text_pool_object, (const void **)&doc->text_pool, doc->text_pool_len, len,
+            BROWSER_INITIAL_TEXT_CAP, BROWSER_MAX_TEXT_BYTES
+        )) {
+        doc->truncated = true;
+        /* Fit whatever still fits rather than dropping the whole run. */
+        size_t capacity = doc->text_pool_object.backend != BRUCE_MEMORY_BACKEND_INVALID
+                               ? doc->text_pool_object.size
+                               : 0;
+        len = doc->text_pool_len < capacity ? capacity - doc->text_pool_len : 0;
+        if (len == 0) return;
+    }
+    if (memory__external_write(&doc->text_pool_object, doc->text_pool_len, text, len) != BRUCE_OK) {
+        doc->truncated = true;
+        return;
     }
     browser_item_t *item = browser_document__new_item(doc);
-    if (item == NULL) return;
-    memcpy(doc->text_pool + doc->text_pool_len, text, len);
-    item->kind = BROWSER_ITEM_TEXT;
-    item->text_offset = doc->text_pool_len;
-    item->text_len = len;
-    item->heading_level = heading_level;
-    item->link_index = link_index;
+    if (item == NULL) return; /* Bytes are written but unreferenced; harmless. */
+    item->kind = (uint8_t)BROWSER_ITEM_TEXT;
+    item->text_offset = (uint16_t)doc->text_pool_len;
+    item->text_len = (uint16_t)len;
+    item->heading_level = (int8_t)heading_level;
+    item->link_index = (int16_t)link_index;
     doc->text_pool_len += len;
 }
 
 int browser_document__add_link(browser_document_t *doc, const char *url) {
     if (doc == NULL || url == NULL) return -1;
-    if (doc->link_count >= doc->link_cap &&
-        !browser_document__grow((void **)&doc->links, &doc->link_cap, sizeof(*doc->links), BROWSER_MAX_LINKS)) {
+    browser_link_t link;
+    memset(&link, 0, sizeof(link));
+    snprintf(link.url, sizeof(link.url), "%s", url);
+
+    if (!browser_document__ext_reserve(
+            &doc->links_object, (const void **)&doc->links, doc->link_count * sizeof(link), sizeof(link),
+            BROWSER_INITIAL_LINK_CAP * sizeof(link), (size_t)BROWSER_MAX_LINKS * sizeof(link)
+        )) {
         doc->truncated = true;
         return -1;
     }
-    if (doc->link_count >= doc->link_cap) {
+    if (memory__external_write(&doc->links_object, doc->link_count * sizeof(link), &link, sizeof(link)) !=
+        BRUCE_OK) {
         doc->truncated = true;
         return -1;
     }
-    snprintf(doc->links[doc->link_count].url, sizeof(doc->links[0].url), "%s", url);
     return (int)doc->link_count++;
 }
 
 void browser_document__add_image(browser_document_t *doc, const char *url, const char *alt, size_t alt_len) {
     if (doc == NULL || url == NULL) return;
-    if (doc->image_count >= doc->image_cap &&
-        !browser_document__grow((void **)&doc->images, &doc->image_cap, sizeof(*doc->images), BROWSER_MAX_IMAGES)) {
-        doc->truncated = true;
-        return;
-    }
-    if (doc->image_count >= doc->image_cap) {
-        doc->truncated = true;
-        return;
-    }
-    browser_item_t *item = browser_document__new_item(doc);
-    if (item == NULL) return;
-    browser_image_ref_t *image = &doc->images[doc->image_count];
-    snprintf(image->url, sizeof(image->url), "%s", url);
+
+    /* Built in a local first, then committed with one external_write() below
+     * -- external storage can't be filled in place field-by-field the way
+     * &doc->images[i] used to be, since a write there needs a fully-formed
+     * value up front (see browser_document__ext_reserve()'s comment). */
+    browser_image_ref_t image;
+    memset(&image, 0, sizeof(image));
+    snprintf(image.url, sizeof(image.url), "%s", url);
     if (alt != NULL && alt_len > 0) {
-        if (alt_len >= sizeof(image->alt)) alt_len = sizeof(image->alt) - 1u;
-        memcpy(image->alt, alt, alt_len);
-        image->alt[alt_len] = '\0';
-    } else {
-        image->alt[0] = '\0';
+        if (alt_len >= sizeof(image.alt)) alt_len = sizeof(image.alt) - 1u;
+        memcpy(image.alt, alt, alt_len);
+        image.alt[alt_len] = '\0';
     }
-    item->kind = BROWSER_ITEM_IMAGE;
-    item->image_index = (int)doc->image_count++;
+
+    if (!browser_document__ext_reserve(
+            &doc->images_object, (const void **)&doc->images, doc->image_count * sizeof(image), sizeof(image),
+            BROWSER_INITIAL_IMAGE_CAP * sizeof(image), (size_t)BROWSER_MAX_IMAGES * sizeof(image)
+        )) {
+        doc->truncated = true;
+        return;
+    }
+    if (memory__external_write(&doc->images_object, doc->image_count * sizeof(image), &image, sizeof(image)) !=
+        BRUCE_OK) {
+        doc->truncated = true;
+        return;
+    }
+
+    browser_item_t *item = browser_document__new_item(doc);
+    if (item == NULL) return; /* Bytes are written but unreferenced; harmless. */
+    item->kind = (uint8_t)BROWSER_ITEM_IMAGE;
+    item->image_index = (int16_t)doc->image_count++;
 }
 
 void browser_document__add_break(browser_document_t *doc, bool paragraph) {
     if (doc == NULL) return;
     browser_item_t *item = browser_document__new_item(doc);
     if (item == NULL) return;
-    item->kind = paragraph ? BROWSER_ITEM_PARAGRAPH_BREAK : BROWSER_ITEM_LINE_BREAK;
+    item->kind = (uint8_t)(paragraph ? BROWSER_ITEM_PARAGRAPH_BREAK : BROWSER_ITEM_LINE_BREAK);
 }

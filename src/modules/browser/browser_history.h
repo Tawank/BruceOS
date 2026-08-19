@@ -3,17 +3,27 @@
 /* Back/forward navigation history: a plain array of visited URLs with a
  * "current" cursor, the same model every desktop/mobile browser uses.
  * Navigating to a new URL while the cursor isn't at the end discards the
- * discarded-forward entries, matching that same familiar behavior. */
+ * discarded-forward entries, matching that same familiar behavior.
+ *
+ * BROWSER_HISTORY_MAX * BROWSER_URL_MAX (24 * 400 = 9.6 KiB) would otherwise
+ * be a single fixed internal-heap block held for the app's entire lifetime,
+ * regardless of how many pages were actually visited -- see
+ * browser_document.h's comment for why that's worth avoiding on a board with
+ * no PSRAM. It's rarely touched (only on an actual navigation, never on a
+ * redraw), so unlike browser_document.h's items array there's no read-hot-path
+ * reason to keep it internal. */
 
 #include <stdbool.h>
 
 #include "browser_document.h"
+#include "core_sdk/memory.h"
 #include "core_sdk/result.h"
 
 #define BROWSER_HISTORY_MAX 24
 
 typedef struct {
-    char entries[BROWSER_HISTORY_MAX][BROWSER_URL_MAX];
+    bruce_memory_object_t entries_object; /* BROWSER_HISTORY_MAX * BROWSER_URL_MAX bytes, external. */
+    const char *entries;                  /* Mapped read pointer; entries[i * BROWSER_URL_MAX]. */
     int count;
     int current; /* -1 when empty. */
 } browser_history_t;

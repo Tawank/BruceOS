@@ -34,8 +34,12 @@ int browser_render__content_height(const browser_document_t *doc);
 int browser_render__max_scroll(const browser_document_t *doc);
 
 /* Content-relative y position of link `link_index`'s first occurrence, or -1
- * if not found (e.g. an out-of-range index). */
-int browser_render__link_top(const browser_document_t *doc, int link_index);
+ * if not found (e.g. an out-of-range index). When found and `out_line_height`
+ * isn't NULL, also fills it with that occurrence's line height, so a caller
+ * can bring the *whole* line into view rather than just its top edge (a
+ * multi-scale document has lines of varying height -- a heading-sized link
+ * is taller than the base line height a top-only check would assume). */
+int browser_render__link_top(const browser_document_t *doc, int link_index, int *out_line_height);
 
 /* Draws one full frame: chrome bar plus the visible slice of `doc` for
  * `view`. Fetches/decodes any inline images newly scrolled into view through

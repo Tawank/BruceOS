@@ -56,22 +56,25 @@ int browser_render__max_scroll(const browser_document_t *doc) {
 typedef struct {
     int link_index;
     int found_y;
+    int found_height;
 } browser_render__link_search_t;
 
 static void browser_render__link_top_visitor(const browser_layout_token_t *token, void *context) {
     browser_render__link_search_t *search = context;
     if (search->found_y >= 0 || token->link_index != search->link_index) return;
     search->found_y = token->y;
+    search->found_height = token->line_height;
 }
 
-int browser_render__link_top(const browser_document_t *doc, int link_index) {
+int browser_render__link_top(const browser_document_t *doc, int link_index, int *out_line_height) {
     if (link_index < 0) return -1;
     int16_t char_width, char_height;
     browser_render__metrics(&char_width, &char_height);
-    browser_render__link_search_t search = {.link_index = link_index, .found_y = -1};
+    browser_render__link_search_t search = {.link_index = link_index, .found_y = -1, .found_height = 0};
     browser_layout__walk(
         doc, browser_render__content_width(), char_width, char_height, browser_render__link_top_visitor, &search
     );
+    if (search.found_y >= 0 && out_line_height != NULL) *out_line_height = search.found_height;
     return search.found_y;
 }
 

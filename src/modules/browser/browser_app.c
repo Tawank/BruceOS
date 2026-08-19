@@ -72,14 +72,23 @@ static void browser_app__navigate(browser_app_state_t *state, const char *raw_ur
 }
 
 /* Adjusts scroll_y by the minimum amount needed to bring the selected link's
- * top edge into the visible viewport. */
+ * whole line into the visible viewport -- not just its top edge, or a link
+ * on a taller-than-base-height line (e.g. a heading) could end up with only
+ * its first pixel row on screen and the rest scrolled off the bottom. */
 static void browser_app__scroll_into_view(browser_app_state_t *state) {
     if (state->view.selected_link < 0) return;
-    int top = browser_render__link_top(state->doc, state->view.selected_link);
+    int line_height = 0;
+    int top = browser_render__link_top(state->doc, state->view.selected_link, &line_height);
     if (top < 0) return;
+    int bottom = top + line_height;
     int view_height = browser_render__view_height();
     if (top < state->view.scroll_y) state->view.scroll_y = top;
-    else if (top >= state->view.scroll_y + view_height) state->view.scroll_y = top - view_height + 1;
+    else if (bottom > state->view.scroll_y + view_height) {
+        state->view.scroll_y = bottom - view_height;
+        /* The line itself is taller than the whole viewport: fall back to
+         * showing its top edge rather than its (unreachable) bottom. */
+        if (state->view.scroll_y > top) state->view.scroll_y = top;
+    }
 
     int max_scroll = browser_render__max_scroll(state->doc);
     if (state->view.scroll_y > max_scroll) state->view.scroll_y = max_scroll;
