@@ -54,28 +54,73 @@ int browser_render__max_scroll(const browser_document_t *doc) {
 }
 
 typedef struct {
-    int link_index;
-    int found_y;
-    int found_height;
-} browser_render__link_search_t;
+    int after_y;
+    int direction;
+    bool done;
+    bool found;
+    browser_render_row_t row;
+} browser_render__row_search_t;
 
-static void browser_render__link_top_visitor(const browser_layout_token_t *token, void *context) {
-    browser_render__link_search_t *search = context;
-    if (search->found_y >= 0 || token->link_index != search->link_index) return;
-    search->found_y = token->y;
-    search->found_height = token->line_height;
+static void browser_render__add_row_link(browser_render_row_t *row, int link_index) {
+    if (link_index < 0) return;
+    /* A multi-word link produces one token per word, all sharing the same
+     * link_index -- only record it once per row. */
+    if (row->link_count > 0 && row->link_indices[row->link_count - 1] == link_index) return;
+    if (row->link_count >= BROWSER_ROW_MAX_LINKS) return;
+    row->link_indices[row->link_count++] = link_index;
 }
 
-int browser_render__link_top(const browser_document_t *doc, int link_index, int *out_line_height) {
-    if (link_index < 0) return -1;
+static void browser_render__row_visitor(const browser_layout_token_t *token, void *context) {
+    browser_render__row_search_t *search = context;
+    if (search->done) return;
+
+    if (search->direction > 0) {
+        if (token->y <= search->after_y) return;
+        if (!search->found) {
+            /* browser_layout__walk() visits tokens in non-decreasing y order,
+             * so the first token clearing after_y already has the smallest
+             * qualifying y -- it settles which row this is. */
+            search->row = (browser_render_row_t){
+                .y = token->y, .line_height = token->line_height, .link_count = 0, .image_index = -1
+            };
+            search->found = true;
+        }
+        if (token->y != search->row.y) {
+            search->done = true; /* Moved past the target row; nothing further matters. */
+            return;
+        }
+    } else {
+        if (search->after_y >= 0 && token->y >= search->after_y) {
+            search->done = true;
+            return;
+        }
+        if (!search->found || token->y != search->row.y) {
+            /* A later (walk order), still-qualifying row supersedes whatever
+             * was the best candidate so far -- keep the last one standing. */
+            search->row = (browser_render_row_t){
+                .y = token->y, .line_height = token->line_height, .link_count = 0, .image_index = -1
+            };
+            search->found = true;
+        }
+    }
+
+    if (token->line_height > search->row.line_height) search->row.line_height = token->line_height;
+    browser_render__add_row_link(&search->row, token->link_index);
+    if (token->image_index >= 0) search->row.image_index = token->image_index;
+}
+
+bool browser_render__find_row(const browser_document_t *doc, int after_y, int direction, browser_render_row_t *out_row) {
+    if (out_row == NULL || direction == 0) return false;
     int16_t char_width, char_height;
     browser_render__metrics(&char_width, &char_height);
-    browser_render__link_search_t search = {.link_index = link_index, .found_y = -1, .found_height = 0};
+    browser_render__row_search_t search = {.after_y = after_y, .direction = direction, .done = false, .found = false};
+    search.row.link_count = 0;
     browser_layout__walk(
-        doc, browser_render__content_width(), char_width, char_height, browser_render__link_top_visitor, &search
+        doc, browser_render__content_width(), char_width, char_height, browser_render__row_visitor, &search
     );
-    if (search.found_y >= 0 && out_line_height != NULL) *out_line_height = search.found_height;
-    return search.found_y;
+    if (!search.found) return false;
+    *out_row = search.row;
+    return true;
 }
 
 typedef struct {
@@ -86,11 +131,20 @@ typedef struct {
     int view_height;
 } browser_render__draw_context_t;
 
-static void browser_render__draw_placeholder(int x, int y, int w, int h, const char *alt) {
-    (void)display__draw_rect(x, y, w, h, BRUCE_COLOR_DARKGREY);
+static void browser_render__draw_placeholder(
+    int x, int y, int w, int h, const char *text, bool selected
+) {
+    (void)display__fill_rect(x, y, w, h, BRUCE_COLOR_DARKGREY);
+    if (selected) (void)display__draw_rect(x, y, w, h, BRUCE_COLOR_CYAN);
     (void)display__set_text_color(BRUCE_COLOR_LIGHTGREY);
     (void)display__set_text_size(1);
-    (void)display__draw_string(alt != NULL && alt[0] != '\0' ? alt : "[image]", x + 4, y + h / 2 - 4);
+
+    int16_t char_width, char_height;
+    browser_render__metrics(&char_width, &char_height);
+    int text_w = (int)strlen(text) * char_width;
+    int text_x = x + (w - text_w) / 2;
+    if (text_x < x + 2) text_x = x + 2; /* Longer than the box: pin to the left edge, not off it. */
+    (void)display__draw_string(text, text_x, y + h / 2 - char_height / 2);
 }
 
 static void browser_render__draw_image_token(
@@ -98,15 +152,31 @@ static void browser_render__draw_image_token(
 ) {
     const browser_image_ref_t *image = &ctx->doc->images[token->image_index];
     int box_x = BROWSER_CONTENT_MARGIN, box_w = browser_render__content_width();
+    bool selected = token->image_index == ctx->view->selected_image;
+
+    /* Never fetches: images load only on an explicit Select press (see
+     * browser_app.c's browser_app__load_image()), so a page with several of
+     * them scrolls at the same speed as one with none. */
     const void *data = NULL;
     size_t len = 0;
-    bruce_result_t result = browser_image_cache__get(ctx->image_cache, image->url, &data, &len);
+    bruce_result_t result = browser_image_cache__peek(ctx->image_cache, image->url, &data, &len);
     if (result == BRUCE_OK) {
         result = browser_image_draw__fit(
             data, len, box_x, screen_y, box_w, token->line_height, BRUCE_COLOR_BLACK, NULL, NULL
         );
+        if (result == BRUCE_OK) return;
     }
-    if (result != BRUCE_OK) browser_render__draw_placeholder(box_x, screen_y, box_w, token->line_height, image->alt);
+
+    const char *alt = image->alt[0] != '\0' ? image->alt : "[image]";
+    char text[BROWSER_ALT_MAX + 24];
+    if (result == BRUCE_ERR_NOT_FOUND) {
+        /* Not yet requested at all -- say so, or there's no way to tell it
+         * apart from one that was tried and failed. */
+        snprintf(text, sizeof(text), "%s - Select to load", alt);
+    } else {
+        snprintf(text, sizeof(text), "%s", alt);
+    }
+    browser_render__draw_placeholder(box_x, screen_y, box_w, token->line_height, text, selected);
 }
 
 static void browser_render__draw_text_token(
@@ -194,8 +264,6 @@ bruce_result_t browser_render__draw(
     if (result != BRUCE_OK) return result;
     (void)display__fill_screen(BRUCE_COLOR_BLACK);
 
-    browser_render__draw_chrome(doc, history);
-
     int16_t char_width, char_height;
     browser_render__metrics(&char_width, &char_height);
     browser_render__draw_context_t ctx = {
@@ -210,6 +278,14 @@ bruce_result_t browser_render__draw(
             doc, browser_render__content_width(), char_width, char_height, browser_render__token_visitor, &ctx
         );
     }
+
+    /* Drawn last, on top of the content: token_visitor only skips a row once
+     * it's entirely outside the viewport, so a row straddling y_top (its
+     * scroll position landing mid-row rather than exactly on a row
+     * boundary -- e.g. after a page-scroll press) still draws in full, and
+     * without this the part of it above y_top would bleed over the chrome
+     * bar instead of being covered by it. */
+    browser_render__draw_chrome(doc, history);
 
     return display__present();
 }

@@ -139,3 +139,18 @@ browser_image_cache__get(browser_image_cache_t *cache, const char *url, const vo
     *out_len = slot->response.body_len;
     return BRUCE_OK;
 }
+
+bruce_result_t
+browser_image_cache__peek(browser_image_cache_t *cache, const char *url, const void **out_data, size_t *out_len) {
+    if (cache == NULL || url == NULL || url[0] == '\0' || out_data == NULL || out_len == NULL)
+        return BRUCE_ERR_INVALID_ARGUMENT;
+
+    browser_image_cache_slot_t *slot = browser_image_cache__find(cache, url);
+    if (slot == NULL) return BRUCE_ERR_NOT_FOUND; /* Never requested -- caller should offer to load it. */
+    if (slot->failed) return slot->failure;
+
+    slot->last_used = ++cache->clock;
+    *out_data = slot->response.body;
+    *out_len = slot->response.body_len;
+    return BRUCE_OK;
+}

@@ -7,6 +7,8 @@
  * one in the module that calls core_sdk/display.h.
  */
 
+#include <stdbool.h>
+
 #include "browser_document.h"
 #include "browser_history.h"
 #include "browser_image_cache.h"
@@ -15,6 +17,11 @@
 typedef struct {
     int scroll_y;       /* Content pixels scrolled past the top. */
     int selected_link;  /* Index into doc->links, or -1 for none selected. */
+    int selected_image; /* Index into doc->images, or -1 for none selected. Mutually
+                          * exclusive with selected_link -- a row is either a link row,
+                          * an image row (images are always alone on their own row --
+                          * see browser_document.h), or neither. */
+    int row_y;           /* Content y of the row Up/Down navigation is on, or -1 before the first move. */
 } browser_view_state_t;
 
 /* Pixel height of the top chrome bar, derived from the active font. */
@@ -33,13 +40,32 @@ int browser_render__content_height(const browser_document_t *doc);
  * viewport height below the chrome bar (never negative). */
 int browser_render__max_scroll(const browser_document_t *doc);
 
-/* Content-relative y position of link `link_index`'s first occurrence, or -1
- * if not found (e.g. an out-of-range index). When found and `out_line_height`
- * isn't NULL, also fills it with that occurrence's line height, so a caller
- * can bring the *whole* line into view rather than just its top edge (a
- * multi-scale document has lines of varying height -- a heading-sized link
- * is taller than the base line height a top-only check would assume). */
-int browser_render__link_top(const browser_document_t *doc, int link_index, int *out_line_height);
+#define BROWSER_ROW_MAX_LINKS 16
+
+/* One word-wrapped content row (everything sharing a single layout y), as
+ * needed to drive line-by-line Up/Down navigation: see
+ * browser_app__move_line() in browser_app.c. Distinct links within the row
+ * are listed left to right; a row packing more than BROWSER_ROW_MAX_LINKS
+ * distinct links onto one line (implausible at any real viewport width) just
+ * isn't reachable by name past the first that many -- it's still drawn and
+ * still clickable once selected some other way. image_index is -1 unless
+ * this row is an image (images always get their own row -- see
+ * browser_document.h -- so it's never alongside a link). */
+typedef struct {
+    int y;
+    int line_height;
+    int link_indices[BROWSER_ROW_MAX_LINKS];
+    int link_count;
+    int image_index;
+} browser_render_row_t;
+
+/* Finds the content row adjacent to `after_y` in `direction`: the row with
+ * the smallest y greater than `after_y` (direction > 0), or the largest y
+ * less than `after_y` (direction < 0). Pass `after_y` < 0 to instead get the
+ * very first (direction > 0) or very last (direction < 0) row of the
+ * document. Returns false, `*out_row` untouched, if there's no such row
+ * (already at an end, or an empty document). */
+bool browser_render__find_row(const browser_document_t *doc, int after_y, int direction, browser_render_row_t *out_row);
 
 /* Draws one full frame: chrome bar plus the visible slice of `doc` for
  * `view`. Fetches/decodes any inline images newly scrolled into view through

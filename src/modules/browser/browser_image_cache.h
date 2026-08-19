@@ -2,10 +2,14 @@
 
 /*
  * Small bounded cache of fetched (still-compressed) inline image bytes, keyed
- * by URL. Scrolling redraws a page's visible images on every frame, and this
- * is what keeps that from re-fetching the same image over the network each
- * time; the image itself is still decoded and box-fitted fresh on every draw
- * by browser_render.c; decoding a already-small compressed buffer is cheap
+ * by URL. Images are loaded on demand, not automatically: browser_render.c
+ * only ever calls browser_image_cache__peek() while drawing, which never
+ * touches the network -- a page with several images scrolls just as fast as
+ * one with none. browser_app.c calls browser_image_cache__get() exactly
+ * once, when the user highlights an image and presses Select, to actually
+ * fetch it; after that, redraws pick it up from the cache via peek(). The
+ * image itself is still decoded and box-fitted fresh on every draw by
+ * browser_render.c -- decoding an already-small compressed buffer is cheap
  * compared to a round trip over HTTP.
  */
 
@@ -31,12 +35,19 @@ void browser_image_cache__destroy(browser_image_cache_t *cache);
 /* Returns still-encoded (JPEG/PNG/GIF) bytes for `url`, fetching over HTTP on
  * a cache miss and evicting the least-recently-used slot if the cache is
  * full. The returned pointer/length are borrowed: valid until the next
- * browser_image_cache__get() call on this cache (which may evict the slot
- * backing them) or until the cache is destroyed. Requires the calling
- * process to hold `http`.
+ * browser_image_cache__get()/peek() call on this cache (which may evict the
+ * slot backing them) or until the cache is destroyed. Requires the calling
+ * process to hold `http`. Only call this in response to an explicit user
+ * action (see the file comment above) -- for drawing, use peek() below.
  *
  * A failed fetch is cached too (see BROWSER_IMAGE_FAIL_COOLDOWN_MS): calling
  * this again for the same URL within the cooldown window returns the
  * original failure immediately, with no network activity at all. */
 bruce_result_t
 browser_image_cache__get(browser_image_cache_t *cache, const char *url, const void **out_data, size_t *out_len);
+
+/* Like get(), but never touches the network: returns BRUCE_ERR_NOT_FOUND if
+ * `url` hasn't been fetched (successfully or not) yet, instead of fetching
+ * it. This is what browser_render.c calls on every draw. */
+bruce_result_t
+browser_image_cache__peek(browser_image_cache_t *cache, const char *url, const void **out_data, size_t *out_len);
