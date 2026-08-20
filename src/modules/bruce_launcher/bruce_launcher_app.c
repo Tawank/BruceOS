@@ -58,10 +58,9 @@ static int bruce_launcher__submenu_font_size(void) {
 }
 
 static uint32_t bruce_launcher__draw_status_bar(const bruce_launcher_theme_t *theme) {
-    bruce_status_icon_t icons[BRUCE_STATUS_ICON_MAX];
     size_t count = 0;
     uint32_t revision = 0;
-    if (status_icon__list(icons, BRUCE_STATUS_ICON_MAX, &count, &revision) != BRUCE_OK) { return revision; }
+    if (status_icon__list(NULL, 0, &count, &revision) != BRUCE_OK) { return revision; }
     int w = display__width();
     display__fill_rect(
         BRUCE_LAUNCHER_BORDER_PAD + 1,
@@ -111,7 +110,9 @@ static uint32_t bruce_launcher__draw_status_bar(const bruce_launcher_theme_t *th
     }
 
     for (size_t i = count; i > 0; --i) {
-        const bruce_status_icon_t *icon = &icons[i - 1];
+        bruce_status_icon_t icon_value;
+        if (status_icon__get(i - 1, &icon_value, NULL) != BRUCE_OK) continue;
+        const bruce_status_icon_t *icon = &icon_value;
         x -= icon->width;
         if (x < left_limit) break;
         display__draw_bitmap(
@@ -417,13 +418,16 @@ static bruce_result_t bruce_launcher__draw_process_page(
 }
 
 static int bruce_launcher__run_process_switcher(const bruce_launcher_theme_t *theme) {
+    const size_t candidate_capacity = 16;
+    bruce_process_snapshot_t *candidates =
+        (bruce_process_snapshot_t *)memory__calloc(candidate_capacity, sizeof(*candidates));
+    if (candidates == NULL) return BRUCE_ERR_NO_MEMORY;
+
     size_t page = 0;
     int selected = 0;
     bool redraw = true;
     for (;;) {
-        bruce_process_snapshot_t candidates[16];
-        size_t total =
-            bruce_launcher__process_candidates(candidates, sizeof(candidates) / sizeof(candidates[0]));
+        size_t total = bruce_launcher__process_candidates(candidates, candidate_capacity);
         size_t pages = total == 0 ? 1 : (total + BRUCE_DISPLAY_MAX_TILES - 1) / BRUCE_DISPLAY_MAX_TILES;
         if (page >= pages) page = pages - 1;
         size_t start = page * BRUCE_DISPLAY_MAX_TILES;
@@ -443,10 +447,14 @@ static int bruce_launcher__run_process_switcher(const bruce_launcher_theme_t *th
 
         bruce_input_event_t event;
         bruce_result_t input_result = input__read(&event, 100);
-        if (input_result == BRUCE_ERR_NOT_FOREGROUND) { return 0; }
+        if (input_result == BRUCE_ERR_NOT_FOREGROUND) {
+            memory__free(candidates);
+            return 0;
+        }
         if (input_result != BRUCE_OK || event.action != BRUCE_INPUT_PRESS) { continue; }
         if (event.code == BRUCE_INPUT_CODE_BACK || event.code == BRUCE_INPUT_CODE_BUTTON_B) {
             (void)display__set_tiles(NULL, 0);
+            memory__free(candidates);
             return 0;
         }
         if ((event.code == BRUCE_INPUT_CODE_UP || event.code == BRUCE_INPUT_CODE_PREV ||
@@ -474,6 +482,7 @@ static int bruce_launcher__run_process_switcher(const bruce_launcher_theme_t *th
             if (process__snapshot(target, &snapshot) == BRUCE_OK) {
                 (void)display__set_tiles(NULL, 0);
                 (void)process__foreground(target);
+                memory__free(candidates);
                 return 0;
             }
             redraw = true;
@@ -520,20 +529,28 @@ static int bruce_launcher__run_entry(const bruce_launcher_entry_t *entry) {
      *
      * BG itself is left to app_runner__run_command() to parse off the line; the
      * launcher only picks the default for entries that don't say. */
-    char command[BRUCE_LAUNCHER_COMMAND_MAX + 8];
-    if (!runtime__gui_requested() || bruce_launcher__command_sets(entry->command, "GUI")) {
-        snprintf(command, sizeof(command), "%s", entry->command);
-    } else {
-        snprintf(command, sizeof(command), "GUI=1 %s", entry->command);
+    const char *command = entry->command;
+    char *prefixed_command = NULL;
+    if (runtime__gui_requested() && !bruce_launcher__command_sets(entry->command, "GUI")) {
+        size_t capacity = strlen(entry->command) + sizeof("GUI=1 ");
+        prefixed_command = (char *)memory__malloc(capacity);
+        if (prefixed_command == NULL) return BRUCE_ERR_NO_MEMORY;
+        snprintf(prefixed_command, capacity, "GUI=1 %s", entry->command);
+        command = prefixed_command;
     }
     int result = app_runner__run_command(command, BRUCE_LAUNCH_FOREGROUND);
+    memory__free(prefixed_command);
 
     if (result < 0) {
-        char message[128];
-        ext_mem_loader__format_error_message(
-            bruce_launcher__entry_label(entry), result, message, sizeof(message)
-        );
-        (void)dialog__message(BRUCE_DIALOG_ERROR, "Launch failed", message);
+        const size_t message_capacity = 128;
+        char *message = (char *)memory__malloc(message_capacity);
+        if (message != NULL) {
+            ext_mem_loader__format_error_message(
+                bruce_launcher__entry_label(entry), result, message, message_capacity
+            );
+            (void)dialog__message(BRUCE_DIALOG_ERROR, "Launch failed", message);
+            memory__free(message);
+        }
     }
     return result;
 }
@@ -823,6 +840,8 @@ int bruce_launcher_app_main(int argc, char **argv) {
         };
         dialog__set_window_renderer(&window_renderer, NULL);
         result = bruce_launcher__run_gui_menu(root);
+        dialog__set_window_renderer(NULL, NULL);
+        s_live_choices.count = 0;
     } else {
         result = bruce_launcher__run_terminal_menu(root);
     }

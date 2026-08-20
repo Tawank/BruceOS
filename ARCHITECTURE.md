@@ -991,7 +991,9 @@ registry. Any process may replace or remove any key, including one created by a
 different process. Entries survive producer exit, list in lexicographic key order,
 and every effective mutation increments a revision. Core never renders these
 1bpp icons or reserves a status bar; the launcher and interested applications
-list and draw them themselves. `status_icon__push_named()` scales a named
+list and draw them themselves. `status_icon__get()` lets a renderer copy one
+lexicographically indexed icon at a time when a full registry snapshot would
+be too large for its task stack. `status_icon__push_named()` scales a named
 built-in icon proportionally into the status-icon bounds before publishing it.
 Wi-Fi publishes the `core.wifi` icon after a
 station obtains an IP address and removes it when that station disconnects.

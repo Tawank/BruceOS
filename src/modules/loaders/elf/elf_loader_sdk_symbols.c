@@ -424,6 +424,7 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(status_icon__push_named),
     ESP_ELFSYM_EXPORT(status_icon__remove),
     ESP_ELFSYM_EXPORT(status_icon__list),
+    ESP_ELFSYM_EXPORT(status_icon__get),
 
     /* Dialog */
     ESP_ELFSYM_EXPORT(dialog__message),

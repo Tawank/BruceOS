@@ -182,6 +182,7 @@ bool selftest__run_status_icon_case(void) {
         return false;
     }
     bruce_status_icon_t icons[BRUCE_STATUS_ICON_MAX];
+    bruce_status_icon_t indexed_icon;
     size_t count = 0;
     uint32_t revision = 0;
     if (status_icon__list(icons, BRUCE_STATUS_ICON_MAX, &count, &revision) != BRUCE_OK ||
@@ -197,6 +198,10 @@ bool selftest__run_status_icon_case(void) {
         if (strcmp(icons[i].key, "selftest-named") == 0) named = i;
     }
     bool valid = a < b && b < count && icons[a].width == 2 && icons[a].bitmap[0] == bitmap_b[0];
+    valid = valid && status_icon__get(a, &indexed_icon, NULL) == BRUCE_OK &&
+            memcmp(&indexed_icon, &icons[a], sizeof(indexed_icon)) == 0;
+    valid = valid && status_icon__get(count, &indexed_icon, NULL) == BRUCE_ERR_NOT_FOUND;
+    valid = valid && status_icon__get(0, NULL, NULL) == BRUCE_ERR_INVALID_ARGUMENT;
     valid = valid && named < count && icons[named].width == BRUCE_STATUS_ICON_MAX_WIDTH &&
             icons[named].height == BRUCE_STATUS_ICON_MAX_HEIGHT;
     valid = valid && status_icon__push("", bitmap_a, 1, 1) == BRUCE_ERR_INVALID_ARGUMENT;

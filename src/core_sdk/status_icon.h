@@ -31,3 +31,9 @@ bruce_result_t status_icon__remove(const char *key);
  * are copied in lexicographic key order. */
 bruce_result_t
 status_icon__list(bruce_status_icon_t *icons, size_t capacity, size_t *out_count, uint32_t *out_revision);
+
+/* Copies one entry by its lexicographic list index without requiring callers
+ * to reserve a full BRUCE_STATUS_ICON_MAX snapshot. The optional revision is
+ * captured under the same lock as the icon. */
+bruce_result_t
+status_icon__get(size_t index, bruce_status_icon_t *out_icon, uint32_t *out_revision);

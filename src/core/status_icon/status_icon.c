@@ -155,3 +155,18 @@ status_icon__list(bruce_status_icon_t *icons, size_t capacity, size_t *out_count
     xSemaphoreGive(s_mutex);
     return BRUCE_OK;
 }
+
+bruce_result_t
+status_icon__get(size_t index, bruce_status_icon_t *out_icon, uint32_t *out_revision) {
+    if (out_icon == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    if (!status_icon__ensure_lock()) { return BRUCE_ERR_NO_MEMORY; }
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    if (index >= s_count) {
+        xSemaphoreGive(s_mutex);
+        return BRUCE_ERR_NOT_FOUND;
+    }
+    *out_icon = s_icons[index];
+    if (out_revision != NULL) *out_revision = s_revision;
+    xSemaphoreGive(s_mutex);
+    return BRUCE_OK;
+}
