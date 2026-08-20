@@ -12,6 +12,10 @@
 
 #define BROWSER_HOME_URL "http://bruce.computer/"
 
+/* Called synchronously after each response chunk has been parsed. `received`
+ * is the cumulative number of response-body bytes received so far. */
+typedef void (*browser_page_progress_cb_t)(size_t received, void *context);
+
 /* Adds a "http://" scheme to `raw_url` when it has none (a bare host like
  * "example.com" or "bruce.computer" is the common case typed into the URL
  * bar); an already-absolute URL is copied unchanged. Returns false if the
@@ -27,4 +31,7 @@ bool browser_page__normalize_url(const char *raw_url, char *out_url, size_t out_
  * reported through `*out_status_code` for the caller to show. This function
  * only fails on a transport-level problem (DNS, connect, timeout, or the
  * response exceeding the size limit) or an invalid `url`. */
-bruce_result_t browser_page__fetch(const char *url, browser_document_t *doc, int *out_status_code);
+bruce_result_t browser_page__fetch(
+    const char *url, browser_document_t *doc, int *out_status_code, browser_page_progress_cb_t progress_cb,
+    void *progress_context
+);

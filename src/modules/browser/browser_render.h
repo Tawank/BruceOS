@@ -86,3 +86,9 @@ bruce_result_t browser_render__draw(
     const browser_document_t *doc, const browser_view_state_t *view, const browser_history_t *history,
     browser_image_cache_t *image_cache
 );
+
+/* Draws an empty loading view with the URL chrome visible. `progress` is
+ * clamped to 0..100 and fills the blue-gray chrome from left to right. */
+bruce_result_t browser_render__draw_loading(
+    const browser_document_t *doc, const browser_history_t *history, int progress
+);

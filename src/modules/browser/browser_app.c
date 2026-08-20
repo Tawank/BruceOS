@@ -25,6 +25,23 @@ typedef struct {
     browser_view_state_t view;
 } browser_app_state_t;
 
+typedef struct {
+    browser_app_state_t *state;
+    int last_percent;
+} browser_app_progress_t;
+
+static void browser_app__show_progress(size_t received, void *context) {
+    browser_app_progress_t *progress = context;
+    /* Content-Length is not exposed by the streaming HTTP callback. Advance
+     * quickly for small pages and asymptotically reserve the final segment
+     * for request completion instead of displaying a false exact percent. */
+    int percent = 8 + (int)(received * 84u / (received + 32768u));
+    if (percent > 92) percent = 92;
+    if (percent < progress->last_percent + 2) return;
+    progress->last_percent = percent;
+    (void)browser_render__draw_loading(progress->state->doc, progress->state->history, percent);
+}
+
 /* Mirrors modules/filemanager's own pattern: input__read() surfaces
  * BRUCE_ERR_NOT_FOREGROUND when another process takes over the screen (e.g. a
  * permission prompt); wait here until we're either back in the foreground or
@@ -49,10 +66,14 @@ static void browser_app__navigate(browser_app_state_t *state, const char *raw_ur
         return;
     }
 
-    (void)notification__push("Loading...", 30000);
+    browser_document__reset(state->doc);
+    browser_document__set_url(state->doc, url);
+    (void)browser_render__draw_loading(state->doc, state->history, 0);
     int status_code = 0;
-    bruce_result_t result = browser_page__fetch(url, state->doc, &status_code);
-    (void)notification__dismiss();
+    browser_app_progress_t progress = {.state = state, .last_percent = 0};
+    bruce_result_t result = browser_page__fetch(
+        url, state->doc, &status_code, browser_app__show_progress, &progress
+    );
 
     if (result != BRUCE_OK) {
         browser_document__reset(state->doc);

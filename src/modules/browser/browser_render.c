@@ -11,6 +11,8 @@
 #define BROWSER_CONTENT_MARGIN 2
 #define BROWSER_CHROME_PADDING 5
 #define BROWSER_WORD_BUF_MAX 64
+#define BROWSER_CHROME_COLOR 0x324B   /* Blue-gray. */
+#define BROWSER_PROGRESS_COLOR 0x24BE /* Target blue. */
 
 static void browser_render__metrics(int16_t *char_width, int16_t *char_height) {
     if (display__get_font_metrics(char_width, char_height) != BRUCE_OK || *char_width <= 0 || *char_height <= 0) {
@@ -221,10 +223,18 @@ static void browser_render__token_visitor(const browser_layout_token_t *token, v
     else if (token->text_len > 0) browser_render__draw_text_token(ctx, token, screen_y);
 }
 
-static void browser_render__draw_chrome(const browser_document_t *doc, const browser_history_t *history) {
+static void browser_render__draw_chrome(
+    const browser_document_t *doc, const browser_history_t *history, int progress
+) {
     int width = display__width();
     int height = browser_render__chrome_height();
-    (void)display__fill_rect(0, 0, width, height, BRUCE_COLOR_NAVY);
+    (void)display__fill_rect(0, 0, width, height, BROWSER_CHROME_COLOR);
+    if (progress >= 0) {
+        if (progress > 100) progress = 100;
+        int progress_width = width * progress / 100;
+        if (progress_width > 0)
+            (void)display__fill_rect(0, 0, progress_width, height, BROWSER_PROGRESS_COLOR);
+    }
 
     int16_t char_width, char_height;
     browser_render__metrics(&char_width, &char_height);
@@ -289,7 +299,17 @@ bruce_result_t browser_render__draw(
      * boundary -- e.g. after a page-scroll press) still draws in full, and
      * without this the part of it above y_top would bleed over the chrome
      * bar instead of being covered by it. */
-    browser_render__draw_chrome(doc, history);
+    browser_render__draw_chrome(doc, history, -1);
 
+    return display__present();
+}
+
+bruce_result_t browser_render__draw_loading(
+    const browser_document_t *doc, const browser_history_t *history, int progress
+) {
+    bruce_result_t result = display__begin_frame();
+    if (result != BRUCE_OK) return result;
+    (void)display__fill_screen(BRUCE_COLOR_BLACK);
+    browser_render__draw_chrome(doc, history, progress < 0 ? 0 : progress);
     return display__present();
 }

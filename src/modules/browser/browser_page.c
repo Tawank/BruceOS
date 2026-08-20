@@ -12,8 +12,12 @@
 
 typedef struct {
     browser_document_t *doc;
+    bruce_html_parser_t *parser;
     int current_link;
     int current_heading;
+    size_t received;
+    browser_page_progress_cb_t progress_cb;
+    void *progress_context;
 } browser_page_event_state_t;
 
 static void browser_page__on_event(const bruce_html_event_t *event, void *context) {
@@ -59,7 +63,13 @@ static void browser_page__on_event(const bruce_html_event_t *event, void *contex
 }
 
 static bruce_result_t browser_page__on_chunk(const void *data, size_t data_len, void *context) {
-    return html__parser_feed((bruce_html_parser_t *)context, data, data_len);
+    browser_page_event_state_t *state = context;
+    bruce_result_t result = html__parser_feed(state->parser, data, data_len);
+    if (result == BRUCE_OK) {
+        state->received += data_len;
+        if (state->progress_cb != NULL) state->progress_cb(state->received, state->progress_context);
+    }
+    return result;
 }
 
 bool browser_page__normalize_url(const char *raw_url, char *out_url, size_t out_capacity) {
@@ -69,17 +79,27 @@ bool browser_page__normalize_url(const char *raw_url, char *out_url, size_t out_
     return written >= 0 && (size_t)written < out_capacity;
 }
 
-bruce_result_t browser_page__fetch(const char *url, browser_document_t *doc, int *out_status_code) {
+bruce_result_t browser_page__fetch(
+    const char *url, browser_document_t *doc, int *out_status_code, browser_page_progress_cb_t progress_cb,
+    void *progress_context
+) {
     if (url == NULL || url[0] == '\0' || doc == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     if (out_status_code != NULL) *out_status_code = 0;
 
     browser_document__reset(doc);
     browser_document__set_url(doc, url);
 
-    browser_page_event_state_t state = {.doc = doc, .current_link = -1, .current_heading = 0};
+    browser_page_event_state_t state = {
+        .doc = doc,
+        .current_link = -1,
+        .current_heading = 0,
+        .progress_cb = progress_cb,
+        .progress_context = progress_context,
+    };
     bruce_html_parser_t *parser = NULL;
     bruce_result_t result = html__parser_create(url, browser_page__on_event, &state, &parser);
     if (result != BRUCE_OK) return result;
+    state.parser = parser;
 
     const char *headers[] = {"User-Agent", BROWSER_PAGE_USER_AGENT};
     bruce_http_request_t request = {
@@ -89,7 +109,7 @@ bruce_result_t browser_page__fetch(const char *url, browser_document_t *doc, int
         .header_count = 1,
         .max_response_bytes = BROWSER_PAGE_MAX_RESPONSE_BYTES,
         .on_response_chunk = browser_page__on_chunk,
-        .response_chunk_context = parser,
+        .response_chunk_context = &state,
     };
     bruce_http_response_t response = {0};
     result = http__request(&request, &response);
