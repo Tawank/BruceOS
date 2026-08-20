@@ -18,6 +18,7 @@
 #define BROWSER_IMAGE_BOX_HEIGHT 72
 
 typedef struct {
+    size_t item_index;
     int x;
     int y; /* Top-left, in content-local pixels; y=0 is the document's top. */
     int line_height;

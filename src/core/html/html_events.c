@@ -25,6 +25,10 @@ void html__finalize_attr(bruce_html_parser_t *p) {
         dest = p->alt_value;
         dest_len = &p->alt_len;
         dest_has = &p->has_alt;
+    } else if (p->attr_name_len == 2 && memcmp(p->attr_name, "id", 2) == 0) {
+        dest = p->id_value;
+        dest_len = &p->id_len;
+        dest_has = &p->has_id;
     }
     if (dest != NULL) {
         memcpy(dest, p->attr_value, p->attr_value_len);
@@ -104,6 +108,14 @@ html_parser_state_t html__handle_tag_end(bruce_html_parser_t *p) {
     int heading_level = 0;
 
     if (!p->tag_is_closing) {
+        if (p->has_id && p->id_len > 0) {
+            html__flush_text(p);
+            bruce_html_event_t event = {0};
+            event.type = BRUCE_HTML_EVENT_ANCHOR;
+            event.text = p->id_value;
+            event.text_len = p->id_len;
+            html__emit(p, &event);
+        }
         if (p->current_tag == HTML_TAG_A) {
             html__emit_link_start(p);
         } else if (p->current_tag == HTML_TAG_IMG) {
@@ -168,9 +180,10 @@ html_parser_state_t html__handle_tag_end(bruce_html_parser_t *p) {
     p->has_href = false;
     p->has_src = false;
     p->has_alt = false;
+    p->has_id = false;
     p->href_len = 0;
     p->src_len = 0;
     p->alt_len = 0;
+    p->id_len = 0;
     return next;
 }
-

@@ -67,6 +67,8 @@ typedef struct {
     int line_breaks;
     int link_count;
     int image_count;
+    int anchor_count;
+    char anchor[32];
 } html_test__capture_t;
 
 static void html_test__append(char *dst, size_t *len, size_t cap, const char *src, size_t src_len) {
@@ -102,6 +104,10 @@ static void html_test__on_event(const bruce_html_event_t *event, void *context) 
         c->image_count++;
         snprintf(c->image_url, sizeof(c->image_url), "%.*s", (int)event->text_len, event->text);
         snprintf(c->image_alt, sizeof(c->image_alt), "%.*s", (int)event->alt_len, event->alt ? event->alt : "");
+        break;
+    case BRUCE_HTML_EVENT_ANCHOR:
+        c->anchor_count++;
+        snprintf(c->anchor, sizeof(c->anchor), "%.*s", (int)event->text_len, event->text);
         break;
     case BRUCE_HTML_EVENT_HEADING_START:
         c->heading_starts++;
@@ -145,7 +151,7 @@ bool selftest__run_html_parser_case(void) {
     if (html_test__parse(
             "http://bruce.computer/",
             "<html><head><title>My  Page</title></head>"
-            "<body><h1>Welcome</h1><p>Hello <b>World</b>! Visit "
+            "<body><h1 id=\"faq\">Welcome</h1><p>Hello <b>World</b>! Visit "
             "<a href=\"/about\">our about page</a>.</p>"
             "<img src=\"logo.png\" alt=\"Bruce logo\"><script>if (1<2) bad();</script>done</body></html>",
             &c
@@ -154,6 +160,10 @@ bool selftest__run_html_parser_case(void) {
     }
     if (strcmp(c.title, "My Page") != 0) {
         printf("[selftest] html/parser: FAIL, title = '%s'\n", c.title);
+        ok = false;
+    }
+    if (c.anchor_count != 1 || strcmp(c.anchor, "faq") != 0) {
+        printf("[selftest] html/parser: FAIL, anchor_count=%d anchor='%s'\n", c.anchor_count, c.anchor);
         ok = false;
     }
     if (strstr(c.text, "Hello World!") == NULL || strstr(c.text, "done") == NULL) {

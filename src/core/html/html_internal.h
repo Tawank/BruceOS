@@ -94,6 +94,9 @@ struct bruce_html_parser {
     char alt_value[HTML_ATTR_VALUE_MAX];
     size_t alt_len;
     bool has_alt;
+    char id_value[HTML_ATTR_VALUE_MAX];
+    size_t id_len;
+    bool has_id;
 
     /* <script>/<style> raw-content skip: incremental case-insensitive match
      * against "</" + rawtext_end_tag. */

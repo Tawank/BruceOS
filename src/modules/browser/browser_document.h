@@ -36,6 +36,7 @@
 #define BROWSER_URL_MAX 400
 #define BROWSER_ALT_MAX 96
 #define BROWSER_TITLE_MAX 96
+#define BROWSER_ANCHOR_MAX 96
 
 /* Caps chosen to keep one document's worst-case footprint in the tens of KB:
  * BROWSER_MAX_TEXT_BYTES text pool + BROWSER_MAX_ITEMS * sizeof(item) +
@@ -45,6 +46,7 @@
 #define BROWSER_MAX_ITEMS 1024u
 #define BROWSER_MAX_LINKS 256u
 #define BROWSER_MAX_IMAGES 64u
+#define BROWSER_MAX_ANCHORS 128u
 
 typedef enum {
     BROWSER_ITEM_TEXT,
@@ -83,6 +85,11 @@ typedef struct {
 } browser_image_ref_t;
 
 typedef struct {
+    char name[BROWSER_ANCHOR_MAX];
+    uint16_t item_index;
+} browser_anchor_t;
+
+typedef struct {
     const char *text_pool; /* Externally backed -- see the comment above. */
     size_t text_pool_len;
     bruce_memory_object_t text_pool_object;
@@ -98,6 +105,10 @@ typedef struct {
     const browser_image_ref_t *images; /* Externally backed -- see the comment above. */
     size_t image_count;
     bruce_memory_object_t images_object;
+
+    const browser_anchor_t *anchors;
+    size_t anchor_count;
+    bruce_memory_object_t anchors_object;
 
     char title[BROWSER_TITLE_MAX];
     char url[BROWSER_URL_MAX]; /* This page's own resolved URL. */
@@ -126,6 +137,9 @@ int browser_document__add_link(browser_document_t *doc, const char *url);
 /* Registers an image reference as its own item. Silently dropped once
  * BROWSER_MAX_IMAGES or BROWSER_MAX_ITEMS is reached. */
 void browser_document__add_image(browser_document_t *doc, const char *url, const char *alt, size_t alt_len);
+
+void browser_document__add_anchor(browser_document_t *doc, const char *name, size_t len);
+bool browser_document__find_anchor(const browser_document_t *doc, const char *name, size_t *out_item_index);
 
 void browser_document__add_break(browser_document_t *doc, bool paragraph);
 

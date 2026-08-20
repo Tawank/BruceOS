@@ -44,6 +44,9 @@ static void browser_page__on_event(const bruce_html_event_t *event, void *contex
         browser_document__add_image(state->doc, event->text, event->alt, event->alt_len);
         browser_document__add_break(state->doc, true);
         break;
+    case BRUCE_HTML_EVENT_ANCHOR:
+        browser_document__add_anchor(state->doc, event->text, event->text_len);
+        break;
     case BRUCE_HTML_EVENT_HEADING_START:
         /* Likewise, always start a heading on a fresh line even if the
          * source markup ran it straight on from preceding loose text. */

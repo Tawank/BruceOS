@@ -10,6 +10,7 @@
 #define BROWSER_INITIAL_ITEM_CAP 64u
 #define BROWSER_INITIAL_LINK_CAP 16u
 #define BROWSER_INITIAL_IMAGE_CAP 8u
+#define BROWSER_INITIAL_ANCHOR_CAP 8u
 
 bruce_result_t browser_document__create(browser_document_t **out_doc) {
     if (out_doc == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
@@ -41,6 +42,9 @@ void browser_document__destroy(browser_document_t *doc) {
     }
     if (doc->images_object.backend != BRUCE_MEMORY_BACKEND_INVALID) {
         (void)memory__external_free(&doc->images_object);
+    }
+    if (doc->anchors_object.backend != BRUCE_MEMORY_BACKEND_INVALID) {
+        (void)memory__external_free(&doc->anchors_object);
     }
     memory__free(doc->items);
     memory__free(doc);
@@ -89,6 +93,7 @@ void browser_document__reset(browser_document_t *doc) {
     doc->item_count = 0;
     doc->link_count = 0;
     doc->image_count = 0;
+    doc->anchor_count = 0;
     doc->title[0] = '\0';
     doc->url[0] = '\0';
     doc->truncated = false;
@@ -227,6 +232,36 @@ void browser_document__add_image(browser_document_t *doc, const char *url, const
     if (item == NULL) return; /* Bytes are written but unreferenced; harmless. */
     item->kind = (uint8_t)BROWSER_ITEM_IMAGE;
     item->image_index = (int16_t)doc->image_count++;
+}
+
+void browser_document__add_anchor(browser_document_t *doc, const char *name, size_t len) {
+    if (doc == NULL || name == NULL || len == 0) return;
+    browser_anchor_t anchor = {.item_index = (uint16_t)doc->item_count};
+    if (len >= sizeof(anchor.name)) len = sizeof(anchor.name) - 1u;
+    memcpy(anchor.name, name, len);
+    anchor.name[len] = '\0';
+    if (!browser_document__ext_reserve(
+            &doc->anchors_object, (const void **)&doc->anchors, doc->anchor_count * sizeof(anchor), sizeof(anchor),
+            BROWSER_INITIAL_ANCHOR_CAP * sizeof(anchor), (size_t)BROWSER_MAX_ANCHORS * sizeof(anchor)
+        )) {
+        doc->truncated = true;
+        return;
+    }
+    if (memory__external_write(&doc->anchors_object, doc->anchor_count * sizeof(anchor), &anchor, sizeof(anchor)) ==
+        BRUCE_OK) {
+        doc->anchor_count++;
+    }
+}
+
+bool browser_document__find_anchor(const browser_document_t *doc, const char *name, size_t *out_item_index) {
+    if (doc == NULL || name == NULL || out_item_index == NULL) return false;
+    for (size_t i = 0; i < doc->anchor_count; ++i) {
+        if (strcmp(doc->anchors[i].name, name) == 0) {
+            *out_item_index = doc->anchors[i].item_index;
+            return true;
+        }
+    }
+    return false;
 }
 
 void browser_document__add_break(browser_document_t *doc, bool paragraph) {

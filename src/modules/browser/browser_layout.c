@@ -71,6 +71,7 @@ int browser_layout__walk(
                     row_height = 0;
                 }
                 browser_layout_token_t token = {
+                    .item_index = i,
                     .x = x,
                     .y = y,
                     .line_height = line_h,
@@ -101,6 +102,7 @@ int browser_layout__walk(
                 row_height = 0;
             }
             browser_layout_token_t token = {
+                .item_index = i,
                 .x = 0,
                 .y = y,
                 .line_height = BROWSER_IMAGE_BOX_HEIGHT,

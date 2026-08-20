@@ -925,7 +925,9 @@ markup is never buffered whole) and reports a fixed vocabulary of content
 events -- text runs, link/heading boundaries, image references, line/paragraph
 breaks -- through a caller callback, entity-decoding and whitespace-collapsing
 text and resolving `href`/`src` values to absolute URLs against a base URL as
-it goes. `html__resolve_url()` is also exposed standalone. An unrecognized tag
+it goes. Element `id` attributes are surfaced as anchor events so streaming
+consumers can retain document positions without building a DOM.
+`html__resolve_url()` is also exposed standalone. An unrecognized tag
 (`<span>`, `<div class=...>`, and the like) is simply transparent: it
 disappears and its content flows into the surrounding text rather than being
 special-cased, which is what keeps a consumer from needing its own tag

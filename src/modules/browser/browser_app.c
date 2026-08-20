@@ -42,6 +42,35 @@ static void browser_app__show_progress(size_t received, void *context) {
     (void)browser_render__draw_loading(progress->state->doc, progress->state->history, percent);
 }
 
+static size_t browser_app__page_url_len(const char *url) {
+    const char *fragment = strchr(url, '#');
+    size_t len = fragment != NULL ? (size_t)(fragment - url) : strlen(url);
+    while (len > 0 && url[len - 1] == '/') len--;
+    return len;
+}
+
+static bool browser_app__scroll_to_fragment(browser_app_state_t *state, const char *url) {
+    const char *fragment = strchr(url, '#');
+    if (fragment == NULL) return false;
+    size_t current_len = browser_app__page_url_len(state->doc->url);
+    size_t target_len = browser_app__page_url_len(url);
+    if (current_len != target_len || memcmp(state->doc->url, url, current_len) != 0) return false;
+
+    size_t item_index = 0;
+    int scroll_y = 0;
+    if (fragment[1] != '\0') {
+        if (!browser_document__find_anchor(state->doc, fragment + 1, &item_index)) return true;
+        scroll_y = browser_render__item_y(state->doc, item_index, state->view.font_scale);
+    }
+    browser_document__set_url(state->doc, url);
+    int max_scroll = browser_render__max_scroll(state->doc, state->view.font_scale);
+    state->view.scroll_y = scroll_y < max_scroll ? scroll_y : max_scroll;
+    state->view.selected_link = -1;
+    state->view.selected_image = -1;
+    state->view.row_y = -1;
+    return true;
+}
+
 /* Mirrors modules/filemanager's own pattern: input__read() surfaces
  * BRUCE_ERR_NOT_FOREGROUND when another process takes over the screen (e.g. a
  * permission prompt); wait here until we're either back in the foreground or
@@ -144,6 +173,19 @@ static void browser_app__scroll_into_view(browser_app_state_t *state, int top, i
 static void browser_app__move_line(browser_app_state_t *state, int direction) {
     if (state->doc->item_count == 0) return;
 
+    /* Fragment jumps and page scrolling move the viewport independently of
+     * the row cursor. If that cursor is now off-screen, start navigation at
+     * the visible edge instead of dragging the viewport back to its stale
+     * document position. find_row() uses strict comparisons, hence top - 1
+     * for Down and bottom for Up. */
+    int view_top = state->view.scroll_y;
+    int view_bottom = view_top + browser_render__view_height();
+    if (state->view.row_y < view_top || state->view.row_y >= view_bottom) {
+        state->view.row_y = direction > 0 ? view_top - 1 : view_bottom;
+        state->view.selected_link = -1;
+        state->view.selected_image = -1;
+    }
+
     if (state->view.row_y >= 0) {
         /* Re-fetch the current row's own link list: find_row(row_y - 1, +1)
          * is exactly "the row at row_y" (there's no room for another row's y
@@ -233,7 +275,7 @@ static bool browser_app__handle_event(browser_app_state_t *state, const bruce_in
     } else if (event->code == BRUCE_INPUT_CODE_RIGHT || event->code == BRUCE_INPUT_CODE_SELECT) {
         if (state->view.selected_link >= 0) {
             const char *url = state->doc->links[state->view.selected_link].url;
-            browser_app__navigate(state, url, true);
+            if (!browser_app__scroll_to_fragment(state, url)) browser_app__navigate(state, url, true);
         } else if (state->view.selected_image >= 0) {
             browser_app__load_image(state);
         }

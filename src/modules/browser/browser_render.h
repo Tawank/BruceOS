@@ -50,6 +50,10 @@ int browser_render__content_height(const browser_document_t *doc, int font_scale
  * viewport height below the chrome bar (never negative). */
 int browser_render__max_scroll(const browser_document_t *doc, int font_scale);
 
+/* Returns the content-local y position of the first drawable item at or
+ * after `item_index`, clamped to the document's bottom. */
+int browser_render__item_y(const browser_document_t *doc, size_t item_index, int font_scale);
+
 #define BROWSER_ROW_MAX_LINKS 16
 
 /* One word-wrapped content row (everything sharing a single layout y), as

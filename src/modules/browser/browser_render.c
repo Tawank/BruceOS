@@ -56,6 +56,31 @@ int browser_render__max_scroll(const browser_document_t *doc, int font_scale) {
 }
 
 typedef struct {
+    size_t item_index;
+    int y;
+    bool found;
+} browser_render__item_search_t;
+
+static void browser_render__item_visitor(const browser_layout_token_t *token, void *context) {
+    browser_render__item_search_t *search = context;
+    if (!search->found && token->item_index >= search->item_index) {
+        search->y = token->y;
+        search->found = true;
+    }
+}
+
+int browser_render__item_y(const browser_document_t *doc, size_t item_index, int font_scale) {
+    int16_t char_width, char_height;
+    browser_render__metrics(&char_width, &char_height);
+    browser_render__item_search_t search = {.item_index = item_index};
+    int height = browser_layout__walk(
+        doc, browser_render__content_width(), char_width, char_height, font_scale, browser_render__item_visitor,
+        &search
+    );
+    return search.found ? search.y : height;
+}
+
+typedef struct {
     int after_y;
     int direction;
     bool done;

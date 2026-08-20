@@ -38,6 +38,7 @@ typedef enum {
     BRUCE_HTML_EVENT_LINK_END,
     BRUCE_HTML_EVENT_IMAGE,          /* `text` is the image's resolved absolute URL;
                                        * `alt` is its optional alt text. */
+    BRUCE_HTML_EVENT_ANCHOR,         /* `text` is an element's decoded `id` attribute. */
     BRUCE_HTML_EVENT_HEADING_START,  /* `value` is the heading level, 1-6. */
     BRUCE_HTML_EVENT_HEADING_END,
     BRUCE_HTML_EVENT_LINE_BREAK,     /* <br>. */
