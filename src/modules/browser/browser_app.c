@@ -162,64 +162,163 @@ static void browser_app__scroll_into_view(browser_app_state_t *state, int top, i
     if (state->view.scroll_y < 0) state->view.scroll_y = 0;
 }
 
-/* Up/Down moves one content row (word-wrapped line) at a time, not link to
- * link -- the screen only scrolls once the cursor row would go off it, same
- * as any ordinary list/pager. A row's link(s) or image (a row is one or the
- * other, never both -- see browser_render_row_t) are highlighted as the
- * cursor reaches them; a row carrying more than one distinct link is cycled
- * through link by link, in the same direction, before the cursor moves on to
- * the next row. Select then either navigates the highlighted link or loads
- * the highlighted image -- see browser_app__load_image(). */
+static bool browser_app__scroll_step(browser_app_state_t *state, int direction) {
+    int old_scroll = state->view.scroll_y;
+    int max_scroll = browser_render__max_scroll(state->doc, state->view.font_scale);
+    browser_render_row_t row;
+    if (browser_render__find_row(
+            state->doc, state->view.scroll_y, direction, state->view.font_scale, &row
+        )) {
+        state->view.scroll_y = row.y;
+    }
+    if (state->view.scroll_y < 0) state->view.scroll_y = 0;
+    if (state->view.scroll_y > max_scroll) state->view.scroll_y = max_scroll;
+    return state->view.scroll_y != old_scroll;
+}
+
+static void browser_app__select_link(browser_app_state_t *state, const browser_render_link_bounds_t *link) {
+    state->view.selected_link = link->link_index;
+    state->view.selected_image = -1;
+    state->view.row_y = -1;
+    browser_app__scroll_into_view(state, link->top, link->bottom - link->top);
+}
+
+static bool browser_app__find_image(
+    browser_app_state_t *state, int after_y, int direction, browser_render_row_t *out_row
+) {
+    browser_render_row_t row;
+    int y = after_y;
+    while (browser_render__find_row(state->doc, y, direction, state->view.font_scale, &row)) {
+        if (row.image_index >= 0) {
+            *out_row = row;
+            return true;
+        }
+        y = row.y;
+    }
+    return false;
+}
+
+static void browser_app__select_image(browser_app_state_t *state, const browser_render_row_t *row) {
+    state->view.selected_link = -1;
+    state->view.selected_image = row->image_index;
+    state->view.row_y = row->y;
+    browser_app__scroll_into_view(state, row->y, row->line_height);
+}
+
+static bool browser_app__range_is_visible(int top, int bottom, int view_top, int view_bottom) {
+    return bottom > view_top && top < view_bottom;
+}
+
+/* Up/Down treats each link as one target, regardless of how many wrapped
+ * rows it occupies. A clipped selected link is revealed in the requested
+ * direction first. Otherwise navigation jumps directly to an adjacent link
+ * that is already visible; an off-screen link is reached by scrolling the
+ * viewport one rendered row at a time until it becomes visible. */
 static void browser_app__move_line(browser_app_state_t *state, int direction) {
     if (state->doc->item_count == 0) return;
-
-    /* Fragment jumps and page scrolling move the viewport independently of
-     * the row cursor. If that cursor is now off-screen, start navigation at
-     * the visible edge instead of dragging the viewport back to its stale
-     * document position. find_row() uses strict comparisons, hence top - 1
-     * for Down and bottom for Up. */
     int view_top = state->view.scroll_y;
     int view_bottom = view_top + browser_render__view_height();
-    if (state->view.row_y < view_top || state->view.row_y >= view_bottom) {
-        state->view.row_y = direction > 0 ? view_top - 1 : view_bottom;
+
+    browser_render_link_bounds_t current;
+    bool has_current = state->view.selected_link >= 0 && browser_render__link_bounds(
+        state->doc, state->view.selected_link, state->view.font_scale, &current
+    );
+    if (has_current && (current.bottom <= view_top || current.top >= view_bottom)) {
         state->view.selected_link = -1;
-        state->view.selected_image = -1;
+        has_current = false;
     }
 
-    if (state->view.row_y >= 0) {
-        /* Re-fetch the current row's own link list: find_row(row_y - 1, +1)
-         * is exactly "the row at row_y" (there's no room for another row's y
-         * to fall strictly between row_y - 1 and row_y). */
-        browser_render_row_t row;
-        if (browser_render__find_row(state->doc, state->view.row_y - 1, 1, state->view.font_scale, &row) &&
-            row.y == state->view.row_y) {
-            int pos = -1;
-            for (int i = 0; i < row.link_count; ++i) {
-                if (row.link_indices[i] == state->view.selected_link) {
-                    pos = i;
-                    break;
-                }
-            }
-            int next_pos = pos + direction;
-            if (pos >= 0 && next_pos >= 0 && next_pos < row.link_count) {
-                state->view.selected_link = row.link_indices[next_pos];
-                browser_app__scroll_into_view(state, row.y, row.line_height);
-                return;
-            }
+    bool has_image = state->view.selected_image >= 0 && state->view.row_y >= 0;
+    browser_render_row_t current_image;
+    if (has_image &&
+        (!browser_render__find_row(
+             state->doc, state->view.row_y - 1, 1, state->view.font_scale, &current_image
+         ) ||
+         current_image.y != state->view.row_y || current_image.image_index != state->view.selected_image)) {
+        has_image = false;
+    }
+    int current_top = has_current ? current.top : (has_image ? current_image.y : state->view.row_y);
+    int current_bottom = has_current ? current.bottom
+                                     : (has_image ? current_image.y + current_image.line_height : state->view.row_y);
+    if (has_image && (current_bottom <= view_top || current_top >= view_bottom)) {
+        state->view.selected_image = -1;
+        state->view.row_y = -1;
+        has_image = false;
+    }
+
+    if (has_current || has_image) {
+        if (direction < 0 && current_top < view_top) {
+            state->view.scroll_y = current_top;
+            return;
         }
+        if (direction > 0 && current_bottom > view_bottom) {
+            state->view.scroll_y = current_bottom - browser_render__view_height();
+            int max_scroll = browser_render__max_scroll(state->doc, state->view.font_scale);
+            if (state->view.scroll_y > max_scroll) state->view.scroll_y = max_scroll;
+            return;
+        }
+        browser_render_link_bounds_t adjacent;
+        bool has_adjacent = has_current
+                                ? browser_render__adjacent_link(
+                                      state->doc, current.link_index, direction, state->view.font_scale, &adjacent
+                                  )
+                                : browser_render__link_from_edge(
+                                      state->doc, direction > 0 ? current_bottom : current_top, direction,
+                                      state->view.font_scale, &adjacent
+                                  );
+        browser_render_row_t image;
+        bool has_next_image = browser_app__find_image(
+            state, direction > 0 ? current_bottom - 1 : current_top, direction, &image
+        );
+        if (has_adjacent &&
+            !browser_app__range_is_visible(adjacent.top, adjacent.bottom, view_top, view_bottom)) {
+            has_adjacent = false;
+        }
+        if (has_next_image &&
+            !browser_app__range_is_visible(
+                image.y, image.y + image.line_height, view_top, view_bottom
+            )) {
+            has_next_image = false;
+        }
+        bool image_first = has_next_image &&
+                           (!has_adjacent || (direction > 0 ? image.y < adjacent.top : image.y > adjacent.top));
+        if (image_first) {
+            browser_app__select_image(state, &image);
+            return;
+        }
+        if (has_adjacent) {
+            browser_app__select_link(state, &adjacent);
+            return;
+        }
+        (void)browser_app__scroll_step(state, direction);
+        return;
     }
 
-    browser_render_row_t row;
-    if (!browser_render__find_row(state->doc, state->view.row_y, direction, state->view.font_scale, &row)) return;
-    state->view.row_y = row.y;
-    if (row.link_count > 0) {
-        state->view.selected_link = row.link_indices[direction > 0 ? 0 : row.link_count - 1];
-        state->view.selected_image = -1;
-    } else {
-        state->view.selected_link = -1;
-        state->view.selected_image = row.image_index; /* -1 for a plain-text row. */
+    browser_render_link_bounds_t candidate;
+    int edge_y = direction > 0 ? view_top : view_bottom;
+    bool has_candidate = browser_render__link_from_edge(
+        state->doc, edge_y, direction, state->view.font_scale, &candidate
+    );
+    browser_render_row_t image;
+    bool has_image_candidate = browser_app__find_image(state, edge_y, direction, &image);
+    if (has_candidate &&
+        !browser_app__range_is_visible(candidate.top, candidate.bottom, view_top, view_bottom)) {
+        has_candidate = false;
     }
-    browser_app__scroll_into_view(state, row.y, row.line_height);
+    if (has_image_candidate &&
+        !browser_app__range_is_visible(image.y, image.y + image.line_height, view_top, view_bottom)) {
+        has_image_candidate = false;
+    }
+    if (has_image_candidate &&
+        (!has_candidate || (direction > 0 ? image.y < candidate.top : image.y > candidate.top))) {
+        browser_app__select_image(state, &image);
+        return;
+    }
+    if (has_candidate) {
+        browser_app__select_link(state, &candidate);
+        return;
+    }
+    (void)browser_app__scroll_step(state, direction);
 }
 
 static void browser_app__page_scroll(browser_app_state_t *state, int direction) {
