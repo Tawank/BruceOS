@@ -9,6 +9,7 @@
 #include "browser_document.h"
 #include "browser_history.h"
 #include "browser_image_cache.h"
+#include "browser_layout.h"
 #include "browser_page.h"
 #include "browser_render.h"
 #include "core_sdk/dialog.h"
@@ -132,11 +133,13 @@ static void browser_app__navigate(browser_app_state_t *state, const char *raw_ur
 static void browser_app__load_image(browser_app_state_t *state) {
     if (state->view.selected_image < 0) return;
     const char *url = state->doc->images[state->view.selected_image].url;
-    const void *data = NULL;
-    size_t len = 0;
-    if (browser_image_cache__peek(state->image_cache, url, &data, &len) == BRUCE_ERR_NOT_FOUND) {
+    const image_bitmap_t *bitmap = NULL;
+    if (browser_image_cache__peek(state->image_cache, url, &bitmap) == BRUCE_ERR_NOT_FOUND) {
         (void)notification__push("Loading image...", 30000);
-        (void)browser_image_cache__get(state->image_cache, url, &data, &len);
+        (void)browser_image_cache__get(
+            state->image_cache, url, (uint16_t)browser_render__content_width(), BROWSER_IMAGE_BOX_HEIGHT,
+            BRUCE_COLOR_BLACK, &bitmap
+        );
         (void)notification__dismiss();
     }
 }

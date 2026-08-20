@@ -4,7 +4,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "browser_image_draw.h"
 #include "browser_layout.h"
 #include "core_sdk/display.h"
 
@@ -268,14 +267,20 @@ static void browser_render__draw_image_token(
     /* Never fetches: images load only on an explicit Select press (see
      * browser_app.c's browser_app__load_image()), so a page with several of
      * them scrolls at the same speed as one with none. */
-    const void *data = NULL;
-    size_t len = 0;
-    bruce_result_t result = browser_image_cache__peek(ctx->image_cache, image->url, &data, &len);
+    const image_bitmap_t *bitmap = NULL;
+    bruce_result_t result = browser_image_cache__peek(ctx->image_cache, image->url, &bitmap);
     if (result == BRUCE_OK) {
-        result = browser_image_draw__fit(
-            data, len, box_x, screen_y, box_w, token->line_height, BRUCE_COLOR_BLACK, NULL, NULL
+        int draw_x = box_x + (box_w - bitmap->width) / 2;
+        int draw_y = screen_y + (token->line_height - bitmap->height) / 2;
+        result = display__draw_rgb_bitmap(
+            (int16_t)draw_x, (int16_t)draw_y, bitmap->pixels, (int16_t)bitmap->width, (int16_t)bitmap->height
         );
-        if (result == BRUCE_OK) return;
+        if (result == BRUCE_OK) {
+            if (selected) {
+                (void)display__draw_rect(box_x, screen_y, box_w, token->line_height, BRUCE_COLOR_CYAN);
+            }
+            return;
+        }
     }
 
     const char *alt = image->alt[0] != '\0' ? image->alt : "[image]";

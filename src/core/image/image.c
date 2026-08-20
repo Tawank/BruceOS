@@ -62,6 +62,68 @@ bruce_result_t image__get_bitmap_from_memory(
     return image__decode_memory(data, size, options, out_bitmap);
 }
 
+bruce_result_t image__bitmap_resize(
+    const image_bitmap_t *source, uint16_t max_width, uint16_t max_height, image_bitmap_t *out_bitmap
+) {
+    if (source == NULL || source->pixels == NULL || source->width == 0 || source->height == 0 ||
+        max_width == 0 || max_height == 0 || out_bitmap == NULL || out_bitmap == source) {
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    *out_bitmap = (image_bitmap_t){0};
+
+    uint32_t target_width = source->width;
+    uint32_t target_height = source->height;
+    if (target_width > max_width || target_height > max_height) {
+        if ((uint64_t)max_width * target_height <= (uint64_t)max_height * target_width) {
+            target_height = (target_height * max_width) / target_width;
+            target_width = max_width;
+        } else {
+            target_width = (target_width * max_height) / target_height;
+            target_height = max_height;
+        }
+        if (target_width == 0) target_width = 1;
+        if (target_height == 0) target_height = 1;
+    }
+    if (target_width > SIZE_MAX / (target_height * sizeof(uint16_t))) return BRUCE_ERR_RESOURCE_LIMIT;
+
+    size_t row_size = target_width * sizeof(uint16_t);
+    bruce_memory_object_t backing = {0};
+    bruce_result_t result = memory__external_alloc(row_size * target_height, &backing);
+    if (result != BRUCE_OK) return result;
+    uint16_t *row = memory__malloc(row_size);
+    if (row == NULL) {
+        (void)memory__external_free(&backing);
+        return BRUCE_ERR_NO_MEMORY;
+    }
+
+    for (uint32_t y = 0; result == BRUCE_OK && y < target_height; ++y) {
+        uint32_t source_y = (uint32_t)(((uint64_t)y * source->height) / target_height);
+        for (uint32_t x = 0; x < target_width; ++x) {
+            uint32_t source_x = (uint32_t)(((uint64_t)x * source->width) / target_width);
+            row[x] = source->pixels[(size_t)source_y * source->width + source_x];
+        }
+        result = memory__external_write(&backing, (size_t)y * row_size, row, row_size);
+    }
+    memory__free(row);
+
+    const void *pixels = NULL;
+    if (result == BRUCE_OK) result = memory__external_map(&backing, &pixels);
+    if (result != BRUCE_OK) {
+        (void)memory__external_free(&backing);
+        return result;
+    }
+    *out_bitmap = (image_bitmap_t){
+        .pixels = (uint16_t *)pixels,
+        .width = (uint16_t)target_width,
+        .height = (uint16_t)target_height,
+        .source_width = source->source_width,
+        .source_height = source->source_height,
+        .format = source->format,
+        .backing = backing,
+    };
+    return BRUCE_OK;
+}
+
 bruce_result_t image__draw_bitmap(
     const image_bitmap_t *bitmap, const bruce_image_draw_options_t *options
 ) {

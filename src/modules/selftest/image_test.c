@@ -49,6 +49,24 @@ bool selftest__run_image_decode_case(void) {
         printf("[selftest] image/decode: FAIL, unsupported signature\n");
         return false;
     }
+    uint16_t source_pixels[] = {BRUCE_COLOR_RED, BRUCE_COLOR_BLUE, BRUCE_COLOR_WHITE, BRUCE_COLOR_BLACK};
+    image_bitmap_t source = {
+        .pixels = source_pixels,
+        .width = 2,
+        .height = 2,
+        .source_width = 2,
+        .source_height = 2,
+        .format = BRUCE_IMAGE_FORMAT_PNG,
+    };
+    image_bitmap_t resized = {0};
+    if (image__bitmap_resize(&source, 1, 1, &resized) != BRUCE_OK || resized.width != 1 ||
+        resized.height != 1 || resized.pixels == NULL || resized.pixels[0] != BRUCE_COLOR_RED ||
+        resized.backing.backend == BRUCE_MEMORY_BACKEND_INVALID) {
+        image__bitmap_release(&resized);
+        printf("[selftest] image/decode: FAIL, bitmap resize\n");
+        return false;
+    }
+    image__bitmap_release(&resized);
     if (display__begin_frame() != BRUCE_OK) {
         printf("[selftest] image/decode: FAIL, begin frame\n");
         return false;

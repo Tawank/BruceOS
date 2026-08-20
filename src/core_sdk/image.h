@@ -48,6 +48,15 @@ bruce_result_t image__get_bitmap_from_memory(
     const void *data, size_t size, const bruce_image_draw_options_t *options, image_bitmap_t *out_bitmap
 );
 
+/* Resizes `source` into an owned RGB565 bitmap, preserving aspect ratio
+ * while fitting within `max_width` x `max_height`. Core chooses the backing
+ * store; callers must not depend on a particular memory backend. The result is
+ * never upscaled and must be
+ * released with image__bitmap_release(). */
+bruce_result_t image__bitmap_resize(
+    const image_bitmap_t *source, uint16_t max_width, uint16_t max_height, image_bitmap_t *out_bitmap
+);
+
 /* Opens and decodes an image through process-owned Core storage. */
 bruce_result_t image__get_bitmap_from_file(
     const char *path, const bruce_image_draw_options_t *options, image_bitmap_t *out_bitmap

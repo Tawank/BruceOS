@@ -27,6 +27,12 @@ typedef struct {
     uint64_t retry_at_ms; /* failed slots only: don't retry before this. */
     bruce_result_t failure;
     bruce_http_response_t response;
+    image_bitmap_t bitmap;
+    uint16_t bitmap_box_width;
+    uint16_t bitmap_box_height;
+    bruce_display_color_t bitmap_background;
+    bruce_result_t bitmap_failure;
+    bool bitmap_failed;
     uint32_t last_used;
 } browser_image_cache_slot_t;
 
@@ -44,10 +50,16 @@ bruce_result_t browser_image_cache__create(browser_image_cache_t **out_cache) {
     return BRUCE_OK;
 }
 
+static void browser_image_cache__release_slot(browser_image_cache_slot_t *slot) {
+    if (slot == NULL) return;
+    http__response_free(&slot->response);
+    image__bitmap_release(&slot->bitmap);
+}
+
 void browser_image_cache__destroy(browser_image_cache_t *cache) {
     if (cache == NULL) return;
     for (size_t i = 0; i < BROWSER_IMAGE_CACHE_SLOTS; ++i) {
-        if (cache->slots[i].valid) http__response_free(&cache->slots[i].response);
+        browser_image_cache__release_slot(&cache->slots[i]);
     }
     memory__free(cache);
 }
@@ -86,8 +98,7 @@ static bruce_result_t browser_image_cache__fetch_once(const char *url, bruce_htt
     return result;
 }
 
-bruce_result_t
-browser_image_cache__get(browser_image_cache_t *cache, const char *url, const void **out_data, size_t *out_len) {
+static bruce_result_t browser_image_cache__get_encoded(browser_image_cache_t *cache, const char *url, const void **out_data, size_t *out_len) {
     if (cache == NULL || url == NULL || url[0] == '\0' || out_data == NULL || out_len == NULL)
         return BRUCE_ERR_INVALID_ARGUMENT;
 
@@ -118,7 +129,7 @@ browser_image_cache__get(browser_image_cache_t *cache, const char *url, const vo
      * same URL) if there was one, so a URL that keeps failing doesn't churn
      * through every other slot's cache each time its cooldown lapses. */
     if (slot == NULL) slot = browser_image_cache__slot_to_reuse(cache);
-    if (slot->valid && !slot->failed) http__response_free(&slot->response);
+    if (slot->valid) browser_image_cache__release_slot(slot);
     snprintf(slot->url, sizeof(slot->url), "%s", url);
     slot->last_used = ++cache->clock;
 
@@ -134,23 +145,69 @@ browser_image_cache__get(browser_image_cache_t *cache, const char *url, const vo
     slot->response = response;
     slot->valid = true;
     slot->failed = false;
+    slot->bitmap_failed = false;
 
     *out_data = slot->response.body;
     *out_len = slot->response.body_len;
     return BRUCE_OK;
 }
 
-bruce_result_t
-browser_image_cache__peek(browser_image_cache_t *cache, const char *url, const void **out_data, size_t *out_len) {
-    if (cache == NULL || url == NULL || url[0] == '\0' || out_data == NULL || out_len == NULL)
+bruce_result_t browser_image_cache__get(
+    browser_image_cache_t *cache, const char *url, uint16_t box_width, uint16_t box_height,
+    bruce_display_color_t background, const image_bitmap_t **out_bitmap
+) {
+    if (out_bitmap == NULL || box_width == 0 || box_height == 0) return BRUCE_ERR_INVALID_ARGUMENT;
+    *out_bitmap = NULL;
+
+    const void *data = NULL;
+    size_t len = 0;
+    bruce_result_t result = browser_image_cache__get_encoded(cache, url, &data, &len);
+    if (result != BRUCE_OK) return result;
+    browser_image_cache_slot_t *slot = browser_image_cache__find(cache, url);
+    if (slot == NULL) return BRUCE_ERR_NOT_FOUND;
+    bool same_fit = slot->bitmap_box_width == box_width && slot->bitmap_box_height == box_height &&
+                    slot->bitmap_background == background;
+    if (same_fit && slot->bitmap.pixels != NULL) {
+        *out_bitmap = &slot->bitmap;
+        return BRUCE_OK;
+    }
+    if (same_fit && slot->bitmap_failed) return slot->bitmap_failure;
+
+    image__bitmap_release(&slot->bitmap);
+    slot->bitmap_box_width = box_width;
+    slot->bitmap_box_height = box_height;
+    slot->bitmap_background = background;
+    slot->bitmap_failed = false;
+    bruce_image_draw_options_t options = {.center = false, .fit = true, .background = background};
+    image_bitmap_t decoded = {0};
+    result = image__get_bitmap_from_memory(data, len, &options, &decoded);
+    if (result == BRUCE_OK) {
+        result = image__bitmap_resize(&decoded, box_width, box_height, &slot->bitmap);
+    }
+    image__bitmap_release(&decoded);
+    if (result != BRUCE_OK) {
+        slot->bitmap_failed = true;
+        slot->bitmap_failure = result;
+        return result;
+    }
+    *out_bitmap = &slot->bitmap;
+    return BRUCE_OK;
+}
+
+bruce_result_t browser_image_cache__peek(
+    browser_image_cache_t *cache, const char *url, const image_bitmap_t **out_bitmap
+) {
+    if (cache == NULL || url == NULL || url[0] == '\0' || out_bitmap == NULL)
         return BRUCE_ERR_INVALID_ARGUMENT;
+    *out_bitmap = NULL;
 
     browser_image_cache_slot_t *slot = browser_image_cache__find(cache, url);
-    if (slot == NULL) return BRUCE_ERR_NOT_FOUND; /* Never requested -- caller should offer to load it. */
+    if (slot == NULL) return BRUCE_ERR_NOT_FOUND;
     if (slot->failed) return slot->failure;
-
+    if (slot->bitmap.pixels == NULL) {
+        return slot->bitmap_failed ? slot->bitmap_failure : BRUCE_ERR_NOT_FOUND;
+    }
     slot->last_used = ++cache->clock;
-    *out_data = slot->response.body;
-    *out_len = slot->response.body_len;
+    *out_bitmap = &slot->bitmap;
     return BRUCE_OK;
 }

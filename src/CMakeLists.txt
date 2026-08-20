@@ -121,7 +121,6 @@ idf_component_register(SRCS
                      "modules/browser/browser_document.c"
                      "modules/browser/browser_history.c"
                      "modules/browser/browser_image_cache.c"
-                     "modules/browser/browser_image_draw.c"
                      "modules/browser/browser_layout.c"
                      "modules/browser/browser_page.c"
                      "modules/browser/browser_render.c"
@@ -448,7 +447,6 @@ add_library(bruce_sdk_builtin_browser_check OBJECT
             "modules/browser/browser_document.c"
             "modules/browser/browser_history.c"
             "modules/browser/browser_image_cache.c"
-            "modules/browser/browser_image_draw.c"
             "modules/browser/browser_layout.c"
             "modules/browser/browser_page.c"
             "modules/browser/browser_render.c")

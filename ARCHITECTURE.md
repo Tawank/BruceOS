@@ -904,6 +904,10 @@ assets at development time.
 
 Image Core decodes JPEG, PNG, and the first GIF frame from memory or a Core
 storage path into an owned RGB565 `image_bitmap_t`.
+`image__bitmap_resize()` creates another owned bitmap fitted within caller-
+supplied bounds without upscaling; Core chooses its backing store, currently
+using `memory__external` so retained resized images do not consume a large
+contiguous internal-heap block.
 `image__get_bitmap_from_memory()` and `image__get_bitmap_from_file()` optionally
 fit without upscaling, preserve aspect ratio, and composite transparency over a
 caller-selected background. The owner draws with `image__draw_bitmap()` and
@@ -946,14 +950,14 @@ position; `modules/browser/browser_render.c` is the only file that calls
 `core_sdk/display.h`, drawing the top URL/back-forward chrome bar and the
 current scrolled page, highlighting the selected link. Inline images are
 fetched through a small bounded per-URL cache
-(`modules/browser/browser_image_cache.c`) and box-fitted with
-`modules/browser/browser_image_draw.c`, which decodes at `fit=true` (bounding
-memory to the display viewport, the same protection any other `fit` caller
-gets) and then does its own smaller nearest-neighbor scale down into the
-inline image's reserved box -- `core_sdk/image.h`'s own `fit`/`center` only
-scale relative to the caller's whole viewport, which suits a full-screen
-viewer but not one picture among several on a page. Up/Down cycle the
-selected link (auto-scrolling it into view), Left/Back and Right/Select
+(`modules/browser/browser_image_cache.c`). Explicitly loading an image decodes
+it once and uses `image__bitmap_resize()` to retain a box-fitted RGB565 bitmap;
+subsequent redraws borrow and draw that bitmap directly, with no decode, scale,
+or allocation in the scrolling path. Up/Down navigate directly among visible
+links, treating a wrapped multi-line
+link as one target; when no target is visible in that direction they scroll
+one rendered row, and only scroll within a selected link to reveal a clipped
+part. Left/Back and Right/Select
 navigate history backward and forward (`modules/browser/browser_history.c`,
 a plain array with a current-position cursor), Space/`b` page-scroll, `g`
 opens a `dialog__text_input()` URL bar, and Home returns to the configured
