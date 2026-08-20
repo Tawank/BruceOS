@@ -1,11 +1,11 @@
 #include "dialog.h"
 
 #include "core/config/config.h"
+#include "core_sdk/app_runner.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/display.h"
-#include "core_sdk/input.h"
 #include "core_sdk/icon.h"
-#include "core_sdk/app_runner.h"
+#include "core_sdk/input.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/partition_manager.h"
 #include "core_sdk/process.h"
@@ -322,8 +322,8 @@ static void dialog__copy_utf8_columns(
  * one right-pointing marker; the selected row pauses, scrolls to its end,
  * pauses there, and repeats so every UTF-8 column can be read. */
 static void dialog__gui_draw_row_label(
-    const char *label, int x, int y, int max_width, int text_size, bool selected,
-    uint64_t selected_for_ms, bool *out_overflow
+    const char *label, int x, int y, int max_width, int text_size, bool selected, uint64_t selected_for_ms,
+    bool *out_overflow
 ) {
     if (label == NULL || max_width <= 0) { return; }
     int max_chars = max_width / (DIALOG__CHAR_W * text_size);
@@ -414,10 +414,10 @@ static bruce_result_t dialog__gui_wait_for_any_key(void) {
 static bruce_result_t dialog__gui_message(bruce_dialog_kind_t kind, const char *title, const char *message) {
     uint16_t pri, sec, bg, surface, text, text_muted, border, success, warning, error;
     dialog__get_colors(&pri, &sec, &bg, &surface, &text, &text_muted, &border, &success, &warning, &error);
-    uint16_t accent = kind == BRUCE_DIALOG_SUCCESS ? success
+    uint16_t accent = kind == BRUCE_DIALOG_SUCCESS   ? success
                       : kind == BRUCE_DIALOG_WARNING ? warning
                       : kind == BRUCE_DIALOG_ERROR   ? error
-                                                      : pri;
+                                                     : pri;
 
     bruce_result_t frame_result = display__begin_frame();
     if (frame_result == BRUCE_ERR_NOT_FOREGROUND) { return BRUCE_ERR_CANCELLED; }
@@ -573,9 +573,7 @@ static bruce_result_t dialog__gui_choice(
 
             if (title_h > 0) {
                 bool title_on_pri_fill = render_borders && !render_window;
-                if (title_on_pri_fill) {
-                    display__fill_rect(left, top, viewport_w, title_h, pri);
-                }
+                if (title_on_pri_fill) { display__fill_rect(left, top, viewport_w, title_h, pri); }
                 /* Full-bleed layout fills the bar itself with pri, so the
                  * label needs the readable-over-accent `text` color there
                  * instead of text_color (which stays pri, for list rows -
@@ -618,7 +616,13 @@ static bruce_result_t dialog__gui_choice(
                 if (icon != NULL) {
                     int icon_size = row_h - 2;
                     display__draw_bitmap_scaled(
-                        label_left, y + 1, icon->bits, icon->width, icon->height, icon_size, icon_size,
+                        label_left,
+                        y + 1,
+                        icon->bits,
+                        icon->width,
+                        icon->height,
+                        icon_size,
+                        icon_size,
                         i == selected ? background_color : text_color
                     );
                     label_left += icon_size + DIALOG__MARGIN;
@@ -635,8 +639,14 @@ static bruce_result_t dialog__gui_choice(
                 }
                 bool *overflow = i == selected ? &selected_label_overflows : NULL;
                 dialog__gui_draw_row_label(
-                    choices[i].label, label_left, y + 1, label_right - label_left, text_size,
-                    i == selected, now - selected_at, overflow
+                    choices[i].label,
+                    label_left,
+                    y + 1,
+                    label_right - label_left,
+                    text_size,
+                    i == selected,
+                    now - selected_at,
+                    overflow
                 );
             }
 
@@ -1186,7 +1196,8 @@ static void dialog__pick_file_go_up(char *current_path) {
  * relists the parent - can re-select that entry instead of defaulting back
  * to the top. Only ever holds the single most recent directory left, not a
  * full history stack, so this re-selection only reaches one level up. */
-static void dialog__pick_file_note_returning_from(const char *current_path, char *out_name, size_t out_name_size) {
+static void
+dialog__pick_file_note_returning_from(const char *current_path, char *out_name, size_t out_name_size) {
     const char *last_slash = strrchr(current_path, '/');
     snprintf(out_name, out_name_size, "%s", last_slash != NULL ? last_slash + 1 : current_path);
 }
@@ -1194,7 +1205,7 @@ static void dialog__pick_file_note_returning_from(const char *current_path, char
 /* Whole-number binary-prefix size, e.g. 20480 -> "20KiB", 2097152 -> "2MiB".
  * Truncates rather than rounding: plenty precise for a status-bar readout. */
 static void dialog__pick_file_format_bytes(uint64_t bytes, char *out, size_t out_size) {
-    static const char *const units[] = {"B", "KiB", "MiB", "GiB", "TiB"};
+    static const char *const units[] = {"B", "KB", "MB", "GB", "TB"};
     size_t unit = 0;
     uint64_t divisor = 1;
     while (unit + 1 < sizeof(units) / sizeof(units[0]) && bytes >= divisor * 1024) {
@@ -1236,7 +1247,8 @@ static void dialog__pick_file_partition_label(const char *path, char *out, size_
     size_t best_len = 0;
     if (partition_manager__list_current(entries, BRUCE_PARTITION_MAX_ENTRIES, &count) == BRUCE_OK) {
         for (size_t i = 0; i < count; ++i) {
-            if (!storage__internal_mount_point(entries[i].label, mount_point, BRUCE_STORAGE_PATH_MAX)) continue;
+            if (!storage__internal_mount_point(entries[i].label, mount_point, BRUCE_STORAGE_PATH_MAX))
+                continue;
             size_t mount_len = strlen(mount_point);
             bool root_mount = mount_len == 1 && mount_point[0] == '/';
             bool matches = strncmp(path, mount_point, mount_len) == 0 &&
@@ -1340,7 +1352,9 @@ static bruce_result_t dialog__gui_pick_file_run(
      * pre-selects it below. */
     size_t initial_list_count = 0;
     if (storage__list(ws->current_path, NULL, 0, &initial_list_count) != BRUCE_OK) {
-        dialog__pick_file_note_returning_from(ws->current_path, ws->returning_from, sizeof(ws->returning_from));
+        dialog__pick_file_note_returning_from(
+            ws->current_path, ws->returning_from, sizeof(ws->returning_from)
+        );
         dialog__pick_file_go_up(ws->current_path);
     }
     (void)initial_list_count;
@@ -1368,14 +1382,13 @@ static bruce_result_t dialog__gui_pick_file_run(
         (void)items_per_page;
 
         bruce_dialog_choice_t *choices = memory__calloc(count + 1, sizeof(bruce_dialog_choice_t));
-        if (choices == NULL) {
-            memory__free(entries);
-            return BRUCE_ERR_NO_MEMORY;
-        }
+        char (*size_texts)[16] = memory__calloc(count + 1, sizeof(*size_texts));
         const char **values = memory__malloc((count + 1) * sizeof(const char *));
-        if (values == NULL) {
+        if (choices == NULL || size_texts == NULL || values == NULL) {
             memory__free(entries);
             memory__free(choices);
+            memory__free(size_texts);
+            memory__free(values);
             return BRUCE_ERR_NO_MEMORY;
         }
 
@@ -1397,8 +1410,14 @@ static bruce_result_t dialog__gui_pick_file_run(
             choices[choice_count].label = entries[i].name;
             choices[choice_count].value = entries[i].name;
             choices[choice_count].icon_name = entries[i].type == BRUCE_STORAGE_ENTRY_DIRECTORY
-                                                   ? "folder"
-                                                   : app_runner__icon_for_path(entries[i].name);
+                                                  ? "folder"
+                                                  : app_runner__icon_for_path(entries[i].name);
+            if (entries[i].type == BRUCE_STORAGE_ENTRY_FILE) {
+                dialog__pick_file_format_bytes(
+                    entries[i].size, size_texts[choice_count], sizeof(size_texts[choice_count])
+                );
+                choices[choice_count].right_text = size_texts[choice_count];
+            }
             choice_count++;
         }
 
@@ -1436,6 +1455,7 @@ static bruce_result_t dialog__gui_pick_file_run(
 
         const char *picked = values[out_selected];
         memory__free(values);
+        memory__free(size_texts);
         memory__free(choices);
 
         if (choice_result != BRUCE_OK) {
@@ -1446,7 +1466,9 @@ static bruce_result_t dialog__gui_pick_file_run(
             /* Genuine Back/Esc: step up a directory rather than exiting the
              * picker outright, unless already at the root. */
             if (strcmp(ws->current_path, "/") != 0) {
-                dialog__pick_file_note_returning_from(ws->current_path, ws->returning_from, sizeof(ws->returning_from));
+                dialog__pick_file_note_returning_from(
+                    ws->current_path, ws->returning_from, sizeof(ws->returning_from)
+                );
                 dialog__pick_file_go_up(ws->current_path);
                 continue;
             }
@@ -1454,7 +1476,9 @@ static bruce_result_t dialog__gui_pick_file_run(
         }
 
         if (strcmp(picked, "..") == 0) {
-            dialog__pick_file_note_returning_from(ws->current_path, ws->returning_from, sizeof(ws->returning_from));
+            dialog__pick_file_note_returning_from(
+                ws->current_path, ws->returning_from, sizeof(ws->returning_from)
+            );
             dialog__pick_file_go_up(ws->current_path);
             memory__free(entries);
             continue;
@@ -1626,7 +1650,10 @@ static bruce_result_t dialog__viewer_draw(dialog__viewer_t *viewer, bool gui) {
             display__set_cursor(DIALOG__MARGIN, y);
             int col = 0;
             while (*p != '\0' && *p != '\n' && col < max_chars) {
-                size_t bytes = (unsigned char)*p < 0x80 ? 1 : ((unsigned char)*p >= 0xF0 ? 4 : (unsigned char)*p >= 0xE0 ? 3 : 2);
+                size_t bytes = (unsigned char)*p < 0x80 ? 1
+                                                        : ((unsigned char)*p >= 0xF0   ? 4
+                                                           : (unsigned char)*p >= 0xE0 ? 3
+                                                                                       : 2);
                 char ch[5] = {0};
                 memcpy(ch, p, bytes);
                 display__print(ch);
@@ -1759,7 +1786,9 @@ bruce_result_t dialog__pick_file_ex(
     }
 
     if (gui) {
-        return dialog__gui_pick_file(initial_path, extension_filter, out_path, out_path_size, title, render_params);
+        return dialog__gui_pick_file(
+            initial_path, extension_filter, out_path, out_path_size, title, render_params
+        );
     }
     return dialog__term_pick_file(initial_path, extension_filter, out_path, out_path_size);
 }
