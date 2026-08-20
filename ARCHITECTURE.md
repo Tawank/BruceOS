@@ -957,11 +957,13 @@ or allocation in the scrolling path. Up/Down navigate directly among visible
 links, treating a wrapped multi-line
 link as one target; when no target is visible in that direction they scroll
 one rendered row, and only scroll within a selected link to reveal a clipped
-part. Left/Back and Right/Select
-navigate history backward and forward (`modules/browser/browser_history.c`,
-a plain array with a current-position cursor), Space/`b` page-scroll, `g`
-opens a `dialog__text_input()` URL bar, and Home returns to the configured
-home page (`bruce.computer`).
+part. Left/`b` and Right/Space page-scroll; Backspace and Delete navigate
+history backward and forward (`modules/browser/browser_history.c`, a plain
+array with a current-position cursor), doing nothing at the respective history
+edge. Escape always closes the browser, `[`/`]` jump to the top/end of the
+page, `i` shows the complete browser key reference, `g` opens a
+`dialog__text_input()` URL bar, and Home returns to the configured home page
+(`bruce.computer`).
 
 The transient notification banner is not special-cased in Core at all: Core
 only knows about the generic overlay primitive above. `notification__push()`

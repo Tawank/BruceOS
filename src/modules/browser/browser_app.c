@@ -101,9 +101,8 @@ static void browser_app__navigate(browser_app_state_t *state, const char *raw_ur
     (void)browser_render__draw_loading(state->doc, state->history, 0);
     int status_code = 0;
     browser_app_progress_t progress = {.state = state, .last_percent = 0};
-    bruce_result_t result = browser_page__fetch(
-        url, state->doc, &status_code, browser_app__show_progress, &progress
-    );
+    bruce_result_t result =
+        browser_page__fetch(url, state->doc, &status_code, browser_app__show_progress, &progress);
 
     if (result != BRUCE_OK) {
         browser_document__reset(state->doc);
@@ -137,8 +136,12 @@ static void browser_app__load_image(browser_app_state_t *state) {
     if (browser_image_cache__peek(state->image_cache, url, &bitmap) == BRUCE_ERR_NOT_FOUND) {
         (void)notification__push("Loading image...", 30000);
         (void)browser_image_cache__get(
-            state->image_cache, url, (uint16_t)browser_render__content_width(), BROWSER_IMAGE_BOX_HEIGHT,
-            BRUCE_COLOR_BLACK, &bitmap
+            state->image_cache,
+            url,
+            (uint16_t)browser_render__content_width(),
+            BROWSER_IMAGE_BOX_HEIGHT,
+            BRUCE_COLOR_BLACK,
+            &bitmap
         );
         (void)notification__dismiss();
     }
@@ -169,9 +172,7 @@ static bool browser_app__scroll_step(browser_app_state_t *state, int direction) 
     int old_scroll = state->view.scroll_y;
     int max_scroll = browser_render__max_scroll(state->doc, state->view.font_scale);
     browser_render_row_t row;
-    if (browser_render__find_row(
-            state->doc, state->view.scroll_y, direction, state->view.font_scale, &row
-        )) {
+    if (browser_render__find_row(state->doc, state->view.scroll_y, direction, state->view.font_scale, &row)) {
         state->view.scroll_y = row.y;
     }
     if (state->view.scroll_y < 0) state->view.scroll_y = 0;
@@ -223,9 +224,9 @@ static void browser_app__move_line(browser_app_state_t *state, int direction) {
     int view_bottom = view_top + browser_render__view_height();
 
     browser_render_link_bounds_t current;
-    bool has_current = state->view.selected_link >= 0 && browser_render__link_bounds(
-        state->doc, state->view.selected_link, state->view.font_scale, &current
-    );
+    bool has_current =
+        state->view.selected_link >= 0 &&
+        browser_render__link_bounds(state->doc, state->view.selected_link, state->view.font_scale, &current);
     if (has_current && (current.bottom <= view_top || current.top >= view_bottom)) {
         state->view.selected_link = -1;
         has_current = false;
@@ -241,8 +242,9 @@ static void browser_app__move_line(browser_app_state_t *state, int direction) {
         has_image = false;
     }
     int current_top = has_current ? current.top : (has_image ? current_image.y : state->view.row_y);
-    int current_bottom = has_current ? current.bottom
-                                     : (has_image ? current_image.y + current_image.line_height : state->view.row_y);
+    int current_bottom = has_current
+                             ? current.bottom
+                             : (has_image ? current_image.y + current_image.line_height : state->view.row_y);
     if (has_image && (current_bottom <= view_top || current_top >= view_bottom)) {
         state->view.selected_image = -1;
         state->view.row_y = -1;
@@ -261,14 +263,17 @@ static void browser_app__move_line(browser_app_state_t *state, int direction) {
             return;
         }
         browser_render_link_bounds_t adjacent;
-        bool has_adjacent = has_current
-                                ? browser_render__adjacent_link(
-                                      state->doc, current.link_index, direction, state->view.font_scale, &adjacent
-                                  )
-                                : browser_render__link_from_edge(
-                                      state->doc, direction > 0 ? current_bottom : current_top, direction,
-                                      state->view.font_scale, &adjacent
-                                  );
+        bool has_adjacent =
+            has_current ? browser_render__adjacent_link(
+                              state->doc, current.link_index, direction, state->view.font_scale, &adjacent
+                          )
+                        : browser_render__link_from_edge(
+                              state->doc,
+                              direction > 0 ? current_bottom : current_top,
+                              direction,
+                              state->view.font_scale,
+                              &adjacent
+                          );
         browser_render_row_t image;
         bool has_next_image = browser_app__find_image(
             state, direction > 0 ? current_bottom - 1 : current_top, direction, &image
@@ -278,13 +283,12 @@ static void browser_app__move_line(browser_app_state_t *state, int direction) {
             has_adjacent = false;
         }
         if (has_next_image &&
-            !browser_app__range_is_visible(
-                image.y, image.y + image.line_height, view_top, view_bottom
-            )) {
+            !browser_app__range_is_visible(image.y, image.y + image.line_height, view_top, view_bottom)) {
             has_next_image = false;
         }
-        bool image_first = has_next_image &&
-                           (!has_adjacent || (direction > 0 ? image.y < adjacent.top : image.y > adjacent.top));
+        bool image_first =
+            has_next_image &&
+            (!has_adjacent || (direction > 0 ? image.y < adjacent.top : image.y > adjacent.top));
         if (image_first) {
             browser_app__select_image(state, &image);
             return;
@@ -299,9 +303,8 @@ static void browser_app__move_line(browser_app_state_t *state, int direction) {
 
     browser_render_link_bounds_t candidate;
     int edge_y = direction > 0 ? view_top : view_bottom;
-    bool has_candidate = browser_render__link_from_edge(
-        state->doc, edge_y, direction, state->view.font_scale, &candidate
-    );
+    bool has_candidate =
+        browser_render__link_from_edge(state->doc, edge_y, direction, state->view.font_scale, &candidate);
     browser_render_row_t image;
     bool has_image_candidate = browser_app__find_image(state, edge_y, direction, &image);
     if (has_candidate &&
@@ -333,6 +336,13 @@ static void browser_app__page_scroll(browser_app_state_t *state, int direction) 
     if (state->view.scroll_y > max_scroll) state->view.scroll_y = max_scroll;
 }
 
+static void browser_app__scroll_to_edge(browser_app_state_t *state, bool end) {
+    state->view.scroll_y = end ? browser_render__max_scroll(state->doc, state->view.font_scale) : 0;
+    state->view.selected_link = -1;
+    state->view.selected_image = -1;
+    state->view.row_y = -1;
+}
+
 /* +/- resizes body/heading text on the fly (see BROWSER_FONT_SCALE_MIN/MAX).
  * Re-flowing at a new scale moves every row's y, so an exact scroll_y or
  * row_y/selected_link carried over from the old layout would land on the
@@ -349,7 +359,8 @@ static void browser_app__adjust_font_scale(browser_app_state_t *state, int delta
     int old_height = browser_render__content_height(state->doc, old_scale);
     int new_height = browser_render__content_height(state->doc, new_scale);
     state->view.font_scale = new_scale;
-    state->view.scroll_y = old_height > 0 ? (int)((int64_t)state->view.scroll_y * new_height / old_height) : 0;
+    state->view.scroll_y =
+        old_height > 0 ? (int)((int64_t)state->view.scroll_y * new_height / old_height) : 0;
 
     int max_scroll = browser_render__max_scroll(state->doc, new_scale);
     if (state->view.scroll_y > max_scroll) state->view.scroll_y = max_scroll;
@@ -367,40 +378,66 @@ static void browser_app__edit_url(browser_app_state_t *state) {
     browser_app__navigate(state, buffer, true);
 }
 
+static void browser_app__show_keybindings(void) {
+    static const char bindings[] = "Up/Down  Select or scroll\n"
+                                   "Left/b  Page up\n"
+                                   "Right/Space  Page down\n"
+                                   "Enter  Open link/image\n"
+                                   "Backspace/Delete  Back/forward\n"
+                                   "Esc  Close browser\n"
+                                   "[ / ]  Top/end    Home  Homepage\n"
+                                   "g  URL    r  Reload\n"
+                                   "- / = / +  Text size    p  Debug\n"
+                                   "i  Show these keys";
+    (void)dialog__message(BRUCE_DIALOG_INFO, "Browser keys", bindings);
+}
+
 static bool browser_app__handle_event(browser_app_state_t *state, const bruce_input_event_t *event) {
     if (event->action != BRUCE_INPUT_PRESS) return true;
+    bool semantic = event->type != BRUCE_INPUT_KEY || event->value != event->code;
 
-    if (event->code == BRUCE_INPUT_CODE_LEFT || event->code == BRUCE_INPUT_CODE_BACK) {
-        const char *url = browser_history__back(state->history);
-        if (url == NULL) return false; /* No history left: exit the app, like Back everywhere else. */
-        browser_app__navigate(state, url, false);
-    } else if (event->code == BRUCE_INPUT_CODE_RIGHT || event->code == BRUCE_INPUT_CODE_SELECT) {
-        if (state->view.selected_link >= 0) {
-            const char *url = state->doc->links[state->view.selected_link].url;
-            if (!browser_app__scroll_to_fragment(state, url)) browser_app__navigate(state, url, true);
-        } else if (state->view.selected_image >= 0) {
-            browser_app__load_image(state);
+    switch (event->code) {
+        case BRUCE_INPUT_CODE_BACK:
+            if (semantic) return false;
+            break;
+        case 0x1b: return false;
+        case '\b': {
+            const char *url = browser_history__back(state->history);
+            if (url != NULL) browser_app__navigate(state, url, false);
+            break;
         }
-    } else if (event->code == BRUCE_INPUT_CODE_UP) {
-        browser_app__move_line(state, -1);
-    } else if (event->code == BRUCE_INPUT_CODE_DOWN) {
-        browser_app__move_line(state, 1);
-    } else if (event->code == ' ' || event->code == BRUCE_INPUT_CODE_NEXT) {
-        browser_app__page_scroll(state, 1);
-    } else if (event->code == 'b' || event->code == BRUCE_INPUT_CODE_PREV) {
-        browser_app__page_scroll(state, -1);
-    } else if (event->code == '-') {
-        browser_app__adjust_font_scale(state, -1);
-    } else if (event->code == '=') {
-        browser_app__adjust_font_scale(state, 1);
-    } else if (event->code == 'p') {
-        browser_debug__dump(state->doc, state->view.font_scale);
-    } else if (event->code == 'g') {
-        browser_app__edit_url(state);
-    } else if (event->code == 'r') {
-        browser_app__navigate(state, state->doc->url, false);
-    } else if (event->code == BRUCE_INPUT_CODE_HOME) {
-        browser_app__navigate(state, BROWSER_HOME_URL, true);
+        case BRUCE_INPUT_CODE_DELETE: {
+            const char *url = browser_history__forward(state->history);
+            if (url != NULL) browser_app__navigate(state, url, false);
+            break;
+        }
+        case BRUCE_INPUT_CODE_SELECT:
+            if (state->view.selected_link >= 0) {
+                const char *url = state->doc->links[state->view.selected_link].url;
+                if (!browser_app__scroll_to_fragment(state, url)) browser_app__navigate(state, url, true);
+            } else if (state->view.selected_image >= 0) {
+                browser_app__load_image(state);
+            }
+            break;
+        case BRUCE_INPUT_CODE_UP: browser_app__move_line(state, -1); break;
+        case BRUCE_INPUT_CODE_DOWN: browser_app__move_line(state, 1); break;
+        case BRUCE_INPUT_CODE_RIGHT: browser_app__page_scroll(state, 1); break;
+        case ' ':
+        case BRUCE_INPUT_CODE_NEXT: browser_app__page_scroll(state, 1); break;
+        case BRUCE_INPUT_CODE_LEFT: browser_app__page_scroll(state, -1); break;
+        case 'b':
+        case BRUCE_INPUT_CODE_PREV: browser_app__page_scroll(state, -1); break;
+        case '[': browser_app__scroll_to_edge(state, false); break;
+        case ']': browser_app__scroll_to_edge(state, true); break;
+        case '-': browser_app__adjust_font_scale(state, -1); break;
+        case '=':
+        case '+': browser_app__adjust_font_scale(state, 1); break;
+        case 'i': browser_app__show_keybindings(); break;
+        case 'p': browser_debug__dump(state->doc, state->view.font_scale); break;
+        case 'g': browser_app__edit_url(state); break;
+        case 'r': browser_app__navigate(state, state->doc->url, false); break;
+        case BRUCE_INPUT_CODE_HOME: browser_app__navigate(state, BROWSER_HOME_URL, true); break;
+        default: break;
     }
     return true;
 }
@@ -413,7 +450,8 @@ int browser_app_main(int argc, char **argv) {
     if (!ap_parse(parser, argc, argv)) {
         ap_status_t status = ap_get_status(parser);
         ap_free(parser);
-        return status == AP_STATUS_HELP || status == AP_STATUS_VERSION ? BRUCE_OK : BRUCE_ERR_INVALID_ARGUMENT;
+        return status == AP_STATUS_HELP || status == AP_STATUS_VERSION ? BRUCE_OK
+                                                                       : BRUCE_ERR_INVALID_ARGUMENT;
     }
     char start_url[BROWSER_URL_MAX];
     const char *arg_url = ap_get_arg(parser, "url");
