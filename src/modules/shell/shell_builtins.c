@@ -11,9 +11,10 @@
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
 #include "shell_parser.h"
+#include "shell_executor.h"
 
 static const char *const s_shell_builtin_names[] = {
-    "echo", "true", "false", "cd", "set", "unset", "export", "clear", "reset", "exit"
+    "echo", "true", "false", "cd", "set", "unset", "export", "clear", "reset", "help", "exit"
 };
 
 static int shell_builtins__find_index(const shell_state_t *state, const char *name) {
@@ -264,6 +265,13 @@ int shell_builtins__run(shell_state_t *state, int argc, char **argv) {
         }
         return 0;
     }
+    if (strcmp(argv[0], "help") == 0) {
+        if (argc != 1) {
+            stdio__printf("shell: help takes no arguments; use man <command>\n");
+            return 2;
+        }
+        return shell_executor__page_help();
+    }
     if (strcmp(argv[0], "clear") == 0) {
         if (argc != 1) {
             stdio__printf("shell: clear takes no arguments\n");
@@ -310,7 +318,7 @@ int shell_builtins__run(shell_state_t *state, int argc, char **argv) {
         state->exit_status = status;
         return status;
     }
-    stdio__printf("Builtins: echo true false cd set unset export clear exit\n");
+    stdio__printf("Builtins: echo true false cd set unset export clear reset help exit\n");
     stdio__printf("Operators: ; && || and producer | text. Redirection is unsupported.\n");
     return 0;
 }

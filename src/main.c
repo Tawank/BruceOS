@@ -41,8 +41,8 @@
 #include "modules/system_menu/system_menu_app.h"
 #include "modules/tcp/tcp_app.h"
 #include "modules/text/text_app.h"
-#include "modules/utils/help/help_app.h"
 #include "modules/utils/launcher/launcher_app.h"
+#include "modules/utils/man/man_app.h"
 #include "modules/utils/notify/notify_app.h"
 #include "modules/utils/process/process_app.h"
 #include "modules/utils/serial_commands/serial_commands_app.h"
@@ -83,7 +83,6 @@ void app_runner__register_defaults(void) {
     app_runner__register("elf", elf_loader__app_main, 0);
     app_runner__register("filemanager", filemanager_app_main, 0);
     app_runner__register("free", bnu_free_app_main, 0);
-    app_runner__register("help", help_app_main, 0);
     app_runner__register("image", image_app_main, 0);
     app_runner__register("image_viewer", image_viewer_app_main, 8192);
     app_runner__register("input", input_app_main, INPUT_STACK_BYTES);
@@ -93,6 +92,7 @@ void app_runner__register_defaults(void) {
     app_runner__register("less", bnu_less_app_main, 0);
     app_runner__register("ls", bnu_ls_app_main, 0);
     app_runner__register("lsblk", bnu_lsblk_app_main, 0);
+    app_runner__register("man", man_app_main, 0);
     app_runner__register("menu", system_menu_app_main, MENU_STACK_BYTES);
     app_runner__register("mkdir", bnu_mkdir_app_main, 0);
     app_runner__register("mount", bnu_mount_app_main, 0);

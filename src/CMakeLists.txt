@@ -161,7 +161,7 @@ idf_component_register(SRCS
                      "modules/tcp/tcp_app.c"
                      "modules/text/text_app.c"
                      "modules/utils/launcher/launcher_app.c"
-                     "modules/utils/help/help_app.c"
+                     "modules/utils/man/man_app.c"
                      "modules/utils/serial_commands/serial_commands_app.c"
                      "modules/utils/terminal/terminal_app.c"
                      "modules/utils/terminal/terminal_ansi.c"
@@ -469,10 +469,10 @@ target_include_directories(bruce_sdk_builtin_utils_launcher_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/utils/launcher")
 
-add_library(bruce_sdk_builtin_utils_help_check OBJECT "modules/utils/help/help_app.c")
-target_include_directories(bruce_sdk_builtin_utils_help_check PRIVATE
+add_library(bruce_sdk_builtin_utils_man_check OBJECT "modules/utils/man/man_app.c")
+target_include_directories(bruce_sdk_builtin_utils_man_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
-                           "${CMAKE_CURRENT_LIST_DIR}/modules/utils/help")
+                           "${CMAKE_CURRENT_LIST_DIR}/modules/utils/man")
 
 add_library(bruce_sdk_builtin_utils_terminal_check OBJECT
             "modules/utils/terminal/terminal_app.c"
@@ -591,7 +591,7 @@ set(BRUCE_ARGS_SDK_CHECK_TARGETS
     bruce_sdk_builtin_browser_check
     bruce_sdk_builtin_image_loader_check
     bruce_sdk_builtin_text_check
-    bruce_sdk_builtin_utils_help_check
+    bruce_sdk_builtin_utils_man_check
     bruce_sdk_builtin_utils_process_check
     bruce_sdk_builtin_utils_terminal_check
     bruce_sdk_builtin_shell_check

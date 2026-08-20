@@ -446,6 +446,59 @@ static int shell_executor__pipe_to_external(
     return status;
 }
 
+static bool shell_executor__buffer_append_text(shell_executor__buffer_t *buffer, const char *text) {
+    return shell_executor__buffer_append(buffer, text, strlen(text));
+}
+
+static int shell_executor__page_buffer(shell_executor__buffer_t *buffer) {
+    char *less_argv[] = {"less", NULL};
+    int status = shell_executor__pipe_write(1, less_argv, buffer);
+    shell_executor__buffer_free(buffer);
+    return status;
+}
+
+int shell_executor__page_help(void) {
+    shell_executor__buffer_t buffer = {0};
+    static const char introduction[] = "Bruce shell\n"
+                                       "\n"
+                                       "Usage:\n"
+                                       "  command [argument ...]\n"
+                                       "  NAME=value command\n"
+                                       "  producer | consumer\n"
+                                       "\n"
+                                       "Operators:\n"
+                                       "  ;    run commands in sequence\n"
+                                       "  &&   run the next command after success\n"
+                                       "  ||   run the next command after failure\n"
+                                       "  |    pipe one external producer to one external consumer\n"
+                                       "\n"
+                                       "Redirection and chained pipes are not supported.\n"
+                                       "\n"
+                                       "Shell built-ins:\n";
+    if (!shell_executor__buffer_append_text(&buffer, introduction)) goto out_of_memory;
+
+    for (size_t i = 0; i < shell_builtins__count(); ++i) {
+        const char *name = shell_builtins__name(i);
+        if (name != NULL && (!shell_executor__buffer_append_text(&buffer, "  ") ||
+                             !shell_executor__buffer_append_text(&buffer, name) ||
+                             !shell_executor__buffer_append_text(&buffer, "\n"))) {
+            goto out_of_memory;
+        }
+    }
+
+    if (!shell_executor__buffer_append_text(&buffer, "\nList of external commands run: man\n"))
+        goto out_of_memory;
+    if (!shell_executor__buffer_append_text(&buffer, "Use man <command> for detailed command help.\n")) {
+        goto out_of_memory;
+    }
+    return shell_executor__page_buffer(&buffer);
+
+out_of_memory:
+    shell_executor__buffer_free(&buffer);
+    stdio__printf("shell: help: out of memory\n");
+    return 1;
+}
+
 /* Consumes leading NAME=value assignment words, then dispatches the
  * remainder (if any) to a builtin or an external process. `words` is
  * borrowed; the caller owns and frees it. */

@@ -158,9 +158,10 @@ retain their loader-defined argument conventions.
 
 Registered built-in command names can be enumerated in registration order with
 `app_runner__command_count()` and `app_runner__command_name()`. The returned
-names remain owned by AppRunner. The built-in `help` utility uses this registry:
-`help` prints all registered commands, while `help <command>` starts the named
-command with `--help` and waits for it to finish.
+names remain owned by AppRunner. The registered `man` utility uses this registry:
+bare `man` lists all registered commands, while `man <command>` starts the named
+command with `--help`. On an interactive terminal both forms feed that output
+through `less`; as a pipe producer, `man` emits the same content directly.
 
 AppRunner owns only the shell-style conversion from command text to `argc` and
 `argv`. Built-in modules and ELF apps use the public `core_sdk/args.h` parser
@@ -591,7 +592,8 @@ requested as part of the pipeline itself. Its bounded local variables persist
 across interactive input and script lines. `export NAME=value` or `export NAME` publishes a value to the
 shell process environment, and `NAME=value command` applies only to that
 child. Builtins are `echo`, `true`, `false`, `cd`, `set`, `unset`, `export`,
-`clear`, `exit`, and `help`; other names and absolute/`./` paths launch
+`clear`, `reset`, `exit`, and `help`; bare `help` opens the shell syntax,
+built-in, and registered-command index in `less`; other names and absolute/`./` paths launch
 through AppRunner in foreground mode and are synchronously reaped. `BG=1`
 changes the process state but does not turn synchronous shell execution into job control.
 The `.sh` loader invokes this built-in for absolute scripts. Command

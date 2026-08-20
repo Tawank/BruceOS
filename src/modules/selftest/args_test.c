@@ -16,7 +16,7 @@
 #include "modules/loaders/js/js_loader_app.h"
 #include "modules/nrf24/nrf24_app.h"
 #include "modules/tcp/tcp_app.h"
-#include "modules/utils/help/help_app.h"
+#include "modules/utils/man/man_app.h"
 #include "modules/utils/notify/notify_app.h"
 #include "modules/utils/process/process_app.h"
 #include "modules/utils/terminal/terminal_app.h"
@@ -97,7 +97,7 @@ static bool selftest__args_module_help(void) {
         js_loader__app_main,
         nrf24_app_main,
         notify_app_main,
-        help_app_main,
+        man_app_main,
         process_app_main,
         tcp_app_main,
         terminal_app_main,
@@ -123,8 +123,8 @@ static bool selftest__args_help_integration(void) {
     if (registered != BRUCE_OK && registered != BRUCE_ERR_ALREADY_EXISTS) return false;
 
     s_help_target_received_help = false;
-    char *argv[] = {"help", "selftest_help_target"};
-    return help_app_main(2, argv) == BRUCE_OK && s_help_target_received_help;
+    char *argv[] = {"man", "selftest_help_target"};
+    return man_app_main(2, argv) == BRUCE_OK && s_help_target_received_help;
 }
 
 static bool selftest__args_wifi_integration(void) {
