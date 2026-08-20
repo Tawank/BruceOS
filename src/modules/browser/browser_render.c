@@ -5,13 +5,32 @@
 #include <string.h>
 
 #include "browser_layout.h"
+#include "core_sdk/config.h"
 #include "core_sdk/display.h"
 
 #define BROWSER_CONTENT_MARGIN 2
 #define BROWSER_CHROME_PADDING 5
 #define BROWSER_WORD_BUF_MAX 64
-#define BROWSER_CHROME_COLOR 0x324B   /* Blue-gray. */
-#define BROWSER_PROGRESS_COLOR 0x24BE /* Target blue. */
+
+typedef struct {
+    bruce_display_color_t primary;
+    bruce_display_color_t secondary;
+    bruce_display_color_t background;
+    bruce_display_color_t surface;
+    bruce_display_color_t text;
+    bruce_display_color_t text_muted;
+    bruce_display_color_t border;
+} browser_render__theme_t;
+
+static void browser_render__get_theme(browser_render__theme_t *theme) {
+    theme->primary = config__get_color_primary();
+    theme->secondary = config__get_color_secondary();
+    theme->background = config__get_color_background();
+    theme->surface = config__get_color_surface();
+    theme->text = config__get_color_text();
+    theme->text_muted = config__get_color_text_muted();
+    theme->border = config__get_color_border();
+}
 
 static void browser_render__metrics(int16_t *char_width, int16_t *char_height) {
     if (display__get_font_metrics(char_width, char_height) != BRUCE_OK || *char_width <= 0 || *char_height <= 0) {
@@ -236,17 +255,18 @@ bool browser_render__find_row(
 typedef struct {
     const browser_document_t *doc;
     const browser_view_state_t *view;
+    const browser_render__theme_t *theme;
     browser_image_cache_t *image_cache;
     int y_top;
     int view_height;
 } browser_render__draw_context_t;
 
 static void browser_render__draw_placeholder(
-    int x, int y, int w, int h, const char *text, bool selected
+    int x, int y, int w, int h, const char *text, bool selected, const browser_render__theme_t *theme
 ) {
-    (void)display__fill_rect(x, y, w, h, BRUCE_COLOR_DARKGREY);
-    if (selected) (void)display__draw_rect(x, y, w, h, BRUCE_COLOR_CYAN);
-    (void)display__set_text_color(BRUCE_COLOR_LIGHTGREY);
+    (void)display__fill_rect(x, y, w, h, theme->surface);
+    (void)display__draw_rect(x, y, w, h, selected ? theme->primary : theme->border);
+    (void)display__set_text_color(theme->text_muted);
     (void)display__set_text_size(1);
 
     int16_t char_width, char_height;
@@ -277,7 +297,7 @@ static void browser_render__draw_image_token(
         );
         if (result == BRUCE_OK) {
             if (selected) {
-                (void)display__draw_rect(box_x, screen_y, box_w, token->line_height, BRUCE_COLOR_CYAN);
+                (void)display__draw_rect(box_x, screen_y, box_w, token->line_height, ctx->theme->primary);
             }
             return;
         }
@@ -292,7 +312,7 @@ static void browser_render__draw_image_token(
     } else {
         snprintf(text, sizeof(text), "%s", alt);
     }
-    browser_render__draw_placeholder(box_x, screen_y, box_w, token->line_height, text, selected);
+    browser_render__draw_placeholder(box_x, screen_y, box_w, token->line_height, text, selected, ctx->theme);
 }
 
 static void browser_render__draw_text_token(
@@ -305,10 +325,10 @@ static void browser_render__draw_text_token(
 
     int scale = browser_layout__heading_scale(token->heading_level, ctx->view->font_scale);
     bool selected = token->link_index >= 0 && token->link_index == ctx->view->selected_link;
-    bruce_display_color_t fg = BRUCE_COLOR_WHITE;
-    if (token->heading_level > 0) fg = BRUCE_COLOR_YELLOW;
-    else if (token->link_index >= 0) fg = BRUCE_COLOR_CYAN;
-    if (selected) fg = BRUCE_COLOR_BLACK;
+    bruce_display_color_t fg = ctx->theme->text;
+    if (token->heading_level > 0) fg = ctx->theme->secondary;
+    else if (token->link_index >= 0) fg = ctx->theme->primary;
+    if (selected) fg = ctx->theme->background;
 
     int x = BROWSER_CONTENT_MARGIN + token->x;
     if (selected) {
@@ -316,7 +336,7 @@ static void browser_render__draw_text_token(
         browser_render__metrics(&char_width, &char_height);
         (void)display__fill_rect(
             (int16_t)x, (int16_t)screen_y, (int16_t)((int)len * char_width * scale), (int16_t)(char_height * scale),
-            BRUCE_COLOR_CYAN
+            ctx->theme->primary
         );
     }
     (void)display__set_text_size((uint8_t)scale);
@@ -335,16 +355,17 @@ static void browser_render__token_visitor(const browser_layout_token_t *token, v
 }
 
 static void browser_render__draw_chrome(
-    const browser_document_t *doc, const browser_history_t *history, int progress
+    const browser_document_t *doc, const browser_history_t *history, int progress,
+    const browser_render__theme_t *theme
 ) {
     int width = display__width();
     int height = browser_render__chrome_height();
-    (void)display__fill_rect(0, 0, width, height, BROWSER_CHROME_COLOR);
+    (void)display__fill_rect(0, 0, width, height, theme->surface);
     if (progress >= 0) {
         if (progress > 100) progress = 100;
         int progress_width = width * progress / 100;
         if (progress_width > 0)
-            (void)display__fill_rect(0, 0, progress_width, height, BROWSER_PROGRESS_COLOR);
+            (void)display__fill_rect(0, 0, progress_width, height, theme->primary);
     }
 
     int16_t char_width, char_height;
@@ -354,11 +375,11 @@ static void browser_render__draw_chrome(
     (void)display__set_text_size(1);
     (void)display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
     (void)display__set_text_color(
-        browser_history__can_go_back(history) ? BRUCE_COLOR_WHITE : BRUCE_COLOR_DARKGREY
+        browser_history__can_go_back(history) ? theme->text : theme->text_muted
     );
     (void)display__draw_string("<", BROWSER_CONTENT_MARGIN, text_y);
     (void)display__set_text_color(
-        browser_history__can_go_forward(history) ? BRUCE_COLOR_WHITE : BRUCE_COLOR_DARKGREY
+        browser_history__can_go_forward(history) ? theme->text : theme->text_muted
     );
     (void)display__draw_string(">", BROWSER_CONTENT_MARGIN + char_width + 4, text_y);
 
@@ -376,7 +397,7 @@ static void browser_render__draw_chrome(
     size_t copy_len = url_len < cap ? url_len : cap;
     memcpy(shown, doc->url, copy_len);
     shown[copy_len] = '\0';
-    (void)display__set_text_color(BRUCE_COLOR_WHITE);
+    (void)display__set_text_color(theme->text);
     (void)display__draw_string(shown, url_x, text_y);
 }
 
@@ -386,13 +407,16 @@ bruce_result_t browser_render__draw(
 ) {
     bruce_result_t result = display__begin_frame();
     if (result != BRUCE_OK) return result;
-    (void)display__fill_screen(BRUCE_COLOR_BLACK);
+    browser_render__theme_t theme;
+    browser_render__get_theme(&theme);
+    (void)display__fill_screen(theme.background);
 
     int16_t char_width, char_height;
     browser_render__metrics(&char_width, &char_height);
     browser_render__draw_context_t ctx = {
         .doc = doc,
         .view = view,
+        .theme = &theme,
         .image_cache = image_cache,
         .y_top = browser_render__chrome_height(),
         .view_height = browser_render__view_height(),
@@ -410,7 +434,7 @@ bruce_result_t browser_render__draw(
      * boundary -- e.g. after a page-scroll press) still draws in full, and
      * without this the part of it above y_top would bleed over the chrome
      * bar instead of being covered by it. */
-    browser_render__draw_chrome(doc, history, -1);
+    browser_render__draw_chrome(doc, history, -1, &theme);
 
     return display__present();
 }
@@ -420,7 +444,9 @@ bruce_result_t browser_render__draw_loading(
 ) {
     bruce_result_t result = display__begin_frame();
     if (result != BRUCE_OK) return result;
-    (void)display__fill_screen(BRUCE_COLOR_BLACK);
-    browser_render__draw_chrome(doc, history, progress < 0 ? 0 : progress);
+    browser_render__theme_t theme;
+    browser_render__get_theme(&theme);
+    (void)display__fill_screen(theme.background);
+    browser_render__draw_chrome(doc, history, progress < 0 ? 0 : progress, &theme);
     return display__present();
 }
