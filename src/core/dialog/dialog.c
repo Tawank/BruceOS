@@ -207,6 +207,10 @@ static bruce_result_t dialog__term_pick_file(
 #define DIALOG__LIST_TEXT_SIZE_WIDE 2
 #define DIALOG__WINDOW_RADIUS 5
 #define DIALOG__WINDOW_INSET 4
+#define DIALOG__OVERFLOW_MARKER ">"
+#define DIALOG__MARQUEE_INITIAL_DELAY_MS 700u
+#define DIALOG__MARQUEE_STEP_MS 180u
+#define DIALOG__MARQUEE_END_DELAY_MS 700u
 /* Vertical breathing room dialog__gui_pick_file() requests (via
  * render_params->list_gap) between its title bar and the first list row -
  * without it, a selected first row's fill paints flush against the title
@@ -274,62 +278,89 @@ static void dialog__gui_footer(const char *hint) {
     display__print(hint != NULL ? hint : "");
 }
 
-/* The display text API wraps at the viewport edge. Limit a row label before
- * drawing it so optional icons and right-aligned text never overlap it. */
-static void dialog__gui_draw_row_label(const char *label, int x, int y, int max_width, int text_size) {
+static size_t dialog__utf8_bytes(const char *text, size_t remaining) {
+    unsigned char c = (unsigned char)text[0];
+    size_t bytes = c < 0x80 ? 1 : (c >= 0xF0 ? 4 : c >= 0xE0 ? 3 : 2);
+    return bytes <= remaining ? bytes : 1;
+}
+
+static size_t dialog__utf8_columns(const char *text) {
+    size_t length = strlen(text);
+    size_t columns = 0;
+    for (size_t offset = 0; offset < length; columns++) {
+        offset += dialog__utf8_bytes(text + offset, length - offset);
+    }
+    return columns;
+}
+
+static size_t dialog__utf8_offset(const char *text, size_t wanted_column) {
+    size_t length = strlen(text);
+    size_t offset = 0;
+    for (size_t column = 0; offset < length && column < wanted_column; column++) {
+        offset += dialog__utf8_bytes(text + offset, length - offset);
+    }
+    return offset;
+}
+
+static void dialog__copy_utf8_columns(
+    char *output, size_t capacity, const char *text, size_t first_column, size_t column_count
+) {
+    size_t text_length = strlen(text);
+    size_t start = dialog__utf8_offset(text, first_column);
+    size_t end = start;
+    for (size_t column = 0; end < text_length && column < column_count; column++) {
+        size_t bytes = dialog__utf8_bytes(text + end, text_length - end);
+        if (end - start + bytes >= capacity) break;
+        end += bytes;
+    }
+    size_t length = end - start;
+    memcpy(output, text + start, length);
+    output[length] = 0;
+}
+
+/* The display text API wraps at the viewport edge. Idle overflowing rows use
+ * one right-pointing marker; the selected row pauses, scrolls to its end,
+ * pauses there, and repeats so every UTF-8 column can be read. */
+static void dialog__gui_draw_row_label(
+    const char *label, int x, int y, int max_width, int text_size, bool selected,
+    uint64_t selected_for_ms, bool *out_overflow
+) {
     if (label == NULL || max_width <= 0) { return; }
     int max_chars = max_width / (DIALOG__CHAR_W * text_size);
     if (max_chars <= 0) { return; }
 
-    size_t label_len = strlen(label);
-    size_t columns = 0;
-    for (size_t i = 0; i < label_len;) {
-        unsigned char c = (unsigned char)label[i];
-        size_t bytes = c < 0x80 ? 1 : (c >= 0xF0 ? 4 : c >= 0xE0 ? 3 : 2);
-        if (i + bytes > label_len) bytes = 1;
-        i += bytes;
-        columns++;
-    }
-    size_t draw_len = label_len;
-    if (columns > (size_t)max_chars) {
-        size_t column = 0;
-        draw_len = 0;
-        while (draw_len < label_len && column < (size_t)max_chars) {
-            unsigned char c = (unsigned char)label[draw_len];
-            size_t bytes = c < 0x80 ? 1 : (c >= 0xF0 ? 4 : c >= 0xE0 ? 3 : 2);
-            if (draw_len + bytes > label_len) bytes = 1;
-            draw_len += bytes;
-            column++;
-        }
-    }
+    size_t columns = dialog__utf8_columns(label);
     if (columns <= (size_t)max_chars) {
         display__set_cursor(x, y);
         display__print(label);
         return;
     }
+    if (out_overflow != NULL) *out_overflow = true;
 
-    if (max_chars <= 3) {
+    char rendered[256];
+    if (!selected) {
+        size_t visible_columns = max_chars > 1 ? (size_t)max_chars - 1u : 0u;
+        dialog__copy_utf8_columns(rendered, sizeof(rendered), label, 0, visible_columns);
+        size_t length = strlen(rendered);
+        snprintf(rendered + length, sizeof(rendered) - length, "%s", DIALOG__OVERFLOW_MARKER);
         display__set_cursor(x, y);
-        for (int i = 0; i < max_chars; ++i) { display__print("."); }
+        display__print(rendered);
         return;
     }
 
-    char truncated[128];
-    size_t wanted = (size_t)(max_chars - 3);
-    draw_len = 0;
-    size_t column = 0;
-    while (draw_len < label_len && column < wanted) {
-        unsigned char c = (unsigned char)label[draw_len];
-        size_t bytes = c < 0x80 ? 1 : (c >= 0xF0 ? 4 : c >= 0xE0 ? 3 : 2);
-        if (draw_len + bytes > label_len) bytes = 1;
-        if (draw_len + bytes >= sizeof(truncated) - 4) break;
-        draw_len += bytes;
-        column++;
+    size_t maximum_offset = columns - (size_t)max_chars;
+    uint64_t cycle_ms = DIALOG__MARQUEE_INITIAL_DELAY_MS + maximum_offset * DIALOG__MARQUEE_STEP_MS +
+                        DIALOG__MARQUEE_END_DELAY_MS;
+    uint64_t phase_ms = cycle_ms > 0 ? selected_for_ms % cycle_ms : 0;
+    size_t first_column = 0;
+    if (phase_ms > DIALOG__MARQUEE_INITIAL_DELAY_MS) {
+        uint64_t scrolling_ms = phase_ms - DIALOG__MARQUEE_INITIAL_DELAY_MS;
+        first_column = (size_t)(scrolling_ms / DIALOG__MARQUEE_STEP_MS) + 1u;
+        if (first_column > maximum_offset) first_column = maximum_offset;
     }
-    memcpy(truncated, label, draw_len);
-    memcpy(truncated + draw_len, "...", 4);
+    dialog__copy_utf8_columns(rendered, sizeof(rendered), label, first_column, (size_t)max_chars);
     display__set_cursor(x, y);
-    display__print(truncated);
+    display__print(rendered);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -490,6 +521,8 @@ static bruce_result_t dialog__gui_choice(
     bool redraw = true;
     bool launcher_border_drawn = false;
     uint64_t rendered_at = 0;
+    uint64_t selected_at = runtime__now();
+    bool selected_label_overflows = false;
     bool wants_periodic_refresh = render_launcher
                                       ? s_window_renderer.draw_status != NULL
                                       : render_params != NULL && render_params->render_callback != NULL;
@@ -505,6 +538,7 @@ static bruce_result_t dialog__gui_choice(
         if (wants_periodic_refresh && refresh_interval_ms > 0 && now - rendered_at >= refresh_interval_ms) {
             redraw = true;
         }
+        if (selected_label_overflows && now - rendered_at >= DIALOG__MARQUEE_STEP_MS) redraw = true;
 
         if (redraw) {
             bruce_result_t frame_result = display__begin_frame();
@@ -566,6 +600,7 @@ static bruce_result_t dialog__gui_choice(
             int list_y = content_top + title_h + message_h + list_gap;
             int last_visible = first_visible + items_per_page - 1;
             if ((size_t)last_visible >= choice_count) { last_visible = (int)choice_count - 1; }
+            selected_label_overflows = false;
 
             for (int i = first_visible; i <= last_visible; ++i) {
                 int y = list_y + (i - first_visible) * row_h;
@@ -598,8 +633,10 @@ static bruce_result_t dialog__gui_choice(
                     }
                     label_right -= (int)right_columns * DIALOG__CHAR_W * text_size + DIALOG__MARGIN;
                 }
+                bool *overflow = i == selected ? &selected_label_overflows : NULL;
                 dialog__gui_draw_row_label(
-                    choices[i].label, label_left, y + 1, label_right - label_left, text_size
+                    choices[i].label, label_left, y + 1, label_right - label_left, text_size,
+                    i == selected, now - selected_at, overflow
                 );
             }
 
@@ -655,6 +692,7 @@ static bruce_result_t dialog__gui_choice(
             default: break;
         }
         redraw = selected != previous_selected;
+        if (redraw) selected_at = runtime__now();
     }
 }
 

@@ -737,7 +737,9 @@ viewport can remain current while the choice is open. Terminal rendering
 ignores these parameters. Each choice has a display `label`, a stable semantic
 `value`, and optional `icon_name` and `right_text` metadata. GUI uses
 `icon_name` with the built-in icon registry and right-aligns `right_text`;
-terminal output appends `right_text`. Callers retain the selected index for
+terminal output appends `right_text`. GUI labels that exceed their available
+row width use a single `>` overflow marker while idle and scroll horizontally
+when selected so their complete text remains accessible. Callers retain the selected index for
 locating the selected row, then branch on its `value` rather than its position.
 
 app_runner records the initial `GUI` environment request in process-local
