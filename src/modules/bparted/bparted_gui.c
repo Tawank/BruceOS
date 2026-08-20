@@ -31,8 +31,9 @@
  * Nothing on this screen touches flash except Apply, and nothing touches
  * user data at all until the next boot - see core_sdk/partition_manager.h. */
 
-/* Longest "<label> <size> [<change>]" row rendered below. */
+/* Storage for the left and right portions of dynamically built partition rows. */
 #define BPARTED_GUI_ROW_TEXT 40
+#define BPARTED_GUI_RIGHT_TEXT 32
 
 /* Partition rows the page can show at once: the running layout plus the
  * next-boot one, which is the longer of the two (see BPARTED_PLANNED_MAX). */
@@ -69,6 +70,7 @@ typedef struct {
     bruce_partition_status_t status;
 
     char row_text[BPARTED_GUI_ENTRY_ROWS][BPARTED_GUI_ROW_TEXT];
+    char row_right_text[BPARTED_GUI_ENTRY_ROWS][BPARTED_GUI_RIGHT_TEXT];
     size_t text_count;
     bruce_dialog_choice_t choices[BPARTED_GUI_MAX_ROWS];
     uint8_t actions[BPARTED_GUI_MAX_ROWS];
@@ -100,8 +102,8 @@ static bool bparted_gui__confirm(const char *title, const char *message, const c
 }
 
 /* "<label> <size> [<change>]", with the root entry marked by the path it is
- * mounted at. Used for both lists and for the Delete/Format pickers, so a
- * partition looks the same everywhere it appears. */
+ * mounted at. Used by the Delete/Format pickers, where each choice is a
+ * single string instead of the main page left/right columns. */
 static void bparted_gui__format_row(const bruce_partition_entry_t *entry, char *out, size_t capacity) {
     char size_text[16];
     bparted_common__format_size(entry->size, size_text, sizeof(size_text));
@@ -135,18 +137,34 @@ static bool bparted_gui__has_label(const bruce_partition_entry_t *entries, size_
 
 static void bparted_gui__add_row(bparted_gui_page_t *page, const char *label, bparted_gui_action_t action) {
     if (page->row_count >= BPARTED_GUI_MAX_ROWS) return;
-    page->choices[page->row_count].label = label;
-    page->choices[page->row_count].value = label;
+    page->choices[page->row_count] = (bruce_dialog_choice_t){
+        .label = label,
+        .value = label,
+    };
     page->actions[page->row_count] = (uint8_t)action;
     page->row_count++;
 }
 
 static void bparted_gui__add_entry_row(bparted_gui_page_t *page, const bruce_partition_entry_t *entry) {
-    if (page->text_count >= BPARTED_GUI_ENTRY_ROWS) return;
-    char *text = page->row_text[page->text_count];
-    bparted_gui__format_row(entry, text, BPARTED_GUI_ROW_TEXT);
+    if (page->text_count >= BPARTED_GUI_ENTRY_ROWS || page->row_count >= BPARTED_GUI_MAX_ROWS) return;
+    char *label = page->row_text[page->text_count];
+    char *right_text = page->row_right_text[page->text_count];
+    snprintf(label, BPARTED_GUI_ROW_TEXT, "%.16s%s", entry->label, entry->is_root ? " /" : "");
+
+    char size_text[16];
+    bparted_common__format_size(entry->size, size_text, sizeof(size_text));
+    const char *state = bparted_common__state_name(entry->state);
+    if (state[0] != 0) snprintf(right_text, BPARTED_GUI_RIGHT_TEXT, "%s [%s]", size_text, state);
+    else snprintf(right_text, BPARTED_GUI_RIGHT_TEXT, "%s", size_text);
+
+    page->choices[page->row_count] = (bruce_dialog_choice_t){
+        .label = label,
+        .value = label,
+        .right_text = right_text,
+    };
+    page->actions[page->row_count] = (uint8_t)BPARTED_GUI_ACTION_NONE;
+    page->row_count++;
     page->text_count++;
-    bparted_gui__add_row(page, text, BPARTED_GUI_ACTION_NONE);
 }
 
 /* Re-reads both layouts and rebuilds every row. Called before each frame
@@ -560,7 +578,7 @@ int bparted_gui__main(int argc, char **argv) {
     (void)argc;
     (void)argv;
 
-    bparted_gui_page_t page;
+    bparted_gui_page_t page = {0};
     size_t selected = 0;
     for (;;) {
         bruce_result_t result = bparted_gui__refresh(&page);
@@ -572,7 +590,9 @@ int bparted_gui__main(int argc, char **argv) {
          * do not send it back to the top of the layout every time. */
         if (selected >= page.row_count) selected = 0;
 
-        result = dialog__choice_launcher("Partitions", page.summary, page.choices, page.row_count, &selected);
+        char title[sizeof(page.summary) + sizeof("Partitions - ")];
+        snprintf(title, sizeof(title), "Partitions - %s", page.summary);
+        result = dialog__choice_launcher(title, NULL, page.choices, page.row_count, &selected);
         if (result != BRUCE_OK && result != BRUCE_ERR_CANCELLED) {
             bparted_gui__report("Partitions", result);
             return result;
