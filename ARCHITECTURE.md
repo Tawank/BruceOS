@@ -623,7 +623,11 @@ terminal app, an ssh client, a serial console) renders it, the same way
 -- is paged with `space`/`b` (or Page Down/Up), `j`/`k` (or the arrow keys),
 `g`/`G` for top/bottom, and `/pattern` plus `n` for a forward substring
 search; `q` or Esc quits. Navigation re-scans at most a screenful of lines
-per keypress rather than keeping a precomputed line index. When its stdio
+per keypress rather than keeping a precomputed line index. Long lines wrap by
+default; less -S chops them at the terminal width and enables horizontal
+scrolling with the left/right arrow keys. CRLF line endings do not show a
+carriage-return placeholder. The bare semicolon and period keys also move one
+line up and down, respectively. When its stdio
 session has no known terminal size (`core_sdk/tty.h`'s `tty__isatty()`
 returns false, e.g. read by a plain, non-terminal consumer), it falls back to
 dumping its content unpaged, matching real `less(1)`'s behavior when its

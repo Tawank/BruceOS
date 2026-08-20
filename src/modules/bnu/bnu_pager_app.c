@@ -51,6 +51,7 @@ typedef struct {
     size_t left_column;
     uint16_t columns;
     uint16_t rows; /* total rows including the status line */
+    bool chop_long_lines;
     char path[BRUCE_STORAGE_PATH_MAX];
     char *line_buffer; /* columns + 1 bytes, reused for both content rows and the status bar */
     char search[LESS_SEARCH_MAX];
@@ -101,23 +102,78 @@ static size_t less__back_lines(const char *data, size_t line_start_offset, size_
 
 static uint16_t less__visible_rows(uint16_t rows) { return rows > 1u ? (uint16_t)(rows - 1u) : rows; }
 
-/* The top offset that puts the file's last line at the bottom of a full
- * page, i.e. what 'G' (and page-down clamping) scrolls to. */
-static size_t less__last_page_top(const char *data, size_t length, size_t visible_rows) {
-    size_t last_line = less__line_start(data, length);
-    return less__back_lines(data, last_line, visible_rows > 0 ? visible_rows - 1u : 0u);
+/* Return the first byte of the next screen row. In normal mode long logical
+ * lines occupy as many screen rows as necessary; -S makes one logical line
+ * occupy exactly one row. CR is zero-width so CRLF input doesn't display a
+ * spurious '.' at the right edge of every line. */
+static size_t less__next_row(const less__state_t *state, size_t offset) {
+    if (state->chop_long_lines) return less__next_line(state->data, state->length, offset);
+
+    size_t columns = 0;
+    while (offset < state->length && state->data[offset] != '\n') {
+        unsigned char byte = (unsigned char)state->data[offset++];
+        if (byte == '\r') continue;
+        columns += byte == '\t' ? 2u : 1u;
+        if (columns >= state->columns) break;
+    }
+    if (offset < state->length && state->data[offset] == '\n') offset++;
+    return offset;
 }
 
-static bool less__scroll_down(less__state_t *state, size_t lines, size_t last_top) {
-    size_t next = less__forward_lines(state->data, state->length, state->top, lines);
+static size_t less__forward_rows(const less__state_t *state, size_t offset, size_t count) {
+    if (state->chop_long_lines) return less__forward_lines(state->data, state->length, offset, count);
+    for (size_t i = 0; i < count && offset < state->length; ++i) offset = less__next_row(state, offset);
+    return offset;
+}
+
+static size_t less__previous_row(const less__state_t *state, size_t offset) {
+    if (offset == 0) return 0;
+    if (state->chop_long_lines) return less__line_start(state->data, offset - 1u);
+
+    size_t line_start = less__line_start(state->data, offset);
+    if (line_start == offset) line_start = less__line_start(state->data, offset - 1u);
+    size_t previous = line_start;
+    for (size_t row = line_start; row < offset;) {
+        size_t next = less__next_row(state, row);
+        if (next >= offset || next == row) break;
+        previous = next;
+        row = next;
+    }
+    return previous;
+}
+
+static size_t less__back_rows(const less__state_t *state, size_t offset, size_t count) {
+    if (state->chop_long_lines) return less__back_lines(state->data, offset, count);
+    for (size_t i = 0; i < count && offset > 0; ++i) offset = less__previous_row(state, offset);
+    return offset;
+}
+
+/* The top offset that puts the file's last display row at the bottom of a
+ * full page, i.e. what 'G' (and page-down clamping) scrolls to. */
+static size_t less__last_page_top(const less__state_t *state, size_t visible_rows) {
+    size_t last_row = less__line_start(state->data, state->length);
+    if (!state->chop_long_lines) {
+        size_t row = last_row;
+        while (row < state->length) {
+            size_t next = less__next_row(state, row);
+            if (next >= state->length || next == row) break;
+            row = next;
+        }
+        last_row = row;
+    }
+    return less__back_rows(state, last_row, visible_rows > 0 ? visible_rows - 1u : 0u);
+}
+
+static bool less__scroll_down(less__state_t *state, size_t rows, size_t last_top) {
+    size_t next = less__forward_rows(state, state->top, rows);
     if (next > last_top) next = last_top;
     if (next == state->top) return false;
     state->top = next;
     return true;
 }
 
-static bool less__scroll_up(less__state_t *state, size_t lines) {
-    size_t prev = less__back_lines(state->data, state->top, lines);
+static bool less__scroll_up(less__state_t *state, size_t rows) {
+    size_t prev = less__back_rows(state, state->top, rows);
     if (prev == state->top) return false;
     state->top = prev;
     return true;
@@ -155,7 +211,9 @@ static size_t less__sanitize(char *out, size_t out_capacity, const char *in, siz
     size_t written = 0;
     for (size_t i = 0; i < length && written < out_capacity; ++i) {
         unsigned char byte = (unsigned char)in[i];
-        if (byte == '\t') {
+        if (byte == '\r') {
+            continue;
+        } else if (byte == '\t') {
             out[written++] = ' ';
             if (written < out_capacity) out[written++] = ' ';
         } else {
@@ -179,13 +237,16 @@ static void less__draw(less__state_t *state, const char *message) {
     for (uint16_t row = 0; row < visible_rows; ++row) {
         size_t line_end = offset;
         while (line_end < state->length && state->data[line_end] != '\n') line_end++;
-        size_t line_len = line_end - offset;
-        size_t start = offset + (state->left_column < line_len ? state->left_column : line_len);
-        size_t written =
-            less__sanitize(state->line_buffer, state->columns, state->data + start, line_end - start);
+        size_t row_end = state->chop_long_lines ? line_end : less__next_row(state, offset);
+        if (!state->chop_long_lines && row_end > offset && state->data[row_end - 1u] == '\n') row_end--;
+        size_t line_len = row_end - offset;
+        size_t left = state->chop_long_lines ? state->left_column : 0;
+        size_t start = offset + (left < line_len ? left : line_len);
+        size_t written = less__sanitize(state->line_buffer, state->columns, state->data + start, row_end - start);
         (void)stdio__write(state->line_buffer, written);
         if ((uint16_t)(row + 1u) < visible_rows) (void)stdio__write("\r\n", 2);
-        offset = line_end < state->length ? line_end + 1u : state->length;
+        offset = state->chop_long_lines ? (line_end < state->length ? line_end + 1u : state->length)
+                                        : less__next_row(state, offset);
     }
     if (visible_rows >= state->rows) return; /* no room for a status line */
 
@@ -264,9 +325,11 @@ static less__action_t less__decode_byte(int input) {
         case 'b':
         case 0x02: return LESS_ACTION_PAGE_UP; /* Ctrl+B */
         case 'j':
+        case '.':
         case '\n':
         case '\r': return LESS_ACTION_LINE_DOWN;
-        case 'k': return LESS_ACTION_LINE_UP;
+        case 'k':
+        case ';': return LESS_ACTION_LINE_UP;
         case 'g': return LESS_ACTION_TOP;
         case 'G': return LESS_ACTION_BOTTOM;
         case '/': return LESS_ACTION_SEARCH;
@@ -306,7 +369,7 @@ static bool less__prompt_search(less__state_t *state) {
 }
 
 static void less__search(less__state_t *state, const char **message) {
-    size_t from = less__forward_lines(state->data, state->length, state->top, 1);
+    size_t from = less__next_line(state->data, state->length, state->top);
     size_t found = 0;
     if (less__find(state->data, state->length, from, state->search, strlen(state->search), &found)) {
         state->top = found;
@@ -333,6 +396,7 @@ static void less__run(less__state_t *state) {
         if (tty__get_size(&size) == BRUCE_OK && size.generation != last_generation) {
             last_generation = size.generation;
             if (size.columns > 0 && size.columns != state->columns) {
+                state->top = less__line_start(state->data, state->top);
                 char *grown = memory__realloc(state->line_buffer, (size_t)size.columns + 1u);
                 if (grown != NULL) {
                     state->line_buffer = grown;
@@ -354,7 +418,7 @@ static void less__run(less__state_t *state) {
 
         less__action_t action = input == 0x1b ? less__decode_escape() : less__decode_byte(input);
         uint16_t visible_rows = less__visible_rows(state->rows);
-        size_t last_top = less__last_page_top(state->data, state->length, visible_rows);
+        size_t last_top = less__last_page_top(state, visible_rows);
         switch (action) {
             case LESS_ACTION_QUIT: running = false; break;
             case LESS_ACTION_LINE_DOWN: dirty = less__scroll_down(state, 1, last_top) || dirty; break;
@@ -368,13 +432,18 @@ static void less__run(less__state_t *state) {
                 break;
             case LESS_ACTION_BOTTOM: dirty = (state->top != last_top) || dirty; state->top = last_top; break;
             case LESS_ACTION_LEFT:
-                if (state->left_column > 0) {
+                if (state->chop_long_lines && state->left_column > 0) {
                     size_t step = state->left_column < LESS_HSCROLL_STEP ? state->left_column : LESS_HSCROLL_STEP;
                     state->left_column -= step;
                     dirty = true;
                 }
                 break;
-            case LESS_ACTION_RIGHT: state->left_column += LESS_HSCROLL_STEP; dirty = true; break;
+            case LESS_ACTION_RIGHT:
+                if (state->chop_long_lines) {
+                    state->left_column += LESS_HSCROLL_STEP;
+                    dirty = true;
+                }
+                break;
             case LESS_ACTION_SEARCH:
                 if (less__prompt_search(state)) less__search(state, &message);
                 dirty = true;
@@ -456,11 +525,14 @@ int bnu_less_app_main(int argc, char **argv) {
     if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
     ap_add_str_opt(parser, "stdin-size", NULL);
     ap_set_opt_help(parser, "stdin-size", "Read exactly this many bytes from stdin (used by shell pipes)");
+    ap_add_flag(parser, "S");
+    ap_set_opt_help(parser, "S", "Chop long lines instead of wrapping them");
     ap_add_optional_arg(parser, "path", "File to view");
     ap_unknown_options_as_args(parser);
     ap_allow_extra_args(parser);
     ap_first_pos_arg_ends_option_parsing(parser);
     if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
+    bool chop_long_lines = ap_found(parser, "S");
 
     const char *path_arg = ap_get_arg(parser, "path");
     const char *stdin_size_arg = ap_found(parser, "stdin-size") ? ap_get_str_value(parser, "stdin-size") : NULL;
@@ -516,6 +588,7 @@ int bnu_less_app_main(int argc, char **argv) {
         .length = length,
         .columns = tty_size.columns,
         .rows = tty_size.rows,
+        .chop_long_lines = chop_long_lines,
     };
     snprintf(state.path, sizeof(state.path), "%s", from_stdin ? "(stdin)" : path);
     state.line_buffer = memory__malloc((size_t)state.columns + 1u);
