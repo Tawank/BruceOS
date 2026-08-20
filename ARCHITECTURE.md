@@ -989,7 +989,9 @@ registry. Any process may replace or remove any key, including one created by a
 different process. Entries survive producer exit, list in lexicographic key order,
 and every effective mutation increments a revision. Core never renders these
 1bpp icons or reserves a status bar; the launcher and interested applications
-list and draw them themselves. Wi-Fi publishes the `core.wifi` icon after a
+list and draw them themselves. `status_icon__push_named()` scales a named
+built-in icon proportionally into the status-icon bounds before publishing it.
+Wi-Fi publishes the `core.wifi` icon after a
 station obtains an IP address and removes it when that station disconnects.
 
 `storage` grants access to Core `storage__*` APIs.  Public file handles are
@@ -1056,7 +1058,9 @@ reuses an active Wi-Fi connection or selects a configured station/access point,
 serves generated gzip assets from `embedded_resources/web_interface`, and owns
 authenticated file management, uploads, command/navigation input, credentials,
 screen capture, status, and reboot routes. WebUI sessions and credentials remain
-permanently unavailable to external ELF/JS processes.
+permanently unavailable to external ELF/JS processes. While its HTTP server is
+running, WebUI publishes the `module.webui` status icon and removes it after a
+successful stop.
 
 `config` is one Core-owned singleton exposed through type-safe field APIs such
 as `config__get_bright()`, `config__get_theme_path()`, and

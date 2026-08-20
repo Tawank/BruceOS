@@ -421,6 +421,7 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(notification__push),
     ESP_ELFSYM_EXPORT(notification__dismiss),
     ESP_ELFSYM_EXPORT(status_icon__push),
+    ESP_ELFSYM_EXPORT(status_icon__push_named),
     ESP_ELFSYM_EXPORT(status_icon__remove),
     ESP_ELFSYM_EXPORT(status_icon__list),
 

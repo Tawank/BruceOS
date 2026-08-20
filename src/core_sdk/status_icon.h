@@ -21,6 +21,10 @@ typedef struct {
 
 /* The registry is global and unrestricted. Existing keys are replaced. */
 bruce_result_t status_icon__push(const char *key, const uint8_t *bitmap, uint8_t width, uint8_t height);
+
+/* Looks up a built-in icon by name, scales it proportionally to fit the
+ * status bar limit, and publishes it under key. */
+bruce_result_t status_icon__push_named(const char *key, const char *icon_name);
 bruce_result_t status_icon__remove(const char *key);
 
 /* Returns the total entry count and current revision. Up to capacity entries

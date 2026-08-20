@@ -7,12 +7,15 @@
 #include "core_sdk/http_server.h"
 #include "core_sdk/result.h"
 #include "core_sdk/runtime.h"
+#include "core_sdk/status_icon.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/wifi.h"
 #include "embedded_resources.h"
 #include "webui_internal.h"
 
 static webui_app_network_mode_t s_network_mode;
+
+#define WEBUI_STATUS_ICON_KEY "module.webui"
 
 webui_app_network_mode_t webui__get_network_mode(void) { return s_network_mode; }
 
@@ -86,6 +89,12 @@ static int webui_app__status(bool gui) {
     return BRUCE_OK;
 }
 
+static bruce_result_t webui_app__stop(void) {
+    bruce_result_t result = http_server__stop();
+    if (result == BRUCE_OK) (void)status_icon__remove(WEBUI_STATUS_ICON_KEY);
+    return result;
+}
+
 static int webui_app__start(webui_app_network_mode_t mode, bool gui) {
     bruce_result_t result;
     if (mode == WEBUI_APP_NETWORK_AP) result = wifi__is_ap_running() ? BRUCE_OK : wifi__setup_ap();
@@ -105,6 +114,7 @@ static int webui_app__start(webui_app_network_mode_t mode, bool gui) {
         else stdio__printf("WebUI start failed: %d\n", result);
         return result;
     }
+    (void)status_icon__push_named(WEBUI_STATUS_ICON_KEY, "web");
     return webui_app__status(gui);
 }
 
@@ -122,11 +132,11 @@ static int webui_app__gui(void) {
         if (result != BRUCE_OK) return result;
         if (strcmp(choices[selected].value, "exit") == 0) return BRUCE_OK;
         if (strcmp(choices[selected].value, "stop-exit") == 0) {
-            if (http_server__is_running()) return http_server__stop();
+            if (http_server__is_running()) return webui_app__stop();
             return BRUCE_OK;
         }
         if (running) {
-            result = http_server__stop();
+            result = webui_app__stop();
             if (result != BRUCE_OK)
                 (void)dialog__message(BRUCE_DIALOG_ERROR, "WebUI", "Could not stop server");
             continue;
@@ -169,7 +179,7 @@ int webui_app_main(int argc, char **argv) {
     }
     if (argc <= 1 || (argc == 2 && strcmp(argv[1], "status") == 0)) return webui_app__status(false);
     if (argc == 2 && strcmp(argv[1], "stop") == 0) {
-        bruce_result_t result = http_server__stop();
+        bruce_result_t result = webui_app__stop();
         if (result == BRUCE_OK) stdio__printf("WebUI stopped\n");
         return result;
     }

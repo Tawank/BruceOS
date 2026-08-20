@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "core_sdk/icon.h"
+
 #include "freertos/FreeRTOS.h" // IWYU pragma: export
 #include "freertos/semphr.h"
 
@@ -75,6 +77,41 @@ bruce_result_t status_icon__push(const char *key, const uint8_t *bitmap, uint8_t
     s_revision++;
     xSemaphoreGive(s_mutex);
     return BRUCE_OK;
+}
+
+bruce_result_t status_icon__push_named(const char *key, const char *icon_name) {
+    const bruce_icon_t *icon = icon__get(icon_name);
+    if (icon == NULL) return BRUCE_ERR_NOT_FOUND;
+    if (icon->bits == NULL || icon->width == 0 || icon->height == 0) return BRUCE_ERR_INVALID_STATE;
+
+    uint8_t width = icon->width;
+    uint8_t height = icon->height;
+    if (width > BRUCE_STATUS_ICON_MAX_WIDTH || height > BRUCE_STATUS_ICON_MAX_HEIGHT) {
+        if (width >= height) {
+            width = BRUCE_STATUS_ICON_MAX_WIDTH;
+            height = (uint8_t)(((uint16_t)icon->height * width) / icon->width);
+        } else {
+            height = BRUCE_STATUS_ICON_MAX_HEIGHT;
+            width = (uint8_t)(((uint16_t)icon->width * height) / icon->height);
+        }
+        if (width == 0) width = 1;
+        if (height == 0) height = 1;
+    }
+
+    uint8_t bitmap[BRUCE_STATUS_ICON_BITMAP_MAX] = {0};
+    size_t source_stride = (icon->width + 7u) / 8u;
+    size_t target_stride = (width + 7u) / 8u;
+    for (uint8_t y = 0; y < height; ++y) {
+        uint8_t source_y = (uint8_t)(((uint16_t)(2u * y + 1u) * icon->height) / (2u * height));
+        for (uint8_t x = 0; x < width; ++x) {
+            uint8_t source_x = (uint8_t)(((uint16_t)(2u * x + 1u) * icon->width) / (2u * width));
+            if ((icon->bits[(size_t)source_y * source_stride + source_x / 8u] &
+                 (uint8_t)(0x80u >> (source_x % 8u))) != 0) {
+                bitmap[(size_t)y * target_stride + x / 8u] |= (uint8_t)(0x80u >> (x % 8u));
+            }
+        }
+    }
+    return status_icon__push(key, bitmap, width, height);
 }
 
 bruce_result_t status_icon__remove(const char *key) {

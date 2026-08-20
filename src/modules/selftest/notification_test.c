@@ -171,32 +171,40 @@ bool selftest__run_status_icon_case(void) {
     static const uint8_t bitmap_b[] = {0xc0};
     (void)status_icon__remove("selftest-a");
     (void)status_icon__remove("selftest-b");
+    (void)status_icon__remove("selftest-named");
     size_t before_count = 0;
     uint32_t before_revision = 0;
     if (status_icon__list(NULL, 0, &before_count, &before_revision) != BRUCE_OK ||
         status_icon__push("selftest-b", bitmap_a, 1, 1) != BRUCE_OK ||
         status_icon__push("selftest-a", bitmap_a, 1, 1) != BRUCE_OK ||
-        status_icon__push("selftest-a", bitmap_b, 2, 1) != BRUCE_OK) {
+        status_icon__push("selftest-a", bitmap_b, 2, 1) != BRUCE_OK ||
+        status_icon__push_named("selftest-named", "web") != BRUCE_OK) {
         return false;
     }
     bruce_status_icon_t icons[BRUCE_STATUS_ICON_MAX];
     size_t count = 0;
     uint32_t revision = 0;
     if (status_icon__list(icons, BRUCE_STATUS_ICON_MAX, &count, &revision) != BRUCE_OK ||
-        count != before_count + 2 || revision < before_revision + 3) {
+        count != before_count + 3 || revision < before_revision + 4) {
         return false;
     }
     size_t a = count;
     size_t b = count;
+    size_t named = count;
     for (size_t i = 0; i < count; ++i) {
         if (strcmp(icons[i].key, "selftest-a") == 0) a = i;
         if (strcmp(icons[i].key, "selftest-b") == 0) b = i;
+        if (strcmp(icons[i].key, "selftest-named") == 0) named = i;
     }
     bool valid = a < b && b < count && icons[a].width == 2 && icons[a].bitmap[0] == bitmap_b[0];
+    valid = valid && named < count && icons[named].width == BRUCE_STATUS_ICON_MAX_WIDTH &&
+            icons[named].height == BRUCE_STATUS_ICON_MAX_HEIGHT;
     valid = valid && status_icon__push("", bitmap_a, 1, 1) == BRUCE_ERR_INVALID_ARGUMENT;
+    valid = valid && status_icon__push_named("selftest-missing", "no-such-icon") == BRUCE_ERR_NOT_FOUND;
     valid = valid && status_icon__remove("selftest-a") == BRUCE_OK;
     valid = valid && status_icon__remove("selftest-a") == BRUCE_OK;
     valid = valid && status_icon__remove("selftest-b") == BRUCE_OK;
+    valid = valid && status_icon__remove("selftest-named") == BRUCE_OK;
 
     char keys[BRUCE_STATUS_ICON_MAX][BRUCE_STATUS_ICON_KEY_MAX];
     size_t inserted = 0;
