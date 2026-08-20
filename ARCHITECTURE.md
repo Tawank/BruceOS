@@ -580,9 +580,9 @@ internal RAM, per the normal memory__external_alloc() rules -- growing by
 doubling as it fills, so a pipeline isn't bounded by the internal heap's
 largest free block. The destination is launched with a `--stdin-size N`
 argument prefix so it can size its read, the same way any other external
-command the shell launches is: in the background, with no GUI environment of
-its own. It is relayed live, byte for byte in both directions, between its
-own stdio session and the shell process's own routed stdio (i.e. whatever
+command the shell launches is: in the background, with an explicit `GUI=0`
+child overlay so it cannot inherit GUI mode from a graphical terminal. It is
+relayed live, byte for byte in both directions, between its own stdio session and the shell process's own routed stdio (i.e. whatever
 real terminal the shell itself is running under) until it exits -- which is
 what lets an interactive destination like `less` actually be seen and typed
 into through a pipe. A destination that wants the physical display, like
@@ -593,9 +593,10 @@ across interactive input and script lines. `export NAME=value` or `export NAME` 
 shell process environment, and `NAME=value command` applies only to that
 child. Builtins are `echo`, `true`, `false`, `cd`, `set`, `unset`, `export`,
 `clear`, `reset`, `exit`, and `help`; bare `help` opens the shell syntax,
-built-in, and registered-command index in `less`; other names and absolute/`./` paths launch
-through AppRunner in foreground mode and are synchronously reaped. `BG=1`
-changes the process state but does not turn synchronous shell execution into job control.
+built-in, and registered-command index in `less`; other names and absolute/`./`
+paths launch through AppRunner in background mode with `GUI=0` and are
+synchronously reaped; explicit `GUI=1` selects a foreground GUI launch.
+`BG=1` changes the process state but does not turn synchronous shell execution into job control.
 The `.sh` loader invokes this built-in for absolute scripts. Command
 substitution, globbing, subshells, functions, positional parameters, general or
 chained pipelines, and redirection are deferred. Unsupported pipeline forms and

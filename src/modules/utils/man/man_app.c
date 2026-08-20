@@ -67,7 +67,7 @@ static int man_app__page(const char *command) {
     size_t capacity = (registered != NULL ? strlen(registered) : 0u) + 32u;
     char *shell_args = memory__malloc(capacity);
     if (shell_args == NULL) return BRUCE_ERR_NO_MEMORY;
-    if (registered != NULL) snprintf(shell_args, capacity, "-c 'man %s | less'", registered);
+    if (registered != NULL) snprintf(shell_args, capacity, "-c '%s --help | less'", registered);
     else snprintf(shell_args, capacity, "-c 'man | less'");
 
     int process_id = app_runner__run("shell", shell_args, BRUCE_LAUNCH_BACKGROUND);

@@ -16,6 +16,7 @@
 static volatile int s_probe_calls;
 static char s_probe_arg[64];
 static char s_probe_environment[64];
+static char s_probe_gui[4];
 static char s_probe_pwd[BRUCE_STORAGE_PATH_MAX];
 
 static int selftest__shell_probe(int argc, char **argv) {
@@ -27,6 +28,8 @@ static int selftest__shell_probe(int argc, char **argv) {
         s_probe_environment, sizeof(s_probe_environment), "%s|%s",
         exported != NULL ? exported : "", temporary != NULL ? temporary : ""
     );
+    const char *gui = environment__get("GUI");
+    snprintf(s_probe_gui, sizeof(s_probe_gui), "%s", gui != NULL ? gui : "");
     const char *pwd = environment__get("PWD");
     snprintf(s_probe_pwd, sizeof(s_probe_pwd), "%s", pwd != NULL ? pwd : "");
     if (argc > 1 && strcmp(argv[1], "nonzero") == 0) return 37;
@@ -46,17 +49,21 @@ bool selftest__run_shell_language_case(void) {
     shell__state_init(&state);
     s_probe_calls = 0;
     memset(s_probe_arg, 0, sizeof(s_probe_arg));
+    memset(s_probe_gui, 0, sizeof(s_probe_gui));
     memset(s_probe_pwd, 0, sizeof(s_probe_pwd));
 
     bool ok =
         shell__execute_line(&state, "shell_test_probe 'a b' \"a b\"") == 0 &&
         strcmp(s_probe_arg, "a b") == 0 &&
+        strcmp(s_probe_gui, "0") == 0 &&
+        shell__execute_line(&state, "GUI=1 shell_test_probe gui") == 0 &&
+        strcmp(s_probe_gui, "1") == 0 &&
         shell__execute_line(&state, "shell_test_probe escaped\\ word 'escaped word'") == 0 &&
         shell__execute_line(&state, "VALUE=stored; shell_test_probe $VALUE stored") == 0 &&
         shell__execute_line(&state, "false; shell_test_probe $? 1") == 0 &&
         shell__execute_line(&state, "true || shell_test_probe skipped; false && shell_test_probe skipped") ==
             1 &&
-        s_probe_calls == 4 && shell__execute_line(&state, "false || true && false") == 1 &&
+        s_probe_calls == 5 && shell__execute_line(&state, "false || true && false") == 1 &&
         shell__execute_line(&state, "echo ok; true") == 0 &&
         shell__execute_line(&state, "LOCAL_ONLY=yes; shell_test_probe env") == 0 &&
         strcmp(s_probe_environment, "|") == 0 &&

@@ -99,6 +99,19 @@ static int shell_executor__launch_external(
     int argc, char **argv, const char *prefix, const bruce_environment_variable_t *environment,
     size_t environment_count, bruce_launch_mode_t mode
 ) {
+    /* The graphical terminal itself carries GUI=1. Shell commands are CLI by
+     * default, so mask that inherited value; a command-local GUI=1 entry is
+     * copied after this default and therefore still wins. This also covers
+     * producer and destination launches, whose callers pass no overlay. */
+    if (environment_count > SHELL__MAX_VARIABLES) return BRUCE_ERR_RESOURCE_LIMIT;
+    bruce_environment_variable_t cli_environment[SHELL__MAX_VARIABLES + 1u];
+    cli_environment[0] = (bruce_environment_variable_t){.name = "GUI", .value = "0"};
+    if (environment_count > 0) {
+        memcpy(cli_environment + 1u, environment, environment_count * sizeof(*environment));
+    }
+    environment = cli_environment;
+    environment_count++;
+
     size_t capacity = SHELL__LINE_MAX * 2;
     char *arguments = memory__malloc(capacity);
     if (arguments == NULL) {
