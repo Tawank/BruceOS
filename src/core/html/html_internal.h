@@ -50,8 +50,10 @@ typedef enum {
      * p->list_depth so HTML_TAG_LIST_ITEM below can report each <li>'s
      * nesting depth. */
     HTML_TAG_LIST,
-    /* li: block-level on close like HTML_TAG_BLOCK, but its *open* also
-     * reports a BRUCE_HTML_EVENT_LIST_ITEM_START carrying p->list_depth. */
+    /* li: its *open* reports a BRUCE_HTML_EVENT_LIST_ITEM_START carrying
+     * p->list_depth; its *close* is a LINE_BREAK rather than HTML_TAG_BLOCK's
+     * PARAGRAPH_BREAK, keeping sibling list items snug (see
+     * html__handle_tag_end() in html_events.c for why). */
     HTML_TAG_LIST_ITEM,
 } html_tag_id_t;
 

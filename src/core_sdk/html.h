@@ -42,8 +42,8 @@ typedef enum {
     BRUCE_HTML_EVENT_ANCHOR,         /* `text` is an element's decoded `id` attribute. */
     BRUCE_HTML_EVENT_HEADING_START,  /* `value` is the heading level, 1-6. */
     BRUCE_HTML_EVENT_HEADING_END,
-    BRUCE_HTML_EVENT_LINE_BREAK,     /* <br>. */
-    BRUCE_HTML_EVENT_PARAGRAPH_BREAK,/* End of a block element such as <p>, <li>, <div>. */
+    BRUCE_HTML_EVENT_LINE_BREAK,     /* <br>, or an <li> closing (kept snug against its siblings). */
+    BRUCE_HTML_EVENT_PARAGRAPH_BREAK,/* End of a block element such as <p>, <div>, or a <ul>/<ol>. */
     BRUCE_HTML_EVENT_LANDMARK_START, /* <main>/<article>/<nav> open; `value` is a bruce_html_landmark_t. */
     BRUCE_HTML_EVENT_LIST_ITEM_START,/* <li> open; `value` is its <ul>/<ol> nesting depth (1 = not nested). */
 } bruce_html_event_type_t;

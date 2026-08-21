@@ -110,9 +110,15 @@ static void browser_page__on_event(const bruce_html_event_t *event, void *contex
         break;
     }
     case BRUCE_HTML_EVENT_LIST_ITEM_START:
-        /* Each <li> starts its own line -- same reasoning as headings/images
-         * above -- then gets an indent marker if it's nested. */
-        browser_document__add_break(state->doc, true);
+        /* Each <li> starts its own line -- a plain one, not a paragraph
+         * break, matching how BRUCE_HTML_EVENT_LINE_BREAK now closes it too
+         * (see html.h) so list items stay snug against each other -- then
+         * gets an indent marker if it's nested. This is the only source of
+         * that leading break for the *first* <li> in a list (nothing else
+         * forces one between, say, a "Table of contents" label and the list
+         * under it); for every later sibling it just folds into the one its
+         * predecessor's own close already emitted. */
+        browser_document__add_break(state->doc, false);
         browser_page__add_list_marker(state->doc, event->value);
         break;
     }

@@ -199,10 +199,15 @@ html_parser_state_t html__handle_tag_end(bruce_html_parser_t *p) {
         } else if (p->current_tag == HTML_TAG_LIST) {
             if (p->list_depth > 0) p->list_depth--;
             html__break(p, BRUCE_HTML_EVENT_PARAGRAPH_BREAK);
-        } else if (
-            p->current_tag == HTML_TAG_BLOCK || p->current_tag == HTML_TAG_LIST_ITEM ||
-            html__is_landmark(p->current_tag, &landmark)
-        ) {
+        } else if (p->current_tag == HTML_TAG_LIST_ITEM) {
+            /* A LINE_BREAK, not the stronger PARAGRAPH_BREAK other block tags
+             * close with -- browsers keep sibling <li>s snug against each
+             * other (their default spacing comes from the enclosing
+             * <ul>/<ol>'s own margin, not from each other), so a page with a
+             * long list shouldn't read as a wall of separately-paragraphed
+             * one-liners. */
+            html__break(p, BRUCE_HTML_EVENT_LINE_BREAK);
+        } else if (p->current_tag == HTML_TAG_BLOCK || html__is_landmark(p->current_tag, &landmark)) {
             html__break(p, BRUCE_HTML_EVENT_PARAGRAPH_BREAK);
         }
     }
