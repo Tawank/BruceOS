@@ -412,6 +412,7 @@ static void browser_app__show_keybindings(void) {
                                    "[ / ]  Top/end    Home  Homepage\n"
                                    "g  URL    r  Reload\n"
                                    "a  Main/article    n  Nav\n"
+                                   "f  Footer\n"
                                    "- / = / +  Text size    p  Debug\n"
                                    "i  Show these keys";
     (void)dialog__message(BRUCE_DIALOG_INFO, "Browser keys", bindings);
@@ -468,6 +469,7 @@ static bool browser_app__handle_event(browser_app_state_t *state, const bruce_in
             );
             break;
         case 'n': browser_app__jump_to_item(state, state->doc->nav_item_index); break;
+        case 'f': browser_app__jump_to_item(state, state->doc->footer_item_index); break;
         case BRUCE_INPUT_CODE_HOME: browser_app__navigate(state, BROWSER_HOME_URL, true); break;
         default: break;
     }

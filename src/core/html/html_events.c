@@ -96,6 +96,7 @@ static bool html__is_landmark(html_tag_id_t tag, bruce_html_landmark_t *out_land
     case HTML_TAG_MAIN: *out_landmark = BRUCE_HTML_LANDMARK_MAIN; return true;
     case HTML_TAG_ARTICLE: *out_landmark = BRUCE_HTML_LANDMARK_ARTICLE; return true;
     case HTML_TAG_NAV: *out_landmark = BRUCE_HTML_LANDMARK_NAV; return true;
+    case HTML_TAG_FOOTER: *out_landmark = BRUCE_HTML_LANDMARK_FOOTER; return true;
     default: return false;
     }
 }

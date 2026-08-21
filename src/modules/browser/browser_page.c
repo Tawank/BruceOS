@@ -94,17 +94,18 @@ static void browser_page__on_event(const bruce_html_event_t *event, void *contex
         browser_document__add_break(state->doc, true);
         break;
     case BRUCE_HTML_EVENT_LANDMARK_START: {
-        /* Same reasoning as heading/image above: a <main>/<article>/<nav>
-         * commonly opens with no line break of its own in the markup (e.g. a
-         * secondary <nav> for a table of contents sitting right after a nav
-         * item's own link) -- force one so it doesn't run on from whatever
-         * came before it. */
+        /* Same reasoning as heading/image above: a <main>/<article>/<nav>/
+         * <footer> commonly opens with no line break of its own in the
+         * markup (e.g. a secondary <nav> for a table of contents sitting
+         * right after a nav item's own link) -- force one so it doesn't run
+         * on from whatever came before it. */
         browser_document__add_break(state->doc, true);
         browser_landmark_kind_t kind;
         switch ((bruce_html_landmark_t)event->value) {
         case BRUCE_HTML_LANDMARK_MAIN: kind = BROWSER_LANDMARK_MAIN; break;
         case BRUCE_HTML_LANDMARK_ARTICLE: kind = BROWSER_LANDMARK_ARTICLE; break;
-        default: kind = BROWSER_LANDMARK_NAV; break;
+        case BRUCE_HTML_LANDMARK_NAV: kind = BROWSER_LANDMARK_NAV; break;
+        default: kind = BROWSER_LANDMARK_FOOTER; break;
         }
         browser_document__add_landmark(state->doc, kind);
         break;

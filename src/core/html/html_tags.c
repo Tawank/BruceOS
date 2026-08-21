@@ -38,7 +38,7 @@ static const html_tag_entry_t HTML_TAGS[] = {
     {"ol",         HTML_TAG_LIST      },
     {"blockquote", HTML_TAG_BLOCK     },
     {"header",     HTML_TAG_BLOCK     },
-    {"footer",     HTML_TAG_BLOCK     },
+    {"footer",     HTML_TAG_FOOTER    },
     {"section",    HTML_TAG_BLOCK     },
     {"main",       HTML_TAG_MAIN      },
     {"article",    HTML_TAG_ARTICLE   },

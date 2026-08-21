@@ -31,6 +31,7 @@ bruce_result_t browser_document__create(browser_document_t **out_doc) {
     doc->main_item_index = -1;
     doc->article_item_index = -1;
     doc->nav_item_index = -1;
+    doc->footer_item_index = -1;
     *out_doc = doc;
     return BRUCE_OK;
 }
@@ -100,6 +101,7 @@ void browser_document__reset(browser_document_t *doc) {
     doc->main_item_index = -1;
     doc->article_item_index = -1;
     doc->nav_item_index = -1;
+    doc->footer_item_index = -1;
     doc->title[0] = '\0';
     doc->url[0] = '\0';
     doc->truncated = false;
@@ -191,6 +193,27 @@ static size_t browser_document__fold_repeated_text(
     return idx;
 }
 
+/* Companion to the landmark-retargeting in browser_document__add_text(): an
+ * <a id="..">/<h2 id="..">/etc. anchor pins its item_index the same way a
+ * landmark does (see browser_document__add_anchor()), so it's just as
+ * vulnerable to a fold rewinding item_count out from under it -- a TOC link
+ * whose target heading repeats the TOC entry's own text is the common case
+ * (e.g. Wikipedia-style "On this page" sidebars). Retargets every trailing
+ * anchor pinned to `old_item_count` to `doc->item_count` (the folded item),
+ * mirroring the landmark fix one item_index at a time since anchors[] is
+ * external-memory storage rather than a field that can be reassigned in
+ * place. Trailing anchors are checked back-to-front and stop at the first
+ * non-matching one, since only anchors recorded at this exact call's landmark
+ * open point could have been orphaned by it. */
+static void browser_document__retarget_anchors(browser_document_t *doc, size_t old_item_count) {
+    for (size_t i = doc->anchor_count; i > 0; --i) {
+        browser_anchor_t anchor = doc->anchors[i - 1];
+        if (anchor.item_index != old_item_count) break;
+        anchor.item_index = (uint16_t)doc->item_count;
+        (void)memory__external_write(&doc->anchors_object, (i - 1) * sizeof(anchor), &anchor, sizeof(anchor));
+    }
+}
+
 void browser_document__add_text(
     browser_document_t *doc, const char *text, size_t len, int heading_level, int link_index
 ) {
@@ -217,6 +240,9 @@ void browser_document__add_text(
             doc->article_item_index = (int)doc->item_count;
         if (doc->nav_item_index >= 0 && (size_t)doc->nav_item_index == old_item_count)
             doc->nav_item_index = (int)doc->item_count;
+        if (doc->footer_item_index >= 0 && (size_t)doc->footer_item_index == old_item_count)
+            doc->footer_item_index = (int)doc->item_count;
+        browser_document__retarget_anchors(doc, old_item_count);
     }
     if (!browser_document__ext_reserve(
             &doc->text_pool_object, (const void **)&doc->text_pool, doc->text_pool_len, len,
@@ -334,7 +360,8 @@ void browser_document__add_landmark(browser_document_t *doc, browser_landmark_ki
     if (doc == NULL) return;
     int *slot = kind == BROWSER_LANDMARK_MAIN      ? &doc->main_item_index
                 : kind == BROWSER_LANDMARK_ARTICLE ? &doc->article_item_index
-                                                    : &doc->nav_item_index;
+                : kind == BROWSER_LANDMARK_NAV     ? &doc->nav_item_index
+                                                    : &doc->footer_item_index;
     if (*slot < 0) *slot = (int)doc->item_count;
 }
 

@@ -97,6 +97,7 @@ typedef enum {
     BROWSER_LANDMARK_MAIN,
     BROWSER_LANDMARK_ARTICLE,
     BROWSER_LANDMARK_NAV,
+    BROWSER_LANDMARK_FOOTER,
 } browser_landmark_kind_t;
 
 typedef struct {
@@ -120,11 +121,13 @@ typedef struct {
     size_t anchor_count;
     bruce_memory_object_t anchors_object;
 
-    /* item_index of the first <main>/<article>/<nav> seen while parsing, or
-     * -1 if the page has none -- see browser_document__add_landmark(). */
+    /* item_index of the first <main>/<article>/<nav>/<footer> seen while
+     * parsing, or -1 if the page has none -- see
+     * browser_document__add_landmark(). */
     int main_item_index;
     int article_item_index;
     int nav_item_index;
+    int footer_item_index;
 
     char title[BROWSER_TITLE_MAX];
     char url[BROWSER_URL_MAX]; /* This page's own resolved URL. */
@@ -160,9 +163,10 @@ void browser_document__add_image(browser_document_t *doc, const char *url, const
 void browser_document__add_anchor(browser_document_t *doc, const char *name, size_t len);
 bool browser_document__find_anchor(const browser_document_t *doc, const char *name, size_t *out_item_index);
 
-/* Records the item index of the *first* <main>/<article>/<nav> of a given
- * kind seen while parsing; later ones of the same kind are ignored. Read
- * back directly via doc->main_item_index/article_item_index/nav_item_index
+/* Records the item index of the *first* <main>/<article>/<nav>/<footer> of a
+ * given kind seen while parsing; later ones of the same kind are ignored.
+ * Read back directly via
+ * doc->main_item_index/article_item_index/nav_item_index/footer_item_index
  * (-1 if that kind never appeared). */
 void browser_document__add_landmark(browser_document_t *doc, browser_landmark_kind_t kind);
 
