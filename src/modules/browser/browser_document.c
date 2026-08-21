@@ -195,7 +195,29 @@ void browser_document__add_text(
     browser_document_t *doc, const char *text, size_t len, int heading_level, int link_index
 ) {
     if (doc == NULL || text == NULL || len == 0) return;
+    size_t old_item_count = doc->item_count;
     doc->item_count = browser_document__fold_repeated_text(doc, text, len, &heading_level, &link_index);
+    /* A landmark that just opened pins its item_index to "wherever the next
+     * item lands" (see browser_document__add_landmark()) before it's seen
+     * that item's actual content. When that first item turns out to be a
+     * fold -- e.g. a nav widget's own label repeating the link that sat
+     * right before <nav> opened, exactly the case
+     * browser_document__fold_repeated_text() is written to catch -- the fold
+     * rewinds item_count back past the pinned index, orphaning it: nothing
+     * ever lands there again until unrelated later content happens to grow
+     * item_count back up that far, so 'a'/'n' in modules/browser end up
+     * jumping to the wrong item (commonly indistinguishable from the top of
+     * the page). Retarget a pin that's exactly the old item_count -- i.e.
+     * one this fold's rewind just orphaned -- to the folded item, which is
+     * genuinely where that landmark's (deduplicated) content now starts. */
+    if (doc->item_count < old_item_count) {
+        if (doc->main_item_index >= 0 && (size_t)doc->main_item_index == old_item_count)
+            doc->main_item_index = (int)doc->item_count;
+        if (doc->article_item_index >= 0 && (size_t)doc->article_item_index == old_item_count)
+            doc->article_item_index = (int)doc->item_count;
+        if (doc->nav_item_index >= 0 && (size_t)doc->nav_item_index == old_item_count)
+            doc->nav_item_index = (int)doc->item_count;
+    }
     if (!browser_document__ext_reserve(
             &doc->text_pool_object, (const void **)&doc->text_pool, doc->text_pool_len, len,
             BROWSER_INITIAL_TEXT_CAP, BROWSER_MAX_TEXT_BYTES
