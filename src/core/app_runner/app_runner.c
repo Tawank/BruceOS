@@ -11,6 +11,8 @@
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
 
+#include "embedded_resources.h"
+
 #include <ctype.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -26,45 +28,7 @@
 #define APP_RUNNER_LOADER_EXTENSION_MAX 5
 #define APP_RUNNER_LOADER_PROGRAM_MAX 32
 
-static const char *APP_RUNNER_DEFAULT_EXTENSIONS_JSON =
-    "{\"extensions\":{"
-    "\".elf\":{\"program\":\"elf\",\"icon\":\"application\"},"
-    "\".wasm\":{\"program\":\"wasm\",\"icon\":\"application\"},"
-    "\".js\":{\"program\":\"js\",\"icon\":\"file-code\"},"
-    "\".sh\":{\"program\":\"shell\",\"icon\":\"file-code\"},"
-    "\".jpg\":{\"program\":\"image\",\"icon\":\"file-image\"},"
-    "\".jpeg\":{\"program\":\"image\",\"icon\":\"file-image\"},"
-    "\".png\":{\"program\":\"image\",\"icon\":\"file-image\"},"
-    "\".gif\":{\"program\":\"image\",\"icon\":\"file-image\"},"
-    "\".bmp\":{\"icon\":\"file-image\"},"
-    "\".webp\":{\"icon\":\"file-image\"},"
-    "\".txt\":{\"program\":\"text\",\"icon\":\"file-document\"},"
-    "\".md\":{\"icon\":\"file-document\"},"
-    "\".log\":{\"icon\":\"file-document\"},"
-    "\".json\":{\"program\":\"text\",\"icon\":\"application-braces\"},"
-    "\".conf\":{\"program\":\"text\",\"icon\":\"file-cog\"},"
-    "\".cfg\":{\"icon\":\"file-cog\"},"
-    "\".ini\":{\"icon\":\"file-cog\"},"
-    "\".c\":{\"icon\":\"file-code\"},"
-    "\".h\":{\"icon\":\"file-code\"},"
-    "\".cpp\":{\"icon\":\"file-code\"},"
-    "\".py\":{\"icon\":\"file-code\"},"
-    "\".html\":{\"icon\":\"file-code\"},"
-    "\".css\":{\"icon\":\"file-code\"},"
-    "\".mp3\":{\"icon\":\"file-music\"},"
-    "\".wav\":{\"icon\":\"file-music\"},"
-    "\".ogg\":{\"icon\":\"file-music\"},"
-    "\".flac\":{\"icon\":\"file-music\"},"
-    "\".mp4\":{\"icon\":\"file-video\"},"
-    "\".avi\":{\"icon\":\"file-video\"},"
-    "\".mkv\":{\"icon\":\"file-video\"},"
-    "\".mov\":{\"icon\":\"file-video\"},"
-    "\".zip\":{\"icon\":\"zip-box\"},"
-    "\".7z\":{\"icon\":\"zip-box\"},"
-    "\".rar\":{\"icon\":\"zip-box\"},"
-    "\".tar\":{\"icon\":\"zip-box\"},"
-    "\".gz\":{\"icon\":\"zip-box\"}"
-    "}}";
+static const char *APP_RUNNER_DEFAULT_EXTENSIONS_JSON = json_extensions_json;
 
 typedef struct {
     const char *name;
@@ -124,9 +88,8 @@ static cJSON *app_runner__extension_entry(const char *path) {
 }
 
 /* Looks up an override for one opened file. */
-static bool app_runner__config_program_for_extension(
-    const char *path, char *program_out, size_t program_out_size
-) {
+static bool
+app_runner__config_program_for_extension(const char *path, char *program_out, size_t program_out_size) {
     cJSON *entry = app_runner__extension_entry(path);
     cJSON *program = cJSON_IsObject(entry) ? cJSON_GetObjectItemCaseSensitive(entry, "program") : NULL;
     if (cJSON_IsString(program) && program->valuestring != NULL &&
@@ -167,8 +130,7 @@ static bool app_runner__environment_requests_overlay(
 bruce_result_t app_runner__register(
     const char *name, const char *description, bruce_app_entry_t entry, uint32_t stack_bytes
 ) {
-    if (name == NULL || name[0] == '\0' || description == NULL || description[0] == '\0' ||
-        entry == NULL) {
+    if (name == NULL || name[0] == '\0' || description == NULL || description[0] == '\0' || entry == NULL) {
         printf("BRUCE_ERR_INVALID_ARGUMENT");
         return BRUCE_ERR_INVALID_ARGUMENT;
     }

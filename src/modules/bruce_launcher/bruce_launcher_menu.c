@@ -14,7 +14,7 @@
 #include "core_sdk/wifi.h"
 #include "embedded_resources.h"
 
-#define BRUCE_LAUNCHER_CONFIG_PATH "/config/launcher.json"
+#define BRUCE_LAUNCHER_CONFIG_PATH "/config/launcher.conf"
 #define BRUCE_LAUNCHER_JSON_MAX 8192
 #define BRUCE_LAUNCHER_MAX_DEPTH 4
 #define BRUCE_LAUNCHER_TITLE "Main Menu"
