@@ -181,11 +181,22 @@ static void browser_app__scroll_into_view(browser_app_state_t *state, int top, i
     if (state->view.scroll_y < 0) state->view.scroll_y = 0;
 }
 
-static bool browser_app__scroll_step(browser_app_state_t *state, int direction) {
+/* Scrolls one rendered row past `after_y` in `direction`. `after_y` is the
+ * search anchor, not necessarily the current scroll position: called with a
+ * current link/image selected, it must be that item's own trailing edge
+ * (current_bottom - 1 going down, current_top going up) rather than
+ * scroll_y, or the row found can land *behind* the current selection --
+ * scroll_y can sit well above a current item that only just scrolled into
+ * view (e.g. one flush against the bottom edge), and find_row(scroll_y, ...)
+ * would then pick the nearest already-visible row above it instead of
+ * advancing toward the next row, wasting a press with a scroll that visibly
+ * changes nothing about which link is selected. With nothing selected, the
+ * caller passes scroll_y itself, which is the correct anchor there. */
+static bool browser_app__scroll_step(browser_app_state_t *state, int direction, int after_y) {
     int old_scroll = state->view.scroll_y;
     int max_scroll = browser_render__max_scroll(state->doc, state->view.font_scale);
     browser_render_row_t row;
-    if (browser_render__find_row(state->doc, state->view.scroll_y, direction, state->view.font_scale, &row)) {
+    if (browser_render__find_row(state->doc, after_y, direction, state->view.font_scale, &row)) {
         state->view.scroll_y = row.y;
     }
     if (state->view.scroll_y < 0) state->view.scroll_y = 0;
@@ -310,7 +321,7 @@ static void browser_app__move_line(browser_app_state_t *state, int direction) {
             browser_app__select_link(state, &adjacent);
             return;
         }
-        (void)browser_app__scroll_step(state, direction);
+        (void)browser_app__scroll_step(state, direction, direction > 0 ? current_bottom - 1 : current_top);
         return;
     }
 
@@ -337,7 +348,7 @@ static void browser_app__move_line(browser_app_state_t *state, int direction) {
         browser_app__select_link(state, &candidate);
         return;
     }
-    (void)browser_app__scroll_step(state, direction);
+    (void)browser_app__scroll_step(state, direction, state->view.scroll_y);
 }
 
 static void browser_app__page_scroll(browser_app_state_t *state, int direction) {
