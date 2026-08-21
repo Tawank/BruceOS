@@ -91,6 +91,15 @@ static bool html__is_heading(html_tag_id_t tag, int *out_level) {
     }
 }
 
+static bool html__is_landmark(html_tag_id_t tag, bruce_html_landmark_t *out_landmark) {
+    switch (tag) {
+    case HTML_TAG_MAIN: *out_landmark = BRUCE_HTML_LANDMARK_MAIN; return true;
+    case HTML_TAG_ARTICLE: *out_landmark = BRUCE_HTML_LANDMARK_ARTICLE; return true;
+    case HTML_TAG_NAV: *out_landmark = BRUCE_HTML_LANDMARK_NAV; return true;
+    default: return false;
+    }
+}
+
 static const char *html__rawtext_name_for(html_tag_id_t tag, size_t *out_len) {
     if (tag == HTML_TAG_SCRIPT) {
         *out_len = 6;
@@ -106,6 +115,7 @@ static const char *html__rawtext_name_for(html_tag_id_t tag, size_t *out_len) {
 html_parser_state_t html__handle_tag_end(bruce_html_parser_t *p) {
     html_parser_state_t next = HTML_PS_TEXT;
     int heading_level = 0;
+    bruce_html_landmark_t landmark;
 
     if (!p->tag_is_closing) {
         if (p->has_id && p->id_len > 0) {
@@ -134,6 +144,12 @@ html_parser_state_t html__handle_tag_end(bruce_html_parser_t *p) {
             bruce_html_event_t event = {0};
             event.type = BRUCE_HTML_EVENT_HEADING_START;
             event.value = heading_level;
+            html__emit(p, &event);
+        } else if (html__is_landmark(p->current_tag, &landmark)) {
+            html__flush_text(p);
+            bruce_html_event_t event = {0};
+            event.type = BRUCE_HTML_EVENT_LANDMARK_START;
+            event.value = landmark;
             html__emit(p, &event);
         } else {
             size_t rawtext_len = 0;
@@ -172,7 +188,7 @@ html_parser_state_t html__handle_tag_end(bruce_html_parser_t *p) {
             html__emit(p, &event);
             p->heading_level = 0;
             html__break(p, BRUCE_HTML_EVENT_PARAGRAPH_BREAK);
-        } else if (p->current_tag == HTML_TAG_BLOCK) {
+        } else if (p->current_tag == HTML_TAG_BLOCK || html__is_landmark(p->current_tag, &landmark)) {
             html__break(p, BRUCE_HTML_EVENT_PARAGRAPH_BREAK);
         }
     }

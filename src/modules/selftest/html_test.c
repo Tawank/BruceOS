@@ -69,6 +69,9 @@ typedef struct {
     int image_count;
     int anchor_count;
     char anchor[32];
+    int main_starts;
+    int article_starts;
+    int nav_starts;
 } html_test__capture_t;
 
 static void html_test__append(char *dst, size_t *len, size_t cap, const char *src, size_t src_len) {
@@ -120,6 +123,13 @@ static void html_test__on_event(const bruce_html_event_t *event, void *context) 
         break;
     case BRUCE_HTML_EVENT_LINE_BREAK:
         c->line_breaks++;
+        break;
+    case BRUCE_HTML_EVENT_LANDMARK_START:
+        switch ((bruce_html_landmark_t)event->value) {
+        case BRUCE_HTML_LANDMARK_MAIN: c->main_starts++; break;
+        case BRUCE_HTML_LANDMARK_ARTICLE: c->article_starts++; break;
+        case BRUCE_HTML_LANDMARK_NAV: c->nav_starts++; break;
+        }
         break;
     }
 }
@@ -210,6 +220,19 @@ bool selftest__run_html_parser_case(void) {
     if (html_test__parse(NULL, "Line one<br>Line two", &c) != BRUCE_OK) ok = false;
     if (c.line_breaks != 1 || strcmp(c.text, "Line oneLine two") != 0) {
         printf("[selftest] html/parser: FAIL, line breaks/text = %d '%s'\n", c.line_breaks, c.text);
+        ok = false;
+    }
+
+    if (html_test__parse(
+            NULL, "<nav>Menu</nav><main><article>Body</article></main>", &c
+        ) != BRUCE_OK) {
+        ok = false;
+    }
+    if (c.main_starts != 1 || c.article_starts != 1 || c.nav_starts != 1) {
+        printf(
+            "[selftest] html/parser: FAIL, main_starts=%d article_starts=%d nav_starts=%d\n", c.main_starts,
+            c.article_starts, c.nav_starts
+        );
         ok = false;
     }
 

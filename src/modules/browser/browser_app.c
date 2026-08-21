@@ -72,6 +72,19 @@ static bool browser_app__scroll_to_fragment(browser_app_state_t *state, const ch
     return true;
 }
 
+/* Scrolls so the given item index is at the top, the same way
+ * browser_app__scroll_to_fragment() lands on an anchor's item. A negative
+ * index (that landmark never appeared on this page) is a no-op. */
+static void browser_app__jump_to_item(browser_app_state_t *state, int item_index) {
+    if (item_index < 0) return;
+    int scroll_y = browser_render__item_y(state->doc, (size_t)item_index, state->view.font_scale);
+    int max_scroll = browser_render__max_scroll(state->doc, state->view.font_scale);
+    state->view.scroll_y = scroll_y < max_scroll ? scroll_y : max_scroll;
+    state->view.selected_link = -1;
+    state->view.selected_image = -1;
+    state->view.row_y = -1;
+}
+
 /* Mirrors modules/filemanager's own pattern: input__read() surfaces
  * BRUCE_ERR_NOT_FOREGROUND when another process takes over the screen (e.g. a
  * permission prompt); wait here until we're either back in the foreground or
@@ -387,6 +400,7 @@ static void browser_app__show_keybindings(void) {
                                    "Esc  Close browser\n"
                                    "[ / ]  Top/end    Home  Homepage\n"
                                    "g  URL    r  Reload\n"
+                                   "a  Main/article    n  Nav\n"
                                    "- / = / +  Text size    p  Debug\n"
                                    "i  Show these keys";
     (void)dialog__message(BRUCE_DIALOG_INFO, "Browser keys", bindings);
@@ -436,6 +450,13 @@ static bool browser_app__handle_event(browser_app_state_t *state, const bruce_in
         case 'p': browser_debug__dump(state->doc, state->view.font_scale); break;
         case 'g': browser_app__edit_url(state); break;
         case 'r': browser_app__navigate(state, state->doc->url, false); break;
+        case 'a':
+            browser_app__jump_to_item(
+                state, state->doc->main_item_index >= 0 ? state->doc->main_item_index
+                                                          : state->doc->article_item_index
+            );
+            break;
+        case 'n': browser_app__jump_to_item(state, state->doc->nav_item_index); break;
         case BRUCE_INPUT_CODE_HOME: browser_app__navigate(state, BROWSER_HOME_URL, true); break;
         default: break;
     }

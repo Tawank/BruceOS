@@ -38,9 +38,15 @@ typedef enum {
     HTML_TAG_H5,
     HTML_TAG_H6,
     /* Block-level tags whose *close* just breaks the text flow: p, div, li,
-     * tr, table, ul, ol, blockquote, header, footer, section, article, nav,
-     * dl, dt, dd, form, td, th. */
+     * tr, table, ul, ol, blockquote, header, footer, section, dl, dt, dd,
+     * form, td, th. */
     HTML_TAG_BLOCK,
+    /* Landmarks: block-level on close like HTML_TAG_BLOCK above, but their
+     * *open* also reports a BRUCE_HTML_EVENT_LANDMARK_START (see
+     * html__handle_tag_end() in html_events.c). */
+    HTML_TAG_MAIN,
+    HTML_TAG_ARTICLE,
+    HTML_TAG_NAV,
 } html_tag_id_t;
 
 typedef enum {

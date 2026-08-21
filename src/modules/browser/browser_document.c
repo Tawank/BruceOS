@@ -28,6 +28,9 @@ bruce_result_t browser_document__create(browser_document_t **out_doc) {
         return BRUCE_ERR_NO_MEMORY;
     }
     doc->item_cap = BROWSER_INITIAL_ITEM_CAP;
+    doc->main_item_index = -1;
+    doc->article_item_index = -1;
+    doc->nav_item_index = -1;
     *out_doc = doc;
     return BRUCE_OK;
 }
@@ -94,6 +97,9 @@ void browser_document__reset(browser_document_t *doc) {
     doc->link_count = 0;
     doc->image_count = 0;
     doc->anchor_count = 0;
+    doc->main_item_index = -1;
+    doc->article_item_index = -1;
+    doc->nav_item_index = -1;
     doc->title[0] = '\0';
     doc->url[0] = '\0';
     doc->truncated = false;
@@ -262,6 +268,14 @@ bool browser_document__find_anchor(const browser_document_t *doc, const char *na
         }
     }
     return false;
+}
+
+void browser_document__add_landmark(browser_document_t *doc, browser_landmark_kind_t kind) {
+    if (doc == NULL) return;
+    int *slot = kind == BROWSER_LANDMARK_MAIN      ? &doc->main_item_index
+                : kind == BROWSER_LANDMARK_ARTICLE ? &doc->article_item_index
+                                                    : &doc->nav_item_index;
+    if (*slot < 0) *slot = (int)doc->item_count;
 }
 
 void browser_document__add_break(browser_document_t *doc, bool paragraph) {

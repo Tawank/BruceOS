@@ -62,6 +62,16 @@ static void browser_page__on_event(const bruce_html_event_t *event, void *contex
     case BRUCE_HTML_EVENT_PARAGRAPH_BREAK:
         browser_document__add_break(state->doc, true);
         break;
+    case BRUCE_HTML_EVENT_LANDMARK_START: {
+        browser_landmark_kind_t kind;
+        switch ((bruce_html_landmark_t)event->value) {
+        case BRUCE_HTML_LANDMARK_MAIN: kind = BROWSER_LANDMARK_MAIN; break;
+        case BRUCE_HTML_LANDMARK_ARTICLE: kind = BROWSER_LANDMARK_ARTICLE; break;
+        default: kind = BROWSER_LANDMARK_NAV; break;
+        }
+        browser_document__add_landmark(state->doc, kind);
+        break;
+    }
     }
 }
 
