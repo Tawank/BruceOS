@@ -186,8 +186,17 @@ static bruce_result_t image__decode_jpeg_baseline(
     return error == ESP_ERR_NO_MEM ? BRUCE_ERR_NO_MEMORY : BRUCE_ERR_IO;
 }
 
-static bruce_result_t image__decode_jpeg_progressive(
-    const uint8_t *data, size_t size, const bruce_image_draw_options_t *options, image_bitmap_t *bitmap
+/* skip_full_quality forces every coefficient array through libjpeg's backing
+ * store instead of a single large in-RAM allocation, regardless of what the
+ * memory__get_stats() heuristic below would have picked. The backing store
+ * already streams through memory__external() (swap flash when no PSRAM is
+ * present, see memory.h) in small fixed-size chunks -- see
+ * image__jpeg_backing_read()/write() -- so this is the "smaller buffers,
+ * more memory__external" fallback for devices too tight on internal RAM to
+ * ever satisfy the full-quality check. */
+static bruce_result_t image__decode_jpeg_progressive_attempt(
+    const uint8_t *data, size_t size, const bruce_image_draw_options_t *options, image_bitmap_t *bitmap,
+    bool skip_full_quality
 ) {
     struct jpeg_decompress_struct decoder = {0};
     image_jpeg_error_t error = {0};
@@ -242,8 +251,9 @@ static bruce_result_t image__decode_jpeg_progressive(
         coefficient_size += component_size;
         if (component_size > largest_component) largest_component = component_size;
     }
-    bool full_quality = coefficient_size <= decoder.mem->max_memory_to_use;
-    if (decoder.progressive_mode && !full_quality && coefficient_size <= LONG_MAX - 64u * 1024u) {
+    bool full_quality = !skip_full_quality && coefficient_size <= decoder.mem->max_memory_to_use;
+    if (!skip_full_quality && decoder.progressive_mode && !full_quality &&
+        coefficient_size <= LONG_MAX - 64u * 1024u) {
         bruce_memory_stats_t stats;
         if (memory__get_stats(&stats) == BRUCE_OK) {
             size_t required = coefficient_size + 64u * 1024u;
@@ -360,6 +370,25 @@ static bruce_result_t image__decode_jpeg_progressive(
     bitmap->source_height = source_height;
     bitmap->format = BRUCE_IMAGE_FORMAT_JPEG;
     return BRUCE_OK;
+}
+
+/* The first attempt trusts memory__get_stats() to decide whether a
+ * single-shot, full-RAM decode fits. That snapshot can go stale by the time
+ * jpeg_start_decompress() actually asks for the large coefficient block --
+ * header parsing and per-component allocations in between eat into the same
+ * heap -- so on devices with only tens of KB free the first attempt can
+ * still lose the race and come back BRUCE_ERR_NO_MEMORY. Rather than fail
+ * the whole decode, retry once with the backing store forced on: slower,
+ * but bounded to small fixed-size buffers instead of one large allocation. */
+static bruce_result_t image__decode_jpeg_progressive(
+    const uint8_t *data, size_t size, const bruce_image_draw_options_t *options, image_bitmap_t *bitmap
+) {
+    bruce_result_t result = image__decode_jpeg_progressive_attempt(data, size, options, bitmap, false);
+    if (result == BRUCE_ERR_NO_MEMORY) {
+        ESP_LOGW(TAG, "full-quality decode ran out of memory, retrying via backing store");
+        result = image__decode_jpeg_progressive_attempt(data, size, options, bitmap, true);
+    }
+    return result;
 }
 
 bruce_result_t image__decode_jpeg(
