@@ -192,10 +192,49 @@ static int config_app__clock_cli(
     return BRUCE_ERR_INVALID_ARGUMENT;
 }
 
-static int config_app__startup_cli(ArgParser *startup_parser, ArgParser *add, ArgParser *remove) {
+/* Swaps the startup app at `from` with the one at `to` and persists the
+ * whole list in one write. Shared by the "up"/"down" CLI actions and the
+ * GUI's per-item "Move up"/"Move down" choices. */
+static bruce_result_t config_app__startup_move(size_t from, size_t to) {
+    const bruce_config_startup_apps_t *apps = config__get_startup_apps();
+    if (apps == NULL || from >= apps->count || to >= apps->count) return BRUCE_ERR_INVALID_ARGUMENT;
+    const char *order[BRUCE_CONFIG_STARTUP_APP_MAX_COUNT];
+    for (size_t i = 0; i < apps->count; ++i) order[i] = apps->items[i];
+    const char *swap = order[from];
+    order[from] = order[to];
+    order[to] = swap;
+    return config__set_startup_apps(order, apps->count);
+}
+
+/* Finds `name` in the current startup list, moving it one slot toward
+ * `direction` (-1 up, +1 down). Returns BRUCE_ERR_NOT_FOUND if `name` isn't
+ * listed, or BRUCE_ERR_INVALID_ARGUMENT if it's already at that edge. */
+static bruce_result_t config_app__startup_move_by_name(const char *name, int direction) {
+    const bruce_config_startup_apps_t *apps = config__get_startup_apps();
+    if (name == NULL || apps == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    size_t index = 0;
+    while (index < apps->count && strcmp(apps->items[index], name) != 0) ++index;
+    if (index == apps->count) return BRUCE_ERR_NOT_FOUND;
+    if (direction < 0 && index == 0) return BRUCE_ERR_INVALID_ARGUMENT;
+    if (direction > 0 && index + 1 >= apps->count) return BRUCE_ERR_INVALID_ARGUMENT;
+    return config_app__startup_move(index, direction < 0 ? index - 1 : index + 1);
+}
+
+static int config_app__startup_cli(
+    ArgParser *startup_parser, ArgParser *add, ArgParser *remove, ArgParser *up, ArgParser *down
+) {
     ArgParser *action = ap_get_cmd_parser(startup_parser);
+    if (action == NULL) {
+        const bruce_config_startup_apps_t *apps = config__get_startup_apps();
+        size_t count = apps != NULL ? apps->count : 0;
+        for (size_t i = 0; i < count; ++i) stdio__printf("%u: %s\n", (unsigned)(i + 1), apps->items[i]);
+        if (count == 0) stdio__printf("No startup apps configured\n");
+        return BRUCE_OK;
+    }
     if (action == add) return config__add_startup_app(ap_get_arg(add, "name"));
     if (action == remove) return config__remove_startup_app(ap_get_arg(remove, "name"));
+    if (action == up) return config_app__startup_move_by_name(ap_get_arg(up, "name"), -1);
+    if (action == down) return config_app__startup_move_by_name(ap_get_arg(down, "name"), 1);
     return BRUCE_ERR_INVALID_ARGUMENT;
 }
 
@@ -408,6 +447,143 @@ static int config_app__display_cli(
     return BRUCE_ERR_INVALID_ARGUMENT;
 }
 
+static int config_app__audio_gui(void) {
+    static const int volume_percents[6] = {100, 80, 60, 40, 20, 0};
+    static const char *const volume_labels[6] = {"100%", "80%", "60%", "40%", "20%", "0%"};
+    for (;;) {
+        bool enabled = config__get_sound_enabled();
+        int volume = config__get_sound_volume();
+        char enabled_label[32], volume_label[32];
+        snprintf(enabled_label, sizeof(enabled_label), "Sound: %s", enabled ? "ON" : "OFF");
+        snprintf(volume_label, sizeof(volume_label), "Volume: %d%%", volume);
+        const bruce_dialog_choice_t choices[] = {
+            {.label = enabled_label, .value = "enabled"},
+            {.label = volume_label,  .value = "volume" },
+            {.label = "Back",        .value = "back"   },
+        };
+        size_t selected = 0;
+        bruce_result_t result = dialog__choice_launcher("Audio", NULL, choices, 3, &selected);
+        const char *action = result == BRUCE_OK && selected < 3 ? choices[selected].value : "back";
+        bool back = result == BRUCE_ERR_CANCELLED || (result == BRUCE_OK && strcmp(action, "back") == 0);
+        if (!back && result == BRUCE_OK) {
+            if (strcmp(action, "enabled") == 0) {
+                result = config__set_sound_enabled(!enabled);
+            } else if (strcmp(action, "volume") == 0) {
+                bruce_dialog_choice_t volume_choices[6];
+                for (size_t i = 0; i < 6; ++i)
+                    volume_choices[i] =
+                        (bruce_dialog_choice_t){.label = volume_labels[i], .value = volume_labels[i]};
+                size_t volume_selected = config_app__closest_index(volume_percents, 6, volume);
+                bruce_result_t volume_result =
+                    dialog__choice_launcher("Volume", NULL, volume_choices, 6, &volume_selected);
+                if (volume_result == BRUCE_OK && volume_selected < 6)
+                    result = config__set_sound_volume(volume_percents[volume_selected]);
+            }
+        }
+        if (back) return BRUCE_OK;
+        if (result != BRUCE_OK) return result;
+    }
+}
+
+static int config_app__audio_cli(ArgParser *audio_parser, ArgParser *enabled, ArgParser *volume) {
+    ArgParser *action = ap_get_cmd_parser(audio_parser);
+    if (action == NULL) {
+        stdio__printf(
+            "Sound: %s\nVolume: %d%%\n", config__get_sound_enabled() ? "on" : "off", config__get_sound_volume()
+        );
+        return BRUCE_OK;
+    }
+    if (action == enabled) {
+        const char *state = ap_get_arg(enabled, "state");
+        if (state == NULL) {
+            stdio__printf("Sound: %s\n", config__get_sound_enabled() ? "on" : "off");
+            return BRUCE_OK;
+        }
+        bool value;
+        return config_app__parse_on_off(state, &value) ? config__set_sound_enabled(value)
+                                                        : BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    if (action == volume) {
+        const char *percent = ap_get_arg(volume, "percent");
+        if (percent == NULL) {
+            stdio__printf("Volume: %d%%\n", config__get_sound_volume());
+            return BRUCE_OK;
+        }
+        char *end = NULL;
+        long value = strtol(percent, &end, 10);
+        if (end == percent || *end != '\0' || value < 0 || value > 100) return BRUCE_ERR_INVALID_ARGUMENT;
+        return config__set_sound_volume((int)value);
+    }
+    return BRUCE_ERR_INVALID_ARGUMENT;
+}
+
+/* Per-item action sheet for one startup app: reorder it, remove it, or back
+ * out unchanged. `index`/`count` place it within the current list so
+ * "Move up"/"Move down" can be hidden at either edge. */
+static bruce_result_t config_app__startup_item_gui(const char *name, size_t index, size_t count) {
+    bruce_dialog_choice_t choices[4];
+    size_t n = 0;
+    bool has_up = index > 0;
+    bool has_down = index + 1 < count;
+    size_t up_index = n;
+    if (has_up) choices[n++] = (bruce_dialog_choice_t){.label = "Move up", .value = "up"};
+    size_t down_index = n;
+    if (has_down) choices[n++] = (bruce_dialog_choice_t){.label = "Move down", .value = "down"};
+    size_t remove_index = n;
+    choices[n++] = (bruce_dialog_choice_t){.label = "Remove", .value = "remove"};
+    size_t back_index = n;
+    choices[n++] = (bruce_dialog_choice_t){.label = "Back", .value = "back"};
+
+    size_t selected = 0;
+    bruce_result_t result = dialog__choice_launcher(name, NULL, choices, n, &selected);
+    if (result == BRUCE_ERR_CANCELLED || (result == BRUCE_OK && selected == back_index)) return BRUCE_OK;
+    if (result != BRUCE_OK) return result;
+    if (has_up && selected == up_index) return config_app__startup_move(index, index - 1);
+    if (has_down && selected == down_index) return config_app__startup_move(index, index + 1);
+    if (selected == remove_index) return config__remove_startup_app(name);
+    return BRUCE_OK;
+}
+
+static int config_app__startup_gui(void) {
+    for (;;) {
+        const bruce_config_startup_apps_t *apps = config__get_startup_apps();
+        size_t count = apps != NULL ? apps->count : 0;
+        bool can_add = count < BRUCE_CONFIG_STARTUP_APP_MAX_COUNT;
+        size_t capacity = count + (can_add ? 2 : 1);
+        bruce_dialog_choice_t *choices = memory__calloc(capacity, sizeof(*choices));
+        if (choices == NULL) return BRUCE_ERR_NO_MEMORY;
+        for (size_t i = 0; i < count; ++i)
+            choices[i] = (bruce_dialog_choice_t){.label = apps->items[i], .value = apps->items[i]};
+        size_t add_index = count;
+        if (can_add) choices[add_index] = (bruce_dialog_choice_t){.label = "Add application", .value = "add"};
+        size_t back_index = count + (can_add ? 1 : 0);
+        choices[back_index] = (bruce_dialog_choice_t){.label = "Back", .value = "back"};
+
+        size_t selected = 0;
+        bruce_result_t result =
+            dialog__choice_launcher("Startup apps", NULL, choices, back_index + 1, &selected);
+        bool back = result == BRUCE_ERR_CANCELLED || (result == BRUCE_OK && selected == back_index);
+        bruce_result_t action_result = BRUCE_OK;
+        if (!back && result == BRUCE_OK) {
+            if (can_add && selected == add_index) {
+                char entered[64] = {0};
+                if (dialog__text_input(
+                        "Startup apps", "Command to launch", "", false, entered, sizeof(entered)
+                    ) == BRUCE_OK &&
+                    entered[0] != '\0') {
+                    action_result = config__add_startup_app(entered);
+                }
+            } else if (selected < count) {
+                action_result = config_app__startup_item_gui(apps->items[selected], selected, count);
+            }
+        }
+        memory__free(choices);
+        if (back) return BRUCE_OK;
+        if (result != BRUCE_OK) return result;
+        if (action_result != BRUCE_OK) return action_result;
+    }
+}
+
 /* Named theme selection. Core (core_sdk/config.h) only stores and validates
  * the ten color_* roles; the catalog of names in theme_presets.h and the
  * UI/CLI to pick one are this module's job. */
@@ -561,9 +737,11 @@ int config_app_main(int argc, char **argv) {
     ArgParser *dst = clock != NULL ? ap_new_cmd(clock, "dst") : NULL;
     ArgParser *format = clock != NULL ? ap_new_cmd(clock, "format") : NULL;
     ArgParser *set = clock != NULL ? ap_new_cmd(clock, "set") : NULL;
-    ArgParser *startup = ap_new_cmd(root, "startup");
+    ArgParser *startup = system != NULL ? ap_new_cmd(system, "startup") : NULL;
     ArgParser *startup_add = startup != NULL ? ap_new_cmd(startup, "add") : NULL;
     ArgParser *startup_remove = startup != NULL ? ap_new_cmd(startup, "remove") : NULL;
+    ArgParser *startup_up = startup != NULL ? ap_new_cmd(startup, "up") : NULL;
+    ArgParser *startup_down = startup != NULL ? ap_new_cmd(startup, "down") : NULL;
     ArgParser *display = ap_new_cmd(root, "display");
     ArgParser *display_buffered = display != NULL ? ap_new_cmd(display, "buffered") : NULL;
     ArgParser *display_brightness = display != NULL ? ap_new_cmd(display, "brightness") : NULL;
@@ -574,6 +752,9 @@ int config_app_main(int argc, char **argv) {
     ArgParser *theme_set = theme != NULL ? ap_new_cmd(theme, "set") : NULL;
     ArgParser *theme_get = theme != NULL ? ap_new_cmd(theme, "get") : NULL;
     ArgParser *theme_set_color = theme != NULL ? ap_new_cmd(theme, "set-color") : NULL;
+    ArgParser *audio = ap_new_cmd(root, "audio");
+    ArgParser *audio_enabled = audio != NULL ? ap_new_cmd(audio, "enabled") : NULL;
+    ArgParser *audio_volume = audio != NULL ? ap_new_cmd(audio, "volume") : NULL;
     ArgParser *parsers[] = {
         system,
         clock,
@@ -587,6 +768,8 @@ int config_app_main(int argc, char **argv) {
         startup,
         startup_add,
         startup_remove,
+        startup_up,
+        startup_down,
         display,
         display_buffered,
         display_brightness,
@@ -597,6 +780,9 @@ int config_app_main(int argc, char **argv) {
         theme_set,
         theme_get,
         theme_set_color,
+        audio,
+        audio_enabled,
+        audio_volume,
     };
     for (size_t i = 0; i < sizeof(parsers) / sizeof(parsers[0]); ++i) {
         if (parsers[i] == NULL) {
@@ -626,6 +812,10 @@ int config_app_main(int argc, char **argv) {
     ap_add_required_arg(startup_add, "name", "Application name or quoted command line");
     ap_set_helptext(startup_remove, "Remove an application command from the startup list.");
     ap_add_required_arg(startup_remove, "name", "Application name or quoted command line");
+    ap_set_helptext(startup_up, "Move an application one slot earlier in the startup list.");
+    ap_add_required_arg(startup_up, "name", "Application name or quoted command line");
+    ap_set_helptext(startup_down, "Move an application one slot later in the startup list.");
+    ap_add_required_arg(startup_down, "name", "Application name or quoted command line");
     ap_set_helptext(display, "Configure display rendering.");
     ap_set_helptext(display_buffered, "Enable smooth buffered rendering or direct low-memory drawing.");
     ap_add_optional_arg(display_buffered, "state", "on or off");
@@ -647,6 +837,11 @@ int config_app_main(int argc, char **argv) {
         "primary, secondary, background, surface, text, textMuted, border, success, warning, or error"
     );
     ap_add_required_arg(theme_set_color, "color", "RGB or RRGGBB hex, with or without '#'");
+    ap_set_helptext(audio, "Configure audio (sound) settings.");
+    ap_set_helptext(audio_enabled, "Enable or disable sound.");
+    ap_add_optional_arg(audio_enabled, "state", "on or off (required outside GUI mode)");
+    ap_set_helptext(audio_volume, "Set the sound volume.");
+    ap_add_optional_arg(audio_volume, "percent", "0 to 100 (required outside GUI mode)");
 
     if (!ap_parse(root, argc, argv)) {
         ap_status_t status = ap_get_status(root);
@@ -657,16 +852,20 @@ int config_app_main(int argc, char **argv) {
 
     ArgParser *root_action = ap_get_cmd_parser(root);
     bool clock_hierarchy = root_action == system && ap_get_cmd_parser(system) == clock;
-    bool startup_hierarchy = root_action == startup;
+    bool startup_hierarchy = root_action == system && ap_get_cmd_parser(system) == startup;
     bool display_hierarchy = root_action == display;
     bool theme_hierarchy = root_action == theme;
+    bool audio_hierarchy = root_action == audio;
     bool gui = runtime__gui_requested();
     int result;
     if (clock_hierarchy) {
         result = gui ? config_app__clock_gui()
                      : config_app__clock_cli(clock, show, sync, ntp, timezone, dst, format, set);
-    } else if (startup_hierarchy && !gui) {
-        result = config_app__startup_cli(startup, startup_add, startup_remove);
+    } else if (startup_hierarchy) {
+        result = gui ? config_app__startup_gui()
+                     : config_app__startup_cli(startup, startup_add, startup_remove, startup_up, startup_down);
+    } else if (audio_hierarchy) {
+        result = gui ? config_app__audio_gui() : config_app__audio_cli(audio, audio_enabled, audio_volume);
     } else if (display_hierarchy) {
         result = gui ? config_app__display_gui()
                      : config_app__display_cli(

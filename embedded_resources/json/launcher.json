@@ -36,7 +36,7 @@
     "LED Config": "config led",
     "Audio Config": "config audio",
     "System Config": {
-      "Startup Apps": "config system startup_apps",
+      "Startup Apps": "config system startup",
       "Clock": "config system clock",
       "Advanced": {
         "Factory reset": "config system reset_defaults confirm"

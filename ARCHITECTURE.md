@@ -1088,9 +1088,11 @@ and leaves successfully created processes running concurrently.
 `config__add_startup_app()` appends a command line only when it is not already
 present, and `config__remove_startup_app()` removes one while preserving the
 order of the remaining entries. The built-in command exposes these operations as
-`config startup add <name>` and `config startup remove <name>`; command lines
-containing spaces must be passed as one quoted argument. `hotkeys` is a bounded
-key-to-action object.
+`config system startup add <name>` and `config system startup remove <name>`,
+plus `config system startup up <name>` / `down <name>` to reorder an entry and
+a GUI (`config system startup` with no arguments) to add, remove, and reorder
+entries interactively; command lines containing spaces must be passed as one
+quoted argument. `hotkeys` is a bounded key-to-action object.
 `displayBufferedRendering` defaults to true and is applied at boot. When false,
 Core does not allocate the full framebuffer; drawing is direct, screenshots are
 unavailable, and `config display buffered on|off` changes the setting for the

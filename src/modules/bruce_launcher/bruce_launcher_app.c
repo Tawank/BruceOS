@@ -621,7 +621,16 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
                 current->title, NULL, choices, (size_t)current->entry_count, &selected
             );
             s_live_choices.count = 0;
-            if (result == BRUCE_ERR_CANCELLED) break;
+            if (result == BRUCE_ERR_CANCELLED) {
+                /* Esc/Back steps up one level, same as selecting the "Back"
+                 * entry below -- not all the way out of the whole submenu
+                 * stack. Only at the top of this stack (depth 0) does it
+                 * leave the submenu entirely. */
+                if (depth == 0) break;
+                current = parents[--depth];
+                (void)input__flush();
+                continue;
+            }
             if (result == BRUCE_ERR_NOT_FOREGROUND) {
                 (void)runtime__sleep(BRUCE_LAUNCHER_BACKGROUND_WAIT_MS);
                 continue;
