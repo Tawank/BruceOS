@@ -157,9 +157,12 @@ backslash escaping). Registered built-ins receive conventional C arguments:
 retain their loader-defined argument conventions.
 
 Registered built-in command names can be enumerated in registration order with
-`app_runner__command_count()` and `app_runner__command_name()`. The returned
-names remain owned by AppRunner. The registered `man` utility uses this registry:
-bare `man` lists all registered commands, while `man <command>` starts the named
+`app_runner__command_count()`, `app_runner__command_name()`, and
+`app_runner__command_description()`. Built-ins register a non-empty,
+static-lifetime description alongside their name, entry point, and stack size.
+The returned names and descriptions remain owned by AppRunner. The registered
+`man` utility uses this registry: bare `man` lists every command with its
+description, while `man <command>` starts the named
 command with `--help`. On an interactive terminal both forms feed that output
 through `less`; as a pipe producer, `man` emits the same content directly.
 

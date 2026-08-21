@@ -37,7 +37,8 @@ static int man_app__list_commands(void) {
     size_t count = app_runner__command_count();
     for (size_t i = 0; i < count; ++i) {
         const char *name = app_runner__command_name(i);
-        if (name != NULL) stdio__printf("%s\n", name);
+        const char *description = app_runner__command_description(i);
+        if (name != NULL) stdio__printf("%s - %s\n", name, description != NULL ? description : "");
     }
     stdio__printf("\nType:\nman <command>\nto open a command manual\n");
     return BRUCE_OK;

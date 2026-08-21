@@ -68,6 +68,7 @@ static const char *APP_RUNNER_DEFAULT_EXTENSIONS_JSON =
 
 typedef struct {
     const char *name;
+    const char *description;
     bruce_app_entry_t entry;
     uint16_t stack_bytes;
 } app_runner_app_t;
@@ -163,8 +164,11 @@ static bool app_runner__environment_requests_overlay(
     return requested;
 }
 
-bruce_result_t app_runner__register(const char *name, bruce_app_entry_t entry, uint32_t stack_bytes) {
-    if (name == NULL || name[0] == '\0' || entry == NULL) {
+bruce_result_t app_runner__register(
+    const char *name, const char *description, bruce_app_entry_t entry, uint32_t stack_bytes
+) {
+    if (name == NULL || name[0] == '\0' || description == NULL || description[0] == '\0' ||
+        entry == NULL) {
         printf("BRUCE_ERR_INVALID_ARGUMENT");
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
@@ -182,6 +186,7 @@ bruce_result_t app_runner__register(const char *name, bruce_app_entry_t entry, u
     }
 
     s_apps[s_app_count].name = name;
+    s_apps[s_app_count].description = description;
     s_apps[s_app_count].entry = entry;
     s_apps[s_app_count].stack_bytes = stack_bytes;
     s_app_count++;
@@ -192,6 +197,10 @@ size_t app_runner__command_count(void) { return (size_t)s_app_count; }
 
 const char *app_runner__command_name(size_t index) {
     return index < (size_t)s_app_count ? s_apps[index].name : NULL;
+}
+
+const char *app_runner__command_description(size_t index) {
+    return index < (size_t)s_app_count ? s_apps[index].description : NULL;
 }
 
 static bruce_app_entry_t app_runner__find_builtin(const char *app_name) {

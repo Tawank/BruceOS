@@ -68,59 +68,76 @@
 #define BROWSER_STACK_BYTES 16384u
 
 void app_runner__register_defaults(void) {
-    app_runner__register("apps", apps_app_main, 0);
-    app_runner__register("bluetooth", bluetooth_app_main, 0);
-    app_runner__register("bluetooth_hid_app", bluetooth_hid_app_main, 0);
-    app_runner__register("bootanimation", bootanimation_app_main, 0);
-    app_runner__register("bparted", bparted_app_main, BPARTED_STACK_BYTES);
-    app_runner__register("browser", browser_app_main, BROWSER_STACK_BYTES);
-    app_runner__register("bruce_launcher", bruce_launcher_app_main, 0);
-    app_runner__register("cat", bnu_cat_app_main, 0);
-    app_runner__register("clock", clock_app_main, 0);
-    app_runner__register("config", config_app_main, CONFIG_STACK_BYTES);
-    app_runner__register("curl", bnu_curl_app_main, BNU_HTTP_STACK_BYTES);
-    app_runner__register("device_bus", device_bus_app_main, DEVICE_BUS_STACK_BYTES);
-    app_runner__register("elf", elf_loader__app_main, 0);
-    app_runner__register("filemanager", filemanager_app_main, 0);
-    app_runner__register("free", bnu_free_app_main, 0);
-    app_runner__register("image", image_app_main, 0);
-    app_runner__register("image_viewer", image_viewer_app_main, 8192);
-    app_runner__register("input", input_app_main, INPUT_STACK_BYTES);
-    app_runner__register("ir", ir_app_main, 0);
-    app_runner__register("js", js_loader__app_main, 0);
-    app_runner__register("launcher", launcher_app_main, LAUNCHER_STACK_BYTES);
-    app_runner__register("less", bnu_less_app_main, 0);
-    app_runner__register("ls", bnu_ls_app_main, 0);
-    app_runner__register("lsblk", bnu_lsblk_app_main, 0);
-    app_runner__register("man", man_app_main, 0);
-    app_runner__register("menu", system_menu_app_main, MENU_STACK_BYTES);
-    app_runner__register("mkdir", bnu_mkdir_app_main, 0);
-    app_runner__register("mount", bnu_mount_app_main, 0);
-    app_runner__register("notification_service", notification_service_main, 0);
-    app_runner__register("notify", notify_app_main, 0);
-    app_runner__register("nrf24", nrf24_app_main, 0);
-    app_runner__register("permissions", permissions_app_main, PERMISSIONS_STACK_BYTES);
-    app_runner__register("process", process_app_main, 0);
-    app_runner__register("pwd", bnu_pwd_app_main, 0);
-    app_runner__register("reboot", bnu_reboot_app_main, 0);
-    app_runner__register("rm", bnu_rm_app_main, 0);
-    app_runner__register("selftest", selftest_app_main, SELFTEST_STACK_BYTES);
-    app_runner__register("serial_commands", serial_commands_app_main, SERIAL_COMMANDS_STACK_BYTES);
-    app_runner__register("shell", shell_app_main, SHELL_STACK_BYTES);
-    app_runner__register("shutdown", bnu_shutdown_app_main, 0);
-    app_runner__register("ssh", ssh_app_main, SSH_STACK_BYTES);
-    app_runner__register("ssh-keygen", ssh_keygen_app_main, SSH_KEYGEN_STACK_BYTES);
-    app_runner__register("stty", bnu_stty_app_main, 0);
-    app_runner__register("tcp", tcp_app_main, 0);
-    app_runner__register("terminal", terminal_app_main, 0);
-    app_runner__register("text", text_app_main, 0);
-    app_runner__register("top", bnu_top_app_main, 0);
-    app_runner__register("touch", bnu_touch_app_main, 0);
-    app_runner__register("unmount", bnu_unmount_app_main, 0);
-    app_runner__register("wasm", wasm_loader__app_main, 0);
-    app_runner__register("webui", webui_app_main, 0);
-    app_runner__register("wget", bnu_wget_app_main, BNU_HTTP_STACK_BYTES);
-    app_runner__register("wifi", wifi_app_main, WIFI_STACK_BYTES);
+    app_runner__register("apps", "Browse and manage installed apps", apps_app_main, 0);
+    app_runner__register("bluetooth", "Scan and manage Bluetooth devices", bluetooth_app_main, 0);
+    app_runner__register(
+        "bluetooth_hid_app", "Use Bruce as a Bluetooth HID peripheral", bluetooth_hid_app_main, 0
+    );
+    app_runner__register("bootanimation", "Play the boot animation", bootanimation_app_main, 0);
+    app_runner__register("bparted", "Manage storage partitions", bparted_app_main, BPARTED_STACK_BYTES);
+    app_runner__register("browser", "Browse web pages", browser_app_main, BROWSER_STACK_BYTES);
+    app_runner__register("bruce_launcher", "Open the Bruce application launcher", bruce_launcher_app_main, 0);
+    app_runner__register("cat", "Print file contents", bnu_cat_app_main, 0);
+    app_runner__register("clock", "Show clock and timer tools", clock_app_main, 0);
+    app_runner__register("config", "Configure Bruce settings", config_app_main, CONFIG_STACK_BYTES);
+    app_runner__register("curl", "Transfer data from URLs", bnu_curl_app_main, BNU_HTTP_STACK_BYTES);
+    app_runner__register(
+        "device_bus", "Inspect and control device buses", device_bus_app_main, DEVICE_BUS_STACK_BYTES
+    );
+    app_runner__register("elf", "Run ELF applications", elf_loader__app_main, 0);
+    app_runner__register("filemanager", "Browse and manage files", filemanager_app_main, 0);
+    app_runner__register("free", "Show memory usage", bnu_free_app_main, 0);
+    app_runner__register("image", "Decode image files", image_app_main, 0);
+    app_runner__register("image_viewer", "View image files", image_viewer_app_main, 8192);
+    app_runner__register("input", "Inspect input devices", input_app_main, INPUT_STACK_BYTES);
+    app_runner__register("ir", "Control infrared devices", ir_app_main, 0);
+    app_runner__register("js", "Run JavaScript applications", js_loader__app_main, 0);
+    app_runner__register(
+        "launcher", "Open the application launcher", launcher_app_main, LAUNCHER_STACK_BYTES
+    );
+    app_runner__register("less", "Page through text", bnu_less_app_main, 0);
+    app_runner__register("ls", "List directory contents", bnu_ls_app_main, 0);
+    app_runner__register("lsblk", "List storage devices", bnu_lsblk_app_main, 0);
+    app_runner__register("man", "List commands or show command manuals", man_app_main, 0);
+    app_runner__register("menu", "Open the system menu", system_menu_app_main, MENU_STACK_BYTES);
+    app_runner__register("mkdir", "Create directories", bnu_mkdir_app_main, 0);
+    app_runner__register("mount", "Mount storage devices", bnu_mount_app_main, 0);
+    app_runner__register(
+        "notification_service", "Run the notification service", notification_service_main, 0
+    );
+    app_runner__register("notify", "Send a notification", notify_app_main, 0);
+    app_runner__register("nrf24", "Control NRF24 radios", nrf24_app_main, 0);
+    app_runner__register(
+        "permissions", "Manage application permissions", permissions_app_main, PERMISSIONS_STACK_BYTES
+    );
+    app_runner__register("process", "List and manage processes", process_app_main, 0);
+    app_runner__register("pwd", "Print the current directory", bnu_pwd_app_main, 0);
+    app_runner__register("reboot", "Restart the device", bnu_reboot_app_main, 0);
+    app_runner__register("rm", "Remove files and directories", bnu_rm_app_main, 0);
+    app_runner__register(
+        "selftest", "Run hardware and Core self-tests", selftest_app_main, SELFTEST_STACK_BYTES
+    );
+    app_runner__register(
+        "serial_commands",
+        "Run the terminal command service",
+        serial_commands_app_main,
+        SERIAL_COMMANDS_STACK_BYTES
+    );
+    app_runner__register("shell", "Run the command shell", shell_app_main, SHELL_STACK_BYTES);
+    app_runner__register("shutdown", "Power off the device", bnu_shutdown_app_main, 0);
+    app_runner__register("ssh", "Connect to an SSH server", ssh_app_main, SSH_STACK_BYTES);
+    app_runner__register("ssh-keygen", "Generate SSH keys", ssh_keygen_app_main, SSH_KEYGEN_STACK_BYTES);
+    app_runner__register("stty", "Configure terminal settings", bnu_stty_app_main, 0);
+    app_runner__register("tcp", "Connect to a TCP server", tcp_app_main, 0);
+    app_runner__register("terminal", "Open a terminal", terminal_app_main, 0);
+    app_runner__register("text", "Edit text files", text_app_main, 0);
+    app_runner__register("top", "Show processes and resource usage", bnu_top_app_main, 0);
+    app_runner__register("touch", "Create files or update timestamps", bnu_touch_app_main, 0);
+    app_runner__register("unmount", "Unmount storage devices", bnu_unmount_app_main, 0);
+    app_runner__register("wasm", "Run WebAssembly applications", wasm_loader__app_main, 0);
+    app_runner__register("webui", "Start the web interface", webui_app_main, 0);
+    app_runner__register("wget", "Download files from URLs", bnu_wget_app_main, BNU_HTTP_STACK_BYTES);
+    app_runner__register("wifi", "Manage Wi-Fi connections", wifi_app_main, WIFI_STACK_BYTES);
 
     app_runner__register_loader(".elf", "elf");
     app_runner__register_loader(".wasm", "wasm");

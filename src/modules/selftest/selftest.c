@@ -58,7 +58,8 @@ static int selftest__visual_entry(int argc, char **argv) {
 }
 
 static bool selftest__run_visual_cases(void) {
-    bruce_result_t registered = app_runner__register("selftest_visual", selftest__visual_entry, 0);
+    bruce_result_t registered =
+        app_runner__register("selftest_visual", "Visual self-test runner", selftest__visual_entry, 0);
     if (registered != BRUCE_OK && registered != BRUCE_ERR_ALREADY_EXISTS) return false;
 
     int launched = app_runner__run_command("GUI=1 selftest_visual", BRUCE_LAUNCH_FOREGROUND);

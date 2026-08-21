@@ -14,15 +14,19 @@ typedef enum {
     BRUCE_LAUNCH_BACKGROUND = 1,
 } bruce_launch_mode_t;
 
-/* Registers a built-in command.  Returns BRUCE_ERR_ALREADY_EXISTS for a
- * duplicate name and BRUCE_ERR_RESOURCE_LIMIT if the registry is full. */
-bruce_result_t app_runner__register(const char *name, bruce_app_entry_t entry, uint32_t stack_bytes);
+/* Registers a built-in command. Name and description must be non-empty and
+ * remain valid for the lifetime of the system. Returns BRUCE_ERR_ALREADY_EXISTS
+ * for a duplicate name and BRUCE_ERR_RESOURCE_LIMIT if the registry is full. */
+bruce_result_t app_runner__register(
+    const char *name, const char *description, bruce_app_entry_t entry, uint32_t stack_bytes
+);
 
-/* Read-only access to registered built-in command names. Names are returned in
- * registration order and remain owned by AppRunner. Returns NULL when `index`
- * is out of range. */
+/* Read-only access to registered built-in command metadata. Entries are
+ * returned in registration order and remain owned by AppRunner. Returns NULL
+ * when `index` is out of range. */
 size_t app_runner__command_count(void);
 const char *app_runner__command_name(size_t index);
+const char *app_runner__command_description(size_t index);
 
 /* Starts a named built-in or loader-registered application (see
  * core_sdk/ext_mem_loader.h).  On success this returns a positive bruce_process_id_t.
