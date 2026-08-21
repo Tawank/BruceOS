@@ -72,6 +72,8 @@ typedef struct {
     int main_starts;
     int article_starts;
     int nav_starts;
+    int list_item_starts;
+    int list_item_depths[8];
 } html_test__capture_t;
 
 static void html_test__append(char *dst, size_t *len, size_t cap, const char *src, size_t src_len) {
@@ -130,6 +132,12 @@ static void html_test__on_event(const bruce_html_event_t *event, void *context) 
         case BRUCE_HTML_LANDMARK_ARTICLE: c->article_starts++; break;
         case BRUCE_HTML_LANDMARK_NAV: c->nav_starts++; break;
         }
+        break;
+    case BRUCE_HTML_EVENT_LIST_ITEM_START:
+        if (c->list_item_starts < (int)(sizeof(c->list_item_depths) / sizeof(c->list_item_depths[0]))) {
+            c->list_item_depths[c->list_item_starts] = event->value;
+        }
+        c->list_item_starts++;
         break;
     }
 }
@@ -232,6 +240,20 @@ bool selftest__run_html_parser_case(void) {
         printf(
             "[selftest] html/parser: FAIL, main_starts=%d article_starts=%d nav_starts=%d\n", c.main_starts,
             c.article_starts, c.nav_starts
+        );
+        ok = false;
+    }
+
+    if (html_test__parse(
+            NULL, "<ul><li>One<ul><li>Nested</li></ul></li><li>Two</li></ul>", &c
+        ) != BRUCE_OK) {
+        ok = false;
+    }
+    if (c.list_item_starts != 3 || c.list_item_depths[0] != 1 || c.list_item_depths[1] != 2 ||
+        c.list_item_depths[2] != 1) {
+        printf(
+            "[selftest] html/parser: FAIL, list_item_starts=%d depths=[%d,%d,%d]\n", c.list_item_starts,
+            c.list_item_depths[0], c.list_item_depths[1], c.list_item_depths[2]
         );
         ok = false;
     }

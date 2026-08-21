@@ -37,9 +37,8 @@ typedef enum {
     HTML_TAG_H4,
     HTML_TAG_H5,
     HTML_TAG_H6,
-    /* Block-level tags whose *close* just breaks the text flow: p, div, li,
-     * tr, table, ul, ol, blockquote, header, footer, section, dl, dt, dd,
-     * form, td, th. */
+    /* Block-level tags whose *close* just breaks the text flow: p, div, tr,
+     * table, blockquote, header, footer, section, dl, dt, dd, form, td, th. */
     HTML_TAG_BLOCK,
     /* Landmarks: block-level on close like HTML_TAG_BLOCK above, but their
      * *open* also reports a BRUCE_HTML_EVENT_LANDMARK_START (see
@@ -47,6 +46,13 @@ typedef enum {
     HTML_TAG_MAIN,
     HTML_TAG_ARTICLE,
     HTML_TAG_NAV,
+    /* ul/ol: block-level on close like HTML_TAG_BLOCK, but also tracks
+     * p->list_depth so HTML_TAG_LIST_ITEM below can report each <li>'s
+     * nesting depth. */
+    HTML_TAG_LIST,
+    /* li: block-level on close like HTML_TAG_BLOCK, but its *open* also
+     * reports a BRUCE_HTML_EVENT_LIST_ITEM_START carrying p->list_depth. */
+    HTML_TAG_LIST_ITEM,
 } html_tag_id_t;
 
 typedef enum {
@@ -123,6 +129,14 @@ struct bruce_html_parser {
 
     bool in_link;
     int heading_level;
+
+    /* Count of currently-open <ul>/<ol> ancestors, reported on each
+     * BRUCE_HTML_EVENT_LIST_ITEM_START so a consumer can indent nested list
+     * items -- see HTML_TAG_LIST/HTML_TAG_LIST_ITEM above. Not a stack (this
+     * parser doesn't keep one; see the file comment in html_parser.c), so
+     * mismatched/malformed markup can drift it, same as every other counter
+     * here -- clamped in html_events.c rather than left to wrap. */
+    int list_depth;
 
     char entity_buffer[HTML_ENTITY_NAME_MAX];
     size_t entity_len;

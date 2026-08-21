@@ -151,6 +151,14 @@ html_parser_state_t html__handle_tag_end(bruce_html_parser_t *p) {
             event.type = BRUCE_HTML_EVENT_LANDMARK_START;
             event.value = landmark;
             html__emit(p, &event);
+        } else if (p->current_tag == HTML_TAG_LIST) {
+            if (p->list_depth < 255) p->list_depth++; /* Clamp: malformed/unbalanced markup shouldn't drift forever. */
+        } else if (p->current_tag == HTML_TAG_LIST_ITEM) {
+            html__flush_text(p);
+            bruce_html_event_t event = {0};
+            event.type = BRUCE_HTML_EVENT_LIST_ITEM_START;
+            event.value = p->list_depth;
+            html__emit(p, &event);
         } else {
             size_t rawtext_len = 0;
             const char *rawtext_name = html__rawtext_name_for(p->current_tag, &rawtext_len);
@@ -188,7 +196,13 @@ html_parser_state_t html__handle_tag_end(bruce_html_parser_t *p) {
             html__emit(p, &event);
             p->heading_level = 0;
             html__break(p, BRUCE_HTML_EVENT_PARAGRAPH_BREAK);
-        } else if (p->current_tag == HTML_TAG_BLOCK || html__is_landmark(p->current_tag, &landmark)) {
+        } else if (p->current_tag == HTML_TAG_LIST) {
+            if (p->list_depth > 0) p->list_depth--;
+            html__break(p, BRUCE_HTML_EVENT_PARAGRAPH_BREAK);
+        } else if (
+            p->current_tag == HTML_TAG_BLOCK || p->current_tag == HTML_TAG_LIST_ITEM ||
+            html__is_landmark(p->current_tag, &landmark)
+        ) {
             html__break(p, BRUCE_HTML_EVENT_PARAGRAPH_BREAK);
         }
     }

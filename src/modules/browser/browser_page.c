@@ -10,6 +10,16 @@
 #define BROWSER_PAGE_MAX_RESPONSE_BYTES (512u * 1024u)
 #define BROWSER_PAGE_USER_AGENT "Bruce-Browser/1.0"
 
+/* Longest indent marker browser_page__add_list_marker() will build, sized for
+ * BROWSER_PAGE_MAX_INDENT levels of "  " plus "- " -- comfortably under this
+ * even at that cap, but small screens can't afford deep indents anyway (see
+ * BROWSER_PAGE_MAX_INDENT). */
+#define BROWSER_PAGE_LIST_MARKER_MAX 16
+/* Nesting levels beyond this render at the same indent as this one -- a
+ * small screen has no room to keep stepping in further, and a reader can
+ * still tell items apart by which heading they follow. */
+#define BROWSER_PAGE_MAX_INDENT 3
+
 typedef struct {
     browser_document_t *doc;
     bruce_html_parser_t *parser;
@@ -19,6 +29,27 @@ typedef struct {
     browser_page_progress_cb_t progress_cb;
     void *progress_context;
 } browser_page_event_state_t;
+
+/* <li> nesting depth (BRUCE_HTML_EVENT_LIST_ITEM_START's `value`) is 1 for a
+ * top-level item, so it isn't indented; a nested list's items get a leading
+ * " - " marker, one level deeper widening it by two spaces each, capped at
+ * BROWSER_PAGE_MAX_INDENT so a deeply-nested page (e.g. a wiring-diagram tree
+ * several boards deep) doesn't run the marker off a small screen. Emitted as
+ * an ordinary text item -- see browser_document__add_text() -- so it just
+ * flows into the line ahead of the <li>'s real content with no other layout
+ * changes needed. */
+static void browser_page__add_list_marker(browser_document_t *doc, int depth) {
+    int indent = depth > 1 ? depth - 1 : 0;
+    if (indent <= 0) return;
+    if (indent > BROWSER_PAGE_MAX_INDENT) indent = BROWSER_PAGE_MAX_INDENT;
+
+    char marker[BROWSER_PAGE_LIST_MARKER_MAX];
+    size_t n = 0;
+    for (int i = 0; i < 2 * indent - 1 && n < sizeof(marker) - 3u; ++i) marker[n++] = ' ';
+    marker[n++] = '-';
+    marker[n++] = ' ';
+    browser_document__add_text(doc, marker, n, 0, -1);
+}
 
 static void browser_page__on_event(const bruce_html_event_t *event, void *context) {
     browser_page_event_state_t *state = context;
@@ -63,6 +94,12 @@ static void browser_page__on_event(const bruce_html_event_t *event, void *contex
         browser_document__add_break(state->doc, true);
         break;
     case BRUCE_HTML_EVENT_LANDMARK_START: {
+        /* Same reasoning as heading/image above: a <main>/<article>/<nav>
+         * commonly opens with no line break of its own in the markup (e.g. a
+         * secondary <nav> for a table of contents sitting right after a nav
+         * item's own link) -- force one so it doesn't run on from whatever
+         * came before it. */
+        browser_document__add_break(state->doc, true);
         browser_landmark_kind_t kind;
         switch ((bruce_html_landmark_t)event->value) {
         case BRUCE_HTML_LANDMARK_MAIN: kind = BROWSER_LANDMARK_MAIN; break;
@@ -72,6 +109,12 @@ static void browser_page__on_event(const bruce_html_event_t *event, void *contex
         browser_document__add_landmark(state->doc, kind);
         break;
     }
+    case BRUCE_HTML_EVENT_LIST_ITEM_START:
+        /* Each <li> starts its own line -- same reasoning as headings/images
+         * above -- then gets an indent marker if it's nested. */
+        browser_document__add_break(state->doc, true);
+        browser_page__add_list_marker(state->doc, event->value);
+        break;
     }
 }
 

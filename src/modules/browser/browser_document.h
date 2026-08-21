@@ -142,7 +142,10 @@ void browser_document__set_url(browser_document_t *doc, const char *url);
 void browser_document__set_title(browser_document_t *doc, const char *title, size_t len);
 
 /* Appends a text run. No-op once BROWSER_MAX_TEXT_BYTES or BROWSER_MAX_ITEMS
- * is reached (sets `truncated`). */
+ * is reached (sets `truncated`). An exact repeat of the item immediately
+ * before this one (one intervening break allowed) is folded into it instead
+ * of appended separately -- see browser_document__fold_repeated_text() in the
+ * .c file. */
 void browser_document__add_text(browser_document_t *doc, const char *text, size_t len, int heading_level, int link_index);
 
 /* Registers a link target and returns its index for use as add_text()'s

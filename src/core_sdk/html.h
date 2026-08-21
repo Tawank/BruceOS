@@ -45,6 +45,7 @@ typedef enum {
     BRUCE_HTML_EVENT_LINE_BREAK,     /* <br>. */
     BRUCE_HTML_EVENT_PARAGRAPH_BREAK,/* End of a block element such as <p>, <li>, <div>. */
     BRUCE_HTML_EVENT_LANDMARK_START, /* <main>/<article>/<nav> open; `value` is a bruce_html_landmark_t. */
+    BRUCE_HTML_EVENT_LIST_ITEM_START,/* <li> open; `value` is its <ul>/<ol> nesting depth (1 = not nested). */
 } bruce_html_event_type_t;
 
 /* Named regions a reader may want to jump straight to, reported by

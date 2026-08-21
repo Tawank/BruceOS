@@ -154,10 +154,48 @@ void browser_document__shrink_to_fit(browser_document_t *doc) {
     doc->item_cap = doc->item_count;
 }
 
+/* Nav widgets commonly repeat a section's text immediately -- once as a
+ * collapsible toggle, once more as the <a> it toggles or as a nested <nav>'s
+ * own title label -- with nothing but link/landmark events (no line break)
+ * in between; mkdocs-material's sidebar (see modules/browser's own use of
+ * this) does this throughout. Folds an exact repeat of the item immediately
+ * before `doc`'s next item -- allowing one intervening break, since a
+ * landmark/heading start forces one of those before its own text -- into
+ * that same item instead of appending a second, visually-identical one.
+ * Comparison ignores a single trailing space on either side (a whitespace-
+ * collapse artifact of how the two runs happened to be split, not meaningful
+ * content). Returns the index to (re)write the item at, and updates
+ * `*heading_level`/`*link_index` to carry over the dropped copy's, in case it
+ * had one this copy lacks (e.g. the label came first, the link second). */
+static size_t browser_document__fold_repeated_text(
+    browser_document_t *doc, const char *text, size_t len, int *heading_level, int *link_index
+) {
+    size_t fold_at = doc->item_count;
+    if (doc->item_count == 0) return fold_at;
+
+    size_t idx = doc->item_count - 1;
+    browser_item_kind_t kind = (browser_item_kind_t)doc->items[idx].kind;
+    if ((kind == BROWSER_ITEM_LINE_BREAK || kind == BROWSER_ITEM_PARAGRAPH_BREAK) && idx > 0) idx--;
+    if (doc->items[idx].kind != BROWSER_ITEM_TEXT) return fold_at;
+
+    const browser_item_t *prev_item = &doc->items[idx];
+    const char *prev = doc->text_pool + prev_item->text_offset;
+    size_t prev_len = prev_item->text_len;
+    size_t new_len = len;
+    if (prev_len > 0 && prev[prev_len - 1] == ' ') prev_len--;
+    if (new_len > 0 && text[new_len - 1] == ' ') new_len--;
+    if (prev_len != new_len || (new_len > 0 && memcmp(prev, text, new_len) != 0)) return fold_at;
+
+    if (*link_index < 0) *link_index = prev_item->link_index;
+    if (*heading_level == 0) *heading_level = prev_item->heading_level;
+    return idx;
+}
+
 void browser_document__add_text(
     browser_document_t *doc, const char *text, size_t len, int heading_level, int link_index
 ) {
     if (doc == NULL || text == NULL || len == 0) return;
+    doc->item_count = browser_document__fold_repeated_text(doc, text, len, &heading_level, &link_index);
     if (!browser_document__ext_reserve(
             &doc->text_pool_object, (const void **)&doc->text_pool, doc->text_pool_len, len,
             BROWSER_INITIAL_TEXT_CAP, BROWSER_MAX_TEXT_BYTES
