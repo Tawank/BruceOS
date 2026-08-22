@@ -54,35 +54,6 @@ int browser_render__max_scroll(const browser_document_t *doc, int font_scale);
  * after `item_index`, clamped to the document's bottom. */
 int browser_render__item_y(const browser_document_t *doc, size_t item_index, int font_scale);
 
-typedef struct {
-    int link_index;
-    int top;
-    int bottom;
-} browser_render_link_bounds_t;
-
-/* Finds one link's combined laid-out bounds. All wrapped lines belonging to
- * the link are represented by this single range. */
-bool browser_render__link_bounds(
-    const browser_document_t *doc, int link_index, int font_scale, browser_render_link_bounds_t *out_bounds
-);
-
-/* Finds the first drawable link after/before `link_index` in document order.
- * Empty links that emitted no layout tokens are skipped. The caller decides
- * whether the result is close enough to navigate to without scrolling. */
-bool browser_render__adjacent_link(
-    const browser_document_t *doc, int link_index, int direction, int font_scale,
-    browser_render_link_bounds_t *out_bounds
-);
-
-/* With no active selection, finds the first link at/below `edge_y` for Down,
- * or the last link at/above it for Up. The result may be outside the viewport;
- * callers that implement interactive navigation must apply their visibility
- * rule before selecting it. */
-bool browser_render__link_from_edge(
-    const browser_document_t *doc, int edge_y, int direction, int font_scale,
-    browser_render_link_bounds_t *out_bounds
-);
-
 #define BROWSER_ROW_MAX_LINKS 16
 
 /* One word-wrapped content row (everything sharing a single layout y), as
