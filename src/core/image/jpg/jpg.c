@@ -254,13 +254,22 @@ static bruce_result_t image__decode_jpeg_progressive_attempt(
     bool full_quality = !skip_full_quality && coefficient_size <= decoder.mem->max_memory_to_use;
     if (!skip_full_quality && decoder.progressive_mode && !full_quality &&
         coefficient_size <= LONG_MAX - 64u * 1024u) {
+        size_t required = coefficient_size + 64u * 1024u;
+        size_t largest_required = largest_component + 32u;
         bruce_memory_stats_t stats;
-        if (memory__get_stats(&stats) == BRUCE_OK) {
-            size_t required = coefficient_size + 64u * 1024u;
-            size_t largest_required = largest_component + 32u;
-            full_quality =
-                (stats.psram_free >= required && stats.psram_largest_block >= largest_required) ||
-                (stats.internal_free >= required && stats.internal_largest_block >= largest_required);
+        full_quality = memory__get_stats(&stats) == BRUCE_OK && stats.psram_free >= required &&
+                       stats.psram_largest_block >= largest_required;
+        if (!full_quality) {
+            /* memory__get_stats()'s internal_free/internal_largest_block come from
+             * MALLOC_CAP_INTERNAL, which also counts internal memory (e.g. IRAM used as
+             * heap) that isn't usable here. jpeg_get_large() falls back to plain malloc()
+             * (see jmemnobs.c), which on this target draws from MALLOC_CAP_8BIT -- the same
+             * mask __wrap_jpeg_get_large()'s own out-of-memory log above already uses. Using
+             * the wider INTERNAL figures here let this check see room that the actual
+             * allocation can't reach, pick full_quality=true, and then fail inside
+             * jpeg_start_decompress() instead of taking the backing-store path. */
+            full_quality = heap_caps_get_free_size(MALLOC_CAP_8BIT) >= required &&
+                           heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) >= largest_required;
         }
     }
     if (decoder.progressive_mode && full_quality && coefficient_size <= LONG_MAX - 64u * 1024u)
