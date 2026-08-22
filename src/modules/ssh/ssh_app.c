@@ -107,17 +107,58 @@ static void ssh_app__copy_config_value(char *out, size_t capacity, const char *v
     if (length >= 0 && (size_t)length < capacity) *was_set = true;
 }
 
+/* Prefers a PSRAM-backed memory__external block for these multi-KiB scratch
+ * buffers (config/known_hosts parsing) so they don't compete with the rest
+ * of the app for scarce internal RAM; falls back to plain memory__malloc()
+ * when PSRAM has no room, mirroring terminal_app.c's terminal__alloc_buffer()
+ * (see its comment for why memory__external_alloc() must not be called
+ * unconditionally: it would otherwise land on "swap" and pay for a real
+ * flash erase on every SSH connection on a board with no PSRAM). */
+static bruce_result_t
+ssh_app__buffer_alloc(void **out_data, bruce_memory_object_t *out_object, bool *out_external, size_t size) {
+    bruce_memory_stats_t stats;
+    bool psram_has_room = memory__get_stats(&stats) == BRUCE_OK && stats.psram_largest_block >= size;
+    if (psram_has_room) {
+        bruce_memory_object_t object;
+        if (memory__external_alloc(size, &object) == BRUCE_OK) {
+            const void *mapped = NULL;
+            if ((object.backend == BRUCE_MEMORY_BACKEND_PSRAM ||
+                 object.backend == BRUCE_MEMORY_BACKEND_INTERNAL) &&
+                memory__external_map(&object, &mapped) == BRUCE_OK) {
+                *out_data = (void *)mapped;
+                *out_object = object;
+                *out_external = true;
+                return BRUCE_OK;
+            }
+            (void)memory__external_free(&object);
+        }
+    }
+    *out_data = memory__malloc(size);
+    *out_external = false;
+    return *out_data != NULL ? BRUCE_OK : BRUCE_ERR_NO_MEMORY;
+}
+
+static void ssh_app__buffer_free(void *data, bruce_memory_object_t *object, bool external) {
+    if (external) (void)memory__external_free(object);
+    else memory__free(data);
+}
+
 static bruce_result_t ssh_app__load_config(const char *alias, ssh_app__config_t *config) {
-    char *buffer = memory__malloc(SSH_APP_CONFIG_MAX_BYTES + 1u);
-    if (buffer == NULL) return BRUCE_ERR_NO_MEMORY;
+    void *buffer_data = NULL;
+    bruce_memory_object_t buffer_object;
+    bool buffer_external = false;
+    if (ssh_app__buffer_alloc(&buffer_data, &buffer_object, &buffer_external, SSH_APP_CONFIG_MAX_BYTES + 1u) !=
+        BRUCE_OK)
+        return BRUCE_ERR_NO_MEMORY;
+    char *buffer = buffer_data;
     bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
     bruce_result_t result = storage__open(SSH_APP_CONFIG_PATH, BRUCE_STORAGE_OPEN_READ, &file);
     if (result == BRUCE_ERR_NOT_FOUND) {
-        memory__free(buffer);
+        ssh_app__buffer_free(buffer_data, &buffer_object, buffer_external);
         return BRUCE_OK;
     }
     if (result != BRUCE_OK) {
-        memory__free(buffer);
+        ssh_app__buffer_free(buffer_data, &buffer_object, buffer_external);
         return result;
     }
     size_t size = 0;
@@ -129,7 +170,7 @@ static bruce_result_t ssh_app__load_config(const char *alias, ssh_app__config_t 
     }
     storage__close(file);
     if (result != BRUCE_OK || size > SSH_APP_CONFIG_MAX_BYTES) {
-        memory__free(buffer);
+        ssh_app__buffer_free(buffer_data, &buffer_object, buffer_external);
         return result != BRUCE_OK ? result : BRUCE_ERR_RESOURCE_LIMIT;
     }
     buffer[size] = '\0';
@@ -168,7 +209,7 @@ static bruce_result_t ssh_app__load_config(const char *alias, ssh_app__config_t 
         else if (strcasecmp(line, "Port") == 0 && !config->port_set)
             config->port_set = ssh_app__parse_port(value, &config->port);
     }
-    memory__free(buffer);
+    ssh_app__buffer_free(buffer_data, &buffer_object, buffer_external);
     return BRUCE_OK;
 }
 
@@ -262,20 +303,30 @@ static bool ssh_app__find_known_fingerprint(
  * store is meant for a handful of personally-managed hosts, not a fleet. */
 static bruce_result_t
 ssh_app__store_known_fingerprint(const char *key, const uint8_t fingerprint[BRUCE_SSH_HOST_KEY_SHA256_SIZE]) {
-    char *existing = memory__malloc(SSH_APP_KNOWN_HOSTS_MAX_BYTES);
-    char *rebuilt = memory__malloc(SSH_APP_KNOWN_HOSTS_MAX_BYTES);
-    if (existing == NULL || rebuilt == NULL) {
-        memory__free(existing);
-        memory__free(rebuilt);
+    void *existing_data = NULL;
+    void *rebuilt_data = NULL;
+    bruce_memory_object_t existing_object;
+    bruce_memory_object_t rebuilt_object;
+    bool existing_external = false;
+    bool rebuilt_external = false;
+    bruce_result_t alloc_result =
+        ssh_app__buffer_alloc(&existing_data, &existing_object, &existing_external, SSH_APP_KNOWN_HOSTS_MAX_BYTES);
+    if (alloc_result == BRUCE_OK)
+        alloc_result =
+            ssh_app__buffer_alloc(&rebuilt_data, &rebuilt_object, &rebuilt_external, SSH_APP_KNOWN_HOSTS_MAX_BYTES);
+    if (alloc_result != BRUCE_OK) {
+        if (existing_data != NULL) ssh_app__buffer_free(existing_data, &existing_object, existing_external);
         return BRUCE_ERR_NO_MEMORY;
     }
+    char *existing = existing_data;
+    char *rebuilt = rebuilt_data;
 
     size_t existing_size = 0;
     bruce_result_t result =
         ssh_app__read_known_hosts(existing, SSH_APP_KNOWN_HOSTS_MAX_BYTES, &existing_size);
     if (result != BRUCE_OK) {
-        memory__free(existing);
-        memory__free(rebuilt);
+        ssh_app__buffer_free(existing_data, &existing_object, existing_external);
+        ssh_app__buffer_free(rebuilt_data, &rebuilt_object, rebuilt_external);
         return result;
     }
 
@@ -296,7 +347,7 @@ ssh_app__store_known_fingerprint(const char *key, const uint8_t fingerprint[BRUC
         }
         pos += line_len + 1;
     }
-    memory__free(existing);
+    ssh_app__buffer_free(existing_data, &existing_object, existing_external);
 
     char hex[BRUCE_SSH_HOST_KEY_SHA256_SIZE * 2 + 1];
     ssh_app__hex_encode(fingerprint, BRUCE_SSH_HOST_KEY_SHA256_SIZE, hex);
@@ -310,7 +361,7 @@ ssh_app__store_known_fingerprint(const char *key, const uint8_t fingerprint[BRUC
     bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
     result = storage__mkdir(SSH_APP_DIRECTORY);
     if (result != BRUCE_OK) {
-        memory__free(rebuilt);
+        ssh_app__buffer_free(rebuilt_data, &rebuilt_object, rebuilt_external);
         return result;
     }
     result = storage__open(
@@ -323,7 +374,7 @@ ssh_app__store_known_fingerprint(const char *key, const uint8_t fingerprint[BRUC
         result = storage__write(file, rebuilt, rebuilt_size, &written);
         storage__close(file);
     }
-    memory__free(rebuilt);
+    ssh_app__buffer_free(rebuilt_data, &rebuilt_object, rebuilt_external);
     return result;
 }
 
@@ -342,17 +393,23 @@ static bruce_result_t ssh_app__verify_host_key(bruce_ssh_id_t session, const cha
     char key[SSH_APP_KEY_MAX];
     snprintf(key, sizeof(key), "%s|%u", host, (unsigned int)port);
 
-    char *known_hosts = memory__malloc(SSH_APP_KNOWN_HOSTS_MAX_BYTES);
-    if (known_hosts == NULL) return BRUCE_ERR_NO_MEMORY;
+    void *known_hosts_data = NULL;
+    bruce_memory_object_t known_hosts_object;
+    bool known_hosts_external = false;
+    if (ssh_app__buffer_alloc(
+            &known_hosts_data, &known_hosts_object, &known_hosts_external, SSH_APP_KNOWN_HOSTS_MAX_BYTES
+        ) != BRUCE_OK)
+        return BRUCE_ERR_NO_MEMORY;
+    char *known_hosts = known_hosts_data;
     size_t known_hosts_size = 0;
     result = ssh_app__read_known_hosts(known_hosts, SSH_APP_KNOWN_HOSTS_MAX_BYTES, &known_hosts_size);
     if (result != BRUCE_OK) {
-        memory__free(known_hosts);
+        ssh_app__buffer_free(known_hosts_data, &known_hosts_object, known_hosts_external);
         return result;
     }
     uint8_t stored[BRUCE_SSH_HOST_KEY_SHA256_SIZE];
     bool known = ssh_app__find_known_fingerprint(known_hosts, known_hosts_size, key, stored);
-    memory__free(known_hosts);
+    ssh_app__buffer_free(known_hosts_data, &known_hosts_object, known_hosts_external);
 
     if (known && memcmp(stored, fingerprint, BRUCE_SSH_HOST_KEY_SHA256_SIZE) == 0) {
         stdio__printf("Host key fingerprint SHA256:%s matches the saved known_hosts entry.\n", hex);
