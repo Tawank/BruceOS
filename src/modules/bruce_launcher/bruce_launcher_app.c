@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "bruce_launcher_config.h"
 #include "bruce_launcher_icons.h"
 #include "bruce_launcher_menu.h"
 #include "core_sdk/app_runner.h"
@@ -202,8 +203,198 @@ static void bruce_launcher__draw_centered_text(
     display__print(text);
 }
 
+/* Truncates `text` to fit `max_width` px at `font_size` (a single trailing
+ * "." stands in for an ellipsis -- there's rarely room for more on the
+ * narrow strips this is used for) and draws it centered at (cx, y). No-ops
+ * on an empty string or a budget too small for even one character. */
+static void bruce_launcher__draw_label_fit(
+    const char *text, int cx, int y, int font_size, int max_width, uint16_t color, uint16_t bg
+) {
+    if (text == NULL || text[0] == '\0' || max_width <= 0) return;
+    int advance = BRUCE_LAUNCHER_FONT_ADVANCE * font_size;
+    int max_chars = advance > 0 ? max_width / advance : 0;
+    if (max_chars <= 0) return;
+
+    char buffer[40];
+    size_t len = strlen(text);
+    if ((int)len > max_chars) {
+        int keep = max_chars > 1 ? max_chars - 1 : max_chars;
+        if (keep >= (int)sizeof(buffer)) keep = sizeof(buffer) - 1;
+        memcpy(buffer, text, (size_t)keep);
+        buffer[keep] = '\0';
+        if (max_chars > 1) strncat(buffer, ".", sizeof(buffer) - strlen(buffer) - 1);
+    } else {
+        if (len >= sizeof(buffer)) len = sizeof(buffer) - 1;
+        memcpy(buffer, text, len);
+        buffer[len] = '\0';
+    }
+
+    int text_w = (int)strlen(buffer) * advance;
+    display__set_text_size(font_size);
+    display__set_text_color(color);
+    display__set_text_bg_color(bg);
+    display__set_cursor((int16_t)(cx - text_w / 2), (int16_t)y);
+    display__print(buffer);
+}
+
+static void bruce_launcher__carousel_icon_sizes(int *out_large, int *out_small) {
+    bool narrow = display__width() < 180;
+    *out_large = narrow ? 52 : 64;
+    *out_small = narrow ? 28 : 36;
+}
+
+/* Shared layout math for both the horizontal and vertical carousel: where
+ * the focused (relative offset 0) icon sits, how far its neighbors are
+ * offset along the axis of motion, and where the label line goes. Used by
+ * both the static draw (below) and the sliding transition, so a resting
+ * frame drawn by either one lines up pixel-for-pixel with the other. */
+static void bruce_launcher__carousel_geometry(
+    bool vertical, int large, int *out_cx, int *out_cy, int *out_spacing_x, int *out_spacing_y,
+    int *out_label_y
+) {
+    int w = display__width();
+    int h = display__height();
+    int content_h = h - BRUCE_LAUNCHER_STATUS_H;
+    if (vertical) {
+        int label_band = 24;
+        int track_h = content_h - label_band;
+        if (track_h < large) track_h = large;
+        *out_cx = w / 2;
+        *out_cy = BRUCE_LAUNCHER_STATUS_H + track_h / 2;
+        *out_spacing_x = 0;
+        *out_spacing_y = track_h / 2 - track_h / 7;
+        *out_label_y = h - BRUCE_LAUNCHER_BORDER_PAD - label_band + 6;
+    } else {
+        *out_cx = w / 2;
+        *out_cy = BRUCE_LAUNCHER_STATUS_H + content_h * 2 / 5;
+        *out_spacing_x = w / 2 - w / 7;
+        *out_spacing_y = 0;
+        *out_label_y = *out_cy + large / 2 + 6;
+    }
+}
+
+static void bruce_launcher__draw_root_menu_carousel(
+    const bruce_launcher_menu_t *menu, int selected, const bruce_launcher_theme_t *theme,
+    const bruce_launcher_render_config_t *render, bool vertical
+) {
+    int large, small;
+    bruce_launcher__carousel_icon_sizes(&large, &small);
+    int cx, cy, spacing_x, spacing_y, label_y;
+    bruce_launcher__carousel_geometry(vertical, large, &cx, &cy, &spacing_x, &spacing_y, &label_y);
+
+    int previous = (selected + menu->entry_count - 1) % menu->entry_count;
+    int next = (selected + 1) % menu->entry_count;
+    const bruce_launcher_entry_t *entries = bruce_launcher__menu_entries(menu);
+
+    if (menu->entry_count > 1) {
+        bruce_launcher__draw_entry_icon(
+            &entries[previous], cx - spacing_x, cy - spacing_y, small, theme->sec
+        );
+        bruce_launcher__draw_entry_icon(&entries[next], cx + spacing_x, cy + spacing_y, small, theme->sec);
+    }
+    bruce_launcher__draw_entry_icon(&entries[selected], cx, cy, large, theme->pri);
+
+    if (render->carousel_labels != BRUCE_LAUNCHER_LABELS_NONE) {
+        bruce_launcher__draw_centered_text(
+            bruce_launcher__entry_label(&entries[selected]), label_y, BRUCE_LAUNCHER_FONT_MEDIUM, theme
+        );
+    }
+    if (render->carousel_labels == BRUCE_LAUNCHER_LABELS_ALL && menu->entry_count > 1) {
+        int w = display__width();
+        int edge_budget = spacing_x > 0 ? spacing_x : spacing_y;
+        int screen_budget = vertical ? w - 2 * BRUCE_LAUNCHER_BORDER_PAD - 10 : w / 7;
+        int half_budget = edge_budget < screen_budget ? edge_budget : screen_budget;
+        int side_max_width = 2 * half_budget - 8;
+        bruce_launcher__draw_label_fit(
+            bruce_launcher__entry_label(&entries[previous]), cx - spacing_x, cy - spacing_y + small / 2 + 3,
+            BRUCE_LAUNCHER_FONT_SMALL, side_max_width, theme->sec, theme->bg
+        );
+        bruce_launcher__draw_label_fit(
+            bruce_launcher__entry_label(&entries[next]), cx + spacing_x, cy + spacing_y + small / 2 + 3,
+            BRUCE_LAUNCHER_FONT_SMALL, side_max_width, theme->sec, theme->bg
+        );
+    }
+}
+
+/* Effective column count for the grid layout: the configured value (clamped
+ * to the entry count) if set, otherwise picked from display width so cells
+ * stay a reasonable size on both small and large screens. */
+static int bruce_launcher__grid_columns(int entry_count, int configured) {
+    int cols;
+    if (configured > 0) {
+        cols = configured;
+    } else {
+        int content_w = display__width() - 2 * BRUCE_LAUNCHER_BORDER_PAD - 4;
+        cols = content_w / 60;
+        if (cols < 2) cols = 2;
+        if (cols > 5) cols = 5;
+    }
+    if (cols > entry_count) cols = entry_count;
+    return cols < 1 ? 1 : cols;
+}
+
+static void bruce_launcher__draw_root_menu_grid(
+    const bruce_launcher_menu_t *menu, int selected, const bruce_launcher_theme_t *theme,
+    const bruce_launcher_render_config_t *render
+) {
+    int w = display__width();
+    int h = display__height();
+    int top = BRUCE_LAUNCHER_STATUS_H + 4;
+    int count = menu->entry_count;
+    int cols = bruce_launcher__grid_columns(count, render->grid_columns);
+    int rows = (count + cols - 1) / cols;
+    int cell_w = (w - 2 * BRUCE_LAUNCHER_BORDER_PAD - 2) / cols;
+    int cell_h = (h - BRUCE_LAUNCHER_BORDER_PAD - 2 - top) / (rows > 0 ? rows : 1);
+
+    const bruce_launcher_entry_t *entries = bruce_launcher__menu_entries(menu);
+    for (int i = 0; i < count; ++i) {
+        int col = i % cols;
+        int row = i / cols;
+        int cell_x = BRUCE_LAUNCHER_BORDER_PAD + 2 + col * cell_w;
+        int cell_y = top + row * cell_h;
+        int cx = cell_x + cell_w / 2;
+        bool is_selected = i == selected;
+
+        int icon_size = cell_w < cell_h ? cell_w : cell_h;
+        icon_size = icon_size * 3 / 5;
+        if (icon_size > 40) icon_size = 40;
+        if (icon_size < 16) icon_size = 16;
+        int icon_y = cell_y + (render->grid_labels ? cell_h * 2 / 5 : cell_h / 2);
+
+        if (is_selected) {
+            int box = icon_size + 10;
+            display__fill_round_rect(
+                (int16_t)(cx - box / 2), (int16_t)(icon_y - box / 2), (int16_t)box, (int16_t)box, 4,
+                theme->sec
+            );
+        }
+        bruce_launcher__draw_entry_icon(
+            &entries[i], cx, icon_y, icon_size, is_selected ? theme->bg : theme->sec
+        );
+
+        if (render->grid_labels) {
+            bruce_launcher__draw_label_fit(
+                bruce_launcher__entry_label(&entries[i]), cx, icon_y + icon_size / 2 + 4,
+                BRUCE_LAUNCHER_FONT_SMALL, cell_w - 4, is_selected ? theme->pri : theme->text_muted, theme->bg
+            );
+        }
+    }
+
+    if (!render->grid_labels && count > 0) {
+        bruce_launcher__draw_centered_text(
+            bruce_launcher__entry_label(&entries[selected]), h - BRUCE_LAUNCHER_BORDER_PAD - 14,
+            BRUCE_LAUNCHER_FONT_SMALL, theme
+        );
+    }
+}
+
+/* Root-menu entry point: dispatches to whichever layout render.layout
+ * selects (see bruce_launcher_config.h). Nested submenus never call this --
+ * they always use Core's plain list dialog (dialog__choice_launcher),
+ * regardless of the root's layout. */
 static void bruce_launcher__draw_root_menu(
-    const bruce_launcher_menu_t *menu, int selected, const bruce_launcher_theme_t *theme
+    const bruce_launcher_menu_t *menu, int selected, const bruce_launcher_theme_t *theme,
+    const bruce_launcher_render_config_t *render
 ) {
     int w = display__width();
     int h = display__height();
@@ -218,24 +409,15 @@ static void bruce_launcher__draw_root_menu(
         return;
     }
 
-    bool narrow = w < 180;
-    int large = narrow ? 52 : 64;
-    int small = narrow ? 28 : 36;
-    int content_h = h - BRUCE_LAUNCHER_STATUS_H;
-    int cy = BRUCE_LAUNCHER_STATUS_H + content_h * 2 / 5;
-    int previous = (selected + menu->entry_count - 1) % menu->entry_count;
-    int next = (selected + 1) % menu->entry_count;
-
-    const bruce_launcher_entry_t *entries = bruce_launcher__menu_entries(menu);
-    if (menu->entry_count > 1) {
-        bruce_launcher__draw_entry_icon(&entries[previous], w / 7, cy, small, theme->sec);
-        bruce_launcher__draw_entry_icon(&entries[next], w - w / 7, cy, small, theme->sec);
+    switch (render->layout) {
+        case BRUCE_LAUNCHER_LAYOUT_GRID:
+            bruce_launcher__draw_root_menu_grid(menu, selected, theme, render);
+            return;
+        case BRUCE_LAUNCHER_LAYOUT_CAROUSEL_V:
+            bruce_launcher__draw_root_menu_carousel(menu, selected, theme, render, true);
+            return;
+        default: bruce_launcher__draw_root_menu_carousel(menu, selected, theme, render, false); return;
     }
-    bruce_launcher__draw_entry_icon(&entries[selected], w / 2, cy, large, theme->pri);
-
-    bruce_launcher__draw_centered_text(
-        bruce_launcher__entry_label(&entries[selected]), cy + large / 2 + 6, BRUCE_LAUNCHER_FONT_MEDIUM, theme
-    );
 }
 
 static uint16_t bruce_launcher__blend_color(uint16_t from, uint16_t to, int amount) {
@@ -251,72 +433,81 @@ static int bruce_launcher__wrap_index(int index, int count) {
     return index < 0 ? index + count : index;
 }
 
+/* center_x/center_y is where the focused (relative==0) icon sits;
+ * spacing_x/spacing_y is how far one full step moves along the axis of
+ * motion -- exactly one of the two is 0, picking horizontal vs. vertical
+ * sliding (see bruce_launcher__carousel_geometry()). */
 static void bruce_launcher__draw_sliding_icon(
     const bruce_launcher_menu_t *menu, int from, int relative, int direction, int progress, int center_x,
-    int spacing, int cy, int small, int large, const bruce_launcher_theme_t *theme
+    int center_y, int spacing_x, int spacing_y, int small, int large, const bruce_launcher_theme_t *theme
 ) {
     int position = relative * BRUCE_LAUNCHER_EASING_SCALE - direction * progress;
     int distance = abs(position);
     if (distance > BRUCE_LAUNCHER_EASING_SCALE) { distance = BRUCE_LAUNCHER_EASING_SCALE; }
     int size = large - (large - small) * distance / BRUCE_LAUNCHER_EASING_SCALE;
     uint16_t color = bruce_launcher__blend_color(theme->pri, theme->sec, distance);
-    int x = center_x + position * spacing / BRUCE_LAUNCHER_EASING_SCALE;
+    int x = center_x + position * spacing_x / BRUCE_LAUNCHER_EASING_SCALE;
+    int y = center_y + position * spacing_y / BRUCE_LAUNCHER_EASING_SCALE;
     int entry = bruce_launcher__wrap_index(from + relative, menu->entry_count);
-    bruce_launcher__draw_entry_icon(&bruce_launcher__menu_entries(menu)[entry], x, cy, size, color);
+    bruce_launcher__draw_entry_icon(&bruce_launcher__menu_entries(menu)[entry], x, y, size, color);
 }
 
 static void bruce_launcher__draw_root_transition(
     const bruce_launcher_menu_t *menu, int from, int direction, int progress,
-    const bruce_launcher_theme_t *theme
+    const bruce_launcher_theme_t *theme, const bruce_launcher_render_config_t *render, bool vertical
 ) {
-    int w = display__width();
-    int h = display__height();
-    bool narrow = w < 180;
-    int large = narrow ? 52 : 64;
-    int small = narrow ? 28 : 36;
-    int cy = BRUCE_LAUNCHER_STATUS_H + (h - BRUCE_LAUNCHER_STATUS_H) * 2 / 5;
-    int spacing = w / 2 - w / 7;
+    int large, small;
+    bruce_launcher__carousel_icon_sizes(&large, &small);
+    int cx, cy, spacing_x, spacing_y, label_y;
+    bruce_launcher__carousel_geometry(vertical, large, &cx, &cy, &spacing_x, &spacing_y, &label_y);
     int outer_before = direction > 0 ? -1 : 1;
     int outer_after = direction > 0 ? 2 : -2;
     int destination = direction;
 
     bruce_launcher__draw_sliding_icon(
-        menu, from, outer_before, direction, progress, w / 2, spacing, cy, small, large, theme
+        menu, from, outer_before, direction, progress, cx, cy, spacing_x, spacing_y, small, large, theme
     );
     bruce_launcher__draw_sliding_icon(
-        menu, from, outer_after, direction, progress, w / 2, spacing, cy, small, large, theme
+        menu, from, outer_after, direction, progress, cx, cy, spacing_x, spacing_y, small, large, theme
     );
     if (progress < BRUCE_LAUNCHER_EASING_SCALE / 2) {
         bruce_launcher__draw_sliding_icon(
-            menu, from, destination, direction, progress, w / 2, spacing, cy, small, large, theme
+            menu, from, destination, direction, progress, cx, cy, spacing_x, spacing_y, small, large, theme
         );
         bruce_launcher__draw_sliding_icon(
-            menu, from, 0, direction, progress, w / 2, spacing, cy, small, large, theme
+            menu, from, 0, direction, progress, cx, cy, spacing_x, spacing_y, small, large, theme
         );
     } else {
         bruce_launcher__draw_sliding_icon(
-            menu, from, 0, direction, progress, w / 2, spacing, cy, small, large, theme
+            menu, from, 0, direction, progress, cx, cy, spacing_x, spacing_y, small, large, theme
         );
         bruce_launcher__draw_sliding_icon(
-            menu, from, destination, direction, progress, w / 2, spacing, cy, small, large, theme
+            menu, from, destination, direction, progress, cx, cy, spacing_x, spacing_y, small, large, theme
         );
     }
 
-    int label_entry = progress < BRUCE_LAUNCHER_EASING_SCALE / 2
-                          ? from
-                          : bruce_launcher__wrap_index(from + direction, menu->entry_count);
-    bruce_launcher__draw_centered_text(
-        bruce_launcher__entry_label(&bruce_launcher__menu_entries(menu)[label_entry]),
-        cy + large / 2 + 6,
-        BRUCE_LAUNCHER_FONT_MEDIUM,
-        theme
-    );
+    if (render->carousel_labels != BRUCE_LAUNCHER_LABELS_NONE) {
+        int label_entry = progress < BRUCE_LAUNCHER_EASING_SCALE / 2
+                              ? from
+                              : bruce_launcher__wrap_index(from + direction, menu->entry_count);
+        bruce_launcher__draw_centered_text(
+            bruce_launcher__entry_label(&bruce_launcher__menu_entries(menu)[label_entry]), label_y,
+            BRUCE_LAUNCHER_FONT_MEDIUM, theme
+        );
+    }
 }
 
+/* Slides the root carousel from `from` one step in `direction` (-1 or +1).
+ * The last frame (linear == EASING_SCALE) is drawn with the plain static
+ * renderer instead of the transition one, at the settled index, so it comes
+ * out pixel-identical to what a plain redraw of that selection would show
+ * (including e.g. LABELS_ALL's side labels, which the transition itself
+ * never draws mid-slide). */
 static bruce_result_t bruce_launcher__animate_root_menu(
     const bruce_launcher_menu_t *menu, int from, int direction, const bruce_launcher_theme_t *theme,
-    uint32_t *icon_revision
+    const bruce_launcher_render_config_t *render, uint32_t *icon_revision
 ) {
+    bool vertical = render->layout == BRUCE_LAUNCHER_LAYOUT_CAROUSEL_V;
     uint64_t started_at = runtime__now();
     for (;;) {
         uint64_t elapsed = runtime__now() - started_at;
@@ -334,7 +525,12 @@ static bruce_result_t bruce_launcher__animate_root_menu(
         if (frame != BRUCE_OK) { return frame; }
 
         bruce_launcher__draw_main_border(theme);
-        bruce_launcher__draw_root_transition(menu, from, direction, progress, theme);
+        if (linear == BRUCE_LAUNCHER_EASING_SCALE) {
+            int settled = bruce_launcher__wrap_index(from + direction, menu->entry_count);
+            bruce_launcher__draw_root_menu_carousel(menu, settled, theme, render, vertical);
+        } else {
+            bruce_launcher__draw_root_transition(menu, from, direction, progress, theme, render, vertical);
+        }
         *icon_revision = bruce_launcher__draw_status_bar(theme);
         frame = display__present();
         if (frame != BRUCE_OK) { return frame; }
@@ -660,6 +856,9 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
 
     (void)input__flush();
 
+    bruce_launcher_render_config_t render;
+    bruce_launcher_config__load(&render);
+
     int selected = 0;
     int last_drawn = -1;
     int last_width = -1;
@@ -690,7 +889,7 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
             }
             if (frame != BRUCE_OK) { return frame; }
             bruce_launcher__draw_main_border(&theme);
-            bruce_launcher__draw_root_menu(menu, selected, &theme);
+            bruce_launcher__draw_root_menu(menu, selected, &theme, &render);
             icon_revision = bruce_launcher__draw_status_bar(&theme);
             status_drawn_at = runtime__now();
             frame = display__present();
@@ -728,34 +927,62 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
             case BRUCE_INPUT_CODE_LEFT:
             case BRUCE_INPUT_CODE_UP:
             case BRUCE_INPUT_CODE_PREV:
-                if (menu->is_root && menu->entry_count > 0) {
-                    int previous = selected;
-                    selected = (selected + menu->entry_count - 1) % menu->entry_count;
-                    if (menu->entry_count > 1) {
-                        result =
-                            bruce_launcher__animate_root_menu(menu, previous, -1, &theme, &icon_revision);
-                        if (result != BRUCE_OK) { return result; }
-                        last_drawn = selected;
-                    }
-                } else if (selected > 0) {
-                    selected--;
-                }
-                break;
             case BRUCE_INPUT_CODE_RIGHT:
             case BRUCE_INPUT_CODE_DOWN:
-            case BRUCE_INPUT_CODE_NEXT:
-                if (menu->is_root && menu->entry_count > 0) {
-                    int previous = selected;
-                    selected = (selected + 1) % menu->entry_count;
-                    if (menu->entry_count > 1) {
-                        result = bruce_launcher__animate_root_menu(menu, previous, 1, &theme, &icon_revision);
-                        if (result != BRUCE_OK) { return result; }
-                        last_drawn = selected;
+            case BRUCE_INPUT_CODE_NEXT: {
+                if (menu->entry_count == 0) break;
+
+                if (render.layout == BRUCE_LAUNCHER_LAYOUT_GRID) {
+                    /* A real 2D layout: LEFT/RIGHT step within the current row
+                     * (wrapping at that row's own length, which may be short
+                     * on a partially-filled last row), UP/DOWN step by a full
+                     * row (wrapping the whole grid). PREV/NEXT -- the generic
+                     * two-button-hardware codes -- fall back to flat list
+                     * order, same as they would for a plain list dialog. */
+                    int count = menu->entry_count;
+                    int cols = bruce_launcher__grid_columns(count, render.grid_columns);
+                    switch (ev.code) {
+                        case BRUCE_INPUT_CODE_PREV: selected = (selected + count - 1) % count; break;
+                        case BRUCE_INPUT_CODE_NEXT: selected = (selected + 1) % count; break;
+                        case BRUCE_INPUT_CODE_LEFT:
+                        case BRUCE_INPUT_CODE_RIGHT: {
+                            int row_start = (selected / cols) * cols;
+                            int row_len = count - row_start < cols ? count - row_start : cols;
+                            int col = selected - row_start;
+                            col = ev.code == BRUCE_INPUT_CODE_LEFT ? (col + row_len - 1) % row_len
+                                                                    : (col + 1) % row_len;
+                            selected = row_start + col;
+                            break;
+                        }
+                        default: /* UP / DOWN */
+                            selected = bruce_launcher__wrap_index(
+                                selected + (ev.code == BRUCE_INPUT_CODE_UP ? -cols : cols), count
+                            );
+                            break;
                     }
-                } else if (selected + 1 < menu->entry_count) {
-                    selected++;
+                    last_drawn = -1;
+                    break;
+                }
+
+                /* Both carousel orientations accept all six codes -- LEFT/UP
+                 * and RIGHT/DOWN alike mean "previous"/"next" regardless of
+                 * which way the carousel visually slides -- so hardware with
+                 * only a left/right pair still drives a vertical carousel,
+                 * and vice versa. */
+                bool go_previous = ev.code == BRUCE_INPUT_CODE_LEFT || ev.code == BRUCE_INPUT_CODE_UP ||
+                                    ev.code == BRUCE_INPUT_CODE_PREV;
+                int direction = go_previous ? -1 : 1;
+                int previous = selected;
+                selected = bruce_launcher__wrap_index(selected + direction, menu->entry_count);
+                if (menu->entry_count > 1) {
+                    result = bruce_launcher__animate_root_menu(
+                        menu, previous, direction, &theme, &render, &icon_revision
+                    );
+                    if (result != BRUCE_OK) { return result; }
+                    last_drawn = selected;
                 }
                 break;
+            }
             case BRUCE_INPUT_CODE_SELECT: {
                 if (menu->entry_count == 0) { break; }
                 const bruce_launcher_entry_t *entry = &bruce_launcher__menu_entries(menu)[selected];
@@ -829,6 +1056,15 @@ static int bruce_launcher__run_terminal_menu(const bruce_launcher_menu_t *menu) 
 /* -------------------------------------------------------------------------- */
 
 int bruce_launcher_app_main(int argc, char **argv) {
+    /* "bruce_launcher config ..." reconfigures how the root menu renders
+     * (bruce_launcher_config.c) instead of running the menu itself; routed
+     * here rather than through a separate registered app so the render
+     * settings stay a private implementation detail of this module, the
+     * same way the menu tree parser and icon drawing do. */
+    if (argc > 1 && strcmp(argv[1], "config") == 0) {
+        return bruce_launcher_config__run(argc - 1, argv + 1);
+    }
+
     bruce_launcher_menu_t *root = bruce_launcher__menu_load();
     if (root == NULL) {
         printf("Failed to load launcher configuration\n");

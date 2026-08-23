@@ -102,6 +102,7 @@ idf_component_register(SRCS
                      "modules/apps/apps_app.c"
                      "modules/bootanimation/bootanimation_app.c"
                      "modules/bruce_launcher/bruce_launcher_app.c"
+                    "modules/bruce_launcher/bruce_launcher_config.c"
                     "modules/bruce_launcher/bruce_launcher_icons.c"
                     "modules/bruce_launcher/bruce_launcher_menu.c"
                     "modules/bnu/bnu_app.c"
@@ -332,6 +333,7 @@ set_source_files_properties(${BRUCE_SELFTEST_SOURCES} PROPERTIES
 # "core_sdk/..." headers; Core-private includes are rejected by source review.
 add_library(bruce_sdk_builtin_launcher_check OBJECT
             "modules/bruce_launcher/bruce_launcher_app.c"
+            "modules/bruce_launcher/bruce_launcher_config.c"
             "modules/bruce_launcher/bruce_launcher_icons.c"
             "modules/bruce_launcher/bruce_launcher_menu.c")
 add_dependencies(bruce_sdk_builtin_launcher_check bruce_embedded_resources)
@@ -581,6 +583,7 @@ set(BRUCE_ARGS_SDK_CHECK_TARGETS
     bruce_sdk_builtin_bnu_check
     bruce_sdk_builtin_clock_check
     bruce_sdk_builtin_config_check
+    bruce_sdk_builtin_launcher_check
     bruce_sdk_builtin_wifi_check
     bruce_sdk_builtin_webui_check
     bruce_sdk_builtin_bluetooth_check

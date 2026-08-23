@@ -218,6 +218,10 @@ static bruce_result_t dialog__term_pick_file(
  * render_params, not a default in dialog__gui_choice(), so plain
  * dialog__choice()/_ex() callers keep their existing flush layout. */
 #define DIALOG__LIST_GAP 3
+/* How long a SELECT press must be held before dialog__gui_choice() resolves
+ * it as a long press instead of an instant selection - see
+ * bruce_dialog_render_params_t.long_press_enabled. */
+#define DIALOG__LONG_PRESS_MS 500u
 
 static int dialog__default_list_text_size(void) {
     return display__width() >= DIALOG__WIDE_DISPLAY_MIN_WIDTH ? DIALOG__LIST_TEXT_SIZE_WIDE
@@ -461,6 +465,27 @@ static bruce_result_t dialog__gui_message(bruce_dialog_kind_t kind, const char *
     return dialog__gui_wait_for_any_key();
 }
 
+/* Blocks until the SELECT press dialog__gui_choice() just consumed either
+ * releases or has been held DIALOG__LONG_PRESS_MS, whichever comes first -
+ * distinguishing a long press from a plain tap for a long_press_enabled
+ * caller. `press_started_at` is that press event's own timestamp_ms, not
+ * runtime__now() at the point of the call, so time already spent in
+ * dialog__gui_choice()'s input__read() before this ran still counts toward
+ * the hold. Only reached when a caller opts in, so every existing
+ * dialog__choice()/_ex() caller keeps returning on the raw PRESS exactly as
+ * before this existed. */
+static bool dialog__gui_wait_long_press(uint64_t press_started_at) {
+    for (;;) {
+        if (runtime__now() - press_started_at >= DIALOG__LONG_PRESS_MS) { return true; }
+        bruce_input_event_t ev;
+        bruce_result_t result = input__read(&ev, 20);
+        if (result == BRUCE_ERR_NOT_FOREGROUND) { return false; }
+        if (result == BRUCE_OK && ev.action == BRUCE_INPUT_RELEASE && ev.code == BRUCE_INPUT_CODE_SELECT) {
+            return false;
+        }
+    }
+}
+
 static bruce_result_t dialog__gui_choice(
     const char *title, const char *message, const bruce_dialog_choice_t *choices, size_t choice_count,
     size_t *out_selected, const bruce_dialog_render_params_t *render_params
@@ -526,6 +551,8 @@ static bruce_result_t dialog__gui_choice(
     bool wants_periodic_refresh = render_launcher
                                       ? s_window_renderer.draw_status != NULL
                                       : render_params != NULL && render_params->render_callback != NULL;
+    bool long_press_enabled = render_params != NULL && render_params->long_press_enabled;
+    if (long_press_enabled && render_params->out_long_press != NULL) { *render_params->out_long_press = false; }
 
     /* Discard whatever's still queued (typically the press that navigated
      * into this screen) so it can't be replayed as an immediate selection on
@@ -697,6 +724,12 @@ static bruce_result_t dialog__gui_choice(
                 }
                 break;
             case BRUCE_INPUT_CODE_SELECT:
+                if (long_press_enabled) {
+                    bool is_long_press = dialog__gui_wait_long_press(ev.timestamp_ms);
+                    if (render_params->out_long_press != NULL) { *render_params->out_long_press = is_long_press; }
+                }
+                *out_selected = (size_t)selected;
+                return BRUCE_OK;
             case '\r': *out_selected = (size_t)selected; return BRUCE_OK;
             case BRUCE_INPUT_CODE_BACK: return BRUCE_ERR_CANCELLED;
             default: break;
@@ -1510,6 +1543,16 @@ static bruce_result_t dialog__gui_pick_file_run(
             return BRUCE_OK;
         }
 
+        /* A long press on a directory row returns it, the same way a plain
+         * press on a file does, instead of descending into it - see
+         * dialog__pick_file_ex()'s doc comment. */
+        if (effective_params->long_press_enabled && effective_params->out_long_press != NULL &&
+            *effective_params->out_long_press) {
+            snprintf(out_path, out_path_size, "%s", ws->next_path);
+            memory__free(entries);
+            return BRUCE_OK;
+        }
+
         snprintf(ws->current_path, sizeof(ws->current_path), "%s", ws->next_path);
         ws->returning_from[0] = '\0';
         memory__free(entries);
@@ -1531,12 +1574,24 @@ static bruce_result_t dialog__gui_pick_file(
     effective_params.render_callback = dialog__pick_file_draw_footer_usage;
     effective_params.list_gap = DIALOG__LIST_GAP;
 
+    /* Also own out_long_press: dialog__gui_pick_file_run() needs to read it
+     * after every dialog__gui_choice() call to decide whether a long press
+     * on a directory should stop the picker there instead of descending, so
+     * it must always get a non-NULL slot to write into even when the
+     * original caller passed NULL (wanting long_press_enabled's folder
+     * behavior without caring which press kind produced the result). The
+     * caller's own slot, if any, is filled in from it below. */
+    bool *caller_out_long_press = effective_params.out_long_press;
+    bool picker_long_press = false;
+    if (effective_params.long_press_enabled) { effective_params.out_long_press = &picker_long_press; }
+
     dialog__pick_file_workspace_t *ws = memory__malloc(sizeof(*ws));
     if (ws == NULL) { return BRUCE_ERR_NO_MEMORY; }
     bruce_result_t result = dialog__gui_pick_file_run(
         ws, initial_path, extension_filter, out_path, out_path_size, title, &effective_params
     );
     memory__free(ws);
+    if (caller_out_long_press != NULL) { *caller_out_long_press = picker_long_press; }
     return result;
 }
 

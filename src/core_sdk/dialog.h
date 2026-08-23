@@ -41,6 +41,21 @@ typedef struct {
      * title bar above it. 0 (the default) draws the list flush against
      * them, matching every existing caller. */
     int list_gap;
+    /* When true, a SELECT press held for at least DIALOG__LONG_PRESS_MS
+     * before release resolves as a long press instead of an immediate
+     * selection - dialog__choice_ex()/dialog__pick_file_ex() still return
+     * BRUCE_OK with the highlighted row in *out_selected either way, but
+     * report which one happened through `out_long_press` below. False (the
+     * default) keeps every existing caller returning the instant a SELECT
+     * press arrives, exactly as before this field existed. GUI only;
+     * ignored on a terminal/non-GUI dialog. */
+    bool long_press_enabled;
+    /* Set to true/false on every long_press_enabled selection, reporting
+     * whether it was a long press. May be NULL if the caller only set
+     * long_press_enabled to change dialog__pick_file_ex()'s folder
+     * behavior below without needing to know afterward which kind of
+     * press it was. Left untouched when long_press_enabled is false. */
+    bool *out_long_press;
 } bruce_dialog_render_params_t;
 
 /* Dialog APIs return BRUCE_OK or BRUCE_ERR_CANCELLED, BRUCE_ERR_BUSY,
@@ -79,7 +94,16 @@ bruce_result_t dialog__pick_file(
  * dialog__pick_file()) - its `render_callback`/`render_callback_context`
  * are reserved for the picker's own use (it draws the current volume's
  * name and used/total space in the bottom bar) and are overridden if set.
- * Ignored on non-GUI/terminal picks. */
+ * Ignored on non-GUI/terminal picks.
+ *
+ * `render_params->long_press_enabled` additionally changes what a long
+ * press on a *directory* row does: instead of descending into it, the
+ * picker returns immediately with that directory's own path in `out_path`
+ * (still BRUCE_OK, `*render_params->out_long_press` true) - the same way a
+ * short press on a file returns that file's path - so a caller can offer
+ * folder-level actions (rename/delete/info, ...) the way it already can
+ * for a picked file. A short press on a directory still descends into it
+ * exactly as before, long_press_enabled or not. */
 bruce_result_t dialog__pick_file_ex(
     const char *initial_path, const char *extension_filter, char *out_path, size_t out_path_size,
     const char *title, const bruce_dialog_render_params_t *render_params

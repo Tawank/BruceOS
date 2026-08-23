@@ -11,5 +11,8 @@
  * which is the actual menu application.
  * `launcher -s` remains resident and restarts the GUI launcher whenever no
  * foreground application remains.
+ * `launcher config` forwards to "<configured launcher app> config" instead
+ * of starting the menu, so it opens whichever app's settings screen is
+ * actually configured to run (bruce_launcher's by default).
  */
 int launcher_app_main(int argc, char **argv);

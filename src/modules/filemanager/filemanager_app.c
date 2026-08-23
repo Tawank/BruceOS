@@ -254,19 +254,62 @@ static void filemanager__show_error(const char *action, bruce_result_t result) {
     (void)dialog__message(BRUCE_DIALOG_ERROR, "Apps", message);
 }
 
-static bruce_result_t filemanager__delete_file(const char *path) {
+/* `kind` ("file"/"folder") only changes the confirmation dialog's wording;
+ * storage__remove() itself already refuses a non-empty directory, so a
+ * folder holding anything comes back as an ordinary error here rather than
+ * being silently skipped. */
+static bruce_result_t filemanager__delete_entry(const char *path, const char *kind) {
     const bruce_dialog_choice_t confirm_actions[] = {
         {.label = "Delete", .value = "delete"},
         {.label = "Cancel", .value = "cancel"},
     };
+    char title[24];
+    snprintf(title, sizeof(title), "Delete %s?", kind);
+
     size_t selected = 0;
     bruce_result_t result = dialog__choice(
-        "Delete file?", path, confirm_actions, sizeof(confirm_actions) / sizeof(confirm_actions[0]), &selected
+        title, path, confirm_actions, sizeof(confirm_actions) / sizeof(confirm_actions[0]), &selected
     );
     if (result != BRUCE_OK) return result;
     if (strcmp(confirm_actions[selected].value, "delete") != 0) return BRUCE_ERR_CANCELLED;
 
     return storage__remove(path);
+}
+
+/* Prompts for a new name and renames `path` (file or folder) in place,
+ * leaving it untouched on cancel/error. On success, `path` itself is
+ * rewritten to the new full path so the caller can re-select it. */
+static bruce_result_t filemanager__rename_entry(char *path, size_t path_size) {
+    const char *base = filemanager__basename(path);
+    char new_name[BRUCE_STORAGE_NAME_MAX];
+    bruce_result_t result = dialog__text_input("Rename", base, base, false, new_name, sizeof(new_name));
+    if (result != BRUCE_OK) return result;
+    if (new_name[0] == '\0' || strchr(new_name, '/') != NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    if (strcmp(new_name, base) == 0) return BRUCE_OK;
+
+    size_t dir_len = (size_t)(base - path);
+    char new_path[BRUCE_STORAGE_PATH_MAX];
+    if (dir_len >= sizeof(new_path)) return BRUCE_ERR_INVALID_PATH;
+    memcpy(new_path, path, dir_len);
+    int written = snprintf(new_path + dir_len, sizeof(new_path) - dir_len, "%s", new_name);
+    if (written < 0 || (size_t)written >= sizeof(new_path) - dir_len) return BRUCE_ERR_RESOURCE_LIMIT;
+
+    result = storage__rename(path, new_path);
+    if (result == BRUCE_OK) snprintf(path, path_size, "%s", new_path);
+    return result;
+}
+
+/* Folder counterpart to filemanager__show_info(): a directory can't be
+ * storage__open()'d for a byte size, so this reports its entry count
+ * instead. */
+static bruce_result_t filemanager__show_folder_info(const char *path) {
+    size_t count = 0;
+    bruce_result_t result = storage__list(path, NULL, 0, &count);
+    if (result != BRUCE_OK) return result;
+
+    char message[BRUCE_STORAGE_PATH_MAX + 32];
+    snprintf(message, sizeof(message), "%s\n%zu item%s", path, count, count == 1 ? "" : "s");
+    return dialog__message(BRUCE_DIALOG_INFO, "Folder info", message);
 }
 
 int filemanager_app_main(int argc, char **argv) {
@@ -276,18 +319,34 @@ int filemanager_app_main(int argc, char **argv) {
         {.label = "Open with...", .value = "openw" },
         {.label = "View",         .value = "view"  },
         {.label = "Edit",         .value = "edit"  },
+        {.label = "Rename",       .value = "rename"},
         {.label = "File info",    .value = "info"  },
         {.label = "Delete",       .value = "delete"},
         {.label = "Back",         .value = "back"  },
     };
+    /* Long-pressing a folder row returns it here instead of descending into
+     * it (see dialog__pick_file_ex()'s doc comment), so it gets this menu
+     * instead of the file one above. */
+    const bruce_dialog_choice_t folder_actions[] = {
+        {.label = "Rename",      .value = "rename"},
+        {.label = "Folder info", .value = "info"  },
+        {.label = "Delete",      .value = "delete"},
+        {.label = "Back",        .value = "back"  },
+    };
     (void)argc;
     (void)argv;
 
-    const bruce_dialog_render_params_t action_params = dialog__default_render_params(2);
-    /* The last file picked, re-passed as dialog__pick_file_ex()'s starting
-     * point below: it browses that file's directory with the file itself
-     * pre-selected, so Esc/"Back" out of the action menu lands the browser
-     * back on the same file instead of just the same directory. */
+    bruce_dialog_render_params_t action_params = dialog__default_render_params(2);
+    /* Lets a long press on a folder row return it below instead of
+     * descending into it; out_long_press is left NULL since which entry
+     * came back (probed via storage__list() further down) is all this loop
+     * needs to know. */
+    action_params.long_press_enabled = true;
+    /* The last file/folder picked, re-passed as dialog__pick_file_ex()'s
+     * starting point below: it browses that entry's directory with the
+     * entry itself pre-selected, so Esc/"Back" out of the action menu lands
+     * the browser back on the same entry instead of just the same
+     * directory. */
     char last_path[BRUCE_STORAGE_PATH_MAX] = "/";
 
     for (;;) {
@@ -305,11 +364,24 @@ int filemanager_app_main(int argc, char **argv) {
         }
         snprintf(last_path, sizeof(last_path), "%s", path);
 
+        /* A short press always yields a file, same as before this feature
+         * existed; a long press yields a folder only when it landed on one
+         * (see dialog__pick_file_ex()'s doc comment) - it still returns the
+         * file itself, same as a short press, when it landed on a file. So
+         * rather than track which kind of press this was, just check what
+         * came back: storage__list() succeeds on a directory and fails on a
+         * file. */
+        size_t probe_count = 0;
+        bool is_folder = storage__list(path, NULL, 0, &probe_count) == BRUCE_OK;
+
         size_t selected = 0;
         /* Plain dialog__choice(), not the picker's full-bleed action_params:
          * this is a small action menu over the already-visible file browser,
          * so it reads better as a popup window than another full screen. */
-        result = dialog__choice(path, NULL, actions, sizeof(actions) / sizeof(actions[0]), &selected);
+        const bruce_dialog_choice_t *menu = is_folder ? folder_actions : actions;
+        size_t menu_count = is_folder ? sizeof(folder_actions) / sizeof(folder_actions[0])
+                                       : sizeof(actions) / sizeof(actions[0]);
+        result = dialog__choice(path, NULL, menu, menu_count, &selected);
         if (result == BRUCE_ERR_CANCELLED && filemanager__resume_after_handoff()) {
             (void)input__flush();
             continue;
@@ -320,9 +392,18 @@ int filemanager_app_main(int argc, char **argv) {
             continue;
         }
 
-        const char *action = actions[selected].value;
+        const char *action = menu[selected].value;
         if (strcmp(action, "back") == 0) continue;
-        if (strcmp(action, "open") == 0) {
+        if (is_folder) {
+            if (strcmp(action, "rename") == 0) {
+                result = filemanager__rename_entry(path, sizeof(path));
+                if (result == BRUCE_OK) snprintf(last_path, sizeof(last_path), "%s", path);
+            } else if (strcmp(action, "info") == 0) {
+                result = filemanager__show_folder_info(path);
+            } else if (strcmp(action, "delete") == 0) {
+                result = filemanager__delete_entry(path, "folder");
+            }
+        } else if (strcmp(action, "open") == 0) {
             result = filemanager__open_default(path, gui);
         } else if (strcmp(action, "openw") == 0) {
             result = filemanager__pick_open_with_app(path, gui);
@@ -330,13 +411,16 @@ int filemanager_app_main(int argc, char **argv) {
             result = filemanager__view_file(path, gui);
         } else if (strcmp(action, "edit") == 0) {
             result = filemanager__edit_file(path, gui);
+        } else if (strcmp(action, "rename") == 0) {
+            result = filemanager__rename_entry(path, sizeof(path));
+            if (result == BRUCE_OK) snprintf(last_path, sizeof(last_path), "%s", path);
         } else if (strcmp(action, "info") == 0) {
             result = filemanager__show_info(path);
         } else if (strcmp(action, "delete") == 0) {
-            result = filemanager__delete_file(path);
+            result = filemanager__delete_entry(path, "file");
         }
         if (result != BRUCE_OK && result != BRUCE_ERR_CANCELLED) {
-            filemanager__show_error(actions[selected].label, result);
+            filemanager__show_error(menu[selected].label, result);
         }
         (void)input__flush();
     }

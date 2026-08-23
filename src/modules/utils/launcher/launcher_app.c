@@ -28,14 +28,19 @@ static bool launcher__has_foreground(void) {
     return false;
 }
 
-static int launcher__start(bool gui, bruce_launch_mode_t mode) {
+/* Resolves the configured launcher app (falling back to LAUNCHER__FALLBACK_APP)
+ * and runs it with `arg` -- shared by plain "launcher" starts and by
+ * "launcher config", which forwards to "<configured launcher> config" so the
+ * settings screen always belongs to whichever app is actually configured to
+ * run as the menu, not hardcoded to bruce_launcher. */
+static int launcher__run_target(bool gui, bruce_launch_mode_t mode, const char *arg) {
     const char *configured = config__get_launcher();
     const char *target = (configured != NULL && configured[0] != '\0') ? configured : LAUNCHER__FALLBACK_APP;
     const bruce_environment_variable_t gui_env[] = {
         {.name = "GUI", .value = "1"}
     };
 
-    int result = app_runner__run_with_environment(target, NULL, mode, gui ? gui_env : NULL, gui ? 1u : 0u);
+    int result = app_runner__run_with_environment(target, arg, mode, gui ? gui_env : NULL, gui ? 1u : 0u);
     if (result < 0 && strcmp(target, LAUNCHER__FALLBACK_APP) != 0) {
         stdio__printf(
             "launcherApp \"%s\" failed to start (%d); falling back to " LAUNCHER__FALLBACK_APP "\n",
@@ -43,13 +48,22 @@ static int launcher__start(bool gui, bruce_launch_mode_t mode) {
             result
         );
         result = app_runner__run_with_environment(
-            LAUNCHER__FALLBACK_APP, NULL, mode, gui ? gui_env : NULL, gui ? 1u : 0u
+            LAUNCHER__FALLBACK_APP, arg, mode, gui ? gui_env : NULL, gui ? 1u : 0u
         );
     }
     return result;
 }
 
+static int launcher__start(bool gui, bruce_launch_mode_t mode) {
+    return launcher__run_target(gui, mode, NULL);
+}
+
 int launcher_app_main(int argc, char **argv) {
+    if (argc > 1 && strcmp(argv[1], "config") == 0) {
+        int result = launcher__run_target(runtime__gui_requested(), BRUCE_LAUNCH_FOREGROUND, "config");
+        return result < 0 ? result : 0;
+    }
+
     if (!launcher__has_arg(argc, argv, "-s")) {
         bruce_process_snapshot_t snapshot;
         bruce_launch_mode_t mode = BRUCE_LAUNCH_FOREGROUND;

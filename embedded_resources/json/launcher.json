@@ -33,6 +33,7 @@
   "Clock@clock-outline": "clock",
   "Config@cog": {
     "Display & UI": "config display",
+    "Launcher": "launcher config",
     "LED Config": "config led",
     "Audio Config": "config audio",
     "System Config": {
