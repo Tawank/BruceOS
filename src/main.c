@@ -8,6 +8,7 @@
 #include "core/autostart/autostart.h"
 #include "core/config/config.h"
 #include "core/device/device.h"
+#include "core/disk/disk.h"
 #include "core/display/display.h"
 #include "core/event_loop/event_loop.h"
 #include "core/process/process.h"
@@ -157,6 +158,12 @@ void app_runner__register_defaults(void) {
 bool init_storage(void) {
     bool storage_ok = storage__init();
     if (!storage_ok) printf("Storage initialization failed\n");
+    /* Independent of internal storage: a board with no SD slot at all
+     * (BRUCE_SD_ENABLED unset) or no card inserted just leaves /sdcard
+     * unmounted, so the result isn't checked here - `lsblk`/`mount` reflect
+     * whatever actually happened, and storage__sd_mount_spi() already logs
+     * a warning on failure. */
+    disk__mount_sd_boot();
     return storage_ok;
 }
 

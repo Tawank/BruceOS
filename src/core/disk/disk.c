@@ -100,6 +100,22 @@ static bool disk__mount_point_valid(const char *mount_point) {
     return true;
 }
 
+#if CONFIG_BRUCE_SD_ENABLED
+/* Board-configured SD pins (Kconfig, set per-board in sdkconfig.defaults),
+ * shared by disk__mount()'s "sd0" case and disk__mount_sd_boot() below so
+ * the two entry points can never disagree on which pins to use. */
+static bool disk__sd_mount_default(void) {
+    const storage__sdspi_config_t config = {
+        .host = (spi_host_device_t)CONFIG_BRUCE_SD_SPI_HOST,
+        .mosi_gpio = CONFIG_BRUCE_SD_PIN_MOSI,
+        .miso_gpio = CONFIG_BRUCE_SD_PIN_MISO,
+        .sck_gpio = CONFIG_BRUCE_SD_PIN_SCK,
+        .cs_gpio = CONFIG_BRUCE_SD_PIN_CS,
+    };
+    return storage__sd_mount_spi(&config);
+}
+#endif
+
 bruce_result_t disk__mount(const char *name, const char *mount_point) {
     if (name == NULL || mount_point == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     if (!disk__caller_is_built_in()) return BRUCE_ERR_PERMISSION;
@@ -107,14 +123,7 @@ bruce_result_t disk__mount(const char *name, const char *mount_point) {
     if (strcmp(name, "sd0") == 0) {
         if (strcmp(mount_point, "/sdcard") != 0) return BRUCE_ERR_INVALID_PATH;
 #if CONFIG_BRUCE_SD_ENABLED
-        const storage__sdspi_config_t config = {
-            .host = (spi_host_device_t)CONFIG_BRUCE_SD_SPI_HOST,
-            .mosi_gpio = CONFIG_BRUCE_SD_PIN_MOSI,
-            .miso_gpio = CONFIG_BRUCE_SD_PIN_MISO,
-            .sck_gpio = CONFIG_BRUCE_SD_PIN_SCK,
-            .cs_gpio = CONFIG_BRUCE_SD_PIN_CS,
-        };
-        return storage__sd_mount_spi(&config) ? BRUCE_OK : BRUCE_ERR_IO;
+        return disk__sd_mount_default() ? BRUCE_OK : BRUCE_ERR_IO;
 #else
         return BRUCE_ERR_UNSUPPORTED;
 #endif
@@ -126,6 +135,22 @@ bruce_result_t disk__mount(const char *name, const char *mount_point) {
      * rejects both; any other label is an extra partition to mount here. */
     if (!disk__mount_point_valid(mount_point)) return BRUCE_ERR_INVALID_PATH;
     return storage__mount_partition(name, mount_point);
+}
+
+/* Boot-time counterpart to disk__mount("sd0", "/sdcard"): main.c calls this
+ * before any process is registered, so disk__mount()'s "built-in caller"
+ * permission check would reject it (process_registry__current_context()
+ * finds no record for the main task at all). A card that fails to mount
+ * here - absent, unformatted, wrong voltage - is routine, not fatal, so
+ * this reports success only, matching storage__sd_mount_spi()'s own
+ * warning-level logging on failure. Returns false immediately, without
+ * touching hardware, when the board has no SD slot at all. */
+bool disk__mount_sd_boot(void) {
+#if CONFIG_BRUCE_SD_ENABLED
+    return disk__sd_mount_default();
+#else
+    return false;
+#endif
 }
 
 bruce_result_t disk__unmount(const char *name_or_mount_point) {

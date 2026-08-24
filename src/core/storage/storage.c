@@ -386,6 +386,12 @@ bool storage__sd_mount_spi(const storage__sdspi_config_t *config) {
     }
     s_sd_host = config->host;
     s_sd_ready = true;
+    ESP_LOGI(
+        TAG,
+        "mounted SD card at %s (%llu bytes)",
+        STORAGE__SD_MOUNT_PATH,
+        (unsigned long long)s_sd_card->csd.capacity * s_sd_card->csd.sector_size
+    );
     storage__unlock();
     return true;
 }
