@@ -144,6 +144,8 @@ int selftest_app_main(int argc, char **argv) {
     RUN_SELFTEST(selftest__run_terminal_editing_case);
     RUN_SELFTEST(selftest__run_shell_language_case);
     RUN_SELFTEST(selftest__run_shell_script_case);
+    RUN_SELFTEST(selftest__run_shell_control_flow_case);
+    RUN_SELFTEST(selftest__run_shell_multiline_case);
     RUN_SELFTEST(selftest__run_shell_stdio_inheritance_case);
     RUN_SELFTEST(selftest__run_shell_tty_size_case);
     RUN_SELFTEST(selftest__run_bnu_case);

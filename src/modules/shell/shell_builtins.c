@@ -10,11 +10,13 @@
 #include "core_sdk/environment.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
+#include "shell_condition.h"
 #include "shell_parser.h"
 #include "shell_executor.h"
 
 static const char *const s_shell_builtin_names[] = {
-    "echo", "true", "false", "cd", "set", "unset", "export", "clear", "reset", "help", "exit"
+    "echo", "true",  "false", "cd",   "set",  "unset", "export", "clear",
+    "reset", "help",  "exit",  "test", "[",    "[[",
 };
 
 static int shell_builtins__find_index(const shell_state_t *state, const char *name) {
@@ -213,6 +215,9 @@ int shell_builtins__run(shell_state_t *state, int argc, char **argv) {
     }
     if (strcmp(argv[0], "true") == 0) return 0;
     if (strcmp(argv[0], "false") == 0) return 1;
+    if (strcmp(argv[0], "test") == 0 || strcmp(argv[0], "[") == 0 || strcmp(argv[0], "[[") == 0) {
+        return shell_condition__run(argc, argv);
+    }
     if (strcmp(argv[0], "cd") == 0) return shell_builtins__cd(state, argc, argv);
     if (strcmp(argv[0], "set") == 0) {
         if (argc != 1) {
@@ -318,7 +323,7 @@ int shell_builtins__run(shell_state_t *state, int argc, char **argv) {
         state->exit_status = status;
         return status;
     }
-    stdio__printf("Builtins: echo true false cd set unset export clear reset help exit\n");
+    stdio__printf("Builtins: echo true false cd set unset export clear reset help exit test [ [[\n");
     stdio__printf("Operators: ; && || and producer | text. Redirection is unsupported.\n");
     return 0;
 }

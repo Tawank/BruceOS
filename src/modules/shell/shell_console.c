@@ -31,6 +31,11 @@
  * state instead of replacing it, so the prompt word itself would render
  * underlined until something else (like the `reset` builtin) clears it. */
 static const char SHELL_CONSOLE_PROMPT[] = "\r\033[0m\033[2K\033[1;36mbruce\033[0m$ ";
+/* Shown instead, while shell_app.c's shell__interactive() is still
+ * accumulating a multi-line if/fi or function block -- the same
+ * reset-then-clear-line convention as the primary prompt, styled as
+ * secondary (dim) rather than the "bruce" brand color. */
+static const char SHELL_CONSOLE_CONTINUATION_PROMPT[] = "\r\033[0m\033[2K\033[2m> \033[0m";
 static volatile bool s_shell_console_ready;
 
 typedef struct {
@@ -99,8 +104,8 @@ static bool shell_console__tab_state_remember_capacity(shell_console_tab_state_t
     return true;
 }
 
-static void shell_console__redraw(const shell_line_editor_t *editor) {
-    (void)stdio__write(SHELL_CONSOLE_PROMPT, sizeof(SHELL_CONSOLE_PROMPT) - 1);
+static void shell_console__redraw(const shell_line_editor_t *editor, const char *prompt) {
+    (void)stdio__write(prompt, strlen(prompt));
     (void)stdio__write(editor->text, editor->length);
     if (editor->cursor < editor->length) {
         stdio__printf("\033[%uD", (unsigned)(editor->length - editor->cursor));
@@ -536,7 +541,8 @@ static bool shell_console__handle_byte(
     }
 }
 
-int shell_console__read_line(char *line, size_t capacity, bool *skip_lf) {
+int shell_console__read_line(char *line, size_t capacity, bool *skip_lf, const char *prompt) {
+    if (prompt == NULL) prompt = SHELL_CONSOLE_PROMPT;
     shell_line_editor_t editor;
     shell_line_editor__init(&editor, line, capacity);
     size_t draft_capacity = capacity > 0 ? capacity : 1u;
@@ -545,7 +551,7 @@ int shell_console__read_line(char *line, size_t capacity, bool *skip_lf) {
     shell_history_browser_t history;
     shell_console_tab_state_t tab_state = {0};
     shell_history_browser__init(&history, draft, draft_capacity);
-    shell_console__redraw(&editor);
+    shell_console__redraw(&editor, prompt);
     s_shell_console_ready = true;
 
     for (;;) {
@@ -570,9 +576,11 @@ int shell_console__read_line(char *line, size_t capacity, bool *skip_lf) {
         }
         bool redraw = shell_console__handle_byte(&editor, &history, &tab_state, byte);
         if (byte != '\t') shell_console__tab_reset(&tab_state);
-        if (redraw) shell_console__redraw(&editor);
+        if (redraw) shell_console__redraw(&editor, prompt);
     }
 }
+
+const char *shell_console__continuation_prompt(void) { return SHELL_CONSOLE_CONTINUATION_PROMPT; }
 
 void shell_console__reset_ready(void) { s_shell_console_ready = false; }
 

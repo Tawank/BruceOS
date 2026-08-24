@@ -48,9 +48,20 @@ int shell_parser__plan(const char *line, shell_plan_t *plan, const char **error)
     bool double_quote = false;
     bool escaped = false;
     bool token_boundary = true;
+    /* Set while skipping a "# ..." comment. Unlike the rest of this scanner,
+     * a comment isn't scoped to one physical line -- shell_compound.c feeds
+     * whole multi-line if/fi and function blocks through here in one call,
+     * with real '\n' bytes between the original lines (see the '\n'
+     * connector case below) -- so a comment must stop at the next '\n'
+     * rather than swallowing every statement after it in the block. */
+    bool in_comment = false;
 
     for (size_t i = 0; i <= length; ++i) {
         char c = i < length ? line[i] : '\0';
+        if (in_comment) {
+            if (c != '\n' && c != '\0') continue;
+            in_comment = false;
+        }
         if (escaped) {
             escaped = false;
             token_boundary = false;
@@ -77,8 +88,8 @@ int shell_parser__plan(const char *line, shell_plan_t *plan, const char **error)
         }
         if (single || double_quote) continue;
         if (c == '#' && token_boundary) {
-            length = i;
-            c = '\0';
+            in_comment = true;
+            continue;
         }
         if (c == '<' || c == '>') {
             *error = "redirection is unsupported";
@@ -87,7 +98,7 @@ int shell_parser__plan(const char *line, shell_plan_t *plan, const char **error)
 
         shell_connector_t connector = SHELL_CONNECT_NONE;
         size_t operator_size = 0;
-        if (c == ';') {
+        if (c == ';' || c == '\n') {
             connector = SHELL_CONNECT_SEQUENCE;
             operator_size = 1;
         } else if (c == '&' && i + 1 < length && line[i + 1] == '&') {
@@ -123,12 +134,21 @@ int shell_parser__plan(const char *line, shell_plan_t *plan, const char **error)
                     return -1;
                 }
                 next_connector = SHELL_CONNECT_NONE;
-            } else if (operator_size != 0 && (plan->count == 0 || next_connector != SHELL_CONNECT_NONE)) {
+            } else if (
+                operator_size != 0 && c != '\n' && (plan->count == 0 || next_connector != SHELL_CONNECT_NONE)
+            ) {
                 *error = "unexpected operator";
                 return -1;
             }
             if (operator_size != 0) {
-                next_connector = connector;
+                /* A blank line, or a '\n' right after another separator
+                 * (";\n", a blank line between statements, "&&\n" line
+                 * continuation into the next physical line, ...) carries no
+                 * command of its own -- unlike an explicit ';'/'&&'/'||'/'|'
+                 * with nothing before it, which is a real syntax error, this
+                 * is just whitespace and must not downgrade or clobber
+                 * whatever real connector (if any) is already pending. */
+                if (c != '\n' || next_connector == SHELL_CONNECT_NONE) next_connector = connector;
                 i += operator_size - 1;
                 start = i + 1;
                 token_boundary = true;
@@ -228,6 +248,20 @@ static int shell_parser__expand(
         int written = snprintf(status, sizeof(status), "%d", last_status);
         *position = i + 2;
         return written > 0 && shell_word_buffer__append(word, status, (size_t)written) ? 0 : -1;
+    }
+    /* $0/$1../$9/$# -- a function call's name, its positional parameters,
+     * and how many of them there are (see shell_compound__call_function()
+     * in shell_compound.c, and shell_executor__lookup() in shell_executor.c,
+     * which is what actually resolves these through `lookup`). Bash itself
+     * only ever expands a single digit unbraced this way ($10 is $1 followed
+     * by a literal "0"), so this doesn't loop to collect more digits. An
+     * unset positional parameter expands to nothing, same as an unset named
+     * variable below. */
+    if (command->text[i + 1] == '#' || isdigit((unsigned char)command->text[i + 1])) {
+        char key[2] = {command->text[i + 1], '\0'};
+        *position = i + 2;
+        const char *value = lookup != NULL ? lookup(context, key) : NULL;
+        return value == NULL || shell_word_buffer__append(word, value, strlen(value)) ? 0 : -1;
     }
     if (command->text[i + 1] == '{') {
         i += 2;

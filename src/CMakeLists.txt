@@ -150,6 +150,8 @@ idf_component_register(SRCS
                     "modules/loaders/js/serial_js.c"
                      "modules/loaders/js/wifi_js.c"
                      "modules/shell/shell_app.c"
+                     "modules/shell/shell_condition.c"
+                     "modules/shell/shell_compound.c"
                      "modules/shell/shell_console.c"
                      "modules/shell/shell_history.c"
                      "modules/shell/shell_line_editor.c"
@@ -497,6 +499,8 @@ target_include_directories(bruce_sdk_builtin_utils_serial_commands_check PRIVATE
 
 add_library(bruce_sdk_builtin_shell_check OBJECT
             "modules/shell/shell_app.c"
+            "modules/shell/shell_condition.c"
+            "modules/shell/shell_compound.c"
             "modules/shell/shell_console.c"
             "modules/shell/shell_history.c"
             "modules/shell/shell_line_editor.c"

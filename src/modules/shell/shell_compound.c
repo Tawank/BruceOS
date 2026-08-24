@@ -1,0 +1,593 @@
+#include "shell_compound.h"
+
+#include <ctype.h>
+#include <stdio.h>
+#include <string.h>
+
+#include "core_sdk/memory.h"
+#include "core_sdk/stdio.h"
+#include "shell_executor.h"
+#include "shell_parser.h"
+
+static void shell_compound__trim(const char *text, size_t length, size_t *out_start, size_t *out_len) {
+    size_t start = 0;
+    size_t end = length;
+    while (start < end && isspace((unsigned char)text[start])) start++;
+    while (end > start && isspace((unsigned char)text[end - 1])) end--;
+    *out_start = start;
+    *out_len = end - start;
+}
+
+/* Matches `keyword` ("if"/"elif"/"then"/"else"/"fi") against cmd's trimmed
+ * text as a reserved word in command position: either the whole command is
+ * bare (== keyword, nothing else -- the rest of the construct starts at the
+ * next flat command) or it starts with `keyword` followed by whitespace,
+ * with the remainder ("then echo hi", "if [ -n \"$x\" ]") returned as
+ * *rest / *rest_len for the caller to run as the construct's first statement.
+ * A word that merely starts with `keyword` (e.g. "ifconfig") never matches. */
+static bool shell_compound__match_keyword(
+    const shell_command_t *cmd, const char *keyword, const char **rest, size_t *rest_len
+) {
+    size_t start, len;
+    shell_compound__trim(cmd->text, cmd->length, &start, &len);
+    const char *text = cmd->text + start;
+    size_t keyword_len = strlen(keyword);
+    if (len < keyword_len || memcmp(text, keyword, keyword_len) != 0) return false;
+    if (len == keyword_len) {
+        *rest = text + keyword_len;
+        *rest_len = 0;
+        return true;
+    }
+    if (!isspace((unsigned char)text[keyword_len])) return false;
+    size_t rs = keyword_len;
+    size_t rl = len - keyword_len;
+    while (rl > 0 && isspace((unsigned char)text[rs])) {
+        rs++;
+        rl--;
+    }
+    *rest = text + rs;
+    *rest_len = rl;
+    return true;
+}
+
+static bool shell_compound__is_close_brace(const shell_command_t *cmd) {
+    size_t start, len;
+    shell_compound__trim(cmd->text, cmd->length, &start, &len);
+    return len == 1 && cmd->text[start] == '}';
+}
+
+/* Finds a "{" that stands as its own word in [text, text+length) -- preceded
+ * and followed only by whitespace (or the ends of the range) -- skipping
+ * over quoted/escaped content so a literal brace inside a string doesn't
+ * false-positive. This is the only brace shell_compound.c ever looks for;
+ * an unrelated "{" used as a plain argument (e.g. `echo { hi }`, where it's
+ * the *second* word of a simple command, not the start of one) is filtered
+ * out separately by shell_compound__parse_header() requiring a real
+ * function-header shape before the brace. */
+static bool shell_compound__find_open_brace(const char *text, size_t length, size_t *out_offset) {
+    bool single = false;
+    bool double_quote = false;
+    bool escaped = false;
+    for (size_t i = 0; i < length; ++i) {
+        char c = text[i];
+        if (escaped) {
+            escaped = false;
+            continue;
+        }
+        if (!single && c == '\\') {
+            escaped = true;
+            continue;
+        }
+        if (!double_quote && c == '\'') {
+            single = !single;
+            continue;
+        }
+        if (!single && c == '"') {
+            double_quote = !double_quote;
+            continue;
+        }
+        if (single || double_quote) continue;
+        if (c == '{' && (i == 0 || isspace((unsigned char)text[i - 1])) &&
+            (i + 1 >= length || isspace((unsigned char)text[i + 1]))) {
+            *out_offset = i;
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Validates a function-definition header ("NAME", "NAME()", "NAME ( )",
+ * "function NAME", "function NAME()") and extracts NAME. A bare NAME with no
+ * "()" is only a function header when it's prefixed by "function" -- without
+ * that keyword, "()" is mandatory, matching bash's grammar (otherwise a
+ * stray "word {" like `echo { hi }`'s "echo" would look like a def). */
+static bool shell_compound__parse_header(const char *raw, size_t raw_length, char *name_out, size_t name_cap) {
+    size_t start, len;
+    shell_compound__trim(raw, raw_length, &start, &len);
+    const char *text = raw + start;
+
+    static const char prefix[] = "function";
+    size_t prefix_len = sizeof(prefix) - 1;
+    bool has_prefix = false;
+    if (len > prefix_len && memcmp(text, prefix, prefix_len) == 0 && isspace((unsigned char)text[prefix_len])) {
+        size_t s2, l2;
+        shell_compound__trim(text + prefix_len, len - prefix_len, &s2, &l2);
+        text += prefix_len + s2;
+        len = l2;
+        has_prefix = true;
+    }
+
+    size_t name_len = 0;
+    while (name_len < len && (isalnum((unsigned char)text[name_len]) || text[name_len] == '_')) name_len++;
+    if (name_len == 0 || name_len >= name_cap || !shell_parser__valid_name(text, name_len)) return false;
+
+    size_t rs = name_len;
+    size_t rl = len - name_len;
+    while (rl > 0 && isspace((unsigned char)text[rs])) {
+        rs++;
+        rl--;
+    }
+    bool has_parens = rl > 0 && text[rs] == '(';
+    if (has_parens) {
+        rs++;
+        rl--;
+        while (rl > 0 && isspace((unsigned char)text[rs])) {
+            rs++;
+            rl--;
+        }
+        if (rl == 0 || text[rs] != ')') return false;
+        rs++;
+        rl--;
+        while (rl > 0 && isspace((unsigned char)text[rs])) {
+            rs++;
+            rl--;
+        }
+    }
+    if (rl != 0 || (!has_prefix && !has_parens)) return false;
+
+    memcpy(name_out, text, name_len);
+    name_out[name_len] = '\0';
+    return true;
+}
+
+/* Detects a function definition starting at plan->commands[index], in
+ * either of its two source shapes -- "name() {" glued onto one flat command
+ * (the common case: nothing but whitespace between the header and "{"), or
+ * the header and a bare "{" as two separate flat commands (the brace on its
+ * own line). Either way, *body_start / *body_end become a raw, verbatim slice
+ * of the original source between the "{" and the matching bare "}" flat
+ * command at *close_index -- re-parsed from scratch on every call via
+ * shell_compound__run(), so it can itself contain if/fi, nested commands,
+ * anything a top-level block can. Only the first bare "}" is matched (no
+ * brace-depth counting), so a body containing its own nested "{ ... }" is
+ * unsupported -- a deliberate simplification for this basic implementation. */
+static bool shell_compound__match_function_header(
+    const shell_plan_t *plan, size_t index, char *name_out, size_t name_cap, const char **body_start,
+    const char **body_end, size_t *close_index
+) {
+    if (index >= plan->count) return false;
+    const shell_command_t *cmd = &plan->commands[index];
+    size_t brace_offset;
+    const char *after_brace;
+    size_t search_from;
+    if (shell_compound__find_open_brace(cmd->text, cmd->length, &brace_offset)) {
+        if (!shell_compound__parse_header(cmd->text, brace_offset, name_out, name_cap)) return false;
+        after_brace = cmd->text + brace_offset + 1;
+        search_from = index + 1;
+    } else {
+        if (!shell_compound__parse_header(cmd->text, cmd->length, name_out, name_cap)) return false;
+        if (index + 1 >= plan->count) return false;
+        const shell_command_t *brace_cmd = &plan->commands[index + 1];
+        size_t s, l;
+        shell_compound__trim(brace_cmd->text, brace_cmd->length, &s, &l);
+        if (l != 1 || brace_cmd->text[s] != '{') return false;
+        after_brace = brace_cmd->text + brace_cmd->length;
+        search_from = index + 2;
+    }
+    for (size_t k = search_from; k < plan->count; ++k) {
+        if (shell_compound__is_close_brace(&plan->commands[k])) {
+            *body_start = after_brace;
+            *body_end = plan->commands[k].text;
+            *close_index = k;
+            return true;
+        }
+    }
+    return false;
+}
+
+typedef enum {
+    SHELL_COMPOUND_PLAIN,
+    SHELL_COMPOUND_IF,
+    SHELL_COMPOUND_ELIF,
+    SHELL_COMPOUND_THEN,
+    SHELL_COMPOUND_ELSE,
+    SHELL_COMPOUND_FI,
+    SHELL_COMPOUND_CLOSE_BRACE,
+    SHELL_COMPOUND_FUNCTION,
+} shell_compound_kind_t;
+
+static shell_compound_kind_t shell_compound__classify(const shell_plan_t *plan, size_t index) {
+    const shell_command_t *cmd = &plan->commands[index];
+    const char *rest;
+    size_t rest_len;
+    if (shell_compound__is_close_brace(cmd)) return SHELL_COMPOUND_CLOSE_BRACE;
+    if (shell_compound__match_keyword(cmd, "if", &rest, &rest_len)) return SHELL_COMPOUND_IF;
+    if (shell_compound__match_keyword(cmd, "elif", &rest, &rest_len)) return SHELL_COMPOUND_ELIF;
+    if (shell_compound__match_keyword(cmd, "then", &rest, &rest_len)) return SHELL_COMPOUND_THEN;
+    if (shell_compound__match_keyword(cmd, "else", &rest, &rest_len)) return SHELL_COMPOUND_ELSE;
+    if (shell_compound__match_keyword(cmd, "fi", &rest, &rest_len)) return SHELL_COMPOUND_FI;
+    char name[SHELL__FUNCTION_NAME_MAX];
+    const char *body_start, *body_end;
+    size_t close_index;
+    if (shell_compound__match_function_header(plan, index, name, sizeof(name), &body_start, &body_end, &close_index)) {
+        return SHELL_COMPOUND_FUNCTION;
+    }
+    return SHELL_COMPOUND_PLAIN;
+}
+
+/* Runs a single command text (an "if"/"elif"/"then"/"else" keyword's glued
+ * remainder) as its own one-command plan. */
+static int shell_compound__run_text(shell_state_t *state, const char *text, size_t length) {
+    shell_command_t synthetic = {.text = text, .length = length, .connector = SHELL_CONNECT_NONE};
+    shell_plan_t sub = {.commands = &synthetic, .count = 1};
+    return shell_executor__plan(state, &sub);
+}
+
+static int shell_compound__define_function(shell_state_t *state, const char *name, const char *body_text, size_t body_len);
+
+static int shell_compound__run_sequence(shell_state_t *state, const shell_plan_t *plan, size_t *index, bool execute);
+
+/* *index is at the "if" (or, on a later loop iteration, "elif") command on
+ * entry. Consumes through the matching "fi" and leaves *index just past it.
+ * `execute` false means this whole if-statement lives in a branch that
+ * isn't being taken (an outer if/function skip) -- conditions are never run
+ * and no branch is ever taken, but the structure is still walked so *index
+ * ends up in the right place. */
+static int shell_compound__run_if(shell_state_t *state, const shell_plan_t *plan, size_t *index, bool execute) {
+    bool taken = false;
+    int status = 0;
+    bool first = true;
+    for (;;) {
+        const shell_command_t *cmd = &plan->commands[*index];
+        const char *rest;
+        size_t rest_len;
+        (void)shell_compound__match_keyword(cmd, first ? "if" : "elif", &rest, &rest_len);
+        first = false;
+        (*index)++;
+
+        bool cond_execute = execute && !taken;
+        bool have_cond = rest_len > 0;
+        int cond_status = have_cond && cond_execute ? shell_compound__run_text(state, rest, rest_len) : 1;
+        /* The rest of the condition list (if any) is itself just a run of
+         * statements -- reuse run_sequence rather than re-deriving its
+         * then/elif/else/fi/"}" boundary handling here. */
+        if (*index < plan->count && shell_compound__classify(plan, *index) != SHELL_COMPOUND_THEN) {
+            int seq_status = shell_compound__run_sequence(state, plan, index, cond_execute);
+            if (cond_execute) cond_status = seq_status;
+            have_cond = true;
+        }
+        if (*index >= plan->count || shell_compound__classify(plan, *index) != SHELL_COMPOUND_THEN) {
+            stdio__printf("shell: if: missing 'then'\n");
+            state->last_status = 2;
+            *index = plan->count; /* stop the enclosing walk cleanly instead of resuming mid-error */
+            return 2;
+        }
+        cmd = &plan->commands[*index];
+        (void)shell_compound__match_keyword(cmd, "then", &rest, &rest_len);
+        (*index)++;
+
+        bool run_branch = cond_execute && have_cond && cond_status == 0;
+        if (run_branch) taken = true;
+        if (rest_len > 0 && run_branch) status = shell_compound__run_text(state, rest, rest_len);
+        int body_status = shell_compound__run_sequence(state, plan, index, run_branch);
+        if (run_branch) status = body_status;
+
+        if (*index >= plan->count) {
+            stdio__printf("shell: if: missing 'fi'\n");
+            state->last_status = 2;
+            return 2;
+        }
+        if (shell_compound__classify(plan, *index) == SHELL_COMPOUND_ELIF) continue;
+        break;
+    }
+
+    if (*index < plan->count && shell_compound__classify(plan, *index) == SHELL_COMPOUND_ELSE) {
+        const shell_command_t *cmd = &plan->commands[*index];
+        const char *rest;
+        size_t rest_len;
+        (void)shell_compound__match_keyword(cmd, "else", &rest, &rest_len);
+        (*index)++;
+        bool run_branch = execute && !taken;
+        if (run_branch) taken = true;
+        if (rest_len > 0 && run_branch) status = shell_compound__run_text(state, rest, rest_len);
+        int body_status = shell_compound__run_sequence(state, plan, index, run_branch);
+        if (run_branch) status = body_status;
+    }
+
+    if (*index >= plan->count || shell_compound__classify(plan, *index) != SHELL_COMPOUND_FI) {
+        stdio__printf("shell: if: missing 'fi'\n");
+        state->last_status = 2;
+        *index = plan->count; /* stop the enclosing walk cleanly instead of resuming mid-error */
+        return 2;
+    }
+    (*index)++;
+
+    if (execute && !taken) status = 0; /* bash: no branch taken and no else -> exit status 0 */
+    return status;
+}
+
+/* Walks plan->commands from *index, running plain commands (grouped into
+ * runs so ;/&&/|| short-circuiting between them still works, via
+ * shell_executor__plan) and recursing into nested "if"/function-definition
+ * constructs, until it either runs out of commands or reaches a
+ * then/elif/else/fi/"}" that belongs to an *enclosing* construct -- which it
+ * leaves at *index, unconsumed, for that caller to see. `execute` false
+ * skips all side effects (no command runs, no function gets defined) while
+ * still advancing *index the same amount, for an if-branch that isn't
+ * taken. */
+static int shell_compound__run_sequence(shell_state_t *state, const shell_plan_t *plan, size_t *index, bool execute) {
+    int status = 0;
+    while (*index < plan->count && !(execute && state->exit_requested)) {
+        shell_compound_kind_t kind = shell_compound__classify(plan, *index);
+        if (kind == SHELL_COMPOUND_THEN || kind == SHELL_COMPOUND_ELIF || kind == SHELL_COMPOUND_ELSE ||
+            kind == SHELL_COMPOUND_FI || kind == SHELL_COMPOUND_CLOSE_BRACE) {
+            break;
+        }
+        if (kind == SHELL_COMPOUND_IF) {
+            status = shell_compound__run_if(state, plan, index, execute);
+            continue;
+        }
+        if (kind == SHELL_COMPOUND_FUNCTION) {
+            char name[SHELL__FUNCTION_NAME_MAX];
+            const char *body_start, *body_end;
+            size_t close_index;
+            (void)shell_compound__match_function_header(
+                plan, *index, name, sizeof(name), &body_start, &body_end, &close_index
+            );
+            if (execute) {
+                status = shell_compound__define_function(state, name, body_start, (size_t)(body_end - body_start));
+            }
+            *index = close_index + 1;
+            continue;
+        }
+        size_t run_start = *index;
+        (*index)++;
+        while (*index < plan->count && shell_compound__classify(plan, *index) == SHELL_COMPOUND_PLAIN) (*index)++;
+        if (execute) {
+            shell_plan_t sub = {.commands = &plan->commands[run_start], .count = *index - run_start};
+            status = shell_executor__plan(state, &sub);
+        }
+    }
+    return status;
+}
+
+int shell_compound__run(shell_state_t *state, const char *text) {
+    shell_plan_t plan = {0};
+    const char *error = NULL;
+    if (shell_parser__plan(text, &plan, &error) != 0) {
+        shell_parser__plan_free(&plan);
+        stdio__printf("shell: %s\n", error != NULL ? error : "syntax error");
+        state->last_status = 2;
+        return 2;
+    }
+    if (plan.count == 0) {
+        shell_parser__plan_free(&plan);
+        return 0;
+    }
+    size_t index = 0;
+    int status = shell_compound__run_sequence(state, &plan, &index, true);
+    if (index < plan.count) {
+        stdio__printf(
+            "shell: unexpected `%.*s'\n", (int)plan.commands[index].length, plan.commands[index].text
+        );
+        status = 2;
+    }
+    state->last_status = status;
+    shell_parser__plan_free(&plan);
+    return status;
+}
+
+bool shell_compound__pending(const char *text) {
+    if (text == NULL) return false;
+    bool single = false;
+    bool double_quote = false;
+    bool escaped = false;
+    bool in_comment = false;
+    int if_depth = 0;
+    int brace_depth = 0;
+    char word[8];
+    size_t word_len = 0;
+    bool word_clean = true;
+
+    for (const char *p = text;; ++p) {
+        char c = *p;
+        bool end_of_buffer = c == '\0';
+        if (!in_comment && !escaped && !single && !double_quote && (end_of_buffer || isspace((unsigned char)c))) {
+            if (word_len > 0 && word_len < sizeof(word) && word_clean) {
+                if (word_len == 2 && memcmp(word, "if", 2) == 0) if_depth++;
+                else if (word_len == 2 && memcmp(word, "fi", 2) == 0 && if_depth > 0) if_depth--;
+                else if (word_len == 1 && word[0] == '{') brace_depth++;
+                else if (word_len == 1 && word[0] == '}' && brace_depth > 0) brace_depth--;
+            }
+            word_len = 0;
+            word_clean = true;
+        }
+        if (end_of_buffer) break;
+        if (in_comment) {
+            if (c == '\n') in_comment = false;
+            continue;
+        }
+        if (escaped) {
+            escaped = false;
+            if (word_len < sizeof(word)) word[word_len++] = c;
+            word_clean = false;
+            continue;
+        }
+        if (!single && c == '\\') {
+            escaped = true;
+            word_clean = false;
+            continue;
+        }
+        if (!double_quote && c == '\'') {
+            single = !single;
+            word_clean = false;
+            continue;
+        }
+        if (!single && c == '"') {
+            double_quote = !double_quote;
+            word_clean = false;
+            continue;
+        }
+        if (single || double_quote) {
+            if (word_len < sizeof(word)) word[word_len++] = c;
+            continue;
+        }
+        if (c == '#' && word_len == 0) {
+            in_comment = true;
+            continue;
+        }
+        if (isspace((unsigned char)c)) continue;
+        if (word_len < sizeof(word)) word[word_len++] = c;
+        else word_clean = false;
+    }
+    return single || double_quote || if_depth > 0 || brace_depth > 0;
+}
+
+static shell_function_t *shell_compound__find_function(const shell_state_t *state, const char *name) {
+    for (size_t i = 0; i < state->function_count; ++i) {
+        if (strcmp(state->functions[i].name, name) == 0) return &state->functions[i];
+    }
+    return NULL;
+}
+
+bool shell_compound__is_function(const shell_state_t *state, const char *name) {
+    return shell_compound__find_function(state, name) != NULL;
+}
+
+static int shell_compound__define_function(shell_state_t *state, const char *name, const char *body_text, size_t body_len) {
+    while (body_len > 0 && isspace((unsigned char)body_text[0])) {
+        body_text++;
+        body_len--;
+    }
+    while (body_len > 0 && isspace((unsigned char)body_text[body_len - 1])) body_len--;
+    if (body_len >= SHELL__FUNCTION_BODY_MAX) {
+        stdio__printf("shell: %s: function body too long\n", name);
+        return 1;
+    }
+    char *body = memory__malloc(body_len + 1);
+    if (body == NULL) {
+        stdio__printf("shell: out of memory\n");
+        return 1;
+    }
+    memcpy(body, body_text, body_len);
+    body[body_len] = '\0';
+
+    /* Redefining a function while it's the one currently executing (it
+     * redefines itself mid-call) would free the body string that call is
+     * still reading from -- an accepted, unlikely-to-matter limitation for
+     * this basic implementation, same as real shells' own edge cases around
+     * self-redefinition. */
+    shell_function_t *existing = shell_compound__find_function(state, name);
+    if (existing != NULL) {
+        memory__free(existing->body);
+        existing->body = body;
+        return 0;
+    }
+    if (state->function_count >= SHELL__MAX_FUNCTIONS) {
+        stdio__printf("shell: function limit reached\n");
+        memory__free(body);
+        return 1;
+    }
+    if (state->function_count >= state->function_capacity) {
+        size_t new_capacity = state->function_capacity == 0 ? 4u : state->function_capacity * 2u;
+        if (new_capacity > SHELL__MAX_FUNCTIONS) new_capacity = SHELL__MAX_FUNCTIONS;
+        shell_function_t *grown = memory__realloc(state->functions, new_capacity * sizeof(*grown));
+        if (grown == NULL) {
+            stdio__printf("shell: out of memory\n");
+            memory__free(body);
+            return 1;
+        }
+        state->functions = grown;
+        state->function_capacity = new_capacity;
+    }
+    size_t name_len = strlen(name);
+    char *name_copy = memory__malloc(name_len + 1);
+    if (name_copy == NULL) {
+        stdio__printf("shell: out of memory\n");
+        memory__free(body);
+        return 1;
+    }
+    memcpy(name_copy, name, name_len + 1);
+    state->functions[state->function_count].name = name_copy;
+    state->functions[state->function_count].body = body;
+    state->function_count++;
+    return 0;
+}
+
+int shell_compound__call_function(shell_state_t *state, int argc, char **argv) {
+    shell_function_t *fn = shell_compound__find_function(state, argv[0]);
+    if (fn == NULL) return 127;
+
+    int new_count = argc - 1;
+    if (new_count > SHELL__MAX_POSITIONAL) new_count = SHELL__MAX_POSITIONAL;
+    char **new_positional = NULL;
+    if (new_count > 0) {
+        new_positional = memory__malloc((size_t)new_count * sizeof(*new_positional));
+        if (new_positional == NULL) {
+            stdio__printf("shell: out of memory\n");
+            return 1;
+        }
+        int allocated = 0;
+        for (; allocated < new_count; ++allocated) {
+            size_t len = strlen(argv[allocated + 1]);
+            new_positional[allocated] = memory__malloc(len + 1);
+            if (new_positional[allocated] == NULL) break;
+            memcpy(new_positional[allocated], argv[allocated + 1], len + 1);
+        }
+        if (allocated < new_count) {
+            for (int i = 0; i < allocated; ++i) memory__free(new_positional[i]);
+            memory__free(new_positional);
+            stdio__printf("shell: out of memory\n");
+            return 1;
+        }
+    }
+
+    /* fn->body is read out here, before the call -- if the function's own
+     * body redefines it (see shell_compound__define_function()'s comment),
+     * this call still runs to completion off the copy it already started
+     * with. functions/function_count may still grow (realloc) during the
+     * call, which is fine: `fn` itself is never dereferenced again below. */
+    const char *body = fn->body;
+    char **saved_positional = state->positional;
+    int saved_positional_count = state->positional_count;
+    const char *saved_arg0 = state->arg0;
+    state->positional = new_positional;
+    state->positional_count = new_count;
+    state->arg0 = argv[0];
+
+    int status = shell_compound__run(state, body);
+
+    for (int i = 0; i < state->positional_count; ++i) memory__free(state->positional[i]);
+    memory__free(state->positional);
+    state->positional = saved_positional;
+    state->positional_count = saved_positional_count;
+    state->arg0 = saved_arg0;
+    state->last_status = status;
+    return status;
+}
+
+void shell_compound__state_free(shell_state_t *state) {
+    if (state == NULL) return;
+    for (size_t i = 0; i < state->function_count; ++i) {
+        memory__free(state->functions[i].name);
+        memory__free(state->functions[i].body);
+    }
+    memory__free(state->functions);
+    state->functions = NULL;
+    state->function_count = 0;
+    state->function_capacity = 0;
+    for (int i = 0; i < state->positional_count; ++i) memory__free(state->positional[i]);
+    memory__free(state->positional);
+    state->positional = NULL;
+    state->positional_count = 0;
+}

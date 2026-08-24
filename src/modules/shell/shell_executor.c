@@ -12,13 +12,30 @@
 #include "core_sdk/stdio.h"
 #include "core_sdk/tty.h"
 #include "shell_builtins.h"
+#include "shell_compound.h"
 
 /* Initial size, and doubling step, for the external-memory buffer pipes
  * capture a producer's output into (see shell_executor__buffer_append()). */
 #define SHELL_PIPE_CHUNK (512u)
 
+/* $0/$1../$9/$# resolve here rather than through the variable table: they're
+ * per-call state (see shell_compound__call_function()), not assignable
+ * NAME=value variables. Everything else falls through to the variables
+ * shell_builtins__set()/export() manage. */
 static const char *shell_executor__lookup(void *context, const char *name) {
-    return shell_builtins__get((const shell_state_t *)context, name);
+    shell_state_t *state = (shell_state_t *)context;
+    if (name[0] != '\0' && name[1] == '\0') {
+        if (name[0] == '0') return state->arg0 != NULL ? state->arg0 : "";
+        if (name[0] >= '1' && name[0] <= '9') {
+            int index = name[0] - '1';
+            return index < state->positional_count ? state->positional[index] : NULL;
+        }
+        if (name[0] == '#') {
+            snprintf(state->positional_count_text, sizeof(state->positional_count_text), "%d", state->positional_count);
+            return state->positional_count_text;
+        }
+    }
+    return shell_builtins__get(state, name);
 }
 
 typedef struct {
@@ -586,7 +603,11 @@ static int shell_executor__dispatch(shell_state_t *state, char **words, int argc
     }
     int remaining = argc - first_command;
     char **argv = words + first_command;
-    int result = shell_builtins__is_builtin(argv[0])
+    /* A user-defined function shadows a builtin or external command of the
+     * same name, the same as in bash. */
+    int result = shell_compound__is_function(state, argv[0])
+                     ? shell_compound__call_function(state, remaining, argv)
+                 : shell_builtins__is_builtin(argv[0])
                      ? shell_builtins__run(state, remaining, argv)
                      : shell_executor__external(remaining, argv, environment.items, environment.count, mode);
     shell_executor__environment_free(&environment);

@@ -14,12 +14,11 @@
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
 #include "core_sdk/tty.h"
-#include "shell_executor.h"
+#include "shell_compound.h"
 #include "shell_builtins.h"
 #include "shell_console.h"
 #include "shell_history.h"
 #include "shell_internal.h"
-#include "shell_parser.h"
 
 /* Keeps $COLUMNS/$LINES in sync with the routed session's terminal size
  * (see core_sdk/tty.h). Cheap no-op once nothing has changed, so it's safe
@@ -62,6 +61,7 @@ void shell__state_init(shell_state_t *state) {
 
 void shell__state_free(shell_state_t *state) {
     if (state == NULL) return;
+    shell_compound__state_free(state);
     for (size_t i = 0; i < state->variable_count; ++i) {
         memory__free(state->variables[i].name);
         memory__free(state->variables[i].value);
@@ -74,21 +74,23 @@ void shell__state_free(shell_state_t *state) {
 
 int shell__execute_line(shell_state_t *state, const char *line) {
     if (state == NULL || line == NULL) return 2;
-    shell_plan_t plan = {0};
-    const char *error = NULL;
-    if (shell_parser__plan(line, &plan, &error) != 0) {
-        shell_parser__plan_free(&plan);
-        stdio__printf("shell: %s\n", error != NULL ? error : "syntax error");
-        state->last_status = 2;
-        return 2;
-    }
-    if (plan.count == 0) {
-        shell_parser__plan_free(&plan);
-        return 0;
-    }
-    int status = shell_executor__plan(state, &plan);
-    shell_parser__plan_free(&plan);
-    return status;
+    return shell_compound__run(state, line);
+}
+
+/* Appends one physical line to the multi-line accumulation buffer that both
+ * shell__run_script() and shell__interactive() feed shell_compound__pending()
+ * -- joining lines with a real '\n' so an if/fi or function block that spans
+ * several of them parses as one unit (see the '\n' connector case
+ * shell_parser__plan() gained for this). Returns false if `line` wouldn't
+ * fit within `capacity`. */
+static bool shell__block_append(char *block, size_t capacity, size_t *block_used, const char *line, size_t line_len) {
+    size_t separator = *block_used > 0 ? 1u : 0u;
+    if (*block_used + separator + line_len + 1 > capacity) return false;
+    if (separator != 0) block[(*block_used)++] = '\n';
+    memcpy(block + *block_used, line, line_len);
+    *block_used += line_len;
+    block[*block_used] = '\0';
+    return true;
 }
 
 static int shell__run_script(shell_state_t *state, const char *path) {
@@ -99,12 +101,16 @@ static int shell__run_script(shell_state_t *state, const char *path) {
         return 1;
     }
     char *line = memory__malloc(SHELL__LINE_MAX);
-    if (line == NULL) {
+    char *block = memory__malloc(SHELL__BLOCK_MAX);
+    if (line == NULL || block == NULL) {
         stdio__printf("shell: out of memory\n");
+        memory__free(line);
+        memory__free(block);
         (void)storage__close(file);
         return 1;
     }
     size_t used = 0;
+    size_t block_used = 0;
     int status = state->last_status;
     bool overlong = false;
     for (;;) {
@@ -125,9 +131,17 @@ static int shell__run_script(shell_state_t *state, const char *path) {
                     goto done;
                 }
                 if (used > 0 && line[used - 1] == '\r') used--;
-                line[used] = '\0';
-                status = shell__execute_line(state, line);
+                if (!shell__block_append(block, SHELL__BLOCK_MAX, &block_used, line, used)) {
+                    stdio__printf("shell: %s: script block too long\n", path);
+                    status = 2;
+                    goto done;
+                }
                 used = 0;
+                if (!shell_compound__pending(block)) {
+                    status = shell__execute_line(state, block);
+                    block_used = 0;
+                    block[0] = '\0';
+                }
                 if (state->exit_requested) goto done;
             } else if (used + 1 < SHELL__LINE_MAX) {
                 line[used++] = c;
@@ -140,23 +154,39 @@ static int shell__run_script(shell_state_t *state, const char *path) {
     if (overlong) {
         stdio__printf("shell: %s: script line too long\n", path);
         status = 2;
-    } else if (used > 0 && !state->exit_requested) {
-        if (line[used - 1] == '\r') used--;
-        line[used] = '\0';
-        status = shell__execute_line(state, line);
+    } else if (!state->exit_requested && (used > 0 || block_used > 0)) {
+        if (used > 0) {
+            if (line[used - 1] == '\r') used--;
+            if (!shell__block_append(block, SHELL__BLOCK_MAX, &block_used, line, used)) {
+                stdio__printf("shell: %s: script block too long\n", path);
+                status = 2;
+                goto done;
+            }
+        }
+        if (shell_compound__pending(block)) {
+            stdio__printf("shell: %s: unexpected end of file (unterminated if/function)\n", path);
+            status = 2;
+        } else {
+            status = shell__execute_line(state, block);
+        }
     }
 done:
     memory__free(line);
+    memory__free(block);
     (void)storage__close(file);
     return state->exit_requested ? state->exit_status : status;
 }
 
 static int shell__interactive(shell_state_t *state, bool suppress_echo) {
     char *line = memory__malloc(SHELL__LINE_MAX);
-    if (line == NULL) {
+    char *block = memory__malloc(SHELL__BLOCK_MAX);
+    if (line == NULL || block == NULL) {
         stdio__printf("shell: out of memory\n");
+        memory__free(line);
+        memory__free(block);
         return 1;
     }
+    size_t block_used = 0;
     bool skip_lf = false;
     while (!state->exit_requested) {
         shell__sync_tty_size(state);
@@ -164,18 +194,41 @@ static int shell__interactive(shell_state_t *state, bool suppress_echo) {
         if (suppress_echo) {
             length = stdio__read_line(line, SHELL__LINE_MAX, true);
         } else {
-            length = shell_console__read_line(line, SHELL__LINE_MAX, &skip_lf);
+            /* Once a line has been folded into a still-incomplete block (an
+             * open "if" or function "{"), switch to the "> " continuation
+             * prompt -- same idea as bash's PS2 -- until it closes. */
+            const char *prompt = block_used > 0 ? shell_console__continuation_prompt() : NULL;
+            length = shell_console__read_line(line, SHELL__LINE_MAX, &skip_lf, prompt);
         }
         if (length == BRUCE_ERR_CANCELLED) {
             int status = 128 + (int)process__current_signal();
             memory__free(line);
+            memory__free(block);
             return status;
         }
         if (length < 0) break;
         if (length > 0) (void)shell_history__append(SHELL_HISTORY_PATH, line);
-        (void)shell__execute_line(state, line);
+        if (!shell__block_append(block, SHELL__BLOCK_MAX, &block_used, line, (size_t)length)) {
+            stdio__printf("shell: input too long\n");
+            block_used = 0;
+            block[0] = '\0';
+            continue;
+        }
+        if (!shell_compound__pending(block)) {
+            (void)shell__execute_line(state, block);
+            block_used = 0;
+            block[0] = '\0';
+        }
+    }
+    if (!state->exit_requested && block_used > 0) {
+        if (shell_compound__pending(block)) {
+            stdio__printf("shell: unexpected end of input (unterminated if/function)\n");
+        } else {
+            (void)shell__execute_line(state, block);
+        }
     }
     memory__free(line);
+    memory__free(block);
     return state->exit_requested ? state->exit_status : state->last_status;
 }
 

@@ -114,6 +114,98 @@ bool selftest__run_shell_script_case(void) {
     return ok;
 }
 
+bool selftest__run_shell_control_flow_case(void) {
+    if (!selftest__shell_register_probe()) return false;
+    shell_state_t state;
+    shell__state_init(&state);
+    s_probe_calls = 0;
+
+    bool ok =
+        /* if/then/fi, if/then/else/fi, if/elif/else/fi -- each only fires
+         * its taken branch, and the untaken branches never call the probe. */
+        shell__execute_line(&state, "if true; then shell_test_probe then_ran; fi") == 0 &&
+        strcmp(s_probe_arg, "then_ran") == 0 && s_probe_calls == 1 &&
+        shell__execute_line(&state, "if false; then shell_test_probe skipped; fi") == 0 && s_probe_calls == 1 &&
+        shell__execute_line(&state, "if false; then shell_test_probe skipped; else shell_test_probe else_ran; fi") ==
+            0 &&
+        strcmp(s_probe_arg, "else_ran") == 0 && s_probe_calls == 2 &&
+        shell__execute_line(
+            &state,
+            "if false; then shell_test_probe skipped; elif true; then shell_test_probe elif_ran; else "
+            "shell_test_probe skipped; fi"
+        ) == 0 &&
+        strcmp(s_probe_arg, "elif_ran") == 0 && s_probe_calls == 3 &&
+        /* No branch taken and no else: exit status is 0, same as bash. */
+        shell__execute_line(&state, "if false; then shell_test_probe skipped; fi") == 0 && s_probe_calls == 3 &&
+        /* A condition list can itself use ; and &&/||. */
+        shell__execute_line(&state, "if true; false; then shell_test_probe skipped; fi") == 0 &&
+        s_probe_calls == 3 &&
+        /* test/[/[[ builtins: numeric, string, -z/-n, and -a. */
+        shell__execute_line(&state, "[ 1 -eq 1 ] && shell_test_probe num_eq") == 0 &&
+        strcmp(s_probe_arg, "num_eq") == 0 &&
+        shell__execute_line(&state, "[ 1 -eq 2 ] && shell_test_probe skipped") == 1 &&
+        shell__execute_line(&state, "test 3 -ne 2 -a 3 -gt 1 && shell_test_probe test_a") == 0 &&
+        strcmp(s_probe_arg, "test_a") == 0 &&
+        shell__execute_line(&state, "[[ 5 -ge 5 ]] && shell_test_probe dbracket") == 0 &&
+        strcmp(s_probe_arg, "dbracket") == 0 &&
+        shell__execute_line(&state, "[ a = a ] && shell_test_probe streq") == 0 &&
+        shell__execute_line(&state, "[ a != b ] && shell_test_probe strneq") == 0 &&
+        shell__execute_line(&state, "[ -z \"\" ] && shell_test_probe zempty") == 0 &&
+        shell__execute_line(&state, "[ -n x ] && shell_test_probe nnonempty") == 0 &&
+        shell__execute_line(&state, "[ x && shell_test_probe missing_bracket") == 2 &&
+        shell__execute_line(&state, "test 1 -eq x") == 2 &&
+        /* Functions: $0/$1../$# bind for the duration of the call and are
+         * restored afterwards; a function shadows a builtin/external of the
+         * same name. */
+        shell__execute_line(&state, "greet() { shell_test_probe $1; }") == 0 &&
+        shell__execute_line(&state, "greet hello") == 0 && strcmp(s_probe_arg, "hello") == 0 &&
+        shell__execute_line(&state, "whoami() { shell_test_probe $0; }; whoami") == 0 &&
+        strcmp(s_probe_arg, "whoami") == 0 &&
+        shell__execute_line(&state, "argcount() { shell_test_probe $#; }; argcount a b c") == 0 &&
+        strcmp(s_probe_arg, "3") == 0 &&
+        shell__execute_line(&state, "recur() { if [ $1 -gt 0 ]; then recur 0; fi; shell_test_probe done$1; }") ==
+            0 &&
+        shell__execute_line(&state, "recur 1") == 0 && strcmp(s_probe_arg, "done1") == 0 &&
+        /* Malformed constructs are reported, not silently misparsed. */
+        shell__execute_line(&state, "if true") == 2 && shell__execute_line(&state, "if true; then echo hi") == 2;
+    shell__state_free(&state);
+    printf("[selftest] shell/control-flow: %s\n", ok ? "OK" : "failed");
+    return ok;
+}
+
+bool selftest__run_shell_multiline_case(void) {
+    if (!selftest__shell_register_probe()) return false;
+    const char *path = "/apps/shell_multiline_test.sh";
+    const char script[] = "greet() {\n"
+                          "  # a comment inside the body\n"
+                          "  if [ -n \"$1\" ]; then\n"
+                          "    shell_test_probe $1\n"
+                          "  else\n"
+                          "    shell_test_probe empty\n"
+                          "  fi\n"
+                          "}\n"
+                          "\n"
+                          "greet multiline\n";
+    (void)storage__remove(path);
+    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
+    size_t written = 0;
+    if (storage__open(
+            path, BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE | BRUCE_STORAGE_OPEN_TRUNCATE, &file
+        ) != BRUCE_OK ||
+        storage__write(file, script, sizeof(script) - 1, &written) != BRUCE_OK ||
+        written != sizeof(script) - 1 || storage__close(file) != BRUCE_OK) {
+        if (file != BRUCE_FILE_ID_INVALID) (void)storage__close(file);
+        (void)storage__remove(path);
+        return false;
+    }
+    char *argv[] = {"shell", (char *)path, NULL};
+    int status = shell_app_main(2, argv);
+    (void)storage__remove(path);
+    bool ok = status == 0 && strcmp(s_probe_arg, "multiline") == 0;
+    printf("[selftest] shell/multiline: %s\n", ok ? "OK" : "failed");
+    return ok;
+}
+
 bool selftest__run_shell_stdio_inheritance_case(void) {
     if (!selftest__shell_register_probe()) return false;
     bruce_stdio_session_t session = BRUCE_STDIO_SESSION_INVALID;
