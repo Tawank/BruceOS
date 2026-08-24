@@ -56,6 +56,17 @@ typedef struct {
     int last_status;
     bool exit_requested;
     int exit_status;
+    /* Set by the `break` builtin to the number of enclosing for/while loops
+     * still left to unwind (N for "break N", 1 for a bare "break"). Checked
+     * the same way exit_requested is: shell_compound__run_sequence() stops
+     * running further statements while it's nonzero, and each enclosing
+     * loop (shell_compound__run_for()/run_while()) decrements it by one and
+     * stops iterating when it does so, so it naturally reaches 0 at the
+     * right nesting level. A stray "break" outside any loop -- or one that
+     * outlives every loop it could apply to -- is caught and reset back to
+     * 0 by shell_compound__run(), the same function-call/top-level-line
+     * boundary a real bash restricts break's effect to. */
+    int break_requested;
     /* Last tty__get_size() generation applied to COLUMNS/LINES -- see
      * shell__sync_tty_size in shell_app.c. Starts at 0 (calloc'd), which
      * never equals a real session's generation (tty__set_size always bumps

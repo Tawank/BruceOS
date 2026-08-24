@@ -5,7 +5,11 @@
 #include <string.h>
 
 #include "core_sdk/memory.h"
+#include "core_sdk/process.h"
+#include "core_sdk/runtime.h"
 #include "core_sdk/stdio.h"
+#include "shell_arith.h"
+#include "shell_builtins.h"
 #include "shell_executor.h"
 #include "shell_parser.h"
 
@@ -204,6 +208,10 @@ typedef enum {
     SHELL_COMPOUND_FI,
     SHELL_COMPOUND_CLOSE_BRACE,
     SHELL_COMPOUND_FUNCTION,
+    SHELL_COMPOUND_FOR,
+    SHELL_COMPOUND_WHILE,
+    SHELL_COMPOUND_DO,
+    SHELL_COMPOUND_DONE,
 } shell_compound_kind_t;
 
 static shell_compound_kind_t shell_compound__classify(const shell_plan_t *plan, size_t index) {
@@ -216,6 +224,10 @@ static shell_compound_kind_t shell_compound__classify(const shell_plan_t *plan, 
     if (shell_compound__match_keyword(cmd, "then", &rest, &rest_len)) return SHELL_COMPOUND_THEN;
     if (shell_compound__match_keyword(cmd, "else", &rest, &rest_len)) return SHELL_COMPOUND_ELSE;
     if (shell_compound__match_keyword(cmd, "fi", &rest, &rest_len)) return SHELL_COMPOUND_FI;
+    if (shell_compound__match_keyword(cmd, "for", &rest, &rest_len)) return SHELL_COMPOUND_FOR;
+    if (shell_compound__match_keyword(cmd, "while", &rest, &rest_len)) return SHELL_COMPOUND_WHILE;
+    if (shell_compound__match_keyword(cmd, "do", &rest, &rest_len)) return SHELL_COMPOUND_DO;
+    if (shell_compound__match_keyword(cmd, "done", &rest, &rest_len)) return SHELL_COMPOUND_DONE;
     char name[SHELL__FUNCTION_NAME_MAX];
     const char *body_start, *body_end;
     size_t close_index;
@@ -236,6 +248,24 @@ static int shell_compound__run_text(shell_state_t *state, const char *text, size
 static int shell_compound__define_function(shell_state_t *state, const char *name, const char *body_text, size_t body_len);
 
 static int shell_compound__run_sequence(shell_state_t *state, const shell_plan_t *plan, size_t *index, bool execute);
+static int shell_compound__run_for(shell_state_t *state, const shell_plan_t *plan, size_t *index, bool execute);
+static int shell_compound__run_while(shell_state_t *state, const shell_plan_t *plan, size_t *index, bool execute);
+
+/* A run_sequence() pass that was actually executing can stop early, part
+ * way through the statements it was walking, because a "break" or "exit"
+ * fired inside them (see shell_state_t.break_requested/exit_requested) --
+ * leaving *index short of the then/elif/else/fi/do/done boundary it would
+ * otherwise have reached. Callers that go on to inspect *index's classify()
+ * right after such a call (run_if's then/fi checks below, chiefly) call
+ * this first: a non-executing pass can never itself stop early (nothing it
+ * does can set either flag), so it always finishes walking to the real
+ * boundary, without re-running anything or emitting a second, spurious
+ * "missing ..." error over the interrupted one. */
+static void shell_compound__catch_up(shell_state_t *state, const shell_plan_t *plan, size_t *index, bool was_executing) {
+    if (was_executing && (state->exit_requested || state->break_requested > 0)) {
+        (void)shell_compound__run_sequence(state, plan, index, false);
+    }
+}
 
 /* *index is at the "if" (or, on a later loop iteration, "elif") command on
  * entry. Consumes through the matching "fi" and leaves *index just past it.
@@ -263,6 +293,7 @@ static int shell_compound__run_if(shell_state_t *state, const shell_plan_t *plan
          * then/elif/else/fi/"}" boundary handling here. */
         if (*index < plan->count && shell_compound__classify(plan, *index) != SHELL_COMPOUND_THEN) {
             int seq_status = shell_compound__run_sequence(state, plan, index, cond_execute);
+            shell_compound__catch_up(state, plan, index, cond_execute);
             if (cond_execute) cond_status = seq_status;
             have_cond = true;
         }
@@ -280,6 +311,7 @@ static int shell_compound__run_if(shell_state_t *state, const shell_plan_t *plan
         if (run_branch) taken = true;
         if (rest_len > 0 && run_branch) status = shell_compound__run_text(state, rest, rest_len);
         int body_status = shell_compound__run_sequence(state, plan, index, run_branch);
+        shell_compound__catch_up(state, plan, index, run_branch);
         if (run_branch) status = body_status;
 
         if (*index >= plan->count) {
@@ -301,6 +333,7 @@ static int shell_compound__run_if(shell_state_t *state, const shell_plan_t *plan
         if (run_branch) taken = true;
         if (rest_len > 0 && run_branch) status = shell_compound__run_text(state, rest, rest_len);
         int body_status = shell_compound__run_sequence(state, plan, index, run_branch);
+        shell_compound__catch_up(state, plan, index, run_branch);
         if (run_branch) status = body_status;
     }
 
@@ -327,14 +360,23 @@ static int shell_compound__run_if(shell_state_t *state, const shell_plan_t *plan
  * taken. */
 static int shell_compound__run_sequence(shell_state_t *state, const shell_plan_t *plan, size_t *index, bool execute) {
     int status = 0;
-    while (*index < plan->count && !(execute && state->exit_requested)) {
+    while (*index < plan->count && !(execute && (state->exit_requested || state->break_requested > 0))) {
         shell_compound_kind_t kind = shell_compound__classify(plan, *index);
         if (kind == SHELL_COMPOUND_THEN || kind == SHELL_COMPOUND_ELIF || kind == SHELL_COMPOUND_ELSE ||
-            kind == SHELL_COMPOUND_FI || kind == SHELL_COMPOUND_CLOSE_BRACE) {
+            kind == SHELL_COMPOUND_FI || kind == SHELL_COMPOUND_CLOSE_BRACE || kind == SHELL_COMPOUND_DO ||
+            kind == SHELL_COMPOUND_DONE) {
             break;
         }
         if (kind == SHELL_COMPOUND_IF) {
             status = shell_compound__run_if(state, plan, index, execute);
+            continue;
+        }
+        if (kind == SHELL_COMPOUND_FOR) {
+            status = shell_compound__run_for(state, plan, index, execute);
+            continue;
+        }
+        if (kind == SHELL_COMPOUND_WHILE) {
+            status = shell_compound__run_while(state, plan, index, execute);
             continue;
         }
         if (kind == SHELL_COMPOUND_FUNCTION) {
@@ -361,6 +403,302 @@ static int shell_compound__run_sequence(shell_state_t *state, const shell_plan_t
     return status;
 }
 
+/* A parsed "for" header: either bash's C-style `((init; cond; incr))` (see
+ * shell_arith.c), or its word-list form `NAME [in WORD...]` -- a bare NAME
+ * with no "in" clause iterates $1.. of the *currently executing function
+ * call* (state->positional), same as bash's own fallback to "$@"; at top
+ * level, outside any call, that's simply empty, so the loop runs zero
+ * times. */
+typedef struct {
+    bool c_style;
+    const char *init_text, *cond_text, *incr_text;
+    size_t init_len, cond_len, incr_len;
+    char name[SHELL__VARIABLE_NAME_MAX];
+    bool has_in;
+    const char *list_text;
+    size_t list_len;
+} shell_compound__for_header_t;
+
+/* Splits `inner` (the text strictly between a C-style header's "((" and
+ * "))") into exactly 3 segments on ';' -- the init/cond/incr clauses --
+ * ignoring any ';' nested inside a parenthesized sub-group. Each segment may
+ * be empty (`for ((;;))`'s infinite-loop shape). Returns false if `inner`
+ * doesn't contain exactly 2 top-level ';'. */
+static bool shell_compound__split_arith_header(
+    const char *inner, size_t inner_len, const char *out_text[3], size_t out_len[3]
+) {
+    size_t segment_start = 0;
+    int segment = 0;
+    int depth = 0;
+    for (size_t i = 0; i <= inner_len; ++i) {
+        bool at_end = i == inner_len;
+        char c = at_end ? ';' : inner[i];
+        if (!at_end) {
+            if (c == '(') depth++;
+            else if (c == ')') depth--;
+        }
+        if (at_end || (depth == 0 && c == ';')) {
+            if (segment >= 3) return false;
+            out_text[segment] = inner + segment_start;
+            out_len[segment] = i - segment_start;
+            segment++;
+            segment_start = i + 1;
+        }
+    }
+    return segment == 3;
+}
+
+static bool
+shell_compound__parse_for_header(const char *raw, size_t raw_length, shell_compound__for_header_t *out) {
+    size_t start, len;
+    shell_compound__trim(raw, raw_length, &start, &len);
+    const char *text = raw + start;
+    if (len == 0) return false;
+
+    if (len >= 4 && text[0] == '(' && text[1] == '(' && text[len - 1] == ')' && text[len - 2] == ')') {
+        const char *parts[3];
+        size_t parts_len[3];
+        if (!shell_compound__split_arith_header(text + 2, len - 4, parts, parts_len)) return false;
+        out->c_style = true;
+        out->init_text = parts[0];
+        out->init_len = parts_len[0];
+        out->cond_text = parts[1];
+        out->cond_len = parts_len[1];
+        out->incr_text = parts[2];
+        out->incr_len = parts_len[2];
+        return true;
+    }
+
+    size_t name_len = 0;
+    while (name_len < len && (isalnum((unsigned char)text[name_len]) || text[name_len] == '_')) name_len++;
+    if (name_len == 0 || name_len >= sizeof(out->name) || !shell_parser__valid_name(text, name_len)) return false;
+    out->c_style = false;
+    memcpy(out->name, text, name_len);
+    out->name[name_len] = '\0';
+
+    size_t rs = name_len, rl = len - name_len;
+    while (rl > 0 && isspace((unsigned char)text[rs])) {
+        rs++;
+        rl--;
+    }
+    if (rl == 0) {
+        out->has_in = false;
+        out->list_text = NULL;
+        out->list_len = 0;
+        return true;
+    }
+    if (rl < 2 || memcmp(text + rs, "in", 2) != 0 || (rl > 2 && !isspace((unsigned char)text[rs + 2]))) {
+        return false; /* trailing garbage after NAME that isn't a real "in ..." clause */
+    }
+    rs += 2;
+    rl -= 2;
+    while (rl > 0 && isspace((unsigned char)text[rs])) {
+        rs++;
+        rl--;
+    }
+    out->has_in = true;
+    out->list_text = text + rs;
+    out->list_len = rl;
+    return true;
+}
+
+/* Shared by run_for()/run_while(): consumes plan->commands from *index
+ * (already positioned right after the "for"/"while" header, or mid-way
+ * through an unglued condition list) forward to the next SHELL_COMPOUND_DO,
+ * via a non-executing dry pass when there's more than the header's own
+ * glued remainder to walk through. Prints/records the "missing 'do'" error
+ * itself on failure. Returns false on failure, having already set *index to
+ * plan->count. */
+static bool shell_compound__find_do(shell_state_t *state, const shell_plan_t *plan, size_t *index, const char *keyword) {
+    if (*index < plan->count && shell_compound__classify(plan, *index) != SHELL_COMPOUND_DO) {
+        (void)shell_compound__run_sequence(state, plan, index, false);
+    }
+    if (*index >= plan->count || shell_compound__classify(plan, *index) != SHELL_COMPOUND_DO) {
+        stdio__printf("shell: %s: missing 'do'\n", keyword);
+        state->last_status = 2;
+        *index = plan->count;
+        return false;
+    }
+    return true;
+}
+
+/* Same idea as shell_compound__find_do(), but for the matching "done" that
+ * closes a loop body -- called with *index already past "do". */
+static bool
+shell_compound__find_done(shell_state_t *state, const shell_plan_t *plan, size_t *index, const char *keyword) {
+    if (*index < plan->count && shell_compound__classify(plan, *index) != SHELL_COMPOUND_DONE) {
+        (void)shell_compound__run_sequence(state, plan, index, false);
+    }
+    if (*index >= plan->count || shell_compound__classify(plan, *index) != SHELL_COMPOUND_DONE) {
+        stdio__printf("shell: %s: missing 'done'\n", keyword);
+        state->last_status = 2;
+        *index = plan->count;
+        return false;
+    }
+    return true;
+}
+
+/* Runs one loop-body iteration starting at `body_start` (a copy of it --
+ * the loop's own *index into `plan` was already finalized past "done" by
+ * the boundary-discovery pass before any of this runs, so this cursor is
+ * disposable): the "do"-glued first statement, if any, then the rest of the
+ * body up to `body_end` (exclusive, the "done" flat command's index).
+ * Returns the branch's exit status. */
+static int shell_compound__run_loop_body(
+    shell_state_t *state, const shell_plan_t *plan, const char *head_text, size_t head_len, size_t body_start,
+    size_t body_end
+) {
+    int status = 0;
+    if (head_len > 0) status = shell_compound__run_text(state, head_text, head_len);
+    if (body_start < body_end) {
+        size_t cursor = body_start;
+        status = shell_compound__run_sequence(state, plan, &cursor, true);
+    }
+    return status;
+}
+
+/* True if this iteration should stop the loop: a break (consuming one
+ * level) or an exit/kill signal (translated into exit_requested, same as
+ * shell_app.c's own interactive-read cancellation handling) fired during
+ * the iteration just run. */
+static bool shell_compound__loop_should_stop(shell_state_t *state) {
+    if (state->break_requested > 0) {
+        state->break_requested--;
+        return true;
+    }
+    if (state->exit_requested) return true;
+    bruce_process_signal_t signal = process__current_signal();
+    if (signal != 0) {
+        state->exit_requested = true;
+        state->exit_status = 128 + (int)signal;
+        return true;
+    }
+    (void)runtime__delay(0); /* cooperative yield -- see the .c file's header comment on busy for/while bodies */
+    return false;
+}
+
+static int shell_compound__run_for(shell_state_t *state, const shell_plan_t *plan, size_t *index, bool execute) {
+    const char *rest;
+    size_t rest_len;
+    (void)shell_compound__match_keyword(&plan->commands[*index], "for", &rest, &rest_len);
+    (*index)++;
+
+    shell_compound__for_header_t header;
+    if (!shell_compound__parse_for_header(rest, rest_len, &header)) {
+        stdio__printf("shell: for: malformed header\n");
+        state->last_status = 2;
+        *index = plan->count;
+        return 2;
+    }
+    if (!shell_compound__find_do(state, plan, index, "for")) return 2;
+    const char *head_text;
+    size_t head_len;
+    (void)shell_compound__match_keyword(&plan->commands[*index], "do", &head_text, &head_len);
+    (*index)++;
+    size_t body_start = *index;
+    if (!shell_compound__find_done(state, plan, index, "for")) return 2;
+    size_t body_end = *index;
+    (*index)++;
+
+    if (!execute) return 0;
+
+    int status = 0;
+    const char *error = NULL;
+    if (header.c_style) {
+        size_t s, l;
+        long scratch;
+        shell_compound__trim(header.init_text, header.init_len, &s, &l);
+        if (l > 0 && !shell_arith__eval(state, header.init_text + s, l, &scratch, &error)) {
+            stdio__printf("shell: for: %s\n", error != NULL ? error : "syntax error");
+            state->last_status = 2;
+            return 2;
+        }
+        for (;;) {
+            shell_compound__trim(header.cond_text, header.cond_len, &s, &l);
+            long cond_value = 1; /* an empty condition clause is always true, matching C's `for(;;)` */
+            if (l > 0 && !shell_arith__eval(state, header.cond_text + s, l, &cond_value, &error)) {
+                stdio__printf("shell: for: %s\n", error != NULL ? error : "syntax error");
+                status = 2;
+                break;
+            }
+            if (cond_value == 0) break;
+
+            status = shell_compound__run_loop_body(state, plan, head_text, head_len, body_start, body_end);
+            if (shell_compound__loop_should_stop(state)) break;
+
+            shell_compound__trim(header.incr_text, header.incr_len, &s, &l);
+            if (l > 0 && !shell_arith__eval(state, header.incr_text + s, l, &scratch, &error)) {
+                stdio__printf("shell: for: %s\n", error != NULL ? error : "syntax error");
+                status = 2;
+                break;
+            }
+        }
+    } else {
+        char **words = NULL;
+        int word_count = 0;
+        if (header.has_in) {
+            shell_command_t synthetic = {.text = header.list_text, .length = header.list_len, .connector = SHELL_CONNECT_NONE};
+            const char *words_error = NULL;
+            if (shell_parser__words(
+                    &synthetic, &words, &word_count, shell_executor__lookup, state, state->last_status, &words_error
+                ) != 0) {
+                stdio__printf("shell: for: %s\n", words_error != NULL ? words_error : "expansion error");
+                state->last_status = 2;
+                return 2;
+            }
+        }
+        int count = header.has_in ? word_count : state->positional_count;
+        for (int i = 0; i < count; ++i) {
+            const char *value = header.has_in ? words[i] : state->positional[i];
+            int assigned = shell_builtins__set(state, header.name, value);
+            if (assigned != 0) {
+                status = assigned;
+                break;
+            }
+            status = shell_compound__run_loop_body(state, plan, head_text, head_len, body_start, body_end);
+            if (shell_compound__loop_should_stop(state)) break;
+        }
+        shell_parser__free_words(words, word_count);
+    }
+    return status;
+}
+
+static int shell_compound__run_while(shell_state_t *state, const shell_plan_t *plan, size_t *index, bool execute) {
+    const char *cond_head;
+    size_t cond_head_len;
+    (void)shell_compound__match_keyword(&plan->commands[*index], "while", &cond_head, &cond_head_len);
+    (*index)++;
+    size_t cond_start = *index;
+    if (!shell_compound__find_do(state, plan, index, "while")) return 2;
+    size_t cond_end = *index;
+    const char *body_head;
+    size_t body_head_len;
+    (void)shell_compound__match_keyword(&plan->commands[*index], "do", &body_head, &body_head_len);
+    (*index)++;
+    size_t body_start = *index;
+    if (!shell_compound__find_done(state, plan, index, "while")) return 2;
+    size_t body_end = *index;
+    (*index)++;
+
+    if (!execute) return 0;
+
+    int status = 0;
+    for (;;) {
+        int cond_status = 0;
+        if (cond_head_len > 0) cond_status = shell_compound__run_text(state, cond_head, cond_head_len);
+        if (cond_start < cond_end) {
+            size_t cursor = cond_start;
+            cond_status = shell_compound__run_sequence(state, plan, &cursor, true);
+        }
+        if (shell_compound__loop_should_stop(state)) break;
+        if (cond_status != 0) break;
+
+        status = shell_compound__run_loop_body(state, plan, body_head, body_head_len, body_start, body_end);
+        if (shell_compound__loop_should_stop(state)) break;
+    }
+    return status;
+}
+
 int shell_compound__run(shell_state_t *state, const char *text) {
     shell_plan_t plan = {0};
     const char *error = NULL;
@@ -376,7 +714,24 @@ int shell_compound__run(shell_state_t *state, const char *text) {
     }
     size_t index = 0;
     int status = shell_compound__run_sequence(state, &plan, &index, true);
-    if (index < plan.count) {
+    /* A "break" that outlives every enclosing for/while loop in this run --
+     * including one with no loop around it at all -- stops here rather than
+     * silently reaching into whatever runs shell_compound__run() next. This
+     * is also the boundary a function call (shell_compound__call_function())
+     * runs its body through, so it doubles as the "break in a function
+     * doesn't reach into the loop that called it" boundary bash itself
+     * enforces. */
+    bool stray_break = state->break_requested > 0;
+    if (stray_break) {
+        stdio__printf("shell: break: only meaningful inside a loop\n");
+        state->break_requested = 0;
+    }
+    /* index<plan.count here means run_sequence stopped without reaching the
+     * end of the plan -- ordinarily a real syntax problem (an orphaned
+     * then/fi/done/"}" left over from a malformed construct), but also
+     * exactly what a mid-plan "exit"/stray "break" leaves behind on
+     * purpose, so those don't get misreported as one. */
+    if (index < plan.count && !state->exit_requested && !stray_break) {
         stdio__printf(
             "shell: unexpected `%.*s'\n", (int)plan.commands[index].length, plan.commands[index].text
         );
@@ -395,6 +750,15 @@ bool shell_compound__pending(const char *text) {
     bool in_comment = false;
     int if_depth = 0;
     int brace_depth = 0;
+    /* "for"/"while" both open a block that's closed by a matching "done"
+     * (their "do" is just a delimiter word in between, not its own nesting
+     * level -- same reason "then" needs no tracking of its own for if/fi).
+     * One shared counter is enough since a stray "for"...(missing "done")
+     * followed by a real "while"...done still needs a "done" of its own to
+     * close, so nesting them under one counter and popping on any "done"
+     * matches this the same way if_depth already treats "if" uniformly
+     * regardless of elif/else in between. */
+    int loop_depth = 0;
     char word[8];
     size_t word_len = 0;
     bool word_clean = true;
@@ -408,6 +772,9 @@ bool shell_compound__pending(const char *text) {
                 else if (word_len == 2 && memcmp(word, "fi", 2) == 0 && if_depth > 0) if_depth--;
                 else if (word_len == 1 && word[0] == '{') brace_depth++;
                 else if (word_len == 1 && word[0] == '}' && brace_depth > 0) brace_depth--;
+                else if (word_len == 3 && memcmp(word, "for", 3) == 0) loop_depth++;
+                else if (word_len == 5 && memcmp(word, "while", 5) == 0) loop_depth++;
+                else if (word_len == 4 && memcmp(word, "done", 4) == 0 && loop_depth > 0) loop_depth--;
             }
             word_len = 0;
             word_clean = true;
@@ -450,7 +817,7 @@ bool shell_compound__pending(const char *text) {
         if (word_len < sizeof(word)) word[word_len++] = c;
         else word_clean = false;
     }
-    return single || double_quote || if_depth > 0 || brace_depth > 0;
+    return single || double_quote || if_depth > 0 || brace_depth > 0 || loop_depth > 0;
 }
 
 static shell_function_t *shell_compound__find_function(const shell_state_t *state, const char *name) {

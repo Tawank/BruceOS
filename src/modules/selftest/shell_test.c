@@ -206,6 +206,112 @@ bool selftest__run_shell_multiline_case(void) {
     return ok;
 }
 
+bool selftest__run_shell_loops_case(void) {
+    if (!selftest__shell_register_probe()) return false;
+    shell_state_t state;
+    shell__state_init(&state);
+    s_probe_calls = 0;
+
+    bool ok =
+        /* (( )) arithmetic: assignment, comparison, exit status, and the
+         * six comparison/logic operators actually get evaluated -- exit
+         * status is 0 (true) iff the result is nonzero, matching bash. */
+        shell__execute_line(&state, "x=5; (( x + 1 == 6 )) && shell_test_probe arith_ok") == 0 &&
+        strcmp(s_probe_arg, "arith_ok") == 0 &&
+        shell__execute_line(&state, "(( 3 * 4 - 2 ))") == 0 && shell__execute_line(&state, "(( 0 ))") == 1 &&
+        shell__execute_line(&state, "(( x++ )); shell_test_probe $x") == 0 && strcmp(s_probe_arg, "6") == 0 &&
+        shell__execute_line(&state, "(( x += 10 )); shell_test_probe $x") == 0 && strcmp(s_probe_arg, "16") == 0 &&
+        shell__execute_line(&state, "(( 5 > 3 && 2 < 4 )) && shell_test_probe logic_ok") == 0 &&
+        strcmp(s_probe_arg, "logic_ok") == 0 && shell__execute_line(&state, "(( 1 / 0 ))") == 2 &&
+        /* for NAME in WORD...; do ...; done -- iterates each word, and
+         * (( )) inside the body can accumulate across iterations. */
+        shell__execute_line(&state, "total=0; for n in 1 2 3; do (( total += n )); done; shell_test_probe $total") ==
+            0 &&
+        strcmp(s_probe_arg, "6") == 0 &&
+        /* break inside a for-loop's body (nested in an if) stops the loop
+         * immediately, without running the rest of that iteration. */
+        shell__execute_line(
+            &state,
+            "sum=0; for n in 1 2 3 4 5; do if [ $n -eq 3 ]; then break; fi; (( sum += n )); done; "
+            "shell_test_probe $sum"
+        ) == 0 &&
+        strcmp(s_probe_arg, "3") == 0 &&
+        /* C-style for ((init; cond; incr)). */
+        shell__execute_line(
+            &state, "product=1; for ((i=1; i<=4; i++)); do (( product *= i )); done; shell_test_probe $product"
+        ) == 0 &&
+        strcmp(s_probe_arg, "24") == 0 &&
+        /* while COND; do ...; done, and a condition re-evaluated every
+         * iteration off a variable the body itself mutates. */
+        shell__execute_line(&state, "count=0; while [ $count -lt 3 ]; do (( count++ )); done; shell_test_probe $count") ==
+            0 &&
+        strcmp(s_probe_arg, "3") == 0 &&
+        /* break N unwinds N enclosing loops at once. */
+        shell__execute_line(
+            &state,
+            "count=0; for i in 1 2 3; do for j in 1 2; do (( count++ )); if [ $count -eq 1 ]; then break 2; fi; "
+            "done; done; shell_test_probe $count"
+        ) == 0 &&
+        strcmp(s_probe_arg, "1") == 0 &&
+        /* A break that's followed, in the same branch, by more structure
+         * still ahead (a nested if) doesn't desync the enclosing while's
+         * own then/fi/done bookkeeping -- see shell_compound__catch_up(). */
+        shell__execute_line(
+            &state,
+            "result=start; while true; do if true; then break; if true; then result=unreached; fi; fi; done; "
+            "shell_test_probe $result"
+        ) == 0 &&
+        strcmp(s_probe_arg, "start") == 0 &&
+        /* Malformed constructs are reported, not silently misparsed. */
+        shell__execute_line(&state, "for x in a b") == 2 && shell__execute_line(&state, "while true; do echo hi") == 2 &&
+        shell__execute_line(&state, "(( 1 +")  == 2;
+    shell__state_free(&state);
+    printf("[selftest] shell/loops: %s\n", ok ? "OK" : "failed");
+    return ok;
+}
+
+/* Runs `command` (a "shell -c ..." argument string) as a background child
+ * with its stdio routed to a fresh session, feeds `stdin_text` into that
+ * session right after launch (queued for the child's own `read` builtin --
+ * see shell_builtins__read() in shell_builtins.c -- to consume whenever it
+ * gets there, the same pattern selftest__run_terminal_stdio_case() uses),
+ * and checks the child exits 0 having recorded `expected` via the probe. */
+static bool selftest__shell_read_probe(const char *command, const char *stdin_text, const char *expected) {
+    if (!selftest__shell_register_probe()) return false;
+    memset(s_probe_arg, 0, sizeof(s_probe_arg));
+    bruce_stdio_session_t session = BRUCE_STDIO_SESSION_INVALID;
+    if (stdio__session_create(&session) != BRUCE_OK || stdio__session_route_children(session) != BRUCE_OK) {
+        return false;
+    }
+    int launched = app_runner__run("shell", command, BRUCE_LAUNCH_BACKGROUND);
+    (void)stdio__session_route_children(BRUCE_STDIO_SESSION_INVALID);
+    if (launched <= 0 || stdio__session_write_input(session, stdin_text, strlen(stdin_text)) != BRUCE_OK) {
+        (void)stdio__session_close(session);
+        return false;
+    }
+    bruce_process_status_t status;
+    bool ok = process__wait_status((bruce_process_id_t)launched, 2000, &status) == BRUCE_OK &&
+              status.reason == BRUCE_PROCESS_EXITED && status.exit_code == 0 && strcmp(s_probe_arg, expected) == 0;
+    (void)stdio__session_close(session);
+    return ok;
+}
+
+bool selftest__run_shell_read_case(void) {
+    bool ok =
+        /* A single variable gets the whole (trimmed) line. */
+        selftest__shell_read_probe("-c \"read line; shell_test_probe $line\"", "hello\n", "hello") &&
+        /* With several variables, the last one gets whatever's left of the
+         * line, not just its next word -- matching bash's own field
+         * splitting for `read`. */
+        selftest__shell_read_probe(
+            "-c \"read a b c; shell_test_probe $c\"", "one two three four\n", "three four"
+        ) &&
+        /* No variable names at all -> $REPLY. */
+        selftest__shell_read_probe("-c \"read; shell_test_probe $REPLY\"", "reply-line\n", "reply-line");
+    printf("[selftest] shell/read: %s\n", ok ? "OK" : "failed");
+    return ok;
+}
+
 bool selftest__run_shell_stdio_inheritance_case(void) {
     if (!selftest__shell_register_probe()) return false;
     bruce_stdio_session_t session = BRUCE_STDIO_SESSION_INVALID;

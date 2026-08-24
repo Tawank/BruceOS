@@ -1,5 +1,6 @@
 #include "shell_builtins.h"
 
+#include <ctype.h>
 #include <errno.h> // IWYU pragma: export
 #include <limits.h>
 #include <stdio.h>
@@ -16,7 +17,7 @@
 
 static const char *const s_shell_builtin_names[] = {
     "echo", "true",  "false", "cd",   "set",  "unset", "export", "clear",
-    "reset", "help",  "exit",  "test", "[",    "[[",
+    "reset", "help",  "exit",  "test", "[",    "[[",   "break",  "read",
 };
 
 static int shell_builtins__find_index(const shell_state_t *state, const char *name) {
@@ -192,6 +193,50 @@ static int shell_builtins__cd(shell_state_t *state, int argc, char **argv) {
     return status == 0 ? shell_builtins__export(state, "PWD") : status;
 }
 
+/* Reads one line from stdin (echoing as it's typed, same as a real
+ * terminal's cooked-mode echo -- `read` itself never echoes) and splits it
+ * on whitespace into argv[1..argc)'s variables, the last of which gets
+ * whatever's left of the line (not just its first word), matching bash's
+ * own `read` field-splitting. With no variable names at all, the whole
+ * (untrimmed) line goes to $REPLY, also matching bash. Returns 1 on EOF/
+ * read error (no variables are touched), 2 on a bad variable name, else the
+ * exit status of the assignment(s). */
+static int shell_builtins__read(shell_state_t *state, int argc, char **argv) {
+    for (int i = 1; i < argc; ++i) {
+        if (!shell_parser__valid_name(argv[i], strlen(argv[i]))) {
+            stdio__printf("shell: read: %s: invalid variable name\n", argv[i]);
+            return 2;
+        }
+    }
+    char line[SHELL__LINE_MAX];
+    int length = stdio__read_line(line, sizeof(line), false);
+    if (length < 0) return 1;
+
+    if (argc == 1) return shell_builtins__set(state, "REPLY", line);
+
+    char *cursor = line;
+    for (int i = 1; i < argc; ++i) {
+        while (*cursor != '\0' && isspace((unsigned char)*cursor)) cursor++;
+        bool last = i == argc - 1;
+        char *value_start = cursor;
+        char *value_end;
+        if (last) {
+            value_end = cursor + strlen(cursor);
+            while (value_end > value_start && isspace((unsigned char)value_end[-1])) value_end--;
+        } else {
+            value_end = cursor;
+            while (*value_end != '\0' && !isspace((unsigned char)*value_end)) value_end++;
+        }
+        char saved = *value_end;
+        *value_end = '\0';
+        int status = shell_builtins__set(state, argv[i], value_start);
+        *value_end = saved;
+        if (status != 0) return status;
+        cursor = value_end;
+    }
+    return 0;
+}
+
 bool shell_builtins__is_builtin(const char *name) {
     for (size_t i = 0; i < sizeof(s_shell_builtin_names) / sizeof(s_shell_builtin_names[0]); ++i) {
         if (strcmp(name, s_shell_builtin_names[i]) == 0) return true;
@@ -323,7 +368,30 @@ int shell_builtins__run(shell_state_t *state, int argc, char **argv) {
         state->exit_status = status;
         return status;
     }
-    stdio__printf("Builtins: echo true false cd set unset export clear reset help exit test [ [[\n");
+    if (strcmp(argv[0], "break") == 0) {
+        if (argc > 2) {
+            stdio__printf("shell: break: too many arguments\n");
+            return 2;
+        }
+        long levels = 1;
+        if (argc == 2) {
+            char *end = NULL;
+            errno = 0;
+            levels = strtol(argv[1], &end, 10);
+            if (errno != 0 || end == argv[1] || *end != '\0' || levels < 1 || levels > INT_MAX) {
+                stdio__printf("shell: break: numeric argument required\n");
+                return 2;
+            }
+        }
+        /* Only meaningful inside a for/while loop -- shell_compound__run()
+         * catches (and warns about) a break_requested that outlives every
+         * loop it could apply to. */
+        state->break_requested = (int)levels;
+        return 0;
+    }
+    if (strcmp(argv[0], "read") == 0) return shell_builtins__read(state, argc, argv);
+    stdio__printf("Builtins: echo true false cd set unset export clear reset help exit test [ [[ break read\n");
     stdio__printf("Operators: ; && || and producer | text. Redirection is unsupported.\n");
+    stdio__printf("Compound: if/elif/else/fi, for, while, ((...)) arithmetic, functions.\n");
     return 0;
 }

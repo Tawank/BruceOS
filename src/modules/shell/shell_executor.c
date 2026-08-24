@@ -1,5 +1,6 @@
 #include "shell_executor.h"
 
+#include <ctype.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -11,6 +12,7 @@
 #include "core_sdk/runtime.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/tty.h"
+#include "shell_arith.h"
 #include "shell_builtins.h"
 #include "shell_compound.h"
 
@@ -22,7 +24,7 @@
  * per-call state (see shell_compound__call_function()), not assignable
  * NAME=value variables. Everything else falls through to the variables
  * shell_builtins__set()/export() manage. */
-static const char *shell_executor__lookup(void *context, const char *name) {
+const char *shell_executor__lookup(void *context, const char *name) {
     shell_state_t *state = (shell_state_t *)context;
     if (name[0] != '\0' && name[1] == '\0') {
         if (name[0] == '0') return state->arg0 != NULL ? state->arg0 : "";
@@ -614,7 +616,38 @@ static int shell_executor__dispatch(shell_state_t *state, char **words, int argc
     return result;
 }
 
+/* True when `command`'s trimmed text is a whole "((...))" arithmetic
+ * command (see shell_arith.c) -- *inner_start / *inner_len then bound the
+ * text strictly between the outer "((" and "))". Nested single parens
+ * inside (grouping) don't confuse this: it only looks at the very first two
+ * and very last two non-whitespace characters, the same shape
+ * shell_parser__plan()'s arith_depth tracking already requires to have kept
+ * this whole span glued together as one flat command in the first place. */
+static bool
+shell_executor__is_arith_command(const shell_command_t *command, size_t *inner_start, size_t *inner_len) {
+    size_t start = 0, end = command->length;
+    while (start < end && isspace((unsigned char)command->text[start])) start++;
+    while (end > start && isspace((unsigned char)command->text[end - 1])) end--;
+    if (end - start < 4 || command->text[start] != '(' || command->text[start + 1] != '(' ||
+        command->text[end - 1] != ')' || command->text[end - 2] != ')') {
+        return false;
+    }
+    *inner_start = start + 2;
+    *inner_len = (end - 2) - (start + 2);
+    return true;
+}
+
 static int shell_executor__command(shell_state_t *state, const shell_command_t *command) {
+    size_t inner_start, inner_len;
+    if (shell_executor__is_arith_command(command, &inner_start, &inner_len)) {
+        long value = 0;
+        const char *arith_error = NULL;
+        if (!shell_arith__eval(state, command->text + inner_start, inner_len, &value, &arith_error)) {
+            stdio__printf("shell: ((: %s\n", arith_error != NULL ? arith_error : "syntax error");
+            return 2;
+        }
+        return value != 0 ? 0 : 1; /* bash: (( )) is "true" (status 0) iff the result is nonzero */
+    }
     char **words = NULL;
     int argc = 0;
     const char *error = NULL;
@@ -631,7 +664,12 @@ static int shell_executor__command(shell_state_t *state, const shell_command_t *
 
 int shell_executor__plan(shell_state_t *state, const shell_plan_t *plan) {
     int status = state->last_status;
-    for (size_t i = 0; i < plan->count && !state->exit_requested; ++i) {
+    /* A "break" mid-batch (e.g. the ";"-joined "break; echo unreached" in
+     * "if x; then break; echo unreached; fi") must stop the rest of this
+     * batch immediately, the same way exit_requested already does -- see
+     * shell_state_t.break_requested and shell_compound__run_for()/
+     * run_while(), which are what actually consume it. */
+    for (size_t i = 0; i < plan->count && !state->exit_requested && state->break_requested == 0; ++i) {
         shell_connector_t connector = plan->commands[i].connector;
         bool run = connector == SHELL_CONNECT_NONE || connector == SHELL_CONNECT_SEQUENCE ||
                    (connector == SHELL_CONNECT_AND && status == 0) ||

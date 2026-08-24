@@ -55,6 +55,16 @@ int shell_parser__plan(const char *line, shell_plan_t *plan, const char **error)
      * connector case below) -- so a comment must stop at the next '\n'
      * rather than swallowing every statement after it in the block. */
     bool in_comment = false;
+    /* Tracks a "((...))" arithmetic-command span (see shell_arith.c and
+     * shell_compound__run_for()'s C-style header) so ';'/'&&'/'||'/'|'/'<'/
+     * '>' inside one -- as in `for ((i=0;i<10;i++))` or `(( a < b ))` -- are
+     * left as plain text instead of being parsed as shell operators or
+     * rejected as redirection. Only a literal doubled "((" opens a span,
+     * matching bash's own recognition of the construct; once open,
+     * arith_depth just counts unmatched '(' (so a nested single-paren
+     * group, e.g. "(( (a+b)*c ))", doesn't close it early) until it returns
+     * to 0 at the matching "))". */
+    int arith_depth = 0;
 
     for (size_t i = 0; i <= length; ++i) {
         char c = i < length ? line[i] : '\0';
@@ -89,6 +99,23 @@ int shell_parser__plan(const char *line, shell_plan_t *plan, const char **error)
         if (single || double_quote) continue;
         if (c == '#' && token_boundary) {
             in_comment = true;
+            continue;
+        }
+        if (arith_depth == 0 && c == '(' && i + 1 < length && line[i + 1] == '(') {
+            /* This is the first '(' of the doubled "((" opener; the second
+             * one is counted by the ordinary +1 below when the next loop
+             * iteration reaches it -- setting arith_depth to 2 here too
+             * would double-count it. */
+            arith_depth = 1;
+        } else if (arith_depth > 0) {
+            if (c == '(') arith_depth++;
+            else if (c == ')') arith_depth--;
+        }
+        if (arith_depth > 0 && c != '\0') {
+            /* Never swallow the end-of-buffer sentinel here: even an
+             * unterminated "((" must still fall through to the flush logic
+             * below so the last command isn't silently dropped. */
+            token_boundary = isspace((unsigned char)c);
             continue;
         }
         if (c == '<' || c == '>') {
