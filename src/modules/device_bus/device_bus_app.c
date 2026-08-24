@@ -1,4 +1,7 @@
 #include "device_bus_app.h"
+#include "core_sdk/result.h"
+
+#if CONFIG_BRUCE_BOARD_I2C_ENABLED
 
 #include "core/device/board_i2c.h"
 
@@ -11,8 +14,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "sdkconfig.h"
-
-#if CONFIG_BRUCE_BOARD_I2C_ENABLED
 
 #define DEVICE_BUS__POLL_PERIOD_MS 20
 #define DEVICE_BUS__BATTERY_POLL_PERIOD_MS 30000
@@ -162,9 +163,7 @@ static bool device_bus__battery_ensure_device(i2c_master_bus_handle_t bus) {
     };
     if (i2c_master_bus_add_device(bus, &dev_config, &s_battery_dev) != ESP_OK) return false;
 
-    uint8_t enable_adc[] = {
-        DEVICE_BUS__AXP2101_REG_ADC_ENABLE, DEVICE_BUS__AXP2101_ADC_ENABLE_MASK
-    };
+    uint8_t enable_adc[] = {DEVICE_BUS__AXP2101_REG_ADC_ENABLE, DEVICE_BUS__AXP2101_ADC_ENABLE_MASK};
     if (i2c_master_transmit(s_battery_dev, enable_adc, sizeof(enable_adc), -1) != ESP_OK) return false;
 
     s_battery_ready = true;
@@ -204,9 +203,7 @@ static bool device_bus__battery_ensure_device(i2c_master_bus_handle_t bus) {
     };
     if (i2c_master_bus_add_device(bus, &dev_config, &s_battery_dev) != ESP_OK) return false;
 
-    uint8_t enable_adc[] = {
-        DEVICE_BUS__AXP192_REG_ADC_ENABLE, DEVICE_BUS__AXP192_ADC_ENABLE_ALL
-    };
+    uint8_t enable_adc[] = {DEVICE_BUS__AXP192_REG_ADC_ENABLE, DEVICE_BUS__AXP192_ADC_ENABLE_ALL};
     if (i2c_master_transmit(s_battery_dev, enable_adc, sizeof(enable_adc), -1) != ESP_OK) return false;
 
     s_battery_ready = true;
@@ -219,8 +216,7 @@ static bool device_bus__battery_read(int *out_percent) {
     if (i2c_master_transmit_receive(s_battery_dev, &reg, 1, raw, sizeof(raw), -1) != ESP_OK) return false;
 
     int adc12 = ((int)raw[0] << 4) | (raw[1] & 0x0F);
-    int battery_mv =
-        adc12 * DEVICE_BUS__AXP192_VOLTAGE_LSB_MV_NUM / DEVICE_BUS__AXP192_VOLTAGE_LSB_MV_DEN;
+    int battery_mv = adc12 * DEVICE_BUS__AXP192_VOLTAGE_LSB_MV_NUM / DEVICE_BUS__AXP192_VOLTAGE_LSB_MV_DEN;
     int percent = (battery_mv - DEVICE_BUS__BATTERY_EMPTY_MV) * 100 /
                   (DEVICE_BUS__BATTERY_FULL_MV - DEVICE_BUS__BATTERY_EMPTY_MV);
     if (percent < 0) percent = 0;
