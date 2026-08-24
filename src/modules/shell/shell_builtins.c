@@ -131,7 +131,7 @@ static int shell_builtins__assignment(shell_state_t *state, const char *assignme
     return shell_builtins__set(state, name, equals + 1);
 }
 
-static bool shell_builtins__resolve_path(const shell_state_t *state, const char *path, char *out_path) {
+bool shell_builtins__resolve_path(const shell_state_t *state, const char *path, char *out_path) {
     char combined[BRUCE_STORAGE_PATH_MAX * 2];
     const char *working_directory = shell_builtins__get(state, "PWD");
     if (working_directory == NULL || working_directory[0] != '/') working_directory = "/";

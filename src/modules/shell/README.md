@@ -14,6 +14,8 @@ definitions) by raw-text keyword matching in command position.
 
 **Commands and connectors**
 - `;` sequencing, `&&` / `||` short-circuiting, `|` single-hop pipes.
+- `>` / `>>` output redirection to a file, for an external command only (see
+  below).
 - Multi-line input: a bare newline is treated as `;`, so a whole multi-line
   construct parses as one flat command list.
 - Comments are not supported (`#` is not special).
@@ -30,8 +32,9 @@ definitions) by raw-text keyword matching in command position.
   arithmetic expansion `$((...))` as a *word* (only the standalone `((...))`
   statement form exists — see below), brace expansion (`{a,b}`), tilde
   expansion (`~`), pathname globbing (`*`, `?`, `[...]`), `$@`/`$*`, `$$`,
-  here-docs/here-strings, and I/O redirection (`<`, `>`, `>>` are rejected
-  with a parse error outside of `((...))`).
+  here-docs/here-strings, and input redirection (`<` is rejected with a
+  parse error outside of `((...))`; see the Redirection section below for
+  what `>`/`>>` do support).
 
 **Builtins** (`shell_builtins.c`)
 - `echo`, `true`, `false`, `cd`, `set`, `unset`, `export`, `clear`, `reset`,
@@ -48,6 +51,35 @@ definitions) by raw-text keyword matching in command position.
 - All builtin names are reserved as command words (see
   `s_shell_builtin_names[]` in `shell_builtins.c`).
 
+**Redirection — `>` / `>>`** (`shell_parser.c`, `shell_executor.c`)
+- A single, trailing `> file` or `>> file` on an **external command** (not a
+  builtin, not a shell function): `>` truncates/creates the file, `>>`
+  creates/appends. The target undergoes the same quoting/escaping/`$`
+  expansion as any other word (`wifi scan >> "$LOG_DIR/wifi.txt"` works), and
+  a relative target resolves against `$PWD` the same way `cd`'s argument
+  does. A bare `> file` / `>> file` with no command at all just
+  creates/truncates the file, same as bash's `: > file` idiom.
+- Implementation: the whole external command's stdout is captured into an
+  in-memory buffer (the same mechanism `|` piping uses — see below) and
+  written to the file once the command exits, rather than streaming to the
+  file as the command runs. Consequently, like a pipe's producer side, any
+  `NAME=value` assignment prefixed onto the redirected command is dropped
+  (not passed to the child) and the command always runs to completion before
+  its output is written — there is no live/streaming redirection.
+- Only one output redirection per command is recognized, and it must trail
+  the command (`cmd arg1 arg2 > file`, not `cmd > file arg2`); a second `>`
+  or trailing text after the target is a syntax error rather than being
+  silently misparsed.
+- Redirecting a builtin, a shell function, or a standalone `((...))`
+  statement is rejected with an error (`shell: output redirection currently
+  requires an external command`) rather than doing nothing silently.
+- **Not implemented:** input redirection (`<`, rejected with a parse error),
+  multiple/chained redirections, numbered file descriptors (`2>`), here-docs,
+  and streaming (a redirected command's output is only written to the file
+  after the whole command has finished, and only if it exited successfully —
+  a command that writes partial output before exiting nonzero has that
+  partial output discarded, not written).
+
 **Arithmetic — `((...))`** (`shell_arith.c`, `shell_arith.h`)
 - A standalone recursive-descent evaluator, usable as its own statement,
   inside `if`/`while` conditions, and as a C-style `for` header. Status is 0
@@ -61,6 +93,14 @@ definitions) by raw-text keyword matching in command position.
   `&&`, `||`, `|`, `<`, `>` inside them are left as literal text instead of
   being parsed as shell connectors/redirection — needed for
   `for ((i=0;i<10;i++))` and `(( a < b ))`.
+- The text inside `((...))` is evaluated as-is, *not* run through the normal
+  `$`-word-expansion pass — variable references there are resolved directly
+  by the evaluator, with a leading `$` accepted but optional (`((x = x + 1))`
+  and `((x = $x + 1))` both work). Consequently only names shaped like a
+  shell identifier (`[A-Za-z_][A-Za-z0-9_]*`) are usable inside `((...))`:
+  positional parameters (`$1`, `$2`, ...) do **not** parse there, since they
+  don't start with a letter/`_`. Copy one into a named variable first
+  (`n=$1`) and use `n` inside the arithmetic.
 - **Not implemented:** the ternary operator `?:`, comma operator, array
   subscripts, and floating point (everything is `long`).
 
@@ -84,6 +124,17 @@ definitions) by raw-text keyword matching in command position.
   parameters (`$1..$9`, `$#`) for the duration of the call, but ordinary
   variables are **not** function-scoped — there is no `local`; a variable
   set inside a function is visible everywhere after the call returns.
+  Recursion works (positional parameters are saved/restored per call), so
+  the usual workaround for "no locals" is an accumulator-passing style where
+  each level only reads its own arguments *before* recursing and does
+  nothing with global state after the recursive call returns — see the
+  `factorial` example below.
+- There is no `return` builtin. A function's exit status is simply whatever
+  its last executed command's status was, same as a plain script; use
+  `if`/`elif`/`else` to skip the rest of the body instead of returning
+  early. A `break` with no enclosing loop (including one used to try to
+  "return" out of a function) is reported as a stray break, not absorbed
+  silently.
 - **Not implemented:** `case`/`esac`, `select`, subshells `(...)`, process
   substitution, `local`, `until`, and command grouping with `{ ...; }` used
   as a value (only as a function body).
@@ -93,7 +144,9 @@ definitions) by raw-text keyword matching in command position.
 Roughly in order of how often bash scripts actually use them:
 - Command substitution `$(...)`/`` `...` `` and arithmetic expansion as a
   word, `$((...))`.
-- I/O redirection (`>`, `>>`, `<`) and here-docs.
+- Input redirection (`<`) and here-docs; streaming (rather than
+  capture-then-write) `>`/`>>` output redirection; redirecting a builtin or
+  shell function's output.
 - Pathname globbing and brace expansion.
 - `case`/`esac`.
 - `local` (function-scoped variables).
@@ -103,6 +156,97 @@ Roughly in order of how often bash scripts actually use them:
 - `until` loops, C-style `((...))` outside of `for` headers used as a word
   (already works as a statement/condition).
 - Comments (`#`).
+
+## Example
+
+A script exercising most of the above at once: recursive functions (via the
+accumulator trick, since there's no `local`/`return`), C-style and word-list
+`for`, `while` + `read`, nested loops with `break 2`, and `((...))`
+arithmetic including the "copy `$N` into a name first" rule.
+
+```sh
+factorial() {
+    acc=$1
+    n=$2
+    if [ $n -le 1 ]; then
+        FACT=$acc
+    else
+        ((next_acc = acc * n))
+        ((next_n = n - 1))
+        factorial $next_acc $next_n
+    fi
+}
+
+is_prime() {
+    n=$1
+    PRIME=1
+    if [ $n -lt 2 ]; then
+        PRIME=0
+    else
+        for ((d = 2; d * d <= n; d++)); do
+            ((rem = n % d))
+            if [ $rem -eq 0 ]; then
+                PRIME=0
+                break
+            fi
+        done
+    fi
+}
+
+echo "== factorials =="
+for k in 1 2 3 4 5 6 7; do
+    factorial 1 $k
+    echo "$k! = $FACT"
+done
+
+echo "== primes under 30 =="
+for ((m = 2; m < 30; m++)); do
+    is_prime $m
+    if [ $PRIME -eq 1 ]; then
+        echo $m
+    fi
+done
+
+echo "== multiplication table, stops once a cell exceeds 25 =="
+for ((row = 1; row <= 9; row++)); do
+    for ((col = 1; col <= 9; col++)); do
+        ((cell = row * col))
+        if [ $cell -gt 25 ]; then
+            break 2
+        fi
+        echo "$row x $col = $cell"
+    done
+done
+
+echo "== guess the number (1-100), type 'quit' to give up =="
+target=42
+attempts=0
+while true; do
+    read guess
+    if [ "$guess" = "quit" ]; then
+        echo "the number was $target"
+        break
+    fi
+    ((attempts++))
+    if [ $guess -eq $target ]; then
+        echo "correct in $attempts tries!"
+        break
+    elif [ $guess -lt $target ]; then
+        echo "too low"
+    else
+        echo "too high"
+    fi
+done
+```
+
+`factorial` and `is_prime` both start by copying their positional parameter
+into a plain named variable (`n=$1`) — required, since `$1` can't appear
+inside `((...))` directly. `factorial` passes an accumulator (`acc`) down
+through the recursion and only sets `FACT` at the base case; every returning
+frame does nothing further, so the shared global `acc`/`n` being overwritten
+by deeper calls is harmless. The multiplication table's `break 2` unwinds
+both the `col` and `row` loops as soon as one cell exceeds 25, rather than
+just skipping the rest of the current row.
 
 ## Selftests
 

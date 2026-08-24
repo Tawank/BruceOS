@@ -37,6 +37,114 @@ bool shell_parser__valid_name(const char *name, size_t length) {
     return true;
 }
 
+/* Detects a single trailing "> target" / ">> target" output redirection on
+ * an already-trimmed command span and, if found, shrinks command->length to
+ * exclude it, leaving the plain command/arguments shell_parser__words() will
+ * tokenize normally. Only a single redirection at the very end of the
+ * command is supported -- anything else (a second '>', or non-whitespace
+ * after the target) is a syntax error rather than being silently
+ * misinterpreted. A '>' inside a quoted word or a "((...))" arithmetic span
+ * (e.g. "(( a > b ))") is never mistaken for the operator, via the same
+ * quote- and arith-depth tracking shell_parser__plan()'s own scan uses. */
+static int shell_parser__extract_redirect(shell_command_t *command, const char **error) {
+    const char *text = command->text;
+    size_t length = command->length;
+    bool single = false, double_quote = false, escaped = false;
+    int arith_depth = 0;
+    size_t op_start = length;
+    for (size_t i = 0; i < length; ++i) {
+        char c = text[i];
+        if (escaped) {
+            escaped = false;
+            continue;
+        }
+        if (!single && c == '\\') {
+            escaped = true;
+            continue;
+        }
+        if (!double_quote && c == '\'') {
+            single = !single;
+            continue;
+        }
+        if (!single && c == '"') {
+            double_quote = !double_quote;
+            continue;
+        }
+        if (single || double_quote) continue;
+        if (arith_depth == 0 && c == '(' && i + 1 < length && text[i + 1] == '(') {
+            arith_depth = 1;
+            continue;
+        }
+        if (arith_depth > 0) {
+            if (c == '(') arith_depth++;
+            else if (c == ')') arith_depth--;
+            continue;
+        }
+        if (c == '>') {
+            op_start = i;
+            break;
+        }
+    }
+    if (op_start == length) return 0; /* no redirection on this command */
+
+    size_t i = op_start;
+    bool append = i + 1 < length && text[i + 1] == '>';
+    i += append ? 2u : 1u;
+    while (i < length && isspace((unsigned char)text[i])) i++;
+    if (i >= length) {
+        *error = "missing redirection target";
+        return -1;
+    }
+    size_t target_start = i;
+    bool t_single = false, t_double = false, t_escaped = false;
+    while (i < length) {
+        char c = text[i];
+        if (t_escaped) {
+            t_escaped = false;
+            i++;
+            continue;
+        }
+        if (!t_single && c == '\\') {
+            t_escaped = true;
+            i++;
+            continue;
+        }
+        if (!t_double && c == '\'') {
+            t_single = !t_single;
+            i++;
+            continue;
+        }
+        if (!t_single && c == '"') {
+            t_double = !t_double;
+            i++;
+            continue;
+        }
+        if (!t_single && !t_double && isspace((unsigned char)c)) break;
+        i++;
+    }
+    if (t_single || t_double) {
+        *error = "unterminated quote in redirection target";
+        return -1;
+    }
+    if (i == target_start) {
+        *error = "missing redirection target";
+        return -1;
+    }
+    size_t target_end = i;
+    while (i < length && isspace((unsigned char)text[i])) i++;
+    if (i < length) {
+        *error =
+            text[i] == '>' ? "multiple output redirections are unsupported" : "unexpected text after redirection";
+        return -1;
+    }
+    command->redirect = append ? SHELL_REDIRECT_APPEND : SHELL_REDIRECT_OUT;
+    command->redirect_target.text = text + target_start;
+    command->redirect_target.length = target_end - target_start;
+    command->length = op_start;
+    while (command->length > 0 && isspace((unsigned char)command->text[command->length - 1])) command->length--;
+    return 0;
+}
+
 int shell_parser__plan(const char *line, shell_plan_t *plan, const char **error) {
     if (line == NULL || plan == NULL || error == NULL) return -1;
     memset(plan, 0, sizeof(*plan));
@@ -118,8 +226,8 @@ int shell_parser__plan(const char *line, shell_plan_t *plan, const char **error)
             token_boundary = isspace((unsigned char)c);
             continue;
         }
-        if (c == '<' || c == '>') {
-            *error = "redirection is unsupported";
+        if (c == '<') {
+            *error = "input redirection ('<') is unsupported";
             return -1;
         }
 
@@ -152,6 +260,7 @@ int shell_parser__plan(const char *line, shell_plan_t *plan, const char **error)
                     .length = end - start,
                     .connector = next_connector,
                 };
+                if (shell_parser__extract_redirect(&command, error) != 0) return -1;
                 if (plan->count >= SHELL__MAX_COMMANDS) {
                     *error = "too many commands";
                     return -1;

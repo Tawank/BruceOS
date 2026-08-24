@@ -11,6 +11,7 @@
 #include "core_sdk/result.h"
 #include "core_sdk/runtime.h"
 #include "core_sdk/stdio.h"
+#include "core_sdk/storage.h"
 #include "core_sdk/tty.h"
 #include "shell_arith.h"
 #include "shell_builtins.h"
@@ -303,6 +304,110 @@ static int shell_executor__capture_external(int argc, char **argv, shell_executo
     return 0;
 }
 
+/* Expands a redirection target span (e.g. the "file.txt" in "cmd > file.txt")
+ * exactly the way an ordinary argv word is expanded -- quotes, escapes, and
+ * $variable references all work -- by wrapping it in a one-off
+ * shell_command_t and running it through the normal word-splitter, then
+ * resolves the result against $PWD via shell_builtins__resolve_path() (the
+ * same resolution `cd`'s own argument goes through), since storage__open()
+ * requires an absolute, normalized path and a redirection target is
+ * otherwise written relative like any other shell path argument. Exactly one
+ * resulting word is required: zero (an expansion that came out empty) or
+ * more than one (e.g. an unquoted variable containing whitespace) is
+ * reported as an error rather than guessing which word was meant. On
+ * success, *out_path is heap-allocated and owned by the caller. */
+static int shell_executor__resolve_redirect_target(
+    shell_state_t *state, const shell_word_span_t *span, char **out_path, const char **error
+) {
+    shell_command_t pseudo = {.text = span->text, .length = span->length};
+    char **words = NULL;
+    int argc = 0;
+    if (shell_parser__words(&pseudo, &words, &argc, shell_executor__lookup, state, state->last_status, error) != 0) {
+        return -1;
+    }
+    if (argc != 1) {
+        shell_parser__free_words(words, argc);
+        *error = argc == 0 ? "missing redirection target" : "ambiguous redirection target";
+        return -1;
+    }
+    char resolved[BRUCE_STORAGE_PATH_MAX];
+    bool resolved_ok = shell_builtins__resolve_path(state, words[0], resolved);
+    shell_parser__free_words(words, argc);
+    if (!resolved_ok) {
+        *error = "invalid redirection target path";
+        return -1;
+    }
+    char *heap_path = memory__malloc(strlen(resolved) + 1u);
+    if (heap_path == NULL) {
+        *error = "out of memory";
+        return -1;
+    }
+    memcpy(heap_path, resolved, strlen(resolved) + 1u);
+    *out_path = heap_path;
+    return 0;
+}
+
+/* Creates (or appends to) `path` and writes `buffer` to it in full. Used for
+ * "cmd > file" / "cmd >> file" -- see shell_executor__external_redirected()
+ * below -- and for a bare "> file" with no command at all, which just
+ * truncates/creates an empty file, matching bash. */
+static bool shell_executor__write_file(const char *path, bool append, const shell_executor__buffer_t *buffer) {
+    uint32_t flags = BRUCE_STORAGE_OPEN_CREATE | (append ? BRUCE_STORAGE_OPEN_APPEND
+                                                          : (BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_TRUNCATE));
+    bruce_file_id_t file;
+    if (storage__open(path, flags, &file) != BRUCE_OK) return false;
+    bool ok = true;
+    if (buffer->length > 0) {
+        const void *data = NULL;
+        if (memory__external_map(&buffer->object, &data) != BRUCE_OK) {
+            ok = false;
+        } else {
+            size_t offset = 0;
+            while (ok && offset < buffer->length) {
+                size_t written = 0;
+                bruce_result_t result =
+                    storage__write(file, (const char *)data + offset, buffer->length - offset, &written);
+                if (result != BRUCE_OK || written == 0) {
+                    ok = false;
+                    break;
+                }
+                offset += written;
+            }
+        }
+    }
+    (void)storage__close(file);
+    return ok;
+}
+
+/* "cmd > file" / "cmd >> file" for an external command: captures its stdout
+ * the same way a pipe's producer side does (shell_executor__capture_external()
+ * -- always foreground, and per-command NAME=value assignments are dropped,
+ * the same pre-existing limitation a pipe producer already has) and writes
+ * the result to `path` once the command finishes. Like bash, the file is
+ * still created/truncated even if the command's own exit status is nonzero;
+ * unlike bash, output the command wrote before exiting nonzero is not
+ * preserved (shell_executor__capture_external() itself discards the buffer
+ * on a nonzero exit, same as the pipe path it's shared with). */
+static int shell_executor__external_redirected(
+    shell_state_t *state, int argc, char **argv, const shell_command_t *command
+) {
+    const char *error = NULL;
+    char *path = NULL;
+    if (shell_executor__resolve_redirect_target(state, &command->redirect_target, &path, &error) != 0) {
+        stdio__printf("shell: %s\n", error != NULL ? error : "redirection error");
+        return 2;
+    }
+    shell_executor__buffer_t buffer = {0};
+    int status = shell_executor__capture_external(argc, argv, &buffer);
+    if (!shell_executor__write_file(path, command->redirect == SHELL_REDIRECT_APPEND, &buffer)) {
+        stdio__printf("shell: %s: write failed\n", path);
+        if (status == 0) status = 1;
+    }
+    shell_executor__buffer_free(&buffer);
+    memory__free(path);
+    return status;
+}
+
 /* Pumps `session` bidirectionally between `child` and the shell process's own
  * routed stdio -- i.e. whatever real terminal (terminal_app.c, ssh, the
  * physical console, ...) the shell itself is running under -- until `child`
@@ -497,14 +602,18 @@ int shell_executor__page_help(void) {
                                        "  command [argument ...]\n"
                                        "  NAME=value command\n"
                                        "  producer | consumer\n"
+                                       "  external-command > file\n"
+                                       "  external-command >> file\n"
                                        "\n"
                                        "Operators:\n"
                                        "  ;    run commands in sequence\n"
                                        "  &&   run the next command after success\n"
                                        "  ||   run the next command after failure\n"
                                        "  |    pipe one external producer to one external consumer\n"
+                                       "  >    redirect an external command's output, truncating the file\n"
+                                       "  >>   redirect an external command's output, appending to the file\n"
                                        "\n"
-                                       "Redirection and chained pipes are not supported.\n"
+                                       "Input redirection ('<') and chained pipes are not supported.\n"
                                        "\n"
                                        "Shell built-ins:\n";
     if (!shell_executor__buffer_append_text(&buffer, introduction)) goto out_of_memory;
@@ -533,8 +642,10 @@ out_of_memory:
 
 /* Consumes leading NAME=value assignment words, then dispatches the
  * remainder (if any) to a builtin or an external process. `words` is
- * borrowed; the caller owns and frees it. */
-static int shell_executor__dispatch(shell_state_t *state, char **words, int argc) {
+ * borrowed; the caller owns and frees it. `command` is only consulted for
+ * its redirect fields (see shell_parser.h) -- `words`/`argc` are already the
+ * result of word-splitting `command`'s (possibly redirect-shortened) text. */
+static int shell_executor__dispatch(shell_state_t *state, const shell_command_t *command, char **words, int argc) {
     int first_command = 0;
     shell_executor__environment_t environment = {0};
     /* Defaults to background: the shell itself is always a background
@@ -601,17 +712,42 @@ static int shell_executor__dispatch(shell_state_t *state, char **words, int argc
             }
         }
         shell_executor__environment_free(&environment);
-        return 0;
+        /* A bare "> file" / ">> file" with no command at all is valid, same
+         * as in bash: it just creates/truncates (or appends nothing to) the
+         * target file. */
+        if (command->redirect == SHELL_REDIRECT_NONE) return 0;
+        const char *error = NULL;
+        char *path = NULL;
+        if (shell_executor__resolve_redirect_target(state, &command->redirect_target, &path, &error) != 0) {
+            stdio__printf("shell: %s\n", error != NULL ? error : "redirection error");
+            return 2;
+        }
+        shell_executor__buffer_t empty = {0};
+        bool ok = shell_executor__write_file(path, command->redirect == SHELL_REDIRECT_APPEND, &empty);
+        if (!ok) stdio__printf("shell: %s: write failed\n", path);
+        memory__free(path);
+        return ok ? 0 : 1;
     }
     int remaining = argc - first_command;
     char **argv = words + first_command;
     /* A user-defined function shadows a builtin or external command of the
      * same name, the same as in bash. */
-    int result = shell_compound__is_function(state, argv[0])
-                     ? shell_compound__call_function(state, remaining, argv)
-                 : shell_builtins__is_builtin(argv[0])
-                     ? shell_builtins__run(state, remaining, argv)
-                     : shell_executor__external(remaining, argv, environment.items, environment.count, mode);
+    bool is_function = shell_compound__is_function(state, argv[0]);
+    bool is_builtin = !is_function && shell_builtins__is_builtin(argv[0]);
+    int result;
+    if (command->redirect != SHELL_REDIRECT_NONE) {
+        if (is_function || is_builtin) {
+            stdio__printf("shell: output redirection currently requires an external command\n");
+            result = 2;
+        } else {
+            result = shell_executor__external_redirected(state, remaining, argv, command);
+        }
+    } else {
+        result = is_function ? shell_compound__call_function(state, remaining, argv)
+                  : is_builtin
+                      ? shell_builtins__run(state, remaining, argv)
+                      : shell_executor__external(remaining, argv, environment.items, environment.count, mode);
+    }
     shell_executor__environment_free(&environment);
     return result;
 }
@@ -640,6 +776,10 @@ shell_executor__is_arith_command(const shell_command_t *command, size_t *inner_s
 static int shell_executor__command(shell_state_t *state, const shell_command_t *command) {
     size_t inner_start, inner_len;
     if (shell_executor__is_arith_command(command, &inner_start, &inner_len)) {
+        if (command->redirect != SHELL_REDIRECT_NONE) {
+            stdio__printf("shell: redirection is not supported on '((...))'\n");
+            return 2;
+        }
         long value = 0;
         const char *arith_error = NULL;
         if (!shell_arith__eval(state, command->text + inner_start, inner_len, &value, &arith_error)) {
@@ -657,7 +797,7 @@ static int shell_executor__command(shell_state_t *state, const shell_command_t *
         stdio__printf("shell: %s\n", error != NULL ? error : "parse error");
         return 2;
     }
-    int result = shell_executor__dispatch(state, words, argc);
+    int result = shell_executor__dispatch(state, command, words, argc);
     shell_parser__free_words(words, argc);
     return result;
 }

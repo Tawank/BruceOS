@@ -17,10 +17,32 @@ typedef enum {
     SHELL_CONNECT_PIPE,
 } shell_connector_t;
 
+/* A single trailing ">"/">>" output redirection recognized on one command by
+ * shell_parser__plan() -- see its shell_parser__extract_redirect() helper.
+ * There is no SHELL_REDIRECT_IN: input redirection ('<') is rejected at
+ * parse time (see shell_executor.c's README notes for why -- this shell's
+ * stdio sessions have no generic EOF signal a plain external command could
+ * detect). */
+typedef enum {
+    SHELL_REDIRECT_NONE = 0,
+    SHELL_REDIRECT_OUT,    /* > : truncate/create */
+    SHELL_REDIRECT_APPEND, /* >> : append/create */
+} shell_redirect_t;
+
+/* A raw, unexpanded span into the original line -- e.g. a redirection
+ * target -- expanded the same way an ordinary argv word is, by wrapping it
+ * in a one-off shell_command_t and running it through shell_parser__words(). */
+typedef struct {
+    const char *text;
+    size_t length;
+} shell_word_span_t;
+
 typedef struct {
     const char *text;
     size_t length;
     shell_connector_t connector;
+    shell_redirect_t redirect;
+    shell_word_span_t redirect_target;
 } shell_command_t;
 
 typedef struct {
