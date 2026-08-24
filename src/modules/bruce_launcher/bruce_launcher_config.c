@@ -19,7 +19,7 @@
 #define BRUCE_LAUNCHER_CONFIG__GRID_COLUMNS_MAX 8
 
 static const char *const LAYOUT_NAMES[3] = {"carousel_h", "carousel_v", "grid"};
-static const char *const LAYOUT_LABELS[3] = {"Horizontal Carousel", "Vertical Carousel", "Grid"};
+static const char *const LAYOUT_LABELS[3] = {"Horizontal Carousel", "Vertical List", "Grid"};
 static const char *const LABEL_MODE_NAMES[3] = {"selected", "all", "none"};
 static const char *const LABEL_MODE_LABELS[3] = {"Main item only", "All items", "Hidden"};
 

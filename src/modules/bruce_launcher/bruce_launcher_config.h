@@ -14,7 +14,7 @@
 
 typedef enum {
     BRUCE_LAUNCHER_LAYOUT_CAROUSEL_H = 0, /* Original look: one big centered icon, slides left/right. */
-    BRUCE_LAUNCHER_LAYOUT_CAROUSEL_V,     /* Same, but stacked vertically and sliding up/down. */
+    BRUCE_LAUNCHER_LAYOUT_CAROUSEL_V,     /* Scrolling list: icon left, label right, one row per entry. */
     BRUCE_LAUNCHER_LAYOUT_GRID,           /* Static rows/columns of icons, no slide animation. */
 } bruce_launcher_layout_t;
 
