@@ -222,6 +222,10 @@ static bruce_result_t dialog__term_pick_file(
  * it as a long press instead of an instant selection - see
  * bruce_dialog_render_params_t.long_press_enabled. */
 #define DIALOG__LONG_PRESS_MS 500u
+/* Width of, and gap before, the scrollbar dialog__gui_choice() draws down the
+ * right edge of a list that doesn't fit on one page. */
+#define DIALOG__SCROLLBAR_W 4
+#define DIALOG__SCROLLBAR_GAP 3
 
 static int dialog__default_list_text_size(void) {
     return display__width() >= DIALOG__WIDE_DISPLAY_MIN_WIDTH ? DIALOG__LIST_TEXT_SIZE_WIDE
@@ -365,6 +369,25 @@ static void dialog__gui_draw_row_label(
     dialog__copy_utf8_columns(rendered, sizeof(rendered), label, first_column, (size_t)max_chars);
     display__set_cursor(x, y);
     display__print(rendered);
+}
+
+/* Thin vertical scrollbar for a list that scrolls: a track from (x, y) down
+ * `h` px, with a thumb sized to the visible fraction of `total` rows and
+ * positioned at `window_start`'s fraction of the scrollable range. Mirrors
+ * bruce_launcher__draw_scrollbar()'s look so a list dialog and the launcher's
+ * own list layout read as the same widget. No-ops when everything already
+ * fits (total <= visible). */
+static void dialog__gui_draw_scrollbar(
+    int x, int y, int h, int window_start, int visible, int total, uint16_t track_color, uint16_t thumb_color
+) {
+    if (total <= visible || h <= 4 || visible <= 0) return;
+    display__draw_rect(x, y, DIALOG__SCROLLBAR_W, h, track_color);
+    int thumb_h = h * visible / total;
+    if (thumb_h < 6) thumb_h = 6;
+    if (thumb_h > h) thumb_h = h;
+    int max_scroll = total - visible;
+    int thumb_y = max_scroll > 0 ? y + (h - thumb_h) * window_start / max_scroll : y;
+    display__fill_rect(x, thumb_y, DIALOG__SCROLLBAR_W, thumb_h, thumb_color);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -627,10 +650,16 @@ static bruce_result_t dialog__gui_choice(
             if ((size_t)last_visible >= choice_count) { last_visible = (int)choice_count - 1; }
             selected_label_overflows = false;
 
+            /* A list longer than one page loses a strip on its right edge to
+             * a scrollbar; every row's fill and label shrink to make room for
+             * it rather than being drawn under it. */
+            bool list_scrollable = choice_count > (size_t)items_per_page;
+            int list_w = list_scrollable ? content_w - DIALOG__SCROLLBAR_W - DIALOG__SCROLLBAR_GAP : content_w;
+
             for (int i = first_visible; i <= last_visible; ++i) {
                 int y = list_y + (i - first_visible) * row_h;
                 if (i == selected) {
-                    display__fill_rect(content_left, y, content_w, row_h, text_color);
+                    display__fill_rect(content_left, y, list_w, row_h, text_color);
                     display__set_text_color(background_color);
                 } else {
                     display__set_text_color(text_color);
@@ -638,7 +667,7 @@ static bruce_result_t dialog__gui_choice(
                 display__set_text_size(text_size);
                 display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
                 int label_left = content_left + DIALOG__MARGIN;
-                int label_right = content_left + content_w - DIALOG__MARGIN;
+                int label_right = content_left + list_w - DIALOG__MARGIN;
                 const bruce_icon_t *icon = icon__get(choices[i].icon_name);
                 if (icon != NULL) {
                     int icon_size = row_h - 2;
@@ -677,6 +706,13 @@ static bruce_result_t dialog__gui_choice(
                 );
             }
 
+            if (list_scrollable) {
+                dialog__gui_draw_scrollbar(
+                    content_left + list_w + DIALOG__SCROLLBAR_GAP, list_y, usable_h, first_visible,
+                    items_per_page, (int)choice_count, border, text_color
+                );
+            }
+
             if (render_borders && !render_window) {
                 display__fill_rect(left, bottom - footer_h, viewport_w, footer_h, sec);
             }
@@ -704,11 +740,14 @@ static bruce_result_t dialog__gui_choice(
         switch (ev.code) {
             case BRUCE_INPUT_CODE_UP:
             case BRUCE_INPUT_CODE_PREV:
-                if (selected > 0) { selected--; }
+                /* Wraps past the top to the last item, same as the launcher's
+                 * own lists (bruce_launcher__wrap_index()). An empty list has
+                 * nothing to wrap to, so it stays put at 0. */
+                if (choice_count > 0) { selected = selected > 0 ? selected - 1 : (int)choice_count - 1; }
                 break;
             case BRUCE_INPUT_CODE_DOWN:
             case BRUCE_INPUT_CODE_NEXT:
-                if ((size_t)selected + 1 < choice_count) { selected++; }
+                if (choice_count > 0) { selected = (size_t)selected + 1 < choice_count ? selected + 1 : 0; }
                 break;
             case BRUCE_INPUT_CODE_LEFT:
                 if (selected > 0) {
