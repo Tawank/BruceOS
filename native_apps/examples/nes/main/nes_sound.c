@@ -19,11 +19,6 @@ static uint32_t audio_sample_rate_hz;
 static uint32_t audio_frame_fraction;
 static bool audio_stream_open;
 
-/* Retained for the video performance report; submission never blocks. */
-static uint32_t audio_last_write_us;
-
-uint32_t nes_sound_last_write_us(void) { return audio_last_write_us; }
-
 void osd_stopsound(void) {
     audio_playfunc = NULL;
     if (audio_stream_open) {
@@ -73,7 +68,6 @@ void nes_sound_pump(void) {
     for (uint32_t i = 0; i < generate; i++) { audio_samples[i] = (int16_t)(audio_samples[i] >> 2); }
 
     (void)audio__stream_write(audio_samples, generate);
-    audio_last_write_us = 0;
 }
 
 #else /* !SOUND_ENABLED */

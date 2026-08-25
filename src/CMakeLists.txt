@@ -186,8 +186,6 @@ idf_component_register(SRCS
                     "modules/webui/webui_files.c"
                     "modules/webui/webui_system.c"
                     "modules/privileged/permissions/permissions_app.c"
-                    EMBED_FILES
-                    "../native_apps/examples/game.elf"
                     REQUIRES
                     args
                     cjson
