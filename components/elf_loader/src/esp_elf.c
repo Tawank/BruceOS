@@ -173,6 +173,9 @@ static int esp_elf_load_section(esp_elf_t *elf, const uint8_t *pbuf) {
     const elf32_shdr_t *shdr = (const elf32_shdr_t *)(pbuf + ehdr->shoff);
     const char *shstrab = (const char *)pbuf + shdr[ehdr->shstrndx].offset;
     uint32_t rodata_index = ehdr->shnum;
+    uint32_t text_v_min = 0;
+    uint32_t text_v_max = 0;
+    bool text_found = false;
 
     /* Calculate ELF image size */
 
@@ -180,25 +183,31 @@ static int esp_elf_load_section(esp_elf_t *elf, const uint8_t *pbuf) {
         const char *name = shstrab + shdr[i].name;
 
         if (stype(&shdr[i], SHT_PROGBITS) && sflags(&shdr[i], SHF_ALLOC)) {
-            if (sflags(&shdr[i], SHF_EXECINSTR) && !strcmp(ELF_TEXT, name)) {
+            if (sflags(&shdr[i], SHF_EXECINSTR)) {
+                /* Every allocated, executable PROGBITS section belongs in
+                 * the code region: ".text" itself, plus whatever the
+                 * toolchain splits out for IRAM_ATTR placement
+                 * (".iram1.N" code and ".iram1.N.literal" L32R pools).
+                 * Track them as one contiguous run so a single writable
+                 * staging buffer (ptext) covers all of them and every
+                 * relocation landing inside one stays mappable -- treating
+                 * only the literal ".text" section as "text" left those
+                 * IRAM sections unmapped and their relocations failed with
+                 * "relocation target is not writable". */
                 ESP_LOGD(
                     TAG,
-                    ".text   sec addr=0x%08x size=0x%08x offset=0x%08x",
+                    "%s sec addr=0x%08x size=0x%08x offset=0x%08x",
+                    name,
                     shdr[i].addr,
                     shdr[i].size,
                     shdr[i].offset
                 );
 
-                elf->sec[ELF_SEC_TEXT].v_addr = shdr[i].addr;
-                elf->sec[ELF_SEC_TEXT].size = ELF_ALIGN(shdr[i].size, 4);
-                elf->sec[ELF_SEC_TEXT].offset = shdr[i].offset;
-
-                ESP_LOGD(
-                    TAG,
-                    ".text   offset is 0x%lx size is 0x%x",
-                    elf->sec[ELF_SEC_TEXT].offset,
-                    elf->sec[ELF_SEC_TEXT].size
-                );
+                if (!text_found || shdr[i].addr < text_v_min) { text_v_min = shdr[i].addr; }
+                if (!text_found || shdr[i].addr + shdr[i].size > text_v_max) {
+                    text_v_max = shdr[i].addr + shdr[i].size;
+                }
+                text_found = true;
             } else if (sflags(&shdr[i], SHF_WRITE) && !strcmp(ELF_DATA, name)) {
                 ESP_LOGD(
                     TAG,
@@ -257,6 +266,33 @@ static int esp_elf_load_section(esp_elf_t *elf, const uint8_t *pbuf) {
                     elf->sec[ELF_SEC_DRLRO].offset,
                     elf->sec[ELF_SEC_DRLRO].size
                 );
+            } else if (!strcmp(ELF_CTORS, name)) {
+                /* Table of function pointers to global/namespace-scope C++
+                 * object constructors (see elf_loader_sdk_symbols.c for the
+                 * background -- ELF apps are expected to avoid these, but
+                 * a dependency can still emit one). Handled exactly like
+                 * ".data.rel.ro": copied to a writable RAM buffer so its
+                 * R_XTENSA_RELATIVE fixups land somewhere writable, then
+                 * walked and invoked once relocation finishes (see the end
+                 * of esp_elf_relocate_internal). */
+                ESP_LOGD(
+                    TAG,
+                    ".ctors  sec addr=0x%08x size=0x%08x offset=0x%08x",
+                    shdr[i].addr,
+                    shdr[i].size,
+                    shdr[i].offset
+                );
+
+                elf->sec[ELF_SEC_CTORS].v_addr = shdr[i].addr;
+                elf->sec[ELF_SEC_CTORS].size = shdr[i].size;
+                elf->sec[ELF_SEC_CTORS].offset = shdr[i].offset;
+
+                ESP_LOGD(
+                    TAG,
+                    ".ctors  offset is 0x%lx size is 0x%x",
+                    elf->sec[ELF_SEC_CTORS].offset,
+                    elf->sec[ELF_SEC_CTORS].size
+                );
             }
         } else if (stype(&shdr[i], SHT_NOBITS) && sflags(&shdr[i], SHF_ALLOC | SHF_WRITE) &&
                    !strcmp(ELF_BSS, name)) {
@@ -282,6 +318,11 @@ static int esp_elf_load_section(esp_elf_t *elf, const uint8_t *pbuf) {
     }
 
     /* No .text on image */
+
+    if (!text_found) { return -EINVAL; }
+
+    elf->sec[ELF_SEC_TEXT].v_addr = text_v_min;
+    elf->sec[ELF_SEC_TEXT].size = ELF_ALIGN(text_v_max - text_v_min, 4);
 
     if (!elf->sec[ELF_SEC_TEXT].size) { return -EINVAL; }
 
@@ -309,7 +350,7 @@ static int esp_elf_load_section(esp_elf_t *elf, const uint8_t *pbuf) {
     }
 
     size = elf->sec[ELF_SEC_DATA].size + (xip ? 0 : elf->sec[ELF_SEC_RODATA].size) +
-           elf->sec[ELF_SEC_BSS].size + elf->sec[ELF_SEC_DRLRO].size;
+           elf->sec[ELF_SEC_BSS].size + elf->sec[ELF_SEC_DRLRO].size + elf->sec[ELF_SEC_CTORS].size;
     if (size) {
         elf->pdata = esp_elf_malloc(size, false);
         if (!elf->pdata) {
@@ -320,11 +361,20 @@ static int esp_elf_load_section(esp_elf_t *elf, const uint8_t *pbuf) {
         }
     }
 
-    /* Dump ".text" from ELF to executable space memory */
+    /* Dump ".text" (and any ".iram1.*" sections folded into the same
+     * region, see above) from ELF to executable space memory. Each
+     * section is copied to its own offset within the region individually
+     * -- file layout isn't guaranteed to mirror the vaddr layout
+     * byte-for-byte (alignment padding between sections), so one bulk
+     * memcpy across the whole span isn't safe. */
 
     elf->sec[ELF_SEC_TEXT].addr = (Elf32_Addr)elf->ptext;
     elf->sec[ELF_SEC_TEXT].reloc_addr = (uintptr_t)elf->ptext;
-    memcpy(elf->ptext, pbuf + elf->sec[ELF_SEC_TEXT].offset, elf->sec[ELF_SEC_TEXT].size);
+    for (uint32_t i = 0; i < ehdr->shnum; i++) {
+        if (stype(&shdr[i], SHT_PROGBITS) && sflags(&shdr[i], SHF_ALLOC) && sflags(&shdr[i], SHF_EXECINSTR)) {
+            memcpy(elf->ptext + (shdr[i].addr - text_v_min), pbuf + shdr[i].offset, shdr[i].size);
+        }
+    }
 
     if (xip) {
         const uint8_t *instruction = NULL;
@@ -397,6 +447,15 @@ static int esp_elf_load_section(esp_elf_t *elf, const uint8_t *pbuf) {
             memcpy(pdata, pbuf + elf->sec[ELF_SEC_DRLRO].offset, elf->sec[ELF_SEC_DRLRO].size);
 
             pdata += elf->sec[ELF_SEC_DRLRO].size;
+        }
+
+        if (elf->sec[ELF_SEC_CTORS].size) {
+            elf->sec[ELF_SEC_CTORS].addr = (uint32_t)pdata;
+            elf->sec[ELF_SEC_CTORS].reloc_addr = (uintptr_t)pdata;
+
+            memcpy(pdata, pbuf + elf->sec[ELF_SEC_CTORS].offset, elf->sec[ELF_SEC_CTORS].size);
+
+            pdata += elf->sec[ELF_SEC_CTORS].size;
         }
 
         if (elf->sec[ELF_SEC_BSS].size) {
@@ -588,6 +647,39 @@ int esp_elf_init(esp_elf_t *elf) {
     memset(elf, 0, sizeof(esp_elf_t));
 
     return 0;
+}
+
+/**
+ * @brief Invoke global/namespace-scope C++ object constructors registered in
+ *        ".ctors" (see esp_elf_load_section() and elf_loader_sdk_symbols.c
+ *        for how that table gets there and why).
+ *
+ * Every entry has already been fixed up to its final, callable runtime
+ * address by the ordinary R_XTENSA_RELATIVE relocation pass in
+ * esp_elf_relocate_internal() -- the same pass and the same section-address
+ * mapping that produces elf->entry -- so this just walks the table and
+ * calls each one before the caller runs the app's own entry point.
+ *
+ * Legacy ".ctors" tables are conventionally terminated by a -1 sentinel
+ * when built via crtbegin.o/crtend.o; project_elf() links with -nostdlib so
+ * neither object is linked in and no sentinel is present here, but 0/-1
+ * entries are skipped defensively in case that ever changes.
+ *
+ * @param elf - ELF object pointer
+ */
+static void esp_elf_run_ctors(esp_elf_t *elf) {
+    size_t count = elf->sec[ELF_SEC_CTORS].size / sizeof(uint32_t);
+    if (!count) { return; }
+
+    const uint32_t *ctors = (const uint32_t *)elf->sec[ELF_SEC_CTORS].reloc_addr;
+
+    for (size_t i = 0; i < count; i++) {
+        uint32_t ctor = ctors[i];
+        if (ctor == 0 || ctor == UINT32_MAX) { continue; }
+
+        ESP_LOGD(TAG, "Calling global constructor[%u] at 0x%08x", (unsigned)i, ctor);
+        ((void (*)(void))ctor)();
+    }
 }
 
 /**
@@ -788,6 +880,8 @@ static int esp_elf_relocate_internal(esp_elf_t *elf, const uint8_t *pbuf) {
         esp_elf_free(elf->ptext);
         elf->ptext = NULL;
     }
+
+    esp_elf_run_ctors(elf);
 
     return 0;
 }
