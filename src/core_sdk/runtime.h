@@ -5,6 +5,10 @@
 
 #include "core_sdk/result.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef uint32_t bruce_timer_id_t;
 
 #define BRUCE_TIMER_ID_INVALID ((bruce_timer_id_t)0)
@@ -40,3 +44,7 @@ bruce_result_t runtime__timer_stop(bruce_timer_id_t timer_id);
  * app_runner__environment_requests_gui() is the loader-facing variant used
  * to decide a child's gui_requested before that child's process exists. */
 bool runtime__gui_requested(void);
+
+#ifdef __cplusplus
+}
+#endif

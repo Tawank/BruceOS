@@ -5,6 +5,10 @@
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef enum {
     BRUCE_INPUT_KEY,
     BRUCE_INPUT_BUTTON,
@@ -146,3 +150,7 @@ bool input__check(int32_t code, bool consume);
  * the core fills them in from the current time/process before queuing.
  */
 bruce_result_t input__inject(const bruce_input_event_t *event);
+
+#ifdef __cplusplus
+}
+#endif

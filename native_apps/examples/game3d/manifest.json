@@ -1,8 +1,8 @@
 {
-  "appName": "Game",
+  "appName": "Game3D",
   "entryPoint": "app_main",
   "appIcon": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
   "coreAbiVersion": 4,
-  "permissions": ["storage"],
-  "stackSize": 8192
+  "permissions": [],
+  "stackSize": 16384
 }

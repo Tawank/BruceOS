@@ -1,0 +1,9 @@
+dependencies:
+  idf: '>=5.1'
+  espressif/elf_loader: ^1.3.1
+  # 3D rasteriser this app renders with (see main.cpp and README.md); not
+  # vendored into this repo, fetched here instead. Pinned to the exact
+  # commit this app was built and verified against.
+  jet:
+    git: "https://github.com/CubeCoders/Jet.git"
+    version: "4db6aa1e0d30da2f46092bae6552dd3529c0c764"

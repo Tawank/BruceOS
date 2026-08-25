@@ -9,6 +9,7 @@
  * if ELF apps are expected to call them directly.
  */
 
+#include <math.h>
 #include <pthread.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -106,6 +107,113 @@ static int bruce_elf__puts(const char *text) {
 static int bruce_elf__putchar(int character) {
     unsigned char byte = (unsigned char)character;
     return stdio__write(&byte, 1) == BRUCE_OK ? byte : EOF;
+}
+
+/* ---------------------------------------------------------------------------
+ * Minimal C++ ABI support, added for C++ ELF apps (see
+ * native_apps/examples/game3d, the first one). project_elf() builds ELF apps
+ * with `-nostdlib` (see components/elf_loader/elf_loader.cmake) and never
+ * links libstdc++/libsupc++, so a C++ app leaves every C++ runtime symbol --
+ * even plain `new`/`delete` -- as an unresolved relocation for this loader to
+ * satisfy at load time, exactly like malloc/free above.
+ *
+ * Only the bare minimum is provided: freestanding global operator new/delete
+ * (routed through the same process-aware memory__* allocator as malloc/free)
+ * and a __cxa_pure_virtual trap. There is deliberately no support for
+ * exceptions (__cxa_throw, __gxx_personality_v0, ...), RTTI (typeinfo,
+ * dynamic_cast), thread-safe function-local statics (__cxa_guard_*), or
+ * global/namespace-scope objects with non-trivial constructors (this loader
+ * never walks .init_array -- grep esp_elf.c). A C++ ELF app's own build must
+ * therefore compile with -fno-exceptions -fno-rtti -fno-threadsafe-statics
+ * and avoid namespace-scope objects with non-trivial constructors; see
+ * native_apps/examples/game3d/main/CMakeLists.txt for the flags and
+ * native_apps/examples/game3d/README.md for the reasoning.
+ *
+ * The symbol names below are the Itanium C++ ABI mangling for global
+ * operator new/delete on the 32-bit targets this project builds for
+ * (size_t == unsigned int, mangled 'j'); a 64-bit target would need the 'm'
+ * forms instead. Like malloc/free, a failed allocation returns NULL rather
+ * than throwing (there is no exception support to throw with, and nothing
+ * in the ELF apps built against this table checks new's return value).
+ * ------------------------------------------------------------------------- */
+static void *bruce_elf__operator_new(size_t size) { return memory__malloc(size); }
+static void bruce_elf__operator_delete(void *ptr) { memory__free(ptr); }
+static void bruce_elf__operator_delete_sized(void *ptr, size_t size) {
+    (void)size;
+    memory__free(ptr);
+}
+/* A function-local `static` object with a non-trivial destructor (e.g. a
+ * std::vector -- see Jet's Scene.cpp, a dependency of
+ * native_apps/examples/game3d, the first C++ ELF app) still gets its destructor
+ * registered via __cxa_atexit even under -fno-threadsafe-statics, which only
+ * suppresses the *initialization* guard (__cxa_guard_*), not this. Real
+ * __cxa_atexit registers a destructor to run when the process exits via a
+ * full C runtime exit() call; ELF apps have no such teardown path (app_main
+ * just returns and the loader reclaims the process's memory directly -- see
+ * the .init_array comment above), so there is nothing useful to register.
+ * A no-op that reports success satisfies the ABI contract without pretending
+ * to actually run anything later.
+ *
+ * Note this covers __cxa_atexit itself but deliberately not its companion
+ * __dso_handle: that symbol has hidden ELF visibility by ABI convention, so
+ * project_elf()'s -fPIC -shared link refuses to leave it as a runtime-
+ * resolved external the way it does every symbol in this table -- it must
+ * be defined inside the app's own linked objects instead. See game3d's
+ * main.cpp for that definition and a fuller explanation. */
+static int bruce_elf__cxa_atexit(void (*destructor)(void *), void *arg, void *dso_handle) {
+    (void)destructor;
+    (void)arg;
+    (void)dso_handle;
+    return 0;
+}
+
+static void bruce_elf__cxa_pure_virtual(void) {
+    static const char message[] = "bruce: pure virtual function call\n";
+    stdio__write(message, sizeof(message) - 1);
+    /* Should never be reached (see the comment block above); park the
+     * process instead of falling through into whatever garbage the caller
+     * expected a real override to return. runtime__delay() keeps this from
+     * spinning the watchdog while parked. */
+    for (;;) { runtime__delay(1000); }
+}
+
+/* libstdc++'s <vector>/<new> headers call these on genuinely exceptional
+ * conditions (allocation failure, a requested container size past its
+ * implementation limit, an overflowing array-new size computation) even
+ * under -fno-exceptions -- the header always calls the out-of-line
+ * function; whether it throws or aborts is that function's own decision,
+ * normally made inside libstdc++.a, which this table stands in for. Since
+ * there is no exception support to throw with here (see the comment block
+ * above), park the same way __cxa_pure_virtual does -- one of these firing
+ * means a real bug (OOM, or a size that should never have been requested),
+ * not a recoverable condition. Mangled names: Itanium C++ ABI for
+ * std::__throw_bad_alloc(), std::__throw_length_error(char const*), and
+ * std::__throw_bad_array_new_length(). */
+static void bruce_elf__throw_bad_alloc(void) {
+    static const char message[] = "bruce: std::__throw_bad_alloc\n";
+    stdio__write(message, sizeof(message) - 1);
+    for (;;) { runtime__delay(1000); }
+}
+static void bruce_elf__throw_length_error(const char *what) {
+    stdio__write("bruce: std::__throw_length_error: ", 35);
+    if (what != NULL) stdio__write(what, strlen(what));
+    stdio__write("\n", 1);
+    for (;;) { runtime__delay(1000); }
+}
+static void bruce_elf__throw_bad_array_new_length(void) {
+    static const char message[] = "bruce: std::__throw_bad_array_new_length\n";
+    stdio__write(message, sizeof(message) - 1);
+    for (;;) { runtime__delay(1000); }
+}
+
+/* operator new(size_t, const std::nothrow_t&): returning NULL on failure is
+ * exactly the nothrow contract, so this is just operator new without the
+ * (absent) throwing behaviour -- no need to see the actual std::nothrow_t
+ * tag object, its type is never inspected. Mangled name: 32-bit size_t
+ * ('j'), matching the plain operator new forms above. */
+static void *bruce_elf__operator_new_nothrow(size_t size, const void *tag) {
+    (void)tag;
+    return memory__malloc(size);
 }
 
 const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
@@ -574,6 +682,40 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(__subdf3),
     ESP_ELFSYM_EXPORT(__truncdfsf2),
     ESP_ELFSYM_EXPORT(__udivdi3),
+
+    /* libm. Real implementations already exist in the firmware's own libm;
+     * this just exposes them to ELF apps that do floating-point math
+     * (e.g. native_apps/examples/game3d's 3D renderer). */
+    ESP_ELFSYM_EXPORT(sin),
+    ESP_ELFSYM_EXPORT(cos),
+    ESP_ELFSYM_EXPORT(tan),
+    ESP_ELFSYM_EXPORT(sinf),
+    ESP_ELFSYM_EXPORT(cosf),
+    ESP_ELFSYM_EXPORT(tanf),
+    ESP_ELFSYM_EXPORT(sqrt),
+    ESP_ELFSYM_EXPORT(sqrtf),
+    ESP_ELFSYM_EXPORT(atan2),
+    ESP_ELFSYM_EXPORT(atan2f),
+    ESP_ELFSYM_EXPORT(fabsf),
+    ESP_ELFSYM_EXPORT(floor),
+    ESP_ELFSYM_EXPORT(ceil),
+    ESP_ELFSYM_EXPORT(fmodf),
+
+    /* C++ freestanding new/delete + pure-virtual trap (see the C++ ABI
+     * comment block above). Mangled names, not ESP_ELFSYM_EXPORT: these are
+     * C++ operators, not C symbols the preprocessor can name directly. */
+    {"_Znwj", (const void *)&bruce_elf__operator_new}, /* operator new(size_t) */
+    {"_Znaj", (const void *)&bruce_elf__operator_new}, /* operator new[](size_t) */
+    {"_ZdlPv", (const void *)&bruce_elf__operator_delete}, /* operator delete(void*) */
+    {"_ZdaPv", (const void *)&bruce_elf__operator_delete}, /* operator delete[](void*) */
+    {"_ZdlPvj", (const void *)&bruce_elf__operator_delete_sized}, /* operator delete(void*, size_t) */
+    {"_ZdaPvj", (const void *)&bruce_elf__operator_delete_sized}, /* operator delete[](void*, size_t) */
+    {"__cxa_pure_virtual", (const void *)&bruce_elf__cxa_pure_virtual},
+    {"__cxa_atexit", (const void *)&bruce_elf__cxa_atexit},
+    {"_ZnwjRKSt9nothrow_t", (const void *)&bruce_elf__operator_new_nothrow}, /* operator new(size_t, const std::nothrow_t&) */
+    {"_ZSt17__throw_bad_allocv", (const void *)&bruce_elf__throw_bad_alloc}, /* std::__throw_bad_alloc() */
+    {"_ZSt20__throw_length_errorPKc", (const void *)&bruce_elf__throw_length_error}, /* std::__throw_length_error(const char*) */
+    {"_ZSt28__throw_bad_array_new_lengthv", (const void *)&bruce_elf__throw_bad_array_new_length}, /* std::__throw_bad_array_new_length() */
 
     ESP_ELFSYM_END,
 };
