@@ -5,6 +5,10 @@
 
 #include "core_sdk/result.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef struct {
     size_t internal_total;
     size_t internal_free;
@@ -87,3 +91,7 @@ bruce_result_t memory__external_free(bruce_memory_object_t *object);
  * `internal_free_blocks` counts currently free allocator blocks across all
  * internal-capable heap regions; it includes the regions' natural boundaries. */
 bruce_result_t memory__get_stats(bruce_memory_stats_t *out_stats);
+
+#ifdef __cplusplus
+}
+#endif

@@ -1,22 +1,28 @@
-// Game3D: a minimal native ELF example driving components/jet, a small
-// fixed-function 3D rasteriser (https://github.com/CubeCoders/Jet), to spin
-// a flat-shaded debug cube on the display. See native_apps/examples/game3d
-// and components/jet's READMEs for the C++-on-ELF-loader story this app
-// depends on -- in short: no exceptions, no RTTI, no global constructors.
+// Game3D: an isometric 3D Sokoban clone driving components/jet, a small
+// fixed-function 3D rasteriser (https://github.com/CubeCoders/Jet). See
+// native_apps/examples/game3d and components/jet's READMEs for the
+// C++-on-ELF-loader story this app depends on -- in short: no exceptions,
+// no RTTI, no global constructors.
 //
-// Loosely modelled on native_apps/examples/game (renamed/replaced here) and
-// on Jet's own upstream Sample.cpp, adapted to Bruce's core_sdk display API
-// instead of Jet's own mbed sample harness.
+// The level, the push-box rules and the win check are ordinary 2D grid
+// logic (sokoban_levels.hpp / sokoban_game.hpp); sokoban_render.hpp turns a
+// GameState into Jet Objects and this file just drives the input/animation
+// loop. The camera sits on the level's XZ-diagonal and looks straight at
+// the board centre (Camera::lookAt() derives the exact pitch/yaw for
+// that), which is the classic "fake isometric" trick for a
+// perspective-only rasteriser: pull the camera far back on a
+// 45/35.264-degree diagonal so perspective distortion becomes negligible
+// across the board.
 
+#include <cstdint>
 #include <cstdio>
 
-#include "core_sdk/display.h"
 #include "core_sdk/input.h"
+#include "core_sdk/memory.h"
 #include "core_sdk/runtime.h"
 
-#include "Jet.hpp"
-
-using namespace Renderer;
+#include "sokoban_game.hpp"
+#include "sokoban_render.hpp"
 
 // __dso_handle: an ABI-mandated tag identifying which "shared object" a
 // __cxa_atexit-registered destructor belongs to (Scene.cpp has function-
@@ -36,26 +42,15 @@ void *__dso_handle = (void *)&__dso_handle;
 }
 
 namespace {
-
-// Degrees per frame for each axis; arbitrary, just enough to show all six
-// faces over time.
-constexpr int32_t kSpinX = 1;
-constexpr int32_t kSpinY = 2;
-constexpr int32_t kSpinZ = 0;
-
-// One render/present cycle. Not vsynced to the panel -- this fixed delay is
-// a simple, portable pace across the boards this app targets rather than a
-// measured frame budget (contrast with native_apps/examples/nes/main/
-// nes_video.c, which paces against the emulated console's real refresh
-// rate).
-constexpr uint32_t kFrameDelayMs = 16;
-
+constexpr int kAnimTotalFrames = 6;
+constexpr uint32_t kAnimFrameDelayMs = 16;
+constexpr uint32_t kIdleDelayMs = 30; // turn-based: no need to poll at 60fps while idle
 } // namespace
 
 extern "C" int app_main(int argc, char **argv) {
     (void)argc;
     (void)argv;
-    printf("game3d started\n");
+    printf("game3d (sokoban) started\n");
 
     const int width = display__width();
     const int height = display__height();
@@ -78,46 +73,198 @@ extern "C" int app_main(int argc, char **argv) {
         return 1;
     }
 
+    // Diagnostic only: not used for any decision here, just logged so a
+    // hardware run tells us how much headroom the mesh allocations below
+    // actually have to work with (see createStaticGeometryObjects()'s
+    // comment in sokoban_render.hpp for why that headroom matters on this
+    // loader specifically).
+    bruce_memory_stats_t memStats;
+    if (memory__get_stats(&memStats) == BRUCE_OK) {
+        printf(
+            "game3d: heap free=%u largest_block=%u (after framebuffer alloc)\n",
+            (unsigned)memStats.internal_free, (unsigned)memStats.internal_largest_block
+        );
+    }
+
     // Z_BUFFERING is off in JetConfig.hpp (see its comment for why), so no
     // depth buffer is allocated -- Scene accepts nullptr for that case.
+    // SORT_TRIANGLES (painter's algorithm) is enough here: every tile,
+    // wall, box and the player are opaque, and the fixed diagonal camera
+    // gives every triangle a distinct view-space depth.
     Scene scene(framebuffer, nullptr, width, height);
-    scene.setBackcolor(BRUCE_COLOR_BLACK);
+    scene.setBackcolor(kBackColor);
 
     Camera camera;
-    camera.setPosition(0, 0, -600);
-    // Explicit int32_t casts: Camera::setFOV() is overloaded on
-    // (int32_t, int32_t) vs (float, int32_t), and int32_t is a distinct
-    // type from int on this toolchain (not just another name for it), so a
-    // bare `60` is an equally-good conversion target for both overloads --
-    // ambiguous without the cast.
-    camera.setFOV(static_cast<int32_t>(60), static_cast<int32_t>(width));
     scene.setCamera(&camera);
 
-    // 6 faces, one flat colour each -- see components/jet/src/Primitives.cpp.
-    // Deliberately not using lighting (JetConfig.hpp: LIGHTING 0): the debug
-    // cube's own per-face colours are the whole point, an easy way to see
-    // the object's orientation as it spins.
-    int32_t cubeSize = width < height ? width / 2 : height / 2;
-    if (cubeSize < 16) cubeSize = 16;
-    Object *cube = Primitives::createDebugCube(cubeSize, cubeSize, cubeSize);
-    scene.addObject(cube);
+    // All Materials and Objects are created exactly once here, up front,
+    // and reused for every level for the rest of the app's run -- see
+    // createStaticGeometryObjects()'s comment in sokoban_render.hpp for
+    // why level transitions never delete/reallocate any of these.
+    Material *floorMat = new Material(kFloorColor);
+    Material *goalMat = new Material(kGoalColor);
+    Material *wallMat = new Material(kWallColor);
+    Material *playerMat = new Material(kPlayerColor);
+    Material *noseMat = new Material(kNoseColor);
+    Material *boxMat[kMaxBoxes];
+    for (int i = 0; i < kMaxBoxes; i++) boxMat[i] = new Material(kBoxColor);
+
+    Object *floorObj = nullptr, *wallObj = nullptr;
+    createStaticGeometryObjects(scene, floorObj, wallObj);
+    Object *playerObj = nullptr, *noseObj = nullptr;
+    Object *boxObj[kMaxBoxes] = {};
+    createDynamicObjects(scene, playerMat, noseMat, boxMat, playerObj, noseObj, boxObj);
+
+    GameState gs;
+    int facingDr = 1, facingDc = 0; // facing "south" by default
+
+    int levelIndex = 0;
+    bool dirty = true;
+
+    auto reloadLevel = [&](int idx) {
+        loadLevel(idx, gs);
+        rebuildLevelGeometry(gs, floorMat, goalMat, wallMat, floorObj, wallObj);
+        facingDr = 1;
+        facingDc = 0;
+        applyLevelToActors(gs, playerObj, noseObj, boxObj, boxMat, facingDr, facingDc);
+        frameCameraForBoard(camera, gs.rows, gs.cols, width, height);
+        dirty = true;
+    };
+    reloadLevel(levelIndex);
+
+    bool animActive = false;
+    int animFrame = 0;
+    int32_t animPX0 = 0, animPZ0 = 0, animPX1 = 0, animPZ1 = 0;
+    bool animPushed = false;
+    int animBoxIdx = -1;
+    int32_t animBX0 = 0, animBZ0 = 0, animBX1 = 0, animBZ1 = 0;
 
     bool running = true;
     while (running) {
-        cube->rotate(kSpinX, kSpinY, kSpinZ);
-        scene.render();
-
-        if (display__begin_frame() == BRUCE_OK) {
-            display__draw_rgb_bitmap(0, 0, framebuffer, (int16_t)width, (int16_t)height);
-            display__present();
-        }
-
         if (input__check(BRUCE_INPUT_CODE_BACK, true)) running = false;
 
-        runtime__delay(kFrameDelayMs);
+        if (!animActive) {
+            if (input__check(BRUCE_INPUT_CODE_SELECT, true)) {
+                if (gs.solved) levelIndex = (levelIndex + 1) % kLevelCount;
+                reloadLevel(levelIndex); // also serves as "restart" when not solved
+            } else if (!gs.solved) {
+                int dr = 0, dc = 0;
+                bool haveDir = false;
+                if (input__check(BRUCE_INPUT_CODE_UP, true)) {
+                    dr = 1;
+                    haveDir = true;
+                } else if (input__check(BRUCE_INPUT_CODE_DOWN, true)) {
+                    dr = -1;
+                    haveDir = true;
+                } else if (input__check(BRUCE_INPUT_CODE_LEFT, true)) {
+                    dc = -1;
+                    haveDir = true;
+                } else if (input__check(BRUCE_INPUT_CODE_RIGHT, true)) {
+                    dc = 1;
+                    haveDir = true;
+                }
+
+                if (haveDir) {
+                    facingDr = dr;
+                    facingDc = dc;
+                    int oldR = gs.playerR, oldC = gs.playerC;
+                    MoveResult res = tryMove(gs, dr, dc);
+                    if (res.moved) {
+                        animPX0 = cellWorldX(oldC, gs.cols);
+                        animPZ0 = cellWorldZ(oldR, gs.rows);
+                        animPX1 = cellWorldX(gs.playerC, gs.cols);
+                        animPZ1 = cellWorldZ(gs.playerR, gs.rows);
+                        animPushed = res.pushedBox;
+                        animBoxIdx = res.boxIndex;
+                        if (animPushed) {
+                            // The box started in the cell the player just
+                            // moved into.
+                            animBX0 = animPX1;
+                            animBZ0 = animPZ1;
+                            animBX1 = cellWorldX(gs.boxC[animBoxIdx], gs.cols);
+                            animBZ1 = cellWorldZ(gs.boxR[animBoxIdx], gs.rows);
+                            bool onGoal = gs.goal[gs.boxR[animBoxIdx]][gs.boxC[animBoxIdx]];
+                            boxMat[animBoxIdx]->color = onGoal ? kBoxOnGoalColor : kBoxColor;
+                        }
+                        animActive = true;
+                        animFrame = 0;
+                    } else {
+                        // Blocked: still snap the facing nose to the
+                        // direction that was tried, no animation needed.
+                        int32_t px = cellWorldX(gs.playerC, gs.cols);
+                        int32_t pz = cellWorldZ(gs.playerR, gs.rows);
+                        noseObj->setPosition(
+                            px + facingDc * kNoseOffset, kPlayerH / 2, pz + facingDr * kNoseOffset
+                        );
+                        dirty = true;
+                    }
+                }
+            } else {
+                // Solved: drop stray directional presses instead of
+                // letting them queue up for the next level.
+                input__check(BRUCE_INPUT_CODE_UP, true);
+                input__check(BRUCE_INPUT_CODE_DOWN, true);
+                input__check(BRUCE_INPUT_CODE_LEFT, true);
+                input__check(BRUCE_INPUT_CODE_RIGHT, true);
+            }
+        } else {
+            // Mid-slide: drop new move/restart presses rather than queuing
+            // them for when the animation ends.
+            input__check(BRUCE_INPUT_CODE_UP, true);
+            input__check(BRUCE_INPUT_CODE_DOWN, true);
+            input__check(BRUCE_INPUT_CODE_LEFT, true);
+            input__check(BRUCE_INPUT_CODE_RIGHT, true);
+            input__check(BRUCE_INPUT_CODE_SELECT, true);
+        }
+
+        if (animActive) {
+            animFrame++;
+            float t = (float)animFrame / (float)kAnimTotalFrames;
+            if (t >= 1.0f) {
+                t = 1.0f;
+                animActive = false;
+            }
+
+            int32_t px = animPX0 + (int32_t)((float)(animPX1 - animPX0) * t);
+            int32_t pz = animPZ0 + (int32_t)((float)(animPZ1 - animPZ0) * t);
+            playerObj->setPosition(px, kPlayerH / 2, pz);
+            noseObj->setPosition(px + facingDc * kNoseOffset, kPlayerH / 2, pz + facingDr * kNoseOffset);
+
+            if (animPushed) {
+                int32_t bx = animBX0 + (int32_t)((float)(animBX1 - animBX0) * t);
+                int32_t bz = animBZ0 + (int32_t)((float)(animBZ1 - animBZ0) * t);
+                boxObj[animBoxIdx]->setPosition(bx, kBoxSize / 2, bz);
+            }
+            dirty = true;
+        }
+
+        if (dirty) {
+            scene.render();
+            if (display__begin_frame() == BRUCE_OK) {
+                display__draw_rgb_bitmap(0, 0, framebuffer, (int16_t)width, (int16_t)height);
+                drawHud(gs, levelIndex, width, height);
+                display__present();
+            }
+            dirty = false;
+        }
+
+        // Turn-based game: pace tightly while a slide animation is
+        // playing, otherwise poll input at a much lighter rate instead of
+        // spinning at a fixed frame rate with nothing changing on screen.
+        runtime__delay(animActive ? kAnimFrameDelayMs : kIdleDelayMs);
     }
 
-    delete cube;
+    delete floorObj;
+    delete wallObj;
+    delete playerObj;
+    delete noseObj;
+    for (int i = 0; i < kMaxBoxes; i++) delete boxObj[i];
+    delete floorMat;
+    delete goalMat;
+    delete wallMat;
+    delete playerMat;
+    delete noseMat;
+    for (int i = 0; i < kMaxBoxes; i++) delete boxMat[i];
     delete[] framebuffer;
     display__game_mode(false);
     printf("game3d exiting\n");
