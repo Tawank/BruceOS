@@ -28,13 +28,13 @@ struct LevelDef {
 // on purpose: a bigger grid means more tiles fighting for the same screen
 // area, which makes the player cube read smaller, not bigger.
 const char *const kLevel1[] = {
-    "       ",
-    "       ",
-    "   @   ",
-    "   $   ",
-    "       ",
-    "   .   ",
-    "       ",
+    "~~~ ~~~",
+    "~~~ ~~~",
+    "~~~@~~~",
+    "~~~$~~~",
+    "~~~ ~~~",
+    "~~~.~~~",
+    "~~~ ~~~",
 };
 
 // Two boxes, each needs the player to walk around it to push from the
