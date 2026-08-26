@@ -7,12 +7,12 @@
 // The level, the push-box rules and the win check are ordinary 2D grid
 // logic (sokoban_levels.hpp / sokoban_game.hpp); sokoban_render.hpp turns a
 // GameState into Jet Objects and this file just drives the input/animation
-// loop. The camera sits on the level's XZ-diagonal and looks straight at
-// the board centre (Camera::lookAt() derives the exact pitch/yaw for
-// that), which is the classic "fake isometric" trick for a
-// perspective-only rasteriser: pull the camera far back on a
-// 45/35.264-degree diagonal so perspective distortion becomes negligible
-// across the board.
+// loop. The camera follows the player: a fixed XZ-diagonal offset from its
+// current world position, re-aimed every frame (frameCameraOnPlayer(),
+// sokoban_render.hpp) so it pans to keep the cube centred and close
+// through a move -- the classic "fake isometric" trick (pull the camera
+// far back on a 45/35.264-degree diagonal) applied around a moving point
+// instead of the board centre.
 
 #include <cstdint>
 #include <cstdio>
@@ -73,18 +73,20 @@ extern "C" int app_main(int argc, char **argv) {
         return 1;
     }
 
-    // Diagnostic only: not used for any decision here, just logged so a
-    // hardware run tells us how much headroom the mesh allocations below
-    // actually have to work with (see createStaticGeometryObjects()'s
-    // comment in sokoban_render.hpp for why that headroom matters on this
-    // loader specifically).
-    bruce_memory_stats_t memStats;
-    if (memory__get_stats(&memStats) == BRUCE_OK) {
-        printf(
-            "game3d: heap free=%u largest_block=%u (after framebuffer alloc)\n",
-            (unsigned)memStats.internal_free, (unsigned)memStats.internal_largest_block
-        );
-    }
+    // Diagnostic only: not used for any decision here, just logged at each
+    // major allocation step so a hardware crash tells us which step ran
+    // out of room instead of just where the resulting wild pointer write
+    // happened (see createStaticGeometryObjects()'s comment in
+    // sokoban_render.hpp for why that headroom matters on this loader
+    // specifically).
+    auto logHeap = [](const char *tag) {
+        bruce_memory_stats_t s;
+        if (memory__get_stats(&s) == BRUCE_OK) {
+            printf("game3d: heap free=%u largest_block=%u (%s)\n", (unsigned)s.internal_free,
+                   (unsigned)s.internal_largest_block, tag);
+        }
+    };
+    logHeap("after framebuffer alloc");
 
     // Z_BUFFERING is off in JetConfig.hpp (see its comment for why), so no
     // depth buffer is allocated -- Scene accepts nullptr for that case.
@@ -109,11 +111,33 @@ extern "C" int app_main(int argc, char **argv) {
     Material *boxMat[kMaxBoxes];
     for (int i = 0; i < kMaxBoxes; i++) boxMat[i] = new Material(kBoxColor);
 
+    // operator new returns NULL on failure here instead of throwing (see
+    // sokoban_render.hpp), and nothing downstream checks that -- check it
+    // ourselves rather than let a NULL Material* become a wild write.
+    if (!floorMat || !goalMat || !wallMat || !playerMat || !noseMat || !boxMat[0] || !boxMat[1] || !boxMat[2] || !boxMat[3]) {
+        printf("game3d: material allocation failed\n");
+        logHeap("material allocation failed");
+        delete[] framebuffer;
+        display__game_mode(false);
+        return 1;
+    }
+    logHeap("after materials");
+
     Object *floorObj = nullptr, *wallObj = nullptr;
     createStaticGeometryObjects(scene, floorObj, wallObj);
+    reserveWorstCaseLevelGeometry(floorObj, wallObj);
+    logHeap("after static geometry objects");
     Object *playerObj = nullptr, *noseObj = nullptr;
     Object *boxObj[kMaxBoxes] = {};
     createDynamicObjects(scene, playerMat, noseMat, boxMat, playerObj, noseObj, boxObj);
+    logHeap("after dynamic objects (player/nose/boxes)");
+
+    if (!floorObj || !wallObj || !playerObj || !noseObj || !boxObj[0] || !boxObj[1] || !boxObj[2] || !boxObj[3]) {
+        printf("game3d: object allocation failed\n");
+        delete[] framebuffer;
+        display__game_mode(false);
+        return 1;
+    }
 
     GameState gs;
     int facingDr = 1, facingDc = 0; // facing "south" by default
@@ -124,10 +148,11 @@ extern "C" int app_main(int argc, char **argv) {
     auto reloadLevel = [&](int idx) {
         loadLevel(idx, gs);
         rebuildLevelGeometry(gs, floorMat, goalMat, wallMat, floorObj, wallObj);
+        logHeap("after rebuildLevelGeometry");
         facingDr = 1;
         facingDc = 0;
         applyLevelToActors(gs, playerObj, noseObj, boxObj, boxMat, facingDr, facingDc);
-        frameCameraForBoard(camera, gs.rows, gs.cols, width, height);
+        frameCameraOnPlayer(camera, cellWorldX(gs.playerC, gs.cols), cellWorldZ(gs.playerR, gs.rows), width, height);
         dirty = true;
     };
     reloadLevel(levelIndex);
@@ -229,6 +254,7 @@ extern "C" int app_main(int argc, char **argv) {
             int32_t pz = animPZ0 + (int32_t)((float)(animPZ1 - animPZ0) * t);
             playerObj->setPosition(px, kPlayerH / 2, pz);
             noseObj->setPosition(px + facingDc * kNoseOffset, kPlayerH / 2, pz + facingDr * kNoseOffset);
+            frameCameraOnPlayer(camera, px, pz, width, height);
 
             if (animPushed) {
                 int32_t bx = animBX0 + (int32_t)((float)(animBX1 - animBX0) * t);

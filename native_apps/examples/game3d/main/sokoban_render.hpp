@@ -14,6 +14,7 @@
 
 #include "Jet.hpp" // IWYU pragma: keep
 #include "sokoban_game.hpp"
+#include "sokoban_geometry.hpp"
 
 using namespace Renderer;
 
@@ -41,115 +42,45 @@ constexpr uint16_t kBoxOnGoalColor = rgb565(80, 210, 100);
 // spinning-cube demo's cubeSize -- see JetConfig.hpp).
 // ---------------------------------------------------------------------
 
-constexpr int32_t kTile     = 44; // grid pitch
-constexpr int32_t kFloorGap = 4;  // gap between floor tiles, purely cosmetic
+constexpr int32_t kTile     = 40; // grid pitch
+constexpr int32_t kFloorGap = 3;  // gap between floor tiles, purely cosmetic
 constexpr int32_t kWallH    = 40;
-constexpr int32_t kBoxSize  = 30;
-constexpr int32_t kPlayerW  = 22;
-constexpr int32_t kPlayerH  = 30;
-constexpr int32_t kNoseSize = 14;
+constexpr int32_t kIslandDepth = 26; // side-face depth for a wall-less level's exposed rim
+constexpr int32_t kBoxSize  = 34; // objects sized close to the tile on purpose -- see frameCameraForBoard()
+constexpr int32_t kPlayerW  = 26;
+constexpr int32_t kPlayerH  = 34;
+constexpr int32_t kNoseSize = 16;
 constexpr int32_t kNoseOffset = kPlayerW / 2 + kNoseSize / 2 + 2;
 
 inline int32_t cellWorldX(int c, int cols) { return (2 * c - (cols - 1)) * (kTile / 2); }
 inline int32_t cellWorldZ(int r, int rows) { return (2 * r - (rows - 1)) * (kTile / 2); }
 
-// Appends one axis-aligned box's faces (per-face normals) to `obj`,
-// centred at (cx, cy, cz). Mirrors Primitives::createDebugCube's vertex
-// layout so winding/culling matches the rest of the engine, just
-// parameterised by a centre offset and pushed into a caller-owned Object
-// instead of a fresh one -- lets many grid cells share one Object (one
-// culling test, one draw walk) instead of one Object per tile.
-//
-// `includeBottom` drops the -Y face (24 verts -> 20) when the caller
-// knows it can never be seen -- true for every wall in this level (the
-// camera never gets under one) and worth doing given how memory-tight
-// this loader's freestanding allocator is (see
-// createStaticGeometryObjects()'s comment below).
-inline void addBoxFaces(Object *obj, int32_t cx, int32_t cy, int32_t cz, int32_t hw, int32_t hh, int32_t hd,
-                         Material *mat, bool includeBottom = true) {
-    const int32_t N = FIXED_POINT_SCALE;
-    uint16_t b = (uint16_t)obj->vertices.size();
-
-    // Front (+Z)
-    obj->addVertex({{cx - hw, cy - hh, cz + hd}, {0, 0}, {0, 0, N}});
-    obj->addVertex({{cx + hw, cy - hh, cz + hd}, {0, 0}, {0, 0, N}});
-    obj->addVertex({{cx + hw, cy + hh, cz + hd}, {0, 0}, {0, 0, N}});
-    obj->addVertex({{cx - hw, cy + hh, cz + hd}, {0, 0}, {0, 0, N}});
-    // Back (-Z)
-    obj->addVertex({{cx + hw, cy - hh, cz - hd}, {0, 0}, {0, 0, -N}});
-    obj->addVertex({{cx - hw, cy - hh, cz - hd}, {0, 0}, {0, 0, -N}});
-    obj->addVertex({{cx - hw, cy + hh, cz - hd}, {0, 0}, {0, 0, -N}});
-    obj->addVertex({{cx + hw, cy + hh, cz - hd}, {0, 0}, {0, 0, -N}});
-    // Left (-X)
-    obj->addVertex({{cx - hw, cy - hh, cz - hd}, {0, 0}, {-N, 0, 0}});
-    obj->addVertex({{cx - hw, cy - hh, cz + hd}, {0, 0}, {-N, 0, 0}});
-    obj->addVertex({{cx - hw, cy + hh, cz + hd}, {0, 0}, {-N, 0, 0}});
-    obj->addVertex({{cx - hw, cy + hh, cz - hd}, {0, 0}, {-N, 0, 0}});
-    // Right (+X)
-    obj->addVertex({{cx + hw, cy - hh, cz + hd}, {0, 0}, {N, 0, 0}});
-    obj->addVertex({{cx + hw, cy - hh, cz - hd}, {0, 0}, {N, 0, 0}});
-    obj->addVertex({{cx + hw, cy + hh, cz - hd}, {0, 0}, {N, 0, 0}});
-    obj->addVertex({{cx + hw, cy + hh, cz + hd}, {0, 0}, {N, 0, 0}});
-    // Top (+Y)
-    obj->addVertex({{cx - hw, cy + hh, cz + hd}, {0, 0}, {0, N, 0}});
-    obj->addVertex({{cx + hw, cy + hh, cz + hd}, {0, 0}, {0, N, 0}});
-    obj->addVertex({{cx + hw, cy + hh, cz - hd}, {0, 0}, {0, N, 0}});
-    obj->addVertex({{cx - hw, cy + hh, cz - hd}, {0, 0}, {0, N, 0}});
-
-    obj->addFace(b + 0, b + 1, b + 2, b + 3, mat);
-    obj->addFace(b + 4, b + 5, b + 6, b + 7, mat);
-    obj->addFace(b + 8, b + 9, b + 10, b + 11, mat);
-    obj->addFace(b + 12, b + 13, b + 14, b + 15, mat);
-    obj->addFace(b + 16, b + 17, b + 18, b + 19, mat);
-
-    if (!includeBottom) return;
-    // Bottom (-Y)
-    obj->addVertex({{cx - hw, cy - hh, cz - hd}, {0, 0}, {0, -N, 0}});
-    obj->addVertex({{cx + hw, cy - hh, cz - hd}, {0, 0}, {0, -N, 0}});
-    obj->addVertex({{cx + hw, cy - hh, cz + hd}, {0, 0}, {0, -N, 0}});
-    obj->addVertex({{cx - hw, cy - hh, cz + hd}, {0, 0}, {0, -N, 0}});
-    obj->addFace(b + 20, b + 21, b + 22, b + 23, mat);
-}
-
-// Appends a single flat +Y-facing quad (4 verts) at height `cy`, centred
-// at (cx, cz) -- the top face of addBoxFaces() above, standalone. Floor
-// tiles use this instead of a full box: their sides are never visible
-// (nothing sits below y=0), so a 6-face box would spend 20 extra verts
-// per tile for geometry that never draws -- a real cost given how many
-// floor tiles a level has and how tight this loader's heap is (see
-// createStaticGeometryObjects()'s comment below).
-inline void addTopQuad(Object *obj, int32_t cx, int32_t cy, int32_t cz, int32_t hw, int32_t hd, Material *mat) {
-    const int32_t N = FIXED_POINT_SCALE;
-    uint16_t b = (uint16_t)obj->vertices.size();
-    obj->addVertex({{cx - hw, cy, cz + hd}, {0, 0}, {0, N, 0}});
-    obj->addVertex({{cx + hw, cy, cz + hd}, {0, 0}, {0, N, 0}});
-    obj->addVertex({{cx + hw, cy, cz - hd}, {0, 0}, {0, N, 0}});
-    obj->addVertex({{cx - hw, cy, cz - hd}, {0, 0}, {0, N, 0}});
-    obj->addFace(b + 0, b + 1, b + 2, b + 3, mat);
-}
-
-// Creates the floor/wall Objects ONCE for the app's whole lifetime.
-// Levels are then re-rendered by clearing and repopulating these same two
-// Objects in place (rebuildLevelGeometry() below) instead of deleting and
-// reallocating them per level.
-//
-// This matters on this loader specifically: the freestanding
-// operator new it links against (elf_loader_sdk_symbols.c) returns NULL
-// on failure instead of throwing, and nothing downstream -- including
-// libstdc++'s own vector growth path -- checks for that, so a transient
-// allocation failure turns into a wild pointer write instead of a clean
-// abort. Never freeing this mesh data at all (just reserve()-ing it to
-// exactly what the incoming level needs, see rebuildLevelGeometry) avoids
-// both repeated free/realloc churn AND ever asking for more than the
-// current level actually uses -- important because this loader's process
-// heap is small enough that a naive "reserve for the worst-case level up
-// front" (a fully-boxed floor+wall mesh can be several hundred KB) can by
-// itself exceed what's available.
+// Creates the floor/wall Objects ONCE for the app's whole lifetime; levels
+// are re-rendered by clearing and repopulating these same two Objects in
+// place (rebuildLevelGeometry() below), never deleted/reallocated per
+// level. Matters because this loader's operator new returns NULL on
+// failure instead of throwing and nothing downstream checks that -- a
+// transient allocation failure becomes a wild pointer write, not a clean
+// abort (see elf_loader_sdk_symbols.c).
 inline void createStaticGeometryObjects(Scene &scene, Object *&floorObj, Object *&wallObj) {
     floorObj = new Object();
     wallObj = new Object();
     scene.addObject(floorObj);
     scene.addObject(wallObj);
+}
+
+// Builds one origin-centred cube via addBoxFaces() with its vectors
+// reserve()d to their exact final size (24 verts, 12 tris) up front --
+// unlike Primitives::createCube(), which push_backs 24 times unreserved,
+// risking several separately-failable reallocations to get there.
+inline Object *createReservedCube(Scene &scene, int32_t w, int32_t h, int32_t d, Material *mat) {
+    Object *obj = new Object();
+    obj->vertices.reserve(24);
+    obj->triangles.reserve(12);
+    addBoxFaces(obj, 0, 0, 0, w / 2, h / 2, d / 2, mat);
+    obj->calculateBoundingBox();
+    scene.addObject(obj);
+    return obj;
 }
 
 // Player, its facing "nose" cube, and kMaxBoxes box cubes -- created once
@@ -159,40 +90,72 @@ inline void createStaticGeometryObjects(Scene &scene, Object *&floorObj, Object 
 // per level.
 inline void createDynamicObjects(Scene &scene, Material *playerMat, Material *noseMat, Material *boxMat[],
                                   Object *&playerObj, Object *&noseObj, Object *boxObj[]) {
-    playerObj = Primitives::createCube(kPlayerW, kPlayerH, kPlayerW, playerMat);
-    scene.addObject(playerObj);
-    noseObj = Primitives::createCube(kNoseSize, kNoseSize, kNoseSize, noseMat);
-    scene.addObject(noseObj);
-
-    for (int i = 0; i < kMaxBoxes; i++) {
-        boxObj[i] = Primitives::createCube(kBoxSize, kBoxSize, kBoxSize, boxMat[i]);
-        scene.addObject(boxObj[i]);
-    }
+    playerObj = createReservedCube(scene, kPlayerW, kPlayerH, kPlayerW, playerMat);
+    noseObj = createReservedCube(scene, kNoseSize, kNoseSize, kNoseSize, noseMat);
+    for (int i = 0; i < kMaxBoxes; i++) boxObj[i] = createReservedCube(scene, kBoxSize, kBoxSize, kBoxSize, boxMat[i]);
 }
 
-// Re-fills the floor/wall Objects with the current level's tiles: floor
-// cells get a single flat top quad each (see addTopQuad()), wall cells a
-// bottomless box (see addBoxFaces()). Counts cells first so vertices/
-// triangles can be reserve()d to exactly what this level needs -- capacity
-// only ever grows to the largest level seen so far, and never further
-// than that, since reserve() is a no-op when already big enough.
-inline void rebuildLevelGeometry(const GameState &gs, Material *floorMat, Material *goalMat, Material *wallMat,
-                                  Object *floorObj, Object *wallObj) {
-    int floorCells = 0, wallCells = 0;
+// Shared by rebuildLevelGeometry() and reserveWorstCaseLevelGeometry()
+// below: counts how many cells of each kind this level's grid needs.
+inline void countLevelCells(const GameState &gs, int &floorFlat, int &floorEdge, int &wallCells) {
+    floorFlat = floorEdge = wallCells = 0;
     for (int r = 0; r < gs.rows; r++) {
         for (int c = 0; c < gs.cols; c++) {
             if (gs.cell[r][c] == CELL_WALL) wallCells++;
-            else if (gs.cell[r][c] == CELL_FLOOR) floorCells++;
+            else if (gs.cell[r][c] == CELL_FLOOR) {
+                if (isIslandEdgeCell(gs, r, c)) floorEdge++;
+                else floorFlat++;
+            }
         }
     }
+}
+
+// Scans every level once at startup for its worst-case cell counts and
+// reserve()s floorObj/wallObj to that ceiling up front. Without this, the
+// first level whose wall count exceeds every level played before it forces
+// wallObj's vectors to actually grow *during play* -- a real operator-new
+// call at a random, possibly-fragmented moment instead of a predictable
+// one at startup. Concretely: level 1 has zero walls, so wallObj never
+// left capacity 0 until the first walled level loaded -- exactly the
+// level-1-to-level-2 transition that was panicking.
+inline void reserveWorstCaseLevelGeometry(Object *floorObj, Object *wallObj) {
+    int maxFlat = 0, maxEdge = 0, maxWalls = 0;
+    GameState tmp;
+    for (int i = 0; i < kLevelCount; i++) {
+        loadLevel(i, tmp);
+        int flat, edge, walls;
+        countLevelCells(tmp, flat, edge, walls);
+        maxFlat = std::max(maxFlat, flat);
+        maxEdge = std::max(maxEdge, edge);
+        maxWalls = std::max(maxWalls, walls);
+    }
+    floorObj->vertices.reserve((size_t)maxFlat * 4 + (size_t)maxEdge * 20);
+    floorObj->triangles.reserve((size_t)maxFlat * 2 + (size_t)maxEdge * 10);
+    wallObj->vertices.reserve((size_t)maxWalls * 20);
+    wallObj->triangles.reserve((size_t)maxWalls * 10);
+}
+
+// Re-fills the floor/wall Objects with the current level's tiles. Wall
+// cells get a bottomless box; floor cells get a flat top quad, except the
+// exposed rim of a wall-less "floating island" level (isIslandEdgeCell,
+// sokoban_game.hpp), which gets a bottomless box of its own so the island
+// reads as a solid slab. Capacity was already reserved to the worst case
+// across all levels by reserveWorstCaseLevelGeometry() at startup, so
+// these reserve() calls are just documentation -- they no-op in practice.
+inline void rebuildLevelGeometry(const GameState &gs, Material *floorMat, Material *goalMat, Material *wallMat,
+                                  Object *floorObj, Object *wallObj) {
+    int floorFlat, floorEdge, wallCells;
+    countLevelCells(gs, floorFlat, floorEdge, wallCells);
 
     floorObj->vertices.clear();
     floorObj->triangles.clear();
     wallObj->vertices.clear();
     wallObj->triangles.clear();
-    floorObj->vertices.reserve((size_t)floorCells * 4);
-    floorObj->triangles.reserve((size_t)floorCells * 2);
-    wallObj->vertices.reserve((size_t)wallCells * 20); // addBoxFaces(includeBottom=false)
+    // Both boxes here and wall boxes below drop their -Y face (20 verts,
+    // 10 tris, not 24/12): addBoxFaces(includeBottom=false).
+    floorObj->vertices.reserve((size_t)floorFlat * 4 + (size_t)floorEdge * 20);
+    floorObj->triangles.reserve((size_t)floorFlat * 2 + (size_t)floorEdge * 10);
+    wallObj->vertices.reserve((size_t)wallCells * 20);
     wallObj->triangles.reserve((size_t)wallCells * 10);
 
     constexpr int32_t wallHalf = kTile / 2;
@@ -206,8 +169,13 @@ inline void rebuildLevelGeometry(const GameState &gs, Material *floorMat, Materi
             if (gs.cell[r][c] == CELL_WALL) {
                 addBoxFaces(wallObj, x, kWallH / 2, z, wallHalf, kWallH / 2, wallHalf, wallMat,
                             /*includeBottom=*/false);
+                continue;
+            }
+            Material *mat = gs.goal[r][c] ? goalMat : floorMat;
+            if (isIslandEdgeCell(gs, r, c)) {
+                addBoxFaces(floorObj, x, -kIslandDepth / 2, z, floorHalf, kIslandDepth / 2, floorHalf, mat,
+                            /*includeBottom=*/false);
             } else {
-                Material *mat = gs.goal[r][c] ? goalMat : floorMat;
                 addTopQuad(floorObj, x, 0, z, floorHalf, floorHalf, mat);
             }
         }
@@ -242,31 +210,40 @@ inline void applyLevelToActors(const GameState &gs, Object *playerObj, Object *n
     }
 }
 
-// Places the camera on the board's XZ diagonal, far enough back that the
-// whole board (plus wall height) fits within `targetApparentRadius`
-// pixels of screen radius, then points it at the board centre via
-// lookAt() -- see main.cpp's top comment for why this fakes isometric on
-// a perspective-only rasteriser. `fovFactor` (screenWidth/2 / tan(fov/2))
-// is cached on Camera by setFOV(), so the apparent-size solve is just
-// apparentRadius = fovFactor * worldRadius / distance, inverted for
-// distance.
-inline void frameCameraForBoard(Camera &camera, int rows, int cols, int width, int height) {
+// How much board (radius, in tiles) stays in view around the player --
+// fixed, not derived from the level's rows/cols, so the camera stays
+// zoomed in on the cube the same amount on every level instead of pulling
+// back for a bigger grid (see frameCameraOnPlayer() below).
+constexpr float kFollowRadiusTiles = 3.0f;
+
+// Places the camera on a fixed XZ-diagonal offset from (px, ?, pz) -- see
+// main.cpp's top comment for why this fakes isometric -- then points it at
+// that same spot via lookAt(). Called every frame with the player's
+// current (possibly mid-slide) world position, so the camera pans to keep
+// the cube centred and close instead of statically framing the whole
+// board. `fovFactor` (cached on Camera by setFOV()) makes the
+// apparent-size solve just apparentRadius = fovFactor*worldRadius/dist,
+// inverted for dist; the offset itself doesn't depend on (px, pz), only
+// on screen size, so most of this is loop-invariant work repeated for
+// simplicity rather than because it needs to be.
+inline void frameCameraOnPlayer(Camera &camera, int32_t px, int32_t pz, int width, int height) {
     camera.setFOV(50.0f, static_cast<int32_t>(width));
 
-    int32_t boardHalfW = (cols * kTile) / 2;
-    int32_t boardHalfD = (rows * kTile) / 2;
-    float boardRadius = std::sqrt((float)boardHalfW * (float)boardHalfW + (float)boardHalfD * (float)boardHalfD +
-                                   (float)kWallH * (float)kWallH);
+    float worldRadius = kFollowRadiusTiles * (float)kTile;
 
-    float targetApparentRadius = 0.40f * (float)std::min(width, height);
+    // Leave room for the HUD strips (drawHud() below draws a 16px bar top
+    // and bottom) so the view doesn't zoom in behind them.
+    int usableHeight = height - 32;
+    if (usableHeight < 1) usableHeight = height;
+    float targetApparentRadius = 0.85f * (float)std::min(width, usableHeight);
     if (targetApparentRadius < 1.0f) targetApparentRadius = 1.0f;
 
-    float dist = camera.fovFactor * boardRadius / targetApparentRadius;
+    float dist = camera.fovFactor * worldRadius / targetApparentRadius;
     float s = dist / 1.7320508f; // camera offset (s,s,s) has length s*sqrt(3)
     int32_t offset = (int32_t)s;
-    if (offset < kTile) offset = kTile; // guard tiny/degenerate boards
+    if (offset < kTile) offset = kTile; // guard a degenerate/zero FOV
 
-    Vector3 target(0, kWallH / 2, 0);
+    Vector3 target(px, kPlayerH / 2, pz);
     camera.setPosition(target.x + offset, target.y + offset, target.z - offset);
     camera.lookAt(target);
 

@@ -20,15 +20,21 @@ struct LevelDef {
     int rowCount;
 };
 
-// Tutorial: push the box straight down onto the goal (2x DOWN).
+// Tutorial: push the box straight down onto the goal (2x DOWN). A
+// wall-less "floating island" -- the level boundary is just where the
+// floor stops, rounded off at the corners; sokoban_render.hpp gives the
+// exposed rim its own side faces (isIslandEdgeCell, sokoban_game.hpp) so
+// it reads as a solid slab rather than a paper-thin tile. Kept small (7x7)
+// on purpose: a bigger grid means more tiles fighting for the same screen
+// area, which makes the player cube read smaller, not bigger.
 const char *const kLevel1[] = {
-    "~#####~",
-    "~#   #~",
-    "~# @ #~",
-    "~# $ #~",
-    "~#   #~",
-    "~# . #~",
-    "~#####~",
+    "~     ~",
+    "       ",
+    "   @   ",
+    "   $   ",
+    "       ",
+    "   .   ",
+    "~     ~",
 };
 
 // Two boxes, each needs the player to walk around it to push from the
