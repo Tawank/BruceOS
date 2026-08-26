@@ -111,13 +111,9 @@ inline void countLevelCells(const GameState &gs, int &floorFlat, int &floorEdge,
 }
 
 // Scans every level once at startup for its worst-case cell counts and
-// reserve()s floorObj/wallObj to that ceiling up front. Without this, the
-// first level whose wall count exceeds every level played before it forces
-// wallObj's vectors to actually grow *during play* -- a real operator-new
-// call at a random, possibly-fragmented moment instead of a predictable
-// one at startup. Concretely: level 1 has zero walls, so wallObj never
-// left capacity 0 until the first walled level loaded -- exactly the
-// level-1-to-level-2 transition that was panicking.
+// reserve()s floorObj/wallObj to that ceiling up front, so a level with
+// more walls/floor than any level played before it doesn't force a real
+// operator-new call at a random, possibly-fragmented moment mid-play.
 inline void reserveWorstCaseLevelGeometry(Object *floorObj, Object *wallObj) {
     int maxFlat = 0, maxEdge = 0, maxWalls = 0;
     GameState tmp;
@@ -161,16 +157,46 @@ inline void rebuildLevelGeometry(const GameState &gs, Material *floorMat, Materi
     constexpr int32_t wallHalf = kTile / 2;
     constexpr int32_t floorHalf = (kTile - kFloorGap) / 2;
 
+    // Wall cells are merged into maximal straight runs (one box per run,
+    // not per cell): adjacent wall cells share a face nobody ever sees, so
+    // per-cell boxes waste ~4x the triangles the same footprint needs (a
+    // 9x9 room's 32-cell border: 320 vs. ~40 merged). This is what keeps
+    // Scene's internal renderQueue (Scene.hpp, no public reserve(), grows
+    // via plain push_back) from ever needing more capacity than level 1 --
+    // wall-less but always loaded first -- already grows it to at startup.
+    bool consumed[kMaxRows][kMaxCols] = {};
+    for (int r = 0; r < gs.rows; r++) {
+        for (int c = 0; c < gs.cols;) {
+            if (gs.cell[r][c] != CELL_WALL) { c++; continue; }
+            int run = 1;
+            while (c + run < gs.cols && gs.cell[r][c + run] == CELL_WALL) run++;
+            if (run >= 2) {
+                int32_t x0 = cellWorldX(c, gs.cols) - wallHalf, x1 = cellWorldX(c + run - 1, gs.cols) + wallHalf;
+                addBoxFaces(wallObj, (x0 + x1) / 2, kWallH / 2, cellWorldZ(r, gs.rows), (x1 - x0) / 2, kWallH / 2,
+                            wallHalf, wallMat, /*includeBottom=*/false);
+                for (int i = 0; i < run; i++) consumed[r][c + i] = true;
+            }
+            c += run;
+        }
+    }
+    for (int c = 0; c < gs.cols; c++) {
+        for (int r = 0; r < gs.rows;) {
+            if (gs.cell[r][c] != CELL_WALL || consumed[r][c]) { r++; continue; }
+            int run = 1;
+            while (r + run < gs.rows && gs.cell[r + run][c] == CELL_WALL && !consumed[r + run][c]) run++;
+            int32_t z0 = cellWorldZ(r, gs.rows) - wallHalf, z1 = cellWorldZ(r + run - 1, gs.rows) + wallHalf;
+            addBoxFaces(wallObj, cellWorldX(c, gs.cols), kWallH / 2, (z0 + z1) / 2, wallHalf, kWallH / 2,
+                        (z1 - z0) / 2, wallMat, /*includeBottom=*/false);
+            for (int i = 0; i < run; i++) consumed[r + i][c] = true;
+            r += run;
+        }
+    }
+
     for (int r = 0; r < gs.rows; r++) {
         for (int c = 0; c < gs.cols; c++) {
-            if (gs.cell[r][c] == CELL_VOID) continue;
+            if (gs.cell[r][c] != CELL_FLOOR) continue;
             int32_t x = cellWorldX(c, gs.cols);
             int32_t z = cellWorldZ(r, gs.rows);
-            if (gs.cell[r][c] == CELL_WALL) {
-                addBoxFaces(wallObj, x, kWallH / 2, z, wallHalf, kWallH / 2, wallHalf, wallMat,
-                            /*includeBottom=*/false);
-                continue;
-            }
             Material *mat = gs.goal[r][c] ? goalMat : floorMat;
             if (isIslandEdgeCell(gs, r, c)) {
                 addBoxFaces(floorObj, x, -kIslandDepth / 2, z, floorHalf, kIslandDepth / 2, floorHalf, mat,
