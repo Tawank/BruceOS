@@ -28,7 +28,8 @@ constexpr uint16_t kFloorColor     = rgb565(70, 76, 96);
 constexpr uint16_t kGoalColor      = rgb565(150, 122, 40);
 constexpr uint16_t kWallColor      = rgb565(58, 52, 66);
 constexpr uint16_t kPlayerColor    = rgb565(60, 190, 225);
-constexpr uint16_t kNoseColor      = rgb565(255, 235, 130);
+constexpr uint16_t kBeakColor      = rgb565(255, 200, 60);
+constexpr uint16_t kAccentColor    = rgb565(18, 18, 22); // eyes, feet, crate straps
 constexpr uint16_t kBoxColor       = rgb565(196, 122, 45);
 constexpr uint16_t kBoxOnGoalColor = rgb565(80, 210, 100);
 constexpr uint16_t kHudBg          = rgb565(8, 9, 14);
@@ -48,8 +49,6 @@ constexpr int32_t kIslandDepth = 26; // side-face depth for a wall-less level's 
 constexpr int32_t kBoxSize  = 34; // objects sized close to the tile on purpose -- see frameCameraForBoard()
 constexpr int32_t kPlayerW  = 26;
 constexpr int32_t kPlayerH  = 34;
-constexpr int32_t kNoseSize = 16;
-constexpr int32_t kNoseOffset = kPlayerW / 2 + kNoseSize / 2 + 2;
 
 inline int32_t cellWorldX(int c, int cols) { return (2 * c - (cols - 1)) * (kTile / 2); }
 inline int32_t cellWorldZ(int r, int rows) { return (2 * r - (rows - 1)) * (kTile / 2); }
@@ -63,29 +62,6 @@ inline void createStaticGeometryObjects(Scene &scene, Object *&floorObj, Object 
     wallObj = new Object();
     scene.addObject(floorObj);
     scene.addObject(wallObj);
-}
-
-// Builds one origin-centred cube, vectors reserve()d to their exact final
-// size (24 verts, 12 tris) up front -- unlike Primitives::createCube(),
-// which push_backs unreserved and risks a separately-failable realloc.
-inline Object *createReservedCube(Scene &scene, int32_t w, int32_t h, int32_t d, Material *mat) {
-    Object *obj = new Object();
-    obj->vertices.reserve(24);
-    obj->triangles.reserve(12);
-    addBoxFaces(obj, 0, 0, 0, w / 2, h / 2, d / 2, mat);
-    obj->calculateBoundingBox();
-    scene.addObject(obj);
-    return obj;
-}
-
-// Player, its facing "nose" cube, and kMaxBoxes box cubes -- created once
-// up front; levels with fewer boxes just disable the extra slots (see
-// applyLevelToActors()) instead of creating/destroying Objects per level.
-inline void createDynamicObjects(Scene &scene, Material *playerMat, Material *noseMat, Material *boxMat[],
-                                  Object *&playerObj, Object *&noseObj, Object *boxObj[]) {
-    playerObj = createReservedCube(scene, kPlayerW, kPlayerH, kPlayerW, playerMat);
-    noseObj = createReservedCube(scene, kNoseSize, kNoseSize, kNoseSize, noseMat);
-    for (int i = 0; i < kMaxBoxes; i++) boxObj[i] = createReservedCube(scene, kBoxSize, kBoxSize, kBoxSize, boxMat[i]);
 }
 
 // Shared by rebuildLevelGeometry() and reserveWorstCaseLevelGeometry()
@@ -103,11 +79,15 @@ inline void countLevelCells(const GameState &gs, int &floorFlat, int &floorEdge,
     }
 }
 
-// Scans every level once at startup for its worst-case cell counts and
-// reserve()s floorObj/wallObj to that ceiling, so a bigger later level
-// never forces a real operator-new at a random, fragmented moment mid-play.
-inline void reserveWorstCaseLevelGeometry(Object *floorObj, Object *wallObj) {
-    int maxFlat = 0, maxEdge = 0, maxWalls = 0;
+// Used by reserveWorstCaseLevelGeometry() below: the worst single-level
+// cell count of each kind across all levels (not necessarily all from the
+// same level -- floorObj and wallObj are two separate, independently-sized
+// Objects, each needing its own all-time high-water mark, so cross-level
+// maxima are what they actually need, unlike worstCaseFrameTriangles()
+// in sokoban_actors.hpp, which sizes one shared per-frame budget and needs
+// a real single level's total instead).
+inline void worstCaseCellCounts(int &maxFlat, int &maxEdge, int &maxWalls) {
+    maxFlat = maxEdge = maxWalls = 0;
     GameState tmp;
     for (int i = 0; i < kLevelCount; i++) {
         loadLevel(i, tmp);
@@ -117,6 +97,14 @@ inline void reserveWorstCaseLevelGeometry(Object *floorObj, Object *wallObj) {
         maxEdge = std::max(maxEdge, edge);
         maxWalls = std::max(maxWalls, walls);
     }
+}
+
+// Reserve()s floorObj/wallObj to the worst-case ceiling above, so a bigger
+// later level never forces a real operator-new at a random, fragmented
+// moment mid-play.
+inline void reserveWorstCaseLevelGeometry(Object *floorObj, Object *wallObj) {
+    int maxFlat, maxEdge, maxWalls;
+    worstCaseCellCounts(maxFlat, maxEdge, maxWalls);
     floorObj->vertices.reserve((size_t)maxFlat * 4 + (size_t)maxEdge * 20);
     floorObj->triangles.reserve((size_t)maxFlat * 2 + (size_t)maxEdge * 10);
     wallObj->vertices.reserve((size_t)maxWalls * 20);
@@ -197,30 +185,6 @@ inline void rebuildLevelGeometry(const GameState &gs, Material *floorMat, Materi
 
     floorObj->calculateBoundingBox();
     wallObj->calculateBoundingBox();
-}
-
-// Snaps player/nose/box visuals straight to their logical grid cells (no
-// animation); box slots beyond boxCount are disabled, not repositioned.
-inline void applyLevelToActors(const GameState &gs, Object *playerObj, Object *noseObj, Object *boxObj[],
-                                Material *boxMat[], int facingDr, int facingDc) {
-    int32_t px = cellWorldX(gs.playerC, gs.cols);
-    int32_t pz = cellWorldZ(gs.playerR, gs.rows);
-    constexpr int32_t py = kPlayerH / 2;
-    playerObj->setPosition(px, py, pz);
-    noseObj->setPosition(px + facingDc * kNoseOffset, py, pz + facingDr * kNoseOffset);
-
-    for (int i = 0; i < kMaxBoxes; i++) {
-        if (i >= gs.boxCount) {
-            boxObj[i]->enabled = false;
-            continue;
-        }
-        boxObj[i]->enabled = true;
-        bool onGoal = gs.goal[gs.boxR[i]][gs.boxC[i]];
-        boxMat[i]->color = onGoal ? kBoxOnGoalColor : kBoxColor;
-        int32_t bx = cellWorldX(gs.boxC[i], gs.cols);
-        int32_t bz = cellWorldZ(gs.boxR[i], gs.rows);
-        boxObj[i]->setPosition(bx, kBoxSize / 2, bz);
-    }
 }
 
 // Fixed board radius (tiles) kept in view around the player -- not

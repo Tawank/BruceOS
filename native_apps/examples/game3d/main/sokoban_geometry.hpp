@@ -81,4 +81,26 @@ inline void addTopQuad(Object *obj, int32_t cx, int32_t cy, int32_t cz, int32_t 
     obj->addFace(b + 0, b + 1, b + 2, b + 3, mat);
 }
 
+// Appends a cubic box plus thin dark beams along its 8 visible edges (4
+// vertical corner posts, 4 around the top perimeter -- the 4 edges of the
+// never-rendered bottom face are skipped). Each beam is centred ON its
+// edge and poked out a little past the main box to both sides of it, so
+// it reads as a highlighted border right where two faces actually meet.
+// (An earlier version ran 3 straps through the box's CENTRE instead --
+// each one only poked out at the middle of a face, nowhere near an edge,
+// which just looked like a dark hole punched in the centre of that face.)
+inline void addCrateFaces(Object *obj, int32_t cx, int32_t cy, int32_t cz, int32_t half, Material *mat,
+                           Material *edgeMat) {
+    addBoxFaces(obj, cx, cy, cz, half, half, half, mat, /*includeBottom=*/false);
+    constexpr int32_t e = 2; // edge beam half-thickness
+    addBoxFaces(obj, cx + half, cy, cz + half, e, half, e, edgeMat, /*includeBottom=*/false);
+    addBoxFaces(obj, cx + half, cy, cz - half, e, half, e, edgeMat, /*includeBottom=*/false);
+    addBoxFaces(obj, cx - half, cy, cz + half, e, half, e, edgeMat, /*includeBottom=*/false);
+    addBoxFaces(obj, cx - half, cy, cz - half, e, half, e, edgeMat, /*includeBottom=*/false);
+    addBoxFaces(obj, cx, cy + half, cz + half, half, e, e, edgeMat, /*includeBottom=*/false);
+    addBoxFaces(obj, cx, cy + half, cz - half, half, e, e, edgeMat, /*includeBottom=*/false);
+    addBoxFaces(obj, cx + half, cy + half, cz, e, e, half, edgeMat, /*includeBottom=*/false);
+    addBoxFaces(obj, cx - half, cy + half, cz, e, e, half, edgeMat, /*includeBottom=*/false);
+}
+
 } // namespace

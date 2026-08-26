@@ -5,12 +5,13 @@
 // no RTTI, no global constructors.
 //
 // The level, the push-box rules and the win check are ordinary 2D grid
-// logic (sokoban_levels.hpp / sokoban_game.hpp); sokoban_render.hpp turns a
-// GameState into Jet Objects and this file just drives the input/animation
-// loop. The camera follows the player -- a fixed XZ-diagonal offset from
-// its current world position, re-aimed every frame (frameCameraOnPlayer(),
-// sokoban_render.hpp) -- the classic "fake isometric" trick (camera pulled
-// far back on a 45/35.264-degree diagonal) applied around a moving point.
+// logic (sokoban_levels.hpp / sokoban_game.hpp); sokoban_render.hpp and
+// sokoban_actors.hpp turn a GameState into Jet Objects and this file just
+// drives the input/animation loop. The camera follows the player -- a
+// fixed XZ-diagonal offset from its current world position, re-aimed every
+// frame (frameCameraOnPlayer(), sokoban_render.hpp) -- the classic "fake
+// isometric" trick (camera pulled far back on a 45/35.264-degree diagonal)
+// applied around a moving point.
 
 #include <cstdint>
 #include <cstdio>
@@ -19,6 +20,7 @@
 #include "core_sdk/memory.h"
 #include "core_sdk/runtime.h"
 
+#include "sokoban_actors.hpp"
 #include "sokoban_game.hpp"
 #include "sokoban_render.hpp"
 
@@ -98,6 +100,14 @@ extern "C" int app_main(int argc, char **argv) {
     Camera camera;
     scene.setCamera(&camera);
 
+    // Pre-size Scene's internal render queue to this app's worst-case
+    // per-frame triangle count -- see Scene::reserveRenderQueue()'s own
+    // comment (components/jet's Scene.hpp/.cpp) for why, and do it now,
+    // before a single Object or Material exists, while the heap is at its
+    // least fragmented.
+    scene.reserveRenderQueue((size_t)worstCaseFrameTriangles());
+    logHeap("after renderQueue reserve");
+
     // All Materials and Objects are created exactly once here, up front,
     // and reused for every level for the rest of the app's run -- see
     // createStaticGeometryObjects()'s comment in sokoban_render.hpp for
@@ -106,14 +116,16 @@ extern "C" int app_main(int argc, char **argv) {
     Material *goalMat = new Material(kGoalColor);
     Material *wallMat = new Material(kWallColor);
     Material *playerMat = new Material(kPlayerColor);
-    Material *noseMat = new Material(kNoseColor);
+    Material *beakMat = new Material(kBeakColor);
+    Material *accentMat = new Material(kAccentColor); // eyes, feet, crate straps
     Material *boxMat[kMaxBoxes];
     for (int i = 0; i < kMaxBoxes; i++) boxMat[i] = new Material(kBoxColor);
 
     // operator new returns NULL on failure here instead of throwing (see
     // sokoban_render.hpp), and nothing downstream checks that -- check it
     // ourselves rather than let a NULL Material* become a wild write.
-    if (!floorMat || !goalMat || !wallMat || !playerMat || !noseMat || !boxMat[0] || !boxMat[1] || !boxMat[2] || !boxMat[3]) {
+    if (!floorMat || !goalMat || !wallMat || !playerMat || !beakMat || !accentMat || !boxMat[0] || !boxMat[1] ||
+        !boxMat[2] || !boxMat[3]) {
         printf("game3d: material allocation failed\n");
         logHeap("material allocation failed");
         delete[] framebuffer;
@@ -126,12 +138,12 @@ extern "C" int app_main(int argc, char **argv) {
     createStaticGeometryObjects(scene, floorObj, wallObj);
     reserveWorstCaseLevelGeometry(floorObj, wallObj);
     logHeap("after static geometry objects");
-    Object *playerObj = nullptr, *noseObj = nullptr;
+    Object *playerObj = nullptr, *faceObj = nullptr;
     Object *boxObj[kMaxBoxes] = {};
-    createDynamicObjects(scene, playerMat, noseMat, boxMat, playerObj, noseObj, boxObj);
-    logHeap("after dynamic objects (player/nose/boxes)");
+    createDynamicObjects(scene, playerMat, accentMat, boxMat, playerObj, faceObj, boxObj);
+    logHeap("after dynamic objects (player/face/boxes)");
 
-    if (!floorObj || !wallObj || !playerObj || !noseObj || !boxObj[0] || !boxObj[1] || !boxObj[2] || !boxObj[3]) {
+    if (!floorObj || !wallObj || !playerObj || !faceObj || !boxObj[0] || !boxObj[1] || !boxObj[2] || !boxObj[3]) {
         printf("game3d: object allocation failed\n");
         delete[] framebuffer;
         display__game_mode(false);
@@ -150,7 +162,7 @@ extern "C" int app_main(int argc, char **argv) {
         logHeap("after rebuildLevelGeometry");
         facingDr = 1;
         facingDc = 0;
-        applyLevelToActors(gs, playerObj, noseObj, boxObj, boxMat, facingDr, facingDc);
+        applyLevelToActors(gs, playerObj, faceObj, boxObj, boxMat, beakMat, accentMat, facingDr, facingDc);
         frameCameraOnPlayer(camera, cellWorldX(gs.playerC, gs.cols), cellWorldZ(gs.playerR, gs.rows), width,
                              gameHeight);
         dirty = true;
@@ -198,6 +210,7 @@ extern "C" int app_main(int argc, char **argv) {
 
             facingDr = dr;
             facingDc = dc;
+            rebuildFaceGeometry(faceObj, beakMat, accentMat, facingDr, facingDc);
             int oldR = gs.playerR, oldC = gs.playerC;
             MoveResult res = tryMove(gs, dr, dc);
             if (res.moved) {
@@ -219,11 +232,12 @@ extern "C" int app_main(int argc, char **argv) {
                 animActive = true;
                 animFrame = 0;
             } else {
-                // Blocked: still snap the facing nose to the direction that
-                // was tried, no animation needed.
+                // Blocked: still snap the face to the direction that was
+                // tried (rebuildFaceGeometry() above already did the
+                // shape), no animation needed.
                 int32_t px = cellWorldX(gs.playerC, gs.cols);
                 int32_t pz = cellWorldZ(gs.playerR, gs.rows);
-                noseObj->setPosition(px + facingDc * kNoseOffset, kPlayerH / 2, pz + facingDr * kNoseOffset);
+                faceObj->setPosition(px, kPlayerH / 2, pz);
                 dirty = true;
             }
         }
@@ -239,7 +253,7 @@ extern "C" int app_main(int argc, char **argv) {
             int32_t px = animPX0 + (int32_t)((float)(animPX1 - animPX0) * t);
             int32_t pz = animPZ0 + (int32_t)((float)(animPZ1 - animPZ0) * t);
             playerObj->setPosition(px, kPlayerH / 2, pz);
-            noseObj->setPosition(px + facingDc * kNoseOffset, kPlayerH / 2, pz + facingDr * kNoseOffset);
+            faceObj->setPosition(px, kPlayerH / 2, pz);
             frameCameraOnPlayer(camera, px, pz, width, gameHeight);
 
             if (animPushed) {
@@ -269,13 +283,14 @@ extern "C" int app_main(int argc, char **argv) {
     delete floorObj;
     delete wallObj;
     delete playerObj;
-    delete noseObj;
+    delete faceObj;
     for (int i = 0; i < kMaxBoxes; i++) delete boxObj[i];
     delete floorMat;
     delete goalMat;
     delete wallMat;
     delete playerMat;
-    delete noseMat;
+    delete beakMat;
+    delete accentMat;
     for (int i = 0; i < kMaxBoxes; i++) delete boxMat[i];
     delete[] framebuffer;
     display__game_mode(false);
