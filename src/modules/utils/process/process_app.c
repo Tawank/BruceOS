@@ -7,12 +7,11 @@
 #include <string.h>
 
 #include "args.h"
-#include "core_sdk/app_runner.h"
 #include "core_sdk/config.h"
 #include "core_sdk/display.h"
 #include "core_sdk/input.h"
-#include "core_sdk/result.h"
 #include "core_sdk/process.h"
+#include "core_sdk/result.h"
 #include "core_sdk/runtime.h"
 
 #define PROCESS_APP__MAX_PROCESSES 16
@@ -106,8 +105,9 @@ static size_t process_app__preview_candidates(bruce_process_snapshot_t *processe
 /* Draw the header, per-app labels and selection frames, and compute the tile
  * rectangles for the current page.  The live app content is composited by Core
  * once display__set_tiles() assigns the rectangles. */
-static void
-process_app__preview_layout(const bruce_process_snapshot_t *processes, size_t count, int selected, bruce_display_tile_t *tiles) {
+static void process_app__preview_layout(
+    const bruce_process_snapshot_t *processes, size_t count, int selected, bruce_display_tile_t *tiles
+) {
     uint16_t pri = config__get_color_primary();
     uint16_t sec = config__get_color_secondary();
     uint16_t bg = config__get_color_background();
@@ -149,8 +149,7 @@ process_app__preview_layout(const bruce_process_snapshot_t *processes, size_t co
         display__set_cursor(cell_x + 4, cell_y + 2);
         display__print(processes[i].name);
         display__draw_rect(
-            cell_x + 1, cell_y + 10, right - cell_x - 2, bottom - cell_y - 11,
-            (int)i == selected ? pri : sec
+            cell_x + 1, cell_y + 10, right - cell_x - 2, bottom - cell_y - 11, (int)i == selected ? pri : sec
         );
     }
 }
@@ -220,11 +219,9 @@ static int process_app__preview(void) {
             selected > 0) {
             selected--;
             redraw = true;
-        } else if (
-            (event.code == BRUCE_INPUT_CODE_DOWN || event.code == BRUCE_INPUT_CODE_NEXT ||
-             event.code == BRUCE_INPUT_CODE_RIGHT) &&
-            selected + 1 < (int)page_count
-        ) {
+        } else if ((event.code == BRUCE_INPUT_CODE_DOWN || event.code == BRUCE_INPUT_CODE_NEXT ||
+                    event.code == BRUCE_INPUT_CODE_RIGHT) &&
+                   selected + 1 < (int)page_count) {
             selected++;
             redraw = true;
         } else if (event.code == BRUCE_INPUT_CODE_LEFT && page > 0) {
@@ -235,10 +232,8 @@ static int process_app__preview(void) {
             page++;
             selected = 0;
             redraw = true;
-        } else if (
-            (event.code == BRUCE_INPUT_CODE_SELECT || event.code == BRUCE_INPUT_CODE_BUTTON_A) &&
-            page_count > 0
-        ) {
+        } else if ((event.code == BRUCE_INPUT_CODE_SELECT || event.code == BRUCE_INPUT_CODE_BUTTON_A) &&
+                   page_count > 0) {
             bruce_process_id_t target = candidates[start + (size_t)selected].id;
             bruce_process_snapshot_t snapshot;
             if (process__snapshot(target, &snapshot) == BRUCE_OK) {
@@ -292,9 +287,8 @@ int process_app_main(int argc, char **argv) {
     if (command == switch_command) {
         result = process_app__switch(ap_get_arg(switch_command, "target"));
     } else if (command == signal_command) {
-        result = process_app__signal(
-            ap_get_arg(signal_command, "signal"), ap_get_arg(signal_command, "target")
-        );
+        result =
+            process_app__signal(ap_get_arg(signal_command, "signal"), ap_get_arg(signal_command, "target"));
     } else if (command == kill_command) {
         result = process_app__kill(ap_get_arg(kill_command, "target"));
     } else if (command == preview_command) {

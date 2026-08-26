@@ -47,6 +47,7 @@
 #include "modules/utils/notify/notify_app.h"
 #include "modules/utils/process/process_app.h"
 #include "modules/utils/serial_commands/serial_commands_app.h"
+#include "modules/utils/storage_commands/storage_commands_app.h"
 #include "modules/utils/terminal/terminal_app.h"
 #include "modules/webui/webui_app.h"
 #include "modules/wifi/wifi_app.h"
@@ -62,6 +63,7 @@
 #define SSH_KEYGEN_STACK_BYTES 12288u
 #define WIFI_STACK_BYTES 8192u
 #define BPARTED_STACK_BYTES 8192u
+#define STORAGE_COMMANDS_STACK_BYTES 8192u
 #define NOTIFICATION_SERVICE_STACK_BYTES 2048u
 #define MENU_STACK_BYTES 4096u
 #define CONFIG_STACK_BYTES 8192u
@@ -128,6 +130,10 @@ void app_runner__register_defaults(void) {
     app_runner__register("shutdown", "Power off the device", bnu_shutdown_app_main, 0);
     app_runner__register("ssh", "Connect to an SSH server", ssh_app_main, SSH_STACK_BYTES);
     app_runner__register("ssh-keygen", "Generate SSH keys", ssh_keygen_app_main, SSH_KEYGEN_STACK_BYTES);
+    app_runner__register(
+        "storage", "Manage files (list/remove/mkdir/rename/read/write)", storage_commands_app_main,
+        STORAGE_COMMANDS_STACK_BYTES
+    );
     app_runner__register("stty", "Configure terminal settings", bnu_stty_app_main, 0);
     app_runner__register("tcp", "Connect to a TCP server", tcp_app_main, 0);
     app_runner__register("terminal", "Open a terminal", terminal_app_main, 0);
