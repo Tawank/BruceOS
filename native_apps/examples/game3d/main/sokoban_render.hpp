@@ -1,8 +1,6 @@
 // sokoban_render.hpp -- Jet scene building, camera framing and HUD for the
-// Sokoban clone in main.cpp. Everything here is a free function operating
-// on caller-owned Objects/Materials and a GameState (sokoban_game.hpp);
-// nothing here is a namespace-scope instance, per main.cpp's __dso_handle
-// comment on this loader's C++ ABI constraints.
+// Sokoban clone in main.cpp. Free functions only (no namespace-scope
+// instances -- see main.cpp's __dso_handle comment on this loader's ABI).
 #pragma once
 
 #include <algorithm>
@@ -20,10 +18,7 @@ using namespace Renderer;
 
 namespace {
 
-// ---------------------------------------------------------------------
 // Colours
-// ---------------------------------------------------------------------
-
 constexpr uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b) {
     return (uint16_t)(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
 }
@@ -36,12 +31,16 @@ constexpr uint16_t kPlayerColor    = rgb565(60, 190, 225);
 constexpr uint16_t kNoseColor      = rgb565(255, 235, 130);
 constexpr uint16_t kBoxColor       = rgb565(196, 122, 45);
 constexpr uint16_t kBoxOnGoalColor = rgb565(80, 210, 100);
+constexpr uint16_t kHudBg          = rgb565(8, 9, 14);
+constexpr uint16_t kSolvedBg       = rgb565(18, 58, 22);
 
-// ---------------------------------------------------------------------
-// World-scale constants (world units, same rough scale as the original
-// spinning-cube demo's cubeSize -- see JetConfig.hpp).
-// ---------------------------------------------------------------------
+// Height (screen rows) of each HUD bar. main.cpp renders the 3D scene into
+// a framebuffer this much shorter than the physical screen, top and
+// bottom, so the bars live in their own rows the scene blit never touches.
+constexpr int kHudBarH = 16;
 
+// World-scale constants (same rough scale as the original spinning-cube
+// demo's cubeSize -- see JetConfig.hpp).
 constexpr int32_t kTile     = 40; // grid pitch
 constexpr int32_t kFloorGap = 3;  // gap between floor tiles, purely cosmetic
 constexpr int32_t kWallH    = 40;
@@ -56,12 +55,9 @@ inline int32_t cellWorldX(int c, int cols) { return (2 * c - (cols - 1)) * (kTil
 inline int32_t cellWorldZ(int r, int rows) { return (2 * r - (rows - 1)) * (kTile / 2); }
 
 // Creates the floor/wall Objects ONCE for the app's whole lifetime; levels
-// are re-rendered by clearing and repopulating these same two Objects in
-// place (rebuildLevelGeometry() below), never deleted/reallocated per
-// level. Matters because this loader's operator new returns NULL on
-// failure instead of throwing and nothing downstream checks that -- a
-// transient allocation failure becomes a wild pointer write, not a clean
-// abort (see elf_loader_sdk_symbols.c).
+// are re-rendered in place (rebuildLevelGeometry() below), never
+// deleted/reallocated -- this loader's operator new returns NULL instead
+// of throwing and nothing downstream checks that (elf_loader_sdk_symbols.c).
 inline void createStaticGeometryObjects(Scene &scene, Object *&floorObj, Object *&wallObj) {
     floorObj = new Object();
     wallObj = new Object();
@@ -69,10 +65,9 @@ inline void createStaticGeometryObjects(Scene &scene, Object *&floorObj, Object 
     scene.addObject(wallObj);
 }
 
-// Builds one origin-centred cube via addBoxFaces() with its vectors
-// reserve()d to their exact final size (24 verts, 12 tris) up front --
-// unlike Primitives::createCube(), which push_backs 24 times unreserved,
-// risking several separately-failable reallocations to get there.
+// Builds one origin-centred cube, vectors reserve()d to their exact final
+// size (24 verts, 12 tris) up front -- unlike Primitives::createCube(),
+// which push_backs unreserved and risks a separately-failable realloc.
 inline Object *createReservedCube(Scene &scene, int32_t w, int32_t h, int32_t d, Material *mat) {
     Object *obj = new Object();
     obj->vertices.reserve(24);
@@ -84,10 +79,8 @@ inline Object *createReservedCube(Scene &scene, int32_t w, int32_t h, int32_t d,
 }
 
 // Player, its facing "nose" cube, and kMaxBoxes box cubes -- created once
-// up front like the static geometry above. Levels with fewer than
-// kMaxBoxes boxes just leave the extra slots disabled (see
-// applyLevelToActors()) instead of the Objects being created/destroyed
-// per level.
+// up front; levels with fewer boxes just disable the extra slots (see
+// applyLevelToActors()) instead of creating/destroying Objects per level.
 inline void createDynamicObjects(Scene &scene, Material *playerMat, Material *noseMat, Material *boxMat[],
                                   Object *&playerObj, Object *&noseObj, Object *boxObj[]) {
     playerObj = createReservedCube(scene, kPlayerW, kPlayerH, kPlayerW, playerMat);
@@ -111,9 +104,8 @@ inline void countLevelCells(const GameState &gs, int &floorFlat, int &floorEdge,
 }
 
 // Scans every level once at startup for its worst-case cell counts and
-// reserve()s floorObj/wallObj to that ceiling up front, so a level with
-// more walls/floor than any level played before it doesn't force a real
-// operator-new call at a random, possibly-fragmented moment mid-play.
+// reserve()s floorObj/wallObj to that ceiling, so a bigger later level
+// never forces a real operator-new at a random, fragmented moment mid-play.
 inline void reserveWorstCaseLevelGeometry(Object *floorObj, Object *wallObj) {
     int maxFlat = 0, maxEdge = 0, maxWalls = 0;
     GameState tmp;
@@ -131,13 +123,11 @@ inline void reserveWorstCaseLevelGeometry(Object *floorObj, Object *wallObj) {
     wallObj->triangles.reserve((size_t)maxWalls * 10);
 }
 
-// Re-fills the floor/wall Objects with the current level's tiles. Wall
-// cells get a bottomless box; floor cells get a flat top quad, except the
-// exposed rim of a wall-less "floating island" level (isIslandEdgeCell,
-// sokoban_game.hpp), which gets a bottomless box of its own so the island
-// reads as a solid slab. Capacity was already reserved to the worst case
-// across all levels by reserveWorstCaseLevelGeometry() at startup, so
-// these reserve() calls are just documentation -- they no-op in practice.
+// Re-fills the floor/wall Objects with the current level's tiles. Floor
+// cells get a flat top quad, except a wall-less "island" level's exposed
+// rim (isIslandEdgeCell, sokoban_game.hpp), which gets a bottomless box so
+// it reads as a solid slab. Capacity was already reserved to the worst
+// case at startup, so the reserve() calls below just document intent.
 inline void rebuildLevelGeometry(const GameState &gs, Material *floorMat, Material *goalMat, Material *wallMat,
                                   Object *floorObj, Object *wallObj) {
     int floorFlat, floorEdge, wallCells;
@@ -157,13 +147,11 @@ inline void rebuildLevelGeometry(const GameState &gs, Material *floorMat, Materi
     constexpr int32_t wallHalf = kTile / 2;
     constexpr int32_t floorHalf = (kTile - kFloorGap) / 2;
 
-    // Wall cells are merged into maximal straight runs (one box per run,
-    // not per cell): adjacent wall cells share a face nobody ever sees, so
-    // per-cell boxes waste ~4x the triangles the same footprint needs (a
-    // 9x9 room's 32-cell border: 320 vs. ~40 merged). This is what keeps
-    // Scene's internal renderQueue (Scene.hpp, no public reserve(), grows
-    // via plain push_back) from ever needing more capacity than level 1 --
-    // wall-less but always loaded first -- already grows it to at startup.
+    // Wall cells are merged into maximal straight runs (one box per run, not
+    // per cell): adjacent cells share a face nobody ever sees, so per-cell
+    // boxes waste ~4x the triangles the same footprint needs (a 9x9 room's
+    // 32-cell border: 320 vs. ~40 merged) -- keeping every level's geometry
+    // under level 1's (wall-less, always loaded first) startup triangle count.
     bool consumed[kMaxRows][kMaxCols] = {};
     for (int r = 0; r < gs.rows; r++) {
         for (int c = 0; c < gs.cols;) {
@@ -211,9 +199,8 @@ inline void rebuildLevelGeometry(const GameState &gs, Material *floorMat, Materi
     wallObj->calculateBoundingBox();
 }
 
-// Snaps player/nose/box visuals straight to their logical grid cells, no
-// animation -- used right after (re)building a level. Box slots beyond
-// this level's boxCount are disabled rather than repositioned.
+// Snaps player/nose/box visuals straight to their logical grid cells (no
+// animation); box slots beyond boxCount are disabled, not repositioned.
 inline void applyLevelToActors(const GameState &gs, Object *playerObj, Object *noseObj, Object *boxObj[],
                                 Material *boxMat[], int facingDr, int facingDc) {
     int32_t px = cellWorldX(gs.playerC, gs.cols);
@@ -236,32 +223,24 @@ inline void applyLevelToActors(const GameState &gs, Object *playerObj, Object *n
     }
 }
 
-// How much board (radius, in tiles) stays in view around the player --
-// fixed, not derived from the level's rows/cols, so the camera stays
-// zoomed in on the cube the same amount on every level instead of pulling
-// back for a bigger grid (see frameCameraOnPlayer() below).
+// Fixed board radius (tiles) kept in view around the player -- not
+// derived from rows/cols, so zoom stays constant across levels instead of
+// pulling back for a bigger grid (frameCameraOnPlayer() below).
 constexpr float kFollowRadiusTiles = 3.0f;
 
 // Places the camera on a fixed XZ-diagonal offset from (px, ?, pz) -- see
-// main.cpp's top comment for why this fakes isometric -- then points it at
-// that same spot via lookAt(). Called every frame with the player's
-// current (possibly mid-slide) world position, so the camera pans to keep
-// the cube centred and close instead of statically framing the whole
-// board. `fovFactor` (cached on Camera by setFOV()) makes the
-// apparent-size solve just apparentRadius = fovFactor*worldRadius/dist,
-// inverted for dist; the offset itself doesn't depend on (px, pz), only
-// on screen size, so most of this is loop-invariant work repeated for
-// simplicity rather than because it needs to be.
+// main.cpp's top comment for why this fakes isometric -- then lookAt()s
+// that spot. Called every frame with the player's current (possibly
+// mid-slide) position, so the camera pans to keep the cube centred.
+// `fovFactor` (cached by setFOV()) makes apparentRadius =
+// fovFactor*worldRadius/dist solvable for dist.
 inline void frameCameraOnPlayer(Camera &camera, int32_t px, int32_t pz, int width, int height) {
     camera.setFOV(50.0f, static_cast<int32_t>(width));
 
     float worldRadius = kFollowRadiusTiles * (float)kTile;
-
-    // Leave room for the HUD strips (drawHud() below draws a 16px bar top
-    // and bottom) so the view doesn't zoom in behind them.
-    int usableHeight = height - 32;
-    if (usableHeight < 1) usableHeight = height;
-    float targetApparentRadius = 0.85f * (float)std::min(width, usableHeight);
+    // `height` here is already the game viewport (main.cpp reserves the HUD
+    // bars out of the framebuffer itself), so no separate margin is needed.
+    float targetApparentRadius = 0.85f * (float)std::min(width, height);
     if (targetApparentRadius < 1.0f) targetApparentRadius = 1.0f;
 
     float dist = camera.fovFactor * worldRadius / targetApparentRadius;
@@ -277,23 +256,41 @@ inline void frameCameraOnPlayer(Camera &camera, int32_t px, int32_t pz, int widt
     camera.farPlane = (int32_t)(offset * 3.5f) + kTile * 4;
 }
 
+// Only touches the display when the HUD's content changed: the bars now
+// live in their own screen rows (kHudBarH above), untouched by the scene
+// blit. Text uses an opaque, fixed-width background instead of a separate
+// fill_rect erase -- redoing that erase+redraw every dirty frame (~6x per
+// move, during slide animation) was what caused the visible flicker.
 inline void drawHud(const GameState &gs, int levelIndex, int width, int height) {
-    char line[48];
-    std::snprintf(line, sizeof(line), "Level %d/%d   Moves %d", levelIndex + 1, kLevelCount, gs.moves);
+    static int lastLevel = -1, lastMoves = -1;
+    static bool lastSolved = false, everDrawn = false;
+    bool firstDraw = !everDrawn;
+    bool bannerChanged = firstDraw || gs.solved != lastSolved;
+    if (!firstDraw && !bannerChanged && levelIndex == lastLevel && gs.moves == lastMoves) return;
+    lastLevel = levelIndex;
+    lastMoves = gs.moves;
+    lastSolved = gs.solved;
+    everDrawn = true;
 
-    display__fill_rect(0, 0, (int16_t)width, 16, rgb565(8, 9, 14));
+    if (firstDraw) display__fill_rect(0, 0, (int16_t)width, (int16_t)kHudBarH, kHudBg);
+    char line[48];
+    std::snprintf(line, sizeof(line), "Level %d/%d   Moves %-5d", levelIndex + 1, kLevelCount, gs.moves);
     display__set_text_color(BRUCE_COLOR_WHITE);
-    display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
+    display__set_text_bg_color(kHudBg);
     display__draw_string(line, 4, 4);
 
+    if (!bannerChanged) return;
+    int16_t by = (int16_t)(height - kHudBarH);
     if (gs.solved) {
-        display__fill_rect(0, 18, (int16_t)width, 16, rgb565(18, 58, 22));
+        display__fill_rect(0, by, (int16_t)width, (int16_t)kHudBarH, kSolvedBg);
         display__set_text_color(rgb565(255, 235, 130));
-        display__draw_centre_string("SOLVED! SELECT for next level", (int16_t)(width / 2), 22);
+        display__set_text_bg_color(kSolvedBg);
+        display__draw_centre_string("SOLVED! SELECT for next level", (int16_t)(width / 2), (int16_t)(by + 4));
     } else {
-        display__fill_rect(0, (int16_t)(height - 16), (int16_t)width, 16, rgb565(8, 9, 14));
+        display__fill_rect(0, by, (int16_t)width, (int16_t)kHudBarH, kHudBg);
         display__set_text_color(rgb565(150, 158, 180));
-        display__draw_centre_string("SELECT restart  BACK exit", (int16_t)(width / 2), (int16_t)(height - 13));
+        display__set_text_bg_color(kHudBg);
+        display__draw_centre_string("SELECT restart  BACK exit", (int16_t)(width / 2), (int16_t)(by + 4));
     }
 }
 

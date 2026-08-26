@@ -53,14 +53,26 @@ extern "C" int app_main(int argc, char **argv) {
 
     // Hand back the buffered/DMA framebuffer's RAM (same handoff
     // native_apps/examples/nes uses); Jet's own colour buffer below needs
-    // width*height*2 bytes on top of it.
+    // width*gameHeight*2 bytes on top of it.
     display__game_mode(true);
 
     initializeTrigTables();
 
-    uint16_t *framebuffer = new uint16_t[(size_t)width * (size_t)height];
+    // The 3D scene is rendered into a shorter buffer than the physical
+    // screen, leaving a dedicated row of screen space free above and below
+    // for drawHud()'s bars (sokoban_render.hpp) -- they're drawn straight
+    // to the display, never through this buffer, so they need their own
+    // rows the scene blit will never overwrite.
+    int gameHeight = height - 2 * kHudBarH;
+    int gameY = kHudBarH;
+    if (gameHeight < 1) {
+        gameHeight = height;
+        gameY = 0;
+    }
+
+    uint16_t *framebuffer = new uint16_t[(size_t)width * (size_t)gameHeight];
     if (framebuffer == nullptr) {
-        printf("game3d: framebuffer allocation failed (%dx%d)\n", width, height);
+        printf("game3d: framebuffer allocation failed (%dx%d)\n", width, gameHeight);
         display__game_mode(false);
         return 1;
     }
@@ -80,7 +92,7 @@ extern "C" int app_main(int argc, char **argv) {
     // Z_BUFFERING is off (see JetConfig.hpp), so no depth buffer -- Scene
     // accepts nullptr. SORT_TRIANGLES (painter's algorithm) suffices:
     // everything here is opaque with a distinct view-space depth.
-    Scene scene(framebuffer, nullptr, width, height);
+    Scene scene(framebuffer, nullptr, width, gameHeight);
     scene.setBackcolor(kBackColor);
 
     Camera camera;
@@ -139,7 +151,8 @@ extern "C" int app_main(int argc, char **argv) {
         facingDr = 1;
         facingDc = 0;
         applyLevelToActors(gs, playerObj, noseObj, boxObj, boxMat, facingDr, facingDc);
-        frameCameraOnPlayer(camera, cellWorldX(gs.playerC, gs.cols), cellWorldZ(gs.playerR, gs.rows), width, height);
+        frameCameraOnPlayer(camera, cellWorldX(gs.playerC, gs.cols), cellWorldZ(gs.playerR, gs.rows), width,
+                             gameHeight);
         dirty = true;
     };
     reloadLevel(levelIndex);
@@ -227,7 +240,7 @@ extern "C" int app_main(int argc, char **argv) {
             int32_t pz = animPZ0 + (int32_t)((float)(animPZ1 - animPZ0) * t);
             playerObj->setPosition(px, kPlayerH / 2, pz);
             noseObj->setPosition(px + facingDc * kNoseOffset, kPlayerH / 2, pz + facingDr * kNoseOffset);
-            frameCameraOnPlayer(camera, px, pz, width, height);
+            frameCameraOnPlayer(camera, px, pz, width, gameHeight);
 
             if (animPushed) {
                 int32_t bx = animBX0 + (int32_t)((float)(animBX1 - animBX0) * t);
@@ -240,7 +253,7 @@ extern "C" int app_main(int argc, char **argv) {
         if (dirty) {
             scene.render();
             if (display__begin_frame() == BRUCE_OK) {
-                display__draw_rgb_bitmap(0, 0, framebuffer, (int16_t)width, (int16_t)height);
+                display__draw_rgb_bitmap(0, (int16_t)gameY, framebuffer, (int16_t)width, (int16_t)gameHeight);
                 drawHud(gs, levelIndex, width, height);
                 display__present();
             }
