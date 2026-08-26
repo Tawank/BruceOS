@@ -6,6 +6,10 @@
 
 #include "core_sdk/result.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* Opaque, nonzero Core identifiers.  Applications must not infer any layout
  * or relationship to FreeRTOS handles from their numeric values. */
 typedef uint32_t bruce_process_id_t;
@@ -104,3 +108,7 @@ bruce_result_t process__wait(bruce_process_id_t process_id, uint32_t timeout_ms)
  * and zero polls. On failure, *out_status is unchanged. */
 bruce_result_t
 process__wait_status(bruce_process_id_t process_id, uint32_t timeout_ms, bruce_process_status_t *out_status);
+
+#ifdef __cplusplus
+}
+#endif
