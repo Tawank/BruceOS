@@ -113,9 +113,12 @@ inline void reserveWorstCaseLevelGeometry(Object *floorObj, Object *wallObj) {
 
 // Re-fills the floor/wall Objects with the current level's tiles. Floor
 // cells get a flat top quad, except a wall-less "island" level's exposed
-// rim (isIslandEdgeCell, sokoban_game.hpp), which gets a bottomless box so
-// it reads as a solid slab. Capacity was already reserved to the worst
-// case at startup, so the reserve() calls below just document intent.
+// rim (isIslandEdgeCell, sokoban_game.hpp), which gets a top face plus a
+// rim wall on only the side(s) that actually face void (addIslandRimFaces,
+// sokoban_geometry.hpp) so it reads as a solid slab without hanging a
+// wall down past a side that just borders another floor tile. Capacity
+// was already reserved to the worst case at startup, so the reserve()
+// calls below just document intent.
 inline void rebuildLevelGeometry(const GameState &gs, Material *floorMat, Material *goalMat, Material *wallMat,
                                   Object *floorObj, Object *wallObj) {
     int floorFlat, floorEdge, wallCells;
@@ -125,8 +128,11 @@ inline void rebuildLevelGeometry(const GameState &gs, Material *floorMat, Materi
     floorObj->triangles.clear();
     wallObj->vertices.clear();
     wallObj->triangles.clear();
-    // Both boxes here and wall boxes below drop their -Y face (20 verts,
-    // 10 tris, not 24/12): addBoxFaces(includeBottom=false).
+    // Wall boxes below drop their -Y face (20 verts, 10 tris, not 24/12):
+    // addBoxFaces(includeBottom=false). Edge floor tiles never had a -Y
+    // face to begin with (addIslandRimFaces, sokoban_geometry.hpp) but
+    // still cap out at the same 20/10 in the worst case (all 4 sides
+    // exposed), so the reserve below still covers them.
     floorObj->vertices.reserve((size_t)floorFlat * 4 + (size_t)floorEdge * 20);
     floorObj->triangles.reserve((size_t)floorFlat * 2 + (size_t)floorEdge * 10);
     wallObj->vertices.reserve((size_t)wallCells * 20);
@@ -175,8 +181,8 @@ inline void rebuildLevelGeometry(const GameState &gs, Material *floorMat, Materi
             int32_t z = cellWorldZ(r, gs.rows);
             Material *mat = gs.goal[r][c] ? goalMat : floorMat;
             if (isIslandEdgeCell(gs, r, c)) {
-                addBoxFaces(floorObj, x, -kIslandDepth / 2, z, floorHalf, kIslandDepth / 2, floorHalf, mat,
-                            /*includeBottom=*/false);
+                addIslandRimFaces(floorObj, x, z, floorHalf, kIslandDepth, mat, isVoidCell(gs, r - 1, c),
+                                   isVoidCell(gs, r + 1, c), isVoidCell(gs, r, c + 1), isVoidCell(gs, r, c - 1));
             } else {
                 addTopQuad(floorObj, x, 0, z, floorHalf, floorHalf, mat);
             }

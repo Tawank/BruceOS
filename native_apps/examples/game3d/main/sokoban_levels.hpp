@@ -30,38 +30,38 @@ struct LevelDef {
 const char *const kLevel1[] = {
     "~~~ ~~~",
     "~~~ ~~~",
-    "~~~@~~~",
-    "~~~$~~~",
+    "~~ @ ~~",
+    "   $  .",
     "~~~ ~~~",
-    "~~~.~~~",
+    "~~~ ~~~",
     "~~~ ~~~",
 };
 
 // Two boxes, each needs the player to walk around it to push from the
 // north side, then 4x DOWN per box.
 const char *const kLevel2[] = {
-    "#########",
-    "#       #",
-    "#  $ $  #",
-    "#       #",
-    "#  @    #",
-    "#       #",
-    "#  . .  #",
-    "#       #",
-    "#########",
+    "~~~~~~~~~",
+    "~       ~",
+    "~  $ $  ~",
+    "~       ~",
+    "~  @    ~",
+    "~       ~",
+    "~  . .  ~",
+    "~       ~",
+    "~~~~~~~~~",
 };
 
 // Same idea, with an interior pillar (two wall cells) to route around.
 const char *const kLevel3[] = {
-    "#########",
-    "#       #",
-    "#  $    #",
-    "#   #   #",
-    "#  @  $ #",
-    "#   #   #",
-    "#  .  . #",
-    "#       #",
-    "#########",
+    "~~~~~~~~~",
+    "~       ~",
+    "~  $    ~",
+    "~   #   ~",
+    "~  @  $ ~",
+    "~   #   ~",
+    "~  .  . ~",
+    "~       ~",
+    "~~~~~~~~~",
 };
 
 const LevelDef kLevels[] = {

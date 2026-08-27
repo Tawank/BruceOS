@@ -67,6 +67,68 @@ inline void addBoxFaces(Object *obj, int32_t cx, int32_t cy, int32_t cz, int32_t
     obj->addFace(b + 20, b + 21, b + 22, b + 23, mat);
 }
 
+// Appends a floating-island floor tile's top face plus a rim wall on ONLY
+// the sides that actually face void/off-board (north/south/east/west,
+// each true when that neighbour is exposed -- see isIslandEdgeCell() in
+// sokoban_game.hpp). A tile bordering another floor tile on 2 or 3 of its
+// sides doesn't get a wall face there: that neighbour is flat ground at
+// the same y=0, so a full addBoxFaces() box hung an extra wall down past
+// every interior-facing side too, reading as a raised block instead of a
+// tile that blends into its neighbours. Worst case (an isolated 1-tile
+// island, all 4 sides exposed) is still the 20 verts / 10 tris a full
+// bottomless box needs, so callers can keep sizing reserve() the same way.
+inline void addIslandRimFaces(Object *obj, int32_t cx, int32_t cz, int32_t half, int32_t depth, Material *mat,
+                               bool north, bool south, bool east, bool west) {
+    const int32_t N = FIXED_POINT_SCALE;
+    const int32_t cy = -depth / 2, hh = depth / 2;
+    uint16_t b;
+
+    // Top (+Y) -- every rim tile shows its top.
+    b = (uint16_t)obj->vertices.size();
+    obj->addVertex({{cx - half, cy + hh, cz + half}, {0, 0}, {0, N, 0}});
+    obj->addVertex({{cx + half, cy + hh, cz + half}, {0, 0}, {0, N, 0}});
+    obj->addVertex({{cx + half, cy + hh, cz - half}, {0, 0}, {0, N, 0}});
+    obj->addVertex({{cx - half, cy + hh, cz - half}, {0, 0}, {0, N, 0}});
+    obj->addFace(b + 0, b + 1, b + 2, b + 3, mat);
+
+    // South (+Z)
+    if (south) {
+        b = (uint16_t)obj->vertices.size();
+        obj->addVertex({{cx - half, cy - hh, cz + half}, {0, 0}, {0, 0, N}});
+        obj->addVertex({{cx + half, cy - hh, cz + half}, {0, 0}, {0, 0, N}});
+        obj->addVertex({{cx + half, cy + hh, cz + half}, {0, 0}, {0, 0, N}});
+        obj->addVertex({{cx - half, cy + hh, cz + half}, {0, 0}, {0, 0, N}});
+        obj->addFace(b + 0, b + 1, b + 2, b + 3, mat);
+    }
+    // North (-Z)
+    if (north) {
+        b = (uint16_t)obj->vertices.size();
+        obj->addVertex({{cx + half, cy - hh, cz - half}, {0, 0}, {0, 0, -N}});
+        obj->addVertex({{cx - half, cy - hh, cz - half}, {0, 0}, {0, 0, -N}});
+        obj->addVertex({{cx - half, cy + hh, cz - half}, {0, 0}, {0, 0, -N}});
+        obj->addVertex({{cx + half, cy + hh, cz - half}, {0, 0}, {0, 0, -N}});
+        obj->addFace(b + 0, b + 1, b + 2, b + 3, mat);
+    }
+    // West (-X)
+    if (west) {
+        b = (uint16_t)obj->vertices.size();
+        obj->addVertex({{cx - half, cy - hh, cz - half}, {0, 0}, {-N, 0, 0}});
+        obj->addVertex({{cx - half, cy - hh, cz + half}, {0, 0}, {-N, 0, 0}});
+        obj->addVertex({{cx - half, cy + hh, cz + half}, {0, 0}, {-N, 0, 0}});
+        obj->addVertex({{cx - half, cy + hh, cz - half}, {0, 0}, {-N, 0, 0}});
+        obj->addFace(b + 0, b + 1, b + 2, b + 3, mat);
+    }
+    // East (+X)
+    if (east) {
+        b = (uint16_t)obj->vertices.size();
+        obj->addVertex({{cx + half, cy - hh, cz + half}, {0, 0}, {N, 0, 0}});
+        obj->addVertex({{cx + half, cy - hh, cz - half}, {0, 0}, {N, 0, 0}});
+        obj->addVertex({{cx + half, cy + hh, cz - half}, {0, 0}, {N, 0, 0}});
+        obj->addVertex({{cx + half, cy + hh, cz + half}, {0, 0}, {N, 0, 0}});
+        obj->addFace(b + 0, b + 1, b + 2, b + 3, mat);
+    }
+}
+
 // Appends a single flat +Y-facing quad (4 verts) at height `cy`, centred
 // at (cx, cz) -- the top face of addBoxFaces() above, standalone, for a
 // floor tile whose sides are never visible (an interior tile with floor

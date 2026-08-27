@@ -94,19 +94,20 @@ inline bool cellIsWalkable(const GameState &gs, int r, int c) {
     return r >= 0 && r < gs.rows && c >= 0 && c < gs.cols && gs.cell[r][c] == CELL_FLOOR;
 }
 
+// True when (r, c) is off the grid or a VOID cell -- the single
+// direction-test isIslandEdgeCell() and the renderer's per-side rim mask
+// both build on this.
+inline bool isVoidCell(const GameState &gs, int r, int c) {
+    return r < 0 || r >= gs.rows || c < 0 || c >= gs.cols || gs.cell[r][c] == CELL_VOID;
+}
+
 // True when a FLOOR cell touches a VOID cell (or the grid edge) on one of
 // its 4 sides -- the exposed rim of a level with no walls around it (a
 // "floating island"), which needs a side face when rendered. A floor cell
 // next to a WALL isn't an edge: the wall already covers that side.
 inline bool isIslandEdgeCell(const GameState &gs, int r, int c) {
-    static const int dr[4] = {-1, 1, 0, 0};
-    static const int dc[4] = {0, 0, -1, 1};
-    for (int i = 0; i < 4; i++) {
-        int nr = r + dr[i], nc = c + dc[i];
-        if (nr < 0 || nr >= gs.rows || nc < 0 || nc >= gs.cols) return true;
-        if (gs.cell[nr][nc] == CELL_VOID) return true;
-    }
-    return false;
+    return isVoidCell(gs, r - 1, c) || isVoidCell(gs, r + 1, c) || isVoidCell(gs, r, c - 1) ||
+           isVoidCell(gs, r, c + 1);
 }
 
 inline int findBoxAt(const GameState &gs, int r, int c) {
