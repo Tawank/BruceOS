@@ -1,9 +1,0 @@
-dependencies:
-  idf: '>=5.0.0'
-description: Jpeg-turbo port to ESP
-repository: git://github.com/espressif/idf-extra-components.git
-repository_info:
-  commit_sha: 6e6afd75f7fc55c0469592ec5f7d7c40ca085372
-  path: libjpeg-turbo
-url: https://github.com/espressif/idf-extra-components/tree/master/libjpeg-turbo
-version: 3.1.1~2

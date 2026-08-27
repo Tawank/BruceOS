@@ -1,9 +1,3 @@
-if(TARGET idf::espressif__libjpeg-turbo AND NOT TARGET idf::libjpeg-turbo)
-    # libjpeg-turbo 3.1.1~2 still references its pre-namespace component target.
-    get_target_property(LIBJPEG_TURBO_TARGET idf::espressif__libjpeg-turbo ALIASED_TARGET)
-    add_library(idf::libjpeg-turbo ALIAS ${LIBJPEG_TURBO_TARGET})
-endif()
-
 set(BRUCE_SELFTEST_SOURCES
     "modules/selftest/args_test.c"
     "modules/selftest/app_runner_test.c"
@@ -222,7 +216,7 @@ idf_component_register(SRCS
                      nvs_flash
                      spi_flash
                      littlefs
-                     espressif__libjpeg-turbo
+                     libjpeg-turbo
                      libpng
                      wolfssl
                      wolfssh

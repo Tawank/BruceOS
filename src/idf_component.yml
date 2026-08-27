@@ -4,8 +4,9 @@ dependencies:
   espressif/elf_loader:
     override_path: ../components/elf_loader
   espressif/esp_jpeg: ^1.3.1
-  espressif/libjpeg-turbo:
-    override_path: ../components/espressif__libjpeg-turbo
+  libjpeg-turbo:
+    git: https://github.com/Tawank/libjpeg-turbo.git
+    version: db4f0fc110766499f113136625d8de7517bac7e9
   espressif/libpng: ^1.6.58
   joltwallet/littlefs: ^1.22.3
   wasm-micro-runtime:
