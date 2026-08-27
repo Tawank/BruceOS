@@ -177,7 +177,6 @@ bruce_result_t process__to_foreground(void) {
     bool promoted = self->state == BRUCE_PROCESS_BACKGROUND;
     if (promoted) process__foreground_push_locked(self->id);
     process__unlock();
-    if (promoted) process__clear_foreground_display();
     return BRUCE_OK;
 }
 

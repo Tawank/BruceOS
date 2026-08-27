@@ -110,6 +110,13 @@ process_registry__resource_realloc(bruce_resource_id_t resource_id, void *contex
  * BRUCE_ERR_NOT_FOUND if it does not. */
 bruce_result_t process_registry__resource_release(bruce_resource_id_t resource_id);
 
+/* Same as process_registry__resource_release(), but only unlinks the resource
+ * when its registered cleanup context is exactly `context`. Tracked allocators
+ * use this to ensure damaged or stale metadata cannot release an unrelated
+ * resource that happens to have the referenced ID. */
+bruce_result_t
+process_registry__resource_release_exact(bruce_resource_id_t resource_id, const void *context);
+
 /* Atomically moves one resource and its memory accounting from another live
  * process to the calling process. Used when a loader prepares an image before
  * its child process exists. */

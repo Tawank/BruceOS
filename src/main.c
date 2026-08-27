@@ -88,7 +88,7 @@ void app_runner__register_defaults(void) {
         "device_bus", "Inspect and control device buses", device_bus_app_main, DEVICE_BUS_STACK_BYTES
     );
     app_runner__register("elf", "Run ELF applications", elf_loader__app_main, 0);
-    app_runner__register("filemanager", "Browse and manage files", filemanager_app_main, 0);
+    app_runner__register("filemanager", "Browse and manage files", filemanager_app_main, 8192);
     app_runner__register("free", "Show memory usage", bnu_free_app_main, 0);
     app_runner__register("image", "Decode image files", image_app_main, 0);
     app_runner__register("image_viewer", "View image files", image_viewer_app_main, 8192);
@@ -131,7 +131,9 @@ void app_runner__register_defaults(void) {
     app_runner__register("ssh", "Connect to an SSH server", ssh_app_main, SSH_STACK_BYTES);
     app_runner__register("ssh-keygen", "Generate SSH keys", ssh_keygen_app_main, SSH_KEYGEN_STACK_BYTES);
     app_runner__register(
-        "storage", "Manage files (list/remove/mkdir/rename/read/write)", storage_commands_app_main,
+        "storage",
+        "Manage files (list/remove/mkdir/rename/read/write)",
+        storage_commands_app_main,
         STORAGE_COMMANDS_STACK_BYTES
     );
     app_runner__register("stty", "Configure terminal settings", bnu_stty_app_main, 0);

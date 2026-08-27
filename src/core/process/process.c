@@ -244,13 +244,6 @@ void process__foreground_push_locked(bruce_process_id_t id) {
     process__foreground_recompute_locked();
 }
 
-void process__clear_foreground_display(void) {
-    if (display__begin_frame() == BRUCE_OK) {
-        (void)display__fill_screen(BRUCE_COLOR_BLACK);
-        (void)display__present();
-    }
-}
-
 void process__refresh_cpu_samples_locked(void) {
     const size_t status_capacity = uxTaskGetNumberOfTasks();
     TaskStatus_t *status_buf = malloc(status_capacity * sizeof(*status_buf));
@@ -383,13 +376,11 @@ static void process__trampoline(void *arg) {
     }
     process__unlock();
 
-    /* Do not let a newly launched fullscreen GUI inherit the previous
-     * foreground process's completed panel frame. Clear and present once before
-     * application code starts; normal app redraw throttling can then remain
-     * event-driven. */
-    if (record->gui_requested && !record->start_in_background && !record->preserve_display) {
-        process__clear_foreground_display();
-    }
+    /* The display context is marked clear_on_next_frame when this process is
+     * promoted to the foreground. Keep the previous process's completed panel
+     * frame visible while application code initializes; the new process's
+     * first display__begin_frame() clears its framebuffer, and its first
+     * display__present() replaces the old UI atomically. */
 
     stdio__process_attach(record->stdio_session, &stdio_input, &stdio_output, &stdio_error);
 
@@ -586,7 +577,8 @@ process_registry__resource_realloc(bruce_resource_id_t resource_id, void *contex
     return NULL;
 }
 
-bruce_result_t process_registry__resource_release(bruce_resource_id_t resource_id) {
+static bruce_result_t
+process__resource_release(bruce_resource_id_t resource_id, const void *context, bool match_context) {
     process__ensure_init();
     process__lock();
     process__record_t *self = process__find_by_handle_locked(xTaskGetCurrentTaskHandle());
@@ -597,7 +589,7 @@ bruce_result_t process_registry__resource_release(bruce_resource_id_t resource_i
     process__resource_t **link = &self->resources;
     while (*link != NULL) {
         process__resource_t *resource = *link;
-        if (resource->id == resource_id) {
+        if (resource->id == resource_id && (!match_context || resource->context == context)) {
             *link = resource->next;
             free(resource);
             self->resource_count--;
@@ -608,6 +600,16 @@ bruce_result_t process_registry__resource_release(bruce_resource_id_t resource_i
     }
     process__unlock();
     return BRUCE_ERR_NOT_FOUND;
+}
+
+bruce_result_t process_registry__resource_release(bruce_resource_id_t resource_id) {
+    return process__resource_release(resource_id, NULL, false);
+}
+
+bruce_result_t
+process_registry__resource_release_exact(bruce_resource_id_t resource_id, const void *context) {
+    if (context == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    return process__resource_release(resource_id, context, true);
 }
 
 bruce_result_t process_registry__resource_transfer(

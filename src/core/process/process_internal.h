@@ -119,7 +119,6 @@ void process__wake_locked(process__record_t *record);
 void process__foreground_recompute_locked(void);
 void process__foreground_remove_locked(bruce_process_id_t id);
 void process__foreground_push_locked(bruce_process_id_t id);
-void process__clear_foreground_display(void);
 void process__refresh_cpu_samples_locked(void);
 void process__fill_snapshot_locked(const process__record_t *record, bruce_process_snapshot_t *out_snapshot);
 void process__teardown_locked(process__record_t *record, const bruce_process_status_t *status);

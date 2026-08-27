@@ -20,6 +20,11 @@ typedef struct {
 
 static void memory__cleanup(void *context) {
     memory__header_t *header = (memory__header_t *)context;
+    /* A stale resource entry must not turn process teardown into a second
+     * free. memory__free() clears the marker before releasing the allocation,
+     * so a header that no longer identifies a live tracked block is ignored. */
+    if (header == NULL || header->magic != MEMORY__MAGIC) return;
+    header->magic = 0;
     free(header);
 }
 
@@ -76,7 +81,12 @@ void memory__free(void *ptr) {
     if (ptr == NULL) { return; }
     memory__header_t *header = ((memory__header_t *)ptr) - 1;
     if (header->magic != MEMORY__MAGIC) { return; }
-    process_registry__resource_release(header->resource_id);
+    /* Only free a tracked block after removing this exact header from the
+     * calling process's resource list. If its metadata is stale/corrupted, or
+     * it is freed from the wrong process, leave the registered allocation for
+     * its owner's teardown instead of freeing it while a cleanup entry still
+     * points at it (which would become a teardown-time double free). */
+    if (process_registry__resource_release_exact(header->resource_id, header) != BRUCE_OK) return;
     process_registry__account_memory(-(int64_t)header->size);
     header->magic = 0;
     free(header);
