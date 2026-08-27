@@ -14,6 +14,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#define CLOCK_APP__MENU_HINT_MS 5000u
+
 
 static bool clock_app__resume_after_handoff(void) {
     bruce_process_snapshot_t snapshot;
@@ -57,7 +59,12 @@ static bruce_result_t clock_app__draw(const char *title, const char *main_text, 
     while (text_size > 1 && (int)strlen(main_text) * 6 * text_size > width - 16) text_size--;
     (void)display__set_text_color(primary);
     (void)display__set_text_size((uint8_t)text_size);
-    (void)display__draw_centre_string(main_text, width / 2, (height - 8 * text_size) / 2);
+    int16_t font_width = 0;
+    int16_t font_height = 0;
+    if (display__get_font_metrics(&font_width, &font_height) != BRUCE_OK || font_height <= 0) {
+        font_height = 8;
+    }
+    (void)display__draw_centre_string(main_text, width / 2, (height - font_height * text_size) / 2);
     if (footer != NULL) {
         (void)display__set_text_color(secondary);
         (void)display__set_text_size(1);
@@ -83,18 +90,22 @@ static int clock_app__show(bool gui) {
     }
     (void)input__flush();
     uint8_t last_second = UINT8_MAX;
+    uint64_t hint_started_at = runtime__now();
+    bool last_hint_visible = false;
     for (;;) {
+        bool hint_visible = runtime__now() - hint_started_at < CLOCK_APP__MENU_HINT_MS;
         bruce_clock_datetime_t now;
         bruce_result_t result = clock__get_local(&now);
         if (result != BRUCE_OK) {
             (void)clock_app__draw("Clock", "--:--:--", "Set time in Config");
-        } else if (now.second != last_second) {
+        } else if (now.second != last_second || hint_visible != last_hint_visible) {
             char formatted[16];
             char date[16];
             clock_app__format_time(&now, formatted, sizeof(formatted));
             snprintf(date, sizeof(date), "%04u-%02u-%02u", now.year, now.month, now.day);
-            (void)clock_app__draw(date, formatted, "OK menu / BACK");
+            (void)clock_app__draw(date, formatted, hint_visible ? "OK to show menu" : NULL);
             last_second = now.second;
+            last_hint_visible = hint_visible;
         }
         int32_t code = 0;
         result = input__wait(200, &code);
