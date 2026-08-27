@@ -154,11 +154,11 @@ void app_runner__register_defaults(void) {
     app_runner__register("stty", "Configure terminal settings", "Shell", bnu_stty_app_main, 0);
     app_runner__register("terminal", "Open a terminal", "Shell", terminal_app_main, 0);
 
-    /* Text - viewing and editing text and images. */
-    app_runner__register("image", "Decode image files", "Text", image_app_main, 0);
-    app_runner__register("image_viewer", "View image files", "Text", image_viewer_app_main, 8192);
-    app_runner__register("less", "Page through text", "Text", bnu_less_app_main, 0);
-    app_runner__register("text", "Edit text files", "Text", text_app_main, 0);
+    /* Content - viewing and editing text and images. */
+    app_runner__register("image", "Decode image files", "Content", image_app_main, 0);
+    app_runner__register("image_viewer", "View image files", "Content", image_viewer_app_main, 8192);
+    app_runner__register("less", "Page through text", "Content", bnu_less_app_main, 0);
+    app_runner__register("text", "Edit text files", "Content", text_app_main, 0);
 
     app_runner__register_loader(".elf", "elf");
     app_runner__register_loader(".wasm", "wasm");

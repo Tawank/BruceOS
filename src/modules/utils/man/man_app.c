@@ -43,7 +43,7 @@ static const char *const MAN_APP_CATEGORY_ORDER[] = {
     "Radio",
     "Runtime",
     "Shell",
-    "Text",
+    "Content",
 };
 #define MAN_APP_CATEGORY_COUNT (sizeof(MAN_APP_CATEGORY_ORDER) / sizeof(MAN_APP_CATEGORY_ORDER[0]))
 
