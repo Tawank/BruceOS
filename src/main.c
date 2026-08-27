@@ -68,9 +68,6 @@
 #define WIFI_STACK_BYTES 8192u
 
 void app_runner__register_defaults(void) {
-    /* Grouped by category so this list doubles as a table of contents for
-     * `man` and command search; alphabetical within each group. */
-
     /* System - boot, launcher, config, diagnostics, power. */
     app_runner__register("apps", "Browse installed apps", "System", apps_app_main, 0);
     app_runner__register("bootanimation", "Play the boot animation", "System", bootanimation_app_main, 0);

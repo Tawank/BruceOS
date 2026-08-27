@@ -3,12 +3,15 @@
 
 #if CONFIG_BRUCE_BOARD_I2C_ENABLED
 
+#include <string.h>
+
 #include "core/device/board_i2c.h"
 
 #include "core_sdk/device.h"
 #include "core_sdk/process.h"
 #include "core_sdk/pubsub.h"
 #include "core_sdk/runtime.h"
+#include "core_sdk/stdio.h"
 
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
@@ -268,8 +271,10 @@ static void device_bus__battery_poll(i2c_master_bus_handle_t bus) {
 #endif
 
 int device_bus_app_main(int argc, char **argv) {
-    (void)argc;
-    (void)argv;
+    if (argc > 1 && (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)) {
+        stdio__printf("Inspect device buses.\n");
+        return BRUCE_OK;
+    }
 
 #if !CONFIG_BRUCE_TOUCH_ENABLED && defined(DEVICE_BUS__NO_I2C_BATTERY)
     return BRUCE_OK;

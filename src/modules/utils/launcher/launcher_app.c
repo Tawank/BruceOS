@@ -59,6 +59,10 @@ static int launcher__start(bool gui, bruce_launch_mode_t mode) {
 }
 
 int launcher_app_main(int argc, char **argv) {
+    if (launcher__has_arg(argc, argv, "--help") || launcher__has_arg(argc, argv, "-h")) {
+        stdio__printf("Launches configured launcher.\nUsage: launcher [config|-s]\n");
+        return BRUCE_OK;
+    }
     if (argc > 1 && strcmp(argv[1], "config") == 0) {
         int result = launcher__run_target(runtime__gui_requested(), BRUCE_LAUNCH_FOREGROUND, "config");
         return result < 0 ? result : 0;

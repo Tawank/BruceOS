@@ -7,6 +7,7 @@
 #include <string.h>
 #include <strings.h>
 
+#include "args.h"
 #include "core_sdk/app_runner.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/ext_mem_loader.h"
@@ -141,6 +142,18 @@ static void apps__show_error(const char *action, bruce_result_t result) {
 }
 
 int apps_app_main(int argc, char **argv) {
+    ArgParser *parser = ap_new_parser();
+    if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
+    ap_set_helptext(parser, "Browse and launch installed .elf, .wasm, and .js apps from /apps and /scripts.");
+    if (!ap_parse(parser, argc, argv)) {
+        ap_status_t status = ap_get_status(parser);
+        ap_free(parser);
+        return status == AP_STATUS_HELP || status == AP_STATUS_VERSION ? BRUCE_OK
+               : status == AP_STATUS_NO_MEMORY                         ? BRUCE_ERR_NO_MEMORY
+                                                                        : BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    ap_free(parser);
+
     bool gui = runtime__gui_requested();
 
     const char *directories[] = {"/apps", "/scripts"};

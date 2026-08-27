@@ -1,5 +1,7 @@
 #include "serial_commands_app.h"
 
+#include <string.h>
+
 #include "core_sdk/app_runner.h"
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
@@ -15,8 +17,10 @@ int serial_commands__run_line(const char *line, bool in_background) {
 }
 
 int serial_commands_app_main(int argc, char **argv) {
-    (void)argc;
-    (void)argv;
+    if (argc > 1 && (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)) {
+        stdio__printf("Run the terminal command service.\n");
+        return BRUCE_OK;
+    }
 
 #if !CONFIG_BRUCE_QEMU_TEST_MODE
     /* Wait for a first byte before spawning the interactive shell, instead

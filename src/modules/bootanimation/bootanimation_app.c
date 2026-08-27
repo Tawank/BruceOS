@@ -1,5 +1,8 @@
 #include "bootanimation_app.h"
 
+#include <stdio.h>
+#include <string.h>
+
 #include "core_sdk/config.h"
 #include "core_sdk/display.h"
 #include "core_sdk/image.h"
@@ -369,8 +372,10 @@ static bruce_result_t bootanimation__finish(bruce_result_t result) {
 }
 
 int bootanimation_app_main(int argc, char **argv) {
-    (void)argc;
-    (void)argv;
+    if (argc > 1 && (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)) {
+        printf("Play the boot animation.\n");
+        return BRUCE_OK;
+    }
 
     bruce_result_t result = bootanimation__draw_title();
     if (result != BRUCE_OK) return result;

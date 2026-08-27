@@ -170,8 +170,10 @@ static int system_menu__run_action(const char *action) {
 }
 
 int system_menu_app_main(int argc, char **argv) {
-    (void)argc;
-    (void)argv;
+    if (argc > 1 && (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)) {
+        printf("Open the system menu.\n");
+        return BRUCE_OK;
+    }
 
     system_menu__item_t *items = memory__calloc(SYSTEM_MENU__MAX_ITEMS, sizeof(*items));
     if (items == NULL) return BRUCE_ERR_NO_MEMORY;

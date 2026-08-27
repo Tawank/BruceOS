@@ -1,5 +1,7 @@
 #include "input_app.h"
 
+#include <string.h>
+
 #include "input_buttons.h"
 #include "input_common.h"
 #include "input_encoder.h"
@@ -11,6 +13,7 @@
 #include "core_sdk/input.h"
 #include "core_sdk/process.h"
 #include "core_sdk/runtime.h"
+#include "core_sdk/stdio.h"
 
 #include "freertos/FreeRTOS.h" // IWYU pragma: keep
 #include "sdkconfig.h"
@@ -59,8 +62,10 @@ static void input_app__poll(void) {
 }
 
 int input_app_main(int argc, char **argv) {
-    (void)argc;
-    (void)argv;
+    if (argc > 1 && (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)) {
+        stdio__printf("Inspect input devices.\n");
+        return BRUCE_OK;
+    }
 
     bruce_result_t result = input_app__init();
     if (result != BRUCE_OK) { return result; }

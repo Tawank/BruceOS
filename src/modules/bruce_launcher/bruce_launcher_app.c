@@ -1214,6 +1214,11 @@ static int bruce_launcher__run_terminal_menu(const bruce_launcher_menu_t *menu) 
 /* -------------------------------------------------------------------------- */
 
 int bruce_launcher_app_main(int argc, char **argv) {
+    if (argc > 1 && (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)) {
+        printf("Open the Bruce launcher.\nUsage: bruce_launcher [config ...]\n");
+        return BRUCE_OK;
+    }
+
     /* "bruce_launcher config ..." reconfigures how the root menu renders
      * (bruce_launcher_config.c) instead of running the menu itself; routed
      * here rather than through a separate registered app so the render

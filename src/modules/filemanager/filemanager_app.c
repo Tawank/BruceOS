@@ -313,6 +313,11 @@ static bruce_result_t filemanager__show_folder_info(const char *path) {
 }
 
 int filemanager_app_main(int argc, char **argv) {
+    if (argc > 1 && (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)) {
+        stdio__printf("Browse and manage files.\n");
+        return BRUCE_OK;
+    }
+
     bool gui = runtime__gui_requested();
     const bruce_dialog_choice_t actions[] = {
         {.label = "Open",         .value = "open"  },

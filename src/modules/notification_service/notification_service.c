@@ -73,8 +73,10 @@ static bruce_result_t notification_service__show(const char *text) {
 }
 
 int notification_service_main(int argc, char **argv) {
-    (void)argc;
-    (void)argv;
+    if (argc > 1 && (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)) {
+        stdio__printf("The notification service.\n");
+        return BRUCE_OK;
+    }
     bool visible = false;
     uint64_t deadline_ms = 0;
     for (;;) {

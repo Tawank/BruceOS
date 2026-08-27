@@ -5,6 +5,7 @@
 #include "freertos/FreeRTOS.h" // IWYU pragma: export
 #include "freertos/task.h"
 
+#include "args.h"
 #include "core_sdk/storage.h"
 #include "core_sdk/app_runner.h"
 #include "core_sdk/process.h"
@@ -71,8 +72,20 @@ static bool selftest__run_visual_cases(void) {
 }
 
 int selftest_app_main(int argc, char **argv) {
-    (void)argc;
-    (void)argv;
+    ArgParser *parser = ap_new_parser();
+    if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
+    ap_set_helptext(
+        parser, "Run BruceOS's full hardware and Core self-test suite (slow; exercises storage, "
+                "partitions, and process management for real)."
+    );
+    if (!ap_parse(parser, argc, argv)) {
+        ap_status_t status = ap_get_status(parser);
+        ap_free(parser);
+        return status == AP_STATUS_HELP || status == AP_STATUS_VERSION ? BRUCE_OK
+               : status == AP_STATUS_NO_MEMORY                         ? BRUCE_ERR_NO_MEMORY
+                                                                        : BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    ap_free(parser);
 
     (void)storage__mkdir("/apps");
     (void)storage__mkdir("/bin");
