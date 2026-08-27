@@ -39,7 +39,7 @@ static int selftest__shell_probe(int argc, char **argv) {
 
 static bool selftest__shell_register_probe(void) {
     bruce_result_t result =
-        app_runner__register("shell_test_probe", "Shell integration probe", selftest__shell_probe, 0);
+        app_runner__register("shell_test_probe", "Shell integration probe", "Test", selftest__shell_probe, 0);
     return result == BRUCE_OK || result == BRUCE_ERR_ALREADY_EXISTS;
 }
 

@@ -61,7 +61,7 @@ bool selftest__run_terminal_named_case(void) {
     memset(&s_echo, 0, sizeof(s_echo));
 
     bruce_result_t registered = app_runner__register(
-        "terminal_test_echo", "Terminal argument probe", selftest__terminal_test_echo_entry, 0
+        "terminal_test_echo", "Terminal argument probe", "Test", selftest__terminal_test_echo_entry, 0
     );
     if (registered != BRUCE_OK && registered != BRUCE_ERR_ALREADY_EXISTS) {
         printf("[selftest] terminal/named: failed to register echo app (%d)\n", registered);
@@ -182,8 +182,9 @@ static int selftest__terminal_stdio_cancel_entry(int argc, char **argv) {
 }
 
 bool selftest__run_terminal_stdio_case(void) {
-    bruce_result_t registered =
-        app_runner__register("terminal_test_stdio", "Terminal stdio probe", selftest__terminal_stdio_entry, 0);
+    bruce_result_t registered = app_runner__register(
+        "terminal_test_stdio", "Terminal stdio probe", "Test", selftest__terminal_stdio_entry, 0
+    );
     if (registered != BRUCE_OK && registered != BRUCE_ERR_ALREADY_EXISTS) return false;
 
     bruce_stdio_session_t session = BRUCE_STDIO_SESSION_INVALID;
@@ -250,10 +251,9 @@ bool selftest__run_terminal_stdio_case(void) {
 }
 
 bool selftest__run_terminal_stdio_cancel_case(void) {
-    bruce_result_t registered =
-        app_runner__register(
-            "terminal_test_stdio_cancel", "Terminal cancellation probe", selftest__terminal_stdio_cancel_entry, 0
-        );
+    bruce_result_t registered = app_runner__register(
+        "terminal_test_stdio_cancel", "Terminal cancellation probe", "Test", selftest__terminal_stdio_cancel_entry, 0
+    );
     if (registered != BRUCE_OK && registered != BRUCE_ERR_ALREADY_EXISTS) return false;
 
     s_stdio_cancel_started = false;

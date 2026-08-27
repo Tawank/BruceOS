@@ -119,8 +119,9 @@ static int selftest__args_help_target(int argc, char **argv) {
 }
 
 static bool selftest__args_help_integration(void) {
-    bruce_result_t registered =
-        app_runner__register("selftest_help_target", "Manual integration probe", selftest__args_help_target, 0);
+    bruce_result_t registered = app_runner__register(
+        "selftest_help_target", "Manual integration probe", "Test", selftest__args_help_target, 0
+    );
     if (registered != BRUCE_OK && registered != BRUCE_ERR_ALREADY_EXISTS) return false;
 
     s_help_target_received_help = false;

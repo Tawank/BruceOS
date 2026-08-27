@@ -35,17 +35,18 @@ bool selftest__run_apprunner_registration_case(void) {
         printf("[selftest] apprunner/registration: command enumeration failed\n");
         return false;
     }
-    if (app_runner__register("selftest", "Run hardware and Core self-tests", selftest__apprunner_dummy_entry, 0) !=
-        BRUCE_ERR_ALREADY_EXISTS) {
+    if (app_runner__register(
+            "selftest", "Run hardware and Core self-tests", "Test", selftest__apprunner_dummy_entry, 0
+        ) != BRUCE_ERR_ALREADY_EXISTS) {
         printf("[selftest] apprunner/registration: duplicate name was not rejected\n");
         return false;
     }
-    if (app_runner__register(NULL, "Invalid command", selftest__apprunner_dummy_entry, 0) !=
+    if (app_runner__register(NULL, "Invalid command", "Test", selftest__apprunner_dummy_entry, 0) !=
         BRUCE_ERR_INVALID_ARGUMENT) {
         printf("[selftest] apprunner/registration: NULL name was accepted\n");
         return false;
     }
-    if (app_runner__register("invalid_description", NULL, selftest__apprunner_dummy_entry, 0) !=
+    if (app_runner__register("invalid_description", NULL, "Test", selftest__apprunner_dummy_entry, 0) !=
         BRUCE_ERR_INVALID_ARGUMENT) {
         printf("[selftest] apprunner/registration: NULL description was accepted\n");
         return false;
@@ -59,8 +60,9 @@ bool selftest__run_apprunner_registration_case(void) {
         "selftest_apprunner_capacity_2",
     };
     for (size_t i = 0; i < sizeof(capacity_names) / sizeof(capacity_names[0]); ++i) {
-        bruce_result_t result =
-            app_runner__register(capacity_names[i], "AppRunner capacity probe", selftest__apprunner_dummy_entry, 0);
+        bruce_result_t result = app_runner__register(
+            capacity_names[i], "AppRunner capacity probe", "Test", selftest__apprunner_dummy_entry, 0
+        );
         if (result != BRUCE_OK && result != BRUCE_ERR_ALREADY_EXISTS) {
             printf("[selftest] apprunner/registration: additional registration failed (%d)\n", result);
             return false;
@@ -121,8 +123,9 @@ bool selftest__run_apprunner_args_case(void) {
         printf("[selftest] apprunner/args: GUI environment flag was not matched exactly\n");
         return false;
     }
-    bruce_result_t registered =
-        app_runner__register("selftest_echo", "AppRunner argument probe", selftest__apprunner_echo_entry, 0);
+    bruce_result_t registered = app_runner__register(
+        "selftest_echo", "AppRunner argument probe", "Test", selftest__apprunner_echo_entry, 0
+    );
     if (registered != BRUCE_OK && registered != BRUCE_ERR_ALREADY_EXISTS) {
         printf("[selftest] apprunner/args: register failed (%d)\n", registered);
         return false;

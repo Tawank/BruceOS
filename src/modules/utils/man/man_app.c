@@ -32,14 +32,75 @@ static int man_app__wait(bruce_process_id_t process_id) {
     }
 }
 
+/* Categories in display order. Anything uncategorized (NULL/"") prints under
+ * a trailing "Other" section, and any category name outside this list still
+ * gets its own section after that - so a stray/misspelled category shows up
+ * as its own header instead of silently vanishing. */
+static const char *const MAN_APP_CATEGORY_ORDER[] = {
+    "System",
+    "Storage",
+    "Network",
+    "Radio",
+    "Runtime",
+    "Shell",
+    "Text",
+};
+#define MAN_APP_CATEGORY_COUNT (sizeof(MAN_APP_CATEGORY_ORDER) / sizeof(MAN_APP_CATEGORY_ORDER[0]))
+
+static bool man_app__is_hidden_category(const char *category) {
+    return category != NULL && strcmp(category, "Test") == 0;
+}
+
+static bool man_app__category_matches(const char *category, const char *bucket) {
+    if (category == NULL || category[0] == '\0') return false;
+    return strcmp(category, bucket) == 0;
+}
+
+static void man_app__list_category(const char *bucket, size_t count) {
+    bool header_printed = false;
+    for (size_t i = 0; i < count; ++i) {
+        const char *category = app_runner__command_category(i);
+        bool in_this_bucket = bucket != NULL ? man_app__category_matches(category, bucket)
+                                             : category == NULL || category[0] == '\0';
+        if (!in_this_bucket) continue;
+
+        const char *name = app_runner__command_name(i);
+        if (name == NULL) continue;
+        if (!header_printed) {
+            stdio__printf("\n%s:\n", bucket != NULL ? bucket : "Other");
+            header_printed = true;
+        }
+        const char *description = app_runner__command_description(i);
+        stdio__printf("%s - %s\n", name, description != NULL ? description : "");
+    }
+}
+
 static int man_app__list_commands(void) {
     stdio__printf("Available commands:\n");
     size_t count = app_runner__command_count();
-    for (size_t i = 0; i < count; ++i) {
-        const char *name = app_runner__command_name(i);
-        const char *description = app_runner__command_description(i);
-        if (name != NULL) stdio__printf("%s - %s\n", name, description != NULL ? description : "");
+
+    for (size_t category_index = 0; category_index < MAN_APP_CATEGORY_COUNT; ++category_index) {
+        man_app__list_category(MAN_APP_CATEGORY_ORDER[category_index], count);
     }
+
+    /* Uncategorized commands, then anything registered under a category name
+     * this list doesn't know about (excluding hidden ones like "Test"). Each
+     * unknown category is printed once, the first time it's encountered. */
+    man_app__list_category(NULL, count);
+    for (size_t i = 0; i < count; ++i) {
+        const char *category = app_runner__command_category(i);
+        if (category == NULL || category[0] == '\0' || man_app__is_hidden_category(category)) continue;
+
+        bool already_handled = false;
+        for (size_t j = 0; j < MAN_APP_CATEGORY_COUNT && !already_handled; ++j) {
+            already_handled = man_app__category_matches(category, MAN_APP_CATEGORY_ORDER[j]);
+        }
+        for (size_t earlier = 0; earlier < i && !already_handled; ++earlier) {
+            already_handled = man_app__category_matches(category, app_runner__command_category(earlier));
+        }
+        if (!already_handled) man_app__list_category(category, count);
+    }
+
     stdio__printf("\nType:\nman <command>\nto open a command manual\n");
     return BRUCE_OK;
 }

@@ -15,10 +15,16 @@ typedef enum {
 } bruce_launch_mode_t;
 
 /* Registers a built-in command. Name and description must be non-empty and
- * remain valid for the lifetime of the system. Returns BRUCE_ERR_ALREADY_EXISTS
- * for a duplicate name and BRUCE_ERR_RESOURCE_LIMIT if the registry is full. */
+ * remain valid for the lifetime of the system. `category` groups commands for
+ * docs and command search (`man`, launcher, shell completion) - it has no
+ * effect on lookup or execution; pass one of the short, title-case names used
+ * in app_runner__register_defaults() (e.g. "System", "Storage", "Network"),
+ * or NULL/"" if the command has none (excluded from category listings).
+ * Returns BRUCE_ERR_ALREADY_EXISTS for a duplicate name and
+ * BRUCE_ERR_RESOURCE_LIMIT if the registry is full. */
 bruce_result_t app_runner__register(
-    const char *name, const char *description, bruce_app_entry_t entry, uint32_t stack_bytes
+    const char *name, const char *description, const char *category, bruce_app_entry_t entry,
+    uint32_t stack_bytes
 );
 
 /* Read-only access to registered built-in command metadata. Entries are
@@ -27,6 +33,7 @@ bruce_result_t app_runner__register(
 size_t app_runner__command_count(void);
 const char *app_runner__command_name(size_t index);
 const char *app_runner__command_description(size_t index);
+const char *app_runner__command_category(size_t index);
 
 /* Starts a named built-in or loader-registered application (see
  * core_sdk/ext_mem_loader.h).  On success this returns a positive bruce_process_id_t.
