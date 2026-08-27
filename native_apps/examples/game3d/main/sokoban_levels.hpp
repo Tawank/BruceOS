@@ -64,10 +64,58 @@ const char *const kLevel3[] = {
     "~~~~~~~~~",
 };
 
+// A diamond room (void cut in from all 4 corners, not just a bordered
+// rectangle) split by a 2-cell pillar. The starting box blocks the
+// straight route through the middle, so the player nudges it aside first,
+// drops a second box into the near goal, then walks the first box up and
+// around into its own goal on the far side, finishing with a third eased
+// down to the point on the right (20 moves).
+const char *const kLevel4[] = {
+    "~~~~~~~~~",
+    "~~~   ~~~",
+    "~~  .  ~~",
+    "~   # $ ~",
+    "@$     . ",
+    "~   #   ~",
+    "~~ $.  ~~",
+    "~~~   ~~~",
+    "~~~~~~~~~",
+};
+
+// An L-shaped room, two squares joined at one corner (not a rectangle) --
+// the room itself, not just a pillar, forces the detour. Two boxes sit in
+// the near square and drop straight onto their goals; the third has to be
+// walked the long way around the bend into the far square (24 moves).
+const char *const kLevel5[] = {
+    "~~~~~~~~~~~",
+    "~   @ ~~~~~",
+    "~ .#$ ~~~~~",
+    "~  $. ~~~~~",
+    "~         ~",
+    "~~~~~ $   ~",
+    "~~~~~   . ~",
+    "~~~~~     ~",
+    "~~~~~~~~~~~",
+};
+
+// Two chambers joined by a single-width corridor cut through the void --
+// the hardest level here. Boxes start on both sides but belong on the
+// other side, so the player has to walk one all the way across the
+// corridor before the rest can follow without jamming the doorway
+// (44 moves, the longest solution of the six levels). kMaxBoxes below caps
+// the level at this many.
+const char *const kLevel6[] = {
+    "~~~~~~~~~~~~~~~",
+    "~     ~~~     ~",
+    "~   .$~~~ .   ~",
+    "~  #       #  ~",
+    "~     ~~~ $@$ ~",
+    "~ . $ ~~~   . ~",
+    "~~~~~~~~~~~~~~~",
+};
+
 const LevelDef kLevels[] = {
-    {kLevel1, 7},
-    {kLevel2, 9},
-    {kLevel3, 9},
+    {kLevel1, 7}, {kLevel2, 9}, {kLevel3, 9}, {kLevel4, 9}, {kLevel5, 9}, {kLevel6, 7},
 };
 constexpr int kLevelCount = sizeof(kLevels) / sizeof(kLevels[0]);
 
