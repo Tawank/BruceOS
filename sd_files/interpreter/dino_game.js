@@ -268,83 +268,101 @@ function main() {
       sprites: [cactusBigSprite],
     },
   ];
-  var black = display.color(0, 0, 0);
-  var white = display.color(255, 255, 255);
-  var grey = display.color(100, 100, 100);
-  var gravity = 700;
+  var COLOR_BLACK = display.color(0, 0, 0);
+  var COLOR_WHITE = display.color(255, 255, 255);
+  var COLOR_GREY = display.color(100, 100, 100);
+  var COLOR_TRANSPARENT = 0x10000;
 
-  // Dino properties
-  var dinoY = 82; // Initial position
-  var dinoVelocity = 0;
-  var dinoJumpStrength = -350;
-  var dinoIsJumping = false;
-  var dinoIsDucking = false;
-
-  // Obstacle properties
-  var obstacleX = 300; // Start off-screen
-  var obstacle = obstacles[1];
-  var obstacleY = obstacle.spawnsY[0];
-
-  // Ground properties
-  var groundX = 0; // Track ground position
-  var groundSpeed = 4; // Speed of ground movement
-  var sprite = display.createSprite();
-
-  var deltaTime = 0;
-  var nowTime = now();
-  var oldTime = nowTime;
-  var startTime = nowTime;
-
-  var playPointSound = 0;
-
-  var dayInterval = 700;
-  var dayTransitionRange = 10;
-  var baseColorValue = 0;
-  var baseColorInverted = Math.abs(baseColorValue - 255);
+  var GRAVITY = 700; // px/s^2
+  var JUMP_VELOCITY = -350; // px/s, applied once when a jump starts
+  var GROUND_Y = 82; // dino's resting y position
+  var GROUND_SPRITE_Y = 118;
+  var GROUND_SPRITE_WIDTH = 623;
+  var GROUND_LOOP_RESET_X = -383; // scroll distance before the ground tile wraps
+  var DAY_NIGHT_CYCLE_SCORE = 700; // score points per half day/night cycle
+  var DAY_NIGHT_TRANSITION_SCORE = 10; // score points spent fading between them
+  var FONT_CELL_W = 6;
+  var FONT_CELL_H = 8;
 
   var displayWidth = display.width();
   var displayHeight = display.height();
 
+  var dinoY = GROUND_Y;
+  var dinoVelocity = 0;
+  var dinoIsJumping = false;
+  var dinoIsDucking = false;
+
+  var obstacle = obstacles[1];
+  var obstacleX = displayWidth + 50; // start off-screen
+  var obstacleY = obstacle.spawnsY[0];
+
+  var groundX = 0;
+  var groundSpeed = 4;
+
   var clouds = [
     { x: random(displayWidth, displayWidth + 100), y: random(0, 50) },
     { x: random(displayWidth + 200, displayWidth + 300), y: random(0, 50) },
-    { x: random(displayWidth + 400, displayWidth + 500), y: random(0, 50) }
+    { x: random(displayWidth + 400, displayWidth + 500), y: random(0, 50) },
   ];
-  var foreground = black;
-  var background = white;
 
   var score = 0;
+  var playPointSound = 0;
+  var foreground = COLOR_BLACK;
+  var background = COLOR_WHITE;
 
-  sprite.fill(background);
-  sprite.setTextColor(foreground);
-  sprite.setTextSize(2);
-  sprite.setTextAlign(2);
-  keyboard.setLongPress(true);
-  while (true) {
-    if (keyboard.getPrevPress(true)) {
-      break; // Exits the game when a prev button is pressed.
+  var nowTime = now();
+  var oldTime = nowTime;
+  var startTime = nowTime;
+  var deltaTime = 0;
+
+  // Input codes, matching core_sdk/input.h (BRUCE_INPUT_CODE_*).
+  var INPUT_CODE_UP = 0x03b;
+  var INPUT_CODE_DOWN = 0x02e;
+  var INPUT_CODE_SELECT = 0x00a;
+  var INPUT_CODE_BACK = 0x060;
+
+  // Held state for each logical action, updated from the raw press/release
+  // event stream so it reflects how long a key is actually held rather than
+  // a single edge/repeat event.
+  var jumpKeyDown = false; // Enter or Up
+  var duckKeyDown = false; // Down
+  var exitRequested = false; // Esc
+
+  // Drains every queued input event (see core_sdk/input.h's event loop).
+  // This must run every frame regardless of which keys are relevant: any
+  // event left unconsumed sits in the fixed-size event queue forever, and
+  // once it fills up no further input is delivered at all.
+  function pollInputEvents() {
+    var event;
+    while ((event = keyboard.pollEvent()) !== null) {
+      if (event.action !== 'press' && event.action !== 'release') continue;
+      var isDown = event.action === 'press';
+      if (event.code === INPUT_CODE_SELECT || event.code === INPUT_CODE_UP) {
+        jumpKeyDown = isDown;
+      } else if (event.code === INPUT_CODE_DOWN) {
+        duckKeyDown = isDown;
+      } else if (event.code === INPUT_CODE_BACK && isDown) {
+        exitRequested = true;
+      }
     }
+  }
 
-    var selPressed = keyboard.getSelPress(true);
-    if (selPressed && !dinoIsJumping && !dinoIsDucking) {
-      dinoVelocity = dinoJumpStrength; // Start the jump
+  function handleInput() {
+    pollInputEvents();
+
+    if (jumpKeyDown && !dinoIsJumping && !dinoIsDucking) {
+      dinoVelocity = JUMP_VELOCITY;
       dinoIsJumping = true;
       audio.tone(494, 40, true);
     }
 
-    var nextPressed = keyboard.getNextPress(true) || keyboard.getEscPress(true);
-    if (nextPressed && !dinoIsJumping) {
-      dinoIsDucking = true;
-    }
+    dinoIsDucking = duckKeyDown && !dinoIsJumping;
+  }
 
-    if (!nextPressed && dinoIsDucking) {
-      dinoIsDucking = false;
-    }
-
-    nowTime = now();
-    deltaTime = (nowTime - oldTime) / 1000;
-    oldTime = nowTime;
-
+  // ---------------------------------------------------------------------
+  // Update
+  // ---------------------------------------------------------------------
+  function updateScore() {
     score = Math.floor((nowTime - startTime) / 100);
 
     if (playPointSound === 0 && score % 100 < 10 && score > 50) {
@@ -356,35 +374,36 @@ function main() {
     } else if (score % 100 > 50 && playPointSound === 2) {
       playPointSound = 0;
     }
+  }
 
-    // Apply gravity
-    dinoVelocity += gravity * deltaTime;
+  function updateDino() {
+    dinoVelocity += GRAVITY * deltaTime;
     dinoY += dinoVelocity * deltaTime;
 
-    // Prevent dino from falling below ground
-    if (dinoY > 82) {
-      dinoY = 82;
-      dinoIsJumping = false; // Allow jumping again
+    if (dinoY > GROUND_Y) {
+      dinoY = GROUND_Y; // landed
+      dinoIsJumping = false;
       dinoVelocity = 0;
     }
+  }
 
+  function updateGroundAndObstacle() {
     groundSpeed = 4 + Math.floor(score / 200);
-    // Move the ground
+
     groundX -= groundSpeed;
-    if (groundX <= -383) {
-      groundX = 0; // Reset position for seamless looping
+    if (groundX <= GROUND_LOOP_RESET_X) {
+      groundX = 0;
     }
 
-    // Move the obstacle
     obstacleX -= groundSpeed;
-    // Reset obstacle
     if (obstacleX < -obstacle.width) {
-      obstacleX = displayWidth + random(0, 100); // Random respawn
+      obstacleX = displayWidth + random(0, 100); // random respawn gap
       obstacle = obstacles[random(0, 3)];
       obstacleY = obstacle.spawnsY[random(0, obstacle.spawnsY.length)];
     }
+  }
 
-    // Move clouds
+  function updateClouds() {
     for (var i = 0; i < 2; i++) {
       clouds[i].x -= groundSpeed - 2;
       if (clouds[i].x < -46) {
@@ -392,117 +411,185 @@ function main() {
         clouds[i].y = random(0, 50);
       }
     }
+  }
 
-    // Day/night cycle
-    var modScore = score % (dayInterval * 2);
-    baseColorValue = 0;
-    baseColorInverted = 255;
-    if (modScore % dayInterval >= dayInterval - dayTransitionRange) {
+  function updateDayNightColors() {
+    var modScore = score % (DAY_NIGHT_CYCLE_SCORE * 2);
+    var baseColorValue = 0;
+    var baseColorInverted = 255;
+    if (modScore % DAY_NIGHT_CYCLE_SCORE >= DAY_NIGHT_CYCLE_SCORE - DAY_NIGHT_TRANSITION_SCORE) {
       baseColorValue = Math.round(
-        255 *
-        (((modScore % dayInterval) - (dayInterval - dayTransitionRange)) /
-          dayTransitionRange)
+        (255 * ((modScore % DAY_NIGHT_CYCLE_SCORE) - (DAY_NIGHT_CYCLE_SCORE - DAY_NIGHT_TRANSITION_SCORE))) /
+          DAY_NIGHT_TRANSITION_SCORE
       );
       baseColorInverted = Math.abs(baseColorValue - 255);
     }
-    if (modScore < dayInterval) {
-      foreground = display.color(
-        baseColorValue,
-        baseColorValue,
-        baseColorValue
-      );
-      background = display.color(
-        baseColorInverted,
-        baseColorInverted,
-        baseColorInverted
-      );
+
+    if (modScore < DAY_NIGHT_CYCLE_SCORE) {
+      foreground = display.color(baseColorValue, baseColorValue, baseColorValue);
+      background = display.color(baseColorInverted, baseColorInverted, baseColorInverted);
     } else {
-      foreground = display.color(
-        baseColorInverted,
-        baseColorInverted,
-        baseColorInverted
-      );
-      background = display.color(
-        baseColorValue,
-        baseColorValue,
-        baseColorValue
+      foreground = display.color(baseColorInverted, baseColorInverted, baseColorInverted);
+      background = display.color(baseColorValue, baseColorValue, baseColorValue);
+    }
+  }
+
+  function dinoHitObstacle() {
+    var dinoBottom = dinoY + dinoRunHeight - 20;
+    var xOverlap = obstacleX < 40 && obstacleX + obstacle.width > 20;
+    if (!xOverlap || dinoBottom <= obstacleY) return false;
+
+    if (obstacleY < 78) {
+      var isHighBird = obstacleY < 50;
+      return isHighBird ? dinoIsJumping : !dinoIsDucking;
+    }
+    return true; // cactus
+  }
+
+  function drawScene() {
+    display.fill(background);
+
+    for (var i = 0; i < 2; i++) {
+      display.drawXBitmap(clouds[i].x, clouds[i].y, cloudSprite, 46, 13, COLOR_GREY);
+    }
+
+    display.drawXBitmap(groundX, GROUND_SPRITE_Y, groundSprite, GROUND_SPRITE_WIDTH, 12, foreground);
+    if (displayWidth > 240 && GROUND_SPRITE_WIDTH + groundX < displayWidth) {
+      display.drawXBitmap(
+        GROUND_SPRITE_WIDTH + groundX,
+        GROUND_SPRITE_Y,
+        groundSprite,
+        GROUND_SPRITE_WIDTH,
+        12,
+        foreground
       );
     }
 
-    // Draw the scene
-    sprite.fill(background);
-    for (var i = 0; i < 2; i++) {
-      sprite.drawXBitmap(clouds[i].x, clouds[i].y, cloudSprite, 46, 13, grey);
-    }
-    sprite.drawXBitmap(groundX, 118, groundSprite, 623, 12, foreground);
-    if ((displayWidth > 240) && ((623 + groundX) < displayWidth)) {
-      sprite.drawXBitmap(623 + groundX, 118, groundSprite, 623, 12, foreground);
-    }
-    sprite.drawXBitmap(
+    var obstacleFrame = obstacle.isAnimated ? Math.floor((nowTime % 500) / 250) : 0;
+    display.drawXBitmap(
       obstacleX,
       obstacleY,
-      obstacle.sprites[
-      obstacle.isAnimated ? Math.floor((nowTime % 500) / 250) : 0
-      ],
+      obstacle.sprites[obstacleFrame],
       obstacle.width,
       obstacle.height,
       foreground
     );
+
+    var dinoFrame = Math.floor((nowTime % 200) / 100);
     if (dinoIsDucking) {
-      sprite.drawXBitmap(
-        10,
-        dinoY + 17,
-        dinoDuckSprite[Math.floor((nowTime % 200) / 100)],
-        55,
-        26,
-        foreground
-      );
+      display.drawXBitmap(10, dinoY + 17, dinoDuckSprite[dinoFrame], 55, 26, foreground);
     } else {
-      sprite.drawXBitmap(
-        10,
-        dinoY,
-        dinoRunSprite[Math.floor((nowTime % 200) / 100)],
-        dinoRunWidth,
-        dinoRunHeight,
-        foreground
-      );
+      display.drawXBitmap(10, dinoY, dinoRunSprite[dinoFrame], dinoRunWidth, dinoRunHeight, foreground);
     }
-    sprite.setTextColor(foreground);
-    sprite.drawText(score, 235, 5);
-    sprite.pushSprite();
 
-    // Collision detection
-    if (
-      20 < obstacleX + obstacle.width &&
-      40 > obstacleX &&
-      dinoY + dinoRunHeight - 20 /* dinoBottom */ > obstacleY
-    ) {
-      // Game over
-      if (obstacleY < 78) {
-        if (obstacleY < 50) {
-          if (!dinoIsJumping) continue;
-        } else {
-          if (dinoIsDucking) continue;
-        }
-      }
+    display.setTextSize(2);
+    display.setTextColor(foreground, COLOR_TRANSPARENT);
+    var scoreText = String(score);
+    while (scoreText.length < 5) {
+      scoreText = '0' + scoreText;
+    }
+    display.drawText(scoreText, displayWidth - 10 - textWidth(scoreText, 1), 5);
+  }
 
-      audio.tone(60, 100); // 50
-      delay(20);
-      audio.tone(60, 180); // 90
-      display.setTextColor(foreground);
-      display.setTextSize(2);
-      display.setTextAlign(0);
-      display.drawText('GAME OVER', 70, 40);
-      delay(500);
-      while (!keyboard.getAnyPress()) {
-        delay(10);
-      }
+  function textWidth(text, size) {
+    return String(text).length * FONT_CELL_W * size;
+  }
 
-      obstacleX = displayWidth + 50;
-      delay(500);
-      startTime = now();
+  function drawGameOverOverlay() {
+    var title = 'GAME OVER';
+    var hint = 'press any key';
+    var titleSize = 2;
+    var titleW = textWidth(title, titleSize);
+    var titleH = FONT_CELL_H * titleSize;
+    var hintW = textWidth(hint, 1);
+
+    var panelPadding = 12;
+    var panelW = Math.max(titleW, hintW) + panelPadding * 2;
+    var panelH = titleH + FONT_CELL_H + panelPadding * 2;
+    var panelX = Math.floor((displayWidth - panelW) / 2);
+    var panelY = Math.floor((displayHeight - panelH) / 2);
+
+    display.beginFrame();
+    display.drawFillRect(panelX, panelY, panelW, panelH, background);
+    display.drawRect(panelX, panelY, panelW, panelH, foreground);
+
+    display.setTextColor(foreground, COLOR_TRANSPARENT);
+    display.setTextSize(titleSize);
+    display.drawText(title, panelX + Math.floor((panelW - titleW) / 2), panelY + panelPadding);
+    display.setTextSize(1);
+    display.drawText(hint, panelX + Math.floor((panelW - hintW) / 2), panelY + panelPadding + titleH + 4);
+
+  }
+
+  // Drains every queued input event, same as pollInputEvents(), while the
+  // game loop itself is paused. Returns true once any key is pressed, so
+  // the game-over screen can wait for a restart without ever leaving
+  // events unconsumed in the queue.
+  function drainAndCheckAnyPress() {
+    var event;
+    var pressed = false;
+    while ((event = keyboard.pollEvent()) !== null) {
+      if (event.action !== 'press') continue;
+      pressed = true;
+      if (event.code === INPUT_CODE_BACK) { exitRequested = true; }
+    }
+    return pressed;
+  }
+
+  function showGameOverAndWait() {
+    audio.tone(60, 100); // 50
+    delay(20);
+    audio.tone(60, 180); // 90
+    drawGameOverOverlay();
+    display.present();
+    delay(500);
+    while (!drainAndCheckAnyPress() && !exitRequested) {
+      display.beginFrame();
+      drawScene();
+      drawGameOverOverlay();
+      display.present();
+      delay(100);
+    }
+
+    if (exitRequested) return;
+
+    dinoY = GROUND_Y;
+    dinoVelocity = 0;
+    dinoIsJumping = false;
+    dinoIsDucking = false;
+
+    obstacleX = displayWidth + 50;
+    delay(500);
+    startTime = now();
+  }
+
+  display.fill(background);
+  while (true) {
+    handleInput();
+    if (exitRequested) {
+      break; // exits the game when Esc is pressed
+    }
+
+    nowTime = now();
+    deltaTime = (nowTime - oldTime) / 1000;
+    oldTime = nowTime;
+
+    updateScore();
+    updateDino();
+    updateGroundAndObstacle();
+    updateClouds();
+    updateDayNightColors();
+
+    display.beginFrame();
+    drawScene();
+    display.present();
+
+    delay(1);
+
+    if (dinoHitObstacle()) {
+      showGameOverAndWait();
+      if (exitRequested) break;
     }
   }
-  keyboard.setLongPress(false);
 }
 main();

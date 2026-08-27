@@ -1,56 +1,53 @@
+![Bruce Main Menu](./media/pictures/bruce_banner.jpg)
+
 # :shark: Bruce
 
-Bruce is a versatile ESP32 firmware that supports a ton of offensive features focusing on facilitating Red Team operations.
-It also supports M5stack and Lilygo products and works great with Cardputer, Sticks, M5Cores, T-Decks and T-Embeds.
+Bruce is a versatile ESP32 firmware packed with offensive-security tools, built to make Red Team operations fast and portable.
+
+It also supports [M5Stack](https://shop.m5stack.com), [LILYGO](https://lilygo.cc) , [RockBase IoT](https://www.rockbaseiot.com) and [Elecrow](https://www.elecrow.com) products, and works great with the Cardputer, Sticks, M5Cores, T-Decks and T-Embeds.
+
+## :zap: Get Our Official DevKit!
+
+# RF REAPER
+
+**RF REAPER** is our custom PCB devkit, purpose-built for Bruce!
+
+Every major feature works natively, right out of the box. Sub-GHz, NFC/RFID, IR, 2.4GHz(NRF), GPS-ready, and a microSD, all driven by a beefy ESP32-S3 (16MB Flash / 8MB PSRAM). Tons of GPIOs via the AW9523 expander plus Flipper Zero & iButton header compatibility mean you can hack, mod, and build on it endlessly. Want a specific function? Ask us with an issue, we'll check it.
+
+👉 **[Buy the RF REAPER and official boards](https://shop.bruce.computer)**
+
+**Check our fully open-source hardware too:** https://bruce.computer/boards
+
+More custom devkit boards coming soon! Stay across our communities!
 
 ## :building_construction: How to install
 
-```sh
-source ~/.espressif/v6.0.2/esp-idf/export.sh
-idf.py -p PORT flash
-```
+### The easiest way to install Bruce is using our official Web Flasher!
 
-## :hammer_and_wrench: How to build
+### Check out: https://bruce.computer/flasher
 
-Install [ESP-IDF](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/get-started/index.html) and follow the instructions to build Bruce.
-
-then build by sourcing the ESP-IDF environment and running:
+Alternatively, you can download the latest binary from releases or actions and flash locally using esptool.py
 
 ```sh
-source ~/.espressif/v6.0.2/esp-idf/export.sh
-idf.py build
+esptool.py --port /dev/ttyACM0 write_flash 0x00000 Bruce-<device>.bin
 ```
 
-This builds the default board (M5 Cardputer). To build for a specific board,
-use `tools/board.py` instead, which picks the right chip target and
-board-specific `sdkconfig.defaults` (see `boards/<board>/`) and puts the
-build output in its own `build-board/<board>/` directory:
+**For m5stack devices**
 
-```sh
-source ~/.espressif/v6.0.2/esp-idf/export.sh
-python tools/board.py --list                 # show available board ids
-python tools/board.py m5stack-cplus2 build
-python tools/board.py m5stack-cplus2 flash monitor -p PORT
-```
+If you already use M5Launcher to manage your m5stack device, you can install it with OTA
 
-## :test_tube: How to run tests
+Or you can burn it directly from the [m5burner tool](https://docs.m5stack.com/en/download), just search for 'Bruce' (My official builds will be uploaded by "owner" and have photos.) on the device category you want to and click on burn
 
-Perequisites:
-```sh
-source ~/.espressif/v6.0.2/esp-idf/export.sh
-python -m pip install pytest pytest-embedded pytest-embedded-idf pytest-embedded-qemu
-python $IDF_PATH/tools/idf_tools.py install qemu-xtensa qemu-riscv32
+## :keyboard: Discord Server
 
-```
+Contact us in our [Discord Server](https://discord.gg/WJ9XF9czVT)!
 
-Then run the tests with:
-```sh
-source ~/.espressif/v6.0.2/esp-idf/export.sh
-idf.py -B build-qemu build
-python -m pytest tests/pytest_firmware.py
-```
+## :bookmark_tabs: Wiki
 
-## :computer: List of Features BrucePIO supports
+For more information on each function supported by Bruce, [read our wiki here](https://wiki.bruce.computer/).
+Also, [read our FAQ](https://wiki.bruce.computer/faq/)
+
+## :computer: List of Features
 
 <details>
   <summary><h2>WiFi</h2></summary>
@@ -228,7 +225,7 @@ python -m pytest tests/pytest_firmware.py
 
 ## Specific functions per Device, the ones not mentioned here are available to all.
 
-| Device                                                                                                                                                                                      | CC1101 | NRF24 | FM Radio |        PN532         | Mic  | BadUSB | RGB Led | Speaker | Fuel Guage | LITE_VERSION |
+| Device                                                                                                                                                                                      | CC1101 | NRF24 | FM Radio |        PN532         | Mic  | BadUSB | RGB Led | Speaker | Fuel Gauge | LITE_VERSION |
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :----: | :---: | :------: | :------------------: | :--: | :----: | :-----: | :-----: | :--------: | :----------: |
 | [M5Stack Cardputer](https://shop.m5stack.com/products/m5stack-cardputer-kit-w-m5stamps) (and ADV)                                                                                           |  :ok:  | :ok:  |   :ok:   |         :ok:         | :ok: |  :ok:  |  :ok:   | NS4168  |    :x:     |     :x:      |
 | [M5Stack M5StickC PLUS2](https://shop.m5stack.com/products/m5stickc-plus2-esp32-mini-iot-development-kit)                                                                                   |  :ok:  | :ok:  |   :ok:   |         :ok:         | :ok: | :ok:¹  |   :x:   |  Tone   |    :x:     |     :x:      |
@@ -245,7 +242,53 @@ python -m pytest tests/pytest_firmware.py
 | [Lilygo T-LoRa Pager](https://lilygo.cc/products/t-lora-pager)                                                                                                                              |  :x:   |  :x:  |   :x:    |         :x:          | :x:  |  :ok:  |   :x:   |   :x:   |    :x:     |     :x:      |
 | [Smoochiee V2](https://www.pcbway.com/project/shareproject/Bruce_PCB_Smoochiee_d6a0284b.html)                                                                                               |  :ok:  | :ok:  |   :x:    |         :ok:         | :x:  |  :ok:  |   :x:   |   :x:   |    :x:     |     :x:      |
 | [ESP32-C5](https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32c5/esp32-c5-devkitc-1/user_guide.html)                                                                           |  :ok:  | :ok:  |   :x:    |         :ok:         | :x:  |  :x:   |   :x:   |   :x:   |    :x:     |     :x:      |
-| [Bruce RF Reaper](https://www.elecrow.com/bruce-pcb-rf-reaper.html)                                                                                                                         |  :ok:  | :ok:  |   :x:    | :x: but w/ ST25R3916 | :x:  |  :ok:  |  :ok:   |   :x:   |    :ok:    |     :x:      |
-| [Elecrow 24B](https://www.elecrow.com/2-4inch-esp32-miner-lcd-display-2pcs-cryptocurrency-solo-miner-with-1000kh-s-hashrate.html)                                                                                                                         |  :ok:  | :ok:  |   :x:    | :x: but w/ ST25R3916 | :x:  |  :ok:  |  :ok:   |   :x:   |    :ok:    |     :x:      |
+| [Bruce RF Reaper](https://www.elecrow.com/bruce-pcb-rf-reaper.html)                                                                                                                         |  :ok:  | :ok:  |   :x:    | :ok: but w/ ST25R3916 | :x:  |  :ok:  |  :ok:   |   :x:   |    :ok:    |     :x:      |
+| [Elecrow 24B](https://www.elecrow.com/2-4inch-esp32-miner-lcd-display-2pcs-cryptocurrency-solo-miner-with-1000kh-s-hashrate.html)                                                            |  :ok:  | :ok:  |   :ok:   |         :ok:         | :x:  | :ok:¹  |   :x:   |   :x:   |    :x:     |     :x:²     |
+| [Elecrow 3.5"](https://www.elecrow.com/esp-terminal-with-esp32-3-5-inch-parallel-480x320-tft-capacitive-touch-display-rgb-by-chip-ili9488.html)                                                                                                                                                        |  :ok:  | :ok:  |   :ok:   |         :ok:         | :x:  | :ok:¹  |   :x:   |   :x:   |    :x:     |     :x:²     |
+| [NM-CYD-C5 + RF HAT](https://https://rockbase.shop/products/nm-cyd-c5-colorful)                                                                                                                         |  :ok:  | :ok:  |   :x:    | :ok: | :x:  |  :ok:  |  :ok:   |   :x:   |    :ok:    |     :x:      |
 ² CYD have a LITE_VERSION version for Launcher Compatibility
 ¹ Core, CYD and StickCs Bad-USB: [here](https://wiki.bruce.computer/features/others/#badusb)
+
+_LITE_VERSION_: TelNet, SSH, WireGuard, ScanHosts, RawSniffer, Brucegotchi, BLEBacon, BLEScan and Interpreter are NOT available for M5Launcher Compatibility
+
+## :sparkles: Why and how does it look?
+
+Bruce stems from a keen observation within the community focused on devices like Flipper Zero. While these devices offered a glimpse into the world of offensive security, there was a palpable sense that something more could be achieved without being that overpriced, particularly with the robust and modular hardware ecosystem provided by ESP32 Devices, Lilygo and M5Stack products.
+
+![Bruce Main Menu](./media/pictures/pic1.png)
+![Bruce on M5Core](./media/pictures/core.png)
+![Bruce on Stick](./media/pictures/stick.png)
+![Bruce on CYD](./media/pictures/cyd.png)
+![Bruce on CYD with NM-RF-HAT](./media/pictures/bruce-cyd.png)
+
+Other media can be [found here](./media/).
+
+## :clap: Acknowledgements
+
+- [@bmorcelli](https://github.com/bmorcelli) for new core and a bunch of new features, also porting to many devices!
+- [@IncursioHack](https://github.com/IncursioHack) for adding RF and RFID modules features.
+- [@Luidiblu](https://github.com/Luidiblu) for logo and UI design assistance.
+- [@eadmaster](https://github.com/eadmaster) for adding a lot of features.
+- [@rennancockles](https://github.com/rennancockles) for a lot of RFID code, refactoring and others features.
+- [@7h30th3r0n3](https://github.com/7h30th3r0n3) refactoring and a lot of help with WiFi attacks.
+- [@Tawank](https://github.com/Tawank) refactoring interpreter among many other things
+- @pablonymous RF functions to read RAW Data
+- [Smoochiee](https://github.com/smoochiee) for Bruce PCB design.
+- TH3_KR4K3N for Stick cplus extender PCB design.
+- Everyone who contributed in some way to the project, thanks :heart:
+
+Bruce also stands on the shoulders of other great open-source firmware projects,
+which inspired features and code across the project:
+
+- [ESP32Marauder](https://github.com/justcallmekoko/ESP32Marauder) by [@justcallmekoko](https://github.com/justcallmekoko) — WiFi/Bluetooth offensive toolkit.
+- [Launcher](https://github.com/bmorcelli/Launcher) by [@bmorcelli](https://github.com/bmorcelli) — the multi-app launcher/bootloader for the devices.
+- [Evil-M5Project](https://github.com/7h30th3r0n3/Evil-M5Project) by [@7h30th3r0n3](https://github.com/7h30th3r0n3) — WiFi attack suite for M5Stack.
+- [M5Stick-Nemo](https://github.com/n0xa/m5stick-nemo) by [@n0xa](https://github.com/n0xa) — multi-tool firmware for M5Stick devices.
+
+Bruce builds on many free-software libraries, and parts of the RF and NFC/RFID
+modules are derived from other projects. See [THIRD_PARTY.md](./THIRD_PARTY.md)
+for third-party attribution and copyleft-compliance details.
+
+## :construction: Disclaimer
+
+Bruce is a tool for cyber offensive and red team operations, distributed under the terms of the Affero General Public License (AGPL). It is intended for legal and authorized security testing purposes only. Use of this software for any malicious or unauthorized activities is strictly prohibited. By downloading, installing, or using Bruce, you agree to comply with all applicable laws and regulations. This software is provided free of charge, and we do not accept payments for copies or modifications. The developers of Bruce assume no liability for any misuse of the software. Use at your own risk.
