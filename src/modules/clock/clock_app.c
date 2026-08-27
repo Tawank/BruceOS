@@ -322,10 +322,17 @@ int clock_app_main(int argc, char **argv) {
 
     ArgParser *command = ap_get_cmd_parser(root);
     bool gui = runtime__gui_requested();
-    int result;
-    if (command == NULL || command == show) result = gui ? clock_app__gui() : clock_app__show(false);
-    else if (command == timer) result = clock_app__timer(ap_get_arg(timer, "duration"), gui);
-    else result = clock_app__alarm(ap_get_arg(alarm, "time"), gui);
+    bool run_show = command == NULL || command == show;
+    bool run_timer = command == timer;
+    const char *duration_arg = run_timer ? ap_get_arg(timer, "duration") : NULL;
+    const char *alarm_arg = !run_show && !run_timer ? ap_get_arg(alarm, "time") : NULL;
+    /* These point into argv, not the arena, so they stay valid after
+     * ap_free() below -- only the parser's fixed 8KB arena needs to be
+     * released here, before the potentially long-running loop that follows,
+     * instead of being held for the app's whole lifetime. */
     ap_free(root);
-    return result;
+
+    if (run_show) return gui ? clock_app__gui() : clock_app__show(false);
+    if (run_timer) return clock_app__timer(duration_arg, gui);
+    return clock_app__alarm(alarm_arg, gui);
 }
