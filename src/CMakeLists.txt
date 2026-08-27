@@ -583,10 +583,11 @@ add_dependencies(bruce_sdk_builtin_js_loader_check mquickjs_generate_stdlib)
 add_library(bruce_sdk_builtin_wasm_loader_check OBJECT
              "modules/loaders/wasm/wasm_loader_app.c"
              "modules/loaders/wasm/wasm_bruce_host_adapter.c")
+idf_component_get_property(wasm_micro_runtime_dir wasm-micro-runtime COMPONENT_DIR)
 target_include_directories(bruce_sdk_builtin_wasm_loader_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/loaders/wasm"
-                           "${CMAKE_CURRENT_LIST_DIR}/../components/wasm-micro-runtime/core/iwasm/include")
+                           "${wasm_micro_runtime_dir}/core/iwasm/include")
 target_link_libraries(bruce_sdk_builtin_wasm_loader_check PRIVATE wasm-micro-runtime)
 
 set(BRUCE_ARGS_SDK_CHECK_TARGETS

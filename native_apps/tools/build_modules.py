@@ -37,6 +37,7 @@ class Module:
     compile_options: tuple[str, ...]
     component_dirs: tuple[Path, ...]
     component_dependencies: tuple[str, ...]
+    idf_component_dependencies: dict
     link_options: tuple[str, ...]
     sdkconfig_defaults: tuple[str, ...]
     targets: tuple[str, ...]
@@ -116,6 +117,19 @@ def load_module(manifest_path):
         for dependency in component_dependencies
     ):
         raise RuntimeError(f"Invalid build.componentDependencies in {manifest_path}")
+    idf_component_dependencies = build.get("idfComponentDependencies", {})
+    if not isinstance(idf_component_dependencies, dict):
+        raise RuntimeError(f"build.idfComponentDependencies must be an object in {manifest_path}")
+    for dependency_name, dependency_spec in idf_component_dependencies.items():
+        if not isinstance(dependency_name, str) or not dependency_name:
+            raise RuntimeError(f"Invalid build.idfComponentDependencies name in {manifest_path}")
+        if not isinstance(dependency_spec, dict) or any(
+            not isinstance(key, str) or not isinstance(value, str)
+            for key, value in dependency_spec.items()
+        ):
+            raise RuntimeError(
+                f"build.idfComponentDependencies.{dependency_name} must be an object of strings in {manifest_path}"
+            )
     sdkconfig_defaults = read_string_list(build, "sdkconfigDefaults", manifest_path)
     if any(
         not value.startswith("CONFIG_") or "=" not in value or "\n" in value or "\r" in value
@@ -133,6 +147,7 @@ def load_module(manifest_path):
         compile_options=read_string_list(build, "compileOptions", manifest_path),
         component_dirs=component_dirs,
         component_dependencies=component_dependencies,
+        idf_component_dependencies=idf_component_dependencies,
         link_options=read_string_list(build, "linkOptions", manifest_path),
         sdkconfig_defaults=sdkconfig_defaults,
         targets=targets,
@@ -194,6 +209,12 @@ def write_elf_project(module, project_dir):
     component.append("")
     (project_dir / "CMakeLists.txt").write_text(top_level, encoding="utf-8")
     (main_dir / "CMakeLists.txt").write_text("\n".join(component), encoding="utf-8")
+    if module.idf_component_dependencies:
+        dependencies = {"idf": ">=5.2"}
+        dependencies.update(module.idf_component_dependencies)
+        (main_dir / "idf_component.yml").write_text(
+            json.dumps({"dependencies": dependencies}, indent=2) + "\n", encoding="utf-8"
+        )
     (project_dir / "sdkconfig.defaults").write_text(
         "CONFIG_ESP_SYSTEM_MEMPROT=n\n"
         "CONFIG_ELF_LOADER_LIBC_SYMBOLS=n\n"

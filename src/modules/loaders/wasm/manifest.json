@@ -16,12 +16,15 @@
       ".",
       "../../../../components/args"
     ],
-    "componentDirs": [
-      "../../../../components/wasm-micro-runtime"
-    ],
     "componentDependencies": [
       "wasm-micro-runtime"
     ],
+    "idfComponentDependencies": {
+      "wasm-micro-runtime": {
+        "git": "https://github.com/Tawank/wasm-micro-runtime.git",
+        "version": "435bbc245298278d855f41a38d1149c43ad8652b"
+      }
+    },
     "compileDefinitions": ["BRUCE_WASM_EXTERNAL_ELF=1"],
     "linkOptions": ["-lm"],
     "sdkconfigDefaults": [

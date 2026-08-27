@@ -89,6 +89,9 @@ directory. `sources` is required; all other fields are optional:
     "compileOptions": ["-Os"],
     "componentDirs": ["../../../components/example_runtime"],
     "componentDependencies": ["example_runtime"],
+    "idfComponentDependencies": {
+      "example_runtime": {"git": "https://github.com/example/example_runtime.git", "version": "main"}
+    },
     "linkOptions": ["-lm"],
     "sdkconfigDefaults": ["CONFIG_EXAMPLE_RUNTIME_FEATURE=y"],
     "targets": ["elf", "wasm"]
@@ -96,10 +99,15 @@ directory. `sources` is required; all other fields are optional:
 }
 ```
 
-`componentDirs`, `componentDependencies`, `linkOptions`, and
-`sdkconfigDefaults` add local ESP-IDF components to ELF builds, statically link
-their component archives and supporting libraries into the loadable image, and
-configure those dependencies. They do not apply to WASM builds.
+`componentDirs`, `componentDependencies`, `idfComponentDependencies`,
+`linkOptions`, and `sdkconfigDefaults` add ESP-IDF components to ELF builds,
+statically link their component archives and supporting libraries into the
+loadable image, and configure those dependencies. They do not apply to WASM
+builds. `componentDirs` points at components already vendored in the repo;
+`idfComponentDependencies` instead declares component-manager dependencies
+(e.g. fetched from git) that the tool resolves into the generated project's
+own `main/idf_component.yml`, so no local copy is needed. A component listed
+in `componentDependencies` may be satisfied by either mechanism.
 
 An ELF app that spawns a loader child with callbacks implemented inside its own
 ELF must remain alive until that child exits. Returning from the parent entry

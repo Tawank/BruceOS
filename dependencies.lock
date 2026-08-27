@@ -129,11 +129,23 @@ dependencies:
       type: service
     version: 1.22.3
   wasm-micro-runtime:
-    dependencies: []
+    component_hash: 2756bdf92a073c93716e6fe1f9a65f6ea8e6cddd653bddbe54703c95e7c6df2b
+    dependencies:
+    - name: idf
+      version: '>=4.4'
     source:
-      path: components/wasm-micro-runtime
-      type: local
-    version: 2.2.0~3
+      git: https://github.com/Tawank/wasm-micro-runtime.git
+      path: .
+      type: git
+    targets:
+    - esp32
+    - esp32s2
+    - esp32s3
+    - esp32c3
+    - esp32c6
+    - esp32p4
+    - esp32c5
+    version: 435bbc245298278d855f41a38d1149c43ad8652b
   wolfssl/wolfssh:
     component_hash: 24d623360c07374a90b1ade8d1218b24bb7b661fd51ace9135dccf510a338927
     dependencies: []
@@ -162,6 +174,6 @@ direct_dependencies:
 - wasm-micro-runtime
 - wolfssl/wolfssh
 - wolfssl/wolfssl
-manifest_hash: e0ce6d9a85f214fc5c60d9328d562ee33deee8a189aeec18466c37776840b7af
+manifest_hash: 9586e481e49c9c1a6929ed535e4bdb09996f459819fbd97779297bcab2c68d72
 target: esp32s3
 version: 3.0.0

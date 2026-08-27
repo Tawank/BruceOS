@@ -9,7 +9,8 @@ dependencies:
   espressif/libpng: ^1.6.58
   joltwallet/littlefs: ^1.22.3
   wasm-micro-runtime:
-    override_path: ../components/wasm-micro-runtime
+    git: https://github.com/Tawank/wasm-micro-runtime.git
+    version: 435bbc245298278d855f41a38d1149c43ad8652b
   wolfssl/wolfssl: ^5.7.4
   wolfssl/wolfssh: ^1.4.20
   # ILI9341 isn't built into esp_lcd's core (unlike ST7789); needed for
