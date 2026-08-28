@@ -35,9 +35,20 @@ dependencies:
     source:
       type: idf
     version: 6.0.2
+  nofrendo:
+    component_hash: a08189e022b0b161006f227eff576e745c4dc5ea6476947aa3bb6472c5478e16
+    dependencies:
+    - name: idf
+      version: '>=5.0'
+    source:
+      git: https://github.com/Tawank/arduino-nofrendo.git
+      path: .
+      type: git
+    version: 5e8750a5ee181c1bffeafc1f15bed68631b37439
 direct_dependencies:
 - espressif/elf_loader
 - idf
-manifest_hash: 2fb1e694c3c560543ce081a0fa416decc1c51c28d3172f52df926191de25b549
+- nofrendo
+manifest_hash: c9c197e430a8a1f2e7780ac791ae469d4cc7dcaf72b0c4e2b1b9feaa7d2d1ffd
 target: esp32s3
 version: 3.0.0

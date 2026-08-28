@@ -1,3 +1,7 @@
 dependencies:
   idf: '>=5.1'
+  # Pinned fork containing the ESP-IDF component metadata and Bruce-tested source list.
+  nofrendo:
+    git: "https://github.com/Tawank/arduino-nofrendo.git"
+    version: "5e8750a5ee181c1bffeafc1f15bed68631b37439"
   espressif/elf_loader: ^1.3.1

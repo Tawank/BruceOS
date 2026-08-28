@@ -9,10 +9,10 @@ external applications.
   public Core SDK APIs and the `BRUCE_APP_MANIFEST()` macro.  Apps that need
   `config`, `dialog`, `display`, `http`, `input`, `stdio`, or `wifi` should also
   include the corresponding `core_sdk/*.h` headers.
-- `native_apps/examples/elf_loader/` — template for a loader ELF app (`elf_loader.elf`).
-- `native_apps/examples/game/` — template for a simple ELF app (`game.elf`).
+- `native_apps/examples/elf_loader/` — template for a loader ELF app (`elf_loader_esp32s3.elf`).
+- `native_apps/examples/game/` — template for a simple ELF app (`game_esp32s3.elf`).
 - `native_apps/examples/nes/` — Nofrendo NES emulator port using Bruce display, input, and storage APIs.
-- `components/nofrendo/` — reusable ESP-IDF component containing the emulator core.
+- `native_apps/examples/nes/managed_components/nofrendo/` — generated, NES-local checkout of the pinned emulator core.
 - `tools/build_apps.py` — builds ELF or WASM apps from the same
   `examples/<app>/main/` sources and the same `manifest.json`.
 - `tools/build_modules.py` — discovers build-enabled manifests below
@@ -39,9 +39,9 @@ python3 native_apps/tools/build_modules.py --target wasm --module clock
 
 Final ELF files are written to:
 
-- `native_apps/examples/elf_loader.elf`
-- `native_apps/examples/game.elf`
-- `native_apps/examples/nes.elf`
+- `native_apps/examples/elf_loader_esp32s3.elf`
+- `native_apps/examples/game_esp32s3.elf`
+- `native_apps/examples/nes_esp32s3.elf`
 
 WASM module output is written under `native_apps/build_modules/`, for example
 `native_apps/build_modules/clock.wasm`. External examples are written beside
@@ -115,7 +115,7 @@ unloads its code and invalidates the child's entry, stop, and cleanup callbacks.
 
 The tool generates disposable ESP-IDF project files below
 `native_apps/build_modules/.work/` and writes final files such as
-`native_apps/build_modules/clock.elf`. A module should only declare `wasm` when
+`native_apps/build_modules/clock_esp32s3.elf`. A module should only declare `wasm` when
 every SDK API it uses is available from the WASM runtime.
 
 The WASM target uses exactly the same sources and manifest as the ELF target.
@@ -127,8 +127,8 @@ ESP-IDF/Nofrendo NES integration does not yet satisfy that requirement.
 Nofrendo can be launched with a ROM path or without one to open the file picker:
 
 ```
-elf ./nes.elf /roms/game.nes
-elf ./nes.elf
+elf ./nes_esp32s3.elf /roms/game.nes
+elf ./nes_esp32s3.elf
 ```
 
 The Back input exits. D-pad/gamepad inputs are mapped directly; keyboard controls
@@ -142,19 +142,19 @@ RAM are constrained on non-PSRAM devices.
 Copy the ELF files to a mounted path on the device, then from the terminal:
 
 ```
-elf ./elf_loader.elf ./game.elf
+elf ./elf_loader_esp32s3.elf ./game_esp32s3.elf
 ```
 
 The built-in `elf` command loads the named ELF file and passes the remaining
-arguments to it.  `elf_loader.elf` receives `argv = ["elf_loader", "./game.elf"]`,
+arguments to it.  `elf_loader_esp32s3.elf` receives `argv = ["elf_loader", "./game_esp32s3.elf"]`,
 which it forwards to `app_runner__run_path()`.  Relative paths starting with
 `./` are normalized to the root directory.  The `execute` permission is required
-for `app_runner__run_path()`, so the manifest of `elf_loader.elf` requests it.
+for `app_runner__run_path()`, so the manifest of `elf_loader_esp32s3.elf` requests it.
 
 You can also load a single ELF directly:
 
 ```
-elf ./game.elf
+elf ./game_esp32s3.elf
 ```
 
 ## Writing your own ELF app

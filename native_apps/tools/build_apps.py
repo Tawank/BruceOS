@@ -100,7 +100,7 @@ def build_native(app, target, idf_path):
         temporary, source_elf,
     ], build_dir, env)
     temporary.unlink()
-    output = APPS_DIR / f"{app}.elf"
+    output = APPS_DIR / f"{app}_{target}.elf"
     shutil.copy2(source_elf, output)
     print(f"Built {output}")
 

@@ -249,7 +249,7 @@ def build_elf(module, target, idf_path):
     source_elf = build_dir / f"{module.name}.app.elf"
     if not source_elf.exists():
         raise RuntimeError(f"Missing ELF output for {module.name}: {source_elf}")
-    output = OUTPUT_DIR / f"{module.name}.elf"
+    output = OUTPUT_DIR / f"{module.name}_{target}.elf"
     add_elf_manifest(source_elf, output, module.manifest_path, target, env)
     print(f"Built {output}")
 

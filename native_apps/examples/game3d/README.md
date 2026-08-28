@@ -90,7 +90,7 @@ not just style differences:
   `-Wunused-parameter` cases), the final `-nostdlib -shared` link succeeds
   (with `jet` pulled in via `ELF_COMPONENTS`, see `CMakeLists.txt`), and
   `build_apps.py`'s `objcopy --add-section .bruce.manifest` step completes,
-  producing `native_apps/examples/game3d.elf` (checked into git alongside
+  producing `native_apps/examples/game3d_esp32s3.elf` (checked into git alongside
   the other examples' prebuilt `.elf` outputs). Every symbol the linked ELF
   leaves undefined was cross-checked against `g_bruce_sdk_elfsyms[]` by hand
   (`objdump -T` against the table's actual entries) and all resolve. What
