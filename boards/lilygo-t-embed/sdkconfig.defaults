@@ -205,3 +205,18 @@ CONFIG_BRUCE_ENCODER_PIN_B=1
 # legacy Arduino driver used RotaryDecoder's stepsPerDetent=2 default here
 # (see BRUCE_ENCODER_STEPS_PER_DETENT's help text).
 CONFIG_BRUCE_ENCODER_STEPS_PER_DETENT=2
+# input_encoder.c decodes quadrature by polling the A/B pins on the shared
+# input task tick rather than by GPIO interrupt, so a transition that
+# happens between two polls is silently missed (not miscounted - the
+# gray-code table just treats the skipped state as a no-op). With only 2
+# sub-steps per detent, a fast flick of the knob can easily produce both
+# transitions of a detent inside one 20ms (the default
+# BRUCE_INPUT_POLL_PERIOD_MS) window, or straddle two windows badly enough
+# to drop one - the faster you spin it, the more detents get eaten before
+# they ever become a NEXT/PREV event, which is why scrolling fast feels
+# like it lags behind the knob while scrolling slowly tracks it exactly.
+# Polling every 5ms instead (the lowest BRUCE_INPUT_POLL_PERIOD_MS allows)
+# gives quadrature decoding a much finer sampling rate for the cost of a
+# few extra cheap GPIO reads/sec; it does not affect button debounce, which
+# is timed off wall-clock ms, not poll ticks.
+CONFIG_BRUCE_INPUT_POLL_PERIOD_MS=5

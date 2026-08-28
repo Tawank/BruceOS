@@ -67,6 +67,12 @@ CONFIG_BRUCE_BUTTON_SELECT_GPIO=42
 CONFIG_BRUCE_ENCODER_ENABLED=y
 CONFIG_BRUCE_ENCODER_PIN_A=41
 CONFIG_BRUCE_ENCODER_PIN_B=40
+# Poll the encoder (and every other input) at 5ms instead of the default
+# 20ms - see the matching comment in boards/lilygo-t-embed/sdkconfig.defaults
+# for why: input_encoder.c decodes quadrature by polling, not by GPIO
+# interrupt, so a fast spin can produce transitions faster than the poll
+# period samples them and some get silently dropped.
+CONFIG_BRUCE_INPUT_POLL_PERIOD_MS=5
 
 # No GPIO matrix keyboard on this board.
 # CONFIG_BRUCE_KEYBOARD_ENABLED is not set

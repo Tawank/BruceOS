@@ -338,14 +338,14 @@ static bool browser_app__handle_event(browser_app_state_t *state, const bruce_in
                 browser_app__load_image(state);
             }
             break;
-        case BRUCE_INPUT_CODE_UP: browser_app__move_line(state, -1); break;
-        case BRUCE_INPUT_CODE_DOWN: browser_app__move_line(state, 1); break;
+        case BRUCE_INPUT_CODE_UP:
+        case BRUCE_INPUT_CODE_PREV: browser_app__move_line(state, -1); break;
+        case BRUCE_INPUT_CODE_DOWN:
+        case BRUCE_INPUT_CODE_NEXT: browser_app__move_line(state, 1); break;
         case BRUCE_INPUT_CODE_RIGHT: browser_app__page_scroll(state, 1); break;
-        case ' ':
-        case BRUCE_INPUT_CODE_NEXT: browser_app__page_scroll(state, 1); break;
+        case ' ': browser_app__page_scroll(state, 1); break;
         case BRUCE_INPUT_CODE_LEFT: browser_app__page_scroll(state, -1); break;
-        case 'b':
-        case BRUCE_INPUT_CODE_PREV: browser_app__page_scroll(state, -1); break;
+        case 'b': browser_app__page_scroll(state, -1); break;
         case '[': browser_app__scroll_to_edge(state, false); break;
         case ']': browser_app__scroll_to_edge(state, true); break;
         case '-': browser_app__adjust_font_scale(state, -1); break;
@@ -407,7 +407,13 @@ int browser_app_main(int argc, char **argv) {
         bruce_result_t read_result = input__read(&event, UINT32_MAX);
         if (read_result == BRUCE_ERR_NOT_FOREGROUND) {
             if (browser_app__resume_after_handoff()) {
-                (void)input__flush();
+                /* No input__flush() here (unlike the startup one above): a
+                 * process that just handed focus back to us - e.g. the
+                 * system menu's "Esc" item - may have injected an event (a
+                 * BACK press) meant to be delivered right after the handoff.
+                 * Flushing would silently discard it before this loop's next
+                 * input__read() ever sees it. filemanager's own equivalent
+                 * retry loop doesn't flush here either. */
                 (void)browser_render__draw(state.doc, &state.view, state.history, state.image_cache);
                 continue;
             }
@@ -415,7 +421,15 @@ int browser_app_main(int argc, char **argv) {
         }
         if (read_result != BRUCE_OK) continue;
         if (!browser_app__handle_event(&state, &event)) break;
-        (void)browser_render__draw(state.doc, &state.view, state.history, state.image_cache);
+        /* handle_event() no-ops on anything but a PRESS, so a RELEASE (half
+         * of every encoder detent - see input_encoder.c) never actually
+         * changes state; skip its redraw. browser_render__draw() re-walks
+         * the whole document layout and flushes the full framebuffer, so
+         * doing it twice per detent instead of once is what makes fast
+         * encoder spins visibly lag the display behind the knob. */
+        if (event.action == BRUCE_INPUT_PRESS) {
+            (void)browser_render__draw(state.doc, &state.view, state.history, state.image_cache);
+        }
     }
 
     browser_document__destroy(state.doc);

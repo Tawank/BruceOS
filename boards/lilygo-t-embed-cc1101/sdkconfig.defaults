@@ -104,6 +104,12 @@ CONFIG_BRUCE_ENCODER_PIN_B=5
 # legacy Arduino driver used RotaryDecoder's stepsPerDetent=2 default here
 # (see BRUCE_ENCODER_STEPS_PER_DETENT's help text).
 CONFIG_BRUCE_ENCODER_STEPS_PER_DETENT=2
+# Poll the encoder (and every other input) at 5ms instead of the default
+# 20ms - see the matching comment in boards/lilygo-t-embed/sdkconfig.defaults
+# for why: with only 2 sub-steps per detent, a fast spin can produce both
+# quadrature transitions of a detent within one poll window, and
+# input_encoder.c has no way to recover a transition it never sampled.
+CONFIG_BRUCE_INPUT_POLL_PERIOD_MS=5
 
 # Infrared.
 CONFIG_BRUCE_IR_TX_GPIO=2
