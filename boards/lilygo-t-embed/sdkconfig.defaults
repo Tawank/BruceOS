@@ -39,6 +39,70 @@ CONFIG_SPIRAM_SPEED_80M=y
 # out from under this board if that upstream default ever does.
 CONFIG_SPIRAM_USE_MALLOC=y
 
+# ESP32-S3's I/D-cache Kconfig choice is a false economy at its default: the
+# "32KB data cache" and "16KB data cache" options both configure the same
+# physical 32KB of cache hardware (see Kconfig.cache's own comment) - "16KB"
+# just donates the other 16KB to the heap instead of leaving it as cache.
+# boards/m5stack-cardputer already opts into this; this board didn't, which
+# left it with 16KB less internal RAM than necessary. That 16KB matters more
+# here than almost anywhere else: FreeRTOS task stacks (see BROWSER_STACK_BYTES
+# in main.c) are allocated via xTaskCreate(), which - unlike plain malloc() -
+# always pulls from internal RAM with no PSRAM fallback, so every KB of
+# internal headroom directly affects which apps can even launch.
+CONFIG_ESP32S3_INSTRUCTION_CACHE_16KB=y
+CONFIG_ESP32S3_DATA_CACHE_16KB=y
+
+# ESP-IDF's default Wi-Fi buffer pools (32 dynamic RX + 32 dynamic TX
+# buffers) are sized for routing/high-throughput use, not this device's
+# interactive shell/app traffic. On measured hardware, associating to a WPA2
+# AP dropped this board's largest free internal block from ~31KB (fresh
+# boot) to ~10.5KB - below the 16KB a task like the browser app needs for
+# its stack (see BROWSER_STACK_BYTES in main.c, and the note on
+# CONFIG_SPIRAM_USE_MALLOC above for why task stacks can't fall back to
+# PSRAM the way most other allocations do). boards/m5stack-cardputer
+# already carries this same trim for the same reason - mirrored here.
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=12
+CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=12
+CONFIG_ESP_WIFI_RX_BA_WIN=6
+CONFIG_ESP_WIFI_IRAM_OPT=n
+CONFIG_ESP_WIFI_RX_IRAM_OPT=n
+# CONFIG_ESP_WIFI_STATIC_RX_MGMT_BUFFER is not set
+CONFIG_ESP_WIFI_DYNAMIC_RX_MGMT_BUFFER=y
+CONFIG_ESP_WIFI_RX_MGMT_BUF_NUM_DEF=5
+
+# mbedTLS's own allocator (src/mbedtls/port/esp_mem.c) bypasses plain
+# malloc()'s internal/PSRAM fallback entirely: it calls heap_caps_calloc()
+# with a fixed capability mask chosen by CONFIG_MBEDTLS_MEM_ALLOC_MODE, which
+# defaults to MBEDTLS_INTERNAL_MEM_ALLOC (MALLOC_CAP_INTERNAL, no fallback to
+# PSRAM if that's full). Every HTTPS fetch's SSL in/out buffers - the
+# "contiguous ~16 KiB block" browser_image_cache.c's retry comment refers to
+# - go through that allocator, so on this board's already-thin internal
+# heap (its framebuffer alone is ~55 KB bigger than a small-screen board's -
+# see DISPLAY__FB_SIZE) they can fail with BRUCE_ERR_NO_MEMORY even while
+# PSRAM sits almost entirely free. MBEDTLS_DEFAULT_MEM_ALLOC routes mbedTLS
+# through plain calloc() instead, which gets ESP-IDF's normal
+# prefer-internal/fall-back-to-PSRAM malloc() behavior (see
+# CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL) rather than a hard PSRAM-only or
+# internal-only pin.
+CONFIG_MBEDTLS_DEFAULT_MEM_ALLOC=y
+
+# boards/m5stack-cardputer already carries these two mbedTLS trims (it has no
+# PSRAM at all, so it needs every internal KB back); this board never picked
+# them up even though its own internal headroom turns out to be just as
+# tight once Wi-Fi + the browser's own state are both live:
+# - DYNAMIC_FREE_* releases the peer certificate, CA cert, and SSL config
+#   data as soon as the handshake no longer needs them, instead of holding
+#   each (often multiple KB for a real cert chain) for the connection's
+#   whole lifetime.
+# - The shared sdkconfig.defaults only trims SSL_IN_CONTENT_LEN (the
+#   incoming/download side); the outgoing side was left at Kconfig's 4096B
+#   default, far more than an HTTP request's headers need. 512B (matching
+#   Cardputer) gives back 3.5KB per connection at no real cost.
+CONFIG_MBEDTLS_DYNAMIC_FREE_PEER_CERT=y
+CONFIG_MBEDTLS_DYNAMIC_FREE_CONFIG_DATA=y
+CONFIG_MBEDTLS_DYNAMIC_FREE_CA_CERT=y
+CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN=512
+
 # Partition layout: with PSRAM now available, memory__external_alloc()
 # (src/core_sdk/memory.h) prefers PSRAM over the flash-backed "swap"
 # partition, so swap's 512K is mostly wasted space here - use the swap-less
