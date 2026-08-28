@@ -194,9 +194,10 @@ CONFIG_BRUCE_BUTTON_SELECT_GPIO=0
 # CONFIG_BRUCE_KEYBOARD_ENABLED is not set
 
 # Rotary encoder: quadrature turn (legacy ENCODER_INA/INB), synthesized as
-# UP/DOWN presses (see BRUCE_ENCODER_ENABLED's help text) - every existing
-# menu that already handles up/down navigation works here with no app-side
-# changes. The center-press part is the SELECT button above, not here.
+# PREV/NEXT presses (see BRUCE_ENCODER_ENABLED's help text) - works with
+# every existing menu, including horizontal carousels (e.g. the system
+# menu) that only handle PREV/NEXT/LEFT/RIGHT, not just the up/down ones.
+# The center-press part is the SELECT button above, not here.
 CONFIG_BRUCE_ENCODER_ENABLED=y
 CONFIG_BRUCE_ENCODER_PIN_A=2
 CONFIG_BRUCE_ENCODER_PIN_B=1

@@ -698,10 +698,14 @@ menu "Bruce hardware configuration"
             help
                 A mechanical quadrature rotary encoder (e.g. M5Stack
                 DinMeter's control knob), decoded in software and
-                synthesized as BRUCE_INPUT_CODE_UP/DOWN button presses -
-                one pair of pins per detent, direction-dependent - so every
-                existing menu that already handles up/down navigation
-                works with no app-side changes. The encoder's own push
+                synthesized as BRUCE_INPUT_CODE_PREV/NEXT button presses -
+                one pair of pins per detent, direction-dependent. PREV/NEXT
+                rather than UP/DOWN because every screen that handles
+                UP/DOWN already treats PREV/NEXT as equivalent, but not
+                every screen handles UP/DOWN (e.g. the system menu's
+                horizontal carousel) - so PREV/NEXT works everywhere
+                UP/DOWN would have, plus the places it wouldn't have, with
+                no app-side changes either way. The encoder's own push
                 button (if it has one) is a normal button - wire it to
                 BRUCE_BUTTON_SELECT_GPIO or another button slot, not here.
 

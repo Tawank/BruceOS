@@ -122,14 +122,22 @@ static void config__set_defaults(config__t *cfg) {
     config__assign(&cfg->hotkeys.items[1].action, "process preview");
     config__assign(&cfg->hotkeys.items[2].key, "ctrl + space");
     config__assign(&cfg->hotkeys.items[2].action, "launcher");
-    config__assign(&cfg->hotkeys.items[3].key, "500ms BTN_A");
-    config__assign(&cfg->hotkeys.items[3].action, "GUI=1 OVERLAY=1 menu");
-    config__assign(&cfg->hotkeys.items[4].key, "BTN_A");
-    config__assign(&cfg->hotkeys.items[4].action, "emit PREV");
-    config__assign(&cfg->hotkeys.items[5].key, "BTN_B");
-    config__assign(&cfg->hotkeys.items[5].action, "emit SELECT");
-    config__assign(&cfg->hotkeys.items[6].key, "BTN_C");
-    config__assign(&cfg->hotkeys.items[6].action, "emit NEXT");
+    config__assign(&cfg->hotkeys.items[3].key, "BTN_A");
+    config__assign(&cfg->hotkeys.items[3].action, "emit PREV");
+    config__assign(&cfg->hotkeys.items[4].key, "BTN_B");
+    config__assign(&cfg->hotkeys.items[4].action, "emit SELECT");
+    config__assign(&cfg->hotkeys.items[5].key, "BTN_C");
+    config__assign(&cfg->hotkeys.items[5].action, "emit NEXT");
+
+#if CONFIG_BRUCE_BUTTON_SELECT_ENABLED && !CONFIG_BRUCE_BUTTON_A_ENABLED && !CONFIG_BRUCE_BUTTON_B_ENABLED && \
+    !CONFIG_BRUCE_BUTTON_C_ENABLED && !CONFIG_BRUCE_BUTTON_D_ENABLED
+    config__assign(&cfg->hotkeys.items[6].key, "500ms SELECT");
+    config__assign(&cfg->hotkeys.items[6].action, "GUI=1 OVERLAY=1 menu");
+#else
+    config__assign(&cfg->hotkeys.items[6].key, "500ms BTN_A");
+    config__assign(&cfg->hotkeys.items[6].action, "GUI=1 OVERLAY=1 menu");
+#endif
+
     cfg->hotkeys.count = 7;
 
     cfg->ledBrightness = 50;

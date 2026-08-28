@@ -60,9 +60,10 @@ CONFIG_BRUCE_SD_PIN_CS=13
 CONFIG_BRUCE_BUTTON_SELECT_ENABLED=y
 CONFIG_BRUCE_BUTTON_SELECT_GPIO=42
 
-# Rotary encoder: quadrature turn, synthesized as UP/DOWN presses (see
-# BRUCE_ENCODER_ENABLED's help text) - every existing menu that already
-# handles up/down navigation works here with no app-side changes.
+# Rotary encoder: quadrature turn, synthesized as PREV/NEXT presses (see
+# BRUCE_ENCODER_ENABLED's help text) - works with every existing menu,
+# including horizontal carousels that only handle PREV/NEXT/LEFT/RIGHT,
+# not just the up/down ones.
 CONFIG_BRUCE_ENCODER_ENABLED=y
 CONFIG_BRUCE_ENCODER_PIN_A=41
 CONFIG_BRUCE_ENCODER_PIN_B=40

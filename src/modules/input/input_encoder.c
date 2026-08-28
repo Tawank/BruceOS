@@ -65,19 +65,19 @@ void input_encoder__poll(void) {
     s_encoder_prev_state = new_state;
     if (step == 0) return;
 
-    /* Clockwise vs counter-clockwise -> DOWN vs UP is a guess (not verified
+    /* Clockwise vs counter-clockwise -> NEXT vs PREV is a guess (not verified
      * against real hardware); if a board's encoder feels reversed, swap the
      * two blocks below rather than the A/B pins. */
     s_encoder_accum += step;
     while (s_encoder_accum >= INPUT__ENCODER_STEPS_PER_DETENT) {
         s_encoder_accum -= INPUT__ENCODER_STEPS_PER_DETENT;
-        input__emit(BRUCE_INPUT_BUTTON, BRUCE_INPUT_PRESS, BRUCE_INPUT_CODE_DOWN, 1);
-        input__emit(BRUCE_INPUT_BUTTON, BRUCE_INPUT_RELEASE, BRUCE_INPUT_CODE_DOWN, 0);
+        input__emit(BRUCE_INPUT_BUTTON, BRUCE_INPUT_PRESS, BRUCE_INPUT_CODE_NEXT, 1);
+        input__emit(BRUCE_INPUT_BUTTON, BRUCE_INPUT_RELEASE, BRUCE_INPUT_CODE_NEXT, 0);
     }
     while (s_encoder_accum <= -INPUT__ENCODER_STEPS_PER_DETENT) {
         s_encoder_accum += INPUT__ENCODER_STEPS_PER_DETENT;
-        input__emit(BRUCE_INPUT_BUTTON, BRUCE_INPUT_PRESS, BRUCE_INPUT_CODE_UP, 1);
-        input__emit(BRUCE_INPUT_BUTTON, BRUCE_INPUT_RELEASE, BRUCE_INPUT_CODE_UP, 0);
+        input__emit(BRUCE_INPUT_BUTTON, BRUCE_INPUT_PRESS, BRUCE_INPUT_CODE_PREV, 1);
+        input__emit(BRUCE_INPUT_BUTTON, BRUCE_INPUT_RELEASE, BRUCE_INPUT_CODE_PREV, 0);
     }
 }
 
