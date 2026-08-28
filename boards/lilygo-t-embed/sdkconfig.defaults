@@ -38,6 +38,19 @@ CONFIG_SPIRAM_SPEED_80M=y
 # once CONFIG_SPIRAM=y - pinned explicitly here so it can't silently change
 # out from under this board if that upstream default ever does.
 CONFIG_SPIRAM_USE_MALLOC=y
+# SPIRAM_MALLOC_ALWAYSINTERNAL (esp_psram/Kconfig.spiram.common) is a
+# *preference* threshold, not a hard split: plain malloc() below this size
+# prefers internal RAM (falling back to PSRAM if internal is full), and
+# above it prefers PSRAM (falling back to internal if PSRAM is full).
+# BRUCE_MEMORY_FORCE_PSRAM below already routes memory__malloc() around
+# this entirely, but this still governs every allocation this board makes
+# through plain malloc()/calloc() directly - most notably mbedTLS once
+# MBEDTLS_DEFAULT_MEM_ALLOC is on (see below), whose TLS in/out buffers
+# regularly land in the 5-16KB range and, at the 16KB default, would still
+# prefer this board's scarce internal RAM. Lowered to 5KB so only truly
+# small/hot allocations stay internal by preference; everything from 5KB up
+# prefers PSRAM instead.
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=5120
 
 # ESP32-S3's I/D-cache Kconfig choice is a false economy at its default: the
 # "32KB data cache" and "16KB data cache" options both configure the same
@@ -102,6 +115,18 @@ CONFIG_MBEDTLS_DYNAMIC_FREE_PEER_CERT=y
 CONFIG_MBEDTLS_DYNAMIC_FREE_CONFIG_DATA=y
 CONFIG_MBEDTLS_DYNAMIC_FREE_CA_CERT=y
 CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN=512
+
+# All the fixes above only narrow how much of the app layer's own general
+# heap traffic (memory__malloc() and friends, core/memory/memory.c) spills
+# into internal RAM instead of avoiding it outright - plain malloc()'s
+# prefer-internal/fall-back-to-PSRAM policy (CONFIG_SPIRAM_MALLOC_
+# ALWAYSINTERNAL above) still keeps every small allocation internal. With
+# 8MB of PSRAM sitting mostly idle and internal RAM the one truly scarce
+# resource here, pin that entire traffic class to PSRAM instead - see
+# BRUCE_MEMORY_FORCE_PSRAM's help text for what this does and does not
+# cover (task stacks and DMA buffers are unaffected either way) and its one
+# real cost (PSRAM's higher access latency).
+CONFIG_BRUCE_MEMORY_FORCE_PSRAM=y
 
 # Partition layout: with PSRAM now available, memory__external_alloc()
 # (src/core_sdk/memory.h) prefers PSRAM over the flash-backed "swap"

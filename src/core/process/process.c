@@ -12,6 +12,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "esp_heap_caps.h"
+
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "freertos/semphr.h"
@@ -556,8 +558,9 @@ bruce_result_t process_registry__resource_update(bruce_resource_id_t resource_id
     return BRUCE_ERR_NOT_FOUND;
 }
 
-void *
-process_registry__resource_realloc(bruce_resource_id_t resource_id, void *context, size_t allocation_size) {
+void *process_registry__resource_realloc(
+    bruce_resource_id_t resource_id, void *context, size_t allocation_size, uint32_t caps
+) {
     process__ensure_init();
     process__lock();
     process__record_t *self = process__find_by_handle_locked(xTaskGetCurrentTaskHandle());
@@ -567,7 +570,8 @@ process_registry__resource_realloc(bruce_resource_id_t resource_id, void *contex
     }
     for (process__resource_t *resource = self->resources; resource != NULL; resource = resource->next) {
         if (resource->id == resource_id && resource->context == context) {
-            void *resized = realloc(context, allocation_size);
+            void *resized = caps != 0 ? heap_caps_realloc(context, allocation_size, caps)
+                                       : realloc(context, allocation_size);
             if (resized != NULL) resource->context = resized;
             process__unlock();
             return resized;

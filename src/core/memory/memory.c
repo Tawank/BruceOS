@@ -10,7 +10,22 @@
 #include "core/memory/memory.h"
 #include "core_sdk/process.h"
 
+#include "sdkconfig.h"
+
 #define MEMORY__MAGIC 0x42524d31u /* "BRM1" */
+
+#if CONFIG_BRUCE_MEMORY_FORCE_PSRAM
+/* See BRUCE_MEMORY_FORCE_PSRAM's Kconfig help text: with this on, every
+ * memory__malloc()/calloc()/realloc() allocation must land in PSRAM, with no
+ * silent internal-RAM fallback - so a full PSRAM heap fails the allocation
+ * (NULL) rather than eating into the internal RAM this option exists to
+ * protect. */
+#define MEMORY__MALLOC(size) heap_caps_malloc((size), MALLOC_CAP_SPIRAM)
+#define MEMORY__REALLOC_CAPS MALLOC_CAP_SPIRAM
+#else
+#define MEMORY__MALLOC(size) malloc(size)
+#define MEMORY__REALLOC_CAPS 0u
+#endif
 
 typedef struct {
     uint32_t magic;
@@ -31,7 +46,7 @@ static void memory__cleanup(void *context) {
 void *memory__malloc(size_t size) {
     if (size == 0 || size > SIZE_MAX - sizeof(memory__header_t)) { return NULL; }
 
-    memory__header_t *header = malloc(sizeof(memory__header_t) + size);
+    memory__header_t *header = MEMORY__MALLOC(sizeof(memory__header_t) + size);
     if (header == NULL) { return NULL; }
 
     bruce_resource_id_t resource_id = process_registry__resource_register(memory__cleanup, header);
@@ -68,7 +83,9 @@ void *memory__realloc(void *ptr, size_t size) {
 
     size_t old_size = header->size;
     bruce_resource_id_t resource_id = header->resource_id;
-    memory__header_t *grown = process_registry__resource_realloc(resource_id, header, sizeof(*grown) + size);
+    memory__header_t *grown = process_registry__resource_realloc(
+        resource_id, header, sizeof(*grown) + size, MEMORY__REALLOC_CAPS
+    );
     if (grown == NULL) return NULL;
     grown->magic = MEMORY__MAGIC;
     grown->size = size;

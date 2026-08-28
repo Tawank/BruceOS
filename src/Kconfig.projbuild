@@ -843,4 +843,37 @@ menu "Bruce hardware configuration"
                 legacy builds. The radio uses SPI3_HOST; IRQ is not required.
     endmenu
 
+    menu "Memory"
+        config BRUCE_MEMORY_FORCE_PSRAM
+            bool "Force memory__malloc()/calloc()/realloc() into PSRAM only"
+            depends on SPIRAM
+            default n
+            help
+                memory__malloc() and friends (core/memory/memory.c) normally
+                call plain malloc()/realloc(), which ESP-IDF satisfies from
+                internal RAM first and only spills into PSRAM once an
+                allocation is too big (or internal RAM is too fragmented) to
+                place internally - see SPIRAM_MALLOC_ALWAYSINTERNAL and
+                SPIRAM_MALLOC_RESERVE_INTERNAL. On a board with little
+                internal RAM to begin with, that still lets every small,
+                short-lived allocation across the whole app layer (browser,
+                filemanager, dialogs, image decoding, ...) compete with task
+                stacks, DMA buffers, and Wi-Fi/TLS's internal-RAM-only needs.
+
+                Enabling this routes every memory__malloc()/calloc()/
+                realloc() call through heap_caps_malloc()/heap_caps_realloc()
+                with MALLOC_CAP_SPIRAM instead, so none of that traffic ever
+                touches internal RAM, at two costs: an allocation fails
+                outright (NULL, not a silent internal-RAM fallback) once
+                PSRAM itself is exhausted, and PSRAM is noticeably slower
+                than internal RAM to access (off-chip, lower bandwidth,
+                higher latency) - code that leans on memory__malloc() for
+                something access-pattern-heavy may get measurably slower
+                even while total free RAM looks healthier. This only affects
+                the memory__malloc() family - task stacks (xTaskCreate() has
+                no PSRAM option at all), DMA buffers, and anything calling
+                plain malloc()/heap_caps_malloc() directly are unaffected
+                and still land in internal RAM as before.
+    endmenu
+
 endmenu

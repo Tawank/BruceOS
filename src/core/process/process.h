@@ -100,9 +100,12 @@ process_registry__resource_register(bruce_process_resource_cleanup_t cleanup, vo
 bruce_result_t process_registry__resource_update(bruce_resource_id_t resource_id, void *context);
 
 /* Reallocates a cleanup context while holding the registry lock so process
- * teardown cannot observe a pointer that libc has moved. */
-void *
-process_registry__resource_realloc(bruce_resource_id_t resource_id, void *context, size_t allocation_size);
+ * teardown cannot observe a pointer that libc has moved. `caps` is a
+ * heap_caps.h MALLOC_CAP_* mask routed through heap_caps_realloc(); pass 0
+ * for a plain realloc() (any capability). */
+void *process_registry__resource_realloc(
+    bruce_resource_id_t resource_id, void *context, size_t allocation_size, uint32_t caps
+);
 
 /* Releases a resource early because the owner already cleaned it up itself
  * (e.g. an explicit storage__close()); this does NOT invoke the cleanup
