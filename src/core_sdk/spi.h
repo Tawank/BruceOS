@@ -7,7 +7,7 @@
 #include "core_sdk/process.h"
 
 /**
- * @brief SPI bus device access.
+ * @brief SPI device access.
  */
 
 #define BRUCE_SPI_MAX_TRANSFER_SIZE 64u

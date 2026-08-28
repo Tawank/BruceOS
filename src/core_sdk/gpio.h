@@ -3,7 +3,7 @@
 #include "core_sdk/result.h"
 
 /**
- * @brief Raw GPIO pin configuration and access.
+ * @brief GPIO pin access.
  */
 
 typedef enum {

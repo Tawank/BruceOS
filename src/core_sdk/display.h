@@ -1,7 +1,7 @@
 #pragma once
 
 /**
- * @brief Display API, drawing shapes, texts, bitmaps.
+ * @brief Screen drawing and display settings.
  *
  * This is the Core-side implementation of the JavaScript `display.*`
  * surface used by the bjs_interpreter. It is intentionally small and
@@ -497,7 +497,7 @@ uint8_t display__get_brightness(void);
 bruce_result_t display__display_on_off(bool on);
 
 /**
- * @brief Frees the off-screen DMA framebuffer and switches rendering to direct (unbuffered) mode, or reverts back.
+ * @brief Turns direct game rendering on or off.
  *
  * Entirely at runtime, no reboot required. Meant to be called by a
  * memory-hungry ELF/JS app (an emulator, a game with a large asset set,

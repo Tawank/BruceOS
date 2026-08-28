@@ -8,7 +8,7 @@
 #include "core_sdk/result.h"
 
 /**
- * @brief Standard input/output, printf-style formatting, and routed I/O sessions.
+ * @brief Standard input and output.
  */
 
 typedef uint32_t bruce_stdio_session_t;

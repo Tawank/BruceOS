@@ -7,7 +7,7 @@
 #include "core_sdk/process.h"
 
 /**
- * @brief TCP client/server sockets.
+ * @brief TCP network connections.
  */
 
 #define BRUCE_TCP_HOST_MAX 64

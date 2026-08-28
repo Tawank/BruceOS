@@ -6,7 +6,7 @@
 #include "core_sdk/permission.h"
 
 /**
- * @brief App manifest parsing and per-format (ELF/JS/WASM) inspection.
+ * @brief App manifest parsing.
  */
 
 #define BRUCE_CORE_ABI_VERSION 5u
@@ -57,7 +57,7 @@ typedef struct {
 bruce_manifest_t *manifest__parse(const char *json, size_t json_len);
 
 /**
- * @brief Universal manifest JSON extractor (see migration_plan.md, "Loader modules").
+ * @brief Reads a manifest from any supported app file.
  *
  * Opens `path`, auto-detects the file format (ELF section, JS comment
  * block, or WebAssembly `bruce.manifest` custom section), and returns raw
@@ -79,7 +79,7 @@ bruce_manifest_t *manifest__parse(const char *json, size_t json_len);
 char *manifest__inspect_path(const char *path);
 
 /**
- * @brief ELF-specific manifest inspection (see migration_plan.md, "ELF contract").
+ * @brief Reads a manifest from an ELF app.
  *
  * Opens `path`, validates the ELF32 header (magic, e_machine vs. this
  * build's target), extracts and parses the .bruce.manifest section via
@@ -99,7 +99,7 @@ char *manifest__inspect_path(const char *path);
 bruce_app_inspection_t *manifest__inspect_elf(const char *path);
 
 /**
- * @brief JavaScript-specific manifest inspection (see migration_plan.md, "JavaScript contract").
+ * @brief Reads a manifest from a JavaScript app.
  *
  * Opens `path`, detects a leading block comment (slash-asterisk ...
  * asterisk-slash) containing the canonical manifest JSON, and parses it.
@@ -117,7 +117,7 @@ bruce_app_inspection_t *manifest__inspect_elf(const char *path);
 bruce_app_inspection_t *manifest__inspect_javascript(const char *path);
 
 /**
- * @brief WebAssembly-specific manifest inspection.
+ * @brief Reads a manifest from a WebAssembly app.
  *
  * Opens a `.wasm` path, validates the standard WebAssembly magic and
  * version, safely walks bounded u32 LEB128 section envelopes, and parses

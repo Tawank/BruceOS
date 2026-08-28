@@ -8,7 +8,7 @@
 #include "core_sdk/result.h"
 
 /**
- * @brief Classic Bluetooth HID (keyboard/gamepad) device scanning and connection.
+ * @brief Bluetooth keyboard and gamepad connections.
  */
 
 typedef enum {

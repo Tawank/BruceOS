@@ -1,7 +1,7 @@
 #pragma once
 
 /**
- * @brief Public streaming HTML-to-content extractor (Core SDK surface).
+ * @brief HTML parser.
  *
  * This is intentionally not a DOM: ESP32 RAM is too tight to hold a parsed
  * tree of an arbitrary web page. Instead the parser is a byte-at-a-time SAX

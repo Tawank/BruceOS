@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 /**
- * @brief Human-readable byte-count formatting.
+ * @brief Formatting helpers.
  */
 
 /**

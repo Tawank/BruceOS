@@ -1,7 +1,7 @@
 #pragma once
 
 /**
- * @brief Bruce Config API.
+ * @brief Global Bruce Config API.
  *
  * The Core owns one configuration singleton. Getters are type-safe and
  * return scalar values directly or read-only pointers into that singleton;

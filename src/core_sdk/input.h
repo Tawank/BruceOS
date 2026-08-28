@@ -6,7 +6,7 @@
 #include "core_sdk/result.h"
 
 /**
- * @brief Physical/virtual input event queue: keys, buttons, touch, encoder.
+ * @brief Keyboard, button, touch, and encoder event queue.
  */
 
 #ifdef __cplusplus
@@ -82,7 +82,7 @@ typedef struct {
 } bruce_input_event_t;
 
 /**
- * @brief input__read pops the next input event for the foreground process.
+ * @brief Returns the next input event for the foreground app.
  *
  * `timeout_ms` controls blocking:
  *   - 0      : non-blocking; returns BRUCE_ERR_TIMEOUT immediately if no event
@@ -106,7 +106,7 @@ typedef struct {
 bruce_result_t input__read(bruce_input_event_t *out_event, uint32_t timeout_ms);
 
 /**
- * @brief input__poll is a convenience wrapper for a non-blocking read.
+ * @brief Returns the next input event without waiting.
  *
  * It returns BRUCE_OK with *out_event filled, or BRUCE_ERR_TIMEOUT if no
  * event is available. It is equivalent to input__read(out_event, 0).
@@ -120,7 +120,7 @@ bruce_result_t input__read(bruce_input_event_t *out_event, uint32_t timeout_ms);
 static inline bruce_result_t input__poll(bruce_input_event_t *out_event) { return input__read(out_event, 0); }
 
 /**
- * @brief input__flush removes all queued input events.
+ * @brief Removes all queued input events.
  *
  * It is useful when switching screens so that stale presses do not affect
  * the new UI. Returns BRUCE_OK or BRUCE_ERR_NOT_FOREGROUND if the caller is
@@ -129,7 +129,7 @@ static inline bruce_result_t input__poll(bruce_input_event_t *out_event) { retur
 bruce_result_t input__flush(void);
 
 /**
- * @brief input__peek inspects the next queued event without removing it.
+ * @brief Returns the next queued event without removing it.
  *
  * Returns BRUCE_OK with *out_event filled, BRUCE_ERR_TIMEOUT if the queue
  * is empty, or BRUCE_ERR_NOT_FOREGROUND if the caller is not the foreground
@@ -140,7 +140,7 @@ bruce_result_t input__flush(void);
 bruce_result_t input__peek(bruce_input_event_t *out_event);
 
 /**
- * @brief input__wait blocks until a press event arrives.
+ * @brief Waits for a press event.
  *
  * Returns BRUCE_OK with the event code in *out_code, BRUCE_ERR_TIMEOUT if
  * no press event arrived within the timeout, or BRUCE_ERR_NOT_FOREGROUND if
@@ -153,7 +153,7 @@ bruce_result_t input__peek(bruce_input_event_t *out_event);
 bruce_result_t input__wait(uint32_t timeout_ms, int32_t *out_code);
 
 /**
- * @brief input__check tests whether a press event for `code` is currently queued.
+ * @brief Checks whether a press event for `code` is queued.
  *
  * If `consume` is true the first matching press event is removed from the
  * queue; if false the event is left in place. Returns true if a matching
@@ -170,7 +170,7 @@ bruce_result_t input__wait(uint32_t timeout_ms, int32_t *out_code);
 bool input__check(int32_t code, bool consume);
 
 /**
- * @brief input__inject pushes a normalized event into the input queue.
+ * @brief Adds an event to the input queue.
  *
  * It is used by input adapters (Bluetooth, GPIO, I2C, serial, ...) to feed
  * the same event pipeline as physical buttons and keyboard.

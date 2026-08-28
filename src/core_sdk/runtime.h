@@ -6,7 +6,7 @@
 #include "core_sdk/result.h"
 
 /**
- * @brief Monotonic time, sleep/delay, periodic timers, and the GUI-requested flag.
+ * @brief Time, delays, timers, and isGUI request.
  */
 
 #ifdef __cplusplus
@@ -80,11 +80,10 @@ bruce_result_t runtime__timer_wait(bruce_timer_id_t timer_id, uint32_t timeout_m
 bruce_result_t runtime__timer_stop(bruce_timer_id_t timer_id);
 
 /**
- * @brief Returns true iff the calling process's own "GUI" environment variable is "1".
+ * @brief Checks whether the current app is running in GUI mode.
  *
- * (see core_sdk/environment.h). This is the app-facing self-check;
- * app_runner__environment_requests_gui() is the loader-facing variant used
- * to decide a child's gui_requested before that child's process exists.
+ * Use this to decide whether the app should draw to the display or interact
+ * through standard input and output.
  */
 bool runtime__gui_requested(void);
 

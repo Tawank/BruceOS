@@ -7,7 +7,7 @@
 #include "core_sdk/result.h"
 
 /**
- * @brief Process lifecycle: listing, foreground/background switching, signaling, pause/resume.
+ * @brief Running app and process control.
  *
  * All process APIs below return BRUCE_OK or a documented BRUCE_ERR_*
  * result. Foregrounding, switching, signalling, pausing, resuming, or
@@ -86,6 +86,7 @@ typedef struct {
     bool presentable;
 } bruce_process_snapshot_t;
 
+/** @brief Returns the calling process ID. */
 bruce_process_id_t process__current_id(void);
 
 /**

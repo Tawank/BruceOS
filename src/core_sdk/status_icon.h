@@ -6,7 +6,7 @@
 #include "core_sdk/result.h"
 
 /**
- * @brief Status-bar icon registry: small 1bpp bitmaps published by key.
+ * @brief Status bar icons.
  *
  * Not permission-gated; the registry is global and unrestricted.
  */

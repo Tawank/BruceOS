@@ -3,7 +3,7 @@
 #include <stdint.h>
 
 /**
- * @brief Built-in icon registry.
+ * @brief Built-in icons.
  *
  * Icons are stored as 24x24 1bpp bitmaps (72 bytes each, MSB-first, three
  * bytes per row) pre-rasterized from Material Design Icons path data. This

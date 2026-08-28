@@ -6,7 +6,7 @@
 #include "core_sdk/result.h"
 
 /**
- * @brief Battery, power control, and shared device sensors.
+ * @brief Battery, power, and device sensors.
  */
 
 /**

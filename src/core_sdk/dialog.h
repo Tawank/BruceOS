@@ -8,7 +8,7 @@
 #include "core_sdk/result.h"
 
 /**
- * @brief Modal dialogs: messages, choice lists, file/text/number input, and text viewers.
+ * @brief Messages, menus, input dialogs, and text viewers.
  *
  * Not permission-gated. Rendering is chosen from the process's launch
  * context, never by an app-specific renderer.
@@ -180,7 +180,7 @@ bruce_result_t dialog__pick_file_ex(
 );
 
 /**
- * @brief Window chrome: a pluggable "look" that dialog__choice() draws around a choice list.
+ * @brief Draws the frame around a choice dialog.
  *
  * (rounded border, live status bar, ...) drawn when render_params has
  * `window_chrome=true`. Core doesn't own that look - the launcher registers

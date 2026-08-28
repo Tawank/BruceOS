@@ -16,7 +16,7 @@ typedef struct {
 } bruce_pubsub_message_t;
 
 /**
- * @brief A minimal named-topic broadcast bus for Core-owned hardware services.
+ * @brief Named message topics.
  *
  * (e.g. a shared I2C bus driver) to publish semantic events - touch taps,
  * sensor readings - that any number of other processes, including ELF/JS

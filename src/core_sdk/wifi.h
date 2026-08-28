@@ -7,7 +7,7 @@
 #include "core_sdk/result.h"
 
 /**
- * @brief Wi-Fi connect/scan/status for the existing Core Wi-Fi implementation.
+ * @brief Wi-Fi connections, scanning, and status.
  */
 
 #define BRUCE_WIFI_SSID_MAX_LEN 32

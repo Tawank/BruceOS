@@ -6,7 +6,7 @@
 #include "core_sdk/result.h"
 
 /**
- * @brief System clock reads, local-time conversion, and NTP sync.
+ * @brief Clock, time zone, and NTP settings.
  */
 
 typedef struct {
@@ -43,7 +43,7 @@ bruce_result_t clock__get_utc(bruce_clock_datetime_t *out);
 bruce_result_t clock__get_local(bruce_clock_datetime_t *out);
 
 /**
- * @brief Set the UTC system clock from a local calendar value.
+ * @brief Sets the system clock from a local date and time.
  *
  * @param local Local date/time to convert to UTC and apply.
  * @permission config
@@ -51,7 +51,7 @@ bruce_result_t clock__get_local(bruce_clock_datetime_t *out);
 bruce_result_t clock__set_local(const bruce_clock_datetime_t *local);
 
 /**
- * @brief Synchronize UTC from pool.ntp.org.
+ * @brief Synchronizes the clock over the network.
  *
  * Wi-Fi must already be connected.
  *
@@ -60,5 +60,7 @@ bruce_result_t clock__set_local(const bruce_clock_datetime_t *local);
  */
 bruce_result_t clock__sync_ntp(uint32_t timeout_ms);
 
+/** @brief Returns the status of the latest clock synchronization. */
 bruce_clock_sync_status_t clock__get_sync_status(void);
+/** @brief Returns the configured NTP server address. */
 const char *clock__get_ntp_server(void);

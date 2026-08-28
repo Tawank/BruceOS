@@ -1,7 +1,7 @@
 #pragma once
 
 /**
- * @brief Coarse-grained app permission model (public SDK surface).
+ * @brief App permissions.
  *
  * Every ELF/JS/WASM app is identified, for permission purposes, by its
  * filename including extension and without its path (e.g. "game.elf",
@@ -83,7 +83,7 @@ bool permission__from_name(const char *name, bruce_permission_t *out_permission)
 bruce_result_t permission__check(bruce_permission_t permission);
 
 /**
- * @brief Pre-launch batch request.
+ * @brief Requests several permissions before launching an app.
  *
  * For every name in `permission_names` that `file_name` has no saved
  * decision for yet, prompts (unchecked/undecided by default) and persists

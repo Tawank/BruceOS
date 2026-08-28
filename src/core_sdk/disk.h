@@ -7,7 +7,7 @@
 #include "core_sdk/result.h"
 
 /**
- * @brief Physical block device / partition listing and mount control.
+ * @brief Disk and partition access.
  */
 
 #define BRUCE_DISK_NAME_MAX 17

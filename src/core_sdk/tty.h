@@ -1,7 +1,7 @@
 #pragma once
 
 /**
- * @brief Terminal ("tty") metadata layered on top of a stdio session.
+ * @brief Terminal size and mode settings.
  *
  * BruceOS's stdio__session_t (core/stdio/stdio.c) already behaves like a
  * pty: it's a process-owned, bounded input/output byte channel inherited
@@ -72,7 +72,7 @@ bruce_result_t tty__get_size(bruce_tty_size_t *out_size);
 bruce_result_t tty__set_size(bruce_stdio_session_t session, uint16_t columns, uint16_t rows);
 
 /**
- * @brief Cooperative bookkeeping only.
+ * @brief Reads the terminal mode.
  *
  * BruceOS never echoes or line-edits at the session level, so switching
  * modes changes no OS behavior by itself. This exists so a process can

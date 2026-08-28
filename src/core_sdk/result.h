@@ -1,7 +1,7 @@
 #pragma once
 
 /**
- * @brief Stable result vocabulary for the public Bruce SDK.
+ * @brief Common Core SDK result codes.
  *
  * Functions returning bruce_result_t use BRUCE_OK on success and one of the
  * negative BRUCE_ERR_* values below on failure. Other return conventions

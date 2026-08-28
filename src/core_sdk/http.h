@@ -1,7 +1,7 @@
 #pragma once
 
 /**
- * @brief Public HTTP client API (Core SDK surface).
+ * @brief HTTP client.
  *
  * A single synchronous request primitive used by the JavaScript
  * `httpFetch()` binding and any ELF app that holds the `http` permission.
@@ -76,7 +76,7 @@ typedef struct {
 } bruce_http_response_t;
 
 /**
- * @brief Perform a synchronous HTTP request.
+ * @brief Performs an HTTP request and waits for the response.
  *
  * On success, fills `response` and returns BRUCE_OK. The body is
  * NUL-terminated in buffered mode, but body_len is authoritative. Headers
@@ -94,7 +94,7 @@ typedef struct {
 bruce_result_t http__request(const bruce_http_request_t *request, bruce_http_response_t *response);
 
 /**
- * @brief Release all memory owned by `response`.
+ * @brief Releases an HTTP response.
  *
  * NULL or a zero-initialized response is a no-op.
  *

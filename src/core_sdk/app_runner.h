@@ -8,7 +8,7 @@
 #include "core_sdk/result.h"
 
 /**
- * @brief Built-in command registry and process launcher.
+ * @brief Runs apps and built-in commands.
  */
 
 typedef int (*bruce_app_entry_t)(int argc, char **argv);
@@ -42,7 +42,7 @@ bruce_result_t app_runner__register(
 );
 
 /**
- * @brief Read-only access to registered built-in command metadata.
+ * @brief Returns the number of registered built-in commands.
  *
  * Entries are returned in registration order and remain owned by AppRunner.
  * Returns NULL when `index` is out of range.
@@ -89,7 +89,7 @@ const char *app_runner__command_category(size_t index);
 int app_runner__run(const char *app_name, const char *arg, bruce_launch_mode_t mode);
 
 /**
- * @brief Launches with temporary child environment assignments.
+ * @brief Starts an app with temporary environment variables.
  *
  * The overlay is deep-copied before this function returns.
  *
@@ -106,7 +106,7 @@ int app_runner__run_with_environment(
 );
 
 /**
- * @brief Parses a complete command line, including leading NAME=value assignments.
+ * @brief Runs a command line, including environment variable assignments.
  *
  * An explicit BG=0 or BG=1 selects foreground/background; otherwise
  * default_mode is used. GUI=1 requests a GUI process. OVERLAY=1 preserves
@@ -119,8 +119,7 @@ int app_runner__run_with_environment(
 bruce_result_t app_runner__run_command(const char *command_line, bruce_launch_mode_t default_mode);
 
 /**
- * @brief Shell-style tokenizer shared by app_runner__run()'s own named resolution
- * and by loader commands.
+ * @brief Splits a command line into arguments.
  *
  * Ensures quoting/escaping rules are identical everywhere: splits on runs of
  * spaces/tabs; supports single quotes (fully literal), double quotes
@@ -158,7 +157,7 @@ void app_runner__free_args(char **argv, int argc);
 const char *app_runner__icon_for_path(const char *path);
 
 /**
- * @brief Scans an environment overlay array for name "GUI".
+ * @brief Checks whether an environment requests a graphical interface.
  *
  * Not yet applied to any process. Returns true iff the last matching
  * entry's value is "1". Shared by app_runner__run()'s built-in path and by

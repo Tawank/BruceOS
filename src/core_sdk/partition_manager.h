@@ -98,7 +98,7 @@ typedef struct {
 } bruce_partition_status_t;
 
 /**
- * @brief The layout running this boot.
+ * @brief Returns the current partition layout.
  *
  * Pass NULL with capacity 0 to query count; a too-small non-NULL buffer
  * fills what fits and returns BRUCE_ERR_RESOURCE_LIMIT. Entries are
@@ -112,7 +112,7 @@ bruce_result_t
 partition_manager__list_current(bruce_partition_entry_t *entries, size_t capacity, size_t *out_count);
 
 /**
- * @brief The layout the next boot will have.
+ * @brief Returns the partition layout for the next boot.
  *
  * list_current() plus every staged and committed change, each entry tagged
  * with how it differs (including BRUCE_PARTITION_STATE_DELETED rows for
@@ -128,7 +128,7 @@ bruce_result_t
 partition_manager__list_planned(bruce_partition_entry_t *entries, size_t capacity, size_t *out_count);
 
 /**
- * @brief Space accounting plus the two "is there anything outstanding" flags.
+ * @brief Returns partition space and pending-change information.
  *
  * @param out_status Receives the current status.
  */

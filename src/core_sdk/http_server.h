@@ -7,7 +7,7 @@
 #include "core_sdk/result.h"
 
 /**
- * @brief Device-wide embedded HTTP server: fixed and dynamic routes.
+ * @brief HTTP server.
  */
 
 #ifdef __cplusplus

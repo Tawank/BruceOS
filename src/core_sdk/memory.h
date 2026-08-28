@@ -6,7 +6,7 @@
 #include "core_sdk/result.h"
 
 /**
- * @brief Process-owned tracked heap allocator, plus external (PSRAM/swap) memory objects.
+ * @brief Memory allocation (RAM, PSRAM, swap).
  */
 
 #ifdef __cplusplus

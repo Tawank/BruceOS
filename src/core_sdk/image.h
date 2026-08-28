@@ -9,7 +9,7 @@
 #include "core_sdk/result.h"
 
 /**
- * @brief JPEG/PNG/GIF decoding, resizing, and drawing.
+ * @brief JPEG, PNG and GIF decoding, resizing, and drawing.
  */
 
 typedef enum {

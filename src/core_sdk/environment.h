@@ -5,7 +5,7 @@
 #include "core_sdk/result.h"
 
 /**
- * @brief Global and per-process environment variables.
+ * @brief Environment variables.
  */
 
 #define BRUCE_ENVIRONMENT_MAX_VARIABLES 24

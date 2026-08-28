@@ -7,7 +7,7 @@
 #include "core_sdk/result.h"
 
 /**
- * @brief nRF24L01(+) radio: channel control and RPD activity scanning.
+ * @brief nRF24 radio control and scanning.
  */
 
 #define BRUCE_NRF24_CHANNEL_MIN 0u

@@ -7,7 +7,7 @@
 #include "core_sdk/result.h"
 
 /**
- * @brief Tone and streaming PCM audio output.
+ * @brief Tone and PCM audio playback.
  */
 
 #define BRUCE_AUDIO_MIN_FREQUENCY_HZ 20u
@@ -40,9 +40,7 @@ bruce_result_t audio__tone(uint32_t frequency_hz, uint32_t duration_ms, bool non
 uint32_t audio__stream_sample_rate(void);
 
 /**
- * @brief Opens the device-wide streaming PCM output, for apps synthesizing
- * continuous audio themselves (e.g. an emulated sound chip) instead of a
- * single square-wave tone.
+ * @brief Opens PCM audio output.
  *
  * Shares the same underlying output as audio__tone() -- while a stream is
  * open, a concurrent audio__tone() call still works but blocks until the
@@ -58,7 +56,7 @@ uint32_t audio__stream_sample_rate(void);
 bruce_result_t audio__stream_open(uint8_t channels);
 
 /**
- * @brief Number of PCM frames that can currently be written without blocking/dropping.
+ * @brief Returns how many PCM frames can be written immediately.
  *
  * Apps that cannot drop audio can consult this before synthesizing more.
  *

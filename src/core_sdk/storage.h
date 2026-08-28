@@ -8,7 +8,7 @@
 #include "core_sdk/result.h"
 
 /**
- * @brief File and directory access on mounted storage (LittleFS root, SD card, extra partitions).
+ * @brief File and directory access.
  *
  * Each fallible storage API returns BRUCE_OK or BRUCE_ERR_PERMISSION,
  * BRUCE_ERR_NOT_FOUND, BRUCE_ERR_INVALID_PATH, BRUCE_ERR_IO, or a related

@@ -6,7 +6,7 @@
 #include "core_sdk/result.h"
 
 /**
- * @brief Per-app local configuration store.
+ * @brief App settings.
  *
  * Separate from the shared /config/bruce.conf singleton (core_sdk/config.h).
  * Each app_name gets its own JSON document at /config/<app_name>.conf,

@@ -7,7 +7,7 @@
 #include "core_sdk/result.h"
 
 /**
- * @brief Infrared transmit/receive: raw timings, decoded protocols, and .ir files.
+ * @brief Infrared sending and receiving.
  */
 
 #define BRUCE_IR_DEFAULT_FREQUENCY_HZ 38000u
@@ -94,5 +94,7 @@ bruce_result_t ir__transmit_file(const char *path, uint8_t repeats);
  */
 bruce_result_t ir__transmit_record(const char *contents, uint8_t repeats);
 
+/** @brief Returns the infrared transmitter pin. */
 int ir__tx_pin(void);
+/** @brief Returns the infrared receiver pin. */
 int ir__rx_pin(void);

@@ -8,7 +8,7 @@
 #include "core_sdk/stdio.h"
 
 /**
- * @brief Global transient notification mailbox (push/dismiss and its consumer).
+ * @brief On-screen notifications.
  */
 
 #define BRUCE_NOTIFICATION_TEXT_MAX 96
@@ -42,7 +42,7 @@ bruce_result_t notification__push(const char *text, uint32_t duration_ms);
 bruce_result_t notification__dismiss(void);
 
 /**
- * @brief Consumer side of the mailbox notification__push()/dismiss() write into.
+ * @brief Waits for the next notification change.
  *
  * Blocks up to `timeout_ms` (UINT32_MAX blocks forever) for the next
  * request. On a push, copies its text into `out_text` (size `text_size`,

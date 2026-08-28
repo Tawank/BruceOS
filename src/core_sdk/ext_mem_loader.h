@@ -1,7 +1,7 @@
 #pragma once
 
 /**
- * @brief Loader registry (see migration_plan.md, "Loader modules").
+ * @brief Loader to external memory.
  *
  * A loader module turns a file of one specific extension into a running
  * Core process by registering itself here. Core ships built-in ELF (".elf")

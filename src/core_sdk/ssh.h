@@ -8,7 +8,7 @@
 #include "core_sdk/result.h"
 
 /**
- * @brief SSH client: connect, host-key verification, authentication, shell, key generation.
+ * @brief SSH connections and remote shells.
  */
 
 #define BRUCE_SSH_HOST_KEY_SHA256_SIZE 32
