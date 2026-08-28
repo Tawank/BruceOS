@@ -3,6 +3,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/**
+ * @brief BLE advertisement scanning.
+ */
+
 #define BRUCE_BLUETOOTH_NAME_MAX 63
 #define BRUCE_BLUETOOTH_ADDRESS_LEN 6
 
@@ -13,7 +17,15 @@ typedef struct {
     char name[BRUCE_BLUETOOTH_NAME_MAX + 1];
 } bluetooth__device_t;
 
-/* Performs a synchronous BLE advertisement scan. Returns the number of unique
- * devices copied to `devices`, or a negative BRUCE_ERR_* value. A zero timeout
- * selects the Core default. Results are ordered by descending RSSI. */
+/**
+ * @brief Performs a synchronous BLE advertisement scan.
+ *
+ * Returns the number of unique devices copied to `devices`, or a negative
+ * BRUCE_ERR_* value. A zero timeout selects the Core default. Results are
+ * ordered by descending RSSI.
+ *
+ * @param devices Array to receive scanned devices.
+ * @param capacity Number of entries devices can hold.
+ * @param timeout_ms Scan duration in milliseconds, or 0 for the Core default.
+ */
 int bluetooth__scan_ble(bluetooth__device_t *devices, size_t capacity, uint32_t timeout_ms);

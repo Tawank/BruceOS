@@ -6,6 +6,15 @@
 
 #include "core_sdk/result.h"
 
+/**
+ * @brief Process lifecycle: listing, foreground/background switching, signaling, pause/resume.
+ *
+ * All process APIs below return BRUCE_OK or a documented BRUCE_ERR_*
+ * result. Foregrounding, switching, signalling, pausing, resuming, or
+ * killing *another* process requires the `process` permission; a process
+ * may always perform these operations on itself.
+ */
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -77,35 +86,131 @@ typedef struct {
     bool presentable;
 } bruce_process_snapshot_t;
 
-/* All process APIs below return BRUCE_OK or a documented BRUCE_ERR_* result.
- * Foregrounding, switching, signalling, pausing, resuming, or killing another
- * process requires the `process` permission; a process may perform operations on itself. */
 bruce_process_id_t process__current_id(void);
-/* Returns the pending cooperative INT/TERM signal for the calling process, or
- * zero when no cooperative signal is pending. */
+
+/**
+ * @brief Returns the pending cooperative INT/TERM signal for the calling process.
+ *
+ * Zero when no cooperative signal is pending.
+ */
 bruce_process_signal_t process__current_signal(void);
+
+/**
+ * @brief Lists live processes.
+ *
+ * @param snapshots Array to receive process snapshots.
+ * @param capacity Number of entries the snapshots array can hold.
+ * @param out_count Receives the total number of live processes.
+ */
 bruce_result_t process__list(bruce_process_snapshot_t *snapshots, size_t capacity, size_t *out_count);
+
+/**
+ * @brief Reads a point-in-time snapshot of one process.
+ *
+ * @param process_id Process to snapshot.
+ * @param out_snapshot Receives the snapshot.
+ */
 bruce_result_t process__snapshot(bruce_process_id_t process_id, bruce_process_snapshot_t *out_snapshot);
+
+/**
+ * @brief Switches the foreground process to the next one in launch order.
+ *
+ * @permission process
+ */
 bruce_result_t process__switch_next(void);
+
+/**
+ * @brief Switches the foreground process to the previous one in launch order.
+ *
+ * @permission process
+ */
 bruce_result_t process__switch_previous(void);
+
+/** @brief Moves the calling process to the background. Self-only. */
 bruce_result_t process__to_background(void);
-/* Declares the calling process GUI-capable and gives it foreground ownership.
- * This self-only operation does not require the `process` permission. */
+
+/**
+ * @brief Declares the calling process GUI-capable and gives it foreground ownership.
+ *
+ * @permission none (self-only operation)
+ */
 bruce_result_t process__to_foreground(void);
+
+/**
+ * @brief Gives another process foreground ownership.
+ *
+ * @param process_id Process to foreground.
+ * @permission process
+ */
 bruce_result_t process__foreground(bruce_process_id_t process_id);
-/* INT and TERM are cooperative; KILL is forced and equivalent to process__kill(). */
+
+/**
+ * @brief Sends a signal to a process.
+ *
+ * INT and TERM are cooperative; KILL is forced and equivalent to
+ * process__kill().
+ *
+ * @param process_id Process to signal.
+ * @param signal Signal to send.
+ * @permission process
+ */
 bruce_result_t process__signal(bruce_process_id_t process_id, bruce_process_signal_t signal);
+
+/**
+ * @brief Sends a cooperative TERM signal to a process.
+ *
+ * @param process_id Process to terminate.
+ * @permission process
+ */
 bruce_result_t process__terminate(bruce_process_id_t process_id);
+
+/**
+ * @brief Pauses a process.
+ *
+ * @param process_id Process to pause.
+ * @permission process
+ */
 bruce_result_t process__pause(bruce_process_id_t process_id);
+
+/**
+ * @brief Resumes a paused process.
+ *
+ * @param process_id Process to resume.
+ * @permission process
+ */
 bruce_result_t process__resume(bruce_process_id_t process_id);
+
+/**
+ * @brief Forcibly kills a process, equivalent to process__signal() with BRUCE_PROCESS_SIGNAL_KILL.
+ *
+ * @param process_id Process to kill.
+ * @permission process
+ */
 bruce_result_t process__kill(bruce_process_id_t process_id);
-/* Non-consuming: succeeds for either a live process that completes before the
- * timeout or an already-retained completion. UINT32_MAX waits forever and zero
- * polls. No process permission is required. */
+
+/**
+ * @brief Non-consuming wait for a process to complete.
+ *
+ * Succeeds for either a live process that completes before the timeout or
+ * an already-retained completion. UINT32_MAX waits forever and zero polls.
+ *
+ * @param process_id Process to wait for.
+ * @param timeout_ms Maximum time to wait, in milliseconds (UINT32_MAX waits forever, 0 polls).
+ * @permission none
+ */
 bruce_result_t process__wait(bruce_process_id_t process_id, uint32_t timeout_ms);
-/* Atomically consumes one retained completion. Exactly one concurrent caller
- * can succeed; the `process` permission is required. UINT32_MAX waits forever
- * and zero polls. On failure, *out_status is unchanged. */
+
+/**
+ * @brief Atomically consumes one retained completion.
+ *
+ * Exactly one concurrent caller can succeed. UINT32_MAX waits forever and
+ * zero polls. On failure, *out_status is unchanged.
+ *
+ * @param process_id Process to wait for.
+ * @param timeout_ms Maximum time to wait, in milliseconds (UINT32_MAX waits forever, 0 polls).
+ * @param out_status Receives the process's completion status.
+ * @permission process
+ */
 bruce_result_t
 process__wait_status(bruce_process_id_t process_id, uint32_t timeout_ms, bruce_process_status_t *out_status);
 

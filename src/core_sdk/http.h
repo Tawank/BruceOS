@@ -1,15 +1,15 @@
 #pragma once
 
-/*
- * Public HTTP client API (Core SDK surface).
+/**
+ * @brief Public HTTP client API (Core SDK surface).
  *
- * A single synchronous request primitive used by the JavaScript `httpFetch()`
- * binding and any ELF app that holds the `http` permission.  `http__request()`
- * does NOT imply the `wifi` permission; callers must arrange Wi-Fi
- * connectivity separately (e.g. via `wifi__connect()`).
+ * A single synchronous request primitive used by the JavaScript
+ * `httpFetch()` binding and any ELF app that holds the `http` permission.
+ * `http__request()` does NOT imply the `wifi` permission; callers must
+ * arrange Wi-Fi connectivity separately (e.g. via `wifi__connect()`).
  *
  * Response memory is allocated with the process-owned allocator and must be
- * released with `http__response_free()`.  Binary bodies may contain embedded
+ * released with `http__response_free()`. Binary bodies may contain embedded
  * NUL bytes; callers must use `body_len` instead of `strlen(body)`.
  */
 
@@ -75,18 +75,31 @@ typedef struct {
     bruce_memory_object_t body_object;
 } bruce_http_response_t;
 
-/* Perform a synchronous HTTP request. Requires the `http` permission.
- * On success, fills `response` and returns BRUCE_OK. The body is NUL-terminated
- * in buffered mode, but body_len is authoritative. Headers are always one
- * process-owned internal-heap allocation; the body shares it unless it was
- * large enough to instead go through memory__external_alloc() (PSRAM, or
- * swap when no PSRAM is fitted) - either way, release both with a single
- * http__response_free() call. On failure, leaves `response` zeroed and
- * returns a negative BRUCE_ERR_* value. */
+/**
+ * @brief Perform a synchronous HTTP request.
+ *
+ * On success, fills `response` and returns BRUCE_OK. The body is
+ * NUL-terminated in buffered mode, but body_len is authoritative. Headers
+ * are always one process-owned internal-heap allocation; the body shares it
+ * unless it was large enough to instead go through
+ * memory__external_alloc() (PSRAM, or swap when no PSRAM is fitted) -
+ * either way, release both with a single http__response_free() call. On
+ * failure, leaves `response` zeroed and returns a negative BRUCE_ERR_*
+ * value.
+ *
+ * @param request Request to perform (url, method, body, headers, ...).
+ * @param response Receives the response on success; zeroed on failure.
+ * @permission http
+ */
 bruce_result_t http__request(const bruce_http_request_t *request, bruce_http_response_t *response);
 
-/* Release all memory owned by `response`.  NULL or a zero-initialized response
- * is a no-op. */
+/**
+ * @brief Release all memory owned by `response`.
+ *
+ * NULL or a zero-initialized response is a no-op.
+ *
+ * @param response Response to release, previously filled by http__request().
+ */
 void http__response_free(bruce_http_response_t *response);
 
 #ifdef __cplusplus

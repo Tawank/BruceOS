@@ -1,14 +1,15 @@
 #pragma once
 
-/*
- * Coarse-grained app permission model (public SDK surface).
+/**
+ * @brief Coarse-grained app permission model (public SDK surface).
  *
- * Every ELF/JS/WASM app is identified, for permission purposes, by its filename
- * including extension and without its path (e.g. "game.elf", "weather.js").
- * Decisions are persisted in Core-owned /config/permissions.json, keyed by that
- * filename; apps sharing a basename deliberately share the same decision.
- * Built-in modules are implicitly granted every permission and never
- * consult the saved-decision store.
+ * Every ELF/JS/WASM app is identified, for permission purposes, by its
+ * filename including extension and without its path (e.g. "game.elf",
+ * "weather.js"). Decisions are persisted in Core-owned
+ * /config/permissions.json, keyed by that filename; apps sharing a
+ * basename deliberately share the same decision. Built-in modules are
+ * implicitly granted every permission and never consult the saved-decision
+ * store.
  */
 
 #include <stdbool.h>
@@ -39,47 +40,87 @@ typedef enum {
     BRUCE_PERMISSION_COUNT,
 } bruce_permission_t;
 
-/* Returns the canonical lowercase name ("wifi", "http", ...) used in
- * manifests and /config/permissions.json, or NULL for an out-of-range value. */
+/**
+ * @brief Returns the canonical lowercase name ("wifi", "http", ...).
+ *
+ * Used in manifests and /config/permissions.json, or NULL for an
+ * out-of-range value.
+ *
+ * @param permission Permission to name.
+ */
 const char *permission__name(bruce_permission_t permission);
 
-/* Resolves a manifest/JSON permission name to its enum value. Returns false
- * (leaving *out_permission untouched) for an unknown name. */
+/**
+ * @brief Resolves a manifest/JSON permission name to its enum value.
+ *
+ * Returns false (leaving *out_permission untouched) for an unknown name.
+ *
+ * @param name Canonical lowercase permission name, e.g. "wifi".
+ * @param out_permission Receives the resolved enum value.
+ */
 bool permission__from_name(const char *name, bruce_permission_t *out_permission);
 
-/* Checks whether the *calling* process currently holds `permission`. This is
- * the function every protected Core API (wifi__*, http__*, storage__*,
- * config__*, process__* control of another process, app_runner__run, ...) calls
- * internally; app/module code never needs to call it directly.
+/**
+ * @brief Checks whether the *calling* process currently holds `permission`.
  *
- * A built-in process always returns BRUCE_OK. An external (ELF/JS/WASM) process with an
- * existing saved decision returns immediately (BRUCE_OK or
+ * This is the function every protected Core API (wifi__*, http__*,
+ * storage__*, config__*, process__* control of another process,
+ * app_runner__run, ...) calls internally; app/module code never needs to
+ * call it directly.
+ *
+ * A built-in process always returns BRUCE_OK. An external (ELF/JS/WASM)
+ * process with an existing saved decision returns immediately (BRUCE_OK or
  * BRUCE_ERR_PERMISSION) with no prompt. With no saved decision yet, this is
  * the dynamic first-use request: it shows an allow/deny dialog__choice(),
- * persists the answer keyed by the process's permission file name, and returns
- * accordingly. If the dialog itself fails (e.g. is cancelled) the decision
- * is left unresolved (not persisted) and BRUCE_ERR_PERMISSION is returned,
- * so a later call may prompt again. Returns BRUCE_ERR_INVALID_ARGUMENT for
- * an out-of-range `permission`. */
+ * persists the answer keyed by the process's permission file name, and
+ * returns accordingly. If the dialog itself fails (e.g. is cancelled) the
+ * decision is left unresolved (not persisted) and BRUCE_ERR_PERMISSION is
+ * returned, so a later call may prompt again. Returns
+ * BRUCE_ERR_INVALID_ARGUMENT for an out-of-range `permission`.
+ *
+ * @param permission Permission to check for the calling process.
+ */
 bruce_result_t permission__check(bruce_permission_t permission);
 
-/* Pre-launch batch request: for every name in `permission_names` that
- * `file_name` has no saved decision for yet, prompts (unchecked/undecided by
- * default) and persists the user's choice; already-known permissions are
- * left untouched and not re-prompted. Intended for the ELF/JS/WASM loaders
- * (Stage 3) to call with the manifest's declared permission list before a
- * new process's first instruction runs. Returns BRUCE_OK once every name has
- * been processed (regardless of individual allow/deny outcomes) or
+/**
+ * @brief Pre-launch batch request.
+ *
+ * For every name in `permission_names` that `file_name` has no saved
+ * decision for yet, prompts (unchecked/undecided by default) and persists
+ * the user's choice; already-known permissions are left untouched and not
+ * re-prompted. Intended for the ELF/JS/WASM loaders (Stage 3) to call with
+ * the manifest's declared permission list before a new process's first
+ * instruction runs. Returns BRUCE_OK once every name has been processed
+ * (regardless of individual allow/deny outcomes) or
  * BRUCE_ERR_INVALID_ARGUMENT for an invalid `file_name` or an unknown
- * permission name. */
+ * permission name.
+ *
+ * @param file_name Permission file name the decisions are keyed by, e.g. "game.elf".
+ * @param permission_names Permission names from the app's manifest.
+ * @param count Number of entries in permission_names.
+ */
 bruce_result_t
 permission__preflight(const char *file_name, const char *const *permission_names, size_t count);
 
-/* Returns the saved decision without prompting, e.g. for a
- * permissions-management UI. Returns BRUCE_ERR_NOT_FOUND if `file_name` has
- * no saved decision yet for `permission`. */
+/**
+ * @brief Returns the saved decision without prompting.
+ *
+ * e.g. for a permissions-management UI. Returns BRUCE_ERR_NOT_FOUND if
+ * `file_name` has no saved decision yet for `permission`.
+ *
+ * @param file_name Permission file name to look up, e.g. "game.elf".
+ * @param permission Permission to look up.
+ * @param out_allowed Receives the saved allow/deny decision.
+ */
 bruce_result_t permission__get_saved(const char *file_name, bruce_permission_t permission, bool *out_allowed);
 
-/* Persists an explicit allow/deny decision for `file_name`, e.g. from a
- * permissions-management UI. */
+/**
+ * @brief Persists an explicit allow/deny decision for `file_name`.
+ *
+ * e.g. from a permissions-management UI.
+ *
+ * @param file_name Permission file name to set the decision for, e.g. "game.elf".
+ * @param permission Permission to set.
+ * @param allowed New allow/deny decision.
+ */
 bruce_result_t permission__set(const char *file_name, bruce_permission_t permission, bool allowed);

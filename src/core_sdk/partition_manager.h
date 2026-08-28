@@ -7,19 +7,21 @@
 #include "core_sdk/disk.h" // IWYU pragma: export (BRUCE_DISK_NAME_MAX)
 #include "core_sdk/result.h"
 
-/*
- * Manages the "user area": the flash left over after the static partitions
- * in partitions.csv (bootloader, partition_table, nvs, coredump, factory),
- * minus one sector at the very end of the flash reserved for this module's
- * own partition table. The user area always holds exactly one LittleFS
- * partition labeled "littlefs" mounted at "/" (BRUCE_PARTITION_ROOT_LABEL),
- * at offset 0, plus any number of extra partitions the user creates.
+/**
+ * @brief Manages the "user area" partitions.
+ *
+ * The flash left over after the static partitions in partitions.csv
+ * (bootloader, partition_table, nvs, coredump, factory), minus one sector
+ * at the very end of the flash reserved for this module's own partition
+ * table. The user area always holds exactly one LittleFS partition labeled
+ * "littlefs" mounted at "/" (BRUCE_PARTITION_ROOT_LABEL), at offset 0, plus
+ * any number of extra partitions the user creates.
  *
  * The root partition is elastic: it is never given a size directly, it
  * simply spans everything below the lowest extra partition. Creating an
- * extra partition therefore takes that space away from "/" and reformats it
- * on the next boot (LittleFS cannot be shrunk in place); deleting the lowest
- * extra partition gives the space back the same way. Both UIs
+ * extra partition therefore takes that space away from "/" and reformats
+ * it on the next boot (LittleFS cannot be shrunk in place); deleting the
+ * lowest extra partition gives the space back the same way. Both UIs
  * (modules/bparted) warn about that before anything is written.
  *
  * Nothing here ever mounts, erases or reformats storage the running system
@@ -95,52 +97,103 @@ typedef struct {
     uint64_t max_new_size;      /* Largest partition stage_create() would accept right now. */
 } bruce_partition_status_t;
 
-/* The layout running this boot. Pass NULL with capacity 0 to query count;
- * a too-small non-NULL buffer fills what fits and returns
- * BRUCE_ERR_RESOURCE_LIMIT. Entries are ordered by offset. */
+/**
+ * @brief The layout running this boot.
+ *
+ * Pass NULL with capacity 0 to query count; a too-small non-NULL buffer
+ * fills what fits and returns BRUCE_ERR_RESOURCE_LIMIT. Entries are
+ * ordered by offset.
+ *
+ * @param entries Array to receive partition entries, or NULL to only query count.
+ * @param capacity Number of entries the entries array can hold.
+ * @param out_count Receives the total number of entries available.
+ */
 bruce_result_t
 partition_manager__list_current(bruce_partition_entry_t *entries, size_t capacity, size_t *out_count);
 
-/* The layout the next boot will have: list_current() plus every staged and
- * committed change, each entry tagged with how it differs (including
- * BRUCE_PARTITION_STATE_DELETED rows for entries that are about to go away,
- * which is why this can return more entries than list_current()). Same
- * ordering and capacity convention as list_current(). */
+/**
+ * @brief The layout the next boot will have.
+ *
+ * list_current() plus every staged and committed change, each entry tagged
+ * with how it differs (including BRUCE_PARTITION_STATE_DELETED rows for
+ * entries that are about to go away, which is why this can return more
+ * entries than list_current()). Same ordering and capacity convention as
+ * list_current().
+ *
+ * @param entries Array to receive partition entries, or NULL to only query count.
+ * @param capacity Number of entries the entries array can hold.
+ * @param out_count Receives the total number of entries available.
+ */
 bruce_result_t
 partition_manager__list_planned(bruce_partition_entry_t *entries, size_t capacity, size_t *out_count);
 
-/* Space accounting plus the two "is there anything outstanding" flags. */
+/**
+ * @brief Space accounting plus the two "is there anything outstanding" flags.
+ *
+ * @param out_status Receives the current status.
+ */
 bruce_result_t partition_manager__status(bruce_partition_status_t *out_status);
 
-/* Stages a new partition, taking its space from the tail of the root
- * partition (or from a gap a previous delete left behind). `label` must be
- * 1-16 chars of [A-Za-z0-9_-] and a BRUCE_PARTITION_KIND_SWAP entry's label
- * must be exactly BRUCE_PARTITION_SWAP_LABEL. `size_bytes` is rounded up to
- * the nearest 4096-byte flash sector. Returns BRUCE_ERR_ALREADY_EXISTS for
- * a duplicate label and BRUCE_ERR_RESOURCE_LIMIT when the table is full or
+/**
+ * @brief Stages a new partition, taking its space from the tail of the root partition.
+ *
+ * (or from a gap a previous delete left behind). `label` must be 1-16
+ * chars of [A-Za-z0-9_-] and a BRUCE_PARTITION_KIND_SWAP entry's label must
+ * be exactly BRUCE_PARTITION_SWAP_LABEL. `size_bytes` is rounded up to the
+ * nearest 4096-byte flash sector. Returns BRUCE_ERR_ALREADY_EXISTS for a
+ * duplicate label and BRUCE_ERR_RESOURCE_LIMIT when the table is full or
  * the request is larger than bruce_partition_status_t.max_new_size. Call
- * commit() to persist. */
+ * commit() to persist.
+ *
+ * @param label New partition's label, 1-16 chars of [A-Za-z0-9_-].
+ * @param kind Partition kind (swap or littlefs).
+ * @param size_bytes Requested size in bytes, rounded up to the nearest 4096-byte sector.
+ * @permission built-in only
+ */
 bruce_result_t
 partition_manager__stage_create(const char *label, bruce_partition_kind_t kind, uint64_t size_bytes);
 
-/* Stages removal of `label`. The root entry cannot be deleted
- * (BRUCE_ERR_PERMISSION) - reformat it instead. Its space is given back to
- * the root partition when it sits directly above it, and is otherwise left
- * as a gap only a new partition can reuse. */
+/**
+ * @brief Stages removal of `label`.
+ *
+ * The root entry cannot be deleted (BRUCE_ERR_PERMISSION) - reformat it
+ * instead. Its space is given back to the root partition when it sits
+ * directly above it, and is otherwise left as a gap only a new partition
+ * can reuse.
+ *
+ * @param label Label of the partition to remove.
+ * @permission built-in only
+ */
 bruce_result_t partition_manager__stage_delete(const char *label);
 
-/* Stages an in-place erase + reformat of `label`, keeping its size, kind
- * and position. Allowed for the root entry (wipes and reformats "/" on the
- * next boot). Returns BRUCE_ERR_INVALID_STATE for an entry that does not
- * exist yet (a staged create is formatted on creation anyway). */
+/**
+ * @brief Stages an in-place erase + reformat of `label`, keeping its size, kind and position.
+ *
+ * Allowed for the root entry (wipes and reformats "/" on the next boot).
+ * Returns BRUCE_ERR_INVALID_STATE for an entry that does not exist yet (a
+ * staged create is formatted on creation anyway).
+ *
+ * @param label Label of the partition to reformat.
+ * @permission built-in only
+ */
 bruce_result_t partition_manager__stage_format(const char *label);
 
-/* Persists the staged table to flash. Does not itself erase or format
- * anything - that happens once, automatically, the next time the device
- * boots. */
+/**
+ * @brief Persists the staged table to flash.
+ *
+ * Does not itself erase or format anything - that happens once,
+ * automatically, the next time the device boots.
+ *
+ * @permission built-in only
+ */
 bruce_result_t partition_manager__commit(void);
 
-/* Discards every not-yet-committed staged edit, resetting list_planned()
- * back to the last committed layout. A no-op (BRUCE_OK) when
- * has_pending_changes is already false. */
+/**
+ * @brief Discards every not-yet-committed staged edit.
+ *
+ * Resets list_planned() back to the last committed layout. A no-op
+ * (BRUCE_OK) when has_pending_changes is already false.
+ *
+ * @permission built-in only
+ */
 bruce_result_t partition_manager__discard(void);

@@ -1,26 +1,28 @@
 #pragma once
 
-/*
- * Public streaming HTML-to-content extractor (Core SDK surface).
+/**
+ * @brief Public streaming HTML-to-content extractor (Core SDK surface).
  *
  * This is intentionally not a DOM: ESP32 RAM is too tight to hold a parsed
  * tree of an arbitrary web page. Instead the parser is a byte-at-a-time SAX
  * style tokenizer -- feed it bytes as they arrive over HTTP (see
- * `bruce_http_response_chunk_cb_t` in core_sdk/http.h) and it reports a small
- * vocabulary of content events as it recognizes them: plain text runs,
- * link/heading boundaries, image references, line/paragraph breaks, and
- * <main>/<article>/<nav>/<footer> landmark starts. `<script>`, `<style>`, and markup
- * the vocabulary below doesn't describe are silently skipped rather than
- * reported.
+ * `bruce_http_response_chunk_cb_t` in core_sdk/http.h) and it reports a
+ * small vocabulary of content events as it recognizes them: plain text
+ * runs, link/heading boundaries, image references, line/paragraph breaks,
+ * and main/article/nav/footer landmark starts. `script,
+ * `style`, and markup the vocabulary below doesn't describe are silently
+ * skipped rather than reported.
  *
- * Any module that wants "the readable content of an HTML page" -- a browser,
- * a feed reader, a page-title lookup -- can reuse this instead of writing its
- * own tag stripper.
+ * Any module that wants "the readable content of an HTML page" -- a
+ * browser, a feed reader, a page-title lookup -- can reuse this instead of
+ * writing its own tag stripper.
  *
  * Text is whitespace-collapsed (a run of spaces/tabs/newlines becomes one
  * space) and HTML entities are decoded. `href`/`src` attribute values are
  * resolved to absolute URLs against the parser's base URL before being
  * reported.
+ *
+ * Not permission-gated.
  */
 
 #include <stdbool.h>
@@ -75,30 +77,64 @@ typedef void (*bruce_html_event_cb_t)(const bruce_html_event_t *event, void *con
 
 typedef struct bruce_html_parser bruce_html_parser_t;
 
-/* Creates a streaming parser. `base_url` is used to resolve relative
- * `href`/`src` attributes and is copied; it may be NULL if the caller only
- * wants text/structure events (relative links/images are then reported
- * unresolved, exactly as written in the markup). */
+/**
+ * @brief Creates a streaming parser.
+ *
+ * `base_url` is used to resolve relative `href`/`src` attributes and is
+ * copied; it may be NULL if the caller only wants text/structure events
+ * (relative links/images are then reported unresolved, exactly as written
+ * in the markup).
+ *
+ * @param base_url URL used to resolve relative href/src attributes, or NULL.
+ * @param callback Called synchronously as each event is recognized.
+ * @param context Opaque pointer passed back to callback.
+ * @param out_parser Receives the new parser.
+ */
 bruce_result_t html__parser_create(
     const char *base_url, bruce_html_event_cb_t callback, void *context, bruce_html_parser_t **out_parser
 );
 
-/* Feeds the next chunk of HTML bytes. May be called repeatedly with partial
- * data (e.g. directly from an HTTP response chunk callback); the parser
- * carries incomplete tags/entities across calls. */
+/**
+ * @brief Feeds the next chunk of HTML bytes.
+ *
+ * May be called repeatedly with partial data (e.g. directly from an HTTP
+ * response chunk callback); the parser carries incomplete tags/entities
+ * across calls.
+ *
+ * @param parser Parser to feed.
+ * @param data HTML bytes to parse.
+ * @param len Number of bytes in data.
+ */
 bruce_result_t html__parser_feed(bruce_html_parser_t *parser, const void *data, size_t len);
 
-/* Flushes any pending text run and closes out open elements. Call once after
- * the last html__parser_feed(). */
+/**
+ * @brief Flushes any pending text run and closes out open elements.
+ *
+ * Call once after the last html__parser_feed().
+ *
+ * @param parser Parser to finish.
+ */
 bruce_result_t html__parser_finish(bruce_html_parser_t *parser);
 
+/**
+ * @brief Destroys a parser created by html__parser_create().
+ *
+ * @param parser Parser to destroy.
+ */
 void html__parser_destroy(bruce_html_parser_t *parser);
 
-/* Resolves `ref` (absolute, scheme-relative, absolute-path, or relative)
- * against `base_url` into an absolute URL written to `out_url`. Returns false
- * if the result would not fit `out_capacity` or `ref`/`base_url` is
- * malformed. `ref` is returned unchanged (copied) when it is already
- * absolute. */
+/**
+ * @brief Resolves `ref` against `base_url` into an absolute URL written to `out_url`.
+ *
+ * (absolute, scheme-relative, absolute-path, or relative). Returns false if
+ * the result would not fit `out_capacity` or `ref`/`base_url` is malformed.
+ * `ref` is returned unchanged (copied) when it is already absolute.
+ *
+ * @param base_url Base URL to resolve against.
+ * @param ref URL reference to resolve (absolute, scheme-relative, absolute-path, or relative).
+ * @param out_url Buffer to receive the resolved absolute URL.
+ * @param out_capacity Size of out_url in bytes.
+ */
 bool html__resolve_url(const char *base_url, const char *ref, char *out_url, size_t out_capacity);
 
 #ifdef __cplusplus

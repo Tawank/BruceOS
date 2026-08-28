@@ -2,6 +2,14 @@
 
 #include <stdbool.h>
 
+/**
+ * @brief Command-line argument parser (argparse-style).
+ *
+ * Generic option/flag/positional-argument and subcommand parser, independent
+ * of the rest of core_sdk. Not permission-gated.
+ * Docs: https://www.dmulholl.com/docs/args/master/
+ */
+
 typedef struct ArgParser ArgParser;
 typedef int (*ap_callback_t)(char *cmd_name, ArgParser *cmd_parser);
 
@@ -21,19 +29,50 @@ char *ap_get_helptext(ArgParser *parser);
 void ap_set_version(ArgParser *parser, const char *version);
 char *ap_get_version(ArgParser *parser);
 
-/* Parses conventional main()-style arguments without modifying argv. Parse
- * errors, help, and version requests never exit the calling process. */
+/**
+ * @brief Parses conventional main()-style arguments without modifying argv.
+ *
+ * Parse errors, help, and version requests never exit the calling process.
+ *
+ * @param parser Parser to run.
+ * @param argc Argument count, as passed to main().
+ * @param argv Argument vector, as passed to main(); not modified.
+ */
 bool ap_parse(ArgParser *parser, int argc, char **argv);
+
+/**
+ * @brief Outcome of the most recent ap_parse() call.
+ *
+ * @param parser Parser to query.
+ */
 ap_status_t ap_get_status(ArgParser *parser);
+
+/**
+ * @brief Prints the parser's generated help text.
+ *
+ * @param parser Parser to print help for.
+ */
 void ap_print_help(ArgParser *parser);
 
 void ap_first_pos_arg_ends_option_parsing(ArgParser *parser);
 void ap_all_args_as_pos_args(ArgParser *parser);
-/* Accepts positional arguments beyond the declared named positionals. They
- * remain available through ap_get_arg_at_index()/ap_get_args(). */
+
+/**
+ * @brief Accepts positional arguments beyond the declared named positionals.
+ *
+ * They remain available through ap_get_arg_at_index()/ap_get_args().
+ *
+ * @param parser Parser to configure.
+ */
 void ap_allow_extra_args(ArgParser *parser);
-/* Treats unregistered option-looking tokens as positional arguments while
- * continuing to recognize registered options. */
+
+/**
+ * @brief Treats unregistered option-looking tokens as positional arguments.
+ *
+ * Continues to recognize registered options.
+ *
+ * @param parser Parser to configure.
+ */
 void ap_unknown_options_as_args(ArgParser *parser);
 
 void ap_add_flag(ArgParser *parser, const char *name);
@@ -55,15 +94,46 @@ double ap_get_dbl_value(ArgParser *parser, const char *name);
 double ap_get_dbl_value_at_index(ArgParser *parser, const char *name, int index);
 double *ap_get_dbl_values(ArgParser *parser, const char *name);
 
-/* String results are borrowed and must not be modified or freed. Array
- * getters allocate only the returned array with memory__malloc(); release the
- * array with memory__free(), never libc free(). */
+/**
+ * @brief String results are borrowed and must not be modified or freed.
+ *
+ * Array getters allocate only the returned array with memory__malloc();
+ * release the array with memory__free(), never libc free().
+ */
 
-/* Named positionals are declared in order. Required arguments must precede
- * optional arguments. ap_get_arg() returns a borrowed argv string, or NULL
- * when an optional argument was omitted or the name is unknown. */
+/**
+ * @brief Declares a required named positional argument.
+ *
+ * Named positionals are declared in order; required arguments must precede
+ * optional arguments.
+ *
+ * @param parser Parser to configure.
+ * @param name Name of the positional argument.
+ * @param helptext Help text shown for this argument.
+ */
 void ap_add_required_arg(ArgParser *parser, const char *name, const char *helptext);
+
+/**
+ * @brief Declares an optional named positional argument.
+ *
+ * Named positionals are declared in order; required arguments must precede
+ * optional arguments.
+ *
+ * @param parser Parser to configure.
+ * @param name Name of the positional argument.
+ * @param helptext Help text shown for this argument.
+ */
 void ap_add_optional_arg(ArgParser *parser, const char *name, const char *helptext);
+
+/**
+ * @brief Reads the value of a declared named positional argument.
+ *
+ * Returns a borrowed argv string, or NULL when an optional argument was
+ * omitted or the name is unknown.
+ *
+ * @param parser Parser to query.
+ * @param name Name of the positional argument, as declared.
+ */
 char *ap_get_arg(ArgParser *parser, const char *name);
 
 bool ap_has_args(ArgParser *parser);

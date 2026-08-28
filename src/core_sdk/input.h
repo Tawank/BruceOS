@@ -5,6 +5,10 @@
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
 
+/**
+ * @brief Physical/virtual input event queue: keys, buttons, touch, encoder.
+ */
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -77,7 +81,8 @@ typedef struct {
     bruce_process_id_t source_process_id;
 } bruce_input_event_t;
 
-/* input__read pops the next input event for the foreground process.
+/**
+ * @brief input__read pops the next input event for the foreground process.
  *
  * `timeout_ms` controls blocking:
  *   - 0      : non-blocking; returns BRUCE_ERR_TIMEOUT immediately if no event
@@ -91,63 +96,95 @@ typedef struct {
  * foreground tenure ends; regaining foreground requires a new call. An
  * indefinite read is also interrupted by input deinitialization.
  *
- * Physical input is delivered only to the foreground process; background processes
- * must call process__foreground() or use input__inject() (which requires the
- * `input` permission).
+ * Physical input is delivered only to the foreground process; background
+ * processes must call process__foreground() or use input__inject() (which
+ * requires the `input` permission).
+ *
+ * @param out_event Receives the popped event.
+ * @param timeout_ms 0 for non-blocking, >0 to block up to that many milliseconds, or 0xFFFFFFFF to block indefinitely.
  */
 bruce_result_t input__read(bruce_input_event_t *out_event, uint32_t timeout_ms);
 
-/* input__poll is a convenience wrapper for a non-blocking read.  It returns
- * BRUCE_OK with *out_event filled, or BRUCE_ERR_TIMEOUT if no event is
- * available.  It is equivalent to input__read(out_event, 0).
+/**
+ * @brief input__poll is a convenience wrapper for a non-blocking read.
+ *
+ * It returns BRUCE_OK with *out_event filled, or BRUCE_ERR_TIMEOUT if no
+ * event is available. It is equivalent to input__read(out_event, 0).
  *
  * Typical polling loop:
  *   bruce_input_event_t ev;
  *   while (input__poll(&ev) == BRUCE_OK) { ... handle ev ... }
+ *
+ * @param out_event Receives the popped event.
  */
 static inline bruce_result_t input__poll(bruce_input_event_t *out_event) { return input__read(out_event, 0); }
 
-/* input__flush removes all queued input events.  It is useful when switching
- * screens so that stale presses do not affect the new UI.  Returns BRUCE_OK
- * or BRUCE_ERR_NOT_FOREGROUND if the caller is not the foreground process. */
+/**
+ * @brief input__flush removes all queued input events.
+ *
+ * It is useful when switching screens so that stale presses do not affect
+ * the new UI. Returns BRUCE_OK or BRUCE_ERR_NOT_FOREGROUND if the caller is
+ * not the foreground process.
+ */
 bruce_result_t input__flush(void);
 
-/* input__peek inspects the next queued event without removing it.
+/**
+ * @brief input__peek inspects the next queued event without removing it.
  *
- * Returns BRUCE_OK with *out_event filled, BRUCE_ERR_TIMEOUT if the queue is
- * empty, or BRUCE_ERR_NOT_FOREGROUND if the caller is not the foreground process.
+ * Returns BRUCE_OK with *out_event filled, BRUCE_ERR_TIMEOUT if the queue
+ * is empty, or BRUCE_ERR_NOT_FOREGROUND if the caller is not the foreground
+ * process.
+ *
+ * @param out_event Receives the next queued event.
  */
 bruce_result_t input__peek(bruce_input_event_t *out_event);
 
-/* input__wait blocks until a press event arrives.
+/**
+ * @brief input__wait blocks until a press event arrives.
  *
- * Returns BRUCE_OK with the event code in *out_code, BRUCE_ERR_TIMEOUT if no
- * press event arrived within the timeout, or BRUCE_ERR_NOT_FOREGROUND if the
- * caller is not the foreground process.  Release and change events are ignored.
+ * Returns BRUCE_OK with the event code in *out_code, BRUCE_ERR_TIMEOUT if
+ * no press event arrived within the timeout, or BRUCE_ERR_NOT_FOREGROUND if
+ * the caller is not the foreground process. Release and change events are
+ * ignored.
+ *
+ * @param timeout_ms Maximum time to wait, in milliseconds.
+ * @param out_code Receives the pressed event's code.
  */
 bruce_result_t input__wait(uint32_t timeout_ms, int32_t *out_code);
 
-/* input__check tests whether a press event for `code` is currently queued.
+/**
+ * @brief input__check tests whether a press event for `code` is currently queued.
  *
- * If `consume` is true the first matching press event is removed from the queue;
- * if false the event is left in place.  Returns true if a matching press event
- * exists, false otherwise.  Always returns false for non-foreground processes.
+ * If `consume` is true the first matching press event is removed from the
+ * queue; if false the event is left in place. Returns true if a matching
+ * press event exists, false otherwise. Always returns false for
+ * non-foreground processes.
  *
- * This is the Core equivalent of the legacy `check(PrevPress)` / `check(SelPress)`
- * pattern used by the old Arduino loop code and JS bindings.
+ * This is the Core equivalent of the legacy `check(PrevPress)` /
+ * `check(SelPress)` pattern used by the old Arduino loop code and JS
+ * bindings.
+ *
+ * @param code Event code to test for, e.g. BRUCE_INPUT_CODE_SELECT.
+ * @param consume If true, removes the matching event from the queue.
  */
 bool input__check(int32_t code, bool consume);
 
-/* input__inject pushes a normalized event into the input queue.  It is used
- * by input adapters (Bluetooth, GPIO, I2C, serial, ...) to feed the same
- * event pipeline as physical buttons and keyboard.
+/**
+ * @brief input__inject pushes a normalized event into the input queue.
+ *
+ * It is used by input adapters (Bluetooth, GPIO, I2C, serial, ...) to feed
+ * the same event pipeline as physical buttons and keyboard.
  *
  * Returns BRUCE_OK, BRUCE_ERR_PERMISSION if the caller lacks the `input`
  * permission, BRUCE_ERR_INVALID_ARGUMENT for a malformed event, or another
  * BRUCE_ERR_* value for internal failures.
  *
- * `event->timestamp_ms` and `event->source_process_id` are ignored by the core;
- * the core fills them in from the current time/process before queuing.
+ * `event->timestamp_ms` and `event->source_process_id` are ignored by the
+ * core; the core fills them in from the current time/process before
+ * queuing.
+ *
+ * @param event Event to inject.
+ * @permission input
  */
 bruce_result_t input__inject(const bruce_input_event_t *event);
 

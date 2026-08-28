@@ -6,6 +6,10 @@
 
 #include "core_sdk/result.h"
 
+/**
+ * @brief Physical block device / partition listing and mount control.
+ */
+
 #define BRUCE_DISK_NAME_MAX 17
 #define BRUCE_DISK_MOUNT_POINT_MAX 16
 
@@ -25,15 +29,36 @@ typedef struct {
     bool read_only;
 } bruce_disk_entry_t;
 
-/* Lists physical block devices and their partitions. Entries are ordered with
- * each disk before its partitions. Pass NULL with capacity 0 to query count. */
+/**
+ * @brief Lists physical block devices and their partitions.
+ *
+ * Entries are ordered with each disk before its partitions. Pass NULL with
+ * capacity 0 to query count.
+ *
+ * @param entries Array to receive disk/partition entries, or NULL to only query count.
+ * @param capacity Number of entries the entries array can hold.
+ * @param out_count Receives the total number of disks/partitions available.
+ */
 bruce_result_t disk__list(bruce_disk_entry_t *entries, size_t capacity, size_t *out_count);
 
-/* Mount and unmount are global built-in operations; external applications
- * receive BRUCE_ERR_PERMISSION. `name` "sd0" always mounts at "/sdcard";
- * any other name is looked up among core/partition_manager's extra
- * partitions (the "bparted" command) and mounted at the given path, which
- * must be an absolute path other than "/" or "/sdcard". `unmount` accepts
- * either the name or the mount point. */
+/**
+ * @brief Mounts a disk/partition.
+ *
+ * `name` "sd0" always mounts at "/sdcard"; any other name is looked up
+ * among core/partition_manager's extra partitions (the "bparted" command)
+ * and mounted at the given path, which must be an absolute path other than
+ * "/" or "/sdcard".
+ *
+ * @param name Disk/partition name to mount, e.g. "sd0".
+ * @param mount_point Absolute path to mount at (ignored for "sd0", which always mounts at "/sdcard").
+ * @permission built-in only (external applications receive BRUCE_ERR_PERMISSION)
+ */
 bruce_result_t disk__mount(const char *name, const char *mount_point);
+
+/**
+ * @brief Unmounts a disk/partition.
+ *
+ * @param name_or_mount_point Disk/partition name or its current mount point.
+ * @permission built-in only (external applications receive BRUCE_ERR_PERMISSION)
+ */
 bruce_result_t disk__unmount(const char *name_or_mount_point);

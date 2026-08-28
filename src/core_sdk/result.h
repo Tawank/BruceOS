@@ -1,12 +1,12 @@
 #pragma once
 
-/*
- * Stable result vocabulary for the public Bruce SDK.
+/**
+ * @brief Stable result vocabulary for the public Bruce SDK.
  *
  * Functions returning bruce_result_t use BRUCE_OK on success and one of the
- * negative BRUCE_ERR_* values below on failure. Other return conventions are
- * documented on the individual function. Result values are part of the Core
- * ABI and must not be renumbered.
+ * negative BRUCE_ERR_* values below on failure. Other return conventions
+ * are documented on the individual function. Result values are part of the
+ * Core ABI and must not be renumbered.
  */
 typedef enum {
     BRUCE_OK = 0,
@@ -31,9 +31,14 @@ typedef enum {
     BRUCE_ERR_INTERNAL = -19,
 } bruce_result_t;
 
-/* Translates a bruce_result_t (or the BRUCE_OK/BRUCE_ERR_* range of any int
- * returned by the app_runner__run*() family) into a short human-readable
- * description, e.g. BRUCE_ERR_NOT_FOUND -> "Not found". Positive values
- * (process ids) and unrecognized codes return "Unknown error". Always
- * returns a non-NULL, statically-allocated string. */
+/**
+ * @brief Translates a bruce_result_t into a short human-readable description.
+ *
+ * (or the BRUCE_OK/BRUCE_ERR_* range of any int returned by the
+ * app_runner__run*() family), e.g. BRUCE_ERR_NOT_FOUND -> "Not found".
+ * Positive values (process ids) and unrecognized codes return "Unknown
+ * error". Always returns a non-NULL, statically-allocated string.
+ *
+ * @param result Result code to translate.
+ */
 const char *result__to_string(int result);
