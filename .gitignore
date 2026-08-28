@@ -10,6 +10,7 @@ managed_components/
 BrucePIO_legacy/
 __pycache__
 .claude
-/sdkconfig.old
+sdkconfig
+sdkconfig.old
 
 # nofrendo
