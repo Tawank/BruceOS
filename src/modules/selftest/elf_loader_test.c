@@ -5,6 +5,7 @@
 #include "core_sdk/app_runner.h"
 #include "core_sdk/ext_mem_loader.h"
 #include "core_sdk/permission.h"
+#include "core_sdk/process.h"
 #include "core_sdk/runtime.h"
 #include "modules/loaders/wasm/wasm_loader_app.h"
 #include "platform_api_vmcore.h"
@@ -70,6 +71,28 @@ bool selftest__run_wasm_loader_case(void) {
     korp_tid task = os_self_thread();
     if (task == 0 || task != os_self_thread()) {
         printf("[selftest] loader/wasm: unstable WAMR task identity\n");
+        return false;
+    }
+
+    bruce_process_snapshot_t before;
+    bruce_process_snapshot_t during;
+    bruce_process_snapshot_t after;
+    if (process__snapshot(process__current_id(), &before) != BRUCE_OK) {
+        printf("[selftest] loader/wasm: could not read initial accounting\n");
+        return false;
+    }
+    void *allocation = wasm_loader__debug_runtime_malloc(4096);
+    if (allocation == NULL ||
+        process__snapshot(process__current_id(), &during) != BRUCE_OK ||
+        during.memory_bytes < before.memory_bytes + 4096u) {
+        wasm_loader__debug_runtime_free(allocation);
+        printf("[selftest] loader/wasm: WAMR allocation was not accounted\n");
+        return false;
+    }
+    wasm_loader__debug_runtime_free(allocation);
+    if (process__snapshot(process__current_id(), &after) != BRUCE_OK ||
+        after.memory_bytes != before.memory_bytes) {
+        printf("[selftest] loader/wasm: WAMR accounting was not released\n");
         return false;
     }
 

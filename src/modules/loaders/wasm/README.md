@@ -40,6 +40,13 @@ pointers. The module heap belongs to the process-owned WAMR instance and is
 reclaimed when that instance is deinstantiated during loader cleanup. Shared
 WAMR runtime storage remains on WAMR's global allocator.
 
+WAMR module metadata, linear memory, the host-managed heap, and execution-stack
+allocations are charged to the child process, so `b top` reports them in its
+heap column. A flash-backed staged image is shown as swap only while it remains
+flash-backed; the child copies it to tracked internal RAM before WAMR loads it
+and releases the swap allocation. Runtime-global WAMR state is intentionally
+not charged to whichever launcher happened to initialize the shared runtime.
+
 The WASM module image is staged through the external-memory loader, so large
 modules can use PSRAM or flash swap instead of consuming one contiguous
 internal-RAM allocation. WAMR runtime state and writable linear memory still

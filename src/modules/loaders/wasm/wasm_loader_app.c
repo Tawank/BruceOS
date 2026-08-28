@@ -41,6 +41,7 @@
 
 static size_t s_call_count;
 static bool s_runtime_initialized;
+static TaskHandle_t s_runtime_init_task;
 static StaticSemaphore_t s_runtime_mutex_storage;
 static SemaphoreHandle_t s_runtime_mutex;
 static portMUX_TYPE s_runtime_mutex_init = portMUX_INITIALIZER_UNLOCKED;
@@ -50,13 +51,17 @@ size_t wasm_loader__debug_call_count(void) { return s_call_count; }
 typedef struct {
     void *base;
     uint32_t size;
+    uint32_t process_owned;
 } wasm_loader_allocation_header_t;
 
-_Static_assert(sizeof(wasm_loader_allocation_header_t) == 8, "WAMR allocation header ABI changed");
+_Static_assert(sizeof(wasm_loader_allocation_header_t) == 12, "WAMR allocation header ABI changed");
 
 static void *wasm_loader__runtime_malloc(unsigned int size) {
     if (size > UINT32_MAX - sizeof(wasm_loader_allocation_header_t) - 7u) return NULL;
-    void *base = malloc(size + sizeof(wasm_loader_allocation_header_t) + 7u);
+    bool process_owned = process__current_id() != BRUCE_PROCESS_ID_INVALID &&
+                         xTaskGetCurrentTaskHandle() != s_runtime_init_task;
+    size_t allocation_size = size + sizeof(wasm_loader_allocation_header_t) + 7u;
+    void *base = process_owned ? memory__malloc(allocation_size) : malloc(allocation_size);
     if (base == NULL) {
         printf(
             "[wasm_loader] allocation failed: request=%u free=%u largest=%u\n",
@@ -70,7 +75,13 @@ static void *wasm_loader__runtime_malloc(unsigned int size) {
     wasm_loader_allocation_header_t *header = (wasm_loader_allocation_header_t *)address - 1;
     header->base = base;
     header->size = size;
+    header->process_owned = process_owned ? 1u : 0u;
     return (void *)address;
+}
+
+void *wasm_loader__debug_runtime_malloc(size_t size) {
+    if (size > UINT32_MAX) return NULL;
+    return wasm_loader__runtime_malloc((unsigned int)size);
 }
 
 /* Reserved on top of the module bytes themselves for the two allocations
@@ -100,8 +111,11 @@ static size_t wasm_loader__internal_module_budget(void) {
 static void wasm_loader__runtime_free(void *pointer) {
     if (pointer == NULL) return;
     wasm_loader_allocation_header_t *header = (wasm_loader_allocation_header_t *)pointer - 1;
-    free(header->base);
+    if (header->process_owned != 0) memory__free(header->base);
+    else free(header->base);
 }
+
+void wasm_loader__debug_runtime_free(void *pointer) { wasm_loader__runtime_free(pointer); }
 
 static void *wasm_loader__runtime_realloc(void *pointer, unsigned int size) {
     if (pointer == NULL) return wasm_loader__runtime_malloc(size);
@@ -311,7 +325,13 @@ static bool wasm_loader__init_runtime(void) {
     init_args.mem_alloc_option.allocator.malloc_func = wasm_loader__runtime_malloc;
     init_args.mem_alloc_option.allocator.realloc_func = wasm_loader__runtime_realloc;
     init_args.mem_alloc_option.allocator.free_func = wasm_loader__runtime_free;
+    /* Runtime-global allocations outlive whichever launcher first initializes
+     * WAMR. Keep those global blocks outside per-process accounting; module,
+     * instance, linear-memory, and exec-env allocations are made later by the
+     * child task and are charged to that child. */
+    s_runtime_init_task = xTaskGetCurrentTaskHandle();
     if (!wasm_runtime_full_init(&init_args)) {
+        s_runtime_init_task = NULL;
         printf("[wasm_loader] failed to initialize runtime\n");
         xSemaphoreGive(s_runtime_mutex);
         return false;
@@ -319,9 +339,11 @@ static bool wasm_loader__init_runtime(void) {
     if (!wasm_bruce_host_adapter__register()) {
         printf("[wasm_loader] failed to register Bruce SDK imports\n");
         wasm_runtime_destroy();
+        s_runtime_init_task = NULL;
         xSemaphoreGive(s_runtime_mutex);
         return false;
     }
+    s_runtime_init_task = NULL;
     s_runtime_initialized = true;
     xSemaphoreGive(s_runtime_mutex);
     return true;
@@ -331,18 +353,43 @@ void wasm_loader__init(void) {
     (void)wasm_loader__init_runtime();
 }
 
+static void wasm_loader__release_runtime_objects(wasm_loader_process_ctx_t *ctx) {
+    if (ctx == NULL) { return; }
+    if (ctx->module_inst != NULL) {
+        wasm_runtime_deinstantiate(ctx->module_inst);
+        ctx->module_inst = NULL;
+    }
+    if (ctx->module != NULL) {
+        wasm_runtime_unload(ctx->module);
+        ctx->module = NULL;
+    }
+    if (ctx->module_buffer != NULL) {
+        memory__free(ctx->module_buffer);
+        ctx->module_buffer = NULL;
+    }
+    if (ctx->module_image.memory.handle != 0) {
+        (void)ext_mem_loader__release_image(&ctx->module_image);
+    }
+    ctx->module_bytes = NULL;
+    ctx->module_size = 0;
+}
+
 static void wasm_loader__free_process_ctx(wasm_loader_process_ctx_t *ctx) {
     if (ctx == NULL) { return; }
-    if (ctx->module_inst != NULL) wasm_runtime_deinstantiate(ctx->module_inst);
-    if (ctx->module != NULL) wasm_runtime_unload(ctx->module);
+    wasm_loader__release_runtime_objects(ctx);
     app_runner__free_args(ctx->argv, ctx->argc);
-    free(ctx->module_buffer);
-    if (ctx->module_image.memory.handle != 0) (void)ext_mem_loader__release_image(&ctx->module_image);
     free(ctx);
 }
 
 static void wasm_loader__cleanup_context(void *context) {
-    wasm_loader__free_process_ctx((wasm_loader_process_ctx_t *)context);
+    wasm_loader_process_ctx_t *ctx = (wasm_loader_process_ctx_t *)context;
+    if (ctx == NULL) return;
+    /* Normal return releases WAMR objects while their process-owned
+     * allocations are still registered. Force-kill has already reclaimed
+     * those resources before this callback, so only loader scaffolding is
+     * safe to touch here. */
+    app_runner__free_args(ctx->argv, ctx->argc);
+    free(ctx);
 }
 
 static int wasm_loader__entry(void *context) {
@@ -451,11 +498,28 @@ static int wasm_loader__process_entry(void *context) {
         ctx->module_size = ctx->module_image.size;
     }
 
+    if (ctx->module_image.memory.backend == BRUCE_MEMORY_BACKEND_SWAP) {
+        size_t module_size = ctx->module_image.size;
+        ctx->module_buffer = memory__malloc(module_size);
+        if (ctx->module_buffer == NULL) return BRUCE_ERR_NO_MEMORY;
+        memcpy(ctx->module_buffer, ctx->module_image.data, module_size);
+        (void)ext_mem_loader__release_image(&ctx->module_image);
+        ctx->module_bytes = ctx->module_buffer;
+        ctx->module_size = module_size;
+    }
+
     if (!wasm_loader__init_runtime()) {
         return BRUCE_ERR_INVALID_STATE;
     }
 
-    if (ctx->module == NULL) return BRUCE_ERR_INVALID_STATE;
+    ctx->module = wasm_runtime_load(
+        (uint8_t *)ctx->module_bytes, (uint32_t)ctx->module_size, error_buf, sizeof(error_buf)
+    );
+    if (ctx->module == NULL) {
+        stdio__printf("[wasm_loader] %s: %s\n", wasm_loader__basename(ctx->path), error_buf);
+        wasm_loader__release_runtime_objects(ctx);
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
 
     const InstantiationArgs instantiate_args = {
         .default_stack_size = WASM_LOADER_EXEC_STACK_BYTES,
@@ -476,10 +540,13 @@ static int wasm_loader__process_entry(void *context) {
             );
             (void)dialog__message(BRUCE_DIALOG_ERROR, "Launch failed", message);
         }
+        wasm_loader__release_runtime_objects(ctx);
         return BRUCE_ERR_NO_MEMORY;
     }
 
-    return wasm_loader__entry(ctx);
+    int result = wasm_loader__entry(ctx);
+    wasm_loader__release_runtime_objects(ctx);
+    return result;
 }
 
 static int wasm_loader__open(
@@ -570,21 +637,7 @@ static int wasm_loader__open(
     }
     ctx->module_bytes = ctx->module_image.data;
     ctx->module_size = ctx->module_image.size;
-    if (ctx->module_image.memory.backend == BRUCE_MEMORY_BACKEND_SWAP) {
-        size_t module_size = ctx->module_image.size;
-        ctx->module_buffer = malloc(module_size);
-        if (ctx->module_buffer == NULL) {
-            wasm_loader__free_process_ctx(ctx);
-            memory__free(inspection);
-            return BRUCE_ERR_NO_MEMORY;
-        }
-        memcpy(ctx->module_buffer, ctx->module_image.data, module_size);
-        (void)ext_mem_loader__release_image(&ctx->module_image);
-        ctx->module_bytes = ctx->module_buffer;
-        ctx->module_size = module_size;
-    }
 
-    char error_buf[128];
     wasm_memory_preflight_result_t memory_result =
         wasm_loader__preflight_memory(ctx->module_bytes, ctx->module_size);
     if (memory_result != WASM_MEMORY_PREFLIGHT_OK) {
@@ -598,16 +651,6 @@ static int wasm_loader__open(
         return memory_result == WASM_MEMORY_PREFLIGHT_LIMIT ?
                    BRUCE_ERR_RESOURCE_LIMIT : BRUCE_ERR_INVALID_ARGUMENT;
     }
-    ctx->module = wasm_runtime_load(
-        (uint8_t *)ctx->module_bytes, (uint32_t)ctx->module_size, error_buf, sizeof(error_buf)
-    );
-    if (ctx->module == NULL) {
-        stdio__printf("[wasm_loader] %s: %s\n", wasm_loader__basename(ctx->path), error_buf);
-        wasm_loader__free_process_ctx(ctx);
-        memory__free(inspection);
-        return BRUCE_ERR_INVALID_ARGUMENT;
-    }
-
     bool gui_requested = app_runner__environment_requests_gui(environment, environment_count);
     ctx->gui = gui_requested;
     if (inspection->manifest.stack_size > WASM_LOADER_MANIFEST_STACK_MAX) {
