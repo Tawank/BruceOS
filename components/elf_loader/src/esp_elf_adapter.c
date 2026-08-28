@@ -8,6 +8,7 @@
 #include <sys/errno.h>
 #include "esp_attr.h"
 #include "esp_heap_caps.h"
+#include "esp_idf_version.h"
 #include "soc/soc.h"
 #include "private/elf_platform.h"
 

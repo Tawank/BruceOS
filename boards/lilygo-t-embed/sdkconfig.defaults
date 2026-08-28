@@ -21,6 +21,32 @@
 # sdkconfig defaults rule.
 CONFIG_IDF_TARGET="esp32s3"
 
+# PSRAM: this board's ESP32-S3 module has 8MB of in-package Octal PSRAM
+# (legacy board_build.arduino.memory_type = qio_opi - "opi" is Octal PSRAM,
+# distinct from the Quad-PSRAM "qspi" some other boards use, e.g.
+# lilygo-t-lora-pager's qio_qspi). 80MHz is the standard, non-experimental
+# speed for Octal PSRAM on ESP32-S3 (120MHz is flagged experimental/
+# thermal-sensitive in Kconfig.spiram; 40MHz leaves it underused). CLK/CS
+# IO default to the fixed internal pins the R8 in-package PSRAM actually
+# uses, not GPIOs, so nothing else needs configuring here.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+# Route plain malloc() (not just explicit MALLOC_CAP_SPIRAM callers like
+# memory__external_alloc() below) through PSRAM once it no longer fits
+# internal RAM. This is already ESP-IDF's own default SPIRAM_USE choice
+# once CONFIG_SPIRAM=y - pinned explicitly here so it can't silently change
+# out from under this board if that upstream default ever does.
+CONFIG_SPIRAM_USE_MALLOC=y
+
+# Partition layout: with PSRAM now available, memory__external_alloc()
+# (src/core_sdk/memory.h) prefers PSRAM over the flash-backed "swap"
+# partition, so swap's 512K is mostly wasted space here - use the swap-less
+# layout instead. memory__external_alloc() still falls back straight to
+# internal RAM if a PSRAM allocation doesn't fit and there's no swap
+# partition to fall back to next, per that function's documented order.
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
 # Power: GPIO46 must be driven high at boot to latch the board's peripheral
 # power rail on (legacy PIN_POWER_ON, set HIGH in interface.cpp before
 # anything else, unconditionally for this board too - only the pin number
