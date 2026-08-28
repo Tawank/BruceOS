@@ -10,7 +10,7 @@
 #include "browser_document.h"
 #include "core_sdk/result.h"
 
-#define BROWSER_HOME_URL "http://bruce.computer/"
+#define BROWSER_HOME_URL "https://bruce.computer/"
 
 /* Called synchronously after each response chunk has been parsed. `received`
  * is the cumulative number of response-body bytes received so far. */

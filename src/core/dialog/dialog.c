@@ -491,11 +491,10 @@ static bruce_result_t dialog__gui_message(bruce_dialog_kind_t kind, const char *
 /* Blocks until the SELECT press dialog__gui_choice() just consumed either
  * releases or has been held DIALOG__LONG_PRESS_MS, whichever comes first -
  * distinguishing a long press from a plain tap for a long_press_enabled
- * caller. `press_started_at` is that press event's own timestamp_ms, not
- * runtime__now() at the point of the call, so time already spent in
- * dialog__gui_choice()'s input__read() before this ran still counts toward
- * the hold. Only reached when a caller opts in, so every existing
- * dialog__choice()/_ex() caller keeps returning on the raw PRESS exactly as
+ * caller. `press_started_at` and the checks below both use runtime__now();
+ * input event timestamps use the FreeRTOS tick epoch and cannot safely be
+ * compared with runtime__now()'s ESP timer epoch. Only reached when a caller opts in, so every
+ * existing dialog__choice()/_ex() caller keeps returning on the raw PRESS exactly as
  * before this existed. */
 static bool dialog__gui_wait_long_press(uint64_t press_started_at) {
     for (;;) {
@@ -764,7 +763,7 @@ static bruce_result_t dialog__gui_choice(
                 break;
             case BRUCE_INPUT_CODE_SELECT:
                 if (long_press_enabled) {
-                    bool is_long_press = dialog__gui_wait_long_press(ev.timestamp_ms);
+                    bool is_long_press = dialog__gui_wait_long_press(runtime__now());
                     if (render_params->out_long_press != NULL) { *render_params->out_long_press = is_long_press; }
                 }
                 *out_selected = (size_t)selected;
@@ -1465,14 +1464,14 @@ static bruce_result_t dialog__gui_pick_file_run(
         }
 
         int choice_count = 0;
-        /* ".." entry to go up, except at root. */
-        if (strcmp(ws->current_path, "/") != 0) {
-            values[choice_count] = "..";
-            choices[choice_count].label = "[..]";
-            choices[choice_count].value = "..";
-            choices[choice_count].icon_name = "folder-open";
-            choice_count++;
-        }
+        /* Keep an explicit exit row at root too. Besides making the exit
+         * discoverable, Filemanager can long-press this row to act on the
+         * directory currently being displayed. */
+        values[choice_count] = "..";
+        choices[choice_count].label = strcmp(ws->current_path, "/") == 0 ? "[..] (exit)" : "[..]";
+        choices[choice_count].value = "..";
+        choices[choice_count].icon_name = "folder-open";
+        choice_count++;
         for (size_t i = 0; i < count && (size_t)choice_count < count + 1; ++i) {
             if (entries[i].type == BRUCE_STORAGE_ENTRY_FILE &&
                 !dialog__matches_extension_filter(entries[i].name, extension_filter)) {
@@ -1548,6 +1547,19 @@ static bruce_result_t dialog__gui_pick_file_run(
         }
 
         if (strcmp(picked, "..") == 0) {
+            if (effective_params->long_press_enabled && effective_params->out_long_press != NULL &&
+                *effective_params->out_long_press) {
+                if (effective_params->out_parent_entry != NULL) {
+                    *effective_params->out_parent_entry = true;
+                }
+                snprintf(out_path, out_path_size, "%s", ws->current_path);
+                memory__free(entries);
+                return BRUCE_OK;
+            }
+            if (strcmp(ws->current_path, "/") == 0) {
+                memory__free(entries);
+                return BRUCE_ERR_CANCELLED;
+            }
             dialog__pick_file_note_returning_from(
                 ws->current_path, ws->returning_from, sizeof(ws->returning_from)
             );
@@ -1621,8 +1633,13 @@ static bruce_result_t dialog__gui_pick_file(
      * behavior without caring which press kind produced the result). The
      * caller's own slot, if any, is filled in from it below. */
     bool *caller_out_long_press = effective_params.out_long_press;
+    bool *caller_out_parent_entry = effective_params.out_parent_entry;
     bool picker_long_press = false;
-    if (effective_params.long_press_enabled) { effective_params.out_long_press = &picker_long_press; }
+    bool picker_parent_entry = false;
+    if (effective_params.long_press_enabled) {
+        effective_params.out_long_press = &picker_long_press;
+        effective_params.out_parent_entry = &picker_parent_entry;
+    }
 
     dialog__pick_file_workspace_t *ws = memory__malloc(sizeof(*ws));
     if (ws == NULL) { return BRUCE_ERR_NO_MEMORY; }
@@ -1631,6 +1648,7 @@ static bruce_result_t dialog__gui_pick_file(
     );
     memory__free(ws);
     if (caller_out_long_press != NULL) { *caller_out_long_press = picker_long_press; }
+    if (caller_out_parent_entry != NULL) { *caller_out_parent_entry = picker_parent_entry; }
     return result;
 }
 

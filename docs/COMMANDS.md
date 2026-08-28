@@ -589,7 +589,7 @@ Usage: browser [url]
 Browse the web, Lynx-style, with inline images.
 
 Arguments:
-  url   Starting URL (defaults to http://bruce.computer/)
+  url   Starting URL (defaults to https://bruce.computer/)
 
 Options:
   -h, --help    Show this help

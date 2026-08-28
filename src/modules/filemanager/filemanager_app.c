@@ -36,6 +36,45 @@ static const char *filemanager__basename(const char *path) {
     return slash != NULL ? slash + 1 : path;
 }
 
+static void filemanager__parent_path(const char *path, char *out, size_t out_size) {
+    snprintf(out, out_size, "%s", path);
+    char *slash = strrchr(out, '/');
+    if (slash == NULL || slash == out) {
+        snprintf(out, out_size, "/");
+    } else {
+        *slash = '\0';
+    }
+}
+
+static bruce_result_t filemanager__new_entry(const char *directory, bool folder) {
+    char name[BRUCE_STORAGE_NAME_MAX];
+    bruce_result_t result = dialog__text_input(
+        folder ? "New folder" : "New file", "Name", "", false, name, sizeof(name)
+    );
+    if (result != BRUCE_OK) return result;
+    if (name[0] == '\0' || strchr(name, '/') != NULL || strcmp(name, ".") == 0 ||
+        strcmp(name, "..") == 0) {
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+
+    char new_path[BRUCE_STORAGE_PATH_MAX];
+    int written;
+    if (strcmp(directory, "/") == 0) {
+        written = snprintf(new_path, sizeof(new_path), "/%s", name);
+    } else {
+        written = snprintf(new_path, sizeof(new_path), "%s/%s", directory, name);
+    }
+    if (written < 0 || (size_t)written >= sizeof(new_path)) return BRUCE_ERR_RESOURCE_LIMIT;
+    if (folder) return storage__mkdir(new_path);
+
+    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
+    result = storage__open(
+        new_path, BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE | BRUCE_STORAGE_OPEN_TRUNCATE, &file
+    );
+    if (result == BRUCE_OK) result = storage__close(file);
+    return result;
+}
+
 static const char *filemanager__extension(const char *path) {
     const char *dot = strrchr(path, '.');
     return dot != NULL ? dot : "";
@@ -338,6 +377,11 @@ int filemanager_app_main(int argc, char **argv) {
         {.label = "Delete",      .value = "delete"},
         {.label = "Back",        .value = "back"  },
     };
+    const bruce_dialog_choice_t directory_actions[] = {
+        {.label = "New file",   .value = "new_file"  },
+        {.label = "New folder", .value = "new_folder"},
+        {.label = "Back",       .value = "back"      },
+    };
     (void)argc;
     (void)argv;
 
@@ -347,6 +391,8 @@ int filemanager_app_main(int argc, char **argv) {
      * came back (probed via storage__list() further down) is all this loop
      * needs to know. */
     action_params.long_press_enabled = true;
+    bool parent_entry = false;
+    action_params.out_parent_entry = &parent_entry;
     /* The last file/folder picked, re-passed as dialog__pick_file_ex()'s
      * starting point below: it browses that entry's directory with the
      * entry itself pre-selected, so Esc/"Back" out of the action menu lands
@@ -383,23 +429,43 @@ int filemanager_app_main(int argc, char **argv) {
         /* Plain dialog__choice(), not the picker's full-bleed action_params:
          * this is a small action menu over the already-visible file browser,
          * so it reads better as a popup window than another full screen. */
-        const bruce_dialog_choice_t *menu = is_folder ? folder_actions : actions;
-        size_t menu_count = is_folder ? sizeof(folder_actions) / sizeof(folder_actions[0])
-                                       : sizeof(actions) / sizeof(actions[0]);
+        const bruce_dialog_choice_t *menu =
+            parent_entry ? directory_actions : (is_folder ? folder_actions : actions);
+        size_t menu_count = parent_entry ? sizeof(directory_actions) / sizeof(directory_actions[0])
+                            : is_folder   ? sizeof(folder_actions) / sizeof(folder_actions[0])
+                                          : sizeof(actions) / sizeof(actions[0]);
         result = dialog__choice(path, NULL, menu, menu_count, &selected);
         if (result == BRUCE_ERR_CANCELLED && filemanager__resume_after_handoff()) {
             (void)input__flush();
             continue;
         }
-        if (result == BRUCE_ERR_CANCELLED) continue;
+        if (result == BRUCE_ERR_CANCELLED) {
+            if (!parent_entry && is_folder) {
+                filemanager__parent_path(path, last_path, sizeof(last_path));
+            }
+            (void)input__flush();
+            continue;
+        }
         if (result != BRUCE_OK) {
             filemanager__show_error("Action", result);
             continue;
         }
 
         const char *action = menu[selected].value;
-        if (strcmp(action, "back") == 0) continue;
-        if (is_folder) {
+        if (strcmp(action, "back") == 0) {
+            if (!parent_entry && is_folder) {
+                filemanager__parent_path(path, last_path, sizeof(last_path));
+            }
+            (void)input__flush();
+            continue;
+        }
+        if (parent_entry) {
+            if (strcmp(action, "new_file") == 0) {
+                result = filemanager__new_entry(path, false);
+            } else if (strcmp(action, "new_folder") == 0) {
+                result = filemanager__new_entry(path, true);
+            }
+        } else if (is_folder) {
             if (strcmp(action, "rename") == 0) {
                 result = filemanager__rename_entry(path, sizeof(path));
                 if (result == BRUCE_OK) snprintf(last_path, sizeof(last_path), "%s", path);

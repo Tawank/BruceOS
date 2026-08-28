@@ -63,6 +63,10 @@ typedef struct {
      * behavior below without needing to know afterward which kind of
      * press it was. Left untouched when long_press_enabled is false. */
     bool *out_long_press;
+    /* Set when the returned long-press selection was the synthetic `[..]`
+     * row rather than a real file or directory. The returned path is the
+     * directory that was being displayed. */
+    bool *out_parent_entry;
 } bruce_dialog_render_params_t;
 
 /**
@@ -165,7 +169,10 @@ bruce_result_t dialog__pick_file(
  * short press on a file returns that file's path - so a caller can offer
  * folder-level actions (rename/delete/info, ...) the way it already can
  * for a picked file. A short press on a directory still descends into it
- * exactly as before, long_press_enabled or not.
+ * exactly as before, long_press_enabled or not. A long press on the
+ * synthetic `[..]` row returns the directory currently being displayed and
+ * sets `*render_params->out_parent_entry`; a short press navigates upward,
+ * or returns BRUCE_ERR_CANCELLED when used at root.
  *
  * @param initial_path Directory the picker starts browsing from.
  * @param extension_filter Optional filter limiting which file extensions are shown.

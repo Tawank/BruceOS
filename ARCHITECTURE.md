@@ -1057,6 +1057,10 @@ Core. The built-in `lsblk` command renders this inventory in Linux-style
 `NAME MAJ:MIN RM SIZE RO TYPE MOUNTPOINTS` columns. Built-in-only
 `disk__mount()` and `disk__unmount()` operations manage the Cardputer SD device
 as `sd0` at `/sdcard`; unmount refuses while public SD file handles are open.
+Successful SD and internal-partition mounts ensure their backing mount-point
+directory exists first, so root directory listings expose mounted filesystems as
+ordinary directory entries; a mount failure removes a directory created solely
+for that attempt.
 The `mount` command lists mounted filesystems when called without arguments,
 and `mount sd0 [mount-point]` and `unmount <sd0|/sdcard>` manage the SD card.
 

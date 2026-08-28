@@ -81,6 +81,19 @@ static char *storage__strdup(const char *value) {
     return copy;
 }
 
+/* VFS registrations make a mount path directly addressable, but the root
+ * fallback filesystem only enumerates mount points that also exist as real
+ * directories. Create that backing entry before registering the VFS so
+ * storage__list("/") (and therefore ls/Filemanager) can discover it. */
+static bool storage__ensure_mount_directory_locked(const char *path, bool *out_created) {
+    if (out_created != NULL) *out_created = false;
+    struct stat path_stat;
+    if (stat(path, &path_stat) == 0) return S_ISDIR(path_stat.st_mode);
+    if (errno != ENOENT || mkdir(path, 0775) != 0) return false;
+    if (out_created != NULL) *out_created = true;
+    return true;
+}
+
 static bool storage__littlefs_metadata_erased(const esp_partition_t *partition) {
     uint8_t buffer[256];
     size_t check_size = partition->size < 2 * SPI_FLASH_SEC_SIZE ? partition->size : 2 * SPI_FLASH_SEC_SIZE;
@@ -371,6 +384,13 @@ bool storage__sd_mount_spi(const storage__sdspi_config_t *config) {
     sdspi_device_config_t device = SDSPI_DEVICE_CONFIG_DEFAULT();
     device.gpio_cs = config->cs_gpio;
     device.host_id = host.slot;
+    bool mount_directory_created = false;
+    if (!storage__ensure_mount_directory_locked(STORAGE__SD_MOUNT_PATH, &mount_directory_created)) {
+        if (s_sd_bus_owned) spi_bus_free(config->host);
+        s_sd_bus_owned = false;
+        storage__unlock();
+        return false;
+    }
     esp_vfs_fat_mount_config_t mount = {
         .format_if_mount_failed = false,
         .max_files = 5,
@@ -380,6 +400,7 @@ bool storage__sd_mount_spi(const storage__sdspi_config_t *config) {
     if (err != ESP_OK) {
         if (s_sd_bus_owned) spi_bus_free(config->host);
         s_sd_bus_owned = false;
+        if (mount_directory_created) (void)rmdir(STORAGE__SD_MOUNT_PATH);
         ESP_LOGW(TAG, "could not mount SD card: %s", esp_err_to_name(err));
         storage__unlock();
         return false;
@@ -510,6 +531,14 @@ bruce_result_t storage__mount_partition(const char *label, const char *mount_poi
         return BRUCE_ERR_NO_MEMORY;
     }
 
+    bool mount_directory_created = false;
+    if (!storage__ensure_mount_directory_locked(mount_point, &mount_directory_created)) {
+        free(label_copy);
+        free(mount_point_copy);
+        storage__unlock();
+        return BRUCE_ERR_INVALID_PATH;
+    }
+
     const esp_vfs_littlefs_conf_t config = {
         .base_path = mount_point,
         .partition_label = NULL,
@@ -525,6 +554,7 @@ bruce_result_t storage__mount_partition(const char *label, const char *mount_poi
     }
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "could not mount '%s' at %s: %s", label, mount_point, esp_err_to_name(err));
+        if (mount_directory_created) (void)rmdir(mount_point);
         free(label_copy);
         free(mount_point_copy);
         storage__unlock();
