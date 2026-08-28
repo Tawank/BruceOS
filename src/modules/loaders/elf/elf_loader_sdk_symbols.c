@@ -467,6 +467,7 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(display__set_text_size),
     ESP_ELFSYM_EXPORT(display__set_cursor),
     ESP_ELFSYM_EXPORT(display__get_cursor),
+    ESP_ELFSYM_EXPORT(display__get_font_metrics),
     ESP_ELFSYM_EXPORT(display__print),
     ESP_ELFSYM_EXPORT(display__println),
     ESP_ELFSYM_EXPORT(display__draw_string),
