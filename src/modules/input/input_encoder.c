@@ -12,9 +12,10 @@
 
 #define INPUT__ENCODER_PIN_A CONFIG_BRUCE_ENCODER_PIN_A
 #define INPUT__ENCODER_PIN_B CONFIG_BRUCE_ENCODER_PIN_B
-/* One full detent is 4 quadrature sub-steps on a typical mechanical
- * encoder. */
-#define INPUT__ENCODER_STEPS_PER_DETENT 4
+/* How many quadrature sub-steps make up one detent - see
+ * BRUCE_ENCODER_STEPS_PER_DETENT's help text; typical mechanical encoders
+ * are 4, but not all of them. */
+#define INPUT__ENCODER_STEPS_PER_DETENT CONFIG_BRUCE_ENCODER_STEPS_PER_DETENT
 
 /* Standard quadrature gray-code transition table: index is
  * (old_state << 2 | new_state), where each state is (A << 1 | B). Value is

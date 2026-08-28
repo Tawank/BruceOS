@@ -273,6 +273,24 @@ menu "Bruce hardware configuration"
             depends on BRUCE_DISPLAY_BACKLIGHT_AXP192_LDO2_ENABLED
             default 0x34
 
+        config BRUCE_DISPLAY_BACKLIGHT_MAX_LEVEL
+            int "Maximum backlight PWM level (0-255)"
+            default 255
+            range 1 255
+            help
+                Caps the brightness value display_driver__set_backlight()
+                ever turns into an LEDC duty cycle, so 100% brightness in
+                the UI still leaves a sliver of PWM off-time rather than
+                driving the backlight pin to a literal, unswitched DC high.
+                Most boards are fine at the default (255 = no cap).
+
+                Some boards' backlight boost converter needs that off-time
+                to stay in regulation, and visibly flickers without it -
+                the LilyGO T-Embed family (both variants) is a known case:
+                the legacy Arduino driver's analogWrite(TFT_BL, ...) always
+                capped out at 254, never the full 255, for exactly this
+                reason.
+
         # ST7789's addressable RAM is a fixed 240x320; a physically smaller
         # panel is offset within it, and the offset swaps per rotation. These
         # four (x, y) pairs are the same per-panel constants TFT_eSPI ships in
@@ -696,6 +714,24 @@ menu "Bruce hardware configuration"
             int "Encoder B (quadrature) GPIO"
             depends on BRUCE_ENCODER_ENABLED
             range 0 48
+
+        config BRUCE_ENCODER_STEPS_PER_DETENT
+            int "Quadrature sub-steps per detent"
+            depends on BRUCE_ENCODER_ENABLED
+            default 4
+            range 1 8
+            help
+                How many valid quadrature transitions the decoder should
+                accumulate before it counts one detent (one UP/DOWN press).
+                A typical mechanical encoder is 4 sub-steps per detent -
+                that's the default - but some (e.g. the encoder used on
+                both LilyGO T-Embed variants) only produce 2: the legacy
+                Arduino driver's RotaryDecoder::begin() defaults to
+                stepsPerDetent=2, and both boards' interface.cpp use that
+                default rather than overriding it to 4. Set too high and
+                each detent needs several turns to register; set too low
+                and a single detent fires more than one UP/DOWN.
+
     endmenu
 
     menu "Touch"

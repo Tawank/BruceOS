@@ -12,6 +12,14 @@
 # sdkconfig defaults rule.
 CONFIG_IDF_TARGET="esp32s3"
 
+# Power: GPIO15 must be driven high at boot to latch the board's peripheral
+# power rail on (legacy PIN_POWER_ON, set HIGH in interface.cpp before
+# anything else - "Power on CC1101 and LED", but it also feeds the
+# display/SD rail here). Left low/floating, the ESP32-S3 itself still boots
+# fine off USB but the display, SD card, and radio stay unpowered - see
+# BRUCE_POWER_HOLD_GPIO's help text.
+CONFIG_BRUCE_POWER_HOLD_GPIO=15
+
 # Board I2C bus (legacy GROVE_SDA/GROVE_SCL, also aliased SYS_I2C_SDA/
 # SYS_I2C_SCL in pins_arduino.h): shared by the BQ27220 fuel gauge below.
 # Not used by the display/SD/NRF24 SPI buses, so no pin conflicts.
@@ -33,6 +41,11 @@ CONFIG_BRUCE_DISPLAY_PIN_CS=41
 CONFIG_BRUCE_DISPLAY_PIN_DC=16
 CONFIG_BRUCE_DISPLAY_PIN_RST=40
 CONFIG_BRUCE_DISPLAY_PIN_BL=21
+# This board's backlight boost converter flickers at a literal 100% PWM
+# duty cycle - the legacy Arduino driver's analogWrite(TFT_BL, ...) always
+# capped out at 254, never 255, for exactly this reason (see
+# BRUCE_DISPLAY_BACKLIGHT_MAX_LEVEL's help text).
+CONFIG_BRUCE_DISPLAY_BACKLIGHT_MAX_LEVEL=254
 CONFIG_BRUCE_DISPLAY_GAP_X_ROTATION0=35
 CONFIG_BRUCE_DISPLAY_GAP_Y_ROTATION0=0
 CONFIG_BRUCE_DISPLAY_GAP_X_ROTATION1=0
@@ -86,6 +99,10 @@ CONFIG_BRUCE_BUTTON_A_GPIO=6
 CONFIG_BRUCE_ENCODER_ENABLED=y
 CONFIG_BRUCE_ENCODER_PIN_A=4
 CONFIG_BRUCE_ENCODER_PIN_B=5
+# This encoder is 2 quadrature sub-steps per detent, not the usual 4 - the
+# legacy Arduino driver used RotaryDecoder's stepsPerDetent=2 default here
+# (see BRUCE_ENCODER_STEPS_PER_DETENT's help text).
+CONFIG_BRUCE_ENCODER_STEPS_PER_DETENT=2
 
 # Infrared.
 CONFIG_BRUCE_IR_TX_GPIO=2

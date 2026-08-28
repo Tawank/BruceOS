@@ -379,6 +379,9 @@ bruce_result_t display_driver__draw_bitmap(
 
 void display_driver__set_backlight(uint8_t brightness) {
     if (!s_backlight_initialized) return;
+    if (brightness > CONFIG_BRUCE_DISPLAY_BACKLIGHT_MAX_LEVEL) {
+        brightness = CONFIG_BRUCE_DISPLAY_BACKLIGHT_MAX_LEVEL;
+    }
     uint32_t duty = ((uint32_t)brightness * DISPLAY__LEDC_MAX_DUTY) / 255;
     ledc_set_duty(DISPLAY__BL_LEDC_MODE, DISPLAY__BL_LEDC_CHANNEL, duty);
     ledc_update_duty(DISPLAY__BL_LEDC_MODE, DISPLAY__BL_LEDC_CHANNEL);

@@ -1,0 +1,116 @@
+# LilyGO T-Embed (ESP32-S3, ST7789 170x320 round-corner bar display, no CC1101 radio).
+#
+# Do not confuse this with boards/lilygo-t-embed-cc1101 - it's a different
+# physical board with entirely different pin numbers, not just a variant
+# missing the radio. (The legacy PlatformIO tree shares one pins_arduino.h
+# file between the two, gated on `#ifdef T_EMBED_1101`; this file was
+# translated from that same file's `#else` branch, i.e. plain T_EMBED.)
+#
+# Peripherals with no equivalent in this HAL yet (W5500 ethernet, PN532 NFC,
+# PDM mic, RGB LED, BadUSB, FM radio) are not ported. IR and NRF24 are also
+# not wired here even though the legacy code default-enables IR: on this
+# board those, the board I2C bus, and the optional CC1101 add-on all
+# time-share the same two expansion-header GPIOs (43/44) depending on what's
+# plugged in, which this HAL's static one-purpose-per-pin config can't
+# express - see the help text below.
+#
+# Selected via `python tools/board.py lilygo-t-embed build` (see
+# tools/board.py), which passes this file through SDKCONFIG_DEFAULTS after
+# the shared sdkconfig.defaults. The build system automatically also loads
+# sdkconfig.defaults.esp32s3 if present, per ESP-IDF's target-dependent
+# sdkconfig defaults rule.
+CONFIG_IDF_TARGET="esp32s3"
+
+# Power: GPIO46 must be driven high at boot to latch the board's peripheral
+# power rail on (legacy PIN_POWER_ON, set HIGH in interface.cpp before
+# anything else, unconditionally for this board too - only the pin number
+# differs from the CC1101 variant's GPIO15). Left low/floating, the
+# ESP32-S3 itself still boots fine off USB but the display and SD card stay
+# unpowered - see BRUCE_POWER_HOLD_GPIO's help text.
+CONFIG_BRUCE_POWER_HOLD_GPIO=46
+
+# Board I2C bus (legacy GROVE_SDA/GROVE_SCL, aka SYS_I2C_SDA/SYS_I2C_SCL):
+# left disabled here because these same two GPIOs (43/44) are also the
+# legacy default IR TX/RX pins and the NRF24/CC1101 add-on's CS/CE pins on
+# this board's shared expansion header - wiring it up by default would
+# silently contend with whichever of those a future patch ports next.
+# Uncomment if you need the QWIIC header as a plain I2C bus and aren't using
+# the header for IR/NRF24/CC1101:
+# CONFIG_BRUCE_BOARD_I2C_ENABLED=y
+# CONFIG_BRUCE_BOARD_I2C_SDA_GPIO=44
+# CONFIG_BRUCE_BOARD_I2C_SCL_GPIO=43
+
+# Display: SPI2_HOST, ST7789 170x320 physical panel, portrait (rotation 3).
+# Same physical panel as the CC1101 variant (see that board's sdkconfig.
+# defaults for the gap-table provenance), but on its own dedicated SPI bus
+# here (no MISO wired) rather than sharing one with SD/NRF24.
+CONFIG_BRUCE_DISPLAY_WIDTH=170
+CONFIG_BRUCE_DISPLAY_HEIGHT=320
+CONFIG_BRUCE_DISPLAY_DEFAULT_ROTATION=3
+CONFIG_BRUCE_DISPLAY_SPI_HOST=1
+CONFIG_BRUCE_DISPLAY_PIN_MOSI=11
+CONFIG_BRUCE_DISPLAY_PIN_SCK=12
+CONFIG_BRUCE_DISPLAY_PIN_CS=10
+CONFIG_BRUCE_DISPLAY_PIN_DC=13
+CONFIG_BRUCE_DISPLAY_PIN_RST=9
+CONFIG_BRUCE_DISPLAY_PIN_BL=15
+# This board's backlight boost converter flickers at a literal 100% PWM
+# duty cycle - the legacy Arduino driver's analogWrite(TFT_BL, ...) always
+# capped out at 254, never 255, for exactly this reason (see
+# BRUCE_DISPLAY_BACKLIGHT_MAX_LEVEL's help text).
+CONFIG_BRUCE_DISPLAY_BACKLIGHT_MAX_LEVEL=254
+CONFIG_BRUCE_DISPLAY_GAP_X_ROTATION0=35
+CONFIG_BRUCE_DISPLAY_GAP_Y_ROTATION0=0
+CONFIG_BRUCE_DISPLAY_GAP_X_ROTATION1=0
+CONFIG_BRUCE_DISPLAY_GAP_Y_ROTATION1=35
+CONFIG_BRUCE_DISPLAY_GAP_X_ROTATION2=35
+CONFIG_BRUCE_DISPLAY_GAP_Y_ROTATION2=0
+CONFIG_BRUCE_DISPLAY_GAP_X_ROTATION3=0
+CONFIG_BRUCE_DISPLAY_GAP_Y_ROTATION3=35
+
+# Audio: I2S DAC (NS4168 amp).
+CONFIG_BRUCE_AUDIO_BACKEND_I2S=y
+CONFIG_BRUCE_AUDIO_I2S_BCLK_GPIO=7
+CONFIG_BRUCE_AUDIO_I2S_DATA_GPIO=6
+CONFIG_BRUCE_AUDIO_I2S_LRCLK_GPIO=5
+
+# Battery: no fuel-gauge/PMIC IC on this variant (unlike the CC1101 board's
+# BQ27220) - legacy ANALOG_BAT_PIN 4 reads a raw divider on ADC1, which on
+# ESP32-S3 is GPIO4 = ADC1 channel 3.
+CONFIG_BRUCE_BATTERY_ENABLED=y
+CONFIG_BRUCE_BATTERY_BACKEND_ADC=y
+CONFIG_BRUCE_BATTERY_ADC_CHANNEL=3
+
+# SD card: own SPI3_HOST bus, shared with nothing else on this variant
+# (legacy SPI_MOSI_PIN/MISO_PIN/SCK_PIN/SDCARD_CS).
+CONFIG_BRUCE_SD_ENABLED=y
+CONFIG_BRUCE_SD_SPI_HOST=2
+CONFIG_BRUCE_SD_PIN_MOSI=41
+CONFIG_BRUCE_SD_PIN_MISO=38
+CONFIG_BRUCE_SD_PIN_SCK=40
+CONFIG_BRUCE_SD_PIN_CS=39
+
+# Buttons: this board's only physical input besides the encoder's own turn
+# motion is the encoder's center press (legacy ENCODER_KEY/SEL_BTN), mapped
+# to SELECT (OK/confirm) - unlike the CC1101 variant there is no separate
+# back button (no legacy BK_BTN on this board), so no button A here.
+CONFIG_BRUCE_BUTTON_SELECT_ENABLED=y
+CONFIG_BRUCE_BUTTON_SELECT_GPIO=0
+# CONFIG_BRUCE_BUTTON_A_ENABLED is not set
+# CONFIG_BRUCE_BUTTON_B_ENABLED is not set
+# CONFIG_BRUCE_BUTTON_C_ENABLED is not set
+
+# No GPIO matrix keyboard on this board.
+# CONFIG_BRUCE_KEYBOARD_ENABLED is not set
+
+# Rotary encoder: quadrature turn (legacy ENCODER_INA/INB), synthesized as
+# UP/DOWN presses (see BRUCE_ENCODER_ENABLED's help text) - every existing
+# menu that already handles up/down navigation works here with no app-side
+# changes. The center-press part is the SELECT button above, not here.
+CONFIG_BRUCE_ENCODER_ENABLED=y
+CONFIG_BRUCE_ENCODER_PIN_A=2
+CONFIG_BRUCE_ENCODER_PIN_B=1
+# This encoder is 2 quadrature sub-steps per detent, not the usual 4 - the
+# legacy Arduino driver used RotaryDecoder's stepsPerDetent=2 default here
+# (see BRUCE_ENCODER_STEPS_PER_DETENT's help text).
+CONFIG_BRUCE_ENCODER_STEPS_PER_DETENT=2
