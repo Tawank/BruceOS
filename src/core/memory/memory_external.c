@@ -312,16 +312,16 @@ memory__external_write(const bruce_memory_object_t *object, size_t offset, const
             process_registry__operation_end();
             return BRUCE_ERR_INVALID_ARGUMENT;
         }
-        bool direct_write = partition != NULL;
-        for (size_t i = 0; direct_write && i < size; ++i) {
-            direct_write = (record->data[offset + i] & bytes[i]) == bytes[i];
-        }
-        if (direct_write) {
-            if (esp_partition_write(partition, record->offset + offset, data, size) != ESP_OK) {
-                result = BRUCE_ERR_IO;
-            }
-        } else if (partition != NULL) {
-            uint8_t *sector = malloc(MEMORY_EXTERNAL__FLASH_SECTOR);
+        if (partition != NULL) {
+            /* Flash operations disable the cache. Caller data may live in a
+             * flash mmap (external-object growth does exactly that), and a
+             * plain malloc buffer is not an explicit cache-safe contract.
+             * Stage every operation through internal RAM so neither the
+             * partition driver nor its ROM memcpy touches cached memory
+             * while the cache is disabled. */
+            uint8_t *sector = heap_caps_malloc(
+                MEMORY_EXTERNAL__FLASH_SECTOR, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT
+            );
             if (sector == NULL) {
                 result = BRUCE_ERR_NO_MEMORY;
             } else {
@@ -334,23 +334,39 @@ memory__external_write(const bruce_memory_object_t *object, size_t offset, const
                     if (chunk > MEMORY_EXTERNAL__FLASH_SECTOR - in_sector) {
                         chunk = MEMORY_EXTERNAL__FLASH_SECTOR - in_sector;
                     }
-                    if (esp_partition_read(partition, sector_offset, sector, MEMORY_EXTERNAL__FLASH_SECTOR) !=
-                        ESP_OK) {
-                        result = BRUCE_ERR_IO;
-                        break;
+                    bool direct_write = true;
+                    for (size_t i = 0; i < chunk; ++i) {
+                        direct_write = direct_write &&
+                                       (record->data[offset + written + i] & bytes[written + i]) ==
+                                           bytes[written + i];
                     }
-                    memcpy(sector + in_sector, bytes + written, chunk);
-                    if (esp_partition_erase_range(partition, sector_offset, MEMORY_EXTERNAL__FLASH_SECTOR) !=
-                            ESP_OK ||
-                        esp_partition_write(
-                            partition, sector_offset, sector, MEMORY_EXTERNAL__FLASH_SECTOR
-                        ) != ESP_OK) {
-                        result = BRUCE_ERR_IO;
-                        break;
+                    if (direct_write) {
+                        memcpy(sector, bytes + written, chunk);
+                        if (esp_partition_write(partition, absolute, sector, chunk) != ESP_OK) {
+                            result = BRUCE_ERR_IO;
+                            break;
+                        }
+                    } else {
+                        if (esp_partition_read(
+                                partition, sector_offset, sector, MEMORY_EXTERNAL__FLASH_SECTOR
+                            ) != ESP_OK) {
+                            result = BRUCE_ERR_IO;
+                            break;
+                        }
+                        memcpy(sector + in_sector, bytes + written, chunk);
+                        if (esp_partition_erase_range(
+                                partition, sector_offset, MEMORY_EXTERNAL__FLASH_SECTOR
+                            ) != ESP_OK ||
+                            esp_partition_write(
+                                partition, sector_offset, sector, MEMORY_EXTERNAL__FLASH_SECTOR
+                            ) != ESP_OK) {
+                            result = BRUCE_ERR_IO;
+                            break;
+                        }
                     }
                     written += chunk;
                 }
-                free(sector);
+                heap_caps_free(sector);
             }
         } else {
             result = BRUCE_ERR_IO;
