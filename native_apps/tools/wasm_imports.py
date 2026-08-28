@@ -39,6 +39,7 @@ SUPPORTED_BRUCE_SDK_SIGNATURES = {
     )},
     **{name: FunctionType((I32, I32), (I32,)) for name in (
         "process__signal", "process__wait", "stdio__write", "process__snapshot", "input__wait",
+        "display__get_font_metrics",
     )},
     **{name: FunctionType((I32, I32, I32), (I32,)) for name in (
         "stdio__read_line", "stdio__session_write_input", "display__draw_centre_string",

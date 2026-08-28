@@ -77,7 +77,7 @@ _Static_assert(offsetof(bruce_dialog_choice_t, value) == 4, "wasm32 dialog choic
 _Static_assert(offsetof(bruce_dialog_choice_t, icon_name) == 8, "wasm32 dialog choice ABI changed");
 _Static_assert(offsetof(bruce_dialog_choice_t, right_text) == 12, "wasm32 dialog choice ABI changed");
 
-static uint32_t wasm_bruce_guest_adapter__offset(const void *pointer) { return (uint32_t)(uintptr_t)pointer; }
+static uint32_t wasm_bruce_guest_adapter__offset(const volatile void *pointer) { return (uint32_t)(uintptr_t)pointer; }
 
 BRUCE_WASM_IMPORT("runtime__now") extern uint64_t wasm_import__runtime_now(void);
 BRUCE_WASM_IMPORT("runtime__sleep") extern int32_t wasm_import__runtime_sleep(uint32_t milliseconds);
@@ -354,6 +354,8 @@ BRUCE_WASM_IMPORT("display__set_text_color") extern int32_t wasm_import__display
 BRUCE_WASM_IMPORT("display__set_text_size") extern int32_t wasm_import__display_set_text_size(uint32_t size);
 BRUCE_WASM_IMPORT("display__draw_centre_string")
 extern int32_t wasm_import__display_draw_centre_string(uint32_t text, int32_t x, int32_t y);
+BRUCE_WASM_IMPORT("display__get_font_metrics")
+extern int32_t wasm_import__display_get_font_metrics(uint32_t out_char_width, uint32_t out_char_height);
 BRUCE_WASM_IMPORT("clock__get_local") extern int32_t wasm_import__clock_get_local(uint32_t output);
 BRUCE_WASM_IMPORT("process__snapshot")
 extern int32_t wasm_import__process_snapshot(uint32_t process_id, uint32_t output);
@@ -387,6 +389,12 @@ bruce_result_t display__set_text_size(uint8_t size) {
 bruce_result_t display__draw_centre_string(const char *text, int16_t x, int16_t y) {
     return (bruce_result_t)wasm_import__display_draw_centre_string(
         wasm_bruce_guest_adapter__offset(text), x, y
+    );
+}
+bruce_result_t display__get_font_metrics(int16_t *out_char_width, int16_t *out_char_height) {
+    return (bruce_result_t)wasm_import__display_get_font_metrics(
+        wasm_bruce_guest_adapter__offset(out_char_width),
+        wasm_bruce_guest_adapter__offset(out_char_height)
     );
 }
 bruce_result_t clock__get_local(bruce_clock_datetime_t *output) {

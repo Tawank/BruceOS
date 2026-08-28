@@ -306,6 +306,21 @@ WASM_NO_ARG_RESULT_WRAPPER(wasm_display__begin_frame, display__begin_frame)
 WASM_NO_ARG_RESULT_WRAPPER(wasm_display__present, display__present)
 WASM_NO_ARG_RESULT_WRAPPER(wasm_input__flush, input__flush)
 
+static int32_t wasm_display__get_font_metrics(
+    wasm_exec_env_t exec_env, uint32_t width_offset, uint32_t height_offset
+) {
+    uint8_t *width = wasm_bruce_host_adapter__required_span(exec_env, width_offset, sizeof(int16_t));
+    uint8_t *height = wasm_bruce_host_adapter__required_span(exec_env, height_offset, sizeof(int16_t));
+    if (width == NULL || height == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    int16_t width_value;
+    int16_t height_value;
+    bruce_result_t result = display__get_font_metrics(&width_value, &height_value);
+    if (result != BRUCE_OK) return result;
+    wasm_bruce_abi__store_u16(width, (uint16_t)width_value);
+    wasm_bruce_abi__store_u16(height, (uint16_t)height_value);
+    return BRUCE_OK;
+}
+
 static int32_t wasm_display__fill_screen(wasm_exec_env_t exec_env, uint32_t color) {
     (void)exec_env;
     return display__fill_screen((bruce_display_color_t)color);
@@ -539,6 +554,7 @@ static NativeSymbol s_native_symbols[] = {
     BRUCE_WASM_NATIVE("display__set_text_color", wasm_display__set_text_color, "(i)i"),
     BRUCE_WASM_NATIVE("display__set_text_size", wasm_display__set_text_size, "(i)i"),
     BRUCE_WASM_NATIVE("display__draw_centre_string", wasm_display__draw_centre_string, "(iii)i"),
+    BRUCE_WASM_NATIVE("display__get_font_metrics", wasm_display__get_font_metrics, "(ii)i"),
     BRUCE_WASM_NATIVE("display__present", wasm_display__present, "()i"),
     BRUCE_WASM_NATIVE("clock__get_local", wasm_clock__get_local, "(i)i"),
     BRUCE_WASM_NATIVE("process__snapshot", wasm_process__snapshot, "(ii)i"),
