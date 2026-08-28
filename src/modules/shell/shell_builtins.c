@@ -17,7 +17,7 @@
 
 static const char *const s_shell_builtin_names[] = {
     "echo", "true",  "false", "cd",   "set",  "unset", "export", "clear",
-    "reset", "help",  "exit",  "test", "[",    "[[",   "break",  "read",
+    "reset", "help",  "exit",  "test", "[",    "[[",   "break",  "read",  "time",
 };
 
 static int shell_builtins__find_index(const shell_state_t *state, const char *name) {
@@ -390,7 +390,13 @@ int shell_builtins__run(shell_state_t *state, int argc, char **argv) {
         return 0;
     }
     if (strcmp(argv[0], "read") == 0) return shell_builtins__read(state, argc, argv);
-    stdio__printf("Builtins: echo true false cd set unset export clear reset help exit test [ [[ break read\n");
+    /* "time" is intercepted in shell_executor__dispatch() before it ever
+     * reaches here (it needs to wrap the function/builtin/external dispatch
+     * itself), so it's listed for documentation purposes only -- this branch
+     * is otherwise unreachable for it. */
+    stdio__printf(
+        "Builtins: echo true false cd set unset export clear reset help exit test [ [[ break read time\n"
+    );
     stdio__printf("Operators: ; && || and producer | text. Redirection is unsupported.\n");
     stdio__printf("Compound: if/elif/else/fi, for, while, ((...)) arithmetic, functions.\n");
     return 0;

@@ -730,11 +730,28 @@ static int shell_executor__dispatch(shell_state_t *state, const shell_command_t 
     }
     int remaining = argc - first_command;
     char **argv = words + first_command;
+    /* "time" wraps whatever command follows it (function, builtin, or
+     * external) rather than being one itself -- peel it off here, before
+     * is_function/is_builtin below ever see it, so the timing wraps the
+     * *wrapped* command's dispatch. It stays in shell_builtins__is_builtin()
+     * so pipelines reject it with the usual builtin-in-a-pipe message
+     * instead of "command not found" (see shell_executor__pipe_to_external). */
+    bool timed = strcmp(argv[0], "time") == 0;
+    if (timed) {
+        if (remaining < 2) {
+            stdio__printf("shell: time: missing command\n");
+            shell_executor__environment_free(&environment);
+            return 2;
+        }
+        argv++;
+        remaining--;
+    }
     /* A user-defined function shadows a builtin or external command of the
      * same name, the same as in bash. */
     bool is_function = shell_compound__is_function(state, argv[0]);
     bool is_builtin = !is_function && shell_builtins__is_builtin(argv[0]);
     int result;
+    uint64_t started_at = timed ? runtime__now() : 0;
     if (command->redirect != SHELL_REDIRECT_NONE) {
         if (is_function || is_builtin) {
             stdio__printf("shell: output redirection currently requires an external command\n");
@@ -747,6 +764,19 @@ static int shell_executor__dispatch(shell_state_t *state, const shell_command_t 
                   : is_builtin
                       ? shell_builtins__run(state, remaining, argv)
                       : shell_executor__external(remaining, argv, environment.items, environment.count, mode);
+    }
+    /* Only wall-clock ("real") time is available here -- the process SDK
+     * exposes a live cpu_percent gauge (see bruce_process_snapshot_t) but no
+     * cumulative user/sys CPU time to report alongside it, unlike bash's
+     * three-line `time` output. */
+    if (timed) {
+        uint64_t elapsed_ms = runtime__now() - started_at;
+        stdio__printf(
+            "real\t%um%u.%03us\n",
+            (unsigned)(elapsed_ms / 60000u),
+            (unsigned)((elapsed_ms / 1000u) % 60u),
+            (unsigned)(elapsed_ms % 1000u)
+        );
     }
     shell_executor__environment_free(&environment);
     return result;
