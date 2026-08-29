@@ -86,13 +86,13 @@ static bruce_result_t system_menu__draw(
     if (result != BRUCE_OK) return result;
 
     int width = display__width();
-    int height = display__height();
     uint16_t primary = config__get_color_primary();
-    uint16_t secondary = config__get_color_secondary();
     uint16_t background = config__get_color_background();
+    uint16_t surface = config__get_color_surface();
+    uint16_t text = config__get_color_text();
 
-    (void)display__fill_screen(secondary);
-    (void)display__draw_line(0, height - 1, width - 1, height - 1, primary);
+    (void)display__fill_screen(surface);
+    (void)display__draw_line(0, SYSTEM_MENU__BAR_H - 1, width - 1, SYSTEM_MENU__BAR_H - 1, primary);
 
     int cell_w = count > 0 ? width / (int)count : width;
     if (cell_w < 1) cell_w = 1;
@@ -100,8 +100,8 @@ static bruce_result_t system_menu__draw(
         int x = (int)i * cell_w;
         int w = i == count - 1 ? width - x : cell_w;
         bool active = (int)i == selected;
-        uint16_t fg = active ? background : primary;
-        uint16_t bg = active ? primary : secondary;
+        uint16_t fg = active ? background : text;
+        uint16_t bg = active ? primary : surface;
         if (active) (void)display__fill_rect(x + 1, 2, w - 2, SYSTEM_MENU__BAR_H - 4, bg);
 
         const bruce_icon_t *icon = icon__get(items[i].icon);
@@ -128,14 +128,14 @@ static bruce_result_t system_menu__draw(
         (void)display__set_text_color(fg);
         (void)display__set_text_bg_color(bg);
         (void)display__set_text_size(1);
-        (void)display__draw_centre_string(items[i].label, x + w / 2, height - 13);
+        (void)display__draw_centre_string(items[i].label, x + w / 2, SYSTEM_MENU__BAR_H - 13);
     }
 
     if (status != NULL && status[0] != '\0') {
         (void)display__set_text_color(primary);
         (void)display__set_text_bg_color(background);
         (void)display__set_text_size(1);
-        (void)display__draw_centre_string(status, width / 2, height / 2);
+        (void)display__draw_centre_string(status, width / 2, SYSTEM_MENU__BAR_H / 2);
     }
     return display__overlay_end(overlay);
 }
