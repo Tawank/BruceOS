@@ -1,5 +1,6 @@
 #include "terminal_app.h"
 
+#include <math.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
@@ -35,6 +36,19 @@
 #define TERMINAL__ASCII_ESCAPE 0x1b
 #define TERMINAL__ASCII_DELETE 0x7f
 
+/* User-adjustable font size, a direct display__set_text_size() multiplier
+ * (unlike browser's per-heading-level delta -- the terminal only ever draws
+ * one text size). Adjusted via BRUCE_INPUT_CODE_ZOOM_OUT/IN (Fn + -/=, see
+ * input_keyboard.c) rather than plain +/- keystrokes: every printable key
+ * here is live shell input (see terminal__handle_input), so there's no key
+ * left to steal for it. 0.5 bottoms out readable at this font's 6x10 native
+ * cell; 3.0 is plenty to make the grid unusably coarse before it stops being
+ * useful, same ceiling as browser's zoom. */
+#define TERMINAL__FONT_SCALE_MIN 0.5f
+#define TERMINAL__FONT_SCALE_MAX 3.0f
+#define TERMINAL__FONT_SCALE_STEP 0.5f
+#define TERMINAL__FONT_SCALE_DEFAULT 1.0f
+
 typedef struct {
     terminal_cell_t *cells;
     terminal_cell_t *alt_cells;
@@ -47,7 +61,29 @@ typedef struct {
     bruce_process_id_t child;
     bool dirty;
     bool exit_requested;
+    float font_scale;      /* See TERMINAL__FONT_SCALE_MIN/MAX above. */
+    size_t cell_capacity;  /* Cells `cells`/`alt_cells` can each hold -- see terminal__apply_font_scale(). */
 } terminal__state_t;
+
+/* Grid geometry (columns/rows) that fits the display at `scale`, using the
+ * same math -- and the same TERMINAL__MAX_COLUMNS/ROWS clamp -- as the
+ * startup sizing this factors out of. */
+static void terminal__grid_size(float scale, int *out_columns, int *out_rows) {
+    int width = display__width();
+    int height = display__height();
+    int char_w = (int)lroundf((float)TERMINAL__CHAR_W * scale);
+    int char_h = (int)lroundf((float)TERMINAL__CHAR_H * scale);
+    if (char_w < 1) char_w = 1;
+    if (char_h < 1) char_h = 1;
+    int columns = (width - 2 * TERMINAL__FRAME_MARGIN) / char_w;
+    int rows = (height - TERMINAL__TITLE_H - 2 * TERMINAL__FRAME_MARGIN) / char_h;
+    if (columns < 1) columns = 1;
+    if (rows < 1) rows = 1;
+    if (columns > TERMINAL__MAX_COLUMNS) columns = TERMINAL__MAX_COLUMNS;
+    if (rows > TERMINAL__MAX_ROWS) rows = TERMINAL__MAX_ROWS;
+    *out_columns = columns;
+    *out_rows = rows;
+}
 
 /* Prefers a PSRAM- or plain-internal-RAM-backed memory__external block (both
  * are plain, directly addressable buffers) so the grid can keep mutating it
@@ -126,6 +162,11 @@ static void terminal__write_input(terminal__state_t *state, const char *bytes, s
 static void terminal__draw_grid(const terminal__state_t *state, uint16_t theme_fg, uint16_t theme_bg) {
     const terminal_grid_t *grid = &state->grid;
     const terminal_cell_t *cells = terminal_grid__active_cells(grid);
+    /* Matches display__print()'s own per-glyph advance -- lroundf(cell_width
+     * * text_size) -- so a run's start x lines up with wherever the previous
+     * run's glyphs actually landed instead of drifting from it. */
+    int char_w = (int)lroundf((float)TERMINAL__CHAR_W * state->font_scale);
+    int char_h = (int)lroundf((float)TERMINAL__CHAR_H * state->font_scale);
     char text[TERMINAL__MAX_COLUMNS * 4 + 1];
     for (uint16_t y = 0; y < grid->rows; ++y) {
         const terminal_cell_t *row = cells + (size_t)y * grid->columns;
@@ -159,15 +200,12 @@ static void terminal__draw_grid(const terminal__state_t *state, uint16_t theme_f
             text[text_len] = '\0';
             display__set_text_color(fg565);
             display__set_text_bg_color(bg565);
-            display__set_cursor(
-                TERMINAL__FRAME_MARGIN + (int16_t)(x * TERMINAL__CHAR_W), TERMINAL__TITLE_H + y * TERMINAL__CHAR_H
-            );
+            display__set_cursor(TERMINAL__FRAME_MARGIN + (int16_t)(x * char_w), TERMINAL__TITLE_H + y * char_h);
             display__print(text);
             if (underline) {
                 display__fill_rect(
-                    TERMINAL__FRAME_MARGIN + (int16_t)(x * TERMINAL__CHAR_W),
-                    TERMINAL__TITLE_H + y * TERMINAL__CHAR_H + TERMINAL__CHAR_H - 1, (int16_t)(run * TERMINAL__CHAR_W),
-                    1, fg565
+                    TERMINAL__FRAME_MARGIN + (int16_t)(x * char_w), TERMINAL__TITLE_H + y * char_h + char_h - 1,
+                    (int16_t)(run * char_w), 1, fg565
                 );
             }
             x = (uint16_t)(x + run);
@@ -184,9 +222,11 @@ terminal__draw_cursor(const terminal__state_t *state, uint16_t theme_fg, uint16_
     const terminal_grid_t *grid = &state->grid;
     if (!grid->cursor_visible) return;
     (void)theme_bg;
-    int16_t x = TERMINAL__FRAME_MARGIN + (int16_t)(grid->cursor_x * TERMINAL__CHAR_W);
-    int16_t y = TERMINAL__TITLE_H + grid->cursor_y * TERMINAL__CHAR_H;
-    display__fill_rect(x, y, TERMINAL__CHAR_W, TERMINAL__CHAR_H, theme_fg);
+    int char_w = (int)lroundf((float)TERMINAL__CHAR_W * state->font_scale);
+    int char_h = (int)lroundf((float)TERMINAL__CHAR_H * state->font_scale);
+    int16_t x = TERMINAL__FRAME_MARGIN + (int16_t)(grid->cursor_x * char_w);
+    int16_t y = TERMINAL__TITLE_H + grid->cursor_y * char_h;
+    display__fill_rect(x, y, (int16_t)char_w, (int16_t)char_h, theme_fg);
     const terminal_cell_t *cells = terminal_grid__active_cells(grid);
     const terminal_cell_t *cell = &cells[(size_t)grid->cursor_y * grid->columns + grid->cursor_x];
     if (cell->utf8_len > 0) {
@@ -214,6 +254,10 @@ static bruce_result_t terminal__draw(const terminal__state_t *state) {
     display__set_text_color(text_color);
     display__set_cursor(TERMINAL__FRAME_MARGIN, TERMINAL__FRAME_MARGIN);
     display__print(state->child != BRUCE_PROCESS_ID_INVALID ? "Terminal [running]" : "Terminal");
+    /* The title bar above is always drawn at size 1 regardless of
+     * `font_scale` -- it's fixed chrome, not grid content, and staying
+     * legible at TERMINAL__TITLE_H matters more than matching the zoom. */
+    display__set_text_size(state->font_scale);
     terminal__draw_grid(state, foreground, background);
     terminal__draw_cursor(state, foreground, background, text_color);
     return display__present();
@@ -228,6 +272,67 @@ static void terminal__open_text_input(terminal__state_t *state) {
     state->dirty = true;
 }
 
+/* Re-fits the grid to `new_scale` (clamped to TERMINAL__FONT_SCALE_MIN/MAX)
+ * and pushes the new geometry to the child through the same tty__set_size()
+ * live-resize path ssh_app.c uses for a remote pty -- a well-behaved program
+ * (the shell, vim, htop, ...) picks up the new columns/rows next time it
+ * polls tty__get_size()'s generation, same as reacting to a real SIGWINCH.
+ * terminal_grid__init() clears the screen and scrollback, matching what a
+ * real terminal emulator's resize does. The `==` guard skips that reset (and
+ * the resulting flicker) when the scale didn't actually change, e.g. already
+ * at MIN/MAX and pressed again -- safe because every reachable value is an
+ * exact sum of TERMINAL__FONT_SCALE_STEP (0.5, a power of two) starting from
+ * TERMINAL__FONT_SCALE_DEFAULT, so there's no float drift to worry about.
+ *
+ * The cell buffers only ever grow, lazily, the first time a scale actually
+ * needs more cells than they currently hold -- they're never sized up front
+ * for TERMINAL__FONT_SCALE_MIN's grid (the largest one reachable). That
+ * would always cost ~4x this app's steady-state heap use (smaller font =
+ * more, smaller cells) whether or not a session ever zooms, and on a board
+ * with no PSRAM (e.g. Cardputer, the only keyboard-equipped board this
+ * feature reaches) that 4x comes straight out of scarce internal SRAM. */
+static void terminal__apply_font_scale(terminal__state_t *state, float new_scale) {
+    if (new_scale < TERMINAL__FONT_SCALE_MIN) new_scale = TERMINAL__FONT_SCALE_MIN;
+    if (new_scale > TERMINAL__FONT_SCALE_MAX) new_scale = TERMINAL__FONT_SCALE_MAX;
+    if (new_scale == state->font_scale) return;
+    int columns, rows;
+    terminal__grid_size(new_scale, &columns, &rows);
+    size_t needed_cells = (size_t)columns * (size_t)rows;
+    if (needed_cells > state->cell_capacity) {
+        size_t new_buffer_size = needed_cells * sizeof(terminal_cell_t);
+        void *new_cells = NULL;
+        void *new_alt_cells = NULL;
+        bruce_memory_object_t new_cells_object;
+        bruce_memory_object_t new_alt_cells_object;
+        bool new_cells_external = false;
+        bool new_alt_cells_external = false;
+        bruce_result_t cells_alloc =
+            terminal__alloc_buffer(&new_cells, &new_cells_object, &new_cells_external, new_buffer_size);
+        bruce_result_t alt_cells_alloc =
+            terminal__alloc_buffer(&new_alt_cells, &new_alt_cells_object, &new_alt_cells_external, new_buffer_size);
+        if (cells_alloc != BRUCE_OK || alt_cells_alloc != BRUCE_OK) {
+            if (cells_alloc == BRUCE_OK) terminal__free_buffer(new_cells, &new_cells_object, new_cells_external);
+            if (alt_cells_alloc == BRUCE_OK) {
+                terminal__free_buffer(new_alt_cells, &new_alt_cells_object, new_alt_cells_external);
+            }
+            return; /* Out of memory: stay at the current, still-valid scale rather than corrupt it. */
+        }
+        terminal__free_buffer(state->cells, &state->cells_object, state->cells_external);
+        terminal__free_buffer(state->alt_cells, &state->alt_cells_object, state->alt_cells_external);
+        state->cells = new_cells;
+        state->alt_cells = new_alt_cells;
+        state->cells_object = new_cells_object;
+        state->alt_cells_object = new_alt_cells_object;
+        state->cells_external = new_cells_external;
+        state->alt_cells_external = new_alt_cells_external;
+        state->cell_capacity = needed_cells;
+    }
+    terminal_grid__init(&state->grid, state->cells, state->alt_cells, (uint16_t)columns, (uint16_t)rows);
+    (void)tty__set_size(state->session, (uint16_t)columns, (uint16_t)rows);
+    state->font_scale = new_scale;
+    state->dirty = true;
+}
+
 static void terminal__handle_input(terminal__state_t *state, const bruce_input_event_t *event) {
     bool semantic_key = event->type == BRUCE_INPUT_KEY && event->value != event->code;
     if ((semantic_key && event->code == BRUCE_INPUT_CODE_BACK) ||
@@ -239,6 +344,14 @@ static void terminal__handle_input(terminal__state_t *state, const bruce_input_e
     if ((event->code == BRUCE_INPUT_CODE_SELECT && (semantic_key || event->type != BRUCE_INPUT_KEY)) ||
         event->code == BRUCE_INPUT_CODE_BUTTON_A) {
         terminal__open_text_input(state);
+        return;
+    }
+    if (semantic_key && event->code == BRUCE_INPUT_CODE_ZOOM_OUT) {
+        terminal__apply_font_scale(state, state->font_scale - TERMINAL__FONT_SCALE_STEP);
+        return;
+    }
+    if (semantic_key && event->code == BRUCE_INPUT_CODE_ZOOM_IN) {
+        terminal__apply_font_scale(state, state->font_scale + TERMINAL__FONT_SCALE_STEP);
         return;
     }
     if (semantic_key || event->type != BRUCE_INPUT_KEY) {
@@ -318,14 +431,10 @@ int terminal_app_main(int argc, char **argv) {
     terminal__state_t state = {0};
     state.child = BRUCE_PROCESS_ID_INVALID;
 
-    int width = display__width();
-    int height = display__height();
-    int columns = (width - 2 * TERMINAL__FRAME_MARGIN) / TERMINAL__CHAR_W;
-    int rows = (height - TERMINAL__TITLE_H - 2 * TERMINAL__FRAME_MARGIN) / TERMINAL__CHAR_H;
-    if (columns < 1) columns = 1;
-    if (rows < 1) rows = 1;
-    if (columns > TERMINAL__MAX_COLUMNS) columns = TERMINAL__MAX_COLUMNS;
-    if (rows > TERMINAL__MAX_ROWS) rows = TERMINAL__MAX_ROWS;
+    state.font_scale = TERMINAL__FONT_SCALE_DEFAULT;
+
+    int columns, rows;
+    terminal__grid_size(state.font_scale, &columns, &rows);
 
     size_t cell_buffer_size = (size_t)columns * (size_t)rows * sizeof(terminal_cell_t);
     void *cells_data = NULL;
@@ -343,6 +452,7 @@ int terminal_app_main(int argc, char **argv) {
         }
         return BRUCE_ERR_NO_MEMORY;
     }
+    state.cell_capacity = (size_t)columns * (size_t)rows;
     terminal_grid__init(&state.grid, state.cells, state.alt_cells, (uint16_t)columns, (uint16_t)rows);
     terminal_grid__feed(
         &state.grid, "Bruce terminal\r\nType a command and press Enter.\r\n",

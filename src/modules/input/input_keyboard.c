@@ -10,7 +10,6 @@
 #include "core_sdk/config.h"
 #include "core_sdk/gpio.h"
 
-#include "esp_log.h"
 #include "esp_rom_sys.h"
 #include "sdkconfig.h"
 
@@ -207,6 +206,10 @@ static int32_t input__kb_decode_fn_nav(int x, int y) {
      *   NavRight : Fn + /   (row 3, col 12)
      *   Back/Esc : Fn + 1   (row 0, col 1)
      *   Delete   : Fn + del (row 0, col 13)
+     *   ZoomOut  : Fn + -   (row 0, col 11)
+     *   ZoomIn   : Fn + =   (row 0, col 12; also this key's shifted "+" --
+     *                        Fn ignores shift, see the caller, so Fn+Shift+=
+     *                        lands here too, same as Fn+=)
      */
     if (y == 2 && x == 11) { return BRUCE_INPUT_CODE_UP; }
     if (y == 3 && x == 11) { return BRUCE_INPUT_CODE_DOWN; }
@@ -214,6 +217,8 @@ static int32_t input__kb_decode_fn_nav(int x, int y) {
     if (y == 3 && x == 12) { return BRUCE_INPUT_CODE_RIGHT; }
     if (y == 0 && x == 1) { return BRUCE_INPUT_CODE_BACK; }
     if (y == 0 && x == 13) { return BRUCE_INPUT_CODE_DELETE; }
+    if (y == 0 && x == 11) { return BRUCE_INPUT_CODE_ZOOM_OUT; }
+    if (y == 0 && x == 12) { return BRUCE_INPUT_CODE_ZOOM_IN; }
     return 0;
 }
 

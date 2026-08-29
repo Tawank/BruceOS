@@ -750,10 +750,56 @@ int ssh_app_main(int argc, char **argv) {
     bool conflicting_auth = password_supplied && identity_supplied;
     ap_free(root);
 
-    if (config_result != BRUCE_OK || alias_len <= 0 || (size_t)alias_len >= sizeof(alias) || host_len < 0 ||
-        (size_t)host_len >= sizeof(host) || username_len <= 0 || (size_t)username_len >= sizeof(username) ||
-        identity_len < 0 || (size_t)identity_len >= sizeof(identity_copy) ||
-        (identity_copy[0] != '\0' && identity_copy[0] != '/') || conflicting_auth) {
+    /* Each of these used to fall through to one shared `return
+     * BRUCE_ERR_INVALID_ARGUMENT` with no message at all -- every other
+     * failure path in this file (Wi-Fi down, connection failed, host key
+     * rejected, auth failed, ...) prints a "SSH client: ..." line first, so
+     * silently landing here just looked like the command did nothing. The
+     * likeliest way to hit this in practice: `ssh <alias>` for an alias with
+     * no --username on the command line and no matching `User` line under
+     * `Host <alias>` in ~/.ssh/config, which leaves username_len == 0. */
+    if (config_result != BRUCE_OK) {
+        stdio__printf("SSH client: failed to read %s (%d)\n", SSH_APP_CONFIG_PATH, config_result);
+        memset(password_copy, 0, sizeof(password_copy));
+        return config_result;
+    }
+    if (alias_len <= 0 || (size_t)alias_len >= sizeof(alias)) {
+        stdio__printf("SSH client: host name is empty or too long (max %zu characters)\n", sizeof(alias) - 1);
+        memset(password_copy, 0, sizeof(password_copy));
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    if (host_len < 0 || (size_t)host_len >= sizeof(host)) {
+        stdio__printf("SSH client: resolved host name is too long (max %zu characters)\n", sizeof(host) - 1);
+        memset(password_copy, 0, sizeof(password_copy));
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    if (username_len <= 0) {
+        stdio__printf(
+            "SSH client: no username for '%s' -- pass --username, or add 'User <name>' under 'Host %s' in %s\n",
+            alias, alias, SSH_APP_CONFIG_PATH
+        );
+        memset(password_copy, 0, sizeof(password_copy));
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    if ((size_t)username_len >= sizeof(username)) {
+        stdio__printf("SSH client: username is too long (max %zu characters)\n", sizeof(username) - 1);
+        memset(password_copy, 0, sizeof(password_copy));
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    if (identity_len < 0 || (size_t)identity_len >= sizeof(identity_copy)) {
+        stdio__printf(
+            "SSH client: identity file path is too long (max %zu characters)\n", sizeof(identity_copy) - 1
+        );
+        memset(password_copy, 0, sizeof(password_copy));
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    if (identity_copy[0] != '\0' && identity_copy[0] != '/') {
+        stdio__printf("SSH client: identity file path '%s' must be absolute (start with '/')\n", identity_copy);
+        memset(password_copy, 0, sizeof(password_copy));
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    if (conflicting_auth) {
+        stdio__printf("SSH client: --password and --identity cannot both be given\n");
         memset(password_copy, 0, sizeof(password_copy));
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
