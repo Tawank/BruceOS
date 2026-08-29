@@ -4,7 +4,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h>
 
 #include "args.h"
 #include "core_sdk/config.h"
@@ -84,12 +83,6 @@ static bruce_result_t text__load_stdin(size_t size, text_editor_t *editor) {
     editor->length = offset;
     editor->dirty = true;
     return BRUCE_OK;
-}
-
-static bool text__has_supported_extension(const char *path) {
-    const char *dot = path != NULL ? strrchr(path, '.') : NULL;
-    return dot != NULL &&
-           (strcasecmp(dot, ".txt") == 0 || strcasecmp(dot, ".json") == 0 || strcasecmp(dot, ".conf") == 0);
 }
 
 static bruce_result_t text__reserve(text_editor_t *editor, size_t required) {
@@ -353,10 +346,10 @@ static bruce_result_t text__show_error(const char *action, bruce_result_t result
 static bruce_result_t text__ensure_save_path(char *path, size_t path_size) {
     if (path[0] != '\0') return BRUCE_OK;
     bruce_result_t result = dialog__text_input(
-        "Save piped text", "Absolute .txt, .json, or .conf path", "/untitled.txt", false, path, path_size
+        "Save piped text", "Absolute path", "/untitled.txt", false, path, path_size
     );
     if (result != BRUCE_OK) return result;
-    return path[0] == '/' && text__has_supported_extension(path) ? BRUCE_OK : BRUCE_ERR_INVALID_PATH;
+    return path[0] == '/' ? BRUCE_OK : BRUCE_ERR_INVALID_PATH;
 }
 
 static bruce_result_t text__save_to_path(char *path, size_t path_size, text_editor_t *editor) {
@@ -507,7 +500,7 @@ static bruce_result_t text__run_editor(char *path, size_t path_size, text_editor
 int text_app_main(int argc, char **argv) {
     ArgParser *parser = ap_new_parser();
     if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
-    ap_set_helptext(parser, "Edit a .txt, .json, or .conf file, or piped stdin.");
+    ap_set_helptext(parser, "Edit a file, or piped stdin.");
     ap_add_flag(parser, "r");
     ap_set_opt_help(parser, "r", "Alias for --read-only");
     ap_add_flag(parser, "read-only");
@@ -537,7 +530,7 @@ int text_app_main(int argc, char **argv) {
     int path_length = path_arg != NULL ? snprintf(path, sizeof(path), "%s", path_arg) : 0;
     ap_free(parser);
     if ((stdin_requested && !from_stdin) || path_length < 0 || (size_t)path_length >= sizeof(path) ||
-        (!from_stdin && path[0] == '\0') || (path[0] != '\0' && !text__has_supported_extension(path))) {
+        (!from_stdin && path[0] == '\0')) {
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
     text_editor_t editor = {.read_only = read_only};

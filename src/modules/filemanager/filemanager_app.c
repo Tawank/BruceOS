@@ -81,15 +81,13 @@ static const char *filemanager__extension(const char *path) {
     return dot != NULL ? dot : "";
 }
 
-static bool filemanager__is_editable_text(const char *path) {
-    const char *dot = filemanager__extension(path);
-    return dot[0] != '\0' &&
-           (strcasecmp(dot, ".txt") == 0 || strcasecmp(dot, ".json") == 0 || strcasecmp(dot, ".conf") == 0);
-}
-
 static bool filemanager__is_gui_executable(const char *path) {
     const char *extension = filemanager__extension(path);
     return strcasecmp(extension, ".wasm") == 0 || strcasecmp(extension, ".elf") == 0;
+}
+
+static bool filemanager__is_shell_script(const char *path) {
+    return strcasecmp(filemanager__extension(path), ".sh") == 0;
 }
 
 static bool filemanager__escape_arg(const char *path, char *out, size_t out_size) {
@@ -133,6 +131,16 @@ filemanager__run_named_app(const char *app, const char *path, bool gui, bool rea
 }
 
 static bruce_result_t filemanager__open_default(const char *path, bool gui) {
+    /* Shell scripts loaded the plain way (the ".sh" -> "shell" loader used by
+     * the shell itself, see app_runner__register_loader() in main.c) run
+     * headless with no visible output. Opening one from the file manager
+     * instead launches a terminal and types its path into that terminal's
+     * own interactive shell, the same as running it from any other shell
+     * session -- so it's visible, and stays the *only* place ".sh" maps to
+     * "terminal"; running a script from inside an existing terminal must
+     * keep going through the plain "shell" loader, not recurse into a
+     * nested terminal. */
+    if (filemanager__is_shell_script(path)) return filemanager__run_named_app("terminal", path, true, false);
     gui = gui || filemanager__is_gui_executable(path);
     const bruce_environment_variable_t gui_env[] = {
         {.name = "GUI", .value = "1"}
@@ -269,7 +277,6 @@ static bruce_result_t filemanager__view_file(const char *path, bool gui) {
 }
 
 static bruce_result_t filemanager__edit_file(const char *path, bool gui) {
-    if (!filemanager__is_editable_text(path)) return BRUCE_ERR_INVALID_ARGUMENT;
     return filemanager__run_named_app("text", path, gui, false);
 }
 
