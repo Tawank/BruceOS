@@ -8,6 +8,7 @@
 | [`app_runner.h`](#app_runnerh) | Runs apps and built-in commands. |
 | [`args.h`](#argsh) | Command-line argument parser (argparse-style). |
 | [`audio.h`](#audioh) | Tone and PCM audio playback. |
+| [`base64.h`](#base64h) | Base64 encoding (RFC 4648). |
 | [`bluetooth.h`](#bluetoothh) | BLE advertisement scanning. |
 | [`bluetooth_hid.h`](#bluetooth_hidh) | Bluetooth keyboard and gamepad connections. |
 | [`clock.h`](#clockh) | Clock, time zone, and NTP settings. |
@@ -20,6 +21,7 @@
 | [`ext_mem_loader.h`](#ext_mem_loaderh) | Loader to external memory. |
 | [`format.h`](#formath) | Formatting helpers. |
 | [`gpio.h`](#gpioh) | GPIO pin access. |
+| [`hash.h`](#hashh) | Cryptographic and checksum digests. |
 | [`html.h`](#htmlh) | HTML parser. |
 | [`http.h`](#httph) | HTTP client. |
 | [`http_server.h`](#http_serverh) | HTTP server. |
@@ -33,6 +35,7 @@
 | [`notification.h`](#notificationh) | On-screen notifications. |
 | [`nrf24.h`](#nrf24h) | nRF24 radio control and scanning. |
 | [`partition_manager.h`](#partition_managerh) | Manages the "user area" partitions. |
+| [`paste.h`](#pasteh) | Shared copy/paste clipboard. |
 | [`permission.h`](#permissionh) | App permissions. |
 | [`process.h`](#processh) | Running app and process control. |
 | [`pubsub.h`](#pubsubh) | Named message topics. |
@@ -187,6 +190,7 @@ Functions that explicitly document a `bruce_permission_t` check, grouped by perm
 ### `storage`
 
 - `ir__transmit_file` (ir.h)
+- `paste__paste_files` (paste.h)
 - `storage__exists` (storage.h)
 - `storage__open` (storage.h)
 - `storage__list` (storage.h)
@@ -228,7 +232,7 @@ missing intermediate objects on demand.
 
 ---
 
-## app_config.get_bool()
+## app_config__get_bool()
 
 ```c
 bool app_config__get_bool(const char *app_name, const char *json_path, bool default_value);
@@ -251,7 +255,7 @@ Reads a boolean value, falling back to default_value.
 
 ---
 
-## app_config.set_bool()
+## app_config__set_bool()
 
 ```c
 bruce_result_t app_config__set_bool(const char *app_name, const char *json_path, bool value);
@@ -274,7 +278,7 @@ Sets a boolean value, creating the file/path if needed.
 
 ---
 
-## app_config.get_int()
+## app_config__get_int()
 
 ```c
 int app_config__get_int(const char *app_name, const char *json_path, int default_value);
@@ -297,7 +301,7 @@ Reads an integer value, falling back to default_value.
 
 ---
 
-## app_config.set_int()
+## app_config__set_int()
 
 ```c
 bruce_result_t app_config__set_int(const char *app_name, const char *json_path, int value);
@@ -320,7 +324,7 @@ Sets an integer value, creating the file/path if needed.
 
 ---
 
-## app_config.get_string()
+## app_config__get_string()
 
 ```c
 bool app_config__get_string(
@@ -350,7 +354,7 @@ absent/not a string. Returns whether a stored value was found.
 
 ---
 
-## app_config.set_string()
+## app_config__set_string()
 
 ```c
 bruce_result_t app_config__set_string(const char *app_name, const char *json_path, const char *value);
@@ -373,7 +377,7 @@ Sets a string value, creating the file/path if needed.
 
 ---
 
-## app_config.get_json()
+## app_config__get_json()
 
 ```c
 bool app_config__get_json(
@@ -404,7 +408,7 @@ public app_config API small. Returns whether a stored value was found.
 
 ---
 
-## app_config.set_json()
+## app_config__set_json()
 
 ```c
 bruce_result_t app_config__set_json(const char *app_name, const char *json_path, const char *value_json);
@@ -427,7 +431,7 @@ Sets a raw JSON value, creating the file/path if needed.
 
 ---
 
-## app_config.get_bool_array()
+## app_config__get_bool_array()
 
 ```c
 size_t
@@ -454,7 +458,7 @@ Returns the number of entries filled.
 
 ---
 
-## app_config.set_bool_array()
+## app_config__set_bool_array()
 
 ```c
 bruce_result_t
@@ -479,7 +483,7 @@ Sets a bool array value, creating the file/path if needed.
 
 ---
 
-## app_config.get_int_array()
+## app_config__get_int_array()
 
 ```c
 size_t
@@ -506,7 +510,7 @@ Returns the number of entries filled.
 
 ---
 
-## app_config.set_int_array()
+## app_config__set_int_array()
 
 ```c
 bruce_result_t
@@ -531,7 +535,7 @@ Sets an int array value, creating the file/path if needed.
 
 ---
 
-## app_config.get_string_array()
+## app_config__get_string_array()
 
 ```c
 size_t app_config__get_string_array(
@@ -561,7 +565,7 @@ bytes. Returns the number of entries filled.
 
 ---
 
-## app_config.set_string_array()
+## app_config__set_string_array()
 
 ```c
 bruce_result_t app_config__set_string_array(
@@ -587,7 +591,7 @@ Sets a string array value, creating the file/path if needed.
 
 ---
 
-## app_config.remove()
+## app_config__remove()
 
 ```c
 bruce_result_t app_config__remove(const char *app_name, const char *json_path);
@@ -638,7 +642,7 @@ typedef enum {
 
 ---
 
-## app_runner.register()
+## app_runner__register()
 
 ```c
 bruce_result_t app_runner__register(
@@ -675,7 +679,7 @@ BRUCE_ERR_RESOURCE_LIMIT if the registry is full.
 
 ---
 
-## app_runner.command_count()
+## app_runner__command_count()
 
 ```c
 size_t app_runner__command_count(void);
@@ -693,7 +697,7 @@ Returns NULL when `index` is out of range.
 
 ---
 
-## app_runner.command_name()
+## app_runner__command_name()
 
 ```c
 const char *app_runner__command_name(size_t index);
@@ -714,7 +718,7 @@ Name of the built-in command at `index`.
 
 ---
 
-## app_runner.command_description()
+## app_runner__command_description()
 
 ```c
 const char *app_runner__command_description(size_t index);
@@ -735,7 +739,7 @@ Description of the built-in command at `index`.
 
 ---
 
-## app_runner.command_category()
+## app_runner__command_category()
 
 ```c
 const char *app_runner__command_category(size_t index);
@@ -756,7 +760,7 @@ Category of the built-in command at `index`.
 
 ---
 
-## app_runner.run()
+## app_runner__run()
 
 ```c
 int app_runner__run(const char *app_name, const char *arg, bruce_launch_mode_t mode);
@@ -791,7 +795,7 @@ convention.
 
 ---
 
-## app_runner.run_with_environment()
+## app_runner__run_with_environment()
 
 ```c
 int app_runner__run_with_environment(
@@ -825,7 +829,7 @@ The overlay is deep-copied before this function returns.
 
 ---
 
-## app_runner.run_command()
+## app_runner__run_command()
 
 ```c
 bruce_result_t app_runner__run_command(const char *command_line, bruce_launch_mode_t default_mode);
@@ -852,7 +856,7 @@ assignments are still included in the child's environment.
 
 ---
 
-## app_runner.parse_args()
+## app_runner__parse_args()
 
 ```c
 bruce_result_t app_runner__parse_args(const char *arg, char ***out_argv, int *out_argc);
@@ -884,7 +888,7 @@ successful result with app_runner__free_args().
 
 ---
 
-## app_runner.free_args()
+## app_runner__free_args()
 
 ```c
 void app_runner__free_args(char **argv, int argc);
@@ -908,7 +912,7 @@ Safe to call with argv == NULL (e.g. when argc == 0).
 
 ---
 
-## app_runner.icon_for_path()
+## app_runner__icon_for_path()
 
 ```c
 const char *app_runner__icon_for_path(const char *path);
@@ -932,7 +936,7 @@ is owned by Core.
 
 ---
 
-## app_runner.environment_requests_gui()
+## app_runner__environment_requests_gui()
 
 ```c
 bool app_runner__environment_requests_gui(
@@ -2115,7 +2119,7 @@ Returns the program name from the root argument list.
 
 ---
 
-## audio.tone()
+## audio__tone()
 
 ```c
 bruce_result_t audio__tone(uint32_t frequency_hz, uint32_t duration_ms, bool non_blocking);
@@ -2147,7 +2151,7 @@ _Not permission-gated._
 
 ---
 
-## audio.stream_sample_rate()
+## audio__stream_sample_rate()
 
 ```c
 uint32_t audio__stream_sample_rate(void);
@@ -2169,7 +2173,7 @@ _Not permission-gated._
 
 ---
 
-## audio.stream_open()
+## audio__stream_open()
 
 ```c
 bruce_result_t audio__stream_open(uint8_t channels);
@@ -2202,7 +2206,7 @@ _Not permission-gated._
 
 ---
 
-## audio.stream_writable_frames()
+## audio__stream_writable_frames()
 
 ```c
 size_t audio__stream_writable_frames(void);
@@ -2223,7 +2227,7 @@ _Not permission-gated._
 
 ---
 
-## audio.stream_write()
+## audio__stream_write()
 
 ```c
 size_t audio__stream_write(const int16_t *samples, size_t frame_count);
@@ -2254,7 +2258,7 @@ _Not permission-gated._
 
 ---
 
-## audio.stream_close()
+## audio__stream_close()
 
 ```c
 bruce_result_t audio__stream_close(void);
@@ -2273,6 +2277,85 @@ _Not permission-gated._
 
 ---
 
+# `base64.h`
+
+**Base64 encoding (RFC 4648).**
+
+**Constants**
+
+| Name | Value |
+|---|---|
+| `BRUCE_BASE64_ENCODED_SIZE(byte_count)` | `((((byte_count) + 2) / 3) * 4)` |
+| `BRUCE_BASE64_DECODED_SIZE(text_length)` | `((((text_length) + 3) / 4) * 3)` |
+
+---
+
+## base64__encode()
+
+```c
+bruce_result_t base64__encode(const void *data, size_t size, char *out, size_t out_capacity);
+```
+
+Encodes `size` bytes of `data` as base64 text.
+
+`out` receives BRUCE_BASE64_ENCODED_SIZE(size) characters plus a NUL
+terminator; `out_capacity` must be at least that large or this fails
+with BRUCE_ERR_RESOURCE_LIMIT without writing anything. The output is a
+single unbroken run of characters -- a caller that wants line-wrapped
+output (e.g. matching the classic 76-column base64(1) format) inserts
+its own breaks when writing it out.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `data` | `const void *` | Bytes to encode. |
+| `size` | `size_t` | Number of bytes in data. |
+| `out` | `char *` | Buffer to receive the encoded text and its NUL terminator. |
+| `out_capacity` | `size_t` | Size of out in bytes. |
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
+## base64__decode()
+
+```c
+bruce_result_t
+base64__decode(const char *text, size_t text_length, uint8_t *out, size_t out_capacity, size_t *out_size);
+```
+
+Decodes base64 text back into raw bytes.
+
+Whitespace (space, tab, CR, LF) anywhere in `text` is ignored, so
+previously line-wrapped text decodes without preprocessing. Padding
+('=') is only accepted at the very end of the (whitespace-stripped)
+input. Fails with BRUCE_ERR_INVALID_ARGUMENT for malformed input (bad
+alphabet, misplaced padding, or a length that isn't a multiple of 4 once
+whitespace is stripped), or BRUCE_ERR_RESOURCE_LIMIT if out isn't large
+enough for BRUCE_BASE64_DECODED_SIZE(text_length) bytes. `text`/`out` may
+be NULL when `text_length`/`out_capacity` (respectively) is 0.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `text` | `const char *` | Base64 text to decode. |
+| `text_length` | `size_t` | Number of characters in text. |
+| `out` | `uint8_t *` | Buffer to receive the decoded bytes. |
+| `out_capacity` | `size_t` | Size of out in bytes. |
+| `out_size` | `size_t *` | Receives the number of bytes written to out. |
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
 # `bluetooth.h`
 
 **BLE advertisement scanning.**
@@ -2286,7 +2369,7 @@ _Not permission-gated._
 
 ---
 
-## bluetooth.device_t()
+## bluetooth__device_t()
 
 ```c
 typedef struct {
@@ -2300,7 +2383,7 @@ typedef struct {
 
 ---
 
-## bluetooth.scan_ble()
+## bluetooth__scan_ble()
 
 ```c
 int bluetooth__scan_ble(bluetooth__device_t *devices, size_t capacity, uint32_t timeout_ms);
@@ -2333,7 +2416,7 @@ ordered by descending RSSI.
 
 ---
 
-## bluetooth_hid.usage_t()
+## bluetooth_hid__usage_t()
 
 ```c
 typedef enum {
@@ -2346,7 +2429,7 @@ typedef enum {
 
 ---
 
-## bluetooth_hid.device_t()
+## bluetooth_hid__device_t()
 
 ```c
 typedef struct {
@@ -2360,7 +2443,7 @@ typedef struct {
 
 ---
 
-## bluetooth_hid.is_supported()
+## bluetooth_hid__is_supported()
 
 ```c
 bool bluetooth_hid__is_supported(void);
@@ -2377,7 +2460,7 @@ Only targets with a Classic-capable radio support it.
 
 ---
 
-## bluetooth_hid.scan()
+## bluetooth_hid__scan()
 
 ```c
 int bluetooth_hid__scan(bluetooth_hid__device_t *devices, size_t capacity, uint32_t timeout_ms);
@@ -2404,7 +2487,7 @@ Classic-capable radio).
 
 ---
 
-## bluetooth_hid.connect()
+## bluetooth_hid__connect()
 
 ```c
 bruce_result_t
@@ -2427,7 +2510,7 @@ Connects to a Classic Bluetooth HID device.
 
 ---
 
-## bluetooth_hid.disconnect()
+## bluetooth_hid__disconnect()
 
 ```c
 bruce_result_t bluetooth_hid__disconnect(void);
@@ -2442,7 +2525,7 @@ Disconnects the currently connected Classic Bluetooth HID device, if any.
 
 ---
 
-## bluetooth_hid.is_connected()
+## bluetooth_hid__is_connected()
 
 ```c
 bool bluetooth_hid__is_connected(void);
@@ -2457,7 +2540,7 @@ Whether a Classic Bluetooth HID device is currently connected.
 
 ---
 
-## bluetooth_hid.connected_device()
+## bluetooth_hid__connected_device()
 
 ```c
 bruce_result_t bluetooth_hid__connected_device(bluetooth_hid__device_t *out_device);
@@ -2518,7 +2601,7 @@ typedef enum {
 
 ---
 
-## clock.get_utc()
+## clock__get_utc()
 
 ```c
 bruce_result_t clock__get_utc(bruce_clock_datetime_t *out);
@@ -2539,7 +2622,7 @@ Reads the system clock, which is kept in UTC.
 
 ---
 
-## clock.get_local()
+## clock__get_local()
 
 ```c
 bruce_result_t clock__get_local(bruce_clock_datetime_t *out);
@@ -2563,7 +2646,7 @@ adjustment.
 
 ---
 
-## clock.set_local()
+## clock__set_local()
 
 ```c
 bruce_result_t clock__set_local(const bruce_clock_datetime_t *local);
@@ -2588,7 +2671,7 @@ Sets the system clock from a local date and time.
 
 ---
 
-## clock.sync_ntp()
+## clock__sync_ntp()
 
 ```c
 bruce_result_t clock__sync_ntp(uint32_t timeout_ms);
@@ -2616,7 +2699,7 @@ Wi-Fi must already be connected.
 
 ---
 
-## clock.get_sync_status()
+## clock__get_sync_status()
 
 ```c
 bruce_clock_sync_status_t clock__get_sync_status(void);
@@ -2631,7 +2714,7 @@ Returns the status of the latest clock synchronization.
 
 ---
 
-## clock.get_ntp_server()
+## clock__get_ntp_server()
 
 ```c
 const char *clock__get_ntp_server(void);
@@ -2723,7 +2806,7 @@ typedef struct {
 
 ---
 
-## config.get_wifi_ap_ssid()
+## config__get_wifi_ap_ssid()
 
 ```c
 const char *config__get_wifi_ap_ssid(void);
@@ -2745,7 +2828,7 @@ _Not permission-gated._
 
 ---
 
-## config.get_wifi_ap_password()
+## config__get_wifi_ap_password()
 
 ```c
 const char *config__get_wifi_ap_password(void);
@@ -2767,7 +2850,7 @@ _Not permission-gated._
 
 ---
 
-## config.set_wifi_ap()
+## config__set_wifi_ap()
 
 ```c
 bruce_result_t config__set_wifi_ap(const char *ssid, const char *password);
@@ -2796,7 +2879,7 @@ _Not permission-gated._
 
 ---
 
-## config.wifi_credential_count()
+## config__wifi_credential_count()
 
 ```c
 size_t config__wifi_credential_count(void);
@@ -2818,7 +2901,7 @@ _Not permission-gated._
 
 ---
 
-## config.wifi_credential_at()
+## config__wifi_credential_at()
 
 ```c
 const bruce_config_wifi_credential_t *config__wifi_credential_at(size_t index);
@@ -2846,7 +2929,7 @@ _Not permission-gated._
 
 ---
 
-## config.find_wifi_credential()
+## config__find_wifi_credential()
 
 ```c
 const bruce_config_wifi_credential_t *config__find_wifi_credential(const char *ssid);
@@ -2874,7 +2957,7 @@ _Not permission-gated._
 
 ---
 
-## config.add_or_update_wifi_credential()
+## config__add_or_update_wifi_credential()
 
 ```c
 bruce_result_t config__add_or_update_wifi_credential(const char *ssid, const char *password);
@@ -2903,7 +2986,7 @@ _Not permission-gated._
 
 ---
 
-## config.get_wifi_mac()
+## config__get_wifi_mac()
 
 ```c
 const char *config__get_wifi_mac(void);
@@ -2925,7 +3008,7 @@ _Not permission-gated._
 
 ---
 
-## config.set_wifi_mac()
+## config__set_wifi_mac()
 
 ```c
 bruce_result_t config__set_wifi_mac(const char *value);
@@ -2953,7 +3036,7 @@ _Not permission-gated._
 
 ---
 
-## config.get_color_primary()
+## config__get_color_primary()
 
 ```c
 uint16_t config__get_color_primary(void);
@@ -2986,7 +3069,7 @@ and persisted in one batch).
 
 ---
 
-## config.set_color_primary()
+## config__set_color_primary()
 
 ```c
 bruce_result_t config__set_color_primary(uint16_t value);
@@ -3011,7 +3094,7 @@ Sets the primary accent color.
 
 ---
 
-## config.get_color_secondary()
+## config__get_color_secondary()
 
 ```c
 uint16_t config__get_color_secondary(void);
@@ -3026,7 +3109,7 @@ Secondary accent color. @permission config
 
 ---
 
-## config.set_color_secondary()
+## config__set_color_secondary()
 
 ```c
 bruce_result_t config__set_color_secondary(uint16_t value);
@@ -3051,7 +3134,7 @@ Sets the secondary accent color.
 
 ---
 
-## config.get_color_background()
+## config__get_color_background()
 
 ```c
 uint16_t config__get_color_background(void);
@@ -3066,7 +3149,7 @@ Full-screen canvas background color. @permission config
 
 ---
 
-## config.set_color_background()
+## config__set_color_background()
 
 ```c
 bruce_result_t config__set_color_background(uint16_t value);
@@ -3091,7 +3174,7 @@ Sets the background color.
 
 ---
 
-## config.get_color_surface()
+## config__get_color_surface()
 
 ```c
 uint16_t config__get_color_surface(void);
@@ -3106,7 +3189,7 @@ Raised panel/window surface color. @permission config
 
 ---
 
-## config.set_color_surface()
+## config__set_color_surface()
 
 ```c
 bruce_result_t config__set_color_surface(uint16_t value);
@@ -3131,7 +3214,7 @@ Sets the surface color.
 
 ---
 
-## config.get_color_text()
+## config__get_color_text()
 
 ```c
 uint16_t config__get_color_text(void);
@@ -3146,7 +3229,7 @@ Body copy text color. @permission config
 
 ---
 
-## config.set_color_text()
+## config__set_color_text()
 
 ```c
 bruce_result_t config__set_color_text(uint16_t value);
@@ -3171,7 +3254,7 @@ Sets the body text color.
 
 ---
 
-## config.get_color_text_muted()
+## config__get_color_text_muted()
 
 ```c
 uint16_t config__get_color_text_muted(void);
@@ -3186,7 +3269,7 @@ De-emphasized text color. @permission config
 
 ---
 
-## config.set_color_text_muted()
+## config__set_color_text_muted()
 
 ```c
 bruce_result_t config__set_color_text_muted(uint16_t value);
@@ -3211,7 +3294,7 @@ Sets the muted text color.
 
 ---
 
-## config.get_color_border()
+## config__get_color_border()
 
 ```c
 uint16_t config__get_color_border(void);
@@ -3226,7 +3309,7 @@ Divider/window stroke color. @permission config
 
 ---
 
-## config.set_color_border()
+## config__set_color_border()
 
 ```c
 bruce_result_t config__set_color_border(uint16_t value);
@@ -3251,7 +3334,7 @@ Sets the border color.
 
 ---
 
-## config.get_color_success()
+## config__get_color_success()
 
 ```c
 uint16_t config__get_color_success(void);
@@ -3266,7 +3349,7 @@ Success-status color. @permission config
 
 ---
 
-## config.set_color_success()
+## config__set_color_success()
 
 ```c
 bruce_result_t config__set_color_success(uint16_t value);
@@ -3291,7 +3374,7 @@ Sets the success-status color.
 
 ---
 
-## config.get_color_warning()
+## config__get_color_warning()
 
 ```c
 uint16_t config__get_color_warning(void);
@@ -3306,7 +3389,7 @@ Warning-status color. @permission config
 
 ---
 
-## config.set_color_warning()
+## config__set_color_warning()
 
 ```c
 bruce_result_t config__set_color_warning(uint16_t value);
@@ -3331,7 +3414,7 @@ Sets the warning-status color.
 
 ---
 
-## config.get_color_error()
+## config__get_color_error()
 
 ```c
 uint16_t config__get_color_error(void);
@@ -3346,7 +3429,7 @@ Error-status color. @permission config
 
 ---
 
-## config.set_color_error()
+## config__set_color_error()
 
 ```c
 bruce_result_t config__set_color_error(uint16_t value);
@@ -3391,7 +3474,7 @@ typedef struct {
 
 ---
 
-## config.set_colors()
+## config__set_colors()
 
 ```c
 bruce_result_t config__set_colors(const bruce_config_theme_colors_t *colors);
@@ -3422,7 +3505,7 @@ using that role's own setter.
 
 ---
 
-## config.parse_theme_color()
+## config__parse_theme_color()
 
 ```c
 bool config__parse_theme_color(const char *text, uint16_t *out_rgb565);
@@ -3454,7 +3537,7 @@ duplicating it.
 
 ---
 
-## config.get_display_buffered_rendering()
+## config__get_display_buffered_rendering()
 
 ```c
 bool config__get_display_buffered_rendering(void);
@@ -3477,7 +3560,7 @@ unavailable.
 
 ---
 
-## config.set_display_buffered_rendering()
+## config__set_display_buffered_rendering()
 
 ```c
 bruce_result_t config__set_display_buffered_rendering(bool value);
@@ -3504,7 +3587,7 @@ Changes apply after reboot.
 
 ---
 
-## config.get_display_rotation()
+## config__get_display_rotation()
 
 ```c
 int config__get_display_rotation(void);
@@ -3525,7 +3608,7 @@ Changes apply after reboot.
 
 ---
 
-## config.set_display_rotation()
+## config__set_display_rotation()
 
 ```c
 bruce_result_t config__set_display_rotation(int value);
@@ -3552,7 +3635,7 @@ Changes apply after reboot.
 
 ---
 
-## config.get_display_dma_framebuffer()
+## config__get_display_dma_framebuffer()
 
 ```c
 bool config__get_display_dma_framebuffer(void);
@@ -3573,7 +3656,7 @@ Changes apply after reboot and only affects buffered rendering.
 
 ---
 
-## config.set_display_dma_framebuffer()
+## config__set_display_dma_framebuffer()
 
 ```c
 bruce_result_t config__set_display_dma_framebuffer(bool value);
@@ -3600,7 +3683,7 @@ Changes apply after reboot and only affects buffered rendering.
 
 ---
 
-## config.get_launcher()
+## config__get_launcher()
 
 ```c
 const char *config__get_launcher(void);
@@ -3619,7 +3702,7 @@ Launcher command run at startup.
 
 ---
 
-## config.set_launcher()
+## config__set_launcher()
 
 ```c
 bruce_result_t config__set_launcher(const char *value);
@@ -3644,7 +3727,7 @@ Sets the launcher command run at startup.
 
 ---
 
-## config.get_display_dim_timeout()
+## config__get_display_dim_timeout()
 
 ```c
 int config__get_display_dim_timeout(void);
@@ -3659,7 +3742,7 @@ Screen dim timeout, in seconds. @permission config
 
 ---
 
-## config.set_display_dim_timeout()
+## config__set_display_dim_timeout()
 
 ```c
 bruce_result_t config__set_display_dim_timeout(int value);
@@ -3684,7 +3767,7 @@ Sets the screen dim timeout.
 
 ---
 
-## config.get_display_brightness()
+## config__get_display_brightness()
 
 ```c
 int config__get_display_brightness(void);
@@ -3699,7 +3782,7 @@ Display brightness (0-100). @permission config
 
 ---
 
-## config.set_display_brightness()
+## config__set_display_brightness()
 
 ```c
 bruce_result_t config__set_display_brightness(int value);
@@ -3724,7 +3807,7 @@ Sets the display brightness.
 
 ---
 
-## config.get_time_automatic_update_via_ntp()
+## config__get_time_automatic_update_via_ntp()
 
 ```c
 bool config__get_time_automatic_update_via_ntp(void);
@@ -3739,7 +3822,7 @@ Whether the clock automatically syncs via NTP. @permission config
 
 ---
 
-## config.set_time_automatic_update_via_ntp()
+## config__set_time_automatic_update_via_ntp()
 
 ```c
 bruce_result_t config__set_time_automatic_update_via_ntp(bool value);
@@ -3764,7 +3847,7 @@ Sets whether the clock automatically syncs via NTP.
 
 ---
 
-## config.get_time_timezone()
+## config__get_time_timezone()
 
 ```c
 float config__get_time_timezone(void);
@@ -3779,7 +3862,7 @@ UTC offset in hours (may be fractional). @permission config
 
 ---
 
-## config.set_time_timezone()
+## config__set_time_timezone()
 
 ```c
 bruce_result_t config__set_time_timezone(float value);
@@ -3804,7 +3887,7 @@ Sets the UTC offset.
 
 ---
 
-## config.get_time_dst()
+## config__get_time_dst()
 
 ```c
 bool config__get_time_dst(void);
@@ -3819,7 +3902,7 @@ Whether the manual one-hour DST adjustment is applied. @permission config
 
 ---
 
-## config.set_time_dst()
+## config__set_time_dst()
 
 ```c
 bruce_result_t config__set_time_dst(bool value);
@@ -3844,7 +3927,7 @@ Sets the manual one-hour DST adjustment.
 
 ---
 
-## config.get_time_clock24hr()
+## config__get_time_clock24hr()
 
 ```c
 bool config__get_time_clock24hr(void);
@@ -3859,7 +3942,7 @@ Whether times are displayed in 24-hour format. @permission config
 
 ---
 
-## config.set_time_clock24hr()
+## config__set_time_clock24hr()
 
 ```c
 bruce_result_t config__set_time_clock24hr(bool value);
@@ -3884,7 +3967,7 @@ Sets whether times are displayed in 24-hour format.
 
 ---
 
-## config.get_sound_enabled()
+## config__get_sound_enabled()
 
 ```c
 bool config__get_sound_enabled(void);
@@ -3899,7 +3982,7 @@ Whether sound is enabled. @permission config
 
 ---
 
-## config.set_sound_enabled()
+## config__set_sound_enabled()
 
 ```c
 bruce_result_t config__set_sound_enabled(bool value);
@@ -3924,7 +4007,7 @@ Sets whether sound is enabled.
 
 ---
 
-## config.get_sound_volume()
+## config__get_sound_volume()
 
 ```c
 int config__get_sound_volume(void);
@@ -3939,7 +4022,7 @@ Sound volume (0-100). @permission config
 
 ---
 
-## config.set_sound_volume()
+## config__set_sound_volume()
 
 ```c
 bruce_result_t config__set_sound_volume(int value);
@@ -3964,7 +4047,7 @@ Sets the sound volume.
 
 ---
 
-## config.get_keyboard_lang()
+## config__get_keyboard_lang()
 
 ```c
 const char *config__get_keyboard_lang(void);
@@ -3979,7 +4062,7 @@ Configured on-screen keyboard language. @permission config
 
 ---
 
-## config.set_keyboard_lang()
+## config__set_keyboard_lang()
 
 ```c
 bruce_result_t config__set_keyboard_lang(const char *value);
@@ -4004,7 +4087,7 @@ Sets the on-screen keyboard language.
 
 ---
 
-## config.get_hotkeys()
+## config__get_hotkeys()
 
 ```c
 const bruce_config_hotkeys_t *config__get_hotkeys(void);
@@ -4019,7 +4102,7 @@ Configured hotkey chords. @permission config
 
 ---
 
-## config.set_hotkeys()
+## config__set_hotkeys()
 
 ```c
 bruce_result_t config__set_hotkeys(const bruce_config_hotkey_t *values, size_t count);
@@ -4045,7 +4128,7 @@ Replaces the whole hotkey list.
 
 ---
 
-## config.get_led_enabled()
+## config__get_led_enabled()
 
 ```c
 bool config__get_led_enabled(void);
@@ -4060,7 +4143,7 @@ Whether the status LED is enabled. @permission config
 
 ---
 
-## config.set_led_enabled()
+## config__set_led_enabled()
 
 ```c
 bruce_result_t config__set_led_enabled(bool value);
@@ -4085,7 +4168,7 @@ Sets whether the status LED is enabled.
 
 ---
 
-## config.get_led_brightness()
+## config__get_led_brightness()
 
 ```c
 int config__get_led_brightness(void);
@@ -4100,7 +4183,7 @@ Status LED brightness (0-100). @permission config
 
 ---
 
-## config.set_led_brightness()
+## config__set_led_brightness()
 
 ```c
 bruce_result_t config__set_led_brightness(int value);
@@ -4125,7 +4208,7 @@ Sets the status LED brightness.
 
 ---
 
-## config.get_led_color()
+## config__get_led_color()
 
 ```c
 uint32_t config__get_led_color(void);
@@ -4140,7 +4223,7 @@ Status LED color. @permission config
 
 ---
 
-## config.set_led_color()
+## config__set_led_color()
 
 ```c
 bruce_result_t config__set_led_color(uint32_t value);
@@ -4165,7 +4248,7 @@ Sets the status LED color.
 
 ---
 
-## config.get_led_blink_enabled()
+## config__get_led_blink_enabled()
 
 ```c
 bool config__get_led_blink_enabled(void);
@@ -4180,7 +4263,7 @@ Whether the status LED blinks. @permission config
 
 ---
 
-## config.set_led_blink_enabled()
+## config__set_led_blink_enabled()
 
 ```c
 bruce_result_t config__set_led_blink_enabled(bool value);
@@ -4205,7 +4288,7 @@ Sets whether the status LED blinks.
 
 ---
 
-## config.get_led_effect()
+## config__get_led_effect()
 
 ```c
 int config__get_led_effect(void);
@@ -4220,7 +4303,7 @@ Selected status LED effect. @permission config
 
 ---
 
-## config.set_led_effect()
+## config__set_led_effect()
 
 ```c
 bruce_result_t config__set_led_effect(int value);
@@ -4245,7 +4328,7 @@ Sets the status LED effect.
 
 ---
 
-## config.get_led_effect_speed()
+## config__get_led_effect_speed()
 
 ```c
 int config__get_led_effect_speed(void);
@@ -4260,7 +4343,7 @@ Status LED effect speed. @permission config
 
 ---
 
-## config.set_led_effect_speed()
+## config__set_led_effect_speed()
 
 ```c
 bruce_result_t config__set_led_effect_speed(int value);
@@ -4285,7 +4368,7 @@ Sets the status LED effect speed.
 
 ---
 
-## config.get_led_effect_direction()
+## config__get_led_effect_direction()
 
 ```c
 int config__get_led_effect_direction(void);
@@ -4300,7 +4383,7 @@ Status LED effect direction. @permission config
 
 ---
 
-## config.set_led_effect_direction()
+## config__set_led_effect_direction()
 
 ```c
 bruce_result_t config__set_led_effect_direction(int value);
@@ -4325,7 +4408,7 @@ Sets the status LED effect direction.
 
 ---
 
-## config.get_startup_apps()
+## config__get_startup_apps()
 
 ```c
 const bruce_config_startup_apps_t *config__get_startup_apps(void);
@@ -4344,7 +4427,7 @@ Startup app list.
 
 ---
 
-## config.set_startup_apps()
+## config__set_startup_apps()
 
 ```c
 bruce_result_t config__set_startup_apps(const char *const *values, size_t count);
@@ -4370,7 +4453,7 @@ Replaces the whole startup app list.
 
 ---
 
-## config.add_startup_app()
+## config__add_startup_app()
 
 ```c
 bruce_result_t config__add_startup_app(const char *key);
@@ -4397,7 +4480,7 @@ Adding an existing key is a successful no-op.
 
 ---
 
-## config.remove_startup_app()
+## config__remove_startup_app()
 
 ```c
 bruce_result_t config__remove_startup_app(const char *key);
@@ -4424,7 +4507,7 @@ Returns BRUCE_ERR_NOT_FOUND if the key isn't present.
 
 ---
 
-## config.get_dev_mode()
+## config__get_dev_mode()
 
 ```c
 bool config__get_dev_mode(void);
@@ -4443,7 +4526,7 @@ Developer-mode flag.
 
 ---
 
-## config.set_dev_mode()
+## config__set_dev_mode()
 
 ```c
 bruce_result_t config__set_dev_mode(bool value);
@@ -4481,7 +4564,7 @@ Sets the developer-mode flag.
 
 ---
 
-## device.get_battery()
+## device__get_battery()
 
 ```c
 int device__get_battery(void);
@@ -4498,7 +4581,7 @@ Analog-only boards estimate charge from battery voltage.
 
 ---
 
-## device.restart()
+## device__restart()
 
 ```c
 bruce_result_t device__restart(uint32_t delay_ms);
@@ -4523,7 +4606,7 @@ Schedules a device restart after delay_ms.
 
 ---
 
-## device.power_off()
+## device__power_off()
 
 ```c
 bruce_result_t device__power_off(uint32_t delay_ms);
@@ -4657,13 +4740,17 @@ typedef struct {
      * behavior below without needing to know afterward which kind of
      * press it was. Left untouched when long_press_enabled is false. */
     bool *out_long_press;
+    /* Set when the returned long-press selection was the synthetic `[..]`
+     * row rather than a real file or directory. The returned path is the
+     * directory that was being displayed. */
+    bool *out_parent_entry;
 } bruce_dialog_render_params_t;
 ```
 
 
 ---
 
-## dialog.message()
+## dialog__message()
 
 ```c
 bruce_result_t dialog__message(bruce_dialog_kind_t kind, const char *title, const char *message);
@@ -4689,7 +4776,7 @@ BRUCE_ERR_INVALID_ARGUMENT, or another BRUCE_ERR_* result.
 
 ---
 
-## dialog.choice()
+## dialog__choice()
 
 ```c
 bruce_result_t dialog__choice(
@@ -4717,7 +4804,7 @@ Shows a choice-list dialog and waits for a selection.
 
 ---
 
-## dialog.choice_launcher()
+## dialog__choice_launcher()
 
 ```c
 bruce_result_t dialog__choice_launcher(
@@ -4745,7 +4832,7 @@ Like dialog__choice(), styled for use from the launcher.
 
 ---
 
-## dialog.choice_ex()
+## dialog__choice_ex()
 
 ```c
 bruce_result_t dialog__choice_ex(
@@ -4783,7 +4870,7 @@ outside the viewport can update.
 
 ---
 
-## dialog.pick_file()
+## dialog__pick_file()
 
 ```c
 bruce_result_t dialog__pick_file(
@@ -4816,7 +4903,7 @@ its own subtitle line underneath. Ignored on non-GUI/terminal picks.
 
 ---
 
-## dialog.pick_file_ex()
+## dialog__pick_file_ex()
 
 ```c
 bruce_result_t dialog__pick_file_ex(
@@ -4841,7 +4928,10 @@ picker returns immediately with that directory's own path in `out_path`
 short press on a file returns that file's path - so a caller can offer
 folder-level actions (rename/delete/info, ...) the way it already can
 for a picked file. A short press on a directory still descends into it
-exactly as before, long_press_enabled or not.
+exactly as before, long_press_enabled or not. A long press on the
+synthetic `[..]` row returns the directory currently being displayed and
+sets `*render_params->out_parent_entry`; a short press navigates upward,
+or returns BRUCE_ERR_CANCELLED when used at root.
 
 ### Parameters
 
@@ -4904,7 +4994,7 @@ typedef struct {
 
 ---
 
-## dialog.set_window_renderer()
+## dialog__set_window_renderer()
 
 ```c
 void dialog__set_window_renderer(const bruce_dialog_window_renderer_t *renderer, void *context);
@@ -4929,7 +5019,7 @@ previously registered renderer.
 
 ---
 
-## dialog.default_render_params()
+## dialog__default_render_params()
 
 ```c
 bruce_dialog_render_params_t dialog__default_render_params(int text_size);
@@ -4955,7 +5045,7 @@ size.
 
 ---
 
-## dialog.text_input()
+## dialog__text_input()
 
 ```c
 bruce_result_t dialog__text_input(
@@ -4988,7 +5078,7 @@ BRUCE_ERR_CANCELLED.
 
 ---
 
-## dialog.hex_input()
+## dialog__hex_input()
 
 ```c
 bruce_result_t dialog__hex_input(
@@ -5019,7 +5109,7 @@ BRUCE_ERR_CANCELLED.
 
 ---
 
-## dialog.number_input()
+## dialog__number_input()
 
 ```c
 bruce_result_t dialog__number_input(
@@ -5050,7 +5140,7 @@ BRUCE_ERR_CANCELLED.
 
 ---
 
-## dialog.create_text_viewer()
+## dialog__create_text_viewer()
 
 ```c
 bruce_result_t dialog__create_text_viewer(const char *title, const char *text, bruce_viewer_id_t *out_viewer);
@@ -5073,7 +5163,7 @@ Opens a scrollable text viewer dialog.
 
 ---
 
-## dialog.viewer_set_text()
+## dialog__viewer_set_text()
 
 ```c
 bruce_result_t dialog__viewer_set_text(bruce_viewer_id_t viewer, const char *text);
@@ -5095,7 +5185,7 @@ Replaces the text shown in an open viewer.
 
 ---
 
-## dialog.viewer_set_text_size()
+## dialog__viewer_set_text_size()
 
 ```c
 bruce_result_t dialog__viewer_set_text_size(bruce_viewer_id_t viewer, int text_size);
@@ -5117,7 +5207,7 @@ Sets the GUI body font multiplier (1..8) and redraws the viewer.
 
 ---
 
-## dialog.viewer_scroll()
+## dialog__viewer_scroll()
 
 ```c
 bruce_result_t dialog__viewer_scroll(bruce_viewer_id_t viewer, int lines);
@@ -5139,7 +5229,7 @@ Scrolls an open viewer by a number of lines.
 
 ---
 
-## dialog.viewer_close()
+## dialog__viewer_close()
 
 ```c
 bruce_result_t dialog__viewer_close(bruce_viewer_id_t viewer);
@@ -5203,7 +5293,7 @@ typedef struct {
 
 ---
 
-## disk.list()
+## disk__list()
 
 ```c
 bruce_result_t disk__list(bruce_disk_entry_t *entries, size_t capacity, size_t *out_count);
@@ -5229,7 +5319,7 @@ capacity 0 to query count.
 
 ---
 
-## disk.mount()
+## disk__mount()
 
 ```c
 bruce_result_t disk__mount(const char *name, const char *mount_point);
@@ -5260,7 +5350,7 @@ and mounted at the given path, which must be an absolute path other than
 
 ---
 
-## disk.unmount()
+## disk__unmount()
 
 ```c
 bruce_result_t disk__unmount(const char *name_or_mount_point);
@@ -5370,7 +5460,7 @@ typedef struct {
 
 ---
 
-## display.width()
+## display__width()
 
 ```c
 int display__width(void);
@@ -5385,7 +5475,7 @@ Width of the caller's current viewport, or zero while hidden.
 
 ---
 
-## display.height()
+## display__height()
 
 ```c
 int display__height(void);
@@ -5400,7 +5490,7 @@ Height of the caller's current viewport, or zero while hidden.
 
 ---
 
-## display.screen_width()
+## display__screen_width()
 
 ```c
 int display__screen_width(void);
@@ -5420,7 +5510,7 @@ display__init().
 
 ---
 
-## display.screen_height()
+## display__screen_height()
 
 ```c
 int display__screen_height(void);
@@ -5440,7 +5530,7 @@ display__init().
 
 ---
 
-## display.color565()
+## display__color565()
 
 ```c
 bruce_display_color_t display__color565(uint8_t r, uint8_t g, uint8_t b);
@@ -5463,7 +5553,7 @@ Convert 8-bit RGB components to an RGB565 color value.
 
 ---
 
-## display.fill_screen()
+## display__fill_screen()
 
 ```c
 bruce_result_t display__fill_screen(bruce_display_color_t color);
@@ -5484,7 +5574,7 @@ Fill the entire logical screen with `color`.
 
 ---
 
-## display.clear()
+## display__clear()
 
 ```c
 bruce_result_t display__clear(void);
@@ -5499,7 +5589,7 @@ Fill the screen with the current background color (black by default).
 
 ---
 
-## display.set_text_color()
+## display__set_text_color()
 
 ```c
 bruce_result_t display__set_text_color(bruce_display_color_t color);
@@ -5520,7 +5610,7 @@ Set the foreground color used by subsequent text and bitmap drawing.
 
 ---
 
-## display.set_text_bg_color()
+## display__set_text_bg_color()
 
 ```c
 bruce_result_t display__set_text_bg_color(uint32_t color);
@@ -5545,22 +5635,26 @@ parameter is 32-bit so the transparent sentinel fits.
 
 ---
 
-## display.set_text_size()
+## display__set_text_size()
 
 ```c
-bruce_result_t display__set_text_size(uint8_t size);
+bruce_result_t display__set_text_size(float size);
 ```
 
 Text size multiplier (1 = native character cells, 2 = 2x that, ...).
 
-Clamped to 1..8. See display__get_font_metrics() for the native cell
-size.
+Clamped to 0.1..8. Values below 1 downscale the native glyph bitmap
+(nearest-pixel, not antialiased) instead of upscaling it -- since the
+built-in font is only 5px wide to start with, legibility drops off fast
+below ~0.5 and glyphs may fall back to a solid dot rather than a hollow
+box at the smallest sizes. See display__get_font_metrics() for the native
+cell size.
 
 ### Parameters
 
 | Parameter | Type | Description |
 | --- | --- | --- |
-| `size` | `uint8_t` | New text size multiplier (clamped to 1..8). |
+| `size` | `float` | New text size multiplier (clamped to 0.1..8). |
 
 ### Returns
 
@@ -5569,7 +5663,7 @@ size.
 
 ---
 
-## display.set_cursor()
+## display__set_cursor()
 
 ```c
 bruce_result_t display__set_cursor(int16_t x, int16_t y);
@@ -5591,7 +5685,7 @@ Position the text cursor in logical coordinates.
 
 ---
 
-## display.get_cursor()
+## display__get_cursor()
 
 ```c
 bruce_result_t display__get_cursor(int16_t *x, int16_t *y);
@@ -5613,7 +5707,7 @@ Read the current text cursor position in logical coordinates.
 
 ---
 
-## display.print()
+## display__print()
 
 ```c
 bruce_result_t display__print(const char *text);
@@ -5634,7 +5728,7 @@ Print a NUL-terminated UTF-8 string at the cursor and advance the cursor.
 
 ---
 
-## display.println()
+## display__println()
 
 ```c
 bruce_result_t display__println(const char *text);
@@ -5655,7 +5749,7 @@ Same as display__print() but appends a newline.
 
 ---
 
-## display.draw_string()
+## display__draw_string()
 
 ```c
 bruce_result_t display__draw_string(const char *text, int16_t x, int16_t y);
@@ -5678,7 +5772,7 @@ Draw a single-line string with (x, y) at its left edge.
 
 ---
 
-## display.draw_centre_string()
+## display__draw_centre_string()
 
 ```c
 bruce_result_t display__draw_centre_string(const char *text, int16_t x, int16_t y);
@@ -5701,7 +5795,7 @@ Draw a single-line string horizontally centered on x.
 
 ---
 
-## display.draw_right_string()
+## display__draw_right_string()
 
 ```c
 bruce_result_t display__draw_right_string(const char *text, int16_t x, int16_t y);
@@ -5724,7 +5818,7 @@ Draw a single-line string with its right edge at x.
 
 ---
 
-## display.get_font_metrics()
+## display__get_font_metrics()
 
 ```c
 bruce_result_t display__get_font_metrics(int16_t *out_char_width, int16_t *out_char_height);
@@ -5732,7 +5826,7 @@ bruce_result_t display__get_font_metrics(int16_t *out_char_width, int16_t *out_c
 
 The active font's fixed advance width/height, in px, before text_size scaling.
 
-(multiply by the value passed to display__set_text_size() to get
+(scale by the value passed to display__set_text_size() to get
 on-screen pixels). Every built-in font is monospace today, so this
 single width/height pair is exact for any string; callers doing their
 own layout math (row heights, column counts, cursor placement) should
@@ -5753,7 +5847,7 @@ active font ever changes.
 
 ---
 
-## display.draw_pixel()
+## display__draw_pixel()
 
 ```c
 bruce_result_t display__draw_pixel(int16_t x, int16_t y, bruce_display_color_t color);
@@ -5776,7 +5870,7 @@ Draw a single pixel.
 
 ---
 
-## display.draw_line()
+## display__draw_line()
 
 ```c
 bruce_result_t
@@ -5802,7 +5896,7 @@ Draw a line between two points.
 
 ---
 
-## display.draw_rect()
+## display__draw_rect()
 
 ```c
 bruce_result_t display__draw_rect(int16_t x, int16_t y, int16_t w, int16_t h, bruce_display_color_t color);
@@ -5827,7 +5921,7 @@ Draw a rectangle outline.
 
 ---
 
-## display.fill_rect()
+## display__fill_rect()
 
 ```c
 bruce_result_t display__fill_rect(int16_t x, int16_t y, int16_t w, int16_t h, bruce_display_color_t color);
@@ -5852,7 +5946,7 @@ Draw a filled rectangle.
 
 ---
 
-## display.draw_circle()
+## display__draw_circle()
 
 ```c
 bruce_result_t display__draw_circle(int16_t x, int16_t y, int16_t r, bruce_display_color_t color);
@@ -5876,7 +5970,7 @@ Draw a circle outline.
 
 ---
 
-## display.fill_circle()
+## display__fill_circle()
 
 ```c
 bruce_result_t display__fill_circle(int16_t x, int16_t y, int16_t r, bruce_display_color_t color);
@@ -5900,7 +5994,7 @@ Draw a filled circle.
 
 ---
 
-## display.draw_arc()
+## display__draw_arc()
 
 ```c
 bruce_result_t display__draw_arc(
@@ -5932,7 +6026,7 @@ wraps through zero; a range of 360 degrees draws a full circle.
 
 ---
 
-## display.draw_triangle()
+## display__draw_triangle()
 
 ```c
 bruce_result_t display__draw_triangle(
@@ -5961,7 +6055,7 @@ Draw a triangle outline.
 
 ---
 
-## display.fill_triangle()
+## display__fill_triangle()
 
 ```c
 bruce_result_t display__fill_triangle(
@@ -5990,7 +6084,7 @@ Draw a filled triangle.
 
 ---
 
-## display.draw_round_rect()
+## display__draw_round_rect()
 
 ```c
 bruce_result_t
@@ -6017,7 +6111,7 @@ Draw a rounded-rectangle outline.
 
 ---
 
-## display.fill_round_rect()
+## display__fill_round_rect()
 
 ```c
 bruce_result_t
@@ -6044,7 +6138,7 @@ Draw a filled rounded rectangle.
 
 ---
 
-## display.draw_bitmap()
+## display__draw_bitmap()
 
 ```c
 bruce_result_t display__draw_bitmap(
@@ -6076,7 +6170,7 @@ transparent).
 
 ---
 
-## display.draw_xbitmap()
+## display__draw_xbitmap()
 
 ```c
 bruce_result_t display__draw_xbitmap(
@@ -6107,7 +6201,7 @@ transparent.
 
 ---
 
-## display.draw_rgb_bitmap()
+## display__draw_rgb_bitmap()
 
 ```c
 bruce_result_t display__draw_rgb_bitmap(int16_t x, int16_t y, const uint16_t *bitmap, int16_t w, int16_t h);
@@ -6132,7 +6226,7 @@ Draw a raw RGB565 bitmap from `bitmap` (width * height * 2 bytes).
 
 ---
 
-## display.draw_bitmap_scaled()
+## display__draw_bitmap_scaled()
 
 ```c
 bruce_result_t display__draw_bitmap_scaled(
@@ -6167,7 +6261,7 @@ integer math, no parsing, no extra RAM.
 
 ---
 
-## display.set_rotation()
+## display__set_rotation()
 
 ```c
 bruce_result_t display__set_rotation(uint8_t rotation);
@@ -6188,7 +6282,7 @@ Set rotation: 0 = native, 1 = 90deg clockwise, 2 = 180, 3 = 270.
 
 ---
 
-## display.get_rotation()
+## display__get_rotation()
 
 ```c
 uint8_t display__get_rotation(void);
@@ -6203,7 +6297,7 @@ Return the current rotation (0..3).
 
 ---
 
-## display.snapshot()
+## display__snapshot()
 
 ```c
 bruce_result_t display__snapshot(
@@ -6237,7 +6331,7 @@ Returns BRUCE_ERR_UNSUPPORTED when buffered rendering is disabled.
 
 ---
 
-## display.invert_display()
+## display__invert_display()
 
 ```c
 bruce_result_t display__invert_display(bool invert);
@@ -6258,7 +6352,7 @@ Invert the panel colors (independent of color_inverted config).
 
 ---
 
-## display.set_brightness()
+## display__set_brightness()
 
 ```c
 bruce_result_t display__set_brightness(uint8_t brightness);
@@ -6279,7 +6373,7 @@ Set backlight brightness, 0..255. Persists via config__set_display_brightness().
 
 ---
 
-## display.get_brightness()
+## display__get_brightness()
 
 ```c
 uint8_t display__get_brightness(void);
@@ -6294,7 +6388,7 @@ Return the current backlight brightness, 0..255.
 
 ---
 
-## display.display_on_off()
+## display__display_on_off()
 
 ```c
 bruce_result_t display__display_on_off(bool on);
@@ -6315,7 +6409,7 @@ Turn the panel display on or off (backlight is controlled separately).
 
 ---
 
-## display.game_mode()
+## display__game_mode()
 
 ```c
 bruce_result_t display__game_mode(bool enable);
@@ -6355,7 +6449,7 @@ or while any process has an active (begun but not yet presented) frame.
 
 ---
 
-## display.begin_frame()
+## display__begin_frame()
 
 ```c
 bruce_result_t display__begin_frame(void);
@@ -6372,7 +6466,7 @@ In direct mode, drawing is visible before the frame is presented.
 
 ---
 
-## display.present()
+## display__present()
 
 ```c
 bruce_result_t display__present(void);
@@ -6390,7 +6484,7 @@ lease and draws an active notification over the caller's viewport.
 
 ---
 
-## display.set_tiles()
+## display__set_tiles()
 
 ```c
 bruce_result_t display__set_tiles(const bruce_display_tile_t *tiles, size_t count);
@@ -6421,7 +6515,7 @@ typedef uint32_t bruce_display_overlay_id_t;
 
 ---
 
-## display.overlay_create()
+## display__overlay_create()
 
 ```c
 bruce_result_t
@@ -6450,7 +6544,7 @@ BRUCE_DISPLAY_MAX_OVERLAYS are live.
 
 ---
 
-## display.overlay_destroy()
+## display__overlay_destroy()
 
 ```c
 bruce_result_t display__overlay_destroy(bruce_display_overlay_id_t overlay);
@@ -6471,7 +6565,7 @@ Destroys an overlay early. Also happens automatically on process exit.
 
 ---
 
-## display.overlay_show()
+## display__overlay_show()
 
 ```c
 bruce_result_t display__overlay_show(bruce_display_overlay_id_t overlay);
@@ -6494,7 +6588,7 @@ Content persists while hidden. Idempotent.
 
 ---
 
-## display.overlay_hide()
+## display__overlay_hide()
 
 ```c
 bruce_result_t display__overlay_hide(bruce_display_overlay_id_t overlay);
@@ -6517,7 +6611,7 @@ Content persists while hidden. Idempotent.
 
 ---
 
-## display.overlay_move()
+## display__overlay_move()
 
 ```c
 bruce_result_t display__overlay_move(bruce_display_overlay_id_t overlay, int16_t x, int16_t y);
@@ -6540,7 +6634,7 @@ Repositions an overlay's on-screen origin; size is fixed at creation.
 
 ---
 
-## display.overlay_begin()
+## display__overlay_begin()
 
 ```c
 bruce_result_t display__overlay_begin(bruce_display_overlay_id_t overlay);
@@ -6566,7 +6660,7 @@ caller's normal viewport. Sessions do not nest.
 
 ---
 
-## display.overlay_end()
+## display__overlay_end()
 
 ```c
 bruce_result_t display__overlay_end(bruce_display_overlay_id_t overlay);
@@ -6615,7 +6709,7 @@ typedef struct {
 
 ---
 
-## environment.global_get()
+## environment__global_get()
 
 ```c
 const char *environment__global_get(const char *name);
@@ -6641,7 +6735,7 @@ boot; these setters intentionally do not modify that file.
 
 ---
 
-## environment.global_set()
+## environment__global_set()
 
 ```c
 bruce_result_t environment__global_set(const char *name, const char *value);
@@ -6663,7 +6757,7 @@ Sets a global environment default.
 
 ---
 
-## environment.global_unset()
+## environment__global_unset()
 
 ```c
 bruce_result_t environment__global_unset(const char *name);
@@ -6684,7 +6778,7 @@ Removes a global environment default.
 
 ---
 
-## environment.get()
+## environment__get()
 
 ```c
 const char *environment__get(const char *name);
@@ -6709,7 +6803,7 @@ process changes its environment or exits.
 
 ---
 
-## environment.set()
+## environment__set()
 
 ```c
 bruce_result_t environment__set(const char *name, const char *value);
@@ -6731,7 +6825,7 @@ Sets a variable in the calling process's own environment.
 
 ---
 
-## environment.unset()
+## environment__unset()
 
 ```c
 bruce_result_t environment__unset(const char *name);
@@ -6752,7 +6846,7 @@ Removes a variable from the calling process's own environment.
 
 ---
 
-## environment.count()
+## environment__count()
 
 ```c
 size_t environment__count(void);
@@ -6767,7 +6861,7 @@ Number of variables in the calling process's own environment.
 
 ---
 
-## environment.get_at()
+## environment__get_at()
 
 ```c
 bruce_result_t environment__get_at(size_t index, const char **out_name, const char **out_value);
@@ -6856,7 +6950,7 @@ typedef struct {
 
 ---
 
-## ext_mem_loader.stage_path()
+## ext_mem_loader__stage_path()
 
 ```c
 bruce_result_t ext_mem_loader__stage_path(const char *path, bruce_ext_mem_loader_image_t *out_image);
@@ -6882,7 +6976,7 @@ directly. The caller must release successful mappings promptly.
 
 ---
 
-## ext_mem_loader.adopt_image()
+## ext_mem_loader__adopt_image()
 
 ```c
 bruce_result_t ext_mem_loader__adopt_image(bruce_ext_mem_loader_image_t *image);
@@ -6903,7 +6997,7 @@ Transfers a staged image to the current process after a loader spawns it.
 
 ---
 
-## ext_mem_loader.release_image()
+## ext_mem_loader__release_image()
 
 ```c
 bruce_result_t ext_mem_loader__release_image(bruce_ext_mem_loader_image_t *image);
@@ -6924,7 +7018,7 @@ Releases an image staged/adopted via ext_mem_loader__stage_path()/adopt_image().
 
 ---
 
-## ext_mem_loader.allocate_xip()
+## ext_mem_loader__allocate_xip()
 
 ```c
 bruce_result_t ext_mem_loader__allocate_xip(size_t size, bruce_ext_mem_loader_xip_image_t *out_image);
@@ -6949,7 +7043,7 @@ cache coherent.
 
 ---
 
-## ext_mem_loader.write_xip()
+## ext_mem_loader__write_xip()
 
 ```c
 bruce_result_t
@@ -6976,7 +7070,7 @@ Writes into a bounds-checked region of an allocated XIP image.
 
 ---
 
-## ext_mem_loader.adopt_xip()
+## ext_mem_loader__adopt_xip()
 
 ```c
 bruce_result_t ext_mem_loader__adopt_xip(bruce_ext_mem_loader_xip_image_t *image);
@@ -6997,7 +7091,7 @@ Transfers a staged XIP image to the current process after a loader spawns it.
 
 ---
 
-## ext_mem_loader.release_xip()
+## ext_mem_loader__release_xip()
 
 ```c
 bruce_result_t ext_mem_loader__release_xip(bruce_ext_mem_loader_xip_image_t *image);
@@ -7018,7 +7112,7 @@ Releases an XIP image allocated/adopted via allocate_xip()/adopt_xip().
 
 ---
 
-## ext_mem_loader.set_error_message()
+## ext_mem_loader__set_error_message()
 
 ```c
 void ext_mem_loader__set_error_message(const char *message);
@@ -7042,7 +7136,7 @@ NULL.
 
 ---
 
-## ext_mem_loader.last_error_message()
+## ext_mem_loader__last_error_message()
 
 ```c
 const char *ext_mem_loader__last_error_message(void);
@@ -7057,7 +7151,7 @@ Reads back the diagnostic set via ext_mem_loader__set_error_message().
 
 ---
 
-## ext_mem_loader.format_error_message()
+## ext_mem_loader__format_error_message()
 
 ```c
 void ext_mem_loader__format_error_message(const char *action, int result, char *out_message, size_t out_size);
@@ -7084,7 +7178,7 @@ results use the SDK error description.
 
 ---
 
-## app_runner.register_loader()
+## app_runner__register_loader()
 
 ```c
 bruce_result_t app_runner__register_loader(const char *extension, const char *program);
@@ -7110,7 +7204,7 @@ its first argument. Registration order determines named resolution.
 
 ---
 
-## app_runner.run_path()
+## app_runner__run_path()
 
 ```c
 int app_runner__run_path(const char *path, const char *arg, bruce_launch_mode_t mode);
@@ -7144,7 +7238,7 @@ loader's own negative BRUCE_ERR_* on failure.
 
 ---
 
-## app_runner.run_path_with_environment()
+## app_runner__run_path_with_environment()
 
 ```c
 int app_runner__run_path_with_environment(
@@ -7176,7 +7270,7 @@ Like app_runner__run_path(), with temporary child environment assignments.
 
 ---
 
-## app_runner.spawn_loader_process()
+## app_runner__spawn_loader_process()
 
 ```c
 int app_runner__spawn_loader_process(
@@ -7215,7 +7309,7 @@ or a negative BRUCE_ERR_*.
 
 ---
 
-## app_runner.spawn_loader_process_owned()
+## app_runner__spawn_loader_process_owned()
 
 ```c
 int app_runner__spawn_loader_process_owned(
@@ -7251,7 +7345,7 @@ cancellation before entry starts.
 
 ---
 
-## app_runner.spawn_loader_process_owned_with_stop()
+## app_runner__spawn_loader_process_owned_with_stop()
 
 ```c
 int app_runner__spawn_loader_process_owned_with_stop(
@@ -7294,7 +7388,7 @@ Owned variant for runtimes which must be explicitly interrupted to observe coope
 
 ---
 
-## format.bytes_human()
+## format__bytes_human()
 
 ```c
 void format__bytes_human(uint64_t bytes, char *output, size_t capacity);
@@ -7355,7 +7449,7 @@ typedef enum {
 
 ---
 
-## gpio.configure()
+## gpio__configure()
 
 ```c
 bruce_result_t gpio__configure(int pin, bruce_gpio_mode_t mode, bruce_gpio_pull_t pull);
@@ -7385,7 +7479,7 @@ driver is called.
 
 ---
 
-## gpio.read()
+## gpio__read()
 
 ```c
 bruce_result_t gpio__read(int pin, int *out_level);
@@ -7411,7 +7505,7 @@ Reads a GPIO pin's logic level.
 
 ---
 
-## gpio.write()
+## gpio__write()
 
 ```c
 bruce_result_t gpio__write(int pin, int level);
@@ -7433,6 +7527,178 @@ Sets a GPIO pin's output logic level.
 #### Permissions
 
 - `gpio`
+
+
+---
+
+# `hash.h`
+
+**Cryptographic and checksum digests.**
+
+**Constants**
+
+| Name | Value |
+|---|---|
+| `BRUCE_HASH_MD5_SIZE` | `16` |
+| `BRUCE_HASH_SHA256_SIZE` | `32` |
+
+---
+
+## bruce_hash_algorithm_t()
+
+```c
+typedef enum {
+    BRUCE_HASH_MD5 = 0,
+    BRUCE_HASH_SHA256,
+} bruce_hash_algorithm_t;
+```
+
+
+---
+
+## bruce_hash_ctx_t()
+
+```c
+typedef struct bruce_hash_ctx bruce_hash_ctx_t;
+```
+
+
+---
+
+## hash__start()
+
+```c
+bruce_hash_ctx_t *hash__start(bruce_hash_algorithm_t algorithm);
+```
+
+Starts a new streaming digest.
+
+Feed data to it with hash__update() as it becomes available (e.g. one
+file-read chunk at a time), then collect the result with hash__finish().
+Use hash__compute() instead when the whole input is already in memory.
+
+@return A new context, or NULL on allocation failure.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `algorithm` | `bruce_hash_algorithm_t` | Which digest to compute. |
+
+### Returns
+
+`bruce_hash_ctx_t *`
+
+
+---
+
+## hash__update()
+
+```c
+bruce_result_t hash__update(bruce_hash_ctx_t *ctx, const void *data, size_t size);
+```
+
+Feeds `size` bytes of `data` into an in-progress digest.
+
+May be called any number of times between hash__start() and
+hash__finish(). `ctx` is left usable after a failure; the caller still
+owns it and must eventually pass it to hash__finish() to free it.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `ctx` | `bruce_hash_ctx_t *` | Context returned by hash__start(). |
+| `data` | `const void *` | Bytes to add to the digest. |
+| `size` | `size_t` | Number of bytes in data. |
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
+## hash__finish()
+
+```c
+bruce_result_t hash__finish(bruce_hash_ctx_t *ctx, uint8_t *out);
+```
+
+Finishes a digest, writing the result and freeing `ctx`.
+
+`ctx` is freed whether this succeeds or fails; it must not be used again
+afterwards either way.
+
+  BRUCE_HASH_SHA256_SIZE raw bytes, matching the algorithm hash__start()
+  was called with.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `ctx` | `bruce_hash_ctx_t *` | Context returned by hash__start(). |
+| `out` | `uint8_t *` | Receives the digest: BRUCE_HASH_MD5_SIZE or |
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
+## hash__compute()
+
+```c
+bruce_result_t hash__compute(bruce_hash_algorithm_t algorithm, const void *data, size_t size, uint8_t *out);
+```
+
+One-shot digest of a buffer already in memory.
+
+Equivalent to hash__start() + hash__update() + hash__finish() in a
+single call.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `algorithm` | `bruce_hash_algorithm_t` | Which digest to compute. |
+| `data` | `const void *` | Buffer to digest. |
+| `size` | `size_t` | Number of bytes in data. |
+| `out` | `uint8_t *` | Receives the digest, sized as in hash__finish(). |
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
+## hash__crc32()
+
+```c
+uint32_t hash__crc32(uint32_t crc, const void *data, size_t size);
+```
+
+Incremental CRC-32.
+
+The poly 0xEDB88320/init/final-XOR 0xFFFFFFFF variant used by
+zlib/gzip/PNG/PKZIP (and e.g. Python's zlib.crc32()). Pass 0 as `crc` for
+the first chunk of a stream, then thread each call's return value into
+the next one as `crc`; the value returned after the last chunk already
+is the complete CRC-32 -- there's no separate "finish" step.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `crc` | `uint32_t` | 0 to start a new checksum, or a previous return value to continue one. |
+| `data` | `const void *` | Bytes to add to the checksum. |
+| `size` | `size_t` | Number of bytes in data. |
+
+### Returns
+
+`uint32_t`
 
 
 ---
@@ -7537,7 +7803,7 @@ typedef struct bruce_html_parser bruce_html_parser_t;
 
 ---
 
-## html.parser_create()
+## html__parser_create()
 
 ```c
 bruce_result_t html__parser_create(
@@ -7568,7 +7834,7 @@ in the markup).
 
 ---
 
-## html.parser_feed()
+## html__parser_feed()
 
 ```c
 bruce_result_t html__parser_feed(bruce_html_parser_t *parser, const void *data, size_t len);
@@ -7595,7 +7861,7 @@ across calls.
 
 ---
 
-## html.parser_finish()
+## html__parser_finish()
 
 ```c
 bruce_result_t html__parser_finish(bruce_html_parser_t *parser);
@@ -7618,7 +7884,7 @@ Call once after the last html__parser_feed().
 
 ---
 
-## html.parser_destroy()
+## html__parser_destroy()
 
 ```c
 void html__parser_destroy(bruce_html_parser_t *parser);
@@ -7639,7 +7905,7 @@ Destroys a parser created by html__parser_create().
 
 ---
 
-## html.resolve_url()
+## html__resolve_url()
 
 ```c
 bool html__resolve_url(const char *base_url, const char *ref, char *out_url, size_t out_capacity);
@@ -7756,7 +8022,7 @@ typedef struct {
 
 ---
 
-## http.request()
+## http__request()
 
 ```c
 bruce_result_t http__request(const bruce_http_request_t *request, bruce_http_response_t *response);
@@ -7791,7 +8057,7 @@ value.
 
 ---
 
-## http.response_free()
+## http__response_free()
 
 ```c
 void http__response_free(bruce_http_response_t *response);
@@ -7905,7 +8171,7 @@ typedef struct {
 
 ---
 
-## http_server.start()
+## http_server__start()
 
 ```c
 bruce_result_t http_server__start(const bruce_http_server_options_t *options);
@@ -7946,7 +8212,7 @@ the first response send/chunk. Fixed routes remain synchronous.
 
 ---
 
-## http_server_request.uri()
+## http_server_request__uri()
 
 ```c
 const char *http_server_request__uri(const bruce_http_server_request_t *request);
@@ -7969,7 +8235,7 @@ The returned pointer follows the request lifetime described above.
 
 ---
 
-## http_server_request.query_length()
+## http_server_request__query_length()
 
 ```c
 size_t http_server_request__query_length(const bruce_http_server_request_t *request);
@@ -7990,7 +8256,7 @@ Returns the raw, undecoded query length, excluding its NUL terminator.
 
 ---
 
-## http_server_request.get_query()
+## http_server_request__get_query()
 
 ```c
 bruce_result_t http_server_request__get_query(
@@ -8017,7 +8283,7 @@ Copies the raw, undecoded query and NUL-terminates it.
 
 ---
 
-## http_server_request.header_length()
+## http_server_request__header_length()
 
 ```c
 size_t http_server_request__header_length(
@@ -8045,7 +8311,7 @@ distinguishes absence.
 
 ---
 
-## http_server_request.get_header()
+## http_server_request__get_header()
 
 ```c
 bruce_result_t http_server_request__get_header(
@@ -8074,7 +8340,7 @@ Copies a request header value and NUL-terminates it.
 
 ---
 
-## http_server_request.content_length()
+## http_server_request__content_length()
 
 ```c
 size_t http_server_request__content_length(const bruce_http_server_request_t *request);
@@ -8095,7 +8361,7 @@ Returns the request body's declared Content-Length.
 
 ---
 
-## http_server_request.recv()
+## http_server_request__recv()
 
 ```c
 int http_server_request__recv(
@@ -8125,7 +8391,7 @@ value.
 
 ---
 
-## http_server_request.set_status()
+## http_server_request__set_status()
 
 ```c
 bruce_result_t http_server_request__set_status(
@@ -8152,7 +8418,7 @@ Response metadata must be set before the first send/chunk.
 
 ---
 
-## http_server_request.set_type()
+## http_server_request__set_type()
 
 ```c
 bruce_result_t http_server_request__set_type(
@@ -8180,7 +8446,7 @@ must remain valid until that first send/chunk call.
 
 ---
 
-## http_server_request.set_header()
+## http_server_request__set_header()
 
 ```c
 bruce_result_t http_server_request__set_header(
@@ -8210,7 +8476,7 @@ must remain valid until that first send/chunk call.
 
 ---
 
-## http_server_request.send()
+## http_server_request__send()
 
 ```c
 bruce_result_t http_server_request__send(
@@ -8237,7 +8503,7 @@ Sends a complete response. data may be NULL only when data_len is zero.
 
 ---
 
-## http_server_request.send_chunk()
+## http_server_request__send_chunk()
 
 ```c
 bruce_result_t http_server_request__send_chunk(
@@ -8264,7 +8530,7 @@ Sends a non-empty response chunk. Call finalize exactly once afterward.
 
 ---
 
-## http_server_request.finalize()
+## http_server_request__finalize()
 
 ```c
 bruce_result_t http_server_request__finalize(bruce_http_server_request_t *request);
@@ -8285,7 +8551,7 @@ Finalizes a chunked response started with http_server_request__send_chunk().
 
 ---
 
-## http_server.stop()
+## http_server__stop()
 
 ```c
 bruce_result_t http_server__stop(void);
@@ -8309,7 +8575,7 @@ call stop again.
 
 ---
 
-## http_server.get_status()
+## http_server__get_status()
 
 ```c
 bruce_result_t http_server__get_status(bruce_http_server_status_t *out_status);
@@ -8334,7 +8600,7 @@ Returns a point-in-time server status.
 
 ---
 
-## http_server.is_running()
+## http_server__is_running()
 
 ```c
 bool http_server__is_running(void);
@@ -8377,7 +8643,7 @@ typedef struct {
 
 ---
 
-## i2c.open()
+## i2c__open()
 
 ```c
 bruce_result_t i2c__open(const bruce_i2c_bus_config_t *config, bruce_i2c_id_t *out_bus);
@@ -8406,7 +8672,7 @@ process exit.
 
 ---
 
-## i2c.probe()
+## i2c__probe()
 
 ```c
 bruce_result_t i2c__probe(bruce_i2c_id_t bus, uint8_t address, uint32_t timeout_ms, bool *out_present);
@@ -8436,7 +8702,7 @@ A zero timeout performs one immediate, bounded driver attempt.
 
 ---
 
-## i2c.write()
+## i2c__write()
 
 ```c
 bruce_result_t
@@ -8466,7 +8732,7 @@ Writes bytes to an I2C device.
 
 ---
 
-## i2c.read()
+## i2c__read()
 
 ```c
 bruce_result_t i2c__read(bruce_i2c_id_t bus, uint8_t address, void *data, size_t size, uint32_t timeout_ms);
@@ -8495,7 +8761,7 @@ Reads bytes from an I2C device.
 
 ---
 
-## i2c.write_read()
+## i2c__write_read()
 
 ```c
 bruce_result_t i2c__write_read(
@@ -8529,7 +8795,7 @@ Writes then reads in one combined I2C transaction (repeated start).
 
 ---
 
-## i2c.close()
+## i2c__close()
 
 ```c
 bruce_result_t i2c__close(bruce_i2c_id_t bus);
@@ -8586,7 +8852,7 @@ typedef struct {
 
 ---
 
-## icon.get()
+## icon__get()
 
 ```c
 const bruce_icon_t *icon__get(const char *name);
@@ -8691,7 +8957,7 @@ typedef struct bruce_gif bruce_gif_t;
 
 ---
 
-## image.get_bitmap_from_memory()
+## image__get_bitmap_from_memory()
 
 ```c
 bruce_result_t image__get_bitmap_from_memory(
@@ -8721,7 +8987,7 @@ image__bitmap_release().
 
 ---
 
-## image.bitmap_resize()
+## image__bitmap_resize()
 
 ```c
 bruce_result_t image__bitmap_resize(
@@ -8752,7 +9018,7 @@ image__bitmap_release().
 
 ---
 
-## image.get_bitmap_from_file()
+## image__get_bitmap_from_file()
 
 ```c
 bruce_result_t image__get_bitmap_from_file(
@@ -8777,7 +9043,7 @@ Opens and decodes an image through process-owned Core storage.
 
 ---
 
-## image.draw_path()
+## image__draw_path()
 
 ```c
 bruce_result_t
@@ -8801,7 +9067,7 @@ Decodes, draws, and releases an image from Core storage.
 
 ---
 
-## image.draw_bitmap()
+## image__draw_bitmap()
 
 ```c
 bruce_result_t image__draw_bitmap(const image_bitmap_t *bitmap, const bruce_image_draw_options_t *options);
@@ -8825,7 +9091,7 @@ The caller controls frame presentation.
 
 ---
 
-## image.bitmap_release()
+## image__bitmap_release()
 
 ```c
 void image__bitmap_release(image_bitmap_t *bitmap);
@@ -8846,7 +9112,7 @@ Releases a bitmap returned by image__get_bitmap_from_memory()/from_file()/resize
 
 ---
 
-## image.is_supported_path()
+## image__is_supported_path()
 
 ```c
 bool image__is_supported_path(const char *path);
@@ -8867,7 +9133,7 @@ Returns true for the filename extensions accepted by image__get_bitmap_from_file
 
 ---
 
-## image.gif_open()
+## image__gif_open()
 
 ```c
 bruce_result_t image__gif_open(
@@ -8897,7 +9163,7 @@ image__gif_close().
 
 ---
 
-## image.gif_draw()
+## image__gif_draw()
 
 ```c
 bruce_result_t image__gif_draw(bruce_gif_t *gif, uint32_t *out_delay_ms);
@@ -8919,7 +9185,7 @@ Draws the current composited frame and optionally returns its display time.
 
 ---
 
-## image.gif_increment()
+## image__gif_increment()
 
 ```c
 bruce_result_t image__gif_increment(bruce_gif_t *gif, bool *out_looped);
@@ -8944,7 +9210,7 @@ non-NULL, to true.
 
 ---
 
-## image.gif_close()
+## image__gif_close()
 
 ```c
 void image__gif_close(bruce_gif_t *gif);
@@ -9048,7 +9314,7 @@ typedef struct {
 
 ---
 
-## input.read()
+## input__read()
 
 ```c
 bruce_result_t input__read(bruce_input_event_t *out_event, uint32_t timeout_ms);
@@ -9086,7 +9352,7 @@ requires the `input` permission).
 
 ---
 
-## input.poll()
+## input__poll()
 
 ```c
 static inline bruce_result_t input__poll(bruce_input_event_t *out_event) { return input__read(out_event, 0); }
@@ -9114,7 +9380,7 @@ Typical polling loop:
 
 ---
 
-## input.flush()
+## input__flush()
 
 ```c
 bruce_result_t input__flush(void);
@@ -9133,7 +9399,7 @@ not the foreground process.
 
 ---
 
-## input.peek()
+## input__peek()
 
 ```c
 bruce_result_t input__peek(bruce_input_event_t *out_event);
@@ -9158,7 +9424,7 @@ process.
 
 ---
 
-## input.wait()
+## input__wait()
 
 ```c
 bruce_result_t input__wait(uint32_t timeout_ms, int32_t *out_code);
@@ -9185,7 +9451,7 @@ ignored.
 
 ---
 
-## input.check()
+## input__check()
 
 ```c
 bool input__check(int32_t code, bool consume);
@@ -9216,7 +9482,7 @@ bindings.
 
 ---
 
-## input.inject()
+## input__inject()
 
 ```c
 bruce_result_t input__inject(const bruce_input_event_t *event);
@@ -9265,7 +9531,7 @@ queuing.
 
 ---
 
-## ir.transmit_raw()
+## ir__transmit_raw()
 
 ```c
 bruce_result_t
@@ -9297,7 +9563,7 @@ transmission, matching the Bruce IR file/menu convention.
 
 ---
 
-## ir.transmit()
+## ir__transmit()
 
 ```c
 bruce_result_t ir__transmit(const char *data_hex, const char *protocol, uint8_t bits, uint8_t repeats);
@@ -9327,7 +9593,7 @@ Protocol matching is case-insensitive.
 
 ---
 
-## ir.transmit_parsed()
+## ir__transmit_parsed()
 
 ```c
 bruce_result_t
@@ -9359,7 +9625,7 @@ Byte strings may be contiguous ("04000000") or space-separated
 
 ---
 
-## ir.receive()
+## ir__receive()
 
 ```c
 bruce_result_t ir__receive(bool raw, uint32_t timeout_ms, char *out, size_t out_size);
@@ -9390,7 +9656,7 @@ BRUCE_ERR_UNSUPPORTED so callers can retry with raw=true.
 
 ---
 
-## ir.transmit_file()
+## ir__transmit_file()
 
 ```c
 bruce_result_t ir__transmit_file(const char *path, uint8_t repeats);
@@ -9420,7 +9686,7 @@ ir__transmit().
 
 ---
 
-## ir.transmit_record()
+## ir__transmit_record()
 
 ```c
 bruce_result_t ir__transmit_record(const char *contents, uint8_t repeats);
@@ -9449,7 +9715,7 @@ requires only `ir`.
 
 ---
 
-## ir.tx_pin()
+## ir__tx_pin()
 
 ```c
 int ir__tx_pin(void);
@@ -9464,7 +9730,7 @@ Returns the infrared transmitter pin.
 
 ---
 
-## ir.rx_pin()
+## ir__rx_pin()
 
 ```c
 int ir__rx_pin(void);
@@ -9539,7 +9805,7 @@ typedef struct {
 
 ---
 
-## manifest.parse()
+## manifest__parse()
 
 ```c
 bruce_manifest_t *manifest__parse(const char *json, size_t json_len);
@@ -9571,7 +9837,7 @@ NULL for invalid input or allocation failure.
 
 ---
 
-## manifest.inspect_path()
+## manifest__inspect_path()
 
 ```c
 char *manifest__inspect_path(const char *path);
@@ -9607,7 +9873,7 @@ missing manifest, or allocation failure.
 
 ---
 
-## manifest.inspect_elf()
+## manifest__inspect_elf()
 
 ```c
 bruce_app_inspection_t *manifest__inspect_elf(const char *path);
@@ -9641,7 +9907,7 @@ ELF headers, target mismatches, or allocation failures.
 
 ---
 
-## manifest.inspect_javascript()
+## manifest__inspect_javascript()
 
 ```c
 bruce_app_inspection_t *manifest__inspect_javascript(const char *path);
@@ -9673,7 +9939,7 @@ allocation failures.
 
 ---
 
-## manifest.inspect_wasm()
+## manifest__inspect_wasm()
 
 ```c
 bruce_app_inspection_t *manifest__inspect_wasm(const char *path);
@@ -9762,7 +10028,7 @@ typedef struct {
 
 ---
 
-## memory.malloc()
+## memory__malloc()
 
 ```c
 void *memory__malloc(size_t size);
@@ -9794,7 +10060,7 @@ failure.
 
 ---
 
-## memory.calloc()
+## memory__calloc()
 
 ```c
 void *memory__calloc(size_t count, size_t size);
@@ -9819,7 +10085,7 @@ size_t.
 
 ---
 
-## memory.realloc()
+## memory__realloc()
 
 ```c
 void *memory__realloc(void *ptr, size_t size);
@@ -9843,7 +10109,7 @@ The libc realloc rules apply for NULL ptr and zero size.
 
 ---
 
-## memory.free()
+## memory__free()
 
 ```c
 void memory__free(void *ptr);
@@ -9867,7 +10133,7 @@ undefined behaviour, matching libc free().
 
 ---
 
-## memory.external_alloc()
+## memory__external_alloc()
 
 ```c
 bruce_result_t memory__external_alloc(size_t size, bruce_memory_object_t *out_object);
@@ -9897,7 +10163,7 @@ automatically when its process exits.
 
 ---
 
-## memory.external_write()
+## memory__external_write()
 
 ```c
 bruce_result_t
@@ -9926,7 +10192,7 @@ an already shared mapping.
 
 ---
 
-## memory.external_map()
+## memory__external_map()
 
 ```c
 bruce_result_t memory__external_map(const bruce_memory_object_t *object, const void **out_data);
@@ -9948,7 +10214,7 @@ Returns a read-only mapping that remains valid until memory__external_free() or 
 
 ---
 
-## memory.external_free()
+## memory__external_free()
 
 ```c
 bruce_result_t memory__external_free(bruce_memory_object_t *object);
@@ -9972,7 +10238,7 @@ bytes are not zeroed.
 
 ---
 
-## memory.get_stats()
+## memory__get_stats()
 
 ```c
 bruce_result_t memory__get_stats(bruce_memory_stats_t *out_stats);
@@ -10011,7 +10277,7 @@ boundaries.
 
 ---
 
-## notification.push()
+## notification__push()
 
 ```c
 bruce_result_t notification__push(const char *text, uint32_t duration_ms);
@@ -10048,7 +10314,7 @@ notification__wait_request().
 
 ---
 
-## notification.dismiss()
+## notification__dismiss()
 
 ```c
 bruce_result_t notification__dismiss(void);
@@ -10063,7 +10329,7 @@ Dismisses the current notification. This operation is idempotent.
 
 ---
 
-## notification.wait_request()
+## notification__wait_request()
 
 ```c
 bruce_result_t notification__wait_request(
@@ -10145,7 +10411,7 @@ typedef struct {
 
 ---
 
-## nrf24.probe()
+## nrf24__probe()
 
 ```c
 bruce_result_t nrf24__probe(bool *out_connected);
@@ -10173,7 +10439,7 @@ display-owned SPI2_HOST.
 
 ---
 
-## nrf24.set_channel()
+## nrf24__set_channel()
 
 ```c
 bruce_result_t nrf24__set_channel(uint8_t channel);
@@ -10198,7 +10464,7 @@ Sets the radio's channel.
 
 ---
 
-## nrf24.get_channel()
+## nrf24__get_channel()
 
 ```c
 bruce_result_t nrf24__get_channel(uint8_t *out_channel);
@@ -10223,7 +10489,7 @@ Reads the radio's current channel.
 
 ---
 
-## nrf24.scan()
+## nrf24__scan()
 
 ```c
 bruce_result_t
@@ -10255,7 +10521,7 @@ a threshold activity indication, not calibrated RSSI or packet decoding.
 
 ---
 
-## nrf24.get_pins()
+## nrf24__get_pins()
 
 ```c
 void nrf24__get_pins(bruce_nrf24_pins_t *out_pins);
@@ -10387,7 +10653,7 @@ typedef struct {
 
 ---
 
-## partition_manager.list_current()
+## partition_manager__list_current()
 
 ```c
 bruce_result_t
@@ -10415,7 +10681,7 @@ ordered by offset.
 
 ---
 
-## partition_manager.list_planned()
+## partition_manager__list_planned()
 
 ```c
 bruce_result_t
@@ -10445,7 +10711,7 @@ list_current().
 
 ---
 
-## partition_manager.status()
+## partition_manager__status()
 
 ```c
 bruce_result_t partition_manager__status(bruce_partition_status_t *out_status);
@@ -10466,7 +10732,7 @@ Returns partition space and pending-change information.
 
 ---
 
-## partition_manager.stage_create()
+## partition_manager__stage_create()
 
 ```c
 bruce_result_t
@@ -10502,7 +10768,7 @@ commit() to persist.
 
 ---
 
-## partition_manager.stage_delete()
+## partition_manager__stage_delete()
 
 ```c
 bruce_result_t partition_manager__stage_delete(const char *label);
@@ -10532,7 +10798,7 @@ can reuse.
 
 ---
 
-## partition_manager.stage_format()
+## partition_manager__stage_format()
 
 ```c
 bruce_result_t partition_manager__stage_format(const char *label);
@@ -10561,7 +10827,7 @@ staged create is formatted on creation anyway).
 
 ---
 
-## partition_manager.commit()
+## partition_manager__commit()
 
 ```c
 bruce_result_t partition_manager__commit(void);
@@ -10583,7 +10849,7 @@ automatically, the next time the device boots.
 
 ---
 
-## partition_manager.discard()
+## partition_manager__discard()
 
 ```c
 bruce_result_t partition_manager__discard(void);
@@ -10601,6 +10867,234 @@ Resets list_planned() back to the last committed layout. A no-op
 #### Permissions
 
 - _Built-in apps only -- external ELF/JS/WASM callers are always denied._
+
+
+---
+
+# `paste.h`
+
+**Shared copy/paste clipboard.**
+
+A single system-wide clipboard slot, independent of any process's
+lifetime: one app (e.g. the file manager) can copy something and a
+different app -- launched later, by a different process, possibly after
+the copying process has already exited -- can paste it (e.g. the text
+editor, or the file manager again in a different directory). Setting
+either kind of content replaces whatever was there before; there is
+exactly one slot, no history and no separate text/file buffers.
+
+**Constants**
+
+| Name | Value |
+|---|---|
+| `BRUCE_PASTE_MAX_FILES` | `64` |
+
+---
+
+## bruce_paste_kind_t()
+
+```c
+typedef enum {
+    BRUCE_PASTE_EMPTY = 0,
+    BRUCE_PASTE_TEXT,
+    BRUCE_PASTE_FILES,
+} bruce_paste_kind_t;
+```
+
+
+---
+
+## bruce_paste_file_mode_t()
+
+```c
+typedef enum {
+    BRUCE_PASTE_FILE_COPY = 0,
+    BRUCE_PASTE_FILE_CUT,
+} bruce_paste_file_mode_t;
+```
+
+
+---
+
+## paste__kind()
+
+```c
+bruce_paste_kind_t paste__kind(void);
+```
+
+What's currently on the clipboard.
+
+### Returns
+
+`bruce_paste_kind_t`
+
+
+---
+
+## paste__set_text()
+
+```c
+bruce_result_t paste__set_text(const char *text);
+```
+
+Copies text onto the clipboard, replacing any prior content.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `text` | `const char *` | Null-terminated text to store; copied internally. |
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
+## paste__get_text()
+
+```c
+const char *paste__get_text(void);
+```
+
+Returns the clipboard's text, or NULL if paste__kind() is not BRUCE_PASTE_TEXT.
+
+The returned pointer is borrowed: valid until the next paste__set_text(),
+paste__set_files(), or paste__clear() call from any process.
+
+### Returns
+
+`const char *`
+
+
+---
+
+## paste__set_files()
+
+```c
+bruce_result_t paste__set_files(const char *const *paths, size_t count, bruce_paste_file_mode_t mode);
+```
+
+Records file/directory paths on the clipboard for a later paste__paste_files(), replacing any prior content.
+
+            originals in place) or cut (remove each original once it, and
+            everything under it, has been pasted successfully).
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `paths` | `const char *const *` | Absolute source paths; copied internally. |
+| `count` | `size_t` | Number of paths, from 1 to BRUCE_PASTE_MAX_FILES. |
+| `mode` | `bruce_paste_file_mode_t` | Whether the eventual paste should copy (leaving the |
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
+## paste__file_count()
+
+```c
+size_t paste__file_count(void);
+```
+
+Number of paths on the clipboard (0 unless paste__kind() is BRUCE_PASTE_FILES).
+
+### Returns
+
+`size_t`
+
+
+---
+
+## paste__get_file()
+
+```c
+const char *paste__get_file(size_t index);
+```
+
+Returns one clipboard path by index, or NULL if index is out of range.
+
+The returned pointer is borrowed under the same rules as paste__get_text().
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `index` | `size_t` | Zero-based index, below paste__file_count(). |
+
+### Returns
+
+`const char *`
+
+
+---
+
+## paste__file_mode()
+
+```c
+bruce_paste_file_mode_t paste__file_mode(void);
+```
+
+Whether the clipboard's files were cut or copied; meaningless when paste__file_count() is 0.
+
+### Returns
+
+`bruce_paste_file_mode_t`
+
+
+---
+
+## paste__paste_files()
+
+```c
+bruce_result_t paste__paste_files(const char *target_directory);
+```
+
+Copies (or moves, for a cut) every clipboard file/directory into target_directory.
+
+Recurses into directories, creating them at the destination as needed.
+Refuses (BRUCE_ERR_ALREADY_EXISTS) rather than overwriting any
+destination path that already exists, and refuses
+(BRUCE_ERR_INVALID_ARGUMENT) a target that is one of the clipboard's own
+directories or nested inside one, rather than recursing into its own
+output forever. Stops at the first failure; a cut has already removed
+whichever earlier entries it fully copied, but does not roll them back.
+The clipboard itself is left untouched either way, so the same content
+can be pasted again.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `target_directory` | `const char *` | Absolute destination directory; must already exist. |
+
+### Returns
+
+`bruce_result_t`
+
+#### Permissions
+
+- `storage`
+
+
+---
+
+## paste__clear()
+
+```c
+void paste__clear(void);
+```
+
+Clears the clipboard; paste__kind() becomes BRUCE_PASTE_EMPTY.
+
+### Returns
+
+`void`
 
 
 ---
@@ -10653,7 +11147,7 @@ typedef enum {
 
 ---
 
-## permission.name()
+## permission__name()
 
 ```c
 const char *permission__name(bruce_permission_t permission);
@@ -10677,7 +11171,7 @@ out-of-range value.
 
 ---
 
-## permission.from_name()
+## permission__from_name()
 
 ```c
 bool permission__from_name(const char *name, bruce_permission_t *out_permission);
@@ -10701,7 +11195,7 @@ Returns false (leaving *out_permission untouched) for an unknown name.
 
 ---
 
-## permission.check()
+## permission__check()
 
 ```c
 bruce_result_t permission__check(bruce_permission_t permission);
@@ -10737,7 +11231,7 @@ BRUCE_ERR_INVALID_ARGUMENT for an out-of-range `permission`.
 
 ---
 
-## permission.preflight()
+## permission__preflight()
 
 ```c
 bruce_result_t
@@ -10771,7 +11265,7 @@ permission name.
 
 ---
 
-## permission.get_saved()
+## permission__get_saved()
 
 ```c
 bruce_result_t permission__get_saved(const char *file_name, bruce_permission_t permission, bool *out_allowed);
@@ -10797,7 +11291,7 @@ e.g. for a permissions-management UI. Returns BRUCE_ERR_NOT_FOUND if
 
 ---
 
-## permission.set()
+## permission__set()
 
 ```c
 bruce_result_t permission__set(const char *file_name, bruce_permission_t permission, bool allowed);
@@ -11006,7 +11500,7 @@ typedef struct {
 
 ---
 
-## process.current_id()
+## process__current_id()
 
 ```c
 bruce_process_id_t process__current_id(void);
@@ -11021,7 +11515,7 @@ Returns the calling process ID.
 
 ---
 
-## process.current_signal()
+## process__current_signal()
 
 ```c
 bruce_process_signal_t process__current_signal(void);
@@ -11038,7 +11532,7 @@ Zero when no cooperative signal is pending.
 
 ---
 
-## process.list()
+## process__list()
 
 ```c
 bruce_result_t process__list(bruce_process_snapshot_t *snapshots, size_t capacity, size_t *out_count);
@@ -11061,7 +11555,7 @@ Lists live processes.
 
 ---
 
-## process.snapshot()
+## process__snapshot()
 
 ```c
 bruce_result_t process__snapshot(bruce_process_id_t process_id, bruce_process_snapshot_t *out_snapshot);
@@ -11083,7 +11577,7 @@ Reads a point-in-time snapshot of one process.
 
 ---
 
-## process.switch_next()
+## process__switch_next()
 
 ```c
 bruce_result_t process__switch_next(void);
@@ -11102,7 +11596,7 @@ Switches the foreground process to the next one in launch order.
 
 ---
 
-## process.switch_previous()
+## process__switch_previous()
 
 ```c
 bruce_result_t process__switch_previous(void);
@@ -11121,7 +11615,7 @@ Switches the foreground process to the previous one in launch order.
 
 ---
 
-## process.to_background()
+## process__to_background()
 
 ```c
 bruce_result_t process__to_background(void);
@@ -11136,7 +11630,7 @@ Moves the calling process to the background. Self-only.
 
 ---
 
-## process.to_foreground()
+## process__to_foreground()
 
 ```c
 bruce_result_t process__to_foreground(void);
@@ -11155,7 +11649,7 @@ _Not permission-gated._
 
 ---
 
-## process.foreground()
+## process__foreground()
 
 ```c
 bruce_result_t process__foreground(bruce_process_id_t process_id);
@@ -11180,7 +11674,7 @@ Gives another process foreground ownership.
 
 ---
 
-## process.signal()
+## process__signal()
 
 ```c
 bruce_result_t process__signal(bruce_process_id_t process_id, bruce_process_signal_t signal);
@@ -11209,7 +11703,7 @@ process__kill().
 
 ---
 
-## process.terminate()
+## process__terminate()
 
 ```c
 bruce_result_t process__terminate(bruce_process_id_t process_id);
@@ -11234,7 +11728,7 @@ Sends a cooperative TERM signal to a process.
 
 ---
 
-## process.pause()
+## process__pause()
 
 ```c
 bruce_result_t process__pause(bruce_process_id_t process_id);
@@ -11259,7 +11753,7 @@ Pauses a process.
 
 ---
 
-## process.resume()
+## process__resume()
 
 ```c
 bruce_result_t process__resume(bruce_process_id_t process_id);
@@ -11284,7 +11778,7 @@ Resumes a paused process.
 
 ---
 
-## process.kill()
+## process__kill()
 
 ```c
 bruce_result_t process__kill(bruce_process_id_t process_id);
@@ -11309,7 +11803,7 @@ Forcibly kills a process, equivalent to process__signal() with BRUCE_PROCESS_SIG
 
 ---
 
-## process.wait()
+## process__wait()
 
 ```c
 bruce_result_t process__wait(bruce_process_id_t process_id, uint32_t timeout_ms);
@@ -11338,7 +11832,7 @@ _Not permission-gated._
 
 ---
 
-## process.wait_status()
+## process__wait_status()
 
 ```c
 bruce_result_t
@@ -11407,7 +11901,7 @@ typedef struct {
 
 ---
 
-## pubsub.publish()
+## pubsub__publish()
 
 ```c
 bruce_result_t pubsub__publish(const char *topic, const void *data, size_t size);
@@ -11440,7 +11934,7 @@ for a NULL/empty topic or an oversized message.
 
 ---
 
-## pubsub.subscribe()
+## pubsub__subscribe()
 
 ```c
 bruce_result_t pubsub__subscribe(const char *topic, bruce_pubsub_id_t *out_sub);
@@ -11465,7 +11959,7 @@ returns; nothing published earlier is replayed.
 
 ---
 
-## pubsub.unsubscribe()
+## pubsub__unsubscribe()
 
 ```c
 bruce_result_t pubsub__unsubscribe(bruce_pubsub_id_t sub);
@@ -11490,7 +11984,7 @@ process.
 
 ---
 
-## pubsub.read()
+## pubsub__read()
 
 ```c
 bruce_result_t pubsub__read(bruce_pubsub_id_t sub, bruce_pubsub_message_t *out_message, uint32_t timeout_ms);
@@ -11563,7 +12057,7 @@ Core ABI and must not be renumbered.
 
 ---
 
-## result.to_string()
+## result__to_string()
 
 ```c
 const char *result__to_string(int result);
@@ -11610,7 +12104,7 @@ typedef uint32_t bruce_timer_id_t;
 
 ---
 
-## runtime.now()
+## runtime__now()
 
 ```c
 uint64_t runtime__now(void);
@@ -11628,7 +12122,7 @@ not wall-clock time.
 
 ---
 
-## runtime.sleep()
+## runtime__sleep()
 
 ```c
 bruce_result_t runtime__sleep(uint32_t milliseconds);
@@ -11656,7 +12150,7 @@ interrupted merely by foregrounding; it waits its requested duration.
 
 ---
 
-## runtime.delay()
+## runtime__delay()
 
 ```c
 bruce_result_t runtime__delay(uint32_t milliseconds);
@@ -11677,7 +12171,7 @@ Delays for the given duration, ignoring foregrounding (see runtime__sleep()).
 
 ---
 
-## runtime.timer_start()
+## runtime__timer_start()
 
 ```c
 bruce_result_t runtime__timer_start(
@@ -11707,7 +12201,7 @@ or is killed; callers may stop it early with runtime__timer_stop().
 
 ---
 
-## runtime.timer_wait()
+## runtime__timer_wait()
 
 ```c
 bruce_result_t runtime__timer_wait(bruce_timer_id_t timer_id, uint32_t timeout_ms);
@@ -11731,7 +12225,7 @@ A zero timeout polls; UINT32_MAX waits indefinitely.
 
 ---
 
-## runtime.timer_stop()
+## runtime__timer_stop()
 
 ```c
 bruce_result_t runtime__timer_stop(bruce_timer_id_t timer_id);
@@ -11752,7 +12246,7 @@ Stops a timer started with runtime__timer_start().
 
 ---
 
-## runtime.gui_requested()
+## runtime__gui_requested()
 
 ```c
 bool runtime__gui_requested(void);
@@ -11798,7 +12292,7 @@ typedef struct {
 
 ---
 
-## spi.open()
+## spi__open()
 
 ```c
 bruce_result_t spi__open(const bruce_spi_device_config_t *config, bruce_spi_id_t *out_device);
@@ -11827,7 +12321,7 @@ belong to the calling process and close automatically on process exit.
 
 ---
 
-## spi.transfer()
+## spi__transfer()
 
 ```c
 bruce_result_t spi__transfer(bruce_spi_id_t device, const void *tx_data, void *rx_data, size_t size);
@@ -11858,7 +12352,7 @@ NULL to discard input.
 
 ---
 
-## spi.close()
+## spi__close()
 
 ```c
 bruce_result_t spi__close(bruce_spi_id_t device);
@@ -11909,7 +12403,7 @@ typedef enum {
 
 ---
 
-## ssh.connect()
+## ssh__connect()
 
 ```c
 bruce_result_t ssh__connect(
@@ -11943,7 +12437,7 @@ host-key fingerprint before authenticating.
 
 ---
 
-## ssh.host_key_sha256()
+## ssh__host_key_sha256()
 
 ```c
 bruce_result_t ssh__host_key_sha256(
@@ -11971,7 +12465,7 @@ Reads the negotiated host key's SHA-256 fingerprint.
 
 ---
 
-## ssh.verify_host_key_sha256()
+## ssh__verify_host_key_sha256()
 
 ```c
 bruce_result_t ssh__verify_host_key_sha256(
@@ -12001,7 +12495,7 @@ Authentication remains unavailable until this succeeds.
 
 ---
 
-## ssh.authenticate_password()
+## ssh__authenticate_password()
 
 ```c
 bruce_result_t ssh__authenticate_password(
@@ -12031,7 +12525,7 @@ Authenticates a session with a password.
 
 ---
 
-## ssh.generate_keypair_ex()
+## ssh__generate_keypair_ex()
 
 ```c
 bruce_result_t ssh__generate_keypair_ex(
@@ -12070,7 +12564,7 @@ both buffers.
 
 ---
 
-## ssh.authenticate_key()
+## ssh__authenticate_key()
 
 ```c
 bruce_result_t ssh__authenticate_key(
@@ -12104,7 +12598,7 @@ Authenticates with an unencrypted ECDSA P-256 SEC1 PEM key or Ed25519 private ke
 
 ---
 
-## ssh.open_shell()
+## ssh__open_shell()
 
 ```c
 bruce_result_t ssh__open_shell(
@@ -12136,7 +12630,7 @@ Opens an interactive shell channel on an authenticated session.
 
 ---
 
-## ssh.resize_pty()
+## ssh__resize_pty()
 
 ```c
 bruce_result_t ssh__resize_pty(
@@ -12166,7 +12660,7 @@ Notifies the remote end of a terminal size change on an open shell.
 
 ---
 
-## ssh.read()
+## ssh__read()
 
 ```c
 bruce_result_t ssh__read(
@@ -12202,7 +12696,7 @@ channel's extended-data stream.
 
 ---
 
-## ssh.write()
+## ssh__write()
 
 ```c
 bruce_result_t ssh__write(
@@ -12234,7 +12728,7 @@ Writes to an SSH channel.
 
 ---
 
-## ssh.close()
+## ssh__close()
 
 ```c
 bruce_result_t ssh__close(bruce_ssh_id_t session);
@@ -12291,7 +12785,7 @@ typedef struct {
 
 ---
 
-## status_icon.push()
+## status_icon__push()
 
 ```c
 bruce_result_t status_icon__push(const char *key, const uint8_t *bitmap, uint8_t width, uint8_t height);
@@ -12317,7 +12811,7 @@ The registry is global and unrestricted. Existing keys are replaced.
 
 ---
 
-## status_icon.push_named()
+## status_icon__push_named()
 
 ```c
 bruce_result_t status_icon__push_named(const char *key, const char *icon_name);
@@ -12341,7 +12835,7 @@ Scales it proportionally to fit the status bar limit.
 
 ---
 
-## status_icon.remove()
+## status_icon__remove()
 
 ```c
 bruce_result_t status_icon__remove(const char *key);
@@ -12362,7 +12856,7 @@ Removes the icon published at `key`.
 
 ---
 
-## status_icon.list()
+## status_icon__list()
 
 ```c
 bruce_result_t
@@ -12389,7 +12883,7 @@ Up to capacity entries are copied in lexicographic key order.
 
 ---
 
-## status_icon.get()
+## status_icon__get()
 
 ```c
 bruce_result_t
@@ -12438,7 +12932,7 @@ typedef uint32_t bruce_stdio_session_t;
 
 ---
 
-## stdio.read_line()
+## stdio__read_line()
 
 ```c
 int stdio__read_line(char *buffer, size_t buffer_size, bool mask_input);
@@ -12466,7 +12960,7 @@ INT/TERM, or -1 on invalid arguments / EOF.
 
 ---
 
-## stdio.read()
+## stdio__read()
 
 ```c
 bruce_result_t stdio__read(void *buffer, size_t capacity, uint32_t timeout_ms, size_t *out_size);
@@ -12496,7 +12990,7 @@ over queued input.
 
 ---
 
-## stdio.write()
+## stdio__write()
 
 ```c
 bruce_result_t stdio__write(const void *data, size_t size);
@@ -12521,7 +13015,7 @@ diagnostics should continue to use the normal logging/stdio functions.
 
 ---
 
-## stdio.write_to()
+## stdio__write_to()
 
 ```c
 bruce_result_t stdio__write_to(bruce_stdio_session_t session, const void *data, size_t size);
@@ -12551,7 +13045,7 @@ session routed.
 
 ---
 
-## stdio.printf()
+## stdio__printf()
 
 ```c
 int stdio__printf(const char *format, ...) __attribute__((format(printf, 1, 2)));
@@ -12576,7 +13070,7 @@ value.
 
 ---
 
-## stdio.vprintf()
+## stdio__vprintf()
 
 ```c
 int stdio__vprintf(const char *format, va_list args) __attribute__((format(printf, 1, 0)));
@@ -12598,7 +13092,7 @@ va_list form of stdio__printf().
 
 ---
 
-## stdio.session_create()
+## stdio__session_create()
 
 ```c
 bruce_result_t stdio__session_create(bruce_stdio_session_t *out_session);
@@ -12619,7 +13113,7 @@ Creates a process-owned, bounded input/output session.
 
 ---
 
-## stdio.session_close()
+## stdio__session_close()
 
 ```c
 bruce_result_t stdio__session_close(bruce_stdio_session_t session);
@@ -12640,7 +13134,7 @@ Closes a session created by stdio__session_create().
 
 ---
 
-## stdio.session_route_children()
+## stdio__session_route_children()
 
 ```c
 bruce_result_t stdio__session_route_children(bruce_stdio_session_t session);
@@ -12668,7 +13162,7 @@ same terminal as before.
 
 ---
 
-## stdio.session_write_input()
+## stdio__session_write_input()
 
 ```c
 bruce_result_t stdio__session_write_input(bruce_stdio_session_t session, const void *data, size_t size);
@@ -12691,7 +13185,7 @@ Writes input bytes into a session, as if typed by its consumer.
 
 ---
 
-## stdio.session_read_output()
+## stdio__session_read_output()
 
 ```c
 bruce_result_t
@@ -12787,7 +13281,7 @@ typedef struct {
 
 ---
 
-## storage.exists()
+## storage__exists()
 
 ```c
 bruce_result_t storage__exists(const char *path, bool *out_exists);
@@ -12816,7 +13310,7 @@ storage__open().
 
 ---
 
-## storage.open()
+## storage__open()
 
 ```c
 bruce_result_t storage__open(const char *path, uint32_t flags, bruce_file_id_t *out_file);
@@ -12846,7 +13340,7 @@ protected-path policy both this and storage__list() share.
 
 ---
 
-## storage.read()
+## storage__read()
 
 ```c
 bruce_result_t storage__read(bruce_file_id_t file, void *buffer, size_t capacity, size_t *out_size);
@@ -12870,7 +13364,7 @@ Reads from an open file.
 
 ---
 
-## storage.write()
+## storage__write()
 
 ```c
 bruce_result_t storage__write(bruce_file_id_t file, const void *buffer, size_t size, size_t *out_size);
@@ -12894,7 +13388,7 @@ Writes to an open file.
 
 ---
 
-## storage.seek()
+## storage__seek()
 
 ```c
 bruce_result_t storage__seek(bruce_file_id_t file, int64_t offset, int whence, uint64_t *out_position);
@@ -12918,7 +13412,7 @@ Seeks an open file.
 
 ---
 
-## storage.close()
+## storage__close()
 
 ```c
 bruce_result_t storage__close(bruce_file_id_t file);
@@ -12939,7 +13433,7 @@ Closes an open file.
 
 ---
 
-## storage.list()
+## storage__list()
 
 ```c
 bruce_result_t
@@ -12971,7 +13465,7 @@ protected-path policy both this and storage__open() share.
 
 ---
 
-## storage.mkdir()
+## storage__mkdir()
 
 ```c
 bruce_result_t storage__mkdir(const char *path);
@@ -12995,7 +13489,7 @@ names a directory.
 
 ---
 
-## storage.remove()
+## storage__remove()
 
 ```c
 bruce_result_t storage__remove(const char *path);
@@ -13019,7 +13513,7 @@ public SDK.
 
 ---
 
-## storage.rename()
+## storage__rename()
 
 ```c
 bruce_result_t storage__rename(const char *from, const char *to);
@@ -13043,7 +13537,7 @@ Both paths must be on the same mounted filesystem.
 
 ---
 
-## storage.get_usage()
+## storage__get_usage()
 
 ```c
 bruce_result_t storage__get_usage(const char *path, size_t *total_bytes, size_t *used_bytes);
@@ -13090,7 +13584,7 @@ typedef struct {
 
 ---
 
-## tcp.connect()
+## tcp__connect()
 
 ```c
 bruce_result_t tcp__connect(const char *host, uint16_t port, uint32_t timeout_ms, bruce_tcp_id_t *out_socket);
@@ -13121,7 +13615,7 @@ automatically when that process exits.
 
 ---
 
-## tcp.listen()
+## tcp__listen()
 
 ```c
 bruce_result_t tcp__listen(uint16_t port, bruce_tcp_id_t *out_listener);
@@ -13147,7 +13641,7 @@ Starts listening for inbound TCP connections on a port.
 
 ---
 
-## tcp.accept()
+## tcp__accept()
 
 ```c
 bruce_result_t tcp__accept(
@@ -13179,7 +13673,7 @@ A zero timeout polls.
 
 ---
 
-## tcp.read()
+## tcp__read()
 
 ```c
 bruce_result_t
@@ -13211,7 +13705,7 @@ A zero timeout polls. TCP EOF is BRUCE_OK with *out_size == 0.
 
 ---
 
-## tcp.write()
+## tcp__write()
 
 ```c
 bruce_result_t
@@ -13243,7 +13737,7 @@ A zero timeout polls.
 
 ---
 
-## tcp.close()
+## tcp__close()
 
 ```c
 bruce_result_t tcp__close(bruce_tcp_id_t socket);
@@ -13316,7 +13810,7 @@ typedef struct {
 
 ---
 
-## tty.isatty()
+## tty__isatty()
 
 ```c
 bool tty__isatty(void);
@@ -13335,7 +13829,7 @@ physical console) or the session's size was never set (a plain pipe).
 
 ---
 
-## tty.get_size()
+## tty__get_size()
 
 ```c
 bruce_result_t tty__get_size(bruce_tty_size_t *out_size);
@@ -13358,7 +13852,7 @@ Returns BRUCE_ERR_NOT_FOUND if no session is routed.
 
 ---
 
-## tty.set_size()
+## tty__set_size()
 
 ```c
 bruce_result_t tty__set_size(bruce_stdio_session_t session, uint16_t columns, uint16_t rows);
@@ -13387,7 +13881,7 @@ BRUCE_ERR_NOT_FOUND if the session doesn't exist.
 
 ---
 
-## tty.get_mode()
+## tty__get_mode()
 
 ```c
 bruce_tty_mode_t tty__get_mode(void);
@@ -13410,7 +13904,7 @@ just self-description.
 
 ---
 
-## tty.set_mode()
+## tty__set_mode()
 
 ```c
 bruce_result_t tty__set_mode(bruce_tty_mode_t mode);
@@ -13445,7 +13939,7 @@ Cooperative bookkeeping only -- see tty__get_mode().
 
 ---
 
-## wifi.network_t()
+## wifi__network_t()
 
 ```c
 typedef struct {
@@ -13459,7 +13953,7 @@ typedef struct {
 
 ---
 
-## wifi.disconnect()
+## wifi__disconnect()
 
 ```c
 bruce_result_t wifi__disconnect(void);
@@ -13474,7 +13968,7 @@ Disconnects from the current Wi-Fi network, if any.
 
 ---
 
-## wifi.connect()
+## wifi__connect()
 
 ```c
 bruce_result_t wifi__connect(const char *ssid, const char *password, uint32_t timeout_ms);
@@ -13497,7 +13991,7 @@ Connects to a Wi-Fi network by SSID/password.
 
 ---
 
-## wifi.connect_known()
+## wifi__connect_known()
 
 ```c
 bruce_result_t wifi__connect_known(void);
@@ -13512,7 +14006,7 @@ Connects using a previously saved Wi-Fi credential (see config.h).
 
 ---
 
-## wifi.setup_ap()
+## wifi__setup_ap()
 
 ```c
 bruce_result_t wifi__setup_ap(void);
@@ -13527,7 +14021,7 @@ Starts the configured Wi-Fi access point.
 
 ---
 
-## wifi.scan()
+## wifi__scan()
 
 ```c
 int wifi__scan(wifi__network_t *networks, size_t capacity);
@@ -13552,7 +14046,7 @@ scan) or a negative BRUCE_ERR_* value on failure.
 
 ---
 
-## wifi.is_connected()
+## wifi__is_connected()
 
 ```c
 bool wifi__is_connected(void);
@@ -13567,7 +14061,7 @@ Whether Wi-Fi is currently connected to a network. Returns false when unavailabl
 
 ---
 
-## wifi.is_ap_running()
+## wifi__is_ap_running()
 
 ```c
 bool wifi__is_ap_running(void);
@@ -13582,7 +14076,7 @@ Whether the Wi-Fi access point is currently running. Returns false when unavaila
 
 ---
 
-## wifi.get_ssid()
+## wifi__get_ssid()
 
 ```c
 const char *wifi__get_ssid(void);
@@ -13601,7 +14095,7 @@ another wifi__* call.
 
 ---
 
-## wifi.get_ip()
+## wifi__get_ip()
 
 ```c
 const char *wifi__get_ip(void);
@@ -13620,7 +14114,7 @@ another wifi__* call.
 
 ---
 
-## wifi.get_mac()
+## wifi__get_mac()
 
 ```c
 const char *wifi__get_mac(void);

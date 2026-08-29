@@ -248,10 +248,7 @@ def parse_signature(name, code):
 
 
 def heading_name(name):
-    """Renders `module__function` as `module.function()`, else `name()`."""
-    if "__" in name:
-        module, rest = name.split("__", 1)
-        return f"{module}.{rest}()"
+    """Renders `name` as `name()`."""
     return f"{name}()"
 
 
