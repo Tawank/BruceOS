@@ -27,8 +27,38 @@ bool selftest__run_bnu_case(void) {
     char *date_invalid_argv[] = {"date", "-s", "not-a-date"};
     char *sleep_argv[] = {"sleep", "0"};
     char *sleep_invalid_argv[] = {"sleep", "-1"};
+    char *grep_argv[] = {"grep", "-n", "-A", "1", "-B", "1", "needle", "/selftest_bnu_grep.txt"};
+    char *grep_invert_argv[] = {"grep", "-v", "-q", "needle", "/selftest_bnu_grep.txt"};
+    char *grep_miss_argv[] = {"grep", "-q", "not-present-anywhere", "/selftest_bnu_grep.txt"};
+    char *grep_context_invalid_argv[] = {"grep", "-A", "99999", "needle", "/selftest_bnu_grep.txt"};
+    char *grep_no_pattern_argv[] = {"grep"};
+    char *wc_argv[] = {"wc", "/selftest_bnu_wc.txt"};
+    char *wc_flags_argv[] = {"wc", "-l", "-w", "/selftest_bnu_wc.txt"};
+    char *wc_missing_argv[] = {"wc", "/selftest_bnu_wc_missing.txt"};
     bruce_result_t date_result = bnu_date_app_main(1, date_argv);
     static const char cat_text[] = "bnu cat selftest\n";
+    static const char grep_text[] = "alpha\nbeta needle\ngamma\ndelta needle\nepsilon\n";
+    static const char wc_text[] = "one two three\nfour five\n";
+    bruce_file_id_t wc_file = BRUCE_FILE_ID_INVALID;
+    size_t wc_written = 0;
+    bruce_result_t wc_open = storage__open(
+        wc_argv[1], BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE | BRUCE_STORAGE_OPEN_TRUNCATE, &wc_file
+    );
+    bruce_result_t wc_write = wc_open == BRUCE_OK
+                                   ? storage__write(wc_file, wc_text, sizeof(wc_text) - 1, &wc_written)
+                                   : wc_open;
+    bruce_result_t wc_close = wc_open == BRUCE_OK ? storage__close(wc_file) : wc_open;
+    bruce_file_id_t grep_file = BRUCE_FILE_ID_INVALID;
+    size_t grep_written = 0;
+    bruce_result_t grep_open = storage__open(
+        grep_argv[7],
+        BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE | BRUCE_STORAGE_OPEN_TRUNCATE,
+        &grep_file
+    );
+    bruce_result_t grep_write = grep_open == BRUCE_OK
+                                     ? storage__write(grep_file, grep_text, sizeof(grep_text) - 1, &grep_written)
+                                     : grep_open;
+    bruce_result_t grep_close = grep_open == BRUCE_OK ? storage__close(grep_file) : grep_open;
     bruce_file_id_t cat_file = BRUCE_FILE_ID_INVALID;
     size_t cat_written = 0;
     bruce_result_t cat_open = storage__open(
@@ -56,8 +86,20 @@ bool selftest__run_bnu_case(void) {
                (date_result == BRUCE_OK || date_result == BRUCE_ERR_INVALID_STATE) &&
                bnu_date_app_main(3, date_invalid_argv) == BRUCE_ERR_INVALID_ARGUMENT &&
                bnu_sleep_app_main(2, sleep_argv) == BRUCE_OK &&
-               bnu_sleep_app_main(2, sleep_invalid_argv) == BRUCE_ERR_INVALID_ARGUMENT;
+               bnu_sleep_app_main(2, sleep_invalid_argv) == BRUCE_ERR_INVALID_ARGUMENT &&
+               grep_open == BRUCE_OK && grep_write == BRUCE_OK && grep_written == sizeof(grep_text) - 1 &&
+               grep_close == BRUCE_OK && bnu_grep_app_main(8, grep_argv) == BRUCE_OK &&
+               bnu_grep_app_main(5, grep_invert_argv) == BRUCE_OK &&
+               bnu_grep_app_main(4, grep_miss_argv) == BRUCE_ERR_NOT_FOUND &&
+               bnu_grep_app_main(5, grep_context_invalid_argv) == BRUCE_ERR_INVALID_ARGUMENT &&
+               bnu_grep_app_main(1, grep_no_pattern_argv) == BRUCE_ERR_INVALID_ARGUMENT &&
+               wc_open == BRUCE_OK && wc_write == BRUCE_OK && wc_written == sizeof(wc_text) - 1 &&
+               wc_close == BRUCE_OK && bnu_wc_app_main(2, wc_argv) == BRUCE_OK &&
+               bnu_wc_app_main(4, wc_flags_argv) == BRUCE_OK &&
+               bnu_wc_app_main(2, wc_missing_argv) == BRUCE_ERR_NOT_FOUND;
     storage__remove(cat_argv[1]);
+    storage__remove(grep_argv[7]);
+    storage__remove(wc_argv[1]);
     printf("[selftest] bnu: %s\n", ok ? "OK" : "failed");
     return ok;
 }

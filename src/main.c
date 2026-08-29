@@ -159,12 +159,14 @@ void app_runner__register_defaults(void) {
     /* Content - viewing and editing text and images. */
     app_runner__register("base64", "Base64 encode or decode data", "Content", bnu_base64_app_main, 0);
     app_runner__register("crc32", "Print CRC-32 checksums", "Content", bnu_crc32_app_main, 0);
+    app_runner__register("grep", "Search for text in files or stdin", "Content", bnu_grep_app_main, 0);
     app_runner__register("image", "Decode image files", "Content", image_app_main, 0);
     app_runner__register("image_viewer", "View image files", "Content", image_viewer_app_main, 8192);
     app_runner__register("less", "Page through text", "Content", bnu_less_app_main, 0);
     app_runner__register("md5sum", "Print MD5 checksums", "Content", bnu_md5sum_app_main, 0);
     app_runner__register("sha256sum", "Print SHA-256 checksums", "Content", bnu_sha256sum_app_main, 0);
     app_runner__register("text", "Edit text files", "Content", text_app_main, 0);
+    app_runner__register("wc", "Count lines, words, and bytes", "Content", bnu_wc_app_main, 0);
 
     app_runner__register_loader(".elf", "elf");
     app_runner__register_loader(".wasm", "wasm");
