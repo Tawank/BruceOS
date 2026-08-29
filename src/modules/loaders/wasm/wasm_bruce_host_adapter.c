@@ -345,9 +345,10 @@ static int32_t wasm_display__set_text_color(wasm_exec_env_t exec_env, uint32_t c
     return display__set_text_color((bruce_display_color_t)color);
 }
 
-static int32_t wasm_display__set_text_size(wasm_exec_env_t exec_env, uint32_t size) {
+static int32_t wasm_display__set_text_size(wasm_exec_env_t exec_env, uint32_t size_x10) {
     (void)exec_env;
-    return display__set_text_size((uint8_t)size);
+    /* Guest side sends fixed-point tenths -- see wasm_bruce_guest_adapter.c. */
+    return display__set_text_size((float)size_x10 / 10.0f);
 }
 
 static int32_t

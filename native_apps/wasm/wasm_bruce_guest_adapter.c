@@ -351,7 +351,9 @@ extern int32_t wasm_import__display_draw_rect(int32_t x, int32_t y, int32_t w, i
 BRUCE_WASM_IMPORT("display__set_text_bg_color")
 extern int32_t wasm_import__display_set_text_bg_color(uint32_t color);
 BRUCE_WASM_IMPORT("display__set_text_color") extern int32_t wasm_import__display_set_text_color(uint32_t color);
-BRUCE_WASM_IMPORT("display__set_text_size") extern int32_t wasm_import__display_set_text_size(uint32_t size);
+/* Carries the fractional multiplier as fixed-point tenths -- the WASM
+ * import ABI is integers-only, so a raw float can't cross this boundary. */
+BRUCE_WASM_IMPORT("display__set_text_size") extern int32_t wasm_import__display_set_text_size(uint32_t size_x10);
 BRUCE_WASM_IMPORT("display__draw_centre_string")
 extern int32_t wasm_import__display_draw_centre_string(uint32_t text, int32_t x, int32_t y);
 BRUCE_WASM_IMPORT("display__get_font_metrics")
@@ -383,8 +385,8 @@ bruce_result_t display__set_text_bg_color(uint32_t color) {
 bruce_result_t display__set_text_color(bruce_display_color_t color) {
     return (bruce_result_t)wasm_import__display_set_text_color(color);
 }
-bruce_result_t display__set_text_size(uint8_t size) {
-    return (bruce_result_t)wasm_import__display_set_text_size(size);
+bruce_result_t display__set_text_size(float size) {
+    return (bruce_result_t)wasm_import__display_set_text_size((uint32_t)(size * 10.0f + 0.5f));
 }
 bruce_result_t display__draw_centre_string(const char *text, int16_t x, int16_t y) {
     return (bruce_result_t)wasm_import__display_draw_centre_string(
