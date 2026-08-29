@@ -57,9 +57,19 @@ static void gif__emit(gif_output_t *output, uint8_t color) {
     if (color == output->transparent_index) return;
     uint32_t source_x = output->left + x, source_y = output->top + y;
     if (source_x >= output->source_width || source_y >= output->source_height) return;
-    uint32_t out_x = (uint32_t)(((uint64_t)source_x * output->canvas_width) / output->source_width);
-    uint32_t out_y = (uint32_t)(((uint64_t)source_y * output->canvas_height) / output->source_height);
-    output->pixels[(size_t)out_y * output->canvas_width + out_x] = output->palette[color];
+    /* Fill the whole destination box this source pixel scales to, not just a single point, so
+     * upscaling doesn't leave unwritten (background-colored) gaps between mapped pixels. */
+    uint32_t out_x0 = (uint32_t)(((uint64_t)source_x * output->canvas_width) / output->source_width);
+    uint32_t out_x1 = (uint32_t)((((uint64_t)source_x + 1) * output->canvas_width) / output->source_width);
+    uint32_t out_y0 = (uint32_t)(((uint64_t)source_y * output->canvas_height) / output->source_height);
+    uint32_t out_y1 = (uint32_t)((((uint64_t)source_y + 1) * output->canvas_height) / output->source_height);
+    if (out_x1 <= out_x0) out_x1 = out_x0 + 1;
+    if (out_y1 <= out_y0) out_y1 = out_y0 + 1;
+    if (out_x1 > output->canvas_width) out_x1 = output->canvas_width;
+    if (out_y1 > output->canvas_height) out_y1 = output->canvas_height;
+    for (uint32_t out_y = out_y0; out_y < out_y1; ++out_y)
+        for (uint32_t out_x = out_x0; out_x < out_x1; ++out_x)
+            output->pixels[(size_t)out_y * output->canvas_width + out_x] = output->palette[color];
 }
 
 static bool gif__lzw(image_reader_t *reader, uint8_t minimum_code_size, gif_output_t *output) {

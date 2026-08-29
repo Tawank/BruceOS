@@ -77,10 +77,10 @@ static int bluetooth_hid_app__connect(const uint8_t address[BRUCE_BLUETOOTH_ADDR
     if (result != BRUCE_OK) {
         if (gui) {
             char message[64];
-            snprintf(message, sizeof(message), "Connection failed (%d)", result);
+            snprintf(message, sizeof(message), "Connection failed: %s", result__to_string(result));
             (void)dialog__message(BRUCE_DIALOG_ERROR, "Bluetooth HID", message);
         } else {
-            stdio__printf("Bluetooth HID connection failed: %d\n", result);
+            stdio__printf("Bluetooth HID connection failed: %s\n", result__to_string(result));
         }
         return result;
     }

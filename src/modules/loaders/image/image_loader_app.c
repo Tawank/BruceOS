@@ -88,7 +88,7 @@ int image_viewer_app_main(int argc, char **argv) {
         (void)display__set_text_color(BRUCE_COLOR_RED);
         (void)display__set_cursor(4, 4);
         char message[48];
-        snprintf(message, sizeof(message), "Image error (%d)", (int)result);
+        snprintf(message, sizeof(message), "Image error: %s", result__to_string(result));
         (void)display__println(message);
         (void)display__present();
     }

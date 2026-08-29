@@ -338,7 +338,7 @@ static bruce_result_t text__edit_line(text_editor_t *editor) {
 
 static bruce_result_t text__show_error(const char *action, bruce_result_t result) {
     char message[64];
-    snprintf(message, sizeof(message), "%s failed (%d)", action, (int)result);
+    snprintf(message, sizeof(message), "%s failed: %s", action, result__to_string(result));
     (void)dialog__message(BRUCE_DIALOG_ERROR, "Text editor", message);
     return result;
 }

@@ -13,7 +13,6 @@
 #include "jpeg_decoder.h"
 #include "jpeglib.h"
 
-#include "core/image/image.h"
 #include "core_sdk/memory.h"
 
 typedef struct {
@@ -141,6 +140,40 @@ static void image__jpeg_error_exit(j_common_ptr decoder) {
     longjmp(error->jump, 1);
 }
 
+/* If `options->fit` is set, resample the already-decoded RGB565 buffer (whatever size the
+ * hardware/software decoder below settled on) to the exact dimensions image__fit_size() picks for
+ * `source_width`x`source_height` -- the same target PNG and GIF decoding already render into.
+ * Both JPEG decode paths only ever shrink their output in coarse power-of-two/eight steps to get
+ * *under* the display size, and never grow it back up, so without this a JPEG smaller than the
+ * display renders at its native (small) size instead of filling the screen like PNG/GIF do.
+ * No-ops if the decoded size already matches the target. */
+static bruce_result_t image__jpeg_resample_to_fit(
+    uint16_t **pixels, uint16_t *width, uint16_t *height, uint16_t source_width, uint16_t source_height,
+    const bruce_image_draw_options_t *options
+) {
+    if (!options->fit) return BRUCE_OK;
+    uint16_t target_width, target_height;
+    image__fit_size(source_width, source_height, true, &target_width, &target_height);
+    if (target_width == *width && target_height == *height) return BRUCE_OK;
+    if (target_width == 0 || target_height == 0 ||
+        (size_t)target_width > SIZE_MAX / ((size_t)target_height * sizeof(uint16_t)))
+        return BRUCE_ERR_RESOURCE_LIMIT;
+    uint16_t *scaled = memory__malloc((size_t)target_width * target_height * sizeof(uint16_t));
+    if (scaled == NULL) return BRUCE_ERR_NO_MEMORY;
+    for (uint16_t y = 0; y < target_height; ++y) {
+        size_t source_row = (size_t)y * *height / target_height;
+        for (uint16_t x = 0; x < target_width; ++x) {
+            size_t source_column = (size_t)x * *width / target_width;
+            scaled[(size_t)y * target_width + x] = (*pixels)[source_row * (*width) + source_column];
+        }
+    }
+    memory__free(*pixels);
+    *pixels = scaled;
+    *width = target_width;
+    *height = target_height;
+    return BRUCE_OK;
+}
+
 static bruce_result_t image__decode_jpeg_baseline(
     const uint8_t *data, size_t size, const bruce_image_draw_options_t *options, image_bitmap_t *bitmap
 ) {
@@ -168,22 +201,30 @@ static bruce_result_t image__decode_jpeg_baseline(
         return BRUCE_ERR_RESOURCE_LIMIT;
     size_t output_size = (size_t)output.width * output.height * sizeof(uint16_t);
     if (output_size > UINT32_MAX) return BRUCE_ERR_RESOURCE_LIMIT;
-    uint8_t *pixels = memory__malloc(output_size);
+    uint16_t *pixels = memory__malloc(output_size);
     if (pixels == NULL) return BRUCE_ERR_NO_MEMORY;
-    config.outbuf = pixels;
+    config.outbuf = (uint8_t *)pixels;
     config.outbuf_size = output_size;
     esp_err_t error = esp_jpeg_decode(&config, &output);
-    if (error == ESP_OK) {
-        bitmap->pixels = (uint16_t *)pixels;
-        bitmap->width = output.width;
-        bitmap->height = output.height;
-        bitmap->source_width = source_width;
-        bitmap->source_height = source_height;
-        bitmap->format = BRUCE_IMAGE_FORMAT_JPEG;
-        return BRUCE_OK;
+    if (error != ESP_OK) {
+        memory__free(pixels);
+        return error == ESP_ERR_NO_MEM ? BRUCE_ERR_NO_MEMORY : BRUCE_ERR_IO;
     }
-    memory__free(pixels);
-    return error == ESP_ERR_NO_MEM ? BRUCE_ERR_NO_MEMORY : BRUCE_ERR_IO;
+    uint16_t decoded_width = output.width, decoded_height = output.height;
+    bruce_result_t result = image__jpeg_resample_to_fit(
+        &pixels, &decoded_width, &decoded_height, source_width, source_height, options
+    );
+    if (result != BRUCE_OK) {
+        memory__free(pixels);
+        return result;
+    }
+    bitmap->pixels = pixels;
+    bitmap->width = decoded_width;
+    bitmap->height = decoded_height;
+    bitmap->source_width = source_width;
+    bitmap->source_height = source_height;
+    bitmap->format = BRUCE_IMAGE_FORMAT_JPEG;
+    return BRUCE_OK;
 }
 
 /* skip_full_quality forces every coefficient array through libjpeg's backing
@@ -283,7 +324,6 @@ static bruce_result_t image__decode_jpeg_progressive_attempt(
     }
 
     bool dc_scan_only = decoder.progressive_mode && !full_quality && decoder.scale_denom == 8;
-    bool upscale_output = decoder.progressive_mode && options->fit && decoder.scale_denom == 8;
     decoder.buffered_image = dc_scan_only;
     ESP_LOGI(
         TAG,
@@ -341,38 +381,19 @@ static bruce_result_t image__decode_jpeg_progressive_attempt(
     uint16_t decoded_height = (uint16_t)decoder.output_height;
     jpeg_destroy_decompress(&decoder);
 
-    if (upscale_output) {
-        uint16_t target_width = display__width();
-        uint16_t target_height = (uint16_t)(((uint32_t)source_height * target_width) / source_width);
-        if (target_height == 0) target_height = 1;
-        if (target_height > display__height()) {
-            target_height = display__height();
-            target_width = (uint16_t)(((uint32_t)source_width * target_height) / source_height);
-            if (target_width == 0) target_width = 1;
-        }
-        if (target_width > decoded_width || target_height > decoded_height) {
-            size_t scaled_size = (size_t)target_width * target_height * sizeof(uint16_t);
-            uint16_t *scaled = memory__malloc(scaled_size);
-            if (scaled == NULL) {
-                memory__free((uint16_t *)pixels);
-                return BRUCE_ERR_NO_MEMORY;
-            }
-            for (uint16_t y = 0; y < target_height; ++y) {
-                size_t source_row = (size_t)y * decoded_height / target_height;
-                for (uint16_t x = 0; x < target_width; ++x) {
-                    size_t source_column = (size_t)x * decoded_width / target_width;
-                    scaled[(size_t)y * target_width + x] =
-                        ((uint16_t *)pixels)[source_row * decoded_width + source_column];
-                }
-            }
-            memory__free((uint16_t *)pixels);
-            pixels = scaled;
-            decoded_width = target_width;
-            decoded_height = target_height;
-        }
+    /* Past this point nothing can longjmp back into image__jpeg_error_exit() (the decoder is
+     * already destroyed), so it's safe to drop out of the volatile `pixels` into a plain local
+     * for the resample helper. */
+    uint16_t *decoded_pixels = (uint16_t *)pixels;
+    bruce_result_t resample_result = image__jpeg_resample_to_fit(
+        &decoded_pixels, &decoded_width, &decoded_height, source_width, source_height, options
+    );
+    if (resample_result != BRUCE_OK) {
+        memory__free(decoded_pixels);
+        return resample_result;
     }
 
-    bitmap->pixels = (uint16_t *)pixels;
+    bitmap->pixels = decoded_pixels;
     bitmap->width = decoded_width;
     bitmap->height = decoded_height;
     bitmap->source_width = source_width;
@@ -404,6 +425,13 @@ bruce_result_t image__decode_jpeg(
     const uint8_t *data, size_t size, const bruce_image_draw_options_t *options, image_bitmap_t *bitmap
 ) {
     bruce_result_t result = image__decode_jpeg_baseline(data, size, options, bitmap);
-    if (result != BRUCE_ERR_IO) return result;
+    /* The hardware/esp_jpeg path fails BRUCE_ERR_IO for formats it can't decode at all (e.g.
+     * progressive), which is when we fall back to the software libjpeg-turbo decoder below --
+     * that decoder handles both baseline and progressive JPEGs. It also needs to be tried on
+     * BRUCE_ERR_NO_MEMORY: esp_jpeg allocates its scaled output buffer up front and has no
+     * fallback if that single allocation doesn't fit, whereas image__decode_jpeg_progressive()
+     * can shrink further via DCT scaling and/or spill large buffers to external/swap memory
+     * (see image_jpeg_backing_store_t), so it can succeed on the same image in tighter memory. */
+    if (result != BRUCE_ERR_IO && result != BRUCE_ERR_NO_MEMORY) return result;
     return image__decode_jpeg_progressive(data, size, options, bitmap);
 }
