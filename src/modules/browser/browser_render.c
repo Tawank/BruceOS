@@ -1,5 +1,6 @@
 #include "browser_render.h"
 
+#include <math.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
@@ -60,7 +61,7 @@ static void browser_render__noop_visitor(const browser_layout_token_t *token, vo
     (void)context;
 }
 
-int browser_render__content_height(const browser_document_t *doc, int font_scale) {
+int browser_render__content_height(const browser_document_t *doc, float font_scale) {
     int16_t char_width, char_height;
     browser_render__metrics(&char_width, &char_height);
     return browser_layout__walk(
@@ -68,7 +69,7 @@ int browser_render__content_height(const browser_document_t *doc, int font_scale
     );
 }
 
-int browser_render__max_scroll(const browser_document_t *doc, int font_scale) {
+int browser_render__max_scroll(const browser_document_t *doc, float font_scale) {
     int max_scroll = browser_render__content_height(doc, font_scale) - browser_render__view_height();
     return max_scroll > 0 ? max_scroll : 0;
 }
@@ -87,7 +88,7 @@ static void browser_render__item_visitor(const browser_layout_token_t *token, vo
     }
 }
 
-int browser_render__item_y(const browser_document_t *doc, size_t item_index, int font_scale) {
+int browser_render__item_y(const browser_document_t *doc, size_t item_index, float font_scale) {
     int16_t char_width, char_height;
     browser_render__metrics(&char_width, &char_height);
     browser_render__item_search_t search = {.item_index = item_index};
@@ -155,7 +156,7 @@ static void browser_render__row_visitor(const browser_layout_token_t *token, voi
 }
 
 bool browser_render__find_row(
-    const browser_document_t *doc, int after_y, int direction, int font_scale, browser_render_row_t *out_row
+    const browser_document_t *doc, int after_y, int direction, float font_scale, browser_render_row_t *out_row
 ) {
     if (out_row == NULL || direction == 0) return false;
     int16_t char_width, char_height;
@@ -242,7 +243,7 @@ static void browser_render__draw_text_token(
     memcpy(word, token->text, len);
     word[len] = '\0';
 
-    int scale = browser_layout__heading_scale(token->heading_level, ctx->view->font_scale);
+    float scale = browser_layout__heading_scale(token->heading_level, ctx->view->font_scale);
     bool selected = token->link_index >= 0 && token->link_index == ctx->view->selected_link;
     bruce_display_color_t fg = ctx->theme->text;
     if (token->heading_level > 0) fg = ctx->theme->secondary;
@@ -254,11 +255,11 @@ static void browser_render__draw_text_token(
         int16_t char_width, char_height;
         browser_render__metrics(&char_width, &char_height);
         (void)display__fill_rect(
-            (int16_t)x, (int16_t)screen_y, (int16_t)((int)len * char_width * scale), (int16_t)(char_height * scale),
-            ctx->theme->primary
+            (int16_t)x, (int16_t)screen_y, (int16_t)lroundf((float)len * (float)char_width * scale),
+            (int16_t)lroundf((float)char_height * scale), ctx->theme->primary
         );
     }
-    (void)display__set_text_size((uint8_t)scale);
+    (void)display__set_text_size(scale);
     (void)display__set_text_color(fg);
     (void)display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
     (void)display__draw_string(word, x, screen_y);

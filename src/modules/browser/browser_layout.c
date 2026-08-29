@@ -1,30 +1,34 @@
 #include "browser_layout.h"
 
+#include <math.h>
+
 #define BROWSER_LAYOUT_LINE_GAP 2
 #define BROWSER_LAYOUT_PARAGRAPH_GAP 6
 
-int browser_layout__heading_scale(int heading_level, int font_scale_delta) {
-    int base;
+float browser_layout__heading_scale(int heading_level, float font_scale_delta) {
+    float base;
     switch (heading_level) {
-    case 1: base = 4; break;
-    case 2: base = 3; break;
-    case 3: base = 3; break;
-    default: base = 2; break;
+    case 1: base = 4.0f; break;
+    case 2: base = 3.0f; break;
+    case 3: base = 3.0f; break;
+    default: base = 2.0f; break;
     }
-    int scale = base + font_scale_delta;
-    if (scale < 1) scale = 1;
-    if (scale > 8) scale = 8; /* display__set_text_size() takes a uint8_t; keep it off the wall too. */
+    float scale = base + font_scale_delta;
+    if (scale < 0.5f) scale = 0.5f;
+    if (scale > 8.0f) scale = 8.0f; /* display__set_text_size() clamps at 8 too; keep it off the wall here as well. */
     return scale;
 }
 
 int browser_layout__walk(
-    const browser_document_t *doc, int width, int char_width, int char_height, int font_scale_delta,
+    const browser_document_t *doc, int width, int char_width, int char_height, float font_scale_delta,
     browser_layout_visitor_t visitor, void *context
 ) {
     if (doc == NULL || visitor == NULL || width <= 0 || char_width <= 0 || char_height <= 0) return 0;
 
     int x = 0, y = 0;
-    int base_line_height = char_height * browser_layout__heading_scale(0, font_scale_delta) + BROWSER_LAYOUT_LINE_GAP;
+    int base_line_height =
+        (int)lroundf((float)char_height * browser_layout__heading_scale(0, font_scale_delta)) +
+        BROWSER_LAYOUT_LINE_GAP;
     /* Tallest line_height of any token placed on the current row so far (0 =
      * nothing placed yet this row). A row isn't always one item -- e.g. a
      * heading item is immediately followed by plain-text item with no break
@@ -42,14 +46,14 @@ int browser_layout__walk(
         const browser_item_t *item = &doc->items[i];
         switch (item->kind) {
         case BROWSER_ITEM_TEXT: {
-            int scale = browser_layout__heading_scale(item->heading_level, font_scale_delta);
-            int line_h = char_height * scale + BROWSER_LAYOUT_LINE_GAP;
+            float scale = browser_layout__heading_scale(item->heading_level, font_scale_delta);
+            int line_h = (int)lroundf((float)char_height * scale) + BROWSER_LAYOUT_LINE_GAP;
             const char *text = doc->text_pool + item->text_offset;
             size_t len = item->text_len;
             size_t k = 0;
             while (k < len) {
                 if (text[k] == ' ') {
-                    int space_px = char_width * scale;
+                    int space_px = (int)lroundf((float)char_width * scale);
                     if (x > 0) {
                         if (x + space_px <= width) x += space_px;
                         else {
@@ -64,7 +68,7 @@ int browser_layout__walk(
                 size_t start = k;
                 while (k < len && text[k] != ' ') k++;
                 size_t word_len = k - start;
-                int word_px = (int)word_len * char_width * scale;
+                int word_px = (int)lroundf((float)word_len * (float)char_width * scale);
                 if (x > 0 && x + word_px > width) {
                     y += row_height > 0 ? row_height : line_h;
                     x = 0;

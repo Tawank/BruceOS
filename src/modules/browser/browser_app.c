@@ -260,15 +260,16 @@ static void browser_app__scroll_to_edge(browser_app_state_t *state, bool end) {
     state->view.row_y = -1;
 }
 
-/* +/- resizes body/heading text on the fly (see BROWSER_FONT_SCALE_MIN/MAX).
- * Re-flowing at a new scale moves every row's y, so an exact scroll_y or
- * row_y/selected_link carried over from the old layout would land on the
- * wrong content -- keep the same approximate reading position by scaling
- * scroll_y by how much the total content height changed, and drop row
- * selection rather than have it silently point at the wrong row. */
-static void browser_app__adjust_font_scale(browser_app_state_t *state, int delta) {
-    int old_scale = state->view.font_scale;
-    int new_scale = old_scale + delta;
+/* +/- resizes body/heading text on the fly, in 0.5 steps (see
+ * BROWSER_FONT_SCALE_MIN/MAX). Re-flowing at a new scale moves every row's y,
+ * so an exact scroll_y or row_y/selected_link carried over from the old
+ * layout would land on the wrong content -- keep the same approximate
+ * reading position by scaling scroll_y by how much the total content height
+ * changed, and drop row selection rather than have it silently point at the
+ * wrong row. */
+static void browser_app__adjust_font_scale(browser_app_state_t *state, float delta) {
+    float old_scale = state->view.font_scale;
+    float new_scale = old_scale + delta;
     if (new_scale < BROWSER_FONT_SCALE_MIN) new_scale = BROWSER_FONT_SCALE_MIN;
     if (new_scale > BROWSER_FONT_SCALE_MAX) new_scale = BROWSER_FONT_SCALE_MAX;
     if (new_scale == old_scale) return;
@@ -348,9 +349,9 @@ static bool browser_app__handle_event(browser_app_state_t *state, const bruce_in
         case 'b': browser_app__page_scroll(state, -1); break;
         case '[': browser_app__scroll_to_edge(state, false); break;
         case ']': browser_app__scroll_to_edge(state, true); break;
-        case '-': browser_app__adjust_font_scale(state, -1); break;
+        case '-': browser_app__adjust_font_scale(state, -0.5f); break;
         case '=':
-        case '+': browser_app__adjust_font_scale(state, 1); break;
+        case '+': browser_app__adjust_font_scale(state, 0.5f); break;
         case 'i': browser_app__show_keybindings(); break;
         case 'p': browser_debug__dump(state->doc, state->view.font_scale); break;
         case 'g': browser_app__edit_url(state); break;

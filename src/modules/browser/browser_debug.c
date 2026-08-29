@@ -79,11 +79,13 @@ static void browser_debug__layout_visitor(const browser_layout_token_t *token, v
     ctx->index++;
 }
 
-static void browser_debug__dump_layout(const browser_document_t *doc, int font_scale) {
+static void browser_debug__dump_layout(const browser_document_t *doc, float font_scale) {
     int16_t char_width, char_height;
     browser_debug__metrics(&char_width, &char_height);
     int width = browser_render__content_width();
-    printf("[browser_debug] layout: width=%d char=%dx%d font_scale=%d\n", width, char_width, char_height, font_scale);
+    printf(
+        "[browser_debug] layout: width=%d char=%dx%d font_scale=%.1f\n", width, char_width, char_height, font_scale
+    );
 
     browser_debug__layout_ctx_t ctx = {.index = 0};
     int height =
@@ -91,7 +93,7 @@ static void browser_debug__dump_layout(const browser_document_t *doc, int font_s
     printf("[browser_debug] layout: %zu tokens, content_height=%d\n", ctx.index, height);
 }
 
-void browser_debug__dump(const browser_document_t *doc, int font_scale) {
+void browser_debug__dump(const browser_document_t *doc, float font_scale) {
     if (doc == NULL) {
         printf("[browser_debug] dump: doc == NULL\n");
         return;

@@ -33,14 +33,14 @@ typedef void (*browser_layout_visitor_t)(const browser_layout_token_t *token, vo
 
 /* The display__set_text_size() multiplier for a heading level (0 = body/link
  * text), adjusted by `font_scale_delta` (the user's +/- font size preference,
- * 0 = default) and clamped to a sane [1, 8] range. */
-int browser_layout__heading_scale(int heading_level, int font_scale_delta);
+ * in 0.5 steps, 0 = default) and clamped to a sane [0.5, 8] range. */
+float browser_layout__heading_scale(int heading_level, float font_scale_delta);
 
 /* Word-wraps `doc` to `width` px using the given native (unscaled) font cell
  * size and `font_scale_delta` (see browser_layout__heading_scale above),
  * calling `visitor` once per positioned word or image, in document order.
  * Returns the total laid-out content height in pixels. */
 int browser_layout__walk(
-    const browser_document_t *doc, int width, int char_width, int char_height, int font_scale_delta,
+    const browser_document_t *doc, int width, int char_width, int char_height, float font_scale_delta,
     browser_layout_visitor_t visitor, void *context
 );
