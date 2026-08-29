@@ -23,6 +23,11 @@ bool selftest__run_bnu_case(void) {
     char *reboot_invalid_argv[] = {"reboot", "later"};
     char *cat_argv[] = {"cat", "/selftest_bnu_cat.txt"};
     char *stty_argv[] = {"stty"};
+    char *date_argv[] = {"date"};
+    char *date_invalid_argv[] = {"date", "-s", "not-a-date"};
+    char *sleep_argv[] = {"sleep", "0"};
+    char *sleep_invalid_argv[] = {"sleep", "-1"};
+    bruce_result_t date_result = bnu_date_app_main(1, date_argv);
     static const char cat_text[] = "bnu cat selftest\n";
     bruce_file_id_t cat_file = BRUCE_FILE_ID_INVALID;
     size_t cat_written = 0;
@@ -47,7 +52,11 @@ bool selftest__run_bnu_case(void) {
                cat_open == BRUCE_OK && cat_write == BRUCE_OK && cat_written == sizeof(cat_text) - 1 &&
               cat_close == BRUCE_OK && bnu_cat_app_main(2, cat_argv) == BRUCE_OK &&
                /* Selftest runs with no routed stdio session, so stty correctly reports "not a tty". */
-               bnu_stty_app_main(1, stty_argv) == BRUCE_ERR_NOT_FOUND;
+               bnu_stty_app_main(1, stty_argv) == BRUCE_ERR_NOT_FOUND &&
+               (date_result == BRUCE_OK || date_result == BRUCE_ERR_INVALID_STATE) &&
+               bnu_date_app_main(3, date_invalid_argv) == BRUCE_ERR_INVALID_ARGUMENT &&
+               bnu_sleep_app_main(2, sleep_argv) == BRUCE_OK &&
+               bnu_sleep_app_main(2, sleep_invalid_argv) == BRUCE_ERR_INVALID_ARGUMENT;
     storage__remove(cat_argv[1]);
     printf("[selftest] bnu: %s\n", ok ? "OK" : "failed");
     return ok;

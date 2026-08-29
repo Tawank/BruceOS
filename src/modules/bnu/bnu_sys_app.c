@@ -2,6 +2,7 @@
 #include "bnu_internal.h"
 
 #include <errno.h> // IWYU pragma: keep
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -15,7 +16,7 @@
 #include "core_sdk/stdio.h"
 #include "core_sdk/tty.h"
 
-/* System commands: free, top, shutdown, reboot, stty. */
+/* System commands: free, top, shutdown, reboot, stty, date, sleep. */
 
 static void
 bnu__print_memory_row(const char *name, size_t total, size_t free_size, size_t largest, bool human) {
@@ -213,4 +214,78 @@ int bnu_stty_app_main(int argc, char **argv) {
     }
     stdio__printf("stty: unknown setting '%s'\n", setting);
     return BRUCE_ERR_INVALID_ARGUMENT;
+}
+
+static bool bnu__parse_datetime(const char *text, bruce_clock_datetime_t *out) {
+    unsigned int year, month, day, hour, minute, second;
+    char extra;
+    if (text == NULL ||
+        sscanf(text, "%u-%u-%u %u:%u:%u%c", &year, &month, &day, &hour, &minute, &second, &extra) != 6) {
+        return false;
+    }
+    if (month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || minute > 59 || second > 59) {
+        return false;
+    }
+    out->year = (uint16_t)year;
+    out->month = (uint8_t)month;
+    out->day = (uint8_t)day;
+    out->hour = (uint8_t)hour;
+    out->minute = (uint8_t)minute;
+    out->second = (uint8_t)second;
+    return true;
+}
+
+int bnu_date_app_main(int argc, char **argv) {
+    ArgParser *parser = bnu__new_parser("Show or set the current date and time.");
+    if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
+    ap_add_flag(parser, "u");
+    ap_set_opt_help(parser, "u", "Show the time in UTC instead of local time");
+    ap_add_str_opt(parser, "s set", NULL);
+    ap_set_opt_help(parser, "s set", "Set the date and time ('YYYY-MM-DD HH:MM:SS', local)");
+    if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
+    bool utc = ap_found(parser, "u");
+    const char *set_value = ap_get_str_value(parser, "s");
+    bruce_clock_datetime_t set_local;
+    bool has_set_value = set_value != NULL && bnu__parse_datetime(set_value, &set_local);
+    bool set_requested = set_value != NULL;
+    ap_free(parser);
+
+    if (set_requested) {
+        if (!has_set_value) return BRUCE_ERR_INVALID_ARGUMENT;
+        bruce_result_t result = clock__set_local(&set_local);
+        if (result != BRUCE_OK) return result;
+    }
+
+    bruce_clock_datetime_t now;
+    bruce_result_t result = utc ? clock__get_utc(&now) : clock__get_local(&now);
+    if (result != BRUCE_OK) return result;
+    stdio__printf(
+        "%04u-%02u-%02u %02u:%02u:%02u%s\n",
+        (unsigned)now.year,
+        (unsigned)now.month,
+        (unsigned)now.day,
+        (unsigned)now.hour,
+        (unsigned)now.minute,
+        (unsigned)now.second,
+        utc ? " UTC" : ""
+    );
+    return BRUCE_OK;
+}
+
+int bnu_sleep_app_main(int argc, char **argv) {
+    ArgParser *parser = bnu__new_parser("Pause for the given duration.");
+    if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
+    ap_add_required_arg(parser, "seconds", "Duration to sleep, in seconds (e.g. 2 or 0.5)");
+    if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
+    const char *text = ap_get_arg(parser, "seconds");
+
+    errno = 0;
+    char *end = NULL;
+    double seconds = text != NULL ? strtod(text, &end) : 0.0;
+    bool valid = text != NULL && end != text && *end == '\0' && errno == 0 && seconds >= 0.0 &&
+                 seconds <= (double)UINT32_MAX / 1000.0;
+    ap_free(parser);
+    if (!valid) return BRUCE_ERR_INVALID_ARGUMENT;
+
+    return runtime__sleep((uint32_t)(seconds * 1000.0));
 }

@@ -74,6 +74,7 @@ void app_runner__register_defaults(void) {
     app_runner__register("bruce_launcher", "Open the Bruce launcher", "System", bruce_launcher_app_main, 0);
     app_runner__register("clock", "Show clock and timer tools", "System", clock_app_main, 0);
     app_runner__register("config", "Configure Bruce settings", "System", config_app_main, CONFIG_STACK_BYTES);
+    app_runner__register("date", "Show or set the date and time", "System", bnu_date_app_main, 0);
     app_runner__register("free", "Show memory usage", "System", bnu_free_app_main, 0);
     app_runner__register("launcher", "Launches configured launcher", "System", launcher_app_main, 3072u);
     app_runner__register("man", "List commands or show command manuals", "System", man_app_main, 0);
@@ -93,6 +94,7 @@ void app_runner__register_defaults(void) {
     app_runner__register("reboot", "Restart the device", "System", bnu_reboot_app_main, 0);
     app_runner__register("selftest", "Hardware and Core self-tests", "System", selftest_app_main, 8192u);
     app_runner__register("shutdown", "Power off the device", "System", bnu_shutdown_app_main, 0);
+    app_runner__register("sleep", "Pause for a duration", "System", bnu_sleep_app_main, 0);
     app_runner__register("top", "Processes, CPU, RAM usage", "System", bnu_top_app_main, 0);
 
     /* Storage - filesystems, partitions, and file management. */
