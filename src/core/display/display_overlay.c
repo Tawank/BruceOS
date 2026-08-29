@@ -204,7 +204,7 @@ display__overlay_create(int16_t x, int16_t y, int16_t w, int16_t h, bruce_displa
     overlay->surface.target_stride = w;
     overlay->surface.text_color = BRUCE_COLOR_WHITE;
     overlay->surface.text_bg_color = BRUCE_COLOR_BLACK;
-    overlay->surface.text_size = 1;
+    overlay->surface.text_size = 1.0f;
     *out_overlay = overlay->id;
     display_internal__unlock_registry();
     return BRUCE_OK;

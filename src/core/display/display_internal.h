@@ -62,7 +62,7 @@ typedef struct {
     bruce_display_color_t text_color;
     bruce_display_color_t text_bg_color;
     bool text_bg_transparent;
-    uint8_t text_size;
+    float text_size; /* fractional multiplier, clamped in display__set_text_size() */
     int16_t cursor_x;
     int16_t cursor_y;
 

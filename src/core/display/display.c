@@ -129,7 +129,7 @@ static void display__context_defaults(display__process_context_t *context) {
     context->text_color = BRUCE_COLOR_WHITE;
     context->text_bg_color = BRUCE_COLOR_BLACK;
     context->text_bg_transparent = false;
-    context->text_size = 1;
+    context->text_size = 1.0f;
     context->cursor_x = 0;
     context->cursor_y = 0;
 }

@@ -147,12 +147,16 @@ bruce_result_t display__set_text_bg_color(uint32_t color);
 /**
  * @brief Text size multiplier (1 = native character cells, 2 = 2x that, ...).
  *
- * Clamped to 1..8. See display__get_font_metrics() for the native cell
- * size.
+ * Clamped to 0.1..8. Values below 1 downscale the native glyph bitmap
+ * (nearest-pixel, not antialiased) instead of upscaling it -- since the
+ * built-in font is only 5px wide to start with, legibility drops off fast
+ * below ~0.5 and glyphs may fall back to a solid dot rather than a hollow
+ * box at the smallest sizes. See display__get_font_metrics() for the native
+ * cell size.
  *
- * @param size New text size multiplier (clamped to 1..8).
+ * @param size New text size multiplier (clamped to 0.1..8).
  */
-bruce_result_t display__set_text_size(uint8_t size);
+bruce_result_t display__set_text_size(float size);
 
 /**
  * @brief Position the text cursor in logical coordinates.
@@ -214,7 +218,7 @@ bruce_result_t display__draw_right_string(const char *text, int16_t x, int16_t y
 /**
  * @brief The active font's fixed advance width/height, in px, before text_size scaling.
  *
- * (multiply by the value passed to display__set_text_size() to get
+ * (scale by the value passed to display__set_text_size() to get
  * on-screen pixels). Every built-in font is monospace today, so this
  * single width/height pair is exact for any string; callers doing their
  * own layout math (row heights, column counts, cursor placement) should

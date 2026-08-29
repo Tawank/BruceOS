@@ -2,6 +2,8 @@
 
 #include "core_sdk/display.h"
 
+#include <math.h>
+
 /* Font-agnostic text renderer: walks a UTF-8 string, asks the active
  * display__font_t (display_internal__active_font(), see display_font.h) for
  * each codepoint's glyph, and blits it. The only provider today is the
@@ -40,26 +42,35 @@ static size_t display__utf8_decode(const char *text, uint32_t *out_codepoint) {
 
 /* Blits a resolved glyph's own pixels (run-length per row, same shape as the
  * old fixed-font loop) -- does not touch the background box, callers draw
- * that first if needed. */
+ * that first if needed. `text_size` is a float, so both edges of each run
+ * are rounded to their own device pixel independently (start = round(n*s),
+ * end = round((n+1)*s)) rather than computing an origin plus a fixed s-px
+ * size; at integer s this reduces to the old exact block math, but it's also
+ * what makes s < 1 work -- adjacent source rows/columns can round into the
+ * same destination pixel without leaving gaps, which is how downscaling
+ * happens here (nearest-pixel, no antialiasing: several "on" source pixels
+ * just redundantly re-fill the same destination pixel). */
 static void display__blit_glyph(
     display__process_context_t *context, int16_t x, int16_t y, const display__glyph_t *glyph
 ) {
-    int16_t s = context->text_size;
+    float s = context->text_size;
     for (uint8_t row = 0; row < glyph->height; ++row) {
+        int16_t row_y0 = (int16_t)lroundf((float)y + row * s);
+        int16_t row_y1 = (int16_t)lroundf((float)y + (row + 1) * s);
+        int16_t h = (int16_t)(row_y1 - row_y0);
+        if (h <= 0) continue;
         uint8_t col = 0;
         while (col < glyph->width) {
             while (col < glyph->width && !(glyph->columns[col] & (1u << row))) ++col;
             uint8_t start = col;
             while (col < glyph->width && (glyph->columns[col] & (1u << row))) ++col;
             if (col > start) {
-                display_internal__fill_rect(
-                    context,
-                    (int16_t)(x + start * s),
-                    (int16_t)(y + row * s),
-                    (int16_t)((col - start) * s),
-                    s,
-                    context->text_color
-                );
+                int16_t col_x0 = (int16_t)lroundf((float)x + start * s);
+                int16_t col_x1 = (int16_t)lroundf((float)x + col * s);
+                int16_t w = (int16_t)(col_x1 - col_x0);
+                if (w > 0) {
+                    display_internal__fill_rect(context, col_x0, row_y0, w, h, context->text_color);
+                }
             }
         }
     }
@@ -72,20 +83,32 @@ static void display__blit_glyph(
  * misrepresented as an unrelated character. */
 static void display__draw_tofu(display__process_context_t *context, int16_t x, int16_t y) {
     const display__font_t *font = display_internal__active_font();
-    int16_t s = context->text_size;
-    int16_t w = (int16_t)(font->cell_width * s);
-    int16_t h = (int16_t)(font->cell_height * s);
+    float s = context->text_size;
+    int16_t w = (int16_t)lroundf(font->cell_width * s);
+    int16_t h = (int16_t)lroundf(font->cell_height * s);
+    /* Border thickness is an integer px count -- at s < 1 that would round
+     * to 0 and the whole hollow box would vanish, so it's floored at 1px
+     * regardless of how small s gets. */
+    int16_t b = (int16_t)lroundf(s);
+    if (b < 1) b = 1;
+    if (w < 3 * b || h < 3 * b) {
+        /* Too small at this scale for a hollow box with distinguishable
+         * borders/interior -- fall back to a solid dot so a missing glyph
+         * still reads as "something's here" instead of disappearing. */
+        display_internal__fill_rect(context, x, y, w > 0 ? w : 1, h > 0 ? h : 1, context->text_color);
+        return;
+    }
     display_internal__fill_rect(
-        context, (int16_t)(x + s), (int16_t)(y + s), (int16_t)(w - 3 * s), s, context->text_color
+        context, (int16_t)(x + b), (int16_t)(y + b), (int16_t)(w - 3 * b), b, context->text_color
     );
     display_internal__fill_rect(
-        context, (int16_t)(x + s), (int16_t)(y + h - 2 * s), (int16_t)(w - 3 * s), s, context->text_color
+        context, (int16_t)(x + b), (int16_t)(y + h - 2 * b), (int16_t)(w - 3 * b), b, context->text_color
     );
     display_internal__fill_rect(
-        context, (int16_t)(x + s), (int16_t)(y + s), s, (int16_t)(h - 3 * s), context->text_color
+        context, (int16_t)(x + b), (int16_t)(y + b), b, (int16_t)(h - 3 * b), context->text_color
     );
     display_internal__fill_rect(
-        context, (int16_t)(x + w - 2 * s), (int16_t)(y + s), s, (int16_t)(h - 3 * s), context->text_color
+        context, (int16_t)(x + w - 2 * b), (int16_t)(y + b), b, (int16_t)(h - 3 * b), context->text_color
     );
 }
 
@@ -96,12 +119,12 @@ display__draw_char(display__process_context_t *context, int16_t x, int16_t y, ui
     const display__font_t *font = display_internal__active_font();
     display__glyph_t glyph;
     bool found = font->get_glyph(codepoint, &glyph);
-    int16_t s = context->text_size;
-    int16_t advance = (int16_t)((found ? glyph.advance : font->cell_width) * s);
+    float s = context->text_size;
+    int16_t advance = (int16_t)lroundf((found ? glyph.advance : font->cell_width) * s);
 
     if (!context->text_bg_transparent) {
         display_internal__fill_rect(
-            context, x, y, advance, (int16_t)(font->cell_height * s), context->text_bg_color
+            context, x, y, advance, (int16_t)lroundf(font->cell_height * s), context->text_bg_color
         );
     }
     if (found) {
@@ -123,7 +146,7 @@ static int32_t display__string_width(const display__process_context_t *context, 
         if (codepoint >= 0x20) {
             display__glyph_t glyph;
             uint8_t advance = font->get_glyph(codepoint, &glyph) ? glyph.advance : font->cell_width;
-            width += advance * context->text_size;
+            width += (int32_t)lroundf(advance * context->text_size);
         }
         p += length;
     }
@@ -178,11 +201,15 @@ bruce_result_t display__set_text_bg_color(uint32_t color) {
     return BRUCE_OK;
 }
 
-bruce_result_t display__set_text_size(uint8_t size) {
+bruce_result_t display__set_text_size(float size) {
     display__process_context_t *context;
     bruce_result_t result = display_internal__begin_draw(&context);
     if (result != BRUCE_OK) { return result; }
-    context->text_size = size < 1 ? 1 : (size > 8 ? 8 : size);
+    /* Below 1, the renderer downscales the native 5x10 glyph bitmap instead
+     * of block-replicating it (see display__blit_glyph()) -- floored at 0.1
+     * rather than clamped to 1 so callers can actually ask for text smaller
+     * than the native cell, matching LovyanGFX's float setTextSize(). */
+    context->text_size = size < 0.1f ? 0.1f : (size > 8.0f ? 8.0f : size);
     display_internal__unlock(context);
     return BRUCE_OK;
 }
@@ -219,7 +246,7 @@ bruce_result_t display__print(const char *text) {
         size_t length = display__utf8_decode(p, &codepoint);
         if (codepoint == '\n') {
             context->cursor_x = 0;
-            context->cursor_y += (int16_t)(font->cell_height * context->text_size);
+            context->cursor_y += (int16_t)lroundf(font->cell_height * context->text_size);
         } else if (codepoint == '\r') {
             context->cursor_x = 0;
         } else if (codepoint >= 0x20) {
