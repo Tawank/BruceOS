@@ -22,21 +22,50 @@ More custom devkit boards coming soon! Stay across our communities!
 
 ## :building_construction: How to install
 
-### The easiest way to install Bruce is using our official Web Flasher!
-
-### Check out: https://bruce.computer/flasher
-
-Alternatively, you can download the latest binary from releases or actions and flash locally using esptool.py
-
 ```sh
-esptool.py --port /dev/ttyACM0 write_flash 0x00000 Bruce-<device>.bin
+source ~/.espressif/v6.0.2/esp-idf/export.sh
+idf.py -p PORT flash
 ```
 
-**For m5stack devices**
+## :hammer_and_wrench: How to build
 
-If you already use M5Launcher to manage your m5stack device, you can install it with OTA
+Install [ESP-IDF](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/get-started/index.html) and follow the instructions to build Bruce.
 
-Or you can burn it directly from the [m5burner tool](https://docs.m5stack.com/en/download), just search for 'Bruce' (My official builds will be uploaded by "owner" and have photos.) on the device category you want to and click on burn
+then build by sourcing the ESP-IDF environment and running:
+
+```sh
+source ~/.espressif/v6.0.2/esp-idf/export.sh
+idf.py build
+```
+
+This builds the default board (M5 Cardputer). To build for a specific board,
+use `tools/board.py` instead, which picks the right chip target and
+board-specific `sdkconfig.defaults` (see `boards/<board>/`) and puts the
+build output in its own `build-board/<board>/` directory:
+
+```sh
+source ~/.espressif/v6.0.2/esp-idf/export.sh
+python tools/board.py --list                 # show available board ids
+python tools/board.py m5stack-cplus2 build
+python tools/board.py m5stack-cplus2 flash monitor -p PORT
+```
+
+## :test_tube: How to run tests
+
+Perequisites:
+```sh
+source ~/.espressif/v6.0.2/esp-idf/export.sh
+python -m pip install pytest pytest-embedded pytest-embedded-idf pytest-embedded-qemu
+python $IDF_PATH/tools/idf_tools.py install qemu-xtensa qemu-riscv32
+
+```
+
+Then run the tests with:
+```sh
+source ~/.espressif/v6.0.2/esp-idf/export.sh
+idf.py -B build-qemu build
+python -m pytest tests/pytest_firmware.py
+```
 
 ## :keyboard: Discord Server
 
@@ -47,7 +76,7 @@ Contact us in our [Discord Server](https://discord.gg/WJ9XF9czVT)!
 For more information on each function supported by Bruce, [read our wiki here](https://wiki.bruce.computer/).
 Also, [read our FAQ](https://wiki.bruce.computer/faq/)
 
-## :computer: List of Features
+## :computer: List of Features BrucePIO supports
 
 <details>
   <summary><h2>WiFi</h2></summary>
