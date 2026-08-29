@@ -379,9 +379,16 @@ bruce_result_t display_driver__draw_bitmap(
 
 void display_driver__set_backlight(uint8_t brightness) {
     if (!s_backlight_initialized) return;
+#if CONFIG_BRUCE_DISPLAY_BACKLIGHT_MAX_LEVEL < 255
     if (brightness > CONFIG_BRUCE_DISPLAY_BACKLIGHT_MAX_LEVEL) {
         brightness = CONFIG_BRUCE_DISPLAY_BACKLIGHT_MAX_LEVEL;
     }
+#endif
+    /* At the default config (255) the cap above is compiled out entirely --
+     * per its Kconfig help text, 255 means "no cap" -- since brightness
+     * (uint8_t) can never exceed 255 anyway, so the comparison would be a
+     * tautologically-false clamp that -Werror=type-limits rightly refuses to
+     * build. */
     uint32_t duty = ((uint32_t)brightness * DISPLAY__LEDC_MAX_DUTY) / 255;
     ledc_set_duty(DISPLAY__BL_LEDC_MODE, DISPLAY__BL_LEDC_CHANNEL, duty);
     ledc_update_duty(DISPLAY__BL_LEDC_MODE, DISPLAY__BL_LEDC_CHANNEL);
