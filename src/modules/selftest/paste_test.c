@@ -7,6 +7,18 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* A few paths below are built by snprintf()-ing a suffix onto a directory
+ * path that was itself just snprintf()'d into a BRUCE_STORAGE_PATH_MAX
+ * buffer. The actual strings involved here are always short, but GCC's
+ * -Werror=format-truncation only sees that source buffer's declared
+ * capacity (it doesn't trace what an earlier snprintf() actually wrote into
+ * it), so it assumes a worst-case near-full path and flags the
+ * concatenation as possibly truncating. Giving the destination a little
+ * slack over BRUCE_STORAGE_PATH_MAX -- enough for the longest suffix used
+ * below, "/tree/inner.txt" -- makes the bound provably safe instead of just
+ * actually safe. */
+#define SELFTEST_PASTE_PATH_MAX (BRUCE_STORAGE_PATH_MAX + 16)
+
 /* Recursively removes `path` (file or directory, present or not) so each
  * case starts from a clean slate and leaves none of its scratch files
  * behind - storage__remove() itself only accepts an already-empty
@@ -108,7 +120,7 @@ bool selftest__run_paste_files_case(void) {
     const char *copy_sources[] = {source_file};
     bruce_result_t copy_set = paste__set_files(copy_sources, 1, BRUCE_PASTE_FILE_COPY);
     bruce_result_t copy_result = paste__paste_files(dest_dir);
-    char copied_file[BRUCE_STORAGE_PATH_MAX];
+    char copied_file[SELFTEST_PASTE_PATH_MAX];
     snprintf(copied_file, sizeof(copied_file), "%s/src.txt", dest_dir);
     bool source_survived = false;
     bruce_result_t source_exists_result = storage__exists(source_file, &source_survived);
@@ -122,14 +134,14 @@ bool selftest__run_paste_files_case(void) {
     /* Recursive directory copy: a nested file comes along with its folder. */
     char source_dir[BRUCE_STORAGE_PATH_MAX];
     snprintf(source_dir, sizeof(source_dir), "%s/tree", root);
-    char nested_file[BRUCE_STORAGE_PATH_MAX];
+    char nested_file[SELFTEST_PASTE_PATH_MAX];
     snprintf(nested_file, sizeof(nested_file), "%s/inner.txt", source_dir);
     bool tree_setup_ok = storage__mkdir(source_dir) == BRUCE_OK &&
                          selftest__paste_write_file(nested_file, "nested") == BRUCE_OK;
     const char *tree_sources[] = {source_dir};
     bruce_result_t tree_set = paste__set_files(tree_sources, 1, BRUCE_PASTE_FILE_COPY);
     bruce_result_t tree_result = paste__paste_files(dest_dir);
-    char copied_nested_file[BRUCE_STORAGE_PATH_MAX];
+    char copied_nested_file[SELFTEST_PASTE_PATH_MAX];
     snprintf(copied_nested_file, sizeof(copied_nested_file), "%s/tree/inner.txt", dest_dir);
     bool tree_ok = tree_setup_ok && tree_set == BRUCE_OK && tree_result == BRUCE_OK &&
                    selftest__paste_file_contains(copied_nested_file, "nested");
@@ -150,7 +162,7 @@ bool selftest__run_paste_files_case(void) {
     const char *cut_sources[] = {cut_source};
     bruce_result_t cut_set = paste__set_files(cut_sources, 1, BRUCE_PASTE_FILE_CUT);
     bruce_result_t cut_result = paste__paste_files(cut_dest_dir);
-    char cut_destination_file[BRUCE_STORAGE_PATH_MAX];
+    char cut_destination_file[SELFTEST_PASTE_PATH_MAX];
     snprintf(cut_destination_file, sizeof(cut_destination_file), "%s/cut.txt", cut_dest_dir);
     bool cut_source_exists = true;
     bruce_result_t cut_source_check = storage__exists(cut_source, &cut_source_exists);
