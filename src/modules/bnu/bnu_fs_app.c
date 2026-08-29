@@ -1,13 +1,16 @@
 #include "bnu_app.h"
 #include "bnu_internal.h"
 
+#include <stdio.h>
+#include <stdlib.h>
+
 #include "args.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/result.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
 
-/* Filesystem commands: pwd, ls, mkdir, touch, rm, cat. */
+/* Filesystem commands: pwd, ls, mkdir, touch, rm, cat, head, tail. */
 
 int bnu_pwd_app_main(int argc, char **argv) {
     ArgParser *parser = bnu__new_parser("Print the current working directory.");
@@ -159,3 +162,174 @@ int bnu_cat_app_main(int argc, char **argv) {
     ap_free(parser);
     return BRUCE_OK;
 }
+
+/* head/tail load the whole file (or stdin) into one memory__external_alloc()-
+ * backed buffer -- same approach as bnu_less_app_main() (bnu_pager_app.c's
+ * LESS_MAX_BYTES) -- then find the cut point by counting lines, rather than
+ * streaming. Large enough for any text file worth viewing a piece of, backed
+ * by PSRAM/swap rather than the internal heap. */
+#define BNU_HEAD_TAIL_MAX_BYTES (512u * 1024u)
+#define BNU_HEAD_TAIL_DEFAULT_LINES 10
+#define BNU_HEAD_TAIL_CHUNK_SIZE 256
+
+static bruce_result_t
+bnu__head_tail_load_path(const char *path, bruce_memory_object_t *object, size_t *out_length) {
+    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
+    bruce_result_t result = storage__open(path, BRUCE_STORAGE_OPEN_READ, &file);
+    if (result != BRUCE_OK) return result;
+
+    uint64_t size = 0;
+    result = storage__seek(file, 0, SEEK_END, &size);
+    if (result == BRUCE_OK && size > BNU_HEAD_TAIL_MAX_BYTES) result = BRUCE_ERR_RESOURCE_LIMIT;
+    if (result == BRUCE_OK) result = storage__seek(file, 0, SEEK_SET, NULL);
+
+    bruce_memory_object_t obj = {0};
+    if (result == BRUCE_OK && size > 0) result = memory__external_alloc((size_t)size, &obj);
+    size_t offset = 0;
+    unsigned char chunk[BNU_HEAD_TAIL_CHUNK_SIZE];
+    while (result == BRUCE_OK && offset < (size_t)size) {
+        size_t read_size = 0;
+        result = storage__read(file, chunk, sizeof(chunk), &read_size);
+        if (result == BRUCE_OK && read_size == 0) result = BRUCE_ERR_IO;
+        if (result == BRUCE_OK) result = memory__external_write(&obj, offset, chunk, read_size);
+        offset += read_size;
+    }
+    (void)storage__close(file);
+    if (result != BRUCE_OK) {
+        if (obj.backend != BRUCE_MEMORY_BACKEND_INVALID) (void)memory__external_free(&obj);
+        return result;
+    }
+    *object = obj;
+    *out_length = offset;
+    return BRUCE_OK;
+}
+
+static bruce_result_t
+bnu__head_tail_load_stdin(size_t size, bruce_memory_object_t *object, size_t *out_length) {
+    bruce_memory_object_t obj = {0};
+    bruce_result_t result = size > 0 ? memory__external_alloc(size, &obj) : BRUCE_OK;
+    size_t offset = 0;
+    unsigned char chunk[BNU_HEAD_TAIL_CHUNK_SIZE];
+    while (result == BRUCE_OK && offset < size) {
+        size_t want = size - offset > sizeof(chunk) ? sizeof(chunk) : size - offset;
+        size_t read_size = 0;
+        result = stdio__read(chunk, want, UINT32_MAX, &read_size);
+        if (result == BRUCE_OK && read_size == 0) result = BRUCE_ERR_IO;
+        if (result == BRUCE_OK) result = memory__external_write(&obj, offset, chunk, read_size);
+        offset += read_size;
+    }
+    if (result != BRUCE_OK) {
+        if (obj.backend != BRUCE_MEMORY_BACKEND_INVALID) (void)memory__external_free(&obj);
+        return result;
+    }
+    *object = obj;
+    *out_length = offset;
+    return BRUCE_OK;
+}
+
+/* Offset of the start of the `lines`-th line (0-based) counting from the
+ * front, or `length` if the data has fewer than that many lines -- i.e. the
+ * end of what "head -n lines" prints, and (via bnu__tail_offset() below) the
+ * number of leading lines "tail -n lines" needs to skip. */
+static size_t bnu__head_offset(const char *data, size_t length, unsigned long lines) {
+    size_t offset = 0;
+    for (unsigned long i = 0; i < lines && offset < length; ++i) {
+        while (offset < length && data[offset] != '\n') offset++;
+        if (offset < length) offset++;
+    }
+    return offset;
+}
+
+/* Total line count, counting a non-empty final line without a trailing
+ * newline as one more line -- matches how real head/tail count lines. */
+static unsigned long bnu__count_lines(const char *data, size_t length) {
+    unsigned long count = 0;
+    for (size_t i = 0; i < length; ++i) {
+        if (data[i] == '\n') count++;
+    }
+    if (length > 0 && data[length - 1] != '\n') count++;
+    return count;
+}
+
+/* Offset of the start of the last `lines` lines: skip (total - lines) lines
+ * from the front via bnu__head_offset(), or none if the data has no more
+ * than `lines` lines. */
+static size_t bnu__tail_offset(const char *data, size_t length, unsigned long lines) {
+    unsigned long total = bnu__count_lines(data, length);
+    unsigned long skip = total > lines ? total - lines : 0;
+    return bnu__head_offset(data, length, skip);
+}
+
+/* Shared body of head and tail: parse "-n lines" plus the usual file-or-
+ * stdin argument (see bnu_less_app_main()'s "--stdin-size" handling, which
+ * this mirrors), load the whole input, and print the requested slice. */
+static int bnu__head_tail_app_main(int argc, char **argv, bool tail) {
+    const char *command = tail ? "tail" : "head";
+    ArgParser *parser = bnu__new_parser(
+        tail ? "Print the last part of a file, or piped stdin."
+             : "Print the first part of a file, or piped stdin."
+    );
+    if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
+    ap_add_int_opt(parser, "n", BNU_HEAD_TAIL_DEFAULT_LINES);
+    ap_set_opt_help(parser, "n", "Number of lines to print");
+    ap_add_str_opt(parser, "stdin-size", NULL);
+    ap_set_opt_help(parser, "stdin-size", "Read exactly this many bytes from stdin (used by shell pipes)");
+    ap_add_optional_arg(parser, "file", "File to read (reads stdin if omitted)");
+    ap_unknown_options_as_args(parser);
+    ap_first_pos_arg_ends_option_parsing(parser);
+    if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
+
+    int lines_arg = ap_get_int_value(parser, "n");
+    unsigned long lines = lines_arg > 0 ? (unsigned long)lines_arg : 0;
+    const char *path_arg = ap_get_arg(parser, "file");
+    const char *stdin_size_arg =
+        ap_found(parser, "stdin-size") ? ap_get_str_value(parser, "stdin-size") : NULL;
+    char *end = NULL;
+    unsigned long parsed_stdin_size = stdin_size_arg != NULL ? strtoul(stdin_size_arg, &end, 10) : 0;
+    bool stdin_requested = stdin_size_arg != NULL;
+    bool from_stdin = stdin_requested && stdin_size_arg[0] != '\0' && end != NULL && *end == '\0' &&
+                      parsed_stdin_size <= BNU_HEAD_TAIL_MAX_BYTES;
+    char path[BRUCE_STORAGE_PATH_MAX] = {0};
+    bool path_resolved = !from_stdin && path_arg != NULL && bnu__resolve_path(path_arg, path);
+    ap_free(parser);
+
+    if (stdin_requested && !from_stdin) {
+        stdio__printf("%s: invalid --stdin-size\n", command);
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    if (!from_stdin && path_arg == NULL) {
+        stdio__printf("%s: missing file operand\n", command);
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    if (!from_stdin && !path_resolved) return BRUCE_ERR_INVALID_PATH;
+
+    bruce_memory_object_t object = {0};
+    size_t length = 0;
+    bruce_result_t result = from_stdin
+                                 ? bnu__head_tail_load_stdin((size_t)parsed_stdin_size, &object, &length)
+                                 : bnu__head_tail_load_path(path, &object, &length);
+    if (result != BRUCE_OK) {
+        stdio__printf("%s: %s: %s\n", command, from_stdin ? "-" : path, result__to_string(result));
+        return result;
+    }
+
+    const void *data = NULL;
+    if (length > 0 && memory__external_map(&object, &data) != BRUCE_OK) {
+        if (object.backend != BRUCE_MEMORY_BACKEND_INVALID) (void)memory__external_free(&object);
+        return BRUCE_ERR_IO;
+    }
+
+    size_t start = 0, stop = length;
+    if (data != NULL) {
+        if (tail) start = bnu__tail_offset(data, length, lines);
+        else stop = bnu__head_offset(data, length, lines);
+    }
+    if (stop > start) (void)stdio__write((const char *)data + start, stop - start);
+
+    if (object.backend != BRUCE_MEMORY_BACKEND_INVALID) (void)memory__external_free(&object);
+    return BRUCE_OK;
+}
+
+int bnu_head_app_main(int argc, char **argv) { return bnu__head_tail_app_main(argc, argv, false); }
+
+int bnu_tail_app_main(int argc, char **argv) { return bnu__head_tail_app_main(argc, argv, true); }
