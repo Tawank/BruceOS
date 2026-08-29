@@ -1,0 +1,188 @@
+#include "paste_test.h"
+
+#include "core_sdk/paste.h"
+#include "core_sdk/storage.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+/* Recursively removes `path` (file or directory, present or not) so each
+ * case starts from a clean slate and leaves none of its scratch files
+ * behind - storage__remove() itself only accepts an already-empty
+ * directory. */
+static void selftest__paste_remove_tree(const char *path) {
+    size_t count = 0;
+    if (storage__list(path, NULL, 0, &count) == BRUCE_OK) {
+        bruce_storage_entry_t *entries = count > 0 ? malloc(count * sizeof(*entries)) : NULL;
+        if (entries != NULL && storage__list(path, entries, count, &count) == BRUCE_OK) {
+            for (size_t i = 0; i < count; ++i) {
+                char child[BRUCE_STORAGE_PATH_MAX];
+                snprintf(child, sizeof(child), "%s/%s", path, entries[i].name);
+                selftest__paste_remove_tree(child);
+            }
+        }
+        free(entries);
+    }
+    (void)storage__remove(path);
+}
+
+static bruce_result_t selftest__paste_write_file(const char *path, const char *text) {
+    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
+    bruce_result_t result = storage__open(
+        path, BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE | BRUCE_STORAGE_OPEN_TRUNCATE, &file
+    );
+    if (result != BRUCE_OK) return result;
+    size_t written = 0;
+    result = storage__write(file, text, strlen(text), &written);
+    bruce_result_t close_result = storage__close(file);
+    if (result != BRUCE_OK) return result;
+    if (written != strlen(text)) return BRUCE_ERR_IO;
+    return close_result;
+}
+
+static bool selftest__paste_file_contains(const char *path, const char *expected) {
+    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
+    if (storage__open(path, BRUCE_STORAGE_OPEN_READ, &file) != BRUCE_OK) return false;
+    char buffer[64] = {0};
+    size_t read_size = 0;
+    bruce_result_t result = storage__read(file, buffer, sizeof(buffer) - 1, &read_size);
+    (void)storage__close(file);
+    return result == BRUCE_OK && read_size == strlen(expected) && strncmp(buffer, expected, read_size) == 0;
+}
+
+/* ------------------------------------------------------------------------ */
+/* selftest__run_paste_text_case                                            */
+/* ------------------------------------------------------------------------ */
+
+bool selftest__run_paste_text_case(void) {
+    paste__clear();
+    bool empty_ok = paste__kind() == BRUCE_PASTE_EMPTY && paste__get_text() == NULL && paste__file_count() == 0;
+
+    bruce_result_t null_text_result = paste__set_text(NULL);
+    bool set_text_ok = paste__set_text("hello clipboard") == BRUCE_OK;
+    const char *text = paste__get_text();
+    bool get_text_ok = paste__kind() == BRUCE_PASTE_TEXT && text != NULL && strcmp(text, "hello clipboard") == 0;
+
+    const char *bad_paths[] = {"relative/path"};
+    bruce_result_t relative_path_result = paste__set_files(bad_paths, 1, BRUCE_PASTE_FILE_COPY);
+    bruce_result_t zero_count_result = paste__set_files(bad_paths, 0, BRUCE_PASTE_FILE_COPY);
+
+    /* Setting files replaces the earlier text -- exactly one clipboard slot. */
+    const char *file_paths[] = {"/selftest_paste_text_probe"};
+    bool set_files_ok = paste__set_files(file_paths, 1, BRUCE_PASTE_FILE_CUT) == BRUCE_OK;
+    bool replaced_ok = paste__kind() == BRUCE_PASTE_FILES && paste__get_text() == NULL &&
+                        paste__file_count() == 1 && paste__file_mode() == BRUCE_PASTE_FILE_CUT &&
+                        paste__get_file(0) != NULL && strcmp(paste__get_file(0), file_paths[0]) == 0 &&
+                        paste__get_file(1) == NULL;
+
+    paste__clear();
+    bool cleared_ok = paste__kind() == BRUCE_PASTE_EMPTY;
+
+    bool ok = empty_ok && null_text_result == BRUCE_ERR_INVALID_ARGUMENT && set_text_ok && get_text_ok &&
+              relative_path_result == BRUCE_ERR_INVALID_ARGUMENT &&
+              zero_count_result == BRUCE_ERR_INVALID_ARGUMENT && set_files_ok && replaced_ok && cleared_ok;
+    printf("[selftest] paste/text: %s\n", ok ? "OK" : "FAIL");
+    return ok;
+}
+
+/* ------------------------------------------------------------------------ */
+/* selftest__run_paste_files_case                                           */
+/* ------------------------------------------------------------------------ */
+
+bool selftest__run_paste_files_case(void) {
+    static const char *const root = "/selftest_paste";
+    selftest__paste_remove_tree(root);
+    paste__clear();
+
+    bool setup_ok = storage__mkdir(root) == BRUCE_OK;
+    char source_file[BRUCE_STORAGE_PATH_MAX];
+    snprintf(source_file, sizeof(source_file), "%s/src.txt", root);
+    setup_ok = setup_ok && selftest__paste_write_file(source_file, "copy me") == BRUCE_OK;
+    char dest_dir[BRUCE_STORAGE_PATH_MAX];
+    snprintf(dest_dir, sizeof(dest_dir), "%s/dst", root);
+    setup_ok = setup_ok && storage__mkdir(dest_dir) == BRUCE_OK;
+
+    /* Plain file copy: source is untouched, destination gets a byte-for-byte
+     * copy under its original name. */
+    const char *copy_sources[] = {source_file};
+    bruce_result_t copy_set = paste__set_files(copy_sources, 1, BRUCE_PASTE_FILE_COPY);
+    bruce_result_t copy_result = paste__paste_files(dest_dir);
+    char copied_file[BRUCE_STORAGE_PATH_MAX];
+    snprintf(copied_file, sizeof(copied_file), "%s/src.txt", dest_dir);
+    bool source_survived = false;
+    bruce_result_t source_exists_result = storage__exists(source_file, &source_survived);
+    bool copy_ok = copy_set == BRUCE_OK && copy_result == BRUCE_OK && source_exists_result == BRUCE_OK &&
+                   source_survived && selftest__paste_file_contains(copied_file, "copy me");
+
+    /* Pasting the same clipboard again refuses to clobber the existing copy. */
+    bruce_result_t duplicate_result = paste__paste_files(dest_dir);
+    bool duplicate_ok = duplicate_result == BRUCE_ERR_ALREADY_EXISTS;
+
+    /* Recursive directory copy: a nested file comes along with its folder. */
+    char source_dir[BRUCE_STORAGE_PATH_MAX];
+    snprintf(source_dir, sizeof(source_dir), "%s/tree", root);
+    char nested_file[BRUCE_STORAGE_PATH_MAX];
+    snprintf(nested_file, sizeof(nested_file), "%s/inner.txt", source_dir);
+    bool tree_setup_ok = storage__mkdir(source_dir) == BRUCE_OK &&
+                         selftest__paste_write_file(nested_file, "nested") == BRUCE_OK;
+    const char *tree_sources[] = {source_dir};
+    bruce_result_t tree_set = paste__set_files(tree_sources, 1, BRUCE_PASTE_FILE_COPY);
+    bruce_result_t tree_result = paste__paste_files(dest_dir);
+    char copied_nested_file[BRUCE_STORAGE_PATH_MAX];
+    snprintf(copied_nested_file, sizeof(copied_nested_file), "%s/tree/inner.txt", dest_dir);
+    bool tree_ok = tree_setup_ok && tree_set == BRUCE_OK && tree_result == BRUCE_OK &&
+                   selftest__paste_file_contains(copied_nested_file, "nested");
+
+    /* Pasting a directory into itself is refused instead of recursing into
+     * its own output forever. The clipboard still holds `source_dir` from
+     * the copy just above. */
+    bruce_result_t self_paste_result = paste__paste_files(source_dir);
+
+    /* Cut removes the source only once the destination copy has fully
+     * succeeded. */
+    char cut_source[BRUCE_STORAGE_PATH_MAX];
+    snprintf(cut_source, sizeof(cut_source), "%s/cut.txt", root);
+    char cut_dest_dir[BRUCE_STORAGE_PATH_MAX];
+    snprintf(cut_dest_dir, sizeof(cut_dest_dir), "%s/dst2", root);
+    bool cut_setup_ok = selftest__paste_write_file(cut_source, "move me") == BRUCE_OK &&
+                        storage__mkdir(cut_dest_dir) == BRUCE_OK;
+    const char *cut_sources[] = {cut_source};
+    bruce_result_t cut_set = paste__set_files(cut_sources, 1, BRUCE_PASTE_FILE_CUT);
+    bruce_result_t cut_result = paste__paste_files(cut_dest_dir);
+    char cut_destination_file[BRUCE_STORAGE_PATH_MAX];
+    snprintf(cut_destination_file, sizeof(cut_destination_file), "%s/cut.txt", cut_dest_dir);
+    bool cut_source_exists = true;
+    bruce_result_t cut_source_check = storage__exists(cut_source, &cut_source_exists);
+    bool cut_ok = cut_setup_ok && cut_set == BRUCE_OK && cut_result == BRUCE_OK &&
+                  cut_source_check == BRUCE_OK && !cut_source_exists &&
+                  selftest__paste_file_contains(cut_destination_file, "move me");
+
+    /* An empty clipboard, and a target directory that doesn't exist, both
+     * fail without touching anything. */
+    paste__clear();
+    bruce_result_t empty_clipboard_result = paste__paste_files(dest_dir);
+    const char *missing_sources[] = {source_file};
+    (void)paste__set_files(missing_sources, 1, BRUCE_PASTE_FILE_COPY);
+    bruce_result_t missing_target_result = paste__paste_files("/selftest_paste_missing_target");
+
+    selftest__paste_remove_tree(root);
+    paste__clear();
+
+    bool ok = setup_ok && copy_ok && duplicate_ok && tree_ok &&
+              self_paste_result == BRUCE_ERR_INVALID_ARGUMENT && cut_ok &&
+              empty_clipboard_result == BRUCE_ERR_INVALID_STATE &&
+              missing_target_result == BRUCE_ERR_NOT_FOUND;
+    printf(
+        "[selftest] paste/files: %s (copy=%d dup=%d tree=%d self=%d cut=%d empty=%d missing=%d)\n",
+        ok ? "OK" : "FAIL",
+        copy_result,
+        duplicate_result,
+        tree_result,
+        self_paste_result,
+        cut_result,
+        empty_clipboard_result,
+        missing_target_result
+    );
+    return ok;
+}

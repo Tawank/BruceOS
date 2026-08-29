@@ -33,6 +33,7 @@
 #include "notification_test.h"
 #include "nrf24_test.h"
 #include "partition_manager_test.h"
+#include "paste_test.h"
 #include "permission_test.h"
 #include "storage_test.h"
 #include "process_test.h"
@@ -200,6 +201,8 @@ int selftest_app_main(int argc, char **argv) {
     RUN_SELFTEST(selftest__run_visual_cases);
     RUN_SELFTEST(selftest__run_notification_console_fallback_case);
     RUN_SELFTEST(selftest__run_status_icon_case);
+    RUN_SELFTEST(selftest__run_paste_text_case);
+    RUN_SELFTEST(selftest__run_paste_files_case);
 
 #undef RUN_SELFTEST
     printf("[selftest] summary: %d failure(s)\n", failures);

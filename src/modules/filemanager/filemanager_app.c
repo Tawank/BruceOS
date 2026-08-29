@@ -10,6 +10,7 @@
 #include "core_sdk/ext_mem_loader.h"
 #include "core_sdk/input.h"
 #include "core_sdk/memory.h"
+#include "core_sdk/paste.h"
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
 #include "core_sdk/runtime.h"
@@ -293,6 +294,22 @@ static void filemanager__show_error(const char *action, bruce_result_t result) {
     (void)dialog__message(BRUCE_DIALOG_ERROR, "Apps", message);
 }
 
+/* "Copy" action: adds `path` (a file or folder) to the shared clipboard so a
+ * later "Paste" here, in a different directory, or in another app entirely,
+ * can paste it - see core_sdk/paste.h. */
+static bruce_result_t filemanager__copy_entry(const char *path) {
+    const char *source_paths[] = {path};
+    return paste__set_files(source_paths, 1, BRUCE_PASTE_FILE_COPY);
+}
+
+/* "Paste" action: pastes the clipboard's file(s)/folder(s) into `directory`,
+ * or reports BRUCE_ERR_INVALID_STATE if the clipboard doesn't hold files
+ * (e.g. it's empty, or holds text copied by some other app). */
+static bruce_result_t filemanager__paste_here(const char *directory) {
+    if (paste__kind() != BRUCE_PASTE_FILES) return BRUCE_ERR_INVALID_STATE;
+    return paste__paste_files(directory);
+}
+
 /* `kind` ("file"/"folder") only changes the confirmation dialog's wording;
  * storage__remove() itself already refuses a non-empty directory, so a
  * folder holding anything comes back as an ordinary error here rather than
@@ -363,6 +380,7 @@ int filemanager_app_main(int argc, char **argv) {
         {.label = "Open with...", .value = "openw" },
         {.label = "View",         .value = "view"  },
         {.label = "Edit",         .value = "edit"  },
+        {.label = "Copy",         .value = "copy"  },
         {.label = "Rename",       .value = "rename"},
         {.label = "File info",    .value = "info"  },
         {.label = "Delete",       .value = "delete"},
@@ -372,14 +390,19 @@ int filemanager_app_main(int argc, char **argv) {
      * it (see dialog__pick_file_ex()'s doc comment), so it gets this menu
      * instead of the file one above. */
     const bruce_dialog_choice_t folder_actions[] = {
+        {.label = "Copy",        .value = "copy"  },
         {.label = "Rename",      .value = "rename"},
         {.label = "Folder info", .value = "info"  },
         {.label = "Delete",      .value = "delete"},
         {.label = "Back",        .value = "back"  },
     };
+    /* Long-pressing the ".." row returns the directory being browsed itself
+     * (see dialog__pick_file_ex()'s doc comment), so this menu acts on the
+     * directory rather than an entry within it. */
     const bruce_dialog_choice_t directory_actions[] = {
         {.label = "New file",   .value = "new_file"  },
         {.label = "New folder", .value = "new_folder"},
+        {.label = "Paste",      .value = "paste"     },
         {.label = "Back",       .value = "back"      },
     };
     (void)argc;
@@ -464,9 +487,13 @@ int filemanager_app_main(int argc, char **argv) {
                 result = filemanager__new_entry(path, false);
             } else if (strcmp(action, "new_folder") == 0) {
                 result = filemanager__new_entry(path, true);
+            } else if (strcmp(action, "paste") == 0) {
+                result = filemanager__paste_here(path);
             }
         } else if (is_folder) {
-            if (strcmp(action, "rename") == 0) {
+            if (strcmp(action, "copy") == 0) {
+                result = filemanager__copy_entry(path);
+            } else if (strcmp(action, "rename") == 0) {
                 result = filemanager__rename_entry(path, sizeof(path));
                 if (result == BRUCE_OK) snprintf(last_path, sizeof(last_path), "%s", path);
             } else if (strcmp(action, "info") == 0) {
@@ -482,6 +509,8 @@ int filemanager_app_main(int argc, char **argv) {
             result = filemanager__view_file(path, gui);
         } else if (strcmp(action, "edit") == 0) {
             result = filemanager__edit_file(path, gui);
+        } else if (strcmp(action, "copy") == 0) {
+            result = filemanager__copy_entry(path);
         } else if (strcmp(action, "rename") == 0) {
             result = filemanager__rename_entry(path, sizeof(path));
             if (result == BRUCE_OK) snprintf(last_path, sizeof(last_path), "%s", path);
