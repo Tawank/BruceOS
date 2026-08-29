@@ -17,4 +17,8 @@ int bnu_stty_app_main(int argc, char **argv);
 int bnu_less_app_main(int argc, char **argv);
 int bnu_wget_app_main(int argc, char **argv);
 int bnu_curl_app_main(int argc, char **argv);
+int bnu_base64_app_main(int argc, char **argv);
+int bnu_md5sum_app_main(int argc, char **argv);
+int bnu_sha256sum_app_main(int argc, char **argv);
+int bnu_crc32_app_main(int argc, char **argv);
 const char *bnu__get_working_directory(void);

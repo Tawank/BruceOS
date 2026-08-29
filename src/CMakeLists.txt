@@ -2,6 +2,7 @@ set(BRUCE_SELFTEST_SOURCES
     "modules/selftest/args_test.c"
     "modules/selftest/app_runner_test.c"
     "modules/selftest/audio_test.c"
+    "modules/selftest/base64_test.c"
     "modules/selftest/bluetooth_test.c"
     "modules/selftest/clock_test.c"
     "modules/selftest/bnu_test.c"
@@ -12,6 +13,7 @@ set(BRUCE_SELFTEST_SOURCES
     "modules/selftest/elf_loader_test.c"
     "modules/selftest/fake_elf.c"
     "modules/selftest/gpio_bus_test.c"
+    "modules/selftest/hash_test.c"
     "modules/selftest/html_test.c"
     "modules/selftest/icon_test.c"
     "modules/selftest/image_test.c"
@@ -39,6 +41,7 @@ idf_component_register(SRCS
                      "core/app_runner/app_runner.c"
                      "core/audio/audio.c"
                     "core/autostart/autostart.c"
+                    "core/base64/base64.c"
                     "core/bluetooth/bluetooth.c"
                     "core/bluetooth/bluetooth_hid.c"
                     "core/clock/clock.c"
@@ -55,6 +58,7 @@ idf_component_register(SRCS
                     "core/disk/disk.c"
                     "core/format/format.c"
                     "core/gpio/gpio.c"
+                    "core/hash/hash.c"
                     "core/html/html_entities.c"
                     "core/html/html_events.c"
                     "core/html/html_parser.c"
@@ -107,6 +111,7 @@ idf_component_register(SRCS
                     "modules/bnu/bnu_sys_app.c"
                     "modules/bnu/bnu_net_app.c"
                     "modules/bnu/bnu_pager_app.c"
+                    "modules/bnu/bnu_hash_app.c"
                     "modules/bluetooth/bluetooth_app.c"
                     "modules/bluetooth_hid/bluetooth_hid_app.c"
                     "modules/clock/clock_app.c"
@@ -349,7 +354,8 @@ add_library(bruce_sdk_builtin_bnu_check OBJECT
             "modules/bnu/bnu_disk_app.c"
             "modules/bnu/bnu_sys_app.c"
             "modules/bnu/bnu_net_app.c"
-            "modules/bnu/bnu_pager_app.c")
+            "modules/bnu/bnu_pager_app.c"
+            "modules/bnu/bnu_hash_app.c")
 target_include_directories(bruce_sdk_builtin_bnu_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/bnu")

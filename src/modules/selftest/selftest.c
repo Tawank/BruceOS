@@ -13,6 +13,7 @@
 #include "app_runner_test.h"
 #include "args_test.h"
 #include "audio_test.h"
+#include "base64_test.h"
 #include "bluetooth_test.h"
 #include "bnu_test.h"
 #include "clock_test.h"
@@ -22,6 +23,7 @@
 #include "display_test.h"
 #include "elf_loader_test.h"
 #include "gpio_bus_test.h"
+#include "hash_test.h"
 #include "html_test.h"
 #include "icon_test.h"
 #include "image_test.h"
@@ -203,6 +205,11 @@ int selftest_app_main(int argc, char **argv) {
     RUN_SELFTEST(selftest__run_status_icon_case);
     RUN_SELFTEST(selftest__run_paste_text_case);
     RUN_SELFTEST(selftest__run_paste_files_case);
+    RUN_SELFTEST(selftest__run_hash_crc32_case);
+    RUN_SELFTEST(selftest__run_hash_md5_case);
+    RUN_SELFTEST(selftest__run_hash_sha256_case);
+    RUN_SELFTEST(selftest__run_base64_encode_case);
+    RUN_SELFTEST(selftest__run_base64_decode_case);
 
 #undef RUN_SELFTEST
     printf("[selftest] summary: %d failure(s)\n", failures);
