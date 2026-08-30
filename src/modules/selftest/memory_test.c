@@ -7,6 +7,56 @@
 #include "core_sdk/memory.h"
 #include "core_sdk/process.h"
 
+bool selftest__run_memory_layout_case(void) {
+    void *allocation = memory__malloc(123);
+    if (allocation == NULL) {
+        printf("[selftest] memory/layout: allocation failed\n");
+        return false;
+    }
+    size_t internal_count = 0;
+    size_t psram_count = 0;
+    if (memory__get_layout(BRUCE_MEMORY_BACKEND_INTERNAL, NULL, 0, &internal_count) != BRUCE_OK ||
+        memory__get_layout(BRUCE_MEMORY_BACKEND_PSRAM, NULL, 0, &psram_count) != BRUCE_OK) {
+        memory__free(allocation);
+        printf("[selftest] memory/layout: count failed\n");
+        return false;
+    }
+    size_t capacity = (internal_count > psram_count ? internal_count : psram_count) + 4;
+    bruce_memory_layout_block_t *blocks = memory__malloc(capacity * sizeof(*blocks));
+    if (blocks == NULL) {
+        memory__free(allocation);
+        printf("[selftest] memory/layout: snapshot allocation failed\n");
+        return false;
+    }
+
+    size_t count = 0;
+    bruce_result_t result = BRUCE_OK;
+    bool found = false;
+    const bruce_memory_backend_t heaps[] = {
+        BRUCE_MEMORY_BACKEND_INTERNAL,
+        BRUCE_MEMORY_BACKEND_PSRAM,
+    };
+    for (size_t heap = 0; heap < sizeof(heaps) / sizeof(heaps[0]) && !found; ++heap) {
+        result = memory__get_layout(heaps[heap], blocks, capacity, &count);
+        if (result != BRUCE_OK) break;
+        size_t shown = count < capacity ? count : capacity;
+        for (size_t i = 0; i < shown; ++i) {
+            uintptr_t end = blocks[i].address + blocks[i].size;
+            if (blocks[i].tracked && blocks[i].address < (uintptr_t)allocation &&
+                (uintptr_t)allocation < end && blocks[i].requested_size == 123 &&
+                blocks[i].owner_id == process__current_id()) {
+                found = true;
+                break;
+            }
+        }
+    }
+    memory__free(blocks);
+    memory__free(allocation);
+    bool ok = result == BRUCE_OK && found;
+    printf("[selftest] memory/layout: %s (blocks=%u)\n", ok ? "OK" : "failed", (unsigned)count);
+    return ok;
+}
+
 bool selftest__run_external_memory_case(void) {
     bruce_memory_stats_t before;
     if (memory__get_stats(&before) != BRUCE_OK) {

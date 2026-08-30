@@ -782,6 +782,13 @@ Boot starts with an empty in-RAM swap allocation table, and free only unmaps and
 marks pages reusable. Stale flash is erased lazily when those pages are next
 allocated, as required by flash write semantics.
 
+The process-protected, read-only `memory__get_layout()` diagnostic snapshots
+ESP-IDF internal/PSRAM heap blocks and Bruce's exact swap extents without
+allocating. Heap blocks created through `memory__malloc()` identify their
+owning process; occupied blocks from ESP-IDF, libc, Core, or third-party code
+that bypass that allocator are deliberately reported as untracked. The
+`free -m` terminal view renders proportional maps and an ownership table.
+
 Every process record owns one universal resource registry, and one FreeRTOS TLS
 pointer associates the current task with that record. Core services register
 opaque handles and Core-owned cleanup callbacks for memory,

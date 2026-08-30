@@ -377,6 +377,7 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(memory__external_map),
     ESP_ELFSYM_EXPORT(memory__external_free),
     ESP_ELFSYM_EXPORT(memory__get_stats),
+    ESP_ELFSYM_EXPORT(memory__get_layout),
     {"malloc",  (const void *)&memory__malloc    },
     {"calloc",  (const void *)&memory__calloc    },
     {"realloc", (const void *)&memory__realloc   },

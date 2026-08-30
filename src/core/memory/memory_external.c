@@ -531,3 +531,49 @@ void memory_external__get_swap_stats(size_t *out_total, size_t *out_free, size_t
     if (out_free != NULL) *out_free = free_bytes;
     if (out_largest != NULL) *out_largest = largest;
 }
+
+bruce_result_t memory_external__layout(
+    bruce_memory_layout_block_t *blocks, size_t capacity, size_t *out_count
+) {
+    if (out_count == NULL || (capacity != 0 && blocks == NULL)) return BRUCE_ERR_INVALID_ARGUMENT;
+    *out_count = 0;
+    if (!process_registry__operation_begin()) return BRUCE_ERR_CANCELLED;
+    memory_external__ensure_mutex();
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    const esp_partition_t *partition = memory_external__partition();
+    size_t page_count = partition == NULL ? 0 : partition->size / MEMORY_EXTERNAL__MMU_PAGE;
+    for (size_t page = 0; page < page_count;) {
+        const memory_external__record_t *owner = NULL;
+        for (size_t i = 0; i < MEMORY_EXTERNAL__MAX_OBJECTS; ++i) {
+            if (s_records[i].backend == BRUCE_MEMORY_BACKEND_SWAP &&
+                s_records[i].offset / MEMORY_EXTERNAL__MMU_PAGE == page) {
+                owner = &s_records[i];
+                break;
+            }
+        }
+        size_t pages = 1;
+        if (owner != NULL) {
+            pages = owner->page_count;
+        } else {
+            while (page + pages < page_count && !s_pages[page + pages]) ++pages;
+        }
+        size_t index = (*out_count)++;
+        if (index < capacity) {
+            blocks[index] = (bruce_memory_layout_block_t){
+                .address = page * MEMORY_EXTERNAL__MMU_PAGE,
+                .size = pages * MEMORY_EXTERNAL__MMU_PAGE,
+                .requested_size = owner == NULL ? 0 : owner->size,
+                .backend = BRUCE_MEMORY_BACKEND_SWAP,
+                .owner_id = owner == NULL ? BRUCE_PROCESS_ID_INVALID : owner->owner_id,
+                .handle = owner == NULL ? 0 : owner->handle,
+                .used = owner != NULL,
+                .tracked = owner != NULL,
+                .executable = owner != NULL && owner->executable,
+            };
+        }
+        page += pages;
+    }
+    xSemaphoreGive(s_mutex);
+    process_registry__operation_end();
+    return BRUCE_OK;
+}

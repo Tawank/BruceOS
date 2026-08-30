@@ -18,6 +18,102 @@
 
 /* System commands: free, top, shutdown, reboot, stty, date, sleep. */
 
+#define BNU_MEMORY_LAYOUT_WIDTH 48
+
+static const bruce_process_snapshot_t *
+bnu__layout_process(const bruce_process_snapshot_t *processes, size_t count, bruce_process_id_t id) {
+    for (size_t i = 0; i < count; ++i) {
+        if (processes[i].id == id) return &processes[i];
+    }
+    return NULL;
+}
+
+static char bnu__layout_symbol(
+    const bruce_memory_layout_block_t *block, const bruce_process_snapshot_t *processes, size_t count
+) {
+    if (!block->used) return '.';
+    if (!block->tracked) return '?';
+    const bruce_process_snapshot_t *process = bnu__layout_process(processes, count, block->owner_id);
+    if (process == NULL) return '!';
+    size_t index = (size_t)(process - processes);
+    return index < 26 ? (char)('A' + index) : index < 52 ? (char)('a' + index - 26) : '*';
+}
+
+static int bnu__layout_compare_address(const void *left, const void *right) {
+    const bruce_memory_layout_block_t *a = left;
+    const bruce_memory_layout_block_t *b = right;
+    if (a->address < b->address) return -1;
+    if (a->address > b->address) return 1;
+    return 0;
+}
+
+static void bnu__print_layout_backend(
+    const char *name, bruce_memory_backend_t backend, const bruce_process_snapshot_t *processes,
+    size_t process_count, bool human, bruce_memory_layout_block_t *blocks, size_t capacity
+) {
+    size_t count = 0;
+    bruce_result_t result = memory__get_layout(backend, blocks, capacity, &count);
+    if (result != BRUCE_OK) {
+        stdio__printf("\n%s layout unavailable: %s\n", name, result__to_string(result));
+        return;
+    }
+    size_t shown = count < capacity ? count : capacity;
+    qsort(blocks, shown, sizeof(*blocks), bnu__layout_compare_address);
+    size_t total = 0;
+    for (size_t i = 0; i < shown; ++i) total += blocks[i].size;
+    if (total == 0) return;
+
+    char map[BNU_MEMORY_LAYOUT_WIDTH + 1];
+    memset(map, '.', BNU_MEMORY_LAYOUT_WIDTH);
+    map[BNU_MEMORY_LAYOUT_WIDTH] = '\0';
+    size_t offset = 0;
+    for (size_t i = 0; i < shown; ++i) {
+        size_t first = offset * BNU_MEMORY_LAYOUT_WIDTH / total;
+        offset += blocks[i].size;
+        size_t last = (offset * BNU_MEMORY_LAYOUT_WIDTH + total - 1) / total;
+        if (last > BNU_MEMORY_LAYOUT_WIDTH) last = BNU_MEMORY_LAYOUT_WIDTH;
+        char symbol = bnu__layout_symbol(&blocks[i], processes, process_count);
+        for (size_t cell = first; cell < last; ++cell) {
+            if (map[cell] == '.' || map[cell] == symbol) map[cell] = symbol;
+            else map[cell] = '#';
+        }
+    }
+    char total_text[16];
+    bnu__format_size((uint32_t)total, true, total_text, sizeof(total_text));
+    stdio__printf("\n%s layout (%s, proportional)\n[%s]\n", name, total_text, map);
+    stdio__printf(". free  ? untracked  # mixed  ! exited owner\n");
+    for (size_t i = 0; i < process_count && i < 52; ++i) {
+        char symbol = i < 26 ? (char)('A' + i) : (char)('a' + i - 26);
+        stdio__printf("%c pid %-3u %s\n", symbol, (unsigned)processes[i].id, processes[i].name);
+    }
+
+    stdio__printf(
+        "%-10s %-5s %-4s %-15s %8s %8s\n", "address", "state", "pid", "owner", "request", "block"
+    );
+    for (size_t i = 0; i < shown; ++i) {
+        const bruce_memory_layout_block_t *block = &blocks[i];
+        if (backend != BRUCE_MEMORY_BACKEND_SWAP && !block->tracked) continue;
+        const bruce_process_snapshot_t *process =
+            bnu__layout_process(processes, process_count, block->owner_id);
+        char requested[16] = "-";
+        char reserved[16];
+        if (block->used) {
+            bnu__format_size((uint32_t)block->requested_size, human, requested, sizeof(requested));
+        }
+        bnu__format_size((uint32_t)block->size, human, reserved, sizeof(reserved));
+        stdio__printf(
+            "0x%08lx %-5s %-4u %-15.15s %8s %8s%s\n",
+            (unsigned long)block->address, block->used ? "used" : "free",
+            (unsigned)block->owner_id,
+            process != NULL ? process->name : block->used ? "<exited>" : "-",
+            requested, reserved, block->executable ? " xip" : ""
+        );
+    }
+    if (count > shown) {
+        stdio__printf("... %u blocks omitted (snapshot limit)\n", (unsigned)(count - shown));
+    }
+}
+
 static void
 bnu__print_memory_row(const char *name, size_t total, size_t free_size, size_t largest, bool human) {
     char total_text[16];
@@ -36,8 +132,11 @@ int bnu_free_app_main(int argc, char **argv) {
     if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
     ap_add_flag(parser, "H");
     ap_set_opt_help(parser, "H", "Show sizes in human-readable units (e.g. 8.2K, 1.3M)");
+    ap_add_flag(parser, "m");
+    ap_set_opt_help(parser, "m", "Show proportional allocator maps and tracked owners");
     if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
     bool human = ap_found(parser, "H");
+    bool show_map = ap_found(parser, "m");
     ap_free(parser);
     bruce_memory_stats_t stats;
     bruce_result_t result = memory__get_stats(&stats);
@@ -51,6 +150,56 @@ int bnu_free_app_main(int argc, char **argv) {
     }
     if (stats.swap_total > 0) {
         bnu__print_memory_row("swap", stats.swap_total, stats.swap_free, stats.swap_largest_block, human);
+    }
+    if (show_map) {
+        const bruce_memory_backend_t backends[] = {
+            BRUCE_MEMORY_BACKEND_INTERNAL,
+            BRUCE_MEMORY_BACKEND_PSRAM,
+            BRUCE_MEMORY_BACKEND_SWAP,
+        };
+        size_t capacity = 0;
+        for (size_t i = 0; i < sizeof(backends) / sizeof(backends[0]); ++i) {
+            if ((backends[i] == BRUCE_MEMORY_BACKEND_PSRAM && stats.psram_total == 0) ||
+                (backends[i] == BRUCE_MEMORY_BACKEND_SWAP && stats.swap_total == 0)) {
+                continue;
+            }
+            size_t required = 0;
+            result = memory__get_layout(backends[i], NULL, 0, &required);
+            if (result != BRUCE_OK) return result;
+            if (required > capacity) capacity = required;
+        }
+        /* The temporary snapshot itself can add one heap block between the
+         * counting and capture passes. Leave a little room for concurrent
+         * allocator activity without keeping any permanent BSS reservation. */
+        if (capacity > SIZE_MAX - 4) return BRUCE_ERR_NO_MEMORY;
+        capacity += 4;
+        if (capacity > SIZE_MAX / sizeof(bruce_memory_layout_block_t)) return BRUCE_ERR_NO_MEMORY;
+        bruce_memory_layout_block_t *blocks = memory__malloc(capacity * sizeof(*blocks));
+        if (blocks == NULL) return BRUCE_ERR_NO_MEMORY;
+        bruce_process_snapshot_t processes[16];
+        size_t process_count = 0;
+        result = process__list(processes, sizeof(processes) / sizeof(processes[0]), &process_count);
+        if (result != BRUCE_OK) {
+            memory__free(blocks);
+            return result;
+        }
+        if (process_count > sizeof(processes) / sizeof(processes[0])) {
+            process_count = sizeof(processes) / sizeof(processes[0]);
+        }
+        bnu__print_layout_backend(
+            "internal", BRUCE_MEMORY_BACKEND_INTERNAL, processes, process_count, human, blocks, capacity
+        );
+        if (stats.psram_total > 0) {
+            bnu__print_layout_backend(
+                "psram", BRUCE_MEMORY_BACKEND_PSRAM, processes, process_count, human, blocks, capacity
+            );
+        }
+        if (stats.swap_total > 0) {
+            bnu__print_layout_backend(
+                "swap", BRUCE_MEMORY_BACKEND_SWAP, processes, process_count, human, blocks, capacity
+            );
+        }
+        memory__free(blocks);
     }
     return BRUCE_OK;
 }

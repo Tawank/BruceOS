@@ -12,8 +12,6 @@
 
 #include "sdkconfig.h"
 
-#define MEMORY__MAGIC 0x42524d31u /* "BRM1" */
-
 #if CONFIG_BRUCE_MEMORY_FORCE_PSRAM
 /* See BRUCE_MEMORY_FORCE_PSRAM's Kconfig help text: with this on, every
  * memory__malloc()/calloc()/realloc() allocation must land in PSRAM, with no
@@ -26,12 +24,6 @@
 #define MEMORY__MALLOC(size) malloc(size)
 #define MEMORY__REALLOC_CAPS 0u
 #endif
-
-typedef struct {
-    uint32_t magic;
-    size_t size;
-    bruce_resource_id_t resource_id;
-} memory__header_t;
 
 static void memory__cleanup(void *context) {
     memory__header_t *header = (memory__header_t *)context;
@@ -58,6 +50,7 @@ void *memory__malloc(size_t size) {
     header->magic = MEMORY__MAGIC;
     header->size = size;
     header->resource_id = resource_id;
+    header->owner_id = process__current_id();
     process_registry__account_memory((int64_t)size);
     return (void *)(header + 1);
 }
@@ -90,6 +83,7 @@ void *memory__realloc(void *ptr, size_t size) {
     grown->magic = MEMORY__MAGIC;
     grown->size = size;
     grown->resource_id = resource_id;
+    /* owner_id is preserved by realloc; resources cannot change owner here. */
     process_registry__account_memory((int64_t)size - (int64_t)old_size);
     return grown + 1;
 }

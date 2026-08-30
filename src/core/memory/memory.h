@@ -1,5 +1,18 @@
 #pragma once
 
+#include "core_sdk/memory.h"
+
+#include <stddef.h>
+
+#define MEMORY__MAGIC 0x42524d31u /* "BRM1" */
+
+typedef struct {
+    uint32_t magic;
+    size_t size;
+    bruce_resource_id_t resource_id;
+    bruce_process_id_t owner_id;
+} memory__header_t;
+
 #include <stdbool.h>
 #include <stddef.h>
 
@@ -15,6 +28,9 @@ bruce_result_t memory_external__instruction_map(
 );
 bruce_result_t memory_external__release(bruce_memory_object_t *object);
 void memory_external__get_swap_stats(size_t *out_total, size_t *out_free, size_t *out_largest);
+bruce_result_t memory_external__layout(
+    bruce_memory_layout_block_t *blocks, size_t capacity, size_t *out_count
+);
 
 /*
  * Core-owned external-memory objects: PSRAM/swap allocations with no

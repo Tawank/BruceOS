@@ -79,6 +79,7 @@ idf_component_register(SRCS
                      "core/manifest/manifest.c"
                     "core/memory/memory.c"
                     "core/memory/memory_external.c"
+                    "core/memory/memory_layout.c"
                     "core/network/network.c"
                     "core/notification/notification.c"
                     "core/nrf24/nrf24.c"

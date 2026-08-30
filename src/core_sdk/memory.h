@@ -1,8 +1,10 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
+#include "core_sdk/process.h"
 #include "core_sdk/result.h"
 
 /**
@@ -39,6 +41,19 @@ typedef struct {
     size_t size;
     bruce_memory_backend_t backend;
 } bruce_memory_object_t;
+
+/** One block in a point-in-time memory layout snapshot. */
+typedef struct {
+    uintptr_t address;
+    size_t size;              /* Allocator block size, or swap reserved size. */
+    size_t requested_size;    /* Bruce-requested bytes; zero when unknown/free. */
+    bruce_memory_backend_t backend;
+    bruce_process_id_t owner_id; /* Invalid for free or untracked blocks. */
+    uint32_t handle;          /* External-object handle; zero for heap blocks. */
+    bool used;
+    bool tracked;
+    bool executable;
+} bruce_memory_layout_block_t;
 
 /**
  * @brief Process-owned tracked heap allocator.
@@ -148,6 +163,22 @@ bruce_result_t memory__external_free(bruce_memory_object_t *object);
  * @param out_stats Receives the current heap statistics.
  */
 bruce_result_t memory__get_stats(bruce_memory_stats_t *out_stats);
+
+/**
+ * @brief Captures allocator blocks for one memory backend without allocating.
+ *
+ * INTERNAL and PSRAM include both free and occupied ESP-IDF heap blocks.
+ * Occupied blocks allocated through memory__malloc() carry their Bruce owner;
+ * other occupied blocks are returned as untracked. SWAP returns exact free
+ * runs and process-owned external allocations. If capacity is too small, the
+ * prefix that fits is written and out_count still reports the required count.
+ *
+ * @permission process
+ */
+bruce_result_t memory__get_layout(
+    bruce_memory_backend_t backend, bruce_memory_layout_block_t *blocks,
+    size_t capacity, size_t *out_count
+);
 
 #ifdef __cplusplus
 }
