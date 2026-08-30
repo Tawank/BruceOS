@@ -31,6 +31,8 @@ void memory_external__get_swap_stats(size_t *out_total, size_t *out_free, size_t
 bruce_result_t memory_external__layout(
     bruce_memory_layout_block_t *blocks, size_t capacity, size_t *out_count
 );
+bruce_result_t memory_external__read(uintptr_t offset, void *buffer, size_t size);
+bruce_result_t memory_external__readable_size(uintptr_t offset, size_t *out_size);
 
 /*
  * Core-owned external-memory objects: PSRAM/swap allocations with no

@@ -42,12 +42,26 @@ typedef struct {
     bruce_memory_backend_t backend;
 } bruce_memory_object_t;
 
+/** Physical memory kind containing a layout block. */
+typedef enum {
+    BRUCE_MEMORY_REGION_UNKNOWN = 0,
+    BRUCE_MEMORY_REGION_DRAM,
+    BRUCE_MEMORY_REGION_DIRAM,
+    BRUCE_MEMORY_REGION_IRAM,
+    BRUCE_MEMORY_REGION_RTC_FAST,
+    BRUCE_MEMORY_REGION_PSRAM,
+    BRUCE_MEMORY_REGION_SWAP,
+} bruce_memory_region_t;
+
 /** One block in a point-in-time memory layout snapshot. */
 typedef struct {
     uintptr_t address;
     size_t size;              /* Allocator block size, or swap reserved size. */
+    uintptr_t region_start;   /* Start of the containing allocator region. */
+    uintptr_t region_end;     /* Exclusive end of the containing region. */
     size_t requested_size;    /* Bruce-requested bytes; zero when unknown/free. */
     bruce_memory_backend_t backend;
+    bruce_memory_region_t region;
     bruce_process_id_t owner_id; /* Invalid for free or untracked blocks. */
     uint32_t handle;          /* External-object handle; zero for heap blocks. */
     bool used;
@@ -178,6 +192,34 @@ bruce_result_t memory__get_stats(bruce_memory_stats_t *out_stats);
 bruce_result_t memory__get_layout(
     bruce_memory_backend_t backend, bruce_memory_layout_block_t *blocks,
     size_t capacity, size_t *out_count
+);
+
+/**
+ * @brief Validates or copies bytes from a diagnostic memory range.
+ *
+ * INTERNAL and PSRAM addresses must lie wholly inside one ESP-IDF heap block;
+ * MMIO, allocator metadata gaps, and unrelated address ranges are rejected.
+ * SWAP addresses are byte offsets in the swap partition and must lie wholly
+ * inside one currently allocated external object (free/stale pages are never
+ * exposed). This is a best-effort live snapshot: separate calls may observe
+ * concurrent changes.
+ * Passing NULL for buffer performs validation without copying.
+ *
+ * @note Built-in modules only. External ELF/JS/WASM apps are denied even if
+ * they hold the process permission, and the symbol is not exported to ELF.
+ */
+bruce_result_t memory__read(
+    bruce_memory_backend_t backend, uintptr_t address, void *buffer, size_t size
+);
+
+/**
+ * @brief Returns readable bytes from an address to the end of its heap block
+ * or active swap object.
+ *
+ * @note Built-in modules only, under the same restrictions as memory__read().
+ */
+bruce_result_t memory__readable_size(
+    bruce_memory_backend_t backend, uintptr_t address, size_t *out_size
 );
 
 #ifdef __cplusplus

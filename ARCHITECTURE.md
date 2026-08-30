@@ -792,7 +792,23 @@ ESP-IDF internal/PSRAM heap blocks and Bruce's exact swap extents without
 allocating. Heap blocks created through `memory__malloc()` identify their
 owning process; occupied blocks from ESP-IDF, libc, Core, or third-party code
 that bypass that allocator are deliberately reported as untracked. The
-`free -m` terminal view renders proportional maps and an ownership table.
+`free -m` terminal view renders each disjoint allocator region as its own
+address-bounded proportional map, labels it as DRAM, D/IRAM, IRAM, RTC fast RAM,
+PSRAM, or swap, and then prints an ownership table.
+The built-in-only `memory__read()` performs bounded diagnostic reads:
+RAM/PSRAM must remain inside one ESP-IDF heap block, while swap offsets
+must remain inside one active external object, never a free page. It rejects
+external ELF/JS/WASM callers regardless of their manifest permissions and is
+not present in the ELF symbol table. The built-in
+`memorydump <int|psram|swap> <address> [length]` writes those bytes unchanged
+to stdout for pipes or redirection; `memorydump -x ...` reuses BNU's xxd line
+formatter for direct terminal inspection. An omitted length means the remainder
+of the containing heap block or active swap object, never subsequent blocks.
+`memorydump -a` walks every heap block in address order (or every active swap
+object); binary mode concatenates payloads and therefore does not preserve
+address gaps. `memorydump -a -x -o` adds per-block state, process owner,
+requested size, and block size headers while retaining physical addresses in
+the hex lines.
 
 Every process record owns one universal resource registry, and one FreeRTOS TLS
 pointer associates the current task with that record. Core services register

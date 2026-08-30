@@ -28,4 +28,5 @@ int bnu_crc32_app_main(int argc, char **argv);
 int bnu_grep_app_main(int argc, char **argv);
 int bnu_wc_app_main(int argc, char **argv);
 int bnu_xxd_app_main(int argc, char **argv);
+int bnu_memorydump_app_main(int argc, char **argv);
 const char *bnu__get_working_directory(void);

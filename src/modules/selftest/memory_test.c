@@ -13,6 +13,27 @@ bool selftest__run_memory_layout_case(void) {
         printf("[selftest] memory/layout: allocation failed\n");
         return false;
     }
+    memset(allocation, 0x5a, 123);
+    uint8_t readback[16] = {0};
+    bool read_ok = memory__read(
+        BRUCE_MEMORY_BACKEND_INTERNAL, (uintptr_t)allocation, readback, sizeof(readback)
+    ) == BRUCE_OK;
+    if (!read_ok) {
+        read_ok = memory__read(
+            BRUCE_MEMORY_BACKEND_PSRAM, (uintptr_t)allocation, readback, sizeof(readback)
+        ) == BRUCE_OK;
+    }
+    read_ok = read_ok && readback[0] == 0x5a && readback[sizeof(readback) - 1] == 0x5a;
+    size_t readable = 0;
+    bool span_ok = memory__readable_size(
+                       BRUCE_MEMORY_BACKEND_INTERNAL, (uintptr_t)allocation, &readable
+                   ) == BRUCE_OK;
+    if (!span_ok) {
+        span_ok = memory__readable_size(
+                      BRUCE_MEMORY_BACKEND_PSRAM, (uintptr_t)allocation, &readable
+                  ) == BRUCE_OK;
+    }
+    read_ok = read_ok && span_ok && readable >= 123;
     size_t internal_count = 0;
     size_t psram_count = 0;
     if (memory__get_layout(BRUCE_MEMORY_BACKEND_INTERNAL, NULL, 0, &internal_count) != BRUCE_OK ||
@@ -42,7 +63,10 @@ bool selftest__run_memory_layout_case(void) {
         size_t shown = count < capacity ? count : capacity;
         for (size_t i = 0; i < shown; ++i) {
             uintptr_t end = blocks[i].address + blocks[i].size;
-            if (blocks[i].tracked && blocks[i].address < (uintptr_t)allocation &&
+            if (blocks[i].tracked && blocks[i].region != BRUCE_MEMORY_REGION_UNKNOWN &&
+                blocks[i].region_start < blocks[i].region_end &&
+                blocks[i].region_start <= blocks[i].address && end <= blocks[i].region_end &&
+                blocks[i].address < (uintptr_t)allocation &&
                 (uintptr_t)allocation < end && blocks[i].requested_size == 123 &&
                 blocks[i].owner_id == process__current_id()) {
                 found = true;
@@ -52,7 +76,7 @@ bool selftest__run_memory_layout_case(void) {
     }
     memory__free(blocks);
     memory__free(allocation);
-    bool ok = result == BRUCE_OK && found;
+    bool ok = result == BRUCE_OK && found && read_ok;
     printf("[selftest] memory/layout: %s (blocks=%u)\n", ok ? "OK" : "failed", (unsigned)count);
     return ok;
 }

@@ -47,6 +47,52 @@ static int bnu__layout_compare_address(const void *left, const void *right) {
     return 0;
 }
 
+static const char *bnu__layout_region_name(bruce_memory_region_t region) {
+    switch (region) {
+        case BRUCE_MEMORY_REGION_DRAM: return "DRAM";
+        case BRUCE_MEMORY_REGION_DIRAM: return "D/IRAM";
+        case BRUCE_MEMORY_REGION_IRAM: return "IRAM";
+        case BRUCE_MEMORY_REGION_RTC_FAST: return "RTC fast RAM";
+        case BRUCE_MEMORY_REGION_PSRAM: return "PSRAM";
+        case BRUCE_MEMORY_REGION_SWAP: return "swap";
+        default: return "unknown";
+    }
+}
+
+static void bnu__print_layout_region(
+    const bruce_memory_layout_block_t *blocks, size_t count,
+    const bruce_process_snapshot_t *processes, size_t process_count,
+    uintptr_t region_start, uintptr_t region_end, bruce_memory_region_t region
+) {
+    if (region_end <= region_start) return;
+    size_t span = region_end - region_start;
+    char map[BNU_MEMORY_LAYOUT_WIDTH + 1];
+    memset(map, '-', BNU_MEMORY_LAYOUT_WIDTH);
+    map[BNU_MEMORY_LAYOUT_WIDTH] = '\0';
+    for (size_t i = 0; i < count; ++i) {
+        const bruce_memory_layout_block_t *block = &blocks[i];
+        if (block->region_start != region_start || block->region_end != region_end) continue;
+        size_t relative = block->address > region_start ? block->address - region_start : 0;
+        size_t first = relative * BNU_MEMORY_LAYOUT_WIDTH / span;
+        size_t end = relative + block->size;
+        if (end > span) end = span;
+        size_t last = (end * BNU_MEMORY_LAYOUT_WIDTH + span - 1) / span;
+        if (last > BNU_MEMORY_LAYOUT_WIDTH) last = BNU_MEMORY_LAYOUT_WIDTH;
+        char symbol = bnu__layout_symbol(block, processes, process_count);
+        for (size_t cell = first; cell < last; ++cell) {
+            if (map[cell] == '-' || map[cell] == symbol) map[cell] = symbol;
+            else map[cell] = '#';
+        }
+    }
+    char span_text[16];
+    bnu__format_size((uint32_t)span, true, span_text, sizeof(span_text));
+    stdio__printf(
+        "region %-12s 0x%08lx-0x%08lx (%s)\n[%s]\n",
+        bnu__layout_region_name(region),
+        (unsigned long)region_start, (unsigned long)region_end, span_text, map
+    );
+}
+
 static void bnu__print_layout_backend(
     const char *name, bruce_memory_backend_t backend, const bruce_process_snapshot_t *processes,
     size_t process_count, bool human, bruce_memory_layout_block_t *blocks, size_t capacity
@@ -63,25 +109,21 @@ static void bnu__print_layout_backend(
     for (size_t i = 0; i < shown; ++i) total += blocks[i].size;
     if (total == 0) return;
 
-    char map[BNU_MEMORY_LAYOUT_WIDTH + 1];
-    memset(map, '.', BNU_MEMORY_LAYOUT_WIDTH);
-    map[BNU_MEMORY_LAYOUT_WIDTH] = '\0';
-    size_t offset = 0;
-    for (size_t i = 0; i < shown; ++i) {
-        size_t first = offset * BNU_MEMORY_LAYOUT_WIDTH / total;
-        offset += blocks[i].size;
-        size_t last = (offset * BNU_MEMORY_LAYOUT_WIDTH + total - 1) / total;
-        if (last > BNU_MEMORY_LAYOUT_WIDTH) last = BNU_MEMORY_LAYOUT_WIDTH;
-        char symbol = bnu__layout_symbol(&blocks[i], processes, process_count);
-        for (size_t cell = first; cell < last; ++cell) {
-            if (map[cell] == '.' || map[cell] == symbol) map[cell] = symbol;
-            else map[cell] = '#';
-        }
-    }
     char total_text[16];
     bnu__format_size((uint32_t)total, true, total_text, sizeof(total_text));
-    stdio__printf("\n%s layout (%s, proportional)\n[%s]\n", name, total_text, map);
-    stdio__printf(". free  ? untracked  # mixed  ! exited owner\n");
+    stdio__printf("\n%s layout (%s, physical regions)\n", name, total_text);
+    uintptr_t previous_start = UINTPTR_MAX;
+    uintptr_t previous_end = UINTPTR_MAX;
+    for (size_t i = 0; i < shown; ++i) {
+        if (blocks[i].region_start == previous_start && blocks[i].region_end == previous_end) continue;
+        bnu__print_layout_region(
+            blocks, shown, processes, process_count,
+            blocks[i].region_start, blocks[i].region_end, blocks[i].region
+        );
+        previous_start = blocks[i].region_start;
+        previous_end = blocks[i].region_end;
+    }
+    stdio__printf(". free  ? untracked  # mixed  ! exited owner  - allocator metadata\n");
     for (size_t i = 0; i < process_count && i < 52; ++i) {
         char symbol = i < 26 ? (char)('A' + i) : (char)('a' + i - 26);
         stdio__printf("%c pid %-3u %s\n", symbol, (unsigned)processes[i].id, processes[i].name);

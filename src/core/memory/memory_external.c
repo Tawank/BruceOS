@@ -562,8 +562,11 @@ bruce_result_t memory_external__layout(
             blocks[index] = (bruce_memory_layout_block_t){
                 .address = page * MEMORY_EXTERNAL__MMU_PAGE,
                 .size = pages * MEMORY_EXTERNAL__MMU_PAGE,
+                .region_start = 0,
+                .region_end = partition->size,
                 .requested_size = owner == NULL ? 0 : owner->size,
                 .backend = BRUCE_MEMORY_BACKEND_SWAP,
+                .region = BRUCE_MEMORY_REGION_SWAP,
                 .owner_id = owner == NULL ? BRUCE_PROCESS_ID_INVALID : owner->owner_id,
                 .handle = owner == NULL ? 0 : owner->handle,
                 .used = owner != NULL,
@@ -576,4 +579,47 @@ bruce_result_t memory_external__layout(
     xSemaphoreGive(s_mutex);
     process_registry__operation_end();
     return BRUCE_OK;
+}
+
+bruce_result_t memory_external__read(uintptr_t offset, void *buffer, size_t size) {
+    if (size == 0 || offset > SIZE_MAX - size) return BRUCE_ERR_INVALID_ARGUMENT;
+    if (!process_registry__operation_begin()) return BRUCE_ERR_CANCELLED;
+    memory_external__ensure_mutex();
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    const memory_external__record_t *record = NULL;
+    for (size_t i = 0; i < MEMORY_EXTERNAL__MAX_OBJECTS; ++i) {
+        const memory_external__record_t *candidate = &s_records[i];
+        if (candidate->backend != BRUCE_MEMORY_BACKEND_SWAP || offset < candidate->offset) continue;
+        size_t relative = offset - candidate->offset;
+        if (relative <= candidate->size && size <= candidate->size - relative) {
+            record = candidate;
+            break;
+        }
+    }
+    if (record != NULL && buffer != NULL) memcpy(buffer, record->data + (offset - record->offset), size);
+    xSemaphoreGive(s_mutex);
+    process_registry__operation_end();
+    return record != NULL ? BRUCE_OK : BRUCE_ERR_INVALID_ARGUMENT;
+}
+
+bruce_result_t memory_external__readable_size(uintptr_t offset, size_t *out_size) {
+    if (out_size == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    *out_size = 0;
+    if (!process_registry__operation_begin()) return BRUCE_ERR_CANCELLED;
+    memory_external__ensure_mutex();
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    const memory_external__record_t *record = NULL;
+    for (size_t i = 0; i < MEMORY_EXTERNAL__MAX_OBJECTS; ++i) {
+        const memory_external__record_t *candidate = &s_records[i];
+        if (candidate->backend != BRUCE_MEMORY_BACKEND_SWAP || offset < candidate->offset) continue;
+        size_t relative = offset - candidate->offset;
+        if (relative < candidate->size) {
+            record = candidate;
+            *out_size = candidate->size - relative;
+            break;
+        }
+    }
+    xSemaphoreGive(s_mutex);
+    process_registry__operation_end();
+    return record != NULL ? BRUCE_OK : BRUCE_ERR_INVALID_ARGUMENT;
 }
