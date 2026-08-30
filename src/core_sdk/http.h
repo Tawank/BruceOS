@@ -66,13 +66,13 @@ typedef struct {
     char **header_values;
     size_t header_count;
 
-    /* Opaque. Set when `body` was captured straight into its own PSRAM/swap
-     * object instead of sharing headers' internal-heap block (a buffered
-     * response whose Content-Length fit in memory__external_alloc() - see
-     * src/core/http/http.c). backend == BRUCE_MEMORY_BACKEND_INVALID (the
-     * zero value) means it wasn't; either way, never touch this field
-     * directly - just pass the whole response to http__response_free(). */
-    bruce_memory_object_t body_object;
+    /* Opaque. Non-NULL when `body` was captured straight into its own
+     * PSRAM/swap allocation instead of sharing headers' internal-heap block
+     * (a buffered response whose Content-Length fit in
+     * memory__external_malloc() - see src/core/http/http.c). Either way,
+     * never touch this field directly - just pass the whole response to
+     * http__response_free(). */
+    const void *body_object;
 } bruce_http_response_t;
 
 /**
@@ -82,7 +82,7 @@ typedef struct {
  * NUL-terminated in buffered mode, but body_len is authoritative. Headers
  * are always one process-owned internal-heap allocation; the body shares it
  * unless it was large enough to instead go through
- * memory__external_alloc() (PSRAM, or swap when no PSRAM is fitted) -
+ * memory__external_malloc() (PSRAM, or swap when no PSRAM is fitted) -
  * either way, release both with a single http__response_free() call. On
  * failure, leaves `response` zeroed and returns a negative BRUCE_ERR_*
  * value.

@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "core/memory/memory.h"
 #include "core_sdk/ext_mem_loader.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/process.h"
@@ -89,7 +90,7 @@ bool selftest__run_external_memory_case(void) {
     }
 
     bruce_memory_object_t object;
-    bruce_result_t allocation = memory__external_alloc(32, &object);
+    bruce_result_t allocation = memory_external__alloc(32, false, true, &object);
     if (allocation != BRUCE_OK || object.handle == 0 ||
         object.size != 32 || object.backend == BRUCE_MEMORY_BACKEND_INVALID) {
         printf("[selftest] memory/external: allocation failed (%d)\n", allocation);
@@ -100,9 +101,9 @@ bool selftest__run_external_memory_case(void) {
     uint8_t changed[8];
     memset(changed, 0xA5, sizeof(changed));
     const void *mapping = NULL;
-    bruce_result_t initial_write = memory__external_write(&object, 0, initial, sizeof(initial));
-    bruce_result_t changed_write = memory__external_write(&object, 12, changed, sizeof(changed));
-    bruce_result_t mapped = memory__external_map(&object, &mapping);
+    bruce_result_t initial_write = memory_external__write(&object, 0, initial, sizeof(initial));
+    bruce_result_t changed_write = memory_external__write(&object, 12, changed, sizeof(changed));
+    bruce_result_t mapped = memory_external__map(&object, &mapping);
     bool ok = initial_write == BRUCE_OK && changed_write == BRUCE_OK && mapped == BRUCE_OK && mapping != NULL;
 #if !CONFIG_BRUCE_QEMU_TEST_MODE
     ok = ok && memcmp((const uint8_t *)mapping + 12, changed, sizeof(changed)) == 0;
@@ -113,7 +114,7 @@ bool selftest__run_external_memory_case(void) {
          snapshot.memory_bytes >= object.size;
 
     bruce_memory_backend_t backend = object.backend;
-    ok = ok && memory__external_free(&object) == BRUCE_OK && object.handle == 0;
+    ok = ok && memory_external__release(&object) == BRUCE_OK && object.handle == 0;
     bruce_memory_stats_t after;
     ok = ok && memory__get_stats(&after) == BRUCE_OK;
     if (backend == BRUCE_MEMORY_BACKEND_SWAP) {

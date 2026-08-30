@@ -16,14 +16,12 @@
 #include <stdbool.h>
 
 #include "browser_document.h"
-#include "core_sdk/memory.h"
 #include "core_sdk/result.h"
 
 #define BROWSER_HISTORY_MAX 24
 
 typedef struct {
-    bruce_memory_object_t entries_object; /* BROWSER_HISTORY_MAX * BROWSER_URL_MAX bytes, external. */
-    const char *entries;                  /* Mapped read pointer; entries[i * BROWSER_URL_MAX]. */
+    const char *entries; /* BROWSER_HISTORY_MAX * BROWSER_URL_MAX bytes, external; entries[i * BROWSER_URL_MAX]. */
     int count;
     int current; /* -1 when empty. */
 } browser_history_t;

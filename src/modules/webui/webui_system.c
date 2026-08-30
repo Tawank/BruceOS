@@ -175,20 +175,19 @@ bruce_result_t webui__screen(bruce_http_server_request_t *request, void *context
         return webui__reply_error(request, result != BRUCE_OK ? result : BRUCE_ERR_INVALID_STATE);
     if (pixel_count > SIZE_MAX / sizeof(uint16_t)) return webui__reply_text(request, 503, "Screen too large");
     void *pixels_data = NULL;
-    bruce_memory_object_t pixels_object = {0};
     bool pixels_external = false;
-    result = webui__alloc_direct(&pixels_data, &pixels_object, &pixels_external, pixel_count * sizeof(uint16_t));
+    result = webui__alloc_direct(&pixels_data, &pixels_external, pixel_count * sizeof(uint16_t));
     if (result != BRUCE_OK) return webui__reply_text(request, 503, "Screen memory unavailable");
     uint16_t *pixels = pixels_data;
     result = display__snapshot(pixels, pixel_count, &width, &height, &pixel_count);
     size_t row_size = ((size_t)width * 3u + 3u) & ~(size_t)3u;
     if (result != BRUCE_OK || row_size > UINT32_MAX || (size_t)height > (UINT32_MAX - 54u) / row_size) {
-        webui__free_direct(pixels_data, &pixels_object, pixels_external);
+        webui__free_direct(pixels_data, pixels_external);
         return webui__reply_error(request, result != BRUCE_OK ? result : BRUCE_ERR_RESOURCE_LIMIT);
     }
     uint8_t *row = memory__calloc(1, row_size);
     if (row == NULL) {
-        webui__free_direct(pixels_data, &pixels_object, pixels_external);
+        webui__free_direct(pixels_data, pixels_external);
         return webui__reply_text(request, 503, "Screen memory unavailable");
     }
     uint32_t image_size = (uint32_t)(row_size * height);
@@ -218,7 +217,7 @@ bruce_result_t webui__screen(bruce_http_server_request_t *request, void *context
         result = http_server_request__send_chunk(request, row, row_size);
     }
     memory__free(row);
-    webui__free_direct(pixels_data, &pixels_object, pixels_external);
+    webui__free_direct(pixels_data, pixels_external);
     if (result == BRUCE_OK) result = http_server_request__finalize(request);
     return result;
 }

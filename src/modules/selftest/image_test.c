@@ -61,7 +61,7 @@ bool selftest__run_image_decode_case(void) {
     image_bitmap_t resized = {0};
     if (image__bitmap_resize(&source, 1, 1, &resized) != BRUCE_OK || resized.width != 1 ||
         resized.height != 1 || resized.pixels == NULL || resized.pixels[0] != BRUCE_COLOR_RED ||
-        resized.backing.backend == BRUCE_MEMORY_BACKEND_INVALID) {
+        !resized.external) {
         image__bitmap_release(&resized);
         printf("[selftest] image/decode: FAIL, bitmap resize\n");
         return false;

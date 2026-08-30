@@ -367,7 +367,7 @@ static void wasm_loader__release_runtime_objects(wasm_loader_process_ctx_t *ctx)
         memory__free(ctx->module_buffer);
         ctx->module_buffer = NULL;
     }
-    if (ctx->module_image.memory.handle != 0) {
+    if (ctx->module_image.data != NULL) {
         (void)ext_mem_loader__release_image(&ctx->module_image);
     }
     ctx->module_bytes = NULL;
@@ -491,14 +491,14 @@ static int wasm_loader__process_entry(void *context) {
     wasm_loader_process_ctx_t *ctx = (wasm_loader_process_ctx_t *)context;
     char error_buf[128];
 
-    if (ctx->module_image.memory.handle != 0) {
+    if (ctx->module_image.data != NULL) {
         bruce_result_t adopt_result = ext_mem_loader__adopt_image(&ctx->module_image);
         if (adopt_result != BRUCE_OK) return adopt_result;
         ctx->module_bytes = ctx->module_image.data;
         ctx->module_size = ctx->module_image.size;
     }
 
-    if (ctx->module_image.memory.backend == BRUCE_MEMORY_BACKEND_SWAP) {
+    if (ctx->module_image.backend == BRUCE_MEMORY_BACKEND_SWAP) {
         size_t module_size = ctx->module_image.size;
         ctx->module_buffer = memory__malloc(module_size);
         if (ctx->module_buffer == NULL) return BRUCE_ERR_NO_MEMORY;
@@ -627,7 +627,7 @@ static int wasm_loader__open(
         memory__free(inspection);
         return stage_result;
     }
-    size_t max_module_bytes = ctx->module_image.memory.backend == BRUCE_MEMORY_BACKEND_PSRAM ?
+    size_t max_module_bytes = ctx->module_image.backend == BRUCE_MEMORY_BACKEND_PSRAM ?
                                    WASM_LOADER_MAX_MODULE_BYTES_PSRAM :
                                    wasm_loader__internal_module_budget();
     if (ctx->module_image.size > max_module_bytes) {

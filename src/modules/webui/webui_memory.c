@@ -1,5 +1,7 @@
 #include "webui_internal.h"
 
+#include "core_sdk/memory.h"
+
 /* Kept out of ~1KiB reserved so a save never claims literally every byte a
  * stats snapshot reported free -- by the time the allocation call actually
  * runs, concurrent activity (the other http worker, a background app) may
@@ -16,32 +18,20 @@ size_t webui__memory_cap(void) {
     return cap > WEBUI_MEMORY_RESERVE_BYTES ? cap - WEBUI_MEMORY_RESERVE_BYTES : 0;
 }
 
-bruce_result_t
-webui__alloc_direct(void **out_data, bruce_memory_object_t *out_object, bool *out_external, size_t size) {
-    bruce_memory_stats_t stats;
-    bool psram_has_room = memory__get_stats(&stats) == BRUCE_OK && stats.psram_largest_block >= size;
-    if (psram_has_room) {
-        bruce_memory_object_t object;
-        if (memory__external_alloc(size, &object) == BRUCE_OK) {
-            const void *mapped = NULL;
-            if ((object.backend == BRUCE_MEMORY_BACKEND_PSRAM ||
-                 object.backend == BRUCE_MEMORY_BACKEND_INTERNAL) &&
-                memory__external_map(&object, &mapped) == BRUCE_OK) {
-                *out_data = (void *)mapped;
-                *out_object = object;
-                *out_external = true;
-                return BRUCE_OK;
-            }
-            (void)memory__external_free(&object);
-        }
+bruce_result_t webui__alloc_direct(void **out_data, bool *out_external, size_t size) {
+    const void *data = memory__external_malloc_writable(size);
+    if (data != NULL) {
+        *out_data = (void *)data;
+        *out_external = true;
+        return BRUCE_OK;
     }
     *out_data = memory__malloc(size);
     *out_external = false;
     return *out_data != NULL ? BRUCE_OK : BRUCE_ERR_NO_MEMORY;
 }
 
-void webui__free_direct(void *data, bruce_memory_object_t *object, bool external) {
-    if (external) (void)memory__external_free(object);
+void webui__free_direct(void *data, bool external) {
+    if (external) (void)memory__external_free(data);
     else memory__free(data);
 }
 
@@ -50,7 +40,7 @@ void webui__free_direct(void *data, bruce_memory_object_t *object, bool external
  * function nests inside a route handler's own frame(s), and a couple of
  * kilobytes of locals stacked on top of those would risk overflowing it. */
 bruce_result_t webui__receive_into_object(
-    bruce_http_server_request_t *request, const bruce_memory_object_t *object, size_t length
+    bruce_http_server_request_t *request, const void *data, size_t length
 ) {
     uint8_t *chunk = memory__malloc(WEBUI_IO_CHUNK);
     if (chunk == NULL) return BRUCE_ERR_NO_MEMORY;
@@ -64,7 +54,7 @@ bruce_result_t webui__receive_into_object(
             result = count < 0 ? (bruce_result_t)count : BRUCE_ERR_IO;
             break;
         }
-        result = memory__external_write(object, received, chunk, (size_t)count);
+        result = memory__external_memcpy(data, received, chunk, (size_t)count);
         if (result != BRUCE_OK) break;
         received += (size_t)count;
     }
@@ -73,7 +63,7 @@ bruce_result_t webui__receive_into_object(
 }
 
 bruce_result_t webui__decode_to_object(
-    const char *source, size_t length, const bruce_memory_object_t *object, size_t *out_length
+    const char *source, size_t length, const void *data, size_t *out_length
 ) {
     uint8_t *chunk = memory__malloc(WEBUI_DECODE_CHUNK);
     if (chunk == NULL) return BRUCE_ERR_NO_MEMORY;
@@ -105,13 +95,13 @@ bruce_result_t webui__decode_to_object(
         }
         chunk[filled++] = value;
         if (filled == WEBUI_DECODE_CHUNK) {
-            result = memory__external_write(object, written, chunk, filled);
+            result = memory__external_memcpy(data, written, chunk, filled);
             written += filled;
             filled = 0;
         }
     }
     if (result == BRUCE_OK && filled > 0) {
-        result = memory__external_write(object, written, chunk, filled);
+        result = memory__external_memcpy(data, written, chunk, filled);
         written += filled;
     }
     memory__free(chunk);

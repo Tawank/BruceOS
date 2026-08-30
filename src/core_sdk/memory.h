@@ -119,53 +119,87 @@ void *memory__realloc(void *ptr, size_t size);
 void memory__free(void *ptr);
 
 /**
- * @brief Allocates a process-owned external-memory object.
+ * @brief Allocates process-owned external memory (PSRAM, swap, or internal RAM) and returns a read-only pointer.
  *
  * PSRAM is preferred when a sufficiently large block is available;
  * otherwise complete 64 KiB pages are allocated from swap. If neither is
  * available -- no PSRAM on this board, and no "swap" partition has been
  * committed yet (see partitions.csv) -- plain internal RAM is used as a
- * last resort so callers of this function still get a usable object
- * instead of BRUCE_ERR_RESOURCE_LIMIT. The returned object is released
- * automatically when its process exits.
+ * last resort so callers still get a usable allocation instead of NULL.
+ * The allocation is released automatically when its process exits.
  *
- * @param size Number of bytes to allocate.
- * @param out_object Receives the new external-memory object.
+ * The returned pointer is read-only: swap allocations are flash-mapped and
+ * not directly CPU-writable, so writes must go through
+ * memory__external_memcpy()/memset(), which know how to update each backend.
+ *
+ * @param size Number of bytes to allocate. Returns NULL for zero.
  */
-bruce_result_t memory__external_alloc(size_t size, bruce_memory_object_t *out_object);
+const void *memory__external_malloc(size_t size);
 
 /**
- * @brief Writes or replaces bytes through the object's backend without exposing a writable flash pointer.
+ * @brief Allocates process-owned external memory that is guaranteed directly CPU-writable.
+ *
+ * Same PSRAM-or-internal-RAM allocation memory__external_malloc() may also
+ * land on, but never swap: unlike memory__external_malloc(), this never
+ * falls back to a flash-mapped allocation, so callers that write into the
+ * returned buffer through an ordinary pointer (rather than
+ * memory__external_memcpy()/memset()) never end up with one that silently
+ * corrupts on write. Returns NULL if neither PSRAM nor internal RAM has
+ * room for `size` -- callers needing a guaranteed allocation should fall
+ * back to memory__malloc() in that case.
+ *
+ * @param size Number of bytes to allocate. Returns NULL for zero.
+ */
+const void *memory__external_malloc_writable(size_t size);
+
+/**
+ * @brief Allocates zero-initialized external memory for count objects of size bytes.
+ *
+ * Returns NULL when either argument is zero or their product overflows size_t.
+ *
+ * @param count Number of objects to allocate.
+ * @param size Size of each object in bytes.
+ */
+const void *memory__external_calloc(size_t count, size_t size);
+
+/**
+ * @brief Copies bytes into external memory without exposing a writable flash pointer.
  *
  * Swap updates that require changing a zero bit back to one rewrite the
  * affected flash sectors. Callers must synchronize writes with readers of
  * an already shared mapping.
  *
- * @param object External-memory object to write into.
- * @param offset Byte offset within the object to write at.
- * @param data Bytes to write.
- * @param size Number of bytes to write.
+ * @param ptr Allocation obtained from memory__external_malloc()/calloc().
+ * @param offset Byte offset within the allocation to write at.
+ * @param data Bytes to copy in.
+ * @param size Number of bytes to copy.
  */
-bruce_result_t
-memory__external_write(const bruce_memory_object_t *object, size_t offset, const void *data, size_t size);
+bruce_result_t memory__external_memcpy(const void *ptr, size_t offset, const void *data, size_t size);
 
 /**
- * @brief Returns a read-only mapping that remains valid until memory__external_free() or process teardown.
+ * @brief Fills a range of external memory with a repeated byte value.
  *
- * @param object External-memory object to map.
- * @param out_data Receives a read-only pointer to the object's bytes.
+ * Semantics otherwise match memory__external_memcpy(); prefer this over a
+ * memcpy() of a manually filled buffer since a zero fill is always a direct
+ * flash write (no sector erase needed).
+ *
+ * @param ptr Allocation obtained from memory__external_malloc()/calloc().
+ * @param offset Byte offset within the allocation to fill at.
+ * @param value Byte value to repeat, as an unsigned char.
+ * @param size Number of bytes to fill.
  */
-bruce_result_t memory__external_map(const bruce_memory_object_t *object, const void **out_data);
+bruce_result_t memory__external_memset(const void *ptr, size_t offset, int value, size_t size);
 
 /**
- * @brief Releases an external object.
+ * @brief Frees memory obtained from memory__external_malloc()/calloc().
  *
- * NULL is invalid; a successful call clears the caller's object. Payload
- * bytes are not zeroed.
+ * NULL is a no-op. Payload bytes are not zeroed. Passing any other pointer
+ * not currently owned by the calling process, or one already freed, is
+ * rejected with BRUCE_ERR_INVALID_ARGUMENT / BRUCE_ERR_PERMISSION.
  *
- * @param object External-memory object to release.
+ * @param ptr Allocation to free, or NULL.
  */
-bruce_result_t memory__external_free(bruce_memory_object_t *object);
+bruce_result_t memory__external_free(const void *ptr);
 
 /**
  * @brief Returns current heap capacity plus fragmentation/high-water diagnostics.

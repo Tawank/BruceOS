@@ -32,7 +32,7 @@ typedef void (*bruce_loader_process_stop_fn)(void *context, bruce_process_signal
 typedef struct {
     const uint8_t *data;
     size_t size;
-    bruce_memory_object_t memory;
+    bruce_memory_backend_t backend;
 } bruce_ext_mem_loader_image_t;
 
 typedef struct {

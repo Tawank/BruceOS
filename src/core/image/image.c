@@ -87,39 +87,37 @@ bruce_result_t image__bitmap_resize(
     if (target_width > SIZE_MAX / (target_height * sizeof(uint16_t))) return BRUCE_ERR_RESOURCE_LIMIT;
 
     size_t row_size = target_width * sizeof(uint16_t);
-    bruce_memory_object_t backing = {0};
-    bruce_result_t result = memory__external_alloc(row_size * target_height, &backing);
-    if (result != BRUCE_OK) return result;
+    const void *backing = memory__external_malloc(row_size * target_height);
+    if (backing == NULL) return BRUCE_ERR_NO_MEMORY;
     uint16_t *row = memory__malloc(row_size);
     if (row == NULL) {
-        (void)memory__external_free(&backing);
+        (void)memory__external_free(backing);
         return BRUCE_ERR_NO_MEMORY;
     }
 
+    bruce_result_t result = BRUCE_OK;
     for (uint32_t y = 0; result == BRUCE_OK && y < target_height; ++y) {
         uint32_t source_y = (uint32_t)(((uint64_t)y * source->height) / target_height);
         for (uint32_t x = 0; x < target_width; ++x) {
             uint32_t source_x = (uint32_t)(((uint64_t)x * source->width) / target_width);
             row[x] = source->pixels[(size_t)source_y * source->width + source_x];
         }
-        result = memory__external_write(&backing, (size_t)y * row_size, row, row_size);
+        result = memory__external_memcpy(backing, (size_t)y * row_size, row, row_size);
     }
     memory__free(row);
 
-    const void *pixels = NULL;
-    if (result == BRUCE_OK) result = memory__external_map(&backing, &pixels);
     if (result != BRUCE_OK) {
-        (void)memory__external_free(&backing);
+        (void)memory__external_free(backing);
         return result;
     }
     *out_bitmap = (image_bitmap_t){
-        .pixels = (uint16_t *)pixels,
+        .pixels = (uint16_t *)backing,
         .width = (uint16_t)target_width,
         .height = (uint16_t)target_height,
         .source_width = source->source_width,
         .source_height = source->source_height,
         .format = source->format,
-        .backing = backing,
+        .external = true,
     };
     return BRUCE_OK;
 }
@@ -165,14 +163,13 @@ bruce_result_t image__gif_open(
         return result != BRUCE_OK ? result : BRUCE_ERR_RESOURCE_LIMIT;
     }
 
-    bruce_memory_object_t object = {0};
-    result = memory__external_alloc((size_t)file_size, &object);
-    uint8_t *chunk = NULL;
-    if (result == BRUCE_OK) {
-        chunk = memory__malloc(IMAGE_READ_CHUNK_SIZE);
-        if (chunk == NULL) result = BRUCE_ERR_NO_MEMORY;
+    const void *data = memory__external_malloc((size_t)file_size);
+    if (data == NULL) {
+        (void)storage__close(file);
+        return BRUCE_ERR_NO_MEMORY;
     }
-    result = result == BRUCE_OK ? storage__seek(file, 0, SEEK_SET, NULL) : result;
+    uint8_t *chunk = memory__malloc(IMAGE_READ_CHUNK_SIZE);
+    result = chunk != NULL ? storage__seek(file, 0, SEEK_SET, NULL) : BRUCE_ERR_NO_MEMORY;
     size_t total = 0;
     while (result == BRUCE_OK && total < file_size) {
         size_t wanted = (size_t)file_size - total;
@@ -181,22 +178,17 @@ bruce_result_t image__gif_open(
         result = storage__read(file, chunk, wanted, &count);
         if (result == BRUCE_OK && count == 0) result = BRUCE_ERR_IO;
         if (result == BRUCE_OK) {
-            result = memory__external_write(&object, total, chunk, count);
+            result = memory__external_memcpy(data, total, chunk, count);
             total += count;
         }
     }
     memory__free(chunk);
     (void)storage__close(file);
 
-    const void *data = NULL;
-    if (result == BRUCE_OK) result = memory__external_map(&object, &data);
     if (result == BRUCE_OK && image__detect_format(data, total) != IMAGE_FORMAT_GIF)
         result = BRUCE_ERR_UNSUPPORTED;
-    if (result == BRUCE_OK) {
-        result = gif__open_memory(data, total, options, &object, out_gif);
-        if (result == BRUCE_OK) object = (bruce_memory_object_t){0};
-    }
-    if (object.backend != BRUCE_MEMORY_BACKEND_INVALID) (void)memory__external_free(&object);
+    if (result == BRUCE_OK) result = gif__open_memory(data, total, options, data, out_gif);
+    if (result != BRUCE_OK) (void)memory__external_free(data);
     if (result == BRUCE_OK && out_info != NULL) {
         out_info->format = BRUCE_IMAGE_FORMAT_GIF;
         out_info->width = (*out_gif)->source_width;
@@ -217,17 +209,16 @@ static bruce_result_t image__decode_jpeg_from_file(
     bruce_file_id_t file, size_t file_size, const bruce_image_draw_options_t *options,
     image_bitmap_t *out_bitmap
 ) {
-    bruce_memory_object_t object = {0};
-    bruce_result_t result = memory__external_alloc(file_size, &object);
-    if (result != BRUCE_OK) return result;
+    const void *data = memory__external_malloc(file_size);
+    if (data == NULL) return BRUCE_ERR_NO_MEMORY;
 
     uint8_t *chunk = memory__malloc(IMAGE_READ_CHUNK_SIZE);
     if (chunk == NULL) {
-        (void)memory__external_free(&object);
+        (void)memory__external_free(data);
         return BRUCE_ERR_NO_MEMORY;
     }
 
-    result = storage__seek(file, 0, SEEK_SET, NULL);
+    bruce_result_t result = storage__seek(file, 0, SEEK_SET, NULL);
     size_t total = 0;
     while (result == BRUCE_OK && total < file_size) {
         size_t wanted = file_size - total;
@@ -236,16 +227,14 @@ static bruce_result_t image__decode_jpeg_from_file(
         result = storage__read(file, chunk, wanted, &count);
         if (result == BRUCE_OK && count == 0) result = BRUCE_ERR_IO;
         if (result == BRUCE_OK) {
-            result = memory__external_write(&object, total, chunk, count);
+            result = memory__external_memcpy(data, total, chunk, count);
             total += count;
         }
     }
     memory__free(chunk);
 
-    const void *data = NULL;
-    if (result == BRUCE_OK) result = memory__external_map(&object, &data);
     if (result == BRUCE_OK) result = image__decode_jpeg(data, total, options, out_bitmap);
-    bruce_result_t free_result = memory__external_free(&object);
+    bruce_result_t free_result = memory__external_free(data);
     return result == BRUCE_OK ? free_result : result;
 }
 
@@ -253,17 +242,16 @@ static bruce_result_t image__decode_gif_from_file(
     bruce_file_id_t file, size_t file_size, const bruce_image_draw_options_t *options,
     image_bitmap_t *out_bitmap
 ) {
-    bruce_memory_object_t object = {0};
-    bruce_result_t result = memory__external_alloc(file_size, &object);
-    if (result != BRUCE_OK) return result;
+    const void *data = memory__external_malloc(file_size);
+    if (data == NULL) return BRUCE_ERR_NO_MEMORY;
 
     uint8_t *chunk = memory__malloc(IMAGE_READ_CHUNK_SIZE);
     if (chunk == NULL) {
-        (void)memory__external_free(&object);
+        (void)memory__external_free(data);
         return BRUCE_ERR_NO_MEMORY;
     }
 
-    result = storage__seek(file, 0, SEEK_SET, NULL);
+    bruce_result_t result = storage__seek(file, 0, SEEK_SET, NULL);
     size_t total = 0;
     while (result == BRUCE_OK && total < file_size) {
         size_t wanted = file_size - total;
@@ -272,18 +260,14 @@ static bruce_result_t image__decode_gif_from_file(
         result = storage__read(file, chunk, wanted, &count);
         if (result == BRUCE_OK && count == 0) result = BRUCE_ERR_IO;
         if (result == BRUCE_OK) {
-            result = memory__external_write(&object, total, chunk, count);
+            result = memory__external_memcpy(data, total, chunk, count);
             total += count;
         }
     }
     memory__free(chunk);
 
-    if (result == BRUCE_OK) {
-        const void *data = NULL;
-        result = memory__external_map(&object, &data);
-        if (result == BRUCE_OK) result = image__decode_gif(data, total, options, out_bitmap);
-    }
-    bruce_result_t free_result = memory__external_free(&object);
+    if (result == BRUCE_OK) result = image__decode_gif(data, total, options, out_bitmap);
+    bruce_result_t free_result = memory__external_free(data);
     return result == BRUCE_OK ? free_result : result;
 }
 

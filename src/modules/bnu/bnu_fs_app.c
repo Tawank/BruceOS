@@ -163,8 +163,8 @@ int bnu_cat_app_main(int argc, char **argv) {
     return BRUCE_OK;
 }
 
-/* head/tail load the whole file (or stdin) into one memory__external_alloc()-
- * backed buffer -- same approach as bnu_less_app_main() (bnu_pager_app.c's
+/* head/tail load the whole file (or stdin) into one memory__external_malloc()
+ * allocation -- same approach as bnu_less_app_main() (bnu_pager_app.c's
  * LESS_MAX_BYTES) -- then find the cut point by counting lines, rather than
  * streaming. Large enough for any text file worth viewing a piece of, backed
  * by PSRAM/swap rather than the internal heap. */
@@ -172,8 +172,7 @@ int bnu_cat_app_main(int argc, char **argv) {
 #define BNU_HEAD_TAIL_DEFAULT_LINES 10
 #define BNU_HEAD_TAIL_CHUNK_SIZE 256
 
-static bruce_result_t
-bnu__head_tail_load_path(const char *path, bruce_memory_object_t *object, size_t *out_length) {
+static bruce_result_t bnu__head_tail_load_path(const char *path, const void **out_data, size_t *out_length) {
     bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
     bruce_result_t result = storage__open(path, BRUCE_STORAGE_OPEN_READ, &file);
     if (result != BRUCE_OK) return result;
@@ -183,31 +182,37 @@ bnu__head_tail_load_path(const char *path, bruce_memory_object_t *object, size_t
     if (result == BRUCE_OK && size > BNU_HEAD_TAIL_MAX_BYTES) result = BRUCE_ERR_RESOURCE_LIMIT;
     if (result == BRUCE_OK) result = storage__seek(file, 0, SEEK_SET, NULL);
 
-    bruce_memory_object_t obj = {0};
-    if (result == BRUCE_OK && size > 0) result = memory__external_alloc((size_t)size, &obj);
+    const void *data = NULL;
+    if (result == BRUCE_OK && size > 0) {
+        data = memory__external_malloc((size_t)size);
+        if (data == NULL) result = BRUCE_ERR_NO_MEMORY;
+    }
     size_t offset = 0;
     unsigned char chunk[BNU_HEAD_TAIL_CHUNK_SIZE];
     while (result == BRUCE_OK && offset < (size_t)size) {
         size_t read_size = 0;
         result = storage__read(file, chunk, sizeof(chunk), &read_size);
         if (result == BRUCE_OK && read_size == 0) result = BRUCE_ERR_IO;
-        if (result == BRUCE_OK) result = memory__external_write(&obj, offset, chunk, read_size);
+        if (result == BRUCE_OK) result = memory__external_memcpy(data, offset, chunk, read_size);
         offset += read_size;
     }
     (void)storage__close(file);
     if (result != BRUCE_OK) {
-        if (obj.backend != BRUCE_MEMORY_BACKEND_INVALID) (void)memory__external_free(&obj);
+        if (data != NULL) (void)memory__external_free(data);
         return result;
     }
-    *object = obj;
+    *out_data = data;
     *out_length = offset;
     return BRUCE_OK;
 }
 
-static bruce_result_t
-bnu__head_tail_load_stdin(size_t size, bruce_memory_object_t *object, size_t *out_length) {
-    bruce_memory_object_t obj = {0};
-    bruce_result_t result = size > 0 ? memory__external_alloc(size, &obj) : BRUCE_OK;
+static bruce_result_t bnu__head_tail_load_stdin(size_t size, const void **out_data, size_t *out_length) {
+    const void *data = NULL;
+    bruce_result_t result = BRUCE_OK;
+    if (size > 0) {
+        data = memory__external_malloc(size);
+        if (data == NULL) result = BRUCE_ERR_NO_MEMORY;
+    }
     size_t offset = 0;
     unsigned char chunk[BNU_HEAD_TAIL_CHUNK_SIZE];
     while (result == BRUCE_OK && offset < size) {
@@ -215,14 +220,14 @@ bnu__head_tail_load_stdin(size_t size, bruce_memory_object_t *object, size_t *ou
         size_t read_size = 0;
         result = stdio__read(chunk, want, UINT32_MAX, &read_size);
         if (result == BRUCE_OK && read_size == 0) result = BRUCE_ERR_IO;
-        if (result == BRUCE_OK) result = memory__external_write(&obj, offset, chunk, read_size);
+        if (result == BRUCE_OK) result = memory__external_memcpy(data, offset, chunk, read_size);
         offset += read_size;
     }
     if (result != BRUCE_OK) {
-        if (obj.backend != BRUCE_MEMORY_BACKEND_INVALID) (void)memory__external_free(&obj);
+        if (data != NULL) (void)memory__external_free(data);
         return result;
     }
-    *object = obj;
+    *out_data = data;
     *out_length = offset;
     return BRUCE_OK;
 }
@@ -303,20 +308,14 @@ static int bnu__head_tail_app_main(int argc, char **argv, bool tail) {
     }
     if (!from_stdin && !path_resolved) return BRUCE_ERR_INVALID_PATH;
 
-    bruce_memory_object_t object = {0};
+    const void *data = NULL;
     size_t length = 0;
     bruce_result_t result = from_stdin
-                                 ? bnu__head_tail_load_stdin((size_t)parsed_stdin_size, &object, &length)
-                                 : bnu__head_tail_load_path(path, &object, &length);
+                                 ? bnu__head_tail_load_stdin((size_t)parsed_stdin_size, &data, &length)
+                                 : bnu__head_tail_load_path(path, &data, &length);
     if (result != BRUCE_OK) {
         stdio__printf("%s: %s: %s\n", command, from_stdin ? "-" : path, result__to_string(result));
         return result;
-    }
-
-    const void *data = NULL;
-    if (length > 0 && memory__external_map(&object, &data) != BRUCE_OK) {
-        if (object.backend != BRUCE_MEMORY_BACKEND_INVALID) (void)memory__external_free(&object);
-        return BRUCE_ERR_IO;
     }
 
     size_t start = 0, stop = length;
@@ -326,7 +325,7 @@ static int bnu__head_tail_app_main(int argc, char **argv, bool tail) {
     }
     if (stop > start) (void)stdio__write((const char *)data + start, stop - start);
 
-    if (object.backend != BRUCE_MEMORY_BACKEND_INVALID) (void)memory__external_free(&object);
+    if (data != NULL) (void)memory__external_free(data);
     return BRUCE_OK;
 }
 

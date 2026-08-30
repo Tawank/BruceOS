@@ -27,7 +27,7 @@
 /* Above the 4096-byte Core process default: workers are now
  * process_registry-tracked processes (see http_server__start_workers()), so
  * every route callback's frame sits on top of process bookkeeping calls
- * (memory__malloc()/memory__external_alloc() et al.) that didn't used to run
+ * (memory__malloc()/memory__external_malloc() et al.) that didn't used to run
  * on this stack. */
 #define HTTP_SERVER__WORKER_STACK_SIZE 6144u
 #define HTTP_SERVER__WORKER_PRIORITY 5u
@@ -314,7 +314,7 @@ static esp_err_t http_server__invoke_dynamic(
  * rather than a bare FreeRTOS task, so route callbacks -- which run
  * synchronously on this stack via http_server__invoke_dynamic() below -- get
  * a real current-process context. That's what lets webui's route handlers
- * call memory__malloc()/memory__external_alloc(): both require
+ * call memory__malloc()/memory__external_malloc(): both require
  * process__current_id() to resolve, which only happens on a task
  * process_registry__create() itself spawned. Returning (rather than calling
  * vTaskDelete()) lets process__trampoline() tear the process down normally. */
@@ -378,7 +378,7 @@ static void http_server__abort_idle_workers(void) {
             /* Force-kill rather than vTaskDelete(): the worker is a tracked
              * process now, and process__kill() releases whatever
              * process_registry resources (memory__malloc/memory__external_
-             * alloc allocations, mainly) it still owned instead of leaking
+             * malloc allocations, mainly) it still owned instead of leaking
              * them. */
             (void)process__kill(s_worker_process_ids[worker]);
             s_worker_process_ids[worker] = BRUCE_PROCESS_ID_INVALID;

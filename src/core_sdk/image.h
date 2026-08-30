@@ -39,7 +39,7 @@ typedef struct {
     uint16_t source_width;
     uint16_t source_height;
     bruce_image_format_t format;
-    bruce_memory_object_t backing;
+    bool external; /* true when pixels came from memory__external_malloc() and must be freed that way. */
 } image_bitmap_t;
 
 typedef struct bruce_gif bruce_gif_t;

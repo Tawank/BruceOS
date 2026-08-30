@@ -12,12 +12,12 @@
  * `truncated` is set so the caller can say so.
  *
  * text_pool, links, and images are only ever appended to during parsing,
- * then read-only afterward -- so they live in a memory__external_alloc()
- * object (PSRAM, or swap carved out of flash where there's no PSRAM) instead
- * of the process-owned internal heap, the same way core/http/http.c keeps a
- * response body off the internal heap once it's known to be sizeable. That
- * leaves more internal RAM free for things that must live there, in
- * particular mbedTLS's own per-request TLS buffers during an inline image
+ * then read-only afterward -- so they live in a memory__external_malloc()
+ * allocation (PSRAM, or swap carved out of flash where there's no PSRAM)
+ * instead of the process-owned internal heap, the same way core/http/http.c
+ * keeps a response body off the internal heap once it's known to be
+ * sizeable. That leaves more internal RAM free for things that must live
+ * there, in particular mbedTLS's own per-request TLS buffers during an inline image
  * fetch. items stays on the internal heap: it's walked byte-by-byte on
  * *every* draw (word-wrap layout re-runs on every redraw, not just once per
  * navigation, and does so 2-3 times per frame -- see browser_render.c) and
@@ -30,7 +30,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "core_sdk/memory.h"
 #include "core_sdk/result.h"
 
 #define BROWSER_URL_MAX 400
@@ -103,7 +102,7 @@ typedef enum {
 typedef struct {
     const char *text_pool; /* Externally backed -- see the comment above. */
     size_t text_pool_len;
-    bruce_memory_object_t text_pool_object;
+    size_t text_pool_cap;
 
     browser_item_t *items;
     size_t item_count;
@@ -111,15 +110,15 @@ typedef struct {
 
     const browser_link_t *links; /* Externally backed -- see the comment above. */
     size_t link_count;
-    bruce_memory_object_t links_object;
+    size_t link_cap;
 
     const browser_image_ref_t *images; /* Externally backed -- see the comment above. */
     size_t image_count;
-    bruce_memory_object_t images_object;
+    size_t image_cap;
 
-    const browser_anchor_t *anchors;
+    const browser_anchor_t *anchors; /* Externally backed -- see the comment above. */
     size_t anchor_count;
-    bruce_memory_object_t anchors_object;
+    size_t anchor_cap;
 
     /* item_index of the first <main>/<article>/<nav>/<footer> seen while
      * parsing, or -1 if the page has none -- see

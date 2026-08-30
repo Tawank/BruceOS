@@ -9,7 +9,6 @@
 #include <stdint.h>
 
 #include "core_sdk/http_server.h"
-#include "core_sdk/memory.h"
 #include "core_sdk/result.h"
 
 /* Local per-app config (see core_sdk/app_config.h); persisted at
@@ -71,41 +70,40 @@ bool webui__storage_path(
 void webui__human_size(size_t bytes, char *output, size_t capacity);
 
 /* --- webui_memory.c ---
- * memory__external_alloc()-backed helpers so large/variable-size buffers
+ * memory__external_malloc()-backed helpers so large/variable-size buffers
  * come from PSRAM or swap when available instead of a fixed-size internal
  * allocation. */
 
 /* Largest single allocation realistically available right now, across
  * internal RAM, PSRAM, and swap, minus a small safety margin. Replaces a
  * fixed cap (there is no more WEBUI_FORM_MAX) for buffers that go through
- * memory__external_write()/memory__external_map() rather than a raw
- * pointer, so swap is a genuine option. */
+ * memory__external_memcpy() rather than a raw pointer, so swap is a genuine
+ * option. */
 size_t webui__memory_cap(void);
 
-/* Allocates a directly-writable buffer: PSRAM (via memory__external_alloc(),
- * tracked and released with the request's process) when it has room for
- * `size`, otherwise a plain memory__malloc(). Never swap: callers write into
- * the buffer through a raw pointer (storage__list()/display__snapshot()
- * filling it directly), which swap's flash-backed objects don't support --
- * only memory__external_write() may touch swap memory, and probing swap only
- * to discover that and free it immediately would erase a real flash region
- * for nothing. */
-bruce_result_t webui__alloc_direct(void **out_data, bruce_memory_object_t *out_object, bool *out_external, size_t size);
-void webui__free_direct(void *data, bruce_memory_object_t *object, bool external);
+/* Allocates a directly-writable buffer: PSRAM or internal RAM (via
+ * memory__external_malloc_writable(), tracked and released with the
+ * request's process) when either has room for `size`, otherwise a plain
+ * memory__malloc(). Never swap: callers write into the buffer through a raw
+ * pointer (storage__list()/display__snapshot() filling it directly), which
+ * swap's flash-backed allocations don't support -- only
+ * memory__external_memcpy() may touch swap memory. */
+bruce_result_t webui__alloc_direct(void **out_data, bool *out_external, size_t size);
+void webui__free_direct(void *data, bool external);
 
-/* Fills object[0..length) from the request body in WEBUI_IO_CHUNK pieces,
- * via memory__external_write() so this works regardless of which backend
- * memory__external_alloc() picked (a straight recv() into the object's own
- * memory would need a raw pointer, which swap can't offer). */
+/* Fills data[0..length) from the request body in WEBUI_IO_CHUNK pieces, via
+ * memory__external_memcpy() so this works regardless of which backend
+ * memory__external_malloc() picked (a straight recv() into that memory
+ * would need a raw pointer, which swap can't offer). */
 bruce_result_t
-webui__receive_into_object(bruce_http_server_request_t *request, const bruce_memory_object_t *object, size_t length);
+webui__receive_into_object(bruce_http_server_request_t *request, const void *data, size_t length);
 
-/* Percent/plus-decodes source[0..length) into object starting at offset 0,
- * in WEBUI_IO_CHUNK-sized memory__external_write() calls; *out_length
- * receives the decoded length (always <= length, so a `length`-byte object
- * always has room). Same validation rules as webui__decode(). */
+/* Percent/plus-decodes source[0..length) into data starting at offset 0, in
+ * WEBUI_IO_CHUNK-sized memory__external_memcpy() calls; *out_length receives
+ * the decoded length (always <= length, so a `length`-byte allocation always
+ * has room). Same validation rules as webui__decode(). */
 bruce_result_t webui__decode_to_object(
-    const char *source, size_t length, const bruce_memory_object_t *object, size_t *out_length
+    const char *source, size_t length, const void *data, size_t *out_length
 );
 
 /* --- webui_auth.c --- */

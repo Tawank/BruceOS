@@ -283,7 +283,7 @@ static bruce_result_t gif__decode_next(bruce_gif_t *gif, bool *out_trailer) {
 
 bruce_result_t gif__open_memory(
     const uint8_t *data, size_t size, const bruce_image_draw_options_t *options,
-    const bruce_memory_object_t *backing, bruce_gif_t **out_gif
+    const void *backing, bruce_gif_t **out_gif
 ) {
     if (data == NULL || size < 13 || options == NULL || out_gif == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     *out_gif = NULL;
@@ -336,7 +336,7 @@ bruce_result_t gif__open_memory(
         image__gif_close(gif);
         return result != BRUCE_OK ? result : BRUCE_ERR_IO;
     }
-    if (backing != NULL) gif->backing = *backing;
+    if (backing != NULL) gif->backing = backing;
     *out_gif = gif;
     return BRUCE_OK;
 }
@@ -370,7 +370,7 @@ void image__gif_close(bruce_gif_t *gif) {
     if (gif == NULL) return;
     memory__free(gif->restore_canvas);
     memory__free(gif->canvas);
-    if (gif->backing.backend != BRUCE_MEMORY_BACKEND_INVALID) (void)memory__external_free(&gif->backing);
+    if (gif->backing != NULL) (void)memory__external_free(gif->backing);
     memory__free(gif);
 }
 

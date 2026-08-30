@@ -66,7 +66,8 @@ bruce_result_t ext_mem_loader__stage_path(const char *path, bruce_ext_mem_loader
         return result;
     }
 
-    result = memory__external_alloc((size_t)file_size + 1u, &out_image->memory);
+    const void *data = memory__external_malloc((size_t)file_size + 1u);
+    if (data == NULL) result = BRUCE_ERR_NO_MEMORY;
     uint8_t *buffer = NULL;
     if (result == BRUCE_OK) {
         buffer = malloc(LOADER__IO_CHUNK);
@@ -85,56 +86,49 @@ bruce_result_t ext_mem_loader__stage_path(const char *path, bruce_ext_mem_loader
             break;
         }
         source_crc = esp_rom_crc32_le(source_crc, buffer, received);
-        result = memory__external_write(&out_image->memory, offset, buffer, received);
+        result = memory__external_memcpy(data, offset, buffer, received);
         offset += received;
     }
     static const uint8_t terminator = 0;
-    if (result == BRUCE_OK) {
-        result = memory__external_write(&out_image->memory, (size_t)file_size, &terminator, 1);
-    }
+    if (result == BRUCE_OK) result = memory__external_memcpy(data, (size_t)file_size, &terminator, 1);
     free(buffer);
     bruce_result_t close_result = storage__close(file);
     if (result == BRUCE_OK) result = close_result;
-    if (result == BRUCE_OK) {
-        const void *data = NULL;
-        result = memory__external_map(&out_image->memory, &data);
 #if !CONFIG_BRUCE_QEMU_TEST_MODE
-        if (result == BRUCE_OK && esp_rom_crc32_le(0, data, (size_t)file_size) != source_crc) {
-            result = BRUCE_ERR_IO;
-        }
+    if (result == BRUCE_OK && esp_rom_crc32_le(0, data, (size_t)file_size) != source_crc) {
+        result = BRUCE_ERR_IO;
+    }
 #endif
-        if (result == BRUCE_OK) {
-            out_image->data = data;
-            out_image->size = (size_t)file_size;
-        }
-    }
     if (result != BRUCE_OK) {
-        if (out_image->memory.handle != 0) (void)memory__external_free(&out_image->memory);
-        memset(out_image, 0, sizeof(*out_image));
+        if (data != NULL) (void)memory__external_free(data);
+        return result;
     }
-    return result;
+    out_image->data = data;
+    out_image->size = (size_t)file_size;
+    (void)memory_external__backend_of(data, &out_image->backend);
+    return BRUCE_OK;
 }
 
 bruce_result_t ext_mem_loader__release_image(bruce_ext_mem_loader_image_t *image) {
     if (image == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
-    bruce_result_t result = memory__external_free(&image->memory);
+    bruce_result_t result = memory__external_free(image->data);
     if (result == BRUCE_OK) memset(image, 0, sizeof(*image));
     return result;
 }
 
 bruce_result_t ext_mem_loader__adopt_image(bruce_ext_mem_loader_image_t *image) {
     if (image == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
-    return memory_external__adopt(&image->memory);
+    return memory_external__adopt_pointer(image->data);
 }
 
 bruce_result_t ext_mem_loader__allocate_xip(size_t size, bruce_ext_mem_loader_xip_image_t *out_image) {
     if (out_image == NULL || size == 0) return BRUCE_ERR_INVALID_ARGUMENT;
     memset(out_image, 0, sizeof(*out_image));
-    bruce_result_t result = memory_external__alloc(size, true, &out_image->memory);
+    bruce_result_t result = memory_external__alloc(size, true, true, &out_image->memory);
     const void *instruction = NULL;
     const void *data = NULL;
     if (result == BRUCE_OK) { result = memory_external__instruction_map(&out_image->memory, &instruction); }
-    if (result == BRUCE_OK) result = memory__external_map(&out_image->memory, &data);
+    if (result == BRUCE_OK) result = memory_external__map(&out_image->memory, &data);
     if (result != BRUCE_OK) {
         if (out_image->memory.handle != 0) { (void)memory_external__release(&out_image->memory); }
         return result;
@@ -150,7 +144,7 @@ ext_mem_loader__write_xip(
     const bruce_ext_mem_loader_xip_image_t *image, size_t offset, const void *data, size_t size
 ) {
     if (image == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
-    return memory__external_write(&image->memory, offset, data, size);
+    return memory_external__write(&image->memory, offset, data, size);
 }
 
 bruce_result_t ext_mem_loader__adopt_xip(bruce_ext_mem_loader_xip_image_t *image) {

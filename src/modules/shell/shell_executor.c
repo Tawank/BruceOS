@@ -187,54 +187,51 @@ static int shell_executor__external(
 }
 
 typedef struct {
-    bruce_memory_object_t object;
+    const void *data;
+    size_t capacity;
     size_t length;
 } shell_executor__buffer_t;
 
 static void shell_executor__buffer_free(shell_executor__buffer_t *buffer) {
-    if (buffer->object.backend != BRUCE_MEMORY_BACKEND_INVALID) (void)memory__external_free(&buffer->object);
+    if (buffer->data != NULL) (void)memory__external_free(buffer->data);
+    buffer->data = NULL;
+    buffer->capacity = 0;
     buffer->length = 0;
 }
 
 /* Appends to an external-memory-backed buffer, growing it by doubling: each
- * growth step allocates a new, bigger memory__external object and copies the
- * old bytes across, since external objects can't be resized in place (same
- * approach as http__external_body_reserve() in core/http/http.c). Routing
- * pipe data through PSRAM/swap this way -- rather than a memory__malloc()
- * buffer capped well below it -- means a captured command's output isn't
- * bounded by the internal heap's largest free block, which on a board
- * without PSRAM or a committed swap partition can be as little as ~100 KiB
- * of fragmented internal RAM shared with everything else. This only fails
- * once the backing store itself (PSRAM, swap, or as a last-resort plain
- * internal RAM -- see memory__external_alloc()) is actually exhausted. */
+ * growth step allocates a new, bigger memory__external_malloc() allocation
+ * and copies the old bytes across, since external allocations can't be
+ * resized in place (same approach as http__external_body_reserve() in
+ * core/http/http.c). Routing pipe data through PSRAM/swap this way -- rather
+ * than a memory__malloc() buffer capped well below it -- means a captured
+ * command's output isn't bounded by the internal heap's largest free block,
+ * which on a board without PSRAM or a committed swap partition can be as
+ * little as ~100 KiB of fragmented internal RAM shared with everything else.
+ * This only fails once the backing store itself (PSRAM, swap, or as a
+ * last-resort plain internal RAM) is actually exhausted. */
 static bool shell_executor__buffer_append(shell_executor__buffer_t *buffer, const void *data, size_t size) {
     if (size == 0) return true;
-    size_t capacity = buffer->object.backend != BRUCE_MEMORY_BACKEND_INVALID ? buffer->object.size : 0;
     size_t required = buffer->length + size;
     if (required < buffer->length) return false;
-    if (required > capacity) {
-        size_t new_capacity = capacity == 0 ? SHELL_PIPE_CHUNK : capacity;
+    if (required > buffer->capacity) {
+        size_t new_capacity = buffer->capacity == 0 ? SHELL_PIPE_CHUNK : buffer->capacity;
         while (new_capacity < required) {
             size_t doubled = new_capacity * 2u;
             if (doubled < new_capacity) return false;
             new_capacity = doubled;
         }
-        bruce_memory_object_t grown;
-        if (memory__external_alloc(new_capacity, &grown) != BRUCE_OK) return false;
-        if (buffer->length > 0) {
-            const void *old_data = NULL;
-            bruce_result_t result = memory__external_map(&buffer->object, &old_data);
-            if (result == BRUCE_OK) result = memory__external_write(&grown, 0, old_data, buffer->length);
-            if (result != BRUCE_OK) {
-                (void)memory__external_free(&grown);
-                return false;
-            }
+        const void *grown = memory__external_malloc(new_capacity);
+        if (grown == NULL) return false;
+        if (buffer->length > 0 && memory__external_memcpy(grown, 0, buffer->data, buffer->length) != BRUCE_OK) {
+            (void)memory__external_free(grown);
+            return false;
         }
-        if (buffer->object.backend != BRUCE_MEMORY_BACKEND_INVALID)
-            (void)memory__external_free(&buffer->object);
-        buffer->object = grown;
+        if (buffer->data != NULL) (void)memory__external_free(buffer->data);
+        buffer->data = grown;
+        buffer->capacity = new_capacity;
     }
-    if (memory__external_write(&buffer->object, buffer->length, data, size) != BRUCE_OK) return false;
+    if (memory__external_memcpy(buffer->data, buffer->length, data, size) != BRUCE_OK) return false;
     buffer->length += size;
     return true;
 }
@@ -358,21 +355,16 @@ static bool shell_executor__write_file(const char *path, bool append, const shel
     if (storage__open(path, flags, &file) != BRUCE_OK) return false;
     bool ok = true;
     if (buffer->length > 0) {
-        const void *data = NULL;
-        if (memory__external_map(&buffer->object, &data) != BRUCE_OK) {
-            ok = false;
-        } else {
-            size_t offset = 0;
-            while (ok && offset < buffer->length) {
-                size_t written = 0;
-                bruce_result_t result =
-                    storage__write(file, (const char *)data + offset, buffer->length - offset, &written);
-                if (result != BRUCE_OK || written == 0) {
-                    ok = false;
-                    break;
-                }
-                offset += written;
+        size_t offset = 0;
+        while (ok && offset < buffer->length) {
+            size_t written = 0;
+            bruce_result_t result =
+                storage__write(file, (const char *)buffer->data + offset, buffer->length - offset, &written);
+            if (result != BRUCE_OK || written == 0) {
+                ok = false;
+                break;
             }
+            offset += written;
         }
     }
     (void)storage__close(file);
@@ -492,8 +484,6 @@ static bool shell_executor__pipe_drain_output(bruce_stdio_session_t session) {
  * shell_executor__dispatch()'s big comment on GUI=1/BRUCE_LAUNCH_FOREGROUND). */
 static int
 shell_executor__pipe_write(int target_argc, char **target_words, const shell_executor__buffer_t *buffer) {
-    const void *data = NULL;
-    if (buffer->length > 0 && memory__external_map(&buffer->object, &data) != BRUCE_OK) return 1;
     bruce_stdio_session_t session = BRUCE_STDIO_SESSION_INVALID;
     if (stdio__session_create(&session) != BRUCE_OK) return 1;
     /* Establishes the new session's tty geometry before the target starts, so
@@ -524,7 +514,7 @@ shell_executor__pipe_write(int target_argc, char **target_words, const shell_exe
     while (offset < buffer->length) {
         (void)shell_executor__pipe_drain_output(session);
         size_t chunk = buffer->length - offset > 128u ? 128u : buffer->length - offset;
-        bruce_result_t written = stdio__session_write_input(session, (const char *)data + offset, chunk);
+        bruce_result_t written = stdio__session_write_input(session, (const char *)buffer->data + offset, chunk);
         if (written == BRUCE_OK) {
             offset += chunk;
         } else if (written == BRUCE_ERR_RESOURCE_LIMIT) {

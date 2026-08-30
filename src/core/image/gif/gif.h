@@ -16,7 +16,7 @@ struct bruce_gif {
     uint16_t *canvas;
     uint16_t *restore_canvas;
     bruce_image_draw_options_t options;
-    bruce_memory_object_t backing;
+    const void *backing; /* Non-NULL when data/canvas came from memory__external_malloc(). */
     uint32_t delay_ms;
     uint16_t previous_left;
     uint16_t previous_top;
@@ -27,7 +27,7 @@ struct bruce_gif {
 
 bruce_result_t gif__open_memory(
     const uint8_t *data, size_t size, const bruce_image_draw_options_t *options,
-    const bruce_memory_object_t *backing, bruce_gif_t **out_gif
+    const void *backing, bruce_gif_t **out_gif
 );
 
 bruce_result_t image__decode_gif(

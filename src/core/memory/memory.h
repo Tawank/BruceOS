@@ -18,14 +18,36 @@ typedef struct {
 
 #include "core_sdk/memory.h"
 
-/* Core-only variants used by the ELF loader's executable mappings. */
+/*
+ * Core-only, object-based variants of the memory__external_*() API. These
+ * exist for callers Core code that need what a raw pointer can't carry:
+ * - the ELF loader's executable (XIP) mappings, which need a separate
+ *   instruction-bus pointer and an explicit adopt/transfer step;
+ * - callers that must know which backend an allocation landed in (e.g. to
+ *   decide whether a pointer is directly CPU-writable) before deciding how
+ *   to fill it.
+ *
+ * An object obtained here can still be freed through the public pointer
+ * API: memory__external_free(data) after memory_external__map(), since both
+ * paths populate the same underlying record table.
+ */
 bruce_result_t memory_external__alloc(
-    size_t size, bool executable, bruce_memory_object_t *out_object
+    size_t size, bool executable, bool allow_swap, bruce_memory_object_t *out_object
 );
-bruce_result_t memory_external__adopt(bruce_memory_object_t *object);
+bruce_result_t
+memory_external__write(const bruce_memory_object_t *object, size_t offset, const void *data, size_t size);
+bruce_result_t memory_external__map(const bruce_memory_object_t *object, const void **out_data);
 bruce_result_t memory_external__instruction_map(
     const bruce_memory_object_t *object, const void **out_instruction
 );
+bruce_result_t memory_external__adopt(bruce_memory_object_t *object);
+/* Pointer-based counterpart of memory_external__adopt(), for images built
+ * with the public memory__external_malloc() API. */
+bruce_result_t memory_external__adopt_pointer(const void *ptr);
+/* Reports which backend a memory__external_malloc()/calloc() allocation
+ * landed in, for the few callers that must know before writing through the
+ * pointer directly (e.g. flash-mapped swap memory isn't CPU-writable). */
+bruce_result_t memory_external__backend_of(const void *ptr, bruce_memory_backend_t *out_backend);
 bruce_result_t memory_external__release(bruce_memory_object_t *object);
 void memory_external__get_swap_stats(size_t *out_total, size_t *out_free, size_t *out_largest);
 bruce_result_t memory_external__layout(
@@ -33,19 +55,3 @@ bruce_result_t memory_external__layout(
 );
 bruce_result_t memory_external__read(uintptr_t offset, void *buffer, size_t size);
 bruce_result_t memory_external__readable_size(uintptr_t offset, size_t *out_size);
-
-/*
- * Core-owned external-memory objects: PSRAM/swap allocations with no
- * process owner. Unlike memory__external_*(), these are never released by
- * process exit or process_registry cleanup - they live until an explicit
- * memory_external_core__free() call, matching the lifetime of Core
- * singleton state (config, status icons, ...) that must survive whichever
- * process last touched it. Only Core code may call these; the object
- * handles are not exposed across the core_sdk boundary.
- */
-bruce_result_t memory_external_core__alloc(size_t size, bruce_memory_object_t *out_object);
-bruce_result_t memory_external_core__write(
-    const bruce_memory_object_t *object, size_t offset, const void *data, size_t size
-);
-bruce_result_t memory_external_core__map(const bruce_memory_object_t *object, const void **out_data);
-bruce_result_t memory_external_core__free(bruce_memory_object_t *object);

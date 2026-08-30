@@ -16,10 +16,10 @@ bruce_result_t browser_document__create(browser_document_t **out_doc) {
     if (out_doc == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     browser_document_t *doc = memory__malloc(sizeof(*doc));
     if (doc == NULL) return BRUCE_ERR_NO_MEMORY;
-    /* Zeroing leaves text_pool_object/links_object at BRUCE_MEMORY_BACKEND_INVALID
-     * (0) -- both are allocated lazily, on the first add_text()/add_link()
-     * call, rather than up front here, so a page with no text or no links
-     * never touches the external allocator at all. */
+    /* Zeroing leaves text_pool/links (and their _cap fields) NULL/0 -- both
+     * are allocated lazily, on the first add_text()/add_link() call, rather
+     * than up front here, so a page with no text or no links never touches
+     * the external allocator at all. */
     memset(doc, 0, sizeof(*doc));
 
     doc->items = memory__malloc(BROWSER_INITIAL_ITEM_CAP * sizeof(*doc->items));
@@ -38,56 +38,41 @@ bruce_result_t browser_document__create(browser_document_t **out_doc) {
 
 void browser_document__destroy(browser_document_t *doc) {
     if (doc == NULL) return;
-    if (doc->text_pool_object.backend != BRUCE_MEMORY_BACKEND_INVALID) {
-        (void)memory__external_free(&doc->text_pool_object);
-    }
-    if (doc->links_object.backend != BRUCE_MEMORY_BACKEND_INVALID) {
-        (void)memory__external_free(&doc->links_object);
-    }
-    if (doc->images_object.backend != BRUCE_MEMORY_BACKEND_INVALID) {
-        (void)memory__external_free(&doc->images_object);
-    }
-    if (doc->anchors_object.backend != BRUCE_MEMORY_BACKEND_INVALID) {
-        (void)memory__external_free(&doc->anchors_object);
-    }
+    if (doc->text_pool != NULL) (void)memory__external_free(doc->text_pool);
+    if (doc->links != NULL) (void)memory__external_free(doc->links);
+    if (doc->images != NULL) (void)memory__external_free(doc->images);
+    if (doc->anchors != NULL) (void)memory__external_free(doc->anchors);
     memory__free(doc->items);
     memory__free(doc);
 }
 
 /* Grows an external (PSRAM/swap, or internal RAM only as a last resort --
- * see memory__external_alloc()) buffer to hold at least `used + extra`
- * bytes, migrating the `used` bytes already written across, and updates
- * `*mapped` to the freshly mapped read pointer. External objects can't be
- * resized in place, so -- exactly like core/http/http.c's own
- * http__external_body_reserve() -- each growth step allocates a new, bigger
- * object and copies the old one across via a read-only map plus a write.
- * A no-op returning true when the existing object already fits. */
+ * see memory__external_malloc()) allocation to hold at least `used + extra`
+ * bytes, migrating the `used` bytes already written across. External
+ * allocations can't be resized in place, so -- exactly like
+ * core/http/http.c's own http__external_body_reserve() -- each growth step
+ * allocates a new, bigger one and copies the old one across. A no-op
+ * returning true when the existing allocation already fits. */
 static bool browser_document__ext_reserve(
-    bruce_memory_object_t *object, const void **mapped, size_t used, size_t extra, size_t initial, size_t hard_max
+    const void **data, size_t *capacity, size_t used, size_t extra, size_t initial, size_t hard_max
 ) {
-    size_t capacity = object->backend != BRUCE_MEMORY_BACKEND_INVALID ? object->size : 0;
     size_t required = used + extra;
-    if (required <= capacity) return true;
+    if (required <= *capacity) return true;
     if (required > hard_max) return false;
 
-    size_t new_capacity = capacity == 0 ? initial : capacity;
+    size_t new_capacity = *capacity == 0 ? initial : *capacity;
     while (new_capacity < required) {
         new_capacity = new_capacity > hard_max / 2 ? hard_max : new_capacity * 2;
     }
-    bruce_memory_object_t grown;
-    if (memory__external_alloc(new_capacity, &grown) != BRUCE_OK) return false;
-    if (used > 0 && memory__external_write(&grown, 0, *mapped, used) != BRUCE_OK) {
-        (void)memory__external_free(&grown);
+    const void *grown = memory__external_malloc(new_capacity);
+    if (grown == NULL) return false;
+    if (used > 0 && memory__external_memcpy(grown, 0, *data, used) != BRUCE_OK) {
+        (void)memory__external_free(grown);
         return false;
     }
-    const void *new_map = NULL;
-    if (memory__external_map(&grown, &new_map) != BRUCE_OK) {
-        (void)memory__external_free(&grown);
-        return false;
-    }
-    if (object->backend != BRUCE_MEMORY_BACKEND_INVALID) (void)memory__external_free(object);
-    *object = grown;
-    *mapped = new_map;
+    if (*data != NULL) (void)memory__external_free(*data);
+    *data = grown;
+    *capacity = new_capacity;
     return true;
 }
 
@@ -210,7 +195,7 @@ static void browser_document__retarget_anchors(browser_document_t *doc, size_t o
         browser_anchor_t anchor = doc->anchors[i - 1];
         if (anchor.item_index != old_item_count) break;
         anchor.item_index = (uint16_t)doc->item_count;
-        (void)memory__external_write(&doc->anchors_object, (i - 1) * sizeof(anchor), &anchor, sizeof(anchor));
+        (void)memory__external_memcpy(doc->anchors, (i - 1) * sizeof(anchor), &anchor, sizeof(anchor));
     }
 }
 
@@ -245,18 +230,15 @@ void browser_document__add_text(
         browser_document__retarget_anchors(doc, old_item_count);
     }
     if (!browser_document__ext_reserve(
-            &doc->text_pool_object, (const void **)&doc->text_pool, doc->text_pool_len, len,
+            (const void **)&doc->text_pool, &doc->text_pool_cap, doc->text_pool_len, len,
             BROWSER_INITIAL_TEXT_CAP, BROWSER_MAX_TEXT_BYTES
         )) {
         doc->truncated = true;
         /* Fit whatever still fits rather than dropping the whole run. */
-        size_t capacity = doc->text_pool_object.backend != BRUCE_MEMORY_BACKEND_INVALID
-                               ? doc->text_pool_object.size
-                               : 0;
-        len = doc->text_pool_len < capacity ? capacity - doc->text_pool_len : 0;
+        len = doc->text_pool_len < doc->text_pool_cap ? doc->text_pool_cap - doc->text_pool_len : 0;
         if (len == 0) return;
     }
-    if (memory__external_write(&doc->text_pool_object, doc->text_pool_len, text, len) != BRUCE_OK) {
+    if (memory__external_memcpy(doc->text_pool, doc->text_pool_len, text, len) != BRUCE_OK) {
         doc->truncated = true;
         return;
     }
@@ -277,14 +259,13 @@ int browser_document__add_link(browser_document_t *doc, const char *url) {
     snprintf(link.url, sizeof(link.url), "%s", url);
 
     if (!browser_document__ext_reserve(
-            &doc->links_object, (const void **)&doc->links, doc->link_count * sizeof(link), sizeof(link),
+            (const void **)&doc->links, &doc->link_cap, doc->link_count * sizeof(link), sizeof(link),
             BROWSER_INITIAL_LINK_CAP * sizeof(link), (size_t)BROWSER_MAX_LINKS * sizeof(link)
         )) {
         doc->truncated = true;
         return -1;
     }
-    if (memory__external_write(&doc->links_object, doc->link_count * sizeof(link), &link, sizeof(link)) !=
-        BRUCE_OK) {
+    if (memory__external_memcpy(doc->links, doc->link_count * sizeof(link), &link, sizeof(link)) != BRUCE_OK) {
         doc->truncated = true;
         return -1;
     }
@@ -308,13 +289,13 @@ void browser_document__add_image(browser_document_t *doc, const char *url, const
     }
 
     if (!browser_document__ext_reserve(
-            &doc->images_object, (const void **)&doc->images, doc->image_count * sizeof(image), sizeof(image),
+            (const void **)&doc->images, &doc->image_cap, doc->image_count * sizeof(image), sizeof(image),
             BROWSER_INITIAL_IMAGE_CAP * sizeof(image), (size_t)BROWSER_MAX_IMAGES * sizeof(image)
         )) {
         doc->truncated = true;
         return;
     }
-    if (memory__external_write(&doc->images_object, doc->image_count * sizeof(image), &image, sizeof(image)) !=
+    if (memory__external_memcpy(doc->images, doc->image_count * sizeof(image), &image, sizeof(image)) !=
         BRUCE_OK) {
         doc->truncated = true;
         return;
@@ -333,13 +314,13 @@ void browser_document__add_anchor(browser_document_t *doc, const char *name, siz
     memcpy(anchor.name, name, len);
     anchor.name[len] = '\0';
     if (!browser_document__ext_reserve(
-            &doc->anchors_object, (const void **)&doc->anchors, doc->anchor_count * sizeof(anchor), sizeof(anchor),
+            (const void **)&doc->anchors, &doc->anchor_cap, doc->anchor_count * sizeof(anchor), sizeof(anchor),
             BROWSER_INITIAL_ANCHOR_CAP * sizeof(anchor), (size_t)BROWSER_MAX_ANCHORS * sizeof(anchor)
         )) {
         doc->truncated = true;
         return;
     }
-    if (memory__external_write(&doc->anchors_object, doc->anchor_count * sizeof(anchor), &anchor, sizeof(anchor)) ==
+    if (memory__external_memcpy(doc->anchors, doc->anchor_count * sizeof(anchor), &anchor, sizeof(anchor)) ==
         BRUCE_OK) {
         doc->anchor_count++;
     }

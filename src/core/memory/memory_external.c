@@ -83,6 +83,34 @@ static uint32_t memory_external__next_handle_locked(void) {
     return 0;
 }
 
+/* Looks up the record whose payload pointer is exactly `ptr`, as returned by
+ * memory__external_malloc()/calloc(). The public pointer-based API has no
+ * handle to look up by, so it identifies records by pointer identity
+ * instead; ownership is checked separately by each caller. */
+static memory_external__record_t *memory_external__record_at_locked(const void *ptr) {
+    if (ptr == NULL) return NULL;
+    for (size_t i = 0; i < MEMORY_EXTERNAL__MAX_OBJECTS; ++i) {
+        memory_external__record_t *record = &s_records[i];
+        if (record->backend != BRUCE_MEMORY_BACKEND_INVALID && record->data == ptr) return record;
+    }
+    return NULL;
+}
+
+static bruce_result_t memory_external__object_for_pointer(const void *ptr, bruce_memory_object_t *out_object) {
+    memory_external__ensure_mutex();
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    memory_external__record_t *record = memory_external__record_at_locked(ptr);
+    if (record != NULL) {
+        *out_object = (bruce_memory_object_t){
+            .handle = record->handle,
+            .size = record->size,
+            .backend = record->backend,
+        };
+    }
+    xSemaphoreGive(s_mutex);
+    return record != NULL ? BRUCE_OK : BRUCE_ERR_INVALID_ARGUMENT;
+}
+
 static void memory_external__cleanup(void *context) {
     memory_external__record_t *record = context;
     if (record == NULL || record->backend == BRUCE_MEMORY_BACKEND_INVALID) return;
@@ -224,7 +252,8 @@ memory_external__allocate_swap_locked(memory_external__record_t *record, size_t 
     return true;
 }
 
-bruce_result_t memory_external__alloc(size_t size, bool executable, bruce_memory_object_t *out_object) {
+bruce_result_t
+memory_external__alloc(size_t size, bool executable, bool allow_swap, bruce_memory_object_t *out_object) {
     if (size == 0 || out_object == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     if (size > SIZE_MAX - (MEMORY_EXTERNAL__MMU_PAGE - 1u)) return BRUCE_ERR_RESOURCE_LIMIT;
     if (!process_registry__operation_begin()) return BRUCE_ERR_CANCELLED;
@@ -235,7 +264,7 @@ bruce_result_t memory_external__alloc(size_t size, bool executable, bruce_memory
     memory_external__record_t *record = memory_external__free_record_locked();
     bool allocated = false;
     if (record != NULL && !executable) { allocated = memory_external__allocate_psram_locked(record, size); }
-    if (record != NULL && !allocated) {
+    if (record != NULL && !allocated && allow_swap) {
         allocated = memory_external__allocate_swap_locked(record, size, executable);
     }
     if (record != NULL && !allocated && !executable) {
@@ -277,108 +306,122 @@ bruce_result_t memory_external__alloc(size_t size, bool executable, bruce_memory
     return BRUCE_OK;
 }
 
-bruce_result_t memory__external_alloc(size_t size, bruce_memory_object_t *out_object) {
-    return memory_external__alloc(size, false, out_object);
-}
+/*
+ * Shared byte-store logic for both memory_external__write() (copies from a
+ * caller buffer) and memory_external__fill() (repeats one byte value), used
+ * by the public memcpy()/memset() functions. Caller holds s_mutex and has
+ * already validated the record/offset/size against `object`.
+ */
+static bruce_result_t memory_external__store_locked(
+    memory_external__record_t *record, size_t offset, const void *data, int fill_value, bool is_fill, size_t size
+) {
+    if (offset > record->size || size > record->size - offset) return BRUCE_ERR_INVALID_ARGUMENT;
+    if (size == 0) return BRUCE_OK;
 
-bruce_result_t
-memory__external_write(const bruce_memory_object_t *object, size_t offset, const void *data, size_t size) {
-    if (object == NULL || (data == NULL && size != 0)) return BRUCE_ERR_INVALID_ARGUMENT;
-    if (!process_registry__operation_begin()) return BRUCE_ERR_CANCELLED;
-    bruce_process_id_t owner_id = process__current_id();
-    memory_external__ensure_mutex();
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
-    memory_external__record_t *record = memory_external__find_locked(object->handle);
-    if (!memory_external__matches(record, object) || record->owner_id != owner_id || offset > record->size ||
-        size > record->size - offset) {
-        xSemaphoreGive(s_mutex);
-        process_registry__operation_end();
-        return BRUCE_ERR_INVALID_ARGUMENT;
+    if (record->backend == BRUCE_MEMORY_BACKEND_PSRAM || record->backend == BRUCE_MEMORY_BACKEND_INTERNAL) {
+        if (is_fill) memset((uint8_t *)record->psram + offset, fill_value, size);
+        else memmove((uint8_t *)record->psram + offset, data, size);
+        return BRUCE_OK;
     }
-    bruce_result_t result = BRUCE_OK;
-    if (size != 0 &&
-        (record->backend == BRUCE_MEMORY_BACKEND_PSRAM || record->backend == BRUCE_MEMORY_BACKEND_INTERNAL)) {
-        memmove((uint8_t *)record->psram + offset, data, size);
-    } else if (size != 0) {
-        const esp_partition_t *partition = memory_external__partition();
-        const uint8_t *bytes = data;
+
+    const uint8_t *bytes = data;
+    if (!is_fill) {
         uintptr_t source_start = (uintptr_t)data;
         uintptr_t source_end = source_start + size;
         uintptr_t mapping_start = (uintptr_t)record->data;
         uintptr_t mapping_end = mapping_start + record->size;
         if (source_end < source_start || mapping_end < mapping_start ||
             (source_start < mapping_end && source_end > mapping_start)) {
-            xSemaphoreGive(s_mutex);
-            process_registry__operation_end();
             return BRUCE_ERR_INVALID_ARGUMENT;
         }
-        if (partition != NULL) {
-            /* Flash operations disable the cache. Caller data may live in a
-             * flash mmap (external-object growth does exactly that), and a
-             * plain malloc buffer is not an explicit cache-safe contract.
-             * Stage every operation through internal RAM so neither the
-             * partition driver nor its ROM memcpy touches cached memory
-             * while the cache is disabled. */
-            uint8_t *sector = heap_caps_malloc(
-                MEMORY_EXTERNAL__FLASH_SECTOR, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT
-            );
-            if (sector == NULL) {
-                result = BRUCE_ERR_NO_MEMORY;
-            } else {
-                size_t written = 0;
-                while (result == BRUCE_OK && written < size) {
-                    size_t absolute = record->offset + offset + written;
-                    size_t sector_offset = absolute & ~(MEMORY_EXTERNAL__FLASH_SECTOR - 1u);
-                    size_t in_sector = absolute - sector_offset;
-                    size_t chunk = size - written;
-                    if (chunk > MEMORY_EXTERNAL__FLASH_SECTOR - in_sector) {
-                        chunk = MEMORY_EXTERNAL__FLASH_SECTOR - in_sector;
-                    }
-                    bool direct_write = true;
-                    for (size_t i = 0; i < chunk; ++i) {
-                        direct_write = direct_write &&
-                                       (record->data[offset + written + i] & bytes[written + i]) ==
-                                           bytes[written + i];
-                    }
-                    if (direct_write) {
-                        memcpy(sector, bytes + written, chunk);
-                        if (esp_partition_write(partition, absolute, sector, chunk) != ESP_OK) {
-                            result = BRUCE_ERR_IO;
-                            break;
-                        }
-                    } else {
-                        if (esp_partition_read(
-                                partition, sector_offset, sector, MEMORY_EXTERNAL__FLASH_SECTOR
-                            ) != ESP_OK) {
-                            result = BRUCE_ERR_IO;
-                            break;
-                        }
-                        memcpy(sector + in_sector, bytes + written, chunk);
-                        if (esp_partition_erase_range(
-                                partition, sector_offset, MEMORY_EXTERNAL__FLASH_SECTOR
-                            ) != ESP_OK ||
-                            esp_partition_write(
-                                partition, sector_offset, sector, MEMORY_EXTERNAL__FLASH_SECTOR
-                            ) != ESP_OK) {
-                            result = BRUCE_ERR_IO;
-                            break;
-                        }
-                    }
-                    written += chunk;
-                }
-                heap_caps_free(sector);
+    }
+
+    const esp_partition_t *partition = memory_external__partition();
+    if (partition == NULL) return BRUCE_ERR_IO;
+
+    /* Flash operations disable the cache. Caller data may live in a flash
+     * mmap (external-object growth does exactly that), and a plain malloc
+     * buffer is not an explicit cache-safe contract. Stage every operation
+     * through internal RAM so neither the partition driver nor its ROM
+     * memcpy touches cached memory while the cache is disabled. */
+    uint8_t *sector = heap_caps_malloc(MEMORY_EXTERNAL__FLASH_SECTOR, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (sector == NULL) return BRUCE_ERR_NO_MEMORY;
+
+    bruce_result_t result = BRUCE_OK;
+    size_t written = 0;
+    while (result == BRUCE_OK && written < size) {
+        size_t absolute = record->offset + offset + written;
+        size_t sector_offset = absolute & ~(MEMORY_EXTERNAL__FLASH_SECTOR - 1u);
+        size_t in_sector = absolute - sector_offset;
+        size_t chunk = size - written;
+        if (chunk > MEMORY_EXTERNAL__FLASH_SECTOR - in_sector) chunk = MEMORY_EXTERNAL__FLASH_SECTOR - in_sector;
+
+        bool direct_write = true;
+        for (size_t i = 0; i < chunk; ++i) {
+            uint8_t new_byte = is_fill ? (uint8_t)fill_value : bytes[written + i];
+            direct_write = direct_write && (record->data[offset + written + i] & new_byte) == new_byte;
+        }
+
+        if (direct_write) {
+            if (is_fill) memset(sector, fill_value, chunk);
+            else memcpy(sector, bytes + written, chunk);
+            if (esp_partition_write(partition, absolute, sector, chunk) != ESP_OK) {
+                result = BRUCE_ERR_IO;
+                break;
             }
         } else {
-            result = BRUCE_ERR_IO;
+            if (esp_partition_read(partition, sector_offset, sector, MEMORY_EXTERNAL__FLASH_SECTOR) != ESP_OK) {
+                result = BRUCE_ERR_IO;
+                break;
+            }
+            if (is_fill) memset(sector + in_sector, fill_value, chunk);
+            else memcpy(sector + in_sector, bytes + written, chunk);
+            if (esp_partition_erase_range(partition, sector_offset, MEMORY_EXTERNAL__FLASH_SECTOR) != ESP_OK ||
+                esp_partition_write(partition, sector_offset, sector, MEMORY_EXTERNAL__FLASH_SECTOR) != ESP_OK) {
+                result = BRUCE_ERR_IO;
+                break;
+            }
         }
-        if (result == BRUCE_OK) memory_external__invalidate_data_alias(record, offset, size);
+        written += chunk;
     }
+    heap_caps_free(sector);
+    if (result == BRUCE_OK) memory_external__invalidate_data_alias(record, offset, size);
+    return result;
+}
+
+bruce_result_t
+memory_external__write(const bruce_memory_object_t *object, size_t offset, const void *data, size_t size) {
+    if (object == NULL || (data == NULL && size != 0)) return BRUCE_ERR_INVALID_ARGUMENT;
+    if (!process_registry__operation_begin()) return BRUCE_ERR_CANCELLED;
+    bruce_process_id_t owner_id = process__current_id();
+    memory_external__ensure_mutex();
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    memory_external__record_t *record = memory_external__find_locked(object->handle);
+    bruce_result_t result = !memory_external__matches(record, object) || record->owner_id != owner_id
+                                 ? BRUCE_ERR_INVALID_ARGUMENT
+                                 : memory_external__store_locked(record, offset, data, 0, false, size);
     xSemaphoreGive(s_mutex);
     process_registry__operation_end();
     return result;
 }
 
-bruce_result_t memory__external_map(const bruce_memory_object_t *object, const void **out_data) {
+static bruce_result_t
+memory_external__fill(const bruce_memory_object_t *object, size_t offset, int value, size_t size) {
+    if (object == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    if (!process_registry__operation_begin()) return BRUCE_ERR_CANCELLED;
+    bruce_process_id_t owner_id = process__current_id();
+    memory_external__ensure_mutex();
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    memory_external__record_t *record = memory_external__find_locked(object->handle);
+    bruce_result_t result = !memory_external__matches(record, object) || record->owner_id != owner_id
+                                 ? BRUCE_ERR_INVALID_ARGUMENT
+                                 : memory_external__store_locked(record, offset, NULL, value, true, size);
+    xSemaphoreGive(s_mutex);
+    process_registry__operation_end();
+    return result;
+}
+
+bruce_result_t memory_external__map(const bruce_memory_object_t *object, const void **out_data) {
     if (object == NULL || out_data == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     if (!process_registry__operation_begin()) return BRUCE_ERR_CANCELLED;
     bruce_process_id_t owner_id = process__current_id();
@@ -462,6 +505,22 @@ bruce_result_t memory_external__adopt(bruce_memory_object_t *object) {
     return BRUCE_OK;
 }
 
+bruce_result_t memory_external__adopt_pointer(const void *ptr) {
+    bruce_memory_object_t object;
+    bruce_result_t result = memory_external__object_for_pointer(ptr, &object);
+    if (result != BRUCE_OK) return result;
+    return memory_external__adopt(&object);
+}
+
+bruce_result_t memory_external__backend_of(const void *ptr, bruce_memory_backend_t *out_backend) {
+    if (out_backend == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    bruce_memory_object_t object;
+    bruce_result_t result = memory_external__object_for_pointer(ptr, &object);
+    if (result != BRUCE_OK) return result;
+    *out_backend = object.backend;
+    return BRUCE_OK;
+}
+
 bruce_result_t memory_external__release(bruce_memory_object_t *object) {
     if (object == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     if (!process_registry__operation_begin()) return BRUCE_ERR_CANCELLED;
@@ -493,8 +552,62 @@ bruce_result_t memory_external__release(bruce_memory_object_t *object) {
     return BRUCE_OK;
 }
 
-bruce_result_t memory__external_free(bruce_memory_object_t *object) {
-    return memory_external__release(object);
+const void *memory__external_malloc(size_t size) {
+    if (size == 0) return NULL;
+    bruce_memory_object_t object;
+    if (memory_external__alloc(size, false, true, &object) != BRUCE_OK) return NULL;
+    const void *data = NULL;
+    if (memory_external__map(&object, &data) != BRUCE_OK) {
+        (void)memory_external__release(&object);
+        return NULL;
+    }
+    return data;
+}
+
+const void *memory__external_malloc_writable(size_t size) {
+    if (size == 0) return NULL;
+    bruce_memory_object_t object;
+    if (memory_external__alloc(size, false, false, &object) != BRUCE_OK) return NULL;
+    const void *data = NULL;
+    if (memory_external__map(&object, &data) != BRUCE_OK) {
+        (void)memory_external__release(&object);
+        return NULL;
+    }
+    return data;
+}
+
+const void *memory__external_calloc(size_t count, size_t size) {
+    if (count == 0 || size == 0 || count > SIZE_MAX / size) return NULL;
+    size_t total = count * size;
+    const void *data = memory__external_malloc(total);
+    if (data != NULL && memory__external_memset(data, 0, 0, total) != BRUCE_OK) {
+        (void)memory__external_free(data);
+        return NULL;
+    }
+    return data;
+}
+
+bruce_result_t memory__external_memcpy(const void *ptr, size_t offset, const void *data, size_t size) {
+    if (data == NULL && size != 0) return BRUCE_ERR_INVALID_ARGUMENT;
+    bruce_memory_object_t object;
+    bruce_result_t result = memory_external__object_for_pointer(ptr, &object);
+    if (result != BRUCE_OK) return result;
+    return memory_external__write(&object, offset, data, size);
+}
+
+bruce_result_t memory__external_memset(const void *ptr, size_t offset, int value, size_t size) {
+    bruce_memory_object_t object;
+    bruce_result_t result = memory_external__object_for_pointer(ptr, &object);
+    if (result != BRUCE_OK) return result;
+    return memory_external__fill(&object, offset, value, size);
+}
+
+bruce_result_t memory__external_free(const void *ptr) {
+    if (ptr == NULL) return BRUCE_OK;
+    bruce_memory_object_t object;
+    bruce_result_t result = memory_external__object_for_pointer(ptr, &object);
+    if (result != BRUCE_OK) return result;
+    return memory_external__release(&object);
 }
 
 void memory_external__get_swap_stats(size_t *out_total, size_t *out_free, size_t *out_largest) {

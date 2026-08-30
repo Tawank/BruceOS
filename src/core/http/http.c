@@ -41,17 +41,19 @@ typedef struct {
     bool body_started;
 
     /* Set once a buffered (non-streaming) response's body has moved out of
-     * `arena` into its own memory__external_alloc() object (PSRAM, or swap
-     * when no PSRAM is fitted) - either up front from a known Content-Length
-     * (http__try_start_external_body()) or partway through because `arena`
-     * itself ran out of room to grow (http__migrate_body_to_external()),
-     * which also covers chunked responses that never had a Content-Length to
-     * begin with. While this is non-INVALID, body bytes go straight to it
-     * via memory__external_write() instead of `arena`, so a response's body
-     * never needs one contiguous block of scarce internal RAM. Its current
-     * capacity is body_object.size - 1 (the object always has room for one
-     * extra byte: the NUL terminator written in http__build_response()). */
-    bruce_memory_object_t body_object;
+     * `arena` into its own memory__external_malloc() allocation (PSRAM, or
+     * swap when no PSRAM is fitted) - either up front from a known
+     * Content-Length (http__try_start_external_body()) or partway through
+     * because `arena` itself ran out of room to grow
+     * (http__migrate_body_to_external()), which also covers chunked
+     * responses that never had a Content-Length to begin with. While this is
+     * non-NULL, body bytes go straight to it via memory__external_memcpy()
+     * instead of `arena`, so a response's body never needs one contiguous
+     * block of scarce internal RAM. Its current capacity is body_capacity -
+     * 1 (the allocation always has room for one extra byte: the NUL
+     * terminator written in http__build_response()). */
+    const void *body_object;
+    size_t body_capacity;
 } http__request_state_t;
 
 static const char *const TAG = "bruce_http";
@@ -149,34 +151,35 @@ static bool http__parse_content_length(const char *value, size_t *out_length) {
 /* Called once, at the first body byte of a buffered (non-streaming) response
  * that isn't an intermediate redirect page. When Content-Length is present
  * and fits the caller's max_response_bytes, this gives the body a head
- * start in one memory__external_alloc() object (PSRAM if fitted, otherwise
- * 64 KiB swap pages carved out of flash, falling back to plain internal RAM
- * only if neither is available) sized to it, so a response the internal
- * heap couldn't hold contiguously - e.g. a page bigger than the largest free
- * internal block - doesn't have to grow into PSRAM/swap one doubling step
- * at a time. It's just a head start, not a hard cap: a response without a
- * Content-Length (chunked transfer-encoding, decoded transparently below us
- * by esp_http_client before we ever see it - there's no raw chunk framing to
- * parse here) or one that undercounted it still grows correctly via
- * http__external_body_reserve()/http__migrate_body_to_external() below. On
- * allocation failure this just leaves state->body_object at its zeroed/
- * BRUCE_MEMORY_BACKEND_INVALID default, and the body starts in the internal
- * arena as before. */
+ * start in one memory__external_malloc() allocation (PSRAM if fitted,
+ * otherwise 64 KiB swap pages carved out of flash, falling back to plain
+ * internal RAM only if neither is available) sized to it, so a response the
+ * internal heap couldn't hold contiguously - e.g. a page bigger than the
+ * largest free internal block - doesn't have to grow into PSRAM/swap one
+ * doubling step at a time. It's just a head start, not a hard cap: a
+ * response without a Content-Length (chunked transfer-encoding, decoded
+ * transparently below us by esp_http_client before we ever see it - there's
+ * no raw chunk framing to parse here) or one that undercounted it still
+ * grows correctly via http__external_body_reserve()/
+ * http__migrate_body_to_external() below. On allocation failure this just
+ * leaves state->body_object NULL, and the body starts in the internal arena
+ * as before. */
 static void http__try_start_external_body(http__request_state_t *state) {
     size_t content_length = 0;
     if (!http__parse_content_length(http__find_header(state, "Content-Length"), &content_length)) return;
     if (content_length == 0 || content_length > state->max_response_bytes) return;
-    (void)memory__external_alloc(content_length + 1, &state->body_object);
+    state->body_object = memory__external_malloc(content_length + 1);
+    if (state->body_object != NULL) state->body_capacity = content_length + 1;
 }
 
 /* Grows state->body_object (already established) to fit `state->body_len +
  * extra`, doubling like http__arena_reserve() does for internal memory, but
- * since external objects can't be resized in place, each growth step
- * allocates a new, bigger object and copies the old one's bytes across via a
- * read-only map + a write. `extra` is guaranteed by http__capture_body()'s
- * own max_response_bytes check to keep the required size within it. */
+ * since external allocations can't be resized in place, each growth step
+ * allocates a new, bigger one and copies the old one's bytes across.
+ * `extra` is guaranteed by http__capture_body()'s own max_response_bytes
+ * check to keep the required size within it. */
 static bool http__external_body_reserve(http__request_state_t *state, size_t extra) {
-    size_t capacity = state->body_object.size - 1;
+    size_t capacity = state->body_capacity - 1;
     size_t required = state->body_len + extra;
     if (required <= capacity) return true;
 
@@ -184,24 +187,21 @@ static bool http__external_body_reserve(http__request_state_t *state, size_t ext
     while (new_capacity < required) {
         new_capacity = new_capacity > state->max_response_bytes / 2 ? state->max_response_bytes : new_capacity * 2;
     }
-    bruce_memory_object_t grown;
-    if (memory__external_alloc(new_capacity + 1, &grown) != BRUCE_OK) return false;
-    if (state->body_len > 0) {
-        const void *old_data = NULL;
-        bruce_result_t result = memory__external_map(&state->body_object, &old_data);
-        if (result == BRUCE_OK) result = memory__external_write(&grown, 0, old_data, state->body_len);
-        if (result != BRUCE_OK) {
-            (void)memory__external_free(&grown);
-            return false;
-        }
+    const void *grown = memory__external_malloc(new_capacity + 1);
+    if (grown == NULL) return false;
+    if (state->body_len > 0 &&
+        memory__external_memcpy(grown, 0, state->body_object, state->body_len) != BRUCE_OK) {
+        (void)memory__external_free(grown);
+        return false;
     }
-    (void)memory__external_free(&state->body_object);
+    (void)memory__external_free(state->body_object);
     state->body_object = grown;
+    state->body_capacity = new_capacity + 1;
     return true;
 }
 
 /* Moves a body so far captured in `arena` (from state->body_offset, for
- * state->body_len bytes) into a fresh external object sized for it plus
+ * state->body_len bytes) into a fresh external allocation sized for it plus
  * `extra` more incoming bytes, for when `arena` itself can't grow any
  * further - typically internal RAM fragmentation rather than truly being
  * out of memory, which is exactly the situation PSRAM/swap can route around.
@@ -215,14 +215,15 @@ static bool http__migrate_body_to_external(http__request_state_t *state, size_t 
     if (new_capacity > state->max_response_bytes) new_capacity = state->max_response_bytes;
     if (new_capacity < required) return false;
 
-    bruce_memory_object_t object;
-    if (memory__external_alloc(new_capacity + 1, &object) != BRUCE_OK) return false;
+    const void *object = memory__external_malloc(new_capacity + 1);
+    if (object == NULL) return false;
     if (state->body_len > 0 &&
-        memory__external_write(&object, 0, state->arena + state->body_offset, state->body_len) != BRUCE_OK) {
-        (void)memory__external_free(&object);
+        memory__external_memcpy(object, 0, state->arena + state->body_offset, state->body_len) != BRUCE_OK) {
+        (void)memory__external_free(object);
         return false;
     }
     state->body_object = object;
+    state->body_capacity = new_capacity + 1;
     return true;
 }
 
@@ -234,7 +235,7 @@ static bool http__migrate_body_to_external(http__request_state_t *state, size_t 
 static esp_err_t http__append_body(http__request_state_t *state, const void *data, size_t data_len) {
     if (data_len == 0) return ESP_OK;
 
-    if (state->body_object.backend == BRUCE_MEMORY_BACKEND_INVALID) {
+    if (state->body_object == NULL) {
         if (state->body_len == 0) state->body_offset = state->arena_used;
         if (http__arena_reserve(state, data_len)) {
             memcpy(state->arena + state->arena_used, data, data_len);
@@ -250,7 +251,7 @@ static esp_err_t http__append_body(http__request_state_t *state, const void *dat
         return ESP_FAIL;
     }
 
-    bruce_result_t result = memory__external_write(&state->body_object, state->body_len, data, data_len);
+    bruce_result_t result = memory__external_memcpy(state->body_object, state->body_len, data, data_len);
     if (result != BRUCE_OK) {
         state->result = result;
         return ESP_FAIL;
@@ -315,7 +316,7 @@ static esp_err_t http__event_handler(esp_http_client_event_t *evt) {
 
 static bruce_result_t
 http__build_response(http__request_state_t *state, int status_code, bruce_http_response_t *response) {
-    bool external_body = state->body_object.backend != BRUCE_MEMORY_BACKEND_INVALID;
+    bool external_body = state->body_object != NULL;
     bool buffered = state->request->on_response_chunk == NULL;
 
     size_t pointer_bytes = state->header_count * sizeof(char *) * 2;
@@ -351,17 +352,15 @@ http__build_response(http__request_state_t *state, int status_code, bruce_http_r
 
     if (external_body) {
         static const uint8_t terminator = 0;
-        bruce_result_t result = memory__external_write(&state->body_object, state->body_len, &terminator, 1);
-        const void *mapped = NULL;
-        if (result == BRUCE_OK) result = memory__external_map(&state->body_object, &mapped);
+        bruce_result_t result = memory__external_memcpy(state->body_object, state->body_len, &terminator, 1);
         if (result != BRUCE_OK) {
             memory__free(storage);
-            (void)memory__external_free(&state->body_object);
+            (void)memory__external_free(state->body_object);
             return result;
         }
-        response->body = (char *)mapped;
+        response->body = (char *)state->body_object;
         response->body_object = state->body_object;
-        state->body_object = (bruce_memory_object_t){0}; /* ownership moved to response */
+        state->body_object = NULL; /* ownership moved to response */
     } else if (body_bytes > 0) {
         size_t body_offset = state->body_len > 0 ? state->body_offset : state->arena_used;
         response->body = storage + pointer_bytes + body_offset;
@@ -460,11 +459,13 @@ bruce_result_t http__request(const bruce_http_request_t *request, bruce_http_res
         state.header_count = 0;
         state.header_bytes = 0;
         state.arena_used = 0;
-        /* An external body object from a prior hop (e.g. a redirect's own
-         * landing page) is superseded by this attempt - release it instead
-         * of leaking it until the whole request (or process) ends. */
-        if (state.body_object.backend != BRUCE_MEMORY_BACKEND_INVALID) {
-            (void)memory__external_free(&state.body_object);
+        /* An external body allocation from a prior hop (e.g. a redirect's
+         * own landing page) is superseded by this attempt - release it
+         * instead of leaking it until the whole request (or process) ends. */
+        if (state.body_object != NULL) {
+            (void)memory__external_free(state.body_object);
+            state.body_object = NULL;
+            state.body_capacity = 0;
         }
 
         esp_err_t err = http__perform_once(request, url, method, send_body, &state, &status);
@@ -482,9 +483,7 @@ bruce_result_t http__request(const bruce_http_request_t *request, bruce_http_res
                 state.result != BRUCE_OK ? result__to_string(state.result) : esp_err_to_name(err)
             );
             memory__free(state.arena);
-            if (state.body_object.backend != BRUCE_MEMORY_BACKEND_INVALID) {
-                (void)memory__external_free(&state.body_object);
-            }
+            if (state.body_object != NULL) (void)memory__external_free(state.body_object);
             return state.result != BRUCE_OK ? state.result : BRUCE_ERR_IO;
         }
 
@@ -511,14 +510,14 @@ bruce_result_t http__request(const bruce_http_request_t *request, bruce_http_res
 
 void http__response_free(bruce_http_response_t *response) {
     if (response == NULL) return;
-    if (response->body_object.backend != BRUCE_MEMORY_BACKEND_INVALID) {
+    if (response->body_object != NULL) {
         /* Headers (if any) still live in their own plain internal-heap
          * block; the body was captured straight into a separate PSRAM/swap
-         * object (see http__try_start_external_body()) and needs its own
+         * allocation (see http__try_start_external_body()) and needs its own
          * release - freeing it as if it were part of that block would be
          * undefined behaviour. */
         memory__free(response->header_names);
-        (void)memory__external_free(&response->body_object);
+        (void)memory__external_free(response->body_object);
     } else {
         void *storage =
             response->header_names != NULL ? (void *)response->header_names : (void *)response->body;

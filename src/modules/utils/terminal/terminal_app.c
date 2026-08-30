@@ -52,8 +52,6 @@
 typedef struct {
     terminal_cell_t *cells;
     terminal_cell_t *alt_cells;
-    bruce_memory_object_t cells_object;
-    bruce_memory_object_t alt_cells_object;
     bool cells_external;
     bool alt_cells_external;
     terminal_grid_t grid;
@@ -85,57 +83,36 @@ static void terminal__grid_size(float scale, int *out_columns, int *out_rows) {
     *out_rows = rows;
 }
 
-/* Prefers a PSRAM- or plain-internal-RAM-backed memory__external block (both
- * are plain, directly addressable buffers) so the grid can keep mutating it
- * in place with ordinary pointer writes. Falls back to a separate, untracked
- * internal heap allocation when PSRAM has no room for `size`, without ever
- * calling memory__external_alloc() in that case: on a board where a "swap"
- * partition has been committed (see partition_manager__commit()),
- * memory__external_alloc() would otherwise land on it whenever PSRAM is
- * short, which means erasing a real 64 KiB flash region just to get a
- * SWAP-backed object this function immediately frees because it's not
- * safely writable through a raw pointer -- only through
- * memory__external_write(). That erase is real hardware time (a 64 KiB
- * region is 16 flash sectors) wasted on a result this never uses, and was
- * the whole cause of a plain terminal open going from instant to ~700ms
- * once a swap partition existed to find. memory__get_stats() only reads
- * already-tracked heap/page-bitmap counters, so checking it first is cheap
- * regardless of which way it comes out. */
-static bruce_result_t
-terminal__alloc_buffer(void **out_data, bruce_memory_object_t *out_object, bool *out_external, size_t size) {
-    bruce_memory_stats_t stats;
-    bool psram_has_room =
-        memory__get_stats(&stats) == BRUCE_OK && stats.psram_largest_block >= size;
-    bruce_memory_object_t object;
-    if (psram_has_room && memory__external_alloc(size, &object) == BRUCE_OK) {
-        const void *mapped = NULL;
-        if ((object.backend == BRUCE_MEMORY_BACKEND_PSRAM ||
-             object.backend == BRUCE_MEMORY_BACKEND_INTERNAL) &&
-            memory__external_map(&object, &mapped) == BRUCE_OK) {
-            memset((void *)mapped, 0, size);
-            *out_data = (void *)mapped;
-            *out_object = object;
-            *out_external = true;
-            return BRUCE_OK;
-        }
-        (void)memory__external_free(&object);
+/* Prefers a PSRAM- or plain-internal-RAM-backed memory__external allocation
+ * (both are plain, directly addressable buffers, guaranteed by
+ * memory__external_malloc_writable() which never lands on flash-backed swap)
+ * so the grid can keep mutating it in place with ordinary pointer writes.
+ * Falls back to a separate, untracked internal heap allocation when neither
+ * has room for `size`. */
+static bruce_result_t terminal__alloc_buffer(void **out_data, bool *out_external, size_t size) {
+    const void *data = memory__external_malloc_writable(size);
+    if (data != NULL) {
+        memset((void *)data, 0, size);
+        *out_data = (void *)data;
+        *out_external = true;
+        return BRUCE_OK;
     }
     *out_data = memory__calloc(size, 1);
     *out_external = false;
     return *out_data != NULL ? BRUCE_OK : BRUCE_ERR_NO_MEMORY;
 }
 
-static void terminal__free_buffer(void *data, bruce_memory_object_t *object, bool external) {
+static void terminal__free_buffer(void *data, bool external) {
     if (external) {
-        (void)memory__external_free(object);
+        (void)memory__external_free(data);
     } else {
         memory__free(data);
     }
 }
 
 static void terminal__free_buffers(terminal__state_t *state) {
-    terminal__free_buffer(state->cells, &state->cells_object, state->cells_external);
-    terminal__free_buffer(state->alt_cells, &state->alt_cells_object, state->alt_cells_external);
+    terminal__free_buffer(state->cells, state->cells_external);
+    terminal__free_buffer(state->alt_cells, state->alt_cells_external);
 }
 
 static void terminal__drain_output(terminal__state_t *state) {
@@ -302,27 +279,22 @@ static void terminal__apply_font_scale(terminal__state_t *state, float new_scale
         size_t new_buffer_size = needed_cells * sizeof(terminal_cell_t);
         void *new_cells = NULL;
         void *new_alt_cells = NULL;
-        bruce_memory_object_t new_cells_object;
-        bruce_memory_object_t new_alt_cells_object;
         bool new_cells_external = false;
         bool new_alt_cells_external = false;
-        bruce_result_t cells_alloc =
-            terminal__alloc_buffer(&new_cells, &new_cells_object, &new_cells_external, new_buffer_size);
+        bruce_result_t cells_alloc = terminal__alloc_buffer(&new_cells, &new_cells_external, new_buffer_size);
         bruce_result_t alt_cells_alloc =
-            terminal__alloc_buffer(&new_alt_cells, &new_alt_cells_object, &new_alt_cells_external, new_buffer_size);
+            terminal__alloc_buffer(&new_alt_cells, &new_alt_cells_external, new_buffer_size);
         if (cells_alloc != BRUCE_OK || alt_cells_alloc != BRUCE_OK) {
-            if (cells_alloc == BRUCE_OK) terminal__free_buffer(new_cells, &new_cells_object, new_cells_external);
+            if (cells_alloc == BRUCE_OK) terminal__free_buffer(new_cells, new_cells_external);
             if (alt_cells_alloc == BRUCE_OK) {
-                terminal__free_buffer(new_alt_cells, &new_alt_cells_object, new_alt_cells_external);
+                terminal__free_buffer(new_alt_cells, new_alt_cells_external);
             }
             return; /* Out of memory: stay at the current, still-valid scale rather than corrupt it. */
         }
-        terminal__free_buffer(state->cells, &state->cells_object, state->cells_external);
-        terminal__free_buffer(state->alt_cells, &state->alt_cells_object, state->alt_cells_external);
+        terminal__free_buffer(state->cells, state->cells_external);
+        terminal__free_buffer(state->alt_cells, state->alt_cells_external);
         state->cells = new_cells;
         state->alt_cells = new_alt_cells;
-        state->cells_object = new_cells_object;
-        state->alt_cells_object = new_alt_cells_object;
         state->cells_external = new_cells_external;
         state->alt_cells_external = new_alt_cells_external;
         state->cell_capacity = needed_cells;
@@ -439,16 +411,15 @@ int terminal_app_main(int argc, char **argv) {
     size_t cell_buffer_size = (size_t)columns * (size_t)rows * sizeof(terminal_cell_t);
     void *cells_data = NULL;
     void *alt_cells_data = NULL;
-    bruce_result_t cells_alloc =
-        terminal__alloc_buffer(&cells_data, &state.cells_object, &state.cells_external, cell_buffer_size);
+    bruce_result_t cells_alloc = terminal__alloc_buffer(&cells_data, &state.cells_external, cell_buffer_size);
     state.cells = cells_data;
     bruce_result_t alt_cells_alloc =
-        terminal__alloc_buffer(&alt_cells_data, &state.alt_cells_object, &state.alt_cells_external, cell_buffer_size);
+        terminal__alloc_buffer(&alt_cells_data, &state.alt_cells_external, cell_buffer_size);
     state.alt_cells = alt_cells_data;
     if (cells_alloc != BRUCE_OK || alt_cells_alloc != BRUCE_OK) {
-        if (cells_alloc == BRUCE_OK) terminal__free_buffer(state.cells, &state.cells_object, state.cells_external);
+        if (cells_alloc == BRUCE_OK) terminal__free_buffer(state.cells, state.cells_external);
         if (alt_cells_alloc == BRUCE_OK) {
-            terminal__free_buffer(state.alt_cells, &state.alt_cells_object, state.alt_cells_external);
+            terminal__free_buffer(state.alt_cells, state.alt_cells_external);
         }
         return BRUCE_ERR_NO_MEMORY;
     }

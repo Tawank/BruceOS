@@ -6,8 +6,7 @@
 
 void image__bitmap_release(image_bitmap_t *bitmap) {
     if (bitmap == NULL) return;
-    if (bitmap->backing.backend != BRUCE_MEMORY_BACKEND_INVALID)
-        (void)memory__external_free(&bitmap->backing);
+    if (bitmap->external) (void)memory__external_free(bitmap->pixels);
     else memory__free(bitmap->pixels);
     *bitmap = (image_bitmap_t){0};
 }

@@ -57,7 +57,7 @@ typedef struct {
     uint32_t match_count;
 } bnu_grep_run_t;
 
-static bruce_result_t bnu__grep_load_path(const char *path, bruce_memory_object_t *object, size_t *out_length) {
+static bruce_result_t bnu__grep_load_path(const char *path, const void **out_data, size_t *out_length) {
     bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
     bruce_result_t result = storage__open(path, BRUCE_STORAGE_OPEN_READ, &file);
     if (result != BRUCE_OK) return result;
@@ -67,30 +67,37 @@ static bruce_result_t bnu__grep_load_path(const char *path, bruce_memory_object_
     if (result == BRUCE_OK && size > BNU_GREP_MAX_BYTES) result = BRUCE_ERR_RESOURCE_LIMIT;
     if (result == BRUCE_OK) result = storage__seek(file, 0, SEEK_SET, NULL);
 
-    bruce_memory_object_t obj = {0};
-    if (result == BRUCE_OK && size > 0) result = memory__external_alloc((size_t)size, &obj);
+    const void *data = NULL;
+    if (result == BRUCE_OK && size > 0) {
+        data = memory__external_malloc((size_t)size);
+        if (data == NULL) result = BRUCE_ERR_NO_MEMORY;
+    }
     size_t offset = 0;
     unsigned char chunk[256];
     while (result == BRUCE_OK && offset < (size_t)size) {
         size_t read_size = 0;
         result = storage__read(file, chunk, sizeof(chunk), &read_size);
         if (result == BRUCE_OK && read_size == 0) result = BRUCE_ERR_IO;
-        if (result == BRUCE_OK) result = memory__external_write(&obj, offset, chunk, read_size);
+        if (result == BRUCE_OK) result = memory__external_memcpy(data, offset, chunk, read_size);
         offset += read_size;
     }
     (void)storage__close(file);
     if (result != BRUCE_OK) {
-        if (obj.backend != BRUCE_MEMORY_BACKEND_INVALID) (void)memory__external_free(&obj);
+        if (data != NULL) (void)memory__external_free(data);
         return result;
     }
-    *object = obj;
+    *out_data = data;
     *out_length = offset;
     return BRUCE_OK;
 }
 
-static bruce_result_t bnu__grep_load_stdin(size_t size, bruce_memory_object_t *object, size_t *out_length) {
-    bruce_memory_object_t obj = {0};
-    bruce_result_t result = size > 0 ? memory__external_alloc(size, &obj) : BRUCE_OK;
+static bruce_result_t bnu__grep_load_stdin(size_t size, const void **out_data, size_t *out_length) {
+    const void *data = NULL;
+    bruce_result_t result = BRUCE_OK;
+    if (size > 0) {
+        data = memory__external_malloc(size);
+        if (data == NULL) result = BRUCE_ERR_NO_MEMORY;
+    }
     size_t offset = 0;
     unsigned char chunk[256];
     while (result == BRUCE_OK && offset < size) {
@@ -98,14 +105,14 @@ static bruce_result_t bnu__grep_load_stdin(size_t size, bruce_memory_object_t *o
         size_t read_size = 0;
         result = stdio__read(chunk, want, UINT32_MAX, &read_size);
         if (result == BRUCE_OK && read_size == 0) result = BRUCE_ERR_IO;
-        if (result == BRUCE_OK) result = memory__external_write(&obj, offset, chunk, read_size);
+        if (result == BRUCE_OK) result = memory__external_memcpy(data, offset, chunk, read_size);
         offset += read_size;
     }
     if (result != BRUCE_OK) {
-        if (obj.backend != BRUCE_MEMORY_BACKEND_INVALID) (void)memory__external_free(&obj);
+        if (data != NULL) (void)memory__external_free(data);
         return result;
     }
-    *object = obj;
+    *out_data = data;
     *out_length = offset;
     return BRUCE_OK;
 }
@@ -216,12 +223,9 @@ static void bnu__grep_process_buffer(
 }
 
 static bruce_result_t bnu__grep_run_source(
-    const bnu_grep_options_t *opt, const char *filename, bruce_memory_object_t *object, size_t length,
+    const bnu_grep_options_t *opt, const char *filename, const void *data, size_t length,
     bnu_grep_line_t *ring, bool *out_matched
 ) {
-    const void *data = NULL;
-    if (length > 0 && memory__external_map(object, &data) != BRUCE_OK) return BRUCE_ERR_IO;
-
     bnu_grep_run_t run = {.ring = ring};
     bnu__grep_process_buffer(opt, filename, data != NULL ? data : "", length, &run);
 
@@ -315,14 +319,14 @@ int bnu_grep_app_main(int argc, char **argv) {
             stdio__printf("grep: missing filename\n");
             result = BRUCE_ERR_INVALID_ARGUMENT;
         } else {
-            bruce_memory_object_t object = {0};
+            const void *data = NULL;
             size_t length = 0;
-            result = bnu__grep_load_stdin((size_t)parsed_stdin_size, &object, &length);
+            result = bnu__grep_load_stdin((size_t)parsed_stdin_size, &data, &length);
             if (result != BRUCE_OK) {
                 stdio__printf("grep: (standard input): %s\n", result__to_string(result));
             } else {
-                result = bnu__grep_run_source(&opt, "(standard input)", &object, length, ring, &matched_any);
-                if (object.backend != BRUCE_MEMORY_BACKEND_INVALID) (void)memory__external_free(&object);
+                result = bnu__grep_run_source(&opt, "(standard input)", data, length, ring, &matched_any);
+                if (data != NULL) (void)memory__external_free(data);
             }
         }
     } else {
@@ -332,17 +336,17 @@ int bnu_grep_app_main(int argc, char **argv) {
                 result = BRUCE_ERR_INVALID_PATH;
                 break;
             }
-            bruce_memory_object_t object = {0};
+            const void *data = NULL;
             size_t length = 0;
-            result = bnu__grep_load_path(path, &object, &length);
+            result = bnu__grep_load_path(path, &data, &length);
             if (result != BRUCE_OK) {
                 stdio__printf("grep: %s: %s\n", path, result__to_string(result));
                 break;
             }
             bool file_matched = false;
-            result = bnu__grep_run_source(&opt, path, &object, length, ring, &file_matched);
+            result = bnu__grep_run_source(&opt, path, data, length, ring, &file_matched);
             if (file_matched) matched_any = true;
-            if (object.backend != BRUCE_MEMORY_BACKEND_INVALID) (void)memory__external_free(&object);
+            if (data != NULL) (void)memory__external_free(data);
         }
     }
 

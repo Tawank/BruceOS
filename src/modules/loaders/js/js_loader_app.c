@@ -274,7 +274,7 @@ static int js_loader__open(
     );
     if (result <= 0) {
         js_loader__free_process_ctx(ctx);
-    } else if (parent_image.memory.handle != 0) {
+    } else if (parent_image.data != NULL) {
         for (;;) {
             bruce_process_snapshot_t snapshot;
             bruce_result_t snapshot_result = process__snapshot(result, &snapshot);

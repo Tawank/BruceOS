@@ -105,6 +105,14 @@ static bool disk__mount_point_valid(const char *mount_point) {
  * shared by disk__mount()'s "sd0" case and disk__mount_sd_boot() below so
  * the two entry points can never disagree on which pins to use. */
 static bool disk__sd_mount_default(void) {
+#if CONFIG_BRUCE_QEMU_TEST_MODE
+    /* QEMU has no SD card device on the emulated SPI bus, so there is
+     * nothing to ever raise the "done" status the SPI HAL polls for:
+     * sdmmc_card_init()'s card-reset transaction (spi_device_polling_end())
+     * spins on that bit forever instead of failing, hanging boot before
+     * firmware tests ever get a chance to run. */
+    return false;
+#else
     const storage__sdspi_config_t config = {
         .host = (spi_host_device_t)CONFIG_BRUCE_SD_SPI_HOST,
         .mosi_gpio = CONFIG_BRUCE_SD_PIN_MOSI,
@@ -113,6 +121,7 @@ static bool disk__sd_mount_default(void) {
         .cs_gpio = CONFIG_BRUCE_SD_PIN_CS,
     };
     return storage__sd_mount_spi(&config);
+#endif
 }
 #endif
 

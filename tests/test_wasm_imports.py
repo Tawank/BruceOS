@@ -47,7 +47,7 @@ def test_rejects_other_import_modules(module):
 
 def test_rejects_unknown_symbol():
     with pytest.raises(WasmImportError, match="unsupported Bruce SDK import"):
-        validate_bruce_sdk_imports(module_with_import(name="memory__external_alloc"))
+        validate_bruce_sdk_imports(module_with_import(name="not__a_real_symbol"))
 
 
 def test_rejects_signature_mismatch():

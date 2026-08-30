@@ -32,7 +32,6 @@ struct image_jpeg_backing_store {
         j_common_ptr decoder, image_jpeg_backing_store_t *store, void *buffer, long offset, long count
     );
     void (*close)(j_common_ptr decoder, image_jpeg_backing_store_t *store);
-    bruce_memory_object_t object;
     const uint8_t *data;
     long raw_size;
     uint8_t reserved[48];
@@ -97,8 +96,8 @@ static void image__jpeg_backing_write(
         for (size_t i = 0; i < chunk; ++i) {
             memcpy(dc_values + i * sizeof(JCOEF), input + (first + i) * sizeof(JBLOCK), sizeof(JCOEF));
         }
-        if (memory__external_write(
-                &store->object, (first_block + first) * sizeof(JCOEF), dc_values, chunk * sizeof(JCOEF)
+        if (memory__external_memcpy(
+                store->data, (first_block + first) * sizeof(JCOEF), dc_values, chunk * sizeof(JCOEF)
             ) != BRUCE_OK) {
             image__jpeg_file_error(decoder, JERR_TFILE_WRITE);
         }
@@ -107,7 +106,7 @@ static void image__jpeg_backing_write(
 
 static void image__jpeg_backing_close(j_common_ptr decoder, image_jpeg_backing_store_t *store) {
     (void)decoder;
-    if (store->object.handle != 0) (void)memory__external_free(&store->object);
+    if (store->data != NULL) (void)memory__external_free(store->data);
 }
 
 void __wrap_jpeg_open_backing_store(j_common_ptr decoder, void *backing_store, long total_size) {
@@ -117,15 +116,10 @@ void __wrap_jpeg_open_backing_store(j_common_ptr decoder, void *backing_store, l
         total_size <= 0 || total_size % (long)sizeof(JBLOCK) != 0) {
         image__jpeg_file_error(decoder, JERR_NO_BACKING_STORE);
     }
-    memset(&store->object, 0, sizeof(store->object));
-    store->data = NULL;
     store->raw_size = total_size;
     size_t compressed_size = (size_t)total_size / DCTSIZE2;
-    if (memory__external_alloc(compressed_size, &store->object) != BRUCE_OK ||
-        memory__external_map(&store->object, (const void **)&store->data) != BRUCE_OK) {
-        if (store->object.handle != 0) (void)memory__external_free(&store->object);
-        image__jpeg_file_error(decoder, JERR_OUT_OF_MEMORY);
-    }
+    store->data = memory__external_malloc(compressed_size);
+    if (store->data == NULL) { image__jpeg_file_error(decoder, JERR_OUT_OF_MEMORY); }
     store->read = image__jpeg_backing_read;
     store->write = image__jpeg_backing_write;
     store->close = image__jpeg_backing_close;

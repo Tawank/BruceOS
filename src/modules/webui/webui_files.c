@@ -31,17 +31,16 @@ bruce_result_t webui__list_files(bruce_http_server_request_t *request, void *con
         return webui__reply_text(request, 503, "Directory too large");
     size_t capacity = count;
     void *entries_data = NULL;
-    bruce_memory_object_t entries_object = {0};
     bool entries_external = false;
     if (count > 0) {
         bruce_result_t alloc_result =
-            webui__alloc_direct(&entries_data, &entries_object, &entries_external, count * sizeof(bruce_storage_entry_t));
+            webui__alloc_direct(&entries_data, &entries_external, count * sizeof(bruce_storage_entry_t));
         if (alloc_result != BRUCE_OK) return webui__reply_text(request, 503, "Out of memory");
     }
     bruce_storage_entry_t *entries = entries_data;
     result = storage__list(path, entries, count, &count);
     if (result != BRUCE_OK || count > capacity) {
-        webui__free_direct(entries_data, &entries_object, entries_external);
+        webui__free_direct(entries_data, entries_external);
         return webui__reply_error(request, result != BRUCE_OK ? result : BRUCE_ERR_BUSY);
     }
     result = http_server_request__set_type(request, "text/plain; charset=utf-8");
@@ -67,7 +66,7 @@ bruce_result_t webui__list_files(bruce_http_server_request_t *request, void *con
         if (length < 0 || (size_t)length >= sizeof(line)) result = BRUCE_ERR_INTERNAL;
         else result = http_server_request__send_chunk(request, line, (size_t)length);
     }
-    webui__free_direct(entries_data, &entries_object, entries_external);
+    webui__free_direct(entries_data, entries_external);
     if (result == BRUCE_OK) result = http_server_request__finalize(request);
     return result;
 }
@@ -203,16 +202,16 @@ bruce_result_t webui__rename(bruce_http_server_request_t *request, void *context
 }
 
 /* The editor form is "fs=...&name=...&content=<percent-encoded text>". The
- * request body is read straight into a memory__external_alloc() object (PSRAM,
- * swap, or internal RAM -- whichever memory__get_stats()-informed
- * webui__memory_cap() found room for) via chunked memory__external_write()
- * calls, so a swap-backed object works here too: unlike a raw pointer, that
- * write API doesn't need the object to be directly addressable. fs/name are
- * short, so they're decoded straight off the read-only mapping into small
+ * request body is read straight into a memory__external_malloc() allocation
+ * (PSRAM, swap, or internal RAM -- whichever memory__get_stats()-informed
+ * webui__memory_cap() found room for) via chunked memory__external_memcpy()
+ * calls, so a swap-backed allocation works here too: unlike a raw write, that
+ * copy API doesn't need the destination to be directly addressable. fs/name
+ * are short, so they're decoded straight off the returned pointer into small
  * stack buffers the ordinary way. "content" is decoded into a second,
- * separately-sized external object rather than in place, because swap has no
- * writable pointer to decode into -- the object must go through
- * memory__external_write() again, this time via webui__decode_to_object(). */
+ * separately-sized external allocation rather than in place, because swap has
+ * no writable pointer to decode into -- the data must go through
+ * memory__external_memcpy() again, this time via webui__decode_to_object(). */
 bruce_result_t webui__edit(bruce_http_server_request_t *request, void *context) {
     (void)context;
     bruce_result_t auth_response;
@@ -222,17 +221,14 @@ bruce_result_t webui__edit(bruce_http_server_request_t *request, void *context) 
     if (content_length > webui__memory_cap())
         return webui__reply_text(request, 413, "Editor content exceeds available memory");
 
-    bruce_memory_object_t raw_object;
-    bruce_result_t result = memory__external_alloc(content_length + 1u, &raw_object);
-    if (result != BRUCE_OK) return webui__reply_text(request, 503, "Out of memory for editor content");
+    const void *raw_data = memory__external_malloc(content_length + 1u);
+    if (raw_data == NULL) return webui__reply_text(request, 503, "Out of memory for editor content");
 
-    result = webui__receive_into_object(request, &raw_object, content_length);
+    bruce_result_t result = webui__receive_into_object(request, raw_data, content_length);
     static const uint8_t terminator = 0;
-    if (result == BRUCE_OK) result = memory__external_write(&raw_object, content_length, &terminator, 1u);
-    const void *raw_data = NULL;
-    if (result == BRUCE_OK) result = memory__external_map(&raw_object, &raw_data);
+    if (result == BRUCE_OK) result = memory__external_memcpy(raw_data, content_length, &terminator, 1u);
     if (result != BRUCE_OK) {
-        (void)memory__external_free(&raw_object);
+        (void)memory__external_free(raw_data);
         return webui__reply_error(request, result);
     }
     const char *body = raw_data;
@@ -257,23 +253,21 @@ bruce_result_t webui__edit(bruce_http_server_request_t *request, void *context) 
             content_found,
             path_valid
         );
-        (void)memory__external_free(&raw_object);
+        (void)memory__external_free(raw_data);
         return webui__reply_text(request, 400, reason);
     }
 
-    bruce_memory_object_t content_object = {0};
-    bool have_content_object = false;
+    const void *content_data = NULL;
     size_t content_length_decoded = 0;
     if (content_span > 0) {
-        result = memory__external_alloc(content_span, &content_object);
-        if (result == BRUCE_OK) {
-            have_content_object = true;
-            result = webui__decode_to_object(content_start, content_span, &content_object, &content_length_decoded);
-        }
+        content_data = memory__external_malloc(content_span);
+        result = content_data != NULL ? BRUCE_OK : BRUCE_ERR_NO_MEMORY;
+        if (result == BRUCE_OK)
+            result = webui__decode_to_object(content_start, content_span, content_data, &content_length_decoded);
     }
-    (void)memory__external_free(&raw_object);
+    (void)memory__external_free(raw_data);
     if (result != BRUCE_OK) {
-        if (have_content_object) (void)memory__external_free(&content_object);
+        if (content_data != NULL) (void)memory__external_free(content_data);
         return result == BRUCE_ERR_INVALID_ARGUMENT
                    ? webui__reply_text(request, 400, "Invalid or oversized editor content")
                    : webui__reply_error(request, result);
@@ -284,8 +278,6 @@ bruce_result_t webui__edit(bruce_http_server_request_t *request, void *context) 
         path, BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE | BRUCE_STORAGE_OPEN_TRUNCATE, &file
     );
     if (result == BRUCE_OK && content_length_decoded > 0) {
-        const void *content_data = NULL;
-        result = memory__external_map(&content_object, &content_data);
         size_t offset = 0;
         while (result == BRUCE_OK && offset < content_length_decoded) {
             size_t written = 0;
@@ -296,7 +288,7 @@ bruce_result_t webui__edit(bruce_http_server_request_t *request, void *context) 
             offset += written;
         }
     }
-    if (have_content_object) (void)memory__external_free(&content_object);
+    if (content_data != NULL) (void)memory__external_free(content_data);
     if (result == BRUCE_OK) result = storage__close(file);
     else if (file != BRUCE_FILE_ID_INVALID) (void)storage__close(file);
     if (result != BRUCE_OK) return webui__reply_error(request, result);

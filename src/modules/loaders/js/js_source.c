@@ -74,13 +74,13 @@ bruce_result_t js_source__load_transferable(
 
 bruce_result_t js_source__adopt(js_source_t *source) {
     if (source == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
-    if (source->external.memory.handle == 0) return BRUCE_OK;
+    if (source->external.data == NULL) return BRUCE_OK;
     return ext_mem_loader__adopt_image(&source->external);
 }
 
 void js_source__release(js_source_t *source) {
     if (source == NULL) return;
-    if (source->external.memory.handle != 0) (void)ext_mem_loader__release_image(&source->external);
+    if (source->external.data != NULL) (void)ext_mem_loader__release_image(&source->external);
     if (source->internal_tracked) {
         memory__free(source->internal);
     } else {

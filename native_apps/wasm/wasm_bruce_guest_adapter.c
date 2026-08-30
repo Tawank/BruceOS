@@ -510,15 +510,22 @@ bruce_result_t runtime__timer_wait(uint32_t timer, uint32_t timeout) {
 }
 bruce_result_t runtime__timer_stop(uint32_t timer) { return (bruce_result_t)wasm_import__runtime_timer_stop(timer); }
 
-bruce_result_t memory__external_alloc(size_t size, bruce_memory_object_t *object) {
-    (void)size; (void)object; return BRUCE_ERR_UNSUPPORTED;
+const void *memory__external_malloc(size_t size) {
+    (void)size;
+    return NULL;
 }
-bruce_result_t memory__external_write(const bruce_memory_object_t *object, size_t offset, const void *data, size_t size) {
-    (void)object; (void)offset; (void)data; (void)size; return BRUCE_ERR_UNSUPPORTED;
+const void *memory__external_malloc_writable(size_t size) {
+    (void)size;
+    return NULL;
 }
-bruce_result_t memory__external_map(const bruce_memory_object_t *object, const void **data) {
-    (void)object; (void)data; return BRUCE_ERR_UNSUPPORTED;
+const void *memory__external_calloc(size_t count, size_t size) {
+    (void)count; (void)size;
+    return NULL;
 }
-bruce_result_t memory__external_free(bruce_memory_object_t *object) {
-    (void)object; return BRUCE_ERR_UNSUPPORTED;
+bruce_result_t memory__external_memcpy(const void *ptr, size_t offset, const void *data, size_t size) {
+    (void)ptr; (void)offset; (void)data; (void)size; return BRUCE_ERR_UNSUPPORTED;
 }
+bruce_result_t memory__external_memset(const void *ptr, size_t offset, int value, size_t size) {
+    (void)ptr; (void)offset; (void)value; (void)size; return BRUCE_ERR_UNSUPPORTED;
+}
+bruce_result_t memory__external_free(const void *ptr) { return ptr == NULL ? BRUCE_OK : BRUCE_ERR_UNSUPPORTED; }

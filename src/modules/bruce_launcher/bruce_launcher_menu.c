@@ -25,8 +25,9 @@ typedef struct {
 } bruce_launcher_menu_arena_t;
 
 /* bruce_launcher loads exactly one menu tree at a time (load, run, free), so
- * a single handle is enough to release its memory__external block later. */
-static bruce_memory_object_t s_menu_object;
+ * a single pointer is enough to release its memory__external_malloc()
+ * allocation later. */
+static const void *s_menu_data;
 
 /* Default launcher configuration written when /config/launcher.json is
  * missing. Sourced from embedded_resources/json/launcher.json at build time;
@@ -97,11 +98,12 @@ const char *bruce_launcher__entry_label(const bruce_launcher_entry_t *entry) {
     return entry->label;
 }
 
-/* menu is the mapping returned by menu_load(); the block behind it is
- * released via the handle load() stashed in s_menu_object. */
+/* menu is the pointer returned by menu_load(); the allocation behind it is
+ * released via the pointer load() stashed in s_menu_data. */
 void bruce_launcher__menu_free(bruce_launcher_menu_t *menu) {
     if (menu == NULL) return;
-    (void)memory__external_free(&s_menu_object);
+    (void)memory__external_free(s_menu_data);
+    s_menu_data = NULL;
 }
 
 static bool
@@ -336,11 +338,11 @@ static bruce_launcher_menu_t *bruce_launcher__parse_json_object(
 
 /* Builds the tree in a scratch internal-heap buffer (unchanged parsing logic
  * above), then copies the finished, self-relative-offset-only blob verbatim
- * into a memory__external block (PSRAM, falling back to flash swap) and
- * frees the scratch copy. This moves the tree's ~8KB out of the small
- * internal heap for as long as the launcher runs, which is effectively the
- * whole time the device is on. The tree is never mutated after this point,
- * so returning the read-only external mapping as a plain pointer is safe. */
+ * into a memory__external_malloc() allocation (PSRAM, falling back to flash
+ * swap) and frees the scratch copy. This moves the tree's ~8KB out of the
+ * small internal heap for as long as the launcher runs, which is effectively
+ * the whole time the device is on. The tree is never mutated after this
+ * point, so returning the read-only external pointer directly is safe. */
 static bruce_launcher_menu_t *bruce_launcher__parse_json(cJSON *root) {
     size_t allocation_size = bruce_launcher__json_allocation_size(root, false, 0);
     if (allocation_size == 0) return NULL;
@@ -358,26 +360,20 @@ static bruce_launcher_menu_t *bruce_launcher__parse_json(cJSON *root) {
         return NULL;
     }
 
-    bruce_memory_object_t object;
-    if (memory__external_alloc(allocation_size, &object) != BRUCE_OK) {
+    const void *data = memory__external_malloc(allocation_size);
+    if (data == NULL) {
         memory__free(scratch);
         return NULL;
     }
-    bruce_result_t write_result = memory__external_write(&object, 0, scratch, allocation_size);
+    bruce_result_t write_result = memory__external_memcpy(data, 0, scratch, allocation_size);
     memory__free(scratch);
     if (write_result != BRUCE_OK) {
-        (void)memory__external_free(&object);
+        (void)memory__external_free(data);
         return NULL;
     }
 
-    const void *mapped = NULL;
-    if (memory__external_map(&object, &mapped) != BRUCE_OK) {
-        (void)memory__external_free(&object);
-        return NULL;
-    }
-
-    s_menu_object = object;
-    return (bruce_launcher_menu_t *)mapped;
+    s_menu_data = data;
+    return (bruce_launcher_menu_t *)data;
 }
 
 bruce_launcher_menu_t *bruce_launcher__menu_load(void) {

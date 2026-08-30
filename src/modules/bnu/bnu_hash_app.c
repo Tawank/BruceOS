@@ -261,7 +261,7 @@ int bnu_crc32_app_main(int argc, char **argv) {
  * (unlike md5sum/sha256sum/crc32, which stream) since encoding/decoding
  * needs the complete input to place padding and validate trailing
  * whitespace correctly. Kept well under a typical internal heap's size so
- * this never needs memory__external_alloc()'s PSRAM/swap fallback (see
+ * this never needs memory__external_malloc()'s PSRAM/swap fallback (see
  * bnu_less_app_main()'s LESS_MAX_BYTES for the file that does need it) --
  * base64 payloads on this device (tokens, keys, small certs/blobs) are
  * expected to be modest either way. */
