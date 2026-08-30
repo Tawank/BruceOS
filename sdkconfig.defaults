@@ -21,10 +21,6 @@ CONFIG_SPI_SLAVE_ISR_IN_IRAM=y
 CONFIG_COMPILER_OPTIMIZATION_SIZE=y
 CONFIG_LOG_DEFAULT_LEVEL_WARN=y
 
-# Reduce peak RAM retained by HTTPS clients while allowing 8 KiB TLS records.
-CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
-CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=8192
-
 # Append the legacy GlobalSign Root CA (R1) to the default certificate
 # bundle - see certs/globalsign_root_ca_r1.pem for why it's needed even
 # though ESP-IDF's default bundle no longer ships it.

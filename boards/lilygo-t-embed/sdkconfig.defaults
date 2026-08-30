@@ -83,21 +83,8 @@ CONFIG_ESP_WIFI_RX_IRAM_OPT=n
 CONFIG_ESP_WIFI_DYNAMIC_RX_MGMT_BUFFER=y
 CONFIG_ESP_WIFI_RX_MGMT_BUF_NUM_DEF=5
 
-# mbedTLS's own allocator (src/mbedtls/port/esp_mem.c) bypasses plain
-# malloc()'s internal/PSRAM fallback entirely: it calls heap_caps_calloc()
-# with a fixed capability mask chosen by CONFIG_MBEDTLS_MEM_ALLOC_MODE, which
-# defaults to MBEDTLS_INTERNAL_MEM_ALLOC (MALLOC_CAP_INTERNAL, no fallback to
-# PSRAM if that's full). Every HTTPS fetch's SSL in/out buffers - the
-# "contiguous ~16 KiB block" browser_image_cache.c's retry comment refers to
-# - go through that allocator, so on this board's already-thin internal
-# heap (its framebuffer alone is ~55 KB bigger than a small-screen board's -
-# see DISPLAY__FB_SIZE) they can fail with BRUCE_ERR_NO_MEMORY even while
-# PSRAM sits almost entirely free. MBEDTLS_DEFAULT_MEM_ALLOC routes mbedTLS
-# through plain calloc() instead, which gets ESP-IDF's normal
-# prefer-internal/fall-back-to-PSRAM malloc() behavior (see
-# CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL) rather than a hard PSRAM-only or
-# internal-only pin.
-CONFIG_MBEDTLS_DEFAULT_MEM_ALLOC=y
+# mbedTLS
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
 
 # boards/m5stack-cardputer already carries these two mbedTLS trims (it has no
 # PSRAM at all, so it needs every internal KB back); this board never picked
