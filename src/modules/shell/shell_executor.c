@@ -463,6 +463,22 @@ static int shell_executor__pipe_relay(bruce_stdio_session_t session, bruce_proce
     return status.exit_code < 0 ? 1 : status.exit_code & 0xff;
 }
 
+/* Drains output already produced by a pipe destination. This must also run
+ * while its captured input is being fed: filters such as xxd expand their
+ * input, so waiting until the entire input has been written can fill the
+ * destination's output channel and deadlock both sides. */
+static bool shell_executor__pipe_drain_output(bruce_stdio_session_t session) {
+    bool activity = false;
+    char chunk[256];
+    size_t size = 0;
+    while (stdio__session_read_output(session, chunk, sizeof(chunk), &size) == BRUCE_OK) {
+        if (size == 0) continue;
+        (void)stdio__write(chunk, size);
+        activity = true;
+    }
+    return activity;
+}
+
 /* Feeds a captured buffer to `target`'s stdin over a fresh stdio session,
  * telling it up front how many bytes are coming via a "--stdin-size N"
  * argument prefix (see text_app.c's --stdin-size handling for the convention
@@ -506,11 +522,14 @@ shell_executor__pipe_write(int target_argc, char **target_words, const shell_exe
     int status = 0;
     size_t offset = 0;
     while (offset < buffer->length) {
+        (void)shell_executor__pipe_drain_output(session);
         size_t chunk = buffer->length - offset > 128u ? 128u : buffer->length - offset;
         bruce_result_t written = stdio__session_write_input(session, (const char *)data + offset, chunk);
         if (written == BRUCE_OK) {
             offset += chunk;
         } else if (written == BRUCE_ERR_RESOURCE_LIMIT) {
+            /* The child may be waiting for room in its output channel before
+             * it can consume more input. Draining above breaks that cycle. */
             (void)runtime__delay(1);
         } else {
             status = 1;
