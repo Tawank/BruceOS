@@ -639,10 +639,15 @@ output isn't a tty.
 The built-in BNU (Bruce is Not Unix) module provides the direct commands
 `pwd`, `ls [path]`, `lsblk`, `mount [device] [mount-point]`,
 `unmount <target>`, `mkdir <directory>`, `touch <file>`, `cat <file>...`,
-`free`, `top`, `shutdown`, and `reboot`. The shell's `cd [directory]` builtin
+`xxd [options] [file]`, `free`, `top`, `shutdown`, and `reboot`. The shell's `cd [directory]` builtin
 updates and exports `PWD`; BNU commands inherit it and use it to resolve relative
 storage paths independently of libc process cwd. `cat` streams
-files unchanged to app-visible stdout. `free` reports Core-provided internal RAM
+files unchanged to app-visible stdout. `xxd` streams file or piped input as
+canonical hexadecimal/ASCII lines, with configurable columns, grouping,
+offset, and length, or as plain hexadecimal. Its line formatter accepts an
+explicit source address so a later privileged memory-dump frontend can reuse
+it for bounded RAM, PSRAM, or swap reads without exposing raw-memory access
+through the ordinary storage command. `free` reports Core-provided internal RAM
 and PSRAM heap statistics. `top` reports the same system heaps plus CPU usage,
 stack high-water bytes, and tracked heap usage for each Core-managed process.
 `shutdown <now|+minutes|HH:MM>` releases a board power-hold latch when present

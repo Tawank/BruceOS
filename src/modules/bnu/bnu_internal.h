@@ -28,3 +28,9 @@ bool bnu__resolve_path(const char *path, char *out_path);
 /* Formats `bytes` into `output` as a plain decimal, or a human-readable
  * value (e.g. 8.2K, 1.3M) when `human` is true. */
 void bnu__format_size(uint32_t bytes, bool human, char *output, size_t capacity);
+
+/* Prints one xxd-compatible line. The explicit address makes this reusable
+ * by a future memorydump command whose source is not a storage file. */
+void bnu__xxd_print_line(
+    const uint8_t *data, size_t length, uint64_t address, size_t columns, size_t group, bool plain
+);

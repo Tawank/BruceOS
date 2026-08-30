@@ -169,6 +169,7 @@ void app_runner__register_defaults(void) {
     app_runner__register("sha256sum", "Print SHA-256 checksums", "Content", bnu_sha256sum_app_main, 0);
     app_runner__register("text", "Edit text files", "Content", text_app_main, 0);
     app_runner__register("wc", "Count lines, words, and bytes", "Content", bnu_wc_app_main, 0);
+    app_runner__register("xxd", "Make a hexadecimal dump", "Content", bnu_xxd_app_main, 0);
 
     app_runner__register_loader(".elf", "elf");
     app_runner__register_loader(".wasm", "wasm");

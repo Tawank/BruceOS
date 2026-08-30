@@ -35,6 +35,9 @@ bool selftest__run_bnu_case(void) {
     char *wc_argv[] = {"wc", "/selftest_bnu_wc.txt"};
     char *wc_flags_argv[] = {"wc", "-l", "-w", "/selftest_bnu_wc.txt"};
     char *wc_missing_argv[] = {"wc", "/selftest_bnu_wc_missing.txt"};
+    char *xxd_argv[] = {"xxd", "-c", "8", "-g", "1", "-l", "12", "-s", "4", "/selftest_bnu_wc.txt"};
+    char *xxd_plain_argv[] = {"xxd", "-p", "/selftest_bnu_wc.txt"};
+    char *xxd_invalid_argv[] = {"xxd", "-c", "0", "/selftest_bnu_wc.txt"};
     bruce_result_t date_result = bnu_date_app_main(1, date_argv);
     static const char cat_text[] = "bnu cat selftest\n";
     static const char grep_text[] = "alpha\nbeta needle\ngamma\ndelta needle\nepsilon\n";
@@ -96,7 +99,10 @@ bool selftest__run_bnu_case(void) {
                wc_open == BRUCE_OK && wc_write == BRUCE_OK && wc_written == sizeof(wc_text) - 1 &&
                wc_close == BRUCE_OK && bnu_wc_app_main(2, wc_argv) == BRUCE_OK &&
                bnu_wc_app_main(4, wc_flags_argv) == BRUCE_OK &&
-               bnu_wc_app_main(2, wc_missing_argv) == BRUCE_ERR_NOT_FOUND;
+               bnu_wc_app_main(2, wc_missing_argv) == BRUCE_ERR_NOT_FOUND &&
+               bnu_xxd_app_main(10, xxd_argv) == BRUCE_OK &&
+               bnu_xxd_app_main(3, xxd_plain_argv) == BRUCE_OK &&
+               bnu_xxd_app_main(4, xxd_invalid_argv) == BRUCE_ERR_INVALID_ARGUMENT;
     storage__remove(cat_argv[1]);
     storage__remove(grep_argv[7]);
     storage__remove(wc_argv[1]);
