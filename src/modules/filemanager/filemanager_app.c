@@ -476,15 +476,42 @@ int filemanager_app_main(int argc, char **argv) {
         size_t probe_count = 0;
         bool is_folder = storage__list(path, NULL, 0, &probe_count) == BRUCE_OK;
 
+        /* A plain file (neither the ".." parent row nor a folder) gets its
+         * extension's own extra actions (e.g. an archive's "Extract here",
+         * see core_sdk/filetype.h's bruce_filetype_action_t) spliced into
+         * `actions` just before "Back", so file_info must be identified up
+         * here rather than lazily inside filemanager__open_default() -
+         * dispatch below (the final `else` of the action chain) reads it
+         * back by comparing the chosen value against file_info.actions[]. */
+        bruce_filetype_info_t file_info;
+        bool has_file_info = false;
+        bruce_dialog_choice_t file_actions[sizeof(actions) / sizeof(actions[0]) + BRUCE_FILETYPE_MAX_ACTIONS];
+        size_t file_actions_count = sizeof(actions) / sizeof(actions[0]);
+        if (!parent_entry && !is_folder) {
+            has_file_info = filetype__identify(path, &file_info) == BRUCE_OK && !file_info.is_directory;
+            memcpy(file_actions, actions, sizeof(actions));
+            if (has_file_info && file_info.action_count > 0) {
+                /* Splice in before the last entry ("Back"). */
+                file_actions[file_actions_count - 1 + file_info.action_count] = actions[file_actions_count - 1];
+                for (size_t i = 0; i < file_info.action_count; ++i) {
+                    file_actions[file_actions_count - 1 + i].label = file_info.actions[i].label;
+                    file_actions[file_actions_count - 1 + i].value = file_info.actions[i].program;
+                    file_actions[file_actions_count - 1 + i].icon_name = NULL;
+                    file_actions[file_actions_count - 1 + i].right_text = NULL;
+                }
+                file_actions_count += file_info.action_count;
+            }
+        }
+
         size_t selected = 0;
         /* Plain dialog__choice(), not the picker's full-bleed action_params:
          * this is a small action menu over the already-visible file browser,
          * so it reads better as a popup window than another full screen. */
         const bruce_dialog_choice_t *menu =
-            parent_entry ? directory_actions : (is_folder ? folder_actions : actions);
+            parent_entry ? directory_actions : (is_folder ? folder_actions : file_actions);
         size_t menu_count = parent_entry ? sizeof(directory_actions) / sizeof(directory_actions[0])
                             : is_folder   ? sizeof(folder_actions) / sizeof(folder_actions[0])
-                                          : sizeof(actions) / sizeof(actions[0]);
+                                          : file_actions_count;
         result = dialog__choice(path, NULL, menu, menu_count, &selected);
         if (result == BRUCE_ERR_CANCELLED && filemanager__resume_after_handoff()) {
             (void)input__flush();
@@ -546,6 +573,16 @@ int filemanager_app_main(int argc, char **argv) {
             result = filemanager__show_info(path);
         } else if (strcmp(action, "delete") == 0) {
             result = filemanager__delete_entry(path, "file");
+        } else {
+            /* Not one of the fixed actions above - must be one of
+             * file_info.actions[] spliced into the menu earlier. */
+            result = BRUCE_ERR_NOT_FOUND;
+            for (size_t i = 0; has_file_info && i < file_info.action_count; ++i) {
+                if (strcmp(action, file_info.actions[i].program) == 0) {
+                    result = filemanager__run_named_app(file_info.actions[i].program, path, gui, false);
+                    break;
+                }
+            }
         }
         if (result != BRUCE_OK && result != BRUCE_ERR_CANCELLED) {
             filemanager__show_error(menu[selected].label, result);

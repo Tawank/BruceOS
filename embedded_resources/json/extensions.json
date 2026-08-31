@@ -187,9 +187,11 @@
     },
     {
       "description": "ZIP archive",
+      "program": "archive",
       "extensions": [".zip"],
       "mimetypes": ["application/zip"],
-      "icon": "zip-box"
+      "icon": "zip-box",
+      "actions": [{"label": "Extract here", "program": "archive-extract"}]
     },
     {
       "description": "7-Zip archive",
@@ -210,10 +212,19 @@
       "icon": "zip-box"
     },
     {
+      "description": "Gzip-compressed tar archive",
+      "program": "archive",
+      "extensions": [".tar.gz", ".tgz"],
+      "mimetypes": ["application/gzip"],
+      "icon": "zip-box",
+      "actions": [{"label": "Extract here", "program": "archive-extract"}]
+    },
+    {
       "description": "Gzip-compressed data",
       "extensions": [".gz"],
       "mimetypes": ["application/gzip"],
-      "icon": "zip-box"
+      "icon": "zip-box",
+      "actions": [{"label": "Extract here", "program": "gunzip"}]
     }
   ]
 }

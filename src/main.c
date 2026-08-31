@@ -99,6 +99,12 @@ void app_runner__register_defaults(void) {
     app_runner__register("top", "Processes, CPU, RAM usage", "System", bnu_top_app_main, 0);
 
     /* Storage - filesystems, partitions, and file management. */
+    app_runner__register(
+        "archive", "List a .zip or .tar.gz/.tgz archive's contents", "Storage", bnu_archive_app_main, 0
+    );
+    app_runner__register(
+        "archive-extract", "Extract a .zip or .tar.gz/.tgz archive", "Storage", bnu_archive_extract_app_main, 0
+    );
     app_runner__register("bparted", "Manage partitions", "Storage", bparted_app_main, BPARTED_STACK_BYTES);
     app_runner__register("cat", "Print file contents", "Storage", bnu_cat_app_main, 0);
     app_runner__register("file", "Identify a file's type", "Storage", bnu_file_app_main, 0);
@@ -118,8 +124,11 @@ void app_runner__register_defaults(void) {
         STORAGE_COMMANDS_STACK_BYTES
     );
     app_runner__register("tail", "Print the last part of a file", "Storage", bnu_tail_app_main, 0);
+    app_runner__register("tar", "Create, list, or extract a .tar.gz archive", "Storage", bnu_tar_app_main, 0);
     app_runner__register("touch", "Create files or update timestamps", "Storage", bnu_touch_app_main, 0);
     app_runner__register("unmount", "Unmount storage devices", "Storage", bnu_unmount_app_main, 0);
+    app_runner__register("unzip", "List or extract a .zip archive", "Storage", bnu_unzip_app_main, 0);
+    app_runner__register("zip", "Create a .zip archive", "Storage", bnu_zip_app_main, 0);
 
     /* Network - Wi-Fi, web, and remote-access tools. */
     app_runner__register("browser", "Browse web pages", "Network", browser_app_main, BROWSER_STACK_BYTES);
@@ -164,6 +173,8 @@ void app_runner__register_defaults(void) {
     app_runner__register("base64", "Base64 encode or decode data", "Content", bnu_base64_app_main, 0);
     app_runner__register("crc32", "Print CRC-32 checksums", "Content", bnu_crc32_app_main, 0);
     app_runner__register("grep", "Search for text in files or stdin", "Content", bnu_grep_app_main, 0);
+    app_runner__register("gunzip", "Decompress a .gz file", "Content", bnu_gunzip_app_main, 0);
+    app_runner__register("gzip", "Compress a file to .gz", "Content", bnu_gzip_app_main, 0);
     app_runner__register("image", "View image files", "Content", image_app_main, 8192);
     app_runner__register("less", "Page through text", "Content", bnu_less_app_main, 0);
     app_runner__register("md5sum", "Print MD5 checksums", "Content", bnu_md5sum_app_main, 0);

@@ -1,11 +1,13 @@
 set(BRUCE_SELFTEST_SOURCES
     "modules/selftest/args_test.c"
     "modules/selftest/app_runner_test.c"
+    "modules/selftest/archive_test.c"
     "modules/selftest/audio_test.c"
     "modules/selftest/base64_test.c"
     "modules/selftest/bluetooth_test.c"
     "modules/selftest/clock_test.c"
     "modules/selftest/bnu_test.c"
+    "modules/selftest/compress_test.c"
     "modules/selftest/config_test.c"
     "modules/selftest/device_test.c"
     "modules/selftest/dialog_test.c"
@@ -40,12 +42,15 @@ idf_component_register(SRCS
                     "main.c"
                      "core/app_config/app_config.c"
                      "core/app_runner/app_runner.c"
+                     "core/archive/archive.c"
+                     "core/archive/archive_zip.c"
                      "core/audio/audio.c"
                     "core/autostart/autostart.c"
                     "core/base64/base64.c"
                     "core/bluetooth/bluetooth.c"
                     "core/bluetooth/bluetooth_hid.c"
                     "core/clock/clock.c"
+                    "core/compress/compress.c"
                     "core/config/config.c"
                     "core/dialog/dialog.c"
                     "core/device/board_i2c.c"
@@ -121,6 +126,8 @@ idf_component_register(SRCS
                     "modules/bnu/bnu_xxd_app.c"
                     "modules/bnu/bnu_clipboard_app.c"
                     "modules/bnu/bnu_memorydump_app.c"
+                    "modules/bnu/bnu_compress_app.c"
+                    "modules/bnu/bnu_archive_app.c"
                     "modules/bluetooth/bluetooth_app.c"
                     "modules/bluetooth_hid/bluetooth_hid_app.c"
                     "modules/clock/clock_app.c"
@@ -234,9 +241,12 @@ idf_component_register(SRCS
                      littlefs
                      libjpeg-turbo
                      libpng
+                     zlib
                      wolfssl
                      wolfssh
                      elf_loader
+                     microtar
+                     minizip
                      mquickjs
                      wasm-micro-runtime
                     INCLUDE_DIRS
@@ -370,6 +380,7 @@ add_library(bruce_sdk_builtin_bnu_check OBJECT
             "modules/bnu/bnu_xxd_app.c"
             "modules/bnu/bnu_clipboard_app.c")
 target_sources(bruce_sdk_builtin_bnu_check PRIVATE "modules/bnu/bnu_memorydump_app.c")
+target_sources(bruce_sdk_builtin_bnu_check PRIVATE "modules/bnu/bnu_compress_app.c" "modules/bnu/bnu_archive_app.c")
 target_include_directories(bruce_sdk_builtin_bnu_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/bnu")

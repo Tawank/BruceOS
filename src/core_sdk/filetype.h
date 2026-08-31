@@ -38,6 +38,19 @@
 #define BRUCE_FILETYPE_MIME_MAX 64
 #define BRUCE_FILETYPE_ICON_MAX 32
 #define BRUCE_FILETYPE_PROGRAM_MAX 32
+#define BRUCE_FILETYPE_ACTION_LABEL_MAX 24
+/* Extra per-extension context-menu entries beyond the usual Open/Copy/
+ * Rename/Delete set (e.g. ".zip"'s "Extract here"); see "actions" below and
+ * BRUCE_FILETYPE_MAX_ACTIONS's own note for why this is kept small. */
+#define BRUCE_FILETYPE_MAX_ACTIONS 2
+
+typedef struct {
+    /* Menu label, e.g. "Extract here". Never empty. */
+    char label[BRUCE_FILETYPE_ACTION_LABEL_MAX];
+    /* app_runner program to run with the file's path as its sole argument
+     * when this action is chosen, e.g. "archive-extract". */
+    char program[BRUCE_FILETYPE_PROGRAM_MAX];
+} bruce_filetype_action_t;
 
 typedef struct {
     /* Short human-readable description, e.g. "PNG image", "POSIX shell
@@ -52,6 +65,16 @@ typedef struct {
     bool is_directory;
     /* Best-effort text/binary guess, only meaningful when is_directory is false. */
     bool is_binary;
+    /* Extra actions this extension offers beyond the default file-manager
+     * menu, in configured order; only actions[0..action_count-1] are valid.
+     * Kept to a handful (BRUCE_FILETYPE_MAX_ACTIONS) since these are meant
+     * for the rare "this filetype needs its own verb" case (an archive's
+     * "Extract here") rather than a general-purpose menu builder - most
+     * entries have none. Populated by filetype__lookup_extension() and
+     * filetype__identify()/filetype__identify_bytes() when an extension
+     * matched (tier 2); always empty otherwise. */
+    bruce_filetype_action_t actions[BRUCE_FILETYPE_MAX_ACTIONS];
+    size_t action_count;
 } bruce_filetype_info_t;
 
 /**

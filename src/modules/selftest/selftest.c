@@ -11,12 +11,14 @@
 #include "core_sdk/process.h"
 
 #include "app_runner_test.h"
+#include "archive_test.h"
 #include "args_test.h"
 #include "audio_test.h"
 #include "base64_test.h"
 #include "bluetooth_test.h"
 #include "bnu_test.h"
 #include "clock_test.h"
+#include "compress_test.h"
 #include "config_test.h"
 #include "device_test.h"
 #include "dialog_test.h"
@@ -118,6 +120,13 @@ int selftest_app_main(int argc, char **argv) {
     RUN_SELFTEST(selftest__run_process_app_kill_case);
     RUN_SELFTEST(selftest__run_device_state_case);
     RUN_SELFTEST(selftest__run_clock_case);
+    RUN_SELFTEST(selftest__run_compress_one_shot_case);
+    RUN_SELFTEST(selftest__run_compress_streaming_case);
+    RUN_SELFTEST(selftest__run_compress_corrupt_input_case);
+    RUN_SELFTEST(selftest__run_archive_tar_gz_roundtrip_case);
+    RUN_SELFTEST(selftest__run_archive_zip_roundtrip_case);
+    RUN_SELFTEST(selftest__run_archive_tar_gz_corrupt_case);
+    RUN_SELFTEST(selftest__run_archive_tar_gz_slip_rejection_case);
     RUN_SELFTEST(selftest__run_apprunner_registration_case);
     RUN_SELFTEST(selftest__run_apprunner_args_case);
     RUN_SELFTEST(selftest__run_apprunner_resolution_case);

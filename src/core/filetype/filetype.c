@@ -15,10 +15,10 @@
 
 /*
  * Owns "/config/extensions.conf" (schema: {"types": [{description,
- * program, extensions, mimetypes, interpreters, icon}, ...]}) and the
- * magic-byte/shebang/text-heuristic fallbacks used when a path's extension
- * either isn't in that table or doesn't exist at all. See core_sdk/
- * filetype.h for the full detection order.
+ * program, extensions, mimetypes, interpreters, icon, actions}, ...]}) and
+ * the magic-byte/shebang/text-heuristic fallbacks used when a path's
+ * extension either isn't in that table or doesn't exist at all. See
+ * core_sdk/filetype.h for the full detection order.
  *
  * Each entry's "extensions" only ever groups extensions that share one
  * exact MIME type (e.g. .jpg/.jpeg -> image/jpeg, .c/.h -> text/x-c), so
@@ -27,6 +27,18 @@
  * string; the array shape is just what lets a future entry list more than
  * one equally-valid MIME string for the same kind (e.g. an alias) without a
  * schema change.
+ *
+ * "extensions" entries are also matched compound-first: a path ending in
+ * two dot-segments (e.g. "backup.tar.gz") is looked up by both its full
+ * ".tar.gz" and its bare ".gz" before falling back to whichever one has a
+ * configured entry, so ".tar.gz" can have its own program/icon/actions
+ * distinct from every other ".gz" file's (see filetype__entry_for_extension()).
+ *
+ * "actions" (optional): [{"label", "program"}, ...], up to
+ * BRUCE_FILETYPE_MAX_ACTIONS entries -- extra file-manager context-menu
+ * items beyond the default set, e.g. an archive's [{"label": "Extract
+ * here", "program": "archive-extract"}]. `program` is run with the file's
+ * path as its sole argument when chosen.
  */
 
 #define FILETYPE_HEADER_SAMPLE_SIZE 256
@@ -101,18 +113,42 @@ static const char *filetype__extension_of(const char *path) {
     return dot;
 }
 
+/* The two-segment compound extension ending at `simple` (filetype__extension_of()'s
+ * result), e.g. "backup.tar.gz" -> ".tar.gz" for simple=".gz", or NULL if
+ * there's no second dot within the same basename (or `simple` is NULL). */
+static const char *filetype__compound_extension_of(const char *path, const char *simple) {
+    if (simple == NULL) return NULL;
+    const char *slash = strrchr(path, '/');
+    const char *basename_start = slash != NULL ? slash + 1 : path;
+    for (const char *p = simple; p > basename_start; --p) {
+        if (p[-1] == '.') return p - 1;
+    }
+    return NULL;
+}
+
 /* Entry in the config's "types" array whose "extensions" list contains
- * path's extension, or NULL if path has no extension or nothing matches. */
+ * path's extension, or NULL if path has no extension or nothing matches.
+ * Tries the compound two-segment extension (".tar.gz") before the bare
+ * final one (".gz") when both exist, so a configured ".tar.gz" entry wins
+ * over the ".gz" entry every gzip file also matches. */
 static cJSON *filetype__entry_for_extension(const char *path) {
     filetype__load_config();
     if (s_config == NULL || path == NULL) return NULL;
-    const char *extension = filetype__extension_of(path);
-    if (extension == NULL) return NULL;
+    const char *simple = filetype__extension_of(path);
+    if (simple == NULL) return NULL;
+    const char *compound = filetype__compound_extension_of(path, simple);
     cJSON *types = cJSON_GetObjectItemCaseSensitive(s_config, "types");
     if (!cJSON_IsArray(types)) return NULL;
+
+    if (compound != NULL) {
+        cJSON *entry = NULL;
+        cJSON_ArrayForEach(entry, types) {
+            if (cJSON_IsObject(entry) && filetype__string_array_has_ci(entry, "extensions", compound)) return entry;
+        }
+    }
     cJSON *entry = NULL;
     cJSON_ArrayForEach(entry, types) {
-        if (cJSON_IsObject(entry) && filetype__string_array_has_ci(entry, "extensions", extension)) return entry;
+        if (cJSON_IsObject(entry) && filetype__string_array_has_ci(entry, "extensions", simple)) return entry;
     }
     return NULL;
 }
@@ -139,6 +175,23 @@ static cJSON *filetype__entry_for_interpreter(const char *interpreter) {
     return NULL;
 }
 
+/* Fills out_info->actions[]/action_count from entry's optional "actions"
+ * array; entries missing a non-empty "label" or "program" are skipped, and
+ * anything past BRUCE_FILETYPE_MAX_ACTIONS is silently dropped. */
+static void filetype__fill_actions(const cJSON *entry, bruce_filetype_info_t *out_info) {
+    cJSON *actions = cJSON_GetObjectItemCaseSensitive(entry, "actions");
+    if (!cJSON_IsArray(actions)) return;
+    cJSON *item = NULL;
+    cJSON_ArrayForEach(item, actions) {
+        if (out_info->action_count >= BRUCE_FILETYPE_MAX_ACTIONS) break;
+        if (!cJSON_IsObject(item)) continue;
+        bruce_filetype_action_t *action = &out_info->actions[out_info->action_count];
+        if (!filetype__string_field(item, "label", action->label, sizeof(action->label))) continue;
+        if (!filetype__string_field(item, "program", action->program, sizeof(action->program))) continue;
+        out_info->action_count++;
+    }
+}
+
 static void filetype__fill_from_entry(const cJSON *entry, bruce_filetype_info_t *out_info) {
     if (!filetype__string_field(entry, "description", out_info->description, sizeof(out_info->description))) {
         snprintf(out_info->description, sizeof(out_info->description), "data");
@@ -149,6 +202,8 @@ static void filetype__fill_from_entry(const cJSON *entry, bruce_filetype_info_t 
         icon__get(out_info->icon) == NULL) {
         snprintf(out_info->icon, sizeof(out_info->icon), "file");
     }
+    out_info->action_count = 0;
+    filetype__fill_actions(entry, out_info);
 }
 
 bruce_result_t filetype__lookup_extension(const char *path, bruce_filetype_info_t *out_info) {
