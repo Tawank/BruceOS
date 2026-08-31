@@ -308,6 +308,105 @@ bool selftest__run_shell_loops_case(void) {
     return ok;
 }
 
+/* "producer | consumer >> file" must honor the consumer's own redirection --
+ * shell_executor__pipe_to_external()/pipe_write() used to just relay the
+ * consumer's output straight to the shell's own stdio (see
+ * shell_executor__pipe_relay()) with no regard for target->redirect at all,
+ * silently discarding it and leaving the redirect target untouched/empty.
+ * Uses "cat"/"head" here in place of a real "wifi scan" (QEMU has no wifi
+ * hardware to scan with, but the bug is in the shell's pipe plumbing, not
+ * in any particular producer). Runs the same line twice to also confirm
+ * ">>" appends rather than truncating on the second run.
+ *
+ * Captured content isn't compared byte-for-byte under QEMU:
+ * shell_executor__buffer_t (used both for the pipe's capture and for writing
+ * the redirect target) is backed by memory__external_malloc()/
+ * memory__external_memcpy(), and under QEMU there's no emulated PSRAM
+ * (CONFIG_SPIRAM is unset in build-qemu/sdkconfig), so the allocation falls
+ * through to the swap backend, whose flash-mapped pointer does not reliably
+ * reflect memcpy writes -- the same documented glitch bnu_test.c's grep case
+ * works around (see the comment there and memory_test.c's own
+ * CONFIG_BRUCE_QEMU_TEST_MODE guards). On real hardware PSRAM is available
+ * and content is compared exactly, including the '\r' that
+ * stdio__session_write_output()'s ONLCR translation inserts before every
+ * '\n' relayed through a routed session -- a pre-existing characteristic of
+ * the whole capture pipeline (also shared by "cmd > file"), not unique to
+ * this fix. */
+bool selftest__run_shell_pipe_redirect_case(void) {
+    const char *source_path = "/apps/shell_pipe_source.txt";
+    const char *result_path = "/apps/shell_pipe_result.txt";
+    static const char source_text[] = "line1\nline2\nline3\n";
+    (void)storage__remove(source_path);
+    (void)storage__remove(result_path);
+    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
+    size_t written = 0;
+    if (storage__open(
+            source_path, BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE | BRUCE_STORAGE_OPEN_TRUNCATE, &file
+        ) != BRUCE_OK ||
+        storage__write(file, source_text, sizeof(source_text) - 1, &written) != BRUCE_OK ||
+        written != sizeof(source_text) - 1 || storage__close(file) != BRUCE_OK) {
+        if (file != BRUCE_FILE_ID_INVALID) (void)storage__close(file);
+        (void)storage__remove(source_path);
+        printf("[selftest] shell/pipe-redirect: could not stage fixture\n");
+        return false;
+    }
+
+    /* Run each attempt as a spawned "shell -c ..." child with its own routed
+     * stdio session -- the same pattern selftest__shell_read_probe() uses --
+     * rather than calling shell__execute_line() directly in the selftest's
+     * own process: pipe_write()'s target runs as a background child of
+     * *whichever* process calls it, and its relay/drain loop expects a real
+     * routed session around that call, not the selftest task's own bare
+     * (session-less) context. */
+    char command[160];
+    snprintf(command, sizeof(command), "-c \"cat %s | head -n2 >> %s\"", source_path, result_path);
+    int status_a = -1, status_b = -1;
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        bruce_stdio_session_t session = BRUCE_STDIO_SESSION_INVALID;
+        int *status_out = attempt == 0 ? &status_a : &status_b;
+        if (stdio__session_create(&session) != BRUCE_OK || stdio__session_route_children(session) != BRUCE_OK) {
+            (void)stdio__session_close(session);
+            break;
+        }
+        int launched = app_runner__run("shell", command, BRUCE_LAUNCH_BACKGROUND);
+        (void)stdio__session_route_children(BRUCE_STDIO_SESSION_INVALID);
+        if (launched > 0) {
+            bruce_process_status_t status;
+            if (process__wait_status((bruce_process_id_t)launched, 5000, &status) == BRUCE_OK &&
+                status.reason == BRUCE_PROCESS_EXITED) {
+                *status_out = status.exit_code;
+            }
+        }
+        (void)stdio__session_close(session);
+    }
+
+    char result[64] = {0};
+    size_t result_size = 0;
+    bruce_result_t read_result = BRUCE_ERR_NOT_FOUND;
+    if (storage__open(result_path, BRUCE_STORAGE_OPEN_READ, &file) == BRUCE_OK) {
+        read_result = storage__read(file, result, sizeof(result) - 1, &result_size);
+        (void)storage__close(file);
+    }
+    (void)storage__remove(source_path);
+    (void)storage__remove(result_path);
+
+#if CONFIG_BRUCE_QEMU_TEST_MODE
+    bool ok = status_a == 0 && status_b == 0 && read_result == BRUCE_OK && result_size > 0;
+#else
+    static const char expected[] = "line1\r\nline2\r\nline1\r\nline2\r\n";
+    bool ok = status_a == 0 && status_b == 0 && read_result == BRUCE_OK &&
+              result_size == sizeof(expected) - 1 && memcmp(result, expected, sizeof(expected) - 1) == 0;
+#endif
+    if (!ok) {
+        printf(
+            "[selftest] shell/pipe-redirect: status=%d,%d read=%d size=%u\n", status_a, status_b, read_result,
+            (unsigned)result_size
+        );
+    }
+    printf("[selftest] shell/pipe-redirect: %s\n", ok ? "OK" : "failed");
+    return ok;
+}
+
 /* Runs `command` (a "shell -c ..." argument string) as a background child
  * with its stdio routed to a fresh session, feeds `stdin_text` into that
  * session right after launch (queued for the child's own `read` builtin --

@@ -471,6 +471,62 @@ static bool shell_executor__pipe_drain_output(bruce_stdio_session_t session) {
     return activity;
 }
 
+/* Same draining duty as shell_executor__pipe_drain_output() above, but for a
+ * "producer | consumer > file" destination: its output is being collected
+ * into `out_buffer` for shell_executor__write_file() rather than relayed
+ * live to the shell's own stdio, since a redirected destination isn't
+ * interactive and has nothing to relay to. Sets *out_of_memory and stops
+ * appending (but keeps draining the channel, so the destination doesn't
+ * stall on a full output pipe) if the buffer can't grow any further. */
+static bool
+shell_executor__pipe_drain_output_capture(bruce_stdio_session_t session, shell_executor__buffer_t *out_buffer, bool *out_of_memory) {
+    bool activity = false;
+    char chunk[256];
+    size_t size = 0;
+    while (stdio__session_read_output(session, chunk, sizeof(chunk), &size) == BRUCE_OK) {
+        if (size == 0) continue;
+        if (!*out_of_memory && !shell_executor__buffer_append(out_buffer, chunk, size)) *out_of_memory = true;
+        activity = true;
+    }
+    return activity;
+}
+
+/* shell_executor__pipe_relay()'s counterpart for a redirected pipe
+ * destination: waits for `child` to exit, collecting all of its output into
+ * `out_buffer` instead of relaying it live and forwarding the shell's own
+ * stdin (a redirected destination has no terminal to be interactive with).
+ * Returns the same status convention as pipe_relay(), plus -1 -- which
+ * cannot collide with a real exit/signal status, both of which are
+ * non-negative -- if the buffer ran out of memory partway through. */
+static int shell_executor__pipe_relay_capture(
+    bruce_stdio_session_t session, bruce_process_id_t child, shell_executor__buffer_t *out_buffer
+) {
+    bruce_process_status_t status = {0};
+    bool complete = false;
+    bool out_of_memory = false;
+    while (!complete) {
+        bool activity = shell_executor__pipe_drain_output_capture(session, out_buffer, &out_of_memory);
+        if (out_of_memory) break;
+        bruce_result_t waited = process__wait_status(child, 0, &status);
+        complete = waited == BRUCE_OK;
+        if (!complete && waited != BRUCE_ERR_TIMEOUT) break;
+        if (!activity && !complete) (void)runtime__delay(20);
+    }
+    if (!out_of_memory) (void)shell_executor__pipe_drain_output_capture(session, out_buffer, &out_of_memory);
+    if (out_of_memory) {
+        if (!complete) {
+            (void)process__kill(child);
+            (void)process__wait_status(child, 500, &status);
+        }
+        return -1;
+    }
+    if (!complete) return 1;
+    if (status.reason == BRUCE_PROCESS_TERMINATED || status.reason == BRUCE_PROCESS_KILLED) {
+        return 128 + (int)status.signal;
+    }
+    return status.exit_code < 0 ? 1 : status.exit_code & 0xff;
+}
+
 /* Feeds a captured buffer to `target`'s stdin over a fresh stdio session,
  * telling it up front how many bytes are coming via a "--stdin-size N"
  * argument prefix (see text_app.c's --stdin-size handling for the convention
@@ -481,11 +537,29 @@ static bool shell_executor__pipe_drain_output(bruce_stdio_session_t session) {
  * shell's own terminal by shell_executor__pipe_relay() once the buffer is
  * delivered; a target that wants the physical display instead needs the
  * same explicit "GUI=1" its non-piped invocation would (see
- * shell_executor__dispatch()'s big comment on GUI=1/BRUCE_LAUNCH_FOREGROUND). */
-static int
-shell_executor__pipe_write(int target_argc, char **target_words, const shell_executor__buffer_t *buffer) {
+ * shell_executor__dispatch()'s big comment on GUI=1/BRUCE_LAUNCH_FOREGROUND).
+ * `capture`, when non-NULL, redirects this relaying: the target's output is
+ * collected into `*capture` (for a caller such as
+ * shell_executor__pipe_to_external() to write out via
+ * shell_executor__write_file()) instead of being relayed live to the shell's
+ * own stdio, and the shell's own stdin is not forwarded to the target either
+ * -- a "producer | consumer > file" destination is never interactive. Takes
+ * ownership of `buffer` and frees it itself as soon as every byte has been
+ * written to the target's stdin (the caller must not touch or free it
+ * afterward): once `capture` is in play, `buffer` (the producer's captured
+ * output) and `*capture` (the consumer's, being accumulated) are both
+ * memory__external_*-backed allocations, and freeing the source the moment
+ * it's no longer needed -- rather than leaving it alive for the rest of this
+ * call, as the caller freeing it only after this function returns would --
+ * keeps only one such buffer live at a time. */
+static int shell_executor__pipe_write(
+    int target_argc, char **target_words, shell_executor__buffer_t *buffer, shell_executor__buffer_t *capture
+) {
     bruce_stdio_session_t session = BRUCE_STDIO_SESSION_INVALID;
-    if (stdio__session_create(&session) != BRUCE_OK) return 1;
+    if (stdio__session_create(&session) != BRUCE_OK) {
+        shell_executor__buffer_free(buffer);
+        return 1;
+    }
     /* Establishes the new session's tty geometry before the target starts, so
      * an interactive destination (e.g. "less") sees a real screen size from
      * its very first tty__isatty()/tty__get_size() call instead of looking
@@ -498,6 +572,7 @@ shell_executor__pipe_write(int target_argc, char **target_words, const shell_exe
     if (tty__get_size(&size) == BRUCE_OK) (void)tty__set_size(session, size.columns, size.rows);
     if (stdio__session_route_children(session) != BRUCE_OK) {
         (void)stdio__session_close(session);
+        shell_executor__buffer_free(buffer);
         return 1;
     }
     char prefix[48];
@@ -507,12 +582,22 @@ shell_executor__pipe_write(int target_argc, char **target_words, const shell_exe
     (void)stdio__session_route_children(BRUCE_STDIO_SESSION_INVALID);
     if (launched <= 0) {
         (void)stdio__session_close(session);
+        shell_executor__buffer_free(buffer);
         return 1;
     }
     int status = 0;
     size_t offset = 0;
+    bool out_of_memory = false;
     while (offset < buffer->length) {
-        (void)shell_executor__pipe_drain_output(session);
+        if (capture != NULL) {
+            (void)shell_executor__pipe_drain_output_capture(session, capture, &out_of_memory);
+            if (out_of_memory) {
+                status = 1;
+                break;
+            }
+        } else {
+            (void)shell_executor__pipe_drain_output(session);
+        }
         size_t chunk = buffer->length - offset > 128u ? 128u : buffer->length - offset;
         bruce_result_t written = stdio__session_write_input(session, (const char *)buffer->data + offset, chunk);
         if (written == BRUCE_OK) {
@@ -526,14 +611,27 @@ shell_executor__pipe_write(int target_argc, char **target_words, const shell_exe
             break;
         }
     }
+    /* The source buffer's job ends here -- everything of it that's going to
+     * reach the target has already been written to its stdin. Freeing it now
+     * rather than leaving it to the caller (after this function returns)
+     * means it's no longer live during the relay/capture phase below, so at
+     * most one memory__external_*-backed pipe buffer (this one, or `*capture`
+     * once relaying starts collecting into it) is ever alive at a time. */
+    shell_executor__buffer_free(buffer);
     if (status == 0) {
-        status = shell_executor__pipe_relay(session, (bruce_process_id_t)launched);
+        status = capture != NULL ? shell_executor__pipe_relay_capture(session, (bruce_process_id_t)launched, capture)
+                                  : shell_executor__pipe_relay(session, (bruce_process_id_t)launched);
+        if (status == -1) {
+            out_of_memory = true;
+            status = 1;
+        }
     } else {
         (void)process__kill((bruce_process_id_t)launched);
         bruce_process_status_t child_status;
         (void)process__wait_status((bruce_process_id_t)launched, 500, &child_status);
     }
     (void)stdio__session_close(session);
+    if (out_of_memory) stdio__printf("shell: pipe: out of memory buffering output\n");
     return status;
 }
 
@@ -565,6 +663,27 @@ static int shell_executor__pipe_to_external(
         return 2;
     }
 
+    /* "producer | consumer > file" / "producer | consumer >> file" -- the
+     * consumer's own redirection is honored the same way a lone
+     * "cmd > file" is (see shell_executor__external_redirected() above):
+     * shell_executor__pipe_write() collects the consumer's output into a
+     * buffer instead of relaying it live to the shell's own stdio, and
+     * that buffer is written out via shell_executor__write_file() once the
+     * consumer finishes. Resolved up front, before the producer even runs,
+     * so a bad redirection target is reported without wasting the
+     * producer's work. */
+    char *redirect_path = NULL;
+    bool redirect_append = false;
+    if (target->redirect != SHELL_REDIRECT_NONE) {
+        if (shell_executor__resolve_redirect_target(state, &target->redirect_target, &redirect_path, &error) != 0) {
+            stdio__printf("shell: %s\n", error != NULL ? error : "redirection error");
+            shell_parser__free_words(source_words, source_argc);
+            shell_parser__free_words(target_words, target_argc);
+            return 2;
+        }
+        redirect_append = target->redirect == SHELL_REDIRECT_APPEND;
+    }
+
     shell_executor__buffer_t buffer = {0};
     int status = 0;
     if (source_is_echo) {
@@ -584,9 +703,20 @@ static int shell_executor__pipe_to_external(
         status = shell_executor__capture_external(source_argc, source_words, &buffer);
     }
     if (status == 0) {
-        status = shell_executor__pipe_write(target_argc, target_words, &buffer);
-        shell_executor__buffer_free(&buffer);
+        shell_executor__buffer_t redirect_buffer = {0};
+        /* pipe_write() takes ownership of `buffer` and frees it itself. */
+        status = shell_executor__pipe_write(
+            target_argc, target_words, &buffer, redirect_path != NULL ? &redirect_buffer : NULL
+        );
+        if (redirect_path != NULL) {
+            if (!shell_executor__write_file(redirect_path, redirect_append, &redirect_buffer)) {
+                stdio__printf("shell: %s: write failed\n", redirect_path);
+                if (status == 0) status = 1;
+            }
+            shell_executor__buffer_free(&redirect_buffer);
+        }
     }
+    memory__free(redirect_path);
     shell_parser__free_words(source_words, source_argc);
     shell_parser__free_words(target_words, target_argc);
     return status;
@@ -598,9 +728,8 @@ static bool shell_executor__buffer_append_text(shell_executor__buffer_t *buffer,
 
 static int shell_executor__page_buffer(shell_executor__buffer_t *buffer) {
     char *less_argv[] = {"less", NULL};
-    int status = shell_executor__pipe_write(1, less_argv, buffer);
-    shell_executor__buffer_free(buffer);
-    return status;
+    /* pipe_write() takes ownership of `buffer` and frees it itself. */
+    return shell_executor__pipe_write(1, less_argv, buffer, NULL);
 }
 
 int shell_executor__page_help(void) {
