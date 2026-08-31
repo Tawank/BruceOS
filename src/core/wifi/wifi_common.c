@@ -24,7 +24,13 @@
 
 #define WIFI__CONNECTED_BIT BIT0
 #define WIFI__AP_BIT BIT1
+#define WIFI__SCAN_DONE_BIT BIT2
 #define WIFI__DEFAULT_CONNECT_TIMEOUT_MS 10000
+#define WIFI__SCAN_TIMEOUT_MS 10000
+/* Caps how many networks a shared scan round keeps in s_scan_cache -- every
+ * current caller asks for <=32, so this never truncates anyone in practice
+ * (see wifi__scan_poll()). */
+#define WIFI__SCAN_CACHE_MAX 32
 #define WIFI__STATUS_ICON_KEY "core.wifi"
 
 static const char *const TAG = "bruce_wifi";
@@ -40,6 +46,15 @@ static bool s_event_loop_owned;
 static char s_active_ssid[CONFIG__WIFI_SSID_MAX_LEN + 1];
 static char s_ip_buffer[16];
 static char s_mac_buffer[18];
+
+/* Only one scan can be in flight on the radio; concurrent wifi__scan_start()
+ * callers join the same round rather than restarting it. s_scan_refcount is
+ * how many haven't resolved it yet; s_scan_cache is that round's results,
+ * fetched from the driver once and shared out (guarded by s_wifi_mutex). */
+static int s_scan_refcount;
+static bool s_scan_cache_ready;
+static int s_scan_cache_result;
+static wifi__network_t s_scan_cache[WIFI__SCAN_CACHE_MAX];
 
 static const uint8_t s_wifi_status_icon[] = {
     0x3F, 0xE0,
@@ -85,6 +100,8 @@ static void wifi__event_handler(void *arg, esp_event_base_t event_base, int32_t 
         xEventGroupSetBits(s_wifi_events, WIFI__AP_BIT);
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_STOP) {
         xEventGroupClearBits(s_wifi_events, WIFI__AP_BIT);
+    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_SCAN_DONE) {
+        xEventGroupSetBits(s_wifi_events, WIFI__SCAN_DONE_BIT);
     }
     xSemaphoreGive(s_wifi_mutex);
 }
@@ -261,10 +278,9 @@ bruce_result_t wifi__connect(const char *ssid, const char *password, uint32_t ti
     return BRUCE_OK;
 }
 
-int wifi__scan(wifi__network_t *networks, size_t capacity) {
+bruce_result_t wifi__scan_start(void) {
     bruce_result_t result = permission__check(BRUCE_PERMISSION_WIFI);
-    if (result != BRUCE_OK) return (int)result;
-    if (capacity != 0 && networks == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    if (result != BRUCE_OK) return result;
     result = wifi__init();
     if (result != BRUCE_OK) return result;
     xSemaphoreTake(s_wifi_mutex, portMAX_DELAY);
@@ -272,37 +288,118 @@ int wifi__scan(wifi__network_t *networks, size_t capacity) {
         xSemaphoreGive(s_wifi_mutex);
         return BRUCE_ERR_IO;
     }
-    esp_err_t err = esp_wifi_scan_start(NULL, true);
-    if (err != ESP_OK) {
-        xSemaphoreGive(s_wifi_mutex);
-        return BRUCE_ERR_IO;
-    }
+    if (s_scan_refcount == 0) {
+        /* Fresh round: only clear the bit here, never in wifi__scan_poll(),
+         * so multiple waiters can safely observe the same completion. */
+        xEventGroupClearBits(s_wifi_events, WIFI__SCAN_DONE_BIT);
+        s_scan_cache_ready = false;
+        /* Non-blocking: esp_wifi scans on its own task and posts
+         * WIFI_EVENT_SCAN_DONE, so we don't sit here holding s_wifi_mutex
+         * for the whole scan (that used to stall every other wifi__*
+         * caller in the system for as long as the scan took). */
+        esp_err_t err = esp_wifi_scan_start(NULL, false);
+        if (err != ESP_OK) {
+            xSemaphoreGive(s_wifi_mutex);
+            return BRUCE_ERR_IO;
+        }
+    } /* else: a round is already in flight or uncollected -- join it instead
+       * of restarting the radio scan out from under that caller. */
+    s_scan_refcount++;
+    xSemaphoreGive(s_wifi_mutex);
+    return BRUCE_OK;
+}
+
+/* s_wifi_mutex held. Runs once per round (guarded by s_scan_cache_ready):
+ * fetches from the driver into s_scan_cache, freeing its AP list as a
+ * side effect, so other waiters copy from the cache instead of each
+ * fetching (and re-freeing) the same driver-owned list. */
+static void wifi__scan_fill_cache_locked(void) {
     uint16_t found = 0;
     esp_wifi_scan_get_ap_num(&found);
-    uint16_t returned = found > capacity ? (uint16_t)capacity : found;
-    int scan_result = 0;
-    if (returned > 0 && networks != NULL) {
-        wifi_ap_record_t *records = calloc(returned, sizeof(*records));
+    uint16_t to_cache = found > WIFI__SCAN_CACHE_MAX ? WIFI__SCAN_CACHE_MAX : found;
+    s_scan_cache_result = 0;
+    if (to_cache > 0) {
+        wifi_ap_record_t *records = calloc(to_cache, sizeof(*records));
         if (records == NULL) {
-            xSemaphoreGive(s_wifi_mutex);
-            return BRUCE_ERR_NO_MEMORY;
-        }
-        uint16_t record_count = returned;
-        err = esp_wifi_scan_get_ap_records(&record_count, records);
-        if (err == ESP_OK) {
-            for (uint16_t i = 0; i < record_count; ++i) {
-                wifi__copy(networks[i].ssid, sizeof(networks[i].ssid), (const char *)records[i].ssid);
-                networks[i].rssi = records[i].rssi;
-                networks[i].channel = records[i].primary;
-                networks[i].authmode = (uint8_t)records[i].authmode;
-            }
-            scan_result = (int)record_count;
+            (void)esp_wifi_clear_ap_list();
+            s_scan_cache_result = BRUCE_ERR_NO_MEMORY;
         } else {
-            scan_result = BRUCE_ERR_IO;
+            uint16_t record_count = to_cache;
+            esp_err_t err = esp_wifi_scan_get_ap_records(&record_count, records);
+            if (err == ESP_OK) {
+                for (uint16_t i = 0; i < record_count; ++i) {
+                    wifi__copy(
+                        s_scan_cache[i].ssid, sizeof(s_scan_cache[i].ssid), (const char *)records[i].ssid
+                    );
+                    s_scan_cache[i].rssi = records[i].rssi;
+                    s_scan_cache[i].channel = records[i].primary;
+                    s_scan_cache[i].authmode = (uint8_t)records[i].authmode;
+                }
+                s_scan_cache_result = (int)record_count;
+            } else {
+                s_scan_cache_result = BRUCE_ERR_IO;
+            }
+            free(records);
         }
-        free(records);
+    } else if (found > 0) {
+        (void)esp_wifi_clear_ap_list(); /* over WIFI__SCAN_CACHE_MAX -- still free the driver's list */
     }
+    s_scan_cache_ready = true;
+}
+
+int wifi__scan_poll(wifi__network_t *networks, size_t capacity, uint32_t timeout_ms) {
+    bruce_result_t result = permission__check(BRUCE_PERMISSION_WIFI);
+    if (result != BRUCE_OK) return (int)result;
+    if (capacity != 0 && networks == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    if (s_wifi_events == NULL) return BRUCE_ERR_IO;
+
+    /* pdFALSE clear-on-exit: FreeRTOS doesn't reliably wake multiple tasks
+     * blocked on the same auto-clearing bit, so this stays level-triggered
+     * until wifi__scan_start() clears it for the next round. A timeout here
+     * leaves the round untouched -- call again to keep waiting. */
+    EventBits_t scan_bits = xEventGroupWaitBits(
+        s_wifi_events, WIFI__SCAN_DONE_BIT, pdFALSE, pdFALSE, pdMS_TO_TICKS(timeout_ms)
+    );
+    if ((scan_bits & WIFI__SCAN_DONE_BIT) == 0) { return BRUCE_ERR_TIMEOUT; }
+
+    xSemaphoreTake(s_wifi_mutex, portMAX_DELAY);
+    if (!s_scan_cache_ready) { wifi__scan_fill_cache_locked(); }
+
+    int scan_result = s_scan_cache_result;
+    if (scan_result > 0) {
+        if (networks != NULL) {
+            size_t to_copy = (size_t)scan_result < capacity ? (size_t)scan_result : capacity;
+            for (size_t i = 0; i < to_copy; ++i) { networks[i] = s_scan_cache[i]; }
+            scan_result = (int)to_copy;
+        } else {
+            scan_result = 0; /* caller didn't want records (capacity 0 / networks NULL) */
+        }
+    }
+
+    /* Resolved -- once every joiner has too, drop the cache so the next
+     * wifi__scan_start() starts a fresh scan instead of reusing this one. */
+    if (s_scan_refcount > 0) s_scan_refcount--;
+    if (s_scan_refcount == 0) s_scan_cache_ready = false;
     xSemaphoreGive(s_wifi_mutex);
+    return scan_result;
+}
+
+bruce_result_t wifi__scan_cancel(void) {
+    if (s_wifi_events == NULL) return BRUCE_OK;
+    xSemaphoreTake(s_wifi_mutex, portMAX_DELAY);
+    if (s_scan_refcount > 0) s_scan_refcount--;
+    bool last_waiter = s_scan_refcount == 0;
+    if (last_waiter) s_scan_cache_ready = false;
+    xSemaphoreGive(s_wifi_mutex);
+    if (!last_waiter) return BRUCE_OK; /* someone else is still waiting on this round */
+    return esp_wifi_scan_stop() == ESP_OK ? BRUCE_OK : BRUCE_ERR_IO; /* best-effort */
+}
+
+int wifi__scan(wifi__network_t *networks, size_t capacity) {
+    bruce_result_t result = wifi__scan_start();
+    if (result != BRUCE_OK) return (int)result;
+    int scan_result = wifi__scan_poll(networks, capacity, WIFI__SCAN_TIMEOUT_MS);
+    if (scan_result == BRUCE_ERR_TIMEOUT) { (void)wifi__scan_cancel(); }
     return scan_result;
 }
 

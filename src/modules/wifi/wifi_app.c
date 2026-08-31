@@ -7,6 +7,8 @@
 #include "args.h"
 #include "core_sdk/config.h"
 #include "core_sdk/dialog.h"
+#include "core_sdk/display.h"
+#include "core_sdk/input.h"
 #include "core_sdk/notification.h"
 #include "core_sdk/runtime.h"
 #include "core_sdk/stdio.h"
@@ -34,6 +36,10 @@
  * wifi_auth_mode_t Bruce targets, and wifi__network_t exposes only the raw
  * byte (no public enum), so that's the value checked here. */
 #define WIFI_APP_GUI_AUTH_OPEN 0u
+/* Tick length for the scanning spinner: how long each input__read() wait
+ * is, which doubles as the spinner's frame duration and the worst-case
+ * latency before a cancel press is noticed. */
+#define WIFI_APP_GUI_SCAN_TICK_MS 150u
 
 static const char *wifi_app_result_label(bruce_result_t result) {
     switch (result) {
@@ -132,16 +138,63 @@ static void wifi_app_gui__connect(const wifi__network_t *net) {
     }
 }
 
+/* Runs a Wi-Fi scan behind a full-screen spinner, ticking every
+ * WIFI_APP_GUI_SCAN_TICK_MS so the screen animates and Back/B is noticed
+ * within about one tick, instead of the old single blocking wifi__scan()
+ * call leaving the screen frozen (and uncancellable) for the scan's whole
+ * duration. Returns the same thing wifi__scan() does -- a non-negative
+ * count or a negative BRUCE_ERR_* value -- plus BRUCE_ERR_CANCELLED if the
+ * user backed out. */
+static int wifi_app__gui_scan(wifi__network_t *networks, size_t capacity) {
+    bruce_result_t start = wifi__scan_start();
+    if (start != BRUCE_OK) return (int)start;
+
+    static const char *const frames[] = {"|", "/", "-", "\\"};
+    size_t frame = 0;
+    for (;;) {
+        if (display__begin_frame() == BRUCE_OK) {
+            char status[32];
+            snprintf(
+                status, sizeof(status), "Scanning %s", frames[frame % (sizeof(frames) / sizeof(frames[0]))]
+            );
+            (void)display__fill_screen(BRUCE_COLOR_BLACK);
+            (void)display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
+            (void)display__set_text_color(BRUCE_COLOR_WHITE);
+            (void)display__set_text_size(2);
+            (void)display__draw_centre_string(status, display__width() / 2, (display__height() / 2) - 12);
+            (void)display__set_text_size(1);
+            (void)display__draw_centre_string("Back to cancel", display__width() / 2, (display__height() / 2) + 16);
+            (void)display__present();
+        }
+        frame++;
+
+        bruce_input_event_t event;
+        bruce_result_t input_result = input__read(&event, WIFI_APP_GUI_SCAN_TICK_MS);
+        if (input_result == BRUCE_ERR_NOT_FOREGROUND ||
+            (input_result == BRUCE_OK && event.action == BRUCE_INPUT_PRESS &&
+             (event.code == BRUCE_INPUT_CODE_BACK || event.code == BRUCE_INPUT_CODE_BUTTON_B))) {
+            (void)wifi__scan_cancel();
+            return BRUCE_ERR_CANCELLED;
+        }
+
+        /* Tick already spent WIFI_APP_GUI_SCAN_TICK_MS waiting on input, so
+         * this just checks whether that wait was also long enough for the
+         * scan to finish -- no need to wait again. */
+        int result = wifi__scan_poll(networks, capacity, 0);
+        if (result != BRUCE_ERR_TIMEOUT) return result;
+    }
+}
+
 /* Interactive picker: scan, list every visible network with its saved/open/
  * locked state, connect on selection, and rescan so the list (and any
  * change the connect attempt caused) is current again. Hidden networks
  * (blank SSID) are left out -- there is nothing to select or connect to by
  * name. */
 static int wifi_app__gui(void) {
-    (void)notification__push("Wi-Fi scanning...", WIFI_APP_KNOWN_CONNECT_BANNER_MS);
     for (;;) {
         wifi__network_t networks[WIFI_APP_GUI_SCAN_MAX];
-        int count = wifi__scan(networks, WIFI_APP_GUI_SCAN_MAX);
+        int count = wifi_app__gui_scan(networks, WIFI_APP_GUI_SCAN_MAX);
+        if (count == BRUCE_ERR_CANCELLED) return 0;
         if (count < 0) {
             (void)dialog__message(BRUCE_DIALOG_ERROR, "Wi-Fi scan", "Scan failed.");
             return -1;
