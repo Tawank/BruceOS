@@ -66,12 +66,15 @@ base64__decode(const char *text, size_t text_length, uint8_t *out, size_t out_ca
         if (!end) {
             char c = text[i];
             if (base64__is_space(c)) continue;
-            /* Once padding starts, nothing but more input beyond it is
-             * allowed -- this both rejects '=' in the middle of a group
-             * and, since it fires on every following character, guarantees
-             * padding can only ever be part of the very last group. */
-            if (padding_seen) return BRUCE_ERR_INVALID_ARGUMENT;
-            if (c == '=') {
+            /* Once padding starts, only more '=' may follow (a group has at
+             * most two), and nothing at all may follow the group beyond
+             * that -- rejecting '=' in the middle of a group, and (since a
+             * completed group's leftover padding_seen keeps rejecting any
+             * non-'=' that follows) guaranteeing padding can only ever be
+             * part of the very last group. */
+            if (padding_seen) {
+                if (c != '=') return BRUCE_ERR_INVALID_ARGUMENT;
+            } else if (c == '=') {
                 padding_seen = true;
             } else if (base64__value(c) < 0) {
                 return BRUCE_ERR_INVALID_ARGUMENT;

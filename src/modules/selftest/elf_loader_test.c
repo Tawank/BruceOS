@@ -98,6 +98,19 @@ bool selftest__run_wasm_loader_case(void) {
 
     size_t calls_before = wasm_loader__debug_call_count();
     int result = app_runner__run_path(path, NULL, BRUCE_LAUNCH_BACKGROUND);
+    /* app_runner__run_path() only spawns the "wasm" loader command
+     * asynchronously (see app_runner__run_path_with_environment()) -- the
+     * wasm loader's own BRUCE_ERR_NOT_FOUND (the target file was never
+     * written) is produced inside that spawned process, so it shows up on
+     * its exit code, not this call's own return value (just the spawned
+     * pid on success). */
+    if (result > 0) {
+        bruce_process_status_t status;
+        result = process__wait_status((bruce_process_id_t)result, 2000, &status) == BRUCE_OK &&
+                         status.reason == BRUCE_PROCESS_EXITED
+                     ? status.exit_code
+                     : result;
+    }
     if (result != BRUCE_ERR_NOT_FOUND || wasm_loader__debug_call_count() != calls_before + 1) {
         printf("[selftest] loader/wasm: loader was not dispatched (%d)\n", result);
         return false;

@@ -812,6 +812,22 @@ shell_executor__is_arith_command(const shell_command_t *command, size_t *inner_s
     return true;
 }
 
+/* True when `command`'s trimmed text merely *opens* with "((" -- no valid
+ * command name starts with '(', so this is always an attempted arithmetic
+ * command, whether or not it goes on to close with a matching "))". Used to
+ * tell a genuinely malformed one (e.g. "(( 1 +", missing its close) apart
+ * from an ordinary command lookup once shell_executor__is_arith_command()
+ * has already said this isn't a well-formed one: without this, such a line
+ * falls through to word-splitting and dispatch, where "((" becomes argv[0]
+ * and fails as an unknown command (status 127) instead of being reported as
+ * the syntax error it actually is (status 2, matching every other malformed
+ * construct this shell reports). */
+static bool shell_executor__starts_with_arith(const shell_command_t *command) {
+    size_t start = 0, end = command->length;
+    while (start < end && isspace((unsigned char)command->text[start])) start++;
+    return end - start >= 2 && command->text[start] == '(' && command->text[start + 1] == '(';
+}
+
 static int shell_executor__command(shell_state_t *state, const shell_command_t *command) {
     size_t inner_start, inner_len;
     if (shell_executor__is_arith_command(command, &inner_start, &inner_len)) {
@@ -826,6 +842,10 @@ static int shell_executor__command(shell_state_t *state, const shell_command_t *
             return 2;
         }
         return value != 0 ? 0 : 1; /* bash: (( )) is "true" (status 0) iff the result is nonzero */
+    }
+    if (shell_executor__starts_with_arith(command)) {
+        stdio__printf("shell: ((: missing '))'\n");
+        return 2;
     }
     char **words = NULL;
     int argc = 0;

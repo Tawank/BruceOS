@@ -206,65 +206,103 @@ bool selftest__run_shell_multiline_case(void) {
     return ok;
 }
 
+/* Runs one line and checks its exit status (and, if expected_arg is not
+ * NULL, that shell_test_probe's last argument matches). Prints exactly
+ * which checkpoint failed and what actually happened, then reports whether
+ * this and every prior checkpoint in the case passed. */
+static bool selftest__shell_loops_step(
+    bool ok_so_far, shell_state_t *state, const char *line, int expected_status, const char *expected_arg
+) {
+    if (!ok_so_far) return false;
+    int status = shell__execute_line(state, line);
+    bool ok = status == expected_status && (expected_arg == NULL || strcmp(s_probe_arg, expected_arg) == 0);
+    if (!ok) {
+        printf(
+            "[selftest] shell/loops: `%s` -> status=%d (want %d) arg=\"%s\" (want \"%s\")\n",
+            line,
+            status,
+            expected_status,
+            s_probe_arg,
+            expected_arg != NULL ? expected_arg : "(unchecked)"
+        );
+    }
+    return ok;
+}
+
 bool selftest__run_shell_loops_case(void) {
     if (!selftest__shell_register_probe()) return false;
     shell_state_t state;
     shell__state_init(&state);
     s_probe_calls = 0;
 
-    bool ok =
-        /* (( )) arithmetic: assignment, comparison, exit status, and the
-         * six comparison/logic operators actually get evaluated -- exit
-         * status is 0 (true) iff the result is nonzero, matching bash. */
-        shell__execute_line(&state, "x=5; (( x + 1 == 6 )) && shell_test_probe arith_ok") == 0 &&
-        strcmp(s_probe_arg, "arith_ok") == 0 &&
-        shell__execute_line(&state, "(( 3 * 4 - 2 ))") == 0 && shell__execute_line(&state, "(( 0 ))") == 1 &&
-        shell__execute_line(&state, "(( x++ )); shell_test_probe $x") == 0 && strcmp(s_probe_arg, "6") == 0 &&
-        shell__execute_line(&state, "(( x += 10 )); shell_test_probe $x") == 0 && strcmp(s_probe_arg, "16") == 0 &&
-        shell__execute_line(&state, "(( 5 > 3 && 2 < 4 )) && shell_test_probe logic_ok") == 0 &&
-        strcmp(s_probe_arg, "logic_ok") == 0 && shell__execute_line(&state, "(( 1 / 0 ))") == 2 &&
-        /* for NAME in WORD...; do ...; done -- iterates each word, and
-         * (( )) inside the body can accumulate across iterations. */
-        shell__execute_line(&state, "total=0; for n in 1 2 3; do (( total += n )); done; shell_test_probe $total") ==
-            0 &&
-        strcmp(s_probe_arg, "6") == 0 &&
-        /* break inside a for-loop's body (nested in an if) stops the loop
-         * immediately, without running the rest of that iteration. */
-        shell__execute_line(
-            &state,
-            "sum=0; for n in 1 2 3 4 5; do if [ $n -eq 3 ]; then break; fi; (( sum += n )); done; "
-            "shell_test_probe $sum"
-        ) == 0 &&
-        strcmp(s_probe_arg, "3") == 0 &&
-        /* C-style for ((init; cond; incr)). */
-        shell__execute_line(
-            &state, "product=1; for ((i=1; i<=4; i++)); do (( product *= i )); done; shell_test_probe $product"
-        ) == 0 &&
-        strcmp(s_probe_arg, "24") == 0 &&
-        /* while COND; do ...; done, and a condition re-evaluated every
-         * iteration off a variable the body itself mutates. */
-        shell__execute_line(&state, "count=0; while [ $count -lt 3 ]; do (( count++ )); done; shell_test_probe $count") ==
-            0 &&
-        strcmp(s_probe_arg, "3") == 0 &&
-        /* break N unwinds N enclosing loops at once. */
-        shell__execute_line(
-            &state,
-            "count=0; for i in 1 2 3; do for j in 1 2; do (( count++ )); if [ $count -eq 1 ]; then break 2; fi; "
-            "done; done; shell_test_probe $count"
-        ) == 0 &&
-        strcmp(s_probe_arg, "1") == 0 &&
-        /* A break that's followed, in the same branch, by more structure
-         * still ahead (a nested if) doesn't desync the enclosing while's
-         * own then/fi/done bookkeeping -- see shell_compound__catch_up(). */
-        shell__execute_line(
-            &state,
-            "result=start; while true; do if true; then break; if true; then result=unreached; fi; fi; done; "
-            "shell_test_probe $result"
-        ) == 0 &&
-        strcmp(s_probe_arg, "start") == 0 &&
-        /* Malformed constructs are reported, not silently misparsed. */
-        shell__execute_line(&state, "for x in a b") == 2 && shell__execute_line(&state, "while true; do echo hi") == 2 &&
-        shell__execute_line(&state, "(( 1 +")  == 2;
+    bool ok = true;
+    /* (( )) arithmetic: assignment, comparison, exit status, and the six
+     * comparison/logic operators actually get evaluated -- exit status is 0
+     * (true) iff the result is nonzero, matching bash. */
+    ok = selftest__shell_loops_step(
+        ok, &state, "x=5; (( x + 1 == 6 )) && shell_test_probe arith_ok", 0, "arith_ok"
+    );
+    ok = selftest__shell_loops_step(ok, &state, "(( 3 * 4 - 2 ))", 0, NULL);
+    ok = selftest__shell_loops_step(ok, &state, "(( 0 ))", 1, NULL);
+    ok = selftest__shell_loops_step(ok, &state, "(( x++ )); shell_test_probe $x", 0, "6");
+    ok = selftest__shell_loops_step(ok, &state, "(( x += 10 )); shell_test_probe $x", 0, "16");
+    ok = selftest__shell_loops_step(
+        ok, &state, "(( 5 > 3 && 2 < 4 )) && shell_test_probe logic_ok", 0, "logic_ok"
+    );
+    ok = selftest__shell_loops_step(ok, &state, "(( 1 / 0 ))", 2, NULL);
+    /* for NAME in WORD...; do ...; done -- iterates each word, and (( ))
+     * inside the body can accumulate across iterations. */
+    ok = selftest__shell_loops_step(
+        ok, &state, "total=0; for n in 1 2 3; do (( total += n )); done; shell_test_probe $total", 0, "6"
+    );
+    /* break inside a for-loop's body (nested in an if) stops the loop
+     * immediately, without running the rest of that iteration. */
+    ok = selftest__shell_loops_step(
+        ok,
+        &state,
+        "sum=0; for n in 1 2 3 4 5; do if [ $n -eq 3 ]; then break; fi; (( sum += n )); done; "
+        "shell_test_probe $sum",
+        0,
+        "3"
+    );
+    /* C-style for ((init; cond; incr)). */
+    ok = selftest__shell_loops_step(
+        ok,
+        &state,
+        "product=1; for ((i=1; i<=4; i++)); do (( product *= i )); done; shell_test_probe $product",
+        0,
+        "24"
+    );
+    /* while COND; do ...; done, and a condition re-evaluated every iteration
+     * off a variable the body itself mutates. */
+    ok = selftest__shell_loops_step(
+        ok, &state, "count=0; while [ $count -lt 3 ]; do (( count++ )); done; shell_test_probe $count", 0, "3"
+    );
+    /* break N unwinds N enclosing loops at once. */
+    ok = selftest__shell_loops_step(
+        ok,
+        &state,
+        "count=0; for i in 1 2 3; do for j in 1 2; do (( count++ )); if [ $count -eq 1 ]; then break 2; fi; "
+        "done; done; shell_test_probe $count",
+        0,
+        "1"
+    );
+    /* A break that's followed, in the same branch, by more structure still
+     * ahead (a nested if) doesn't desync the enclosing while's own
+     * then/fi/done bookkeeping -- see shell_compound__catch_up(). */
+    ok = selftest__shell_loops_step(
+        ok,
+        &state,
+        "result=start; while true; do if true; then break; if true; then result=unreached; fi; fi; done; "
+        "shell_test_probe $result",
+        0,
+        "start"
+    );
+    /* Malformed constructs are reported, not silently misparsed. */
+    ok = selftest__shell_loops_step(ok, &state, "for x in a b", 2, NULL);
+    ok = selftest__shell_loops_step(ok, &state, "while true; do echo hi", 2, NULL);
+    ok = selftest__shell_loops_step(ok, &state, "(( 1 +", 2, NULL);
+
     shell__state_free(&state);
     printf("[selftest] shell/loops: %s\n", ok ? "OK" : "failed");
     return ok;

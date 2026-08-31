@@ -541,20 +541,91 @@ shell_compound__find_done(shell_state_t *state, const shell_plan_t *plan, size_t
 /* Runs one loop-body iteration starting at `body_start` (a copy of it --
  * the loop's own *index into `plan` was already finalized past "done" by
  * the boundary-discovery pass before any of this runs, so this cursor is
- * disposable): the "do"-glued first statement, if any, then the rest of the
- * body up to `body_end` (exclusive, the "done" flat command's index).
- * Returns the branch's exit status. */
-static int shell_compound__run_loop_body(
-    shell_state_t *state, const shell_plan_t *plan, const char *head_text, size_t head_len, size_t body_start,
-    size_t body_end
-) {
-    int status = 0;
-    if (head_len > 0) status = shell_compound__run_text(state, head_text, head_len);
-    if (body_start < body_end) {
-        size_t cursor = body_start;
-        status = shell_compound__run_sequence(state, plan, &cursor, true);
+ * disposable) up to `body_end` (exclusive, the "done" flat command's
+ * index). Returns the branch's exit status.
+ *
+ * The "do"-glued first statement (see shell_compound__consume_do() below)
+ * is *not* special-cased here -- by the time this runs, it has already been
+ * folded into plan->commands[body_start] itself, so it's just the body's
+ * first entry, walked -- and, if it's a nested if/for/while, correctly
+ * recursed into -- like any other. */
+static int shell_compound__run_loop_body(shell_state_t *state, const shell_plan_t *plan, size_t body_start, size_t body_end) {
+    if (body_start >= body_end) return 0;
+    size_t cursor = body_start;
+    return shell_compound__run_sequence(state, plan, &cursor, true);
+}
+
+/* The plan entry shell_compound__consume_do() shrank, and what it originally
+ * held -- see shell_compound__restore_do() below. */
+typedef struct {
+    size_t index;
+    const char *text;
+    size_t length;
+} shell_compound__do_span_t;
+
+/* *index is at the "do" that shell_compound__find_do() just confirmed is
+ * there. Consumes it, leaving *index at the loop body's first entry, and
+ * returns what plan->commands[] held there before -- pass this to
+ * shell_compound__restore_do() once the caller is done needing the shrunk
+ * form (see below for why that matters).
+ *
+ * shell_parser__plan() splits purely on ;/&&/||/pipe/newline, with no
+ * keyword awareness -- so "do"'s glued remainder (e.g. "if $n -eq 3" in
+ * "do if [ $n -eq 3 ]; then break; fi") can itself be the opening of a
+ * nested if/for/while construct spanning several more plan entries, not
+ * just a flat first statement the way "do echo hi" is. Running that
+ * remainder as one flat command via shell_compound__run_text() (as this
+ * used to) mis-executes it and, worse, desyncs the boundary-discovery dry
+ * run that locates "done" for it, since a dry run never reaches this
+ * function at all -- it only ever walks plan->commands[] via classify().
+ *
+ * So instead of hand-running the remainder, shrink this plan entry in
+ * place down to just that remainder (dropping the "do " prefix) and leave
+ * *index pointing at it, unconsumed: reclassify()'d normally, it now reads
+ * as SHELL_COMPOUND_IF/FOR/WHILE (recursing exactly like a standalone
+ * nested construct would) or plain SHELL_COMPOUND_PLAIN (an ordinary
+ * command, run the same as before) -- either way it becomes an ordinary
+ * first entry of the body for every walk (discovery and execution alike)
+ * from here on, not a one-off special case. A "do" with nothing glued to
+ * it (its own segment, e.g. "do" on its own line before a real body
+ * statement) has nothing to shrink; *index just advances past it, and the
+ * returned span is a no-op to restore. */
+static shell_compound__do_span_t shell_compound__consume_do(const shell_plan_t *plan, size_t *index) {
+    shell_compound__do_span_t saved = {
+        .index = *index, .text = plan->commands[*index].text, .length = plan->commands[*index].length
+    };
+    const char *head_text;
+    size_t head_len;
+    (void)shell_compound__match_keyword(&plan->commands[*index], "do", &head_text, &head_len);
+    if (head_len > 0) {
+        plan->commands[*index].text = head_text;
+        plan->commands[*index].length = head_len;
+    } else {
+        (*index)++;
     }
-    return status;
+    return saved;
+}
+
+/* Undoes shell_compound__consume_do()'s shrink. A nested for/while's "do"
+ * entry gets shrunk once by whichever pass reaches it first -- often a
+ * boundary-discovery dry run belonging to an *outer* loop, hunting for its
+ * own "done" -- but that same nested construct is then run for real again on
+ * every iteration of that outer loop, via a fresh, independent
+ * run_for()/run_while() call each time (its own *index into plan is a local
+ * copy, disposable per shell_compound__run_loop_body()'s own header comment
+ * above). Each such call redoes its own find_do()/consume_do() from
+ * scratch, expecting to find an unshrunk "do ..." entry to match against --
+ * so a shrink left in place past the call that produced it desyncs every
+ * later call onto the same entry (find_do() no longer sees SHELL_COMPOUND_DO
+ * there at all). Restoring here, right before every return out of
+ * run_for()/run_while() from this point on, keeps each call self-contained:
+ * whatever shrink it performed to run its own body is gone again by the time
+ * it hands control back, so the next call -- next iteration of an enclosing
+ * loop, or a plain second look at the same plan -- starts from the same
+ * pristine "do ..." text this one did. */
+static void shell_compound__restore_do(const shell_plan_t *plan, const shell_compound__do_span_t *saved) {
+    plan->commands[saved->index].text = saved->text;
+    plan->commands[saved->index].length = saved->length;
 }
 
 /* True if this iteration should stop the loop: a break (consuming one
@@ -591,76 +662,87 @@ static int shell_compound__run_for(shell_state_t *state, const shell_plan_t *pla
         return 2;
     }
     if (!shell_compound__find_do(state, plan, index, "for")) return 2;
-    const char *head_text;
-    size_t head_len;
-    (void)shell_compound__match_keyword(&plan->commands[*index], "do", &head_text, &head_len);
-    (*index)++;
+    /* From here on, plan->commands[do_span.index] is shrunk to "do"'s glued
+     * remainder -- every return below must go through "done" so it gets
+     * restored first (see shell_compound__restore_do()'s header comment). */
+    shell_compound__do_span_t do_span = shell_compound__consume_do(plan, index);
     size_t body_start = *index;
-    if (!shell_compound__find_done(state, plan, index, "for")) return 2;
+    bool have_done = shell_compound__find_done(state, plan, index, "for");
     size_t body_end = *index;
-    (*index)++;
+    if (have_done) (*index)++;
 
-    if (!execute) return 0;
-
-    int status = 0;
-    const char *error = NULL;
-    if (header.c_style) {
-        size_t s, l;
-        long scratch;
-        shell_compound__trim(header.init_text, header.init_len, &s, &l);
-        if (l > 0 && !shell_arith__eval(state, header.init_text + s, l, &scratch, &error)) {
-            stdio__printf("shell: for: %s\n", error != NULL ? error : "syntax error");
-            state->last_status = 2;
-            return 2;
-        }
-        for (;;) {
-            shell_compound__trim(header.cond_text, header.cond_len, &s, &l);
-            long cond_value = 1; /* an empty condition clause is always true, matching C's `for(;;)` */
-            if (l > 0 && !shell_arith__eval(state, header.cond_text + s, l, &cond_value, &error)) {
-                stdio__printf("shell: for: %s\n", error != NULL ? error : "syntax error");
-                status = 2;
-                break;
-            }
-            if (cond_value == 0) break;
-
-            status = shell_compound__run_loop_body(state, plan, head_text, head_len, body_start, body_end);
-            if (shell_compound__loop_should_stop(state)) break;
-
-            shell_compound__trim(header.incr_text, header.incr_len, &s, &l);
-            if (l > 0 && !shell_arith__eval(state, header.incr_text + s, l, &scratch, &error)) {
-                stdio__printf("shell: for: %s\n", error != NULL ? error : "syntax error");
-                status = 2;
-                break;
-            }
-        }
+    int result;
+    if (!have_done) {
+        result = 2;
+    } else if (!execute) {
+        result = 0;
     } else {
-        char **words = NULL;
-        int word_count = 0;
-        if (header.has_in) {
-            shell_command_t synthetic = {.text = header.list_text, .length = header.list_len, .connector = SHELL_CONNECT_NONE};
-            const char *words_error = NULL;
-            if (shell_parser__words(
-                    &synthetic, &words, &word_count, shell_executor__lookup, state, state->last_status, &words_error
-                ) != 0) {
-                stdio__printf("shell: for: %s\n", words_error != NULL ? words_error : "expansion error");
+        int status = 0;
+        const char *error = NULL;
+        bool malformed = false;
+        if (header.c_style) {
+            size_t s, l;
+            long scratch;
+            shell_compound__trim(header.init_text, header.init_len, &s, &l);
+            if (l > 0 && !shell_arith__eval(state, header.init_text + s, l, &scratch, &error)) {
+                stdio__printf("shell: for: %s\n", error != NULL ? error : "syntax error");
                 state->last_status = 2;
-                return 2;
+                malformed = true;
             }
-        }
-        int count = header.has_in ? word_count : state->positional_count;
-        for (int i = 0; i < count; ++i) {
-            const char *value = header.has_in ? words[i] : state->positional[i];
-            int assigned = shell_builtins__set(state, header.name, value);
-            if (assigned != 0) {
-                status = assigned;
-                break;
+            while (!malformed) {
+                shell_compound__trim(header.cond_text, header.cond_len, &s, &l);
+                long cond_value = 1; /* an empty condition clause is always true, matching C's `for(;;)` */
+                if (l > 0 && !shell_arith__eval(state, header.cond_text + s, l, &cond_value, &error)) {
+                    stdio__printf("shell: for: %s\n", error != NULL ? error : "syntax error");
+                    status = 2;
+                    break;
+                }
+                if (cond_value == 0) break;
+
+                status = shell_compound__run_loop_body(state, plan, body_start, body_end);
+                if (shell_compound__loop_should_stop(state)) break;
+
+                shell_compound__trim(header.incr_text, header.incr_len, &s, &l);
+                if (l > 0 && !shell_arith__eval(state, header.incr_text + s, l, &scratch, &error)) {
+                    stdio__printf("shell: for: %s\n", error != NULL ? error : "syntax error");
+                    status = 2;
+                    break;
+                }
             }
-            status = shell_compound__run_loop_body(state, plan, head_text, head_len, body_start, body_end);
-            if (shell_compound__loop_should_stop(state)) break;
+        } else {
+            char **words = NULL;
+            int word_count = 0;
+            if (header.has_in) {
+                shell_command_t synthetic = {.text = header.list_text, .length = header.list_len, .connector = SHELL_CONNECT_NONE};
+                const char *words_error = NULL;
+                if (shell_parser__words(
+                        &synthetic, &words, &word_count, shell_executor__lookup, state, state->last_status,
+                        &words_error
+                    ) != 0) {
+                    stdio__printf("shell: for: %s\n", words_error != NULL ? words_error : "expansion error");
+                    state->last_status = 2;
+                    malformed = true;
+                }
+            }
+            if (!malformed) {
+                int count = header.has_in ? word_count : state->positional_count;
+                for (int i = 0; i < count; ++i) {
+                    const char *value = header.has_in ? words[i] : state->positional[i];
+                    int assigned = shell_builtins__set(state, header.name, value);
+                    if (assigned != 0) {
+                        status = assigned;
+                        break;
+                    }
+                    status = shell_compound__run_loop_body(state, plan, body_start, body_end);
+                    if (shell_compound__loop_should_stop(state)) break;
+                }
+            }
+            shell_parser__free_words(words, word_count);
         }
-        shell_parser__free_words(words, word_count);
+        result = malformed ? 2 : status;
     }
-    return status;
+    shell_compound__restore_do(plan, &do_span);
+    return result;
 }
 
 static int shell_compound__run_while(shell_state_t *state, const shell_plan_t *plan, size_t *index, bool execute) {
@@ -671,32 +753,39 @@ static int shell_compound__run_while(shell_state_t *state, const shell_plan_t *p
     size_t cond_start = *index;
     if (!shell_compound__find_do(state, plan, index, "while")) return 2;
     size_t cond_end = *index;
-    const char *body_head;
-    size_t body_head_len;
-    (void)shell_compound__match_keyword(&plan->commands[*index], "do", &body_head, &body_head_len);
-    (*index)++;
+    /* From here on, plan->commands[do_span.index] is shrunk to "do"'s glued
+     * remainder -- every return below must go through "done" so it gets
+     * restored first (see shell_compound__restore_do()'s header comment). */
+    shell_compound__do_span_t do_span = shell_compound__consume_do(plan, index);
     size_t body_start = *index;
-    if (!shell_compound__find_done(state, plan, index, "while")) return 2;
+    bool have_done = shell_compound__find_done(state, plan, index, "while");
     size_t body_end = *index;
-    (*index)++;
+    if (have_done) (*index)++;
 
-    if (!execute) return 0;
+    int result;
+    if (!have_done) {
+        result = 2;
+    } else if (!execute) {
+        result = 0;
+    } else {
+        int status = 0;
+        for (;;) {
+            int cond_status = 0;
+            if (cond_head_len > 0) cond_status = shell_compound__run_text(state, cond_head, cond_head_len);
+            if (cond_start < cond_end) {
+                size_t cursor = cond_start;
+                cond_status = shell_compound__run_sequence(state, plan, &cursor, true);
+            }
+            if (shell_compound__loop_should_stop(state)) break;
+            if (cond_status != 0) break;
 
-    int status = 0;
-    for (;;) {
-        int cond_status = 0;
-        if (cond_head_len > 0) cond_status = shell_compound__run_text(state, cond_head, cond_head_len);
-        if (cond_start < cond_end) {
-            size_t cursor = cond_start;
-            cond_status = shell_compound__run_sequence(state, plan, &cursor, true);
+            status = shell_compound__run_loop_body(state, plan, body_start, body_end);
+            if (shell_compound__loop_should_stop(state)) break;
         }
-        if (shell_compound__loop_should_stop(state)) break;
-        if (cond_status != 0) break;
-
-        status = shell_compound__run_loop_body(state, plan, body_head, body_head_len, body_start, body_end);
-        if (shell_compound__loop_should_stop(state)) break;
+        result = status;
     }
-    return status;
+    shell_compound__restore_do(plan, &do_span);
+    return result;
 }
 
 int shell_compound__run(shell_state_t *state, const char *text) {

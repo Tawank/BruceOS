@@ -173,6 +173,23 @@ static bruce_result_t selftest__elf_dialog_allow_provider(
     return BRUCE_OK;
 }
 
+/* app_runner__run_path() only spawns the "elf" loader command asynchronously
+ * (see app_runner__run_path_with_environment()) -- elf_loader__open()'s
+ * acceptance or rejection of the staged image happens inside that spawned
+ * process, so it can only be observed by waiting for the process to exit
+ * and reading its exit code, never off run_path()'s own return value (just
+ * the spawned pid on success). Returns the exit code, or `spawn_result`
+ * itself if it was not a pid or the process never exited cleanly. */
+static int selftest__loader_wait_exit_code(int spawn_result) {
+    if (spawn_result <= 0) return spawn_result;
+    bruce_process_status_t status;
+    if (process__wait_status((bruce_process_id_t)spawn_result, 2000, &status) != BRUCE_OK ||
+        status.reason != BRUCE_PROCESS_EXITED) {
+        return spawn_result;
+    }
+    return status.exit_code;
+}
+
 bool selftest__run_elf_loader_case(void) {
     const char *path = "/bin/selftest_elf_loader_target.elf";
     storage__remove(path);
@@ -198,7 +215,7 @@ bool selftest__run_elf_loader_case(void) {
 
     dialog__test_set_choice_provider(selftest__elf_dialog_allow_provider);
     size_t calls_before = elf_loader__debug_call_count();
-    int result = app_runner__run_path(path, NULL, BRUCE_LAUNCH_BACKGROUND);
+    int result = selftest__loader_wait_exit_code(app_runner__run_path(path, NULL, BRUCE_LAUNCH_BACKGROUND));
     dialog__test_set_choice_provider(NULL);
 
     bool run_ok = result == BRUCE_ERR_INVALID_ARGUMENT && elf_loader__debug_call_count() == calls_before + 1;
@@ -220,7 +237,7 @@ bool selftest__run_elf_loader_case(void) {
                        inspection->manifest.stack_size != 0 && inspection->manifest.permission_count == 0;
     if (inspection != NULL) memory__free(inspection);
     if (fallback_ok) {
-        result = app_runner__run_path(path, NULL, BRUCE_LAUNCH_BACKGROUND);
+        result = selftest__loader_wait_exit_code(app_runner__run_path(path, NULL, BRUCE_LAUNCH_BACKGROUND));
         fallback_ok = result == BRUCE_ERR_INVALID_ARGUMENT;
     }
     storage__remove(path);

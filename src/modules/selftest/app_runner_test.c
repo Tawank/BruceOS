@@ -20,17 +20,20 @@ static int selftest__apprunner_dummy_entry(int argc, char **argv) {
 
 bool selftest__run_apprunner_registration_case(void) {
     size_t command_count = app_runner__command_count();
-    bool found_help = false;
+    bool found_man = false;
     bool found_apps = false;
     for (size_t i = 0; i < command_count; ++i) {
         const char *name = app_runner__command_name(i);
         const char *description = app_runner__command_description(i);
-        if (name != NULL && strcmp(name, "help") == 0 && description != NULL && description[0] != '\0') {
-            found_help = true;
+        /* "help" itself is a shell builtin (see shell_builtins.c), not an
+         * app_runner command -- "man" is the app_runner-registered command
+         * that plays this role (see "Add man and help commands to terminal"). */
+        if (name != NULL && strcmp(name, "man") == 0 && description != NULL && description[0] != '\0') {
+            found_man = true;
         }
         if (name != NULL && strcmp(name, "apps") == 0) found_apps = true;
     }
-    if (!found_help || !found_apps || app_runner__command_name(command_count) != NULL ||
+    if (!found_man || !found_apps || app_runner__command_name(command_count) != NULL ||
         app_runner__command_description(command_count) != NULL) {
         printf("[selftest] apprunner/registration: command enumeration failed\n");
         return false;
@@ -277,16 +280,23 @@ bool selftest__run_apprunner_resolution_case(void) {
     }
     size_t elf_calls = elf_loader__debug_call_count();
     result = app_runner__run(SELFTEST_APPRUNNER_RESOLUTION_NAME, "", BRUCE_LAUNCH_BACKGROUND);
-    elf_calls++;
-    bool spawned = elf_loader__debug_call_count() == elf_calls;
-#if CONFIG_BRUCE_QEMU_TEST_MODE
-    /* QEMU does not implement ESP ELF XIP relocation; reaching it verifies
-     * loader registration without claiming the image executed. */
-    spawned = spawned && result == BRUCE_ERR_INVALID_ARGUMENT;
-#else
-    spawned = spawned && result > 0;
-#endif
-    if (spawned) { (void)process__wait((bruce_process_id_t)result, 2000); }
+    /* app_runner__run() only spawns the "elf" loader command asynchronously
+     * (see app_runner__run_path_with_environment()) -- elf_loader__open()
+     * runs inside that spawned process, so its call count (and the
+     * process's own completion) can only be observed after waiting for it,
+     * not read off this call's return value or an unsynchronized count
+     * comparison immediately after it. This fixture is intentionally an
+     * invalid, code-less ELF (see selftest__run_elf_loader_case()), so
+     * relocation is expected to fail on any platform, XIP-capable or not;
+     * what this case actually proves is that the ELF loader -- not the
+     * JS loader -- was the one preferred and invoked. */
+    bool spawned = result > 0;
+    if (spawned) {
+        bruce_process_status_t status;
+        spawned = process__wait_status((bruce_process_id_t)result, 2000, &status) == BRUCE_OK &&
+                  status.reason == BRUCE_PROCESS_EXITED;
+    }
+    spawned = spawned && elf_loader__debug_call_count() == elf_calls + 1;
     storage__remove(elf_path);
     storage__remove(js_path);
     if (!spawned) {

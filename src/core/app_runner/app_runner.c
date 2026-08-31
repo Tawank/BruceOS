@@ -25,7 +25,7 @@
 #define APP_RUNNER_MAX_APPS 128
 #define APP_RUNNER_PATH_MAX 160
 #define APP_RUNNER_MAX_LOADERS 32
-#define APP_RUNNER_LOADER_EXTENSION_MAX 5
+#define APP_RUNNER_LOADER_EXTENSION_MAX 16
 #define APP_RUNNER_LOADER_PROGRAM_MAX 32
 
 static const char *APP_RUNNER_DEFAULT_EXTENSIONS_JSON = json_extensions_json;
@@ -133,21 +133,14 @@ bruce_result_t app_runner__register(
     uint32_t stack_bytes
 ) {
     if (name == NULL || name[0] == '\0' || description == NULL || description[0] == '\0' || entry == NULL) {
-        printf("BRUCE_ERR_INVALID_ARGUMENT");
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
 
     for (int i = 0; i < s_app_count; ++i) {
-        if (strcmp(s_apps[i].name, name) == 0) {
-            printf("BRUCE_ERR_ALREADY_EXISTS");
-            return BRUCE_ERR_ALREADY_EXISTS;
-        }
+        if (strcmp(s_apps[i].name, name) == 0) { return BRUCE_ERR_ALREADY_EXISTS; }
     }
 
-    if (s_app_count >= APP_RUNNER_MAX_APPS) {
-        printf("BRUCE_ERR_RESOURCE_LIMIT");
-        return BRUCE_ERR_RESOURCE_LIMIT;
-    }
+    if (s_app_count >= APP_RUNNER_MAX_APPS) { return BRUCE_ERR_RESOURCE_LIMIT; }
 
     s_apps[s_app_count].name = name;
     s_apps[s_app_count].description = description;

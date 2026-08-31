@@ -117,7 +117,12 @@ bool selftest__run_notification_case(void) {
     bruce_display_overlay_id_t overlay = notification_service__test_overlay_id();
     bruce_display_color_t border = 0;
     bool saw_glyph_pixel = false;
-    if (display__test_overlay_pixel(overlay, 0, 0, &border) != BRUCE_OK || border != BRUCE_COLOR_WHITE) {
+    /* The overlay's border is drawn with the active theme's border color
+     * (see notification_service.c), not a hardcoded white -- the default
+     * theme's border is 0x4208, not BRUCE_COLOR_WHITE (see "Refactor
+     * themes, add new themes"). */
+    if (display__test_overlay_pixel(overlay, 0, 0, &border) != BRUCE_OK ||
+        border != config__get_color_border()) {
         printf("[selftest] notification: border color failed\n");
         return false;
     }

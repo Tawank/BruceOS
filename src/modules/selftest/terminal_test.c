@@ -111,17 +111,24 @@ bool selftest__run_terminal_path_case(void) {
 
     size_t calls_before = elf_loader__debug_call_count();
     int result = serial_commands__run_line(path, false);
+    /* serial_commands__run_line() only spawns the "elf" loader command
+     * asynchronously (see app_runner__run_path_with_environment()) --
+     * elf_loader__open()'s rejection of this deliberately code-less fixture
+     * (see selftest__run_elf_loader_case()) happens inside that spawned
+     * process, so both its call-count bump and its outcome can only be
+     * observed after waiting for it to exit, not immediately after this
+     * call returns (just the spawned pid on success). */
+    if (result > 0) {
+        bruce_process_status_t status;
+        result = process__wait_status((bruce_process_id_t)result, 2000, &status) == BRUCE_OK &&
+                         status.reason == BRUCE_PROCESS_EXITED
+                     ? status.exit_code
+                     : result;
+    }
     size_t calls_after = elf_loader__debug_call_count();
-
-    if (result > 0) { (void)process__wait((bruce_process_id_t)result, 2000); }
     storage__remove(path);
 
-    bool dispatched = calls_after == calls_before + 1;
-#if CONFIG_BRUCE_QEMU_TEST_MODE
-    dispatched = dispatched && result == BRUCE_ERR_INVALID_ARGUMENT;
-#else
-    dispatched = dispatched && result > 0;
-#endif
+    bool dispatched = calls_after == calls_before + 1 && result == BRUCE_ERR_INVALID_ARGUMENT;
     if (!dispatched) {
         printf(
             "[selftest] terminal/path: ELF loader not dispatched (%d, calls %zu -> %zu)\n",
