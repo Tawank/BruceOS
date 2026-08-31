@@ -138,16 +138,37 @@ static memory_external__record_t *memory_external__free_record_locked(void) {
 
 /*
  * esp_partition_write() only invalidates the cache alias matching the
- * physical page's MMU capability (see spi_flash_check_and_flush_cache() /
- * is_page_mapped_in_cache() in IDF's flash_mmap.c): pages mapped executable
- * (ESP_PARTITION_MMAP_INST, used for XIP records here) only get their
- * instruction-bus line invalidated. record->data for an executable record is
- * a separate data-bus alias of the same physical page (spi_flash_phys2cache()
- * with SPI_FLASH_MMAP_DATA), so IDF never invalidates it on write -- any read
- * through it (including the direct_write check below) can keep returning
- * pre-write bytes indefinitely. Invalidate that alias ourselves after writing,
- * and once right after allocating (a fresh mapping can recycle a virtual
- * address a previous, already-torn-down executable record left cached).
+ * physical page's *actual registered* MMU mapping (see
+ * spi_flash_check_and_flush_cache() / is_page_mapped_in_cache() in IDF's
+ * flash_mmap.c, which resolve the mapping via esp_mmu_paddr_find_caps() and
+ * pick the instruction- or data-bus vaddr based on whichever caps that
+ * mapping was actually registered with).
+ *
+ * For a non-executable record, that's exactly record->data: it's the primary
+ * ESP_PARTITION_MMAP_DATA mapping IDF itself tracks, so esp_partition_write()
+ * already invalidates it correctly on its own.
+ *
+ * For an executable record, it isn't: record->data there is a *second*,
+ * manually-derived data-bus alias of the same physical page
+ * (spi_flash_phys2cache() with SPI_FLASH_MMAP_DATA) sitting alongside the
+ * ESP_PARTITION_MMAP_INST mapping IDF actually tracks for that address.
+ * esp_mmu_paddr_find_caps() only ever finds the one mapping it knows about
+ * (the instruction one, since that's what execution needs), so
+ * esp_partition_write()'s own invalidation only ever touches the
+ * instruction-bus line -- this second, IDF-invisible data-bus alias is never
+ * invalidated on write, and a read through it (including the direct_write
+ * check below) can keep returning pre-write bytes indefinitely.
+ *
+ * IDF's own invalidation is therefore provably sufficient for the
+ * non-executable case and strictly necessary only for the executable one --
+ * but this is applied to every swap-backed record unconditionally anyway
+ * (record->data always denotes *some* data-bus alias, IDF-tracked or not):
+ * it's a few extra, always-safe esp_cache_msync() calls, and it means this
+ * function doesn't have to stay in lockstep with any future change to how
+ * IDF resolves esp_mmu_paddr_find_caps() for a plain MMAP_DATA mapping.
+ * Called once right after allocating (a fresh mapping can recycle a virtual
+ * address a previous, already-torn-down record left cached) and again after
+ * every write/fill.
  *
  * esp_cache_get_line_size_by_addr() cannot be used to size this: it only
  * recognizes PSRAM (esp_ptr_external_ram) and internal RAM (esp_ptr_internal)
@@ -163,7 +184,7 @@ static memory_external__record_t *memory_external__free_record_locked(void) {
 
 static void
 memory_external__invalidate_data_alias(const memory_external__record_t *record, size_t offset, size_t size) {
-    if (!record->executable || record->data == NULL || size == 0) return;
+    if (record->data == NULL || size == 0) return;
     uintptr_t start = (uintptr_t)(record->data + offset);
     uintptr_t end =
         (start + size + MEMORY_EXTERNAL__CACHE_ALIGN - 1) & ~(uintptr_t)(MEMORY_EXTERNAL__CACHE_ALIGN - 1);
@@ -245,10 +266,13 @@ memory_external__allocate_swap_locked(memory_external__record_t *record, size_t 
             memset(record, 0, sizeof(*record));
             return false;
         }
-        memory_external__invalidate_data_alias(record, 0, record->size);
     } else {
         record->data = mapped;
     }
+    /* See the comment on memory_external__invalidate_data_alias() above:
+     * strictly necessary only for the executable case, applied to both for
+     * symmetry and defense-in-depth. */
+    memory_external__invalidate_data_alias(record, 0, record->size);
     return true;
 }
 
