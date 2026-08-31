@@ -61,10 +61,10 @@ static bool browser_app__scroll_to_fragment(browser_app_state_t *state, const ch
     int scroll_y = 0;
     if (fragment[1] != '\0') {
         if (!browser_document__find_anchor(state->doc, fragment + 1, &item_index)) return true;
-        scroll_y = browser_render__item_y(state->doc, item_index, state->view.font_scale);
+        scroll_y = browser_render__item_y(state->doc, item_index, state->view.font_scale, state->image_cache);
     }
     browser_document__set_url(state->doc, url);
-    int max_scroll = browser_render__max_scroll(state->doc, state->view.font_scale);
+    int max_scroll = browser_render__max_scroll(state->doc, state->view.font_scale, state->image_cache);
     state->view.scroll_y = scroll_y < max_scroll ? scroll_y : max_scroll;
     state->view.selected_link = -1;
     state->view.selected_image = -1;
@@ -77,8 +77,8 @@ static bool browser_app__scroll_to_fragment(browser_app_state_t *state, const ch
  * index (that landmark never appeared on this page) is a no-op. */
 static void browser_app__jump_to_item(browser_app_state_t *state, int item_index) {
     if (item_index < 0) return;
-    int scroll_y = browser_render__item_y(state->doc, (size_t)item_index, state->view.font_scale);
-    int max_scroll = browser_render__max_scroll(state->doc, state->view.font_scale);
+    int scroll_y = browser_render__item_y(state->doc, (size_t)item_index, state->view.font_scale, state->image_cache);
+    int max_scroll = browser_render__max_scroll(state->doc, state->view.font_scale, state->image_cache);
     state->view.scroll_y = scroll_y < max_scroll ? scroll_y : max_scroll;
     state->view.selected_link = -1;
     state->view.selected_image = -1;
@@ -148,11 +148,17 @@ static void browser_app__load_image(browser_app_state_t *state) {
     const image_bitmap_t *bitmap = NULL;
     if (browser_image_cache__peek(state->image_cache, url, &bitmap) == BRUCE_ERR_NOT_FOUND) {
         (void)notification__push("Loading image...", 30000);
+        /* box_height is the full viewport, not BROWSER_IMAGE_BOX_HEIGHT: fit
+         * (see image__bitmap_resize()) preserves aspect and never upscales,
+         * so a square/vertical image naturally comes out height-constrained
+         * -- filling up to the viewport -- while a horizontal one stays
+         * width-constrained, same as before. No orientation check needed
+         * here; browser_layout__walk() picks up whichever height results. */
         (void)browser_image_cache__get(
             state->image_cache,
             url,
             (uint16_t)browser_render__content_width(),
-            BROWSER_IMAGE_BOX_HEIGHT,
+            (uint16_t)browser_render__view_height(),
             BRUCE_COLOR_BLACK,
             &bitmap
         );
@@ -176,7 +182,7 @@ static void browser_app__scroll_into_view(browser_app_state_t *state, int top, i
         if (state->view.scroll_y > top) state->view.scroll_y = top;
     }
 
-    int max_scroll = browser_render__max_scroll(state->doc, state->view.font_scale);
+    int max_scroll = browser_render__max_scroll(state->doc, state->view.font_scale, state->image_cache);
     if (state->view.scroll_y > max_scroll) state->view.scroll_y = max_scroll;
     if (state->view.scroll_y < 0) state->view.scroll_y = 0;
 }
@@ -223,7 +229,9 @@ static void browser_app__move_line(browser_app_state_t *state, int direction) {
 
     if (row_visible && state->view.selected_link >= 0) {
         browser_render_row_t current;
-        if (browser_render__find_row(state->doc, state->view.row_y - 1, 1, state->view.font_scale, &current) &&
+        if (browser_render__find_row(
+                state->doc, state->view.row_y - 1, 1, state->view.font_scale, state->image_cache, &current
+            ) &&
             current.y == state->view.row_y) {
             for (int i = 0; i < current.link_count; ++i) {
                 if (current.link_indices[i] != state->view.selected_link) continue;
@@ -239,7 +247,7 @@ static void browser_app__move_line(browser_app_state_t *state, int direction) {
 
     int anchor = row_visible ? state->view.row_y : (direction > 0 ? view_top - 1 : view_bottom);
     browser_render_row_t next;
-    if (browser_render__find_row(state->doc, anchor, direction, state->view.font_scale, &next)) {
+    if (browser_render__find_row(state->doc, anchor, direction, state->view.font_scale, state->image_cache, &next)) {
         browser_app__select_row(state, &next, direction > 0 ? 0 : next.link_count - 1);
     }
 }
@@ -247,14 +255,15 @@ static void browser_app__move_line(browser_app_state_t *state, int direction) {
 static void browser_app__page_scroll(browser_app_state_t *state, int direction) {
     int view_height = browser_render__view_height();
     if (view_height <= 0) view_height = 1;
-    int max_scroll = browser_render__max_scroll(state->doc, state->view.font_scale);
+    int max_scroll = browser_render__max_scroll(state->doc, state->view.font_scale, state->image_cache);
     state->view.scroll_y += direction * view_height;
     if (state->view.scroll_y < 0) state->view.scroll_y = 0;
     if (state->view.scroll_y > max_scroll) state->view.scroll_y = max_scroll;
 }
 
 static void browser_app__scroll_to_edge(browser_app_state_t *state, bool end) {
-    state->view.scroll_y = end ? browser_render__max_scroll(state->doc, state->view.font_scale) : 0;
+    state->view.scroll_y =
+        end ? browser_render__max_scroll(state->doc, state->view.font_scale, state->image_cache) : 0;
     state->view.selected_link = -1;
     state->view.selected_image = -1;
     state->view.row_y = -1;
@@ -274,13 +283,13 @@ static void browser_app__adjust_font_scale(browser_app_state_t *state, float del
     if (new_scale > BROWSER_FONT_SCALE_MAX) new_scale = BROWSER_FONT_SCALE_MAX;
     if (new_scale == old_scale) return;
 
-    int old_height = browser_render__content_height(state->doc, old_scale);
-    int new_height = browser_render__content_height(state->doc, new_scale);
+    int old_height = browser_render__content_height(state->doc, old_scale, state->image_cache);
+    int new_height = browser_render__content_height(state->doc, new_scale, state->image_cache);
     state->view.font_scale = new_scale;
     state->view.scroll_y =
         old_height > 0 ? (int)((int64_t)state->view.scroll_y * new_height / old_height) : 0;
 
-    int max_scroll = browser_render__max_scroll(state->doc, new_scale);
+    int max_scroll = browser_render__max_scroll(state->doc, new_scale, state->image_cache);
     if (state->view.scroll_y > max_scroll) state->view.scroll_y = max_scroll;
     if (state->view.scroll_y < 0) state->view.scroll_y = 0;
     state->view.selected_link = -1;

@@ -21,7 +21,7 @@ float browser_layout__heading_scale(int heading_level, float font_scale_delta) {
 
 int browser_layout__walk(
     const browser_document_t *doc, int width, int char_width, int char_height, float font_scale_delta,
-    browser_layout_visitor_t visitor, void *context
+    browser_image_cache_t *image_cache, browser_layout_visitor_t visitor, void *context
 ) {
     if (doc == NULL || visitor == NULL || width <= 0 || char_width <= 0 || char_height <= 0) return 0;
 
@@ -105,11 +105,23 @@ int browser_layout__walk(
                 x = 0;
                 row_height = 0;
             }
+            /* Once loaded, size the row to the image's real fitted height
+             * (see browser_app__load_image()) instead of the placeholder --
+             * a square/vertical image fit up to the full viewport height
+             * needs far more than BROWSER_IMAGE_BOX_HEIGHT to avoid the next
+             * row overlapping it. */
+            int box_height = BROWSER_IMAGE_BOX_HEIGHT;
+            const image_bitmap_t *bitmap = NULL;
+            if (image_cache != NULL &&
+                browser_image_cache__peek(image_cache, doc->images[item->image_index].url, &bitmap) == BRUCE_OK &&
+                bitmap->height > 0) {
+                box_height = bitmap->height;
+            }
             browser_layout_token_t token = {
                 .item_index = i,
                 .x = 0,
                 .y = y,
-                .line_height = BROWSER_IMAGE_BOX_HEIGHT,
+                .line_height = box_height,
                 .text = NULL,
                 .text_len = 0,
                 .heading_level = 0,
@@ -117,7 +129,7 @@ int browser_layout__walk(
                 .image_index = item->image_index,
             };
             visitor(&token, context);
-            y += BROWSER_IMAGE_BOX_HEIGHT;
+            y += box_height;
             x = 0;
             row_height = 0;
             break;

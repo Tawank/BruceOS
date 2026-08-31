@@ -88,8 +88,9 @@ static void browser_debug__dump_layout(const browser_document_t *doc, float font
     );
 
     browser_debug__layout_ctx_t ctx = {.index = 0};
-    int height =
-        browser_layout__walk(doc, width, char_width, char_height, font_scale, browser_debug__layout_visitor, &ctx);
+    int height = browser_layout__walk(
+        doc, width, char_width, char_height, font_scale, NULL, browser_debug__layout_visitor, &ctx
+    );
     printf("[browser_debug] layout: %zu tokens, content_height=%d\n", ctx.index, height);
 }
 

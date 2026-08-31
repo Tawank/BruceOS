@@ -45,16 +45,25 @@ int browser_render__content_width(void);
 int browser_render__view_height(void);
 
 /* Total laid-out height of `doc` at the current content width and
- * `font_scale` (see BROWSER_FONT_SCALE_MIN/MAX above). */
-int browser_render__content_height(const browser_document_t *doc, float font_scale);
+ * `font_scale` (see BROWSER_FONT_SCALE_MIN/MAX above). `image_cache` is
+ * peek()ed (never fetched) so an already-loaded image's row reflects its
+ * real fitted height rather than the unloaded placeholder -- pass the same
+ * cache used to draw `doc`, or NULL to always assume the placeholder. */
+int browser_render__content_height(
+    const browser_document_t *doc, float font_scale, browser_image_cache_t *image_cache
+);
 
 /* Largest `scroll_y` that still shows content, i.e. content_height minus the
- * viewport height below the chrome bar (never negative). */
-int browser_render__max_scroll(const browser_document_t *doc, float font_scale);
+ * viewport height below the chrome bar (never negative). See
+ * browser_render__content_height() for `image_cache`. */
+int browser_render__max_scroll(const browser_document_t *doc, float font_scale, browser_image_cache_t *image_cache);
 
 /* Returns the content-local y position of the first drawable item at or
- * after `item_index`, clamped to the document's bottom. */
-int browser_render__item_y(const browser_document_t *doc, size_t item_index, float font_scale);
+ * after `item_index`, clamped to the document's bottom. See
+ * browser_render__content_height() for `image_cache`. */
+int browser_render__item_y(
+    const browser_document_t *doc, size_t item_index, float font_scale, browser_image_cache_t *image_cache
+);
 
 #define BROWSER_ROW_MAX_LINKS 16
 
@@ -80,9 +89,11 @@ typedef struct {
  * less than `after_y` (direction < 0). Pass `after_y` < 0 to instead get the
  * very first (direction > 0) or very last (direction < 0) row of the
  * document. Returns false, `*out_row` untouched, if there's no such row
- * (already at an end, or an empty document). */
+ * (already at an end, or an empty document). See
+ * browser_render__content_height() for `image_cache`. */
 bool browser_render__find_row(
-    const browser_document_t *doc, int after_y, int direction, float font_scale, browser_render_row_t *out_row
+    const browser_document_t *doc, int after_y, int direction, float font_scale, browser_image_cache_t *image_cache,
+    browser_render_row_t *out_row
 );
 
 /* Draws one full frame: chrome bar plus the visible slice of `doc` for

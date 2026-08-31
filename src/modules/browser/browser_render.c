@@ -61,16 +61,19 @@ static void browser_render__noop_visitor(const browser_layout_token_t *token, vo
     (void)context;
 }
 
-int browser_render__content_height(const browser_document_t *doc, float font_scale) {
+int browser_render__content_height(
+    const browser_document_t *doc, float font_scale, browser_image_cache_t *image_cache
+) {
     int16_t char_width, char_height;
     browser_render__metrics(&char_width, &char_height);
     return browser_layout__walk(
-        doc, browser_render__content_width(), char_width, char_height, font_scale, browser_render__noop_visitor, NULL
+        doc, browser_render__content_width(), char_width, char_height, font_scale, image_cache,
+        browser_render__noop_visitor, NULL
     );
 }
 
-int browser_render__max_scroll(const browser_document_t *doc, float font_scale) {
-    int max_scroll = browser_render__content_height(doc, font_scale) - browser_render__view_height();
+int browser_render__max_scroll(const browser_document_t *doc, float font_scale, browser_image_cache_t *image_cache) {
+    int max_scroll = browser_render__content_height(doc, font_scale, image_cache) - browser_render__view_height();
     return max_scroll > 0 ? max_scroll : 0;
 }
 
@@ -88,13 +91,15 @@ static void browser_render__item_visitor(const browser_layout_token_t *token, vo
     }
 }
 
-int browser_render__item_y(const browser_document_t *doc, size_t item_index, float font_scale) {
+int browser_render__item_y(
+    const browser_document_t *doc, size_t item_index, float font_scale, browser_image_cache_t *image_cache
+) {
     int16_t char_width, char_height;
     browser_render__metrics(&char_width, &char_height);
     browser_render__item_search_t search = {.item_index = item_index};
     int height = browser_layout__walk(
-        doc, browser_render__content_width(), char_width, char_height, font_scale, browser_render__item_visitor,
-        &search
+        doc, browser_render__content_width(), char_width, char_height, font_scale, image_cache,
+        browser_render__item_visitor, &search
     );
     return search.found ? search.y : height;
 }
@@ -156,7 +161,8 @@ static void browser_render__row_visitor(const browser_layout_token_t *token, voi
 }
 
 bool browser_render__find_row(
-    const browser_document_t *doc, int after_y, int direction, float font_scale, browser_render_row_t *out_row
+    const browser_document_t *doc, int after_y, int direction, float font_scale, browser_image_cache_t *image_cache,
+    browser_render_row_t *out_row
 ) {
     if (out_row == NULL || direction == 0) return false;
     int16_t char_width, char_height;
@@ -164,8 +170,8 @@ bool browser_render__find_row(
     browser_render__row_search_t search = {.after_y = after_y, .direction = direction, .done = false, .found = false};
     search.row.link_count = 0;
     browser_layout__walk(
-        doc, browser_render__content_width(), char_width, char_height, font_scale, browser_render__row_visitor,
-        &search
+        doc, browser_render__content_width(), char_width, char_height, font_scale, image_cache,
+        browser_render__row_visitor, &search
     );
     if (!search.found) return false;
     *out_row = search.row;
@@ -343,7 +349,7 @@ bruce_result_t browser_render__draw(
     };
     if (ctx.view_height > 0) {
         browser_layout__walk(
-            doc, browser_render__content_width(), char_width, char_height, view->font_scale,
+            doc, browser_render__content_width(), char_width, char_height, view->font_scale, image_cache,
             browser_render__token_visitor, &ctx
         );
     }

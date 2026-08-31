@@ -11,10 +11,16 @@
 #include <stddef.h>
 
 #include "browser_document.h"
+#include "browser_image_cache.h"
 
-/* Fixed reserved height for an inline image's layout box; the actual decoded
- * image is scaled to fit within (available width) x BROWSER_IMAGE_BOX_HEIGHT
- * -- see browser_render.c. */
+/* Reserved height for an inline image's layout box before it's been loaded
+ * (see browser_image_cache.h: images fetch only on an explicit Select press,
+ * so most of the time there is nothing decoded yet to size the row from) --
+ * see browser_render.c's "Select to load" placeholder. Once an image is in
+ * `image_cache`, browser_layout__walk() sizes its row to the image's actual
+ * fitted height instead (see browser_app.c's browser_app__load_image(),
+ * which fits square/vertical images up to the full viewport height and
+ * leaves horizontal ones sized by width, same as before). */
 #define BROWSER_IMAGE_BOX_HEIGHT 72
 
 typedef struct {
@@ -39,8 +45,11 @@ float browser_layout__heading_scale(int heading_level, float font_scale_delta);
 /* Word-wraps `doc` to `width` px using the given native (unscaled) font cell
  * size and `font_scale_delta` (see browser_layout__heading_scale above),
  * calling `visitor` once per positioned word or image, in document order.
- * Returns the total laid-out content height in pixels. */
+ * `image_cache` is peek()ed (never fetched) to size an already-loaded
+ * image's row to its real fitted height; pass NULL to always use the
+ * BROWSER_IMAGE_BOX_HEIGHT placeholder instead. Returns the total laid-out
+ * content height in pixels. */
 int browser_layout__walk(
     const browser_document_t *doc, int width, int char_width, int char_height, float font_scale_delta,
-    browser_layout_visitor_t visitor, void *context
+    browser_image_cache_t *image_cache, browser_layout_visitor_t visitor, void *context
 );
