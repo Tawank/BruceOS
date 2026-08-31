@@ -21,6 +21,13 @@
 #define MEMORY_EXTERNAL__MMU_PAGE 65536u
 #define MEMORY_EXTERNAL__MAX_PAGES 32u
 #define MEMORY_EXTERNAL__MAX_OBJECTS 32u
+/* Slots subdivide one 64KB swap page into MEMORY_EXTERNAL__FLASH_SECTOR-sized
+ * (4KB) pieces so several small, non-executable, same-process allocations can
+ * share one physical page instead of each rounding up to a whole one. See the
+ * comment on memory_external__allocate_slot_locked() for why sector alignment
+ * and single-process ownership are load-bearing, not just tidy defaults. */
+#define MEMORY_EXTERNAL__SLOTS_PER_PAGE (MEMORY_EXTERNAL__MMU_PAGE / MEMORY_EXTERNAL__FLASH_SECTOR)
+#define MEMORY_EXTERNAL__SLAB_THRESHOLD (MEMORY_EXTERNAL__MMU_PAGE / 4)
 
 typedef struct {
     bruce_memory_backend_t backend;
@@ -35,6 +42,10 @@ typedef struct {
     bruce_process_id_t owner_id;
     uint32_t handle;
     bool executable;
+    bool is_slot;
+    size_t slot_page;
+    size_t slot_first;
+    size_t slot_count;
 } memory_external__record_t;
 
 static StaticSemaphore_t s_mutex_storage;
@@ -44,6 +55,19 @@ static memory_external__record_t s_records[MEMORY_EXTERNAL__MAX_OBJECTS];
 static bool s_pages[MEMORY_EXTERNAL__MAX_PAGES];
 static size_t s_next_page;
 static uint32_t s_next_handle = 1;
+
+/* Slab-page bookkeeping. A page becomes a slab page the first time a small
+ * object is allocated into it; s_slots[page] tracks which of its 4KB slots
+ * are occupied, s_slot_owner[page] is the one process allowed to place new
+ * slots there, and s_page_mmap[page]/s_page_data[page] are the single shared
+ * esp_partition_mmap() covering the whole page (mapped once, not once per
+ * slot -- see memory_external__allocate_slot_locked()). Only meaningful
+ * while s_pages[page] && s_page_is_slab[page]. */
+static bool s_page_is_slab[MEMORY_EXTERNAL__MAX_PAGES];
+static bool s_slots[MEMORY_EXTERNAL__MAX_PAGES][MEMORY_EXTERNAL__SLOTS_PER_PAGE];
+static bruce_process_id_t s_slot_owner[MEMORY_EXTERNAL__MAX_PAGES];
+static esp_partition_mmap_handle_t s_page_mmap[MEMORY_EXTERNAL__MAX_PAGES];
+static const void *s_page_data[MEMORY_EXTERNAL__MAX_PAGES];
 
 static void memory_external__ensure_mutex(void) {
     if (s_mutex != NULL) return;
@@ -118,6 +142,22 @@ static void memory_external__cleanup(void *context) {
     xSemaphoreTake(s_mutex, portMAX_DELAY);
     if (record->backend == BRUCE_MEMORY_BACKEND_PSRAM || record->backend == BRUCE_MEMORY_BACKEND_INTERNAL) {
         heap_caps_free(record->psram);
+    } else if (record->is_slot) {
+        /* Release just this record's slots. The page's shared mmap and
+         * s_pages[]/s_page_is_slab[] entry only go away once every slot in
+         * it is empty -- normally driven by one pass of process exit cleanup
+         * over all of that process's records, since a slab page only ever
+         * hosts slots from the one process it was assigned to. */
+        size_t page = record->slot_page;
+        for (size_t i = 0; i < record->slot_count; ++i) s_slots[page][record->slot_first + i] = false;
+        bool empty = true;
+        for (size_t i = 0; empty && i < MEMORY_EXTERNAL__SLOTS_PER_PAGE; ++i) empty = !s_slots[page][i];
+        if (empty) {
+            esp_partition_munmap(s_page_mmap[page]);
+            s_pages[page] = false;
+            s_page_is_slab[page] = false;
+            s_slot_owner[page] = BRUCE_PROCESS_ID_INVALID;
+        }
     } else {
         if (record->data != NULL || record->instruction != NULL) {
             esp_partition_munmap(record->mmap_handle);
@@ -213,8 +253,142 @@ static bool memory_external__allocate_internal_locked(memory_external__record_t 
     return true;
 }
 
+/* Scans one slab page's slot bitmap for `wanted` contiguous free slots.
+ * Caller holds s_mutex. */
 static bool
-memory_external__allocate_swap_locked(memory_external__record_t *record, size_t size, bool executable) {
+memory_external__page_has_room_locked(size_t page, size_t wanted, size_t *out_first) {
+    for (size_t start = 0; start + wanted <= MEMORY_EXTERNAL__SLOTS_PER_PAGE; ++start) {
+        bool available = true;
+        for (size_t i = 0; available && i < wanted; ++i) available = !s_slots[page][start + i];
+        if (available) {
+            *out_first = start;
+            return true;
+        }
+    }
+    return false;
+}
+
+/*
+ * Sub-allocates a small, non-executable object into a 4KB-aligned slot
+ * within a 64KB swap page shared with other objects -- unlike
+ * memory_external__allocate_page_locked(), which gives every object a whole
+ * page to itself. Two constraints here are load-bearing, not stylistic:
+ *
+ * 1. Slots are always MEMORY_EXTERNAL__FLASH_SECTOR-aligned and sized in
+ *    whole sectors. Flash can only be erased at sector granularity, and
+ *    memory_external__store_locked()'s read-modify-erase-write path erases
+ *    and rewrites the *whole* sector containing a write. Keeping every
+ *    slot's byte range wholly inside its own sector(s) means that erase can
+ *    never reach into a neighboring object's bytes -- sector exclusivity is
+ *    what makes sharing a page safe, not any locking around the erase.
+ *
+ * 2. A slab page is only ever handed out to slots owned by the ONE process
+ *    that first claimed it (s_slot_owner[page]); a second process asking for
+ *    a small allocation gets its own page (or a slab page it already owns),
+ *    never a slot on someone else's. Reads of a mapped record are always
+ *    lock-free raw pointer dereferences (see memory__external_malloc()), so
+ *    nothing serializes a read against a write to a *different* record --
+ *    that's fine when every record's owner is also the only process that
+ *    ever reads or writes it (BruceOS's existing ownership contract already
+ *    requires this: writes/frees are rejected for a non-owner, and
+ *    memory_external__adopt() is the only sanctioned handoff, after which
+ *    the previous owner is expected to stop touching the pointer). Sharing
+ *    a page across *different* processes' concurrently-live objects would
+ *    reopen exactly that hazard for two objects that never agreed to
+ *    synchronize with each other; keeping a slab page single-process avoids
+ *    it by construction instead of relying on cache-invalidation timing.
+ *
+ * A page's mmap is created once, when it first becomes a slab page, and
+ * shared by every slot placed in it afterward (s_page_mmap/s_page_data) --
+ * never re-mapped per slot. A second esp_partition_mmap() of an
+ * already-mapped physical range doesn't create an independent mapping (IDF
+ * detects the shared physical range and hands back the existing one), which
+ * is exactly the mechanism that produced a LoadStoreError crash the last
+ * time this file mapped the same physical page twice for two different
+ * capability sets (see the executable/data-alias handling below).
+ */
+static bool memory_external__allocate_slot_locked(
+    memory_external__record_t *record, size_t size, bruce_process_id_t owner_id
+) {
+    const esp_partition_t *partition = memory_external__partition();
+    if (partition == NULL || partition->size % MEMORY_EXTERNAL__MMU_PAGE != 0) return false;
+    size_t total_pages = partition->size / MEMORY_EXTERNAL__MMU_PAGE;
+    if (total_pages > MEMORY_EXTERNAL__MAX_PAGES) return false;
+    size_t wanted = (size + MEMORY_EXTERNAL__FLASH_SECTOR - 1u) / MEMORY_EXTERNAL__FLASH_SECTOR;
+
+    size_t page = SIZE_MAX;
+    size_t first_slot = 0;
+    for (size_t p = 0; p < total_pages; ++p) {
+        if (s_pages[p] && s_page_is_slab[p] && s_slot_owner[p] == owner_id &&
+            memory_external__page_has_room_locked(p, wanted, &first_slot)) {
+            page = p;
+            break;
+        }
+    }
+
+    bool fresh_page = false;
+    if (page == SIZE_MAX) {
+        for (size_t pass = 0; pass < total_pages; ++pass) {
+            size_t candidate = (s_next_page + pass) % total_pages;
+            if (!s_pages[candidate]) {
+                page = candidate;
+                break;
+            }
+        }
+        if (page == SIZE_MAX) return false;
+        first_slot = 0;
+        fresh_page = true;
+    }
+
+    if (fresh_page) {
+        const void *mapped = NULL;
+        esp_partition_mmap_handle_t mmap_handle;
+        if (esp_partition_mmap(
+                partition, page * MEMORY_EXTERNAL__MMU_PAGE, MEMORY_EXTERNAL__MMU_PAGE, ESP_PARTITION_MMAP_DATA,
+                &mapped, &mmap_handle
+            ) != ESP_OK) {
+            return false;
+        }
+        memset(s_slots[page], 0, sizeof(s_slots[page]));
+        s_pages[page] = true;
+        s_page_is_slab[page] = true;
+        s_slot_owner[page] = owner_id;
+        s_page_mmap[page] = mmap_handle;
+        s_page_data[page] = mapped;
+        s_next_page = (page + 1) % total_pages;
+    }
+
+    size_t offset = page * MEMORY_EXTERNAL__MMU_PAGE + first_slot * MEMORY_EXTERNAL__FLASH_SECTOR;
+    if (esp_partition_erase_range(partition, offset, wanted * MEMORY_EXTERNAL__FLASH_SECTOR) != ESP_OK) {
+        if (fresh_page) {
+            esp_partition_munmap(s_page_mmap[page]);
+            s_pages[page] = false;
+            s_page_is_slab[page] = false;
+            s_slot_owner[page] = BRUCE_PROCESS_ID_INVALID;
+        }
+        return false;
+    }
+
+    for (size_t i = 0; i < wanted; ++i) s_slots[page][first_slot + i] = true;
+    record->backend = BRUCE_MEMORY_BACKEND_SWAP;
+    record->size = size;
+    record->offset = offset;
+    record->executable = false;
+    record->is_slot = true;
+    record->slot_page = page;
+    record->slot_first = first_slot;
+    record->slot_count = wanted;
+    record->data = (const uint8_t *)s_page_data[page] + first_slot * MEMORY_EXTERNAL__FLASH_SECTOR;
+    record->instruction = NULL;
+    /* See memory_external__invalidate_data_alias() above: cheap, always-safe
+     * defense-in-depth, doubly worthwhile here since this slot's virtual
+     * address range may have hosted a different, already-freed object. */
+    memory_external__invalidate_data_alias(record, 0, record->size);
+    return true;
+}
+
+static bool
+memory_external__allocate_page_locked(memory_external__record_t *record, size_t size, bool executable) {
     const esp_partition_t *partition = memory_external__partition();
     if (partition == NULL || partition->size % MEMORY_EXTERNAL__MMU_PAGE != 0) return false;
     size_t total_pages = partition->size / MEMORY_EXTERNAL__MMU_PAGE;
@@ -240,6 +414,7 @@ memory_external__allocate_swap_locked(memory_external__record_t *record, size_t 
     record->offset = first * MEMORY_EXTERNAL__MMU_PAGE;
     record->page_count = wanted;
     record->executable = executable;
+    record->is_slot = false;
     s_next_page = (first + wanted) % total_pages;
 
     if (esp_partition_erase_range(partition, record->offset, wanted * MEMORY_EXTERNAL__MMU_PAGE) != ESP_OK) {
@@ -276,6 +451,25 @@ memory_external__allocate_swap_locked(memory_external__record_t *record, size_t 
     return true;
 }
 
+/* Small (< MEMORY_EXTERNAL__SLAB_THRESHOLD), non-executable requests try to
+ * share a slot in one of the requesting process's own slab pages first,
+ * falling back to a whole page (as every request always did before slabs
+ * existed) only if no slot placement succeeds -- e.g. every page this
+ * process already owns is full and no fresh page is free either, in which
+ * case memory_external__allocate_page_locked() will independently fail too
+ * and the caller sees the same BRUCE_ERR_RESOURCE_LIMIT it always would
+ * have. Executable objects and anything at or above the threshold skip
+ * straight to the whole-page path. */
+static bool memory_external__allocate_swap_locked(
+    memory_external__record_t *record, size_t size, bool executable, bruce_process_id_t owner_id
+) {
+    if (!executable && size < MEMORY_EXTERNAL__SLAB_THRESHOLD &&
+        memory_external__allocate_slot_locked(record, size, owner_id)) {
+        return true;
+    }
+    return memory_external__allocate_page_locked(record, size, executable);
+}
+
 bruce_result_t
 memory_external__alloc(size_t size, bool executable, bool allow_swap, bruce_memory_object_t *out_object) {
     if (size == 0 || out_object == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
@@ -289,7 +483,7 @@ memory_external__alloc(size_t size, bool executable, bool allow_swap, bruce_memo
     bool allocated = false;
     if (record != NULL && !executable) { allocated = memory_external__allocate_psram_locked(record, size); }
     if (record != NULL && !allocated && allow_swap) {
-        allocated = memory_external__allocate_swap_locked(record, size, executable);
+        allocated = memory_external__allocate_swap_locked(record, size, executable, owner_id);
     }
     if (record != NULL && !allocated && !executable) {
         allocated = memory_external__allocate_internal_locked(record, size);
@@ -659,6 +853,15 @@ void memory_external__get_swap_stats(size_t *out_total, size_t *out_free, size_t
                 if (run > largest) largest = run;
             } else {
                 run = 0;
+                /* A slab page's still-empty slots are real, allocatable
+                 * bytes -- just not a contiguous run big enough for a
+                 * whole-page request from a different process, so they
+                 * count toward free_bytes but never toward largest. */
+                if (s_page_is_slab[i]) {
+                    for (size_t s = 0; s < MEMORY_EXTERNAL__SLOTS_PER_PAGE; ++s) {
+                        if (!s_slots[i][s]) free_bytes += MEMORY_EXTERNAL__FLASH_SECTOR;
+                    }
+                }
             }
         }
     }
@@ -680,9 +883,52 @@ bruce_result_t memory_external__layout(
     const esp_partition_t *partition = memory_external__partition();
     size_t page_count = partition == NULL ? 0 : partition->size / MEMORY_EXTERNAL__MMU_PAGE;
     for (size_t page = 0; page < page_count;) {
+        if (s_pages[page] && s_page_is_slab[page]) {
+            /* Slab page: report one block per live slot run (and per free
+             * slot run in between), instead of one block for the whole
+             * page -- a slab page can hold several different owners' small
+             * objects at once. */
+            for (size_t slot = 0; slot < MEMORY_EXTERNAL__SLOTS_PER_PAGE;) {
+                const memory_external__record_t *owner = NULL;
+                for (size_t i = 0; i < MEMORY_EXTERNAL__MAX_OBJECTS; ++i) {
+                    if (s_records[i].backend == BRUCE_MEMORY_BACKEND_SWAP && s_records[i].is_slot &&
+                        s_records[i].slot_page == page && s_records[i].slot_first == slot) {
+                        owner = &s_records[i];
+                        break;
+                    }
+                }
+                size_t slots = 1;
+                if (owner != NULL) {
+                    slots = owner->slot_count;
+                } else {
+                    while (slot + slots < MEMORY_EXTERNAL__SLOTS_PER_PAGE && !s_slots[page][slot + slots]) ++slots;
+                }
+                size_t index = (*out_count)++;
+                if (index < capacity) {
+                    blocks[index] = (bruce_memory_layout_block_t){
+                        .address = page * MEMORY_EXTERNAL__MMU_PAGE + slot * MEMORY_EXTERNAL__FLASH_SECTOR,
+                        .size = slots * MEMORY_EXTERNAL__FLASH_SECTOR,
+                        .region_start = 0,
+                        .region_end = partition->size,
+                        .requested_size = owner == NULL ? 0 : owner->size,
+                        .backend = BRUCE_MEMORY_BACKEND_SWAP,
+                        .region = BRUCE_MEMORY_REGION_SWAP,
+                        .owner_id = owner == NULL ? BRUCE_PROCESS_ID_INVALID : owner->owner_id,
+                        .handle = owner == NULL ? 0 : owner->handle,
+                        .used = owner != NULL,
+                        .tracked = owner != NULL,
+                        .executable = false,
+                    };
+                }
+                slot += slots;
+            }
+            ++page;
+            continue;
+        }
+
         const memory_external__record_t *owner = NULL;
         for (size_t i = 0; i < MEMORY_EXTERNAL__MAX_OBJECTS; ++i) {
-            if (s_records[i].backend == BRUCE_MEMORY_BACKEND_SWAP &&
+            if (s_records[i].backend == BRUCE_MEMORY_BACKEND_SWAP && !s_records[i].is_slot &&
                 s_records[i].offset / MEMORY_EXTERNAL__MMU_PAGE == page) {
                 owner = &s_records[i];
                 break;

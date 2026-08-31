@@ -112,6 +112,7 @@ int selftest_app_main(int argc, char **argv) {
     RUN_SELFTEST(selftest__run_external_memory_case);
     RUN_SELFTEST(selftest__run_memory_layout_case);
     RUN_SELFTEST(selftest__run_external_memory_xip_case);
+    RUN_SELFTEST(selftest__run_external_memory_slab_case);
     RUN_SELFTEST(selftest__run_process_app_switch_case);
     RUN_SELFTEST(selftest__run_process_app_kill_case);
     RUN_SELFTEST(selftest__run_device_state_case);

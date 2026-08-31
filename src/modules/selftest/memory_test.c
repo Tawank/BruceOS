@@ -170,3 +170,80 @@ bool selftest__run_external_memory_xip_case(void) {
     printf("[selftest] memory/external_xip: %s\n", ok ? "OK" : "failed");
     return ok;
 }
+
+/* Regression coverage for the swap "slab" allocator: two small (< 16KB),
+ * non-executable objects allocated back to back from the same process must
+ * share one physical 64KB swap page instead of each rounding up to its own
+ * -- that's the whole point of slab support. The two objects must also land
+ * in disjoint, sector-aligned slots: an erase-forcing write to one (flipping
+ * bits 0->1, which requires a full-sector erase+rewrite) must never disturb
+ * the other's bytes, even though both live in the same shared mmap. See the
+ * comment on memory_external__allocate_slot_locked() for why sector
+ * exclusivity is what makes this safe. */
+bool selftest__run_external_memory_slab_case(void) {
+    bruce_memory_object_t object_a = {0};
+    bruce_memory_object_t object_b = {0};
+    bruce_result_t alloc_a = memory_external__alloc(4096, false, true, &object_a);
+    bruce_result_t alloc_b = memory_external__alloc(4096, false, true, &object_b);
+    if (alloc_a != BRUCE_OK || alloc_b != BRUCE_OK) {
+        if (alloc_a == BRUCE_OK) (void)memory_external__release(&object_a);
+        if (alloc_b == BRUCE_OK) (void)memory_external__release(&object_b);
+        printf("[selftest] memory/external_slab: allocation failed (%d,%d)\n", alloc_a, alloc_b);
+        return false;
+    }
+
+    const void *data_a = NULL;
+    const void *data_b = NULL;
+    bool ok = memory_external__map(&object_a, &data_a) == BRUCE_OK &&
+              memory_external__map(&object_b, &data_b) == BRUCE_OK && data_a != NULL && data_b != NULL;
+
+    /* Slab placement only applies to the SWAP backend -- PSRAM/internal
+     * allocations never round up to a whole page in the first place, so
+     * there's nothing to assert about sharing there. Both objects here are
+     * well under any board's PSRAM allocator threshold, so this only
+     * degrades to a skip on a board with no "swap" partition committed at
+     * all (see memory_external__allocate_internal_locked()'s fallback). */
+    bool both_swap = object_a.backend == BRUCE_MEMORY_BACKEND_SWAP && object_b.backend == BRUCE_MEMORY_BACKEND_SWAP;
+    if (both_swap) {
+        const size_t mmu_page = 65536u;
+        ok = ok && (uintptr_t)data_a / mmu_page == (uintptr_t)data_b / mmu_page;
+
+        bruce_memory_layout_block_t blocks[8];
+        size_t count = 0;
+        ok = ok && memory_external__layout(blocks, 8, &count) == BRUCE_OK;
+        bool found_small_block = false;
+        for (size_t i = 0; i < count && i < 8; ++i) {
+            if (blocks[i].handle == object_a.handle) {
+                /* The whole point of slab support: a 4KB request no longer
+                 * reserves a whole 64KB page for itself. */
+                found_small_block = blocks[i].size < mmu_page;
+                break;
+            }
+        }
+        ok = ok && found_small_block;
+    }
+
+    uint8_t pattern_a1[64];
+    memset(pattern_a1, 0x0F, sizeof(pattern_a1)); /* clears bits vs. erased 0xFF -- no erase needed */
+    uint8_t pattern_b[64];
+    memset(pattern_b, 0x55, sizeof(pattern_b));
+    ok = ok && memory_external__write(&object_a, 0, pattern_a1, sizeof(pattern_a1)) == BRUCE_OK;
+    ok = ok && memory_external__write(&object_b, 0, pattern_b, sizeof(pattern_b)) == BRUCE_OK;
+
+    uint8_t pattern_a2[64];
+    memset(pattern_a2, 0xFF, sizeof(pattern_a2)); /* sets bits back on -- forces an erase+rewrite of A's sector */
+    ok = ok && memory_external__write(&object_a, 0, pattern_a2, sizeof(pattern_a2)) == BRUCE_OK;
+
+#if !CONFIG_BRUCE_QEMU_TEST_MODE
+    /* B lives in a different sector of the same shared page; A's erase must
+     * never touch it. */
+    ok = ok && memcmp(data_a, pattern_a2, sizeof(pattern_a2)) == 0;
+    ok = ok && memcmp(data_b, pattern_b, sizeof(pattern_b)) == 0;
+#endif
+
+    ok = memory_external__release(&object_a) == BRUCE_OK && ok;
+    ok = memory_external__release(&object_b) == BRUCE_OK && ok;
+
+    printf("[selftest] memory/external_slab: %s\n", ok ? "OK" : "failed");
+    return ok;
+}
