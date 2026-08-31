@@ -93,7 +93,6 @@ static bool selftest__args_module_help(void) {
         ir_app_main,
         elf_loader__app_main,
         image_app_main,
-        image_viewer_app_main,
         js_loader__app_main,
         nrf24_app_main,
         notify_app_main,
