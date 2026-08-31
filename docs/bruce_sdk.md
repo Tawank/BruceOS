@@ -191,6 +191,7 @@ Functions that explicitly document a `bruce_permission_t` check, grouped by perm
 ### `storage`
 
 - `clipboard__paste_files` (clipboard.h)
+- `clipboard__paste_binary` (clipboard.h)
 - `ir__transmit_file` (ir.h)
 - `storage__exists` (storage.h)
 - `storage__open` (storage.h)
@@ -2576,13 +2577,14 @@ different app -- launched later, by a different process, possibly after
 the copying process has already exited -- can paste it (e.g. the text
 editor, or the file manager again in a different directory). Setting
 either kind of content replaces whatever was there before; there is
-exactly one slot, no history and no separate text/file buffers.
+exactly one slot, no history and no separate text/file/binary buffers.
 
 **Constants**
 
 | Name | Value |
 |---|---|
 | `BRUCE_CLIPBOARD_MAX_FILES` | `64` |
+| `BRUCE_CLIPBOARD_MAX_BINARY_BYTES` | `(512u * 1024u)` |
 
 ---
 
@@ -2593,6 +2595,10 @@ typedef enum {
     BRUCE_CLIPBOARD_EMPTY = 0,
     BRUCE_CLIPBOARD_TEXT,
     BRUCE_CLIPBOARD_FILES,
+    /* Raw bytes with no filesystem home of their own yet, e.g. an image
+     * fetched by the browser but never saved to storage -- see
+     * clipboard__set_binary(). */
+    BRUCE_CLIPBOARD_BINARY,
 } bruce_clipboard_kind_t;
 ```
 
@@ -2767,6 +2773,119 @@ can be pasted again.
 | Parameter | Type | Description |
 | --- | --- | --- |
 | `target_directory` | `const char *` | Absolute destination directory; must already exist. |
+
+### Returns
+
+`bruce_result_t`
+
+#### Permissions
+
+- `storage`
+
+
+---
+
+## clipboard__set_binary()
+
+```c
+bruce_result_t clipboard__set_binary(const void *data, size_t len, const char *filename);
+```
+
+Copies raw bytes onto the clipboard, replacing any prior content.
+
+For content that has no filesystem path of its own (yet) to hand to
+clipboard__set_files() instead -- e.g. an image the browser fetched but
+the user hasn't chosen to save anywhere.
+
+                separators) for whatever later writes these bytes out --
+                see clipboard__binary_filename() -- or NULL to leave it
+                unset.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `data` | `const void *` | Bytes to store; copied internally. |
+| `len` | `size_t` | Length of data in bytes, from 1 to BRUCE_CLIPBOARD_MAX_BINARY_BYTES. |
+| `filename` | `const char *` | Optional suggested filename (a bare name, no directory |
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
+## clipboard__binary_size()
+
+```c
+size_t clipboard__binary_size(void);
+```
+
+Size in bytes of the clipboard's binary payload (0 unless clipboard__kind() is BRUCE_CLIPBOARD_BINARY).
+
+### Returns
+
+`size_t`
+
+
+---
+
+## clipboard__get_binary()
+
+```c
+const void *clipboard__get_binary(void);
+```
+
+Returns the clipboard's binary payload, or NULL if clipboard__kind() is not BRUCE_CLIPBOARD_BINARY.
+
+The returned pointer is borrowed under the same rules as clipboard__get_text().
+
+### Returns
+
+`const void *`
+
+
+---
+
+## clipboard__binary_filename()
+
+```c
+const char *clipboard__binary_filename(void);
+```
+
+The binary payload's suggested filename, or NULL if none was given.
+
+Meaningless when clipboard__kind() is not BRUCE_CLIPBOARD_BINARY. A
+pasting app (e.g. the file manager) should fall back to asking the user
+for a name when this is NULL -- some copier may not have one to offer.
+
+### Returns
+
+`const char *`
+
+
+---
+
+## clipboard__paste_binary()
+
+```c
+bruce_result_t clipboard__paste_binary(const char *target_path);
+```
+
+Writes the clipboard's binary payload to target_path, creating it.
+
+Refuses (BRUCE_ERR_ALREADY_EXISTS) rather than overwriting an existing
+file there, matching clipboard__paste_files(). Reports
+BRUCE_ERR_INVALID_STATE if clipboard__kind() is not
+BRUCE_CLIPBOARD_BINARY. The clipboard itself is left untouched either
+way, so the same content can be pasted again.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `target_path` | `const char *` | Absolute destination file path; must not already exist. |
 
 ### Returns
 

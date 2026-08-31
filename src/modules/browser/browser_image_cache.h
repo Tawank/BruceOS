@@ -8,9 +8,9 @@
  * once, when the user highlights an image and presses Select, to actually
  * fetch it; after that, the cache decodes and box-fits it once into a memory__external-backed RGB565 bitmap. Redraws borrow that fitted bitmap and perform no
  * image decoding, scaling, or allocation. The slot also keeps the original
- * fetched bytes around (see browser_image_cache__save()) so a loaded image
- * can be written out to storage as the real file it is, not the decoded
- * pixel data.
+ * fetched bytes around (see browser_image_cache__save()/__raw()) so a loaded
+ * image can be written out to storage, or put on the clipboard, as the real
+ * file it is, not the decoded pixel data.
  */
 
 #include <stddef.h>
@@ -54,3 +54,12 @@ bruce_result_t browser_image_cache__peek(
  * `url` was never successfully fetched (get() not yet called for it, or its
  * fetch failed). */
 bruce_result_t browser_image_cache__save(browser_image_cache_t *cache, const char *url, const char *dest_path);
+
+/* Borrows the exact bytes fetched for `url` -- the same ones save() writes
+ * to storage -- without touching storage at all, e.g. to put them directly
+ * on the clipboard (see clipboard__set_binary()). Returns BRUCE_ERR_NOT_FOUND
+ * under the same conditions as save(). The borrowed pointer remains valid
+ * under the same rules as get()/peek()'s bitmap. */
+bruce_result_t browser_image_cache__raw(
+    browser_image_cache_t *cache, const char *url, const void **out_data, size_t *out_len
+);

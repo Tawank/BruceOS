@@ -309,12 +309,40 @@ static bruce_result_t filemanager__copy_entry(const char *path) {
     return clipboard__set_files(source_paths, 1, BRUCE_CLIPBOARD_FILE_COPY);
 }
 
-/* "Paste" action: pastes the clipboard's file(s)/folder(s) into `directory`,
- * or reports BRUCE_ERR_INVALID_STATE if the clipboard doesn't hold files
- * (e.g. it's empty, or holds text copied by some other app). */
+/* Binary-clipboard half of filemanager__paste_here(): writes the clipboard's
+ * raw bytes into `directory` under its own suggested name
+ * (clipboard__binary_filename()) when it has one, or otherwise prompts for
+ * one -- some copier (e.g. a shell `wl-copy` piped from stdin) has no
+ * filename of its own to offer. */
+static bruce_result_t filemanager__paste_binary_here(const char *directory) {
+    const char *suggested_name = clipboard__binary_filename();
+    char name[BRUCE_STORAGE_NAME_MAX];
+    if (suggested_name != NULL) {
+        snprintf(name, sizeof(name), "%s", suggested_name);
+    } else {
+        bruce_result_t result = dialog__text_input("Paste", "File name", "", false, name, sizeof(name));
+        if (result != BRUCE_OK) return result;
+    }
+    if (name[0] == '\0' || strchr(name, '/') != NULL || strcmp(name, ".") == 0 || strcmp(name, "..") == 0) {
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+
+    char target_path[BRUCE_STORAGE_PATH_MAX];
+    int written = strcmp(directory, "/") == 0 ? snprintf(target_path, sizeof(target_path), "/%s", name)
+                                               : snprintf(target_path, sizeof(target_path), "%s/%s", directory, name);
+    if (written < 0 || (size_t)written >= sizeof(target_path)) return BRUCE_ERR_RESOURCE_LIMIT;
+    return clipboard__paste_binary(target_path);
+}
+
+/* "Paste" action: pastes the clipboard's file(s)/folder(s), or binary
+ * payload, into `directory`; reports BRUCE_ERR_INVALID_STATE if the
+ * clipboard holds neither (e.g. it's empty, or holds text copied by some
+ * other app). */
 static bruce_result_t filemanager__paste_here(const char *directory) {
-    if (clipboard__kind() != BRUCE_CLIPBOARD_FILES) return BRUCE_ERR_INVALID_STATE;
-    return clipboard__paste_files(directory);
+    bruce_clipboard_kind_t kind = clipboard__kind();
+    if (kind == BRUCE_CLIPBOARD_FILES) return clipboard__paste_files(directory);
+    if (kind == BRUCE_CLIPBOARD_BINARY) return filemanager__paste_binary_here(directory);
+    return BRUCE_ERR_INVALID_STATE;
 }
 
 /* `kind` ("file"/"folder") only changes the confirmation dialog's wording;

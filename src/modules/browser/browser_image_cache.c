@@ -213,21 +213,36 @@ bruce_result_t browser_image_cache__peek(
     return BRUCE_OK;
 }
 
-bruce_result_t browser_image_cache__save(browser_image_cache_t *cache, const char *url, const char *dest_path) {
-    if (cache == NULL || url == NULL || url[0] == '\0' || dest_path == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+bruce_result_t browser_image_cache__raw(
+    browser_image_cache_t *cache, const char *url, const void **out_data, size_t *out_len
+) {
+    if (cache == NULL || url == NULL || url[0] == '\0' || out_data == NULL || out_len == NULL)
+        return BRUCE_ERR_INVALID_ARGUMENT;
 
     browser_image_cache_slot_t *slot = browser_image_cache__find(cache, url);
     if (slot == NULL || slot->failed || slot->response.body == NULL) return BRUCE_ERR_NOT_FOUND;
 
+    *out_data = slot->response.body;
+    *out_len = slot->response.body_len;
+    return BRUCE_OK;
+}
+
+bruce_result_t browser_image_cache__save(browser_image_cache_t *cache, const char *url, const char *dest_path) {
+    if (dest_path == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    const void *data = NULL;
+    size_t len = 0;
+    bruce_result_t result = browser_image_cache__raw(cache, url, &data, &len);
+    if (result != BRUCE_OK) return result;
+
     bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
-    bruce_result_t result = storage__open(
+    result = storage__open(
         dest_path, BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE | BRUCE_STORAGE_OPEN_TRUNCATE, &file
     );
     if (result != BRUCE_OK) return result;
 
     size_t written = 0;
-    result = storage__write(file, slot->response.body, slot->response.body_len, &written);
-    if (result == BRUCE_OK && written != slot->response.body_len) result = BRUCE_ERR_IO;
+    result = storage__write(file, data, len, &written);
+    if (result == BRUCE_OK && written != len) result = BRUCE_ERR_IO;
     bruce_result_t close_result = storage__close(file);
     return result != BRUCE_OK ? result : close_result;
 }

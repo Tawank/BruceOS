@@ -23,6 +23,9 @@ typedef struct {
     char **file_paths;
     size_t file_count;
     bruce_clipboard_file_mode_t file_mode;
+    void *binary_data;
+    size_t binary_len;
+    char *binary_filename; /* Optional; NULL if the copier gave none. */
 } clipboard__state_t;
 
 static StaticSemaphore_t s_clipboard_mutex_storage;
@@ -52,6 +55,11 @@ static void clipboard__clear_locked(void) {
     s_state.file_paths = NULL;
     s_state.file_count = 0;
     s_state.file_mode = BRUCE_CLIPBOARD_FILE_COPY;
+    free(s_state.binary_data);
+    s_state.binary_data = NULL;
+    s_state.binary_len = 0;
+    free(s_state.binary_filename);
+    s_state.binary_filename = NULL;
     s_state.kind = BRUCE_CLIPBOARD_EMPTY;
 }
 
@@ -146,6 +154,93 @@ bruce_clipboard_file_mode_t clipboard__file_mode(void) {
     bruce_clipboard_file_mode_t mode = s_state.file_mode;
     clipboard__unlock();
     return mode;
+}
+
+bruce_result_t clipboard__set_binary(const void *data, size_t len, const char *filename) {
+    if (data == NULL || len == 0 || len > BRUCE_CLIPBOARD_MAX_BINARY_BYTES) return BRUCE_ERR_INVALID_ARGUMENT;
+    if (filename != NULL && strchr(filename, '/') != NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+
+    /* Duplicate before touching the existing clipboard, so a failed copy
+     * leaves whatever was there before intact instead of losing it. */
+    void *data_copy = malloc(len);
+    if (data_copy == NULL) return BRUCE_ERR_NO_MEMORY;
+    memcpy(data_copy, data, len);
+    char *filename_copy = NULL;
+    if (filename != NULL) {
+        filename_copy = strdup(filename);
+        if (filename_copy == NULL) {
+            free(data_copy);
+            return BRUCE_ERR_NO_MEMORY;
+        }
+    }
+
+    clipboard__lock();
+    clipboard__clear_locked();
+    s_state.kind = BRUCE_CLIPBOARD_BINARY;
+    s_state.binary_data = data_copy;
+    s_state.binary_len = len;
+    s_state.binary_filename = filename_copy;
+    clipboard__unlock();
+    return BRUCE_OK;
+}
+
+size_t clipboard__binary_size(void) {
+    clipboard__lock();
+    size_t size = s_state.kind == BRUCE_CLIPBOARD_BINARY ? s_state.binary_len : 0;
+    clipboard__unlock();
+    return size;
+}
+
+const void *clipboard__get_binary(void) {
+    clipboard__lock();
+    const void *data = s_state.kind == BRUCE_CLIPBOARD_BINARY ? s_state.binary_data : NULL;
+    clipboard__unlock();
+    return data;
+}
+
+const char *clipboard__binary_filename(void) {
+    clipboard__lock();
+    const char *filename = s_state.kind == BRUCE_CLIPBOARD_BINARY ? s_state.binary_filename : NULL;
+    clipboard__unlock();
+    return filename;
+}
+
+bruce_result_t clipboard__paste_binary(const char *target_path) {
+    if (target_path == NULL || target_path[0] == '\0') return BRUCE_ERR_INVALID_ARGUMENT;
+
+    /* Snapshot the payload under the lock rather than holding it for the
+     * whole (potentially slow) file write below, which would block every
+     * other clipboard__ call for as long as the write takes. */
+    clipboard__lock();
+    if (s_state.kind != BRUCE_CLIPBOARD_BINARY) {
+        clipboard__unlock();
+        return BRUCE_ERR_INVALID_STATE;
+    }
+    size_t len = s_state.binary_len;
+    void *data = malloc(len);
+    bruce_result_t snapshot_result = data != NULL ? BRUCE_OK : BRUCE_ERR_NO_MEMORY;
+    if (snapshot_result == BRUCE_OK) memcpy(data, s_state.binary_data, len);
+    clipboard__unlock();
+    if (snapshot_result != BRUCE_OK) return snapshot_result;
+
+    bool exists = false;
+    bruce_result_t result = storage__exists(target_path, &exists);
+    if (result == BRUCE_OK && exists) result = BRUCE_ERR_ALREADY_EXISTS;
+    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
+    if (result == BRUCE_OK) {
+        result = storage__open(
+            target_path, BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE | BRUCE_STORAGE_OPEN_TRUNCATE, &file
+        );
+    }
+    if (result == BRUCE_OK) {
+        size_t written = 0;
+        result = storage__write(file, data, len, &written);
+        if (result == BRUCE_OK && written != len) result = BRUCE_ERR_IO;
+        bruce_result_t close_result = storage__close(file);
+        if (result == BRUCE_OK) result = close_result;
+    }
+    free(data);
+    return result;
 }
 
 /* -------------------------------------------------------------------------- */
