@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 
 #include "core_sdk/result.h"
@@ -100,6 +101,29 @@ bruce_clipboard_file_mode_t clipboard__file_mode(void);
  * @permission storage
  */
 bruce_result_t clipboard__paste_files(const char *target_directory);
+
+/**
+ * @brief Copies/moves a single clipboard entry to an exact destination path.
+ *
+ * Same recursive copy/move engine as clipboard__paste_files(), but for one
+ * clipboard entry chosen by index and a caller-supplied destination path
+ * (rather than target_directory + the source's own basename) - lets a
+ * caller (e.g. the file manager) paste a copy under a different name, or
+ * explicitly allow overwriting an existing destination instead of getting
+ * BRUCE_ERR_ALREADY_EXISTS back. Refuses (BRUCE_ERR_INVALID_ARGUMENT) a
+ * target_path equal to the source itself, or one of the source's own
+ * directories or nested inside one, same as clipboard__paste_files() does
+ * for its target_directory.
+ *
+ * @param index Zero-based clipboard file index, below clipboard__file_count().
+ * @param target_path Absolute destination path, including the final name.
+ * @param overwrite When false, refuses (BRUCE_ERR_ALREADY_EXISTS) an
+ *                   existing destination, matching clipboard__paste_files();
+ *                   when true, removes it (file, or whole directory tree)
+ *                   first.
+ * @permission storage
+ */
+bruce_result_t clipboard__paste_file_as(size_t index, const char *target_path, bool overwrite);
 
 /**
  * @brief Copies raw bytes onto the clipboard, replacing any prior content.

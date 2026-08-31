@@ -361,6 +361,59 @@ static bruce_result_t clipboard__copy_entry(const char *src, const char *dst, bo
     return result;
 }
 
+/* Recursively removes `path` (file or directory tree) - storage__remove()
+ * itself only accepts an already-empty directory, so overwriting a
+ * directory destination (clipboard__paste_file_as() below) needs to empty
+ * it out first. */
+static bruce_result_t clipboard__remove_recursive(const char *path) {
+    bool is_directory = false;
+    bruce_result_t result = clipboard__is_directory(path, &is_directory);
+    if (result != BRUCE_OK) return result;
+    if (is_directory) {
+        size_t count = 0;
+        result = storage__list(path, NULL, 0, &count);
+        bruce_storage_entry_t *entries = NULL;
+        if (result == BRUCE_OK && count > 0) {
+            entries = malloc(count * sizeof(*entries));
+            result = entries != NULL ? storage__list(path, entries, count, &count) : BRUCE_ERR_NO_MEMORY;
+        }
+        for (size_t i = 0; result == BRUCE_OK && i < count; ++i) {
+            char child[BRUCE_STORAGE_PATH_MAX];
+            result = clipboard__join_path(path, entries[i].name, child);
+            if (result == BRUCE_OK) result = clipboard__remove_recursive(child);
+        }
+        free(entries);
+    }
+    if (result == BRUCE_OK) result = storage__remove(path);
+    return result;
+}
+
+bruce_result_t clipboard__paste_file_as(size_t index, const char *target_path, bool overwrite) {
+    if (target_path == NULL || target_path[0] == '\0') return BRUCE_ERR_INVALID_ARGUMENT;
+
+    clipboard__lock();
+    if (s_state.kind != BRUCE_CLIPBOARD_FILES || index >= s_state.file_count) {
+        clipboard__unlock();
+        return BRUCE_ERR_INVALID_STATE;
+    }
+    bool move = s_state.file_mode == BRUCE_CLIPBOARD_FILE_CUT;
+    char *source = strdup(s_state.file_paths[index]);
+    clipboard__unlock();
+    if (source == NULL) return BRUCE_ERR_NO_MEMORY;
+
+    bruce_result_t result = BRUCE_OK;
+    if (strcmp(source, target_path) == 0 || clipboard__is_within(source, target_path)) {
+        result = BRUCE_ERR_INVALID_ARGUMENT;
+    } else if (overwrite) {
+        bool exists = false;
+        result = storage__exists(target_path, &exists);
+        if (result == BRUCE_OK && exists) result = clipboard__remove_recursive(target_path);
+    }
+    if (result == BRUCE_OK) result = clipboard__copy_entry(source, target_path, move);
+    free(source);
+    return result;
+}
+
 bruce_result_t clipboard__paste_files(const char *target_directory) {
     if (target_directory == NULL || target_directory[0] == '\0') return BRUCE_ERR_INVALID_ARGUMENT;
     bool target_exists = false;

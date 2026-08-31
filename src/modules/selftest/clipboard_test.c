@@ -133,6 +133,32 @@ bool selftest__run_clipboard_files_case(void) {
     bruce_result_t duplicate_result = clipboard__paste_files(dest_dir);
     bool duplicate_ok = duplicate_result == BRUCE_ERR_ALREADY_EXISTS;
 
+    /* clipboard__paste_file_as() can do what clipboard__paste_files() just
+     * refused above, once asked to: overwrite the existing copy in place. */
+    bruce_result_t overwrite_setup_ok = selftest__clipboard_write_file(source_file, "overwritten");
+    bruce_result_t overwrite_result = clipboard__paste_file_as(0, copied_file, true);
+    bool overwrite_ok = overwrite_setup_ok == BRUCE_OK && overwrite_result == BRUCE_OK &&
+                        selftest__clipboard_file_contains(copied_file, "overwritten");
+
+    /* Without overwrite, it refuses an existing destination the same as
+     * clipboard__paste_files() does. */
+    bruce_result_t no_overwrite_result = clipboard__paste_file_as(0, copied_file, false);
+    bool no_overwrite_ok = no_overwrite_result == BRUCE_ERR_ALREADY_EXISTS;
+
+    /* A target_path equal to the source itself is refused outright, even
+     * with overwrite requested - it would otherwise delete the source before
+     * "copying" it back onto itself. */
+    bruce_result_t self_target_result = clipboard__paste_file_as(0, source_file, true);
+    bool self_target_ok = self_target_result == BRUCE_ERR_INVALID_ARGUMENT;
+
+    /* A caller-chosen destination name/path, not just target_directory +
+     * the source's own basename. */
+    char renamed_file[SELFTEST_CLIPBOARD_PATH_MAX];
+    snprintf(renamed_file, sizeof(renamed_file), "%s/renamed.txt", dest_dir);
+    bruce_result_t rename_paste_result = clipboard__paste_file_as(0, renamed_file, false);
+    bool rename_paste_ok =
+        rename_paste_result == BRUCE_OK && selftest__clipboard_file_contains(renamed_file, "overwritten");
+
     /* Recursive directory copy: a nested file comes along with its folder. */
     char source_dir[BRUCE_STORAGE_PATH_MAX];
     snprintf(source_dir, sizeof(source_dir), "%s/tree", root);
@@ -183,15 +209,20 @@ bool selftest__run_clipboard_files_case(void) {
     selftest__clipboard_remove_tree(root);
     clipboard__clear();
 
-    bool ok = setup_ok && copy_ok && duplicate_ok && tree_ok &&
-              self_paste_result == BRUCE_ERR_INVALID_ARGUMENT && cut_ok &&
+    bool ok = setup_ok && copy_ok && duplicate_ok && overwrite_ok && no_overwrite_ok && self_target_ok &&
+              rename_paste_ok && tree_ok && self_paste_result == BRUCE_ERR_INVALID_ARGUMENT && cut_ok &&
               empty_clipboard_result == BRUCE_ERR_INVALID_STATE &&
               missing_target_result == BRUCE_ERR_NOT_FOUND;
     printf(
-        "[selftest] clipboard/files: %s (copy=%d dup=%d tree=%d self=%d cut=%d empty=%d missing=%d)\n",
+        "[selftest] clipboard/files: %s (copy=%d dup=%d overwrite=%d no_overwrite=%d self_target=%d "
+        "rename=%d tree=%d self=%d cut=%d empty=%d missing=%d)\n",
         ok ? "OK" : "FAIL",
         copy_result,
         duplicate_result,
+        overwrite_result,
+        no_overwrite_result,
+        self_target_result,
+        rename_paste_result,
         tree_result,
         self_paste_result,
         cut_result,
