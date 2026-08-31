@@ -189,11 +189,39 @@ Core ships built-in ELF and JavaScript loader mappings, so ELF still wins if
 both `/bin/<app_name>.elf` and `/bin/<app_name>.js` exist. A third-party loader
 can register an extension and the name of the program that handles it, with no
 Core change required. Duplicate built-in command names and duplicate loader
-extensions are both startup registration errors. Mappings in
-`/config/extensions.conf` is read when AppRunner opens a path, allowing users to
-replace defaults or add extensions without a restart. If the file has no
-matching entry, the built-in mapping is used. Each non-comment line contains an
-extension and program name separated by whitespace, for example `.py python`.
+extensions are both startup registration errors.
+
+`/config/extensions.conf` (owned by the `filetype` Core module,
+`core_sdk/filetype.h`) is consulted next and, when it has a matching entry,
+overrides the built-in loader — so users can replace defaults or add
+extensions without a restart. Its schema is a `"types"` array of file-kind
+descriptors:
+
+```json
+{
+  "types": [
+    {
+      "description": "POSIX shell script",
+      "program": "shell",
+      "extensions": [".sh"],
+      "mimetypes": ["text/x-shellscript"],
+      "interpreters": ["sh", "bash", "ash", "dash"],
+      "icon": "file-code"
+    }
+  ]
+}
+```
+
+`program`/`icon` are what AppRunner and the file manager use to open and
+label a matching file; `description`/`mimetypes` back the `file` command and
+filetype's own description output. If neither a built-in loader nor an
+extensions.conf entry matches - typically a path with no extension - AppRunner
+falls back to `filetype__identify()`, which samples the file's magic bytes
+and, for a `#!` shebang line, matches the interpreter name against entries'
+`interpreters` lists (so an extensionless script with `#!/usr/bin/env bash`
+resolves the same way a `.sh` file does). See `core_sdk/filetype.h` for the
+full detection order, used the same way by the file manager and the `file`
+command.
 
 Any caller — including `app_runner__run()` itself — that needs to start an
 arbitrary path rather than a `/bin/<name>` command uses the loader-agnostic:

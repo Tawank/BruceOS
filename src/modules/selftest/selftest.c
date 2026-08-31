@@ -22,6 +22,7 @@
 #include "dialog_test.h"
 #include "display_test.h"
 #include "elf_loader_test.h"
+#include "filetype_test.h"
 #include "gpio_bus_test.h"
 #include "hash_test.h"
 #include "html_test.h"
@@ -135,6 +136,11 @@ int selftest_app_main(int argc, char **argv) {
     RUN_SELFTEST(selftest__run_storage_ownership_case);
     RUN_SELFTEST(selftest__run_storage_no_leak_normal_exit_case);
     RUN_SELFTEST(selftest__run_storage_no_leak_killed_case);
+    RUN_SELFTEST(selftest__run_filetype_extension_case);
+    RUN_SELFTEST(selftest__run_filetype_magic_bytes_case);
+    RUN_SELFTEST(selftest__run_filetype_shebang_case);
+    RUN_SELFTEST(selftest__run_filetype_text_binary_case);
+    RUN_SELFTEST(selftest__run_filetype_identify_path_case);
     RUN_SELFTEST(selftest__run_partition_manager_default_layout_case);
     RUN_SELFTEST(selftest__run_partition_manager_validation_case);
     RUN_SELFTEST(selftest__run_partition_manager_stage_lifecycle_case);

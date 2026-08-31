@@ -3,11 +3,11 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
-#include <strings.h>
 
 #include "core_sdk/app_runner.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/ext_mem_loader.h"
+#include "core_sdk/filetype.h"
 #include "core_sdk/input.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/clipboard.h"
@@ -76,20 +76,6 @@ static bruce_result_t filemanager__new_entry(const char *directory, bool folder)
     return result;
 }
 
-static const char *filemanager__extension(const char *path) {
-    const char *dot = strrchr(path, '.');
-    return dot != NULL ? dot : "";
-}
-
-static bool filemanager__is_gui_executable(const char *path) {
-    const char *extension = filemanager__extension(path);
-    return strcasecmp(extension, ".wasm") == 0 || strcasecmp(extension, ".elf") == 0;
-}
-
-static bool filemanager__is_shell_script(const char *path) {
-    return strcasecmp(filemanager__extension(path), ".sh") == 0;
-}
-
 static bool filemanager__escape_arg(const char *path, char *out, size_t out_size) {
     size_t written = 0;
     for (size_t i = 0; path[i] != '\0'; ++i) {
@@ -140,8 +126,15 @@ static bruce_result_t filemanager__open_default(const char *path, bool gui) {
      * "terminal"; running a script from inside an existing terminal must
      * keep going through the plain "shell" loader, not recurse into a
      * nested terminal. */
-    if (filemanager__is_shell_script(path)) return filemanager__run_named_app("terminal", path, true, false);
-    gui = gui || filemanager__is_gui_executable(path);
+    /* One filetype lookup covers both checks below - it also catches an
+     * extensionless script via its shebang, so it opens the same way its
+     * ".sh" equivalent would. */
+    bruce_filetype_info_t info;
+    bool identified = filetype__identify(path, &info) == BRUCE_OK && !info.is_directory;
+    if (identified && strcmp(info.program, "shell") == 0) {
+        return filemanager__run_named_app("terminal", path, true, false);
+    }
+    gui = gui || (identified && (strcmp(info.program, "wasm") == 0 || strcmp(info.program, "elf") == 0));
     const bruce_environment_variable_t gui_env[] = {
         {.name = "GUI", .value = "1"}
     };

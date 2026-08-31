@@ -5,12 +5,13 @@
 #include <stdlib.h>
 
 #include "args.h"
+#include "core_sdk/filetype.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/result.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
 
-/* Filesystem commands: pwd, ls, mkdir, touch, rm, cat, head, tail. */
+/* Filesystem commands: pwd, ls, mkdir, touch, rm, cat, file, head, tail. */
 
 int bnu_pwd_app_main(int argc, char **argv) {
     ArgParser *parser = bnu__new_parser("Print the current working directory.");
@@ -156,6 +157,45 @@ int bnu_cat_app_main(int argc, char **argv) {
             stdio__printf("cat: %s: error %d\n", path, result);
             ap_free(parser);
             return result;
+        }
+    }
+
+    ap_free(parser);
+    return BRUCE_OK;
+}
+
+int bnu_file_app_main(int argc, char **argv) {
+    ArgParser *parser = bnu__new_parser("Identify a file's type from its extension, contents, or shebang.");
+    if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
+    ap_add_flag(parser, "mime i");
+    ap_set_opt_help(parser, "mime", "Print only the MIME type, like `file -i`");
+    ap_add_required_arg(parser, "file", "Path to identify");
+    ap_allow_extra_args(parser);
+    ap_unknown_options_as_args(parser);
+    if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
+
+    bool mime_only = ap_found(parser, "mime");
+    int path_count = ap_count_args(parser);
+    for (int i = 0; i < path_count; ++i) {
+        char path[BRUCE_STORAGE_PATH_MAX];
+        if (!bnu__resolve_path(ap_get_arg_at_index(parser, i), path)) {
+            ap_free(parser);
+            return BRUCE_ERR_INVALID_PATH;
+        }
+        bruce_filetype_info_t info;
+        bruce_result_t result = filetype__identify(path, &info);
+        if (result != BRUCE_OK) {
+            stdio__printf("file: %s: error %d\n", path, result);
+            ap_free(parser);
+            return result;
+        }
+        const char *mimetype = info.mimetype[0] != '\0' ? info.mimetype : "application/octet-stream";
+        if (mime_only) {
+            stdio__printf("%s: %s\n", path, mimetype);
+        } else if (info.mimetype[0] != '\0') {
+            stdio__printf("%s: %s (%s)\n", path, info.description, mimetype);
+        } else {
+            stdio__printf("%s: %s\n", path, info.description);
         }
     }
 

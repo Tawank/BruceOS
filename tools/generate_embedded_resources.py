@@ -32,7 +32,7 @@ RESOURCES = [
     ("web_interface/index.css", "src/modules/webui/embedded_resources.h", True),
     ("web_interface/index.js", "src/modules/webui/embedded_resources.h", True),
     ("json/launcher.json", "src/modules/bruce_launcher/embedded_resources.h", False),
-    ("json/extensions.json", "src/core/app_runner/embedded_resources.h", False),
+    ("json/extensions.json", "src/core/filetype/embedded_resources.h", False),
 ]
 
 

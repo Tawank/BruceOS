@@ -6,12 +6,11 @@
 
 #include "core_sdk/app_runner.h"
 #include "core_sdk/ext_mem_loader.h"
+#include "core_sdk/filetype.h"
 #include "core_sdk/icon.h"
 #include "core_sdk/permission.h"
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
-
-#include "embedded_resources.h"
 
 #include <ctype.h>
 #include <stdbool.h>
@@ -20,15 +19,11 @@
 #include <string.h>
 #include <strings.h>
 
-#include "cJSON.h"
-
 #define APP_RUNNER_MAX_APPS 128
 #define APP_RUNNER_PATH_MAX 160
 #define APP_RUNNER_MAX_LOADERS 32
 #define APP_RUNNER_LOADER_EXTENSION_MAX 16
 #define APP_RUNNER_LOADER_PROGRAM_MAX 32
-
-static const char *APP_RUNNER_DEFAULT_EXTENSIONS_JSON = json_extensions_json;
 
 typedef struct {
     const char *name;
@@ -48,69 +43,23 @@ typedef struct {
 
 static app_runner_loader_t s_loaders[APP_RUNNER_MAX_LOADERS];
 static int s_loader_count;
-static cJSON *s_extension_config;
-static bool s_extension_config_loaded;
 
 static bool app_runner__path_has_extension(const char *path, const char *extension);
 
-static void app_runner__load_extension_config(void) {
-    if (s_extension_config_loaded) return;
-    s_extension_config_loaded = true;
-
-    char *text = NULL;
-    size_t size = 0;
-    if (storage__read_file("/config/extensions.conf", &text, &size) && text != NULL) {
-        s_extension_config = cJSON_ParseWithLength(text, size);
-        storage__free(text);
-        if (s_extension_config != NULL && cJSON_IsObject(s_extension_config)) return;
-        cJSON_Delete(s_extension_config);
-        s_extension_config = NULL;
-    }
-
-    s_extension_config = cJSON_Parse(APP_RUNNER_DEFAULT_EXTENSIONS_JSON);
-    if (s_extension_config != NULL) {
-        (void)storage__mkdir_internal("/config");
-        (void)storage__write_file_atomic(
-            "/config/extensions.conf",
-            APP_RUNNER_DEFAULT_EXTENSIONS_JSON,
-            strlen(APP_RUNNER_DEFAULT_EXTENSIONS_JSON)
-        );
-    }
+/* Extension-table lookup only (no I/O, no magic-byte/shebang fallback) -
+ * the fast, common-case path for a recognized extension. See filetype.h's
+ * detection-order notes for why the shebang fallback below needs the
+ * heavier filetype__identify() instead. */
+static bool app_runner__config_program_for_extension(const char *path, char *program_out, size_t program_out_size) {
+    bruce_filetype_info_t info;
+    if (filetype__lookup_extension(path, &info) != BRUCE_OK || info.program[0] == '\0') return false;
+    if (strlen(info.program) >= program_out_size) return false;
+    strncpy(program_out, info.program, program_out_size - 1);
+    program_out[program_out_size - 1] = '\0';
+    return true;
 }
 
-static cJSON *app_runner__extension_entry(const char *path) {
-    app_runner__load_extension_config();
-    if (s_extension_config == NULL) return NULL;
-    cJSON *extensions = cJSON_GetObjectItemCaseSensitive(s_extension_config, "extensions");
-    if (!cJSON_IsObject(extensions)) return NULL;
-    const char *dot = strrchr(path, '.');
-    if (dot == NULL) return NULL;
-    return cJSON_GetObjectItemCaseSensitive(extensions, dot);
-}
-
-/* Looks up an override for one opened file. */
-static bool
-app_runner__config_program_for_extension(const char *path, char *program_out, size_t program_out_size) {
-    cJSON *entry = app_runner__extension_entry(path);
-    cJSON *program = cJSON_IsObject(entry) ? cJSON_GetObjectItemCaseSensitive(entry, "program") : NULL;
-    if (cJSON_IsString(program) && program->valuestring != NULL &&
-        strlen(program->valuestring) < program_out_size) {
-        strncpy(program_out, program->valuestring, program_out_size - 1);
-        program_out[program_out_size - 1] = '\0';
-        return true;
-    }
-    return false;
-}
-
-const char *app_runner__icon_for_path(const char *path) {
-    cJSON *entry = path != NULL ? app_runner__extension_entry(path) : NULL;
-    cJSON *icon = cJSON_IsObject(entry) ? cJSON_GetObjectItemCaseSensitive(entry, "icon") : NULL;
-    if (cJSON_IsString(icon) && icon->valuestring != NULL && icon->valuestring[0] != '\0' &&
-        icon__get(icon->valuestring) != NULL) {
-        return icon->valuestring;
-    }
-    return "file";
-}
+const char *app_runner__icon_for_path(const char *path) { return filetype__icon_for_path(path); }
 
 static bool app_runner__mode_valid(bruce_launch_mode_t mode) {
     return mode == BRUCE_LAUNCH_FOREGROUND || mode == BRUCE_LAUNCH_BACKGROUND;
@@ -246,6 +195,19 @@ int app_runner__run_path_with_environment(
             normalized_path, configured_program, sizeof(configured_program)
         )) {
         program = configured_program;
+    }
+    if (program == NULL) {
+        /* Neither a built-in loader nor extensions.conf claimed this
+         * extension (or the path has none) - fall back to sniffing a
+         * shebang line, e.g. an extensionless script or one whose
+         * extension isn't configured. */
+        bruce_filetype_info_t info;
+        if (filetype__identify(normalized_path, &info) == BRUCE_OK && !info.is_directory &&
+            info.program[0] != '\0' && strlen(info.program) < sizeof(configured_program)) {
+            strncpy(configured_program, info.program, sizeof(configured_program) - 1);
+            configured_program[sizeof(configured_program) - 1] = '\0';
+            program = configured_program;
+        }
     }
     if (program == NULL) {
         // printf("app_runner__run_path: normalized_path=%s, loader=NULL\n", normalized_path);

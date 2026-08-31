@@ -1,123 +1,219 @@
 {
-  "extensions": {
-    ".elf": {
+  "types": [
+    {
+      "description": "ELF executable",
       "program": "elf",
+      "extensions": [".elf"],
+      "mimetypes": ["application/x-elf"],
       "icon": "application"
     },
-    ".wasm": {
+    {
+      "description": "WebAssembly application",
       "program": "wasm",
+      "extensions": [".wasm"],
+      "mimetypes": ["application/wasm"],
       "icon": "application"
     },
-    ".js": {
+    {
+      "description": "JavaScript source",
       "program": "js",
+      "extensions": [".js"],
+      "mimetypes": ["text/javascript"],
       "icon": "file-code"
     },
-    ".sh": {
+    {
+      "description": "POSIX shell script",
       "program": "shell",
+      "extensions": [".sh"],
+      "mimetypes": ["text/x-shellscript"],
+      "interpreters": ["sh", "bash", "ash", "dash"],
       "icon": "file-code"
     },
-    ".jpg": {
+    {
+      "description": "JPEG image",
       "program": "image",
+      "extensions": [".jpg", ".jpeg"],
+      "mimetypes": ["image/jpeg"],
       "icon": "file-image"
     },
-    ".jpeg": {
+    {
+      "description": "PNG image",
       "program": "image",
+      "extensions": [".png"],
+      "mimetypes": ["image/png"],
       "icon": "file-image"
     },
-    ".png": {
+    {
+      "description": "GIF image",
       "program": "image",
+      "extensions": [".gif"],
+      "mimetypes": ["image/gif"],
       "icon": "file-image"
     },
-    ".gif": {
-      "program": "image",
+    {
+      "description": "BMP image",
+      "extensions": [".bmp"],
+      "mimetypes": ["image/bmp"],
       "icon": "file-image"
     },
-    ".bmp": {
+    {
+      "description": "WebP image",
+      "extensions": [".webp"],
+      "mimetypes": ["image/webp"],
       "icon": "file-image"
     },
-    ".webp": {
-      "icon": "file-image"
-    },
-    ".txt": {
+    {
+      "description": "ASCII text",
       "program": "text",
+      "extensions": [".txt"],
+      "mimetypes": ["text/plain"],
       "icon": "file-document"
     },
-    ".md": {
+    {
+      "description": "Markdown document",
+      "extensions": [".md"],
+      "mimetypes": ["text/markdown"],
       "icon": "file-document"
     },
-    ".log": {
+    {
+      "description": "Log file",
+      "extensions": [".log"],
+      "mimetypes": ["text/plain"],
       "icon": "file-document"
     },
-    ".json": {
+    {
+      "description": "JSON data",
       "program": "text",
+      "extensions": [".json"],
+      "mimetypes": ["application/json"],
       "icon": "application-braces"
     },
-    ".conf": {
+    {
+      "description": "Configuration file",
       "program": "text",
+      "extensions": [".conf"],
+      "mimetypes": ["text/plain"],
       "icon": "file-cog"
     },
-    ".cfg": {
+    {
+      "description": "Configuration file",
+      "extensions": [".cfg"],
+      "mimetypes": ["text/plain"],
       "icon": "file-cog"
     },
-    ".ini": {
+    {
+      "description": "INI configuration file",
+      "extensions": [".ini"],
+      "mimetypes": ["text/plain"],
       "icon": "file-cog"
     },
-    ".c": {
+    {
+      "description": "C source",
+      "extensions": [".c", ".h"],
+      "mimetypes": ["text/x-c"],
       "icon": "file-code"
     },
-    ".h": {
+    {
+      "description": "C++ source",
+      "extensions": [".cpp"],
+      "mimetypes": ["text/x-c++"],
       "icon": "file-code"
     },
-    ".cpp": {
+    {
+      "description": "Python script",
+      "extensions": [".py"],
+      "mimetypes": ["text/x-python"],
       "icon": "file-code"
     },
-    ".py": {
+    {
+      "description": "HTML document",
+      "extensions": [".html"],
+      "mimetypes": ["text/html"],
       "icon": "file-code"
     },
-    ".html": {
+    {
+      "description": "CSS stylesheet",
+      "extensions": [".css"],
+      "mimetypes": ["text/css"],
       "icon": "file-code"
     },
-    ".css": {
-      "icon": "file-code"
-    },
-    ".mp3": {
+    {
+      "description": "MP3 audio",
+      "extensions": [".mp3"],
+      "mimetypes": ["audio/mpeg"],
       "icon": "file-music"
     },
-    ".wav": {
+    {
+      "description": "WAV audio",
+      "extensions": [".wav"],
+      "mimetypes": ["audio/wav"],
       "icon": "file-music"
     },
-    ".ogg": {
+    {
+      "description": "Ogg audio",
+      "extensions": [".ogg"],
+      "mimetypes": ["audio/ogg"],
       "icon": "file-music"
     },
-    ".flac": {
+    {
+      "description": "FLAC audio",
+      "extensions": [".flac"],
+      "mimetypes": ["audio/flac"],
       "icon": "file-music"
     },
-    ".mp4": {
+    {
+      "description": "MP4 video",
+      "extensions": [".mp4"],
+      "mimetypes": ["video/mp4"],
       "icon": "file-video"
     },
-    ".avi": {
+    {
+      "description": "AVI video",
+      "extensions": [".avi"],
+      "mimetypes": ["video/x-msvideo"],
       "icon": "file-video"
     },
-    ".mkv": {
+    {
+      "description": "Matroska video",
+      "extensions": [".mkv"],
+      "mimetypes": ["video/x-matroska"],
       "icon": "file-video"
     },
-    ".mov": {
+    {
+      "description": "QuickTime video",
+      "extensions": [".mov"],
+      "mimetypes": ["video/quicktime"],
       "icon": "file-video"
     },
-    ".zip": {
+    {
+      "description": "ZIP archive",
+      "extensions": [".zip"],
+      "mimetypes": ["application/zip"],
       "icon": "zip-box"
     },
-    ".7z": {
+    {
+      "description": "7-Zip archive",
+      "extensions": [".7z"],
+      "mimetypes": ["application/x-7z-compressed"],
       "icon": "zip-box"
     },
-    ".rar": {
+    {
+      "description": "RAR archive",
+      "extensions": [".rar"],
+      "mimetypes": ["application/vnd.rar"],
       "icon": "zip-box"
     },
-    ".tar": {
+    {
+      "description": "TAR archive",
+      "extensions": [".tar"],
+      "mimetypes": ["application/x-tar"],
       "icon": "zip-box"
     },
-    ".gz": {
+    {
+      "description": "Gzip-compressed data",
+      "extensions": [".gz"],
+      "mimetypes": ["application/gzip"],
       "icon": "zip-box"
     }
-  }
+  ]
 }
