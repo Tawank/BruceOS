@@ -256,6 +256,85 @@ bruce_result_t memory__readable_size(
     bruce_memory_backend_t backend, uintptr_t address, size_t *out_size
 );
 
+/**
+ * @brief One subsystem's contribution to memory__reclaim(): how much it could
+ * give back right now, and the calls to actually shrink or grow it.
+ *
+ * estimate() must be side-effect-free and cheap -- memory__reclaim() calls it
+ * on every registered provider just to decide whether reclaiming is worth
+ * disturbing anything for. reclaim() actually shrinks the subsystem and
+ * returns the bytes it freed, which may be less than estimate() reported (the
+ * state may have changed, or another caller reclaimed it first) or zero if
+ * there was nothing left to give. restore() undoes exactly the shrink that
+ * reclaim() performed; it runs automatically, best-effort, when the process
+ * credited with the reclaim exits (see memory__reclaim()), so it must be safe
+ * to call from any context and a no-op if there is nothing to restore.
+ */
+typedef struct {
+    const char *name; /* For logs; not required to be unique. */
+    size_t (*estimate)(void);
+    size_t (*reclaim)(void);
+    void (*restore)(void);
+} bruce_reclaim_provider_t;
+
+/**
+ * @brief Registers a subsystem as a source memory__reclaim() can draw from.
+ *
+ * Providers are consulted in registration order and are never unregistered
+ * -- meant for a long-lived Core subsystem (e.g. the display framebuffer) to
+ * call once from its own init function, not for per-allocation use.
+ *
+ * @note Built-in modules only; not exported to ELF.
+ */
+bruce_result_t memory__register_reclaimable(const bruce_reclaim_provider_t *provider);
+
+/**
+ * @brief Handle to a memory__reclaim() performed on another process's behalf,
+ * to be handed to memory__reclaim_adopt() by that process.
+ */
+typedef struct {
+    bruce_process_id_t owner_id;
+    bruce_resource_id_t resource_id;
+} bruce_memory_reclaim_token_t;
+
+/**
+ * @brief Tries to free at least `needed_bytes` from registered subsystems before a big allocation.
+ *
+ * Sums every registered provider's estimate() first and only calls reclaim()
+ * on any of them if the total would actually meet `needed_bytes` -- a
+ * request that can't be satisfied never disturbs anything (e.g. never
+ * changes the display's rendering mode) for no benefit. Reclaiming stops as
+ * soon as enough has been freed, so it never shrinks more subsystems than it
+ * has to.
+ *
+ * On success, what was reclaimed is restored automatically when the calling
+ * process exits -- the same crash-safety memory__malloc() gives ordinary
+ * allocations. A caller reclaiming on behalf of a *different* process (e.g.
+ * a loader, before spawning it) should pass out_token and have that process
+ * call memory__reclaim_adopt() with it, so the restore is tied to the
+ * process that actually needs the memory instead of to the caller.
+ *
+ * @param needed_bytes Bytes the caller is about to need.
+ * @param out_freed Bytes actually freed; 0 if nothing was reclaimed (out_token is also cleared). May be NULL.
+ * @param out_token Set to a token for memory__reclaim_adopt(), or the zero token if nothing was reclaimed. May be NULL.
+ */
+bruce_result_t memory__reclaim(
+    size_t needed_bytes, size_t *out_freed, bruce_memory_reclaim_token_t *out_token
+);
+
+/**
+ * @brief Transfers a memory__reclaim() restore obligation to the calling process.
+ *
+ * Call once from the process meant to benefit from a reclaim performed by a
+ * different process -- mirrors ext_mem_loader__adopt_xip()'s handoff
+ * pattern. The zero token (or one already adopted) is a no-op.
+ *
+ * @note Built-in modules only; not exported to ELF.
+ *
+ * @param token Token returned by memory__reclaim().
+ */
+bruce_result_t memory__reclaim_adopt(bruce_memory_reclaim_token_t token);
+
 #ifdef __cplusplus
 }
 #endif

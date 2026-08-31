@@ -156,6 +156,7 @@ Functions that explicitly document a `bruce_permission_t` check, grouped by perm
 
 - `device__restart` (device.h)
 - `device__power_off` (device.h)
+- `memory__get_layout` (memory.h)
 - `process__switch_next` (process.h)
 - `process__switch_previous` (process.h)
 - `process__foreground` (process.h)
@@ -6409,42 +6410,103 @@ Turn the panel display on or off (backlight is controlled separately).
 
 ---
 
-## display__game_mode()
+## bruce_display_render_mode_t()
 
 ```c
-bruce_result_t display__game_mode(bool enable);
+typedef enum {
+    BRUCE_DISPLAY_MODE_BUFFERED_DMA = 0,
+    BRUCE_DISPLAY_MODE_BUFFERED,
+    BRUCE_DISPLAY_MODE_DIRECT,
+} bruce_display_render_mode_t;
 ```
 
-Turns direct game rendering on or off.
+Display rendering modes, from most capable/RAM-hungry to leanest.
+
+BRUCE_DISPLAY_MODE_BUFFERED_DMA is the default: drawing goes to an
+off-screen framebuffer allocated in DMA-capable RAM. BRUCE_DISPLAY_MODE_BUFFERED
+keeps the off-screen framebuffer but drops its DMA capability (see the
+"DMA Buf" setting in Display & UI settings). BRUCE_DISPLAY_MODE_DIRECT drops
+the framebuffer entirely: draw calls go straight to the panel, freeing the
+framebuffer's RAM at the cost of visible partial-frame updates while
+drawing (see display__request_render_mode()).
+
+
+---
+
+## display__request_render_mode()
+
+```c
+bruce_result_t display__request_render_mode(bruce_display_render_mode_t mode);
+```
+
+Requests the display be at `mode` (or a leaner one another caller also wants) for as long as the calling process needs it.
 
 Entirely at runtime, no reboot required. Meant to be called by a
 memory-hungry ELF/JS app (an emulator, a game with a large asset set,
-...) right before it starts allocating, to hand back the RAM the
-buffered/DMA framebuffer would otherwise be holding for the whole time
-the app runs.
+...) right before it starts allocating, to hand back the RAM a
+buffered/DMA framebuffer would otherwise hold for the whole time the app
+runs -- or use memory__reclaim(), which calls this on your behalf and
+only if it's actually enough to cover what you're about to allocate.
 
-display__game_mode(true) tears down the current s_framebuffer/pack buffer
-(if buffered rendering was in use) and allocates only the small
-direct-mode scratch buffer instead; the calling process becomes game
-mode's owner. display__game_mode(false), called by that same owning
-process, restores whatever rendering mode was active before game mode
-was turned on. Calling it again with the same value the caller already
-holds is a no-op. Only the owning process may turn its own game mode
-back off; if the owner exits (or is killed) without doing so, the
-display core reverts it automatically.
+Each process may hold at most one request at a time; calling this again
+replaces the calling process's own request. The display's actual mode is
+always the leanest one requested by any live caller, so one process
+asking for BRUCE_DISPLAY_MODE_DIRECT is never undone by another asking for
+BRUCE_DISPLAY_MODE_BUFFERED. Requesting BRUCE_DISPLAY_MODE_BUFFERED_DMA
+releases the calling process's request (equivalent to
+display__release_render_mode()). A request is released automatically if
+the requesting process exits or is killed without releasing it itself.
 
-Fails with BRUCE_ERR_BUSY if another process currently owns game mode,
-or while any process has an active (begun but not yet presented) frame.
+Fails with BRUCE_ERR_BUSY while any process has an active (begun but not
+yet presented) frame.
 
 ### Parameters
 
 | Parameter | Type | Description |
 | --- | --- | --- |
-| `enable` | `bool` | True to enter game mode, false to revert to the prior rendering mode. |
+| `mode` | `bruce_display_render_mode_t` | Leanest rendering mode the calling process is willing to accept. |
 
 ### Returns
 
 `bruce_result_t`
+
+
+---
+
+## display__release_render_mode()
+
+```c
+bruce_result_t display__release_render_mode(void);
+```
+
+Releases the calling process's own display__request_render_mode() request, if any.
+
+A no-op if the calling process holds no request. The display's mode drops
+back to the leanest one still requested by another live caller, or to
+BRUCE_DISPLAY_MODE_BUFFERED_DMA if none remain.
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
+## display__buffer_footprint()
+
+```c
+size_t display__buffer_footprint(void);
+```
+
+Returns how many bytes the display's current rendering buffers are using.
+
+Includes the off-screen framebuffer (buffered modes only) and its
+transfer/direct-mode scratch buffer. Falls as rendering mode gets leaner;
+see display__request_render_mode(). Zero if the display isn't initialized.
+
+### Returns
+
+`size_t`
 
 
 ---
@@ -6929,7 +6991,7 @@ typedef void (*bruce_loader_process_stop_fn)(void *context, bruce_process_signal
 typedef struct {
     const uint8_t *data;
     size_t size;
-    bruce_memory_object_t memory;
+    bruce_memory_backend_t backend;
 } bruce_ext_mem_loader_image_t;
 ```
 
@@ -8009,13 +8071,13 @@ typedef struct {
     char **header_values;
     size_t header_count;
 
-    /* Opaque. Set when `body` was captured straight into its own PSRAM/swap
-     * object instead of sharing headers' internal-heap block (a buffered
-     * response whose Content-Length fit in memory__external_alloc() - see
-     * src/core/http/http.c). backend == BRUCE_MEMORY_BACKEND_INVALID (the
-     * zero value) means it wasn't; either way, never touch this field
-     * directly - just pass the whole response to http__response_free(). */
-    bruce_memory_object_t body_object;
+    /* Opaque. Non-NULL when `body` was captured straight into its own
+     * PSRAM/swap allocation instead of sharing headers' internal-heap block
+     * (a buffered response whose Content-Length fit in
+     * memory__external_malloc() - see src/core/http/http.c). Either way,
+     * never touch this field directly - just pass the whole response to
+     * http__response_free(). */
+    const void *body_object;
 } bruce_http_response_t;
 ```
 
@@ -8034,7 +8096,7 @@ On success, fills `response` and returns BRUCE_OK. The body is
 NUL-terminated in buffered mode, but body_len is authoritative. Headers
 are always one process-owned internal-heap allocation; the body shares it
 unless it was large enough to instead go through
-memory__external_alloc() (PSRAM, or swap when no PSRAM is fitted) -
+memory__external_malloc() (PSRAM, or swap when no PSRAM is fitted) -
 either way, release both with a single http__response_free() call. On
 failure, leaves `response` zeroed and returns a negative BRUCE_ERR_*
 value.
@@ -8941,7 +9003,7 @@ typedef struct {
     uint16_t source_width;
     uint16_t source_height;
     bruce_image_format_t format;
-    bruce_memory_object_t backing;
+    bool external; /* true when pixels came from memory__external_malloc() and must be freed that way. */
 } image_bitmap_t;
 ```
 
@@ -9250,6 +9312,8 @@ Closes a GIF object opened by image__gif_open().
 | `BRUCE_INPUT_CODE_DELETE` | `0x108` |
 | `BRUCE_INPUT_CODE_PREV` | `0x109` |
 | `BRUCE_INPUT_CODE_NEXT` | `0x10A` |
+| `BRUCE_INPUT_CODE_ZOOM_OUT` | `0x10B` |
+| `BRUCE_INPUT_CODE_ZOOM_IN` | `0x10C` |
 | `BRUCE_INPUT_CODE_BUTTON_A` | `0x200` |
 | `BRUCE_INPUT_CODE_BUTTON_B` | `0x201` |
 | `BRUCE_INPUT_CODE_BUTTON_C` | `0x202` |
@@ -9760,6 +9824,7 @@ Returns the infrared receiver pin.
 | `BRUCE_MANIFEST_PERMISSION_NAME_MAX` | `16` |
 | `BRUCE_MANIFEST_STACK_MIN` | `4096u` |
 | `BRUCE_MANIFEST_STACK_MAX` | `16384u` |
+| `BRUCE_MANIFEST_HEAP_MAX` | `0x800000u /* 8 MiB */` |
 
 ---
 
@@ -9771,6 +9836,10 @@ typedef struct {
     uint8_t app_icon[BRUCE_MANIFEST_ICON_BYTES];
     uint32_t core_abi_version;
     uint32_t stack_size;
+    /* Advisory expected peak memory__malloc()/memory__external_malloc() use;
+     * see BRUCE_MANIFEST_HEAP_MAX. 0 (the default) if the manifest omits
+     * heapSize. */
+    uint32_t heap_size;
     char permissions[BRUCE_MANIFEST_MAX_PERMISSIONS][BRUCE_MANIFEST_PERMISSION_NAME_MAX];
     size_t permission_count;
 } bruce_manifest_t;
@@ -9816,12 +9885,14 @@ Parses and validates canonical manifest JSON bytes.
 (see migration_plan.md, "ELF contract"): required appName/appIcon
 (base64, decodes to exactly BRUCE_MANIFEST_ICON_BYTES bytes)/
 coreAbiVersion/stackSize (BRUCE_MANIFEST_STACK_MIN-
-BRUCE_MANIFEST_STACK_MAX inclusive), and an optional permissions array
-(each name must be a known bruce_permission_t name, no duplicates). Every
-caller extracts raw manifest bytes from the file format and calls this
-one shared parser instead of reimplementing JSON/base64 handling. Returns
-a process-owned manifest that must be released with memory__free(), or
-NULL for invalid input or allocation failure.
+BRUCE_MANIFEST_STACK_MAX inclusive); an optional heapSize (0-
+BRUCE_MANIFEST_HEAP_MAX inclusive, see bruce_manifest_t.heap_size); and an
+optional permissions array (each name must be a known bruce_permission_t
+name, no duplicates). Every caller extracts raw manifest bytes from the
+file format and calls this one shared parser instead of reimplementing
+JSON/base64 handling. Returns a process-owned manifest that must be
+released with memory__free(), or NULL for invalid input or allocation
+failure.
 
 ### Parameters
 
@@ -9886,7 +9957,8 @@ build's target), extracts and parses the .bruce.manifest section via
 manifest__parse(), and fills *out_inspection with the parsed manifest,
 BRUCE_APP_KIND_ELF, and the ABI-warning flag. A valid ELF with a missing
 or invalid manifest receives fallback metadata: its filename, current
-Core ABI, an 8192-byte stack, and no predeclared permissions. Loader
+Core ABI, an 8192-byte stack, no heap-size hint (0), and no predeclared
+permissions. Loader
 modules that know they are loading an ELF file (the built-in ELF loader,
 for example) call this directly.
 
@@ -9956,9 +10028,9 @@ BRUCE_APP_KIND_WEBASSEMBLY and an ABI-warning flag.
 
 An envelope-valid WebAssembly module with a missing, duplicate,
 oversized, or invalid manifest receives filename fallback metadata with
-a generic icon, current Core ABI, an 8192-byte stack, and no
-permissions. Malformed modules, invalid paths, inaccessible files, and
-allocation failures return NULL. The returned inspection is
+a generic icon, current Core ABI, an 8192-byte stack, no heap-size hint
+(0), and no permissions. Malformed modules, invalid paths, inaccessible
+files, and allocation failures return NULL. The returned inspection is
 process-owned and must be released with memory__free().
 
 ### Parameters
@@ -10024,6 +10096,49 @@ typedef struct {
     bruce_memory_backend_t backend;
 } bruce_memory_object_t;
 ```
+
+
+---
+
+## bruce_memory_region_t()
+
+```c
+typedef enum {
+    BRUCE_MEMORY_REGION_UNKNOWN = 0,
+    BRUCE_MEMORY_REGION_DRAM,
+    BRUCE_MEMORY_REGION_DIRAM,
+    BRUCE_MEMORY_REGION_IRAM,
+    BRUCE_MEMORY_REGION_RTC_FAST,
+    BRUCE_MEMORY_REGION_PSRAM,
+    BRUCE_MEMORY_REGION_SWAP,
+} bruce_memory_region_t;
+```
+
+Physical memory kind containing a layout block.
+
+
+---
+
+## bruce_memory_layout_block_t()
+
+```c
+typedef struct {
+    uintptr_t address;
+    size_t size;              /* Allocator block size, or swap reserved size. */
+    uintptr_t region_start;   /* Start of the containing allocator region. */
+    uintptr_t region_end;     /* Exclusive end of the containing region. */
+    size_t requested_size;    /* Bruce-requested bytes; zero when unknown/free. */
+    bruce_memory_backend_t backend;
+    bruce_memory_region_t region;
+    bruce_process_id_t owner_id; /* Invalid for free or untracked blocks. */
+    uint32_t handle;          /* External-object handle; zero for heap blocks. */
+    bool used;
+    bool tracked;
+    bool executable;
+} bruce_memory_layout_block_t;
+```
+
+One block in a point-in-time memory layout snapshot.
 
 
 ---
@@ -10133,44 +10248,99 @@ undefined behaviour, matching libc free().
 
 ---
 
-## memory__external_alloc()
+## memory__external_malloc()
 
 ```c
-bruce_result_t memory__external_alloc(size_t size, bruce_memory_object_t *out_object);
+const void *memory__external_malloc(size_t size);
 ```
 
-Allocates a process-owned external-memory object.
+Allocates process-owned external memory (PSRAM, swap, or internal RAM) and returns a read-only pointer.
 
 PSRAM is preferred when a sufficiently large block is available;
 otherwise complete 64 KiB pages are allocated from swap. If neither is
 available -- no PSRAM on this board, and no "swap" partition has been
 committed yet (see partitions.csv) -- plain internal RAM is used as a
-last resort so callers of this function still get a usable object
-instead of BRUCE_ERR_RESOURCE_LIMIT. The returned object is released
-automatically when its process exits.
+last resort so callers still get a usable allocation instead of NULL.
+The allocation is released automatically when its process exits.
+
+The returned pointer is read-only: swap allocations are flash-mapped and
+not directly CPU-writable, so writes must go through
+memory__external_memcpy()/memset(), which know how to update each backend.
 
 ### Parameters
 
 | Parameter | Type | Description |
 | --- | --- | --- |
-| `size` | `size_t` | Number of bytes to allocate. |
-| `out_object` | `bruce_memory_object_t *` | Receives the new external-memory object. |
+| `size` | `size_t` | Number of bytes to allocate. Returns NULL for zero. |
 
 ### Returns
 
-`bruce_result_t`
+`const void *`
 
 
 ---
 
-## memory__external_write()
+## memory__external_malloc_writable()
 
 ```c
-bruce_result_t
-memory__external_write(const bruce_memory_object_t *object, size_t offset, const void *data, size_t size);
+const void *memory__external_malloc_writable(size_t size);
 ```
 
-Writes or replaces bytes through the object's backend without exposing a writable flash pointer.
+Allocates process-owned external memory that is guaranteed directly CPU-writable.
+
+Same PSRAM-or-internal-RAM allocation memory__external_malloc() may also
+land on, but never swap: unlike memory__external_malloc(), this never
+falls back to a flash-mapped allocation, so callers that write into the
+returned buffer through an ordinary pointer (rather than
+memory__external_memcpy()/memset()) never end up with one that silently
+corrupts on write. Returns NULL if neither PSRAM nor internal RAM has
+room for `size` -- callers needing a guaranteed allocation should fall
+back to memory__malloc() in that case.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `size` | `size_t` | Number of bytes to allocate. Returns NULL for zero. |
+
+### Returns
+
+`const void *`
+
+
+---
+
+## memory__external_calloc()
+
+```c
+const void *memory__external_calloc(size_t count, size_t size);
+```
+
+Allocates zero-initialized external memory for count objects of size bytes.
+
+Returns NULL when either argument is zero or their product overflows size_t.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `count` | `size_t` | Number of objects to allocate. |
+| `size` | `size_t` | Size of each object in bytes. |
+
+### Returns
+
+`const void *`
+
+
+---
+
+## memory__external_memcpy()
+
+```c
+bruce_result_t memory__external_memcpy(const void *ptr, size_t offset, const void *data, size_t size);
+```
+
+Copies bytes into external memory without exposing a writable flash pointer.
 
 Swap updates that require changing a zero bit back to one rewrite the
 affected flash sectors. Callers must synchronize writes with readers of
@@ -10180,10 +10350,10 @@ an already shared mapping.
 
 | Parameter | Type | Description |
 | --- | --- | --- |
-| `object` | `const bruce_memory_object_t *` | External-memory object to write into. |
-| `offset` | `size_t` | Byte offset within the object to write at. |
-| `data` | `const void *` | Bytes to write. |
-| `size` | `size_t` | Number of bytes to write. |
+| `ptr` | `const void *` | Allocation obtained from memory__external_malloc()/calloc(). |
+| `offset` | `size_t` | Byte offset within the allocation to write at. |
+| `data` | `const void *` | Bytes to copy in. |
+| `size` | `size_t` | Number of bytes to copy. |
 
 ### Returns
 
@@ -10192,20 +10362,26 @@ an already shared mapping.
 
 ---
 
-## memory__external_map()
+## memory__external_memset()
 
 ```c
-bruce_result_t memory__external_map(const bruce_memory_object_t *object, const void **out_data);
+bruce_result_t memory__external_memset(const void *ptr, size_t offset, int value, size_t size);
 ```
 
-Returns a read-only mapping that remains valid until memory__external_free() or process teardown.
+Fills a range of external memory with a repeated byte value.
+
+Semantics otherwise match memory__external_memcpy(); prefer this over a
+memcpy() of a manually filled buffer since a zero fill is always a direct
+flash write (no sector erase needed).
 
 ### Parameters
 
 | Parameter | Type | Description |
 | --- | --- | --- |
-| `object` | `const bruce_memory_object_t *` | External-memory object to map. |
-| `out_data` | `const void **` | Receives a read-only pointer to the object's bytes. |
+| `ptr` | `const void *` | Allocation obtained from memory__external_malloc()/calloc(). |
+| `offset` | `size_t` | Byte offset within the allocation to fill at. |
+| `value` | `int` | Byte value to repeat, as an unsigned char. |
+| `size` | `size_t` | Number of bytes to fill. |
 
 ### Returns
 
@@ -10217,19 +10393,20 @@ Returns a read-only mapping that remains valid until memory__external_free() or 
 ## memory__external_free()
 
 ```c
-bruce_result_t memory__external_free(bruce_memory_object_t *object);
+bruce_result_t memory__external_free(const void *ptr);
 ```
 
-Releases an external object.
+Frees memory obtained from memory__external_malloc()/calloc().
 
-NULL is invalid; a successful call clears the caller's object. Payload
-bytes are not zeroed.
+NULL is a no-op. Payload bytes are not zeroed. Passing any other pointer
+not currently owned by the calling process, or one already freed, is
+rejected with BRUCE_ERR_INVALID_ARGUMENT / BRUCE_ERR_PERMISSION.
 
 ### Parameters
 
 | Parameter | Type | Description |
 | --- | --- | --- |
-| `object` | `bruce_memory_object_t *` | External-memory object to release. |
+| `ptr` | `const void *` | Allocation to free, or NULL. |
 
 ### Returns
 
@@ -10255,6 +10432,240 @@ boundaries.
 | Parameter | Type | Description |
 | --- | --- | --- |
 | `out_stats` | `bruce_memory_stats_t *` | Receives the current heap statistics. |
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
+## memory__get_layout()
+
+```c
+bruce_result_t memory__get_layout(
+    bruce_memory_backend_t backend, bruce_memory_layout_block_t *blocks,
+    size_t capacity, size_t *out_count
+);
+```
+
+Captures allocator blocks for one memory backend without allocating.
+
+INTERNAL and PSRAM include both free and occupied ESP-IDF heap blocks.
+Occupied blocks allocated through memory__malloc() carry their Bruce owner;
+other occupied blocks are returned as untracked. SWAP returns exact free
+runs and process-owned external allocations. If capacity is too small, the
+prefix that fits is written and out_count still reports the required count.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `backend` | `bruce_memory_backend_t` |  |
+| `blocks` | `bruce_memory_layout_block_t *` |  |
+| `capacity` | `size_t` |  |
+| `out_count` | `size_t *` |  |
+
+### Returns
+
+`bruce_result_t`
+
+#### Permissions
+
+- `process`
+
+
+---
+
+## memory__read()
+
+```c
+bruce_result_t memory__read(
+    bruce_memory_backend_t backend, uintptr_t address, void *buffer, size_t size
+);
+```
+
+Validates or copies bytes from a diagnostic memory range.
+
+INTERNAL and PSRAM addresses must lie wholly inside one ESP-IDF heap block;
+MMIO, allocator metadata gaps, and unrelated address ranges are rejected.
+SWAP addresses are byte offsets in the swap partition and must lie wholly
+inside one currently allocated external object (free/stale pages are never
+exposed). This is a best-effort live snapshot: separate calls may observe
+concurrent changes.
+Passing NULL for buffer performs validation without copying.
+
+@note Built-in modules only. External ELF/JS/WASM apps are denied even if
+they hold the process permission, and the symbol is not exported to ELF.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `backend` | `bruce_memory_backend_t` |  |
+| `address` | `uintptr_t` |  |
+| `buffer` | `void *` |  |
+| `size` | `size_t` |  |
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
+## memory__readable_size()
+
+```c
+bruce_result_t memory__readable_size(
+    bruce_memory_backend_t backend, uintptr_t address, size_t *out_size
+);
+```
+
+Returns readable bytes from an address to the end of its heap block or active swap object.
+
+@note Built-in modules only, under the same restrictions as memory__read().
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `backend` | `bruce_memory_backend_t` |  |
+| `address` | `uintptr_t` |  |
+| `out_size` | `size_t *` |  |
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
+## estimate()
+
+```c
+typedef struct {
+    const char *name; /* For logs; not required to be unique. */
+    size_t (*estimate)(void);
+    size_t (*reclaim)(void);
+    void (*restore)(void);
+} bruce_reclaim_provider_t;
+```
+
+One subsystem's contribution to memory__reclaim(): how much it could give back right now, and the calls to actually shrink or grow it.
+
+estimate() must be side-effect-free and cheap -- memory__reclaim() calls it
+on every registered provider just to decide whether reclaiming is worth
+disturbing anything for. reclaim() actually shrinks the subsystem and
+returns the bytes it freed, which may be less than estimate() reported (the
+state may have changed, or another caller reclaimed it first) or zero if
+there was nothing left to give. restore() undoes exactly the shrink that
+reclaim() performed; it runs automatically, best-effort, when the process
+credited with the reclaim exits (see memory__reclaim()), so it must be safe
+to call from any context and a no-op if there is nothing to restore.
+
+
+---
+
+## memory__register_reclaimable()
+
+```c
+bruce_result_t memory__register_reclaimable(const bruce_reclaim_provider_t *provider);
+```
+
+Registers a subsystem as a source memory__reclaim() can draw from.
+
+Providers are consulted in registration order and are never unregistered
+-- meant for a long-lived Core subsystem (e.g. the display framebuffer) to
+call once from its own init function, not for per-allocation use.
+
+@note Built-in modules only; not exported to ELF.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `provider` | `const bruce_reclaim_provider_t *` |  |
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
+## bruce_memory_reclaim_token_t()
+
+```c
+typedef struct {
+    bruce_process_id_t owner_id;
+    bruce_resource_id_t resource_id;
+} bruce_memory_reclaim_token_t;
+```
+
+Handle to a memory__reclaim() performed on another process's behalf, to be handed to memory__reclaim_adopt() by that process.
+
+
+---
+
+## memory__reclaim()
+
+```c
+bruce_result_t memory__reclaim(
+    size_t needed_bytes, size_t *out_freed, bruce_memory_reclaim_token_t *out_token
+);
+```
+
+Tries to free at least `needed_bytes` from registered subsystems before a big allocation.
+
+Sums every registered provider's estimate() first and only calls reclaim()
+on any of them if the total would actually meet `needed_bytes` -- a
+request that can't be satisfied never disturbs anything (e.g. never
+changes the display's rendering mode) for no benefit. Reclaiming stops as
+soon as enough has been freed, so it never shrinks more subsystems than it
+has to.
+
+On success, what was reclaimed is restored automatically when the calling
+process exits -- the same crash-safety memory__malloc() gives ordinary
+allocations. A caller reclaiming on behalf of a *different* process (e.g.
+a loader, before spawning it) should pass out_token and have that process
+call memory__reclaim_adopt() with it, so the restore is tied to the
+process that actually needs the memory instead of to the caller.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `needed_bytes` | `size_t` | Bytes the caller is about to need. |
+| `out_freed` | `size_t *` | Bytes actually freed; 0 if nothing was reclaimed (out_token is also cleared). May be NULL. |
+| `out_token` | `bruce_memory_reclaim_token_t *` | Set to a token for memory__reclaim_adopt(), or the zero token if nothing was reclaimed. May be NULL. |
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
+## memory__reclaim_adopt()
+
+```c
+bruce_result_t memory__reclaim_adopt(bruce_memory_reclaim_token_t token);
+```
+
+Transfers a memory__reclaim() restore obligation to the calling process.
+
+Call once from the process meant to benefit from a reclaim performed by a
+different process -- mirrors ext_mem_loader__adopt_xip()'s handoff
+pattern. The zero token (or one already adopted) is a no-op.
+
+@note Built-in modules only; not exported to ELF.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `token` | `bruce_memory_reclaim_token_t` | Token returned by memory__reclaim(). |
 
 ### Returns
 

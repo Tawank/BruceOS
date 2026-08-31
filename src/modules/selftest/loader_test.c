@@ -68,12 +68,44 @@ bool selftest__run_manifest_parse_case(void) {
         }
     }
     bool ok = strcmp(manifest->app_name, "Example app") == 0 && manifest->core_abi_version == 2 &&
-              manifest->stack_size == 8192 && manifest->permission_count == 2 &&
+              manifest->stack_size == 8192 && manifest->heap_size == 0 && manifest->permission_count == 2 &&
               strcmp(manifest->permissions[0], "wifi") == 0 &&
               strcmp(manifest->permissions[1], "http") == 0 && icon_all_zero;
     memory__free(manifest);
     if (!ok) {
         printf("[selftest] loader/manifest_parse: parsed fields mismatch\n");
+        return false;
+    }
+
+    /* heapSize is optional; when present it must be parsed and validated
+     * the same way stackSize is. */
+    char heap_json[512];
+    snprintf(
+        heap_json,
+        sizeof(heap_json),
+        "{\"appName\":\"x\",\"appIcon\":\"%s\",\"coreAbiVersion\":2,\"stackSize\":8192,"
+        "\"heapSize\":65536}",
+        icon_b64
+    );
+    bruce_manifest_t *heap_manifest = manifest__parse(heap_json, strlen(heap_json));
+    if (heap_manifest == NULL || heap_manifest->heap_size != 65536) {
+        printf("[selftest] loader/manifest_parse: valid heapSize mismatch or rejected\n");
+        memory__free(heap_manifest);
+        return false;
+    }
+    memory__free(heap_manifest);
+
+    char bad_heap_json[512];
+    snprintf(
+        bad_heap_json,
+        sizeof(bad_heap_json),
+        "{\"appName\":\"x\",\"appIcon\":\"%s\",\"coreAbiVersion\":2,\"stackSize\":8192,"
+        "\"heapSize\":%u}",
+        icon_b64,
+        (unsigned)BRUCE_MANIFEST_HEAP_MAX + 1u
+    );
+    if (manifest__parse(bad_heap_json, strlen(bad_heap_json)) != NULL) {
+        printf("[selftest] loader/manifest_parse: out-of-range heapSize accepted\n");
         return false;
     }
 

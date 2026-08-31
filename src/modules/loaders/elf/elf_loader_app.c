@@ -71,6 +71,15 @@ typedef struct {
     esp_elf_t elf;
     bool elf_initialized;
     bruce_ext_mem_loader_xip_image_t xip;
+    /* Set by elf_loader__open()/elf_loader__run() (whichever process runs
+     * them) right before spawning, from a memory__reclaim() attempt sized to
+     * the manifest's stack_size plus its heap_size hint. Adopted here so the
+     * reclaim is credited to the spawned app -- the one actually using the
+     * freed memory -- instead
+     * of to the loader, which may run on and outlive this app by a lot (an
+     * interactive shell that ran "elf foo.elf", say). The zero token if
+     * nothing was reclaimed. */
+    bruce_memory_reclaim_token_t reclaim_token;
 } elf_loader_process_ctx_t;
 
 /* Public SDK symbol allowlist. ELF apps may only resolve these names; selected
@@ -104,6 +113,10 @@ static void elf_loader__cleanup_context(void *context) {
 /* Process entry for an ELF already relocated by elf_loader__open(). */
 static int elf_loader__entry(void *context) {
     elf_loader_process_ctx_t *ctx = (elf_loader_process_ctx_t *)context;
+    /* Best-effort: a failed adopt just means whatever was reclaimed stays
+     * credited to the loader instead of this process, not a reason to abort
+     * launch. */
+    (void)memory__reclaim_adopt(ctx->reclaim_token);
     bruce_result_t adopt_result = ext_mem_loader__adopt_xip(&ctx->xip);
     if (adopt_result != BRUCE_OK) return adopt_result;
     return esp_elf_request(&ctx->elf, 0, ctx->argc, ctx->argv);
@@ -258,6 +271,20 @@ static int elf_loader__open(
                    : release_result;
     }
 
+    /* Best-effort: give the new app's stack (and its manifest-declared
+     * expected heap use, if any -- see BRUCE_MANIFEST_HEAP_MAX) a better
+     * chance of fitting by asking registered subsystems (e.g. the display
+     * framebuffer) to shrink first, but only if doing so would actually
+     * cover it -- see memory__reclaim(). A failure here (nothing worth
+     * reclaiming, or no memory pressure at all) is not a reason to abort the
+     * launch; the spawn below simply fails on its own if truly out of
+     * memory, same as before this existed. elf_loader__entry() adopts the
+     * credit once the new process actually exists (see
+     * bruce_memory_reclaim_token_t's field comment above). */
+    (void)memory__reclaim(
+        inspection->manifest.stack_size + inspection->manifest.heap_size, NULL, &ctx->reclaim_token
+    );
+
     bruce_ext_mem_loader_xip_image_t parent_xip = ctx->xip;
     int result = app_runner__spawn_loader_process_owned(
         permission_key,
@@ -271,6 +298,12 @@ static int elf_loader__open(
         elf_loader__cleanup_context
     );
     if (result <= 0) {
+        /* ctx (and its unadopted reclaim_token) is discarded here without
+         * ever calling memory__reclaim_adopt() -- whatever was reclaimed
+         * above stays credited to this loader's own process and reverts
+         * when it eventually exits, rather than immediately. Acceptable:
+         * this is the launch-failed path, not a loop callers retry rapidly,
+         * and it is never left un-reverted, just reverted later than ideal. */
         elf_loader__free_process_ctx(ctx);
     } else {
         for (;;) {

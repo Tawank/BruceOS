@@ -92,6 +92,7 @@ bruce_manifest_t *manifest__parse(const char *json, size_t json_len) {
     const cJSON *icon = cJSON_GetObjectItemCaseSensitive(root, "appIcon");
     const cJSON *abi = cJSON_GetObjectItemCaseSensitive(root, "coreAbiVersion");
     const cJSON *stack = cJSON_GetObjectItemCaseSensitive(root, "stackSize");
+    const cJSON *heap = cJSON_GetObjectItemCaseSensitive(root, "heapSize");
     const cJSON *permissions = cJSON_GetObjectItemCaseSensitive(root, "permissions");
 
     bool ok = cJSON_IsString(name) && name->valuestring != NULL && name->valuestring[0] != '\0' &&
@@ -100,6 +101,12 @@ bruce_manifest_t *manifest__parse(const char *json, size_t json_len) {
     ok = ok && cJSON_IsNumber(abi);
     ok = ok && cJSON_IsNumber(stack) && stack->valuedouble >= MANIFEST__STACK_MIN &&
          stack->valuedouble <= MANIFEST__STACK_MAX;
+    /* heapSize is optional -- unlike stackSize, absent just means "no
+     * particular expectation" (bruce_manifest_t.heap_size defaults to 0),
+     * not a manifest error. */
+    ok = ok &&
+         (heap == NULL ||
+          (cJSON_IsNumber(heap) && heap->valuedouble >= 0 && heap->valuedouble <= BRUCE_MANIFEST_HEAP_MAX));
     ok = ok && (permissions == NULL || cJSON_IsArray(permissions));
     if (!ok) {
         memory__free(out_manifest);
@@ -118,6 +125,7 @@ bruce_manifest_t *manifest__parse(const char *json, size_t json_len) {
     strncpy(out_manifest->app_name, name->valuestring, BRUCE_MANIFEST_APP_NAME_MAX - 1);
     out_manifest->core_abi_version = (uint32_t)abi->valuedouble;
     out_manifest->stack_size = (uint32_t)stack->valuedouble;
+    out_manifest->heap_size = heap != NULL ? (uint32_t)heap->valuedouble : 0;
 
     size_t permission_count = 0;
     if (permissions != NULL) {

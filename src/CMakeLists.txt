@@ -80,6 +80,7 @@ idf_component_register(SRCS
                     "core/memory/memory.c"
                     "core/memory/memory_external.c"
                     "core/memory/memory_layout.c"
+                    "core/memory/memory_reclaim.c"
                     "core/network/network.c"
                     "core/notification/notification.c"
                     "core/nrf24/nrf24.c"

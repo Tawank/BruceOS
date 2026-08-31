@@ -501,30 +501,66 @@ uint8_t display__get_brightness(void);
 bruce_result_t display__display_on_off(bool on);
 
 /**
- * @brief Turns direct game rendering on or off.
+ * @brief Display rendering modes, from most capable/RAM-hungry to leanest.
+ *
+ * BRUCE_DISPLAY_MODE_BUFFERED_DMA is the default: drawing goes to an
+ * off-screen framebuffer allocated in DMA-capable RAM. BRUCE_DISPLAY_MODE_BUFFERED
+ * keeps the off-screen framebuffer but drops its DMA capability (see the
+ * "DMA Buf" setting in Display & UI settings). BRUCE_DISPLAY_MODE_DIRECT drops
+ * the framebuffer entirely: draw calls go straight to the panel, freeing the
+ * framebuffer's RAM at the cost of visible partial-frame updates while
+ * drawing (see display__request_render_mode()).
+ */
+typedef enum {
+    BRUCE_DISPLAY_MODE_BUFFERED_DMA = 0,
+    BRUCE_DISPLAY_MODE_BUFFERED,
+    BRUCE_DISPLAY_MODE_DIRECT,
+} bruce_display_render_mode_t;
+
+/**
+ * @brief Requests the display be at `mode` (or a leaner one another caller
+ * also wants) for as long as the calling process needs it.
  *
  * Entirely at runtime, no reboot required. Meant to be called by a
  * memory-hungry ELF/JS app (an emulator, a game with a large asset set,
- * ...) right before it starts allocating, to hand back the RAM the
- * buffered/DMA framebuffer would otherwise be holding for the whole time
- * the app runs.
+ * ...) right before it starts allocating, to hand back the RAM a
+ * buffered/DMA framebuffer would otherwise hold for the whole time the app
+ * runs -- or use memory__reclaim(), which calls this on your behalf and
+ * only if it's actually enough to cover what you're about to allocate.
  *
- * display__game_mode(true) tears down the current s_framebuffer/pack buffer
- * (if buffered rendering was in use) and allocates only the small
- * direct-mode scratch buffer instead; the calling process becomes game
- * mode's owner. display__game_mode(false), called by that same owning
- * process, restores whatever rendering mode was active before game mode
- * was turned on. Calling it again with the same value the caller already
- * holds is a no-op. Only the owning process may turn its own game mode
- * back off; if the owner exits (or is killed) without doing so, the
- * display core reverts it automatically.
+ * Each process may hold at most one request at a time; calling this again
+ * replaces the calling process's own request. The display's actual mode is
+ * always the leanest one requested by any live caller, so one process
+ * asking for BRUCE_DISPLAY_MODE_DIRECT is never undone by another asking for
+ * BRUCE_DISPLAY_MODE_BUFFERED. Requesting BRUCE_DISPLAY_MODE_BUFFERED_DMA
+ * releases the calling process's request (equivalent to
+ * display__release_render_mode()). A request is released automatically if
+ * the requesting process exits or is killed without releasing it itself.
  *
- * Fails with BRUCE_ERR_BUSY if another process currently owns game mode,
- * or while any process has an active (begun but not yet presented) frame.
+ * Fails with BRUCE_ERR_BUSY while any process has an active (begun but not
+ * yet presented) frame.
  *
- * @param enable True to enter game mode, false to revert to the prior rendering mode.
+ * @param mode Leanest rendering mode the calling process is willing to accept.
  */
-bruce_result_t display__game_mode(bool enable);
+bruce_result_t display__request_render_mode(bruce_display_render_mode_t mode);
+
+/**
+ * @brief Releases the calling process's own display__request_render_mode() request, if any.
+ *
+ * A no-op if the calling process holds no request. The display's mode drops
+ * back to the leanest one still requested by another live caller, or to
+ * BRUCE_DISPLAY_MODE_BUFFERED_DMA if none remain.
+ */
+bruce_result_t display__release_render_mode(void);
+
+/**
+ * @brief Returns how many bytes the display's current rendering buffers are using.
+ *
+ * Includes the off-screen framebuffer (buffered modes only) and its
+ * transfer/direct-mode scratch buffer. Falls as rendering mode gets leaner;
+ * see display__request_render_mode(). Zero if the display isn't initialized.
+ */
+size_t display__buffer_footprint(void);
 
 /* -------------------------------------------------------------------------- */
 /* Framebuffer flush                                                          */

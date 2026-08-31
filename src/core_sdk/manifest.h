@@ -16,12 +16,23 @@
 #define BRUCE_MANIFEST_PERMISSION_NAME_MAX 16
 #define BRUCE_MANIFEST_STACK_MIN 4096u
 #define BRUCE_MANIFEST_STACK_MAX 16384u
+/* heapSize has no minimum -- 0 (also the default when the field is absent)
+ * means "no particular expectation", not "zero bytes of heap". It is purely
+ * advisory: unlike stack_size, nothing reserves this many bytes up front: it
+ * only sizes how hard the loader tries memory__reclaim() before spawning the
+ * app (see elf_loader_app.c), so an app that guesses low just gets less help
+ * from that and a guess of 0 is equivalent to omitting the field entirely. */
+#define BRUCE_MANIFEST_HEAP_MAX 0x800000u /* 8 MiB */
 
 typedef struct {
     char app_name[BRUCE_MANIFEST_APP_NAME_MAX];
     uint8_t app_icon[BRUCE_MANIFEST_ICON_BYTES];
     uint32_t core_abi_version;
     uint32_t stack_size;
+    /* Advisory expected peak memory__malloc()/memory__external_malloc() use;
+     * see BRUCE_MANIFEST_HEAP_MAX. 0 (the default) if the manifest omits
+     * heapSize. */
+    uint32_t heap_size;
     char permissions[BRUCE_MANIFEST_MAX_PERMISSIONS][BRUCE_MANIFEST_PERMISSION_NAME_MAX];
     size_t permission_count;
 } bruce_manifest_t;
@@ -44,12 +55,14 @@ typedef struct {
  * (see migration_plan.md, "ELF contract"): required appName/appIcon
  * (base64, decodes to exactly BRUCE_MANIFEST_ICON_BYTES bytes)/
  * coreAbiVersion/stackSize (BRUCE_MANIFEST_STACK_MIN-
- * BRUCE_MANIFEST_STACK_MAX inclusive), and an optional permissions array
- * (each name must be a known bruce_permission_t name, no duplicates). Every
- * caller extracts raw manifest bytes from the file format and calls this
- * one shared parser instead of reimplementing JSON/base64 handling. Returns
- * a process-owned manifest that must be released with memory__free(), or
- * NULL for invalid input or allocation failure.
+ * BRUCE_MANIFEST_STACK_MAX inclusive); an optional heapSize (0-
+ * BRUCE_MANIFEST_HEAP_MAX inclusive, see bruce_manifest_t.heap_size); and an
+ * optional permissions array (each name must be a known bruce_permission_t
+ * name, no duplicates). Every caller extracts raw manifest bytes from the
+ * file format and calls this one shared parser instead of reimplementing
+ * JSON/base64 handling. Returns a process-owned manifest that must be
+ * released with memory__free(), or NULL for invalid input or allocation
+ * failure.
  *
  * @param json Canonical manifest JSON bytes.
  * @param json_len Number of bytes in json.
@@ -86,7 +99,8 @@ char *manifest__inspect_path(const char *path);
  * manifest__parse(), and fills *out_inspection with the parsed manifest,
  * BRUCE_APP_KIND_ELF, and the ABI-warning flag. A valid ELF with a missing
  * or invalid manifest receives fallback metadata: its filename, current
- * Core ABI, an 8192-byte stack, and no predeclared permissions. Loader
+ * Core ABI, an 8192-byte stack, no heap-size hint (0), and no predeclared
+ * permissions. Loader
  * modules that know they are loading an ELF file (the built-in ELF loader,
  * for example) call this directly.
  *
@@ -128,9 +142,9 @@ bruce_app_inspection_t *manifest__inspect_javascript(const char *path);
  *
  * An envelope-valid WebAssembly module with a missing, duplicate,
  * oversized, or invalid manifest receives filename fallback metadata with
- * a generic icon, current Core ABI, an 8192-byte stack, and no
- * permissions. Malformed modules, invalid paths, inaccessible files, and
- * allocation failures return NULL. The returned inspection is
+ * a generic icon, current Core ABI, an 8192-byte stack, no heap-size hint
+ * (0), and no permissions. Malformed modules, invalid paths, inaccessible
+ * files, and allocation failures return NULL. The returned inspection is
  * process-owned and must be released with memory__free().
  *
  * @param path Path of the .wasm file to inspect.

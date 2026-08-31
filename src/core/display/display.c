@@ -5,6 +5,7 @@
 
 #include "core/process/process.h"
 #include "core_sdk/config.h"
+#include "core_sdk/memory.h"
 #include "core_sdk/process.h"
 #include "display_driver.h"
 #include "display_internal.h"
@@ -18,6 +19,7 @@
 
 #define TAG "bruce_display"
 #define DISPLAY__MAX_CONTEXTS 16
+#define DISPLAY__MAX_RENDER_REQUESTS 8
 #define DISPLAY__ROW_BUF_PIXELS                                                                              \
     (DISPLAY__NATIVE_WIDTH > DISPLAY__NATIVE_HEIGHT ? DISPLAY__NATIVE_WIDTH : DISPLAY__NATIVE_HEIGHT)
 
@@ -66,17 +68,28 @@ static display__process_context_t s_contexts[DISPLAY__MAX_CONTEXTS];
 static display__process_context_t s_system_context;
 static SemaphoreHandle_t s_transfer_done;
 static bool s_dashboard_layout;
-/* display__game_mode(): BRUCE_PROCESS_ID_INVALID when no process currently
- * has game mode on; otherwise the owning process, and s_game_mode_saved_*
- * hold the buffered/dma_framebuffer config to restore when it turns game
- * mode back off (or exits without doing so -- see display__process_removed()). */
-static bruce_process_id_t s_game_mode_owner = BRUCE_PROCESS_ID_INVALID;
-static bool s_game_mode_saved_buffered;
-static bool s_game_mode_saved_dma;
+/* display__request_render_mode(): each live entry is one process's standing
+ * request for a rendering mode leaner than the default. The display's actual
+ * mode (see display__apply_effective_render_mode_locked()) is always the
+ * leanest of these, or BRUCE_DISPLAY_MODE_BUFFERED_DMA if the table is empty
+ * -- so several independent requesters compose correctly regardless of
+ * order. display__process_removed() clears a process's entry if it exits (or
+ * is killed) without releasing it itself. */
+typedef struct {
+    bool in_use;
+    bruce_process_id_t process_id;
+    bruce_display_render_mode_t mode;
+} display__render_request_t;
+static display__render_request_t s_render_requests[DISPLAY__MAX_RENDER_REQUESTS];
 
 static inline void display__lock(void) { xSemaphoreTakeRecursive(s_registry_mutex, portMAX_DELAY); }
 static inline void display__unlock(void) { xSemaphoreGiveRecursive(s_registry_mutex); }
 static void display__ensure_lock(void);
+/* bruce_reclaim_provider_t callbacks; registered with memory__reclaim() from
+ * display__init(), defined near display__release_render_mode() below. */
+static size_t display__reclaim_estimate(void);
+static size_t display__reclaim_reclaim(void);
+static void display__reclaim_restore(void);
 
 void display_internal__lock_registry(void) { display__lock(); }
 void display_internal__unlock_registry(void) { display__unlock(); }
@@ -601,15 +614,16 @@ static void display__release_resources_locked(void) {
 /* Switches the live rendering mode between buffered (with or without a
  * DMA-capable framebuffer) and direct, at runtime -- the same allocation
  * display__init() does up front, just replayed on demand. Used by
- * display__game_mode() to free (or restore) the off-screen framebuffer
- * without a reboot.
+ * display__apply_effective_render_mode_locked() to free (or restore) the
+ * off-screen framebuffer without a reboot.
  *
  * The new buffer(s) are allocated before any old one is freed, so a
  * transient allocation failure leaves the previous mode fully intact instead
  * of tearing display rendering down; only on success are the old buffers
  * replaced. Caller must hold the registry lock, with no frame currently
- * active on any context -- display__game_mode() enforces both -- so no new
- * draw or transfer can start against the buffers being swapped out here. */
+ * active on any context -- display__apply_effective_render_mode_locked()
+ * enforces both -- so no new draw or transfer can start against the buffers
+ * being swapped out here. */
 static bruce_result_t display__reconfigure_render_mode_locked(bool buffered, bool dma) {
     bruce_display_color_t *new_framebuffer = NULL;
     bruce_display_color_t *new_pack_buffer = NULL;
@@ -651,6 +665,28 @@ static bruce_result_t display__reconfigure_render_mode_locked(bool buffered, boo
     s_dma_framebuffer = new_dma;
     xSemaphoreGive(s_transfer_mutex);
     return BRUCE_OK;
+}
+
+static bruce_display_render_mode_t display__current_render_mode_locked(void) {
+    if (!s_buffered_rendering) return BRUCE_DISPLAY_MODE_DIRECT;
+    return s_dma_framebuffer ? BRUCE_DISPLAY_MODE_BUFFERED_DMA : BRUCE_DISPLAY_MODE_BUFFERED;
+}
+
+/* Recomputes the leanest mode any live entry in s_render_requests[] asks
+ * for, and applies it if that differs from the display's current mode.
+ * Caller must hold the registry lock, with no frame active on any context
+ * (display__request_render_mode()/display__release_render_mode() enforce
+ * this) so display__reconfigure_render_mode_locked() never swaps buffers out
+ * from under an in-progress draw or transfer. */
+static bruce_result_t display__apply_effective_render_mode_locked(void) {
+    bruce_display_render_mode_t target = BRUCE_DISPLAY_MODE_BUFFERED_DMA;
+    for (size_t i = 0; i < DISPLAY__MAX_RENDER_REQUESTS; ++i) {
+        if (s_render_requests[i].in_use && s_render_requests[i].mode > target) target = s_render_requests[i].mode;
+    }
+    if (target == display__current_render_mode_locked()) return BRUCE_OK;
+    return display__reconfigure_render_mode_locked(
+        target != BRUCE_DISPLAY_MODE_DIRECT, target == BRUCE_DISPLAY_MODE_BUFFERED_DMA
+    );
 }
 
 /* Creates `context->lock` on first use and preserves it across a memset of
@@ -745,6 +781,16 @@ bruce_result_t display__init(void) {
 #endif
     s_initialized = true;
     display__unlock();
+    static bool s_reclaim_provider_registered;
+    if (!s_reclaim_provider_registered) {
+        static const bruce_reclaim_provider_t reclaim_provider = {
+            .name = "display",
+            .estimate = display__reclaim_estimate,
+            .reclaim = display__reclaim_reclaim,
+            .restore = display__reclaim_restore,
+        };
+        s_reclaim_provider_registered = memory__register_reclaimable(&reclaim_provider) == BRUCE_OK;
+    }
     if (s_buffered_rendering) return display__flush();
     bruce_result_t direct_result = display__begin_frame();
     if (direct_result == BRUCE_OK) direct_result = display__fill_screen(BRUCE_COLOR_BLACK);
@@ -762,10 +808,10 @@ void display__deinit(void) {
     }
     s_initialized = false;
     /* display__release_resources_locked() below frees whichever buffers are
-     * currently live regardless of game mode; reset the bookkeeping so a
-     * later display__init() doesn't come up believing some now-gone process
-     * still owns game mode. */
-    s_game_mode_owner = BRUCE_PROCESS_ID_INVALID;
+     * currently live regardless of any standing render-mode requests; clear
+     * the table so a later display__init() doesn't come up leaning on
+     * requests from processes it no longer knows about. */
+    memset(s_render_requests, 0, sizeof(s_render_requests));
     display_overlay__deinit();
     display__release_resources_locked();
     display__unlock();
@@ -944,87 +990,155 @@ bruce_result_t display__display_on_off(bool on) {
     return result;
 }
 
-/* Caller must hold the registry lock, and have already verified `process_id`
- * is game mode's current owner. Reverts to the rendering mode saved when
- * that owner turned game mode on, best-effort: on allocation failure the
- * display is left in game mode's (smaller) direct-mode footprint rather than
- * a torn state, which is the safer of the two failure outcomes for a caller
- * (a process exiting) that has no way to retry. Either way ownership is
- * cleared so a later display__game_mode(true) from a new owner isn't
- * rejected as BRUCE_ERR_BUSY forever. */
-static void display__game_mode_release_locked(bruce_process_id_t process_id) {
-    if (s_game_mode_owner != process_id) return;
-    bruce_result_t result =
-        display__reconfigure_render_mode_locked(s_game_mode_saved_buffered, s_game_mode_saved_dma);
-    if (result != BRUCE_OK) {
-        ESP_LOGE(TAG, "game mode: failed to restore previous rendering mode (%d)", (int)result);
+/* Caller must hold the registry lock. Finds the calling process's existing
+ * entry in s_render_requests[], if any, so display__request_render_mode()
+ * and display__release_render_mode() share one lookup. */
+static display__render_request_t *display__find_render_request_locked(bruce_process_id_t process_id) {
+    for (size_t i = 0; i < DISPLAY__MAX_RENDER_REQUESTS; ++i) {
+        if (s_render_requests[i].in_use && s_render_requests[i].process_id == process_id) {
+            return &s_render_requests[i];
+        }
     }
-    s_game_mode_owner = BRUCE_PROCESS_ID_INVALID;
+    return NULL;
 }
 
-bruce_result_t display__game_mode(bool enable) {
+/* Caller must hold the registry lock. No frame may be active on any context
+ * -- checked here, alongside display__apply_effective_render_mode_locked()'s
+ * own actual mode change, since either failure must leave s_render_requests[]
+ * exactly as it was found. */
+static bruce_result_t display__frame_active_locked(void) {
+    for (int i = 0; i < DISPLAY__MAX_CONTEXTS; ++i) {
+        if (s_contexts[i].in_use && s_contexts[i].frame_active) return BRUCE_ERR_BUSY;
+    }
+    return s_system_context.frame_active ? BRUCE_ERR_BUSY : BRUCE_OK;
+}
+
+bruce_result_t display__request_render_mode(bruce_display_render_mode_t mode) {
+    if (mode < BRUCE_DISPLAY_MODE_BUFFERED_DMA || mode > BRUCE_DISPLAY_MODE_DIRECT) {
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    bruce_process_id_t caller = process__current_id();
+    /* BRUCE_PROCESS_ID_INVALID means "no process" -- a request table entry
+     * for it would be meaningless (nothing to release it on exit) and would
+     * collide with any other caller with no process, so reject it up front,
+     * same as the old display__game_mode() did. */
+    if (caller == BRUCE_PROCESS_ID_INVALID) return BRUCE_ERR_PERMISSION;
+    display__lock();
+    if (!s_initialized) {
+        display__unlock();
+        return BRUCE_ERR_NOT_INITIALIZED;
+    }
+    display__render_request_t *slot = display__find_render_request_locked(caller);
+    if (slot == NULL && mode == BRUCE_DISPLAY_MODE_BUFFERED_DMA) {
+        /* Requesting the default with no request on file is a no-op, same as
+         * display__release_render_mode() with nothing to release. */
+        display__unlock();
+        return BRUCE_OK;
+    }
+    if (slot == NULL) {
+        for (size_t i = 0; i < DISPLAY__MAX_RENDER_REQUESTS; ++i) {
+            if (!s_render_requests[i].in_use) {
+                slot = &s_render_requests[i];
+                break;
+            }
+        }
+        if (slot == NULL) {
+            display__unlock();
+            return BRUCE_ERR_RESOURCE_LIMIT;
+        }
+    }
+    bruce_display_render_mode_t previous_mode = slot->in_use ? slot->mode : BRUCE_DISPLAY_MODE_BUFFERED_DMA;
+    bool was_in_use = slot->in_use;
+    slot->in_use = mode != BRUCE_DISPLAY_MODE_BUFFERED_DMA;
+    slot->process_id = caller;
+    slot->mode = mode;
+    bruce_result_t result = display__frame_active_locked();
+    if (result == BRUCE_OK) result = display__apply_effective_render_mode_locked();
+    if (result != BRUCE_OK) {
+        /* Leave the table exactly as found on failure, so a rejected request
+         * can't silently change what the caller already held. */
+        slot->in_use = was_in_use;
+        slot->mode = previous_mode;
+    }
+    display__unlock();
+    return result;
+}
+
+bruce_result_t display__release_render_mode(void) {
     bruce_process_id_t caller = process__current_id();
     display__lock();
     if (!s_initialized) {
         display__unlock();
         return BRUCE_ERR_NOT_INITIALIZED;
     }
-    /* BRUCE_PROCESS_ID_INVALID both means "no process" to display__find_-
-     * context_locked() (it resolves to the system context) and doubles as
-     * s_game_mode_owner's "off" sentinel -- reject it up front so the two
-     * meanings can never collide. */
-    display__process_context_t *context =
-        caller == BRUCE_PROCESS_ID_INVALID ? NULL : display__find_context_locked(caller);
-    if (context == NULL) {
+    display__render_request_t *slot = display__find_render_request_locked(caller);
+    if (slot == NULL) {
         display__unlock();
-        return BRUCE_ERR_PERMISSION;
+        return BRUCE_OK;
     }
-    if (enable) {
-        if (s_game_mode_owner == caller) {
-            display__unlock();
-            return BRUCE_OK;
-        }
-        if (s_game_mode_owner != BRUCE_PROCESS_ID_INVALID) {
-            display__unlock();
-            return BRUCE_ERR_BUSY;
-        }
-    } else {
-        if (s_game_mode_owner == BRUCE_PROCESS_ID_INVALID) {
-            display__unlock();
-            return BRUCE_OK;
-        }
-        if (s_game_mode_owner != caller) {
-            display__unlock();
-            return BRUCE_ERR_PERMISSION;
-        }
-    }
-    for (int i = 0; i < DISPLAY__MAX_CONTEXTS; ++i) {
-        if (s_contexts[i].in_use && s_contexts[i].frame_active) {
-            display__unlock();
-            return BRUCE_ERR_BUSY;
-        }
-    }
-    if (s_system_context.frame_active) {
-        display__unlock();
-        return BRUCE_ERR_BUSY;
-    }
-    bruce_result_t result;
-    if (enable) {
-        bool saved_buffered = s_buffered_rendering;
-        bool saved_dma = s_dma_framebuffer;
-        result = display__reconfigure_render_mode_locked(false, false);
-        if (result == BRUCE_OK) {
-            s_game_mode_saved_buffered = saved_buffered;
-            s_game_mode_saved_dma = saved_dma;
-            s_game_mode_owner = caller;
-        }
-    } else {
-        result = display__reconfigure_render_mode_locked(s_game_mode_saved_buffered, s_game_mode_saved_dma);
-        if (result == BRUCE_OK) s_game_mode_owner = BRUCE_PROCESS_ID_INVALID;
+    bruce_result_t result = display__frame_active_locked();
+    if (result == BRUCE_OK) {
+        slot->in_use = false;
+        result = display__apply_effective_render_mode_locked();
+        if (result != BRUCE_OK) slot->in_use = true;
     }
     display__unlock();
     return result;
 }
+
+/* Caller must hold the registry lock. Clears any render-mode request
+ * belonging to `process_id` and reapplies the resulting effective mode,
+ * unconditionally -- unlike display__release_render_mode(), this skips the
+ * frame-active check, since process teardown itself may leave `process_id`'s
+ * own context (or another one) mid-frame, and a process that exited (or was
+ * killed) without releasing its own request first must not leave the
+ * display stuck leaner than every remaining live request needs, forever. */
+static void display__release_render_mode_for_process_locked(bruce_process_id_t process_id) {
+    display__render_request_t *slot = display__find_render_request_locked(process_id);
+    if (slot == NULL) return;
+    slot->in_use = false;
+    bruce_result_t result = display__apply_effective_render_mode_locked();
+    if (result != BRUCE_OK) {
+        ESP_LOGE(TAG, "display: failed to restore rendering mode for exited process (%d)", (int)result);
+    }
+}
+
+size_t display__buffer_footprint(void) {
+    display__lock();
+    size_t bytes = 0;
+    if (s_initialized) {
+        size_t direct_bytes = DISPLAY__DIRECT_BUF_PIXELS * sizeof(bruce_display_color_t);
+        bytes = s_buffered_rendering ? (size_t)DISPLAY__FB_SIZE + direct_bytes : direct_bytes;
+    }
+    display__unlock();
+    return bytes;
+}
+
+/* bruce_reclaim_provider_t callbacks (registered with memory__reclaim() in
+ * display__init()): reaching BRUCE_DISPLAY_MODE_DIRECT frees the off-screen
+ * framebuffer and its pack buffer, which together cost exactly
+ * DISPLAY__FB_SIZE more than the direct-mode scratch buffer that replaces
+ * them (same size as the pack buffer it takes over from) -- see
+ * display__buffer_footprint(). Dropping DMA capability alone
+ * (BRUCE_DISPLAY_MODE_BUFFERED) frees no bytes, just changes which RAM pool
+ * the framebuffer draws from, so it is not a reclaim step. */
+static size_t display__reclaim_estimate(void) {
+    display__lock();
+    size_t bytes =
+        (s_initialized && display__current_render_mode_locked() != BRUCE_DISPLAY_MODE_DIRECT)
+            ? DISPLAY__FB_SIZE
+            : 0;
+    display__unlock();
+    return bytes;
+}
+
+static size_t display__reclaim_reclaim(void) {
+    size_t estimate = display__reclaim_estimate();
+    if (estimate == 0) return 0;
+    return display__request_render_mode(BRUCE_DISPLAY_MODE_DIRECT) == BRUCE_OK ? estimate : 0;
+}
+
+static void display__reclaim_restore(void) { (void)display__release_render_mode(); }
 
 bruce_result_t display__begin_frame(void) {
     bruce_process_id_t caller = process__current_id();
@@ -1244,11 +1358,7 @@ void display__process_state_changed(bruce_process_id_t process_id, bruce_process
 void display__process_removed(bruce_process_id_t process_id) {
     display__ensure_lock();
     display__lock();
-    /* A process that turned game mode on and exited (crashed, was killed,
-     * simply forgot) without calling display__game_mode(false) itself must
-     * not leave the display stuck in its smaller, non-DMA direct-mode
-     * footprint forever. */
-    if (s_initialized) display__game_mode_release_locked(process_id);
+    if (s_initialized) display__release_render_mode_for_process_locked(process_id);
     display__process_context_t *context = display__find_context_locked(process_id);
     if (context != NULL) {
         context->hidden = true;
