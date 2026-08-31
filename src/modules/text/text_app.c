@@ -11,7 +11,7 @@
 #include "core_sdk/display.h"
 #include "core_sdk/input.h"
 #include "core_sdk/memory.h"
-#include "core_sdk/paste.h"
+#include "core_sdk/clipboard.h"
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
 #include "core_sdk/stdio.h"
@@ -441,13 +441,13 @@ static bruce_result_t text__run_editor(char *path, size_t path_size, text_editor
         } else if (!semantic && event.code == 0x03) {
             /* Ctrl+C: copy the whole document -- there's no selection
              * concept to copy a range of, see text_editor_t's comment. */
-            result = paste__set_text(editor->data);
+            result = clipboard__set_text(editor->data);
         } else if (!editor->read_only && !semantic && event.code == 0x16) {
             /* Ctrl+V: insert the clipboard's text at the cursor, the same
              * way a newline or typed character is inserted below. Silently
              * does nothing if the clipboard doesn't hold text (e.g. it's
              * empty, or holds files copied from the file manager). */
-            const char *clip_text = paste__kind() == BRUCE_PASTE_TEXT ? paste__get_text() : NULL;
+            const char *clip_text = clipboard__kind() == BRUCE_CLIPBOARD_TEXT ? clipboard__get_text() : NULL;
             if (clip_text != NULL) {
                 result = text__replace(editor, editor->cursor, editor->cursor, clip_text, strlen(clip_text));
             }

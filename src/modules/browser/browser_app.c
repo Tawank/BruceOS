@@ -1,5 +1,6 @@
 #include "browser_app.h"
 
+#include <ctype.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
@@ -15,9 +16,15 @@
 #include "core_sdk/dialog.h"
 #include "core_sdk/input.h"
 #include "core_sdk/notification.h"
+#include "core_sdk/clipboard.h"
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
 #include "core_sdk/runtime.h"
+#include "core_sdk/storage.h"
+
+/* Where "Save image"/"Copy image" (see browser_app__image_menu()) write a
+ * fetched image, created on first use. */
+#define BROWSER_DOWNLOAD_DIR "/Downloads"
 
 typedef struct {
     browser_document_t *doc;
@@ -309,7 +316,8 @@ static void browser_app__show_keybindings(void) {
     static const char bindings[] = "Up/Down  Select or scroll\n"
                                    "Left/b  Page up\n"
                                    "Right/Space  Page down\n"
-                                   "Enter  Open link/image\n"
+                                   "Enter  Open link/load image\n"
+                                   "Enter (loaded image)  Save/copy image\n"
                                    "Backspace/Delete  Back/forward\n"
                                    "Esc  Close browser\n"
                                    "[ / ]  Top/end    Home  Homepage\n"
@@ -319,6 +327,100 @@ static void browser_app__show_keybindings(void) {
                                    "- / = / +  Text size    p  Debug\n"
                                    "i  Show these keys";
     (void)dialog__message(BRUCE_DIALOG_INFO, "Browser keys", bindings);
+}
+
+static const char *browser_app__image_extension(bruce_image_format_t format) {
+    switch (format) {
+        case BRUCE_IMAGE_FORMAT_PNG: return ".png";
+        case BRUCE_IMAGE_FORMAT_GIF: return ".gif";
+        case BRUCE_IMAGE_FORMAT_JPEG:
+        default: return ".jpg";
+    }
+}
+
+/* Picks a not-yet-existing path under BROWSER_DOWNLOAD_DIR for the image at
+ * `url`, creating that directory on first use. Named after the URL's own
+ * filename when it has one (sanitized, and sized so a collision gets a
+ * "_1", "_2", ... suffix instead of silently overwriting); always given the
+ * extension matching the actually-decoded `format` rather than whatever (if
+ * any) the URL itself ends in -- a server can serve a JPEG from a
+ * query-string URL with no ".jpg" anywhere in it. */
+static bruce_result_t browser_app__build_download_path(
+    const char *url, bruce_image_format_t format, char *out_path, size_t out_size
+) {
+    /* storage__mkdir() itself returns BRUCE_OK, not an error, when the
+     * directory is already there -- see storage.c. */
+    bruce_result_t mkdir_result = storage__mkdir(BROWSER_DOWNLOAD_DIR);
+    if (mkdir_result != BRUCE_OK) return mkdir_result;
+
+    const char *base = strrchr(url, '/');
+    base = base != NULL ? base + 1 : url;
+    size_t raw_len = strcspn(base, "?#");
+
+    char stem[BRUCE_STORAGE_NAME_MAX];
+    size_t stem_len = 0;
+    for (size_t i = 0; i < raw_len && stem_len + 1 < sizeof(stem); ++i) {
+        char c = base[i];
+        stem[stem_len++] = (isalnum((unsigned char)c) || c == '-' || c == '_' || c == '.') ? c : '_';
+    }
+    stem[stem_len] = '\0';
+    /* Drop any extension already in the name -- the one matching the decoded
+     * format (above) replaces it below regardless of what was here. */
+    char *dot = strrchr(stem, '.');
+    if (dot != NULL) *dot = '\0';
+    if (stem[0] == '\0') snprintf(stem, sizeof(stem), "image");
+
+    const char *extension = browser_app__image_extension(format);
+    for (int suffix = 0; suffix < 1000; ++suffix) {
+        int written = suffix == 0
+                          ? snprintf(out_path, out_size, "%s/%s%s", BROWSER_DOWNLOAD_DIR, stem, extension)
+                          : snprintf(out_path, out_size, "%s/%s_%d%s", BROWSER_DOWNLOAD_DIR, stem, suffix, extension);
+        if (written < 0 || (size_t)written >= out_size) return BRUCE_ERR_RESOURCE_LIMIT;
+        bool exists = false;
+        bruce_result_t result = storage__exists(out_path, &exists);
+        if (result != BRUCE_OK) return result;
+        if (!exists) return BRUCE_OK;
+    }
+    return BRUCE_ERR_RESOURCE_LIMIT;
+}
+
+/* "Save"/"Copy" popup for the currently selected image, once it's already
+ * loaded (see browser_app__handle_event()'s SELECT case: a first press loads
+ * an image, a second -- once it's loaded -- opens this instead). The shared
+ * clipboard (core_sdk/clipboard.h) only ever holds text or file paths, never
+ * raw bytes, so there's no way to put a fetched-but-not-saved image "on the
+ * clipboard" directly -- "Copy" saves it to BROWSER_DOWNLOAD_DIR exactly like
+ * "Save" does, then records that file's path with clipboard__set_files(), the
+ * same call the file manager's own "Copy" makes, so a later "Paste" there (or
+ * anywhere else that accepts pasted files) drops in a real file. */
+static void browser_app__image_menu(browser_app_state_t *state, const char *url, bruce_image_format_t format) {
+    const bruce_dialog_choice_t choices[] = {
+        {.label = "Save image", .value = "save"  },
+        {.label = "Copy image", .value = "copy"  },
+        {.label = "Cancel",     .value = "cancel"},
+    };
+    size_t selected = 0;
+    bruce_result_t result = dialog__choice("Image", NULL, choices, sizeof(choices) / sizeof(choices[0]), &selected);
+    if (result != BRUCE_OK || strcmp(choices[selected].value, "cancel") == 0) return;
+    bool copy = strcmp(choices[selected].value, "copy") == 0;
+
+    char path[BRUCE_STORAGE_PATH_MAX];
+    result = browser_app__build_download_path(url, format, path, sizeof(path));
+    if (result == BRUCE_OK) result = browser_image_cache__save(state->image_cache, url, path);
+    if (result == BRUCE_OK && copy) {
+        const char *paths[] = {path};
+        result = clipboard__set_files(paths, 1, BRUCE_CLIPBOARD_FILE_COPY);
+    }
+
+    if (result == BRUCE_OK) {
+        char message[BRUCE_STORAGE_PATH_MAX + 16];
+        snprintf(message, sizeof(message), copy ? "Copied: %s" : "Saved: %s", path);
+        (void)notification__push(message, 2500);
+    } else {
+        char message[96];
+        snprintf(message, sizeof(message), "Could not save image: %s", result__to_string(result));
+        (void)dialog__message(BRUCE_DIALOG_ERROR, "Image", message);
+    }
 }
 
 static bool browser_app__handle_event(browser_app_state_t *state, const bruce_input_event_t *event) {
@@ -345,7 +447,13 @@ static bool browser_app__handle_event(browser_app_state_t *state, const bruce_in
                 const char *url = state->doc->links[state->view.selected_link].url;
                 if (!browser_app__scroll_to_fragment(state, url)) browser_app__navigate(state, url, true);
             } else if (state->view.selected_image >= 0) {
-                browser_app__load_image(state);
+                const char *url = state->doc->images[state->view.selected_image].url;
+                const image_bitmap_t *bitmap = NULL;
+                if (browser_image_cache__peek(state->image_cache, url, &bitmap) == BRUCE_OK) {
+                    browser_app__image_menu(state, url, bitmap->format);
+                } else {
+                    browser_app__load_image(state);
+                }
             }
             break;
         case BRUCE_INPUT_CODE_UP:

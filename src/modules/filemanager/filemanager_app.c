@@ -10,7 +10,7 @@
 #include "core_sdk/ext_mem_loader.h"
 #include "core_sdk/input.h"
 #include "core_sdk/memory.h"
-#include "core_sdk/paste.h"
+#include "core_sdk/clipboard.h"
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
 #include "core_sdk/runtime.h"
@@ -303,18 +303,18 @@ static void filemanager__show_error(const char *action, bruce_result_t result) {
 
 /* "Copy" action: adds `path` (a file or folder) to the shared clipboard so a
  * later "Paste" here, in a different directory, or in another app entirely,
- * can paste it - see core_sdk/paste.h. */
+ * can paste it - see core_sdk/clipboard.h. */
 static bruce_result_t filemanager__copy_entry(const char *path) {
     const char *source_paths[] = {path};
-    return paste__set_files(source_paths, 1, BRUCE_PASTE_FILE_COPY);
+    return clipboard__set_files(source_paths, 1, BRUCE_CLIPBOARD_FILE_COPY);
 }
 
 /* "Paste" action: pastes the clipboard's file(s)/folder(s) into `directory`,
  * or reports BRUCE_ERR_INVALID_STATE if the clipboard doesn't hold files
  * (e.g. it's empty, or holds text copied by some other app). */
 static bruce_result_t filemanager__paste_here(const char *directory) {
-    if (paste__kind() != BRUCE_PASTE_FILES) return BRUCE_ERR_INVALID_STATE;
-    return paste__paste_files(directory);
+    if (clipboard__kind() != BRUCE_CLIPBOARD_FILES) return BRUCE_ERR_INVALID_STATE;
+    return clipboard__paste_files(directory);
 }
 
 /* `kind` ("file"/"folder") only changes the confirmation dialog's wording;

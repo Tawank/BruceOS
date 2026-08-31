@@ -7,7 +7,10 @@
  * one with none. browser_app.c calls browser_image_cache__get() exactly
  * once, when the user highlights an image and presses Select, to actually
  * fetch it; after that, the cache decodes and box-fits it once into a memory__external-backed RGB565 bitmap. Redraws borrow that fitted bitmap and perform no
- * image decoding, scaling, or allocation.
+ * image decoding, scaling, or allocation. The slot also keeps the original
+ * fetched bytes around (see browser_image_cache__save()) so a loaded image
+ * can be written out to storage as the real file it is, not the decoded
+ * pixel data.
  */
 
 #include <stddef.h>
@@ -44,3 +47,10 @@ bruce_result_t browser_image_cache__get(
 bruce_result_t browser_image_cache__peek(
     browser_image_cache_t *cache, const char *url, const image_bitmap_t **out_bitmap
 );
+
+/* Writes the exact bytes fetched for `url` -- the original encoded
+ * JPEG/PNG/GIF, not the decoded-and-box-fitted bitmap peek()/get() return --
+ * to `dest_path`, creating or truncating it. Returns BRUCE_ERR_NOT_FOUND if
+ * `url` was never successfully fetched (get() not yet called for it, or its
+ * fetch failed). */
+bruce_result_t browser_image_cache__save(browser_image_cache_t *cache, const char *url, const char *dest_path);

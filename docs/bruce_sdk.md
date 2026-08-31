@@ -11,6 +11,7 @@
 | [`base64.h`](#base64h) | Base64 encoding (RFC 4648). |
 | [`bluetooth.h`](#bluetoothh) | BLE advertisement scanning. |
 | [`bluetooth_hid.h`](#bluetooth_hidh) | Bluetooth keyboard and gamepad connections. |
+| [`clipboard.h`](#clipboardh) | Shared copy/paste clipboard. |
 | [`clock.h`](#clockh) | Clock, time zone, and NTP settings. |
 | [`config.h`](#configh) | Global Bruce Config API. |
 | [`device.h`](#deviceh) | Battery, power, and device sensors. |
@@ -35,7 +36,6 @@
 | [`notification.h`](#notificationh) | On-screen notifications. |
 | [`nrf24.h`](#nrf24h) | nRF24 radio control and scanning. |
 | [`partition_manager.h`](#partition_managerh) | Manages the "user area" partitions. |
-| [`paste.h`](#pasteh) | Shared copy/paste clipboard. |
 | [`permission.h`](#permissionh) | App permissions. |
 | [`process.h`](#processh) | Running app and process control. |
 | [`pubsub.h`](#pubsubh) | Named message topics. |
@@ -190,8 +190,8 @@ Functions that explicitly document a `bruce_permission_t` check, grouped by perm
 
 ### `storage`
 
+- `clipboard__paste_files` (clipboard.h)
 - `ir__transmit_file` (ir.h)
-- `paste__paste_files` (paste.h)
 - `storage__exists` (storage.h)
 - `storage__open` (storage.h)
 - `storage__list` (storage.h)
@@ -2562,6 +2562,234 @@ Returns the currently connected HID device's identity.
 #### Permissions
 
 - `bt`
+
+
+---
+
+# `clipboard.h`
+
+**Shared copy/paste clipboard.**
+
+A single system-wide clipboard slot, independent of any process's
+lifetime: one app (e.g. the file manager) can copy something and a
+different app -- launched later, by a different process, possibly after
+the copying process has already exited -- can paste it (e.g. the text
+editor, or the file manager again in a different directory). Setting
+either kind of content replaces whatever was there before; there is
+exactly one slot, no history and no separate text/file buffers.
+
+**Constants**
+
+| Name | Value |
+|---|---|
+| `BRUCE_CLIPBOARD_MAX_FILES` | `64` |
+
+---
+
+## bruce_clipboard_kind_t()
+
+```c
+typedef enum {
+    BRUCE_CLIPBOARD_EMPTY = 0,
+    BRUCE_CLIPBOARD_TEXT,
+    BRUCE_CLIPBOARD_FILES,
+} bruce_clipboard_kind_t;
+```
+
+
+---
+
+## bruce_clipboard_file_mode_t()
+
+```c
+typedef enum {
+    BRUCE_CLIPBOARD_FILE_COPY = 0,
+    BRUCE_CLIPBOARD_FILE_CUT,
+} bruce_clipboard_file_mode_t;
+```
+
+
+---
+
+## clipboard__kind()
+
+```c
+bruce_clipboard_kind_t clipboard__kind(void);
+```
+
+What's currently on the clipboard.
+
+### Returns
+
+`bruce_clipboard_kind_t`
+
+
+---
+
+## clipboard__set_text()
+
+```c
+bruce_result_t clipboard__set_text(const char *text);
+```
+
+Copies text onto the clipboard, replacing any prior content.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `text` | `const char *` | Null-terminated text to store; copied internally. |
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
+## clipboard__get_text()
+
+```c
+const char *clipboard__get_text(void);
+```
+
+Returns the clipboard's text, or NULL if clipboard__kind() is not BRUCE_CLIPBOARD_TEXT.
+
+The returned pointer is borrowed: valid until the next clipboard__set_text(),
+clipboard__set_files(), or clipboard__clear() call from any process.
+
+### Returns
+
+`const char *`
+
+
+---
+
+## clipboard__set_files()
+
+```c
+bruce_result_t clipboard__set_files(const char *const *paths, size_t count, bruce_clipboard_file_mode_t mode);
+```
+
+Records file/directory paths on the clipboard for a later clipboard__paste_files(), replacing any prior content.
+
+            originals in place) or cut (remove each original once it, and
+            everything under it, has been pasted successfully).
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `paths` | `const char *const *` | Absolute source paths; copied internally. |
+| `count` | `size_t` | Number of paths, from 1 to BRUCE_CLIPBOARD_MAX_FILES. |
+| `mode` | `bruce_clipboard_file_mode_t` | Whether the eventual paste should copy (leaving the |
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
+## clipboard__file_count()
+
+```c
+size_t clipboard__file_count(void);
+```
+
+Number of paths on the clipboard (0 unless clipboard__kind() is BRUCE_CLIPBOARD_FILES).
+
+### Returns
+
+`size_t`
+
+
+---
+
+## clipboard__get_file()
+
+```c
+const char *clipboard__get_file(size_t index);
+```
+
+Returns one clipboard path by index, or NULL if index is out of range.
+
+The returned pointer is borrowed under the same rules as clipboard__get_text().
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `index` | `size_t` | Zero-based index, below clipboard__file_count(). |
+
+### Returns
+
+`const char *`
+
+
+---
+
+## clipboard__file_mode()
+
+```c
+bruce_clipboard_file_mode_t clipboard__file_mode(void);
+```
+
+Whether the clipboard's files were cut or copied; meaningless when clipboard__file_count() is 0.
+
+### Returns
+
+`bruce_clipboard_file_mode_t`
+
+
+---
+
+## clipboard__paste_files()
+
+```c
+bruce_result_t clipboard__paste_files(const char *target_directory);
+```
+
+Copies (or moves, for a cut) every clipboard file/directory into target_directory.
+
+Recurses into directories, creating them at the destination as needed.
+Refuses (BRUCE_ERR_ALREADY_EXISTS) rather than overwriting any
+destination path that already exists, and refuses
+(BRUCE_ERR_INVALID_ARGUMENT) a target that is one of the clipboard's own
+directories or nested inside one, rather than recursing into its own
+output forever. Stops at the first failure; a cut has already removed
+whichever earlier entries it fully copied, but does not roll them back.
+The clipboard itself is left untouched either way, so the same content
+can be pasted again.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `target_directory` | `const char *` | Absolute destination directory; must already exist. |
+
+### Returns
+
+`bruce_result_t`
+
+#### Permissions
+
+- `storage`
+
+
+---
+
+## clipboard__clear()
+
+```c
+void clipboard__clear(void);
+```
+
+Clears the clipboard; clipboard__kind() becomes BRUCE_CLIPBOARD_EMPTY.
+
+### Returns
+
+`void`
 
 
 ---
@@ -11278,234 +11506,6 @@ Resets list_planned() back to the last committed layout. A no-op
 #### Permissions
 
 - _Built-in apps only -- external ELF/JS/WASM callers are always denied._
-
-
----
-
-# `paste.h`
-
-**Shared copy/paste clipboard.**
-
-A single system-wide clipboard slot, independent of any process's
-lifetime: one app (e.g. the file manager) can copy something and a
-different app -- launched later, by a different process, possibly after
-the copying process has already exited -- can paste it (e.g. the text
-editor, or the file manager again in a different directory). Setting
-either kind of content replaces whatever was there before; there is
-exactly one slot, no history and no separate text/file buffers.
-
-**Constants**
-
-| Name | Value |
-|---|---|
-| `BRUCE_PASTE_MAX_FILES` | `64` |
-
----
-
-## bruce_paste_kind_t()
-
-```c
-typedef enum {
-    BRUCE_PASTE_EMPTY = 0,
-    BRUCE_PASTE_TEXT,
-    BRUCE_PASTE_FILES,
-} bruce_paste_kind_t;
-```
-
-
----
-
-## bruce_paste_file_mode_t()
-
-```c
-typedef enum {
-    BRUCE_PASTE_FILE_COPY = 0,
-    BRUCE_PASTE_FILE_CUT,
-} bruce_paste_file_mode_t;
-```
-
-
----
-
-## paste__kind()
-
-```c
-bruce_paste_kind_t paste__kind(void);
-```
-
-What's currently on the clipboard.
-
-### Returns
-
-`bruce_paste_kind_t`
-
-
----
-
-## paste__set_text()
-
-```c
-bruce_result_t paste__set_text(const char *text);
-```
-
-Copies text onto the clipboard, replacing any prior content.
-
-### Parameters
-
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `text` | `const char *` | Null-terminated text to store; copied internally. |
-
-### Returns
-
-`bruce_result_t`
-
-
----
-
-## paste__get_text()
-
-```c
-const char *paste__get_text(void);
-```
-
-Returns the clipboard's text, or NULL if paste__kind() is not BRUCE_PASTE_TEXT.
-
-The returned pointer is borrowed: valid until the next paste__set_text(),
-paste__set_files(), or paste__clear() call from any process.
-
-### Returns
-
-`const char *`
-
-
----
-
-## paste__set_files()
-
-```c
-bruce_result_t paste__set_files(const char *const *paths, size_t count, bruce_paste_file_mode_t mode);
-```
-
-Records file/directory paths on the clipboard for a later paste__paste_files(), replacing any prior content.
-
-            originals in place) or cut (remove each original once it, and
-            everything under it, has been pasted successfully).
-
-### Parameters
-
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `paths` | `const char *const *` | Absolute source paths; copied internally. |
-| `count` | `size_t` | Number of paths, from 1 to BRUCE_PASTE_MAX_FILES. |
-| `mode` | `bruce_paste_file_mode_t` | Whether the eventual paste should copy (leaving the |
-
-### Returns
-
-`bruce_result_t`
-
-
----
-
-## paste__file_count()
-
-```c
-size_t paste__file_count(void);
-```
-
-Number of paths on the clipboard (0 unless paste__kind() is BRUCE_PASTE_FILES).
-
-### Returns
-
-`size_t`
-
-
----
-
-## paste__get_file()
-
-```c
-const char *paste__get_file(size_t index);
-```
-
-Returns one clipboard path by index, or NULL if index is out of range.
-
-The returned pointer is borrowed under the same rules as paste__get_text().
-
-### Parameters
-
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `index` | `size_t` | Zero-based index, below paste__file_count(). |
-
-### Returns
-
-`const char *`
-
-
----
-
-## paste__file_mode()
-
-```c
-bruce_paste_file_mode_t paste__file_mode(void);
-```
-
-Whether the clipboard's files were cut or copied; meaningless when paste__file_count() is 0.
-
-### Returns
-
-`bruce_paste_file_mode_t`
-
-
----
-
-## paste__paste_files()
-
-```c
-bruce_result_t paste__paste_files(const char *target_directory);
-```
-
-Copies (or moves, for a cut) every clipboard file/directory into target_directory.
-
-Recurses into directories, creating them at the destination as needed.
-Refuses (BRUCE_ERR_ALREADY_EXISTS) rather than overwriting any
-destination path that already exists, and refuses
-(BRUCE_ERR_INVALID_ARGUMENT) a target that is one of the clipboard's own
-directories or nested inside one, rather than recursing into its own
-output forever. Stops at the first failure; a cut has already removed
-whichever earlier entries it fully copied, but does not roll them back.
-The clipboard itself is left untouched either way, so the same content
-can be pasted again.
-
-### Parameters
-
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `target_directory` | `const char *` | Absolute destination directory; must already exist. |
-
-### Returns
-
-`bruce_result_t`
-
-#### Permissions
-
-- `storage`
-
-
----
-
-## paste__clear()
-
-```c
-void paste__clear(void);
-```
-
-Clears the clipboard; paste__kind() becomes BRUCE_PASTE_EMPTY.
-
-### Returns
-
-`void`
 
 
 ---

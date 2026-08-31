@@ -9,6 +9,7 @@
 #include "core_sdk/memory.h"
 #include "core_sdk/result.h"
 #include "core_sdk/runtime.h"
+#include "core_sdk/storage.h"
 
 /* A failed fetch is retried once, after a short delay, before it's cached as
  * a failure. On a board with no PSRAM, an HTTPS image fetch competes with
@@ -210,4 +211,23 @@ bruce_result_t browser_image_cache__peek(
     slot->last_used = ++cache->clock;
     *out_bitmap = &slot->bitmap;
     return BRUCE_OK;
+}
+
+bruce_result_t browser_image_cache__save(browser_image_cache_t *cache, const char *url, const char *dest_path) {
+    if (cache == NULL || url == NULL || url[0] == '\0' || dest_path == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+
+    browser_image_cache_slot_t *slot = browser_image_cache__find(cache, url);
+    if (slot == NULL || slot->failed || slot->response.body == NULL) return BRUCE_ERR_NOT_FOUND;
+
+    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
+    bruce_result_t result = storage__open(
+        dest_path, BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE | BRUCE_STORAGE_OPEN_TRUNCATE, &file
+    );
+    if (result != BRUCE_OK) return result;
+
+    size_t written = 0;
+    result = storage__write(file, slot->response.body, slot->response.body_len, &written);
+    if (result == BRUCE_OK && written != slot->response.body_len) result = BRUCE_ERR_IO;
+    bruce_result_t close_result = storage__close(file);
+    return result != BRUCE_OK ? result : close_result;
 }
