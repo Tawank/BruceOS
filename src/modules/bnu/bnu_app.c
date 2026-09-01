@@ -77,8 +77,12 @@ bool bnu__resolve_path(const char *path, char *out_path) {
     return true;
 }
 
-/* -h is reserved by ArgParser for --help, so human-readable output uses -H
- * (matching du/df/ls's -h intent, just on a free letter). */
+/* ArgParser's own "-h" only means --help while a command hasn't claimed "h"
+ * for itself (see ap_parse_level()'s "-h"/ap_find_option() check in
+ * args.c) - ls and free do, and pass their own ap_found(parser, "h") in as
+ * `human` here, matching their real Unix -h namesakes; df and du claim it
+ * the same way but call format__bytes_human() directly instead of this
+ * helper, since a filesystem's byte counts can exceed uint32_t. */
 void bnu__format_size(uint32_t bytes, bool human, char *output, size_t capacity) {
     if (human) format__bytes_human(bytes, output, capacity);
     else snprintf(output, capacity, "%u", (unsigned)bytes);

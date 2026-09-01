@@ -108,6 +108,8 @@ void app_runner__register_defaults(void) {
     app_runner__register("bparted", "Manage partitions", "Storage", bparted_app_main, BPARTED_STACK_BYTES);
     app_runner__register("cat", "Print file contents", "Storage", bnu_cat_app_main, 0);
     app_runner__register("cp", "Copy a file", "Storage", bnu_cp_app_main, 0);
+    app_runner__register("df", "Show mounted filesystems' space usage", "Storage", bnu_df_app_main, 0);
+    app_runner__register("du", "Show a file or directory tree's disk usage", "Storage", bnu_du_app_main, 0);
     app_runner__register("file", "Identify a file's type", "Storage", bnu_file_app_main, 0);
     app_runner__register("filemanager", "Browse and manage files", "Storage", filemanager_app_main, 8192);
     app_runner__register("head", "Print the first part of a file", "Storage", bnu_head_app_main, 0);

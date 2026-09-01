@@ -43,6 +43,9 @@ bool selftest__run_bnu_case(void) {
     char *lsblk_argv[] = {"lsblk"};
     char *mount_argv[] = {"mount"};
     char *unmount_argv[] = {"unmount", "missing"};
+    char *df_argv[] = {"df"};
+    char *df_human_argv[] = {"df", "-h"};
+    char *df_path_argv[] = {"df", "/"};
     char *free_argv[] = {"free"};
     char *free_map_argv[] = {"free", "-m"};
     char *free_map_human_argv[] = {"free", "-m", "-h"};
@@ -54,6 +57,16 @@ bool selftest__run_bnu_case(void) {
     char *cp_missing_argv[] = {"cp", "/selftest_bnu_missing.txt", "/selftest_bnu_cp2.txt"};
     char *mv_argv[] = {"mv", "/selftest_bnu_cp.txt", "/selftest_bnu_mv.txt"};
     char *mv_missing_argv[] = {"mv", "/selftest_bnu_missing.txt", "/selftest_bnu_mv2.txt"};
+    char *du_argv[] = {"du", "/selftest_bnu_cat.txt"};
+    char *du_missing_argv[] = {"du", "/selftest_bnu_missing.txt"};
+    /* Exercises bnu_du_app_main()'s directory-recursion branch (du_argv
+     * above only covers its single-file branch): mkdir, then cp the cat
+     * fixture into it so du has one nested file of known size to sum,
+     * bounded and deterministic rather than walking all of "/" (which on
+     * real hardware could mean an entire populated SD card). */
+    char *du_dir_mkdir_argv[] = {"mkdir", "/selftest_bnu_du_dir"};
+    char *du_dir_cp_argv[] = {"cp", "/selftest_bnu_cat.txt", "/selftest_bnu_du_dir/inner.txt"};
+    char *du_dir_argv[] = {"du", "-h", "/selftest_bnu_du_dir"};
     char *stty_argv[] = {"stty"};
     char *date_argv[] = {"date"};
     char *date_invalid_argv[] = {"date", "-s", "not-a-date"};
@@ -117,6 +130,9 @@ bool selftest__run_bnu_case(void) {
     BNU_CHECK_RESULT(ok, bnu_lsblk_app_main(1, lsblk_argv), BRUCE_OK, "lsblk");
     BNU_CHECK_RESULT(ok, bnu_mount_app_main(1, mount_argv), BRUCE_OK, "mount");
     BNU_CHECK_RESULT(ok, bnu_unmount_app_main(2, unmount_argv), BRUCE_ERR_NOT_FOUND, "unmount missing");
+    BNU_CHECK_RESULT(ok, bnu_df_app_main(1, df_argv), BRUCE_OK, "df");
+    BNU_CHECK_RESULT(ok, bnu_df_app_main(2, df_human_argv), BRUCE_OK, "df -h");
+    BNU_CHECK_RESULT(ok, bnu_df_app_main(2, df_path_argv), BRUCE_OK, "df /");
     BNU_CHECK_RESULT(ok, bnu_free_app_main(1, free_argv), BRUCE_OK, "free");
     /* Regression coverage for a real bug: "-m" (proportional allocator map)
      * silently produced no map output whenever the layout snapshot couldn't
@@ -148,6 +164,11 @@ bool selftest__run_bnu_case(void) {
     BNU_CHECK_RESULT(ok, bnu_cp_app_main(3, cp_argv), BRUCE_ERR_ALREADY_EXISTS, "cp (dest exists)");
     BNU_CHECK_RESULT(ok, bnu_mv_app_main(3, mv_argv), BRUCE_OK, "mv");
     BNU_CHECK_RESULT(ok, bnu_mv_app_main(3, mv_missing_argv), BRUCE_ERR_NOT_FOUND, "mv (missing source)");
+    BNU_CHECK_RESULT(ok, bnu_du_app_main(2, du_argv), BRUCE_OK, "du (file)");
+    BNU_CHECK_RESULT(ok, bnu_mkdir_app_main(2, du_dir_mkdir_argv), BRUCE_OK, "du fixture mkdir");
+    BNU_CHECK_RESULT(ok, bnu_cp_app_main(3, du_dir_cp_argv), BRUCE_OK, "du fixture cp");
+    BNU_CHECK_RESULT(ok, bnu_du_app_main(3, du_dir_argv), BRUCE_OK, "du -h (directory)");
+    BNU_CHECK_RESULT(ok, bnu_du_app_main(2, du_missing_argv), BRUCE_ERR_NOT_FOUND, "du (missing path)");
     /* Selftest runs with no routed stdio session, so stty correctly reports "not a tty". */
     BNU_CHECK_RESULT(ok, bnu_stty_app_main(1, stty_argv), BRUCE_ERR_NOT_FOUND, "stty");
     BNU_CHECK_BOOL(
@@ -214,6 +235,8 @@ bool selftest__run_bnu_case(void) {
     BNU_CHECK_RESULT(ok, bnu_xxd_app_main(4, xxd_invalid_argv), BRUCE_ERR_INVALID_ARGUMENT, "xxd -c 0");
     storage__remove(cat_argv[1]);
     storage__remove(mv_argv[2]); /* mv above renamed cp_argv's destination to this path. */
+    storage__remove(du_dir_cp_argv[2]);
+    storage__remove(du_dir_mkdir_argv[1]);
     storage__remove(grep_argv[7]);
     storage__remove(wc_argv[1]);
     printf("[selftest] bnu: %s\n", ok ? "OK" : "failed");

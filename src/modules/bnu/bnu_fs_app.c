@@ -8,13 +8,14 @@
 
 #include "args.h"
 #include "core_sdk/filetype.h"
+#include "core_sdk/format.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/result.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
 #include "core_sdk/tty.h"
 
-/* Filesystem commands: pwd, ls, mkdir, touch, rm, cat, file, head, tail. */
+/* Filesystem commands: pwd, ls, mkdir, touch, rm, cp, mv, cat, file, head, tail, du. */
 
 /* Broad, extension-driven color categories, in the spirit of GNU ls's
  * LS_COLORS: directories get their own color regardless of name; everything
@@ -508,3 +509,99 @@ static int bnu__head_tail_app_main(int argc, char **argv, bool tail) {
 int bnu_head_app_main(int argc, char **argv) { return bnu__head_tail_app_main(argc, argv, false); }
 
 int bnu_tail_app_main(int argc, char **argv) { return bnu__head_tail_app_main(argc, argv, true); }
+
+/* Adds up every file's size under `path` - directories recurse (see
+ * bnu__du_walk_directory() below), and their own entries never contribute a
+ * size of their own, only the plain files they (transitively) contain -
+ * matching what real du actually measures. */
+static bruce_result_t bnu__du_walk_directory(const char *path, uint64_t *out_bytes) {
+    size_t count = 0;
+    bruce_result_t result = storage__list(path, NULL, 0, &count);
+    if (result != BRUCE_OK) return result;
+    bruce_storage_entry_t *entries = NULL;
+    if (count > 0) {
+        entries = memory__malloc(count * sizeof(*entries));
+        if (entries == NULL) return BRUCE_ERR_NO_MEMORY;
+        result = storage__list(path, entries, count, &count);
+    }
+    for (size_t i = 0; result == BRUCE_OK && i < count; ++i) {
+        char child[BRUCE_STORAGE_PATH_MAX];
+        const char *name = entries[i].name;
+        int written = strcmp(path, "/") == 0 ? snprintf(child, sizeof(child), "/%s", name)
+                                              : snprintf(child, sizeof(child), "%s/%s", path, name);
+        if (written < 0 || (size_t)written >= sizeof(child)) {
+            result = BRUCE_ERR_RESOURCE_LIMIT;
+            break;
+        }
+        if (entries[i].type == BRUCE_STORAGE_ENTRY_DIRECTORY) {
+            result = bnu__du_walk_directory(child, out_bytes);
+        } else {
+            *out_bytes += entries[i].size;
+        }
+    }
+    memory__free(entries);
+    return result;
+}
+
+/* `path` itself might be a plain file rather than a directory (e.g. `du
+ * one_file.bin`), which bnu__du_walk_directory() above never sees - it only
+ * ever stats *children* of a directory it already knows is one, straight
+ * out of storage__list()'s own bruce_storage_entry_t.size, without a
+ * dedicated open/seek per file. This top-level case is the one spot that
+ * needs its own open+seek-to-end, the same way bnu_file_app_main() sizes a
+ * single path. */
+static bruce_result_t bnu__du_sum(const char *path, uint64_t *out_bytes) {
+    *out_bytes = 0;
+    size_t probe_count = 0;
+    bruce_result_t result = storage__list(path, NULL, 0, &probe_count);
+    if (result == BRUCE_OK) return bnu__du_walk_directory(path, out_bytes);
+    if (result != BRUCE_ERR_IO) return result; /* not-a-directory is the only expected failure here */
+
+    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
+    result = storage__open(path, BRUCE_STORAGE_OPEN_READ, &file);
+    if (result != BRUCE_OK) return result;
+    uint64_t position = 0;
+    result = storage__seek(file, 0, SEEK_END, &position);
+    bruce_result_t close_result = storage__close(file);
+    if (result != BRUCE_OK) return result;
+    *out_bytes = position;
+    return close_result;
+}
+
+int bnu_du_app_main(int argc, char **argv) {
+    ArgParser *parser =
+        bnu__new_parser("Show total disk usage of a file or directory tree (always summarized, like du -s).");
+    if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
+    ap_add_flag(parser, "h");
+    ap_set_opt_help(parser, "h", "Show sizes in human-readable units (e.g. 8.2K, 1.3M)");
+    ap_add_optional_arg(parser, "path", "File or directory to measure (defaults to the working directory)");
+    ap_allow_extra_args(parser);
+    ap_unknown_options_as_args(parser);
+    if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
+
+    bool human = ap_found(parser, "h");
+    int given = ap_count_args(parser);
+    int path_count = given > 0 ? given : 1; /* no args -> one pass over the working directory */
+
+    bruce_result_t result = BRUCE_OK;
+    for (int i = 0; i < path_count; ++i) {
+        char path[BRUCE_STORAGE_PATH_MAX];
+        if (!bnu__resolve_path(ap_get_arg_at_index(parser, i), path)) {
+            result = BRUCE_ERR_INVALID_PATH;
+            break;
+        }
+        uint64_t bytes = 0;
+        result = bnu__du_sum(path, &bytes);
+        if (result != BRUCE_OK) {
+            stdio__printf("du: %s: error %d\n", path, result);
+            break;
+        }
+        char size_text[32];
+        if (human) format__bytes_human(bytes, size_text, sizeof(size_text));
+        else snprintf(size_text, sizeof(size_text), "%llu", (unsigned long long)bytes);
+        stdio__printf("%-8s %s\n", size_text, path);
+    }
+
+    ap_free(parser);
+    return result;
+}
