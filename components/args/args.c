@@ -743,7 +743,17 @@ static bool ap_parse_level(ArgParser *parser, int argc, char **argv, int start) 
             options_enabled = false;
             continue;
         }
-        if (options_enabled && (strcmp(arg, "--help") == 0 || strcmp(arg, "-h") == 0)) {
+        /* "-h" is a --help shortcut only when the command hasn't claimed its
+         * own "h" option (see bnu_ls_app_main's "-h" for human-readable
+         * sizes) -- same opt-out shape as "-v" below deferring to the
+         * command when it wants "-v" for something other than --version.
+         * "--help" always means help; it has no such escape hatch. */
+        if (options_enabled && strcmp(arg, "--help") == 0) {
+            ap_print_help(parser);
+            ap_set_status(parser, AP_STATUS_HELP);
+            return false;
+        }
+        if (options_enabled && strcmp(arg, "-h") == 0 && ap_find_option(parser, "h") == NULL) {
             ap_print_help(parser);
             ap_set_status(parser, AP_STATUS_HELP);
             return false;

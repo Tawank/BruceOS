@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "args.h"
 #include "core_sdk/filetype.h"
@@ -10,8 +11,37 @@
 #include "core_sdk/result.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
+#include "core_sdk/tty.h"
 
 /* Filesystem commands: pwd, ls, mkdir, touch, rm, cat, file, head, tail. */
+
+/* Broad, extension-driven color categories, in the spirit of GNU ls's
+ * LS_COLORS: directories get their own color regardless of name; everything
+ * else is bucketed from filetype__lookup_extension()'s mimetype/program
+ * fields (cheap -- extension-table only, no I/O). NULL means "no color",
+ * left to the terminal's default. */
+static const char *bnu_ls__color_for(const bruce_storage_entry_t *entry) {
+    if (entry->type == BRUCE_STORAGE_ENTRY_DIRECTORY) return "\033[1;34m";
+    bruce_filetype_info_t info;
+    if (filetype__lookup_extension(entry->name, &info) != BRUCE_OK) return NULL;
+    if (strncmp(info.mimetype, "image/", 6) == 0 || strncmp(info.mimetype, "audio/", 6) == 0 ||
+        strncmp(info.mimetype, "video/", 6) == 0) {
+        return "\033[35m";
+    }
+    if (strcmp(info.mimetype, "application/zip") == 0 || strcmp(info.mimetype, "application/gzip") == 0 ||
+        strcmp(info.mimetype, "application/x-tar") == 0) {
+        return "\033[1;31m";
+    }
+    if (info.program[0] != '\0') return "\033[1;32m";
+    return NULL;
+}
+
+static void bnu_ls__print_name(const bruce_storage_entry_t *entry, bool color) {
+    const char *code = color ? bnu_ls__color_for(entry) : NULL;
+    if (code != NULL) stdio__printf("%s", code);
+    stdio__printf("%s%s", entry->name, entry->type == BRUCE_STORAGE_ENTRY_DIRECTORY ? "/" : "");
+    if (code != NULL) stdio__printf("\033[0m");
+}
 
 int bnu_pwd_app_main(int argc, char **argv) {
     ArgParser *parser = bnu__new_parser("Print the current working directory.");
@@ -25,9 +55,18 @@ int bnu_pwd_app_main(int argc, char **argv) {
 int bnu_ls_app_main(int argc, char **argv) {
     ArgParser *parser = bnu__new_parser("List files and directories.");
     if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
+    ap_add_flag(parser, "l");
+    ap_set_opt_help(parser, "l", "Use long listing format");
+    ap_add_flag(parser, "a");
+    ap_set_opt_help(parser, "a", "Show hidden entries too");
+    ap_add_flag(parser, "h");
+    ap_set_opt_help(parser, "h", "Human-readable sizes (e.g. 4.0K, 1.2M)");
     ap_add_optional_arg(parser, "path", "Path to list (defaults to the working directory)");
     ap_unknown_options_as_args(parser);
     if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
+    bool long_format = ap_found(parser, "l");
+    bool show_hidden = ap_found(parser, "a");
+    bool human_readable = ap_found(parser, "h");
     char path[BRUCE_STORAGE_PATH_MAX];
     bool resolved = bnu__resolve_path(ap_get_arg(parser, "path"), path);
     ap_free(parser);
@@ -43,11 +82,24 @@ int bnu_ls_app_main(int argc, char **argv) {
     if (entries == NULL) return BRUCE_ERR_NO_MEMORY;
     result = storage__list(path, entries, count, &count);
     if (result == BRUCE_OK) {
+        /* Only colorize for an interactive terminal -- piped ("ls | x") or
+         * redirected ("ls > file") output stays plain, same as GNU ls. */
+        bool color = tty__isatty();
         for (size_t i = 0; i < count; ++i) {
-            if (entries[i].type == BRUCE_STORAGE_ENTRY_DIRECTORY) {
-                stdio__printf("%-10s %s/\n", "<dir>", entries[i].name);
+            if (!show_hidden && entries[i].name[0] == '.') continue;
+            if (long_format) {
+                char size_text[16] = "-";
+                if (entries[i].type != BRUCE_STORAGE_ENTRY_DIRECTORY) {
+                    bnu__format_size((uint32_t)entries[i].size, human_readable, size_text, sizeof(size_text));
+                }
+                stdio__printf(
+                    "%c %8s  ", entries[i].type == BRUCE_STORAGE_ENTRY_DIRECTORY ? 'd' : '-', size_text
+                );
+                bnu_ls__print_name(&entries[i], color);
+                stdio__printf("\n");
             } else {
-                stdio__printf("%10u %s\n", (unsigned)entries[i].size, entries[i].name);
+                bnu_ls__print_name(&entries[i], color);
+                stdio__printf("\n");
             }
         }
     }

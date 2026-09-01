@@ -172,12 +172,12 @@ bnu__print_memory_row(const char *name, size_t total, size_t free_size, size_t l
 int bnu_free_app_main(int argc, char **argv) {
     ArgParser *parser = bnu__new_parser("Show internal memory, PSRAM, and swap usage.");
     if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
-    ap_add_flag(parser, "H");
-    ap_set_opt_help(parser, "H", "Show sizes in human-readable units (e.g. 8.2K, 1.3M)");
+    ap_add_flag(parser, "h");
+    ap_set_opt_help(parser, "h", "Show sizes in human-readable units (e.g. 8.2K, 1.3M)");
     ap_add_flag(parser, "m");
     ap_set_opt_help(parser, "m", "Show proportional allocator maps and tracked owners");
     if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
-    bool human = ap_found(parser, "H");
+    bool human = ap_found(parser, "h");
     bool show_map = ap_found(parser, "m");
     ap_free(parser);
     bruce_memory_stats_t stats;
@@ -260,10 +260,10 @@ static const char *bnu__process_state_name(bruce_process_state_t state) {
 int bnu_top_app_main(int argc, char **argv) {
     ArgParser *parser = bnu__new_parser("Show runtime process resource usage.");
     if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
-    ap_add_flag(parser, "H");
-    ap_set_opt_help(parser, "H", "Show stck/heap/swap sizes in human-readable units (e.g. 8.2K, 1.3M)");
+    ap_add_flag(parser, "h");
+    ap_set_opt_help(parser, "h", "Show stck/heap/swap sizes in human-readable units (e.g. 8.2K, 1.3M)");
     if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
-    bool human = ap_found(parser, "H");
+    bool human = ap_found(parser, "h");
     ap_free(parser);
 
     bruce_process_snapshot_t processes[16];
