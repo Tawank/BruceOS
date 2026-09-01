@@ -6,7 +6,9 @@
 #include "core_sdk/environment.h"
 #include "core_sdk/result.h"
 #include "core_sdk/disk.h"
+#include "core_sdk/process.h"
 #include "core_sdk/storage.h"
+#include "core/process/process.h"
 #include "core/storage/storage.h"
 #include "modules/bnu/bnu_app.h"
 
@@ -199,5 +201,39 @@ bool selftest__run_bnu_case(void) {
     storage__remove(grep_argv[7]);
     storage__remove(wc_argv[1]);
     printf("[selftest] bnu: %s\n", ok ? "OK" : "failed");
+    return ok;
+}
+
+/* selftest__run_bnu_case() above calls bnu_free_app_main() directly on the
+ * selftest task's own (much larger) stack, which cannot catch an overflow
+ * specific to running "free -m" on the small stack a real shell-launched
+ * process actually gets. Spawn it as a real process with Core's default
+ * stack size instead - this is a regression test for a real bug:
+ * bnu_free_app_main()'s "-m" path kept enough of its own working state (the
+ * process-snapshot and legend arrays) on its own stack to overflow a
+ * default-sized process stack while printing a non-trivial memory map. */
+bool selftest__run_bnu_free_stack_case(void) {
+    char *free_map_argv[] = {"free", "-m"};
+    process_create_params_t params = {
+        .name = "selftest_free_m",
+        .entry = bnu_free_app_main,
+        .argc = 2,
+        .argv = free_map_argv,
+        .built_in = true,
+        .start_in_background = true,
+    };
+    bruce_process_id_t id = BRUCE_PROCESS_ID_INVALID;
+    if (process_registry__create(&params, &id) != BRUCE_OK) {
+        printf("[selftest] bnu/free-stack: create failed\n");
+        return false;
+    }
+    if (process__wait(id, 5000) != BRUCE_OK) {
+        printf("[selftest] bnu/free-stack: worker did not exit in time\n");
+        return false;
+    }
+    bruce_process_status_t status;
+    bool ok = process__wait_status(id, 0, &status) == BRUCE_OK && status.reason == BRUCE_PROCESS_EXITED &&
+              status.exit_code == BRUCE_OK;
+    printf("[selftest] bnu/free-stack: %s\n", ok ? "OK" : "failed");
     return ok;
 }

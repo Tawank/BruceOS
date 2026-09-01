@@ -18,6 +18,12 @@
 
 /* System commands: free, top, shutdown, reboot, stty, date, sleep. */
 
+/* Heap-allocated, not a local array: on top of the legend/block-map buffers
+ * `free -m` already keeps on the heap, this is another ~1.7K that a stack
+ * array would add on top of the caller's own frame, and this runs on that
+ * process's own (small, default-sized) stack. */
+#define BNU_PROCESS_SNAPSHOT_MAX 16
+
 #define BNU_MEMORY_LAYOUT_WIDTH 48
 
 static const bruce_process_snapshot_t *
@@ -234,7 +240,14 @@ static void bnu__print_layout_backend(
     for (size_t i = 0; i < shown; ++i) total += blocks[i].size;
     if (total == 0) return;
 
-    bnu__layout_legend_entry_t legend[BNU_MEMORY_LEGEND_MAX];
+    /* Heap-allocated for the same reason as processes[] below - this and the
+     * legend array together would otherwise add ~2.5K to a process that
+     * normally runs on a default-sized stack. */
+    bnu__layout_legend_entry_t *legend = memory__malloc(BNU_MEMORY_LEGEND_MAX * sizeof(*legend));
+    if (legend == NULL) {
+        stdio__printf("\n%s layout unavailable: out of memory\n", name);
+        return;
+    }
     size_t legend_count = bnu__build_layout_legend(blocks, shown, processes, process_count, legend);
 
     char total_text[16];
@@ -289,6 +302,7 @@ static void bnu__print_layout_backend(
     if (count > shown) {
         stdio__printf("... %u blocks omitted (snapshot limit)\n", (unsigned)(count - shown));
     }
+    memory__free(legend);
 }
 
 /* Task stacks are FreeRTOS-allocated, not something memory__get_layout()'s
@@ -416,18 +430,23 @@ int bnu_free_app_main(int argc, char **argv) {
             stdio__printf("free: -m layout unavailable: out of memory (%zu blocks)\n", capacity);
             return BRUCE_ERR_NO_MEMORY;
         }
-        bruce_process_snapshot_t processes[16];
+        bruce_process_snapshot_t *processes = memory__malloc(BNU_PROCESS_SNAPSHOT_MAX * sizeof(*processes));
+        if (processes == NULL) {
+            stdio__printf("free: -m layout unavailable: out of memory\n");
+            if (blocks_external) memory__external_free(blocks);
+            else memory__free(blocks);
+            return BRUCE_ERR_NO_MEMORY;
+        }
         size_t process_count = 0;
-        result = process__list(processes, sizeof(processes) / sizeof(processes[0]), &process_count);
+        result = process__list(processes, BNU_PROCESS_SNAPSHOT_MAX, &process_count);
         if (result != BRUCE_OK) {
             stdio__printf("free: -m layout unavailable: %s\n", result__to_string(result));
+            memory__free(processes);
             if (blocks_external) memory__external_free(blocks);
             else memory__free(blocks);
             return result;
         }
-        if (process_count > sizeof(processes) / sizeof(processes[0])) {
-            process_count = sizeof(processes) / sizeof(processes[0]);
-        }
+        if (process_count > BNU_PROCESS_SNAPSHOT_MAX) { process_count = BNU_PROCESS_SNAPSHOT_MAX; }
         bnu__print_layout_backend(
             "internal", BRUCE_MEMORY_BACKEND_INTERNAL, processes, process_count, human, blocks, capacity
         );
@@ -444,6 +463,7 @@ int bnu_free_app_main(int argc, char **argv) {
         if (blocks_external) memory__external_free(blocks);
         else memory__free(blocks);
         bnu__print_layout_stacks(processes, process_count, human);
+        memory__free(processes);
     }
     return BRUCE_OK;
 }
@@ -468,15 +488,24 @@ int bnu_top_app_main(int argc, char **argv) {
     bool human = ap_found(parser, "h");
     ap_free(parser);
 
-    bruce_process_snapshot_t processes[16];
+    bruce_process_snapshot_t *processes = memory__malloc(BNU_PROCESS_SNAPSHOT_MAX * sizeof(*processes));
+    if (processes == NULL) return BRUCE_ERR_NO_MEMORY;
     size_t process_count = 0;
-    bruce_result_t result =
-        process__list(processes, sizeof(processes) / sizeof(processes[0]), &process_count);
-    if (result != BRUCE_OK) return result;
+    bruce_result_t result = process__list(processes, BNU_PROCESS_SNAPSHOT_MAX, &process_count);
+    if (result != BRUCE_OK) {
+        memory__free(processes);
+        return result;
+    }
     result = runtime__delay(250);
-    if (result != BRUCE_OK) return result;
-    result = process__list(processes, sizeof(processes) / sizeof(processes[0]), &process_count);
-    if (result != BRUCE_OK) return result;
+    if (result != BRUCE_OK) {
+        memory__free(processes);
+        return result;
+    }
+    result = process__list(processes, BNU_PROCESS_SNAPSHOT_MAX, &process_count);
+    if (result != BRUCE_OK) {
+        memory__free(processes);
+        return result;
+    }
 
     stdio__printf("\n%1s %2s %3s %4s %4s %4s %s\n", "s", "id", "cpu", "stck", "heap", "swap", "name");
     for (size_t i = 0; i < process_count; ++i) {
@@ -506,6 +535,7 @@ int bnu_top_app_main(int argc, char **argv) {
             processes[i].name
         );
     }
+    memory__free(processes);
     return BRUCE_OK;
 }
 

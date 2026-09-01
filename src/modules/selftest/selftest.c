@@ -191,6 +191,7 @@ int selftest_app_main(int argc, char **argv) {
     RUN_SELFTEST(selftest__run_shell_interrupt_case);
     RUN_SELFTEST(selftest__run_shell_eof_case);
     RUN_SELFTEST(selftest__run_bnu_case);
+    RUN_SELFTEST(selftest__run_bnu_free_stack_case);
     RUN_SELFTEST(selftest__run_launcher_apps_discovery_case);
     RUN_SELFTEST(selftest__run_wifi_permission_denied_case);
     RUN_SELFTEST(selftest__run_http_permission_denied_case);
