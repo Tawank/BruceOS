@@ -176,14 +176,21 @@ void app_runner__register_defaults(void) {
     /* Content - viewing and editing text and images. */
     app_runner__register("base64", "Base64 encode or decode data", "Content", bnu_base64_app_main, 0);
     app_runner__register("crc32", "Print CRC-32 checksums", "Content", bnu_crc32_app_main, 0);
+    app_runner__register("cut", "Extract fields or characters from lines", "Content", bnu_cut_app_main, 0);
     app_runner__register("grep", "Search for text in files or stdin", "Content", bnu_grep_app_main, 0);
     app_runner__register("gunzip", "Decompress a .gz file", "Content", bnu_gunzip_app_main, 0);
     app_runner__register("gzip", "Compress a file to .gz", "Content", bnu_gzip_app_main, 0);
     app_runner__register("image", "View image files", "Content", image_app_main, 8192);
     app_runner__register("less", "Page through text", "Content", bnu_less_app_main, 0);
     app_runner__register("md5sum", "Print MD5 checksums", "Content", bnu_md5sum_app_main, 0);
+    app_runner__register("rev", "Reverse the characters of each line", "Content", bnu_rev_app_main, 0);
+    app_runner__register("seq", "Print a sequence of numbers", "Content", bnu_seq_app_main, 0);
     app_runner__register("sha256sum", "Print SHA-256 checksums", "Content", bnu_sha256sum_app_main, 0);
+    app_runner__register("sort", "Sort the lines of a file or stdin", "Content", bnu_sort_app_main, 0);
+    app_runner__register("tee", "Copy stdin to stdout and to files", "Content", bnu_tee_app_main, 0);
     app_runner__register("text", "Edit text files", "Content", text_app_main, 0);
+    app_runner__register("tr", "Translate, delete, or squeeze characters", "Content", bnu_tr_app_main, 0);
+    app_runner__register("uniq", "Filter out repeated adjacent lines", "Content", bnu_uniq_app_main, 0);
     app_runner__register("wc", "Count lines, words, and bytes", "Content", bnu_wc_app_main, 0);
     app_runner__register("wl-copy", "Copy stdin or a file to the clipboard", "Content", bnu_wl_copy_app_main, 0);
     app_runner__register("wl-paste", "Print the clipboard to stdout", "Content", bnu_wl_paste_app_main, 0);

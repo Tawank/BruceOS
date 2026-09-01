@@ -10,6 +10,7 @@
 #include <stdint.h>
 
 #include "args.h"
+#include "core_sdk/result.h"
 
 /* Frees `parser` and translates its parse status into a bruce_result_t
  * (BRUCE_OK for help/version, otherwise an invalid-argument/no-memory error). */
@@ -34,3 +35,16 @@ void bnu__format_size(uint32_t bytes, bool human, char *output, size_t capacity)
 void bnu__xxd_print_line(
     const uint8_t *data, size_t length, uint64_t address, size_t columns, size_t group, bool plain
 );
+
+/* Loads `path`'s full contents into a memory__external_malloc buffer (an
+ * empty file yields *out_data == NULL, *out_length == 0), or
+ * BRUCE_ERR_RESOURCE_LIMIT if it exceeds `max_bytes`. Caller frees the
+ * buffer with memory__external_free(). Shared by the bnu commands that need
+ * random access to their whole input rather than a single streaming pass. */
+bruce_result_t bnu__load_path(const char *path, size_t max_bytes, const void **out_data, size_t *out_length);
+
+/* Reads exactly `size` bytes of piped stdin into a memory__external_malloc
+ * buffer, per the shell's --stdin-size convention (see shell_executor.c and
+ * text_app.c, which originated it). Caller frees the buffer with
+ * memory__external_free(). */
+bruce_result_t bnu__load_stdin(size_t size, const void **out_data, size_t *out_length);

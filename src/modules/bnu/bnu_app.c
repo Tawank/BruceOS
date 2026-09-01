@@ -1,13 +1,16 @@
 #include "bnu_app.h"
 #include "bnu_internal.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
 #include "args.h"
 #include "core_sdk/environment.h"
 #include "core_sdk/format.h"
+#include "core_sdk/memory.h"
 #include "core_sdk/result.h"
+#include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
 
 /*
@@ -86,4 +89,68 @@ bool bnu__resolve_path(const char *path, char *out_path) {
 void bnu__format_size(uint32_t bytes, bool human, char *output, size_t capacity) {
     if (human) format__bytes_human(bytes, output, capacity);
     else snprintf(output, capacity, "%u", (unsigned)bytes);
+}
+
+/* Identical in shape to grep's and head/tail's own private loaders (see
+ * bnu_grep_app.c, bnu_fs_app.c) -- kept here as one shared copy for the
+ * text-processing commands (uniq, cut, sort, rev) that all need the same
+ * whole-buffer-then-scan approach, rather than adding a fourth near-copy. */
+bruce_result_t bnu__load_path(const char *path, size_t max_bytes, const void **out_data, size_t *out_length) {
+    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
+    bruce_result_t result = storage__open(path, BRUCE_STORAGE_OPEN_READ, &file);
+    if (result != BRUCE_OK) return result;
+
+    uint64_t size = 0;
+    result = storage__seek(file, 0, SEEK_END, &size);
+    if (result == BRUCE_OK && size > max_bytes) result = BRUCE_ERR_RESOURCE_LIMIT;
+    if (result == BRUCE_OK) result = storage__seek(file, 0, SEEK_SET, NULL);
+
+    const void *data = NULL;
+    if (result == BRUCE_OK && size > 0) {
+        data = memory__external_malloc((size_t)size);
+        if (data == NULL) result = BRUCE_ERR_NO_MEMORY;
+    }
+    size_t offset = 0;
+    unsigned char chunk[256];
+    while (result == BRUCE_OK && offset < (size_t)size) {
+        size_t read_size = 0;
+        result = storage__read(file, chunk, sizeof(chunk), &read_size);
+        if (result == BRUCE_OK && read_size == 0) result = BRUCE_ERR_IO;
+        if (result == BRUCE_OK) result = memory__external_memcpy(data, offset, chunk, read_size);
+        offset += read_size;
+    }
+    (void)storage__close(file);
+    if (result != BRUCE_OK) {
+        if (data != NULL) (void)memory__external_free(data);
+        return result;
+    }
+    *out_data = data;
+    *out_length = offset;
+    return BRUCE_OK;
+}
+
+bruce_result_t bnu__load_stdin(size_t size, const void **out_data, size_t *out_length) {
+    const void *data = NULL;
+    bruce_result_t result = BRUCE_OK;
+    if (size > 0) {
+        data = memory__external_malloc(size);
+        if (data == NULL) result = BRUCE_ERR_NO_MEMORY;
+    }
+    size_t offset = 0;
+    unsigned char chunk[256];
+    while (result == BRUCE_OK && offset < size) {
+        size_t want = size - offset > sizeof(chunk) ? sizeof(chunk) : size - offset;
+        size_t read_size = 0;
+        result = stdio__read(chunk, want, UINT32_MAX, &read_size);
+        if (result == BRUCE_OK && read_size == 0) result = BRUCE_ERR_IO;
+        if (result == BRUCE_OK) result = memory__external_memcpy(data, offset, chunk, read_size);
+        offset += read_size;
+    }
+    if (result != BRUCE_OK) {
+        if (data != NULL) (void)memory__external_free(data);
+        return result;
+    }
+    *out_data = data;
+    *out_length = offset;
+    return BRUCE_OK;
 }

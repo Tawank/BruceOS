@@ -80,10 +80,13 @@ bool selftest__run_bnu_case(void) {
     char *wc_argv[] = {"wc", "/selftest_bnu_wc.txt"};
     char *wc_flags_argv[] = {"wc", "-l", "-w", "/selftest_bnu_wc.txt"};
     char *wc_missing_argv[] = {"wc", "/selftest_bnu_wc_missing.txt"};
+#if !CONFIG_BRUCE_QEMU_TEST_MODE
     /* Legacy "-N" line-count shorthand (e.g. "head -4" for "head -n 4") --
-     * reuses the wc fixture (2 lines), so "-1" prints one of them. */
+     * reuses the wc fixture (2 lines), so "-1" prints one of them. Skipped
+     * entirely under QEMU -- see the guard around the checks below for why. */
     char *head_legacy_argv[] = {"head", "-1", "/selftest_bnu_wc.txt"};
     char *tail_legacy_argv[] = {"tail", "-1", "/selftest_bnu_wc.txt"};
+#endif
     char *xxd_argv[] = {"xxd", "-c", "8", "-g", "1", "-l", "12", "-s", "4", "/selftest_bnu_wc.txt"};
     char *xxd_plain_argv[] = {"xxd", "-p", "/selftest_bnu_wc.txt"};
     char *xxd_invalid_argv[] = {"xxd", "-c", "0", "/selftest_bnu_wc.txt"};
@@ -228,8 +231,29 @@ bool selftest__run_bnu_case(void) {
     BNU_CHECK_RESULT(ok, bnu_wc_app_main(2, wc_argv), BRUCE_OK, "wc");
     BNU_CHECK_RESULT(ok, bnu_wc_app_main(4, wc_flags_argv), BRUCE_OK, "wc -l -w");
     BNU_CHECK_RESULT(ok, bnu_wc_app_main(2, wc_missing_argv), BRUCE_ERR_NOT_FOUND, "wc (missing file)");
+#if !CONFIG_BRUCE_QEMU_TEST_MODE
     BNU_CHECK_RESULT(ok, bnu_head_app_main(3, head_legacy_argv), BRUCE_OK, "head -1");
     BNU_CHECK_RESULT(ok, bnu_tail_app_main(3, tail_legacy_argv), BRUCE_OK, "tail -1");
+#else
+    /* bnu_head_app_main()/bnu_tail_app_main() load their file through
+     * memory__external_malloc()/memory__external_memcpy() (see
+     * bnu__head_tail_load_path() in bnu_fs_app.c) -- the same documented,
+     * hardware-correct pattern grep's loader uses above, and the same
+     * QEMU-only gap: no emulated PSRAM (CONFIG_SPIRAM is unset in
+     * build-qemu/sdkconfig) means the allocation falls through to the swap
+     * backend, whose flash-mapped pointer doesn't reliably reflect
+     * memory__external_memcpy() writes under QEMU (matching
+     * selftest__run_external_memory_case()'s own CONFIG_BRUCE_QEMU_TEST_MODE
+     * guard on its swap-backend readback check). Unlike grep, which only
+     * ever *compares* the loaded bytes, head/tail pipe them straight into
+     * stdio__write() -- feeding a raw write() syscall whatever stale bytes
+     * happen to be mapped there was observed to hang the whole selftest
+     * task under QEMU (not just return a wrong result), so this isn't safe
+     * to tolerate leniently the way grep's result is above: skip exercising
+     * it under QEMU entirely rather than risk stalling every selftest after
+     * it.
+     */
+#endif
     BNU_CHECK_RESULT(ok, bnu_xxd_app_main(10, xxd_argv), BRUCE_OK, "xxd -c 8 -g 1 -l 12 -s 4");
     BNU_CHECK_RESULT(ok, bnu_xxd_app_main(3, xxd_plain_argv), BRUCE_OK, "xxd -p");
     BNU_CHECK_RESULT(ok, bnu_xxd_app_main(4, xxd_invalid_argv), BRUCE_ERR_INVALID_ARGUMENT, "xxd -c 0");
@@ -240,6 +264,95 @@ bool selftest__run_bnu_case(void) {
     storage__remove(grep_argv[7]);
     storage__remove(wc_argv[1]);
     printf("[selftest] bnu: %s\n", ok ? "OK" : "failed");
+    return ok;
+}
+
+/* Split out from selftest__run_bnu_case() rather than folded into its
+ * already-large frame: that function's locals (dozens of argv arrays plus
+ * three fixture files' worth of open/write/close bookkeeping) combined with
+ * a direct (non-spawned) call into bnu_tr_app_main() -- whose own on-stack
+ * working tables are sized for a real process, not for sharing a frame with
+ * all of the above -- was enough to overflow the selftest task's stack.
+ * Giving these checks their own function lets the first function's frame
+ * fully unwind before any of these run, same fix shape as
+ * selftest__run_bnu_free_stack_case() below (though that one goes further
+ * and spawns a real process; a fresh function frame was enough here). Own
+ * fixture file since selftest__run_bnu_case() removes its wc fixture before
+ * returning. */
+bool selftest__run_bnu_text_case(void) {
+    char *uniq_argv[] = {"uniq", "/selftest_bnu_text.txt"};
+    char *uniq_missing_argv[] = {"uniq", "/selftest_bnu_missing.txt"};
+#if !CONFIG_BRUCE_QEMU_TEST_MODE
+    char *cut_argv[] = {"cut", "-d", " ", "-f", "2", "/selftest_bnu_text.txt"};
+#endif
+    char *cut_no_list_argv[] = {"cut", "/selftest_bnu_text.txt"};
+#if !CONFIG_BRUCE_QEMU_TEST_MODE
+    char *sort_argv[] = {"sort", "/selftest_bnu_text.txt"};
+#endif
+    char *sort_missing_argv[] = {"sort", "/selftest_bnu_missing.txt"};
+#if !CONFIG_BRUCE_QEMU_TEST_MODE
+    char *rev_argv[] = {"rev", "/selftest_bnu_text.txt"};
+#endif
+    char *rev_missing_argv[] = {"rev", "/selftest_bnu_missing.txt"};
+    char *seq_argv[] = {"seq", "3"};
+    char *seq_invalid_argv[] = {"seq", "abc"};
+    /* tr and tee only ever read piped stdin (no file-argument mode at all),
+     * so unlike the fixtures above there's no way to exercise a full run
+     * here without a routed session behind stdio__read() -- these two just
+     * pin the argument-validation branches that return before ever
+     * touching stdio (missing SET2, missing --stdin-size). */
+    char *tr_no_set2_argv[] = {"tr", "a-z"};
+    char *tee_no_input_argv[] = {"tee"};
+    static const char text[] = "one two three\nfour five\n";
+    bruce_file_id_t text_file = BRUCE_FILE_ID_INVALID;
+    size_t text_written = 0;
+    bruce_result_t text_open = storage__open(
+        uniq_argv[1], BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE | BRUCE_STORAGE_OPEN_TRUNCATE,
+        &text_file
+    );
+    bruce_result_t text_write =
+        text_open == BRUCE_OK ? storage__write(text_file, text, sizeof(text) - 1, &text_written) : text_open;
+    bruce_result_t text_close = text_open == BRUCE_OK ? storage__close(text_file) : text_open;
+    bool ok = true;
+    BNU_CHECK_RESULT(ok, text_open, BRUCE_OK, "text fixture open");
+    BNU_CHECK_RESULT(ok, text_write, BRUCE_OK, "text fixture write");
+    BNU_CHECK_BOOL(ok, text_written == sizeof(text) - 1, "text fixture write length");
+    BNU_CHECK_RESULT(ok, text_close, BRUCE_OK, "text fixture close");
+#if !CONFIG_BRUCE_QEMU_TEST_MODE
+    /* uniq/cut/sort/rev all load their file through bnu__load_path() (see
+     * bnu_app.c), the same memory__external_malloc()-backed helper
+     * bnu__head_tail_load_path() uses for head/tail -- and, like head/tail,
+     * each of these writes output derived straight from that buffer via
+     * stdio__printf()/stdio__write(). See the guard around head/tail's own
+     * checks in selftest__run_bnu_case() above for why that's not safe to
+     * exercise under QEMU: skipped here for the same reason. */
+    BNU_CHECK_RESULT(ok, bnu_uniq_app_main(2, uniq_argv), BRUCE_OK, "uniq");
+#endif
+    BNU_CHECK_RESULT(ok, bnu_uniq_app_main(2, uniq_missing_argv), BRUCE_ERR_NOT_FOUND, "uniq (missing file)");
+#if !CONFIG_BRUCE_QEMU_TEST_MODE
+    BNU_CHECK_RESULT(ok, bnu_cut_app_main(6, cut_argv), BRUCE_OK, "cut -d ' ' -f 2");
+#endif
+    BNU_CHECK_RESULT(ok, bnu_cut_app_main(2, cut_no_list_argv), BRUCE_ERR_INVALID_ARGUMENT, "cut (no -f/-c)");
+#if !CONFIG_BRUCE_QEMU_TEST_MODE
+    BNU_CHECK_RESULT(ok, bnu_sort_app_main(2, sort_argv), BRUCE_OK, "sort");
+#endif
+    BNU_CHECK_RESULT(
+        ok, bnu_sort_app_main(2, sort_missing_argv), BRUCE_ERR_NOT_FOUND, "sort (missing file)"
+    );
+#if !CONFIG_BRUCE_QEMU_TEST_MODE
+    BNU_CHECK_RESULT(ok, bnu_rev_app_main(2, rev_argv), BRUCE_OK, "rev");
+#endif
+    BNU_CHECK_RESULT(ok, bnu_rev_app_main(2, rev_missing_argv), BRUCE_ERR_NOT_FOUND, "rev (missing file)");
+    BNU_CHECK_RESULT(ok, bnu_seq_app_main(2, seq_argv), BRUCE_OK, "seq 3");
+    BNU_CHECK_RESULT(ok, bnu_seq_app_main(2, seq_invalid_argv), BRUCE_ERR_INVALID_ARGUMENT, "seq abc");
+    BNU_CHECK_RESULT(
+        ok, bnu_tr_app_main(2, tr_no_set2_argv), BRUCE_ERR_INVALID_ARGUMENT, "tr (missing SET2)"
+    );
+    BNU_CHECK_RESULT(
+        ok, bnu_tee_app_main(1, tee_no_input_argv), BRUCE_ERR_INVALID_ARGUMENT, "tee (missing input)"
+    );
+    storage__remove(uniq_argv[1]);
+    printf("[selftest] bnu (text): %s\n", ok ? "OK" : "failed");
     return ok;
 }
 

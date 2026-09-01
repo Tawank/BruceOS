@@ -410,6 +410,94 @@ bool selftest__run_shell_pipe_redirect_case(void) {
 }
 
 /* Runs `command` (a "shell -c ..." argument string) as a background child
+ * with its own routed stdio session, the same way
+ * selftest__run_shell_pipe_redirect_case() above does, and returns its exit
+ * code (or -1 if it never got that far). Shared by the tr/tee checks below
+ * so each only has to build its own command line and check the resulting
+ * file. */
+static int selftest__shell_run_pipe_command(const char *command) {
+    int status = -1;
+    bruce_stdio_session_t session = BRUCE_STDIO_SESSION_INVALID;
+    if (stdio__session_create(&session) == BRUCE_OK && stdio__session_route_children(session) == BRUCE_OK) {
+        int launched = app_runner__run("shell", command, BRUCE_LAUNCH_BACKGROUND);
+        (void)stdio__session_route_children(BRUCE_STDIO_SESSION_INVALID);
+        if (launched > 0) {
+            bruce_process_status_t proc_status;
+            if (process__wait_status((bruce_process_id_t)launched, 5000, &proc_status) == BRUCE_OK &&
+                proc_status.reason == BRUCE_PROCESS_EXITED) {
+                status = proc_status.exit_code;
+            }
+        }
+    }
+    (void)stdio__session_close(session);
+    return status;
+}
+
+/* tr and tee (see bnu_text_app.c) have no file-argument mode at all -- like
+ * real tr/tee, they only ever read piped stdin -- so unlike bnu_test.c's
+ * other bnu_*_app_main() fixtures, calling them directly with a
+ * "--stdin-size N" argv but no routed session behind it would have nothing
+ * to read from. This exercises them the same way
+ * selftest__run_shell_pipe_redirect_case() above exercises "cat | head": a
+ * real "shell -c ..." pipe, with the same QEMU pipe-buffer caveat that
+ * comment documents (shell_executor's pipe buffer is
+ * memory__external_malloc()-backed, unreliable under QEMU's swap-backend
+ * fallback). Two separate one-pipe commands rather than one three-stage
+ * "echo | tr | tee" -- shell_executor__execute_plan() rejects chained pipes
+ * ("shell: chained pipes are unsupported"), so tr's result is captured via
+ * its own "> file" redirect instead of piping it onward into tee. */
+bool selftest__run_shell_bnu_text_pipe_case(void) {
+    const char *tr_result_path = "/apps/shell_bnu_tr_result.txt";
+    const char *tee_result_path = "/apps/shell_bnu_tee_result.txt";
+    (void)storage__remove(tr_result_path);
+    (void)storage__remove(tee_result_path);
+
+    char tr_command[160];
+    snprintf(tr_command, sizeof(tr_command), "-c \"echo abc | tr a-z A-Z > %s\"", tr_result_path);
+    char tee_command[160];
+    snprintf(tee_command, sizeof(tee_command), "-c \"echo xyz | tee %s\"", tee_result_path);
+    int tr_status = selftest__shell_run_pipe_command(tr_command);
+    int tee_status = selftest__shell_run_pipe_command(tee_command);
+
+    char tr_result[32] = {0}, tee_result[32] = {0};
+    size_t tr_size = 0, tee_size = 0;
+    bruce_result_t tr_read = BRUCE_ERR_NOT_FOUND, tee_read = BRUCE_ERR_NOT_FOUND;
+    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
+    if (storage__open(tr_result_path, BRUCE_STORAGE_OPEN_READ, &file) == BRUCE_OK) {
+        tr_read = storage__read(file, tr_result, sizeof(tr_result) - 1, &tr_size);
+        (void)storage__close(file);
+    }
+    if (storage__open(tee_result_path, BRUCE_STORAGE_OPEN_READ, &file) == BRUCE_OK) {
+        tee_read = storage__read(file, tee_result, sizeof(tee_result) - 1, &tee_size);
+        (void)storage__close(file);
+    }
+    (void)storage__remove(tr_result_path);
+    (void)storage__remove(tee_result_path);
+
+#if CONFIG_BRUCE_QEMU_TEST_MODE
+    bool ok =
+        tr_status == 0 && tee_status == 0 && tr_read == BRUCE_OK && tr_size > 0 && tee_read == BRUCE_OK &&
+        tee_size > 0;
+#else
+    static const char tr_expected[] = "ABC\n";
+    static const char tee_expected[] = "xyz\n";
+    bool tr_ok = tr_read == BRUCE_OK && tr_size == sizeof(tr_expected) - 1 &&
+                 memcmp(tr_result, tr_expected, sizeof(tr_expected) - 1) == 0;
+    bool tee_ok = tee_read == BRUCE_OK && tee_size == sizeof(tee_expected) - 1 &&
+                  memcmp(tee_result, tee_expected, sizeof(tee_expected) - 1) == 0;
+    bool ok = tr_status == 0 && tee_status == 0 && tr_ok && tee_ok;
+#endif
+    if (!ok) {
+        printf(
+            "[selftest] shell/bnu-text-pipe: tr status=%d size=%u, tee status=%d size=%u\n", tr_status,
+            (unsigned)tr_size, tee_status, (unsigned)tee_size
+        );
+    }
+    printf("[selftest] shell/bnu-text-pipe: %s\n", ok ? "OK" : "failed");
+    return ok;
+}
+
+/* Runs `command` (a "shell -c ..." argument string) as a background child
  * with its stdio routed to a fresh session, feeds `stdin_text` into that
  * session right after launch (queued for the child's own `read` builtin --
  * see shell_builtins__read() in shell_builtins.c -- to consume whenever it
