@@ -33,7 +33,11 @@ bnu__layout_process(const bruce_process_snapshot_t *processes, size_t count, bru
  * whichever processes and reservations are live right now, rather than
  * reserving a fixed letter per system process up front. That's what lets the
  * legend list only processes actually visible in the map (see
- * bnu__build_layout_legend()) instead of every process on the system. */
+ * bnu__build_layout_legend()) instead of every process on the system. Each
+ * entry also totals the bytes it stands for, so a map cell collapsed to '#'
+ * (more distinct owners than the map has columns for) is never the only way
+ * to find out who's actually there and how much they hold - the legend
+ * always has the exact number. */
 #define BNU_MEMORY_LEGEND_MAX 52
 
 typedef struct {
@@ -47,6 +51,7 @@ typedef struct {
      * comment - such a page's spare slots aren't available to anyone else,
      * so "free" alone would be misleading). */
     bool reserved;
+    size_t bytes;
 } bnu__layout_legend_entry_t;
 
 static char bnu__layout_legend_symbol(
@@ -60,16 +65,23 @@ static char bnu__layout_legend_symbol(
     return '*';
 }
 
-static void bnu__layout_legend_add(
-    bnu__layout_legend_entry_t *legend, size_t *legend_count, bruce_process_id_t owner_id, bool reserved
+static void bnu__layout_legend_add_bytes(
+    bnu__layout_legend_entry_t *legend, size_t *legend_count, bruce_process_id_t owner_id, bool reserved,
+    size_t bytes
 ) {
-    if (bnu__layout_legend_symbol(legend, *legend_count, owner_id, reserved) != '*') return;
+    for (size_t i = 0; i < *legend_count; ++i) {
+        if (legend[i].owner_id == owner_id && legend[i].reserved == reserved) {
+            legend[i].bytes += bytes;
+            return;
+        }
+    }
     if (*legend_count >= BNU_MEMORY_LEGEND_MAX) return;
     size_t index = (*legend_count)++;
     legend[index] = (bnu__layout_legend_entry_t){
         .symbol = index < 26 ? (char)('A' + index) : (char)('a' + (index - 26)),
         .owner_id = owner_id,
         .reserved = reserved,
+        .bytes = bytes,
     };
 }
 
@@ -92,12 +104,14 @@ static size_t bnu__build_layout_legend(
         if (block->used) {
             if (!block->tracked) continue;
             if (bnu__layout_process(processes, process_count, block->owner_id) == NULL) continue;
-            bnu__layout_legend_add(legend, &legend_count, block->owner_id, false);
+            bnu__layout_legend_add_bytes(legend, &legend_count, block->owner_id, false, block->requested_size);
             if (block->size > block->requested_size) {
-                bnu__layout_legend_add(legend, &legend_count, block->owner_id, true);
+                bnu__layout_legend_add_bytes(
+                    legend, &legend_count, block->owner_id, true, block->size - block->requested_size
+                );
             }
         } else {
-            bnu__layout_legend_add(legend, &legend_count, block->owner_id, true);
+            bnu__layout_legend_add_bytes(legend, &legend_count, block->owner_id, true, block->size);
         }
     }
     return legend_count;
@@ -237,12 +251,14 @@ static void bnu__print_layout_backend(
         previous_start = blocks[i].region_start;
         previous_end = blocks[i].region_end;
     }
-    stdio__printf(". free  ? untracked  # mixed  ! exited owner  - allocator metadata\n");
+    stdio__printf(". free  ? untracked  # multiple owners (see legend)  ! exited owner  - allocator metadata\n");
     for (size_t i = 0; i < legend_count; ++i) {
         const bruce_process_snapshot_t *process = bnu__layout_process(processes, process_count, legend[i].owner_id);
+        char bytes_text[16];
+        bnu__format_size((uint32_t)legend[i].bytes, human, bytes_text, sizeof(bytes_text));
         stdio__printf(
-            "%c pid %-3u %s%s\n", legend[i].symbol, (unsigned)legend[i].owner_id,
-            process != NULL ? process->name : "<exited>", legend[i].reserved ? " - reserved" : ""
+            "%c pid %-3u %-15.15s %-8s %8s\n", legend[i].symbol, (unsigned)legend[i].owner_id,
+            process != NULL ? process->name : "<exited>", legend[i].reserved ? "reserved" : "used", bytes_text
         );
     }
 
@@ -332,9 +348,10 @@ int bnu_free_app_main(int argc, char **argv) {
             }
             if (required > capacity) capacity = required;
         }
-        /* The temporary snapshot itself can add one heap block between the
-         * counting and capture passes. Leave a little room for concurrent
-         * allocator activity without keeping any permanent BSS reservation. */
+        /* The temporary snapshot itself can add one block between the
+         * counting and capture passes (to whichever backend it ends up
+         * allocated from). Leave a little room for concurrent allocator
+         * activity without keeping any permanent BSS reservation. */
         if (capacity > SIZE_MAX - 4) {
             stdio__printf("free: -m layout unavailable: block count too large\n");
             return BRUCE_ERR_NO_MEMORY;
@@ -347,7 +364,7 @@ int bnu_free_app_main(int argc, char **argv) {
         /* A live heap this snapshot walks can hold vastly more blocks than a
          * single fixed-size buffer will ever comfortably fit (a heavily
          * fragmented, tens-of-MB heap can have hundreds of thousands) - a
-         * one-shot memory__malloc() sized to the *exact* live count is prone
+         * one-shot allocation sized to the *exact* live count is prone
          * to failing outright on exactly the busy systems this is meant to
          * diagnose. Cap it at a size that always fits a normal heap and rely
          * on bnu__print_layout_backend()'s own "N blocks omitted" truncation
@@ -355,7 +372,20 @@ int bnu_free_app_main(int argc, char **argv) {
          * than needing every single block to fit at once. */
         static const size_t BNU_FREE_MAP_MAX_BLOCKS = 8192;
         if (capacity > BNU_FREE_MAP_MAX_BLOCKS) capacity = BNU_FREE_MAP_MAX_BLOCKS;
-        bruce_memory_layout_block_t *blocks = memory__malloc(capacity * sizeof(*blocks));
+        /* This is a scratch buffer, not something worth taking bytes away
+         * from the internal heap for - the whole point of `free -m` is to
+         * run when internal RAM is already tight. Prefer PSRAM (never
+         * swap: memory__get_layout() below writes into this buffer through
+         * an ordinary pointer, which a flash-backed swap allocation
+         * wouldn't survive) and only fall back to memory__malloc() if
+         * there's no PSRAM or it's full too. */
+        bool blocks_external = true;
+        bruce_memory_layout_block_t *blocks =
+            (bruce_memory_layout_block_t *)memory__external_malloc_writable(capacity * sizeof(*blocks));
+        if (blocks == NULL) {
+            blocks_external = false;
+            blocks = memory__malloc(capacity * sizeof(*blocks));
+        }
         if (blocks == NULL) {
             stdio__printf("free: -m layout unavailable: out of memory (%zu blocks)\n", capacity);
             return BRUCE_ERR_NO_MEMORY;
@@ -365,7 +395,8 @@ int bnu_free_app_main(int argc, char **argv) {
         result = process__list(processes, sizeof(processes) / sizeof(processes[0]), &process_count);
         if (result != BRUCE_OK) {
             stdio__printf("free: -m layout unavailable: %s\n", result__to_string(result));
-            memory__free(blocks);
+            if (blocks_external) memory__external_free(blocks);
+            else memory__free(blocks);
             return result;
         }
         if (process_count > sizeof(processes) / sizeof(processes[0])) {
@@ -384,7 +415,8 @@ int bnu_free_app_main(int argc, char **argv) {
                 "swap", BRUCE_MEMORY_BACKEND_SWAP, processes, process_count, human, blocks, capacity
             );
         }
-        memory__free(blocks);
+        if (blocks_external) memory__external_free(blocks);
+        else memory__free(blocks);
     }
     return BRUCE_OK;
 }
