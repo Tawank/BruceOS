@@ -905,6 +905,16 @@ bruce_result_t memory_external__layout(
                 }
                 size_t index = (*out_count)++;
                 if (index < capacity) {
+                    /* A slab page is single-process for its whole lifetime
+                     * (see memory_external__allocate_slot_locked()'s doc
+                     * comment): a *free* slot run here isn't up for grabs by
+                     * anyone else, it's already reserved for s_slot_owner[page]
+                     * to place its next small allocation into. Report that
+                     * ownership even for the free run - `used: false` still
+                     * says nothing live is stored there, but `owner_id` now
+                     * says who it's held for instead of the caller having no
+                     * way to tell "free and available" apart from "free but
+                     * reserved". */
                     blocks[index] = (bruce_memory_layout_block_t){
                         .address = page * MEMORY_EXTERNAL__MMU_PAGE + slot * MEMORY_EXTERNAL__FLASH_SECTOR,
                         .size = slots * MEMORY_EXTERNAL__FLASH_SECTOR,
@@ -913,7 +923,7 @@ bruce_result_t memory_external__layout(
                         .requested_size = owner == NULL ? 0 : owner->size,
                         .backend = BRUCE_MEMORY_BACKEND_SWAP,
                         .region = BRUCE_MEMORY_REGION_SWAP,
-                        .owner_id = owner == NULL ? BRUCE_PROCESS_ID_INVALID : owner->owner_id,
+                        .owner_id = owner != NULL ? owner->owner_id : s_slot_owner[page],
                         .handle = owner == NULL ? 0 : owner->handle,
                         .used = owner != NULL,
                         .tracked = owner != NULL,

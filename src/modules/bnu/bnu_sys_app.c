@@ -28,15 +28,79 @@ bnu__layout_process(const bruce_process_snapshot_t *processes, size_t count, bru
     return NULL;
 }
 
-static char bnu__layout_symbol(
-    const bruce_memory_layout_block_t *block, const bruce_process_snapshot_t *processes, size_t count
+/* One map/legend letter per (owner, used-or-reserved) pair that actually
+ * appears in a backend's blocks - built fresh per `free -m` call from
+ * whichever processes and reservations are live right now, rather than
+ * reserving a fixed letter per system process up front. That's what lets the
+ * legend list only processes actually visible in the map (see
+ * bnu__build_layout_legend()) instead of every process on the system. */
+#define BNU_MEMORY_LEGEND_MAX 52
+
+typedef struct {
+    char symbol;
+    bruce_process_id_t owner_id;
+    /* false: this letter marks bytes actually holding that owner's data.
+     * true: bytes reserved for that owner but not currently holding any -
+     * either the rounded-up tail of one of its own allocations (block->size
+     * > block->requested_size) or a free slot run on a swap slab page it
+     * exclusively holds (see memory_external__allocate_slot_locked()'s doc
+     * comment - such a page's spare slots aren't available to anyone else,
+     * so "free" alone would be misleading). */
+    bool reserved;
+} bnu__layout_legend_entry_t;
+
+static char bnu__layout_legend_symbol(
+    const bnu__layout_legend_entry_t *legend, size_t legend_count, bruce_process_id_t owner_id, bool reserved
 ) {
-    if (!block->used) return '.';
-    if (!block->tracked) return '?';
-    const bruce_process_snapshot_t *process = bnu__layout_process(processes, count, block->owner_id);
-    if (process == NULL) return '!';
-    size_t index = (size_t)(process - processes);
-    return index < 26 ? (char)('A' + index) : index < 52 ? (char)('a' + index - 26) : '*';
+    for (size_t i = 0; i < legend_count; ++i) {
+        if (legend[i].owner_id == owner_id && legend[i].reserved == reserved) return legend[i].symbol;
+    }
+    /* Ran out of the 52 available letters - same overflow behaviour the
+     * previous flat per-process assignment used. */
+    return '*';
+}
+
+static void bnu__layout_legend_add(
+    bnu__layout_legend_entry_t *legend, size_t *legend_count, bruce_process_id_t owner_id, bool reserved
+) {
+    if (bnu__layout_legend_symbol(legend, *legend_count, owner_id, reserved) != '*') return;
+    if (*legend_count >= BNU_MEMORY_LEGEND_MAX) return;
+    size_t index = (*legend_count)++;
+    legend[index] = (bnu__layout_legend_entry_t){
+        .symbol = index < 26 ? (char)('A' + index) : (char)('a' + (index - 26)),
+        .owner_id = owner_id,
+        .reserved = reserved,
+    };
+}
+
+/* Scans every block this backend reported (not just one region) so the same
+ * owner gets the same letter in every region's map, and assigns letters in
+ * address order (blocks are already sorted by the time this runs) - the
+ * closest thing to "in the order you'd read the maps" without tracking each
+ * region separately. Blocks whose disposition wouldn't get a dedicated
+ * letter anyway (untracked - '?', or a used block whose owner has since
+ * exited - '!') are skipped, exactly mirroring what
+ * bnu__print_layout_region() actually paints for them. */
+static size_t bnu__build_layout_legend(
+    const bruce_memory_layout_block_t *blocks, size_t count, const bruce_process_snapshot_t *processes,
+    size_t process_count, bnu__layout_legend_entry_t *legend
+) {
+    size_t legend_count = 0;
+    for (size_t i = 0; i < count; ++i) {
+        const bruce_memory_layout_block_t *block = &blocks[i];
+        if (block->owner_id == BRUCE_PROCESS_ID_INVALID) continue;
+        if (block->used) {
+            if (!block->tracked) continue;
+            if (bnu__layout_process(processes, process_count, block->owner_id) == NULL) continue;
+            bnu__layout_legend_add(legend, &legend_count, block->owner_id, false);
+            if (block->size > block->requested_size) {
+                bnu__layout_legend_add(legend, &legend_count, block->owner_id, true);
+            }
+        } else {
+            bnu__layout_legend_add(legend, &legend_count, block->owner_id, true);
+        }
+    }
+    return legend_count;
 }
 
 static int bnu__layout_compare_address(const void *left, const void *right) {
@@ -59,9 +123,17 @@ static const char *bnu__layout_region_name(bruce_memory_region_t region) {
     }
 }
 
+static void bnu__layout_paint(char *map, size_t first, size_t last, char symbol) {
+    for (size_t cell = first; cell < last; ++cell) {
+        if (map[cell] == '-' || map[cell] == symbol) map[cell] = symbol;
+        else map[cell] = '#';
+    }
+}
+
 static void bnu__print_layout_region(
     const bruce_memory_layout_block_t *blocks, size_t count,
     const bruce_process_snapshot_t *processes, size_t process_count,
+    const bnu__layout_legend_entry_t *legend, size_t legend_count,
     uintptr_t region_start, uintptr_t region_end, bruce_memory_region_t region
 ) {
     if (region_end <= region_start) return;
@@ -82,10 +154,35 @@ static void bnu__print_layout_region(
         if (end > span) end = span;
         size_t last = (end * BNU_MEMORY_LAYOUT_WIDTH + span - 1) / span;
         if (last > BNU_MEMORY_LAYOUT_WIDTH) last = BNU_MEMORY_LAYOUT_WIDTH;
-        char symbol = bnu__layout_symbol(block, processes, process_count);
-        for (size_t cell = first; cell < last; ++cell) {
-            if (map[cell] == '-' || map[cell] == symbol) map[cell] = symbol;
-            else map[cell] = '#';
+
+        if (!block->used) {
+            /* Free: '.' when nobody's holding it, otherwise the reserved
+             * letter for whoever is (see bnu__build_layout_legend()). */
+            char symbol = block->owner_id == BRUCE_PROCESS_ID_INVALID
+                              ? '.'
+                              : bnu__layout_legend_symbol(legend, legend_count, block->owner_id, true);
+            bnu__layout_paint(map, first, last, symbol);
+        } else if (!block->tracked) {
+            bnu__layout_paint(map, first, last, '?');
+        } else if (bnu__layout_process(processes, process_count, block->owner_id) == NULL) {
+            bnu__layout_paint(map, first, last, '!');
+        } else {
+            /* Split the block's own span at the boundary between bytes it
+             * actually asked for (block->requested_size) and the rounded-up
+             * remainder its allocator reserved alongside them
+             * (block->size - block->requested_size, if any) - each half
+             * gets that owner's own used/reserved letter. */
+            size_t requested_end = relative + block->requested_size;
+            if (requested_end > end) requested_end = end;
+            size_t used_last = (requested_end * BNU_MEMORY_LAYOUT_WIDTH + span - 1) / span;
+            if (used_last > last) used_last = last;
+            if (used_last < first) used_last = first;
+            char used_symbol = bnu__layout_legend_symbol(legend, legend_count, block->owner_id, false);
+            bnu__layout_paint(map, first, used_last, used_symbol);
+            if (last > used_last) {
+                char reserved_symbol = bnu__layout_legend_symbol(legend, legend_count, block->owner_id, true);
+                bnu__layout_paint(map, used_last, last, reserved_symbol);
+            }
         }
     }
     /* used can't exceed span - every contributing block->size was already
@@ -123,6 +220,9 @@ static void bnu__print_layout_backend(
     for (size_t i = 0; i < shown; ++i) total += blocks[i].size;
     if (total == 0) return;
 
+    bnu__layout_legend_entry_t legend[BNU_MEMORY_LEGEND_MAX];
+    size_t legend_count = bnu__build_layout_legend(blocks, shown, processes, process_count, legend);
+
     char total_text[16];
     bnu__format_size((uint32_t)total, true, total_text, sizeof(total_text));
     stdio__printf("\n%s layout (%s, physical regions)\n", name, total_text);
@@ -131,16 +231,19 @@ static void bnu__print_layout_backend(
     for (size_t i = 0; i < shown; ++i) {
         if (blocks[i].region_start == previous_start && blocks[i].region_end == previous_end) continue;
         bnu__print_layout_region(
-            blocks, shown, processes, process_count,
+            blocks, shown, processes, process_count, legend, legend_count,
             blocks[i].region_start, blocks[i].region_end, blocks[i].region
         );
         previous_start = blocks[i].region_start;
         previous_end = blocks[i].region_end;
     }
     stdio__printf(". free  ? untracked  # mixed  ! exited owner  - allocator metadata\n");
-    for (size_t i = 0; i < process_count && i < 52; ++i) {
-        char symbol = i < 26 ? (char)('A' + i) : (char)('a' + i - 26);
-        stdio__printf("%c pid %-3u %s\n", symbol, (unsigned)processes[i].id, processes[i].name);
+    for (size_t i = 0; i < legend_count; ++i) {
+        const bruce_process_snapshot_t *process = bnu__layout_process(processes, process_count, legend[i].owner_id);
+        stdio__printf(
+            "%c pid %-3u %s%s\n", legend[i].symbol, (unsigned)legend[i].owner_id,
+            process != NULL ? process->name : "<exited>", legend[i].reserved ? " - reserved" : ""
+        );
     }
 
     stdio__printf(
@@ -161,7 +264,9 @@ static void bnu__print_layout_backend(
             "0x%08lx %-5s %-4u %-15.15s %8s %8s%s\n",
             (unsigned long)block->address, block->used ? "used" : "free",
             (unsigned)block->owner_id,
-            process != NULL ? process->name : block->used ? "<exited>" : "-",
+            process != NULL ? process->name
+            : block->used || block->owner_id != BRUCE_PROCESS_ID_INVALID ? "<exited>"
+                                                                          : "-",
             requested, reserved, block->executable ? " xip" : ""
         );
     }
