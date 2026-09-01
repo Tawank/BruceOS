@@ -56,7 +56,6 @@ extern "C" int app_main(int argc, char **argv) {
     // Hand back the buffered/DMA framebuffer's RAM (same handoff
     // native_apps/examples/nes uses); Jet's own colour buffer below needs
     // width*gameHeight*2 bytes on top of it.
-    display__game_mode(true);
 
     initializeTrigTables();
 
@@ -75,7 +74,6 @@ extern "C" int app_main(int argc, char **argv) {
     uint16_t *framebuffer = new uint16_t[(size_t)width * (size_t)gameHeight];
     if (framebuffer == nullptr) {
         printf("game3d: framebuffer allocation failed (%dx%d)\n", width, gameHeight);
-        display__game_mode(false);
         return 1;
     }
 
@@ -129,7 +127,6 @@ extern "C" int app_main(int argc, char **argv) {
         printf("game3d: material allocation failed\n");
         logHeap("material allocation failed");
         delete[] framebuffer;
-        display__game_mode(false);
         return 1;
     }
     logHeap("after materials");
@@ -146,7 +143,6 @@ extern "C" int app_main(int argc, char **argv) {
     if (!floorObj || !wallObj || !playerObj || !faceObj || !boxObj[0] || !boxObj[1] || !boxObj[2] || !boxObj[3]) {
         printf("game3d: object allocation failed\n");
         delete[] framebuffer;
-        display__game_mode(false);
         return 1;
     }
 
@@ -293,7 +289,6 @@ extern "C" int app_main(int argc, char **argv) {
     delete accentMat;
     for (int i = 0; i < kMaxBoxes; i++) delete boxMat[i];
     delete[] framebuffer;
-    display__game_mode(false);
     printf("game3d exiting\n");
     return 0;
 }
