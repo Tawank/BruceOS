@@ -50,6 +50,10 @@ bool selftest__run_bnu_case(void) {
     char *shutdown_invalid_argv[] = {"shutdown", "later"};
     char *reboot_invalid_argv[] = {"reboot", "later"};
     char *cat_argv[] = {"cat", "/selftest_bnu_cat.txt"};
+    char *cp_argv[] = {"cp", "/selftest_bnu_cat.txt", "/selftest_bnu_cp.txt"};
+    char *cp_missing_argv[] = {"cp", "/selftest_bnu_missing.txt", "/selftest_bnu_cp2.txt"};
+    char *mv_argv[] = {"mv", "/selftest_bnu_cp.txt", "/selftest_bnu_mv.txt"};
+    char *mv_missing_argv[] = {"mv", "/selftest_bnu_missing.txt", "/selftest_bnu_mv2.txt"};
     char *stty_argv[] = {"stty"};
     char *date_argv[] = {"date"};
     char *date_invalid_argv[] = {"date", "-s", "not-a-date"};
@@ -63,6 +67,10 @@ bool selftest__run_bnu_case(void) {
     char *wc_argv[] = {"wc", "/selftest_bnu_wc.txt"};
     char *wc_flags_argv[] = {"wc", "-l", "-w", "/selftest_bnu_wc.txt"};
     char *wc_missing_argv[] = {"wc", "/selftest_bnu_wc_missing.txt"};
+    /* Legacy "-N" line-count shorthand (e.g. "head -4" for "head -n 4") --
+     * reuses the wc fixture (2 lines), so "-1" prints one of them. */
+    char *head_legacy_argv[] = {"head", "-1", "/selftest_bnu_wc.txt"};
+    char *tail_legacy_argv[] = {"tail", "-1", "/selftest_bnu_wc.txt"};
     char *xxd_argv[] = {"xxd", "-c", "8", "-g", "1", "-l", "12", "-s", "4", "/selftest_bnu_wc.txt"};
     char *xxd_plain_argv[] = {"xxd", "-p", "/selftest_bnu_wc.txt"};
     char *xxd_invalid_argv[] = {"xxd", "-c", "0", "/selftest_bnu_wc.txt"};
@@ -135,6 +143,11 @@ bool selftest__run_bnu_case(void) {
     BNU_CHECK_BOOL(ok, cat_written == sizeof(cat_text) - 1, "cat fixture write length");
     BNU_CHECK_RESULT(ok, cat_close, BRUCE_OK, "cat fixture close");
     BNU_CHECK_RESULT(ok, bnu_cat_app_main(2, cat_argv), BRUCE_OK, "cat");
+    BNU_CHECK_RESULT(ok, bnu_cp_app_main(3, cp_argv), BRUCE_OK, "cp");
+    BNU_CHECK_RESULT(ok, bnu_cp_app_main(3, cp_missing_argv), BRUCE_ERR_NOT_FOUND, "cp (missing source)");
+    BNU_CHECK_RESULT(ok, bnu_cp_app_main(3, cp_argv), BRUCE_ERR_ALREADY_EXISTS, "cp (dest exists)");
+    BNU_CHECK_RESULT(ok, bnu_mv_app_main(3, mv_argv), BRUCE_OK, "mv");
+    BNU_CHECK_RESULT(ok, bnu_mv_app_main(3, mv_missing_argv), BRUCE_ERR_NOT_FOUND, "mv (missing source)");
     /* Selftest runs with no routed stdio session, so stty correctly reports "not a tty". */
     BNU_CHECK_RESULT(ok, bnu_stty_app_main(1, stty_argv), BRUCE_ERR_NOT_FOUND, "stty");
     BNU_CHECK_BOOL(
@@ -194,10 +207,13 @@ bool selftest__run_bnu_case(void) {
     BNU_CHECK_RESULT(ok, bnu_wc_app_main(2, wc_argv), BRUCE_OK, "wc");
     BNU_CHECK_RESULT(ok, bnu_wc_app_main(4, wc_flags_argv), BRUCE_OK, "wc -l -w");
     BNU_CHECK_RESULT(ok, bnu_wc_app_main(2, wc_missing_argv), BRUCE_ERR_NOT_FOUND, "wc (missing file)");
+    BNU_CHECK_RESULT(ok, bnu_head_app_main(3, head_legacy_argv), BRUCE_OK, "head -1");
+    BNU_CHECK_RESULT(ok, bnu_tail_app_main(3, tail_legacy_argv), BRUCE_OK, "tail -1");
     BNU_CHECK_RESULT(ok, bnu_xxd_app_main(10, xxd_argv), BRUCE_OK, "xxd -c 8 -g 1 -l 12 -s 4");
     BNU_CHECK_RESULT(ok, bnu_xxd_app_main(3, xxd_plain_argv), BRUCE_OK, "xxd -p");
     BNU_CHECK_RESULT(ok, bnu_xxd_app_main(4, xxd_invalid_argv), BRUCE_ERR_INVALID_ARGUMENT, "xxd -c 0");
     storage__remove(cat_argv[1]);
+    storage__remove(mv_argv[2]); /* mv above renamed cp_argv's destination to this path. */
     storage__remove(grep_argv[7]);
     storage__remove(wc_argv[1]);
     printf("[selftest] bnu: %s\n", ok ? "OK" : "failed");

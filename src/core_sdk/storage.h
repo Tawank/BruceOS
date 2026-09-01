@@ -159,6 +159,18 @@ bruce_result_t storage__remove(const char *path);
 bruce_result_t storage__rename(const char *from, const char *to);
 
 /**
+ * @brief Copies one file's bytes to a new path.
+ *
+ * Unlike storage__rename(), works across mounted filesystems (e.g. internal
+ * flash to/from SD). `from` must be a regular file, not a directory -
+ * BRUCE_ERR_UNSUPPORTED.
+ *
+ * @param from Existing file path.
+ * @param to New path; must not already exist.
+ */
+bruce_result_t storage__copy(const char *from, const char *to);
+
+/**
  * @brief Returns filesystem capacity and used bytes for the volume containing path.
  *
  * @param path Path identifying which mounted volume to report on.

@@ -76,28 +76,11 @@ typedef struct {
     size_t bytes;
 } bnu__layout_legend_entry_t;
 
-/* Distinct sets of bits (legend[] owners and/or the fixed BNU_MEMORY_BIT_*
- * categories - see bnu__layout_mark()) observed sharing a single map cell.
- * Resolved only after every block in a region has been marked (see
- * bnu__layout_resolve_symbol()), so anything sharing a cell - two owners, an
- * owner and some untracked heap noise, whatever - gets its own dedicated
- * letter and breakdown line instead of collapsing straight to the generic
- * '#' the instant it first overlaps with something else. Sized generously:
- * unlike the old owner-only combos (rare), a dense heap region can genuinely
- * have this many distinct overlaps once free/untracked/padding are counted
- * too - '#' is now reserved for the rarer case of exhausting even this. */
-#define BNU_MEMORY_COMBO_MAX 24
-
-typedef struct {
-    uint64_t members; /* bitmask over legend[] indices and BNU_MEMORY_BIT_* */
-    char symbol;
-} bnu__layout_combo_entry_t;
-
-/* Index counterpart of the old per-symbol lookup: building the per-cell
- * membership bitmask bnu__layout_resolve_symbol() later turns into a symbol
- * needs legend[]'s *index*, not its already-assigned letter. SIZE_MAX on the
- * same "ran out of the 52 available letters" overflow the previous flat
- * per-process assignment used (callers fall back to '*', same as before). */
+/* Index lookup: turning an (owner, reserved, is_stack) key back into
+ * legend[]'s index, e.g. so a block can be credited to the same row
+ * bnu__build_layout_legend() already gave it. SIZE_MAX on the near-impossible
+ * "ran out of the 52 available letters" overflow (callers fall back to a
+ * dedicated overflow category - see BNU_MEMORY_CATEGORY_OVERFLOW). */
 static size_t bnu__layout_legend_index(
     const bnu__layout_legend_entry_t *legend, size_t legend_count, bruce_process_id_t owner_id, bool reserved,
     bool is_stack
@@ -131,19 +114,6 @@ static void bnu__layout_legend_add_bytes(
     };
 }
 
-/* Backend-wide totals for everything that ISN'T a specific live owner - each
- * gets a fixed bit position (see BNU_MEMORY_BIT_FREE et al.) rather than a
- * legend[] slot, since there's exactly one of each per backend rather than
- * one per owner. Reused wherever one of these ends up as a member of a
- * combo cell (bnu__layout_resolve_symbol()), the same way a real owner's
- * legend[].bytes gets reused there. */
-typedef struct {
-    size_t padding_bytes; /* RAM only - see compact_reserved. */
-    size_t free_bytes;
-    size_t untracked_bytes;
-    size_t exited_bytes;
-} bnu__layout_totals_t;
-
 /* Scans every block this backend reported (not just one region) so the same
  * owner gets the same letter in every region's map, and assigns letters in
  * address order (blocks are already sorted by the time this runs) - the
@@ -151,46 +121,43 @@ typedef struct {
  * region separately.
  *
  * compact_reserved folds every "reserved" byte (regardless of owner) into
- * out_totals->padding_bytes instead of a per-owner legend entry - see
+ * *out_padding_bytes instead of a per-owner legend entry - see
  * BNU_MEMORY_LEGEND_MAX's doc comment. Pass false, as the swap backend does,
- * to keep the old per-owner behaviour. */
+ * to keep the old per-owner behaviour. Free/untracked/exited bytes aren't
+ * owners and never get a legend row; the map (bnu__print_layout_region())
+ * paints them straight from each block with no legend bookkeeping needed. */
 static size_t bnu__build_layout_legend(
     const bruce_memory_layout_block_t *blocks, size_t count, const bruce_process_snapshot_t *processes,
-    size_t process_count, bool compact_reserved, bnu__layout_totals_t *out_totals,
-    bnu__layout_legend_entry_t *legend
+    size_t process_count, bool compact_reserved, size_t *out_padding_bytes, bnu__layout_legend_entry_t *legend
 ) {
     size_t legend_count = 0;
-    bnu__layout_totals_t totals = {0};
+    size_t padding_bytes = 0;
     for (size_t i = 0; i < count; ++i) {
         const bruce_memory_layout_block_t *block = &blocks[i];
         if (!block->used) {
             if (block->owner_id == BRUCE_PROCESS_ID_INVALID) {
-                totals.free_bytes += block->size;
+                /* Free - no legend row. */
             } else if (compact_reserved) {
-                totals.padding_bytes += block->size;
+                padding_bytes += block->size;
             } else {
                 bnu__layout_legend_add_bytes(legend, &legend_count, block->owner_id, true, false, block->size);
             }
             continue;
         }
-        if (!block->tracked) {
-            totals.untracked_bytes += block->size;
-            continue;
-        }
+        if (!block->tracked) continue; /* Untracked - no legend row. */
         if (bnu__layout_process(processes, process_count, block->owner_id) == NULL) {
-            totals.exited_bytes += block->size;
-            continue;
+            continue; /* Exited owner - no legend row. */
         }
         bnu__layout_legend_add_bytes(
             legend, &legend_count, block->owner_id, false, block->is_stack, block->requested_size
         );
         if (block->size > block->requested_size) {
             size_t padding = block->size - block->requested_size;
-            if (compact_reserved) totals.padding_bytes += padding;
+            if (compact_reserved) padding_bytes += padding;
             else bnu__layout_legend_add_bytes(legend, &legend_count, block->owner_id, true, block->is_stack, padding);
         }
     }
-    *out_totals = totals;
+    *out_padding_bytes = padding_bytes;
     return legend_count;
 }
 
@@ -214,97 +181,93 @@ static const char *bnu__layout_region_name(bruce_memory_region_t region) {
     }
 }
 
-/* Bit positions in a cell's membership bitmask for categories that aren't a
- * specific live owner - kept well clear of legend[]'s own index range (bits
- * 0..BNU_MEMORY_LEGEND_MAX-1, i.e. 0..51) so a cell can mix owners and these
- * in the same combo without bit collisions.
+/* Categories a map cell can be dominated by that aren't a specific live
+ * owner - appended right after legend[]'s own indices (0..legend_count-1) to
+ * form one flat 0..category_count-1 space (see bnu__print_layout_region()).
  *
  * OVERFLOW covers the near-impossible case of a backend with more than the
  * 52 available (owner, reserved, is-stack) combinations - legend[] has
- * nowhere left to put such a block, so it's grouped here instead of being
- * silently dropped from the map. */
-#define BNU_MEMORY_BIT_PADDING 59
-#define BNU_MEMORY_BIT_OVERFLOW 60
-#define BNU_MEMORY_BIT_FREE 61
-#define BNU_MEMORY_BIT_UNTRACKED 62
-#define BNU_MEMORY_BIT_EXITED 63
+ * nowhere left to put such a block, so its bytes still count towards a cell
+ * (rather than being silently dropped from the map) under this shared
+ * catch-all instead of a real owner's own letter. */
+#define BNU_MEMORY_CATEGORY_PADDING 0
+#define BNU_MEMORY_CATEGORY_OVERFLOW 1
+#define BNU_MEMORY_CATEGORY_FREE 2
+#define BNU_MEMORY_CATEGORY_UNTRACKED 3
+#define BNU_MEMORY_CATEGORY_EXITED 4
+#define BNU_MEMORY_PSEUDO_CATEGORIES 5
 
-/* OR's a bit into every cell in [first, last) - shared by both a specific
- * owner's legend[] index and the fixed BNU_MEMORY_BIT_* categories. Doesn't
- * resolve a display symbol itself: what a cell ends up showing depends on
- * every bit it accumulates across the whole region, which isn't known until
- * every block has been processed (see bnu__layout_resolve_symbol()). */
-static void bnu__layout_mark(uint64_t *cell_members, size_t first, size_t last, size_t bit) {
-    uint64_t mask = 1ull << bit;
-    for (size_t cell = first; cell < last; ++cell) cell_members[cell] |= mask;
-}
-
-static char bnu__layout_bit_symbol(const bnu__layout_legend_entry_t *legend, size_t legend_count, size_t bit) {
-    switch (bit) {
-        case BNU_MEMORY_BIT_PADDING: return '+';
-        case BNU_MEMORY_BIT_OVERFLOW: return '*';
-        case BNU_MEMORY_BIT_FREE: return '.';
-        case BNU_MEMORY_BIT_UNTRACKED: return '?';
-        case BNU_MEMORY_BIT_EXITED: return '!';
-        default: return bit < legend_count ? legend[bit].symbol : '#';
-    }
-}
-
-/* Turns a cell's accumulated membership bitmask into a display symbol: a
- * single bit's own stable symbol when it's alone, otherwise a dedicated
- * combo letter - reused whenever the exact same set of bits shares another
- * cell, continuing the same A-Z/a-z sequence right after legend[]'s own
- * letters. This is what replaces the old flat '#' for "more than one thing
- * here": every combination - two owners, an owner and some untracked heap
- * noise, free space butting up against padding, whatever - gets its own
- * letter and its own breakdown line (see bnu__print_layout_backend()) rather
- * than being flattened to one uninformative symbol. '#' now only means
- * every available letter (52 total, owners and combos combined) is spoken
- * for, or the small fixed combo table (BNU_MEMORY_COMBO_MAX) is full - both
- * rare in practice. */
-static char bnu__layout_resolve_symbol(
-    const bnu__layout_legend_entry_t *legend, size_t legend_count, bnu__layout_combo_entry_t *combo,
-    size_t *combo_count, uint64_t members
+static char bnu__layout_category_symbol(
+    const bnu__layout_legend_entry_t *legend, size_t legend_count, size_t category
 ) {
-    size_t popcount = 0;
-    size_t only_bit = 0;
-    for (size_t bit = 0; bit < 64 && popcount <= 1; ++bit) {
-        if ((members & (1ull << bit)) == 0) continue;
-        only_bit = bit;
-        ++popcount;
+    if (category < legend_count) return legend[category].symbol;
+    switch (category - legend_count) {
+        case BNU_MEMORY_CATEGORY_PADDING: return '+';
+        case BNU_MEMORY_CATEGORY_OVERFLOW: return '*';
+        case BNU_MEMORY_CATEGORY_FREE: return '.';
+        case BNU_MEMORY_CATEGORY_UNTRACKED: return '?';
+        case BNU_MEMORY_CATEGORY_EXITED: return '!';
+        default: return '#'; /* Unreachable: every category above is handled. */
     }
-    if (popcount == 0) return '-'; /* Shouldn't happen - caller skips empty cells. */
-    if (popcount == 1) return bnu__layout_bit_symbol(legend, legend_count, only_bit);
-
-    for (size_t i = 0; i < *combo_count; ++i) {
-        if (combo[i].members == members) return combo[i].symbol;
-    }
-    size_t next_symbol_index = legend_count + *combo_count;
-    if (*combo_count >= BNU_MEMORY_COMBO_MAX || next_symbol_index >= 52) return '#';
-    size_t index = (*combo_count)++;
-    combo[index].members = members;
-    combo[index].symbol =
-        next_symbol_index < 26 ? (char)('A' + next_symbol_index) : (char)('a' + (next_symbol_index - 26));
-    return combo[index].symbol;
 }
 
+/* Adds [byte_start, byte_end) worth of a category's bytes into every map
+ * cell it actually overlaps, weighted by exactly how many of those bytes
+ * fall in each cell - not just "did this block touch this cell at all".
+ * That per-cell weight is what lets bnu__print_layout_region() later paint
+ * each cell as whichever single category holds the most of it, instead of
+ * inventing a new symbol the moment two things share a cell. */
+static void bnu__layout_add_bytes_to_cells(
+    uint32_t *counts, size_t category_count, size_t category, size_t span, size_t byte_start, size_t byte_end
+) {
+    if (byte_end <= byte_start || span == 0) return;
+    size_t first = byte_start * BNU_MEMORY_LAYOUT_WIDTH / span;
+    size_t last = (byte_end * BNU_MEMORY_LAYOUT_WIDTH + span - 1) / span;
+    if (last > BNU_MEMORY_LAYOUT_WIDTH) last = BNU_MEMORY_LAYOUT_WIDTH;
+    for (size_t cell = first; cell < last; ++cell) {
+        size_t cell_start = cell * span / BNU_MEMORY_LAYOUT_WIDTH;
+        size_t cell_end = (cell + 1) * span / BNU_MEMORY_LAYOUT_WIDTH;
+        size_t overlap_start = byte_start > cell_start ? byte_start : cell_start;
+        size_t overlap_end = byte_end < cell_end ? byte_end : cell_end;
+        if (overlap_end > overlap_start) {
+            counts[cell * category_count + category] += (uint32_t)(overlap_end - overlap_start);
+        }
+    }
+}
+
+/* Paints one region's map: every block contributes its bytes, cell by cell,
+ * to whichever category it belongs to (a specific owner's used or reserved
+ * half, or one of the fixed padding/free/untracked/exited/overflow
+ * categories); once every block has been counted, each cell is painted with
+ * whichever single category holds the most of it. A cell too coarse to hold
+ * one thing cleanly always shows *something real* - the category that
+ * actually dominates it - rather than a synthetic combo letter that doesn't
+ * correspond to any legend row. The legend below always lists a category's
+ * true total regardless of whether it wins any cell at this resolution. */
 static void bnu__print_layout_region(
     const bruce_memory_layout_block_t *blocks, size_t count,
     const bruce_process_snapshot_t *processes, size_t process_count,
-    const bnu__layout_legend_entry_t *legend, size_t legend_count, bool compact_reserved,
-    bnu__layout_combo_entry_t *combo, size_t *combo_count, size_t region_number,
-    uintptr_t region_start, uintptr_t region_end, bruce_memory_region_t region
+    const bnu__layout_legend_entry_t *legend, size_t legend_count, bool compact_reserved, bool human,
+    size_t region_number, uintptr_t region_start, uintptr_t region_end, bruce_memory_region_t region
 ) {
     if (region_end <= region_start) return;
     size_t span = region_end - region_start;
     char map[BNU_MEMORY_LAYOUT_WIDTH + 1];
     map[BNU_MEMORY_LAYOUT_WIDTH] = '\0';
-    /* Per-cell membership, resolved into a display symbol only once every
-     * block below has been marked - see bnu__layout_mark() /
-     * bnu__layout_resolve_symbol(). Small and fixed-size (48 cells), unlike
-     * the per-process/legend buffers this file already keeps on the heap -
-     * safe to leave on the stack. */
-    uint64_t cell_members[BNU_MEMORY_LAYOUT_WIDTH] = {0};
+
+    size_t category_count = legend_count + BNU_MEMORY_PSEUDO_CATEGORIES;
+    /* Heap-allocated: up to 48 * 57 uint32_t (~10.5K) in the worst case,
+     * scaled down to a few hundred bytes normally by legend_count - either
+     * way, too big to risk on this process's small default stack. */
+    uint32_t *counts = memory__calloc(BNU_MEMORY_LAYOUT_WIDTH * category_count, sizeof(*counts));
+    if (counts == NULL) {
+        stdio__printf(
+            "%u. region %-12s 0x%08lx-0x%08lx map unavailable: out of memory\n", (unsigned)region_number,
+            bnu__layout_region_name(region), (unsigned long)region_start, (unsigned long)region_end
+        );
+        return;
+    }
+
     size_t used = 0;
     size_t largest_free = 0;
     for (size_t i = 0; i < count; ++i) {
@@ -313,66 +276,96 @@ static void bnu__print_layout_region(
         if (block->used) used += block->size;
         else if (block->size > largest_free) largest_free = block->size;
         size_t relative = block->address > region_start ? block->address - region_start : 0;
-        size_t first = relative * BNU_MEMORY_LAYOUT_WIDTH / span;
         size_t end = relative + block->size;
         if (end > span) end = span;
-        size_t last = (end * BNU_MEMORY_LAYOUT_WIDTH + span - 1) / span;
-        if (last > BNU_MEMORY_LAYOUT_WIDTH) last = BNU_MEMORY_LAYOUT_WIDTH;
 
         if (!block->used) {
             /* Free: nobody's holding it, RAM's compacted padding, or (swap
              * only) reserved for a specific owner - see
              * bnu__build_layout_legend(). */
             if (block->owner_id == BRUCE_PROCESS_ID_INVALID) {
-                bnu__layout_mark(cell_members, first, last, BNU_MEMORY_BIT_FREE);
+                bnu__layout_add_bytes_to_cells(
+                    counts, category_count, legend_count + BNU_MEMORY_CATEGORY_FREE, span, relative, end
+                );
             } else if (compact_reserved) {
-                bnu__layout_mark(cell_members, first, last, BNU_MEMORY_BIT_PADDING);
+                bnu__layout_add_bytes_to_cells(
+                    counts, category_count, legend_count + BNU_MEMORY_CATEGORY_PADDING, span, relative, end
+                );
             } else {
                 size_t index = bnu__layout_legend_index(legend, legend_count, block->owner_id, true, false);
-                bnu__layout_mark(cell_members, first, last, index == SIZE_MAX ? BNU_MEMORY_BIT_OVERFLOW : index);
+                bnu__layout_add_bytes_to_cells(
+                    counts, category_count,
+                    index == SIZE_MAX ? legend_count + BNU_MEMORY_CATEGORY_OVERFLOW : index, span, relative, end
+                );
             }
         } else if (!block->tracked) {
-            bnu__layout_mark(cell_members, first, last, BNU_MEMORY_BIT_UNTRACKED);
+            bnu__layout_add_bytes_to_cells(
+                counts, category_count, legend_count + BNU_MEMORY_CATEGORY_UNTRACKED, span, relative, end
+            );
         } else if (bnu__layout_process(processes, process_count, block->owner_id) == NULL) {
-            bnu__layout_mark(cell_members, first, last, BNU_MEMORY_BIT_EXITED);
+            bnu__layout_add_bytes_to_cells(
+                counts, category_count, legend_count + BNU_MEMORY_CATEGORY_EXITED, span, relative, end
+            );
         } else {
             /* Split the block's own span at the boundary between bytes it
              * actually asked for (block->requested_size) and the rounded-up
              * remainder its allocator reserved alongside them
              * (block->size - block->requested_size, if any) - the used half
-             * always gets that owner's own bit; the reserved half gets
-             * RAM's padding bit (compacted) or its own reserved bit on
-             * swap. */
+             * always counts towards that owner's own category; the reserved
+             * half counts towards RAM's padding category (compacted) or its
+             * own reserved category on swap. */
             size_t requested_end = relative + block->requested_size;
             if (requested_end > end) requested_end = end;
-            size_t used_last = (requested_end * BNU_MEMORY_LAYOUT_WIDTH + span - 1) / span;
-            if (used_last > last) used_last = last;
-            if (used_last < first) used_last = first;
 
             size_t used_index =
                 bnu__layout_legend_index(legend, legend_count, block->owner_id, false, block->is_stack);
-            bnu__layout_mark(
-                cell_members, first, used_last, used_index == SIZE_MAX ? BNU_MEMORY_BIT_OVERFLOW : used_index
+            bnu__layout_add_bytes_to_cells(
+                counts, category_count,
+                used_index == SIZE_MAX ? legend_count + BNU_MEMORY_CATEGORY_OVERFLOW : used_index, span, relative,
+                requested_end
             );
 
-            if (last > used_last) {
+            if (end > requested_end) {
                 if (compact_reserved) {
-                    bnu__layout_mark(cell_members, used_last, last, BNU_MEMORY_BIT_PADDING);
+                    bnu__layout_add_bytes_to_cells(
+                        counts, category_count, legend_count + BNU_MEMORY_CATEGORY_PADDING, span, requested_end, end
+                    );
                 } else {
                     size_t reserved_index =
                         bnu__layout_legend_index(legend, legend_count, block->owner_id, true, block->is_stack);
-                    bnu__layout_mark(
-                        cell_members, used_last, last,
-                        reserved_index == SIZE_MAX ? BNU_MEMORY_BIT_OVERFLOW : reserved_index
+                    bnu__layout_add_bytes_to_cells(
+                        counts, category_count,
+                        reserved_index == SIZE_MAX ? legend_count + BNU_MEMORY_CATEGORY_OVERFLOW : reserved_index,
+                        span, requested_end, end
                     );
                 }
             }
         }
     }
+    /* A cell shared by two or more *live processes* - as opposed to an owner
+     * merely sharing a cell with free/untracked/padding noise, which its own
+     * letter already covers well enough - gets a dedicated '%' instead of
+     * silently picking whichever owner has the most bytes there. Detected in
+     * the same pass that picks each cell's winning category, since both need
+     * the same per-category byte counts. */
+    bool shared[BNU_MEMORY_LAYOUT_WIDTH];
     for (size_t cell = 0; cell < BNU_MEMORY_LAYOUT_WIDTH; ++cell) {
-        map[cell] = cell_members[cell] == 0
-                        ? '-'
-                        : bnu__layout_resolve_symbol(legend, legend_count, combo, combo_count, cell_members[cell]);
+        size_t best_category = SIZE_MAX;
+        uint32_t best_bytes = 0;
+        size_t owners_present = 0;
+        for (size_t category = 0; category < category_count; ++category) {
+            uint32_t bytes = counts[cell * category_count + category];
+            if (bytes == 0) continue;
+            if (category < legend_count) ++owners_present;
+            if (bytes > best_bytes) {
+                best_bytes = bytes;
+                best_category = category;
+            }
+        }
+        shared[cell] = owners_present >= 2;
+        map[cell] = best_category == SIZE_MAX ? '-'
+                    : shared[cell]             ? '%'
+                                               : bnu__layout_category_symbol(legend, legend_count, best_category);
     }
     /* used can't exceed span - every contributing block->size was already
      * clamped against this same region when memory_layout__visit() built it -
@@ -391,6 +384,31 @@ static void bnu__print_layout_region(
         bnu__layout_region_name(region),
         (unsigned long)region_start, (unsigned long)region_end, used_text, span_text, free_text, largest_text, map
     );
+    /* One line per '%' cell, breaking down exactly what's in *that cell* -
+     * not a backend-wide total - so distinct '%' cells never repeat the same
+     * numbers at each other the way the old combo rows did. Column is
+     * 1-based to match counting characters into the bracketed map above. */
+    for (size_t cell = 0; cell < BNU_MEMORY_LAYOUT_WIDTH; ++cell) {
+        if (!shared[cell]) continue;
+        stdio__printf("  %% col %u:", (unsigned)(cell + 1));
+        bool first_owner = true;
+        for (size_t category = 0; category < legend_count; ++category) {
+            uint32_t bytes = counts[cell * category_count + category];
+            if (bytes == 0) continue;
+            const bruce_process_snapshot_t *process =
+                bnu__layout_process(processes, process_count, legend[category].owner_id);
+            char bytes_text[16];
+            bnu__format_size(bytes, human, bytes_text, sizeof(bytes_text));
+            stdio__printf(
+                "%s %u %s%s %s", first_owner ? "" : ",", (unsigned)legend[category].owner_id,
+                process != NULL ? process->name : "<exited>", legend[category].is_stack ? " (stack)" : "",
+                bytes_text
+            );
+            first_owner = false;
+        }
+        stdio__printf("\n");
+    }
+    memory__free(counts);
 }
 
 static void bnu__print_layout_backend(
@@ -421,12 +439,9 @@ static void bnu__print_layout_backend(
      * BNU_MEMORY_LEGEND_MAX's doc comment - so only swap keeps the detailed
      * per-owner "reserved" accounting the map/legend otherwise show. */
     bool compact_reserved = backend != BRUCE_MEMORY_BACKEND_SWAP;
-    bnu__layout_totals_t totals;
+    size_t padding_bytes = 0;
     size_t legend_count =
-        bnu__build_layout_legend(blocks, shown, processes, process_count, compact_reserved, &totals, legend);
-    /* Small and fixed-size - see BNU_MEMORY_COMBO_MAX. */
-    bnu__layout_combo_entry_t combo[BNU_MEMORY_COMBO_MAX];
-    size_t combo_count = 0;
+        bnu__build_layout_legend(blocks, shown, processes, process_count, compact_reserved, &padding_bytes, legend);
 
     char total_text[16];
     bnu__format_size((uint32_t)total, true, total_text, sizeof(total_text));
@@ -438,14 +453,15 @@ static void bnu__print_layout_backend(
         if (blocks[i].region_start == previous_start && blocks[i].region_end == previous_end) continue;
         ++region_number;
         bnu__print_layout_region(
-            blocks, shown, processes, process_count, legend, legend_count, compact_reserved, combo, &combo_count,
-            region_number, blocks[i].region_start, blocks[i].region_end, blocks[i].region
+            blocks, shown, processes, process_count, legend, legend_count, compact_reserved, human, region_number,
+            blocks[i].region_start, blocks[i].region_end, blocks[i].region
         );
         previous_start = blocks[i].region_start;
         previous_end = blocks[i].region_end;
     }
     stdio__printf(
-        ". free  ? untracked  ! exited owner  - allocator metadata  # too many owners to letter%s\n",
+        ". free  ? untracked  ! exited owner  - allocator metadata  %% shared by processes (see below)"
+        "  # too many processes to letter%s\n",
         compact_reserved ? "  + padding" : ""
     );
     for (size_t i = 0; i < legend_count; ++i) {
@@ -476,61 +492,10 @@ static void bnu__print_layout_backend(
             );
         }
     }
-    if (compact_reserved && totals.padding_bytes > 0) {
+    if (compact_reserved && padding_bytes > 0) {
         char bytes_text[16];
-        bnu__format_size((uint32_t)totals.padding_bytes, human, bytes_text, sizeof(bytes_text));
+        bnu__format_size((uint32_t)padding_bytes, human, bytes_text, sizeof(bytes_text));
         stdio__printf("%c pid %-3s %-15.15s %-8s %8s\n", '+', "-", "(padding)", "reserved", bytes_text);
-    }
-    /* Combo rows: every map cell where more than one thing - two owners, an
-     * owner and some untracked heap noise, free space next to padding,
-     * whatever - shares a column gets its own letter (assigned in
-     * bnu__layout_resolve_symbol()) plus a breakdown of exactly what's in
-     * it, comma-separated. A member that's a specific owner reuses its
-     * already-printed total above rather than working out how many of its
-     * bytes fall in that one cell; a member that's one of the fixed
-     * categories (free/untracked/exited/padding/overflow) reports that
-     * category's one backend-wide total instead, for the same reason. */
-    for (size_t i = 0; i < combo_count; ++i) {
-        stdio__printf("%c ", combo[i].symbol);
-        bool first_member = true;
-        for (size_t bit = 0; bit < 64; ++bit) {
-            if ((combo[i].members & (1ull << bit)) == 0) continue;
-            const char *sep = first_member ? "" : ", ";
-            char bytes_text[16];
-            switch (bit) {
-                case BNU_MEMORY_BIT_PADDING:
-                    bnu__format_size((uint32_t)totals.padding_bytes, human, bytes_text, sizeof(bytes_text));
-                    stdio__printf("%spadding %s", sep, bytes_text);
-                    break;
-                case BNU_MEMORY_BIT_OVERFLOW: stdio__printf("%sother owners", sep); break;
-                case BNU_MEMORY_BIT_FREE:
-                    bnu__format_size((uint32_t)totals.free_bytes, human, bytes_text, sizeof(bytes_text));
-                    stdio__printf("%sfree %s", sep, bytes_text);
-                    break;
-                case BNU_MEMORY_BIT_UNTRACKED:
-                    bnu__format_size((uint32_t)totals.untracked_bytes, human, bytes_text, sizeof(bytes_text));
-                    stdio__printf("%suntracked %s", sep, bytes_text);
-                    break;
-                case BNU_MEMORY_BIT_EXITED:
-                    bnu__format_size((uint32_t)totals.exited_bytes, human, bytes_text, sizeof(bytes_text));
-                    stdio__printf("%sexited %s", sep, bytes_text);
-                    break;
-                default:
-                    if (bit < legend_count) {
-                        const bruce_process_snapshot_t *process =
-                            bnu__layout_process(processes, process_count, legend[bit].owner_id);
-                        bnu__format_size((uint32_t)legend[bit].bytes, human, bytes_text, sizeof(bytes_text));
-                        stdio__printf(
-                            "%s%u %s%s %s", sep, (unsigned)legend[bit].owner_id,
-                            process != NULL ? process->name : "<exited>", legend[bit].is_stack ? " (stack)" : "",
-                            bytes_text
-                        );
-                    }
-                    break;
-            }
-            first_member = false;
-        }
-        stdio__printf("\n");
     }
 
     /* "rgn" cross-references each row against the numbered region headers

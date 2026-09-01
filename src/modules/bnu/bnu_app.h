@@ -14,6 +14,8 @@ int bnu_sleep_app_main(int argc, char **argv);
 int bnu_mkdir_app_main(int argc, char **argv);
 int bnu_touch_app_main(int argc, char **argv);
 int bnu_rm_app_main(int argc, char **argv);
+int bnu_cp_app_main(int argc, char **argv);
+int bnu_mv_app_main(int argc, char **argv);
 int bnu_cat_app_main(int argc, char **argv);
 int bnu_file_app_main(int argc, char **argv);
 int bnu_head_app_main(int argc, char **argv);

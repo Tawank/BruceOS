@@ -107,6 +107,7 @@ void app_runner__register_defaults(void) {
     );
     app_runner__register("bparted", "Manage partitions", "Storage", bparted_app_main, BPARTED_STACK_BYTES);
     app_runner__register("cat", "Print file contents", "Storage", bnu_cat_app_main, 0);
+    app_runner__register("cp", "Copy a file", "Storage", bnu_cp_app_main, 0);
     app_runner__register("file", "Identify a file's type", "Storage", bnu_file_app_main, 0);
     app_runner__register("filemanager", "Browse and manage files", "Storage", filemanager_app_main, 8192);
     app_runner__register("head", "Print the first part of a file", "Storage", bnu_head_app_main, 0);
@@ -114,6 +115,7 @@ void app_runner__register_defaults(void) {
     app_runner__register("lsblk", "List storage devices", "Storage", bnu_lsblk_app_main, 0);
     app_runner__register("mkdir", "Create directories", "Storage", bnu_mkdir_app_main, 0);
     app_runner__register("mount", "Mount storage devices", "Storage", bnu_mount_app_main, 0);
+    app_runner__register("mv", "Move or rename a file", "Storage", bnu_mv_app_main, 0);
     app_runner__register("pwd", "Print the current directory", "Storage", bnu_pwd_app_main, 0);
     app_runner__register("rm", "Remove files and directories", "Storage", bnu_rm_app_main, 0);
     app_runner__register(

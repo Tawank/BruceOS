@@ -990,6 +990,66 @@ bruce_result_t storage__rename(const char *from, const char *to) {
     return result;
 }
 
+/* Streams `from`'s bytes into a freshly created `to`, going through the
+ * public storage__open()/read()/write() API rather than a raw POSIX
+ * copy - unlike storage__rename()'s rename(2), that works across mount
+ * points (internal flash <-> SD), and it means an open handle on either
+ * side is still process-owned and gets cleaned up automatically if the
+ * calling process dies mid-copy, the same as any other open file. */
+bruce_result_t storage__copy(const char *from, const char *to) {
+    if (from == NULL || to == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    if (strcmp(from, to) == 0) return BRUCE_ERR_INVALID_ARGUMENT;
+
+    /* storage__list() succeeding is this codebase's standing idiom for "path
+     * is a directory" (clipboard__is_directory(), shell_builtins__cd()) -
+     * opendir() on a plain file fails ENOTDIR -> BRUCE_ERR_IO, which is also
+     * how a missing `from` (ENOENT -> BRUCE_ERR_NOT_FOUND) and permission
+     * failures fall out below rather than being misread as "not a
+     * directory". */
+    size_t entry_count = 0;
+    bruce_result_t result = storage__list(from, NULL, 0, &entry_count);
+    if (result == BRUCE_OK) return BRUCE_ERR_UNSUPPORTED;
+    if (result != BRUCE_ERR_IO) return result;
+
+    bool exists = false;
+    result = storage__exists(to, &exists);
+    if (result != BRUCE_OK) return result;
+    if (exists) return BRUCE_ERR_ALREADY_EXISTS;
+
+    bruce_file_id_t src = BRUCE_FILE_ID_INVALID;
+    result = storage__open(from, BRUCE_STORAGE_OPEN_READ, &src);
+    if (result != BRUCE_OK) return result;
+    bruce_file_id_t dst = BRUCE_FILE_ID_INVALID;
+    result = storage__open(to, BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE, &dst);
+    if (result != BRUCE_OK) {
+        storage__close(src);
+        return result;
+    }
+
+    unsigned char buffer[512];
+    while (result == BRUCE_OK) {
+        size_t read_size = 0;
+        result = storage__read(src, buffer, sizeof(buffer), &read_size);
+        if (result != BRUCE_OK || read_size == 0) break;
+        size_t total_written = 0;
+        while (total_written < read_size) {
+            size_t written = 0;
+            result = storage__write(dst, buffer + total_written, read_size - total_written, &written);
+            if (result != BRUCE_OK) break;
+            if (written == 0) {
+                result = BRUCE_ERR_IO;
+                break;
+            }
+            total_written += written;
+        }
+    }
+    bruce_result_t close_src = storage__close(src);
+    bruce_result_t close_dst = storage__close(dst);
+    if (result != BRUCE_OK) return result;
+    if (close_src != BRUCE_OK) return close_src;
+    return close_dst;
+}
+
 bruce_result_t storage__get_usage(const char *path, size_t *total_bytes, size_t *used_bytes) {
     bruce_result_t permission = permission__check(BRUCE_PERMISSION_STORAGE);
     if (permission != BRUCE_OK) return permission;

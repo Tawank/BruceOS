@@ -288,41 +288,6 @@ static bool clipboard__is_within(const char *ancestor, const char *path) {
     return path[ancestor_length] == '\0' || path[ancestor_length] == '/';
 }
 
-static bruce_result_t clipboard__copy_file_bytes(const char *src, const char *dst) {
-    bruce_file_id_t in = BRUCE_FILE_ID_INVALID;
-    bruce_result_t result = storage__open(src, BRUCE_STORAGE_OPEN_READ, &in);
-    if (result != BRUCE_OK) return result;
-    bruce_file_id_t out = BRUCE_FILE_ID_INVALID;
-    result = storage__open(dst, BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE, &out);
-    if (result != BRUCE_OK) {
-        storage__close(in);
-        return result;
-    }
-
-    unsigned char buffer[512];
-    while (result == BRUCE_OK) {
-        size_t read_size = 0;
-        result = storage__read(in, buffer, sizeof(buffer), &read_size);
-        if (result != BRUCE_OK || read_size == 0) break;
-        size_t total_written = 0;
-        while (total_written < read_size) {
-            size_t written = 0;
-            result = storage__write(out, buffer + total_written, read_size - total_written, &written);
-            if (result != BRUCE_OK) break;
-            if (written == 0) {
-                result = BRUCE_ERR_IO;
-                break;
-            }
-            total_written += written;
-        }
-    }
-    bruce_result_t close_in = storage__close(in);
-    bruce_result_t close_out = storage__close(out);
-    if (result != BRUCE_OK) return result;
-    if (close_in != BRUCE_OK) return close_in;
-    return close_out;
-}
-
 static bruce_result_t clipboard__copy_entry(const char *src, const char *dst, bool move) {
     bool destination_exists = false;
     bruce_result_t result = storage__exists(dst, &destination_exists);
@@ -334,7 +299,9 @@ static bruce_result_t clipboard__copy_entry(const char *src, const char *dst, bo
     if (result != BRUCE_OK) return result;
 
     if (!is_directory) {
-        result = clipboard__copy_file_bytes(src, dst);
+        /* storage__copy() does the same destination-exists/read/write loop
+         * this used to duplicate locally - see its doc comment. */
+        result = storage__copy(src, dst);
     } else {
         result = storage__mkdir(dst);
         size_t count = 0;

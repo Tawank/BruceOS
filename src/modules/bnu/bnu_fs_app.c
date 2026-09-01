@@ -1,6 +1,7 @@
 #include "bnu_app.h"
 #include "bnu_internal.h"
 
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -171,6 +172,48 @@ int bnu_rm_app_main(int argc, char **argv) {
     ap_free(parser);
     return BRUCE_OK;
 }
+
+/* Shared body of cp and mv: both take exactly a source and destination path
+ * (no globbing, no directory destinations, no recursive directory copy -
+ * matching rm/mkdir/touch's own minimal, single-path style above) and print
+ * the same "cmd: from -> to: error N" shape on failure. */
+static int bnu__cp_mv_app_main(int argc, char **argv, bool move) {
+    const char *command = move ? "mv" : "cp";
+    ArgParser *parser = bnu__new_parser(move ? "Move or rename a file." : "Copy a file.");
+    if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
+    ap_add_required_arg(parser, "source", move ? "File to move" : "File to copy");
+    ap_add_required_arg(parser, "dest", "Destination path (must not already exist)");
+    ap_unknown_options_as_args(parser);
+    if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
+
+    char from[BRUCE_STORAGE_PATH_MAX];
+    char to[BRUCE_STORAGE_PATH_MAX];
+    bool resolved = bnu__resolve_path(ap_get_arg(parser, "source"), from) &&
+                     bnu__resolve_path(ap_get_arg(parser, "dest"), to);
+    ap_free(parser);
+    if (!resolved) return BRUCE_ERR_INVALID_PATH;
+
+    bruce_result_t result = move ? storage__rename(from, to) : storage__copy(from, to);
+    /* storage__rename() only fails BRUCE_ERR_INVALID_ARGUMENT when `from`
+     * and `to` sit on different mounted filesystems (e.g. internal flash and
+     * SD) - rename(2) can't cross that boundary, so fall back to a copy
+     * (which streams through the public read/write API instead of a raw
+     * rename and so doesn't care about mount boundaries) plus a remove,
+     * matching a real cross-device mv. */
+    if (move && result == BRUCE_ERR_INVALID_ARGUMENT) {
+        result = storage__copy(from, to);
+        if (result == BRUCE_OK) result = storage__remove(from);
+    }
+    if (result != BRUCE_OK) {
+        stdio__printf("%s: %s -> %s: error %d\n", command, from, to, result);
+        return result;
+    }
+    return BRUCE_OK;
+}
+
+int bnu_cp_app_main(int argc, char **argv) { return bnu__cp_mv_app_main(argc, argv, false); }
+
+int bnu_mv_app_main(int argc, char **argv) { return bnu__cp_mv_app_main(argc, argv, true); }
 
 static bruce_result_t bnu__cat_file(const char *path) {
     bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
@@ -357,7 +400,26 @@ static size_t bnu__tail_offset(const char *data, size_t length, unsigned long li
     return bnu__head_offset(data, length, skip);
 }
 
-/* Shared body of head and tail: parse "-n lines" plus the usual file-or-
+/* Old-style "-N" line count (e.g. "head -4"), as a shorthand for "-n N".
+ * args.c never treats "-<digits>" as an option (see ap_parse_level()'s
+ * isdigit() check, there so a leading "-4" doesn't get mistaken for a
+ * cluster of short options) -- it lands as an ordinary positional instead,
+ * which is what lets bnu__head_tail_app_main() below tell it apart from the
+ * file argument itself. */
+static bool bnu__head_tail_legacy_count(const char *arg, unsigned long *out_lines) {
+    if (arg == NULL || arg[0] != '-' || arg[1] == '\0') return false;
+    for (const char *c = arg + 1; *c != '\0'; ++c) {
+        if (!isdigit((unsigned char)*c)) return false;
+    }
+    char *end = NULL;
+    unsigned long value = strtoul(arg + 1, &end, 10);
+    if (end == NULL || *end != '\0') return false;
+    *out_lines = value;
+    return true;
+}
+
+/* Shared body of head and tail: parse "-n lines" (or the legacy "-N"
+ * shorthand -- see bnu__head_tail_legacy_count()) plus the usual file-or-
  * stdin argument (see bnu_less_app_main()'s "--stdin-size" handling, which
  * this mirrors), load the whole input, and print the requested slice. */
 static int bnu__head_tail_app_main(int argc, char **argv, bool tail) {
@@ -368,17 +430,39 @@ static int bnu__head_tail_app_main(int argc, char **argv, bool tail) {
     );
     if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
     ap_add_int_opt(parser, "n", BNU_HEAD_TAIL_DEFAULT_LINES);
-    ap_set_opt_help(parser, "n", "Number of lines to print");
+    ap_set_opt_help(parser, "n", "Number of lines to print (also settable as e.g. -4)");
     ap_add_str_opt(parser, "stdin-size", NULL);
     ap_set_opt_help(parser, "stdin-size", "Read exactly this many bytes from stdin (used by shell pipes)");
     ap_add_optional_arg(parser, "file", "File to read (reads stdin if omitted)");
     ap_unknown_options_as_args(parser);
     ap_first_pos_arg_ends_option_parsing(parser);
+    ap_allow_extra_args(parser); /* to let a legacy "-N" arg sit alongside "file" -- resolved below. */
     if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
 
     int lines_arg = ap_get_int_value(parser, "n");
     unsigned long lines = lines_arg > 0 ? (unsigned long)lines_arg : 0;
-    const char *path_arg = ap_get_arg(parser, "file");
+
+    /* "file" isn't just ap_get_arg(parser, "file") here: with extra args
+     * allowed, a legacy "-N" could occupy parsed_args[0] ahead of the real
+     * file (e.g. "head -4 notes.txt"), so both positionals need sorting out
+     * by shape rather than by position. */
+    const char *path_arg = NULL;
+    bool legacy_count_seen = false;
+    for (int i = 0; i < ap_count_args(parser); ++i) {
+        const char *value = ap_get_arg_at_index(parser, i);
+        unsigned long legacy_lines = 0;
+        if (!legacy_count_seen && bnu__head_tail_legacy_count(value, &legacy_lines)) {
+            if (!ap_found(parser, "n")) lines = legacy_lines;
+            legacy_count_seen = true;
+            continue;
+        }
+        if (path_arg != NULL) {
+            stdio__printf("%s: unexpected argument '%s'\n", command, value);
+            ap_free(parser);
+            return BRUCE_ERR_INVALID_ARGUMENT;
+        }
+        path_arg = value;
+    }
     const char *stdin_size_arg =
         ap_found(parser, "stdin-size") ? ap_get_str_value(parser, "stdin-size") : NULL;
     char *end = NULL;

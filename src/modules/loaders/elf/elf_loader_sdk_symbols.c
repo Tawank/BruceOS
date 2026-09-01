@@ -578,6 +578,7 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(storage__exists),
     ESP_ELFSYM_EXPORT(storage__remove),
     ESP_ELFSYM_EXPORT(storage__rename),
+    ESP_ELFSYM_EXPORT(storage__copy),
     ESP_ELFSYM_EXPORT(storage__get_usage),
 
     /* Block devices */
