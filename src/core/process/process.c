@@ -2,6 +2,7 @@
 
 #include "core/display/display.h"
 #include "core/event_loop/event_loop.h"
+#include "core/memory/memory.h"
 #include "core/stdio/stdio.h"
 #include "core_sdk/display.h"
 #include "core_sdk/permission.h"
@@ -42,11 +43,103 @@ bruce_process_id_t s_effective_foreground;
 static uint32_t s_last_total_runtime;
 process__environment_t s_global_environment;
 
+#define PROCESS__REAP_STACK_BYTES 2048u
+
+/* One node per statically-created task waiting for its stack/TCB buffers to
+ * be freed once FreeRTOS confirms it will never run again (see
+ * process__enqueue_reap_locked() and process__reap_task() below). */
+typedef struct process__reap_entry {
+    TaskHandle_t handle;
+    void *stack_buffer;
+    void *tcb_buffer;
+    struct process__reap_entry *next;
+} process__reap_entry_t;
+
+static process__reap_entry_t *s_reap_head;
+static process__reap_entry_t *s_reap_tail;
+static TaskHandle_t s_reaper_handle;
+
+/* Frees a statically-created task's stack/TCB buffers directly. Safe only
+ * once FreeRTOS guarantees the task will never run again - e.g. right after
+ * vTaskDelete() on a *different*, still-live task, which takes effect
+ * immediately. Self-deleting tasks must go through process__enqueue_reap_locked()
+ * instead. */
+void process__free_stack_buffers(void *stack_buffer, void *tcb_buffer) {
+    memory__header_t *header = ((memory__header_t *)stack_buffer) - 1;
+    header->magic = 0;
+    free(header);
+    free(tcb_buffer);
+}
+
+/* Persistent background task (not a Bruce process itself) that reclaims
+ * self-deleted tasks' buffers. A task can never free its own stack while
+ * still executing on it, so process__trampoline() and process__kill()'s
+ * self-kill path suspend themselves (vTaskSuspend(NULL), never resumed)
+ * instead of self-deleting, and hand their buffers off here.
+ *
+ * eTaskGetState() == eDeleted is deliberately not used to detect this: a
+ * self-deleted task reports eDeleted the instant it is queued for the idle
+ * task's deferred cleanup, before that cleanup has actually run - freeing its
+ * buffers that early races the idle task's own list bookkeeping. eSuspended
+ * carries no such caveat, and once suspended (and never resumed) the task is
+ * guaranteed to never touch its stack again, so deleting it from here (not
+ * self, not currently running) completes synchronously with no idle-task
+ * involvement, just like killing any other suspended task. */
+static void process__reap_task(void *arg) {
+    (void)arg;
+    for (;;) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        for (;;) {
+            process__lock();
+            process__reap_entry_t *entry = s_reap_head;
+            if (entry != NULL) {
+                s_reap_head = entry->next;
+                if (s_reap_head == NULL) s_reap_tail = NULL;
+            }
+            process__unlock();
+            if (entry == NULL) break;
+
+            while (eTaskGetState(entry->handle) != eSuspended) {
+                vTaskDelay(pdMS_TO_TICKS(1));
+            }
+            vTaskDelete(entry->handle);
+            process__free_stack_buffers(entry->stack_buffer, entry->tcb_buffer);
+            free(entry);
+        }
+    }
+}
+
+void process__enqueue_reap_locked(TaskHandle_t handle, void *stack_buffer, void *tcb_buffer) {
+    process__reap_entry_t *entry = malloc(sizeof(*entry));
+    if (entry == NULL) {
+        /* A process already committed to exiting must not block or fail
+         * because of this: leak the two buffers instead. Vanishingly rare,
+         * and no worse than the exiting process continuing to hold them. */
+        return;
+    }
+    entry->handle = handle;
+    entry->stack_buffer = stack_buffer;
+    entry->tcb_buffer = tcb_buffer;
+    entry->next = NULL;
+    if (s_reap_tail != NULL) s_reap_tail->next = entry;
+    else s_reap_head = entry;
+    s_reap_tail = entry;
+    if (s_reaper_handle != NULL) xTaskNotifyGive(s_reaper_handle);
+}
+
 void process__ensure_init(void) {
     if (s_lock != NULL) { return; }
+    bool created = false;
     portENTER_CRITICAL(&s_init_mux);
-    if (s_lock == NULL) { s_lock = xSemaphoreCreateRecursiveMutexStatic(&s_lock_storage); }
+    if (s_lock == NULL) {
+        s_lock = xSemaphoreCreateRecursiveMutexStatic(&s_lock_storage);
+        created = true;
+    }
     portEXIT_CRITICAL(&s_init_mux);
+    if (!created) return;
+    xTaskCreate(
+        process__reap_task, "reaper", PROCESS__REAP_STACK_BYTES, NULL, tskIDLE_PRIORITY + 1, &s_reaper_handle
+    );
 }
 
 void process__lock(void) { xSemaphoreTakeRecursive(s_lock, portMAX_DELAY); }
@@ -371,9 +464,13 @@ static void process__trampoline(void *arg) {
             .exit_code = 0,
             .signal = record->pending_signal,
         };
+        /* Read before teardown, which may free `record` itself. */
+        void *stack_buffer = record->stack_buffer;
+        void *tcb_buffer = record->tcb_buffer;
         process__teardown_locked(record, &status);
+        process__enqueue_reap_locked(xTaskGetCurrentTaskHandle(), stack_buffer, tcb_buffer);
         process__unlock();
-        vTaskDelete(NULL);
+        vTaskSuspend(NULL);
         return;
     }
     process__unlock();
@@ -397,8 +494,9 @@ static void process__trampoline(void *arg) {
 
     process__lock();
     if (!record->in_use) {
+        process__enqueue_reap_locked(xTaskGetCurrentTaskHandle(), record->stack_buffer, record->tcb_buffer);
         process__unlock();
-        vTaskDelete(NULL);
+        vTaskSuspend(NULL);
         return;
     }
     bruce_process_status_t status = {
@@ -406,10 +504,14 @@ static void process__trampoline(void *arg) {
         .exit_code = record->stop_requested ? 0 : exit_code,
         .signal = record->stop_requested ? record->pending_signal : (bruce_process_signal_t)0,
     };
+    /* Read before teardown, which may free `record` itself. */
+    void *stack_buffer = record->stack_buffer;
+    void *tcb_buffer = record->tcb_buffer;
     process__teardown_locked(record, &status);
+    process__enqueue_reap_locked(xTaskGetCurrentTaskHandle(), stack_buffer, tcb_buffer);
     process__unlock();
 
-    vTaskDelete(NULL);
+    vTaskSuspend(NULL);
 }
 
 bruce_result_t
@@ -487,10 +589,44 @@ process_registry__create(const process_create_params_t *params, bruce_process_id
     record->next_resource_id = 1;
     uint32_t stack_bytes = params->stack_bytes != 0 ? params->stack_bytes : PROCESS__DEFAULT_STACK_BYTES;
     record->stack_total_bytes = stack_bytes;
+
+    /* The stack is allocated (and freed - see process__free_stack_buffers())
+     * by Bruce itself rather than FreeRTOS, so it carries a Bruce tracked-
+     * memory header and shows up in `free -m` as the process's own memory
+     * instead of an anonymous heap block. It is deliberately never registered
+     * via process_registry__resource_register(): process__teardown_locked()
+     * runs its resource cleanups synchronously while the process is still
+     * executing (before it self-deletes), which would free a running task's
+     * own stack out from under it. */
+    memory__header_t *stack_header = malloc(sizeof(memory__header_t) + stack_bytes);
+    StaticTask_t *tcb_buffer = stack_header != NULL ? malloc(sizeof(StaticTask_t)) : NULL;
+    if (stack_header == NULL || tcb_buffer == NULL) {
+        free(stack_header);
+        free(tcb_buffer);
+        process__free_argv(record->argc, record->argv);
+        process__environment_free(&record->environment);
+        record->in_use = false;
+        process__dispose_if_unused_locked(record);
+        process__unlock();
+        return BRUCE_ERR_NO_MEMORY;
+    }
+    stack_header->magic = MEMORY__MAGIC;
+    stack_header->size = stack_bytes;
+    stack_header->resource_id = record->next_resource_id++;
+    stack_header->owner_id = record->id;
+    record->stack_buffer = (void *)(stack_header + 1);
+    record->tcb_buffer = tcb_buffer;
+    record->memory_bytes += stack_bytes;
+
     UBaseType_t priority = params->priority != 0 ? (UBaseType_t)params->priority : tskIDLE_PRIORITY + 1;
-    BaseType_t created =
-        xTaskCreate(process__trampoline, record->name, stack_bytes, record, priority, &record->handle);
-    if (created != pdPASS) {
+    record->handle = xTaskCreateStatic(
+        process__trampoline, record->name, stack_bytes, record, priority, (StackType_t *)record->stack_buffer,
+        tcb_buffer
+    );
+    if (record->handle == NULL) {
+        process__free_stack_buffers(record->stack_buffer, record->tcb_buffer);
+        record->stack_buffer = NULL;
+        record->tcb_buffer = NULL;
         process__free_argv(record->argc, record->argv);
         process__environment_free(&record->environment);
         record->in_use = false;

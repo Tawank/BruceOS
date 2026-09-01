@@ -291,6 +291,32 @@ static void bnu__print_layout_backend(
     }
 }
 
+/* Task stacks are FreeRTOS-allocated, not something memory__get_layout()'s
+ * heap-block walk attributes to a process, so this reads straight off the
+ * process snapshot (the same stack_total_bytes/stack_high_water_bytes `top`
+ * already reports) instead of needing a second allocator pass. */
+static void bnu__print_layout_stacks(
+    const bruce_process_snapshot_t *processes, size_t process_count, bool human
+) {
+    stdio__printf("\nprocess stacks\n");
+    stdio__printf("%-4s %-15s %8s %8s %8s\n", "pid", "name", "stack", "used", "free");
+    for (size_t i = 0; i < process_count; ++i) {
+        uint32_t used = processes[i].stack_total_bytes > processes[i].stack_high_water_bytes
+                            ? processes[i].stack_total_bytes - processes[i].stack_high_water_bytes
+                            : 0;
+        char stack_text[16];
+        char used_text[16];
+        char free_text[16];
+        bnu__format_size(processes[i].stack_total_bytes, human, stack_text, sizeof(stack_text));
+        bnu__format_size(used, human, used_text, sizeof(used_text));
+        bnu__format_size(processes[i].stack_high_water_bytes, human, free_text, sizeof(free_text));
+        stdio__printf(
+            "%-4u %-15.15s %8s %8s %8s\n", (unsigned)processes[i].id, processes[i].name, stack_text, used_text,
+            free_text
+        );
+    }
+}
+
 static void
 bnu__print_memory_row(const char *name, size_t total, size_t free_size, size_t largest, bool human) {
     char total_text[16];
@@ -417,6 +443,7 @@ int bnu_free_app_main(int argc, char **argv) {
         }
         if (blocks_external) memory__external_free(blocks);
         else memory__free(blocks);
+        bnu__print_layout_stacks(processes, process_count, human);
     }
     return BRUCE_OK;
 }

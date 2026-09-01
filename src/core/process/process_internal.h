@@ -41,6 +41,15 @@ typedef struct process__record {
     bruce_stdio_session_t stdio_session;
     bruce_stdio_session_t child_stdio_session;
     TaskHandle_t handle;
+    /* Backing buffers for this process's statically-created task, so its
+     * stack shows up in `free -m` as the process's own tracked memory
+     * instead of an anonymous heap block (see process_registry__create()).
+     * Freed by the reaper (self-delete) or directly (force-kill) once
+     * FreeRTOS confirms the task will never run again - see
+     * process__reap_task()'s doc comment for why that can't happen here on
+     * the process's own stack. */
+    void *stack_buffer;
+    void *tcb_buffer;
 
     bruce_app_entry_t entry;
     int argc;
@@ -122,6 +131,29 @@ void process__foreground_push_locked(bruce_process_id_t id);
 void process__refresh_cpu_samples_locked(void);
 void process__fill_snapshot_locked(const process__record_t *record, bruce_process_snapshot_t *out_snapshot);
 void process__teardown_locked(process__record_t *record, const bruce_process_status_t *status);
+
+/* Hands a statically-created task's backing buffers off to the reaper task so
+ * they get freed once it is safe. Caller must hold the lock and must call
+ * this only for xTaskGetCurrentTaskHandle() (the caller's own task), right
+ * before it calls vTaskSuspend(NULL) - never vTaskDelete(NULL) - and never
+ * runs another instruction. Suspending (rather than self-deleting) lets the
+ * reaper delete it from outside once suspended, which frees the buffers
+ * synchronously with no idle-task involvement; see process__free_stack_buffers()'s
+ * doc comment for why self-deleting first would race the idle task's own
+ * cleanup of the task. Killing a *different*, non-self task completes
+ * immediately as-is, so that path frees buffers directly instead. */
+void process__enqueue_reap_locked(TaskHandle_t handle, void *stack_buffer, void *tcb_buffer);
+
+/* Frees a statically-created task's stack/TCB buffers directly. Safe only
+ * once FreeRTOS guarantees the task will never run again *and* has already
+ * torn down its TCB - i.e. right after vTaskDelete() returns for a task that
+ * was not the caller and was not currently running (suspended, blocked, or
+ * ready but preempted). A task exiting on its own must go through
+ * process__enqueue_reap_locked() instead: it cannot vTaskDelete(NULL) itself
+ * and then free its own buffers here, both because it can't free its own
+ * running stack and because self-deletion defers the actual TCB teardown to
+ * the idle task. */
+void process__free_stack_buffers(void *stack_buffer, void *tcb_buffer);
 
 bool process__environment_name_valid(const char *name);
 int process__environment_find(const process__environment_t *environment, const char *name);

@@ -355,15 +355,21 @@ bruce_result_t process__kill(bruce_process_id_t process_id) {
     bool is_self = handle != NULL && handle == xTaskGetCurrentTaskHandle();
 
     if (is_self) {
-        /* Self-kill: tear down first, then delete; this call never returns. */
+        /* Self-kill: tear down first, then suspend; this call never returns.
+         * See process__enqueue_reap_locked()'s doc comment for why this
+         * suspends rather than self-deletes. */
         bruce_process_status_t status = {
             .reason = BRUCE_PROCESS_KILLED,
             .exit_code = 0,
             .signal = BRUCE_PROCESS_SIGNAL_KILL,
         };
+        /* Read before teardown, which may free `record` itself. */
+        void *stack_buffer = record->stack_buffer;
+        void *tcb_buffer = record->tcb_buffer;
         process__teardown_locked(record, &status);
+        process__enqueue_reap_locked(handle, stack_buffer, tcb_buffer);
         process__unlock();
-        vTaskDelete(NULL);
+        vTaskSuspend(NULL);
         return BRUCE_OK; /* unreachable */
     }
 
@@ -399,6 +405,11 @@ bruce_result_t process__kill(bruce_process_id_t process_id) {
     if (handle != NULL) {
         vTaskSetThreadLocalStoragePointer(handle, PROCESS__TLS_SLOT, NULL);
         vTaskDelete(handle);
+        /* Deleting a *different*, still-live task completes immediately, so
+         * its buffers can be freed directly here instead of via the reaper. */
+        process__free_stack_buffers(record->stack_buffer, record->tcb_buffer);
+        record->stack_buffer = NULL;
+        record->tcb_buffer = NULL;
     }
     bruce_process_status_t status = {
         .reason = BRUCE_PROCESS_KILLED,
