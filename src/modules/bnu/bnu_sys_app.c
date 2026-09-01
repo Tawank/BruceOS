@@ -69,9 +69,13 @@ static void bnu__print_layout_region(
     char map[BNU_MEMORY_LAYOUT_WIDTH + 1];
     memset(map, '-', BNU_MEMORY_LAYOUT_WIDTH);
     map[BNU_MEMORY_LAYOUT_WIDTH] = '\0';
+    size_t used = 0;
+    size_t largest_free = 0;
     for (size_t i = 0; i < count; ++i) {
         const bruce_memory_layout_block_t *block = &blocks[i];
         if (block->region_start != region_start || block->region_end != region_end) continue;
+        if (block->used) used += block->size;
+        else if (block->size > largest_free) largest_free = block->size;
         size_t relative = block->address > region_start ? block->address - region_start : 0;
         size_t first = relative * BNU_MEMORY_LAYOUT_WIDTH / span;
         size_t end = relative + block->size;
@@ -84,12 +88,22 @@ static void bnu__print_layout_region(
             else map[cell] = '#';
         }
     }
+    /* used can't exceed span - every contributing block->size was already
+     * clamped against this same region when memory_layout__visit() built it -
+     * but derive free_size defensively rather than trusting that here too. */
+    size_t free_size = used < span ? span - used : 0;
     char span_text[16];
+    char used_text[16];
+    char free_text[16];
+    char largest_text[16];
     bnu__format_size((uint32_t)span, true, span_text, sizeof(span_text));
+    bnu__format_size((uint32_t)used, true, used_text, sizeof(used_text));
+    bnu__format_size((uint32_t)free_size, true, free_text, sizeof(free_text));
+    bnu__format_size((uint32_t)largest_free, true, largest_text, sizeof(largest_text));
     stdio__printf(
-        "region %-12s 0x%08lx-0x%08lx (%s)\n[%s]\n",
+        "region %-12s 0x%08lx-0x%08lx (%s/%s) free: %s lrgst: %s\n[%s]\n",
         bnu__layout_region_name(region),
-        (unsigned long)region_start, (unsigned long)region_end, span_text, map
+        (unsigned long)region_start, (unsigned long)region_end, used_text, span_text, free_text, largest_text, map
     );
 }
 
@@ -207,21 +221,45 @@ int bnu_free_app_main(int argc, char **argv) {
             }
             size_t required = 0;
             result = memory__get_layout(backends[i], NULL, 0, &required);
-            if (result != BRUCE_OK) return result;
+            if (result != BRUCE_OK) {
+                stdio__printf("free: -m layout unavailable: %s\n", result__to_string(result));
+                return result;
+            }
             if (required > capacity) capacity = required;
         }
         /* The temporary snapshot itself can add one heap block between the
          * counting and capture passes. Leave a little room for concurrent
          * allocator activity without keeping any permanent BSS reservation. */
-        if (capacity > SIZE_MAX - 4) return BRUCE_ERR_NO_MEMORY;
+        if (capacity > SIZE_MAX - 4) {
+            stdio__printf("free: -m layout unavailable: block count too large\n");
+            return BRUCE_ERR_NO_MEMORY;
+        }
         capacity += 4;
-        if (capacity > SIZE_MAX / sizeof(bruce_memory_layout_block_t)) return BRUCE_ERR_NO_MEMORY;
+        if (capacity > SIZE_MAX / sizeof(bruce_memory_layout_block_t)) {
+            stdio__printf("free: -m layout unavailable: block count too large\n");
+            return BRUCE_ERR_NO_MEMORY;
+        }
+        /* A live heap this snapshot walks can hold vastly more blocks than a
+         * single fixed-size buffer will ever comfortably fit (a heavily
+         * fragmented, tens-of-MB heap can have hundreds of thousands) - a
+         * one-shot memory__malloc() sized to the *exact* live count is prone
+         * to failing outright on exactly the busy systems this is meant to
+         * diagnose. Cap it at a size that always fits a normal heap and rely
+         * on bnu__print_layout_backend()'s own "N blocks omitted" truncation
+         * (already handles a *_get_layout() count exceeding capacity) rather
+         * than needing every single block to fit at once. */
+        static const size_t BNU_FREE_MAP_MAX_BLOCKS = 8192;
+        if (capacity > BNU_FREE_MAP_MAX_BLOCKS) capacity = BNU_FREE_MAP_MAX_BLOCKS;
         bruce_memory_layout_block_t *blocks = memory__malloc(capacity * sizeof(*blocks));
-        if (blocks == NULL) return BRUCE_ERR_NO_MEMORY;
+        if (blocks == NULL) {
+            stdio__printf("free: -m layout unavailable: out of memory (%zu blocks)\n", capacity);
+            return BRUCE_ERR_NO_MEMORY;
+        }
         bruce_process_snapshot_t processes[16];
         size_t process_count = 0;
         result = process__list(processes, sizeof(processes) / sizeof(processes[0]), &process_count);
         if (result != BRUCE_OK) {
+            stdio__printf("free: -m layout unavailable: %s\n", result__to_string(result));
             memory__free(blocks);
             return result;
         }

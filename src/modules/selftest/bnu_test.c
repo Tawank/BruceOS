@@ -42,6 +42,8 @@ bool selftest__run_bnu_case(void) {
     char *mount_argv[] = {"mount"};
     char *unmount_argv[] = {"unmount", "missing"};
     char *free_argv[] = {"free"};
+    char *free_map_argv[] = {"free", "-m"};
+    char *free_map_human_argv[] = {"free", "-m", "-h"};
     char *top_argv[] = {"top"};
     char *shutdown_invalid_argv[] = {"shutdown", "later"};
     char *reboot_invalid_argv[] = {"reboot", "later"};
@@ -106,6 +108,18 @@ bool selftest__run_bnu_case(void) {
     BNU_CHECK_RESULT(ok, bnu_mount_app_main(1, mount_argv), BRUCE_OK, "mount");
     BNU_CHECK_RESULT(ok, bnu_unmount_app_main(2, unmount_argv), BRUCE_ERR_NOT_FOUND, "unmount missing");
     BNU_CHECK_RESULT(ok, bnu_free_app_main(1, free_argv), BRUCE_OK, "free");
+    /* Regression coverage for a real bug: "-m" (proportional allocator map)
+     * silently produced no map output whenever the layout snapshot couldn't
+     * be captured (e.g. permission failure, or the exact-sized snapshot
+     * buffer failing to allocate on a large/fragmented heap) - the failure
+     * was swallowed with a bare `return result;` and nothing printed. This
+     * doesn't reproduce the specific failure (this heap is far too small to
+     * hit the allocation-size case), but it does pin the success contract so
+     * a future regression in "-m"'s own argument/dispatch handling - like the
+     * one this bug report was actually about - fails loudly here instead of
+     * only in the field. */
+    BNU_CHECK_RESULT(ok, bnu_free_app_main(2, free_map_argv), BRUCE_OK, "free -m");
+    BNU_CHECK_RESULT(ok, bnu_free_app_main(3, free_map_human_argv), BRUCE_OK, "free -m -h");
     BNU_CHECK_RESULT(ok, bnu_top_app_main(1, top_argv), BRUCE_OK, "top");
     BNU_CHECK_RESULT(
         ok, bnu_shutdown_app_main(1, shutdown_invalid_argv), BRUCE_ERR_INVALID_ARGUMENT, "shutdown (argc=1)"
