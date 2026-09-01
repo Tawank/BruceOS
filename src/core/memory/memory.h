@@ -11,6 +11,12 @@ typedef struct {
     size_t size;
     bruce_resource_id_t resource_id;
     bruce_process_id_t owner_id;
+    /* See bruce_memory_layout_block_t.is_stack - carried straight through by
+     * memory_layout__visit(). Always false for memory__malloc()'s own
+     * headers; only process_registry__create() ever sets this true, for the
+     * header it builds by hand ahead of its own xTaskCreateStatic() stack
+     * buffer. */
+    bool is_stack;
 } memory__header_t;
 
 #include <stdbool.h>

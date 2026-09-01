@@ -614,6 +614,7 @@ process_registry__create(const process_create_params_t *params, bruce_process_id
     stack_header->size = stack_bytes;
     stack_header->resource_id = record->next_resource_id++;
     stack_header->owner_id = record->id;
+    stack_header->is_stack = true;
     record->stack_buffer = (void *)(stack_header + 1);
     record->tcb_buffer = tcb_buffer;
     record->memory_bytes += stack_bytes;

@@ -51,6 +51,7 @@ void *memory__malloc(size_t size) {
     header->size = size;
     header->resource_id = resource_id;
     header->owner_id = process__current_id();
+    header->is_stack = false;
     process_registry__account_memory((int64_t)size);
     return (void *)(header + 1);
 }

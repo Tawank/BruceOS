@@ -71,6 +71,7 @@ static bool memory_layout__visit(
             item.tracked = true;
             item.requested_size = header->size;
             item.owner_id = header->owner_id;
+            item.is_stack = header->is_stack;
         }
     }
     walk->blocks[index] = item;

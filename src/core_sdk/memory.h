@@ -67,6 +67,11 @@ typedef struct {
     bool used;
     bool tracked;
     bool executable;
+    /* True when this tracked block is a process's own task-stack buffer
+     * (see process_registry__create()'s xTaskCreateStatic() call) rather
+     * than a regular heap allocation. Always false for untracked or free
+     * blocks. */
+    bool is_stack;
 } bruce_memory_layout_block_t;
 
 /**
