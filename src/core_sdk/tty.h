@@ -92,3 +92,15 @@ bruce_tty_mode_t tty__get_mode(void);
  * @param mode New cooperative mode.
  */
 bruce_result_t tty__set_mode(bruce_tty_mode_t mode);
+
+/**
+ * @brief Reads the mode of `session`. Caller must own the session (like tty__set_size()).
+ *
+ * Lets an owner (terminal app, ssh client, ...) see if the program using
+ * this session asked for raw mode, before deciding things like whether
+ * Ctrl+C should send SIGINT or just be passed through as a normal byte.
+ *
+ * @param session Session to query; caller must be its owner.
+ * @param out_mode Receives the session's mode.
+ */
+bruce_result_t tty__get_mode_of(bruce_stdio_session_t session, bruce_tty_mode_t *out_mode);

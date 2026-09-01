@@ -35,6 +35,7 @@
 #define TERMINAL__CHILD_STOP_TIMEOUT_MS 500
 #define TERMINAL__ASCII_ESCAPE 0x1b
 #define TERMINAL__ASCII_DELETE 0x7f
+#define TERMINAL__ASCII_INTERRUPT 0x03
 
 /* User-adjustable font size, a direct display__set_text_size() multiplier
  * (unlike browser's per-heading-level delta -- the terminal only ever draws
@@ -341,6 +342,19 @@ static void terminal__handle_input(terminal__state_t *state, const bruce_input_e
         }
         if (sequence != NULL) terminal__write_input(state, sequence, strlen(sequence));
         return;
+    }
+    if (event->code == TERMINAL__ASCII_INTERRUPT && state->child != BRUCE_PROCESS_ID_INVALID) {
+        /* Like a real terminal: Ctrl+C doesn't go to the child as a byte, it
+         * sends SIGINT. `stty raw` (see bnu_sys_app.c) opts a program out of
+         * this, so it gets the literal ^C byte instead -- e.g. a pager. */
+        bruce_tty_mode_t mode = BRUCE_TTY_MODE_COOKED;
+        (void)tty__get_mode_of(state->session, &mode);
+        if (mode != BRUCE_TTY_MODE_RAW) {
+            terminal_grid__feed(&state->grid, "^C\r\n", 4);
+            state->dirty = true;
+            (void)process__signal(state->child, BRUCE_PROCESS_SIGNAL_INT);
+            return;
+        }
     }
     if (event->code == '\n' || event->code == '\r') {
         terminal__write_input(state, "\r", 1);

@@ -657,8 +657,13 @@ static bruce_result_t ssh_app__client(
     }
 
     stdio__printf("Connected. Press Ctrl+] to close.\n");
+    /* Like a real ssh client, put the local tty in raw mode for the session:
+     * Ctrl+C must reach the remote shell over the wire, not get turned into
+     * a local SIGINT by the terminal (see terminal_app.c). */
+    (void)tty__set_mode(BRUCE_TTY_MODE_RAW);
     bool local_exit = false;
     result = ssh_app__session(session, pty_tty_generation, &local_exit);
+    (void)tty__set_mode(BRUCE_TTY_MODE_COOKED);
     (void)ssh__close(session);
     stdio__printf("\nConnection closed%s\n", result == BRUCE_OK ? "." : " with an error.");
     return result;

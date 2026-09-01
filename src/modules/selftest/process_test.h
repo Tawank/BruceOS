@@ -9,3 +9,4 @@ bool selftest__run_runtime_now_case(void);
 bool selftest__run_runtime_timer_case(void);
 bool selftest__run_process_app_switch_case(void);
 bool selftest__run_process_app_kill_case(void);
+bool selftest__run_process_clear_signal_case(void);

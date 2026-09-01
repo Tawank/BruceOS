@@ -190,6 +190,18 @@ bruce_result_t process__resume(bruce_process_id_t process_id);
 bruce_result_t process__kill(bruce_process_id_t process_id);
 
 /**
+ * @brief Cancels a pending INT/TERM on the calling process instead of stopping.
+ *
+ * Normally a cooperative signal means "stop soon". This lets a process say
+ * "I saw it, I'm fine, keep going" instead -- e.g. an interactive shell that
+ * wants to just abort the line it's reading on Ctrl+C, not exit. Does
+ * nothing if no signal is pending. Sets state back to BRUCE_PROCESS_BACKGROUND,
+ * same as process__resume(). Self-only, no permission check. KILL can't be
+ * cancelled this way -- it kills the process directly instead.
+ */
+bruce_result_t process__clear_signal(void);
+
+/**
  * @brief Non-consuming wait for a process to complete.
  *
  * Succeeds for either a live process that completes before the timeout or

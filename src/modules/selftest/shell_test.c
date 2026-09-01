@@ -7,10 +7,12 @@
 #include "core_sdk/environment.h"
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
+#include "core_sdk/runtime.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
 #include "core_sdk/tty.h"
 #include "modules/shell/shell_app.h"
+#include "modules/shell/shell_console.h"
 #include "modules/shell/shell_internal.h"
 
 static volatile int s_probe_calls;
@@ -500,5 +502,101 @@ bool selftest__run_shell_tty_size_case(void) {
               selftest__shell_tty_size_probe(session, "-c \"shell_test_probe $LINES\"", "40");
     (void)stdio__session_close(session);
     printf("[selftest] shell/tty-size: %s\n", ok ? "OK" : "failed");
+    return ok;
+}
+
+/* Ctrl+C at the prompt (process__signal(INT), the same call terminal_app.c
+ * makes) should throw away the half-typed line and keep the shell running --
+ * not exit it, like bash. Uses the same "-i" + stdio__session_* launch shape
+ * as selftest__run_terminal_stdio_cancel_case(). */
+bool selftest__run_shell_interrupt_case(void) {
+    bruce_stdio_session_t session = BRUCE_STDIO_SESSION_INVALID;
+    if (stdio__session_create(&session) != BRUCE_OK || stdio__session_route_children(session) != BRUCE_OK) {
+        if (session != BRUCE_STDIO_SESSION_INVALID) (void)stdio__session_close(session);
+        return false;
+    }
+    shell_console__reset_ready();
+    int launched = app_runner__run("shell", "-i", BRUCE_LAUNCH_BACKGROUND);
+    (void)stdio__session_route_children(BRUCE_STDIO_SESSION_INVALID);
+    if (launched <= 0) {
+        (void)stdio__session_close(session);
+        return false;
+    }
+    bruce_process_id_t shell_id = (bruce_process_id_t)launched;
+    uint64_t started = runtime__now();
+    while (!shell_console__is_ready() && runtime__now() - started < 1000) (void)runtime__delay(5);
+
+    static const char half_line[] = "echo should-not-run";
+    bool ok = shell_console__is_ready() &&
+              stdio__session_write_input(session, half_line, strlen(half_line)) == BRUCE_OK;
+    if (ok) (void)runtime__delay(50);
+    ok = ok && process__signal(shell_id, BRUCE_PROCESS_SIGNAL_INT) == BRUCE_OK;
+    if (ok) (void)runtime__delay(100);
+
+    /* Still running -- INT aborted the line, it didn't exit the shell. */
+    bruce_process_status_t status;
+    ok = ok && process__wait_status(shell_id, 0, &status) == BRUCE_ERR_TIMEOUT;
+
+    /* And the prompt still works afterward. */
+    static const char next_line[] = "echo shell-recovered\nexit\n";
+    ok = ok && stdio__session_write_input(session, next_line, strlen(next_line)) == BRUCE_OK;
+    ok = ok && process__wait_status(shell_id, 2000, &status) == BRUCE_OK &&
+         status.reason == BRUCE_PROCESS_EXITED && status.exit_code == 0;
+
+    char output[512] = {0};
+    size_t output_size = 0;
+    (void)stdio__session_read_output(session, output, sizeof(output) - 1, &output_size);
+    (void)stdio__session_close(session);
+
+    ok = ok && strstr(output, "^C") != NULL && strstr(output, "should-not-run") == NULL &&
+         strstr(output, "shell-recovered") != NULL;
+    if (!ok) printf("[selftest] shell/interrupt: output=%s\n", output);
+    printf("[selftest] shell/interrupt: %s\n", ok ? "OK" : "failed");
+    return ok;
+}
+
+bool selftest__run_shell_eof_case(void) {
+    bruce_stdio_session_t session = BRUCE_STDIO_SESSION_INVALID;
+    if (stdio__session_create(&session) != BRUCE_OK || stdio__session_route_children(session) != BRUCE_OK) {
+        if (session != BRUCE_STDIO_SESSION_INVALID) (void)stdio__session_close(session);
+        return false;
+    }
+    shell_console__reset_ready();
+    int launched = app_runner__run("shell", "-i", BRUCE_LAUNCH_BACKGROUND);
+    (void)stdio__session_route_children(BRUCE_STDIO_SESSION_INVALID);
+    if (launched <= 0) {
+        (void)stdio__session_close(session);
+        return false;
+    }
+    bruce_process_id_t shell_id = (bruce_process_id_t)launched;
+    uint64_t started = runtime__now();
+    while (!shell_console__is_ready() && runtime__now() - started < 1000) (void)runtime__delay(5);
+
+    /* On a non-empty line, Ctrl+D just deletes under the cursor -- move the
+     * cursor to the start with Ctrl+A first so it eats the stray leading 'e'
+     * instead of ending the shell. */
+    static const char line[] = "eecho hello\x01\x04\n";
+    bool ok = shell_console__is_ready() &&
+              stdio__session_write_input(session, line, strlen(line)) == BRUCE_OK;
+    if (ok) (void)runtime__delay(100);
+
+    bruce_process_status_t status;
+    ok = ok && process__wait_status(shell_id, 0, &status) == BRUCE_ERR_TIMEOUT;
+
+    /* Ctrl+D on an empty prompt is end-of-input and exits the shell, with
+     * whatever status the last command left behind. */
+    static const char eof[] = {0x04};
+    ok = ok && stdio__session_write_input(session, eof, sizeof(eof)) == BRUCE_OK;
+    ok = ok && process__wait_status(shell_id, 2000, &status) == BRUCE_OK &&
+         status.reason == BRUCE_PROCESS_EXITED && status.exit_code == 0;
+
+    char output[512] = {0};
+    size_t output_size = 0;
+    (void)stdio__session_read_output(session, output, sizeof(output) - 1, &output_size);
+    (void)stdio__session_close(session);
+
+    ok = ok && strstr(output, "hello") != NULL;
+    if (!ok) printf("[selftest] shell/eof: output=%s\n", output);
+    printf("[selftest] shell/eof: %s\n", ok ? "OK" : "failed");
     return ok;
 }

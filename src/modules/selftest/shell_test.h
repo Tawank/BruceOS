@@ -11,3 +11,5 @@ bool selftest__run_shell_pipe_redirect_case(void);
 bool selftest__run_shell_read_case(void);
 bool selftest__run_shell_stdio_inheritance_case(void);
 bool selftest__run_shell_tty_size_case(void);
+bool selftest__run_shell_interrupt_case(void);
+bool selftest__run_shell_eof_case(void);

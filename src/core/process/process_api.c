@@ -263,6 +263,25 @@ bruce_result_t process__terminate(bruce_process_id_t process_id) {
     return process__signal(process_id, BRUCE_PROCESS_SIGNAL_TERM);
 }
 
+bruce_result_t process__clear_signal(void) {
+    process__ensure_init();
+    process__lock();
+    process__record_t *self = process__find_by_handle_locked(xTaskGetCurrentTaskHandle());
+    if (self == NULL) {
+        process__unlock();
+        return BRUCE_ERR_NOT_FOUND;
+    }
+    if (self->stop_requested) {
+        self->stop_requested = false;
+        self->pending_signal = (bruce_process_signal_t)0;
+        self->state = BRUCE_PROCESS_BACKGROUND;
+        display__process_state_changed(self->id, self->state);
+        process__foreground_recompute_locked();
+    }
+    process__unlock();
+    return BRUCE_OK;
+}
+
 bruce_result_t process__pause(bruce_process_id_t process_id) {
     if (process_id != process__current_id()) {
         bruce_result_t permission_result = permission__check(BRUCE_PERMISSION_PROCESS);

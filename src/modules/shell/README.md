@@ -36,6 +36,18 @@ definitions) by raw-text keyword matching in command position.
   parse error outside of `((...))`; see the Redirection section below for
   what `>`/`>>` do support).
 
+**Ctrl+C** -- `terminal_app.c` turns it into a real `SIGINT` (`process__signal`)
+on the shell rather than forwarding it as a byte, like a cooked tty's INTR
+key. A foreground external command gets it relayed by `shell_executor__wait`,
+same as `kill`; with nothing running, the shell aborts the line being typed
+and shows a fresh prompt instead of exiting (matching bash), via
+`process__clear_signal()`. `stty raw` opts a program (e.g. `ssh`, `tcp`) out
+of this so it gets the literal `^C` byte instead.
+
+**Ctrl+D** -- same as bash: on an empty prompt it's end-of-input and exits
+the interactive shell (with the last command's exit status); on a non-empty
+line it just deletes the character under the cursor, like Delete.
+
 **Builtins** (`shell_builtins.c`)
 - `echo`, `true`, `false`, `cd`, `set`, `unset`, `export`, `clear`, `reset`,
   `help`, `exit [N]`.
@@ -255,5 +267,6 @@ against real firmware output (via `stdio__session_*` + `app_runner__run`):
 `selftest__run_shell_language_case`, `..._script_case`,
 `..._control_flow_case`, `..._multiline_case`, `..._loops_case` (arithmetic,
 both `for` forms, `while`, `break`, `break N`, and the break/catch-up
-regression), `..._read_case`, `..._stdio_inheritance_case`, and
-`..._tty_size_case`.
+regression), `..._read_case`, `..._stdio_inheritance_case`,
+`..._tty_size_case`, `..._interrupt_case` (Ctrl+C), and `..._eof_case`
+(Ctrl+D).

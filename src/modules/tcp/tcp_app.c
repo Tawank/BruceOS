@@ -10,6 +10,7 @@
 #include "core_sdk/runtime.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/tcp.h"
+#include "core_sdk/tty.h"
 #include "core_sdk/wifi.h"
 
 #define TCP_APP_BUFFER_SIZE 256u
@@ -93,8 +94,12 @@ static int tcp_app__client(const char *host, uint16_t port) {
         return result;
     }
     stdio__printf("Connected. Press Ctrl+] to close.\n");
+    /* Raw byte relay: any byte, including Ctrl+C, must reach the remote peer
+     * rather than get turned into a local SIGINT by the terminal. */
+    (void)tty__set_mode(BRUCE_TTY_MODE_RAW);
     bool local_exit = false;
     result = tcp_app__session(socket, &local_exit);
+    (void)tty__set_mode(BRUCE_TTY_MODE_COOKED);
     (void)tcp__close(socket);
     stdio__printf("\nConnection closed%s\n", result == BRUCE_OK ? "." : " with an error.");
     return result;
@@ -138,8 +143,10 @@ static int tcp_app__listener(uint16_t port) {
         if (result != BRUCE_OK) break;
 
         stdio__printf("Client connected from %s:%u\n", peer.host, (unsigned int)peer.port);
+        (void)tty__set_mode(BRUCE_TTY_MODE_RAW);
         bool local_exit = false;
         bruce_result_t session_result = tcp_app__session(client, &local_exit);
+        (void)tty__set_mode(BRUCE_TTY_MODE_COOKED);
         (void)tcp__close(client);
         stdio__printf("\nClient disconnected%s\n", session_result == BRUCE_OK ? "." : " with an error.");
         if (local_exit || session_result == BRUCE_ERR_CANCELLED) {

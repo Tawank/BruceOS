@@ -102,6 +102,7 @@ static int32_t wasm_process__current_signal(wasm_exec_env_t exec_env) {
         return function((bruce_process_id_t)id);                                                             \
     }
 
+WASM_NO_ARG_RESULT_WRAPPER(wasm_process__clear_signal, process__clear_signal)
 WASM_NO_ARG_RESULT_WRAPPER(wasm_process__switch_next, process__switch_next)
 WASM_NO_ARG_RESULT_WRAPPER(wasm_process__switch_previous, process__switch_previous)
 WASM_NO_ARG_RESULT_WRAPPER(wasm_process__to_background, process__to_background)
@@ -236,6 +237,16 @@ static int32_t wasm_tty__get_mode(wasm_exec_env_t exec_env) {
 static int32_t wasm_tty__set_mode(wasm_exec_env_t exec_env, uint32_t mode) {
     (void)exec_env;
     return tty__set_mode((bruce_tty_mode_t)mode);
+}
+
+static int32_t wasm_tty__get_mode_of(wasm_exec_env_t exec_env, uint32_t session, uint32_t out_mode_offset) {
+    uint32_t *out_mode = wasm_bruce_host_adapter__app_u32(exec_env, out_mode_offset);
+    if (out_mode == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    bruce_tty_mode_t mode = BRUCE_TTY_MODE_COOKED;
+    bruce_result_t result = tty__get_mode_of((bruce_stdio_session_t)session, &mode);
+    if (result != BRUCE_OK) return result;
+    wasm_bruce_abi__store_u32(out_mode, (uint32_t)mode);
+    return BRUCE_OK;
 }
 
 static int32_t wasm_memory__get_stats(wasm_exec_env_t exec_env, uint32_t stats_offset) {
@@ -507,6 +518,7 @@ static NativeSymbol s_native_symbols[] = {
     BRUCE_WASM_NATIVE("runtime__gui_requested", wasm_runtime__gui_requested, "()i"),
     BRUCE_WASM_NATIVE("process__current_id", wasm_process__current_id, "()i"),
     BRUCE_WASM_NATIVE("process__current_signal", wasm_process__current_signal, "()i"),
+    BRUCE_WASM_NATIVE("process__clear_signal", wasm_process__clear_signal, "()i"),
     BRUCE_WASM_NATIVE("process__switch_next", wasm_process__switch_next, "()i"),
     BRUCE_WASM_NATIVE("process__switch_previous", wasm_process__switch_previous, "()i"),
     BRUCE_WASM_NATIVE("process__to_background", wasm_process__to_background, "()i"),
@@ -532,6 +544,7 @@ static NativeSymbol s_native_symbols[] = {
     BRUCE_WASM_NATIVE("tty__set_size", wasm_tty__set_size, "(iii)i"),
     BRUCE_WASM_NATIVE("tty__get_mode", wasm_tty__get_mode, "()i"),
     BRUCE_WASM_NATIVE("tty__set_mode", wasm_tty__set_mode, "(i)i"),
+    BRUCE_WASM_NATIVE("tty__get_mode_of", wasm_tty__get_mode_of, "(ii)i"),
     BRUCE_WASM_NATIVE("memory__get_stats", wasm_memory__get_stats, "(i)i"),
     BRUCE_WASM_NATIVE("memory__malloc", wasm_memory__malloc, "(i)i"),
     BRUCE_WASM_NATIVE("memory__free", wasm_memory__free, "(i)"),

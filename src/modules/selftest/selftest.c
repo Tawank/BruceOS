@@ -107,6 +107,7 @@ int selftest_app_main(int argc, char **argv) {
     RUN_SELFTEST(selftest__run_process_normal_exit_case);
     RUN_SELFTEST(selftest__run_process_status_case);
     RUN_SELFTEST(selftest__run_process_killed_case);
+    RUN_SELFTEST(selftest__run_process_clear_signal_case);
     RUN_SELFTEST(selftest__run_process_registry_growth_case);
     RUN_SELFTEST(selftest__run_process_resource_growth_case);
     RUN_SELFTEST(selftest__run_runtime_now_case);
@@ -184,6 +185,8 @@ int selftest_app_main(int argc, char **argv) {
     RUN_SELFTEST(selftest__run_shell_read_case);
     RUN_SELFTEST(selftest__run_shell_stdio_inheritance_case);
     RUN_SELFTEST(selftest__run_shell_tty_size_case);
+    RUN_SELFTEST(selftest__run_shell_interrupt_case);
+    RUN_SELFTEST(selftest__run_shell_eof_case);
     RUN_SELFTEST(selftest__run_bnu_case);
     RUN_SELFTEST(selftest__run_launcher_apps_discovery_case);
     RUN_SELFTEST(selftest__run_wifi_permission_denied_case);

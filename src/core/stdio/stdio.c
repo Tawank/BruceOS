@@ -628,3 +628,18 @@ bruce_result_t tty__set_mode(bruce_tty_mode_t mode) {
     xSemaphoreGive(s_lock);
     return BRUCE_OK;
 }
+
+bruce_result_t tty__get_mode_of(bruce_stdio_session_t session, bruce_tty_mode_t *out_mode) {
+    if (out_mode == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    bruce_process_id_t owner = process__current_id();
+    stdio__ensure_init();
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    stdio__session_t *entry = stdio__find_locked(session);
+    if (!stdio__owned_locked(entry, owner)) {
+        xSemaphoreGive(s_lock);
+        return entry == NULL ? BRUCE_ERR_NOT_FOUND : BRUCE_ERR_PERMISSION;
+    }
+    *out_mode = entry->tty_mode;
+    xSemaphoreGive(s_lock);
+    return BRUCE_OK;
+}

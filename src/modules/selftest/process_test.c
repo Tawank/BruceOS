@@ -14,6 +14,9 @@
 
 static selftest__shared_t s_shared;
 static volatile bool s_status_worker_started;
+static volatile bool s_clear_signal_worker_started;
+static volatile bool s_clear_signal_worker_saw_int;
+static volatile bool s_clear_signal_worker_resumed;
 
 #define SELFTEST__PROCESS_STRESS_COUNT 17
 #define SELFTEST__RESOURCE_STRESS_COUNT 33
@@ -317,6 +320,62 @@ bool selftest__run_process_status_case(void) {
 
     printf("[selftest] process/status: OK\n");
     return true;
+}
+
+/* Spins on runtime__delay() (which returns BRUCE_ERR_CANCELLED as soon as a
+ * signal is pending, same as any other cooperative wait) until it sees one,
+ * clears it, then spins again to prove it's still a normal, fully-working
+ * process afterward -- only a later real TERM should actually stop it. */
+static int selftest__worker_clears_signal(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    s_clear_signal_worker_started = true;
+    while (runtime__delay(5) == BRUCE_OK) {}
+    if (process__current_signal() == BRUCE_PROCESS_SIGNAL_INT) {
+        s_clear_signal_worker_saw_int = true;
+        (void)process__clear_signal();
+        if (process__current_signal() == 0) {
+            while (runtime__delay(5) == BRUCE_OK) {}
+            s_clear_signal_worker_resumed = process__current_signal() == BRUCE_PROCESS_SIGNAL_TERM;
+        }
+    }
+    return 0;
+}
+
+bool selftest__run_process_clear_signal_case(void) {
+    s_clear_signal_worker_started = false;
+    s_clear_signal_worker_saw_int = false;
+    s_clear_signal_worker_resumed = false;
+    process_create_params_t params = {
+        .name = "selftest_clear_signal",
+        .entry = selftest__worker_clears_signal,
+        .built_in = true,
+        .start_in_background = true,
+        .stack_bytes = 4096,
+    };
+    bruce_process_id_t id = BRUCE_PROCESS_ID_INVALID;
+    if (process_registry__create(&params, &id) != BRUCE_OK) {
+        printf("[selftest] process/clear-signal: create failed\n");
+        return false;
+    }
+    for (int i = 0; i < 40 && !s_clear_signal_worker_started; ++i) vTaskDelay(pdMS_TO_TICKS(5));
+
+    bool ok = s_clear_signal_worker_started && process__signal(id, BRUCE_PROCESS_SIGNAL_INT) == BRUCE_OK;
+    for (int i = 0; ok && i < 40 && !s_clear_signal_worker_saw_int; ++i) vTaskDelay(pdMS_TO_TICKS(5));
+    ok = ok && s_clear_signal_worker_saw_int;
+
+    /* Cleared, not dead: still a live, snapshottable process. */
+    bruce_process_snapshot_t snapshot;
+    ok = ok && process__snapshot(id, &snapshot) == BRUCE_OK;
+
+    bruce_process_status_t status;
+    ok = ok && process__terminate(id) == BRUCE_OK &&
+         process__wait_status(id, 2000, &status) == BRUCE_OK &&
+         status.reason == BRUCE_PROCESS_TERMINATED && status.signal == BRUCE_PROCESS_SIGNAL_TERM &&
+         s_clear_signal_worker_resumed;
+    if (!ok) (void)process__kill(id);
+    printf("[selftest] process/clear-signal: %s\n", ok ? "OK" : "failed");
+    return ok;
 }
 
 bool selftest__run_process_killed_case(void) {

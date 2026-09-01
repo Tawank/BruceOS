@@ -7,7 +7,10 @@
  * NULL for the shell's normal "bruce$ " prompt, or a continuation prompt
  * (see shell_console__continuation_prompt()) while reading another physical
  * line into an still-incomplete if/fi or function block (see
- * shell_compound__pending() in shell_compound.c). */
+ * shell_compound__pending() in shell_compound.c).
+ *
+ * Returns the line length, or -1 if Ctrl+D was pressed on an empty line
+ * (end of input, same as bash). */
 int shell_console__read_line(char *line, size_t capacity, bool *skip_lf, const char *prompt);
 
 /* The "> " continuation prompt shown while shell__interactive() (shell_app.c)

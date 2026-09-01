@@ -19,6 +19,7 @@
 #define SHELL_CONSOLE_ESCAPE_TIMEOUT_MS 50
 
 #define SHELL_CONSOLE_CTRL_A 0x01
+#define SHELL_CONSOLE_CTRL_D 0x04
 #define SHELL_CONSOLE_CTRL_E 0x05
 #define SHELL_CONSOLE_CTRL_U 0x15
 #define SHELL_CONSOLE_ESCAPE 0x1b
@@ -573,6 +574,18 @@ int shell_console__read_line(char *line, size_t capacity, bool *skip_lf, const c
             shell_console__tab_state_free(&tab_state);
             memory__free(draft);
             return (int)editor.length;
+        }
+        if (byte == SHELL_CONSOLE_CTRL_D) {
+            /* Like bash: on an empty line this means end-of-input and closes
+             * the prompt, otherwise it just deletes the character under the
+             * cursor. */
+            if (editor.length == 0) {
+                shell_console__tab_state_free(&tab_state);
+                memory__free(draft);
+                return -1;
+            }
+            if (shell_line_editor__delete(&editor)) shell_console__redraw(&editor, prompt);
+            continue;
         }
         bool redraw = shell_console__handle_byte(&editor, &history, &tab_state, byte);
         if (byte != '\t') shell_console__tab_reset(&tab_state);

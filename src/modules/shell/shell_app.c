@@ -201,7 +201,19 @@ static int shell__interactive(shell_state_t *state, bool suppress_echo) {
             length = shell_console__read_line(line, SHELL__LINE_MAX, &skip_lf, prompt);
         }
         if (length == BRUCE_ERR_CANCELLED) {
-            int status = 128 + (int)process__current_signal();
+            bruce_process_signal_t signal = process__current_signal();
+            if (signal == BRUCE_PROCESS_SIGNAL_INT) {
+                /* Like bash: Ctrl+C at the prompt just throws away whatever
+                 * was being typed and shows a fresh prompt, it doesn't quit
+                 * the shell. TERM/KILL (someone actually closing this shell)
+                 * still fall through below and exit. */
+                (void)process__clear_signal();
+                (void)stdio__write("^C\r\n", 4);
+                block_used = 0;
+                block[0] = '\0';
+                continue;
+            }
+            int status = 128 + (int)signal;
             memory__free(line);
             memory__free(block);
             return status;

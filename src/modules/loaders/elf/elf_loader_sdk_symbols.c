@@ -239,6 +239,7 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(process__wait),
     ESP_ELFSYM_EXPORT(process__wait_status),
     ESP_ELFSYM_EXPORT(process__current_signal),
+    ESP_ELFSYM_EXPORT(process__clear_signal),
     ESP_ELFSYM_EXPORT(process__snapshot),
     ESP_ELFSYM_EXPORT(process__list),
 
