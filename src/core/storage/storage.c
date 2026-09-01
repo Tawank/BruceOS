@@ -166,11 +166,18 @@ bool storage__init(void) {
 
 bool storage__mkdir_internal(const char *path) {
     if (path == NULL || path[0] != '/') return false;
+    /* stat()/mkdir() below can block on flash I/O; a force-kill must not
+     * delete this task while it holds s_storage_mutex mid-syscall, or every
+     * later storage__* call would deadlock on the now-unreleasable mutex.
+     * operation_begin/end makes process__kill() wait for us to finish first
+     * (same pattern as audio__play() in core/audio/audio.c). */
+    if (!process_registry__operation_begin()) return false;
     storage__lock();
     struct stat path_stat;
     bool created =
         s_ready && ((stat(path, &path_stat) == 0 && S_ISDIR(path_stat.st_mode)) || mkdir(path, 0775) == 0);
     storage__unlock();
+    process_registry__operation_end();
     return created;
 }
 

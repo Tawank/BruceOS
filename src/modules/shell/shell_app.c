@@ -208,6 +208,13 @@ static int shell__interactive(shell_state_t *state, bool suppress_echo) {
                  * the shell. TERM/KILL (someone actually closing this shell)
                  * still fall through below and exit. */
                 (void)process__clear_signal();
+                /* Also discard anything already queued but not yet read (a
+                 * fast paste/burst that arrived before the interrupt) -- a
+                 * real tty flushes pending input on SIGINT the same way
+                 * (termios' NOFLSH-unset default); without this, its
+                 * leftover bytes would survive into the fresh prompt below
+                 * and get replayed as if freshly typed. */
+                (void)stdio__flush_input();
                 (void)stdio__write("^C\r\n", 4);
                 block_used = 0;
                 block[0] = '\0';

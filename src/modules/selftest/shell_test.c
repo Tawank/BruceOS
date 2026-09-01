@@ -543,7 +543,11 @@ bool selftest__run_shell_interrupt_case(void) {
     ok = ok && process__wait_status(shell_id, 2000, &status) == BRUCE_OK &&
          status.reason == BRUCE_PROCESS_EXITED && status.exit_code == 0;
 
-    char output[512] = {0};
+    /* 1024 to match STDIO__OUTPUT_CAPACITY -- the shell redraws the whole
+     * prompt+line on every keystroke, so a handful of echoed characters
+     * easily outgrows a smaller capture buffer before "shell-recovered"
+     * ever shows up in it. */
+    char output[1024] = {0};
     size_t output_size = 0;
     (void)stdio__session_read_output(session, output, sizeof(output) - 1, &output_size);
     (void)stdio__session_close(session);

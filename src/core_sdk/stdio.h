@@ -46,6 +46,20 @@ int stdio__read_line(char *buffer, size_t buffer_size, bool mask_input);
 bruce_result_t stdio__read(void *buffer, size_t capacity, uint32_t timeout_ms, size_t *out_size);
 
 /**
+ * @brief Discards any input already queued but not yet read on the calling
+ * process's routed session.
+ *
+ * Matches what a real tty driver does when it delivers SIGINT/SIGQUIT to the
+ * foreground process (termios' default, NOFLSH unset): stdio__read()'s
+ * BRUCE_ERR_CANCELLED only unblocks whichever read was already in progress,
+ * it doesn't discard bytes that arrived but hadn't been read yet (e.g. the
+ * rest of a fast paste/burst) -- those would otherwise sit queued and get
+ * silently replayed into the next read. A no-op (BRUCE_OK) when the calling
+ * process has no routed session.
+ */
+bruce_result_t stdio__flush_input(void);
+
+/**
  * @brief Writes app-visible output to the calling process's routed session.
  *
  * Or to the physical serial console when no session is routed. Core
@@ -127,6 +141,18 @@ bruce_result_t stdio__session_route_children(bruce_stdio_session_t session);
  * @param size Number of bytes in data.
  */
 bruce_result_t stdio__session_write_input(bruce_stdio_session_t session, const void *data, size_t size);
+
+/**
+ * @brief Same as stdio__flush_input(), but targets an explicit session.
+ *
+ * Instead of the calling process's own routed session -- for a caller (e.g.
+ * terminal_app.c, delivering Ctrl+C to a child it owns) discarding a
+ * session's queued input on another process's behalf, mirroring
+ * stdio__write_to()'s relationship to stdio__write().
+ *
+ * @param session Session whose queued-but-unread input should be discarded.
+ */
+bruce_result_t stdio__session_flush_input(bruce_stdio_session_t session);
 
 /**
  * @brief Reads output bytes a session's owning process has written.

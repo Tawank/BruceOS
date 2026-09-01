@@ -609,6 +609,13 @@ static void terminal__handle_input(terminal__state_t *state, const bruce_input_e
         if (mode != BRUCE_TTY_MODE_RAW) {
             terminal_grid__feed(&state->grid, "^C\r\n", 4);
             state->dirty = true;
+            /* Also discard whatever's already queued but not yet read (a
+             * fast paste/burst typed just before Ctrl+C) -- see
+             * stdio__session_flush_input()'s doc: a real tty flushes pending
+             * input on SIGINT the same way, and without this the leftover
+             * bytes would survive into the child's next read and get
+             * replayed as if freshly typed. */
+            (void)stdio__session_flush_input(state->session);
             (void)process__signal(state->child, BRUCE_PROCESS_SIGNAL_INT);
             return;
         }

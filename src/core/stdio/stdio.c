@@ -272,6 +272,38 @@ bruce_result_t stdio__session_read_input(
     }
 }
 
+/* Discards whatever's currently sitting unread in the session's input queue,
+ * the same way a real tty driver flushes pending input when it delivers
+ * SIGINT/SIGQUIT to the foreground process (termios' default, NOFLSH unset).
+ * Without this, bytes that were already written (e.g. a burst/paste, or
+ * stdio__session_write_input() in a test) but not yet read at the moment a
+ * blocking stdio__session_read_input() is cancelled stay queued and get
+ * silently replayed into whatever reads next -- see shell_app.c's Ctrl+C
+ * handling, the first caller that needs this. */
+bruce_result_t stdio__session_flush_input(bruce_stdio_session_t session) {
+    stdio__ensure_init();
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    stdio__session_t *entry = stdio__find_locked(session);
+    if (entry == NULL) {
+        xSemaphoreGive(s_lock);
+        return BRUCE_ERR_NOT_FOUND;
+    }
+    entry->input_read = 0;
+    entry->input_size = 0;
+    xSemaphoreGive(s_lock);
+    return BRUCE_OK;
+}
+
+/* Same as stdio__session_flush_input(), but for the calling process's own
+ * routed session (see stdio__read()/stdio__write() above for the same
+ * "current session" pattern). A no-op when there's no routed session to
+ * flush (e.g. the physical serial console has no such queue to discard). */
+bruce_result_t stdio__flush_input(void) {
+    bruce_stdio_session_t session = process_registry__current_stdio_session();
+    if (session == BRUCE_STDIO_SESSION_INVALID) return BRUCE_OK;
+    return stdio__session_flush_input(session);
+}
+
 #if !CONFIG_LIBC_PICOLIBC
 static int stdio__stream_read(void *cookie, char *buffer, int size) {
     size_t read_size = 0;
