@@ -5,6 +5,7 @@
   "coreAbiVersion": 4,
   "permissions": ["storage"],
   "stackSize": 8192,
+  "heapSize": 105000,
   "build": {
     "sources": [
       "main/*.c",

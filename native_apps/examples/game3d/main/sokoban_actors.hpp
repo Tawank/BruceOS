@@ -36,7 +36,7 @@ constexpr int32_t kFootSpread = kPlayerW / 2 + kFootSize / 2 - 2;
 // doesn't duplicate these as raw numbers.
 constexpr int kPlayerBodyTris = 30; // body + 2 feet
 constexpr int kFaceTris       = 30; // beak + 2 eyes
-constexpr int kCrateTris      = 90; // main box + 8 edge beams
+constexpr int kCrateTris      = 24; // main box + 3 visible corner posts
 
 // Body cube plus two small fixed feet poking out past its bottom corners,
 // all reserve()d to their exact final size up front.

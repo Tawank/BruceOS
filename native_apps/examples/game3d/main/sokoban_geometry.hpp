@@ -143,26 +143,54 @@ inline void addTopQuad(Object *obj, int32_t cx, int32_t cy, int32_t cz, int32_t 
     obj->addFace(b + 0, b + 1, b + 2, b + 3, mat);
 }
 
-// Appends a cubic box plus thin dark beams along its 8 visible edges (4
-// vertical corner posts, 4 around the top perimeter -- the 4 edges of the
-// never-rendered bottom face are skipped). Each beam is centred ON its
-// edge and poked out a little past the main box to both sides of it, so
-// it reads as a highlighted border right where two faces actually meet.
-// (An earlier version ran 3 straps through the box's CENTRE instead --
-// each one only poked out at the middle of a face, nowhere near an edge,
-// which just looked like a dark hole punched in the centre of that face.)
+// Appends a cubic box plus the three vertical corner posts visible from the
+// game's fixed (+X, -Z) camera. Each post contains only its camera-facing
+// side(s) and top cap; the hidden faces and fourth rear corner are omitted.
+// This keeps a clear crate silhouette without paying for complete little
+// boxes that can never be seen.
 inline void addCrateFaces(Object *obj, int32_t cx, int32_t cy, int32_t cz, int32_t half, Material *mat,
                            Material *edgeMat) {
     addBoxFaces(obj, cx, cy, cz, half, half, half, mat, /*includeBottom=*/false);
-    constexpr int32_t e = 2; // edge beam half-thickness
-    addBoxFaces(obj, cx + half, cy, cz + half, e, half, e, edgeMat, /*includeBottom=*/false);
-    addBoxFaces(obj, cx + half, cy, cz - half, e, half, e, edgeMat, /*includeBottom=*/false);
-    addBoxFaces(obj, cx - half, cy, cz + half, e, half, e, edgeMat, /*includeBottom=*/false);
-    addBoxFaces(obj, cx - half, cy, cz - half, e, half, e, edgeMat, /*includeBottom=*/false);
-    addBoxFaces(obj, cx, cy + half, cz + half, half, e, e, edgeMat, /*includeBottom=*/false);
-    addBoxFaces(obj, cx, cy + half, cz - half, half, e, e, edgeMat, /*includeBottom=*/false);
-    addBoxFaces(obj, cx + half, cy + half, cz, e, e, half, edgeMat, /*includeBottom=*/false);
-    addBoxFaces(obj, cx - half, cy + half, cz, e, e, half, edgeMat, /*includeBottom=*/false);
+
+    constexpr int32_t e = 2;
+    constexpr int32_t N = FIXED_POINT_SCALE;
+    auto addPost = [&](int sx, int sz, bool showX, bool showZ) {
+        const int32_t x = cx + sx * half;
+        const int32_t z = cz + sz * half;
+        const int32_t y0 = cy - half;
+        const int32_t y1 = cy + half + 1;
+        uint16_t b;
+
+        if (showX) {
+            b = (uint16_t)obj->vertices.size();
+            const int32_t fx = x + sx;
+            obj->addVertex({{fx, y0, z + sx * e}, {0, 0}, {sx * N, 0, 0}});
+            obj->addVertex({{fx, y0, z - sx * e}, {0, 0}, {sx * N, 0, 0}});
+            obj->addVertex({{fx, y1, z - sx * e}, {0, 0}, {sx * N, 0, 0}});
+            obj->addVertex({{fx, y1, z + sx * e}, {0, 0}, {sx * N, 0, 0}});
+            obj->addFace(b, b + 1, b + 2, b + 3, edgeMat);
+        }
+        if (showZ) {
+            b = (uint16_t)obj->vertices.size();
+            const int32_t fz = z + sz;
+            obj->addVertex({{x + e, y0, fz}, {0, 0}, {0, 0, sz * N}});
+            obj->addVertex({{x - e, y0, fz}, {0, 0}, {0, 0, sz * N}});
+            obj->addVertex({{x - e, y1, fz}, {0, 0}, {0, 0, sz * N}});
+            obj->addVertex({{x + e, y1, fz}, {0, 0}, {0, 0, sz * N}});
+            obj->addFace(b, b + 1, b + 2, b + 3, edgeMat);
+        }
+
+        b = (uint16_t)obj->vertices.size();
+        obj->addVertex({{x - e, y1, z + e}, {0, 0}, {0, N, 0}});
+        obj->addVertex({{x + e, y1, z + e}, {0, 0}, {0, N, 0}});
+        obj->addVertex({{x + e, y1, z - e}, {0, 0}, {0, N, 0}});
+        obj->addVertex({{x - e, y1, z - e}, {0, 0}, {0, N, 0}});
+        obj->addFace(b, b + 1, b + 2, b + 3, edgeMat);
+    };
+
+    addPost(+1, -1, true, true);  // near corner shared by both visible sides
+    addPost(+1, +1, true, false); // far edge of the +X side
+    addPost(-1, -1, false, true); // far edge of the -Z side
 }
 
 } // namespace
