@@ -63,12 +63,22 @@ int bnu_ls_app_main(int argc, char **argv) {
     ap_set_opt_help(parser, "a", "Show hidden entries too");
     ap_add_flag(parser, "h");
     ap_set_opt_help(parser, "h", "Human-readable sizes (e.g. 4.0K, 1.2M)");
+    ap_add_str_opt(parser, "color", "auto");
+    ap_set_opt_help(parser, "color", "Colorize output: always, auto, or never (default: auto)");
     ap_add_optional_arg(parser, "path", "Path to list (defaults to the working directory)");
     ap_unknown_options_as_args(parser);
     if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
     bool long_format = ap_found(parser, "l");
     bool show_hidden = ap_found(parser, "a");
     bool human_readable = ap_found(parser, "h");
+    const char *color_mode = ap_get_str_value(parser, "color");
+    bool color_always = strcmp(color_mode, "always") == 0;
+    bool color_auto = strcmp(color_mode, "auto") == 0;
+    if (!color_always && !color_auto && strcmp(color_mode, "never") != 0) {
+        stdio__printf("ls: invalid --color value '%s' (expected always, auto, or never)\n", color_mode);
+        ap_free(parser);
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
     char path[BRUCE_STORAGE_PATH_MAX];
     bool resolved = bnu__resolve_path(ap_get_arg(parser, "path"), path);
     ap_free(parser);
@@ -84,9 +94,9 @@ int bnu_ls_app_main(int argc, char **argv) {
     if (entries == NULL) return BRUCE_ERR_NO_MEMORY;
     result = storage__list(path, entries, count, &count);
     if (result == BRUCE_OK) {
-        /* Only colorize for an interactive terminal -- piped ("ls | x") or
-         * redirected ("ls > file") output stays plain, same as GNU ls. */
-        bool color = tty__isatty();
+        /* Auto only colorizes an interactive terminal; always intentionally
+         * preserves ANSI escapes through pipes and redirection. */
+        bool color = color_always || (color_auto && tty__isatty());
         for (size_t i = 0; i < count; ++i) {
             if (!show_hidden && entries[i].name[0] == '.') continue;
             if (long_format) {
