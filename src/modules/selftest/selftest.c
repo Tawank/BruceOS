@@ -124,10 +124,13 @@ int selftest_app_main(int argc, char **argv) {
     RUN_SELFTEST(selftest__run_compress_one_shot_case);
     RUN_SELFTEST(selftest__run_compress_streaming_case);
     RUN_SELFTEST(selftest__run_compress_corrupt_input_case);
+    RUN_SELFTEST(selftest__run_compress_invalid_args_case);
     RUN_SELFTEST(selftest__run_archive_tar_gz_roundtrip_case);
     RUN_SELFTEST(selftest__run_archive_zip_roundtrip_case);
     RUN_SELFTEST(selftest__run_archive_tar_gz_corrupt_case);
+    RUN_SELFTEST(selftest__run_archive_zip_corrupt_case);
     RUN_SELFTEST(selftest__run_archive_tar_gz_slip_rejection_case);
+    RUN_SELFTEST(selftest__run_archive_not_found_case);
     RUN_SELFTEST(selftest__run_apprunner_registration_case);
     RUN_SELFTEST(selftest__run_apprunner_args_case);
     RUN_SELFTEST(selftest__run_apprunner_resolution_case);

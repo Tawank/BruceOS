@@ -105,6 +105,28 @@ static const char *archive__zip_basename(const char *path) {
 
 static bruce_result_t archive__zip_add_path(zipFile zf, const char *fs_path, const char *archive_name, int level);
 
+/* zipOpenNewFileInZip() (minizip's own convenience wrapper) hardcodes
+ * deflateInit2()'s windowBits/memLevel at zlib's own defaults (-15/8, ~256KB
+ * combined - see zlib.h), which can fail with Z_MEM_ERROR on a fragmented
+ * embedded heap even though compress__start() (core/compress/compress.c)
+ * already works around the exact same problem for the gzip path - minizip
+ * talks to zlib directly (see this file's module doc comment) so that fix
+ * doesn't cover it. Step window size and memLevel down the same way here,
+ * via zipOpenNewFileInZip3()'s explicit parameters instead of the wrapper. */
+static int archive__zip_open_new_file(zipFile zf, const char *archive_name, const zip_fileinfo *info, int level) {
+    static const int WINDOW_BITS[] = {-15, -12, -10, -9};
+    static const int MEM_LEVELS[] = {8, 6, 4, 1};
+    int rc = Z_MEM_ERROR;
+    for (size_t i = 0; i < sizeof(WINDOW_BITS) / sizeof(WINDOW_BITS[0]); ++i) {
+        rc = zipOpenNewFileInZip3(
+            zf, archive_name, info, NULL, 0, NULL, 0, NULL, Z_DEFLATED, level, 0, WINDOW_BITS[i], MEM_LEVELS[i],
+            Z_DEFAULT_STRATEGY, NULL, 0
+        );
+        if (rc == ZIP_OK || rc != Z_MEM_ERROR) break;
+    }
+    return rc;
+}
+
 static bruce_result_t archive__zip_add_file(zipFile zf, const char *fs_path, const char *archive_name, int level) {
     bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
     bruce_result_t result = storage__open(fs_path, BRUCE_STORAGE_OPEN_READ, &file);
@@ -113,7 +135,7 @@ static bruce_result_t archive__zip_add_file(zipFile zf, const char *fs_path, con
     zip_fileinfo info;
     memset(&info, 0, sizeof(info));
     int compression_level = level == BRUCE_COMPRESS_LEVEL_DEFAULT ? Z_DEFAULT_COMPRESSION : level;
-    if (zipOpenNewFileInZip(zf, archive_name, &info, NULL, 0, NULL, 0, NULL, Z_DEFLATED, compression_level) != ZIP_OK) {
+    if (archive__zip_open_new_file(zf, archive_name, &info, compression_level) != ZIP_OK) {
         (void)storage__close(file);
         return BRUCE_ERR_IO;
     }
@@ -141,8 +163,7 @@ static bruce_result_t archive__zip_add_directory(zipFile zf, const char *fs_path
 
     zip_fileinfo info;
     memset(&info, 0, sizeof(info));
-    if (zipOpenNewFileInZip(zf, dir_name, &info, NULL, 0, NULL, 0, NULL, Z_DEFLATED, Z_DEFAULT_COMPRESSION) != ZIP_OK)
-        return BRUCE_ERR_IO;
+    if (archive__zip_open_new_file(zf, dir_name, &info, Z_DEFAULT_COMPRESSION) != ZIP_OK) return BRUCE_ERR_IO;
     if (zipCloseFileInZip(zf) != ZIP_OK) return BRUCE_ERR_IO;
 
     size_t count = 0;

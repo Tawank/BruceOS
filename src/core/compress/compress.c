@@ -20,19 +20,27 @@ struct bruce_compress_ctx {
     z_stream stream;
 };
 
-static int compress__window_bits(bruce_compress_format_t format) {
+/* `magnitude` is the actual window size selector (2^magnitude bytes,
+ * 9-15) - kept separate from the format's sign/offset encoding so
+ * compress__start() below can shrink just the window size, independently of
+ * which wrapper format is being produced. */
+static int compress__window_bits_magnitude(bruce_compress_format_t format, int magnitude) {
     switch (format) {
     case BRUCE_COMPRESS_FORMAT_RAW:
-        return -15;
+        return -magnitude;
     case BRUCE_COMPRESS_FORMAT_ZLIB:
-        return 15;
+        return magnitude;
     case BRUCE_COMPRESS_FORMAT_GZIP:
-        return 15 + 16;
+        return magnitude + 16;
     case BRUCE_COMPRESS_FORMAT_AUTO:
-        return 15 + 32;
+        return magnitude + 32;
     default:
-        return 15;
+        return magnitude;
     }
+}
+
+static int compress__window_bits(bruce_compress_format_t format) {
+    return compress__window_bits_magnitude(format, 15);
 }
 
 size_t compress__bound(bruce_compress_format_t format, size_t input_size) {
@@ -54,12 +62,28 @@ bruce_compress_ctx_t *compress__start(bruce_compress_format_t format, int level)
 
     bruce_compress_ctx_t *ctx = malloc(sizeof(*ctx));
     if (ctx == NULL) return NULL;
-    memset(&ctx->stream, 0, sizeof(ctx->stream));
 
-    int rc = deflateInit2(
-        &ctx->stream, level, Z_DEFLATED, compress__window_bits(format), 8 /* default memLevel */,
-        Z_DEFAULT_STRATEGY
-    );
+    /* deflate's own memory footprint is roughly (1 << (windowBits+2)) +
+     * (1 << (memLevel+9)) bytes (see zlib.h) - about 256KB combined at the
+     * library's usual defaults (windowBits=15, memLevel=8). zlib asks its
+     * allocator for that as several separate multi-ten-KB blocks, and on a
+     * long-running embedded heap the *total* free memory can be plentiful
+     * while no single free block is big enough, which deflateInit2() surfaces
+     * as Z_MEM_ERROR. Step window size and memLevel down together until it
+     * actually succeeds (or we run out of legal values): the largest request
+     * that fits wins, so a device with memory to spare still gets the best
+     * ratio and a constrained one gets a working (if less space-efficient)
+     * compressor instead of a hard failure. */
+    static const int MAGNITUDES[] = {15, 12, 10, 9};
+    static const int MEM_LEVELS[] = {8, 6, 4, 1};
+    int rc = Z_MEM_ERROR;
+    for (size_t i = 0; i < sizeof(MAGNITUDES) / sizeof(MAGNITUDES[0]); ++i) {
+        memset(&ctx->stream, 0, sizeof(ctx->stream));
+        int window_bits = compress__window_bits_magnitude(format, MAGNITUDES[i]);
+        rc = deflateInit2(&ctx->stream, level, Z_DEFLATED, window_bits, MEM_LEVELS[i], Z_DEFAULT_STRATEGY);
+        if (rc == Z_OK) break;
+        if (rc != Z_MEM_ERROR) break; /* not a memory problem - smaller windows won't fix it */
+    }
     if (rc != Z_OK) {
         free(ctx);
         return NULL;
@@ -74,8 +98,18 @@ bruce_result_t compress__update(
     if (ctx == NULL || out == NULL || out_written == NULL || out_finished == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     if (in_size > 0 && in == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
 
-    ctx->stream.next_in = (z_const Bytef *)in;
-    ctx->stream.avail_in = (uInt)in_size;
+    /* Only replace next_in/avail_in when the caller actually hands us a new
+     * chunk. A drain-only call (in_size == 0, per this function's own doc
+     * comment) must leave them alone: a tiny out_capacity can make deflate()
+     * fill the whole output buffer - and so stop - before consuming any of
+     * the input it was just given (e.g. gzip's fixed header alone can eat an
+     * 8-byte out_capacity), leaving avail_in > 0. Clobbering that leftover
+     * with 0 here would silently drop it instead of feeding it on the next
+     * call. */
+    if (in_size > 0) {
+        ctx->stream.next_in = (z_const Bytef *)in;
+        ctx->stream.avail_in = (uInt)in_size;
+    }
     ctx->stream.next_out = (Bytef *)out;
     ctx->stream.avail_out = (uInt)out_capacity;
 
@@ -115,8 +149,13 @@ bruce_result_t decompress__update(
     if (ctx == NULL || out == NULL || out_written == NULL || out_finished == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     if (in_size > 0 && in == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
 
-    ctx->stream.next_in = (z_const Bytef *)in;
-    ctx->stream.avail_in = (uInt)in_size;
+    /* See the matching comment in compress__update() - a drain-only call
+     * (in_size == 0) must not clobber avail_in when the previous call left
+     * input unconsumed. */
+    if (in_size > 0) {
+        ctx->stream.next_in = (z_const Bytef *)in;
+        ctx->stream.avail_in = (uInt)in_size;
+    }
     ctx->stream.next_out = (Bytef *)out;
     ctx->stream.avail_out = (uInt)out_capacity;
 

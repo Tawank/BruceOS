@@ -226,16 +226,35 @@ bool selftest__run_terminal_stdio_case(void) {
             stdio__session_write_input(session, shell_command, sizeof(shell_command) - 1) != BRUCE_OK) {
             ok = false;
         } else {
-            (void)runtime__delay(50);
-            read_result = stdio__session_read_output(session, output, sizeof(output) - 1, &output_size);
-            if (read_result != BRUCE_OK || stdio__session_write_input(session, shell_exit, sizeof(shell_exit) - 1) !=
-                                         BRUCE_OK) {
+            /* The shell only echoes its output once it's actually been
+             * scheduled and had a chance to parse/execute the line - a fixed
+             * delay before a single read races that scheduling and was
+             * intermittently failing under load. Poll instead: accumulate
+             * whatever's newly available each round (stdio__session_read_output()
+             * is non-blocking and only returns bytes written since the last
+             * call) until the expected text shows up or a generous deadline
+             * passes. */
+            uint64_t deadline = runtime__now() + 2000;
+            output_size = 0;
+            output[0] = '\0';
+            for (;;) {
+                size_t chunk_size = 0;
+                read_result =
+                    stdio__session_read_output(session, output + output_size, sizeof(output) - 1 - output_size, &chunk_size);
+                if (read_result == BRUCE_OK) {
+                    output_size += chunk_size;
+                    output[output_size] = '\0';
+                }
+                if (strstr(output, "interactive-ok") != NULL || runtime__now() >= deadline) break;
+                (void)runtime__delay(10);
+            }
+            if (strstr(output, "interactive-ok") == NULL ||
+                stdio__session_write_input(session, shell_exit, sizeof(shell_exit) - 1) != BRUCE_OK) {
                 ok = false;
             }
             waited = process__wait_status((bruce_process_id_t)result, 2000, &status);
             ok = ok && waited == BRUCE_OK && status.reason == BRUCE_PROCESS_EXITED &&
-                 status.exit_code == 0 && read_result == BRUCE_OK &&
-                 strstr(output, "interactive-ok") != NULL;
+                 status.exit_code == 0 && strstr(output, "interactive-ok") != NULL;
         }
         (void)stdio__session_close(session);
     } else {
