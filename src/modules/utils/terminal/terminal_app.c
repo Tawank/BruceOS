@@ -7,6 +7,7 @@
 
 #include "args.h"
 #include "core_sdk/app_runner.h"
+#include "core_sdk/clipboard.h"
 #include "core_sdk/config.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/display.h"
@@ -36,6 +37,7 @@
 #define TERMINAL__ASCII_ESCAPE 0x1b
 #define TERMINAL__ASCII_DELETE 0x7f
 #define TERMINAL__ASCII_INTERRUPT 0x03
+#define TERMINAL__ASCII_PASTE 0x16
 
 /* User-adjustable font size, a direct display__set_text_size() multiplier
  * (unlike browser's per-heading-level delta -- the terminal only ever draws
@@ -62,6 +64,19 @@ typedef struct {
     bool exit_requested;
     float font_scale;      /* See TERMINAL__FONT_SCALE_MIN/MAX above. */
     size_t cell_capacity;  /* Cells `cells`/`alt_cells` can each hold -- see terminal__apply_font_scale(). */
+
+    /* Keyboard-driven copy mode -- there's no mouse to drag-select with, so
+     * this is this terminal's take on tmux/screen's copy-mode: SELECT/BTN_A
+     * opens a menu (terminal__open_actions_menu) offering "Select text",
+     * which moves an independent selection cursor over the grid instead of
+     * forwarding keys to the child (see terminal__handle_selection_input).
+     * Meaningless while `selecting` is false. */
+    bool selecting;
+    bool selection_active; /* Anchor has been dropped; still false right after entering selection mode. */
+    uint16_t sel_cursor_x;
+    uint16_t sel_cursor_y;
+    uint16_t sel_anchor_x;
+    uint16_t sel_anchor_y;
 } terminal__state_t;
 
 /* Grid geometry (columns/rows) that fits the display at `scale`, using the
@@ -191,22 +206,21 @@ static void terminal__draw_grid(const terminal__state_t *state, uint16_t theme_f
     }
 }
 
-/* `theme_fg`/`theme_bg` are the ANSI default foreground/background (primary/
- * background - see terminal__draw_grid()); `theme_text` is the chrome text
- * color the inverted glyph under the cursor block is drawn in, so it stays
- * legible against theme_fg regardless of what theme_bg happens to be. */
-static void
-terminal__draw_cursor(const terminal__state_t *state, uint16_t theme_fg, uint16_t theme_bg, uint16_t theme_text) {
+/* Draws a solid cursor block at grid cell (column, row), with the glyph
+ * already there (if any) redrawn in `theme_text` on top so it stays legible.
+ * Shared by the real terminal cursor and the selection-mode cursor below --
+ * they're never both on screen at once (see terminal__draw()). */
+static void terminal__draw_cursor_at(
+    const terminal__state_t *state, uint16_t column, uint16_t row, uint16_t theme_fg, uint16_t theme_text
+) {
     const terminal_grid_t *grid = &state->grid;
-    if (!grid->cursor_visible) return;
-    (void)theme_bg;
     int char_w = (int)lroundf((float)TERMINAL__CHAR_W * state->font_scale);
     int char_h = (int)lroundf((float)TERMINAL__CHAR_H * state->font_scale);
-    int16_t x = TERMINAL__FRAME_MARGIN + (int16_t)(grid->cursor_x * char_w);
-    int16_t y = TERMINAL__TITLE_H + grid->cursor_y * char_h;
+    int16_t x = TERMINAL__FRAME_MARGIN + (int16_t)(column * char_w);
+    int16_t y = TERMINAL__TITLE_H + row * char_h;
     display__fill_rect(x, y, (int16_t)char_w, (int16_t)char_h, theme_fg);
     const terminal_cell_t *cells = terminal_grid__active_cells(grid);
-    const terminal_cell_t *cell = &cells[(size_t)grid->cursor_y * grid->columns + grid->cursor_x];
+    const terminal_cell_t *cell = &cells[(size_t)row * grid->columns + column];
     if (cell->utf8_len > 0) {
         char glyph[5];
         memcpy(glyph, cell->utf8, cell->utf8_len);
@@ -215,6 +229,67 @@ terminal__draw_cursor(const terminal__state_t *state, uint16_t theme_fg, uint16_
         display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
         display__set_cursor(x, y);
         display__print(glyph);
+    }
+}
+
+/* `theme_fg`/`theme_bg` are the ANSI default foreground/background (primary/
+ * background - see terminal__draw_grid()); `theme_text` is the chrome text
+ * color the inverted glyph under the cursor block is drawn in, so it stays
+ * legible against theme_fg regardless of what theme_bg happens to be. */
+static void
+terminal__draw_cursor(const terminal__state_t *state, uint16_t theme_fg, uint16_t theme_bg, uint16_t theme_text) {
+    (void)theme_bg;
+    if (!state->grid.cursor_visible) return;
+    terminal__draw_cursor_at(state, state->grid.cursor_x, state->grid.cursor_y, theme_fg, theme_text);
+}
+
+/* Normalizes the anchor/cursor pair into a row-major (start <= end) range,
+ * the same order terminal__copy_selection() walks the grid in. */
+static void terminal__selection_range(
+    const terminal__state_t *state, uint16_t *out_start_y, uint16_t *out_start_x, uint16_t *out_end_y,
+    uint16_t *out_end_x
+) {
+    uint16_t ax = state->sel_anchor_x, ay = state->sel_anchor_y;
+    uint16_t cx = state->sel_cursor_x, cy = state->sel_cursor_y;
+    bool anchor_first = ay < cy || (ay == cy && ax <= cx);
+    *out_start_y = anchor_first ? ay : cy;
+    *out_start_x = anchor_first ? ax : cx;
+    *out_end_y = anchor_first ? cy : ay;
+    *out_end_x = anchor_first ? cx : ax;
+}
+
+/* Paints the highlighted range (once an anchor has been dropped) as solid
+ * `theme_fg`-on-`theme_text` blocks, like a real terminal's selection
+ * highlight -- character-wise (an xterm mouse drag), not the rectangular
+ * "block select" some terminals offer as an alt-modifier variant. */
+static void terminal__draw_selection(const terminal__state_t *state, uint16_t theme_fg, uint16_t theme_text) {
+    if (!state->selection_active) return;
+    const terminal_grid_t *grid = &state->grid;
+    const terminal_cell_t *cells = terminal_grid__active_cells(grid);
+    int char_w = (int)lroundf((float)TERMINAL__CHAR_W * state->font_scale);
+    int char_h = (int)lroundf((float)TERMINAL__CHAR_H * state->font_scale);
+    uint16_t start_y, start_x, end_y, end_x;
+    terminal__selection_range(state, &start_y, &start_x, &end_y, &end_x);
+    char text[TERMINAL__MAX_COLUMNS * 4 + 1];
+    for (uint16_t y = start_y; y <= end_y; ++y) {
+        uint16_t col_start = (y == start_y) ? start_x : 0;
+        uint16_t col_end = (y == end_y) ? end_x : (uint16_t)(grid->columns - 1);
+        const terminal_cell_t *row = cells + (size_t)y * grid->columns;
+        size_t text_len = 0;
+        for (uint16_t x = col_start; x <= col_end; ++x) {
+            const terminal_cell_t *cell = &row[x];
+            if (cell->utf8_len == 0) {
+                text[text_len++] = ' ';
+            } else {
+                memcpy(text + text_len, cell->utf8, cell->utf8_len);
+                text_len += cell->utf8_len;
+            }
+        }
+        text[text_len] = '\0';
+        display__set_text_color(theme_text);
+        display__set_text_bg_color(theme_fg);
+        display__set_cursor(TERMINAL__FRAME_MARGIN + (int16_t)(col_start * char_w), TERMINAL__TITLE_H + y * char_h);
+        display__print(text);
     }
 }
 
@@ -231,13 +306,22 @@ static bruce_result_t terminal__draw(const terminal__state_t *state) {
     display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
     display__set_text_color(text_color);
     display__set_cursor(TERMINAL__FRAME_MARGIN, TERMINAL__FRAME_MARGIN);
-    display__print(state->child != BRUCE_PROCESS_ID_INVALID ? "Terminal [running]" : "Terminal");
+    display__print(
+        state->selecting            ? "Terminal [v=mark y=copy Esc=cancel]"
+        : state->child != BRUCE_PROCESS_ID_INVALID ? "Terminal [running]"
+                                                    : "Terminal"
+    );
     /* The title bar above is always drawn at size 1 regardless of
      * `font_scale` -- it's fixed chrome, not grid content, and staying
      * legible at TERMINAL__TITLE_H matters more than matching the zoom. */
     display__set_text_size(state->font_scale);
     terminal__draw_grid(state, foreground, background);
-    terminal__draw_cursor(state, foreground, background, text_color);
+    if (state->selecting) {
+        terminal__draw_selection(state, foreground, text_color);
+        terminal__draw_cursor_at(state, state->sel_cursor_x, state->sel_cursor_y, foreground, text_color);
+    } else {
+        terminal__draw_cursor(state, foreground, background, text_color);
+    }
     return display__present();
 }
 
@@ -306,7 +390,180 @@ static void terminal__apply_font_scale(terminal__state_t *state, float new_scale
     state->dirty = true;
 }
 
+/* Writes the clipboard's text to the child as if typed -- same as Ctrl+V
+ * below and text_app.c's Ctrl+V. Silently does nothing if the clipboard
+ * doesn't hold text (e.g. it's empty, or holds files from the file
+ * manager). */
+static void terminal__paste_clipboard(terminal__state_t *state) {
+    if (clipboard__kind() != BRUCE_CLIPBOARD_TEXT) return;
+    const char *text = clipboard__get_text();
+    if (text != NULL && *text != '\0') terminal__write_input(state, text, strlen(text));
+}
+
+/* Extracts the highlighted range (row-major, character-wise -- like an
+ * xterm mouse drag, not a rectangular/block select) into a freshly
+ * allocated string and puts it on the shared clipboard. Trailing blank
+ * (never-written) cells on each copied line are trimmed, the way a real
+ * terminal doesn't copy the unwritten padding after a short line. */
+static void terminal__copy_selection(const terminal__state_t *state) {
+    const terminal_grid_t *grid = &state->grid;
+    const terminal_cell_t *cells = terminal_grid__active_cells(grid);
+    uint16_t start_y, start_x, end_y, end_x;
+    terminal__selection_range(state, &start_y, &start_x, &end_y, &end_x);
+
+    size_t rows = (size_t)(end_y - start_y) + 1;
+    size_t capacity = rows * ((size_t)grid->columns * 4u + 1u) + 1u;
+    char *text = memory__malloc(capacity);
+    if (text == NULL) return;
+    size_t len = 0;
+    for (uint16_t y = start_y; y <= end_y; ++y) {
+        uint16_t col_start = (y == start_y) ? start_x : 0;
+        uint16_t col_end = (y == end_y) ? end_x : (uint16_t)(grid->columns - 1);
+        const terminal_cell_t *row = cells + (size_t)y * grid->columns;
+        size_t line_start = len;
+        for (uint16_t x = col_start; x <= col_end; ++x) {
+            const terminal_cell_t *cell = &row[x];
+            if (cell->utf8_len == 0) {
+                text[len++] = ' ';
+            } else {
+                memcpy(text + len, cell->utf8, cell->utf8_len);
+                len += cell->utf8_len;
+            }
+        }
+        while (len > line_start && text[len - 1] == ' ') len--; /* trim trailing padding */
+        if (y != end_y) text[len++] = '\n';
+    }
+    text[len] = '\0';
+    (void)clipboard__set_text(text);
+    memory__free(text);
+}
+
+static void terminal__enter_selection(terminal__state_t *state) {
+    state->selecting = true;
+    state->selection_active = false;
+    state->sel_cursor_x = state->grid.cursor_x;
+    state->sel_cursor_y = state->grid.cursor_y;
+    state->sel_anchor_x = state->sel_cursor_x;
+    state->sel_anchor_y = state->sel_cursor_y;
+    state->dirty = true;
+}
+
+static void terminal__exit_selection(terminal__state_t *state) {
+    state->selecting = false;
+    state->selection_active = false;
+    state->dirty = true;
+}
+
+/* Keyboard-driven copy mode, modeled on tmux/WezTerm/Alacritty's vi-style
+ * copy-mode bindings (the scheme that keeps recurring across terminals that
+ * support keyboard-only selection): h/j/k/l or arrows move the selection
+ * cursor, `v` drops the anchor, `y` (or Enter) confirms and copies,
+ * Escape/Back cancels. Every other key is silently absorbed -- nothing is
+ * forwarded to the child while selecting. */
+static void terminal__handle_selection_input(terminal__state_t *state, const bruce_input_event_t *event) {
+    bool semantic_key = event->type == BRUCE_INPUT_KEY && event->value != event->code;
+    const terminal_grid_t *grid = &state->grid;
+
+    if ((semantic_key && event->code == BRUCE_INPUT_CODE_BACK) ||
+        (event->type == BRUCE_INPUT_KEY && event->code == TERMINAL__ASCII_ESCAPE) ||
+        event->code == BRUCE_INPUT_CODE_BUTTON_B) {
+        terminal__exit_selection(state);
+        return;
+    }
+
+    /* `v` toggles the anchor, matching vim: press once to mark, press again
+     * (still nothing else typed) to cancel the mark and keep browsing. */
+    bool mark = event->type == BRUCE_INPUT_KEY && !semantic_key && event->code == 'v';
+    /* `y`/Enter/BTN_A/SELECT confirm: with no anchor yet, they mark here (so
+     * a single confirm press still works on boards with no `v` key);
+     * with an anchor already set, they copy the highlighted range and leave
+     * selection mode -- the same two-step flow tmux's `y` and tmux's plain
+     * Enter both follow. */
+    bool confirm = event->code == BRUCE_INPUT_CODE_BUTTON_A ||
+                   (event->code == BRUCE_INPUT_CODE_SELECT && event->type != BRUCE_INPUT_KEY) ||
+                   (event->type == BRUCE_INPUT_KEY && !semantic_key &&
+                    (event->code == '\r' || event->code == '\n' || event->code == 'y'));
+    if (mark) {
+        state->selection_active = !state->selection_active;
+        if (state->selection_active) {
+            state->sel_anchor_x = state->sel_cursor_x;
+            state->sel_anchor_y = state->sel_cursor_y;
+        }
+        state->dirty = true;
+        return;
+    }
+    if (confirm) {
+        if (!state->selection_active) {
+            state->selection_active = true;
+            state->sel_anchor_x = state->sel_cursor_x;
+            state->sel_anchor_y = state->sel_cursor_y;
+            state->dirty = true;
+            return;
+        }
+        terminal__copy_selection(state);
+        terminal__exit_selection(state);
+        return;
+    }
+
+    int32_t code = event->code;
+    if (event->type == BRUCE_INPUT_KEY && !semantic_key) {
+        /* hjkl aliases, vi-style -- only when not shadowing a semantic code. */
+        if (code == 'h') code = BRUCE_INPUT_CODE_LEFT;
+        else if (code == 'j') code = BRUCE_INPUT_CODE_DOWN;
+        else if (code == 'k') code = BRUCE_INPUT_CODE_UP;
+        else if (code == 'l') code = BRUCE_INPUT_CODE_RIGHT;
+    }
+    if (semantic_key || event->type != BRUCE_INPUT_KEY || code != event->code) {
+        switch (code) {
+            case BRUCE_INPUT_CODE_UP:
+                if (state->sel_cursor_y > 0) state->sel_cursor_y--;
+                break;
+            case BRUCE_INPUT_CODE_DOWN:
+                if ((uint16_t)(state->sel_cursor_y + 1) < grid->rows) state->sel_cursor_y++;
+                break;
+            case BRUCE_INPUT_CODE_LEFT:
+                if (state->sel_cursor_x > 0) state->sel_cursor_x--;
+                break;
+            case BRUCE_INPUT_CODE_RIGHT:
+                if ((uint16_t)(state->sel_cursor_x + 1) < grid->columns) state->sel_cursor_x++;
+                break;
+            default: return; /* unrecognized key: ignore */
+        }
+        state->dirty = true;
+    }
+}
+
+/* SELECT/BTN_A opens a small actions menu -- the same entry point that used
+ * to jump straight to dialog__text_input (still offered as "Type
+ * command...") now also offers "Select text" (this terminal's take on
+ * copy-mode, since there's no mouse to drag-select with -- see
+ * terminal__handle_selection_input) and "Paste" (mirrors Ctrl+V below, for
+ * boards that can't type a Ctrl chord at all). */
+static void terminal__open_actions_menu(terminal__state_t *state) {
+    const bruce_dialog_choice_t choices[] = {
+        {.label = "Type command...", .value = "type"  },
+        {.label = "Select text...",  .value = "select"},
+        {.label = "Paste",           .value = "paste" },
+        {.label = "Cancel",          .value = "cancel"},
+    };
+    size_t selected = 0;
+    bruce_result_t result =
+        dialog__choice("Terminal", NULL, choices, sizeof(choices) / sizeof(choices[0]), &selected);
+    if (result != BRUCE_OK) return;
+    if (strcmp(choices[selected].value, "type") == 0) {
+        terminal__open_text_input(state);
+    } else if (strcmp(choices[selected].value, "select") == 0) {
+        terminal__enter_selection(state);
+    } else if (strcmp(choices[selected].value, "paste") == 0) {
+        terminal__paste_clipboard(state);
+    }
+}
+
 static void terminal__handle_input(terminal__state_t *state, const bruce_input_event_t *event) {
+    if (state->selecting) {
+        terminal__handle_selection_input(state, event);
+        return;
+    }
     bool semantic_key = event->type == BRUCE_INPUT_KEY && event->value != event->code;
     if ((semantic_key && event->code == BRUCE_INPUT_CODE_BACK) ||
         (event->type == BRUCE_INPUT_KEY && event->code == TERMINAL__ASCII_ESCAPE) ||
@@ -316,7 +573,7 @@ static void terminal__handle_input(terminal__state_t *state, const bruce_input_e
     }
     if ((event->code == BRUCE_INPUT_CODE_SELECT && (semantic_key || event->type != BRUCE_INPUT_KEY)) ||
         event->code == BRUCE_INPUT_CODE_BUTTON_A) {
-        terminal__open_text_input(state);
+        terminal__open_actions_menu(state);
         return;
     }
     if (semantic_key && event->code == BRUCE_INPUT_CODE_ZOOM_OUT) {
@@ -353,6 +610,19 @@ static void terminal__handle_input(terminal__state_t *state, const bruce_input_e
             terminal_grid__feed(&state->grid, "^C\r\n", 4);
             state->dirty = true;
             (void)process__signal(state->child, BRUCE_PROCESS_SIGNAL_INT);
+            return;
+        }
+    }
+    if (event->code == TERMINAL__ASCII_PASTE) {
+        /* Ctrl+V pastes the clipboard, mirroring text_app.c's Ctrl+V --
+         * gated on cooked mode the same way Ctrl+C is above, so a raw-mode
+         * program that wants a literal Ctrl+V (vim's block-visual mode,
+         * readline's quoted-insert) still gets the real byte instead of
+         * having it hijacked. */
+        bruce_tty_mode_t mode = BRUCE_TTY_MODE_COOKED;
+        (void)tty__get_mode_of(state->session, &mode);
+        if (mode != BRUCE_TTY_MODE_RAW) {
+            terminal__paste_clipboard(state);
             return;
         }
     }

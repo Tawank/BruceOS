@@ -6,6 +6,7 @@
 |---|---|
 | [`app_config.h`](#app_configh) | App settings. |
 | [`app_runner.h`](#app_runnerh) | Runs apps and built-in commands. |
+| [`archive.h`](#archiveh) | ".tar.gz" and ".zip" archive create/list/extract. |
 | [`args.h`](#argsh) | Command-line argument parser (argparse-style). |
 | [`audio.h`](#audioh) | Tone and PCM audio playback. |
 | [`base64.h`](#base64h) | Base64 encoding (RFC 4648). |
@@ -13,6 +14,7 @@
 | [`bluetooth_hid.h`](#bluetooth_hidh) | Bluetooth keyboard and gamepad connections. |
 | [`clipboard.h`](#clipboardh) | Shared copy/paste clipboard. |
 | [`clock.h`](#clockh) | Clock, time zone, and NTP settings. |
+| [`compress.h`](#compressh) | DEFLATE compression/decompression (zlib-backed). |
 | [`config.h`](#configh) | Global Bruce Config API. |
 | [`device.h`](#deviceh) | Battery, power, and device sensors. |
 | [`dialog.h`](#dialogh) | Messages, menus, input dialogs, and text viewers. |
@@ -191,7 +193,14 @@ Functions that explicitly document a `bruce_permission_t` check, grouped by perm
 
 ### `storage`
 
+- `archive__tar_gz_create` (archive.h)
+- `archive__tar_gz_list` (archive.h)
+- `archive__tar_gz_extract` (archive.h)
+- `archive__zip_create` (archive.h)
+- `archive__zip_list` (archive.h)
+- `archive__zip_extract` (archive.h)
 - `clipboard__paste_files` (clipboard.h)
+- `clipboard__paste_file_as` (clipboard.h)
 - `clipboard__paste_binary` (clipboard.h)
 - `filetype__identify` (filetype.h)
 - `ir__transmit_file` (ir.h)
@@ -966,6 +975,263 @@ process interaction").
 ### Returns
 
 `bool`
+
+
+---
+
+# `archive.h`
+
+**".tar.gz" and ".zip" archive create/list/extract.**
+
+".tar.gz": core_sdk/compress.h (the gzip layer) plus a vendored
+tar-format reader/writer (components/microtar). ".zip": a vendored
+zip container reader/writer (components/minizip) that talks to zlib
+directly for its own per-entry deflate, the same way libpng does - it
+doesn't go through core_sdk/compress.h. Both are wired to Bruce's own
+storage__ calls instead of stdio - see core/archive/archive.c (tar.gz)
+and core/archive/archive_zip.c (zip) for the I/O shims. Used by the
+`tar`/`zip`/`archive`/`archive-extract` bnu commands and filemanager's
+"Extract here" action.
+
+Creating a ".tar.gz" is a single streaming pass (tar formatting -> gzip
+compression -> storage__write), never holding more than one I/O chunk in
+memory regardless of archive size. Creating/reading a ".zip" streams
+each entry independently the same way, straight against storage__ -
+a zip's central directory supports real random access (see
+archive__zip_create()'s doc comment), so unlike ".tar.gz" nothing extra
+is needed to read one back.
+
+Listing/extracting a ".tar.gz" is the one exception: gzip decompression
+is inherently forward-only (there's no seeking backward in a deflate
+stream without re-decompressing from the start), but the tar reader
+needs to seek between entries. So both first fully decompress the
+archive to a same-directory scratch ".tar" file, read/extract from that
+with ordinary seeks, then delete the scratch file - meaning free storage
+space at least equal to the decompressed archive size is needed
+temporarily, on top of the archive itself. Fine for the
+sprite/config/small-archive sizes this targets; worth knowing before
+pointing this at something huge.
+
+**Constants**
+
+| Name | Value |
+|---|---|
+| `BRUCE_ARCHIVE_ENTRY_NAME_MAX` | `100` |
+
+---
+
+## bruce_archive_entry_t()
+
+```c
+typedef struct {
+    /* Entry's path within the archive, e.g. "photos/cat.jpg". Always
+     * forward-slash separated regardless of host path conventions. */
+    char name[BRUCE_ARCHIVE_ENTRY_NAME_MAX];
+    /* Uncompressed size in bytes; 0 for directories. */
+    size_t size;
+    bool is_directory;
+} bruce_archive_entry_t;
+```
+
+
+---
+
+## bruce_archive_list_fn()
+
+```c
+typedef bool (*bruce_archive_list_fn)(void *context, const bruce_archive_entry_t *entry);
+```
+
+Called once per archive entry by archive__tar_gz_list().
+
+@return false to stop listing early (e.g. caller found what it needed); true to continue.
+
+
+---
+
+## archive__tar_gz_create()
+
+```c
+bruce_result_t
+archive__tar_gz_create(const char *archive_path, const char *const *entry_paths, size_t entry_count, int level);
+```
+
+Creates a new ".tar.gz" archive from a set of existing paths.
+
+Each of `entry_paths` is added under its own basename; a directory is
+added recursively (its own name becomes an archive-relative root, e.g.
+adding "/sd/photos" produces entries named "photos/", "photos/a.jpg", ...).
+`archive_path` is truncated/created fresh - any existing file there is
+overwritten only once the whole archive has been built successfully
+(nothing already at `archive_path` is touched if this fails partway).
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `archive_path` | `const char *` | Destination ".tar.gz" path. |
+| `entry_paths` | `const char *const *` | Existing file/directory paths to add. |
+| `entry_count` | `size_t` | Number of paths in entry_paths. |
+| `level` | `int` | BRUCE_COMPRESS_LEVEL_DEFAULT, or 0-9 (see core_sdk/compress.h). |
+
+### Returns
+
+`bruce_result_t`
+
+#### Permissions
+
+- `storage`
+
+
+---
+
+## archive__tar_gz_list()
+
+```c
+bruce_result_t archive__tar_gz_list(const char *archive_path, bruce_archive_list_fn callback, void *context);
+```
+
+Lists a ".tar.gz" archive's entries without extracting them.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `archive_path` | `const char *` | Archive to list. |
+| `callback` | `bruce_archive_list_fn` | Called once per entry, in archive order. |
+| `context` | `void *` | Passed through to every callback call unchanged. |
+
+### Returns
+
+`bruce_result_t`
+
+#### Permissions
+
+- `storage`
+
+
+---
+
+## archive__tar_gz_extract()
+
+```c
+bruce_result_t archive__tar_gz_extract(const char *archive_path, const char *dest_dir);
+```
+
+Extracts every entry of a ".tar.gz" archive under `dest_dir`.
+
+`dest_dir` must already exist. Entry names are validated before anything
+is written: an absolute name or one containing a ".." component is
+rejected (BRUCE_ERR_INVALID_PATH) rather than allowed to write outside
+`dest_dir` ("tar-slip"). Missing intermediate directories under
+`dest_dir` are created as needed.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `archive_path` | `const char *` | Archive to extract. |
+| `dest_dir` | `const char *` | Existing directory to extract into. |
+
+### Returns
+
+`bruce_result_t`
+
+#### Permissions
+
+- `storage`
+
+
+---
+
+## archive__zip_create()
+
+```c
+bruce_result_t
+archive__zip_create(const char *archive_path, const char *const *entry_paths, size_t entry_count, int level);
+```
+
+Creates a new ".zip" archive from a set of existing paths.
+
+Same entry-naming/recursion rules as archive__tar_gz_create(). Unlike
+".tar.gz", a ".zip"'s entries are compressed individually and its
+central directory supports real random access, so - unlike
+archive__tar_gz_list()/_extract() - no scratch decompression step is
+needed for reading one back; the underlying storage__seek() is used
+directly.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `archive_path` | `const char *` | Destination ".zip" path. |
+| `entry_paths` | `const char *const *` | Existing file/directory paths to add. |
+| `entry_count` | `size_t` | Number of paths in entry_paths. |
+| `level` | `int` | BRUCE_COMPRESS_LEVEL_DEFAULT, or 0-9 (see core_sdk/compress.h). |
+
+### Returns
+
+`bruce_result_t`
+
+#### Permissions
+
+- `storage`
+
+
+---
+
+## archive__zip_list()
+
+```c
+bruce_result_t archive__zip_list(const char *archive_path, bruce_archive_list_fn callback, void *context);
+```
+
+Lists a ".zip" archive's entries without extracting them.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `archive_path` | `const char *` | Archive to list. |
+| `callback` | `bruce_archive_list_fn` | Called once per entry, in archive order. |
+| `context` | `void *` | Passed through to every callback call unchanged. |
+
+### Returns
+
+`bruce_result_t`
+
+#### Permissions
+
+- `storage`
+
+
+---
+
+## archive__zip_extract()
+
+```c
+bruce_result_t archive__zip_extract(const char *archive_path, const char *dest_dir);
+```
+
+Extracts every entry of a ".zip" archive under `dest_dir`.
+
+Same "dest_dir must exist"/"zip-slip"-rejection/intermediate-directory
+rules as archive__tar_gz_extract().
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `archive_path` | `const char *` | Archive to extract. |
+| `dest_dir` | `const char *` | Existing directory to extract into. |
+
+### Returns
+
+`bruce_result_t`
+
+#### Permissions
+
+- `storage`
 
 
 ---
@@ -2787,6 +3053,47 @@ can be pasted again.
 
 ---
 
+## clipboard__paste_file_as()
+
+```c
+bruce_result_t clipboard__paste_file_as(size_t index, const char *target_path, bool overwrite);
+```
+
+Copies/moves a single clipboard entry to an exact destination path.
+
+Same recursive copy/move engine as clipboard__paste_files(), but for one
+clipboard entry chosen by index and a caller-supplied destination path
+(rather than target_directory + the source's own basename) - lets a
+caller (e.g. the file manager) paste a copy under a different name, or
+explicitly allow overwriting an existing destination instead of getting
+BRUCE_ERR_ALREADY_EXISTS back. Refuses (BRUCE_ERR_INVALID_ARGUMENT) a
+target_path equal to the source itself, or one of the source's own
+directories or nested inside one, same as clipboard__paste_files() does
+for its target_directory.
+
+                  existing destination, matching clipboard__paste_files();
+                  when true, removes it (file, or whole directory tree)
+                  first.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `index` | `size_t` | Zero-based clipboard file index, below clipboard__file_count(). |
+| `target_path` | `const char *` | Absolute destination path, including the final name. |
+| `overwrite` | `bool` | When false, refuses (BRUCE_ERR_ALREADY_EXISTS) an |
+
+### Returns
+
+`bruce_result_t`
+
+#### Permissions
+
+- `storage`
+
+
+---
+
 ## clipboard__set_binary()
 
 ```c
@@ -3075,6 +3382,338 @@ Returns the configured NTP server address.
 ### Returns
 
 `const char *`
+
+
+---
+
+# `compress.h`
+
+**DEFLATE compression/decompression (zlib-backed).**
+
+Used to compress/decompress sprites, bitmaps, and general file data, and
+as the codec layer under core_sdk/archive.h's ".tar.gz" support. No
+permission of its own - this only ever touches memory the caller already
+gave it; a caller doing file I/O around it (e.g. writing the compressed
+output to storage) needs whatever permission that I/O itself requires.
+
+Two ways to use it:
+
+  - The one-shot compress__compute()/decompress__compute() functions, for
+    a buffer that's already fully in memory and whose *decompressed* size
+    is already known ahead of time (e.g. a sprite's own header already
+    states its uncompressed width*height*bpp) - the common case for
+    sprites/bitmaps.
+  - The streaming compress__start()/compress__update()/compress__end() and
+    decompress__start()/decompress__update()/decompress__end() functions,
+    for arbitrary-size data (a whole file, an archive member) that
+    shouldn't ever need to sit fully in RAM at once. This is a thin,
+    honest wrapper over zlib's own deflate()/inflate() call contract
+    rather than one that hides it - compressed output size isn't bounded
+    by input chunk size, so any API that pretended otherwise would either
+    lie about completion or require an unbounded output buffer.
+
+**Constants**
+
+| Name | Value |
+|---|---|
+| `BRUCE_COMPRESS_LEVEL_DEFAULT` | `(-1)` |
+| `BRUCE_COMPRESS_LEVEL_FASTEST` | `1` |
+| `BRUCE_COMPRESS_LEVEL_BEST` | `9` |
+
+---
+
+## bruce_compress_format_t()
+
+```c
+typedef enum {
+    /* RFC1951 raw deflate: no header, no trailer, no checksum. Smallest
+     * output, for embedding inside a caller's own container that already
+     * tracks the original size (e.g. a sprite file's header). */
+    BRUCE_COMPRESS_FORMAT_RAW = 0,
+    /* RFC1950 zlib wrapper: 2-byte header + Adler-32 trailer. */
+    BRUCE_COMPRESS_FORMAT_ZLIB,
+    /* RFC1952 gzip container: magic/OS-byte header + CRC-32/size trailer -
+     * what ".gz" files and the gzip layer of ".tar.gz" use. */
+    BRUCE_COMPRESS_FORMAT_GZIP,
+    /* decompress__start() only: sniff zlib-vs-gzip from the stream's own
+     * header instead of the caller having to know which one it is. */
+    BRUCE_COMPRESS_FORMAT_AUTO,
+} bruce_compress_format_t;
+```
+
+
+---
+
+## bruce_compress_ctx_t()
+
+```c
+typedef struct bruce_compress_ctx bruce_compress_ctx_t;
+```
+
+
+---
+
+## compress__bound()
+
+```c
+size_t compress__bound(bruce_compress_format_t format, size_t input_size);
+```
+
+Upper bound on compress__compute()'s output size for `input_size` bytes of input, to size `out` with.
+
+Compression can (rarely, for already-dense input) make data slightly
+larger; this is the worst case, not the expected case.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `format` | `bruce_compress_format_t` |  |
+| `input_size` | `size_t` |  |
+
+### Returns
+
+`size_t`
+
+
+---
+
+## compress__compute()
+
+```c
+bruce_result_t compress__compute(
+    bruce_compress_format_t format, int level, const void *data, size_t size, void *out, size_t out_capacity,
+    size_t *out_size
+);
+```
+
+Compresses a buffer already fully in memory, in one call.
+
+Equivalent to compress__start() + compress__update() (with finish=true) +
+compress__end(), for the common case where `data` is small enough to
+already be fully in RAM. Prefer the streaming API for anything
+file-sized.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `format` | `bruce_compress_format_t` | Output container. Must not be BRUCE_COMPRESS_FORMAT_AUTO. |
+| `level` | `int` | BRUCE_COMPRESS_LEVEL_DEFAULT, or 0-9 (0 = store, 9 = smallest/slowest). |
+| `data` | `const void *` | Bytes to compress. |
+| `size` | `size_t` | Number of bytes in data. |
+| `out` | `void *` | Buffer to receive the compressed output. |
+| `out_capacity` | `size_t` | Size of out; compress__bound(format, size) is always enough. |
+| `out_size` | `size_t *` | Receives the number of bytes written to out. |
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
+## decompress__compute()
+
+```c
+bruce_result_t decompress__compute(
+    bruce_compress_format_t format, const void *data, size_t size, void *out, size_t out_capacity, size_t *out_size
+);
+```
+
+Decompresses a buffer already fully in memory, in one call.
+
+The decompressed size must already be known and `out_capacity` must be at
+least that large - this never grows `out` or guesses; it fails with
+BRUCE_ERR_RESOURCE_LIMIT if the decompressed data doesn't fit. Prefer the
+streaming API when the decompressed size isn't known ahead of time (the
+general "decompress a file" case).
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `format` | `bruce_compress_format_t` | Container to expect `data` to be in. |
+| `data` | `const void *` | Compressed bytes. |
+| `size` | `size_t` | Number of bytes in data. |
+| `out` | `void *` | Buffer to receive the decompressed output. |
+| `out_capacity` | `size_t` | Size of out. |
+| `out_size` | `size_t *` | Receives the number of bytes written to out. |
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
+## compress__start()
+
+```c
+bruce_compress_ctx_t *compress__start(bruce_compress_format_t format, int level);
+```
+
+Starts a new streaming compression.
+
+@return A new context, or NULL on allocation failure or an invalid format/level.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `format` | `bruce_compress_format_t` | Output container. Must not be BRUCE_COMPRESS_FORMAT_AUTO. |
+| `level` | `int` | BRUCE_COMPRESS_LEVEL_DEFAULT, or 0-9. |
+
+### Returns
+
+`bruce_compress_ctx_t *`
+
+
+---
+
+## compress__update()
+
+```c
+bruce_result_t compress__update(
+    bruce_compress_ctx_t *ctx, const void *in, size_t in_size, bool finish, void *out, size_t out_capacity,
+    size_t *out_written, bool *out_finished
+);
+```
+
+Feeds input to and/or drains output from an in-progress compression.
+
+Usage loop: call with a new chunk of `in`; if `*out_written` comes back
+equal to `out_capacity`, more compressed output may be pending - call
+again with `in`/`in_size` as NULL/0 (same `finish`) to keep draining
+before feeding more input. Pass `finish=true` on the call carrying the
+last input byte, then keep draining (in=NULL) until `*out_finished` comes
+back true - that is the last chunk of compressed output.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `ctx` | `bruce_compress_ctx_t *` | Context returned by compress__start(). |
+| `in` | `const void *` | New input bytes, or NULL to only drain pending output. |
+| `in_size` | `size_t` | Number of bytes in in, or 0. |
+| `finish` | `bool` | True on (and after) the call carrying the last input byte. |
+| `out` | `void *` | Buffer to receive compressed output. |
+| `out_capacity` | `size_t` | Size of out. |
+| `out_written` | `size_t *` | Receives the number of bytes written to out this call. |
+| `out_finished` | `bool *` | Receives true once this was the final chunk of output (only possible when finish=true). |
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
+## compress__end()
+
+```c
+void compress__end(bruce_compress_ctx_t *ctx);
+```
+
+Frees a streaming compression context.
+
+Must be called exactly once per compress__start(), whether or not
+out_finished was ever reached (an early abort is fine).
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `ctx` | `bruce_compress_ctx_t *` |  |
+
+### Returns
+
+`void`
+
+
+---
+
+## decompress__start()
+
+```c
+bruce_compress_ctx_t *decompress__start(bruce_compress_format_t format);
+```
+
+Starts a new streaming decompression.
+
+  sniffs zlib-vs-gzip from the stream's own header.
+@return A new context, or NULL on allocation failure.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `format` | `bruce_compress_format_t` | Container `in` is expected to be in. BRUCE_COMPRESS_FORMAT_AUTO |
+
+### Returns
+
+`bruce_compress_ctx_t *`
+
+
+---
+
+## decompress__update()
+
+```c
+bruce_result_t decompress__update(
+    bruce_compress_ctx_t *ctx, const void *in, size_t in_size, void *out, size_t out_capacity, size_t *out_written,
+    bool *out_finished
+);
+```
+
+Feeds input to and/or drains output from an in-progress decompression.
+
+Same drain loop as compress__update() (call again with in=NULL whenever
+`*out_written == out_capacity`), except there's no `finish` flag to pass -
+the compressed stream's own trailer marks its end, so `*out_finished`
+becomes true on its own once the last byte of decompressed output has
+been produced from the input fed so far.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `ctx` | `bruce_compress_ctx_t *` | Context returned by decompress__start(). |
+| `in` | `const void *` | New compressed input bytes, or NULL to only drain pending output. |
+| `in_size` | `size_t` | Number of bytes in in, or 0. |
+| `out` | `void *` | Buffer to receive decompressed output. |
+| `out_capacity` | `size_t` | Size of out. |
+| `out_written` | `size_t *` | Receives the number of bytes written to out this call. |
+| `out_finished` | `bool *` | Receives true once the compressed stream's end has been reached. |
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
+## decompress__end()
+
+```c
+void decompress__end(bruce_compress_ctx_t *ctx);
+```
+
+Frees a streaming decompression context.
+
+Must be called exactly once per decompress__start(), whether or not
+out_finished was ever reached (an early abort, or a corrupt/truncated
+stream, is fine).
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `ctx` | `bruce_compress_ctx_t *` |  |
+
+### Returns
+
+`void`
 
 
 ---
@@ -7828,6 +8467,23 @@ text").
 | `BRUCE_FILETYPE_MIME_MAX` | `64` |
 | `BRUCE_FILETYPE_ICON_MAX` | `32` |
 | `BRUCE_FILETYPE_PROGRAM_MAX` | `32` |
+| `BRUCE_FILETYPE_ACTION_LABEL_MAX` | `24` |
+| `BRUCE_FILETYPE_MAX_ACTIONS` | `2` |
+
+---
+
+## bruce_filetype_action_t()
+
+```c
+typedef struct {
+    /* Menu label, e.g. "Extract here". Never empty. */
+    char label[BRUCE_FILETYPE_ACTION_LABEL_MAX];
+    /* app_runner program to run with the file's path as its sole argument
+     * when this action is chosen, e.g. "archive-extract". */
+    char program[BRUCE_FILETYPE_PROGRAM_MAX];
+} bruce_filetype_action_t;
+```
+
 
 ---
 
@@ -7847,6 +8503,16 @@ typedef struct {
     bool is_directory;
     /* Best-effort text/binary guess, only meaningful when is_directory is false. */
     bool is_binary;
+    /* Extra actions this extension offers beyond the default file-manager
+     * menu, in configured order; only actions[0..action_count-1] are valid.
+     * Kept to a handful (BRUCE_FILETYPE_MAX_ACTIONS) since these are meant
+     * for the rare "this filetype needs its own verb" case (an archive's
+     * "Extract here") rather than a general-purpose menu builder - most
+     * entries have none. Populated by filetype__lookup_extension() and
+     * filetype__identify()/filetype__identify_bytes() when an extension
+     * matched (tier 2); always empty otherwise. */
+    bruce_filetype_action_t actions[BRUCE_FILETYPE_MAX_ACTIONS];
+    size_t action_count;
 } bruce_filetype_info_t;
 ```
 
@@ -12521,6 +13187,28 @@ Forcibly kills a process, equivalent to process__signal() with BRUCE_PROCESS_SIG
 
 ---
 
+## process__clear_signal()
+
+```c
+bruce_result_t process__clear_signal(void);
+```
+
+Cancels a pending INT/TERM on the calling process instead of stopping.
+
+Normally a cooperative signal means "stop soon". This lets a process say
+"I saw it, I'm fine, keep going" instead -- e.g. an interactive shell that
+wants to just abort the line it's reading on Ctrl+C, not exit. Does
+nothing if no signal is pending. Sets state back to BRUCE_PROCESS_BACKGROUND,
+same as process__resume(). Self-only, no permission check. KILL can't be
+cancelled this way -- it kills the process directly instead.
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
 ## process__wait()
 
 ```c
@@ -14645,6 +15333,32 @@ Cooperative bookkeeping only -- see tty__get_mode().
 
 ---
 
+## tty__get_mode_of()
+
+```c
+bruce_result_t tty__get_mode_of(bruce_stdio_session_t session, bruce_tty_mode_t *out_mode);
+```
+
+Reads the mode of `session`. Caller must own the session (like tty__set_size()).
+
+Lets an owner (terminal app, ssh client, ...) see if the program using
+this session asked for raw mode, before deciding things like whether
+Ctrl+C should send SIGINT or just be passed through as a normal byte.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `session` | `bruce_stdio_session_t` | Session to query; caller must be its owner. |
+| `out_mode` | `bruce_tty_mode_t *` | Receives the session's mode. |
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
 # `wifi.h`
 
 **Wi-Fi connections, scanning, and status.**
@@ -14748,7 +15462,10 @@ int wifi__scan(wifi__network_t *networks, size_t capacity);
 Scans for nearby Wi-Fi networks.
 
 Returns the number of networks copied into `networks` (0 on an empty
-scan) or a negative BRUCE_ERR_* value on failure.
+scan) or a negative BRUCE_ERR_* value on failure. Blocks the calling
+process until the scan completes or times out; a caller that wants to
+animate progress or offer cancellation should use wifi__scan_start() /
+wifi__scan_poll() / wifi__scan_cancel() instead.
 
 ### Parameters
 
@@ -14760,6 +15477,78 @@ scan) or a negative BRUCE_ERR_* value on failure.
 ### Returns
 
 `int`
+
+
+---
+
+## wifi__scan_start()
+
+```c
+bruce_result_t wifi__scan_start(void);
+```
+
+Starts a Wi-Fi scan without waiting for it to finish.
+
+Only one scan runs on the radio at a time; calling this while another
+caller's scan is in flight (or uncollected) joins that round instead of
+restarting it, so concurrent scanners share one result set rather than
+stepping on each other. Must be matched by one wifi__scan_poll() call
+that doesn't return BRUCE_ERR_TIMEOUT, or one wifi__scan_cancel().
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
+## wifi__scan_poll()
+
+```c
+int wifi__scan_poll(wifi__network_t *networks, size_t capacity, uint32_t timeout_ms);
+```
+
+Waits up to `timeout_ms` for a scan started with wifi__scan_start() to finish, returning its results if it has.
+
+Returns the number of networks copied into `networks` (0 on an empty
+scan), BRUCE_ERR_TIMEOUT if the scan is still running when `timeout_ms`
+elapses (the scan itself is unaffected -- call again to keep waiting, or
+wifi__scan_cancel() to give up on it), or another negative BRUCE_ERR_*
+value on failure. Calling this without a scan in flight (no prior
+wifi__scan_start(), or one already collected) just waits out the timeout
+and returns BRUCE_ERR_TIMEOUT.
+
+A caller that joined the same round as another process still gets its
+own copy, capped to its own `capacity`.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `networks` | `wifi__network_t *` | Array to receive scanned networks. |
+| `capacity` | `size_t` | Number of entries networks can hold. |
+| `timeout_ms` | `uint32_t` | How long to wait for this poll before giving up. |
+
+### Returns
+
+`int`
+
+
+---
+
+## wifi__scan_cancel()
+
+```c
+bruce_result_t wifi__scan_cancel(void);
+```
+
+Aborts a scan started with wifi__scan_start(), if one is running.
+
+Best-effort and safe to call with no scan in flight.
+
+### Returns
+
+`bruce_result_t`
 
 
 ---
