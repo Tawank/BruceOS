@@ -66,6 +66,7 @@
 #define SHELL_STACK_BYTES 4096u
 #define SSH_STACK_BYTES 16384u
 #define STORAGE_COMMANDS_STACK_BYTES 8192u
+#define TERMINAL_STACK_BYTES 8192u
 #define WIFI_STACK_BYTES 8192u
 
 void app_runner__register_defaults(void) {
@@ -172,7 +173,7 @@ void app_runner__register_defaults(void) {
     );
     app_runner__register("shell", "Run the command shell", "Shell", shell_app_main, SHELL_STACK_BYTES);
     app_runner__register("stty", "Configure terminal settings", "Shell", bnu_stty_app_main, 0);
-    app_runner__register("terminal", "Open a terminal", "Shell", terminal_app_main, 0);
+    app_runner__register("terminal", "Open a terminal", "Shell", terminal_app_main, TERMINAL_STACK_BYTES);
 
     /* Content - viewing and editing text and images. */
     app_runner__register("base64", "Base64 encode or decode data", "Content", bnu_base64_app_main, 0);

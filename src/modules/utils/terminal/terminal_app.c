@@ -667,7 +667,15 @@ static bool terminal__args_to_line(ArgParser *parser, char *out, size_t out_size
 }
 
 int terminal_app_main(int argc, char **argv) {
-    char startup_line[TERMINAL__LINE_CAPACITY] = {0};
+    /* Heap-allocated, not a local char[TERMINAL__LINE_CAPACITY]: its content
+     * is only needed for the one terminal__write_input() below, right before
+     * the interactive loop starts, but a plain stack array declared at
+     * function scope stays reserved for the rest of terminal_app_main's
+     * activation - including every later terminal__handle_input() ->
+     * terminal__open_actions_menu() -> dialog__choice() call the SELECT
+     * actions menu makes, which is exactly the deep GUI-rendering chain this
+     * task's stack is tightest for. Freed right after its one use below. */
+    char *startup_line = NULL;
     bool has_startup_command = false;
     ArgParser *parser = ap_new_parser();
     if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
@@ -685,9 +693,14 @@ int terminal_app_main(int argc, char **argv) {
     }
     const char *command = ap_get_arg(parser, "command");
     has_startup_command = command != NULL;
-    if (has_startup_command && !terminal__args_to_line(parser, startup_line, sizeof(startup_line))) {
-        ap_free(parser);
-        return BRUCE_ERR_INVALID_ARGUMENT;
+    if (has_startup_command) {
+        startup_line = memory__malloc(TERMINAL__LINE_CAPACITY);
+        if (startup_line == NULL || !terminal__args_to_line(parser, startup_line, TERMINAL__LINE_CAPACITY)) {
+            bruce_result_t error = startup_line == NULL ? BRUCE_ERR_NO_MEMORY : BRUCE_ERR_INVALID_ARGUMENT;
+            memory__free(startup_line);
+            ap_free(parser);
+            return error;
+        }
     }
     ap_free(parser);
 
@@ -712,6 +725,7 @@ int terminal_app_main(int argc, char **argv) {
         if (alt_cells_alloc == BRUCE_OK) {
             terminal__free_buffer(state.alt_cells, state.alt_cells_external);
         }
+        memory__free(startup_line);
         return BRUCE_ERR_NO_MEMORY;
     }
     state.cell_capacity = (size_t)columns * (size_t)rows;
@@ -724,6 +738,7 @@ int terminal_app_main(int argc, char **argv) {
 
     if (stdio__session_create(&state.session) != BRUCE_OK) {
         terminal__free_buffers(&state);
+        memory__free(startup_line);
         return BRUCE_ERR_RESOURCE_LIMIT;
     }
     /* Establishes the session's tty geometry before the shell (and every
@@ -738,6 +753,7 @@ int terminal_app_main(int argc, char **argv) {
     if (shell_process <= 0) {
         (void)stdio__session_close(state.session);
         terminal__free_buffers(&state);
+        memory__free(startup_line);
         return shell_process;
     }
     state.child = (bruce_process_id_t)shell_process;
@@ -747,6 +763,8 @@ int terminal_app_main(int argc, char **argv) {
         terminal__write_input(&state, startup_line, strlen(startup_line));
         terminal__write_input(&state, "\r", 1);
     }
+    memory__free(startup_line);
+    startup_line = NULL;
 
     while (!state.exit_requested) {
         terminal__drain_output(&state);
