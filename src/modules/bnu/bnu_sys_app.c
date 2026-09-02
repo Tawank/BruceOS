@@ -175,6 +175,7 @@ static const char *bnu__layout_region_name(bruce_memory_region_t region) {
         case BRUCE_MEMORY_REGION_DIRAM: return "D/IRAM";
         case BRUCE_MEMORY_REGION_IRAM: return "IRAM";
         case BRUCE_MEMORY_REGION_RTC_FAST: return "RTC fast RAM";
+        case BRUCE_MEMORY_REGION_RTC_SLOW: return "RTC slow RAM";
         case BRUCE_MEMORY_REGION_PSRAM: return "PSRAM";
         case BRUCE_MEMORY_REGION_SWAP: return "swap";
         default: return "unknown";

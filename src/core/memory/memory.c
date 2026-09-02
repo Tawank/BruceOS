@@ -31,19 +31,54 @@ static void memory__cleanup(void *context) {
      * free. memory__free() clears the marker before releasing the allocation,
      * so a header that no longer identifies a live tracked block is ignored. */
     if (header == NULL || header->magic != MEMORY__MAGIC) return;
+    bool is_rtc_pool = header->is_rtc_pool;
     header->magic = 0;
-    free(header);
+    if (is_rtc_pool) {
+        memory_rtc__free(header);
+    } else {
+        free(header);
+    }
 }
 
 void *memory__malloc(size_t size) {
     if (size == 0 || size > SIZE_MAX - sizeof(memory__header_t)) { return NULL; }
+    size_t total = sizeof(memory__header_t) + size;
 
-    memory__header_t *header = MEMORY__MALLOC(sizeof(memory__header_t) + size);
+    /* Small allocations get first crack at RTC memory - both the hand-rolled
+     * RTC_SLOW pool (memory_rtc.c) and, straight through esp_heap_caps,
+     * RTC_FAST - before falling back to the general internal/PSRAM heap.
+     * Neither is memory a plain malloc() ever reaches in practice (RTC_SLOW
+     * has no heap_caps region at all; RTC_FAST matches MALLOC_CAP_DEFAULT at
+     * LOW priority behind D/IRAM and DRAM, so it's only ever reached once
+     * both of those are full - see memory_rtc.c's header comment), so
+     * steering small, short-lived allocations there first is what keeps the
+     * big D/IRAM region's largest free block from fragmenting under them.
+     *
+     * Skipped entirely under CONFIG_BRUCE_MEMORY_FORCE_PSRAM: that option's
+     * whole point is routing memory__malloc() traffic away from internal RAM
+     * (see its Kconfig help text), and both RTC regions are internal RAM -
+     * silently landing allocations there would defeat it exactly the way it
+     * exists to prevent. */
+    bool from_rtc_pool = false;
+    memory__header_t *header = NULL;
+#if !CONFIG_BRUCE_MEMORY_FORCE_PSRAM
+    from_rtc_pool = true;
+    header = memory_rtc__alloc(total);
+    if (header == NULL) {
+        from_rtc_pool = false;
+        header = heap_caps_malloc(total, MALLOC_CAP_RTCRAM);
+    }
+#endif
+    if (header == NULL) { header = MEMORY__MALLOC(total); }
     if (header == NULL) { return NULL; }
 
     bruce_resource_id_t resource_id = process_registry__resource_register(memory__cleanup, header);
     if (resource_id == BRUCE_RESOURCE_ID_INVALID) {
-        free(header);
+        if (from_rtc_pool) {
+            memory_rtc__free(header);
+        } else {
+            free(header);
+        }
         return NULL;
     }
 
@@ -52,6 +87,7 @@ void *memory__malloc(size_t size) {
     header->resource_id = resource_id;
     header->owner_id = process__current_id();
     header->is_stack = false;
+    header->is_rtc_pool = from_rtc_pool;
     process_registry__account_memory((int64_t)size);
     return (void *)(header + 1);
 }
@@ -74,6 +110,19 @@ void *memory__realloc(void *ptr, size_t size) {
 
     memory__header_t *header = ((memory__header_t *)ptr) - 1;
     if (header->magic != MEMORY__MAGIC) return NULL;
+
+    if (header->is_rtc_pool) {
+        /* The RTC pool has no in-place grow/shrink (see memory_rtc.c) -
+         * migrate by allocating fresh, which gets its own shot at the pool
+         * and falls back to the heap exactly like any other memory__malloc()
+         * call, rather than handing a non-heap pointer to
+         * process_registry__resource_realloc() below. */
+        void *migrated = memory__malloc(size);
+        if (migrated == NULL) return NULL;
+        memcpy(migrated, ptr, header->size < size ? header->size : size);
+        memory__free(ptr);
+        return migrated;
+    }
 
     size_t old_size = header->size;
     bruce_resource_id_t resource_id = header->resource_id;
@@ -100,8 +149,13 @@ void memory__free(void *ptr) {
      * points at it (which would become a teardown-time double free). */
     if (process_registry__resource_release_exact(header->resource_id, header) != BRUCE_OK) return;
     process_registry__account_memory(-(int64_t)header->size);
+    bool is_rtc_pool = header->is_rtc_pool;
     header->magic = 0;
-    free(header);
+    if (is_rtc_pool) {
+        memory_rtc__free(header);
+    } else {
+        free(header);
+    }
 }
 
 bruce_result_t memory__get_stats(bruce_memory_stats_t *out_stats) {

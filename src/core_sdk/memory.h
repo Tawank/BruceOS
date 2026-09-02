@@ -49,6 +49,12 @@ typedef enum {
     BRUCE_MEMORY_REGION_DIRAM,
     BRUCE_MEMORY_REGION_IRAM,
     BRUCE_MEMORY_REGION_RTC_FAST,
+    /* The small hand-rolled RTC_DATA_ATTR pool memory_rtc.c backs - see
+     * memory_layout.c's RTC-pool walk. Distinct from RTC_FAST: this SoC has
+     * no esp_heap_caps-supported way to register RTC slow memory as heap at
+     * all, so it is reported through a separate path rather than a real
+     * heap_caps region. */
+    BRUCE_MEMORY_REGION_RTC_SLOW,
     BRUCE_MEMORY_REGION_PSRAM,
     BRUCE_MEMORY_REGION_SWAP,
 } bruce_memory_region_t;
