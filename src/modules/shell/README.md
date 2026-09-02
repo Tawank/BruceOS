@@ -19,7 +19,10 @@ definitions) by raw-text keyword matching in command position.
   below).
 - Multi-line input: a bare newline is treated as `;`, so a whole multi-line
   construct parses as one flat command list.
-- Comments are not supported (`#` is not special).
+- Comments: a `#` at the start of a word begins a comment running to the end
+  of that physical line (a `#` glued onto other text, e.g. `foo#bar`, is not
+  special, same as bash). Works inside `if`/`for`/`while`/function bodies
+  too, not just at top level.
 
 **Quoting and expansion**
 - Single quotes (`'...'`, no expansion), double quotes (`"..."`, `$`
@@ -210,7 +213,6 @@ Roughly in order of how often bash scripts actually use them:
 - File-test operators for `test`/`[` (`-e -f -d -r -w -x ...`) and `-o`/`[[
   ... || ... ]]`-in-tests.
 - `until` loops.
-- Comments (`#`).
 
 ## Example
 
@@ -310,9 +312,14 @@ against real firmware output (via `stdio__session_*` + `app_runner__run`):
 `selftest__run_shell_language_case`, `..._script_case`,
 `..._control_flow_case`, `..._local_case`, `..._command_substitution_case`,
 `..._arith_word_case`, `..._output_redirect_case`, `..._input_redirect_case`,
-`..._heredoc_case`, `..._multiline_case`,
+`..._heredoc_case`, `..._cat_interactive_case` (bare `cat`'s
+Ctrl+D-terminated interactive stdin, layered on `stdio__read_line()` --
+see `bnu_fs_app.c`'s `bnu__cat_interactive()`), `..._multiline_case` (also
+the only case exercising a `#` comment, inside a function body),
 `..._loops_case` (arithmetic,
 both `for` forms, `while`, `break`, `break N`, and the break/catch-up
 regression), `..._read_case`, `..._stdio_inheritance_case`,
 `..._tty_size_case`, `..._interrupt_case` (Ctrl+C), and `..._eof_case`
-(Ctrl+D).
+(Ctrl+D on the shell's own prompt, ending the shell -- not to be confused
+with `..._cat_interactive_case`'s Ctrl+D, which ends a child's stdin read
+instead).
