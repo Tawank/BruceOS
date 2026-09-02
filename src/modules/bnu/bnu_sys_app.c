@@ -660,13 +660,30 @@ int bnu_free_app_main(int argc, char **argv) {
          * swap: memory__get_layout() below writes into this buffer through
          * an ordinary pointer, which a flash-backed swap allocation
          * wouldn't survive) and only fall back to memory__malloc() if
-         * there's no PSRAM or it's full too. */
+         * there's no PSRAM or it's full too.
+         *
+         * On a board with no PSRAM at all (memory__external_malloc_writable()
+         * fails immediately, every time), that fallback has to come out of
+         * the very internal heap this snapshot is reporting on - so a heap
+         * fragmented enough to be worth diagnosing can also be exactly the
+         * one that can't produce one contiguous buffer sized for its own
+         * full (even capped) block count. Retry at half the size, down to a
+         * floor that still shows something, rather than giving up with
+         * nothing: bnu__print_layout_backend()'s own truncation ("N blocks
+         * omitted") already handles a get_layout() count exceeding whatever
+         * capacity actually fit. */
+        static const size_t BNU_FREE_MAP_MIN_BLOCKS = 64;
         bool blocks_external = true;
-        bruce_memory_layout_block_t *blocks =
-            (bruce_memory_layout_block_t *)memory__external_malloc_writable(capacity * sizeof(*blocks));
-        if (blocks == NULL) {
-            blocks_external = false;
-            blocks = memory__malloc(capacity * sizeof(*blocks));
+        bruce_memory_layout_block_t *blocks = NULL;
+        while (true) {
+            blocks_external = true;
+            blocks = (bruce_memory_layout_block_t *)memory__external_malloc_writable(capacity * sizeof(*blocks));
+            if (blocks == NULL) {
+                blocks_external = false;
+                blocks = memory__malloc(capacity * sizeof(*blocks));
+            }
+            if (blocks != NULL || capacity <= BNU_FREE_MAP_MIN_BLOCKS) break;
+            capacity = capacity / 2 > BNU_FREE_MAP_MIN_BLOCKS ? capacity / 2 : BNU_FREE_MAP_MIN_BLOCKS;
         }
         if (blocks == NULL) {
             stdio__printf("free: -m layout unavailable: out of memory (%zu blocks)\n", capacity);

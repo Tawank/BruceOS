@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <cstdio>
 
+#include "core_sdk/display.h"
 #include "core_sdk/input.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/runtime.h"
@@ -53,9 +54,26 @@ extern "C" int app_main(int argc, char **argv) {
         return 0;
     }
 
-    // Hand back the buffered/DMA framebuffer's RAM (same handoff
-    // native_apps/examples/nes uses); Jet's own colour buffer below needs
-    // width*gameHeight*2 bytes on top of it.
+    // Hand back Core's off-screen framebuffer RAM before allocating our own
+    // colour buffer below: there's no API to draw straight into Core's
+    // buffer (apps are isolated from it, same as any other core/ internal),
+    // so this app always needs its own width*gameHeight*2 bytes regardless -
+    // requesting DIRECT mode just guarantees Core's copy is freed rather
+    // than leaving it allocated-and-unused alongside ours. This is on top
+    // of (not a replacement for) the ELF loader's automatic
+    // memory__reclaim() ahead of app_main(), which only drops Core into
+    // DIRECT if the manifest's declared heap/stack size didn't already fit -
+    // a request here covers the common case where it did fit but this
+    // buffer still doesn't need to coexist with Core's. Released
+    // automatically when this process exits (display__request_render_mode()),
+    // so the display returns to whatever mode the remaining live requests
+    // (if any) call for - same as process_app's tile preview, which depends
+    // on Core's shared framebuffer and would have nowhere to composite into
+    // while this request is held; this game is a full-screen foreground
+    // app, so that trade-off is acceptable while it's running.
+    if (display__request_render_mode(BRUCE_DISPLAY_MODE_DIRECT) != BRUCE_OK) {
+        printf("game3d: direct render mode request failed, continuing buffered\n");
+    }
 
     initializeTrigTables();
 
