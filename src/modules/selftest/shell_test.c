@@ -12,6 +12,7 @@
 #include "core_sdk/storage.h"
 #include "core_sdk/tty.h"
 #include "modules/shell/shell_app.h"
+#include "modules/shell/shell_builtins.h"
 #include "modules/shell/shell_console.h"
 #include "modules/shell/shell_internal.h"
 
@@ -172,6 +173,61 @@ bool selftest__run_shell_control_flow_case(void) {
         shell__execute_line(&state, "if true") == 2 && shell__execute_line(&state, "if true; then echo hi") == 2;
     shell__state_free(&state);
     printf("[selftest] shell/control-flow: %s\n", ok ? "OK" : "failed");
+    return ok;
+}
+
+/* Exercises `local`'s function-call scoping (shell_builtins.c's
+ * shell_builtins__local()/shell_local_frame_t, restored by
+ * shell_compound__call_function() in shell_compound.c): a variable localized
+ * inside a function shadows the outer one only for that call's own extent
+ * (and any call it makes in turn -- like bash, this is dynamic scoping on
+ * the same flat variable table, not lexical), and reverts -- or is fully
+ * removed, if it never existed outside -- the moment the call returns. */
+bool selftest__run_shell_local_case(void) {
+    if (!selftest__shell_register_probe()) return false;
+    shell_state_t state;
+    shell__state_init(&state);
+    s_probe_calls = 0;
+
+    bool ok =
+        /* A local shadows an existing outer variable while the call runs,
+         * and the outer value comes back once it returns. */
+        shell__execute_line(&state, "x=outer") == 0 &&
+        shell__execute_line(&state, "f() { local x=inner; shell_test_probe $x; }") == 0 &&
+        shell__execute_line(&state, "f") == 0 && strcmp(s_probe_arg, "inner") == 0 &&
+        shell__execute_line(&state, "shell_test_probe $x") == 0 && strcmp(s_probe_arg, "outer") == 0 &&
+        /* A function `h` calls sees `h`'s local (dynamic scoping on the same
+         * flat variable table) and can reassign it in place with no `local`
+         * of its own -- that reassignment is visible to `h` once the callee
+         * returns, same as any other non-local assignment would be -- but it
+         * still reverts once `h` itself returns. */
+        shell__execute_line(&state, "g() { x=from-g; }; h() { local x=h-local; g; shell_test_probe $x; }") ==
+            0 &&
+        shell__execute_line(&state, "h") == 0 && strcmp(s_probe_arg, "from-g") == 0 &&
+        shell__execute_line(&state, "shell_test_probe $x") == 0 && strcmp(s_probe_arg, "outer") == 0 &&
+        /* A bare "local NAME" (no "=value") starts out empty, distinct from
+         * whatever the outer variable holds. */
+        shell__execute_line(&state, "j() { local x; shell_test_probe \"$x\"; }") == 0 &&
+        shell__execute_line(&state, "j") == 0 && strcmp(s_probe_arg, "") == 0 &&
+        shell__execute_line(&state, "shell_test_probe $x") == 0 && strcmp(s_probe_arg, "outer") == 0 &&
+        /* A name localized that never existed outside the call is fully
+         * removed, not left behind holding "", once the call returns. */
+        shell__execute_line(&state, "k() { local brand_new=temp; shell_test_probe $brand_new; }") == 0 &&
+        shell__execute_line(&state, "k") == 0 && strcmp(s_probe_arg, "temp") == 0 &&
+        shell_builtins__get(&state, "brand_new") == NULL &&
+        /* Recursive calls each get their own frame: a name localized deeper
+         * in the recursion reverts on the way back out of *that* call only,
+         * restoring the enclosing call's own local value every time a
+         * deeper call returns rather than the outermost caller's. */
+        shell__execute_line(
+            &state, "r() { local x=$1; n=$1; if [ $n -gt 1 ]; then ((n = n - 1)); r $n; fi; shell_test_probe $x; }"
+        ) == 0 &&
+        shell__execute_line(&state, "r 3") == 0 && strcmp(s_probe_arg, "3") == 0 &&
+        /* Using `local` outside of any function call is rejected rather than
+         * silently acting like a plain assignment. */
+        shell__execute_line(&state, "local y=nope") == 1 && shell_builtins__get(&state, "y") == NULL;
+    shell__state_free(&state);
+    printf("[selftest] shell/local: %s\n", ok ? "OK" : "failed");
     return ok;
 }
 

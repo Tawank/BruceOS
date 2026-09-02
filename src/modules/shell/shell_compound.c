@@ -1021,7 +1021,34 @@ int shell_compound__call_function(shell_state_t *state, int argc, char **argv) {
     state->positional_count = new_count;
     state->arg0 = argv[0];
 
+    /* frame lives on this call's own C stack frame, exactly like
+     * saved_positional above -- shell_builtins__local() (see
+     * shell_builtins.c) only ever writes into whatever state->local_frame
+     * currently points at, so nested calls each get their own frame without
+     * needing any explicit stack structure here: recursion into another
+     * call_function() just points state->local_frame at *its* frame and
+     * restores this one when that inner call returns, same as positional. */
+    shell_local_frame_t frame = {0};
+    shell_local_frame_t *saved_frame = state->local_frame;
+    state->local_frame = &frame;
+
     int status = shell_compound__run(state, body);
+
+    /* Unwind in reverse declaration order, restoring each localized name to
+     * whatever it held just before this call's first "local NAME" -- or
+     * removing it entirely, if it did not exist yet -- so a `local` here is
+     * invisible again once the call that declared it returns. */
+    for (size_t i = frame.count; i-- > 0;) {
+        if (frame.entries[i].previous_value != NULL) {
+            (void)shell_builtins__set(state, frame.entries[i].name, frame.entries[i].previous_value);
+            memory__free(frame.entries[i].previous_value);
+        } else {
+            shell_builtins__unset(state, frame.entries[i].name);
+        }
+        memory__free(frame.entries[i].name);
+    }
+    memory__free(frame.entries);
+    state->local_frame = saved_frame;
 
     for (int i = 0; i < state->positional_count; ++i) memory__free(state->positional[i]);
     memory__free(state->positional);

@@ -37,6 +37,29 @@ typedef struct {
     char *body;
 } shell_function_t;
 
+/* One name the `local` builtin has shadowed during the function call that
+ * owns this entry's frame (see shell_local_frame_t below), recording what to
+ * put back once that call returns: `previous_value` is a copy of what
+ * shell_builtins__get() returned for `name` right before it was first
+ * localized this call, or NULL if `name` didn't exist at all yet (in which
+ * case the call unsets it on the way out instead of restoring a value). */
+typedef struct {
+    char *name;
+    char *previous_value;
+} shell_local_entry_t;
+
+/* One function call's `local` bookkeeping -- shell_compound__call_function()
+ * stack-allocates one of these per call (the same "lives on the C call
+ * stack, saved/restored around the call" shape it already uses for
+ * state->positional) and points state->local_frame at it for the call's
+ * duration, so shell_builtins__local() always records into the innermost
+ * active call regardless of how deep the recursion goes. */
+typedef struct {
+    shell_local_entry_t *entries;
+    size_t count;
+    size_t capacity;
+} shell_local_frame_t;
+
 typedef struct {
     shell_variable_t *variables;
     size_t variable_count;
@@ -44,6 +67,11 @@ typedef struct {
     shell_function_t *functions;
     size_t function_count;
     size_t function_capacity;
+    /* The currently-executing function call's `local` frame, or NULL outside
+     * any function call -- see shell_local_frame_t above. Owned by whichever
+     * shell_compound__call_function() stack frame is innermost; never
+     * allocated or freed through this pointer itself. */
+    shell_local_frame_t *local_frame;
     /* $0/$1../$#/$@ for the function call currently executing (see
      * shell_compound.c); empty/NULL at top level, outside any call. */
     const char *arg0;

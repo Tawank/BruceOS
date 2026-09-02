@@ -5,6 +5,7 @@
 bool selftest__run_shell_language_case(void);
 bool selftest__run_shell_script_case(void);
 bool selftest__run_shell_control_flow_case(void);
+bool selftest__run_shell_local_case(void);
 bool selftest__run_shell_multiline_case(void);
 bool selftest__run_shell_loops_case(void);
 bool selftest__run_shell_pipe_redirect_case(void);

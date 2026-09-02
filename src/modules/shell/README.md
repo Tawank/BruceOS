@@ -50,8 +50,8 @@ the interactive shell (with the last command's exit status); on a non-empty
 line it just deletes the character under the cursor, like Delete.
 
 **Builtins** (`shell_builtins.c`)
-- `echo`, `true`, `false`, `cd`, `set`, `unset`, `export`, `clear`, `reset`,
-  `help`, `exit [N]`.
+- `echo`, `true`, `false`, `cd`, `set`, `unset`, `export`, `local`, `clear`,
+  `reset`, `help`, `exit [N]`.
 - `test` / `[` / `[[`: `-eq -ne -lt -le -gt -ge` (integer comparison),
   `=` / `!=` (string comparison), `-z` / `-n` (empty/non-empty), `-a`
   (logical AND of chained tests). No `-o`, no file-test operators
@@ -148,9 +148,16 @@ line it just deletes the character under the cursor, like Delete.
   early. A `break` with no enclosing loop (including one used to try to
   "return" out of a function) is reported as a stray break, not absorbed
   silently.
+- `local NAME[=value]...`: only valid inside a function call (an error
+  otherwise, like bash). Shadows the name for the rest of that call --
+  including any call it makes in turn, since this is bash's usual *dynamic*
+  scoping on the same flat variable table, not lexical -- and reverts to
+  whatever it held before (or is removed entirely, if it did not exist
+  before) the instant the call returns. A bare `local NAME` with no
+  `=value` starts out empty, same as bash.
 - **Not implemented:** `case`/`esac`, `select`, subshells `(...)`, process
-  substitution, `local`, `until`, and command grouping with `{ ...; }` used
-  as a value (only as a function body).
+  substitution, `until`, and command grouping with `{ ...; }` used as a
+  value (only as a function body).
 
 ## What's left to implement
 
@@ -162,7 +169,6 @@ Roughly in order of how often bash scripts actually use them:
   shell function's output.
 - Pathname globbing and brace expansion.
 - `case`/`esac`.
-- `local` (function-scoped variables).
 - `$@`, `$*`, `$$`, `$!`.
 - File-test operators for `test`/`[` (`-e -f -d -r -w -x ...`) and `-o`/`[[
   ... || ... ]]`-in-tests.
@@ -266,7 +272,8 @@ just skipping the rest of the current row.
 `src/modules/selftest/shell_test.c` covers the language layer end-to-end
 against real firmware output (via `stdio__session_*` + `app_runner__run`):
 `selftest__run_shell_language_case`, `..._script_case`,
-`..._control_flow_case`, `..._multiline_case`, `..._loops_case` (arithmetic,
+`..._control_flow_case`, `..._local_case`, `..._multiline_case`,
+`..._loops_case` (arithmetic,
 both `for` forms, `while`, `break`, `break N`, and the break/catch-up
 regression), `..._read_case`, `..._stdio_inheritance_case`,
 `..._tty_size_case`, `..._interrupt_case` (Ctrl+C), and `..._eof_case`

@@ -12,6 +12,13 @@ const char *shell_builtins__get(const shell_state_t *state, const char *name);
 int shell_builtins__set(shell_state_t *state, const char *name, const char *value);
 int shell_builtins__export(shell_state_t *state, const char *name);
 
+/* Removes `name` entirely (a no-op if it isn't set) and, if it was exported,
+ * drops it from the process environment too -- the guts of the `unset`
+ * builtin, exported so shell_compound__call_function() can reuse it to tear
+ * a `local` frame back down once a call returns (see shell_local_frame_t in
+ * shell_internal.h). `name` is assumed already validated by the caller. */
+void shell_builtins__unset(shell_state_t *state, const char *name);
+
 /* Resolves `path` (NULL or "" means the current directory itself) against
  * $PWD into an absolute, "."/".."-normalized path the storage SDK will
  * accept -- the same resolution `cd`'s own argument goes through. Exported

@@ -17,7 +17,7 @@
 
 static const char *const s_shell_builtin_names[] = {
     "echo", "true",  "false", "cd",   "set",  "unset", "export", "clear",
-    "reset", "help",  "exit",  "test", "[",    "[[",   "break",  "read",  "time",
+    "reset", "help",  "exit",  "test", "[",    "[[",   "break",  "read",  "time", "local",
 };
 
 static int shell_builtins__find_index(const shell_state_t *state, const char *name) {
@@ -99,6 +99,12 @@ int shell_builtins__set(shell_state_t *state, const char *name, const char *valu
     state->variables[state->variable_count].exported = false;
     state->variable_count++;
     return 0;
+}
+
+void shell_builtins__unset(shell_state_t *state, const char *name) {
+    int index = shell_builtins__find_index(state, name);
+    if (index >= 0) shell_builtins__remove_at(state, (size_t)index);
+    (void)environment__unset(name);
 }
 
 int shell_builtins__export(shell_state_t *state, const char *name) {
@@ -237,6 +243,94 @@ static int shell_builtins__read(shell_state_t *state, int argc, char **argv) {
     return 0;
 }
 
+/* Adds `name` to the innermost active function call's `local` frame the
+ * first time it's localized during that call, snapshotting whatever value
+ * (if any) it currently holds so shell_compound__call_function() can put it
+ * back -- or unset `name` entirely, if it didn't exist before -- once the
+ * call returns. A second `local name` for the same name within the same
+ * call is a no-op here (the call already knows what to restore to); the
+ * caller still goes on to perform the actual assignment either way, same
+ * as bash re-localizing (and reassigning) an already-local name. */
+static int shell_builtins__local_track(shell_state_t *state, const char *name) {
+    shell_local_frame_t *frame = state->local_frame;
+    for (size_t i = 0; i < frame->count; ++i) {
+        if (strcmp(frame->entries[i].name, name) == 0) return 0;
+    }
+    if (frame->count >= SHELL__MAX_VARIABLES) {
+        stdio__printf("shell: local: too many local variables\n");
+        return 1;
+    }
+    if (frame->count >= frame->capacity) {
+        size_t new_capacity = frame->capacity == 0 ? 4 : frame->capacity * 2;
+        if (new_capacity > SHELL__MAX_VARIABLES) new_capacity = SHELL__MAX_VARIABLES;
+        shell_local_entry_t *grown = memory__realloc(frame->entries, new_capacity * sizeof(*grown));
+        if (grown == NULL) {
+            stdio__printf("shell: out of memory\n");
+            return 1;
+        }
+        frame->entries = grown;
+        frame->capacity = new_capacity;
+    }
+    char *name_copy = shell_builtins__dup(name, strlen(name));
+    if (name_copy == NULL) {
+        stdio__printf("shell: out of memory\n");
+        return 1;
+    }
+    const char *previous = shell_builtins__get(state, name);
+    char *previous_copy = NULL;
+    if (previous != NULL) {
+        previous_copy = shell_builtins__dup(previous, strlen(previous));
+        if (previous_copy == NULL) {
+            memory__free(name_copy);
+            stdio__printf("shell: out of memory\n");
+            return 1;
+        }
+    }
+    frame->entries[frame->count].name = name_copy;
+    frame->entries[frame->count].previous_value = previous_copy;
+    frame->count++;
+    return 0;
+}
+
+/* `local NAME[=value]...`: only valid while a function call is executing --
+ * state->local_frame is set up around the body's run by
+ * shell_compound__call_function() (see shell_local_frame_t in
+ * shell_internal.h) and is NULL at top level, the same boundary
+ * state->positional already uses. Declares each NAME as shadowing whatever
+ * it held before -- or as freshly unset, if it wasn't set at all -- for the
+ * rest of this call, same as bash. A bare NAME (no "=value") behaves like
+ * bash's own "local x": it starts out empty, distinct from whatever a
+ * same-named variable outside this call might hold. */
+static int shell_builtins__local(shell_state_t *state, int argc, char **argv) {
+    if (state->local_frame == NULL) {
+        stdio__printf("shell: local: can only be used inside a function\n");
+        return 1;
+    }
+    for (int i = 1; i < argc; ++i) {
+        char *equals = strchr(argv[i], '=');
+        const char *name = argv[i];
+        char name_buffer[SHELL__VARIABLE_NAME_MAX];
+        if (equals != NULL) {
+            size_t length = (size_t)(equals - argv[i]);
+            if (length >= sizeof(name_buffer) || !shell_parser__valid_name(argv[i], length)) {
+                stdio__printf("shell: invalid variable name\n");
+                return 2;
+            }
+            memcpy(name_buffer, argv[i], length);
+            name_buffer[length] = '\0';
+            name = name_buffer;
+        } else if (!shell_parser__valid_name(name, strlen(name))) {
+            stdio__printf("shell: invalid variable name\n");
+            return 2;
+        }
+        int status = shell_builtins__local_track(state, name);
+        if (status != 0) return status;
+        status = shell_builtins__set(state, name, equals != NULL ? equals + 1 : "");
+        if (status != 0) return status;
+    }
+    return 0;
+}
+
 bool shell_builtins__is_builtin(const char *name) {
     for (size_t i = 0; i < sizeof(s_shell_builtin_names) / sizeof(s_shell_builtin_names[0]); ++i) {
         if (strcmp(name, s_shell_builtin_names[i]) == 0) return true;
@@ -284,9 +378,7 @@ int shell_builtins__run(shell_state_t *state, int argc, char **argv) {
                 stdio__printf("shell: invalid variable name\n");
                 return 2;
             }
-            int index = shell_builtins__find_index(state, argv[arg]);
-            if (index >= 0) shell_builtins__remove_at(state, (size_t)index);
-            (void)environment__unset(argv[arg]);
+            shell_builtins__unset(state, argv[arg]);
         }
         return 0;
     }
@@ -390,12 +482,13 @@ int shell_builtins__run(shell_state_t *state, int argc, char **argv) {
         return 0;
     }
     if (strcmp(argv[0], "read") == 0) return shell_builtins__read(state, argc, argv);
+    if (strcmp(argv[0], "local") == 0) return shell_builtins__local(state, argc, argv);
     /* "time" is intercepted in shell_executor__dispatch() before it ever
      * reaches here (it needs to wrap the function/builtin/external dispatch
      * itself), so it's listed for documentation purposes only -- this branch
      * is otherwise unreachable for it. */
     stdio__printf(
-        "Builtins: echo true false cd set unset export clear reset help exit test [ [[ break read time\n"
+        "Builtins: echo true false cd set unset export clear reset help exit test [ [[ break read time local\n"
     );
     stdio__printf("Operators: ; && || and producer | text. Redirection is unsupported.\n");
     stdio__printf("Compound: if/elif/else/fi, for, while, ((...)) arithmetic, functions.\n");
