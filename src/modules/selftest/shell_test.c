@@ -843,16 +843,14 @@ bool selftest__run_shell_input_redirect_case(void) {
  * comment): a script staged at `script_path` covers an unquoted delimiter
  * (body gets $expanded), a single-quoted one (body stays literal), and
  * "<<-" (leading tabs stripped from both the body and the terminator line),
- * each redirecting the heredoc'd "head"'s output to its own result file so
+ * each redirecting the heredoc'd "cat"'s output to its own result file so
  * this can read it back afterward -- run as a spawned "shell <path>" child
  * with a routed session, the same reasoning as
- * selftest__run_shell_input_redirect_case() above. "head" (not "cat") reads
- * the heredoc body: this shell's "cat" only ever reads a named file (a
- * required argument, see bnu_cat_app_main() in bnu_fs_app.c) and has no
- * stdin mode at all, so it can never be the target of a "<"/heredoc; "head"
- * defaults to stdin when given no file, the same as the other bnu text tools
- * a piped/redirected source can target. Each heredoc here is also combined
- * with ">", the one case that still buffers instead of streaming (see
+ * selftest__run_shell_input_redirect_case() above. "cat" reads the heredoc
+ * body via its "--stdin-size" fallback (see bnu__cat_stdin() in
+ * bnu_fs_app.c), the same as the other bnu text tools a piped/redirected
+ * source can target. Each heredoc here is also combined with ">", the one
+ * case that still buffers instead of streaming (see
  * shell_executor__external_with_input()'s own doc comment), so content is
  * checked under the same CONFIG_BRUCE_QEMU_TEST_MODE relaxation the other
  * memory__external_malloc()-backed-capture tests already use. */
@@ -870,13 +868,13 @@ bool selftest__run_shell_heredoc_case(void) {
     snprintf(
         script, sizeof(script),
         "x=world\n"
-        "head <<EOF > %s\n"
+        "cat <<EOF > %s\n"
         "hello $x\n"
         "EOF\n"
-        "head <<'EOF' > %s\n"
+        "cat <<'EOF' > %s\n"
         "literal $x\n"
         "EOF\n"
-        "head <<-EOF > %s\n"
+        "cat <<-EOF > %s\n"
         "\ttabbed\n"
         "\tEOF\n",
         expand_path, literal_path, striptabs_path
@@ -957,6 +955,61 @@ bool selftest__run_shell_heredoc_case(void) {
         );
     }
     printf("[selftest] shell/heredoc: %s\n", ok ? "OK" : "failed");
+    return ok;
+}
+
+/* Exercises bnu_cat_app_main()'s interactive fallback (bnu__cat_interactive()
+ * in bnu_fs_app.c) and, underneath it, stdio__read_line()'s new Ctrl+D
+ * handling -- neither is reached by the heredoc/redirect cases above, which
+ * only ever exercise the known-byte-count "--stdin-size" path. Launches
+ * "cat" directly (no shell involved -- bare, no file, no "--stdin-size")
+ * with its stdio routed to a session this test controls, the same way the
+ * heredoc case's spawned "shell" child inherits its session; feeds two typed
+ * lines and a Ctrl+D (0x04) on an empty line into the session's input queue,
+ * then checks the output matches what a real terminal running bare "cat"
+ * shows: each typed line echoed back (stdio__read_line()'s per-character
+ * echo), then cat's own re-print of that same line, then a bare newline for
+ * the Ctrl+D itself (see stdio__read_line()'s doc comment on why that final
+ * "\n" is unconditional). */
+bool selftest__run_shell_cat_interactive_case(void) {
+    int status = -1;
+    char output[128] = {0};
+    size_t output_size = 0;
+    bruce_stdio_session_t session = BRUCE_STDIO_SESSION_INVALID;
+    if (stdio__session_create(&session) == BRUCE_OK && stdio__session_route_children(session) == BRUCE_OK) {
+        int launched = app_runner__run("cat", "", BRUCE_LAUNCH_BACKGROUND);
+        (void)stdio__session_route_children(BRUCE_STDIO_SESSION_INVALID);
+        if (launched > 0) {
+            static const char input[] = "line one\nline two\n\x04";
+            (void)stdio__session_write_input(session, input, sizeof(input) - 1);
+            bruce_process_status_t proc_status;
+            if (process__wait_status((bruce_process_id_t)launched, 5000, &proc_status) == BRUCE_OK &&
+                proc_status.reason == BRUCE_PROCESS_EXITED) {
+                status = proc_status.exit_code;
+            }
+            for (;;) {
+                size_t chunk_size = 0;
+                if (stdio__session_read_output(
+                        session, output + output_size, sizeof(output) - 1 - output_size, &chunk_size
+                    ) != BRUCE_OK ||
+                    chunk_size == 0)
+                    break;
+                output_size += chunk_size;
+            }
+        }
+    }
+    (void)stdio__session_close(session);
+
+    static const char expected[] = "line one\r\nline one\r\nline two\r\nline two\r\n\r\n";
+    bool ok =
+        status == 0 && output_size == sizeof(expected) - 1 && memcmp(output, expected, sizeof(expected) - 1) == 0;
+    if (!ok) {
+        printf(
+            "[selftest] shell/cat_interactive: status=%d output_size=%u output=%.*s\n", status,
+            (unsigned)output_size, (int)output_size, output
+        );
+    }
+    printf("[selftest] shell/cat_interactive: %s\n", ok ? "OK" : "failed");
     return ok;
 }
 

@@ -243,15 +243,83 @@ static bruce_result_t bnu__cat_file(const char *path) {
     return result != BRUCE_OK ? result : close_result;
 }
 
+/* cat's counterpart to bnu__cat_file() above, for when cat is fed piped or
+ * redirected input instead of a named file -- relays exactly `size` bytes
+ * from stdin to stdout in the same 256-byte chunks, rather than loading
+ * everything up front the way uniq/cut/sort/rev do (see
+ * bnu__text_load_source() in bnu_text_app.c): cat only ever needs to see
+ * each byte once, so streaming keeps it working on input larger than
+ * BNU_TEXT_MAX_BYTES too. `size` comes from the shell's own hidden
+ * "--stdin-size N" prefix (see bnu_tr_app_main()'s doc comment for why that
+ * exists) -- there's no file to open, just `size` bytes already waiting on
+ * stdin. */
+static bruce_result_t bnu__cat_stdin(size_t size) {
+    unsigned char buffer[256];
+    size_t offset = 0;
+    bruce_result_t result = BRUCE_OK;
+    while (result == BRUCE_OK && offset < size) {
+        size_t want = size - offset > sizeof(buffer) ? sizeof(buffer) : size - offset;
+        size_t read_size = 0;
+        result = stdio__read(buffer, want, UINT32_MAX, &read_size);
+        if (result == BRUCE_OK && read_size == 0) result = BRUCE_ERR_IO;
+        if (result != BRUCE_OK) break;
+        result = stdio__write(buffer, read_size);
+        offset += read_size;
+    }
+    return result;
+}
+
+/* Bare "cat" with no file and no "--stdin-size" (i.e. not fed by a pipe,
+ * redirect, or heredoc -- those always know their exact byte count up front
+ * and go through bnu__cat_stdin() above instead): mirrors bash's own `cat`
+ * with no arguments, echoing each typed line back out until Ctrl+D. Reads a
+ * line at a time via stdio__read_line() -- which already handles the
+ * console echo, backspace, and (see its own doc comment) Ctrl+D-as-EOF --
+ * rather than bnu__cat_stdin()'s raw byte relay, since there's no known
+ * total size to read toward here. */
+static bruce_result_t bnu__cat_interactive(void) {
+    char line[256];
+    for (;;) {
+        int length = stdio__read_line(line, sizeof(line), false);
+        if (length < 0) return BRUCE_OK;
+        line[length] = '\n';
+        bruce_result_t result = stdio__write(line, (size_t)length + 1);
+        if (result != BRUCE_OK) return result;
+    }
+}
+
 int bnu_cat_app_main(int argc, char **argv) {
-    ArgParser *parser = bnu__new_parser("Print file contents.");
+    ArgParser *parser = bnu__new_parser("Print the contents of one or more files, or piped stdin.");
     if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
-    ap_add_required_arg(parser, "file", "File path to print");
+    ap_add_str_opt(parser, "stdin-size", NULL);
+    ap_set_opt_help(parser, "stdin-size", "Read exactly this many bytes from stdin (used by shell pipes)");
+    ap_add_optional_arg(parser, "file", "File path to print (reads stdin if omitted)");
     ap_allow_extra_args(parser);
     ap_unknown_options_as_args(parser);
     if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
 
     int path_count = ap_count_args(parser);
+    if (path_count == 0) {
+        /* Mirrors bnu__head_tail_app_main()'s "stdin-size" handling above:
+         * distinguish "--stdin-size was given but garbled" from "no
+         * --stdin-size at all", which (unlike head/tail) isn't an error here
+         * -- it means cat is bare, at an interactive prompt, so it falls
+         * back to bnu__cat_interactive() instead. */
+        const char *stdin_size_arg =
+            ap_found(parser, "stdin-size") ? ap_get_str_value(parser, "stdin-size") : NULL;
+        char *end = NULL;
+        unsigned long parsed = stdin_size_arg != NULL ? strtoul(stdin_size_arg, &end, 10) : 0;
+        bool from_stdin = stdin_size_arg != NULL && stdin_size_arg[0] != '\0' && end != NULL && *end == '\0';
+        ap_free(parser);
+        if (stdin_size_arg != NULL && !from_stdin) {
+            stdio__printf("cat: invalid --stdin-size\n");
+            return BRUCE_ERR_INVALID_ARGUMENT;
+        }
+        bruce_result_t result = from_stdin ? bnu__cat_stdin((size_t)parsed) : bnu__cat_interactive();
+        if (result != BRUCE_OK) stdio__printf("cat: (standard input): error %d\n", result);
+        return result;
+    }
+
     for (int i = 0; i < path_count; ++i) {
         char path[BRUCE_STORAGE_PATH_MAX];
         if (!bnu__resolve_path(ap_get_arg_at_index(parser, i), path)) {

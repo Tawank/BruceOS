@@ -537,6 +537,17 @@ bruce_result_t stdio__read(void *buffer, size_t capacity, uint32_t timeout_ms, s
 #endif
 }
 
+/* Ctrl+D: not a readline-style binding here (compare
+ * shell_console__read_line()'s own SHELL_CONSOLE_CTRL_D, which deletes the
+ * character under the cursor mid-line -- that's specific to editing the
+ * shell's own command line). This is the plainer convention a real
+ * terminal's canonical line discipline gives *any* program reading raw
+ * input: on an empty line it's end-of-file; mid-line it flushes what's been
+ * typed so far immediately, without waiting for Enter. Lets any caller of
+ * stdio__read_line() -- not just the shell -- offer "type input, Ctrl+D when
+ * done" the way bash's own `cat` (with no arguments) does. */
+#define STDIO__READ_LINE_CTRL_D 0x04
+
 int stdio__read_line(char *buffer, size_t buffer_size, bool mask_input) {
     if (buffer == NULL || buffer_size == 0) return -1;
     bruce_stdio_session_t session = process_registry__current_stdio_session();
@@ -568,6 +579,10 @@ int stdio__read_line(char *buffer, size_t buffer_size, bool mask_input) {
          * permission Allow/Deny prompt in dialog.c) waits for a '\n' that
          * never arrives and Enter appears to do nothing. */
         if (c == '\n' || c == '\r') break;
+        if (c == STDIO__READ_LINE_CTRL_D) {
+            if (i == 0) eof = true;
+            break;
+        }
         if (c == '\b' || c == 0x7f) {
             if (i > 0) {
                 i--;
