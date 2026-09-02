@@ -186,6 +186,8 @@ int selftest_app_main(int argc, char **argv) {
     RUN_SELFTEST(selftest__run_shell_script_case);
     RUN_SELFTEST(selftest__run_shell_control_flow_case);
     RUN_SELFTEST(selftest__run_shell_local_case);
+    RUN_SELFTEST(selftest__run_shell_command_substitution_case);
+    RUN_SELFTEST(selftest__run_shell_arith_word_case);
     RUN_SELFTEST(selftest__run_shell_multiline_case);
     RUN_SELFTEST(selftest__run_shell_loops_case);
     RUN_SELFTEST(selftest__run_shell_pipe_redirect_case);

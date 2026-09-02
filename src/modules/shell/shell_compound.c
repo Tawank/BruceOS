@@ -716,8 +716,8 @@ static int shell_compound__run_for(shell_state_t *state, const shell_plan_t *pla
                 shell_command_t synthetic = {.text = header.list_text, .length = header.list_len, .connector = SHELL_CONNECT_NONE};
                 const char *words_error = NULL;
                 if (shell_parser__words(
-                        &synthetic, &words, &word_count, shell_executor__lookup, state, state->last_status,
-                        &words_error
+                        &synthetic, &words, &word_count, shell_executor__lookup, shell_executor__run_substitution,
+                        shell_executor__eval_arith_word, state, state->last_status, &words_error
                     ) != 0) {
                     stdio__printf("shell: for: %s\n", words_error != NULL ? words_error : "expansion error");
                     state->last_status = 2;

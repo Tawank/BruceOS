@@ -231,6 +231,183 @@ bool selftest__run_shell_local_case(void) {
     return ok;
 }
 
+/* Exercises "$(...)" / "`...`" command substitution (shell_parser.c's
+ * shell_parser__substitution_span()/shell_parser__splice_substitution(),
+ * driven by shell_executor__run_substitution() in shell_executor.c): its
+ * content is run as a nested "shell -c" child process, its trailing-newline-
+ * stripped stdout is spliced in as one unsplit word, a nonzero exit discards
+ * whatever it printed, and -- being a real separate process rather than a
+ * copy-on-write subshell -- it sees exported variables and the filesystem
+ * but never the calling shell's own unexported variables or functions. */
+static bool selftest__shell_substitution_step(
+    bool ok_so_far, shell_state_t *state, const char *line, int expected_status, const char *expected_arg
+) {
+    if (!ok_so_far) return false;
+    int status = shell__execute_line(state, line);
+    bool ok = status == expected_status && (expected_arg == NULL || strcmp(s_probe_arg, expected_arg) == 0);
+    if (!ok) {
+        printf(
+            "[selftest] shell/command-substitution: `%s` -> status=%d (want %d) arg=\"%s\" (want \"%s\")\n",
+            line,
+            status,
+            expected_status,
+            s_probe_arg,
+            expected_arg != NULL ? expected_arg : "(unchecked)"
+        );
+    }
+    return ok;
+}
+
+/* Like selftest__shell_substitution_step() above, but for QEMU mode's
+ * relaxed content check: only requires the substitution produced *some*
+ * non-empty word (see selftest__run_shell_command_substitution_case()'s own
+ * CONFIG_BRUCE_QEMU_TEST_MODE comment for why exact bytes aren't checked
+ * there). */
+static bool selftest__shell_substitution_nonempty_step(bool ok_so_far, shell_state_t *state, const char *line) {
+    if (!ok_so_far) return false;
+    int status = shell__execute_line(state, line);
+    bool ok = status == 0 && strlen(s_probe_arg) > 0;
+    if (!ok) {
+        printf(
+            "[selftest] shell/command-substitution: `%s` -> status=%d (want 0) arg=\"%s\" (want non-empty)\n", line,
+            status, s_probe_arg
+        );
+    }
+    return ok;
+}
+
+/* Like the two step helpers above, but for QEMU mode's relaxed isolation
+ * check: a successful substitution's captured bytes aren't verified exactly
+ * (see selftest__run_shell_command_substitution_case()'s
+ * CONFIG_BRUCE_QEMU_TEST_MODE comment), so a leaked value can't be checked
+ * for exact absence ("") either -- only that whatever came back isn't the
+ * verbatim `forbidden_value` a real leak would have produced, which swap
+ * corruption reproducing by coincidence is astronomically unlikely. */
+static bool selftest__shell_substitution_not_leaked_step(
+    bool ok_so_far, shell_state_t *state, const char *line, const char *forbidden_value
+) {
+    if (!ok_so_far) return false;
+    int status = shell__execute_line(state, line);
+    bool ok = status == 0 && strcmp(s_probe_arg, forbidden_value) != 0;
+    if (!ok) {
+        printf(
+            "[selftest] shell/command-substitution: `%s` -> status=%d (want 0) arg=\"%s\" (leaked \"%s\")\n", line,
+            status, s_probe_arg, forbidden_value
+        );
+    }
+    return ok;
+}
+
+bool selftest__run_shell_command_substitution_case(void) {
+    if (!selftest__shell_register_probe()) return false;
+    shell_state_t state;
+    shell__state_init(&state);
+    s_probe_calls = 0;
+
+    bool ok = true;
+#if CONFIG_BRUCE_QEMU_TEST_MODE
+    /* shell_executor__run_substitution() captures its child's output through
+     * the same memory__external_malloc()-backed buffer every other captured-
+     * output path in this shell uses -- and that backing is unreliable under
+     * QEMU's swap-backend fallback (see selftest__run_shell_bnu_text_pipe_case()
+     * above, and shell_executor__run_substitution()'s own doc comment): a
+     * *successful* substitution's captured bytes can come back corrupted
+     * even though spawning, routing, draining, and splicing all worked. So
+     * under QEMU these only check that a successful substitution produced
+     * *some* non-empty word, not its exact bytes. */
+    ok = selftest__shell_substitution_nonempty_step(ok, &state, "shell_test_probe $(echo hi)");
+    ok = selftest__shell_substitution_nonempty_step(ok, &state, "shell_test_probe `echo hi`");
+    ok = selftest__shell_substitution_nonempty_step(ok, &state, "shell_test_probe $(echo $(echo nested))");
+    ok = selftest__shell_substitution_nonempty_step(ok, &state, "shell_test_probe \"$(echo a b)\"");
+    ok = selftest__shell_substitution_nonempty_step(ok, &state, "export ev=visible; shell_test_probe $(echo $ev)");
+    /* ... and the calling shell's own unexported variables are not visible
+     * to that child process -- under QEMU, only checked as "didn't leak the
+     * verbatim value" (see the helper's own comment), not exact emptiness,
+     * since this goes through the same unreliable captured-content path as
+     * the checks above (echo succeeds either way, so this never reaches the
+     * exact/reliable discard-on-nonzero-exit path below). */
+    ok = selftest__shell_substitution_not_leaked_step(
+        ok, &state, "secret=hidden; y=$(echo $secret); shell_test_probe \"$y\"", "hidden"
+    );
+#else
+    /* Basic "$(...)" and the "`...`" spelling. */
+    ok = selftest__shell_substitution_step(ok, &state, "shell_test_probe $(echo hi) hi", 0, "hi");
+    ok = selftest__shell_substitution_step(ok, &state, "shell_test_probe `echo hi` hi", 0, "hi");
+    /* Substitutions nest. */
+    ok = selftest__shell_substitution_step(ok, &state, "shell_test_probe $(echo $(echo nested)) nested", 0, "nested");
+    /* Recognized inside double quotes too, and -- like a plain $VAR
+     * expansion -- never itself word-split: embedded whitespace in the
+     * captured output survives as part of one word. */
+    ok = selftest__shell_substitution_step(ok, &state, "shell_test_probe \"$(echo a b)\" \"a b\"", 0, "a b");
+    /* It runs in a real, separate child process: exported variables are
+     * visible ... */
+    ok = selftest__shell_substitution_step(
+        ok, &state, "export ev=visible; shell_test_probe $(echo $ev) visible", 0, "visible"
+    );
+    /* ... but the calling shell's own unexported variables are not visible
+     * to that child process ... */
+    ok = selftest__shell_substitution_step(
+        ok, &state, "secret=hidden; y=$(echo $secret); shell_test_probe \"$y\" \"\"", 0, ""
+    );
+#endif
+    /* A substitution whose command exits nonzero discards whatever it
+     * printed, matching shell_executor__capture_external()'s existing
+     * discard-on-failure rule for redirection/pipes -- exact and reliable
+     * regardless of backend, since that path never touches the captured-
+     * output buffer's content at all (it's left at {0}, see
+     * shell_executor__capture_external()'s early return on a nonzero exit). */
+    ok = selftest__shell_substitution_step(ok, &state, "x=$(echo hi; false); shell_test_probe \"$x\" \"\"", 0, "");
+    /* ... and neither are its function definitions -- calling one is "not
+     * found", exactly like invoking it from any other external command's
+     * child process, so its output is discarded the same as any other
+     * nonzero-exit substitution. */
+    ok = selftest__shell_substitution_step(
+        ok, &state, "myfunc() { echo from-func; }; w=$(myfunc); shell_test_probe \"$w\" \"\"", 0, ""
+    );
+
+    shell__state_free(&state);
+    printf("[selftest] shell/command-substitution: %s\n", ok ? "OK" : "failed");
+    return ok;
+}
+
+/* Exercises "$((...))" arithmetic expansion as a *word* (shell_parser.c's
+ * doubled-paren detection in shell_parser__expand()'s "$(" branch, driven by
+ * shell_executor__eval_arith_word() in shell_executor.c) -- unlike
+ * "$(...)"/"`...`" command substitution above, this never spawns a nested
+ * process, so it's not subject to that feature's QEMU swap-backend caveat,
+ * and an assignment inside it (e.g. "$((x = 5))") mutates this shell's own
+ * `x` exactly like the standalone "((...))" statement form does. */
+bool selftest__run_shell_arith_word_case(void) {
+    if (!selftest__shell_register_probe()) return false;
+    shell_state_t state;
+    shell__state_init(&state);
+    s_probe_calls = 0;
+
+    bool ok =
+        /* Basic expansion, and nested parens/precedence. */
+        shell__execute_line(&state, "shell_test_probe $((1 + 2)) 3") == 0 &&
+        shell__execute_line(&state, "shell_test_probe $((2 * (3 + 4))) 14") == 0 &&
+        /* Recognized inside double quotes too, same as "$(...)". */
+        shell__execute_line(&state, "shell_test_probe \"$((1 + 1))\" 2") == 0 &&
+        /* Splices into a word alongside surrounding literal text, same as
+         * any other "$..." expansion. */
+        shell__execute_line(&state, "shell_test_probe a$((1 + 1))b a2b") == 0 &&
+        /* An assignment inside it is a real side effect on this shell's own
+         * variable, not something scoped to the expansion -- distinguishing
+         * it from "$(...)"'s nested-process isolation. */
+        shell__execute_line(&state, "shell_test_probe $((y = 10)) 10") == 0 &&
+        shell__execute_line(&state, "shell_test_probe $y 10") == 0 &&
+        /* A real arithmetic error (not just a malformed expansion) is
+         * reported and rejects the whole command, matching the standalone
+         * "((...))" statement form's own "shell: ((: ...\n" / status 2
+         * behavior for the same input. */
+        shell__execute_line(&state, "shell_test_probe $((1 / 0))") == 2;
+
+    shell__state_free(&state);
+    printf("[selftest] shell/arith-word: %s\n", ok ? "OK" : "failed");
+    return ok;
+}
+
 bool selftest__run_shell_multiline_case(void) {
     if (!selftest__shell_register_probe()) return false;
     const char *path = "/apps/shell_multiline_test.sh";

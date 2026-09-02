@@ -11,3 +11,15 @@ int shell_executor__page_help(void);
  * shell_compound.c's word-list `for NAME in WORD...` can expand its list
  * the same way an ordinary command's arguments are expanded. */
 const char *shell_executor__lookup(void *context, const char *name);
+
+/* Runs "$(...)" / "`...`" command substitution for shell_parser__words()
+ * (see shell_executor.c for exactly what this does) -- exported so
+ * shell_compound.c's word-list `for NAME in WORD...` can expand its list
+ * the same way an ordinary command's arguments are expanded. */
+char *shell_executor__run_substitution(void *context, const char *command_text, size_t length);
+
+/* Evaluates "$((...))" arithmetic-expansion words for shell_parser__words()
+ * (see shell_executor.c for exactly what this does) -- exported so
+ * shell_compound.c's word-list `for NAME in WORD...` can expand its list
+ * the same way an ordinary command's arguments are expanded. */
+char *shell_executor__eval_arith_word(void *context, const char *text, size_t length, const char **error);

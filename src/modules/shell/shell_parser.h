@@ -53,16 +53,41 @@ typedef struct {
 
 typedef const char *(*shell_variable_lookup_fn)(void *context, const char *name);
 
+/* Runs `command_text` (`length` bytes, not NUL-terminated) as a nested shell
+ * command list for "$(...)" / "`...`" command substitution and returns its
+ * captured, trailing-newlines-stripped stdout as a heap-allocated (same
+ * allocator shell_parser__free_words() releases its items with --
+ * memory__malloc()), NUL-terminated string the caller owns, or NULL on
+ * failure (out of memory, or `command_text` too long to run at all) -- see
+ * shell_executor__run_substitution() in shell_executor.c for what actually
+ * implements this. */
+typedef char *(*shell_command_substitution_fn)(void *context, const char *command_text, size_t length);
+
+/* Evaluates `text` (`length` bytes, not NUL-terminated) -- the expression
+ * between the doubled "((" and "))" of a "$((...))" arithmetic-expansion
+ * *word* (e.g. the "1 + 2" in "echo $((1 + 2))") -- and returns its result
+ * formatted as a decimal string, heap-allocated the same way
+ * shell_command_substitution_fn's result is (memory__malloc(), owned by the
+ * caller). On failure (a syntax error, division by zero, ...) returns NULL
+ * and sets *error to a human-readable, caller-durable (string-literal)
+ * message -- see shell_arith__eval() in shell_arith.c, which is what
+ * actually implements this, for what those messages look like. */
+typedef char *(*shell_arith_word_fn)(void *context, const char *text, size_t length, const char **error);
+
 int shell_parser__plan(const char *line, shell_plan_t *plan, const char **error);
 void shell_parser__plan_free(shell_plan_t *plan);
 
 /* Tokenizes `command` into a heap-allocated, NULL-terminated argv-style array:
- * each word is allocated to its exact final length. On success *out_words is
- * non-NULL when *word_count > 0 and must be released with
- * shell_parser__free_words(); on failure (returns -1) *out_words is NULL. */
+ * each word is allocated to its exact final length. `lookup`/`substitute`/
+ * `arith` are called with the same `context` for $NAME/$(...)-or-`...`/
+ * $((...))-style expansion respectively (see their typedefs above). On
+ * success *out_words is non-NULL when *word_count > 0 and must be released
+ * with shell_parser__free_words(); on failure (returns -1) *out_words is
+ * NULL. */
 int shell_parser__words(
     const shell_command_t *command, char ***out_words, int *word_count, shell_variable_lookup_fn lookup,
-    void *lookup_context, int last_status, const char **error
+    shell_command_substitution_fn substitute, shell_arith_word_fn arith, void *context, int last_status,
+    const char **error
 );
 void shell_parser__free_words(char **words, int word_count);
 

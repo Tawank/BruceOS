@@ -37,6 +37,71 @@ bool shell_parser__valid_name(const char *name, size_t length) {
     return true;
 }
 
+/* Finds the end of a "$(...)" command-substitution span (`backtick` false,
+ * `start` pointing at the '$' with text[start+1] == '(') or a "`...`" one
+ * (`backtick` true, `start` pointing at the opening '`'), setting *out_end
+ * to the index just past the matching ')' or closing '`' and returning true
+ * -- or returning false (an unterminated span) if the matching close is
+ * never found before `length`. Tracks nested "$(...)" spans and bare
+ * '('/')' pairs inside a "$(...)" the same way shell_parser__plan()'s own
+ * arith_depth already tracks "((...))", and skips quoted content within the
+ * span (so a stray ')'/'`' inside a quoted string in there doesn't end the
+ * span early), matching shell_parser__plan()'s own top-level quote
+ * handling. Used both to find where a substitution's content ends
+ * (shell_parser__expand()/shell_parser__words() below) and, by
+ * shell_parser__plan()/shell_parser__extract_redirect(), to skip over the
+ * whole span as one opaque unit so ';'/'&&'/'||'/'|'/'>' used *inside* it
+ * (e.g. "$(cmd > file)") are never mistaken for this line's own operators. */
+static bool
+shell_parser__substitution_span(const char *text, size_t length, size_t start, bool backtick, size_t *out_end) {
+    size_t i = start + (backtick ? 1u : 2u);
+    int depth = 1;
+    bool single = false, double_quote = false, escaped = false;
+    while (i < length) {
+        char c = text[i];
+        if (escaped) {
+            escaped = false;
+            i++;
+            continue;
+        }
+        if (!single && c == '\\') {
+            escaped = true;
+            i++;
+            continue;
+        }
+        if (!double_quote && c == '\'') {
+            single = !single;
+            i++;
+            continue;
+        }
+        if (!single && c == '"') {
+            double_quote = !double_quote;
+            i++;
+            continue;
+        }
+        if (single || double_quote) {
+            i++;
+            continue;
+        }
+        if (backtick) {
+            if (c == '`') {
+                *out_end = i + 1;
+                return true;
+            }
+        } else if (c == '(') {
+            depth++;
+        } else if (c == ')') {
+            depth--;
+            if (depth == 0) {
+                *out_end = i + 1;
+                return true;
+            }
+        }
+        i++;
+    }
+    return false;
+}
+
 /* Detects a single trailing "> target" / ">> target" output redirection on
  * an already-trimmed command span and, if found, shrinks command->length to
  * exclude it, leaving the plain command/arguments shell_parser__words() will
@@ -71,6 +136,15 @@ static int shell_parser__extract_redirect(shell_command_t *command, const char *
             continue;
         }
         if (single || double_quote) continue;
+        if ((c == '$' && i + 1 < length && text[i + 1] == '(') || c == '`') {
+            size_t end = 0;
+            if (!shell_parser__substitution_span(text, length, i, c == '`', &end)) {
+                *error = "unterminated command substitution";
+                return -1;
+            }
+            i = end - 1;
+            continue;
+        }
         if (arith_depth == 0 && c == '(' && i + 1 < length && text[i + 1] == '(') {
             arith_depth = 1;
             continue;
@@ -205,6 +279,16 @@ int shell_parser__plan(const char *line, shell_plan_t *plan, const char **error)
             continue;
         }
         if (single || double_quote) continue;
+        if ((c == '$' && i + 1 < length && line[i + 1] == '(') || c == '`') {
+            size_t end = 0;
+            if (!shell_parser__substitution_span(line, length, i, c == '`', &end)) {
+                *error = "unterminated command substitution";
+                return -1;
+            }
+            i = end - 1;
+            token_boundary = false;
+            continue;
+        }
         if (c == '#' && token_boundary) {
             in_comment = true;
             continue;
@@ -368,14 +452,89 @@ static void shell_word_list__free(shell_word_list_t *list) {
     memory__free(list->items);
 }
 
+/* Splices `substitute`'s captured output for the command-substitution span
+ * command->text[content_start .. content_start+content_len) into `word`.
+ * Shared by shell_parser__expand()'s "$(...)" branch below and
+ * shell_parser__words()'s own "`...`" handling further down. */
+static int shell_parser__splice_substitution(
+    const shell_command_t *command, size_t content_start, size_t content_len, shell_word_buffer_t *word,
+    shell_command_substitution_fn substitute, void *context, const char **error
+) {
+    char *result = substitute != NULL ? substitute(context, command->text + content_start, content_len) : NULL;
+    if (result == NULL) {
+        *error = "command substitution failed";
+        return -1;
+    }
+    bool appended = shell_word_buffer__append(word, result, strlen(result));
+    memory__free(result);
+    if (!appended) *error = "expanded word too long";
+    return appended ? 0 : -1;
+}
+
+/* Splices `arith`'s formatted result for the "$((...))" arithmetic-word span
+ * command->text[inner_start .. inner_start+inner_len) -- the expression
+ * between the doubled "((" and "))", *not* including those four characters
+ * -- into `word`. Mirrors shell_parser__splice_substitution() above, except
+ * a failure propagates `arith`'s own specific, caller-durable error message
+ * instead of a fixed generic one (matching how the standalone "((...))"
+ * statement form reports arithmetic errors -- see shell_executor.c). */
+static int shell_parser__splice_arith(
+    const shell_command_t *command, size_t inner_start, size_t inner_len, shell_word_buffer_t *word,
+    shell_arith_word_fn arith, void *context, const char **error
+) {
+    const char *arith_error = NULL;
+    char *result =
+        arith != NULL ? arith(context, command->text + inner_start, inner_len, &arith_error) : NULL;
+    if (result == NULL) {
+        *error = arith_error != NULL ? arith_error : "arithmetic expansion failed";
+        return -1;
+    }
+    bool appended = shell_word_buffer__append(word, result, strlen(result));
+    memory__free(result);
+    if (!appended) *error = "expanded word too long";
+    return appended ? 0 : -1;
+}
+
 static int shell_parser__expand(
     const shell_command_t *command, size_t *position, shell_word_buffer_t *word, shell_variable_lookup_fn lookup,
-    void *context, int last_status, const char **error
+    shell_command_substitution_fn substitute, shell_arith_word_fn arith, void *context, int last_status,
+    const char **error
 ) {
     size_t i = *position;
     if (i + 1 >= command->length) {
         *position = i + 1;
         return shell_word_buffer__append(word, "$", 1) ? 0 : -1;
+    }
+    /* "$(...)" command substitution -- see shell_command_substitution_fn in
+     * shell_parser.h. Its content span was already validated as
+     * well-terminated by shell_parser__plan()'s own scan of the whole line
+     * before shell_parser__words() ever runs on one command out of it, so
+     * shell_parser__substitution_span() failing here would mean those two
+     * scans disagreed; still checked and reported rather than assumed.
+     *
+     * "$((...))" arithmetic expansion is recognized here too, as a special
+     * case of the very same span: since this shell has no subshell "(...)"
+     * command grouping (see README.md's "Not implemented" list) to
+     * disambiguate against, a content span itself wrapped in one more
+     * matched pair of parens -- e.g. "(1 + 2)" inside "$((1 + 2))" -- is
+     * unambiguously the doubled-paren arithmetic form and never a real
+     * command starting with a literal '(' word. */
+    if (command->text[i + 1] == '(') {
+        size_t end = 0;
+        if (!shell_parser__substitution_span(command->text, command->length, i, false, &end)) {
+            *error = "unterminated command substitution";
+            return -1;
+        }
+        size_t content_start = i + 2;
+        size_t content_len = (end - 1) - content_start;
+        *position = end;
+        if (content_len >= 2 && command->text[content_start] == '(' &&
+            command->text[content_start + content_len - 1] == ')') {
+            return shell_parser__splice_arith(
+                command, content_start + 1, content_len - 2, word, arith, context, error
+            );
+        }
+        return shell_parser__splice_substitution(command, content_start, content_len, word, substitute, context, error);
     }
     char name[SHELL__PARSED_NAME_MAX];
     size_t name_length = 0;
@@ -443,7 +602,8 @@ static int shell_parser__expand(
 
 int shell_parser__words(
     const shell_command_t *command, char ***out_words, int *word_count, shell_variable_lookup_fn lookup,
-    void *lookup_context, int last_status, const char **error
+    shell_command_substitution_fn substitute, shell_arith_word_fn arith, void *context, int last_status,
+    const char **error
 ) {
     if (command == NULL || out_words == NULL || word_count == NULL || error == NULL) return -1;
     *out_words = NULL;
@@ -485,12 +645,37 @@ int shell_parser__words(
                 continue;
             }
             if (!single && c == '$') {
-                if (shell_parser__expand(command, &i, &word, lookup, lookup_context, last_status, error) != 0) {
+                if (shell_parser__expand(command, &i, &word, lookup, substitute, arith, context, last_status, error) !=
+                    0) {
                     if (*error == NULL) *error = "expanded word too long";
                     memory__free(word.data);
                     shell_word_list__free(&list);
                     return -1;
                 }
+                continue;
+            }
+            /* "`...`" command substitution -- same expansion as "$(...)"
+             * above (see shell_command_substitution_fn in shell_parser.h),
+             * just with the other spelling bash accepts. Recognized inside
+             * double quotes too, same as "$(...)"/"$NAME", only single
+             * quotes suppress it. */
+            if (!single && c == '`') {
+                size_t end = 0;
+                if (!shell_parser__substitution_span(command->text, command->length, i, true, &end)) {
+                    *error = "unterminated command substitution";
+                    memory__free(word.data);
+                    shell_word_list__free(&list);
+                    return -1;
+                }
+                size_t content_start = i + 1;
+                size_t content_len = (end - 1) - content_start;
+                if (shell_parser__splice_substitution(command, content_start, content_len, &word, substitute, context, error) !=
+                    0) {
+                    memory__free(word.data);
+                    shell_word_list__free(&list);
+                    return -1;
+                }
+                i = end;
                 continue;
             }
             if (!shell_word_buffer__append(&word, command->text + i, 1)) {

@@ -301,6 +301,89 @@ static int shell_executor__capture_external(int argc, char **argv, shell_executo
     return 0;
 }
 
+/* Implements "$(...)" / "`...`" command substitution (see
+ * shell_command_substitution_fn in shell_parser.h): runs `command_text` as a
+ * nested "shell -c '<command_text>'" child process and captures its output
+ * via shell_executor__capture_external() -- the same "spawn a real child,
+ * route its stdio through a session this process created, read it back"
+ * trick every other captured-output path here already relies on, just
+ * pointed at "shell" itself instead of a single external command, since
+ * substitution content can be arbitrary shell syntax (multiple commands,
+ * pipes, if/for/while, ...), not just one external command's argv.
+ *
+ * This is a real, separate process, not bash's copy-on-write subshell: it
+ * only ever sees what any other external command this shell launches would
+ * -- exported variables and the filesystem, via shell_executor__external()'s
+ * usual environment plumbing -- never the calling shell's own unexported
+ * variables or function definitions. "$(myfunc)" referencing a function
+ * defined earlier in this same interactive session therefore fails ("myfunc:
+ * not found") exactly the way calling myfunc from any other external
+ * command's child process already would.
+ *
+ * Also inherits shell_executor__capture_external()'s existing "discards the
+ * captured buffer on a nonzero exit" behavior (see its own doc comment) --
+ * so unlike bash, "$(cmd_that_fails)" expands to empty rather than whatever
+ * cmd_that_fails printed before exiting nonzero. This keeps exactly one
+ * discard-on-failure rule across every captured-output path in this shell
+ * (">"/">>" redirection, pipes, and now substitution) instead of a special
+ * case just for this one.
+ *
+ * Trailing newlines are stripped from the captured output, matching bash's
+ * own "$(...)"/"`...`" behavior (a real command substitution runs *inside*
+ * word-splitting, so this also means the result never itself gets
+ * word-split on whitespace -- consistent with how a plain $NAME expansion
+ * already behaves in this shell, see shell_parser__expand()).
+ *
+ * Like every other memory__external_malloc()-backed captured-output path
+ * here, a *successful* substitution's captured bytes are unreliable under
+ * QEMU's swap-backend fallback (see selftest__run_shell_bnu_text_pipe_case()
+ * in shell_test.c) -- this is a pre-existing limitation of that backing
+ * store under QEMU, not something specific to substitution. */
+char *shell_executor__run_substitution(void *context, const char *command_text, size_t length) {
+    (void)context; /* nothing of the caller's own shell_state_t is usable across the process boundary; see above */
+    if (length >= SHELL__LINE_MAX) {
+        stdio__printf("shell: command substitution too long\n");
+        return NULL;
+    }
+    char line[SHELL__LINE_MAX];
+    memcpy(line, command_text, length);
+    line[length] = '\0';
+    char *argv[] = {"shell", "-c", line, NULL};
+    shell_executor__buffer_t buffer = {0};
+    (void)shell_executor__capture_external(3, argv, &buffer);
+    while (buffer.length > 0 && ((const char *)buffer.data)[buffer.length - 1] == '\n') buffer.length--;
+    char *result = memory__malloc(buffer.length + 1u);
+    if (result != NULL) {
+        if (buffer.length > 0) memcpy(result, buffer.data, buffer.length);
+        result[buffer.length] = '\0';
+    }
+    shell_executor__buffer_free(&buffer);
+    return result;
+}
+
+/* Evaluates "$((...))" arithmetic-expansion *words* (see shell_arith_word_fn
+ * in shell_parser.h and shell_parser__expand()'s doubled-paren detection,
+ * which is what routes here instead of to shell_executor__run_substitution()
+ * above). Unlike command substitution this never spawns a nested process --
+ * `context` is this shell's own shell_state_t, evaluated in place exactly
+ * like the standalone "((...))" statement form (see
+ * shell_executor__is_arith_command()/shell_arith__eval() below), so it sees
+ * and can mutate this shell's own variables, assignment side effects
+ * included: "echo $((x = 5))" sets $x here just as "((x = 5))" would. */
+char *shell_executor__eval_arith_word(void *context, const char *text, size_t length, const char **error) {
+    long value = 0;
+    if (!shell_arith__eval((shell_state_t *)context, text, length, &value, error)) return NULL;
+    char formatted[24];
+    int written = snprintf(formatted, sizeof(formatted), "%ld", value);
+    if (written <= 0) {
+        *error = "arithmetic formatting error";
+        return NULL;
+    }
+    char *result = memory__malloc((size_t)written + 1u);
+    if (result != NULL) memcpy(result, formatted, (size_t)written + 1u);
+    return result;
+}
+
 /* Expands a redirection target span (e.g. the "file.txt" in "cmd > file.txt")
  * exactly the way an ordinary argv word is expanded -- quotes, escapes, and
  * $variable references all work -- by wrapping it in a one-off
@@ -319,7 +402,10 @@ static int shell_executor__resolve_redirect_target(
     shell_command_t pseudo = {.text = span->text, .length = span->length};
     char **words = NULL;
     int argc = 0;
-    if (shell_parser__words(&pseudo, &words, &argc, shell_executor__lookup, state, state->last_status, error) != 0) {
+    if (shell_parser__words(
+            &pseudo, &words, &argc, shell_executor__lookup, shell_executor__run_substitution,
+            shell_executor__eval_arith_word, state, state->last_status, error
+        ) != 0) {
         return -1;
     }
     if (argc != 1) {
@@ -655,8 +741,8 @@ static int shell_executor__pipeline(shell_state_t *state, const shell_command_t 
     bool parse_failed = false;
     for (size_t i = 0; i < count && !parse_failed; ++i) {
         if (shell_parser__words(
-                &commands[i], &stage_words[i], &stage_argc[i], shell_executor__lookup, state, state->last_status,
-                &error
+                &commands[i], &stage_words[i], &stage_argc[i], shell_executor__lookup,
+                shell_executor__run_substitution, shell_executor__eval_arith_word, state, state->last_status, &error
             ) != 0) {
             parse_failed = true;
         }
@@ -1007,7 +1093,8 @@ static int shell_executor__command(shell_state_t *state, const shell_command_t *
     int argc = 0;
     const char *error = NULL;
     if (shell_parser__words(
-            command, &words, &argc, shell_executor__lookup, state, state->last_status, &error
+            command, &words, &argc, shell_executor__lookup, shell_executor__run_substitution,
+            shell_executor__eval_arith_word, state, state->last_status, &error
         ) != 0) {
         stdio__printf("shell: %s\n", error != NULL ? error : "parse error");
         return 2;

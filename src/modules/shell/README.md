@@ -29,13 +29,33 @@ definitions) by raw-text keyword matching in command position.
   bash-style — `$10` is `$1` followed by a literal `0`), `$#` (positional
   argument count), `$?` (last exit status). An unset variable or unset
   positional parameter expands to empty string.
-- **Not implemented:** command substitution (`` `cmd` `` / `$(cmd)`),
-  arithmetic expansion `$((...))` as a *word* (only the standalone `((...))`
-  statement form exists — see below), brace expansion (`{a,b}`), tilde
-  expansion (`~`), pathname globbing (`*`, `?`, `[...]`), `$@`/`$*`, `$$`,
-  here-docs/here-strings, and input redirection (`<` is rejected with a
-  parse error outside of `((...))`; see the Redirection section below for
-  what `>`/`>>` do support).
+- Command substitution: `$(...)` and `` `...` ``, recognized unquoted and
+  inside double quotes (only single quotes suppress it, same as `$NAME`) and
+  nestable. Its content runs as a nested `shell -c` child process (see
+  `shell_executor__run_substitution()` in `shell_executor.c`) — a real,
+  separate process, not bash's copy-on-write subshell: it sees exported
+  variables and the filesystem, but never the calling shell's own unexported
+  variables or function definitions. Trailing newlines are stripped from the
+  captured output, and — like a plain `$NAME` expansion — the result is never
+  itself word-split. A nonzero exit discards whatever the substitution
+  printed, matching `>`/`>>` and `|`'s existing discard-on-failure rule (see
+  below) rather than keeping partial output.
+- Arithmetic expansion: `$((...))` as a *word* (e.g. `echo $((1 + 2))`),
+  alongside the standalone `((...))` statement form (see below). Recognized
+  the same way as `$(...)` command substitution — a `$(` span whose content
+  is itself wrapped in one more matched pair of parens is unambiguously the
+  doubled-paren arithmetic form, since this shell has no subshell `(...)`
+  command grouping to disambiguate against. Unlike `$(...)`, this never
+  spawns a nested process: it's evaluated in place against this shell's own
+  variables by the same evaluator the statement form uses (see
+  `shell_executor__eval_arith_word()` in `shell_executor.c`), so an
+  assignment inside it (`$((x = 5))`) is a real side effect on `$x` here, not
+  something scoped to the expansion.
+- **Not implemented:** brace expansion (`{a,b}`), tilde expansion (`~`),
+  pathname globbing (`*`, `?`, `[...]`), `$@`/`$*`, `$$`, here-docs/here-
+  strings, and input redirection (`<` is rejected with a parse error outside
+  of `((...))`; see the Redirection section below for what `>`/`>>` do
+  support).
 
 **Ctrl+C** -- `terminal_app.c` turns it into a real `SIGINT` (`process__signal`)
 on the shell rather than forwarding it as a byte, like a cooked tty's INTR
@@ -162,8 +182,6 @@ line it just deletes the character under the cursor, like Delete.
 ## What's left to implement
 
 Roughly in order of how often bash scripts actually use them:
-- Command substitution `$(...)`/`` `...` `` and arithmetic expansion as a
-  word, `$((...))`.
 - Input redirection (`<`) and here-docs; streaming (rather than
   capture-then-write) `>`/`>>` output redirection; redirecting a builtin or
   shell function's output.
@@ -172,8 +190,7 @@ Roughly in order of how often bash scripts actually use them:
 - `$@`, `$*`, `$$`, `$!`.
 - File-test operators for `test`/`[` (`-e -f -d -r -w -x ...`) and `-o`/`[[
   ... || ... ]]`-in-tests.
-- `until` loops, C-style `((...))` outside of `for` headers used as a word
-  (already works as a statement/condition).
+- `until` loops.
 - Comments (`#`).
 
 ## Example
@@ -272,7 +289,8 @@ just skipping the rest of the current row.
 `src/modules/selftest/shell_test.c` covers the language layer end-to-end
 against real firmware output (via `stdio__session_*` + `app_runner__run`):
 `selftest__run_shell_language_case`, `..._script_case`,
-`..._control_flow_case`, `..._local_case`, `..._multiline_case`,
+`..._control_flow_case`, `..._local_case`, `..._command_substitution_case`,
+`..._arith_word_case`, `..._multiline_case`,
 `..._loops_case` (arithmetic,
 both `for` forms, `while`, `break`, `break N`, and the break/catch-up
 regression), `..._read_case`, `..._stdio_inheritance_case`,
