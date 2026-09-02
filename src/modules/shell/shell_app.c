@@ -17,8 +17,10 @@
 #include "shell_compound.h"
 #include "shell_builtins.h"
 #include "shell_console.h"
+#include "shell_executor.h"
 #include "shell_history.h"
 #include "shell_internal.h"
+#include "shell_parser.h"
 
 /* Keeps $COLUMNS/$LINES in sync with the routed session's terminal size
  * (see core_sdk/tty.h). Cheap no-op once nothing has changed, so it's safe
@@ -74,7 +76,7 @@ void shell__state_free(shell_state_t *state) {
 
 int shell__execute_line(shell_state_t *state, const char *line) {
     if (state == NULL || line == NULL) return 2;
-    return shell_compound__run(state, line);
+    return shell_compound__run(state, line, NULL, 0);
 }
 
 /* Appends one physical line to the multi-line accumulation buffer that both
@@ -93,6 +95,130 @@ static bool shell__block_append(char *block, size_t capacity, size_t *block_used
     return true;
 }
 
+/* Safety cap on how many "<<DELIM" heredocs a single accumulated block (see
+ * shell__block_append() above) may contain -- generous for any realistic
+ * script, and matched in spirit to SHELL__MAX_COMMANDS. Heredocs are
+ * currently only collected by shell__run_script() below, not by
+ * shell__interactive()'s own read loop further down -- typing "<<EOF" at the
+ * interactive prompt reaches shell_parser__plan() with no body collected for
+ * it and reports "heredoc ... not supported here", the same message a
+ * heredoc inside a re-parsed function body gets (see shell_compound.c's
+ * shell_compound__call_function()). */
+#define SHELL_APP__MAX_HEREDOCS 8
+
+/* Reads one more raw line into `out` (`out_capacity` bytes, NUL-terminated,
+ * a trailing '\r' stripped same as shell__run_script()'s own line handling),
+ * pulling bytes from `*chunk_pos`/`*chunk_size` within `chunk` and refilling
+ * via storage__read() on `file` as needed -- the very same byte cursor
+ * shell__run_script()'s own reading loop advances, shared by pointer so
+ * control returns there exactly where this function leaves off, whether
+ * that's mid-chunk or needing a fresh read. Used only while collecting a
+ * heredoc body (see shell_app__collect_heredoc_body() below), where lines
+ * must be read raw -- never joined into `block` or checked against
+ * shell_compound__pending() -- until the delimiter line turns up. Returns
+ * the line's length (never counting a line that doesn't fit -- see
+ * *overlong), or -1 at real end-of-file with nothing left to read at all. */
+static int shell_app__heredoc_read_line(
+    bruce_file_id_t file, char *chunk, size_t chunk_capacity, size_t *chunk_pos, size_t *chunk_size, char *out,
+    size_t out_capacity, bool *overlong
+) {
+    size_t used = 0;
+    for (;;) {
+        if (*chunk_pos >= *chunk_size) {
+            bruce_result_t read = storage__read(file, chunk, chunk_capacity, chunk_size);
+            *chunk_pos = 0;
+            if (read != BRUCE_OK || *chunk_size == 0) {
+                if (used == 0) return -1;
+                if (used < out_capacity) out[used] = '\0';
+                return (int)used;
+            }
+        }
+        char c = chunk[(*chunk_pos)++];
+        if (c == '\n') {
+            if (used > 0 && out[used - 1] == '\r') used--;
+            if (used < out_capacity) out[used] = '\0';
+            return (int)used;
+        }
+        if (used + 1 < out_capacity) out[used++] = c;
+        else *overlong = true;
+    }
+}
+
+/* Collects a heredoc's raw (not yet $expanded) body: repeatedly reads a raw
+ * line via shell_app__heredoc_read_line() above and appends it (plus a real
+ * '\n') to a growing memory__malloc()-owned string, until a line matches
+ * `delim`/`delim_len` -- after first stripping that line's own leading tabs
+ * too when `strip_tabs` is set ("<<-"), matching bash's own rule that a
+ * tab-indented terminator still closes the heredoc. *out_raw becomes the
+ * caller-owned (memory__free()) body text, excluding the terminator line
+ * itself. Returns 0 on success, 1 if the terminator is never found before
+ * end-of-file, or 2 on a hard error (a body line too long, or the body
+ * outgrowing SHELL__HEREDOC_MAX, or out of memory).
+ *
+ * `raw_line`/`raw_line_capacity` is scratch space for one line at a time --
+ * caller-owned (memory__malloc()) rather than a local SHELL__LINE_MAX array
+ * here, since the "shell" task's stack budget (SHELL_STACK_BYTES in main.c)
+ * is tight enough that this function's own frame plus shell__run_script()'s
+ * already caused a stack overflow before this was moved to the heap. */
+static int shell_app__collect_heredoc_body(
+    bruce_file_id_t file, char *chunk, size_t chunk_capacity, size_t *chunk_pos, size_t *chunk_size,
+    bool strip_tabs, const char *delim, size_t delim_len, char *raw_line, size_t raw_line_capacity, char **out_raw
+) {
+    char *body = memory__malloc(1);
+    if (body == NULL) return 2;
+    body[0] = '\0';
+    size_t body_len = 0;
+    for (;;) {
+        bool overlong = false;
+        int length = shell_app__heredoc_read_line(
+            file, chunk, chunk_capacity, chunk_pos, chunk_size, raw_line, raw_line_capacity, &overlong
+        );
+        if (overlong) {
+            memory__free(body);
+            return 2;
+        }
+        if (length < 0) {
+            memory__free(body);
+            return 1;
+        }
+        const char *compare = raw_line;
+        size_t compare_len = (size_t)length;
+        if (strip_tabs) {
+            while (compare_len > 0 && *compare == '\t') {
+                compare++;
+                compare_len--;
+            }
+        }
+        if (compare_len == delim_len && memcmp(compare, delim, delim_len) == 0) {
+            *out_raw = body;
+            return 0;
+        }
+        size_t needed = body_len + compare_len + 2u; /* the line, a '\n', and the NUL */
+        if (needed > SHELL__HEREDOC_MAX) {
+            memory__free(body);
+            return 2;
+        }
+        char *grown = memory__realloc(body, needed);
+        if (grown == NULL) {
+            memory__free(body);
+            return 2;
+        }
+        body = grown;
+        memcpy(body + body_len, compare, compare_len);
+        body_len += compare_len;
+        body[body_len++] = '\n';
+        body[body_len] = '\0';
+    }
+}
+
+/* Frees every entry collected so far in `heredoc_bodies[0..*heredoc_count)`
+ * and resets the count to 0 -- shared by every point shell__run_script()
+ * finishes with one accumulated block's heredocs, success or error alike. */
+static void shell_app__heredoc_bodies_free(char **heredoc_bodies, size_t *heredoc_count) {
+    for (size_t i = 0; i < *heredoc_count; ++i) memory__free(heredoc_bodies[i]);
+    *heredoc_count = 0;
+}
+
 static int shell__run_script(shell_state_t *state, const char *path) {
     bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
     bruce_result_t opened = storage__open(path, BRUCE_STORAGE_OPEN_READ, &file);
@@ -102,10 +228,20 @@ static int shell__run_script(shell_state_t *state, const char *path) {
     }
     char *line = memory__malloc(SHELL__LINE_MAX);
     char *block = memory__malloc(SHELL__BLOCK_MAX);
-    if (line == NULL || block == NULL) {
+    /* Heredoc scratch space, heap-allocated for the same stack-budget reason
+     * as shell_app__collect_heredoc_body()'s own `raw_line` parameter (see
+     * its doc comment) -- `delim_copy` holds one heredoc delimiter at a time
+     * (copied out of `line` before it's reused, see below) and `raw_line` is
+     * handed down to shell_app__collect_heredoc_body() as its line-at-a-time
+     * scratch buffer. */
+    char *delim_copy = memory__malloc(SHELL__LINE_MAX);
+    char *raw_line = memory__malloc(SHELL__LINE_MAX);
+    if (line == NULL || block == NULL || delim_copy == NULL || raw_line == NULL) {
         stdio__printf("shell: out of memory\n");
         memory__free(line);
         memory__free(block);
+        memory__free(delim_copy);
+        memory__free(raw_line);
         (void)storage__close(file);
         return 1;
     }
@@ -113,43 +249,120 @@ static int shell__run_script(shell_state_t *state, const char *path) {
     size_t block_used = 0;
     int status = state->last_status;
     bool overlong = false;
+    /* Heredoc bodies collected for whatever block is currently being
+     * accumulated -- reset (freed) every time a block finishes, whether by
+     * running it or by an error abandoning it (see `goto done` below, and
+     * shell_app__heredoc_bodies_free()'s own doc comment). */
+    char *heredoc_bodies[SHELL_APP__MAX_HEREDOCS] = {0};
+    size_t heredoc_count = 0;
+    char chunk[128];
+    size_t chunk_pos = 0;
+    size_t chunk_size = 0;
     for (;;) {
-        char chunk[128];
-        size_t size = 0;
-        bruce_result_t read = storage__read(file, chunk, sizeof(chunk), &size);
-        if (read != BRUCE_OK) {
-            stdio__printf("shell: %s: read error (%d)\n", path, read);
-            status = 1;
-            break;
-        }
-        for (size_t i = 0; i < size; ++i) {
-            char c = chunk[i];
-            if (c == '\n') {
-                if (overlong) {
-                    stdio__printf("shell: %s: script line too long\n", path);
-                    status = 2;
-                    goto done;
-                }
-                if (used > 0 && line[used - 1] == '\r') used--;
-                if (!shell__block_append(block, SHELL__BLOCK_MAX, &block_used, line, used)) {
-                    stdio__printf("shell: %s: script block too long\n", path);
-                    status = 2;
-                    goto done;
-                }
-                used = 0;
-                if (!shell_compound__pending(block)) {
-                    status = shell__execute_line(state, block);
-                    block_used = 0;
-                    block[0] = '\0';
-                }
-                if (state->exit_requested) goto done;
-            } else if (used + 1 < SHELL__LINE_MAX) {
-                line[used++] = c;
-            } else {
-                overlong = true;
+        if (chunk_pos >= chunk_size) {
+            bruce_result_t read = storage__read(file, chunk, sizeof(chunk), &chunk_size);
+            chunk_pos = 0;
+            if (read != BRUCE_OK) {
+                stdio__printf("shell: %s: read error (%d)\n", path, read);
+                status = 1;
+                break;
             }
+            if (chunk_size == 0) break;
         }
-        if (size == 0) break;
+        char c = chunk[chunk_pos++];
+        if (c == '\n') {
+            if (overlong) {
+                stdio__printf("shell: %s: script line too long\n", path);
+                status = 2;
+                goto done;
+            }
+            if (used > 0 && line[used - 1] == '\r') used--;
+            /* Recognized *before* the line joins `block` -- see
+             * shell_parser__find_heredoc_marker()'s own doc comment for why
+             * this has to happen here, ahead of ordinary block/pending
+             * handling, rather than once the whole block is parsed. */
+            bool strip_tabs = false, literal = false;
+            const char *delim = NULL;
+            size_t delim_len = 0;
+            const char *marker_error = NULL;
+            bool has_marker =
+                shell_parser__find_heredoc_marker(line, used, &strip_tabs, &literal, &delim, &delim_len, &marker_error);
+            if (marker_error != NULL) {
+                stdio__printf("shell: %s: %s\n", path, marker_error);
+                status = 2;
+                goto done;
+            }
+            if (!shell__block_append(block, SHELL__BLOCK_MAX, &block_used, line, used)) {
+                stdio__printf("shell: %s: script block too long\n", path);
+                status = 2;
+                goto done;
+            }
+            used = 0;
+            if (has_marker) {
+                if (heredoc_count >= SHELL_APP__MAX_HEREDOCS) {
+                    stdio__printf("shell: %s: too many heredocs\n", path);
+                    status = 2;
+                    goto done;
+                }
+                /* `delim` points into `line`, which the raw per-char loop
+                 * below is about to start refilling from index 0 again --
+                 * copy it out before that happens into the heap-allocated
+                 * `delim_copy` (see its allocation above for why this isn't a
+                 * local array). `raw_line` is likewise heap-allocated scratch
+                 * space, handed down for shell_app__collect_heredoc_body() to
+                 * read each body line into. */
+                if (delim_len >= SHELL__LINE_MAX) {
+                    stdio__printf("shell: %s: heredoc delimiter too long\n", path);
+                    status = 2;
+                    goto done;
+                }
+                memcpy(delim_copy, delim, delim_len);
+                char *raw_body = NULL;
+                int collected = shell_app__collect_heredoc_body(
+                    file, chunk, sizeof(chunk), &chunk_pos, &chunk_size, strip_tabs, delim_copy, delim_len, raw_line,
+                    SHELL__LINE_MAX, &raw_body
+                );
+                if (collected == 1) {
+                    stdio__printf("shell: %s: unexpected end of file (unterminated heredoc)\n", path);
+                    status = 2;
+                    goto done;
+                }
+                if (collected != 0) {
+                    stdio__printf("shell: %s: heredoc body too long\n", path);
+                    status = 2;
+                    goto done;
+                }
+                char *final_body = raw_body;
+                if (!literal) {
+                    const char *expand_error = NULL;
+                    char *expanded = shell_parser__expand_text(
+                        raw_body, strlen(raw_body), shell_executor__lookup, shell_executor__run_substitution,
+                        shell_executor__eval_arith_word, state, state->last_status, &expand_error
+                    );
+                    memory__free(raw_body);
+                    if (expanded == NULL) {
+                        stdio__printf(
+                            "shell: %s: %s\n", path, expand_error != NULL ? expand_error : "heredoc expansion failed"
+                        );
+                        status = 2;
+                        goto done;
+                    }
+                    final_body = expanded;
+                }
+                heredoc_bodies[heredoc_count++] = final_body;
+            }
+            if (!shell_compound__pending(block)) {
+                status = shell_compound__run(state, block, heredoc_bodies, heredoc_count);
+                shell_app__heredoc_bodies_free(heredoc_bodies, &heredoc_count);
+                block_used = 0;
+                block[0] = '\0';
+            }
+            if (state->exit_requested) goto done;
+        } else if (used + 1 < SHELL__LINE_MAX) {
+            line[used++] = c;
+        } else {
+            overlong = true;
+        }
     }
     if (overlong) {
         stdio__printf("shell: %s: script line too long\n", path);
@@ -167,12 +380,15 @@ static int shell__run_script(shell_state_t *state, const char *path) {
             stdio__printf("shell: %s: unexpected end of file (unterminated if/function)\n", path);
             status = 2;
         } else {
-            status = shell__execute_line(state, block);
+            status = shell_compound__run(state, block, heredoc_bodies, heredoc_count);
         }
     }
 done:
+    shell_app__heredoc_bodies_free(heredoc_bodies, &heredoc_count);
     memory__free(line);
     memory__free(block);
+    memory__free(delim_copy);
+    memory__free(raw_line);
     (void)storage__close(file);
     return state->exit_requested ? state->exit_status : status;
 }

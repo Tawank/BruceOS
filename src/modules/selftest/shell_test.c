@@ -666,6 +666,300 @@ static int selftest__shell_run_pipe_command(const char *command) {
     return status;
 }
 
+/* Exercises "cmd > file" / "cmd >> file" for a plain (non-piped, no "<"/
+ * heredoc input) external command -- shell_executor__stream_external_to_file()
+ * in shell_executor.c, which writes each output chunk straight to the file
+ * as the command runs rather than buffering it in memory__external_malloc()-
+ * backed storage first. Unlike selftest__run_shell_bnu_text_pipe_case()'s own
+ * "|"/">>"-redirected-pipe-destination checks, this path never touches that
+ * buffer at all, so -- unlike that test -- content is checked exactly
+ * regardless of CONFIG_BRUCE_QEMU_TEST_MODE; nothing here is subject to that
+ * backing store's QEMU swap-backend unreliability. Calls shell__execute_line()
+ * directly (no spawned "shell -c ..." child, unlike the pipe-backed tests
+ * further up) since shell_executor__stream_external_to_file() -- like
+ * shell_executor__capture_external() it's modeled on -- creates and owns its
+ * own stdio session and never touches the calling task's own (here, the
+ * selftest task's bare, session-less) stdio directly. */
+bool selftest__run_shell_output_redirect_case(void) {
+    const char *source_path = "/apps/shell_output_redirect_source.txt";
+    const char *result_path = "/apps/shell_output_redirect_result.txt";
+    static const char source_text[] = "alpha\nbeta\n";
+    (void)storage__remove(source_path);
+    (void)storage__remove(result_path);
+    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
+    size_t written = 0;
+    if (storage__open(
+            source_path, BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE | BRUCE_STORAGE_OPEN_TRUNCATE, &file
+        ) != BRUCE_OK ||
+        storage__write(file, source_text, sizeof(source_text) - 1, &written) != BRUCE_OK ||
+        written != sizeof(source_text) - 1 || storage__close(file) != BRUCE_OK) {
+        if (file != BRUCE_FILE_ID_INVALID) (void)storage__close(file);
+        (void)storage__remove(source_path);
+        printf("[selftest] shell/output-redirect: could not stage fixture\n");
+        return false;
+    }
+
+    shell_state_t state;
+    shell__state_init(&state);
+    char command[160];
+    snprintf(command, sizeof(command), "cat %s > %s", source_path, result_path);
+    int status_truncate = shell__execute_line(&state, command);
+    snprintf(command, sizeof(command), "cat %s >> %s", source_path, result_path);
+    int status_append = shell__execute_line(&state, command);
+
+    /* Snapshot the file right here, before the failing command below
+     * overwrites it -- reading it any later would just observe that
+     * command's own (empty, see below) result instead of this one's. */
+    char after_append[64] = {0};
+    size_t after_append_size = 0;
+    bruce_result_t read_after_append = BRUCE_ERR_NOT_FOUND;
+    if (storage__open(result_path, BRUCE_STORAGE_OPEN_READ, &file) == BRUCE_OK) {
+        read_after_append = storage__read(file, after_append, sizeof(after_append) - 1, &after_append_size);
+        (void)storage__close(file);
+    }
+
+    /* A redirected external command that fails still creates/truncates the
+     * target file, same as bash -- exercised by redirecting a command name
+     * that can't even be launched (rather than one that launches fine and
+     * fails internally, e.g. "cat" on a missing path: this shell has no
+     * separate stderr, so a launched command's own error text -- like cat's
+     * "cat: PATH: error N" -- goes through the same stdout its normal output
+     * would and lands in the file same as any other captured output; only a
+     * command that never launches at all writes nothing) onto the same
+     * result path a third time, and confirming it comes back empty rather
+     * than untouched. */
+    snprintf(command, sizeof(command), "shell_output_redirect_no_such_command > %s", result_path);
+    int status_fail = shell__execute_line(&state, command);
+    shell__state_free(&state);
+
+    char after_fail[8] = {0};
+    size_t after_fail_size = 1; /* not 0, so a read failure doesn't look like "confirmed empty" below */
+    bruce_result_t read_after_fail = BRUCE_ERR_NOT_FOUND;
+    if (storage__open(result_path, BRUCE_STORAGE_OPEN_READ, &file) == BRUCE_OK) {
+        read_after_fail = storage__read(file, after_fail, sizeof(after_fail), &after_fail_size);
+        (void)storage__close(file);
+    }
+    (void)storage__remove(source_path);
+    (void)storage__remove(result_path);
+
+    /* "\r\n", not "\n" -- the same routed-session line-ending convention
+     * documented on selftest__run_shell_pipe_redirect_case()'s own
+     * expected[] applies here too: a child's stdout crosses the same
+     * console-style stdio session either way. */
+    static const char expected_after_append[] = "alpha\r\nbeta\r\nalpha\r\nbeta\r\n";
+    bool ok = status_truncate == 0 && status_append == 0 && status_fail != 0 && read_after_append == BRUCE_OK &&
+              after_append_size == sizeof(expected_after_append) - 1 &&
+              memcmp(after_append, expected_after_append, sizeof(expected_after_append) - 1) == 0 &&
+              read_after_fail == BRUCE_OK && after_fail_size == 0;
+    if (!ok) {
+        printf(
+            "[selftest] shell/output-redirect: status=%d,%d,%d append_size=%u fail_size=%u\n", status_truncate,
+            status_append, status_fail, (unsigned)after_append_size, (unsigned)after_fail_size
+        );
+    }
+    printf("[selftest] shell/output-redirect: %s\n", ok ? "OK" : "failed");
+    return ok;
+}
+
+/* Exercises "cmd < file" -- shell_executor__external_input_redirected() in
+ * shell_executor.c, which reads `file` in full and feeds it to the command's
+ * stdin via shell_executor__pipe_write() (the same "--stdin-size N"-fed
+ * mechanism a "|" pipe destination already uses). The one content check runs
+ * as a spawned "shell -c ..." child with its own routed stdio session, the
+ * same pattern (and for the same reason -- see its own doc comment)
+ * selftest__run_shell_pipe_redirect_case() uses, and combines "<" with ">" so
+ * the result lands in a file this can read back rather than needing to
+ * capture a live relay; the parse/dispatch-rejection checks below it need no
+ * such session since they never reach shell_executor__pipe_write() at all. */
+bool selftest__run_shell_input_redirect_case(void) {
+    const char *source_path = "/apps/shell_input_redirect_source.txt";
+    const char *result_path = "/apps/shell_input_redirect_result.txt";
+    static const char source_text[] = "line1\nline2\nline3\n";
+    (void)storage__remove(source_path);
+    (void)storage__remove(result_path);
+    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
+    size_t written = 0;
+    if (storage__open(
+            source_path, BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE | BRUCE_STORAGE_OPEN_TRUNCATE, &file
+        ) != BRUCE_OK ||
+        storage__write(file, source_text, sizeof(source_text) - 1, &written) != BRUCE_OK ||
+        written != sizeof(source_text) - 1 || storage__close(file) != BRUCE_OK) {
+        if (file != BRUCE_FILE_ID_INVALID) (void)storage__close(file);
+        (void)storage__remove(source_path);
+        printf("[selftest] shell/input-redirect: could not stage fixture\n");
+        return false;
+    }
+
+    char command[160];
+    snprintf(command, sizeof(command), "-c \"head -n2 < %s > %s\"", source_path, result_path);
+    int status = selftest__shell_run_pipe_command(command);
+
+    char result[64] = {0};
+    size_t result_size = 0;
+    bruce_result_t read_result = BRUCE_ERR_NOT_FOUND;
+    if (storage__open(result_path, BRUCE_STORAGE_OPEN_READ, &file) == BRUCE_OK) {
+        read_result = storage__read(file, result, sizeof(result) - 1, &result_size);
+        (void)storage__close(file);
+    }
+    (void)storage__remove(result_path);
+
+    shell_state_t state;
+    shell__state_init(&state);
+    bool rejections =
+        /* No such file -- caught before any process launch, so this doesn't
+         * need a routed session either. */
+        shell__execute_line(&state, "cat < /apps/shell_input_redirect_missing.txt") == 1 &&
+        /* A builtin ("echo") can't be redirected, "<" included -- same
+         * "requires an external command" rule ">" already had. */
+        shell__execute_line(&state, "echo hi < /apps/shell_input_redirect_missing.txt") == 2 &&
+        /* At most one "<" per command, same as ">" (SHELL__WORD_MAX etc.
+         * aside, this is a pure parse-time check -- no file even needs to
+         * exist for it to fire). */
+        shell__execute_line(&state, "cat < a < b") == 2 &&
+        /* "<" and a heredoc marker both claim the same command's stdin. */
+        shell__execute_line(&state, "cat < a <<EOF") == 2;
+    shell__state_free(&state);
+    (void)storage__remove(source_path);
+
+#if CONFIG_BRUCE_QEMU_TEST_MODE
+    bool ok = status == 0 && read_result == BRUCE_OK && result_size > 0 && rejections;
+#else
+    static const char expected[] = "line1\r\nline2\r\n";
+    bool ok = status == 0 && read_result == BRUCE_OK && result_size == sizeof(expected) - 1 &&
+              memcmp(result, expected, sizeof(expected) - 1) == 0 && rejections;
+#endif
+    if (!ok) {
+        printf(
+            "[selftest] shell/input-redirect: status=%d read=%d size=%u rejections=%d\n", status, read_result,
+            (unsigned)result_size, rejections
+        );
+    }
+    printf("[selftest] shell/input-redirect: %s\n", ok ? "OK" : "failed");
+    return ok;
+}
+
+/* Exercises "<<DELIM"/"<<-DELIM"/"<<'DELIM'" heredocs, script-file-only per
+ * this feature's scope (see shell_app.c's SHELL_APP__MAX_HEREDOCS doc
+ * comment): a script staged at `script_path` covers an unquoted delimiter
+ * (body gets $expanded), a single-quoted one (body stays literal), and
+ * "<<-" (leading tabs stripped from both the body and the terminator line),
+ * each redirecting the heredoc'd "head"'s output to its own result file so
+ * this can read it back afterward -- run as a spawned "shell <path>" child
+ * with a routed session, the same reasoning as
+ * selftest__run_shell_input_redirect_case() above. "head" (not "cat") reads
+ * the heredoc body: this shell's "cat" only ever reads a named file (a
+ * required argument, see bnu_cat_app_main() in bnu_fs_app.c) and has no
+ * stdin mode at all, so it can never be the target of a "<"/heredoc; "head"
+ * defaults to stdin when given no file, the same as the other bnu text tools
+ * a piped/redirected source can target. Each heredoc here is also combined
+ * with ">", the one case that still buffers instead of streaming (see
+ * shell_executor__external_with_input()'s own doc comment), so content is
+ * checked under the same CONFIG_BRUCE_QEMU_TEST_MODE relaxation the other
+ * memory__external_malloc()-backed-capture tests already use. */
+bool selftest__run_shell_heredoc_case(void) {
+    const char *script_path = "/apps/shell_heredoc_script.sh";
+    const char *expand_path = "/apps/shell_heredoc_result_expand.txt";
+    const char *literal_path = "/apps/shell_heredoc_result_literal.txt";
+    const char *striptabs_path = "/apps/shell_heredoc_result_striptabs.txt";
+    (void)storage__remove(script_path);
+    (void)storage__remove(expand_path);
+    (void)storage__remove(literal_path);
+    (void)storage__remove(striptabs_path);
+
+    char script[512];
+    snprintf(
+        script, sizeof(script),
+        "x=world\n"
+        "head <<EOF > %s\n"
+        "hello $x\n"
+        "EOF\n"
+        "head <<'EOF' > %s\n"
+        "literal $x\n"
+        "EOF\n"
+        "head <<-EOF > %s\n"
+        "\ttabbed\n"
+        "\tEOF\n",
+        expand_path, literal_path, striptabs_path
+    );
+    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
+    size_t written = 0;
+    size_t script_length = strlen(script);
+    if (storage__open(
+            script_path, BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE | BRUCE_STORAGE_OPEN_TRUNCATE, &file
+        ) != BRUCE_OK ||
+        storage__write(file, script, script_length, &written) != BRUCE_OK || written != script_length ||
+        storage__close(file) != BRUCE_OK) {
+        if (file != BRUCE_FILE_ID_INVALID) (void)storage__close(file);
+        (void)storage__remove(script_path);
+        printf("[selftest] shell/heredoc: could not stage fixture\n");
+        return false;
+    }
+
+    int status = -1;
+    bruce_stdio_session_t session = BRUCE_STDIO_SESSION_INVALID;
+    if (stdio__session_create(&session) == BRUCE_OK && stdio__session_route_children(session) == BRUCE_OK) {
+        int launched = app_runner__run("shell", script_path, BRUCE_LAUNCH_BACKGROUND);
+        (void)stdio__session_route_children(BRUCE_STDIO_SESSION_INVALID);
+        if (launched > 0) {
+            bruce_process_status_t proc_status;
+            if (process__wait_status((bruce_process_id_t)launched, 5000, &proc_status) == BRUCE_OK &&
+                proc_status.reason == BRUCE_PROCESS_EXITED) {
+                status = proc_status.exit_code;
+            }
+        }
+    }
+    (void)stdio__session_close(session);
+    (void)storage__remove(script_path);
+
+    char expand_result[32] = {0};
+    size_t expand_size = 0;
+    bruce_result_t read_expand = BRUCE_ERR_NOT_FOUND;
+    if (storage__open(expand_path, BRUCE_STORAGE_OPEN_READ, &file) == BRUCE_OK) {
+        read_expand = storage__read(file, expand_result, sizeof(expand_result) - 1, &expand_size);
+        (void)storage__close(file);
+    }
+    char literal_result[32] = {0};
+    size_t literal_size = 0;
+    bruce_result_t read_literal = BRUCE_ERR_NOT_FOUND;
+    if (storage__open(literal_path, BRUCE_STORAGE_OPEN_READ, &file) == BRUCE_OK) {
+        read_literal = storage__read(file, literal_result, sizeof(literal_result) - 1, &literal_size);
+        (void)storage__close(file);
+    }
+    char striptabs_result[32] = {0};
+    size_t striptabs_size = 0;
+    bruce_result_t read_striptabs = BRUCE_ERR_NOT_FOUND;
+    if (storage__open(striptabs_path, BRUCE_STORAGE_OPEN_READ, &file) == BRUCE_OK) {
+        read_striptabs = storage__read(file, striptabs_result, sizeof(striptabs_result) - 1, &striptabs_size);
+        (void)storage__close(file);
+    }
+    (void)storage__remove(expand_path);
+    (void)storage__remove(literal_path);
+    (void)storage__remove(striptabs_path);
+
+#if CONFIG_BRUCE_QEMU_TEST_MODE
+    bool ok = status == 0 && read_expand == BRUCE_OK && expand_size > 0 && read_literal == BRUCE_OK &&
+              literal_size > 0 && read_striptabs == BRUCE_OK && striptabs_size > 0;
+#else
+    static const char expected_expand[] = "hello world\r\n";
+    static const char expected_literal[] = "literal $x\r\n";
+    static const char expected_striptabs[] = "tabbed\r\n";
+    bool ok = status == 0 && read_expand == BRUCE_OK && expand_size == sizeof(expected_expand) - 1 &&
+              memcmp(expand_result, expected_expand, sizeof(expected_expand) - 1) == 0 && read_literal == BRUCE_OK &&
+              literal_size == sizeof(expected_literal) - 1 &&
+              memcmp(literal_result, expected_literal, sizeof(expected_literal) - 1) == 0 &&
+              read_striptabs == BRUCE_OK && striptabs_size == sizeof(expected_striptabs) - 1 &&
+              memcmp(striptabs_result, expected_striptabs, sizeof(expected_striptabs) - 1) == 0;
+#endif
+    if (!ok) {
+        printf(
+            "[selftest] shell/heredoc: status=%d expand=%d/%u literal=%d/%u striptabs=%d/%u\n", status, read_expand,
+            (unsigned)expand_size, read_literal, (unsigned)literal_size, read_striptabs, (unsigned)striptabs_size
+        );
+    }
+    printf("[selftest] shell/heredoc: %s\n", ok ? "OK" : "failed");
+    return ok;
+}
+
 /* tr and tee (see bnu_text_app.c) have no file-argument mode at all -- like
  * real tr/tee, they only ever read piped stdin -- so unlike bnu_test.c's
  * other bnu_*_app_main() fixtures, calling them directly with a

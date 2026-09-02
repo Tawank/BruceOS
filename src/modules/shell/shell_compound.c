@@ -788,10 +788,10 @@ static int shell_compound__run_while(shell_state_t *state, const shell_plan_t *p
     return result;
 }
 
-int shell_compound__run(shell_state_t *state, const char *text) {
+int shell_compound__run(shell_state_t *state, const char *text, char *const *heredoc_bodies, size_t heredoc_count) {
     shell_plan_t plan = {0};
     const char *error = NULL;
-    if (shell_parser__plan(text, &plan, &error) != 0) {
+    if (shell_parser__plan(text, &plan, heredoc_bodies, heredoc_count, &error) != 0) {
         shell_parser__plan_free(&plan);
         stdio__printf("shell: %s\n", error != NULL ? error : "syntax error");
         state->last_status = 2;
@@ -1032,7 +1032,14 @@ int shell_compound__call_function(shell_state_t *state, int argc, char **argv) {
     shell_local_frame_t *saved_frame = state->local_frame;
     state->local_frame = &frame;
 
-    int status = shell_compound__run(state, body);
+    /* NULL/0: a function body is re-parsed fresh from its stored text on
+     * every call (see shell_compound__define_function() above), so any
+     * heredoc marker in it has no body left to attach -- shell_parser__plan()
+     * reports that plainly ("heredoc ... not supported here") rather than
+     * this silently running the command with no stdin at all. Only the one
+     * top-level shell_compound__run() call in shell_app.c's
+     * shell__run_script() currently ever passes real heredoc bodies. */
+    int status = shell_compound__run(state, body, NULL, 0);
 
     /* Unwind in reverse declaration order, restoring each localized name to
      * whatever it held just before this call's first "local NAME" -- or

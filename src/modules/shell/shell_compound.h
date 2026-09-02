@@ -15,8 +15,11 @@
 /* Parses and runs `text` -- one logical line, or a whole multi-line
  * if/fi or function block already assembled by the caller (see
  * shell_compound__pending() below). This is what shell__execute_line() and
- * a function call's body both run through. */
-int shell_compound__run(shell_state_t *state, const char *text);
+ * a function call's body both run through. `heredoc_bodies`/`heredoc_count`
+ * are forwarded to shell_parser__plan() as-is (see its own doc comment in
+ * shell_parser.h) -- pass `NULL, 0` when `text` is known to carry no heredoc
+ * of its own, which is every caller except shell_app.c's shell__run_script(). */
+int shell_compound__run(shell_state_t *state, const char *text, char *const *heredoc_bodies, size_t heredoc_count);
 
 /* True if `text` (everything accumulated so far, physical lines joined by a
  * real '\n') is not yet a complete, well-formed unit -- an open quote, an

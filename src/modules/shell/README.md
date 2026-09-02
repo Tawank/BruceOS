@@ -52,10 +52,9 @@ definitions) by raw-text keyword matching in command position.
   assignment inside it (`$((x = 5))`) is a real side effect on `$x` here, not
   something scoped to the expansion.
 - **Not implemented:** brace expansion (`{a,b}`), tilde expansion (`~`),
-  pathname globbing (`*`, `?`, `[...]`), `$@`/`$*`, `$$`, here-docs/here-
-  strings, and input redirection (`<` is rejected with a parse error outside
-  of `((...))`; see the Redirection section below for what `>`/`>>` do
-  support).
+  pathname globbing (`*`, `?`, `[...]`), `$@`/`$*`, `$$`, and here-strings
+  (`<<<`). Here-docs (`<<`) and input redirection (`<`) *are* implemented —
+  see the Redirection section below.
 
 **Ctrl+C** -- `terminal_app.c` turns it into a real `SIGINT` (`process__signal`)
 on the shell rather than forwarding it as a byte, like a cooked tty's INTR
@@ -84,34 +83,55 @@ line it just deletes the character under the cursor, like Delete.
 - All builtin names are reserved as command words (see
   `s_shell_builtin_names[]` in `shell_builtins.c`).
 
-**Redirection — `>` / `>>`** (`shell_parser.c`, `shell_executor.c`)
+**Redirection — `>` / `>>` / `<` / here-docs** (`shell_parser.c`,
+`shell_executor.c`, `shell_app.c`)
 - A single, trailing `> file` or `>> file` on an **external command** (not a
   builtin, not a shell function): `>` truncates/creates the file, `>>`
-  creates/appends. The target undergoes the same quoting/escaping/`$`
-  expansion as any other word (`wifi scan >> "$LOG_DIR/wifi.txt"` works), and
-  a relative target resolves against `$PWD` the same way `cd`'s argument
-  does. A bare `> file` / `>> file` with no command at all just
-  creates/truncates the file, same as bash's `: > file` idiom.
-- Implementation: the whole external command's stdout is captured into an
-  in-memory buffer (the same mechanism `|` piping uses — see below) and
-  written to the file once the command exits, rather than streaming to the
-  file as the command runs. Consequently, like a pipe's producer side, any
-  `NAME=value` assignment prefixed onto the redirected command is dropped
-  (not passed to the child) and the command always runs to completion before
-  its output is written — there is no live/streaming redirection.
-- Only one output redirection per command is recognized, and it must trail
-  the command (`cmd arg1 arg2 > file`, not `cmd > file arg2`); a second `>`
-  or trailing text after the target is a syntax error rather than being
-  silently misparsed.
+  creates/appends. A single, trailing `< file` is likewise supported, feeding
+  the file's whole content to the command's stdin, and can be combined with a
+  `>`/`>>` on the same command (`sort < in.txt > out.txt`). Either target
+  undergoes the same quoting/escaping/`$` expansion as any other word
+  (`wifi scan >> "$LOG_DIR/wifi.txt"` works), and a relative target resolves
+  against `$PWD` the same way `cd`'s argument does. A bare `> file` /
+  `>> file` with no command at all just creates/truncates the file, same as
+  bash's `: > file` idiom; a bare `< file` with no command just checks the
+  file can be opened.
+- Implementation: a plain `>`/`>>` redirection with no `<`/here-doc input
+  streams the external command's stdout straight to the file as it runs
+  (`shell_executor__stream_external_to_file()`), rather than buffering it
+  first — so, unlike a `NAME=value`-prefixed command, it keeps whatever
+  partial output the command wrote before exiting nonzero, matching bash. A
+  `<`/here-doc-fed command combined with a `>`/`>>` is the one case that
+  still buffers the output in memory first and writes it out once the
+  command finishes (`shell_executor__external_with_input()`), the same
+  mechanism `|` piping uses — so it shares that path's existing
+  `NAME=value`-dropped, discard-partial-output-on-failure limitations. A
+  `<`/here-doc-fed command with no `>`/`>>` of its own instead relays its
+  output live, exactly like a non-redirected external command.
+- Only one input and one output redirection per command are recognized, and
+  they must trail the command (`cmd arg1 arg2 > file`, not
+  `cmd > file arg2`); a second `>`/`<`/here-doc marker, or trailing text
+  after a target, is a syntax error rather than being silently misparsed. A
+  command can carry `<` or a here-doc, never both (they're two ways of
+  sourcing the same stdin).
+- Here-docs (`<<DELIM`, `<<-DELIM`, and their single-/double-quoted-delimiter
+  forms) are **script-files-only** (`shell__run_script()` in `shell_app.c`):
+  a script's body-collection reads the following raw lines up to the
+  terminator before ordinary parsing resumes, the same way a real shell's
+  line reader would, but the interactive prompt and a re-parsed function body
+  have no such reader, so a `<<` there reports a clear "not supported here"
+  error rather than misbehaving. An unquoted or double-quoted delimiter
+  `$`-expands the body the way a double-quoted word would (substitutions run,
+  but the result is never word-split or globbed); a single-quoted delimiter
+  keeps the body completely literal. `<<-` strips each body line's (and the
+  terminator's) leading tabs before comparing, matching bash.
 - Redirecting a builtin, a shell function, or a standalone `((...))`
-  statement is rejected with an error (`shell: output redirection currently
-  requires an external command`) rather than doing nothing silently.
-- **Not implemented:** input redirection (`<`, rejected with a parse error),
-  multiple/chained redirections, numbered file descriptors (`2>`), here-docs,
-  and streaming (a redirected command's output is only written to the file
-  after the whole command has finished, and only if it exited successfully —
-  a command that writes partial output before exiting nonzero has that
-  partial output discarded, not written).
+  statement is rejected with an error (`shell: redirection currently
+  requires an external command`) rather than doing nothing silently, and so
+  is a `<`/here-doc on a piped command's stage.
+- **Not implemented:** here-docs outside a script file, here-strings
+  (`<<<`), multiple/chained redirections, and numbered file descriptors
+  (`2>`).
 
 **Arithmetic — `((...))`** (`shell_arith.c`, `shell_arith.h`)
 - A standalone recursive-descent evaluator, usable as its own statement,
@@ -182,9 +202,8 @@ line it just deletes the character under the cursor, like Delete.
 ## What's left to implement
 
 Roughly in order of how often bash scripts actually use them:
-- Input redirection (`<`) and here-docs; streaming (rather than
-  capture-then-write) `>`/`>>` output redirection; redirecting a builtin or
-  shell function's output.
+- Redirecting a builtin or shell function's output (still requires an
+  external command — see the Redirection section above).
 - Pathname globbing and brace expansion.
 - `case`/`esac`.
 - `$@`, `$*`, `$$`, `$!`.
@@ -290,7 +309,8 @@ just skipping the rest of the current row.
 against real firmware output (via `stdio__session_*` + `app_runner__run`):
 `selftest__run_shell_language_case`, `..._script_case`,
 `..._control_flow_case`, `..._local_case`, `..._command_substitution_case`,
-`..._arith_word_case`, `..._multiline_case`,
+`..._arith_word_case`, `..._output_redirect_case`, `..._input_redirect_case`,
+`..._heredoc_case`, `..._multiline_case`,
 `..._loops_case` (arithmetic,
 both `for` forms, `while`, `break`, `break N`, and the break/catch-up
 regression), `..._read_case`, `..._stdio_inheritance_case`,

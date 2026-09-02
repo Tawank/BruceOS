@@ -430,42 +430,143 @@ static int shell_executor__resolve_redirect_target(
     return 0;
 }
 
-/* Creates (or appends to) `path` and writes `buffer` to it in full. Used for
- * "cmd > file" / "cmd >> file" -- see shell_executor__external_redirected()
- * below -- and for a bare "> file" with no command at all, which just
- * truncates/creates an empty file, matching bash. */
-static bool shell_executor__write_file(const char *path, bool append, const shell_executor__buffer_t *buffer) {
-    uint32_t flags = BRUCE_STORAGE_OPEN_CREATE | (append ? BRUCE_STORAGE_OPEN_APPEND
-                                                          : (BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_TRUNCATE));
-    bruce_file_id_t file;
-    if (storage__open(path, flags, &file) != BRUCE_OK) return false;
-    bool ok = true;
-    if (buffer->length > 0) {
-        size_t offset = 0;
-        while (ok && offset < buffer->length) {
-            size_t written = 0;
-            bruce_result_t result =
-                storage__write(file, (const char *)buffer->data + offset, buffer->length - offset, &written);
-            if (result != BRUCE_OK || written == 0) {
-                ok = false;
-                break;
-            }
-            offset += written;
-        }
+static uint32_t shell_executor__redirect_open_flags(bool append) {
+    return BRUCE_STORAGE_OPEN_CREATE |
+           (append ? BRUCE_STORAGE_OPEN_APPEND : (BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_TRUNCATE));
+}
+
+/* Writes `size` bytes of `data` to the already-open `file`, retrying as
+ * needed until every byte is accounted for (a single storage__write() call
+ * isn't guaranteed to take it all at once). Shared by shell_executor__write_file()
+ * (a whole captured buffer at once) and shell_executor__stream_external_to_file()
+ * (one output chunk at a time) below. */
+static bool shell_executor__write_chunk(bruce_file_id_t file, const void *data, size_t size) {
+    size_t offset = 0;
+    while (offset < size) {
+        size_t written = 0;
+        bruce_result_t result = storage__write(file, (const char *)data + offset, size - offset, &written);
+        if (result != BRUCE_OK || written == 0) return false;
+        offset += written;
     }
+    return true;
+}
+
+/* Creates (or appends to) `path` and writes `buffer` to it in full. Used for
+ * a bare "> file" with no command at all, which just truncates/creates an
+ * empty file, matching bash, and by shell_executor__external_with_input()
+ * below for the one redirected-output case that still has to buffer first
+ * (an external command with both a "<"/heredoc input *and* a ">"/">>"
+ * output). A plain "cmd > file"/"cmd >> file" instead streams straight to
+ * the file as the command runs -- see shell_executor__stream_external_to_file()
+ * and shell_executor__external_redirected(), neither of which goes through
+ * this function at all. */
+static bool shell_executor__write_file(const char *path, bool append, const shell_executor__buffer_t *buffer) {
+    bruce_file_id_t file;
+    if (storage__open(path, shell_executor__redirect_open_flags(append), &file) != BRUCE_OK) return false;
+    bool ok = buffer->length == 0 || shell_executor__write_chunk(file, buffer->data, buffer->length);
     (void)storage__close(file);
     return ok;
 }
 
-/* "cmd > file" / "cmd >> file" for an external command: captures its stdout
- * the same way a pipe's producer side does (shell_executor__capture_external()
- * -- always foreground, and per-command NAME=value assignments are dropped,
- * the same pre-existing limitation a pipe producer already has) and writes
- * the result to `path` once the command finishes. Like bash, the file is
- * still created/truncated even if the command's own exit status is nonzero;
- * unlike bash, output the command wrote before exiting nonzero is not
- * preserved (shell_executor__capture_external() itself discards the buffer
- * on a nonzero exit, same as the pipe path it's shared with). */
+/* Reads the whole content of `path` into a fresh external-memory-backed
+ * buffer (see shell_executor__buffer_append()'s own doc comment on why
+ * that backing is used for this shell's captured/fed data in general).
+ * Used for "cmd < file" -- see shell_executor__external_input_redirected()
+ * below. Returns false (leaving *out_buffer untouched) if `path` can't be
+ * opened for reading, or on any read/out-of-memory error partway through --
+ * in the latter case whatever had been read so far is freed rather than
+ * left dangling. */
+static bool shell_executor__read_file(const char *path, shell_executor__buffer_t *out_buffer) {
+    bruce_file_id_t file;
+    if (storage__open(path, BRUCE_STORAGE_OPEN_READ, &file) != BRUCE_OK) return false;
+    shell_executor__buffer_t buffer = {0};
+    bool ok = true;
+    for (;;) {
+        char chunk[256];
+        size_t size = 0;
+        if (storage__read(file, chunk, sizeof(chunk), &size) != BRUCE_OK) {
+            ok = false;
+            break;
+        }
+        if (size == 0) break;
+        if (!shell_executor__buffer_append(&buffer, chunk, size)) {
+            ok = false;
+            break;
+        }
+    }
+    (void)storage__close(file);
+    if (!ok) {
+        shell_executor__buffer_free(&buffer);
+        return false;
+    }
+    *out_buffer = buffer;
+    return true;
+}
+
+/* shell_executor__capture_external()'s counterpart for "cmd > file"/
+ * "cmd >> file": runs the same way (a fresh stdio session, foreground,
+ * per-command NAME=value assignments dropped -- the same pre-existing
+ * limitation a pipe producer already has), but writes each output chunk to
+ * the already-open `file` as it arrives instead of buffering the whole
+ * thing in external memory first. Unlike shell_executor__capture_external()
+ * (which this file's other redirected-output/pipe/substitution paths still
+ * use, and which discards its buffer on a nonzero exit), this keeps
+ * whatever partial output the command wrote before exiting nonzero --
+ * matching bash's own "> file" behavior, and no longer subject to that
+ * memory__external_malloc()-backed buffer's QEMU swap-backend unreliability
+ * (see shell_executor__run_substitution()'s doc comment) since nothing is
+ * captured there at all. Returns the command's own exit status, or -1 if a
+ * write to `file` failed partway through (distinguishable from every real
+ * exit/signal status, both of which are non-negative). */
+static int shell_executor__stream_external_to_file(int argc, char **argv, bruce_file_id_t file) {
+    bruce_stdio_session_t session = BRUCE_STDIO_SESSION_INVALID;
+    if (stdio__session_create(&session) != BRUCE_OK) return 1;
+    if (stdio__session_route_children(session) != BRUCE_OK) {
+        (void)stdio__session_close(session);
+        return 1;
+    }
+    int launched = shell_executor__launch_external(argc, argv, NULL, NULL, 0, BRUCE_LAUNCH_FOREGROUND);
+    (void)stdio__session_route_children(BRUCE_STDIO_SESSION_INVALID);
+    if (launched <= 0) {
+        (void)stdio__session_close(session);
+        return 1;
+    }
+    bruce_process_status_t status = {0};
+    bool complete = false;
+    bool write_failed = false;
+    while (!complete) {
+        char chunk[256];
+        size_t size = 0;
+        while (stdio__session_read_output(session, chunk, sizeof(chunk), &size) == BRUCE_OK) {
+            if (size == 0) continue;
+            if (!write_failed && !shell_executor__write_chunk(file, chunk, size)) write_failed = true;
+        }
+        bruce_result_t waited = process__wait_status((bruce_process_id_t)launched, 0, &status);
+        complete = waited == BRUCE_OK;
+        if (!complete && waited != BRUCE_ERR_TIMEOUT) break;
+        if (!complete) (void)runtime__delay(1);
+    }
+    /* Same "drain whatever arrived between the last read and the process
+     * actually exiting" tail shell_executor__capture_external() has. */
+    char chunk[256];
+    size_t size = 0;
+    while (stdio__session_read_output(session, chunk, sizeof(chunk), &size) == BRUCE_OK) {
+        if (size == 0) continue;
+        if (!write_failed && !shell_executor__write_chunk(file, chunk, size)) write_failed = true;
+    }
+    (void)stdio__session_close(session);
+    if (write_failed) return -1;
+    if (!complete) return 1;
+    if (status.reason == BRUCE_PROCESS_TERMINATED || status.reason == BRUCE_PROCESS_KILLED) {
+        return 128 + (int)status.signal;
+    }
+    return status.exit_code < 0 ? 1 : status.exit_code & 0xff;
+}
+
+/* "cmd > file" / "cmd >> file" for an external command with no "<"/heredoc
+ * input of its own -- see shell_executor__stream_external_to_file() above
+ * for how its output actually reaches `path`. Like bash, the file is still
+ * created/truncated even if the command's own exit status is nonzero. */
 static int shell_executor__external_redirected(
     shell_state_t *state, int argc, char **argv, const shell_command_t *command
 ) {
@@ -475,13 +576,19 @@ static int shell_executor__external_redirected(
         stdio__printf("shell: %s\n", error != NULL ? error : "redirection error");
         return 2;
     }
-    shell_executor__buffer_t buffer = {0};
-    int status = shell_executor__capture_external(argc, argv, &buffer);
-    if (!shell_executor__write_file(path, command->redirect == SHELL_REDIRECT_APPEND, &buffer)) {
-        stdio__printf("shell: %s: write failed\n", path);
-        if (status == 0) status = 1;
+    bruce_file_id_t file;
+    if (storage__open(path, shell_executor__redirect_open_flags(command->redirect == SHELL_REDIRECT_APPEND), &file) !=
+        BRUCE_OK) {
+        stdio__printf("shell: %s: cannot open\n", path);
+        memory__free(path);
+        return 2;
     }
-    shell_executor__buffer_free(&buffer);
+    int status = shell_executor__stream_external_to_file(argc, argv, file);
+    (void)storage__close(file);
+    if (status == -1) {
+        stdio__printf("shell: %s: write failed\n", path);
+        status = 1;
+    }
     memory__free(path);
     return status;
 }
@@ -721,6 +828,86 @@ static int shell_executor__pipe_write(
     return status;
 }
 
+/* "cmd < file" or "cmd <<DELIM"/"<<-DELIM" for an external command --
+ * `input` is the file's content or the (already expanded, unless the
+ * heredoc's delimiter was quoted) heredoc body respectively, fed to the
+ * command's stdin the exact same way a pipe producer's captured output
+ * would be (shell_executor__pipe_write() -- including its "--stdin-size N"
+ * convention any external program written to expect piped input already
+ * relies on). Always takes ownership of `input`, freeing it via
+ * shell_executor__pipe_write() even on an early exit below.
+ *
+ * When `command` carries no output redirect of its own, the command's own
+ * output is relayed live to the shell's stdio, exactly like a plain,
+ * non-redirected external command -- only its stdin came from somewhere
+ * other than a terminal. When it also has a ">"/">>" redirect, this is the
+ * one case that still buffers instead of streaming (see
+ * shell_executor__stream_external_to_file()'s own doc comment for the
+ * streaming path this does *not* get to use): the command's output is
+ * captured into memory via `pipe_write`'s own `capture` parameter -- the
+ * same mechanism shell_executor__pipeline() already relies on for
+ * "producer | consumer > file" -- and written out to the target file once
+ * it finishes, sharing that path's pre-existing memory__external_malloc()
+ * QEMU-swap-backend caveat and discard-on-out-of-memory behavior. */
+static int shell_executor__external_with_input(
+    shell_state_t *state, int argc, char **argv, const shell_command_t *command, shell_executor__buffer_t *input
+) {
+    if (command->redirect == SHELL_REDIRECT_NONE) return shell_executor__pipe_write(argc, argv, input, NULL);
+    const char *error = NULL;
+    char *path = NULL;
+    if (shell_executor__resolve_redirect_target(state, &command->redirect_target, &path, &error) != 0) {
+        stdio__printf("shell: %s\n", error != NULL ? error : "redirection error");
+        shell_executor__buffer_free(input);
+        return 2;
+    }
+    shell_executor__buffer_t capture = {0};
+    int status = shell_executor__pipe_write(argc, argv, input, &capture);
+    if (!shell_executor__write_file(path, command->redirect == SHELL_REDIRECT_APPEND, &capture)) {
+        stdio__printf("shell: %s: write failed\n", path);
+        if (status == 0) status = 1;
+    }
+    shell_executor__buffer_free(&capture);
+    memory__free(path);
+    return status;
+}
+
+/* "cmd < file" -- reads `file` in full (shell_executor__read_file()) and
+ * hands it to shell_executor__external_with_input() above. */
+static int shell_executor__external_input_redirected(
+    shell_state_t *state, int argc, char **argv, const shell_command_t *command
+) {
+    const char *error = NULL;
+    char *path = NULL;
+    if (shell_executor__resolve_redirect_target(state, &command->input_target, &path, &error) != 0) {
+        stdio__printf("shell: %s\n", error != NULL ? error : "redirection error");
+        return 2;
+    }
+    shell_executor__buffer_t input = {0};
+    bool ok = shell_executor__read_file(path, &input);
+    if (!ok) stdio__printf("shell: %s: cannot open\n", path);
+    memory__free(path);
+    if (!ok) return 1;
+    return shell_executor__external_with_input(state, argc, argv, command, &input);
+}
+
+/* "cmd <<DELIM"/"cmd <<-DELIM" -- copies the already-collected, already
+ * (unless quoted) $expanded heredoc body (see shell_command_t's own doc
+ * comment on `heredoc_body`) into a fresh buffer and hands it to
+ * shell_executor__external_with_input() above the same way a "<"-redirected
+ * file's content would be. */
+static int shell_executor__external_heredoc_redirected(
+    shell_state_t *state, int argc, char **argv, const shell_command_t *command
+) {
+    shell_executor__buffer_t input = {0};
+    size_t body_length = strlen(command->heredoc_body);
+    if (body_length > 0 && !shell_executor__buffer_append(&input, command->heredoc_body, body_length)) {
+        stdio__printf("shell: out of memory\n");
+        shell_executor__buffer_free(&input);
+        return 1;
+    }
+    return shell_executor__external_with_input(state, argc, argv, command, &input);
+}
+
 /* Runs a full "|"-chain of `count` (>= 2) commands, feeding each stage's
  * captured stdout to the next stage's stdin in turn: `commands[0]` is the
  * producer, `commands[count-1]` is the final destination, and everything
@@ -754,7 +941,9 @@ static int shell_executor__pipeline(shell_state_t *state, const shell_command_t 
     }
     bool source_is_echo = stage_argc[0] > 0 && strcmp(stage_words[0][0], "echo") == 0;
     bool invalid = false;
+    bool has_stage_input = false;
     for (size_t i = 0; i < count; ++i) {
+        if (commands[i].input_redirect || commands[i].heredoc_body != NULL) has_stage_input = true;
         if (stage_argc[i] == 0) {
             invalid = true;
         } else if (i == 0) {
@@ -765,6 +954,17 @@ static int shell_executor__pipeline(shell_state_t *state, const shell_command_t 
     }
     if (invalid) {
         stdio__printf("shell: pipes currently require an external producer and an external destination\n");
+        for (size_t i = 0; i < count; ++i) shell_parser__free_words(stage_words[i], stage_argc[i]);
+        return 2;
+    }
+    /* Every stage but the first already gets its stdin from the stage before
+     * it; a "<"/heredoc on one of those would have nowhere to go, and one on
+     * the first stage -- feeding it *instead* of piping into it -- isn't
+     * wired up here at all yet. Rejected outright rather than silently
+     * ignored (which is what would otherwise happen: nothing here ever
+     * consults commands[i].input_redirect/heredoc_body). */
+    if (has_stage_input) {
+        stdio__printf("shell: '<'/heredoc input is not supported on a piped command\n");
         for (size_t i = 0; i < count; ++i) shell_parser__free_words(stage_words[i], stage_argc[i]);
         return 2;
     }
@@ -855,6 +1055,8 @@ int shell_executor__page_help(void) {
                                        "  producer | filter | ... | consumer\n"
                                        "  external-command > file\n"
                                        "  external-command >> file\n"
+                                       "  external-command < file\n"
+                                       "  external-command <<DELIM ... DELIM (script files only)\n"
                                        "\n"
                                        "Operators:\n"
                                        "  ;    run commands in sequence\n"
@@ -863,8 +1065,8 @@ int shell_executor__page_help(void) {
                                        "  |    pipe external commands together, any number of hops\n"
                                        "  >    redirect an external command's output, truncating the file\n"
                                        "  >>   redirect an external command's output, appending to the file\n"
-                                       "\n"
-                                       "Input redirection ('<') is not supported.\n"
+                                       "  <    feed a file's content to an external command's stdin\n"
+                                       "  <<   feed a heredoc body to an external command's stdin (scripts only)\n"
                                        "\n"
                                        "Shell built-ins:\n";
     if (!shell_executor__buffer_append_text(&buffer, introduction)) goto out_of_memory;
@@ -963,10 +1165,34 @@ static int shell_executor__dispatch(shell_state_t *state, const shell_command_t 
             }
         }
         shell_executor__environment_free(&environment);
-        /* A bare "> file" / ">> file" with no command at all is valid, same
-         * as in bash: it just creates/truncates (or appends nothing to) the
-         * target file. */
-        if (command->redirect == SHELL_REDIRECT_NONE) return 0;
+        /* A bare "< file" / "> file" / ">> file" with no command at all is
+         * valid, same as in bash: "<" just checks the file opens for
+         * reading (bash itself does the same -- no command means nothing
+         * ever actually reads it), and ">"/">>" creates/truncates (or
+         * appends nothing to) the target file. A bare "<<DELIM" heredoc
+         * with no command is rejected instead: unlike a file, its body has
+         * already been read from the script by the time this runs (see
+         * shell_command_t's own doc comment on `heredoc_body`), so silently
+         * discarding it would be more surprising than useful. */
+        if (command->heredoc_body != NULL) {
+            stdio__printf("shell: heredoc with no command has no effect\n");
+            return 2;
+        }
+        bool ok = true;
+        if (command->input_redirect) {
+            const char *in_error = NULL;
+            char *in_path = NULL;
+            if (shell_executor__resolve_redirect_target(state, &command->input_target, &in_path, &in_error) != 0) {
+                stdio__printf("shell: %s\n", in_error != NULL ? in_error : "redirection error");
+                return 2;
+            }
+            bruce_file_id_t probe;
+            ok = storage__open(in_path, BRUCE_STORAGE_OPEN_READ, &probe) == BRUCE_OK;
+            if (ok) (void)storage__close(probe);
+            else stdio__printf("shell: %s: cannot open\n", in_path);
+            memory__free(in_path);
+        }
+        if (command->redirect == SHELL_REDIRECT_NONE) return ok ? 0 : 1;
         const char *error = NULL;
         char *path = NULL;
         if (shell_executor__resolve_redirect_target(state, &command->redirect_target, &path, &error) != 0) {
@@ -974,10 +1200,10 @@ static int shell_executor__dispatch(shell_state_t *state, const shell_command_t 
             return 2;
         }
         shell_executor__buffer_t empty = {0};
-        bool ok = shell_executor__write_file(path, command->redirect == SHELL_REDIRECT_APPEND, &empty);
-        if (!ok) stdio__printf("shell: %s: write failed\n", path);
+        bool write_ok = shell_executor__write_file(path, command->redirect == SHELL_REDIRECT_APPEND, &empty);
+        if (!write_ok) stdio__printf("shell: %s: write failed\n", path);
         memory__free(path);
-        return ok ? 0 : 1;
+        return ok && write_ok ? 0 : 1;
     }
     int remaining = argc - first_command;
     char **argv = words + first_command;
@@ -1003,10 +1229,16 @@ static int shell_executor__dispatch(shell_state_t *state, const shell_command_t 
     bool is_builtin = !is_function && shell_builtins__is_builtin(argv[0]);
     int result;
     uint64_t started_at = timed ? runtime__now() : 0;
-    if (command->redirect != SHELL_REDIRECT_NONE) {
+    bool redirected = command->redirect != SHELL_REDIRECT_NONE || command->input_redirect ||
+                       command->heredoc_body != NULL;
+    if (redirected) {
         if (is_function || is_builtin) {
-            stdio__printf("shell: output redirection currently requires an external command\n");
+            stdio__printf("shell: redirection currently requires an external command\n");
             result = 2;
+        } else if (command->input_redirect) {
+            result = shell_executor__external_input_redirected(state, remaining, argv, command);
+        } else if (command->heredoc_body != NULL) {
+            result = shell_executor__external_heredoc_redirected(state, remaining, argv, command);
         } else {
             result = shell_executor__external_redirected(state, remaining, argv, command);
         }
@@ -1073,7 +1305,7 @@ static bool shell_executor__starts_with_arith(const shell_command_t *command) {
 static int shell_executor__command(shell_state_t *state, const shell_command_t *command) {
     size_t inner_start, inner_len;
     if (shell_executor__is_arith_command(command, &inner_start, &inner_len)) {
-        if (command->redirect != SHELL_REDIRECT_NONE) {
+        if (command->redirect != SHELL_REDIRECT_NONE || command->input_redirect || command->heredoc_body != NULL) {
             stdio__printf("shell: redirection is not supported on '((...))'\n");
             return 2;
         }
