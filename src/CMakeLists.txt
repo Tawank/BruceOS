@@ -109,6 +109,7 @@ idf_component_register(SRCS
                     "core/wifi/wifi_common.c"
                      "core/http_server/http_server.c"
                      "modules/apps/apps_app.c"
+                     "modules/archive/archive_app.c"
                      "modules/bootanimation/bootanimation_app.c"
                      "modules/bruce_launcher/bruce_launcher_app.c"
                     "modules/bruce_launcher/bruce_launcher_config.c"
@@ -392,6 +393,11 @@ target_include_directories(bruce_sdk_builtin_apps_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/apps")
 
+add_library(bruce_sdk_builtin_archive_check OBJECT "modules/archive/archive_app.c")
+target_include_directories(bruce_sdk_builtin_archive_check PRIVATE
+                           "${CMAKE_CURRENT_LIST_DIR}"
+                           "${CMAKE_CURRENT_LIST_DIR}/modules/archive")
+
 add_library(bruce_sdk_builtin_bootanimation_check OBJECT "modules/bootanimation/bootanimation_app.c")
 target_include_directories(bruce_sdk_builtin_bootanimation_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
@@ -621,6 +627,7 @@ target_link_libraries(bruce_sdk_builtin_wasm_loader_check PRIVATE wasm-micro-run
 
 set(BRUCE_ARGS_SDK_CHECK_TARGETS
     bruce_sdk_builtin_apps_check
+    bruce_sdk_builtin_archive_check
     bruce_sdk_builtin_bnu_check
     bruce_sdk_builtin_clock_check
     bruce_sdk_builtin_config_check

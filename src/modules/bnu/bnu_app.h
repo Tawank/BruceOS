@@ -48,6 +48,5 @@ int bnu_gunzip_app_main(int argc, char **argv);
 int bnu_tar_app_main(int argc, char **argv);
 int bnu_zip_app_main(int argc, char **argv);
 int bnu_unzip_app_main(int argc, char **argv);
-int bnu_archive_app_main(int argc, char **argv);
 int bnu_archive_extract_app_main(int argc, char **argv);
 const char *bnu__get_working_directory(void);

@@ -103,6 +103,38 @@ bruce_result_t archive__tar_gz_list(const char *archive_path, bruce_archive_list
 bruce_result_t archive__tar_gz_extract(const char *archive_path, const char *dest_dir);
 
 /**
+ * @brief Extracts one entry - a file, or a directory's whole subtree - from a ".tar.gz" archive.
+ *
+ * Same entry-matching/relative-path/dest_dir/tar-slip rules as
+ * archive__zip_extract_entry(), for a ".tar.gz"/".tgz" archive.
+ *
+ * @param archive_path Archive to extract from.
+ * @param entry_name File or directory entry to extract.
+ * @param dest_dir Existing directory to extract into.
+ * @return BRUCE_ERR_NOT_FOUND if no entry matches entry_name.
+ * @permission storage
+ */
+bruce_result_t
+archive__tar_gz_extract_entry(const char *archive_path, const char *entry_name, const char *dest_dir);
+
+/**
+ * @brief Reads up to `buffer_size` - 1 bytes of a single ".tar.gz" file entry, for a lightweight preview.
+ *
+ * Same semantics as archive__zip_read_entry(), for a ".tar.gz"/".tgz" archive.
+ *
+ * @param archive_path Archive to read from.
+ * @param entry_name File entry to read; a directory entry is BRUCE_ERR_INVALID_ARGUMENT.
+ * @param buffer Caller-owned buffer to receive the entry's content.
+ * @param buffer_size Size of buffer in bytes.
+ * @param out_size Receives the entry's full uncompressed size (may exceed buffer_size - 1).
+ * @return BRUCE_ERR_NOT_FOUND if no entry matches entry_name.
+ * @permission storage
+ */
+bruce_result_t archive__tar_gz_read_entry(
+    const char *archive_path, const char *entry_name, char *buffer, size_t buffer_size, size_t *out_size
+);
+
+/**
  * @brief Creates a new ".zip" archive from a set of existing paths.
  *
  * Same entry-naming/recursion rules as archive__tar_gz_create(). Unlike
@@ -142,3 +174,43 @@ bruce_result_t archive__zip_list(const char *archive_path, bruce_archive_list_fn
  * @permission storage
  */
 bruce_result_t archive__zip_extract(const char *archive_path, const char *dest_dir);
+
+/**
+ * @brief Extracts one entry - a file, or a directory's whole subtree - from a ".zip" archive.
+ *
+ * `entry_name` matches an entry exactly (a file, e.g. "docs/readme.txt") or
+ * a directory (e.g. "docs", trailing '/' optional - also matches every
+ * entry nested under it, e.g. "docs/readme.txt", "docs/notes/todo.txt").
+ * Every matching entry lands under `dest_dir` at the same relative path
+ * archive__zip_extract() would have given it extracting the whole archive -
+ * this is exactly that, restricted to one subtree, not a "flatten into
+ * dest_dir" extract. Same "dest_dir must exist"/"zip-slip"-rejection/
+ * intermediate-directory rules as archive__zip_extract().
+ *
+ * @param archive_path Archive to extract from.
+ * @param entry_name File or directory entry to extract.
+ * @param dest_dir Existing directory to extract into.
+ * @return BRUCE_ERR_NOT_FOUND if no entry matches entry_name.
+ * @permission storage
+ */
+bruce_result_t archive__zip_extract_entry(const char *archive_path, const char *entry_name, const char *dest_dir);
+
+/**
+ * @brief Reads up to `buffer_size` - 1 bytes of a single ".zip" file entry, for a lightweight preview.
+ *
+ * NUL-terminates `buffer`. Nothing is written to storage - this isn't a
+ * substitute for archive__zip_extract_entry(), and content past
+ * `buffer_size` - 1 bytes is silently dropped (compare `*out_size` against
+ * `buffer_size` - 1 to detect that a preview was truncated).
+ *
+ * @param archive_path Archive to read from.
+ * @param entry_name File entry to read; a directory entry is BRUCE_ERR_INVALID_ARGUMENT.
+ * @param buffer Caller-owned buffer to receive the entry's content.
+ * @param buffer_size Size of buffer in bytes.
+ * @param out_size Receives the entry's full uncompressed size (may exceed buffer_size - 1).
+ * @return BRUCE_ERR_NOT_FOUND if no entry matches entry_name.
+ * @permission storage
+ */
+bruce_result_t archive__zip_read_entry(
+    const char *archive_path, const char *entry_name, char *buffer, size_t buffer_size, size_t *out_size
+);

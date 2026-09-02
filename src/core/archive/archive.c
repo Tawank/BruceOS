@@ -389,7 +389,24 @@ bruce_result_t archive__tar_gz_list(const char *archive_path, bruce_archive_list
 
 typedef struct {
     const char *dest_dir;
+    const char *filter; /* NULL = extract everything, see archive__entry_matches_filter() */
+    bool matched_any;
 } archive__extract_visitor_ctx_t;
+
+/* True if `name` (a raw tar entry name, e.g. "docs/readme.txt") is `filter`
+ * itself or nested under it as a path component - `filter` must have no
+ * trailing '/' (archive__tar_gz_extract_entry() strips one before calling
+ * in here). NULL matches everything, for archive__tar_gz_extract()'s
+ * whole-archive case. Same shape as archive_zip.c's
+ * archive__zip_name_matches_filter() - kept as its own copy rather than a
+ * shared helper since the two formats' entry-visiting code doesn't share
+ * any other plumbing either (see this file's own module doc comment). */
+static bool archive__entry_matches_filter(const char *name, const char *filter) {
+    if (filter == NULL) return true;
+    size_t filter_len = strlen(filter);
+    if (strncmp(name, filter, filter_len) != 0) return false;
+    return name[filter_len] == '\0' || name[filter_len] == '/';
+}
 
 /* Rejects an absolute entry name or one with a ".." path component -
  * without this, a crafted (or just buggy) archive could write outside
@@ -421,6 +438,8 @@ static bruce_result_t archive__ensure_parent_dirs(const char *path) {
 static bruce_result_t archive__extract_visitor(mtar_t *tar, const mtar_header_t *header, void *context) {
     archive__extract_visitor_ctx_t *ctx = (archive__extract_visitor_ctx_t *)context;
     if (!archive__entry_name_is_safe(header->name)) return BRUCE_ERR_INVALID_PATH;
+    if (!archive__entry_matches_filter(header->name, ctx->filter)) return BRUCE_OK;
+    ctx->matched_any = true;
 
     /* archive__add_directory() always writes a directory entry's name with
      * a trailing '/' - strip it so dest_path doesn't end up with one too. */
@@ -460,15 +479,110 @@ static bruce_result_t archive__extract_visitor(mtar_t *tar, const mtar_header_t 
     return result;
 }
 
-bruce_result_t archive__tar_gz_extract(const char *archive_path, const char *dest_dir) {
+static bruce_result_t
+archive__tar_gz_extract_filtered(const char *archive_path, const char *dest_dir, const char *filter) {
     if (archive_path == NULL || dest_dir == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
 
     char scratch_path[BRUCE_STORAGE_PATH_MAX];
     bruce_result_t result = archive__decompress_to_scratch(archive_path, scratch_path, sizeof(scratch_path));
     if (result != BRUCE_OK) return result;
 
-    archive__extract_visitor_ctx_t visitor_ctx = {.dest_dir = dest_dir};
+    archive__extract_visitor_ctx_t visitor_ctx = {.dest_dir = dest_dir, .filter = filter, .matched_any = false};
     result = archive__walk_scratch(scratch_path, archive__extract_visitor, &visitor_ctx);
     (void)storage__remove(scratch_path);
+    if (result == BRUCE_OK && filter != NULL && !visitor_ctx.matched_any) result = BRUCE_ERR_NOT_FOUND;
     return result;
+}
+
+bruce_result_t archive__tar_gz_extract(const char *archive_path, const char *dest_dir) {
+    return archive__tar_gz_extract_filtered(archive_path, dest_dir, NULL);
+}
+
+bruce_result_t
+archive__tar_gz_extract_entry(const char *archive_path, const char *entry_name, const char *dest_dir) {
+    /* A trailing '/' (a directory entry's own stored name, e.g. as browsed
+     * from a bruce_archive_entry_t) would otherwise stop
+     * archive__entry_matches_filter() from also matching anything nested
+     * under it - see that function's comment. */
+    char filter[BRUCE_ARCHIVE_ENTRY_NAME_MAX];
+    if (entry_name == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    size_t entry_len = strlen(entry_name);
+    if (entry_len == 0 || entry_len >= sizeof(filter)) return BRUCE_ERR_INVALID_ARGUMENT;
+    memcpy(filter, entry_name, entry_len + 1);
+    if (filter[entry_len - 1] == '/') filter[entry_len - 1] = '\0';
+
+    return archive__tar_gz_extract_filtered(archive_path, dest_dir, filter);
+}
+
+/* ---- read entry ---- */
+
+typedef struct {
+    const char *entry_name;
+    char *buffer;
+    size_t buffer_size;
+    size_t out_size;
+    bool found;
+    bool is_directory;
+} archive__read_visitor_ctx_t;
+
+/* Stops the walk (BRUCE_ERR_CANCELLED, the same "caller asked to stop
+ * early - not a failure" convention archive__tar_gz_list()'s own callback
+ * uses to end a listing early) the moment `entry_name` is seen, whether it
+ * turns out to be a file or a directory; archive__tar_gz_read_entry()
+ * itself decides what ctx->is_directory means for the result once the walk
+ * is over. */
+static bruce_result_t archive__read_visitor(mtar_t *tar, const mtar_header_t *header, void *context) {
+    archive__read_visitor_ctx_t *ctx = (archive__read_visitor_ctx_t *)context;
+    if (strcmp(header->name, ctx->entry_name) != 0) return BRUCE_OK;
+    ctx->found = true;
+    ctx->is_directory = header->type == MTAR_TDIR;
+    ctx->out_size = header->size;
+    if (ctx->is_directory) return BRUCE_ERR_CANCELLED;
+
+    size_t capacity = ctx->buffer_size - 1;
+    size_t total_read = 0;
+    unsigned remaining = header->size;
+    bruce_result_t result = BRUCE_OK;
+    /* Chunked at ARCHIVE_CHUNK_SIZE, same as archive__extract_visitor()'s
+     * own mtar_read_data() calls below - the underlying tar->read callback
+     * (archive__storage_read_cb) requires storage__read() to satisfy a
+     * request in one call, and nothing elsewhere in this file asks it to
+     * fill more than one chunk at a time. */
+    while (remaining > 0 && total_read < capacity) {
+        size_t chunk_capacity = capacity - total_read;
+        if (chunk_capacity > ARCHIVE_CHUNK_SIZE) chunk_capacity = ARCHIVE_CHUNK_SIZE;
+        unsigned to_read = remaining < (unsigned)chunk_capacity ? remaining : (unsigned)chunk_capacity;
+        if (mtar_read_data(tar, ctx->buffer + total_read, to_read) != MTAR_ESUCCESS) {
+            result = BRUCE_ERR_IO;
+            break;
+        }
+        total_read += to_read;
+        remaining -= to_read;
+    }
+    ctx->buffer[total_read] = '\0';
+    return result == BRUCE_OK ? BRUCE_ERR_CANCELLED : result;
+}
+
+bruce_result_t archive__tar_gz_read_entry(
+    const char *archive_path, const char *entry_name, char *buffer, size_t buffer_size, size_t *out_size
+) {
+    if (archive_path == NULL || entry_name == NULL || entry_name[0] == '\0' || buffer == NULL || buffer_size == 0 ||
+        out_size == NULL) {
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+
+    char scratch_path[BRUCE_STORAGE_PATH_MAX];
+    bruce_result_t result = archive__decompress_to_scratch(archive_path, scratch_path, sizeof(scratch_path));
+    if (result != BRUCE_OK) return result;
+
+    archive__read_visitor_ctx_t ctx = {.entry_name = entry_name, .buffer = buffer, .buffer_size = buffer_size};
+    result = archive__walk_scratch(scratch_path, archive__read_visitor, &ctx);
+    (void)storage__remove(scratch_path);
+
+    if (result == BRUCE_ERR_CANCELLED) result = BRUCE_OK;
+    if (result != BRUCE_OK) return result;
+    if (!ctx.found) return BRUCE_ERR_NOT_FOUND;
+    if (ctx.is_directory) return BRUCE_ERR_INVALID_ARGUMENT;
+    *out_size = ctx.out_size;
+    return BRUCE_OK;
 }

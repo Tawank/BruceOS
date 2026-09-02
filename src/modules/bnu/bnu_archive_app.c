@@ -20,12 +20,13 @@
  *     core_sdk/archive.h supports - always gzip-compressed).
  *   - zip: create a ".zip".
  *   - unzip: list/extract a ".zip".
- *   - archive/archive-extract: format-agnostic list/extract, picking
- *     archive__zip_*() or archive__tar_gz_*() by `path`'s extension (see
- *     bnu__archive_is_zip()) - these are what extensions.conf's "program"/
- *     "actions" point a ".zip"/".tar.gz"/".tgz" file's "Open"/"Extract
- *     here" at, so opening one from the file manager doesn't need to know
- *     which format it is.
+ *   - archive-extract: format-agnostic whole-archive extract, picking
+ *     archive__zip_extract() or archive__tar_gz_extract() by `path`'s
+ *     extension (see bnu__archive_is_zip()) - this is what
+ *     extensions.conf's "actions" points a ".zip"/".tar.gz"/".tgz" file's
+ *     "Extract here" at, so it doesn't need to know which format it is.
+ *     Its "Open" counterpart ("program", the same lookup) is the "archive"
+ *     built-in - not this file, see modules/archive/archive_app.c.
  */
 
 /* True if `path` ends in ".zip" (case-insensitive, matching how
@@ -243,28 +244,18 @@ int bnu_unzip_app_main(int argc, char **argv) {
 }
 
 /* ------------------------------------------------------------------------ */
-/* archive / archive-extract (format-agnostic, extensions.conf-driven)      */
+/* archive-extract (format-agnostic, extensions.conf-driven)                */
 /* ------------------------------------------------------------------------ */
 
-int bnu_archive_app_main(int argc, char **argv) {
-    ArgParser *parser = bnu__new_parser("List a \".zip\" or \".tar.gz\"/\".tgz\" archive's contents.");
-    if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
-    ap_add_required_arg(parser, "archive", "Archive file to list");
-    ap_unknown_options_as_args(parser);
-    if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
-
-    char archive_path[BRUCE_STORAGE_PATH_MAX];
-    bool resolved = bnu__resolve_path(ap_get_arg(parser, "archive"), archive_path);
-    ap_free(parser);
-    if (!resolved) return BRUCE_ERR_INVALID_PATH;
-
-    bruce_result_t result = bnu__archive_is_zip(archive_path)
-                                 ? archive__zip_list(archive_path, bnu__archive_print_entry, NULL)
-                                 : archive__tar_gz_list(archive_path, bnu__archive_print_entry, NULL);
-    if (result != BRUCE_OK) stdio__printf("archive: %s: %s\n", archive_path, result__to_string(result));
-    return result;
-}
-
+/* The interactive counterpart - browsing/viewing/extracting individual
+ * entries with "the look of the filemanager" - moved to its own "archive"
+ * module (modules/archive/archive_app.c, registered as the "archive"
+ * built-in in main.c) so it could grow a GUI without pulling core_sdk/dialog.h
+ * and friends into bnu, which stays plain argv-in/stdout-out commands. This
+ * whole-archive "archive-extract" action (filetype's "Extract here", see
+ * embedded_resources/json/extensions.json) is unrelated to that browsing
+ * UI - archive_app.c calls archive__*_extract_entry() directly for its own
+ * per-item Extract, not this command - so it stays here. */
 int bnu_archive_extract_app_main(int argc, char **argv) {
     ArgParser *parser = bnu__new_parser("Extract a \".zip\" or \".tar.gz\"/\".tgz\" archive.");
     if (parser == NULL) return BRUCE_ERR_NO_MEMORY;

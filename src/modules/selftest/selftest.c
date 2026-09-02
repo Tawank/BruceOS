@@ -131,6 +131,8 @@ int selftest_app_main(int argc, char **argv) {
     RUN_SELFTEST(selftest__run_archive_zip_corrupt_case);
     RUN_SELFTEST(selftest__run_archive_tar_gz_slip_rejection_case);
     RUN_SELFTEST(selftest__run_archive_not_found_case);
+    RUN_SELFTEST(selftest__run_archive_tar_gz_entry_ops_case);
+    RUN_SELFTEST(selftest__run_archive_zip_entry_ops_case);
     RUN_SELFTEST(selftest__run_apprunner_registration_case);
     RUN_SELFTEST(selftest__run_apprunner_args_case);
     RUN_SELFTEST(selftest__run_apprunner_resolution_case);

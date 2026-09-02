@@ -368,3 +368,127 @@ bool selftest__run_archive_not_found_case(void) {
     if (dest_created) (void)storage__remove(dest_dir);
     return ok;
 }
+
+/* ------------------------------------------------------------------------ */
+/* extract_entry / read_entry: single-file and single-subtree granularity   */
+/* ------------------------------------------------------------------------ */
+
+/* Builds the same "<prefix>_src.txt / <prefix>_srcdir/nested.txt" shape
+ * archive_test__roundtrip() does, then exercises
+ * archive__*_read_entry()/archive__*_extract_entry() - the API
+ * archive_app.c's browser (modules/archive/archive_app.c) uses for its
+ * per-item View/Extract, restricted to one entry or subtree rather than
+ * archive_test__roundtrip()'s whole-archive archive__*_list()/_extract().
+ * The point of each half below is proving the filter is actually SCOPED -
+ * extracting just the top-level file must not also recreate the directory
+ * subtree, and vice versa - not merely that these functions return
+ * BRUCE_OK for something. */
+static bool archive_test__entry_operations(const char *prefix, const char *archive_path, bool zip) {
+    char src_file[128], src_dir[128], src_nested[128], dest_dir[128];
+    snprintf(src_file, sizeof(src_file), "%s_src.txt", prefix);
+    snprintf(src_dir, sizeof(src_dir), "%s_srcdir", prefix);
+    snprintf(src_nested, sizeof(src_nested), "%s_srcdir/nested.txt", prefix);
+    snprintf(dest_dir, sizeof(dest_dir), "%s_dest", prefix);
+
+    const char *file_basename = archive_test__basename(src_file);
+    const char *dir_basename = archive_test__basename(src_dir);
+
+    bruce_result_t result = archive_test__write_file(src_file, ARCHIVE_TEST_FILE_CONTENT);
+    if (result == BRUCE_OK) result = storage__mkdir(src_dir);
+    if (result == BRUCE_OK) result = archive_test__write_file(src_nested, ARCHIVE_TEST_NESTED_CONTENT);
+    if (result == BRUCE_OK) result = storage__mkdir(dest_dir);
+
+    const char *entry_paths[] = {src_file, src_dir};
+    if (result == BRUCE_OK) {
+        result = zip ? archive__zip_create(archive_path, entry_paths, 2, BRUCE_COMPRESS_LEVEL_DEFAULT)
+                      : archive__tar_gz_create(archive_path, entry_paths, 2, BRUCE_COMPRESS_LEVEL_DEFAULT);
+    }
+
+    /* read_entry: the top-level file's content comes back exactly, a
+     * directory entry is rejected (not a file), and a name that doesn't
+     * exist is BRUCE_ERR_NOT_FOUND. */
+    char read_buffer[256];
+    size_t read_size = 0;
+    bruce_result_t read_result = BRUCE_ERR_INVALID_STATE;
+    if (result == BRUCE_OK) {
+        read_result = zip ? archive__zip_read_entry(archive_path, file_basename, read_buffer, sizeof(read_buffer), &read_size)
+                           : archive__tar_gz_read_entry(
+                                 archive_path, file_basename, read_buffer, sizeof(read_buffer), &read_size
+                             );
+    }
+    bool read_ok = read_result == BRUCE_OK && read_size == strlen(ARCHIVE_TEST_FILE_CONTENT) &&
+                   strcmp(read_buffer, ARCHIVE_TEST_FILE_CONTENT) == 0;
+
+    char dir_entry_name[128];
+    snprintf(dir_entry_name, sizeof(dir_entry_name), "%.100s/", dir_basename);
+    bruce_result_t read_dir_result =
+        zip ? archive__zip_read_entry(archive_path, dir_entry_name, read_buffer, sizeof(read_buffer), &read_size)
+            : archive__tar_gz_read_entry(archive_path, dir_entry_name, read_buffer, sizeof(read_buffer), &read_size);
+    bool read_dir_ok = read_dir_result == BRUCE_ERR_INVALID_ARGUMENT;
+
+    bruce_result_t read_missing_result =
+        zip ? archive__zip_read_entry(archive_path, "does_not_exist.txt", read_buffer, sizeof(read_buffer), &read_size)
+            : archive__tar_gz_read_entry(
+                  archive_path, "does_not_exist.txt", read_buffer, sizeof(read_buffer), &read_size
+              );
+    bool read_missing_ok = read_missing_result == BRUCE_ERR_NOT_FOUND;
+
+    /* extract_entry: extracting just the top-level file must not also
+     * recreate the directory subtree ... */
+    char dest_file[128], dest_nested[128], dest_subdir[128];
+    snprintf(dest_file, sizeof(dest_file), "%.60s/%.60s", dest_dir, file_basename);
+    snprintf(dest_subdir, sizeof(dest_subdir), "%.60s/%.60s", dest_dir, dir_basename);
+    snprintf(dest_nested, sizeof(dest_nested), "%.50s/%.50s/nested.txt", dest_dir, dir_basename);
+
+    bruce_result_t extract_file_result = zip ? archive__zip_extract_entry(archive_path, file_basename, dest_dir)
+                                              : archive__tar_gz_extract_entry(archive_path, file_basename, dest_dir);
+    bool file_exists = false;
+    bool subdir_created = true;
+    (void)storage__exists(dest_file, &file_exists);
+    (void)storage__exists(dest_subdir, &subdir_created);
+    bool extract_file_ok = extract_file_result == BRUCE_OK && file_exists &&
+                            archive_test__file_matches(dest_file, ARCHIVE_TEST_FILE_CONTENT) && !subdir_created;
+    (void)storage__remove(dest_file);
+
+    /* ... and, the other way round, extracting the directory must not
+     * re-create the top-level file. */
+    bruce_result_t extract_dir_result = zip ? archive__zip_extract_entry(archive_path, dir_basename, dest_dir)
+                                             : archive__tar_gz_extract_entry(archive_path, dir_basename, dest_dir);
+    bool nested_ok = archive_test__file_matches(dest_nested, ARCHIVE_TEST_NESTED_CONTENT);
+    bool file_recreated = true;
+    (void)storage__exists(dest_file, &file_recreated);
+    bool extract_dir_ok = extract_dir_result == BRUCE_OK && nested_ok && !file_recreated;
+
+    bruce_result_t extract_missing_result = zip ? archive__zip_extract_entry(archive_path, "does_not_exist.txt", dest_dir)
+                                                 : archive__tar_gz_extract_entry(archive_path, "does_not_exist.txt", dest_dir);
+    bool extract_missing_ok = extract_missing_result == BRUCE_ERR_NOT_FOUND;
+
+    bool ok = result == BRUCE_OK && read_ok && read_dir_ok && read_missing_ok && extract_file_ok && extract_dir_ok &&
+              extract_missing_ok;
+
+    printf(
+        "[selftest] archive/%s_entry_ops: %s (setup=%d read=%d read_dir=%d read_missing=%d extract_file=%d "
+        "extract_dir=%d extract_missing=%d)\n",
+        zip ? "zip" : "tar_gz", ok ? "OK" : "FAIL", result, read_ok, read_dir_ok, read_missing_ok, extract_file_ok,
+        extract_dir_ok, extract_missing_ok
+    );
+
+    (void)storage__remove(dest_nested);
+    (void)storage__remove(dest_subdir);
+    (void)storage__remove(dest_dir);
+    (void)storage__remove(archive_path);
+    (void)storage__remove(src_nested);
+    (void)storage__remove(src_dir);
+    (void)storage__remove(src_file);
+    return ok;
+}
+
+bool selftest__run_archive_tar_gz_entry_ops_case(void) {
+    return archive_test__entry_operations(
+        "/selftest_archive_tar_entry", "/selftest_archive_tar_entry.tar.gz", false
+    );
+}
+
+bool selftest__run_archive_zip_entry_ops_case(void) {
+    return archive_test__entry_operations("/selftest_archive_zip_entry", "/selftest_archive_zip_entry.zip", true);
+}

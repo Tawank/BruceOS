@@ -273,6 +273,19 @@ static bool archive__zip_entry_name_is_safe(const char *name) {
     return true;
 }
 
+/* True if `name` (a raw stored entry name, e.g. "docs/readme.txt") is
+ * `filter` itself or nested under it as a path component (e.g. filter
+ * "docs" also matches "docs/readme.txt" and "docs/notes/todo.txt", but not
+ * "docs.bak/readme.txt") - `filter` itself must have no trailing '/'
+ * (archive__zip_extract_entry() strips one before calling in here). NULL
+ * matches everything, for archive__zip_extract()'s whole-archive case. */
+static bool archive__zip_name_matches_filter(const char *name, const char *filter) {
+    if (filter == NULL) return true;
+    size_t filter_len = strlen(filter);
+    if (strncmp(name, filter, filter_len) != 0) return false;
+    return name[filter_len] == '\0' || name[filter_len] == '/';
+}
+
 static bruce_result_t archive__zip_ensure_parent_dirs(const char *path) {
     char buffer[BRUCE_STORAGE_PATH_MAX];
     int written = snprintf(buffer, sizeof(buffer), "%s", path);
@@ -314,8 +327,16 @@ static bruce_result_t archive__zip_extract_current(unzFile uf, const char *dest_
     return result;
 }
 
-bruce_result_t archive__zip_extract(const char *archive_path, const char *dest_dir) {
+/* `filter` == NULL extracts every entry (archive__zip_extract()'s own
+ * shape); otherwise only entries matching it via
+ * archive__zip_name_matches_filter() below are extracted, and
+ * *out_matched_any reports whether anything did (archive__zip_extract_entry()
+ * turns "filter given but nothing matched" into BRUCE_ERR_NOT_FOUND - a
+ * plain whole-archive extract has no such notion of "not found"). */
+static bruce_result_t
+archive__zip_extract_filtered(const char *archive_path, const char *dest_dir, const char *filter, bool *out_matched_any) {
     if (archive_path == NULL || dest_dir == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    if (out_matched_any != NULL) *out_matched_any = false;
 
     zlib_filefunc64_def filefunc;
     archive__zip_filefunc(&filefunc);
@@ -336,27 +357,110 @@ bruce_result_t archive__zip_extract(const char *archive_path, const char *dest_d
             break;
         }
 
-        size_t name_len = strlen(name);
-        bool is_directory = name_len > 0 && name[name_len - 1] == '/';
-        size_t name_len_trimmed = is_directory ? name_len - 1 : name_len;
+        if (archive__zip_name_matches_filter(name, filter)) {
+            if (out_matched_any != NULL) *out_matched_any = true;
 
-        char dest_path[BRUCE_STORAGE_PATH_MAX];
-        int written = snprintf(dest_path, sizeof(dest_path), "%s/%.*s", dest_dir, (int)name_len_trimmed, name);
-        if (written < 0 || (size_t)written >= sizeof(dest_path)) {
-            result = BRUCE_ERR_RESOURCE_LIMIT;
-            break;
-        }
+            size_t name_len = strlen(name);
+            bool is_directory = name_len > 0 && name[name_len - 1] == '/';
+            size_t name_len_trimmed = is_directory ? name_len - 1 : name_len;
 
-        if (is_directory) {
-            result = storage__mkdir(dest_path);
-        } else {
-            result = archive__zip_ensure_parent_dirs(dest_path);
-            if (result == BRUCE_OK) result = archive__zip_extract_current(uf, dest_path);
+            char dest_path[BRUCE_STORAGE_PATH_MAX];
+            int written = snprintf(dest_path, sizeof(dest_path), "%s/%.*s", dest_dir, (int)name_len_trimmed, name);
+            if (written < 0 || (size_t)written >= sizeof(dest_path)) {
+                result = BRUCE_ERR_RESOURCE_LIMIT;
+                break;
+            }
+
+            if (is_directory) {
+                result = storage__mkdir(dest_path);
+            } else {
+                result = archive__zip_ensure_parent_dirs(dest_path);
+                if (result == BRUCE_OK) result = archive__zip_extract_current(uf, dest_path);
+            }
+            if (result != BRUCE_OK) break;
         }
-        if (result != BRUCE_OK) break;
         go_result = unzGoToNextFile(uf);
     }
     if (result == BRUCE_OK && go_result != UNZ_END_OF_LIST_OF_FILE && go_result != UNZ_OK) result = BRUCE_ERR_IO;
+
+    (void)unzClose(uf);
+    return result;
+}
+
+bruce_result_t archive__zip_extract(const char *archive_path, const char *dest_dir) {
+    return archive__zip_extract_filtered(archive_path, dest_dir, NULL, NULL);
+}
+
+bruce_result_t archive__zip_extract_entry(const char *archive_path, const char *entry_name, const char *dest_dir) {
+    /* A trailing '/' (a directory entry's own stored name, e.g. as browsed
+     * from a bruce_archive_entry_t) would otherwise stop
+     * archive__zip_name_matches_filter() from also matching anything nested
+     * under it - see that function's comment. */
+    char filter[BRUCE_ARCHIVE_ENTRY_NAME_MAX];
+    if (entry_name == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    size_t entry_len = strlen(entry_name);
+    if (entry_len == 0 || entry_len >= sizeof(filter)) return BRUCE_ERR_INVALID_ARGUMENT;
+    memcpy(filter, entry_name, entry_len + 1);
+    if (filter[entry_len - 1] == '/') filter[entry_len - 1] = '\0';
+
+    bool matched_any = false;
+    bruce_result_t result = archive__zip_extract_filtered(archive_path, dest_dir, filter, &matched_any);
+    if (result == BRUCE_OK && !matched_any) result = BRUCE_ERR_NOT_FOUND;
+    return result;
+}
+
+/* ---- read entry ---- */
+
+bruce_result_t archive__zip_read_entry(
+    const char *archive_path, const char *entry_name, char *buffer, size_t buffer_size, size_t *out_size
+) {
+    if (archive_path == NULL || entry_name == NULL || entry_name[0] == '\0' || buffer == NULL || buffer_size == 0 ||
+        out_size == NULL) {
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+
+    zlib_filefunc64_def filefunc;
+    archive__zip_filefunc(&filefunc);
+    unzFile uf = unzOpen2_64(archive_path, &filefunc);
+    if (uf == NULL) return BRUCE_ERR_NOT_FOUND;
+
+    /* CASESENSITIVITY=0: minizip's own default, matching how
+     * archive__zip_list()'s names are byte-for-byte what's stored - the
+     * caller (archive_app's browser) always passes back a name that came
+     * from exactly that listing. */
+    bruce_result_t result = BRUCE_OK;
+    if (unzLocateFile(uf, entry_name, 0) != UNZ_OK) {
+        result = BRUCE_ERR_NOT_FOUND;
+    } else {
+        unz_file_info64 info;
+        char name[BRUCE_ARCHIVE_ENTRY_NAME_MAX];
+        if (unzGetCurrentFileInfo64(uf, &info, name, sizeof(name), NULL, 0, NULL, 0) != UNZ_OK) {
+            result = BRUCE_ERR_IO;
+        } else {
+            size_t name_len = strlen(name);
+            if (name_len > 0 && name[name_len - 1] == '/') {
+                result = BRUCE_ERR_INVALID_ARGUMENT; /* a directory, not a file */
+            } else if (unzOpenCurrentFile(uf) != UNZ_OK) {
+                result = BRUCE_ERR_IO;
+            } else {
+                size_t capacity = buffer_size - 1;
+                size_t total_read = 0;
+                while (total_read < capacity) {
+                    unsigned chunk_size = (unsigned)(capacity - total_read);
+                    int read_size = unzReadCurrentFile(uf, buffer + total_read, chunk_size);
+                    if (read_size < 0) {
+                        result = BRUCE_ERR_IO;
+                        break;
+                    }
+                    if (read_size == 0) break;
+                    total_read += (size_t)read_size;
+                }
+                buffer[total_read] = '\0';
+                (void)unzCloseCurrentFile(uf);
+                if (result == BRUCE_OK) *out_size = (size_t)info.uncompressed_size;
+            }
+        }
+    }
 
     (void)unzClose(uf);
     return result;

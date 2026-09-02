@@ -196,9 +196,13 @@ Functions that explicitly document a `bruce_permission_t` check, grouped by perm
 - `archive__tar_gz_create` (archive.h)
 - `archive__tar_gz_list` (archive.h)
 - `archive__tar_gz_extract` (archive.h)
+- `archive__tar_gz_extract_entry` (archive.h)
+- `archive__tar_gz_read_entry` (archive.h)
 - `archive__zip_create` (archive.h)
 - `archive__zip_list` (archive.h)
 - `archive__zip_extract` (archive.h)
+- `archive__zip_extract_entry` (archive.h)
+- `archive__zip_read_entry` (archive.h)
 - `clipboard__paste_files` (clipboard.h)
 - `clipboard__paste_file_as` (clipboard.h)
 - `clipboard__paste_binary` (clipboard.h)
@@ -1144,6 +1148,74 @@ rejected (BRUCE_ERR_INVALID_PATH) rather than allowed to write outside
 
 ---
 
+## archive__tar_gz_extract_entry()
+
+```c
+bruce_result_t
+archive__tar_gz_extract_entry(const char *archive_path, const char *entry_name, const char *dest_dir);
+```
+
+Extracts one entry - a file, or a directory's whole subtree - from a ".tar.gz" archive.
+
+Same entry-matching/relative-path/dest_dir/tar-slip rules as
+archive__zip_extract_entry(), for a ".tar.gz"/".tgz" archive.
+
+@return BRUCE_ERR_NOT_FOUND if no entry matches entry_name.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `archive_path` | `const char *` | Archive to extract from. |
+| `entry_name` | `const char *` | File or directory entry to extract. |
+| `dest_dir` | `const char *` | Existing directory to extract into. |
+
+### Returns
+
+`bruce_result_t`
+
+#### Permissions
+
+- `storage`
+
+
+---
+
+## archive__tar_gz_read_entry()
+
+```c
+bruce_result_t archive__tar_gz_read_entry(
+    const char *archive_path, const char *entry_name, char *buffer, size_t buffer_size, size_t *out_size
+);
+```
+
+Reads up to `buffer_size` - 1 bytes of a single ".tar.gz" file entry, for a lightweight preview.
+
+Same semantics as archive__zip_read_entry(), for a ".tar.gz"/".tgz" archive.
+
+@return BRUCE_ERR_NOT_FOUND if no entry matches entry_name.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `archive_path` | `const char *` | Archive to read from. |
+| `entry_name` | `const char *` | File entry to read; a directory entry is BRUCE_ERR_INVALID_ARGUMENT. |
+| `buffer` | `char *` | Caller-owned buffer to receive the entry's content. |
+| `buffer_size` | `size_t` | Size of buffer in bytes. |
+| `out_size` | `size_t *` | Receives the entry's full uncompressed size (may exceed buffer_size - 1). |
+
+### Returns
+
+`bruce_result_t`
+
+#### Permissions
+
+- `storage`
+
+
+---
+
 ## archive__zip_create()
 
 ```c
@@ -1224,6 +1296,82 @@ rules as archive__tar_gz_extract().
 | --- | --- | --- |
 | `archive_path` | `const char *` | Archive to extract. |
 | `dest_dir` | `const char *` | Existing directory to extract into. |
+
+### Returns
+
+`bruce_result_t`
+
+#### Permissions
+
+- `storage`
+
+
+---
+
+## archive__zip_extract_entry()
+
+```c
+bruce_result_t archive__zip_extract_entry(const char *archive_path, const char *entry_name, const char *dest_dir);
+```
+
+Extracts one entry - a file, or a directory's whole subtree - from a ".zip" archive.
+
+`entry_name` matches an entry exactly (a file, e.g. "docs/readme.txt") or
+a directory (e.g. "docs", trailing '/' optional - also matches every
+entry nested under it, e.g. "docs/readme.txt", "docs/notes/todo.txt").
+Every matching entry lands under `dest_dir` at the same relative path
+archive__zip_extract() would have given it extracting the whole archive -
+this is exactly that, restricted to one subtree, not a "flatten into
+dest_dir" extract. Same "dest_dir must exist"/"zip-slip"-rejection/
+intermediate-directory rules as archive__zip_extract().
+
+@return BRUCE_ERR_NOT_FOUND if no entry matches entry_name.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `archive_path` | `const char *` | Archive to extract from. |
+| `entry_name` | `const char *` | File or directory entry to extract. |
+| `dest_dir` | `const char *` | Existing directory to extract into. |
+
+### Returns
+
+`bruce_result_t`
+
+#### Permissions
+
+- `storage`
+
+
+---
+
+## archive__zip_read_entry()
+
+```c
+bruce_result_t archive__zip_read_entry(
+    const char *archive_path, const char *entry_name, char *buffer, size_t buffer_size, size_t *out_size
+);
+```
+
+Reads up to `buffer_size` - 1 bytes of a single ".zip" file entry, for a lightweight preview.
+
+NUL-terminates `buffer`. Nothing is written to storage - this isn't a
+substitute for archive__zip_extract_entry(), and content past
+`buffer_size` - 1 bytes is silently dropped (compare `*out_size` against
+`buffer_size` - 1 to detect that a preview was truncated).
+
+@return BRUCE_ERR_NOT_FOUND if no entry matches entry_name.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `archive_path` | `const char *` | Archive to read from. |
+| `entry_name` | `const char *` | File entry to read; a directory entry is BRUCE_ERR_INVALID_ARGUMENT. |
+| `buffer` | `char *` | Caller-owned buffer to receive the entry's content. |
+| `buffer_size` | `size_t` | Size of buffer in bytes. |
+| `out_size` | `size_t *` | Receives the entry's full uncompressed size (may exceed buffer_size - 1). |
 
 ### Returns
 
@@ -11336,6 +11484,11 @@ typedef struct {
     bool used;
     bool tracked;
     bool executable;
+    /* True when this tracked block is a process's own task-stack buffer
+     * (see process_registry__create()'s xTaskCreateStatic() call) rather
+     * than a regular heap allocation. Always false for untracked or free
+     * blocks. */
+    bool is_stack;
 } bruce_memory_layout_block_t;
 ```
 
@@ -14396,6 +14549,29 @@ over queued input.
 
 ---
 
+## stdio__flush_input()
+
+```c
+bruce_result_t stdio__flush_input(void);
+```
+
+Discards any input already queued but not yet read on the calling process's routed session.
+
+Matches what a real tty driver does when it delivers SIGINT/SIGQUIT to the
+foreground process (termios' default, NOFLSH unset): stdio__read()'s
+BRUCE_ERR_CANCELLED only unblocks whichever read was already in progress,
+it doesn't discard bytes that arrived but hadn't been read yet (e.g. the
+rest of a fast paste/burst) -- those would otherwise sit queued and get
+silently replayed into the next read. A no-op (BRUCE_OK) when the calling
+process has no routed session.
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
 ## stdio__write()
 
 ```c
@@ -14583,6 +14759,32 @@ Writes input bytes into a session, as if typed by its consumer.
 | `session` | `bruce_stdio_session_t` | Session to write into. |
 | `data` | `const void *` | Bytes to write. |
 | `size` | `size_t` | Number of bytes in data. |
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
+## stdio__session_flush_input()
+
+```c
+bruce_result_t stdio__session_flush_input(bruce_stdio_session_t session);
+```
+
+Same as stdio__flush_input(), but targets an explicit session.
+
+Instead of the calling process's own routed session -- for a caller (e.g.
+terminal_app.c, delivering Ctrl+C to a child it owns) discarding a
+session's queued input on another process's behalf, mirroring
+stdio__write_to()'s relationship to stdio__write().
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `session` | `bruce_stdio_session_t` | Session whose queued-but-unread input should be discarded. |
 
 ### Returns
 
@@ -14934,6 +15136,32 @@ Both paths must be on the same mounted filesystem.
 | Parameter | Type | Description |
 | --- | --- | --- |
 | `from` | `const char *` | Existing path. |
+| `to` | `const char *` | New path; must not already exist. |
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
+## storage__copy()
+
+```c
+bruce_result_t storage__copy(const char *from, const char *to);
+```
+
+Copies one file's bytes to a new path.
+
+Unlike storage__rename(), works across mounted filesystems (e.g. internal
+flash to/from SD). `from` must be a regular file, not a directory -
+BRUCE_ERR_UNSUPPORTED.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `from` | `const char *` | Existing file path. |
 | `to` | `const char *` | New path; must not already exist. |
 
 ### Returns

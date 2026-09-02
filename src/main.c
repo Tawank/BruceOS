@@ -16,6 +16,7 @@
 #include "core/storage/storage.h"
 
 #include "modules/apps/apps_app.h"
+#include "modules/archive/archive_app.h"
 #include "modules/bluetooth/bluetooth_app.h"
 #include "modules/bluetooth_hid/bluetooth_hid_app.h"
 #include "modules/bnu/bnu_app.h"
@@ -100,7 +101,7 @@ void app_runner__register_defaults(void) {
 
     /* Storage - filesystems, partitions, and file management. */
     app_runner__register(
-        "archive", "List a .zip or .tar.gz/.tgz archive's contents", "Storage", bnu_archive_app_main, 0
+        "archive", "Browse a .zip or .tar.gz/.tgz archive's contents", "Storage", archive_app_main, 8192
     );
     app_runner__register(
         "archive-extract", "Extract a .zip or .tar.gz/.tgz archive", "Storage", bnu_archive_extract_app_main, 0
