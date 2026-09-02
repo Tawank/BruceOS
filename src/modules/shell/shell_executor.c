@@ -602,11 +602,17 @@ static int shell_executor__external_redirected(
  * instead, this temporarily reroutes the shell's own session (not its
  * children's -- see stdio__session_capture_self()'s doc comment) into a
  * private capture session, runs the builtin/function, restores the
- * previous routing, and writes whatever got captured to the target file --
- * the same capture-fully-then-write shape
- * shell_executor__external_with_input() uses for a real child, just with
- * nothing to wait on afterward since running the builtin/function already
- * happened synchronously by the time capture_self() is undone.
+ * previous routing, and streams whatever got captured straight to the
+ * already-open target file -- the same open-then-stream shape
+ * shell_executor__external_redirected()/shell_executor__stream_external_to_file()
+ * use for a real child, just draining the capture session after the
+ * builtin/function returns instead of while a separate process runs. This
+ * deliberately avoids shell_executor__write_file()'s buffer-fully-then-write
+ * shape (which routes through the external/swap-backed
+ * shell_executor__buffer_t): a builtin/function's own output has no
+ * separate child to buffer *for* the way a piped producer does, so there's
+ * nothing to gain from buffering it externally first, and one less
+ * allocation on this path is one less thing to go wrong.
  *
  * Only a plain ">"/">>" is handled here -- a "<"/heredoc feeding a
  * builtin/function's *input* is a separate, harder problem (its own
@@ -626,35 +632,40 @@ static int shell_executor__builtin_redirected(
         stdio__printf("shell: %s\n", error != NULL ? error : "redirection error");
         return 2;
     }
+    bruce_file_id_t file;
+    if (storage__open(path, shell_executor__redirect_open_flags(command->redirect == SHELL_REDIRECT_APPEND), &file) !=
+        BRUCE_OK) {
+        stdio__printf("shell: %s: cannot open\n", path);
+        memory__free(path);
+        return 2;
+    }
     bruce_stdio_session_t capture = BRUCE_STDIO_SESSION_INVALID;
     if (stdio__session_create(&capture) != BRUCE_OK || stdio__session_capture_self(capture) != BRUCE_OK) {
         stdio__printf("shell: %s: out of memory\n", path);
         if (capture != BRUCE_STDIO_SESSION_INVALID) (void)stdio__session_close(capture);
+        (void)storage__close(file);
         memory__free(path);
         return 2;
     }
     int status = is_function ? shell_compound__call_function(state, argc, argv) : shell_builtins__run(state, argc, argv);
     (void)stdio__session_release_self();
 
-    shell_executor__buffer_t buffer = {0};
-    bool out_of_memory = false;
+    bool write_ok = true;
     for (;;) {
         char chunk[256];
         size_t size = 0;
         if (stdio__session_read_output(capture, chunk, sizeof(chunk), &size) != BRUCE_OK || size == 0) break;
-        if (!shell_executor__buffer_append(&buffer, chunk, size)) {
-            out_of_memory = true;
+        if (!shell_executor__write_chunk(file, chunk, size)) {
+            write_ok = false;
             break;
         }
     }
     (void)stdio__session_close(capture);
+    (void)storage__close(file);
 
-    bool write_ok = shell_executor__write_file(path, command->redirect == SHELL_REDIRECT_APPEND, &buffer);
-    if (out_of_memory) stdio__printf("shell: %s: out of memory\n", path);
-    else if (!write_ok) stdio__printf("shell: %s: write failed\n", path);
-    shell_executor__buffer_free(&buffer);
+    if (!write_ok) stdio__printf("shell: %s: write failed\n", path);
     memory__free(path);
-    return out_of_memory || !write_ok ? 1 : status;
+    return write_ok ? status : 1;
 }
 
 /* Pumps `session` bidirectionally between `child` and the shell process's own

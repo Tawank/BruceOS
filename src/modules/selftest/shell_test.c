@@ -830,17 +830,11 @@ bool selftest__run_shell_builtin_redirect_case(void) {
               func_size == sizeof(expected_func) - 1 &&
               memcmp(func_result, expected_func, sizeof(expected_func) - 1) == 0;
     if (!ok) {
-        /* echo_result/func_result are zero-initialized and storage__read()
-         * never fills past sizeof(...)-1, so both are already safely
-         * NUL-terminated within bounds -- plain "%s" (no dynamic precision)
-         * is enough to dump the actual captured bytes for diagnosis. */
-        char dbg[256];
-        snprintf(
-            dbg, sizeof(dbg), "[selftest] shell/builtin-redirect: status=%d,%d,%d,%d,%d echo=%d/%u:[%s] func=%d/%u:[%s]\n",
-            status_echo, status_echo_append, status_def, status_func, status_input_rejected, read_echo,
-            (unsigned)echo_size, echo_result, read_func, (unsigned)func_size, func_result
+        printf(
+            "[selftest] shell/builtin-redirect: status=%d,%d,%d,%d,%d echo=%d/%u func=%d/%u\n", status_echo,
+            status_echo_append, status_def, status_func, status_input_rejected, read_echo, (unsigned)echo_size,
+            read_func, (unsigned)func_size
         );
-        printf("%s", dbg);
     }
     printf("[selftest] shell/builtin-redirect: %s\n", ok ? "OK" : "failed");
     return ok;
