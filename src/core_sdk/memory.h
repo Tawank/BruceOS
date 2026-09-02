@@ -311,12 +311,15 @@ typedef struct {
 /**
  * @brief Tries to free at least `needed_bytes` from registered subsystems before a big allocation.
  *
- * Sums every registered provider's estimate() first and only calls reclaim()
- * on any of them if the total would actually meet `needed_bytes` -- a
- * request that can't be satisfied never disturbs anything (e.g. never
- * changes the display's rendering mode) for no benefit. Reclaiming stops as
- * soon as enough has been freed, so it never shrinks more subsystems than it
- * has to.
+ * A no-op (BRUCE_OK, nothing freed) if the largest contiguous internal block
+ * can already cover `needed_bytes` on its own -- total free memory looking
+ * tight is not a reason to disturb anything (e.g. change the display's
+ * rendering mode); a too-small largest block is. Otherwise, reclaims
+ * whatever registered providers can offer, even if that falls short of
+ * `needed_bytes` -- partial headroom is still real headroom, so this is not
+ * an all-or-nothing request. Reclaiming stops once enough has been freed, so
+ * it never shrinks more subsystems than it has to; it only fails
+ * (BRUCE_ERR_NO_MEMORY) if nothing could be reclaimed at all.
  *
  * On success, what was reclaimed is restored automatically when the calling
  * process exits -- the same crash-safety memory__malloc() gives ordinary

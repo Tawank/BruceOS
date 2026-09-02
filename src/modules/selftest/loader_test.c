@@ -1,6 +1,7 @@
 /* A6 acceptance coverage: shared manifest parser, the app_runner loader
  * registry's third-party extensibility, and the built-in ELF loader module
  * (see migration_plan.md, "Loader modules"). */
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -313,18 +314,16 @@ bool selftest__run_reclaim_handoff_case(void) {
         return true;
     }
 
-    /* 1, not footprint_before: memory__reclaim()'s needed_bytes is what the
-     * caller is asking for, checked against providers' estimate() (the
-     * strictly-reclaimable portion -- for display, just the off-screen
-     * framebuffer, see display__reclaim_estimate()), not against
-     * display__buffer_footprint()'s larger total-display-RAM-cost figure
-     * (framebuffer + pack buffer, which together exceed what a single
-     * reclaim actually frees -- see display__buffer_footprint()'s own
-     * comment). Any request this small that's still > 0 exercises the same
-     * path a real elf_loader__open() caller sized to its own actual need
-     * would. */
+    /* SIZE_MAX, not footprint_before: memory__reclaim() is now a no-op
+     * whenever the largest contiguous internal block already covers
+     * needed_bytes on its own (see its doc comment), so this must ask for
+     * more than any board's largest block could possibly satisfy to
+     * guarantee the reclaim path actually runs, rather than being skipped as
+     * already-unnecessary -- exercising the same partial-reclaim path a real
+     * elf_loader__open() caller (sized to its own manifest, which may also
+     * exceed what a single provider can give back) would take. */
     size_t freed = 0;
-    if (memory__reclaim(1, &freed, &s_reclaim_handoff_token) != BRUCE_OK || freed == 0) {
+    if (memory__reclaim(SIZE_MAX, &freed, &s_reclaim_handoff_token) != BRUCE_OK || freed == 0) {
         printf("[selftest] loader/reclaim_handoff: reclaim failed\n");
         return false;
     }

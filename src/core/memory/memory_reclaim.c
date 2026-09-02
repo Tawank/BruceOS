@@ -6,6 +6,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 
+#include "esp_heap_caps.h"
+
 #include "core/process/process.h"
 #include "core_sdk/process.h"
 
@@ -78,6 +80,13 @@ bruce_result_t memory__reclaim(
     }
     if (needed_bytes == 0) return BRUCE_OK;
 
+    /* Nothing to do if the largest contiguous internal block can already
+     * cover the request on its own: reclaiming is disruptive (e.g. drops the
+     * display out of buffered mode), so it should only happen when a
+     * request this size would actually have somewhere to trip -- total free
+     * bytes looking tight is not that; a too-small largest block is. */
+    if (heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) >= needed_bytes) return BRUCE_OK;
+
     memory_reclaim__ensure_mutex();
     xSemaphoreTake(s_mutex, portMAX_DELAY);
     memory_reclaim__slot_t snapshot[MEMORY_RECLAIM__MAX_PROVIDERS];
@@ -85,13 +94,13 @@ bruce_result_t memory__reclaim(
     memcpy(snapshot, s_providers, count * sizeof(*snapshot));
     xSemaphoreGive(s_mutex);
 
-    /* Estimate first, with no side effects: never touch a single provider
-     * (e.g. drop the display into direct mode) unless the total achievable
-     * would actually cover the request. */
-    size_t estimated_total = 0;
-    for (size_t i = 0; i < count; ++i) estimated_total += snapshot[i].provider.estimate();
-    if (estimated_total < needed_bytes) return BRUCE_ERR_NO_MEMORY;
-
+    /* The largest-block check above already established real pressure --
+     * unlike a straight "would the total achievable cover needed_bytes"
+     * gate, reclaim whatever registered providers can offer even if, summed,
+     * it falls short. Partial headroom (e.g. the display's whole
+     * framebuffer, still less than a generous manifest heap size) is still
+     * real headroom; declining to take it would leave the largest block
+     * exactly as undersized as it already was. */
     memory_reclaim__grant_t *grant = malloc(sizeof(*grant));
     if (grant == NULL) return BRUCE_ERR_NO_MEMORY;
     grant->count = 0;

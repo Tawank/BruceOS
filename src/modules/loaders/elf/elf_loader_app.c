@@ -288,8 +288,10 @@ static int elf_loader__open(
     /* Best-effort: give the new app's stack (and its manifest-declared
      * expected heap use, if any -- see BRUCE_MANIFEST_HEAP_MAX) a better
      * chance of fitting by asking registered subsystems (e.g. the display
-     * framebuffer) to shrink first, but only if doing so would actually
-     * cover it -- see memory__reclaim(). A failure here (nothing worth
+     * framebuffer) to shrink first -- a no-op if the largest contiguous
+     * internal block already covers this on its own, otherwise reclaims
+     * whatever is available even if that falls short of the full manifest
+     * total (see memory__reclaim()). A failure here (nothing worth
      * reclaiming, or no memory pressure at all) is not a reason to abort the
      * launch; the spawn below simply fails on its own if truly out of
      * memory, same as before this existed. elf_loader__entry() adopts the

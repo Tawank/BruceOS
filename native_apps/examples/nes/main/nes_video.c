@@ -374,32 +374,9 @@ static void video_blit(bitmap_t *bitmap, int num_dirties, rect_t *dirty_rects) {
 
     uint64_t now_ms = runtime__now();
     bool stall = s_last_iter_ms != 0 && (now_ms - s_last_iter_ms) >= NES_PERF_STALL_MS;
-    /* TEMP DIAGNOSTIC - remove once the skip/debt dynamics are confirmed on
-     * hardware. Reads s_skip_debt_us before/after skip_track_debt() without
-     * touching its logic (plain file-static read, same translation unit),
-     * and recomputes the same iter_us it uses internally, so we can see the
-     * raw inputs/outputs behind every skip decision instead of only the
-     * averaged perf report. Full-rate for the first 90 calls (~1.5s, covers
-     * startup), then 1-in-30 (~2x/sec) after that. */
-    static uint32_t diag_call_count;
-    bool diag_log = diag_call_count < 90 || diag_call_count % 30 == 0;
-    uint32_t diag_iter_us = s_last_iter_ms != 0 ? (uint32_t)(now_ms - s_last_iter_ms) * 1000u : 0;
-    uint32_t diag_debt_before = s_skip_debt_us;
-    diag_call_count++;
-
     bool late = skip_track_debt(now_ms, stall);
     bool display_capped = skip_display_frame(stall);
     bool skip_blit = late || display_capped;
-
-    if (diag_log) {
-        printf(
-            "nes: DIAG #%lu iter_us=%lu stall=%d debt_before=%lu debt_after=%lu late=%d "
-            "capped=%d phase=%u\n",
-            (unsigned long)diag_call_count, (unsigned long)diag_iter_us, (int)stall,
-            (unsigned long)diag_debt_before, (unsigned long)s_skip_debt_us, (int)late, (int)display_capped,
-            (unsigned)s_display_frame_phase
-        );
-    }
 
     int screen_width = display__width();
     int screen_height = display__height();
@@ -445,22 +422,7 @@ static void video_blit(bitmap_t *bitmap, int num_dirties, rect_t *dirty_rects) {
 
     size_t scaled_lines_needed = (size_t)BRUCE_NES_BLIT_ROWS * (size_t)draw_width;
     if (scaled_lines_needed > s_scaled_lines_capacity) {
-        /* TEMP DIAGNOSTIC - remove once the realloc-failure theory is
-         * confirmed/ruled out on hardware: every skip_blit-surviving call
-         * re-attempts this same allocation (s_scaled_lines_capacity never
-         * grows past 0 if it keeps failing), so if this is where the 100%
-         * skip actually comes from, it'd fail here on essentially every one
-         * of those calls, not just once. */
-        bruce_memory_stats_t diag_stats;
-        bool diag_have_stats = memory__get_stats(&diag_stats) == BRUCE_OK;
-        printf(
-            "nes: DIAG realloc need=%lu cap=%lu internal_free=%lu largest=%lu\n",
-            (unsigned long)(scaled_lines_needed * sizeof(uint16_t)), (unsigned long)s_scaled_lines_capacity,
-            diag_have_stats ? (unsigned long)diag_stats.internal_free : 0ul,
-            diag_have_stats ? (unsigned long)diag_stats.internal_largest_block : 0ul
-        );
         uint16_t *scaled_lines = memory__realloc(s_scaled_lines, scaled_lines_needed * sizeof(*scaled_lines));
-        printf("nes: DIAG realloc result=%s\n", scaled_lines != NULL ? "ok" : "NULL");
         if (scaled_lines == NULL) {
             perf_track_and_report(now_ms, stall, 0, 0, 0, 0, false, 0, 0);
             s_last_iter_ms = now_ms;
