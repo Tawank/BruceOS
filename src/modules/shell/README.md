@@ -13,7 +13,8 @@ definitions) by raw-text keyword matching in command position.
 ## Implemented
 
 **Commands and connectors**
-- `;` sequencing, `&&` / `||` short-circuiting, `|` single-hop pipes.
+- `;` sequencing, `&&` / `||` short-circuiting, `|` pipes (any number of
+  chained hops, e.g. `a | b | c`).
 - `>` / `>>` output redirection to a file, for an external command only (see
   below).
 - Multi-line input: a bare newline is treated as `;`, so a whole multi-line

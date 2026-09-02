@@ -540,7 +540,7 @@ static int shell_executor__pipe_relay_capture(
  * shell_executor__dispatch()'s big comment on GUI=1/BRUCE_LAUNCH_FOREGROUND).
  * `capture`, when non-NULL, redirects this relaying: the target's output is
  * collected into `*capture` (for a caller such as
- * shell_executor__pipe_to_external() to write out via
+ * shell_executor__pipeline() to write out via
  * shell_executor__write_file()) instead of being relayed live to the shell's
  * own stdio, and the shell's own stdin is not forwarded to the target either
  * -- a "producer | consumer > file" destination is never interactive. Takes
@@ -635,62 +635,82 @@ static int shell_executor__pipe_write(
     return status;
 }
 
-static int shell_executor__pipe_to_external(
-    shell_state_t *state, const shell_command_t *source, const shell_command_t *target
-) {
-    char **source_words = NULL;
-    char **target_words = NULL;
-    int source_argc = 0;
-    int target_argc = 0;
+/* Runs a full "|"-chain of `count` (>= 2) commands, feeding each stage's
+ * captured stdout to the next stage's stdin in turn: `commands[0]` is the
+ * producer, `commands[count-1]` is the final destination, and everything
+ * between is both a consumer (of the previous stage) and a producer (for the
+ * next) -- e.g. "a | b | c" runs as count==3 with b in that middle role.
+ * This is shell_executor__pipe_write()'s buffer-and-feed model (see its big
+ * comment above) chained across more than one hop: since this shell has no
+ * fd-level fork/exec, every stage still runs to completion, fully buffered
+ * in external memory, before the next stage starts -- there is no concurrent
+ * streaming between stages, same as the two-stage case already had. Only
+ * `commands[0]` may be the "echo" pseudo-producer (see below); every other
+ * stage must be a real external command, since only a real process has
+ * stdin to feed the previous stage's captured output into. */
+static int shell_executor__pipeline(shell_state_t *state, const shell_command_t *commands, size_t count) {
+    char **stage_words[SHELL__MAX_COMMANDS] = {0};
+    int stage_argc[SHELL__MAX_COMMANDS] = {0};
     const char *error = NULL;
-    if (shell_parser__words(
-            source, &source_words, &source_argc, shell_executor__lookup, state, state->last_status, &error
-        ) != 0 ||
-        shell_parser__words(
-            target, &target_words, &target_argc, shell_executor__lookup, state, state->last_status, &error
-        ) != 0) {
+    bool parse_failed = false;
+    for (size_t i = 0; i < count && !parse_failed; ++i) {
+        if (shell_parser__words(
+                &commands[i], &stage_words[i], &stage_argc[i], shell_executor__lookup, state, state->last_status,
+                &error
+            ) != 0) {
+            parse_failed = true;
+        }
+    }
+    if (parse_failed) {
         stdio__printf("shell: %s\n", error != NULL ? error : "pipe parse error");
-        shell_parser__free_words(source_words, source_argc);
-        shell_parser__free_words(target_words, target_argc);
+        for (size_t i = 0; i < count; ++i) shell_parser__free_words(stage_words[i], stage_argc[i]);
         return 2;
     }
-    bool source_is_echo = source_argc > 0 && strcmp(source_words[0], "echo") == 0;
-    if (source_argc == 0 || target_argc == 0 || shell_builtins__is_builtin(target_words[0]) ||
-        (shell_builtins__is_builtin(source_words[0]) && !source_is_echo)) {
+    bool source_is_echo = stage_argc[0] > 0 && strcmp(stage_words[0][0], "echo") == 0;
+    bool invalid = false;
+    for (size_t i = 0; i < count; ++i) {
+        if (stage_argc[i] == 0) {
+            invalid = true;
+        } else if (i == 0) {
+            if (!source_is_echo && shell_builtins__is_builtin(stage_words[i][0])) invalid = true;
+        } else if (shell_builtins__is_builtin(stage_words[i][0])) {
+            invalid = true;
+        }
+    }
+    if (invalid) {
         stdio__printf("shell: pipes currently require an external producer and an external destination\n");
-        shell_parser__free_words(source_words, source_argc);
-        shell_parser__free_words(target_words, target_argc);
+        for (size_t i = 0; i < count; ++i) shell_parser__free_words(stage_words[i], stage_argc[i]);
         return 2;
     }
 
-    /* "producer | consumer > file" / "producer | consumer >> file" -- the
-     * consumer's own redirection is honored the same way a lone
-     * "cmd > file" is (see shell_executor__external_redirected() above):
-     * shell_executor__pipe_write() collects the consumer's output into a
-     * buffer instead of relaying it live to the shell's own stdio, and
-     * that buffer is written out via shell_executor__write_file() once the
-     * consumer finishes. Resolved up front, before the producer even runs,
-     * so a bad redirection target is reported without wasting the
-     * producer's work. */
+    /* "... | last > file" / "... | last >> file" -- the final stage's own
+     * redirection is honored the same way a lone "cmd > file" is (see
+     * shell_executor__external_redirected() above): its captured output is
+     * written to `path` via shell_executor__write_file() once it finishes,
+     * instead of being relayed live to the shell's own stdio. Resolved up
+     * front, before the first stage even runs, so a bad redirection target
+     * is reported without wasting any of the pipeline's work. Only the last
+     * stage's redirect is consulted -- same as before, a redirect on any
+     * earlier stage is silently ignored (see the header comment above). */
+    const shell_command_t *last = &commands[count - 1];
     char *redirect_path = NULL;
     bool redirect_append = false;
-    if (target->redirect != SHELL_REDIRECT_NONE) {
-        if (shell_executor__resolve_redirect_target(state, &target->redirect_target, &redirect_path, &error) != 0) {
+    if (last->redirect != SHELL_REDIRECT_NONE) {
+        if (shell_executor__resolve_redirect_target(state, &last->redirect_target, &redirect_path, &error) != 0) {
             stdio__printf("shell: %s\n", error != NULL ? error : "redirection error");
-            shell_parser__free_words(source_words, source_argc);
-            shell_parser__free_words(target_words, target_argc);
+            for (size_t i = 0; i < count; ++i) shell_parser__free_words(stage_words[i], stage_argc[i]);
             return 2;
         }
-        redirect_append = target->redirect == SHELL_REDIRECT_APPEND;
+        redirect_append = last->redirect == SHELL_REDIRECT_APPEND;
     }
 
     shell_executor__buffer_t buffer = {0};
     int status = 0;
     if (source_is_echo) {
-        for (int i = 1; status == 0 && i < source_argc; ++i) {
+        for (int i = 1; status == 0 && i < stage_argc[0]; ++i) {
             if (i > 1 && !shell_executor__buffer_append(&buffer, " ", 1u)) status = 1;
             if (status == 0 &&
-                !shell_executor__buffer_append(&buffer, source_words[i], strlen(source_words[i]))) {
+                !shell_executor__buffer_append(&buffer, stage_words[0][i], strlen(stage_words[0][i]))) {
                 status = 1;
             }
         }
@@ -700,25 +720,31 @@ static int shell_executor__pipe_to_external(
             shell_executor__buffer_free(&buffer);
         }
     } else {
-        status = shell_executor__capture_external(source_argc, source_words, &buffer);
+        status = shell_executor__capture_external(stage_argc[0], stage_words[0], &buffer);
     }
-    if (status == 0) {
-        shell_executor__buffer_t redirect_buffer = {0};
+    /* Each hop feeds the previous stage's captured output in as `buffer` and
+     * gets back its own captured output in `stage_out`, which becomes the
+     * next hop's `buffer` in turn -- except the very last hop, which relays
+     * live to the shell's own stdio (leaving `stage_out` untouched, so
+     * assigning it back is a no-op) unless the pipeline as a whole is
+     * redirected to a file. */
+    for (size_t i = 1; status == 0 && i < count; ++i) {
+        bool is_last = i == count - 1;
+        shell_executor__buffer_t stage_out = {0};
+        bool want_capture = !is_last || redirect_path != NULL;
         /* pipe_write() takes ownership of `buffer` and frees it itself. */
-        status = shell_executor__pipe_write(
-            target_argc, target_words, &buffer, redirect_path != NULL ? &redirect_buffer : NULL
-        );
-        if (redirect_path != NULL) {
-            if (!shell_executor__write_file(redirect_path, redirect_append, &redirect_buffer)) {
+        status = shell_executor__pipe_write(stage_argc[i], stage_words[i], &buffer, want_capture ? &stage_out : NULL);
+        buffer = stage_out;
+        if (is_last && redirect_path != NULL) {
+            if (!shell_executor__write_file(redirect_path, redirect_append, &stage_out)) {
                 stdio__printf("shell: %s: write failed\n", redirect_path);
                 if (status == 0) status = 1;
             }
-            shell_executor__buffer_free(&redirect_buffer);
         }
     }
+    shell_executor__buffer_free(&buffer);
     memory__free(redirect_path);
-    shell_parser__free_words(source_words, source_argc);
-    shell_parser__free_words(target_words, target_argc);
+    for (size_t i = 0; i < count; ++i) shell_parser__free_words(stage_words[i], stage_argc[i]);
     return status;
 }
 
@@ -740,6 +766,7 @@ int shell_executor__page_help(void) {
                                        "  command [argument ...]\n"
                                        "  NAME=value command\n"
                                        "  producer | consumer\n"
+                                       "  producer | filter | ... | consumer\n"
                                        "  external-command > file\n"
                                        "  external-command >> file\n"
                                        "\n"
@@ -747,11 +774,11 @@ int shell_executor__page_help(void) {
                                        "  ;    run commands in sequence\n"
                                        "  &&   run the next command after success\n"
                                        "  ||   run the next command after failure\n"
-                                       "  |    pipe one external producer to one external consumer\n"
+                                       "  |    pipe external commands together, any number of hops\n"
                                        "  >    redirect an external command's output, truncating the file\n"
                                        "  >>   redirect an external command's output, appending to the file\n"
                                        "\n"
-                                       "Input redirection ('<') and chained pipes are not supported.\n"
+                                       "Input redirection ('<') is not supported.\n"
                                        "\n"
                                        "Shell built-ins:\n";
     if (!shell_executor__buffer_append_text(&buffer, introduction)) goto out_of_memory;
@@ -873,7 +900,7 @@ static int shell_executor__dispatch(shell_state_t *state, const shell_command_t 
      * is_function/is_builtin below ever see it, so the timing wraps the
      * *wrapped* command's dispatch. It stays in shell_builtins__is_builtin()
      * so pipelines reject it with the usual builtin-in-a-pipe message
-     * instead of "command not found" (see shell_executor__pipe_to_external). */
+     * instead of "command not found" (see shell_executor__pipeline). */
     bool timed = strcmp(argv[0], "time") == 0;
     if (timed) {
         if (remaining < 2) {
@@ -1004,13 +1031,17 @@ int shell_executor__plan(shell_state_t *state, const shell_plan_t *plan) {
                    (connector == SHELL_CONNECT_OR && status != 0);
         if (!run) continue;
         if (i + 1u < plan->count && plan->commands[i + 1u].connector == SHELL_CONNECT_PIPE) {
-            if (i + 2u < plan->count && plan->commands[i + 2u].connector == SHELL_CONNECT_PIPE) {
-                stdio__printf("shell: chained pipes are unsupported\n");
-                status = 2;
-            } else {
-                status = shell_executor__pipe_to_external(state, &plan->commands[i], &plan->commands[i + 1u]);
+            /* Collect the whole run of pipe-joined commands starting here --
+             * plan->commands[i + n].connector == SHELL_CONNECT_PIPE means
+             * that command is piped from the one before it, so a chain of
+             * any length shows up as a run of such connectors -- and run the
+             * lot as one pipeline instead of just the next one command. */
+            size_t pipeline_count = 2;
+            while (i + pipeline_count < plan->count && plan->commands[i + pipeline_count].connector == SHELL_CONNECT_PIPE) {
+                pipeline_count++;
             }
-            i++;
+            status = shell_executor__pipeline(state, &plan->commands[i], pipeline_count);
+            i += pipeline_count - 1u;
         } else if (connector == SHELL_CONNECT_PIPE) {
             status = 2;
         } else {
