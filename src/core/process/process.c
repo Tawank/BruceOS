@@ -67,7 +67,7 @@ static TaskHandle_t s_reaper_handle;
 void process__free_stack_buffers(void *stack_buffer, void *tcb_buffer) {
     memory__header_t *header = ((memory__header_t *)stack_buffer) - 1;
     header->magic = 0;
-    free(header);
+    memory__stack_free(header);
     free(tcb_buffer);
 }
 
@@ -597,11 +597,15 @@ process_registry__create(const process_create_params_t *params, bruce_process_id
      * via process_registry__resource_register(): process__teardown_locked()
      * runs its resource cleanups synchronously while the process is still
      * executing (before it self-deletes), which would free a running task's
-     * own stack out from under it. */
-    memory__header_t *stack_header = malloc(sizeof(memory__header_t) + stack_bytes);
+     * own stack out from under it.
+     *
+     * Where those bytes physically come from (general heap vs. RTC memory)
+     * is memory.c's call, not this function's - see memory__stack_alloc(). */
+    size_t stack_total = sizeof(memory__header_t) + stack_bytes;
+    memory__header_t *stack_header = memory__stack_alloc(stack_total);
     StaticTask_t *tcb_buffer = stack_header != NULL ? malloc(sizeof(StaticTask_t)) : NULL;
     if (stack_header == NULL || tcb_buffer == NULL) {
-        free(stack_header);
+        memory__stack_free(stack_header);
         free(tcb_buffer);
         process__free_argv(record->argc, record->argv);
         process__environment_free(&record->environment);
@@ -615,6 +619,10 @@ process_registry__create(const process_create_params_t *params, bruce_process_id
     stack_header->resource_id = record->next_resource_id++;
     stack_header->owner_id = record->id;
     stack_header->is_stack = true;
+    /* memory__stack_alloc() never hands back memory_rtc.c's hand-rolled
+     * pool (a stack pointer can't live there - see its comment), so this is
+     * always false; memory__stack_free() doesn't inspect it either way. */
+    stack_header->is_rtc_pool = false;
     record->stack_buffer = (void *)(stack_header + 1);
     record->tcb_buffer = tcb_buffer;
     record->memory_bytes += stack_bytes;

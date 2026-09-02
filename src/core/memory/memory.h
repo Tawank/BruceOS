@@ -104,3 +104,26 @@ void memory_rtc__walk(
     bool (*visit)(uintptr_t pool_start, uintptr_t pool_end, const memory_rtc__block_t *block, void *context),
     void *context
 );
+
+/*
+ * Backing allocator for a process's own task stack (process.c is the only
+ * caller) - hides exactly where those bytes physically come from behind one
+ * call, the same way memory__malloc() does for ordinary allocations.
+ * process.c owns everything about *being* a stack (the header's
+ * magic/size/resource_id/owner_id/is_stack fields, xTaskCreateStatic(),
+ * teardown ordering); it has no business also knowing which capability flag
+ * or hand-rolled pool is safe to try for a stack pointer specifically, or in
+ * what order - that's a memory-placement decision, so it lives here with
+ * memory__malloc()'s own (see memory.c's memory__stack_alloc() for the
+ * reasoning: RTC_FAST is safe, memory_rtc.c's RTC_SLOW pool is not -
+ * esp_stack_ptr_is_sane() rejects it).
+ *
+ * Returns raw, unheadered memory sized exactly total_bytes (the caller adds
+ * sizeof(memory__header_t) itself, same as memory__malloc()'s own total) -
+ * NULL on failure. memory__stack_free() releases whatever
+ * memory__stack_alloc() returned; unlike memory__free()'s is_rtc_pool
+ * dispatch, no header inspection is needed to free it - every source this
+ * function can pick from is released identically.
+ */
+void *memory__stack_alloc(size_t total_bytes);
+void memory__stack_free(void *ptr);

@@ -158,6 +158,29 @@ void memory__free(void *ptr) {
     }
 }
 
+void *memory__stack_alloc(size_t total_bytes) {
+    /* RTC_FAST only, deliberately never memory_rtc.c's RTC_SLOW pool:
+     * esp_stack_ptr_is_sane() (esp_memory_utils.h) - which FreeRTOS/the IDF
+     * port use to validate a stack pointer on every context switch - accepts
+     * DRAM, ext RAM, and RTC_FAST, but never RTC_SLOW under any Kconfig
+     * option on this chip. Confirmed the hard way: a stack landed in the
+     * RTC_SLOW pool boot-loops at the very first context switch. RTC_FAST
+     * rarely has room in practice (a default-sized stack is already half its
+     * ~8KB region, and the 8KB GUI tier doesn't fit at all), so most stacks
+     * fall straight through to the general heap below - same as
+     * memory__malloc()'s own RTC-then-heap steering, just with RTC_SLOW off
+     * the table for this one caller. */
+    void *ptr = heap_caps_malloc(total_bytes, MALLOC_CAP_RTCRAM);
+    if (ptr == NULL) { ptr = malloc(total_bytes); }
+    return ptr;
+}
+
+void memory__stack_free(void *ptr) {
+    /* Both sources memory__stack_alloc() can return - RTC_FAST via
+     * heap_caps_malloc() or the general heap - are freed identically. */
+    free(ptr);
+}
+
 bruce_result_t memory__get_stats(bruce_memory_stats_t *out_stats) {
     if (out_stats == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     multi_heap_info_t internal_info;
