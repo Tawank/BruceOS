@@ -81,6 +81,23 @@ typedef struct {
     bruce_display_render_mode_t mode;
 } display__render_request_t;
 static display__render_request_t s_render_requests[DISPLAY__MAX_RENDER_REQUESTS];
+/* Set by display__reclaim_reclaim(), cleared by display__reclaim_restore()
+ * (both defined near display__release_render_mode() below) -- deliberately
+ * NOT represented as an entry in s_render_requests[], unlike a process's own
+ * display__request_render_mode() call. A memory__reclaim() shrink is credited
+ * to whichever process calls it (see elf_loader_app.c's use), but that credit
+ * is then routinely reassigned to a different process via
+ * memory__reclaim_adopt() -- process_registry__resource_transfer() moves who
+ * memory_reclaim__restore() fires for, but has no way to also renumber an
+ * s_render_requests[] row's process_id, and display__process_removed() would
+ * release that row the moment the ORIGINAL (reclaiming) process exits
+ * regardless, which is often almost immediately, well before the adopted-to
+ * process ever gets to use the freed space. Tracking this shrink with its own
+ * flag instead of a per-process row sidesteps both: nothing but
+ * display__reclaim_restore() (itself only ever invoked via the
+ * memory_reclaim.c resource callback already correctly re-targeted by
+ * adopt()) can undo it. */
+static bool s_reclaim_forced_direct;
 
 static inline void display__lock(void) { xSemaphoreTakeRecursive(s_registry_mutex, portMAX_DELAY); }
 static inline void display__unlock(void) { xSemaphoreGiveRecursive(s_registry_mutex); }
@@ -683,6 +700,9 @@ static bruce_result_t display__apply_effective_render_mode_locked(void) {
     for (size_t i = 0; i < DISPLAY__MAX_RENDER_REQUESTS; ++i) {
         if (s_render_requests[i].in_use && s_render_requests[i].mode > target) target = s_render_requests[i].mode;
     }
+    /* s_reclaim_forced_direct is a standing, process-independent floor on top
+     * of the per-process requests above -- see its declaration. */
+    if (s_reclaim_forced_direct) target = BRUCE_DISPLAY_MODE_DIRECT;
     if (target == display__current_render_mode_locked()) return BRUCE_OK;
     return display__reconfigure_render_mode_locked(
         target != BRUCE_DISPLAY_MODE_DIRECT, target == BRUCE_DISPLAY_MODE_BUFFERED_DMA
@@ -1132,13 +1152,51 @@ static size_t display__reclaim_estimate(void) {
     return bytes;
 }
 
+/* Deliberately does not go through display__request_render_mode() -- see
+ * s_reclaim_forced_direct's declaration for why a per-process request row
+ * would be the wrong lifetime for this. Still declines (like
+ * display__request_render_mode() does) while a frame is active on any
+ * context, and while already forced (memory__reclaim() itself never asks
+ * twice without an intervening restore, but this keeps the flag/mode pair
+ * consistent regardless). */
 static size_t display__reclaim_reclaim(void) {
     size_t estimate = display__reclaim_estimate();
     if (estimate == 0) return 0;
-    return display__request_render_mode(BRUCE_DISPLAY_MODE_DIRECT) == BRUCE_OK ? estimate : 0;
+    display__lock();
+    bruce_result_t result = BRUCE_ERR_NOT_INITIALIZED;
+    if (s_initialized && !s_reclaim_forced_direct) {
+        result = display__frame_active_locked();
+        if (result == BRUCE_OK) {
+            s_reclaim_forced_direct = true;
+            result = display__apply_effective_render_mode_locked();
+            if (result != BRUCE_OK) s_reclaim_forced_direct = false;
+        }
+    }
+    display__unlock();
+    return result == BRUCE_OK ? estimate : 0;
 }
 
-static void display__reclaim_restore(void) { (void)display__release_render_mode(); }
+/* Runs from the memory_reclaim.c resource-cleanup callback (memory__reclaim()
+ * registers this via s_reclaim_provider below) at the exit of whichever
+ * process actually ended up credited with the reclaim -- via
+ * memory__reclaim_adopt(), ordinarily the spawned app, not the loader that
+ * called memory__reclaim() -- so, like
+ * display__release_render_mode_for_process_locked(), unconditional: that
+ * process's own teardown may leave a context mid-frame, and this must not
+ * leave the display stuck leaner than every remaining request needs forever
+ * just because the exiting process never itself called
+ * display__release_render_mode(). */
+static void display__reclaim_restore(void) {
+    display__lock();
+    if (s_initialized && s_reclaim_forced_direct) {
+        s_reclaim_forced_direct = false;
+        bruce_result_t result = display__apply_effective_render_mode_locked();
+        if (result != BRUCE_OK) {
+            ESP_LOGE(TAG, "display: failed to restore rendering mode after reclaim (%d)", (int)result);
+        }
+    }
+    display__unlock();
+}
 
 bruce_result_t display__begin_frame(void) {
     bruce_process_id_t caller = process__current_id();

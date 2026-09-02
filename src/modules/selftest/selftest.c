@@ -169,6 +169,7 @@ int selftest_app_main(int argc, char **argv) {
     RUN_SELFTEST(selftest__run_loader_registry_extensibility_case);
     RUN_SELFTEST(selftest__run_elf_loader_case);
     RUN_SELFTEST(selftest__run_elf_loader_xip_case);
+    RUN_SELFTEST(selftest__run_reclaim_handoff_case);
     RUN_SELFTEST(selftest__run_wasm_loader_case);
     RUN_SELFTEST(selftest__run_wasm_manifest_case);
     RUN_SELFTEST(selftest__run_wasm_bruce_abi_case);

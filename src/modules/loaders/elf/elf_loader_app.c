@@ -110,15 +110,29 @@ static void elf_loader__cleanup_context(void *context) {
     elf_loader__free_process_ctx((elf_loader_process_ctx_t *)context);
 }
 
-/* Process entry for an ELF already relocated by elf_loader__open(). */
+/* Process entry for an ELF already relocated by elf_loader__open(). Adopts
+ * the XIP mapping FIRST, before the reclaim token -- elf_loader__open()'s own
+ * wait loop (see its "for (;;)" below) treats this process having any
+ * resource at all (snapshot.resource_count > 0) as its signal that the
+ * hand-off is done and it's safe for the loader to exit, so whichever adopt
+ * call runs first is the one that actually has to be complete by then. XIP
+ * ownership must be settled first: it's this process's actual code and data
+ * (the memory it's about to execute out of and read its .rodata from) --
+ * unlike the reclaim token, its adoption is not optional to wait for. Once
+ * ext_mem_loader__adopt_xip() returns BRUCE_OK the loader has no further
+ * claim on ctx->xip regardless of what this process does next, so it's safe
+ * for elf_loader__open()'s loop to unblock right there. */
 static int elf_loader__entry(void *context) {
     elf_loader_process_ctx_t *ctx = (elf_loader_process_ctx_t *)context;
-    /* Best-effort: a failed adopt just means whatever was reclaimed stays
-     * credited to the loader instead of this process, not a reason to abort
-     * launch. */
-    (void)memory__reclaim_adopt(ctx->reclaim_token);
     bruce_result_t adopt_result = ext_mem_loader__adopt_xip(&ctx->xip);
     if (adopt_result != BRUCE_OK) return adopt_result;
+    /* Best-effort, and deliberately after the XIP adopt above: a failed (or,
+     * per the ordering note above, not-yet-observed-by-the-loader) adopt just
+     * means whatever was reclaimed stays credited to the loader instead of
+     * this process -- it still gets released, just possibly a little sooner
+     * (when the loader itself exits) rather than when this process does --
+     * never a reason to abort launch, unlike the XIP case above. */
+    (void)memory__reclaim_adopt(ctx->reclaim_token);
     return esp_elf_request(&ctx->elf, 0, ctx->argc, ctx->argv);
 }
 
@@ -306,6 +320,22 @@ static int elf_loader__open(
          * and it is never left un-reverted, just reverted later than ideal. */
         elf_loader__free_process_ctx(ctx);
     } else {
+        /* Waits for the spawned process to own at least one resource before
+         * letting this loader process proceed (and, in particular, exit --
+         * see the module doc comment above app_main() ... actually see
+         * elf_loader__app_main()'s own comment on why a caller can't see this
+         * failure any other way). resource_count > 0 is a safe proxy for
+         * "the XIP hand-off is done" specifically because
+         * elf_loader__entry() adopts the XIP mapping before anything else it
+         * does -- see that function's comment. Only once that is true does
+         * ctx->xip belong entirely to the new process, at which point
+         * parent_xip (this loader's now-stale copy of the same struct) must
+         * NOT also be released -- the loop simply lets it go unreleased on
+         * this path, since ownership already transferred. If the process
+         * instead exits without ever adopting (relocation looked fine but
+         * esp_elf_request() never got called, or the process was killed
+         * first), parent_xip is this loader's only remaining reference and
+         * releasing it here is what prevents the XIP mapping from leaking. */
         for (;;) {
             bruce_process_snapshot_t snapshot;
             bruce_result_t snapshot_result = process__snapshot(result, &snapshot);

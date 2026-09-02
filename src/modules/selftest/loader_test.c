@@ -7,6 +7,7 @@
 #include "core/dialog/dialog.h"
 #include "core/storage/storage.h"
 #include "core_sdk/dialog.h"
+#include "core_sdk/display.h"
 #include "core_sdk/ext_mem_loader.h"
 #include "core_sdk/manifest.h"
 #include "core_sdk/memory.h"
@@ -279,6 +280,90 @@ bool selftest__run_elf_loader_case(void) {
     }
 
     printf("[selftest] loader/elf: OK\n");
+    return true;
+}
+
+/* ------------------------------------------------------------------------ */
+/* memory__reclaim()/memory__reclaim_adopt(): process-independent restore   */
+/* ------------------------------------------------------------------------ */
+
+/* elf_loader__open() reclaims memory (e.g. the display framebuffer, via
+ * memory__reclaim()) on behalf of the app it's about to spawn, then that app
+ * calls memory__reclaim_adopt() so the credit -- and the eventual restore --
+ * follows IT, not the loader, which may exit long before the app does (see
+ * elf_loader_process_ctx_t's reclaim_token field comment in
+ * elf_loader_app.c). This reproduces that exact hand-off shape with a
+ * throwaway child process instead of a real ELF (blocked under QEMU by a
+ * separate, already-documented swap-readback gap -- see
+ * selftest__run_elf_loader_xip_case()'s own QEMU leniency guard above), so it
+ * can run the real mechanism end-to-end here: the display framebuffer is the
+ * one reclaim provider Core currently registers (display.c's
+ * display__reclaim_reclaim()/_restore()). */
+static bruce_memory_reclaim_token_t s_reclaim_handoff_token;
+
+static int selftest__reclaim_handoff_child_entry(void *context) {
+    (void)context;
+    return (int)memory__reclaim_adopt(s_reclaim_handoff_token);
+}
+
+bool selftest__run_reclaim_handoff_case(void) {
+    size_t footprint_before = display__buffer_footprint();
+    if (footprint_before == 0) {
+        printf("[selftest] loader/reclaim_handoff: SKIP, nothing reclaimable\n");
+        return true;
+    }
+
+    /* 1, not footprint_before: memory__reclaim()'s needed_bytes is what the
+     * caller is asking for, checked against providers' estimate() (the
+     * strictly-reclaimable portion -- for display, just the off-screen
+     * framebuffer, see display__reclaim_estimate()), not against
+     * display__buffer_footprint()'s larger total-display-RAM-cost figure
+     * (framebuffer + pack buffer, which together exceed what a single
+     * reclaim actually frees -- see display__buffer_footprint()'s own
+     * comment). Any request this small that's still > 0 exercises the same
+     * path a real elf_loader__open() caller sized to its own actual need
+     * would. */
+    size_t freed = 0;
+    if (memory__reclaim(1, &freed, &s_reclaim_handoff_token) != BRUCE_OK || freed == 0) {
+        printf("[selftest] loader/reclaim_handoff: reclaim failed\n");
+        return false;
+    }
+    size_t footprint_after_reclaim = display__buffer_footprint();
+    if (footprint_after_reclaim >= footprint_before) {
+        printf("[selftest] loader/reclaim_handoff: reclaim did not shrink the framebuffer\n");
+        return false;
+    }
+
+    int child = app_runner__spawn_loader_process(
+        "selftest_reclaim_handoff", false, BRUCE_LAUNCH_BACKGROUND, 0, NULL, 0,
+        selftest__reclaim_handoff_child_entry, NULL
+    );
+    bruce_process_status_t status;
+    bool child_ok = child > 0 && process__wait_status((bruce_process_id_t)child, 2000, &status) == BRUCE_OK &&
+                    status.reason == BRUCE_PROCESS_EXITED && status.exit_code == 0;
+    if (!child_ok) {
+        printf("[selftest] loader/reclaim_handoff: child did not adopt and exit cleanly (child=%d)\n", child);
+        return false;
+    }
+
+    /* This (the selftest) process never exited -- only the child, which just
+     * adopted the token and exited above, did. A restore keyed to the
+     * ORIGINAL reclaiming process (the bug display.c's s_reclaim_forced_direct
+     * fixes) would never fire here; one keyed correctly to the adopting
+     * process already has. */
+    size_t footprint_after_child_exit = display__buffer_footprint();
+    if (footprint_after_child_exit != footprint_before) {
+        printf(
+            "[selftest] loader/reclaim_handoff: restore did not follow the adopting process's exit "
+            "(before=%u after_reclaim=%u after_child_exit=%u)\n",
+            (unsigned)footprint_before,
+            (unsigned)footprint_after_reclaim,
+            (unsigned)footprint_after_child_exit
+        );
+        return false;
+    }
+
+    printf("[selftest] loader/reclaim_handoff: OK\n");
     return true;
 }
 
