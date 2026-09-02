@@ -9,6 +9,7 @@ bool selftest__run_shell_local_case(void);
 bool selftest__run_shell_command_substitution_case(void);
 bool selftest__run_shell_arith_word_case(void);
 bool selftest__run_shell_output_redirect_case(void);
+bool selftest__run_shell_builtin_redirect_case(void);
 bool selftest__run_shell_input_redirect_case(void);
 bool selftest__run_shell_heredoc_case(void);
 bool selftest__run_shell_cat_interactive_case(void);

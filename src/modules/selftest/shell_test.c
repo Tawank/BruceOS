@@ -83,10 +83,14 @@ bool selftest__run_shell_language_case(void) {
         strcmp(s_probe_pwd, "/") == 0 &&
         shell__execute_line(&state, "shell_test_probe nonzero") == 37 &&
         shell__execute_line(&state, "echo broken | echo nope") == 2 &&
-        shell__execute_line(&state, "echo > file") == 2 &&
+        /* "echo > file" now succeeds -- builtin/function output redirection
+         * is supported (shell_executor__builtin_redirected()), so this just
+         * writes an empty line to the target rather than being rejected. */
+        shell__execute_line(&state, "echo > /apps/shell_language_echo_redirect.txt") == 0 &&
         shell__execute_line(&state, "echo 'unterminated") == 2;
     if (ok) ok = shell__execute_line(&state, "shell_test_probe $INHERITED_SHELL visible") == 0;
     shell__state_free(&state);
+    (void)storage__remove("/apps/shell_language_echo_redirect.txt");
     (void)environment__unset("INHERITED_SHELL");
     printf("[selftest] shell/language: %s\n", ok ? "OK" : "failed");
     return ok;
@@ -758,6 +762,87 @@ bool selftest__run_shell_output_redirect_case(void) {
         );
     }
     printf("[selftest] shell/output-redirect: %s\n", ok ? "OK" : "failed");
+    return ok;
+}
+
+/* Exercises "builtin > file" / "builtin >> file" / "myfunc > file" --
+ * shell_executor__builtin_redirected() in shell_executor.c, which (unlike a
+ * real external command) has no separate child process to relay from: it
+ * temporarily reroutes the shell's own current session
+ * (stdio__session_capture_self()) into a private capture session, runs the
+ * builtin/function in-line, then writes whatever got captured to the target
+ * file. Called directly via shell__execute_line() on the selftest task, same
+ * reasoning as selftest__run_shell_output_redirect_case() above -- the
+ * capture session this creates is entirely its own, needing no pre-routed
+ * session on the calling task the way a spawned-child test would. Also
+ * confirms "<" combined with a builtin/function is still rejected (only a
+ * plain ">"/">>" is implemented -- see that function's own doc comment on
+ * why redirecting a builtin/function's *input* is a separate problem). */
+bool selftest__run_shell_builtin_redirect_case(void) {
+    const char *echo_path = "/apps/shell_builtin_redirect_echo.txt";
+    const char *func_path = "/apps/shell_builtin_redirect_func.txt";
+    (void)storage__remove(echo_path);
+    (void)storage__remove(func_path);
+
+    shell_state_t state;
+    shell__state_init(&state);
+    char command[160];
+    snprintf(command, sizeof(command), "echo hello world > %s", echo_path);
+    int status_echo = shell__execute_line(&state, command);
+    snprintf(command, sizeof(command), "echo again >> %s", echo_path);
+    int status_echo_append = shell__execute_line(&state, command);
+
+    int status_def = shell__execute_line(&state, "greet() { echo hi; echo there; }");
+    snprintf(command, sizeof(command), "greet > %s", func_path);
+    int status_func = shell__execute_line(&state, command);
+
+    snprintf(command, sizeof(command), "echo x < %s > %s", echo_path, func_path);
+    int status_input_rejected = shell__execute_line(&state, command);
+    shell__state_free(&state);
+
+    char echo_result[64] = {0};
+    size_t echo_size = 0;
+    bruce_result_t read_echo = BRUCE_ERR_NOT_FOUND;
+    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
+    if (storage__open(echo_path, BRUCE_STORAGE_OPEN_READ, &file) == BRUCE_OK) {
+        read_echo = storage__read(file, echo_result, sizeof(echo_result) - 1, &echo_size);
+        (void)storage__close(file);
+    }
+    char func_result[64] = {0};
+    size_t func_size = 0;
+    bruce_result_t read_func = BRUCE_ERR_NOT_FOUND;
+    if (storage__open(func_path, BRUCE_STORAGE_OPEN_READ, &file) == BRUCE_OK) {
+        read_func = storage__read(file, func_result, sizeof(func_result) - 1, &func_size);
+        (void)storage__close(file);
+    }
+    (void)storage__remove(echo_path);
+    (void)storage__remove(func_path);
+
+    /* "\r\n", not "\n" -- same ONLCR session-output convention noted on
+     * selftest__run_shell_output_redirect_case()'s own expected[] above: the
+     * capture session this goes through applies it just the same as any
+     * other session. */
+    static const char expected_echo[] = "hello world\r\nagain\r\n";
+    static const char expected_func[] = "hi\r\nthere\r\n";
+    bool ok = status_echo == 0 && status_echo_append == 0 && status_def == 0 && status_func == 0 &&
+              status_input_rejected == 2 && read_echo == BRUCE_OK && echo_size == sizeof(expected_echo) - 1 &&
+              memcmp(echo_result, expected_echo, sizeof(expected_echo) - 1) == 0 && read_func == BRUCE_OK &&
+              func_size == sizeof(expected_func) - 1 &&
+              memcmp(func_result, expected_func, sizeof(expected_func) - 1) == 0;
+    if (!ok) {
+        /* echo_result/func_result are zero-initialized and storage__read()
+         * never fills past sizeof(...)-1, so both are already safely
+         * NUL-terminated within bounds -- plain "%s" (no dynamic precision)
+         * is enough to dump the actual captured bytes for diagnosis. */
+        char dbg[256];
+        snprintf(
+            dbg, sizeof(dbg), "[selftest] shell/builtin-redirect: status=%d,%d,%d,%d,%d echo=%d/%u:[%s] func=%d/%u:[%s]\n",
+            status_echo, status_echo_append, status_def, status_func, status_input_rejected, read_echo,
+            (unsigned)echo_size, echo_result, read_func, (unsigned)func_size, func_result
+        );
+        printf("%s", dbg);
+    }
+    printf("[selftest] shell/builtin-redirect: %s\n", ok ? "OK" : "failed");
     return ok;
 }
 

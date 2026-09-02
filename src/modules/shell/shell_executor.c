@@ -593,6 +593,70 @@ static int shell_executor__external_redirected(
     return status;
 }
 
+/* "builtin > file" / "builtin >> file" / "myfunc > file" -- a builtin or
+ * shell function has no separate child process whose output could be
+ * relayed the way shell_executor__external_redirected() above (a real
+ * child) or shell_executor__pipeline()'s "echo" pseudo-producer (nothing to
+ * run at all) can: it runs in-line, on the shell's own task, writing
+ * through whatever session *this process* is currently routed to. So
+ * instead, this temporarily reroutes the shell's own session (not its
+ * children's -- see stdio__session_capture_self()'s doc comment) into a
+ * private capture session, runs the builtin/function, restores the
+ * previous routing, and writes whatever got captured to the target file --
+ * the same capture-fully-then-write shape
+ * shell_executor__external_with_input() uses for a real child, just with
+ * nothing to wait on afterward since running the builtin/function already
+ * happened synchronously by the time capture_self() is undone.
+ *
+ * Only a plain ">"/">>" is handled here -- a "<"/heredoc feeding a
+ * builtin/function's *input* is a separate, harder problem (its own
+ * stdio__read_line()/stdio__read() calls would need the capture session's
+ * *input* side pre-loaded instead) and stays rejected by the caller.
+ *
+ * Nests correctly for a function whose body itself redirects another
+ * builtin/function: each call's capture/release pair is scoped to this
+ * single call, so nested calls push/pop their own session in turn, same as
+ * ordinary recursion. */
+static int shell_executor__builtin_redirected(
+    shell_state_t *state, int argc, char **argv, const shell_command_t *command, bool is_function
+) {
+    const char *error = NULL;
+    char *path = NULL;
+    if (shell_executor__resolve_redirect_target(state, &command->redirect_target, &path, &error) != 0) {
+        stdio__printf("shell: %s\n", error != NULL ? error : "redirection error");
+        return 2;
+    }
+    bruce_stdio_session_t capture = BRUCE_STDIO_SESSION_INVALID;
+    if (stdio__session_create(&capture) != BRUCE_OK || stdio__session_capture_self(capture) != BRUCE_OK) {
+        stdio__printf("shell: %s: out of memory\n", path);
+        if (capture != BRUCE_STDIO_SESSION_INVALID) (void)stdio__session_close(capture);
+        memory__free(path);
+        return 2;
+    }
+    int status = is_function ? shell_compound__call_function(state, argc, argv) : shell_builtins__run(state, argc, argv);
+    (void)stdio__session_release_self();
+
+    shell_executor__buffer_t buffer = {0};
+    bool out_of_memory = false;
+    for (;;) {
+        char chunk[256];
+        size_t size = 0;
+        if (stdio__session_read_output(capture, chunk, sizeof(chunk), &size) != BRUCE_OK || size == 0) break;
+        if (!shell_executor__buffer_append(&buffer, chunk, size)) {
+            out_of_memory = true;
+            break;
+        }
+    }
+    (void)stdio__session_close(capture);
+
+    bool write_ok = shell_executor__write_file(path, command->redirect == SHELL_REDIRECT_APPEND, &buffer);
+    if (out_of_memory) stdio__printf("shell: %s: out of memory\n", path);
+    else if (!write_ok) stdio__printf("shell: %s: write failed\n", path);
+    shell_executor__buffer_free(&buffer);
+    memory__free(path);
+    return out_of_memory || !write_ok ? 1 : status;
+}
+
 /* Pumps `session` bidirectionally between `child` and the shell process's own
  * routed stdio -- i.e. whatever real terminal (terminal_app.c, ssh, the
  * physical console, ...) the shell itself is running under -- until `child`
@@ -1231,9 +1295,13 @@ static int shell_executor__dispatch(shell_state_t *state, const shell_command_t 
     uint64_t started_at = timed ? runtime__now() : 0;
     bool redirected = command->redirect != SHELL_REDIRECT_NONE || command->input_redirect ||
                        command->heredoc_body != NULL;
+    bool output_only_redirect =
+        command->redirect != SHELL_REDIRECT_NONE && !command->input_redirect && command->heredoc_body == NULL;
     if (redirected) {
-        if (is_function || is_builtin) {
-            stdio__printf("shell: redirection currently requires an external command\n");
+        if ((is_function || is_builtin) && output_only_redirect) {
+            result = shell_executor__builtin_redirected(state, remaining, argv, command, is_function);
+        } else if (is_function || is_builtin) {
+            stdio__printf("shell: '<'/heredoc input redirection currently requires an external command\n");
             result = 2;
         } else if (command->input_redirect) {
             result = shell_executor__external_input_redirected(state, remaining, argv, command);

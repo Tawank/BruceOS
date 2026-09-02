@@ -88,11 +88,13 @@ line it just deletes the character under the cursor, like Delete.
 
 **Redirection — `>` / `>>` / `<` / here-docs** (`shell_parser.c`,
 `shell_executor.c`, `shell_app.c`)
-- A single, trailing `> file` or `>> file` on an **external command** (not a
-  builtin, not a shell function): `>` truncates/creates the file, `>>`
-  creates/appends. A single, trailing `< file` is likewise supported, feeding
-  the file's whole content to the command's stdin, and can be combined with a
-  `>`/`>>` on the same command (`sort < in.txt > out.txt`). Either target
+- A single, trailing `> file` or `>> file` on an external command, a
+  builtin, or a shell function: `>` truncates/creates the file, `>>`
+  creates/appends. A single, trailing `< file` is likewise supported for an
+  **external command**, feeding the file's whole content to the command's
+  stdin, and can be combined with a `>`/`>>` on the same command
+  (`sort < in.txt > out.txt`) — `<`/here-docs feeding a *builtin's or
+  function's* stdin aren't implemented (see further down). Either target
   undergoes the same quoting/escaping/`$` expansion as any other word
   (`wifi scan >> "$LOG_DIR/wifi.txt"` works), and a relative target resolves
   against `$PWD` the same way `cd`'s argument does. A bare `> file` /
@@ -100,7 +102,7 @@ line it just deletes the character under the cursor, like Delete.
   bash's `: > file` idiom; a bare `< file` with no command just checks the
   file can be opened.
 - Implementation: a plain `>`/`>>` redirection with no `<`/here-doc input
-  streams the external command's stdout straight to the file as it runs
+  streams an **external command's** stdout straight to the file as it runs
   (`shell_executor__stream_external_to_file()`), rather than buffering it
   first — so, unlike a `NAME=value`-prefixed command, it keeps whatever
   partial output the command wrote before exiting nonzero, matching bash. A
@@ -110,7 +112,16 @@ line it just deletes the character under the cursor, like Delete.
   mechanism `|` piping uses — so it shares that path's existing
   `NAME=value`-dropped, discard-partial-output-on-failure limitations. A
   `<`/here-doc-fed command with no `>`/`>>` of its own instead relays its
-  output live, exactly like a non-redirected external command.
+  output live, exactly like a non-redirected external command. A **builtin
+  or shell function** has no separate child process to stream/relay from at
+  all — it runs in-line on the shell's own task — so `>`/`>>` on one of
+  those instead temporarily reroutes the shell's *own* current session into
+  a private capture session (`shell_executor__builtin_redirected()`,
+  `stdio__session_capture_self()`/`_release_self()` in `core_sdk/stdio.h`),
+  runs it, and writes whatever got captured once it returns; this always
+  fully buffers (there's nothing to stream until the call has already
+  finished) and nests correctly for a function whose own body redirects
+  another builtin/function.
 - Only one input and one output redirection per command are recognized, and
   they must trail the command (`cmd arg1 arg2 > file`, not
   `cmd > file arg2`); a second `>`/`<`/here-doc marker, or trailing text
@@ -128,10 +139,13 @@ line it just deletes the character under the cursor, like Delete.
   but the result is never word-split or globbed); a single-quoted delimiter
   keeps the body completely literal. `<<-` strips each body line's (and the
   terminator's) leading tabs before comparing, matching bash.
-- Redirecting a builtin, a shell function, or a standalone `((...))`
-  statement is rejected with an error (`shell: redirection currently
-  requires an external command`) rather than doing nothing silently, and so
-  is a `<`/here-doc on a piped command's stage.
+- A `<`/here-doc feeding a builtin's or function's *input* is rejected with
+  an error (`shell: '<'/heredoc input redirection currently requires an
+  external command`) rather than doing nothing silently — only their output
+  can be redirected (see above). A standalone `((...))` statement rejects
+  any redirection at all, input or output (`shell: redirection is not
+  supported on '((...))'`) — a separate limitation, not the same code path.
+  A `<`/here-doc on a piped command's stage is likewise rejected.
 - **Not implemented:** here-docs outside a script file, here-strings
   (`<<<`), multiple/chained redirections, and numbered file descriptors
   (`2>`).
@@ -205,8 +219,9 @@ line it just deletes the character under the cursor, like Delete.
 ## What's left to implement
 
 Roughly in order of how often bash scripts actually use them:
-- Redirecting a builtin or shell function's output (still requires an
-  external command — see the Redirection section above).
+- Redirecting a builtin's or shell function's *input* (`<`/here-doc), and
+  redirecting a standalone `((...))` statement at all — see the Redirection
+  section above; their *output* (`>`/`>>`) is implemented.
 - Pathname globbing and brace expansion.
 - `case`/`esac`.
 - `$@`, `$*`, `$$`, `$!`.
@@ -311,7 +326,9 @@ just skipping the rest of the current row.
 against real firmware output (via `stdio__session_*` + `app_runner__run`):
 `selftest__run_shell_language_case`, `..._script_case`,
 `..._control_flow_case`, `..._local_case`, `..._command_substitution_case`,
-`..._arith_word_case`, `..._output_redirect_case`, `..._input_redirect_case`,
+`..._arith_word_case`, `..._output_redirect_case`, `..._builtin_redirect_case`
+(`echo`/a shell function redirected to a file, and confirming a `<`-combined
+redirect on one is still rejected), `..._input_redirect_case`,
 `..._heredoc_case`, `..._cat_interactive_case` (bare `cat`'s
 Ctrl+D-terminated interactive stdin, layered on `stdio__read_line()` --
 see `bnu_fs_app.c`'s `bnu__cat_interactive()`), `..._multiline_case` (also

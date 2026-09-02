@@ -9,6 +9,9 @@
 #include "freertos/event_groups.h"
 #include "freertos/task.h"
 
+/* See process__record_t's stdio_session_stack field. */
+#define PROCESS__STDIO_SESSION_STACK_MAX 4u
+
 typedef struct {
     char *name;
     char *value;
@@ -40,6 +43,15 @@ typedef struct process__record {
     bool preserve_display;
     bruce_stdio_session_t stdio_session;
     bruce_stdio_session_t child_stdio_session;
+    /* Saved stdio_session values for process_registry__push_own_stdio_session()/
+     * pop_own_stdio_session() -- see their own doc comments in process.c. A
+     * small fixed depth rather than a dynamic stack: a process nesting this
+     * more than a few levels deep (e.g. the shell's own builtin/function
+     * output-redirection capture, see shell_executor__builtin_redirected())
+     * would already have blown its task stack via ordinary C recursion long
+     * before exhausting this. */
+    bruce_stdio_session_t stdio_session_stack[PROCESS__STDIO_SESSION_STACK_MAX];
+    uint8_t stdio_session_stack_depth;
     TaskHandle_t handle;
     /* Backing buffers for this process's statically-created task, so its
      * stack shows up in `free -m` as the process's own tracked memory

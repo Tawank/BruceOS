@@ -175,3 +175,5 @@ void process_registry__mark_presentable(bruce_process_id_t process_id);
 
 bruce_result_t process_registry__set_child_stdio_session(uint32_t session);
 uint32_t process_registry__current_stdio_session(void);
+bruce_result_t process_registry__push_own_stdio_session(uint32_t session);
+bruce_result_t process_registry__pop_own_stdio_session(void);

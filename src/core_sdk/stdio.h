@@ -134,6 +134,34 @@ bruce_result_t stdio__session_close(bruce_stdio_session_t session);
 bruce_result_t stdio__session_route_children(bruce_stdio_session_t session);
 
 /**
+ * @brief Temporarily routes the calling process's *own* reads/writes into `session`.
+ *
+ * Unlike stdio__session_route_children(), which only affects children this
+ * process launches afterward, this changes where the calling process's own
+ * stdio__printf()/stdio__write() calls go right now -- e.g. so a shell can
+ * capture a builtin's or shell function's output for ">"/">>" redirection,
+ * something with no separate child process to relay from. `session` must be
+ * one the calling process created (stdio__session_create()) -- same
+ * ownership rule as route_children(). Nests correctly (a handful of levels
+ * deep -- see PROCESS__STDIO_SESSION_STACK_MAX): call
+ * stdio__session_release_self() to undo the most recent capture and restore
+ * whatever was routed before it.
+ *
+ * @param session Session to route the calling process's own I/O through. Must be owned by the caller.
+ */
+bruce_result_t stdio__session_capture_self(bruce_stdio_session_t session);
+
+/**
+ * @brief Undoes the most recent stdio__session_capture_self(), restoring what it saved.
+ *
+ * Takes no session argument -- there is deliberately nothing here for a
+ * caller to supply a foreign/guessed session ID to; the value restored is
+ * only ever one this process legitimately had routed before the matching
+ * capture_self() call.
+ */
+bruce_result_t stdio__session_release_self(void);
+
+/**
  * @brief Writes input bytes into a session, as if typed by its consumer.
  *
  * @param session Session to write into.

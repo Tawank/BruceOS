@@ -913,6 +913,60 @@ uint32_t process_registry__current_stdio_session(void) {
     return session;
 }
 
+/* Temporarily overrides the calling process's *own* stdio_session (not its
+ * children's -- that's set_child_stdio_session() above): pushes the current
+ * value onto stdio_session_stack and installs `session` in its place, so a
+ * process's own stdio__printf()/stdio__write() calls -- not just the
+ * children it launches -- go somewhere else for a while. This is what lets
+ * the shell capture a builtin's or shell function's output for ">"/">>"
+ * redirection (see shell_executor__builtin_redirected()): unlike an
+ * external command, a builtin/function has no separate child process whose
+ * output could be relayed -- it runs in-line on the shell's own task.
+ *
+ * The stdio.c wrapper (stdio__session_capture_self()) ownership-checks
+ * `session` the same way stdio__session_route_children() does, so this
+ * never has to -- by the time a session ID reaches here, it's already been
+ * established that the calling process was allowed to adopt it. */
+bruce_result_t process_registry__push_own_stdio_session(uint32_t session) {
+    process__ensure_init();
+    process__lock();
+    process__record_t *self = process__find_by_handle_locked(xTaskGetCurrentTaskHandle());
+    if (self == NULL) {
+        process__unlock();
+        return BRUCE_ERR_NOT_FOUND;
+    }
+    if (self->stdio_session_stack_depth >= PROCESS__STDIO_SESSION_STACK_MAX) {
+        process__unlock();
+        return BRUCE_ERR_RESOURCE_LIMIT;
+    }
+    self->stdio_session_stack[self->stdio_session_stack_depth++] = self->stdio_session;
+    self->stdio_session = session;
+    process__unlock();
+    return BRUCE_OK;
+}
+
+/* Undoes the most recent process_registry__push_own_stdio_session(): pops
+ * and restores the value it saved. Takes no session argument at all -- by
+ * design, not merely convenience -- so there is nothing here for a caller
+ * to forge or guess its way into adopting a foreign session with; the value
+ * restored is only ever one this exact process legitimately held before. */
+bruce_result_t process_registry__pop_own_stdio_session(void) {
+    process__ensure_init();
+    process__lock();
+    process__record_t *self = process__find_by_handle_locked(xTaskGetCurrentTaskHandle());
+    if (self == NULL) {
+        process__unlock();
+        return BRUCE_ERR_NOT_FOUND;
+    }
+    if (self->stdio_session_stack_depth == 0) {
+        process__unlock();
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    self->stdio_session = self->stdio_session_stack[--self->stdio_session_stack_depth];
+    process__unlock();
+    return BRUCE_OK;
+}
+
 bruce_result_t process_registry__event_wake_clear(bruce_process_id_t process_id) {
     process__ensure_init();
     process__lock();

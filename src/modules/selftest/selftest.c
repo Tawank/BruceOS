@@ -192,6 +192,7 @@ int selftest_app_main(int argc, char **argv) {
     RUN_SELFTEST(selftest__run_shell_loops_case);
     RUN_SELFTEST(selftest__run_shell_pipe_redirect_case);
     RUN_SELFTEST(selftest__run_shell_output_redirect_case);
+    RUN_SELFTEST(selftest__run_shell_builtin_redirect_case);
     RUN_SELFTEST(selftest__run_shell_input_redirect_case);
     RUN_SELFTEST(selftest__run_shell_heredoc_case);
     RUN_SELFTEST(selftest__run_shell_cat_interactive_case);

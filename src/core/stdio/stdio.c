@@ -187,6 +187,24 @@ bruce_result_t stdio__session_route_children(bruce_stdio_session_t session) {
     return process_registry__set_child_stdio_session(session);
 }
 
+/* Ownership-checked the same way stdio__session_route_children() above is
+ * (session must be one the calling process itself created/owns) -- this is
+ * the "adopt a new session" half; stdio__session_release_self() is the
+ * paired "put the old one back" half, and (see its own doc comment) needs
+ * no check at all since it never accepts a caller-supplied session ID. */
+bruce_result_t stdio__session_capture_self(bruce_stdio_session_t session) {
+    bruce_process_id_t owner = process__current_id();
+    stdio__ensure_init();
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    stdio__session_t *entry = stdio__find_locked(session);
+    bool owned = stdio__owned_locked(entry, owner);
+    xSemaphoreGive(s_lock);
+    if (!owned) return entry == NULL ? BRUCE_ERR_NOT_FOUND : BRUCE_ERR_PERMISSION;
+    return process_registry__push_own_stdio_session(session);
+}
+
+bruce_result_t stdio__session_release_self(void) { return process_registry__pop_own_stdio_session(); }
+
 bruce_result_t stdio__session_write_input(bruce_stdio_session_t session, const void *data, size_t size) {
     if (data == NULL || size == 0) return BRUCE_ERR_INVALID_ARGUMENT;
     bruce_process_id_t owner = process__current_id();
