@@ -544,7 +544,7 @@ int archive_app_main(int argc, char **argv) {
         char bar_title[BRUCE_STORAGE_PATH_MAX + ARCHIVE_APP_PATH_MAX + 4];
         snprintf(bar_title, sizeof(bar_title), "%s - /%s", basename, prefix);
 
-        bruce_dialog_render_params_t render_params = dialog__default_render_params(1);
+        bruce_dialog_render_params_t render_params = dialog__default_render_params(2);
         render_params.long_press_enabled = true;
         bool long_press = false;
         render_params.out_long_press = &long_press;

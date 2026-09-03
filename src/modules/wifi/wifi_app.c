@@ -230,13 +230,13 @@ static int wifi_app__gui(void) {
         choices[exit_index].right_text = NULL;
 
         char subtitle[32];
-        if (count == 0) snprintf(subtitle, sizeof(subtitle), "No networks found");
-        else snprintf(subtitle, sizeof(subtitle), "%d network%s found", count, count == 1 ? "" : "s");
+        if (count == 0) snprintf(subtitle, sizeof(subtitle), "Wi-Fi No networks found");
+        else snprintf(subtitle, sizeof(subtitle), "Wi-Fi %d network%s found", count, count == 1 ? "" : "s");
 
         (void)notification__push("Wi-Fi scan ended", 1000);
         size_t selected = 0;
         bruce_result_t result =
-            dialog__choice_launcher("Wi-Fi networks", subtitle, choices, exit_index + 1, &selected);
+            dialog__choice_launcher(subtitle, NULL, choices, exit_index + 1, &selected);
         if (result == BRUCE_ERR_CANCELLED) return 0;
         if (result != BRUCE_OK) return -1;
         if (strcmp(choices[selected].value, "exit") == 0) return 0;

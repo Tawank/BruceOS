@@ -126,7 +126,7 @@ static int bluetooth_app__scan_gui(void) {
     bruce_result_t choice_result;
     do {
         choice_result = dialog__choice_launcher(
-            "BLE Advertisements", "Select a device", choices, (size_t)count, &selected
+            "BLE Advertisements", NULL, choices, (size_t)count, &selected
         );
     } while (choice_result == BRUCE_ERR_CANCELLED && bluetooth_app__resume_after_handoff());
     if (choice_result == BRUCE_OK) {
