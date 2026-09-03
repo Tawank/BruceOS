@@ -33,7 +33,14 @@ CONFIG_FREERTOS_USE_TRACE_FACILITY=y
 CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y
 # One Core process-context pointer is attached to each managed task.
 CONFIG_FREERTOS_THREAD_LOCAL_STORAGE_POINTERS=2
-CONFIG_FREERTOS_IN_IRAM=y
+
+# Trade IRAM/DIRAM space for scheduler and Wi-Fi throughput: FreeRTOS runs from
+# flash cache instead of RAM, and the Wi-Fi library's hot paths (including RX)
+# aren't pinned into IRAM either. Frees ~40K of RAM combined per ESP-IDF's own
+# Kconfig help text; only revert if a real perf regression traces back here.
+# CONFIG_FREERTOS_IN_IRAM is not set
+# CONFIG_ESP_WIFI_IRAM_OPT is not set
+# CONFIG_ESP_WIFI_RX_IRAM_OPT is not set
 
 # espressif/elf_loader needs executable memory; memory protection in ESP-IDF
 # v6 hides MALLOC_CAP_EXEC when enabled.  Disable it for the ELF loader slice.
