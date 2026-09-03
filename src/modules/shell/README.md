@@ -90,12 +90,10 @@ line it just deletes the character under the cursor, like Delete.
 `shell_executor.c`, `shell_app.c`)
 - A single, trailing `> file` or `>> file` on an external command, a
   builtin, or a shell function: `>` truncates/creates the file, `>>`
-  creates/appends. A single, trailing `< file` is likewise supported for an
-  **external command**, feeding the file's whole content to the command's
-  stdin, and can be combined with a `>`/`>>` on the same command
-  (`sort < in.txt > out.txt`) — `<`/here-docs feeding a *builtin's or
-  function's* stdin aren't implemented (see further down). Either target
-  undergoes the same quoting/escaping/`$` expansion as any other word
+  creates/appends. A single, trailing `< file` is likewise supported on all
+  three, feeding the file's whole content to the command's stdin, and can be
+  combined with a `>`/`>>` on the same command (`sort < in.txt > out.txt`).
+  Either target undergoes the same quoting/escaping/`$` expansion as any other word
   (`wifi scan >> "$LOG_DIR/wifi.txt"` works), and a relative target resolves
   against `$PWD` the same way `cd`'s argument does. A bare `> file` /
   `>> file` with no command at all just creates/truncates the file, same as
@@ -121,7 +119,24 @@ line it just deletes the character under the cursor, like Delete.
   runs it, and writes whatever got captured once it returns; this always
   fully buffers (there's nothing to stream until the call has already
   finished) and nests correctly for a function whose own body redirects
-  another builtin/function.
+  another builtin/function. A `<`/here-doc feeding a builtin's or function's
+  *input* works the same way in reverse (`shell_executor__builtin_with_input()`):
+  the whole file/heredoc body is preloaded into the private capture session's
+  input side via `stdio__session_write_input()` *before* the call is made,
+  since — unlike a real child process's session — nothing services it
+  concurrently once the call is blocked inside its own
+  `stdio__read()`/`stdio__read_line()` (e.g. the `read` builtin). That caps
+  the fed input at whatever the stdio session's input queue can hold in one
+  shot — comfortably enough for `read`'s usual "one line" use, but not a
+  generic streaming input; anything bigger is reported as a clear error
+  (`input too large to redirect into a builtin or function`) instead of
+  being silently truncated or left to hang. Once queued,
+  `stdio__session_close_input()` (`core_sdk/stdio.h`) marks that as the
+  entirety of the input, so a read past the end of it (a function calling
+  `read` twice with only one line on hand, say) gets a clean end-of-input the
+  moment the queue actually empties, instead of a blocking
+  `stdio__read()`/`stdio__read_line()` polling forever for bytes nothing will
+  ever add.
 - Only one input and one output redirection per command are recognized, and
   they must trail the command (`cmd arg1 arg2 > file`, not
   `cmd > file arg2`); a second `>`/`<`/here-doc marker, or trailing text
@@ -139,13 +154,17 @@ line it just deletes the character under the cursor, like Delete.
   but the result is never word-split or globbed); a single-quoted delimiter
   keeps the body completely literal. `<<-` strips each body line's (and the
   terminator's) leading tabs before comparing, matching bash.
-- A `<`/here-doc feeding a builtin's or function's *input* is rejected with
-  an error (`shell: '<'/heredoc input redirection currently requires an
-  external command`) rather than doing nothing silently — only their output
-  can be redirected (see above). A standalone `((...))` statement rejects
-  any redirection at all, input or output (`shell: redirection is not
-  supported on '((...))'`) — a separate limitation, not the same code path.
-  A `<`/here-doc on a piped command's stage is likewise rejected.
+- A standalone `((...))` statement accepts `>`/`>>`/`<`/here-doc too, the
+  same "nothing actually consumes it" way a bare `> file`/`< file` with no
+  command at all already does: `((...))` reads no stdin and writes no
+  stdout of its own, so a `>`/`>>` target is just created/truncated (or left
+  unappended-to), and a `<`/here-doc target is only ever validated (or, for
+  a here-doc, simply discarded — its body was already read regardless), not
+  read from. An arithmetic error (division by zero, a syntax error, ...)
+  skips the output target entirely rather than truncating it and then
+  failing. A `<`/here-doc on a piped command's stage is still rejected —
+  that's the one place a redirected input genuinely has nowhere to go, since
+  a pipe stage's stdin is already spoken for by the previous stage's output.
 - **Not implemented:** here-docs outside a script file, here-strings
   (`<<<`), multiple/chained redirections, and numbered file descriptors
   (`2>`).
@@ -191,14 +210,14 @@ line it just deletes the character under the cursor, like Delete.
   regression case in the selftests).
 - Function definitions: `NAME() { ... }`, `NAME () { ... }`, and
   `function NAME { ... }`. Functions get their own `$0`/positional
-  parameters (`$1..$9`, `$#`) for the duration of the call, but ordinary
-  variables are **not** function-scoped — there is no `local`; a variable
-  set inside a function is visible everywhere after the call returns.
-  Recursion works (positional parameters are saved/restored per call), so
-  the usual workaround for "no locals" is an accumulator-passing style where
-  each level only reads its own arguments *before* recursing and does
-  nothing with global state after the recursive call returns — see the
-  `factorial` example below.
+  parameters (`$1..$9`, `$#`) for the duration of the call, and ordinary
+  variables are dynamically scoped only insofar as `local` (see below) is
+  used to shadow them — a variable set inside a function with no `local` is
+  visible everywhere after the call returns, same as bash. Recursion works
+  (positional parameters are saved/restored per call); the `factorial`
+  example below still uses the accumulator-passing style (each level only
+  reads its own arguments *before* recursing and does nothing with global
+  state after the recursive call returns) since there is no `return`.
 - There is no `return` builtin. A function's exit status is simply whatever
   its last executed command's status was, same as a plain script; use
   `if`/`elif`/`else` to skip the rest of the body instead of returning
@@ -219,9 +238,6 @@ line it just deletes the character under the cursor, like Delete.
 ## What's left to implement
 
 Roughly in order of how often bash scripts actually use them:
-- Redirecting a builtin's or shell function's *input* (`<`/here-doc), and
-  redirecting a standalone `((...))` statement at all — see the Redirection
-  section above; their *output* (`>`/`>>`) is implemented.
 - Pathname globbing and brace expansion.
 - `case`/`esac`.
 - `$@`, `$*`, `$$`, `$!`.
@@ -327,8 +343,14 @@ against real firmware output (via `stdio__session_*` + `app_runner__run`):
 `selftest__run_shell_language_case`, `..._script_case`,
 `..._control_flow_case`, `..._local_case`, `..._command_substitution_case`,
 `..._arith_word_case`, `..._output_redirect_case`, `..._builtin_redirect_case`
-(`echo`/a shell function redirected to a file, and confirming a `<`-combined
-redirect on one is still rejected), `..._input_redirect_case`,
+(`echo`/a shell function redirected to a file, plus `<` alone and combined
+with `>` on both a plain builtin and a function, a second `read` past the
+input's one line proving `stdio__session_close_input()` ends it cleanly
+instead of hanging, and the missing-target error path -- content that traces
+back to the redirected input isn't compared byte-for-byte under
+`CONFIG_BRUCE_QEMU_TEST_MODE`, same reasoning as `..._pipe_redirect_case`),
+`..._input_redirect_case`, `..._arith_redirect_case` (`>`/`>>`/`<` on a
+standalone `((...))`, and that an arithmetic error skips the output target),
 `..._heredoc_case`, `..._cat_interactive_case` (bare `cat`'s
 Ctrl+D-terminated interactive stdin, layered on `stdio__read_line()` --
 see `bnu_fs_app.c`'s `bnu__cat_interactive()`), `..._multiline_case` (also

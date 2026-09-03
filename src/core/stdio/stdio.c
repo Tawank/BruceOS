@@ -41,6 +41,7 @@ typedef struct {
     char input[STDIO__INPUT_CAPACITY];
     size_t input_read;
     size_t input_size;
+    bool input_closed; /* see stdio__session_close_input() */
     uint16_t tty_columns;
     uint16_t tty_rows;
     uint32_t tty_generation; /* 0 == size never set (not a tty) */
@@ -215,6 +216,10 @@ bruce_result_t stdio__session_write_input(bruce_stdio_session_t session, const v
         xSemaphoreGive(s_lock);
         return entry == NULL ? BRUCE_ERR_NOT_FOUND : BRUCE_ERR_PERMISSION;
     }
+    if (entry->input_closed) {
+        xSemaphoreGive(s_lock);
+        return BRUCE_ERR_PERMISSION;
+    }
     if (size > STDIO__INPUT_CAPACITY - entry->input_size) {
         xSemaphoreGive(s_lock);
         return BRUCE_ERR_RESOURCE_LIMIT;
@@ -225,6 +230,35 @@ bruce_result_t stdio__session_write_input(bruce_stdio_session_t session, const v
         entry->input[write_at] = bytes[i];
         entry->input_size++;
     }
+    xSemaphoreGive(s_lock);
+    return BRUCE_OK;
+}
+
+/* Marks a session's input side as permanently closed: stdio__session_write_input()
+ * on it fails from this point on (BRUCE_ERR_PERMISSION), and once its
+ * queued-but-unread bytes run out, stdio__session_read_input() (and so
+ * stdio__read()/stdio__read_line() routed through it) reports BRUCE_ERR_NOT_FOUND
+ * instead of BRUCE_ERR_TIMEOUT -- the same "end of input" outcome as the session
+ * itself having been closed, without actually closing it (its *output* side, e.g.
+ * a builtin/function's captured stdout, still needs to be read afterward).
+ * Without this, a caller that preloads a fixed amount of input (e.g. a shell
+ * feeding a "<"-redirected file's whole content to a builtin/function it has
+ * captured, rather than an interactive typist who can always type more) has no
+ * way to signal "no more input ever" as opposed to "no more input *yet*" --
+ * stdio__read_line() treats BRUCE_ERR_TIMEOUT as "keep polling", so a blocking
+ * read past the end of that fixed amount would otherwise spin forever waiting
+ * for bytes that will never arrive. Idempotent; already-queued bytes stay
+ * readable exactly as before. */
+bruce_result_t stdio__session_close_input(bruce_stdio_session_t session) {
+    bruce_process_id_t owner = process__current_id();
+    stdio__ensure_init();
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    stdio__session_t *entry = stdio__find_locked(session);
+    if (!stdio__owned_locked(entry, owner)) {
+        xSemaphoreGive(s_lock);
+        return entry == NULL ? BRUCE_ERR_NOT_FOUND : BRUCE_ERR_PERMISSION;
+    }
+    entry->input_closed = true;
     xSemaphoreGive(s_lock);
     return BRUCE_OK;
 }
@@ -275,11 +309,13 @@ bruce_result_t stdio__session_read_input(
             entry->input_read = (entry->input_read + 1) % STDIO__INPUT_CAPACITY;
         }
         entry->input_size -= copied;
+        bool exhausted_and_closed = copied == 0 && entry->input_size == 0 && entry->input_closed;
         xSemaphoreGive(s_lock);
         if (copied > 0) {
             *out_size = copied;
             return BRUCE_OK;
         }
+        if (exhausted_and_closed) return BRUCE_ERR_NOT_FOUND; /* EOF -- see stdio__session_close_input() */
         uint64_t elapsed = runtime__now() - started;
         if (timeout_ms == 0 || (timeout_ms != UINT32_MAX && elapsed >= timeout_ms)) {
             return BRUCE_ERR_TIMEOUT;

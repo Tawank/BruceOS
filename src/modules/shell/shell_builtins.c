@@ -490,7 +490,7 @@ int shell_builtins__run(shell_state_t *state, int argc, char **argv) {
     stdio__printf(
         "Builtins: echo true false cd set unset export clear reset help exit test [ [[ break read time local\n"
     );
-    stdio__printf("Operators: ; && || and producer | text. Redirection is unsupported.\n");
+    stdio__printf("Operators: ; && || and producer | text. Redirection: > >> < <<DELIM.\n");
     stdio__printf("Compound: if/elif/else/fi, for, while, ((...)) arithmetic, functions.\n");
     return 0;
 }

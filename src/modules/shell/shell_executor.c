@@ -435,6 +435,28 @@ static uint32_t shell_executor__redirect_open_flags(bool append) {
            (append ? BRUCE_STORAGE_OPEN_APPEND : (BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_TRUNCATE));
 }
 
+/* Opens `target` for reading just long enough to confirm it exists, then
+ * closes it again -- for a "<"/heredoc redirection whose stdin nothing
+ * actually reads: a bare "< file" with no command at all, and a standalone
+ * "((...))" statement (see shell_executor__arith_command() below), neither
+ * of which has anything that would call stdio__read() on it. Matches bash's
+ * own behavior of still validating a "<" target even when nothing consumes
+ * it. Prints a "cannot open" error and returns false on failure. */
+static bool shell_executor__probe_input_target(shell_state_t *state, const shell_word_span_t *target) {
+    const char *error = NULL;
+    char *path = NULL;
+    if (shell_executor__resolve_redirect_target(state, target, &path, &error) != 0) {
+        stdio__printf("shell: %s\n", error != NULL ? error : "redirection error");
+        return false;
+    }
+    bruce_file_id_t probe;
+    bool ok = storage__open(path, BRUCE_STORAGE_OPEN_READ, &probe) == BRUCE_OK;
+    if (ok) (void)storage__close(probe);
+    else stdio__printf("shell: %s: cannot open\n", path);
+    memory__free(path);
+    return ok;
+}
+
 /* Writes `size` bytes of `data` to the already-open `file`, retrying as
  * needed until every byte is accounted for (a single storage__write() call
  * isn't guaranteed to take it all at once). Shared by shell_executor__write_file()
@@ -666,6 +688,148 @@ static int shell_executor__builtin_redirected(
     if (!write_ok) stdio__printf("shell: %s: write failed\n", path);
     memory__free(path);
     return write_ok ? status : 1;
+}
+
+/* "builtin < file" / "builtin <<DELIM" / "myfunc < file" / ... -- and the
+ * ">"/">>"-combined forms of each ("cmd < in > out"). A builtin/function has
+ * no separate child process to feed a pipe into the way
+ * shell_executor__external_with_input() feeds a real one (see
+ * shell_executor__builtin_redirected()'s own doc comment above on why its
+ * *output* has to be captured in-line instead of streamed) -- the same is
+ * true of its *input*, so this preloads `input` straight into the private
+ * capture session's input side via stdio__session_write_input(), before the
+ * call is made at all: unlike a real child's session, nothing services this
+ * one concurrently, so every byte of `input` has to already be queued before
+ * shell_builtins__run()/shell_compound__call_function() makes its first
+ * stdio__read()/stdio__read_line() call (e.g. the `read` builtin). That
+ * caps `input` at whatever the underlying stdio session's input queue can
+ * hold in one shot -- comfortably enough for `read`'s usual "one line"
+ * use, but not a generic streaming input; anything bigger is reported as a
+ * clear error rather than silently truncated or left to hang. Once queued,
+ * stdio__session_close_input() marks that as the *entirety* of the input --
+ * without it, a read past the end of `input` (e.g. a function with two
+ * `read`s but only one line on hand, or a file with no trailing newline)
+ * would block forever polling a session nothing will ever add more bytes to,
+ * instead of getting the clean end-of-input a real file's "<" gives bash.
+ * Always takes ownership of `input`, same as
+ * shell_executor__external_with_input(). */
+static int shell_executor__builtin_with_input(
+    shell_state_t *state, int argc, char **argv, const shell_command_t *command, bool is_function,
+    shell_executor__buffer_t *input
+) {
+    bool has_output = command->redirect != SHELL_REDIRECT_NONE;
+    char *path = NULL;
+    bruce_file_id_t file = 0;
+    if (has_output) {
+        const char *error = NULL;
+        if (shell_executor__resolve_redirect_target(state, &command->redirect_target, &path, &error) != 0) {
+            stdio__printf("shell: %s\n", error != NULL ? error : "redirection error");
+            shell_executor__buffer_free(input);
+            return 2;
+        }
+        if (storage__open(path, shell_executor__redirect_open_flags(command->redirect == SHELL_REDIRECT_APPEND), &file) !=
+            BRUCE_OK) {
+            stdio__printf("shell: %s: cannot open\n", path);
+            memory__free(path);
+            shell_executor__buffer_free(input);
+            return 2;
+        }
+    }
+    bruce_stdio_session_t capture = BRUCE_STDIO_SESSION_INVALID;
+    if (stdio__session_create(&capture) != BRUCE_OK) {
+        stdio__printf("shell: out of memory\n");
+        if (has_output) {
+            (void)storage__close(file);
+            memory__free(path);
+        }
+        shell_executor__buffer_free(input);
+        return 2;
+    }
+    bool queued = true;
+    if (input->length > 0) {
+        bruce_result_t written = stdio__session_write_input(capture, input->data, input->length);
+        queued = written == BRUCE_OK;
+        if (!queued) {
+            stdio__printf(
+                "shell: %s\n",
+                written == BRUCE_ERR_RESOURCE_LIMIT ? "input too large to redirect into a builtin or function"
+                                                     : "redirection error"
+            );
+        }
+    }
+    shell_executor__buffer_free(input); /* queued (or not) above; not needed any further either way */
+    if (queued) (void)stdio__session_close_input(capture); /* signal EOF once the preloaded bytes are consumed --
+                                                              * see stdio__session_close_input()'s doc comment on
+                                                              * why a blocking read()/read_line() would otherwise
+                                                              * spin forever once this fixed amount runs out. */
+    if (!queued || stdio__session_capture_self(capture) != BRUCE_OK) {
+        if (queued) stdio__printf("shell: out of memory\n");
+        (void)stdio__session_close(capture);
+        if (has_output) {
+            (void)storage__close(file);
+            memory__free(path);
+        }
+        return 2;
+    }
+    int status = is_function ? shell_compound__call_function(state, argc, argv) : shell_builtins__run(state, argc, argv);
+    (void)stdio__session_release_self();
+
+    bool write_ok = true;
+    if (has_output) {
+        for (;;) {
+            char chunk[256];
+            size_t size = 0;
+            if (stdio__session_read_output(capture, chunk, sizeof(chunk), &size) != BRUCE_OK || size == 0) break;
+            if (!shell_executor__write_chunk(file, chunk, size)) {
+                write_ok = false;
+                break;
+            }
+        }
+        (void)storage__close(file);
+    }
+    (void)stdio__session_close(capture);
+    if (!has_output) return status;
+    if (!write_ok) stdio__printf("shell: %s: write failed\n", path);
+    memory__free(path);
+    return write_ok ? status : 1;
+}
+
+/* "builtin < file" / "myfunc < file" -- reads `file` in full
+ * (shell_executor__read_file(), same as an external command's "<" does) and
+ * hands it to shell_executor__builtin_with_input() above. */
+static int shell_executor__builtin_input_redirected(
+    shell_state_t *state, int argc, char **argv, const shell_command_t *command, bool is_function
+) {
+    const char *error = NULL;
+    char *path = NULL;
+    if (shell_executor__resolve_redirect_target(state, &command->input_target, &path, &error) != 0) {
+        stdio__printf("shell: %s\n", error != NULL ? error : "redirection error");
+        return 2;
+    }
+    shell_executor__buffer_t input = {0};
+    bool ok = shell_executor__read_file(path, &input);
+    if (!ok) stdio__printf("shell: %s: cannot open\n", path);
+    memory__free(path);
+    if (!ok) return 1;
+    return shell_executor__builtin_with_input(state, argc, argv, command, is_function, &input);
+}
+
+/* "builtin <<DELIM" / "myfunc <<-DELIM" -- copies the already-collected,
+ * already-expanded heredoc body into a fresh buffer and hands it to
+ * shell_executor__builtin_with_input() above, mirroring
+ * shell_executor__external_heredoc_redirected()'s external-command
+ * counterpart. */
+static int shell_executor__builtin_heredoc_redirected(
+    shell_state_t *state, int argc, char **argv, const shell_command_t *command, bool is_function
+) {
+    shell_executor__buffer_t input = {0};
+    size_t body_length = strlen(command->heredoc_body);
+    if (body_length > 0 && !shell_executor__buffer_append(&input, command->heredoc_body, body_length)) {
+        stdio__printf("shell: out of memory\n");
+        shell_executor__buffer_free(&input);
+        return 1;
+    }
+    return shell_executor__builtin_with_input(state, argc, argv, command, is_function, &input);
 }
 
 /* Pumps `session` bidirectionally between `child` and the shell process's own
@@ -1254,19 +1418,7 @@ static int shell_executor__dispatch(shell_state_t *state, const shell_command_t 
             return 2;
         }
         bool ok = true;
-        if (command->input_redirect) {
-            const char *in_error = NULL;
-            char *in_path = NULL;
-            if (shell_executor__resolve_redirect_target(state, &command->input_target, &in_path, &in_error) != 0) {
-                stdio__printf("shell: %s\n", in_error != NULL ? in_error : "redirection error");
-                return 2;
-            }
-            bruce_file_id_t probe;
-            ok = storage__open(in_path, BRUCE_STORAGE_OPEN_READ, &probe) == BRUCE_OK;
-            if (ok) (void)storage__close(probe);
-            else stdio__printf("shell: %s: cannot open\n", in_path);
-            memory__free(in_path);
-        }
+        if (command->input_redirect) ok = shell_executor__probe_input_target(state, &command->input_target);
         if (command->redirect == SHELL_REDIRECT_NONE) return ok ? 0 : 1;
         const char *error = NULL;
         char *path = NULL;
@@ -1311,9 +1463,10 @@ static int shell_executor__dispatch(shell_state_t *state, const shell_command_t 
     if (redirected) {
         if ((is_function || is_builtin) && output_only_redirect) {
             result = shell_executor__builtin_redirected(state, remaining, argv, command, is_function);
+        } else if ((is_function || is_builtin) && command->input_redirect) {
+            result = shell_executor__builtin_input_redirected(state, remaining, argv, command, is_function);
         } else if (is_function || is_builtin) {
-            stdio__printf("shell: '<'/heredoc input redirection currently requires an external command\n");
-            result = 2;
+            result = shell_executor__builtin_heredoc_redirected(state, remaining, argv, command, is_function);
         } else if (command->input_redirect) {
             result = shell_executor__external_input_redirected(state, remaining, argv, command);
         } else if (command->heredoc_body != NULL) {
@@ -1384,17 +1537,36 @@ static bool shell_executor__starts_with_arith(const shell_command_t *command) {
 static int shell_executor__command(shell_state_t *state, const shell_command_t *command) {
     size_t inner_start, inner_len;
     if (shell_executor__is_arith_command(command, &inner_start, &inner_len)) {
-        if (command->redirect != SHELL_REDIRECT_NONE || command->input_redirect || command->heredoc_body != NULL) {
-            stdio__printf("shell: redirection is not supported on '((...))'\n");
-            return 2;
-        }
+        /* "((...))" reads no stdin and writes no stdout of its own -- it's
+         * pure evaluation plus an exit status -- so a "<"/heredoc target on
+         * it is validated (or, for a heredoc, simply discarded: its body was
+         * already read regardless) the same "nothing actually consumes it"
+         * way a bare "< file" with no command at all is, above, and a
+         * ">"/">>" target is just created/truncated (or left unappended-to)
+         * the same way, matching bash's own "(( )) > file" behavior of
+         * still touching the file even though the command itself never
+         * writes to it. */
+        bool input_ok = !command->input_redirect || shell_executor__probe_input_target(state, &command->input_target);
+        if (!input_ok) return 2;
         long value = 0;
         const char *arith_error = NULL;
         if (!shell_arith__eval(state, command->text + inner_start, inner_len, &value, &arith_error)) {
             stdio__printf("shell: ((: %s\n", arith_error != NULL ? arith_error : "syntax error");
             return 2;
         }
-        return value != 0 ? 0 : 1; /* bash: (( )) is "true" (status 0) iff the result is nonzero */
+        int status = value != 0 ? 0 : 1; /* bash: (( )) is "true" (status 0) iff the result is nonzero */
+        if (command->redirect == SHELL_REDIRECT_NONE) return status;
+        const char *error = NULL;
+        char *path = NULL;
+        if (shell_executor__resolve_redirect_target(state, &command->redirect_target, &path, &error) != 0) {
+            stdio__printf("shell: %s\n", error != NULL ? error : "redirection error");
+            return 2;
+        }
+        shell_executor__buffer_t empty = {0};
+        bool write_ok = shell_executor__write_file(path, command->redirect == SHELL_REDIRECT_APPEND, &empty);
+        if (!write_ok) stdio__printf("shell: %s: write failed\n", path);
+        memory__free(path);
+        return write_ok ? status : 1;
     }
     if (shell_executor__starts_with_arith(command)) {
         stdio__printf("shell: ((: missing '))'\n");

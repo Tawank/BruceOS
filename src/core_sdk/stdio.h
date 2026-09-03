@@ -171,6 +171,23 @@ bruce_result_t stdio__session_release_self(void);
 bruce_result_t stdio__session_write_input(bruce_stdio_session_t session, const void *data, size_t size);
 
 /**
+ * @brief Marks a session's input side as permanently closed (end-of-input).
+ *
+ * From this point on, stdio__session_write_input() on `session` fails with
+ * BRUCE_ERR_PERMISSION, and once its queued-but-unread bytes are exhausted, a
+ * blocking read routed through it (stdio__read(), stdio__read_line()) reports
+ * end-of-input instead of continuing to wait for bytes that will never
+ * arrive. Meant for a caller that preloads a *fixed* amount of input via
+ * stdio__session_write_input() -- e.g. a shell feeding a "<"-redirected
+ * file's whole content to a builtin/function it has captured -- rather than
+ * an interactive session, where there is always the possibility of more
+ * input arriving later. Idempotent; bytes already queued stay readable.
+ *
+ * @param session Session whose input side should be closed. Must be owned by the caller.
+ */
+bruce_result_t stdio__session_close_input(bruce_stdio_session_t session);
+
+/**
  * @brief Same as stdio__flush_input(), but targets an explicit session.
  *
  * Instead of the calling process's own routed session -- for a caller (e.g.

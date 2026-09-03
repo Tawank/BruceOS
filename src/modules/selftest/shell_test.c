@@ -775,14 +775,36 @@ bool selftest__run_shell_output_redirect_case(void) {
  * reasoning as selftest__run_shell_output_redirect_case() above -- the
  * capture session this creates is entirely its own, needing no pre-routed
  * session on the calling task the way a spawned-child test would. Also
- * confirms "<" combined with a builtin/function is still rejected (only a
- * plain ">"/">>" is implemented -- see that function's own doc comment on
- * why redirecting a builtin/function's *input* is a separate problem). */
+ * exercises "<" on a builtin/function -- shell_executor__builtin_with_input()
+ * -- alone (a bare "read" builtin), combined with ">" on a plain builtin and
+ * on a function whose body reads its own redirected input, a second "read"
+ * past the input's one line (proving stdio__session_close_input() delivers a
+ * clean end-of-input instead of hanging), and the "target doesn't exist"
+ * error path shared with a plain "< file" on any other command. */
 bool selftest__run_shell_builtin_redirect_case(void) {
     const char *echo_path = "/apps/shell_builtin_redirect_echo.txt";
     const char *func_path = "/apps/shell_builtin_redirect_func.txt";
+    const char *read_in_path = "/apps/shell_builtin_redirect_read_in.txt";
+    const char *confirm_path = "/apps/shell_builtin_redirect_confirm.txt";
+    const char *combo_path = "/apps/shell_builtin_redirect_combo.txt";
+    const char *show_path = "/apps/shell_builtin_redirect_show.txt";
     (void)storage__remove(echo_path);
     (void)storage__remove(func_path);
+    (void)storage__remove(read_in_path);
+    (void)storage__remove(confirm_path);
+    (void)storage__remove(combo_path);
+    (void)storage__remove(show_path);
+
+    static const char read_in_text[] = "redirected\n";
+    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
+    size_t staged_written = 0;
+    bool staged =
+        storage__open(
+            read_in_path, BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE | BRUCE_STORAGE_OPEN_TRUNCATE, &file
+        ) == BRUCE_OK &&
+        storage__write(file, read_in_text, sizeof(read_in_text) - 1, &staged_written) == BRUCE_OK &&
+        staged_written == sizeof(read_in_text) - 1 && storage__close(file) == BRUCE_OK;
+    if (!staged && file != BRUCE_FILE_ID_INVALID) (void)storage__close(file);
 
     shell_state_t state;
     shell__state_init(&state);
@@ -796,14 +818,53 @@ bool selftest__run_shell_builtin_redirect_case(void) {
     snprintf(command, sizeof(command), "greet > %s", func_path);
     int status_func = shell__execute_line(&state, command);
 
-    snprintf(command, sizeof(command), "echo x < %s > %s", echo_path, func_path);
-    int status_input_rejected = shell__execute_line(&state, command);
+    /* Bare "<" on a builtin, no ">" of its own: `read` pulls its line from
+     * the redirected file instead of a real stdin, setting $line the same as
+     * if it had been typed -- a following, separately-redirected statement
+     * then proves that actually happened. */
+    snprintf(command, sizeof(command), "read line < %s", read_in_path);
+    int status_read = shell__execute_line(&state, command);
+    snprintf(command, sizeof(command), "echo \"confirmed:$line\" > %s", confirm_path);
+    int status_confirm = shell__execute_line(&state, command);
+
+    /* "<" and ">" together on a plain builtin (not a function): stdio__read_line()
+     * echoes each consumed input byte back out (see its own doc comment) the
+     * same as if it had been typed at a real console, and since this capture
+     * session backs both the input side and the output side at once here,
+     * that echo is exactly what ends up in combo_path -- `read` itself prints
+     * nothing else. */
+    snprintf(command, sizeof(command), "read combo < %s > %s", read_in_path, combo_path);
+    int status_combo = shell__execute_line(&state, command);
+
+    /* "<" and ">" together on a function: proves the input side
+     * (shell_executor__builtin_with_input()) and the output-capture side
+     * (shell_executor__builtin_redirected()'s own mechanism) compose in one
+     * call, not just work in isolation. Same echo-then-own-output shape as
+     * the plain-builtin combo case above. */
+    int status_show_def = shell__execute_line(&state, "showline() { read got; echo \"got:$got\"; }");
+    snprintf(command, sizeof(command), "showline < %s > %s", read_in_path, show_path);
+    int status_show = shell__execute_line(&state, command);
+
+    /* A second "read" past the one line the redirected input actually has:
+     * proves stdio__session_close_input() delivers a clean end-of-input
+     * (read's own status 1, $b left unset) instead of the second read
+     * blocking forever polling a session nothing will ever add more bytes
+     * to -- the exact hang shell_executor__builtin_with_input()'s "always
+     * queue everything up front, then close the input side" design exists
+     * to avoid. */
+    int status_twice_def = shell__execute_line(&state, "twice() { read a; read b; }");
+    snprintf(command, sizeof(command), "twice < %s", read_in_path);
+    int status_twice = shell__execute_line(&state, command);
+
+    /* A "<" target that doesn't exist is a hard error for a builtin/function
+     * exactly like it already is for a plain "< file" or an external
+     * command's "<" -- shell_executor__read_file() failing to open it. */
+    int status_missing = shell__execute_line(&state, "read x < /apps/shell_builtin_redirect_missing.txt");
     shell__state_free(&state);
 
     char echo_result[64] = {0};
     size_t echo_size = 0;
     bruce_result_t read_echo = BRUCE_ERR_NOT_FOUND;
-    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
     if (storage__open(echo_path, BRUCE_STORAGE_OPEN_READ, &file) == BRUCE_OK) {
         read_echo = storage__read(file, echo_result, sizeof(echo_result) - 1, &echo_size);
         (void)storage__close(file);
@@ -815,25 +876,87 @@ bool selftest__run_shell_builtin_redirect_case(void) {
         read_func = storage__read(file, func_result, sizeof(func_result) - 1, &func_size);
         (void)storage__close(file);
     }
+    char confirm_result[64] = {0};
+    size_t confirm_size = 0;
+    bruce_result_t read_confirm = BRUCE_ERR_NOT_FOUND;
+    if (storage__open(confirm_path, BRUCE_STORAGE_OPEN_READ, &file) == BRUCE_OK) {
+        read_confirm = storage__read(file, confirm_result, sizeof(confirm_result) - 1, &confirm_size);
+        (void)storage__close(file);
+    }
+    char combo_result[64] = {0};
+    size_t combo_size = 0;
+    bruce_result_t read_combo = BRUCE_ERR_NOT_FOUND;
+    if (storage__open(combo_path, BRUCE_STORAGE_OPEN_READ, &file) == BRUCE_OK) {
+        read_combo = storage__read(file, combo_result, sizeof(combo_result) - 1, &combo_size);
+        (void)storage__close(file);
+    }
+    char show_result[64] = {0};
+    size_t show_size = 0;
+    bruce_result_t read_show = BRUCE_ERR_NOT_FOUND;
+    if (storage__open(show_path, BRUCE_STORAGE_OPEN_READ, &file) == BRUCE_OK) {
+        read_show = storage__read(file, show_result, sizeof(show_result) - 1, &show_size);
+        (void)storage__close(file);
+    }
     (void)storage__remove(echo_path);
     (void)storage__remove(func_path);
+    (void)storage__remove(read_in_path);
+    (void)storage__remove(confirm_path);
+    (void)storage__remove(combo_path);
+    (void)storage__remove(show_path);
 
     /* "\r\n", not "\n" -- same ONLCR session-output convention noted on
      * selftest__run_shell_output_redirect_case()'s own expected[] above: the
      * capture session this goes through applies it just the same as any
-     * other session. */
+     * other session. expected_combo/expected_show both lead with
+     * "redirected\r\n" -- stdio__read_line()'s own per-byte echo of what it
+     * consumed from the redirected input, landing in the same captured
+     * output as whatever the builtin/function prints afterward (see the
+     * comment above the "combo" statement). */
     static const char expected_echo[] = "hello world\r\nagain\r\n";
     static const char expected_func[] = "hi\r\nthere\r\n";
-    bool ok = status_echo == 0 && status_echo_append == 0 && status_def == 0 && status_func == 0 &&
-              status_input_rejected == 2 && read_echo == BRUCE_OK && echo_size == sizeof(expected_echo) - 1 &&
+    bool ok = staged && status_echo == 0 && status_echo_append == 0 && status_def == 0 && status_func == 0 &&
+              status_read == 0 && status_confirm == 0 && status_combo == 0 && status_show_def == 0 &&
+              status_show == 0 && status_twice_def == 0 && status_missing == 1 && read_echo == BRUCE_OK &&
+              echo_size == sizeof(expected_echo) - 1 &&
               memcmp(echo_result, expected_echo, sizeof(expected_echo) - 1) == 0 && read_func == BRUCE_OK &&
               func_size == sizeof(expected_func) - 1 &&
               memcmp(func_result, expected_func, sizeof(expected_func) - 1) == 0;
+    /* $line/$got/the echoed bytes read_combo and read_show hold all trace
+     * back to shell_executor__read_file()'s memory__external_malloc()-backed
+     * buffer feeding stdio__session_write_input() -- unreliable under QEMU's
+     * swap-backend fallback for the same reason noted on
+     * selftest__run_shell_pipe_redirect_case() above, so content there isn't
+     * compared byte-for-byte under QEMU. status_twice is unchecked under QEMU
+     * for the same root cause: a stray byte among the corrupted-but-correctly-
+     * *counted* input can happen to look like '\n'/'\r' to stdio__read_line(),
+     * ending "read a" before the true line boundary and leaving "read b" real
+     * (if garbled) bytes to read instead of the end-of-input
+     * stdio__session_close_input() otherwise guarantees once the queue is
+     * actually empty -- the byte *count* fed in (and so exactly when it runs
+     * out) is unaffected, only which value each byte holds is. On real
+     * hardware PSRAM is available and every one of these is exact, including
+     * status_twice == 1. */
+#if CONFIG_BRUCE_QEMU_TEST_MODE
+    ok = ok && read_confirm == BRUCE_OK && confirm_size > 0 && read_combo == BRUCE_OK && combo_size > 0 &&
+         read_show == BRUCE_OK && show_size > 0;
+#else
+    static const char expected_confirm[] = "confirmed:redirected\r\n";
+    static const char expected_combo[] = "redirected\r\n";
+    static const char expected_show[] = "redirected\r\ngot:redirected\r\n";
+    ok = ok && status_twice == 1 && read_confirm == BRUCE_OK && confirm_size == sizeof(expected_confirm) - 1 &&
+         memcmp(confirm_result, expected_confirm, sizeof(expected_confirm) - 1) == 0 && read_combo == BRUCE_OK &&
+         combo_size == sizeof(expected_combo) - 1 &&
+         memcmp(combo_result, expected_combo, sizeof(expected_combo) - 1) == 0 && read_show == BRUCE_OK &&
+         show_size == sizeof(expected_show) - 1 && memcmp(show_result, expected_show, sizeof(expected_show) - 1) == 0;
+#endif
     if (!ok) {
         printf(
-            "[selftest] shell/builtin-redirect: status=%d,%d,%d,%d,%d echo=%d/%u func=%d/%u\n", status_echo,
-            status_echo_append, status_def, status_func, status_input_rejected, read_echo, (unsigned)echo_size,
-            read_func, (unsigned)func_size
+            "[selftest] shell/builtin-redirect: status=%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d staged=%d echo=%d/%u "
+            "func=%d/%u confirm=%d/%u combo=%d/%u show=%d/%u\n",
+            status_echo, status_echo_append, status_def, status_func, status_read, status_confirm, status_combo,
+            status_show_def, status_show, status_twice_def, status_twice, status_missing, staged, read_echo,
+            (unsigned)echo_size, read_func, (unsigned)func_size, read_confirm, (unsigned)confirm_size, read_combo,
+            (unsigned)combo_size, read_show, (unsigned)show_size
         );
     }
     printf("[selftest] shell/builtin-redirect: %s\n", ok ? "OK" : "failed");
@@ -888,9 +1011,12 @@ bool selftest__run_shell_input_redirect_case(void) {
         /* No such file -- caught before any process launch, so this doesn't
          * need a routed session either. */
         shell__execute_line(&state, "cat < /apps/shell_input_redirect_missing.txt") == 1 &&
-        /* A builtin ("echo") can't be redirected, "<" included -- same
-         * "requires an external command" rule ">" already had. */
-        shell__execute_line(&state, "echo hi < /apps/shell_input_redirect_missing.txt") == 2 &&
+        /* A builtin's "<" target missing is the same class of error --
+         * shell_executor__builtin_input_redirected() fails to open it via
+         * shell_executor__read_file() before "echo" ever runs (see
+         * selftest__run_shell_builtin_redirect_case() for the
+         * target-exists path, on both a builtin and a function). */
+        shell__execute_line(&state, "echo hi < /apps/shell_input_redirect_missing.txt") == 1 &&
         /* At most one "<" per command, same as ">" (SHELL__WORD_MAX etc.
          * aside, this is a pure parse-time check -- no file even needs to
          * exist for it to fire). */
@@ -914,6 +1040,81 @@ bool selftest__run_shell_input_redirect_case(void) {
         );
     }
     printf("[selftest] shell/input-redirect: %s\n", ok ? "OK" : "failed");
+    return ok;
+}
+
+/* Exercises ">"/">>"/"<" redirection on a standalone "((...))" statement
+ * (shell_executor__command()'s arithmetic branch in shell_executor.c):
+ * "((...))" reads no stdin and writes no stdout of its own, so a ">"/">>"
+ * target is just created/truncated (or left unappended-to) the same way a
+ * bare "> file" with no command at all already is, and a "<" target is only
+ * ever validated -- shell_executor__probe_input_target() -- never actually
+ * read from. Also confirms an arithmetic *error* skips the output target
+ * entirely (no truncate-then-fail): the error is reported before
+ * shell_executor__resolve_redirect_target()/storage__open() ever run. */
+bool selftest__run_shell_arith_redirect_case(void) {
+    const char *out_path = "/apps/shell_arith_redirect_out.txt";
+    const char *err_path = "/apps/shell_arith_redirect_err.txt";
+    const char *in_path = "/apps/shell_arith_redirect_in.txt";
+    (void)storage__remove(out_path);
+    (void)storage__remove(err_path);
+    (void)storage__remove(in_path);
+
+    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
+    size_t written = 0;
+    static const char in_text[] = "unused\n";
+    bool staged =
+        storage__open(in_path, BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE | BRUCE_STORAGE_OPEN_TRUNCATE, &file) ==
+            BRUCE_OK &&
+        storage__write(file, in_text, sizeof(in_text) - 1, &written) == BRUCE_OK && written == sizeof(in_text) - 1 &&
+        storage__close(file) == BRUCE_OK;
+    if (!staged && file != BRUCE_FILE_ID_INVALID) (void)storage__close(file);
+
+    shell_state_t state;
+    shell__state_init(&state);
+    char command[160];
+    /* Truthy result (5 != 0): status 0, target created/truncated empty. */
+    snprintf(command, sizeof(command), "((x = 5)) > %s", out_path);
+    int status_truncate = shell__execute_line(&state, command);
+    /* Falsy result (0): status 1, ">>" still leaves the (already-empty)
+     * target in place rather than skipping it. */
+    snprintf(command, sizeof(command), "((x = x - 5)) >> %s", out_path);
+    int status_append = shell__execute_line(&state, command);
+    /* A genuine arithmetic error must not touch the output target at all. */
+    snprintf(command, sizeof(command), "((1 / 0)) > %s", err_path);
+    int status_error = shell__execute_line(&state, command);
+    /* "<" on an existing target only validates it opens; the arithmetic
+     * result is unaffected by its content. */
+    snprintf(command, sizeof(command), "((y = 3)) < %s", in_path);
+    int status_input = staged ? shell__execute_line(&state, command) : -1;
+    /* "<" on a missing target is a hard error, same as everywhere else. */
+    int status_input_missing = shell__execute_line(&state, "((z = 1)) < /apps/shell_arith_redirect_missing.txt");
+    shell__state_free(&state);
+
+    size_t out_size = 0;
+    bruce_result_t read_out = BRUCE_ERR_NOT_FOUND;
+    char out_result[8] = {0};
+    if (storage__open(out_path, BRUCE_STORAGE_OPEN_READ, &file) == BRUCE_OK) {
+        read_out = storage__read(file, out_result, sizeof(out_result), &out_size);
+        (void)storage__close(file);
+    }
+    bruce_file_id_t err_probe = BRUCE_FILE_ID_INVALID;
+    bool err_created = storage__open(err_path, BRUCE_STORAGE_OPEN_READ, &err_probe) == BRUCE_OK;
+    if (err_created) (void)storage__close(err_probe);
+    (void)storage__remove(out_path);
+    (void)storage__remove(err_path);
+    (void)storage__remove(in_path);
+
+    bool ok = staged && status_truncate == 0 && status_append == 1 && status_error == 2 && status_input == 0 &&
+              status_input_missing == 2 && read_out == BRUCE_OK && out_size == 0 && !err_created;
+    if (!ok) {
+        printf(
+            "[selftest] shell/arith-redirect: status=%d,%d,%d,%d,%d staged=%d out=%d/%u err_created=%d\n",
+            status_truncate, status_append, status_error, status_input, status_input_missing, staged, read_out,
+            (unsigned)out_size, err_created
+        );
+    }
+    printf("[selftest] shell/arith-redirect: %s\n", ok ? "OK" : "failed");
     return ok;
 }
 
