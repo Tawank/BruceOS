@@ -19,6 +19,17 @@ typedef enum {
     SHELL_CONNECT_AND,
     SHELL_CONNECT_OR,
     SHELL_CONNECT_PIPE,
+    /* ";;" -- closes a `case`/`esac` clause. Tagged on the *next* command the
+     * same way every other connector marks how it followed the one before it
+     * (see shell_parser__plan()'s own doc comment on `next_connector`), so
+     * whatever comes right after a ";;" -- the next clause's pattern, or a
+     * bare "esac" if there is none -- carries this. shell_compound.c's
+     * run_sequence() treats it as a universal stop condition (alongside
+     * "then"/"fi"/"do"/"done"/"}"/"esac") so a case clause's body -- however
+     * many ;/&&/||/nested-construct commands it spans -- is walked the same
+     * way any other compound body is, stopping cleanly right where the next
+     * clause (or "esac") begins. */
+    SHELL_CONNECT_CASE_END,
 } shell_connector_t;
 
 /* A single trailing ">"/">>" output redirection recognized on one command by

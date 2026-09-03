@@ -547,6 +547,121 @@ bool selftest__run_shell_loops_case(void) {
     return ok;
 }
 
+/* Runs one line and checks its exit status (and, if expected_arg is not
+ * NULL, that shell_test_probe's last argument matches) -- same shape as
+ * selftest__shell_loops_step() above, just labeled for this case. */
+static bool selftest__shell_case_step(
+    bool ok_so_far, shell_state_t *state, const char *line, int expected_status, const char *expected_arg
+) {
+    if (!ok_so_far) return false;
+    int status = shell__execute_line(state, line);
+    bool ok = status == expected_status && (expected_arg == NULL || strcmp(s_probe_arg, expected_arg) == 0);
+    if (!ok) {
+        printf(
+            "[selftest] shell/case: `%s` -> status=%d (want %d) arg=\"%s\" (want \"%s\")\n",
+            line,
+            status,
+            expected_status,
+            s_probe_arg,
+            expected_arg != NULL ? expected_arg : "(unchecked)"
+        );
+    }
+    return ok;
+}
+
+/* Exercises `case WORD in PATTERN[|PATTERN...]) commands ;; ... esac`
+ * (shell_compound.c's shell_compound__run_case(), and its
+ * shell_compound__glob_match() pattern matcher): single/multiple clauses,
+ * "|"-separated alternative patterns, "*"/"?"/"[...]" glob wildcards, a
+ * "*)" catch-all, no match with no catch-all (status 0, same as bash), only
+ * the first matching clause's body runs (lazily -- a later clause's own
+ * "$(...)" pattern never executes), nested case-in-case and case-in-loop,
+ * and malformed-construct errors. */
+bool selftest__run_shell_case_case(void) {
+    if (!selftest__shell_register_probe()) return false;
+    shell_state_t state;
+    shell__state_init(&state);
+    s_probe_calls = 0;
+
+    bool ok = true;
+    /* One-line clauses, and only the matching clause's body runs. */
+    ok = selftest__shell_case_step(
+        ok, &state, "case b in a) shell_test_probe skipped ;; b) shell_test_probe matched ;; esac", 0, "matched"
+    );
+    /* "|"-separated alternative patterns. */
+    ok = selftest__shell_case_step(
+        ok, &state, "case y in x|y|z) shell_test_probe alt ;; esac", 0, "alt"
+    );
+    /* Glob wildcards: "*", "?", and a bracket class. */
+    ok = selftest__shell_case_step(ok, &state, "case hello in h*o) shell_test_probe star ;; esac", 0, "star");
+    ok = selftest__shell_case_step(ok, &state, "case cat in c?t) shell_test_probe question ;; esac", 0, "question");
+    ok = selftest__shell_case_step(
+        ok, &state, "case b in [abc]) shell_test_probe bracket ;; esac", 0, "bracket"
+    );
+    ok = selftest__shell_case_step(
+        ok, &state, "case d in [abc]) shell_test_probe skipped ;; *) shell_test_probe catchall ;; esac", 0,
+        "catchall"
+    );
+    /* No match and no catch-all: status 0, same as bash, and the probe
+     * doesn't fire. */
+    s_probe_calls = 0;
+    ok = selftest__shell_case_step(ok, &state, "case z in a) shell_test_probe skipped ;; esac", 0, NULL) &&
+         s_probe_calls == 0;
+    /* Case word/patterns are expanded like inside double quotes (variables
+     * substitute, but the result isn't itself word-split or globbed against
+     * the filesystem). */
+    ok = selftest__shell_case_step(
+        ok, &state, "w=foo; case $w in foo) shell_test_probe var_word ;; esac", 0, "var_word"
+    );
+    /* Multi-line form, with a multi-command clause body spanning ";". */
+    ok = selftest__shell_case_step(
+        ok,
+        &state,
+        "case 2 in\n"
+        "  1) shell_test_probe one ;;\n"
+        "  2) x=mid; shell_test_probe $x ;;\n"
+        "  *) shell_test_probe skipped ;;\n"
+        "esac",
+        0,
+        "mid"
+    );
+    /* Nested case-in-case, and case-in-loop composition. */
+    ok = selftest__shell_case_step(
+        ok,
+        &state,
+        "case a in a) case b in b) shell_test_probe nested ;; esac ;; esac",
+        0,
+        "nested"
+    );
+    ok = selftest__shell_case_step(
+        ok,
+        &state,
+        "sum=0; for n in 1 2 3; do case $n in 2) (( sum += 10 )) ;; *) (( sum += n )) ;; esac; done; "
+        "shell_test_probe $sum",
+        0,
+        "14"
+    );
+    /* A later, never-reached clause's pattern never runs -- its "$(...)"
+     * side effect (setting `w`) never fires since the first clause already
+     * matched. */
+    ok = selftest__shell_case_step(
+        ok,
+        &state,
+        "w=unset; case a in a) shell_test_probe first ;; $(w=ran; echo a)) shell_test_probe skipped ;; esac; "
+        "shell_test_probe $w",
+        0,
+        "unset"
+    );
+    /* Malformed constructs are reported, not silently misparsed. */
+    ok = selftest__shell_case_step(ok, &state, "case a in a) echo hi ;;", 2, NULL);
+    ok = selftest__shell_case_step(ok, &state, "case a of a) echo hi ;; esac", 2, NULL);
+    ok = selftest__shell_case_step(ok, &state, "case a in a echo hi ;; esac", 2, NULL);
+
+    shell__state_free(&state);
+    printf("[selftest] shell/case: %s\n", ok ? "OK" : "failed");
+    return ok;
+}
+
 /* "producer | consumer >> file" must honor the consumer's own redirection --
  * shell_executor__pipe_to_external()/pipe_write() used to just relay the
  * consumer's output straight to the shell's own stdio (see

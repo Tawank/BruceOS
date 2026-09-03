@@ -190,6 +190,7 @@ int selftest_app_main(int argc, char **argv) {
     RUN_SELFTEST(selftest__run_shell_arith_word_case);
     RUN_SELFTEST(selftest__run_shell_multiline_case);
     RUN_SELFTEST(selftest__run_shell_loops_case);
+    RUN_SELFTEST(selftest__run_shell_case_case);
     RUN_SELFTEST(selftest__run_shell_pipe_redirect_case);
     RUN_SELFTEST(selftest__run_shell_output_redirect_case);
     RUN_SELFTEST(selftest__run_shell_builtin_redirect_case);

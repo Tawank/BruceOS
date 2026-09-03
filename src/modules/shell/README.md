@@ -231,15 +231,36 @@ line it just deletes the character under the cursor, like Delete.
   whatever it held before (or is removed entirely, if it did not exist
   before) the instant the call returns. A bare `local NAME` with no
   `=value` starts out empty, same as bash.
-- **Not implemented:** `case`/`esac`, `select`, subshells `(...)`, process
-  substitution, `until`, and command grouping with `{ ...; }` used as a
-  value (only as a function body).
+- `case WORD in PATTERN[|PATTERN...]) commands ;; ... esac`, with an
+  optional leading `(` before a clause's first pattern (`(pattern) cmd ;;`).
+  A clause's body can itself span multiple `;`/`&&`/`||`-joined commands and
+  contain nested `if`/`for`/`while`/`case` constructs, same as any other
+  compound body. `WORD` and every pattern are expanded like inside double
+  quotes (variables/`` `$(...)` ``/`$((...))` substitute, but the result is
+  never word-split or filesystem-globbed), and patterns are matched
+  left-to-right, lazily -- a later, never-reached pattern's own `$(...)`
+  side effects never run, and neither does its own body once an earlier
+  clause has already matched. Falls through to no match (status `0`, same
+  as bash) if nothing matches and there's no `*)` catch-all. Pattern
+  matching supports `*`, `?`, and `[...]`/`[!...]`/`[^...]` (with `lo-hi`
+  ranges and a leading `]` treated as a literal member) -- the same glob
+  syntax `[[ ]]` pattern matching would use if implemented (see
+  `shell_condition.c`), but scoped only to `case`'s own string-vs-pattern
+  comparison, not real filesystem pathname globbing (still unimplemented,
+  see below). Quoting a pattern does not suppress its glob metacharacters'
+  specialness -- `WORD`/pattern expansion strips escaping the same way
+  `shell_parser__words()`/`shell_parser__expand_text()` already do
+  elsewhere, so e.g. `case x in "*") ... ;; esac` still matches anything, a
+  documented limitation shared with this shell's other quoting gaps.
+  `;&`/`;;&` fallthrough is not implemented -- every clause ends at `;;`.
+- **Not implemented:** `select`, subshells `(...)`, process substitution,
+  `until`, and command grouping with `{ ...; }` used as a value (only as a
+  function body).
 
 ## What's left to implement
 
 Roughly in order of how often bash scripts actually use them:
 - Pathname globbing and brace expansion.
-- `case`/`esac`.
 - `$@`, `$*`, `$$`, `$!`.
 - File-test operators for `test`/`[` (`-e -f -d -r -w -x ...`) and `-o`/`[[
   ... || ... ]]`-in-tests.
@@ -357,7 +378,13 @@ see `bnu_fs_app.c`'s `bnu__cat_interactive()`), `..._multiline_case` (also
 the only case exercising a `#` comment, inside a function body),
 `..._loops_case` (arithmetic,
 both `for` forms, `while`, `break`, `break N`, and the break/catch-up
-regression), `..._read_case`, `..._stdio_inheritance_case`,
+regression), `..._case_case` (`case`/`esac`: multiple clauses, `|`-separated
+alternative patterns spanning several plan entries since `shell_parser__plan()`
+tokenizes a top-level `|` as an ordinary pipe, glob wildcards, a `*)`
+catch-all, no-match-no-catch-all falling through to status `0`, `WORD`/pattern
+expansion not word-splitting, lazy pattern evaluation never running a later
+clause's own `$(...)` side effects, nested `case`-in-`case` and `case`-in-loop,
+and malformed-construct errors), `..._read_case`, `..._stdio_inheritance_case`,
 `..._tty_size_case`, `..._interrupt_case` (Ctrl+C), and `..._eof_case`
 (Ctrl+D on the shell's own prompt, ending the shell -- not to be confused
 with `..._cat_interactive_case`'s Ctrl+D, which ends a child's stdin read

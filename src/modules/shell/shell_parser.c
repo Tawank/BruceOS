@@ -514,7 +514,10 @@ int shell_parser__plan(
         }
         shell_connector_t connector = SHELL_CONNECT_NONE;
         size_t operator_size = 0;
-        if (c == ';' || c == '\n') {
+        if (c == ';' && i + 1 < length && line[i + 1] == ';') {
+            connector = SHELL_CONNECT_CASE_END;
+            operator_size = 2;
+        } else if (c == ';' || c == '\n') {
             connector = SHELL_CONNECT_SEQUENCE;
             operator_size = 1;
         } else if (c == '&' && i + 1 < length && line[i + 1] == '&') {
@@ -580,7 +583,13 @@ int shell_parser__plan(
         *error = "unterminated quote";
         return -1;
     }
-    if (plan->count > 0 && next_connector != SHELL_CONNECT_NONE && next_connector != SHELL_CONNECT_SEQUENCE) {
+    /* A trailing ";;" with nothing after it -- unlike a trailing "&&"/"||"/"|",
+     * which can never be well-formed -- is left for shell_compound.c's
+     * run_case() to report as its own clearer "missing 'esac'" once it walks
+     * off the end of the plan looking for one, rather than this purely
+     * syntactic scan rejecting it first with a less specific message. */
+    if (plan->count > 0 && next_connector != SHELL_CONNECT_NONE && next_connector != SHELL_CONNECT_SEQUENCE &&
+        next_connector != SHELL_CONNECT_CASE_END) {
         *error = "missing command after operator";
         return -1;
     }

@@ -212,6 +212,8 @@ typedef enum {
     SHELL_COMPOUND_WHILE,
     SHELL_COMPOUND_DO,
     SHELL_COMPOUND_DONE,
+    SHELL_COMPOUND_CASE,
+    SHELL_COMPOUND_ESAC,
 } shell_compound_kind_t;
 
 static shell_compound_kind_t shell_compound__classify(const shell_plan_t *plan, size_t index) {
@@ -228,6 +230,8 @@ static shell_compound_kind_t shell_compound__classify(const shell_plan_t *plan, 
     if (shell_compound__match_keyword(cmd, "while", &rest, &rest_len)) return SHELL_COMPOUND_WHILE;
     if (shell_compound__match_keyword(cmd, "do", &rest, &rest_len)) return SHELL_COMPOUND_DO;
     if (shell_compound__match_keyword(cmd, "done", &rest, &rest_len)) return SHELL_COMPOUND_DONE;
+    if (shell_compound__match_keyword(cmd, "case", &rest, &rest_len)) return SHELL_COMPOUND_CASE;
+    if (shell_compound__match_keyword(cmd, "esac", &rest, &rest_len)) return SHELL_COMPOUND_ESAC;
     char name[SHELL__FUNCTION_NAME_MAX];
     const char *body_start, *body_end;
     size_t close_index;
@@ -250,6 +254,7 @@ static int shell_compound__define_function(shell_state_t *state, const char *nam
 static int shell_compound__run_sequence(shell_state_t *state, const shell_plan_t *plan, size_t *index, bool execute);
 static int shell_compound__run_for(shell_state_t *state, const shell_plan_t *plan, size_t *index, bool execute);
 static int shell_compound__run_while(shell_state_t *state, const shell_plan_t *plan, size_t *index, bool execute);
+static int shell_compound__run_case(shell_state_t *state, const shell_plan_t *plan, size_t *index, bool execute);
 
 /* A run_sequence() pass that was actually executing can stop early, part
  * way through the statements it was walking, because a "break" or "exit"
@@ -361,10 +366,17 @@ static int shell_compound__run_if(shell_state_t *state, const shell_plan_t *plan
 static int shell_compound__run_sequence(shell_state_t *state, const shell_plan_t *plan, size_t *index, bool execute) {
     int status = 0;
     while (*index < plan->count && !(execute && (state->exit_requested || state->break_requested > 0))) {
+        /* A ";;"-tagged entry belongs to an *enclosing* case's next clause
+         * (or is "esac" itself), never to whatever body is currently being
+         * walked -- checked ahead of classify() since the entry's own text
+         * (e.g. a bare pattern like "b)") classifies as perfectly ordinary
+         * SHELL_COMPOUND_PLAIN otherwise. See SHELL_CONNECT_CASE_END's own
+         * doc comment in shell_parser.h. */
+        if (plan->commands[*index].connector == SHELL_CONNECT_CASE_END) break;
         shell_compound_kind_t kind = shell_compound__classify(plan, *index);
         if (kind == SHELL_COMPOUND_THEN || kind == SHELL_COMPOUND_ELIF || kind == SHELL_COMPOUND_ELSE ||
             kind == SHELL_COMPOUND_FI || kind == SHELL_COMPOUND_CLOSE_BRACE || kind == SHELL_COMPOUND_DO ||
-            kind == SHELL_COMPOUND_DONE) {
+            kind == SHELL_COMPOUND_DONE || kind == SHELL_COMPOUND_ESAC) {
             break;
         }
         if (kind == SHELL_COMPOUND_IF) {
@@ -377,6 +389,10 @@ static int shell_compound__run_sequence(shell_state_t *state, const shell_plan_t
         }
         if (kind == SHELL_COMPOUND_WHILE) {
             status = shell_compound__run_while(state, plan, index, execute);
+            continue;
+        }
+        if (kind == SHELL_COMPOUND_CASE) {
+            status = shell_compound__run_case(state, plan, index, execute);
             continue;
         }
         if (kind == SHELL_COMPOUND_FUNCTION) {
@@ -394,7 +410,10 @@ static int shell_compound__run_sequence(shell_state_t *state, const shell_plan_t
         }
         size_t run_start = *index;
         (*index)++;
-        while (*index < plan->count && shell_compound__classify(plan, *index) == SHELL_COMPOUND_PLAIN) (*index)++;
+        while (*index < plan->count && plan->commands[*index].connector != SHELL_CONNECT_CASE_END &&
+               shell_compound__classify(plan, *index) == SHELL_COMPOUND_PLAIN) {
+            (*index)++;
+        }
         if (execute) {
             shell_plan_t sub = {.commands = &plan->commands[run_start], .count = *index - run_start};
             status = shell_executor__plan(state, &sub);
@@ -556,11 +575,16 @@ static int shell_compound__run_loop_body(shell_state_t *state, const shell_plan_
 }
 
 /* The plan entry shell_compound__consume_do() shrank, and what it originally
- * held -- see shell_compound__restore_do() below. */
+ * held -- see shell_compound__restore_do() below. `connector` is saved/
+ * restored the same way (consume_do() itself never changes it -- restoring
+ * is then a no-op there -- but shell_compound__run_case() below, which
+ * builds this struct directly rather than through consume_do(), *does*
+ * need to change it: see its own comment on why). */
 typedef struct {
     size_t index;
     const char *text;
     size_t length;
+    shell_connector_t connector;
 } shell_compound__do_span_t;
 
 /* *index is at the "do" that shell_compound__find_do() just confirmed is
@@ -592,7 +616,10 @@ typedef struct {
  * returned span is a no-op to restore. */
 static shell_compound__do_span_t shell_compound__consume_do(const shell_plan_t *plan, size_t *index) {
     shell_compound__do_span_t saved = {
-        .index = *index, .text = plan->commands[*index].text, .length = plan->commands[*index].length
+        .index = *index,
+        .text = plan->commands[*index].text,
+        .length = plan->commands[*index].length,
+        .connector = plan->commands[*index].connector,
     };
     const char *head_text;
     size_t head_len;
@@ -626,6 +653,7 @@ static shell_compound__do_span_t shell_compound__consume_do(const shell_plan_t *
 static void shell_compound__restore_do(const shell_plan_t *plan, const shell_compound__do_span_t *saved) {
     plan->commands[saved->index].text = saved->text;
     plan->commands[saved->index].length = saved->length;
+    plan->commands[saved->index].connector = saved->connector;
 }
 
 /* True if this iteration should stop the loop: a break (consuming one
@@ -788,6 +816,444 @@ static int shell_compound__run_while(shell_state_t *state, const shell_plan_t *p
     return result;
 }
 
+/* Matches one glob `pattern` (a plain, already-`$`-expanded NUL-terminated
+ * string -- see shell_compound__run_case() below) against a `]`-terminated
+ * bracket expression starting at pattern[0] == '[': an optional leading '!'
+ * or '^' negates, a member is either one literal character or an inclusive
+ * "lo-hi" range (a bare trailing '-' is just a literal '-'), and a ']' as
+ * the very first member (right after '[' or '[!'/'[^') is itself literal
+ * rather than closing the class early -- the usual glob convention for
+ * "match everything except ']'" (`[!]abc]`). *out_valid is set false (with
+ * `c`'s match result meaningless) when this '[' has no closing ']' at all,
+ * so the caller falls back to treating it as one ordinary literal character
+ * -- matching bash's own leniency for a stray unclosed bracket. On a valid
+ * class, *out_end is set just past the closing ']'. */
+static bool shell_compound__glob_class(const char *pattern, char c, const char **out_end, bool *out_valid) {
+    const char *p = pattern + 1;
+    bool negate = *p == '!' || *p == '^';
+    if (negate) p++;
+    const char *body = p;
+    const char *scan = *p == ']' ? p + 1 : p;
+    while (*scan != '\0' && *scan != ']') scan++;
+    if (*scan != ']') {
+        *out_valid = false;
+        return false;
+    }
+    *out_end = scan + 1;
+    *out_valid = true;
+    bool matched = false;
+    for (const char *q = body; q < scan;) {
+        if (q + 2 < scan && q[1] == '-') {
+            if ((unsigned char)c >= (unsigned char)q[0] && (unsigned char)c <= (unsigned char)q[2]) matched = true;
+            q += 3;
+        } else {
+            if (c == *q) matched = true;
+            q += 1;
+        }
+    }
+    return negate ? !matched : matched;
+}
+
+/* A small, self-contained fnmatch()-style matcher for `case`'s pattern
+ * lists (see README.md's Redirection-adjacent "Case patterns" section) --
+ * `*` matches any run of characters (including none), `?` matches exactly
+ * one, and `[...]`/`[!...]`/`[^...]` matches a bracket expression (see
+ * shell_compound__glob_class() above); anything else matches itself
+ * literally. Standard iterative backtracking on the last `*` seen (`star_p`/
+ * `star_t`): whenever the pattern can't match the text at the current
+ * position, and a `*` was seen earlier, retry from just after that `*` with
+ * one more text character folded into it, rather than recursing -- so this
+ * runs in bounded stack space regardless of pattern/text length. Unlike real
+ * pathname globbing (README.md's "What's left to implement"), this never
+ * touches the filesystem -- it only ever compares `pattern` against the one
+ * `text` string shell_compound__run_case() already expanded, exactly the
+ * same job `[[ str == pattern ]]` would do if this shell's `[[` implemented
+ * pattern matching (shell_condition.c's own doc comment marks that as out of
+ * scope there; this is `case`'s own independent, narrower implementation of
+ * the same glob syntax). */
+static bool shell_compound__glob_match(const char *pattern, const char *text) {
+    const char *p = pattern;
+    const char *t = text;
+    const char *star_p = NULL;
+    const char *star_t = NULL;
+    while (*t != '\0') {
+        bool one_matches;
+        size_t consumed = 1;
+        if (*p == '[') {
+            const char *class_end = NULL;
+            bool valid = false;
+            bool class_matched = shell_compound__glob_class(p, *t, &class_end, &valid);
+            if (valid) {
+                one_matches = class_matched;
+                consumed = (size_t)(class_end - p);
+            } else {
+                one_matches = *p == *t;
+            }
+        } else if (*p == '?') {
+            one_matches = true;
+        } else if (*p == '*') {
+            star_p = p;
+            star_t = t;
+            p++;
+            continue;
+        } else {
+            one_matches = *p != '\0' && *p == *t;
+        }
+        if (one_matches) {
+            p += consumed;
+            t++;
+            continue;
+        }
+        if (star_p == NULL) return false;
+        p = star_p + 1;
+        star_t++;
+        t = star_t;
+    }
+    while (*p == '*') p++;
+    return *p == '\0';
+}
+
+/* Finds a standalone "in" token in [text, text+length) -- bounded by
+ * whitespace/start/end on both sides, skipping quoted content the same way
+ * shell_compound__find_open_brace() does (not command-substitution spans --
+ * the same accepted simplification noted on that function; a case word
+ * containing a literal "in" inside its own "$(...)" is the one input this
+ * misreads). Splits a "case" header's remainder into its WORD (before "in")
+ * and the first clause's glued text, if any (after "in") -- the case-word
+ * equivalent of shell_compound__parse_for_header()'s own "in" search, except
+ * the word here can itself contain whitespace (`case "$a $b" in`), so this
+ * scans the whole remainder instead of assuming "in" immediately follows one
+ * bare NAME. */
+static bool shell_compound__find_case_in(const char *text, size_t length, size_t *out_in_start) {
+    bool single = false;
+    bool double_quote = false;
+    bool escaped = false;
+    for (size_t i = 0; i < length; ++i) {
+        char c = text[i];
+        if (escaped) {
+            escaped = false;
+            continue;
+        }
+        if (!single && c == '\\') {
+            escaped = true;
+            continue;
+        }
+        if (!double_quote && c == '\'') {
+            single = !single;
+            continue;
+        }
+        if (!single && c == '"') {
+            double_quote = !double_quote;
+            continue;
+        }
+        if (single || double_quote) continue;
+        if (c == 'i' && i + 1 < length && text[i + 1] == 'n' && (i == 0 || isspace((unsigned char)text[i - 1])) &&
+            (i + 2 >= length || isspace((unsigned char)text[i + 2]))) {
+            *out_in_start = i;
+            return true;
+        }
+    }
+    return false;
+}
+
+#define SHELL__MAX_CASE_PATTERNS 8
+
+/* Finds the first top-level (quote/escape-aware, same limitation as
+ * shell_compound__find_case_in() above re: command-substitution spans) ')'
+ * in [text, text+length). Returns false -- nothing else set -- when there
+ * isn't one. */
+static bool shell_compound__find_case_close(const char *text, size_t length, size_t *out_offset) {
+    bool single = false;
+    bool double_quote = false;
+    bool escaped = false;
+    for (size_t i = 0; i < length; ++i) {
+        char c = text[i];
+        if (escaped) {
+            escaped = false;
+            continue;
+        }
+        if (!single && c == '\\') {
+            escaped = true;
+            continue;
+        }
+        if (!double_quote && c == '\'') {
+            single = !single;
+            continue;
+        }
+        if (!single && c == '"') {
+            double_quote = !double_quote;
+            continue;
+        }
+        if (single || double_quote) continue;
+        if (c == ')') {
+            *out_offset = i;
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Collects one clause's pattern list -- "PATTERN[|PATTERN...])" -- starting
+ * at plan->commands[*index] (an optional leading '(' before the first
+ * pattern, bash's "(pattern) cmd ;;" form, is skipped there), and reports
+ * where its body begins.
+ *
+ * shell_parser__plan() has no notion of `case`, so a top-level '|' is
+ * always tokenized as an ordinary pipe connector (SHELL_CONNECT_PIPE) --
+ * splitting what bash reads as one "a|b|c)" pattern list across several
+ * plan entries the exact same way "cmd1 | cmd2" would be (see
+ * SHELL_CONNECT_PIPE's own doc comment in shell_parser.h). So rather than
+ * scanning one entry's text for '|' -- which, by the time this runs, has
+ * already been consumed as an entry boundary and never appears in any
+ * entry's own text -- this walks *forward* through however many
+ * PIPE-connected entries the list actually spans, each contributing
+ * exactly one more pattern, until it finds one containing a top-level ')':
+ * that entry's text up to the ')' is the list's last pattern, and *index is
+ * left pointing at it (unshrunk) so shell_compound__run_case() can shrink
+ * it down to its own glued body exactly the way it already does for a
+ * single-entry clause. Every pattern-only entry consumed along the way is
+ * left completely untouched (text/length/connector unchanged) -- unlike the
+ * final, ')'-bearing entry, it never needs shrinking or restoring, since it
+ * carries nothing else worth keeping and (for a clause inside a loop body
+ * re-walked on every iteration) is simply re-read the same way again next
+ * time. A ')'-less entry that ISN'T itself followed by a PIPE-connected one
+ * means the list never closes -- reported by the caller as a malformed
+ * clause. */
+static bool shell_compound__collect_case_patterns(
+    const shell_plan_t *plan, size_t *index, shell_word_span_t out_patterns[SHELL__MAX_CASE_PATTERNS],
+    size_t *out_pattern_count, size_t *out_body_offset
+) {
+    size_t count = 0;
+    bool first = true;
+    for (;;) {
+        const char *text = plan->commands[*index].text;
+        size_t length = plan->commands[*index].length;
+        size_t start, len;
+        shell_compound__trim(text, length, &start, &len);
+        if (first && len > 0 && text[start] == '(') {
+            start++;
+            len--;
+        }
+        first = false;
+        size_t close_offset;
+        if (shell_compound__find_case_close(text + start, len, &close_offset)) {
+            size_t s = start, e = start + close_offset;
+            while (s < e && isspace((unsigned char)text[s])) s++;
+            while (e > s && isspace((unsigned char)text[e - 1])) e--;
+            if (count >= SHELL__MAX_CASE_PATTERNS) return false;
+            out_patterns[count].text = text + s;
+            out_patterns[count].length = e - s;
+            count++;
+            *out_pattern_count = count;
+            *out_body_offset = start + close_offset + 1;
+            return true;
+        }
+        if (count >= SHELL__MAX_CASE_PATTERNS) return false;
+        out_patterns[count].text = text + start;
+        out_patterns[count].length = len;
+        count++;
+        if (*index + 1 >= plan->count || plan->commands[*index + 1].connector != SHELL_CONNECT_PIPE) return false;
+        (*index)++;
+    }
+}
+
+/* *index is at the "case" (or, on a nested call, a recursively-reached)
+ * command on entry. Consumes through the matching "esac" and leaves *index
+ * just past it, same contract as shell_compound__run_if()/run_for()/
+ * run_while(). `execute` false walks the whole structure -- every clause,
+ * every glob comparison skipped -- without ever expanding the case word or
+ * a pattern (both can run "$(...)" command substitutions bash would never
+ * run for a branch that isn't taken) or running any clause's body, purely
+ * to leave *index in the right place, same as an if/for/while in a branch
+ * that isn't being taken.
+ *
+ * Each clause opens with "PATTERN[|PATTERN...]) body..." -- possibly
+ * spanning several plan entries if the pattern list itself uses "|" (see
+ * shell_compound__collect_case_patterns() above) -- which settles *index on
+ * the one entry that actually holds the glued body, right after the
+ * closing ')'. This shrinks that one plan entry down to just the glued body
+ * the same way shell_compound__consume_do() shrinks a "do" entry down to
+ * its own glued remainder (reusing its shell_compound__do_span_t/
+ * restore_do() -- the shape is identical, just produced by a different
+ * keyword) -- and the body from
+ * there is walked with shell_compound__run_sequence() exactly like a loop
+ * body or if-branch is, so it can itself span multiple ;/&&/||-joined
+ * commands, contain nested if/for/while/case constructs, all the way up to
+ * the next ";;"-tagged entry (SHELL_CONNECT_CASE_END -- see its own doc
+ * comment in shell_parser.h) or a bare "esac", whichever comes first --
+ * including a *nested* case's own, since that recurses through the same
+ * SHELL_COMPOUND_CASE dispatch in shell_compound__run_sequence() and fully
+ * consumes its own clauses/"esac" before ever returning control here. */
+static int shell_compound__run_case(shell_state_t *state, const shell_plan_t *plan, size_t *index, bool execute) {
+    size_t header_index = *index;
+    const char *rest;
+    size_t rest_len;
+    (void)shell_compound__match_keyword(&plan->commands[header_index], "case", &rest, &rest_len);
+
+    size_t in_start;
+    if (!shell_compound__find_case_in(rest, rest_len, &in_start)) {
+        stdio__printf("shell: case: missing 'in'\n");
+        state->last_status = 2;
+        *index = plan->count;
+        return 2;
+    }
+    const char *word_text = rest;
+    size_t word_len = in_start;
+    while (word_len > 0 && isspace((unsigned char)word_text[word_len - 1])) word_len--;
+
+    size_t after_in = in_start + 2;
+    const char *glued_text = rest + after_in;
+    size_t glued_len = rest_len - after_in;
+    while (glued_len > 0 && isspace((unsigned char)*glued_text)) {
+        glued_text++;
+        glued_len--;
+    }
+
+    char *word_value = NULL;
+    if (execute) {
+        const char *error = NULL;
+        word_value = shell_parser__expand_text(
+            word_text, word_len, shell_executor__lookup, shell_executor__run_substitution,
+            shell_executor__eval_arith_word, state, state->last_status, &error
+        );
+        if (word_value == NULL) {
+            stdio__printf("shell: case: %s\n", error != NULL ? error : "expansion error");
+            state->last_status = 2;
+            *index = plan->count;
+            return 2;
+        }
+    }
+
+    shell_compound__do_span_t header_span = {
+        .index = header_index,
+        .text = plan->commands[header_index].text,
+        .length = plan->commands[header_index].length,
+        .connector = plan->commands[header_index].connector,
+    };
+    if (glued_len > 0) {
+        plan->commands[header_index].text = glued_text;
+        plan->commands[header_index].length = glued_len;
+        /* This entry -- now shrunk down to the first clause's own opener --
+         * is about to be classified and (if it's itself a nested compound,
+         * e.g. "case a in b) case ...") dispatched by run_sequence(), which
+         * treats SHELL_CONNECT_CASE_END as "stop, this belongs to an
+         * enclosing clause" (see that connector's own doc comment in
+         * shell_parser.h). But that's only true of the *header* entry's
+         * original connector -- how "case ..." followed whatever came
+         * before it -- which is exactly what header_span above just saved
+         * and shell_compound__restore_do() puts back once this shrink is no
+         * longer needed; while it's in effect, this entry must read as an
+         * ordinary sequential command so run_sequence() (both this
+         * function's own clause loop below and, for a nested compound, its
+         * dispatcher) actually runs/recurses into it instead of mistaking
+         * it for the *outer* case's own next-clause boundary. */
+        plan->commands[header_index].connector = SHELL_CONNECT_SEQUENCE;
+        *index = header_index;
+    } else {
+        *index = header_index + 1;
+    }
+
+    bool matched = false;
+    int status = 0;
+    for (;;) {
+        if (*index >= plan->count) {
+            stdio__printf("shell: case: missing 'esac'\n");
+            state->last_status = 2;
+            status = 2;
+            if (glued_len > 0) shell_compound__restore_do(plan, &header_span);
+            memory__free(word_value);
+            return status;
+        }
+        if (shell_compound__classify(plan, *index) == SHELL_COMPOUND_ESAC) {
+            (*index)++;
+            break;
+        }
+
+        shell_word_span_t patterns[SHELL__MAX_CASE_PATTERNS];
+        size_t pattern_count = 0;
+        size_t body_offset = 0;
+        if (!shell_compound__collect_case_patterns(plan, index, patterns, &pattern_count, &body_offset)) {
+            stdio__printf("shell: case: malformed clause (missing ')')\n");
+            state->last_status = 2;
+            if (glued_len > 0) shell_compound__restore_do(plan, &header_span);
+            memory__free(word_value);
+            *index = plan->count;
+            return 2;
+        }
+        /* shell_compound__collect_case_patterns() may have walked *index
+         * forward, past any purely-pattern PIPE-connected entries, onto the
+         * one that actually holds the closing ')' -- re-fetch only now that
+         * it's settled there. */
+        const shell_command_t *clause_cmd = &plan->commands[*index];
+        const char *body_text = clause_cmd->text + body_offset;
+        size_t body_len = clause_cmd->length - body_offset;
+        while (body_len > 0 && isspace((unsigned char)*body_text)) {
+            body_text++;
+            body_len--;
+        }
+
+        shell_compound__do_span_t clause_span = {
+            .index = *index,
+            .text = clause_cmd->text,
+            .length = clause_cmd->length,
+            .connector = plan->commands[*index].connector,
+        };
+        if (body_len > 0) {
+            plan->commands[*index].text = body_text;
+            plan->commands[*index].length = body_len;
+            /* Same reasoning as header_span's own shrink above: this entry
+             * is every non-first clause's own opener, which always carries
+             * SHELL_CONNECT_CASE_END (it follows the previous clause's
+             * ";;") -- clear it while the shrink is in effect so
+             * run_sequence() runs/recurses into this clause's own body
+             * instead of mistaking its first entry for a boundary and
+             * stopping before ever executing (or even classifying) it;
+             * shell_compound__restore_do() below puts the real connector
+             * back once this clause's body has been fully walked. */
+            plan->commands[*index].connector = SHELL_CONNECT_SEQUENCE;
+        } else {
+            (*index)++;
+        }
+
+        bool try_match = execute && !matched;
+        bool clause_matches = false;
+        bool expand_failed = false;
+        for (size_t p = 0; try_match && !clause_matches && p < pattern_count; ++p) {
+            const char *pattern_error = NULL;
+            char *pattern_value = shell_parser__expand_text(
+                patterns[p].text, patterns[p].length, shell_executor__lookup, shell_executor__run_substitution,
+                shell_executor__eval_arith_word, state, state->last_status, &pattern_error
+            );
+            if (pattern_value == NULL) {
+                stdio__printf("shell: case: %s\n", pattern_error != NULL ? pattern_error : "expansion error");
+                expand_failed = true;
+                break;
+            }
+            clause_matches = shell_compound__glob_match(pattern_value, word_value);
+            memory__free(pattern_value);
+        }
+        if (clause_matches) matched = true;
+
+        if (!expand_failed) {
+            int body_status = shell_compound__run_sequence(state, plan, index, clause_matches);
+            shell_compound__catch_up(state, plan, index, clause_matches);
+            if (clause_matches) status = body_status;
+        }
+        if (body_len > 0) shell_compound__restore_do(plan, &clause_span);
+        if (expand_failed) {
+            state->last_status = 2;
+            if (glued_len > 0) shell_compound__restore_do(plan, &header_span);
+            memory__free(word_value);
+            *index = plan->count;
+            return 2;
+        }
+    }
+
+    if (glued_len > 0) shell_compound__restore_do(plan, &header_span);
+    memory__free(word_value);
+    return status;
+}
+
 int shell_compound__run(shell_state_t *state, const char *text, char *const *heredoc_bodies, size_t heredoc_count) {
     shell_plan_t plan = {0};
     const char *error = NULL;
@@ -848,6 +1314,10 @@ bool shell_compound__pending(const char *text) {
      * matches this the same way if_depth already treats "if" uniformly
      * regardless of elif/else in between. */
     int loop_depth = 0;
+    /* "case" is closed by a matching "esac", the same one-counter-per-pair
+     * treatment as if_depth/loop_depth above -- a clause's own ";;"/pattern
+     * words never need tracking here, only the outermost case/esac pair. */
+    int case_depth = 0;
     char word[8];
     size_t word_len = 0;
     bool word_clean = true;
@@ -864,6 +1334,8 @@ bool shell_compound__pending(const char *text) {
                 else if (word_len == 3 && memcmp(word, "for", 3) == 0) loop_depth++;
                 else if (word_len == 5 && memcmp(word, "while", 5) == 0) loop_depth++;
                 else if (word_len == 4 && memcmp(word, "done", 4) == 0 && loop_depth > 0) loop_depth--;
+                else if (word_len == 4 && memcmp(word, "case", 4) == 0) case_depth++;
+                else if (word_len == 4 && memcmp(word, "esac", 4) == 0 && case_depth > 0) case_depth--;
             }
             word_len = 0;
             word_clean = true;
@@ -906,7 +1378,7 @@ bool shell_compound__pending(const char *text) {
         if (word_len < sizeof(word)) word[word_len++] = c;
         else word_clean = false;
     }
-    return single || double_quote || if_depth > 0 || brace_depth > 0 || loop_depth > 0;
+    return single || double_quote || if_depth > 0 || brace_depth > 0 || loop_depth > 0 || case_depth > 0;
 }
 
 static shell_function_t *shell_compound__find_function(const shell_state_t *state, const char *name) {
