@@ -355,7 +355,7 @@ int shell_builtins__run(shell_state_t *state, int argc, char **argv) {
     if (strcmp(argv[0], "true") == 0) return 0;
     if (strcmp(argv[0], "false") == 0) return 1;
     if (strcmp(argv[0], "test") == 0 || strcmp(argv[0], "[") == 0 || strcmp(argv[0], "[[") == 0) {
-        return shell_condition__run(argc, argv);
+        return shell_condition__run(state, argc, argv);
     }
     if (strcmp(argv[0], "cd") == 0) return shell_builtins__cd(state, argc, argv);
     if (strcmp(argv[0], "set") == 0) {

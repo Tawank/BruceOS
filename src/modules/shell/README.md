@@ -75,9 +75,19 @@ line it just deletes the character under the cursor, like Delete.
 - `echo`, `true`, `false`, `cd`, `set`, `unset`, `export`, `local`, `clear`,
   `reset`, `help`, `exit [N]`.
 - `test` / `[` / `[[`: `-eq -ne -lt -le -gt -ge` (integer comparison),
-  `=` / `!=` (string comparison), `-z` / `-n` (empty/non-empty), `-a`
-  (logical AND of chained tests). No `-o`, no file-test operators
-  (`-e -f -d ...`), no `-lt`-style operators on `[[`'s `<`/`>`.
+  `=` / `!=` (string comparison), `-z` / `-n` (empty/non-empty), `-e -f -d
+  -r -w -x` (file tests, resolved against `$PWD` like any other path
+  argument), and `-a` / `-o` (logical AND/OR of chained tests, `-a` binding
+  tighter than `-o`, same as bash). `[[ ... ]]` additionally accepts `&&` /
+  `||` in place of `-a` / `-o` -- the parser keeps a `[[ ... ]]` command flat
+  (not connector-split) so they reach `test`/`[`/`[[`'s shared evaluator as
+  ordinary operands, same as `-a`/`-o` do. No `!`, no parenthesized groups,
+  no `[[ ]]` pattern/regex matching, no `-lt`-style operators on `[[`'s
+  `<`/`>`. This filesystem has no per-file permission bits, so `-r`/`-w`/`-x`
+  are real open-for-read/open-for-write/traversability probes rather than
+  aliases for `-e`, but in practice will agree with `-e` for anything that
+  exists; `-x` mirrors `-d` for directories and `-r` for files, since there's
+  no executable-bit concept at all here.
 - `break [N]`: multi-level loop break, matching bash's `break N`.
 - `read [NAME...]`: reads one line from stdin; with no names the line is
   stored in `$REPLY`; with names, splits on whitespace and the last name
@@ -262,8 +272,6 @@ line it just deletes the character under the cursor, like Delete.
 Roughly in order of how often bash scripts actually use them:
 - Pathname globbing and brace expansion.
 - `$@`, `$*`, `$$`, `$!`.
-- File-test operators for `test`/`[` (`-e -f -d -r -w -x ...`) and `-o`/`[[
-  ... || ... ]]`-in-tests.
 - `until` loops.
 
 ## Example
@@ -362,7 +370,12 @@ just skipping the rest of the current row.
 `src/modules/selftest/shell_test.c` covers the language layer end-to-end
 against real firmware output (via `stdio__session_*` + `app_runner__run`):
 `selftest__run_shell_language_case`, `..._script_case`,
-`..._control_flow_case`, `..._local_case`, `..._command_substitution_case`,
+`..._control_flow_case` (also `-o`, `[[ ... ]]`'s `&&`/`||` -- including that
+`&&`/`-a` binds tighter than `||`/`-o` -- and, via the
+`selftest__shell_condition_file_tests()` helper, the `-e -f -d -r -w -x`
+file-test operators against a real file and directory under `/apps`,
+including `$PWD`-relative resolution and that `-w`'s probe never disturbs the
+file's existing contents), `..._local_case`, `..._command_substitution_case`,
 `..._arith_word_case`, `..._output_redirect_case`, `..._builtin_redirect_case`
 (`echo`/a shell function redirected to a file, plus `<` alone and combined
 with `>` on both a plain builtin and a function, a second `read` past the

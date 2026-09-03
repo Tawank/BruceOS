@@ -121,6 +121,76 @@ bool selftest__run_shell_script_case(void) {
     return ok;
 }
 
+/* Sets up a real file and a real directory under /apps and exercises
+ * test/['s -e/-f/-d/-r/-w/-x unary file-test operators against them
+ * (shell_condition.c's shell_condition__file_test()) -- called from
+ * selftest__run_shell_control_flow_case() below, which already owns the
+ * shell_state_t these lines run against. */
+static bool selftest__shell_condition_file_tests(shell_state_t *state) {
+    const char *file_path = "/apps/shell_condition_test.txt";
+    const char *dir_path = "/apps/shell_condition_test_dir";
+    const char *missing_path = "/apps/shell_condition_test_missing.txt";
+    (void)storage__remove(file_path);
+    (void)storage__remove(dir_path);
+    (void)storage__remove(missing_path);
+    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
+    size_t written = 0;
+    static const char contents[] = "probe";
+    if (storage__open(
+            file_path, BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE | BRUCE_STORAGE_OPEN_TRUNCATE, &file
+        ) != BRUCE_OK ||
+        storage__write(file, contents, sizeof(contents) - 1, &written) != BRUCE_OK ||
+        written != sizeof(contents) - 1 || storage__close(file) != BRUCE_OK) {
+        if (file != BRUCE_FILE_ID_INVALID) (void)storage__close(file);
+        (void)storage__remove(file_path);
+        return false;
+    }
+    if (storage__mkdir(dir_path) != BRUCE_OK) {
+        (void)storage__remove(file_path);
+        return false;
+    }
+
+    bool ok =
+        shell__execute_line(state, "[ -e /apps/shell_condition_test.txt ] && shell_test_probe exists") == 0 &&
+        strcmp(s_probe_arg, "exists") == 0 &&
+        shell__execute_line(state, "[ -e /apps/shell_condition_test_missing.txt ] && shell_test_probe skipped") ==
+            1 &&
+        shell__execute_line(state, "[ -f /apps/shell_condition_test.txt ] && shell_test_probe is_file") == 0 &&
+        strcmp(s_probe_arg, "is_file") == 0 &&
+        shell__execute_line(state, "[ -f /apps/shell_condition_test_dir ] && shell_test_probe skipped") == 1 &&
+        shell__execute_line(state, "[ -d /apps/shell_condition_test_dir ] && shell_test_probe is_dir") == 0 &&
+        strcmp(s_probe_arg, "is_dir") == 0 &&
+        shell__execute_line(state, "[ -d /apps/shell_condition_test.txt ] && shell_test_probe skipped") == 1 &&
+        shell__execute_line(state, "[ -r /apps/shell_condition_test.txt ] && shell_test_probe readable") == 0 &&
+        strcmp(s_probe_arg, "readable") == 0 &&
+        shell__execute_line(state, "[ -w /apps/shell_condition_test.txt ] && shell_test_probe writable") == 0 &&
+        strcmp(s_probe_arg, "writable") == 0 &&
+        shell__execute_line(state, "[ -x /apps/shell_condition_test_dir ] && shell_test_probe traversable") == 0 &&
+        strcmp(s_probe_arg, "traversable") == 0 &&
+        /* Relative paths resolve against $PWD, same as any other shell path
+         * argument. */
+        shell__execute_line(state, "cd /apps; [ -f shell_condition_test.txt ] && shell_test_probe relative") ==
+            0 &&
+        strcmp(s_probe_arg, "relative") == 0 &&
+        shell__execute_line(state, "cd /") == 0;
+    /* -w's non-destructive open-for-write probe never truncates or creates
+     * content -- the file's own contents must still be exactly what was
+     * written above. */
+    if (ok) {
+        char readback[16] = {0};
+        size_t read_size = 0;
+        bruce_file_id_t read_file = BRUCE_FILE_ID_INVALID;
+        ok = storage__open(file_path, BRUCE_STORAGE_OPEN_READ, &read_file) == BRUCE_OK &&
+             storage__read(read_file, readback, sizeof(readback) - 1, &read_size) == BRUCE_OK &&
+             storage__close(read_file) == BRUCE_OK && read_size == sizeof(contents) - 1 &&
+             memcmp(readback, contents, read_size) == 0;
+    }
+    (void)storage__remove(file_path);
+    (void)storage__remove(dir_path);
+    if (!ok) printf("[selftest] shell/control-flow: file-test operators failed\n");
+    return ok;
+}
+
 bool selftest__run_shell_control_flow_case(void) {
     if (!selftest__shell_register_probe()) return false;
     shell_state_t state;
@@ -161,6 +231,27 @@ bool selftest__run_shell_control_flow_case(void) {
         shell__execute_line(&state, "[ -n x ] && shell_test_probe nnonempty") == 0 &&
         shell__execute_line(&state, "[ x && shell_test_probe missing_bracket") == 2 &&
         shell__execute_line(&state, "test 1 -eq x") == 2 &&
+        /* -o (mirrors -a) for test/[. */
+        shell__execute_line(&state, "[ 1 -eq 2 -o 3 -eq 3 ] && shell_test_probe or_true") == 0 &&
+        strcmp(s_probe_arg, "or_true") == 0 &&
+        shell__execute_line(&state, "[ 1 -eq 2 -o 3 -eq 4 ] && shell_test_probe skipped") == 1 &&
+        /* "[[ COND1 && COND2 ]]" / "[[ COND1 || COND2 ]]": shell_parser__plan()
+         * normally tokenizes a top-level "&&"/"||" as a command connector,
+         * splitting the line into short-circuited commands -- its own
+         * "[[ ... ]]" span tracking keeps this one flat command instead, so
+         * it reaches shell_condition__run() intact. */
+        shell__execute_line(&state, "[[ 1 -eq 1 && 2 -eq 2 ]] && shell_test_probe dbracket_and") == 0 &&
+        strcmp(s_probe_arg, "dbracket_and") == 0 &&
+        shell__execute_line(&state, "[[ 1 -eq 2 || 2 -eq 2 ]] && shell_test_probe dbracket_or") == 0 &&
+        strcmp(s_probe_arg, "dbracket_or") == 0 &&
+        shell__execute_line(&state, "[[ 1 -eq 2 && 2 -eq 2 ]] && shell_test_probe skipped") == 1 &&
+        /* "&&" binds tighter than "||": "A && B || C" reads as "(A && B) ||
+         * C", so this is true even though the "&&" side alone is false. */
+        shell__execute_line(&state, "[[ 1 -eq 2 && 2 -eq 2 || 3 -eq 3 ]] && shell_test_probe precedence") == 0 &&
+        strcmp(s_probe_arg, "precedence") == 0 &&
+        /* File-test unary operators (-e/-f/-d/-r/-w/-x), resolved against
+         * $PWD like any other shell path argument. */
+        selftest__shell_condition_file_tests(&state) &&
         /* Functions: $0/$1../$# bind for the duration of the call and are
          * restored afterwards; a function shadows a builtin/external of the
          * same name. */

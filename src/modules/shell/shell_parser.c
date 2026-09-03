@@ -449,6 +449,19 @@ int shell_parser__plan(
      * group, e.g. "(( (a+b)*c ))", doesn't close it early) until it returns
      * to 0 at the matching "))". */
     int arith_depth = 0;
+    /* Tracks a "[[ ... ]]" test-command span the same way arith_depth above
+     * tracks "((...))": while true, ';'/'&&'/'||'/'|' inside it are left as
+     * plain text instead of being parsed as shell operators, so
+     * `[[ COND1 && COND2 ]]` / `[[ COND1 || COND2 ]]` reach
+     * shell_condition__run() as the one flat command bash treats them as,
+     * rather than getting split into separate short-circuited commands the
+     * way they otherwise would be -- see shell_condition.c's own "&&"/"||"
+     * handling for what happens once the whole thing arrives intact. Opened
+     * and closed only by a literal "[[" / "]]" recognized as its own
+     * whitespace-bounded word (never e.g. mid-word), matching bash's own
+     * recognition of the construct; "[[ ]]" never nests, so this is a flag,
+     * not a depth counter like arith_depth. */
+    bool in_double_bracket = false;
 
     for (size_t i = 0; i <= length; ++i) {
         char c = i < length ? line[i] : '\0';
@@ -509,6 +522,24 @@ int shell_parser__plan(
             /* Never swallow the end-of-buffer sentinel here: even an
              * unterminated "((" must still fall through to the flush logic
              * below so the last command isn't silently dropped. */
+            token_boundary = isspace((unsigned char)c);
+            continue;
+        }
+        if (!in_double_bracket && token_boundary && c == '[' && i + 1 < length && line[i + 1] == '[' &&
+            (i + 2 >= length || isspace((unsigned char)line[i + 2]))) {
+            in_double_bracket = true;
+        } else if (
+            in_double_bracket && token_boundary && c == ']' && i + 1 < length && line[i + 1] == ']' &&
+            (i + 2 >= length || isspace((unsigned char)line[i + 2]))
+        ) {
+            in_double_bracket = false;
+        }
+        if (in_double_bracket && c != '\0') {
+            /* Same reasoning as arith_depth's own sentinel note above: an
+             * unterminated "[[" must still fall through and flush at the
+             * end of the buffer rather than swallowing it -- once flushed,
+             * shell_condition__run() reports the missing "]]" itself with a
+             * clearer message than a parse error here would. */
             token_boundary = isspace((unsigned char)c);
             continue;
         }
