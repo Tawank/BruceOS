@@ -2,3 +2,10 @@
 # UART0 remains unused, and no secondary console output is configured.
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+
+# S3 has no Classic BT radio (SOC_BT_CLASSIC_SUPPORTED is unset), so it only
+# ever needs BLE scanning (src/core/bluetooth/bluetooth_nimble.c) -- NimBLE
+# instead of Bluedroid for that saves real DIRAM without losing anything this
+# target could use. Kconfig's BT_HOST choice makes this exclusive with
+# Bluedroid automatically.
+CONFIG_BT_NIMBLE_ENABLED=y

@@ -38,6 +38,16 @@ set(BRUCE_SELFTEST_SOURCES
     "modules/selftest/wasm_bruce_sdk_test.c"
     "modules/selftest/wifi_test.c")
 
+# BLE scanning's host-stack backend: NimBLE on every BLE-only target (see
+# boards/*/sdkconfig.defaults.esp32s3), Bluedroid where Classic BT HID host
+# (bluetooth_hid.c) also needs it. Mirrors the same choice in ESP-IDF's own
+# esp_hid/CMakeLists.txt.
+if(CONFIG_BT_NIMBLE_ENABLED)
+    set(BRUCE_BLUETOOTH_BACKEND_SRC "core/bluetooth/bluetooth_nimble.c")
+else()
+    set(BRUCE_BLUETOOTH_BACKEND_SRC "core/bluetooth/bluetooth_bluedroid.c")
+endif()
+
 idf_component_register(SRCS
                     "main.c"
                      "core/app_config/app_config.c"
@@ -48,6 +58,7 @@ idf_component_register(SRCS
                     "core/autostart/autostart.c"
                     "core/base64/base64.c"
                     "core/bluetooth/bluetooth.c"
+                    "${BRUCE_BLUETOOTH_BACKEND_SRC}"
                     "core/bluetooth/bluetooth_hid.c"
                     "core/clock/clock.c"
                     "core/compress/compress.c"
