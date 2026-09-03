@@ -11,6 +11,7 @@
 #include "shell_arith.h"
 #include "shell_builtins.h"
 #include "shell_executor.h"
+#include "shell_glob.h"
 #include "shell_parser.h"
 
 static void shell_compound__trim(const char *text, size_t length, size_t *out_start, size_t *out_len) {
@@ -816,102 +817,15 @@ static int shell_compound__run_while(shell_state_t *state, const shell_plan_t *p
     return result;
 }
 
-/* Matches one glob `pattern` (a plain, already-`$`-expanded NUL-terminated
- * string -- see shell_compound__run_case() below) against a `]`-terminated
- * bracket expression starting at pattern[0] == '[': an optional leading '!'
- * or '^' negates, a member is either one literal character or an inclusive
- * "lo-hi" range (a bare trailing '-' is just a literal '-'), and a ']' as
- * the very first member (right after '[' or '[!'/'[^') is itself literal
- * rather than closing the class early -- the usual glob convention for
- * "match everything except ']'" (`[!]abc]`). *out_valid is set false (with
- * `c`'s match result meaningless) when this '[' has no closing ']' at all,
- * so the caller falls back to treating it as one ordinary literal character
- * -- matching bash's own leniency for a stray unclosed bracket. On a valid
- * class, *out_end is set just past the closing ']'. */
-static bool shell_compound__glob_class(const char *pattern, char c, const char **out_end, bool *out_valid) {
-    const char *p = pattern + 1;
-    bool negate = *p == '!' || *p == '^';
-    if (negate) p++;
-    const char *body = p;
-    const char *scan = *p == ']' ? p + 1 : p;
-    while (*scan != '\0' && *scan != ']') scan++;
-    if (*scan != ']') {
-        *out_valid = false;
-        return false;
-    }
-    *out_end = scan + 1;
-    *out_valid = true;
-    bool matched = false;
-    for (const char *q = body; q < scan;) {
-        if (q + 2 < scan && q[1] == '-') {
-            if ((unsigned char)c >= (unsigned char)q[0] && (unsigned char)c <= (unsigned char)q[2]) matched = true;
-            q += 3;
-        } else {
-            if (c == *q) matched = true;
-            q += 1;
-        }
-    }
-    return negate ? !matched : matched;
-}
-
-/* A small, self-contained fnmatch()-style matcher for `case`'s pattern
- * lists (see README.md's Redirection-adjacent "Case patterns" section) --
- * `*` matches any run of characters (including none), `?` matches exactly
- * one, and `[...]`/`[!...]`/`[^...]` matches a bracket expression (see
- * shell_compound__glob_class() above); anything else matches itself
- * literally. Standard iterative backtracking on the last `*` seen (`star_p`/
- * `star_t`): whenever the pattern can't match the text at the current
- * position, and a `*` was seen earlier, retry from just after that `*` with
- * one more text character folded into it, rather than recursing -- so this
- * runs in bounded stack space regardless of pattern/text length. Unlike real
- * pathname globbing (README.md's "What's left to implement"), this never
- * touches the filesystem -- it only ever compares `pattern` against the one
- * `text` string shell_compound__run_case() already expanded, exactly the
- * same job `[[ str == pattern ]]` would do if this shell's `[[` implemented
- * pattern matching (shell_condition.c's own doc comment marks that as out of
- * scope there; this is `case`'s own independent, narrower implementation of
- * the same glob syntax). */
-static bool shell_compound__glob_match(const char *pattern, const char *text) {
-    const char *p = pattern;
-    const char *t = text;
-    const char *star_p = NULL;
-    const char *star_t = NULL;
-    while (*t != '\0') {
-        bool one_matches;
-        size_t consumed = 1;
-        if (*p == '[') {
-            const char *class_end = NULL;
-            bool valid = false;
-            bool class_matched = shell_compound__glob_class(p, *t, &class_end, &valid);
-            if (valid) {
-                one_matches = class_matched;
-                consumed = (size_t)(class_end - p);
-            } else {
-                one_matches = *p == *t;
-            }
-        } else if (*p == '?') {
-            one_matches = true;
-        } else if (*p == '*') {
-            star_p = p;
-            star_t = t;
-            p++;
-            continue;
-        } else {
-            one_matches = *p != '\0' && *p == *t;
-        }
-        if (one_matches) {
-            p += consumed;
-            t++;
-            continue;
-        }
-        if (star_p == NULL) return false;
-        p = star_p + 1;
-        star_t++;
-        t = star_t;
-    }
-    while (*p == '*') p++;
-    return *p == '\0';
-}
+/* `case`'s glob matching (`*`/`?`/`[...]`/`[!...]`/`[^...]`) is
+ * shell_glob__match() (shell_glob.c), shared with shell_parser.c's real
+ * pathname expansion -- see shell_glob.h's own doc comment for exactly what
+ * it supports. Unlike that pathname expansion, this never touches the
+ * filesystem: it only ever compares a pattern against the one `text` string
+ * shell_compound__run_case() already expanded, exactly the same job
+ * `[[ str == pattern ]]` would do if this shell's `[[` implemented pattern
+ * matching (shell_condition.c's own doc comment marks that as out of scope
+ * there; this is `case`'s own independent use of the same glob syntax). */
 
 /* Finds a standalone "in" token in [text, text+length) -- bounded by
  * whitespace/start/end on both sides, skipping quoted content the same way
@@ -1229,7 +1143,7 @@ static int shell_compound__run_case(shell_state_t *state, const shell_plan_t *pl
                 expand_failed = true;
                 break;
             }
-            clause_matches = shell_compound__glob_match(pattern_value, word_value);
+            clause_matches = shell_glob__match(pattern_value, word_value);
             memory__free(pattern_value);
         }
         if (clause_matches) matched = true;

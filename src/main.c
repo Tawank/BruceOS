@@ -63,7 +63,19 @@
 #define NOTIFICATION_SERVICE_STACK_BYTES 2048u
 #define PERMISSIONS_STACK_BYTES 8192u
 #define SERIAL_COMMANDS_STACK_BYTES 3072u
-#define SHELL_STACK_BYTES 4096u
+/* 4096 used to be enough, but proved too tight once brace expansion
+ * (shell_brace.c) gave shell_parser.c's word tokenizer one more call layer
+ * to go through on its way to a "$(...)" command substitution's own already-
+ * deep call chain (shell_parser__words() -> ... -> shell_executor__run_substitution()
+ * -> shell_executor__capture_external(), still all on this task's own stack
+ * up to the point where the substitution's child process is actually
+ * spawned) -- a real stack overflow (see shell_app.c's
+ * shell_app__collect_heredoc_body() doc comment for the same class of bug
+ * before), not merely a margin-of-safety bump. Matches every other app here
+ * with genuinely interpreter-like logic (CONFIG_STACK_BYTES,
+ * PERMISSIONS_STACK_BYTES, STORAGE_COMMANDS_STACK_BYTES, TERMINAL_STACK_BYTES
+ * all below) rather than standing out as unusually tight among them. */
+#define SHELL_STACK_BYTES 8192u
 #define SSH_STACK_BYTES 16384u
 #define STORAGE_COMMANDS_STACK_BYTES 8192u
 #define TERMINAL_STACK_BYTES 8192u

@@ -661,8 +661,8 @@ static bool selftest__shell_case_step(
 }
 
 /* Exercises `case WORD in PATTERN[|PATTERN...]) commands ;; ... esac`
- * (shell_compound.c's shell_compound__run_case(), and its
- * shell_compound__glob_match() pattern matcher): single/multiple clauses,
+ * (shell_compound.c's shell_compound__run_case(), matching each clause with
+ * shell_glob__match() in shell_glob.c): single/multiple clauses,
  * "|"-separated alternative patterns, "*"/"?"/"[...]" glob wildcards, a
  * "*)" catch-all, no match with no catch-all (status 0, same as bash), only
  * the first matching clause's body runs (lazily -- a later clause's own
@@ -750,6 +750,215 @@ bool selftest__run_shell_case_case(void) {
 
     shell__state_free(&state);
     printf("[selftest] shell/case: %s\n", ok ? "OK" : "failed");
+    return ok;
+}
+
+/* Sets up a real scratch directory under /apps and exercises real pathname
+ * (glob) expansion (shell_parser.c's shell_parser__words(), backed by
+ * shell_glob.c) -- called from selftest__run_shell_glob_case() below, which
+ * owns the shell_state_t these lines run against. */
+static bool selftest__shell_glob_fixture_teardown(void) {
+    bool ok = true;
+    ok = storage__remove("/apps/shell_glob_test_dir/sub/inner.txt") == BRUCE_OK && ok;
+    ok = storage__remove("/apps/shell_glob_test_dir/sub") == BRUCE_OK && ok;
+    ok = storage__remove("/apps/shell_glob_test_dir/a.txt") == BRUCE_OK && ok;
+    ok = storage__remove("/apps/shell_glob_test_dir/b.txt") == BRUCE_OK && ok;
+    ok = storage__remove("/apps/shell_glob_test_dir/z.txt") == BRUCE_OK && ok;
+    ok = storage__remove("/apps/shell_glob_test_dir/.hidden") == BRUCE_OK && ok;
+    ok = storage__remove("/apps/shell_glob_test_dir") == BRUCE_OK && ok;
+    return ok;
+}
+
+static bool selftest__shell_glob_write(const char *path) {
+    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
+    size_t written = 0;
+    bool ok = storage__open(path, BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE | BRUCE_STORAGE_OPEN_TRUNCATE, &file) ==
+                  BRUCE_OK &&
+              storage__write(file, "x", 1, &written) == BRUCE_OK && written == 1 && storage__close(file) == BRUCE_OK;
+    if (!ok && file != BRUCE_FILE_ID_INVALID) (void)storage__close(file);
+    return ok;
+}
+
+static bool selftest__shell_glob_fixture_setup(void) {
+    /* Best-effort clean slate: a previous run that crashed mid-test could
+     * have left any of these behind. */
+    (void)selftest__shell_glob_fixture_teardown();
+    return storage__mkdir("/apps/shell_glob_test_dir") == BRUCE_OK &&
+           storage__mkdir("/apps/shell_glob_test_dir/sub") == BRUCE_OK &&
+           selftest__shell_glob_write("/apps/shell_glob_test_dir/a.txt") &&
+           selftest__shell_glob_write("/apps/shell_glob_test_dir/b.txt") &&
+           selftest__shell_glob_write("/apps/shell_glob_test_dir/z.txt") &&
+           selftest__shell_glob_write("/apps/shell_glob_test_dir/.hidden") &&
+           selftest__shell_glob_write("/apps/shell_glob_test_dir/sub/inner.txt");
+}
+
+/* Like selftest__shell_case_step()/selftest__shell_loops_step() above, for
+ * selftest__run_shell_glob_case() below. */
+static bool selftest__shell_glob_step(
+    bool ok_so_far, shell_state_t *state, const char *line, int expected_status, const char *expected_arg
+) {
+    if (!ok_so_far) return false;
+    int status = shell__execute_line(state, line);
+    bool ok = status == expected_status && (expected_arg == NULL || strcmp(s_probe_arg, expected_arg) == 0);
+    if (!ok) {
+        printf(
+            "[selftest] shell/glob: `%s` -> status=%d (want %d) arg=\"%s\" (want \"%s\")\n", line, status,
+            expected_status, s_probe_arg, expected_arg != NULL ? expected_arg : "(unchecked)"
+        );
+    }
+    return ok;
+}
+
+/* Exercises real pathname (glob) expansion for unquoted words containing
+ * '*'/'?'/'[...]' (shell_parser.c's shell_parser__words(), backed by
+ * shell_glob.c's shell_glob__expand_path()/shell_glob__match()): multiple
+ * matches sorted the same way bash's own glob results are, '?' matching
+ * exactly one character, a '[...]' bracket class, a pattern that matches
+ * nothing left unchanged (nullglob-off, like bash's own default), dotfiles
+ * hidden from a wildcard unless the pattern component itself starts with
+ * '.', a multi-component pattern (a wildcard directory component followed
+ * by a wildcard filename component), an assignment word's own RHS never
+ * expanded regardless of quoting, and -- unlike shell_glob__match() as
+ * `case`/`esac`'s own pattern matcher, which never touches the filesystem --
+ * quoting (single, double, or backslash) suppressing this real, filesystem-
+ * touching expansion the way it does in bash, even though the shell's other
+ * quoting gaps don't (see shell_glob.h's own doc comment). */
+bool selftest__run_shell_glob_case(void) {
+    if (!selftest__shell_register_probe()) return false;
+    if (!selftest__shell_glob_fixture_setup()) {
+        (void)selftest__shell_glob_fixture_teardown();
+        return false;
+    }
+    shell_state_t state;
+    shell__state_init(&state);
+    s_probe_calls = 0;
+
+    bool ok = shell__execute_line(&state, "cd /apps/shell_glob_test_dir") == 0;
+    /* '*' matches every non-dotfile entry, sorted. */
+    ok = selftest__shell_glob_step(
+        ok, &state, "sum=; for f in *.txt; do sum=\"$sum$f,\"; done; shell_test_probe \"$sum\"", 0,
+        "a.txt,b.txt,z.txt,"
+    );
+    /* '?' matches exactly one character. */
+    ok = selftest__shell_glob_step(
+        ok, &state, "sum=; for f in ?.txt; do sum=\"$sum$f,\"; done; shell_test_probe \"$sum\"", 0,
+        "a.txt,b.txt,z.txt,"
+    );
+    /* '[...]' matches only the members actually present. */
+    ok = selftest__shell_glob_step(ok, &state, "shell_test_probe [xyz].txt", 0, "z.txt");
+    /* A pattern that matches nothing is left unchanged, exactly like
+     * nullglob-off bash -- not an error, not an empty word. */
+    ok = selftest__shell_glob_step(ok, &state, "shell_test_probe *.nomatch", 0, "*.nomatch");
+    /* A wildcard never matches a dotfile's name unless the pattern component
+     * itself starts with '.' too. */
+    ok = selftest__shell_glob_step(ok, &state, "shell_test_probe *hidden*", 0, "*hidden*");
+    ok = selftest__shell_glob_step(ok, &state, "shell_test_probe .*", 0, ".hidden");
+    /* A pattern can have a wildcard component that isn't the last one. */
+    ok = selftest__shell_glob_step(
+        ok, &state, "shell_test_probe /apps/shell_glob_test_dir/s*/inner.txt", 0,
+        "/apps/shell_glob_test_dir/sub/inner.txt"
+    );
+    /* An assignment word's own RHS is never glob-expanded, quoted or not --
+     * but a later unquoted reference to that variable still is, exactly like
+     * bash's own "pattern='*.txt'; echo $pattern". */
+    ok = selftest__shell_glob_step(ok, &state, "pattern=*.txt", 0, NULL);
+    ok = selftest__shell_glob_step(ok, &state, "shell_test_probe \"$pattern\"", 0, "*.txt");
+    ok = selftest__shell_glob_step(
+        ok, &state, "sum=; for f in $pattern; do sum=\"$sum$f,\"; done; shell_test_probe \"$sum\"", 0,
+        "a.txt,b.txt,z.txt,"
+    );
+    /* Quoting (and backslash-escaping) suppresses real pathname expansion
+     * the same way it does in bash, even for a variable whose *value*
+     * happens to be nothing but a glob metacharacter -- this is what makes
+     * it safe to carry an arbitrary, possibly-corrupted or
+     * attacker-influenced string through "$var" without it silently fanning
+     * out into multiple words. */
+    ok = selftest__shell_glob_step(ok, &state, "v=*", 0, NULL);
+    ok = selftest__shell_glob_step(ok, &state, "shell_test_probe \"$v\"", 0, "*");
+    ok = selftest__shell_glob_step(ok, &state, "shell_test_probe \\*", 0, "*");
+    ok = selftest__shell_glob_step(
+        ok, &state, "sum=; for f in $v; do sum=\"$sum$f,\"; done; shell_test_probe \"$sum\"", 0,
+        "a.txt,b.txt,sub,z.txt,"
+    );
+    ok = ok && shell__execute_line(&state, "cd /") == 0;
+
+    shell__state_free(&state);
+    ok = selftest__shell_glob_fixture_teardown() && ok;
+    printf("[selftest] shell/glob: %s\n", ok ? "OK" : "failed");
+    return ok;
+}
+
+/* Like selftest__shell_glob_step() above, for selftest__run_shell_brace_case()
+ * below. */
+static bool selftest__shell_brace_step(
+    bool ok_so_far, shell_state_t *state, const char *line, int expected_status, const char *expected_arg
+) {
+    if (!ok_so_far) return false;
+    int status = shell__execute_line(state, line);
+    bool ok = status == expected_status && (expected_arg == NULL || strcmp(s_probe_arg, expected_arg) == 0);
+    if (!ok) {
+        printf(
+            "[selftest] shell/brace: `%s` -> status=%d (want %d) arg=\"%s\" (want \"%s\")\n", line, status,
+            expected_status, s_probe_arg, expected_arg != NULL ? expected_arg : "(unchecked)"
+        );
+    }
+    return ok;
+}
+
+/* Exercises "{a,b,c}"-style brace (comma-list) expansion (shell_parser.c's
+ * shell_parser__words(), backed by shell_brace.c): a simple comma-list,
+ * sibling groups combining as a cartesian product, a group nested inside
+ * another, a "{...}" with no top-level comma left completely literal (unlike
+ * a real group, bash doesn't even strip its braces), quoting and
+ * backslash-escaping suppressing this the same way they suppress pathname
+ * expansion (shell_glob.h), and -- since brace expansion runs strictly
+ * before pathname expansion, on each result independently -- a brace group
+ * combined with a glob metacharacter in the same word, reusing
+ * selftest__run_shell_glob_case()'s own fixture directory. */
+bool selftest__run_shell_brace_case(void) {
+    if (!selftest__shell_register_probe()) return false;
+    if (!selftest__shell_glob_fixture_setup()) {
+        (void)selftest__shell_glob_fixture_teardown();
+        return false;
+    }
+    shell_state_t state;
+    shell__state_init(&state);
+    s_probe_calls = 0;
+
+    /* A simple comma-list expands to one word per alternative. */
+    bool ok = selftest__shell_brace_step(
+        true, &state, "sum=; for f in file{1,2,3}.txt; do sum=\"$sum$f,\"; done; shell_test_probe \"$sum\"", 0,
+        "file1.txt,file2.txt,file3.txt,"
+    );
+    /* Two sibling groups in one word combine as a cartesian product. */
+    ok = selftest__shell_brace_step(
+        ok, &state, "sum=; for f in {a,b}{1,2}; do sum=\"$sum$f,\"; done; shell_test_probe \"$sum\"", 0,
+        "a1,a2,b1,b2,"
+    );
+    /* A group can itself contain another group. */
+    ok = selftest__shell_brace_step(
+        ok, &state, "sum=; for f in {a,{b,c}}; do sum=\"$sum$f,\"; done; shell_test_probe \"$sum\"", 0, "a,b,c,"
+    );
+    /* A "{...}" with no top-level comma isn't a group at all -- left
+     * completely literal, braces and all, exactly like bash. */
+    ok = selftest__shell_brace_step(ok, &state, "shell_test_probe {foo}", 0, "{foo}");
+    /* Quoting (and backslash-escaping) suppresses brace expansion the same
+     * way it suppresses pathname expansion. */
+    ok = selftest__shell_brace_step(ok, &state, "shell_test_probe \"{a,b}\"", 0, "{a,b}");
+    ok = selftest__shell_brace_step(ok, &state, "shell_test_probe \\{a,b\\}", 0, "{a,b}");
+    /* Brace expansion runs before pathname expansion, on each resulting word
+     * independently: one alternative's glob matches real files, the other's
+     * matches nothing and is left unchanged. */
+    ok = shell__execute_line(&state, "cd /apps/shell_glob_test_dir") == 0 && ok;
+    ok = selftest__shell_brace_step(
+        ok, &state, "sum=; for f in {sub,doesnotexist}/*.txt; do sum=\"$sum$f,\"; done; shell_test_probe \"$sum\"", 0,
+        "sub/inner.txt,doesnotexist/*.txt,"
+    );
+    ok = ok && shell__execute_line(&state, "cd /") == 0;
+
+    shell__state_free(&state);
+    ok = selftest__shell_glob_fixture_teardown() && ok;
+    printf("[selftest] shell/brace: %s\n", ok ? "OK" : "failed");
     return ok;
 }
 

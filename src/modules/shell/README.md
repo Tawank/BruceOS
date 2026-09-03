@@ -54,10 +54,40 @@ definitions) by raw-text keyword matching in command position.
   `shell_executor__eval_arith_word()` in `shell_executor.c`), so an
   assignment inside it (`$((x = 5))`) is a real side effect on `$x` here, not
   something scoped to the expansion.
-- **Not implemented:** brace expansion (`{a,b}`), tilde expansion (`~`),
-  pathname globbing (`*`, `?`, `[...]`), `$@`/`$*`, `$$`, and here-strings
-  (`<<<`). Here-docs (`<<`) and input redirection (`<`) *are* implemented —
-  see the Redirection section below.
+- Brace (comma-list) expansion: `{a,b,c}` (`shell_brace.c`) — purely
+  textual, and runs strictly before every other kind of expansion in this
+  list, on the word's raw, still-unquoted-and-unexpanded text, same as bash.
+  Sibling groups in one word combine as a cartesian product (`{a,b}{1,2}` ->
+  `a1 a2 b1 b2`), and a group can nest inside another (`{a,{b,c}}` -> `a b
+  c`). A `{...}` with no top-level comma (`{foo}`) isn't a group at all —
+  left completely literal, braces included, same as bash; there's no
+  `{1..5}`/`{a..e}` range spelling, only comma-lists. Quoting (single,
+  double, or backslash) suppresses this, matching pathname expansion's own
+  quoting rule below. Since brace expansion's *results* still go through
+  ordinary word splitting afterward, an unquoted space inside one
+  alternative (`{a b,c}`) still ends up as two separate words, same as
+  bash's own `echo {a b,c}` -> `a b c`.
+- Pathname (glob) expansion: `*`, `?`, `[...]`/`[!...]`/`[^...]`
+  (`shell_glob.c`) — real filesystem matching (`storage__list()`), not
+  `case`'s own separate, non-filesystem pattern matcher (see the Compound
+  commands section below), applied to an unquoted word with no quoting or
+  backslash-escaping anywhere in it (matching bash's rule that a quoted or
+  escaped glob character is always literal) that also doesn't merely look
+  like a `NAME=value` assignment (an assignment's RHS is never
+  glob-expanded, quoted or not). A pattern can have a wildcard path
+  component that isn't the last one (`s*/inner.txt`), each matched one
+  component at a time; a wildcard never matches a name starting with `.`
+  unless the pattern component itself starts with `.` too (dotfiles hidden
+  from wildcards by default, like bash); results are sorted the way bash's
+  own glob results are, and mirror the literal absolute/relative shape the
+  pattern itself was written with (`$PWD` is resolved only internally, for
+  the actual `storage__list()` calls, not grafted onto the output). A
+  pattern that matches nothing is left completely unchanged as one word —
+  not an error, not dropped — same as nullglob-off bash. Runs after brace
+  expansion, so each brace alternative is glob-expanded independently.
+- **Not implemented:** tilde expansion (`~`), `$@`/`$*`, `$$`, and
+  here-strings (`<<<`). Here-docs (`<<`) and input redirection (`<`) *are*
+  implemented — see the Redirection section below.
 
 **Ctrl+C** -- `terminal_app.c` turns it into a real `SIGINT` (`process__signal`)
 on the shell rather than forwarding it as a byte, like a cooked tty's INTR
@@ -256,8 +286,8 @@ line it just deletes the character under the cursor, like Delete.
   ranges and a leading `]` treated as a literal member) -- the same glob
   syntax `[[ ]]` pattern matching would use if implemented (see
   `shell_condition.c`), but scoped only to `case`'s own string-vs-pattern
-  comparison, not real filesystem pathname globbing (still unimplemented,
-  see below). Quoting a pattern does not suppress its glob metacharacters'
+  comparison, not real filesystem pathname globbing (see "Pathname (glob)
+  expansion" above). Quoting a pattern does not suppress its glob metacharacters'
   specialness -- `WORD`/pattern expansion strips escaping the same way
   `shell_parser__words()`/`shell_parser__expand_text()` already do
   elsewhere, so e.g. `case x in "*") ... ;; esac` still matches anything, a
@@ -270,7 +300,6 @@ line it just deletes the character under the cursor, like Delete.
 ## What's left to implement
 
 Roughly in order of how often bash scripts actually use them:
-- Pathname globbing and brace expansion.
 - `$@`, `$*`, `$$`, `$!`.
 - `until` loops.
 
@@ -397,7 +426,17 @@ tokenizes a top-level `|` as an ordinary pipe, glob wildcards, a `*)`
 catch-all, no-match-no-catch-all falling through to status `0`, `WORD`/pattern
 expansion not word-splitting, lazy pattern evaluation never running a later
 clause's own `$(...)` side effects, nested `case`-in-`case` and `case`-in-loop,
-and malformed-construct errors), `..._read_case`, `..._stdio_inheritance_case`,
+and malformed-construct errors), `..._glob_case` (real pathname expansion
+against a scratch directory under `/apps`: `*`/`?`/`[...]` matches sorted
+like bash's own, a no-match pattern left unchanged, dotfiles hidden from a
+wildcard unless the pattern itself starts with `.`, a multi-component
+pattern, an assignment word's RHS never expanded, and quoting/backslash-
+escaping suppressing expansion even for a variable whose value is itself a
+glob metacharacter), `..._brace_case` (`{a,b,c}` comma-lists, sibling groups
+combining as a cartesian product, a nested group, a comma-less `{foo}` left
+literal, quoting/escaping suppressing it, and a brace group combined with a
+glob metacharacter in the same word, reusing `..._glob_case`'s own fixture
+directory), `..._read_case`, `..._stdio_inheritance_case`,
 `..._tty_size_case`, `..._interrupt_case` (Ctrl+C), and `..._eof_case`
 (Ctrl+D on the shell's own prompt, ending the shell -- not to be confused
 with `..._cat_interactive_case`'s Ctrl+D, which ends a child's stdin read

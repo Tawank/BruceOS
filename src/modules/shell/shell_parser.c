@@ -6,6 +6,8 @@
 #include <string.h>
 
 #include "core_sdk/memory.h"
+#include "shell_brace.h"
+#include "shell_glob.h"
 
 static bool shell_parser__plan_push(shell_plan_t *plan, const shell_command_t *command) {
     if (plan->count >= SHELL__MAX_COMMANDS) return false;
@@ -694,7 +696,7 @@ static void shell_word_list__free(shell_word_list_t *list) {
 /* Splices `substitute`'s captured output for the command-substitution span
  * command->text[content_start .. content_start+content_len) into `word`.
  * Shared by shell_parser__expand()'s "$(...)" branch below and
- * shell_parser__words()'s own "`...`" handling further down. */
+ * shell_parser__process_word()'s own "`...`" handling further down. */
 static int shell_parser__splice_substitution(
     const shell_command_t *command, size_t content_start, size_t content_len, shell_word_buffer_t *word,
     shell_command_substitution_fn substitute, void *context, const char **error
@@ -925,6 +927,293 @@ char *shell_parser__expand_text(
     return empty;
 }
 
+/* True if `word` has the shape of a "NAME=value" assignment -- a valid
+ * variable name (shell_parser__valid_name()) immediately followed by '='.
+ * shell_parser__push_word() below skips pathname expansion entirely (name
+ * and value both) for such a word, the same way real bash suppresses
+ * pathname expansion specifically in assignment context (a leading
+ * "NAME=value" prefix, or an export/local/etc. argument) -- this shell
+ * doesn't thread that context down into word-splitting at all, so as a
+ * conservative stand-in this applies the suppression by shape instead,
+ * anywhere a word merely looks like an assignment. This differs from real
+ * bash only for a plain non-assignment command explicitly given a literal
+ * "name=value"-shaped argument containing a glob metacharacter (e.g.
+ * "echo X=*"), which bash still expands and this shell now doesn't -- a
+ * rare, low-stakes edge case next to the alternative of silently
+ * glob-expanding every ordinary variable assignment whose value happens to
+ * contain '*'/'?'/'[' (e.g. a stored pattern like "pattern='*.txt'"), which
+ * is by far the more common and consequential case to get right. */
+static bool shell_parser__looks_like_assignment(const char *word) {
+    const char *equals = strchr(word, '=');
+    if (equals == NULL || equals == word) return false;
+    return shell_parser__valid_name(word, (size_t)(equals - word));
+}
+
+/* Pushes one already fully-expanded word into `list`, running it through
+ * real pathname expansion first when it's eligible (see shell_glob.h): on a
+ * real filesystem match, `finished` is replaced by however many matched
+ * paths shell_glob__expand_path() returns (sorted, same as bash); on no
+ * match at all (not a failure -- see shell_glob.h), `finished` itself is
+ * pushed unchanged, exactly like nullglob-off bash. A relative pattern
+ * resolves against $PWD, fetched through `lookup` exactly the way a literal
+ * "$PWD" word would expand. A word is only eligible at all when `any_quoted`
+ * is false (no part of it was single-/double-quoted or backslash-escaped --
+ * see shell_parser__process_word()'s own doc comment on that flag) and it doesn't
+ * merely look like a "NAME=value" assignment (shell_parser__looks_like_assignment()
+ * above); a NAME=value word IS still checked for `any_quoted` first, so e.g.
+ * `pattern="*.txt"` (quoted) and `pattern=*.txt` (unquoted, assignment-shaped)
+ * both correctly skip expansion, each for its own reason. Takes ownership of
+ * `finished` either way. Returns false (with *error set) only on a real
+ * failure: too many words, or out of memory. */
+static bool shell_parser__push_word(
+    shell_word_list_t *list, char *finished, bool any_quoted, shell_variable_lookup_fn lookup, void *context,
+    const char **error
+) {
+    if (!any_quoted && !shell_parser__looks_like_assignment(finished) && shell_glob__has_metachars(finished)) {
+        const char *pwd = lookup != NULL ? lookup(context, "PWD") : NULL;
+        size_t match_count = 0;
+        char **matches = shell_glob__expand_path(finished, pwd, &match_count);
+        if (matches != NULL) {
+            memory__free(finished);
+            bool ok = true;
+            for (size_t m = 0; m < match_count; ++m) {
+                if (ok && shell_word_list__push(list, matches[m])) continue;
+                if (ok) *error = list->count >= SHELL__MAX_WORDS ? "too many words" : "out of memory";
+                ok = false;
+                memory__free(matches[m]);
+            }
+            memory__free(matches);
+            return ok;
+        }
+    }
+    if (!shell_word_list__push(list, finished)) {
+        bool too_many = list->count >= SHELL__MAX_WORDS;
+        memory__free(finished);
+        *error = too_many ? "too many words" : "out of memory";
+        return false;
+    }
+    return true;
+}
+
+/* Tokenizes and fully expands exactly one word starting at `command->text[*io_i]`
+ * (which must not itself be whitespace) -- quotes, `$NAME`/`$(...)`/`` `...` ``
+ * expansion, and (via shell_parser__push_word()) pathname expansion -- and
+ * appends the result to `list`. Advances `*io_i` past the word (to the first
+ * unquoted whitespace, or `command->length`) regardless of success or
+ * failure. This is shell_parser__words()'s own former loop body, pulled out
+ * into its own function so that function's frame stays small; see
+ * shell_parser__words()'s call site below and shell_parser__expand_brace_word()
+ * (which also calls this, once per whitespace-separated chunk of each brace
+ * alternative) for why that matters here.
+ *
+ * Returns true on success (including a word that was entirely quoted away to
+ * nothing, which pushes no word at all -- see `started` below). Returns
+ * false (with *error set to a static string) on a real failure: an
+ * unterminated quote, a word or expansion exceeding its size cap, too many
+ * words, or out of memory. `list` is left holding whatever was already
+ * appended before the failure; freeing it is the caller's job, same as
+ * every other caller of shell_word_list__push() in this file. */
+static bool shell_parser__process_word(
+    const shell_command_t *command, size_t *io_i, shell_word_list_t *list, shell_variable_lookup_fn lookup,
+    shell_command_substitution_fn substitute, shell_arith_word_fn arith, void *context, int last_status,
+    const char **error
+) {
+    size_t i = *io_i;
+    shell_word_buffer_t word = {0};
+    bool single = false;
+    bool double_quote = false;
+    bool started = false;
+    /* Set the moment any quoting or backslash-escaping touches this word at
+     * all -- shell_parser__push_word() below then skips real pathname
+     * expansion for the whole word, matching bash's own rule that
+     * quoting/escaping a glob metacharacter makes it literal. This is a
+     * whole-word approximation of that per-character rule (see its own doc
+     * comment), the same deliberate simplification as
+     * shell_parser__looks_like_assignment() above. */
+    bool any_quoted = false;
+    while (i < command->length) {
+        char c = command->text[i];
+        if (!single && !double_quote && isspace((unsigned char)c)) break;
+        started = true;
+        if (!double_quote && c == '\'') {
+            single = !single;
+            any_quoted = true;
+            i++;
+            continue;
+        }
+        if (!single && c == '"') {
+            double_quote = !double_quote;
+            any_quoted = true;
+            i++;
+            continue;
+        }
+        if (!single && c == '\\') {
+            any_quoted = true;
+            i++;
+            if (i >= command->length || !shell_word_buffer__append(&word, command->text + i, 1)) {
+                *error = "word too long";
+                memory__free(word.data);
+                *io_i = i;
+                return false;
+            }
+            i++;
+            continue;
+        }
+        if (!single && c == '$') {
+            if (shell_parser__expand(command, &i, &word, lookup, substitute, arith, context, last_status, error) !=
+                0) {
+                if (*error == NULL) *error = "expanded word too long";
+                memory__free(word.data);
+                *io_i = i;
+                return false;
+            }
+            continue;
+        }
+        /* "`...`" command substitution -- same expansion as "$(...)" above
+         * (see shell_command_substitution_fn in shell_parser.h), just with
+         * the other spelling bash accepts. Recognized inside double quotes
+         * too, same as "$(...)"/"$NAME", only single quotes suppress it. */
+        if (!single && c == '`') {
+            size_t end = 0;
+            if (!shell_parser__substitution_span(command->text, command->length, i, true, &end)) {
+                *error = "unterminated command substitution";
+                memory__free(word.data);
+                *io_i = i;
+                return false;
+            }
+            size_t content_start = i + 1;
+            size_t content_len = (end - 1) - content_start;
+            if (shell_parser__splice_substitution(command, content_start, content_len, &word, substitute, context, error) !=
+                0) {
+                memory__free(word.data);
+                *io_i = i;
+                return false;
+            }
+            i = end;
+            continue;
+        }
+        if (!shell_word_buffer__append(&word, command->text + i, 1)) {
+            *error = "word too long";
+            memory__free(word.data);
+            *io_i = i;
+            return false;
+        }
+        i++;
+    }
+    if (single || double_quote) {
+        *error = "unterminated quote";
+        memory__free(word.data);
+        *io_i = i;
+        return false;
+    }
+    if (started) {
+        char *finished = shell_word_buffer__finish(&word);
+        if (finished == NULL) {
+            *error = "out of memory";
+            *io_i = i;
+            return false;
+        }
+        if (!shell_parser__push_word(list, finished, any_quoted, lookup, context, error)) {
+            *io_i = i;
+            return false;
+        }
+    }
+    *io_i = i;
+    return true;
+}
+
+/* Finds the end of the word starting at `command->text[start]` (which must
+ * not itself be whitespace) using the exact same unquoted-whitespace-ends-
+ * a-word rule shell_parser__process_word() above uses -- just without that
+ * function's live '$'/backtick expansion, so this can run as a raw first
+ * pass over the word's untouched text, before brace expansion (which must
+ * itself run before any of that live expansion -- see shell_brace.h) ever
+ * sees it. Doesn't validate quote balance itself; an unterminated quote is
+ * still caught the normal way once shell_parser__process_word() makes its
+ * own pass over this same span. */
+static size_t shell_parser__word_span_end(const shell_command_t *command, size_t start) {
+    size_t i = start;
+    bool single = false;
+    bool double_quote = false;
+    while (i < command->length) {
+        char c = command->text[i];
+        if (!single && !double_quote && isspace((unsigned char)c)) break;
+        if (!double_quote && c == '\'') {
+            single = !single;
+            i++;
+            continue;
+        }
+        if (!single && c == '"') {
+            double_quote = !double_quote;
+            i++;
+            continue;
+        }
+        if (!single && c == '\\') {
+            i += 2;
+            if (i > command->length) i = command->length;
+            continue;
+        }
+        i++;
+    }
+    return i;
+}
+
+/* The actual "{a,b,c}"-style brace-expansion work for one word (see
+ * shell_parser__words()'s own call site below): expands `text` (`length`
+ * bytes, already confirmed by the caller to contain a real brace group) via
+ * shell_brace__expand(), then runs each resulting combination through the
+ * exact same "skip whitespace, process one word" loop shell_parser__words()
+ * itself uses below -- reusing shell_parser__process_word() (quotes, `$`/
+ * `` ` `` expansion, pathname expansion) on every whitespace-separated chunk
+ * of it independently, exactly like bash treats brace expansion as a
+ * separate first pass whose *results* still go through ordinary word
+ * splitting (so an unquoted space inside one alternative, e.g. "{a b,c}",
+ * still ends up as two separate words "a" "b", the same as bash's own
+ * `echo {a b,c}` -> "a b c"). Each variant's own text is always already
+ * fully brace-free (shell_brace__expand() resolves every group, nested or
+ * sequential, before returning), so this never needs to look for another
+ * brace group.
+ *
+ * Deliberately does not call shell_parser__words() itself: doing so would
+ * mean this function -- itself only reachable from inside
+ * shell_parser__words() -- adds a call, back into shell_parser__words(),
+ * that inflates *its* frame regardless of whether any given command ever
+ * actually contains a brace group. On the "shell" task's tight stack budget
+ * (SHELL_STACK_BYTES in main.c, and see shell_app.c's
+ * shell_app__collect_heredoc_body() doc comment for the same class of bug
+ * before) that alone was enough to overflow an already-marginal call chain
+ * even on an ordinary command with no braces in it at all. Looping over
+ * shell_parser__process_word() directly here instead keeps
+ * shell_parser__words()'s own frame exactly as small as before this feature
+ * existed, at the cost of duplicating its trivial skip-whitespace loop.
+ *
+ * On success, returns true with every resulting word already appended to
+ * `list` (ownership transferred). On failure, returns false with *error set
+ * to a static string; `list` is left holding whatever was already appended
+ * before the failure, same as every other caller of shell_word_list__push()
+ * in this file -- shell_parser__words() below frees it before returning. */
+static bool shell_parser__expand_brace_word(
+    shell_word_list_t *list, const char *text, size_t length, shell_variable_lookup_fn lookup,
+    shell_command_substitution_fn substitute, shell_arith_word_fn arith, void *context, int last_status,
+    const char **error
+) {
+    char **variants = NULL;
+    size_t variant_count = 0;
+    if (!shell_brace__expand(text, length, &variants, &variant_count, error)) return false;
+    bool ok = true;
+    for (size_t v = 0; ok && v < variant_count; ++v) {
+        shell_command_t sub = {.text = variants[v], .length = strlen(variants[v])};
+        size_t j = 0;
+        while (ok && j < sub.length) {
+            while (j < sub.length && isspace((unsigned char)sub.text[j])) j++;
+            if (j >= sub.length) break;
+            ok = shell_parser__process_word(&sub, &j, list, lookup, substitute, arith, context, last_status, error);
+        }
+    }
+    shell_brace__free(variants, variant_count);
+    return ok;
+}
+
 int shell_parser__words(
     const shell_command_t *command, char ***out_words, int *word_count, shell_variable_lookup_fn lookup,
     shell_command_substitution_fn substitute, shell_arith_word_fn arith, void *context, int last_status,
@@ -940,92 +1229,29 @@ int shell_parser__words(
         while (i < command->length && isspace((unsigned char)command->text[i])) i++;
         if (i >= command->length) break;
 
-        shell_word_buffer_t word = {0};
-        bool single = false;
-        bool double_quote = false;
-        bool started = false;
-        while (i < command->length) {
-            char c = command->text[i];
-            if (!single && !double_quote && isspace((unsigned char)c)) break;
-            started = true;
-            if (!double_quote && c == '\'') {
-                single = !single;
-                i++;
-                continue;
-            }
-            if (!single && c == '"') {
-                double_quote = !double_quote;
-                i++;
-                continue;
-            }
-            if (!single && c == '\\') {
-                i++;
-                if (i >= command->length || !shell_word_buffer__append(&word, command->text + i, 1)) {
-                    *error = "word too long";
-                    memory__free(word.data);
-                    shell_word_list__free(&list);
-                    return -1;
-                }
-                i++;
-                continue;
-            }
-            if (!single && c == '$') {
-                if (shell_parser__expand(command, &i, &word, lookup, substitute, arith, context, last_status, error) !=
-                    0) {
-                    if (*error == NULL) *error = "expanded word too long";
-                    memory__free(word.data);
-                    shell_word_list__free(&list);
-                    return -1;
-                }
-                continue;
-            }
-            /* "`...`" command substitution -- same expansion as "$(...)"
-             * above (see shell_command_substitution_fn in shell_parser.h),
-             * just with the other spelling bash accepts. Recognized inside
-             * double quotes too, same as "$(...)"/"$NAME", only single
-             * quotes suppress it. */
-            if (!single && c == '`') {
-                size_t end = 0;
-                if (!shell_parser__substitution_span(command->text, command->length, i, true, &end)) {
-                    *error = "unterminated command substitution";
-                    memory__free(word.data);
-                    shell_word_list__free(&list);
-                    return -1;
-                }
-                size_t content_start = i + 1;
-                size_t content_len = (end - 1) - content_start;
-                if (shell_parser__splice_substitution(command, content_start, content_len, &word, substitute, context, error) !=
-                    0) {
-                    memory__free(word.data);
-                    shell_word_list__free(&list);
-                    return -1;
-                }
-                i = end;
-                continue;
-            }
-            if (!shell_word_buffer__append(&word, command->text + i, 1)) {
-                *error = "word too long";
-                memory__free(word.data);
+        /* "{a,b,c}"-style brace expansion runs strictly before everything
+         * else this loop does to a word, on the word's raw, still-untouched
+         * text (see shell_brace.h) -- purely textual, so a peek at just this
+         * one word's span (shell_parser__word_span_end() above) is enough to
+         * find it, without needing shell_parser__process_word()'s own live
+         * quote/`$` tracking. The actual expansion work lives in
+         * shell_parser__expand_brace_word() above -- deliberately kept out
+         * of this function's own frame, see that function's doc comment. */
+        size_t span_end = shell_parser__word_span_end(command, i);
+        if (shell_brace__has_group(command->text + i, span_end - i)) {
+            if (!shell_parser__expand_brace_word(
+                    &list, command->text + i, span_end - i, lookup, substitute, arith, context, last_status, error
+                )) {
                 shell_word_list__free(&list);
                 return -1;
             }
-            i++;
+            i = span_end;
+            continue;
         }
-        if (single || double_quote) {
-            *error = "unterminated quote";
-            memory__free(word.data);
+
+        if (!shell_parser__process_word(command, &i, &list, lookup, substitute, arith, context, last_status, error)) {
             shell_word_list__free(&list);
             return -1;
-        }
-        if (started) {
-            char *finished = shell_word_buffer__finish(&word);
-            if (finished == NULL || !shell_word_list__push(&list, finished)) {
-                bool too_many = finished != NULL && list.count >= SHELL__MAX_WORDS;
-                memory__free(finished);
-                *error = too_many ? "too many words" : "out of memory";
-                shell_word_list__free(&list);
-                return -1;
-            }
         }
     }
     *out_words = list.items;
