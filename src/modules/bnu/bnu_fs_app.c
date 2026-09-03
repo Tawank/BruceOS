@@ -45,6 +45,98 @@ static void bnu_ls__print_name(const bruce_storage_entry_t *entry, bool color) {
     if (code != NULL) stdio__printf("\033[0m");
 }
 
+/* On-screen width of `bnu_ls__print_name()`'s output for `entry` -- the name
+ * plus a trailing '/' for a directory, not counting the color escapes
+ * (which take no columns on the terminal). Column-layout math below always
+ * measures by this, never by the raw byte count printed. */
+static size_t bnu_ls__display_width(const bruce_storage_entry_t *entry) {
+    return strlen(entry->name) + (entry->type == BRUCE_STORAGE_ENTRY_DIRECTORY ? 1 : 0);
+}
+
+static int bnu_ls__compare_entries(const void *a, const void *b) {
+    const bruce_storage_entry_t *const *entry_a = a;
+    const bruce_storage_entry_t *const *entry_b = b;
+    return strcmp((*entry_a)->name, (*entry_b)->name);
+}
+
+/* Column widths for laying `n` entries (already sorted, `widths[i]` the
+ * on-screen width of entries[i]) down each column before wrapping to the
+ * next -- entries[c*rows + r] is column c, row r, same order GNU ls uses --
+ * into `cols` columns. Writes each column's own width (its widest entry,
+ * not one width shared by every column) to `out_col_widths` and returns the
+ * total line width: every column's width plus a 2-space gutter between
+ * columns. `out_col_widths` must have room for `cols` entries. */
+static size_t bnu_ls__col_layout_width(const size_t *widths, size_t n, size_t cols, size_t *out_col_widths) {
+    size_t rows = (n + cols - 1) / cols;
+    size_t total = 0;
+    for (size_t c = 0; c < cols; ++c) {
+        size_t w = 0;
+        for (size_t r = 0; r < rows; ++r) {
+            size_t idx = c * rows + r;
+            if (idx < n && widths[idx] > w) w = widths[idx];
+        }
+        out_col_widths[c] = w;
+        total += w + (c + 1 < cols ? 2 : 0);
+    }
+    return total;
+}
+
+/* Prints `n` already-sorted entries in GNU ls's default "many per line"
+ * layout (see bnu_ls__col_layout_width()'s doc comment for the fill order),
+ * picking the most columns that still fit within `term_width`, each column
+ * padded only to its own widest entry. Falls back to one name per line
+ * (still sorted) if even one column's own widest entry doesn't leave room
+ * for a second, or on allocation failure. */
+static void bnu_ls__print_columns(
+    const bruce_storage_entry_t *const *sorted, const size_t *widths, size_t n, bool color, size_t term_width
+) {
+    size_t max_width = 0;
+    for (size_t i = 0; i < n; ++i) {
+        if (widths[i] > max_width) max_width = widths[i];
+    }
+    size_t max_cols = term_width > max_width ? term_width / (max_width + 2) : 1;
+    if (max_cols == 0) max_cols = 1;
+    if (max_cols > n) max_cols = n;
+
+    size_t *col_widths = memory__malloc(max_cols * sizeof(*col_widths));
+    if (col_widths != NULL) {
+        size_t cols = 1;
+        for (size_t candidate = max_cols; candidate >= 1; --candidate) {
+            size_t width = bnu_ls__col_layout_width(widths, n, candidate, col_widths);
+            if (width <= term_width || candidate == 1) {
+                cols = candidate;
+                break;
+            }
+        }
+        /* The winning candidate wasn't necessarily the last one tried;
+         * recompute its column widths (col_widths currently holds whichever
+         * candidate was tried last). */
+        bnu_ls__col_layout_width(widths, n, cols, col_widths);
+
+        size_t rows = (n + cols - 1) / cols;
+        for (size_t r = 0; r < rows; ++r) {
+            for (size_t c = 0; c < cols; ++c) {
+                size_t idx = c * rows + r;
+                if (idx >= n) break;
+                bnu_ls__print_name(sorted[idx], color);
+                bool last_in_row = c + 1 == cols || idx + rows >= n;
+                if (!last_in_row) {
+                    size_t pad = col_widths[c] - widths[idx] + 2;
+                    for (size_t p = 0; p < pad; ++p) stdio__printf(" ");
+                }
+            }
+            stdio__printf("\n");
+        }
+        memory__free(col_widths);
+        return;
+    }
+
+    for (size_t i = 0; i < n; ++i) {
+        bnu_ls__print_name(sorted[i], color);
+        stdio__printf("\n");
+    }
+}
+
 int bnu_pwd_app_main(int argc, char **argv) {
     ArgParser *parser = bnu__new_parser("Print the current working directory.");
     if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
@@ -97,23 +189,55 @@ int bnu_ls_app_main(int argc, char **argv) {
         /* Auto only colorizes an interactive terminal; always intentionally
          * preserves ANSI escapes through pipes and redirection. */
         bool color = color_always || (color_auto && tty__isatty());
+        const bruce_storage_entry_t **sorted = memory__malloc(count * sizeof(*sorted));
+        if (sorted == NULL) {
+            memory__free(entries);
+            return BRUCE_ERR_NO_MEMORY;
+        }
+        size_t visible = 0;
         for (size_t i = 0; i < count; ++i) {
             if (!show_hidden && entries[i].name[0] == '.') continue;
-            if (long_format) {
+            sorted[visible++] = &entries[i];
+        }
+        qsort(sorted, visible, sizeof(*sorted), bnu_ls__compare_entries);
+
+        if (long_format) {
+            for (size_t i = 0; i < visible; ++i) {
                 char size_text[16] = "-";
-                if (entries[i].type != BRUCE_STORAGE_ENTRY_DIRECTORY) {
-                    bnu__format_size((uint32_t)entries[i].size, human_readable, size_text, sizeof(size_text));
+                if (sorted[i]->type != BRUCE_STORAGE_ENTRY_DIRECTORY) {
+                    bnu__format_size((uint32_t)sorted[i]->size, human_readable, size_text, sizeof(size_text));
                 }
-                stdio__printf(
-                    "%c %8s  ", entries[i].type == BRUCE_STORAGE_ENTRY_DIRECTORY ? 'd' : '-', size_text
-                );
-                bnu_ls__print_name(&entries[i], color);
+                stdio__printf("%c %8s  ", sorted[i]->type == BRUCE_STORAGE_ENTRY_DIRECTORY ? 'd' : '-', size_text);
+                bnu_ls__print_name(sorted[i], color);
                 stdio__printf("\n");
+            }
+        } else if (tty__isatty()) {
+            /* Real filesystem contents, so a multi-column, GNU-ls-style
+             * layout only makes sense against an actual terminal -- a pipe
+             * or redirect keeps the one-name-per-line fallback below, same
+             * as real ls, so scripts parsing `ls` output don't have to deal
+             * with column padding. */
+            size_t *widths = memory__malloc(visible * sizeof(*widths));
+            if (widths != NULL) {
+                for (size_t i = 0; i < visible; ++i) widths[i] = bnu_ls__display_width(sorted[i]);
+                bruce_tty_size_t size = {.columns = 80, .rows = 24};
+                (void)tty__get_size(&size);
+                if (size.columns == 0) size.columns = 80;
+                bnu_ls__print_columns(sorted, widths, visible, color, size.columns);
+                memory__free(widths);
             } else {
-                bnu_ls__print_name(&entries[i], color);
+                for (size_t i = 0; i < visible; ++i) {
+                    bnu_ls__print_name(sorted[i], color);
+                    stdio__printf("\n");
+                }
+            }
+        } else {
+            for (size_t i = 0; i < visible; ++i) {
+                bnu_ls__print_name(sorted[i], color);
                 stdio__printf("\n");
             }
         }
+        memory__free(sorted);
     }
     memory__free(entries);
     return result;
