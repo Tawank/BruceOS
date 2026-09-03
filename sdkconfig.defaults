@@ -42,6 +42,13 @@ CONFIG_FREERTOS_THREAD_LOCAL_STORAGE_POINTERS=2
 # CONFIG_ESP_WIFI_IRAM_OPT is not set
 # CONFIG_ESP_WIFI_RX_IRAM_OPT is not set
 
+# Same trade for the heap allocator's own code (heap_caps_malloc/free etc.):
+# place it in flash instead of IRAM. Safe here because no IRAM_ATTR ISR in
+# this codebase (display.c's DMA-done callback, audio.c's I2S callback) ever
+# calls a heap_caps_*/heap_trace_* function, which is the only case where this
+# would be unsafe (cache disabled during a flash op while such an ISR runs).
+CONFIG_HEAP_PLACE_FUNCTION_INTO_FLASH=y
+
 # espressif/elf_loader needs executable memory; memory protection in ESP-IDF
 # v6 hides MALLOC_CAP_EXEC when enabled.  Disable it for the ELF loader slice.
 CONFIG_ESP_SYSTEM_PMP_IDRAM_SPLIT=n

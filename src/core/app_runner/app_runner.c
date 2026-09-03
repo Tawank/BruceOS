@@ -19,22 +19,37 @@
 #include <string.h>
 #include <strings.h>
 
-#define APP_RUNNER_MAX_APPS 128
+/* Only a handful of tests ever call app_runner__register() at runtime (the
+ * rest of the registry is the compile-time table app_runner__register_all()
+ * points at directly -- see its comment below); this just needs headroom
+ * over that handful, not a general-purpose ceiling. */
+#define APP_RUNNER_MAX_DYNAMIC_APPS 32
 #define APP_RUNNER_PATH_MAX 160
 #define APP_RUNNER_MAX_LOADERS 32
 #define APP_RUNNER_LOADER_EXTENSION_MAX 16
 #define APP_RUNNER_LOADER_PROGRAM_MAX 32
 
-typedef struct {
-    const char *name;
-    const char *description;
-    const char *category;
-    bruce_app_entry_t entry;
-    uint16_t stack_bytes;
-} app_runner_app_t;
+/* The registry is split in two so the ~90 built-in commands
+ * (app_runner__register_defaults() in main.c) cost nothing but a pointer and
+ * a count instead of a copy: s_builtin_apps just aliases the caller's own
+ * `static const` table (app_runner__register_all()), which the compiler
+ * places in flash (.rodata), never RAM. Only genuinely runtime registration
+ * -- selftest's dummy commands, today the only caller of the single-entry
+ * app_runner__register() -- pays for the small mutable s_dynamic_apps array.
+ * app_runner__at() is every reader's one seam between the two: callers walk
+ * [0, app_runner__total_count()) and never know which half an index lands in. */
+static const bruce_app_descriptor_t *s_builtin_apps;
+static size_t s_builtin_count;
+static bruce_app_descriptor_t s_dynamic_apps[APP_RUNNER_MAX_DYNAMIC_APPS];
+static int s_dynamic_count;
 
-static app_runner_app_t s_apps[APP_RUNNER_MAX_APPS];
-static int s_app_count;
+static size_t app_runner__total_count(void) { return s_builtin_count + (size_t)s_dynamic_count; }
+
+static const bruce_app_descriptor_t *app_runner__at(size_t index) {
+    if (index < s_builtin_count) return &s_builtin_apps[index];
+    index -= s_builtin_count;
+    return index < (size_t)s_dynamic_count ? &s_dynamic_apps[index] : NULL;
+}
 
 typedef struct {
     char extension[APP_RUNNER_LOADER_EXTENSION_MAX];
@@ -85,38 +100,70 @@ bruce_result_t app_runner__register(
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
 
-    for (int i = 0; i < s_app_count; ++i) {
-        if (strcmp(s_apps[i].name, name) == 0) { return BRUCE_ERR_ALREADY_EXISTS; }
+    size_t total = app_runner__total_count();
+    for (size_t i = 0; i < total; ++i) {
+        if (strcmp(app_runner__at(i)->name, name) == 0) { return BRUCE_ERR_ALREADY_EXISTS; }
     }
 
-    if (s_app_count >= APP_RUNNER_MAX_APPS) { return BRUCE_ERR_RESOURCE_LIMIT; }
+    if (s_dynamic_count >= APP_RUNNER_MAX_DYNAMIC_APPS) { return BRUCE_ERR_RESOURCE_LIMIT; }
 
-    s_apps[s_app_count].name = name;
-    s_apps[s_app_count].description = description;
-    s_apps[s_app_count].category = category;
-    s_apps[s_app_count].entry = entry;
-    s_apps[s_app_count].stack_bytes = stack_bytes;
-    s_app_count++;
+    s_dynamic_apps[s_dynamic_count] = (bruce_app_descriptor_t){
+        .name = name,
+        .description = description,
+        .category = category,
+        .entry = entry,
+        .stack_bytes = stack_bytes,
+    };
+    s_dynamic_count++;
     return BRUCE_OK;
 }
 
-size_t app_runner__command_count(void) { return (size_t)s_app_count; }
+/* Registers the whole built-in command table in one call: see the
+ * s_builtin_apps comment above for why this -- not N calls to
+ * app_runner__register() -- is what keeps the table out of RAM. `apps` must
+ * be a `static const` array (or otherwise outlive the system, same
+ * requirement as app_runner__register()'s arguments); it is referenced in
+ * place, never copied. Every entry is validated up front, exactly as
+ * app_runner__register() would validate it one at a time, so a malformed or
+ * duplicate entry is rejected before any of the table is installed. */
+bruce_result_t app_runner__register_all(const bruce_app_descriptor_t *apps, size_t count) {
+    if (apps == NULL && count > 0) return BRUCE_ERR_INVALID_ARGUMENT;
+    for (size_t i = 0; i < count; ++i) {
+        if (apps[i].name == NULL || apps[i].name[0] == '\0' || apps[i].description == NULL ||
+            apps[i].description[0] == '\0' || apps[i].entry == NULL) {
+            return BRUCE_ERR_INVALID_ARGUMENT;
+        }
+        for (size_t j = 0; j < i; ++j) {
+            if (strcmp(apps[j].name, apps[i].name) == 0) return BRUCE_ERR_ALREADY_EXISTS;
+        }
+    }
+    s_builtin_apps = apps;
+    s_builtin_count = count;
+    return BRUCE_OK;
+}
+
+size_t app_runner__command_count(void) { return app_runner__total_count(); }
 
 const char *app_runner__command_name(size_t index) {
-    return index < (size_t)s_app_count ? s_apps[index].name : NULL;
+    const bruce_app_descriptor_t *app = app_runner__at(index);
+    return app != NULL ? app->name : NULL;
 }
 
 const char *app_runner__command_description(size_t index) {
-    return index < (size_t)s_app_count ? s_apps[index].description : NULL;
+    const bruce_app_descriptor_t *app = app_runner__at(index);
+    return app != NULL ? app->description : NULL;
 }
 
 const char *app_runner__command_category(size_t index) {
-    return index < (size_t)s_app_count ? s_apps[index].category : NULL;
+    const bruce_app_descriptor_t *app = app_runner__at(index);
+    return app != NULL ? app->category : NULL;
 }
 
 static bruce_app_entry_t app_runner__find_builtin(const char *app_name) {
-    for (int i = 0; i < s_app_count; ++i) {
-        if (strcmp(s_apps[i].name, app_name) == 0) { return s_apps[i].entry; }
+    size_t total = app_runner__total_count();
+    for (size_t i = 0; i < total; ++i) {
+        const bruce_app_descriptor_t *app = app_runner__at(i);
+        if (strcmp(app->name, app_name) == 0) { return app->entry; }
     }
     return NULL;
 }
@@ -463,10 +510,11 @@ int app_runner__run_with_environment(
             .environment_count = environment_count,
             .stack_bytes = 0,
         };
-        for (int i = 0; i < s_app_count; ++i) {
-            if (s_apps[i].entry == entry) {
-                params.gui_requested = params.gui_requested;
-                params.stack_bytes = s_apps[i].stack_bytes;
+        size_t total = app_runner__total_count();
+        for (size_t i = 0; i < total; ++i) {
+            const bruce_app_descriptor_t *app = app_runner__at(i);
+            if (app->entry == entry) {
+                params.stack_bytes = app->stack_bytes;
                 break;
             }
         }

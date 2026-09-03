@@ -42,6 +42,37 @@ bruce_result_t app_runner__register(
 );
 
 /**
+ * @brief One entry of an app_runner__register_all() table.
+ *
+ * Field-for-field the same as app_runner__register()'s arguments; see its
+ * doc comment for what each one means and how long it must stay valid.
+ */
+typedef struct {
+    const char *name;
+    const char *description;
+    const char *category;
+    bruce_app_entry_t entry;
+    uint32_t stack_bytes;
+} bruce_app_descriptor_t;
+
+/**
+ * @brief Registers a whole table of built-in commands in one call.
+ *
+ * Equivalent to calling app_runner__register() once per entry, in order,
+ * except that `apps` is referenced in place rather than copied - it must be
+ * `static const` (or otherwise outlive the system), exactly like the
+ * arguments to app_runner__register() already must. Every entry is
+ * validated up front, so a malformed or duplicate entry is rejected before
+ * any of the table is installed, and this returns whichever
+ * app_runner__register() error that entry would have returned.
+ *
+ * @param apps Table of command descriptors; must remain valid for the
+ *             lifetime of the system.
+ * @param count Number of entries in `apps`.
+ */
+bruce_result_t app_runner__register_all(const bruce_app_descriptor_t *apps, size_t count);
+
+/**
  * @brief Returns the number of registered built-in commands.
  *
  * Entries are returned in registration order and remain owned by AppRunner.
