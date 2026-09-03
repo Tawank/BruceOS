@@ -61,10 +61,11 @@ external applications.  Built-ins use the same public SDK API and lifecycle as
 external apps, but their permission checks always pass.  Neither kind of app
 uses private Core headers or ESP-IDF directly.
 
-`modules/input` is a narrow hardware-adapter exception: it may use ESP-IDF GPIO
-drivers to sample the selected board, but it owns no Core queue or process
-policy and receives no private Core access. It emits only normalized events
-through `input__inject()` and remains a normal app_runner-managed process.
+`modules/input` is a narrow hardware-adapter exception: it may use the ESP-IDF
+GPIO timing primitives needed to sample the selected board and public Core bus
+APIs for peripheral-backed input, but it owns no Core queue or process policy
+and receives no private Core access. It emits only normalized events through
+`input__inject()` and remains a normal app_runner-managed process.
 
 The one deliberate exception is `modules/selftest`, a built-in diagnostic app
 whose entire purpose is validating Core's private implementation (process
@@ -873,8 +874,11 @@ only through `input__inject()`; modules never receive ESP-IDF Bluetooth handles.
 ## Input, display, storage, and Config
 
 Core owns the normalized event loop and initializes it before starting apps.
-The resident `input` module owns board GPIO polling, keyboard decoding, and
-hotkey dispatch, and injects normalized events through `input__inject()`.
+The resident `input` module owns board input polling, keyboard decoding, and
+hotkey dispatch, and injects normalized events through `input__inject()`. Both
+the Cardputer GPIO matrix and Cardputer ADV TCA8418 FIFO are normalized into
+the same 4x14 key state before modifiers, navigation chords, and hotkeys are
+decoded; the TCA8418 bus is opened through the public Core I2C API.
 Physical buttons, touch, keyboard, and encoder input go only to the effective
 foreground process. Blocking reads carry an event-loop foreground epoch and are
 revoked immediately on handoff, including an A-to-B-to-A transition. Timeout

@@ -569,6 +569,20 @@ menu "Bruce hardware configuration"
                 different keyboard peripheral (e.g. an I2C co-processor, as
                 on the LilyGO T-Deck) needs its own driver, not this option.
 
+        config BRUCE_KEYBOARD_TCA8418_ENABLED
+            bool "TCA8418 I2C matrix keyboard available"
+            depends on BRUCE_BOARD_I2C_ENABLED
+            default n
+            help
+                A 7-row/8-column Cardputer-layout keyboard connected through
+                a TCA8418 keypad controller, as used by the Cardputer ADV.
+
+        config BRUCE_KEYBOARD_TCA8418_I2C_ADDR
+            hex "TCA8418 I2C address"
+            depends on BRUCE_KEYBOARD_TCA8418_ENABLED
+            range 0x08 0x77
+            default 0x34
+
         config BRUCE_INPUT_SCAN_SETTLE_US
             int "Keyboard scan settle time (us)"
             default 30

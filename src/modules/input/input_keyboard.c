@@ -9,13 +9,15 @@
 
 #include "core_sdk/config.h"
 #include "core_sdk/gpio.h"
+#include "core_sdk/i2c.h"
 
+#include "esp_log.h"
 #include "esp_rom_sys.h"
 #include "sdkconfig.h"
 
 #define TAG "bruce_input_kb"
 
-#define INPUT__HAS_KEYBOARD CONFIG_BRUCE_KEYBOARD_ENABLED
+#define INPUT__HAS_KEYBOARD (CONFIG_BRUCE_KEYBOARD_ENABLED || CONFIG_BRUCE_KEYBOARD_TCA8418_ENABLED)
 #if CONFIG_BRUCE_KEYBOARD_ENABLED
 #define INPUT__KB_OUT_PINS                                                                                   \
     {CONFIG_BRUCE_KEYBOARD_OUT0_GPIO, CONFIG_BRUCE_KEYBOARD_OUT1_GPIO, CONFIG_BRUCE_KEYBOARD_OUT2_GPIO}
@@ -71,10 +73,12 @@ static const char *const s_kb_shifted[INPUT__KB_ROWS][INPUT__KB_COLS] = {
     {"ctrl", "opt",   "alt", "Z", "X", "C", "V", "B", "N", "M", "<", ">", "?",  "space"},
 };
 
+#if CONFIG_BRUCE_KEYBOARD_ENABLED
 static const int s_kb_out_pins[INPUT__KB_OUT_COUNT] = INPUT__KB_OUT_PINS;
 static const int s_kb_in_pins[INPUT__KB_IN_COUNT] = INPUT__KB_IN_PINS;
 #if INPUT__KB_AUTODETECT_ALT
 static const int s_kb_in_alt_pins[INPUT__KB_IN_COUNT] = INPUT__KB_IN_ALT_PINS;
+#endif
 #endif
 
 #if INPUT__KB_AUTODETECT_ALT
@@ -96,6 +100,63 @@ static bool s_kb_alt_held;
 
 static bool s_kb_initialized;
 
+#if CONFIG_BRUCE_KEYBOARD_TCA8418_ENABLED
+#define INPUT__TCA_REG_CFG 0x01
+#define INPUT__TCA_REG_INT_STAT 0x02
+#define INPUT__TCA_REG_KEY_LCK_EC 0x03
+#define INPUT__TCA_REG_KEY_EVENT_A 0x04
+#define INPUT__TCA_REG_KP_GPIO1 0x1D
+#define INPUT__TCA_REG_KP_GPIO2 0x1E
+#define INPUT__TCA_REG_KP_GPIO3 0x1F
+
+static bruce_i2c_id_t s_kb_tca_bus = BRUCE_I2C_ID_INVALID;
+static bool s_kb_tca_pressed[INPUT__KB_ROWS][INPUT__KB_COLS];
+
+static bool input__kb_tca_write(uint8_t reg, uint8_t value) {
+    uint8_t data[] = {reg, value};
+    return i2c__write(s_kb_tca_bus, CONFIG_BRUCE_KEYBOARD_TCA8418_I2C_ADDR, data, sizeof(data), 20) == BRUCE_OK;
+}
+
+static bool input__kb_tca_read(uint8_t reg, uint8_t *value) {
+    return i2c__write_read(
+               s_kb_tca_bus, CONFIG_BRUCE_KEYBOARD_TCA8418_I2C_ADDR, &reg, 1, value, 1, 20
+           ) == BRUCE_OK;
+}
+
+static bool input__kb_tca_init(void) {
+    bruce_i2c_bus_config_t config = {
+        .port = BRUCE_I2C_PORT_AUTO,
+        .sda = CONFIG_BRUCE_BOARD_I2C_SDA_GPIO,
+        .scl = CONFIG_BRUCE_BOARD_I2C_SCL_GPIO,
+        .clock_hz = CONFIG_BRUCE_BOARD_I2C_FREQ_HZ,
+        .enable_internal_pullups = true,
+    };
+    if (i2c__open(&config, &s_kb_tca_bus) != BRUCE_OK) return false;
+
+    /* Lowest 7 row pins and lowest 8 column pins form the ADV matrix. */
+    if (!input__kb_tca_write(INPUT__TCA_REG_KP_GPIO1, 0x7F) ||
+        !input__kb_tca_write(INPUT__TCA_REG_KP_GPIO2, 0xFF) ||
+        !input__kb_tca_write(INPUT__TCA_REG_KP_GPIO3, 0x00)) {
+        return false;
+    }
+
+    /* Drain stale power-on events, clear status, then enable key interrupts.
+     * Polling the FIFO remains authoritative, so a missed GPIO interrupt can
+     * never leave a key stuck. */
+    uint8_t count = 0;
+    if (input__kb_tca_read(INPUT__TCA_REG_KEY_LCK_EC, &count)) {
+        count &= 0x0F;
+        while (count-- > 0) {
+            uint8_t ignored;
+            if (!input__kb_tca_read(INPUT__TCA_REG_KEY_EVENT_A, &ignored)) break;
+        }
+    }
+    return input__kb_tca_write(INPUT__TCA_REG_INT_STAT, 0x03) &&
+           input__kb_tca_write(INPUT__TCA_REG_CFG, 0x01);
+}
+#endif
+
+#if CONFIG_BRUCE_KEYBOARD_ENABLED
 static void input__kb_set_output(uint8_t scan_state) {
     scan_state &= 0x07;
     (void)gpio__write(s_kb_out_pins[0], (scan_state & 0x01) ? 1 : 0);
@@ -112,8 +173,34 @@ static uint8_t input__kb_read_inputs(const int *pins) {
     }
     return mask;
 }
+#endif
 
 static bool input__kb_scan(bool out_pressed[INPUT__KB_ROWS][INPUT__KB_COLS]) {
+#if CONFIG_BRUCE_KEYBOARD_TCA8418_ENABLED
+    uint8_t count = 0;
+    if (!input__kb_tca_read(INPUT__TCA_REG_KEY_LCK_EC, &count)) return false;
+    count &= 0x0F;
+    while (count-- > 0) {
+        uint8_t event = 0;
+        if (!input__kb_tca_read(INPUT__TCA_REG_KEY_EVENT_A, &event) || (event & 0x7F) == 0) break;
+        uint8_t raw = (uint8_t)((event & 0x7F) - 1);
+        uint8_t controller_row = raw / 10;
+        uint8_t controller_col = raw % 10;
+        uint8_t x = (uint8_t)(controller_row * 2 + (controller_col > 3 ? 1 : 0));
+        uint8_t y = (uint8_t)((controller_col + 4) % 4);
+        if (controller_row < 7 && controller_col < 8 && x < INPUT__KB_COLS) {
+            s_kb_tca_pressed[y][x] = (event & 0x80) != 0;
+        }
+    }
+    (void)input__kb_tca_write(INPUT__TCA_REG_INT_STAT, 0x01);
+    memcpy(out_pressed, s_kb_tca_pressed, sizeof(s_kb_tca_pressed));
+    for (int y = 0; y < INPUT__KB_ROWS; ++y) {
+        for (int x = 0; x < INPUT__KB_COLS; ++x) {
+            if (out_pressed[y][x]) return true;
+        }
+    }
+    return false;
+#else
     bool any = false;
     memset(out_pressed, 0, sizeof(bool) * INPUT__KB_ROWS * INPUT__KB_COLS);
 
@@ -155,6 +242,7 @@ static bool input__kb_scan(bool out_pressed[INPUT__KB_ROWS][INPUT__KB_COLS]) {
 
     input__kb_set_output(0);
     return any;
+#endif
 }
 
 static int32_t input__kb_char_code(const char *label) {
@@ -244,6 +332,12 @@ static bool input__kb_match_hotkey(
 }
 
 void input_keyboard__init(void) {
+#if CONFIG_BRUCE_KEYBOARD_TCA8418_ENABLED
+    if (!input__kb_tca_init()) {
+        ESP_LOGE(TAG, "TCA8418 keyboard initialization failed");
+        return;
+    }
+#else
     /* Outputs: push-pull, initially low. */
     for (int i = 0; i < INPUT__KB_OUT_COUNT; ++i) {
         (void)gpio__configure(s_kb_out_pins[i], BRUCE_GPIO_MODE_OUTPUT, BRUCE_GPIO_PULL_NONE);
@@ -259,6 +353,7 @@ void input_keyboard__init(void) {
     for (int i = 0; i < INPUT__KB_IN_COUNT; ++i) {
         (void)gpio__configure(s_kb_in_alt_pins[i], BRUCE_GPIO_MODE_INPUT, BRUCE_GPIO_PULL_UP);
     }
+#endif
 #endif
 
     s_kb_initialized = true;
