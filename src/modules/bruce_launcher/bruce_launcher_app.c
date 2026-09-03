@@ -649,14 +649,28 @@ static void bruce_launcher__draw_root_transition(
     }
 }
 
+static int bruce_launcher__navigation_direction(int32_t code) {
+    switch (code) {
+        case BRUCE_INPUT_CODE_LEFT:
+        case BRUCE_INPUT_CODE_UP:
+        case BRUCE_INPUT_CODE_PREV: return -1;
+        case BRUCE_INPUT_CODE_RIGHT:
+        case BRUCE_INPUT_CODE_DOWN:
+        case BRUCE_INPUT_CODE_NEXT: return 1;
+        default: return 0;
+    }
+}
+
 /* Slides the horizontal carousel from `from` one step in `direction` (-1 or
- * +1). The last frame (linear == EASING_SCALE) is drawn with the plain
+ * +1). Repeated navigation presses replace the in-flight transition with one
+ * from the newest selection, so rapid input cannot queue a full animation per
+ * press. The last frame (linear == EASING_SCALE) is drawn with the plain
  * static renderer instead of the transition one, at the settled index, so
  * it comes out pixel-identical to what a plain redraw of that selection
  * would show. (Only the horizontal carousel animates; the grid redraws
  * instantly and the vertical list has no icons to slide.) */
 static bruce_result_t bruce_launcher__animate_root_menu(
-    const bruce_launcher_menu_t *menu, int from, int direction, const bruce_launcher_theme_t *theme,
+    const bruce_launcher_menu_t *menu, int from, int direction, int *selected, const bruce_launcher_theme_t *theme,
     const bruce_launcher_render_config_t *render, uint32_t *icon_revision
 ) {
     uint64_t started_at = runtime__now();
@@ -686,6 +700,21 @@ static bruce_result_t bruce_launcher__animate_root_menu(
         frame = display__present();
         if (frame != BRUCE_OK) { return frame; }
         if (linear == BRUCE_LAUNCHER_EASING_SCALE) { return BRUCE_OK; }
+
+        bruce_input_event_t event;
+        while (input__peek(&event) == BRUCE_OK) {
+            if (event.action != BRUCE_INPUT_PRESS) {
+                (void)input__read(&event, 0);
+                continue;
+            }
+            int next_direction = bruce_launcher__navigation_direction(event.code);
+            if (next_direction == 0) { break; }
+            (void)input__read(&event, 0);
+            from = *selected;
+            direction = next_direction;
+            *selected = bruce_launcher__wrap_index(*selected + direction, menu->entry_count);
+            started_at = runtime__now();
+        }
     }
 }
 
@@ -1132,7 +1161,7 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
                  * the grid does above. */
                 if (menu->entry_count > 1 && render.layout == BRUCE_LAUNCHER_LAYOUT_CAROUSEL_H) {
                     result = bruce_launcher__animate_root_menu(
-                        menu, previous, direction, &theme, &render, &icon_revision
+                        menu, previous, direction, &selected, &theme, &render, &icon_revision
                     );
                     if (result != BRUCE_OK) { return result; }
                     last_drawn = selected;
