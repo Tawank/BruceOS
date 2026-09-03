@@ -167,17 +167,17 @@ void *memory__stack_alloc(size_t total_bytes) {
      * RTC_SLOW pool boot-loops at the very first context switch. RTC_FAST
      * rarely has room in practice (a default-sized stack is already half its
      * ~8KB region, and the 8KB GUI tier doesn't fit at all), so most stacks
-     * fall straight through to the general heap below - same as
-     * memory__malloc()'s own RTC-then-heap steering, just with RTC_SLOW off
-     * the table for this one caller. */
+     * fall straight through to the internal heap below. Stacks must never use
+     * PSRAM: flash writes disable caches, and ESP-IDF asserts if the current
+     * task stack is external while that happens. */
     void *ptr = heap_caps_malloc(total_bytes, MALLOC_CAP_RTCRAM);
-    if (ptr == NULL) { ptr = malloc(total_bytes); }
+    if (ptr == NULL) { ptr = heap_caps_malloc(total_bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT); }
     return ptr;
 }
 
 void memory__stack_free(void *ptr) {
-    /* Both sources memory__stack_alloc() can return - RTC_FAST via
-     * heap_caps_malloc() or the general heap - are freed identically. */
+    /* Both sources memory__stack_alloc() can return - RTC_FAST or internal
+     * DRAM via heap_caps_malloc() - are freed identically. */
     free(ptr);
 }
 

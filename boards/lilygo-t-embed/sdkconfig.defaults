@@ -156,11 +156,10 @@ CONFIG_BRUCE_DISPLAY_PIN_CS=10
 CONFIG_BRUCE_DISPLAY_PIN_DC=13
 CONFIG_BRUCE_DISPLAY_PIN_RST=9
 CONFIG_BRUCE_DISPLAY_PIN_BL=15
-# This board's backlight boost converter flickers at a literal 100% PWM
-# duty cycle - the legacy Arduino driver's analogWrite(TFT_BL, ...) always
-# capped out at 254, never 255, for exactly this reason (see
-# BRUCE_DISPLAY_BACKLIGHT_MAX_LEVEL's help text).
-CONFIG_BRUCE_DISPLAY_BACKLIGHT_MAX_LEVEL=254
+# This board's backlight boost converter flickers near a full PWM duty cycle.
+# Cap the UI's nominal 100% level at about 90% to leave enough off-time for
+# the converter to stay in regulation.
+CONFIG_BRUCE_DISPLAY_BACKLIGHT_MAX_LEVEL=220
 CONFIG_BRUCE_DISPLAY_GAP_X_ROTATION0=35
 CONFIG_BRUCE_DISPLAY_GAP_Y_ROTATION0=0
 CONFIG_BRUCE_DISPLAY_GAP_X_ROTATION1=0
