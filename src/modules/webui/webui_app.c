@@ -96,6 +96,12 @@ static bruce_result_t webui_app__stop(void) {
 }
 
 static int webui_app__start(webui_app_network_mode_t mode, bool gui) {
+    /* Neither wifi__setup_ap()/wifi__connect_known() nor http_server__start()
+     * below has a poll/cancel pair to animate or interrupt them with, so
+     * this just draws a static popup naming what's happening, rather than
+     * leaving the caller's own "Start server" menu looking frozen for
+     * however long either call takes. */
+    if (gui) (void)dialog__message_show(BRUCE_DIALOG_INFO, "WebUI", "Loading...\nStarting Wi-Fi...");
     bruce_result_t result;
     if (mode == WEBUI_APP_NETWORK_AP) result = wifi__is_ap_running() ? BRUCE_OK : wifi__setup_ap();
     else result = wifi__is_connected() ? BRUCE_OK : wifi__connect_known();
@@ -108,6 +114,7 @@ static int webui_app__start(webui_app_network_mode_t mode, bool gui) {
         .port = 80, .routes = s_routes, .route_count = sizeof(s_routes) / sizeof(s_routes[0])
     };
     s_network_mode = mode;
+    if (gui) (void)dialog__message_show(BRUCE_DIALOG_INFO, "WebUI", "Loading...\nStarting WebUI...");
     result = http_server__start(&options);
     if (result != BRUCE_OK) {
         if (gui) (void)dialog__message(BRUCE_DIALOG_ERROR, "WebUI", "Could not start WebUI");

@@ -488,6 +488,57 @@ static bruce_result_t dialog__gui_message(bruce_dialog_kind_t kind, const char *
     return dialog__gui_wait_for_any_key();
 }
 
+/* Same layout as dialog__gui_message() above, minus the footer hint and the
+ * trailing dialog__gui_wait_for_any_key() -- there's nothing to press, so
+ * this draws once and returns immediately. Meant to sit on screen for
+ * whatever blocking call the caller makes right after it, until that
+ * caller's own next dialog__* draws something else full-screen over it. */
+static bruce_result_t dialog__gui_message_show(bruce_dialog_kind_t kind, const char *title, const char *message) {
+    uint16_t pri, sec, bg, surface, text, text_muted, border, success, warning, error;
+    dialog__get_colors(&pri, &sec, &bg, &surface, &text, &text_muted, &border, &success, &warning, &error);
+    uint16_t accent = kind == BRUCE_DIALOG_SUCCESS   ? success
+                      : kind == BRUCE_DIALOG_WARNING ? warning
+                      : kind == BRUCE_DIALOG_ERROR   ? error
+                                                     : pri;
+
+    bruce_result_t frame_result = display__begin_frame();
+    if (frame_result == BRUCE_ERR_NOT_FOREGROUND) { return BRUCE_ERR_CANCELLED; }
+    if (frame_result != BRUCE_OK) { return frame_result; }
+    (void)display__fill_screen(bg);
+    dialog__gui_title_bar_accent(title, accent, text);
+
+    int w = display__width();
+    int max_chars = (w - 2 * DIALOG__MARGIN) / DIALOG__CHAR_W;
+    if (max_chars < 1) { max_chars = 1; }
+
+    display__set_text_color(text);
+    display__set_text_size(DIALOG__TEXT_SIZE);
+    display__set_text_bg_color(bg);
+    display__set_cursor(DIALOG__MARGIN, DIALOG__CHAR_H + 8);
+
+    if (message != NULL) {
+        const char *p = message;
+        int line_len = 0;
+        while (*p != '\0') {
+            if (*p == '\n' || line_len >= max_chars) {
+                display__println("");
+                line_len = 0;
+                if (*p == '\n') {
+                    p++;
+                    continue;
+                }
+            }
+            char ch[2] = {*p, '\0'};
+            display__print(ch);
+            line_len++;
+            p++;
+        }
+    }
+
+    frame_result = display__present();
+    return frame_result == BRUCE_ERR_NOT_FOREGROUND ? BRUCE_ERR_CANCELLED : frame_result;
+}
+
 /* Blocks until the SELECT press dialog__gui_choice() just consumed either
  * releases or has been held DIALOG__LONG_PRESS_MS, whichever comes first -
  * distinguishing a long press from a plain tap for a long_press_enabled
@@ -1809,6 +1860,14 @@ bruce_result_t dialog__message(bruce_dialog_kind_t kind, const char *title, cons
     return dialog__term_message(kind, title, message);
 }
 
+bruce_result_t dialog__message_show(bruce_dialog_kind_t kind, const char *title, const char *message) {
+    bool gui = dialog__current_process_wants_gui();
+    s_last_call_was_gui = gui;
+
+    if (gui) { return dialog__gui_message_show(kind, title, message); }
+    return dialog__term_message(kind, title, message);
+}
+
 bruce_result_t dialog__choice(
     const char *title, const char *message, const bruce_dialog_choice_t *choices, size_t choice_count,
     size_t *out_selected
@@ -2108,3 +2167,4 @@ bruce_result_t dialog__viewer_close(bruce_viewer_id_t viewer) {
     dialog__viewer_unlock();
     return BRUCE_OK;
 }
+

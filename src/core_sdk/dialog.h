@@ -82,6 +82,23 @@ typedef struct {
 bruce_result_t dialog__message(bruce_dialog_kind_t kind, const char *title, const char *message);
 
 /**
+ * @brief Draws a message dialog like dialog__message(), but returns
+ * immediately instead of waiting for a keypress.
+ *
+ * For a slow blocking call (opening an archive, starting a scan, ...) with
+ * no natural point to update or poll a status from: draws this once so the
+ * screen isn't left looking frozen for that whole stretch, then the caller
+ * does its blocking work. Nothing needs to dismiss it afterward -- the
+ * caller's next dialog__* call (an error message, a result list, ...)
+ * repaints the full screen anyway, replacing it.
+ *
+ * @param kind Message severity/style.
+ * @param title Optional short title shown at the top of the dialog.
+ * @param message Body text shown in the dialog.
+ */
+bruce_result_t dialog__message_show(bruce_dialog_kind_t kind, const char *title, const char *message);
+
+/**
  * @brief Shows a choice-list dialog and waits for a selection.
  *
  * @param title Optional short title shown at the top of the dialog.

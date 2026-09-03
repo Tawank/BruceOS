@@ -497,6 +497,11 @@ int archive_app_main(int argc, char **argv) {
     bool gui = runtime__gui_requested();
     const char *basename = archive_app__basename(archive_path);
 
+    if (gui) {
+        char message[BRUCE_STORAGE_PATH_MAX + 16];
+        snprintf(message, sizeof(message), "Loading...\n%s", basename);
+        (void)dialog__message_show(BRUCE_DIALOG_INFO, "Archive", message);
+    }
     archive_app__entries_t entries;
     bruce_result_t result = archive_app__load_entries(archive_path, zip, &entries);
     if (result != BRUCE_OK) {

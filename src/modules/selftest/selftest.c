@@ -238,6 +238,7 @@ int selftest_app_main(int argc, char **argv) {
     RUN_SELFTEST(selftest__run_dialog_number_input_case);
     RUN_SELFTEST(selftest__run_dialog_pick_file_case);
     RUN_SELFTEST(selftest__run_dialog_viewer_case);
+    RUN_SELFTEST(selftest__run_dialog_message_show_case);
     RUN_SELFTEST(selftest__run_visual_cases);
     RUN_SELFTEST(selftest__run_notification_console_fallback_case);
     RUN_SELFTEST(selftest__run_status_icon_case);

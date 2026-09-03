@@ -167,3 +167,16 @@ bool selftest__run_dialog_viewer_case(void) {
     printf("[selftest] dialog/viewer: OK\n");
     return true;
 }
+
+bool selftest__run_dialog_message_show_case(void) {
+    /* Non-blocking: this terminal-mode run has no key to wait for, so a
+     * hang here means dialog__message_show() forgot and blocked anyway. */
+    bruce_result_t result = dialog__message_show(BRUCE_DIALOG_INFO, "Title", "Loading...\nmessage");
+    if (result != BRUCE_OK) {
+        printf("[selftest] dialog/message_show: FAIL, result=%d\n", result);
+        return false;
+    }
+
+    printf("[selftest] dialog/message_show: OK\n");
+    return true;
+}

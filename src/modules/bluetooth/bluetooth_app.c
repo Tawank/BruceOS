@@ -5,7 +5,6 @@
 #include "args.h"
 #include "core_sdk/bluetooth.h"
 #include "core_sdk/dialog.h"
-#include "core_sdk/display.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
@@ -13,21 +12,10 @@
 #include "core_sdk/stdio.h"
 
 #define BLUETOOTH_APP__MAX_RESULTS 32
-
-/* bluetooth__scan_ble() blocks for the whole scan window (default 5s); paint
- * a status screen first so the display isn't left showing the previous menu
- * (or nothing) for that whole stretch, matching image_viewer_app's
- * "Loading..." screen. Best-effort: scanning still proceeds even if a draw
- * call fails. */
-static void bluetooth_app__show_scanning(void) {
-    if (display__begin_frame() != BRUCE_OK) return;
-    (void)display__fill_screen(BRUCE_COLOR_BLACK);
-    (void)display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
-    (void)display__set_text_color(BRUCE_COLOR_WHITE);
-    (void)display__set_text_size(2);
-    (void)display__draw_centre_string("Scanning...", display__width() / 2, (display__height() - 8) / 2);
-    (void)display__present();
-}
+/* bluetooth__scan_ble()'s scan window below, in both ms (the call's own
+ * argument) and whole seconds (just for the popup's message text). */
+#define BLUETOOTH_APP__SCAN_MS 5000u
+#define BLUETOOTH_APP__SCAN_SECONDS "5"
 
 static bool bluetooth_app__resume_after_handoff(void) {
     bruce_process_snapshot_t snapshot;
@@ -65,7 +53,7 @@ static void bluetooth_app__print_address(const uint8_t *address) {
 
 static int bluetooth_app__scan_terminal(void) {
     bluetooth__device_t devices[BLUETOOTH_APP__MAX_RESULTS];
-    int count = bluetooth__scan_ble(devices, BLUETOOTH_APP__MAX_RESULTS, 5000);
+    int count = bluetooth__scan_ble(devices, BLUETOOTH_APP__MAX_RESULTS, BLUETOOTH_APP__SCAN_MS);
     if (count < 0) {
         stdio__printf("BLE scan failed: %d\n", count);
         return count;
@@ -86,8 +74,14 @@ static int bluetooth_app__scan_gui(void) {
     bluetooth__device_t *devices = memory__calloc(BLUETOOTH_APP__MAX_RESULTS, sizeof(*devices));
     if (devices == NULL) return BRUCE_ERR_NO_MEMORY;
 
-    bluetooth_app__show_scanning();
-    int count = bluetooth__scan_ble(devices, BLUETOOTH_APP__MAX_RESULTS, 5000);
+    /* bluetooth__scan_ble() below is one opaque blocking call with no
+     * poll/cancel of its own, so there's no point mid-scan to redraw from --
+     * just a static popup naming the known scan window, better than the
+     * screen looking frozen for that whole stretch. */
+    (void)dialog__message_show(
+        BRUCE_DIALOG_INFO, "Bluetooth", "Loading...\nScanning BLE (" BLUETOOTH_APP__SCAN_SECONDS "s)..."
+    );
+    int count = bluetooth__scan_ble(devices, BLUETOOTH_APP__MAX_RESULTS, BLUETOOTH_APP__SCAN_MS);
     if (count < 0) {
         char message[48];
         snprintf(message, sizeof(message), "BLE scan failed (%d)", count);
