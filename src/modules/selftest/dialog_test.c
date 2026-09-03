@@ -35,6 +35,33 @@ static bruce_result_t selftest__dialog_input_provider(
 
 static const char *s_pick_file_result;
 
+static bool s_choice_poll_callback_called;
+static bool s_choice_poll_cleanup_called;
+
+static bruce_result_t selftest__dialog_choice_provider(
+    const char *title, const char *message, const bruce_dialog_choice_t *choices, size_t choice_count,
+    size_t *out_selected
+) {
+    (void)title;
+    (void)message;
+    (void)choices;
+    if (choice_count != 1) { return BRUCE_ERR_INVALID_ARGUMENT; }
+    *out_selected = 0;
+    return BRUCE_OK;
+}
+
+static bruce_result_t selftest__dialog_choice_poll_callback(void *context, bool *out_complete) {
+    (void)context;
+    s_choice_poll_callback_called = true;
+    *out_complete = false;
+    return BRUCE_OK;
+}
+
+static void selftest__dialog_choice_poll_cleanup(void *context) {
+    (void)context;
+    s_choice_poll_cleanup_called = true;
+}
+
 static bruce_result_t selftest__dialog_pick_file_provider(
     const char *initial_path, const char *extension_filter, char *out_path, size_t out_path_size
 ) {
@@ -178,5 +205,28 @@ bool selftest__run_dialog_message_show_case(void) {
     }
 
     printf("[selftest] dialog/message_show: OK\n");
+    return true;
+}
+
+bool selftest__run_dialog_choice_poll_case(void) {
+    const bruce_dialog_choice_t choices[] = {{.label = "Back", .value = "back"}};
+    size_t selected = 1;
+    bool complete = true;
+    s_choice_poll_callback_called = false;
+    s_choice_poll_cleanup_called = false;
+    dialog__test_set_choice_provider(selftest__dialog_choice_provider);
+    bruce_result_t result = dialog__choice_poll(
+        "Polling", NULL, choices, 1, 10, selftest__dialog_choice_poll_callback, NULL,
+        selftest__dialog_choice_poll_cleanup, &selected, &complete
+    );
+    dialog__test_set_choice_provider(NULL);
+
+    if (result != BRUCE_OK || selected != 0 || complete || s_choice_poll_callback_called ||
+        !s_choice_poll_cleanup_called) {
+        printf("[selftest] dialog/choice_poll: FAIL, result=%d\n", result);
+        return false;
+    }
+
+    printf("[selftest] dialog/choice_poll: OK\n");
     return true;
 }

@@ -7,7 +7,6 @@
 #include "args.h"
 #include "core_sdk/config.h"
 #include "core_sdk/dialog.h"
-#include "core_sdk/input.h"
 #include "core_sdk/notification.h"
 #include "core_sdk/runtime.h"
 #include "core_sdk/stdio.h"
@@ -35,11 +34,7 @@
  * wifi_auth_mode_t Bruce targets, and wifi__network_t exposes only the raw
  * byte (no public enum), so that's the value checked here. */
 #define WIFI_APP_GUI_AUTH_OPEN 0u
-/* Tick length for each wifi__scan_poll() wait below -- also the worst-case
- * latency before a cancel press is noticed. Only used by the GUI scan;
- * "wifi scan" from a terminal/script has no input to cancel with, so it
- * keeps using the plain blocking wifi__scan() (wifi_app_scan() below). */
-#define WIFI_APP_GUI_SCAN_TICK_MS 150u
+#define WIFI_APP_GUI_SCAN_POLL_INTERVAL_MS 100u
 
 static const char *wifi_app_result_label(bruce_result_t result) {
     switch (result) {
@@ -138,30 +133,46 @@ static void wifi_app_gui__connect(const wifi__network_t *net) {
     }
 }
 
-/* Draws a "Loading..." popup, then polls the scan in WIFI_APP_GUI_SCAN_TICK_MS
- * ticks (instead of one big wifi__scan() block) so a Back/B press is noticed
- * and cancels it, rather than committing this app to sitting frozen for the
- * scan's whole duration with no way out. Returns the same thing wifi__scan()
- * does -- a non-negative count or a negative BRUCE_ERR_* value -- plus
- * BRUCE_ERR_CANCELLED if the user backed out. */
-static int wifi_app__gui_scan(wifi__network_t *networks, size_t capacity) {
-    (void)dialog__message_show(BRUCE_DIALOG_INFO, "Wi-Fi", "Loading...\nScanning... (Back to cancel)");
+typedef struct {
+    wifi__network_t *networks;
+    size_t capacity;
+    int result;
+    bool active;
+} wifi_app_gui_scan_t;
 
+static bruce_result_t wifi_app_gui__poll_scan(void *context, bool *out_complete) {
+    wifi_app_gui_scan_t *scan = context;
+    scan->result = wifi__scan_poll(scan->networks, scan->capacity, 0);
+    if (scan->result == BRUCE_ERR_TIMEOUT) { return BRUCE_OK; }
+    scan->active = false;
+    *out_complete = true;
+    return BRUCE_OK;
+}
+
+static void wifi_app_gui__cancel_scan(void *context) {
+    wifi_app_gui_scan_t *scan = context;
+    if (scan->active) (void)wifi__scan_cancel();
+}
+
+/* Presents the scan as a live choice dialog instead of blocking on one long
+ * scan wait. Back and the Back row leave through dialog cleanup, which aborts
+ * only a scan that has not already completed. */
+static int wifi_app__gui_scan(wifi__network_t *networks, size_t capacity) {
     bruce_result_t start = wifi__scan_start();
     if (start != BRUCE_OK) return (int)start;
-
-    int result;
-    for (;;) {
-        bruce_input_event_t ev;
-        if (input__poll(&ev) == BRUCE_OK && ev.action == BRUCE_INPUT_PRESS &&
-            (ev.code == BRUCE_INPUT_CODE_BACK || ev.code == BRUCE_INPUT_CODE_BUTTON_B)) {
-            (void)wifi__scan_cancel();
-            return BRUCE_ERR_CANCELLED;
-        }
-        result = wifi__scan_poll(networks, capacity, WIFI_APP_GUI_SCAN_TICK_MS);
-        if (result != BRUCE_ERR_TIMEOUT) break;
-    }
-    return result;
+    wifi_app_gui_scan_t scan = {.networks = networks, .capacity = capacity, .result = BRUCE_ERR_TIMEOUT, .active = true};
+    const bruce_dialog_choice_t choices[] = {
+        {.label = "Back", .value = "back"},
+    };
+    size_t selected = 0;
+    bool complete = false;
+    bruce_result_t dialog_result = dialog__choice_poll_launcher(
+        "WiFi Scanning...", NULL, choices, sizeof(choices) / sizeof(choices[0]), WIFI_APP_GUI_SCAN_POLL_INTERVAL_MS,
+        wifi_app_gui__poll_scan, &scan, wifi_app_gui__cancel_scan, &selected, &complete
+    );
+    if (dialog_result == BRUCE_ERR_CANCELLED || (dialog_result == BRUCE_OK && !complete)) return BRUCE_ERR_CANCELLED;
+    if (dialog_result != BRUCE_OK) return (int)dialog_result;
+    return scan.result;
 }
 
 /* Interactive picker: scan, list every visible network with its saved/open/
@@ -198,15 +209,15 @@ static int wifi_app__gui(void) {
             choices[i].right_text = NULL;
         }
         size_t rescan_index = (size_t)count;
-        size_t exit_index = rescan_index + 1;
+        size_t back_index = rescan_index + 1;
         choices[rescan_index].label = "Rescan";
         choices[rescan_index].value = "rescan";
         choices[rescan_index].icon_name = NULL;
         choices[rescan_index].right_text = NULL;
-        choices[exit_index].label = "Exit";
-        choices[exit_index].value = "exit";
-        choices[exit_index].icon_name = NULL;
-        choices[exit_index].right_text = NULL;
+        choices[back_index].label = "Back";
+        choices[back_index].value = "back";
+        choices[back_index].icon_name = NULL;
+        choices[back_index].right_text = NULL;
 
         char subtitle[32];
         if (count == 0) snprintf(subtitle, sizeof(subtitle), "Wi-Fi No networks found");
@@ -215,10 +226,10 @@ static int wifi_app__gui(void) {
         (void)notification__push("Wi-Fi scan ended", 1000);
         size_t selected = 0;
         bruce_result_t result =
-            dialog__choice_launcher(subtitle, NULL, choices, exit_index + 1, &selected);
+            dialog__choice_launcher(subtitle, NULL, choices, back_index + 1, &selected);
         if (result == BRUCE_ERR_CANCELLED) return 0;
         if (result != BRUCE_OK) return -1;
-        if (strcmp(choices[selected].value, "exit") == 0) return 0;
+        if (strcmp(choices[selected].value, "back") == 0) return 0;
         if (strcmp(choices[selected].value, "rescan") == 0) continue;
 
         wifi_app_gui__connect(&networks[selected]);

@@ -785,6 +785,10 @@ terminal output appends `right_text`. GUI labels that exceed their available
 row width use a single `>` overflow marker while idle and scroll horizontally
 when selected so their complete text remains accessible. Callers retain the selected index for
 locating the selected row, then branch on its `value` rather than its position.
+`dialog__choice_poll()` is GUI-only and keeps that choice UI responsive while
+calling a fast caller-owned poll callback at a requested interval. Its cleanup
+callback always runs after a validated call returns, allowing work such as a
+radio scan to be safely cancelled when the user backs out.
 
 app_runner records the initial `GUI` environment request in process-local
 storage before launch-time permission checks. A background serial-monitor-style

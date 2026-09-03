@@ -30,6 +30,17 @@ typedef struct {
 
 typedef void (*bruce_dialog_render_callback_t)(void *context);
 
+/**
+ * @brief Performs one short, non-blocking unit of work for dialog__choice_poll().
+ *
+ * Set @p out_complete to true when the operation has finished. Returning an
+ * error closes the dialog and returns that error to the caller.
+ */
+typedef bruce_result_t (*bruce_dialog_poll_callback_t)(void *context, bool *out_complete);
+
+/** @brief Releases work started for dialog__choice_poll(). */
+typedef void (*bruce_dialog_cleanup_callback_t)(void *context);
+
 typedef struct {
     int padding_top;
     int padding_right;
@@ -110,6 +121,34 @@ bruce_result_t dialog__message_show(bruce_dialog_kind_t kind, const char *title,
 bruce_result_t dialog__choice(
     const char *title, const char *message, const bruce_dialog_choice_t *choices, size_t choice_count,
     size_t *out_selected
+);
+
+/**
+ * @brief Shows a GUI choice dialog while periodically polling caller-owned work.
+ *
+ * The poll callback runs immediately and then no more often than
+ * @p poll_interval_ms. It must not block. When it sets @p out_complete true,
+ * this function returns BRUCE_OK with @p out_poll_complete set true. A user
+ * choice also returns BRUCE_OK, with @p out_poll_complete set false and
+ * @p out_selected set to that choice. Back returns BRUCE_ERR_CANCELLED.
+ *
+ * This is GUI-only, except that the dialog test choice provider may supply a
+ * choice. The cleanup callback, when present, runs exactly once after every
+ * return path following argument validation.
+ */
+bruce_result_t dialog__choice_poll(
+    const char *title, const char *message, const bruce_dialog_choice_t *choices, size_t choice_count,
+    uint32_t poll_interval_ms, bruce_dialog_poll_callback_t poll_callback, void *poll_context,
+    bruce_dialog_cleanup_callback_t cleanup_callback, size_t *out_selected, bool *out_poll_complete
+);
+
+/**
+ * @brief Like dialog__choice_poll(), styled for use from the launcher.
+ */
+bruce_result_t dialog__choice_poll_launcher(
+    const char *title, const char *message, const bruce_dialog_choice_t *choices, size_t choice_count,
+    uint32_t poll_interval_ms, bruce_dialog_poll_callback_t poll_callback, void *poll_context,
+    bruce_dialog_cleanup_callback_t cleanup_callback, size_t *out_selected, bool *out_poll_complete
 );
 
 /**

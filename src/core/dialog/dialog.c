@@ -559,9 +559,16 @@ static bool dialog__gui_wait_long_press(uint64_t press_started_at) {
     }
 }
 
+typedef struct {
+    uint32_t interval_ms;
+    bruce_dialog_poll_callback_t callback;
+    void *context;
+    bool *out_complete;
+} dialog__choice_poll_t;
+
 static bruce_result_t dialog__gui_choice(
     const char *title, const char *message, const bruce_dialog_choice_t *choices, size_t choice_count,
-    size_t *out_selected, const bruce_dialog_render_params_t *render_params
+    size_t *out_selected, const bruce_dialog_render_params_t *render_params, const dialog__choice_poll_t *poll
 ) {
     bool render_launcher = render_params != NULL && render_params->render_launcher && s_window_renderer_set;
     int selected = out_selected != NULL && *out_selected < choice_count ? (int)*out_selected : 0;
@@ -620,6 +627,7 @@ static bruce_result_t dialog__gui_choice(
     bool launcher_border_drawn = false;
     uint64_t rendered_at = 0;
     uint64_t selected_at = runtime__now();
+    uint64_t next_poll_at = selected_at;
     bool selected_label_overflows = false;
     bool wants_periodic_refresh = render_launcher
                                       ? s_window_renderer.draw_status != NULL
@@ -635,6 +643,16 @@ static bruce_result_t dialog__gui_choice(
     (void)input__flush();
     for (;;) {
         uint64_t now = runtime__now();
+        if (poll != NULL && now >= next_poll_at) {
+            bool complete = false;
+            bruce_result_t poll_result = poll->callback(poll->context, &complete);
+            if (poll_result != BRUCE_OK) { return poll_result; }
+            if (complete) {
+                *poll->out_complete = true;
+                return BRUCE_OK;
+            }
+            next_poll_at = runtime__now() + poll->interval_ms;
+        }
         if (wants_periodic_refresh && refresh_interval_ms > 0 && now - rendered_at >= refresh_interval_ms) {
             redraw = true;
         }
@@ -781,8 +799,14 @@ static bruce_result_t dialog__gui_choice(
             redraw = false;
         }
 
+        uint32_t input_timeout_ms = 100;
+        if (poll != NULL) {
+            now = runtime__now();
+            uint64_t until_poll = next_poll_at > now ? next_poll_at - now : 0;
+            if (until_poll < input_timeout_ms) { input_timeout_ms = (uint32_t)until_poll; }
+        }
         bruce_input_event_t ev;
-        bruce_result_t input_result = input__read(&ev, 100);
+        bruce_result_t input_result = input__read(&ev, input_timeout_ms);
         if (input_result == BRUCE_ERR_NOT_FOREGROUND) { return BRUCE_ERR_CANCELLED; }
         if (input_result != BRUCE_OK || ev.action != BRUCE_INPUT_PRESS) { continue; }
 
@@ -1572,7 +1596,7 @@ static bruce_result_t dialog__gui_pick_file_run(
         effective_params->render_callback_context = ws->usage_text;
 
         bruce_result_t choice_result = dialog__gui_choice(
-            ws->bar_title, NULL, choices, (size_t)choice_count, &out_selected, effective_params
+            ws->bar_title, NULL, choices, (size_t)choice_count, &out_selected, effective_params, NULL
         );
 
         const char *picked = values[out_selected];
@@ -1886,12 +1910,74 @@ bruce_result_t dialog__choice(
         params.padding_bottom = 8;
         params.padding_left = 12;
         params.padding_right = 12;
-        return dialog__gui_choice(title, message, choices, choice_count, out_selected, &params);
+        return dialog__gui_choice(title, message, choices, choice_count, out_selected, &params, NULL);
     }
     return dialog__term_choice(title, message, choices, choice_count, out_selected);
 }
 
 static const bruce_dialog_render_params_t s_window_launcher = {.render_launcher = true};
+
+static bruce_result_t dialog__choice_poll_common(
+    const char *title, const char *message, const bruce_dialog_choice_t *choices, size_t choice_count,
+    uint32_t poll_interval_ms, bruce_dialog_poll_callback_t poll_callback, void *poll_context,
+    bruce_dialog_cleanup_callback_t cleanup_callback, size_t *out_selected, bool *out_poll_complete, bool launcher
+) {
+    if (choices == NULL || choice_count == 0 || poll_interval_ms == 0 || poll_callback == NULL ||
+        out_selected == NULL || out_poll_complete == NULL) {
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    *out_poll_complete = false;
+    bool gui = dialog__current_process_wants_gui();
+    s_last_call_was_gui = gui;
+    bruce_result_t result;
+    if (s_test_choice_provider != NULL) {
+        result = s_test_choice_provider(title, message, choices, choice_count, out_selected);
+    } else if (gui) {
+        dialog__choice_poll_t poll = {
+            .interval_ms = poll_interval_ms,
+            .callback = poll_callback,
+            .context = poll_context,
+            .out_complete = out_poll_complete,
+        };
+        if (launcher) {
+            result = dialog__gui_choice(title, message, choices, choice_count, out_selected, &s_window_launcher, &poll);
+        } else {
+            bruce_dialog_render_params_t params = dialog__default_render_params(2);
+            params.padding_top = 8;
+            params.padding_bottom = 8;
+            params.padding_left = 12;
+            params.padding_right = 12;
+            result = dialog__gui_choice(title, message, choices, choice_count, out_selected, &params, &poll);
+        }
+    } else {
+        result = BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    if (cleanup_callback != NULL) { cleanup_callback(poll_context); }
+    return result;
+}
+
+bruce_result_t dialog__choice_poll(
+    const char *title, const char *message, const bruce_dialog_choice_t *choices, size_t choice_count,
+    uint32_t poll_interval_ms, bruce_dialog_poll_callback_t poll_callback, void *poll_context,
+    bruce_dialog_cleanup_callback_t cleanup_callback, size_t *out_selected, bool *out_poll_complete
+) {
+    return dialog__choice_poll_common(
+        title, message, choices, choice_count, poll_interval_ms, poll_callback, poll_context, cleanup_callback,
+        out_selected, out_poll_complete, false
+    );
+}
+
+bruce_result_t dialog__choice_poll_launcher(
+    const char *title, const char *message, const bruce_dialog_choice_t *choices, size_t choice_count,
+    uint32_t poll_interval_ms, bruce_dialog_poll_callback_t poll_callback, void *poll_context,
+    bruce_dialog_cleanup_callback_t cleanup_callback, size_t *out_selected, bool *out_poll_complete
+) {
+    return dialog__choice_poll_common(
+        title, message, choices, choice_count, poll_interval_ms, poll_callback, poll_context, cleanup_callback,
+        out_selected, out_poll_complete, true
+    );
+}
+
 bruce_result_t dialog__choice_launcher(
     const char *title, const char *message, const bruce_dialog_choice_t *choices, size_t choice_count,
     size_t *out_selected
@@ -1905,7 +1991,7 @@ bruce_result_t dialog__choice_launcher(
     }
 
     if (gui) {
-        return dialog__gui_choice(title, message, choices, choice_count, out_selected, &s_window_launcher);
+        return dialog__gui_choice(title, message, choices, choice_count, out_selected, &s_window_launcher, NULL);
     }
     return dialog__term_choice(title, message, choices, choice_count, out_selected);
 }
@@ -1931,7 +2017,7 @@ bruce_result_t dialog__choice_ex(
     }
 
     if (gui) {
-        return dialog__gui_choice(title, message, choices, choice_count, out_selected, render_params);
+        return dialog__gui_choice(title, message, choices, choice_count, out_selected, render_params, NULL);
     }
     return dialog__term_choice(title, message, choices, choice_count, out_selected);
 }
@@ -2167,4 +2253,3 @@ bruce_result_t dialog__viewer_close(bruce_viewer_id_t viewer) {
     dialog__viewer_unlock();
     return BRUCE_OK;
 }
-

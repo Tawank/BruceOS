@@ -7,7 +7,6 @@
 #include "core_sdk/app_runner.h"
 #include "core_sdk/ext_mem_loader.h"
 #include "core_sdk/filetype.h"
-#include "core_sdk/icon.h"
 #include "core_sdk/permission.h"
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
