@@ -5913,6 +5913,36 @@ BRUCE_ERR_INVALID_ARGUMENT, or another BRUCE_ERR_* result.
 
 ---
 
+## dialog__message_show()
+
+```c
+bruce_result_t dialog__message_show(bruce_dialog_kind_t kind, const char *title, const char *message);
+```
+
+Draws a message dialog like dialog__message(), but returns immediately instead of waiting for a keypress.
+
+For a slow blocking call (opening an archive, starting a scan, ...) with
+no natural point to update or poll a status from: draws this once so the
+screen isn't left looking frozen for that whole stretch, then the caller
+does its blocking work. Nothing needs to dismiss it afterward -- the
+caller's next dialog__* call (an error message, a result list, ...)
+repaints the full screen anyway, replacing it.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `kind` | `bruce_dialog_kind_t` | Message severity/style. |
+| `title` | `const char *` | Optional short title shown at the top of the dialog. |
+| `message` | `const char *` | Body text shown in the dialog. |
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
 ## dialog__choice()
 
 ```c
@@ -14753,6 +14783,58 @@ same terminal as before.
 
 ---
 
+## stdio__session_capture_self()
+
+```c
+bruce_result_t stdio__session_capture_self(bruce_stdio_session_t session);
+```
+
+Temporarily routes the calling process's *own* reads/writes into `session`.
+
+Unlike stdio__session_route_children(), which only affects children this
+process launches afterward, this changes where the calling process's own
+stdio__printf()/stdio__write() calls go right now -- e.g. so a shell can
+capture a builtin's or shell function's output for ">"/">>" redirection,
+something with no separate child process to relay from. `session` must be
+one the calling process created (stdio__session_create()) -- same
+ownership rule as route_children(). Nests correctly (a handful of levels
+deep -- see PROCESS__STDIO_SESSION_STACK_MAX): call
+stdio__session_release_self() to undo the most recent capture and restore
+whatever was routed before it.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `session` | `bruce_stdio_session_t` | Session to route the calling process's own I/O through. Must be owned by the caller. |
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
+## stdio__session_release_self()
+
+```c
+bruce_result_t stdio__session_release_self(void);
+```
+
+Undoes the most recent stdio__session_capture_self(), restoring what it saved.
+
+Takes no session argument -- there is deliberately nothing here for a
+caller to supply a foreign/guessed session ID to; the value restored is
+only ever one this process legitimately had routed before the matching
+capture_self() call.
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
 ## stdio__session_write_input()
 
 ```c
@@ -14768,6 +14850,37 @@ Writes input bytes into a session, as if typed by its consumer.
 | `session` | `bruce_stdio_session_t` | Session to write into. |
 | `data` | `const void *` | Bytes to write. |
 | `size` | `size_t` | Number of bytes in data. |
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
+## stdio__session_close_input()
+
+```c
+bruce_result_t stdio__session_close_input(bruce_stdio_session_t session);
+```
+
+Marks a session's input side as permanently closed (end-of-input).
+
+From this point on, stdio__session_write_input() on `session` fails with
+BRUCE_ERR_PERMISSION, and once its queued-but-unread bytes are exhausted, a
+blocking read routed through it (stdio__read(), stdio__read_line()) reports
+end-of-input instead of continuing to wait for bytes that will never
+arrive. Meant for a caller that preloads a *fixed* amount of input via
+stdio__session_write_input() -- e.g. a shell feeding a "<"-redirected
+file's whole content to a builtin/function it has captured -- rather than
+an interactive session, where there is always the possibility of more
+input arriving later. Idempotent; bytes already queued stay readable.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `session` | `bruce_stdio_session_t` | Session whose input side should be closed. Must be owned by the caller. |
 
 ### Returns
 
