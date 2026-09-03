@@ -138,11 +138,38 @@ void ext_mem_loader__format_error_message(const char *action, int result, char *
  * (which must start with '.', e.g. ".elf"). `program` is resolved through
  * the normal AppRunner command registry and receives the matched path as
  * its first argument. Registration order determines named resolution.
+ * `extension` and `program` are copied; they need not outlive this call.
  *
  * @param extension File extension to register for, including the leading '.'.
  * @param program Name of the registered AppRunner command that handles it.
  */
 bruce_result_t app_runner__register_loader(const char *extension, const char *program);
+
+/**
+ * @brief One entry of an app_runner__register_loaders_all() table.
+ *
+ * Field-for-field the same as app_runner__register_loader()'s arguments.
+ */
+typedef struct {
+    const char *extension;
+    const char *program;
+} bruce_loader_descriptor_t;
+
+/**
+ * @brief Registers a whole table of extension loaders in one call.
+ *
+ * Equivalent to calling app_runner__register_loader() once per entry, in
+ * order, except that -- unlike app_runner__register_loader(), which copies
+ * its arguments -- `loaders` is referenced in place: it must be
+ * `static const` (or otherwise outlive the system). Every entry is
+ * validated up front, so a malformed or duplicate entry is rejected before
+ * any of the table is installed.
+ *
+ * @param loaders Table of loader descriptors; must remain valid for the
+ *                lifetime of the system.
+ * @param count Number of entries in `loaders`.
+ */
+bruce_result_t app_runner__register_loaders_all(const bruce_loader_descriptor_t *loaders, size_t count);
 
 /**
  * @brief Starts an arbitrary absolute path via whichever loader is registered for its extension.

@@ -24,7 +24,10 @@
  * over that handful, not a general-purpose ceiling. */
 #define APP_RUNNER_MAX_DYNAMIC_APPS 32
 #define APP_RUNNER_PATH_MAX 160
-#define APP_RUNNER_MAX_LOADERS 32
+/* Same handful-of-callers headroom as APP_RUNNER_MAX_DYNAMIC_APPS above -
+ * the built-in loaders (main.c) go through app_runner__register_loaders_all()
+ * instead, see s_builtin_loaders below. */
+#define APP_RUNNER_MAX_DYNAMIC_LOADERS 8
 #define APP_RUNNER_LOADER_EXTENSION_MAX 16
 #define APP_RUNNER_LOADER_PROGRAM_MAX 32
 
@@ -50,13 +53,42 @@ static const bruce_app_descriptor_t *app_runner__at(size_t index) {
     return index < (size_t)s_dynamic_count ? &s_dynamic_apps[index] : NULL;
 }
 
+/* Same builtin/dynamic split as the app registry above, but for a different
+ * reason: app_runner__register_loader()'s contract never required the
+ * caller's strings to outlive the call (they're copied into a fixed-size
+ * buffer here) - a real third-party runtime loader is exactly what
+ * s_dynamic_loaders exists for (see loader/registry's selftest case). The
+ * ~10 built-in extensions (main.c) still cost nothing but a pointer and a
+ * count, same as s_builtin_apps: app_runner__register_loaders_all() points
+ * s_builtin_loaders straight at the caller's `static const` table instead of
+ * copying it in. */
 typedef struct {
     char extension[APP_RUNNER_LOADER_EXTENSION_MAX];
     char program[APP_RUNNER_LOADER_PROGRAM_MAX];
-} app_runner_loader_t;
+} app_runner_dynamic_loader_t;
 
-static app_runner_loader_t s_loaders[APP_RUNNER_MAX_LOADERS];
-static int s_loader_count;
+static const bruce_loader_descriptor_t *s_builtin_loaders;
+static size_t s_builtin_loader_count;
+static app_runner_dynamic_loader_t s_dynamic_loaders[APP_RUNNER_MAX_DYNAMIC_LOADERS];
+static int s_dynamic_loader_count;
+
+static size_t app_runner__total_loader_count(void) { return s_builtin_loader_count + (size_t)s_dynamic_loader_count; }
+
+/* Returns {NULL, NULL} past the end, same "walk [0, total_count)" contract
+ * as app_runner__at(). Safe to use past its call site: extension/program
+ * always point into either s_builtin_loaders' caller-owned static table or
+ * s_dynamic_loaders' own storage, never a temporary. */
+static bruce_loader_descriptor_t app_runner__loader_at(size_t index) {
+    if (index < s_builtin_loader_count) return s_builtin_loaders[index];
+    index -= s_builtin_loader_count;
+    if (index < (size_t)s_dynamic_loader_count) {
+        return (bruce_loader_descriptor_t){
+            .extension = s_dynamic_loaders[index].extension,
+            .program = s_dynamic_loaders[index].program,
+        };
+    }
+    return (bruce_loader_descriptor_t){0};
+}
 
 static bool app_runner__path_has_extension(const char *path, const char *extension);
 
@@ -174,17 +206,40 @@ bruce_result_t app_runner__register_loader(const char *extension, const char *pr
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
 
-    for (int i = 0; i < s_loader_count; ++i) {
-        if (strcmp(s_loaders[i].extension, extension) == 0) { return BRUCE_ERR_ALREADY_EXISTS; }
+    size_t total = app_runner__total_loader_count();
+    for (size_t i = 0; i < total; ++i) {
+        if (strcmp(app_runner__loader_at(i).extension, extension) == 0) { return BRUCE_ERR_ALREADY_EXISTS; }
     }
 
-    if (s_loader_count >= APP_RUNNER_MAX_LOADERS) { return BRUCE_ERR_RESOURCE_LIMIT; }
+    if (s_dynamic_loader_count >= APP_RUNNER_MAX_DYNAMIC_LOADERS) { return BRUCE_ERR_RESOURCE_LIMIT; }
 
-    app_runner_loader_t *loader = &s_loaders[s_loader_count++];
+    app_runner_dynamic_loader_t *loader = &s_dynamic_loaders[s_dynamic_loader_count++];
     strncpy(loader->extension, extension, APP_RUNNER_LOADER_EXTENSION_MAX - 1);
     loader->extension[APP_RUNNER_LOADER_EXTENSION_MAX - 1] = '\0';
     strncpy(loader->program, program, APP_RUNNER_LOADER_PROGRAM_MAX - 1);
     loader->program[APP_RUNNER_LOADER_PROGRAM_MAX - 1] = '\0';
+    return BRUCE_OK;
+}
+
+/* Registers the whole built-in extension table in one call, the loader-table
+ * counterpart to app_runner__register_all() (see s_builtin_loaders' comment
+ * above). Unlike that one, this never copies: `loaders` is referenced in
+ * place, so it must be `static const` (or otherwise outlive the system) -
+ * this is a *tighter* requirement than app_runner__register_loader()'s own
+ * (which copies), because the bulk path skips that copy for the RAM saving. */
+bruce_result_t app_runner__register_loaders_all(const bruce_loader_descriptor_t *loaders, size_t count) {
+    if (loaders == NULL && count > 0) return BRUCE_ERR_INVALID_ARGUMENT;
+    for (size_t i = 0; i < count; ++i) {
+        if (loaders[i].extension == NULL || loaders[i].extension[0] != '.' || loaders[i].extension[1] == '\0' ||
+            loaders[i].program == NULL || loaders[i].program[0] == '\0') {
+            return BRUCE_ERR_INVALID_ARGUMENT;
+        }
+        for (size_t j = 0; j < i; ++j) {
+            if (strcmp(loaders[j].extension, loaders[i].extension) == 0) return BRUCE_ERR_ALREADY_EXISTS;
+        }
+    }
+    s_builtin_loaders = loaders;
+    s_builtin_loader_count = count;
     return BRUCE_OK;
 }
 
@@ -212,11 +267,16 @@ static bool app_runner__path_has_extension(const char *path, const char *extensi
     return path_len > ext_len && strcasecmp(path + path_len - ext_len, extension) == 0;
 }
 
-static app_runner_loader_t *app_runner__find_loader_for_path(const char *path) {
-    for (int i = 0; i < s_loader_count; ++i) {
-        if (app_runner__path_has_extension(path, s_loaders[i].extension)) { return &s_loaders[i]; }
+/* Returns a {NULL, NULL} sentinel (never a real entry with a NULL program)
+ * when no loader matches - callers test .program == NULL for "not found",
+ * same as the pointer-return version this replaced. */
+static bruce_loader_descriptor_t app_runner__find_loader_for_path(const char *path) {
+    size_t total = app_runner__total_loader_count();
+    for (size_t i = 0; i < total; ++i) {
+        bruce_loader_descriptor_t loader = app_runner__loader_at(i);
+        if (app_runner__path_has_extension(path, loader.extension)) { return loader; }
     }
-    return NULL;
+    return (bruce_loader_descriptor_t){0};
 }
 
 int app_runner__run_path_with_environment(
@@ -234,9 +294,9 @@ int app_runner__run_path_with_environment(
         return BRUCE_ERR_INVALID_PATH;
     }
 
-    app_runner_loader_t *loader = app_runner__find_loader_for_path(normalized_path);
+    bruce_loader_descriptor_t loader = app_runner__find_loader_for_path(normalized_path);
     char configured_program[APP_RUNNER_LOADER_PROGRAM_MAX];
-    const char *program = loader != NULL ? loader->program : NULL;
+    const char *program = loader.program;
     if (app_runner__config_program_for_extension(
             normalized_path, configured_program, sizeof(configured_program)
         )) {
@@ -524,10 +584,11 @@ int app_runner__run_with_environment(
         /* 2. every registered loader, in registration order, matching
          * /bin/<app_name><extension>. */
         result = BRUCE_ERR_NOT_FOUND;
-        for (int i = 0; i < s_loader_count; ++i) {
-            app_runner_loader_t *loader = &s_loaders[i];
+        size_t total_loaders = app_runner__total_loader_count();
+        for (size_t i = 0; i < total_loaders; ++i) {
+            bruce_loader_descriptor_t loader = app_runner__loader_at(i);
             char path[APP_RUNNER_PATH_MAX];
-            int written = snprintf(path, sizeof(path), "/bin/%s%s", app_name, loader->extension);
+            int written = snprintf(path, sizeof(path), "/bin/%s%s", app_name, loader.extension);
             if (written < 0 || (size_t)written >= sizeof(path)) { continue; }
             if (storage__exists_internal(path)) {
                 char loader_arg[APP_RUNNER_PATH_MAX + 1 + 256];
@@ -543,7 +604,7 @@ int app_runner__run_with_environment(
                     result = BRUCE_ERR_INVALID_ARGUMENT;
                 } else {
                     result = app_runner__run_with_environment(
-                        loader->program, loader_arg, mode, environment, environment_count
+                        loader.program, loader_arg, mode, environment, environment_count
                     );
                 }
                 break;

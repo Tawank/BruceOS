@@ -198,17 +198,27 @@ void app_runner__register_defaults(void) {
         ESP_LOGE("boot", "app_runner__register_all() failed: %d (duplicate or malformed entry?)", (int)registered);
     }
 
-    app_runner__register_loader(".elf", "elf");
-    app_runner__register_loader(".wasm", "wasm");
-    app_runner__register_loader(".js", "js");
-    app_runner__register_loader(".sh", "shell");
-    app_runner__register_loader(".jpg", "image");
-    app_runner__register_loader(".jpeg", "image");
-    app_runner__register_loader(".png", "image");
-    app_runner__register_loader(".gif", "image");
-    app_runner__register_loader(".txt", "text");
-    app_runner__register_loader(".json", "text");
-    app_runner__register_loader(".conf", "text");
+    static const bruce_loader_descriptor_t default_loaders[] = {
+        {".elf", "elf"},
+        {".wasm", "wasm"},
+        {".js", "js"},
+        {".sh", "shell"},
+        {".jpg", "image"},
+        {".jpeg", "image"},
+        {".png", "image"},
+        {".gif", "image"},
+        {".txt", "text"},
+        {".json", "text"},
+        {".conf", "text"},
+    };
+    bruce_result_t loaders_registered =
+        app_runner__register_loaders_all(default_loaders, sizeof(default_loaders) / sizeof(default_loaders[0]));
+    if (loaders_registered != BRUCE_OK) {
+        ESP_LOGE(
+            "boot", "app_runner__register_loaders_all() failed: %d (duplicate or malformed entry?)",
+            (int)loaders_registered
+        );
+    }
 
     elf_loader__init();
 }
