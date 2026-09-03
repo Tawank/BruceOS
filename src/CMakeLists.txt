@@ -195,7 +195,7 @@ idf_component_register(SRCS
                      "modules/system_menu/system_menu_app.c"
                      ${BRUCE_SELFTEST_SOURCES}
                     "modules/ssh/ssh_app.c"
-                     "modules/tcp/tcp_app.c"
+                     "modules/nc/nc_app.c"
                      "modules/text/text_app.c"
                      "modules/utils/launcher/launcher_app.c"
                      "modules/utils/man/man_app.c"
@@ -580,10 +580,10 @@ target_include_directories(bruce_sdk_builtin_notification_service_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/notification_service")
 
-add_library(bruce_sdk_builtin_tcp_check OBJECT "modules/tcp/tcp_app.c")
-target_include_directories(bruce_sdk_builtin_tcp_check PRIVATE
+add_library(bruce_sdk_builtin_nc_check OBJECT "modules/nc/nc_app.c")
+target_include_directories(bruce_sdk_builtin_nc_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
-                           "${CMAKE_CURRENT_LIST_DIR}/modules/tcp")
+                           "${CMAKE_CURRENT_LIST_DIR}/modules/nc")
 
 add_library(bruce_sdk_builtin_ssh_check OBJECT "modules/ssh/ssh_app.c")
 target_include_directories(bruce_sdk_builtin_ssh_check PRIVATE
@@ -664,7 +664,7 @@ set(BRUCE_ARGS_SDK_CHECK_TARGETS
     bruce_sdk_builtin_utils_terminal_check
     bruce_sdk_builtin_shell_check
     bruce_sdk_builtin_notification_check
-    bruce_sdk_builtin_tcp_check
+    bruce_sdk_builtin_nc_check
     bruce_sdk_builtin_ssh_check
     bruce_sdk_builtin_system_menu_check
     bruce_sdk_builtin_elf_loader_check

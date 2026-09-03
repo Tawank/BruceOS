@@ -65,6 +65,11 @@ static void tcp__cleanup(void *context) {
 }
 
 static bruce_result_t tcp__adopt(int fd, bruce_tcp_id_t *out_socket) {
+    /* Disable Nagle's algorithm: an interactive relay sends many single-byte
+     * keystrokes, and Nagle + delayed-ACK can otherwise hold them until more
+     * data accumulates or the socket closes. */
+    int nodelay = 1;
+    (void)setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
     tcp__lock();
     int index = -1;
     for (int i = 0; i < TCP__MAX_SOCKETS; ++i) {

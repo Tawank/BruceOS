@@ -41,7 +41,7 @@
 #include "modules/shell/shell_app.h"
 #include "modules/ssh/ssh_app.h"
 #include "modules/system_menu/system_menu_app.h"
-#include "modules/tcp/tcp_app.h"
+#include "modules/nc/nc_app.h"
 #include "modules/text/text_app.h"
 #include "modules/utils/launcher/launcher_app.h"
 #include "modules/utils/man/man_app.h"
@@ -153,7 +153,7 @@ void app_runner__register_defaults(void) {
     app_runner__register("curl", "Transfer data from URLs", "Network", bnu_curl_app_main, HTTP_STACK_BYTES);
     app_runner__register("ssh", "Connect to an SSH server", "Network", ssh_app_main, SSH_STACK_BYTES);
     app_runner__register("ssh-keygen", "Generate SSH keys", "Network", ssh_keygen_app_main, SSH_STACK_BYTES);
-    app_runner__register("tcp", "Connect to a TCP server", "Network", tcp_app_main, 0);
+    app_runner__register("nc", "Connect to or listen on a TCP socket", "Network", nc_app_main, 0);
     app_runner__register("webui", "Start the web interface", "Network", webui_app_main, 0);
     app_runner__register("wget", "Download files from URLs", "Network", bnu_wget_app_main, HTTP_STACK_BYTES);
     app_runner__register("wifi", "Manage Wi-Fi connections", "Network", wifi_app_main, WIFI_STACK_BYTES);

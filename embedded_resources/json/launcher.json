@@ -5,6 +5,7 @@
     "Scan": "wifi scan",
     "AP info": "terminal wifi ap info",
     "WebUI": "webui",
+    "TCP": "nc",
     "Wifi Atks": {
       "Target Atks": "wifiatks target",
       "Karma Attack": "wifiatks karma",

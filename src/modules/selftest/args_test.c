@@ -15,7 +15,7 @@
 #include "modules/loaders/image/image_loader_app.h"
 #include "modules/loaders/js/js_loader_app.h"
 #include "modules/nrf24/nrf24_app.h"
-#include "modules/tcp/tcp_app.h"
+#include "modules/nc/nc_app.h"
 #include "modules/utils/man/man_app.h"
 #include "modules/utils/notify/notify_app.h"
 #include "modules/utils/process/process_app.h"
@@ -98,7 +98,7 @@ static bool selftest__args_module_help(void) {
         notify_app_main,
         man_app_main,
         process_app_main,
-        tcp_app_main,
+        nc_app_main,
         terminal_app_main,
         webui_app_main,
         wifi_app_main,
