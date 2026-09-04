@@ -41,6 +41,8 @@ bool sftp_app__host_pattern_matches(const char *pattern, const char *host);
 bool sftp_app__host_list_matches(char *patterns, const char *host);
 bool sftp_app__is_literal_host_token(const char *token);
 char *sftp_app__trim(char *text);
+bool sftp_app__split_directive(char *line, char **out_value);
+bool sftp_app__resolve_identity_path(const char *identity, const char **out_path);
 void sftp_app__copy_config_value(char *out, size_t capacity, const char *value, bool *was_set);
 
 /* known_hosts TOFU wire format: "<host>|<port> <64 hex chars>\n". */

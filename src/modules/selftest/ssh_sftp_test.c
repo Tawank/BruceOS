@@ -227,3 +227,97 @@ bool selftest__run_sftp_known_hosts_format_case(void) {
     );
     return ok;
 }
+
+/* ------------------------------------------------------------------------ */
+/* selftest__run_sftp_split_directive_case                                  */
+/* ------------------------------------------------------------------------ */
+
+/* Regression coverage for a real bug: sftp_app__list_autodiscover() used to
+ * carry its own copy of this splitting logic and compared `line` against
+ * "Host" *before* null-terminating it at the split point, so it was really
+ * comparing the whole "Host dsa" line against "Host" -- never equal, so no
+ * configured host was ever discovered, only the "New connection..."
+ * placeholder. Both callers now share sftp_app__split_directive(); this
+ * pins down the exact contract that bug violated: `line` must already equal
+ * just the keyword by the time a directive comparison runs against it. */
+bool selftest__run_sftp_split_directive_case(void) {
+    char basic[] = "Host dsa";
+    char *value = NULL;
+    bool basic_ok =
+        sftp_app__split_directive(basic, &value) && strcmp(basic, "Host") == 0 && strcmp(value, "dsa") == 0;
+
+    /* "=" is an accepted separator too, with surrounding whitespace trimmed
+     * off the value on either side of it. */
+    char equals[] = "HostName = 1.2.3.4 ";
+    value = NULL;
+    bool equals_ok = sftp_app__split_directive(equals, &value) && strcmp(equals, "HostName") == 0 &&
+                      strcmp(value, "1.2.3.4") == 0;
+
+    /* A bare keyword with no value at all, or an empty line, is rejected --
+     * `line` is left untouched (not something a caller could mistake for a
+     * successfully split "no value" directive). */
+    char bare[] = "Host";
+    value = NULL;
+    bool bare_rejected = !sftp_app__split_directive(bare, &value) && strcmp(bare, "Host") == 0;
+    char blank[] = "";
+    value = NULL;
+    bool blank_rejected = !sftp_app__split_directive(blank, &value);
+
+    /* Multiple space-separated tokens in the value (e.g. several Host
+     * aliases on one line) all survive as one still-split value string --
+     * splitting the tokens apart is the caller's job, not this function's. */
+    char multi[] = "Host dsa vps-alt";
+    value = NULL;
+    bool multi_ok =
+        sftp_app__split_directive(multi, &value) && strcmp(multi, "Host") == 0 && strcmp(value, "dsa vps-alt") == 0;
+
+    bool ok = basic_ok && equals_ok && bare_rejected && blank_rejected && multi_ok;
+    printf(
+        "[selftest] sftp/split-directive: %s (basic=%d equals=%d bare_rejected=%d blank_rejected=%d multi=%d)\n",
+        ok ? "OK" : "FAIL", basic_ok, equals_ok, bare_rejected, blank_rejected, multi_ok
+    );
+    return ok;
+}
+
+/* ------------------------------------------------------------------------ */
+/* selftest__run_sftp_resolve_identity_path_case                            */
+/* ------------------------------------------------------------------------ */
+
+/* Regression coverage for a real bug: sftp_app__connect() used to pass an
+ * "/.ssh/config" IdentityFile value straight to storage__open() with no
+ * "~/" handling and no absolute-path check, unlike ssh_app.c's identical
+ * config lookup -- so a value like "~/.ssh/id_rsa" that `ssh <alias>`
+ * resolved and connected with just fine made `sftp <alias>`'s "device has no
+ * home directory" storage layer fail with a bare BRUCE_ERR_INVALID_PATH,
+ * surfaced as an unhelpful "authentication failed (-12)". */
+bool selftest__run_sftp_resolve_identity_path_case(void) {
+    const char *path = NULL;
+
+    /* A leading "~/" is stripped down to just "/" (there's no home
+     * directory here, so "~" always resolves to the storage root). */
+    bool tilde_ok =
+        sftp_app__resolve_identity_path("~/.ssh/id_rsa", &path) && strcmp(path, "/.ssh/id_rsa") == 0;
+
+    /* Already-absolute paths (the common case: no IdentityFile at all, so
+     * this is one of the built-in default identity paths) pass through
+     * untouched. */
+    path = NULL;
+    bool absolute_ok =
+        sftp_app__resolve_identity_path("/.ssh/id_ecdsa", &path) && strcmp(path, "/.ssh/id_ecdsa") == 0;
+
+    /* Anything else non-absolute -- a bare relative path, or "~user/..."
+     * (a different user's home directory, meaningless here) -- is rejected
+     * outright rather than handed to storage__open() to fail on later. */
+    path = NULL;
+    bool relative_rejected = !sftp_app__resolve_identity_path("id_rsa", &path) && path == NULL;
+    path = NULL;
+    bool other_user_rejected = !sftp_app__resolve_identity_path("~otheruser/.ssh/id_rsa", &path) && path == NULL;
+
+    bool ok = tilde_ok && absolute_ok && relative_rejected && other_user_rejected;
+    printf(
+        "[selftest] sftp/resolve-identity-path: %s (tilde=%d absolute=%d relative_rejected=%d "
+        "other_user_rejected=%d)\n",
+        ok ? "OK" : "FAIL", tilde_ok, absolute_ok, relative_rejected, other_user_rejected
+    );
+    return ok;
+}

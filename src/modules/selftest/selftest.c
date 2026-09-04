@@ -223,6 +223,8 @@ int selftest_app_main(int argc, char **argv) {
     RUN_SELFTEST(selftest__run_sftp_config_value_case);
     RUN_SELFTEST(selftest__run_sftp_port_case);
     RUN_SELFTEST(selftest__run_sftp_known_hosts_format_case);
+    RUN_SELFTEST(selftest__run_sftp_split_directive_case);
+    RUN_SELFTEST(selftest__run_sftp_resolve_identity_path_case);
     RUN_SELFTEST(selftest__run_filemanager_network_provider_parse_case);
     RUN_SELFTEST(selftest__run_filemanager_network_sanitize_name_case);
     RUN_SELFTEST(selftest__run_filemanager_network_split_entry_name_case);

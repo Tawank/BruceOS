@@ -8,10 +8,13 @@
 #include <string.h>
 #include <strings.h>
 
+#include "core_sdk/config.h"
 #include "core_sdk/dialog.h"
+#include "core_sdk/display.h"
+#include "core_sdk/input.h"
 #include "core_sdk/memory.h"
+#include "core_sdk/notification.h"
 #include "core_sdk/result.h"
-#include "core_sdk/runtime.h"
 #include "core_sdk/ssh.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
@@ -139,6 +142,46 @@ char *sftp_app__trim(char *text) {
     return text;
 }
 
+/* Splits one already-trimmed "/.ssh/config" line into its directive keyword
+ * (left in place at `line`, now null-terminated there) and value (trimmed,
+ * written to `*out_value`); "=" is accepted as a separator too, same as real
+ * ssh_config ("HostName=1.2.3.4"). Returns false, leaving `line` untouched,
+ * for a line with no value at all -- blank, or just a bare keyword -- so a
+ * directive comparison like strcasecmp(line, "Host") is only ever reached
+ * once `line` has actually been cut down to the keyword alone. Comparing
+ * beforehand -- as sftp_app__list_autodiscover() below used to, its own
+ * separate copy of this splitting logic -- compares the *whole* untouched
+ * line ("Host dsa") against "Host" and can never match; sftp_app__load_config()
+ * had this right, so both now share the one implementation instead of a
+ * second hand-rolled copy that could (and did) drift out of sync with it. */
+bool sftp_app__split_directive(char *line, char **out_value) {
+    char *value = line;
+    while (*value != '\0' && !isspace((unsigned char)*value) && *value != '=') ++value;
+    if (*value == '\0') return false;
+    *value++ = '\0';
+    while (isspace((unsigned char)*value) || *value == '=') ++value;
+    *out_value = sftp_app__trim(value);
+    return true;
+}
+
+/* Strips a leading "~/" from an ssh_config-style identity file path (there's
+ * no home directory here, so "~" always resolves to "/", same as ssh_app.c's
+ * equivalent) and confirms what's left is absolute. Returns false, *out_path
+ * untouched, for anything else: storage paths must start with "/" (see
+ * storage__is_valid_public_path() in core/storage/storage.c), so a relative
+ * IdentityFile value -- most commonly written "~/.ssh/id_xxx" -- can never
+ * be opened, and should fail with a clear message here rather than
+ * storage__open()'s raw BRUCE_ERR_INVALID_PATH several calls later, which
+ * used to surface as nothing more helpful than "authentication failed
+ * (-12)" for a config value `ssh <alias>` resolved and connected with just
+ * fine. */
+bool sftp_app__resolve_identity_path(const char *identity, const char **out_path) {
+    if (strncmp(identity, "~/", 2) == 0) ++identity;
+    if (identity[0] != '/') return false;
+    *out_path = identity;
+    return true;
+}
+
 void sftp_app__copy_config_value(char *out, size_t capacity, const char *value, bool *was_set) {
     if (*was_set) return;
     int length = snprintf(out, capacity, "%s", value);
@@ -238,12 +281,8 @@ static bruce_result_t sftp_app__load_config(const char *alias, sftp_app__config_
         if (comment != NULL) *comment = '\0';
         line = sftp_app__trim(line);
         if (*line == '\0') continue;
-        char *value = line;
-        while (*value != '\0' && !isspace((unsigned char)*value) && *value != '=') ++value;
-        if (*value == '\0') continue;
-        *value++ = '\0';
-        while (isspace((unsigned char)*value) || *value == '=') ++value;
-        value = sftp_app__trim(value);
+        char *value = NULL;
+        if (!sftp_app__split_directive(line, &value)) continue;
         if (strcasecmp(line, "Host") == 0) {
             active = sftp_app__host_list_matches(value, alias);
             continue;
@@ -509,11 +548,8 @@ static void sftp_app__list_autodiscover(void) {
         char *comment = strchr(line, '#');
         if (comment != NULL) *comment = '\0';
         line = sftp_app__trim(line);
-        char *value = line;
-        while (*value != '\0' && !isspace((unsigned char)*value)) ++value;
-        if (*value == '\0' || strcasecmp(line, "Host") != 0) continue;
-        *value++ = '\0';
-        value = sftp_app__trim(value);
+        char *value = NULL;
+        if (!sftp_app__split_directive(line, &value) || strcasecmp(line, "Host") != 0) continue;
         char *token_save = NULL;
         for (char *token = strtok_r(value, " \t", &token_save); token != NULL;
              token = strtok_r(NULL, " \t", &token_save)) {
@@ -535,8 +571,16 @@ static bruce_result_t sftp_app__connect(
         return BRUCE_ERR_INVALID_STATE;
     }
     stdio__printf("Connecting to %s:%u...\n", host, (unsigned int)port);
+    char connecting_message[SFTP_APP_HOST_MAX + 16];
+    snprintf(connecting_message, sizeof(connecting_message), "Connecting to %s...", host);
+    (void)notification__push(connecting_message, 13000);
     bruce_ssh_id_t session = BRUCE_SSH_ID_INVALID;
     bruce_result_t result = ssh__connect(host, port, 10000, &session);
+    /* Dismissed the moment ssh__connect() itself resolves, not left to ride
+     * out its full duration -- host-key verification and authentication
+     * both draw their own prompts right after, and this banner has no
+     * business still floating over those. */
+    (void)notification__dismiss();
     if (result != BRUCE_OK) {
         stdio__printf("SFTP client: connection failed (%d)\n", result);
         return result;
@@ -550,9 +594,15 @@ static bruce_result_t sftp_app__connect(
     }
 
     if (identity != NULL && identity[0] != '\0') {
+        const char *identity_path = NULL;
+        if (!sftp_app__resolve_identity_path(identity, &identity_path)) {
+            stdio__printf("SFTP client: identity file path '%s' must be absolute (start with '/')\n", identity);
+            (void)ssh__close(session);
+            return BRUCE_ERR_INVALID_PATH;
+        }
         char private_key[BRUCE_SSH_PRIVATE_KEY_MAX_SIZE + 1u];
         size_t private_key_size = 0;
-        result = sftp_app__read_private_key(identity, private_key, sizeof(private_key), &private_key_size);
+        result = sftp_app__read_private_key(identity_path, private_key, sizeof(private_key), &private_key_size);
         if (result == BRUCE_OK)
             result = ssh__sftp_authenticate_key(session, username, private_key, private_key_size, 10000);
         memset(private_key, 0, sizeof(private_key));
@@ -718,19 +768,81 @@ static bruce_result_t sftp_app__view(bruce_ssh_id_t session, const char *remote_
     result = dialog__create_text_viewer(name, text, &viewer);
     memory__free(text);
     if (result != BRUCE_OK) return result;
-    bruce_dialog_choice_t dismiss[] = {
-        {.label = "Back", .value = "back"}
-    };
-    size_t selected = 0;
-    (void)dialog__choice(NULL, NULL, dismiss, 1, &selected);
+
+    /* Same scroll/resize/close loop as filemanager_app.c's filemanager__view_file()
+     * and archive_app.c's archive_app__run_viewer() tails: a dialog__choice()
+     * dismiss prompt draws its own full-bleed listing right over the text
+     * that's the entire point of "View", covering all but its edges, so this
+     * waits on raw input instead. sftp_app__browse()'s loop uses plain
+     * dialog__choice() (no backgrounding/handoff support in this app), so
+     * unlike those two this just breaks on BRUCE_ERR_NOT_FOREGROUND rather
+     * than trying to resume. */
+    (void)input__flush();
+    int text_size = 1;
+    for (;;) {
+        bruce_input_event_t event;
+        result = input__read(&event, 100);
+        if (result == BRUCE_ERR_NOT_FOREGROUND) break;
+        if (result != BRUCE_OK || event.action != BRUCE_INPUT_PRESS) continue;
+
+        if (event.type == BRUCE_INPUT_KEY && event.code == '-' && text_size > 1) {
+            (void)dialog__viewer_set_text_size(viewer, --text_size);
+        } else if (event.type == BRUCE_INPUT_KEY && event.code == '=' && text_size < 8) {
+            (void)dialog__viewer_set_text_size(viewer, ++text_size);
+        } else if (event.code == BRUCE_INPUT_CODE_UP || event.code == BRUCE_INPUT_CODE_PREV) {
+            (void)dialog__viewer_scroll(viewer, -1);
+        } else if (event.code == BRUCE_INPUT_CODE_DOWN || event.code == BRUCE_INPUT_CODE_NEXT) {
+            (void)dialog__viewer_scroll(viewer, 1);
+        } else if (event.code == BRUCE_INPUT_CODE_LEFT) {
+            (void)dialog__viewer_scroll(viewer, -5);
+        } else if (event.code == BRUCE_INPUT_CODE_RIGHT) {
+            (void)dialog__viewer_scroll(viewer, 5);
+        } else if (event.code == BRUCE_INPUT_CODE_BACK || event.code == BRUCE_INPUT_CODE_SELECT) {
+            break;
+        }
+    }
     return dialog__viewer_close(viewer);
+}
+
+/* render_callback for the browsing loop's dialog__choice_ex() below: draws
+ * `context` (the host string sftp_app__browse() was given, see its own doc
+ * comment for which one that is) right-aligned into the bottom bar
+ * dialog__gui_choice() already fills sec-colored for a full-bleed listing --
+ * the same spot/size dialog__pick_file_draw_footer_usage() (core/dialog/dialog.c)
+ * draws a plain filesystem browse's free/used figure into, and
+ * archive_app__draw_footer_usage() (modules/archive/archive_app.c) draws its
+ * own uncompressed/on-disk totals into. There's no equivalent free/used
+ * figure to show here without an extra round-trip the remote server may not
+ * even support (SFTP has no standard "statvfs" request), so this shows the
+ * one thing already in hand for free: which host this session is on. */
+static void sftp_app__draw_footer_host(void *context) {
+    const char *text = context;
+    if (text == NULL || text[0] == '\0') return;
+    int16_t char_w = 0, char_h = 0;
+    if (display__get_font_metrics(&char_w, &char_h) != BRUCE_OK || char_h <= 0) char_h = 10;
+    (void)char_w;
+    int footer_h = char_h + 4;
+    (void)display__set_text_color(config__get_color_text());
+    (void)display__set_text_size(1);
+    (void)display__set_text_bg_color(config__get_color_secondary());
+    (void)display__draw_right_string(text, display__width() - 2, display__height() - footer_h + 2);
 }
 
 /* Interactive directory browser: lists the current remote directory, lets
  * the user descend into subdirectories or go back up, and offers
  * View/Download on a chosen file. Starts at "." (the login/home directory)
- * and never goes above it -- a v1 scope limitation, not a protocol one. */
-static void sftp_app__browse(bruce_ssh_id_t session) {
+ * and never goes above it -- a v1 scope limitation, not a protocol one.
+ *
+ * `display_host` is shown in the bottom bar (see sftp_app__draw_footer_host()
+ * above) -- deliberately whatever the user actually connected *with* rather
+ * than whatever it resolved to: sftp_app__open_location() passes the alias
+ * text straight out of the "/Network" location file (e.g. "dsa"), even
+ * though the real TCP connection went to that alias's "/.ssh/config"
+ * HostName, which might be a bare IP; sftp_app__new_connection() passes
+ * whatever the user actually typed into the "Host" prompt, IP or name alike.
+ * Either way, this only ever shows an IP if that's genuinely what the user
+ * logged in with. */
+static void sftp_app__browse(bruce_ssh_id_t session, const char *display_host) {
     char remote_dir[SFTP_APP_REMOTE_PATH_MAX] = ".";
     bruce_ssh_sftp_entry_t *entries = memory__malloc(SFTP_APP_ENTRY_MAX * sizeof(bruce_ssh_sftp_entry_t));
     if (entries == NULL) {
@@ -739,9 +851,19 @@ static void sftp_app__browse(bruce_ssh_id_t session) {
     }
 
     for (;;) {
+        /* ssh__sftp_list() below is one blocking round trip (up to 15s) with
+         * no natural pause point to update a status from, same as
+         * sftp_app__connect()'s ssh__connect() -- without this the previous
+         * directory's listing just sits on screen, frozen, for however long
+         * this one takes, which reads as "navigation is slow"/hung rather
+         * than "loading". */
+        char loading_message[SFTP_APP_REMOTE_PATH_MAX + 16];
+        snprintf(loading_message, sizeof(loading_message), "Loading %s...", remote_dir);
+        (void)notification__push(loading_message, 15000);
         size_t count = 0;
         bruce_result_t result =
             ssh__sftp_list(session, remote_dir, entries, SFTP_APP_ENTRY_MAX, &count, 15000);
+        (void)notification__dismiss();
         if (result != BRUCE_OK) {
             stdio__printf("SFTP: could not list '%s' (%d)\n", remote_dir, result);
             dialog__message(BRUCE_DIALOG_ERROR, "SFTP", "Could not list that directory.");
@@ -774,8 +896,15 @@ static void sftp_app__browse(bruce_ssh_id_t session) {
         }
         choices[index++] = (bruce_dialog_choice_t){.label = "Disconnect", .icon_name = "close"};
 
+        char bar_title[SFTP_APP_REMOTE_PATH_MAX + 8];
+        snprintf(bar_title, sizeof(bar_title), "SFTP - %s", remote_dir);
+
+        bruce_dialog_render_params_t render_params = dialog__default_render_params(2);
+        render_params.render_callback = sftp_app__draw_footer_host;
+        render_params.render_callback_context = (void *)display_host;
+
         size_t selected = 0;
-        result = dialog__choice(remote_dir, NULL, choices, choice_count, &selected);
+        result = dialog__choice_ex(bar_title, NULL, choices, choice_count, &selected, &render_params);
         memory__free(choices);
         if (right_text != NULL) memory__free(right_text);
         if (result != BRUCE_OK) break; /* Cancelled/Back also disconnects. */
@@ -848,7 +977,7 @@ static void sftp_app__new_connection(void) {
 
     bruce_ssh_id_t session = BRUCE_SSH_ID_INVALID;
     if (sftp_app__connect(host, port, username, identity, &session) != BRUCE_OK) return;
-    sftp_app__browse(session);
+    sftp_app__browse(session, host);
     (void)ssh__close(session);
 }
 
@@ -896,7 +1025,7 @@ static bruce_result_t sftp_app__open_location(const char *path) {
     bruce_ssh_id_t session = BRUCE_SSH_ID_INVALID;
     bruce_result_t result = sftp_app__connect(host, port, username, identity, &session);
     if (result != BRUCE_OK) return result;
-    sftp_app__browse(session);
+    sftp_app__browse(session, trimmed);
     (void)ssh__close(session);
     return BRUCE_OK;
 }
