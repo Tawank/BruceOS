@@ -580,11 +580,8 @@ static bruce_result_t ssh_app__client(
         stdio__printf("SSH client: Wi-Fi is not connected\n");
         return BRUCE_ERR_INVALID_STATE;
     }
-    stdio__printf("Connecting to %s:%u...\n", host, (unsigned int)port);
-    ssh_app__log_heap_state("before ssh__connect");
     bruce_ssh_id_t session = BRUCE_SSH_ID_INVALID;
     bruce_result_t result = ssh__connect(host, port, 10000, &session);
-    ssh_app__log_heap_state("after ssh__connect");
     if (result != BRUCE_OK) {
         stdio__printf("SSH client: connection failed (%d)\n", result);
         return result;

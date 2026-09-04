@@ -894,7 +894,7 @@ static void sftp_app__browse(bruce_ssh_id_t session, const char *display_host) {
          * this one takes, which reads as "navigation is slow"/hung rather
          * than "loading". */
         char loading_message[SFTP_APP_REMOTE_PATH_MAX + 16];
-        snprintf(loading_message, sizeof(loading_message), "Loading %s...", remote_dir);
+        snprintf(loading_message, sizeof(loading_message), "Loading %s", remote_dir);
         (void)notification__push(loading_message, 15000);
         size_t count = 0;
         bruce_result_t result =
