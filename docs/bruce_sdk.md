@@ -696,6 +696,58 @@ BRUCE_ERR_RESOURCE_LIMIT if the registry is full.
 
 ---
 
+## bruce_app_descriptor_t()
+
+```c
+typedef struct {
+    const char *name;
+    const char *description;
+    const char *category;
+    bruce_app_entry_t entry;
+    uint32_t stack_bytes;
+} bruce_app_descriptor_t;
+```
+
+One entry of an app_runner__register_all() table.
+
+Field-for-field the same as app_runner__register()'s arguments; see its
+doc comment for what each one means and how long it must stay valid.
+
+
+---
+
+## app_runner__register_all()
+
+```c
+bruce_result_t app_runner__register_all(const bruce_app_descriptor_t *apps, size_t count);
+```
+
+Registers a whole table of built-in commands in one call.
+
+Equivalent to calling app_runner__register() once per entry, in order,
+except that `apps` is referenced in place rather than copied - it must be
+`static const` (or otherwise outlive the system), exactly like the
+arguments to app_runner__register() already must. Every entry is
+validated up front, so a malformed or duplicate entry is rejected before
+any of the table is installed, and this returns whichever
+app_runner__register() error that entry would have returned.
+
+            lifetime of the system.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `apps` | `const bruce_app_descriptor_t *` | Table of command descriptors; must remain valid for the |
+| `count` | `size_t` | Number of entries in `apps`. |
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
 ## app_runner__command_count()
 
 ```c
@@ -5841,6 +5893,31 @@ typedef void (*bruce_dialog_render_callback_t)(void *context);
 
 ---
 
+## bruce_dialog_poll_callback_t()
+
+```c
+typedef bruce_result_t (*bruce_dialog_poll_callback_t)(void *context, bool *out_complete);
+```
+
+Performs one short, non-blocking unit of work for dialog__choice_poll().
+
+Set @p out_complete to true when the operation has finished. Returning an
+error closes the dialog and returns that error to the caller.
+
+
+---
+
+## bruce_dialog_cleanup_callback_t()
+
+```c
+typedef void (*bruce_dialog_cleanup_callback_t)(void *context);
+```
+
+Releases work started for dialog__choice_poll().
+
+
+---
+
 ## bruce_dialog_render_params_t()
 
 ```c
@@ -5963,6 +6040,84 @@ Shows a choice-list dialog and waits for a selection.
 | `choices` | `const bruce_dialog_choice_t *` | Choices to list. |
 | `choice_count` | `size_t` | Number of entries in choices. |
 | `out_selected` | `size_t *` | Receives the index of the selected choice. |
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
+## dialog__choice_poll()
+
+```c
+bruce_result_t dialog__choice_poll(
+    const char *title, const char *message, const bruce_dialog_choice_t *choices, size_t choice_count,
+    uint32_t poll_interval_ms, bruce_dialog_poll_callback_t poll_callback, void *poll_context,
+    bruce_dialog_cleanup_callback_t cleanup_callback, size_t *out_selected, bool *out_poll_complete
+);
+```
+
+Shows a GUI choice dialog while periodically polling caller-owned work.
+
+The poll callback runs immediately and then no more often than
+@p poll_interval_ms. It must not block. When it sets @p out_complete true,
+this function returns BRUCE_OK with @p out_poll_complete set true. A user
+choice also returns BRUCE_OK, with @p out_poll_complete set false and
+@p out_selected set to that choice. Back returns BRUCE_ERR_CANCELLED.
+
+This is GUI-only, except that the dialog test choice provider may supply a
+choice. The cleanup callback, when present, runs exactly once after every
+return path following argument validation.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `title` | `const char *` |  |
+| `message` | `const char *` |  |
+| `choices` | `const bruce_dialog_choice_t *` |  |
+| `choice_count` | `size_t` |  |
+| `poll_interval_ms` | `uint32_t` |  |
+| `poll_callback` | `bruce_dialog_poll_callback_t` |  |
+| `poll_context` | `void *` |  |
+| `cleanup_callback` | `bruce_dialog_cleanup_callback_t` |  |
+| `out_selected` | `size_t *` |  |
+| `out_poll_complete` | `bool *` |  |
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
+## dialog__choice_poll_launcher()
+
+```c
+bruce_result_t dialog__choice_poll_launcher(
+    const char *title, const char *message, const bruce_dialog_choice_t *choices, size_t choice_count,
+    uint32_t poll_interval_ms, bruce_dialog_poll_callback_t poll_callback, void *poll_context,
+    bruce_dialog_cleanup_callback_t cleanup_callback, size_t *out_selected, bool *out_poll_complete
+);
+```
+
+Like dialog__choice_poll(), styled for use from the launcher.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `title` | `const char *` |  |
+| `message` | `const char *` |  |
+| `choices` | `const bruce_dialog_choice_t *` |  |
+| `choice_count` | `size_t` |  |
+| `poll_interval_ms` | `uint32_t` |  |
+| `poll_callback` | `bruce_dialog_poll_callback_t` |  |
+| `poll_context` | `void *` |  |
+| `cleanup_callback` | `bruce_dialog_cleanup_callback_t` |  |
+| `out_selected` | `size_t *` |  |
+| `out_poll_complete` | `bool *` |  |
 
 ### Returns
 
@@ -8417,6 +8572,7 @@ Registers `program` to handle files ending in `extension`.
 (which must start with '.', e.g. ".elf"). `program` is resolved through
 the normal AppRunner command registry and receives the matched path as
 its first argument. Registration order determines named resolution.
+`extension` and `program` are copied; they need not outlive this call.
 
 ### Parameters
 
@@ -8424,6 +8580,53 @@ its first argument. Registration order determines named resolution.
 | --- | --- | --- |
 | `extension` | `const char *` | File extension to register for, including the leading '.'. |
 | `program` | `const char *` | Name of the registered AppRunner command that handles it. |
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
+## bruce_loader_descriptor_t()
+
+```c
+typedef struct {
+    const char *extension;
+    const char *program;
+} bruce_loader_descriptor_t;
+```
+
+One entry of an app_runner__register_loaders_all() table.
+
+Field-for-field the same as app_runner__register_loader()'s arguments.
+
+
+---
+
+## app_runner__register_loaders_all()
+
+```c
+bruce_result_t app_runner__register_loaders_all(const bruce_loader_descriptor_t *loaders, size_t count);
+```
+
+Registers a whole table of extension loaders in one call.
+
+Equivalent to calling app_runner__register_loader() once per entry, in
+order, except that -- unlike app_runner__register_loader(), which copies
+its arguments -- `loaders` is referenced in place: it must be
+`static const` (or otherwise outlive the system). Every entry is
+validated up front, so a malformed or duplicate entry is rejected before
+any of the table is installed.
+
+               lifetime of the system.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `loaders` | `const bruce_loader_descriptor_t *` | Table of loader descriptors; must remain valid for the |
+| `count` | `size_t` | Number of entries in `loaders`. |
 
 ### Returns
 
