@@ -1,0 +1,7 @@
+[
+  {
+    "name": "sftp",
+    "program": "sftp",
+    "discovery": "sftp list --autodiscover"
+  }
+]

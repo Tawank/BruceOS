@@ -151,6 +151,9 @@ idf_component_register(SRCS
                     "modules/config/config_app.c"
                     "modules/device_bus/device_bus_app.c"
                      "modules/filemanager/filemanager_app.c"
+                     "modules/filemanager/filemanager_actions.c"
+                     "modules/filemanager/filemanager_clipboard.c"
+                     "modules/filemanager/filemanager_network.c"
                      "modules/browser/browser_app.c"
                      "modules/browser/browser_debug.c"
                      "modules/browser/browser_document.c"
@@ -496,10 +499,20 @@ target_include_directories(bruce_sdk_builtin_bparted_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/bparted")
 
-add_library(bruce_sdk_builtin_filemanager_check OBJECT "modules/filemanager/filemanager_app.c")
+add_library(bruce_sdk_builtin_filemanager_check OBJECT
+            "modules/filemanager/filemanager_app.c"
+            "modules/filemanager/filemanager_actions.c"
+            "modules/filemanager/filemanager_clipboard.c"
+            "modules/filemanager/filemanager_network.c")
+add_dependencies(bruce_sdk_builtin_filemanager_check bruce_embedded_resources)
 target_include_directories(bruce_sdk_builtin_filemanager_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
-                           "${CMAKE_CURRENT_LIST_DIR}/modules/filemanager")
+                           "${CMAKE_CURRENT_LIST_DIR}/modules/filemanager"
+                           "${CMAKE_CURRENT_LIST_DIR}/../managed_components/espressif__cjson/cJSON")
+# filemanager_network.c legitimately uses the third-party espressif/cjson
+# component API (same as the launcher/system_menu checks above); the
+# core_sdk-only check is about rejecting Core-private headers, not component
+# dependencies.
 
 add_library(bruce_sdk_builtin_browser_check OBJECT
             "modules/browser/browser_app.c"
