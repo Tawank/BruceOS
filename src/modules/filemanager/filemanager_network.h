@@ -20,9 +20,11 @@ void filemanager_network__refresh(void);
 
 /* Resolves the app that should open the "/Network" entry at `path`: true
  * (with `program` filled in) only when `path` is a direct child of
- * FILEMANAGER_NETWORK_DIR named "<provider name> <label>" for a provider
+ * FILEMANAGER_NETWORK_DIR named "<label>.<provider name>" for a provider
  * still listed in "/config/filemanager.conf". False otherwise (including a
- * stray file dropped into "/Network" by hand, or a provider since removed
- * from the config) -- the caller falls back to its ordinary
- * extension-based Open in that case. */
+ * provider since removed from the config) -- the caller falls back to its
+ * ordinary extension-based Open in that case, which for a provider that
+ * also has a "/config/extensions.conf" entry (e.g. ".sftp") reaches the
+ * same program anyway; this is really only load-bearing for a provider
+ * that doesn't. */
 bool filemanager_network__resolve_program(const char *path, char *program, size_t program_size);

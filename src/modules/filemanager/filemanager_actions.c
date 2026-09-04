@@ -51,12 +51,13 @@ bruce_result_t filemanager__new_entry(const char *directory, bool folder) {
 }
 
 bruce_result_t filemanager__open_default(const char *path, bool gui) {
-    /* A "/Network"-discovered location (see filemanager_network.h) isn't
-     * dispatched by extension at all -- its provider comes straight out of
-     * "/config/filemanager.conf", the same lookup that produced the entry in
-     * the first place. Checked before filetype__identify() below since a
-     * bare "<provider name> <label>" file name has no extension for that to
-     * key off anyway. */
+    /* A "/Network"-discovered location (see filemanager_network.h) is named
+     * "<label>.<provider name>" -- a real extension, but resolved here
+     * straight from "/config/filemanager.conf" (the same lookup that
+     * produced the entry in the first place) rather than through
+     * filetype__identify() below, so a provider still works with no
+     * matching "/config/extensions.conf" entry -- one just buys it a proper
+     * icon in the listing (see filemanager_network.c's top comment). */
     char provider_program[FILEMANAGER_NETWORK_PROVIDER_NAME_MAX];
     if (filemanager_network__resolve_program(path, provider_program, sizeof(provider_program))) {
         return filemanager__run_named_app(provider_program, path, gui, false);

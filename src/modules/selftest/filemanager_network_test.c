@@ -45,10 +45,11 @@ bool selftest__run_filemanager_network_provider_parse_case(void) {
     bool wrapped_ok = filemanager_network__parse_providers_json(wrapped, wrapped_providers, 4, &wrapped_count) &&
                        wrapped_count == 1 && strcmp(wrapped_providers[0].name, "ftp") == 0;
 
-    /* An entry missing "name"/"program", or whose "name" has a space in it
-     * (it wouldn't survive filemanager_network__split_entry_name() later),
-     * is skipped rather than aborting the whole parse. */
+    /* An entry missing "name"/"program", or whose "name" has a space or a
+     * '.' in it (it wouldn't survive filemanager_network__split_entry_name()
+     * later), is skipped rather than aborting the whole parse. */
     const char *partial = "[{\"program\": \"noname\"}, {\"name\": \"has space\", \"program\": \"x\"}, "
+                           "{\"name\": \"has.dot\", \"program\": \"y\"}, "
                            "{\"name\": \"ok\", \"program\": \"ok\"}]";
     filemanager_network__provider_t partial_providers[4];
     size_t partial_count = 0;
@@ -123,27 +124,32 @@ bool selftest__run_filemanager_network_sanitize_name_case(void) {
 bool selftest__run_filemanager_network_split_entry_name_case(void) {
     char name[32];
 
-    /* Only the *first* space is the boundary -- a label may contain its own
-     * spaces (e.g. sftp's "New connection..." entry). */
-    bool basic_ok = filemanager_network__split_entry_name("sftp New connection...", name, sizeof(name)) &&
+    /* Only the *last* '.' is the boundary -- a label may itself contain dots
+     * (e.g. a hostname like "vps.example.com"), or spaces (e.g. sftp's "New
+     * connection..." entry). */
+    bool basic_ok = filemanager_network__split_entry_name("New connection....sftp", name, sizeof(name)) &&
                     strcmp(name, "sftp") == 0;
     bool label_only_space_ok =
-        filemanager_network__split_entry_name("sftp myVps", name, sizeof(name)) && strcmp(name, "sftp") == 0;
+        filemanager_network__split_entry_name("myVps.sftp", name, sizeof(name)) && strcmp(name, "sftp") == 0;
+    bool label_with_dots_ok =
+        filemanager_network__split_entry_name("vps.example.com.sftp", name, sizeof(name)) &&
+        strcmp(name, "sftp") == 0;
 
-    /* No space at all -- not shaped like a provider-owned entry. */
-    bool no_space_rejected = !filemanager_network__split_entry_name("stray-file.txt", name, sizeof(name));
-    /* A leading space would yield an empty provider name -- also rejected. */
-    bool leading_space_rejected = !filemanager_network__split_entry_name(" leading", name, sizeof(name));
+    /* No '.' at all -- not shaped like a provider-owned entry. */
+    bool no_dot_rejected = !filemanager_network__split_entry_name("stray-file", name, sizeof(name));
+    /* A trailing '.' would yield an empty provider name -- also rejected. */
+    bool trailing_dot_rejected = !filemanager_network__split_entry_name("trailing.", name, sizeof(name));
 
     /* Output buffer too small for the provider name fails cleanly. */
     char tiny[3];
-    bool too_small_rejected = !filemanager_network__split_entry_name("sftp myVps", tiny, sizeof(tiny));
+    bool too_small_rejected = !filemanager_network__split_entry_name("myVps.sftp", tiny, sizeof(tiny));
 
-    bool ok = basic_ok && label_only_space_ok && no_space_rejected && leading_space_rejected && too_small_rejected;
+    bool ok = basic_ok && label_only_space_ok && label_with_dots_ok && no_dot_rejected && trailing_dot_rejected &&
+              too_small_rejected;
     printf(
-        "[selftest] filemanager/network-split-entry-name: %s (basic=%d label_space=%d no_space=%d leading=%d "
-        "too_small=%d)\n",
-        ok ? "OK" : "FAIL", basic_ok, label_only_space_ok, no_space_rejected, leading_space_rejected,
+        "[selftest] filemanager/network-split-entry-name: %s (basic=%d label_space=%d label_dots=%d no_dot=%d "
+        "trailing=%d too_small=%d)\n",
+        ok ? "OK" : "FAIL", basic_ok, label_only_space_ok, label_with_dots_ok, no_dot_rejected, trailing_dot_rejected,
         too_small_rejected
     );
     return ok;

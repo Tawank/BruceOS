@@ -562,9 +562,20 @@ static void sftp_app__list_autodiscover(void) {
 /* Connects, verifies the host key, authenticates (key if one's configured or
  * found under the default names, else a password prompt), and completes the
  * SFTP handshake -- everything sftp_app__browse() needs before it can list a
- * directory. */
+ * directory.
+ *
+ * `display_host` is what the "Connecting..." banner below names -- the same
+ * user-entered identifier sftp_app__browse() shows in its footer (see its
+ * own doc comment for which one that is), not `host`: for
+ * sftp_app__open_location() the two can differ, `host` having been resolved
+ * through "/.ssh/config" to a HostName that might be a bare IP while
+ * `display_host` stays the alias the user actually picked. `host` itself is
+ * still what every actual network operation below uses -- the known_hosts
+ * TOFU entry and the password prompt both key off the real connection
+ * target on purpose, unlike this banner. */
 static bruce_result_t sftp_app__connect(
-    const char *host, uint16_t port, const char *username, const char *identity, bruce_ssh_id_t *out_session
+    const char *host, uint16_t port, const char *username, const char *identity, const char *display_host,
+    bruce_ssh_id_t *out_session
 ) {
     if (!wifi__is_connected()) {
         stdio__printf("SFTP client: Wi-Fi is not connected\n");
@@ -572,7 +583,7 @@ static bruce_result_t sftp_app__connect(
     }
     stdio__printf("Connecting to %s:%u...\n", host, (unsigned int)port);
     char connecting_message[SFTP_APP_HOST_MAX + 16];
-    snprintf(connecting_message, sizeof(connecting_message), "Connecting to %s...", host);
+    snprintf(connecting_message, sizeof(connecting_message), "Connecting to %s...", display_host);
     (void)notification__push(connecting_message, 13000);
     bruce_ssh_id_t session = BRUCE_SSH_ID_INVALID;
     bruce_result_t result = ssh__connect(host, port, 10000, &session);
@@ -634,11 +645,18 @@ static bruce_result_t sftp_app__connect(
     return BRUCE_OK;
 }
 
+/* Only ever called on an absolute path (never called at all while
+ * remote_dir is still "." -- see sftp_app__browse()'s at_root check, which
+ * keeps the "[..]" choice off the menu in that case). */
 static void sftp_app__ascend(char *remote_dir) {
     char *slash = strrchr(remote_dir, '/');
     if (slash == NULL) {
-        remote_dir[0] = '.';
+        /* Defensive only: every remote_dir reaching here starts with '/'. */
+        remote_dir[0] = '/';
         remote_dir[1] = '\0';
+    } else if (slash == remote_dir) {
+        /* "/home" -> "/", not "" -- keep the leading slash itself. */
+        slash[1] = '\0';
     } else {
         *slash = '\0';
     }
@@ -646,8 +664,14 @@ static void sftp_app__ascend(char *remote_dir) {
 
 static bruce_result_t sftp_app__descend(char *remote_dir, size_t capacity, const char *name) {
     char joined[SFTP_APP_REMOTE_PATH_MAX];
-    int written = strcmp(remote_dir, ".") == 0 ? snprintf(joined, sizeof(joined), "./%s", name)
-                                                : snprintf(joined, sizeof(joined), "%s/%s", remote_dir, name);
+    int written;
+    if (strcmp(remote_dir, ".") == 0) {
+        written = snprintf(joined, sizeof(joined), "./%s", name);
+    } else if (strcmp(remote_dir, "/") == 0) {
+        written = snprintf(joined, sizeof(joined), "/%s", name);
+    } else {
+        written = snprintf(joined, sizeof(joined), "%s/%s", remote_dir, name);
+    }
     if (written < 0 || (size_t)written >= sizeof(joined) || (size_t)written >= capacity)
         return BRUCE_ERR_RESOURCE_LIMIT;
     memcpy(remote_dir, joined, (size_t)written + 1u);
@@ -830,8 +854,10 @@ static void sftp_app__draw_footer_host(void *context) {
 
 /* Interactive directory browser: lists the current remote directory, lets
  * the user descend into subdirectories or go back up, and offers
- * View/Download on a chosen file. Starts at "." (the login/home directory)
- * and never goes above it -- a v1 scope limitation, not a protocol one.
+ * View/Download on a chosen file. Starts at the login/home directory
+ * (resolved to its real absolute path -- see the ssh__sftp_realpath() call
+ * below), same as before, but "[..]" can now walk back up past it, all the
+ * way to "/".
  *
  * `display_host` is shown in the bottom bar (see sftp_app__draw_footer_host()
  * above) -- deliberately whatever the user actually connected *with* rather
@@ -850,6 +876,16 @@ static void sftp_app__browse(bruce_ssh_id_t session, const char *display_host) {
         return;
     }
 
+    /* Resolves "." to the actual login/home directory path (e.g.
+     * "/home/tabank") up front, still the starting point exactly as before,
+     * but now shown as its real path instead of the bare SFTP-protocol "."
+     * shorthand -- and with real path segments for "[..]" to walk back up
+     * through, past the login directory, all the way to "/". Left as "." --
+     * its previous meaning, the login directory, never shown or walked
+     * above -- if the server doesn't answer REALPATH for some reason;
+     * SFTPv3 requires it, so this should be rare in practice. */
+    (void)ssh__sftp_realpath(session, ".", remote_dir, sizeof(remote_dir), 10000);
+
     for (;;) {
         /* ssh__sftp_list() below is one blocking round trip (up to 15s) with
          * no natural pause point to update a status from, same as
@@ -867,12 +903,12 @@ static void sftp_app__browse(bruce_ssh_id_t session, const char *display_host) {
         if (result != BRUCE_OK) {
             stdio__printf("SFTP: could not list '%s' (%d)\n", remote_dir, result);
             dialog__message(BRUCE_DIALOG_ERROR, "SFTP", "Could not list that directory.");
-            if (strcmp(remote_dir, ".") == 0) break;
+            if (strcmp(remote_dir, ".") == 0 || strcmp(remote_dir, "/") == 0) break;
             sftp_app__ascend(remote_dir);
             continue;
         }
 
-        bool at_root = strcmp(remote_dir, ".") == 0;
+        bool at_root = strcmp(remote_dir, ".") == 0 || strcmp(remote_dir, "/") == 0;
         size_t choice_count = count + (at_root ? 1u : 2u);
         bruce_dialog_choice_t *choices = memory__malloc(choice_count * sizeof(bruce_dialog_choice_t));
         char *right_text = memory__malloc(count * 16u);
@@ -976,7 +1012,7 @@ static void sftp_app__new_connection(void) {
     }
 
     bruce_ssh_id_t session = BRUCE_SSH_ID_INVALID;
-    if (sftp_app__connect(host, port, username, identity, &session) != BRUCE_OK) return;
+    if (sftp_app__connect(host, port, username, identity, host, &session) != BRUCE_OK) return;
     sftp_app__browse(session, host);
     (void)ssh__close(session);
 }
@@ -1023,7 +1059,7 @@ static bruce_result_t sftp_app__open_location(const char *path) {
     const char *identity = config.identity_set ? config.identity : sftp_app__default_identity();
 
     bruce_ssh_id_t session = BRUCE_SSH_ID_INVALID;
-    bruce_result_t result = sftp_app__connect(host, port, username, identity, &session);
+    bruce_result_t result = sftp_app__connect(host, port, username, identity, trimmed, &session);
     if (result != BRUCE_OK) return result;
     sftp_app__browse(session, trimmed);
     (void)ssh__close(session);

@@ -15,7 +15,7 @@
 #define FILEMANAGER_NETWORK_DISCOVERY_MAX 96
 
 typedef struct {
-    char name[FILEMANAGER_NETWORK_PROVIDER_NAME_MAX];    /* Prefix shown/stored under "/Network", e.g. "sftp". */
+    char name[FILEMANAGER_NETWORK_PROVIDER_NAME_MAX];    /* Extension shown/stored under "/Network", e.g. "sftp". */
     char program[FILEMANAGER_NETWORK_PROVIDER_NAME_MAX]; /* App run to open a discovered location. */
     char discovery[FILEMANAGER_NETWORK_DISCOVERY_MAX];   /* Full command line run to list locations. */
 } filemanager_network__provider_t;
@@ -28,10 +28,12 @@ typedef struct {
  * defaults to "<program> list --autodiscover", the invocation every
  * provider used before this became configurable; "name" and "program" are
  * required and a provider missing either, or whose "name" contains a space
- * (it has to survive being split back out of "<name> <label>" under
- * "/Network" -- see filemanager_network__split_entry_name()), is skipped.
- * Returns false (leaving *out_count at 0) only when `json_text` itself isn't
- * parseable JSON shaped like a provider list at all. */
+ * or a '.' (it becomes the literal extension on every location file this
+ * provider writes, and has to survive being split back out of
+ * "<label>.<name>" under "/Network" -- see
+ * filemanager_network__split_entry_name()), is skipped. Returns false
+ * (leaving *out_count at 0) only when `json_text` itself isn't parseable
+ * JSON shaped like a provider list at all. */
 bool filemanager_network__parse_providers_json(
     const char *json_text, filemanager_network__provider_t *providers, size_t max_providers, size_t *out_count
 );
@@ -40,9 +42,11 @@ bool filemanager_network__parse_providers_json(
  * safe single path component under "/Network". */
 void filemanager_network__sanitize_name(const char *name, char *out, size_t out_size);
 
-/* Splits a "/Network" entry's file name "<provider name> <label>" at its
- * first space, copying the provider name into `name_out`. A label may
- * itself contain spaces (only the first one is the boundary); returns false
- * if `entry_name` has no space at all (or starts with one), i.e. isn't
- * shaped like a provider-owned entry. */
+/* Splits a "/Network" entry's file name "<label>.<provider name>" at its
+ * *last* '.', copying the provider name into `name_out` -- a real file
+ * extension, not just a naming convention (see this file's top comment).
+ * A label may itself contain dots (e.g. a hostname like "vps.example.com");
+ * only the final one is the boundary. Returns false if `entry_name` has no
+ * '.' at all, or ends in one, i.e. isn't shaped like a provider-owned
+ * entry. */
 bool filemanager_network__split_entry_name(const char *entry_name, char *name_out, size_t name_out_size);

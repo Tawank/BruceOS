@@ -36,13 +36,20 @@
  * captured, it prints one "<display name>\t<location>" line per location the
  * provider knows about (e.g. host aliases read from "/.ssh/config", plus a
  * "New connection..." line of the provider's own choosing). Each line
- * becomes "/Network/<name> <display name>", containing just the location
- * string. Opening that file goes through filemanager_network__resolve_program()
- * below rather than extensions.conf's usual by-extension dispatch: the
- * leading "<name> " is split back off and looked up against "program" in the
- * same config, so adding a new location type later is a new provider
- * command plus one object in the config, with no filemanager code changes
- * and no extensions.conf entry to keep in sync with it.
+ * becomes "/Network/<display name>.<name>", containing just the location
+ * string -- a real extension, not just a naming convention: opening that
+ * file goes through filemanager_network__resolve_program() below, which
+ * splits the trailing ".<name>" back off and looks it up against "program"
+ * in the same config, but "<name>" doubling as the file's actual extension
+ * means "/config/extensions.conf" can independently give it an icon (see
+ * ".sftp"'s own entry there) and filemanager__open_default()'s ordinary
+ * by-extension dispatch works as a fallback too -- so a provider still
+ * needs no extensions.conf entry to *function* (resolve_program() below is
+ * checked first and covers that on its own), only to look like something
+ * other than a plain file in a listing. A user can drop their own
+ * "myhost.sftp" file straight into "/Network" by hand the same way -- its
+ * content is read exactly like a discovered one is (see
+ * sftp_app__open_location() in modules/ssh/ssh_sftp_app.c).
  * @{
  */
 
@@ -56,11 +63,12 @@
  * selftest unit-tests those directly (see its header comment). */
 
 bool filemanager_network__split_entry_name(const char *entry_name, char *name_out, size_t name_out_size) {
-    const char *space = strchr(entry_name, ' ');
-    if (space == NULL || space == entry_name) return false;
-    size_t len = (size_t)(space - entry_name);
+    const char *dot = strrchr(entry_name, '.');
+    if (dot == NULL || dot[1] == '\0') return false;
+    const char *provider_name = dot + 1;
+    size_t len = strlen(provider_name);
     if (len >= name_out_size) return false;
-    memcpy(name_out, entry_name, len);
+    memcpy(name_out, provider_name, len);
     name_out[len] = '\0';
     return true;
 }
@@ -97,7 +105,13 @@ bool filemanager_network__parse_providers_json(
         cJSON *program = cJSON_GetObjectItemCaseSensitive(entry, "program");
         if (!cJSON_IsString(name) || name->valuestring == NULL || name->valuestring[0] == '\0') continue;
         if (!cJSON_IsString(program) || program->valuestring == NULL || program->valuestring[0] == '\0') continue;
-        if (strchr(name->valuestring, ' ') != NULL) continue; /* has to survive the split back apart later */
+        /* Becomes the literal extension on every location file this provider
+         * writes (see filemanager_network__write_location() below), so it
+         * has to survive filemanager_network__split_entry_name() splitting
+         * that back off the *last* '.' later -- a "." of its own would
+         * shift where that split lands, and a space is just not a sane
+         * extension character either. */
+        if (strchr(name->valuestring, ' ') != NULL || strchr(name->valuestring, '.') != NULL) continue;
         if (strlen(name->valuestring) >= FILEMANAGER_NETWORK_PROVIDER_NAME_MAX) continue;
         if (strlen(program->valuestring) >= FILEMANAGER_NETWORK_PROVIDER_NAME_MAX) continue;
 
@@ -289,7 +303,7 @@ static bruce_result_t filemanager_network__write_location(
     if (safe_label[0] == '\0') return BRUCE_ERR_INVALID_ARGUMENT;
 
     char path[BRUCE_STORAGE_PATH_MAX];
-    int written = snprintf(path, sizeof(path), "%s/%s %s", FILEMANAGER_NETWORK_DIR, provider->name, safe_label);
+    int written = snprintf(path, sizeof(path), "%s/%s.%s", FILEMANAGER_NETWORK_DIR, safe_label, provider->name);
     if (written < 0 || (size_t)written >= sizeof(path)) return BRUCE_ERR_RESOURCE_LIMIT;
 
     bruce_file_id_t file = BRUCE_FILE_ID_INVALID;

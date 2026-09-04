@@ -272,6 +272,22 @@ bruce_result_t ssh__sftp_list(
 );
 
 /**
+ * @brief Canonicalizes a remote path, e.g. "." to the login directory's absolute path.
+ *
+ * Same server-side resolution OpenSSH's sftp client uses for "pwd".
+ *
+ * @param session Session opened with ssh__sftp_open().
+ * @param path Path to resolve; "." for the login/home directory.
+ * @param out_path Receives the resolved absolute path (NUL-terminated, truncated if it doesn't fit).
+ * @param out_capacity Size of out_path in bytes.
+ * @param timeout_ms Request timeout in milliseconds.
+ * @permission ssh
+ */
+bruce_result_t ssh__sftp_realpath(
+    bruce_ssh_id_t session, const char *path, char *out_path, size_t out_capacity, uint32_t timeout_ms
+);
+
+/**
  * @brief Opens a remote file for reading.
  *
  * @param session Session opened with ssh__sftp_open().

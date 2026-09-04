@@ -1260,6 +1260,50 @@ bruce_result_t ssh__sftp_list(
     return BRUCE_OK;
 }
 
+bruce_result_t ssh__sftp_realpath(
+    bruce_ssh_id_t session, const char *path, char *out_path, size_t out_capacity, uint32_t timeout_ms
+) {
+    bruce_result_t permission = permission__check(BRUCE_PERMISSION_SSH);
+    if (permission != BRUCE_OK) return permission;
+    if (path == NULL || out_path == NULL || out_capacity == 0) return BRUCE_ERR_INVALID_ARGUMENT;
+    ssh__slot_t *slot;
+    bruce_result_t result = ssh__owned_slot(session, &slot);
+    if (result != BRUCE_OK) return result;
+    if (slot->ssh == NULL) return BRUCE_ERR_INVALID_STATE;
+
+    /* wolfSSH_SFTP_RealPath() takes a non-const char* for the same reason
+     * wolfSSH_SFTP_LS() does above -- see that cast's comment. Canonicalizes
+     * `path` server-side (e.g. "." to the login directory's absolute path,
+     * or a relative path to an absolute one) the same way "pwd"/OpenSSH's
+     * sftp client does; the response is always exactly one WS_SFTPNAME
+     * entry holding the resolved path. */
+    uint64_t deadline = runtime__now() + timeout_ms;
+    WS_SFTPNAME *names;
+    while ((names = wolfSSH_SFTP_RealPath(slot->ssh, (char *)(uintptr_t)path)) == NULL) {
+        int wolfssh_err = wolfSSH_get_error(slot->ssh);
+        if (wolfssh_err != WS_WANT_READ && wolfssh_err != WS_WANT_WRITE) {
+            ESP_LOGE(
+                TAG, "sftp realpath %s failed (wolfssh err=%d, %s)", path, wolfssh_err,
+                wolfSSH_get_error_name(slot->ssh)
+            );
+            return BRUCE_ERR_IO;
+        }
+        result = ssh__wait_socket(slot, deadline);
+        if (result != BRUCE_OK) return result;
+    }
+
+    result = BRUCE_OK;
+    if (names == NULL || names->fSz == 0) {
+        result = BRUCE_ERR_IO;
+    } else {
+        size_t name_len = (size_t)names->fSz < out_capacity - 1u ? (size_t)names->fSz : out_capacity - 1u;
+        memcpy(out_path, names->fName, name_len);
+        out_path[name_len] = '\0';
+    }
+    wolfSSH_SFTPNAME_list_free(names);
+    return result;
+}
+
 bruce_result_t ssh__sftp_open_file(
     bruce_ssh_id_t session, const char *path, bruce_ssh_sftp_file_t *out_file, uint32_t timeout_ms
 ) {
