@@ -84,6 +84,12 @@ typedef struct {
     bool built_in;
     bool gui_requested;
     bool presentable;
+    /* True while this process is blocked inside process__wait()/wait_status()
+     * for another process (e.g. a launcher-style app parked waiting on a
+     * foreground child it just started). It has no active input/redraw loop
+     * right now, so switching it into the foreground would just leave the
+     * screen frozen - skip it in any "switch to a running app" listing. */
+    bool blocked_on_wait;
 } bruce_process_snapshot_t;
 
 /** @brief Returns the calling process ID. */

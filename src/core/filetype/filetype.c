@@ -153,6 +153,24 @@ static cJSON *filetype__entry_for_extension(const char *path) {
     return NULL;
 }
 
+/* Entry whose "mimetypes" array contains `mimetype` (case-insensitive) --
+ * used by the text/binary heuristic fallback below so an extensionless (or
+ * otherwise unconfigured) file still opens with whatever program
+ * extensions.conf assigns to that MIME type (e.g. ASCII text picks up
+ * ".txt"'s own "program": "text"), instead of coming back with no program at
+ * all. */
+static cJSON *filetype__entry_for_mimetype(const char *mimetype) {
+    filetype__load_config();
+    if (s_config == NULL || mimetype == NULL || mimetype[0] == '\0') return NULL;
+    cJSON *types = cJSON_GetObjectItemCaseSensitive(s_config, "types");
+    if (!cJSON_IsArray(types)) return NULL;
+    cJSON *entry = NULL;
+    cJSON_ArrayForEach(entry, types) {
+        if (cJSON_IsObject(entry) && filetype__string_array_has_ci(entry, "mimetypes", mimetype)) return entry;
+    }
+    return NULL;
+}
+
 /* Entry whose "interpreters" list contains `interpreter` (case-sensitive,
  * matching how shebangs are conventionally written). */
 static cJSON *filetype__entry_for_interpreter(const char *interpreter) {
@@ -379,6 +397,15 @@ static void filetype__identify_from_bytes_locked(
         snprintf(out_info->description, sizeof(out_info->description), "ASCII text");
         snprintf(out_info->mimetype, sizeof(out_info->mimetype), "text/plain");
         snprintf(out_info->icon, sizeof(out_info->icon), "file-document");
+        /* No extension (or shebang) claimed this file, but it reads as plain
+         * text - pick up whatever program extensions.conf maps to
+         * "text/plain" (the default config points this at ".txt"'s own
+         * entry) so e.g. an extensionless dotfile like ".shell_history"
+         * still has somewhere to open rather than coming back NOT_FOUND. */
+        cJSON *mime_entry = filetype__entry_for_mimetype(out_info->mimetype);
+        if (mime_entry != NULL) {
+            filetype__string_field(mime_entry, "program", out_info->program, sizeof(out_info->program));
+        }
     }
 }
 

@@ -113,11 +113,33 @@ static const char *wifi_app_gui__strength_icon(int8_t rssi, bool secured) {
     return (secured ? lock_icons : open_icons)[bars - 1];
 }
 
+/* wifi_ap_record_t.authmode values (ESP-IDF's wifi_auth_mode_t) mapped to the
+ * short label shown in the scan list -- see WIFI_APP_GUI_AUTH_OPEN's doc
+ * comment above for why this reads the raw byte instead of the enum. Kept to
+ * <= 7 chars so a row (WIFI_APP_GUI_ROW_TEXT bytes) never truncates the
+ * closing "]". */
+static const char *wifi_app_gui__security_label(uint8_t authmode) {
+    switch (authmode) {
+        case 1: return "WEP";      /* WIFI_AUTH_WEP */
+        case 2: return "WPA";      /* WIFI_AUTH_WPA_PSK */
+        case 3: return "WPA2";     /* WIFI_AUTH_WPA2_PSK */
+        case 4: return "WPA/2";    /* WIFI_AUTH_WPA_WPA2_PSK (mixed) */
+        case 5: return "WPA2E";    /* WIFI_AUTH_WPA2_ENTERPRISE */
+        case 6: return "WPA3";     /* WIFI_AUTH_WPA3_PSK */
+        case 7: return "WPA2/3";   /* WIFI_AUTH_WPA2_WPA3_PSK (mixed) */
+        case 8: return "WAPI";     /* WIFI_AUTH_WAPI_PSK */
+        case 9: return "OWE";      /* WIFI_AUTH_OWE */
+        default: return "secured"; /* newer/uncommon mode; still locked */
+    }
+}
+
 /* "<ssid> <rssi> dBm [<tag>]", tag naming what selecting the row will do:
  * "open" connects straight away, "saved" reuses the stored password (still
- * editable), "locked" prompts for a new one. */
+ * editable), the security label (e.g. "WPA2") prompts for a new one. */
 static void wifi_app_gui__format_row(const wifi__network_t *net, bool known, char *out, size_t capacity) {
-    const char *tag = net->authmode == WIFI_APP_GUI_AUTH_OPEN ? "open" : (known ? "saved" : "locked");
+    const char *tag = net->authmode == WIFI_APP_GUI_AUTH_OPEN
+                           ? "open"
+                           : (known ? "saved" : wifi_app_gui__security_label(net->authmode));
     snprintf(out, capacity, "%-20.20s %4d dBm [%s]", net->ssid, (int)net->rssi, tag);
 }
 

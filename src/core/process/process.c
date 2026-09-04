@@ -385,6 +385,7 @@ void process__fill_snapshot_locked(const process__record_t *record, bruce_proces
     out_snapshot->built_in = record->built_in;
     out_snapshot->gui_requested = record->gui_requested;
     out_snapshot->presentable = record->presentable;
+    out_snapshot->blocked_on_wait = record->blocked_on_wait;
 }
 
 static void process__free_argv(int argc, char **argv) {

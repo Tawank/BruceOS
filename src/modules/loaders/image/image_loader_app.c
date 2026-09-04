@@ -5,6 +5,7 @@
 #include <strings.h>
 
 #include "args.h"
+#include "core_sdk/dialog.h"
 #include "core_sdk/display.h"
 #include "core_sdk/image.h"
 #include "core_sdk/input.h"
@@ -102,17 +103,13 @@ int image_app_main(int argc, char **argv) {
         if (result == BRUCE_OK) result = display__present();
     }
     if (result != BRUCE_OK) {
-        (void)display__begin_frame();
-        (void)display__fill_screen(BRUCE_COLOR_BLACK);
-        (void)display__set_text_color(BRUCE_COLOR_RED);
-        (void)display__set_cursor(4, 4);
-        char message[48];
-        snprintf(message, sizeof(message), "Image error: %s", result__to_string(result));
-        (void)display__println(message);
-        (void)display__present();
+        char message[64];
+        snprintf(message, sizeof(message), "Could not load image: %s", result__to_string(result));
+        (void)dialog__message(BRUCE_DIALOG_ERROR, "Image", message);
+        return result;
     }
 
-    if (!image_viewer__is_gif(path) || result != BRUCE_OK) {
+    if (!image_viewer__is_gif(path)) {
         (void)input__flush();
         for (;;) {
             bruce_input_event_t event;

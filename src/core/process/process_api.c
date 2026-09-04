@@ -89,7 +89,7 @@ static bruce_result_t process__switch_relative(int direction) {
         if (start == NULL) start = candidate;
         else if (candidate == start) break;
         if (candidate->in_use && candidate->id != self_id && candidate->presentable &&
-            candidate->state == BRUCE_PROCESS_BACKGROUND) {
+            candidate->state == BRUCE_PROCESS_BACKGROUND && !candidate->blocked_on_wait) {
             process__foreground_push_locked(candidate->id);
             process__unlock();
             return BRUCE_OK;
@@ -447,6 +447,9 @@ process__wait_common(bruce_process_id_t process_id, uint32_t timeout_ms, bruce_p
         waiter->wait_attached = true;
         waiter->wait_target = record;
         waiter->wait_for_status = out_status != NULL;
+        /* Parked here with no input/redraw loop of its own - see the field's
+         * doc comment in process_internal.h. */
+        waiter->blocked_on_wait = true;
     }
     bool cancelled = waiter != NULL && waiter->stop_requested;
     EventGroupHandle_t events = record->events;
@@ -498,6 +501,7 @@ process__wait_common(bruce_process_id_t process_id, uint32_t timeout_ms, bruce_p
     }
 
     if (waiter != NULL) {
+        waiter->blocked_on_wait = false;
         process__detach_wait_locked(waiter);
     } else {
         if (out_status != NULL && completion != NULL && completion->in_use && completion->waiter_pins > 0) {

@@ -724,7 +724,7 @@ static size_t bruce_launcher__process_candidates(bruce_process_snapshot_t *proce
     bruce_process_id_t self = process__current_id();
     if (process__list(processes, capacity, &count) != BRUCE_OK) { return 0; }
     for (size_t i = 0; i < count; ++i) {
-        if (processes[i].id != self && processes[i].presentable &&
+        if (processes[i].id != self && processes[i].presentable && !processes[i].blocked_on_wait &&
             processes[i].state == BRUCE_PROCESS_BACKGROUND) {
             if (written != i) processes[written] = processes[i];
             written++;

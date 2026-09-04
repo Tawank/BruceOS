@@ -38,6 +38,13 @@ typedef struct process__record {
     bool built_in;
     bool gui_requested;
     bool presentable;
+    /* True while this process is parked inside process__wait_common() (e.g.
+     * a launcher-style app blocked on process__wait() for a foreground child
+     * it just started). Such a process has no active input/redraw loop, so
+     * switching it into the foreground would just show a frozen screen -
+     * process__switch_relative() and bruce_launcher__process_candidates()
+     * both skip it while this is set. */
+    bool blocked_on_wait;
     char permission_key[BRUCE_PERMISSION_FILE_NAME_MAX];
     bool start_in_background;
     bool preserve_display;
