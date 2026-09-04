@@ -17,6 +17,8 @@
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
 
+#include "filemanager_network_internal.h"
+
 #define FILEMANAGER_PREVIEW_MAX 4096
 
 static bool filemanager__resume_after_handoff(void) {
@@ -502,6 +504,265 @@ static bruce_result_t filemanager__show_folder_info(const char *path) {
     return dialog__message(BRUCE_DIALOG_INFO, "Folder info", message);
 }
 
+/**
+ * @name Network folder
+ *
+ * "/Network" is a plain directory, populated on entry with one plain file
+ * per remote location a *provider* command discovers -- filemanager itself
+ * has no idea what SSH or SFTP are. A provider is any command listed in
+ * "/config/network_providers.conf" (one name per line, "#" comments,
+ * defaulted to just "sftp" the first time this runs) that understands
+ * `<command> list --autodiscover`: run with no GUI and its stdout captured,
+ * it prints one "<display name>\t<location>" line per location it knows
+ * about (e.g. host aliases read from "/.ssh/config", plus a "New
+ * connection..." line of the provider's own choosing). Each line becomes
+ * "/Network/<display name>.<provider>", containing just the location string
+ * -- extensions.conf's normal program-by-extension dispatch (".sftp" ->
+ * "sftp") is what makes opening that file launch the right app, so adding a
+ * new location type later is a new provider command plus one line in the
+ * config, with no filemanager code changes.
+ * @{
+ */
+
+#define FILEMANAGER_NETWORK_DIR "/Network"
+#define FILEMANAGER_NETWORK_PROVIDERS_CONF "/config/network_providers.conf"
+#define FILEMANAGER_NETWORK_PROVIDERS_DEFAULT "sftp\n"
+#define FILEMANAGER_NETWORK_PROVIDER_MAX 8
+#define FILEMANAGER_NETWORK_CAPTURE_MAX 4096
+/* FILEMANAGER_NETWORK_PROVIDER_NAME_MAX and the pure provider-line/
+ * display-name parsing helpers now live in filemanager_network_internal.h --
+ * selftest unit-tests those directly (see its header comment). */
+
+void filemanager__network_parse_providers(
+    char *text, char providers[][FILEMANAGER_NETWORK_PROVIDER_NAME_MAX], size_t max_providers, size_t *out_count
+) {
+    *out_count = 0;
+    char *saveptr = NULL;
+    char *line = strtok_r(text, "\n", &saveptr);
+    while (line != NULL && *out_count < max_providers) {
+        while (*line == ' ' || *line == '\t') ++line;
+        size_t len = strlen(line);
+        while (len > 0 && (line[len - 1] == '\r' || line[len - 1] == ' ' || line[len - 1] == '\t')) {
+            line[--len] = '\0';
+        }
+        if (len > 0 && len < FILEMANAGER_NETWORK_PROVIDER_NAME_MAX && line[0] != '#') {
+            snprintf(providers[*out_count], FILEMANAGER_NETWORK_PROVIDER_NAME_MAX, "%s", line);
+            ++*out_count;
+        }
+        line = strtok_r(NULL, "\n", &saveptr);
+    }
+}
+
+static void filemanager__network_load_providers(
+    char providers[][FILEMANAGER_NETWORK_PROVIDER_NAME_MAX], size_t max_providers, size_t *out_count
+) {
+    *out_count = 0;
+    bool exists = false;
+    if (storage__exists(FILEMANAGER_NETWORK_PROVIDERS_CONF, &exists) != BRUCE_OK || !exists) {
+        bruce_file_id_t seed = BRUCE_FILE_ID_INVALID;
+        if (storage__open(
+                FILEMANAGER_NETWORK_PROVIDERS_CONF,
+                BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE | BRUCE_STORAGE_OPEN_TRUNCATE, &seed
+            ) == BRUCE_OK) {
+            size_t written = 0;
+            (void)storage__write(
+                seed, FILEMANAGER_NETWORK_PROVIDERS_DEFAULT, strlen(FILEMANAGER_NETWORK_PROVIDERS_DEFAULT),
+                &written
+            );
+            (void)storage__close(seed);
+        }
+    }
+
+    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
+    if (storage__open(FILEMANAGER_NETWORK_PROVIDERS_CONF, BRUCE_STORAGE_OPEN_READ, &file) != BRUCE_OK) {
+        if (max_providers > 0) {
+            snprintf(providers[0], FILEMANAGER_NETWORK_PROVIDER_NAME_MAX, "sftp");
+            *out_count = 1;
+        }
+        return;
+    }
+    char *text = memory__malloc(1024);
+    if (text == NULL) {
+        (void)storage__close(file);
+        return;
+    }
+    size_t total = 0;
+    for (;;) {
+        size_t chunk = 0;
+        if (storage__read(file, text + total, 1023 - total, &chunk) != BRUCE_OK || chunk == 0) break;
+        total += chunk;
+        if (total >= 1023) break;
+    }
+    (void)storage__close(file);
+    text[total] = '\0';
+
+    filemanager__network_parse_providers(text, providers, max_providers, out_count);
+    memory__free(text);
+}
+
+/* Runs "<provider> list --autodiscover" and captures its stdout via a
+ * redirected stdio session -- the same trick the shell uses for "$(...)"
+ * command substitution (see shell_executor__capture_external() in
+ * modules/shell/shell_executor.c), built entirely on public core_sdk
+ * primitives so this needs no new core plumbing. Output beyond out_capacity
+ * is silently dropped rather than growing the buffer: a location listing is
+ * expected to be short text, not arbitrary command output. */
+static bruce_result_t
+filemanager__network_capture(const char *provider, char *out, size_t out_capacity, size_t *out_size) {
+    *out_size = 0;
+    bruce_stdio_session_t session = BRUCE_STDIO_SESSION_INVALID;
+    if (stdio__session_create(&session) != BRUCE_OK) return BRUCE_ERR_IO;
+    if (stdio__session_route_children(session) != BRUCE_OK) {
+        (void)stdio__session_close(session);
+        return BRUCE_ERR_IO;
+    }
+    int process = app_runner__run(provider, "list --autodiscover", BRUCE_LAUNCH_FOREGROUND);
+    (void)stdio__session_route_children(BRUCE_STDIO_SESSION_INVALID);
+    if (process <= 0) {
+        (void)stdio__session_close(session);
+        return BRUCE_ERR_NOT_FOUND;
+    }
+
+    size_t total = 0;
+    bruce_process_status_t status = {0};
+    bool complete = false;
+    while (!complete) {
+        char chunk[128];
+        size_t size = 0;
+        while (stdio__session_read_output(session, chunk, sizeof(chunk), &size) == BRUCE_OK) {
+            size_t copy = size < out_capacity - 1u - total ? size : out_capacity - 1u - total;
+            if (copy > 0) memcpy(out + total, chunk, copy);
+            total += copy;
+        }
+        bruce_result_t waited = process__wait_status((bruce_process_id_t)process, 0, &status);
+        complete = waited == BRUCE_OK;
+        if (!complete && waited != BRUCE_ERR_TIMEOUT) break;
+        if (!complete) (void)runtime__delay(20);
+    }
+    char chunk[128];
+    size_t size = 0;
+    while (stdio__session_read_output(session, chunk, sizeof(chunk), &size) == BRUCE_OK) {
+        size_t copy = size < out_capacity - 1u - total ? size : out_capacity - 1u - total;
+        if (copy > 0) memcpy(out + total, chunk, copy);
+        total += copy;
+    }
+    (void)stdio__session_close(session);
+    out[total] = '\0';
+    *out_size = total;
+    return BRUCE_OK;
+}
+
+void filemanager__network_sanitize_name(const char *name, char *out, size_t out_size) {
+    size_t j = 0;
+    for (size_t i = 0; name[i] != '\0' && j + 1 < out_size; ++i) {
+        char c = name[i];
+        out[j++] = (c == '/' || c == '\\') ? '_' : c;
+    }
+    out[j] = '\0';
+}
+
+static bruce_result_t filemanager__network_write_location(
+    const char *provider, const char *display_name, const char *location
+) {
+    char safe_name[BRUCE_STORAGE_NAME_MAX];
+    filemanager__network_sanitize_name(display_name, safe_name, sizeof(safe_name));
+    if (safe_name[0] == '\0') return BRUCE_ERR_INVALID_ARGUMENT;
+
+    char path[BRUCE_STORAGE_PATH_MAX];
+    int written = snprintf(path, sizeof(path), "%s/%s.%s", FILEMANAGER_NETWORK_DIR, safe_name, provider);
+    if (written < 0 || (size_t)written >= sizeof(path)) return BRUCE_ERR_RESOURCE_LIMIT;
+
+    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
+    bruce_result_t result = storage__open(
+        path, BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE | BRUCE_STORAGE_OPEN_TRUNCATE, &file
+    );
+    if (result != BRUCE_OK) return result;
+    size_t written_size = 0;
+    result = storage__write(file, location, strlen(location), &written_size);
+    (void)storage__close(file);
+    return result;
+}
+
+/* Deletes every /Network entry that belongs to a known provider (matched by
+ * extension) before repopulating, so a host removed from e.g. "/.ssh/config"
+ * doesn't linger as a stale file forever. Anything with an unrecognized
+ * extension (a user's own file dropped in there) is left alone. */
+static void filemanager__network_clear_stale(
+    char providers[][FILEMANAGER_NETWORK_PROVIDER_NAME_MAX], size_t provider_count
+) {
+    bruce_storage_entry_t entries[32];
+    size_t count = 0;
+    if (storage__list(FILEMANAGER_NETWORK_DIR, entries, 32, &count) != BRUCE_OK) return;
+    if (count > 32) count = 32;
+    for (size_t i = 0; i < count; ++i) {
+        if (entries[i].type != BRUCE_STORAGE_ENTRY_FILE) continue;
+        const char *dot = strrchr(entries[i].name, '.');
+        if (dot == NULL) continue;
+        for (size_t p = 0; p < provider_count; ++p) {
+            if (strcmp(dot + 1, providers[p]) == 0) {
+                /* entries[i].name is a char[BRUCE_STORAGE_NAME_MAX] field, but GCC's
+                 * -Werror=format-truncation doesn't infer that array's declared size just
+                 * from the expression here, so it has to be spelled out via precision for
+                 * the checker to see this can't overflow `path`. */
+                char path[BRUCE_STORAGE_PATH_MAX];
+                snprintf(
+                    path, sizeof(path), "%s/%.*s", FILEMANAGER_NETWORK_DIR, BRUCE_STORAGE_NAME_MAX - 1,
+                    entries[i].name
+                );
+                (void)storage__remove(path);
+                break;
+            }
+        }
+    }
+}
+
+/* Rebuilds "/Network" from every configured provider's autodiscover output.
+ * Best-effort throughout: a provider that's missing, fails, or times out
+ * just leaves that provider's locations absent rather than blocking entry
+ * into the folder. */
+static void filemanager__network_refresh(void) {
+    bool exists = false;
+    if (storage__exists(FILEMANAGER_NETWORK_DIR, &exists) != BRUCE_OK) return;
+    if (!exists && storage__mkdir(FILEMANAGER_NETWORK_DIR) != BRUCE_OK) return;
+
+    char providers[FILEMANAGER_NETWORK_PROVIDER_MAX][FILEMANAGER_NETWORK_PROVIDER_NAME_MAX];
+    size_t provider_count = 0;
+    filemanager__network_load_providers(providers, FILEMANAGER_NETWORK_PROVIDER_MAX, &provider_count);
+    if (provider_count == 0) return;
+
+    filemanager__network_clear_stale(providers, provider_count);
+
+    char *capture = memory__malloc(FILEMANAGER_NETWORK_CAPTURE_MAX);
+    if (capture == NULL) return;
+    for (size_t p = 0; p < provider_count; ++p) {
+        size_t capture_size = 0;
+        if (filemanager__network_capture(
+                providers[p], capture, FILEMANAGER_NETWORK_CAPTURE_MAX, &capture_size
+            ) != BRUCE_OK) {
+            continue;
+        }
+        char *saveptr = NULL;
+        char *line = strtok_r(capture, "\n", &saveptr);
+        while (line != NULL) {
+            size_t len = strlen(line);
+            while (len > 0 && line[len - 1] == '\r') line[--len] = '\0';
+            char *tab = strchr(line, '\t');
+            if (tab != NULL) {
+                *tab = '\0';
+                const char *display_name = line;
+                const char *location = tab + 1;
+                if (display_name[0] != '\0') {
+                    (void)filemanager__network_write_location(providers[p], display_name, location);
+                }
+            }
+            line = strtok_r(NULL, "\n", &saveptr);
+        }
+    }
+    memory__free(capture);
+}
+
+/** @} */
+
 int filemanager_app_main(int argc, char **argv) {
     if (argc > 1 && (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)) {
         stdio__printf("Browse and manage files.\n");
@@ -539,8 +800,24 @@ int filemanager_app_main(int argc, char **argv) {
         {.label = "Paste",      .value = "paste"     },
         {.label = "Back",       .value = "back"      },
     };
+    /* Same as directory_actions, but for "/Network" specifically -- see the
+     * "Network folder" section above. Discovery already runs once up front
+     * (below), so this is a manual way to re-run it without leaving and
+     * relaunching filemanager, e.g. right after editing "/.ssh/config". */
+    const bruce_dialog_choice_t network_directory_actions[] = {
+        {.label = "New file",          .value = "new_file"},
+        {.label = "New folder",        .value = "new_folder"},
+        {.label = "Paste",             .value = "paste"    },
+        {.label = "Refresh locations", .value = "refresh"  },
+        {.label = "Back",              .value = "back"     },
+    };
     (void)argc;
     (void)argv;
+
+    /* Best-effort: populates "/Network" from whatever providers are
+     * configured before the browser ever shows it, so the first visit isn't
+     * empty/stale. See the "Network folder" section above. */
+    filemanager__network_refresh();
 
     bruce_dialog_render_params_t action_params = dialog__default_render_params(2);
     /* Lets a long press on a folder row return it below instead of
@@ -609,15 +886,22 @@ int filemanager_app_main(int argc, char **argv) {
             }
         }
 
+        bool is_network_dir = parent_entry && strcmp(path, FILEMANAGER_NETWORK_DIR) == 0;
+
         size_t selected = 0;
         /* Plain dialog__choice(), not the picker's full-bleed action_params:
          * this is a small action menu over the already-visible file browser,
          * so it reads better as a popup window than another full screen. */
-        const bruce_dialog_choice_t *menu =
-            parent_entry ? directory_actions : (is_folder ? folder_actions : file_actions);
-        size_t menu_count = parent_entry ? sizeof(directory_actions) / sizeof(directory_actions[0])
-                            : is_folder   ? sizeof(folder_actions) / sizeof(folder_actions[0])
-                                          : file_actions_count;
+        const bruce_dialog_choice_t *menu = parent_entry
+                                                 ? (is_network_dir ? network_directory_actions : directory_actions)
+                                             : is_folder ? folder_actions
+                                                          : file_actions;
+        size_t menu_count =
+            parent_entry
+                ? (is_network_dir ? sizeof(network_directory_actions) / sizeof(network_directory_actions[0])
+                                   : sizeof(directory_actions) / sizeof(directory_actions[0]))
+            : is_folder ? sizeof(folder_actions) / sizeof(folder_actions[0])
+                        : file_actions_count;
         result = dialog__choice(path, NULL, menu, menu_count, &selected);
         if (result == BRUCE_ERR_CANCELLED && filemanager__resume_after_handoff()) {
             (void)input__flush();
@@ -650,6 +934,9 @@ int filemanager_app_main(int argc, char **argv) {
                 result = filemanager__new_entry(path, true);
             } else if (strcmp(action, "paste") == 0) {
                 result = filemanager__paste_here(path);
+            } else if (strcmp(action, "refresh") == 0) {
+                filemanager__network_refresh();
+                result = BRUCE_OK;
             }
         } else if (is_folder) {
             if (strcmp(action, "copy") == 0) {

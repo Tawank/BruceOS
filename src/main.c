@@ -41,6 +41,7 @@
 #include "modules/selftest/selftest.h"
 #include "modules/shell/shell_app.h"
 #include "modules/ssh/ssh_app.h"
+#include "modules/ssh/ssh_sftp_app.h"
 #include "modules/system_menu/system_menu_app.h"
 #include "modules/nc/nc_app.h"
 #include "modules/text/text_app.h"
@@ -142,6 +143,7 @@ static const bruce_app_descriptor_t s_default_apps[] = {
     {"curl", "Transfer data from URLs", "Network", bnu_curl_app_main, HTTP_STACK_BYTES},
     {"ssh", "Connect to an SSH server", "Network", ssh_app_main, SSH_STACK_BYTES},
     {"ssh-keygen", "Generate SSH keys", "Network", ssh_keygen_app_main, SSH_STACK_BYTES},
+    {"sftp", "Browse/download files over SFTP", "Network", sftp_app_main, SSH_STACK_BYTES},
     {"nc", "Connect to or listen on a TCP socket", "Network", nc_app_main, 0},
     {"webui", "Start the web interface", "Network", webui_app_main, 0},
     {"wget", "Download files from URLs", "Network", bnu_wget_app_main, HTTP_STACK_BYTES},

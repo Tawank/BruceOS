@@ -14,6 +14,7 @@ set(BRUCE_SELFTEST_SOURCES
     "modules/selftest/display_test.c"
     "modules/selftest/elf_loader_test.c"
     "modules/selftest/fake_elf.c"
+    "modules/selftest/filemanager_network_test.c"
     "modules/selftest/filetype_test.c"
     "modules/selftest/gpio_bus_test.c"
     "modules/selftest/hash_test.c"
@@ -34,6 +35,7 @@ set(BRUCE_SELFTEST_SOURCES
     "modules/selftest/storage_test.c"
     "modules/selftest/process_test.c"
     "modules/selftest/shell_test.c"
+    "modules/selftest/ssh_sftp_test.c"
     "modules/selftest/terminal_test.c"
     "modules/selftest/wasm_bruce_sdk_test.c"
     "modules/selftest/wifi_test.c")
@@ -196,6 +198,7 @@ idf_component_register(SRCS
                      "modules/system_menu/system_menu_app.c"
                      ${BRUCE_SELFTEST_SOURCES}
                     "modules/ssh/ssh_app.c"
+                    "modules/ssh/ssh_sftp_app.c"
                      "modules/nc/nc_app.c"
                      "modules/text/text_app.c"
                      "modules/utils/launcher/launcher_app.c"
@@ -306,7 +309,10 @@ set(WOLFSSH_COMPONENT_DIR "${CMAKE_CURRENT_LIST_DIR}/../managed_components/wolfs
 include("${CMAKE_CURRENT_LIST_DIR}/../components/wolfssl_esp_patches/patch_wolfssh_esp_idf6.cmake")
 
 idf_component_get_property(bruce_wolfssh_lib wolfssl__wolfssh COMPONENT_LIB)
-target_compile_definitions(${bruce_wolfssh_lib} PRIVATE WOLFSSH_TERM NO_TERMIOS WOLFSSL_ED25519_STREAMING_VERIFY)
+# wolfSSH's SFTP client (src/wolfsftp.c) is entirely `#ifdef WOLFSSH_SFTP`;
+# needed for the read-only SFTP browsing in modules/ssh/ssh_sftp_app.c
+# (via ssh__sftp_* in src/core/ssh/ssh.c).
+target_compile_definitions(${bruce_wolfssh_lib} PRIVATE WOLFSSH_TERM NO_TERMIOS WOLFSSH_SFTP WOLFSSL_ED25519_STREAMING_VERIFY)
 
 # wolfSSH's default per-channel flow-control window (DEFAULT_WINDOW_SZ,
 # wolfssh/internal.h) is 128KB, allocated as a single WMALLOC() in ChannelNew()
@@ -588,6 +594,11 @@ target_include_directories(bruce_sdk_builtin_nc_check PRIVATE
 
 add_library(bruce_sdk_builtin_ssh_check OBJECT "modules/ssh/ssh_app.c")
 target_include_directories(bruce_sdk_builtin_ssh_check PRIVATE
+                           "${CMAKE_CURRENT_LIST_DIR}"
+                           "${CMAKE_CURRENT_LIST_DIR}/modules/ssh")
+
+add_library(bruce_sdk_builtin_ssh_sftp_check OBJECT "modules/ssh/ssh_sftp_app.c")
+target_include_directories(bruce_sdk_builtin_ssh_sftp_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/ssh")
 

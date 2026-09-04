@@ -225,6 +225,13 @@
       "mimetypes": ["application/gzip"],
       "icon": "zip-box",
       "actions": [{"label": "Extract here", "program": "gunzip"}]
+    },
+    {
+      "description": "SFTP location",
+      "program": "sftp",
+      "extensions": [".sftp"],
+      "mimetypes": ["application/x-bruce-sftp"],
+      "icon": "server"
     }
   ]
 }

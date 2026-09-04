@@ -11,6 +11,7 @@
 #include "lwip/netdb.h"
 #include "lwip/sockets.h"
 #include "wolfssh/ssh.h"
+#include "wolfssh/wolfsftp.h"
 #include "wolfssl/wolfcrypt/asn_public.h"
 #include "wolfssl/wolfcrypt/ecc.h"
 #include "wolfssl/wolfcrypt/ed25519.h"
@@ -624,7 +625,8 @@ bruce_result_t ssh__verify_host_key_sha256(
     return BRUCE_OK;
 }
 
-static bruce_result_t ssh__authenticate(ssh__slot_t *slot, const char *username, uint32_t timeout_ms) {
+static bruce_result_t
+ssh__authenticate(ssh__slot_t *slot, const char *username, uint32_t timeout_ms, bool sftp) {
     if (!slot->host_key_verified) return BRUCE_ERR_INVALID_STATE;
     if (slot->ssh != NULL) return BRUCE_ERR_INVALID_STATE; /* already authenticated */
 
@@ -652,11 +654,21 @@ static bruce_result_t ssh__authenticate(ssh__slot_t *slot, const char *username,
         slot->fd = -1;
         return BRUCE_ERR_IO;
     }
-    /* wolfSSH negotiates KEX, userauth, channel-open, and the PTY/shell
-     * request together inside wolfSSH_connect(), so the channel type must be
-     * declared now even though ssh__open_shell() (which just applies the
-     * caller's requested PTY size) isn't called until later. */
-    (void)wolfSSH_SetChannelType(slot->ssh, WOLFSSH_SESSION_TERMINAL, NULL, 0);
+    /* wolfSSH negotiates KEX, userauth, channel-open, and the PTY/shell (or
+     * subsystem) request together inside wolfSSH_connect(), so the channel
+     * type must be declared now even though ssh__open_shell() (which just
+     * applies the caller's requested PTY size) isn't called until later --
+     * and, unlike PTY size, this can't be changed after the fact: a channel
+     * opened as a shell can't turn into the SFTP subsystem or vice versa, so
+     * the two families of authenticate function pick it here. */
+    if (sftp) {
+        static byte subsystem_name[] = "sftp";
+        (void)wolfSSH_SetChannelType(
+            slot->ssh, WOLFSSH_SESSION_SUBSYSTEM, subsystem_name, sizeof(subsystem_name) - 1
+        );
+    } else {
+        (void)wolfSSH_SetChannelType(slot->ssh, WOLFSSH_SESSION_TERMINAL, NULL, 0);
+    }
 
     int rc;
     while ((rc = wolfSSH_connect(slot->ssh)) != WS_SUCCESS) {
@@ -701,7 +713,24 @@ bruce_result_t ssh__authenticate_password(
     if (result != BRUCE_OK) return result;
     slot->auth_password = password;
     slot->auth_password_len = strlen(password);
-    result = ssh__authenticate(slot, username, timeout_ms);
+    result = ssh__authenticate(slot, username, timeout_ms, false);
+    slot->auth_password = NULL;
+    slot->auth_password_len = 0;
+    return result;
+}
+
+bruce_result_t ssh__sftp_authenticate_password(
+    bruce_ssh_id_t session, const char *username, const char *password, uint32_t timeout_ms
+) {
+    bruce_result_t permission = permission__check(BRUCE_PERMISSION_SSH);
+    if (permission != BRUCE_OK) return permission;
+    if (username == NULL || username[0] == '\0' || password == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    ssh__slot_t *slot;
+    bruce_result_t result = ssh__owned_slot(session, &slot);
+    if (result != BRUCE_OK) return result;
+    slot->auth_password = password;
+    slot->auth_password_len = strlen(password);
+    result = ssh__authenticate(slot, username, timeout_ms, true);
     slot->auth_password = NULL;
     slot->auth_password_len = 0;
     return result;
@@ -955,17 +984,11 @@ bruce_result_t ssh__generate_keypair_ex(
     return BRUCE_ERR_INVALID_ARGUMENT;
 }
 
-bruce_result_t ssh__authenticate_key(
-    bruce_ssh_id_t session, const char *username, const void *private_key,
-    size_t private_key_size, uint32_t timeout_ms
+static bruce_result_t ssh__authenticate_key_impl(
+    ssh__slot_t *slot, const char *username, const void *private_key, size_t private_key_size,
+    uint32_t timeout_ms, bool sftp
 ) {
-    bruce_result_t permission = permission__check(BRUCE_PERMISSION_SSH);
-    if (permission != BRUCE_OK) return permission;
-    if (username == NULL || username[0] == '\0' || private_key == NULL || private_key_size == 0)
-        return BRUCE_ERR_INVALID_ARGUMENT;
-    ssh__slot_t *slot;
-    bruce_result_t result = ssh__owned_slot(session, &slot);
-    if (result != BRUCE_OK) return result;
+    bruce_result_t result;
 
     uint8_t decoded[BRUCE_SSH_PRIVATE_KEY_MAX_SIZE];
     size_t decoded_size = 0;
@@ -1010,7 +1033,7 @@ bruce_result_t ssh__authenticate_key(
         slot->auth_public_key_len = blob_size;
         slot->auth_public_key_type = algorithm;
         slot->auth_public_key_type_len = algorithm_size;
-        result = ssh__authenticate(slot, username, timeout_ms);
+        result = ssh__authenticate(slot, username, timeout_ms, sftp);
     }
     slot->auth_private_key = NULL;
     slot->auth_private_key_len = 0;
@@ -1021,6 +1044,34 @@ bruce_result_t ssh__authenticate_key(
     memset(decoded, 0, sizeof(decoded));
     memset(blob, 0, sizeof(blob));
     return result;
+}
+
+bruce_result_t ssh__authenticate_key(
+    bruce_ssh_id_t session, const char *username, const void *private_key,
+    size_t private_key_size, uint32_t timeout_ms
+) {
+    bruce_result_t permission = permission__check(BRUCE_PERMISSION_SSH);
+    if (permission != BRUCE_OK) return permission;
+    if (username == NULL || username[0] == '\0' || private_key == NULL || private_key_size == 0)
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    ssh__slot_t *slot;
+    bruce_result_t result = ssh__owned_slot(session, &slot);
+    if (result != BRUCE_OK) return result;
+    return ssh__authenticate_key_impl(slot, username, private_key, private_key_size, timeout_ms, false);
+}
+
+bruce_result_t ssh__sftp_authenticate_key(
+    bruce_ssh_id_t session, const char *username, const void *private_key,
+    size_t private_key_size, uint32_t timeout_ms
+) {
+    bruce_result_t permission = permission__check(BRUCE_PERMISSION_SSH);
+    if (permission != BRUCE_OK) return permission;
+    if (username == NULL || username[0] == '\0' || private_key == NULL || private_key_size == 0)
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    ssh__slot_t *slot;
+    bruce_result_t result = ssh__owned_slot(session, &slot);
+    if (result != BRUCE_OK) return result;
+    return ssh__authenticate_key_impl(slot, username, private_key, private_key_size, timeout_ms, true);
 }
 
 bruce_result_t ssh__open_shell(
@@ -1128,4 +1179,175 @@ bruce_result_t ssh__close(bruce_ssh_id_t session) {
     bruce_result_t permission = permission__check(BRUCE_PERMISSION_SSH);
     if (permission != BRUCE_OK) return permission;
     return ssh__close_internal(session, true);
+}
+
+bruce_result_t ssh__sftp_open(bruce_ssh_id_t session, uint32_t timeout_ms) {
+    bruce_result_t permission = permission__check(BRUCE_PERMISSION_SSH);
+    if (permission != BRUCE_OK) return permission;
+    ssh__slot_t *slot;
+    bruce_result_t result = ssh__owned_slot(session, &slot);
+    if (result != BRUCE_OK) return result;
+    if (slot->ssh == NULL) return BRUCE_ERR_INVALID_STATE;
+
+    uint32_t effective_timeout = timeout_ms == 0 ? SSH__DEFAULT_CONNECT_TIMEOUT_MS : timeout_ms;
+    uint64_t deadline = runtime__now() + effective_timeout;
+
+    int rc;
+    while ((rc = wolfSSH_SFTP_connect(slot->ssh)) != WS_SUCCESS) {
+        int wolfssh_err = wolfSSH_get_error(slot->ssh);
+        if (wolfssh_err != WS_WANT_READ && wolfssh_err != WS_WANT_WRITE) break;
+        result = ssh__wait_socket(slot, deadline);
+        if (result != BRUCE_OK) break;
+    }
+    if (result == BRUCE_OK && rc != WS_SUCCESS) {
+        ESP_LOGE(
+            TAG, "sftp open for %s:%u failed (wolfssh rc=%d, %s)", slot->host, (unsigned int)slot->port, rc,
+            wolfSSH_get_error_name(slot->ssh)
+        );
+        result = BRUCE_ERR_IO;
+    }
+    return result;
+}
+
+bruce_result_t ssh__sftp_list(
+    bruce_ssh_id_t session, const char *path, bruce_ssh_sftp_entry_t *entries, size_t capacity,
+    size_t *out_count, uint32_t timeout_ms
+) {
+    bruce_result_t permission = permission__check(BRUCE_PERMISSION_SSH);
+    if (permission != BRUCE_OK) return permission;
+    if (path == NULL || entries == NULL || capacity == 0 || out_count == NULL)
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    *out_count = 0;
+    ssh__slot_t *slot;
+    bruce_result_t result = ssh__owned_slot(session, &slot);
+    if (result != BRUCE_OK) return result;
+    if (slot->ssh == NULL) return BRUCE_ERR_INVALID_STATE;
+
+    /* wolfSSH_SFTP_LS() takes a non-const char* only because it doesn't
+     * bother marking the parameter const, not because it writes through it;
+     * the cast idiom matches ssh__write()'s above. */
+    uint64_t deadline = runtime__now() + timeout_ms;
+    WS_SFTPNAME *names;
+    while ((names = wolfSSH_SFTP_LS(slot->ssh, (char *)(uintptr_t)path)) == NULL) {
+        int wolfssh_err = wolfSSH_get_error(slot->ssh);
+        if (wolfssh_err != WS_WANT_READ && wolfssh_err != WS_WANT_WRITE) {
+            ESP_LOGE(
+                TAG, "sftp list %s failed (wolfssh err=%d, %s)", path, wolfssh_err,
+                wolfSSH_get_error_name(slot->ssh)
+            );
+            return BRUCE_ERR_IO;
+        }
+        result = ssh__wait_socket(slot, deadline);
+        if (result != BRUCE_OK) return result;
+    }
+
+    size_t count = 0;
+    for (WS_SFTPNAME *cur = names; cur != NULL && count < capacity; cur = cur->next) {
+        if (cur->fSz == 1 && cur->fName[0] == '.') continue;
+        if (cur->fSz == 2 && cur->fName[0] == '.' && cur->fName[1] == '.') continue;
+        bruce_ssh_sftp_entry_t *entry = &entries[count];
+        size_t name_len =
+            cur->fSz < BRUCE_SSH_SFTP_NAME_MAX - 1u ? cur->fSz : BRUCE_SSH_SFTP_NAME_MAX - 1u;
+        memcpy(entry->name, cur->fName, name_len);
+        entry->name[name_len] = '\0';
+        entry->is_directory = (cur->atrb.per & FILEATRB_PER_MASK_TYPE) == FILEATRB_PER_DIR;
+        entry->size =
+            entry->is_directory ? 0 : (((uint64_t)cur->atrb.sz[1] << 32) | (uint64_t)cur->atrb.sz[0]);
+        ++count;
+    }
+    *out_count = count;
+    wolfSSH_SFTPNAME_list_free(names);
+    return BRUCE_OK;
+}
+
+bruce_result_t ssh__sftp_open_file(
+    bruce_ssh_id_t session, const char *path, bruce_ssh_sftp_file_t *out_file, uint32_t timeout_ms
+) {
+    bruce_result_t permission = permission__check(BRUCE_PERMISSION_SSH);
+    if (permission != BRUCE_OK) return permission;
+    if (path == NULL || out_file == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    ssh__slot_t *slot;
+    bruce_result_t result = ssh__owned_slot(session, &slot);
+    if (result != BRUCE_OK) return result;
+    if (slot->ssh == NULL) return BRUCE_ERR_INVALID_STATE;
+
+    uint64_t deadline = runtime__now() + timeout_ms;
+    word32 handle_size;
+    int rc;
+    do {
+        handle_size = sizeof(out_file->bytes);
+        rc = wolfSSH_SFTP_Open(
+            slot->ssh, (char *)(uintptr_t)path, WOLFSSH_FXF_READ, NULL, out_file->bytes, &handle_size
+        );
+        if (rc == WS_SUCCESS) break;
+        int wolfssh_err = wolfSSH_get_error(slot->ssh);
+        if (wolfssh_err != WS_WANT_READ && wolfssh_err != WS_WANT_WRITE) {
+            ESP_LOGE(
+                TAG, "sftp open file %s failed (wolfssh rc=%d, %s)", path, rc,
+                wolfSSH_get_error_name(slot->ssh)
+            );
+            return BRUCE_ERR_IO;
+        }
+        result = ssh__wait_socket(slot, deadline);
+        if (result != BRUCE_OK) return result;
+    } while (true);
+    out_file->size = handle_size;
+    return BRUCE_OK;
+}
+
+bruce_result_t ssh__sftp_read_file(
+    bruce_ssh_id_t session, const bruce_ssh_sftp_file_t *file, void *buffer, size_t capacity,
+    uint64_t offset, size_t *out_size, uint32_t timeout_ms
+) {
+    bruce_result_t permission = permission__check(BRUCE_PERMISSION_SSH);
+    if (permission != BRUCE_OK) return permission;
+    if (file == NULL || buffer == NULL || capacity == 0 || out_size == NULL)
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    *out_size = 0;
+    ssh__slot_t *slot;
+    bruce_result_t result = ssh__owned_slot(session, &slot);
+    if (result != BRUCE_OK) return result;
+    if (slot->ssh == NULL) return BRUCE_ERR_INVALID_STATE;
+
+    uint64_t deadline = runtime__now() + timeout_ms;
+    word32 ofst[2] = {(word32)(offset & 0xFFFFFFFFu), (word32)(offset >> 32)};
+    word32 request_size = capacity > WOLFSSH_MAX_SFTP_RW ? (word32)WOLFSSH_MAX_SFTP_RW : (word32)capacity;
+    int rc;
+    while ((rc = wolfSSH_SFTP_SendReadPacket(
+                slot->ssh, (byte *)(uintptr_t)file->bytes, file->size, ofst, (byte *)buffer, request_size
+            )) < 0) {
+        int wolfssh_err = wolfSSH_get_error(slot->ssh);
+        if (wolfssh_err != WS_WANT_READ && wolfssh_err != WS_WANT_WRITE) {
+            ESP_LOGE(TAG, "sftp read failed (wolfssh rc=%d, %s)", rc, wolfSSH_get_error_name(slot->ssh));
+            return BRUCE_ERR_IO;
+        }
+        result = ssh__wait_socket(slot, deadline);
+        if (result != BRUCE_OK) return result;
+    }
+    *out_size = (size_t)rc;
+    return BRUCE_OK;
+}
+
+bruce_result_t
+ssh__sftp_close_file(bruce_ssh_id_t session, const bruce_ssh_sftp_file_t *file, uint32_t timeout_ms) {
+    bruce_result_t permission = permission__check(BRUCE_PERMISSION_SSH);
+    if (permission != BRUCE_OK) return permission;
+    if (file == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    ssh__slot_t *slot;
+    bruce_result_t result = ssh__owned_slot(session, &slot);
+    if (result != BRUCE_OK) return result;
+    if (slot->ssh == NULL) return BRUCE_ERR_INVALID_STATE;
+
+    uint64_t deadline = runtime__now() + timeout_ms;
+    int rc;
+    while ((rc = wolfSSH_SFTP_Close(slot->ssh, (byte *)(uintptr_t)file->bytes, file->size)) != WS_SUCCESS) {
+        int wolfssh_err = wolfSSH_get_error(slot->ssh);
+        if (wolfssh_err != WS_WANT_READ && wolfssh_err != WS_WANT_WRITE) {
+            ESP_LOGE(TAG, "sftp close failed (wolfssh rc=%d, %s)", rc, wolfSSH_get_error_name(slot->ssh));
+            return BRUCE_ERR_IO;
+        }
+        result = ssh__wait_socket(slot, deadline);
+        if (result != BRUCE_OK) return result;
+    }
+    return BRUCE_OK;
 }

@@ -182,3 +182,136 @@ bruce_result_t ssh__write(
  * @permission ssh
  */
 bruce_result_t ssh__close(bruce_ssh_id_t session);
+
+/**
+ * @name SFTP
+ *
+ * An SSH channel is fixed at connect time to carry either an interactive
+ * shell (ssh__authenticate_password()/ssh__authenticate_key(), the SDK
+ * surface used by an interactive terminal) or the SFTP subsystem (this
+ * group) -- one session can never do both, and cannot switch after
+ * authenticating. A session destined for SFTP must authenticate with
+ * ssh__sftp_authenticate_password() or ssh__sftp_authenticate_key() instead
+ * of the plain ones above, then call ssh__sftp_open() once before any other
+ * function in this group. Read-only: there is no SFTP write/upload/rename/
+ * delete surface yet.
+ * @{
+ */
+
+#define BRUCE_SSH_SFTP_NAME_MAX 128
+#define BRUCE_SSH_SFTP_HANDLE_MAX 256
+
+/** Opaque remote file handle from ssh__sftp_open_file(). */
+typedef struct {
+    uint8_t bytes[BRUCE_SSH_SFTP_HANDLE_MAX];
+    uint32_t size;
+} bruce_ssh_sftp_file_t;
+
+/** One entry from ssh__sftp_list(); size is 0 and meaningless for a directory. */
+typedef struct {
+    char name[BRUCE_SSH_SFTP_NAME_MAX];
+    bool is_directory;
+    uint64_t size;
+} bruce_ssh_sftp_entry_t;
+
+/**
+ * @brief Authenticates a session for SFTP with a password.
+ *
+ * Field-for-field identical to ssh__authenticate_password(), except the
+ * channel this negotiates carries the SFTP subsystem instead of a shell --
+ * see the group doc comment above.
+ *
+ * @permission ssh
+ */
+bruce_result_t ssh__sftp_authenticate_password(
+    bruce_ssh_id_t session, const char *username, const char *password, uint32_t timeout_ms
+);
+
+/**
+ * @brief Authenticates a session for SFTP with a private key.
+ *
+ * Field-for-field identical to ssh__authenticate_key(), except the channel
+ * this negotiates carries the SFTP subsystem instead of a shell -- see the
+ * group doc comment above.
+ *
+ * @permission ssh
+ */
+bruce_result_t ssh__sftp_authenticate_key(
+    bruce_ssh_id_t session, const char *username, const void *private_key,
+    size_t private_key_size, uint32_t timeout_ms
+);
+
+/**
+ * @brief Completes the SFTP protocol handshake on an SFTP-authenticated session.
+ *
+ * Must be called once, after ssh__sftp_authenticate_password()/_key()
+ * succeeds and before any other function in this group.
+ *
+ * @param session SFTP-authenticated session.
+ * @param timeout_ms Handshake timeout in milliseconds.
+ * @permission ssh
+ */
+bruce_result_t ssh__sftp_open(bruce_ssh_id_t session, uint32_t timeout_ms);
+
+/**
+ * @brief Lists a remote directory.
+ *
+ * Neither "." nor ".." is included.
+ *
+ * @param session Session opened with ssh__sftp_open().
+ * @param path Absolute remote directory path.
+ * @param entries Array to receive directory entries.
+ * @param capacity Number of entries the entries array can hold.
+ * @param out_count Receives the number of entries written (capped to capacity).
+ * @param timeout_ms Request timeout in milliseconds.
+ * @permission ssh
+ */
+bruce_result_t ssh__sftp_list(
+    bruce_ssh_id_t session, const char *path, bruce_ssh_sftp_entry_t *entries, size_t capacity,
+    size_t *out_count, uint32_t timeout_ms
+);
+
+/**
+ * @brief Opens a remote file for reading.
+ *
+ * @param session Session opened with ssh__sftp_open().
+ * @param path Absolute remote file path.
+ * @param out_file Receives the new file handle.
+ * @param timeout_ms Request timeout in milliseconds.
+ * @permission ssh
+ */
+bruce_result_t ssh__sftp_open_file(
+    bruce_ssh_id_t session, const char *path, bruce_ssh_sftp_file_t *out_file, uint32_t timeout_ms
+);
+
+/**
+ * @brief Reads a chunk from a remote file opened with ssh__sftp_open_file().
+ *
+ * EOF is BRUCE_OK with *out_size == 0.
+ *
+ * @param session Session the file handle belongs to.
+ * @param file File handle from ssh__sftp_open_file().
+ * @param buffer Buffer to receive read bytes.
+ * @param capacity Size of buffer in bytes.
+ * @param offset Byte offset to read from.
+ * @param out_size Receives the number of bytes read.
+ * @param timeout_ms Request timeout in milliseconds.
+ * @permission ssh
+ */
+bruce_result_t ssh__sftp_read_file(
+    bruce_ssh_id_t session, const bruce_ssh_sftp_file_t *file, void *buffer, size_t capacity,
+    uint64_t offset, size_t *out_size, uint32_t timeout_ms
+);
+
+/**
+ * @brief Closes a remote file handle from ssh__sftp_open_file().
+ *
+ * @param session Session the file handle belongs to.
+ * @param file File handle to close.
+ * @param timeout_ms Request timeout in milliseconds.
+ * @permission ssh
+ */
+bruce_result_t
+ssh__sftp_close_file(bruce_ssh_id_t session, const bruce_ssh_sftp_file_t *file, uint32_t timeout_ms);
+
+/** @} */

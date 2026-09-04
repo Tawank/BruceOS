@@ -24,6 +24,7 @@
 #include "dialog_test.h"
 #include "display_test.h"
 #include "elf_loader_test.h"
+#include "filemanager_network_test.h"
 #include "filetype_test.h"
 #include "gpio_bus_test.h"
 #include "hash_test.h"
@@ -43,6 +44,7 @@
 #include "storage_test.h"
 #include "process_test.h"
 #include "shell_test.h"
+#include "ssh_sftp_test.h"
 #include "terminal_test.h"
 #include "wasm_bruce_sdk_test.h"
 #include "wifi_test.h"
@@ -216,6 +218,12 @@ int selftest_app_main(int argc, char **argv) {
     RUN_SELFTEST(selftest__run_tcp_permission_denied_case);
     RUN_SELFTEST(selftest__run_ssh_permission_denied_case);
     RUN_SELFTEST(selftest__run_ssh_keygen_case);
+    RUN_SELFTEST(selftest__run_sftp_host_pattern_case);
+    RUN_SELFTEST(selftest__run_sftp_config_value_case);
+    RUN_SELFTEST(selftest__run_sftp_port_case);
+    RUN_SELFTEST(selftest__run_sftp_known_hosts_format_case);
+    RUN_SELFTEST(selftest__run_filemanager_network_provider_parse_case);
+    RUN_SELFTEST(selftest__run_filemanager_network_sanitize_name_case);
     RUN_SELFTEST(selftest__run_ir_permission_denied_case);
     RUN_SELFTEST(selftest__run_ir_validation_case);
     RUN_SELFTEST(selftest__run_audio_validation_case);

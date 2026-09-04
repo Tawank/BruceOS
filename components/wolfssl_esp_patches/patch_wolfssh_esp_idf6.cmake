@@ -70,6 +70,43 @@ patch_wolfssh_file("src/internal.c"
     "#if defined(WOLFSSH_TERM) && !defined(NO_FILESYSTEM)"
     "#if defined(WOLFSSH_TERM)")
 
+# wolfSSH's SFTP client (src/wolfsftp.c, enabled via WOLFSSH_SFTP in
+# src/CMakeLists.txt for modules/ssh/ssh_sftp_app.c) is written with no
+# NO_FILESYSTEM-avoidance at all -- unlike wolfSSL/wolfSSH's cert/key-loading
+# helpers, its SFTP directory/file helpers (both the client Get/Put
+# convenience wrappers and the server-side request handlers, all compiled
+# into the same translation unit) call the real WFOPEN/WOPENDIR/WSTAT/etc.
+# family unconditionally, which port.h only defines when NO_FILESYSTEM is
+# *not* set. Left as-is, that's ~25 undefined-symbol/implicit-declaration
+# errors, escalating to a link failure for the six ssh__sftp_* entry points
+# this project actually calls (SFTP_connect/LS/Open/SendReadPacket/Close),
+# even though none of the newly-compiled server/Get/Put code ever runs.
+#
+# wolfSSL's own NO_FILESYSTEM (managed_components/wolfssl__wolfssl/include/
+# user_settings.h) exists to keep wolfSSL's cert/key loading off file paths
+# -- this board loads keys from its own core/storage into memory instead --
+# not because the board lacks real file I/O: core/storage/storage.c mounts
+# a real littlefs partition via ESP-IDF's VFS (esp_vfs_littlefs_register()),
+# and CONFIG_VFS_SUPPORT_DIR/CONFIG_VFS_SUPPORT_IO are on, so plain
+# fopen()/opendir()/stat() work. Undoing NO_FILESYSTEM after user_settings.h
+# is included, scoped to wolfSSH's own settings chain only (this file is
+# wolfSSH-private, unlike the shared user_settings.h), lets port.h's normal
+# stdio-backed macros compile instead -- wolfSSL's own object files are
+# unaffected, since each component's sources are preprocessed independently.
+# The only other `!defined(NO_FILESYSTEM)` guards this newly exposes are
+# ssh.c's wolfSSH_ReadKey_file() (an unused file-based key-loading helper)
+# and internal.c's SCP handler (dead anyway: WOLFSSH_SCP is never defined
+# in this project) -- both inert, not called by anything in core/ssh/ssh.c
+# or modules/ssh/*.
+patch_wolfssh_file("wolfssh/settings.h"
+    "#ifdef WOLFSSL_USER_SETTINGS
+    #include \"user_settings.h\""
+    "#ifdef WOLFSSL_USER_SETTINGS
+    #include \"user_settings.h\"
+    #ifdef WOLFSSH_SFTP
+        #undef NO_FILESYSTEM
+    #endif")
+
 patch_wolfssh_file("src/internal.c"
     "int SendChannelTerminalRequest(WOLFSSH* ssh)
 {
