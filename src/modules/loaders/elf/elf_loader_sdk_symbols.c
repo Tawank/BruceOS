@@ -420,6 +420,9 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
 
     /* Bluetooth advertisement scan and Classic HID host */
     ESP_ELFSYM_EXPORT(bluetooth__scan_ble),
+    ESP_ELFSYM_EXPORT(bluetooth__scan_start),
+    ESP_ELFSYM_EXPORT(bluetooth__scan_poll),
+    ESP_ELFSYM_EXPORT(bluetooth__scan_cancel),
     ESP_ELFSYM_EXPORT(bluetooth_hid__is_supported),
     ESP_ELFSYM_EXPORT(bluetooth_hid__scan),
     ESP_ELFSYM_EXPORT(bluetooth_hid__connect),

@@ -12,10 +12,9 @@
 #include "core_sdk/stdio.h"
 
 #define BLUETOOTH_APP__MAX_RESULTS 32
-/* bluetooth__scan_ble()'s scan window below, in both ms (the call's own
- * argument) and whole seconds (just for the popup's message text). */
+/* Scan window passed to bluetooth__scan_start()/bluetooth__scan_ble(). */
 #define BLUETOOTH_APP__SCAN_MS 5000u
-#define BLUETOOTH_APP__SCAN_SECONDS "5"
+#define BLUETOOTH_APP__SCAN_POLL_INTERVAL_MS 100u
 
 static bool bluetooth_app__resume_after_handoff(void) {
     bruce_process_snapshot_t snapshot;
@@ -67,6 +66,52 @@ static int bluetooth_app__scan_terminal(void) {
     return 0;
 }
 
+typedef struct {
+    bluetooth__device_t *devices;
+    size_t capacity;
+    int result;
+    bool active;
+} bluetooth_app_gui_scan_t;
+
+static bruce_result_t bluetooth_app__poll_scan(void *context, bool *out_complete) {
+    bluetooth_app_gui_scan_t *scan = context;
+    scan->result = bluetooth__scan_poll(scan->devices, scan->capacity, 0);
+    if (scan->result == BRUCE_ERR_TIMEOUT) { return BRUCE_OK; }
+    scan->active = false;
+    *out_complete = true;
+    return BRUCE_OK;
+}
+
+static void bluetooth_app__cancel_scan(void *context) {
+    bluetooth_app_gui_scan_t *scan = context;
+    if (scan->active) (void)bluetooth__scan_cancel();
+}
+
+/* Presents the scan as a live choice dialog instead of blocking on one long
+ * scan wait -- same shape as wifi_app__gui_scan() (wifi_app.c). Back leaves
+ * through dialog cleanup, which aborts only a scan that has not already
+ * completed. */
+static int bluetooth_app__gui_scan(bluetooth__device_t *devices, size_t capacity) {
+    bruce_result_t start = bluetooth__scan_start(BLUETOOTH_APP__SCAN_MS);
+    if (start != BRUCE_OK) return (int)start;
+    bluetooth_app_gui_scan_t scan = {
+        .devices = devices, .capacity = capacity, .result = BRUCE_ERR_TIMEOUT, .active = true
+    };
+    const bruce_dialog_choice_t choices[] = {
+        {.label = "Back", .value = "back"},
+    };
+    size_t selected = 0;
+    bool complete = false;
+    bruce_result_t dialog_result = dialog__choice_poll_launcher(
+        "BLE Scanning...", NULL, choices, sizeof(choices) / sizeof(choices[0]),
+        BLUETOOTH_APP__SCAN_POLL_INTERVAL_MS, bluetooth_app__poll_scan, &scan, bluetooth_app__cancel_scan, &selected,
+        &complete
+    );
+    if (dialog_result == BRUCE_ERR_CANCELLED || (dialog_result == BRUCE_OK && !complete)) return BRUCE_ERR_CANCELLED;
+    if (dialog_result != BRUCE_OK) return (int)dialog_result;
+    return scan.result;
+}
+
 /* devices/labels/choices are heap-allocated (rather than kept as ~6 KB of
  * combined locals) so this fits comfortably in the app's small process
  * stack; see memory__malloc()'s process-scoped allocator in core_sdk/memory.h. */
@@ -74,14 +119,11 @@ static int bluetooth_app__scan_gui(void) {
     bluetooth__device_t *devices = memory__calloc(BLUETOOTH_APP__MAX_RESULTS, sizeof(*devices));
     if (devices == NULL) return BRUCE_ERR_NO_MEMORY;
 
-    /* bluetooth__scan_ble() below is one opaque blocking call with no
-     * poll/cancel of its own, so there's no point mid-scan to redraw from --
-     * just a static popup naming the known scan window, better than the
-     * screen looking frozen for that whole stretch. */
-    (void)dialog__message_show(
-        BRUCE_DIALOG_INFO, "Bluetooth", "Loading...\nScanning BLE (" BLUETOOTH_APP__SCAN_SECONDS "s)..."
-    );
-    int count = bluetooth__scan_ble(devices, BLUETOOTH_APP__MAX_RESULTS, BLUETOOTH_APP__SCAN_MS);
+    int count = bluetooth_app__gui_scan(devices, BLUETOOTH_APP__MAX_RESULTS);
+    if (count == BRUCE_ERR_CANCELLED) {
+        memory__free(devices);
+        return 0;
+    }
     if (count < 0) {
         char message[48];
         snprintf(message, sizeof(message), "BLE scan failed (%d)", count);

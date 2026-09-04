@@ -102,6 +102,29 @@ static bruce_result_t archive_app__load_entries(const char *archive_path, bool z
     return result;
 }
 
+typedef struct {
+    const char *archive_path;
+    bool zip;
+    archive_app__entries_t *out;
+    bruce_result_t result;
+} archive_app__load_poll_t;
+
+/* archive__zip_list()/archive__tar_gz_list() are one opaque blocking call
+ * with no natural pause point to resume from later (see core_sdk/archive.h -
+ * a ".tar.gz" even decompresses to a scratch file first), unlike
+ * wifi__scan_poll()/bluetooth__scan_poll(). So this poll callback just does
+ * the whole load on its one tick; what's actually on screen the whole time
+ * is the dialog__message_show() the caller already drew before starting
+ * this, unchanged from before - this only swaps the "block right after
+ * showing it" mechanism for the same dialog__choice_poll_launcher() shape
+ * wifi/bluetooth scanning uses. */
+static bruce_result_t archive_app__poll_load(void *context, bool *out_complete) {
+    archive_app__load_poll_t *load = context;
+    load->result = archive_app__load_entries(load->archive_path, load->zip, load->out);
+    *out_complete = true;
+    return BRUCE_OK;
+}
+
 /* ------------------------------------------------------------------------ */
 /* Deriving one directory level's children from the flat entry list         */
 /* ------------------------------------------------------------------------ */
@@ -497,13 +520,27 @@ int archive_app_main(int argc, char **argv) {
     bool gui = runtime__gui_requested();
     const char *basename = archive_app__basename(archive_path);
 
+    archive_app__entries_t entries;
+    bruce_result_t result;
     if (gui) {
         char message[BRUCE_STORAGE_PATH_MAX + 16];
         snprintf(message, sizeof(message), "Loading...\n%s", basename);
         (void)dialog__message_show(BRUCE_DIALOG_INFO, "Archive", message);
+
+        archive_app__load_poll_t load = {.archive_path = archive_path, .zip = zip, .out = &entries, .result = BRUCE_OK};
+        const bruce_dialog_choice_t choices[] = {
+            {.label = "Back", .value = "back"},
+        };
+        size_t selected = 0;
+        bool complete = false;
+        result = dialog__choice_poll_launcher(
+            "Archive", NULL, choices, sizeof(choices) / sizeof(choices[0]), 1000, archive_app__poll_load, &load,
+            NULL, &selected, &complete
+        );
+        if (result == BRUCE_OK) result = load.result;
+    } else {
+        result = archive_app__load_entries(archive_path, zip, &entries);
     }
-    archive_app__entries_t entries;
-    bruce_result_t result = archive_app__load_entries(archive_path, zip, &entries);
     if (result != BRUCE_OK) {
         archive_app__show_error("Open archive", result);
         return result;
