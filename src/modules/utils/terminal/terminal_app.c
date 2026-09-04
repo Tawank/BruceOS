@@ -542,20 +542,29 @@ static void terminal__handle_selection_input(terminal__state_t *state, const bru
 static void terminal__open_actions_menu(terminal__state_t *state) {
     const bruce_dialog_choice_t choices[] = {
         {.label = "Type command...", .value = "type"  },
+        {.label = "Enter",           .value = "enter" },
         {.label = "Select text...",  .value = "select"},
         {.label = "Paste",           .value = "paste" },
+        {.label = "Exit terminal",   .value = "exit"  },
         {.label = "Cancel",          .value = "cancel"},
     };
     size_t selected = 0;
     bruce_result_t result =
         dialog__choice("Terminal", NULL, choices, sizeof(choices) / sizeof(choices[0]), &selected);
+    /* The dialog owns the most recently presented frame. Always repaint the
+     * terminal after it closes, including when Cancel/Back dismissed it. */
+    state->dirty = true;
     if (result != BRUCE_OK) return;
     if (strcmp(choices[selected].value, "type") == 0) {
         terminal__open_text_input(state);
+    } else if (strcmp(choices[selected].value, "enter") == 0) {
+        terminal__write_input(state, "\r", 1);
     } else if (strcmp(choices[selected].value, "select") == 0) {
         terminal__enter_selection(state);
     } else if (strcmp(choices[selected].value, "paste") == 0) {
         terminal__paste_clipboard(state);
+    } else if (strcmp(choices[selected].value, "exit") == 0) {
+        state->exit_requested = true;
     }
 }
 
@@ -593,8 +602,8 @@ static void terminal__handle_input(terminal__state_t *state, const bruce_input_e
             case BRUCE_INPUT_CODE_LEFT: sequence = "\033[D"; break;
             case BRUCE_INPUT_CODE_HOME: sequence = "\033[H"; break;
             case BRUCE_INPUT_CODE_DELETE: sequence = "\033[3~"; break;
-            case BRUCE_INPUT_CODE_PREV: sequence = "\033[5~"; break; /* Page Up */
-            case BRUCE_INPUT_CODE_NEXT: sequence = "\033[6~"; break; /* Page Down */
+            case BRUCE_INPUT_CODE_PREV: sequence = "\033[A"; break;
+            case BRUCE_INPUT_CODE_NEXT: sequence = "\033[B"; break;
             default: break;
         }
         if (sequence != NULL) terminal__write_input(state, sequence, strlen(sequence));
