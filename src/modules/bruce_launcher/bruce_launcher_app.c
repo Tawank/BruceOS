@@ -1033,26 +1033,35 @@ static int bruce_launcher__palette_filter(
     return count;
 }
 
-static void bruce_launcher__draw_palette(
+static uint32_t bruce_launcher__draw_palette(
     const bruce_launcher_menu_t *root, const bruce_launcher_palette_item_t *items, const int *filtered,
     int filtered_count, int selected, int *scroll_state, const char *query, const bruce_launcher_theme_t *theme
 ) {
     int w = display__width();
     int h = display__height();
     bruce_launcher__draw_main_border(theme);
+    /* The clock/battery/status-icon strip is untouched -- the palette is a
+     * screen below it, same as any submenu, not a takeover of it. */
+    uint32_t icon_revision = bruce_launcher__draw_status_bar(theme);
 
-    /* The query field replaces the clock/battery/icons row -- same strip the
-     * status bar normally occupies -- so the palette needs no layout of its
-     * own for it. */
+    /* Below the status bar this is laid out like a submenu
+     * (dialog__choice_launcher(), via Core's dialog__gui_choice()): a
+     * title-style line -- the query, where a submenu shows its own title --
+     * then a plain, compact list at the same row height/margins a submenu
+     * list uses, instead of the root menu's larger touch-sized rows. */
+    int content_left = BRUCE_LAUNCHER_BORDER_PAD + 1;
+    int content_right = w - BRUCE_LAUNCHER_BORDER_PAD - 1;
+
     display__set_text_size(BRUCE_LAUNCHER_FONT_SMALL);
     display__set_text_color(theme->pri);
     display__set_text_bg_color(theme->bg);
-    display__set_cursor(BRUCE_LAUNCHER_BORDER_PAD + 8, BRUCE_LAUNCHER_STATUS_TEXT_Y);
+    display__set_cursor(content_left + 2, BRUCE_LAUNCHER_STATUS_H + 3);
     char query_line[BRUCE_LAUNCHER_PALETTE_QUERY_MAX + 8];
     snprintf(query_line, sizeof(query_line), "Find: %s_", query);
     display__print(query_line);
 
-    int top = BRUCE_LAUNCHER_STATUS_H + 4;
+    int title_h = 8 * BRUCE_LAUNCHER_FONT_SMALL + 6;
+    int top = BRUCE_LAUNCHER_STATUS_H + 1 + title_h;
     int content_h = h - BRUCE_LAUNCHER_BORDER_PAD - 2 - top;
 
     if (filtered_count == 0) {
@@ -1062,11 +1071,11 @@ static void bruce_launcher__draw_palette(
         int text_w = (int)strlen(empty_label) * BRUCE_LAUNCHER_FONT_ADVANCE * BRUCE_LAUNCHER_FONT_SMALL;
         display__set_cursor((w - text_w) / 2, top + content_h / 2);
         display__print(empty_label);
-        return;
+        return icon_revision;
     }
 
-    int icon_size = display__width() < 180 ? 20 : 28;
-    int row_h = icon_size + 10;
+    int text_size = bruce_launcher__submenu_font_size();
+    int row_h = 8 * text_size + 4;
     if (row_h > content_h) row_h = content_h;
     int visible = row_h > 0 ? content_h / row_h : 1;
     if (visible < 1) visible = 1;
@@ -1076,10 +1085,12 @@ static void bruce_launcher__draw_palette(
     bruce_launcher__scroll_follow(selected, visible, filtered_count, scroll_state);
     int window_start = *scroll_state;
     int scrollbar_w = scrollable ? 10 : 0;
+    int list_right = content_right - scrollbar_w;
 
-    int icon_x = BRUCE_LAUNCHER_BORDER_PAD + 8 + icon_size / 2;
-    int text_x = BRUCE_LAUNCHER_BORDER_PAD + 8 + icon_size + 8;
-    int text_max_w = w - BRUCE_LAUNCHER_BORDER_PAD - 6 - scrollbar_w - text_x;
+    int icon_size = row_h - 2;
+    int icon_x = content_left + 2 + icon_size / 2;
+    int text_x = content_left + 2 + icon_size + 4;
+    int text_max_w = list_right - 2 - text_x;
 
     for (int i = 0; i < visible; ++i) {
         int index = window_start + i;
@@ -1089,10 +1100,12 @@ static void bruce_launcher__draw_palette(
         int row_y = top + i * row_h;
         int row_cy = row_y + row_h / 2;
 
+        /* Flat, full-bleed row fill -- no rounding, no inset -- matching the
+         * plain list rows a submenu draws, rather than the root menu's
+         * rounded selection card. */
         if (is_selected) {
-            display__fill_round_rect(
-                (int16_t)(BRUCE_LAUNCHER_BORDER_PAD + 3), (int16_t)(row_y + 1),
-                (int16_t)(w - 2 * BRUCE_LAUNCHER_BORDER_PAD - 6 - scrollbar_w), (int16_t)(row_h - 2), 4,
+            display__fill_rect(
+                (int16_t)content_left, (int16_t)row_y, (int16_t)(list_right - content_left), (int16_t)row_h,
                 theme->pri
             );
         }
@@ -1101,15 +1114,14 @@ static void bruce_launcher__draw_palette(
         char text[96];
         bruce_launcher__palette_item_text(root, item, text, sizeof(text));
         bruce_launcher__draw_label_left(
-            text, text_x, row_cy, BRUCE_LAUNCHER_FONT_SMALL, text_max_w, fg, is_selected ? theme->pri : theme->bg
+            text, text_x, row_cy, text_size, text_max_w, fg, is_selected ? theme->pri : theme->bg
         );
     }
 
     if (scrollable) {
-        bruce_launcher__draw_scrollbar(
-            w - BRUCE_LAUNCHER_BORDER_PAD - 6, top, content_h, window_start, visible, filtered_count, theme
-        );
+        bruce_launcher__draw_scrollbar(list_right + 3, top, content_h, window_start, visible, filtered_count, theme);
     }
+    return icon_revision;
 }
 
 /* Opens a live-filtering search over every command/submenu the launcher
@@ -1143,6 +1155,8 @@ static void bruce_launcher__run_command_palette(
     int selected = 0;
     int scroll_state = 0;
     bool redraw = true;
+    uint32_t icon_revision = UINT32_MAX;
+    uint64_t status_drawn_at = 0;
 
     (void)input__flush();
     for (;;) {
@@ -1153,10 +1167,29 @@ static void bruce_launcher__run_command_palette(
                 continue;
             }
             if (frame != BRUCE_OK) break;
-            bruce_launcher__draw_palette(root, items, filtered, filtered_count, selected, &scroll_state, query, theme);
+            icon_revision =
+                bruce_launcher__draw_palette(root, items, filtered, filtered_count, selected, &scroll_state, query, theme);
+            status_drawn_at = runtime__now();
             frame = display__present();
             if (frame != BRUCE_OK) break;
             redraw = false;
+        }
+
+        /* Same top-bar upkeep the root menu does while idle: the clock and
+         * status icons keep ticking even while the user is sitting in the
+         * palette not typing. */
+        size_t icon_count = 0;
+        uint32_t current_revision = 0;
+        uint64_t now = runtime__now();
+        if ((status_icon__list(NULL, 0, &icon_count, &current_revision) == BRUCE_OK &&
+             current_revision != icon_revision) ||
+            now - status_drawn_at >= BRUCE_LAUNCHER_STATUS_REFRESH_MS) {
+            bruce_result_t frame = display__begin_frame();
+            if (frame == BRUCE_OK) {
+                icon_revision = bruce_launcher__draw_status_bar(theme);
+                status_drawn_at = now;
+                (void)display__present();
+            }
         }
 
         bruce_input_event_t ev;
