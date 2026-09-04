@@ -8,6 +8,7 @@
 #include <strings.h>
 
 #include "cJSON.h"
+#include "core_sdk/icon.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/permission.h"
 #include "core_sdk/storage.h"
@@ -22,6 +23,10 @@
 
 #define MANIFEST_JS_MAX_BYTES 2048u
 #define MANIFEST_JS_GENERIC_ICON_BYTE 0xAAu
+/* Alternative "appIcon" form (see manifest__parse()'s doc comment): a
+ * built-in icon name instead of a base64 128-byte bitmap, e.g.
+ * "icon:clock-outline". */
+#define MANIFEST_ICON_NAME_PREFIX "icon:"
 
 static const uint8_t s_generic_icon[BRUCE_MANIFEST_ICON_BYTES] = {
     MANIFEST_JS_GENERIC_ICON_BYTE,
@@ -114,9 +119,20 @@ bruce_manifest_t *manifest__parse(const char *json, size_t json_len) {
         return NULL;
     }
 
-    if (!manifest__base64_decode_exact(
-            icon->valuestring, out_manifest->app_icon, BRUCE_MANIFEST_ICON_BYTES
-        )) {
+    if (strncmp(icon->valuestring, MANIFEST_ICON_NAME_PREFIX, sizeof(MANIFEST_ICON_NAME_PREFIX) - 1) == 0) {
+        const char *icon_name = icon->valuestring + (sizeof(MANIFEST_ICON_NAME_PREFIX) - 1);
+        if (icon_name[0] == '\0' || strlen(icon_name) >= BRUCE_MANIFEST_ICON_NAME_MAX ||
+            icon__get(icon_name) == NULL) {
+            memory__free(out_manifest);
+            cJSON_Delete(root);
+            return NULL;
+        }
+        snprintf(out_manifest->app_icon_name, sizeof(out_manifest->app_icon_name), "%s", icon_name);
+        /* app_icon stays all-zero -- out_manifest was memset() above, and
+         * app_icon_name being set is what tells callers to prefer it. */
+    } else if (!manifest__base64_decode_exact(
+                   icon->valuestring, out_manifest->app_icon, BRUCE_MANIFEST_ICON_BYTES
+               )) {
         memory__free(out_manifest);
         cJSON_Delete(root);
         return NULL;

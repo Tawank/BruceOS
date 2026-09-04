@@ -25,6 +25,13 @@ typedef struct {
     char label[APPS_LABEL_MAX + 7];
     char path[BRUCE_STORAGE_PATH_MAX];
     const char *type;
+    /* From the app's manifest.appIcon when it used the "icon:<name>" form
+     * (see core_sdk/manifest.h); empty when the manifest had no icon, used
+     * the base64 bitmap form (not renderable here -- see manifest.h), or
+     * couldn't be read at all -- apps_app_main()'s choices loop falls back
+     * to app_runner__icon_for_path() (the same per-extension icon every
+     * other file listing uses) in that case. */
+    char icon_name[BRUCE_MANIFEST_ICON_NAME_MAX];
 } apps_entry_t;
 
 static bool apps__has_extension(const char *name, const char *extension) {
@@ -68,6 +75,10 @@ static void apps__set_label(apps_entry_t *app, const char *filename, const char 
     snprintf(app->label, sizeof(app->label), "%s", app->name);
     app->type =
         strcasecmp(extension, ".wasm") == 0 ? "wasm" : (strcasecmp(extension, ".js") == 0 ? "js" : "elf");
+    snprintf(
+        app->icon_name, sizeof(app->icon_name), "%s",
+        inspection != NULL ? inspection->manifest.app_icon_name : ""
+    );
     memory__free(inspection);
 }
 
@@ -195,7 +206,8 @@ int apps_app_main(int argc, char **argv) {
     for (size_t i = 0; i < count; ++i) {
         choices[i].label = apps[i].label;
         choices[i].value = apps[i].path;
-        choices[i].icon_name = NULL;
+        choices[i].icon_name =
+            apps[i].icon_name[0] != '\0' ? apps[i].icon_name : app_runner__icon_for_path(apps[i].path);
         choices[i].right_text = NULL;
     }
 

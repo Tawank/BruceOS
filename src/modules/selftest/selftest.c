@@ -169,6 +169,7 @@ int selftest_app_main(int argc, char **argv) {
     RUN_SELFTEST(selftest__run_config_builtin_manage_case);
     RUN_SELFTEST(selftest__run_config_theme_case);
     RUN_SELFTEST(selftest__run_manifest_parse_case);
+    RUN_SELFTEST(selftest__run_manifest_parse_named_icon_case);
     RUN_SELFTEST(selftest__run_html_url_case);
     RUN_SELFTEST(selftest__run_html_parser_case);
     RUN_SELFTEST(selftest__run_loader_registry_extensibility_case);

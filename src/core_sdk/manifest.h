@@ -12,6 +12,7 @@
 #define BRUCE_CORE_ABI_VERSION 5u
 #define BRUCE_MANIFEST_APP_NAME_MAX 64
 #define BRUCE_MANIFEST_ICON_BYTES 128
+#define BRUCE_MANIFEST_ICON_NAME_MAX 32
 #define BRUCE_MANIFEST_MAX_PERMISSIONS BRUCE_PERMISSION_COUNT
 #define BRUCE_MANIFEST_PERMISSION_NAME_MAX 16
 #define BRUCE_MANIFEST_STACK_MIN 4096u
@@ -27,6 +28,13 @@
 typedef struct {
     char app_name[BRUCE_MANIFEST_APP_NAME_MAX];
     uint8_t app_icon[BRUCE_MANIFEST_ICON_BYTES];
+    /* Set (non-empty) only when the manifest's "appIcon" was the
+     * "icon:<name>" form rather than base64 -- see manifest__parse()'s doc
+     * comment. Holds a name looked up in core_sdk/icon.h's built-in icon
+     * registry, already validated to exist at parse time. Empty when
+     * "appIcon" was base64 instead, in which case app_icon above is what's
+     * authoritative. */
+    char app_icon_name[BRUCE_MANIFEST_ICON_NAME_MAX];
     uint32_t core_abi_version;
     uint32_t stack_size;
     /* Advisory expected peak memory__malloc()/memory__external_malloc() use;
@@ -52,17 +60,21 @@ typedef struct {
 /**
  * @brief Parses and validates canonical manifest JSON bytes.
  *
- * (see migration_plan.md, "ELF contract"): required appName/appIcon
- * (base64, decodes to exactly BRUCE_MANIFEST_ICON_BYTES bytes)/
+ * (see migration_plan.md, "ELF contract"): required appName/appIcon/
  * coreAbiVersion/stackSize (BRUCE_MANIFEST_STACK_MIN-
  * BRUCE_MANIFEST_STACK_MAX inclusive); an optional heapSize (0-
  * BRUCE_MANIFEST_HEAP_MAX inclusive, see bruce_manifest_t.heap_size); and an
  * optional permissions array (each name must be a known bruce_permission_t
- * name, no duplicates). Every caller extracts raw manifest bytes from the
- * file format and calls this one shared parser instead of reimplementing
- * JSON/base64 handling. Returns a process-owned manifest that must be
- * released with memory__free(), or NULL for invalid input or allocation
- * failure.
+ * name, no duplicates). appIcon is either base64 (decodes to exactly
+ * BRUCE_MANIFEST_ICON_BYTES bytes, stored in bruce_manifest_t.app_icon) or
+ * "icon:<name>" (e.g. "icon:clock-outline"), naming a built-in icon from
+ * core_sdk/icon.h's registry (stored in bruce_manifest_t.app_icon_name
+ * instead -- app_icon is left all-zero); an "icon:" name that doesn't
+ * resolve via icon__get() is rejected the same as malformed base64 would
+ * be. Every caller extracts raw manifest bytes from the file format and
+ * calls this one shared parser instead of reimplementing JSON/base64
+ * handling. Returns a process-owned manifest that must be released with
+ * memory__free(), or NULL for invalid input or allocation failure.
  *
  * @param json Canonical manifest JSON bytes.
  * @param json_len Number of bytes in json.

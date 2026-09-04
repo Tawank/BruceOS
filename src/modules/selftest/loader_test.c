@@ -156,6 +156,72 @@ bool selftest__run_manifest_parse_case(void) {
 }
 
 /* ------------------------------------------------------------------------ */
+/* manifest__parse(): "icon:<name>" appIcon form                            */
+/* ------------------------------------------------------------------------ */
+
+bool selftest__run_manifest_parse_named_icon_case(void) {
+    /* A known built-in icon name is accepted, stored in app_icon_name, and
+     * leaves app_icon (the base64-bitmap field) all-zero. */
+    const char *json = "{\"appName\":\"x\",\"appIcon\":\"icon:clock-outline\",\"coreAbiVersion\":2,"
+                        "\"stackSize\":8192}";
+    bruce_manifest_t *manifest = manifest__parse(json, strlen(json));
+    bool icon_all_zero = manifest != NULL;
+    for (size_t i = 0; manifest != NULL && i < BRUCE_MANIFEST_ICON_BYTES; ++i) {
+        if (manifest->app_icon[i] != 0) {
+            icon_all_zero = false;
+            break;
+        }
+    }
+    bool named_ok =
+        manifest != NULL && strcmp(manifest->app_icon_name, "clock-outline") == 0 && icon_all_zero;
+    memory__free(manifest);
+    if (!named_ok) {
+        printf("[selftest] loader/manifest_parse_named_icon: known icon name rejected or mismatched\n");
+        return false;
+    }
+
+    /* An unregistered icon name is rejected, same as malformed base64. */
+    const char *unknown_json = "{\"appName\":\"x\",\"appIcon\":\"icon:not-a-real-icon\","
+                                "\"coreAbiVersion\":2,\"stackSize\":8192}";
+    bool unknown_rejected = manifest__parse(unknown_json, strlen(unknown_json)) == NULL;
+
+    /* An empty name after the "icon:" prefix is rejected. */
+    const char *empty_json = "{\"appName\":\"x\",\"appIcon\":\"icon:\",\"coreAbiVersion\":2,"
+                              "\"stackSize\":8192}";
+    bool empty_rejected = manifest__parse(empty_json, strlen(empty_json)) == NULL;
+
+    /* A name too long for app_icon_name's buffer is rejected rather than
+     * silently truncated. */
+    char long_json[256];
+    snprintf(
+        long_json, sizeof(long_json), "{\"appName\":\"x\",\"appIcon\":\"icon:%0*d\",\"coreAbiVersion\":2,"
+        "\"stackSize\":8192}",
+        (int)BRUCE_MANIFEST_ICON_NAME_MAX, 0
+    );
+    bool too_long_rejected = manifest__parse(long_json, strlen(long_json)) == NULL;
+
+    /* Plain base64 (unaffected by this change) still leaves app_icon_name
+     * empty. */
+    char icon_b64[200];
+    selftest__loader_test_icon_base64(icon_b64, sizeof(icon_b64));
+    char base64_json[512];
+    snprintf(
+        base64_json, sizeof(base64_json),
+        "{\"appName\":\"x\",\"appIcon\":\"%s\",\"coreAbiVersion\":2,\"stackSize\":8192}", icon_b64
+    );
+    bruce_manifest_t *base64_manifest = manifest__parse(base64_json, strlen(base64_json));
+    bool base64_name_empty = base64_manifest != NULL && base64_manifest->app_icon_name[0] == '\0';
+    memory__free(base64_manifest);
+
+    bool ok = unknown_rejected && empty_rejected && too_long_rejected && base64_name_empty;
+    printf(
+        "[selftest] loader/manifest_parse_named_icon: %s (unknown=%d empty=%d too_long=%d base64_empty=%d)\n",
+        ok ? "OK" : "FAIL", unknown_rejected, empty_rejected, too_long_rejected, base64_name_empty
+    );
+    return ok;
+}
+
+/* ------------------------------------------------------------------------ */
 /* Loader registry: proves a third-party loader can register a brand new    */
 /* extension using only the public API, with no Core changes (A6 accept.).  */
 /* ------------------------------------------------------------------------ */

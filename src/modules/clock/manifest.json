@@ -1,7 +1,7 @@
 {
   "appName": "Clock",
   "entryPoint": "clock_app_main",
-  "appIcon": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+  "appIcon": "icon:clock-outline",
   "coreAbiVersion": 4,
   "permissions": ["config"],
   "stackSize": 8192,
