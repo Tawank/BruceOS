@@ -28,6 +28,9 @@ typedef struct {
     const char *right_text; /* Optional short GUI/terminal status text. */
 } bruce_dialog_choice_t;
 
+/** Buffer size for an icon name, e.g. bruce_dialog_render_params_t.icon_for_path's out_icon. */
+#define BRUCE_DIALOG_ICON_NAME_MAX 32
+
 typedef void (*bruce_dialog_render_callback_t)(void *context);
 
 /**
@@ -78,6 +81,19 @@ typedef struct {
      * row rather than a real file or directory. The returned path is the
      * directory that was being displayed. */
     bool *out_parent_entry;
+    /* Optional per-entry icon override for dialog__pick_file_ex()'s GUI
+     * listing. Called with each real row's full path (never the synthetic
+     * `[..]` row) before the picker's own default icon_name logic runs;
+     * fills `out_icon` (a BRUCE_DIALOG_ICON_NAME_MAX-byte buffer) and
+     * returns true to use it, or returns false to fall through to the
+     * default (a per-extension icon for a file, "folder" for a directory).
+     * Writing into a caller-owned buffer rather than returning a pointer
+     * keeps every listed row's icon independently valid for as long as the
+     * listing stays on screen, since the picker builds every row's choice
+     * entry before any of them are drawn. Ignored by every other
+     * dialog__* call. May be NULL. */
+    bool (*icon_for_path)(const char *path, bool is_directory, char *out_icon, size_t out_icon_size, void *context);
+    void *icon_for_path_context;
 } bruce_dialog_render_params_t;
 
 /**
@@ -215,8 +231,10 @@ bruce_result_t dialog__pick_file(
  * styles dialog__choice() (NULL behaves exactly like dialog__pick_file())
  * - its `render_callback`/`render_callback_context` are reserved for the
  * picker's own use (it draws the current volume's name and used/total
- * space in the bottom bar) and are overridden if set. Ignored on
- * non-GUI/terminal picks.
+ * space in the bottom bar) and are overridden if set. `icon_for_path`/
+ * `icon_for_path_context`, if set, are consulted for every listed entry
+ * before the picker's default icon choice - see their doc comment above.
+ * Ignored on non-GUI/terminal picks.
  *
  * `render_params->long_press_enabled` additionally changes what a long
  * press on a *directory* row does: instead of descending into it, the

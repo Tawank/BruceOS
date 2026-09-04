@@ -15,6 +15,7 @@ set(BRUCE_SELFTEST_SOURCES
     "modules/selftest/elf_loader_test.c"
     "modules/selftest/fake_elf.c"
     "modules/selftest/filemanager_network_test.c"
+    "modules/selftest/filemanager_pathicons_test.c"
     "modules/selftest/filetype_test.c"
     "modules/selftest/gpio_bus_test.c"
     "modules/selftest/hash_test.c"
@@ -154,6 +155,7 @@ idf_component_register(SRCS
                      "modules/filemanager/filemanager_actions.c"
                      "modules/filemanager/filemanager_clipboard.c"
                      "modules/filemanager/filemanager_network.c"
+                     "modules/filemanager/filemanager_pathicons.c"
                      "modules/browser/browser_app.c"
                      "modules/browser/browser_debug.c"
                      "modules/browser/browser_document.c"
@@ -503,7 +505,8 @@ add_library(bruce_sdk_builtin_filemanager_check OBJECT
             "modules/filemanager/filemanager_app.c"
             "modules/filemanager/filemanager_actions.c"
             "modules/filemanager/filemanager_clipboard.c"
-            "modules/filemanager/filemanager_network.c")
+            "modules/filemanager/filemanager_network.c"
+            "modules/filemanager/filemanager_pathicons.c")
 add_dependencies(bruce_sdk_builtin_filemanager_check bruce_embedded_resources)
 target_include_directories(bruce_sdk_builtin_filemanager_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"

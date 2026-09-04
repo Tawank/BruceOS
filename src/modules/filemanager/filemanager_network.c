@@ -8,6 +8,7 @@
 
 #include "cJSON.h"
 
+#include "core_sdk/app_config.h"
 #include "core_sdk/app_runner.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/process.h"
@@ -24,11 +25,15 @@
  *
  * "/Network" is a plain directory, populated on entry with one plain file
  * per remote location a *provider* discovers -- filemanager itself has no
- * idea what SSH or SFTP are. Providers are configured in
- * "/config/filemanager.conf" as a JSON array of
- * {"name", "program", "discovery"} objects (seeded from this module's own
- * embedded default -- see FILEMANAGER_NETWORK_DEFAULT_CONFIG_JSON below --
- * the first time it's read), e.g.:
+ * idea what SSH or SFTP are. Providers are configured under
+ * "/config/filemanager.conf"'s "providers" key -- read/written through
+ * core_sdk/app_config.h, addressed as app_name "filemanager" -- as a JSON
+ * array of {"name", "program", "discovery"} objects, seeded from this
+ * module's own embedded default (FILEMANAGER_NETWORK_PROVIDERS_DEFAULT_JSON
+ * below) the first time that key is read -- the same "get, and set back if
+ * absent" idiom modules/system_menu/system_menu_app.c uses for its own
+ * "items" key, and modules/filemanager/filemanager_pathicons.c uses for the
+ * sibling "pathicons" key -- e.g.:
  *
  *   [{"name": "sftp", "program": "sftp", "discovery": "sftp list --autodiscover"}]
  *
@@ -53,10 +58,10 @@
  * @{
  */
 
-#define FILEMANAGER_NETWORK_CONF "/config/filemanager.conf"
-#define FILEMANAGER_NETWORK_DEFAULT_CONFIG_JSON json_filemanager_json
+#define FILEMANAGER_NETWORK_APP_NAME "filemanager"
+#define FILEMANAGER_NETWORK_PROVIDERS_DEFAULT_JSON json_filemanager_json
 #define FILEMANAGER_NETWORK_PROVIDER_MAX 8
-#define FILEMANAGER_NETWORK_CONFIG_MAX_BYTES 2047u
+#define FILEMANAGER_NETWORK_PROVIDERS_JSON_MAX_BYTES 2047u
 #define FILEMANAGER_NETWORK_CAPTURE_MAX 4096
 /* FILEMANAGER_NETWORK_PROVIDER_NAME_MAX/DISCOVERY_MAX, the provider struct,
  * and the pure parsing helpers now live in filemanager_network_internal.h --
@@ -131,63 +136,36 @@ bool filemanager_network__parse_providers_json(
     return true;
 }
 
-/* Reads "/config/filemanager.conf", seeding it from this module's embedded
- * default the first time (same convention core/filetype/filetype.c uses for
- * "/config/extensions.conf"), and parses it. Falls back to the embedded
- * default's own providers (never touching storage a second time) if the
- * file exists but fails to read or doesn't parse, so a hand-edited config
- * with a syntax error degrades to "as if unconfigured" rather than leaving
+/* Reads "/config/filemanager.conf"'s "providers" key via app_config,
+ * seeding it with FILEMANAGER_NETWORK_PROVIDERS_DEFAULT_JSON the first time
+ * (i.e. whenever the app has no config file yet, or has one but no
+ * "providers" key in it) so the value is visible and hand-editable there
+ * afterward. Falls back to that same default (without writing it) if the
+ * stored value exists but fails to parse, so a hand-edited config with a
+ * syntax error degrades to "as if unconfigured" rather than leaving
  * "/Network" silently empty. */
 static void filemanager_network__load_providers(
     filemanager_network__provider_t providers[], size_t max_providers, size_t *out_count
 ) {
     *out_count = 0;
-    bool exists = false;
-    if (storage__exists(FILEMANAGER_NETWORK_CONF, &exists) != BRUCE_OK || !exists) {
-        (void)storage__mkdir("/config");
-        bruce_file_id_t seed = BRUCE_FILE_ID_INVALID;
-        if (storage__open(
-                FILEMANAGER_NETWORK_CONF, BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE | BRUCE_STORAGE_OPEN_TRUNCATE,
-                &seed
-            ) == BRUCE_OK) {
-            size_t written = 0;
-            (void)storage__write(
-                seed, FILEMANAGER_NETWORK_DEFAULT_CONFIG_JSON, strlen(FILEMANAGER_NETWORK_DEFAULT_CONFIG_JSON), &written
-            );
-            (void)storage__close(seed);
-        }
-    }
-
-    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
-    if (storage__open(FILEMANAGER_NETWORK_CONF, BRUCE_STORAGE_OPEN_READ, &file) != BRUCE_OK) {
-        (void)filemanager_network__parse_providers_json(
-            FILEMANAGER_NETWORK_DEFAULT_CONFIG_JSON, providers, max_providers, out_count
-        );
-        return;
-    }
-    char *text = memory__malloc(FILEMANAGER_NETWORK_CONFIG_MAX_BYTES + 1u);
-    if (text == NULL) {
-        (void)storage__close(file);
-        return;
-    }
-    size_t total = 0;
-    for (;;) {
-        size_t chunk = 0;
-        if (storage__read(file, text + total, FILEMANAGER_NETWORK_CONFIG_MAX_BYTES - total, &chunk) != BRUCE_OK ||
-            chunk == 0)
-            break;
-        total += chunk;
-        if (total >= FILEMANAGER_NETWORK_CONFIG_MAX_BYTES) break;
-    }
-    (void)storage__close(file);
-    text[total] = '\0';
-
-    if (!filemanager_network__parse_providers_json(text, providers, max_providers, out_count)) {
-        (void)filemanager_network__parse_providers_json(
-            FILEMANAGER_NETWORK_DEFAULT_CONFIG_JSON, providers, max_providers, out_count
+    char *json = memory__malloc(FILEMANAGER_NETWORK_PROVIDERS_JSON_MAX_BYTES + 1u);
+    if (json == NULL) return;
+    bool configured = app_config__get_json(
+        FILEMANAGER_NETWORK_APP_NAME, "providers", FILEMANAGER_NETWORK_PROVIDERS_DEFAULT_JSON, json,
+        FILEMANAGER_NETWORK_PROVIDERS_JSON_MAX_BYTES + 1u
+    );
+    if (!configured) {
+        (void)app_config__set_json(
+            FILEMANAGER_NETWORK_APP_NAME, "providers", FILEMANAGER_NETWORK_PROVIDERS_DEFAULT_JSON
         );
     }
-    memory__free(text);
+
+    if (!filemanager_network__parse_providers_json(json, providers, max_providers, out_count)) {
+        (void)filemanager_network__parse_providers_json(
+            FILEMANAGER_NETWORK_PROVIDERS_DEFAULT_JSON, providers, max_providers, out_count
+        );
+    }
+    memory__free(json);
 }
 
 static const filemanager_network__provider_t *filemanager_network__find_provider(

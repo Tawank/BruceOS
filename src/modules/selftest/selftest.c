@@ -25,6 +25,7 @@
 #include "display_test.h"
 #include "elf_loader_test.h"
 #include "filemanager_network_test.h"
+#include "filemanager_pathicons_test.h"
 #include "filetype_test.h"
 #include "gpio_bus_test.h"
 #include "hash_test.h"
@@ -228,6 +229,8 @@ int selftest_app_main(int argc, char **argv) {
     RUN_SELFTEST(selftest__run_filemanager_network_provider_parse_case);
     RUN_SELFTEST(selftest__run_filemanager_network_sanitize_name_case);
     RUN_SELFTEST(selftest__run_filemanager_network_split_entry_name_case);
+    RUN_SELFTEST(selftest__run_filemanager_pathicons_parse_case);
+    RUN_SELFTEST(selftest__run_filemanager_pathicons_match_case);
     RUN_SELFTEST(selftest__run_ir_permission_denied_case);
     RUN_SELFTEST(selftest__run_ir_validation_case);
     RUN_SELFTEST(selftest__run_audio_validation_case);

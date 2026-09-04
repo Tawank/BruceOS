@@ -1096,11 +1096,13 @@ static bruce_result_t dialog__gui_pick_file_run(
 
         bruce_dialog_choice_t *choices = memory__calloc(count + 1, sizeof(bruce_dialog_choice_t));
         char (*size_texts)[16] = memory__calloc(count + 1, sizeof(*size_texts));
+        char (*icon_texts)[BRUCE_DIALOG_ICON_NAME_MAX] = memory__calloc(count + 1, sizeof(*icon_texts));
         const char **values = memory__malloc((count + 1) * sizeof(const char *));
-        if (choices == NULL || size_texts == NULL || values == NULL) {
+        if (choices == NULL || size_texts == NULL || icon_texts == NULL || values == NULL) {
             memory__free(entries);
             memory__free(choices);
             memory__free(size_texts);
+            memory__free(icon_texts);
             memory__free(values);
             return BRUCE_ERR_NO_MEMORY;
         }
@@ -1122,9 +1124,34 @@ static bruce_result_t dialog__gui_pick_file_run(
             values[choice_count] = entries[i].name;
             choices[choice_count].label = entries[i].name;
             choices[choice_count].value = entries[i].name;
-            choices[choice_count].icon_name = entries[i].type == BRUCE_STORAGE_ENTRY_DIRECTORY
-                                                  ? "folder"
-                                                  : app_runner__icon_for_path(entries[i].name);
+            bool has_icon_override = false;
+            if (effective_params->icon_for_path != NULL) {
+                /* Sized for the true worst case (current_path up to
+                 * BRUCE_STORAGE_PATH_MAX-1 chars, "/", entries[i].name up to
+                 * BRUCE_STORAGE_NAME_MAX-1 chars, NUL) rather than
+                 * BRUCE_STORAGE_PATH_MAX itself: unlike every other path this
+                 * function builds, current_path here isn't already known to
+                 * leave room for one more component, so a same-size buffer
+                 * risks a genuine (not just GCC-format-truncation-checker-
+                 * blind) truncation deep enough in the tree. Truncation would
+                 * still be harmless -- entry_path is only used for an exact-
+                 * match icon_for_path() lookup below -- but sizing it to
+                 * always fit is simpler than reasoning about that. */
+                char entry_path[BRUCE_STORAGE_PATH_MAX + BRUCE_STORAGE_NAME_MAX];
+                if (strcmp(ws->current_path, "/") == 0) {
+                    snprintf(entry_path, sizeof(entry_path), "/%s", entries[i].name);
+                } else {
+                    snprintf(entry_path, sizeof(entry_path), "%s/%s", ws->current_path, entries[i].name);
+                }
+                has_icon_override = effective_params->icon_for_path(
+                    entry_path, entries[i].type == BRUCE_STORAGE_ENTRY_DIRECTORY, icon_texts[choice_count],
+                    sizeof(icon_texts[choice_count]), effective_params->icon_for_path_context
+                );
+            }
+            choices[choice_count].icon_name =
+                has_icon_override ? icon_texts[choice_count]
+                : entries[i].type == BRUCE_STORAGE_ENTRY_DIRECTORY ? "folder"
+                                                                    : app_runner__icon_for_path(entries[i].name);
             if (entries[i].type == BRUCE_STORAGE_ENTRY_FILE) {
                 dialog__pick_file_format_bytes(
                     entries[i].size, size_texts[choice_count], sizeof(size_texts[choice_count])
@@ -1169,6 +1196,7 @@ static bruce_result_t dialog__gui_pick_file_run(
         const char *picked = values[out_selected];
         memory__free(values);
         memory__free(size_texts);
+        memory__free(icon_texts);
         memory__free(choices);
 
         if (choice_result != BRUCE_OK) {

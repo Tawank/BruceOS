@@ -19,6 +19,7 @@
 #include "filemanager_clipboard.h"
 #include "filemanager_internal.h"
 #include "filemanager_network.h"
+#include "filemanager_pathicons.h"
 
 /* filemanager_app_main()'s dispatch loop, plus the handful of small helpers
  * every other file of this module needs at least one of (see
@@ -165,6 +166,10 @@ int filemanager_app_main(int argc, char **argv) {
     action_params.long_press_enabled = true;
     bool parent_entry = false;
     action_params.out_parent_entry = &parent_entry;
+    /* Lets a configured "/config/filemanager.conf" "pathicons" entry (e.g.
+     * "/Network") override the listing's default folder/per-extension icon
+     * for that exact path -- see filemanager_pathicons.h. */
+    action_params.icon_for_path = filemanager_pathicons__icon_for_path;
     /* The last file/folder picked, re-passed as dialog__pick_file_ex()'s
      * starting point below: it browses that entry's directory with the
      * entry itself pre-selected, so Esc/"Back" out of the action menu lands
