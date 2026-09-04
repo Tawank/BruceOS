@@ -184,6 +184,7 @@ int selftest_app_main(int argc, char **argv) {
     RUN_SELFTEST(selftest__run_terminal_stdio_case);
     RUN_SELFTEST(selftest__run_terminal_stdio_cancel_case);
     RUN_SELFTEST(selftest__run_terminal_editing_case);
+    RUN_SELFTEST(selftest__run_terminal_ansi_escapes_case);
     RUN_SELFTEST(selftest__run_shell_language_case);
     RUN_SELFTEST(selftest__run_shell_script_case);
     RUN_SELFTEST(selftest__run_shell_control_flow_case);

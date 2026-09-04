@@ -22,6 +22,15 @@
  * SGR, tab stops other than fixed 8-column, IRM/LNM, and any scrollback
  * beyond the current screen -- none of these are needed for htop/less/vim/
  * tmux to render correctly, which is the bar this was built to clear.
+ *
+ * VT100 G0/G1 charset designation (ESC ( / ESC ), SO/SI) *is* implemented
+ * (mapped to Unicode box-drawing/symbol glyphs -- see
+ * terminal_grid__acs_translate()), since it's how "xterm" (the only
+ * terminal type this emulator ever advertises -- see
+ * SendChannelTerminalRequest()'s "xterm" fallback in wolfSSH) draws line
+ * art: htop's borders and tmux's pane/status separators both go through it.
+ * CSI Pn b (REP) is implemented too, for the same reason -- curses commonly
+ * uses it to lay down a run of the last character cheaply.
  */
 
 #define TERMINAL_ANSI_COLOR_DEFAULT ((int16_t)-1)
@@ -50,6 +59,12 @@ typedef enum {
     TERMINAL_ANSI_ESCAPE,
     TERMINAL_ANSI_CSI,
     TERMINAL_ANSI_OSC,
+    /* Mid `ESC ( <c>` / `ESC ) <c>` (VT100 G0/G1 charset designation --
+     * smacs/rmacs, e.g. `\E(0`/`\E(B` in the "xterm" terminfo entry this
+     * emulator is told it is): waiting for the single designator byte `<c>`
+     * that names the charset. */
+    TERMINAL_ANSI_CHARSET_G0,
+    TERMINAL_ANSI_CHARSET_G1,
 } terminal_ansi_parse_state_t;
 
 typedef struct {
@@ -107,6 +122,21 @@ typedef struct {
     uint8_t utf8_pending[4];
     uint8_t utf8_pending_len;
     uint8_t utf8_expected_len;
+
+    /* VT100 G0/G1 charset designation and GL shift state (ESC ( / ESC ) to
+     * set which charset each slot names, SO/SI -- 0x0e/0x0f -- to pick which
+     * slot is active). '0' means DEC Special Graphics (line drawing); any
+     * other value (typically 'B', US ASCII) means plain passthrough. See
+     * terminal_grid__acs_translate() in the .c file. */
+    uint8_t g0_charset;
+    uint8_t g1_charset;
+    bool shift_out;
+
+    /* Last glyph actually placed on the grid, for CSI Pn b (REP -- repeat
+     * the preceding graphic character Pn times), which curses apps commonly
+     * use to draw fills/rules without spelling out every cell. */
+    uint8_t last_glyph[4];
+    uint8_t last_glyph_len;
 
     /* Bytes the emulator wants written back to the child (cursor position
      * reports for CSI 6n, device attributes for CSI c, ...). The caller

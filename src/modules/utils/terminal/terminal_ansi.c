@@ -137,11 +137,70 @@ static void terminal_grid__put_glyph(terminal_grid_t *grid, const uint8_t *bytes
     cell->fg = grid->fg;
     cell->bg = grid->bg;
     cell->attrs = grid->attrs;
+    memcpy(grid->last_glyph, bytes, len);
+    grid->last_glyph_len = len;
     if ((uint16_t)(grid->cursor_x + 1) >= grid->columns) {
         if (grid->autowrap) grid->pending_wrap = true;
     } else {
         grid->cursor_x++;
     }
+}
+
+/* -------------------------------------------------------------------------
+ * VT100 DEC Special Graphics charset (line drawing / ACS)
+ * ------------------------------------------------------------------------- */
+
+/* DEC Special Graphics only ever remaps 0x60-0x7e ('`' through '~'); 0x20-
+ * 0x5f are identical to ASCII in that charset. Each entry is the UTF-8
+ * encoding of the glyph real terminals (xterm, screen, tmux's own emulation)
+ * show for that code -- this is the standard vt100/xterm `acsc` mapping, not
+ * a guess, so it matches what htop/tmux actually intend to draw. Indexed by
+ * byte - 0x60. */
+static const struct { uint8_t bytes[3]; uint8_t len; } terminal_ansi__acs_table[0x7f - 0x60] = {
+    /* ` */ {{0xe2, 0x97, 0x86}, 3}, /* ◆ diamond */
+    /* a */ {{0xe2, 0x96, 0x92}, 3}, /* ▒ checkerboard */
+    /* b */ {{0xe2, 0x90, 0x89}, 3}, /* ␉ HT symbol */
+    /* c */ {{0xe2, 0x90, 0x8c}, 3}, /* ␌ FF symbol */
+    /* d */ {{0xe2, 0x90, 0x8d}, 3}, /* ␍ CR symbol */
+    /* e */ {{0xe2, 0x90, 0x8a}, 3}, /* ␊ LF symbol */
+    /* f */ {{0xc2, 0xb0, 0x00}, 2}, /* ° degree */
+    /* g */ {{0xc2, 0xb1, 0x00}, 2}, /* ± plus/minus */
+    /* h */ {{0xe2, 0x90, 0xa4}, 3}, /* ␤ NL symbol */
+    /* i */ {{0xe2, 0x90, 0x8b}, 3}, /* ␋ VT symbol */
+    /* j */ {{0xe2, 0x94, 0x98}, 3}, /* ┘ */
+    /* k */ {{0xe2, 0x94, 0x90}, 3}, /* ┐ */
+    /* l */ {{0xe2, 0x94, 0x8c}, 3}, /* ┌ */
+    /* m */ {{0xe2, 0x94, 0x94}, 3}, /* └ */
+    /* n */ {{0xe2, 0x94, 0xbc}, 3}, /* ┼ */
+    /* o */ {{0xe2, 0x8e, 0xba}, 3}, /* ⎺ scan line 1 */
+    /* p */ {{0xe2, 0x8e, 0xbb}, 3}, /* ⎻ scan line 3 */
+    /* q */ {{0xe2, 0x94, 0x80}, 3}, /* ─ */
+    /* r */ {{0xe2, 0x8e, 0xbc}, 3}, /* ⎼ scan line 7 */
+    /* s */ {{0xe2, 0x8e, 0xbd}, 3}, /* ⎽ scan line 9 */
+    /* t */ {{0xe2, 0x94, 0x9c}, 3}, /* ├ */
+    /* u */ {{0xe2, 0x94, 0xa4}, 3}, /* ┤ */
+    /* v */ {{0xe2, 0x94, 0xb4}, 3}, /* ┴ */
+    /* w */ {{0xe2, 0x94, 0xac}, 3}, /* ┬ */
+    /* x */ {{0xe2, 0x94, 0x82}, 3}, /* │ */
+    /* y */ {{0xe2, 0x89, 0xa4}, 3}, /* ≤ */
+    /* z */ {{0xe2, 0x89, 0xa5}, 3}, /* ≥ */
+    /* { */ {{0xcf, 0x80, 0x00}, 2}, /* π */
+    /* | */ {{0xe2, 0x89, 0xa0}, 3}, /* ≠ */
+    /* } */ {{0xc2, 0xa3, 0x00}, 2}, /* £ */
+    /* ~ */ {{0xc2, 0xb7, 0x00}, 2}, /* · bullet */
+};
+
+/* Translates `byte` through the currently-invoked (G0 unless SO shifted in
+ * G1) charset if it's DEC Special Graphics and `byte` falls in its remapped
+ * range; writes the glyph's UTF-8 bytes to `out` (>= 3 bytes) and returns its
+ * length, or returns 0 (leave `byte` as literal ASCII) otherwise. */
+static uint8_t terminal_grid__acs_translate(const terminal_grid_t *grid, uint8_t byte, uint8_t *out) {
+    uint8_t active = grid->shift_out ? grid->g1_charset : grid->g0_charset;
+    if (active != '0' || byte < 0x60 || byte > 0x7e) return 0;
+    const uint8_t *bytes = terminal_ansi__acs_table[byte - 0x60].bytes;
+    uint8_t len = terminal_ansi__acs_table[byte - 0x60].len;
+    memcpy(out, bytes, len);
+    return len;
 }
 
 static void terminal_grid__control(terminal_grid_t *grid, uint8_t byte) {
@@ -158,7 +217,9 @@ static void terminal_grid__control(terminal_grid_t *grid, uint8_t byte) {
             grid->pending_wrap = false;
             break;
         }
-        default: break; /* BEL and other C0 controls: no-op */
+        case 0x0e: grid->shift_out = true; break;  /* SO: invoke G1 into GL */
+        case 0x0f: grid->shift_out = false; break; /* SI: invoke G0 into GL */
+        default: break;                            /* BEL and other C0 controls: no-op */
     }
 }
 
@@ -195,7 +256,10 @@ static void terminal_grid__text_byte(terminal_grid_t *grid, uint8_t byte) {
     }
     uint8_t len = terminal_grid__utf8_len(byte);
     if (len == 1) {
-        terminal_grid__put_glyph(grid, &byte, 1);
+        uint8_t acs[3];
+        uint8_t acs_len = terminal_grid__acs_translate(grid, byte, acs);
+        if (acs_len > 0) terminal_grid__put_glyph(grid, acs, acs_len);
+        else terminal_grid__put_glyph(grid, &byte, 1);
         return;
     }
     grid->utf8_pending[0] = byte;
@@ -257,6 +321,10 @@ static void terminal_grid__reset(terminal_grid_t *grid) {
     grid->fg = TERMINAL_ANSI_COLOR_DEFAULT;
     grid->bg = TERMINAL_ANSI_COLOR_DEFAULT;
     grid->attrs = 0;
+    grid->g0_charset = 'B';
+    grid->g1_charset = 'B';
+    grid->shift_out = false;
+    grid->last_glyph_len = 0;
 }
 
 /* -------------------------------------------------------------------------
@@ -562,6 +630,13 @@ static void terminal_grid__finish_csi(terminal_grid_t *grid, uint8_t final) {
         case 'X': terminal_grid__erase_chars(grid, terminal_grid__param_or(grid, 0, 1)); break;
         case 'S': terminal_grid__scroll_up(grid, terminal_grid__param_or(grid, 0, 1)); break;
         case 'T': terminal_grid__scroll_down(grid, terminal_grid__param_or(grid, 0, 1)); break;
+        case 'b': { /* REP: repeat the preceding graphic character n times */
+            uint16_t n = terminal_grid__param_or(grid, 0, 1);
+            if (grid->last_glyph_len > 0) {
+                for (uint16_t i = 0; i < n; ++i) terminal_grid__put_glyph(grid, grid->last_glyph, grid->last_glyph_len);
+            }
+            break;
+        }
         case 'r': {
             uint16_t top = (uint16_t)(terminal_grid__param_or(grid, 0, 1) - 1);
             uint16_t bottom = (uint16_t)(terminal_grid__param_or(grid, 1, grid->rows) - 1);
@@ -633,6 +708,8 @@ static void terminal_grid__handle_escape(terminal_grid_t *grid, uint8_t byte) {
             grid->csi_private = false;
             return; /* stay in CSI, don't fall through to TEXT below */
         case ']': grid->state = TERMINAL_ANSI_OSC; return;
+        case '(': grid->state = TERMINAL_ANSI_CHARSET_G0; return; /* designator byte follows */
+        case ')': grid->state = TERMINAL_ANSI_CHARSET_G1; return; /* designator byte follows */
         case '7': terminal_grid__save_cursor(grid); break;
         case '8': terminal_grid__restore_cursor(grid); break;
         case 'D': terminal_grid__linefeed(grid); break; /* IND */
@@ -665,6 +742,14 @@ static void terminal_grid__consume_byte(terminal_grid_t *grid, uint8_t byte) {
             if (byte == '\a') grid->state = TERMINAL_ANSI_TEXT;
             else if (byte == TERMINAL_ANSI_ESCAPE_BYTE) grid->state = TERMINAL_ANSI_ESCAPE;
             break;
+        case TERMINAL_ANSI_CHARSET_G0:
+            grid->g0_charset = byte;
+            grid->state = TERMINAL_ANSI_TEXT;
+            break;
+        case TERMINAL_ANSI_CHARSET_G1:
+            grid->g1_charset = byte;
+            grid->state = TERMINAL_ANSI_TEXT;
+            break;
         case TERMINAL_ANSI_CSI: terminal_grid__handle_csi_byte(grid, byte); break;
     }
 }
@@ -688,6 +773,8 @@ void terminal_grid__init(
     grid->fg = TERMINAL_ANSI_COLOR_DEFAULT;
     grid->bg = TERMINAL_ANSI_COLOR_DEFAULT;
     grid->state = TERMINAL_ANSI_TEXT;
+    grid->g0_charset = 'B';
+    grid->g1_charset = 'B';
     terminal_grid__clear_buffer(grid, cells);
     terminal_grid__clear_buffer(grid, alt_cells);
 }

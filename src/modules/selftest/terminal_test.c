@@ -392,3 +392,57 @@ bool selftest__run_terminal_editing_case(void) {
     printf("[selftest] terminal/editing: %s\n", ok ? "OK" : "failed");
     return ok;
 }
+
+/* ------------------------------------------------------------------------ */
+/* Terminal parser: VT100 charset designation (ACS) and REP                  */
+/* ------------------------------------------------------------------------ */
+
+/* Covers the escape-handling gap that let stray bytes leak into the grid and
+ * dropped repeated-character runs: G0 redesignation (smacs/rmacs, `ESC(0`/
+ * `ESC(B`, what htop/tmux actually send to draw line art since this
+ * emulator always advertises itself as "xterm"), G1 + SO/SI, and CSI Pn b
+ * (REP). See terminal_grid__acs_translate() in terminal_ansi.c. */
+bool selftest__run_terminal_ansi_escapes_case(void) {
+    terminal_cell_t g0_cells[16];
+    terminal_cell_t g0_alt_cells[16];
+    terminal_grid_t g0_grid;
+    terminal_grid__init(&g0_grid, g0_cells, g0_alt_cells, 16, 1);
+    /* smacs, draw a box top ("lqqk"), rmacs, then a plain letter -- the
+     * designator bytes themselves ('0', 'B') must not leak into the grid as
+     * literal text. */
+    static const char g0_input[] = "\033(0lqqk\033(Bx";
+    terminal_grid__feed(&g0_grid, g0_input, sizeof(g0_input) - 1);
+    char g0_text[17] = {0};
+    selftest__terminal_row_text(&g0_grid, 0, g0_text, sizeof(g0_text));
+    bool g0_ok = strcmp(g0_text, "\xe2\x94\x8c\xe2\x94\x80\xe2\x94\x80\xe2\x94\x90x") == 0; /* "┌──┐x" */
+
+    terminal_cell_t g1_cells[16];
+    terminal_cell_t g1_alt_cells[16];
+    terminal_grid_t g1_grid;
+    terminal_grid__init(&g1_grid, g1_cells, g1_alt_cells, 16, 1);
+    /* Designate G1 as special graphics, SO to invoke it, draw a box bottom
+     * ("mvj"), SI back to G0 (still plain ASCII), then a plain letter. */
+    static const char g1_input[] = "\033)0\x0emvj\x0fy";
+    terminal_grid__feed(&g1_grid, g1_input, sizeof(g1_input) - 1);
+    char g1_text[17] = {0};
+    selftest__terminal_row_text(&g1_grid, 0, g1_text, sizeof(g1_text));
+    bool g1_ok = strcmp(g1_text, "\xe2\x94\x94\xe2\x94\xb4\xe2\x94\x98y") == 0; /* "└┴┘y" */
+
+    terminal_cell_t rep_cells[16];
+    terminal_cell_t rep_alt_cells[16];
+    terminal_grid_t rep_grid;
+    terminal_grid__init(&rep_grid, rep_cells, rep_alt_cells, 16, 1);
+    /* One 'q', then CSI 3 b repeats it 3 more times, then a plain 'X' --
+     * without REP support this whole run used to just vanish. */
+    static const char rep_input[] = "q\033[3bX";
+    terminal_grid__feed(&rep_grid, rep_input, sizeof(rep_input) - 1);
+    char rep_text[17] = {0};
+    selftest__terminal_row_text(&rep_grid, 0, rep_text, sizeof(rep_text));
+    bool rep_ok = strcmp(rep_text, "qqqqX") == 0;
+
+    bool ok = g0_ok && g1_ok && rep_ok;
+    printf(
+        "[selftest] terminal/ansi-escapes: %s (g0=%d g1=%d rep=%d)\n", ok ? "OK" : "FAIL", g0_ok, g1_ok, rep_ok
+    );
+    return ok;
+}
