@@ -1,5 +1,6 @@
 #include "bruce_launcher_app.h"
 
+#include <ctype.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -34,6 +35,11 @@
 #define BRUCE_LAUNCHER_STATUS_REFRESH_MS 1000
 #define BRUCE_LAUNCHER_STATUS_TEXT_Y 11
 #define BRUCE_LAUNCHER_BACKGROUND_WAIT_MS 1000
+/* Command palette: every command/submenu in the tree, flattened, capped well
+ * above any realistic config (root + submenus stay well under this even at
+ * BRUCE_LAUNCHER_MAX_ENTRIES per level a few levels deep). */
+#define BRUCE_LAUNCHER_PALETTE_MAX_ITEMS 160
+#define BRUCE_LAUNCHER_PALETTE_QUERY_MAX 40
 
 /* Theme colors cached from bruce.conf. */
 typedef struct {
@@ -949,6 +955,285 @@ static int bruce_launcher__run_entry(const bruce_launcher_entry_t *entry) {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Command palette                                                           */
+/* -------------------------------------------------------------------------- */
+
+/* Forward declaration: picking a submenu entry from the palette opens it the
+ * same way SELECT on a submenu entry in the root menu does. */
+static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu);
+
+typedef struct {
+    const bruce_launcher_menu_t *menu; /* Menu the entry actually lives in. */
+    const bruce_launcher_entry_t *entry;
+} bruce_launcher_palette_item_t;
+
+/* Recursively collects every command/submenu entry reachable from `menu`
+ * (BACK entries excluded -- they're navigation placeholders, not commands)
+ * into `out`, depth-first, stopping once `capacity` is reached. Returns the
+ * new count. */
+static int bruce_launcher__flatten_menu(
+    const bruce_launcher_menu_t *menu, bruce_launcher_palette_item_t *out, int capacity, int count
+) {
+    const bruce_launcher_entry_t *entries = bruce_launcher__menu_entries(menu);
+    for (int i = 0; i < menu->entry_count && count < capacity; ++i) {
+        const bruce_launcher_entry_t *entry = &entries[i];
+        if (entry->kind == BRUCE_LAUNCHER_ENTRY_BACK) continue;
+        out[count].menu = menu;
+        out[count].entry = entry;
+        count++;
+        if (entry->kind == BRUCE_LAUNCHER_ENTRY_SUBMENU) {
+            const bruce_launcher_menu_t *submenu = bruce_launcher__entry_submenu(menu, entry);
+            if (submenu != NULL) count = bruce_launcher__flatten_menu(submenu, out, capacity, count);
+        }
+    }
+    return count;
+}
+
+static bool bruce_launcher__contains_ci(const char *haystack, const char *needle) {
+    if (needle == NULL || needle[0] == '\0') return true;
+    size_t haystack_len = strlen(haystack);
+    size_t needle_len = strlen(needle);
+    if (needle_len > haystack_len) return false;
+    for (size_t i = 0; i + needle_len <= haystack_len; ++i) {
+        size_t j = 0;
+        while (j < needle_len && tolower((unsigned char)haystack[i + j]) == tolower((unsigned char)needle[j])) j++;
+        if (j == needle_len) return true;
+    }
+    return false;
+}
+
+/* Row text for `item`: its own label, prefixed with the owning submenu's
+ * title (e.g. "WiFi > Connect") when it isn't a root-level entry, so entries
+ * that share a label with something else stay distinguishable and so the
+ * search also matches on the submenu name. */
+static void bruce_launcher__palette_item_text(
+    const bruce_launcher_menu_t *root, const bruce_launcher_palette_item_t *item, char *buffer, size_t buffer_size
+) {
+    const char *label = bruce_launcher__entry_label(item->entry);
+    if (item->menu == root || item->menu->title[0] == '\0') {
+        snprintf(buffer, buffer_size, "%s", label);
+    } else {
+        snprintf(buffer, buffer_size, "%s > %s", item->menu->title, label);
+    }
+}
+
+/* Rebuilds `filtered` (indices into `items`) to only those entries whose row
+ * text contains `query` (case-insensitive substring; an empty query matches
+ * everything). Returns the new filtered count. */
+static int bruce_launcher__palette_filter(
+    const bruce_launcher_menu_t *root, const bruce_launcher_palette_item_t *items, int item_count,
+    const char *query, int *filtered, int filtered_capacity
+) {
+    int count = 0;
+    for (int i = 0; i < item_count && count < filtered_capacity; ++i) {
+        char text[96];
+        bruce_launcher__palette_item_text(root, &items[i], text, sizeof(text));
+        if (bruce_launcher__contains_ci(text, query)) filtered[count++] = i;
+    }
+    return count;
+}
+
+static void bruce_launcher__draw_palette(
+    const bruce_launcher_menu_t *root, const bruce_launcher_palette_item_t *items, const int *filtered,
+    int filtered_count, int selected, int *scroll_state, const char *query, const bruce_launcher_theme_t *theme
+) {
+    int w = display__width();
+    int h = display__height();
+    bruce_launcher__draw_main_border(theme);
+
+    /* The query field replaces the clock/battery/icons row -- same strip the
+     * status bar normally occupies -- so the palette needs no layout of its
+     * own for it. */
+    display__set_text_size(BRUCE_LAUNCHER_FONT_SMALL);
+    display__set_text_color(theme->pri);
+    display__set_text_bg_color(theme->bg);
+    display__set_cursor(BRUCE_LAUNCHER_BORDER_PAD + 8, BRUCE_LAUNCHER_STATUS_TEXT_Y);
+    char query_line[BRUCE_LAUNCHER_PALETTE_QUERY_MAX + 8];
+    snprintf(query_line, sizeof(query_line), "Find: %s_", query);
+    display__print(query_line);
+
+    int top = BRUCE_LAUNCHER_STATUS_H + 4;
+    int content_h = h - BRUCE_LAUNCHER_BORDER_PAD - 2 - top;
+
+    if (filtered_count == 0) {
+        display__set_text_color(theme->text_muted);
+        display__set_text_bg_color(theme->bg);
+        const char *empty_label = "No matches";
+        int text_w = (int)strlen(empty_label) * BRUCE_LAUNCHER_FONT_ADVANCE * BRUCE_LAUNCHER_FONT_SMALL;
+        display__set_cursor((w - text_w) / 2, top + content_h / 2);
+        display__print(empty_label);
+        return;
+    }
+
+    int icon_size = display__width() < 180 ? 20 : 28;
+    int row_h = icon_size + 10;
+    if (row_h > content_h) row_h = content_h;
+    int visible = row_h > 0 ? content_h / row_h : 1;
+    if (visible < 1) visible = 1;
+    if (visible > filtered_count) visible = filtered_count;
+    bool scrollable = filtered_count > visible;
+
+    bruce_launcher__scroll_follow(selected, visible, filtered_count, scroll_state);
+    int window_start = *scroll_state;
+    int scrollbar_w = scrollable ? 10 : 0;
+
+    int icon_x = BRUCE_LAUNCHER_BORDER_PAD + 8 + icon_size / 2;
+    int text_x = BRUCE_LAUNCHER_BORDER_PAD + 8 + icon_size + 8;
+    int text_max_w = w - BRUCE_LAUNCHER_BORDER_PAD - 6 - scrollbar_w - text_x;
+
+    for (int i = 0; i < visible; ++i) {
+        int index = window_start + i;
+        if (index >= filtered_count) break;
+        const bruce_launcher_palette_item_t *item = &items[filtered[index]];
+        bool is_selected = index == selected;
+        int row_y = top + i * row_h;
+        int row_cy = row_y + row_h / 2;
+
+        if (is_selected) {
+            display__fill_round_rect(
+                (int16_t)(BRUCE_LAUNCHER_BORDER_PAD + 3), (int16_t)(row_y + 1),
+                (int16_t)(w - 2 * BRUCE_LAUNCHER_BORDER_PAD - 6 - scrollbar_w), (int16_t)(row_h - 2), 4,
+                theme->pri
+            );
+        }
+        uint16_t fg = is_selected ? theme->bg : theme->pri;
+        bruce_launcher__draw_entry_icon(item->entry, icon_x, row_cy, icon_size, fg);
+        char text[96];
+        bruce_launcher__palette_item_text(root, item, text, sizeof(text));
+        bruce_launcher__draw_label_left(
+            text, text_x, row_cy, BRUCE_LAUNCHER_FONT_SMALL, text_max_w, fg, is_selected ? theme->pri : theme->bg
+        );
+    }
+
+    if (scrollable) {
+        bruce_launcher__draw_scrollbar(
+            w - BRUCE_LAUNCHER_BORDER_PAD - 6, top, content_h, window_start, visible, filtered_count, theme
+        );
+    }
+}
+
+/* Opens a live-filtering search over every command/submenu the launcher
+ * knows about, seeded with `first_char` (the printable keypress that
+ * triggered it -- see the root menu's input loop below). Runs until the user
+ * picks an entry (launched/opened exactly as SELECT on the root menu would)
+ * or backs out; either way the caller's next frame repaints the root menu,
+ * so this doesn't need to leave the screen in any particular state. */
+static void bruce_launcher__run_command_palette(
+    const bruce_launcher_menu_t *root, const bruce_launcher_theme_t *theme, char first_char
+) {
+    bruce_launcher_palette_item_t *items =
+        (bruce_launcher_palette_item_t *)memory__calloc(BRUCE_LAUNCHER_PALETTE_MAX_ITEMS, sizeof(*items));
+    int *filtered = (int *)memory__calloc(BRUCE_LAUNCHER_PALETTE_MAX_ITEMS, sizeof(*filtered));
+    if (items == NULL || filtered == NULL) {
+        memory__free(items);
+        memory__free(filtered);
+        return;
+    }
+    int item_count = bruce_launcher__flatten_menu(root, items, BRUCE_LAUNCHER_PALETTE_MAX_ITEMS, 0);
+
+    char query[BRUCE_LAUNCHER_PALETTE_QUERY_MAX + 1] = {0};
+    size_t query_len = 0;
+    if (first_char >= 0x20 && first_char <= 0x7e) {
+        query[0] = first_char;
+        query_len = 1;
+    }
+
+    int filtered_count =
+        bruce_launcher__palette_filter(root, items, item_count, query, filtered, BRUCE_LAUNCHER_PALETTE_MAX_ITEMS);
+    int selected = 0;
+    int scroll_state = 0;
+    bool redraw = true;
+
+    (void)input__flush();
+    for (;;) {
+        if (redraw) {
+            bruce_result_t frame = display__begin_frame();
+            if (frame == BRUCE_ERR_NOT_FOREGROUND) {
+                (void)runtime__sleep(BRUCE_LAUNCHER_BACKGROUND_WAIT_MS);
+                continue;
+            }
+            if (frame != BRUCE_OK) break;
+            bruce_launcher__draw_palette(root, items, filtered, filtered_count, selected, &scroll_state, query, theme);
+            frame = display__present();
+            if (frame != BRUCE_OK) break;
+            redraw = false;
+        }
+
+        bruce_input_event_t ev;
+        bruce_result_t result = input__read(&ev, 100);
+        if (result == BRUCE_ERR_NOT_FOREGROUND) {
+            (void)runtime__sleep(BRUCE_LAUNCHER_BACKGROUND_WAIT_MS);
+            redraw = true;
+            continue;
+        }
+        if (result != BRUCE_OK || ev.action != BRUCE_INPUT_PRESS) continue;
+
+        switch (ev.code) {
+            case BRUCE_INPUT_CODE_UP:
+            case BRUCE_INPUT_CODE_PREV:
+                if (filtered_count > 0) selected = (selected + filtered_count - 1) % filtered_count;
+                redraw = true;
+                continue;
+            case BRUCE_INPUT_CODE_DOWN:
+            case BRUCE_INPUT_CODE_NEXT:
+                if (filtered_count > 0) selected = (selected + 1) % filtered_count;
+                redraw = true;
+                continue;
+            case BRUCE_INPUT_CODE_SELECT:
+            case BRUCE_INPUT_CODE_BUTTON_A: {
+                if (filtered_count == 0) continue;
+                const bruce_launcher_palette_item_t *item = &items[filtered[selected]];
+                const bruce_launcher_menu_t *item_menu = item->menu;
+                const bruce_launcher_entry_t *entry = item->entry;
+                memory__free(items);
+                memory__free(filtered);
+                if (entry->kind == BRUCE_LAUNCHER_ENTRY_SUBMENU) {
+                    (void)bruce_launcher__run_gui_menu(bruce_launcher__entry_submenu(item_menu, entry));
+                } else {
+                    (void)bruce_launcher__run_entry(entry);
+                }
+                (void)input__flush();
+                return;
+            }
+            case BRUCE_INPUT_CODE_BACK:
+            case BRUCE_INPUT_CODE_BUTTON_B:
+                memory__free(items);
+                memory__free(filtered);
+                (void)input__flush();
+                return;
+            case '\b':
+            case 0x7f:
+            case BRUCE_INPUT_CODE_DELETE:
+                if (query_len > 0) {
+                    query[--query_len] = '\0';
+                    filtered_count = bruce_launcher__palette_filter(
+                        root, items, item_count, query, filtered, BRUCE_LAUNCHER_PALETTE_MAX_ITEMS
+                    );
+                    selected = 0;
+                    scroll_state = 0;
+                    redraw = true;
+                }
+                continue;
+            default: break;
+        }
+
+        if (ev.type == BRUCE_INPUT_KEY && ev.code >= 0x20 && ev.code <= 0x7e &&
+            query_len < BRUCE_LAUNCHER_PALETTE_QUERY_MAX) {
+            query[query_len++] = (char)ev.code;
+            query[query_len] = '\0';
+            filtered_count = bruce_launcher__palette_filter(
+                root, items, item_count, query, filtered, BRUCE_LAUNCHER_PALETTE_MAX_ITEMS
+            );
+            selected = 0;
+            scroll_state = 0;
+            redraw = true;
+        }
+    }
+    memory__free(items);
+    memory__free(filtered);
+}
+
+/* -------------------------------------------------------------------------- */
 /* GUI menu runner                                                            */
 /* -------------------------------------------------------------------------- */
 
@@ -1234,7 +1519,16 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
                 break;
             }
             case BRUCE_INPUT_CODE_BACK: return 0;
-            default: break;
+            default:
+                /* Any other printable key starts the command palette, seeded
+                 * with the character that opened it, so typing "vnc" from a
+                 * cold root menu both opens the palette and filters down to
+                 * it in one motion instead of needing a dedicated hotkey. */
+                if (ev.type == BRUCE_INPUT_KEY && ev.code >= 0x20 && ev.code <= 0x7e) {
+                    bruce_launcher__run_command_palette(menu, &theme, (char)ev.code);
+                    last_drawn = -1;
+                }
+                break;
         }
     }
 }
