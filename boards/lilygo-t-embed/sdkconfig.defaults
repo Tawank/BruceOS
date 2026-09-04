@@ -159,7 +159,7 @@ CONFIG_BRUCE_DISPLAY_PIN_BL=15
 # This board's backlight boost converter flickers near a full PWM duty cycle.
 # Cap the UI's nominal 100% level at about 90% to leave enough off-time for
 # the converter to stay in regulation.
-CONFIG_BRUCE_DISPLAY_BACKLIGHT_MAX_LEVEL=220
+CONFIG_BRUCE_DISPLAY_BACKLIGHT_MAX_LEVEL=200
 CONFIG_BRUCE_DISPLAY_GAP_X_ROTATION0=35
 CONFIG_BRUCE_DISPLAY_GAP_Y_ROTATION0=0
 CONFIG_BRUCE_DISPLAY_GAP_X_ROTATION1=0
