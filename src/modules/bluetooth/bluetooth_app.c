@@ -119,72 +119,90 @@ static int bluetooth_app__scan_gui(void) {
     bluetooth__device_t *devices = memory__calloc(BLUETOOTH_APP__MAX_RESULTS, sizeof(*devices));
     if (devices == NULL) return BRUCE_ERR_NO_MEMORY;
 
-    int count = bluetooth_app__gui_scan(devices, BLUETOOTH_APP__MAX_RESULTS);
-    if (count == BRUCE_ERR_CANCELLED) {
-        memory__free(devices);
-        return 0;
-    }
-    if (count < 0) {
-        char message[48];
-        snprintf(message, sizeof(message), "BLE scan failed (%d)", count);
-        (void)bluetooth_app__message(BRUCE_DIALOG_ERROR, "Bluetooth", message);
-        memory__free(devices);
-        return count;
-    }
-    if (count == 0) {
-        (void)bluetooth_app__message(BRUCE_DIALOG_INFO, "BLE Scan", "No advertisements found");
-        memory__free(devices);
-        return 0;
-    }
+    for (;;) {
+        int count = bluetooth_app__gui_scan(devices, BLUETOOTH_APP__MAX_RESULTS);
+        if (count == BRUCE_ERR_CANCELLED) break;
+        if (count < 0) {
+            char message[48];
+            snprintf(message, sizeof(message), "BLE scan failed (%d)", count);
+            (void)bluetooth_app__message(BRUCE_DIALOG_ERROR, "Bluetooth", message);
+            memory__free(devices);
+            return count;
+        }
+        if (count == 0) {
+            const bruce_dialog_choice_t choices[] = {
+                {.label = "Rescan", .value = "rescan", .icon_name = "bluetooth"},
+                {.label = "Back", .value = "back"},
+            };
+            size_t selected = 0;
+            bruce_result_t choice_result;
+            do {
+                choice_result = dialog__choice_launcher(
+                    "BLE Scan", "No advertisements found", choices, sizeof(choices) / sizeof(choices[0]), &selected
+                );
+            } while (choice_result == BRUCE_ERR_CANCELLED && bluetooth_app__resume_after_handoff());
+            if (choice_result == BRUCE_OK && selected == 0) continue;
+            break;
+        }
 
-    char (*labels)[96] = memory__calloc((size_t)count, sizeof(*labels));
-    bruce_dialog_choice_t *choices = memory__calloc((size_t)count, sizeof(*choices));
-    if (labels == NULL || choices == NULL) {
+        char (*labels)[96] = memory__calloc((size_t)count, sizeof(*labels));
+        bruce_dialog_choice_t *choices = memory__calloc((size_t)count + 2u, sizeof(*choices));
+        if (labels == NULL || choices == NULL) {
+            memory__free(labels);
+            memory__free(choices);
+            memory__free(devices);
+            return BRUCE_ERR_NO_MEMORY;
+        }
+        for (int i = 0; i < count; ++i) {
+            snprintf(
+                labels[i],
+                sizeof(labels[i]),
+                "%s  %d dBm",
+                devices[i].name[0] != '\0' ? devices[i].name : "(unnamed)",
+                devices[i].rssi
+            );
+            choices[i].label = labels[i];
+            choices[i].value = labels[i];
+            choices[i].icon_name = "bluetooth";
+        }
+        choices[count] = (bruce_dialog_choice_t){.label = "Rescan", .value = "rescan"};
+        choices[count + 1] = (bruce_dialog_choice_t){.label = "Back", .value = "back"};
+
+        bool rescan = false;
+        for (;;) {
+            size_t selected = 0;
+            bruce_result_t choice_result;
+            do {
+                choice_result = dialog__choice_launcher(
+                    "BLE Advertisements", NULL, choices, (size_t)count + 2u, &selected
+                );
+            } while (choice_result == BRUCE_ERR_CANCELLED && bluetooth_app__resume_after_handoff());
+            if (choice_result != BRUCE_OK || selected == (size_t)count + 1u) break;
+            if (selected == (size_t)count) {
+                rescan = true;
+                break;
+            }
+            char details[160];
+            bluetooth__device_t *device = &devices[selected];
+            snprintf(
+                details,
+                sizeof(details),
+                "Name: %s\nAddress: %02X:%02X:%02X:%02X:%02X:%02X\nRSSI: %d dBm",
+                device->name[0] != '\0' ? device->name : "(unnamed)",
+                device->address[0],
+                device->address[1],
+                device->address[2],
+                device->address[3],
+                device->address[4],
+                device->address[5],
+                device->rssi
+            );
+            (void)bluetooth_app__message(BRUCE_DIALOG_INFO, "BLE Device", details);
+        }
         memory__free(labels);
         memory__free(choices);
-        memory__free(devices);
-        return BRUCE_ERR_NO_MEMORY;
+        if (!rescan) break;
     }
-    for (int i = 0; i < count; ++i) {
-        snprintf(
-            labels[i],
-            sizeof(labels[i]),
-            "%s  %d dBm",
-            devices[i].name[0] != '\0' ? devices[i].name : "(unnamed)",
-            devices[i].rssi
-        );
-        choices[i].label = labels[i];
-        choices[i].value = labels[i];
-        choices[i].icon_name = "bluetooth";
-        choices[i].right_text = NULL;
-    }
-    size_t selected = 0;
-    bruce_result_t choice_result;
-    do {
-        choice_result = dialog__choice_launcher(
-            "BLE Advertisements", NULL, choices, (size_t)count, &selected
-        );
-    } while (choice_result == BRUCE_ERR_CANCELLED && bluetooth_app__resume_after_handoff());
-    if (choice_result == BRUCE_OK) {
-        char details[160];
-        bluetooth__device_t *device = &devices[selected];
-        snprintf(
-            details,
-            sizeof(details),
-            "Name: %s\nAddress: %02X:%02X:%02X:%02X:%02X:%02X\nRSSI: %d dBm",
-            device->name[0] != '\0' ? device->name : "(unnamed)",
-            device->address[0],
-            device->address[1],
-            device->address[2],
-            device->address[3],
-            device->address[4],
-            device->address[5],
-            device->rssi
-        );
-        (void)bluetooth_app__message(BRUCE_DIALOG_INFO, "BLE Device", details);
-    }
-    memory__free(labels);
-    memory__free(choices);
     memory__free(devices);
     return 0;
 }
