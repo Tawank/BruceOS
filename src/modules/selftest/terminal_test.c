@@ -362,16 +362,29 @@ bool selftest__run_terminal_editing_case(void) {
     (void)storage__remove(history_path);
     bool history_ok = shell_history__append(history_path, "first") == BRUCE_OK &&
                       shell_history__append(history_path, "second") == BRUCE_OK &&
-                      shell_history__append(history_path, "third") == BRUCE_OK;
-    uint64_t third = 0;
-    uint64_t second = 0;
+                      shell_history__append(history_path, "third") == BRUCE_OK &&
+                      shell_history__append(history_path, "second") == BRUCE_OK &&
+                      shell_history__append(history_path, "second") == BRUCE_OK &&
+                      shell_history__append(history_path, "fourth") == BRUCE_OK;
+    uint64_t newest = 0;
+    uint64_t newer_second = 0;
+    uint64_t older_second = 0;
+    uint64_t first = 0;
     if (history_ok) {
-        history_ok = shell_history__previous(history_path, UINT64_MAX, line, sizeof(line), &third) == BRUCE_OK &&
-                     strcmp(line, "third") == 0 &&
-                     shell_history__previous(history_path, third, line, sizeof(line), &second) == BRUCE_OK &&
-                     strcmp(line, "second") == 0 &&
-                     shell_history__next(history_path, second, line, sizeof(line), &third) == BRUCE_OK &&
-                     strcmp(line, "third") == 0;
+        history_ok =
+            shell_history__previous(history_path, UINT64_MAX, line, sizeof(line), &newest) == BRUCE_OK &&
+            strcmp(line, "fourth") == 0 &&
+            shell_history__previous(history_path, newest, line, sizeof(line), &newer_second) == BRUCE_OK &&
+            strcmp(line, "second") == 0 &&
+            shell_history__previous(history_path, newer_second, line, sizeof(line), &newest) == BRUCE_OK &&
+            strcmp(line, "third") == 0 &&
+            shell_history__previous(history_path, newest, line, sizeof(line), &older_second) == BRUCE_OK &&
+            strcmp(line, "second") == 0 &&
+            shell_history__previous(history_path, older_second, line, sizeof(line), &first) == BRUCE_OK &&
+            strcmp(line, "first") == 0 &&
+            shell_history__next(history_path, first, line, sizeof(line), &older_second) == BRUCE_OK &&
+            strcmp(line, "second") == 0 &&
+            shell_history__previous(history_path, first, line, sizeof(line), &newest) == BRUCE_ERR_NOT_FOUND;
     }
     (void)storage__remove(history_path);
 

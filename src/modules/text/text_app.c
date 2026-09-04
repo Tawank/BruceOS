@@ -6,12 +6,12 @@
 #include <string.h>
 
 #include "args.h"
+#include "core_sdk/clipboard.h"
 #include "core_sdk/config.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/display.h"
 #include "core_sdk/input.h"
 #include "core_sdk/memory.h"
-#include "core_sdk/clipboard.h"
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
 #include "core_sdk/stdio.h"
@@ -34,8 +34,10 @@ typedef struct {
     size_t cursor;
     size_t top_line;
     size_t left_column;
+    size_t selection_anchor;
     bool dirty;
     bool read_only;
+    bool selection_active;
 } text_editor_t;
 
 static bruce_result_t text__reserve(text_editor_t *editor, size_t required);
@@ -166,6 +168,26 @@ static bruce_result_t text__replace(
     return BRUCE_OK;
 }
 
+static bruce_result_t text__paste(text_editor_t *editor) {
+    if (editor->read_only || clipboard__kind() != BRUCE_CLIPBOARD_TEXT) return BRUCE_OK;
+    const char *text = clipboard__get_text();
+    return text != NULL ? text__replace(editor, editor->cursor, editor->cursor, text, strlen(text))
+                        : BRUCE_OK;
+}
+
+static bruce_result_t text__copy_selection(text_editor_t *editor) {
+    size_t start = editor->selection_anchor < editor->cursor ? editor->selection_anchor : editor->cursor;
+    size_t end = editor->selection_anchor < editor->cursor ? editor->cursor : editor->selection_anchor;
+    size_t length = end - start;
+    char *text = memory__malloc(length + 1u);
+    if (text == NULL) return BRUCE_ERR_NO_MEMORY;
+    memcpy(text, editor->data + start, length);
+    text[length] = '\0';
+    bruce_result_t result = clipboard__set_text(text);
+    memory__free(text);
+    return result;
+}
+
 static size_t text__line_start(const text_editor_t *editor, size_t position) {
     while (position > 0 && editor->data[position - 1u] != '\n') position--;
     return position;
@@ -257,6 +279,7 @@ static void text__render(const char *path, text_editor_t *editor) {
     (void)display__print(text__basename(path));
     if (editor->read_only) (void)display__print(" [RO]");
     if (editor->dirty) (void)display__print(" *");
+    if (editor->selection_active) (void)display__print(" [COPY]");
 
     size_t position = 0;
     size_t line = 0;
@@ -272,11 +295,14 @@ static void text__render(const char *path, text_editor_t *editor) {
         }
         char visible[64];
         size_t count = 0;
+        size_t visible_start = position;
+        size_t visible_end = position;
         if (editor->left_column < line_length) {
             count = line_length - editor->left_column;
             if (count > visible_columns) count = visible_columns;
             if (count >= sizeof(visible)) count = sizeof(visible) - 1u;
             size_t visible_position = text__column_to_byte(editor, position, end, editor->left_column);
+            visible_start = visible_position;
             size_t written = 0;
             for (size_t i = 0; i < count && visible_position < end; ++i) {
                 size_t bytes = text__utf8_next(editor->data + visible_position, end - visible_position);
@@ -286,11 +312,49 @@ static void text__render(const char *path, text_editor_t *editor) {
                 visible_position += bytes;
             }
             count = written;
+            visible_end = visible_position;
         }
         visible[count] = '\0';
         (void)display__set_text_color(foreground);
         (void)display__set_cursor(TEXT_FRAME_MARGIN, (int16_t)(TEXT_TITLE_HEIGHT + row * TEXT_CHAR_HEIGHT));
         (void)display__print(visible);
+        if (editor->selection_active) {
+            size_t selection_start =
+                editor->selection_anchor < editor->cursor ? editor->selection_anchor : editor->cursor;
+            size_t selection_end =
+                editor->selection_anchor < editor->cursor ? editor->cursor : editor->selection_anchor;
+            if (selection_start < visible_end && selection_end > visible_start) {
+                size_t highlighted_start = selection_start > visible_start ? selection_start : visible_start;
+                size_t highlighted_end = selection_end < visible_end ? selection_end : visible_end;
+                size_t before_columns = 0;
+                size_t selected_columns = 0;
+                for (size_t p = visible_start; p < highlighted_start;) {
+                    p += text__utf8_next(editor->data + p, highlighted_start - p);
+                    before_columns++;
+                }
+                for (size_t p = highlighted_start; p < highlighted_end;) {
+                    p += text__utf8_next(editor->data + p, highlighted_end - p);
+                    selected_columns++;
+                }
+                size_t start_offset = highlighted_start - visible_start;
+                size_t end_offset = highlighted_end - visible_start;
+                char saved = visible[end_offset];
+                visible[end_offset] = '\0';
+                int selected_x = TEXT_FRAME_MARGIN + (int)before_columns * TEXT_CHAR_WIDTH;
+                int selected_y = TEXT_TITLE_HEIGHT + (int)row * TEXT_CHAR_HEIGHT;
+                (void)display__fill_rect(
+                    (int16_t)selected_x,
+                    (int16_t)selected_y,
+                    (int16_t)(selected_columns * TEXT_CHAR_WIDTH),
+                    TEXT_CHAR_HEIGHT,
+                    foreground
+                );
+                (void)display__set_text_color(background);
+                (void)display__set_cursor((int16_t)selected_x, (int16_t)selected_y);
+                (void)display__print(visible + start_offset);
+                visible[end_offset] = saved;
+            }
+        }
         if (end == editor->length) break;
         position = end + 1u;
     }
@@ -317,7 +381,11 @@ static void text__render(const char *path, text_editor_t *editor) {
     (void)display__print(status);
     (void)display__set_text_color(foreground);
     (void)display__set_cursor(TEXT_FRAME_MARGIN, (int16_t)(height - TEXT_CHAR_HEIGHT));
-    (void)display__print(editor->read_only ? "^X Exit  RO" : "^S Save  ^X Exit");
+    if (editor->selection_active) {
+        (void)display__print("Select: Copy  Back: Cancel");
+    } else {
+        (void)display__print(editor->read_only ? "^X Exit  RO" : "^S Save  ^X Exit");
+    }
     (void)display__present();
 }
 
@@ -345,9 +413,8 @@ static bruce_result_t text__show_error(const char *action, bruce_result_t result
 
 static bruce_result_t text__ensure_save_path(char *path, size_t path_size) {
     if (path[0] != '\0') return BRUCE_OK;
-    bruce_result_t result = dialog__text_input(
-        "Save piped text", "Absolute path", "/untitled.txt", false, path, path_size
-    );
+    bruce_result_t result =
+        dialog__text_input("Save piped text", "Absolute path", "/untitled.txt", false, path, path_size);
     if (result != BRUCE_OK) return result;
     return path[0] == '/' ? BRUCE_OK : BRUCE_ERR_INVALID_PATH;
 }
@@ -385,29 +452,36 @@ static bruce_result_t text__exit_prompt(char *path, size_t path_size, text_edito
 }
 
 static bruce_result_t text__actions(char *path, size_t path_size, text_editor_t *editor, bool *out_exit) {
-    if (editor->read_only) {
-        *out_exit = true;
-        return BRUCE_OK;
-    }
     const bruce_dialog_choice_t choices[] = {
         {.label = "Edit current line", .value = "edit"  },
+        {.label = "Copy",              .value = "copy"  },
+        {.label = "Paste",             .value = "paste" },
         {.label = "Save",              .value = "save"  },
         {.label = "Exit",              .value = "exit"  },
         {.label = "Cancel",            .value = "cancel"},
     };
     size_t selected = 0;
     *out_exit = false;
-    bruce_result_t result = dialog__choice(
-        "Text editor", text__basename(path), choices, sizeof(choices) / sizeof(choices[0]), &selected
-    );
+    char title[BRUCE_STORAGE_PATH_MAX + 16u];
+    snprintf(title, sizeof(title), "Text editor - %s", text__basename(path));
+    bruce_result_t result =
+        dialog__choice(title, NULL, choices, sizeof(choices) / sizeof(choices[0]), &selected);
     if (result == BRUCE_ERR_CANCELLED) return BRUCE_OK;
     if (result != BRUCE_OK) return result;
     if (strcmp(choices[selected].value, "cancel") == 0) return BRUCE_OK;
     if (strcmp(choices[selected].value, "edit") == 0) {
+        if (editor->read_only) return BRUCE_OK;
         result = text__edit_line(editor);
         return result == BRUCE_ERR_CANCELLED ? BRUCE_OK : result;
     }
+    if (strcmp(choices[selected].value, "copy") == 0) {
+        editor->selection_anchor = editor->cursor;
+        editor->selection_active = true;
+        return BRUCE_OK;
+    }
+    if (strcmp(choices[selected].value, "paste") == 0) return text__paste(editor);
     if (strcmp(choices[selected].value, "save") == 0) {
+        if (editor->read_only) return BRUCE_OK;
         result = text__save_to_path(path, path_size, editor);
         if (result == BRUCE_ERR_CANCELLED) return BRUCE_OK;
         if (result == BRUCE_OK) (void)dialog__message(BRUCE_DIALOG_SUCCESS, "Text editor", "File saved");
@@ -427,7 +501,7 @@ static bruce_result_t text__run_editor(char *path, size_t path_size, text_editor
 
         bool semantic = event.type != BRUCE_INPUT_KEY || event.value != event.code;
         bool exit_editor = false;
-        if (!semantic && event.code == 0x13) {
+        if (!editor->selection_active && !semantic && event.code == 0x13) {
             if (!editor->read_only) {
                 result = text__save_to_path(path, path_size, editor);
                 if (result == BRUCE_ERR_CANCELLED) result = BRUCE_OK;
@@ -436,21 +510,19 @@ static bruce_result_t text__run_editor(char *path, size_t path_size, text_editor
                     result = BRUCE_OK;
                 }
             }
-        } else if (!semantic && event.code == 0x18) {
+        } else if (!editor->selection_active && !semantic && event.code == 0x18) {
             result = text__exit_prompt(path, path_size, editor, &exit_editor);
-        } else if (!semantic && event.code == 0x03) {
-            /* Ctrl+C: copy the whole document -- there's no selection
-             * concept to copy a range of, see text_editor_t's comment. */
+        } else if (!editor->selection_active && !semantic && event.code == 0x03) {
+            /* Ctrl+C copies the whole document outside selection mode. */
             result = clipboard__set_text(editor->data);
-        } else if (!editor->read_only && !semantic && event.code == 0x16) {
-            /* Ctrl+V: insert the clipboard's text at the cursor, the same
-             * way a newline or typed character is inserted below. Silently
-             * does nothing if the clipboard doesn't hold text (e.g. it's
-             * empty, or holds files copied from the file manager). */
-            const char *clip_text = clipboard__kind() == BRUCE_CLIPBOARD_TEXT ? clipboard__get_text() : NULL;
-            if (clip_text != NULL) {
-                result = text__replace(editor, editor->cursor, editor->cursor, clip_text, strlen(clip_text));
-            }
+        } else if (!editor->selection_active && !semantic && event.code == 0x16) {
+            result = text__paste(editor);
+        } else if (
+            editor->selection_active &&
+            (event.code == BRUCE_INPUT_CODE_SELECT || event.code == BRUCE_INPUT_CODE_BUTTON_A)
+        ) {
+            result = text__copy_selection(editor);
+            editor->selection_active = false;
         } else if (semantic && (event.code == BRUCE_INPUT_CODE_UP || event.code == BRUCE_INPUT_CODE_PREV)) {
             text__move_vertical(editor, -1);
         } else if (semantic && (event.code == BRUCE_INPUT_CODE_DOWN || event.code == BRUCE_INPUT_CODE_NEXT)) {
@@ -467,28 +539,48 @@ static bruce_result_t text__run_editor(char *path, size_t path_size, text_editor
                     text__utf8_next(editor->data + editor->cursor, editor->length - editor->cursor);
         } else if (semantic && event.code == BRUCE_INPUT_CODE_HOME) {
             editor->cursor = text__line_start(editor, editor->cursor);
-        } else if (!editor->read_only && semantic && event.code == BRUCE_INPUT_CODE_DELETE) {
+        } else if (
+            !editor->selection_active && !editor->read_only && semantic &&
+            event.code == BRUCE_INPUT_CODE_DELETE
+        ) {
             if (editor->cursor < editor->length) {
                 size_t next = editor->cursor +
                               text__utf8_next(editor->data + editor->cursor, editor->length - editor->cursor);
                 result = text__replace(editor, editor->cursor, next, NULL, 0);
             }
-        } else if (!editor->read_only && semantic &&
-                   (event.code == BRUCE_INPUT_CODE_SELECT || event.code == BRUCE_INPUT_CODE_BUTTON_A)) {
+        } else if (
+            !editor->selection_active && !editor->read_only && semantic &&
+            (event.code == BRUCE_INPUT_CODE_SELECT || event.code == BRUCE_INPUT_CODE_BUTTON_A)
+        ) {
             result = text__edit_line(editor);
             if (result == BRUCE_ERR_CANCELLED) result = BRUCE_OK;
-        } else if (semantic && (event.code == BRUCE_INPUT_CODE_MENU || event.code == BRUCE_INPUT_CODE_BACK ||
-                                event.code == BRUCE_INPUT_CODE_BUTTON_B)) {
-            result = text__actions(path, path_size, editor, &exit_editor);
-        } else if (!editor->read_only && !semantic && (event.code == '\b' || event.code == 0x7f)) {
+        } else if (
+            semantic && (event.code == BRUCE_INPUT_CODE_MENU || event.code == BRUCE_INPUT_CODE_BACK ||
+                         event.code == BRUCE_INPUT_CODE_BUTTON_B)
+        ) {
+            if (editor->selection_active) {
+                editor->selection_active = false;
+            } else {
+                result = text__actions(path, path_size, editor, &exit_editor);
+            }
+        } else if (
+            !editor->selection_active && !editor->read_only && !semantic &&
+            (event.code == '\b' || event.code == 0x7f)
+        ) {
             if (editor->cursor > 0) {
                 size_t previous = editor->cursor - 1u;
                 while (previous > 0 && ((unsigned char)editor->data[previous] & 0xC0) == 0x80) previous--;
                 result = text__replace(editor, previous, editor->cursor, NULL, 0);
             }
-        } else if (!editor->read_only && !semantic && (event.code == '\n' || event.code == '\r')) {
+        } else if (
+            !editor->selection_active && !editor->read_only && !semantic &&
+            (event.code == '\n' || event.code == '\r')
+        ) {
             result = text__replace(editor, editor->cursor, editor->cursor, "\n", 1u);
-        } else if (!editor->read_only && !semantic && event.code >= 0x20 && event.code <= 0x7e) {
+        } else if (
+            !editor->selection_active && !editor->read_only && !semantic && event.code >= 0x20 &&
+            event.code <= 0x7e
+        ) {
             char character = (char)event.code;
             result = text__replace(editor, editor->cursor, editor->cursor, &character, 1u);
         }
