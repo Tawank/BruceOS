@@ -64,6 +64,7 @@ idf_component_register(SRCS
                     "core/compress/compress.c"
                     "core/config/config.c"
                     "core/dialog/dialog.c"
+                    "core/dialog/dialog_input.c"
                     "core/device/board_i2c.c"
                     "core/device/device.c"
                     "core/display/display.c"
