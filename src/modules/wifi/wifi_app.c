@@ -7,7 +7,9 @@
 #include "args.h"
 #include "core_sdk/config.h"
 #include "core_sdk/dialog.h"
+#include "core_sdk/input.h"
 #include "core_sdk/notification.h"
+#include "core_sdk/process.h"
 #include "core_sdk/runtime.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/wifi.h"
@@ -163,9 +165,42 @@ static bruce_result_t wifi_app_gui__poll_scan(void *context, bool *out_complete)
     return BRUCE_OK;
 }
 
+/* A dialog__choice_poll_launcher()/dialog__choice_launcher() call losing
+ * (and this process later regaining) foreground - e.g. the user alt-tabbed
+ * away and back, or system_menu's overlay took it while its own dialog was
+ * open - surfaces as BRUCE_ERR_CANCELLED same as a genuine Back/Esc press
+ * (see core/dialog/dialog.c); this tells them apart the same way
+ * archive_app.c/filemanager_app.c's identical helper does, so a real handoff
+ * resumes the scan/picker instead of being treated as the user backing out. */
+static bool wifi_app__resume_after_handoff(void) {
+    bruce_process_snapshot_t snapshot;
+    bruce_process_id_t self = process__current_id();
+    if (self == BRUCE_PROCESS_ID_INVALID || process__snapshot(self, &snapshot) != BRUCE_OK ||
+        snapshot.state != BRUCE_PROCESS_BACKGROUND) {
+        return false;
+    }
+    do {
+        if (runtime__delay(20) != BRUCE_OK || process__snapshot(self, &snapshot) != BRUCE_OK) return false;
+    } while (snapshot.state == BRUCE_PROCESS_BACKGROUND);
+    return snapshot.state == BRUCE_PROCESS_FOREGROUND;
+}
+
 static void wifi_app_gui__cancel_scan(void *context) {
     wifi_app_gui_scan_t *scan = context;
-    if (scan->active) (void)wifi__scan_cancel();
+    if (!scan->active) return;
+    /* Told apart from a genuine Back the same way: a Back press can only
+     * ever have been read while still in the foreground, so still being
+     * BACKGROUND right now means this cleanup is running because foreground
+     * was lost, not because the user asked to stop. Leave the radio scan
+     * running so wifi_app__gui_scan()'s retry can rejoin the same round once
+     * foreground returns. */
+    bruce_process_snapshot_t snapshot;
+    bruce_process_id_t self = process__current_id();
+    if (self != BRUCE_PROCESS_ID_INVALID && process__snapshot(self, &snapshot) == BRUCE_OK &&
+        snapshot.state == BRUCE_PROCESS_BACKGROUND) {
+        return;
+    }
+    (void)wifi__scan_cancel();
 }
 
 /* Presents the scan as a live choice dialog instead of blocking on one long
@@ -178,15 +213,24 @@ static int wifi_app__gui_scan(wifi__network_t *networks, size_t capacity) {
     const bruce_dialog_choice_t choices[] = {
         {.label = "Back", .value = "back"},
     };
-    size_t selected = 0;
-    bool complete = false;
-    bruce_result_t dialog_result = dialog__choice_poll_launcher(
-        "WiFi Scanning...", NULL, choices, sizeof(choices) / sizeof(choices[0]), WIFI_APP_GUI_SCAN_POLL_INTERVAL_MS,
-        wifi_app_gui__poll_scan, &scan, wifi_app_gui__cancel_scan, &selected, &complete
-    );
-    if (dialog_result == BRUCE_ERR_CANCELLED || (dialog_result == BRUCE_OK && !complete)) return BRUCE_ERR_CANCELLED;
-    if (dialog_result != BRUCE_OK) return (int)dialog_result;
-    return scan.result;
+    for (;;) {
+        size_t selected = 0;
+        bool complete = false;
+        bruce_result_t dialog_result = dialog__choice_poll_launcher(
+            "WiFi Scanning...", NULL, choices, sizeof(choices) / sizeof(choices[0]),
+            WIFI_APP_GUI_SCAN_POLL_INTERVAL_MS, wifi_app_gui__poll_scan, &scan, wifi_app_gui__cancel_scan, &selected,
+            &complete
+        );
+        if (dialog_result == BRUCE_ERR_CANCELLED && scan.active && wifi_app__resume_after_handoff()) {
+            (void)input__flush();
+            continue;
+        }
+        if (dialog_result == BRUCE_ERR_CANCELLED || (dialog_result == BRUCE_OK && !complete)) {
+            return BRUCE_ERR_CANCELLED;
+        }
+        if (dialog_result != BRUCE_OK) return (int)dialog_result;
+        return scan.result;
+    }
 }
 
 /* Interactive picker: scan, list every visible network with its saved/open/
@@ -240,8 +284,10 @@ static int wifi_app__gui(void) {
 
         (void)notification__push("Wi-Fi scan ended", 1000);
         size_t selected = 0;
-        bruce_result_t result =
-            dialog__choice_launcher(subtitle, NULL, choices, back_index + 1, &selected);
+        bruce_result_t result;
+        do {
+            result = dialog__choice_launcher(subtitle, NULL, choices, back_index + 1, &selected);
+        } while (result == BRUCE_ERR_CANCELLED && wifi_app__resume_after_handoff());
         if (result == BRUCE_ERR_CANCELLED) return 0;
         if (result != BRUCE_OK) return -1;
         if (strcmp(choices[selected].value, "back") == 0) return 0;

@@ -935,6 +935,26 @@ static int bruce_launcher__run_entry(const bruce_launcher_entry_t *entry) {
 /* GUI menu runner                                                            */
 /* -------------------------------------------------------------------------- */
 
+/* A dialog__choice_launcher() call losing (and this process later regaining)
+ * foreground - e.g. the process switcher, or system_menu's overlay taking it
+ * while its own dialog is open - surfaces as BRUCE_ERR_CANCELLED same as a
+ * genuine Back/Esc (see core/dialog/dialog.c); this tells them apart the same
+ * way archive_app.c/filemanager_app.c's identical helper does, so a real
+ * handoff redraws the same submenu instead of being treated as the user
+ * stepping back a level. */
+static bool bruce_launcher__resume_after_handoff(void) {
+    bruce_process_snapshot_t snapshot;
+    bruce_process_id_t self = process__current_id();
+    if (self == BRUCE_PROCESS_ID_INVALID || process__snapshot(self, &snapshot) != BRUCE_OK ||
+        snapshot.state != BRUCE_PROCESS_BACKGROUND) {
+        return false;
+    }
+    do {
+        if (runtime__delay(20) != BRUCE_OK || process__snapshot(self, &snapshot) != BRUCE_OK) return false;
+    } while (snapshot.state == BRUCE_PROCESS_BACKGROUND);
+    return snapshot.state == BRUCE_PROCESS_FOREGROUND;
+}
+
 /* The root is a horizontal carousel. Nested menus use Core's choice renderer
  * inside the launcher's status bar and outer border. */
 static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
@@ -998,6 +1018,13 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
             );
             s_live_choices.count = 0;
             if (result == BRUCE_ERR_CANCELLED) {
+                if (bruce_launcher__resume_after_handoff()) {
+                    /* Foreground was lost (alt-tab, system_menu, ...) and has
+                     * now returned: redraw the same menu instead of stepping
+                     * up a level. */
+                    (void)input__flush();
+                    continue;
+                }
                 /* Esc/Back steps up one level, same as selecting the "Back"
                  * entry below -- not all the way out of the whole submenu
                  * stack. Only at the top of this stack (depth 0) does it

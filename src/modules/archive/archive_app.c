@@ -465,8 +465,10 @@ static bruce_result_t archive_app__folder_menu(
         {.label = "Back",    .value = "back"   },
     };
     size_t selected = 0;
-    bruce_result_t result =
-        dialog__choice(label, NULL, choices, sizeof(choices) / sizeof(choices[0]), &selected);
+    bruce_result_t result;
+    do {
+        result = dialog__choice(label, NULL, choices, sizeof(choices) / sizeof(choices[0]), &selected);
+    } while (result == BRUCE_ERR_CANCELLED && archive_app__resume_after_handoff());
     if (result != BRUCE_OK) return result;
 
     const char *action = choices[selected].value;
@@ -484,8 +486,10 @@ archive_app__file_menu(const char *archive_path, bool zip, bool gui, const char 
         {.label = "Back",    .value = "back"   },
     };
     size_t selected = 0;
-    bruce_result_t result =
-        dialog__choice(label, NULL, choices, sizeof(choices) / sizeof(choices[0]), &selected);
+    bruce_result_t result;
+    do {
+        result = dialog__choice(label, NULL, choices, sizeof(choices) / sizeof(choices[0]), &selected);
+    } while (result == BRUCE_ERR_CANCELLED && archive_app__resume_after_handoff());
     if (result != BRUCE_OK) return result;
 
     const char *action = choices[selected].value;

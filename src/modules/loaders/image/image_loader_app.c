@@ -8,11 +8,31 @@
 #include "core_sdk/display.h"
 #include "core_sdk/image.h"
 #include "core_sdk/input.h"
+#include "core_sdk/process.h"
 #include "core_sdk/result.h"
+#include "core_sdk/runtime.h"
 
 static bool image_viewer__is_gif(const char *path) {
     const char *extension = path != NULL ? strrchr(path, '.') : NULL;
     return extension != NULL && strcasecmp(extension, ".gif") == 0;
+}
+
+/* input__read() surfaces BRUCE_ERR_NOT_FOREGROUND when another process takes
+ * over the screen (e.g. alt-tab, or system_menu's overlay); wait here until
+ * we're either back in the foreground or the process is gone for good, so
+ * that's told apart from a genuine "close the viewer" press. Same pattern as
+ * archive_app.c/filemanager_app.c's identical helper. */
+static bool image_viewer__resume_after_handoff(void) {
+    bruce_process_snapshot_t snapshot;
+    bruce_process_id_t self = process__current_id();
+    if (self == BRUCE_PROCESS_ID_INVALID || process__snapshot(self, &snapshot) != BRUCE_OK ||
+        snapshot.state != BRUCE_PROCESS_BACKGROUND) {
+        return false;
+    }
+    do {
+        if (runtime__delay(20) != BRUCE_OK || process__snapshot(self, &snapshot) != BRUCE_OK) return false;
+    } while (snapshot.state == BRUCE_PROCESS_BACKGROUND);
+    return snapshot.state == BRUCE_PROCESS_FOREGROUND;
 }
 
 static bruce_result_t image_viewer__draw_gif(const char *path, const bruce_image_draw_options_t *options) {
@@ -31,9 +51,11 @@ static bruce_result_t image_viewer__draw_gif(const char *path, const bruce_image
 
         bruce_input_event_t event;
         bruce_result_t input_result = input__read(&event, delay_ms == 0 ? 100 : delay_ms);
-        if (input_result == BRUCE_ERR_NOT_FOREGROUND ||
-            (input_result == BRUCE_OK && event.action == BRUCE_INPUT_PRESS))
+        if (input_result == BRUCE_ERR_NOT_FOREGROUND) {
+            if (image_viewer__resume_after_handoff()) continue;
             break;
+        }
+        if (input_result == BRUCE_OK && event.action == BRUCE_INPUT_PRESS) break;
         result = image__gif_increment(gif, NULL);
     }
     image__gif_close(gif);
@@ -95,7 +117,10 @@ int image_app_main(int argc, char **argv) {
         for (;;) {
             bruce_input_event_t event;
             bruce_result_t input_result = input__read(&event, 100);
-            if (input_result == BRUCE_ERR_NOT_FOREGROUND) break;
+            if (input_result == BRUCE_ERR_NOT_FOREGROUND) {
+                if (image_viewer__resume_after_handoff()) continue;
+                break;
+            }
             if (input_result == BRUCE_OK && event.action == BRUCE_INPUT_PRESS) break;
         }
     }

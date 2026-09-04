@@ -14,6 +14,7 @@
 #include "core_sdk/memory.h"
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
+#include "core_sdk/runtime.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
 
@@ -490,13 +491,35 @@ static bruce_result_t text__actions(char *path, size_t path_size, text_editor_t 
     return text__exit_prompt(path, path_size, editor, out_exit);
 }
 
+/* input__read() surfaces BRUCE_ERR_NOT_FOREGROUND when another process takes
+ * over the screen (e.g. alt-tab, or system_menu's overlay); wait here until
+ * we're either back in the foreground or the process is gone for good, so
+ * that's told apart from a genuine exit and the editor redraws instead of
+ * closing. Same pattern as archive_app.c/filemanager_app.c's identical
+ * helper. */
+static bool text_app__resume_after_handoff(void) {
+    bruce_process_snapshot_t snapshot;
+    bruce_process_id_t self = process__current_id();
+    if (self == BRUCE_PROCESS_ID_INVALID || process__snapshot(self, &snapshot) != BRUCE_OK ||
+        snapshot.state != BRUCE_PROCESS_BACKGROUND) {
+        return false;
+    }
+    do {
+        if (runtime__delay(20) != BRUCE_OK || process__snapshot(self, &snapshot) != BRUCE_OK) return false;
+    } while (snapshot.state == BRUCE_PROCESS_BACKGROUND);
+    return snapshot.state == BRUCE_PROCESS_FOREGROUND;
+}
+
 static bruce_result_t text__run_editor(char *path, size_t path_size, text_editor_t *editor) {
     (void)input__flush();
     for (;;) {
         text__render(path, editor);
         bruce_input_event_t event;
         bruce_result_t result = input__read(&event, UINT32_MAX);
-        if (result == BRUCE_ERR_NOT_FOREGROUND) return BRUCE_OK;
+        if (result == BRUCE_ERR_NOT_FOREGROUND) {
+            if (text_app__resume_after_handoff()) continue;
+            return BRUCE_OK;
+        }
         if (result != BRUCE_OK || event.action != BRUCE_INPUT_PRESS) continue;
 
         bool semantic = event.type != BRUCE_INPUT_KEY || event.value != event.code;
