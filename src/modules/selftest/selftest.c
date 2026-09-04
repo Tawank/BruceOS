@@ -20,6 +20,7 @@
 #include "clock_test.h"
 #include "compress_test.h"
 #include "config_test.h"
+#include "core_launcher_test.h"
 #include "device_test.h"
 #include "dialog_test.h"
 #include "display_test.h"
@@ -232,6 +233,11 @@ int selftest_app_main(int argc, char **argv) {
     RUN_SELFTEST(selftest__run_filemanager_network_split_entry_name_case);
     RUN_SELFTEST(selftest__run_filemanager_pathicons_parse_case);
     RUN_SELFTEST(selftest__run_filemanager_pathicons_match_case);
+    RUN_SELFTEST(selftest__run_core_launcher_build_entry_key_case);
+    RUN_SELFTEST(selftest__run_core_launcher_label_from_key_case);
+    RUN_SELFTEST(selftest__run_core_launcher_json_has_command_case);
+    RUN_SELFTEST(selftest__run_core_launcher_json_menu_labels_case);
+    RUN_SELFTEST(selftest__run_core_launcher_json_find_menu_case);
     RUN_SELFTEST(selftest__run_ir_permission_denied_case);
     RUN_SELFTEST(selftest__run_ir_validation_case);
     RUN_SELFTEST(selftest__run_audio_validation_case);

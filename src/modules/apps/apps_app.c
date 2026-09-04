@@ -11,6 +11,8 @@
 #include "core_sdk/app_runner.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/ext_mem_loader.h"
+#include "core_sdk/input.h"
+#include "core_sdk/launcher.h"
 #include "core_sdk/manifest.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/process.h"
@@ -152,6 +154,23 @@ static void apps__show_error(const char *action, bruce_result_t result) {
     (void)dialog__message(BRUCE_DIALOG_ERROR, "Apps", message);
 }
 
+/* Long-pressing an app row (see apps_app_main()'s dialog__choice_ex() call)
+ * calls this instead of launching it. launcher__add_menu_entry()
+ * (core_sdk/launcher.h) owns the whole "where" interaction itself -- it
+ * prompts for a destination among the launcher's root menu and its own
+ * submenus (WiFi, Bluetooth, NRF24, ... whatever /config/launcher.conf
+ * actually has) and reports the outcome, so this only has to pass the app's
+ * manifest name as the label, its path as the command, and its icon_name
+ * (if the manifest gave it one via "icon:<name>") and handle a real
+ * failure -- a cancelled prompt is left silent, same as any other
+ * dialog__* cancel. */
+static void apps__handle_long_press(const apps_entry_t *app) {
+    bruce_result_t result = launcher__add_menu_entry(
+        app->name, app->icon_name[0] != '\0' ? app->icon_name : NULL, app->path
+    );
+    if (result != BRUCE_OK && result != BRUCE_ERR_CANCELLED) apps__show_error("Add to menu", result);
+}
+
 int apps_app_main(int argc, char **argv) {
     ArgParser *parser = ap_new_parser();
     if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
@@ -211,14 +230,32 @@ int apps_app_main(int argc, char **argv) {
         choices[i].right_text = NULL;
     }
 
+    /* render_launcher styles this like dialog__choice_launcher() did; the
+     * only change is opting into long_press_enabled so holding SELECT on a
+     * row offers apps__handle_long_press()'s "Add to main menu" instead of
+     * launching it (see bruce_dialog_render_params_t's doc comment in
+     * core_sdk/dialog.h). */
+    bruce_dialog_render_params_t list_params = {0};
+    list_params.render_launcher = true;
+    list_params.long_press_enabled = true;
+    bool long_press = false;
+    list_params.out_long_press = &long_press;
+
     for (;;) {
         size_t selected = 0;
-        result = dialog__choice_launcher("Apps", NULL, choices, count, &selected);
+        long_press = false;
+        result = dialog__choice_ex("Apps", NULL, choices, count, &selected, &list_params);
         if (result == BRUCE_ERR_CANCELLED && apps__resume_after_handoff()) continue;
         if (result == BRUCE_ERR_CANCELLED) break;
         if (result != BRUCE_OK) {
             apps__show_error("Browse", result);
             break;
+        }
+
+        if (long_press) {
+            apps__handle_long_press(&apps[selected]);
+            (void)input__flush();
+            continue;
         }
 
         const bruce_environment_variable_t gui_env[] = {
