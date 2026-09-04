@@ -6,7 +6,7 @@
 #include "core_sdk/result.h"
 #include "shell_line_editor.h"
 
-#define SHELL_HISTORY_PATH "/shell_history"
+#define SHELL_HISTORY_PATH "/.shell_history"
 
 bruce_result_t shell_history__append(const char *path, const char *line);
 bruce_result_t shell_history__previous(

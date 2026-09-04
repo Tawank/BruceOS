@@ -8,6 +8,7 @@
 
 #define SHELL_HISTORY_MAX_BYTES (64u * 1024u)
 #define SHELL_HISTORY_OLD_PATH "/shell_history.old"
+#define SHELL_HISTORY_IO_BYTES 512u
 
 static bruce_result_t shell_history__size(bruce_file_id_t file, uint64_t *out_size) {
     return storage__seek(file, 0, SEEK_END, out_size);
@@ -41,6 +42,96 @@ static bruce_result_t shell_history__read_range(
     return BRUCE_OK;
 }
 
+static bruce_result_t shell_history__write_all(bruce_file_id_t file, const char *data, size_t length) {
+    size_t offset = 0;
+    while (offset < length) {
+        size_t written = 0;
+        bruce_result_t result = storage__write(file, data + offset, length - offset, &written);
+        if (result != BRUCE_OK) return result;
+        if (written == 0) return BRUCE_ERR_IO;
+        offset += written;
+    }
+    return BRUCE_OK;
+}
+
+static bruce_result_t shell_history__read_all(bruce_file_id_t file, char *data, size_t length) {
+    size_t offset = 0;
+    while (offset < length) {
+        size_t read = 0;
+        bruce_result_t result = storage__read(file, data + offset, length - offset, &read);
+        if (result != BRUCE_OK) return result;
+        if (read == 0) return BRUCE_ERR_IO;
+        offset += read;
+    }
+    return BRUCE_OK;
+}
+
+static bruce_result_t shell_history__newest_matches(
+    bruce_file_id_t file, uint64_t size, const char *line, size_t length, bool *out_matches
+) {
+    char buffer[SHELL_HISTORY_IO_BYTES];
+    uint64_t start = 0;
+    uint64_t end = size;
+    bool found_start = false;
+    bool skipping_trailing_newlines = true;
+    bruce_result_t result = BRUCE_OK;
+
+    for (uint64_t cursor = size; cursor > 0 && !found_start;) {
+        uint64_t block_start = cursor > sizeof(buffer) ? cursor - sizeof(buffer) : 0;
+        size_t block_size = (size_t)(cursor - block_start);
+        uint64_t position = 0;
+        result = storage__seek(file, (int64_t)block_start, SEEK_SET, &position);
+        if (result != BRUCE_OK) return result;
+        result = shell_history__read_all(file, buffer, block_size);
+        if (result != BRUCE_OK) return result;
+
+        for (size_t index = block_size; index > 0; index--) {
+            uint64_t offset = block_start + index - 1;
+            if (skipping_trailing_newlines) {
+                if (buffer[index - 1] == '\n') {
+                    end = offset;
+                    continue;
+                }
+                skipping_trailing_newlines = false;
+            }
+            if (buffer[index - 1] == '\n') {
+                start = offset + 1;
+                found_start = true;
+                break;
+            }
+            if (offset == 0) {
+                found_start = true;
+                break;
+            }
+        }
+        cursor = block_start;
+    }
+    if (skipping_trailing_newlines) {
+        *out_matches = false;
+        return BRUCE_OK;
+    }
+    if (end - start != length) {
+        *out_matches = false;
+        return BRUCE_OK;
+    }
+
+    uint64_t position = 0;
+    result = storage__seek(file, (int64_t)start, SEEK_SET, &position);
+    size_t offset = 0;
+    while (result == BRUCE_OK && offset < length) {
+        size_t wanted = length - offset < sizeof(buffer) ? length - offset : sizeof(buffer);
+        result = shell_history__read_all(file, buffer, wanted);
+        if (result != BRUCE_OK) return result;
+        if (memcmp(buffer, line + offset, wanted) != 0) {
+            *out_matches = false;
+            return BRUCE_OK;
+        }
+        offset += wanted;
+    }
+    *out_matches = result == BRUCE_OK;
+    return result;
+}
+
 bruce_result_t shell_history__append(const char *path, const char *line) {
     if (path == NULL || line == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     size_t length = strlen(line);
@@ -56,7 +147,18 @@ bruce_result_t shell_history__append(const char *path, const char *line) {
     (void)storage__close(file);
     if (result != BRUCE_OK) return result;
 
-    if (size + length + 1 > SHELL_HISTORY_MAX_BYTES) {
+    if (size > 0) {
+        result = storage__open(path, BRUCE_STORAGE_OPEN_READ, &file);
+        if (result != BRUCE_OK) return result;
+        bool newest = false;
+        result = shell_history__newest_matches(file, size, line, length, &newest);
+        (void)storage__close(file);
+        if (result != BRUCE_OK) return result;
+        if (newest) return BRUCE_OK;
+    }
+
+    bool rotate = length >= SHELL_HISTORY_MAX_BYTES || size > SHELL_HISTORY_MAX_BYTES - length - 1;
+    if (rotate) {
         if (strcmp(path, SHELL_HISTORY_PATH) == 0) {
             (void)storage__remove(SHELL_HISTORY_OLD_PATH);
             (void)storage__rename(path, SHELL_HISTORY_OLD_PATH);
@@ -69,20 +171,8 @@ bruce_result_t shell_history__append(const char *path, const char *line) {
         path, BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE | BRUCE_STORAGE_OPEN_APPEND, &file
     );
     if (result != BRUCE_OK) return result;
-    size_t offset = 0;
-    while (offset < length) {
-        size_t written = 0;
-        result = storage__write(file, line + offset, length - offset, &written);
-        if (result != BRUCE_OK || written == 0) break;
-        offset += written;
-    }
-    if (result == BRUCE_OK && offset == length) {
-        size_t written = 0;
-        result = storage__write(file, "\n", 1, &written);
-        if (result == BRUCE_OK && written != 1) result = BRUCE_ERR_IO;
-    } else if (result == BRUCE_OK) {
-        result = BRUCE_ERR_IO;
-    }
+    result = shell_history__write_all(file, line, length);
+    if (result == BRUCE_OK) result = shell_history__write_all(file, "\n", 1);
     (void)storage__close(file);
     return result;
 }
