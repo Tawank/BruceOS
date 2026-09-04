@@ -198,16 +198,23 @@ bool filemanager_network__resolve_program(const char *path, char *program, size_
     char provider_name[FILEMANAGER_NETWORK_PROVIDER_NAME_MAX];
     if (!filemanager_network__split_entry_name(entry_name, provider_name, sizeof(provider_name))) return false;
 
-    filemanager_network__provider_t providers[FILEMANAGER_NETWORK_PROVIDER_MAX];
+    /* Heap-allocated, not a stack array: this runs from filemanager__open_default(),
+     * already several calls deep into the file-open dispatch chain, and
+     * FILEMANAGER_NETWORK_PROVIDER_MAX providers worth of struct is too much to add
+     * to that stack (see the identical reasoning on filemanager_network__refresh()'s
+     * own copy of this array, and filemanager_network__clear_stale()'s entries[]). */
+    filemanager_network__provider_t *providers =
+        memory__malloc(FILEMANAGER_NETWORK_PROVIDER_MAX * sizeof(filemanager_network__provider_t));
+    if (providers == NULL) return false;
     size_t provider_count = 0;
     filemanager_network__load_providers(providers, FILEMANAGER_NETWORK_PROVIDER_MAX, &provider_count);
 
     const filemanager_network__provider_t *provider =
         filemanager_network__find_provider(providers, provider_count, provider_name);
-    if (provider == NULL) return false;
-
-    snprintf(program, program_size, "%s", provider->program);
-    return true;
+    bool found = provider != NULL;
+    if (found) snprintf(program, program_size, "%s", provider->program);
+    memory__free(providers);
+    return found;
 }
 
 /* Runs a provider's "discovery" command line and captures its stdout via a
@@ -304,9 +311,18 @@ static bruce_result_t filemanager_network__write_location(
 static void filemanager_network__clear_stale(
     const filemanager_network__provider_t providers[], size_t provider_count
 ) {
-    bruce_storage_entry_t entries[32];
+    /* Heap-allocated: 32 * sizeof(bruce_storage_entry_t) is over 3KB, too much
+     * to add to the stack this runs on -- see filemanager_network__refresh(),
+     * which calls this before ever entering filemanager_app_main()'s own
+     * dialog loop, so this frame stacks directly on top of whatever's already
+     * live in the caller. */
+    bruce_storage_entry_t *entries = memory__malloc(32 * sizeof(bruce_storage_entry_t));
+    if (entries == NULL) return;
     size_t count = 0;
-    if (storage__list(FILEMANAGER_NETWORK_DIR, entries, 32, &count) != BRUCE_OK) return;
+    if (storage__list(FILEMANAGER_NETWORK_DIR, entries, 32, &count) != BRUCE_OK) {
+        memory__free(entries);
+        return;
+    }
     if (count > 32) count = 32;
     for (size_t i = 0; i < count; ++i) {
         if (entries[i].type != BRUCE_STORAGE_ENTRY_FILE) continue;
@@ -324,6 +340,7 @@ static void filemanager_network__clear_stale(
         );
         (void)storage__remove(path);
     }
+    memory__free(entries);
 }
 
 void filemanager_network__refresh(void) {
@@ -331,15 +348,28 @@ void filemanager_network__refresh(void) {
     if (storage__exists(FILEMANAGER_NETWORK_DIR, &exists) != BRUCE_OK) return;
     if (!exists && storage__mkdir(FILEMANAGER_NETWORK_DIR) != BRUCE_OK) return;
 
-    filemanager_network__provider_t providers[FILEMANAGER_NETWORK_PROVIDER_MAX];
+    /* Heap-allocated, not a stack array: this runs unconditionally at the top
+     * of filemanager_app_main(), before any of its own locals go out of
+     * scope, so this and every buffer below it stack directly on top of that
+     * frame -- see the identical reasoning on filemanager_network__resolve_program()
+     * and filemanager_network__clear_stale()'s entries[]. */
+    filemanager_network__provider_t *providers =
+        memory__malloc(FILEMANAGER_NETWORK_PROVIDER_MAX * sizeof(filemanager_network__provider_t));
+    if (providers == NULL) return;
     size_t provider_count = 0;
     filemanager_network__load_providers(providers, FILEMANAGER_NETWORK_PROVIDER_MAX, &provider_count);
-    if (provider_count == 0) return;
+    if (provider_count == 0) {
+        memory__free(providers);
+        return;
+    }
 
     filemanager_network__clear_stale(providers, provider_count);
 
     char *capture = memory__malloc(FILEMANAGER_NETWORK_CAPTURE_MAX);
-    if (capture == NULL) return;
+    if (capture == NULL) {
+        memory__free(providers);
+        return;
+    }
     for (size_t p = 0; p < provider_count; ++p) {
         size_t capture_size = 0;
         if (filemanager_network__capture(&providers[p], capture, FILEMANAGER_NETWORK_CAPTURE_MAX, &capture_size) !=
@@ -364,6 +394,7 @@ void filemanager_network__refresh(void) {
         }
     }
     memory__free(capture);
+    memory__free(providers);
 }
 
 /** @} */
