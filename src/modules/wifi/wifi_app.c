@@ -97,6 +97,20 @@ static int wifi_app_scan(void) {
     return 0;
 }
 
+/* Maps an RSSI reading to one of the four wifi-strength icons (1=weakest,
+ * 4=strongest), in the locked variant for secured networks -- thresholds
+ * follow the common -55/-67/-78 dBm cutoffs used for signal-bar displays. */
+static const char *wifi_app_gui__strength_icon(int8_t rssi, bool secured) {
+    static const char *const open_icons[4] = {
+        "wifi-strength-1", "wifi-strength-2", "wifi-strength-3", "wifi-strength-4"
+    };
+    static const char *const lock_icons[4] = {
+        "wifi-strength-1-lock", "wifi-strength-2-lock", "wifi-strength-3-lock", "wifi-strength-4-lock"
+    };
+    int bars = rssi >= -55 ? 4 : rssi >= -67 ? 3 : rssi >= -78 ? 2 : 1;
+    return (secured ? lock_icons : open_icons)[bars - 1];
+}
+
 /* "<ssid> <rssi> dBm [<tag>]", tag naming what selecting the row will do:
  * "open" connects straight away, "saved" reuses the stored password (still
  * editable), "locked" prompts for a new one. */
@@ -205,7 +219,8 @@ static int wifi_app__gui(void) {
             wifi_app_gui__format_row(&networks[i], known, rows[i], sizeof(rows[i]));
             choices[i].label = rows[i];
             choices[i].value = rows[i];
-            choices[i].icon_name = "wifi";
+            choices[i].icon_name =
+                wifi_app_gui__strength_icon(networks[i].rssi, networks[i].authmode != WIFI_APP_GUI_AUTH_OPEN);
             choices[i].right_text = NULL;
         }
         size_t rescan_index = (size_t)count;
