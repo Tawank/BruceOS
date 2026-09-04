@@ -95,6 +95,8 @@ typedef struct process__record {
     uint32_t cpu_percent;
     uint32_t stack_high_water_bytes;
     uint32_t stack_total_bytes;
+    /* Zero means this process follows the foreground/background task priority. */
+    uint32_t configured_priority;
     process__environment_t environment;
     EventGroupHandle_t events;
     struct process__record *previous;

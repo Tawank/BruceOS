@@ -302,6 +302,12 @@ void process__foreground_recompute_locked(void) {
             record->id == next ? BRUCE_PROCESS_FOREGROUND : BRUCE_PROCESS_BACKGROUND;
         if (record->state != new_state) {
             record->state = new_state;
+            if (record->configured_priority == 0 && record->handle != NULL) {
+                vTaskPrioritySet(
+                    record->handle,
+                    new_state == BRUCE_PROCESS_FOREGROUND ? tskIDLE_PRIORITY + 2 : tskIDLE_PRIORITY + 1
+                );
+            }
             process__wake_locked(record);
             display__process_state_changed(record->id, new_state);
         }
@@ -587,6 +593,7 @@ process_registry__create(const process_create_params_t *params, bruce_process_id
     record->argc = params->argc > 0 ? params->argc : 0;
     record->argv = argv_copy;
     record->next_resource_id = 1;
+    record->configured_priority = params->priority;
     uint32_t stack_bytes = params->stack_bytes != 0 ? params->stack_bytes : PROCESS__DEFAULT_STACK_BYTES;
     record->stack_total_bytes = stack_bytes;
 
@@ -627,7 +634,9 @@ process_registry__create(const process_create_params_t *params, bruce_process_id
     record->tcb_buffer = tcb_buffer;
     record->memory_bytes += stack_bytes;
 
-    UBaseType_t priority = params->priority != 0 ? (UBaseType_t)params->priority : tskIDLE_PRIORITY + 1;
+    UBaseType_t priority = params->priority != 0
+                                 ? (UBaseType_t)params->priority
+                                 : (params->start_in_background ? tskIDLE_PRIORITY + 1 : tskIDLE_PRIORITY + 2);
     record->handle = xTaskCreateStatic(
         process__trampoline, record->name, stack_bytes, record, priority, (StackType_t *)record->stack_buffer,
         tcb_buffer
