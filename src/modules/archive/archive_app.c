@@ -9,7 +9,9 @@
 #include "args.h"
 #include "core_sdk/app_runner.h"
 #include "core_sdk/archive.h"
+#include "core_sdk/config.h"
 #include "core_sdk/dialog.h"
+#include "core_sdk/display.h"
 #include "core_sdk/ext_mem_loader.h"
 #include "core_sdk/input.h"
 #include "core_sdk/memory.h"
@@ -248,6 +250,60 @@ static void archive_app__format_bytes(size_t bytes, char *out, size_t out_size) 
         unit++;
     }
     snprintf(out, out_size, "%zu%s", bytes / divisor, units[unit]);
+}
+
+/* "uncompressed <sum of every file entry's size>   <zip|tar.gz> <archive's
+ * own on-disk size>" - the same "which resource, how full" footer shape
+ * dialog__pick_file_ex() gives a plain filesystem browse (see
+ * dialog__pick_file_draw_footer_usage() in core/dialog/dialog.c), but
+ * there's no volume to report free/used space for here: this is a read-only
+ * listing over one archive file's own entries, so the two figures that make
+ * sense instead are its total uncompressed size and its own compressed size
+ * on disk. Both are whole-archive totals, unaffected by which directory is
+ * currently being browsed, so this runs once up front rather than on every
+ * redraw. */
+static void archive_app__format_usage(
+    const archive_app__entries_t *entries, const char *archive_path, bool zip, char *out, size_t out_size
+) {
+    size_t uncompressed_total = 0;
+    for (size_t i = 0; i < entries->count; ++i) {
+        if (!entries->entries[i].is_directory) uncompressed_total += entries->entries[i].size;
+    }
+    char uncompressed_text[16];
+    archive_app__format_bytes(uncompressed_total, uncompressed_text, sizeof(uncompressed_text));
+
+    uint64_t archive_size = 0;
+    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
+    if (storage__open(archive_path, BRUCE_STORAGE_OPEN_READ, &file) == BRUCE_OK) {
+        (void)storage__seek(file, 0, SEEK_END, &archive_size);
+        (void)storage__close(file);
+    }
+    char archive_size_text[16];
+    archive_app__format_bytes((size_t)archive_size, archive_size_text, sizeof(archive_size_text));
+
+    snprintf(
+        out, out_size, "uncompressed %s   %s %s", uncompressed_text, zip ? "zip" : "tar.gz", archive_size_text
+    );
+}
+
+/* render_callback for the browsing loop's dialog__choice_ex() below: draws
+ * `context` (built by archive_app__format_usage() above) right-aligned into
+ * the bottom bar dialog__gui_choice() already fills sec-colored for a
+ * full-bleed listing - the same spot/size dialog__pick_file_draw_footer_usage()
+ * (core/dialog/dialog.c) draws a plain filesystem browse's free/used figure
+ * into, just reached through the public display__/config__ API since this is
+ * a module, not core. */
+static void archive_app__draw_footer_usage(void *context) {
+    const char *text = context;
+    if (text == NULL || text[0] == '\0') return;
+    int16_t char_w = 0, char_h = 0;
+    if (display__get_font_metrics(&char_w, &char_h) != BRUCE_OK || char_h <= 0) char_h = 10;
+    (void)char_w;
+    int footer_h = char_h + 4;
+    (void)display__set_text_color(config__get_color_text());
+    (void)display__set_text_size(1);
+    (void)display__set_text_bg_color(config__get_color_secondary());
+    (void)display__draw_right_string(text, display__width() - 2, display__height() - footer_h + 2);
 }
 
 static void archive_app__show_error(const char *action, bruce_result_t result) {
@@ -550,6 +606,9 @@ int archive_app_main(int argc, char **argv) {
         return result;
     }
 
+    char usage_text[64];
+    archive_app__format_usage(&entries, archive_path, zip, usage_text, sizeof(usage_text));
+
     char prefix[ARCHIVE_APP_PATH_MAX] = "";
     for (;;) {
         archive_app__child_t *children = NULL;
@@ -594,6 +653,8 @@ int archive_app_main(int argc, char **argv) {
         render_params.long_press_enabled = true;
         bool long_press = false;
         render_params.out_long_press = &long_press;
+        render_params.render_callback = archive_app__draw_footer_usage;
+        render_params.render_callback_context = usage_text;
 
         size_t selected = 0;
         result = dialog__choice_ex(bar_title, NULL, choices, row_count, &selected, &render_params);
