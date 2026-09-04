@@ -852,6 +852,18 @@ static void sftp_app__draw_footer_host(void *context) {
     (void)display__draw_right_string(text, display__width() - 2, display__height() - footer_h + 2);
 }
 
+/* Same ordering filemanager's own browser uses (dialog__compare_file_picker_entries()
+ * in core/dialog/dialog.c): directories before files, then case-insensitive
+ * by name within each group. */
+static int sftp_app__compare_entries(const void *left, const void *right) {
+    const bruce_ssh_sftp_entry_t *left_entry = left;
+    const bruce_ssh_sftp_entry_t *right_entry = right;
+    if (left_entry->is_directory != right_entry->is_directory) {
+        return left_entry->is_directory ? -1 : 1;
+    }
+    return strcasecmp(left_entry->name, right_entry->name);
+}
+
 /* Interactive directory browser: lists the current remote directory, lets
  * the user descend into subdirectories or go back up, and offers
  * View/Download on a chosen file. Starts at the login/home directory
@@ -907,6 +919,7 @@ static void sftp_app__browse(bruce_ssh_id_t session, const char *display_host) {
             sftp_app__ascend(remote_dir);
             continue;
         }
+        qsort(entries, count, sizeof(*entries), sftp_app__compare_entries);
 
         bool at_root = strcmp(remote_dir, ".") == 0 || strcmp(remote_dir, "/") == 0;
         size_t choice_count = count + (at_root ? 1u : 2u);
