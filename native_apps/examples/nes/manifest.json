@@ -1,7 +1,7 @@
 {
   "appName": "NES",
   "entryPoint": "app_main",
-  "appIcon": "icon:remote-tv",
+  "appIcon": "icon:gamepad-square",
   "coreAbiVersion": 4,
   "permissions": ["storage"],
   "stackSize": 8192,

@@ -1,7 +1,7 @@
 {
   "appName": "Game3D",
   "entryPoint": "app_main",
-  "appIcon": "icon:console",
+  "appIcon": "icon:video-3d",
   "coreAbiVersion": 4,
   "permissions": [],
   "heapSize": 105000,
