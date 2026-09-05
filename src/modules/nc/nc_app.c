@@ -179,13 +179,15 @@ static int nc_app__listener(uint16_t port) {
 
 static int nc_app__gui(void) {
     const bruce_dialog_choice_t choices[] = {
-        {.label = "Client",   .value = "client",  .icon_name = "cellphone"},
+        {.label = "Client",          .value = "client",   .icon_name = "cellphone"},
         {.label = "Server/Listener", .value = "listener", .icon_name = "server"},
+        {.label = "Back",            .value = "back"},
     };
     size_t selected = 0;
-    bruce_result_t result =     dialog__choice_launcher("nc", NULL, choices, 2, &selected);
+    bruce_result_t result = dialog__choice_launcher("nc", NULL, choices, 3, &selected);
     if (result == BRUCE_ERR_CANCELLED) return BRUCE_OK;
     if (result != BRUCE_OK) return result;
+    if (strcmp(choices[selected].value, "back") == 0) return BRUCE_OK;
     bool client = strcmp(choices[selected].value, "listener") != 0;
 
     char port_text[8] = "";

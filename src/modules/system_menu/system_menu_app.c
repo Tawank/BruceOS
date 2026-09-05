@@ -29,7 +29,7 @@ static const char *const SYSTEM_MENU__DEFAULT_ITEMS_JSON =
     "["
     "{\"icon\":\"cancel\",\"label\":\"Cancel\",\"action\":\"cancel\"},"
     "{\"icon\":\"keyboard-esc\",\"label\":\"Esc\",\"action\":\"input.esc\"},"
-    "{\"icon\":\"fast-forward\",\"label\":\"Next\",\"action\":\"process.next\"},"
+    "{\"icon\":\"arrange-bring-forward\",\"label\":\"Switch\",\"action\":\"process.next\"},"
     "{\"icon\":\"apps\",\"label\":\"Launcher\",\"action\":\"launcher\"},"
     "{\"icon\":\"power\",\"label\":\"Off\",\"action\":\"shutdown now\"}"
     "]";

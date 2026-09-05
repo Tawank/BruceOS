@@ -1144,28 +1144,11 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
                 continue;
             }
 
-            bruce_result_t frame = display__begin_frame();
-            if (frame == BRUCE_ERR_NOT_FOREGROUND) {
-                (void)runtime__sleep(BRUCE_LAUNCHER_BACKGROUND_WAIT_MS);
-                continue;
-            }
-            if (frame != BRUCE_OK) {
-                memory__free(parents);
-                memory__free(choices);
-                return frame;
-            }
-            bruce_launcher__draw_main_border(&theme);
-            (void)bruce_launcher__draw_status_bar(&theme);
-            frame = display__present();
-            if (frame != BRUCE_OK) {
-                memory__free(parents);
-                memory__free(choices);
-                return frame;
-            }
-
             /* Published only across the dialog call: bruce_launcher__window_draw_status()
              * runs on other processes' dialogs too, and must not touch this
-             * array once it goes out of scope. */
+             * array once it goes out of scope. The dialog's first frame draws
+             * the border, status bar, and list together; presenting a
+             * border-only frame here makes submenu transitions flash. */
             s_live_choices.choices = choices;
             s_live_choices.entries = entries;
             s_live_choices.count = current->entry_count;
