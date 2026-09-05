@@ -65,6 +65,12 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build firmware
         run: source "$IDF_PATH/export.sh" && python3 tools/board.py ${{ matrix.board }} build
+      - name: Report managed component hash
+        if: failure()
+        run: |
+          source "$IDF_PATH/export.sh"
+          python3 -c 'from idf_component_tools.hash_tools.calculate import hash_dir; print(hash_dir("managed_components/wasm-micro-runtime"))'
+          cat managed_components/wasm-micro-runtime/.component_hash
       - name: Stage flash files
         run: |
           mkdir release-assets
