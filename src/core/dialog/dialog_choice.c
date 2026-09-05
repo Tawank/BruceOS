@@ -351,8 +351,13 @@ bruce_result_t dialog__gui_choice(
      * into this screen) so it can't be replayed as an immediate selection on
      * the freshly drawn list before the user has seen it - e.g. a permission
      * prompt silently auto-confirming "Allow" on the stale press that
-     * launched the requesting app. */
-    (void)input__flush();
+     * launched the requesting app. Skipped when a caller is re-issuing this
+     * exact call after briefly losing and regaining foreground (see
+     * bruce_dialog_render_params_t.skip_initial_flush) - there nothing new
+     * has appeared for the user to be surprised by, and a key queued during
+     * the interruption (e.g. the system menu's injected Back press for its
+     * "Esc" button) needs to survive into this redraw instead. */
+    if (render_params == NULL || !render_params->skip_initial_flush) { (void)input__flush(); }
     for (;;) {
         uint64_t now = runtime__now();
         if (poll != NULL && now >= next_poll_at) {
@@ -372,7 +377,10 @@ bruce_result_t dialog__gui_choice(
 
         if (redraw) {
             bruce_result_t frame_result = display__begin_frame();
-            if (frame_result == BRUCE_ERR_NOT_FOREGROUND) { return BRUCE_ERR_CANCELLED; }
+            if (frame_result == BRUCE_ERR_NOT_FOREGROUND) {
+                *out_selected = (size_t)selected;
+                return BRUCE_ERR_CANCELLED;
+            }
             if (frame_result != BRUCE_OK) { return frame_result; }
             if (selected < first_visible) {
                 first_visible = selected;
@@ -444,7 +452,11 @@ bruce_result_t dialog__gui_choice(
             }
             frame_result = display__present();
             if (frame_result != BRUCE_OK) {
-                return frame_result == BRUCE_ERR_NOT_FOREGROUND ? BRUCE_ERR_CANCELLED : frame_result;
+                if (frame_result == BRUCE_ERR_NOT_FOREGROUND) {
+                    *out_selected = (size_t)selected;
+                    return BRUCE_ERR_CANCELLED;
+                }
+                return frame_result;
             }
             rendered_at = runtime__now();
             redraw = false;
@@ -458,7 +470,10 @@ bruce_result_t dialog__gui_choice(
         }
         bruce_input_event_t ev;
         bruce_result_t input_result = input__read(&ev, input_timeout_ms);
-        if (input_result == BRUCE_ERR_NOT_FOREGROUND) { return BRUCE_ERR_CANCELLED; }
+        if (input_result == BRUCE_ERR_NOT_FOREGROUND) {
+            *out_selected = (size_t)selected;
+            return BRUCE_ERR_CANCELLED;
+        }
         if (input_result != BRUCE_OK || ev.action != BRUCE_INPUT_PRESS) { continue; }
 
         int previous_selected = selected;
@@ -495,7 +510,9 @@ bruce_result_t dialog__gui_choice(
                 *out_selected = (size_t)selected;
                 return BRUCE_OK;
             case '\r': *out_selected = (size_t)selected; return BRUCE_OK;
-            case BRUCE_INPUT_CODE_BACK: return BRUCE_ERR_CANCELLED;
+            case BRUCE_INPUT_CODE_BACK:
+                *out_selected = (size_t)selected;
+                return BRUCE_ERR_CANCELLED;
             default: break;
         }
         redraw = selected != previous_selected;

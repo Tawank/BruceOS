@@ -1130,6 +1130,12 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
         (void)input__flush();
         size_t depth = 0;
         const bruce_launcher_menu_t *current = menu;
+        /* Persists across a spurious-cancel redraw of the same `current` (see
+         * the BRUCE_ERR_CANCELLED/resume_after_handoff branch below) instead
+         * of snapping back to row 0 every time; reset to 0 wherever `current`
+         * itself actually changes. */
+        size_t selected = 0;
+        bruce_dialog_render_params_t submenu_params = {.render_launcher = true};
         for (;;) {
             const bruce_launcher_entry_t *entries = bruce_launcher__menu_entries(current);
             if (display__width() <= 0 || display__height() <= 0) {
@@ -1156,7 +1162,6 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
                 return frame;
             }
 
-            size_t selected = 0;
             /* Published only across the dialog call: bruce_launcher__window_draw_status()
              * runs on other processes' dialogs too, and must not touch this
              * array once it goes out of scope. */
@@ -1164,16 +1169,23 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
             s_live_choices.entries = entries;
             s_live_choices.count = current->entry_count;
             bruce_launcher__refresh_live_choices();
-            bruce_result_t result = dialog__choice_launcher(
-                current->title, NULL, choices, (size_t)current->entry_count, &selected
+            bruce_result_t result = dialog__choice_launcher_ex(
+                current->title, NULL, choices, (size_t)current->entry_count, &selected, &submenu_params
             );
+            submenu_params.skip_initial_flush = false; /* one-shot: only meant for the call just made */
             s_live_choices.count = 0;
             if (result == BRUCE_ERR_CANCELLED) {
                 if (bruce_launcher__resume_after_handoff()) {
                     /* Foreground was lost (alt-tab, system_menu, ...) and has
-                     * now returned: redraw the same menu instead of stepping
-                     * up a level. */
-                    (void)input__flush();
+                     * now returned: redraw the same menu with the same row
+                     * still highlighted (dialog__choice_launcher_ex() reports
+                     * it back in `selected` even on this cancel) instead of
+                     * stepping up a level, and skip the next call's usual
+                     * flush so a follow-up key already queued (e.g. the
+                     * system menu's injected Back press for its "Esc"
+                     * button) survives into that redraw instead of being
+                     * silently discarded. */
+                    submenu_params.skip_initial_flush = true;
                     continue;
                 }
                 /* Esc/Back steps up one level, same as selecting the "Back"
@@ -1182,6 +1194,7 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
                  * leave the submenu entirely. */
                 if (depth == 0) break;
                 current = parents[--depth];
+                selected = 0;
                 (void)input__flush();
                 continue;
             }
@@ -1195,6 +1208,7 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
             if (entry->kind == BRUCE_LAUNCHER_ENTRY_BACK) {
                 if (depth == 0) break;
                 current = parents[--depth];
+                selected = 0;
                 (void)input__flush();
                 continue;
             }
@@ -1202,6 +1216,7 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
                 if (depth >= BRUCE_LAUNCHER_MAX_ENTRIES) continue;
                 parents[depth++] = current;
                 current = bruce_launcher__entry_submenu(current, entry);
+                selected = 0;
             } else {
                 (void)bruce_launcher__run_entry(entry);
             }

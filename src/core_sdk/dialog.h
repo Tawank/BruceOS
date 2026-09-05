@@ -94,6 +94,19 @@ typedef struct {
      * dialog__* call. May be NULL. */
     bool (*icon_for_path)(const char *path, bool is_directory, char *out_icon, size_t out_icon_size, void *context);
     void *icon_for_path_context;
+    /* Skips the flush of already-queued input this call normally performs
+     * before its first frame (see dialog__gui_choice()'s doc comment on why
+     * that flush exists). Set this for exactly one re-issued call of the
+     * *same* list after a caller detects it lost and regained foreground
+     * mid-dialog (see e.g. filemanager__resume_after_handoff()) and is
+     * redrawing rather than treating that as Back/Esc - otherwise a
+     * follow-up key that arrived during the interruption (e.g. the system
+     * menu's "Esc" button injecting a Back press once it backgrounds
+     * itself) is silently discarded before this redraw ever reads it. False
+     * (the default) keeps every existing caller flushing exactly as before
+     * this field existed; clear it again after the one call it was meant
+     * for so later, unrelated redraws keep flushing normally. */
+    bool skip_initial_flush;
 } bruce_dialog_render_params_t;
 
 /**
@@ -128,11 +141,18 @@ bruce_result_t dialog__message_show(bruce_dialog_kind_t kind, const char *title,
 /**
  * @brief Shows a choice-list dialog and waits for a selection.
  *
+ * `*out_selected` also seeds which row starts highlighted, and (GUI only) is
+ * left holding whichever row was highlighted when the dialog returns
+ * BRUCE_ERR_CANCELLED too, not just on BRUCE_OK - so a caller that redraws
+ * the same list after a cancel (e.g. one it determines was a spurious loss
+ * of foreground rather than a real Back/Esc) can pass it straight back in
+ * to keep the same row highlighted instead of resetting to the top.
+ *
  * @param title Optional short title shown at the top of the dialog.
  * @param message Optional body text shown above the choice list.
  * @param choices Choices to list.
  * @param choice_count Number of entries in choices.
- * @param out_selected Receives the index of the selected choice.
+ * @param out_selected Receives the index of the selected (or last highlighted) choice.
  */
 bruce_result_t dialog__choice(
     const char *title, const char *message, const bruce_dialog_choice_t *choices, size_t choice_count,
@@ -179,6 +199,25 @@ bruce_result_t dialog__choice_poll_launcher(
 bruce_result_t dialog__choice_launcher(
     const char *title, const char *message, const bruce_dialog_choice_t *choices, size_t choice_count,
     size_t *out_selected
+);
+
+/**
+ * @brief Like dialog__choice_launcher(), but with caller-supplied render
+ * styling (still forced to the launcher look regardless of what
+ * `render_params->render_launcher` says) - e.g. so a launcher-styled screen
+ * can set `skip_initial_flush` for one redraw. NULL behaves exactly like
+ * dialog__choice_launcher().
+ *
+ * @param title Optional short title shown at the top of the dialog.
+ * @param message Optional body text shown above the choice list.
+ * @param choices Choices to list.
+ * @param choice_count Number of entries in choices.
+ * @param out_selected Receives the index of the selected choice.
+ * @param render_params Extra render styling, or NULL for the standard launcher look.
+ */
+bruce_result_t dialog__choice_launcher_ex(
+    const char *title, const char *message, const bruce_dialog_choice_t *choices, size_t choice_count,
+    size_t *out_selected, const bruce_dialog_render_params_t *render_params
 );
 
 /**

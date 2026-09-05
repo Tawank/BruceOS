@@ -365,8 +365,15 @@ static bruce_result_t dialog__gui_pick_file_run(
         bruce_result_t choice_result = dialog__gui_choice(
             ws->bar_title, NULL, choices, (size_t)choice_count, &out_selected, effective_params, NULL
         );
+        effective_params->skip_initial_flush = false; /* one-shot: only meant for the call just made */
 
         const char *picked = values[out_selected];
+        /* Remembered so a spurious cancel from briefly losing foreground
+         * (dialog__pick_file_resume_after_handoff() below) can redraw this
+         * same listing with the same row still selected instead of
+         * resetting to the top - overwritten below by the more specific
+         * up-navigation/descend cases when those actually apply. */
+        snprintf(ws->returning_from, sizeof(ws->returning_from), "%s", picked);
         memory__free(values);
         memory__free(size_texts);
         memory__free(icon_texts);
@@ -374,9 +381,16 @@ static bruce_result_t dialog__gui_pick_file_run(
 
         if (choice_result != BRUCE_OK) {
             memory__free(entries);
-            /* Foreground was lost (e.g. alt-tab) and has now returned:
-             * redraw the same directory instead of unwinding the picker. */
-            if (dialog__pick_file_resume_after_handoff()) { continue; }
+            /* Foreground was lost (e.g. alt-tab, the system menu, ...) and
+             * has now returned: redraw the same directory instead of
+             * unwinding the picker, and skip the next call's usual flush so
+             * a follow-up key already queued (e.g. the system menu's
+             * injected Back press for its "Esc" button) survives into that
+             * redraw instead of being silently discarded. */
+            if (dialog__pick_file_resume_after_handoff()) {
+                effective_params->skip_initial_flush = true;
+                continue;
+            }
             /* Genuine Back/Esc: step up a directory rather than exiting the
              * picker outright, unless already at the root. */
             if (strcmp(ws->current_path, "/") != 0) {

@@ -196,6 +196,26 @@ bruce_result_t dialog__choice_launcher(
     return dialog__term_choice(title, message, choices, choice_count, out_selected);
 }
 
+bruce_result_t dialog__choice_launcher_ex(
+    const char *title, const char *message, const bruce_dialog_choice_t *choices, size_t choice_count,
+    size_t *out_selected, const bruce_dialog_render_params_t *render_params
+) {
+    if (choices == NULL || choice_count == 0 || out_selected == NULL) { return BRUCE_ERR_INVALID_ARGUMENT; }
+    bool gui = dialog__current_process_wants_gui();
+    s_last_call_was_gui = gui;
+
+    if (s_test_choice_provider != NULL) {
+        return s_test_choice_provider(title, message, choices, choice_count, out_selected);
+    }
+
+    if (gui) {
+        bruce_dialog_render_params_t params = render_params != NULL ? *render_params : s_window_launcher;
+        params.render_launcher = true;
+        return dialog__gui_choice(title, message, choices, choice_count, out_selected, &params, NULL);
+    }
+    return dialog__term_choice(title, message, choices, choice_count, out_selected);
+}
+
 bruce_result_t dialog__choice_ex(
     const char *title, const char *message, const bruce_dialog_choice_t *choices, size_t choice_count,
     size_t *out_selected, const bruce_dialog_render_params_t *render_params
