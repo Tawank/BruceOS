@@ -222,6 +222,49 @@ bruce_result_t dialog__choice_ex(
     return dialog__term_choice(title, message, choices, choice_count, out_selected);
 }
 
+static bruce_result_t dialog__choice_search_common(
+    const char *title, const char *prompt, const bruce_dialog_choice_t *choices, size_t choice_count, char *query,
+    size_t query_capacity, size_t *out_selected, const bruce_dialog_render_params_t *render_params
+) {
+    if (choices == NULL || choice_count == 0 || query == NULL || query_capacity == 0 || out_selected == NULL) {
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    bool gui = dialog__current_process_wants_gui();
+    s_last_call_was_gui = gui;
+
+    if (s_test_choice_provider != NULL) {
+        return s_test_choice_provider(title, prompt, choices, choice_count, out_selected);
+    }
+
+    if (gui) {
+        return dialog__gui_choice_search(
+            title, prompt, choices, choice_count, query, query_capacity, out_selected, render_params
+        );
+    }
+    /* Terminal has no live-filtering equivalent -- the query the caller
+     * seeded/typed is dropped and every choice is listed, exactly like
+     * dialog__choice(). */
+    return dialog__term_choice(title, NULL, choices, choice_count, out_selected);
+}
+
+bruce_result_t dialog__choice_search_ex(
+    const char *title, const char *prompt, const bruce_dialog_choice_t *choices, size_t choice_count, char *query,
+    size_t query_capacity, size_t *out_selected, const bruce_dialog_render_params_t *render_params
+) {
+    return dialog__choice_search_common(
+        title, prompt, choices, choice_count, query, query_capacity, out_selected, render_params
+    );
+}
+
+bruce_result_t dialog__choice_search_launcher(
+    const char *title, const char *prompt, const bruce_dialog_choice_t *choices, size_t choice_count, char *query,
+    size_t query_capacity, size_t *out_selected
+) {
+    return dialog__choice_search_common(
+        title, prompt, choices, choice_count, query, query_capacity, out_selected, &s_window_launcher
+    );
+}
+
 bruce_result_t dialog__pick_file(
     const char *initial_path, const char *extension_filter, char *out_path, size_t out_path_size,
     const char *title

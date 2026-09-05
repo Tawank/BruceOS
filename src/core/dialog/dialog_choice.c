@@ -2,7 +2,9 @@
 
 #include "dialog_gui_common.h"
 
+#include <ctype.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "core_sdk/display.h"
@@ -179,6 +181,100 @@ static void dialog__gui_draw_scrollbar(
 }
 
 /* -------------------------------------------------------------------------- */
+/* Row list rendering                                                         */
+/* -------------------------------------------------------------------------- */
+
+/* Draws one page of a choice list into the viewport described by `list_y`/
+ * `content_left`/`content_w`, highlighting `selected` and, for a list longer
+ * than one page, a trailing scrollbar `list_h` px tall. Row `i` of the page
+ * is `choices[order != NULL ? order[i] : i]` -- `order` lets a caller list a
+ * filtered/reordered subset of `choices` (see dialog__gui_choice_search())
+ * without copying entries around; NULL walks `choices` in order, `total`
+ * then being `choices`' own count.
+ *
+ * Shared by dialog__gui_choice() and dialog__gui_choice_search() so a plain
+ * list and a live-filtered one render as exactly the same widget -- row
+ * height, selection rectangle, icon, and marquee-scrolling label included --
+ * rather than two screens that are meant to look identical silently drifting
+ * apart. Sets `*out_selected_overflows` when the selected row's label didn't
+ * fit and had to truncate/scroll, telling the caller to keep redrawing on a
+ * timer for the marquee. */
+static void dialog__gui_choice_draw_list(
+    const bruce_dialog_choice_t *choices, const int *order, int total, int selected, int first_visible,
+    int items_per_page, int list_y, int content_left, int content_w, int row_h, int list_h, int text_size,
+    bruce_display_color_t background_color, bruce_display_color_t text_color, uint16_t border, uint64_t now,
+    uint64_t selected_at, bool *out_selected_overflows
+) {
+    int last_visible = first_visible + items_per_page - 1;
+    if (last_visible >= total) { last_visible = total - 1; }
+    *out_selected_overflows = false;
+
+    /* A list longer than one page loses a strip on its right edge to a
+     * scrollbar; every row's fill and label shrink to make room for it
+     * rather than being drawn under it. */
+    bool list_scrollable = total > items_per_page;
+    int row_w = list_scrollable ? content_w - DIALOG__SCROLLBAR_W - DIALOG__SCROLLBAR_GAP : content_w;
+
+    for (int i = first_visible; i <= last_visible; ++i) {
+        int index = order != NULL ? order[i] : i;
+        int y = list_y + (i - first_visible) * row_h;
+        bool is_selected = i == selected;
+        if (is_selected) {
+            display__fill_rect(content_left, y, row_w, row_h, text_color);
+            display__set_text_color(background_color);
+        } else {
+            display__set_text_color(text_color);
+        }
+        display__set_text_size(text_size);
+        display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
+        int label_left = content_left + DIALOG__MARGIN;
+        int label_right = content_left + row_w - DIALOG__MARGIN;
+        const bruce_icon_t *icon = icon__get(choices[index].icon_name);
+        if (icon != NULL) {
+            int icon_size = row_h - 2;
+            display__draw_bitmap_scaled(
+                label_left,
+                y + 1,
+                icon->bits,
+                icon->width,
+                icon->height,
+                icon_size,
+                icon_size,
+                is_selected ? background_color : text_color
+            );
+            label_left += icon_size + DIALOG__MARGIN;
+        }
+        if (choices[index].right_text != NULL && choices[index].right_text[0] != '\0') {
+            display__draw_right_string(choices[index].right_text, label_right, y + 1);
+            size_t right_columns = 0;
+            for (const unsigned char *p = (const unsigned char *)choices[index].right_text; *p != '\0';) {
+                size_t bytes = *p < 0x80 ? 1 : (*p >= 0xF0 ? 4 : *p >= 0xE0 ? 3 : 2);
+                p += bytes;
+                right_columns++;
+            }
+            label_right -= (int)right_columns * DIALOG__CHAR_W * text_size + DIALOG__MARGIN;
+        }
+        dialog__gui_draw_row_label(
+            choices[index].label,
+            label_left,
+            y + 1,
+            label_right - label_left,
+            text_size,
+            is_selected,
+            now - selected_at,
+            is_selected ? out_selected_overflows : NULL
+        );
+    }
+
+    if (list_scrollable) {
+        dialog__gui_draw_scrollbar(
+            content_left + row_w + DIALOG__SCROLLBAR_GAP, list_y, list_h, first_visible, items_per_page, total,
+            border, text_color
+        );
+    }
+}
+
+/* -------------------------------------------------------------------------- */
 /* Choice-list renderer                                                       */
 /* -------------------------------------------------------------------------- */
 
@@ -330,72 +426,11 @@ bruce_result_t dialog__gui_choice(
             }
 
             int list_y = content_top + title_h + message_h + list_gap;
-            int last_visible = first_visible + items_per_page - 1;
-            if ((size_t)last_visible >= choice_count) { last_visible = (int)choice_count - 1; }
-            selected_label_overflows = false;
-
-            /* A list longer than one page loses a strip on its right edge to
-             * a scrollbar; every row's fill and label shrink to make room for
-             * it rather than being drawn under it. */
-            bool list_scrollable = choice_count > (size_t)items_per_page;
-            int list_w = list_scrollable ? content_w - DIALOG__SCROLLBAR_W - DIALOG__SCROLLBAR_GAP : content_w;
-
-            for (int i = first_visible; i <= last_visible; ++i) {
-                int y = list_y + (i - first_visible) * row_h;
-                if (i == selected) {
-                    display__fill_rect(content_left, y, list_w, row_h, text_color);
-                    display__set_text_color(background_color);
-                } else {
-                    display__set_text_color(text_color);
-                }
-                display__set_text_size(text_size);
-                display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
-                int label_left = content_left + DIALOG__MARGIN;
-                int label_right = content_left + list_w - DIALOG__MARGIN;
-                const bruce_icon_t *icon = icon__get(choices[i].icon_name);
-                if (icon != NULL) {
-                    int icon_size = row_h - 2;
-                    display__draw_bitmap_scaled(
-                        label_left,
-                        y + 1,
-                        icon->bits,
-                        icon->width,
-                        icon->height,
-                        icon_size,
-                        icon_size,
-                        i == selected ? background_color : text_color
-                    );
-                    label_left += icon_size + DIALOG__MARGIN;
-                }
-                if (choices[i].right_text != NULL && choices[i].right_text[0] != '\0') {
-                    display__draw_right_string(choices[i].right_text, label_right, y + 1);
-                    size_t right_columns = 0;
-                    for (const unsigned char *p = (const unsigned char *)choices[i].right_text; *p != '\0';) {
-                        size_t bytes = *p < 0x80 ? 1 : (*p >= 0xF0 ? 4 : *p >= 0xE0 ? 3 : 2);
-                        p += bytes;
-                        right_columns++;
-                    }
-                    label_right -= (int)right_columns * DIALOG__CHAR_W * text_size + DIALOG__MARGIN;
-                }
-                bool *overflow = i == selected ? &selected_label_overflows : NULL;
-                dialog__gui_draw_row_label(
-                    choices[i].label,
-                    label_left,
-                    y + 1,
-                    label_right - label_left,
-                    text_size,
-                    i == selected,
-                    now - selected_at,
-                    overflow
-                );
-            }
-
-            if (list_scrollable) {
-                dialog__gui_draw_scrollbar(
-                    content_left + list_w + DIALOG__SCROLLBAR_GAP, list_y, usable_h, first_visible,
-                    items_per_page, (int)choice_count, border, text_color
-                );
-            }
+            dialog__gui_choice_draw_list(
+                choices, NULL, (int)choice_count, selected, first_visible, items_per_page, list_y, content_left,
+                content_w, row_h, usable_h, text_size, background_color, text_color, border, now, selected_at,
+                &selected_label_overflows
+            );
 
             if (render_borders && !render_window) {
                 display__fill_rect(left, bottom - footer_h, viewport_w, footer_h, sec);
@@ -466,4 +501,282 @@ bruce_result_t dialog__gui_choice(
         redraw = selected != previous_selected;
         if (redraw) selected_at = runtime__now();
     }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Searchable choice-list renderer                                            */
+/* -------------------------------------------------------------------------- */
+
+static bool dialog__contains_ci(const char *haystack, const char *needle) {
+    if (needle == NULL || needle[0] == '\0') return true;
+    if (haystack == NULL) return false;
+    size_t haystack_len = strlen(haystack);
+    size_t needle_len = strlen(needle);
+    if (needle_len > haystack_len) return false;
+    for (size_t i = 0; i + needle_len <= haystack_len; ++i) {
+        size_t j = 0;
+        while (j < needle_len && tolower((unsigned char)haystack[i + j]) == tolower((unsigned char)needle[j])) j++;
+        if (j == needle_len) return true;
+    }
+    return false;
+}
+
+/* Rebuilds `order` (indices into `choices`) to only the entries whose label
+ * contains `query` as a case-insensitive substring (an empty query matches
+ * everything, so `order` comes back as an identity mapping). Returns the new
+ * count. */
+static int dialog__gui_choice_filter(
+    const bruce_dialog_choice_t *choices, size_t choice_count, const char *query, int *order
+) {
+    int count = 0;
+    for (size_t i = 0; i < choice_count; ++i) {
+        if (dialog__contains_ci(choices[i].label, query)) order[count++] = (int)i;
+    }
+    return count;
+}
+
+/* Live-filtering choice list behind dialog__choice_search_ex()/_launcher()
+ * (core_sdk/dialog.h) -- the search box, list, scrolling and marquee-scroll
+ * text a caller like bruce_launcher's command palette gets by reusing
+ * dialog__gui_choice_draw_list(), the same row renderer dialog__gui_choice()
+ * draws a plain list with, rather than a hand-rolled lookalike. `query` is a
+ * caller-owned in/out buffer: it may come in pre-seeded (e.g. with the
+ * keypress that opened the search) and is left holding whatever the user
+ * last typed when this returns. `out_selected` is always an index into the
+ * original, unfiltered `choices`. */
+bruce_result_t dialog__gui_choice_search(
+    const char *title, const char *prompt, const bruce_dialog_choice_t *choices, size_t choice_count,
+    char *query, size_t query_capacity, size_t *out_selected, const bruce_dialog_render_params_t *render_params
+) {
+    if (choices == NULL || choice_count == 0 || query == NULL || query_capacity == 0 || out_selected == NULL) {
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    query[query_capacity - 1] = '\0';
+    size_t query_len = strlen(query);
+
+    bool render_launcher = render_params != NULL && render_params->render_launcher && s_window_renderer_set;
+    int w = display__width();
+    int h = display__height();
+    int left = render_launcher ? s_window_renderer.padding_left
+                               : (render_params != NULL ? render_params->padding_left : 0);
+    int top = render_launcher ? s_window_renderer.padding_top
+                              : (render_params != NULL ? render_params->padding_top : 0);
+    int right = w - (render_launcher ? s_window_renderer.padding_right
+                                     : (render_params != NULL ? render_params->padding_right : 0));
+    int bottom = h - (render_launcher ? s_window_renderer.padding_bottom
+                                      : (render_params != NULL ? render_params->padding_bottom : 0));
+    bool render_borders = !render_launcher && (render_params == NULL || render_params->render_borders);
+    bool render_window = render_borders && render_params != NULL &&
+                         (render_params->padding_top > 0 || render_params->padding_right > 0 ||
+                          render_params->padding_bottom > 0 || render_params->padding_left > 0);
+    int viewport_w = right - left;
+    int viewport_h = bottom - top;
+    int text_size = render_params != NULL && render_params->text_size > 0 ? render_params->text_size
+                    : render_launcher && s_window_renderer.text_size > 0  ? s_window_renderer.text_size
+                    : render_launcher                                     ? 1
+                                                                          : dialog__default_list_text_size();
+
+    uint16_t pri, sec, bg, surface, text, text_muted, border, success, warning, error;
+    dialog__get_colors(&pri, &sec, &bg, &surface, &text, &text_muted, &border, &success, &warning, &error);
+    (void)success;
+    (void)warning;
+    (void)error;
+    bruce_display_color_t background_color =
+        render_launcher ? bg : (render_params != NULL ? render_params->background_color : bg);
+    bruce_display_color_t text_color =
+        render_launcher ? pri : (render_params != NULL ? render_params->text_color : pri);
+    uint32_t refresh_interval_ms = render_launcher         ? s_window_renderer.status_refresh_interval_ms
+                                   : render_params != NULL ? render_params->refresh_interval_ms
+                                                           : 0u;
+
+    int content_left = left + (render_window ? DIALOG__WINDOW_INSET : 0);
+    int content_top = top + (render_window ? DIALOG__WINDOW_INSET : 0);
+    int content_w = viewport_w - (render_window ? 2 * DIALOG__WINDOW_INSET : 0);
+    int content_h = viewport_h - (render_window ? 2 * DIALOG__WINDOW_INSET : 0);
+    if (content_w <= 0 || content_h <= 0) { return BRUCE_ERR_INVALID_ARGUMENT; }
+
+    int row_h = DIALOG__CHAR_H * text_size + 2;
+    int title_h = render_window ? (title != NULL && title[0] != '\0' ? DIALOG__CHAR_H + 4 : 0)
+                  : render_borders || (title != NULL && title[0] != '\0') ? DIALOG__CHAR_H + 4
+                                                                          : 0;
+    int footer_h = render_window ? 0 : (render_borders ? DIALOG__CHAR_H + 4 : 0);
+    /* The query line always takes a row -- it's what this screen shows in
+     * place of dialog__gui_choice()'s static, optional message. */
+    int query_h = DIALOG__CHAR_H + 4;
+    int usable_h = content_h - title_h - query_h - footer_h;
+    if (usable_h < row_h) { return BRUCE_ERR_INVALID_ARGUMENT; }
+    int items_per_page = usable_h / row_h;
+
+    int *order = (int *)malloc(choice_count * sizeof(int));
+    if (order == NULL) { return BRUCE_ERR_NO_MEMORY; }
+    int filtered_count = dialog__gui_choice_filter(choices, choice_count, query, order);
+    int selected = 0;
+    int first_visible = 0;
+    bool redraw = true;
+    bool launcher_border_drawn = false;
+    uint64_t rendered_at = 0;
+    uint64_t selected_at = runtime__now();
+    bool selected_label_overflows = false;
+    bool wants_periodic_refresh = render_launcher && s_window_renderer.draw_status != NULL;
+    bruce_result_t final_result = BRUCE_OK;
+
+    /* Discard whatever's still queued -- typically the keypress that opened
+     * this search -- so it can't replay as a stray character or an
+     * unintended selection on the freshly drawn list; a caller seeds `query`
+     * itself with that keypress instead (see
+     * bruce_launcher__run_command_palette()). */
+    (void)input__flush();
+    for (;;) {
+        uint64_t now = runtime__now();
+        if (wants_periodic_refresh && refresh_interval_ms > 0 && now - rendered_at >= refresh_interval_ms) {
+            redraw = true;
+        }
+        if (selected_label_overflows && now - rendered_at >= DIALOG__MARQUEE_STEP_MS) redraw = true;
+
+        if (redraw) {
+            bruce_result_t frame_result = display__begin_frame();
+            if (frame_result != BRUCE_OK) {
+                final_result = frame_result == BRUCE_ERR_NOT_FOREGROUND ? BRUCE_ERR_CANCELLED : frame_result;
+                break;
+            }
+
+            if (filtered_count > 0) {
+                if (selected < first_visible) {
+                    first_visible = selected;
+                } else if (selected >= first_visible + items_per_page) {
+                    first_visible = selected - items_per_page + 1;
+                }
+            } else {
+                first_visible = 0;
+            }
+
+            if (render_launcher && !launcher_border_drawn) {
+                if (s_window_renderer.draw_border != NULL) {
+                    s_window_renderer.draw_border(s_window_renderer_context);
+                }
+                launcher_border_drawn = true;
+            }
+
+            if (render_window) {
+                display__fill_round_rect(left, top, viewport_w, viewport_h, DIALOG__WINDOW_RADIUS, surface);
+                display__draw_round_rect(left, top, viewport_w, viewport_h, DIALOG__WINDOW_RADIUS, border);
+            } else {
+                display__fill_rect(left, top, viewport_w, viewport_h, background_color);
+            }
+            bruce_display_color_t content_fill_color = render_window ? surface : background_color;
+
+            if (title_h > 0) {
+                bool title_on_pri_fill = render_borders && !render_window;
+                if (title_on_pri_fill) { display__fill_rect(left, top, viewport_w, title_h, pri); }
+                display__set_text_color(title_on_pri_fill ? text : text_color);
+                display__set_text_size(DIALOG__TEXT_SIZE);
+                display__set_text_bg_color(title_on_pri_fill ? pri : content_fill_color);
+                display__set_cursor(content_left + DIALOG__MARGIN, content_top + DIALOG__MARGIN);
+                display__print(title != NULL ? title : "");
+            }
+
+            display__set_text_color(text_color);
+            display__set_text_size(DIALOG__TEXT_SIZE);
+            display__set_text_bg_color(content_fill_color);
+            display__set_cursor(content_left + DIALOG__MARGIN, content_top + title_h + 1);
+            char query_line[96];
+            snprintf(query_line, sizeof(query_line), "%s%s_", prompt != NULL ? prompt : "Find: ", query);
+            display__print(query_line);
+
+            int list_y = content_top + title_h + query_h;
+            if (filtered_count == 0) {
+                display__set_text_color(text_muted);
+                display__set_text_bg_color(content_fill_color);
+                const char *empty_label = "No matches";
+                int text_w = (int)strlen(empty_label) * DIALOG__CHAR_W;
+                display__set_cursor(content_left + (content_w - text_w) / 2, list_y + usable_h / 2);
+                display__print(empty_label);
+            } else {
+                dialog__gui_choice_draw_list(
+                    choices, order, filtered_count, selected, first_visible, items_per_page, list_y, content_left,
+                    content_w, row_h, usable_h, text_size, background_color, text_color, border, now, selected_at,
+                    &selected_label_overflows
+                );
+            }
+
+            if (render_borders && !render_window) {
+                display__fill_rect(left, bottom - footer_h, viewport_w, footer_h, sec);
+            }
+            if (render_launcher && s_window_renderer.draw_status != NULL) {
+                s_window_renderer.draw_status(s_window_renderer_context);
+            }
+            frame_result = display__present();
+            if (frame_result != BRUCE_OK) {
+                final_result = frame_result == BRUCE_ERR_NOT_FOREGROUND ? BRUCE_ERR_CANCELLED : frame_result;
+                break;
+            }
+            rendered_at = runtime__now();
+            redraw = false;
+        }
+
+        bruce_input_event_t ev;
+        bruce_result_t input_result = input__read(&ev, 100);
+        if (input_result == BRUCE_ERR_NOT_FOREGROUND) {
+            free(order);
+            return BRUCE_ERR_CANCELLED;
+        }
+        if (input_result != BRUCE_OK || ev.action != BRUCE_INPUT_PRESS) { continue; }
+
+        int previous_selected = selected;
+        bool query_changed = false;
+        switch (ev.code) {
+            case BRUCE_INPUT_CODE_UP:
+            case BRUCE_INPUT_CODE_PREV:
+                if (filtered_count > 0) { selected = selected > 0 ? selected - 1 : filtered_count - 1; }
+                break;
+            case BRUCE_INPUT_CODE_DOWN:
+            case BRUCE_INPUT_CODE_NEXT:
+                if (filtered_count > 0) { selected = selected + 1 < filtered_count ? selected + 1 : 0; }
+                break;
+            case BRUCE_INPUT_CODE_SELECT:
+            case BRUCE_INPUT_CODE_BUTTON_A:
+                if (filtered_count == 0) { continue; }
+                *out_selected = (size_t)order[selected];
+                free(order);
+                return BRUCE_OK;
+            case '\r':
+                if (filtered_count == 0) { continue; }
+                *out_selected = (size_t)order[selected];
+                free(order);
+                return BRUCE_OK;
+            case BRUCE_INPUT_CODE_BACK:
+            case BRUCE_INPUT_CODE_BUTTON_B:
+                free(order);
+                return BRUCE_ERR_CANCELLED;
+            case '\b':
+            case 0x7f:
+            case BRUCE_INPUT_CODE_DELETE:
+                if (query_len > 0) {
+                    query[--query_len] = '\0';
+                    query_changed = true;
+                }
+                break;
+            default:
+                if (ev.type == BRUCE_INPUT_KEY && ev.code >= 0x20 && ev.code <= 0x7e &&
+                    query_len + 1 < query_capacity) {
+                    query[query_len++] = (char)ev.code;
+                    query[query_len] = '\0';
+                    query_changed = true;
+                }
+                break;
+        }
+
+        if (query_changed) {
+            filtered_count = dialog__gui_choice_filter(choices, choice_count, query, order);
+            selected = 0;
+            first_visible = 0;
+            redraw = true;
+            selected_at = runtime__now();
+        } else if (selected != previous_selected) {
+            redraw = true;
+            selected_at = runtime__now();
+        }
+    }
+    free(order);
+    return final_result;
 }

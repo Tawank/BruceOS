@@ -790,6 +790,18 @@ calling a fast caller-owned poll callback at a requested interval. Its cleanup
 callback always runs after a validated call returns, allowing work such as a
 radio scan to be safely cancelled when the user backs out.
 
+`dialog__choice_search_ex()`/`dialog__choice_search_launcher()` are the same
+choice-list renderer with a live-filtering query line in place of a static
+message: printable keys append to a caller-owned query buffer, Backspace/Delete
+remove from its end, and the list is re-filtered on every change to the
+choices whose label contains the query as a case-insensitive substring.
+`out_selected` is always an index into the original, unfiltered choice array,
+regardless of what subset was on screen when the user picked one. GUI-only;
+a non-GUI process falls back to the plain numbered `dialog__choice()` list.
+The launcher's command palette (`bruce_launcher_app.c`) is this API's first
+caller: it flattens the menu tree into one searchable choice list instead of
+rendering its own.
+
 app_runner records the initial `GUI` environment request in process-local
 storage before launch-time permission checks. A background serial-monitor-style
 process decides its own behavior; there is no separate dynamic process

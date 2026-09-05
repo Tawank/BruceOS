@@ -31,3 +31,12 @@ bruce_result_t dialog__gui_choice(
     const char *title, const char *message, const bruce_dialog_choice_t *choices, size_t choice_count,
     size_t *out_selected, const bruce_dialog_render_params_t *render_params, const dialog__choice_poll_t *poll
 );
+
+/* Backs dialog__choice_search_ex()/dialog__choice_search_launcher() (see
+ * core_sdk/dialog.h for the public contract) -- a dialog__gui_choice() list
+ * with a live-filtering query box in place of a static message, so a caller
+ * gets a searchable choice list without rolling its own. */
+bruce_result_t dialog__gui_choice_search(
+    const char *title, const char *prompt, const bruce_dialog_choice_t *choices, size_t choice_count, char *query,
+    size_t query_capacity, size_t *out_selected, const bruce_dialog_render_params_t *render_params
+);

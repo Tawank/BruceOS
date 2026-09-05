@@ -206,6 +206,49 @@ bruce_result_t dialog__choice_ex(
 );
 
 /**
+ * @brief Like dialog__choice_ex(), but with a live-filtering search box.
+ *
+ * Below the title (if any), an editable query line is drawn in place of a
+ * static message: printable keys append to it, Backspace/Delete remove from
+ * its end, and the list below is live-filtered down to the choices whose
+ * label contains the current query as a case-insensitive substring (an
+ * empty query matches everything), re-selecting the first match whenever it
+ * changes. UP/DOWN/SELECT/BACK still drive the list itself. `out_selected`
+ * is always an index into the original, unfiltered `choices` -- not into
+ * whatever subset happened to be showing when the user picked one.
+ *
+ * `query` is a caller-owned in/out buffer of `query_capacity` bytes: pass it
+ * pre-seeded (e.g. with the keypress that opened the search) to start
+ * already filtered, or empty to start showing everything. It's left holding
+ * whatever the user last typed when this returns, BRUCE_OK or
+ * BRUCE_ERR_CANCELLED alike.
+ *
+ * GUI only on GUI vs. terminal dispatch is unaffected: a non-GUI process
+ * falls back to the plain numbered dialog__choice() list, `query` unused.
+ *
+ * @param title Optional short title shown at the top of the dialog.
+ * @param prompt Optional label shown ahead of the query text, e.g. "Find: " (NULL uses that default).
+ * @param choices Choices to search and list.
+ * @param choice_count Number of entries in choices.
+ * @param query In/out buffer holding the current query text.
+ * @param query_capacity Size of `query` in bytes, including the nul terminator.
+ * @param out_selected Receives the index (into `choices`) of the selected choice.
+ * @param render_params GUI render styling, or NULL for the standard look.
+ */
+bruce_result_t dialog__choice_search_ex(
+    const char *title, const char *prompt, const bruce_dialog_choice_t *choices, size_t choice_count, char *query,
+    size_t query_capacity, size_t *out_selected, const bruce_dialog_render_params_t *render_params
+);
+
+/**
+ * @brief Like dialog__choice_search_ex(), styled for use from the launcher.
+ */
+bruce_result_t dialog__choice_search_launcher(
+    const char *title, const char *prompt, const bruce_dialog_choice_t *choices, size_t choice_count, char *query,
+    size_t query_capacity, size_t *out_selected
+);
+
+/**
  * @brief Opens a file/directory picker.
  *
  * `title`, if non-NULL/non-empty, is shown in the GUI picker's top bar
