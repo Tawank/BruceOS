@@ -33,6 +33,7 @@
 #define BRUCE_LAUNCHER_EASING_SCALE 1000
 #define BRUCE_LAUNCHER_STATUS_REFRESH_MS 1000
 #define BRUCE_LAUNCHER_STATUS_TEXT_Y 11
+#define BRUCE_LAUNCHER_STATUS_CORNER_INSET 6
 #define BRUCE_LAUNCHER_BACKGROUND_WAIT_MS 1000
 /* Command palette: every command in the tree, flattened, capped well above
  * any realistic config (root + submenus stay well under this even at
@@ -72,9 +73,9 @@ static uint32_t bruce_launcher__draw_status_bar(const bruce_launcher_theme_t *th
     if (status_icon__list(NULL, 0, &count, &revision) != BRUCE_OK) { return revision; }
     int w = display__width();
     display__fill_rect(
-        BRUCE_LAUNCHER_BORDER_PAD + 1,
+        BRUCE_LAUNCHER_BORDER_PAD + BRUCE_LAUNCHER_STATUS_CORNER_INSET,
         6,
-        w - 2 * BRUCE_LAUNCHER_BORDER_PAD - 2,
+        w - 2 * (BRUCE_LAUNCHER_BORDER_PAD + BRUCE_LAUNCHER_STATUS_CORNER_INSET),
         BRUCE_LAUNCHER_STATUS_H - 7,
         theme->bg
     );
@@ -154,7 +155,7 @@ static void bruce_launcher__draw_main_border(const bruce_launcher_theme_t *theme
     display__draw_line(
         BRUCE_LAUNCHER_BORDER_PAD,
         BRUCE_LAUNCHER_STATUS_H,
-        w - BRUCE_LAUNCHER_BORDER_PAD,
+        w - BRUCE_LAUNCHER_BORDER_PAD - 1,
         BRUCE_LAUNCHER_STATUS_H,
         theme->pri
     );

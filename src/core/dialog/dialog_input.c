@@ -311,6 +311,20 @@ bruce_result_t dialog__input_gui_run(
         if (input_result == BRUCE_ERR_NOT_FOREGROUND) return BRUCE_ERR_CANCELLED;
         if (input_result != BRUCE_OK || ev.action != BRUCE_INPUT_PRESS) continue;
         if (ev.type == BRUCE_INPUT_KEY && ev.code == '\n') return BRUCE_OK;
+
+        /* Cardputer Fn arrows share their codes with ; . , and /. */
+        bool printable_navigation_code =
+            ev.type == BRUCE_INPUT_KEY && ev.value == ev.code &&
+            (ev.code == BRUCE_INPUT_CODE_UP || ev.code == BRUCE_INPUT_CODE_DOWN ||
+             ev.code == BRUCE_INPUT_CODE_LEFT || ev.code == BRUCE_INPUT_CODE_RIGHT);
+        if (printable_navigation_code) {
+            if (kind == DIALOG__INPUT_TEXT || dialog__key_validate(&st, (char)ev.code, kind)) {
+                dialog__key_add(&st, (char)ev.code);
+                full_redraw = true;
+            }
+            continue;
+        }
+
         switch (ev.code) {
             case BRUCE_INPUT_CODE_UP:
             case BRUCE_INPUT_CODE_DOWN:

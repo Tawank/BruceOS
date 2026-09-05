@@ -546,8 +546,10 @@ static int config_app__audio_cli(ArgParser *audio_parser, ArgParser *enabled, Ar
 
 /* Per-item action sheet for one startup app: reorder it, remove it, or back
  * out unchanged. `index`/`count` place it within the current list so
- * "Move up"/"Move down" can be hidden at either edge. */
-static bruce_result_t config_app__startup_item_gui(const char *name, size_t index, size_t count) {
+ * "Move up"/"Move down" can be hidden at either edge. A successful move
+ * updates `out_list_selected` to keep that entry selected in the list. */
+static bruce_result_t
+config_app__startup_item_gui(const char *name, size_t index, size_t count, size_t *out_list_selected) {
     bruce_dialog_choice_t choices[4];
     size_t n = 0;
     bool has_up = index > 0;
@@ -565,13 +567,22 @@ static bruce_result_t config_app__startup_item_gui(const char *name, size_t inde
     bruce_result_t result = dialog__choice_launcher(name, NULL, choices, n, &selected);
     if (result == BRUCE_ERR_CANCELLED || (result == BRUCE_OK && selected == back_index)) return BRUCE_OK;
     if (result != BRUCE_OK) return result;
-    if (has_up && selected == up_index) return config_app__startup_move(index, index - 1);
-    if (has_down && selected == down_index) return config_app__startup_move(index, index + 1);
+    if (has_up && selected == up_index) {
+        bruce_result_t move_result = config_app__startup_move(index, index - 1);
+        if (move_result == BRUCE_OK) *out_list_selected = index - 1;
+        return move_result;
+    }
+    if (has_down && selected == down_index) {
+        bruce_result_t move_result = config_app__startup_move(index, index + 1);
+        if (move_result == BRUCE_OK) *out_list_selected = index + 1;
+        return move_result;
+    }
     if (selected == remove_index) return config__remove_startup_app(name);
     return BRUCE_OK;
 }
 
 static int config_app__startup_gui(void) {
+    size_t selected = 0;
     for (;;) {
         const bruce_config_startup_apps_t *apps = config__get_startup_apps();
         size_t count = apps != NULL ? apps->count : 0;
@@ -586,7 +597,7 @@ static int config_app__startup_gui(void) {
         size_t back_index = count + (can_add ? 1 : 0);
         choices[back_index] = (bruce_dialog_choice_t){.label = "Back", .value = "back"};
 
-        size_t selected = 0;
+        if (selected > back_index) selected = back_index;
         bruce_result_t result =
             dialog__choice_launcher("Startup apps", NULL, choices, back_index + 1, &selected);
         bool back = result == BRUCE_ERR_CANCELLED || (result == BRUCE_OK && selected == back_index);
@@ -601,7 +612,7 @@ static int config_app__startup_gui(void) {
                     action_result = config__add_startup_app(entered);
                 }
             } else if (selected < count) {
-                action_result = config_app__startup_item_gui(apps->items[selected], selected, count);
+                action_result = config_app__startup_item_gui(apps->items[selected], selected, count, &selected);
             }
         }
         memory__free(choices);
