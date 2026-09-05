@@ -133,7 +133,7 @@ dependencies:
       type: git
     version: db4f0fc110766499f113136625d8de7517bac7e9
   wasm-micro-runtime:
-    component_hash: e8b8eb4e0e71e7bbcc6dd1b137a20c8e6c586a2aec287cff9a7282901346560f
+    component_hash: 2fc1c2e2e6e0b5758d81d409cee95b319f7182b37e3b205a0340bd6246e6974e
     dependencies:
     - name: idf
       version: '>=4.4'
