@@ -38,6 +38,10 @@
 #define WIFI_APP_GUI_AUTH_OPEN 0u
 #define WIFI_APP_GUI_SCAN_POLL_INTERVAL_MS 100u
 
+/* Rapid toggle requests can start overlapping app tasks. Only one toggle may
+ * decide and change the radio state at a time. */
+static bool s_wifi_app_toggle_in_progress;
+
 static const char *wifi_app_result_label(bruce_result_t result) {
     switch (result) {
         case BRUCE_ERR_TIMEOUT: return "timed out";
@@ -392,15 +396,28 @@ static int wifi_app_ap_start(void) {
     return ap_result == BRUCE_OK ? 0 : -1;
 }
 
-/* Saved network first, configured AP as the fallback -- "wifi on" means "get
- * this device on a network somehow", not "join a network". */
+/* Saved credentials are the fast path. If none of those networks are nearby,
+ * GUI users get the same picker as `wifi scan` so they can select and save a
+ * visible network instead of unexpectedly starting an AP. */
 static int wifi_app_on(void) {
     wifi_app_notify_connecting(WIFI_APP_KNOWN_CONNECT_BANNER_MS);
-    if (wifi__connect_known() == BRUCE_OK) {
+    bruce_result_t connect_result = wifi__connect_known();
+    if (connect_result == BRUCE_OK) {
         (void)notification__push("Wi-Fi connected", 3000);
         return 0;
     }
-    return wifi_app_ap_start();
+    if (connect_result == BRUCE_ERR_NOT_FOUND && runtime__gui_requested()) {
+        (void)notification__push("Choose a Wi-Fi network", 3000);
+        return wifi_app__gui();
+    }
+    if (connect_result == BRUCE_ERR_NOT_FOUND) {
+        stdio__printf("No saved Wi-Fi network is in range. Nearby networks:\n");
+        (void)wifi_app_scan();
+        stdio__printf("Use `wifi connect <ssid> <password>` to connect.\n");
+    } else {
+        wifi_app_notify_connect_result(connect_result);
+    }
+    return -1;
 }
 
 /* wifi__disconnect() tears the whole driver down, station and AP alike (see
@@ -409,6 +426,15 @@ static int wifi_app_off(const char *notice) {
     bruce_result_t disconnect_result = wifi__disconnect();
     (void)notification__push(disconnect_result == BRUCE_OK ? notice : "Wi-Fi disconnect failed", 3000);
     return disconnect_result == BRUCE_OK ? 0 : -1;
+}
+
+static int wifi_app_toggle(void) {
+    if (__atomic_exchange_n(&s_wifi_app_toggle_in_progress, true, __ATOMIC_ACQ_REL)) return 0;
+    int result = (wifi__is_connected() || wifi__is_ap_running())
+                     ? wifi_app_off("Wi-Fi disconnected")
+                     : wifi_app_on();
+    __atomic_store_n(&s_wifi_app_toggle_in_progress, false, __ATOMIC_RELEASE);
+    return result;
 }
 
 int wifi_app_main(int argc, char **argv) {
@@ -438,7 +464,7 @@ int wifi_app_main(int argc, char **argv) {
         wifi_app_add_common_options(commands[i]);
     }
 
-    ap_set_helptext(on, "Connect using saved credentials, or start the configured AP.");
+    ap_set_helptext(on, "Connect using saved credentials, or choose a nearby network in GUI mode.");
     ap_set_helptext(off, "Disconnect Wi-Fi.");
     ap_set_helptext(toggle, "Toggle Wi-Fi state.");
     ap_set_helptext(add, "Save a Wi-Fi credential.");
@@ -467,8 +493,7 @@ int wifi_app_main(int argc, char **argv) {
     if (command == NULL) result = wifi_app_default();
     else if (command == on) result = wifi_app_on();
     else if (command == off) result = wifi_app_off("Wi-Fi disconnected");
-    else if (command == toggle)
-        result = wifi__is_connected() ? wifi_app_off("Wi-Fi disconnected") : wifi_app_on();
+    else if (command == toggle) result = wifi_app_toggle();
     else if (command == add) result = wifi_app_add(add);
     else if (command == scan) result = runtime__gui_requested() ? wifi_app__gui() : wifi_app_scan();
     else if (command == connect) result = wifi_app_connect(connect);
