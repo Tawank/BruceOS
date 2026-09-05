@@ -190,12 +190,14 @@ def add(cp, letter, accent=None, dotless=False):
 SAME_ACCENT_PAIRS = [
     (0x00C0, "A", 0x00E0, "a", "GRAVE"), (0x00C1, "A", 0x00E1, "a", "ACUTE"),
     (0x00C2, "A", 0x00E2, "a", "CIRCUMFLEX"), (0x00C3, "A", 0x00E3, "a", "TILDE"),
-    (0x00C4, "A", 0x00E4, "a", "DIAERESIS"), (0x00C7, "C", 0x00E7, "c", "CEDILLA"),
+    (0x00C4, "A", 0x00E4, "a", "DIAERESIS"), (0x00C5, "A", 0x00E5, "a", "RING"),
+    (0x00C7, "C", 0x00E7, "c", "CEDILLA"),
     (0x00C8, "E", 0x00E8, "e", "GRAVE"), (0x00C9, "E", 0x00E9, "e", "ACUTE"),
     (0x00CA, "E", 0x00EA, "e", "CIRCUMFLEX"), (0x00CB, "E", 0x00EB, "e", "DIAERESIS"),
     (0x00D1, "N", 0x00F1, "n", "TILDE"), (0x00D2, "O", 0x00F2, "o", "GRAVE"),
     (0x00D3, "O", 0x00F3, "o", "ACUTE"), (0x00D4, "O", 0x00F4, "o", "CIRCUMFLEX"),
     (0x00D5, "O", 0x00F5, "o", "TILDE"), (0x00D6, "O", 0x00F6, "o", "DIAERESIS"),
+    (0x00D8, "O", 0x00F8, "o", "STROKE"),
     (0x00D9, "U", 0x00F9, "u", "GRAVE"), (0x00DA, "U", 0x00FA, "u", "ACUTE"),
     (0x00DB, "U", 0x00FB, "u", "CIRCUMFLEX"), (0x00DC, "U", 0x00FC, "u", "DIAERESIS"),
     (0x0102, "A", 0x0103, "a", "BREVE"), (0x0104, "A", 0x0105, "a", "OGONEK"),
@@ -207,6 +209,7 @@ SAME_ACCENT_PAIRS = [
     (0x0147, "N", 0x0148, "n", "CARON"), (0x0150, "O", 0x0151, "o", "DOUBLE_ACUTE"),
     (0x0154, "R", 0x0155, "r", "ACUTE"), (0x0158, "R", 0x0159, "r", "CARON"),
     (0x015E, "S", 0x015F, "s", "CEDILLA"), (0x016E, "U", 0x016F, "u", "RING"),
+    (0x0162, "T", 0x0163, "t", "CEDILLA"),
     (0x015A, "S", 0x015B, "s", "ACUTE"), (0x0179, "Z", 0x017A, "z", "ACUTE"),
     (0x017B, "Z", 0x017C, "z", "DOT_ABOVE"), (0x0218, "S", 0x0219, "s", "CEDILLA"),
     (0x021A, "T", 0x021B, "t", "CEDILLA"), (0x0139, "L", 0x013A, "l", "ACUTE"),
@@ -403,6 +406,13 @@ LETTER_GLYPHS_SHIFTED = {
 # diagonally one row/column off, which reads as a curve rather than a right
 # angle at this resolution without needing a distinct antialiased shape.
 RAW_GLYPHS = {
+    # Latin ligatures and sharp S do not derive from a single ASCII base.
+    0x00C6: rows_to_cols([".###.", "#...#", "#....", "####.", "#....", "#...#", "#...#", ".....", ".....", "....."]),  # Æ
+    0x00E6: rows_to_cols([".....", ".###.", "#...#", "#.###", "##..#", "#...#", ".####", ".....", ".....", "....."]),  # æ
+    0x00DF: rows_to_cols([".##..", "#..#.", "#....", ".###.", "#..#.", "#..#.", ".###.", ".....", ".....", "....."]),  # ß
+    0x1E9E: rows_to_cols([".###.", "#....", "#....", ".##..", "#..#.", "#..#.", ".##..", ".....", ".....", "....."]),  # ẞ
+    0x20AC: rows_to_cols([".....", ".###.", "#....", "####.", "#....", ".###.", ".....", ".....", ".....", "....."]),  # €
+    0x2665: rows_to_cols([".....", ".#.#.", "#####", "#####", ".###.", "..#..", ".....", ".....", ".....", "....."]),  # ♥
     # Box drawing: light lines, square corners, tees, cross.
     0x2500: (0x0010, 0x0010, 0x0010, 0x0010, 0x0010),  # ─
     0x2502: (0x0000, 0x0000, 0x03FF, 0x0000, 0x0000),  # │

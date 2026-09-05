@@ -13,7 +13,14 @@
 #define DIALOG__TEXT_SIZE 1
 #define DIALOG__MARGIN 2
 
-enum { DIALOG__KEY_OK = 1, DIALOG__KEY_CANCEL, DIALOG__KEY_DELETE, DIALOG__KEY_SPACE, DIALOG__KEY_CAPS };
+enum {
+    DIALOG__KEY_OK = 1,
+    DIALOG__KEY_CANCEL,
+    DIALOG__KEY_DELETE,
+    DIALOG__KEY_SPACE,
+    DIALOG__KEY_CAPS,
+    DIALOG__KEY_DIACRITICS,
+};
 
 typedef struct {
     const char *label;
@@ -21,52 +28,139 @@ typedef struct {
     int special;
 } dialog__key_t;
 
-static const dialog__key_t s_text_keys[5][10] = {
-    {{"1", '1', 0},
-     {"2", '2', 0},
-     {"3", '3', 0},
-     {"4", '4', 0},
-     {"5", '5', 0},
-     {"6", '6', 0},
-     {"7", '7', 0},
-     {"8", '8', 0},
-     {"9", '9', 0},
-     {"0", '0', 0}},
-    {{"q", 'q', 0},
-     {"w", 'w', 0},
-     {"e", 'e', 0},
-     {"r", 'r', 0},
-     {"t", 't', 0},
-     {"y", 'y', 0},
-     {"u", 'u', 0},
-     {"i", 'i', 0},
-     {"o", 'o', 0},
-     {"p", 'p', 0}},
-    {{"a", 'a', 0},
-     {"s", 's', 0},
-     {"d", 'd', 0},
-     {"f", 'f', 0},
-     {"g", 'g', 0},
-     {"h", 'h', 0},
-     {"j", 'j', 0},
-     {"k", 'k', 0},
-     {"l", 'l', 0},
-     {";", ';', 0}},
-    {{"z", 'z', 0},
-     {"x", 'x', 0},
-     {"c", 'c', 0},
-     {"v", 'v', 0},
-     {"b", 'b', 0},
-     {"n", 'n', 0},
-     {"m", 'm', 0},
-     {",", ',', 0},
-     {".", '.', 0},
-     {"/", '/', 0}},
+#define DIALOG__KEY(label, code) {label, code, 0}
+
+static const dialog__key_t s_text_keys[5][12] = {
+    {DIALOG__KEY("1", '1'),
+     DIALOG__KEY("2", '2'),
+     DIALOG__KEY("3", '3'),
+     DIALOG__KEY("4", '4'),
+     DIALOG__KEY("5", '5'),
+     DIALOG__KEY("6", '6'),
+     DIALOG__KEY("7", '7'),
+     DIALOG__KEY("8", '8'),
+     DIALOG__KEY("9", '9'),
+     DIALOG__KEY("0", '0'),
+     DIALOG__KEY("-", '-'),
+     DIALOG__KEY("=", '=')},
+    {DIALOG__KEY("q", 'q'),
+     DIALOG__KEY("w", 'w'),
+     DIALOG__KEY("e", 'e'),
+     DIALOG__KEY("r", 'r'),
+     DIALOG__KEY("t", 't'),
+     DIALOG__KEY("y", 'y'),
+     DIALOG__KEY("u", 'u'),
+     DIALOG__KEY("i", 'i'),
+     DIALOG__KEY("o", 'o'),
+     DIALOG__KEY("p", 'p'),
+     DIALOG__KEY("[", '['),
+     DIALOG__KEY("]", ']')},
+    {DIALOG__KEY("a", 'a'),
+     DIALOG__KEY("s", 's'),
+     DIALOG__KEY("d", 'd'),
+     DIALOG__KEY("f", 'f'),
+     DIALOG__KEY("g", 'g'),
+     DIALOG__KEY("h", 'h'),
+     DIALOG__KEY("j", 'j'),
+     DIALOG__KEY("k", 'k'),
+     DIALOG__KEY("l", 'l'),
+     DIALOG__KEY(";", ';'),
+     DIALOG__KEY("\"", '"'),
+     DIALOG__KEY("|", '|')},
+    {DIALOG__KEY("\\", '\\'),
+     DIALOG__KEY("z", 'z'),
+     DIALOG__KEY("x", 'x'),
+     DIALOG__KEY("c", 'c'),
+     DIALOG__KEY("v", 'v'),
+     DIALOG__KEY("b", 'b'),
+     DIALOG__KEY("n", 'n'),
+     DIALOG__KEY("m", 'm'),
+     DIALOG__KEY(",", ','),
+     DIALOG__KEY(".", '.'),
+     DIALOG__KEY("?", '?'),
+     DIALOG__KEY("/", '/')},
     {{"OK", 0, DIALOG__KEY_OK},
-     {"AB", 0, DIALOG__KEY_CAPS},
+     {NULL, 0, 0},
+     {"A@", 0, DIALOG__KEY_CAPS},
+     {NULL, 0, 0},
+     {"ąć", 0, DIALOG__KEY_DIACRITICS},
+     {NULL, 0, 0},
+     {"____", 0, DIALOG__KEY_SPACE},
+     {NULL, 0, 0},
+     {NULL, 0, 0},
      {"<-", 0, DIALOG__KEY_DELETE},
-     {"SP", 0, DIALOG__KEY_SPACE},
+     {NULL, 0, 0},
      {"X", 0, DIALOG__KEY_CANCEL}},
+};
+
+static const dialog__key_t s_diacritic_keys[5][12] = {
+    {DIALOG__KEY("á", 0),
+     DIALOG__KEY("à", 0),
+     DIALOG__KEY("â", 0),
+     DIALOG__KEY("ã", 0),
+     DIALOG__KEY("ä", 0),
+     DIALOG__KEY("å", 0),
+     DIALOG__KEY("ç", 0),
+     DIALOG__KEY("ę", 0),
+     DIALOG__KEY("é", 0),
+     DIALOG__KEY("è", 0),
+     DIALOG__KEY("ê", 0),
+     DIALOG__KEY("ë", 0)},
+    {DIALOG__KEY("í", 0),
+     DIALOG__KEY("ì", 0),
+     DIALOG__KEY("î", 0),
+     DIALOG__KEY("ï", 0),
+     DIALOG__KEY("ñ", 0),
+     DIALOG__KEY("ó", 0),
+     DIALOG__KEY("ò", 0),
+     DIALOG__KEY("ô", 0),
+     DIALOG__KEY("õ", 0),
+     DIALOG__KEY("ö", 0),
+     DIALOG__KEY("ú", 0),
+     DIALOG__KEY("ù", 0)},
+    {DIALOG__KEY("û", 0),
+     DIALOG__KEY("ü", 0),
+     DIALOG__KEY("ý", 0),
+     DIALOG__KEY("ś", 0),
+     DIALOG__KEY("ß", 0),
+     DIALOG__KEY("ø", 0),
+     DIALOG__KEY("ł", 0),
+      DIALOG__KEY("ń", 0),
+       DIALOG__KEY("ź", 0),
+       DIALOG__KEY("ż", 0),
+       DIALOG__KEY("đ", 0),
+       DIALOG__KEY("ň", 0)},
+    {DIALOG__KEY("ă", 0),
+     DIALOG__KEY("ą", 0),
+     DIALOG__KEY("ć", 0),
+      DIALOG__KEY("č", 0),
+      DIALOG__KEY("ď", 0),
+     DIALOG__KEY("ğ", 0),
+     DIALOG__KEY("ı", 0),
+     DIALOG__KEY("ŕ", 0),
+      DIALOG__KEY("ě", 0),
+      DIALOG__KEY("ţ", 0),
+      DIALOG__KEY("ř", 0),
+     DIALOG__KEY("♥", 0)},
+    {{"OK", 0, DIALOG__KEY_OK},
+     {NULL, 0, 0},
+     {"A@", 0, DIALOG__KEY_CAPS},
+     {NULL, 0, 0},
+     {"ąć", 0, DIALOG__KEY_DIACRITICS},
+     {NULL, 0, 0},
+     {"____", 0, DIALOG__KEY_SPACE},
+     {NULL, 0, 0},
+     {NULL, 0, 0},
+     {"<-", 0, DIALOG__KEY_DELETE},
+     {NULL, 0, 0},
+     {"X", 0, DIALOG__KEY_CANCEL}},
+};
+
+static const char *s_diacritic_upper[4][12] = {
+    {"Á", "À", "Â", "Ã", "Ä", "Å", "Ç", "Ę", "É", "È", "Ê", "Ë"},
+    {"Í", "Ì", "Î", "Ï", "Ñ", "Ó", "Ò", "Ô", "Õ", "Ö", "Ú", "Ù"},
+    {"Û", "Ü", "Ý", "Ś", "ẞ", "Ø", "Ł", "Ń", "Ź", "Ż", "Đ", "Ň"},
+    {"Ă", "Ą", "Ć", "Č", "Ď", "Ğ", "I", "Ŕ", "Ě", "Ţ", "Ř", "€"},
 };
 
 static const dialog__key_t s_hex_keys[5][4] = {
@@ -88,11 +182,24 @@ static const dialog__key_t s_num_keys[5][3] = {
 typedef struct {
     const dialog__key_t *keys;
     int rows, cols, sel_row, sel_col;
-    bool caps, mask_input;
+    bool caps, diacritics, mask_input;
     char *buffer;
     size_t buffer_size, len, max_len;
     const char *title, *prompt;
 } dialog__keyboard_state_t;
+
+static const char *
+dialog__diacritic_label(const dialog__keyboard_state_t *st, int row, int col, const char *label) {
+    if (st->diacritics && st->caps && row < 4) return s_diacritic_upper[row][col];
+    return label;
+}
+
+static int dialog__utf8_length(const char *text) {
+    int length = 0;
+    for (; *text != '\0'; ++text)
+        if (((unsigned char)*text & 0xc0) != 0x80) ++length;
+    return length;
+}
 
 static bool dialog__key_valid(const dialog__key_t *key) { return key != NULL && key->label != NULL; }
 
@@ -129,6 +236,13 @@ static void dialog__key_add(dialog__keyboard_state_t *st, char c) {
     if (st->len + 1 >= st->buffer_size || st->len >= st->max_len) return;
     st->buffer[st->len++] = c;
     st->buffer[st->len] = '\0';
+}
+
+static void dialog__key_add_string(dialog__keyboard_state_t *st, const char *text) {
+    size_t text_len = strlen(text);
+    if (text_len == 0 || st->len + text_len >= st->buffer_size || st->len + text_len > st->max_len) return;
+    memcpy(st->buffer + st->len, text, text_len + 1);
+    st->len += text_len;
 }
 
 static bool dialog__key_validate(const dialog__keyboard_state_t *st, char c, dialog__input_kind_t kind) {
@@ -168,11 +282,23 @@ static uint16_t dialog__input_background_color(void) {
 static void
 dialog__keyboard_layout(const dialog__keyboard_state_t *st, int *text_area_h, int *cell_w, int *cell_h) {
     int w = display__width(), h = display__height();
-    *text_area_h = DIALOG__CHAR_H * 5 + 12;
+    *text_area_h = st->cols == 12 ? DIALOG__CHAR_H * 3 + 4 : DIALOG__CHAR_H * 5 + 12;
     *cell_w = w / st->cols;
     *cell_h = (h - *text_area_h) / st->rows;
     if (*cell_w < 1) *cell_w = 1;
     if (*cell_h < 1) *cell_h = 1;
+}
+
+static char
+dialog__text_key_code(const dialog__keyboard_state_t *st, int row, int col, const dialog__key_t *key) {
+    static const char symbols[] = "!@#$%^&*()_+"
+                                  "QWERTYUIOP{}"
+                                  "ASDFGHJKL:'\\"
+                                  "|ZXCVBNM<>~`";
+    if (st->caps && !st->diacritics && !key->special) return symbols[row * 12 + col];
+    if (st->caps && !st->diacritics && isalpha((unsigned char)key->code))
+        return (char)toupper((unsigned char)key->code);
+    return key->code;
 }
 
 static void dialog__keyboard_draw_cell(
@@ -181,27 +307,36 @@ static void dialog__keyboard_draw_cell(
 ) {
     const dialog__key_t *key = &st->keys[row * st->cols + col];
     if (!dialog__key_valid(key)) return;
+    int width = 1;
+    if (st->cols == 12 && row == 4) {
+        if (col == 6) width = 3;
+        else if (col == 0 || col == 2 || col == 4 || col == 9) width = 2;
+    }
     int x = col * cell_w, y = text_area_h + row * cell_h;
+    int key_w = width * cell_w;
     bool selected = row == st->sel_row && col == st->sel_col;
     const char *label = key->label;
-    char upper[2];
-    if (!key->special && kind == DIALOG__INPUT_TEXT && st->caps && isalpha((unsigned char)key->code)) {
-        upper[0] = (char)toupper((unsigned char)key->code);
-        upper[1] = '\0';
-        label = upper;
+    char transformed[2];
+    if (!key->special && kind == DIALOG__INPUT_TEXT && !st->diacritics) {
+        transformed[0] = dialog__text_key_code(st, row, col, key);
+        transformed[1] = '\0';
+        label = transformed;
+    } else if (!key->special && st->diacritics) {
+        label = dialog__diacritic_label(st, row, col, label);
     }
-    display__fill_rect(x, y, cell_w, cell_h, selected ? BRUCE_COLOR_WHITE : bg);
+    display__fill_rect(x, y, key_w, cell_h, selected ? BRUCE_COLOR_WHITE : bg);
     if (selected) {
         display__set_text_color(BRUCE_COLOR_BLACK);
     } else {
-        display__draw_rect(x, y, cell_w, cell_h, BRUCE_COLOR_WHITE);
+        if (st->cols == 12 && row == 4) display__draw_rect(x, y, key_w, cell_h, BRUCE_COLOR_WHITE);
         display__set_text_color(BRUCE_COLOR_WHITE);
     }
-    int label_x = x + (cell_w - (int)strlen(label) * DIALOG__CHAR_W) / 2;
-    int label_y = y + (cell_h - DIALOG__CHAR_H) / 2;
+    int text_size = st->cols == 12 ? 2 : DIALOG__TEXT_SIZE;
+    int label_x = x + (key_w - dialog__utf8_length(label) * DIALOG__CHAR_W * text_size) / 2;
+    int label_y = y + (cell_h - DIALOG__CHAR_H * text_size) / 2;
     if (label_x < x + 1) label_x = x + 1;
     if (label_y < y + 1) label_y = y + 1;
-    display__set_text_size(DIALOG__TEXT_SIZE);
+    display__set_text_size(text_size);
     display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
     display__set_cursor(label_x, label_y);
     display__print(label);
@@ -212,21 +347,27 @@ static bruce_result_t dialog__keyboard_draw(dialog__keyboard_state_t *st, dialog
     if (result != BRUCE_OK) return result;
     int w = display__width(), text_area_h, cell_w, cell_h;
     dialog__keyboard_layout(st, &text_area_h, &cell_w, &cell_h);
-    dialog__input_clear_and_title(st->title);
+    if (st->cols == 12) {
+        (void)display__fill_screen(dialog__input_background_color());
+    } else {
+        dialog__input_clear_and_title(st->title);
+    }
     display__set_text_color(BRUCE_COLOR_WHITE);
     display__set_text_size(DIALOG__TEXT_SIZE);
     display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
-    display__set_cursor(DIALOG__MARGIN, DIALOG__CHAR_H + 8);
-    display__print(st->prompt != NULL ? st->prompt : "");
+    int prompt_y = st->cols == 12 ? DIALOG__MARGIN : DIALOG__CHAR_H + 8;
+    display__set_cursor(DIALOG__MARGIN, prompt_y);
+    display__print(st->prompt != NULL ? st->prompt : (st->title != NULL ? st->title : ""));
     char counter[32];
     snprintf(counter, sizeof(counter), "%zu/%zu", st->len, st->max_len);
-    display__set_cursor(w - (int)strlen(counter) * DIALOG__CHAR_W - DIALOG__MARGIN, DIALOG__CHAR_H + 8);
+    display__set_cursor(w - (int)strlen(counter) * DIALOG__CHAR_W - DIALOG__MARGIN, prompt_y);
     display__print(counter);
-    int textbox_y = DIALOG__CHAR_H * 2 + 10;
-    display__draw_rect(
-        DIALOG__MARGIN, textbox_y, w - 2 * DIALOG__MARGIN, DIALOG__CHAR_H * 2 + 4, BRUCE_COLOR_WHITE
-    );
-    display__set_cursor(DIALOG__MARGIN + 2, textbox_y + 2);
+    int textbox_y = st->cols == 12 ? DIALOG__CHAR_H + 4 : DIALOG__CHAR_H * 2 + 10;
+    int textbox_h = st->cols == 12 ? DIALOG__CHAR_H * 2 : DIALOG__CHAR_H * 2 + 4;
+    display__draw_rect(DIALOG__MARGIN, textbox_y, w - 2 * DIALOG__MARGIN, textbox_h, BRUCE_COLOR_WHITE);
+    int input_text_size = st->cols == 12 ? 2 : DIALOG__TEXT_SIZE;
+    display__set_text_size(input_text_size);
+    display__set_cursor(DIALOG__MARGIN + 2, textbox_y);
     if (st->mask_input) {
         char stars[64];
         size_t n = st->len < sizeof(stars) - 1 ? st->len : sizeof(stars) - 1;
@@ -234,7 +375,7 @@ static bruce_result_t dialog__keyboard_draw(dialog__keyboard_state_t *st, dialog
         stars[n] = '\0';
         display__print(stars);
     } else {
-        int max_chars = (w - 4 * DIALOG__MARGIN) / DIALOG__CHAR_W;
+        int max_chars = (w - 4 * DIALOG__MARGIN) / (DIALOG__CHAR_W * input_text_size);
         if (max_chars < 1) max_chars = 1;
         display__print((int)st->len <= max_chars ? st->buffer : st->buffer + st->len - max_chars);
     }
@@ -267,7 +408,7 @@ bruce_result_t dialog__input_gui_run(
     if (kind == DIALOG__INPUT_TEXT) {
         keys = &s_text_keys[0][0];
         rows = 5;
-        cols = 10;
+        cols = 12;
     } else if (kind == DIALOG__INPUT_HEX) {
         keys = &s_hex_keys[0][0];
         rows = 5;
@@ -334,7 +475,18 @@ bruce_result_t dialog__input_gui_run(
             case BRUCE_INPUT_CODE_RIGHT: {
                 int previous_row = st.sel_row, previous_col = st.sel_col;
                 if (ev.code == BRUCE_INPUT_CODE_UP) dialog__key_move_vertical_or_horizontal(&st, -1, 0);
-                else if (ev.code == BRUCE_INPUT_CODE_DOWN) dialog__key_move_vertical_or_horizontal(&st, 1, 0);
+                else if (ev.code == BRUCE_INPUT_CODE_DOWN && st.cols == 12 && st.sel_row == st.rows - 2) {
+                    /* The action row has spanning buttons. Map every character column
+                     * to its nearest action instead of wrapping through a spacer cell. */
+                    static const int action_columns[] = {0, 2, 4, 6, 9, 11};
+                    int action = 0;
+                    for (int i = 1; i < (int)(sizeof(action_columns) / sizeof(action_columns[0])); ++i) {
+                        if (st.sel_col < action_columns[i]) break;
+                        action = i;
+                    }
+                    st.sel_row = st.rows - 1;
+                    st.sel_col = action_columns[action];
+                } else if (ev.code == BRUCE_INPUT_CODE_DOWN) dialog__key_move_vertical_or_horizontal(&st, 1, 0);
                 else if (ev.code == BRUCE_INPUT_CODE_PREV) dialog__key_move_linear(&st, -1);
                 else if (ev.code == BRUCE_INPUT_CODE_NEXT) dialog__key_move_linear(&st, 1);
                 else if (ev.code == BRUCE_INPUT_CODE_LEFT)
@@ -357,10 +509,18 @@ bruce_result_t dialog__input_gui_run(
                 } else if (key->special == DIALOG__KEY_SPACE) {
                     if (kind == DIALOG__INPUT_TEXT) dialog__key_add(&st, ' ');
                 } else if (key->special == DIALOG__KEY_CAPS) st.caps = !st.caps;
-                else if (key->code != '\0') {
-                    char c = key->code;
-                    if (kind == DIALOG__INPUT_TEXT && st.caps && isalpha((unsigned char)c))
-                        c = (char)toupper((unsigned char)c);
+                else if (key->special == DIALOG__KEY_DIACRITICS) {
+                    st.diacritics = !st.diacritics;
+                    st.caps = false;
+                    st.keys = st.diacritics ? &s_diacritic_keys[0][0] : &s_text_keys[0][0];
+                } else if (st.diacritics) {
+                    dialog__key_add_string(
+                        &st, dialog__diacritic_label(&st, st.sel_row, st.sel_col, key->label)
+                    );
+                } else if (key->code != '\0') {
+                    char c = kind == DIALOG__INPUT_TEXT
+                                 ? dialog__text_key_code(&st, st.sel_row, st.sel_col, key)
+                                 : key->code;
                     if (dialog__key_validate(&st, c, kind)) dialog__key_add(&st, c);
                 }
                 full_redraw = true;
