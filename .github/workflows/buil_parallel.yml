@@ -74,14 +74,19 @@ jobs:
       - name: Stage flash files
         run: |
           mkdir release-assets
-          cp build-board/${{ matrix.board }}/BruceIDF.bin release-assets/BruceIDF-${{ matrix.board }}.bin
-          cp build-board/${{ matrix.board }}/bootloader/bootloader.bin release-assets/BruceIDF-${{ matrix.board }}-bootloader.bin
-          cp build-board/${{ matrix.board }}/partition_table/partition-table.bin release-assets/BruceIDF-${{ matrix.board }}-partition-table.bin
-          cp build-board/${{ matrix.board }}/flasher_args.json release-assets/BruceIDF-${{ matrix.board }}-flasher_args.json
+          source "$IDF_PATH/export.sh"
+          chip=$(tr -d '[:space:]' < boards/${{ matrix.board }}/target)
+          python3 -m esptool --chip "$chip" merge-bin --format raw -o release-assets/BruceOS-${{ matrix.board }}.bin \
+            0x1000 build-board/${{ matrix.board }}/bootloader/bootloader.bin \
+            0x8000 build-board/${{ matrix.board }}/partition_table/partition-table.bin \
+            0x20000 build-board/${{ matrix.board }}/BruceIDF.bin
+          cp build-board/${{ matrix.board }}/BruceIDF.bin release-assets/BruceOS-${{ matrix.board }}-app.bin
+          cp build-board/${{ matrix.board }}/bootloader/bootloader.bin release-assets/BruceOS-${{ matrix.board }}-bootloader.bin
+          cp build-board/${{ matrix.board }}/partition_table/partition-table.bin release-assets/BruceOS-${{ matrix.board }}-partition-table.bin
       - name: Upload ${{ matrix.board }} firmware
         uses: actions/upload-artifact@v4
         with:
-          name: BruceIDF-${{ matrix.board }}
+          name: BruceOS-${{ matrix.board }}
           path: release-assets/
           retention-days: 5
           if-no-files-found: error
@@ -109,7 +114,7 @@ jobs:
       - name: Upload native packages
         uses: actions/upload-artifact@v4
         with:
-          name: BruceIDF-native-packages
+          name: BruceOS-native-packages
           path: release-assets/
           retention-days: 5
           if-no-files-found: error
@@ -123,7 +128,7 @@ jobs:
       - name: Download build assets
         uses: actions/download-artifact@v4
         with:
-          pattern: BruceIDF-*
+          pattern: BruceOS-*
           merge-multiple: true
           path: artifacts
       - name: Ensure rolling releases exist
@@ -184,13 +189,13 @@ jobs:
       - name: Download build assets
         uses: actions/download-artifact@v4
         with:
-          pattern: BruceIDF-*
+          pattern: BruceOS-*
           merge-multiple: true
           path: artifacts
       - name: Publish ${{ github.ref_name }}
         uses: softprops/action-gh-release@v2
         with:
-          name: BruceIDF Release ${{ github.ref_name }}
+          name: BruceOS Release ${{ github.ref_name }}
           tag_name: ${{ github.ref_name }}
           generate_release_notes: true
           files: artifacts/*
