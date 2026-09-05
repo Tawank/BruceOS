@@ -6,6 +6,7 @@
   "permissions": ["storage"],
   "stackSize": 8192,
   "heapSize": 105000,
+  "targets": ["elf"],
   "build": {
     "sources": [
       "main/*.c",

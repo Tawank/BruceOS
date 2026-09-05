@@ -144,6 +144,15 @@ def build_wasm(app, compiler):
     print(f"Built {output}")
 
 
+def app_targets(app):
+    app_dir = APPS_DIR / app
+    _, manifest_data, _ = read_manifest(app_dir)
+    targets = manifest_data.get("targets", ["elf"])
+    if not isinstance(targets, list) or any(target not in ("elf", "wasm") for target in targets):
+        raise RuntimeError(f"Invalid targets in {app_dir / 'manifest.json'}")
+    return targets
+
+
 def main():
     parser = argparse.ArgumentParser(description="Build Bruce external apps")
     parser.add_argument("--target", default="elf", help="elf, wasm, or an ESP-IDF target")
@@ -152,7 +161,14 @@ def main():
     parser.add_argument("--compiler", default=os.environ.get("WASM_CLANG", "clang"))
     parser.add_argument("--app", action="append", choices=available_apps())
     args = parser.parse_args()
-    apps = list(dict.fromkeys(args.app or available_apps()))
+    requested_target = "wasm" if args.target == "wasm" else "elf"
+    apps = list(dict.fromkeys(args.app or (app for app in available_apps() if requested_target in app_targets(app))))
+    unsupported = [app for app in apps if requested_target not in app_targets(app)]
+    if unsupported:
+        raise SystemExit(f"Target {requested_target} is not supported by: {', '.join(unsupported)}")
+    if not apps:
+        print(f"No external apps support target {requested_target}")
+        return
 
     if args.target == "wasm":
         try:
