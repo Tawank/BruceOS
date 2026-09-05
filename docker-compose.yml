@@ -1,0 +1,16 @@
+services:
+  platformio_build:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.ci
+    working_dir: /work
+    volumes:
+      - .:/work
+      - idf_build:/work/build-board
+    environment:
+      # Optional overrides:
+      - PIO_ENVS=m5stack-cplus2
+    command: ["bash", "docker/run_all_envs.sh"]
+
+volumes:
+  idf_build:

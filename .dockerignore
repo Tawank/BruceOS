@@ -1,0 +1,5 @@
+# The repository is bind-mounted at /work when the CI container runs. No source
+# files need to be sent while building the image.
+**
+!docker/
+!docker/Dockerfile.ci
