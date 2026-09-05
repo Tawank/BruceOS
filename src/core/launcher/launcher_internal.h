@@ -9,6 +9,18 @@
 /* Pulled out of launcher.c so selftest can exercise these without any
  * storage I/O. */
 
+/* Mirrors modules/bruce_launcher/bruce_launcher_menu.c's own
+ * BRUCE_LAUNCHER_CONFIG_PATH/BRUCE_LAUNCHER_JSON_MAX/BRUCE_LAUNCHER_MAX_ENTRIES
+ * - keep all three in sync if any of them change there. Core only ever
+ * appends/edits entries in the same config that module owns loading/parsing
+ * for, so it must never grow the file past what that loader will actually
+ * read back (a file at or over the size limit is treated as unreadable and
+ * silently replaced with the embedded default on the next load, and a menu
+ * over the entry limit just has its extra entries dropped at load time). */
+#define LAUNCHER__CONFIG_PATH "/config/launcher.conf"
+#define LAUNCHER__JSON_MAX_BYTES 8192
+#define LAUNCHER__MAX_ENTRIES 32
+
 /* Builds the "Label" or "Label@icon-name" key launcher.json uses for a flat
  * command entry. Returns false (leaving out_key untouched) when label is
  * NULL/empty or out_key has no room; truncates a label/icon combination that
@@ -44,3 +56,32 @@ launcher__json_menu_labels(const cJSON *root, char out_labels[][BRUCE_LAUNCHER_E
  * half matches otherwise. NULL if menu_label names something that isn't one
  * of root's own submenus, or root itself is NULL. */
 cJSON *launcher__json_find_menu(cJSON *root, const char *menu_label);
+
+/* Walks path[0..path_depth) as a chain of submenu labels from `root`
+ * (root itself when path_depth == 0), applying launcher__json_find_menu()
+ * one level at a time. NULL as soon as any label along the way doesn't name
+ * one of its parent's own submenus, or root itself is NULL. */
+cJSON *launcher__json_find_menu_at_path(cJSON *root, const char *const *path, size_t path_depth);
+
+/* Splits a JSON key into its icon half - the complement of
+ * launcher__label_from_key(). Writes "" (not an error) when the key has no
+ * "@icon-name" suffix. Returns false (leaving out_icon untouched) for a
+ * NULL key or a zero-capacity buffer; truncates an icon name that doesn't
+ * fit. */
+bool launcher__icon_from_key(const char *key, char *out_icon, size_t out_icon_size);
+
+/* Loads /config/launcher.conf into a parsed object, or NULL if it doesn't
+ * exist yet, is empty, or isn't a JSON object - the same shape
+ * bruce_launcher__menu_load() requires before it'll use a file instead of
+ * falling back to the embedded default. Caller owns the result via
+ * cJSON_Delete(). */
+cJSON *launcher__load_root(void);
+
+/* Serializes `root` and writes it back to /config/launcher.conf, atomically.
+ * Never frees or otherwise touches `root` itself - the caller still owns it
+ * either way. BRUCE_ERR_NO_MEMORY if serialization itself fails,
+ * BRUCE_ERR_RESOURCE_LIMIT if the result would exceed
+ * LAUNCHER__JSON_MAX_BYTES (the same limit bruce_launcher__menu_load()
+ * enforces before it'll read the file back), BRUCE_ERR_IO on a storage
+ * write failure. */
+bruce_result_t launcher__save_root(const cJSON *root);

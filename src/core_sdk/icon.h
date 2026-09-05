@@ -1,6 +1,10 @@
 #pragma once
 
+#include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
+
+#include "core_sdk/result.h"
 
 /**
  * @brief Built-in icons.
@@ -39,3 +43,26 @@ typedef struct {
  * @param name Icon name, matching an SVG filename in core/icon/assets (without the .svg suffix).
  */
 const bruce_icon_t *icon__get(const char *name);
+
+/** Buffer size for an icon name returned by icon__pick(). */
+#define BRUCE_ICON_NAME_MAX 32
+
+/**
+ * @brief Shows a picker listing every built-in icon and returns the one chosen.
+ *
+ * A dialog__choice() list with one row per icon__get()-recognized name, each
+ * drawn with its own icon so the list doubles as a preview. Falls back to a
+ * plain-text list of names outside a GUI context, same as any other
+ * dialog__* call.
+ *
+ * @param title Optional short title shown at the top of the picker.
+ * @param current_icon_name Optional icon name to preselect, or NULL/"" for none.
+ * @param allow_none When true, an extra leading "None" row clears out_icon_name instead of picking one.
+ * @param out_icon_name Receives the chosen icon name ("" if "None" was picked). Left untouched on a
+ * non-BRUCE_OK return (e.g. the picker was cancelled).
+ * @param out_icon_name_size Size of out_icon_name in bytes.
+ */
+bruce_result_t icon__pick(
+    const char *title, const char *current_icon_name, bool allow_none, char *out_icon_name,
+    size_t out_icon_name_size
+);

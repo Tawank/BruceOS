@@ -106,6 +106,7 @@ idf_component_register(SRCS
                     "core/ext_mem_loader/ext_mem_loader.c"
                     "core/filetype/filetype.c"
                      "core/launcher/launcher.c"
+                     "core/launcher/launcher_tree.c"
                      "core/manifest/manifest.c"
                     "core/memory/memory.c"
                     "core/memory/memory_external.c"
@@ -139,6 +140,7 @@ idf_component_register(SRCS
                     "modules/bruce_launcher/bruce_launcher_config.c"
                     "modules/bruce_launcher/bruce_launcher_icons.c"
                     "modules/bruce_launcher/bruce_launcher_menu.c"
+                    "modules/bruce_launcher/bruce_launcher_menu_editor.c"
                     "modules/bnu/bnu_app.c"
                     "modules/bnu/bnu_fs_app.c"
                     "modules/bnu/bnu_disk_app.c"
@@ -393,7 +395,8 @@ add_library(bruce_sdk_builtin_launcher_check OBJECT
             "modules/bruce_launcher/bruce_launcher_app.c"
             "modules/bruce_launcher/bruce_launcher_config.c"
             "modules/bruce_launcher/bruce_launcher_icons.c"
-            "modules/bruce_launcher/bruce_launcher_menu.c")
+            "modules/bruce_launcher/bruce_launcher_menu.c"
+            "modules/bruce_launcher/bruce_launcher_menu_editor.c")
 add_dependencies(bruce_sdk_builtin_launcher_check bruce_embedded_resources)
 target_include_directories(bruce_sdk_builtin_launcher_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"

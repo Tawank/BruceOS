@@ -9,18 +9,6 @@
 #include "core_sdk/memory.h"
 #include "launcher_internal.h"
 
-/* Mirrors modules/bruce_launcher/bruce_launcher_menu.c's own
- * BRUCE_LAUNCHER_CONFIG_PATH/BRUCE_LAUNCHER_JSON_MAX/BRUCE_LAUNCHER_MAX_ENTRIES
- * - keep all three in sync if any of them change there. This file only ever
- * appends one entry to the same config that module owns loading/parsing
- * for, so it must never grow the file past what that loader will actually
- * read back (a file at or over the size limit is treated as unreadable and
- * silently replaced with the embedded default on the next load, and a menu
- * over the entry limit just has its extra entries dropped at load time). */
-#define LAUNCHER__CONFIG_PATH "/config/launcher.conf"
-#define LAUNCHER__JSON_MAX_BYTES 8192
-#define LAUNCHER__MAX_ENTRIES 32
-
 bool launcher__build_entry_key(const char *label, const char *icon_name, char *out_key, size_t out_key_size) {
     if (label == NULL || label[0] == '\0' || out_key == NULL || out_key_size == 0) return false;
     if (icon_name != NULL && icon_name[0] != '\0') {
@@ -38,6 +26,13 @@ bool launcher__label_from_key(const char *key, char *out_label, size_t out_label
     if (length >= out_label_size) length = out_label_size - 1;
     memcpy(out_label, key, length);
     out_label[length] = '\0';
+    return true;
+}
+
+bool launcher__icon_from_key(const char *key, char *out_icon, size_t out_icon_size) {
+    if (key == NULL || out_icon == NULL || out_icon_size == 0) return false;
+    const char *separator = strrchr(key, '@');
+    snprintf(out_icon, out_icon_size, "%s", separator != NULL ? separator + 1 : "");
     return true;
 }
 
@@ -85,12 +80,15 @@ cJSON *launcher__json_find_menu(cJSON *root, const char *menu_label) {
     return NULL;
 }
 
-/* Loads /config/launcher.conf into a parsed object, or NULL if it doesn't
- * exist yet, is empty, or isn't a JSON object - the same shape
- * bruce_launcher__menu_load() requires before it'll use a file instead of
- * falling back to the embedded default. Caller owns the result via
- * cJSON_Delete(). */
-static cJSON *launcher__load_root(void) {
+cJSON *launcher__json_find_menu_at_path(cJSON *root, const char *const *path, size_t path_depth) {
+    cJSON *menu = root;
+    for (size_t i = 0; i < path_depth && menu != NULL; ++i) {
+        menu = launcher__json_find_menu(menu, path[i]);
+    }
+    return menu;
+}
+
+cJSON *launcher__load_root(void) {
     char *text = NULL;
     size_t size = 0;
     if (!storage__read_file(LAUNCHER__CONFIG_PATH, &text, &size) || size == 0) return NULL;
@@ -108,6 +106,17 @@ size_t launcher__list_menus(char out_labels[][BRUCE_LAUNCHER_ENTRY_LABEL_MAX], s
     size_t count = launcher__json_menu_labels(root, out_labels, capacity);
     cJSON_Delete(root);
     return count;
+}
+
+bruce_result_t launcher__save_root(const cJSON *root) {
+    char *serialized = cJSON_Print(root);
+    if (serialized == NULL) return BRUCE_ERR_NO_MEMORY;
+    bruce_result_t result = BRUCE_OK;
+    size_t length = strlen(serialized);
+    if (length >= LAUNCHER__JSON_MAX_BYTES) result = BRUCE_ERR_RESOURCE_LIMIT;
+    else if (!storage__write_file_atomic(LAUNCHER__CONFIG_PATH, serialized, length)) result = BRUCE_ERR_IO;
+    cJSON_free(serialized);
+    return result;
 }
 
 bool launcher__menu_has_command(const char *menu_label, const char *command) {
@@ -220,18 +229,8 @@ bruce_result_t launcher__add_menu_entry(const char *label, const char *icon_name
         return BRUCE_ERR_NO_MEMORY;
     }
 
-    char *serialized = cJSON_Print(root);
+    bruce_result_t result = launcher__save_root(root);
     cJSON_Delete(root);
-    if (serialized == NULL) return BRUCE_ERR_NO_MEMORY;
-
-    bruce_result_t result = BRUCE_OK;
-    size_t length = strlen(serialized);
-    if (length >= LAUNCHER__JSON_MAX_BYTES) {
-        result = BRUCE_ERR_RESOURCE_LIMIT;
-    } else if (!storage__write_file_atomic(LAUNCHER__CONFIG_PATH, serialized, length)) {
-        result = BRUCE_ERR_IO;
-    }
-    cJSON_free(serialized);
 
     if (result == BRUCE_OK) {
         snprintf(message, sizeof(message), "Added to %s", menu_label);

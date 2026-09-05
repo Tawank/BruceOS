@@ -6,6 +6,7 @@
 #include <strings.h>
 
 #include "args.h"
+#include "bruce_launcher_menu_editor.h"
 #include "core_sdk/app_config.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/result.h"
@@ -151,7 +152,7 @@ static int bruce_launcher_config__gui(void) {
             grid_labels_label, sizeof(grid_labels_label), "Grid labels: %s", cfg.grid_labels ? "On" : "Off"
         );
 
-        bruce_dialog_choice_t choices[4];
+        bruce_dialog_choice_t choices[5];
         size_t count = 0;
         choices[count++] = (bruce_dialog_choice_t){.label = layout_label, .value = "layout"};
         if (cfg.layout == BRUCE_LAUNCHER_LAYOUT_GRID) {
@@ -160,6 +161,7 @@ static int bruce_launcher_config__gui(void) {
         } else {
             choices[count++] = (bruce_dialog_choice_t){.label = labels_label, .value = "carousel_labels"};
         }
+        choices[count++] = (bruce_dialog_choice_t){.label = "Menu entries", .value = "menu_entries"};
         choices[count++] = (bruce_dialog_choice_t){.label = "Back", .value = "back"};
 
         size_t selected = 0;
@@ -178,6 +180,7 @@ static int bruce_launcher_config__gui(void) {
             set_result = bruce_launcher_config__pick_grid_columns(cfg.grid_columns);
         else if (strcmp(action, "grid_labels") == 0)
             set_result = bruce_launcher_config__pick_grid_labels(cfg.grid_labels);
+        else if (strcmp(action, "menu_entries") == 0) set_result = bruce_launcher_menu_editor__run();
         if (set_result != BRUCE_OK) return set_result;
     }
 }
