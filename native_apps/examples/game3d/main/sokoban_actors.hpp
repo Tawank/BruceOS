@@ -142,28 +142,4 @@ inline void applyLevelToActors(const GameState &gs, Object *playerObj, Object *f
     }
 }
 
-// Upper bound on triangles any one frame can submit to Scene's render
-// queue -- see main.cpp's scene.reserveRenderQueue() call. Floor/wall come
-// from whichever level is active (wallCells is the pre-merge cell count;
-// rebuildLevelGeometry's run-merging only reduces triangle count from
-// there, never grows it, so it's a safe stand-in for the real merged
-// total); player/face are fixed; crates scale with that level's actual
-// boxCount, not kMaxBoxes -- a disabled box Object is skipped entirely by
-// Scene, so unused slots cost nothing here. Deliberately the max of each
-// LEVEL's own total rather than the max of each field across levels
-// (floor/wall/boxCount all come from the SAME level within any one frame,
-// so summing separate per-field maxima would double up on levels).
-inline int worstCaseFrameTriangles() {
-    int worst = 0;
-    GameState tmp;
-    for (int i = 0; i < kLevelCount; i++) {
-        loadLevel(i, tmp);
-        int flat, edge, walls;
-        countLevelCells(tmp, flat, edge, walls);
-        int total = flat * 2 + edge * 10 + walls * 10 + kPlayerBodyTris + kFaceTris + tmp.boxCount * kCrateTris;
-        worst = std::max(worst, total);
-    }
-    return worst;
-}
-
 } // namespace

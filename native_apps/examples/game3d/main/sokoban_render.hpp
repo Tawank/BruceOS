@@ -83,9 +83,7 @@ inline void countLevelCells(const GameState &gs, int &floorFlat, int &floorEdge,
 // cell count of each kind across all levels (not necessarily all from the
 // same level -- floorObj and wallObj are two separate, independently-sized
 // Objects, each needing its own all-time high-water mark, so cross-level
-// maxima are what they actually need, unlike worstCaseFrameTriangles()
-// in sokoban_actors.hpp, which sizes one shared per-frame budget and needs
-// a real single level's total instead).
+// maxima are what they actually need.
 inline void worstCaseCellCounts(int &maxFlat, int &maxEdge, int &maxWalls) {
     maxFlat = maxEdge = maxWalls = 0;
     GameState tmp;

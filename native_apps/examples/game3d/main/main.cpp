@@ -116,14 +116,6 @@ extern "C" int app_main(int argc, char **argv) {
     Camera camera;
     scene.setCamera(&camera);
 
-    // Pre-size Scene's internal render queue to this app's worst-case
-    // per-frame triangle count -- see Scene::reserveRenderQueue()'s own
-    // comment (components/jet's Scene.hpp/.cpp) for why, and do it now,
-    // before a single Object or Material exists, while the heap is at its
-    // least fragmented.
-    scene.reserveRenderQueue((size_t)worstCaseFrameTriangles());
-    logHeap("after renderQueue reserve");
-
     // All Materials and Objects are created exactly once here, up front,
     // and reused for every level for the rest of the app's run -- see
     // createStaticGeometryObjects()'s comment in sokoban_render.hpp for
