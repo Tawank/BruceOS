@@ -57,6 +57,17 @@ static esp_lcd_i80_bus_handle_t s_i80_bus;
 #endif
 static bool s_backlight_initialized;
 
+void display_driver__boot_backlight_off(void) {
+#if CONFIG_BRUCE_DISPLAY_PIN_BL >= 0
+    gpio_config_t bl_gpio = {
+        .mode = GPIO_MODE_OUTPUT,
+        .pin_bit_mask = 1ULL << DISPLAY__PIN_BL,
+    };
+    (void)gpio_config(&bl_gpio);
+    (void)gpio_set_level(DISPLAY__PIN_BL, 0);
+#endif
+}
+
 static bool display_driver__on_color_trans_done(
     esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_io_event_data_t *event_data, void *user_ctx
 ) {
@@ -164,22 +175,19 @@ static bruce_result_t display_driver__backlight_init(void) {
         ledc_timer_rst(DISPLAY__BL_LEDC_MODE, DISPLAY__BL_LEDC_TIMER);
         return BRUCE_ERR_INTERNAL;
     }
+    if (ledc_fade_func_install(0) != ESP_OK) {
+        ESP_LOGE(TAG, "failed to install LEDC fade service");
+        ledc_stop(DISPLAY__BL_LEDC_MODE, DISPLAY__BL_LEDC_CHANNEL, 0);
+        ledc_timer_rst(DISPLAY__BL_LEDC_MODE, DISPLAY__BL_LEDC_TIMER);
+        return BRUCE_ERR_INTERNAL;
+    }
     s_backlight_initialized = true;
     return BRUCE_OK;
 #endif
 }
 
 static bruce_result_t display_driver__panel_init(void) {
-#if CONFIG_BRUCE_DISPLAY_PIN_BL >= 0
-    {
-        gpio_config_t bl_gpio = {
-            .mode = GPIO_MODE_OUTPUT,
-            .pin_bit_mask = 1ULL << DISPLAY__PIN_BL,
-        };
-        gpio_config(&bl_gpio);
-        gpio_set_level(DISPLAY__PIN_BL, 0);
-    }
-#endif
+    display_driver__boot_backlight_off();
 
 #if CONFIG_BRUCE_DISPLAY_BUS_I80
     esp_lcd_i80_bus_config_t bus_config = {
@@ -392,6 +400,20 @@ void display_driver__set_backlight(uint8_t brightness) {
     uint32_t duty = ((uint32_t)brightness * DISPLAY__LEDC_MAX_DUTY) / 255;
     ledc_set_duty(DISPLAY__BL_LEDC_MODE, DISPLAY__BL_LEDC_CHANNEL, duty);
     ledc_update_duty(DISPLAY__BL_LEDC_MODE, DISPLAY__BL_LEDC_CHANNEL);
+}
+
+void display_driver__fade_backlight(uint8_t brightness, uint32_t duration_ms) {
+    if (!s_backlight_initialized) return;
+#if CONFIG_BRUCE_DISPLAY_BACKLIGHT_MAX_LEVEL < 255
+    if (brightness > CONFIG_BRUCE_DISPLAY_BACKLIGHT_MAX_LEVEL) {
+        brightness = CONFIG_BRUCE_DISPLAY_BACKLIGHT_MAX_LEVEL;
+    }
+#endif
+    uint32_t duty = ((uint32_t)brightness * DISPLAY__LEDC_MAX_DUTY) / 255;
+    if (ledc_set_fade_with_time(DISPLAY__BL_LEDC_MODE, DISPLAY__BL_LEDC_CHANNEL, duty, duration_ms) != ESP_OK ||
+        ledc_fade_start(DISPLAY__BL_LEDC_MODE, DISPLAY__BL_LEDC_CHANNEL, LEDC_FADE_NO_WAIT) != ESP_OK) {
+        display_driver__set_backlight(brightness);
+    }
 }
 
 bruce_result_t display_driver__invert(bool invert) {

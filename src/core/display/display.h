@@ -7,6 +7,8 @@
 #include "core_sdk/display.h"
 
 bruce_result_t display__init(void);
+/* Keep a GPIO-controlled backlight dark during the rest of system startup. */
+void display__boot_backlight_off(void);
 void display__deinit(void);
 bruce_result_t display__flush(void);
 

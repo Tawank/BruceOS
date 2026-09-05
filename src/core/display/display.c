@@ -15,7 +15,6 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h" // IWYU pragma: keep
 #include "freertos/semphr.h"
-#include "freertos/task.h"
 
 #define TAG "bruce_display"
 #define DISPLAY__MAX_CONTEXTS 16
@@ -29,6 +28,7 @@
  * derives from it is too short to visibly light the panel, so a low-but-nonzero
  * brightness looks identical to the backlight being fully off. */
 #define DISPLAY__MIN_VISIBLE_BRIGHTNESS 26
+#define DISPLAY__BOOT_FADE_DURATION_MS 240
 
 /* Short-lived structural lock: context/overlay table membership, viewport
  * and visibility transitions, rotation, tile layout, and frame-lease
@@ -149,6 +149,14 @@ bruce_result_t display__snapshot(
 static void display__ensure_lock(void) {
     if (s_registry_mutex == NULL) s_registry_mutex = xSemaphoreCreateRecursiveMutex();
     if (s_transfer_mutex == NULL) s_transfer_mutex = xSemaphoreCreateMutex();
+}
+
+void display__boot_backlight_off(void) { display_driver__boot_backlight_off(); }
+
+static void display__fade_in(void) {
+#if !CONFIG_BRUCE_QEMU_TEST_MODE
+    if (s_brightness != 0) display_driver__fade_backlight(s_brightness, DISPLAY__BOOT_FADE_DURATION_MS);
+#endif
 }
 
 static bruce_display_rect_t display__fullscreen_rect(void) {
@@ -796,9 +804,6 @@ bruce_result_t display__init(void) {
     s_brightness = (uint8_t)((configured_brightness * 255) / 100);
     if (configured_brightness > 0 && s_brightness < DISPLAY__MIN_VISIBLE_BRIGHTNESS)
         s_brightness = DISPLAY__MIN_VISIBLE_BRIGHTNESS;
-#if !CONFIG_BRUCE_QEMU_TEST_MODE
-    display_driver__set_backlight(s_brightness);
-#endif
     s_initialized = true;
     display__unlock();
     static bool s_reclaim_provider_registered;
@@ -811,11 +816,18 @@ bruce_result_t display__init(void) {
         };
         s_reclaim_provider_registered = memory__register_reclaimable(&reclaim_provider) == BRUCE_OK;
     }
-    if (s_buffered_rendering) return display__flush();
+    if (s_buffered_rendering) {
+        bruce_result_t flush_result = display__flush();
+        if (flush_result == BRUCE_OK) display__fade_in();
+        return flush_result;
+    }
     bruce_result_t direct_result = display__begin_frame();
     if (direct_result == BRUCE_OK) direct_result = display__fill_screen(BRUCE_COLOR_BLACK);
     if (direct_result == BRUCE_OK) direct_result = display__present();
-    if (direct_result != BRUCE_OK) display__deinit();
+    if (direct_result != BRUCE_OK)
+        display__deinit();
+    else
+        display__fade_in();
     return direct_result;
 }
 

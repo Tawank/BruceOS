@@ -259,6 +259,7 @@ void quemu_test_mode__wait_for_serial_ready(void) {
 void app_main(void) {
     ESP_LOGI("boot", "reset reason: %d\n", (int)esp_reset_reason());
     device__power_hold_init();
+    display__boot_backlight_off();
 
     bool storage_ok = init_storage();
     if (storage_ok && !config__init()) printf("Configuration is unavailable; using in-memory defaults\n");
