@@ -76,10 +76,15 @@ jobs:
           mkdir release-assets
           source "$IDF_PATH/export.sh"
           chip=$(tr -d '[:space:]' < boards/${{ matrix.board }}/target)
+          build_dir=build-board/${{ matrix.board }}
+          read -r flash_mode flash_freq flash_size < <(python3 -c 'import json, sys; settings = json.load(open(sys.argv[1]))["flash_settings"]; print(settings["flash_mode"], settings["flash_freq"], settings["flash_size"])' "$build_dir/flasher_args.json")
+          [[ "$flash_size" == "detect" ]] && flash_size=keep
+          flash_args=()
+          while read -r offset file; do
+            flash_args+=("$offset" "$build_dir/$file")
+          done < <(python3 -c 'import json, sys; print("\n".join(f"{offset} {path}" for offset, path in sorted(json.load(open(sys.argv[1]))["flash_files"].items(), key=lambda item: int(item[0], 0))))' "$build_dir/flasher_args.json")
           python3 -m esptool --chip "$chip" merge-bin --format raw -o release-assets/BruceOS-${{ matrix.board }}.bin \
-            0x1000 build-board/${{ matrix.board }}/bootloader/bootloader.bin \
-            0x8000 build-board/${{ matrix.board }}/partition_table/partition-table.bin \
-            0x20000 build-board/${{ matrix.board }}/BruceIDF.bin
+            --flash-mode "$flash_mode" --flash-freq "$flash_freq" --flash-size "$flash_size" "${flash_args[@]}"
       - name: Upload ${{ matrix.board }} firmware
         uses: actions/upload-artifact@v4
         with:
