@@ -12,358 +12,173 @@ on:
       - dev
 
     paths:
-        - "**.yml"
-        - "**.h"
-        - "**.cpp"
-        - "**.py"
-        - "**.html"
-        - "**.css"
-        - "**.js"
-        - "**.ini"
-        - "**.json"
-        - "**.csv"
+      - "**.yml"
+      - "**.h"
+      - "**.c"
+      - "**.cpp"
+      - "**.py"
+      - "**.html"
+      - "**.css"
+      - "**.js"
+      - "**.ini"
+      - "**.json"
+      - "**.cmake"
+      - "CMakeLists.txt"
+      - "sdkconfig.defaults*"
+      - "boards/**"
+      - "native_apps/**"
     tags:
       - "*"
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
-  compile_sketch:
-    name: Build ${{ matrix.board.env }}
+  firmware:
+    name: Build ${{ matrix.board }}
     runs-on: ubuntu-latest
+    container: espressif/idf:v6.0.2
     strategy:
       fail-fast: false
       matrix:
         board:
-          - { env: "arduino-nesso-n1",                family: "ESP32-C6",}
-          - { env: "m5stack-cardputer",               family: "ESP32-S3",}
-          - { env: "m5stack-sticks3",                 family: "ESP32-S3",}
-          - { env: "m5stack-cplus2",                  family: "ESP32",}
-          - { env: "m5stack-cplus1_1",                family: "ESP32",}
-          - { env: "LAUNCHER_m5stack-cplus1_1",       family: "ESP32",}
-          - { env: "m5stack-core2",                   family: "ESP32",}
-          - { env: "m5stack-core16mb",                family: "ESP32",}
-          - { env: "m5stack-core4mb",                 family: "ESP32",}
-          - { env: "m5stack-cores3",                  family: "ESP32-S3",}
-          - { env: "m5stack-dinmeter",                family: "ESP32-S3",}
-          - { env: "esp32-s3-devkitc-1",              family: "ESP32-S3",}
-          - { env: "esp32-s3-devkitc-1-psram",        family: "ESP32-S3",}
-          - { env: "esp32-c5",                        family: "ESP32-C5",}
-          - { env: "esp32-c5-tft",                    family: "ESP32-C5",}
-          - { env: "nm-cyd-c5",                       family: "ESP32-C5",}
-          - { env: "CYD-2432S028",                    family: "ESP32",}
-          - { env: "CYD-2USB",                        family: "ESP32",}
-          - { env: "CYD-2432W328C",                   family: "ESP32",}
-          - { env: "CYD-2432W328C_2",                 family: "ESP32",}
-          - { env: "CYD-2432W328R-or-S024R",          family: "ESP32",}
-          - { env: "CYD-3248S035R",                   family: "ESP32",}
-          - { env: "CYD-3248S035C",                   family: "ESP32",}
-          - { env: "LAUNCHER_CYD-2432W328R-or-S024R", family: "ESP32",}
-          - { env: "LAUNCHER_CYD-2432S028",           family: "ESP32",}
-          - { env: "LAUNCHER_CYD-2USB",               family: "ESP32",}
-          - { env: "LAUNCHER_CYD-2432W328C",          family: "ESP32",}
-          - { env: "LAUNCHER_CYD-3248S035R",          family: "ESP32",}
-          - { env: "LAUNCHER_CYD-3248S035C",          family: "ESP32",}
-          - { env: "lilygo-t-embed-cc1101",           family: "ESP32-S3",}
-          - { env: "lilygo-t-embed",                  family: "ESP32-S3",}
-          - { env: "lilygo-t-deck",                   family: "ESP32-S3",}
-          - { env: "lilygo-t-watch-s3",               family: "ESP32-S3",}
-          - { env: "lilygo-t-deck-pro",               family: "ESP32-S3",}
-          - { env: "lilygo-t-display-s3",             family: "ESP32-S3",}
-          - { env: "lilygo-t-display-s3-touch",       family: "ESP32-S3",}
-          - { env: "lilygo-t-display-s3-mmc",         family: "ESP32-S3",}
-          - { env: "lilygo-t-display-s3-touch-mmc",   family: "ESP32-S3",}
-          - { env: "lilygo-t-display-S3-pro",         family: "ESP32-S3",}
-          - { env: "lilygo-t-display-ttgo",           family: "ESP32",}
-          - { env: "lilygo-t-hmi",                    family: "ESP32-S3",}
-          - { env: "lilygo-t-lora-pager",             family: "ESP32-S3",}
-          - { env: "elecrow-24B",                     family: "ESP32",}
-          - { env: "elecrow-28B",                     family: "ESP32",}
-          - { env: "elecrow-advance-35-s3",           family: "ESP32-S3",}
-          - { env: "smoochiee-board",                 family: "ESP32-S3",}
-          - { env: "reaper",                          family: "ESP32-S3",}
-          - { env: "Phantom_S024R",                   family: "ESP32",}
-          - { env: "LAUNCHER_Phantom_S024R",          family: "ESP32",}
-          - { env: "Marauder-Mini",                   family: "ESP32",}
-          - { env: "LAUNCHER_Marauder-Mini",          family: "ESP32",}
-          - { env: "Awok-Mini",                       family: "ESP32",}
-          - { env: "Marauder-v7",                     family: "ESP32",}
-          - { env: "LAUNCHER_Marauder-v7",            family: "ESP32",}
-          - { env: "Marauder-V4-V6",                  family: "ESP32",}
-          - { env: "Marauder-v61",                    family: "ESP32",}
-          - { env: "LAUNCHER_Marauder-V4-V6",         family: "ESP32",}
-          - { env: "LAUNCHER_Marauder-v61",           family: "ESP32",}
-          - { env: "Awok-Touch",                      family: "ESP32",}
-          - { env: "WaveSentry-R1",                   family: "ESP32",}
-          - { env: "LAUNCHER_WaveSentry-R1",          family: "ESP32",}
-
+          - "m5stack-cardputer"
+          - "m5stack-cardputer-adv"
+          - "m5stack-cplus2"
+          - "m5stack-cplus1_1"
+          - "m5stack-core"
+          - "m5stack-core2"
+          - "m5stack-cores3"
+          - "m5stack-dinmeter"
+          - "m5stack-sticks3"
+          - "lilygo-t-embed-cc1101"
+          - "lilygo-t-embed"
+          - "lilygo-t-display-s3"
+          - "lilygo-t-display-ttgo"
+          - "xk404"
     steps:
       - uses: actions/checkout@v4
-
-      - id: build
-        name: setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-
-      - name: Install build deps (multilib)
+      - name: Build firmware
+        run: python3 tools/board.py ${{ matrix.board }} build
+      - name: Stage flash files
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends gcc-multilib libc6-dev-i386
-
-      - name: Cache pip
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}
-            ${{ runner.os }}-pip-
-
-      - name: Cache PlatformIO Framework
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.platformio
-          key: ${{ runner.os }}-platformio-${{ hashFiles('platformio.ini') }}
-          restore-keys: |
-            ${{ runner.os }}-platformio-${{ hashFiles('platformio.ini') }}
-            ${{ runner.os }}-platformio-
-
-      - name: PIO libraries cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            .pio/libdeps
-          key: ${{ runner.os }}-pio-${{ matrix.board.env }}-${{ hashFiles('platformio.ini') }}
-          restore-keys: |
-            ${{ runner.os }}-pio-${{ matrix.board.env }}-${{ hashFiles('platformio.ini') }}
-            ${{ runner.os }}-pio-${{ matrix.board.env }}-
-
-      - name: Install dependencies
-        run: |
-          pip install requests esptool intelhex
-          pip install platformio
-
-      - name: Prepare PlatformIO file
-        run: |
-
-          if [[ "${{ github.ref_type }}" == "tag" ]]; then
-            version=${{ github.ref_name }}
-            sed -i "s/-D ENABLE_RAM_LOGGING=1/;-D ENABLE_RAM_LOGGING=1'\"$version\"' ; /g" ./platformio.ini
-          else
-            version="${GITHUB_SHA::7}"
-          fi
-
-          sed -i "s/-DBRUCE_VERSION=/-DBRUCE_VERSION='\"$version\"' ; /g" ./platformio.ini
-          sed -i "s/-DGIT_COMMIT_HASH='\"Homebrew\"'/\!echo '-DGIT_COMMIT_HASH=\\\\\\\\\"'\$\(git describe --always --dirty)'\\\\\\\\\"'/g" ./platformio.ini
-
-          cat ./platformio.ini
-
-      - name: Run Compile
-        run: |
-          set -o pipefail
-          platformio run -e ${{ matrix.board.env }} | tee build-${{ matrix.board.env }}.log
-
-      - name: Build summary
-        run: |
-          if [[ -f build-${{ matrix.board.env }}.log ]]; then
-            echo "Last 75 lines of build-${{ matrix.board.env }}.log:"
-            tail -n 75 build-${{ matrix.board.env }}.log
-          else
-            echo "Build log not found; nothing to show."
-          fi
-
-      - name: Upload ${{ matrix.board.env }}
+          mkdir release-assets
+          cp build-board/${{ matrix.board }}/BruceIDF.bin release-assets/BruceIDF-${{ matrix.board }}.bin
+          cp build-board/${{ matrix.board }}/bootloader/bootloader.bin release-assets/BruceIDF-${{ matrix.board }}-bootloader.bin
+          cp build-board/${{ matrix.board }}/partition_table/partition-table.bin release-assets/BruceIDF-${{ matrix.board }}-partition-table.bin
+          cp build-board/${{ matrix.board }}/flasher_args.json release-assets/BruceIDF-${{ matrix.board }}-flasher_args.json
+      - name: Upload ${{ matrix.board }} firmware
         uses: actions/upload-artifact@v4
         with:
-          name: Bruce-${{ matrix.board.env }}
-          path: Bruce-*.*
-          retention-days: 1
+          name: BruceIDF-${{ matrix.board }}
+          path: release-assets/
+          retention-days: 5
           if-no-files-found: error
 
-  post_compile_steps:
-    name: Update Placeholders
+  native_packages:
+    name: Build native apps and modules
+    runs-on: ubuntu-latest
+    container: espressif/idf:v6.0.2
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build external application ELFs
+        run: python3 native_apps/tools/build_apps.py --target elf --idf-target esp32s3
+      - name: Build module ELFs
+        run: python3 native_apps/tools/build_modules.py --target elf --idf-target esp32s3
+      - name: Build WASM modules
+        run: python3 native_apps/tools/build_modules.py --target wasm
+      - name: Stage native packages
+        run: |
+          mkdir release-assets
+          cp native_apps/examples/*_esp32s3.elf release-assets/
+          cp native_apps/build_modules/*.elf release-assets/
+          cp native_apps/build_modules/*.wasm release-assets/
+      - name: Upload native packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: BruceIDF-native-packages
+          path: release-assets/
+          retention-days: 5
+          if-no-files-found: error
+
+  rolling_releases:
+    name: Update rolling releases
     runs-on: ubuntu-latest
     environment: github_release
-    needs: compile_sketch
-    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') || github.ref_type == 'tag'
+    needs: [firmware, native_packages]
     steps:
-      - name: Download all artifacts
+      - name: Download build assets
         uses: actions/download-artifact@v4
         with:
-          pattern: '*'
+          pattern: BruceIDF-*
           merge-multiple: true
           path: artifacts
-
-      - name: Ensure releases exist and get IDs
-        id: get_release
+      - name: Ensure rolling releases exist
+        id: releases
         uses: actions/github-script@v7
         with:
           script: |
-            const ensureByTag = async (tag, prerelease=true) => {
+            const ensure = async (tag) => {
               try {
-                const { data } = await github.rest.repos.getReleaseByTag({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  tag
-                });
-                return data.id;
-              } catch (e) {
-                if (e.status !== 404) throw e;
-                const { data } = await github.rest.repos.createRelease({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  tag_name: tag,
-                  name: tag,
-                  prerelease
-                });
-                return data.id;
+                return (await github.rest.repos.getReleaseByTag({ owner: context.repo.owner, repo: context.repo.repo, tag })).data.id;
+              } catch (error) {
+                if (error.status !== 404) throw error;
+                return (await github.rest.repos.createRelease({ owner: context.repo.owner, repo: context.repo.repo, tag_name: tag, name: tag, prerelease: true })).data.id;
               }
             };
-
-            const betaId = await ensureByTag('betaRelease');
-            const lastId = await ensureByTag('lastRelease');
-
-            core.setOutput('beta', String(betaId));
-            core.setOutput('last', String(lastId));
-
-      - name: Get current sha
-        id: get_sha
-        run: |
-          echo "GITHUB_SHA_SHORT=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
-
-      - name: Delete old betaRelease assets
-        uses: actions/github-script@v6
+            core.setOutput('beta', await ensure('betaRelease'));
+            core.setOutput('last', await ensure('lastRelease'));
+      - name: Replace beta assets
+        uses: actions/github-script@v7
         with:
           script: |
-            const release_id = ${{ steps.get_release.outputs.beta }};
-            const assets = await github.rest.repos.listReleaseAssets({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              release_id: release_id
-            });
-            for (const asset of assets.data) {
-              await github.rest.repos.deleteReleaseAsset({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                asset_id: asset.id
-              });
-            }
-
-      - name: Upload new betaRelease asset
+            const assets = await github.paginate(github.rest.repos.listReleaseAssets, { owner: context.repo.owner, repo: context.repo.repo, release_id: ${{ steps.releases.outputs.beta }} });
+            await Promise.all(assets.map(asset => github.rest.repos.deleteReleaseAsset({ owner: context.repo.owner, repo: context.repo.repo, asset_id: asset.id })));
+      - name: Upload beta assets
         uses: softprops/action-gh-release@v2
         with:
-          name: betaRelease commit (${{ steps.get_sha.outputs.GITHUB_SHA_SHORT }})
+          name: betaRelease commit (${{ github.sha }})
           tag_name: betaRelease
           prerelease: true
-          files: artifacts/**
-          fail_on_unmatched_files: false
           make_latest: false
-          generate_release_notes: false
-
-      - name: Delete old lastRelease assets
-        uses: actions/github-script@v6
+          files: artifacts/*
+      - name: Replace last-release assets
         if: github.ref_type == 'tag'
+        uses: actions/github-script@v7
         with:
           script: |
-            const release_id = ${{ steps.get_release.outputs.last }};
-            const assets = await github.rest.repos.listReleaseAssets({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              release_id: release_id
-            });
-            for (const asset of assets.data) {
-              await github.rest.repos.deleteReleaseAsset({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                asset_id: asset.id
-              });
-            }
-
-      - name: Upload new lastRelease asset
-        uses: softprops/action-gh-release@v2
+            const assets = await github.paginate(github.rest.repos.listReleaseAssets, { owner: context.repo.owner, repo: context.repo.repo, release_id: ${{ steps.releases.outputs.last }} });
+            await Promise.all(assets.map(asset => github.rest.repos.deleteReleaseAsset({ owner: context.repo.owner, repo: context.repo.repo, asset_id: asset.id })));
+      - name: Upload last-release assets
         if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
         with:
-          name: lastRelease commit (${{ steps.get_sha.outputs.GITHUB_SHA_SHORT }})
+          name: lastRelease commit (${{ github.sha }})
           tag_name: lastRelease
           prerelease: true
-          files: artifacts/**
-          fail_on_unmatched_files: false
           make_latest: false
-          generate_release_notes: false
+          files: artifacts/*
+      # Web-page deployment is intentionally disabled for this unofficial build.
+      # - run: gh workflow run .github/workflows/deploy.yml --ref WebPage
 
-      - name: Checkout main to trigger WebPage deploy
-        if: ${{ success() }}
-        uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 1
-
-      - name: Trigger WebPage deploy (workflow_dispatch)
-        if: ${{ success() }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh workflow list
-          gh workflow run .github/workflows/deploy.yml --ref WebPage
-
-  create_release:
+  release:
+    name: Create tagged release
     runs-on: ubuntu-latest
     environment: github_release
-    needs: [compile_sketch]
+    needs: [firmware, native_packages]
     if: github.ref_type == 'tag'
-    permissions:
-      contents: write
-      issues: write
     steps:
-      - id: bruce_version
-        name: Get Version
-        run: |
-          set -x
-
-          if [[ "${{ github.ref_type }}" == "tag" ]]; then
-            version=${{ github.ref_name }}
-          else
-            version="${GITHUB_SHA::7}"
-          fi
-
-          echo "version=${version}" > $GITHUB_OUTPUT
-      - uses: actions/download-artifact@v4
+      - name: Download build assets
+        uses: actions/download-artifact@v4
         with:
+          pattern: BruceIDF-*
           merge-multiple: true
-
-      - name: List all files
-        if: always()
-        run: |
-          set -x
-          pwd
-          ls -all
-          tree
-
-      - name: Create Release ${{ steps.bruce_version.outputs.version }}
-        uses: softprops/action-gh-release@v1
+          path: artifacts
+      - name: Publish ${{ github.ref_name }}
+        uses: softprops/action-gh-release@v2
         with:
-          name: Bruce Release ${{ steps.bruce_version.outputs.version }}
-          tag_name: ${{ steps.bruce_version.outputs.version }}
+          name: BruceIDF Release ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
           generate_release_notes: true
-          files: |
-            Bruce-*.bin
-
-      - name: Close "Fixed on Beta" issues
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ steps.bruce_version.outputs.version }}
-        run: |
-          set -x
-          gh issue list \
-            --repo "${{ github.repository }}" \
-            --label "Fixed on Beta" \
-            --state open \
-            --limit 500 \
-            --json number \
-            --jq '.[].number' | while read -r issue; do
-            [ -z "$issue" ] && continue
-            gh issue close "$issue" \
-              --repo "${{ github.repository }}" \
-              --comment "Fixed on ${VERSION}. Issue automatically closed after release"
-          done
+          files: artifacts/*
