@@ -88,6 +88,7 @@ static portMUX_TYPE s_init_mux = portMUX_INITIALIZER_UNLOCKED;
 
 static bool s_initialized;
 static bool s_ready;
+static bool s_layout_owned;
 
 static uint64_t s_flash_size;
 static uint64_t s_user_area_start; /* Sector-aligned, right after the last static partition. */
@@ -286,8 +287,9 @@ static bruce_result_t partition_manager__write_header(const partition_manager__s
     return BRUCE_OK;
 }
 
-static void
-partition_manager__fill_header(const partition_manager__table_t *table, partition_manager__stored_header_t *header) {
+static void partition_manager__fill_header(
+    const partition_manager__table_t *table, partition_manager__stored_header_t *header
+) {
     memset(header, 0, sizeof(*header));
     header->magic = PARTITION_MANAGER__MAGIC;
     header->version = PARTITION_MANAGER__VERSION;
@@ -296,8 +298,9 @@ partition_manager__fill_header(const partition_manager__table_t *table, partitio
         partition_manager__stored_entry_t *stored = &header->entries[i];
         strncpy(stored->label, table->entries[i].label, BRUCE_PARTITION_LABEL_MAX - 1);
         stored->kind = (uint8_t)table->entries[i].kind;
-        stored->flags =
-            partition_manager__format_pending(&table->entries[i]) ? PARTITION_MANAGER__FLAG_FORMAT_PENDING : 0;
+        stored->flags = partition_manager__format_pending(&table->entries[i])
+                            ? PARTITION_MANAGER__FLAG_FORMAT_PENDING
+                            : 0;
         stored->offset = (uint32_t)table->entries[i].offset;
         stored->size = (uint32_t)table->entries[i].size;
     }
@@ -320,7 +323,8 @@ static bool partition_manager__table_valid(const partition_manager__table_t *tab
         const partition_manager__entry_t *entry = &table->entries[i];
         if (!partition_manager__label_valid(entry->label)) return false;
         if (entry->size == 0 || entry->offset + entry->size > s_data_region_size) return false;
-        if ((entry->offset % SPI_FLASH_SEC_SIZE) != 0 || (entry->size % SPI_FLASH_SEC_SIZE) != 0) return false;
+        if ((entry->offset % SPI_FLASH_SEC_SIZE) != 0 || (entry->size % SPI_FLASH_SEC_SIZE) != 0)
+            return false;
         bool is_swap_kind = entry->kind == BRUCE_PARTITION_KIND_SWAP;
         if (is_swap_kind != (strcmp(entry->label, BRUCE_PARTITION_SWAP_LABEL) == 0)) return false;
         for (size_t j = i + 1; j < table->count; ++j) {
@@ -338,20 +342,31 @@ static bool partition_manager__table_valid(const partition_manager__table_t *tab
  * erases (swap) or reformats (littlefs) it right now. Only ever runs during
  * ensure_init_locked(), before storage__init() mounts anything, so this is
  * the one place a create/delete/format actually takes effect on flash. */
-static void
-partition_manager__register_and_apply(partition_manager__entry_t *entry, bool format_pending, bool *out_applied) {
+static void partition_manager__register_and_apply(
+    partition_manager__entry_t *entry, bool format_pending, bool *out_applied
+) {
     uint64_t absolute_offset = s_user_area_start + entry->offset;
     const esp_partition_t *partition = NULL;
     esp_err_t err;
     if (entry->kind == BRUCE_PARTITION_KIND_SWAP) {
         err = esp_partition_register_external(
-            NULL, absolute_offset, (size_t)entry->size, BRUCE_PARTITION_SWAP_LABEL,
-            PARTITION_MANAGER__SWAP_TYPE, PARTITION_MANAGER__SWAP_SUBTYPE, &partition
+            NULL,
+            absolute_offset,
+            (size_t)entry->size,
+            BRUCE_PARTITION_SWAP_LABEL,
+            PARTITION_MANAGER__SWAP_TYPE,
+            PARTITION_MANAGER__SWAP_SUBTYPE,
+            &partition
         );
     } else {
         err = esp_partition_register_external(
-            NULL, absolute_offset, (size_t)entry->size, entry->label, ESP_PARTITION_TYPE_DATA,
-            ESP_PARTITION_SUBTYPE_DATA_LITTLEFS, &partition
+            NULL,
+            absolute_offset,
+            (size_t)entry->size,
+            entry->label,
+            ESP_PARTITION_TYPE_DATA,
+            ESP_PARTITION_SUBTYPE_DATA_LITTLEFS,
+            &partition
         );
     }
     if (err != ESP_OK) {
@@ -408,8 +423,13 @@ static bruce_result_t partition_manager__ensure_init_locked(void) {
     s_data_region_size = s_ptable_offset - s_user_area_start;
 
     esp_err_t ptable_err = esp_partition_register_external(
-        NULL, s_ptable_offset, SPI_FLASH_SEC_SIZE, PARTITION_MANAGER__PTABLE_LABEL,
-        PARTITION_MANAGER__PTABLE_TYPE, PARTITION_MANAGER__PTABLE_SUBTYPE, &s_ptable_partition
+        NULL,
+        s_ptable_offset,
+        SPI_FLASH_SEC_SIZE,
+        PARTITION_MANAGER__PTABLE_LABEL,
+        PARTITION_MANAGER__PTABLE_TYPE,
+        PARTITION_MANAGER__PTABLE_SUBTYPE,
+        &s_ptable_partition
     );
     if (ptable_err != ESP_OK) {
         ESP_LOGE(TAG, "could not reserve the partition table sector: %s", esp_err_to_name(ptable_err));
@@ -446,6 +466,7 @@ static bruce_result_t partition_manager__ensure_init_locked(void) {
         memset(format_pending, 0, sizeof(format_pending));
         partition_manager__default_table(&s_boot);
     }
+    s_layout_owned = have_table;
 
     bool applied = false;
     for (size_t i = 0; i < s_boot.count; ++i) {
@@ -473,12 +494,30 @@ static bruce_result_t partition_manager__ensure_init_locked(void) {
 /* Core-private entry point (storage__init())                                */
 /* ------------------------------------------------------------------------ */
 
-bruce_result_t partition_manager__init_for_storage(const esp_partition_t **out_root_littlefs) {
-    if (out_root_littlefs == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+bruce_result_t
+partition_manager__init_for_storage(const esp_partition_t **out_root_littlefs, bool *out_layout_owned) {
+    if (out_root_littlefs == NULL || out_layout_owned == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     *out_root_littlefs = NULL;
+    *out_layout_owned = false;
     partition_manager__lock();
     bruce_result_t result = partition_manager__ensure_init_locked();
-    if (result == BRUCE_OK) *out_root_littlefs = s_root_partition;
+    if (result == BRUCE_OK) {
+        *out_root_littlefs = s_root_partition;
+        *out_layout_owned = s_layout_owned;
+    }
+    partition_manager__unlock();
+    return result;
+}
+
+bruce_result_t partition_manager__claim_layout(void) {
+    partition_manager__lock();
+    bruce_result_t result = partition_manager__ensure_init_locked();
+    if (result == BRUCE_OK && !s_layout_owned) {
+        partition_manager__stored_header_t header;
+        partition_manager__fill_header(&s_boot, &header);
+        result = partition_manager__write_header(&header);
+        if (result == BRUCE_OK) s_layout_owned = true;
+    }
     partition_manager__unlock();
     return result;
 }
@@ -491,8 +530,8 @@ bruce_result_t partition_manager__init_for_storage(const esp_partition_t **out_r
  * offset. Counts what it could not fit, so a too-small buffer still reports
  * the real total. */
 static void partition_manager__emit(
-    bruce_partition_entry_t *entries, size_t capacity, size_t *count, const partition_manager__entry_t *source,
-    bruce_partition_state_t state
+    bruce_partition_entry_t *entries, size_t capacity, size_t *count,
+    const partition_manager__entry_t *source, bruce_partition_state_t state
 ) {
     size_t index = *count;
     (*count)++;
@@ -532,7 +571,9 @@ static bruce_result_t partition_manager__list_locked(
     if (diff_against_boot) {
         for (size_t i = 0; i < s_boot.count; ++i) {
             if (partition_manager__find(table, s_boot.entries[i].label) >= 0) continue;
-            partition_manager__emit(entries, capacity, &count, &s_boot.entries[i], BRUCE_PARTITION_STATE_DELETED);
+            partition_manager__emit(
+                entries, capacity, &count, &s_boot.entries[i], BRUCE_PARTITION_STATE_DELETED
+            );
         }
     }
     *out_count = count;
@@ -544,7 +585,8 @@ partition_manager__list_current(bruce_partition_entry_t *entries, size_t capacit
     if (out_count == NULL || (entries == NULL && capacity != 0)) return BRUCE_ERR_INVALID_ARGUMENT;
     partition_manager__lock();
     bruce_result_t result = partition_manager__ensure_init_locked();
-    if (result == BRUCE_OK) result = partition_manager__list_locked(&s_boot, false, entries, capacity, out_count);
+    if (result == BRUCE_OK)
+        result = partition_manager__list_locked(&s_boot, false, entries, capacity, out_count);
     partition_manager__unlock();
     return result;
 }
@@ -596,8 +638,10 @@ partition_manager__stage_create(const char *label, bruce_partition_kind_t kind, 
 
     partition_manager__lock();
     bruce_result_t result = partition_manager__ensure_init_locked();
-    if (result == BRUCE_OK && s_working.count >= PARTITION_MANAGER__MAX_ENTRIES) result = BRUCE_ERR_RESOURCE_LIMIT;
-    if (result == BRUCE_OK && partition_manager__find(&s_working, label) >= 0) result = BRUCE_ERR_ALREADY_EXISTS;
+    if (result == BRUCE_OK && s_working.count >= PARTITION_MANAGER__MAX_ENTRIES)
+        result = BRUCE_ERR_RESOURCE_LIMIT;
+    if (result == BRUCE_OK && partition_manager__find(&s_working, label) >= 0)
+        result = BRUCE_ERR_ALREADY_EXISTS;
     if (result == BRUCE_OK) {
         partition_manager__span_search_t search = {.wanted = partition_manager__sector_align_up(size_bytes)};
         partition_manager__each_free_span(&s_working, partition_manager__span_visitor, &search);
@@ -633,8 +677,7 @@ bruce_result_t partition_manager__stage_delete(const char *label) {
         size_t tail = s_working.count - (size_t)index - 1;
         if (tail > 0) {
             memmove(
-                &s_working.entries[index], &s_working.entries[index + 1],
-                tail * sizeof(s_working.entries[0])
+                &s_working.entries[index], &s_working.entries[index + 1], tail * sizeof(s_working.entries[0])
             );
         }
         s_working.count--;

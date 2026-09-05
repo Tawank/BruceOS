@@ -121,7 +121,8 @@ void *memory_rtc__alloc(size_t size) {
         if (!chunk->used && chunk->size >= size) {
             uint32_t remaining = chunk->size - (uint32_t)size;
             if (remaining >= sizeof(memory_rtc__chunk_t) + MEMORY_RTC__MIN_SPLIT) {
-                memory_rtc__chunk_t *split = (memory_rtc__chunk_t *)(cursor + sizeof(memory_rtc__chunk_t) + size);
+                memory_rtc__chunk_t *split =
+                    (memory_rtc__chunk_t *)(cursor + sizeof(memory_rtc__chunk_t) + size);
                 split->size = remaining - (uint32_t)sizeof(memory_rtc__chunk_t);
                 split->used = 0;
                 chunk->size = (uint32_t)size;

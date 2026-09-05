@@ -115,7 +115,8 @@ static esp_err_t storage__mount_internal(void) {
      * space into a "swap" partition, additional labeled littlefs volumes,
      * etc. Either way it hands back the entry labeled "littlefs" already
      * registered as an esp_partition_t, ready to mount exactly as before. */
-    if (partition_manager__init_for_storage(&s_littlefs_partition) != BRUCE_OK ||
+    bool layout_owned = false;
+    if (partition_manager__init_for_storage(&s_littlefs_partition, &layout_owned) != BRUCE_OK ||
         s_littlefs_partition == NULL) {
         return ESP_FAIL;
     }
@@ -135,8 +136,8 @@ static esp_err_t storage__mount_internal(void) {
         .grow_on_mount = true,
     };
     esp_err_t err = esp_vfs_littlefs_register(&config);
-    if (err != ESP_OK && storage__littlefs_metadata_erased(s_littlefs_partition)) {
-        ESP_LOGI(TAG, "formatting empty internal storage");
+    if (err != ESP_OK && (storage__littlefs_metadata_erased(s_littlefs_partition) || !layout_owned)) {
+        ESP_LOGW(TAG, "formatting unclaimed internal storage after mount failure");
         err = esp_littlefs_format_partition(s_littlefs_partition);
         if (err == ESP_OK) err = esp_vfs_littlefs_register(&config);
     }
@@ -147,6 +148,9 @@ static esp_err_t storage__mount_internal(void) {
             (size_t)s_littlefs_partition->address,
             s_littlefs_partition->size
         );
+        if (partition_manager__claim_layout() != BRUCE_OK) {
+            ESP_LOGW(TAG, "could not mark internal storage as Bruce-owned");
+        }
     }
     return err;
 }
@@ -465,7 +469,7 @@ bool storage__get_sd_capacity(uint64_t *out_size) {
 bool storage__is_internal_partition_mounted(const char *label) {
     storage__lock();
     bool mounted = (s_ready && s_littlefs_partition != NULL && label != NULL &&
-                     strcmp(s_littlefs_partition->label, label) == 0) ||
+                    strcmp(s_littlefs_partition->label, label) == 0) ||
                    storage__extra_mount_find_by_label_locked(label) >= 0;
     storage__unlock();
     return mounted;
@@ -501,9 +505,9 @@ bruce_result_t storage__mount_partition(const char *label, const char *mount_poi
         return BRUCE_ERR_INVALID_STATE;
     }
     bool label_taken = (s_littlefs_partition != NULL && strcmp(s_littlefs_partition->label, label) == 0) ||
-                        storage__extra_mount_find_by_label_locked(label) >= 0;
+                       storage__extra_mount_find_by_label_locked(label) >= 0;
     bool point_taken = strcmp(mount_point, "/") == 0 || storage__is_sd_path(mount_point) ||
-                        storage__extra_mount_find_by_point_locked(mount_point) >= 0;
+                       storage__extra_mount_find_by_point_locked(mount_point) >= 0;
     if (label_taken || point_taken) {
         storage__unlock();
         return BRUCE_ERR_ALREADY_EXISTS;
