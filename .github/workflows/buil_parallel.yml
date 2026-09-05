@@ -92,6 +92,8 @@ jobs:
     container: espressif/idf:v6.0.2
     steps:
       - uses: actions/checkout@v4
+      - name: Install WASM compiler
+        run: apt-get update && apt-get install -y --no-install-recommends clang lld
       - name: Build external application ELFs
         run: source "$IDF_PATH/export.sh" && python3 native_apps/tools/build_apps.py --target elf --idf-target esp32s3
       - name: Build module ELFs
