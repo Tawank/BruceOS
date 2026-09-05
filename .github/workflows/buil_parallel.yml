@@ -38,6 +38,9 @@ defaults:
   run:
     shell: bash
 
+env:
+  IDF_COMPONENT_CACHE_PATH: /tmp/idf-component-cache
+
 jobs:
   firmware:
     name: Build ${{ matrix.board }}
