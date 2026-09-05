@@ -129,24 +129,24 @@ extern "C" int app_main(int argc, char **argv) {
     // createStaticGeometryObjects()'s comment in sokoban_render.hpp for
     // why level transitions never delete/reallocate any of these.
     //
-    // floor/goal/wall/player/box are ShadedMaterial triples (top/lit/shadow
-    // tones baked from one base colour, sokoban_geometry.hpp) so their
-    // boxes read as lit from one fake-sun direction instead of flat;
-    // beak/accent stay single flat Materials -- too small (eyes, feet,
-    // crate straps) for directional shading to read.
-    ShadedMaterial floorMat, goalMat, wallMat, playerMat, boxMat[kMaxBoxes];
+    // floor/goal/wall/player/box/beak are ShadedMaterial triples (top/lit/
+    // shadow tones baked from one base colour, sokoban_geometry.hpp) so
+    // they read as lit from one fake-sun direction instead of flat;
+    // accent stays a single flat Material -- too small (eyes, feet, crate
+    // straps) for directional shading to read.
+    ShadedMaterial floorMat, goalMat, wallMat, playerMat, beakMat, boxMat[kMaxBoxes];
     bool matsOk = makeShadedMaterial(floorMat, kFloorColor);
     matsOk &= makeShadedMaterial(goalMat, kGoalColor);
     matsOk &= makeShadedMaterial(wallMat, kWallColor);
     matsOk &= makeShadedMaterial(playerMat, kPlayerColor);
+    matsOk &= makeShadedMaterial(beakMat, kBeakColor);
     for (int i = 0; i < kMaxBoxes; i++) matsOk &= makeShadedMaterial(boxMat[i], kBoxColor);
-    Material *beakMat = new Material(kBeakColor);
     Material *accentMat = new Material(kAccentColor); // eyes, feet, crate straps
 
     // operator new returns NULL on failure here instead of throwing (see
     // sokoban_render.hpp), and nothing downstream checks that -- check it
     // ourselves rather than let a NULL Material* become a wild write.
-    if (!matsOk || !beakMat || !accentMat) {
+    if (!matsOk || !accentMat) {
         printf("game3d: material allocation failed\n");
         logHeap("material allocation failed");
         delete[] framebuffer;
@@ -308,7 +308,7 @@ extern "C" int app_main(int argc, char **argv) {
     deleteShadedMaterial(goalMat);
     deleteShadedMaterial(wallMat);
     deleteShadedMaterial(playerMat);
-    delete beakMat;
+    deleteShadedMaterial(beakMat);
     delete accentMat;
     for (int i = 0; i < kMaxBoxes; i++) deleteShadedMaterial(boxMat[i]);
     delete[] framebuffer;

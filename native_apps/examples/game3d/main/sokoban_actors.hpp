@@ -87,8 +87,12 @@ inline void createDynamicObjects(Scene &scene, const ShadedMaterial &playerMat, 
 // this is only called when facing actually changes. Beak/eyes swap their
 // wide axis with facing, so the beak always reads as wide-across,
 // thin-along-travel no matter which of the 4 axis-aligned directions the
-// player is facing.
-inline void rebuildFaceGeometry(Object *faceObj, Material *beakMat, Material *eyeMat, int facingDr, int facingDc) {
+// player is facing. beakMat is direction-shaded like the body (fake-sun,
+// sokoban_geometry.hpp) -- it stays axis-aligned in world space regardless
+// of facing, so the same top/lit/shadow tones apply correctly either way;
+// eyeMat stays flat (too small for the shading to read).
+inline void rebuildFaceGeometry(Object *faceObj, const ShadedMaterial &beakMat, Material *eyeMat, int facingDr,
+                                 int facingDc) {
     faceObj->vertices.clear();
     faceObj->triangles.clear();
     faceObj->vertices.reserve(kFaceTris * 2);
@@ -97,7 +101,8 @@ inline void rebuildFaceGeometry(Object *faceObj, Material *beakMat, Material *ey
     int32_t bx = facingDc * kBeakOffset, bz = facingDr * kBeakOffset;
     int32_t beakHw = facingDc != 0 ? kBeakLen / 2 : kBeakWidth / 2;
     int32_t beakHd = facingDc != 0 ? kBeakWidth / 2 : kBeakLen / 2;
-    addBoxFaces(faceObj, bx, kBeakY, bz, beakHw, kBeakH / 2, beakHd, beakMat, /*includeBottom=*/false);
+    addBoxFaces(faceObj, bx, kBeakY, bz, beakHw, kBeakH / 2, beakHd, beakMat.top, beakMat.lit, beakMat.shadow,
+                /*includeBottom=*/false);
 
     int32_t ex = facingDc * kEyeForward, ez = facingDr * kEyeForward;
     constexpr int32_t eh = kEyeSize / 2;
@@ -114,8 +119,8 @@ inline void rebuildFaceGeometry(Object *faceObj, Material *beakMat, Material *ey
 // Snaps player/face/box visuals straight to their logical grid cells (no
 // animation); box slots beyond boxCount are disabled, not repositioned.
 inline void applyLevelToActors(const GameState &gs, Object *playerObj, Object *faceObj, Object *boxObj[],
-                                ShadedMaterial boxMat[], Material *beakMat, Material *eyeMat, int facingDr,
-                                int facingDc) {
+                                ShadedMaterial boxMat[], const ShadedMaterial &beakMat, Material *eyeMat,
+                                int facingDr, int facingDc) {
     int32_t px = cellWorldX(gs.playerC, gs.cols);
     int32_t pz = cellWorldZ(gs.playerR, gs.rows);
     constexpr int32_t py = kPlayerH / 2;
