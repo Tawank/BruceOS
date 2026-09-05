@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 
 #include "core_sdk/app_runner.h"
 #include "core_sdk/dialog.h"
@@ -11,6 +12,8 @@
 #include "core_sdk/filetype.h"
 #include "core_sdk/input.h"
 #include "core_sdk/launcher.h"
+#include "core_sdk/manifest.h"
+#include "core_sdk/memory.h"
 #include "core_sdk/process.h"
 #include "core_sdk/runtime.h"
 #include "core_sdk/stdio.h"
@@ -103,6 +106,49 @@ void filemanager__show_error(const char *action, bruce_result_t result) {
     (void)dialog__message(BRUCE_DIALOG_ERROR, "Apps", message);
 }
 
+static bool filemanager__has_extension(const char *name, const char *extension) {
+    size_t name_length = strlen(name);
+    size_t extension_length = strlen(extension);
+    return name_length > extension_length &&
+           strcasecmp(name + name_length - extension_length, extension) == 0;
+}
+
+/* bruce_dialog_render_params_t.icon_for_path-shaped (core_sdk/dialog.h),
+ * wired into dialog__pick_file_ex() below in filemanager_pathicons__icon_
+ * for_path()'s place. A configured "pathicons" override for the exact path
+ * still wins first; failing that, an .elf/.wasm/.js file gets the icon its
+ * own manifest declares via "icon:<name>" (core_sdk/manifest.h's
+ * app_icon_name) -- the same icon apps_app_main() shows for it in the Apps
+ * browser -- so the same app looks the same whether it's launched from
+ * there or browsed to here. Falls through to false (the picker's usual
+ * "folder"/per-extension default, see dialog.c) for a directory, a file
+ * with no recognized app extension, or an app file whose manifest has no
+ * icon (missing entirely, or the base64 form -- not renderable here, see
+ * manifest.h) or fails to parse. */
+static bool filemanager__icon_for_path(
+    const char *path, bool is_directory, char *out_icon, size_t out_icon_size, void *context
+) {
+    if (filemanager_pathicons__icon_for_path(path, is_directory, out_icon, out_icon_size, context)) {
+        return true;
+    }
+    if (is_directory) return false;
+
+    bruce_app_inspection_t *inspection;
+    if (filemanager__has_extension(path, ".js")) {
+        inspection = manifest__inspect_javascript(path);
+    } else if (filemanager__has_extension(path, ".wasm")) {
+        inspection = manifest__inspect_wasm(path);
+    } else if (filemanager__has_extension(path, ".elf")) {
+        inspection = manifest__inspect_elf(path);
+    } else {
+        return false;
+    }
+    bool has_icon = inspection != NULL && inspection->manifest.app_icon_name[0] != '\0';
+    if (has_icon) snprintf(out_icon, out_icon_size, "%s", inspection->manifest.app_icon_name);
+    memory__free(inspection);
+    return has_icon;
+}
+
 int filemanager_app_main(int argc, char **argv) {
     if (argc > 1 && (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)) {
         stdio__printf("Browse and manage files.\n");
@@ -170,8 +216,10 @@ int filemanager_app_main(int argc, char **argv) {
     action_params.out_parent_entry = &parent_entry;
     /* Lets a configured "/config/filemanager.conf" "pathicons" entry (e.g.
      * "/Network") override the listing's default folder/per-extension icon
-     * for that exact path -- see filemanager_pathicons.h. */
-    action_params.icon_for_path = filemanager_pathicons__icon_for_path;
+     * for that exact path -- see filemanager_pathicons.h -- and, failing
+     * that, shows an .elf/.wasm/.js file's own manifest-declared icon, same
+     * as the Apps browser -- see filemanager__icon_for_path() above. */
+    action_params.icon_for_path = filemanager__icon_for_path;
     /* The last file/folder picked, re-passed as dialog__pick_file_ex()'s
      * starting point below: it browses that entry's directory with the
      * entry itself pre-selected, so Esc/"Back" out of the action menu lands
@@ -310,15 +358,15 @@ int filemanager_app_main(int argc, char **argv) {
         } else if (strcmp(action, "info") == 0) {
             result = filemanager__show_info(path);
         } else if (strcmp(action, "add_to_menu") == 0) {
-            /* Same icon this row is actually showing in the browser above:
-             * a configured pathicon override if one matches (see
-             * filemanager_pathicons.h), else the per-extension icon every
-             * other file listing falls back to -- launcher__add_menu_entry()
-             * (core_sdk/launcher.h) owns picking where and reporting the
-             * outcome, so this just hands it the file's name, icon, and
-             * path as the label/icon/command. */
+            /* Same icon this row is actually showing in the browser above
+             * (see filemanager__icon_for_path()): a configured pathicon
+             * override, else an app file's own manifest icon, else the
+             * per-extension icon every other file listing falls back to --
+             * launcher__add_menu_entry() (core_sdk/launcher.h) owns picking
+             * where and reporting the outcome, so this just hands it the
+             * file's name, icon, and path as the label/icon/command. */
             char icon[BRUCE_DIALOG_ICON_NAME_MAX];
-            bool has_icon = filemanager_pathicons__icon_for_path(path, false, icon, sizeof(icon), NULL);
+            bool has_icon = filemanager__icon_for_path(path, false, icon, sizeof(icon), NULL);
             result = launcher__add_menu_entry(
                 filemanager__basename(path), has_icon ? icon : app_runner__icon_for_path(path), path
             );
