@@ -132,8 +132,9 @@ static bool selftest__args_wifi_integration(void) {
     char *help_argv[] = {"wifi", "help", "connect"};
     char *missing_argv[] = {"wifi", "add", "ssid-only"};
     char *unknown_argv[] = {"wifi", "ap", "unknown"};
+    char *status_argv[] = {"wifi", "status"};
     return wifi_app_main(3, help_argv) == 0 && wifi_app_main(3, missing_argv) == -1 &&
-           wifi_app_main(3, unknown_argv) == -1;
+           wifi_app_main(3, unknown_argv) == -1 && wifi_app_main(2, status_argv) == 0;
 }
 
 bool selftest__run_args_case(void) {

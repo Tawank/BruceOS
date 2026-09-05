@@ -351,6 +351,26 @@ static int wifi_app_ap_info(void) {
     return 0;
 }
 
+static int wifi_app_status(void) {
+    if (wifi__is_connected()) {
+        const char *ssid = wifi__get_ssid();
+        const char *ip = wifi__get_ip();
+        const char *mac = wifi__get_mac();
+        stdio__printf(
+            "Wi-Fi: connected\nSSID: %s\nIP: %s\nMAC: %s\n", ssid != NULL ? ssid : "unknown",
+            ip != NULL ? ip : "unknown", mac != NULL ? mac : "unknown"
+        );
+    } else if (wifi__is_ap_running()) {
+        const char *ssid = wifi__get_ssid();
+        const char *ip = wifi__get_ip();
+        stdio__printf("Wi-Fi AP: running\nSSID: %s\nIP: %s\n", ssid != NULL ? ssid : "unknown",
+                      ip != NULL ? ip : "unknown");
+    } else {
+        stdio__printf("Wi-Fi: disconnected\n");
+    }
+    return 0;
+}
+
 static int wifi_app_add(ArgParser *parser) {
     char *ssid = ap_get_arg(parser, "ssid");
     char *password = ap_get_arg(parser, "password");
@@ -404,11 +424,12 @@ int wifi_app_main(int argc, char **argv) {
     ArgParser *ap = ap_new_cmd(root, "ap");
     ArgParser *scan = ap_new_cmd(root, "scan");
     ArgParser *connect = ap_new_cmd(root, "connect");
+    ArgParser *status = ap_new_cmd(root, "status");
     ArgParser *ap_start = ap != NULL ? ap_new_cmd(ap, "start") : NULL;
     ArgParser *ap_toggle = ap != NULL ? ap_new_cmd(ap, "toggle") : NULL;
     ArgParser *ap_info = ap != NULL ? ap_new_cmd(ap, "info") : NULL;
 
-    ArgParser *commands[] = {on, off, toggle, add, ap, scan, connect, ap_start, ap_toggle, ap_info};
+    ArgParser *commands[] = {on, off, toggle, add, ap, scan, connect, status, ap_start, ap_toggle, ap_info};
     for (size_t i = 0; i < sizeof(commands) / sizeof(commands[0]); ++i) {
         if (commands[i] == NULL) {
             ap_free(root);
@@ -430,6 +451,7 @@ int wifi_app_main(int argc, char **argv) {
     ap_set_helptext(ap_info, "Show access-point status and addresses.");
     ap_set_helptext(scan, "List nearby Wi-Fi networks (interactive picker in GUI mode).");
     ap_set_helptext(connect, "Connect saved credentials or provide a network and password.");
+    ap_set_helptext(status, "Show Wi-Fi station or access-point status.");
     ap_add_optional_arg(connect, "ssid", "Network name");
     ap_add_optional_arg(connect, "password", "Network password");
     ap_unknown_options_as_args(connect);
@@ -450,6 +472,7 @@ int wifi_app_main(int argc, char **argv) {
     else if (command == add) result = wifi_app_add(add);
     else if (command == scan) result = runtime__gui_requested() ? wifi_app__gui() : wifi_app_scan();
     else if (command == connect) result = wifi_app_connect(connect);
+    else if (command == status) result = wifi_app_status();
     else if (command == ap) {
         ArgParser *ap_command = ap_get_cmd_parser(ap);
         if (ap_command == ap_start) result = wifi_app_ap_start();

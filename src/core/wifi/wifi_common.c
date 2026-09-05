@@ -406,6 +406,8 @@ int wifi__scan(wifi__network_t *networks, size_t capacity) {
 bruce_result_t wifi__connect_known(void) {
     bruce_result_t result = permission__check(BRUCE_PERMISSION_WIFI);
     if (result != BRUCE_OK) return result;
+
+    if (wifi__is_connected()) return BRUCE_OK;
     wifi__network_t networks[16];
     int count = wifi__scan(networks, 16);
     if (count < 0) return (bruce_result_t)count;
