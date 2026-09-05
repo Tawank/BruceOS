@@ -136,22 +136,41 @@ static bruce_result_t bruce_launcher_menu_editor__entry_actions(
 }
 
 bruce_result_t bruce_launcher_menu_editor__run(void) {
-    bruce_launcher_menu_editor__path_t path = {.depth = 0};
-    bruce_launcher_menu_editor__move_t move = {.active = false};
+    /* Heap-allocated, not plain locals: together path and move are ~800
+     * bytes, and this function already runs deep under bruce_launcher's own
+     * default-stack process (bruce_launcher_app_main -> ...__config__run ->
+     * ...__config__gui -> here), itself several frames beneath whatever
+     * Core dialog/display rendering the choice list below descends into.
+     * That combination overflowed the task's stack the first time this
+     * screen shipped; see launcher__prompt_menu()'s comment (launcher.c) for
+     * the same fix applied to an earlier instance of this exact problem. */
+    bruce_launcher_menu_editor__path_t *path = memory__calloc(1, sizeof(*path));
+    bruce_launcher_menu_editor__move_t *move = memory__calloc(1, sizeof(*move));
+    if (path == NULL || move == NULL) {
+        memory__free(path);
+        memory__free(move);
+        return BRUCE_ERR_NO_MEMORY;
+    }
 
     for (;;) {
         const char *path_ptrs[BRUCE_LAUNCHER_TREE_MAX_DEPTH];
-        bruce_launcher_menu_editor__path_ptrs(&path, path_ptrs);
+        bruce_launcher_menu_editor__path_ptrs(path, path_ptrs);
 
         bruce_launcher_tree_entry_t *entries =
             memory__calloc(BRUCE_LAUNCHER_TREE_ENTRIES_MAX, sizeof(*entries));
-        if (entries == NULL) return BRUCE_ERR_NO_MEMORY;
-        size_t count = launcher__tree_list(path_ptrs, path.depth, entries, BRUCE_LAUNCHER_TREE_ENTRIES_MAX);
+        if (entries == NULL) {
+            memory__free(path);
+            memory__free(move);
+            return BRUCE_ERR_NO_MEMORY;
+        }
+        size_t count = launcher__tree_list(path_ptrs, path->depth, entries, BRUCE_LAUNCHER_TREE_ENTRIES_MAX);
 
         size_t capacity = count + 2 + 1; /* entries + up to two control rows + Back */
         bruce_dialog_choice_t *choices = memory__calloc(capacity, sizeof(*choices));
         if (choices == NULL) {
             memory__free(entries);
+            memory__free(path);
+            memory__free(move);
             return BRUCE_ERR_NO_MEMORY;
         }
         size_t n = 0;
@@ -165,7 +184,7 @@ bruce_result_t bruce_launcher_menu_editor__run(void) {
         size_t move_here_index = n;
         size_t add_command_index = n;
         size_t add_submenu_index = n;
-        if (move.active) {
+        if (move->active) {
             choices[n++] = (bruce_dialog_choice_t){.label = "Move here", .value = "move_here"};
         } else if (count < BRUCE_LAUNCHER_TREE_ENTRIES_MAX) {
             add_command_index = n;
@@ -177,9 +196,9 @@ bruce_result_t bruce_launcher_menu_editor__run(void) {
         choices[n++] = (bruce_dialog_choice_t){.label = "Back", .value = "back"};
 
         char title[BRUCE_LAUNCHER_ENTRY_LABEL_MAX + 16];
-        if (move.active) snprintf(title, sizeof(title), "Move \"%s\"", move.label);
-        else if (path.depth == 0) snprintf(title, sizeof(title), "Menu entries");
-        else snprintf(title, sizeof(title), "%s", path.labels[path.depth - 1]);
+        if (move->active) snprintf(title, sizeof(title), "Move \"%s\"", move->label);
+        else if (path->depth == 0) snprintf(title, sizeof(title), "Menu entries");
+        else snprintf(title, sizeof(title), "%s", path->labels[path->depth - 1]);
 
         size_t selected = 0;
         bruce_result_t result = dialog__choice_launcher(title, NULL, choices, n, &selected);
@@ -188,12 +207,16 @@ bruce_result_t bruce_launcher_menu_editor__run(void) {
         bool back = result == BRUCE_ERR_CANCELLED || (result == BRUCE_OK && selected == back_index);
         if (back) {
             memory__free(entries);
-            if (move.active && path.depth == 0) {
-                move.active = false;
+            if (move->active && path->depth == 0) {
+                move->active = false;
                 continue;
             }
-            if (path.depth == 0) return BRUCE_OK;
-            path.depth--;
+            if (path->depth == 0) {
+                memory__free(path);
+                memory__free(move);
+                return BRUCE_OK;
+            }
+            path->depth--;
             continue;
         }
         if (result != BRUCE_OK) {
@@ -201,12 +224,12 @@ bruce_result_t bruce_launcher_menu_editor__run(void) {
             continue;
         }
 
-        if (move.active && selected == move_here_index) {
+        if (move->active && selected == move_here_index) {
             const char *src_ptrs[BRUCE_LAUNCHER_TREE_MAX_DEPTH];
-            bruce_launcher_menu_editor__path_ptrs(&move.path, src_ptrs);
+            bruce_launcher_menu_editor__path_ptrs(&move->path, src_ptrs);
             bruce_result_t move_result =
-                launcher__tree_move_to(src_ptrs, move.path.depth, move.index, path_ptrs, path.depth);
-            move.active = false;
+                launcher__tree_move_to(src_ptrs, move->path.depth, move->index, path_ptrs, path->depth);
+            move->active = false;
             memory__free(entries);
             if (move_result == BRUCE_ERR_ALREADY_EXISTS) {
                 (void)dialog__message(BRUCE_DIALOG_ERROR, "Move", "An entry with that name already exists there");
@@ -215,53 +238,63 @@ bruce_result_t bruce_launcher_menu_editor__run(void) {
             }
             continue;
         }
-        if (!move.active && selected == add_command_index) {
-            bruce_result_t add_result = bruce_launcher_menu_editor__add_command(path_ptrs, path.depth);
+        if (!move->active && selected == add_command_index) {
+            bruce_result_t add_result = bruce_launcher_menu_editor__add_command(path_ptrs, path->depth);
             memory__free(entries);
             if (add_result == BRUCE_ERR_RESOURCE_LIMIT) {
                 (void)dialog__message(BRUCE_DIALOG_ERROR, "Add entry", "This menu is full");
             } else if (add_result != BRUCE_OK && add_result != BRUCE_ERR_CANCELLED) {
+                memory__free(path);
+                memory__free(move);
                 return add_result;
             }
             continue;
         }
-        if (!move.active && selected == add_submenu_index) {
-            bruce_result_t add_result = bruce_launcher_menu_editor__add_submenu(path_ptrs, path.depth);
+        if (!move->active && selected == add_submenu_index) {
+            bruce_result_t add_result = bruce_launcher_menu_editor__add_submenu(path_ptrs, path->depth);
             memory__free(entries);
             if (add_result == BRUCE_ERR_RESOURCE_LIMIT) {
                 (void)dialog__message(BRUCE_DIALOG_ERROR, "Add submenu", "This menu is full");
             } else if (add_result != BRUCE_OK && add_result != BRUCE_ERR_CANCELLED) {
+                memory__free(path);
+                memory__free(move);
                 return add_result;
             }
             continue;
         }
 
-        /* Otherwise an actual entry row was picked. */
+        /* Otherwise an actual entry row was picked. `entry` aliases straight
+         * into `entries` (freed once we're done with it below) rather than
+         * copying the whole ~200-byte struct onto this frame. */
         size_t index = selected;
-        bruce_launcher_tree_entry_t picked = entries[index];
-        if (picked.is_submenu) {
-            memory__free(entries);
-            if (path.depth < BRUCE_LAUNCHER_TREE_MAX_DEPTH) {
-                snprintf(path.labels[path.depth], BRUCE_LAUNCHER_ENTRY_LABEL_MAX, "%s", picked.label);
-                path.depth++;
+        const bruce_launcher_tree_entry_t *entry = &entries[index];
+        if (entry->is_submenu) {
+            if (path->depth < BRUCE_LAUNCHER_TREE_MAX_DEPTH) {
+                snprintf(path->labels[path->depth], BRUCE_LAUNCHER_ENTRY_LABEL_MAX, "%s", entry->label);
+                path->depth++;
             }
+            memory__free(entries);
             continue;
         }
-        if (move.active) {
+        if (move->active) {
             memory__free(entries);
             continue; /* only submenus are valid move destinations */
         }
 
         bool start_move = false;
         bruce_result_t action_result =
-            bruce_launcher_menu_editor__entry_actions(&path, index, &picked, count, &start_move);
+            bruce_launcher_menu_editor__entry_actions(path, index, entry, count, &start_move);
+        if (action_result == BRUCE_OK && start_move) {
+            move->active = true;
+            move->path = *path;
+            move->index = index;
+            snprintf(move->label, sizeof(move->label), "%s", entry->label);
+        }
         memory__free(entries);
-        if (action_result != BRUCE_OK) return action_result;
-        if (start_move) {
-            move.active = true;
-            move.path = path;
-            move.index = index;
-            snprintf(move.label, sizeof(move.label), "%s", picked.label);
+        if (action_result != BRUCE_OK) {
+            memory__free(path);
+            memory__free(move);
+            return action_result;
         }
     }
 }
