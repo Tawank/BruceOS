@@ -195,6 +195,20 @@ static bool bruce_launcher__write_default_config(void) {
     return result == BRUCE_OK && written == length;
 }
 
+/* A JSON command value starting with '/' is ambiguous: app_runner__run_command()
+ * (core/app_runner/app_runner.c) resolves a leading '/' word as a direct
+ * path launch, so it's a perfectly good command for one specific app/file,
+ * but this loader also uses a leading '/' to recognize a *directory* to
+ * auto-populate a submenu from (see bruce_launcher__discover_apps() below).
+ * Telling them apart here -- rather than always assuming "directory" --
+ * keeps a single file's path working as a plain launchable command instead
+ * of silently becoming a (likely empty, since storage__list() fails on a
+ * file) auto-discovery submenu. */
+static bool bruce_launcher__value_is_directory(const char *path) {
+    size_t count = 0;
+    return storage__list(path, NULL, 0, &count) == BRUCE_OK;
+}
+
 static int bruce_launcher__discover_apps(bruce_launcher_menu_t *menu, const char *path) {
     bruce_storage_entry_t *entries =
         (bruce_storage_entry_t *)memory__malloc(sizeof(*entries) * BRUCE_LAUNCHER_MAX_ENTRIES);
@@ -279,7 +293,7 @@ static size_t bruce_launcher__json_allocation_size(cJSON *root, bool include_bac
         child_count++;
 
         size_t child_size = 0;
-        if (is_command && child->valuestring[0] == '/') {
+        if (is_command && child->valuestring[0] == '/' && bruce_launcher__value_is_directory(child->valuestring)) {
             int capacity = bruce_launcher__discovered_menu_capacity(child->valuestring);
             /* Carry the preflight result on the temporary JSON node into arena construction. */
             child->valueint = capacity;
@@ -297,7 +311,7 @@ static bool bruce_launcher__parse_json_value(
     bruce_launcher_menu_arena_t *arena, bruce_launcher_menu_t *menu, const char *key, cJSON *value, int depth
 ) {
     if (cJSON_IsString(value) && value->valuestring != NULL) {
-        if (value->valuestring[0] != '/') {
+        if (value->valuestring[0] != '/' || !bruce_launcher__value_is_directory(value->valuestring)) {
             return bruce_launcher__menu_add_command(menu, key, value->valuestring);
         }
         bruce_launcher_menu_t *submenu = bruce_launcher__menu_create(arena, key, false, value->valueint);

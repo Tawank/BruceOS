@@ -6,6 +6,7 @@
 #include "cJSON.h"
 #include "core/storage/storage.h"
 #include "core_sdk/dialog.h"
+#include "core_sdk/memory.h"
 #include "launcher_internal.h"
 
 /* Mirrors modules/bruce_launcher/bruce_launcher_menu.c's own
@@ -120,12 +121,20 @@ bool launcher__menu_has_command(const char *menu_label, const char *command) {
 
 /* Prompts for one of `menu_labels[0..menu_count)` with dialog__choice(),
  * appending a synthetic "Cancel" row after them. Returns the chosen label's
- * index, or menu_count on cancel/a dialog failure -- callers treat that the
- * same way (abort without touching the config). */
+ * index, or menu_count on cancel/a dialog failure/an allocation failure --
+ * callers treat all three the same way (abort without touching the config).
+ *
+ * `choices` is heap-allocated rather than a BRUCE_LAUNCHER_MENU_LIST_MAX + 1
+ * local array: launcher__add_menu_entry() can run on whatever task called
+ * it (e.g. apps_app_main()'s long-press handler, on the "apps" task's small
+ * default stack -- see PROCESS__DEFAULT_STACK_BYTES in core/process/process.c),
+ * so this function's own frame has to stay small rather than assume a
+ * generous caller stack. */
 static size_t launcher__prompt_menu(
     const char *label, char menu_labels[][BRUCE_LAUNCHER_ENTRY_LABEL_MAX], size_t menu_count
 ) {
-    bruce_dialog_choice_t choices[BRUCE_LAUNCHER_MENU_LIST_MAX + 1];
+    bruce_dialog_choice_t *choices = memory__calloc(menu_count + 1, sizeof(*choices));
+    if (choices == NULL) return menu_count;
     for (size_t i = 0; i < menu_count; ++i) {
         choices[i] = (bruce_dialog_choice_t){.label = menu_labels[i], .value = menu_labels[i]};
     }
@@ -135,7 +144,10 @@ static size_t launcher__prompt_menu(
     snprintf(message, sizeof(message), "Add \"%s\" to:", label);
     size_t selected = 0;
     bruce_result_t result = dialog__choice("Launcher", message, choices, menu_count + 1, &selected);
-    return result == BRUCE_OK && strcmp(choices[selected].value, "cancel") != 0 ? selected : menu_count;
+    size_t chosen =
+        result == BRUCE_OK && strcmp(choices[selected].value, "cancel") != 0 ? selected : menu_count;
+    memory__free(choices);
+    return chosen;
 }
 
 /**
@@ -158,18 +170,30 @@ bruce_result_t launcher__add_menu_entry(const char *label, const char *icon_name
     cJSON *root = launcher__load_root();
     if (root == NULL) return BRUCE_ERR_NOT_FOUND;
 
-    char menu_labels[BRUCE_LAUNCHER_MENU_LIST_MAX][BRUCE_LAUNCHER_ENTRY_LABEL_MAX];
+    /* Heap-allocated, not a BRUCE_LAUNCHER_MENU_LIST_MAX local array (that's
+     * 33 * BRUCE_LAUNCHER_ENTRY_LABEL_MAX = 1584 bytes) -- see
+     * launcher__prompt_menu()'s comment on why this function's frame has to
+     * stay small regardless of the caller's own stack budget. */
+    char(*menu_labels)[BRUCE_LAUNCHER_ENTRY_LABEL_MAX] =
+        memory__calloc(BRUCE_LAUNCHER_MENU_LIST_MAX, sizeof(*menu_labels));
+    if (menu_labels == NULL) {
+        cJSON_Delete(root);
+        return BRUCE_ERR_NO_MEMORY;
+    }
     size_t menu_count = launcher__json_menu_labels(root, menu_labels, BRUCE_LAUNCHER_MENU_LIST_MAX);
 
     size_t chosen = 0;
     if (menu_count > 1) {
         chosen = launcher__prompt_menu(label, menu_labels, menu_count);
         if (chosen >= menu_count) {
+            memory__free(menu_labels);
             cJSON_Delete(root);
             return BRUCE_ERR_CANCELLED;
         }
     }
-    const char *menu_label = menu_labels[chosen];
+    char menu_label[BRUCE_LAUNCHER_ENTRY_LABEL_MAX];
+    snprintf(menu_label, sizeof(menu_label), "%s", menu_labels[chosen]);
+    memory__free(menu_labels);
 
     cJSON *menu = launcher__json_find_menu(root, menu_label);
     if (menu == NULL) {

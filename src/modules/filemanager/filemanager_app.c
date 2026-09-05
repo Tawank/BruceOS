@@ -10,6 +10,7 @@
 #include "core_sdk/ext_mem_loader.h"
 #include "core_sdk/filetype.h"
 #include "core_sdk/input.h"
+#include "core_sdk/launcher.h"
 #include "core_sdk/process.h"
 #include "core_sdk/runtime.h"
 #include "core_sdk/stdio.h"
@@ -110,15 +111,16 @@ int filemanager_app_main(int argc, char **argv) {
 
     bool gui = runtime__gui_requested();
     const bruce_dialog_choice_t actions[] = {
-        {.label = "Open",         .value = "open"  },
-        {.label = "Open with...", .value = "openw" },
-        {.label = "View",         .value = "view"  },
-        {.label = "Edit",         .value = "edit"  },
-        {.label = "Copy",         .value = "copy"  },
-        {.label = "Rename",       .value = "rename"},
-        {.label = "File info",    .value = "info"  },
-        {.label = "Delete",       .value = "delete"},
-        {.label = "Back",         .value = "back"  },
+        {.label = "Open",         .value = "open"       },
+        {.label = "Open with...", .value = "openw"      },
+        {.label = "View",         .value = "view"       },
+        {.label = "Edit",         .value = "edit"       },
+        {.label = "Copy",         .value = "copy"       },
+        {.label = "Rename",       .value = "rename"     },
+        {.label = "File info",    .value = "info"       },
+        {.label = "Add to menu",  .value = "add_to_menu"},
+        {.label = "Delete",       .value = "delete"     },
+        {.label = "Back",         .value = "back"       },
     };
     /* Long-pressing a folder row returns it here instead of descending into
      * it (see dialog__pick_file_ex()'s doc comment), so it gets this menu
@@ -307,6 +309,19 @@ int filemanager_app_main(int argc, char **argv) {
             if (result == BRUCE_OK) snprintf(last_path, sizeof(last_path), "%s", path);
         } else if (strcmp(action, "info") == 0) {
             result = filemanager__show_info(path);
+        } else if (strcmp(action, "add_to_menu") == 0) {
+            /* Same icon this row is actually showing in the browser above:
+             * a configured pathicon override if one matches (see
+             * filemanager_pathicons.h), else the per-extension icon every
+             * other file listing falls back to -- launcher__add_menu_entry()
+             * (core_sdk/launcher.h) owns picking where and reporting the
+             * outcome, so this just hands it the file's name, icon, and
+             * path as the label/icon/command. */
+            char icon[BRUCE_DIALOG_ICON_NAME_MAX];
+            bool has_icon = filemanager_pathicons__icon_for_path(path, false, icon, sizeof(icon), NULL);
+            result = launcher__add_menu_entry(
+                filemanager__basename(path), has_icon ? icon : app_runner__icon_for_path(path), path
+            );
         } else if (strcmp(action, "delete") == 0) {
             result = filemanager__delete_entry(path, "file");
         } else {
