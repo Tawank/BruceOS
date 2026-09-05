@@ -42,10 +42,10 @@
  * handful of bytes of its own in .rtc.data (RTC_DATA_ATTR/RTC_NOINIT_ATTR
  * users elsewhere in the tree/SDK), and claiming the full length leaves no
  * room for that, which fails at link time (confirmed: "region `rtc_slow_seg'
- * overflowed by 36 bytes" at exactly 8192u). 8064u leaves a margin well past
- * that 36 bytes for incidental growth on either side.
+ * overflowed by 36 bytes" at exactly 8192u). 8000u leaves room for ESP-IDF
+ * RTC sleep code and timer state, including a 32-byte margin with v6.0.2.
  */
-#define MEMORY_RTC__POOL_SIZE 8064u
+#define MEMORY_RTC__POOL_SIZE 8000u
 /* Minimum leftover worth splitting off into its own free chunk when an
  * allocation only partly fills the chunk it landed in - below this, the
  * request just takes the whole chunk instead of leaving a sliver too small
