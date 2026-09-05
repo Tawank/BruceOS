@@ -133,7 +133,7 @@ dependencies:
       type: git
     version: db4f0fc110766499f113136625d8de7517bac7e9
   wasm-micro-runtime:
-    component_hash: ef146278bacf349a0e4da3982d41b3e7904abe4e79a8f3b47099410680a52a53
+    component_hash: e8b8eb4e0e71e7bbcc6dd1b137a20c8e6c586a2aec287cff9a7282901346560f
     dependencies:
     - name: idf
       version: '>=4.4'
@@ -180,5 +180,5 @@ direct_dependencies:
 - wolfssl/wolfssh
 - wolfssl/wolfssl
 manifest_hash: a1d253a99df276d9c199645c762b630f7e78eae3abb6eb21a61fd70f097a9cc7
-target: esp32
+target: esp32s3
 version: 3.0.0
