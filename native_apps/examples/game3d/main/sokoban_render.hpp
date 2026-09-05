@@ -119,8 +119,8 @@ inline void reserveWorstCaseLevelGeometry(Object *floorObj, Object *wallObj) {
 // wall down past a side that just borders another floor tile. Capacity
 // was already reserved to the worst case at startup, so the reserve()
 // calls below just document intent.
-inline void rebuildLevelGeometry(const GameState &gs, Material *floorMat, Material *goalMat, Material *wallMat,
-                                  Object *floorObj, Object *wallObj) {
+inline void rebuildLevelGeometry(const GameState &gs, const ShadedMaterial &floorMat, const ShadedMaterial &goalMat,
+                                  const ShadedMaterial &wallMat, Object *floorObj, Object *wallObj) {
     int floorFlat, floorEdge, wallCells;
     countLevelCells(gs, floorFlat, floorEdge, wallCells);
 
@@ -155,7 +155,7 @@ inline void rebuildLevelGeometry(const GameState &gs, Material *floorMat, Materi
             if (run >= 2) {
                 int32_t x0 = cellWorldX(c, gs.cols) - wallHalf, x1 = cellWorldX(c + run - 1, gs.cols) + wallHalf;
                 addBoxFaces(wallObj, (x0 + x1) / 2, kWallH / 2, cellWorldZ(r, gs.rows), (x1 - x0) / 2, kWallH / 2,
-                            wallHalf, wallMat, /*includeBottom=*/false);
+                            wallHalf, wallMat.top, wallMat.lit, wallMat.shadow, /*includeBottom=*/false);
                 for (int i = 0; i < run; i++) consumed[r][c + i] = true;
             }
             c += run;
@@ -168,7 +168,7 @@ inline void rebuildLevelGeometry(const GameState &gs, Material *floorMat, Materi
             while (r + run < gs.rows && gs.cell[r + run][c] == CELL_WALL && !consumed[r + run][c]) run++;
             int32_t z0 = cellWorldZ(r, gs.rows) - wallHalf, z1 = cellWorldZ(r + run - 1, gs.rows) + wallHalf;
             addBoxFaces(wallObj, cellWorldX(c, gs.cols), kWallH / 2, (z0 + z1) / 2, wallHalf, kWallH / 2,
-                        (z1 - z0) / 2, wallMat, /*includeBottom=*/false);
+                        (z1 - z0) / 2, wallMat.top, wallMat.lit, wallMat.shadow, /*includeBottom=*/false);
             for (int i = 0; i < run; i++) consumed[r + i][c] = true;
             r += run;
         }
@@ -179,12 +179,13 @@ inline void rebuildLevelGeometry(const GameState &gs, Material *floorMat, Materi
             if (gs.cell[r][c] != CELL_FLOOR) continue;
             int32_t x = cellWorldX(c, gs.cols);
             int32_t z = cellWorldZ(r, gs.rows);
-            Material *mat = gs.goal[r][c] ? goalMat : floorMat;
+            const ShadedMaterial &mat = gs.goal[r][c] ? goalMat : floorMat;
             if (isIslandEdgeCell(gs, r, c)) {
-                addIslandRimFaces(floorObj, x, z, floorHalf, kIslandDepth, mat, isVoidCell(gs, r - 1, c),
-                                   isVoidCell(gs, r + 1, c), isVoidCell(gs, r, c + 1), isVoidCell(gs, r, c - 1));
+                addIslandRimFaces(floorObj, x, z, floorHalf, kIslandDepth, mat.top, mat.lit, mat.shadow,
+                                   isVoidCell(gs, r - 1, c), isVoidCell(gs, r + 1, c), isVoidCell(gs, r, c + 1),
+                                   isVoidCell(gs, r, c - 1));
             } else {
-                addTopQuad(floorObj, x, 0, z, floorHalf, floorHalf, mat);
+                addTopQuad(floorObj, x, 0, z, floorHalf, floorHalf, mat.top);
             }
         }
     }

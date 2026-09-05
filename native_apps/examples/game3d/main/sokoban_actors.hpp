@@ -39,12 +39,15 @@ constexpr int kFaceTris       = 30; // beak + 2 eyes
 constexpr int kCrateTris      = 24; // main box + 3 visible corner posts
 
 // Body cube plus two small fixed feet poking out past its bottom corners,
-// all reserve()d to their exact final size up front.
-inline Object *createPlayerBody(Scene &scene, Material *bodyMat, Material *footMat) {
+// all reserve()d to their exact final size up front. bodyMat is
+// direction-shaded (fake-sun, sokoban_geometry.hpp); footMat stays a
+// single flat colour -- feet are too small for the shading to read.
+inline Object *createPlayerBody(Scene &scene, const ShadedMaterial &bodyMat, Material *footMat) {
     Object *obj = new Object();
     obj->vertices.reserve(kPlayerBodyTris * 2);
     obj->triangles.reserve(kPlayerBodyTris);
-    addBoxFaces(obj, 0, 0, 0, kPlayerW / 2, kPlayerH / 2, kPlayerW / 2, bodyMat, /*includeBottom=*/false);
+    addBoxFaces(obj, 0, 0, 0, kPlayerW / 2, kPlayerH / 2, kPlayerW / 2, bodyMat.top, bodyMat.lit, bodyMat.shadow,
+                /*includeBottom=*/false);
     constexpr int32_t fh = kFootSize / 2;
     addBoxFaces(obj, kFootSpread, kFootY, 0, fh, fh, fh, footMat, /*includeBottom=*/false);
     addBoxFaces(obj, -kFootSpread, kFootY, 0, fh, fh, fh, footMat, /*includeBottom=*/false);
@@ -55,7 +58,7 @@ inline Object *createPlayerBody(Scene &scene, Material *bodyMat, Material *footM
 
 // One crate-textured box (addCrateFaces(), sokoban_geometry.hpp), reserve()d
 // to its exact final size up front.
-inline Object *createCrateObject(Scene &scene, Material *mat, Material *edgeMat) {
+inline Object *createCrateObject(Scene &scene, const ShadedMaterial &mat, Material *edgeMat) {
     Object *obj = new Object();
     obj->vertices.reserve(kCrateTris * 2);
     obj->triangles.reserve(kCrateTris);
@@ -69,8 +72,8 @@ inline Object *createCrateObject(Scene &scene, Material *mat, Material *edgeMat)
 // below), and kMaxBoxes crates -- created once up front; levels with fewer
 // boxes just disable the extra slots (see applyLevelToActors()) instead of
 // creating/destroying Objects per level.
-inline void createDynamicObjects(Scene &scene, Material *playerMat, Material *accentMat, Material *boxMat[],
-                                  Object *&playerObj, Object *&faceObj, Object *boxObj[]) {
+inline void createDynamicObjects(Scene &scene, const ShadedMaterial &playerMat, Material *accentMat,
+                                  ShadedMaterial boxMat[], Object *&playerObj, Object *&faceObj, Object *boxObj[]) {
     playerObj = createPlayerBody(scene, playerMat, accentMat);
     faceObj = new Object();
     faceObj->vertices.reserve(kFaceTris * 2);
@@ -111,7 +114,7 @@ inline void rebuildFaceGeometry(Object *faceObj, Material *beakMat, Material *ey
 // Snaps player/face/box visuals straight to their logical grid cells (no
 // animation); box slots beyond boxCount are disabled, not repositioned.
 inline void applyLevelToActors(const GameState &gs, Object *playerObj, Object *faceObj, Object *boxObj[],
-                                Material *boxMat[], Material *beakMat, Material *eyeMat, int facingDr,
+                                ShadedMaterial boxMat[], Material *beakMat, Material *eyeMat, int facingDr,
                                 int facingDc) {
     int32_t px = cellWorldX(gs.playerC, gs.cols);
     int32_t pz = cellWorldZ(gs.playerR, gs.rows);
@@ -127,7 +130,7 @@ inline void applyLevelToActors(const GameState &gs, Object *playerObj, Object *f
         }
         boxObj[i]->enabled = true;
         bool onGoal = gs.goal[gs.boxR[i]][gs.boxC[i]];
-        boxMat[i]->color = onGoal ? kBoxOnGoalColor : kBoxColor;
+        setShadedColor(boxMat[i], onGoal ? kBoxOnGoalColor : kBoxColor);
         int32_t bx = cellWorldX(gs.boxC[i], gs.cols);
         int32_t bz = cellWorldZ(gs.boxR[i], gs.rows);
         boxObj[i]->setPosition(bx, kBoxSize / 2, bz);

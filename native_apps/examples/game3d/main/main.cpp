@@ -128,20 +128,25 @@ extern "C" int app_main(int argc, char **argv) {
     // and reused for every level for the rest of the app's run -- see
     // createStaticGeometryObjects()'s comment in sokoban_render.hpp for
     // why level transitions never delete/reallocate any of these.
-    Material *floorMat = new Material(kFloorColor);
-    Material *goalMat = new Material(kGoalColor);
-    Material *wallMat = new Material(kWallColor);
-    Material *playerMat = new Material(kPlayerColor);
+    //
+    // floor/goal/wall/player/box are ShadedMaterial triples (top/lit/shadow
+    // tones baked from one base colour, sokoban_geometry.hpp) so their
+    // boxes read as lit from one fake-sun direction instead of flat;
+    // beak/accent stay single flat Materials -- too small (eyes, feet,
+    // crate straps) for directional shading to read.
+    ShadedMaterial floorMat, goalMat, wallMat, playerMat, boxMat[kMaxBoxes];
+    bool matsOk = makeShadedMaterial(floorMat, kFloorColor);
+    matsOk &= makeShadedMaterial(goalMat, kGoalColor);
+    matsOk &= makeShadedMaterial(wallMat, kWallColor);
+    matsOk &= makeShadedMaterial(playerMat, kPlayerColor);
+    for (int i = 0; i < kMaxBoxes; i++) matsOk &= makeShadedMaterial(boxMat[i], kBoxColor);
     Material *beakMat = new Material(kBeakColor);
     Material *accentMat = new Material(kAccentColor); // eyes, feet, crate straps
-    Material *boxMat[kMaxBoxes];
-    for (int i = 0; i < kMaxBoxes; i++) boxMat[i] = new Material(kBoxColor);
 
     // operator new returns NULL on failure here instead of throwing (see
     // sokoban_render.hpp), and nothing downstream checks that -- check it
     // ourselves rather than let a NULL Material* become a wild write.
-    if (!floorMat || !goalMat || !wallMat || !playerMat || !beakMat || !accentMat || !boxMat[0] || !boxMat[1] ||
-        !boxMat[2] || !boxMat[3]) {
+    if (!matsOk || !beakMat || !accentMat) {
         printf("game3d: material allocation failed\n");
         logHeap("material allocation failed");
         delete[] framebuffer;
@@ -241,7 +246,7 @@ extern "C" int app_main(int argc, char **argv) {
                     animBX1 = cellWorldX(gs.boxC[animBoxIdx], gs.cols);
                     animBZ1 = cellWorldZ(gs.boxR[animBoxIdx], gs.rows);
                     bool onGoal = gs.goal[gs.boxR[animBoxIdx]][gs.boxC[animBoxIdx]];
-                    boxMat[animBoxIdx]->color = onGoal ? kBoxOnGoalColor : kBoxColor;
+                    setShadedColor(boxMat[animBoxIdx], onGoal ? kBoxOnGoalColor : kBoxColor);
                 }
                 animActive = true;
                 animFrame = 0;
@@ -299,13 +304,13 @@ extern "C" int app_main(int argc, char **argv) {
     delete playerObj;
     delete faceObj;
     for (int i = 0; i < kMaxBoxes; i++) delete boxObj[i];
-    delete floorMat;
-    delete goalMat;
-    delete wallMat;
-    delete playerMat;
+    deleteShadedMaterial(floorMat);
+    deleteShadedMaterial(goalMat);
+    deleteShadedMaterial(wallMat);
+    deleteShadedMaterial(playerMat);
     delete beakMat;
     delete accentMat;
-    for (int i = 0; i < kMaxBoxes; i++) delete boxMat[i];
+    for (int i = 0; i < kMaxBoxes; i++) deleteShadedMaterial(boxMat[i]);
     delete[] framebuffer;
     printf("game3d exiting\n");
     return 0;
