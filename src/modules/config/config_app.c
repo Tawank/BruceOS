@@ -12,10 +12,31 @@
 #include "theme_presets.h"
 
 #include <ctype.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+
+/* Standard UTC offsets, ascending. Covers every whole-, half-, and
+ * quarter-hour offset actually in use so the timezone picker below can be a
+ * plain list instead of free-text entry. */
+static const float config_app__timezone_offsets[] = {
+    -12.0f, -11.0f, -10.0f, -9.5f, -9.0f, -8.0f, -7.0f, -6.0f, -5.0f, -4.5f, -4.0f,
+    -3.5f,  -3.0f,  -2.0f,  -1.0f, 0.0f,  1.0f,  2.0f,  3.0f,  3.5f,  4.0f,  4.5f,
+    5.0f,   5.5f,   5.75f,  6.0f,  6.5f,  7.0f,  8.0f,  8.75f, 9.0f,  9.5f,  10.0f,
+    10.5f,  11.0f,  12.0f,  12.75f, 13.0f, 14.0f,
+};
+#define CONFIG_APP__TIMEZONE_OFFSET_COUNT \
+    (sizeof(config_app__timezone_offsets) / sizeof(config_app__timezone_offsets[0]))
+
+static void config_app__format_utc_offset(float offset, char *out, size_t out_size) {
+    char sign = offset < 0.0f ? '-' : '+';
+    float abs_offset = offset < 0.0f ? -offset : offset;
+    int hours = (int)abs_offset;
+    int minutes = (int)((abs_offset - (float)hours) * 60.0f + 0.5f);
+    snprintf(out, out_size, "UTC%c%02d:%02d", sign, hours, minutes);
+}
 
 static int config_app__show_clock(void) {
     bool automatic = config__get_time_automatic_update_via_ntp();
@@ -110,17 +131,23 @@ static int config_app__clock_gui(void) {
         } else if (strcmp(action, "automatic") == 0) {
             (void)config__set_time_automatic_update_via_ntp(!automatic);
         } else if (strcmp(action, "timezone") == 0) {
-            char initial[16], entered[16];
-            snprintf(initial, sizeof(initial), "%.2f", timezone);
-            if (dialog__number_input(
-                    "Timezone", "UTC offset (-12 to +14)", initial, entered, sizeof(entered)
-                ) == BRUCE_OK) {
-                char *end = NULL;
-                float value = strtof(entered, &end);
-                if (end != entered && *end == '\0' && value >= -12.0f && value <= 14.0f)
-                    (void)config__set_time_timezone(value);
-                else (void)dialog__message(BRUCE_DIALOG_ERROR, "Timezone", "Offset must be from -12 to +14");
+            char tz_labels[CONFIG_APP__TIMEZONE_OFFSET_COUNT][16];
+            bruce_dialog_choice_t tz_choices[CONFIG_APP__TIMEZONE_OFFSET_COUNT];
+            size_t tz_selected = 0;
+            float best_diff = fabsf(config_app__timezone_offsets[0] - timezone);
+            for (size_t i = 0; i < CONFIG_APP__TIMEZONE_OFFSET_COUNT; i++) {
+                config_app__format_utc_offset(config_app__timezone_offsets[i], tz_labels[i], sizeof(tz_labels[i]));
+                tz_choices[i] = (bruce_dialog_choice_t){.label = tz_labels[i], .value = tz_labels[i]};
+                float diff = fabsf(config_app__timezone_offsets[i] - timezone);
+                if (diff < best_diff) {
+                    best_diff = diff;
+                    tz_selected = i;
+                }
             }
+            if (dialog__choice_launcher(
+                    "Timezone", NULL, tz_choices, CONFIG_APP__TIMEZONE_OFFSET_COUNT, &tz_selected
+                ) == BRUCE_OK)
+                (void)config__set_time_timezone(config_app__timezone_offsets[tz_selected]);
         } else if (strcmp(action, "dst") == 0) {
             (void)config__set_time_dst(!dst);
         } else if (strcmp(action, "format") == 0) {
