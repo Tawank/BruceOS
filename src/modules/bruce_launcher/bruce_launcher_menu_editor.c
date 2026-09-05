@@ -61,20 +61,27 @@ static bruce_result_t bruce_launcher_menu_editor__add_submenu(const char *const 
 }
 
 /* Per-entry action sheet: reorder/rename/re-icon/delete it, start a "Move
- * to..." pick, or back out unchanged -- mirrors config_app.c's per-item
- * sheet (config_app__startup_item_gui). Every action but "Move to..." is
- * applied directly here; setting *out_start_move leaves the caller to drive
- * the destination pick, since that reuses the same browsing loop. */
+ * to..." pick, open it (submenus only), or back out unchanged -- mirrors
+ * config_app.c's per-item sheet (config_app__startup_item_gui). Every action
+ * but "Move to..."/"Open" is applied directly here; setting *out_start_move
+ * or *out_open leaves the caller to act on it, since both reuse the same
+ * browsing loop (picking a destination, or descending a level).
+ * *out_next_selected reports which row should stay highlighted next time
+ * this same menu is drawn -- index unless an up/down move changed it. */
 static bruce_result_t bruce_launcher_menu_editor__entry_actions(
     const bruce_launcher_menu_editor__path_t *path, size_t index, const bruce_launcher_tree_entry_t *entry,
-    size_t entry_count, bool *out_start_move
+    size_t entry_count, bool *out_start_move, bool *out_open, size_t *out_next_selected
 ) {
     *out_start_move = false;
+    *out_open = false;
+    *out_next_selected = index;
     const char *path_ptrs[BRUCE_LAUNCHER_TREE_MAX_DEPTH];
     bruce_launcher_menu_editor__path_ptrs(path, path_ptrs);
 
-    bruce_dialog_choice_t choices[7];
+    bruce_dialog_choice_t choices[8];
     size_t n = 0;
+    size_t open_index = n;
+    if (entry->is_submenu) choices[n++] = (bruce_dialog_choice_t){.label = "Open", .value = "open"};
     bool has_up = index > 0;
     bool has_down = index + 1 < entry_count;
     size_t up_index = n;
@@ -96,8 +103,18 @@ static bruce_result_t bruce_launcher_menu_editor__entry_actions(
     bruce_result_t result = dialog__choice_launcher(entry->label, NULL, choices, n, &selected);
     if (result != BRUCE_OK || selected == back_index) return BRUCE_OK;
 
-    if (has_up && selected == up_index) return launcher__tree_move(path_ptrs, path->depth, index, -1);
-    if (has_down && selected == down_index) return launcher__tree_move(path_ptrs, path->depth, index, 1);
+    if (entry->is_submenu && selected == open_index) {
+        *out_open = true;
+        return BRUCE_OK;
+    }
+    if (has_up && selected == up_index) {
+        *out_next_selected = index - 1;
+        return launcher__tree_move(path_ptrs, path->depth, index, -1);
+    }
+    if (has_down && selected == down_index) {
+        *out_next_selected = index + 1;
+        return launcher__tree_move(path_ptrs, path->depth, index, 1);
+    }
 
     if (selected == rename_index) {
         char new_label[BRUCE_LAUNCHER_ENTRY_LABEL_MAX] = {0};
@@ -121,7 +138,8 @@ static bruce_result_t bruce_launcher_menu_editor__entry_actions(
     }
     if (selected == delete_index) {
         char message[BRUCE_LAUNCHER_ENTRY_LABEL_MAX + 32];
-        snprintf(message, sizeof(message), "Delete \"%s\"?", entry->label);
+        if (entry->is_submenu) snprintf(message, sizeof(message), "Delete \"%s\" and everything in it?", entry->label);
+        else snprintf(message, sizeof(message), "Delete \"%s\"?", entry->label);
         bruce_dialog_choice_t confirm_choices[2] = {
             {.label = "Delete", .value = "delete"},
             {.label = "Cancel", .value = "cancel"},
@@ -151,6 +169,11 @@ bruce_result_t bruce_launcher_menu_editor__run(void) {
         memory__free(move);
         return BRUCE_ERR_NO_MEMORY;
     }
+
+    /* Row remembered per tree depth, so acting on an entry (move up/down,
+     * rename, ...) or backing out of a submenu redraws that same list with
+     * the same row highlighted instead of always snapping back to the top. */
+    size_t selected_at_depth[BRUCE_LAUNCHER_TREE_MAX_DEPTH + 1] = {0};
 
     for (;;) {
         const char *path_ptrs[BRUCE_LAUNCHER_TREE_MAX_DEPTH];
@@ -200,8 +223,11 @@ bruce_result_t bruce_launcher_menu_editor__run(void) {
         else if (path->depth == 0) snprintf(title, sizeof(title), "Menu entries");
         else snprintf(title, sizeof(title), "%s", path->labels[path->depth - 1]);
 
-        size_t selected = 0;
+        size_t depth = path->depth;
+        if (selected_at_depth[depth] >= n) selected_at_depth[depth] = n > 0 ? n - 1 : 0;
+        size_t selected = selected_at_depth[depth];
         bruce_result_t result = dialog__choice_launcher(title, NULL, choices, n, &selected);
+        selected_at_depth[depth] = selected;
         memory__free(choices);
 
         bool back = result == BRUCE_ERR_CANCELLED || (result == BRUCE_OK && selected == back_index);
@@ -235,6 +261,8 @@ bruce_result_t bruce_launcher_menu_editor__run(void) {
                 (void)dialog__message(BRUCE_DIALOG_ERROR, "Move", "An entry with that name already exists there");
             } else if (move_result != BRUCE_OK) {
                 (void)dialog__message(BRUCE_DIALOG_ERROR, "Move", "Couldn't move that entry there");
+            } else {
+                selected_at_depth[path->depth] = count; /* highlight the entry that just landed here */
             }
             continue;
         }
@@ -243,7 +271,9 @@ bruce_result_t bruce_launcher_menu_editor__run(void) {
             memory__free(entries);
             if (add_result == BRUCE_ERR_RESOURCE_LIMIT) {
                 (void)dialog__message(BRUCE_DIALOG_ERROR, "Add entry", "This menu is full");
-            } else if (add_result != BRUCE_OK && add_result != BRUCE_ERR_CANCELLED) {
+            } else if (add_result == BRUCE_OK) {
+                selected_at_depth[path->depth] = count; /* highlight the newly added entry */
+            } else if (add_result != BRUCE_ERR_CANCELLED) {
                 memory__free(path);
                 memory__free(move);
                 return add_result;
@@ -255,7 +285,9 @@ bruce_result_t bruce_launcher_menu_editor__run(void) {
             memory__free(entries);
             if (add_result == BRUCE_ERR_RESOURCE_LIMIT) {
                 (void)dialog__message(BRUCE_DIALOG_ERROR, "Add submenu", "This menu is full");
-            } else if (add_result != BRUCE_OK && add_result != BRUCE_ERR_CANCELLED) {
+            } else if (add_result == BRUCE_OK) {
+                selected_at_depth[path->depth] = count; /* highlight the newly added entry */
+            } else if (add_result != BRUCE_ERR_CANCELLED) {
                 memory__free(path);
                 memory__free(move);
                 return add_result;
@@ -268,27 +300,39 @@ bruce_result_t bruce_launcher_menu_editor__run(void) {
          * copying the whole ~200-byte struct onto this frame. */
         size_t index = selected;
         const bruce_launcher_tree_entry_t *entry = &entries[index];
-        if (entry->is_submenu) {
+        if (move->active) {
+            if (entry->is_submenu) {
+                /* Browsing for a move destination: descend straight in, same
+                 * as every entry used to behave before entries got their own
+                 * action sheet below -- there's nothing to edit while picking
+                 * where to drop something. */
+                if (path->depth < BRUCE_LAUNCHER_TREE_MAX_DEPTH) {
+                    snprintf(path->labels[path->depth], BRUCE_LAUNCHER_ENTRY_LABEL_MAX, "%s", entry->label);
+                    path->depth++;
+                }
+            }
+            memory__free(entries); /* leaf entries aren't valid move destinations, ignored */
+            continue;
+        }
+
+        bool start_move = false;
+        bool open_submenu = false;
+        size_t next_selected = index;
+        bruce_result_t action_result = bruce_launcher_menu_editor__entry_actions(
+            path, index, entry, count, &start_move, &open_submenu, &next_selected
+        );
+        if (action_result == BRUCE_OK && open_submenu) {
             if (path->depth < BRUCE_LAUNCHER_TREE_MAX_DEPTH) {
                 snprintf(path->labels[path->depth], BRUCE_LAUNCHER_ENTRY_LABEL_MAX, "%s", entry->label);
                 path->depth++;
             }
-            memory__free(entries);
-            continue;
-        }
-        if (move->active) {
-            memory__free(entries);
-            continue; /* only submenus are valid move destinations */
-        }
-
-        bool start_move = false;
-        bruce_result_t action_result =
-            bruce_launcher_menu_editor__entry_actions(path, index, entry, count, &start_move);
-        if (action_result == BRUCE_OK && start_move) {
+        } else if (action_result == BRUCE_OK && start_move) {
             move->active = true;
             move->path = *path;
             move->index = index;
             snprintf(move->label, sizeof(move->label), "%s", entry->label);
+        } else if (action_result == BRUCE_OK) {
+            selected_at_depth[path->depth] = next_selected;
         }
         memory__free(entries);
         if (action_result != BRUCE_OK) {
