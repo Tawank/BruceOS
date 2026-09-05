@@ -25,6 +25,10 @@ on:
       - "native_apps/**"
   workflow_dispatch:
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   firmware:
     name: Build ${{ matrix.board }}

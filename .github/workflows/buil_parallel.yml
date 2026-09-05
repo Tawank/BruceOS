@@ -34,6 +34,10 @@ on:
 permissions:
   contents: write
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   firmware:
     name: Build ${{ matrix.board }}

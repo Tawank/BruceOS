@@ -29,6 +29,10 @@ on:
           - "lilygo-t-display-ttgo"
           - "xk404"
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   firmware:
     name: Build ${{ inputs.environment }}

@@ -9,6 +9,10 @@ on:
         type: string
         required: true
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   firmware:
     name: Build ${{ matrix.board }}
