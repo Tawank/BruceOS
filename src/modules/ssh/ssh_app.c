@@ -497,29 +497,6 @@ ssh_app__session(bruce_ssh_id_t session, uint32_t tty_generation, bool *out_loca
     }
 }
 
-/* TODO(remove): temporary diagnostic for tracking down BRUCE_ERR_NO_MEMORY
- * failures on PSRAM-less boards. */
-static void ssh_app__log_heap_state(const char *label) {
-    bruce_memory_stats_t stats;
-    if (memory__get_stats(&stats) != BRUCE_OK) return;
-    stdio__printf(
-        "[ssh mem] %s: internal free=%u largest=%u (total=%u)",
-        label,
-        (unsigned)stats.internal_free,
-        (unsigned)stats.internal_largest_block,
-        (unsigned)stats.internal_total
-    );
-    if (stats.psram_total > 0) {
-        stdio__printf(
-            ", psram free=%u largest=%u (total=%u)",
-            (unsigned)stats.psram_free,
-            (unsigned)stats.psram_largest_block,
-            (unsigned)stats.psram_total
-        );
-    }
-    stdio__printf("\n");
-}
-
 static bruce_result_t
 ssh_app__read_private_key(const char *path, char *buffer, size_t capacity, size_t *out_size) {
     bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
