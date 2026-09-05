@@ -12,5 +12,6 @@ __pycache__
 .claude
 sdkconfig
 sdkconfig.old
+dependencies.lock
 
 # nofrendo
