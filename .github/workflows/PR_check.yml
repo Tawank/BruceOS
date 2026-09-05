@@ -42,7 +42,7 @@ jobs:
           - "lilygo-t-display-ttgo"
     steps:
       - uses: actions/checkout@v4
-      - run: python3 tools/board.py ${{ matrix.board }} build
+      - run: source "$IDF_PATH/export.sh" && python3 tools/board.py ${{ matrix.board }} build
       - uses: actions/upload-artifact@v4
         with:
           name: BruceIDF-${{ matrix.board }}

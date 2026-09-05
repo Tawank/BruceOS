@@ -28,6 +28,7 @@ else
   ENVS=("${DEFAULT_ENVS[@]}")
 fi
 
+source "${IDF_PATH}/export.sh"
 idf.py --version
 
 JOBS="${PIO_JOBS:-1}"

@@ -36,7 +36,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: refs/pull/${{ inputs.pr_number }}/merge
-      - run: python3 tools/board.py ${{ matrix.board }} build
+      - run: source "$IDF_PATH/export.sh" && python3 tools/board.py ${{ matrix.board }} build
       - uses: actions/upload-artifact@v4
         with:
           name: BruceIDF-${{ matrix.board }}

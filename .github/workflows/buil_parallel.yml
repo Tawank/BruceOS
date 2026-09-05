@@ -60,7 +60,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build firmware
-        run: python3 tools/board.py ${{ matrix.board }} build
+        run: source "$IDF_PATH/export.sh" && python3 tools/board.py ${{ matrix.board }} build
       - name: Stage flash files
         run: |
           mkdir release-assets
@@ -83,11 +83,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build external application ELFs
-        run: python3 native_apps/tools/build_apps.py --target elf --idf-target esp32s3
+        run: source "$IDF_PATH/export.sh" && python3 native_apps/tools/build_apps.py --target elf --idf-target esp32s3
       - name: Build module ELFs
-        run: python3 native_apps/tools/build_modules.py --target elf --idf-target esp32s3
+        run: source "$IDF_PATH/export.sh" && python3 native_apps/tools/build_modules.py --target elf --idf-target esp32s3
       - name: Build WASM modules
-        run: python3 native_apps/tools/build_modules.py --target wasm
+        run: source "$IDF_PATH/export.sh" && python3 native_apps/tools/build_modules.py --target wasm
       - name: Stage native packages
         run: |
           mkdir release-assets
