@@ -52,9 +52,6 @@ jobs:
             0x1000 build-board/${{ inputs.environment }}/bootloader/bootloader.bin \
             0x8000 build-board/${{ inputs.environment }}/partition_table/partition-table.bin \
             0x20000 build-board/${{ inputs.environment }}/BruceIDF.bin
-          cp build-board/${{ inputs.environment }}/BruceIDF.bin release-assets/BruceOS-${{ inputs.environment }}-app.bin
-          cp build-board/${{ inputs.environment }}/bootloader/bootloader.bin release-assets/BruceOS-${{ inputs.environment }}-bootloader.bin
-          cp build-board/${{ inputs.environment }}/partition_table/partition-table.bin release-assets/BruceOS-${{ inputs.environment }}-partition-table.bin
       - uses: actions/upload-artifact@v4
         with:
           name: BruceOS-${{ inputs.environment }}

@@ -80,9 +80,6 @@ jobs:
             0x1000 build-board/${{ matrix.board }}/bootloader/bootloader.bin \
             0x8000 build-board/${{ matrix.board }}/partition_table/partition-table.bin \
             0x20000 build-board/${{ matrix.board }}/BruceIDF.bin
-          cp build-board/${{ matrix.board }}/BruceIDF.bin release-assets/BruceOS-${{ matrix.board }}-app.bin
-          cp build-board/${{ matrix.board }}/bootloader/bootloader.bin release-assets/BruceOS-${{ matrix.board }}-bootloader.bin
-          cp build-board/${{ matrix.board }}/partition_table/partition-table.bin release-assets/BruceOS-${{ matrix.board }}-partition-table.bin
       - name: Upload ${{ matrix.board }} firmware
         uses: actions/upload-artifact@v4
         with:
