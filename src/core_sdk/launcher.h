@@ -175,6 +175,18 @@ bruce_result_t
 launcher__tree_set_icon(const char *const *path, size_t path_depth, size_t index, const char *icon_name);
 
 /**
+ * @brief Replaces the command run by a non-submenu entry, leaving its label and icon unchanged.
+ *
+ * @param path Menu's path from the root; see launcher__tree_list().
+ * @param path_depth Number of labels in path.
+ * @param index Command entry to update.
+ * @param command Non-empty command string to run when the entry is picked.
+ * @return BRUCE_ERR_INVALID_ARGUMENT if index is invalid or names a submenu.
+ */
+bruce_result_t
+launcher__tree_set_command(const char *const *path, size_t path_depth, size_t index, const char *command);
+
+/**
  * @brief Appends a new command entry directly to the menu at `path`.
  *
  * Unlike launcher__add_menu_entry(), never prompts for a destination - the

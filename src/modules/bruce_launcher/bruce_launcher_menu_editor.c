@@ -60,7 +60,7 @@ static bruce_result_t bruce_launcher_menu_editor__add_submenu(const char *const 
     return launcher__tree_add_submenu(path_ptrs, depth, label, icon_name);
 }
 
-/* Per-entry action sheet: reorder/rename/re-icon/delete it, start a "Move
+/* Per-entry action sheet: reorder/rename/edit-command/re-icon/delete it, start a "Move
  * to..." pick, open it (submenus only), or back out unchanged -- mirrors
  * config_app.c's per-item sheet (config_app__startup_item_gui). Every action
  * but "Move to..."/"Open" is applied directly here; setting *out_start_move
@@ -90,6 +90,8 @@ static bruce_result_t bruce_launcher_menu_editor__entry_actions(
     if (has_down) choices[n++] = (bruce_dialog_choice_t){.label = "Move down", .value = "down"};
     size_t rename_index = n;
     choices[n++] = (bruce_dialog_choice_t){.label = "Rename", .value = "rename"};
+    size_t command_index = n;
+    if (!entry->is_submenu) choices[n++] = (bruce_dialog_choice_t){.label = "Edit command", .value = "command"};
     size_t icon_index = n;
     choices[n++] = (bruce_dialog_choice_t){.label = "Change icon", .value = "icon"};
     size_t move_to_index = n;
@@ -124,6 +126,15 @@ static bruce_result_t bruce_launcher_menu_editor__entry_actions(
             return BRUCE_OK;
         }
         return launcher__tree_rename(path_ptrs, path->depth, index, new_label);
+    }
+    if (!entry->is_submenu && selected == command_index) {
+        char command[BRUCE_LAUNCHER_ENTRY_COMMAND_MAX] = {0};
+        if (dialog__text_input("Edit command", "Command to launch", entry->command, false, command, sizeof(command)) !=
+                BRUCE_OK ||
+            command[0] == '\0') {
+            return BRUCE_OK;
+        }
+        return launcher__tree_set_command(path_ptrs, path->depth, index, command);
     }
     if (selected == icon_index) {
         char icon_name[BRUCE_ICON_NAME_MAX] = {0};

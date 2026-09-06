@@ -2,8 +2,8 @@
 
 #include "core_sdk/result.h"
 
-/* GUI tree editor for /config/launcher.conf -- reorder, rename, re-icon,
- * add, delete, and move entries between menus at any depth. Reached from
+/* GUI tree editor for /config/launcher.conf -- reorder, rename, edit commands,
+ * re-icon, add, delete, and move entries between menus at any depth. Reached from
  * bruce_launcher_config__gui()'s "Menu entries" row (bruce_launcher_config.c);
  * see core_sdk/launcher.h's launcher__tree_*() family for the storage side. */
 

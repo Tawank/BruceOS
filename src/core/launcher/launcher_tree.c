@@ -163,6 +163,40 @@ launcher__tree_set_icon(const char *const *path, size_t path_depth, size_t index
     return result;
 }
 
+bruce_result_t
+launcher__tree_set_command(const char *const *path, size_t path_depth, size_t index, const char *command) {
+    if (command == NULL || command[0] == '\0' || path_depth > BRUCE_LAUNCHER_TREE_MAX_DEPTH) {
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    cJSON *root = launcher__load_root();
+    if (root == NULL) return BRUCE_ERR_NOT_FOUND;
+    cJSON *menu = launcher__json_find_menu_at_path(root, path, path_depth);
+    cJSON *item = launcher__tree_item_at(menu, index);
+    if (item == NULL) {
+        cJSON_Delete(root);
+        return menu == NULL ? BRUCE_ERR_NOT_FOUND : BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    if (!cJSON_IsString(item)) {
+        cJSON_Delete(root);
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+
+    size_t length = strlen(command) + 1;
+    char *copy = cJSON_malloc(length);
+    if (copy == NULL) {
+        cJSON_Delete(root);
+        return BRUCE_ERR_NO_MEMORY;
+    }
+    memcpy(copy, command, length);
+    if (item->valuestring != NULL && !(item->type & cJSON_IsReference)) cJSON_free(item->valuestring);
+    item->valuestring = copy;
+    item->type &= ~cJSON_IsReference;
+
+    bruce_result_t result = launcher__save_root(root);
+    cJSON_Delete(root);
+    return result;
+}
+
 bruce_result_t launcher__tree_add_command(
     const char *const *path, size_t path_depth, const char *label, const char *icon_name, const char *command
 ) {
