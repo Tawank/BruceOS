@@ -19,6 +19,18 @@
  * supplied default when the app has no config file, the path is absent, or
  * the stored value is a different type; setters create the file and any
  * missing intermediate objects on demand.
+ *
+ * Passing NULL for app_name means "my own config": it resolves to the
+ * calling process's own identity (sanitized into a legal app_name), so any
+ * process -- including a sandboxed ELF app -- can always read/write its own
+ * settings this way, and can never reach another app's by accident. Passing
+ * an explicit app_name is a request to touch some OTHER app's config file by
+ * that name outright; since nothing here can otherwise verify the caller
+ * really is that app, this path is restricted to built-in processes (every
+ * existing built-in call site already passes its own hardcoded name, so this
+ * is unaffected in practice) -- a non-built-in caller gets treated the same
+ * as an invalid name (getters fall back to their default, setters return
+ * BRUCE_ERR_INVALID_ARGUMENT).
  */
 
 #define BRUCE_APP_CONFIG_NAME_MAX_LEN 31
@@ -27,7 +39,7 @@
 /**
  * @brief Reads a boolean value, falling back to default_value.
  *
- * @param app_name Name of the app whose config file to read.
+ * @param app_name Name of the app whose config file to read, or NULL for the caller's own (see above).
  * @param json_path Dot-separated path to the value within the app's config document.
  * @param default_value Value to return if the path is absent or not a bool.
  */
@@ -36,7 +48,7 @@ bool app_config__get_bool(const char *app_name, const char *json_path, bool defa
 /**
  * @brief Sets a boolean value, creating the file/path if needed.
  *
- * @param app_name Name of the app whose config file to write.
+ * @param app_name Name of the app whose config file to write, or NULL for the caller's own (see above).
  * @param json_path Dot-separated path to the value within the app's config document.
  * @param value New boolean value to store.
  */
@@ -45,7 +57,7 @@ bruce_result_t app_config__set_bool(const char *app_name, const char *json_path,
 /**
  * @brief Reads an integer value, falling back to default_value.
  *
- * @param app_name Name of the app whose config file to read.
+ * @param app_name Name of the app whose config file to read, or NULL for the caller's own (see above).
  * @param json_path Dot-separated path to the value within the app's config document.
  * @param default_value Value to return if the path is absent or not an int.
  */
@@ -54,7 +66,7 @@ int app_config__get_int(const char *app_name, const char *json_path, int default
 /**
  * @brief Sets an integer value, creating the file/path if needed.
  *
- * @param app_name Name of the app whose config file to write.
+ * @param app_name Name of the app whose config file to write, or NULL for the caller's own (see above).
  * @param json_path Dot-separated path to the value within the app's config document.
  * @param value New integer value to store.
  */
@@ -66,7 +78,7 @@ bruce_result_t app_config__set_int(const char *app_name, const char *json_path, 
  * Always NUL-terminated within capacity, or default_value if the path is
  * absent/not a string. Returns whether a stored value was found.
  *
- * @param app_name Name of the app whose config file to read.
+ * @param app_name Name of the app whose config file to read, or NULL for the caller's own (see above).
  * @param json_path Dot-separated path to the value within the app's config document.
  * @param default_value String copied into out_value when the path is absent or not a string.
  * @param out_value Buffer to receive the NUL-terminated string.
@@ -79,7 +91,7 @@ bool app_config__get_string(
 /**
  * @brief Sets a string value, creating the file/path if needed.
  *
- * @param app_name Name of the app whose config file to write.
+ * @param app_name Name of the app whose config file to write, or NULL for the caller's own (see above).
  * @param json_path Dot-separated path to the value within the app's config document.
  * @param value New string value to store.
  */
@@ -92,7 +104,7 @@ bruce_result_t app_config__set_string(const char *app_name, const char *json_pat
  * structured per-app values such as arrays of objects while keeping the
  * public app_config API small. Returns whether a stored value was found.
  *
- * @param app_name Name of the app whose config file to read.
+ * @param app_name Name of the app whose config file to read, or NULL for the caller's own (see above).
  * @param json_path Dot-separated path to the value within the app's config document.
  * @param default_json JSON text copied into out_json when the path is absent.
  * @param out_json Buffer to receive the serialized JSON text.
@@ -105,7 +117,7 @@ bool app_config__get_json(
 /**
  * @brief Sets a raw JSON value, creating the file/path if needed.
  *
- * @param app_name Name of the app whose config file to write.
+ * @param app_name Name of the app whose config file to write, or NULL for the caller's own (see above).
  * @param json_path Dot-separated path to the value within the app's config document.
  * @param value_json JSON text to store at json_path.
  */
@@ -116,7 +128,7 @@ bruce_result_t app_config__set_json(const char *app_name, const char *json_path,
  *
  * Returns the number of entries filled.
  *
- * @param app_name Name of the app whose config file to read.
+ * @param app_name Name of the app whose config file to read, or NULL for the caller's own (see above).
  * @param json_path Dot-separated path to the array value.
  * @param out_values Array to receive the stored bool entries.
  * @param capacity Number of entries out_values can hold.
@@ -127,7 +139,7 @@ app_config__get_bool_array(const char *app_name, const char *json_path, bool *ou
 /**
  * @brief Sets a bool array value, creating the file/path if needed.
  *
- * @param app_name Name of the app whose config file to write.
+ * @param app_name Name of the app whose config file to write, or NULL for the caller's own (see above).
  * @param json_path Dot-separated path to the array value.
  * @param values Bool entries to store.
  * @param count Number of entries in values.
@@ -140,7 +152,7 @@ app_config__set_bool_array(const char *app_name, const char *json_path, const bo
  *
  * Returns the number of entries filled.
  *
- * @param app_name Name of the app whose config file to read.
+ * @param app_name Name of the app whose config file to read, or NULL for the caller's own (see above).
  * @param json_path Dot-separated path to the array value.
  * @param out_values Array to receive the stored int entries.
  * @param capacity Number of entries out_values can hold.
@@ -151,7 +163,7 @@ app_config__get_int_array(const char *app_name, const char *json_path, int *out_
 /**
  * @brief Sets an int array value, creating the file/path if needed.
  *
- * @param app_name Name of the app whose config file to write.
+ * @param app_name Name of the app whose config file to write, or NULL for the caller's own (see above).
  * @param json_path Dot-separated path to the array value.
  * @param values Int entries to store.
  * @param count Number of entries in values.
@@ -165,7 +177,7 @@ app_config__set_int_array(const char *app_name, const char *json_path, const int
  * out_values[i] must point at a writable buffer of at least value_size
  * bytes. Returns the number of entries filled.
  *
- * @param app_name Name of the app whose config file to read.
+ * @param app_name Name of the app whose config file to read, or NULL for the caller's own (see above).
  * @param json_path Dot-separated path to the array value.
  * @param out_values Array of caller-owned buffers to receive the strings.
  * @param value_size Size in bytes of each buffer pointed to by out_values.
@@ -178,7 +190,7 @@ size_t app_config__get_string_array(
 /**
  * @brief Sets a string array value, creating the file/path if needed.
  *
- * @param app_name Name of the app whose config file to write.
+ * @param app_name Name of the app whose config file to write, or NULL for the caller's own (see above).
  * @param json_path Dot-separated path to the array value.
  * @param values String entries to store.
  * @param count Number of entries in values.
@@ -192,7 +204,7 @@ bruce_result_t app_config__set_string_array(
  *
  * BRUCE_ERR_NOT_FOUND if it was not set.
  *
- * @param app_name Name of the app whose config file to modify.
+ * @param app_name Name of the app whose config file to modify, or NULL for the caller's own (see above).
  * @param json_path Dot-separated path to the value to remove.
  */
 bruce_result_t app_config__remove(const char *app_name, const char *json_path);

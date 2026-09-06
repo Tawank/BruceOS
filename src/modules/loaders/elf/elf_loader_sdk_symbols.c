@@ -34,12 +34,17 @@
 #include "lwip/sockets.h"
 
 #include "core/process/process.h"
+#include "core_sdk/app_config.h"
 #include "core_sdk/app_runner.h"
+#include "core_sdk/archive.h"
 #include "core_sdk/args.h"
 #include "core_sdk/audio.h"
+#include "core_sdk/base64.h"
 #include "core_sdk/bluetooth.h"
 #include "core_sdk/bluetooth_hid.h"
+#include "core_sdk/clipboard.h"
 #include "core_sdk/clock.h"
+#include "core_sdk/compress.h"
 #include "core_sdk/config.h"
 #include "core_sdk/device.h"
 #include "core_sdk/dialog.h"
@@ -47,7 +52,9 @@
 #include "core_sdk/display.h"
 #include "core_sdk/environment.h"
 #include "core_sdk/ext_mem_loader.h"
+#include "core_sdk/filetype.h"
 #include "core_sdk/gpio.h"
+#include "core_sdk/hash.h"
 #include "core_sdk/http.h"
 #include "core_sdk/i2c.h"
 #include "core_sdk/icon.h"
@@ -58,6 +65,7 @@
 #include "core_sdk/memory.h"
 #include "core_sdk/notification.h"
 #include "core_sdk/nrf24.h"
+#include "core_sdk/partition_manager.h"
 #include "core_sdk/permission.h"
 #include "core_sdk/process.h"
 #include "core_sdk/pubsub.h"
@@ -2093,6 +2101,110 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(disk__list),
     ESP_ELFSYM_EXPORT(disk__mount),
     ESP_ELFSYM_EXPORT(disk__unmount),
+
+    /* Partition layout. list_current()/list_planned()/status() are readable
+     * by any process; stage_create()/stage_delete()/stage_format()/commit()/
+     * discard() enforce "built-in only" themselves
+     * (partition_manager__caller_is_built_in(), core/partition_manager/
+     * partition_manager.c) via the same process_registry__current_context()
+     * check permission__check() uses -- an ELF app is never a built-in
+     * process, so those calls fail closed with BRUCE_ERR_PERMISSION here
+     * exactly as they would for any other non-built-in caller. Exported
+     * unconditionally rather than only the read side, so that failure is
+     * this file's normal permission handling rather than an unresolved
+     * symbol. */
+    ESP_ELFSYM_EXPORT(partition_manager__list_current),
+    ESP_ELFSYM_EXPORT(partition_manager__list_planned),
+    ESP_ELFSYM_EXPORT(partition_manager__status),
+    ESP_ELFSYM_EXPORT(partition_manager__stage_create),
+    ESP_ELFSYM_EXPORT(partition_manager__stage_delete),
+    ESP_ELFSYM_EXPORT(partition_manager__stage_format),
+    ESP_ELFSYM_EXPORT(partition_manager__commit),
+    ESP_ELFSYM_EXPORT(partition_manager__discard),
+
+    /* Per-app JSON settings. app_name == NULL always resolves to the
+     * caller's own identity (core/app_config/app_config.c sanitizes it into
+     * a legal name), so a sandboxed ELF app can safely store its own
+     * settings this way; an explicit app_name naming some OTHER app is
+     * gated to built-in processes only, the same way partition_manager's
+     * mutating calls are above -- an ELF app that tries it gets treated
+     * exactly like an invalid name (see core_sdk/app_config.h). */
+    ESP_ELFSYM_EXPORT(app_config__get_bool),
+    ESP_ELFSYM_EXPORT(app_config__set_bool),
+    ESP_ELFSYM_EXPORT(app_config__get_int),
+    ESP_ELFSYM_EXPORT(app_config__set_int),
+    ESP_ELFSYM_EXPORT(app_config__get_string),
+    ESP_ELFSYM_EXPORT(app_config__set_string),
+    ESP_ELFSYM_EXPORT(app_config__get_json),
+    ESP_ELFSYM_EXPORT(app_config__set_json),
+    ESP_ELFSYM_EXPORT(app_config__get_bool_array),
+    ESP_ELFSYM_EXPORT(app_config__set_bool_array),
+    ESP_ELFSYM_EXPORT(app_config__get_int_array),
+    ESP_ELFSYM_EXPORT(app_config__set_int_array),
+    ESP_ELFSYM_EXPORT(app_config__get_string_array),
+    ESP_ELFSYM_EXPORT(app_config__set_string_array),
+    ESP_ELFSYM_EXPORT(app_config__remove),
+
+    /* Hashing/checksums, base64, DEFLATE compression, and tar.gz/zip
+     * archives -- exported directly, unlike the storage__/tcp__/udp__
+     * families above: none of these hand back a handle that needs boxing
+     * into a small-int fd or tracking for auto-cleanup-on-exit. A
+     * bruce_hash_ctx_t* / bruce_compress_ctx_t* is just heap memory the
+     * calling process already owns and must pass back to *_finish() / *_end()
+     * itself, exactly like a malloc()'d buffer -- no different from any
+     * other pointer already crossing this boundary. archive__*_list()'s
+     * callback parameter is a plain function pointer into the ELF app's own
+     * (already-relocated) code, which core/archive calls directly; nothing
+     * about crossing the ELF boundary is specific to it being a callback. */
+    ESP_ELFSYM_EXPORT(hash__start),
+    ESP_ELFSYM_EXPORT(hash__update),
+    ESP_ELFSYM_EXPORT(hash__finish),
+    ESP_ELFSYM_EXPORT(hash__compute),
+    ESP_ELFSYM_EXPORT(hash__crc32),
+    ESP_ELFSYM_EXPORT(base64__encode),
+    ESP_ELFSYM_EXPORT(base64__decode),
+    ESP_ELFSYM_EXPORT(compress__bound),
+    ESP_ELFSYM_EXPORT(compress__compute),
+    ESP_ELFSYM_EXPORT(decompress__compute),
+    ESP_ELFSYM_EXPORT(compress__start),
+    ESP_ELFSYM_EXPORT(compress__update),
+    ESP_ELFSYM_EXPORT(compress__end),
+    ESP_ELFSYM_EXPORT(decompress__start),
+    ESP_ELFSYM_EXPORT(decompress__update),
+    ESP_ELFSYM_EXPORT(decompress__end),
+    ESP_ELFSYM_EXPORT(archive__tar_gz_create),
+    ESP_ELFSYM_EXPORT(archive__tar_gz_list),
+    ESP_ELFSYM_EXPORT(archive__tar_gz_extract),
+    ESP_ELFSYM_EXPORT(archive__tar_gz_extract_entry),
+    ESP_ELFSYM_EXPORT(archive__tar_gz_read_entry),
+    ESP_ELFSYM_EXPORT(archive__zip_create),
+    ESP_ELFSYM_EXPORT(archive__zip_list),
+    ESP_ELFSYM_EXPORT(archive__zip_extract),
+    ESP_ELFSYM_EXPORT(archive__zip_extract_entry),
+    ESP_ELFSYM_EXPORT(archive__zip_read_entry),
+
+    /* Clipboard */
+    ESP_ELFSYM_EXPORT(clipboard__kind),
+    ESP_ELFSYM_EXPORT(clipboard__set_text),
+    ESP_ELFSYM_EXPORT(clipboard__get_text),
+    ESP_ELFSYM_EXPORT(clipboard__set_files),
+    ESP_ELFSYM_EXPORT(clipboard__file_count),
+    ESP_ELFSYM_EXPORT(clipboard__get_file),
+    ESP_ELFSYM_EXPORT(clipboard__file_mode),
+    ESP_ELFSYM_EXPORT(clipboard__paste_files),
+    ESP_ELFSYM_EXPORT(clipboard__paste_file_as),
+    ESP_ELFSYM_EXPORT(clipboard__set_binary),
+    ESP_ELFSYM_EXPORT(clipboard__binary_size),
+    ESP_ELFSYM_EXPORT(clipboard__get_binary),
+    ESP_ELFSYM_EXPORT(clipboard__binary_filename),
+    ESP_ELFSYM_EXPORT(clipboard__paste_binary),
+    ESP_ELFSYM_EXPORT(clipboard__clear),
+
+    /* File type identification */
+    ESP_ELFSYM_EXPORT(filetype__lookup_extension),
+    ESP_ELFSYM_EXPORT(filetype__icon_for_path),
+    ESP_ELFSYM_EXPORT(filetype__identify),
+    ESP_ELFSYM_EXPORT(filetype__identify_bytes),
 
     /* TCP, UDP, and console streams */
     ESP_ELFSYM_EXPORT(tcp__connect),

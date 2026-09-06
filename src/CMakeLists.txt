@@ -1,5 +1,6 @@
 set(BRUCE_SELFTEST_SOURCES
     "modules/selftest/args_test.c"
+    "modules/selftest/app_config_test.c"
     "modules/selftest/app_runner_test.c"
     "modules/selftest/archive_test.c"
     "modules/selftest/audio_test.c"

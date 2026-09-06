@@ -7,17 +7,24 @@
  * public Bruce Core API declarations and the BRUCE_APP_MANIFEST() macro.
  */
 
+#include "core_sdk/app_config.h"   // IWYU pragma: export
 #include "core_sdk/app_runner.h"   // IWYU pragma: export
+#include "core_sdk/archive.h"      // IWYU pragma: export
 #include "core_sdk/args.h"         // IWYU pragma: export
+#include "core_sdk/base64.h"       // IWYU pragma: export
 #include "core_sdk/bluetooth.h"    // IWYU pragma: export
 #include "core_sdk/bluetooth_hid.h" // IWYU pragma: export
+#include "core_sdk/clipboard.h"    // IWYU pragma: export
 #include "core_sdk/clock.h"        // IWYU pragma: export
+#include "core_sdk/compress.h"     // IWYU pragma: export
 #include "core_sdk/device.h"       // IWYU pragma: export
 #include "core_sdk/dialog.h"       // IWYU pragma: export
 #include "core_sdk/disk.h"         // IWYU pragma: export
 #include "core_sdk/display.h"      // IWYU pragma: export
 #include "core_sdk/environment.h"  // IWYU pragma: export
+#include "core_sdk/filetype.h"     // IWYU pragma: export
 #include "core_sdk/gpio.h"         // IWYU pragma: export
+#include "core_sdk/hash.h"         // IWYU pragma: export
 #include "core_sdk/http.h"         // IWYU pragma: export
 #include "core_sdk/i2c.h"          // IWYU pragma: export
 #include "core_sdk/icon.h"         // IWYU pragma: export
@@ -29,6 +36,7 @@
 #include "core_sdk/memory.h"       // IWYU pragma: export
 #include "core_sdk/notification.h" // IWYU pragma: export
 #include "core_sdk/nrf24.h"        // IWYU pragma: export
+#include "core_sdk/partition_manager.h" // IWYU pragma: export
 #include "core_sdk/permission.h"   // IWYU pragma: export
 #include "core_sdk/ssh.h"          // IWYU pragma: export
 #include "core_sdk/process.h"      // IWYU pragma: export

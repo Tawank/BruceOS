@@ -10,6 +10,7 @@
 #include "core_sdk/app_runner.h"
 #include "core_sdk/process.h"
 
+#include "app_config_test.h"
 #include "app_runner_test.h"
 #include "archive_test.h"
 #include "args_test.h"
@@ -165,6 +166,8 @@ int selftest_app_main(int argc, char **argv) {
     RUN_SELFTEST(selftest__run_partition_manager_validation_case);
     RUN_SELFTEST(selftest__run_partition_manager_stage_lifecycle_case);
     RUN_SELFTEST(selftest__run_partition_manager_pending_changes_case);
+    RUN_SELFTEST(selftest__run_app_config_self_identity_case);
+    RUN_SELFTEST(selftest__run_app_config_cross_app_permission_case);
     RUN_SELFTEST(selftest__run_config_permission_denied_case);
     RUN_SELFTEST(selftest__run_config_permission_allowed_case);
     RUN_SELFTEST(selftest__run_config_protected_field_denied_case);

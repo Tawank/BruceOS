@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "cJSON.h"
+#include "core/process/process.h"
 #include "core/storage/storage.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h"
@@ -47,9 +48,55 @@ static bool app_config__name_valid(const char *name) {
     return true;
 }
 
+/* Resolves the effective app_name for a call and gates cross-app access.
+ *
+ * app_name == NULL means "my own config": it resolves to the calling
+ * process's own permission_key, sanitized into a legal app_config name
+ * (isalnum()/'_' only, first char isalpha()/'_' -- an ELF app's
+ * permission_key is its basename WITH extension, e.g. "myapp.elf", so the
+ * dot and any other stray character gets folded to '_'). Any process --
+ * including a sandboxed ELF app -- may do this; it can only ever reach its
+ * own file this way.
+ *
+ * app_name != NULL is a request to operate on some OTHER app's config file
+ * by name outright. Nothing in this file ties that name to the caller's own
+ * identity, so without a check here any caller could read or overwrite any
+ * other app's settings (the doc comment on core_sdk/app_config.h even uses
+ * "auth.user" as an example stored key). Restricting this path to built-in
+ * processes only -- the same process_registry__current_context() gate
+ * partition_manager__stage_create() and friends use for their own
+ * built-in-only calls -- closes that off for sandboxed apps while leaving
+ * every existing built-in call site (which always already passes its own
+ * hardcoded name) unaffected. */
+static bool app_config__resolve_name(const char *app_name, char *out_name, size_t out_size) {
+    if (out_size == 0) return false;
+    if (app_name != NULL) {
+        bool built_in = false;
+        if (process_registry__current_context(&built_in, NULL, 0, NULL) != BRUCE_OK || !built_in) return false;
+        if (strlen(app_name) >= out_size) return false;
+        strcpy(out_name, app_name);
+        return true;
+    }
+
+    char key[BRUCE_APP_CONFIG_NAME_MAX_LEN + 1] = {0};
+    if (process_registry__current_context(NULL, key, sizeof(key), NULL) != BRUCE_OK || key[0] == '\0') {
+        return false;
+    }
+    size_t length = 0;
+    for (const char *p = key; *p != '\0' && length < out_size - 1; ++p, ++length) {
+        out_name[length] = (isalnum((unsigned char)*p) || *p == '_') ? *p : '_';
+    }
+    out_name[length] = '\0';
+    if (length == 0) return false;
+    if (isdigit((unsigned char)out_name[0])) out_name[0] = '_';
+    return true;
+}
+
 static bool app_config__path_for(const char *app_name, char *out_path, size_t capacity) {
-    if (!app_config__name_valid(app_name)) return false;
-    int written = snprintf(out_path, capacity, "%s/%s.conf", APP_CONFIG__DIRECTORY, app_name);
+    char resolved[BRUCE_APP_CONFIG_NAME_MAX_LEN + 1];
+    if (!app_config__resolve_name(app_name, resolved, sizeof(resolved))) return false;
+    if (!app_config__name_valid(resolved)) return false;
+    int written = snprintf(out_path, capacity, "%s/%s.conf", APP_CONFIG__DIRECTORY, resolved);
     return written > 0 && (size_t)written < capacity;
 }
 
