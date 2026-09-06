@@ -26,7 +26,9 @@ void ext_mem_loader__set_error_message(const char *message) {
 
 const char *ext_mem_loader__last_error_message(void) { return s_error_message; }
 
-void ext_mem_loader__format_error_message(const char *action, int result, char *out_message, size_t out_size) {
+void ext_mem_loader__format_error_message(
+    const char *action, int result, char *out_message, size_t out_size
+) {
     if (out_message == NULL || out_size == 0) return;
     const char *detail = result == BRUCE_ERR_ABI_MISMATCH ? ext_mem_loader__last_error_message() : NULL;
     if (detail != NULL && detail[0] != '\0') {
@@ -42,10 +44,9 @@ void ext_mem_loader__format_error_message(const char *action, int result, char *
     snprintf(
         out_message,
         out_size,
-        "%s failed: %s (%d)",
+        "%s failed: %s",
         action != NULL && action[0] != '\0' ? action : "Launch",
-        result__to_string(result),
-        result
+        result__to_string(result)
     );
 }
 
@@ -139,8 +140,7 @@ bruce_result_t ext_mem_loader__allocate_xip(size_t size, bruce_ext_mem_loader_xi
     return BRUCE_OK;
 }
 
-bruce_result_t
-ext_mem_loader__write_xip(
+bruce_result_t ext_mem_loader__write_xip(
     const bruce_ext_mem_loader_xip_image_t *image, size_t offset, const void *data, size_t size
 ) {
     if (image == NULL) return BRUCE_ERR_INVALID_ARGUMENT;

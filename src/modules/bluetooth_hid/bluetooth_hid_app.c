@@ -131,7 +131,7 @@ static int bluetooth_hid_app__scan_and_connect_gui(void) {
     int count = bluetooth_hid__scan(devices, BLUETOOTH_HID_APP__MAX_RESULTS, 10000);
     if (count < 0) {
         char message[64];
-        snprintf(message, sizeof(message), "Classic HID scan failed (%d)", count);
+        snprintf(message, sizeof(message), "Classic HID scan failed: %s", result__to_string(count));
         (void)dialog__message(BRUCE_DIALOG_ERROR, "Bluetooth HID", message);
         memory__free(devices);
         return count;
@@ -182,8 +182,8 @@ static int bluetooth_hid_app__gui(void) {
         return BRUCE_ERR_UNSUPPORTED;
     }
     const bruce_dialog_choice_t choices[] = {
-        {.label = "Scan and connect", .value = "connect", .icon_name = "bluetooth"},
-        {.label = "Disconnect", .value = "disconnect", .icon_name = "bluetooth"},
+        {.label = "Scan and connect", .value = "connect",    .icon_name = "bluetooth"},
+        {.label = "Disconnect",       .value = "disconnect", .icon_name = "bluetooth"},
     };
     size_t selected = 0;
     if (dialog__choice_launcher("Bluetooth HID", "Keyboards and gamepads", choices, 2, &selected) != BRUCE_OK)
@@ -212,7 +212,7 @@ int bluetooth_hid_app_main(int argc, char **argv) {
         if (parse_status != AP_STATUS_HELP && parse_status != AP_STATUS_VERSION)
             ap_print_help(ap_get_cmd_parser(root) != NULL ? ap_get_cmd_parser(root) : root);
         int result = parse_status == AP_STATUS_HELP || parse_status == AP_STATUS_VERSION ? BRUCE_OK
-                     : parse_status == AP_STATUS_NO_MEMORY                               ? BRUCE_ERR_NO_MEMORY
+                     : parse_status == AP_STATUS_NO_MEMORY ? BRUCE_ERR_NO_MEMORY
                                                            : BRUCE_ERR_INVALID_ARGUMENT;
         ap_free(root);
         return result;

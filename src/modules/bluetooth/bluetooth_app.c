@@ -150,7 +150,7 @@ static int bluetooth_app__scan_gui(void) {
         if (count == BRUCE_ERR_CANCELLED) break;
         if (count < 0) {
             char message[48];
-            snprintf(message, sizeof(message), "BLE scan failed (%d)", count);
+            snprintf(message, sizeof(message), "BLE scan failed: %s", result__to_string(count));
             (void)bluetooth_app__message(BRUCE_DIALOG_ERROR, "Bluetooth", message);
             memory__free(devices);
             return count;

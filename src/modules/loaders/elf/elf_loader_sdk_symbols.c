@@ -217,6 +217,9 @@ static void *bruce_elf__operator_new_nothrow(size_t size, const void *tag) {
 }
 
 const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
+    /* Result descriptions */
+    ESP_ELFSYM_EXPORT(result__to_string),
+
     /* Core runtime / process */
     ESP_ELFSYM_EXPORT(runtime__now),
     ESP_ELFSYM_EXPORT(runtime__sleep),
@@ -721,18 +724,21 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     /* C++ freestanding new/delete + pure-virtual trap (see the C++ ABI
      * comment block above). Mangled names, not ESP_ELFSYM_EXPORT: these are
      * C++ operators, not C symbols the preprocessor can name directly. */
-    {"_Znwj", (const void *)&bruce_elf__operator_new}, /* operator new(size_t) */
-    {"_Znaj", (const void *)&bruce_elf__operator_new}, /* operator new[](size_t) */
-    {"_ZdlPv", (const void *)&bruce_elf__operator_delete}, /* operator delete(void*) */
-    {"_ZdaPv", (const void *)&bruce_elf__operator_delete}, /* operator delete[](void*) */
-    {"_ZdlPvj", (const void *)&bruce_elf__operator_delete_sized}, /* operator delete(void*, size_t) */
-    {"_ZdaPvj", (const void *)&bruce_elf__operator_delete_sized}, /* operator delete[](void*, size_t) */
-    {"__cxa_pure_virtual", (const void *)&bruce_elf__cxa_pure_virtual},
-    {"__cxa_atexit", (const void *)&bruce_elf__cxa_atexit},
-    {"_ZnwjRKSt9nothrow_t", (const void *)&bruce_elf__operator_new_nothrow}, /* operator new(size_t, const std::nothrow_t&) */
-    {"_ZSt17__throw_bad_allocv", (const void *)&bruce_elf__throw_bad_alloc}, /* std::__throw_bad_alloc() */
-    {"_ZSt20__throw_length_errorPKc", (const void *)&bruce_elf__throw_length_error}, /* std::__throw_length_error(const char*) */
-    {"_ZSt28__throw_bad_array_new_lengthv", (const void *)&bruce_elf__throw_bad_array_new_length}, /* std::__throw_bad_array_new_length() */
+    {"_Znwj",                               (const void *)&bruce_elf__operator_new         }, /* operator new(size_t) */
+    {"_Znaj",                               (const void *)&bruce_elf__operator_new         }, /* operator new[](size_t) */
+    {"_ZdlPv",                              (const void *)&bruce_elf__operator_delete      }, /* operator delete(void*) */
+    {"_ZdaPv",                              (const void *)&bruce_elf__operator_delete      }, /* operator delete[](void*) */
+    {"_ZdlPvj",                             (const void *)&bruce_elf__operator_delete_sized}, /* operator delete(void*, size_t) */
+    {"_ZdaPvj",                             (const void *)&bruce_elf__operator_delete_sized}, /* operator delete[](void*, size_t) */
+    {"__cxa_pure_virtual",                  (const void *)&bruce_elf__cxa_pure_virtual     },
+    {"__cxa_atexit",                        (const void *)&bruce_elf__cxa_atexit           },
+    {"_ZnwjRKSt9nothrow_t",
+                       (const void *)&bruce_elf__operator_new_nothrow                                        }, /* operator new(size_t, const std::nothrow_t&) */
+    {"_ZSt17__throw_bad_allocv",            (const void *)&bruce_elf__throw_bad_alloc      }, /* std::__throw_bad_alloc() */
+    {"_ZSt20__throw_length_errorPKc",
+                       (const void *)&bruce_elf__throw_length_error                                          }, /* std::__throw_length_error(const char*) */
+    {"_ZSt28__throw_bad_array_new_lengthv",
+                       (const void *)&bruce_elf__throw_bad_array_new_length                                  }, /* std::__throw_bad_array_new_length() */
 
     ESP_ELFSYM_END,
 };
