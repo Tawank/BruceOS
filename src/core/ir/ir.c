@@ -25,7 +25,9 @@
 #define IR_FILE_MAX_SIZE (64u * 1024u)
 #define IR_TX_TIMEOUT_MS 5000
 
+static StaticSemaphore_t s_ir_mutex_storage;
 static SemaphoreHandle_t s_ir_mutex;
+static portMUX_TYPE s_ir_init_mux = portMUX_INITIALIZER_UNLOCKED;
 
 int ir__tx_pin(void) { return CONFIG_BRUCE_IR_TX_GPIO; }
 
@@ -42,8 +44,16 @@ static bruce_result_t ir__esp_result(esp_err_t error) {
     return BRUCE_ERR_IO;
 }
 
+static void ir__ensure_mutex(void) {
+    if (s_ir_mutex != NULL) return;
+    portENTER_CRITICAL(&s_ir_init_mux);
+    if (s_ir_mutex == NULL) { s_ir_mutex = xSemaphoreCreateMutexStatic(&s_ir_mutex_storage); }
+    portEXIT_CRITICAL(&s_ir_init_mux);
+}
+
 static bool ir__lock(void) {
-    return s_ir_mutex != NULL && xSemaphoreTake(s_ir_mutex, pdMS_TO_TICKS(1000)) == pdTRUE;
+    ir__ensure_mutex();
+    return xSemaphoreTake(s_ir_mutex, pdMS_TO_TICKS(1000)) == pdTRUE;
 }
 
 static void ir__unlock(void) { xSemaphoreGive(s_ir_mutex); }
@@ -191,8 +201,10 @@ bruce_result_t ir__transmit(const char *data_hex, const char *protocol, uint8_t 
         bool samsung = strcasecmp(protocol, "Samsung32") == 0;
         result =
             ir__encode_nec((uint32_t)parsed, bits, samsung ? 4500 : 9000, 4500, symbols, 128, &symbol_count);
-    } else if (strcasecmp(protocol, "SIRC") == 0 || strcasecmp(protocol, "SIRC15") == 0 ||
-               strcasecmp(protocol, "SIRC20") == 0 || strcasecmp(protocol, "SONY") == 0) {
+    } else if (
+        strcasecmp(protocol, "SIRC") == 0 || strcasecmp(protocol, "SIRC15") == 0 ||
+        strcasecmp(protocol, "SIRC20") == 0 || strcasecmp(protocol, "SONY") == 0
+    ) {
         if (strcasecmp(protocol, "SIRC") == 0) bits = 12;
         else if (strcasecmp(protocol, "SIRC15") == 0) bits = 15;
         else if (strcasecmp(protocol, "SIRC20") == 0) bits = 20;

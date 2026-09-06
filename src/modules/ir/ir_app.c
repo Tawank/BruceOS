@@ -230,7 +230,7 @@ static int ir_app__receive(bool raw, uint32_t timeout_ms, bool show_dialog) {
         else stdio__printf("%s", capture);
     } else if (result == BRUCE_ERR_TIMEOUT) stdio__printf("IR receive timed out\n");
     else if (result == BRUCE_ERR_UNSUPPORTED) stdio__printf("IR decoding failed; retry with raw mode\n");
-    else stdio__printf("IR receive failed: %d\n", result);
+    else stdio__printf("IR receive failed: %s\n", result__to_string(result));
     memory__free(capture);
     return result;
 }
@@ -792,7 +792,9 @@ int ir_app_main(int argc, char **argv) {
     ap_add_optional_arg(tvbgone, "region", "na or eu (case-insensitive); omitted shows a picker in GUI mode");
     ap_set_helptext(jam, "Transmit an IR jamming pattern.");
     ap_add_optional_arg(jam, "frequency_hz", "Carrier frequency from 20000 to 100000 Hz");
-    ap_add_optional_arg(jam, "seconds", "Duration in seconds; omitted with frequency_hz shows a picker in GUI mode");
+    ap_add_optional_arg(
+        jam, "seconds", "Duration in seconds; omitted with frequency_hz shows a picker in GUI mode"
+    );
     ap_add_optional_arg(jam, "mode", "basic, enhanced, sweep, random, or empty");
     ap_set_helptext(learn_custom, "Interactively capture and save a signal (GUI only).");
     ap_set_helptext(quick_setup, "Interactively capture a full remote from a device template (GUI only).");
@@ -869,6 +871,9 @@ int ir_app_main(int argc, char **argv) {
     }
     ap_free(root);
     if (!is_rx && command != NULL && !gui)
-        stdio__printf(result == BRUCE_OK ? "IR operation complete\n" : "IR operation failed: %d\n", result);
+        stdio__printf(
+            result == BRUCE_OK ? "IR operation complete\n" : "IR operation failed: %s\n",
+            result__to_string(result)
+        );
     return result;
 }
