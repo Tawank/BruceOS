@@ -9,6 +9,7 @@
 
 #include <stdarg.h>
 #include <stdio.h>
+#include <time.h>
 
 FILE *bruce_elf__fopen(const char *path, const char *mode);
 int bruce_elf__fclose(FILE *stream);
@@ -39,3 +40,8 @@ int bruce_elf__setenv(const char *name, const char *value, int overwrite);
 int bruce_elf__unsetenv(const char *name);
 char *bruce_elf__strdup(const char *text);
 char *bruce_elf__strndup(const char *text, size_t size);
+
+struct tm *bruce_elf__localtime_r(const time_t *timer, struct tm *out);
+struct tm *bruce_elf__localtime(const time_t *timer);
+time_t bruce_elf__mktime(struct tm *tm);
+clock_t bruce_elf__clock(void);

@@ -64,3 +64,37 @@ bruce_result_t clock__sync_ntp(uint32_t timeout_ms);
 bruce_clock_sync_status_t clock__get_sync_status(void);
 /** @brief Returns the configured NTP server address. */
 const char *clock__get_ntp_server(void);
+
+/**
+ * @brief Converts a date/time to a Unix epoch timestamp.
+ *
+ * Pure calendar math: the fields are taken as UTC and neither reads nor
+ * depends on the system clock, unlike clock__set_local(). month must be in
+ * [1, 12]; callers with a denormalized month (as from struct tm arithmetic)
+ * must fold it into year themselves first.
+ *
+ * @param value Date/time to convert.
+ * @param out_epoch Receives the corresponding Unix epoch seconds.
+ */
+bruce_result_t clock__datetime_to_epoch(const bruce_clock_datetime_t *value, int64_t *out_epoch);
+
+/**
+ * @brief Converts a Unix epoch timestamp to a date/time.
+ *
+ * Pure calendar math, treating epoch as UTC: neither reads nor depends on
+ * the system clock, and -- unlike clock__get_utc() -- accepts any epoch
+ * value, not just one that looks like a plausibly-synced current time.
+ *
+ * @param epoch Unix epoch seconds.
+ * @param out Receives the corresponding UTC date/time.
+ */
+bruce_result_t clock__epoch_to_datetime(int64_t epoch, bruce_clock_datetime_t *out);
+
+/**
+ * @brief Returns Config's currently configured local-time offset from UTC, in seconds.
+ *
+ * Combines the fixed UTC-offset timezone setting with the optional manual
+ * one-hour DST adjustment -- the same inputs clock__get_local() itself
+ * applies.
+ */
+int64_t clock__get_local_offset_seconds(void);

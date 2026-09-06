@@ -48,25 +48,31 @@ static bool clock__datetime_valid(const bruce_clock_datetime_t *value) {
     return value->day >= 1 && value->day <= max_day;
 }
 
-static time_t clock__timegm(const struct tm *value) {
-    int year = value->tm_year + 1900;
-    int month = value->tm_mon + 1;
+bruce_result_t clock__datetime_to_epoch(const bruce_clock_datetime_t *value, int64_t *out_epoch) {
+    if (value == NULL || out_epoch == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    if (value->month < 1 || value->month > 12) return BRUCE_ERR_INVALID_ARGUMENT;
+    int year = value->year;
     int64_t days = 0;
-    for (int current = 1970; current < year; ++current) days += clock__is_leap_year(current) ? 366 : 365;
+    if (year >= 1970) {
+        for (int current = 1970; current < year; ++current) days += clock__is_leap_year(current) ? 366 : 365;
+    } else {
+        for (int current = year; current < 1970; ++current) days -= clock__is_leap_year(current) ? 366 : 365;
+    }
     static const uint8_t days_per_month[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
-    for (int current = 1; current < month; ++current) {
+    for (int current = 1; current < value->month; ++current) {
         days += days_per_month[current - 1];
         if (current == 2 && clock__is_leap_year(year)) days++;
     }
-    days += value->tm_mday - 1;
-    return (time_t)(days * 86400 + value->tm_hour * 3600 + value->tm_min * 60 + value->tm_sec);
+    days += value->day - 1;
+    *out_epoch = days * 86400 + value->hour * 3600 + value->minute * 60 + value->second;
+    return BRUCE_OK;
 }
 
-static bruce_result_t clock__from_epoch(time_t epoch, bruce_clock_datetime_t *out) {
+bruce_result_t clock__epoch_to_datetime(int64_t epoch, bruce_clock_datetime_t *out) {
     if (out == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
-    if (epoch < CLOCK__VALID_EPOCH_MIN) return BRUCE_ERR_INVALID_STATE;
+    time_t seconds = (time_t)epoch;
     struct tm value;
-    if (gmtime_r(&epoch, &value) == NULL) return BRUCE_ERR_INTERNAL;
+    if (gmtime_r(&seconds, &value) == NULL) return BRUCE_ERR_INTERNAL;
     out->year = (uint16_t)(value.tm_year + 1900);
     out->month = (uint8_t)(value.tm_mon + 1);
     out->day = (uint8_t)value.tm_mday;
@@ -76,31 +82,32 @@ static bruce_result_t clock__from_epoch(time_t epoch, bruce_clock_datetime_t *ou
     return BRUCE_OK;
 }
 
-static time_t clock__local_offset_seconds(void) {
+static bruce_result_t clock__from_epoch(time_t epoch, bruce_clock_datetime_t *out) {
+    if (out == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    if (epoch < CLOCK__VALID_EPOCH_MIN) return BRUCE_ERR_INVALID_STATE;
+    return clock__epoch_to_datetime(epoch, out);
+}
+
+int64_t clock__get_local_offset_seconds(void) {
     float timezone = config__get_time_timezone();
     bool dst = config__get_time_dst();
-    return (time_t)(timezone * 3600.0f) + (dst ? 3600 : 0);
+    return (int64_t)(timezone * 3600.0f) + (dst ? 3600 : 0);
 }
 
 bruce_result_t clock__get_utc(bruce_clock_datetime_t *out) { return clock__from_epoch(time(NULL), out); }
 
 bruce_result_t clock__get_local(bruce_clock_datetime_t *out) {
-    return clock__from_epoch(time(NULL) + clock__local_offset_seconds(), out);
+    return clock__from_epoch(time(NULL) + clock__get_local_offset_seconds(), out);
 }
 
 bruce_result_t clock__set_local(const bruce_clock_datetime_t *local) {
     bruce_result_t permission = permission__check(BRUCE_PERMISSION_CONFIG);
     if (permission != BRUCE_OK) return permission;
     if (!clock__datetime_valid(local)) return BRUCE_ERR_INVALID_ARGUMENT;
-    struct tm value = {
-        .tm_sec = local->second,
-        .tm_min = local->minute,
-        .tm_hour = local->hour,
-        .tm_mday = local->day,
-        .tm_mon = local->month - 1,
-        .tm_year = local->year - 1900,
-    };
-    time_t utc = clock__timegm(&value) - clock__local_offset_seconds();
+    int64_t local_epoch;
+    bruce_result_t result = clock__datetime_to_epoch(local, &local_epoch);
+    if (result != BRUCE_OK) return result;
+    time_t utc = (time_t)(local_epoch - clock__get_local_offset_seconds());
     struct timeval tv = {.tv_sec = utc, .tv_usec = 0};
     return settimeofday(&tv, NULL) == 0 ? BRUCE_OK : BRUCE_ERR_IO;
 }

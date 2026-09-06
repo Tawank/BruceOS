@@ -21,6 +21,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <time.h>
 
 #include "esp_elf.h" // IWYU pragma: export
 
@@ -532,6 +533,95 @@ static void bruce_elf__assert_func(const char *file, int line, const char *func,
 
 static void bruce_elf__assert(const char *file, int line, const char *msg) {
     bruce_elf__assert_func(file, line, NULL, msg);
+}
+
+/* ---------------------------------------------------------------------------
+ * time.h. time/gmtime/gmtime_r/difftime/strftime/asctime/asctime_r are
+ * exported directly, unadapted (see the table entries below): the real
+ * picolibc time() already returns the correct UTC epoch on this firmware --
+ * it's the exact call clock__get_utc() itself makes (core/clock/clock.c) --
+ * and gmtime/gmtime_r/difftime/strftime/asctime/asctime_r have no
+ * clock/timezone state of their own to get wrong, so the real functions are
+ * exactly correct as-is, same rationale as the libm block above. time_t is
+ * 64-bit on this toolchain (checked: __SIZEOF_LONG__ == 4 here, so
+ * picolibc's own sys/_types.h selects __int_least64_t over `long`), so
+ * there is no Y2038 problem to inherit.
+ *
+ * localtime/localtime_r/mktime DO need adapting: picolibc has no tzset()/TZ
+ * environment support here, so the real functions would just be UTC. These
+ * instead go through clock__get_local_offset_seconds() and
+ * clock__datetime_to_epoch() (core_sdk/clock.h) -- the exact same
+ * Config-driven offset and calendar math core/clock/clock.c itself uses for
+ * clock__get_local()/set_local(), rather than a second, separately
+ * maintained implementation of the same math living only here.
+ *
+ * ctime/ctime_r are deliberately not provided: they're specified as
+ * asctime(localtime(t)), and the real picolibc ctime() would call its own
+ * internal localtime() rather than the adapter above, silently producing a
+ * UTC-assuming result inconsistent with what an app's own explicit
+ * localtime() call gets -- not worth a whole extra pair of adapters for a
+ * function strftime() already fully subsumes. */
+
+/* Folds an out-of-range struct tm month (any int, as mktime() must accept)
+ * into tm_year, leaving a month in [1,12] for clock__datetime_to_epoch(),
+ * which -- like the real days-in-civil-calendar math it wraps -- requires a
+ * normalized month. */
+static void bruce_elf__normalize_month(int64_t *year, int *month_1based) {
+    int64_t m0 = *month_1based - 1;
+    int64_t y = *year + m0 / 12;
+    int64_t m = m0 % 12;
+    if (m < 0) {
+        m += 12;
+        y -= 1;
+    }
+    *year = y;
+    *month_1based = (int)m + 1;
+}
+
+struct tm *bruce_elf__localtime_r(const time_t *timer, struct tm *out) {
+    if (timer == NULL || out == NULL) return NULL;
+    time_t shifted = (time_t)(*timer + clock__get_local_offset_seconds());
+    if (gmtime_r(&shifted, out) == NULL) return NULL;
+    out->tm_isdst = config__get_time_dst() ? 1 : 0;
+    return out;
+}
+
+struct tm *bruce_elf__localtime(const time_t *timer) {
+    static struct tm result; /* matches real localtime()'s non-reentrant contract */
+    return bruce_elf__localtime_r(timer, &result);
+}
+
+time_t bruce_elf__mktime(struct tm *tm) {
+    if (tm == NULL) return (time_t)-1;
+    int64_t year = tm->tm_year + 1900;
+    int month = tm->tm_mon + 1;
+    bruce_elf__normalize_month(&year, &month);
+    bruce_clock_datetime_t local = {
+        .year = (uint16_t)year,
+        .month = (uint8_t)month,
+        .day = (uint8_t)tm->tm_mday,
+        .hour = (uint8_t)tm->tm_hour,
+        .minute = (uint8_t)tm->tm_min,
+        .second = (uint8_t)tm->tm_sec,
+    };
+    int64_t local_epoch;
+    if (clock__datetime_to_epoch(&local, &local_epoch) != BRUCE_OK) return (time_t)-1;
+    time_t result = (time_t)(local_epoch - clock__get_local_offset_seconds());
+    bruce_elf__localtime_r(&result, tm); /* POSIX: also normalize the caller's fields */
+    return result;
+}
+
+/* Approximates CPU time with wall-clock-since-boot (runtime__now(), which
+ * is explicitly documented as "not wall-clock time" and meant only for
+ * differences -- see core_sdk/runtime.h): correct for the overwhelmingly
+ * common `(clock() - start) / CLOCKS_PER_SEC` elapsed-time idiom, wrong for
+ * code that assumes it measures actual CPU time or resets per-process.
+ * clock_t is 32-bit unsigned on this toolchain and CLOCKS_PER_SEC is
+ * 1000000, so this also wraps roughly every 71 minutes of uptime -- an
+ * existing real-world clock() limitation on any 32-bit-clock_t libc, not
+ * something this adapter introduces. */
+clock_t bruce_elf__clock(void) {
+    return (clock_t)(runtime__now() * (CLOCKS_PER_SEC / 1000ULL));
 }
 
 /* ---------------------------------------------------------------------------
@@ -1095,6 +1185,17 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     {"strndup",  (const void *)&bruce_elf__strndup  },
     {"__assert_func", (const void *)&bruce_elf__assert_func},
     {"__assert",      (const void *)&bruce_elf__assert     },
+    ESP_ELFSYM_EXPORT(time),
+    ESP_ELFSYM_EXPORT(gmtime),
+    ESP_ELFSYM_EXPORT(gmtime_r),
+    {"localtime",  (const void *)&bruce_elf__localtime  },
+    {"localtime_r",(const void *)&bruce_elf__localtime_r},
+    {"mktime",     (const void *)&bruce_elf__mktime    },
+    {"clock",      (const void *)&bruce_elf__clock     },
+    ESP_ELFSYM_EXPORT(difftime),
+    ESP_ELFSYM_EXPORT(strftime),
+    ESP_ELFSYM_EXPORT(asctime),
+    ESP_ELFSYM_EXPORT(asctime_r),
     ESP_ELFSYM_EXPORT(snprintf),
     ESP_ELFSYM_EXPORT(sprintf),
     ESP_ELFSYM_EXPORT(vsnprintf),

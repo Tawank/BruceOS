@@ -1,10 +1,13 @@
 #include <errno.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #include "core/storage/storage.h"
 #include "core_sdk/app_runner.h"
+#include "core_sdk/config.h"
 #include "core_sdk/environment.h"
 #include "core_sdk/ext_mem_loader.h"
 #include "core_sdk/memory.h"
@@ -186,6 +189,103 @@ bool selftest__run_elf_loader_libc_case(void) {
     memory__free(partial);
 
     printf("[selftest] loader/elf_libc: OK\n");
+    return true;
+}
+
+/*
+ * Exercises the ELF loader's time.h support (elf_loader_sdk_symbols.c).
+ * time()/gmtime_r() are exercised directly -- they're exported to sandboxed
+ * apps unadapted, so this is really regression coverage for the real
+ * picolibc functions against known reference dates, not just a
+ * self-round-trip that could hide a wrong assumption. localtime_r()/
+ * mktime()/clock() ARE BruceOS-specific adapters (deliberately non-static
+ * so this case can call them directly, same rationale as
+ * selftest__run_elf_loader_stdio_case()), so those are checked for
+ * mktime(localtime_r(t)) == t and for actually applying Config's currently
+ * configured offset rather than silently passing UTC through.
+ */
+bool selftest__run_elf_loader_time_case(void) {
+    /* 1970-01-01 00:00:00 UTC, a Thursday -- the epoch itself. */
+    time_t epoch0 = 0;
+    struct tm tm0;
+    if (gmtime_r(&epoch0, &tm0) == NULL) {
+        printf("[selftest] loader/elf_time: gmtime_r(0) returned NULL\n");
+        return false;
+    }
+    if (tm0.tm_year != 70 || tm0.tm_mon != 0 || tm0.tm_mday != 1 || tm0.tm_hour != 0 ||
+        tm0.tm_min != 0 || tm0.tm_sec != 0 || tm0.tm_wday != 4 || tm0.tm_yday != 0) {
+        printf("[selftest] loader/elf_time: gmtime_r(0) mismatch (y=%d m=%d d=%d h=%d mi=%d s=%d wd=%d yd=%d)\n",
+               tm0.tm_year, tm0.tm_mon, tm0.tm_mday, tm0.tm_hour, tm0.tm_min, tm0.tm_sec, tm0.tm_wday,
+               tm0.tm_yday);
+        return false;
+    }
+
+    /* 2000-01-01 00:00:00 UTC, a known Saturday. */
+    time_t y2k = 946684800;
+    struct tm tm1;
+    if (gmtime_r(&y2k, &tm1) == NULL) {
+        printf("[selftest] loader/elf_time: gmtime_r(y2k) returned NULL\n");
+        return false;
+    }
+    if (tm1.tm_year != 100 || tm1.tm_mon != 0 || tm1.tm_mday != 1 || tm1.tm_wday != 6 || tm1.tm_yday != 0) {
+        printf("[selftest] loader/elf_time: gmtime_r(y2k) mismatch (y=%d m=%d d=%d wd=%d yd=%d)\n",
+               tm1.tm_year, tm1.tm_mon, tm1.tm_mday, tm1.tm_wday, tm1.tm_yday);
+        return false;
+    }
+
+    /* 2000-03-01 00:00:00 UTC: day 60 of a leap year (Jan 31 + Feb 29 days
+     * precede it), exercising both the leap-year rule and tm_yday. */
+    time_t leap_check = 951868800;
+    struct tm tm2;
+    gmtime_r(&leap_check, &tm2);
+    if (tm2.tm_mon != 2 || tm2.tm_mday != 1 || tm2.tm_yday != 60) {
+        printf("[selftest] loader/elf_time: gmtime_r leap-year mismatch (m=%d d=%d yd=%d)\n", tm2.tm_mon,
+               tm2.tm_mday, tm2.tm_yday);
+        return false;
+    }
+
+    /* mktime() must be the exact inverse of localtime_r() for any epoch
+     * second, regardless of Config's currently configured offset. */
+    time_t now = time(NULL);
+    struct tm local;
+    if (bruce_elf__localtime_r(&now, &local) == NULL) {
+        printf("[selftest] loader/elf_time: localtime_r returned NULL\n");
+        return false;
+    }
+    time_t roundtrip = bruce_elf__mktime(&local);
+    if (roundtrip != now) {
+        printf("[selftest] loader/elf_time: mktime(localtime_r(t)) != t (%lld != %lld)\n",
+               (long long)roundtrip, (long long)now);
+        return false;
+    }
+
+    /* localtime_r() must actually apply Config's offset -- compare against
+     * an independently-computed shift rather than assuming a particular
+     * configured timezone/DST value. */
+    int64_t expected_offset =
+        (int64_t)(((double)config__get_time_timezone() + (config__get_time_dst() ? 1.0 : 0.0)) * 3600.0);
+    time_t shifted = now + (time_t)expected_offset;
+    struct tm expected_local;
+    gmtime_r(&shifted, &expected_local);
+    if (local.tm_year != expected_local.tm_year || local.tm_mon != expected_local.tm_mon ||
+        local.tm_mday != expected_local.tm_mday || local.tm_hour != expected_local.tm_hour ||
+        local.tm_min != expected_local.tm_min || local.tm_sec != expected_local.tm_sec) {
+        printf("[selftest] loader/elf_time: localtime_r did not apply Config's offset\n");
+        return false;
+    }
+
+    /* clock() must at least return without crashing and stay non-decreasing
+     * across two back-to-back calls (ignoring the documented ~71-minute
+     * wraparound, which a fast selftest can't hit). */
+    clock_t c1 = bruce_elf__clock();
+    clock_t c2 = bruce_elf__clock();
+    if (c2 < c1) {
+        printf("[selftest] loader/elf_time: clock() went backwards (%lu -> %lu)\n", (unsigned long)c1,
+               (unsigned long)c2);
+        return false;
+    }
+
+    printf("[selftest] loader/elf_time: OK\n");
     return true;
 }
 
