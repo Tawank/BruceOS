@@ -76,7 +76,7 @@ static bruce_result_t ir__send_symbols(
 
     rmt_copy_encoder_config_t encoder_config = {};
     error = rmt_new_copy_encoder(&encoder_config, &encoder);
-    if (error == ESP_OK) {
+    if (error == ESP_OK && frequency_hz != 0) {
         rmt_carrier_config_t carrier = {
             .frequency_hz = frequency_hz,
             .duty_cycle = duty_cycle,
@@ -106,31 +106,58 @@ static bruce_result_t ir__transmit_raw_with_duty(
     bruce_result_t permission = permission__check(BRUCE_PERMISSION_IR);
     if (permission != BRUCE_OK) return permission;
     if (timings_us == NULL || timing_count < 2 || timing_count > BRUCE_IR_MAX_RAW_TIMINGS ||
-        frequency_hz < 20000 || frequency_hz > 100000 || duty_cycle <= 0.0f || duty_cycle >= 1.0f) {
+        (frequency_hz != 0 && (frequency_hz < 20000 || frequency_hz > 100000)) || duty_cycle <= 0.0f ||
+        duty_cycle >= 1.0f) {
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
     if (!ir__lock()) return BRUCE_ERR_BUSY;
 
-    size_t symbol_count = (timing_count + 1u) / 2u;
+    typedef struct {
+        uint8_t level;
+        uint64_t duration;
+    } ir_run_t;
+    ir_run_t runs[BRUCE_IR_MAX_RAW_TIMINGS];
+    size_t run_count = 0;
+    for (size_t i = 0; i < timing_count; ++i) {
+        uint32_t duration = timings_us[i];
+        uint8_t level = (uint8_t)((i & 1u) == 0);
+        if (duration == 0) continue;
+        if (run_count > 0 && runs[run_count - 1u].level == level) runs[run_count - 1u].duration += duration;
+        else runs[run_count++] = (ir_run_t){.level = level, .duration = duration};
+    }
+    if (run_count == 0) {
+        ir__unlock();
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+
+    size_t chunk_count = 0;
+    for (size_t i = 0; i < run_count; ++i) { chunk_count += (size_t)((runs[i].duration + 32766u) / 32767u); }
+    size_t symbol_count = (chunk_count + 1u) / 2u;
     rmt_symbol_word_t *symbols = calloc(symbol_count, sizeof(*symbols));
     if (symbols == NULL) {
         ir__unlock();
         return BRUCE_ERR_NO_MEMORY;
     }
-    for (size_t i = 0; i < timing_count; ++i) {
-        uint32_t duration = timings_us[i];
-        if (duration == 0 || duration > 32767) {
-            free(symbols);
-            ir__unlock();
-            return BRUCE_ERR_INVALID_ARGUMENT;
+    size_t chunk = 0;
+    for (size_t i = 0; i < run_count; ++i) {
+        uint64_t remaining = runs[i].duration;
+        while (remaining > 0) {
+            uint16_t duration = (uint16_t)(remaining > 32767u ? 32767u : remaining);
+            rmt_symbol_word_t *symbol = &symbols[chunk / 2u];
+            if ((chunk & 1u) == 0) {
+                symbol->level0 = runs[i].level;
+                symbol->duration0 = duration;
+            } else {
+                symbol->level1 = runs[i].level;
+                symbol->duration1 = duration;
+            }
+            remaining -= duration;
+            ++chunk;
         }
-        if ((i & 1u) == 0) {
-            symbols[i / 2u].level0 = 1;
-            symbols[i / 2u].duration0 = duration;
-        } else {
-            symbols[i / 2u].level1 = 0;
-            symbols[i / 2u].duration1 = duration;
-        }
+    }
+    if ((chunk & 1u) != 0) {
+        symbols[chunk / 2u].level1 = (uint8_t)!runs[run_count - 1u].level;
+        symbols[chunk / 2u].duration1 = 1;
     }
 
     bruce_result_t result = ir__send_symbols(symbols, symbol_count, frequency_hz, duty_cycle, repeats);

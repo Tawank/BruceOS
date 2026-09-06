@@ -1285,12 +1285,18 @@ in-memory capture so learning workflows can test it before saving.
 `ir__transmit_file()` replays version-1 `.ir` files and
 also requires `storage`, since it uses process-owned public storage handles. One
 transmission is always made and `repeats` specifies additional transmissions.
+Raw waveform durations may exceed one RMT symbol and are split without changing
+the mark/space level; zero-duration transitions are collapsed. A zero carrier
+frequency requests an unmodulated waveform.
 IR GPIOs are board defaults configurable through Kconfig.
 The built-in Infrared app provides regional TV power-code runs, RMT-backed
 basic/enhanced/sweep/random/empty jammer patterns, custom learning, and TV, AC,
 fan, sound, and LED-strip quick-learning templates. Learned remotes use the
 version-1 format under `/BruceIR`; filename collisions may be numbered,
 overwritten, renamed, or cancelled.
+TV-B-Gone uses native compressed waveform records expanded into `IR_CODE_RAW`
+`bruce_ir_code_t` values immediately before transmit; it does not depend on the
+legacy source at runtime.
 
 `rf` grants access to the NRF24 Core API. `nrf24__probe()` checks physical chip
 presence, channel operations cover the hardware range 0 through 125, and

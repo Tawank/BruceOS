@@ -17,7 +17,7 @@
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
 
-#include "ir_codes.h"
+#include "ir_tvbgone.h"
 
 #define IR_APP_CAPTURE_SIZE 8192u
 #define IR_APP_LIBRARY_PATH "/BruceIR"
@@ -387,82 +387,6 @@ static bruce_result_t ir_app__quick_learn(void) {
     return result != BRUCE_OK ? result : (saved > 0 ? BRUCE_OK : BRUCE_ERR_CANCELLED);
 }
 
-static bruce_result_t ir_app__send_power_batch(
-    const bruce_ir_code_t *codes, size_t count, size_t *sent, size_t total, bruce_viewer_id_t viewer
-) {
-    for (size_t i = 0; i < count; ++i) {
-        if (input__check(BRUCE_INPUT_CODE_BACK, true) || input__check(BRUCE_INPUT_CODE_BUTTON_B, true)) {
-            return BRUCE_ERR_CANCELLED;
-        }
-        bruce_result_t result = ir__transmit_code(&codes[i], 0);
-        if (result != BRUCE_OK) return result;
-        (*sent)++;
-        if (viewer != BRUCE_VIEWER_ID_INVALID) {
-            char progress[96];
-            snprintf(
-                progress,
-                sizeof(progress),
-                "Sending power codes\n%u / %u\n\nBack: stop",
-                (unsigned int)*sent,
-                (unsigned int)total
-            );
-            (void)dialog__viewer_set_text(viewer, progress);
-        }
-        if (runtime__delay(205) != BRUCE_OK) return BRUCE_ERR_CANCELLED;
-    }
-    return BRUCE_OK;
-}
-
-static bruce_result_t ir_app__tvbgone(bool europe, bool gui) {
-    const bruce_ir_code_t *regional = europe ? s_power_eu : s_power_na;
-    size_t regional_count =
-        europe ? sizeof(s_power_eu) / sizeof(s_power_eu[0]) : sizeof(s_power_na) / sizeof(s_power_na[0]);
-    size_t universal_count = sizeof(s_power_universal) / sizeof(s_power_universal[0]);
-    size_t parsed_count = sizeof(s_power_universal_ext) / sizeof(s_power_universal_ext[0]);
-    size_t raw_count = sizeof(s_power_universal_raw) / sizeof(s_power_universal_raw[0]);
-    size_t sent = 0;
-    bruce_viewer_id_t viewer = BRUCE_VIEWER_ID_INVALID;
-    if (gui) {
-        (void)input__flush();
-        (void)dialog__create_text_viewer("TV-B-Gone", "Starting...\n\nBack: stop", &viewer);
-    }
-    bruce_result_t result = ir_app__send_power_batch(
-        regional, regional_count, &sent, regional_count + universal_count + parsed_count + raw_count, viewer
-    );
-    if (result == BRUCE_OK)
-        result = ir_app__send_power_batch(
-            s_power_universal,
-            universal_count,
-            &sent,
-            regional_count + universal_count + parsed_count + raw_count,
-            viewer
-        );
-    if (result == BRUCE_OK)
-        result = ir_app__send_power_batch(
-            s_power_universal_ext,
-            parsed_count,
-            &sent,
-            regional_count + universal_count + parsed_count + raw_count,
-            viewer
-        );
-    if (result == BRUCE_OK)
-        result = ir_app__send_power_batch(
-            s_power_universal_raw,
-            raw_count,
-            &sent,
-            regional_count + universal_count + parsed_count + raw_count,
-            viewer
-        );
-    if (viewer != BRUCE_VIEWER_ID_INVALID) (void)dialog__viewer_close(viewer);
-    if (gui)
-        (void)dialog__message(
-            result == BRUCE_OK ? BRUCE_DIALOG_SUCCESS : BRUCE_DIALOG_WARNING,
-            "TV-B-Gone",
-            result == BRUCE_OK ? "All codes sent" : "Stopped"
-        );
-    return result;
-}
-
 static void
 ir_app__jam_pattern(unsigned int mode, uint32_t *timings, size_t count, uint32_t *state, uint32_t *sweep) {
     for (size_t i = 0; i < count; ++i) {
@@ -554,7 +478,7 @@ static bruce_result_t ir_app__tvbgone_pick(void) {
     };
     size_t region = 0;
     bruce_result_t result = dialog__choice_launcher("TV-B-Gone", "Select region", regions, 3, &region);
-    if (result == BRUCE_OK && region < 2) return ir_app__tvbgone(region == 1, true);
+    if (result == BRUCE_OK && region < 2) return ir_tvbgone__run(region == 1, true);
     return result == BRUCE_ERR_CANCELLED ? BRUCE_OK : result;
 }
 
@@ -829,7 +753,7 @@ int ir_app_main(int argc, char **argv) {
             result = gui ? ir_app__tvbgone_pick() : BRUCE_ERR_INVALID_ARGUMENT;
         } else if (strcasecmp(region, "na") != 0 && strcasecmp(region, "eu") != 0) {
             result = BRUCE_ERR_INVALID_ARGUMENT;
-        } else result = ir_app__tvbgone(strcasecmp(region, "eu") == 0, gui);
+        } else result = ir_tvbgone__run(strcasecmp(region, "eu") == 0, gui);
     } else if (command == jam) {
         const char *frequency_arg = ap_get_arg(jam, "frequency_hz");
         const char *seconds_arg = ap_get_arg(jam, "seconds");

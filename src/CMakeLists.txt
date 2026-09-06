@@ -226,7 +226,8 @@ idf_component_register(SRCS
                      "modules/utils/process/process_app.c"
                     "modules/utils/notify/notify_app.c"
                     "modules/notification_service/notification_service.c"
-                    "modules/ir/ir_app.c"
+                     "modules/ir/ir_app.c"
+                     "modules/ir/ir_tvbgone.c"
                     "modules/nrf24/nrf24_app.c"
                     "modules/bparted/bparted_app.c"
                     "modules/bparted/bparted_cli.c"
@@ -494,7 +495,9 @@ target_include_directories(bruce_sdk_builtin_bluetooth_hid_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/bluetooth_hid")
 
-add_library(bruce_sdk_builtin_ir_check OBJECT "modules/ir/ir_app.c")
+add_library(bruce_sdk_builtin_ir_check OBJECT
+            "modules/ir/ir_app.c"
+            "modules/ir/ir_tvbgone.c")
 target_include_directories(bruce_sdk_builtin_ir_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/ir")

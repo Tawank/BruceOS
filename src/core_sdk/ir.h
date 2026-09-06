@@ -45,10 +45,13 @@ typedef struct {
  *
  * `repeats` means additional complete transmissions after the initial
  * transmission, matching the Bruce IR file/menu convention.
+ * Durations longer than one RMT symbol are emitted as consecutive symbols;
+ * zero-duration transitions are collapsed.
  *
  * @param timings_us Raw mark/space durations in microseconds.
  * @param timing_count Number of entries in timings_us.
- * @param frequency_hz Carrier frequency in Hz, e.g. BRUCE_IR_DEFAULT_FREQUENCY_HZ.
+ * @param frequency_hz Carrier frequency in Hz, e.g. BRUCE_IR_DEFAULT_FREQUENCY_HZ,
+ * or zero for an unmodulated waveform.
  * @param repeats Additional complete transmissions after the initial one.
  * @permission ir
  */

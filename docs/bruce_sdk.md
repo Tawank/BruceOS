@@ -11473,7 +11473,7 @@ transmission, matching the Bruce IR file/menu convention.
 | --- | --- | --- |
 | `timings_us` | `const uint32_t *` | Raw mark/space durations in microseconds. |
 | `timing_count` | `size_t` | Number of entries in timings_us. |
-| `frequency_hz` | `uint32_t` | Carrier frequency in Hz, e.g. BRUCE_IR_DEFAULT_FREQUENCY_HZ. |
+| `frequency_hz` | `uint32_t` | Carrier frequency in Hz, e.g. BRUCE_IR_DEFAULT_FREQUENCY_HZ; zero sends an unmodulated waveform. |
 | `repeats` | `uint8_t` | Additional complete transmissions after the initial one. |
 
 ### Returns
