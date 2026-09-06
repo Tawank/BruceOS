@@ -5,6 +5,7 @@
 #include "args.h"
 #include "core_sdk/bluetooth.h"
 #include "core_sdk/dialog.h"
+#include "core_sdk/input.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
@@ -84,7 +85,17 @@ static bruce_result_t bluetooth_app__poll_scan(void *context, bool *out_complete
 
 static void bluetooth_app__cancel_scan(void *context) {
     bluetooth_app_gui_scan_t *scan = context;
-    if (scan->active) (void)bluetooth__scan_cancel();
+    if (!scan->active) return;
+    /* dialog__choice_poll_launcher() reports a foreground handoff as a
+     * cancellation too. Keep the radio scan alive in that case so the same
+     * picker can resume once this process is foreground again. */
+    bruce_process_snapshot_t snapshot;
+    bruce_process_id_t self = process__current_id();
+    if (self != BRUCE_PROCESS_ID_INVALID && process__snapshot(self, &snapshot) == BRUCE_OK &&
+        snapshot.state == BRUCE_PROCESS_BACKGROUND) {
+        return;
+    }
+    (void)bluetooth__scan_cancel();
 }
 
 /* Presents the scan as a live choice dialog instead of blocking on one long
@@ -100,16 +111,31 @@ static int bluetooth_app__gui_scan(bluetooth__device_t *devices, size_t capacity
     const bruce_dialog_choice_t choices[] = {
         {.label = "Back", .value = "back"},
     };
-    size_t selected = 0;
-    bool complete = false;
-    bruce_result_t dialog_result = dialog__choice_poll_launcher(
-        "BLE Scanning...", NULL, choices, sizeof(choices) / sizeof(choices[0]),
-        BLUETOOTH_APP__SCAN_POLL_INTERVAL_MS, bluetooth_app__poll_scan, &scan, bluetooth_app__cancel_scan, &selected,
-        &complete
-    );
-    if (dialog_result == BRUCE_ERR_CANCELLED || (dialog_result == BRUCE_OK && !complete)) return BRUCE_ERR_CANCELLED;
-    if (dialog_result != BRUCE_OK) return (int)dialog_result;
-    return scan.result;
+    for (;;) {
+        size_t selected = 0;
+        bool complete = false;
+        bruce_result_t dialog_result = dialog__choice_poll_launcher(
+            "BLE Scanning...",
+            NULL,
+            choices,
+            sizeof(choices) / sizeof(choices[0]),
+            BLUETOOTH_APP__SCAN_POLL_INTERVAL_MS,
+            bluetooth_app__poll_scan,
+            &scan,
+            bluetooth_app__cancel_scan,
+            &selected,
+            &complete
+        );
+        if (dialog_result == BRUCE_ERR_CANCELLED && scan.active && bluetooth_app__resume_after_handoff()) {
+            (void)input__flush();
+            continue;
+        }
+        if (dialog_result == BRUCE_ERR_CANCELLED || (dialog_result == BRUCE_OK && !complete)) {
+            return BRUCE_ERR_CANCELLED;
+        }
+        if (dialog_result != BRUCE_OK) return (int)dialog_result;
+        return scan.result;
+    }
 }
 
 /* devices/labels/choices are heap-allocated (rather than kept as ~6 KB of
@@ -138,7 +164,11 @@ static int bluetooth_app__scan_gui(void) {
             bruce_result_t choice_result;
             do {
                 choice_result = dialog__choice_launcher(
-                    "BLE Scan", "No advertisements found", choices, sizeof(choices) / sizeof(choices[0]), &selected
+                    "BLE Scan",
+                    "No advertisements found",
+                    choices,
+                    sizeof(choices) / sizeof(choices[0]),
+                    &selected
                 );
             } while (choice_result == BRUCE_ERR_CANCELLED && bluetooth_app__resume_after_handoff());
             if (choice_result == BRUCE_OK && selected == 0) continue;
