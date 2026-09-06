@@ -142,8 +142,8 @@ static const char *wifi_app_gui__security_label(uint8_t authmode) {
  * editable), the security label (e.g. "WPA2") prompts for a new one. */
 static void wifi_app_gui__format_row(const wifi__network_t *net, bool known, char *out, size_t capacity) {
     const char *tag = net->authmode == WIFI_APP_GUI_AUTH_OPEN
-                           ? "open"
-                           : (known ? "saved" : wifi_app_gui__security_label(net->authmode));
+                          ? "open"
+                          : (known ? "saved" : wifi_app_gui__security_label(net->authmode));
     snprintf(out, capacity, "%-20.20s %4d dBm [%s]", net->ssid, (int)net->rssi, tag);
 }
 
@@ -235,7 +235,9 @@ static void wifi_app_gui__cancel_scan(void *context) {
 static int wifi_app__gui_scan(wifi__network_t *networks, size_t capacity) {
     bruce_result_t start = wifi__scan_start();
     if (start != BRUCE_OK) return (int)start;
-    wifi_app_gui_scan_t scan = {.networks = networks, .capacity = capacity, .result = BRUCE_ERR_TIMEOUT, .active = true};
+    wifi_app_gui_scan_t scan = {
+        .networks = networks, .capacity = capacity, .result = BRUCE_ERR_TIMEOUT, .active = true
+    };
     const bruce_dialog_choice_t choices[] = {
         {.label = "Back", .value = "back"},
     };
@@ -243,8 +245,15 @@ static int wifi_app__gui_scan(wifi__network_t *networks, size_t capacity) {
         size_t selected = 0;
         bool complete = false;
         bruce_result_t dialog_result = dialog__choice_poll_launcher(
-            "WiFi Scanning...", NULL, choices, sizeof(choices) / sizeof(choices[0]),
-            WIFI_APP_GUI_SCAN_POLL_INTERVAL_MS, wifi_app_gui__poll_scan, &scan, wifi_app_gui__cancel_scan, &selected,
+            "WiFi Scanning...",
+            NULL,
+            choices,
+            sizeof(choices) / sizeof(choices[0]),
+            WIFI_APP_GUI_SCAN_POLL_INTERVAL_MS,
+            wifi_app_gui__poll_scan,
+            &scan,
+            wifi_app_gui__cancel_scan,
+            &selected,
             &complete
         );
         if (dialog_result == BRUCE_ERR_CANCELLED && scan.active && wifi_app__resume_after_handoff()) {
@@ -361,14 +370,19 @@ static int wifi_app_status(void) {
         const char *ip = wifi__get_ip();
         const char *mac = wifi__get_mac();
         stdio__printf(
-            "Wi-Fi: connected\nSSID: %s\nIP: %s\nMAC: %s\n", ssid != NULL ? ssid : "unknown",
-            ip != NULL ? ip : "unknown", mac != NULL ? mac : "unknown"
+            "Wi-Fi: connected\nSSID: %s\nIP: %s\nMAC: %s\n",
+            ssid != NULL ? ssid : "unknown",
+            ip != NULL ? ip : "unknown",
+            mac != NULL ? mac : "unknown"
         );
     } else if (wifi__is_ap_running()) {
         const char *ssid = wifi__get_ssid();
         const char *ip = wifi__get_ip();
-        stdio__printf("Wi-Fi AP: running\nSSID: %s\nIP: %s\n", ssid != NULL ? ssid : "unknown",
-                      ip != NULL ? ip : "unknown");
+        stdio__printf(
+            "Wi-Fi AP: running\nSSID: %s\nIP: %s\n",
+            ssid != NULL ? ssid : "unknown",
+            ip != NULL ? ip : "unknown"
+        );
     } else {
         stdio__printf("Wi-Fi: disconnected\n");
     }
@@ -407,6 +421,8 @@ static int wifi_app_on(void) {
         return 0;
     }
     if (connect_result == BRUCE_ERR_NOT_FOUND && runtime__gui_requested()) {
+        bruce_result_t foreground_result = runtime__to_foreground();
+        if (foreground_result != BRUCE_OK) return -1;
         (void)notification__push("Choose a Wi-Fi network", 3000);
         return wifi_app__gui();
     }
@@ -430,9 +446,8 @@ static int wifi_app_off(const char *notice) {
 
 static int wifi_app_toggle(void) {
     if (__atomic_exchange_n(&s_wifi_app_toggle_in_progress, true, __ATOMIC_ACQ_REL)) return 0;
-    int result = (wifi__is_connected() || wifi__is_ap_running())
-                     ? wifi_app_off("Wi-Fi disconnected")
-                     : wifi_app_on();
+    int result =
+        (wifi__is_connected() || wifi__is_ap_running()) ? wifi_app_off("Wi-Fi disconnected") : wifi_app_on();
     __atomic_store_n(&s_wifi_app_toggle_in_progress, false, __ATOMIC_RELEASE);
     return result;
 }
