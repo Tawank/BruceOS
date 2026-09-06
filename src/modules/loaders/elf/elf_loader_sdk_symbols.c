@@ -11,7 +11,9 @@
 
 #include <assert.h>
 #include <ctype.h>
+#include <dirent.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <math.h>
 #include <pthread.h>
 #include <setjmp.h>
@@ -21,7 +23,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <sys/stat.h>
 #include <time.h>
+#include <unistd.h>
 
 #include "esp_elf.h" // IWYU pragma: export
 
@@ -625,6 +629,324 @@ clock_t bruce_elf__clock(void) {
 }
 
 /* ---------------------------------------------------------------------------
+ * POSIX low-level file I/O (open/close/read/write/lseek), metadata
+ * (stat/fstat), and directory listing (opendir/readdir/closedir/rewinddir),
+ * all layered on the exact same storage__* calls and bruce_elf_file_t box
+ * the FILE*-based stdio family above already uses -- this is the
+ * int-fd-shaped surface next to that pointer-shaped one, not a second
+ * implementation. mkdir/access/unlink are thin storage__mkdir/exists/remove
+ * wrappers (unlink is literally bruce_elf__remove under another name -- see
+ * the table entries below).
+ *
+ * A fixed-size fd table maps small integers to the same boxes fopen() hands
+ * out as FILE*, with fd 0/1/2 permanently bound to the stdin/stdout/stderr
+ * console sentinels above (g_bruce_elf_console_in/out) -- so `write(1, ...)`
+ * and `read(0, ...)` work too, not just their FILE* equivalents. Closing
+ * fd 0/1/2 is a documented no-op, same as fclose() on stdin/stdout/stderr:
+ * bruce_elf__fclose() already refuses to free a non-STORAGE box, so
+ * bruce_elf__close() reusing it is correct as-is; the table slot is simply
+ * never cleared for those three reserved descriptors.
+ *
+ * stat()/fstat() populate only the fields BruceOS's storage layer actually
+ * tracks (size and file-vs-directory) -- st_dev/st_ino/st_uid/st_gid/st_rdev
+ * and all three timestamps are always zero, a real, documented gap rather
+ * than fabricated data. "is this path a directory" reuses this codebase's
+ * own standing idiom (see storage__copy()'s comment in core/storage/storage.c):
+ * storage__list(path, NULL, 0, &count) succeeding means a directory, and
+ * BRUCE_ERR_IO specifically means "exists but isn't one".
+ *
+ * opendir() takes a two-pass snapshot (size the listing, then fetch it in
+ * full into one malloc'd array) rather than exposing any live cursor into
+ * storage__list() -- there isn't one to expose (out_count is always "how
+ * many total", not an offset/cursor API) -- so a directory that changes
+ * between those two calls, or between opendir() and a later readdir(), is a
+ * known, documented snapshot-vs-live race, not something this shim can
+ * avoid without storage__* itself growing pagination. */
+
+#define BRUCE_ELF_FD_MAX 32
+#define BRUCE_ELF_FD_RESERVED 3 /* 0/1/2 = stdin/stdout/stderr, pre-bound below */
+
+static bruce_elf_file_t *s_bruce_elf_fd_table[BRUCE_ELF_FD_MAX] = {
+    [0] = &g_bruce_elf_console_in,
+    [1] = &g_bruce_elf_console_out,
+    [2] = &g_bruce_elf_console_out,
+};
+
+static int bruce_elf__fd_alloc(bruce_elf_file_t *box) {
+    for (int fd = BRUCE_ELF_FD_RESERVED; fd < BRUCE_ELF_FD_MAX; ++fd) {
+        if (s_bruce_elf_fd_table[fd] == NULL) {
+            s_bruce_elf_fd_table[fd] = box;
+            return fd;
+        }
+    }
+    return -1;
+}
+
+static bruce_elf_file_t *bruce_elf__fd_lookup(int fd) {
+    if (fd < 0 || fd >= BRUCE_ELF_FD_MAX) return NULL;
+    return s_bruce_elf_fd_table[fd];
+}
+
+static uint32_t bruce_elf__translate_open_flags(int flags) {
+    uint32_t result = 0;
+    int access_mode = flags & O_ACCMODE;
+    if (access_mode == O_WRONLY) {
+        result |= BRUCE_STORAGE_OPEN_WRITE;
+    } else if (access_mode == O_RDWR) {
+        result |= BRUCE_STORAGE_OPEN_READ | BRUCE_STORAGE_OPEN_WRITE;
+    } else {
+        result |= BRUCE_STORAGE_OPEN_READ;
+    }
+    if (flags & O_APPEND) result |= BRUCE_STORAGE_OPEN_APPEND;
+    if (flags & O_CREAT) result |= BRUCE_STORAGE_OPEN_CREATE;
+    if (flags & O_TRUNC) result |= BRUCE_STORAGE_OPEN_TRUNCATE;
+    return result;
+}
+
+/* The POSIX mode_t third argument (only meaningful with O_CREAT) is
+ * silently ignored via `...` rather than read -- BruceOS storage has no
+ * permission-bit concept for files, same rationale as bruce_elf__mkdir()
+ * below. */
+int bruce_elf__open(const char *path, int flags, ...) {
+    if (path == NULL) {
+        *__errno() = EINVAL;
+        return -1;
+    }
+    bruce_elf_file_t *box = memory__malloc(sizeof(*box));
+    if (box == NULL) {
+        *__errno() = ENOMEM;
+        return -1;
+    }
+    box->kind = BRUCE_ELF_FILE_STORAGE;
+    box->eof = false;
+    box->error = false;
+    bruce_result_t result = storage__open(path, bruce_elf__translate_open_flags(flags), &box->file);
+    if (result != BRUCE_OK) {
+        memory__free(box);
+        bruce_elf__set_errno_from_result(result);
+        return -1;
+    }
+    int fd = bruce_elf__fd_alloc(box);
+    if (fd < 0) {
+        storage__close(box->file);
+        memory__free(box);
+        *__errno() = EMFILE;
+        return -1;
+    }
+    return fd;
+}
+
+int bruce_elf__close(int fd) {
+    bruce_elf_file_t *box = bruce_elf__fd_lookup(fd);
+    if (box == NULL) {
+        *__errno() = EBADF;
+        return -1;
+    }
+    int result = bruce_elf__fclose((FILE *)box);
+    if (fd >= BRUCE_ELF_FD_RESERVED) s_bruce_elf_fd_table[fd] = NULL;
+    return result == 0 ? 0 : -1;
+}
+
+ssize_t bruce_elf__read(int fd, void *buffer, size_t count) {
+    bruce_elf_file_t *box = bruce_elf__fd_lookup(fd);
+    if (box == NULL) {
+        *__errno() = EBADF;
+        return -1;
+    }
+    size_t read_count = bruce_elf__fread(buffer, 1, count, (FILE *)box);
+    if (read_count == 0 && count != 0 && box->error) {
+        *__errno() = EIO;
+        return -1;
+    }
+    return (ssize_t)read_count;
+}
+
+ssize_t bruce_elf__write(int fd, const void *buffer, size_t count) {
+    bruce_elf_file_t *box = bruce_elf__fd_lookup(fd);
+    if (box == NULL) {
+        *__errno() = EBADF;
+        return -1;
+    }
+    size_t written = bruce_elf__fwrite(buffer, 1, count, (FILE *)box);
+    if (written == 0 && count != 0 && box->error) {
+        *__errno() = EIO;
+        return -1;
+    }
+    return (ssize_t)written;
+}
+
+off_t bruce_elf__lseek(int fd, off_t offset, int whence) {
+    bruce_elf_file_t *box = bruce_elf__fd_lookup(fd);
+    if (box == NULL) {
+        *__errno() = EBADF;
+        return (off_t)-1;
+    }
+    if (bruce_elf__fseek((FILE *)box, (long)offset, whence) != 0) return (off_t)-1;
+    return (off_t)bruce_elf__ftell((FILE *)box);
+}
+
+static void bruce_elf__stat_fill(struct stat *out, bool is_dir, size_t size) {
+    memset(out, 0, sizeof(*out));
+    out->st_mode = (mode_t)((is_dir ? S_IFDIR : S_IFREG) | (is_dir ? 0755 : 0644));
+    out->st_nlink = 1;
+    out->st_size = (off_t)size;
+    out->st_blksize = 512;
+    out->st_blocks = (blkcnt_t)((size + 511) / 512);
+}
+
+int bruce_elf__stat(const char *path, struct stat *out) {
+    if (path == NULL || out == NULL) {
+        *__errno() = EINVAL;
+        return -1;
+    }
+    size_t entry_count = 0;
+    bruce_result_t result = storage__list(path, NULL, 0, &entry_count);
+    if (result == BRUCE_OK) {
+        bruce_elf__stat_fill(out, true, 0);
+        return 0;
+    }
+    if (result != BRUCE_ERR_IO) {
+        bruce_elf__set_errno_from_result(result);
+        return -1;
+    }
+    bruce_file_id_t file;
+    result = storage__open(path, BRUCE_STORAGE_OPEN_READ, &file);
+    if (result != BRUCE_OK) {
+        bruce_elf__set_errno_from_result(result);
+        return -1;
+    }
+    uint64_t size = 0;
+    storage__seek(file, 0, SEEK_END, &size);
+    storage__close(file);
+    bruce_elf__stat_fill(out, false, (size_t)size);
+    return 0;
+}
+
+int bruce_elf__fstat(int fd, struct stat *out) {
+    bruce_elf_file_t *box = bruce_elf__fd_lookup(fd);
+    if (box == NULL || out == NULL) {
+        *__errno() = EBADF;
+        return -1;
+    }
+    if (box->kind != BRUCE_ELF_FILE_STORAGE) {
+        /* stdin/stdout/stderr: report as a character device, no seekable size. */
+        memset(out, 0, sizeof(*out));
+        out->st_mode = S_IFCHR | 0666;
+        out->st_nlink = 1;
+        return 0;
+    }
+    uint64_t saved_position = 0;
+    storage__seek(box->file, 0, SEEK_CUR, &saved_position);
+    uint64_t size = 0;
+    storage__seek(box->file, 0, SEEK_END, &size);
+    storage__seek(box->file, (int64_t)saved_position, SEEK_SET, &saved_position);
+    bruce_elf__stat_fill(out, false, (size_t)size);
+    return 0;
+}
+
+int bruce_elf__mkdir(const char *path, mode_t mode) {
+    (void)mode; /* BruceOS storage has no permission-bit concept */
+    bruce_result_t result = storage__mkdir(path);
+    if (result != BRUCE_OK) {
+        bruce_elf__set_errno_from_result(result);
+        return -1;
+    }
+    return 0;
+}
+
+int bruce_elf__access(const char *path, int mode) {
+    (void)mode; /* only existence is checked -- no read/write/execute permission bits here */
+    bool exists = false;
+    bruce_result_t result = storage__exists(path, &exists);
+    if (result != BRUCE_OK) {
+        bruce_elf__set_errno_from_result(result);
+        return -1;
+    }
+    if (!exists) {
+        *__errno() = ENOENT;
+        return -1;
+    }
+    return 0;
+}
+
+/* One malloc'd snapshot of storage__list()'s output, walked by index --
+ * see the design comment above for why this can't be a live cursor. */
+typedef struct {
+    bruce_storage_entry_t *entries;
+    size_t count;
+    size_t index;
+    struct dirent current;
+} bruce_elf_dir_t;
+
+DIR *bruce_elf__opendir(const char *path) {
+    if (path == NULL) {
+        *__errno() = EINVAL;
+        return NULL;
+    }
+    size_t total = 0;
+    bruce_result_t result = storage__list(path, NULL, 0, &total);
+    if (result != BRUCE_OK) {
+        bruce_elf__set_errno_from_result(result);
+        return NULL;
+    }
+    bruce_elf_dir_t *dir = memory__malloc(sizeof(*dir));
+    if (dir == NULL) {
+        *__errno() = ENOMEM;
+        return NULL;
+    }
+    dir->entries = NULL;
+    dir->count = 0;
+    dir->index = 0;
+    if (total > 0) {
+        dir->entries = memory__malloc(total * sizeof(bruce_storage_entry_t));
+        if (dir->entries == NULL) {
+            memory__free(dir);
+            *__errno() = ENOMEM;
+            return NULL;
+        }
+        size_t actual = 0;
+        result = storage__list(path, dir->entries, total, &actual);
+        if (result != BRUCE_OK) {
+            memory__free(dir->entries);
+            memory__free(dir);
+            bruce_elf__set_errno_from_result(result);
+            return NULL;
+        }
+        dir->count = actual < total ? actual : total;
+    }
+    return (DIR *)dir;
+}
+
+struct dirent *bruce_elf__readdir(DIR *dirp) {
+    bruce_elf_dir_t *dir = (bruce_elf_dir_t *)dirp;
+    if (dir == NULL || dir->index >= dir->count) return NULL;
+    const bruce_storage_entry_t *entry = &dir->entries[dir->index++];
+    memset(&dir->current, 0, sizeof(dir->current));
+    dir->current.d_type = (entry->type == BRUCE_STORAGE_ENTRY_DIRECTORY) ? DT_DIR : DT_REG;
+    size_t name_len = strlen(entry->name);
+    if (name_len >= sizeof(dir->current.d_name)) name_len = sizeof(dir->current.d_name) - 1;
+    memcpy(dir->current.d_name, entry->name, name_len);
+    dir->current.d_name[name_len] = '\0';
+    return &dir->current;
+}
+
+void bruce_elf__rewinddir(DIR *dirp) {
+    bruce_elf_dir_t *dir = (bruce_elf_dir_t *)dirp;
+    if (dir != NULL) dir->index = 0;
+}
+
+int bruce_elf__closedir(DIR *dirp) {
+    bruce_elf_dir_t *dir = (bruce_elf_dir_t *)dirp;
+    if (dir == NULL) {
+        *__errno() = EBADF;
+        return -1;
+    }
+    memory__free(dir->entries);
+    memory__free(dir);
+    return 0;
+}
+
+/* ---------------------------------------------------------------------------
  * Minimal C++ ABI support, added for C++ ELF apps (see
  * native_apps/examples/game3d, the first one). project_elf() builds ELF apps
  * with `-nostdlib` (see components/elf_loader/elf_loader.cmake) and never
@@ -1178,6 +1500,20 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     {"fprintf",  (const void *)&bruce_elf__fprintf  },
     {"vfprintf", (const void *)&bruce_elf__vfprintf },
     {"setvbuf",  (const void *)&bruce_elf__setvbuf  },
+    {"open",     (const void *)&bruce_elf__open     },
+    {"close",    (const void *)&bruce_elf__close    },
+    {"read",     (const void *)&bruce_elf__read     },
+    {"write",    (const void *)&bruce_elf__write    },
+    {"lseek",    (const void *)&bruce_elf__lseek    },
+    {"stat",     (const void *)&bruce_elf__stat     },
+    {"fstat",    (const void *)&bruce_elf__fstat    },
+    {"mkdir",    (const void *)&bruce_elf__mkdir    },
+    {"access",   (const void *)&bruce_elf__access   },
+    {"unlink",   (const void *)&bruce_elf__remove   }, /* unlink() and remove() are the same operation here */
+    {"opendir",  (const void *)&bruce_elf__opendir  },
+    {"readdir",  (const void *)&bruce_elf__readdir  },
+    {"closedir", (const void *)&bruce_elf__closedir },
+    {"rewinddir",(const void *)&bruce_elf__rewinddir},
     {"getenv",   (const void *)&bruce_elf__getenv   },
     {"setenv",   (const void *)&bruce_elf__setenv   },
     {"unsetenv", (const void *)&bruce_elf__unsetenv },

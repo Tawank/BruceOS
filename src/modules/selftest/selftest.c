@@ -179,6 +179,7 @@ int selftest_app_main(int argc, char **argv) {
     RUN_SELFTEST(selftest__run_elf_loader_stdio_case);
     RUN_SELFTEST(selftest__run_elf_loader_libc_case);
     RUN_SELFTEST(selftest__run_elf_loader_time_case);
+    RUN_SELFTEST(selftest__run_elf_loader_posix_case);
     RUN_SELFTEST(selftest__run_reclaim_handoff_case);
     RUN_SELFTEST(selftest__run_wasm_loader_case);
     RUN_SELFTEST(selftest__run_wasm_manifest_case);

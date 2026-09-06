@@ -1,8 +1,11 @@
+#include <dirent.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <time.h>
 
 #include "core/storage/storage.h"
@@ -286,6 +289,152 @@ bool selftest__run_elf_loader_time_case(void) {
     }
 
     printf("[selftest] loader/elf_time: OK\n");
+    return true;
+}
+
+/*
+ * Exercises the ELF loader's POSIX file/dir adapters (open/close/read/
+ * write/lseek, stat/fstat, mkdir/access/unlink, opendir/readdir/closedir),
+ * by calling the (deliberately non-static) adapter functions directly, same
+ * rationale as selftest__run_elf_loader_stdio_case(). Also checks that fd
+ * 0/1/2 are pre-bound to the same console sentinels the FILE*-based
+ * stdin/stdout/stderr use, and that closing them is a no-op.
+ */
+bool selftest__run_elf_loader_posix_case(void) {
+    const char *dir = "/selftest_elf_posix";
+    const char *file_a = "/selftest_elf_posix/a.txt";
+    const char *file_b = "/selftest_elf_posix/b.txt";
+    const char *missing = "/selftest_elf_posix/missing.txt";
+
+    /* Best-effort cleanup from a previous interrupted run. */
+    bruce_elf__remove(file_a);
+    bruce_elf__remove(file_b);
+    bruce_elf__remove(dir);
+
+    if (bruce_elf__mkdir(dir, 0755) != 0) {
+        printf("[selftest] loader/elf_posix: mkdir failed\n");
+        return false;
+    }
+
+    int fd = bruce_elf__open(file_a, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) {
+        printf("[selftest] loader/elf_posix: open(O_WRONLY|O_CREAT) failed (%d)\n", fd);
+        return false;
+    }
+    if (bruce_elf__write(fd, "hello", 5) != 5) {
+        printf("[selftest] loader/elf_posix: write mismatch\n");
+        return false;
+    }
+    if (bruce_elf__close(fd) != 0) {
+        printf("[selftest] loader/elf_posix: close failed\n");
+        return false;
+    }
+
+    if (bruce_elf__access(file_a, 0) != 0) {
+        printf("[selftest] loader/elf_posix: access on existing file failed\n");
+        return false;
+    }
+    if (bruce_elf__access(missing, 0) == 0) {
+        printf("[selftest] loader/elf_posix: access on missing file succeeded\n");
+        return false;
+    }
+
+    struct stat file_stat;
+    if (bruce_elf__stat(file_a, &file_stat) != 0 || !S_ISREG(file_stat.st_mode) || file_stat.st_size != 5) {
+        printf("[selftest] loader/elf_posix: stat(file) mismatch\n");
+        return false;
+    }
+    struct stat dir_stat;
+    if (bruce_elf__stat(dir, &dir_stat) != 0 || !S_ISDIR(dir_stat.st_mode)) {
+        printf("[selftest] loader/elf_posix: stat(dir) mismatch\n");
+        return false;
+    }
+
+    fd = bruce_elf__open(file_a, O_RDONLY);
+    if (fd < 0) {
+        printf("[selftest] loader/elf_posix: open(O_RDONLY) failed (%d)\n", fd);
+        return false;
+    }
+    char buffer[16] = {0};
+    if (bruce_elf__read(fd, buffer, sizeof(buffer)) != 5 || strcmp(buffer, "hello") != 0) {
+        printf("[selftest] loader/elf_posix: read mismatch (\"%s\")\n", buffer);
+        return false;
+    }
+    struct stat fd_stat;
+    if (bruce_elf__fstat(fd, &fd_stat) != 0 || fd_stat.st_size != 5) {
+        printf("[selftest] loader/elf_posix: fstat mismatch\n");
+        return false;
+    }
+    if (bruce_elf__lseek(fd, 2, SEEK_SET) != 2) {
+        printf("[selftest] loader/elf_posix: lseek mismatch\n");
+        return false;
+    }
+    memset(buffer, 0, sizeof(buffer));
+    if (bruce_elf__read(fd, buffer, sizeof(buffer)) != 3 || strcmp(buffer, "llo") != 0) {
+        printf("[selftest] loader/elf_posix: post-seek read mismatch (\"%s\")\n", buffer);
+        return false;
+    }
+    bruce_elf__close(fd);
+
+    fd = bruce_elf__open(file_b, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0 || bruce_elf__write(fd, "b", 1) != 1) {
+        printf("[selftest] loader/elf_posix: creating second file failed\n");
+        return false;
+    }
+    bruce_elf__close(fd);
+
+    DIR *dirp = bruce_elf__opendir(dir);
+    if (dirp == NULL) {
+        printf("[selftest] loader/elf_posix: opendir failed\n");
+        return false;
+    }
+    bool saw_a = false, saw_b = false;
+    struct dirent *entry;
+    while ((entry = bruce_elf__readdir(dirp)) != NULL) {
+        if (entry->d_type != DT_REG) {
+            printf("[selftest] loader/elf_posix: unexpected d_type for \"%s\"\n", entry->d_name);
+            bruce_elf__closedir(dirp);
+            return false;
+        }
+        if (strcmp(entry->d_name, "a.txt") == 0) saw_a = true;
+        if (strcmp(entry->d_name, "b.txt") == 0) saw_b = true;
+    }
+    bruce_elf__closedir(dirp);
+    if (!saw_a || !saw_b) {
+        printf("[selftest] loader/elf_posix: readdir missing an entry (a=%d b=%d)\n", saw_a, saw_b);
+        return false;
+    }
+
+    /* Bad-fd handling. */
+    if (bruce_elf__read(999, buffer, sizeof(buffer)) != -1 || bruce_elf__close(999) != -1) {
+        printf("[selftest] loader/elf_posix: bad fd accepted\n");
+        return false;
+    }
+
+    /* fd 0/1/2 are pre-bound to the same console sentinels FILE*
+     * stdin/stdout/stderr use, and closing them is a documented no-op. */
+    static const char console_msg[] = "selftest\n";
+    if (bruce_elf__write(1, console_msg, sizeof(console_msg) - 1) != (ssize_t)(sizeof(console_msg) - 1)) {
+        printf("[selftest] loader/elf_posix: write(1, ...) mismatch\n");
+        return false;
+    }
+    if (bruce_elf__close(1) != 0) {
+        printf("[selftest] loader/elf_posix: close(1) failed\n");
+        return false;
+    }
+    if (bruce_elf__write(1, console_msg, sizeof(console_msg) - 1) != (ssize_t)(sizeof(console_msg) - 1)) {
+        printf("[selftest] loader/elf_posix: write(1, ...) after close(1) failed -- fd 1 was cleared\n");
+        return false;
+    }
+
+    bruce_elf__remove(file_a);
+    bruce_elf__remove(file_b);
+    if (bruce_elf__remove(dir) != 0) {
+        printf("[selftest] loader/elf_posix: cleanup rmdir failed\n");
+        return false;
+    }
+
+    printf("[selftest] loader/elf_posix: OK\n");
     return true;
 }
 

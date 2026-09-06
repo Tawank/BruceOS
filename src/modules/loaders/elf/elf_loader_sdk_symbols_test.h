@@ -7,8 +7,11 @@
  * bruce_elf__* adapter in that file stays `static` and is not declared
  * here. */
 
+#include <dirent.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <time.h>
 
 FILE *bruce_elf__fopen(const char *path, const char *mode);
@@ -45,3 +48,17 @@ struct tm *bruce_elf__localtime_r(const time_t *timer, struct tm *out);
 struct tm *bruce_elf__localtime(const time_t *timer);
 time_t bruce_elf__mktime(struct tm *tm);
 clock_t bruce_elf__clock(void);
+
+int bruce_elf__open(const char *path, int flags, ...);
+int bruce_elf__close(int fd);
+ssize_t bruce_elf__read(int fd, void *buffer, size_t count);
+ssize_t bruce_elf__write(int fd, const void *buffer, size_t count);
+off_t bruce_elf__lseek(int fd, off_t offset, int whence);
+int bruce_elf__stat(const char *path, struct stat *out);
+int bruce_elf__fstat(int fd, struct stat *out);
+int bruce_elf__mkdir(const char *path, mode_t mode);
+int bruce_elf__access(const char *path, int mode);
+DIR *bruce_elf__opendir(const char *path);
+struct dirent *bruce_elf__readdir(DIR *dirp);
+void bruce_elf__rewinddir(DIR *dirp);
+int bruce_elf__closedir(DIR *dirp);
