@@ -114,8 +114,8 @@ static void elf_loader__cleanup_context(void *context) {
     elf_loader__free_process_ctx((elf_loader_process_ctx_t *)context);
 }
 
-/* Process entry for an ELF already relocated by elf_loader__open(). Adopts
- * the XIP mapping FIRST, before the reclaim token -- elf_loader__open()'s own
+/* Process entry for an ELF already relocated by elf_loader__open(). Flash-XIP
+ * builds adopt the XIP mapping FIRST, before the reclaim token -- elf_loader__open()'s own
  * wait loop (see its "for (;;)" below) treats this process having any
  * resource at all (snapshot.resource_count > 0) as its signal that the
  * hand-off is done and it's safe for the loader to exit, so whichever adopt
@@ -142,8 +142,10 @@ static void elf_loader__cleanup_context(void *context) {
  * about. */
 static int elf_loader__entry(void *context) {
     elf_loader_process_ctx_t *ctx = (elf_loader_process_ctx_t *)context;
+#if !CONFIG_ELF_LOADER_LOAD_PSRAM
     bruce_result_t adopt_result = ext_mem_loader__adopt_xip(&ctx->xip);
     if (adopt_result != BRUCE_OK) return adopt_result;
+#endif
     /* Best-effort, and deliberately after the XIP adopt above: a failed (or,
      * per the ordering note above, not-yet-observed-by-the-loader) adopt just
      * means whatever was reclaimed stays credited to the loader instead of
@@ -164,6 +166,7 @@ static int elf_loader__entry(void *context) {
     return result;
 }
 
+#if !CONFIG_ELF_LOADER_LOAD_PSRAM
 static int elf_loader__xip_allocate(
     void *context, size_t size, const uint8_t **instruction, const uint8_t **data, uint32_t *handle
 ) {
@@ -203,6 +206,7 @@ static const esp_elf_xip_ops_t s_xip_ops = {
     .write = elf_loader__xip_write,
     .release = elf_loader__xip_release,
 };
+#endif
 
 static int elf_loader__open(
     const char *path, const char *arg, bruce_launch_mode_t mode,
@@ -288,12 +292,18 @@ static int elf_loader__open(
     int relocate_result = esp_elf_init(&ctx->elf);
     if (relocate_result == 0) {
         ctx->elf_initialized = true;
+#if CONFIG_ELF_LOADER_LOAD_PSRAM
+        /* Espressif's PSRAM backend owns the relocated segments through
+         * esp_elf_deinit(), which runs from this process's context cleanup. */
+        relocate_result = esp_elf_relocate(&ctx->elf, image.data);
+#else
         relocate_result = esp_elf_relocate_xip(&ctx->elf, image.data, image.size, &s_xip_ops, ctx);
+#endif
     }
     bruce_result_t release_result = ext_mem_loader__release_image(&image);
     if (relocate_result != 0 || release_result != BRUCE_OK) {
         printf(
-            "[elf_loader] %s: flash-backed relocation failed (relocate=%d, release=%d)\n",
+            "[elf_loader] %s: relocation failed (relocate=%d, release=%d)\n",
             ctx->permission_key,
             relocate_result,
             release_result
@@ -329,7 +339,9 @@ static int elf_loader__open(
         inspection->manifest.stack_size + inspection->manifest.heap_size, NULL, &ctx->reclaim_token
     );
 
+#if !CONFIG_ELF_LOADER_LOAD_PSRAM
     bruce_ext_mem_loader_xip_image_t parent_xip = ctx->xip;
+#endif
     int result = app_runner__spawn_loader_process_owned(
         permission_key,
         gui_requested,
@@ -349,7 +361,9 @@ static int elf_loader__open(
          * this is the launch-failed path, not a loop callers retry rapidly,
          * and it is never left un-reverted, just reverted later than ideal. */
         elf_loader__free_process_ctx(ctx);
-    } else {
+    }
+#if !CONFIG_ELF_LOADER_LOAD_PSRAM
+    else {
         /* Waits for the spawned process to own at least one resource before
          * letting this loader process proceed (and, in particular, exit --
          * see the module doc comment above app_main() ... actually see
@@ -377,6 +391,7 @@ static int elf_loader__open(
             if (runtime__delay(1) != BRUCE_OK) break;
         }
     }
+#endif
     memory__free(inspection);
     return result;
 }

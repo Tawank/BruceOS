@@ -480,7 +480,7 @@ static void terminal__handle_selection_input(terminal__state_t *state, const bru
      * selection mode -- the same two-step flow tmux's `y` and tmux's plain
      * Enter both follow. */
     bool confirm = event->code == BRUCE_INPUT_CODE_BUTTON_A ||
-                   (event->code == BRUCE_INPUT_CODE_SELECT && event->type != BRUCE_INPUT_KEY) ||
+                   (event->code == BRUCE_INPUT_CODE_SELECT && (semantic_key || event->type != BRUCE_INPUT_KEY)) ||
                    (event->type == BRUCE_INPUT_KEY && !semantic_key &&
                     (event->code == '\r' || event->code == '\n' || event->code == 'y'));
     if (mark) {
@@ -521,11 +521,23 @@ static void terminal__handle_selection_input(terminal__state_t *state, const bru
             case BRUCE_INPUT_CODE_DOWN:
                 if ((uint16_t)(state->sel_cursor_y + 1) < grid->rows) state->sel_cursor_y++;
                 break;
+            case BRUCE_INPUT_CODE_PREV:
             case BRUCE_INPUT_CODE_LEFT:
-                if (state->sel_cursor_x > 0) state->sel_cursor_x--;
+                if (state->sel_cursor_x > 0) {
+                    state->sel_cursor_x--;
+                } else if (state->sel_cursor_y > 0) {
+                    state->sel_cursor_y--;
+                    state->sel_cursor_x = grid->columns - 1u;
+                }
                 break;
+            case BRUCE_INPUT_CODE_NEXT:
             case BRUCE_INPUT_CODE_RIGHT:
-                if ((uint16_t)(state->sel_cursor_x + 1) < grid->columns) state->sel_cursor_x++;
+                if ((uint16_t)(state->sel_cursor_x + 1) < grid->columns) {
+                    state->sel_cursor_x++;
+                } else if ((uint16_t)(state->sel_cursor_y + 1) < grid->rows) {
+                    state->sel_cursor_y++;
+                    state->sel_cursor_x = 0;
+                }
                 break;
             default: return; /* unrecognized key: ignore */
         }

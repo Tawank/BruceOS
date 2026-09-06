@@ -32,6 +32,8 @@ CONFIG_IDF_TARGET="esp32s3"
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_OCT=y
 CONFIG_SPIRAM_SPEED_80M=y
+# Relocate ELF apps into executable PSRAM instead of requiring swap-backed XIP.
+CONFIG_ELF_LOADER_LOAD_PSRAM=y
 # Route plain malloc() (not just explicit MALLOC_CAP_SPIRAM callers like
 # memory__external_alloc() below) through PSRAM once it no longer fits
 # internal RAM. This is already ESP-IDF's own default SPIRAM_USE choice
@@ -195,9 +197,8 @@ CONFIG_BRUCE_SD_PIN_CS=39
 # motion is the encoder's center press (legacy ENCODER_KEY/SEL_BTN), mapped
 # to SELECT (OK/confirm) - unlike the CC1101 variant there is no separate
 # back button (no legacy BK_BTN on this board), so no button A here.
-CONFIG_BRUCE_BUTTON_SELECT_ENABLED=y
-CONFIG_BRUCE_BUTTON_SELECT_GPIO=0
-# CONFIG_BRUCE_BUTTON_A_ENABLED is not set
+CONFIG_BRUCE_BUTTON_A_ENABLED=y
+CONFIG_BRUCE_BUTTON_A_GPIO=0
 # CONFIG_BRUCE_BUTTON_B_ENABLED is not set
 # CONFIG_BRUCE_BUTTON_C_ENABLED is not set
 
