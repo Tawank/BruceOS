@@ -87,6 +87,22 @@ bruce_result_t runtime__timer_stop(bruce_timer_id_t timer_id);
  */
 bool runtime__gui_requested(void);
 
+/**
+ * @brief Gives the calling process foreground ownership.
+ *
+ * Marks the process GUI-capable when necessary. This is self-only and does
+ * not require process permission.
+ */
+bruce_result_t runtime__to_foreground(void);
+
+/**
+ * @brief Moves the calling foreground process to the background.
+ *
+ * This is self-only and returns BRUCE_ERR_INVALID_STATE when the caller is
+ * not currently foreground.
+ */
+bruce_result_t runtime__to_background(void);
+
 #ifdef __cplusplus
 }
 #endif

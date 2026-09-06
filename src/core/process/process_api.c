@@ -3,12 +3,12 @@
 #include "core/display/display.h"
 #include "core_sdk/environment.h"
 #include "core_sdk/permission.h"
+#include "core_sdk/runtime.h"
 
 #include <limits.h>
 #include <string.h>
 
 #include "esp_timer.h"
-
 
 bruce_process_id_t process__current_id(void) {
     process__ensure_init();
@@ -35,7 +35,8 @@ bruce_result_t process__list(bruce_process_snapshot_t *snapshots, size_t capacit
     process__lock();
     process__refresh_cpu_samples_locked();
     size_t written = 0;
-    for (process__record_t *record = s_processes; record != NULL && written < capacity; record = record->next) {
+    for (process__record_t *record = s_processes; record != NULL && written < capacity;
+         record = record->next) {
         if (record->in_use) {
             process__fill_snapshot_locked(record, &snapshots[written]);
             written++;
@@ -180,6 +181,10 @@ bruce_result_t process__to_foreground(void) {
     return BRUCE_OK;
 }
 
+bruce_result_t runtime__to_foreground(void) { return process__to_foreground(); }
+
+bruce_result_t runtime__to_background(void) { return process__to_background(); }
+
 bruce_result_t process__foreground(bruce_process_id_t process_id) {
     if (process_id != process__current_id()) {
         bruce_result_t permission_result = permission__check(BRUCE_PERMISSION_PROCESS);
@@ -245,8 +250,7 @@ bruce_result_t process__signal(bruce_process_id_t process_id, bruce_process_sign
         stop(stop_context, signal);
         process__lock();
         record = process__find_by_id_locked(process_id);
-        if (record != NULL && record->stop_callback_count > 0 &&
-            --record->stop_callback_count == 0) {
+        if (record != NULL && record->stop_callback_count > 0 && --record->stop_callback_count == 0) {
             xEventGroupSetBits(record->events, PROCESS__EVT_STOP_CALLBACK_IDLE);
             if (record->teardown_pending) {
                 bruce_process_status_t status = record->pending_status;
@@ -388,8 +392,11 @@ bruce_result_t process__kill(bruce_process_id_t process_id) {
         if (record->operation_count == 0 && record->stop_callback_count == 0) { break; }
         process__unlock();
         (void)xEventGroupWaitBits(
-            record->events, PROCESS__EVT_OPERATION_IDLE | PROCESS__EVT_STOP_CALLBACK_IDLE,
-            pdFALSE, pdTRUE, portMAX_DELAY
+            record->events,
+            PROCESS__EVT_OPERATION_IDLE | PROCESS__EVT_STOP_CALLBACK_IDLE,
+            pdFALSE,
+            pdTRUE,
+            portMAX_DELAY
         );
         process__lock();
         record = process__find_by_id_locked(process_id);
@@ -508,9 +515,7 @@ process__wait_common(bruce_process_id_t process_id, uint32_t timeout_ms, bruce_p
             completion->waiter_pins--;
         }
         if (record->waiter_count > 0) record->waiter_count--;
-        if (out_status != NULL && record->status_waiter_count > 0) {
-            record->status_waiter_count--;
-        }
+        if (out_status != NULL && record->status_waiter_count > 0) { record->status_waiter_count--; }
         process__dispose_if_unused_locked(record);
     }
     process__unlock();

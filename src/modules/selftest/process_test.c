@@ -47,10 +47,10 @@ static int selftest__worker_normal_exit(int argc, char **argv) {
     (void)argc;
     (void)argv;
 
-    if (process__to_foreground() != BRUCE_OK) { return -1; }
+    if (runtime__to_foreground() != BRUCE_OK) { return -1; }
     s_shared.foregrounded_self = true;
 
-    if (process__to_background() != BRUCE_OK) { return -1; }
+    if (runtime__to_background() != BRUCE_OK) { return -1; }
     s_shared.backgrounded_self = true;
 
     unsigned char *block = memory__calloc(256, 1);
@@ -127,7 +127,8 @@ static int selftest__worker_resource_growth(int argc, char **argv) {
     (void)argc;
     (void)argv;
     for (size_t i = 0; i < SELFTEST__RESOURCE_STRESS_COUNT; ++i) {
-        if (process_registry__resource_register(selftest__count_resource_cleanup, NULL) == BRUCE_RESOURCE_ID_INVALID) {
+        if (process_registry__resource_register(selftest__count_resource_cleanup, NULL) ==
+            BRUCE_RESOURCE_ID_INVALID) {
             return -1;
         }
     }
@@ -183,9 +184,8 @@ bool selftest__run_process_resource_growth_case(void) {
     bruce_process_id_t id = BRUCE_PROCESS_ID_INVALID;
     bruce_process_status_t status;
     bool ok = process_registry__create(&params, &id) == BRUCE_OK &&
-              process__wait_status(id, 2000, &status) == BRUCE_OK &&
-              status.reason == BRUCE_PROCESS_EXITED && status.exit_code == 0 &&
-              s_resource_cleanup_count == SELFTEST__RESOURCE_STRESS_COUNT;
+              process__wait_status(id, 2000, &status) == BRUCE_OK && status.reason == BRUCE_PROCESS_EXITED &&
+              status.exit_code == 0 && s_resource_cleanup_count == SELFTEST__RESOURCE_STRESS_COUNT;
     printf("[selftest] process/resource-growth: %s\n", ok ? "OK" : "FAIL");
     return ok;
 }
@@ -369,8 +369,7 @@ bool selftest__run_process_clear_signal_case(void) {
     ok = ok && process__snapshot(id, &snapshot) == BRUCE_OK;
 
     bruce_process_status_t status;
-    ok = ok && process__terminate(id) == BRUCE_OK &&
-         process__wait_status(id, 2000, &status) == BRUCE_OK &&
+    ok = ok && process__terminate(id) == BRUCE_OK && process__wait_status(id, 2000, &status) == BRUCE_OK &&
          status.reason == BRUCE_PROCESS_TERMINATED && status.signal == BRUCE_PROCESS_SIGNAL_TERM &&
          s_clear_signal_worker_resumed;
     if (!ok) (void)process__kill(id);

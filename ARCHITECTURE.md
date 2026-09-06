@@ -429,6 +429,9 @@ calling application code. Timers are independent across processes and are
 automatically stopped on normal exit or forced teardown; owners may stop them
 early with `runtime__timer_stop()` or block until the next tick with
 `runtime__timer_wait()`.
+`runtime__to_foreground()` and `runtime__to_background()` let an app promote or
+demote only itself without requiring the `process` permission; foregrounding
+also marks that app GUI-capable.
 
 ### Device state
 
