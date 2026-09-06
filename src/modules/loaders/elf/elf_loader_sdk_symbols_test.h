@@ -30,6 +30,10 @@ int bruce_elf__remove(const char *path);
 int bruce_elf__rename(const char *from, const char *to);
 int bruce_elf__fprintf(FILE *stream, const char *format, ...);
 int bruce_elf__vfprintf(FILE *stream, const char *format, va_list args);
+extern FILE *bruce_elf__stdin_ptr;
+extern FILE *bruce_elf__stdout_ptr;
+extern FILE *bruce_elf__stderr_ptr;
+
 char *bruce_elf__getenv(const char *name);
 int bruce_elf__setenv(const char *name, const char *value, int overwrite);
 int bruce_elf__unsetenv(const char *name);

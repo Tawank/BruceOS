@@ -96,6 +96,44 @@ bool selftest__run_elf_loader_stdio_case(void) {
         return false;
     }
 
+    /* stdout/stdin are static console sentinels, not storage__-backed files
+     * -- verify writes route through stdio__write (by return value; actual
+     * console output isn't asserted on), the mismatched direction fails
+     * cleanly instead of touching a storage handle that doesn't exist for
+     * them, they're not seekable, and closing them is a harmless no-op
+     * rather than freeing static storage. */
+    static const char greeting[] = "selftest\n";
+    if (bruce_elf__fwrite(greeting, 1, sizeof(greeting) - 1, bruce_elf__stdout_ptr) != sizeof(greeting) - 1) {
+        printf("[selftest] loader/elf_stdio: fwrite(stdout) did not report full write\n");
+        return false;
+    }
+    char sink[1];
+    if (bruce_elf__fread(sink, 1, sizeof(sink), bruce_elf__stdout_ptr) != 0 ||
+        !bruce_elf__ferror(bruce_elf__stdout_ptr)) {
+        printf("[selftest] loader/elf_stdio: fread(stdout) did not fail\n");
+        return false;
+    }
+    bruce_elf__clearerr(bruce_elf__stdout_ptr);
+    if (bruce_elf__fwrite(sink, 1, sizeof(sink), bruce_elf__stdin_ptr) != 0 ||
+        !bruce_elf__ferror(bruce_elf__stdin_ptr)) {
+        printf("[selftest] loader/elf_stdio: fwrite(stdin) did not fail\n");
+        return false;
+    }
+    bruce_elf__clearerr(bruce_elf__stdin_ptr);
+    errno = 0;
+    if (bruce_elf__fseek(bruce_elf__stdout_ptr, 0, SEEK_SET) != -1 || errno != ESPIPE) {
+        printf("[selftest] loader/elf_stdio: fseek(stdout) did not fail with ESPIPE\n");
+        return false;
+    }
+    if (bruce_elf__fclose(bruce_elf__stdout_ptr) != 0 || bruce_elf__fclose(bruce_elf__stdin_ptr) != 0) {
+        printf("[selftest] loader/elf_stdio: fclose(stdout/stdin) was not a no-op\n");
+        return false;
+    }
+    if (bruce_elf__fprintf(bruce_elf__stdout_ptr, "%s", "selftest\n") != (int)sizeof(greeting) - 1) {
+        printf("[selftest] loader/elf_stdio: fprintf(stdout) after fclose failed\n");
+        return false;
+    }
+
     printf("[selftest] loader/elf_stdio: OK\n");
     return true;
 }

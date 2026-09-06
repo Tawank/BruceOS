@@ -146,12 +146,46 @@ static int bruce_elf__putchar(int character) {
  * Deliberately NOT provided: tmpfile/tmpnam (no sane directory/cleanup
  * story on this filesystem), freopen, and ungetc (needs a pushback buffer
  * per FILE).
- * ------------------------------------------------------------------------- */
+ *
+ * stdin/stdout/stderr are exported too (see the two static sentinel boxes
+ * and the bruce_elf__std*_ptr variables below), which is why `kind` exists
+ * on the box at all: picolibc declares these as real `extern FILE *stdin;`
+ * globals holding a pointer, not compile-time constants, so a relocation
+ * against the symbol "stdout" resolves to the address of a FILE* variable
+ * whose *value* is this table's answer -- if that value were the real
+ * picolibc stdout (a pointer into ITS OWN internal FILE struct, a
+ * completely different layout from bruce_elf_file_t), any of the adapters
+ * above would misread that struct's bytes as this box's fields instead of
+ * failing cleanly. Routing storage__ vs stdio__ by `kind` keeps a single
+ * fprintf()/fwrite()/fgets() implementation correct for both a real file
+ * and the console, exactly like a real libc's FILE does internally. */
+typedef enum {
+    BRUCE_ELF_FILE_STORAGE,
+    BRUCE_ELF_FILE_CONSOLE_IN,
+    BRUCE_ELF_FILE_CONSOLE_OUT,
+} bruce_elf_file_kind_t;
+
 typedef struct {
-    bruce_file_id_t file;
+    bruce_elf_file_kind_t kind;
+    bruce_file_id_t file; /* meaningful only when kind == BRUCE_ELF_FILE_STORAGE */
     bool eof;
     bool error;
 } bruce_elf_file_t;
+
+/* Static, never freed -- fclose() on one of these is a no-op (see below),
+ * matching fclose(stdout) being harmless in a real libc. stderr shares
+ * stdout's box: BruceOS's console model is a single per-process output
+ * stream (stdio__write), there is no separate error stream to route to. */
+static bruce_elf_file_t g_bruce_elf_console_in = {.kind = BRUCE_ELF_FILE_CONSOLE_IN};
+static bruce_elf_file_t g_bruce_elf_console_out = {.kind = BRUCE_ELF_FILE_CONSOLE_OUT};
+
+/* Not `static`: these back the "stdin"/"stdout"/"stderr" table entries.
+ * Each is a real FILE* variable (not the FILE itself) because that is
+ * exactly picolibc's own `extern FILE *stdout;` shape -- the symbol names
+ * an object that *holds* a pointer, not the pointed-to object. */
+FILE *bruce_elf__stdin_ptr = (FILE *)&g_bruce_elf_console_in;
+FILE *bruce_elf__stdout_ptr = (FILE *)&g_bruce_elf_console_out;
+FILE *bruce_elf__stderr_ptr = (FILE *)&g_bruce_elf_console_out;
 
 static void bruce_elf__set_errno_from_result(bruce_result_t result) {
     switch (result) {
@@ -207,6 +241,7 @@ FILE *bruce_elf__fopen(const char *path, const char *mode) {
         memory__free(box);
         return NULL;
     }
+    box->kind = BRUCE_ELF_FILE_STORAGE;
     box->eof = false;
     box->error = false;
     return (FILE *)box;
@@ -215,6 +250,7 @@ FILE *bruce_elf__fopen(const char *path, const char *mode) {
 int bruce_elf__fclose(FILE *stream) {
     if (stream == NULL) return EOF;
     bruce_elf_file_t *box = (bruce_elf_file_t *)stream;
+    if (box->kind != BRUCE_ELF_FILE_STORAGE) return 0; /* static sentinel, not ours to free */
     bruce_result_t result = storage__close(box->file);
     memory__free(box);
     return result == BRUCE_OK ? 0 : EOF;
@@ -223,6 +259,23 @@ int bruce_elf__fclose(FILE *stream) {
 size_t bruce_elf__fread(void *ptr, size_t size, size_t count, FILE *stream) {
     bruce_elf_file_t *box = (bruce_elf_file_t *)stream;
     if (ptr == NULL || box == NULL || size == 0 || count == 0) return 0;
+    if (box->kind == BRUCE_ELF_FILE_CONSOLE_OUT) {
+        box->error = true; /* reading from an output-only stream */
+        return 0;
+    }
+    if (box->kind == BRUCE_ELF_FILE_CONSOLE_IN) {
+        size_t received = 0;
+        bruce_result_t result = stdio__read(ptr, size * count, UINT32_MAX, &received);
+        if (result != BRUCE_OK) {
+            box->error = true;
+            return 0;
+        }
+        /* Unlike the storage case below, a short read here just means
+         * that's everything currently queued on a live console -- not
+         * end-of-input -- so only a truly empty read counts as eof. */
+        if (received == 0) box->eof = true;
+        return received / size;
+    }
     size_t received = 0;
     if (storage__read(box->file, ptr, size * count, &received) != BRUCE_OK) {
         box->error = true;
@@ -235,6 +288,17 @@ size_t bruce_elf__fread(void *ptr, size_t size, size_t count, FILE *stream) {
 size_t bruce_elf__fwrite(const void *ptr, size_t size, size_t count, FILE *stream) {
     bruce_elf_file_t *box = (bruce_elf_file_t *)stream;
     if (ptr == NULL || box == NULL || size == 0 || count == 0) return 0;
+    if (box->kind == BRUCE_ELF_FILE_CONSOLE_IN) {
+        box->error = true; /* writing to an input-only stream */
+        return 0;
+    }
+    if (box->kind == BRUCE_ELF_FILE_CONSOLE_OUT) {
+        if (stdio__write(ptr, size * count) != BRUCE_OK) {
+            box->error = true;
+            return 0;
+        }
+        return count;
+    }
     size_t written = 0;
     if (storage__write(box->file, ptr, size * count, &written) != BRUCE_OK) {
         box->error = true;
@@ -246,6 +310,10 @@ size_t bruce_elf__fwrite(const void *ptr, size_t size, size_t count, FILE *strea
 int bruce_elf__fseek(FILE *stream, long offset, int whence) {
     bruce_elf_file_t *box = (bruce_elf_file_t *)stream;
     if (box == NULL) return -1;
+    if (box->kind != BRUCE_ELF_FILE_STORAGE) {
+        *__errno() = ESPIPE; /* the console is not seekable */
+        return -1;
+    }
     if (storage__seek(box->file, offset, whence, NULL) != BRUCE_OK) return -1;
     box->eof = false;
     return 0;
@@ -253,14 +321,19 @@ int bruce_elf__fseek(FILE *stream, long offset, int whence) {
 
 long bruce_elf__ftell(FILE *stream) {
     bruce_elf_file_t *box = (bruce_elf_file_t *)stream;
+    if (box == NULL) return -1;
+    if (box->kind != BRUCE_ELF_FILE_STORAGE) {
+        *__errno() = ESPIPE;
+        return -1;
+    }
     uint64_t position = 0;
-    if (box == NULL || storage__seek(box->file, 0, SEEK_CUR, &position) != BRUCE_OK) return -1;
+    if (storage__seek(box->file, 0, SEEK_CUR, &position) != BRUCE_OK) return -1;
     return (long)position;
 }
 
 void bruce_elf__rewind(FILE *stream) {
     bruce_elf_file_t *box = (bruce_elf_file_t *)stream;
-    if (box == NULL) return;
+    if (box == NULL || box->kind != BRUCE_ELF_FILE_STORAGE) return; /* console: nothing to rewind */
     if (storage__seek(box->file, 0, SEEK_SET, NULL) == BRUCE_OK) {
         box->eof = false;
         box->error = false;
@@ -990,6 +1063,9 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
 
     /* FILE*-based stdio, backed by storage__open/read/write/seek/close --
      * see the bruce_elf_file_t doc comment above bruce_elf__fopen(). */
+    {"stdin",    (const void *)&bruce_elf__stdin_ptr },
+    {"stdout",   (const void *)&bruce_elf__stdout_ptr},
+    {"stderr",   (const void *)&bruce_elf__stderr_ptr},
     {"fopen",    (const void *)&bruce_elf__fopen    },
     {"fclose",   (const void *)&bruce_elf__fclose   },
     {"fread",    (const void *)&bruce_elf__fread    },
