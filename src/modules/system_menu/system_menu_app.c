@@ -10,6 +10,7 @@
 #include "core_sdk/config.h"
 #include "core_sdk/device.h"
 #include "core_sdk/display.h"
+#include "core_sdk/dialog.h"
 #include "core_sdk/icon.h"
 #include "core_sdk/input.h"
 #include "core_sdk/memory.h"
@@ -30,6 +31,7 @@ static const char *const SYSTEM_MENU__DEFAULT_ITEMS_JSON =
     "["
     "{\"icon\":\"cancel\",\"label\":\"Cancel\",\"action\":\"cancel\"},"
     "{\"icon\":\"keyboard-esc\",\"label\":\"Esc\",\"action\":\"input.esc\"},"
+    "{\"icon\":\"keyboard\",\"label\":\"Input\",\"action\":\"input.action\"},"
     "{\"icon\":\"arrange-bring-forward\",\"label\":\"Switch\",\"action\":\"process.next\"},"
     "{\"icon\":\"apps\",\"label\":\"Launcher\",\"action\":\"launcher\"},"
     "{\"icon\":\"power\",\"label\":\"Off\",\"action\":\"shutdown now\"}"
@@ -143,16 +145,32 @@ static bruce_result_t system_menu__draw(
 
 static int system_menu__run_action(const char *action) {
     if (strcmp(action, "cancel") == 0) return BRUCE_ERR_CANCELLED;
-    if (strcmp(action, "input.esc") == 0) {
+    if (strcmp(action, "input.esc") == 0 || strcmp(action, "input.enter") == 0) {
         bruce_result_t result = process__to_background();
         if (result != BRUCE_OK) return result;
         const bruce_input_event_t event = {
             .type = BRUCE_INPUT_KEY,
             .action = BRUCE_INPUT_PRESS,
-            .code = BRUCE_INPUT_CODE_BACK,
-            .value = -1,
+            .code = strcmp(action, "input.esc") == 0 ? BRUCE_INPUT_CODE_BACK : BRUCE_INPUT_CODE_SELECT,
+            .value = strcmp(action, "input.esc") == 0 ? -1 : BRUCE_INPUT_CODE_SELECT,
         };
-        return input__inject(&event);
+        bruce_result_t injected = input__inject(&event);
+        if (injected != BRUCE_OK) return injected;
+        bruce_input_event_t release = event;
+        release.action = BRUCE_INPUT_RELEASE;
+        release.value = 0;
+        return input__inject(&release);
+    }
+    if (strcmp(action, "input.action") == 0) {
+        static const bruce_dialog_choice_t choices[] = {
+            {.label = "Esc", .value = "input.esc", .icon_name = "keyboard-esc", .right_text = NULL},
+            {.label = "Enter", .value = "input.enter", .icon_name = "keyboard", .right_text = NULL},
+            {.label = "Cancel", .value = "cancel", .icon_name = "cancel", .right_text = NULL},
+        };
+        size_t selected = 0;
+        bruce_result_t result = dialog__choice("Input action", NULL, choices, sizeof(choices) / sizeof(choices[0]), &selected);
+        if (result != BRUCE_OK) return result;
+        return system_menu__run_action(choices[selected].value);
     }
     if (strcmp(action, "process.next") == 0 || strcmp(action, "process.previous") == 0) {
         /* The menu is a temporary foreground process. Remove it before choosing
@@ -232,6 +250,17 @@ int system_menu_app_main(int argc, char **argv) {
             selected = (selected + 1) % (int)count;
             redraw = true;
         } else if (event.code == BRUCE_INPUT_CODE_SELECT) {
+            /* Actions may open a full-screen dialog. The menu's overlay sits
+             * above that dialog until it is hidden explicitly. */
+            if (overlay_shown) {
+                bruce_result_t hide_result = display__overlay_hide(overlay);
+                if (hide_result != BRUCE_OK) {
+                    snprintf(status, sizeof(status), "%s", result__to_string(hide_result));
+                    redraw = true;
+                    continue;
+                }
+                overlay_shown = false;
+            }
             int action_result = system_menu__run_action(items[selected].action);
             if (action_result == BRUCE_OK || action_result == BRUCE_ERR_CANCELLED) break;
             snprintf(status, sizeof(status), "%s", result__to_string(action_result));
