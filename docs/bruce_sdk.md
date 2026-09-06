@@ -34,6 +34,7 @@
 | [`image.h`](#imageh) | JPEG, PNG and GIF decoding, resizing, and drawing. |
 | [`input.h`](#inputh) | Keyboard, button, touch, and encoder event queue. |
 | [`ir.h`](#irh) | Infrared sending and receiving. |
+| [`launcher.h`](#launcherh) | Programmatic access to the launcher's menu tree. |
 | [`manifest.h`](#manifesth) | App manifest parsing. |
 | [`memory.h`](#memoryh) | Memory allocation (RAM, PSRAM, swap). |
 | [`notification.h`](#notificationh) | On-screen notifications. |
@@ -190,6 +191,14 @@ Functions that explicitly document a `bruce_permission_t` check, grouped by perm
 - `ssh__read` (ssh.h)
 - `ssh__write` (ssh.h)
 - `ssh__close` (ssh.h)
+- `ssh__sftp_authenticate_password` (ssh.h)
+- `ssh__sftp_authenticate_key` (ssh.h)
+- `ssh__sftp_open` (ssh.h)
+- `ssh__sftp_list` (ssh.h)
+- `ssh__sftp_realpath` (ssh.h)
+- `ssh__sftp_open_file` (ssh.h)
+- `ssh__sftp_read_file` (ssh.h)
+- `ssh__sftp_close_file` (ssh.h)
 
 ### `storage`
 
@@ -2863,7 +2872,10 @@ Performs a synchronous BLE advertisement scan.
 
 Returns the number of unique devices copied to `devices`, or a negative
 BRUCE_ERR_* value. A zero timeout selects the Core default. Results are
-ordered by descending RSSI.
+ordered by descending RSSI. Blocks the calling process for the scan's
+duration; a caller that wants to animate progress or offer cancellation
+should use bluetooth__scan_start() / bluetooth__scan_poll() /
+bluetooth__scan_cancel() instead.
 
 ### Parameters
 
@@ -2876,6 +2888,87 @@ ordered by descending RSSI.
 ### Returns
 
 `int`
+
+
+---
+
+## bluetooth__scan_start()
+
+```c
+bruce_result_t bluetooth__scan_start(uint32_t timeout_ms);
+```
+
+Starts a BLE advertisement scan without waiting for it to finish.
+
+Only one scan runs on the radio at a time; calling this while another
+caller's scan is in flight (or uncollected) joins that round instead of
+restarting it, so concurrent scanners share one result set rather than
+stepping on each other -- the joining caller's own `timeout_ms` is then
+ignored, since the round is already running to the first caller's. Must
+be matched by one bluetooth__scan_poll() call that doesn't return
+BRUCE_ERR_TIMEOUT, or one bluetooth__scan_cancel().
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `timeout_ms` | `uint32_t` | Scan duration in milliseconds, or 0 for the Core default. |
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
+## bluetooth__scan_poll()
+
+```c
+int bluetooth__scan_poll(bluetooth__device_t *devices, size_t capacity, uint32_t timeout_ms);
+```
+
+Waits up to `timeout_ms` for a scan started with bluetooth__scan_start() to finish, returning its results if it has.
+
+Returns the number of devices copied into `devices` (0 on an empty scan),
+BRUCE_ERR_TIMEOUT if the scan is still running when `timeout_ms` elapses
+(the scan itself is unaffected -- call again to keep waiting, or
+bluetooth__scan_cancel() to give up on it), or another negative
+BRUCE_ERR_* value on failure. Calling this without a scan in flight (no
+prior bluetooth__scan_start(), or one already collected) just waits out
+the timeout and returns BRUCE_ERR_TIMEOUT. Results are ordered by
+descending RSSI.
+
+A caller that joined the same round as another process still gets its
+own copy, capped to its own `capacity`.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `devices` | `bluetooth__device_t *` | Array to receive scanned devices. |
+| `capacity` | `size_t` | Number of entries devices can hold. |
+| `timeout_ms` | `uint32_t` | How long to wait for this poll before giving up. |
+
+### Returns
+
+`int`
+
+
+---
+
+## bluetooth__scan_cancel()
+
+```c
+bruce_result_t bluetooth__scan_cancel(void);
+```
+
+Aborts a scan started with bluetooth__scan_start(), if one is running.
+
+Best-effort and safe to call with no scan in flight.
+
+### Returns
+
+`bruce_result_t`
 
 
 ---
@@ -5854,6 +5947,12 @@ typedef struct {
 Not permission-gated. Rendering is chosen from the process's launch
 context, never by an app-specific renderer.
 
+**Constants**
+
+| Name | Value |
+|---|---|
+| `BRUCE_DIALOG_ICON_NAME_MAX` | `32` |
+
 ---
 
 ## bruce_dialog_kind_t()
@@ -5918,7 +6017,7 @@ Releases work started for dialog__choice_poll().
 
 ---
 
-## bruce_dialog_render_params_t()
+## icon_for_path()
 
 ```c
 typedef struct {
@@ -5958,6 +6057,32 @@ typedef struct {
      * row rather than a real file or directory. The returned path is the
      * directory that was being displayed. */
     bool *out_parent_entry;
+    /* Optional per-entry icon override for dialog__pick_file_ex()'s GUI
+     * listing. Called with each real row's full path (never the synthetic
+     * `[..]` row) before the picker's own default icon_name logic runs;
+     * fills `out_icon` (a BRUCE_DIALOG_ICON_NAME_MAX-byte buffer) and
+     * returns true to use it, or returns false to fall through to the
+     * default (a per-extension icon for a file, "folder" for a directory).
+     * Writing into a caller-owned buffer rather than returning a pointer
+     * keeps every listed row's icon independently valid for as long as the
+     * listing stays on screen, since the picker builds every row's choice
+     * entry before any of them are drawn. Ignored by every other
+     * dialog__* call. May be NULL. */
+    bool (*icon_for_path)(const char *path, bool is_directory, char *out_icon, size_t out_icon_size, void *context);
+    void *icon_for_path_context;
+    /* Skips the flush of already-queued input this call normally performs
+     * before its first frame (see dialog__gui_choice()'s doc comment on why
+     * that flush exists). Set this for exactly one re-issued call of the
+     * *same* list after a caller detects it lost and regained foreground
+     * mid-dialog (see e.g. filemanager__resume_after_handoff()) and is
+     * redrawing rather than treating that as Back/Esc - otherwise a
+     * follow-up key that arrived during the interruption (e.g. the system
+     * menu's "Esc" button injecting a Back press once it backgrounds
+     * itself) is silently discarded before this redraw ever reads it. False
+     * (the default) keeps every existing caller flushing exactly as before
+     * this field existed; clear it again after the one call it was meant
+     * for so later, unrelated redraws keep flushing normally. */
+    bool skip_initial_flush;
 } bruce_dialog_render_params_t;
 ```
 
@@ -6031,6 +6156,13 @@ bruce_result_t dialog__choice(
 
 Shows a choice-list dialog and waits for a selection.
 
+`*out_selected` also seeds which row starts highlighted, and (GUI only) is
+left holding whichever row was highlighted when the dialog returns
+BRUCE_ERR_CANCELLED too, not just on BRUCE_OK - so a caller that redraws
+the same list after a cancel (e.g. one it determines was a spurious loss
+of foreground rather than a real Back/Esc) can pass it straight back in
+to keep the same row highlighted instead of resetting to the top.
+
 ### Parameters
 
 | Parameter | Type | Description |
@@ -6039,7 +6171,7 @@ Shows a choice-list dialog and waits for a selection.
 | `message` | `const char *` | Optional body text shown above the choice list. |
 | `choices` | `const bruce_dialog_choice_t *` | Choices to list. |
 | `choice_count` | `size_t` | Number of entries in choices. |
-| `out_selected` | `size_t *` | Receives the index of the selected choice. |
+| `out_selected` | `size_t *` | Receives the index of the selected (or last highlighted) choice. |
 
 ### Returns
 
@@ -6154,6 +6286,35 @@ Like dialog__choice(), styled for use from the launcher.
 
 ---
 
+## dialog__choice_launcher_ex()
+
+```c
+bruce_result_t dialog__choice_launcher_ex(
+    const char *title, const char *message, const bruce_dialog_choice_t *choices, size_t choice_count,
+    size_t *out_selected, const bruce_dialog_render_params_t *render_params
+);
+```
+
+Like dialog__choice_launcher(), but with caller-supplied render styling (still forced to the launcher look regardless of what `render_params->render_launcher` says) - e.g. so a launcher-styled screen can set `skip_initial_flush` for one redraw. NULL behaves exactly like dialog__choice_launcher().
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `title` | `const char *` | Optional short title shown at the top of the dialog. |
+| `message` | `const char *` | Optional body text shown above the choice list. |
+| `choices` | `const bruce_dialog_choice_t *` | Choices to list. |
+| `choice_count` | `size_t` | Number of entries in choices. |
+| `out_selected` | `size_t *` | Receives the index of the selected choice. |
+| `render_params` | `const bruce_dialog_render_params_t *` | Extra render styling, or NULL for the standard launcher look. |
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
 ## dialog__choice_ex()
 
 ```c
@@ -6184,6 +6345,85 @@ outside the viewport can update.
 | `choice_count` | `size_t` | Number of entries in choices. |
 | `out_selected` | `size_t *` | Receives the index of the selected choice. |
 | `render_params` | `const bruce_dialog_render_params_t *` | GUI render styling, or NULL for the standard look. |
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
+## dialog__choice_search_ex()
+
+```c
+bruce_result_t dialog__choice_search_ex(
+    const char *title, const char *prompt, const bruce_dialog_choice_t *choices, size_t choice_count, char *query,
+    size_t query_capacity, size_t *out_selected, const bruce_dialog_render_params_t *render_params
+);
+```
+
+Like dialog__choice_ex(), but with a live-filtering search box.
+
+Below the title (if any), an editable query line is drawn in place of a
+static message: printable keys append to it, Backspace/Delete remove from
+its end, and the list below is live-filtered down to the choices whose
+label contains the current query as a case-insensitive substring (an
+empty query matches everything), re-selecting the first match whenever it
+changes. UP/DOWN/SELECT/BACK still drive the list itself. `out_selected`
+is always an index into the original, unfiltered `choices` -- not into
+whatever subset happened to be showing when the user picked one.
+
+`query` is a caller-owned in/out buffer of `query_capacity` bytes: pass it
+pre-seeded (e.g. with the keypress that opened the search) to start
+already filtered, or empty to start showing everything. It's left holding
+whatever the user last typed when this returns, BRUCE_OK or
+BRUCE_ERR_CANCELLED alike.
+
+GUI only on GUI vs. terminal dispatch is unaffected: a non-GUI process
+falls back to the plain numbered dialog__choice() list, `query` unused.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `title` | `const char *` | Optional short title shown at the top of the dialog. |
+| `prompt` | `const char *` | Optional label shown ahead of the query text, e.g. "Find: " (NULL uses that default). |
+| `choices` | `const bruce_dialog_choice_t *` | Choices to search and list. |
+| `choice_count` | `size_t` | Number of entries in choices. |
+| `query` | `char *` | In/out buffer holding the current query text. |
+| `query_capacity` | `size_t` | Size of `query` in bytes, including the nul terminator. |
+| `out_selected` | `size_t *` | Receives the index (into `choices`) of the selected choice. |
+| `render_params` | `const bruce_dialog_render_params_t *` | GUI render styling, or NULL for the standard look. |
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
+## dialog__choice_search_launcher()
+
+```c
+bruce_result_t dialog__choice_search_launcher(
+    const char *title, const char *prompt, const bruce_dialog_choice_t *choices, size_t choice_count, char *query,
+    size_t query_capacity, size_t *out_selected
+);
+```
+
+Like dialog__choice_search_ex(), styled for use from the launcher.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `title` | `const char *` |  |
+| `prompt` | `const char *` |  |
+| `choices` | `const bruce_dialog_choice_t *` |  |
+| `choice_count` | `size_t` |  |
+| `query` | `char *` |  |
+| `query_capacity` | `size_t` |  |
+| `out_selected` | `size_t *` |  |
 
 ### Returns
 
@@ -6240,8 +6480,10 @@ Like dialog__pick_file(), but with GUI render styling.
 styles dialog__choice() (NULL behaves exactly like dialog__pick_file())
 - its `render_callback`/`render_callback_context` are reserved for the
 picker's own use (it draws the current volume's name and used/total
-space in the bottom bar) and are overridden if set. Ignored on
-non-GUI/terminal picks.
+space in the bottom bar) and are overridden if set. `icon_for_path`/
+`icon_for_path_context`, if set, are consulted for every listed entry
+before the picker's default icon choice - see their doc comment above.
+Ignored on non-GUI/terminal picks.
 
 `render_params->long_press_enabled` additionally changes what a long
 press on a *directory* row does: instead of descending into it, the
@@ -10480,6 +10722,7 @@ caller.
 | Name | Value |
 |---|---|
 | `BRUCE_ICON_SIZE` | `24` |
+| `BRUCE_ICON_NAME_MAX` | `32` |
 
 ---
 
@@ -10524,6 +10767,41 @@ it. Draw it with display__draw_bitmap_scaled(), e.g.:
 ### Returns
 
 `const bruce_icon_t *`
+
+
+---
+
+## icon__pick()
+
+```c
+bruce_result_t icon__pick(
+    const char *title, const char *current_icon_name, bool allow_none, char *out_icon_name,
+    size_t out_icon_name_size
+);
+```
+
+Shows a picker listing every built-in icon and returns the one chosen.
+
+A dialog__choice() list with one row per icon__get()-recognized name, each
+drawn with its own icon so the list doubles as a preview. Falls back to a
+plain-text list of names outside a GUI context, same as any other
+dialog__* call.
+
+non-BRUCE_OK return (e.g. the picker was cancelled).
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `title` | `const char *` | Optional short title shown at the top of the picker. |
+| `current_icon_name` | `const char *` | Optional icon name to preselect, or NULL/"" for none. |
+| `allow_none` | `bool` | When true, an extra leading "None" row clears out_icon_name instead of picking one. |
+| `out_icon_name` | `char *` | Receives the chosen icon name ("" if "None" was picked). Left untouched on a |
+| `out_icon_name_size` | `size_t` | Size of out_icon_name in bytes. |
+
+### Returns
+
+`bruce_result_t`
 
 
 ---
@@ -11391,6 +11669,405 @@ Returns the infrared receiver pin.
 
 ---
 
+# `launcher.h`
+
+**Programmatic access to the launcher's menu tree.**
+
+The menu lives as one JSON object at /config/launcher.conf: each key is
+"Label" or "Label@icon-name" (see core/icon/icon_assets.h for the valid
+icon names) and each value is either a command string (a builtin command
+name or an absolute app path) or a nested object describing a submenu -
+see embedded_resources/json/launcher.json (modules/bruce_launcher) for the
+shipped default, and modules/bruce_launcher/bruce_launcher_menu.c for how
+it's loaded. launcher__add_menu_entry() appends a flat command entry to
+the root or one of its immediate submenus, asking where with a
+dialog__choice() prompt, e.g. so a long press elsewhere in the UI can
+offer "Add to..." without the caller building that prompt itself. The
+launcher__tree_*() functions below instead address any menu at any depth
+directly (a "path" of submenu labels from the root) for a full tree
+editor - see modules/bruce_launcher/bruce_launcher_menu_editor.c, reached
+from "bruce_launcher config"'s "Menu entries" screen.
+
+**Constants**
+
+| Name | Value |
+|---|---|
+| `BRUCE_LAUNCHER_ENTRY_LABEL_MAX` | `48` |
+| `BRUCE_LAUNCHER_ENTRY_ICON_MAX` | `32` |
+| `BRUCE_LAUNCHER_ENTRY_COMMAND_MAX` | `128` |
+| `BRUCE_LAUNCHER_ROOT_MENU_LABEL` | `"Main Menu"` |
+| `BRUCE_LAUNCHER_MENU_LIST_MAX` | `33` |
+| `BRUCE_LAUNCHER_TREE_MAX_DEPTH` | `8` |
+| `BRUCE_LAUNCHER_TREE_ENTRIES_MAX` | `32` |
+
+---
+
+## launcher__list_menus()
+
+```c
+size_t launcher__list_menus(char out_labels[][BRUCE_LAUNCHER_ENTRY_LABEL_MAX], size_t capacity);
+```
+
+Lists the menus a new entry can be added to.
+
+out_labels[0] is always BRUCE_LAUNCHER_ROOT_MENU_LABEL, representing the
+launcher's root menu; every entry after that is one of the root's own
+immediate submenus (a top-level entry whose value is a JSON object rather
+than a command string), labeled with its "Label@icon-name" key's label
+half. Returns the number of labels written (at least 1, capped at
+`capacity`), or 0 only if `out_labels`/`capacity` themselves are invalid.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `char out_labels[]` | `` |  |
+| `capacity` | `size_t` | Number of entries out_labels can hold. |
+
+### Returns
+
+`size_t`
+
+
+---
+
+## launcher__menu_has_command()
+
+```c
+bool launcher__menu_has_command(const char *menu_label, const char *command);
+```
+
+Reports whether the given menu already has a command entry equal to `command`.
+
+Only looks at flat command entries directly on that menu, not inside its
+own submenus. Returns false (never an error) when /config/launcher.conf
+doesn't exist yet, can't be parsed, or `menu_label` doesn't name a menu
+launcher__list_menus() would list - this is meant to steer what a caller
+offers (e.g. "Add to WiFi" vs "Already in WiFi"), not to validate the
+file.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `menu_label` | `const char *` | Destination menu, as returned by launcher__list_menus(); NULL/"" means the root. |
+| `command` | `const char *` | Command string to search for (e.g. an app's absolute path). |
+
+### Returns
+
+`bool`
+
+
+---
+
+## launcher__add_menu_entry()
+
+```c
+bruce_result_t launcher__add_menu_entry(const char *label, const char *icon_name, const char *command);
+```
+
+Appends a command entry to the launcher menu tree, asking where.
+
+Owns the whole interaction: when /config/launcher.conf has more than one
+destination (the root plus its own submenus - see launcher__list_menus()),
+shows a dialog__choice() prompt listing them (with a "Cancel" row) and
+proceeds with whatever the user picked; with only the root to choose from,
+adds there directly, no prompt. Also reports the outcome itself via
+dialog__message() - "Added to X" or "Already in X" (a no-op when `command`
+is already present on the chosen menu - callers don't need to check first
+to stay idempotent) - so callers don't have to build any of this
+themselves; a long press elsewhere in the UI offering "Add to main menu"
+can just call this and handle the return code.
+
+BRUCE_ERR_CANCELLED if the prompt was cancelled (nothing shown beyond the
+prompt itself, and the file untouched, same as any other dialog__* cancel).
+BRUCE_ERR_NOT_FOUND if /config/launcher.conf doesn't exist yet (the
+launcher writes its default the first time it runs, so this is only
+expected before the launcher has ever started). BRUCE_ERR_RESOURCE_LIMIT
+if the chosen menu already has as many entries as the launcher will load,
+or the file would grow past its size limit.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `label` | `const char *` | Entry label shown in the menu, truncated to BRUCE_LAUNCHER_ENTRY_LABEL_MAX - 1. |
+| `icon_name` | `const char *` | Optional built-in icon name (core/icon/icon_assets.h), or NULL/"" for none. |
+| `command` | `const char *` | Command string to run when the entry is picked. |
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
+## bruce_launcher_tree_entry_t()
+
+```c
+typedef struct {
+    char label[BRUCE_LAUNCHER_ENTRY_LABEL_MAX];
+    char icon_name[BRUCE_LAUNCHER_ENTRY_ICON_MAX];     /* "" if the entry has none. */
+    char command[BRUCE_LAUNCHER_ENTRY_COMMAND_MAX];    /* "" for a submenu entry. */
+    bool is_submenu;
+} bruce_launcher_tree_entry_t;
+```
+
+
+---
+
+## launcher__tree_list()
+
+```c
+size_t launcher__tree_list(
+    const char *const *path, size_t path_depth, bruce_launcher_tree_entry_t *out_entries, size_t capacity
+);
+```
+
+Lists one menu's entries, in on-disk (and on-screen) order.
+
+Every function in this group addresses a menu the same way:
+`path[0..path_depth)` is a chain of submenu labels, each an immediate
+child of the previous, walked from /config/launcher.conf's root;
+`path_depth == 0` means the root menu itself.
+
+@return Number of entries written, capped at `capacity`; 0 if `path` doesn't resolve to a menu.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `path` | `const char *const *` | Submenu labels from the root, or NULL when path_depth is 0. |
+| `path_depth` | `size_t` | Number of labels in path (0..BRUCE_LAUNCHER_TREE_MAX_DEPTH). |
+| `out_entries` | `bruce_launcher_tree_entry_t *` | Array of caller-owned entries to fill. |
+| `capacity` | `size_t` | Number of entries out_entries can hold. |
+
+### Returns
+
+`size_t`
+
+
+---
+
+## launcher__tree_move()
+
+```c
+bruce_result_t launcher__tree_move(const char *const *path, size_t path_depth, size_t index, int direction);
+```
+
+Moves the entry at `index` one slot within its own menu.
+
+@return BRUCE_ERR_INVALID_ARGUMENT if `index` is already at that edge or out of range.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `path` | `const char *const *` | Menu's path from the root; see launcher__tree_list(). |
+| `path_depth` | `size_t` | Number of labels in path. |
+| `index` | `size_t` | Entry to move. |
+| `direction` | `int` | -1 moves it up (earlier), +1 moves it down (later). |
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
+## launcher__tree_delete()
+
+```c
+bruce_result_t launcher__tree_delete(const char *const *path, size_t path_depth, size_t index);
+```
+
+Deletes the entry at `index` - if it's a submenu, its whole subtree goes with it.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `path` | `const char *const *` | Menu's path from the root; see launcher__tree_list(). |
+| `path_depth` | `size_t` | Number of labels in path. |
+| `index` | `size_t` | Entry to delete. |
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
+## launcher__tree_rename()
+
+```c
+bruce_result_t launcher__tree_rename(const char *const *path, size_t path_depth, size_t index, const char *new_label);
+```
+
+Renames the entry at `index`, leaving its icon/kind/value unchanged.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `path` | `const char *const *` | Menu's path from the root; see launcher__tree_list(). |
+| `path_depth` | `size_t` | Number of labels in path. |
+| `index` | `size_t` | Entry to rename. |
+| `new_label` | `const char *` | New label, truncated to BRUCE_LAUNCHER_ENTRY_LABEL_MAX - 1. |
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
+## launcher__tree_set_icon()
+
+```c
+bruce_result_t
+launcher__tree_set_icon(const char *const *path, size_t path_depth, size_t index, const char *icon_name);
+```
+
+Sets (or, with NULL/"", clears) the icon shown for the entry at `index`.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `path` | `const char *const *` | Menu's path from the root; see launcher__tree_list(). |
+| `path_depth` | `size_t` | Number of labels in path. |
+| `index` | `size_t` | Entry to update. |
+| `icon_name` | `const char *` | Built-in icon name (core/icon/icon_assets.h), or NULL/"" to clear it. |
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
+## launcher__tree_set_command()
+
+```c
+bruce_result_t
+launcher__tree_set_command(const char *const *path, size_t path_depth, size_t index, const char *command);
+```
+
+Replaces the command run by a non-submenu entry, leaving its label and icon unchanged.
+
+@return BRUCE_ERR_INVALID_ARGUMENT if index is invalid or names a submenu.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `path` | `const char *const *` | Menu's path from the root; see launcher__tree_list(). |
+| `path_depth` | `size_t` | Number of labels in path. |
+| `index` | `size_t` | Command entry to update. |
+| `command` | `const char *` | Non-empty command string to run when the entry is picked. |
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
+## launcher__tree_add_command()
+
+```c
+bruce_result_t launcher__tree_add_command(
+    const char *const *path, size_t path_depth, const char *label, const char *icon_name, const char *command
+);
+```
+
+Appends a new command entry directly to the menu at `path`.
+
+Unlike launcher__add_menu_entry(), never prompts for a destination - the
+caller has already picked one by way of `path`.
+
+@return BRUCE_ERR_RESOURCE_LIMIT if the menu already has BRUCE_LAUNCHER_TREE_ENTRIES_MAX entries.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `path` | `const char *const *` | Destination menu's path from the root; see launcher__tree_list(). |
+| `path_depth` | `size_t` | Number of labels in path. |
+| `label` | `const char *` | Entry label, truncated to BRUCE_LAUNCHER_ENTRY_LABEL_MAX - 1. |
+| `icon_name` | `const char *` | Optional built-in icon name, or NULL/"" for none. |
+| `command` | `const char *` | Command string to run when the entry is picked. |
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
+## launcher__tree_add_submenu()
+
+```c
+bruce_result_t
+launcher__tree_add_submenu(const char *const *path, size_t path_depth, const char *label, const char *icon_name);
+```
+
+Appends a new, empty submenu directly to the menu at `path`.
+
+@return BRUCE_ERR_RESOURCE_LIMIT if the menu already has BRUCE_LAUNCHER_TREE_ENTRIES_MAX entries.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `path` | `const char *const *` | Destination menu's path from the root; see launcher__tree_list(). |
+| `path_depth` | `size_t` | Number of labels in path. |
+| `label` | `const char *` | Submenu label, truncated to BRUCE_LAUNCHER_ENTRY_LABEL_MAX - 1. |
+| `icon_name` | `const char *` | Optional built-in icon name, or NULL/"" for none. |
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
+## launcher__tree_move_to()
+
+```c
+bruce_result_t launcher__tree_move_to(
+    const char *const *path, size_t path_depth, size_t index, const char *const *dest_path, size_t dest_path_depth
+);
+```
+
+Moves the entry at `index` in the menu at `path` to become the last entry of `dest_path`.
+
+Moves the entry's whole subtree along with it when it's a submenu. A
+no-op (BRUCE_OK, nothing changed) when `dest_path` names the same menu the
+entry is already in.
+
+@return BRUCE_ERR_ALREADY_EXISTS if the destination menu already has an entry with the same label.
+BRUCE_ERR_INVALID_ARGUMENT if `dest_path` is the moved entry itself or nested inside it (which would
+disconnect it from the tree).
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `path` | `const char *const *` | Source menu's path from the root; see launcher__tree_list(). |
+| `path_depth` | `size_t` | Number of labels in path. |
+| `index` | `size_t` | Entry to move. |
+| `dest_path` | `const char *const *` | Destination menu's path from the root. |
+| `dest_path_depth` | `size_t` | Number of labels in dest_path. |
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
 # `manifest.h`
 
 **App manifest parsing.**
@@ -11402,6 +12079,7 @@ Returns the infrared receiver pin.
 | `BRUCE_CORE_ABI_VERSION` | `5u` |
 | `BRUCE_MANIFEST_APP_NAME_MAX` | `64` |
 | `BRUCE_MANIFEST_ICON_BYTES` | `128` |
+| `BRUCE_MANIFEST_ICON_NAME_MAX` | `32` |
 | `BRUCE_MANIFEST_MAX_PERMISSIONS` | `BRUCE_PERMISSION_COUNT` |
 | `BRUCE_MANIFEST_PERMISSION_NAME_MAX` | `16` |
 | `BRUCE_MANIFEST_STACK_MIN` | `4096u` |
@@ -11416,6 +12094,13 @@ Returns the infrared receiver pin.
 typedef struct {
     char app_name[BRUCE_MANIFEST_APP_NAME_MAX];
     uint8_t app_icon[BRUCE_MANIFEST_ICON_BYTES];
+    /* Set (non-empty) only when the manifest's "appIcon" was the
+     * "icon:<name>" form rather than base64 -- see manifest__parse()'s doc
+     * comment. Holds a name looked up in core_sdk/icon.h's built-in icon
+     * registry, already validated to exist at parse time. Empty when
+     * "appIcon" was base64 instead, in which case app_icon above is what's
+     * authoritative. */
+    char app_icon_name[BRUCE_MANIFEST_ICON_NAME_MAX];
     uint32_t core_abi_version;
     uint32_t stack_size;
     /* Advisory expected peak memory__malloc()/memory__external_malloc() use;
@@ -11464,17 +12149,21 @@ bruce_manifest_t *manifest__parse(const char *json, size_t json_len);
 
 Parses and validates canonical manifest JSON bytes.
 
-(see migration_plan.md, "ELF contract"): required appName/appIcon
-(base64, decodes to exactly BRUCE_MANIFEST_ICON_BYTES bytes)/
+(see migration_plan.md, "ELF contract"): required appName/appIcon/
 coreAbiVersion/stackSize (BRUCE_MANIFEST_STACK_MIN-
 BRUCE_MANIFEST_STACK_MAX inclusive); an optional heapSize (0-
 BRUCE_MANIFEST_HEAP_MAX inclusive, see bruce_manifest_t.heap_size); and an
 optional permissions array (each name must be a known bruce_permission_t
-name, no duplicates). Every caller extracts raw manifest bytes from the
-file format and calls this one shared parser instead of reimplementing
-JSON/base64 handling. Returns a process-owned manifest that must be
-released with memory__free(), or NULL for invalid input or allocation
-failure.
+name, no duplicates). appIcon is either base64 (decodes to exactly
+BRUCE_MANIFEST_ICON_BYTES bytes, stored in bruce_manifest_t.app_icon) or
+"icon:<name>" (e.g. "icon:clock-outline"), naming a built-in icon from
+core_sdk/icon.h's registry (stored in bruce_manifest_t.app_icon_name
+instead -- app_icon is left all-zero); an "icon:" name that doesn't
+resolve via icon__get() is rejected the same as malformed base64 would
+be. Every caller extracts raw manifest bytes from the file format and
+calls this one shared parser instead of reimplementing JSON/base64
+handling. Returns a process-owned manifest that must be released with
+memory__free(), or NULL for invalid input or allocation failure.
 
 ### Parameters
 
@@ -13273,6 +13962,12 @@ typedef struct {
     bool built_in;
     bool gui_requested;
     bool presentable;
+    /* True while this process is blocked inside process__wait()/wait_status()
+     * for another process (e.g. a launcher-style app parked waiting on a
+     * foreground child it just started). It has no active input/redraw loop
+     * right now, so switching it into the foreground would just leave the
+     * screen frozen - skip it in any "switch to a running app" listing. */
+    bool blocked_on_wait;
 } bruce_process_snapshot_t;
 ```
 
@@ -14065,6 +14760,42 @@ through standard input and output.
 
 ---
 
+## runtime__to_foreground()
+
+```c
+bruce_result_t runtime__to_foreground(void);
+```
+
+Gives the calling process foreground ownership.
+
+Marks the process GUI-capable when necessary. This is self-only and does
+not require process permission.
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
+## runtime__to_background()
+
+```c
+bruce_result_t runtime__to_background(void);
+```
+
+Moves the calling foreground process to the background.
+
+This is self-only and returns BRUCE_ERR_INVALID_STATE when the caller is
+not currently foreground.
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
 # `spi.h`
 
 **SPI device access.**
@@ -14189,6 +14920,8 @@ Closes an SPI device opened by spi__open().
 | `BRUCE_SSH_HOST_KEY_SHA256_SIZE` | `32` |
 | `BRUCE_SSH_PRIVATE_KEY_MAX_SIZE` | `512` |
 | `BRUCE_SSH_PUBLIC_KEY_MAX_SIZE` | `256` |
+| `BRUCE_SSH_SFTP_NAME_MAX` | `128` |
+| `BRUCE_SSH_SFTP_HANDLE_MAX` | `256` |
 
 ---
 
@@ -14542,6 +15275,296 @@ Closes an SSH session opened by ssh__connect().
 | Parameter | Type | Description |
 | --- | --- | --- |
 | `session` | `bruce_ssh_id_t` | Session to close. |
+
+### Returns
+
+`bruce_result_t`
+
+#### Permissions
+
+- `ssh`
+
+
+---
+
+## bruce_ssh_sftp_file_t()
+
+```c
+typedef struct {
+    uint8_t bytes[BRUCE_SSH_SFTP_HANDLE_MAX];
+    uint32_t size;
+} bruce_ssh_sftp_file_t;
+```
+
+Opaque remote file handle from ssh__sftp_open_file().
+
+
+---
+
+## bruce_ssh_sftp_entry_t()
+
+```c
+typedef struct {
+    char name[BRUCE_SSH_SFTP_NAME_MAX];
+    bool is_directory;
+    uint64_t size;
+} bruce_ssh_sftp_entry_t;
+```
+
+One entry from ssh__sftp_list(); size is 0 and meaningless for a directory.
+
+
+---
+
+## ssh__sftp_authenticate_password()
+
+```c
+bruce_result_t ssh__sftp_authenticate_password(
+    bruce_ssh_id_t session, const char *username, const char *password, uint32_t timeout_ms
+);
+```
+
+Authenticates a session for SFTP with a password.
+
+Field-for-field identical to ssh__authenticate_password(), except the
+channel this negotiates carries the SFTP subsystem instead of a shell --
+see the group doc comment above.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `session` | `bruce_ssh_id_t` |  |
+| `username` | `const char *` |  |
+| `password` | `const char *` |  |
+| `timeout_ms` | `uint32_t` |  |
+
+### Returns
+
+`bruce_result_t`
+
+#### Permissions
+
+- `ssh`
+
+
+---
+
+## ssh__sftp_authenticate_key()
+
+```c
+bruce_result_t ssh__sftp_authenticate_key(
+    bruce_ssh_id_t session, const char *username, const void *private_key,
+    size_t private_key_size, uint32_t timeout_ms
+);
+```
+
+Authenticates a session for SFTP with a private key.
+
+Field-for-field identical to ssh__authenticate_key(), except the channel
+this negotiates carries the SFTP subsystem instead of a shell -- see the
+group doc comment above.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `session` | `bruce_ssh_id_t` |  |
+| `username` | `const char *` |  |
+| `private_key` | `const void *` |  |
+| `private_key_size` | `size_t` |  |
+| `timeout_ms` | `uint32_t` |  |
+
+### Returns
+
+`bruce_result_t`
+
+#### Permissions
+
+- `ssh`
+
+
+---
+
+## ssh__sftp_open()
+
+```c
+bruce_result_t ssh__sftp_open(bruce_ssh_id_t session, uint32_t timeout_ms);
+```
+
+Completes the SFTP protocol handshake on an SFTP-authenticated session.
+
+Must be called once, after ssh__sftp_authenticate_password()/_key()
+succeeds and before any other function in this group.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `session` | `bruce_ssh_id_t` | SFTP-authenticated session. |
+| `timeout_ms` | `uint32_t` | Handshake timeout in milliseconds. |
+
+### Returns
+
+`bruce_result_t`
+
+#### Permissions
+
+- `ssh`
+
+
+---
+
+## ssh__sftp_list()
+
+```c
+bruce_result_t ssh__sftp_list(
+    bruce_ssh_id_t session, const char *path, bruce_ssh_sftp_entry_t *entries, size_t capacity,
+    size_t *out_count, uint32_t timeout_ms
+);
+```
+
+Lists a remote directory.
+
+Neither "." nor ".." is included.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `session` | `bruce_ssh_id_t` | Session opened with ssh__sftp_open(). |
+| `path` | `const char *` | Absolute remote directory path. |
+| `entries` | `bruce_ssh_sftp_entry_t *` | Array to receive directory entries. |
+| `capacity` | `size_t` | Number of entries the entries array can hold. |
+| `out_count` | `size_t *` | Receives the number of entries written (capped to capacity). |
+| `timeout_ms` | `uint32_t` | Request timeout in milliseconds. |
+
+### Returns
+
+`bruce_result_t`
+
+#### Permissions
+
+- `ssh`
+
+
+---
+
+## ssh__sftp_realpath()
+
+```c
+bruce_result_t ssh__sftp_realpath(
+    bruce_ssh_id_t session, const char *path, char *out_path, size_t out_capacity, uint32_t timeout_ms
+);
+```
+
+Canonicalizes a remote path, e.g. "." to the login directory's absolute path.
+
+Same server-side resolution OpenSSH's sftp client uses for "pwd".
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `session` | `bruce_ssh_id_t` | Session opened with ssh__sftp_open(). |
+| `path` | `const char *` | Path to resolve; "." for the login/home directory. |
+| `out_path` | `char *` | Receives the resolved absolute path (NUL-terminated, truncated if it doesn't fit). |
+| `out_capacity` | `size_t` | Size of out_path in bytes. |
+| `timeout_ms` | `uint32_t` | Request timeout in milliseconds. |
+
+### Returns
+
+`bruce_result_t`
+
+#### Permissions
+
+- `ssh`
+
+
+---
+
+## ssh__sftp_open_file()
+
+```c
+bruce_result_t ssh__sftp_open_file(
+    bruce_ssh_id_t session, const char *path, bruce_ssh_sftp_file_t *out_file, uint32_t timeout_ms
+);
+```
+
+Opens a remote file for reading.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `session` | `bruce_ssh_id_t` | Session opened with ssh__sftp_open(). |
+| `path` | `const char *` | Absolute remote file path. |
+| `out_file` | `bruce_ssh_sftp_file_t *` | Receives the new file handle. |
+| `timeout_ms` | `uint32_t` | Request timeout in milliseconds. |
+
+### Returns
+
+`bruce_result_t`
+
+#### Permissions
+
+- `ssh`
+
+
+---
+
+## ssh__sftp_read_file()
+
+```c
+bruce_result_t ssh__sftp_read_file(
+    bruce_ssh_id_t session, const bruce_ssh_sftp_file_t *file, void *buffer, size_t capacity,
+    uint64_t offset, size_t *out_size, uint32_t timeout_ms
+);
+```
+
+Reads a chunk from a remote file opened with ssh__sftp_open_file().
+
+EOF is BRUCE_OK with *out_size == 0.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `session` | `bruce_ssh_id_t` | Session the file handle belongs to. |
+| `file` | `const bruce_ssh_sftp_file_t *` | File handle from ssh__sftp_open_file(). |
+| `buffer` | `void *` | Buffer to receive read bytes. |
+| `capacity` | `size_t` | Size of buffer in bytes. |
+| `offset` | `uint64_t` | Byte offset to read from. |
+| `out_size` | `size_t *` | Receives the number of bytes read. |
+| `timeout_ms` | `uint32_t` | Request timeout in milliseconds. |
+
+### Returns
+
+`bruce_result_t`
+
+#### Permissions
+
+- `ssh`
+
+
+---
+
+## ssh__sftp_close_file()
+
+```c
+bruce_result_t
+ssh__sftp_close_file(bruce_ssh_id_t session, const bruce_ssh_sftp_file_t *file, uint32_t timeout_ms);
+```
+
+Closes a remote file handle from ssh__sftp_open_file().
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `session` | `bruce_ssh_id_t` | Session the file handle belongs to. |
+| `file` | `const bruce_ssh_sftp_file_t *` | File handle to close. |
+| `timeout_ms` | `uint32_t` | Request timeout in milliseconds. |
 
 ### Returns
 
