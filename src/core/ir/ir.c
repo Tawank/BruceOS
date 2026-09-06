@@ -116,7 +116,11 @@ static bruce_result_t ir__transmit_raw_with_duty(
         uint8_t level;
         uint64_t duration;
     } ir_run_t;
-    ir_run_t runs[BRUCE_IR_MAX_RAW_TIMINGS];
+    ir_run_t *runs = calloc(BRUCE_IR_MAX_RAW_TIMINGS, sizeof(*runs));
+    if (runs == NULL) {
+        ir__unlock();
+        return BRUCE_ERR_NO_MEMORY;
+    }
     size_t run_count = 0;
     for (size_t i = 0; i < timing_count; ++i) {
         uint32_t duration = timings_us[i];
@@ -126,6 +130,7 @@ static bruce_result_t ir__transmit_raw_with_duty(
         else runs[run_count++] = (ir_run_t){.level = level, .duration = duration};
     }
     if (run_count == 0) {
+        free(runs);
         ir__unlock();
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
@@ -135,6 +140,7 @@ static bruce_result_t ir__transmit_raw_with_duty(
     size_t symbol_count = (chunk_count + 1u) / 2u;
     rmt_symbol_word_t *symbols = calloc(symbol_count, sizeof(*symbols));
     if (symbols == NULL) {
+        free(runs);
         ir__unlock();
         return BRUCE_ERR_NO_MEMORY;
     }
@@ -162,6 +168,7 @@ static bruce_result_t ir__transmit_raw_with_duty(
 
     bruce_result_t result = ir__send_symbols(symbols, symbol_count, frequency_hz, duty_cycle, repeats);
     free(symbols);
+    free(runs);
     ir__unlock();
     return result;
 }
@@ -521,19 +528,27 @@ static bruce_result_t ir__send_file_record(char *record, uint8_t repeats) {
     }
     if (strcasecmp(type, "raw") != 0 || data == NULL) return BRUCE_ERR_UNSUPPORTED;
 
-    uint32_t timings[BRUCE_IR_MAX_RAW_TIMINGS];
+    uint32_t *timings = calloc(BRUCE_IR_MAX_RAW_TIMINGS, sizeof(*timings));
+    if (timings == NULL) return BRUCE_ERR_NO_MEMORY;
     size_t count = 0;
     char *timing_save = NULL;
     for (char *token = strtok_r(data, " ,\t\r", &timing_save); token != NULL;
          token = strtok_r(NULL, " ,\t\r", &timing_save)) {
-        if (count >= BRUCE_IR_MAX_RAW_TIMINGS) return BRUCE_ERR_RESOURCE_LIMIT;
+        if (count >= BRUCE_IR_MAX_RAW_TIMINGS) {
+            free(timings);
+            return BRUCE_ERR_RESOURCE_LIMIT;
+        }
         char *end = NULL;
         unsigned long duration = strtoul(token, &end, 10);
-        if (end == token || *end != '\0' || duration == 0 || duration > UINT32_MAX)
+        if (end == token || *end != '\0' || duration > UINT32_MAX) {
+            free(timings);
             return BRUCE_ERR_INVALID_ARGUMENT;
+        }
         timings[count++] = (uint32_t)duration;
     }
-    return ir__transmit_raw(timings, count, frequency, repeats);
+    bruce_result_t result = ir__transmit_raw(timings, count, frequency, repeats);
+    free(timings);
+    return result;
 }
 
 static bruce_result_t ir__transmit_record_mutable(char *contents, uint8_t repeats) {
