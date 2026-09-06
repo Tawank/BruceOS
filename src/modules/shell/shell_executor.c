@@ -561,6 +561,34 @@ static uint32_t shell_executor__redirect_open_flags(bool append) {
            (append ? BRUCE_STORAGE_OPEN_APPEND : (BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_TRUNCATE));
 }
 
+/* Resolves `span` to a path and opens it for writing per `append` -- the
+ * shared preamble of every "> target"/">> target" redirect, whether the
+ * command being redirected is a builtin, a function, or an external
+ * process (shell_executor__external_redirected(), shell_executor__builtin_redirected(),
+ * and shell_executor__builtin_with_input()'s optional-output branch all used
+ * to duplicate this). On any failure this prints the same "shell: ..."/
+ * "shell: %s: cannot open" text those call sites already used and returns
+ * false; the two output parameters are only set on success. */
+static bool shell_executor__open_redirect_output(
+    shell_state_t *state, const shell_word_span_t *span, bool append, bruce_file_id_t *out_file, char **out_path
+) {
+    const char *error = NULL;
+    char *path = NULL;
+    if (shell_executor__resolve_redirect_target(state, span, &path, &error) != 0) {
+        stdio__printf("shell: %s\n", error != NULL ? error : "redirection error");
+        return false;
+    }
+    bruce_file_id_t file;
+    if (storage__open(path, shell_executor__redirect_open_flags(append), &file) != BRUCE_OK) {
+        stdio__printf("shell: %s: cannot open\n", path);
+        memory__free(path);
+        return false;
+    }
+    *out_file = file;
+    *out_path = path;
+    return true;
+}
+
 /* Opens `target` for reading just long enough to confirm it exists, then
  * closes it again -- for a "<"/heredoc redirection whose stdin nothing
  * actually reads: a bare "< file" with no command at all, and a standalone
@@ -619,7 +647,7 @@ static bool shell_executor__write_file(const char *path, bool append, const shel
 /* Reads the whole content of `path` into a fresh external-memory-backed
  * buffer (see shell_executor__buffer_append()'s own doc comment on why
  * that backing is used for this shell's captured/fed data in general).
- * Used for "cmd < file" -- see shell_executor__external_input_redirected()
+ * Used for "cmd < file" -- see shell_executor__load_redirect_input()
  * below. Returns false (leaving *out_buffer untouched) if `path` can't be
  * opened for reading, or on any read/out-of-memory error partway through --
  * in the latter case whatever had been read so far is freed rather than
@@ -705,10 +733,7 @@ static int shell_executor__stream_external_to_file(int argc, char **argv, bruce_
     (void)stdio__session_close(session);
     if (write_failed) return -1;
     if (!complete) return 1;
-    if (status.reason == BRUCE_PROCESS_TERMINATED || status.reason == BRUCE_PROCESS_KILLED) {
-        return 128 + (int)status.signal;
-    }
-    return status.exit_code < 0 ? 1 : status.exit_code & 0xff;
+    return shell_executor__status_to_exit_code(&status);
 }
 
 /* "cmd > file" / "cmd >> file" for an external command with no "<"/heredoc
@@ -718,17 +743,11 @@ static int shell_executor__stream_external_to_file(int argc, char **argv, bruce_
 static int shell_executor__external_redirected(
     shell_state_t *state, int argc, char **argv, const shell_command_t *command
 ) {
-    const char *error = NULL;
-    char *path = NULL;
-    if (shell_executor__resolve_redirect_target(state, &command->redirect_target, &path, &error) != 0) {
-        stdio__printf("shell: %s\n", error != NULL ? error : "redirection error");
-        return 2;
-    }
     bruce_file_id_t file;
-    if (storage__open(path, shell_executor__redirect_open_flags(command->redirect == SHELL_REDIRECT_APPEND), &file) !=
-        BRUCE_OK) {
-        stdio__printf("shell: %s: cannot open\n", path);
-        memory__free(path);
+    char *path;
+    if (!shell_executor__open_redirect_output(
+            state, &command->redirect_target, command->redirect == SHELL_REDIRECT_APPEND, &file, &path
+        )) {
         return 2;
     }
     int status = shell_executor__stream_external_to_file(argc, argv, file);
@@ -774,17 +793,11 @@ static int shell_executor__external_redirected(
 static int shell_executor__builtin_redirected(
     shell_state_t *state, int argc, char **argv, const shell_command_t *command, bool is_function
 ) {
-    const char *error = NULL;
-    char *path = NULL;
-    if (shell_executor__resolve_redirect_target(state, &command->redirect_target, &path, &error) != 0) {
-        stdio__printf("shell: %s\n", error != NULL ? error : "redirection error");
-        return 2;
-    }
     bruce_file_id_t file;
-    if (storage__open(path, shell_executor__redirect_open_flags(command->redirect == SHELL_REDIRECT_APPEND), &file) !=
-        BRUCE_OK) {
-        stdio__printf("shell: %s: cannot open\n", path);
-        memory__free(path);
+    char *path;
+    if (!shell_executor__open_redirect_output(
+            state, &command->redirect_target, command->redirect == SHELL_REDIRECT_APPEND, &file, &path
+        )) {
         return 2;
     }
     bruce_stdio_session_t capture = BRUCE_STDIO_SESSION_INVALID;
@@ -846,20 +859,12 @@ static int shell_executor__builtin_with_input(
     bool has_output = command->redirect != SHELL_REDIRECT_NONE;
     char *path = NULL;
     bruce_file_id_t file = 0;
-    if (has_output) {
-        const char *error = NULL;
-        if (shell_executor__resolve_redirect_target(state, &command->redirect_target, &path, &error) != 0) {
-            stdio__printf("shell: %s\n", error != NULL ? error : "redirection error");
-            shell_executor__buffer_free(input);
-            return 2;
-        }
-        if (storage__open(path, shell_executor__redirect_open_flags(command->redirect == SHELL_REDIRECT_APPEND), &file) !=
-            BRUCE_OK) {
-            stdio__printf("shell: %s: cannot open\n", path);
-            memory__free(path);
-            shell_executor__buffer_free(input);
-            return 2;
-        }
+    if (has_output &&
+        !shell_executor__open_redirect_output(
+            state, &command->redirect_target, command->redirect == SHELL_REDIRECT_APPEND, &file, &path
+        )) {
+        shell_executor__buffer_free(input);
+        return 2;
     }
     bruce_stdio_session_t capture = BRUCE_STDIO_SESSION_INVALID;
     if (stdio__session_create(&capture) != BRUCE_OK) {
@@ -920,42 +925,48 @@ static int shell_executor__builtin_with_input(
     return write_ok ? status : 1;
 }
 
-/* "builtin < file" / "myfunc < file" -- reads `file` in full
- * (shell_executor__read_file(), same as an external command's "<" does) and
- * hands it to shell_executor__builtin_with_input() above. */
-static int shell_executor__builtin_input_redirected(
-    shell_state_t *state, int argc, char **argv, const shell_command_t *command, bool is_function
+/* Loads the bytes a "<target"-redirected or heredoc-redirected command
+ * should receive on stdin into a fresh buffer, for either a builtin/function
+ * (shell_executor__builtin_with_input()) or an external command
+ * (shell_executor__external_with_input()) to consume -- both used to
+ * duplicate this as four separate wrapper functions
+ * (builtin/external × input/heredoc), which differed only in which of those
+ * two they went on to call. Reads `command->input_target` via
+ * shell_executor__read_file() when `command->input_redirect` is set,
+ * otherwise copies `command->heredoc_body` verbatim (already collected and,
+ * unless quoted, $-expanded by the parser). On failure, *out_input is left
+ * empty, an error has already been printed, and *out_status is set to the
+ * exact code the removed wrappers used to return for that failure (2 for a
+ * bad redirection target, 1 for a read/open/out-of-memory failure) --
+ * *out_status is left untouched on success. */
+static bool shell_executor__load_redirect_input(
+    shell_state_t *state, const shell_command_t *command, shell_executor__buffer_t *out_input, int *out_status
 ) {
-    const char *error = NULL;
-    char *path = NULL;
-    if (shell_executor__resolve_redirect_target(state, &command->input_target, &path, &error) != 0) {
-        stdio__printf("shell: %s\n", error != NULL ? error : "redirection error");
-        return 2;
+    *out_input = (shell_executor__buffer_t){0};
+    if (command->input_redirect) {
+        const char *error = NULL;
+        char *path = NULL;
+        if (shell_executor__resolve_redirect_target(state, &command->input_target, &path, &error) != 0) {
+            stdio__printf("shell: %s\n", error != NULL ? error : "redirection error");
+            *out_status = 2;
+            return false;
+        }
+        bool ok = shell_executor__read_file(path, out_input);
+        if (!ok) {
+            stdio__printf("shell: %s: cannot open\n", path);
+            *out_status = 1;
+        }
+        memory__free(path);
+        return ok;
     }
-    shell_executor__buffer_t input = {0};
-    bool ok = shell_executor__read_file(path, &input);
-    if (!ok) stdio__printf("shell: %s: cannot open\n", path);
-    memory__free(path);
-    if (!ok) return 1;
-    return shell_executor__builtin_with_input(state, argc, argv, command, is_function, &input);
-}
-
-/* "builtin <<DELIM" / "myfunc <<-DELIM" -- copies the already-collected,
- * already-expanded heredoc body into a fresh buffer and hands it to
- * shell_executor__builtin_with_input() above, mirroring
- * shell_executor__external_heredoc_redirected()'s external-command
- * counterpart. */
-static int shell_executor__builtin_heredoc_redirected(
-    shell_state_t *state, int argc, char **argv, const shell_command_t *command, bool is_function
-) {
-    shell_executor__buffer_t input = {0};
     size_t body_length = strlen(command->heredoc_body);
-    if (body_length > 0 && !shell_executor__buffer_append(&input, command->heredoc_body, body_length)) {
+    if (body_length > 0 && !shell_executor__buffer_append(out_input, command->heredoc_body, body_length)) {
         stdio__printf("shell: out of memory\n");
-        shell_executor__buffer_free(&input);
-        return 1;
+        shell_executor__buffer_free(out_input);
+        *out_status = 1;
+        return false;
     }
-    return shell_executor__builtin_with_input(state, argc, argv, command, is_function, &input);
+    return true;
 }
 
 /* Pumps `session` bidirectionally between `child` and the shell process's own
@@ -1007,10 +1018,7 @@ static int shell_executor__pipe_relay(bruce_stdio_session_t session, bruce_proce
         if (size > 0) (void)stdio__write(chunk, size);
     }
     if (!complete) return 1;
-    if (status.reason == BRUCE_PROCESS_TERMINATED || status.reason == BRUCE_PROCESS_KILLED) {
-        return 128 + (int)status.signal;
-    }
-    return status.exit_code < 0 ? 1 : status.exit_code & 0xff;
+    return shell_executor__status_to_exit_code(&status);
 }
 
 /* Drains output already produced by a pipe destination. This must also run
@@ -1079,10 +1087,7 @@ static int shell_executor__pipe_relay_capture(
         return -1;
     }
     if (!complete) return 1;
-    if (status.reason == BRUCE_PROCESS_TERMINATED || status.reason == BRUCE_PROCESS_KILLED) {
-        return 128 + (int)status.signal;
-    }
-    return status.exit_code < 0 ? 1 : status.exit_code & 0xff;
+    return shell_executor__status_to_exit_code(&status);
 }
 
 /* Feeds a captured buffer to `target`'s stdin over a fresh stdio session,
@@ -1234,43 +1239,6 @@ static int shell_executor__external_with_input(
     shell_executor__buffer_free(&capture);
     memory__free(path);
     return status;
-}
-
-/* "cmd < file" -- reads `file` in full (shell_executor__read_file()) and
- * hands it to shell_executor__external_with_input() above. */
-static int shell_executor__external_input_redirected(
-    shell_state_t *state, int argc, char **argv, const shell_command_t *command
-) {
-    const char *error = NULL;
-    char *path = NULL;
-    if (shell_executor__resolve_redirect_target(state, &command->input_target, &path, &error) != 0) {
-        stdio__printf("shell: %s\n", error != NULL ? error : "redirection error");
-        return 2;
-    }
-    shell_executor__buffer_t input = {0};
-    bool ok = shell_executor__read_file(path, &input);
-    if (!ok) stdio__printf("shell: %s: cannot open\n", path);
-    memory__free(path);
-    if (!ok) return 1;
-    return shell_executor__external_with_input(state, argc, argv, command, &input);
-}
-
-/* "cmd <<DELIM"/"cmd <<-DELIM" -- copies the already-collected, already
- * (unless quoted) $expanded heredoc body (see shell_command_t's own doc
- * comment on `heredoc_body`) into a fresh buffer and hands it to
- * shell_executor__external_with_input() above the same way a "<"-redirected
- * file's content would be. */
-static int shell_executor__external_heredoc_redirected(
-    shell_state_t *state, int argc, char **argv, const shell_command_t *command
-) {
-    shell_executor__buffer_t input = {0};
-    size_t body_length = strlen(command->heredoc_body);
-    if (body_length > 0 && !shell_executor__buffer_append(&input, command->heredoc_body, body_length)) {
-        stdio__printf("shell: out of memory\n");
-        shell_executor__buffer_free(&input);
-        return 1;
-    }
-    return shell_executor__external_with_input(state, argc, argv, command, &input);
 }
 
 /* Runs a full "|"-chain of `count` (>= 2) commands, feeding each stage's
@@ -1610,19 +1578,19 @@ static int shell_executor__dispatch(shell_state_t *state, const shell_command_t 
                 state, remaining, argv, environment.items, environment.count, command->text, command->length
             );
         }
+    } else if (redirected && output_only_redirect) {
+        result = (is_function || is_builtin)
+                     ? shell_executor__builtin_redirected(state, remaining, argv, command, is_function)
+                     : shell_executor__external_redirected(state, remaining, argv, command);
     } else if (redirected) {
-        if ((is_function || is_builtin) && output_only_redirect) {
-            result = shell_executor__builtin_redirected(state, remaining, argv, command, is_function);
-        } else if ((is_function || is_builtin) && command->input_redirect) {
-            result = shell_executor__builtin_input_redirected(state, remaining, argv, command, is_function);
+        shell_executor__buffer_t input;
+        int input_status = 1;
+        if (!shell_executor__load_redirect_input(state, command, &input, &input_status)) {
+            result = input_status;
         } else if (is_function || is_builtin) {
-            result = shell_executor__builtin_heredoc_redirected(state, remaining, argv, command, is_function);
-        } else if (command->input_redirect) {
-            result = shell_executor__external_input_redirected(state, remaining, argv, command);
-        } else if (command->heredoc_body != NULL) {
-            result = shell_executor__external_heredoc_redirected(state, remaining, argv, command);
+            result = shell_executor__builtin_with_input(state, remaining, argv, command, is_function, &input);
         } else {
-            result = shell_executor__external_redirected(state, remaining, argv, command);
+            result = shell_executor__external_with_input(state, remaining, argv, command, &input);
         }
     } else {
         result = is_function ? shell_compound__call_function(state, remaining, argv)

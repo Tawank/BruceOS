@@ -1378,7 +1378,7 @@ bool selftest__run_shell_builtin_redirect_case(void) {
     return ok;
 }
 
-/* Exercises "cmd < file" -- shell_executor__external_input_redirected() in
+/* Exercises "cmd < file" -- shell_executor__load_redirect_input() in
  * shell_executor.c, which reads `file` in full and feeds it to the command's
  * stdin via shell_executor__pipe_write() (the same "--stdin-size N"-fed
  * mechanism a "|" pipe destination already uses). The one content check runs
@@ -1427,7 +1427,7 @@ bool selftest__run_shell_input_redirect_case(void) {
          * need a routed session either. */
         shell__execute_line(&state, "cat < /apps/shell_input_redirect_missing.txt") == 1 &&
         /* A builtin's "<" target missing is the same class of error --
-         * shell_executor__builtin_input_redirected() fails to open it via
+         * shell_executor__load_redirect_input() fails to open it via
          * shell_executor__read_file() before "echo" ever runs (see
          * selftest__run_shell_builtin_redirect_case() for the
          * target-exists path, on both a builtin and a function). */

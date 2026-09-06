@@ -637,21 +637,35 @@ int shell_parser__plan(
     return 0;
 }
 
-/* Grows on demand (starting small) instead of preallocating SHELL__WORD_MAX,
- * so a typical short word costs a fraction of the worst case. */
+/* Growable, null-terminated heap string buffer shared by word-splitting/
+ * expansion (shell_parser__process_word()'s and shell_parser__expand()'s
+ * `word`, capped at SHELL__WORD_MAX) and heredoc/text expansion
+ * (shell_parser__expand_text()'s `out`, capped at the bigger
+ * SHELL__HEREDOC_MAX since a heredoc body is prose/data rather than one argv
+ * word) alike -- both used to be separate, near-identical types
+ * (shell_word_buffer_t/shell_text_buffer_t) differing only in their initial
+ * capacity and cap. `initial_capacity`/`max_capacity` must be set by the
+ * caller before the first append (a `{0}`-initialized buffer would never
+ * grow, since 0 > 0 is false); everything else starts zeroed. Grows on
+ * demand -- starting at `initial_capacity` instead of preallocating
+ * `max_capacity` -- so a typical short word/line costs a fraction of the
+ * worst case, doubling via memory__realloc() in place each time it's still
+ * too small. */
 typedef struct {
     char *data;
     size_t length;
     size_t capacity;
-} shell_word_buffer_t;
+    size_t initial_capacity;
+    size_t max_capacity;
+} shell_dynbuf_t;
 
-static bool shell_word_buffer__append(shell_word_buffer_t *buf, const char *text, size_t length) {
+static bool shell_dynbuf__append(shell_dynbuf_t *buf, const char *text, size_t length) {
     size_t needed = buf->length + length + 1;
-    if (needed > SHELL__WORD_MAX) return false;
+    if (needed > buf->max_capacity) return false;
     if (needed > buf->capacity) {
-        size_t new_capacity = buf->capacity == 0 ? 32 : buf->capacity;
+        size_t new_capacity = buf->capacity == 0 ? buf->initial_capacity : buf->capacity;
         while (new_capacity < needed) new_capacity *= 2;
-        if (new_capacity > SHELL__WORD_MAX) new_capacity = SHELL__WORD_MAX;
+        if (new_capacity > buf->max_capacity) new_capacity = buf->max_capacity;
         char *grown = memory__realloc(buf->data, new_capacity);
         if (grown == NULL) return false;
         buf->data = grown;
@@ -663,10 +677,13 @@ static bool shell_word_buffer__append(shell_word_buffer_t *buf, const char *text
     return true;
 }
 
-/* Releases any capacity beyond what the finished word actually needs, and
+/* Releases any capacity beyond what the finished buffer actually needs, and
  * turns a never-appended-to buffer (e.g. from a bare `''`) into an owned
- * empty string so callers always get a valid pointer. */
-static char *shell_word_buffer__finish(shell_word_buffer_t *buf) {
+ * empty string so callers always get a valid pointer. Only word-splitting
+ * uses this shrink-to-fit step (see shell_parser__process_word()) --
+ * heredoc/text expansion returns its buffer's `data` directly instead, same
+ * as before this type was shared between the two uses. */
+static char *shell_dynbuf__finish(shell_dynbuf_t *buf) {
     if (buf->data == NULL) {
         char *empty = memory__malloc(1);
         if (empty != NULL) empty[0] = '\0';
@@ -706,7 +723,7 @@ static void shell_word_list__free(shell_word_list_t *list) {
  * Shared by shell_parser__expand()'s "$(...)" branch below and
  * shell_parser__process_word()'s own "`...`" handling further down. */
 static int shell_parser__splice_substitution(
-    const shell_command_t *command, size_t content_start, size_t content_len, shell_word_buffer_t *word,
+    const shell_command_t *command, size_t content_start, size_t content_len, shell_dynbuf_t *word,
     shell_command_substitution_fn substitute, void *context, const char **error
 ) {
     char *result = substitute != NULL ? substitute(context, command->text + content_start, content_len) : NULL;
@@ -714,7 +731,7 @@ static int shell_parser__splice_substitution(
         *error = "command substitution failed";
         return -1;
     }
-    bool appended = shell_word_buffer__append(word, result, strlen(result));
+    bool appended = shell_dynbuf__append(word, result, strlen(result));
     memory__free(result);
     if (!appended) *error = "expanded word too long";
     return appended ? 0 : -1;
@@ -728,7 +745,7 @@ static int shell_parser__splice_substitution(
  * instead of a fixed generic one (matching how the standalone "((...))"
  * statement form reports arithmetic errors -- see shell_executor.c). */
 static int shell_parser__splice_arith(
-    const shell_command_t *command, size_t inner_start, size_t inner_len, shell_word_buffer_t *word,
+    const shell_command_t *command, size_t inner_start, size_t inner_len, shell_dynbuf_t *word,
     shell_arith_word_fn arith, void *context, const char **error
 ) {
     const char *arith_error = NULL;
@@ -738,21 +755,21 @@ static int shell_parser__splice_arith(
         *error = arith_error != NULL ? arith_error : "arithmetic expansion failed";
         return -1;
     }
-    bool appended = shell_word_buffer__append(word, result, strlen(result));
+    bool appended = shell_dynbuf__append(word, result, strlen(result));
     memory__free(result);
     if (!appended) *error = "expanded word too long";
     return appended ? 0 : -1;
 }
 
 static int shell_parser__expand(
-    const shell_command_t *command, size_t *position, shell_word_buffer_t *word, shell_variable_lookup_fn lookup,
+    const shell_command_t *command, size_t *position, shell_dynbuf_t *word, shell_variable_lookup_fn lookup,
     shell_command_substitution_fn substitute, shell_arith_word_fn arith, void *context, int last_status,
     const char **error
 ) {
     size_t i = *position;
     if (i + 1 >= command->length) {
         *position = i + 1;
-        return shell_word_buffer__append(word, "$", 1) ? 0 : -1;
+        return shell_dynbuf__append(word, "$", 1) ? 0 : -1;
     }
     /* "$(...)" command substitution -- see shell_command_substitution_fn in
      * shell_parser.h. Its content span was already validated as
@@ -791,7 +808,7 @@ static int shell_parser__expand(
         char status[12];
         int written = snprintf(status, sizeof(status), "%d", last_status);
         *position = i + 2;
-        return written > 0 && shell_word_buffer__append(word, status, (size_t)written) ? 0 : -1;
+        return written > 0 && shell_dynbuf__append(word, status, (size_t)written) ? 0 : -1;
     }
     /* $0/$1../$9/$# -- a function call's name, its positional parameters,
      * and how many of them there are (see shell_compound__call_function()
@@ -805,7 +822,7 @@ static int shell_parser__expand(
         char key[2] = {command->text[i + 1], '\0'};
         *position = i + 2;
         const char *value = lookup != NULL ? lookup(context, key) : NULL;
-        return value == NULL || shell_word_buffer__append(word, value, strlen(value)) ? 0 : -1;
+        return value == NULL || shell_dynbuf__append(word, value, strlen(value)) ? 0 : -1;
     }
     if (command->text[i + 1] == '{') {
         i += 2;
@@ -825,7 +842,7 @@ static int shell_parser__expand(
         i++;
         if (!(isalpha((unsigned char)command->text[i]) || command->text[i] == '_')) {
             *position = i;
-            return shell_word_buffer__append(word, "$", 1) ? 0 : -1;
+            return shell_dynbuf__append(word, "$", 1) ? 0 : -1;
         }
         while (i < command->length && (isalnum((unsigned char)command->text[i]) || command->text[i] == '_')) {
             if (name_length + 1 >= sizeof(name)) {
@@ -842,39 +859,11 @@ static int shell_parser__expand(
     }
     name[name_length] = '\0';
     const char *value = lookup != NULL ? lookup(context, name) : NULL;
-    if (value != NULL && !shell_word_buffer__append(word, value, strlen(value))) {
+    if (value != NULL && !shell_dynbuf__append(word, value, strlen(value))) {
         *error = "expanded word too long";
         return -1;
     }
     return 0;
-}
-
-/* Growable text buffer for shell_parser__expand_text() below -- same
- * doubling-capacity growth as shell_word_buffer_t above, just capped at the
- * bigger SHELL__HEREDOC_MAX instead of SHELL__WORD_MAX, since a heredoc body
- * is prose/data rather than one argv word. */
-typedef struct {
-    char *data;
-    size_t length;
-    size_t capacity;
-} shell_text_buffer_t;
-
-static bool shell_text_buffer__append(shell_text_buffer_t *buf, const char *text, size_t length) {
-    size_t needed = buf->length + length + 1;
-    if (needed > SHELL__HEREDOC_MAX) return false;
-    if (needed > buf->capacity) {
-        size_t new_capacity = buf->capacity == 0 ? 128 : buf->capacity;
-        while (new_capacity < needed) new_capacity *= 2;
-        if (new_capacity > SHELL__HEREDOC_MAX) new_capacity = SHELL__HEREDOC_MAX;
-        char *grown = memory__realloc(buf->data, new_capacity);
-        if (grown == NULL) return false;
-        buf->data = grown;
-        buf->capacity = new_capacity;
-    }
-    memcpy(buf->data + buf->length, text, length);
-    buf->length += length;
-    buf->data[buf->length] = '\0';
-    return true;
 }
 
 char *shell_parser__expand_text(
@@ -882,7 +871,7 @@ char *shell_parser__expand_text(
     shell_arith_word_fn arith, void *context, int last_status, const char **error
 ) {
     shell_command_t pseudo = {.text = text, .length = length};
-    shell_text_buffer_t out = {0};
+    shell_dynbuf_t out = {.initial_capacity = 128, .max_capacity = SHELL__HEREDOC_MAX};
     size_t i = 0;
     while (i < length) {
         char c = text[i];
@@ -892,7 +881,7 @@ char *shell_parser__expand_text(
          * for why) -- everything else, escaped or not, is copied as-is. */
         if (c == '\\' && i + 1 < length &&
             (text[i + 1] == '$' || text[i + 1] == '`' || text[i + 1] == '\\' || text[i + 1] == '\n')) {
-            if (text[i + 1] != '\n' && !shell_text_buffer__append(&out, &text[i + 1], 1)) {
+            if (text[i + 1] != '\n' && !shell_dynbuf__append(&out, &text[i + 1], 1)) {
                 *error = "heredoc body too long";
                 memory__free(out.data);
                 return NULL;
@@ -901,7 +890,7 @@ char *shell_parser__expand_text(
             continue;
         }
         if (c == '$') {
-            shell_word_buffer_t word = {0};
+            shell_dynbuf_t word = {.initial_capacity = 32, .max_capacity = SHELL__WORD_MAX};
             if (shell_parser__expand(&pseudo, &i, &word, lookup, substitute, arith, context, last_status, error) !=
                 0) {
                 if (*error == NULL) *error = "expanded heredoc body too long";
@@ -909,7 +898,7 @@ char *shell_parser__expand_text(
                 memory__free(out.data);
                 return NULL;
             }
-            bool appended = word.length == 0 || shell_text_buffer__append(&out, word.data, word.length);
+            bool appended = word.length == 0 || shell_dynbuf__append(&out, word.data, word.length);
             memory__free(word.data);
             if (!appended) {
                 *error = "heredoc body too long";
@@ -918,7 +907,7 @@ char *shell_parser__expand_text(
             }
             continue;
         }
-        if (!shell_text_buffer__append(&out, &c, 1)) {
+        if (!shell_dynbuf__append(&out, &c, 1)) {
             *error = "heredoc body too long";
             memory__free(out.data);
             return NULL;
@@ -927,7 +916,7 @@ char *shell_parser__expand_text(
     }
     if (out.data != NULL) return out.data;
     /* An empty (or entirely-escaped-away) body still needs a real, owned,
-     * empty string -- shell_text_buffer__append() never allocates for a
+     * empty string -- shell_dynbuf__append() never allocates for a
      * zero-length append, so `out.data` is still NULL at this point. */
     char *empty = memory__malloc(1);
     if (empty != NULL) empty[0] = '\0';
@@ -1027,7 +1016,7 @@ static bool shell_parser__process_word(
     const char **error
 ) {
     size_t i = *io_i;
-    shell_word_buffer_t word = {0};
+    shell_dynbuf_t word = {.initial_capacity = 32, .max_capacity = SHELL__WORD_MAX};
     bool single = false;
     bool double_quote = false;
     bool started = false;
@@ -1058,7 +1047,7 @@ static bool shell_parser__process_word(
         if (!single && c == '\\') {
             any_quoted = true;
             i++;
-            if (i >= command->length || !shell_word_buffer__append(&word, command->text + i, 1)) {
+            if (i >= command->length || !shell_dynbuf__append(&word, command->text + i, 1)) {
                 *error = "word too long";
                 memory__free(word.data);
                 *io_i = i;
@@ -1100,7 +1089,7 @@ static bool shell_parser__process_word(
             i = end;
             continue;
         }
-        if (!shell_word_buffer__append(&word, command->text + i, 1)) {
+        if (!shell_dynbuf__append(&word, command->text + i, 1)) {
             *error = "word too long";
             memory__free(word.data);
             *io_i = i;
@@ -1115,7 +1104,7 @@ static bool shell_parser__process_word(
         return false;
     }
     if (started) {
-        char *finished = shell_word_buffer__finish(&word);
+        char *finished = shell_dynbuf__finish(&word);
         if (finished == NULL) {
             *error = "out of memory";
             *io_i = i;
