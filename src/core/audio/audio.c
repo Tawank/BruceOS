@@ -1,8 +1,8 @@
 #include "core_sdk/audio.h"
 
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdatomic.h>
 
 #include "core/config/config.h"
 #include "core/process/process.h"
@@ -12,6 +12,9 @@
 #include "sdkconfig.h"
 
 #if CONFIG_BRUCE_AUDIO_BACKEND_I2S
+#if CONFIG_BRUCE_AUDIO_ES8311_CODEC
+#include "core_sdk/i2c.h"
+#endif
 #include "driver/i2s_std.h"
 #include "esp_heap_caps.h"
 #define AUDIO__I2S_SAMPLE_RATE 48000u
@@ -61,6 +64,37 @@ static void audio__ensure_mutex(void) {
 static i2s_chan_handle_t s_i2s_tx_channel;
 static bool s_i2s_tx_ready;
 
+#if CONFIG_BRUCE_AUDIO_ES8311_CODEC
+static bruce_result_t audio__es8311_enable(void) {
+    static const uint8_t configuration[][2] = {
+        {0x00, 0x80}, /* Reset / CSM power on. */
+        {0x01, 0xB5}, /* Clock source is BCLK. */
+        {0x02, 0x18},
+        {0x0D, 0x01}, /* Power analog circuitry. */
+        {0x12, 0x00}, /* Power up DAC. */
+        {0x13, 0x10}, /* Route DAC to headphone driver. */
+        {0x32, 0xBF}, /* DAC volume: 0 dB. */
+        {0x37, 0x08}, /* Bypass DAC equalizer. */
+    };
+    bruce_i2c_bus_config_t bus_config = {
+        .port = BRUCE_I2C_PORT_AUTO,
+        .sda = CONFIG_BRUCE_BOARD_I2C_SDA_GPIO,
+        .scl = CONFIG_BRUCE_BOARD_I2C_SCL_GPIO,
+        .clock_hz = CONFIG_BRUCE_BOARD_I2C_FREQ_HZ,
+        .enable_internal_pullups = true,
+    };
+    bruce_i2c_id_t bus = BRUCE_I2C_ID_INVALID;
+    bruce_result_t result = i2c__open(&bus_config, &bus);
+    if (result != BRUCE_OK) return result;
+    for (size_t i = 0; i < sizeof(configuration) / sizeof(configuration[0]); ++i) {
+        result = i2c__write(bus, 0x18, configuration[i], sizeof(configuration[i]), 100);
+        if (result != BRUCE_OK) break;
+    }
+    (void)i2c__close(bus);
+    return result;
+}
+#endif
+
 /* i2s_new_channel()'s own default (I2S_CHANNEL_DEFAULT_CONFIG) is 6
  * descriptors x 240 frames, but that default is IDF's to change; pinning it
  * explicitly below means AUDIO__I2S_DMA_RING_FRAMES is guaranteed to
@@ -78,6 +112,7 @@ static bool s_i2s_tx_ready;
 static int16_t *s_stream_ring;
 static atomic_uint_fast32_t s_stream_write_cursor;
 static atomic_uint_fast32_t s_stream_read_cursor;
+static int16_t s_i2s_output_buffer[AUDIO__I2S_BUFFER_FRAMES * 2u];
 
 static bool IRAM_ATTR audio__i2s_on_sent(i2s_chan_handle_t handle, i2s_event_data_t *event, void *context) {
     (void)handle;
@@ -121,6 +156,11 @@ static bool IRAM_ATTR audio__i2s_on_sent(i2s_chan_handle_t handle, i2s_event_dat
 static bruce_result_t audio__i2s_ensure_channel_locked(void) {
     if (s_i2s_tx_ready) return BRUCE_OK;
 
+#if CONFIG_BRUCE_AUDIO_ES8311_CODEC
+    bruce_result_t codec_result = audio__es8311_enable();
+    if (codec_result != BRUCE_OK) return codec_result;
+#endif
+
     i2s_chan_config_t channel_config = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_AUTO, I2S_ROLE_MASTER);
     channel_config.dma_desc_num = AUDIO__I2S_DMA_DESC_COUNT;
     channel_config.dma_frame_num = AUDIO__I2S_DMA_FRAME_COUNT;
@@ -131,17 +171,16 @@ static bruce_result_t audio__i2s_ensure_channel_locked(void) {
         .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(AUDIO__I2S_SAMPLE_RATE),
         .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO),
         .gpio_cfg = {
-            .mclk = I2S_GPIO_UNUSED,
-            .bclk = AUDIO__I2S_BCLK_GPIO,
-            .ws = AUDIO__I2S_LRCLK_GPIO,
-            .dout = AUDIO__I2S_DATA_GPIO,
-            .din = I2S_GPIO_UNUSED,
-            .invert_flags = {
+                     .mclk = I2S_GPIO_UNUSED,
+                     .bclk = AUDIO__I2S_BCLK_GPIO,
+                     .ws = AUDIO__I2S_LRCLK_GPIO,
+                     .dout = AUDIO__I2S_DATA_GPIO,
+                     .din = I2S_GPIO_UNUSED,
+                     .invert_flags = {
                 .mclk_inv = false,
                 .bclk_inv = false,
                 .ws_inv = false,
-            },
-        },
+            }, },
     };
     const i2s_event_callbacks_t callbacks = {.on_sent = audio__i2s_on_sent};
     if (i2s_channel_init_std_mode(s_i2s_tx_channel, &config) != ESP_OK ||
@@ -160,7 +199,8 @@ static bruce_result_t audio__i2s_ensure_channel_locked(void) {
 static bruce_result_t audio__i2s_write_locked(const int16_t *interleaved_stereo, uint32_t frames) {
     size_t bytes_written = 0;
     size_t bytes = (size_t)frames * 2u * sizeof(int16_t);
-    if (i2s_channel_write(s_i2s_tx_channel, interleaved_stereo, bytes, &bytes_written, portMAX_DELAY) != ESP_OK ||
+    if (i2s_channel_write(s_i2s_tx_channel, interleaved_stereo, bytes, &bytes_written, portMAX_DELAY) !=
+            ESP_OK ||
         bytes_written != bytes) {
         return BRUCE_ERR_IO;
     }
@@ -181,12 +221,11 @@ static bruce_result_t audio__i2s_write_locked(const int16_t *interleaved_stereo,
  * the ring's total capacity guarantees that regardless of where the ring's
  * write pointer currently is. */
 static bruce_result_t audio__i2s_flush_silence_locked(void) {
-    int16_t silence[AUDIO__I2S_BUFFER_FRAMES * 2u];
-    memset(silence, 0, sizeof(silence));
+    memset(s_i2s_output_buffer, 0, sizeof(s_i2s_output_buffer));
     bruce_result_t result = BRUCE_OK;
     for (uint32_t frames_written = 0; frames_written < AUDIO__I2S_DMA_RING_FRAMES && result == BRUCE_OK;
          frames_written += AUDIO__I2S_BUFFER_FRAMES) {
-        result = audio__i2s_write_locked(silence, AUDIO__I2S_BUFFER_FRAMES);
+        result = audio__i2s_write_locked(s_i2s_output_buffer, AUDIO__I2S_BUFFER_FRAMES);
     }
     return result;
 }
@@ -195,20 +234,20 @@ static bruce_result_t audio__play_i2s(const audio__tone_params_t *params) {
     bruce_result_t result = audio__i2s_ensure_channel_locked();
     if (result != BRUCE_OK) return result;
 
-    int16_t samples[AUDIO__I2S_BUFFER_FRAMES * 2u];
     int16_t amplitude = (int16_t)((INT16_MAX * params->volume) / 100u);
     uint32_t phase = 0;
     uint32_t frames_remaining = (AUDIO__I2S_SAMPLE_RATE * params->duration_ms) / 1000u;
     while (frames_remaining > 0) {
-        uint32_t frames = frames_remaining < AUDIO__I2S_BUFFER_FRAMES ? frames_remaining : AUDIO__I2S_BUFFER_FRAMES;
+        uint32_t frames =
+            frames_remaining < AUDIO__I2S_BUFFER_FRAMES ? frames_remaining : AUDIO__I2S_BUFFER_FRAMES;
         for (uint32_t i = 0; i < frames; ++i) {
             int16_t sample = phase < AUDIO__I2S_SAMPLE_RATE / 2u ? amplitude : (int16_t)-amplitude;
-            samples[i * 2u] = sample;
-            samples[i * 2u + 1u] = sample;
+            s_i2s_output_buffer[i * 2u] = sample;
+            s_i2s_output_buffer[i * 2u + 1u] = sample;
             phase += params->frequency_hz;
             phase %= AUDIO__I2S_SAMPLE_RATE;
         }
-        result = audio__i2s_write_locked(samples, frames);
+        result = audio__i2s_write_locked(s_i2s_output_buffer, frames);
         if (result != BRUCE_OK) break;
         frames_remaining -= frames;
     }
@@ -264,9 +303,8 @@ static bruce_result_t audio__play(const audio__tone_params_t *params) {
 #elif CONFIG_BRUCE_AUDIO_BACKEND_I2S
     bruce_result_t result = audio__play_i2s(params);
 #elif CONFIG_BRUCE_AUDIO_BACKEND_LEDC_BUZZER
-    ledc_timer_bit_t resolution = params->frequency_hz <= AUDIO__MAX_FREQUENCY_13_BIT_HZ
-                                      ? LEDC_TIMER_13_BIT
-                                      : LEDC_TIMER_10_BIT;
+    ledc_timer_bit_t resolution =
+        params->frequency_hz <= AUDIO__MAX_FREQUENCY_13_BIT_HZ ? LEDC_TIMER_13_BIT : LEDC_TIMER_10_BIT;
     uint32_t half_duty = resolution == LEDC_TIMER_13_BIT ? 4096u : 512u;
     ledc_timer_config_t timer = {
         .speed_mode = AUDIO__LEDC_MODE,
@@ -439,7 +477,8 @@ size_t audio__stream_writable_frames(void) {
 }
 
 size_t audio__stream_write(const int16_t *samples, size_t frame_count) {
-    if (samples == NULL || frame_count == 0 || !s_stream_open || s_stream_owner != process__current_id()) return 0;
+    if (samples == NULL || frame_count == 0 || !s_stream_open || s_stream_owner != process__current_id())
+        return 0;
     bool enabled = false;
     int volume = 0;
     config__get_audio_settings(&enabled, &volume);

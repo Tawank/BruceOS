@@ -402,6 +402,14 @@ menu "Bruce hardware configuration"
             default 43
             range 0 48
 
+        config BRUCE_AUDIO_ES8311_CODEC
+            bool "ES8311 I2C audio codec"
+            depends on BRUCE_AUDIO_BACKEND_I2S && BRUCE_BOARD_I2C_ENABLED
+            help
+                Enable the ES8311 DAC before I2S playback. This is required
+                by boards such as the M5Stack Cardputer-Adv, whose speaker is
+                driven through an ES8311 rather than a standalone I2S DAC.
+
         config BRUCE_AUDIO_BUZZER_GPIO
             int "Buzzer GPIO"
             depends on BRUCE_AUDIO_BACKEND_LEDC_BUZZER

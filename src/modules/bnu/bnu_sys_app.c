@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "args.h"
+#include "core_sdk/audio.h"
 #include "core_sdk/clock.h"
 #include "core_sdk/device.h"
 #include "core_sdk/memory.h"
@@ -16,7 +17,7 @@
 #include "core_sdk/stdio.h"
 #include "core_sdk/tty.h"
 
-/* System commands: free, top, shutdown, reboot, stty, date, sleep. */
+/* System commands: free, top, shutdown, reboot, stty, date, sleep, tone. */
 
 /* Heap-allocated, not a local array: on top of the legend/block-map buffers
  * `free -m` already keeps on the heap, this is another ~1.7K that a stack
@@ -86,7 +87,8 @@ static size_t bnu__layout_legend_index(
     bool is_stack
 ) {
     for (size_t i = 0; i < legend_count; ++i) {
-        if (legend[i].owner_id == owner_id && legend[i].reserved == reserved && legend[i].is_stack == is_stack) {
+        if (legend[i].owner_id == owner_id && legend[i].reserved == reserved &&
+            legend[i].is_stack == is_stack) {
             return i;
         }
     }
@@ -98,7 +100,8 @@ static void bnu__layout_legend_add_bytes(
     bool is_stack, size_t bytes
 ) {
     for (size_t i = 0; i < *legend_count; ++i) {
-        if (legend[i].owner_id == owner_id && legend[i].reserved == reserved && legend[i].is_stack == is_stack) {
+        if (legend[i].owner_id == owner_id && legend[i].reserved == reserved &&
+            legend[i].is_stack == is_stack) {
             legend[i].bytes += bytes;
             return;
         }
@@ -140,7 +143,9 @@ static size_t bnu__build_layout_legend(
             } else if (compact_reserved) {
                 padding_bytes += block->size;
             } else {
-                bnu__layout_legend_add_bytes(legend, &legend_count, block->owner_id, true, false, block->size);
+                bnu__layout_legend_add_bytes(
+                    legend, &legend_count, block->owner_id, true, false, block->size
+                );
             }
             continue;
         }
@@ -154,7 +159,10 @@ static size_t bnu__build_layout_legend(
         if (block->size > block->requested_size) {
             size_t padding = block->size - block->requested_size;
             if (compact_reserved) padding_bytes += padding;
-            else bnu__layout_legend_add_bytes(legend, &legend_count, block->owner_id, true, block->is_stack, padding);
+            else
+                bnu__layout_legend_add_bytes(
+                    legend, &legend_count, block->owner_id, true, block->is_stack, padding
+                );
         }
     }
     *out_padding_bytes = padding_bytes;
@@ -198,9 +206,8 @@ static const char *bnu__layout_region_name(bruce_memory_region_t region) {
 #define BNU_MEMORY_CATEGORY_EXITED 4
 #define BNU_MEMORY_PSEUDO_CATEGORIES 5
 
-static char bnu__layout_category_symbol(
-    const bnu__layout_legend_entry_t *legend, size_t legend_count, size_t category
-) {
+static char
+bnu__layout_category_symbol(const bnu__layout_legend_entry_t *legend, size_t legend_count, size_t category) {
     if (category < legend_count) return legend[category].symbol;
     switch (category - legend_count) {
         case BNU_MEMORY_CATEGORY_PADDING: return '+';
@@ -246,10 +253,10 @@ static void bnu__layout_add_bytes_to_cells(
  * correspond to any legend row. The legend below always lists a category's
  * true total regardless of whether it wins any cell at this resolution. */
 static void bnu__print_layout_region(
-    const bruce_memory_layout_block_t *blocks, size_t count,
-    const bruce_process_snapshot_t *processes, size_t process_count,
-    const bnu__layout_legend_entry_t *legend, size_t legend_count, bool compact_reserved, bool human,
-    size_t region_number, uintptr_t region_start, uintptr_t region_end, bruce_memory_region_t region
+    const bruce_memory_layout_block_t *blocks, size_t count, const bruce_process_snapshot_t *processes,
+    size_t process_count, const bnu__layout_legend_entry_t *legend, size_t legend_count,
+    bool compact_reserved, bool human, size_t region_number, uintptr_t region_start, uintptr_t region_end,
+    bruce_memory_region_t region
 ) {
     if (region_end <= region_start) return;
     size_t span = region_end - region_start;
@@ -263,8 +270,11 @@ static void bnu__print_layout_region(
     uint32_t *counts = memory__calloc(BNU_MEMORY_LAYOUT_WIDTH * category_count, sizeof(*counts));
     if (counts == NULL) {
         stdio__printf(
-            "%u. region %-12s 0x%08lx-0x%08lx map unavailable: out of memory\n", (unsigned)region_number,
-            bnu__layout_region_name(region), (unsigned long)region_start, (unsigned long)region_end
+            "%u. region %-12s 0x%08lx-0x%08lx map unavailable: out of memory\n",
+            (unsigned)region_number,
+            bnu__layout_region_name(region),
+            (unsigned long)region_start,
+            (unsigned long)region_end
         );
         return;
     }
@@ -295,8 +305,12 @@ static void bnu__print_layout_region(
             } else {
                 size_t index = bnu__layout_legend_index(legend, legend_count, block->owner_id, true, false);
                 bnu__layout_add_bytes_to_cells(
-                    counts, category_count,
-                    index == SIZE_MAX ? legend_count + BNU_MEMORY_CATEGORY_OVERFLOW : index, span, relative, end
+                    counts,
+                    category_count,
+                    index == SIZE_MAX ? legend_count + BNU_MEMORY_CATEGORY_OVERFLOW : index,
+                    span,
+                    relative,
+                    end
                 );
             }
         } else if (!block->tracked) {
@@ -321,23 +335,36 @@ static void bnu__print_layout_region(
             size_t used_index =
                 bnu__layout_legend_index(legend, legend_count, block->owner_id, false, block->is_stack);
             bnu__layout_add_bytes_to_cells(
-                counts, category_count,
-                used_index == SIZE_MAX ? legend_count + BNU_MEMORY_CATEGORY_OVERFLOW : used_index, span, relative,
+                counts,
+                category_count,
+                used_index == SIZE_MAX ? legend_count + BNU_MEMORY_CATEGORY_OVERFLOW : used_index,
+                span,
+                relative,
                 requested_end
             );
 
             if (end > requested_end) {
                 if (compact_reserved) {
                     bnu__layout_add_bytes_to_cells(
-                        counts, category_count, legend_count + BNU_MEMORY_CATEGORY_PADDING, span, requested_end, end
+                        counts,
+                        category_count,
+                        legend_count + BNU_MEMORY_CATEGORY_PADDING,
+                        span,
+                        requested_end,
+                        end
                     );
                 } else {
-                    size_t reserved_index =
-                        bnu__layout_legend_index(legend, legend_count, block->owner_id, true, block->is_stack);
+                    size_t reserved_index = bnu__layout_legend_index(
+                        legend, legend_count, block->owner_id, true, block->is_stack
+                    );
                     bnu__layout_add_bytes_to_cells(
-                        counts, category_count,
-                        reserved_index == SIZE_MAX ? legend_count + BNU_MEMORY_CATEGORY_OVERFLOW : reserved_index,
-                        span, requested_end, end
+                        counts,
+                        category_count,
+                        reserved_index == SIZE_MAX ? legend_count + BNU_MEMORY_CATEGORY_OVERFLOW
+                                                   : reserved_index,
+                        span,
+                        requested_end,
+                        end
                     );
                 }
             }
@@ -365,8 +392,8 @@ static void bnu__print_layout_region(
         }
         shared[cell] = owners_present >= 2;
         map[cell] = best_category == SIZE_MAX ? '-'
-                    : shared[cell]             ? '%'
-                                               : bnu__layout_category_symbol(legend, legend_count, best_category);
+                    : shared[cell] ? '%'
+                                   : bnu__layout_category_symbol(legend, legend_count, best_category);
     }
     /* used can't exceed span - every contributing block->size was already
      * clamped against this same region when memory_layout__visit() built it -
@@ -381,9 +408,16 @@ static void bnu__print_layout_region(
     bnu__format_size((uint32_t)free_size, true, free_text, sizeof(free_text));
     bnu__format_size((uint32_t)largest_free, true, largest_text, sizeof(largest_text));
     stdio__printf(
-        "%u. region %-12s 0x%08lx-0x%08lx (%s/%s) free: %s lrgst: %s\n[%s]\n", (unsigned)region_number,
+        "%u. region %-12s 0x%08lx-0x%08lx (%s/%s) free: %s lrgst: %s\n[%s]\n",
+        (unsigned)region_number,
         bnu__layout_region_name(region),
-        (unsigned long)region_start, (unsigned long)region_end, used_text, span_text, free_text, largest_text, map
+        (unsigned long)region_start,
+        (unsigned long)region_end,
+        used_text,
+        span_text,
+        free_text,
+        largest_text,
+        map
     );
     /* One line per '%' cell, breaking down exactly what's in *that cell* -
      * not a backend-wide total - so distinct '%' cells never repeat the same
@@ -401,8 +435,11 @@ static void bnu__print_layout_region(
             char bytes_text[16];
             bnu__format_size(bytes, human, bytes_text, sizeof(bytes_text));
             stdio__printf(
-                "%s %u %s%s %s", first_owner ? "" : ",", (unsigned)legend[category].owner_id,
-                process != NULL ? process->name : "<exited>", legend[category].is_stack ? " (stack)" : "",
+                "%s %u %s%s %s",
+                first_owner ? "" : ",",
+                (unsigned)legend[category].owner_id,
+                process != NULL ? process->name : "<exited>",
+                legend[category].is_stack ? " (stack)" : "",
                 bytes_text
             );
             first_owner = false;
@@ -441,8 +478,9 @@ static void bnu__print_layout_backend(
      * per-owner "reserved" accounting the map/legend otherwise show. */
     bool compact_reserved = backend != BRUCE_MEMORY_BACKEND_SWAP;
     size_t padding_bytes = 0;
-    size_t legend_count =
-        bnu__build_layout_legend(blocks, shown, processes, process_count, compact_reserved, &padding_bytes, legend);
+    size_t legend_count = bnu__build_layout_legend(
+        blocks, shown, processes, process_count, compact_reserved, &padding_bytes, legend
+    );
 
     char total_text[16];
     bnu__format_size((uint32_t)total, true, total_text, sizeof(total_text));
@@ -454,8 +492,18 @@ static void bnu__print_layout_backend(
         if (blocks[i].region_start == previous_start && blocks[i].region_end == previous_end) continue;
         ++region_number;
         bnu__print_layout_region(
-            blocks, shown, processes, process_count, legend, legend_count, compact_reserved, human, region_number,
-            blocks[i].region_start, blocks[i].region_end, blocks[i].region
+            blocks,
+            shown,
+            processes,
+            process_count,
+            legend,
+            legend_count,
+            compact_reserved,
+            human,
+            region_number,
+            blocks[i].region_start,
+            blocks[i].region_end,
+            blocks[i].region
         );
         previous_start = blocks[i].region_start;
         previous_end = blocks[i].region_end;
@@ -466,7 +514,8 @@ static void bnu__print_layout_backend(
         compact_reserved ? "  + padding" : ""
     );
     for (size_t i = 0; i < legend_count; ++i) {
-        const bruce_process_snapshot_t *process = bnu__layout_process(processes, process_count, legend[i].owner_id);
+        const bruce_process_snapshot_t *process =
+            bnu__layout_process(processes, process_count, legend[i].owner_id);
         /* Sized for the worst case (BRUCE_PROCESS_NAME_MAX plus " (stack)")
          * so the compiler's format-truncation check can prove this always
          * fits - %-15.15s below truncates the actually-printed name anyway. */
@@ -484,12 +533,20 @@ static void bnu__print_layout_backend(
          * still distinguishes the two, so it keeps the column. */
         if (compact_reserved) {
             stdio__printf(
-                "%c pid %-3u %-15.15s %8s\n", legend[i].symbol, (unsigned)legend[i].owner_id, label, bytes_text
+                "%c pid %-3u %-15.15s %8s\n",
+                legend[i].symbol,
+                (unsigned)legend[i].owner_id,
+                label,
+                bytes_text
             );
         } else {
             stdio__printf(
-                "%c pid %-3u %-15.15s %-8s %8s\n", legend[i].symbol, (unsigned)legend[i].owner_id, label,
-                legend[i].reserved ? "reserved" : "used", bytes_text
+                "%c pid %-3u %-15.15s %-8s %8s\n",
+                legend[i].symbol,
+                (unsigned)legend[i].owner_id,
+                label,
+                legend[i].reserved ? "reserved" : "used",
+                bytes_text
             );
         }
     }
@@ -508,8 +565,14 @@ static void bnu__print_layout_backend(
      * single line - swap has no such filter, so it keeps the more useful
      * used/free distinction. */
     stdio__printf(
-        "%-10s %-3s %-5s %-4s %-15s %8s %8s\n", "address", "rgn", compact_reserved ? "type" : "state", "pid",
-        "owner", "request", "block"
+        "%-10s %-3s %-5s %-4s %-15s %8s %8s\n",
+        "address",
+        "rgn",
+        compact_reserved ? "type" : "state",
+        "pid",
+        "owner",
+        "request",
+        "block"
     );
     region_number = 0;
     previous_start = UINTPTR_MAX;
@@ -532,13 +595,16 @@ static void bnu__print_layout_backend(
         bnu__format_size((uint32_t)block->size, human, reserved, sizeof(reserved));
         stdio__printf(
             "0x%08lx %-3u %-5s %-4u %-15.15s %8s %8s%s\n",
-            (unsigned long)block->address, (unsigned)region_number,
+            (unsigned long)block->address,
+            (unsigned)region_number,
             compact_reserved ? (block->is_stack ? "stack" : "heap") : (block->used ? "used" : "free"),
             (unsigned)block->owner_id,
-            process != NULL ? process->name
+            process != NULL                                              ? process->name
             : block->used || block->owner_id != BRUCE_PROCESS_ID_INVALID ? "<exited>"
-                                                                          : "-",
-            requested, reserved, block->executable ? " xip" : ""
+                                                                         : "-",
+            requested,
+            reserved,
+            block->executable ? " xip" : ""
         );
     }
     if (count > shown) {
@@ -551,9 +617,8 @@ static void bnu__print_layout_backend(
  * heap-block walk attributes to a process, so this reads straight off the
  * process snapshot (the same stack_total_bytes/stack_high_water_bytes `top`
  * already reports) instead of needing a second allocator pass. */
-static void bnu__print_layout_stacks(
-    const bruce_process_snapshot_t *processes, size_t process_count, bool human
-) {
+static void
+bnu__print_layout_stacks(const bruce_process_snapshot_t *processes, size_t process_count, bool human) {
     stdio__printf("\nprocess stacks\n");
     stdio__printf("%-4s %-15s %8s %8s %8s\n", "pid", "name", "stack", "used", "free");
     for (size_t i = 0; i < process_count; ++i) {
@@ -567,7 +632,11 @@ static void bnu__print_layout_stacks(
         bnu__format_size(used, human, used_text, sizeof(used_text));
         bnu__format_size(processes[i].stack_high_water_bytes, human, free_text, sizeof(free_text));
         stdio__printf(
-            "%-4u %-15.15s %8s %8s %8s\n", (unsigned)processes[i].id, processes[i].name, stack_text, used_text,
+            "%-4u %-15.15s %8s %8s %8s\n",
+            (unsigned)processes[i].id,
+            processes[i].name,
+            stack_text,
+            used_text,
             free_text
         );
     }
@@ -677,7 +746,8 @@ int bnu_free_app_main(int argc, char **argv) {
         bruce_memory_layout_block_t *blocks = NULL;
         while (true) {
             blocks_external = true;
-            blocks = (bruce_memory_layout_block_t *)memory__external_malloc_writable(capacity * sizeof(*blocks));
+            blocks =
+                (bruce_memory_layout_block_t *)memory__external_malloc_writable(capacity * sizeof(*blocks));
             if (blocks == NULL) {
                 blocks_external = false;
                 blocks = memory__malloc(capacity * sizeof(*blocks));
@@ -970,4 +1040,28 @@ int bnu_sleep_app_main(int argc, char **argv) {
     if (!valid) return BRUCE_ERR_INVALID_ARGUMENT;
 
     return runtime__sleep((uint32_t)(seconds * 1000.0));
+}
+
+int bnu_tone_app_main(int argc, char **argv) {
+    ArgParser *parser = bnu__new_parser("Play a square-wave tone through the board speaker or buzzer.");
+    if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
+    ap_add_optional_arg(parser, "frequency", "Frequency in Hz (default: 500)");
+    ap_add_optional_arg(parser, "duration", "Duration in milliseconds (default: 500)");
+    if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
+    const char *frequency_text = ap_get_arg(parser, "frequency");
+    const char *duration_text = ap_get_arg(parser, "duration");
+    errno = 0;
+    char *frequency_end = NULL;
+    unsigned long frequency = frequency_text == NULL ? 500u : strtoul(frequency_text, &frequency_end, 10);
+    bool frequency_valid =
+        frequency_text == NULL ||
+        (frequency_end != frequency_text && *frequency_end == '\0' && errno == 0 && frequency <= UINT32_MAX);
+    errno = 0;
+    char *duration_end = NULL;
+    unsigned long duration = duration_text == NULL ? 500u : strtoul(duration_text, &duration_end, 10);
+    bool duration_valid = duration_text == NULL || (duration_end != duration_text && *duration_end == '\0' &&
+                                                    errno == 0 && duration <= UINT32_MAX);
+    ap_free(parser);
+    if (!frequency_valid || !duration_valid) return BRUCE_ERR_INVALID_ARGUMENT;
+    return audio__tone((uint32_t)frequency, (uint32_t)duration, false);
 }
