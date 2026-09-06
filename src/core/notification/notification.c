@@ -61,6 +61,9 @@ bruce_result_t notification__push(const char *text, uint32_t duration_ms) {
     message.gui_requested = gui_requested;
     message.session = process_registry__current_stdio_session();
     (void)xQueueOverwrite(queue, &message);
+
+    vTaskDelay(pdMS_TO_TICKS(10));
+
     return BRUCE_OK;
 }
 
@@ -70,6 +73,9 @@ bruce_result_t notification__dismiss(void) {
     notification__message_t message = {0};
     message.dismiss = true;
     (void)xQueueOverwrite(queue, &message);
+
+    vTaskDelay(pdMS_TO_TICKS(10));
+
     return BRUCE_OK;
 }
 

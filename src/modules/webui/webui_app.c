@@ -5,6 +5,7 @@
 
 #include "core_sdk/dialog.h"
 #include "core_sdk/http_server.h"
+#include "core_sdk/notification.h"
 #include "core_sdk/result.h"
 #include "core_sdk/runtime.h"
 #include "core_sdk/status_icon.h"
@@ -96,17 +97,17 @@ static bruce_result_t webui_app__stop(void) {
 }
 
 static int webui_app__start(webui_app_network_mode_t mode, bool gui) {
-    /* Neither wifi__setup_ap()/wifi__connect_known() nor http_server__start()
-     * below has a poll/cancel pair to animate or interrupt them with, so
-     * this just draws a static popup naming what's happening, rather than
-     * leaving the caller's own "Start server" menu looking frozen for
-     * however long either call takes. */
-    if (gui) (void)dialog__message_show(BRUCE_DIALOG_INFO, "WebUI", "Loading...\nStarting Wi-Fi...");
+    if (gui) {
+        bruce_result_t background_result = runtime__to_background();
+        if (background_result != BRUCE_OK) return background_result;
+    }
     bruce_result_t result;
-    if (mode == WEBUI_APP_NETWORK_AP) result = wifi__is_ap_running() ? BRUCE_OK : wifi__setup_ap();
-    else result = wifi__is_connected() ? BRUCE_OK : wifi__connect_known();
+    bool wifi_ready = mode == WEBUI_APP_NETWORK_AP ? wifi__is_ap_running() : wifi__is_connected();
+    if (!wifi_ready && gui) (void)notification__push("Starting Wi-Fi...", 12000);
+    if (mode == WEBUI_APP_NETWORK_AP) result = wifi_ready ? BRUCE_OK : wifi__setup_ap();
+    else result = wifi_ready ? BRUCE_OK : wifi__connect_known();
     if (result != BRUCE_OK) {
-        if (gui) (void)dialog__message(BRUCE_DIALOG_ERROR, "WebUI", "Could not start Wi-Fi");
+        if (gui) (void)notification__push("WebUI: could not start Wi-Fi", 5000);
         else stdio__printf("Wi-Fi start failed: %d\n", result);
         return result;
     }
@@ -114,14 +115,20 @@ static int webui_app__start(webui_app_network_mode_t mode, bool gui) {
         .port = 80, .routes = s_routes, .route_count = sizeof(s_routes) / sizeof(s_routes[0])
     };
     s_network_mode = mode;
-    if (gui) (void)dialog__message_show(BRUCE_DIALOG_INFO, "WebUI", "Loading...\nStarting WebUI...");
     result = http_server__start(&options);
     if (result != BRUCE_OK) {
-        if (gui) (void)dialog__message(BRUCE_DIALOG_ERROR, "WebUI", "Could not start WebUI");
+        if (gui) (void)notification__push("WebUI: could not start server", 5000);
         else stdio__printf("WebUI start failed: %d\n", result);
         return result;
     }
     (void)status_icon__push_named(WEBUI_STATUS_ICON_KEY, "web");
+    if (gui) {
+        const char *ip = wifi__get_ip();
+        char notice[BRUCE_NOTIFICATION_TEXT_MAX];
+        snprintf(notice, sizeof(notice), "WebUI: http://%s", ip != NULL ? ip : "unknown");
+        (void)notification__push(notice, 6000);
+        return BRUCE_OK;
+    }
     return webui_app__status(gui);
 }
 
@@ -148,31 +155,25 @@ static int webui_app__gui(void) {
                 (void)dialog__message(BRUCE_DIALOG_ERROR, "WebUI", "Could not stop server");
             continue;
         }
-        if (wifi__is_connected()) {
-            (void)webui_app__start(WEBUI_APP_NETWORK_EXISTING, true);
-            continue;
-        }
-        if (wifi__is_ap_running()) {
-            (void)webui_app__start(WEBUI_APP_NETWORK_AP, true);
-            continue;
-        }
-        if (wifi__connect_known() == BRUCE_OK) {
-            (void)webui_app__start(WEBUI_APP_NETWORK_EXISTING, true);
-            continue;
-        }
+        if (wifi__is_connected()) { return webui_app__start(WEBUI_APP_NETWORK_EXISTING, true); }
+        if (wifi__is_ap_running()) { return webui_app__start(WEBUI_APP_NETWORK_AP, true); }
         const bruce_dialog_choice_t network_choices[] = {
-            {.label = "Start access point", .value = "ap"    },
-            {.label = "Cancel",             .value = "cancel"},
+            {.label = "Connect saved Wi-Fi", .value = "sta"   },
+            {.label = "Start access point",  .value = "ap"    },
+            {.label = "Cancel",              .value = "cancel"},
         };
         size_t network = 0;
-        result = dialog__choice_launcher(
-            "Start WebUI", "Existing Wi-Fi unavailable", network_choices, 2, &network
-        );
+        result =
+            dialog__choice_launcher("Start WebUI", "Choose a network mode", network_choices, 3, &network);
         if (result == BRUCE_ERR_CANCELLED ||
             (result == BRUCE_OK && strcmp(network_choices[network].value, "cancel") == 0))
             continue;
         if (result != BRUCE_OK) return result;
-        (void)webui_app__start(WEBUI_APP_NETWORK_AP, true);
+        return webui_app__start(
+            strcmp(network_choices[network].value, "sta") == 0 ? WEBUI_APP_NETWORK_EXISTING
+                                                               : WEBUI_APP_NETWORK_AP,
+            true
+        );
     }
 }
 
