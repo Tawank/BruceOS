@@ -27,8 +27,10 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "elf_loader_internal.h"
 #include "esp_elf.h" // IWYU pragma: export
 
+#include "core/process/process.h"
 #include "core_sdk/app_runner.h"
 #include "core_sdk/args.h"
 #include "core_sdk/audio.h"
@@ -540,6 +542,59 @@ static void bruce_elf__assert(const char *file, int line, const char *msg) {
 }
 
 /* ---------------------------------------------------------------------------
+ * stdlib.h process termination: exit()/_exit()/abort(). Unlike a real
+ * process, a sandboxed ELF app has no OS process boundary underneath it for
+ * these to unwind through -- normally exit()/abort() are the kernel tearing
+ * a process down out from under it, no matter how deep its call stack is.
+ * elf_loader_app.c's elf_loader__entry() sets up the closest equivalent
+ * available here: a setjmp() taken right before handing control to the
+ * loaded ELF's own code, armed via process_registry__set_sandbox_exit_target()
+ * (core/process/process.h) so it can be found again from here with no
+ * parameter to thread through (exit()/abort() are resolved as ordinary libc
+ * symbols; their signature has no room for one). bruce_elf__exit_common()
+ * below stashes the exit status where elf_loader__entry() will read it back
+ * and longjmp()s there, unwinding out of however many native call frames the
+ * loaded ELF's own code was nested in -- see elf_loader_internal.h for the
+ * shared bruce_elf_exit_context_t and elf_loader__entry()'s own comment for
+ * the setjmp() side of this pair.
+ *
+ * If there is no armed target -- should not happen while resolved through
+ * this table (it only exists while elf_loader__entry() is running one), but
+ * checked rather than blindly dereferenced -- both fall back to the same
+ * print-and-park behavior bruce_elf__assert_func() and __cxa_pure_virtual
+ * above use for their own "nowhere sane to return to" case.
+ *
+ * abort() additionally reports BRUCE_ELF_ABORT_EXIT_CODE (128 + SIGABRT,
+ * see elf_loader_internal.h) instead of a caller-chosen status, and logs
+ * before unwinding, matching what a real abort() prints before the SIGABRT
+ * it raises takes the process down -- there is no signal delivery here for
+ * it to actually raise, so the longjmp() is this abort()'s entire "default
+ * action", not a caught one.
+ *
+ * Neither one runs the loaded ELF's own atexit()-registered destructors:
+ * bruce_elf__cxa_atexit() above already documents that this loader has no
+ * real C runtime driving exit() to call them; this longjmp() doesn't change
+ * that, it's still just an unwind, not a runtime. _exit() is the exact same
+ * function as exit() here for the same reason -- the distinction (skip
+ * atexit() handlers) is meaningless when neither one ever ran them anyway. */
+static _Noreturn void bruce_elf__exit_common(int status, const char *name) {
+    bruce_elf_exit_context_t *exit_ctx = (bruce_elf_exit_context_t *)process_registry__sandbox_exit_target();
+    if (exit_ctx == NULL) {
+        stdio__printf("bruce: %s() called with no sandboxed app running\n", name);
+        for (;;) { runtime__delay(1000); }
+    }
+    exit_ctx->exit_code = status;
+    longjmp(exit_ctx->target, 1);
+}
+
+_Noreturn void bruce_elf__exit(int status) { bruce_elf__exit_common(status, "exit"); }
+
+_Noreturn void bruce_elf__abort(void) {
+    stdio__printf("bruce: Aborted\n");
+    bruce_elf__exit_common(BRUCE_ELF_ABORT_EXIT_CODE, "abort");
+}
+
+/* ---------------------------------------------------------------------------
  * time.h. time/gmtime/gmtime_r/difftime/strftime/asctime/asctime_r are
  * exported directly, unadapted (see the table entries below): the real
  * picolibc time() already returns the correct UTC epoch on this firmware --
@@ -985,11 +1040,13 @@ static void bruce_elf__operator_delete_sized(void *ptr, size_t size) {
  * registered via __cxa_atexit even under -fno-threadsafe-statics, which only
  * suppresses the *initialization* guard (__cxa_guard_*), not this. Real
  * __cxa_atexit registers a destructor to run when the process exits via a
- * full C runtime exit() call; ELF apps have no such teardown path (app_main
- * just returns and the loader reclaims the process's memory directly -- see
- * the .init_array comment above), so there is nothing useful to register.
- * A no-op that reports success satisfies the ABI contract without pretending
- * to actually run anything later.
+ * full C runtime exit() call; app_main returning is the normal ELF-app
+ * teardown path (the loader reclaims the process's memory directly -- see
+ * the .init_array comment above), and even now that exit()/abort() exist
+ * below, calling out of the sandbox that way is still just a longjmp(), not
+ * a real C runtime driving exit() -- there is nothing useful to register
+ * either way. A no-op that reports success satisfies the ABI contract
+ * without pretending to actually run anything later.
  *
  * Note this covers __cxa_atexit itself but deliberately not its companion
  * __dso_handle: that symbol has hidden ELF visibility by ABI convention, so
@@ -1228,6 +1285,15 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     {"calloc",  (const void *)&memory__calloc    },
     {"realloc", (const void *)&memory__realloc   },
     {"free",    (const void *)&memory__free      },
+
+    /* stdlib.h process termination -- see the comment above
+     * bruce_elf__exit_common() for what these actually do in a sandbox with
+     * no real process boundary. _exit aliases the exact same function as
+     * exit: the distinction (skip atexit() handlers) is meaningless here,
+     * since neither one ever runs them. */
+    {"exit",  (const void *)&bruce_elf__exit },
+    {"_exit", (const void *)&bruce_elf__exit },
+    {"abort", (const void *)&bruce_elf__abort},
 
     /* Permission (introspection only; protected APIs check internally) */
     ESP_ELFSYM_EXPORT(permission__check),

@@ -7,9 +7,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <setjmp.h>
+
 #include "args.h"
+#include "elf_loader_internal.h"
 #include "esp_elf.h"
 
+#include "core/process/process.h"
 #include "core_sdk/app_runner.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/ext_mem_loader.h"
@@ -121,7 +125,21 @@ static void elf_loader__cleanup_context(void *context) {
  * unlike the reclaim token, its adoption is not optional to wait for. Once
  * ext_mem_loader__adopt_xip() returns BRUCE_OK the loader has no further
  * claim on ctx->xip regardless of what this process does next, so it's safe
- * for elf_loader__open()'s loop to unblock right there. */
+ * for elf_loader__open()'s loop to unblock right there.
+ *
+ * The setjmp() below is the other half of bruce_elf__exit()/bruce_elf__abort()
+ * (see their doc comment in elf_loader_sdk_symbols.c, and
+ * elf_loader_internal.h for the shared bruce_elf_exit_context_t): it gives a
+ * libc exit()/abort() call anywhere in the loaded ELF's own code a real place
+ * to unwind to, the same way a real process's exit() escapes via the kernel
+ * rather than by returning through its own call stack -- something
+ * esp_elf_request() alone can't offer, since it just calls straight into
+ * app_main() and returns whatever that returns. Armed only for the duration
+ * of that call (process_registry__set_sandbox_exit_target(NULL) once it's
+ * back, on both the normal-return and the longjmp path) so no stale pointer
+ * into this stack frame can ever be read once it's gone -- exit_ctx itself is
+ * a local, not something the reaper's later vTaskDelete() needs to know
+ * about. */
 static int elf_loader__entry(void *context) {
     elf_loader_process_ctx_t *ctx = (elf_loader_process_ctx_t *)context;
     bruce_result_t adopt_result = ext_mem_loader__adopt_xip(&ctx->xip);
@@ -133,7 +151,17 @@ static int elf_loader__entry(void *context) {
      * (when the loader itself exits) rather than when this process does --
      * never a reason to abort launch, unlike the XIP case above. */
     (void)memory__reclaim_adopt(ctx->reclaim_token);
-    return esp_elf_request(&ctx->elf, 0, ctx->argc, ctx->argv);
+
+    bruce_elf_exit_context_t exit_ctx = {.exit_code = 0};
+    int result;
+    if (setjmp(exit_ctx.target) != 0) {
+        result = exit_ctx.exit_code;
+    } else {
+        process_registry__set_sandbox_exit_target(&exit_ctx);
+        result = esp_elf_request(&ctx->elf, 0, ctx->argc, ctx->argv);
+    }
+    process_registry__set_sandbox_exit_target(NULL);
+    return result;
 }
 
 static int elf_loader__xip_allocate(

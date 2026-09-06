@@ -78,6 +78,10 @@ typedef struct process__record {
     void *process_entry_context;
     void (*process_entry_cleanup)(void *context);
     void (*process_entry_stop)(void *context, bruce_process_signal_t signal);
+    /* Opaque, loader-owned slot -- see process_registry__set_sandbox_exit_target()
+     * in process.h for what this is for. Core never reads or writes it except
+     * to zero it here at process creation (calloc'd) and never interprets it. */
+    void *sandbox_exit_target;
     volatile bool stop_requested;
     bruce_process_signal_t pending_signal;
     /* Pins the owned context while a stop hook runs outside the registry lock. */

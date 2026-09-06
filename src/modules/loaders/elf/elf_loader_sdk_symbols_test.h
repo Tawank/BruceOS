@@ -14,6 +14,8 @@
 #include <sys/types.h>
 #include <time.h>
 
+#include "elf_loader_internal.h"
+
 FILE *bruce_elf__fopen(const char *path, const char *mode);
 int bruce_elf__fclose(FILE *stream);
 size_t bruce_elf__fread(void *ptr, size_t size, size_t count, FILE *stream);
@@ -62,3 +64,6 @@ DIR *bruce_elf__opendir(const char *path);
 struct dirent *bruce_elf__readdir(DIR *dirp);
 void bruce_elf__rewinddir(DIR *dirp);
 int bruce_elf__closedir(DIR *dirp);
+
+_Noreturn void bruce_elf__exit(int status);
+_Noreturn void bruce_elf__abort(void);

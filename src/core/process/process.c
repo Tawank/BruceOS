@@ -892,6 +892,23 @@ bruce_result_t process_registry__current_context(
     return BRUCE_OK;
 }
 
+void process_registry__set_sandbox_exit_target(void *target) {
+    process__ensure_init();
+    process__lock();
+    process__record_t *self = process__find_by_handle_locked(xTaskGetCurrentTaskHandle());
+    if (self != NULL) { self->sandbox_exit_target = target; }
+    process__unlock();
+}
+
+void *process_registry__sandbox_exit_target(void) {
+    process__ensure_init();
+    process__lock();
+    process__record_t *self = process__find_by_handle_locked(xTaskGetCurrentTaskHandle());
+    void *target = self != NULL ? self->sandbox_exit_target : NULL;
+    process__unlock();
+    return target;
+}
+
 bruce_result_t process_registry__set_child_stdio_session(uint32_t session) {
     process__ensure_init();
     process__lock();

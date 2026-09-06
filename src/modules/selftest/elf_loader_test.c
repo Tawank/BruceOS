@@ -1,6 +1,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <setjmp.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -8,6 +9,7 @@
 #include <sys/stat.h>
 #include <time.h>
 
+#include "core/process/process.h"
 #include "core/storage/storage.h"
 #include "core_sdk/app_runner.h"
 #include "core_sdk/config.h"
@@ -435,6 +437,55 @@ bool selftest__run_elf_loader_posix_case(void) {
     }
 
     printf("[selftest] loader/elf_posix: OK\n");
+    return true;
+}
+
+/*
+ * Exercises bruce_elf__exit()/bruce_elf__abort() (elf_loader_sdk_symbols.c)
+ * without a real cross-compiled ELF fixture: elf_loader_app.c's
+ * elf_loader__entry() is the only other place that arms a sandbox exit
+ * target (via process_registry__set_sandbox_exit_target(), core/process/
+ * process.h), and setjmp() is no different called from here than called
+ * from there -- this reproduces exactly that arm/setjmp/call/longjmp
+ * sequence on the selftest's own stack, then confirms the exit status came
+ * back through the shared bruce_elf_exit_context_t (elf_loader_internal.h)
+ * correctly for both a chosen exit() status and abort()'s fixed
+ * BRUCE_ELF_ABORT_EXIT_CODE. The "no target armed" park-forever fallback in
+ * bruce_elf__exit_common() is deliberately not exercised here -- there is no
+ * way to call into it and get control back to report a result.
+ */
+bool selftest__run_elf_loader_exit_case(void) {
+    bruce_elf_exit_context_t exit_ctx = {.exit_code = -1};
+
+    process_registry__set_sandbox_exit_target(&exit_ctx);
+    if (setjmp(exit_ctx.target) == 0) {
+        bruce_elf__exit(42);
+        process_registry__set_sandbox_exit_target(NULL);
+        printf("[selftest] loader/elf_exit: exit() returned instead of unwinding\n");
+        return false;
+    }
+    process_registry__set_sandbox_exit_target(NULL);
+    if (exit_ctx.exit_code != 42) {
+        printf("[selftest] loader/elf_exit: exit(42) carried status %d\n", exit_ctx.exit_code);
+        return false;
+    }
+
+    exit_ctx.exit_code = -1;
+    process_registry__set_sandbox_exit_target(&exit_ctx);
+    if (setjmp(exit_ctx.target) == 0) {
+        bruce_elf__abort();
+        process_registry__set_sandbox_exit_target(NULL);
+        printf("[selftest] loader/elf_exit: abort() returned instead of unwinding\n");
+        return false;
+    }
+    process_registry__set_sandbox_exit_target(NULL);
+    if (exit_ctx.exit_code != BRUCE_ELF_ABORT_EXIT_CODE) {
+        printf("[selftest] loader/elf_exit: abort() carried status %d, want %d\n", exit_ctx.exit_code,
+               BRUCE_ELF_ABORT_EXIT_CODE);
+        return false;
+    }
+
+    printf("[selftest] loader/elf_exit: OK\n");
     return true;
 }
 

@@ -154,6 +154,21 @@ bruce_result_t process_registry__current_context(
     bool *out_built_in, char *out_permission_key, size_t permission_key_size, bool *out_gui_requested
 );
 
+/* Opaque per-process "sandbox exit target" slot, exactly one per process.
+ * Sandboxed loader modules (currently the ELF loader) use this to implement
+ * libc exit()/abort() semantics for code they run with no real OS process
+ * boundary underneath it: the loader arms this with its own context (a
+ * jmp_buf plus somewhere to stash the exit status, entirely defined and
+ * owned by that loader module) immediately before handing control to
+ * untrusted sandboxed code, then exit()/abort() -- running on that same
+ * process's own task -- reads it back and longjmp()s to it, unwinding out of
+ * whatever native call depth the sandboxed code was at instead of returning
+ * through it. Core never reads, writes, or interprets the pointer itself;
+ * self-only (always targets the calling process). Returns/accepts NULL when
+ * unset, or when there is no current Core process. */
+void process_registry__set_sandbox_exit_target(void *target);
+void *process_registry__sandbox_exit_target(void);
+
 /* Input's per-process wake channel. These helpers never run while the input mutex
  * is held except for the lock-free event-group wait itself. */
 bruce_result_t process_registry__event_wake_clear(bruce_process_id_t process_id);
