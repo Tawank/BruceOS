@@ -39,6 +39,7 @@
 #include "core_sdk/status_icon.h"  // IWYU pragma: export
 #include "core_sdk/stdio.h"        // IWYU pragma: export
 #include "core_sdk/tcp.h"          // IWYU pragma: export
+#include "core_sdk/udp.h"          // IWYU pragma: export
 #include "core_sdk/wifi.h"         // IWYU pragma: export
 
 /* Embed the canonical manifest JSON in the non-loadable .bruce.manifest

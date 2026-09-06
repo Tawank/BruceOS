@@ -14,6 +14,8 @@
 #include <sys/types.h>
 #include <time.h>
 
+#include "lwip/sockets.h"
+
 #include "elf_loader_internal.h"
 
 FILE *bruce_elf__fopen(const char *path, const char *mode);
@@ -68,3 +70,21 @@ int bruce_elf__closedir(DIR *dirp);
 
 _Noreturn void bruce_elf__exit(int status);
 _Noreturn void bruce_elf__abort(void);
+
+/* BSD sockets (see elf_loader_sdk_symbols.c, above bruce_elf__sockaddr_from_endpoint()). */
+int bruce_elf__socket(int domain, int type, int protocol);
+int bruce_elf__bind(int fd, const struct sockaddr *addr, socklen_t addrlen);
+int bruce_elf__listen(int fd, int backlog);
+int bruce_elf__connect(int fd, const struct sockaddr *addr, socklen_t addrlen);
+int bruce_elf__accept(int fd, struct sockaddr *addr, socklen_t *addrlen);
+ssize_t bruce_elf__send(int fd, const void *buffer, size_t size, int flags);
+ssize_t bruce_elf__recv(int fd, void *buffer, size_t size, int flags);
+ssize_t bruce_elf__sendto(
+    int fd, const void *buffer, size_t size, int flags, const struct sockaddr *to, socklen_t tolen
+);
+ssize_t bruce_elf__recvfrom(
+    int fd, void *buffer, size_t size, int flags, struct sockaddr *from, socklen_t *fromlen
+);
+int bruce_elf__shutdown(int fd, int how);
+int bruce_elf__setsockopt(int fd, int level, int optname, const void *optval, socklen_t optlen);
+int bruce_elf__getsockopt(int fd, int level, int optname, void *optval, socklen_t *optlen);

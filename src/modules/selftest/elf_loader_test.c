@@ -11,6 +11,8 @@
 #include <sys/stat.h>
 #include <time.h>
 
+#include "lwip/sockets.h"
+
 #include "core/process/process.h"
 #include "core/storage/storage.h"
 #include "core_sdk/app_runner.h"
@@ -498,6 +500,186 @@ bool selftest__run_elf_loader_posix_case(void) {
     }
 
     printf("[selftest] loader/elf_posix: OK\n");
+    return true;
+}
+
+/*
+ * Exercises the BSD socket adapters the ELF loader hands to sandboxed apps
+ * (elf_loader_sdk_symbols.c, backed by core_sdk/tcp.h and core_sdk/udp.h),
+ * by calling the (deliberately non-static) adapter functions directly, same
+ * rationale as selftest__run_elf_loader_stdio_case(). Runs as the selftest
+ * task itself, a built-in process that permission__check() always allows
+ * (permission enforcement is covered separately, same pattern as
+ * selftest__run_udp_permission_denied_case() in wifi_test.c), over the
+ * loopback interface (works under QEMU with no real network, same as
+ * selftest__run_udp_loopback_case()).
+ */
+bool selftest__run_elf_loader_socket_case(void) {
+    const uint16_t tcp_port = 47010;
+    const uint16_t udp_port_a = 47011;
+    const uint16_t udp_port_b = 47012;
+
+    /* Rejected domain/type. */
+    if (bruce_elf__socket(AF_INET, SOCK_RAW, 0) != -1 || errno != EINVAL) {
+        printf("[selftest] loader/elf_socket: SOCK_RAW was not rejected\n");
+        return false;
+    }
+
+    /* --- TCP: listener + client + accept, then a round-trip both ways. --- */
+    int listener = bruce_elf__socket(AF_INET, SOCK_STREAM, 0);
+    int client = bruce_elf__socket(AF_INET, SOCK_STREAM, 0);
+    if (listener < 0 || client < 0) {
+        printf("[selftest] loader/elf_socket: tcp socket() failed\n");
+        return false;
+    }
+
+    struct sockaddr_in listen_addr = {0};
+    listen_addr.sin_family = AF_INET;
+    listen_addr.sin_port = htons(tcp_port);
+    listen_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    if (bruce_elf__bind(listener, (struct sockaddr *)&listen_addr, sizeof(listen_addr)) != 0) {
+        printf("[selftest] loader/elf_socket: tcp bind() failed\n");
+        return false;
+    }
+    if (bruce_elf__listen(listener, 1) != 0) {
+        printf("[selftest] loader/elf_socket: tcp listen() failed\n");
+        return false;
+    }
+
+    struct sockaddr_in connect_addr = {0};
+    connect_addr.sin_family = AF_INET;
+    connect_addr.sin_port = htons(tcp_port);
+    inet_pton(AF_INET, "127.0.0.1", &connect_addr.sin_addr);
+    if (bruce_elf__connect(client, (struct sockaddr *)&connect_addr, sizeof(connect_addr)) != 0) {
+        printf("[selftest] loader/elf_socket: tcp connect() failed\n");
+        return false;
+    }
+
+    struct sockaddr_in peer_addr = {0};
+    socklen_t peer_len = sizeof(peer_addr);
+    int accepted = bruce_elf__accept(listener, (struct sockaddr *)&peer_addr, &peer_len);
+    if (accepted < 0 || peer_len != sizeof(peer_addr) || peer_addr.sin_family != AF_INET) {
+        printf("[selftest] loader/elf_socket: tcp accept() failed\n");
+        return false;
+    }
+
+    static const char to_server[] = "hello server";
+    static const char to_client[] = "hello client";
+    char buffer[32] = {0};
+    if (bruce_elf__send(client, to_server, sizeof(to_server), 0) != (ssize_t)sizeof(to_server)) {
+        printf("[selftest] loader/elf_socket: tcp send (client->server) mismatch\n");
+        return false;
+    }
+    if (bruce_elf__recv(accepted, buffer, sizeof(buffer), 0) != (ssize_t)sizeof(to_server) ||
+        strcmp(buffer, to_server) != 0) {
+        printf("[selftest] loader/elf_socket: tcp recv (client->server) mismatch (\"%s\")\n", buffer);
+        return false;
+    }
+    memset(buffer, 0, sizeof(buffer));
+    if (bruce_elf__send(accepted, to_client, sizeof(to_client), 0) != (ssize_t)sizeof(to_client)) {
+        printf("[selftest] loader/elf_socket: tcp send (server->client) mismatch\n");
+        return false;
+    }
+    if (bruce_elf__recv(client, buffer, sizeof(buffer), 0) != (ssize_t)sizeof(to_client) ||
+        strcmp(buffer, to_client) != 0) {
+        printf("[selftest] loader/elf_socket: tcp recv (server->client) mismatch (\"%s\")\n", buffer);
+        return false;
+    }
+
+    /* getsockopt(SO_ERROR) always reports "no error"; setsockopt/shutdown
+     * are documented no-ops that still validate the fd is a socket. */
+    int so_error = -1;
+    socklen_t so_error_len = sizeof(so_error);
+    if (bruce_elf__getsockopt(client, SOL_SOCKET, SO_ERROR, &so_error, &so_error_len) != 0 || so_error != 0) {
+        printf("[selftest] loader/elf_socket: getsockopt(SO_ERROR) mismatch\n");
+        return false;
+    }
+    int reuse = 1;
+    if (bruce_elf__setsockopt(client, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) != 0) {
+        printf("[selftest] loader/elf_socket: setsockopt failed\n");
+        return false;
+    }
+    if (bruce_elf__shutdown(client, SHUT_RDWR) != 0) {
+        printf("[selftest] loader/elf_socket: shutdown failed\n");
+        return false;
+    }
+    /* A non-socket fd must be rejected by the socket-only calls. */
+    if (bruce_elf__getsockopt(1, SOL_SOCKET, SO_ERROR, &so_error, &so_error_len) != -1 || errno != ENOTSOCK) {
+        printf("[selftest] loader/elf_socket: getsockopt accepted a non-socket fd\n");
+        return false;
+    }
+
+    bruce_elf__close(client);
+    bruce_elf__close(accepted);
+    bruce_elf__close(listener);
+
+    /* --- UDP: sendto/recvfrom on an explicitly-bound socket, then
+     * connect()+send()/recv() on the other, including sender filtering. --- */
+    int udp_a = bruce_elf__socket(AF_INET, SOCK_DGRAM, 0);
+    int udp_b = bruce_elf__socket(AF_INET, SOCK_DGRAM, 0);
+    if (udp_a < 0 || udp_b < 0) {
+        printf("[selftest] loader/elf_socket: udp socket() failed\n");
+        return false;
+    }
+    struct sockaddr_in udp_bind_b = {0};
+    udp_bind_b.sin_family = AF_INET;
+    udp_bind_b.sin_port = htons(udp_port_b);
+    udp_bind_b.sin_addr.s_addr = htonl(INADDR_ANY);
+    if (bruce_elf__bind(udp_b, (struct sockaddr *)&udp_bind_b, sizeof(udp_bind_b)) != 0) {
+        printf("[selftest] loader/elf_socket: udp bind() failed\n");
+        return false;
+    }
+
+    struct sockaddr_in udp_dest_b = {0};
+    udp_dest_b.sin_family = AF_INET;
+    udp_dest_b.sin_port = htons(udp_port_b);
+    inet_pton(AF_INET, "127.0.0.1", &udp_dest_b.sin_addr);
+    static const char dgram_to_b[] = "dgram to b";
+    if (bruce_elf__sendto(udp_a, dgram_to_b, sizeof(dgram_to_b), 0, (struct sockaddr *)&udp_dest_b,
+                           sizeof(udp_dest_b)) != (ssize_t)sizeof(dgram_to_b)) {
+        printf("[selftest] loader/elf_socket: udp sendto() failed\n");
+        return false;
+    }
+    struct sockaddr_in from_addr = {0};
+    socklen_t from_len = sizeof(from_addr);
+    memset(buffer, 0, sizeof(buffer));
+    if (bruce_elf__recvfrom(udp_b, buffer, sizeof(buffer), 0, (struct sockaddr *)&from_addr, &from_len) !=
+            (ssize_t)sizeof(dgram_to_b) ||
+        strcmp(buffer, dgram_to_b) != 0 || from_len != sizeof(from_addr)) {
+        printf("[selftest] loader/elf_socket: udp recvfrom() mismatch (\"%s\")\n", buffer);
+        return false;
+    }
+
+    /* connect() on udp_a latches udp_b as its peer; plain send()/recv() now
+     * route through that peer without naming it on every call. */
+    struct sockaddr_in udp_connect_a = udp_dest_b;
+    if (bruce_elf__connect(udp_a, (struct sockaddr *)&udp_connect_a, sizeof(udp_connect_a)) != 0) {
+        printf("[selftest] loader/elf_socket: udp connect() failed\n");
+        return false;
+    }
+    static const char dgram_connected[] = "connected dgram";
+    if (bruce_elf__send(udp_a, dgram_connected, sizeof(dgram_connected), 0) != (ssize_t)sizeof(dgram_connected)) {
+        printf("[selftest] loader/elf_socket: udp send() (connected) failed\n");
+        return false;
+    }
+    memset(buffer, 0, sizeof(buffer));
+    if (bruce_elf__recvfrom(udp_b, buffer, sizeof(buffer), 0, NULL, NULL) != (ssize_t)sizeof(dgram_connected) ||
+        strcmp(buffer, dgram_connected) != 0) {
+        printf("[selftest] loader/elf_socket: udp recv of connected send mismatch (\"%s\")\n", buffer);
+        return false;
+    }
+
+    /* No datagram pending now -- MSG_DONTWAIT must return EAGAIN rather than
+     * blocking or returning stale data. */
+    if (bruce_elf__recv(udp_a, buffer, sizeof(buffer), MSG_DONTWAIT) != -1 || errno != EAGAIN) {
+        printf("[selftest] loader/elf_socket: udp MSG_DONTWAIT recv did not report EAGAIN\n");
+        return false;
+    }
+
+    bruce_elf__close(udp_a);
+    bruce_elf__close(udp_b);
+
+    printf("[selftest] loader/elf_socket: OK\n");
     return true;
 }
 

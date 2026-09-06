@@ -30,6 +30,9 @@
 #include "elf_loader_internal.h"
 #include "esp_elf.h" // IWYU pragma: export
 
+#include "lwip/inet.h"
+#include "lwip/sockets.h"
+
 #include "core/process/process.h"
 #include "core_sdk/app_runner.h"
 #include "core_sdk/args.h"
@@ -171,14 +174,52 @@ typedef enum {
     BRUCE_ELF_FILE_STORAGE,
     BRUCE_ELF_FILE_CONSOLE_IN,
     BRUCE_ELF_FILE_CONSOLE_OUT,
+    /* BSD-socket-shaped fds -- see the "BSD sockets" section below, well
+     * after the rest of this POSIX-fd family, for what each of these means
+     * and why a socket needs more than one kind to represent it. */
+    BRUCE_ELF_FILE_SOCKET_TCP_PENDING,
+    BRUCE_ELF_FILE_SOCKET_TCP_STREAM,
+    BRUCE_ELF_FILE_SOCKET_TCP_LISTENER,
+    BRUCE_ELF_FILE_SOCKET_UDP,
 } bruce_elf_file_kind_t;
 
 typedef struct {
     bruce_elf_file_kind_t kind;
-    bruce_file_id_t file; /* meaningful only when kind == BRUCE_ELF_FILE_STORAGE */
+    union {
+        bruce_file_id_t file; /* kind == BRUCE_ELF_FILE_STORAGE */
+        bruce_tcp_id_t tcp;   /* kind == ..._SOCKET_TCP_STREAM or ..._TCP_LISTENER */
+        bruce_udp_id_t udp;   /* kind == ..._SOCKET_UDP */
+    };
     bool eof;
     bool error;
+    /* kind == ..._SOCKET_TCP_PENDING only: the port bind() recorded, applied
+     * by a later listen() (there is no real tcp__ handle yet to bind). */
+    uint16_t pending_port;
+    /* kind == ..._SOCKET_UDP only: the peer connect() latched, if any. */
+    bool udp_connected;
+    char udp_peer_host[BRUCE_UDP_HOST_MAX];
+    uint16_t udp_peer_port;
 } bruce_elf_file_t;
+
+static bool bruce_elf__file_kind_is_socket(bruce_elf_file_kind_t kind) {
+    switch (kind) {
+        case BRUCE_ELF_FILE_SOCKET_TCP_PENDING:
+        case BRUCE_ELF_FILE_SOCKET_TCP_STREAM:
+        case BRUCE_ELF_FILE_SOCKET_TCP_LISTENER:
+        case BRUCE_ELF_FILE_SOCKET_UDP:
+            return true;
+        default:
+            return false;
+    }
+}
+
+/* Defined in the "BSD sockets" section below; forward-declared here so
+ * bruce_elf__close()/read()/write() (part of the existing POSIX-fd family,
+ * defined next) can dispatch a socket-kind fd into it without that whole
+ * section needing to sit before them. */
+static int bruce_elf__socket_close(bruce_elf_file_t *box);
+static ssize_t bruce_elf__socket_read(bruce_elf_file_t *box, void *buffer, size_t count);
+static ssize_t bruce_elf__socket_write(bruce_elf_file_t *box, const void *buffer, size_t count);
 
 /* Static, never freed -- fclose() on one of these is a no-op (see below),
  * matching fclose(stdout) being harmless in a real libc. stderr shares
@@ -203,6 +244,7 @@ static void bruce_elf__set_errno_from_result(bruce_result_t result) {
         case BRUCE_ERR_INVALID_ARGUMENT: *__errno() = EINVAL; break;
         case BRUCE_ERR_ALREADY_EXISTS: *__errno() = EEXIST; break;
         case BRUCE_ERR_RESOURCE_LIMIT: *__errno() = EMFILE; break;
+        case BRUCE_ERR_BUSY: *__errno() = EADDRINUSE; break; /* bind()'s own most common failure */
         default: *__errno() = EIO; break;
     }
 }
@@ -819,7 +861,8 @@ int bruce_elf__close(int fd) {
         *__errno() = EBADF;
         return -1;
     }
-    int result = bruce_elf__fclose((FILE *)box);
+    int result = bruce_elf__file_kind_is_socket(box->kind) ? bruce_elf__socket_close(box)
+                                                             : bruce_elf__fclose((FILE *)box);
     if (fd >= BRUCE_ELF_FD_RESERVED) s_bruce_elf_fd_table[fd] = NULL;
     return result == 0 ? 0 : -1;
 }
@@ -830,6 +873,7 @@ ssize_t bruce_elf__read(int fd, void *buffer, size_t count) {
         *__errno() = EBADF;
         return -1;
     }
+    if (bruce_elf__file_kind_is_socket(box->kind)) return bruce_elf__socket_read(box, buffer, count);
     size_t read_count = bruce_elf__fread(buffer, 1, count, (FILE *)box);
     if (read_count == 0 && count != 0 && box->error) {
         *__errno() = EIO;
@@ -844,6 +888,7 @@ ssize_t bruce_elf__write(int fd, const void *buffer, size_t count) {
         *__errno() = EBADF;
         return -1;
     }
+    if (bruce_elf__file_kind_is_socket(box->kind)) return bruce_elf__socket_write(box, buffer, count);
     size_t written = bruce_elf__fwrite(buffer, 1, count, (FILE *)box);
     if (written == 0 && count != 0 && box->error) {
         *__errno() = EIO;
@@ -1020,6 +1065,535 @@ int bruce_elf__closedir(DIR *dirp) {
     }
     memory__free(dir->entries);
     memory__free(dir);
+    return 0;
+}
+
+/* ---------------------------------------------------------------------------
+ * BSD sockets (socket/bind/connect/listen/accept/send/recv/sendto/recvfrom/
+ * shutdown/setsockopt/getsockopt), for unmodified third-party C code written
+ * against the standard sockets API rather than tcp__/udp__ directly -- an ELF
+ * app gets these by adding `PRIV_REQUIRES lwip` to its own
+ * idf_component_register() and `#include <sys/socket.h>` (there is no
+ * picolibc header for this -- verified directly, picolibc ships no
+ * sys/socket.h/netinet/in.h/arpa/inet.h at all -- so the app's own build has
+ * to pull the real ones in from ESP-IDF's lwip component, same as any other
+ * normal ESP-IDF project using sockets).
+ *
+ * Registered below under "lwip_socket"/"lwip_bind"/etc, NOT "socket"/"bind"/
+ * etc: that same lwip/sockets.h defines LWIP_COMPAT_SOCKETS, whose default
+ * value (1 -- checked directly in this project's actual lwip/opt.h, not
+ * assumed) makes `socket(...)` etc. preprocessor macros that expand to
+ * `lwip_socket(...)` etc. at the APP's OWN compile time, so the relocation
+ * a compiled ELF app actually carries is for "lwip_socket", never "socket"
+ * itself. close()/read()/write() are the one exception -- LWIP_COMPAT_SOCKETS
+ * only remaps those two under the rarer ==2 setting -- so a socket fd's
+ * close()/read()/write() calls normally reach the plain "close"/"read"/
+ * "write" entries already registered above for storage fds, which is why
+ * bruce_elf__close()/read()/write() were extended (see the kind dispatch
+ * added to each) to also understand a socket-kind fd rather than adding yet
+ * another parallel set of adapters for those three. "lwip_close"/"lwip_read"/
+ * "lwip_write" are registered too, pointing at those same three functions,
+ * purely as insurance for an ELF app built with LWIP_COMPAT_SOCKETS==2 in
+ * its own sdkconfig instead of the default.
+ *
+ * Built entirely on core_sdk/tcp.h and core_sdk/udp.h -- this file never
+ * touches a raw lwip fd directly for any of this, only lwip's struct/constant
+ * definitions (struct sockaddr_in, AF_INET, ...) and its pure address-format
+ * helpers (inet_ntop/pton and friends, exported unadapted further below,
+ * same rationale as strerror()/div() elsewhere in this file) -- so every BSD
+ * socket still goes through the same `wifi` permission check, per-process
+ * ownership, and auto-close-on-exit that tcp__/udp__ already enforce for
+ * every other network entry point in this sandbox. Calling straight into
+ * lwip's own socket()/connect()/etc. here would silently punch a hole through
+ * all of that for any app that happens to spell its networking the BSD way
+ * instead of BruceOS's own.
+ *
+ * Only AF_INET/SOCK_STREAM/SOCK_DGRAM are supported -- this whole sandbox's
+ * network layer is IPv4-only already (see bruce_tcp_endpoint_t/
+ * bruce_udp_endpoint_t) -- no AF_INET6, no AF_UNIX, no SOCK_RAW.
+ *
+ * A BSD socket has staged setup (socket() now, connect() OR bind()+listen()
+ * later) that tcp__/udp__'s own connect()-does-everything/listen()-does-
+ * everything calls don't have, so a socket's box (bruce_elf_file_t, the same
+ * boxed-fd type the FILE* / POSIX-fd families above already use) can sit in
+ * BRUCE_ELF_FILE_SOCKET_TCP_PENDING -- allocated by socket(), no real tcp__
+ * handle yet -- until connect() or bind()+listen() actually creates one.
+ * listen() specifically requires a prior bind() to an explicit port: real
+ * listen() on a never-bound socket picks an ephemeral port automatically,
+ * but tcp__listen() has no such mode (it always requires a caller-chosen
+ * port) -- a real, documented limitation, not a bug, and not one that
+ * affects any TCP server example this sandbox is meant to run (they already
+ * bind() to a fixed port). UDP has no such staging in real BSD sockets (a UDP
+ * socket can send immediately without ever calling bind()), so
+ * socket(SOCK_DGRAM) opens a real udp__ handle immediately on an ephemeral
+ * port, exactly like the kernel silently auto-binding on first use; a later
+ * explicit bind() closes that ephemeral handle and reopens on the caller's
+ * chosen port instead (see bruce_elf__bind()) -- unlike a real kernel this
+ * doesn't refuse a bind() after the socket has already sent or received, a
+ * known simplification, since tracking that would mean threading a "used"
+ * flag through every send/recv path for a case real portable code almost
+ * never actually hits (bind(), when a program calls it at all, is always the
+ * first thing it does to a fresh UDP socket).
+ *
+ * No non-blocking mode: there is no fcntl()/O_NONBLOCK support in this
+ * sandbox, so connect()/accept()/send()/recv()/sendto()/recvfrom() all block
+ * (internally retrying the matching tcp__/udp__ call on BRUCE_ERR_TIMEOUT in
+ * a loop) until they succeed or hit a real error -- the correct behavior for
+ * a blocking socket, which is the only kind this sandbox has. The one
+ * exception is the standard MSG_DONTWAIT flag on send/recv/sendto/recvfrom,
+ * honored per-call without needing O_NONBLOCK on the fd at all. There is also
+ * no select()/poll(): both need to wait on several fds at once, which has no
+ * equivalent in tcp__/udp__'s own single-socket wait -- a caller that needs
+ * multiplexing has no substitute here yet.
+ *
+ * shutdown() and setsockopt()/getsockopt() are documented no-ops (like
+ * fflush()/setvbuf() above) rather than faked: tcp__/udp__ have no partial-
+ * close or socket-option primitives underneath for these to actually drive,
+ * so they just validate the fd and satisfy the ABI -- getsockopt(SO_ERROR)
+ * specifically always reports "no error" since every call here already
+ * blocks to completion rather than leaving an async error to be collected
+ * later. */
+
+static void bruce_elf__sockaddr_from_endpoint(struct sockaddr_in *out, const char *host, uint16_t port) {
+    memset(out, 0, sizeof(*out));
+    out->sin_family = AF_INET;
+    out->sin_port = htons(port);
+    if (host == NULL || host[0] == '\0' || inet_pton(AF_INET, host, &out->sin_addr) != 1) {
+        out->sin_addr.s_addr = htonl(INADDR_ANY);
+    }
+}
+
+static bruce_result_t bruce_elf__endpoint_from_sockaddr(
+    const struct sockaddr *addr, socklen_t addrlen, char *out_host, size_t host_size, uint16_t *out_port
+) {
+    if (addr == NULL || addrlen < (socklen_t)sizeof(struct sockaddr_in) || addr->sa_family != AF_INET) {
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    const struct sockaddr_in *in = (const struct sockaddr_in *)addr;
+    if (inet_ntop(AF_INET, &in->sin_addr, out_host, host_size) == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    *out_port = ntohs(in->sin_port);
+    return BRUCE_OK;
+}
+
+/* Shared by bruce_elf__send()/bruce_elf__sendto() (a plain send() is exactly
+ * a sendto() with no destination) and by bruce_elf__write() dispatching a
+ * socket-kind fd to bruce_elf__socket_write() below. size == 0 is handled
+ * before ever calling tcp__write()/udp__send_to(): both treat capacity/size
+ * == 0 as an argument error, but POSIX send()/write() of zero bytes is a
+ * valid no-op that returns 0. */
+static ssize_t bruce_elf__send_impl(bruce_elf_file_t *box, const void *buffer, size_t size, int flags) {
+    if (size == 0) return 0;
+    bool poll_once = (flags & MSG_DONTWAIT) != 0;
+    for (;;) {
+        bruce_result_t result;
+        size_t sent = 0;
+        if (box->kind == BRUCE_ELF_FILE_SOCKET_TCP_STREAM) {
+            result = tcp__write(box->tcp, buffer, size, poll_once ? 0 : 1000, &sent);
+        } else if (box->kind == BRUCE_ELF_FILE_SOCKET_UDP && box->udp_connected) {
+            result =
+                udp__send_to(box->udp, box->udp_peer_host, box->udp_peer_port, buffer, size, poll_once ? 0 : 1000,
+                              &sent);
+        } else if (box->kind == BRUCE_ELF_FILE_SOCKET_UDP) {
+            *__errno() = EDESTADDRREQ; /* no connect() peer, and this isn't sendto() */
+            return -1;
+        } else {
+            *__errno() = ENOTSOCK;
+            return -1;
+        }
+        if (result == BRUCE_OK) return (ssize_t)sent;
+        if (result == BRUCE_ERR_TIMEOUT) {
+            if (poll_once) {
+                *__errno() = EAGAIN;
+                return -1;
+            }
+            continue; /* keep blocking, matching a real blocking socket */
+        }
+        bruce_elf__set_errno_from_result(result);
+        return -1;
+    }
+}
+
+/* Shared by bruce_elf__recv()/bruce_elf__recvfrom() and by bruce_elf__read()
+ * dispatching a socket-kind fd to bruce_elf__socket_read() below. See
+ * bruce_elf__send_impl() above for the size == 0 and MSG_DONTWAIT handling,
+ * identical here. */
+static ssize_t bruce_elf__recv_impl(bruce_elf_file_t *box, void *buffer, size_t size, int flags) {
+    if (size == 0) return 0;
+    bool poll_once = (flags & MSG_DONTWAIT) != 0;
+    for (;;) {
+        bruce_result_t result;
+        size_t received = 0;
+        if (box->kind == BRUCE_ELF_FILE_SOCKET_TCP_STREAM) {
+            result = tcp__read(box->tcp, buffer, size, poll_once ? 0 : 1000, &received);
+        } else if (box->kind == BRUCE_ELF_FILE_SOCKET_UDP) {
+            /* Unlike send()/sendto(), recv()/recvfrom() never require a
+             * connect()ed peer -- real recv() is just recvfrom(..., NULL,
+             * NULL), and recvfrom() on a never-connected UDP socket happily
+             * accepts a datagram from anyone. connect() only narrows this:
+             * once set, the peer filter below discards anything else,
+             * matching real connected-UDP delivery (the kernel itself drops
+             * non-matching datagrams for a connected socket, for recv() and
+             * recvfrom() alike). */
+            bruce_udp_endpoint_t sender;
+            result = udp__receive_from(box->udp, buffer, size, poll_once ? 0 : 1000, &received, &sender);
+            if (box->udp_connected && result == BRUCE_OK &&
+                (strcmp(sender.host, box->udp_peer_host) != 0 || sender.port != box->udp_peer_port)) {
+                continue; /* wrong sender -- keep waiting, this datagram is discarded */
+            }
+        } else {
+            *__errno() = ENOTSOCK;
+            return -1;
+        }
+        if (result == BRUCE_OK) return (ssize_t)received;
+        if (result == BRUCE_ERR_TIMEOUT) {
+            if (poll_once) {
+                *__errno() = EAGAIN;
+                return -1;
+            }
+            continue;
+        }
+        bruce_elf__set_errno_from_result(result);
+        return -1;
+    }
+}
+
+static int bruce_elf__socket_close(bruce_elf_file_t *box) {
+    bruce_result_t result = BRUCE_OK;
+    switch (box->kind) {
+        case BRUCE_ELF_FILE_SOCKET_TCP_STREAM:
+        case BRUCE_ELF_FILE_SOCKET_TCP_LISTENER: result = tcp__close(box->tcp); break;
+        case BRUCE_ELF_FILE_SOCKET_UDP: result = udp__close(box->udp); break;
+        default: break; /* TCP_PENDING: never had a real tcp__/udp__ handle to close */
+    }
+    memory__free(box);
+    if (result != BRUCE_OK) {
+        bruce_elf__set_errno_from_result(result);
+        return -1;
+    }
+    return 0;
+}
+
+static ssize_t bruce_elf__socket_read(bruce_elf_file_t *box, void *buffer, size_t count) {
+    return bruce_elf__recv_impl(box, buffer, count, 0);
+}
+
+static ssize_t bruce_elf__socket_write(bruce_elf_file_t *box, const void *buffer, size_t count) {
+    return bruce_elf__send_impl(box, buffer, count, 0);
+}
+
+int bruce_elf__socket(int domain, int type, int protocol) {
+    (void)protocol;
+    bruce_result_t permission = permission__check(BRUCE_PERMISSION_WIFI);
+    if (permission != BRUCE_OK) {
+        bruce_elf__set_errno_from_result(permission);
+        return -1;
+    }
+    if (domain != AF_INET || (type != SOCK_STREAM && type != SOCK_DGRAM)) {
+        *__errno() = EINVAL;
+        return -1;
+    }
+    bruce_elf_file_t *box = memory__malloc(sizeof(*box));
+    if (box == NULL) {
+        *__errno() = ENOMEM;
+        return -1;
+    }
+    memset(box, 0, sizeof(*box));
+    if (type == SOCK_STREAM) {
+        box->kind = BRUCE_ELF_FILE_SOCKET_TCP_PENDING;
+    } else {
+        bruce_result_t result = udp__open(0, &box->udp);
+        if (result != BRUCE_OK) {
+            memory__free(box);
+            bruce_elf__set_errno_from_result(result);
+            return -1;
+        }
+        box->kind = BRUCE_ELF_FILE_SOCKET_UDP;
+    }
+    int fd = bruce_elf__fd_alloc(box);
+    if (fd < 0) {
+        if (box->kind == BRUCE_ELF_FILE_SOCKET_UDP) udp__close(box->udp);
+        memory__free(box);
+        *__errno() = EMFILE;
+        return -1;
+    }
+    return fd;
+}
+
+int bruce_elf__bind(int fd, const struct sockaddr *addr, socklen_t addrlen) {
+    bruce_elf_file_t *box = bruce_elf__fd_lookup(fd);
+    if (box == NULL) {
+        *__errno() = EBADF;
+        return -1;
+    }
+    char host[BRUCE_UDP_HOST_MAX];
+    uint16_t port = 0;
+    if (bruce_elf__endpoint_from_sockaddr(addr, addrlen, host, sizeof(host), &port) != BRUCE_OK) {
+        *__errno() = EINVAL;
+        return -1;
+    }
+    if (box->kind == BRUCE_ELF_FILE_SOCKET_TCP_PENDING) {
+        box->pending_port = port;
+        return 0;
+    }
+    if (box->kind == BRUCE_ELF_FILE_SOCKET_UDP) {
+        if (box->udp_connected) {
+            *__errno() = EINVAL; /* real bind() after connect() also fails */
+            return -1;
+        }
+        bruce_udp_id_t rebound = BRUCE_UDP_ID_INVALID;
+        bruce_result_t result = udp__open(port, &rebound);
+        if (result != BRUCE_OK) {
+            bruce_elf__set_errno_from_result(result);
+            return -1;
+        }
+        udp__close(box->udp); /* only after the reopen succeeds -- see the doc comment above */
+        box->udp = rebound;
+        return 0;
+    }
+    *__errno() = EINVAL;
+    return -1;
+}
+
+int bruce_elf__listen(int fd, int backlog) {
+    (void)backlog; /* tcp__listen() always uses a backlog of 1 internally */
+    bruce_elf_file_t *box = bruce_elf__fd_lookup(fd);
+    if (box == NULL) {
+        *__errno() = EBADF;
+        return -1;
+    }
+    if (box->kind != BRUCE_ELF_FILE_SOCKET_TCP_PENDING || box->pending_port == 0) {
+        *__errno() = EDESTADDRREQ; /* see the doc comment above: bind() to an explicit port is mandatory first */
+        return -1;
+    }
+    bruce_tcp_id_t listener = BRUCE_TCP_ID_INVALID;
+    bruce_result_t result = tcp__listen(box->pending_port, &listener);
+    if (result != BRUCE_OK) {
+        bruce_elf__set_errno_from_result(result);
+        return -1;
+    }
+    box->tcp = listener;
+    box->kind = BRUCE_ELF_FILE_SOCKET_TCP_LISTENER;
+    return 0;
+}
+
+int bruce_elf__connect(int fd, const struct sockaddr *addr, socklen_t addrlen) {
+    bruce_elf_file_t *box = bruce_elf__fd_lookup(fd);
+    if (box == NULL) {
+        *__errno() = EBADF;
+        return -1;
+    }
+    char host[BRUCE_UDP_HOST_MAX];
+    uint16_t port = 0;
+    if (bruce_elf__endpoint_from_sockaddr(addr, addrlen, host, sizeof(host), &port) != BRUCE_OK) {
+        *__errno() = EINVAL;
+        return -1;
+    }
+    if (box->kind == BRUCE_ELF_FILE_SOCKET_TCP_PENDING) {
+        bruce_tcp_id_t id = BRUCE_TCP_ID_INVALID;
+        bruce_result_t result = tcp__connect(host, port, 0, &id);
+        if (result != BRUCE_OK) {
+            bruce_elf__set_errno_from_result(result);
+            return -1;
+        }
+        box->tcp = id;
+        box->kind = BRUCE_ELF_FILE_SOCKET_TCP_STREAM;
+        return 0;
+    }
+    if (box->kind == BRUCE_ELF_FILE_SOCKET_UDP) {
+        strncpy(box->udp_peer_host, host, sizeof(box->udp_peer_host) - 1);
+        box->udp_peer_host[sizeof(box->udp_peer_host) - 1] = '\0';
+        box->udp_peer_port = port;
+        box->udp_connected = true;
+        return 0;
+    }
+    *__errno() = box->kind == BRUCE_ELF_FILE_SOCKET_TCP_STREAM ? EISCONN : EINVAL;
+    return -1;
+}
+
+int bruce_elf__accept(int fd, struct sockaddr *addr, socklen_t *addrlen) {
+    bruce_elf_file_t *box = bruce_elf__fd_lookup(fd);
+    if (box == NULL) {
+        *__errno() = EBADF;
+        return -1;
+    }
+    if (box->kind != BRUCE_ELF_FILE_SOCKET_TCP_LISTENER) {
+        *__errno() = EINVAL;
+        return -1;
+    }
+    bruce_tcp_id_t accepted = BRUCE_TCP_ID_INVALID;
+    bruce_tcp_endpoint_t peer;
+    bruce_result_t result;
+    do {
+        result = tcp__accept(box->tcp, 1000, &accepted, &peer);
+    } while (result == BRUCE_ERR_TIMEOUT); /* block indefinitely -- see the doc comment above */
+    if (result != BRUCE_OK) {
+        bruce_elf__set_errno_from_result(result);
+        return -1;
+    }
+    bruce_elf_file_t *accepted_box = memory__malloc(sizeof(*accepted_box));
+    if (accepted_box == NULL) {
+        tcp__close(accepted);
+        *__errno() = ENOMEM;
+        return -1;
+    }
+    memset(accepted_box, 0, sizeof(*accepted_box));
+    accepted_box->kind = BRUCE_ELF_FILE_SOCKET_TCP_STREAM;
+    accepted_box->tcp = accepted;
+    int accepted_fd = bruce_elf__fd_alloc(accepted_box);
+    if (accepted_fd < 0) {
+        tcp__close(accepted);
+        memory__free(accepted_box);
+        *__errno() = EMFILE;
+        return -1;
+    }
+    if (addr != NULL && addrlen != NULL && *addrlen >= (socklen_t)sizeof(struct sockaddr_in)) {
+        bruce_elf__sockaddr_from_endpoint((struct sockaddr_in *)addr, peer.host, peer.port);
+        *addrlen = (socklen_t)sizeof(struct sockaddr_in);
+    }
+    return accepted_fd;
+}
+
+ssize_t bruce_elf__send(int fd, const void *buffer, size_t size, int flags) {
+    bruce_elf_file_t *box = bruce_elf__fd_lookup(fd);
+    if (box == NULL) {
+        *__errno() = EBADF;
+        return -1;
+    }
+    return bruce_elf__send_impl(box, buffer, size, flags);
+}
+
+ssize_t bruce_elf__recv(int fd, void *buffer, size_t size, int flags) {
+    bruce_elf_file_t *box = bruce_elf__fd_lookup(fd);
+    if (box == NULL) {
+        *__errno() = EBADF;
+        return -1;
+    }
+    return bruce_elf__recv_impl(box, buffer, size, flags);
+}
+
+ssize_t bruce_elf__sendto(
+    int fd, const void *buffer, size_t size, int flags, const struct sockaddr *to, socklen_t tolen
+) {
+    bruce_elf_file_t *box = bruce_elf__fd_lookup(fd);
+    if (box == NULL) {
+        *__errno() = EBADF;
+        return -1;
+    }
+    if (to == NULL) return bruce_elf__send_impl(box, buffer, size, flags);
+    if (box->kind != BRUCE_ELF_FILE_SOCKET_UDP) {
+        *__errno() = EINVAL; /* explicit destination only makes sense for UDP here */
+        return -1;
+    }
+    char host[BRUCE_UDP_HOST_MAX];
+    uint16_t port = 0;
+    if (bruce_elf__endpoint_from_sockaddr(to, tolen, host, sizeof(host), &port) != BRUCE_OK) {
+        *__errno() = EINVAL;
+        return -1;
+    }
+    if (size == 0) return 0;
+    bool poll_once = (flags & MSG_DONTWAIT) != 0;
+    for (;;) {
+        size_t sent = 0;
+        bruce_result_t result = udp__send_to(box->udp, host, port, buffer, size, poll_once ? 0 : 1000, &sent);
+        if (result == BRUCE_OK) return (ssize_t)sent;
+        if (result == BRUCE_ERR_TIMEOUT) {
+            if (poll_once) {
+                *__errno() = EAGAIN;
+                return -1;
+            }
+            continue;
+        }
+        bruce_elf__set_errno_from_result(result);
+        return -1;
+    }
+}
+
+ssize_t bruce_elf__recvfrom(
+    int fd, void *buffer, size_t size, int flags, struct sockaddr *from, socklen_t *fromlen
+) {
+    bruce_elf_file_t *box = bruce_elf__fd_lookup(fd);
+    if (box == NULL) {
+        *__errno() = EBADF;
+        return -1;
+    }
+    if (from == NULL) return bruce_elf__recv_impl(box, buffer, size, flags);
+    if (box->kind != BRUCE_ELF_FILE_SOCKET_UDP) {
+        *__errno() = EINVAL;
+        return -1;
+    }
+    if (size == 0) return 0;
+    bool poll_once = (flags & MSG_DONTWAIT) != 0;
+    bruce_udp_endpoint_t peer;
+    for (;;) {
+        size_t received = 0;
+        bruce_result_t result =
+            udp__receive_from(box->udp, buffer, size, poll_once ? 0 : 1000, &received, &peer);
+        if (result == BRUCE_OK) {
+            if (fromlen != NULL && *fromlen >= (socklen_t)sizeof(struct sockaddr_in)) {
+                bruce_elf__sockaddr_from_endpoint((struct sockaddr_in *)from, peer.host, peer.port);
+                *fromlen = (socklen_t)sizeof(struct sockaddr_in);
+            }
+            return (ssize_t)received;
+        }
+        if (result == BRUCE_ERR_TIMEOUT) {
+            if (poll_once) {
+                *__errno() = EAGAIN;
+                return -1;
+            }
+            continue;
+        }
+        bruce_elf__set_errno_from_result(result);
+        return -1;
+    }
+}
+
+int bruce_elf__shutdown(int fd, int how) {
+    (void)how;
+    bruce_elf_file_t *box = bruce_elf__fd_lookup(fd);
+    if (box == NULL) {
+        *__errno() = EBADF;
+        return -1;
+    }
+    if (!bruce_elf__file_kind_is_socket(box->kind)) {
+        *__errno() = ENOTSOCK;
+        return -1;
+    }
+    return 0; /* no-op -- see the doc comment above */
+}
+
+int bruce_elf__setsockopt(int fd, int level, int optname, const void *optval, socklen_t optlen) {
+    (void)level;
+    (void)optname;
+    (void)optval;
+    (void)optlen;
+    bruce_elf_file_t *box = bruce_elf__fd_lookup(fd);
+    if (box == NULL) {
+        *__errno() = EBADF;
+        return -1;
+    }
+    if (!bruce_elf__file_kind_is_socket(box->kind)) {
+        *__errno() = ENOTSOCK;
+        return -1;
+    }
+    return 0; /* accepted, not applied -- see the doc comment above */
+}
+
+int bruce_elf__getsockopt(int fd, int level, int optname, void *optval, socklen_t *optlen) {
+    bruce_elf_file_t *box = bruce_elf__fd_lookup(fd);
+    if (box == NULL) {
+        *__errno() = EBADF;
+        return -1;
+    }
+    if (!bruce_elf__file_kind_is_socket(box->kind)) {
+        *__errno() = ENOTSOCK;
+        return -1;
+    }
+    if (optval != NULL && optlen != NULL && *optlen >= sizeof(int)) {
+        /* SO_ERROR or anything else: always "no error"/zero -- see the doc
+         * comment above for why there is never a pending one to report. */
+        *(int *)optval = 0;
+        *optlen = sizeof(int);
+    }
     return 0;
 }
 
@@ -1607,6 +2181,52 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     {"readdir",  (const void *)&bruce_elf__readdir  },
     {"closedir", (const void *)&bruce_elf__closedir },
     {"rewinddir",(const void *)&bruce_elf__rewinddir},
+
+    /* BSD sockets, backed by core_sdk/tcp.h and core_sdk/udp.h -- see the
+     * design doc comment above bruce_elf__sockaddr_from_endpoint(). Registered
+     * under "lwip_*" names (plus a few unprefixed pure-function/struct-helper
+     * names below), NOT the plain POSIX names: LWIP_COMPAT_SOCKETS (default
+     * on) makes socket()/bind()/connect()/etc. expand to lwip_socket()/
+     * lwip_bind()/lwip_connect()/etc. at the calling ELF app's own compile
+     * time, so those are the actual relocations a compiled app carries.
+     * close()/read()/write() are the exception -- only remapped under the
+     * rarer LWIP_COMPAT_SOCKETS==2 -- so "close"/"read"/"write" above were
+     * extended to also dispatch a socket-kind fd; "lwip_close"/"lwip_read"/
+     * "lwip_write" here point at those same three functions, for an app built
+     * with ==2 instead of the default. */
+    {"lwip_socket",     (const void *)&bruce_elf__socket    },
+    {"lwip_bind",       (const void *)&bruce_elf__bind      },
+    {"lwip_listen",     (const void *)&bruce_elf__listen    },
+    {"lwip_connect",    (const void *)&bruce_elf__connect   },
+    {"lwip_accept",     (const void *)&bruce_elf__accept    },
+    {"lwip_send",       (const void *)&bruce_elf__send      },
+    {"lwip_recv",       (const void *)&bruce_elf__recv      },
+    {"lwip_sendto",     (const void *)&bruce_elf__sendto    },
+    {"lwip_recvfrom",   (const void *)&bruce_elf__recvfrom  },
+    {"lwip_shutdown",   (const void *)&bruce_elf__shutdown  },
+    {"lwip_setsockopt", (const void *)&bruce_elf__setsockopt},
+    {"lwip_getsockopt", (const void *)&bruce_elf__getsockopt},
+    {"lwip_close",      (const void *)&bruce_elf__close     },
+    {"lwip_read",       (const void *)&bruce_elf__read      },
+    {"lwip_write",      (const void *)&bruce_elf__write     },
+    /* htons(x)/ntohl(x) etc are unconditionally macro-aliased to these two
+     * real functions (lwip/def.h); on this little-endian target ntohs/ntohl
+     * are further macro-aliased to lwip_htons/lwip_htonl themselves, so no
+     * separate entries are needed for those two. Pure functions -- exported
+     * directly, no adapter, same as strerror()/div() elsewhere in this file. */
+    ESP_ELFSYM_EXPORT(lwip_htons),
+    ESP_ELFSYM_EXPORT(lwip_htonl),
+    /* inet_ntop(...)/inet_pton(...) macro-alias to these (lwip/inet.h),
+     * active under the same default LWIP_COMPAT_SOCKETS setting as above. */
+    ESP_ELFSYM_EXPORT(lwip_inet_ntop),
+    ESP_ELFSYM_EXPORT(lwip_inet_pton),
+    /* inet_addr(cp)/inet_aton(cp,addr)/inet_ntoa(addr) macro-alias to these
+     * three (lwip/inet.h) unconditionally -- not gated by LWIP_COMPAT_SOCKETS
+     * at all, unlike everything else in this block. */
+    ESP_ELFSYM_EXPORT(ipaddr_addr),
+    ESP_ELFSYM_EXPORT(ip4addr_aton),
+    ESP_ELFSYM_EXPORT(ip4addr_ntoa),
+
     {"getenv",   (const void *)&bruce_elf__getenv   },
     {"setenv",   (const void *)&bruce_elf__setenv   },
     {"unsetenv", (const void *)&bruce_elf__unsetenv },

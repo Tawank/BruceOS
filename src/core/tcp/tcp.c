@@ -199,6 +199,13 @@ bruce_result_t tcp__listen(uint16_t port, bruce_tcp_id_t *out_listener) {
     if (permission != BRUCE_OK) return permission;
     if (port == 0 || out_listener == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     *out_listener = BRUCE_TCP_ID_INVALID;
+    /* Unlike tcp__connect(), this can be the very first network call a
+     * process ever makes (a server binds before anyone connects to it), so
+     * this needs its own network__init() rather than relying on some earlier
+     * call having already done it -- without this, the very first socket()
+     * below crashes (lwip's tcpip thread mailbox isn't up yet). */
+    bruce_result_t network_result = network__init();
+    if (network_result != BRUCE_OK) return network_result;
 
     int fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (fd < 0) return BRUCE_ERR_IO;
