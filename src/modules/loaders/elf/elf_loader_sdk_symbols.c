@@ -66,6 +66,7 @@
 #include "core_sdk/storage.h"
 #include "core_sdk/tcp.h"
 #include "core_sdk/tty.h"
+#include "core_sdk/udp.h"
 #include "core_sdk/wifi.h"
 
 /* GCC emits these libgcc helpers for floating-point operations in ELF apps.
@@ -1519,13 +1520,17 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(disk__mount),
     ESP_ELFSYM_EXPORT(disk__unmount),
 
-    /* TCP and console streams */
+    /* TCP, UDP, and console streams */
     ESP_ELFSYM_EXPORT(tcp__connect),
     ESP_ELFSYM_EXPORT(tcp__listen),
     ESP_ELFSYM_EXPORT(tcp__accept),
     ESP_ELFSYM_EXPORT(tcp__read),
     ESP_ELFSYM_EXPORT(tcp__write),
     ESP_ELFSYM_EXPORT(tcp__close),
+    ESP_ELFSYM_EXPORT(udp__open),
+    ESP_ELFSYM_EXPORT(udp__send_to),
+    ESP_ELFSYM_EXPORT(udp__receive_from),
+    ESP_ELFSYM_EXPORT(udp__close),
     ESP_ELFSYM_EXPORT(ssh__connect),
     ESP_ELFSYM_EXPORT(ssh__host_key_sha256),
     ESP_ELFSYM_EXPORT(ssh__verify_host_key_sha256),

@@ -18,6 +18,7 @@
 #include "core_sdk/ssh.h"
 #include "core_sdk/process.h"
 #include "core_sdk/tcp.h"
+#include "core_sdk/udp.h"
 #include "core_sdk/wifi.h"
 
 #include "wifi_test.h"
@@ -66,6 +67,15 @@ static int selftest__tcp_connect_entry(int argc, char **argv) {
     (void)argv;
     bruce_tcp_id_t socket = BRUCE_TCP_ID_INVALID;
     s_wifi_http_result.result = tcp__connect("127.0.0.1", 1, 1, &socket);
+    s_wifi_http_result.ran = true;
+    return 0;
+}
+
+static int selftest__udp_open_entry(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    bruce_udp_id_t socket = BRUCE_UDP_ID_INVALID;
+    s_wifi_http_result.result = udp__open(0, &socket);
     s_wifi_http_result.ran = true;
     return 0;
 }
@@ -158,6 +168,15 @@ bool selftest__run_tcp_permission_denied_case(void) {
     bruce_result_t result = selftest__run_as_external("tcp_denied.elf", selftest__tcp_connect_entry);
     bool ok = result == BRUCE_ERR_PERMISSION;
     printf("[selftest] tcp/permission-denied: %s (result=%d)\n", ok ? "OK" : "FAIL", result);
+    return ok;
+}
+
+bool selftest__run_udp_permission_denied_case(void) {
+    permission__test_reset();
+    permission__set("udp_denied.elf", BRUCE_PERMISSION_WIFI, false);
+    bruce_result_t result = selftest__run_as_external("udp_denied.elf", selftest__udp_open_entry);
+    bool ok = result == BRUCE_ERR_PERMISSION;
+    printf("[selftest] udp/permission-denied: %s (result=%d)\n", ok ? "OK" : "FAIL", result);
     return ok;
 }
 

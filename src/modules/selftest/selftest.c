@@ -48,6 +48,7 @@
 #include "shell_test.h"
 #include "ssh_sftp_test.h"
 #include "terminal_test.h"
+#include "udp_test.h"
 #include "wasm_bruce_sdk_test.h"
 #include "wifi_test.h"
 
@@ -226,6 +227,8 @@ int selftest_app_main(int argc, char **argv) {
     RUN_SELFTEST(selftest__run_http_permission_denied_case);
     RUN_SELFTEST(selftest__run_wifi_http_independent_permission_case);
     RUN_SELFTEST(selftest__run_tcp_permission_denied_case);
+    RUN_SELFTEST(selftest__run_udp_permission_denied_case);
+    RUN_SELFTEST(selftest__run_udp_loopback_case);
     RUN_SELFTEST(selftest__run_ssh_permission_denied_case);
     RUN_SELFTEST(selftest__run_ssh_keygen_case);
     RUN_SELFTEST(selftest__run_sftp_host_pattern_case);

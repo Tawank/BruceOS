@@ -39,6 +39,7 @@ set(BRUCE_SELFTEST_SOURCES
     "modules/selftest/shell_test.c"
     "modules/selftest/ssh_sftp_test.c"
     "modules/selftest/terminal_test.c"
+    "modules/selftest/udp_test.c"
     "modules/selftest/wasm_bruce_sdk_test.c"
     "modules/selftest/wifi_test.c")
 
@@ -131,6 +132,7 @@ idf_component_register(SRCS
                       "core/process/process_environment.c"
                       "core/process/runtime_timer.c"
                     "core/tcp/tcp.c"
+                    "core/udp/udp.c"
                     "core/wifi/wifi_common.c"
                      "core/http_server/http_server.c"
                      "modules/apps/apps_app.c"
