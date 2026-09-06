@@ -1949,3 +1949,58 @@ bool selftest__run_shell_eof_case(void) {
     printf("[selftest] shell/eof: %s\n", ok ? "OK" : "failed");
     return ok;
 }
+
+bool selftest__run_shell_jobs_case(void) {
+    if (!selftest__shell_register_probe()) return false;
+    shell_state_t state;
+    shell__state_init(&state);
+    s_probe_calls = 0;
+    memset(s_probe_arg, 0, sizeof(s_probe_arg));
+
+    /* "cmd &" returns immediately (status 0) and records exactly one
+     * running job, with $! (last_background_pid) pointing at it. */
+    bool ok = shell__execute_line(&state, "shell_test_probe backgrounded &") == 0 && state.job_count == 1 &&
+        state.jobs[0].number == 1 && state.jobs[0].pid != BRUCE_PROCESS_ID_INVALID &&
+        state.last_background_pid == state.jobs[0].pid;
+
+    /* Bare "wait" blocks for every tracked job and reaps it -- by the time
+     * it returns, the probe has actually run. */
+    ok = ok && shell__execute_line(&state, "wait") == 0 && state.job_count == 0 && s_probe_calls == 1 &&
+        strcmp(s_probe_arg, "backgrounded") == 0;
+
+    /* "wait %N" blocks for just that job and returns its real exit status
+     * (37, via the probe's "nonzero" path -- see the synchronous
+     * "shell_test_probe nonzero" case in selftest__run_shell_language_case()). */
+    ok = ok && shell__execute_line(&state, "shell_test_probe nonzero &") == 0 && state.job_count == 1;
+    char wait_line[24];
+    snprintf(wait_line, sizeof(wait_line), "wait %%%d", ok ? state.jobs[0].number : 0);
+    ok = ok && shell__execute_line(&state, wait_line) == 37 && state.job_count == 0;
+
+    /* Only external commands and functions can be backgrounded: a builtin,
+     * a redirected command, an arithmetic command, and a pipeline all reject
+     * "&" outright with status 2 rather than silently running synchronously
+     * or leaving an untracked job behind. */
+    ok = ok && shell__execute_line(&state, "cd &") == 2 && state.job_count == 0;
+    ok = ok &&
+        shell__execute_line(&state, "shell_test_probe redirected > /apps/shell_jobs_test_redirect.txt &") == 2 &&
+        state.job_count == 0;
+    ok = ok && shell__execute_line(&state, "((1 + 1)) &") == 2 && state.job_count == 0;
+    ok = ok && shell__execute_line(&state, "shell_test_probe a | shell_test_probe b &") == 2 &&
+        state.job_count == 0;
+
+    /* A backgrounded function runs as its own subshell process: it inherits
+     * the parent's exported variables (same mechanism as the $INHERITED_SHELL
+     * case in selftest__run_shell_language_case()) but its own state never
+     * leaks back into the parent. */
+    ok = ok && shell__execute_line(&state, "export VISIBLE=parent") == 0;
+    ok = ok && shell__execute_line(&state, "leaker() { shell_test_probe $VISIBLE parent; }") == 0;
+    ok = ok && shell__execute_line(&state, "leaker &") == 0 && state.job_count == 1;
+    snprintf(wait_line, sizeof(wait_line), "wait %%%d", ok ? state.jobs[0].number : 0);
+    ok = ok && shell__execute_line(&state, wait_line) == 0 && state.job_count == 0;
+    ok = ok && shell__execute_line(&state, "unset VISIBLE") == 0;
+
+    shell__state_free(&state);
+    (void)storage__remove("/apps/shell_jobs_test_redirect.txt");
+    printf("[selftest] shell/jobs: %s\n", ok ? "OK" : "failed");
+    return ok;
+}

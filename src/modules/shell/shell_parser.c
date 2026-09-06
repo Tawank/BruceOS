@@ -547,6 +547,12 @@ int shell_parser__plan(
         }
         shell_connector_t connector = SHELL_CONNECT_NONE;
         size_t operator_size = 0;
+        /* Set when this iteration's operator is a lone "&": the command
+         * about to be flushed below is backgrounded (see
+         * shell_command_t::background), and -- same as ";" -- whatever
+         * follows just runs next unconditionally, hence SHELL_CONNECT_SEQUENCE
+         * rather than a new connector kind of its own. */
+        bool background_op = false;
         if (c == ';' && i + 1 < length && line[i + 1] == ';') {
             connector = SHELL_CONNECT_CASE_END;
             operator_size = 2;
@@ -563,8 +569,9 @@ int shell_parser__plan(
             connector = SHELL_CONNECT_PIPE;
             operator_size = 1;
         } else if (c == '&') {
-            *error = "unsupported operator";
-            return -1;
+            connector = SHELL_CONNECT_SEQUENCE;
+            operator_size = 1;
+            background_op = true;
         }
 
         if (operator_size != 0 || c == '\0') {
@@ -588,6 +595,7 @@ int shell_parser__plan(
                     *error = "out of memory";
                     return -1;
                 }
+                if (background_op) plan->commands[plan->count - 1].background = true;
                 next_connector = SHELL_CONNECT_NONE;
             } else if (
                 operator_size != 0 && c != '\n' && (plan->count == 0 || next_connector != SHELL_CONNECT_NONE)

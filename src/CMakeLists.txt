@@ -210,6 +210,7 @@ idf_component_register(SRCS
                     "modules/shell/shell_parser.c"
                     "modules/shell/shell_executor.c"
                       "modules/shell/shell_builtins.c"
+                      "modules/shell/shell_jobs.c"
                      "modules/system_menu/system_menu_app.c"
                      ${BRUCE_SELFTEST_SOURCES}
                     "modules/ssh/ssh_app.c"
@@ -598,7 +599,8 @@ add_library(bruce_sdk_builtin_shell_check OBJECT
             "modules/shell/shell_line_editor.c"
             "modules/shell/shell_parser.c"
             "modules/shell/shell_executor.c"
-            "modules/shell/shell_builtins.c")
+            "modules/shell/shell_builtins.c"
+            "modules/shell/shell_jobs.c")
 target_include_directories(bruce_sdk_builtin_shell_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/shell")

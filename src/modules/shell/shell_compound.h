@@ -30,6 +30,14 @@ bool shell_compound__pending(const char *text);
 
 bool shell_compound__is_function(const shell_state_t *state, const char *name);
 
+/* Returns the stored body text (the interior of "name() { ... }", not
+ * including the braces themselves -- see shell_compound__define_function())
+ * of the function named `name`, or NULL if it isn't defined. Exported so
+ * shell_executor.c's "func &" background path can splice it into a
+ * standalone "name() { body }; name ARGS..." script run as its own subshell
+ * process -- see shell_executor__function_background(). */
+const char *shell_compound__function_body(const shell_state_t *state, const char *name);
+
 /* Calls the function named `name` (already confirmed defined via
  * shell_compound__is_function()) with argv[1..argc) bound to $1.. for the
  * duration of the call; argv[0] is the function name itself ($0). Returns

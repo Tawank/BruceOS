@@ -20,6 +20,7 @@
 #include "shell_executor.h"
 #include "shell_history.h"
 #include "shell_internal.h"
+#include "shell_jobs.h"
 #include "shell_parser.h"
 
 /* Keeps $COLUMNS/$LINES in sync with the routed session's terminal size
@@ -406,6 +407,10 @@ static int shell__interactive(shell_state_t *state, bool suppress_echo) {
     bool skip_lf = false;
     while (!state->exit_requested) {
         shell__sync_tty_size(state);
+        /* Report any "cmd &"/"func &" job that finished since the last
+         * prompt, right before showing the next one -- same timing bash
+         * itself uses for "[N]+ Done ...". No-op when nothing is tracked. */
+        shell_jobs__poll(state);
         int length;
         if (suppress_echo) {
             length = stdio__read_line(line, SHELL__LINE_MAX, true);

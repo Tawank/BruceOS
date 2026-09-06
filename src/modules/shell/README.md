@@ -14,7 +14,7 @@ definitions) by raw-text keyword matching in command position.
 
 **Commands and connectors**
 - `;` sequencing, `&&` / `||` short-circuiting, `|` pipes (any number of
-  chained hops, e.g. `a | b | c`).
+  chained hops, e.g. `a | b | c`), `&` backgrounding (see Job control below).
 - `>` / `>>` output redirection to a file, for an external command only (see
   below).
 - Multi-line input: a bare newline is treated as `;`, so a whole multi-line
@@ -30,8 +30,9 @@ definitions) by raw-text keyword matching in command position.
   character.
 - Variable expansion: `$NAME`, `${NAME}`, `$0`..`$9` (single digit only,
   bash-style — `$10` is `$1` followed by a literal `0`), `$#` (positional
-  argument count), `$?` (last exit status). An unset variable or unset
-  positional parameter expands to empty string.
+  argument count), `$?` (last exit status), `$!` (PID of the most recent
+  `cmd &`/`func &`, see Job control below; empty/0 until the first one).
+  An unset variable or unset positional parameter expands to empty string.
 - Command substitution: `$(...)` and `` `...` ``, recognized unquoted and
   inside double quotes (only single quotes suppress it, same as `$NAME`) and
   nestable. Its content runs as a nested `shell -c` child process (see
@@ -88,6 +89,24 @@ definitions) by raw-text keyword matching in command position.
 - **Not implemented:** tilde expansion (`~`), `$@`/`$*`, `$$`, and
   here-strings (`<<<`). Here-docs (`<<`) and input redirection (`<`) *are*
   implemented — see the Redirection section below.
+
+**Job control** -- `cmd &` (an external command) or `func &` (a shell
+function) launches without waiting: the shell prints `[N] PID` and moves
+straight on to the next command. A function backgrounds as a subshell (a
+fresh `shell -c '...'` process running just that call), the same isolation
+`$(...)`/`` `...` `` command substitution already uses -- variables it sets
+never leak back into the calling shell, and it only sees exported variables
+and the filesystem, not the caller's own unexported variables or sibling
+function definitions. `jobs` lists still-running background jobs; `wait`
+(bare) blocks for all of them, `wait %N`/`wait PID` for just one, returning
+its real exit status; `$!` expands to the most recently backgrounded PID. A
+finished job is reported (`[N]+ Done`/`Exit <code>`/`Killed`) right before the
+next prompt. **Not implemented:** backgrounding a pipeline (`a | b &`), a
+builtin (`cd &`), or a redirected command -- all rejected with an error
+rather than run silently in the foreground. A trailing `&` on a whole
+compound construct (`if ...; fi &`, `for ...; done &`) is not recognized at
+all yet (no error, no effect) -- only a single external command or function
+call can be backgrounded in this first pass.
 
 **Ctrl+C** -- `terminal_app.c` turns it into a real `SIGINT` (`process__signal`)
 on the shell rather than forwarding it as a byte, like a cooked tty's INTR
@@ -300,7 +319,7 @@ line it just deletes the character under the cursor, like Delete.
 ## What's left to implement
 
 Roughly in order of how often bash scripts actually use them:
-- `$@`, `$*`, `$$`, `$!`.
+- `$@`, `$*`, `$$`.
 - `until` loops.
 
 ## Example

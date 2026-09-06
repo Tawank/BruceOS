@@ -1306,6 +1306,11 @@ bool shell_compound__is_function(const shell_state_t *state, const char *name) {
     return shell_compound__find_function(state, name) != NULL;
 }
 
+const char *shell_compound__function_body(const shell_state_t *state, const char *name) {
+    shell_function_t *fn = shell_compound__find_function(state, name);
+    return fn != NULL ? fn->body : NULL;
+}
+
 static int shell_compound__define_function(shell_state_t *state, const char *name, const char *body_text, size_t body_len) {
     while (body_len > 0 && isspace((unsigned char)body_text[0])) {
         body_text++;

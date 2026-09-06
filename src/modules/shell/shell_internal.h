@@ -8,6 +8,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "core_sdk/process.h"
+
 /* Safety caps against runaway scripts, not preallocation sizes: variables and
  * words are heap-allocated to their actual length. */
 #define SHELL__MAX_VARIABLES 24
@@ -25,6 +27,11 @@
 /* $1..$9: bash only ever expands a single digit unbraced ($10 is $1 followed
  * by a literal "0"), so this is a hard grammar limit, not a tunable cap. */
 #define SHELL__MAX_POSITIONAL 9
+/* Concurrently-tracked "cmd &" background jobs -- see shell_jobs.c. A small
+ * fixed cap, same "bounded array, not a growth-worthy collection" role
+ * SHELL__MAX_FUNCTIONS plays above: a handful of background jobs from one
+ * interactive shell is the realistic ceiling. */
+#define SHELL__MAX_JOBS 8
 
 typedef struct {
     char *name;
@@ -60,6 +67,17 @@ typedef struct {
     size_t capacity;
 } shell_local_frame_t;
 
+/* One "cmd &" background job tracked by shell_jobs.c: `pid` is the process
+ * shell_executor__external_background()/shell_executor__function_background()
+ * launched and did not wait for; `command` is a truncated, display-only copy
+ * of the source text (for "jobs"/completion messages), not used for
+ * re-execution. */
+typedef struct {
+    int number; /* 1-based, bash-style ("[1]") */
+    bruce_process_id_t pid;
+    char command[64];
+} shell_job_t;
+
 typedef struct {
     shell_variable_t *variables;
     size_t variable_count;
@@ -81,6 +99,16 @@ typedef struct {
      * shell_executor__lookup() -- see shell_parser__expand()'s digit branch
      * in shell_parser.c, which is what actually asks for "#". */
     char positional_count_text[4];
+    /* "cmd &" background jobs -- see shell_jobs.c. `last_background_pid` is
+     * $!'s value (0/BRUCE_PROCESS_ID_INVALID before any "&" has run this
+     * session); `last_background_pid_text` is $!'s formatted expansion,
+     * scratch space for shell_executor__lookup() the same way
+     * positional_count_text is for $#. */
+    shell_job_t jobs[SHELL__MAX_JOBS];
+    size_t job_count;
+    int next_job_number;
+    bruce_process_id_t last_background_pid;
+    char last_background_pid_text[12];
     int last_status;
     bool exit_requested;
     int exit_status;

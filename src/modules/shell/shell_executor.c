@@ -16,6 +16,7 @@
 #include "shell_arith.h"
 #include "shell_builtins.h"
 #include "shell_compound.h"
+#include "shell_jobs.h"
 
 /* Initial size, and doubling step, for the external-memory buffer pipes
  * capture a producer's output into (see shell_executor__buffer_append()). */
@@ -36,6 +37,16 @@ const char *shell_executor__lookup(void *context, const char *name) {
         if (name[0] == '#') {
             snprintf(state->positional_count_text, sizeof(state->positional_count_text), "%d", state->positional_count);
             return state->positional_count_text;
+        }
+        if (name[0] == '!') {
+            /* PID of the most recent "cmd &"/"func &" this session started --
+             * 0 (BRUCE_PROCESS_ID_INVALID) before any, matching bash's own
+             * "unset until the first background job" behavior. */
+            snprintf(
+                state->last_background_pid_text, sizeof(state->last_background_pid_text), "%u",
+                (unsigned)state->last_background_pid
+            );
+            return state->last_background_pid_text;
         }
     }
     return shell_builtins__get(state, name);
@@ -88,6 +99,14 @@ static bool shell_executor__append_arg(char *out, size_t capacity, size_t *used,
     return true;
 }
 
+int shell_executor__status_to_exit_code(const bruce_process_status_t *status) {
+    if (status->reason == BRUCE_PROCESS_TERMINATED || status->reason == BRUCE_PROCESS_KILLED) {
+        return 128 + (int)status->signal;
+    }
+    if (status->exit_code < 0) return 1;
+    return status->exit_code & 0xff;
+}
+
 static int shell_executor__wait(bruce_process_id_t child) {
     bruce_process_status_t status;
     for (;;) {
@@ -108,11 +127,7 @@ static int shell_executor__wait(bruce_process_id_t child) {
         }
         return 1;
     }
-    if (status.reason == BRUCE_PROCESS_TERMINATED || status.reason == BRUCE_PROCESS_KILLED) {
-        return 128 + (int)status.signal;
-    }
-    if (status.exit_code < 0) return 1;
-    return status.exit_code & 0xff;
+    return shell_executor__status_to_exit_code(&status);
 }
 
 static int shell_executor__launch_external(
@@ -184,6 +199,117 @@ static int shell_executor__external(
         return 1;
     }
     return shell_executor__wait((bruce_process_id_t)launched);
+}
+
+/* "cmd &": same launch as shell_executor__external() above, but never waits
+ * -- the job is handed to shell_jobs__add() and the shell moves straight on
+ * to whatever comes next. `display_text`/`display_length` (the command's
+ * own source text, not argv) become the job's "jobs"/completion-message
+ * label. Always backgrounded: a job by definition doesn't own the screen, so
+ * `mode` isn't a parameter here -- shell_executor__dispatch() rejects
+ * "GUI=1 cmd &"/"BG=0 cmd &" outright instead of picking one. */
+static int shell_executor__external_background(
+    shell_state_t *state, int argc, char **argv, const bruce_environment_variable_t *environment,
+    size_t environment_count, const char *display_text, size_t display_length
+) {
+    int launched = shell_executor__launch_external(argc, argv, NULL, environment, environment_count, BRUCE_LAUNCH_BACKGROUND);
+    if (launched == BRUCE_ERR_NOT_FOUND || launched == BRUCE_ERR_INVALID_PATH) {
+        stdio__printf("shell: %s: not found\n", argv[0]);
+        return 127;
+    }
+    if (launched <= 0) {
+        stdio__printf("shell: %s: launch failed (%d)\n", argv[0], launched);
+        return 1;
+    }
+    bruce_process_id_t pid = (bruce_process_id_t)launched;
+    int job_number = shell_jobs__add(state, pid, display_text, display_length);
+    if (job_number == 0) {
+        stdio__printf("shell: too many background jobs (max %d); waiting for it instead\n", SHELL__MAX_JOBS);
+        return shell_executor__wait(pid);
+    }
+    stdio__printf("[%d] %u\n", job_number, (unsigned)pid);
+    return 0;
+}
+
+/* "func &" where `argv[0]` names a shell function: functions run in-process
+ * today (shell_compound__call_function() recurses directly on the caller's
+ * own shell_state_t), so there's no existing process to detach and no safe
+ * way to run one concurrently with whatever the interactive shell does next
+ * -- state->local_frame/positional/last_status are single-call, call-stack
+ * state, not built for concurrent reentry. Instead this runs the call the
+ * way bash effectively does: as a subshell. It splices the function's stored
+ * body (shell_compound__function_body()) into a standalone
+ * "name() { body }; name ARGS..." script and background-launches it as a
+ * brand-new "shell -c ..." process through the same
+ * shell_executor__launch_external()/shell_jobs__add() path as
+ * shell_executor__external_background() above -- exactly the same shape
+ * shell_executor__run_substitution() already uses for "$(...)"/"`...`", down
+ * to the same environment story: `environment` (this command's own
+ * "NAME=value" prefixes) is passed through, but the parent's exported
+ * variables need no separate re-gathering here -- shell_builtins__export()
+ * already writes them through to the process-wide environment__ store
+ * (core_sdk/environment.h), which every freshly-launched process, this one
+ * included, inherits automatically. A useful side effect of running as a
+ * real separate process: since the child gets its own fresh shell_state_t,
+ * any variables it sets never leak back into the parent shell, matching
+ * bash's own subshell semantics for a backgrounded function call -- and, the
+ * same limitation shell_executor__run_substitution() already documents, a
+ * function calling *another* function defined only in the parent's own
+ * session (never exported) won't be visible to it either. */
+static int shell_executor__function_background(
+    shell_state_t *state, int argc, char **argv, const bruce_environment_variable_t *environment,
+    size_t environment_count, const char *display_text, size_t display_length
+) {
+    const char *body = shell_compound__function_body(state, argv[0]);
+    if (body == NULL) {
+        stdio__printf("shell: %s: not found\n", argv[0]);
+        return 127;
+    }
+
+    /* Sized generously (function bodies are capped at SHELL__FUNCTION_BODY_MAX
+     * already); shell_executor__launch_external()'s own fixed-size argument
+     * buffer is the real, tighter bound -- if the quoted-and-escaped result
+     * doesn't fit there, this fails below with the same "arguments too
+     * long" shell_executor__append_arg() already reports for an ordinary
+     * command's oversized arguments. */
+    size_t capacity = strlen(argv[0]) * 2u + strlen(body) + SHELL__LINE_MAX + 16u;
+    char *script = memory__malloc(capacity);
+    if (script == NULL) {
+        stdio__printf("shell: out of memory\n");
+        return 1;
+    }
+    int written = snprintf(script, capacity, "%s() { %s\n}; %s", argv[0], body, argv[0]);
+    if (written < 0 || (size_t)written >= capacity) {
+        memory__free(script);
+        stdio__printf("shell: background function call too long\n");
+        return 2;
+    }
+    size_t used = (size_t)written;
+    for (int i = 1; i < argc; ++i) {
+        if (!shell_executor__append_arg(script, capacity, &used, argv[i])) {
+            memory__free(script);
+            stdio__printf("shell: arguments too long\n");
+            return 2;
+        }
+    }
+
+    char shell_name[] = "shell";
+    char *shell_argv[2] = {shell_name, script};
+    int launched =
+        shell_executor__launch_external(2, shell_argv, "-c", environment, environment_count, BRUCE_LAUNCH_BACKGROUND);
+    memory__free(script);
+    if (launched <= 0) {
+        stdio__printf("shell: %s: launch failed (%d)\n", argv[0], launched);
+        return 1;
+    }
+    bruce_process_id_t pid = (bruce_process_id_t)launched;
+    int job_number = shell_jobs__add(state, pid, display_text, display_length);
+    if (job_number == 0) {
+        stdio__printf("shell: too many background jobs (max %d); waiting for it instead\n", SHELL__MAX_JOBS);
+        return shell_executor__wait(pid);
+    }
+    stdio__printf("[%d] %u\n", job_number, (unsigned)pid);
+    return 0;
 }
 
 typedef struct {
@@ -1299,6 +1425,7 @@ int shell_executor__page_help(void) {
                                        "\n"
                                        "Operators:\n"
                                        "  ;    run commands in sequence\n"
+                                       "  &    run an external command or function in the background (see jobs, wait, $!)\n"
                                        "  &&   run the next command after success\n"
                                        "  ||   run the next command after failure\n"
                                        "  |    pipe external commands together, any number of hops\n"
@@ -1460,7 +1587,30 @@ static int shell_executor__dispatch(shell_state_t *state, const shell_command_t 
                        command->heredoc_body != NULL;
     bool output_only_redirect =
         command->redirect != SHELL_REDIRECT_NONE && !command->input_redirect && command->heredoc_body == NULL;
-    if (redirected) {
+    if (command->background) {
+        /* v1 scope: only a plain external command or a shell function can be
+         * backgrounded -- see shell_executor__external_background()/
+         * shell_executor__function_background() below. A builtin runs
+         * in-process with no process of its own to detach, and redirection/
+         * piping stay synchronous for now (shell_executor__plan() only ever
+         * hands dispatch() a single, non-piped command, so a background
+         * pipeline is already excluded by construction). */
+        if (mode == BRUCE_LAUNCH_FOREGROUND) {
+            stdio__printf("shell: can't background a foreground/GUI command\n");
+            result = 2;
+        } else if (redirected || (is_builtin && !is_function)) {
+            stdio__printf("shell: background jobs only support external commands and shell functions\n");
+            result = 2;
+        } else if (is_function) {
+            result = shell_executor__function_background(
+                state, remaining, argv, environment.items, environment.count, command->text, command->length
+            );
+        } else {
+            result = shell_executor__external_background(
+                state, remaining, argv, environment.items, environment.count, command->text, command->length
+            );
+        }
+    } else if (redirected) {
         if ((is_function || is_builtin) && output_only_redirect) {
             result = shell_executor__builtin_redirected(state, remaining, argv, command, is_function);
         } else if ((is_function || is_builtin) && command->input_redirect) {
@@ -1536,6 +1686,15 @@ static bool shell_executor__starts_with_arith(const shell_command_t *command) {
 
 static int shell_executor__command(shell_state_t *state, const shell_command_t *command) {
     size_t inner_start, inner_len;
+    if (command->background && shell_executor__is_arith_command(command, &inner_start, &inner_len)) {
+        /* "((...))" evaluates in place against this shell's own state (see
+         * below) rather than launching any process -- v1 scope excludes it
+         * from "&" the same way it excludes builtins/redirection/pipes; see
+         * shell_executor__dispatch()'s own background handling for the
+         * external-command/function cases this *does* support. */
+        stdio__printf("shell: background jobs only support external commands and shell functions\n");
+        return 2;
+    }
     if (shell_executor__is_arith_command(command, &inner_start, &inner_len)) {
         /* "((...))" reads no stdin and writes no stdout of its own -- it's
          * pure evaluation plus an exit status -- so a "<"/heredoc target on
@@ -1610,7 +1769,20 @@ int shell_executor__plan(shell_state_t *state, const shell_plan_t *plan) {
             while (i + pipeline_count < plan->count && plan->commands[i + pipeline_count].connector == SHELL_CONNECT_PIPE) {
                 pipeline_count++;
             }
-            status = shell_executor__pipeline(state, &plan->commands[i], pipeline_count);
+            /* "a | b &": only the pipeline's last stage can ever carry
+             * background==true (a lone "&" always flushes into
+             * SHELL_CONNECT_SEQUENCE, never SHELL_CONNECT_PIPE, so no earlier
+             * stage can be background-flushed into this same run -- see
+             * shell_parser.c's tokenizer). shell_executor__pipeline() has no
+             * "don't wait" mode (v1 scope, see shell_executor__dispatch()'s
+             * own background handling), so this is rejected here with the
+             * same message rather than silently running synchronously. */
+            if (plan->commands[i + pipeline_count - 1u].background) {
+                stdio__printf("shell: background jobs only support external commands and shell functions\n");
+                status = 2;
+            } else {
+                status = shell_executor__pipeline(state, &plan->commands[i], pipeline_count);
+            }
             i += pipeline_count - 1u;
         } else if (connector == SHELL_CONNECT_PIPE) {
             status = 2;

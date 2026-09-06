@@ -72,6 +72,11 @@ typedef struct {
      * the only place that currently supplies any). This command borrows the
      * pointer; it does not own or free it. */
     const char *heredoc_body;
+    /* Set when this command was terminated by a bare "&" rather than
+     * ";"/"&&"/"||"/end-of-line: shell_executor__dispatch() launches it and
+     * returns immediately instead of waiting for it to finish -- see
+     * shell_jobs.c, which owns the resulting background-job bookkeeping. */
+    bool background;
 } shell_command_t;
 
 typedef struct {
