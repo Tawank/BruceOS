@@ -44,6 +44,7 @@ dialog__gui_message_frame(bruce_dialog_kind_t kind, const char *title, const cha
     uint16_t pri, sec, bg, surface, text, text_muted, border, success, warning, error;
     dialog__get_colors(&pri, &sec, &bg, &surface, &text, &text_muted, &border, &success, &warning, &error);
     (void)sec;
+    (void)bg;
     (void)text_muted;
     uint16_t accent = kind == BRUCE_DIALOG_SUCCESS   ? success
                       : kind == BRUCE_DIALOG_WARNING ? warning
@@ -53,8 +54,6 @@ dialog__gui_message_frame(bruce_dialog_kind_t kind, const char *title, const cha
     bruce_result_t frame_result = display__begin_frame();
     if (frame_result == BRUCE_ERR_NOT_FOREGROUND) { return BRUCE_ERR_CANCELLED; }
     if (frame_result != BRUCE_OK) { return frame_result; }
-    (void)display__fill_screen(bg);
-
     /* Same screen-edge padding dialog__choice() gives its own windowed
      * popup, so a message dialog reads as the same widget at the same size. */
     int left = 12;
@@ -87,14 +86,16 @@ dialog__gui_message_frame(bruce_dialog_kind_t kind, const char *title, const cha
     display__set_text_color(text);
     display__set_text_size(DIALOG__MESSAGE_TEXT_SIZE);
     display__set_text_bg_color(surface);
-    display__set_cursor(content_left, content_top + title_h + 4);
+    int message_y = content_top + title_h + 4;
+    display__set_cursor(content_left, message_y);
 
     if (message != NULL) {
         const char *p = message;
         int line_len = 0;
         while (*p != '\0') {
             if (*p == '\n' || line_len >= max_chars) {
-                display__println("");
+                message_y += DIALOG__CHAR_H * DIALOG__MESSAGE_TEXT_SIZE;
+                display__set_cursor(content_left, message_y);
                 line_len = 0;
                 if (*p == '\n') {
                     p++;
