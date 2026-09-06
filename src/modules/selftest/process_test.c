@@ -358,23 +358,64 @@ bool selftest__run_process_clear_signal_case(void) {
         printf("[selftest] process/clear-signal: create failed\n");
         return false;
     }
-    for (int i = 0; i < 40 && !s_clear_signal_worker_started; ++i) vTaskDelay(pdMS_TO_TICKS(5));
+    /* 400 * 5ms = 2s, matching the process__wait_status() budget below for
+     * the same kind of wait (another task reaching some state) -- the
+     * previous 40 * 5ms = 200ms was the tightest margin of any wait in this
+     * file for that category, and was tight enough that ordinary QEMU/host
+     * scheduling jitter could occasionally miss it with no functional bug
+     * behind it. */
+    for (int i = 0; i < 400 && !s_clear_signal_worker_started; ++i) vTaskDelay(pdMS_TO_TICKS(5));
+    if (!s_clear_signal_worker_started) {
+        (void)process__kill(id);
+        printf("[selftest] process/clear-signal: worker did not start\n");
+        return false;
+    }
 
-    bool ok = s_clear_signal_worker_started && process__signal(id, BRUCE_PROCESS_SIGNAL_INT) == BRUCE_OK;
-    for (int i = 0; ok && i < 40 && !s_clear_signal_worker_saw_int; ++i) vTaskDelay(pdMS_TO_TICKS(5));
-    ok = ok && s_clear_signal_worker_saw_int;
+    if (process__signal(id, BRUCE_PROCESS_SIGNAL_INT) != BRUCE_OK) {
+        (void)process__kill(id);
+        printf("[selftest] process/clear-signal: signal(INT) failed\n");
+        return false;
+    }
+    for (int i = 0; i < 400 && !s_clear_signal_worker_saw_int; ++i) vTaskDelay(pdMS_TO_TICKS(5));
+    if (!s_clear_signal_worker_saw_int) {
+        bruce_process_snapshot_t debug_snapshot;
+        bruce_result_t debug_result = process__snapshot(id, &debug_snapshot);
+        (void)process__kill(id);
+        printf(
+            "[selftest] process/clear-signal: worker did not see INT (snapshot result=%d state=%d)\n",
+            (int)debug_result, debug_result == BRUCE_OK ? (int)debug_snapshot.state : -1
+        );
+        return false;
+    }
 
     /* Cleared, not dead: still a live, snapshottable process. */
     bruce_process_snapshot_t snapshot;
-    ok = ok && process__snapshot(id, &snapshot) == BRUCE_OK;
+    bruce_result_t snapshot_result = process__snapshot(id, &snapshot);
+    if (snapshot_result != BRUCE_OK) {
+        (void)process__kill(id);
+        printf("[selftest] process/clear-signal: snapshot failed (result=%d)\n", (int)snapshot_result);
+        return false;
+    }
 
     bruce_process_status_t status;
-    ok = ok && process__terminate(id) == BRUCE_OK && process__wait_status(id, 2000, &status) == BRUCE_OK &&
-         status.reason == BRUCE_PROCESS_TERMINATED && status.signal == BRUCE_PROCESS_SIGNAL_TERM &&
-         s_clear_signal_worker_resumed;
-    if (!ok) (void)process__kill(id);
-    printf("[selftest] process/clear-signal: %s\n", ok ? "OK" : "failed");
-    return ok;
+    bruce_result_t terminate_result = process__terminate(id);
+    bruce_result_t wait_result = terminate_result == BRUCE_OK ? process__wait_status(id, 2000, &status)
+                                                                : BRUCE_ERR_INVALID_STATE;
+    bool ok = terminate_result == BRUCE_OK && wait_result == BRUCE_OK &&
+              status.reason == BRUCE_PROCESS_TERMINATED && status.signal == BRUCE_PROCESS_SIGNAL_TERM &&
+              s_clear_signal_worker_resumed;
+    if (!ok) {
+        (void)process__kill(id);
+        printf(
+            "[selftest] process/clear-signal: failed after resume (terminate=%d wait=%d reason=%d "
+            "signal=%d resumed=%d)\n",
+            (int)terminate_result, (int)wait_result, wait_result == BRUCE_OK ? (int)status.reason : -1,
+            wait_result == BRUCE_OK ? (int)status.signal : -1, (int)s_clear_signal_worker_resumed
+        );
+        return false;
+    }
+    printf("[selftest] process/clear-signal: OK\n");
+    return true;
 }
 
 bool selftest__run_process_killed_case(void) {
