@@ -9,12 +9,18 @@
  * if ELF apps are expected to call them directly.
  */
 
+#include <assert.h>
+#include <ctype.h>
+#include <errno.h>
 #include <math.h>
 #include <pthread.h>
+#include <setjmp.h>
+#include <stdarg.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #include "esp_elf.h" // IWYU pragma: export
 
@@ -107,6 +113,352 @@ static int bruce_elf__puts(const char *text) {
 static int bruce_elf__putchar(int character) {
     unsigned char byte = (unsigned char)character;
     return stdio__write(&byte, 1) == BRUCE_OK ? byte : EOF;
+}
+
+/* ---------------------------------------------------------------------------
+ * FILE*-based stdio, backed by storage__open/read/write/seek/close (see
+ * core_sdk/storage.h). `bruce_file_id_t` is deliberately opaque (an index
+ * into storage.c's own slot table, behind which live permission checks,
+ * per-process auto-close-on-kill, and SD/mount bookkeeping -- see that
+ * header's own doc comment) so this doesn't try to "become" a `FILE*` or
+ * vice versa; instead every `FILE*` handed back here is a small heap box
+ * the loaded ELF app only ever passes back into these same adapters, never
+ * dereferences itself -- the exact opacity contract real <stdio.h> already
+ * gives any conforming caller.
+ *
+ * Not declared `static` (unlike every adapter above/below) so
+ * modules/selftest -- which already gets a core-header exemption under this
+ * project's module-boundary rule -- can call them directly to exercise the
+ * mode-string parsing, flag mapping, and eof/error tracking below without
+ * needing a full cross-compiled ELF fixture; see
+ * elf_loader_sdk_symbols_test.h.
+ *
+ * getc/putc alias fgetc/fputc directly (no separate adapter -- same
+ * int(FILE*)/int(int,FILE*) signature). This project's actual toolchain
+ * library -- checked via `xtensa-esp32s3-elf-gcc -H`, which is picolibc
+ * here, not newlib (worth confirming directly rather than assuming from
+ * the toolchain's directory name) -- declares getc() as a plain function
+ * and defines putc() as `#define putc(c, stream) fputc(c, stream)`: a
+ * straight call-through, not a macro that pokes a real FILE struct's
+ * internal fields the way some other libc's getc/putc do. Either spelling
+ * is equally safe against this opaque box on this toolchain.
+ *
+ * Deliberately NOT provided: tmpfile/tmpnam (no sane directory/cleanup
+ * story on this filesystem), freopen, and ungetc (needs a pushback buffer
+ * per FILE).
+ * ------------------------------------------------------------------------- */
+typedef struct {
+    bruce_file_id_t file;
+    bool eof;
+    bool error;
+} bruce_elf_file_t;
+
+static void bruce_elf__set_errno_from_result(bruce_result_t result) {
+    switch (result) {
+        case BRUCE_ERR_NOT_FOUND: *__errno() = ENOENT; break;
+        case BRUCE_ERR_PERMISSION: *__errno() = EACCES; break;
+        case BRUCE_ERR_INVALID_PATH:
+        case BRUCE_ERR_INVALID_ARGUMENT: *__errno() = EINVAL; break;
+        case BRUCE_ERR_ALREADY_EXISTS: *__errno() = EEXIST; break;
+        case BRUCE_ERR_RESOURCE_LIMIT: *__errno() = EMFILE; break;
+        default: *__errno() = EIO; break;
+    }
+}
+
+/* Parses a "r"/"w"/"a" plus optional "+" fopen() mode (a trailing "b"/"t" is
+ * accepted and ignored -- this filesystem makes no such distinction) into
+ * storage__open()'s flags. Returns false (leaving *out_flags untouched) for
+ * anything else, matching fopen()'s own "invalid mode" contract. */
+static bool bruce_elf__parse_fopen_mode(const char *mode, uint32_t *out_flags) {
+    if (mode == NULL || mode[0] == '\0') return false;
+    bool plus = false;
+    for (const char *c = mode + 1; *c != '\0'; ++c) {
+        if (*c == '+') plus = true;
+        else if (*c != 'b' && *c != 't') return false;
+    }
+    switch (mode[0]) {
+        case 'r': *out_flags = BRUCE_STORAGE_OPEN_READ | (plus ? BRUCE_STORAGE_OPEN_WRITE : 0u); return true;
+        case 'w':
+            *out_flags = BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE | BRUCE_STORAGE_OPEN_TRUNCATE |
+                         (plus ? BRUCE_STORAGE_OPEN_READ : 0u);
+            return true;
+        case 'a':
+            *out_flags = BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_APPEND | BRUCE_STORAGE_OPEN_CREATE |
+                         (plus ? BRUCE_STORAGE_OPEN_READ : 0u);
+            return true;
+        default: return false;
+    }
+}
+
+FILE *bruce_elf__fopen(const char *path, const char *mode) {
+    uint32_t flags;
+    if (path == NULL || !bruce_elf__parse_fopen_mode(mode, &flags)) {
+        *__errno() = EINVAL;
+        return NULL;
+    }
+    bruce_elf_file_t *box = memory__malloc(sizeof(*box));
+    if (box == NULL) {
+        *__errno() = ENOMEM;
+        return NULL;
+    }
+    bruce_result_t result = storage__open(path, flags, &box->file);
+    if (result != BRUCE_OK) {
+        bruce_elf__set_errno_from_result(result);
+        memory__free(box);
+        return NULL;
+    }
+    box->eof = false;
+    box->error = false;
+    return (FILE *)box;
+}
+
+int bruce_elf__fclose(FILE *stream) {
+    if (stream == NULL) return EOF;
+    bruce_elf_file_t *box = (bruce_elf_file_t *)stream;
+    bruce_result_t result = storage__close(box->file);
+    memory__free(box);
+    return result == BRUCE_OK ? 0 : EOF;
+}
+
+size_t bruce_elf__fread(void *ptr, size_t size, size_t count, FILE *stream) {
+    bruce_elf_file_t *box = (bruce_elf_file_t *)stream;
+    if (ptr == NULL || box == NULL || size == 0 || count == 0) return 0;
+    size_t received = 0;
+    if (storage__read(box->file, ptr, size * count, &received) != BRUCE_OK) {
+        box->error = true;
+        return 0;
+    }
+    if (received < size * count) box->eof = true;
+    return received / size;
+}
+
+size_t bruce_elf__fwrite(const void *ptr, size_t size, size_t count, FILE *stream) {
+    bruce_elf_file_t *box = (bruce_elf_file_t *)stream;
+    if (ptr == NULL || box == NULL || size == 0 || count == 0) return 0;
+    size_t written = 0;
+    if (storage__write(box->file, ptr, size * count, &written) != BRUCE_OK) {
+        box->error = true;
+        return 0;
+    }
+    return written / size;
+}
+
+int bruce_elf__fseek(FILE *stream, long offset, int whence) {
+    bruce_elf_file_t *box = (bruce_elf_file_t *)stream;
+    if (box == NULL) return -1;
+    if (storage__seek(box->file, offset, whence, NULL) != BRUCE_OK) return -1;
+    box->eof = false;
+    return 0;
+}
+
+long bruce_elf__ftell(FILE *stream) {
+    bruce_elf_file_t *box = (bruce_elf_file_t *)stream;
+    uint64_t position = 0;
+    if (box == NULL || storage__seek(box->file, 0, SEEK_CUR, &position) != BRUCE_OK) return -1;
+    return (long)position;
+}
+
+void bruce_elf__rewind(FILE *stream) {
+    bruce_elf_file_t *box = (bruce_elf_file_t *)stream;
+    if (box == NULL) return;
+    if (storage__seek(box->file, 0, SEEK_SET, NULL) == BRUCE_OK) {
+        box->eof = false;
+        box->error = false;
+    }
+}
+
+/* storage__write() is already unbuffered at this layer (a thin wrapper over
+ * a real fd -- see storage.c), so there is nothing to flush; this satisfies
+ * the contract rather than faking one. */
+int bruce_elf__fflush(FILE *stream) {
+    (void)stream;
+    return 0;
+}
+
+/* Provided only so a defensive caller that always calls setvbuf() doesn't
+ * get an unresolved-symbol relocation failure -- same unbuffered rationale
+ * as fflush() above, so any requested mode/buffer is silently accepted and
+ * ignored. */
+int bruce_elf__setvbuf(FILE *stream, char *buffer, int mode, size_t size) {
+    (void)stream;
+    (void)buffer;
+    (void)mode;
+    (void)size;
+    return 0;
+}
+
+int bruce_elf__fgetc(FILE *stream) {
+    unsigned char byte;
+    return bruce_elf__fread(&byte, 1, 1, stream) == 1 ? byte : EOF;
+}
+
+int bruce_elf__fputc(int character, FILE *stream) {
+    unsigned char byte = (unsigned char)character;
+    return bruce_elf__fwrite(&byte, 1, 1, stream) == 1 ? byte : EOF;
+}
+
+char *bruce_elf__fgets(char *buffer, int size, FILE *stream) {
+    if (buffer == NULL || size <= 0) return NULL;
+    int written = 0;
+    while (written < size - 1) {
+        int character = bruce_elf__fgetc(stream);
+        if (character == EOF) break;
+        buffer[written++] = (char)character;
+        if (character == '\n') break;
+    }
+    if (written == 0) return NULL; /* EOF/error before any byte was read */
+    buffer[written] = '\0';
+    return buffer;
+}
+
+int bruce_elf__fputs(const char *text, FILE *stream) {
+    if (text == NULL) return EOF;
+    size_t length = strlen(text);
+    return length == 0 || bruce_elf__fwrite(text, 1, length, stream) == length ? 0 : EOF;
+}
+
+int bruce_elf__feof(FILE *stream) {
+    bruce_elf_file_t *box = (bruce_elf_file_t *)stream;
+    return box != NULL && box->eof ? 1 : 0;
+}
+
+int bruce_elf__ferror(FILE *stream) {
+    bruce_elf_file_t *box = (bruce_elf_file_t *)stream;
+    return box != NULL && box->error ? 1 : 0;
+}
+
+void bruce_elf__clearerr(FILE *stream) {
+    bruce_elf_file_t *box = (bruce_elf_file_t *)stream;
+    if (box == NULL) return;
+    box->eof = false;
+    box->error = false;
+}
+
+int bruce_elf__remove(const char *path) {
+    bruce_result_t result = storage__remove(path);
+    if (result != BRUCE_OK) {
+        bruce_elf__set_errno_from_result(result);
+        return -1;
+    }
+    return 0;
+}
+
+int bruce_elf__rename(const char *from, const char *to) {
+    bruce_result_t result = storage__rename(from, to);
+    if (result != BRUCE_OK) {
+        bruce_elf__set_errno_from_result(result);
+        return -1;
+    }
+    return 0;
+}
+
+/* Sizes the formatted output exactly via a NULL/0 vsnprintf() dry run, then
+ * formats into a heap buffer of that exact size and writes it out whole --
+ * no truncation, unlike a fixed-size stack buffer. */
+int bruce_elf__vfprintf(FILE *stream, const char *format, va_list args) {
+    va_list length_args;
+    va_copy(length_args, args);
+    int needed = vsnprintf(NULL, 0, format, length_args);
+    va_end(length_args);
+    if (needed < 0) return -1;
+    char *buffer = memory__malloc((size_t)needed + 1u);
+    if (buffer == NULL) {
+        *__errno() = ENOMEM;
+        return -1;
+    }
+    int written = vsnprintf(buffer, (size_t)needed + 1u, format, args);
+    bool ok = written == needed && bruce_elf__fwrite(buffer, 1, (size_t)needed, stream) == (size_t)needed;
+    memory__free(buffer);
+    return ok ? written : -1;
+}
+
+int bruce_elf__fprintf(FILE *stream, const char *format, ...) {
+    va_list args;
+    va_start(args, format);
+    int result = bruce_elf__vfprintf(stream, format, args);
+    va_end(args);
+    return result;
+}
+
+/* getenv/setenv/unsetenv, backed by the calling process's own environment__
+ * (core_sdk/environment.h) -- runtime-only, inherited as a deep copy by
+ * child processes, exactly matching POSIX getenv/setenv/unsetenv scope.
+ * Like the FILE* family above, not declared `static` so modules/selftest
+ * can call these (and strdup/strndup below) directly; see
+ * elf_loader_sdk_symbols_test.h. */
+char *bruce_elf__getenv(const char *name) {
+    return (char *)environment__get(name);
+}
+
+int bruce_elf__setenv(const char *name, const char *value, int overwrite) {
+    if (name == NULL || value == NULL) {
+        *__errno() = EINVAL;
+        return -1;
+    }
+    if (!overwrite && environment__get(name) != NULL) return 0;
+    bruce_result_t result = environment__set(name, value);
+    if (result != BRUCE_OK) {
+        bruce_elf__set_errno_from_result(result);
+        return -1;
+    }
+    return 0;
+}
+
+int bruce_elf__unsetenv(const char *name) {
+    bruce_result_t result = environment__unset(name);
+    if (result != BRUCE_OK) {
+        bruce_elf__set_errno_from_result(result);
+        return -1;
+    }
+    return 0;
+}
+
+/* strdup/strndup, heap-allocated through memory__malloc rather than the
+ * firmware's own real strdup (which would call real malloc internally) --
+ * same per-process accounting rationale as malloc/free/calloc/realloc
+ * above; a caller frees the result with the aliased free() like any other
+ * memory__malloc() allocation. */
+char *bruce_elf__strdup(const char *text) {
+    if (text == NULL) return NULL;
+    size_t length = strlen(text) + 1;
+    char *copy = memory__malloc(length);
+    if (copy == NULL) {
+        *__errno() = ENOMEM;
+        return NULL;
+    }
+    memcpy(copy, text, length);
+    return copy;
+}
+
+char *bruce_elf__strndup(const char *text, size_t size) {
+    if (text == NULL) return NULL;
+    size_t length = strnlen(text, size);
+    char *copy = memory__malloc(length + 1);
+    if (copy == NULL) {
+        *__errno() = ENOMEM;
+        return NULL;
+    }
+    memcpy(copy, text, length);
+    copy[length] = '\0';
+    return copy;
+}
+
+/* assert(): its __assert_func(file, line, func, expr) call on failure (and
+ * the older three-argument __assert(file, line, msg) some code still calls
+ * directly) has nowhere sane to return to -- there is no exception/unwind
+ * support here (see the C++ ABI comment block below) -- so, like
+ * __cxa_pure_virtual, print and park rather than returning into whatever a
+ * real abort() would have done. */
+static void bruce_elf__assert_func(const char *file, int line, const char *func, const char *expr) {
+    stdio__printf(
+        "bruce: assertion \"%s\" failed: file \"%s\", line %d%s%s\n", expr ? expr : "?", file ? file : "?", line,
+        func ? ", function: " : "", func ? func : ""
+    );
+    for (;;) { runtime__delay(1000); }
+}
+
+static void bruce_elf__assert(const char *file, int line, const char *msg) {
+    bruce_elf__assert_func(file, line, NULL, msg);
 }
 
 /* ---------------------------------------------------------------------------
@@ -634,6 +986,38 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     {"vprintf", (const void *)&stdio__vprintf    },
     {"puts",    (const void *)&bruce_elf__puts   },
     {"putchar", (const void *)&bruce_elf__putchar},
+
+    /* FILE*-based stdio, backed by storage__open/read/write/seek/close --
+     * see the bruce_elf_file_t doc comment above bruce_elf__fopen(). */
+    {"fopen",    (const void *)&bruce_elf__fopen    },
+    {"fclose",   (const void *)&bruce_elf__fclose   },
+    {"fread",    (const void *)&bruce_elf__fread    },
+    {"fwrite",   (const void *)&bruce_elf__fwrite   },
+    {"fseek",    (const void *)&bruce_elf__fseek    },
+    {"ftell",    (const void *)&bruce_elf__ftell    },
+    {"rewind",   (const void *)&bruce_elf__rewind   },
+    {"fflush",   (const void *)&bruce_elf__fflush   },
+    {"fgetc",    (const void *)&bruce_elf__fgetc    },
+    {"fputc",    (const void *)&bruce_elf__fputc    },
+    {"getc",     (const void *)&bruce_elf__fgetc    },
+    {"putc",     (const void *)&bruce_elf__fputc    },
+    {"fgets",    (const void *)&bruce_elf__fgets    },
+    {"fputs",    (const void *)&bruce_elf__fputs    },
+    {"feof",     (const void *)&bruce_elf__feof     },
+    {"ferror",   (const void *)&bruce_elf__ferror   },
+    {"clearerr", (const void *)&bruce_elf__clearerr },
+    {"remove",   (const void *)&bruce_elf__remove   },
+    {"rename",   (const void *)&bruce_elf__rename   },
+    {"fprintf",  (const void *)&bruce_elf__fprintf  },
+    {"vfprintf", (const void *)&bruce_elf__vfprintf },
+    {"setvbuf",  (const void *)&bruce_elf__setvbuf  },
+    {"getenv",   (const void *)&bruce_elf__getenv   },
+    {"setenv",   (const void *)&bruce_elf__setenv   },
+    {"unsetenv", (const void *)&bruce_elf__unsetenv },
+    {"strdup",   (const void *)&bruce_elf__strdup   },
+    {"strndup",  (const void *)&bruce_elf__strndup  },
+    {"__assert_func", (const void *)&bruce_elf__assert_func},
+    {"__assert",      (const void *)&bruce_elf__assert     },
     ESP_ELFSYM_EXPORT(snprintf),
     ESP_ELFSYM_EXPORT(sprintf),
     ESP_ELFSYM_EXPORT(vsnprintf),
@@ -652,13 +1036,24 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(strchr),
     ESP_ELFSYM_EXPORT(strrchr),
     ESP_ELFSYM_EXPORT(strstr),
+    ESP_ELFSYM_EXPORT(memchr),
+    ESP_ELFSYM_EXPORT(strtok),
+    ESP_ELFSYM_EXPORT(strtok_r),
+    ESP_ELFSYM_EXPORT(strspn),
+    ESP_ELFSYM_EXPORT(strcspn),
+    ESP_ELFSYM_EXPORT(strpbrk),
+    ESP_ELFSYM_EXPORT(strcasecmp),
+    ESP_ELFSYM_EXPORT(strncasecmp),
     ESP_ELFSYM_EXPORT(strtol),
     ESP_ELFSYM_EXPORT(strtoll),
     ESP_ELFSYM_EXPORT(strtoul),
     ESP_ELFSYM_EXPORT(strtoull),
+    ESP_ELFSYM_EXPORT(strtod),
+    ESP_ELFSYM_EXPORT(strtof),
     ESP_ELFSYM_EXPORT(atoi),
     ESP_ELFSYM_EXPORT(atol),
     ESP_ELFSYM_EXPORT(atoll),
+    ESP_ELFSYM_EXPORT(atof),
     ESP_ELFSYM_EXPORT(abs),
     ESP_ELFSYM_EXPORT(labs),
     ESP_ELFSYM_EXPORT(llabs),
@@ -717,9 +1112,74 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(atan2),
     ESP_ELFSYM_EXPORT(atan2f),
     ESP_ELFSYM_EXPORT(fabsf),
+    ESP_ELFSYM_EXPORT(fabs),
     ESP_ELFSYM_EXPORT(floor),
+    ESP_ELFSYM_EXPORT(floorf),
     ESP_ELFSYM_EXPORT(ceil),
+    ESP_ELFSYM_EXPORT(ceilf),
     ESP_ELFSYM_EXPORT(fmodf),
+    ESP_ELFSYM_EXPORT(pow),
+    ESP_ELFSYM_EXPORT(powf),
+    ESP_ELFSYM_EXPORT(exp),
+    ESP_ELFSYM_EXPORT(expf),
+    ESP_ELFSYM_EXPORT(log),
+    ESP_ELFSYM_EXPORT(logf),
+    ESP_ELFSYM_EXPORT(log10),
+    ESP_ELFSYM_EXPORT(log10f),
+    ESP_ELFSYM_EXPORT(round),
+    ESP_ELFSYM_EXPORT(roundf),
+    ESP_ELFSYM_EXPORT(trunc),
+    ESP_ELFSYM_EXPORT(truncf),
+    ESP_ELFSYM_EXPORT(hypot),
+    ESP_ELFSYM_EXPORT(hypotf),
+    ESP_ELFSYM_EXPORT(asin),
+    ESP_ELFSYM_EXPORT(asinf),
+    ESP_ELFSYM_EXPORT(acos),
+    ESP_ELFSYM_EXPORT(acosf),
+    ESP_ELFSYM_EXPORT(frexp),
+    ESP_ELFSYM_EXPORT(frexpf),
+    ESP_ELFSYM_EXPORT(ldexp),
+    ESP_ELFSYM_EXPORT(ldexpf),
+
+    /* Pure, stateless-to-us runtime helpers with no Bruce-specific behavior
+     * -- direct exports of the firmware's own real symbols, same rationale
+     * as the libm block above. setjmp/longjmp are plain architecture asm
+     * stubs (not OS-dependent), and rand/srand's internal state is real
+     * libc state shared with the firmware itself -- not something that
+     * needs per-process accounting the way malloc/free do. */
+    ESP_ELFSYM_EXPORT(setjmp),
+    ESP_ELFSYM_EXPORT(longjmp),
+    ESP_ELFSYM_EXPORT(rand),
+    ESP_ELFSYM_EXPORT(srand),
+
+    /* ctype.h. This project's actual toolchain library is picolibc (checked
+     * via `xtensa-esp32s3-elf-gcc -H`, not assumed from the toolchain's
+     * "xtensa-esp-elf" directory name, which is really just the target
+     * triple). picolibc's ctype.h has two implementations selected by
+     * _PICOLIBC_CTYPE_SMALL: a single shared lookup-table symbol (like
+     * newlib's _ctype_) when unset, or -- what this build actually gets,
+     * since -Os (in this project's own COMPILE_OPTIONS) defines
+     * __OPTIMIZE_SIZE__ which picolibc's ctype.h checks directly -- a set
+     * of small `extern inline` functions with no shared table at all, each
+     * with its own real out-of-line definition for exactly this kind of
+     * address-taking use. Exporting each by name (verified compilable and
+     * linkable, not assumed) is what actually works here; the single-table
+     * shortcut this comment originally assumed does not apply to this
+     * build's flags. toupper/tolower are these same real functions too, not
+     * macros, on this library. */
+    ESP_ELFSYM_EXPORT(isalnum),
+    ESP_ELFSYM_EXPORT(isalpha),
+    ESP_ELFSYM_EXPORT(iscntrl),
+    ESP_ELFSYM_EXPORT(isdigit),
+    ESP_ELFSYM_EXPORT(isgraph),
+    ESP_ELFSYM_EXPORT(islower),
+    ESP_ELFSYM_EXPORT(isprint),
+    ESP_ELFSYM_EXPORT(ispunct),
+    ESP_ELFSYM_EXPORT(isspace),
+    ESP_ELFSYM_EXPORT(isupper),
+    ESP_ELFSYM_EXPORT(isxdigit),
+    ESP_ELFSYM_EXPORT(tolower),
+    ESP_ELFSYM_EXPORT(toupper),
 
     /* C++ freestanding new/delete + pure-virtual trap (see the C++ ABI
      * comment block above). Mangled names, not ESP_ELFSYM_EXPORT: these are
