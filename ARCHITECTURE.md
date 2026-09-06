@@ -1275,7 +1275,9 @@ fixed before anything that depends on it starts, and skips the configured
 loop.
 
 `ir` grants access to synchronous ESP-IDF RMT infrared capture and transmit
-through `ir__receive()`, `ir__transmit()`, and `ir__transmit_raw()`. Captures
+through `ir__receive()`, `ir__transmit()`, `ir__transmit_raw()`, and
+`ir__transmit_code()`. `bruce_ir_code_t` represents a parsed or raw IR-library
+record, including raw carrier duty cycle. Captures
 are returned as Bruce/Flipper version-1 IR records. Decoded capture recognizes
 NEC; NEC, NECext, Samsung32, and Sony SIRC variants can be transmitted. Unknown
 captures can be read as raw 38 kHz timings. `ir__transmit_record()` replays an

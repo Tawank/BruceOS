@@ -59,7 +59,8 @@ static bool ir__lock(void) {
 static void ir__unlock(void) { xSemaphoreGive(s_ir_mutex); }
 
 static bruce_result_t ir__send_symbols(
-    const rmt_symbol_word_t *symbols, size_t symbol_count, uint32_t frequency_hz, uint8_t repeats
+    const rmt_symbol_word_t *symbols, size_t symbol_count, uint32_t frequency_hz, float duty_cycle,
+    uint8_t repeats
 ) {
     rmt_channel_handle_t channel = NULL;
     rmt_encoder_handle_t encoder = NULL;
@@ -78,7 +79,7 @@ static bruce_result_t ir__send_symbols(
     if (error == ESP_OK) {
         rmt_carrier_config_t carrier = {
             .frequency_hz = frequency_hz,
-            .duty_cycle = 0.33f,
+            .duty_cycle = duty_cycle,
         };
         error = rmt_apply_carrier(channel, &carrier);
     }
@@ -99,12 +100,13 @@ static bruce_result_t ir__send_symbols(
     return ir__esp_result(error);
 }
 
-bruce_result_t
-ir__transmit_raw(const uint32_t *timings_us, size_t timing_count, uint32_t frequency_hz, uint8_t repeats) {
+static bruce_result_t ir__transmit_raw_with_duty(
+    const uint32_t *timings_us, size_t timing_count, uint32_t frequency_hz, float duty_cycle, uint8_t repeats
+) {
     bruce_result_t permission = permission__check(BRUCE_PERMISSION_IR);
     if (permission != BRUCE_OK) return permission;
     if (timings_us == NULL || timing_count < 2 || timing_count > BRUCE_IR_MAX_RAW_TIMINGS ||
-        frequency_hz < 20000 || frequency_hz > 100000) {
+        frequency_hz < 20000 || frequency_hz > 100000 || duty_cycle <= 0.0f || duty_cycle >= 1.0f) {
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
     if (!ir__lock()) return BRUCE_ERR_BUSY;
@@ -131,10 +133,31 @@ ir__transmit_raw(const uint32_t *timings_us, size_t timing_count, uint32_t frequ
         }
     }
 
-    bruce_result_t result = ir__send_symbols(symbols, symbol_count, frequency_hz, repeats);
+    bruce_result_t result = ir__send_symbols(symbols, symbol_count, frequency_hz, duty_cycle, repeats);
     free(symbols);
     ir__unlock();
     return result;
+}
+
+bruce_result_t
+ir__transmit_raw(const uint32_t *timings_us, size_t timing_count, uint32_t frequency_hz, uint8_t repeats) {
+    return ir__transmit_raw_with_duty(timings_us, timing_count, frequency_hz, 0.33f, repeats);
+}
+
+bruce_result_t ir__transmit_code(const bruce_ir_code_t *code, uint8_t repeats) {
+    if (code == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    if (code->type == IR_CODE_PARSED_VALUE) {
+        return ir__transmit(code->value, code->protocol, code->bits, repeats);
+    }
+    if (code->type == IR_CODE_PARSED_ADDRESS) {
+        return ir__transmit_parsed(code->protocol, code->address, code->command, repeats);
+    }
+    if (code->type == IR_CODE_RAW) {
+        return ir__transmit_raw_with_duty(
+            code->data, code->data_count, code->frequency_hz, code->duty_cycle, repeats
+        );
+    }
+    return BRUCE_ERR_INVALID_ARGUMENT;
 }
 
 static bool
@@ -217,7 +240,7 @@ bruce_result_t ir__transmit(const char *data_hex, const char *protocol, uint8_t 
     }
     if (result != BRUCE_OK) return result;
     if (!ir__lock()) return BRUCE_ERR_BUSY;
-    result = ir__send_symbols(symbols, symbol_count, BRUCE_IR_DEFAULT_FREQUENCY_HZ, repeats);
+    result = ir__send_symbols(symbols, symbol_count, BRUCE_IR_DEFAULT_FREQUENCY_HZ, 0.33f, repeats);
     ir__unlock();
     return result;
 }

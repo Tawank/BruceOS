@@ -17,49 +17,10 @@
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
 
+#include "ir_codes.h"
+
 #define IR_APP_CAPTURE_SIZE 8192u
 #define IR_APP_LIBRARY_PATH "/BruceIR"
-
-typedef struct {
-    const char *protocol;
-    const char *data;
-    uint8_t bits;
-} ir_app__power_code_t;
-
-/* A native, protocol-level power database. Duplicates used by many brands are
- * intentionally sent once; regional runs finish with the universal set. */
-static const ir_app__power_code_t s_power_na[] = {
-    {"NEC",       "20DF10EF", 32},
-    {"NEC",       "E0E040BF", 32},
-    {"NEC",       "04FB08F7", 32},
-    {"NEC",       "40BF12ED", 32},
-    {"NEC",       "C1AA09F6", 32},
-    {"NEC",       "F50A03FC", 32},
-    {"Samsung32", "E0E040BF", 32},
-    {"SIRC",      "A90",      12},
-    {"SIRC15",    "540C",     15},
-};
-
-static const ir_app__power_code_t s_power_eu[] = {
-    {"NEC",       "20DF10EF", 32},
-    {"NEC",       "E0E040BF", 32},
-    {"NEC",       "10EF38C7", 32},
-    {"NEC",       "02FD48B7", 32},
-    {"NEC",       "08F7C03F", 32},
-    {"NEC",       "807F02FD", 32},
-    {"Samsung32", "E0E040BF", 32},
-    {"SIRC",      "A90",      12},
-    {"SIRC20",    "000A90",   20},
-};
-
-static const ir_app__power_code_t s_power_universal[] = {
-    {"NEC",       "00FF02FD", 32},
-    {"NEC",       "00FF38C7", 32},
-    {"NEC",       "00FFA25D", 32},
-    {"NEC",       "00FFE21D", 32},
-    {"NEC",       "FF00FD02", 32},
-    {"Samsung32", "707000FF", 32},
-};
 
 static const char *const s_tv_buttons[] = {
     "POWER", "UP",   "DOWN",     "LEFT",    "RIGHT", "OK",   "SOURCES", "VOL+",  "VOL-", "CHA+",
@@ -427,13 +388,13 @@ static bruce_result_t ir_app__quick_learn(void) {
 }
 
 static bruce_result_t ir_app__send_power_batch(
-    const ir_app__power_code_t *codes, size_t count, size_t *sent, size_t total, bruce_viewer_id_t viewer
+    const bruce_ir_code_t *codes, size_t count, size_t *sent, size_t total, bruce_viewer_id_t viewer
 ) {
     for (size_t i = 0; i < count; ++i) {
         if (input__check(BRUCE_INPUT_CODE_BACK, true) || input__check(BRUCE_INPUT_CODE_BUTTON_B, true)) {
             return BRUCE_ERR_CANCELLED;
         }
-        bruce_result_t result = ir__transmit(codes[i].data, codes[i].protocol, codes[i].bits, 0);
+        bruce_result_t result = ir__transmit_code(&codes[i], 0);
         if (result != BRUCE_OK) return result;
         (*sent)++;
         if (viewer != BRUCE_VIEWER_ID_INVALID) {
@@ -453,21 +414,44 @@ static bruce_result_t ir_app__send_power_batch(
 }
 
 static bruce_result_t ir_app__tvbgone(bool europe, bool gui) {
-    const ir_app__power_code_t *regional = europe ? s_power_eu : s_power_na;
+    const bruce_ir_code_t *regional = europe ? s_power_eu : s_power_na;
     size_t regional_count =
         europe ? sizeof(s_power_eu) / sizeof(s_power_eu[0]) : sizeof(s_power_na) / sizeof(s_power_na[0]);
     size_t universal_count = sizeof(s_power_universal) / sizeof(s_power_universal[0]);
+    size_t parsed_count = sizeof(s_power_universal_ext) / sizeof(s_power_universal_ext[0]);
+    size_t raw_count = sizeof(s_power_universal_raw) / sizeof(s_power_universal_raw[0]);
     size_t sent = 0;
     bruce_viewer_id_t viewer = BRUCE_VIEWER_ID_INVALID;
     if (gui) {
         (void)input__flush();
         (void)dialog__create_text_viewer("TV-B-Gone", "Starting...\n\nBack: stop", &viewer);
     }
-    bruce_result_t result =
-        ir_app__send_power_batch(regional, regional_count, &sent, regional_count + universal_count, viewer);
+    bruce_result_t result = ir_app__send_power_batch(
+        regional, regional_count, &sent, regional_count + universal_count + parsed_count + raw_count, viewer
+    );
     if (result == BRUCE_OK)
         result = ir_app__send_power_batch(
-            s_power_universal, universal_count, &sent, regional_count + universal_count, viewer
+            s_power_universal,
+            universal_count,
+            &sent,
+            regional_count + universal_count + parsed_count + raw_count,
+            viewer
+        );
+    if (result == BRUCE_OK)
+        result = ir_app__send_power_batch(
+            s_power_universal_ext,
+            parsed_count,
+            &sent,
+            regional_count + universal_count + parsed_count + raw_count,
+            viewer
+        );
+    if (result == BRUCE_OK)
+        result = ir_app__send_power_batch(
+            s_power_universal_raw,
+            raw_count,
+            &sent,
+            regional_count + universal_count + parsed_count + raw_count,
+            viewer
         );
     if (viewer != BRUCE_VIEWER_ID_INVALID) (void)dialog__viewer_close(viewer);
     if (gui)

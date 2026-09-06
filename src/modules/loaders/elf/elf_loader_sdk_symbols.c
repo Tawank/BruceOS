@@ -789,6 +789,7 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
 
     /* Infrared */
     ESP_ELFSYM_EXPORT(ir__transmit_raw),
+    ESP_ELFSYM_EXPORT(ir__transmit_code),
     ESP_ELFSYM_EXPORT(ir__transmit),
     ESP_ELFSYM_EXPORT(ir__transmit_parsed),
     ESP_ELFSYM_EXPORT(ir__receive),

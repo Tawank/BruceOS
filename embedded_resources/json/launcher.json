@@ -17,11 +17,11 @@
   },
   "Infrared@infrared": {
     "TV-B-Gone": "ir tvbgone",
+    "Custom IR": "ir tx_pick_file",
+    "IR Read": "ir rx",
     "IR jammer": "ir jam",
     "Learn signal": "ir learn_custom",
-    "Quick remote setup": "ir quick_learn",
-    "Transmit .ir file": "ir tx_pick_file",
-    "Read/view signal": "ir rx"
+    "Quick remote setup": "ir quick_learn"
   },
   "NRF24@radio-handheld": {
     "Spectrum scan": "nrf24 scan",

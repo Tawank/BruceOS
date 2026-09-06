@@ -13,6 +13,33 @@
 #define BRUCE_IR_DEFAULT_FREQUENCY_HZ 38000u
 #define BRUCE_IR_MAX_RAW_TIMINGS 512u
 
+typedef enum {
+    IR_CODE_PARSED_VALUE,
+    IR_CODE_PARSED_ADDRESS,
+    IR_CODE_RAW,
+} bruce_ir_code_type_t;
+
+/**
+ * @brief A parsed or raw IR-library record.
+ *
+ * `IR_CODE_PARSED_VALUE` uses `protocol`, `value`, and `bits`.
+ * `IR_CODE_PARSED_ADDRESS` uses `protocol`, `address`, and `command`.
+ * `IR_CODE_RAW` uses `frequency_hz`, `duty_cycle`, and `data`.
+ */
+typedef struct {
+    const char *name;
+    bruce_ir_code_type_t type;
+    const char *protocol;
+    const char *value;
+    uint8_t bits;
+    const char *address;
+    const char *command;
+    uint32_t frequency_hz;
+    float duty_cycle;
+    const uint32_t *data;
+    size_t data_count;
+} bruce_ir_code_t;
+
 /**
  * @brief Transmits raw timing data over RMT.
  *
@@ -27,6 +54,9 @@
  */
 bruce_result_t
 ir__transmit_raw(const uint32_t *timings_us, size_t timing_count, uint32_t frequency_hz, uint8_t repeats);
+
+/** @brief Transmits an IR-library record described by a bruce_ir_code_t. */
+bruce_result_t ir__transmit_code(const bruce_ir_code_t *code, uint8_t repeats);
 
 /**
  * @brief Transmits hexadecimal scalar data using NEC, NECext, Samsung32, SIRC, SIRC15, or SIRC20.
