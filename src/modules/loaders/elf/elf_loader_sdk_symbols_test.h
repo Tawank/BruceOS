@@ -36,6 +36,7 @@ int bruce_elf__remove(const char *path);
 int bruce_elf__rename(const char *from, const char *to);
 int bruce_elf__fprintf(FILE *stream, const char *format, ...);
 int bruce_elf__vfprintf(FILE *stream, const char *format, va_list args);
+void bruce_elf__perror(const char *prefix);
 extern FILE *bruce_elf__stdin_ptr;
 extern FILE *bruce_elf__stdout_ptr;
 extern FILE *bruce_elf__stderr_ptr;

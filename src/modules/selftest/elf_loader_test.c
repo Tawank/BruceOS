@@ -2,9 +2,11 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <setjmp.h>
+#include <stdarg.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
@@ -146,10 +148,32 @@ bool selftest__run_elf_loader_stdio_case(void) {
     return true;
 }
 
+/* Forwards to vsscanf() with a real va_list, the same shape a libc caller
+ * would use -- vsscanf() itself is exported to ELF apps unadapted (a pure
+ * string-in function, no I/O of its own), so this is regression coverage
+ * for the real picolibc function, same rationale as gmtime_r() below. */
+static int selftest__elf_vsscanf_helper(const char *buffer, const char *format, ...) {
+    va_list args;
+    va_start(args, format);
+    int result = vsscanf(buffer, format, args);
+    va_end(args);
+    return result;
+}
+
 /*
  * Exercises the getenv/setenv/unsetenv and strdup/strndup adapters
  * (elf_loader_sdk_symbols.c), by calling the (deliberately non-static)
  * adapter functions directly, same rationale as selftest__run_elf_loader_stdio_case().
+ * Also covers the "small libc gaps" additions: strerror()/div()/ldiv()/
+ * lldiv()/vsscanf() are exported to ELF apps unadapted (pure functions, no
+ * I/O), so they're exercised directly as regression coverage for the real
+ * picolibc functions rather than for any BruceOS-specific logic; perror()
+ * IS a BruceOS-specific adapter (bruce_elf__perror(), routes through
+ * bruce_elf__fprintf(stderr) instead of picolibc's own internal stderr --
+ * see its doc comment), so it's called here too, though -- like the
+ * stdout/stdin writes in selftest__run_elf_loader_stdio_case() -- its
+ * console output itself isn't asserted on, only that it runs to completion
+ * without crashing.
  */
 bool selftest__run_elf_loader_libc_case(void) {
     static const char name[] = "SELFTEST_ELF_LIBC_VAR";
@@ -192,6 +216,43 @@ bool selftest__run_elf_loader_libc_case(void) {
         return false;
     }
     memory__free(partial);
+
+    const char *enoent_message = strerror(ENOENT);
+    const char *einval_message = strerror(EINVAL);
+    if (enoent_message == NULL || einval_message == NULL || enoent_message[0] == '\0' ||
+        strcmp(enoent_message, einval_message) == 0) {
+        printf("[selftest] loader/elf_libc: strerror mismatch (\"%s\" vs \"%s\")\n", enoent_message ? enoent_message : "(null)",
+               einval_message ? einval_message : "(null)");
+        return false;
+    }
+
+    div_t quotient = div(7, 2);
+    div_t negative_quotient = div(-7, 2);
+    if (quotient.quot != 3 || quotient.rem != 1 || negative_quotient.quot != -3 || negative_quotient.rem != -1) {
+        printf("[selftest] loader/elf_libc: div mismatch (7/2=%d,%d -7/2=%d,%d)\n", quotient.quot, quotient.rem,
+               negative_quotient.quot, negative_quotient.rem);
+        return false;
+    }
+
+    ldiv_t long_quotient = ldiv(7L, 2L);
+    lldiv_t long_long_quotient = lldiv(7LL, 2LL);
+    if (long_quotient.quot != 3L || long_quotient.rem != 1L || long_long_quotient.quot != 3LL ||
+        long_long_quotient.rem != 1LL) {
+        printf("[selftest] loader/elf_libc: ldiv/lldiv mismatch\n");
+        return false;
+    }
+
+    int scanned_int = 0;
+    char scanned_word[16] = {0};
+    if (selftest__elf_vsscanf_helper("42 hello", "%d %15s", &scanned_int, scanned_word) != 2 || scanned_int != 42 ||
+        strcmp(scanned_word, "hello") != 0) {
+        printf("[selftest] loader/elf_libc: vsscanf mismatch (%d, \"%s\")\n", scanned_int, scanned_word);
+        return false;
+    }
+
+    errno = ENOENT;
+    bruce_elf__perror("selftest");
+    errno = 0;
 
     printf("[selftest] loader/elf_libc: OK\n");
     return true;

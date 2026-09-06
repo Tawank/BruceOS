@@ -460,6 +460,27 @@ int bruce_elf__fprintf(FILE *stream, const char *format, ...) {
     return result;
 }
 
+/* perror(), routed through bruce_elf__fprintf(bruce_elf__stderr_ptr, ...)
+ * rather than exported as real picolibc's own perror() the way strerror()
+ * below is: real perror() writes to picolibc's own internal `stderr` global
+ * (whatever real FILE the firmware's own libc considers stderr, e.g. its
+ * UART console), not the value this table hands the ELF app for "stderr"
+ * (bruce_elf__stderr_ptr, a console sentinel box -- see the FILE* doc
+ * comment above) -- calling straight into the real function would silently
+ * bypass this process's own stdio__ routing instead of using it, same
+ * reasoning as bruce_elf__puts() over a hypothetical direct fputs(stdout)
+ * export. strerror() itself is a pure errnum->string lookup with no I/O, so
+ * it's exported unadapted below. Not declared `static`, like the rest of
+ * this block, so modules/selftest can call it directly. */
+void bruce_elf__perror(const char *prefix) {
+    const char *message = strerror(*__errno());
+    if (prefix != NULL && prefix[0] != '\0') {
+        bruce_elf__fprintf(bruce_elf__stderr_ptr, "%s: %s\n", prefix, message);
+    } else {
+        bruce_elf__fprintf(bruce_elf__stderr_ptr, "%s\n", message);
+    }
+}
+
 /* getenv/setenv/unsetenv, backed by the calling process's own environment__
  * (core_sdk/environment.h) -- runtime-only, inherited as a deep copy by
  * child processes, exactly matching POSIX getenv/setenv/unsetenv scope.
@@ -1565,6 +1586,7 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     {"rename",   (const void *)&bruce_elf__rename   },
     {"fprintf",  (const void *)&bruce_elf__fprintf  },
     {"vfprintf", (const void *)&bruce_elf__vfprintf },
+    {"perror",   (const void *)&bruce_elf__perror   },
     {"setvbuf",  (const void *)&bruce_elf__setvbuf  },
     {"open",     (const void *)&bruce_elf__open     },
     {"close",    (const void *)&bruce_elf__close    },
@@ -1602,6 +1624,7 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(sprintf),
     ESP_ELFSYM_EXPORT(vsnprintf),
     ESP_ELFSYM_EXPORT(sscanf),
+    ESP_ELFSYM_EXPORT(vsscanf),
     ESP_ELFSYM_EXPORT(memcpy),
     ESP_ELFSYM_EXPORT(memmove),
     ESP_ELFSYM_EXPORT(memset),
@@ -1624,6 +1647,7 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(strpbrk),
     ESP_ELFSYM_EXPORT(strcasecmp),
     ESP_ELFSYM_EXPORT(strncasecmp),
+    ESP_ELFSYM_EXPORT(strerror), /* pure errnum->string lookup, no I/O -- see bruce_elf__perror() above for why perror() itself is not exported this way */
     ESP_ELFSYM_EXPORT(strtol),
     ESP_ELFSYM_EXPORT(strtoll),
     ESP_ELFSYM_EXPORT(strtoul),
@@ -1637,6 +1661,9 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(abs),
     ESP_ELFSYM_EXPORT(labs),
     ESP_ELFSYM_EXPORT(llabs),
+    ESP_ELFSYM_EXPORT(div),
+    ESP_ELFSYM_EXPORT(ldiv),
+    ESP_ELFSYM_EXPORT(lldiv),
 
     /* GCC runtime helpers used by freestanding ELF code. */
     ESP_ELFSYM_EXPORT(__eqdf2),
