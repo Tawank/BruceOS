@@ -22,6 +22,7 @@ set(BRUCE_SELFTEST_SOURCES
     "modules/selftest/core_launcher_test.c"
     "modules/selftest/hash_test.c"
     "modules/selftest/html_test.c"
+    "modules/selftest/icmp_test.c"
     "modules/selftest/icon_test.c"
     "modules/selftest/image_test.c"
     "modules/selftest/input_test.c"
@@ -29,6 +30,7 @@ set(BRUCE_SELFTEST_SOURCES
     "modules/selftest/launcher_test.c"
     "modules/selftest/loader_test.c"
     "modules/selftest/memory_test.c"
+    "modules/selftest/net_test.c"
     "modules/selftest/notification_test.c"
     "modules/selftest/nrf24_test.c"
     "modules/selftest/partition_manager_test.c"
@@ -94,6 +96,7 @@ idf_component_register(SRCS
                     "core/html/html_parser.c"
                     "core/html/html_tags.c"
                     "core/html/html_url.c"
+                    "core/icmp/icmp.c"
                     "core/icon/icon.c"
                     "core/http/http.c"
                     "core/image/image.c"
@@ -115,6 +118,7 @@ idf_component_register(SRCS
                     "core/memory/memory_layout.c"
                     "core/memory/memory_reclaim.c"
                     "core/memory/memory_rtc.c"
+                    "core/net/net.c"
                     "core/network/network.c"
                     "core/notification/notification.c"
                     "core/nrf24/nrf24.c"
@@ -219,6 +223,7 @@ idf_component_register(SRCS
                     "modules/ssh/ssh_app.c"
                     "modules/ssh/ssh_sftp_app.c"
                      "modules/nc/nc_app.c"
+                     "modules/nmap/nmap_app.c"
                      "modules/text/text_app.c"
                      "modules/utils/launcher/launcher_app.c"
                      "modules/utils/man/man_app.c"
@@ -628,6 +633,11 @@ target_include_directories(bruce_sdk_builtin_nc_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/nc")
 
+add_library(bruce_sdk_builtin_nmap_check OBJECT "modules/nmap/nmap_app.c")
+target_include_directories(bruce_sdk_builtin_nmap_check PRIVATE
+                           "${CMAKE_CURRENT_LIST_DIR}"
+                           "${CMAKE_CURRENT_LIST_DIR}/modules/nmap")
+
 add_library(bruce_sdk_builtin_ssh_check OBJECT "modules/ssh/ssh_app.c")
 target_include_directories(bruce_sdk_builtin_ssh_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
@@ -713,6 +723,7 @@ set(BRUCE_ARGS_SDK_CHECK_TARGETS
     bruce_sdk_builtin_shell_check
     bruce_sdk_builtin_notification_check
     bruce_sdk_builtin_nc_check
+    bruce_sdk_builtin_nmap_check
     bruce_sdk_builtin_ssh_check
     bruce_sdk_builtin_system_menu_check
     bruce_sdk_builtin_elf_loader_check

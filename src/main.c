@@ -44,6 +44,7 @@
 #include "modules/ssh/ssh_sftp_app.h"
 #include "modules/system_menu/system_menu_app.h"
 #include "modules/nc/nc_app.h"
+#include "modules/nmap/nmap_app.h"
 #include "modules/text/text_app.h"
 #include "modules/utils/launcher/launcher_app.h"
 #include "modules/utils/man/man_app.h"
@@ -145,6 +146,7 @@ static const bruce_app_descriptor_t s_default_apps[] = {
     {"ssh-keygen", "Generate SSH keys", "Network", ssh_keygen_app_main, SSH_STACK_BYTES},
     {"sftp", "Browse/download files over SFTP", "Network", sftp_app_main, SSH_STACK_BYTES},
     {"nc", "TCP/UDP client, listener, and port scanner (netcat-style)", "Network", nc_app_main, 0},
+    {"nmap", "Host discovery and TCP/UDP port scanner (nmap-style)", "Network", nmap_app_main, 0},
     {"webui", "Start the web interface", "Network", webui_app_main, 0},
     {"wget", "Download files from URLs", "Network", bnu_wget_app_main, HTTP_STACK_BYTES},
     {"wifi", "Manage Wi-Fi connections", "Network", wifi_app_main, WIFI_STACK_BYTES},

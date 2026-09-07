@@ -16,6 +16,7 @@
 #include "modules/loaders/js/js_loader_app.h"
 #include "modules/nrf24/nrf24_app.h"
 #include "modules/nc/nc_app.h"
+#include "modules/nmap/nmap_app.h"
 #include "modules/utils/man/man_app.h"
 #include "modules/utils/notify/notify_app.h"
 #include "modules/utils/process/process_app.h"
@@ -99,6 +100,7 @@ static bool selftest__args_module_help(void) {
         man_app_main,
         process_app_main,
         nc_app_main,
+        nmap_app_main,
         terminal_app_main,
         webui_app_main,
         wifi_app_main,

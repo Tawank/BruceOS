@@ -32,6 +32,7 @@
 #include "gpio_bus_test.h"
 #include "hash_test.h"
 #include "html_test.h"
+#include "icmp_test.h"
 #include "icon_test.h"
 #include "image_test.h"
 #include "input_test.h"
@@ -39,6 +40,7 @@
 #include "launcher_test.h"
 #include "loader_test.h"
 #include "memory_test.h"
+#include "net_test.h"
 #include "notification_test.h"
 #include "nrf24_test.h"
 #include "partition_manager_test.h"
@@ -234,6 +236,8 @@ int selftest_app_main(int argc, char **argv) {
     RUN_SELFTEST(selftest__run_tcp_permission_denied_case);
     RUN_SELFTEST(selftest__run_udp_permission_denied_case);
     RUN_SELFTEST(selftest__run_udp_loopback_case);
+    RUN_SELFTEST(selftest__run_icmp_permission_denied_case);
+    RUN_SELFTEST(selftest__run_icmp_loopback_case);
     RUN_SELFTEST(selftest__run_ssh_permission_denied_case);
     RUN_SELFTEST(selftest__run_ssh_keygen_case);
     RUN_SELFTEST(selftest__run_sftp_host_pattern_case);
@@ -290,6 +294,7 @@ int selftest_app_main(int argc, char **argv) {
     RUN_SELFTEST(selftest__run_hash_sha256_case);
     RUN_SELFTEST(selftest__run_base64_encode_case);
     RUN_SELFTEST(selftest__run_base64_decode_case);
+    RUN_SELFTEST(selftest__run_net_ipv4_case);
 
 #undef RUN_SELFTEST
     printf("[selftest] summary: %d failure(s)\n", failures);
