@@ -857,6 +857,23 @@ bruce_result_t storage__seek(bruce_file_id_t file, int64_t offset, int whence, u
     return BRUCE_OK;
 }
 
+bruce_result_t storage__truncate(bruce_file_id_t file, uint64_t length) {
+    storage__lock();
+    int slot_index = storage__find_open_slot_locked(file);
+    if (slot_index < 0) {
+        storage__unlock();
+        return BRUCE_ERR_NOT_FOUND;
+    }
+    if (!storage__file_owned_by_caller_locked(&s_open_files[slot_index])) {
+        storage__unlock();
+        return BRUCE_ERR_PERMISSION;
+    }
+    int result = ftruncate(s_open_files[slot_index].fd, (off_t)length);
+    storage__unlock();
+    if (result < 0) return BRUCE_ERR_IO;
+    return BRUCE_OK;
+}
+
 bruce_result_t storage__close(bruce_file_id_t file) {
     storage__lock();
     int slot_index = storage__find_open_slot_locked(file);

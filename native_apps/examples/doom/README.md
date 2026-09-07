@@ -78,11 +78,16 @@ key events (letters, digits, etc.) -- useful for cheat codes.
   `elf_loader_sdk_symbols.c`) but not the multiply, so this port added that
   one export alongside them. `FixedDiv()`'s 64-by-32 divide was already
   covered.
-- **No shell.** `i_system.c`'s fatal-error path (`I_Error()`) optionally
-  shells out to `zenity` for a GUI popup on desktop platforms. There's
-  nothing to exec here, so `elf_loader_sdk_symbols.c` gained a `system()`
-  stub that always reports "no command processor available" -- `main.c`
-  also passes `-nogui` so this path is never even attempted.
+- **`zenity` popup skipped, but not because `system()` is a stub.**
+  `i_system.c`'s fatal-error path (`I_Error()`) optionally shells out to
+  `zenity` for a GUI popup on desktop platforms. `elf_loader_sdk_symbols.c`
+  gained a `system()` export for this (`bruce_elf__system()`) -- it's a
+  real implementation now, running the given command through BruceOS's own
+  shell (`modules/shell/`) as a real child process (added when `vi/`
+  needed `:!cmd` -- see `vi/README.md`), not a stub. `main.c` still passes
+  `-nogui` regardless, so this path is never attempted here -- there's no
+  `zenity` (or any GUI popup tool) on this platform for it to usefully find
+  even if it were.
 - **No fork.** Unlike `nes/`'s pinned `nofrendo` fork (which carries its own
   ESP-IDF component metadata), the portable engine here is pulled straight
   from upstream [`ozkl/doomgeneric`](https://github.com/ozkl/doomgeneric) at

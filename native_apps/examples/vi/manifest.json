@@ -1,0 +1,10 @@
+{
+  "appName": "vi",
+  "entryPoint": "app_main",
+  "appIcon": "icon:file-code",
+  "coreAbiVersion": 4,
+  "permissions": ["storage"],
+  "stackSize": 8192,
+  "heapSize": 262144,
+  "targets": ["elf"]
+}

@@ -123,6 +123,21 @@ extern double __subdf3(double left, double right);
 extern float __truncdfsf2(double value);
 extern unsigned long long __udivdi3(unsigned long long dividend, unsigned long long divisor);
 extern float __ieee754_sqrtf(float value);
+/* This build's own <ctype.h> (see the isalpha/isdigit/etc. block below)
+ * uses picolibc's "small" ctype variant, where is*()/toupper()/tolower()
+ * are real out-of-line functions and the header never declares this raw
+ * classification table at all (it only exists under picolibc's other,
+ * larger "table" ctype variant, gated by _PICOLIBC_CTYPE_SMALL -- see
+ * that header's own #else branch). The table itself, however, is still
+ * a real, always-present symbol in the prebuilt libc archive: some
+ * numeric-parsing internals there (e.g. strtoul(), which vi's
+ * bb_strtou() calls -- see native_apps/examples/vi/main/busybox_shim.c)
+ * reference it directly regardless of which ctype variant the *header*
+ * exposes to our own source. Declared by hand for the same reason
+ * __errno/__muldi3/etc. above are: the linker resolves it from the
+ * archive on its own once a symbol of this name is referenced, no
+ * header needed. */
+extern const char _ctype_b[];
 /* Xtensa has no 64x64 hardware multiply either, so GCC lowers a plain
  * `int64_t * int64_t` (e.g. Doom's FixedMul: `((int64_t)a * (int64_t)b) >>
  * FRACBITS`, its single hottest-path arithmetic op) to this libgcc call,
@@ -137,6 +152,26 @@ static int bruce_elf__puts(const char *text) {
 static int bruce_elf__putchar(int character) {
     unsigned char byte = (unsigned char)character;
     return stdio__write(&byte, 1) == BRUCE_OK ? byte : EOF;
+}
+
+/* BruceOS has no multi-user concept -- storage__'s stat()/fstat() likewise
+ * always report st_uid 0 (bruce_elf__stat_fill()) -- so this just reports
+ * the one uid every file already appears to be owned by, matching real
+ * getuid()'s never-fails contract. Exists for BusyBox vi's ".exrc must
+ * belong to the invoking user" ownership check (editors/vi.c), which would
+ * otherwise be an unresolved symbol (a real libc always provides getuid(),
+ * so it's never gated behind a feature flag upstream). */
+static uid_t bruce_elf__getuid(void) {
+    return 0;
+}
+
+/* A GNU libc extension (strchr(), but returns a pointer to the trailing NUL
+ * instead of NULL when the character isn't found) this toolchain's picolibc
+ * doesn't provide -- pure string-scanning with no OS dependency, so it's
+ * implemented directly rather than routed through any core_sdk/ call. */
+static char *bruce_elf__strchrnul(const char *text, int character) {
+    while (*text != '\0' && *text != (char)character) text++;
+    return (char *)text;
 }
 
 /* ---------------------------------------------------------------------------
@@ -920,6 +955,29 @@ off_t bruce_elf__lseek(int fd, off_t offset, int whence) {
     return (off_t)bruce_elf__ftell((FILE *)box);
 }
 
+/* Needed by vi's file_write() (BusyBox's vi.c, editors/vi.c) to shrink a
+ * saved file back down after an in-place overwrite -- it deliberately
+ * opens without O_TRUNC and ftruncate()s afterwards instead (see its own
+ * comment: reduces data lost on power fail versus truncating up front).
+ * Backed by storage__truncate(), a thin wrapper over the real POSIX
+ * ftruncate() storage.c already has on its internal fd (core/storage/storage.c). */
+int bruce_elf__ftruncate(int fd, off_t length) {
+    bruce_elf_file_t *box = bruce_elf__fd_lookup(fd);
+    if (box == NULL) {
+        *__errno() = EBADF;
+        return -1;
+    }
+    if (box->kind != BRUCE_ELF_FILE_STORAGE) {
+        *__errno() = EINVAL; /* matches real ftruncate() on a non-regular-file fd */
+        return -1;
+    }
+    if (storage__truncate(box->file, (uint64_t)length) != BRUCE_OK) {
+        *__errno() = EIO;
+        return -1;
+    }
+    return 0;
+}
+
 static void bruce_elf__stat_fill(struct stat *out, bool is_dir, size_t size) {
     memset(out, 0, sizeof(*out));
     out->st_mode = (mode_t)((is_dir ? S_IFDIR : S_IFREG) | (is_dir ? 0755 : 0644));
@@ -989,18 +1047,99 @@ int bruce_elf__mkdir(const char *path, mode_t mode) {
     return 0;
 }
 
-/* There is no shell/command interpreter to hand a command line to in this
- * sandbox, so this always reports "no command processor available" --
- * exactly the standard's own escape hatch for that case (system(NULL) is
- * conventionally used to probe for one and expects a falsy/zero result;
- * system(cmd) with a real command then has nothing sane to do but fail).
- * Ported C that only uses this for an optional, gracefully-degrading
- * convenience (e.g. doomgeneric's i_system.c shelling out to `zenity` for
- * an error dialog if present) still links and just takes the "not
- * available" path at runtime instead of getting an unresolved symbol. */
+/* Wraps `raw` in single quotes for app_runner__run()'s own shell-style
+ * arg tokenizer (app_runner__parse_args(), core_sdk/app_runner.h): inside
+ * a single-quoted span that tokenizer treats everything -- spaces, `"`,
+ * `\`, `$`, backticks -- as fully literal, so this is the one wrapping
+ * that lets an arbitrary command string survive as exactly one token
+ * (the classic close-quote/escaped-quote/reopen-quote splice, '\'', is
+ * needed only for a literal `'` inside `raw` itself, since that's the one
+ * character this wrapping can't just pass through unescaped). Returns
+ * false if `out` is too small, leaving its content undefined. */
+static bool bruce_elf__quote_single(const char *raw, char *out, size_t out_capacity) {
+    size_t pos = 0;
+    if (out_capacity == 0) return false;
+#define BRUCE_ELF__QUOTE_PUT(ch)                        \
+    do {                                                \
+        if (pos + 1 >= out_capacity) return false;      \
+        out[pos++] = (ch);                               \
+    } while (0)
+    BRUCE_ELF__QUOTE_PUT('\'');
+    for (const char *p = raw; *p != '\0'; ++p) {
+        if (*p == '\'') {
+            BRUCE_ELF__QUOTE_PUT('\'');
+            BRUCE_ELF__QUOTE_PUT('\\');
+            BRUCE_ELF__QUOTE_PUT('\'');
+            BRUCE_ELF__QUOTE_PUT('\'');
+        } else {
+            BRUCE_ELF__QUOTE_PUT(*p);
+        }
+    }
+    BRUCE_ELF__QUOTE_PUT('\'');
+#undef BRUCE_ELF__QUOTE_PUT
+    out[pos] = '\0';
+    return true;
+}
+
+/* Runs `command` as "shell -c '<command>'" (see modules/shell/), the same
+ * real, separate-process "shell -c" launch every other captured/piped path
+ * in that shell already relies on (shell_executor__run_substitution() for
+ * "$(...)", command backgrounding, etc.) -- just via the public
+ * app_runner__run()/process__wait_status() pair rather than that module's
+ * own core-private helpers, since this runs from inside a sandboxed ELF
+ * app, not the shell's own process.
+ *
+ * Unlike those other paths, this doesn't capture output through a
+ * stdio__session_*() pipe: BRUCE_LAUNCH_FOREGROUND hands the child the
+ * calling process's own routed console session (see
+ * stdio__session_route_children()'s doc comment -- nothing here overrides
+ * it), so the command's output/input go straight to the real screen/
+ * keyboard the caller is already attached to, matching plain system()'s
+ * usual behavior (and, concretely, what vi's ":!cmd" wants: the user
+ * watches the command run live, not a buffered result after the fact).
+ *
+ * On any failure to even launch or wait for the child, returns -1 with
+ * *__errno() set (ENOMEM for a too-long command, EIO otherwise); a
+ * successfully completed run always returns the real child's exit code,
+ * even 0 -- there's no separate way to report "launch itself failed"
+ * within that range the way a real fork()+exec()-based system() briefly
+ * has via WIFSIGNALED etc., so a killed/terminated child's status is
+ * folded into -1 too. system(NULL) reports a command processor as
+ * available (a nonzero/true return), per the standard's own probe
+ * convention -- this sandbox always has one (modules/shell/). */
 int bruce_elf__system(const char *command) {
-    (void)command;
-    return command == NULL ? 0 : -1;
+    if (command == NULL) return 1;
+
+    size_t command_len = strlen(command);
+    /* Worst case every byte is a `'` needing the 4-byte splice, plus the
+     * two wrapping quotes, the "-c " prefix, and the NUL. */
+    size_t capacity = command_len * 4u + 8u;
+    char *quoted = malloc(capacity);
+    if (quoted == NULL) {
+        *__errno() = ENOMEM;
+        return -1;
+    }
+    memcpy(quoted, "-c ", 3);
+    if (!bruce_elf__quote_single(command, quoted + 3, capacity - 3)) {
+        free(quoted);
+        *__errno() = ENOMEM; /* only reachable if the capacity math above is ever wrong */
+        return -1;
+    }
+
+    int launched = app_runner__run("shell", quoted, BRUCE_LAUNCH_FOREGROUND);
+    free(quoted);
+    if (launched <= 0) {
+        *__errno() = EIO;
+        return -1;
+    }
+
+    bruce_process_status_t status = {0};
+    bruce_result_t waited = process__wait_status((bruce_process_id_t)launched, UINT32_MAX, &status);
+    if (waited != BRUCE_OK || status.reason != BRUCE_PROCESS_EXITED) {
+        *__errno() = EIO;
+        return -1;
+    }
+    return status.exit_code;
 }
 
 int bruce_elf__access(const char *path, int mode) {
@@ -2267,8 +2406,10 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
      * process-aware Bruce SDK functions rather than firmware libc. */
     {"printf",  (const void *)&stdio__printf     },
     {"vprintf", (const void *)&stdio__vprintf    },
-    {"puts",    (const void *)&bruce_elf__puts   },
-    {"putchar", (const void *)&bruce_elf__putchar},
+    {"puts",      (const void *)&bruce_elf__puts     },
+    {"putchar",   (const void *)&bruce_elf__putchar  },
+    {"getuid",    (const void *)&bruce_elf__getuid   },
+    {"strchrnul", (const void *)&bruce_elf__strchrnul},
 
     /* FILE*-based stdio, backed by storage__open/read/write/seek/close --
      * see the bruce_elf_file_t doc comment above bruce_elf__fopen(). */
@@ -2303,6 +2444,7 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     {"read",     (const void *)&bruce_elf__read     },
     {"write",    (const void *)&bruce_elf__write    },
     {"lseek",    (const void *)&bruce_elf__lseek    },
+    {"ftruncate",(const void *)&bruce_elf__ftruncate},
     {"stat",     (const void *)&bruce_elf__stat     },
     {"fstat",    (const void *)&bruce_elf__fstat    },
     {"mkdir",    (const void *)&bruce_elf__mkdir    },
@@ -2545,6 +2687,11 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(isxdigit),
     ESP_ELFSYM_EXPORT(tolower),
     ESP_ELFSYM_EXPORT(toupper),
+    /* Not a function, and not ESP_ELFSYM_EXPORT (that macro needs the
+     * plain name visible as-is, but our own <ctype.h> never declares this
+     * one -- see the hand-written extern + comment near __errno above for
+     * why, and why that's fine here anyway). */
+    {"_ctype_b", (const void *)&_ctype_b},
 
     /* C++ freestanding new/delete + pure-virtual trap (see the C++ ABI
      * comment block above). Mangled names, not ESP_ELFSYM_EXPORT: these are

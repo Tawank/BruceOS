@@ -189,6 +189,74 @@ bool selftest__run_storage_roundtrip_case(void) {
     return ok;
 }
 
+/* ------------------------------------------------------------------------ */
+/* selftest__run_storage_truncate_case                                      */
+/* ------------------------------------------------------------------------ */
+
+bool selftest__run_storage_truncate_case(void) {
+    static const char *const path = "/selftest_truncate.txt";
+    static const char written_text[] = "hello bruce"; /* 11 bytes */
+
+    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
+    /* READ|WRITE (not WRITE-only) -- this handle both writes the initial
+     * content and reads it back after truncating; littlefs's own
+     * lfs_file_read_() asserts the handle was opened with read access
+     * (LFS_O_RDONLY must be set in its flags), same as any real fd. */
+    bruce_result_t opened = storage__open(
+        path,
+        BRUCE_STORAGE_OPEN_READ | BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE |
+            BRUCE_STORAGE_OPEN_TRUNCATE,
+        &file
+    );
+    size_t written = 0;
+    bruce_result_t write_result =
+        opened == BRUCE_OK ? storage__write(file, written_text, sizeof(written_text) - 1, &written) : opened;
+
+    /* Shrink to "hello" (5 bytes) -- the position (11, right after the
+     * write) is left untouched per storage__truncate()'s documented
+     * contract, same as POSIX ftruncate(); re-read only picks up the
+     * shrink after an explicit seek back to 0. */
+    bruce_result_t shrink_result = opened == BRUCE_OK ? storage__truncate(file, 5) : opened;
+    uint64_t position_after_shrink = UINT64_MAX;
+    bruce_result_t seek_after_shrink =
+        opened == BRUCE_OK ? storage__seek(file, 0, SEEK_CUR, &position_after_shrink) : opened;
+
+    char shrink_buffer[32] = {0};
+    size_t shrink_size = 0;
+    bruce_result_t seek_to_start = opened == BRUCE_OK ? storage__seek(file, 0, SEEK_SET, NULL) : opened;
+    bruce_result_t shrink_read =
+        opened == BRUCE_OK ? storage__read(file, shrink_buffer, sizeof(shrink_buffer) - 1, &shrink_size)
+                            : opened;
+
+    /* Grow back to 8 bytes -- POSIX ftruncate() extends with zero bytes;
+     * only the resulting length is asserted, not the pad byte value
+     * (storage.c defers entirely to the underlying VFS driver for that). */
+    bruce_result_t grow_result = opened == BRUCE_OK ? storage__truncate(file, 8) : opened;
+    bruce_result_t close_result = opened == BRUCE_OK ? storage__close(file) : opened;
+
+    bruce_file_id_t stat_probe = BRUCE_FILE_ID_INVALID;
+    bruce_result_t reopened = storage__open(path, BRUCE_STORAGE_OPEN_READ, &stat_probe);
+    uint64_t grown_size = UINT64_MAX;
+    bruce_result_t grown_seek =
+        reopened == BRUCE_OK ? storage__seek(stat_probe, 0, SEEK_END, &grown_size) : reopened;
+    if (reopened == BRUCE_OK) storage__close(stat_probe);
+
+    storage__remove(path);
+
+    bool ok = opened == BRUCE_OK && write_result == BRUCE_OK && written == sizeof(written_text) - 1 &&
+              shrink_result == BRUCE_OK && seek_after_shrink == BRUCE_OK && position_after_shrink == 11 &&
+              seek_to_start == BRUCE_OK && shrink_read == BRUCE_OK && shrink_size == 5 &&
+              strcmp(shrink_buffer, "hello") == 0 && grow_result == BRUCE_OK && close_result == BRUCE_OK &&
+              reopened == BRUCE_OK && grown_seek == BRUCE_OK && grown_size == 8;
+    printf(
+        "[selftest] storage/truncate: %s (shrink_size=%zu grown_size=%llu)\n",
+        ok ? "OK" : "FAIL",
+        shrink_size,
+        (unsigned long long)grown_size
+    );
+    return ok;
+}
+
 bool selftest__run_storage_mkdir_case(void) {
     static const char *const path = "/selftest_directory";
     (void)storage__remove(path);

@@ -107,6 +107,18 @@ bruce_result_t storage__write(bruce_file_id_t file, const void *buffer, size_t s
 bruce_result_t storage__seek(bruce_file_id_t file, int64_t offset, int whence, uint64_t *out_position);
 
 /**
+ * @brief Truncates (or extends with zero bytes) an open file to a given length.
+ *
+ * Does not change the file's current seek position, matching POSIX
+ * ftruncate()'s own contract -- callers that need the position clamped
+ * (e.g. after shrinking past it) must storage__seek() separately.
+ *
+ * @param file File handle from storage__open(), opened for writing.
+ * @param length New length, in bytes.
+ */
+bruce_result_t storage__truncate(bruce_file_id_t file, uint64_t length);
+
+/**
  * @brief Closes an open file.
  *
  * @param file File handle to close.
