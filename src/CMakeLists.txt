@@ -296,7 +296,8 @@ idf_component_register(SRCS
 
 target_link_options(${COMPONENT_LIB} INTERFACE
                     "LINKER:--wrap=jpeg_get_large"
-                    "LINKER:--wrap=jpeg_open_backing_store")
+                    "LINKER:--wrap=jpeg_open_backing_store"
+                    "LINKER:-u,__muldi3")
 
 # wolfSSH/wolfSSL build fixups for this ESP-IDF v6 / PSRAM-less / software-crypto
 # configuration; see components/wolfssl_esp_patches/patch_wolfssl_esp_idf6.cmake

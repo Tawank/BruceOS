@@ -1,0 +1,10 @@
+dependencies:
+  idf: '>=5.1'
+  # Upstream doomgeneric (github.com/ozkl/doomgeneric) isn't itself an
+  # ESP-IDF component -- no idf_component.yml/CMakeLists.txt of its own --
+  # and ESP-IDF's build system requires every managed_components/* entry to
+  # be a real, registerable component (a bare directory errors hard, unlike
+  # a plain component-directory-scan miss). So it's fetched separately, at
+  # CMake configure time, by doomgeneric_sources.cmake instead of listed
+  # here -- see that file's comment for the exact mechanism.
+  espressif/elf_loader: ^1.3.1

@@ -123,6 +123,11 @@ extern double __subdf3(double left, double right);
 extern float __truncdfsf2(double value);
 extern unsigned long long __udivdi3(unsigned long long dividend, unsigned long long divisor);
 extern float __ieee754_sqrtf(float value);
+/* Xtensa has no 64x64 hardware multiply either, so GCC lowers a plain
+ * `int64_t * int64_t` (e.g. Doom's FixedMul: `((int64_t)a * (int64_t)b) >>
+ * FRACBITS`, its single hottest-path arithmetic op) to this libgcc call,
+ * same rationale as the other __*di3 entries above. */
+extern long long __muldi3(long long left, long long right);
 
 static int bruce_elf__puts(const char *text) {
     if (text == NULL || stdio__write(text, strlen(text)) != BRUCE_OK) return EOF;
@@ -982,6 +987,20 @@ int bruce_elf__mkdir(const char *path, mode_t mode) {
         return -1;
     }
     return 0;
+}
+
+/* There is no shell/command interpreter to hand a command line to in this
+ * sandbox, so this always reports "no command processor available" --
+ * exactly the standard's own escape hatch for that case (system(NULL) is
+ * conventionally used to probe for one and expects a falsy/zero result;
+ * system(cmd) with a real command then has nothing sane to do but fail).
+ * Ported C that only uses this for an optional, gracefully-degrading
+ * convenience (e.g. doomgeneric's i_system.c shelling out to `zenity` for
+ * an error dialog if present) still links and just takes the "not
+ * available" path at runtime instead of getting an unresolved symbol. */
+int bruce_elf__system(const char *command) {
+    (void)command;
+    return command == NULL ? 0 : -1;
 }
 
 int bruce_elf__access(const char *path, int mode) {
@@ -2287,6 +2306,7 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     {"stat",     (const void *)&bruce_elf__stat     },
     {"fstat",    (const void *)&bruce_elf__fstat    },
     {"mkdir",    (const void *)&bruce_elf__mkdir    },
+    {"system",   (const void *)&bruce_elf__system   },
     {"access",   (const void *)&bruce_elf__access   },
     {"unlink",   (const void *)&bruce_elf__remove   }, /* unlink() and remove() are the same operation here */
     {"opendir",  (const void *)&bruce_elf__opendir  },
@@ -2441,6 +2461,7 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(__subdf3),
     ESP_ELFSYM_EXPORT(__truncdfsf2),
     ESP_ELFSYM_EXPORT(__udivdi3),
+    ESP_ELFSYM_EXPORT(__muldi3),
 
     /* libm. Real implementations already exist in the firmware's own libm;
      * this just exposes them to ELF apps that do floating-point math

@@ -1,0 +1,10 @@
+{
+  "appName": "Doom",
+  "entryPoint": "app_main",
+  "appIcon": "icon:gamepad-square",
+  "coreAbiVersion": 4,
+  "permissions": ["storage"],
+  "stackSize": 16384,
+  "heapSize": 4718592,
+  "targets": ["elf"]
+}
