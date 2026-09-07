@@ -634,7 +634,12 @@ void ap_print_help(ArgParser *parser) {
         stdio__printf("\n");
     }
     stdio__printf("  -h, --help\tShow this help\n");
-    if (parser->version != NULL) stdio__printf("  -v, --version\tShow version\n");
+    if (parser->version != NULL) {
+        /* Same opt-out as the "-h" shortcut above: a command that has
+         * claimed its own "v" option (nc's --verbose used to collide here)
+         * keeps its own listing for "v" and this becomes --version-only. */
+        stdio__printf(ap_find_option(parser, "v") == NULL ? "  -v, --version\tShow version\n" : "  --version\tShow version\n");
+    }
 }
 
 static bool ap_append_positional(ArgParser *parser, char *value) {
@@ -758,7 +763,13 @@ static bool ap_parse_level(ArgParser *parser, int argc, char **argv, int start) 
             ap_set_status(parser, AP_STATUS_HELP);
             return false;
         }
-        if (options_enabled && parser->version != NULL && (strcmp(arg, "--version") == 0 || strcmp(arg, "-v") == 0)) {
+        if (options_enabled && parser->version != NULL && strcmp(arg, "--version") == 0) {
+            stdio__printf("%s\n", parser->version);
+            ap_set_status(parser, AP_STATUS_VERSION);
+            return false;
+        }
+        if (options_enabled && parser->version != NULL && strcmp(arg, "-v") == 0 &&
+            ap_find_option(parser, "v") == NULL) {
             stdio__printf("%s\n", parser->version);
             ap_set_status(parser, AP_STATUS_VERSION);
             return false;

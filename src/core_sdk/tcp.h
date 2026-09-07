@@ -32,6 +32,26 @@ typedef struct {
 bruce_result_t tcp__connect(const char *host, uint16_t port, uint32_t timeout_ms, bruce_tcp_id_t *out_socket);
 
 /**
+ * @brief Connects to a TCP endpoint from a specific local port.
+ *
+ * Same as tcp__connect(), but binds the local end of the connection to
+ * `local_port` before connecting (0 behaves exactly like tcp__connect() --
+ * an OS-assigned ephemeral port). Useful for reaching a peer whose firewall
+ * trusts traffic from a specific source port. Fails with BRUCE_ERR_IO if
+ * `local_port` is already bound by something else.
+ *
+ * @param host Hostname or IP address to connect to.
+ * @param port TCP port to connect to.
+ * @param local_port Local port to bind before connecting, or 0 for an OS-assigned ephemeral port.
+ * @param timeout_ms Connection timeout in milliseconds (0 polls).
+ * @param out_socket Receives the new socket handle.
+ * @permission wifi
+ */
+bruce_result_t tcp__connect_from(
+    const char *host, uint16_t port, uint16_t local_port, uint32_t timeout_ms, bruce_tcp_id_t *out_socket
+);
+
+/**
  * @brief Starts listening for inbound TCP connections on a port.
  *
  * @param port TCP port to listen on.

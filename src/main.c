@@ -144,7 +144,7 @@ static const bruce_app_descriptor_t s_default_apps[] = {
     {"ssh", "Connect to an SSH server", "Network", ssh_app_main, SSH_STACK_BYTES},
     {"ssh-keygen", "Generate SSH keys", "Network", ssh_keygen_app_main, SSH_STACK_BYTES},
     {"sftp", "Browse/download files over SFTP", "Network", sftp_app_main, SSH_STACK_BYTES},
-    {"nc", "Connect to or listen on a TCP socket", "Network", nc_app_main, 0},
+    {"nc", "TCP/UDP client, listener, and port scanner (netcat-style)", "Network", nc_app_main, 0},
     {"webui", "Start the web interface", "Network", webui_app_main, 0},
     {"wget", "Download files from URLs", "Network", bnu_wget_app_main, HTTP_STACK_BYTES},
     {"wifi", "Manage Wi-Fi connections", "Network", wifi_app_main, WIFI_STACK_BYTES},

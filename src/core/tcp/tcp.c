@@ -138,6 +138,12 @@ static bruce_result_t tcp__wait_fd(int fd, bool write_ready, uint32_t timeout_ms
 
 bruce_result_t
 tcp__connect(const char *host, uint16_t port, uint32_t timeout_ms, bruce_tcp_id_t *out_socket) {
+    return tcp__connect_from(host, port, 0, timeout_ms, out_socket);
+}
+
+bruce_result_t tcp__connect_from(
+    const char *host, uint16_t port, uint16_t local_port, uint32_t timeout_ms, bruce_tcp_id_t *out_socket
+) {
     bruce_result_t permission = permission__check(BRUCE_PERMISSION_WIFI);
     if (permission != BRUCE_OK) return permission;
     if (host == NULL || host[0] == '\0' || port == 0 || out_socket == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
@@ -161,6 +167,24 @@ tcp__connect(const char *host, uint16_t port, uint32_t timeout_ms, bruce_tcp_id_
         freeaddrinfo(addresses);
         close(fd);
         return BRUCE_ERR_IO;
+    }
+
+    if (local_port != 0) {
+        /* Must bind() before connect() -- this is what pins the local end of
+         * the connection instead of letting the OS assign an ephemeral port.
+         * SO_REUSEADDR mirrors tcp__listen()'s own rationale: a prior
+         * connection from this same local port may still be in TIME_WAIT. */
+        struct sockaddr_in local_address = {0};
+        local_address.sin_family = AF_INET;
+        local_address.sin_addr.s_addr = INADDR_ANY;
+        local_address.sin_port = htons(local_port);
+        int reuse = 1;
+        (void)setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+        if (bind(fd, (struct sockaddr *)&local_address, sizeof(local_address)) < 0) {
+            freeaddrinfo(addresses);
+            close(fd);
+            return BRUCE_ERR_IO;
+        }
     }
 
     bruce_tcp_id_t socket_id = BRUCE_TCP_ID_INVALID;

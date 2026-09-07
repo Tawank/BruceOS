@@ -137,10 +137,54 @@ static bool selftest__args_wifi_integration(void) {
            wifi_app_main(3, unknown_argv) == -1 && wifi_app_main(2, status_argv) == 0;
 }
 
+/* "-h"/"-v" are only ArgParser's own --help/--version shortcuts while a
+ * command hasn't claimed that same letter for its own option (bnu_disk_app.c
+ * claims "h" for human-readable sizes; nc_app.c claims "v" for --verbose,
+ * which used to collide silently with the auto-installed -v/--version --
+ * see args.c's ap_parse_level()). "--help"/"--version" always mean
+ * help/version; only the one-letter form has this opt-out. */
+static bool selftest__args_short_flag_opt_out(void) {
+    ArgParser *unclaimed = ap_new_parser();
+    if (unclaimed == NULL) return false;
+    ap_set_version(unclaimed, "unclaimed 1.0");
+    char *dash_v_argv[] = {"app", "-v"};
+    bool unclaimed_ok = !ap_parse(unclaimed, 2, dash_v_argv) && ap_get_status(unclaimed) == AP_STATUS_VERSION;
+    ap_free(unclaimed);
+
+    ArgParser *claimed_h = ap_new_parser();
+    if (claimed_h == NULL) return false;
+    ap_add_flag(claimed_h, "h");
+    char *dash_h_argv[] = {"app", "-h"};
+    bool claimed_h_ok =
+        ap_parse(claimed_h, 2, dash_h_argv) && ap_get_status(claimed_h) == AP_STATUS_OK && ap_found(claimed_h, "h");
+    ap_free(claimed_h);
+
+    ArgParser *claimed_v = ap_new_parser();
+    if (claimed_v == NULL) return false;
+    ap_set_version(claimed_v, "claimed 1.0");
+    ap_add_flag(claimed_v, "v");
+    bool claimed_v_ok =
+        ap_parse(claimed_v, 2, dash_v_argv) && ap_get_status(claimed_v) == AP_STATUS_OK && ap_found(claimed_v, "v");
+    ap_free(claimed_v);
+
+    /* Even with "v" claimed, "--version" itself has no opt-out. */
+    ArgParser *claimed_v_long = ap_new_parser();
+    if (claimed_v_long == NULL) return false;
+    ap_set_version(claimed_v_long, "claimed 1.0");
+    ap_add_flag(claimed_v_long, "v");
+    char *long_version_argv[] = {"app", "--version"};
+    bool long_version_ok =
+        !ap_parse(claimed_v_long, 2, long_version_argv) && ap_get_status(claimed_v_long) == AP_STATUS_VERSION;
+    ap_free(claimed_v_long);
+
+    return unclaimed_ok && claimed_h_ok && claimed_v_ok && long_version_ok;
+}
+
 bool selftest__run_args_case(void) {
     bool ok = selftest__args_named_positionals() && selftest__args_nonfatal_status() &&
               selftest__args_trailing_positionals() && selftest__args_module_help() &&
-              selftest__args_wifi_integration() && selftest__args_help_integration();
+              selftest__args_wifi_integration() && selftest__args_help_integration() &&
+              selftest__args_short_flag_opt_out();
     printf("[selftest] args: %s\n", ok ? "OK" : "failed");
     return ok;
 }
