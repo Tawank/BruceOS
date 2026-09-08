@@ -12,6 +12,7 @@
 
 #include "core_sdk/memory.h"
 #include "core_sdk/stdio.h"
+#include "core_sdk/tty.h"
 
 typedef enum {
     AP_OPT_FLAG,
@@ -562,7 +563,26 @@ static void ap_print_usage_path(ArgParser *parser) {
     }
 }
 
-static void ap_print_aliases(const char *names, const char *prefix) {
+/* Appends formatted text to `buf` (capacity `cap`) starting at `*len` bytes
+ * already used, the same way repeated snprintf() calls compose a string --
+ * `*len` tracks the length that would have been written even past `cap`
+ * (like snprintf's own return value), so overflowing calls are silently
+ * measured rather than corrupting anything, and a caller only interested in
+ * the final length can pass a buffer that's too small on purpose. */
+static void ap_buf_appendf(char *buf, size_t cap, size_t *len, const char *format, ...) {
+    size_t offset = *len < cap ? *len : cap;
+    va_list args;
+    va_start(args, format);
+    int n = vsnprintf(buf + offset, cap - offset, format, args);
+    va_end(args);
+    if (n > 0) *len += (size_t)n;
+}
+
+/* Appends `names` (a parser's/option's space-separated alias list) to `buf`
+ * as a comma-separated list. `dash_prefixed` picks "-"/"--" per token
+ * (options, where the token length says which) or no prefix at all
+ * (subcommand names, which aren't typed with a dash). */
+static void ap_format_names(char *buf, size_t cap, size_t *len, const char *names, bool dash_prefixed) {
     const char *cursor = names;
     bool first = true;
     while (cursor != NULL && *cursor != '\0') {
@@ -570,9 +590,59 @@ static void ap_print_aliases(const char *names, const char *prefix) {
         const char *start = cursor;
         while (*cursor != '\0' && *cursor != ' ') cursor++;
         if (cursor == start) break;
-        stdio__printf("%s%s%.*s", first ? "" : ", ", prefix, (int)(cursor - start), start);
+        const char *prefix = !dash_prefixed ? "" : (cursor - start == 1 ? "-" : "--");
+        ap_buf_appendf(buf, cap, len, "%s%s%.*s", first ? "" : ", ", prefix, (int)(cursor - start), start);
         first = false;
     }
+}
+
+/* The next three build one help-row's left-hand label ("name (required)",
+ * "-x, --long <value>", ...) into `buf` and return its length, with no
+ * leading indent and no trailing gap or helptext - just the label itself,
+ * so ap_print_help() below can both measure it (for column alignment) and
+ * print it (once padded) from the exact same formatting logic. */
+static size_t ap_format_command_label(char *buf, size_t cap, const ap_command_t *command) {
+    size_t len = 0;
+    ap_format_names(buf, cap, &len, command->names, false);
+    for (int j = 0; j < command->parser->positional_count; ++j) {
+        ap_positional_t *positional = &command->parser->positionals[j];
+        ap_buf_appendf(buf, cap, &len, positional->required ? " <%s>" : " [%s]", positional->name);
+    }
+    if (command->parser->allow_extra_args) ap_buf_appendf(buf, cap, &len, " [args...]");
+    if (command->parser->command_count > 0) ap_buf_appendf(buf, cap, &len, " <command>");
+    return len;
+}
+
+static size_t ap_format_positional_label(char *buf, size_t cap, const ap_positional_t *positional) {
+    size_t len = 0;
+    ap_buf_appendf(buf, cap, &len, "%s%s", positional->name, positional->required ? " (required)" : "");
+    return len;
+}
+
+static size_t ap_format_option_label(char *buf, size_t cap, const ap_option_t *option) {
+    size_t len = 0;
+    ap_format_names(buf, cap, &len, option->names, true);
+    if (option->type != AP_OPT_FLAG) ap_buf_appendf(buf, cap, &len, " <value>");
+    return len;
+}
+
+/* Prints one already-built help row: two-space indent, the label, then
+ * (when there's helptext) a gap and the helptext. In `aligned` mode the gap
+ * pads every row's helptext out to the same column, `label_width` (the
+ * longest label anywhere in this ap_print_help() call) plus a minimum
+ * two-space breathing room; otherwise the gap is always exactly that same
+ * two spaces, matching what interactive use on the device has always
+ * looked like (just without the '\t' this replaces - see ap_print_help()'s
+ * own comment on why '\t' had to go). */
+static void ap_print_row(const char *label, const char *helptext, bool aligned, size_t label_width) {
+    stdio__printf("  %s", label);
+    if (helptext == NULL || helptext[0] == '\0') {
+        stdio__printf("\n");
+        return;
+    }
+    size_t label_len = strlen(label);
+    size_t gap = (aligned && label_width > label_len ? label_width - label_len : 0) + 2;
+    stdio__printf("%*s%s\n", (int)gap, "", helptext);
 }
 
 void ap_print_help(ArgParser *parser) {
@@ -588,20 +658,54 @@ void ap_print_help(ArgParser *parser) {
     stdio__printf("\n");
     if (parser->helptext != NULL && parser->helptext[0] != '\0') stdio__printf("\n%s\n", parser->helptext);
 
+    /* Every "label  helptext" row below (Commands/Arguments/Options, plus
+     * the built-in -h/-v lines) used to separate the two with a literal
+     * '\t' - which a real terminal lands at whatever tab stop comes after
+     * the label, a different column depending how long the label was, so
+     * two labels of different lengths never lined their helptext up.
+     * Replaced with a column computed from the widest label in this help
+     * output (aligned mode), or a plain two-space gap (unaligned) with no
+     * attempt at alignment at all.
+     *
+     * Which one applies is decided the same way man_app.c's --line-marker
+     * decides live-terminal vs. captured output: tty__isatty(). The
+     * device's own console is a real tty with a small physical display, no
+     * room to spare on a wide alignment column - aligned mode is for
+     * anything reading this over a non-tty pipe (a host capture, e.g.
+     * `man --gen-md`'s per-command `<command> --help` capture, or a plain
+     * `<command> --help > file`), where terminal width isn't a scarce
+     * resource. */
+    bool aligned = !tty__isatty();
+    size_t label_width = 0;
+    char label[128];
+    static const char *const help_label = "-h, --help";
+    const char *version_label = parser->version == NULL                    ? NULL
+                                 : ap_find_option(parser, "v") == NULL ? "-v, --version"
+                                                                        : "--version";
+
+    if (aligned) {
+        for (int i = 0; i < parser->command_count; ++i) {
+            size_t len = ap_format_command_label(label, sizeof(label), &parser->commands[i]);
+            if (len > label_width) label_width = len;
+        }
+        for (int i = 0; i < parser->positional_count; ++i) {
+            size_t len = ap_format_positional_label(label, sizeof(label), &parser->positionals[i]);
+            if (len > label_width) label_width = len;
+        }
+        for (int i = 0; i < parser->option_count; ++i) {
+            size_t len = ap_format_option_label(label, sizeof(label), parser->options[i]);
+            if (len > label_width) label_width = len;
+        }
+        if (strlen(help_label) > label_width) label_width = strlen(help_label);
+        if (version_label != NULL && strlen(version_label) > label_width) label_width = strlen(version_label);
+    }
+
     if (parser->command_count > 0) {
         stdio__printf("\nCommands:\n");
         for (int i = 0; i < parser->command_count; ++i) {
             ap_command_t *command = &parser->commands[i];
-            stdio__printf("  ");
-            ap_print_aliases(command->names, "");
-            for (int j = 0; j < command->parser->positional_count; ++j) {
-                ap_positional_t *positional = &command->parser->positionals[j];
-                stdio__printf(positional->required ? " <%s>" : " [%s]", positional->name);
-            }
-            if (command->parser->allow_extra_args) stdio__printf(" [args...]");
-            if (command->parser->command_count > 0) stdio__printf(" <command>");
-            if (command->parser->helptext != NULL) stdio__printf("\t%s", command->parser->helptext);
-            stdio__printf("\n");
+            ap_format_command_label(label, sizeof(label), command);
+            ap_print_row(label, command->parser->helptext, aligned, label_width);
         }
     }
 
@@ -609,36 +713,23 @@ void ap_print_help(ArgParser *parser) {
         stdio__printf("\nArguments:\n");
         for (int i = 0; i < parser->positional_count; ++i) {
             ap_positional_t *positional = &parser->positionals[i];
-            stdio__printf("  %s%s", positional->name, positional->required ? " (required)" : "");
-            if (positional->helptext != NULL) stdio__printf("\t%s", positional->helptext);
-            stdio__printf("\n");
+            ap_format_positional_label(label, sizeof(label), positional);
+            ap_print_row(label, positional->helptext, aligned, label_width);
         }
     }
 
     stdio__printf("\nOptions:\n");
     for (int i = 0; i < parser->option_count; ++i) {
         ap_option_t *option = parser->options[i];
-        stdio__printf("  ");
-        const char *cursor = option->names;
-        bool first = true;
-        while (*cursor != '\0') {
-            while (*cursor == ' ') cursor++;
-            const char *start = cursor;
-            while (*cursor != '\0' && *cursor != ' ') cursor++;
-            if (cursor == start) break;
-            stdio__printf("%s%s%.*s", first ? "" : ", ", cursor - start == 1 ? "-" : "--", (int)(cursor - start), start);
-            first = false;
-        }
-        if (option->type != AP_OPT_FLAG) stdio__printf(" <value>");
-        if (option->helptext != NULL) stdio__printf("\t%s", option->helptext);
-        stdio__printf("\n");
+        ap_format_option_label(label, sizeof(label), option);
+        ap_print_row(label, option->helptext, aligned, label_width);
     }
-    stdio__printf("  -h, --help\tShow this help\n");
-    if (parser->version != NULL) {
+    ap_print_row(help_label, "Show this help", aligned, label_width);
+    if (version_label != NULL) {
         /* Same opt-out as the "-h" shortcut above: a command that has
          * claimed its own "v" option (nc's --verbose used to collide here)
          * keeps its own listing for "v" and this becomes --version-only. */
-        stdio__printf(ap_find_option(parser, "v") == NULL ? "  -v, --version\tShow version\n" : "  --version\tShow version\n");
+        ap_print_row(version_label, "Show version", aligned, label_width);
     }
 }
 

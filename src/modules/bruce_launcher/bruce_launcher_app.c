@@ -21,6 +21,7 @@
 #include "core_sdk/result.h"
 #include "core_sdk/runtime.h"
 #include "core_sdk/status_icon.h"
+#include "core_sdk/stdio.h"
 
 /* MainMenu visual-style constants. */
 #define BRUCE_LAUNCHER_BORDER_PAD 5
@@ -1413,7 +1414,7 @@ static int bruce_launcher__run_terminal_menu(const bruce_launcher_menu_t *menu) 
 
         if (choice_result == BRUCE_ERR_CANCELLED) { break; }
         if (choice_result != BRUCE_OK) {
-            printf("Invalid choice (%d), try again.\n", choice_result);
+            stdio__printf("Invalid choice (%d), try again.\n", choice_result);
             continue;
         }
 
@@ -1436,7 +1437,7 @@ static int bruce_launcher__run_terminal_menu(const bruce_launcher_menu_t *menu) 
 
 int bruce_launcher_app_main(int argc, char **argv) {
     if (argc > 1 && (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)) {
-        printf("Open the Bruce launcher.\nUsage: bruce_launcher [config ...]\n");
+        stdio__printf("Open the Bruce launcher.\nUsage: bruce_launcher [config ...]\n");
         return BRUCE_OK;
     }
 
@@ -1451,7 +1452,7 @@ int bruce_launcher_app_main(int argc, char **argv) {
 
     bruce_launcher_menu_t *root = bruce_launcher__menu_load();
     if (root == NULL) {
-        printf("Failed to load launcher configuration\n");
+        stdio__printf("Failed to load launcher configuration\n");
         return BRUCE_ERR_INTERNAL;
     }
 

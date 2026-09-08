@@ -1,6 +1,5 @@
 #include "bootanimation_app.h"
 
-#include <stdio.h>
 #include <string.h>
 
 #include "core_sdk/config.h"
@@ -8,6 +7,7 @@
 #include "core_sdk/image.h"
 #include "core_sdk/input.h"
 #include "core_sdk/runtime.h"
+#include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
 
 #define BOOTANIMATION__TOTAL_MS 7000u
@@ -373,7 +373,7 @@ static bruce_result_t bootanimation__finish(bruce_result_t result) {
 
 int bootanimation_app_main(int argc, char **argv) {
     if (argc > 1 && (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)) {
-        printf("Play the boot animation.\n");
+        stdio__printf("Play the boot animation.\n");
         return BRUCE_OK;
     }
 

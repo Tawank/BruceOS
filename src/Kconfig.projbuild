@@ -19,8 +19,11 @@ menu "Bruce hardware configuration"
             sdkconfig value isn't something `idf.py -D ...` can override, only
             seed when unset) to run one module/case (e.g.
             "selftest args notification" -- see `selftest --list`) or to
-            drive an unrelated command instead, e.g. "man --gen-md" for
-            tools/gen_commands_doc.py.
+            drive an unrelated command instead, e.g. "man --gen-md
+            --line-marker" for tools/gen_commands_doc.py (--line-marker asks
+            man to mark real line breaks with a byte a capture artifact
+            can't be confused with -- see man_app.c's
+            MAN_APP_GEN_MD_LINE_MARKER and tests/pytest_gen_docs.py).
 
             This has to be a build-time setting rather than something the
             pytest harness types at runtime once QEMU is already up: the

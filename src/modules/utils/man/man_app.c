@@ -1,6 +1,7 @@
 #include "man_app.h"
 
 #include <ctype.h>
+#include <stdarg.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
@@ -120,14 +121,130 @@ static int man_app__list_commands(void) {
  * or otherwise block waiting for input), which would hang --gen-md forever.
  * Give each command this long to exit before it gets killed and skipped. */
 #define MAN_APP_GEN_MD_HELP_TIMEOUT_MS 5000u
+/* `--gen-md` prints on the order of 1800 lines across ~180 stdio__printf-sized
+ * calls' worth of pieces; done unbuffered, that's ~600+ individual
+ * stdio__write() calls, each its own raw write() syscall to the console.
+ * Buffering them through man_app__buf_t below coalesces that into a handful
+ * of much larger writes, which is simply cheaper.
+ *
+ * It does NOT, on its own, fix the QEMU-test-harness-only artifact where a
+ * stray extra newline occasionally appears in the captured output: that was
+ * tried and measured (see git history on this file) - the anomaly rate was
+ * unchanged, and one occurrence was confirmed sitting entirely inside a
+ * single buffered write()'s payload, disproving the original "gap between
+ * two small writes" theory. Wrapping every write() syscall in the firmware
+ * already confirmed it never originates from BruceOS's own code; buffering
+ * further confirms it isn't a function of write() boundaries either, so
+ * it's downstream of the firmware entirely - in QEMU's virtual UART or the
+ * pty/serial capture path. See MAN_APP_GEN_MD_LINE_MARKER below for the
+ * actual fix; 2KB here just keeps most of the doc in a handful of writes. */
+#define MAN_APP_GEN_MD_BUF_CAPACITY 2048u
+/* `--line-marker` mode (see man_app_main()) writes this byte everywhere
+ * gen-md content would otherwise have a '\n', and never writes a real '\n'
+ * at all. That makes the two kinds of newline the QEMU capture artifact
+ * above could otherwise be confused with unambiguous downstream: a real
+ * line break always survives as this marker; a literal '\n' appearing in
+ * the raw captured bytes can therefore only be that artifact, and gets
+ * dropped rather than guessed at (tests/pytest_gen_docs.py does the
+ * strip-then-restore on the host side once capture is complete - see its
+ * LINE_MARKER constant, which must match this byte).
+ * 0x1E (ASCII Record Separator) is a plain, boring control byte: it can't
+ * appear in any command's --help text (all printable ASCII/'\n'/'\t'), and
+ * unlike NUL or XON/XOFF (0x11/0x13) it has no special meaning to a tty
+ * layer or serial link along the way. */
+#define MAN_APP_GEN_MD_LINE_MARKER '\x1e'
+
+typedef struct {
+    char *data;
+    size_t len;
+    size_t cap;
+    bool use_marker;
+} man_app__buf_t;
+
+static void man_app__buf_flush(man_app__buf_t *buf) {
+    if (buf->len == 0) return;
+    (void)stdio__write(buf->data, buf->len);
+    buf->len = 0;
+}
+
+static void man_app__buf_put(man_app__buf_t *buf, char c) {
+    if (buf->cap == 0) {
+        /* Degraded fallback: buffer allocation failed, so there's nothing to
+         * coalesce into - write straight through, one byte at a time. Still
+         * correct, just as unbuffered as before this refactor. */
+        (void)stdio__write(&c, 1);
+        return;
+    }
+    if (buf->len >= buf->cap) man_app__buf_flush(buf);
+    buf->data[buf->len++] = c;
+}
+
+/* Appends to the buffer one byte at a time (flushing whenever it fills up),
+ * translating '\n' to MAN_APP_GEN_MD_LINE_MARKER first when `buf->use_marker`
+ * is set. Doing the translation here, in the one function every gen-md
+ * content path (buf_printf below and man_app__relay_stripped's relayed
+ * --help output) ultimately funnels through, means neither of those call
+ * sites has to know or care whether marker mode is active. */
+static void man_app__buf_write(man_app__buf_t *buf, const char *data, size_t size) {
+    for (size_t i = 0; i < size; ++i) {
+        char c = data[i];
+        if (buf->use_marker && c == '\n') c = MAN_APP_GEN_MD_LINE_MARKER;
+        man_app__buf_put(buf, c);
+    }
+}
+
+static void man_app__buf_printf(man_app__buf_t *buf, const char *format, ...) {
+    char tmp[384];
+    va_list args;
+    va_start(args, format);
+    int n = vsnprintf(tmp, sizeof(tmp), format, args);
+    va_end(args);
+    if (n < 0) return;
+    if ((size_t)n < sizeof(tmp)) {
+        man_app__buf_write(buf, tmp, (size_t)n);
+        return;
+    }
+    /* Rare (only a --gen-md summary line's %zu formatting could ever get
+     * close to 384 bytes): reformat into a big-enough heap buffer instead of
+     * truncating. */
+    char *big = memory__malloc((size_t)n + 1);
+    if (big == NULL) return;
+    va_start(args, format);
+    (void)vsnprintf(big, (size_t)n + 1, format, args);
+    va_end(args);
+    man_app__buf_write(buf, big, (size_t)n);
+    memory__free(big);
+}
+
+/* stdio__session_write_output() (core/stdio/stdio.c) inserts a '\r' before
+ * every '\n' written into a captured session, so a live terminal redraws the
+ * cursor at column 0 the way `man <command>`'s own direct (non-captured)
+ * output already does via the UART driver. That's correct for a live
+ * terminal, but man_app__print_help() below reuses the same capture plumbing
+ * for `--gen-md`'s plain-text dump, which has no terminal to drive - relayed
+ * verbatim, each "\r\n" there needs a real terminal to collapse it back into
+ * one line break; without one (e.g. a test harness reading the raw byte
+ * stream) it looks like a blank line was inserted. Strip the '\r' back out
+ * here so both callers see plain '\n'-terminated text, matching what a real
+ * serial terminal has always shown a human watching `man --gen-md` scroll
+ * by. */
+static void man_app__relay_stripped(man_app__buf_t *buf, const char *chunk, size_t size) {
+    char out[256];
+    size_t n = 0;
+    for (size_t i = 0; i < size; ++i) {
+        if (chunk[i] == '\r') continue;
+        out[n++] = chunk[i];
+    }
+    if (n > 0) man_app__buf_write(buf, out, n);
+}
 
 /* Runs `command --help` on a throwaway stdio session and streams everything
- * it prints straight to the screen as it arrives - the same live output
- * `man <command>` shows, just looped over every command in a row instead of
- * one. Sets `*out_bytes` to how much was printed. Returns BRUCE_ERR_TIMEOUT
- * (and kills the command) if it doesn't exit on its own within the timeout
- * above. */
-static bruce_result_t man_app__print_help(const char *command, size_t *out_bytes) {
+ * it prints into `buf` as it arrives - the same output `man <command>` shows
+ * live, just looped over every command in a row and buffered instead of
+ * written straight through. Sets `*out_bytes` to how much was captured.
+ * Returns BRUCE_ERR_TIMEOUT (and kills the command) if it doesn't exit on
+ * its own within the timeout above. */
+static bruce_result_t man_app__print_help(man_app__buf_t *buf, const char *command, size_t *out_bytes) {
     *out_bytes = 0;
     bruce_stdio_session_t session = BRUCE_STDIO_SESSION_INVALID;
     if (stdio__session_create(&session) != BRUCE_OK) return BRUCE_ERR_IO;
@@ -150,7 +267,7 @@ static bruce_result_t man_app__print_help(const char *command, size_t *out_bytes
         char chunk[256];
         size_t size = 0;
         while (stdio__session_read_output(session, chunk, sizeof(chunk), &size) == BRUCE_OK) {
-            (void)stdio__write(chunk, size);
+            man_app__relay_stripped(buf, chunk, size);
             *out_bytes += size;
         }
         bruce_result_t waited = process__wait_status((bruce_process_id_t)process_id, 0, &status);
@@ -171,7 +288,7 @@ static bruce_result_t man_app__print_help(const char *command, size_t *out_bytes
     char chunk[256];
     size_t size = 0;
     while (stdio__session_read_output(session, chunk, sizeof(chunk), &size) == BRUCE_OK) {
-        (void)stdio__write(chunk, size);
+        man_app__relay_stripped(buf, chunk, size);
         *out_bytes += size;
     }
     (void)stdio__session_close(session);
@@ -179,16 +296,17 @@ static bruce_result_t man_app__print_help(const char *command, size_t *out_bytes
 }
 
 typedef struct {
+    man_app__buf_t *buf;
     size_t timed_out;
 } man_app__gen_md_ctx_t;
 
 /* Prints one command's table-of-contents bullet: a link to its own "###
  * name" heading further down, plus its one-line description. */
-static void man_app__gen_md_toc_entry(size_t index) {
+static void man_app__gen_md_toc_entry(man_app__buf_t *buf, size_t index) {
     const char *name = app_runner__command_name(index);
     if (name == NULL) return;
     const char *description = app_runner__command_description(index);
-    stdio__printf("- [`%s`](#%s) - %s\n", name, name, description != NULL ? description : "");
+    man_app__buf_printf(buf, "- [`%s`](#%s) - %s\n", name, name, description != NULL ? description : "");
 }
 
 /* Prints one command's full section: a "### name" heading, its category and
@@ -200,30 +318,31 @@ static void man_app__gen_md_body_entry(size_t index, man_app__gen_md_ctx_t *ctx)
     const char *category = app_runner__command_category(index);
     const char *category_label = category != NULL && category[0] != '\0' ? category : "Uncategorized";
 
-    stdio__printf("\n### %s\n\n**Category:** %s\n\n", name, category_label);
-    if (description != NULL && description[0] != '\0') stdio__printf("%s\n\n", description);
+    man_app__buf_printf(ctx->buf, "\n### %s\n\n**Category:** %s\n\n", name, category_label);
+    if (description != NULL && description[0] != '\0') man_app__buf_printf(ctx->buf, "%s\n\n", description);
 
-    stdio__printf("```\n");
+    man_app__buf_write(ctx->buf, "```\n", 4);
     size_t bytes = 0;
-    bruce_result_t captured = man_app__print_help(name, &bytes);
+    bruce_result_t captured = man_app__print_help(ctx->buf, name, &bytes);
     if (captured == BRUCE_ERR_TIMEOUT) {
-        stdio__printf(
+        man_app__buf_printf(
+            ctx->buf,
             "(timed out waiting for --help output - command may ignore --help and block\n"
             "on input; it was killed so --gen-md could continue)\n"
         );
         ctx->timed_out++;
     } else if (captured != BRUCE_OK || bytes == 0) {
-        stdio__printf("(no --help output captured)\n");
+        man_app__buf_printf(ctx->buf, "(no --help output captured)\n");
     }
-    stdio__printf("```\n");
+    man_app__buf_write(ctx->buf, "```\n", 4);
 }
 
 /* Shared by both gen-md passes below: walks one category bucket, printing
  * its "### "/"## " header (named `bucket`, or "Other" for NULL) once, right
  * before the first command found in it, via `print_header`. */
 static void man_app__gen_md_walk_bucket(
-    const char *bucket, size_t count, const char *header_format, void (*visit_entry)(size_t, void *),
-    void *context
+    man_app__buf_t *buf, const char *bucket, size_t count, const char *header_format,
+    void (*visit_entry)(size_t, void *), void *context
 ) {
     bool header_printed = false;
     for (size_t i = 0; i < count; ++i) {
@@ -234,7 +353,7 @@ static void man_app__gen_md_walk_bucket(
         if (app_runner__command_name(i) == NULL) continue;
 
         if (!header_printed) {
-            stdio__printf(header_format, bucket != NULL ? bucket : "Other");
+            man_app__buf_printf(buf, header_format, bucket != NULL ? bucket : "Other");
             header_printed = true;
         }
         visit_entry(i, context);
@@ -242,12 +361,13 @@ static void man_app__gen_md_walk_bucket(
 }
 
 static void man_app__gen_md_toc_visit(size_t index, void *context) {
-    (void)context;
-    man_app__gen_md_toc_entry(index);
+    man_app__gen_md_toc_entry((man_app__buf_t *)context, index);
 }
 
 static void man_app__gen_md_toc_section(const char *bucket, size_t count, void *context) {
-    man_app__gen_md_walk_bucket(bucket, count, "\n### %s\n\n", man_app__gen_md_toc_visit, context);
+    man_app__gen_md_walk_bucket(
+        (man_app__buf_t *)context, bucket, count, "\n### %s\n\n", man_app__gen_md_toc_visit, context
+    );
 }
 
 static void man_app__gen_md_body_visit(size_t index, void *context) {
@@ -255,35 +375,56 @@ static void man_app__gen_md_body_visit(size_t index, void *context) {
 }
 
 static void man_app__gen_md_body_section(const char *bucket, size_t count, void *context) {
-    man_app__gen_md_walk_bucket(bucket, count, "\n## %s\n", man_app__gen_md_body_visit, context);
+    man_app__gen_md_ctx_t *ctx = (man_app__gen_md_ctx_t *)context;
+    man_app__gen_md_walk_bucket(ctx->buf, bucket, count, "\n## %s\n", man_app__gen_md_body_visit, context);
 }
 
 /* `man --gen-md`: prints a single Markdown doc covering every command
  * straight to the screen - a table of contents grouped by category linking
  * to each command's own section, followed by the sections themselves,
- * streamed out as each command is processed rather than built up in memory.
- * Never touches storage: it's meant to be captured off the terminal (or
- * piped, e.g. `man --gen-md > COMMANDS.md` from a host serial terminal),
- * since a doc this size written to the device's own flash can fill it. */
-static int man_app__gen_md(void) {
+ * streamed out as each command is processed rather than built up in memory
+ * (buffered through man_app__buf_t, see MAN_APP_GEN_MD_BUF_CAPACITY above -
+ * "streamed" means it isn't all held at once for the whole doc, not that
+ * every printf becomes its own write()). Never touches storage: it's meant
+ * to be captured off the terminal (or piped, e.g. `man --gen-md > COMMANDS.md`
+ * from a host serial terminal), since a doc this size written to the
+ * device's own flash can fill it.
+ *
+ * `use_marker` selects `--line-marker` mode (see MAN_APP_GEN_MD_LINE_MARKER
+ * and man_app_main() below) - a human at a real terminal wants ordinary
+ * '\n's, so this stays off by default; a host-side capture script that
+ * needs to tell a real line break apart from a capture-layer artifact turns
+ * it on and does the marker/newline swap itself once capture is done (see
+ * tests/pytest_gen_docs.py). */
+static int man_app__gen_md(bool use_marker) {
     size_t count = app_runner__command_count();
 
-    stdio__printf("# BruceOS Command Reference\n\nAuto-generated by `man --gen-md`.\n\n## Contents\n");
-    man_app__visit_all_sections(count, man_app__gen_md_toc_section, NULL);
+    man_app__buf_t buf = {
+        .data = memory__malloc(MAN_APP_GEN_MD_BUF_CAPACITY), .len = 0, .cap = 0, .use_marker = use_marker
+    };
+    if (buf.data != NULL) buf.cap = MAN_APP_GEN_MD_BUF_CAPACITY;
+    /* buf.cap stays 0 if the allocation failed, which degrades man_app__buf_write()
+     * above to writing everything straight through unbuffered - gen-md still
+     * works, it just loses the write-coalescing benefit. */
 
-    stdio__write("\n---\n", 5);
+    man_app__buf_printf(&buf, "# BruceOS Command Reference\n\nAuto-generated by `man --gen-md`.\n\n## Contents\n");
+    man_app__visit_all_sections(count, man_app__gen_md_toc_section, &buf);
 
-    man_app__gen_md_ctx_t ctx = {.timed_out = 0};
+    man_app__buf_write(&buf, "\n---\n", 5);
+
+    man_app__gen_md_ctx_t ctx = {.buf = &buf, .timed_out = 0};
     man_app__visit_all_sections(count, man_app__gen_md_body_section, &ctx);
 
     if (ctx.timed_out > 0) {
-        stdio__printf("\n(man: --gen-md: %zu command(s) timed out waiting for --help)\n", ctx.timed_out);
+        man_app__buf_printf(&buf, "\n(man: --gen-md: %zu command(s) timed out waiting for --help)\n", ctx.timed_out);
     }
     /* An unambiguous, greppable end-of-output marker (a Markdown comment, so
      * invisible if left in a rendered doc) -- lets a host-side capture
      * script (tools/gen_commands_doc.py) know it has everything without
      * guessing from a timeout or the shell prompt reappearing. */
-    stdio__printf("\n<!-- man --gen-md: end -->\n");
+    man_app__buf_printf(&buf, "\n<!-- man --gen-md: end -->\n");
+    man_app__buf_flush(&buf);
+    if (buf.data != NULL) memory__free(buf.data);
     return BRUCE_OK;
 }
 
@@ -326,6 +467,12 @@ int man_app_main(int argc, char **argv) {
     ap_add_optional_arg(parser, "command", "Registered command name");
     ap_add_flag(parser, "gen-md");
     ap_set_opt_help(parser, "gen-md", "Print a single Markdown doc covering every command to the screen");
+    ap_add_flag(parser, "line-marker");
+    ap_set_opt_help(
+        parser, "line-marker",
+        "With --gen-md, write byte 0x1E instead of newlines (for a host capture script to restore, "
+        "telling a real line break apart from anything a lossy capture link injects into the raw stream)"
+    );
 
     if (!ap_parse(parser, argc, argv)) {
         ap_status_t status = ap_get_status(parser);
@@ -339,7 +486,7 @@ int man_app_main(int argc, char **argv) {
 
     const char *command = ap_get_arg(parser, "command");
     int result;
-    if (ap_found(parser, "gen-md")) result = man_app__gen_md();
+    if (ap_found(parser, "gen-md")) result = man_app__gen_md(ap_found(parser, "line-marker"));
     else if (tty__isatty()) result = man_app__page(command);
     else result = command != NULL ? man_app__show_command(command) : man_app__list_commands();
     ap_free(parser);

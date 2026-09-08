@@ -87,7 +87,7 @@ def _reconfigure_boot_command(request):
     # rebuilds -- if needed -- before pytest-embedded's `dut` fixture flashes
     # and boots build-qemu/'s current image.
     if request.node.get_closest_marker("docs") is not None:
-        command = "man --gen-md"
+        command = "man --gen-md --line-marker"
     else:
         filters = request.config.getoption("--selftest-filter")
         command = " ".join(["selftest", *filters])

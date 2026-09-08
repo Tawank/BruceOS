@@ -16,6 +16,7 @@
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
 #include "core_sdk/runtime.h"
+#include "core_sdk/stdio.h"
 
 #define SYSTEM_MENU__APP_NAME "menu"
 #define SYSTEM_MENU__MAX_ITEMS 8
@@ -171,7 +172,7 @@ static int system_menu__run_action(const char *action) {
 
 int system_menu_app_main(int argc, char **argv) {
     if (argc > 1 && (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)) {
-        printf("Open the system menu.\n");
+        stdio__printf("Open the system menu.\n");
         return BRUCE_OK;
     }
 
