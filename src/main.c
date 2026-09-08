@@ -251,9 +251,26 @@ void quemu_test_mode__wait_for_serial_ready(void) {
     if (!serial_commands__wait_ready(MAIN_SERIAL_READY_TIMEOUT_MS)) {
         printf("Serial command frontend failed to start\n");
     }
-    printf("\n\nSELFTEST READY\n\n");
+    printf("\n\nQEMU READY\n\n");
     fflush(stdout);
-    app_runner__run_command("selftest", BRUCE_LAUNCH_BACKGROUND);
+    /* The QEMU serial chardev only emulates the guest-to-host (TX)
+     * direction in this configuration -- bytes the test harness writes to
+     * QEMU's stdin never reach the firmware's UART RX (confirmed
+     * experimentally: nothing typed over the QEMU serial link arrives),
+     * so the harness can't just type a command into the shell like a
+     * person at a real console would. Instead, CONFIG_BRUCE_QEMU_TEST_BOOT_COMMAND
+     * (default "selftest", overridable at build time -- see its Kconfig
+     * help and tests/conftest.py's _ensure_boot_command()) is launched here
+     * directly -- this is the one piece of test-running behavior baked
+     * into a QEMU test-mode image; everything else about the boot is an
+     * ordinary BruceOS shell. */
+    /* Success in background mode returns the new process's (positive)
+     * bruce_process_id_t, not BRUCE_OK -- only a negative bruce_result_t
+     * means the launch itself failed (see app_runner__run_command()'s
+     * result, ultimately from process_registry__create()). */
+    if (app_runner__run_command(CONFIG_BRUCE_QEMU_TEST_BOOT_COMMAND, BRUCE_LAUNCH_BACKGROUND) < 0) {
+        printf("Failed to launch QEMU test boot command: %s\n", CONFIG_BRUCE_QEMU_TEST_BOOT_COMMAND);
+    }
     return;
 }
 #endif

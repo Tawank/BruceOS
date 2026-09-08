@@ -4,10 +4,15 @@ from pytest_embedded import Dut
 
 
 def test_firmware_selftest(dut: Dut) -> None:
-    dut.expect_exact("SELFTEST READY", timeout=60)
+    # The reconfigure (if any) that made this build's boot command
+    # "selftest" (or "selftest <filter>...") already happened in the
+    # _reconfigure_boot_command autouse fixture, before this `dut` fixture
+    # flashed and booted build-qemu/'s image -- main.c launches that command
+    # itself right after "QEMU READY", so there's nothing left to type here.
+    dut.expect_exact("QEMU READY", timeout=60)
 
     status_pattern = re.compile(
-        rb"(\[selftest\] selftest__\w+ (?:PASS|FAIL)|SELFTEST PASS|SELFTEST FAIL|Guru Meditation Error|assert failed)"
+        rb"(\[selftest\] \S+ (?:PASS|FAIL)|SELFTEST PASS|SELFTEST FAIL|Guru Meditation Error|assert failed)"
     )
     while True:
         result = dut.expect(status_pattern, timeout=60)

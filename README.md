@@ -67,6 +67,26 @@ idf.py -B build-qemu build
 python -m pytest tests/pytest_firmware.py
 ```
 
+The QEMU image boots to the same interactive shell a real serial console
+would, then launches `selftest` on it (this is the one bit of test-running
+behavior baked into a QEMU test-mode boot -- QEMU's emulated serial link
+only carries firmware output back to the host in this setup, not typed
+input to the firmware, so the test can't just type the command itself once
+the shell's up). Pass `--selftest-filter` (repeatable) to run only cases
+whose name contains the given text, instead of the full suite -- this
+reconfigures and rebuilds `build-qemu/` with the matching boot command
+before the image boots, so expect a rebuild the first time you use it (or
+switch back):
+```sh
+python -m pytest tests/pytest_firmware.py --selftest-filter=notification
+```
+
+`docs/COMMANDS.md` is generated the same way, from the firmware's own
+`man --gen-md`:
+```sh
+python tools/gen_commands_doc.py
+```
+
 ## :keyboard: Discord Server
 
 Contact us in our [Discord Server](https://discord.gg/WJ9XF9czVT)!

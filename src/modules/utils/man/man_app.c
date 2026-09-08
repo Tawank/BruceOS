@@ -279,6 +279,11 @@ static int man_app__gen_md(void) {
     if (ctx.timed_out > 0) {
         stdio__printf("\n(man: --gen-md: %zu command(s) timed out waiting for --help)\n", ctx.timed_out);
     }
+    /* An unambiguous, greppable end-of-output marker (a Markdown comment, so
+     * invisible if left in a rendered doc) -- lets a host-side capture
+     * script (tools/gen_commands_doc.py) know it has everything without
+     * guessing from a timeout or the shell prompt reappearing. */
+    stdio__printf("\n<!-- man --gen-md: end -->\n");
     return BRUCE_OK;
 }
 

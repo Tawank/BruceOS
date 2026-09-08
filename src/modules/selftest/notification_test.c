@@ -160,6 +160,17 @@ bool selftest__run_notification_case(void) {
  * here by omission: if it ever regressed back to always drawing an overlay,
  * this would start failing. */
 bool selftest__run_notification_console_fallback_case(void) {
+    /* Regression guard for an observed flake: selftest__run_visual_cases()
+     * (the case immediately before this one) dismisses its own GUI banner
+     * and waits for it to hide before its child process exits, but that
+     * child's own process teardown (right after, in the parent) can still
+     * be settling display state when this case's poll starts -- landing a
+     * poll in that window could catch a leftover "visible" a moment before
+     * it clears, misreported as this push's own banner. Wait for a known
+     * hidden baseline first so the assertion below is actually about *this*
+     * push, not a race with the previous case's cleanup. */
+    (void)notification_test__wait_visible(false, NULL);
+
     if (!selftest__push_notifications_as(false, selftest__notification_push_one_entry)) {
         printf("[selftest] notification/console-fallback: push failed\n");
         return false;

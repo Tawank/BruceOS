@@ -7,6 +7,31 @@ menu "Bruce hardware configuration"
             Skip physical display and input initialization and expose the
             serial self-test protocol used by the QEMU pytest suite.
 
+    config BRUCE_QEMU_TEST_BOOT_COMMAND
+        string "QEMU test-mode boot command"
+        depends on BRUCE_QEMU_TEST_MODE
+        default "selftest"
+        help
+            The single command main.c launches on the interactive shell right
+            after printing "QEMU READY". Default runs the whole self-test
+            suite; tests/conftest.py overrides it (by editing this value in
+            build-qemu/sdkconfig directly, then rebuilding -- an already-set
+            sdkconfig value isn't something `idf.py -D ...` can override, only
+            seed when unset) to run one module/case (e.g.
+            "selftest args notification" -- see `selftest --list`) or to
+            drive an unrelated command instead, e.g. "man --gen-md" for
+            tools/gen_commands_doc.py.
+
+            This has to be a build-time setting rather than something the
+            pytest harness types at runtime once QEMU is already up: the
+            QEMU serial chardev only emulates the guest-to-host (TX)
+            direction in this configuration -- bytes written to the QEMU
+            process's stdin never reach the firmware's UART RX, confirmed
+            experimentally (plain-pipe, pexpect-pty, and raw-pty
+            reproductions all showed zero bytes delivered), not just assumed
+            from the pre-existing "nothing types over the QEMU serial link"
+            comment this confirms.
+
     config BRUCE_POWER_HOLD_GPIO
         int "Power hold GPIO"
         default -1
