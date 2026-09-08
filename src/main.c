@@ -135,7 +135,6 @@ static const bruce_app_descriptor_t s_default_apps[] = {
     {"webui",                "Start the web interface",                                   "Network", webui_app_main,               0                     },
     {"wget",                 "Download files from URLs",                                  "Network", bnu_wget_app_main,            HTTP_STACK_BYTES      },
     {"wifi",                 "Manage Wi-Fi connections",                                  "Network", wifi_app_main,                WIFI_STACK_BYTES      },
-    {"wifi",                 "Manage Wi-Fi connections",                                  "Network", wifi_app_main,                WIFI_STACK_BYTES      },
 
     /* Radio - Bluetooth, infrared, NRF24, and other device buses. */
     {"bluetooth",            "Scan and manage Bluetooth devices",                         "Radio",   bluetooth_app_main,           0                     },
