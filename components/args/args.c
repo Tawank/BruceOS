@@ -626,14 +626,79 @@ static size_t ap_format_option_label(char *buf, size_t cap, const ap_option_t *o
     return len;
 }
 
+/* Aligned mode's line-wrap target: a fenced ```code block``` on GitHub never
+ * soft-wraps a long line the way a real terminal (or an ordinary Markdown
+ * paragraph outside the fence) does -- it just grows a horizontal scrollbar,
+ * which is exactly what a long helptext string used to do here (`nc`'s -e
+ * and -q options, `nmap`'s --sU, the top-level command blurbs, ...). Only
+ * relevant to aligned mode - unaligned/on-device output already gets
+ * soft-wrapped for free by the terminal it's rendered in, and hard-wrapping
+ * it here too would just fight over the width with whatever that terminal
+ * actually is. 100 columns is a common "reads fine without scrolling"
+ * width for a monospace code block; there's nothing sharper to target since
+ * GitHub doesn't publish one. */
+#define AP_HELP_WRAP_WIDTH 100u
+
+/* Prints `text` word-wrapped so no line exceeds `width` columns, indenting
+ * every line after the first by `indent` spaces (the first line isn't
+ * indented here - the caller has usually already positioned the cursor
+ * there, e.g. ap_print_row()'s label + gap). Never emits a trailing
+ * newline; the caller adds one. Whitespace-only breaking (spaces and
+ * newlines both treated as breakable, collapsed): no current helptext
+ * embeds a deliberate line break, so there's nothing to preserve, and it
+ * keeps this simple. A single word longer than the whole content width is
+ * still printed whole rather than split mid-word - a hyphenated URL or
+ * path is more readable overflowing one line than chopped arbitrarily. */
+static void ap_print_wrapped(const char *text, size_t indent, size_t width) {
+    if (text == NULL || text[0] == '\0') return;
+    size_t content_width = width > indent + 20 ? width - indent : 20;
+    size_t col = 0;
+    bool first_word = true;
+    const char *cursor = text;
+    while (*cursor != '\0') {
+        while (*cursor == ' ' || *cursor == '\n') cursor++;
+        const char *start = cursor;
+        while (*cursor != '\0' && *cursor != ' ' && *cursor != '\n') cursor++;
+        size_t word_len = (size_t)(cursor - start);
+        if (word_len == 0) break;
+        if (!first_word && col + 1 + word_len > content_width) {
+            stdio__printf("\n%*s", (int)indent, "");
+            col = 0;
+            first_word = true;
+        }
+        if (!first_word) {
+            stdio__printf(" ");
+            col += 1;
+        }
+        stdio__printf("%.*s", (int)word_len, start);
+        col += word_len;
+        first_word = false;
+    }
+}
+
+/* See args.h's doc comment - the same aligned/unaligned split ap_print_help()
+ * makes for its own command-level helptext blurb, exposed for a command
+ * that builds its own --help text by hand instead of registering it with
+ * ArgParser. */
+void ap_print_wrapped_help(const char *text) {
+    if (text == NULL || text[0] == '\0') return;
+    if (tty__isatty()) {
+        stdio__printf("%s", text);
+        return;
+    }
+    ap_print_wrapped(text, 0, AP_HELP_WRAP_WIDTH);
+}
+
 /* Prints one already-built help row: two-space indent, the label, then
  * (when there's helptext) a gap and the helptext. In `aligned` mode the gap
  * pads every row's helptext out to the same column, `label_width` (the
  * longest label anywhere in this ap_print_help() call) plus a minimum
- * two-space breathing room; otherwise the gap is always exactly that same
- * two spaces, matching what interactive use on the device has always
- * looked like (just without the '\t' this replaces - see ap_print_help()'s
- * own comment on why '\t' had to go). */
+ * two-space breathing room, and long helptext wraps (see
+ * AP_HELP_WRAP_WIDTH) with continuation lines indented to that same
+ * column; otherwise the gap is always exactly that same two spaces and
+ * helptext is never wrapped, matching what interactive use on the device
+ * has always looked like (just without the '\t' this replaces - see
+ * ap_print_help()'s own comment on why '\t' had to go). */
 static void ap_print_row(const char *label, const char *helptext, bool aligned, size_t label_width) {
     stdio__printf("  %s", label);
     if (helptext == NULL || helptext[0] == '\0') {
@@ -642,7 +707,10 @@ static void ap_print_row(const char *label, const char *helptext, bool aligned, 
     }
     size_t label_len = strlen(label);
     size_t gap = (aligned && label_width > label_len ? label_width - label_len : 0) + 2;
-    stdio__printf("%*s%s\n", (int)gap, "", helptext);
+    stdio__printf("%*s", (int)gap, "");
+    if (aligned) ap_print_wrapped(helptext, 2 + label_width + 2, AP_HELP_WRAP_WIDTH);
+    else stdio__printf("%s", helptext);
+    stdio__printf("\n");
 }
 
 void ap_print_help(ArgParser *parser) {
@@ -656,16 +724,16 @@ void ap_print_help(ArgParser *parser) {
     if (parser->allow_extra_args) stdio__printf(" [args...]");
     if (parser->option_count > 0) stdio__printf(" [options]");
     stdio__printf("\n");
-    if (parser->helptext != NULL && parser->helptext[0] != '\0') stdio__printf("\n%s\n", parser->helptext);
 
     /* Every "label  helptext" row below (Commands/Arguments/Options, plus
-     * the built-in -h/-v lines) used to separate the two with a literal
-     * '\t' - which a real terminal lands at whatever tab stop comes after
-     * the label, a different column depending how long the label was, so
-     * two labels of different lengths never lined their helptext up.
-     * Replaced with a column computed from the widest label in this help
-     * output (aligned mode), or a plain two-space gap (unaligned) with no
-     * attempt at alignment at all.
+     * the built-in -h/-v lines), and this command's own helptext blurb just
+     * below, used to separate label and text with a literal '\t' - which a
+     * real terminal lands at whatever tab stop comes after the label, a
+     * different column depending how long the label was, so two labels of
+     * different lengths never lined their helptext up. Replaced with a
+     * column computed from the widest label in this help output (aligned
+     * mode), or a plain two-space gap (unaligned) with no attempt at
+     * alignment at all.
      *
      * Which one applies is decided the same way man_app.c's --line-marker
      * decides live-terminal vs. captured output: tty__isatty(). The
@@ -674,8 +742,18 @@ void ap_print_help(ArgParser *parser) {
      * anything reading this over a non-tty pipe (a host capture, e.g.
      * `man --gen-md`'s per-command `<command> --help` capture, or a plain
      * `<command> --help > file`), where terminal width isn't a scarce
-     * resource. */
+     * resource. Aligned mode also word-wraps long helptext (AP_HELP_WRAP_WIDTH
+     * above ap_print_row()) - a fenced code block on GitHub never soft-wraps
+     * a long line, it just grows a horizontal scrollbar, which is exactly
+     * where that doc ends up rendered. */
     bool aligned = !tty__isatty();
+
+    if (parser->helptext != NULL && parser->helptext[0] != '\0') {
+        stdio__printf("\n");
+        ap_print_wrapped_help(parser->helptext);
+        stdio__printf("\n");
+    }
+
     size_t label_width = 0;
     char label[128];
     static const char *const help_label = "-h, --help";

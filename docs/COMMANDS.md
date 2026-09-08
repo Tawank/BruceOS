@@ -281,7 +281,9 @@ Arguments:
 
 Options:
   --gen-md       Print a single Markdown doc covering every command to the screen
-  --line-marker  With --gen-md, write byte 0x1E instead of newlines (for a host capture script to restore, telling a real line break apart from anything a lossy capture link injects into the raw stream)
+  --line-marker  With --gen-md, write byte 0x1E instead of newlines (for a host capture script to
+                 restore, telling a real line break apart from anything a lossy capture link injects
+                 into the raw stream)
   -h, --help     Show this help
 ```
 
@@ -341,7 +343,8 @@ Commands:
   list                            List every app with a saved permission decision.
   get <app> <permission>          Show the saved decision for one app/permission pair.
   set <app> <permission> <state>  Allow or deny a permission for an app.
-  forget <app> [permission]       Clear a saved decision so the app is re-prompted on its next launch.
+  forget <app> [permission]       Clear a saved decision so the app is re-prompted on its next
+                                  launch.
   wipe <confirm>                  Delete every saved permission decision for every app.
 
 Options:
@@ -393,7 +396,10 @@ Hardware and Core self-tests
 ```
 Usage: selftest [args...] [options]
 
-Run BruceOS's full hardware and Core self-test suite (slow; exercises storage, partitions, and process management for real). With one or more <filter> arguments, only runs cases whose name contains one of them (case-insensitive), e.g. `selftest args notification`; see --list for the names to filter on.
+Run BruceOS's full hardware and Core self-test suite (slow; exercises storage, partitions, and
+process management for real). With one or more <filter> arguments, only runs cases whose name
+contains one of them (case-insensitive), e.g. `selftest args notification`; see --list for the names
+to filter on.
 
 Options:
   --list      Print case names instead of running them
@@ -500,15 +506,21 @@ Manage partitions
 ```
 Usage: bparted <command>
 
-Manage the user flash area: the space left over after the built-in partitions. Changes are collected into the layout the next boot will use, and only touch flash once applied.
+Manage the user flash area: the space left over after the built-in partitions. Changes are collected
+into the layout the next boot will use, and only touch flash once applied.
 
 Commands:
-  list, ls                              Show the layout running now, the one the next boot will use, and free space.
-  status                                Show free space and whether anything is waiting to be applied or rebooted into.
+  list, ls                              Show the layout running now, the one the next boot will use,
+                                        and free space.
+  status                                Show free space and whether anything is waiting to be
+                                        applied or rebooted into.
   create, mkpart <label> <kind> <size>  Add a partition: create <label> <swap|littlefs> <size>.
-  delete, rm <label>                    Remove a partition by label (the root partition can only be formatted).
-  format <label>                        Erase and reformat a partition, keeping its size and position.
-  apply                                 Save every change made so far; it takes effect on the next boot.
+  delete, rm <label>                    Remove a partition by label (the root partition can only be
+                                        formatted).
+  format <label>                        Erase and reformat a partition, keeping its size and
+                                        position.
+  apply                                 Save every change made so far; it takes effect on the next
+                                        boot.
   cancel                                Throw away every change that has not been applied.
   reboot                                Reboot, so a saved layout takes effect.
 
@@ -776,7 +788,9 @@ Manage files (list/remove/mkdir/rename/read/write)
 ```
 Usage: storage <command>
 
-Manage files over the same interface BrucePIO's legacy 'storage' command did. 'list'/'remove'/'mkdir' forward to 'ls'/'rm'/'mkdir'; 'rename' renames in place; 'read'/'write' transfer a file's raw bytes to/from stdout/stdin (for tools/esp_storage.py).
+Manage files over the same interface BrucePIO's legacy 'storage' command did.
+'list'/'remove'/'mkdir' forward to 'ls'/'rm'/'mkdir'; 'rename' renames in place; 'read'/'write'
+transfer a file's raw bytes to/from stdout/stdin (for tools/esp_storage.py).
 
 Commands:
   list [path]               List a directory's contents (see 'ls').
@@ -961,7 +975,9 @@ Connect to an SSH server
 ```
 Usage: ssh <host> [port] [username] [options]
 
-Open an interactive SSH session. Verifies the host key fingerprint against a persistent known_hosts store before authenticating, then forwards stdin/stdout to/from the remote shell. Use --identity with a key created by ssh-keygen. Press Ctrl+] to close.
+Open an interactive SSH session. Verifies the host key fingerprint against a persistent known_hosts
+store before authenticating, then forwards stdin/stdout to/from the remote shell. Use --identity
+with a key created by ssh-keygen. Press Ctrl+] to close.
 
 Arguments:
   host (required)     Remote host name or address
@@ -983,7 +999,8 @@ Generate SSH keys
 ```
 Usage: ssh-keygen [options]
 
-Generate an ECDSA P-256 or Ed25519 SSH keypair. Writes the private key to --file and the OpenSSH public key to <file>.pub.
+Generate an ECDSA P-256 or Ed25519 SSH keypair. Writes the private key to --file and the OpenSSH
+public key to <file>.pub.
 
 Options:
   --file <value>     Private-key output path (default depends on --type)
@@ -1000,7 +1017,9 @@ Options:
 Browse/download files over SFTP
 
 ```
-SFTP client. Run as "sftp list --autodiscover" to print discovered locations (used by filemanager's "/Network" folder), "sftp <path>" to open a location file, or with no arguments to start a new connection.
+SFTP client. Run as "sftp list --autodiscover" to print discovered locations (used by filemanager's
+"/Network" folder), "sftp <path>" to open a location file, or with no arguments to start a new
+connection.
 ```
 
 ### nc
@@ -1012,24 +1031,37 @@ TCP/UDP client, listener, and port scanner (netcat-style)
 ```
 Usage: nc [args...] [options]
 
-netcat-style TCP/UDP client, listener, and port scanner. Connect with `nc <host> <port>`, listen with `nc -l <port>` (handles one connection then exits, unless -k), scan with `nc -z <host> <port|low-high>`. During an interactive session, stdin is sent to the peer and received data is printed -- press Ctrl+] or Ctrl+D to close. Without -q, closing local stdin does not end the session: nc keeps draining the peer until it closes the connection or you press Ctrl+]/Ctrl+D.
+netcat-style TCP/UDP client, listener, and port scanner. Connect with `nc <host> <port>`, listen
+with `nc -l <port>` (handles one connection then exits, unless -k), scan with `nc -z <host>
+<port|low-high>`. During an interactive session, stdin is sent to the peer and received data is
+printed -- press Ctrl+] or Ctrl+D to close. Without -q, closing local stdin does not end the
+session: nc keeps draining the peer until it closes the connection or you press Ctrl+]/Ctrl+D.
 
 Options:
   -l          Listen for an incoming connection instead of connecting out
   --listen    Alias for -l
   -u          Use UDP instead of TCP
   --udp       Alias for -u
-  -z          Zero-I/O mode: scan for open TCP ports instead of connecting; the port argument may be a single port or a low-high range
+  -z          Zero-I/O mode: scan for open TCP ports instead of connecting; the port argument may be
+              a single port or a low-high range
   -v          Verbose: also report closed ports while scanning, and extra connection detail
   --verbose   Alias for -v
   -w <value>  Timeout in seconds (default: 10s to connect, 0.5s per port while scanning)
-  -e <value>  Run '<cmd> [arg text]' with its stdio wired to the peer once connected, instead of the terminal -- a bind/reverse shell primitive. <cmd> is an app_runner command name (e.g. 'shell -i'). Not usable with -z.
-  -p <value>  Source port for an outgoing connection, instead of an OS-assigned one -- e.g. to reach a peer whose firewall trusts a specific source port. Client/-e modes only.
-  -s <value>  Source address (accepted, not applied -- BruceOS is single-homed, there is no second local address to bind; kept for command-line compatibility with real nc)
+  -e <value>  Run '<cmd> [arg text]' with its stdio wired to the peer once connected, instead of the
+              terminal -- a bind/reverse shell primitive. <cmd> is an app_runner command name (e.g.
+              'shell -i'). Not usable with -z.
+  -p <value>  Source port for an outgoing connection, instead of an OS-assigned one -- e.g. to reach
+              a peer whose firewall trusts a specific source port. Client/-e modes only.
+  -s <value>  Source address (accepted, not applied -- BruceOS is single-homed, there is no second
+              local address to bind; kept for command-line compatibility with real nc)
   -k          Keep listening for further connections after one closes (listen mode only)
-  -C          Translate outgoing bare CR/LF to CRLF -- useful when talking a line-oriented text protocol (SMTP, HTTP/1.0, ...) by hand
-  -i <value>  Delay in seconds between sent lines (interactive/-e modes) or between scanned ports (-z)
-  -q <value>  Seconds to keep reading the peer after local stdin closes, then quit (default: never auto-quit, matching real nc -- keep draining the peer until it closes or you cancel). 0 quits immediately on stdin EOF.
+  -C          Translate outgoing bare CR/LF to CRLF -- useful when talking a line-oriented text
+              protocol (SMTP, HTTP/1.0, ...) by hand
+  -i <value>  Delay in seconds between sent lines (interactive/-e modes) or between scanned ports
+              (-z)
+  -q <value>  Seconds to keep reading the peer after local stdin closes, then quit (default: never
+              auto-quit, matching real nc -- keep draining the peer until it closes or you cancel).
+              0 quits immediately on stdin EOF.
   -o <value>  Hex-dump the full session (both directions) to <file>
   -h, --help  Show this help
   --version   Show version
@@ -1044,17 +1076,28 @@ Host discovery and TCP/UDP port scanner (nmap-style)
 ```
 Usage: nmap [args...] [options]
 
-nmap-style host discovery and TCP/UDP port scanner. `nmap <target>` scans the built-in top-ports list; <target> may be a single host, a CIDR range ("192.168.1.0/24"), or a last-octet range ("192.168.1.1-254"). This is a TCP-connect scanner, not a raw-packet one: no -sS/-sF/-sX stealth scans, no OS fingerprinting (-O), no NSE scripts -- see each option's help for exactly what it does instead.
+nmap-style host discovery and TCP/UDP port scanner. `nmap <target>` scans the built-in top-ports
+list; <target> may be a single host, a CIDR range ("192.168.1.0/24"), or a last-octet range
+("192.168.1.1-254"). This is a TCP-connect scanner, not a raw-packet one: no -sS/-sF/-sX stealth
+scans, no OS fingerprinting (-O), no NSE scripts -- see each option's help for exactly what it does
+instead.
 
 Options:
   --sn                 Host discovery only -- report which targets are up, scan no ports
   --Pn                 Skip host discovery -- treat every target as up
-  -p <value>           Ports to scan: a single port, a range ("20-1024"), or a comma list of either ("22,80,8000-8100"). Default: the built-in top-ports list
-  --top-ports <value>  Scan the N most common ports from the built-in list, instead of the default or -p
+  -p <value>           Ports to scan: a single port, a range ("20-1024"), or a comma list of either
+                       ("22,80,8000-8100"). Default: the built-in top-ports list
+  --top-ports <value>  Scan the N most common ports from the built-in list, instead of the default
+                       or -p
   --sT                 TCP connect scan (the default -- accepted for command-line familiarity)
-  --sU                 UDP scan instead of TCP. Without a reply, a port is reported open|filtered -- the same ambiguity real nmap has when it can't see an ICMP port-unreachable reply either
-  --sV                 Grab whatever an open TCP port sends unprompted and show it as a raw banner -- not real nmap's probe-database service/version match
-  -T <value>           Timing template 0 (paranoid/slow) to 5 (insane/fast), default 3 -- approximates real nmap's timing intent via this build's own probe timeout/pacing
+  --sU                 UDP scan instead of TCP. Without a reply, a port is reported open|filtered --
+                       the same ambiguity real nmap has when it can't see an ICMP port-unreachable
+                       reply either
+  --sV                 Grab whatever an open TCP port sends unprompted and show it as a raw banner
+                       -- not real nmap's probe-database service/version match
+  -T <value>           Timing template 0 (paranoid/slow) to 5 (insane/fast), default 3 --
+                       approximates real nmap's timing intent via this build's own probe
+                       timeout/pacing
   --oN <value>         Also write plain-text output to <file>
   -v                   Verbose: also report closed/filtered ports explicitly
   --verbose            Alias for -v
@@ -1104,7 +1147,8 @@ Usage: wifi <command> [options]
 Manage Wi-Fi station and access-point modes.
 
 Commands:
-  on                         Connect using saved credentials, or choose a nearby network in GUI mode.
+  on                         Connect using saved credentials, or choose a nearby network in GUI
+                             mode.
   off, disconnect            Disconnect Wi-Fi.
   toggle                     Toggle Wi-Fi state.
   add <ssid> <password>      Save a Wi-Fi credential.
@@ -1191,16 +1235,32 @@ Usage: ir <command>
 Receive, learn, transmit, and generate infrared signals.
 
 Commands:
-  rx [raw_or_timeout] [timeout_seconds]                                   Receive a decoded or raw signal: rx [raw] [timeout_seconds].
-  learn <absolute_path> <button_name> [raw_or_timeout] [timeout_seconds]  Capture one signal and write a Bruce IR file.
-  tx <protocol> <data_or_address> [bits_or_command] [repeats]             Transmit protocol data, or an address/command pair for supported protocols.
-  tx_raw <frequency_hz> [args...]                                         Transmit raw timings: tx_raw <frequency_hz> <timing_us> [...]. Commas are accepted.
-  tx_from_file <absolute_path> [repeats]                                  Transmit every signal in a Bruce IR file.
-  tx_pick_file                                                            Pick a Bruce IR file and transmit every signal in it (GUI only).
-  tvbgone [region]                                                        Send regional TV power codes.
-  jam [frequency_hz] [seconds] [mode]                                     Transmit an IR jamming pattern.
-  learn_custom                                                            Interactively capture and save a signal (GUI only).
-  quick_learn                                                             Interactively capture a full remote from a device template (GUI only).
+  rx [raw_or_timeout] [timeout_seconds]                                   Receive a decoded or raw
+                                                                          signal: rx [raw]
+                                                                          [timeout_seconds].
+  learn <absolute_path> <button_name> [raw_or_timeout] [timeout_seconds]  Capture one signal and
+                                                                          write a Bruce IR file.
+  tx <protocol> <data_or_address> [bits_or_command] [repeats]             Transmit protocol data, or
+                                                                          an address/command pair
+                                                                          for supported protocols.
+  tx_raw <frequency_hz> [args...]                                         Transmit raw timings:
+                                                                          tx_raw <frequency_hz>
+                                                                          <timing_us> [...]. Commas
+                                                                          are accepted.
+  tx_from_file <absolute_path> [repeats]                                  Transmit every signal in a
+                                                                          Bruce IR file.
+  tx_pick_file                                                            Pick a Bruce IR file and
+                                                                          transmit every signal in
+                                                                          it (GUI only).
+  tvbgone [region]                                                        Send regional TV power
+                                                                          codes.
+  jam [frequency_hz] [seconds] [mode]                                     Transmit an IR jamming
+                                                                          pattern.
+  learn_custom                                                            Interactively capture and
+                                                                          save a signal (GUI only).
+  quick_learn                                                             Interactively capture a
+                                                                          full remote from a device
+                                                                          template (GUI only).
 
 Options:
   -h, --help                                                              Show this help

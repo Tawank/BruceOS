@@ -725,6 +725,7 @@ set(BRUCE_ARGS_SDK_CHECK_TARGETS
     bruce_sdk_builtin_nc_check
     bruce_sdk_builtin_nmap_check
     bruce_sdk_builtin_ssh_check
+    bruce_sdk_builtin_ssh_sftp_check
     bruce_sdk_builtin_system_menu_check
     bruce_sdk_builtin_elf_loader_check
     bruce_sdk_builtin_js_loader_check

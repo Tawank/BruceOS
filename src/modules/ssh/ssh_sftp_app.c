@@ -8,6 +8,7 @@
 #include <string.h>
 #include <strings.h>
 
+#include "args.h"
 #include "core_sdk/config.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/display.h"
@@ -1081,11 +1082,12 @@ static bruce_result_t sftp_app__open_location(const char *path) {
 
 int sftp_app_main(int argc, char **argv) {
     if (argc > 1 && (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)) {
-        stdio__printf(
+        ap_print_wrapped_help(
             "SFTP client. Run as \"sftp list --autodiscover\" to print discovered locations "
             "(used by filemanager's \"/Network\" folder), \"sftp <path>\" to open a location file, "
-            "or with no arguments to start a new connection.\n"
+            "or with no arguments to start a new connection."
         );
+        stdio__printf("\n");
         return BRUCE_OK;
     }
     if (argc >= 3 && strcmp(argv[1], "list") == 0 && strcmp(argv[2], "--autodiscover") == 0) {

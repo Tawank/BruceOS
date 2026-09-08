@@ -85,6 +85,24 @@ ap_status_t ap_get_status(ArgParser *parser);
 void ap_print_help(ArgParser *parser);
 
 /**
+ * @brief Prints `text` the way ap_print_help() prints a command's own
+ * helptext blurb: as-is when this is interactive on-device output (a real
+ * terminal already soft-wraps it), or word-wrapped at a width that reads
+ * without a horizontal scrollbar in a fenced code block otherwise (e.g.
+ * captured into docs/COMMANDS.md by `man --gen-md`). No trailing newline is
+ * added - same as stdio__printf(), the caller adds one if it wants one.
+ *
+ * A command that registers its help with ArgParser
+ * (ap_set_helptext()/ap_set_opt_help()/ap_add_required_arg()'s helptext,
+ * ...) gets this for free through ap_print_help(). This is for the rarer
+ * command that prints its own `--help` text by hand instead - call this in
+ * place of stdio__printf() so long text still reads well once captured.
+ *
+ * @param text Help text to print (NULL or "" is a no-op).
+ */
+void ap_print_wrapped_help(const char *text);
+
+/**
  * @brief Stops parsing options after the first positional argument.
  *
  * @param parser Parser to configure.
