@@ -2,6 +2,7 @@
 #include "bnu_internal.h"
 
 #include <errno.h> // IWYU pragma: keep
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,6 +11,7 @@
 #include "core_sdk/audio.h"
 #include "core_sdk/clock.h"
 #include "core_sdk/device.h"
+#include "core_sdk/input.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
@@ -17,7 +19,7 @@
 #include "core_sdk/stdio.h"
 #include "core_sdk/tty.h"
 
-/* System commands: free, top, shutdown, reboot, stty, date, sleep, tone. */
+/* System commands: free, top, shutdown, reboot, stty, date, sleep, tone, wev. */
 
 /* Heap-allocated, not a local array: on top of the legend/block-map buffers
  * `free -m` already keeps on the heap, this is another ~1.7K that a stack
@@ -1064,4 +1066,53 @@ int bnu_tone_app_main(int argc, char **argv) {
     ap_free(parser);
     if (!frequency_valid || !duration_valid) return BRUCE_ERR_INVALID_ARGUMENT;
     return audio__tone((uint32_t)frequency, (uint32_t)duration, false);
+}
+
+static const char *bnu__input_type_name(bruce_input_type_t type) {
+    switch (type) {
+        case BRUCE_INPUT_KEY: return "key";
+        case BRUCE_INPUT_BUTTON: return "button";
+        case BRUCE_INPUT_TOUCH: return "touch";
+        case BRUCE_INPUT_ENCODER: return "encoder";
+        case BRUCE_INPUT_CUSTOM: return "custom";
+        default: return "unknown";
+    }
+}
+
+static const char *bnu__input_action_name(bruce_input_action_t action) {
+    switch (action) {
+        case BRUCE_INPUT_PRESS: return "press";
+        case BRUCE_INPUT_RELEASE: return "release";
+        case BRUCE_INPUT_CHANGE: return "change";
+        default: return "unknown";
+    }
+}
+
+int bnu_wev_app_main(int argc, char **argv) {
+    ArgParser *parser = bnu__new_parser("Print raw input events. Press Back or Ctrl+C to stop.");
+    if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
+    if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
+    ap_free(parser);
+
+    for (;;) {
+        bruce_input_event_t event;
+        bruce_result_t result = input__read(&event, UINT32_MAX);
+        if (result != BRUCE_OK) return result;
+        stdio__printf(
+            "time=%" PRIu64 " source=%" PRIu32 " type=%s action=%s code=%" PRId32 " (0x%08" PRIx32
+            ") value=%" PRId32 "\n",
+            event.timestamp_ms,
+            event.source_process_id,
+            bnu__input_type_name(event.type),
+            bnu__input_action_name(event.action),
+            event.code,
+            (uint32_t)event.code,
+            event.value
+        );
+        if (event.action == BRUCE_INPUT_PRESS &&
+            (event.code == BRUCE_INPUT_CODE_BACK ||
+             (event.type == BRUCE_INPUT_KEY && event.code == 0x03 && event.value == 0x03))) {
+            return BRUCE_OK;
+        }
+    }
 }

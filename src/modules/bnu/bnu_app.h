@@ -13,6 +13,7 @@ int bnu_reboot_app_main(int argc, char **argv);
 int bnu_date_app_main(int argc, char **argv);
 int bnu_sleep_app_main(int argc, char **argv);
 int bnu_tone_app_main(int argc, char **argv);
+int bnu_wev_app_main(int argc, char **argv);
 int bnu_mkdir_app_main(int argc, char **argv);
 int bnu_touch_app_main(int argc, char **argv);
 int bnu_rm_app_main(int argc, char **argv);

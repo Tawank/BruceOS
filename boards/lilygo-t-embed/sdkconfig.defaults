@@ -195,8 +195,8 @@ CONFIG_BRUCE_SD_PIN_CS=39
 
 # Buttons: this board's only physical input besides the encoder's own turn
 # motion is the encoder's center press (legacy ENCODER_KEY/SEL_BTN), mapped
-# to SELECT (OK/confirm) - unlike the CC1101 variant there is no separate
-# back button (no legacy BK_BTN on this board), so no button A here.
+# to BUTTON_A. Unlike the CC1101 variant there is no separate back button
+# (no BK_BTN on this board).
 CONFIG_BRUCE_BUTTON_A_ENABLED=y
 CONFIG_BRUCE_BUTTON_A_GPIO=0
 # CONFIG_BRUCE_BUTTON_B_ENABLED is not set
