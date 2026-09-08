@@ -1,5 +1,3 @@
-#include <stdio.h>
-
 #include "core_sdk/dialog.h"
 #include "core_sdk/result.h"
 

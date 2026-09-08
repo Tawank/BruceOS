@@ -117,8 +117,6 @@
 #define RETURNS_MALLOC __attribute__((malloc))
 #define MAIN_EXTERNALLY_VISIBLE
 
-#include <ctype.h>
-
 /* This toolchain's <sys/errno.h> has two mutually exclusive forms of
  * "errno": if __PICOLIBC_ERRNO_FUNCTION is defined before this include,
  * "errno" expands to a call through that function pointer/name (safe --
@@ -140,6 +138,7 @@
  * failed storage__/socket__ calls), so this is a real, resolvable call,
  * not a new dependency. */
 #define __PICOLIBC_ERRNO_FUNCTION __errno
+#include <ctype.h> // IWYU pragma: keep
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -228,8 +227,13 @@ struct termios {
  * vi.c only through bb_show_usage()/error messages (busybox_shim.c). */
 extern const char *applet_name;
 
+#ifndef TRUE
 #define TRUE ((int)1)
+#endif
+
+#ifndef FALSE
 #define FALSE ((int)0)
+#endif
 
 /* BusyBox's space-saving small-int typedefs -- vi.c uses these purely for
  * struct-field size, not for any range/overflow-sensitive arithmetic, so

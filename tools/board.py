@@ -120,6 +120,14 @@ def update_vscode_intellisense(target: str) -> None:
     extra_vars = data.setdefault("idf.customExtraVars", {})
     extra_vars["IDF_TARGET"] = target
 
+    clangd_args = data.get("clangd.arguments")
+    if isinstance(clangd_args, list):
+        # A command-line database directory overrides the scoped .clangd
+        # files, so native ELF apps would incorrectly use the firmware build.
+        data["clangd.arguments"] = [
+            arg for arg in clangd_args if not arg.startswith("--compile-commands-dir=")
+        ]
+
     ocd_configs = data.get("idf.openOcdConfigs")
     if isinstance(ocd_configs, list):
         data["idf.openOcdConfigs"] = [

@@ -1,5 +1,4 @@
 #include <dirent.h>
-#include <errno.h>
 #include <fcntl.h>
 #include <setjmp.h>
 #include <stdarg.h>
@@ -516,7 +515,6 @@ bool selftest__run_elf_loader_posix_case(void) {
  */
 bool selftest__run_elf_loader_socket_case(void) {
     const uint16_t tcp_port = 47010;
-    const uint16_t udp_port_a = 47011;
     const uint16_t udp_port_b = 47012;
 
     /* Rejected domain/type. */

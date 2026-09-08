@@ -22,7 +22,10 @@ external applications.
 
 ## Building
 
-Set `IDF_PATH` and run:
+Activate your installed ESP-IDF environment before building or configuring an
+example. It must set `IDF_PATH` and add the target compiler tools to `PATH`.
+The ESP-IDF VS Code extension performs this setup for editor builds; a generic
+CMake Tools host compiler kit does not. Then run:
 
 ```bash
 python3 native_apps/tools/build_apps.py --target elf --idf-target esp32s3

@@ -10,15 +10,15 @@
   "build": {
     "sources": [
       "main/*.c",
-      "../../../components/nofrendo/src/*.c",
-      "../../../components/nofrendo/src/cpu/*.c",
-      "../../../components/nofrendo/src/libsnss/*.c",
-      "../../../components/nofrendo/src/mappers/*.c",
-      "../../../components/nofrendo/src/nes/*.c",
-      "../../../components/nofrendo/src/sndhrdw/*.c"
+      "managed_components/nofrendo/src/*.c",
+      "managed_components/nofrendo/src/cpu/*.c",
+      "managed_components/nofrendo/src/libsnss/*.c",
+      "managed_components/nofrendo/src/mappers/*.c",
+      "managed_components/nofrendo/src/nes/*.c",
+      "managed_components/nofrendo/src/sndhrdw/*.c"
     ],
-    "exclude": ["../../../components/nofrendo/src/config.c"],
-    "includeDirs": ["main", "../../../components/nofrendo/src", "../../../src", "../../include"],
+    "exclude": ["managed_components/nofrendo/src/config.c"],
+    "includeDirs": ["main", "managed_components/nofrendo/src", "../../../src", "../../include"],
     "cFlags": [
       "-Wno-error=attributes", "-Wno-error=format", "-Wno-error=implicit-fallthrough",
       "-Wno-error=incompatible-pointer-types", "-Wno-error=int-to-pointer-cast",
