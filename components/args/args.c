@@ -638,6 +638,19 @@ static size_t ap_format_option_label(char *buf, size_t cap, const ap_option_t *o
  * width for a monospace code block; there's nothing sharper to target since
  * GitHub doesn't publish one. */
 #define AP_HELP_WRAP_WIDTH 100u
+/* Aligned mode's shared label column, capped: `label_width` below (computed
+ * per ap_print_help() call from the widest label actually present) would,
+ * uncapped, let one oddball long label - a positional's "(required)" suffix,
+ * a "-c <value>" placeholder, whatever - drag every short flag's column out
+ * with it. Real man pages don't do that either: BSD nc(1)'s -I/-i take a
+ * value name ("length", "interval") too wide for its option list's column,
+ * so they get their own line - see ap_print_row(). A label under this cap
+ * still gets the normal shared-column treatment; this only kicks in for the
+ * minority that would've blown the column out for everyone else. Paired with
+ * ap_print_row()'s 4-space indent, this keeps the description column at 4+8
+ * (plus the 2-space gap) - tight, matching the pasted nc(1) example instead
+ * of trailing off toward the far side of the screen. */
+#define AP_HELP_LABEL_CAP 8u
 
 /* Prints `text` word-wrapped so no line exceeds `width` columns, indenting
  * every line after the first by `indent` spaces (the first line isn't
@@ -689,27 +702,37 @@ void ap_print_wrapped_help(const char *text) {
     ap_print_wrapped(text, 0, AP_HELP_WRAP_WIDTH);
 }
 
-/* Prints one already-built help row: two-space indent, the label, then
- * (when there's helptext) a gap and the helptext. In `aligned` mode the gap
- * pads every row's helptext out to the same column, `label_width` (the
- * longest label anywhere in this ap_print_help() call) plus a minimum
- * two-space breathing room, and long helptext wraps (see
- * AP_HELP_WRAP_WIDTH) with continuation lines indented to that same
- * column; otherwise the gap is always exactly that same two spaces and
- * helptext is never wrapped, matching what interactive use on the device
- * has always looked like (just without the '\t' this replaces - see
- * ap_print_help()'s own comment on why '\t' had to go). */
+/* Prints one already-built help row. Unaligned (on-device) mode is exactly
+ * what it's always been: two-space indent, a fixed two-space gap, unwrapped
+ * helptext - a real terminal handles wrapping itself, and the small
+ * physical display has no room for anything wider anyway.
+ *
+ * Aligned mode instead follows a classic man page's option list: four-space
+ * indent, helptext starting at a shared column (`label_width` - the
+ * widest label anywhere in this ap_print_help() call, capped at
+ * AP_HELP_LABEL_CAP - plus indent plus a minimum two-space gap), wrapped
+ * (AP_HELP_WRAP_WIDTH) with continuation lines indented to that same
+ * column. A label wider than the cap doesn't get squeezed into that gap or
+ * drag the column out for every other row - it's printed alone, then the
+ * helptext starts on its own line at the same column, same as real man
+ * pages do for a long tag (BSD nc(1)'s "-I length"/"-i interval" among
+ * plain single-char flags). */
 static void ap_print_row(const char *label, const char *helptext, bool aligned, size_t label_width) {
-    stdio__printf("  %s", label);
+    size_t indent = aligned ? 4 : 2;
+    stdio__printf("%*s%s", (int)indent, "", label);
     if (helptext == NULL || helptext[0] == '\0') {
         stdio__printf("\n");
         return;
     }
+    if (!aligned) {
+        stdio__printf("  %s\n", helptext);
+        return;
+    }
     size_t label_len = strlen(label);
-    size_t gap = (aligned && label_width > label_len ? label_width - label_len : 0) + 2;
-    stdio__printf("%*s", (int)gap, "");
-    if (aligned) ap_print_wrapped(helptext, 2 + label_width + 2, AP_HELP_WRAP_WIDTH);
-    else stdio__printf("%s", helptext);
+    size_t desc_column = indent + label_width + 2;
+    if (label_len > label_width) stdio__printf("\n%*s", (int)desc_column, "");
+    else stdio__printf("%*s", (int)(desc_column - indent - label_len), "");
+    ap_print_wrapped(helptext, desc_column, AP_HELP_WRAP_WIDTH);
     stdio__printf("\n");
 }
 
@@ -756,7 +779,14 @@ void ap_print_help(ArgParser *parser) {
 
     size_t label_width = 0;
     char label[128];
-    static const char *const help_label = "-h, --help";
+    /* Same opt-out ap_parse() itself already applies when deciding whether a
+     * bare "-h" means "show help" (see its own ap_find_option(parser, "h")
+     * check): a command that has claimed "h" for its own option (`top`'s and
+     * `free`'s "-h" for human-readable sizes, e.g.) keeps its own listing
+     * for "h" and this becomes --help-only, instead of the two colliding
+     * "-h, --help" / "-h  <something else>" rows that used to both list
+     * plain "-h". */
+    const char *help_label = ap_find_option(parser, "h") == NULL ? "-h, --help" : "--help";
     const char *version_label = parser->version == NULL                    ? NULL
                                  : ap_find_option(parser, "v") == NULL ? "-v, --version"
                                                                         : "--version";
@@ -776,11 +806,23 @@ void ap_print_help(ArgParser *parser) {
         }
         if (strlen(help_label) > label_width) label_width = strlen(help_label);
         if (version_label != NULL && strlen(version_label) > label_width) label_width = strlen(version_label);
+        if (label_width > AP_HELP_LABEL_CAP) label_width = AP_HELP_LABEL_CAP;
     }
+
+    /* Aligned mode separates every row with a blank line, man-page style
+     * (see ap_print_row()'s own comment); unaligned/on-device output stays
+     * exactly as tight as it's always been. `first` resets per section
+     * (Commands/Arguments/Options) - each section's own header line already
+     * separates it from the last row of the section before it, so there's
+     * nothing to add before a section's own first row. */
+    bool first;
 
     if (parser->command_count > 0) {
         stdio__printf("\nCommands:\n");
+        first = true;
         for (int i = 0; i < parser->command_count; ++i) {
+            if (aligned && !first) stdio__printf("\n");
+            first = false;
             ap_command_t *command = &parser->commands[i];
             ap_format_command_label(label, sizeof(label), command);
             ap_print_row(label, command->parser->helptext, aligned, label_width);
@@ -789,7 +831,10 @@ void ap_print_help(ArgParser *parser) {
 
     if (parser->positional_count > 0) {
         stdio__printf("\nArguments:\n");
+        first = true;
         for (int i = 0; i < parser->positional_count; ++i) {
+            if (aligned && !first) stdio__printf("\n");
+            first = false;
             ap_positional_t *positional = &parser->positionals[i];
             ap_format_positional_label(label, sizeof(label), positional);
             ap_print_row(label, positional->helptext, aligned, label_width);
@@ -797,16 +842,18 @@ void ap_print_help(ArgParser *parser) {
     }
 
     stdio__printf("\nOptions:\n");
+    first = true;
     for (int i = 0; i < parser->option_count; ++i) {
+        if (aligned && !first) stdio__printf("\n");
+        first = false;
         ap_option_t *option = parser->options[i];
         ap_format_option_label(label, sizeof(label), option);
         ap_print_row(label, option->helptext, aligned, label_width);
     }
+    if (aligned && !first) stdio__printf("\n");
     ap_print_row(help_label, "Show this help", aligned, label_width);
     if (version_label != NULL) {
-        /* Same opt-out as the "-h" shortcut above: a command that has
-         * claimed its own "v" option (nc's --verbose used to collide here)
-         * keeps its own listing for "v" and this becomes --version-only. */
+        if (aligned) stdio__printf("\n");
         ap_print_row(version_label, "Show version", aligned, label_width);
     }
 }

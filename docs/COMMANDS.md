@@ -129,7 +129,8 @@ Usage: apps
 Browse and launch installed .elf, .wasm, and .js apps from /apps and /scripts.
 
 Options:
-  -h, --help  Show this help
+    -h, --help
+              Show this help
 ```
 
 ### bootanimation
@@ -165,13 +166,19 @@ Usage: clock <command> [options]
 Show the clock or run timer and alarm tools.
 
 Commands:
-  show              Show the current local date and time.
-  timer [duration]  Run a countdown timer.
-  alarm [time]      Wait until a local time of day.
+    show      Show the current local date and time.
+
+    timer [duration]
+              Run a countdown timer.
+
+    alarm [time]
+              Wait until a local time of day.
 
 Options:
-  --gui             Use GUI interaction mode
-  -h, --help        Show this help
+    --gui     Use GUI interaction mode
+
+    -h, --help
+              Show this help
 ```
 
 ### config
@@ -186,13 +193,21 @@ Usage: config <command>
 Configure BruceOS settings.
 
 Commands:
-  system <command>   Configure system settings.
-  display <command>  Configure display rendering.
-  theme <command>    Select or inspect the UI color theme.
-  audio <command>    Configure audio (sound) settings.
+    system <command>
+              Configure system settings.
+
+    display <command>
+              Configure display rendering.
+
+    theme <command>
+              Select or inspect the UI color theme.
+
+    audio <command>
+              Configure audio (sound) settings.
 
 Options:
-  -h, --help         Show this help
+    -h, --help
+              Show this help
 ```
 
 ### date
@@ -207,9 +222,12 @@ Usage: date [options]
 Show or set the current date and time.
 
 Options:
-  -u                 Show the time in UTC instead of local time
-  -s, --set <value>
-  -h, --help         Show this help
+    -u        Show the time in UTC instead of local time
+
+    -s, --set <value>
+
+    -h, --help
+              Show this help
 ```
 
 ### free
@@ -224,9 +242,11 @@ Usage: free [options]
 Show internal memory, PSRAM, and swap usage.
 
 Options:
-  -h          Show sizes in human-readable units (e.g. 8.2K, 1.3M)
-  -m          Show proportional allocator maps and tracked owners
-  -h, --help  Show this help
+    -h      Show sizes in human-readable units (e.g. 8.2K, 1.3M)
+
+    -m      Show proportional allocator maps and tracked owners
+
+    --help  Show this help
 ```
 
 ### memorydump
@@ -241,17 +261,28 @@ Usage: memorydump <backend> [address] [length] [options]
 Dump a validated internal-RAM, PSRAM, or active-swap range as binary.
 
 Arguments:
-  backend (required)  int, internal, psram, or swap
-  address             RAM address, or byte offset for swap (omit with -a)
-  length              Bytes to dump (default: remainder of containing block/object)
+    backend (required)
+              int, internal, psram, or swap
+
+    address   RAM address, or byte offset for swap (omit with -a)
+
+    length    Bytes to dump (default: remainder of containing block/object)
 
 Options:
-  -x                  Print xxd-style hexadecimal instead of binary
-  -a                  Dump every heap block (active objects only for swap)
-  -o                  Show each block's owner header (requires -a -x)
-  -c <value>          Hex mode bytes per line (1..32; default 16)
-  -g <value>          Hex mode group size (1, 2, 4, or 8; default 2)
-  -h, --help          Show this help
+    -x        Print xxd-style hexadecimal instead of binary
+
+    -a        Dump every heap block (active objects only for swap)
+
+    -o        Show each block's owner header (requires -a -x)
+
+    -c <value>
+              Hex mode bytes per line (1..32; default 16)
+
+    -g <value>
+              Hex mode group size (1, 2, 4, or 8; default 2)
+
+    -h, --help
+              Show this help
 ```
 
 ### launcher
@@ -277,14 +308,18 @@ Usage: man [command] [options]
 List commands or show the manual for one command.
 
 Arguments:
-  command        Registered command name
+    command   Registered command name
 
 Options:
-  --gen-md       Print a single Markdown doc covering every command to the screen
-  --line-marker  With --gen-md, write byte 0x1E instead of newlines (for a host capture script to
-                 restore, telling a real line break apart from anything a lossy capture link injects
-                 into the raw stream)
-  -h, --help     Show this help
+    --gen-md  Print a single Markdown doc covering every command to the screen
+
+    --line-marker
+              With --gen-md, write byte 0x1E instead of newlines (for a host capture script to
+              restore, telling a real line break apart from anything a lossy capture link injects
+              into the raw stream)
+
+    -h, --help
+              Show this help
 ```
 
 ### menu
@@ -319,13 +354,20 @@ Usage: notify <command>
 Manage transient notifications and status icons.
 
 Commands:
-  push <duration-ms> [args...]  Push a notification: push <duration-ms> <text...>
-  dismiss                       Dismiss the current notification.
-  icon-list                     List active status icons.
-  icon-remove <key>             Remove a status icon by key.
+    push <duration-ms> [args...]
+              Push a notification: push <duration-ms> <text...>
+
+    dismiss   Dismiss the current notification.
+
+    icon-list
+              List active status icons.
+
+    icon-remove <key>
+              Remove a status icon by key.
 
 Options:
-  -h, --help                    Show this help
+    -h, --help
+              Show this help
 ```
 
 ### permissions
@@ -340,15 +382,23 @@ Usage: permissions <command>
 View and manage saved app permission decisions.
 
 Commands:
-  list                            List every app with a saved permission decision.
-  get <app> <permission>          Show the saved decision for one app/permission pair.
-  set <app> <permission> <state>  Allow or deny a permission for an app.
-  forget <app> [permission]       Clear a saved decision so the app is re-prompted on its next
-                                  launch.
-  wipe <confirm>                  Delete every saved permission decision for every app.
+    list      List every app with a saved permission decision.
+
+    get <app> <permission>
+              Show the saved decision for one app/permission pair.
+
+    set <app> <permission> <state>
+              Allow or deny a permission for an app.
+
+    forget <app> [permission]
+              Clear a saved decision so the app is re-prompted on its next launch.
+
+    wipe <confirm>
+              Delete every saved permission decision for every app.
 
 Options:
-  -h, --help                      Show this help
+    -h, --help
+              Show this help
 ```
 
 ### process
@@ -363,13 +413,20 @@ Usage: process <command>
 Switch, preview, signal, or force-kill managed processes.
 
 Commands:
-  switch <target>           Switch foreground focus: switch <next|prev|id>
-  signal <signal> <target>  Signal a process: signal <int|term|kill> <id|name>
-  kill <target>             Force-kill a process: kill <id|name>
-  preview                   Tile background GUI apps in a live preview grid
+    switch <target>
+              Switch foreground focus: switch <next|prev|id>
+
+    signal <signal> <target>
+              Signal a process: signal <int|term|kill> <id|name>
+
+    kill <target>
+              Force-kill a process: kill <id|name>
+
+    preview   Tile background GUI apps in a live preview grid
 
 Options:
-  -h, --help                Show this help
+    -h, --help
+              Show this help
 ```
 
 ### reboot
@@ -384,7 +441,8 @@ Usage: reboot
 Restart the device.
 
 Options:
-  -h, --help  Show this help
+    -h, --help
+              Show this help
 ```
 
 ### selftest
@@ -402,8 +460,10 @@ contains one of them (case-insensitive), e.g. `selftest args notification`; see 
 to filter on.
 
 Options:
-  --list      Print case names instead of running them
-  -h, --help  Show this help
+    --list    Print case names instead of running them
+
+    -h, --help
+              Show this help
 ```
 
 ### shutdown
@@ -418,10 +478,12 @@ Usage: shutdown <time>
 Power off the device at the specified time.
 
 Arguments:
-  time (required)  'now', '+minutes', or 24-hour 'HH:MM'
+    time (required)
+              'now', '+minutes', or 24-hour 'HH:MM'
 
 Options:
-  -h, --help       Show this help
+    -h, --help
+              Show this help
 ```
 
 ### sleep
@@ -436,10 +498,12 @@ Usage: sleep <seconds>
 Pause for the given duration.
 
 Arguments:
-  seconds (required)  Duration to sleep, in seconds (e.g. 2 or 0.5)
+    seconds (required)
+              Duration to sleep, in seconds (e.g. 2 or 0.5)
 
 Options:
-  -h, --help          Show this help
+    -h, --help
+              Show this help
 ```
 
 ### top
@@ -454,8 +518,9 @@ Usage: top [options]
 Show runtime process resource usage.
 
 Options:
-  -h          Show stck/heap/swap sizes in human-readable units (e.g. 8.2K, 1.3M)
-  -h, --help  Show this help
+    -h      Show stck/heap/swap sizes in human-readable units (e.g. 8.2K, 1.3M)
+
+    --help  Show this help
 ```
 
 ## Storage
@@ -472,10 +537,12 @@ Usage: archive <archive>
 Browse a .zip or .tar.gz/.tgz archive's contents.
 
 Arguments:
-  archive (required)  Archive file to browse
+    archive (required)
+              Archive file to browse
 
 Options:
-  -h, --help          Show this help
+    -h, --help
+              Show this help
 ```
 
 ### archive-extract
@@ -490,11 +557,15 @@ Usage: archive-extract <archive> [options]
 Extract a ".zip" or ".tar.gz"/".tgz" archive.
 
 Arguments:
-  archive (required)  Archive file to extract
+    archive (required)
+              Archive file to extract
 
 Options:
-  -C <value>          Directory to extract into (defaults to the archive's own directory)
-  -h, --help          Show this help
+    -C <value>
+              Directory to extract into (defaults to the archive's own directory)
+
+    -h, --help
+              Show this help
 ```
 
 ### bparted
@@ -510,22 +581,28 @@ Manage the user flash area: the space left over after the built-in partitions. C
 into the layout the next boot will use, and only touch flash once applied.
 
 Commands:
-  list, ls                              Show the layout running now, the one the next boot will use,
-                                        and free space.
-  status                                Show free space and whether anything is waiting to be
-                                        applied or rebooted into.
-  create, mkpart <label> <kind> <size>  Add a partition: create <label> <swap|littlefs> <size>.
-  delete, rm <label>                    Remove a partition by label (the root partition can only be
-                                        formatted).
-  format <label>                        Erase and reformat a partition, keeping its size and
-                                        position.
-  apply                                 Save every change made so far; it takes effect on the next
-                                        boot.
-  cancel                                Throw away every change that has not been applied.
-  reboot                                Reboot, so a saved layout takes effect.
+    list, ls  Show the layout running now, the one the next boot will use, and free space.
+
+    status    Show free space and whether anything is waiting to be applied or rebooted into.
+
+    create, mkpart <label> <kind> <size>
+              Add a partition: create <label> <swap|littlefs> <size>.
+
+    delete, rm <label>
+              Remove a partition by label (the root partition can only be formatted).
+
+    format <label>
+              Erase and reformat a partition, keeping its size and position.
+
+    apply     Save every change made so far; it takes effect on the next boot.
+
+    cancel    Throw away every change that has not been applied.
+
+    reboot    Reboot, so a saved layout takes effect.
 
 Options:
-  -h, --help                            Show this help
+    -h, --help
+              Show this help
 ```
 
 ### cat
@@ -540,11 +617,14 @@ Usage: cat [file] [args...] [options]
 Print the contents of one or more files, or piped stdin.
 
 Arguments:
-  file                  File path to print (reads stdin if omitted)
+    file      File path to print (reads stdin if omitted)
 
 Options:
-  --stdin-size <value>  Read exactly this many bytes from stdin (used by shell pipes)
-  -h, --help            Show this help
+    --stdin-size <value>
+              Read exactly this many bytes from stdin (used by shell pipes)
+
+    -h, --help
+              Show this help
 ```
 
 ### cp
@@ -559,11 +639,15 @@ Usage: cp <source> <dest>
 Copy a file.
 
 Arguments:
-  source (required)  File to copy
-  dest (required)    Destination path (must not already exist)
+    source (required)
+              File to copy
+
+    dest (required)
+              Destination path (must not already exist)
 
 Options:
-  -h, --help         Show this help
+    -h, --help
+              Show this help
 ```
 
 ### df
@@ -578,11 +662,12 @@ Usage: df [path] [options]
 Show mounted filesystems' space usage.
 
 Arguments:
-  path        Show only the filesystem containing this path
+    path    Show only the filesystem containing this path
 
 Options:
-  -h          Show sizes in human-readable units (e.g. 8.2K, 1.3M)
-  -h, --help  Show this help
+    -h      Show sizes in human-readable units (e.g. 8.2K, 1.3M)
+
+    --help  Show this help
 ```
 
 ### du
@@ -597,11 +682,12 @@ Usage: du [path] [args...] [options]
 Show total disk usage of a file or directory tree (always summarized, like du -s).
 
 Arguments:
-  path        File or directory to measure (defaults to the working directory)
+    path    File or directory to measure (defaults to the working directory)
 
 Options:
-  -h          Show sizes in human-readable units (e.g. 8.2K, 1.3M)
-  -h, --help  Show this help
+    -h      Show sizes in human-readable units (e.g. 8.2K, 1.3M)
+
+    --help  Show this help
 ```
 
 ### file
@@ -616,11 +702,15 @@ Usage: file <file> [args...] [options]
 Identify a file's type from its extension, contents, or shebang.
 
 Arguments:
-  file (required)  Path to identify
+    file (required)
+              Path to identify
 
 Options:
-  --mime, -i       Print only the MIME type, like `file -i`
-  -h, --help       Show this help
+    --mime, -i
+              Print only the MIME type, like `file -i`
+
+    -h, --help
+              Show this help
 ```
 
 ### filemanager
@@ -645,12 +735,17 @@ Usage: head [file] [args...] [options]
 Print the first part of a file, or piped stdin.
 
 Arguments:
-  file                  File to read (reads stdin if omitted)
+    file      File to read (reads stdin if omitted)
 
 Options:
-  -n <value>            Number of lines to print (also settable as e.g. -4)
-  --stdin-size <value>  Read exactly this many bytes from stdin (used by shell pipes)
-  -h, --help            Show this help
+    -n <value>
+              Number of lines to print (also settable as e.g. -4)
+
+    --stdin-size <value>
+              Read exactly this many bytes from stdin (used by shell pipes)
+
+    -h, --help
+              Show this help
 ```
 
 ### ls
@@ -665,14 +760,19 @@ Usage: ls [path] [options]
 List files and directories.
 
 Arguments:
-  path             Path to list (defaults to the working directory)
+    path      Path to list (defaults to the working directory)
 
 Options:
-  -l               Use long listing format
-  -a               Show hidden entries too
-  -h               Human-readable sizes (e.g. 4.0K, 1.2M)
-  --color <value>  Colorize output: always, auto, or never (default: auto)
-  -h, --help       Show this help
+    -l        Use long listing format
+
+    -a        Show hidden entries too
+
+    -h        Human-readable sizes (e.g. 4.0K, 1.2M)
+
+    --color <value>
+              Colorize output: always, auto, or never (default: auto)
+
+    --help    Show this help
 ```
 
 ### lsblk
@@ -687,7 +787,8 @@ Usage: lsblk
 List block devices and partitions.
 
 Options:
-  -h, --help  Show this help
+    -h, --help
+              Show this help
 ```
 
 ### mkdir
@@ -702,10 +803,12 @@ Usage: mkdir <directory>
 Create a directory.
 
 Arguments:
-  directory (required)  Directory path to create
+    directory (required)
+              Directory path to create
 
 Options:
-  -h, --help            Show this help
+    -h, --help
+              Show this help
 ```
 
 ### mount
@@ -720,11 +823,14 @@ Usage: mount [device] [mount-point]
 List mounted filesystems or mount a block device.
 
 Arguments:
-  device       Block device name (currently sd0)
-  mount-point  Mount point (defaults to /sdcard)
+    device    Block device name (currently sd0)
+
+    mount-point
+              Mount point (defaults to /sdcard)
 
 Options:
-  -h, --help   Show this help
+    -h, --help
+              Show this help
 ```
 
 ### mv
@@ -739,11 +845,15 @@ Usage: mv <source> <dest>
 Move or rename a file.
 
 Arguments:
-  source (required)  File to move
-  dest (required)    Destination path (must not already exist)
+    source (required)
+              File to move
+
+    dest (required)
+              Destination path (must not already exist)
 
 Options:
-  -h, --help         Show this help
+    -h, --help
+              Show this help
 ```
 
 ### pwd
@@ -758,7 +868,8 @@ Usage: pwd
 Print the current working directory.
 
 Options:
-  -h, --help  Show this help
+    -h, --help
+              Show this help
 ```
 
 ### rm
@@ -773,10 +884,12 @@ Usage: rm <path> [args...]
 Remove a file or empty directory.
 
 Arguments:
-  path (required)  Path to remove
+    path (required)
+              Path to remove
 
 Options:
-  -h, --help       Show this help
+    -h, --help
+              Show this help
 ```
 
 ### storage
@@ -793,15 +906,27 @@ Manage files over the same interface BrucePIO's legacy 'storage' command did.
 transfer a file's raw bytes to/from stdout/stdin (for tools/esp_storage.py).
 
 Commands:
-  list [path]               List a directory's contents (see 'ls').
-  remove <path>             Remove a file or empty directory (see 'rm').
-  mkdir <path>              Create a directory (see 'mkdir').
-  rename <path> <new_path>  Rename or move a file or directory.
-  write <path> <size>       Read <size> raw bytes from stdin and save them to <path>.
-  read <path>               Stream <path>'s raw bytes to stdout.
+    list [path]
+              List a directory's contents (see 'ls').
+
+    remove <path>
+              Remove a file or empty directory (see 'rm').
+
+    mkdir <path>
+              Create a directory (see 'mkdir').
+
+    rename <path> <new_path>
+              Rename or move a file or directory.
+
+    write <path> <size>
+              Read <size> raw bytes from stdin and save them to <path>.
+
+    read <path>
+              Stream <path>'s raw bytes to stdout.
 
 Options:
-  -h, --help                Show this help
+    -h, --help
+              Show this help
 ```
 
 ### tail
@@ -816,12 +941,17 @@ Usage: tail [file] [args...] [options]
 Print the last part of a file, or piped stdin.
 
 Arguments:
-  file                  File to read (reads stdin if omitted)
+    file      File to read (reads stdin if omitted)
 
 Options:
-  -n <value>            Number of lines to print (also settable as e.g. -4)
-  --stdin-size <value>  Read exactly this many bytes from stdin (used by shell pipes)
-  -h, --help            Show this help
+    -n <value>
+              Number of lines to print (also settable as e.g. -4)
+
+    --stdin-size <value>
+              Read exactly this many bytes from stdin (used by shell pipes)
+
+    -h, --help
+              Show this help
 ```
 
 ### tar
@@ -836,15 +966,23 @@ Usage: tar [entry] [args...] [options]
 Create, list, or extract a ".tar.gz" archive.
 
 Arguments:
-  entry       File(s)/directory(ies) to add when creating (-c)
+    entry     File(s)/directory(ies) to add when creating (-c)
 
 Options:
-  -c          Create a new archive
-  -x          Extract an existing archive
-  -t          List an archive's contents
-  -f <value>  Archive path
-  -C <value>  Directory to extract into (defaults to the archive's own directory)
-  -h, --help  Show this help
+    -c        Create a new archive
+
+    -x        Extract an existing archive
+
+    -t        List an archive's contents
+
+    -f <value>
+              Archive path
+
+    -C <value>
+              Directory to extract into (defaults to the archive's own directory)
+
+    -h, --help
+              Show this help
 ```
 
 ### touch
@@ -859,10 +997,12 @@ Usage: touch <file>
 Create a file if it does not exist.
 
 Arguments:
-  file (required)  File path to create
+    file (required)
+              File path to create
 
 Options:
-  -h, --help       Show this help
+    -h, --help
+              Show this help
 ```
 
 ### unmount
@@ -877,10 +1017,12 @@ Usage: unmount <target>
 Unmount a block device or mount point.
 
 Arguments:
-  target (required)  Block device name or mount point
+    target (required)
+              Block device name or mount point
 
 Options:
-  -h, --help         Show this help
+    -h, --help
+              Show this help
 ```
 
 ### unzip
@@ -895,12 +1037,17 @@ Usage: unzip <archive> [options]
 List or extract a ".zip" archive.
 
 Arguments:
-  archive (required)  ".zip" file to read
+    archive (required)
+              ".zip" file to read
 
 Options:
-  -l                  List contents instead of extracting
-  -d <value>          Directory to extract into (defaults to the archive's own directory)
-  -h, --help          Show this help
+    -l        List contents instead of extracting
+
+    -d <value>
+              Directory to extract into (defaults to the archive's own directory)
+
+    -h, --help
+              Show this help
 ```
 
 ### zip
@@ -915,11 +1062,15 @@ Usage: zip <archive> <file> [args...]
 Create a ".zip" archive from files or directories.
 
 Arguments:
-  archive (required)  Destination ".zip" path
-  file (required)     File(s)/directory(ies) to add
+    archive (required)
+              Destination ".zip" path
+
+    file (required)
+              File(s)/directory(ies) to add
 
 Options:
-  -h, --help          Show this help
+    -h, --help
+              Show this help
 ```
 
 ## Network
@@ -936,10 +1087,11 @@ Usage: browser [url]
 Browse the web, Lynx-style, with inline images.
 
 Arguments:
-  url         Starting URL (defaults to https://bruce.computer/)
+    url       Starting URL (defaults to https://bruce.computer/)
 
 Options:
-  -h, --help  Show this help
+    -h, --help
+              Show this help
 ```
 
 ### curl
@@ -954,16 +1106,27 @@ Usage: curl <url> [options]
 Transfer data from or to a URL.
 
 Arguments:
-  url (required)            URL to request (scheme optional, defaults to http://)
+    url (required)
+              URL to request (scheme optional, defaults to http://)
 
 Options:
-  -X <value>                Request method (defaults to GET, or POST when -d is given)
-  -d <value>                Send this string as the request body
-  -o <value>                Write the response body to this path instead of stdout
-  -I                        Fetch headers only (HTTP HEAD)
-  -i                        Print response headers before the body
-  -A, --user-agent <value>
-  -h, --help                Show this help
+    -X <value>
+              Request method (defaults to GET, or POST when -d is given)
+
+    -d <value>
+              Send this string as the request body
+
+    -o <value>
+              Write the response body to this path instead of stdout
+
+    -I        Fetch headers only (HTTP HEAD)
+
+    -i        Print response headers before the body
+
+    -A, --user-agent <value>
+
+    -h, --help
+              Show this help
 ```
 
 ### ssh
@@ -980,14 +1143,22 @@ store before authenticating, then forwards stdin/stdout to/from the remote shell
 with a key created by ssh-keygen. Press Ctrl+] to close.
 
 Arguments:
-  host (required)     Remote host name or address
-  port                Remote SSH port (default 22 or value from ~/.ssh/config)
-  username            Login username (or value from ~/.ssh/config)
+    host (required)
+              Remote host name or address
+
+    port      Remote SSH port (default 22 or value from ~/.ssh/config)
+
+    username  Login username (or value from ~/.ssh/config)
 
 Options:
-  --password <value>  Password (prompted securely if omitted)
-  --identity <value>  Path to an ECDSA private key; disables password authentication
-  -h, --help          Show this help
+    --password <value>
+              Password (prompted securely if omitted)
+
+    --identity <value>
+              Path to an ECDSA private key; disables password authentication
+
+    -h, --help
+              Show this help
 ```
 
 ### ssh-keygen
@@ -1003,11 +1174,19 @@ Generate an ECDSA P-256 or Ed25519 SSH keypair. Writes the private key to --file
 public key to <file>.pub.
 
 Options:
-  --file <value>     Private-key output path (default depends on --type)
-  --type <value>     Key type: ecdsa or ed25519 (default ecdsa)
-  --comment <value>  Comment appended to the public key
-  --force            Overwrite existing key files
-  -h, --help         Show this help
+    --file <value>
+              Private-key output path (default depends on --type)
+
+    --type <value>
+              Key type: ecdsa or ed25519 (default ecdsa)
+
+    --comment <value>
+              Comment appended to the public key
+
+    --force   Overwrite existing key files
+
+    -h, --help
+              Show this help
 ```
 
 ### sftp
@@ -1038,33 +1217,60 @@ printed -- press Ctrl+] or Ctrl+D to close. Without -q, closing local stdin does
 session: nc keeps draining the peer until it closes the connection or you press Ctrl+]/Ctrl+D.
 
 Options:
-  -l          Listen for an incoming connection instead of connecting out
-  --listen    Alias for -l
-  -u          Use UDP instead of TCP
-  --udp       Alias for -u
-  -z          Zero-I/O mode: scan for open TCP ports instead of connecting; the port argument may be
+    -l        Listen for an incoming connection instead of connecting out
+
+    --listen  Alias for -l
+
+    -u        Use UDP instead of TCP
+
+    --udp     Alias for -u
+
+    -z        Zero-I/O mode: scan for open TCP ports instead of connecting; the port argument may be
               a single port or a low-high range
-  -v          Verbose: also report closed ports while scanning, and extra connection detail
-  --verbose   Alias for -v
-  -w <value>  Timeout in seconds (default: 10s to connect, 0.5s per port while scanning)
-  -e <value>  Run '<cmd> [arg text]' with its stdio wired to the peer once connected, instead of the
+
+    -v        Verbose: also report closed ports while scanning, and extra connection detail
+
+    --verbose
+              Alias for -v
+
+    -w <value>
+              Timeout in seconds (default: 10s to connect, 0.5s per port while scanning)
+
+    -e <value>
+              Run '<cmd> [arg text]' with its stdio wired to the peer once connected, instead of the
               terminal -- a bind/reverse shell primitive. <cmd> is an app_runner command name (e.g.
               'shell -i'). Not usable with -z.
-  -p <value>  Source port for an outgoing connection, instead of an OS-assigned one -- e.g. to reach
+
+    -p <value>
+              Source port for an outgoing connection, instead of an OS-assigned one -- e.g. to reach
               a peer whose firewall trusts a specific source port. Client/-e modes only.
-  -s <value>  Source address (accepted, not applied -- BruceOS is single-homed, there is no second
+
+    -s <value>
+              Source address (accepted, not applied -- BruceOS is single-homed, there is no second
               local address to bind; kept for command-line compatibility with real nc)
-  -k          Keep listening for further connections after one closes (listen mode only)
-  -C          Translate outgoing bare CR/LF to CRLF -- useful when talking a line-oriented text
+
+    -k        Keep listening for further connections after one closes (listen mode only)
+
+    -C        Translate outgoing bare CR/LF to CRLF -- useful when talking a line-oriented text
               protocol (SMTP, HTTP/1.0, ...) by hand
-  -i <value>  Delay in seconds between sent lines (interactive/-e modes) or between scanned ports
+
+    -i <value>
+              Delay in seconds between sent lines (interactive/-e modes) or between scanned ports
               (-z)
-  -q <value>  Seconds to keep reading the peer after local stdin closes, then quit (default: never
+
+    -q <value>
+              Seconds to keep reading the peer after local stdin closes, then quit (default: never
               auto-quit, matching real nc -- keep draining the peer until it closes or you cancel).
               0 quits immediately on stdin EOF.
-  -o <value>  Hex-dump the full session (both directions) to <file>
-  -h, --help  Show this help
-  --version   Show version
+
+    -o <value>
+              Hex-dump the full session (both directions) to <file>
+
+    -h, --help
+              Show this help
+
+    --version
+              Show version
 ```
 
 ### nmap
@@ -1083,26 +1289,42 @@ scans, no OS fingerprinting (-O), no NSE scripts -- see each option's help for e
 instead.
 
 Options:
-  --sn                 Host discovery only -- report which targets are up, scan no ports
-  --Pn                 Skip host discovery -- treat every target as up
-  -p <value>           Ports to scan: a single port, a range ("20-1024"), or a comma list of either
-                       ("22,80,8000-8100"). Default: the built-in top-ports list
-  --top-ports <value>  Scan the N most common ports from the built-in list, instead of the default
-                       or -p
-  --sT                 TCP connect scan (the default -- accepted for command-line familiarity)
-  --sU                 UDP scan instead of TCP. Without a reply, a port is reported open|filtered --
-                       the same ambiguity real nmap has when it can't see an ICMP port-unreachable
-                       reply either
-  --sV                 Grab whatever an open TCP port sends unprompted and show it as a raw banner
-                       -- not real nmap's probe-database service/version match
-  -T <value>           Timing template 0 (paranoid/slow) to 5 (insane/fast), default 3 --
-                       approximates real nmap's timing intent via this build's own probe
-                       timeout/pacing
-  --oN <value>         Also write plain-text output to <file>
-  -v                   Verbose: also report closed/filtered ports explicitly
-  --verbose            Alias for -v
-  -h, --help           Show this help
-  --version            Show version
+    --sn      Host discovery only -- report which targets are up, scan no ports
+
+    --Pn      Skip host discovery -- treat every target as up
+
+    -p <value>
+              Ports to scan: a single port, a range ("20-1024"), or a comma list of either
+              ("22,80,8000-8100"). Default: the built-in top-ports list
+
+    --top-ports <value>
+              Scan the N most common ports from the built-in list, instead of the default or -p
+
+    --sT      TCP connect scan (the default -- accepted for command-line familiarity)
+
+    --sU      UDP scan instead of TCP. Without a reply, a port is reported open|filtered -- the same
+              ambiguity real nmap has when it can't see an ICMP port-unreachable reply either
+
+    --sV      Grab whatever an open TCP port sends unprompted and show it as a raw banner -- not
+              real nmap's probe-database service/version match
+
+    -T <value>
+              Timing template 0 (paranoid/slow) to 5 (insane/fast), default 3 -- approximates real
+              nmap's timing intent via this build's own probe timeout/pacing
+
+    --oN <value>
+              Also write plain-text output to <file>
+
+    -v        Verbose: also report closed/filtered ports explicitly
+
+    --verbose
+              Alias for -v
+
+    -h, --help
+              Show this help
+
+    --version
+              Show version
 ```
 
 ### webui
@@ -1127,12 +1349,17 @@ Usage: wget <url> [options]
 Download a file over HTTP/HTTPS.
 
 Arguments:
-  url (required)            URL to download (scheme optional, defaults to http://)
+    url (required)
+              URL to download (scheme optional, defaults to http://)
 
 Options:
-  -O <value>                Save to this path instead of the URL's file name
-  -U, --user-agent <value>
-  -h, --help                Show this help
+    -O <value>
+              Save to this path instead of the URL's file name
+
+    -U, --user-agent <value>
+
+    -h, --help
+              Show this help
 ```
 
 ### wifi
@@ -1147,19 +1374,31 @@ Usage: wifi <command> [options]
 Manage Wi-Fi station and access-point modes.
 
 Commands:
-  on                         Connect using saved credentials, or choose a nearby network in GUI
-                             mode.
-  off, disconnect            Disconnect Wi-Fi.
-  toggle                     Toggle Wi-Fi state.
-  add <ssid> <password>      Save a Wi-Fi credential.
-  ap <command>               Manage access-point mode.
-  scan                       List nearby Wi-Fi networks (interactive picker in GUI mode).
-  connect [ssid] [password]  Connect saved credentials or provide a network and password.
-  status                     Show Wi-Fi station or access-point status.
+    on        Connect using saved credentials, or choose a nearby network in GUI mode.
+
+    off, disconnect
+              Disconnect Wi-Fi.
+
+    toggle    Toggle Wi-Fi state.
+
+    add <ssid> <password>
+              Save a Wi-Fi credential.
+
+    ap <command>
+              Manage access-point mode.
+
+    scan      List nearby Wi-Fi networks (interactive picker in GUI mode).
+
+    connect [ssid] [password]
+              Connect saved credentials or provide a network and password.
+
+    status    Show Wi-Fi station or access-point status.
 
 Options:
-  --gui                      Use GUI interaction mode
-  -h, --help                 Show this help
+    --gui     Use GUI interaction mode
+
+    -h, --help
+              Show this help
 ```
 
 ## Radio
@@ -1176,10 +1415,11 @@ Usage: bluetooth <command>
 Scan for nearby Bluetooth Low Energy advertisements.
 
 Commands:
-  scan        List nearby BLE advertisements.
+    scan      List nearby BLE advertisements.
 
 Options:
-  -h, --help  Show this help
+    -h, --help
+              Show this help
 ```
 
 ### bluetooth_hid_app
@@ -1194,13 +1434,19 @@ Usage: bluetooth_hid_app <command>
 Manage a Classic Bluetooth keyboard or gamepad input adapter.
 
 Commands:
-  scan               List nearby Classic Bluetooth HID devices.
-  connect <address>  Connect to a Bluetooth HID device.
-  disconnect         Disconnect the active Bluetooth HID device.
-  status             Show the Bluetooth HID connection status.
+    scan      List nearby Classic Bluetooth HID devices.
+
+    connect <address>
+              Connect to a Bluetooth HID device.
+
+    disconnect
+              Disconnect the active Bluetooth HID device.
+
+    status    Show the Bluetooth HID connection status.
 
 Options:
-  -h, --help         Show this help
+    -h, --help
+              Show this help
 ```
 
 ### device_bus
@@ -1235,35 +1481,39 @@ Usage: ir <command>
 Receive, learn, transmit, and generate infrared signals.
 
 Commands:
-  rx [raw_or_timeout] [timeout_seconds]                                   Receive a decoded or raw
-                                                                          signal: rx [raw]
-                                                                          [timeout_seconds].
-  learn <absolute_path> <button_name> [raw_or_timeout] [timeout_seconds]  Capture one signal and
-                                                                          write a Bruce IR file.
-  tx <protocol> <data_or_address> [bits_or_command] [repeats]             Transmit protocol data, or
-                                                                          an address/command pair
-                                                                          for supported protocols.
-  tx_raw <frequency_hz> [args...]                                         Transmit raw timings:
-                                                                          tx_raw <frequency_hz>
-                                                                          <timing_us> [...]. Commas
-                                                                          are accepted.
-  tx_from_file <absolute_path> [repeats]                                  Transmit every signal in a
-                                                                          Bruce IR file.
-  tx_pick_file                                                            Pick a Bruce IR file and
-                                                                          transmit every signal in
-                                                                          it (GUI only).
-  tvbgone [region]                                                        Send regional TV power
-                                                                          codes.
-  jam [frequency_hz] [seconds] [mode]                                     Transmit an IR jamming
-                                                                          pattern.
-  learn_custom                                                            Interactively capture and
-                                                                          save a signal (GUI only).
-  quick_learn                                                             Interactively capture a
-                                                                          full remote from a device
-                                                                          template (GUI only).
+    rx [raw_or_timeout] [timeout_seconds]
+              Receive a decoded or raw signal: rx [raw] [timeout_seconds].
+
+    learn <absolute_path> <button_name> [raw_or_timeout] [timeout_seconds]
+              Capture one signal and write a Bruce IR file.
+
+    tx <protocol> <data_or_address> [bits_or_command] [repeats]
+              Transmit protocol data, or an address/command pair for supported protocols.
+
+    tx_raw <frequency_hz> [args...]
+              Transmit raw timings: tx_raw <frequency_hz> <timing_us> [...]. Commas are accepted.
+
+    tx_from_file <absolute_path> [repeats]
+              Transmit every signal in a Bruce IR file.
+
+    tx_pick_file
+              Pick a Bruce IR file and transmit every signal in it (GUI only).
+
+    tvbgone [region]
+              Send regional TV power codes.
+
+    jam [frequency_hz] [seconds] [mode]
+              Transmit an IR jamming pattern.
+
+    learn_custom
+              Interactively capture and save a signal (GUI only).
+
+    quick_learn
+              Interactively capture a full remote from a device template (GUI only).
 
 Options:
-  -h, --help                                                              Show this help
+    -h, --help
+              Show this help
 ```
 
 ### nrf24
@@ -1278,13 +1528,19 @@ Usage: nrf24 <command>
 Inspect and configure an NRF24 2.4 GHz radio.
 
 Commands:
-  status                         Show radio and pin status.
-  channel <channel>              Set the active NRF24 channel.
-  scan [first] [last] [samples]  Scan a channel range for RPD activity.
-  info                           Show usage notes for passive spectrum scanning.
+    status    Show radio and pin status.
+
+    channel <channel>
+              Set the active NRF24 channel.
+
+    scan [first] [last] [samples]
+              Scan a channel range for RPD activity.
+
+    info      Show usage notes for passive spectrum scanning.
 
 Options:
-  -h, --help                     Show this help
+    -h, --help
+              Show this help
 ```
 
 ## Runtime
@@ -1301,10 +1557,12 @@ Usage: elf <path> [args...]
 Load and run an ELF application.
 
 Arguments:
-  path (required)  ELF file to load
+    path (required)
+              ELF file to load
 
 Options:
-  -h, --help       Show this help
+    -h, --help
+              Show this help
 ```
 
 ### js
@@ -1319,10 +1577,12 @@ Usage: js <path> [args...]
 Load and run a JavaScript application.
 
 Arguments:
-  path (required)  JavaScript file to load
+    path (required)
+              JavaScript file to load
 
 Options:
-  -h, --help       Show this help
+    -h, --help
+              Show this help
 ```
 
 ### wasm
@@ -1337,10 +1597,12 @@ Usage: wasm <path> [args...]
 Open a WebAssembly module.
 
 Arguments:
-  path (required)  Path to a .wasm module
+    path (required)
+              Path to a .wasm module
 
 Options:
-  -h, --help       Show this help
+    -h, --help
+              Show this help
 ```
 
 ## Shell
@@ -1367,13 +1629,19 @@ Usage: shell [script] [options]
 Run the interactive shell, a single command, or a script.
 
 Arguments:
-  script      Absolute path to a .sh script to run
+    script    Absolute path to a .sh script to run
 
 Options:
-  -i          Run interactively
-  --no-echo   Suppress input echo in interactive mode (with -i)
-  -c <value>  Run a single command string
-  -h, --help  Show this help
+    -i        Run interactively
+
+    --no-echo
+              Suppress input echo in interactive mode (with -i)
+
+    -c <value>
+              Run a single command string
+
+    -h, --help
+              Show this help
 ```
 
 ### stty
@@ -1388,10 +1656,11 @@ Usage: stty [setting]
 Show or change the calling process's terminal settings (rows, columns, raw/cooked mode).
 
 Arguments:
-  setting     'size', 'raw', or '-raw'/'cooked'/'sane'
+    setting   'size', 'raw', or '-raw'/'cooked'/'sane'
 
 Options:
-  -h, --help  Show this help
+    -h, --help
+              Show this help
 ```
 
 ### terminal
@@ -1406,11 +1675,13 @@ Usage: terminal [command] [args...] [options]
 Open the terminal and optionally run a startup command.
 
 Arguments:
-  command     Command to run on startup
+    command   Command to run on startup
 
 Options:
-  --gui
-  -h, --help  Show this help
+    --gui
+
+    -h, --help
+              Show this help
 ```
 
 ## Content
@@ -1427,13 +1698,19 @@ Usage: base64 [file] [options]
 Base64 encode or decode a file, or piped stdin.
 
 Arguments:
-  file                  File to encode/decode (reads stdin if omitted)
+    file      File to encode/decode (reads stdin if omitted)
 
 Options:
-  -d                    Decode instead of encode
-  -w <value>            Wrap encoded output at this many columns, 0 for no wrapping
-  --stdin-size <value>  Read exactly this many bytes from stdin (used by shell pipes)
-  -h, --help            Show this help
+    -d        Decode instead of encode
+
+    -w <value>
+              Wrap encoded output at this many columns, 0 for no wrapping
+
+    --stdin-size <value>
+              Read exactly this many bytes from stdin (used by shell pipes)
+
+    -h, --help
+              Show this help
 ```
 
 ### crc32
@@ -1448,11 +1725,14 @@ Usage: crc32 [file] [args...] [options]
 Print CRC-32 checksums.
 
 Arguments:
-  file                  File(s) to checksum (reads stdin if omitted)
+    file      File(s) to checksum (reads stdin if omitted)
 
 Options:
-  --stdin-size <value>  Read exactly this many bytes from stdin (used by shell pipes)
-  -h, --help            Show this help
+    --stdin-size <value>
+              Read exactly this many bytes from stdin (used by shell pipes)
+
+    -h, --help
+              Show this help
 ```
 
 ### cut
@@ -1467,14 +1747,23 @@ Usage: cut [file] [options]
 Extract selected fields or characters from each line of a file or stdin.
 
 Arguments:
-  file                  File to read (defaults to stdin)
+    file      File to read (defaults to stdin)
 
 Options:
-  -f <value>            Field list to keep, e.g. 1,3-5 (columns separated by -d)
-  -c <value>            Character list to keep, e.g. 1-4,8
-  -d <value>            Field separator for -f (default: tab)
-  --stdin-size <value>  Read exactly this many bytes from stdin (used by shell pipes)
-  -h, --help            Show this help
+    -f <value>
+              Field list to keep, e.g. 1,3-5 (columns separated by -d)
+
+    -c <value>
+              Character list to keep, e.g. 1-4,8
+
+    -d <value>
+              Field separator for -f (default: tab)
+
+    --stdin-size <value>
+              Read exactly this many bytes from stdin (used by shell pipes)
+
+    -h, --help
+              Show this help
 ```
 
 ### grep
@@ -1489,20 +1778,36 @@ Usage: grep <pattern> [args...] [options]
 Search for a literal substring in files or stdin (no regular expressions).
 
 Arguments:
-  pattern (required)    Literal substring to search for (no regex)
+    pattern (required)
+              Literal substring to search for (no regex)
 
 Options:
-  -i                    Ignore case when matching
-  -v                    Select non-matching lines instead
-  -n                    Prefix each output line with its line number
-  -c                    Print only a count of matching lines per file
-  -l                    Print only the names of files containing a match
-  -q                    Suppress all output; only the exit status reports a match
-  -A <value>            Print NUM lines of context after each match
-  -B <value>            Print NUM lines of context before each match
-  -C <value>            Print NUM lines of context before and after each match (like -A NUM -B NUM)
-  --stdin-size <value>  Read exactly this many bytes from stdin (used by shell pipes)
-  -h, --help            Show this help
+    -i        Ignore case when matching
+
+    -v        Select non-matching lines instead
+
+    -n        Prefix each output line with its line number
+
+    -c        Print only a count of matching lines per file
+
+    -l        Print only the names of files containing a match
+
+    -q        Suppress all output; only the exit status reports a match
+
+    -A <value>
+              Print NUM lines of context after each match
+
+    -B <value>
+              Print NUM lines of context before each match
+
+    -C <value>
+              Print NUM lines of context before and after each match (like -A NUM -B NUM)
+
+    --stdin-size <value>
+              Read exactly this many bytes from stdin (used by shell pipes)
+
+    -h, --help
+              Show this help
 ```
 
 ### gunzip
@@ -1517,11 +1822,14 @@ Usage: gunzip <file> [options]
 Decompress a ".gz" file.
 
 Arguments:
-  file (required)  ".gz" file to decompress
+    file (required)
+              ".gz" file to decompress
 
 Options:
-  -k               Keep the input file instead of removing it
-  -h, --help       Show this help
+    -k        Keep the input file instead of removing it
+
+    -h, --help
+              Show this help
 ```
 
 ### gzip
@@ -1536,13 +1844,19 @@ Usage: gzip <file> [options]
 Compress a file to ".gz".
 
 Arguments:
-  file (required)  File to compress
+    file (required)
+              File to compress
 
 Options:
-  -d               Decompress instead of compress
-  --level <value>  Compression level, 0 (store) to 9 (smallest/slowest)
-  -k               Keep the input file instead of removing it
-  -h, --help       Show this help
+    -d        Decompress instead of compress
+
+    --level <value>
+              Compression level, 0 (store) to 9 (smallest/slowest)
+
+    -k        Keep the input file instead of removing it
+
+    -h, --help
+              Show this help
 ```
 
 ### image
@@ -1557,10 +1871,12 @@ Usage: image <path> [args...]
 Display an image until an input event is received.
 
 Arguments:
-  path (required)  Path to a JPEG, PNG, or GIF image
+    path (required)
+              Path to a JPEG, PNG, or GIF image
 
 Options:
-  -h, --help       Show this help
+    -h, --help
+              Show this help
 ```
 
 ### less
@@ -1575,12 +1891,16 @@ Usage: less [path] [args...] [options]
 View a file, or piped stdin, one screen at a time.
 
 Arguments:
-  path                  File to view
+    path      File to view
 
 Options:
-  --stdin-size <value>  Read exactly this many bytes from stdin (used by shell pipes)
-  -S                    Chop long lines instead of wrapping them
-  -h, --help            Show this help
+    --stdin-size <value>
+              Read exactly this many bytes from stdin (used by shell pipes)
+
+    -S        Chop long lines instead of wrapping them
+
+    -h, --help
+              Show this help
 ```
 
 ### md5sum
@@ -1595,11 +1915,14 @@ Usage: md5sum [file] [args...] [options]
 Print MD5 checksums.
 
 Arguments:
-  file                  File(s) to checksum (reads stdin if omitted)
+    file      File(s) to checksum (reads stdin if omitted)
 
 Options:
-  --stdin-size <value>  Read exactly this many bytes from stdin (used by shell pipes)
-  -h, --help            Show this help
+    --stdin-size <value>
+              Read exactly this many bytes from stdin (used by shell pipes)
+
+    -h, --help
+              Show this help
 ```
 
 ### rev
@@ -1614,11 +1937,14 @@ Usage: rev [file] [options]
 Reverse the characters of each line in a file or stdin.
 
 Arguments:
-  file                  File to read (defaults to stdin)
+    file      File to read (defaults to stdin)
 
 Options:
-  --stdin-size <value>  Read exactly this many bytes from stdin (used by shell pipes)
-  -h, --help            Show this help
+    --stdin-size <value>
+              Read exactly this many bytes from stdin (used by shell pipes)
+
+    -h, --help
+              Show this help
 ```
 
 ### seq
@@ -1633,13 +1959,19 @@ Usage: seq <n1> [n2] [n3] [options]
 Print a sequence of integers.
 
 Arguments:
-  n1 (required)  LAST, or FIRST if a second number follows
-  n2             LAST, or INCREMENT if a third number follows
-  n3             LAST, when FIRST and INCREMENT were both given
+    n1 (required)
+              LAST, or FIRST if a second number follows
+
+    n2        LAST, or INCREMENT if a third number follows
+
+    n3        LAST, when FIRST and INCREMENT were both given
 
 Options:
-  -s <value>     Separator between numbers (default: newline)
-  -h, --help     Show this help
+    -s <value>
+              Separator between numbers (default: newline)
+
+    -h, --help
+              Show this help
 ```
 
 ### sha256sum
@@ -1654,11 +1986,14 @@ Usage: sha256sum [file] [args...] [options]
 Print SHA-256 checksums.
 
 Arguments:
-  file                  File(s) to checksum (reads stdin if omitted)
+    file      File(s) to checksum (reads stdin if omitted)
 
 Options:
-  --stdin-size <value>  Read exactly this many bytes from stdin (used by shell pipes)
-  -h, --help            Show this help
+    --stdin-size <value>
+              Read exactly this many bytes from stdin (used by shell pipes)
+
+    -h, --help
+              Show this help
 ```
 
 ### sort
@@ -1673,14 +2008,20 @@ Usage: sort [file] [options]
 Sort the lines of a file or stdin.
 
 Arguments:
-  file                  File to read (defaults to stdin)
+    file      File to read (defaults to stdin)
 
 Options:
-  -r                    Reverse the sort order
-  -n                    Compare by each line's leading numeric value
-  -u                    Discard lines identical to the one before them, once sorted
-  --stdin-size <value>  Read exactly this many bytes from stdin (used by shell pipes)
-  -h, --help            Show this help
+    -r        Reverse the sort order
+
+    -n        Compare by each line's leading numeric value
+
+    -u        Discard lines identical to the one before them, once sorted
+
+    --stdin-size <value>
+              Read exactly this many bytes from stdin (used by shell pipes)
+
+    -h, --help
+              Show this help
 ```
 
 ### tee
@@ -1695,9 +2036,13 @@ Usage: tee [args...] [options]
 Copy piped stdin to stdout and to one or more files.
 
 Options:
-  -a                    Append to the files instead of overwriting them
-  --stdin-size <value>  Read exactly this many bytes from stdin (used by shell pipes)
-  -h, --help            Show this help
+    -a        Append to the files instead of overwriting them
+
+    --stdin-size <value>
+              Read exactly this many bytes from stdin (used by shell pipes)
+
+    -h, --help
+              Show this help
 ```
 
 ### text
@@ -1712,13 +2057,19 @@ Usage: text [path] [args...] [options]
 Edit a file, or piped stdin.
 
 Arguments:
-  path                  Path to a text file or save destination for piped input
+    path      Path to a text file or save destination for piped input
 
 Options:
-  -r                    Alias for --read-only
-  --read-only           View without allowing edits or saves
-  --stdin-size <value>  Read exactly this many bytes from stdin (used by shell pipes)
-  -h, --help            Show this help
+    -r        Alias for --read-only
+
+    --read-only
+              View without allowing edits or saves
+
+    --stdin-size <value>
+              Read exactly this many bytes from stdin (used by shell pipes)
+
+    -h, --help
+              Show this help
 ```
 
 ### tr
@@ -1733,14 +2084,21 @@ Usage: tr <set1> [set2] [options]
 Translate, delete, or squeeze characters from piped stdin.
 
 Arguments:
-  set1 (required)       Source character set (supports a-z ranges and \n \t \r)
-  set2                  Replacement character set
+    set1 (required)
+              Source character set (supports a-z ranges and \n \t \r)
+
+    set2      Replacement character set
 
 Options:
-  -d                    Delete characters found in SET1 instead of translating them
-  -s                    Squeeze consecutive output characters found in SET2 (or SET1 alone)
-  --stdin-size <value>  Read exactly this many bytes from stdin (used by shell pipes)
-  -h, --help            Show this help
+    -d        Delete characters found in SET1 instead of translating them
+
+    -s        Squeeze consecutive output characters found in SET2 (or SET1 alone)
+
+    --stdin-size <value>
+              Read exactly this many bytes from stdin (used by shell pipes)
+
+    -h, --help
+              Show this help
 ```
 
 ### uniq
@@ -1755,15 +2113,22 @@ Usage: uniq [file] [options]
 Filter out repeated adjacent lines from a file or stdin.
 
 Arguments:
-  file                  File to read (defaults to stdin)
+    file      File to read (defaults to stdin)
 
 Options:
-  -c                    Prefix each line with its number of occurrences
-  -d                    Print only lines that were repeated
-  -u                    Print only lines that were not repeated
-  -i                    Ignore case when comparing lines
-  --stdin-size <value>  Read exactly this many bytes from stdin (used by shell pipes)
-  -h, --help            Show this help
+    -c        Prefix each line with its number of occurrences
+
+    -d        Print only lines that were repeated
+
+    -u        Print only lines that were not repeated
+
+    -i        Ignore case when comparing lines
+
+    --stdin-size <value>
+              Read exactly this many bytes from stdin (used by shell pipes)
+
+    -h, --help
+              Show this help
 ```
 
 ### wc
@@ -1778,11 +2143,17 @@ Usage: wc [args...] [options]
 Count lines, words, and bytes in files or stdin.
 
 Options:
-  -l                    Print only the newline count
-  -w                    Print only the word count
-  -c                    Print only the byte count
-  --stdin-size <value>  Read exactly this many bytes from stdin (used by shell pipes)
-  -h, --help            Show this help
+    -l        Print only the newline count
+
+    -w        Print only the word count
+
+    -c        Print only the byte count
+
+    --stdin-size <value>
+              Read exactly this many bytes from stdin (used by shell pipes)
+
+    -h, --help
+              Show this help
 ```
 
 ### wl-copy
@@ -1797,12 +2168,17 @@ Usage: wl-copy [file] [options]
 Copy stdin, or a file, to the shared clipboard.
 
 Arguments:
-  file                  File to copy (reads stdin if omitted)
+    file      File to copy (reads stdin if omitted)
 
 Options:
-  -n <value>            Suggested filename, if the content ends up copied as binary data
-  --stdin-size <value>  Read exactly this many bytes from stdin (used by shell pipes)
-  -h, --help            Show this help
+    -n <value>
+              Suggested filename, if the content ends up copied as binary data
+
+    --stdin-size <value>
+              Read exactly this many bytes from stdin (used by shell pipes)
+
+    -h, --help
+              Show this help
 ```
 
 ### wl-paste
@@ -1817,8 +2193,10 @@ Usage: wl-paste [options]
 Print the shared clipboard's contents to stdout.
 
 Options:
-  -n          Don't append a trailing newline to text content
-  -h, --help  Show this help
+    -n        Don't append a trailing newline to text content
+
+    -h, --help
+              Show this help
 ```
 
 ### xxd
@@ -1833,14 +2211,26 @@ Usage: xxd [file] [options]
 Make a hexadecimal dump of a file or stdin.
 
 Arguments:
-  file                  File to dump (reads stdin if omitted)
+    file      File to dump (reads stdin if omitted)
 
 Options:
-  -c <value>            Bytes per output line (1..32; default 16)
-  -g <value>            Bytes per hexadecimal group (1, 2, 4, or 8; default 2)
-  -l <value>            Stop after this many bytes
-  -s <value>            Start at this byte offset (decimal or 0x-prefixed)
-  -p                    Plain hexadecimal output without addresses or ASCII
-  --stdin-size <value>  Read exactly this many bytes from stdin (used by shell pipes)
-  -h, --help            Show this help
+    -c <value>
+              Bytes per output line (1..32; default 16)
+
+    -g <value>
+              Bytes per hexadecimal group (1, 2, 4, or 8; default 2)
+
+    -l <value>
+              Stop after this many bytes
+
+    -s <value>
+              Start at this byte offset (decimal or 0x-prefixed)
+
+    -p        Plain hexadecimal output without addresses or ASCII
+
+    --stdin-size <value>
+              Read exactly this many bytes from stdin (used by shell pipes)
+
+    -h, --help
+              Show this help
 ```
