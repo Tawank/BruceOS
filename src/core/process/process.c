@@ -638,6 +638,16 @@ process_registry__create(const process_create_params_t *params, bruce_process_id
     UBaseType_t priority = params->priority != 0
                                  ? (UBaseType_t)params->priority
                                  : (params->start_in_background ? tskIDLE_PRIORITY + 1 : tskIDLE_PRIORITY + 2);
+    /* Reverted CPU0 pinning here (tried as a fix for the wifi-scan screen
+     * freeze): confirmed on real hardware to help nothing and to actively
+     * hurt everything else (NES emulator lag/input delay) by cramming every
+     * Bruce process onto a single core instead of letting the scheduler
+     * spread them across both. The freeze turned out not to be a core-
+     * affinity problem at all -- see shell_executor__capture_external()'s
+     * poll interval fix instead, which reproduces with the exact symptom
+     * the pinning never touched: "wifi scan" alone doesn't freeze anything,
+     * "wifi scan | grep x" does, and both run wifi's task on whatever core
+     * it was already on either way. */
     record->handle = xTaskCreateStatic(
         process__trampoline, record->name, stack_bytes, record, priority, (StackType_t *)record->stack_buffer,
         tcb_buffer

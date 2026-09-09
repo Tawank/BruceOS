@@ -369,7 +369,19 @@ static int shell_executor__capture_external(int argc, char **argv, shell_executo
         (void)stdio__session_close(session);
         return 1;
     }
-    int launched = shell_executor__launch_external(argc, argv, NULL, NULL, 0, BRUCE_LAUNCH_FOREGROUND);
+    /* BRUCE_LAUNCH_BACKGROUND, not FOREGROUND: this command's stdio is
+     * captured into `session`, not rendered anywhere, so it has no more use
+     * for the physical display than any other headless external command --
+     * see shell_executor__dispatch()'s own default-to-background comment.
+     * Launching it FOREGROUND (as this used to) makes it claim the *physical*
+     * display/keyboard regardless, which is exactly the "wifi scan | grep x"
+     * screen freeze reported on real hardware: whatever actually owns the
+     * screen (the launcher) goes dark for this command's entire runtime, a
+     * pipe producer at the front of a script or a "$(...)"/redirect capture
+     * either one, since both funnel through here. Plain, non-piped "wifi
+     * scan" was never affected because shell_executor__external() already
+     * defaults to background. */
+    int launched = shell_executor__launch_external(argc, argv, NULL, NULL, 0, BRUCE_LAUNCH_BACKGROUND);
     (void)stdio__session_route_children(BRUCE_STDIO_SESSION_INVALID);
     if (launched <= 0) {
         (void)stdio__session_close(session);
@@ -381,9 +393,11 @@ static int shell_executor__capture_external(int argc, char **argv, shell_executo
     bool complete = false;
     bool out_of_memory = false;
     while (!complete && !out_of_memory) {
+        bool activity = false;
         char chunk[256];
         size_t size = 0;
         while (stdio__session_read_output(session, chunk, sizeof(chunk), &size) == BRUCE_OK) {
+            activity = true;
             if (!shell_executor__buffer_append(&buffer, chunk, size)) {
                 out_of_memory = true;
                 break;
@@ -393,7 +407,22 @@ static int shell_executor__capture_external(int argc, char **argv, shell_executo
         bruce_result_t waited = process__wait_status((bruce_process_id_t)launched, 0, &status);
         complete = waited == BRUCE_OK;
         if (!complete && waited != BRUCE_ERR_TIMEOUT) break;
-        if (!complete) (void)runtime__delay(1);
+        /* Was a flat runtime__delay(1) every iteration regardless of output
+         * activity -- rounds up to one FreeRTOS tick (10ms at this project's
+         * CONFIG_FREERTOS_HZ=100), so a slow producer with a long quiet
+         * stretch (e.g. "wifi scan", ~1-1.5s of dwell time with nothing to
+         * drain) kept this foreground-priority shell task waking up ~100
+         * times/sec the whole time, each wake preempting whatever
+         * lower-priority task (the renderer included) was mid-run. The
+         * plain, non-piped wait path (shell_executor__wait(), used for
+         * "wifi scan" with no pipe) blocks a single process__wait_status()
+         * call for up to 100ms at a time instead -- 10x fewer wakeups -- and
+         * doesn't visibly freeze anything. Matching that idle-wait cadence
+         * here (only back off once nothing was read) removes the same
+         * self-inflicted preemption storm from the piped path without
+         * slowing down capture of a chatty producer, which never hits the
+         * idle branch to begin with. */
+        if (!complete && !activity) (void)runtime__delay(100);
     }
     if (out_of_memory) {
         (void)process__kill((bruce_process_id_t)launched);
@@ -680,7 +709,9 @@ static bool shell_executor__read_file(const char *path, shell_executor__buffer_t
 }
 
 /* shell_executor__capture_external()'s counterpart for "cmd > file"/
- * "cmd >> file": runs the same way (a fresh stdio session, foreground,
+ * "cmd >> file": runs the same way (a fresh stdio session, background --
+ * see shell_executor__capture_external()'s own comment on why FOREGROUND
+ * there was the real cause of the "wifi scan | grep x" screen freeze --
  * per-command NAME=value assignments dropped -- the same pre-existing
  * limitation a pipe producer already has), but writes each output chunk to
  * the already-open `file` as it arrives instead of buffering the whole
@@ -701,7 +732,7 @@ static int shell_executor__stream_external_to_file(int argc, char **argv, bruce_
         (void)stdio__session_close(session);
         return 1;
     }
-    int launched = shell_executor__launch_external(argc, argv, NULL, NULL, 0, BRUCE_LAUNCH_FOREGROUND);
+    int launched = shell_executor__launch_external(argc, argv, NULL, NULL, 0, BRUCE_LAUNCH_BACKGROUND);
     (void)stdio__session_route_children(BRUCE_STDIO_SESSION_INVALID);
     if (launched <= 0) {
         (void)stdio__session_close(session);
