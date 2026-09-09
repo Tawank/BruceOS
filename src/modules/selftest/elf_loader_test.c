@@ -22,11 +22,14 @@
 #include "core_sdk/permission.h"
 #include "core_sdk/process.h"
 #include "core_sdk/runtime.h"
+#include "core_sdk/storage.h"
+#include "esp_elf.h"
 #include "modules/loaders/elf/elf_loader_sdk_symbols_test.h"
 #include "modules/loaders/wasm/wasm_loader_app.h"
 #include "platform_api_vmcore.h"
 
 #include "elf_loader_test.h"
+#include "elf_loader_xip_fixture.h"
 
 /*
  * Exercises the FILE*-based stdio adapters the ELF loader hands to
@@ -730,57 +733,182 @@ bool selftest__run_elf_loader_exit_case(void) {
     return true;
 }
 
-// TODO: Fix elf_loader_test.c
-/* native_apps/examples/game.elf, embedded via EMBED_FILES (src/CMakeLists.txt). */
-// extern const uint8_t game_elf_start[] asm("_binary_game_elf_start");
-// extern const uint8_t game_elf_end[] asm("_binary_game_elf_end");
+/* Written by native_apps/examples/loader_selftest/main/main.c's app_main()
+ * once it's actually run to completion -- see that file's doc comment. Must
+ * stay in sync with LOADER_SELFTEST_RESULT_PATH there. */
+#define ELF_LOADER_XIP_RESULT_PATH "/selftest_elf_loader_xip_result.txt"
+
+/*
+ * Reads back and deletes the fixture's verdict file, comparing it against
+ * `expect` ("OK" or "FAIL", matching main.c's LOADER_SELFTEST_RESULT_OK/
+ * _FAIL). Missing entirely (the child never got far enough to write it --
+ * a crash, a hang, or a relocation that jumped somewhere nonsensical
+ * before reaching storage__open()) also fails to match, same as it should.
+ */
+static bool elf_loader_test__xip_check_result(const char *expect) {
+    char *data = NULL;
+    size_t size = 0;
+    bool matched = storage__read_file(ELF_LOADER_XIP_RESULT_PATH, &data, &size) && data != NULL &&
+                   strcmp(data, expect) == 0;
+    free(data);
+    storage__remove(ELF_LOADER_XIP_RESULT_PATH);
+    return matched;
+}
+
+/*
+ * Polls (rather than blocking on process__wait()) for the fixture's verdict
+ * file to show up, up to timeout_ms. process__wait() looked like the right
+ * tool here -- and the wasm loader selftest above uses the equivalent
+ * process__wait_status() successfully -- but on this path it was observed
+ * returning BRUCE_OK (a genuine, already-consumed completion, not a
+ * timeout) well before the file existed, most likely a stale completion
+ * left over from an earlier launch that happened to reuse the same process
+ * id. Polling for the actual condition this test cares about -- the file
+ * existing -- sidesteps that regardless of its root cause: a fast, correct
+ * child still gets observed almost immediately (the loop's granularity is
+ * the only added latency), and a slow one still gets the full budget.
+ */
+static void elf_loader_test__xip_wait_for_result(uint32_t timeout_ms) {
+    uint32_t waited = 0;
+    const uint32_t step_ms = 20;
+    while (waited < timeout_ms) {
+        bool exists = false;
+        if (storage__exists(ELF_LOADER_XIP_RESULT_PATH, &exists) == BRUCE_OK && exists) {
+            /* The verdict file showing up only means storage__write() (and
+             * the storage__close() right after it in the fixture) have run
+             * -- app_main() returning and the process actually unwinding out
+             * of elf_loader__entry() can still be a beat behind that. Left
+             * unaccounted for, the very next case's own
+             * storage__remove(ELF_LOADER_XIP_RESULT_PATH) at its own start
+             * could still race a not-yet-fully-exited previous fixture
+             * process's hold on that same path ("Has open FD", observed).
+             * A short settle delay here is cheaper than plumbing an actual
+             * exit signal through for what's already a diagnostic-only
+             * ordering gap. */
+            (void)runtime__delay(step_ms);
+            return;
+        }
+        if (runtime__delay(step_ms) != BRUCE_OK) return;
+        waited += step_ms;
+    }
+}
 
 /*
  * Regression coverage for the flash-backed (XIP) ELF relocation path: stages
- * a real, small, executable ELF app (committed at native_apps/examples/game.elf)
- * and runs it through the exact same AppRunner path dispatch ->
- * esp_elf_relocate_xip() -> memory_external swap allocator pipeline that
- * "elf ./apps/game.elf" uses on real hardware. This is the pipeline that
- * regressed with "flash-backed relocation failed (relocate=-5, release=0)":
- * selftest__run_elf_loader_case()'s fake ELF fixture is intentionally
- * invalid manifest-only bytes and is rejected before relocation is ever
- * attempted, so it cannot catch this class of bug.
+ * a real, tiny, compiled ELF app (native_apps/examples/loader_selftest/,
+ * committed here as elf_loader_xip_fixture.c/.h -- see
+ * src/modules/selftest/tool/gen_elf_loader_xip_fixture.py to refresh it
+ * after editing the fixture's source) and runs it through the exact same
+ * AppRunner path dispatch -> esp_elf_relocate_xip() -> memory_external swap
+ * allocator pipeline that "elf ./apps/whatever.elf" uses on real hardware.
+ * This is the pipeline that regressed with "flash-backed relocation failed
+ * (relocate=-5, release=0)": selftest__run_elf_loader_case()'s fake ELF
+ * fixture is intentionally invalid manifest-only bytes and is rejected
+ * before relocation is ever attempted, so it cannot catch this class of
+ * bug. On QEMU (as in CI), CONFIG_ELF_LOADER_LOAD_PSRAM is unset -- same as
+ * a real, PSRAM-less device -- so esp_elf_relocate_xip() genuinely runs the
+ * swap-backed pipeline here, not a stub.
+ *
+ * app_runner__run_path()'s own return value is the "elf" loader command's
+ * dispatch result, not the spawned child's eventual exit code (see
+ * elf_loader_app.c's elf_loader__entry(), the child's actual entry point
+ * and return-value target, which runs independently of that dispatch
+ * call) -- so success is read back from the file the fixture itself
+ * writes once app_main() actually finishes, not from `result`.
  */
 bool selftest__run_elf_loader_xip_case(void) {
     const char *path = "/bin/selftest_elf_loader_xip.elf";
     storage__remove(path);
+    storage__remove(ELF_LOADER_XIP_RESULT_PATH);
 
-    /* The external fixture writes to storage while running; selftests must
-     * never wait for a user to answer its first-use permission prompt. */
+    /* The fixture writes to storage while running; selftests must never
+     * wait for a user to answer its first-use permission prompt. */
     if (permission__set("selftest_elf_loader_xip.elf", BRUCE_PERMISSION_STORAGE, true) != BRUCE_OK) {
         printf("[selftest] loader/elf_xip: could not grant storage permission\n");
         return false;
     }
 
-    // size_t elf_size = (size_t)(game_elf_end - game_elf_start);
-    // if (!storage__write_file_atomic(path, game_elf_start, elf_size)) {
-    //     printf("[selftest] loader/elf_xip: could not stage embedded fixture\n");
-    //     return false;
-    // }
+    if (!storage__write_file_atomic(path, elf_loader_xip_fixture, elf_loader_xip_fixture_len)) {
+        printf("[selftest] loader/elf_xip: could not stage fixture\n");
+        return false;
+    }
 
-    int result = app_runner__run_path(path, NULL, BRUCE_LAUNCH_FOREGROUND);
-    if (result > 0) (void)runtime__delay(50);
+    int result = app_runner__run_path(path, NULL, BRUCE_LAUNCH_BACKGROUND);
+    /* A blind fixed delay here was flaky under QEMU, where the spawned
+     * process's first scheduling (and its own storage__open/write/close of
+     * the verdict file) can take longer than on real hardware -- poll for
+     * the verdict file itself instead of guessing at a fixed delay (see
+     * elf_loader_test__xip_wait_for_result()'s own comment for why that's
+     * more reliable here than blocking on process__wait()). */
+    if (result > 0) elf_loader_test__xip_wait_for_result(2000);
     storage__remove(path);
 
     if (result <= 0) {
-#if CONFIG_BRUCE_QEMU_TEST_MODE
-        if (result == BRUCE_ERR_INVALID_ARGUMENT) {
-            printf("[selftest] loader/elf_xip: OK (QEMU relocation unavailable)\n");
-            return true;
-        }
-#endif
         printf("[selftest] loader/elf_xip: open failed (result=%d)\n", result);
+        return false;
+    }
+    if (!elf_loader_test__xip_check_result("OK")) {
+        printf("[selftest] loader/elf_xip: fixture did not report success\n");
         return false;
     }
 
     printf("[selftest] loader/elf_xip: OK\n");
     return true;
 }
+
+#if CONFIG_BRUCE_QEMU_TEST_MODE
+/*
+ * Same fixture and pipeline as selftest__run_elf_loader_xip_case(), but
+ * forces esp_elf_load_section()'s ptext scratch-buffer allocation to fail
+ * via esp_elf_debug_force_streaming_fallback() (esp_elf.h) instead of
+ * actually fragmenting the shared selftest process's internal RAM the way
+ * a real doom_esp32s3.elf-sized load would on a PSRAM-less device -- doing
+ * that for real here would leave every selftest case that runs afterward
+ * to cope with whatever's left of a deliberately wrecked heap. This
+ * directly exercises esp_elf_stream_text_to_xip(), the low-RAM fallback
+ * added alongside it: the same fixture, relocated the same way, has to
+ * come out byte-for-byte identical whether it went through elf->ptext or
+ * straight through the streaming window one 4KB chunk at a time -- if it
+ * doesn't, the child's own written verdict says FAIL (or, if a bad
+ * relocation sent it somewhere it crashes or hangs instead, is never
+ * written at all).
+ */
+bool selftest__run_elf_loader_xip_streaming_fallback_case(void) {
+    const char *path = "/bin/selftest_elf_loader_xip_stream.elf";
+    storage__remove(path);
+    storage__remove(ELF_LOADER_XIP_RESULT_PATH);
+
+    if (permission__set("selftest_elf_loader_xip_stream.elf", BRUCE_PERMISSION_STORAGE, true) != BRUCE_OK) {
+        printf("[selftest] loader/elf_xip_stream: could not grant storage permission\n");
+        return false;
+    }
+
+    if (!storage__write_file_atomic(path, elf_loader_xip_fixture, elf_loader_xip_fixture_len)) {
+        printf("[selftest] loader/elf_xip_stream: could not stage fixture\n");
+        return false;
+    }
+
+    esp_elf_debug_force_streaming_fallback(true);
+    int result = app_runner__run_path(path, NULL, BRUCE_LAUNCH_BACKGROUND);
+    /* See selftest__run_elf_loader_xip_case() above: poll for the verdict
+     * file rather than guessing at a fixed delay. */
+    if (result > 0) elf_loader_test__xip_wait_for_result(2000);
+    esp_elf_debug_force_streaming_fallback(false);
+    storage__remove(path);
+
+    if (result <= 0) {
+        printf("[selftest] loader/elf_xip_stream: open failed (result=%d)\n", result);
+        return false;
+    }
+    if (!elf_loader_test__xip_check_result("OK")) {
+        printf("[selftest] loader/elf_xip_stream: fixture did not report success\n");
+        return false;
+    }
+
+    printf("[selftest] loader/elf_xip_stream: OK\n");
+    return true;
+}
+#endif
 
 bool selftest__run_wasm_loader_case(void) {
     const char *path = "/bin/selftest_wasm_loader_target.wasm";

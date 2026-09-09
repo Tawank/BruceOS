@@ -1,0 +1,10 @@
+{
+  "appName": "loader_selftest",
+  "entryPoint": "app_main",
+  "appIcon": "icon:file-document",
+  "coreAbiVersion": 5,
+  "permissions": ["storage"],
+  "stackSize": 4096,
+  "heapSize": 4096,
+  "targets": ["elf"]
+}

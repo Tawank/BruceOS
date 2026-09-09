@@ -3,6 +3,9 @@
 #include <stdbool.h>
 
 bool selftest__run_elf_loader_xip_case(void);
+#if CONFIG_BRUCE_QEMU_TEST_MODE
+bool selftest__run_elf_loader_xip_streaming_fallback_case(void);
+#endif
 bool selftest__run_elf_loader_stdio_case(void);
 bool selftest__run_elf_loader_libc_case(void);
 bool selftest__run_elf_loader_time_case(void);

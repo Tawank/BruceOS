@@ -14,6 +14,7 @@ set(BRUCE_SELFTEST_SOURCES
     "modules/selftest/dialog_test.c"
     "modules/selftest/display_test.c"
     "modules/selftest/elf_loader_test.c"
+    "modules/selftest/elf_loader_xip_fixture.c"
     "modules/selftest/fake_elf.c"
     "modules/selftest/filemanager_network_test.c"
     "modules/selftest/filemanager_pathicons_test.c"

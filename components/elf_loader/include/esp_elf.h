@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
 
@@ -91,6 +92,26 @@ int esp_elf_relocate(esp_elf_t *elf, const uint8_t *pbuf);
 /** Relocate with .text and plain .rodata retained in caller-managed flash. */
 int esp_elf_relocate_xip(esp_elf_t *elf, const uint8_t *pbuf, size_t size,
                          const esp_elf_xip_ops_t *ops, void *context);
+
+#if CONFIG_BRUCE_QEMU_TEST_MODE
+/**
+ * @brief Selftest-only fault injection: while set, esp_elf_load_section()'s
+ * ptext scratch-buffer allocation is treated as having failed, exactly as
+ * if internal RAM were too fragmented for one contiguous block -- forcing
+ * the low-memory streaming fallback (esp_elf_stream_text_to_xip()) on the
+ * very next esp_elf_relocate_xip() call, deterministically, without
+ * actually having to fragment the shared selftest process's heap (which
+ * every selftest case that runs afterward would then also have to live
+ * with). Never compiled into a production build -- see
+ * src/modules/selftest/elf_loader_test.c's
+ * selftest__run_elf_loader_xip_streaming_fallback_case() for the one
+ * caller.
+ *
+ * @param force - true to force the next allocation to fail, false to
+ *                restore normal behavior
+ */
+void esp_elf_debug_force_streaming_fallback(bool force);
+#endif
 
 /**
  * @brief Request running relocated ELF function.

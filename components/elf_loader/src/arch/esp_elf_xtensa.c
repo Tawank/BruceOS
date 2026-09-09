@@ -63,28 +63,30 @@
 static const char *TAG = "elf_arch";
 
 /**
- * @brief Relocates target architecture symbol of ELF
+ * @brief Applies one already-resolved relocation directly through a caller-
+ * supplied target pointer, instead of looking one up via
+ * esp_elf_map_reloc(). Factored out of esp_elf_arch_relocate() so the
+ * low-memory streaming fallback in esp_elf.c (esp_elf_stream_text_to_xip())
+ * can apply the exact same per-type relocation semantics against its own
+ * small window buffer -- there is nothing in this switch that depends on
+ * `where` pointing into elf->ptext specifically, only that it's 4 writable
+ * (and, for R_XTENSA_RELATIVE, readable) bytes holding this relocation's
+ * pre-relocation placeholder.
  *
- * @param elf  - ELF object pointer
- * @param rela - Relocated symbol data
- * @param sym  - ELF symbol table
- * @param addr - Jumping target address
+ * @param elf   - ELF object pointer
+ * @param rela  - Relocated symbol data
+ * @param sym   - ELF symbol table
+ * @param addr  - Jumping target address
+ * @param where - Writable pointer to the relocation's target 4 bytes
  *
  * @return ESP_OK if success or other if failed.
  */
-int esp_elf_arch_relocate(esp_elf_t *elf, const elf32_rela_t *rela,
-                          const elf32_sym_t *sym, uint32_t addr)
+int esp_elf_arch_relocate_at(esp_elf_t *elf, const elf32_rela_t *rela,
+                             const elf32_sym_t *sym, uint32_t addr, uint32_t *where)
 {
     uint32_t val;
-    uint32_t *where;
 
-    assert(elf && rela);
-
-    where = (uint32_t *)esp_elf_map_reloc(elf, rela->offset);
-    if (!where) {
-        ESP_LOGE(TAG, "relocation target 0x%x is not writable", (int)rela->offset);
-        return -EINVAL;
-    }
+    assert(elf && rela && where);
 
     ESP_LOGD(TAG, "type: %d, where=%p addr=0x%x offset=0x%x\n",
              ELF_R_TYPE(rela->info), where, (int)addr, (int)rela->offset);
@@ -114,4 +116,43 @@ int esp_elf_arch_relocate(esp_elf_t *elf, const elf32_rela_t *rela,
     }
 
     return 0;
+}
+
+/**
+ * @brief Relocates target architecture symbol of ELF
+ *
+ * @param elf  - ELF object pointer
+ * @param rela - Relocated symbol data
+ * @param sym  - ELF symbol table
+ * @param addr - Jumping target address
+ *
+ * @return ESP_OK if success or other if failed.
+ */
+int esp_elf_arch_relocate(esp_elf_t *elf, const elf32_rela_t *rela,
+                          const elf32_sym_t *sym, uint32_t addr)
+{
+    uint32_t *where;
+
+    assert(elf && rela);
+
+    where = (uint32_t *)esp_elf_map_reloc(elf, rela->offset);
+    if (!where) {
+        /* elf->ptext == NULL here normally means "out of memory, this
+         * relocation target is unmappable" -- except when this ELF's .text
+         * (and any staged .rodata) went through esp_elf_stream_text_to_xip()
+         * instead of a materialized ptext buffer (the low-RAM fallback
+         * esp_elf.c's esp_elf_load_section() takes when esp_elf_malloc()
+         * for ptext fails but a swap/XIP target is available). That
+         * function already applies every relocation
+         * landing in its region itself, window by window -- reaching here
+         * for one of those offsets means it's already handled, not broken. */
+        if (elf->xip_ops != NULL && elf->ptext == NULL &&
+            esp_elf_target_streamed(elf, rela->offset, NULL)) {
+            return 0;
+        }
+        ESP_LOGE(TAG, "relocation target 0x%x is not writable", (int)rela->offset);
+        return -EINVAL;
+    }
+
+    return esp_elf_arch_relocate_at(elf, rela, sym, addr, where);
 }

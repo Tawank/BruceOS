@@ -69,6 +69,29 @@ static bruce_process_id_t s_slot_owner[MEMORY_EXTERNAL__MAX_PAGES];
 static esp_partition_mmap_handle_t s_page_mmap[MEMORY_EXTERNAL__MAX_PAGES];
 static const void *s_page_data[MEMORY_EXTERNAL__MAX_PAGES];
 
+#if CONFIG_BRUCE_QEMU_TEST_MODE
+/* QEMU's flash cache/mmu emulation does not actually invalidate the primary
+ * ESP_PARTITION_MMAP_DATA alias on esp_partition_write() the way real
+ * hardware does (see the big comment on memory_external__invalidate_data_alias()
+ * below) -- reads through a non-executable record's record->data can keep
+ * returning stale (pre-write, or even pre-erase, leftover-from-a-different-
+ * object) bytes indefinitely under QEMU, confirmed by direct testing. Rather
+ * than depend on cache invalidation working at all, route every
+ * non-executable, slab-slotted SWAP record's record->data through a plain
+ * heap-RAM mirror of its page under QEMU: real hardware never allocates or
+ * touches this and keeps using the genuine flash mmap directly. */
+static uint8_t *s_qemu_page_shadow[MEMORY_EXTERNAL__MAX_PAGES];
+
+static bool memory_external__qemu_shadow_page_locked(size_t page) {
+    if (s_qemu_page_shadow[page] != NULL) return true;
+    uint8_t *shadow = heap_caps_malloc(MEMORY_EXTERNAL__MMU_PAGE, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (shadow == NULL) return false;
+    memset(shadow, 0xFF, MEMORY_EXTERNAL__MMU_PAGE);
+    s_qemu_page_shadow[page] = shadow;
+    return true;
+}
+#endif
+
 static void memory_external__ensure_mutex(void) {
     if (s_mutex != NULL) return;
     portENTER_CRITICAL(&s_init_mux);
@@ -157,11 +180,30 @@ static void memory_external__cleanup(void *context) {
             s_pages[page] = false;
             s_page_is_slab[page] = false;
             s_slot_owner[page] = BRUCE_PROCESS_ID_INVALID;
+#if CONFIG_BRUCE_QEMU_TEST_MODE
+            heap_caps_free(s_qemu_page_shadow[page]);
+            s_qemu_page_shadow[page] = NULL;
+#endif
         }
     } else {
+#if CONFIG_BRUCE_QEMU_TEST_MODE
+        if (record->executable) {
+            /* Allocated as plain executable RAM under QEMU -- see the
+             * comment on this case in memory_external__allocate_page_locked().
+             * No real esp_partition_mmap() ever happened, so there is
+             * nothing to munmap. */
+            if (record->data != NULL) heap_caps_free((void *)record->data);
+        } else {
+            if (record->data != NULL || record->instruction != NULL) {
+                esp_partition_munmap(record->mmap_handle);
+            }
+            if (record->data != NULL) heap_caps_free((void *)record->data);
+        }
+#else
         if (record->data != NULL || record->instruction != NULL) {
             esp_partition_munmap(record->mmap_handle);
         }
+#endif
         size_t first_page = record->offset / MEMORY_EXTERNAL__MMU_PAGE;
         for (size_t i = 0; i < record->page_count; ++i) s_pages[first_page + i] = false;
     }
@@ -349,6 +391,12 @@ static bool memory_external__allocate_slot_locked(
             ) != ESP_OK) {
             return false;
         }
+#if CONFIG_BRUCE_QEMU_TEST_MODE
+        if (!memory_external__qemu_shadow_page_locked(page)) {
+            esp_partition_munmap(mmap_handle);
+            return false;
+        }
+#endif
         memset(s_slots[page], 0, sizeof(s_slots[page]));
         s_pages[page] = true;
         s_page_is_slab[page] = true;
@@ -368,6 +416,12 @@ static bool memory_external__allocate_slot_locked(
         }
         return false;
     }
+#if CONFIG_BRUCE_QEMU_TEST_MODE
+    memset(
+        s_qemu_page_shadow[page] + first_slot * MEMORY_EXTERNAL__FLASH_SECTOR, 0xFF,
+        wanted * MEMORY_EXTERNAL__FLASH_SECTOR
+    );
+#endif
 
     for (size_t i = 0; i < wanted; ++i) s_slots[page][first_slot + i] = true;
     record->backend = BRUCE_MEMORY_BACKEND_SWAP;
@@ -378,7 +432,11 @@ static bool memory_external__allocate_slot_locked(
     record->slot_page = page;
     record->slot_first = first_slot;
     record->slot_count = wanted;
+#if CONFIG_BRUCE_QEMU_TEST_MODE
+    record->data = s_qemu_page_shadow[page] + first_slot * MEMORY_EXTERNAL__FLASH_SECTOR;
+#else
     record->data = (const uint8_t *)s_page_data[page] + first_slot * MEMORY_EXTERNAL__FLASH_SECTOR;
+#endif
     record->instruction = NULL;
     /* See memory_external__invalidate_data_alias() above: cheap, always-safe
      * defense-in-depth, doubly worthwhile here since this slot's virtual
@@ -417,6 +475,30 @@ memory_external__allocate_page_locked(memory_external__record_t *record, size_t 
     record->is_slot = false;
     s_next_page = (first + wanted) % total_pages;
 
+#if CONFIG_BRUCE_QEMU_TEST_MODE
+    if (executable) {
+        /* Same class of QEMU flash-cache-coherency gap as s_qemu_page_shadow
+         * above, but for the *instruction* alias this time -- confirmed by a
+         * real crash (illegal-instruction fault fetching erased-flash bytes)
+         * executing freshly-relocated code through the genuine flash XIP
+         * mapping under QEMU. Skip the flash entirely for the executable
+         * case under QEMU: allocate genuinely CPU-executable RAM and use it
+         * for both record->instruction and record->data. Real hardware is
+         * untouched and keeps using the real flash XIP mapping. */
+        uint8_t *exec_ram = heap_caps_malloc(record->size, MALLOC_CAP_EXEC | MALLOC_CAP_32BIT);
+        if (exec_ram == NULL) {
+            for (size_t i = 0; i < wanted; ++i) s_pages[first + i] = false;
+            memset(record, 0, sizeof(*record));
+            return false;
+        }
+        memset(exec_ram, 0xFF, record->size);
+        record->instruction = exec_ram;
+        record->data = exec_ram;
+        record->mmap_handle = (esp_partition_mmap_handle_t)0;
+        return true;
+    }
+#endif
+
     if (esp_partition_erase_range(partition, record->offset, wanted * MEMORY_EXTERNAL__MMU_PAGE) != ESP_OK) {
         for (size_t i = 0; i < wanted; ++i) s_pages[first + i] = false;
         memset(record, 0, sizeof(*record));
@@ -442,7 +524,22 @@ memory_external__allocate_page_locked(memory_external__record_t *record, size_t 
             return false;
         }
     } else {
+#if CONFIG_BRUCE_QEMU_TEST_MODE
+        /* See s_qemu_page_shadow's comment above: QEMU does not actually
+         * invalidate this mapping on esp_partition_write() the way real
+         * hardware does, so route it through a plain RAM mirror instead. */
+        uint8_t *shadow = heap_caps_malloc(record->size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        if (shadow == NULL) {
+            esp_partition_munmap(record->mmap_handle);
+            for (size_t i = 0; i < wanted; ++i) s_pages[first + i] = false;
+            memset(record, 0, sizeof(*record));
+            return false;
+        }
+        memset(shadow, 0xFF, record->size);
+        record->data = shadow;
+#else
         record->data = mapped;
+#endif
     }
     /* See the comment on memory_external__invalidate_data_alias() above:
      * strictly necessary only for the executable case, applied to both for
@@ -542,6 +639,17 @@ static bruce_result_t memory_external__store_locked(
         return BRUCE_OK;
     }
 
+#if CONFIG_BRUCE_QEMU_TEST_MODE
+    if (record->backend == BRUCE_MEMORY_BACKEND_SWAP && record->executable) {
+        /* See memory_external__allocate_page_locked(): this record is plain
+         * executable RAM under QEMU, not a flash mapping -- write straight
+         * into it. */
+        if (is_fill) memset((void *)(record->data + offset), fill_value, size);
+        else memmove((void *)(record->data + offset), data, size);
+        return BRUCE_OK;
+    }
+#endif
+
     const uint8_t *bytes = data;
     if (!is_fill) {
         uintptr_t source_start = (uintptr_t)data;
@@ -600,6 +708,18 @@ static bruce_result_t memory_external__store_locked(
                 break;
             }
         }
+#if CONFIG_BRUCE_QEMU_TEST_MODE
+        /* record->data is a plain RAM mirror for non-executable SWAP records
+         * under QEMU (see s_qemu_page_shadow's comment) precisely because
+         * QEMU doesn't keep the real flash-mmap alias coherent with the
+         * esp_partition_write()/erase_range() calls above -- keep the mirror
+         * itself in sync here instead. The executable case still uses the
+         * genuine flash-cache alias (CPU-read-only, so never written here). */
+        if (!record->executable) {
+            if (is_fill) memset((void *)(record->data + offset + written), fill_value, chunk);
+            else memcpy((void *)(record->data + offset + written), bytes + written, chunk);
+        }
+#endif
         written += chunk;
     }
     heap_caps_free(sector);

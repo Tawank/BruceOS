@@ -182,7 +182,7 @@ static int elf_loader__xip_allocate(
 static int
 elf_loader__xip_write(void *context, uint32_t handle, size_t offset, const void *data, size_t size) {
     elf_loader_process_ctx_t *ctx = context;
-    if (ctx->xip.memory.handle != handle) return -EINVAL;
+    if (ctx->xip.memory.handle != handle) { return -EINVAL; }
     bruce_result_t result = ext_mem_loader__write_xip(&ctx->xip, offset, data, size);
     if (result != BRUCE_OK) {
         printf(
@@ -289,6 +289,40 @@ static int elf_loader__open(
         memory__free(inspection);
         return stage_result;
     }
+
+    /* Best-effort: give both the relocation below and the new app's stack
+     * (and its manifest-declared expected heap use, if any -- see
+     * BRUCE_MANIFEST_HEAP_MAX) a better chance of fitting by asking
+     * registered subsystems (e.g. the display framebuffer) to shrink first
+     * -- a no-op if the largest contiguous internal block already covers
+     * this on its own, otherwise reclaims whatever is available even if
+     * that falls short of the full total (see memory__reclaim()). This has
+     * to run BEFORE esp_elf_init()/esp_elf_relocate[_xip]() below, not
+     * after: even on the no-PSRAM/XIP path, where the relocated code itself
+     * ends up in swap rather than internal RAM (see s_xip_ops above),
+     * relocation still needs one contiguous internal-RAM scratch buffer to
+     * assemble the relocated .text (and staged .rodata) into before it's
+     * flashed out and freed (esp_elf.c's esp_elf_relocate_internal()) --
+     * that malloc is exactly as vulnerable to a fragmented heap as the
+     * process's own stack/heap is, and total free memory looking fine
+     * (`free`'s "free" column) says nothing about whether a contiguous
+     * block that size actually exists (`free`'s "lrgst" column is the one
+     * that matters here). image.size (the whole staged ELF file) is a
+     * deliberately generous stand-in for the exact .text/.rodata size --
+     * that isn't known until relocation parses the section headers, which
+     * is the same call this is trying to give room to succeed -- and
+     * memory__reclaim() reclaiming more than strictly needed from a
+     * best-effort provider is harmless, just possibly disturbs one more
+     * subsystem than the bare minimum would have. A failure here (nothing
+     * worth reclaiming, or no memory pressure at all) is not a reason to
+     * abort the launch; relocation and the spawn below simply fail on their
+     * own if truly out of memory, same as before this existed.
+     * elf_loader__entry() adopts the credit once the new process actually
+     * exists (see bruce_memory_reclaim_token_t's field comment above). */
+    (void)memory__reclaim(
+        inspection->manifest.stack_size + inspection->manifest.heap_size + image.size, NULL, &ctx->reclaim_token
+    );
+
     int relocate_result = esp_elf_init(&ctx->elf);
     if (relocate_result == 0) {
         ctx->elf_initialized = true;
@@ -322,22 +356,6 @@ static int elf_loader__open(
                                                                                : BRUCE_ERR_INVALID_ARGUMENT))
                    : release_result;
     }
-
-    /* Best-effort: give the new app's stack (and its manifest-declared
-     * expected heap use, if any -- see BRUCE_MANIFEST_HEAP_MAX) a better
-     * chance of fitting by asking registered subsystems (e.g. the display
-     * framebuffer) to shrink first -- a no-op if the largest contiguous
-     * internal block already covers this on its own, otherwise reclaims
-     * whatever is available even if that falls short of the full manifest
-     * total (see memory__reclaim()). A failure here (nothing worth
-     * reclaiming, or no memory pressure at all) is not a reason to abort the
-     * launch; the spawn below simply fails on its own if truly out of
-     * memory, same as before this existed. elf_loader__entry() adopts the
-     * credit once the new process actually exists (see
-     * bruce_memory_reclaim_token_t's field comment above). */
-    (void)memory__reclaim(
-        inspection->manifest.stack_size + inspection->manifest.heap_size, NULL, &ctx->reclaim_token
-    );
 
 #if !CONFIG_ELF_LOADER_LOAD_PSRAM
     bruce_ext_mem_loader_xip_image_t parent_xip = ctx->xip;

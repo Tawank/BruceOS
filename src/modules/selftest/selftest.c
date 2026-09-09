@@ -170,6 +170,9 @@ static const selftest__case_t selftest__cases[] = {
     SELFTEST_CASE(selftest__run_loader_registry_extensibility_case),
     SELFTEST_CASE(selftest__run_elf_loader_case),
     SELFTEST_CASE(selftest__run_elf_loader_xip_case),
+#if CONFIG_BRUCE_QEMU_TEST_MODE
+    SELFTEST_CASE(selftest__run_elf_loader_xip_streaming_fallback_case),
+#endif
     SELFTEST_CASE(selftest__run_elf_loader_stdio_case),
     SELFTEST_CASE(selftest__run_elf_loader_libc_case),
     SELFTEST_CASE(selftest__run_elf_loader_time_case),
