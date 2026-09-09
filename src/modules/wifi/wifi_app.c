@@ -12,6 +12,7 @@
 #include "core_sdk/process.h"
 #include "core_sdk/runtime.h"
 #include "core_sdk/stdio.h"
+#include "core_sdk/tty.h"
 #include "core_sdk/wifi.h"
 
 /* Mirrors wifi__connect()'s own default (core/wifi/wifi_common.c) -- there's
@@ -86,23 +87,6 @@ static int wifi_app_default(void) {
     return result == BRUCE_OK ? 0 : -1;
 }
 
-static int wifi_app_scan(void) {
-    wifi__network_t networks[32];
-    int count = wifi__scan(networks, sizeof(networks) / sizeof(networks[0]));
-    if (count < 0) { return -1; }
-
-    for (int i = 0; i < count; ++i) {
-        stdio__printf(
-            "%s rssi=%d channel=%u auth=%u\n",
-            networks[i].ssid,
-            networks[i].rssi,
-            networks[i].channel,
-            networks[i].authmode
-        );
-    }
-    return 0;
-}
-
 /* Maps an RSSI reading to one of the four wifi-strength icons (1=weakest,
  * 4=strongest), in the locked variant for secured networks -- thresholds
  * follow the common -55/-67/-78 dBm cutoffs used for signal-bar displays. */
@@ -135,6 +119,50 @@ static const char *wifi_app_gui__security_label(uint8_t authmode) {
         case 9: return "OWE";      /* WIFI_AUTH_OWE */
         default: return "secured"; /* newer/uncommon mode; still locked */
     }
+}
+
+static const char *wifi_app__band(uint8_t channel) { return channel <= 14 ? "2.4" : "5"; }
+
+/* ESP-IDF scan records expose no advertised or negotiated link rate, so this
+ * deliberately prints only fields the scan can report on every terminal. */
+static int wifi_app_scan(void) {
+    wifi__network_t networks[32];
+    int count = wifi__scan(networks, sizeof(networks) / sizeof(networks[0]));
+    if (count < 0) return -1;
+
+    bool interactive = tty__isatty();
+    if (interactive) {
+        stdio__printf("%-18s %-3s %-3s %4s %s\n", "SSID", "BND", "CHN", "RSSI", "AUTH");
+    } else {
+        /* Captured pipeline output stays machine-readable: `cut -f 4`
+         * selects RSSI after `wifi scan | grep NAME`. */
+        stdio__printf("%-18s\t%s\t%s\t%s\t%s\n", "SSID", "BND", "CHN", "RSSI", "AUTH");
+    }
+    for (int i = 0; i < count; ++i) {
+        const wifi__network_t *network = &networks[i];
+        const char *auth = network->authmode == WIFI_APP_GUI_AUTH_OPEN ? "OPEN"
+                                                                        : wifi_app_gui__security_label(network->authmode);
+        if (interactive) {
+            stdio__printf(
+                "%-18.18s %-3s %-3u %4d %s\n",
+                network->ssid,
+                wifi_app__band(network->channel),
+                network->channel,
+                network->rssi,
+                auth
+            );
+        } else {
+            stdio__printf(
+                "%-18.18s\t%s\t%u\t%d\t%s\n",
+                network->ssid,
+                wifi_app__band(network->channel),
+                network->channel,
+                network->rssi,
+                auth
+            );
+        }
+    }
+    return 0;
 }
 
 /* "<ssid> <rssi> dBm [<tag>]", tag naming what selecting the row will do:

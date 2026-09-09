@@ -9,6 +9,7 @@
 #include "core_sdk/result.h"
 #include "core_sdk/storage.h"
 #include "core_sdk/stdio.h"
+#include "core_sdk/tty.h"
 #include "modules/bnu/bnu_app.h"
 #include "shell_builtins.h"
 #include "shell_history.h"
@@ -63,6 +64,17 @@ typedef struct {
     size_t line_capacity;
 } shell_console_tab_state_t;
 
+/* The terminal cursor can be on a later physical row when a line wraps.
+ * Keep the previous layout so a redraw can return to and erase the prompt's
+ * first row instead of rendering another prompt on the continuation row. */
+typedef struct {
+    size_t prompt_width;
+    size_t line_length;
+    size_t cursor;
+    uint16_t columns;
+    bool active;
+} shell_console_render_state_t;
+
 static void shell_console__token_free(shell_console_token_t *token) {
     if (token == NULL) return;
     memory__free(token->decoded);
@@ -105,12 +117,56 @@ static bool shell_console__tab_state_remember_capacity(shell_console_tab_state_t
     return true;
 }
 
-static void shell_console__redraw(const shell_line_editor_t *editor, const char *prompt) {
+static size_t shell_console__display_width(const char *text) {
+    size_t width = 0;
+    for (const unsigned char *p = (const unsigned char *)text; *p != '\0'; ++p) {
+        if (*p == SHELL_CONSOLE_ESCAPE && p[1] == '[') {
+            p += 2;
+            while (*p != '\0' && (*p < 0x40 || *p > 0x7e)) p++;
+            if (*p == '\0') break;
+        } else if (*p >= ' ') {
+            width++;
+        }
+    }
+    return width;
+}
+
+static uint16_t shell_console__columns(void) {
+    bruce_tty_size_t size;
+    return tty__get_size(&size) == BRUCE_OK ? size.columns : 0;
+}
+
+static void shell_console__clear_previous(const shell_console_render_state_t *state) {
+    size_t cursor_cells = state->prompt_width + state->cursor;
+    size_t cursor_rows = cursor_cells == 0 ? 0 : (cursor_cells - 1) / state->columns;
+    size_t line_cells = state->prompt_width + state->line_length;
+    size_t line_rows = line_cells == 0 ? 0 : (line_cells - 1) / state->columns;
+
+    (void)stdio__write("\r", 1);
+    if (cursor_rows != 0) stdio__printf("\033[%uA", (unsigned)cursor_rows);
+    for (size_t row = 0; row <= line_rows; ++row) {
+        (void)stdio__write("\033[2K", 4);
+        if (row != line_rows) (void)stdio__write("\033[1B\r", 5);
+    }
+    if (line_rows != 0) stdio__printf("\033[%uA", (unsigned)line_rows);
+    (void)stdio__write("\r", 1);
+}
+
+static void shell_console__redraw(
+    const shell_line_editor_t *editor, const char *prompt, shell_console_render_state_t *state
+) {
+    uint16_t columns = shell_console__columns();
+    if (state->active && state->columns != 0) shell_console__clear_previous(state);
     (void)stdio__write(prompt, strlen(prompt));
     (void)stdio__write(editor->text, editor->length);
     if (editor->cursor < editor->length) {
         stdio__printf("\033[%uD", (unsigned)(editor->length - editor->cursor));
     }
+    state->prompt_width = shell_console__display_width(prompt);
+    state->line_length = editor->length;
+    state->cursor = editor->cursor;
+    state->columns = columns;
+    state->active = columns != 0;
 }
 
 static int shell_console__read_byte(uint32_t timeout_ms) {
@@ -403,7 +459,10 @@ static void shell_console__tab_remember(shell_console_tab_state_t *tab_state, co
 
 static void shell_console__tab_reset(shell_console_tab_state_t *tab_state) { tab_state->pending = false; }
 
-static bool shell_console__complete(shell_line_editor_t *editor, shell_console_tab_state_t *tab_state) {
+static bool shell_console__complete(
+    shell_line_editor_t *editor, shell_console_tab_state_t *tab_state, bool *out_printed_matches
+) {
+    *out_printed_matches = false;
     if (editor->cursor != editor->length || editor->cursor == 0) return false;
 
     shell_console_token_t token = {0};
@@ -466,7 +525,10 @@ static bool shell_console__complete(shell_line_editor_t *editor, shell_console_t
         memory__free(replacement);
     }
 
-    if (!changed && repeated) shell_console__print_matches(&matches);
+    if (!changed && repeated) {
+        shell_console__print_matches(&matches);
+        *out_printed_matches = true;
+    }
     if (changed || matches.count > 1) shell_console__tab_remember(tab_state, editor);
     else shell_console__tab_reset(tab_state);
     bool redraw = changed || (!changed && repeated);
@@ -516,7 +578,7 @@ static bool shell_console__handle_escape(
 
 static bool shell_console__handle_byte(
     shell_line_editor_t *editor, shell_history_browser_t *history, shell_console_tab_state_t *tab_state,
-    unsigned char byte
+    unsigned char byte, bool *out_printed_matches
 ) {
     switch (byte) {
         case '\b':
@@ -533,7 +595,7 @@ static bool shell_console__handle_byte(
             if (editor->length == 0) return false;
             shell_line_editor__set(editor, "");
             return true;
-        case '\t': return shell_console__complete(editor, tab_state);
+        case '\t': return shell_console__complete(editor, tab_state, out_printed_matches);
         case SHELL_CONSOLE_ESCAPE: return shell_console__handle_escape(editor, history);
         default:
             if (byte < ' ' || byte > '~') return false;
@@ -551,6 +613,7 @@ int shell_console__read_line(char *line, size_t capacity, bool *skip_lf, const c
     if (draft == NULL) return BRUCE_ERR_NO_MEMORY;
     shell_history_browser_t history;
     shell_console_tab_state_t tab_state = {0};
+    shell_console_render_state_t render_state = {0};
     shell_history_browser__init(&history, draft, draft_capacity);
     /* This first draw, unlike every later shell_console__redraw() call below
      * (which is genuinely redrawing an already-on-screen prompt as the user
@@ -564,7 +627,7 @@ int shell_console__read_line(char *line, size_t capacity, bool *skip_lf, const c
      * (e.g. `cat` on a file whose last line has none) instead of leaving it
      * visible above a fresh prompt line. */
     if (!stdio__at_line_start()) (void)stdio__write("\r\n", 2);
-    shell_console__redraw(&editor, prompt);
+    shell_console__redraw(&editor, prompt, &render_state);
     s_shell_console_ready = true;
 
     for (;;) {
@@ -596,12 +659,14 @@ int shell_console__read_line(char *line, size_t capacity, bool *skip_lf, const c
                 memory__free(draft);
                 return -1;
             }
-            if (shell_line_editor__delete(&editor)) shell_console__redraw(&editor, prompt);
+            if (shell_line_editor__delete(&editor)) shell_console__redraw(&editor, prompt, &render_state);
             continue;
         }
-        bool redraw = shell_console__handle_byte(&editor, &history, &tab_state, byte);
+        bool printed_matches = false;
+        bool redraw = shell_console__handle_byte(&editor, &history, &tab_state, byte, &printed_matches);
         if (byte != '\t') shell_console__tab_reset(&tab_state);
-        if (redraw) shell_console__redraw(&editor, prompt);
+        if (printed_matches) render_state.active = false;
+        if (redraw) shell_console__redraw(&editor, prompt, &render_state);
     }
 }
 
