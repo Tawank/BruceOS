@@ -552,6 +552,18 @@ int shell_console__read_line(char *line, size_t capacity, bool *skip_lf, const c
     shell_history_browser_t history;
     shell_console_tab_state_t tab_state = {0};
     shell_history_browser__init(&history, draft, draft_capacity);
+    /* This first draw, unlike every later shell_console__redraw() call below
+     * (which is genuinely redrawing an already-on-screen prompt as the user
+     * edits), is a *new* prompt appearing after whatever the previous
+     * foreground command printed. SHELL_CONSOLE_PROMPT/CONTINUATION_PROMPT
+     * both open with "\r\033[2K" -- return to column 0, erase the entire
+     * current row -- which is exactly what a redraw needs, but is wrong
+     * here if that command's last write didn't end in '\n': the cursor is
+     * still sitting on that same row, so drawing the prompt in place would
+     * silently erase real output that simply never got a trailing newline
+     * (e.g. `cat` on a file whose last line has none) instead of leaving it
+     * visible above a fresh prompt line. */
+    if (!stdio__at_line_start()) (void)stdio__write("\r\n", 2);
     shell_console__redraw(&editor, prompt);
     s_shell_console_ready = true;
 

@@ -2,12 +2,28 @@
 
 #include <ctype.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
 #include "core_sdk/memory.h"
 #include "shell_brace.h"
 #include "shell_glob.h"
+
+/* True for a byte that can legally follow a "]]" closing a "[[ ... ]]" span
+ * (see the `in_double_bracket` handling in shell_parser__plan() below): end
+ * of buffer, whitespace, or a shell metacharacter that terminates a word on
+ * its own without needing whitespace first -- matching bash's own word-
+ * boundary rule, under which "]]; then"/"]] && x"/"]] || x" are exactly as
+ * valid as "]] ; then" with an extra space. Checking only `isspace()` here
+ * used to reject the space-free forms, leaving `in_double_bracket` stuck
+ * true for the rest of the buffer (see this function's own doc comment on
+ * `in_double_bracket` -- everything after a "[[" that never technically
+ * "closes" gets folded into one runaway command, silently swallowing
+ * whatever real structure -- a "then"/"do"/"done" among it -- came next). */
+static bool shell_parser__word_boundary(char c) {
+    return c == '\0' || isspace((unsigned char)c) || c == ';' || c == '&' || c == '|';
+}
 
 static bool shell_parser__plan_push(shell_plan_t *plan, const shell_command_t *command) {
     if (plan->count >= SHELL__MAX_COMMANDS) return false;
@@ -441,6 +457,19 @@ int shell_parser__plan(
      * connector case below) -- so a comment must stop at the next '\n'
      * rather than swallowing every statement after it in the block. */
     bool in_comment = false;
+    /* Byte offset of the '#' that opened the current segment's comment (if
+     * any), or SIZE_MAX when none is open -- `in_comment` above only keeps
+     * the scanner from misreading a comment's own text as operators/quotes/
+     * brackets, it was never enough on its own to keep that text out of the
+     * command it's attached to: at flush time below, `end` gets clipped
+     * back to this offset (then re-trimmed for trailing whitespace) so a
+     * comment never ends up part of `command.text`, and a line that's
+     * nothing but a comment produces no command at all, the same as a blank
+     * line. Reset to SIZE_MAX every time a new segment starts (alongside
+     * `start`) since a comment always runs to the next '\n', which is
+     * always itself a flush point -- so at most one can be open per
+     * segment. */
+    size_t comment_start = SIZE_MAX;
     /* Tracks a "((...))" arithmetic-command span (see shell_arith.c and
      * shell_compound__run_for()'s C-style header) so ';'/'&&'/'||'/'|'/'<'/
      * '>' inside one -- as in `for ((i=0;i<10;i++))` or `(( a < b ))` -- are
@@ -508,6 +537,7 @@ int shell_parser__plan(
         }
         if (c == '#' && token_boundary) {
             in_comment = true;
+            comment_start = i;
             continue;
         }
         if (arith_depth == 0 && c == '(' && i + 1 < length && line[i + 1] == '(') {
@@ -532,7 +562,7 @@ int shell_parser__plan(
             in_double_bracket = true;
         } else if (
             in_double_bracket && token_boundary && c == ']' && i + 1 < length && line[i + 1] == ']' &&
-            (i + 2 >= length || isspace((unsigned char)line[i + 2]))
+            shell_parser__word_boundary(i + 2 >= length ? '\0' : line[i + 2])
         ) {
             in_double_bracket = false;
         }
@@ -576,6 +606,7 @@ int shell_parser__plan(
 
         if (operator_size != 0 || c == '\0') {
             size_t end = i;
+            if (comment_start != SIZE_MAX && comment_start < end) end = comment_start;
             while (start < end && isspace((unsigned char)line[start])) start++;
             while (end > start && isspace((unsigned char)line[end - 1])) end--;
             if (end > start) {
@@ -614,6 +645,7 @@ int shell_parser__plan(
                 if (c != '\n' || next_connector == SHELL_CONNECT_NONE) next_connector = connector;
                 i += operator_size - 1;
                 start = i + 1;
+                comment_start = SIZE_MAX;
                 token_boundary = true;
             }
         } else {

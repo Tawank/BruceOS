@@ -47,6 +47,16 @@ typedef struct {
     uint32_t tty_generation; /* 0 == size never set (not a tty) */
     bruce_tty_mode_t tty_mode;
     bool output_last_was_cr; /* tracks '\r' across write() calls, for ONLCR translation */
+    /* True when the last byte this session's owner wrote was not '\n' -- i.e.
+     * there's an unterminated partial line sitting on the current row. Starts
+     * false (nothing written yet counts as "at column 0"), same as a session
+     * that just closed a real line. See stdio__at_line_start() below: a
+     * prompt that redraws itself in place via "\r\033[2K" (see
+     * shell_console.c's SHELL_CONSOLE_PROMPT) must never do that as its
+     * *first* draw after a command runs without checking this first, or it
+     * silently erases whatever partial line -- real output with no trailing
+     * newline -- the command left behind. */
+    bool output_needs_newline;
 } stdio__session_t;
 
 static StaticSemaphore_t s_lock_storage;
@@ -423,6 +433,14 @@ stdio__session_write_output(bruce_stdio_session_t session, const void *data, siz
         }
         if (!stdio__session_push_output_byte(session, byte)) return BRUCE_ERR_CANCELLED;
     }
+    /* Tracks the caller's own last byte, not whatever
+     * stdio__session_push_output_byte() actually pushed (which may include an
+     * auto-inserted '\r' ahead of it) -- see output_needs_newline's doc
+     * comment on stdio__session_t above. */
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    stdio__session_t *entry = stdio__find_locked(session);
+    if (entry != NULL) entry->output_needs_newline = buffer[size - 1] != '\n';
+    xSemaphoreGive(s_lock);
     return BRUCE_OK;
 }
 
@@ -511,6 +529,12 @@ void stdio__process_detach(FILE *input, FILE *output, FILE *error) {
 #endif
 }
 
+/* Mirrors output_needs_newline on stdio__session_t above, for writes that
+ * bypass the session ring buffer entirely (session == BRUCE_STDIO_SESSION_
+ * INVALID -- the physical serial console, written to directly via write()
+ * below rather than through any stdio__session_t). */
+static bool s_physical_output_needs_newline = false;
+
 bruce_result_t stdio__write_to(bruce_stdio_session_t session, const void *data, size_t size) {
     if (size == 0) return BRUCE_OK;
     if (data == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
@@ -523,11 +547,29 @@ bruce_result_t stdio__write_to(bruce_stdio_session_t session, const void *data, 
         if (written <= 0) return BRUCE_ERR_IO;
         offset += (size_t)written;
     }
+    s_physical_output_needs_newline = bytes[size - 1] != '\n';
     return BRUCE_OK;
 }
 
 bruce_result_t stdio__write(const void *data, size_t size) {
     return stdio__write_to(process_registry__current_stdio_session(), data, size);
+}
+
+/* See output_needs_newline's doc comment on stdio__session_t above -- true
+ * exactly when the calling process's next stdio__write() would land at
+ * column 0 of a fresh row, false when the last write left an unterminated
+ * partial line (no trailing '\n') sitting on the current one. Resolves the
+ * "current session" the same way stdio__write() itself does, so this always
+ * answers for the same stream a caller's own writes actually go to. */
+bool stdio__at_line_start(void) {
+    bruce_stdio_session_t session = process_registry__current_stdio_session();
+    if (session == BRUCE_STDIO_SESSION_INVALID) return !s_physical_output_needs_newline;
+    stdio__ensure_init();
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    stdio__session_t *entry = stdio__find_locked(session);
+    bool at_line_start = entry == NULL || !entry->output_needs_newline;
+    xSemaphoreGive(s_lock);
+    return at_line_start;
 }
 
 int stdio__vprintf(const char *format, va_list args) {

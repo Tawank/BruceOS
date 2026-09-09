@@ -71,6 +71,19 @@ bruce_result_t stdio__flush_input(void);
 bruce_result_t stdio__write(const void *data, size_t size);
 
 /**
+ * @brief True if the calling process's next stdio__write() would start at column 0.
+ *
+ * False when the last byte written to this process's routed session (or the
+ * physical console, if none is routed) was not '\n' -- i.e. an unterminated
+ * partial line is sitting on the current row. Meant for a caller (e.g. the
+ * shell's own prompt, which redraws itself in place with a "\r" + erase-line
+ * sequence) that must not draw over such a line without first moving to a
+ * fresh one, or it silently erases real output that just never ended in a
+ * newline.
+ */
+bool stdio__at_line_start(void);
+
+/**
  * @brief Same as stdio__write(), but targets an explicit session.
  *
  * Instead of the calling process's own routed session -- for the rare case
