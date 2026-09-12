@@ -83,10 +83,22 @@ static bool shell_executor__environment_push(
     return true;
 }
 
+/* Quotes+escapes `arg` onto the end of `out` (space-separated from whatever's
+ * already there), advancing `*used` past it -- or, with `out == NULL`, just
+ * advances `*used` by how many bytes that would take, without writing
+ * anything or checking `capacity` (irrelevant to a measuring pass). Callers
+ * exploit this: shell_executor__launch_external() runs every arg through a
+ * dry-run pass first to size its buffer exactly, then this same function
+ * (bit for bit the same `needed` computation) to fill it, so the exact-size
+ * allocation can never fall short of what the real pass turns out to need. */
 static bool shell_executor__append_arg(char *out, size_t capacity, size_t *used, const char *arg) {
     size_t needed = *used > 0 ? 1u : 0u;
     needed += 2;
     for (const char *p = arg; *p != '\0'; ++p) needed += (*p == '\\' || *p == '"') ? 2u : 1u;
+    if (out == NULL) {
+        *used += needed;
+        return true;
+    }
     if (*used + needed >= capacity) return false;
     if (*used > 0) out[(*used)++] = ' ';
     out[(*used)++] = '"';
@@ -147,20 +159,27 @@ static int shell_executor__launch_external(
     environment = cli_environment;
     environment_count++;
 
-    size_t capacity = SHELL__LINE_MAX * 2;
+    /* Sized to exactly what this command needs (quoting can double an arg's
+     * bytes -- see shell_executor__append_arg()) rather than a flat
+     * SHELL__LINE_MAX*2 worst case regardless of actual length: this runs on
+     * every external command a shell script or interactive session launches,
+     * and the vast majority of commands are nowhere near that cap, so a
+     * fixed 1 KiB-per-launch allocation was pure waste on the common case.
+     * The dry run below (shell_executor__append_arg() with out == NULL) uses
+     * the exact same `needed` computation the real pass does, so the result
+     * can never come up short. */
+    size_t used = prefix != NULL ? strlen(prefix) : 0u;
+    for (int i = 1; i < argc; ++i) (void)shell_executor__append_arg(NULL, 0, &used, argv[i]);
+    size_t capacity = used + 1u;
     char *arguments = memory__malloc(capacity);
     if (arguments == NULL) {
         stdio__printf("shell: out of memory\n");
         return 1;
     }
-    size_t used = 0;
+    used = 0;
     arguments[0] = '\0';
     if (prefix != NULL) {
         size_t prefix_length = strlen(prefix);
-        if (prefix_length >= capacity) {
-            memory__free(arguments);
-            return BRUCE_ERR_RESOURCE_LIMIT;
-        }
         memcpy(arguments, prefix, prefix_length + 1u);
         used = prefix_length;
     }

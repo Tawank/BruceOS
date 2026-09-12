@@ -24,6 +24,8 @@ bool selftest__run_shell_bnu_text_pipe_case(void);
 bool selftest__run_shell_read_case(void);
 bool selftest__run_shell_stdio_inheritance_case(void);
 bool selftest__run_shell_tty_size_case(void);
+bool selftest__run_shell_prompt_wrap_scroll_case(void);
 bool selftest__run_shell_interrupt_case(void);
 bool selftest__run_shell_eof_case(void);
+bool selftest__run_shell_history_multiline_case(void);
 bool selftest__run_shell_jobs_case(void);

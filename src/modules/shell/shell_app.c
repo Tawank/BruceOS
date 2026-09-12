@@ -1,5 +1,6 @@
 #include "shell_app.h"
 
+#include <ctype.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -84,10 +85,16 @@ int shell__execute_line(shell_state_t *state, const char *line) {
  * shell__run_script() and shell__interactive() feed shell_compound__pending()
  * -- joining lines with a real '\n' so an if/fi or function block that spans
  * several of them parses as one unit (see the '\n' connector case
- * shell_parser__plan() gained for this). Returns false if `line` wouldn't
- * fit within `capacity`. */
-static bool shell__block_append(char *block, size_t capacity, size_t *block_used, const char *line, size_t line_len) {
-    size_t separator = *block_used > 0 ? 1u : 0u;
+ * shell_parser__plan() gained for this). `join_directly` skips that '\n'
+ * separator, concatenating straight onto whatever's already in `block`
+ * instead -- for shell__interactive()'s "cmd \" line continuation, where the
+ * backslash-newline itself is dropped entirely (same as bash: "echo foo\"
+ * then "bar" reads back as one "echo foobar", not two statements). Returns
+ * false if `line` wouldn't fit within `capacity`. */
+static bool shell__block_append(
+    char *block, size_t capacity, size_t *block_used, const char *line, size_t line_len, bool join_directly
+) {
+    size_t separator = !join_directly && *block_used > 0 ? 1u : 0u;
     if (*block_used + separator + line_len + 1 > capacity) return false;
     if (separator != 0) block[(*block_used)++] = '\n';
     memcpy(block + *block_used, line, line_len);
@@ -293,7 +300,7 @@ static int shell__run_script(shell_state_t *state, const char *path) {
                 status = 2;
                 goto done;
             }
-            if (!shell__block_append(block, SHELL__BLOCK_MAX, &block_used, line, used)) {
+            if (!shell__block_append(block, SHELL__BLOCK_MAX, &block_used, line, used, false)) {
                 stdio__printf("shell: %s: script block too long\n", path);
                 status = 2;
                 goto done;
@@ -371,7 +378,7 @@ static int shell__run_script(shell_state_t *state, const char *path) {
     } else if (!state->exit_requested && (used > 0 || block_used > 0)) {
         if (used > 0) {
             if (line[used - 1] == '\r') used--;
-            if (!shell__block_append(block, SHELL__BLOCK_MAX, &block_used, line, used)) {
+            if (!shell__block_append(block, SHELL__BLOCK_MAX, &block_used, line, used, false)) {
                 stdio__printf("shell: %s: script block too long\n", path);
                 status = 2;
                 goto done;
@@ -394,6 +401,168 @@ done:
     return state->exit_requested ? state->exit_status : status;
 }
 
+/* Bash's "cmd \" -> keep typing on the next line: true when `line`
+ * (`length` bytes) ends in an unescaped backslash -- an even run of
+ * trailing backslashes is just literal backslash characters (each pair
+ * cancels to one), only an odd run leaves the final one live as a
+ * continuation marker. On a true match, *out_length is `length` with that
+ * trailing backslash dropped -- the continuation carries no text of its
+ * own, same as the newline it's absorbing ("echo foo\" then "bar" reads
+ * back as one "echo foobar", not two statements). */
+static bool shell_app__line_continuation_length(const char *line, size_t length, size_t *out_length) {
+    size_t trailing = 0;
+    while (trailing < length && line[length - 1 - trailing] == '\\') trailing++;
+    if (trailing % 2 == 0) return false;
+    *out_length = length - 1;
+    return true;
+}
+
+/* Whether `a` (`a_len` bytes) followed by `b` (`b_len` bytes) -- `block` and
+ * the not-yet-appended `line` currently being considered, kept as two spans
+ * rather than requiring them already joined in one buffer -- ends inside an
+ * unterminated single-quoted string. Same escape/quote bookkeeping
+ * shell_compound__pending() already does for its if/for/case nesting,
+ * pulled out here just for the one bit shell_app__line_continuation_length()
+ * needs: a trailing "\" only means "keep typing on the next line" outside
+ * single quotes, since backslash keeps no special meaning at all inside
+ * them (matching bash) -- inside double quotes or fully unquoted, it's a
+ * real continuation either way. Scanning `a` then `b` in one pass (instead
+ * of checking `a` alone) matters for a quote opened and left unterminated
+ * within `b` itself, e.g. "echo 'hi\" -- the trailing "\" there is just a
+ * literal character inside the string `b` just opened, not a
+ * continuation, even though `a` alone (whatever came before this line)
+ * isn't inside any quote at all. */
+static bool shell_app__span_ends_in_single_quote(const char *a, size_t a_len, const char *b, size_t b_len) {
+    bool single = false;
+    bool double_quote = false;
+    bool escaped = false;
+    for (int pass = 0; pass < 2; ++pass) {
+        const char *text = pass == 0 ? a : b;
+        size_t length = pass == 0 ? a_len : b_len;
+        for (size_t i = 0; i < length; ++i) {
+            char c = text[i];
+            if (escaped) {
+                escaped = false;
+            } else if (!single && c == '\\') {
+                escaped = true;
+            } else if (!double_quote && c == '\'') {
+                single = !single;
+            } else if (!single && c == '"') {
+                double_quote = !double_quote;
+            }
+        }
+    }
+    return single;
+}
+
+/* Bash keeps a multi-line if/for/while/case/{}/quoted command as a single
+ * history entry; shell_history.c's file format is strictly one physical
+ * line per entry (shell_history__append() writes `line` then a literal
+ * '\n', and every read scans for '\n' to find entry boundaries), so a
+ * block's real embedded '\n' bytes can't be written out as-is -- that would
+ * read back as several unrelated entries instead of the one command that
+ * was actually run. Flattens `block` (`block_len` bytes) into the one-line
+ * form a user would have typed by hand: a '\n' that falls inside an open
+ * quote (changing it would change the string's own value) becomes a plain
+ * space; elsewhere, a '\n' right after a keyword whose body must follow
+ * directly with no bare ';' allowed ("then"/"else"/"do"/"elif"/"in"/"{")
+ * becomes a space too, and every other structural '\n' becomes "; " --
+ * exactly how bash accepts ';' in place of a newline almost everywhere else
+ * ("if true\nthen\necho hi\nfi" reads back as "if true; then echo hi; fi").
+ * Doesn't special-case "# comment" the way shell_compound__pending() does --
+ * a '#' has nowhere left to stop once its line's own '\n' has been folded
+ * away, so treating it as a comment here would make it silently swallow
+ * whatever came after it instead of just (rarely) misreading a quote
+ * character inside one; the latter is the safer failure. Always
+ * NUL-terminates `out`, truncating rather than overflowing if a
+ * pathological block doesn't fit. */
+static void shell_app__history_flatten(const char *block, size_t block_len, char *out, size_t out_capacity) {
+    static const char *const no_sep_words[] = {"then", "else", "do", "elif", "in", "{"};
+    if (out_capacity == 0) return;
+    size_t used = 0;
+    bool single = false;
+    bool double_quote = false;
+    bool escaped = false;
+    char word[8];
+    size_t word_len = 0;
+    for (size_t i = 0; i < block_len && used + 1 < out_capacity; ++i) {
+        char c = block[i];
+        if (escaped) {
+            escaped = false;
+            out[used++] = c;
+            if (word_len < sizeof(word)) word[word_len++] = c;
+            continue;
+        } else if (!single && c == '\\') {
+            escaped = true;
+            out[used++] = c;
+            continue;
+        } else if (!double_quote && c == '\'') {
+            single = !single;
+            out[used++] = c;
+            continue;
+        } else if (!single && c == '"') {
+            double_quote = !double_quote;
+            out[used++] = c;
+            continue;
+        }
+        if (c == '\n' && !single && !double_quote) {
+            if (word_len > 0) {
+                bool no_sep = false;
+                for (size_t k = 0; k < sizeof(no_sep_words) / sizeof(no_sep_words[0]); ++k) {
+                    size_t wl = strlen(no_sep_words[k]);
+                    if (word_len == wl && memcmp(word, no_sep_words[k], wl) == 0) {
+                        no_sep = true;
+                        break;
+                    }
+                }
+                if (!no_sep && used + 1 < out_capacity) out[used++] = ';';
+                if (used + 1 < out_capacity) out[used++] = ' ';
+            }
+            word_len = 0;
+            continue;
+        }
+        if (c == '\n') {
+            out[used++] = ' ';
+            continue;
+        }
+        out[used++] = c;
+        if (single || double_quote) continue;
+        if (isspace((unsigned char)c)) word_len = 0;
+        else if (word_len < sizeof(word)) word[word_len++] = c;
+        else word_len = sizeof(word) + 1;
+    }
+    out[used] = '\0';
+}
+
+/* Records the just-completed `block` (`block_used` bytes) as one history
+ * entry -- flattened to a single line first, see
+ * shell_app__history_flatten() -- and runs it. Shared by
+ * shell__interactive()'s main read loop and its end-of-input flush so a
+ * command typed right up against Ctrl+D/EOF still gets recorded exactly
+ * like one that ended with Enter. Skips the history write entirely for an
+ * empty block (a blank line at a fresh prompt), same as the old
+ * per-physical-line `length > 0` guard did. */
+static void shell_app__interactive_execute(shell_state_t *state, const char *block, size_t block_used) {
+    if (block_used > 0) {
+        /* shell_app__history_flatten() never turns one input byte into more
+         * than two output bytes (only an unquoted structural '\n' can
+         * expand, to "; "; everything else copies 1:1 -- see its own doc
+         * comment), so `block_used * 2 + 1` is an exact, provable worst-case
+         * bound. Sizing to the block actually typed rather than a flat
+         * SHELL__BLOCK_MAX*2 (8 KiB) matters because this runs on every
+         * single command an interactive shell executes, and almost none of
+         * them come anywhere near that cap. */
+        size_t history_capacity = block_used * 2 + 1;
+        char *history_line = memory__malloc(history_capacity);
+        if (history_line != NULL) {
+            shell_app__history_flatten(block, block_used, history_line, history_capacity);
+            (void)shell_history__append(SHELL_HISTORY_PATH, history_line);
+            memory__free(history_line);
+        }
+    }
+    (void)shell__execute_line(state, block);
+}
+
 static int shell__interactive(shell_state_t *state, bool suppress_echo) {
     char *line = memory__malloc(SHELL__LINE_MAX);
     char *block = memory__malloc(SHELL__BLOCK_MAX);
@@ -405,6 +574,15 @@ static int shell__interactive(shell_state_t *state, bool suppress_echo) {
     }
     size_t block_used = 0;
     bool skip_lf = false;
+    /* True when the line just read ended in an unescaped "\" (see
+     * shell_app__line_continuation_length() below) -- both "another physical
+     * line is definitely still coming" (covers the one edge case block_used
+     * alone can't: a line that's *only* a trailing backslash joins zero
+     * bytes onto `block`, so block_used stays 0 even mid-continuation) and
+     * "the next line read is that continuation's remainder, so join it onto
+     * `block` with no separator instead of the usual real '\n'". Cleared
+     * everywhere `block` itself gets cleared. */
+    bool line_continued = false;
     while (!state->exit_requested) {
         shell__sync_tty_size(state);
         /* Report any "cmd &"/"func &" job that finished since the last
@@ -418,7 +596,7 @@ static int shell__interactive(shell_state_t *state, bool suppress_echo) {
             /* Once a line has been folded into a still-incomplete block (an
              * open "if" or function "{"), switch to the "> " continuation
              * prompt -- same idea as bash's PS2 -- until it closes. */
-            const char *prompt = block_used > 0 ? shell_console__continuation_prompt() : NULL;
+            const char *prompt = block_used > 0 || line_continued ? shell_console__continuation_prompt() : NULL;
             length = shell_console__read_line(line, SHELL__LINE_MAX, &skip_lf, prompt);
         }
         if (length == BRUCE_ERR_CANCELLED) {
@@ -439,6 +617,7 @@ static int shell__interactive(shell_state_t *state, bool suppress_echo) {
                 (void)stdio__write("^C\r\n", 4);
                 block_used = 0;
                 block[0] = '\0';
+                line_continued = false;
                 continue;
             }
             int status = 128 + (int)signal;
@@ -447,15 +626,38 @@ static int shell__interactive(shell_state_t *state, bool suppress_echo) {
             return status;
         }
         if (length < 0) break;
-        if (length > 0) (void)shell_history__append(SHELL_HISTORY_PATH, line);
-        if (!shell__block_append(block, SHELL__BLOCK_MAX, &block_used, line, (size_t)length)) {
+        /* A trailing, unescaped "\" outside single quotes -- see
+         * shell_app__line_continuation_length()/shell_app__span_ends_in_single_quote()
+         * above -- means "more of this same line is coming", with the
+         * backslash itself dropped (matching bash). `line_continued` (still
+         * holding *last* iteration's verdict here) says whether the text
+         * we're about to append is itself such a continuation's remainder --
+         * that's what decides whether it's glued directly onto `block` with
+         * no separator, not whether this new fragment happens to end in
+         * "\" too. That keeps a whole "a\<NL>b\<NL>c" chain joining as one
+         * "abc": the "a\" and "b\" lines each set line_continued for the
+         * line after them, and "c" -- itself not a continuation -- still
+         * lands with no separator because the line before *it* was one.
+         * Inside single quotes a trailing "\" is just a literal character
+         * with no special meaning, so it falls through to the normal
+         * "keep this line's own text" case exactly like any other
+         * unterminated-quote continuation already does. */
+        size_t continuation_length = 0;
+        bool continues = length > 0 &&
+            shell_app__line_continuation_length(line, (size_t)length, &continuation_length) &&
+            !shell_app__span_ends_in_single_quote(block, block_used, line, continuation_length);
+        size_t append_length = continues ? continuation_length : (size_t)length;
+        if (!shell__block_append(block, SHELL__BLOCK_MAX, &block_used, line, append_length, line_continued)) {
             stdio__printf("shell: input too long\n");
             block_used = 0;
             block[0] = '\0';
+            line_continued = false;
             continue;
         }
+        line_continued = continues;
+        if (continues) continue;
         if (!shell_compound__pending(block)) {
-            (void)shell__execute_line(state, block);
+            shell_app__interactive_execute(state, block, block_used);
             block_used = 0;
             block[0] = '\0';
         }
@@ -464,7 +666,7 @@ static int shell__interactive(shell_state_t *state, bool suppress_echo) {
         if (shell_compound__pending(block)) {
             stdio__printf("shell: unexpected end of input (unterminated if/function)\n");
         } else {
-            (void)shell__execute_line(state, block);
+            shell_app__interactive_execute(state, block, block_used);
         }
     }
     memory__free(line);

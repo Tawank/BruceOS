@@ -5,6 +5,7 @@
 
 #include "core_sdk/app_runner.h"
 #include "core_sdk/environment.h"
+#include "core_sdk/memory.h"
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
 #include "core_sdk/runtime.h"
@@ -14,7 +15,9 @@
 #include "modules/shell/shell_app.h"
 #include "modules/shell/shell_builtins.h"
 #include "modules/shell/shell_console.h"
+#include "modules/shell/shell_history.h"
 #include "modules/shell/shell_internal.h"
+#include "modules/utils/terminal/terminal_ansi.h"
 
 static volatile int s_probe_calls;
 static char s_probe_arg[64];
@@ -1850,6 +1853,192 @@ bool selftest__run_shell_tty_size_case(void) {
     return ok;
 }
 
+/* Copies a terminal_grid_t row's glyphs into a NUL-terminated string,
+ * trimming trailing spaces -- same helper terminal_test.c uses to inspect a
+ * grid after terminal_grid__feed(), duplicated here (it's file-static
+ * there) since this is the one shell test that needs to look past the raw
+ * bytes the shell wrote into what they'd actually render as. */
+static void
+selftest__shell_terminal_row_text(const terminal_grid_t *grid, uint16_t row, char *out, size_t out_size) {
+    const terminal_cell_t *cells = terminal_grid__active_cells(grid);
+    const terminal_cell_t *cell_row = cells + (size_t)row * grid->columns;
+    size_t used = 0;
+    for (uint16_t x = 0; x < grid->columns && used + 4 < out_size; ++x) {
+        const terminal_cell_t *cell = &cell_row[x];
+        if (cell->utf8_len == 0) {
+            out[used++] = ' ';
+        } else {
+            memcpy(out + used, cell->utf8, cell->utf8_len);
+            used += cell->utf8_len;
+        }
+    }
+    while (used > 0 && out[used - 1] == ' ') used--;
+    out[used] = '\0';
+}
+
+/* "When a prompt command is too long and it wraps, every new character
+ * removes the lines in the terminal" (reported against real hardware).
+ * shell_console__clear_previous() figures out how many rows to move up and
+ * erase purely from character counts (prompt_width + cursor/line_length,
+ * divided by the column count) -- it never learns the terminal's row count,
+ * so it has no way to notice when the wrapped line has grown tall enough
+ * that returning to "the prompt's first row" would require moving above row
+ * 0. CSI A/B (cursor up/down) silently clamp at the screen edges instead of
+ * erroring (see terminal_grid__finish_csi()'s 'A'/'B' cases and
+ * terminal_grid__clamp_cursor()), and terminal_grid_t keeps no scrollback
+ * (see terminal_ansi.h) -- both true of the real on-device renderer, since
+ * it's the same terminal_grid_t/terminal_app.c pair for the local shell and
+ * the ssh client. This types a long command a byte at a time (matching the
+ * user's report) into a terminal too short to hold it all, captures every
+ * raw byte the shell writes back, and replays it through that same grid
+ * engine to check the screen is still laid out correctly afterward instead
+ * of trusting shell_console.c's own row bookkeeping. */
+bool selftest__run_shell_prompt_wrap_scroll_case(void) {
+    bruce_stdio_session_t session = BRUCE_STDIO_SESSION_INVALID;
+    if (stdio__session_create(&session) != BRUCE_OK || stdio__session_route_children(session) != BRUCE_OK) {
+        if (session != BRUCE_STDIO_SESSION_INVALID) (void)stdio__session_close(session);
+        return false;
+    }
+    const uint16_t columns = 10;
+    const uint16_t rows = 3;
+    bool ok = tty__set_size(session, columns, rows) == BRUCE_OK;
+
+    shell_console__reset_ready();
+    int launched = ok ? app_runner__run("shell", "-i", BRUCE_LAUNCH_BACKGROUND) : 0;
+    (void)stdio__session_route_children(BRUCE_STDIO_SESSION_INVALID);
+    ok = ok && launched > 0;
+    if (!ok) {
+        (void)stdio__session_close(session);
+        return false;
+    }
+    bruce_process_id_t shell_id = (bruce_process_id_t)launched;
+    uint64_t started = runtime__now();
+    while (!shell_console__is_ready() && runtime__now() - started < 1000) (void)runtime__delay(5);
+    ok = shell_console__is_ready();
+
+    /* Distinct (non-repeating) characters, long enough to overflow a 10x3
+     * (30-cell) screen several times over once "bruce$ " is counted in --
+     * a missing or duplicated row is easy to spot against a known sequence. */
+    static const char typed[] = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRST";
+    /* Every keystroke's redraw clears and reprints the whole (growing)
+     * prompt+line, so total traffic grows O(typed^2), not O(typed) -- 4096
+     * turned out to be too small (it filled solid, at which point
+     * stdio__session_push_output_byte()'s backpressure blocks the shell task
+     * mid-redraw until this buffer is drained, so a too-small cap doesn't
+     * just truncate the capture, it truncates the shell's OWN output right
+     * along with it, hiding whatever the last few keystrokes actually drew).
+     * Heap-allocated, not a local array -- 16KB would blow through whatever
+     * task stack runs a selftest case. */
+    const size_t captured_capacity = 16384;
+    char *captured = memory__malloc(captured_capacity);
+    if (captured == NULL) {
+        (void)stdio__session_close(session);
+        return false;
+    }
+    memset(captured, 0, captured_capacity);
+    size_t captured_size = 0;
+    for (size_t i = 0; ok && i < sizeof(typed) - 1; ++i) {
+        ok = stdio__session_write_input(session, &typed[i], 1) == BRUCE_OK;
+        (void)runtime__delay(10);
+        if (captured_size < captured_capacity - 1) {
+            size_t chunk_size = 0;
+            (void)stdio__session_read_output(
+                session, captured + captured_size, captured_capacity - 1 - captured_size, &chunk_size
+            );
+            captured_size += chunk_size;
+        }
+    }
+    /* The loop above reads once per keystroke shortly after writing it --
+     * fine early on, but each redraw clears and reprints the *whole*
+     * (growing) prompt+line, so later keystrokes emit far more bytes than
+     * earlier ones, and nothing guarantees the shell task has caught up and
+     * finished landing a redraw in the output ring buffer by the time that
+     * single read fires. A too-impatient drain here doesn't fail loudly --
+     * it silently truncates `captured` mid-redraw, which then LOOKS exactly
+     * like the erased/misrendered-row bug this test exists to catch (fewer
+     * rows/columns than expected) even though the real terminal_grid replay
+     * of the full, untruncated stream is correct. Require a real stretch of
+     * silence (20 reads, 10ms apart, all empty) before concluding the shell
+     * is done, not just a couple of empty reads. */
+    for (int consecutive_empty = 0; ok && consecutive_empty < 20 && captured_size < captured_capacity - 1;) {
+        (void)runtime__delay(10);
+        size_t chunk_size = 0;
+        (void)stdio__session_read_output(
+            session, captured + captured_size, captured_capacity - 1 - captured_size, &chunk_size
+        );
+        captured_size += chunk_size;
+        consecutive_empty = chunk_size == 0 ? consecutive_empty + 1 : 0;
+    }
+
+    /* Judge the screen right where it stands after the last keystroke --
+     * before touching the session again to shut the shell down cleanly, so
+     * that cleanup traffic can't get mixed into what's being checked. */
+    terminal_cell_t cells[10 * 3];
+    terminal_cell_t alt_cells[10 * 3];
+    terminal_grid_t grid;
+    terminal_grid__init(&grid, cells, alt_cells, columns, rows);
+    if (ok) terminal_grid__feed(&grid, captured, captured_size);
+
+    /* selftest__shell_terminal_row_text()'s bound check reserves room for a
+     * worst-case 4-byte UTF-8 glyph before writing each cell (`used + 4 <
+     * out_size`), so the buffer must fit columns*4+1, not just columns+1 --
+     * an 11-byte buffer for a 10-column row stops after ~6 cells no matter
+     * what the row actually holds, which read as truncated/erased content
+     * and was mistaken for a shell_console.c bug when it was really just
+     * this buffer being sized for content, not for the helper's margin. */
+    char row_text[3][41] = {{0}}; /* columns(10) * 4-byte-glyph margin + 1 */
+    for (uint16_t row = 0; row < rows; ++row) {
+        selftest__shell_terminal_row_text(&grid, row, row_text[row], sizeof(row_text[row]));
+    }
+
+    /* Work out what a *correctly* redrawn 10x3, no-scrollback terminal must
+     * show once the cursor sits at the end of the line: since the whole
+     * "bruce$ " + typed stream is longer than the screen, only its tail
+     * survives, wrapped into whole-column rows -- exactly as if it had all
+     * been printed in one shot rather than one keystroke (and one
+     * clear+reprint) at a time. Any row that doesn't match this is either a
+     * row the broken math erased and the following reprint never refilled,
+     * or one that's showing stale/misplaced content instead. */
+    char stream[8 + sizeof(typed)];
+    snprintf(stream, sizeof(stream), "bruce$ %s", typed);
+    size_t stream_len = strlen(stream);
+    size_t last_row_start = ((stream_len - 1) / columns) * columns;
+    char expected_row2[11] = {0};
+    memcpy(expected_row2, stream + last_row_start, stream_len - last_row_start);
+    char expected_row1[11] = {0};
+    memcpy(expected_row1, stream + (last_row_start - columns), columns);
+    char expected_row0[11] = {0};
+    memcpy(expected_row0, stream + (last_row_start - 2 * columns), columns);
+
+    ok = ok && strcmp(row_text[0], expected_row0) == 0 && strcmp(row_text[1], expected_row1) == 0 &&
+         strcmp(row_text[2], expected_row2) == 0;
+    if (!ok) {
+        printf(
+            "[selftest] shell/prompt-wrap-scroll: got row0=\"%s\" row1=\"%s\" row2=\"%s\" want "
+            "row0=\"%s\" row1=\"%s\" row2=\"%s\"\n",
+            row_text[0], row_text[1], row_text[2], expected_row0, expected_row1, expected_row2
+        );
+        printf("[selftest] shell/prompt-wrap-scroll: captured %u bytes (hex):\n", (unsigned)captured_size);
+        for (size_t i = 0; i < captured_size; ++i) {
+            printf("%02x ", (unsigned char)captured[i]);
+            if (i % 24 == 23) putchar('\n');
+        }
+        putchar('\n');
+    }
+
+    (void)process__signal(shell_id, BRUCE_PROCESS_SIGNAL_INT);
+    (void)runtime__delay(50);
+    static const char exit_line[] = "exit\n";
+    (void)stdio__session_write_input(session, exit_line, strlen(exit_line));
+    bruce_process_status_t status;
+    (void)process__wait_status(shell_id, 2000, &status);
+    (void)stdio__session_close(session);
+    memory__free(captured);
+
+    printf("[selftest] shell/prompt-wrap-scroll: %s\n", ok ? "OK" : "failed");
+    return ok;
+}
+
 /* Ctrl+C at the prompt (process__signal(INT), the same call terminal_app.c
  * makes) should throw away the half-typed line and keep the shell running --
  * not exit it, like bash. Uses the same "-i" + stdio__session_* launch shape
@@ -1947,6 +2136,130 @@ bool selftest__run_shell_eof_case(void) {
     ok = ok && strstr(output, "hello") != NULL;
     if (!ok) printf("[selftest] shell/eof: output=%s\n", output);
     printf("[selftest] shell/eof: %s\n", ok ? "OK" : "failed");
+    return ok;
+}
+
+/* Bash-style "cmd \" line continuation, and the history-flattening this
+ * shell app.c gained for it (shell_app__history_flatten()): a backslash-
+ * continued command and a multi-line if/then/fi block must each run as one
+ * logical command AND land in history as exactly one entry, not one per
+ * physical line -- shell_history.c's file format is strictly one line per
+ * entry, so a real embedded '\n' would read back as several unrelated
+ * commands instead of the one that was actually typed. */
+bool selftest__run_shell_history_multiline_case(void) {
+    if (!selftest__shell_register_probe()) return false;
+    (void)storage__remove(SHELL_HISTORY_PATH);
+    bruce_stdio_session_t session = BRUCE_STDIO_SESSION_INVALID;
+    if (stdio__session_create(&session) != BRUCE_OK || stdio__session_route_children(session) != BRUCE_OK) {
+        if (session != BRUCE_STDIO_SESSION_INVALID) (void)stdio__session_close(session);
+        return false;
+    }
+    shell_console__reset_ready();
+    int launched = app_runner__run("shell", "-i", BRUCE_LAUNCH_BACKGROUND);
+    (void)stdio__session_route_children(BRUCE_STDIO_SESSION_INVALID);
+    if (launched <= 0) {
+        (void)stdio__session_close(session);
+        return false;
+    }
+    bruce_process_id_t shell_id = (bruce_process_id_t)launched;
+    uint64_t started = runtime__now();
+    while (!shell_console__is_ready() && runtime__now() - started < 1000) (void)runtime__delay(5);
+    s_probe_calls = 0;
+    memset(s_probe_arg, 0, sizeof(s_probe_arg));
+
+    /* Verified via shell_test_probe's call count/argument rather than the
+     * session's raw captured text, for two reasons: that capture is a small
+     * fixed-size window (see the interrupt-case comment on
+     * STDIO__OUTPUT_CAPACITY) a longer interaction like this one would
+     * otherwise fill; and more importantly, stdio__session_push_output_byte()
+     * *blocks* (busy-waits) once that buffer is full rather than dropping
+     * bytes, so a child that keeps echoing keystrokes without anyone ever
+     * draining its session's output would just hang forever mid-command.
+     * The polling loops below call stdio__session_read_output() on every
+     * spin specifically to keep that buffer drained throughout, not only
+     * to notice s_probe_calls sooner.
+     *
+     * "shell_test_probe foo\" + Enter + "bar" + Enter -- bash-style line
+     * continuation, backslash-newline dropped entirely -- must run as one
+     * word, "foobar", not two arguments. */
+    static const char continued[] = "shell_test_probe foo\\\nbar\n";
+    bool ok = shell_console__is_ready() &&
+              stdio__session_write_input(session, continued, strlen(continued)) == BRUCE_OK;
+    char drain[256];
+    size_t drain_size = 0;
+    uint64_t wait_start = runtime__now();
+    while (ok && s_probe_calls == 0 && runtime__now() - wait_start < 3000) {
+        (void)stdio__session_read_output(session, drain, sizeof(drain), &drain_size);
+        (void)runtime__delay(10);
+    }
+    ok = ok && s_probe_calls == 1 && strcmp(s_probe_arg, "foobar") == 0;
+    if (!ok) {
+        printf(
+            "[selftest] shell/history-multiline: continuation exec failed (calls=%d arg=%s)\n", s_probe_calls,
+            s_probe_arg
+        );
+    }
+
+    /* An if/then/.../fi block spanning four physical lines -- one logical
+     * command, same as the continuation above. */
+    static const char block[] = "if true\nthen\nshell_test_probe block_ran\nfi\n";
+    ok = ok && stdio__session_write_input(session, block, strlen(block)) == BRUCE_OK;
+    wait_start = runtime__now();
+    while (ok && s_probe_calls == 1 && runtime__now() - wait_start < 3000) {
+        (void)stdio__session_read_output(session, drain, sizeof(drain), &drain_size);
+        (void)runtime__delay(10);
+    }
+    ok = ok && s_probe_calls == 2 && strcmp(s_probe_arg, "block_ran") == 0;
+    if (!ok) {
+        printf(
+            "[selftest] shell/history-multiline: if-block exec failed (calls=%d arg=%s)\n", s_probe_calls,
+            s_probe_arg
+        );
+    }
+
+    static const char exit_line[] = "exit\n";
+    ok = ok && stdio__session_write_input(session, exit_line, strlen(exit_line)) == BRUCE_OK;
+    bruce_process_status_t status;
+    uint64_t exit_wait_start = runtime__now();
+    bruce_result_t wait_result;
+    while ((wait_result = process__wait_status(shell_id, 0, &status)) == BRUCE_ERR_TIMEOUT &&
+           runtime__now() - exit_wait_start < 3000) {
+        (void)stdio__session_read_output(session, drain, sizeof(drain), &drain_size);
+        (void)runtime__delay(10);
+    }
+    ok = ok && wait_result == BRUCE_OK && status.reason == BRUCE_PROCESS_EXITED && status.exit_code == 0;
+    if (!ok) printf("[selftest] shell/history-multiline: shell didn't exit cleanly\n");
+    (void)stdio__session_close(session);
+
+    /* Read /.shell_history unconditionally (not gated on `ok` above) --
+     * whether or not the commands ran, this confirms exactly what got
+     * recorded: each multi-line command -- the backslash-continued one and
+     * the if-block -- must land as exactly one flattened entry, never one
+     * per physical line (shell_history.c's file format is strictly one
+     * line per entry; see shell_app__history_flatten()). */
+    char history[512] = {0};
+    size_t history_size = 0;
+    bruce_file_id_t history_file = BRUCE_FILE_ID_INVALID;
+    bool history_ok = storage__open(SHELL_HISTORY_PATH, BRUCE_STORAGE_OPEN_READ, &history_file) == BRUCE_OK &&
+                       storage__read(history_file, history, sizeof(history) - 1, &history_size) == BRUCE_OK;
+    if (history_file != BRUCE_FILE_ID_INVALID) (void)storage__close(history_file);
+    if (history_ok) history[history_size] = '\0';
+
+    /* Exactly 3 entries (one '\n' each): the flattened backslash-continued
+     * command, the flattened if-block, and "exit" -- never one entry per
+     * physical line typed. */
+    size_t newline_count = 0;
+    for (size_t i = 0; i < history_size; ++i) {
+        if (history[i] == '\n') newline_count++;
+    }
+    history_ok = history_ok && newline_count == 3 && strstr(history, "shell_test_probe foobar\n") != NULL &&
+                 strstr(history, "if true; then shell_test_probe block_ran; fi\n") != NULL &&
+                 strstr(history, "exit\n") != NULL;
+    if (!history_ok) printf("[selftest] shell/history-multiline: history=%s\n", history);
+    ok = ok && history_ok;
+
+    (void)storage__remove(SHELL_HISTORY_PATH);
+    printf("[selftest] shell/history-multiline: %s\n", ok ? "OK" : "failed");
     return ok;
 }
 
