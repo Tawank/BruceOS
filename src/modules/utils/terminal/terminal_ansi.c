@@ -318,6 +318,7 @@ static void terminal_grid__reset(terminal_grid_t *grid) {
     grid->scroll_bottom = (uint16_t)(grid->rows > 0 ? grid->rows - 1 : 0);
     grid->autowrap = true;
     grid->origin_mode = false;
+    grid->application_cursor_keys = false;
     grid->fg = TERMINAL_ANSI_COLOR_DEFAULT;
     grid->bg = TERMINAL_ANSI_COLOR_DEFAULT;
     grid->attrs = 0;
@@ -483,6 +484,7 @@ static void terminal_grid__apply_mode_params(terminal_grid_t *grid, bool enable)
     if (!grid->csi_private) return; /* non-private modes (IRM, LNM, ...): unsupported no-op */
     for (uint8_t i = 0; i < grid->param_count; ++i) {
         switch (grid->params[i]) {
+            case 1: grid->application_cursor_keys = enable; break;
             case 6:
                 grid->origin_mode = enable;
                 grid->cursor_x = 0;

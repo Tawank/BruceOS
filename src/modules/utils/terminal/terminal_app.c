@@ -606,16 +606,27 @@ static void terminal__handle_input(terminal__state_t *state, const bruce_input_e
         return;
     }
     if (semantic_key || event->type != BRUCE_INPUT_KEY) {
+        /* Arrow keys are CSI ("\033[A", ...) normally, but SS3 ("\033OA",
+         * ...) once the remote side has asked for DECCKM/application cursor
+         * keys (CSI ?1h) -- see terminal_grid_t.application_cursor_keys's
+         * doc comment. A full-screen app started over ssh/shell (htop,
+         * less, vi, ...) requests this on startup because its terminfo
+         * entry for TERM=xterm defines arrow keys as the SS3 form; sending
+         * CSI regardless (as this used to, unconditionally) meant those
+         * apps' own key parser simply never matched what arrived, even
+         * though the exact same bytes work fine at a plain shell prompt
+         * (readline binds both forms and never requests this mode itself). */
         const char *sequence = NULL;
+        bool app_mode = state->grid.application_cursor_keys;
         switch (event->code) {
-            case BRUCE_INPUT_CODE_UP: sequence = "\033[A"; break;
-            case BRUCE_INPUT_CODE_DOWN: sequence = "\033[B"; break;
-            case BRUCE_INPUT_CODE_RIGHT: sequence = "\033[C"; break;
-            case BRUCE_INPUT_CODE_LEFT: sequence = "\033[D"; break;
+            case BRUCE_INPUT_CODE_UP:
+            case BRUCE_INPUT_CODE_PREV: sequence = app_mode ? "\033OA" : "\033[A"; break;
+            case BRUCE_INPUT_CODE_DOWN:
+            case BRUCE_INPUT_CODE_NEXT: sequence = app_mode ? "\033OB" : "\033[B"; break;
+            case BRUCE_INPUT_CODE_RIGHT: sequence = app_mode ? "\033OC" : "\033[C"; break;
+            case BRUCE_INPUT_CODE_LEFT: sequence = app_mode ? "\033OD" : "\033[D"; break;
             case BRUCE_INPUT_CODE_HOME: sequence = "\033[H"; break;
             case BRUCE_INPUT_CODE_DELETE: sequence = "\033[3~"; break;
-            case BRUCE_INPUT_CODE_PREV: sequence = "\033[A"; break;
-            case BRUCE_INPUT_CODE_NEXT: sequence = "\033[B"; break;
             default: break;
         }
         if (sequence != NULL) terminal__write_input(state, sequence, strlen(sequence));

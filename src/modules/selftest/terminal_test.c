@@ -440,9 +440,27 @@ bool selftest__run_terminal_ansi_escapes_case(void) {
     selftest__terminal_row_text(&rep_grid, 0, rep_text, sizeof(rep_text));
     bool rep_ok = strcmp(rep_text, "qqqqX") == 0;
 
-    bool ok = g0_ok && g1_ok && rep_ok;
+    terminal_cell_t deckm_cells[16];
+    terminal_cell_t deckm_alt_cells[16];
+    terminal_grid_t deckm_grid;
+    terminal_grid__init(&deckm_grid, deckm_cells, deckm_alt_cells, 16, 1);
+    /* CSI ?1h (DECCKM on) must be tracked, not silently dropped like an
+     * unsupported private mode -- see terminal_grid_t.application_cursor_keys's
+     * doc comment for why: htop/less/vi over ssh or the shell request this on
+     * startup, and terminal_app.c's terminal__handle_input() consults this
+     * flag to decide whether an arrow key press should be encoded as CSI
+     * ("\033[A") or SS3 ("\033OA"). */
+    static const char deckm_on[] = "\033[?1h";
+    terminal_grid__feed(&deckm_grid, deckm_on, sizeof(deckm_on) - 1);
+    bool deckm_on_ok = deckm_grid.application_cursor_keys;
+    static const char deckm_off[] = "\033[?1l";
+    terminal_grid__feed(&deckm_grid, deckm_off, sizeof(deckm_off) - 1);
+    bool deckm_off_ok = !deckm_grid.application_cursor_keys;
+
+    bool ok = g0_ok && g1_ok && rep_ok && deckm_on_ok && deckm_off_ok;
     printf(
-        "[selftest] terminal/ansi-escapes: %s (g0=%d g1=%d rep=%d)\n", ok ? "OK" : "FAIL", g0_ok, g1_ok, rep_ok
+        "[selftest] terminal/ansi-escapes: %s (g0=%d g1=%d rep=%d deckm_on=%d deckm_off=%d)\n", ok ? "OK" : "FAIL",
+        g0_ok, g1_ok, rep_ok, deckm_on_ok, deckm_off_ok
     );
     return ok;
 }

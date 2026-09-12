@@ -103,6 +103,18 @@ typedef struct {
     /* Modes. */
     bool autowrap;
     bool origin_mode;
+    /* DECCKM (CSI ?1h/l): when set, an arrow/Home key press should be
+     * encoded as an SS3 sequence ("\033OA", ...) instead of the normal CSI
+     * one ("\033[A", ...) -- see terminal_app.c's terminal__handle_input(),
+     * the only reader of this field. Real full-screen apps (htop, less, vi,
+     * ...) request this on startup because their terminfo entry for
+     * TERM=xterm (what ssh_app.c/shell_app.c always advertise) defines
+     * kcuu1 et al. as the SS3 form; readline-based prompts never request it
+     * and bind both forms anyway, which is why arrow keys previously looked
+     * fine at a bash prompt but silently did nothing in htop/less over the
+     * same session -- this flag was tracked nowhere and every arrow key
+     * left as CSI regardless of what the remote side had asked for. */
+    bool application_cursor_keys;
 
     /* Current SGR state applied to newly-written cells. */
     int16_t fg;
