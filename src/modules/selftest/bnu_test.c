@@ -67,6 +67,16 @@ bool selftest__run_bnu_case(void) {
     char *du_dir_mkdir_argv[] = {"mkdir", "/selftest_bnu_du_dir"};
     char *du_dir_cp_argv[] = {"cp", "/selftest_bnu_cat.txt", "/selftest_bnu_du_dir/inner.txt"};
     char *du_dir_argv[] = {"du", "-h", "/selftest_bnu_du_dir"};
+    /* Reuses the du_dir fixture above (one directory holding one nested
+     * "inner.txt") rather than its own -- find just needs something to
+     * recurse into, and that fixture is already exactly that. */
+    char *find_dir_argv[] = {"find", "/selftest_bnu_du_dir"};
+    char *find_name_argv[] = {"find", "/selftest_bnu_du_dir", "-n", "*.txt"};
+    char *find_type_argv[] = {"find", "/selftest_bnu_du_dir", "-t", "f"};
+    char *find_type_invalid_argv[] = {"find", "/selftest_bnu_du_dir", "-t", "x"};
+    char *find_maxdepth_argv[] = {"find", "/selftest_bnu_du_dir", "-m", "0"};
+    char *find_file_argv[] = {"find", "/selftest_bnu_du_dir/inner.txt"};
+    char *find_missing_argv[] = {"find", "/selftest_bnu_missing.txt"};
     char *stty_argv[] = {"stty"};
     char *date_argv[] = {"date"};
     char *date_invalid_argv[] = {"date", "-s", "not-a-date"};
@@ -172,6 +182,15 @@ bool selftest__run_bnu_case(void) {
     BNU_CHECK_RESULT(ok, bnu_cp_app_main(3, du_dir_cp_argv), BRUCE_OK, "du fixture cp");
     BNU_CHECK_RESULT(ok, bnu_du_app_main(3, du_dir_argv), BRUCE_OK, "du -h (directory)");
     BNU_CHECK_RESULT(ok, bnu_du_app_main(2, du_missing_argv), BRUCE_ERR_NOT_FOUND, "du (missing path)");
+    BNU_CHECK_RESULT(ok, bnu_find_app_main(2, find_dir_argv), BRUCE_OK, "find (directory)");
+    BNU_CHECK_RESULT(ok, bnu_find_app_main(4, find_name_argv), BRUCE_OK, "find -n *.txt");
+    BNU_CHECK_RESULT(ok, bnu_find_app_main(4, find_type_argv), BRUCE_OK, "find -t f");
+    BNU_CHECK_RESULT(
+        ok, bnu_find_app_main(4, find_type_invalid_argv), BRUCE_ERR_INVALID_ARGUMENT, "find -t x"
+    );
+    BNU_CHECK_RESULT(ok, bnu_find_app_main(4, find_maxdepth_argv), BRUCE_OK, "find -m 0");
+    BNU_CHECK_RESULT(ok, bnu_find_app_main(2, find_file_argv), BRUCE_OK, "find (single file)");
+    BNU_CHECK_RESULT(ok, bnu_find_app_main(2, find_missing_argv), BRUCE_ERR_NOT_FOUND, "find (missing path)");
     /* Selftest runs with no routed stdio session, so stty correctly reports "not a tty". */
     BNU_CHECK_RESULT(ok, bnu_stty_app_main(1, stty_argv), BRUCE_ERR_NOT_FOUND, "stty");
     BNU_CHECK_BOOL(

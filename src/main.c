@@ -108,6 +108,7 @@ static const bruce_app_descriptor_t s_default_apps[] = {
     {"du",                   "Show a file or directory tree's disk usage",                "Storage", bnu_du_app_main,              0                     },
     {"file",                 "Identify a file's type",                                    "Storage", bnu_file_app_main,            0                     },
     {"filemanager",          "Browse and manage files",                                   "Storage", filemanager_app_main,         8192                  },
+    {"find",                 "Recursively search a directory tree for matching entries",  "Storage", bnu_find_app_main,            0                     },
     {"head",                 "Print the first part of a file",                            "Storage", bnu_head_app_main,            0                     },
     {"ls",                   "List directory contents",                                   "Storage", bnu_ls_app_main,              0                     },
     {"lsblk",                "List storage devices",                                      "Storage", bnu_lsblk_app_main,           0                     },

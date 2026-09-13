@@ -24,6 +24,7 @@ int bnu_file_app_main(int argc, char **argv);
 int bnu_head_app_main(int argc, char **argv);
 int bnu_tail_app_main(int argc, char **argv);
 int bnu_du_app_main(int argc, char **argv);
+int bnu_find_app_main(int argc, char **argv);
 int bnu_stty_app_main(int argc, char **argv);
 int bnu_less_app_main(int argc, char **argv);
 int bnu_wget_app_main(int argc, char **argv);

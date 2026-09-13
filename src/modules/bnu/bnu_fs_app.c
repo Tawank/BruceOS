@@ -15,7 +15,7 @@
 #include "core_sdk/storage.h"
 #include "core_sdk/tty.h"
 
-/* Filesystem commands: pwd, ls, mkdir, touch, rm, cp, mv, cat, file, head, tail, du. */
+/* Filesystem commands: pwd, ls, mkdir, touch, rm, cp, mv, cat, file, head, tail, du, find. */
 
 /* Broad, extension-driven color categories, in the spirit of GNU ls's
  * LS_COLORS: directories get their own color regardless of name; everything
@@ -805,5 +805,179 @@ int bnu_du_app_main(int argc, char **argv) {
     }
 
     ap_free(parser);
+    return result;
+}
+
+#define BNU__FIND_NAME_PATTERN_MAX BRUCE_STORAGE_NAME_MAX
+
+typedef struct {
+    const char *name_pattern; /* NULL: no -name filter */
+    bool ignore_case;
+    bool has_type_filter;
+    bruce_storage_entry_type_t type_filter;
+    int max_depth; /* negative: unlimited */
+} bnu_find__criteria_t;
+
+/* Minimal fnmatch()-style matcher for `find -name`: '*' matches any run of
+ * characters (including none), '?' matches exactly one; no bracket
+ * expressions or other metacharacters -- deliberately scoped to what a
+ * `-name "*.ext"`-style pattern actually needs, rather than reaching for
+ * shell_glob__match() (shell_glob.h) and coupling this module to the shell's
+ * own. Case-insensitive when `ignore_case` is set (`find -i`). Standard
+ * iterative backtracking on the last '*' seen, so this runs in bounded stack
+ * space regardless of pattern/name length. */
+static bool bnu_find__name_matches(const char *pattern, const char *name, bool ignore_case) {
+    const char *p = pattern;
+    const char *n = name;
+    const char *star_p = NULL;
+    const char *star_n = NULL;
+    while (*n != '\0') {
+        char pc = *p;
+        char nc = *n;
+        if (ignore_case) {
+            pc = (char)tolower((unsigned char)pc);
+            nc = (char)tolower((unsigned char)nc);
+        }
+        if (*p == '?' || (*p != '*' && pc == nc)) {
+            ++p;
+            ++n;
+        } else if (*p == '*') {
+            star_p = p++;
+            star_n = n;
+        } else if (star_p != NULL) {
+            p = star_p + 1;
+            n = ++star_n;
+        } else {
+            return false;
+        }
+    }
+    while (*p == '*') ++p;
+    return *p == '\0';
+}
+
+static bool bnu_find__matches(
+    const bnu_find__criteria_t *criteria, const char *name, bruce_storage_entry_type_t type
+) {
+    if (criteria->has_type_filter && criteria->type_filter != type) return false;
+    if (criteria->name_pattern != NULL &&
+        !bnu_find__name_matches(criteria->name_pattern, name, criteria->ignore_case)) {
+        return false;
+    }
+    return true;
+}
+
+/* Recursively visits `path` (already known to be `self_type`) and every
+ * descendant, printing each one whose name/type satisfy `criteria` -- `path`
+ * itself is tested and printed the same as any descendant, matching real
+ * find's own behaviour for its starting point. `depth` is 0 for `path`
+ * itself, incrementing per directory level, so -maxdepth can cap descent
+ * without capping whether `path` itself gets tested. */
+static bruce_result_t bnu_find__walk(
+    const char *path, const bnu_find__criteria_t *criteria, int depth, bruce_storage_entry_type_t self_type
+) {
+    const char *self_name = strrchr(path, '/');
+    self_name = self_name != NULL ? self_name + 1 : path;
+    if (self_name[0] == '\0') self_name = "/"; /* path == "/" itself */
+    if (bnu_find__matches(criteria, self_name, self_type)) stdio__printf("%s\n", path);
+    if (self_type != BRUCE_STORAGE_ENTRY_DIRECTORY) return BRUCE_OK;
+    if (criteria->max_depth >= 0 && depth >= criteria->max_depth) return BRUCE_OK;
+
+    size_t count = 0;
+    bruce_result_t result = storage__list(path, NULL, 0, &count);
+    if (result != BRUCE_OK) return result;
+    bruce_storage_entry_t *entries = NULL;
+    if (count > 0) {
+        entries = memory__malloc(count * sizeof(*entries));
+        if (entries == NULL) return BRUCE_ERR_NO_MEMORY;
+        result = storage__list(path, entries, count, &count);
+    }
+    for (size_t i = 0; result == BRUCE_OK && i < count; ++i) {
+        char child[BRUCE_STORAGE_PATH_MAX];
+        int written = strcmp(path, "/") == 0 ? snprintf(child, sizeof(child), "/%s", entries[i].name)
+                                              : snprintf(child, sizeof(child), "%s/%s", path, entries[i].name);
+        if (written < 0 || (size_t)written >= sizeof(child)) {
+            result = BRUCE_ERR_RESOURCE_LIMIT;
+            break;
+        }
+        result = bnu_find__walk(child, criteria, depth + 1, entries[i].type);
+    }
+    memory__free(entries);
+    return result;
+}
+
+int bnu_find_app_main(int argc, char **argv) {
+    ArgParser *parser = bnu__new_parser("Recursively search a directory tree for matching entries.");
+    if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
+    ap_add_optional_arg(parser, "path", "Directory to search (defaults to the working directory)");
+    ap_add_str_opt(parser, "n name", NULL);
+    ap_set_opt_help(parser, "n", "Only match entries whose name fits this glob pattern (*, ?)");
+    ap_add_flag(parser, "i");
+    ap_set_opt_help(parser, "i", "Match -name case-insensitively");
+    ap_add_str_opt(parser, "t type", NULL);
+    ap_set_opt_help(parser, "t", "Only match this type: f (file) or d (directory)");
+    ap_add_int_opt(parser, "m maxdepth", -1);
+    ap_set_opt_help(parser, "m", "Descend at most this many levels below the start path");
+    if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
+
+    const char *raw_path = ap_get_arg(parser, "path");
+    const char *name_pattern = ap_get_str_value(parser, "n");
+    const char *type_text = ap_get_str_value(parser, "t");
+    bool ignore_case = ap_found(parser, "i");
+    int max_depth = ap_get_int_value(parser, "m");
+
+    char path[BRUCE_STORAGE_PATH_MAX];
+    bool resolved = bnu__resolve_path(raw_path, path);
+    char name_pattern_buf[BNU__FIND_NAME_PATTERN_MAX];
+    bool name_pattern_fits = true;
+    if (name_pattern != NULL) {
+        int written = snprintf(name_pattern_buf, sizeof(name_pattern_buf), "%s", name_pattern);
+        name_pattern_fits = written >= 0 && (size_t)written < sizeof(name_pattern_buf);
+    }
+    bool has_type_filter = type_text != NULL;
+    bruce_storage_entry_type_t type_filter = BRUCE_STORAGE_ENTRY_FILE;
+    bool type_valid = true;
+    if (has_type_filter) {
+        if (strcmp(type_text, "f") == 0) type_filter = BRUCE_STORAGE_ENTRY_FILE;
+        else if (strcmp(type_text, "d") == 0) type_filter = BRUCE_STORAGE_ENTRY_DIRECTORY;
+        else type_valid = false;
+    }
+    ap_free(parser);
+    if (!resolved || !name_pattern_fits) return BRUCE_ERR_INVALID_PATH;
+    if (!type_valid) {
+        stdio__printf("find: -t/--type must be 'f' or 'd'\n");
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+
+    bnu_find__criteria_t criteria = {
+        .name_pattern = name_pattern != NULL ? name_pattern_buf : NULL,
+        .ignore_case = ignore_case,
+        .has_type_filter = has_type_filter,
+        .type_filter = type_filter,
+        .max_depth = max_depth,
+    };
+
+    size_t probe_count = 0;
+    bruce_result_t probe_result = storage__list(path, NULL, 0, &probe_count);
+    bruce_storage_entry_type_t root_type;
+    if (probe_result == BRUCE_OK) {
+        root_type = BRUCE_STORAGE_ENTRY_DIRECTORY;
+    } else if (probe_result == BRUCE_ERR_IO) {
+        root_type = BRUCE_STORAGE_ENTRY_FILE; /* storage__list()'s way of saying "not a directory" */
+    } else {
+        stdio__printf("find: %s: %s\n", path, result__to_string(probe_result));
+        return probe_result;
+    }
+    if (root_type == BRUCE_STORAGE_ENTRY_FILE) {
+        bool exists = false;
+        bruce_result_t exists_result = storage__exists(path, &exists);
+        if (exists_result != BRUCE_OK) return exists_result;
+        if (!exists) {
+            stdio__printf("find: %s: No such file or directory\n", path);
+            return BRUCE_ERR_NOT_FOUND;
+        }
+    }
+
+    bruce_result_t result = bnu_find__walk(path, &criteria, 0, root_type);
+    if (result != BRUCE_OK) stdio__printf("find: %s: %s\n", path, result__to_string(result));
     return result;
 }
