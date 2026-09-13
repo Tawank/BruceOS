@@ -19,6 +19,8 @@ typedef struct {
     SemaphoreHandle_t done;
     bool got_reply;
     uint32_t round_trip_ms;
+    uint32_t reply_size;
+    uint8_t ttl;
 } icmp__wait_t;
 
 /* Runs on lwIP's own internal ping task, not the caller's -- only ever
@@ -26,9 +28,15 @@ typedef struct {
 static void icmp__on_success(esp_ping_handle_t handle, void *context) {
     icmp__wait_t *wait = context;
     uint32_t elapsed_ms = 0;
+    uint32_t reply_size = 0;
+    uint8_t ttl = 0;
     esp_ping_get_profile(handle, ESP_PING_PROF_TIMEGAP, &elapsed_ms, sizeof(elapsed_ms));
+    esp_ping_get_profile(handle, ESP_PING_PROF_SIZE, &reply_size, sizeof(reply_size));
+    esp_ping_get_profile(handle, ESP_PING_PROF_TTL, &ttl, sizeof(ttl));
     wait->got_reply = true;
     wait->round_trip_ms = elapsed_ms;
+    wait->reply_size = reply_size;
+    wait->ttl = ttl;
 }
 
 static void icmp__on_end(esp_ping_handle_t handle, void *context) {
@@ -40,10 +48,14 @@ static void icmp__on_end(esp_ping_handle_t handle, void *context) {
     xSemaphoreGive(wait->done);
 }
 
-bruce_result_t icmp__ping(const char *host, uint32_t timeout_ms, uint32_t *out_round_trip_ms) {
+bruce_result_t icmp__ping(
+    const char *host, uint32_t timeout_ms, uint32_t data_size, uint32_t *out_round_trip_ms, uint32_t *out_reply_size,
+    uint8_t *out_ttl
+) {
     bruce_result_t permission = permission__check(BRUCE_PERMISSION_WIFI);
     if (permission != BRUCE_OK) return permission;
     if (host == NULL || host[0] == '\0') return BRUCE_ERR_INVALID_ARGUMENT;
+    if (data_size > ICMP__MAX_DATA_SIZE) return BRUCE_ERR_INVALID_ARGUMENT;
     bruce_result_t network_result = network__init();
     if (network_result != BRUCE_OK) return network_result;
 
@@ -60,6 +72,7 @@ bruce_result_t icmp__ping(const char *host, uint32_t timeout_ms, uint32_t *out_r
     config.count = 1;
     config.timeout_ms = timeout_ms == 0 ? ICMP__DEFAULT_TIMEOUT_MS : timeout_ms;
     config.interval_ms = config.timeout_ms; /* irrelevant with count == 1, no second packet is ever sent */
+    if (data_size > 0) config.data_size = data_size;
     memset(&config.target_addr, 0, sizeof(config.target_addr));
     inet_addr_to_ip4addr(ip_2_ip4(&config.target_addr), &resolved);
 
@@ -88,5 +101,7 @@ bruce_result_t icmp__ping(const char *host, uint32_t timeout_ms, uint32_t *out_r
     if (signaled != pdTRUE || !wait.got_reply) return BRUCE_ERR_TIMEOUT;
 
     if (out_round_trip_ms != NULL) *out_round_trip_ms = wait.round_trip_ms;
+    if (out_reply_size != NULL) *out_reply_size = wait.reply_size;
+    if (out_ttl != NULL) *out_ttl = wait.ttl;
     return BRUCE_OK;
 }

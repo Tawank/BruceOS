@@ -132,6 +132,7 @@ static const bruce_app_descriptor_t s_default_apps[] = {
     {"sftp",                 "Browse/download files over SFTP",                           "Network", sftp_app_main,                SSH_STACK_BYTES       },
     {"nc",                   "TCP/UDP client, listener, and port scanner (netcat-style)", "Network", nc_app_main,                  0                     },
     {"nmap",                 "Host discovery and TCP/UDP port scanner (nmap-style)",      "Network", nmap_app_main,                0                     },
+    {"ping",                 "Send ICMP echo requests to a host",                         "Network", bnu_ping_app_main,            0                     },
     {"webui",                "Start the web interface",                                   "Network", webui_app_main,               0                     },
     {"wget",                 "Download files from URLs",                                  "Network", bnu_wget_app_main,            HTTP_STACK_BYTES      },
     {"wifi",                 "Manage Wi-Fi connections",                                  "Network", wifi_app_main,                WIFI_STACK_BYTES      },

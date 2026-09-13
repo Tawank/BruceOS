@@ -1,19 +1,25 @@
 #include "bnu_app.h"
 #include "bnu_internal.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
 #include "args.h"
 #include "core_sdk/http.h"
+#include "core_sdk/icmp.h"
 #include "core_sdk/result.h"
+#include "core_sdk/runtime.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
 
 /*
- * Network commands: wget, curl. Both are thin wrappers around
+ * Network commands: wget, curl, ping. wget/curl are thin wrappers around
  * http__request(); neither implies the `wifi` permission, so callers are
- * expected to already have a working Wi-Fi connection.
+ * expected to already have a working Wi-Fi connection. ping wraps
+ * icmp__ping() (core/icmp/icmp.c) and does require `wifi`, since unlike an
+ * HTTP request it talks to the network stack directly rather than through an
+ * already-connected higher layer.
  */
 
 /* Generous cap on top of BRUCE_HTTP_DEFAULT_MAX_RESPONSE_BYTES: wget/curl
@@ -223,4 +229,98 @@ int bnu_curl_app_main(int argc, char **argv) {
 
     http__response_free(&response);
     return result;
+}
+
+#define BNU__PING_HOST_MAX 128
+#define BNU__PING_DEFAULT_COUNT 4
+#define BNU__PING_DEFAULT_TIMEOUT_MS 1000
+#define BNU__PING_DEFAULT_INTERVAL_MS 1000
+/* icmp__ping()'s own default when data_size is 0 -- kept in sync with
+ * ESP_PING_DEFAULT_CONFIG() only for this command's "PING host: N data
+ * bytes" banner, printed before the first reply confirms the real size. */
+#define BNU__PING_DEFAULT_DATA_SIZE 64
+
+int bnu_ping_app_main(int argc, char **argv) {
+    ArgParser *parser = bnu__new_parser("Send ICMP echo requests to a host.");
+    if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
+    ap_add_required_arg(parser, "host", "Hostname or IPv4 address to ping");
+    ap_add_int_opt(parser, "c", BNU__PING_DEFAULT_COUNT);
+    ap_set_opt_help(parser, "c", "Number of requests to send (0 = until interrupted)");
+    ap_add_int_opt(parser, "i", BNU__PING_DEFAULT_INTERVAL_MS);
+    ap_set_opt_help(parser, "i", "Interval between requests, in milliseconds");
+    ap_add_int_opt(parser, "W", BNU__PING_DEFAULT_TIMEOUT_MS);
+    ap_set_opt_help(parser, "W", "Time to wait for each reply, in milliseconds");
+    ap_add_int_opt(parser, "s", 0);
+    ap_set_opt_help(parser, "s", "ICMP payload size in bytes (default: 64)");
+    if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
+
+    char host[BNU__PING_HOST_MAX];
+    int written = snprintf(host, sizeof(host), "%s", ap_get_arg(parser, "host"));
+    int count = ap_get_int_value(parser, "c");
+    int interval_ms = ap_get_int_value(parser, "i");
+    int timeout_ms = ap_get_int_value(parser, "W");
+    int data_size = ap_get_int_value(parser, "s");
+    ap_free(parser);
+    if (written < 0 || (size_t)written >= sizeof(host)) return BRUCE_ERR_INVALID_ARGUMENT;
+    if (data_size < 0 || (uint32_t)data_size > ICMP__MAX_DATA_SIZE) return BRUCE_ERR_INVALID_ARGUMENT;
+    if (count < 0) count = BNU__PING_DEFAULT_COUNT;
+    if (interval_ms <= 0) interval_ms = BNU__PING_DEFAULT_INTERVAL_MS;
+    if (timeout_ms <= 0) timeout_ms = BNU__PING_DEFAULT_TIMEOUT_MS;
+
+    stdio__printf(
+        "PING %s: %u data bytes\n", host, data_size > 0 ? (unsigned)data_size : (unsigned)BNU__PING_DEFAULT_DATA_SIZE
+    );
+    int sent = 0;
+    int received = 0;
+    uint32_t min_ms = UINT32_MAX;
+    uint32_t max_ms = 0;
+    uint64_t sum_ms = 0;
+    bruce_result_t loop_result = BRUCE_OK;
+    for (int seq = 1; count == 0 || seq <= count; ++seq) {
+        sent++;
+        uint32_t round_trip_ms = 0;
+        uint32_t reply_size = 0;
+        uint8_t ttl = 0;
+        bruce_result_t ping_result =
+            icmp__ping(host, (uint32_t)timeout_ms, (uint32_t)data_size, &round_trip_ms, &reply_size, &ttl);
+        if (ping_result == BRUCE_OK) {
+            received++;
+            if (round_trip_ms < min_ms) min_ms = round_trip_ms;
+            if (round_trip_ms > max_ms) max_ms = round_trip_ms;
+            sum_ms += round_trip_ms;
+            stdio__printf(
+                "%u bytes from %s: icmp_seq=%d ttl=%u time=%u ms\n", (unsigned)reply_size, host, seq, (unsigned)ttl,
+                (unsigned)round_trip_ms
+            );
+        } else if (ping_result == BRUCE_ERR_TIMEOUT) {
+            stdio__printf("Request timeout for icmp_seq=%d\n", seq);
+        } else {
+            stdio__printf("ping: %s: %s\n", host, result__to_string(ping_result));
+            loop_result = ping_result;
+            break;
+        }
+        bool last_attempt = count != 0 && seq == count;
+        if (!last_attempt) {
+            bruce_result_t delay_result = runtime__delay((uint32_t)interval_ms);
+            if (delay_result != BRUCE_OK) {
+                loop_result = BRUCE_ERR_CANCELLED;
+                break;
+            }
+        }
+    }
+
+    int loss_percent = sent > 0 ? (int)(100 - (100 * received / sent)) : 0;
+    stdio__printf(
+        "\n--- %s ping statistics ---\n%d packets transmitted, %d received, %d%% packet loss\n", host, sent,
+        received, loss_percent
+    );
+    if (received > 0) {
+        stdio__printf(
+            "round-trip min/avg/max = %u/%u/%u ms\n", (unsigned)min_ms, (unsigned)(sum_ms / (uint64_t)received),
+            (unsigned)max_ms
+        );
+    }
+    if (loop_result == BRUCE_ERR_CANCELLED) return BRUCE_OK;
+    if (loop_result != BRUCE_OK) return loop_result;
+    return received > 0 ? BRUCE_OK : BRUCE_ERR_TIMEOUT;
 }

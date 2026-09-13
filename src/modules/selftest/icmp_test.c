@@ -18,14 +18,14 @@
  */
 bool selftest__run_icmp_loopback_case(void) {
     uint32_t round_trip_ms = 0xFFFFFFFFu;
-    bruce_result_t reply_result = icmp__ping("127.0.0.1", 1000, &round_trip_ms);
+    bruce_result_t reply_result = icmp__ping("127.0.0.1", 1000, 0, &round_trip_ms, NULL, NULL);
     bool reply_ok = reply_result == BRUCE_OK && round_trip_ms != 0xFFFFFFFFu;
 
     /* A host with no route at all (this build has no default gateway
      * outside loopback) must not be reported as a reply, whether that
      * surfaces as an outright timeout or a quicker routing failure --
      * either way it must never be BRUCE_OK. */
-    bruce_result_t unreachable_result = icmp__ping("192.0.2.1", 200, NULL);
+    bruce_result_t unreachable_result = icmp__ping("192.0.2.1", 200, 0, NULL, NULL, NULL);
     bool unreachable_ok = unreachable_result != BRUCE_OK;
 
     bool ok = reply_ok && unreachable_ok;

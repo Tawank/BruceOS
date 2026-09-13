@@ -84,7 +84,7 @@ static int selftest__udp_open_entry(int argc, char **argv) {
 static int selftest__icmp_ping_entry(int argc, char **argv) {
     (void)argc;
     (void)argv;
-    s_wifi_http_result.result = icmp__ping("127.0.0.1", 1000, NULL);
+    s_wifi_http_result.result = icmp__ping("127.0.0.1", 1000, 0, NULL, NULL, NULL);
     s_wifi_http_result.ran = true;
     return 0;
 }

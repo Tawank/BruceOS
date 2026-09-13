@@ -278,7 +278,7 @@ static bool nmap_app__expand_targets(
 static bool
 nmap_app__host_is_up(const char *host, const nmap_app__options_t *opts, bool *out_has_latency, uint32_t *out_round_trip_ms) {
     *out_has_latency = false;
-    if (icmp__ping(host, opts->probe_timeout_ms, out_round_trip_ms) == BRUCE_OK) {
+    if (icmp__ping(host, opts->probe_timeout_ms, 0, out_round_trip_ms, NULL, NULL) == BRUCE_OK) {
         *out_has_latency = true;
         return true;
     }
