@@ -31,8 +31,9 @@ definitions) by raw-text keyword matching in command position.
 - Variable expansion: `$NAME`, `${NAME}`, `$0`..`$9` (single digit only,
   bash-style — `$10` is `$1` followed by a literal `0`), `$#` (positional
   argument count), `$?` (last exit status), `$!` (PID of the most recent
-  `cmd &`/`func &`, see Job control below; empty/0 until the first one).
-  An unset variable or unset positional parameter expands to empty string.
+  `cmd &`/`func &`, see Job control below; empty/0 until the first one), `$$`
+  (this shell's own PID, `process__current_id()`, always set). An unset
+  variable or unset positional parameter expands to empty string.
 - Command substitution: `$(...)` and `` `...` ``, recognized unquoted and
   inside double quotes (only single quotes suppress it, same as `$NAME`) and
   nestable. Its content runs as a nested `shell -c` child process (see
@@ -86,9 +87,12 @@ definitions) by raw-text keyword matching in command position.
   pattern that matches nothing is left completely unchanged as one word —
   not an error, not dropped — same as nullglob-off bash. Runs after brace
   expansion, so each brace alternative is glob-expanded independently.
-- **Not implemented:** tilde expansion (`~`), `$@`/`$*`, `$$`, and
-  here-strings (`<<<`). Here-docs (`<<`) and input redirection (`<`) *are*
-  implemented — see the Redirection section below.
+- **Not implemented:** tilde expansion (`~`), `$@`/`$*` (real multi-word
+  splitting semantics for these needs the word-expansion engine itself to be
+  able to yield more than one argv word per `$`-expansion, which
+  `shell_parser__process_word()` doesn't support yet), and here-strings
+  (`<<<`). Here-docs (`<<`) and input redirection (`<`) *are* implemented —
+  see the Redirection section below.
 
 **Job control** -- `cmd &` (an external command) or `func &` (a shell
 function) launches without waiting: the shell prints `[N] PID` and moves
@@ -313,7 +317,8 @@ line it just deletes the character under the cursor, like Delete.
   `for ((init; cond; incr)); do ...; done` (C-style form, empty segments
   allowed, e.g. `for ((;;))`). `for NAME; do ...; done` with no `in` clause
   iterates the current function's positional parameters (`$1..`).
-- `while COND; do ...; done`. `until` is not implemented.
+- `while COND; do ...; done`, and `until COND; do ...; done` (the same loop,
+  just stopping when `COND` succeeds instead of when it fails).
 - Loops cooperatively yield each iteration (`runtime__delay(0)`) and check
   `process__current_signal()` so they don't starve the scheduler or ignore
   cancellation/kill.
@@ -364,14 +369,14 @@ line it just deletes the character under the cursor, like Delete.
   documented limitation shared with this shell's other quoting gaps.
   `;&`/`;;&` fallthrough is not implemented -- every clause ends at `;;`.
 - **Not implemented:** `select`, subshells `(...)`, process substitution,
-  `until`, and command grouping with `{ ...; }` used as a value (only as a
-  function body).
+  and command grouping with `{ ...; }` used as a value (only as a function
+  body).
 
 ## What's left to implement
 
 Roughly in order of how often bash scripts actually use them:
-- `$@`, `$*`, `$$`.
-- `until` loops.
+- `$@`, `$*` (see the Quoting and expansion section above for why -- `$$`
+  and `$!` are implemented).
 
 ## Example
 

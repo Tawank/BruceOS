@@ -1,6 +1,7 @@
 #include "shell_test.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "core_sdk/app_runner.h"
@@ -104,6 +105,12 @@ bool selftest__run_shell_language_case(void) {
         shell__execute_line(&state, "cd ..; shell_test_probe $PWD /") == 0 &&
         strcmp(s_probe_pwd, "/") == 0 &&
         shell__execute_line(&state, "shell_test_probe nonzero") == 37 &&
+        /* $$ -- this shell's own pid, always set. */
+        shell__execute_line(&state, "shell_test_probe $$") == 0 &&
+        atoi(s_probe_arg) == (int)process__current_id() &&
+        /* $! -- unset (0) until the first "cmd &"/"func &"; the job-control
+         * selftest case covers it actually tracking a real background pid. */
+        shell__execute_line(&state, "shell_test_probe $!") == 0 && strcmp(s_probe_arg, "0") == 0 &&
         shell__execute_line(&state, "echo broken | echo nope") == 2 &&
         /* "echo > file" now succeeds -- builtin/function output redirection
          * is supported (shell_executor__builtin_redirected()), so this just
@@ -236,6 +243,16 @@ bool selftest__run_shell_control_flow_case(void) {
         strcmp(s_probe_arg, "elif_ran") == 0 && s_probe_calls == 3 &&
         /* No branch taken and no else: exit status is 0, same as bash. */
         shell__execute_line(&state, "if false; then shell_test_probe skipped; fi") == 0 && s_probe_calls == 3 &&
+        /* A taken branch's exit status is that of its own glued "then X"/
+         * "else X" command when nothing else follows it before "fi" --
+         * regression test for a bug where shell_compound__run_if() clobbered
+         * this status with 0 (the empty, never-executed remainder after it)
+         * whenever the glued command's own status was nonzero. Masked for
+         * years because shell_test_probe (used almost everywhere else in
+         * this file) always returns 0, so the clobber was invisible until a
+         * real nonzero-status command exposed it. */
+        shell__execute_line(&state, "if true; then false; fi") == 1 &&
+        shell__execute_line(&state, "if false; then true; else false; fi") == 1 &&
         /* A condition list can itself use ; and &&/||. */
         shell__execute_line(&state, "if true; false; then shell_test_probe skipped; fi") == 0 &&
         s_probe_calls == 3 &&
@@ -537,7 +554,18 @@ bool selftest__run_shell_multiline_case(void) {
                           "  fi\n"
                           "}\n"
                           "\n"
-                          "greet multiline\n";
+                          "greet multiline\n"
+                          /* A real multi-line loop, not just if/fi and a
+                           * function body -- exercises shell_compound__pending()'s
+                           * own loop_depth counter (incremented on "for"/
+                           * "while"/"until", decremented on "done"), which
+                           * decides whether shell_app.c keeps reading more
+                           * lines before running this at all. */
+                          "count=0\n"
+                          "until [ $count -ge 2 ]; do\n"
+                          "  count=$((count + 1))\n"
+                          "done\n"
+                          "shell_test_probe count-$count\n";
     (void)storage__remove(path);
     bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
     size_t written = 0;
@@ -553,7 +581,7 @@ bool selftest__run_shell_multiline_case(void) {
     char *argv[] = {"shell", (char *)path, NULL};
     int status = shell_app_main(2, argv);
     (void)storage__remove(path);
-    bool ok = status == 0 && strcmp(s_probe_arg, "multiline") == 0;
+    bool ok = status == 0 && strcmp(s_probe_arg, "count-2") == 0;
     printf("[selftest] shell/multiline: %s\n", ok ? "OK" : "failed");
     return ok;
 }
@@ -629,6 +657,16 @@ bool selftest__run_shell_loops_case(void) {
      * off a variable the body itself mutates. */
     ok = selftest__shell_loops_step(
         ok, &state, "count=0; while [ $count -lt 3 ]; do (( count++ )); done; shell_test_probe $count", 0, "3"
+    );
+    /* until COND; do ...; done -- the same loop as while, just stopping once
+     * COND *succeeds* instead of once it fails. */
+    ok = selftest__shell_loops_step(
+        ok, &state, "count=0; until [ $count -ge 3 ]; do (( count++ )); done; shell_test_probe $count", 0, "3"
+    );
+    /* A COND that's already true the first time never runs the body at all,
+     * same as "while false; do ...; done" never does. */
+    ok = selftest__shell_loops_step(
+        ok, &state, "result=untouched; until true; do result=ran; done; shell_test_probe $result", 0, "untouched"
     );
     /* break N unwinds N enclosing loops at once. */
     ok = selftest__shell_loops_step(
@@ -736,6 +774,7 @@ bool selftest__run_shell_loops_case(void) {
     /* Malformed constructs are reported, not silently misparsed. */
     ok = selftest__shell_loops_step(ok, &state, "for x in a b", 2, NULL);
     ok = selftest__shell_loops_step(ok, &state, "while true; do echo hi", 2, NULL);
+    ok = selftest__shell_loops_step(ok, &state, "until false; do echo hi", 2, NULL);
     ok = selftest__shell_loops_step(ok, &state, "(( 1 +", 2, NULL);
 
     shell__state_free(&state);

@@ -48,6 +48,13 @@ const char *shell_executor__lookup(void *context, const char *name) {
             );
             return state->last_background_pid_text;
         }
+        if (name[0] == '$') {
+            /* This shell's own pid, matching bash's "$$" -- unlike "$!"
+             * above, always set (this shell is itself a running process the
+             * moment any of its own script text can run). */
+            snprintf(state->pid_text, sizeof(state->pid_text), "%u", (unsigned)process__current_id());
+            return state->pid_text;
+        }
     }
     return shell_builtins__get(state, name);
 }

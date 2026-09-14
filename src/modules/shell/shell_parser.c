@@ -973,15 +973,17 @@ static int shell_parser__expand(
         *position = i + 2;
         return written > 0 && shell_dynbuf__append(word, status, (size_t)written) ? 0 : -1;
     }
-    /* $0/$1../$9/$# -- a function call's name, its positional parameters,
-     * and how many of them there are (see shell_compound__call_function()
-     * in shell_compound.c, and shell_executor__lookup() in shell_executor.c,
-     * which is what actually resolves these through `lookup`). Bash itself
-     * only ever expands a single digit unbraced this way ($10 is $1 followed
-     * by a literal "0"), so this doesn't loop to collect more digits. An
-     * unset positional parameter expands to nothing, same as an unset named
-     * variable below. */
-    if (command->text[i + 1] == '#' || isdigit((unsigned char)command->text[i + 1])) {
+    /* $0/$1../$9/$#/$!/$$ -- a function call's name, its positional
+     * parameters, how many of them there are, the most recent background
+     * job's pid, and this shell's own pid (see shell_compound__call_function()
+     * in shell_compound.c, shell_jobs.c, and shell_executor__lookup() in
+     * shell_executor.c, which is what actually resolves all of these through
+     * `lookup`). Bash itself only ever expands a single digit unbraced this
+     * way ($10 is $1 followed by a literal "0"), so this doesn't loop to
+     * collect more digits. An unset positional parameter expands to nothing,
+     * same as an unset named variable below. */
+    if (command->text[i + 1] == '#' || command->text[i + 1] == '!' || command->text[i + 1] == '$' ||
+        isdigit((unsigned char)command->text[i + 1])) {
         char key[2] = {command->text[i + 1], '\0'};
         *position = i + 2;
         const char *value = lookup != NULL ? lookup(context, key) : NULL;

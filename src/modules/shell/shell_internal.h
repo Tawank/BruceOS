@@ -109,6 +109,14 @@ typedef struct {
     int next_job_number;
     bruce_process_id_t last_background_pid;
     char last_background_pid_text[12];
+    /* $$'s formatted expansion (this shell process's own id, from
+     * process__current_id()) -- scratch space for shell_executor__lookup()
+     * the same way positional_count_text/last_background_pid_text are for
+     * $#/$!. Unlike those two, the value it's formatted from never changes
+     * for the life of this shell_state_t, but it's still just as cheap to
+     * reformat on each lookup as to cache, so this stays a plain scratch
+     * buffer rather than a separately-tracked "already formatted" flag. */
+    char pid_text[12];
     int last_status;
     bool exit_requested;
     int exit_status;

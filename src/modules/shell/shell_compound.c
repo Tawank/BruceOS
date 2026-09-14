@@ -211,6 +211,7 @@ typedef enum {
     SHELL_COMPOUND_FUNCTION,
     SHELL_COMPOUND_FOR,
     SHELL_COMPOUND_WHILE,
+    SHELL_COMPOUND_UNTIL,
     SHELL_COMPOUND_DO,
     SHELL_COMPOUND_DONE,
     SHELL_COMPOUND_CASE,
@@ -229,6 +230,10 @@ static shell_compound_kind_t shell_compound__classify(const shell_plan_t *plan, 
     if (shell_compound__match_keyword(cmd, "fi", &rest, &rest_len)) return SHELL_COMPOUND_FI;
     if (shell_compound__match_keyword(cmd, "for", &rest, &rest_len)) return SHELL_COMPOUND_FOR;
     if (shell_compound__match_keyword(cmd, "while", &rest, &rest_len)) return SHELL_COMPOUND_WHILE;
+    /* "until COND; do ...; done" -- the same loop shell_compound__run_while()
+     * already runs for "while", just negating which way its condition's exit
+     * status stops the loop (see that function's `negate` parameter). */
+    if (shell_compound__match_keyword(cmd, "until", &rest, &rest_len)) return SHELL_COMPOUND_UNTIL;
     if (shell_compound__match_keyword(cmd, "do", &rest, &rest_len)) return SHELL_COMPOUND_DO;
     if (shell_compound__match_keyword(cmd, "done", &rest, &rest_len)) return SHELL_COMPOUND_DONE;
     if (shell_compound__match_keyword(cmd, "case", &rest, &rest_len)) return SHELL_COMPOUND_CASE;
@@ -254,7 +259,9 @@ static int shell_compound__define_function(shell_state_t *state, const char *nam
 
 static int shell_compound__run_sequence(shell_state_t *state, const shell_plan_t *plan, size_t *index, bool execute);
 static int shell_compound__run_for(shell_state_t *state, const shell_plan_t *plan, size_t *index, bool execute);
-static int shell_compound__run_while(shell_state_t *state, const shell_plan_t *plan, size_t *index, bool execute);
+static int shell_compound__run_while(
+    shell_state_t *state, const shell_plan_t *plan, size_t *index, bool execute, bool negate
+);
 static int shell_compound__run_case(shell_state_t *state, const shell_plan_t *plan, size_t *index, bool execute);
 
 /* A run_sequence() pass that was actually executing can stop early, part
@@ -406,8 +413,8 @@ static int shell_compound__run_sequence(shell_state_t *state, const shell_plan_t
             status = shell_compound__run_for(state, plan, index, execute);
             continue;
         }
-        if (kind == SHELL_COMPOUND_WHILE) {
-            status = shell_compound__run_while(state, plan, index, execute);
+        if (kind == SHELL_COMPOUND_WHILE || kind == SHELL_COMPOUND_UNTIL) {
+            status = shell_compound__run_while(state, plan, index, execute, kind == SHELL_COMPOUND_UNTIL);
             continue;
         }
         if (kind == SHELL_COMPOUND_CASE) {
@@ -810,20 +817,30 @@ static int shell_compound__run_for(shell_state_t *state, const shell_plan_t *pla
     return result;
 }
 
-static int shell_compound__run_while(shell_state_t *state, const shell_plan_t *plan, size_t *index, bool execute) {
+/* `negate` is true for "until COND; do ...; done" (shell_compound__classify()'s
+ * SHELL_COMPOUND_UNTIL), false for plain "while" -- the only difference
+ * between the two is which way COND's exit status stops the loop (see the
+ * single inverted check below); everything else -- the do/done boundary
+ * discovery, the cooperative-yield/break/continue/return handling in
+ * shell_compound__loop_should_stop(), re-evaluating COND fresh every
+ * iteration -- is identical, so this one function runs both. */
+static int shell_compound__run_while(
+    shell_state_t *state, const shell_plan_t *plan, size_t *index, bool execute, bool negate
+) {
+    const char *keyword = negate ? "until" : "while";
     const char *cond_head;
     size_t cond_head_len;
-    (void)shell_compound__match_keyword(&plan->commands[*index], "while", &cond_head, &cond_head_len);
+    (void)shell_compound__match_keyword(&plan->commands[*index], keyword, &cond_head, &cond_head_len);
     (*index)++;
     size_t cond_start = *index;
-    if (!shell_compound__find_do(state, plan, index, "while")) return 2;
+    if (!shell_compound__find_do(state, plan, index, keyword)) return 2;
     size_t cond_end = *index;
     /* From here on, plan->commands[do_span.index] is shrunk to "do"'s glued
      * remainder -- every return below must go through "done" so it gets
      * restored first (see shell_compound__restore_do()'s header comment). */
     shell_compound__do_span_t do_span = shell_compound__consume_do(plan, index);
     size_t body_start = *index;
-    bool have_done = shell_compound__find_done(state, plan, index, "while");
+    bool have_done = shell_compound__find_done(state, plan, index, keyword);
     size_t body_end = *index;
     if (have_done) (*index)++;
 
@@ -842,7 +859,9 @@ static int shell_compound__run_while(shell_state_t *state, const shell_plan_t *p
                 cond_status = shell_compound__run_sequence(state, plan, &cursor, true);
             }
             if (shell_compound__loop_should_stop(state)) break;
-            if (cond_status != 0) break;
+            /* while: keep looping only as long as COND succeeds (status 0).
+             * until: invert that -- keep looping only as long as COND fails. */
+            if (negate ? cond_status == 0 : cond_status != 0) break;
 
             status = shell_compound__run_loop_body(state, plan, body_start, body_end);
             if (shell_compound__loop_should_stop(state)) break;
@@ -1267,14 +1286,14 @@ bool shell_compound__pending(const char *text) {
     bool in_comment = false;
     int if_depth = 0;
     int brace_depth = 0;
-    /* "for"/"while" both open a block that's closed by a matching "done"
-     * (their "do" is just a delimiter word in between, not its own nesting
-     * level -- same reason "then" needs no tracking of its own for if/fi).
-     * One shared counter is enough since a stray "for"...(missing "done")
-     * followed by a real "while"...done still needs a "done" of its own to
-     * close, so nesting them under one counter and popping on any "done"
-     * matches this the same way if_depth already treats "if" uniformly
-     * regardless of elif/else in between. */
+    /* "for"/"while"/"until" all open a block that's closed by a matching
+     * "done" (their "do" is just a delimiter word in between, not its own
+     * nesting level -- same reason "then" needs no tracking of its own for
+     * if/fi). One shared counter is enough since a stray "for"...(missing
+     * "done") followed by a real "while"...done still needs a "done" of its
+     * own to close, so nesting them under one counter and popping on any
+     * "done" matches this the same way if_depth already treats "if"
+     * uniformly regardless of elif/else in between. */
     int loop_depth = 0;
     /* "case" is closed by a matching "esac", the same one-counter-per-pair
      * treatment as if_depth/loop_depth above -- a clause's own ";;"/pattern
@@ -1295,6 +1314,7 @@ bool shell_compound__pending(const char *text) {
                 else if (word_len == 1 && word[0] == '}' && brace_depth > 0) brace_depth--;
                 else if (word_len == 3 && memcmp(word, "for", 3) == 0) loop_depth++;
                 else if (word_len == 5 && memcmp(word, "while", 5) == 0) loop_depth++;
+                else if (word_len == 5 && memcmp(word, "until", 5) == 0) loop_depth++;
                 else if (word_len == 4 && memcmp(word, "done", 4) == 0 && loop_depth > 0) loop_depth--;
                 else if (word_len == 4 && memcmp(word, "case", 4) == 0) case_depth++;
                 else if (word_len == 4 && memcmp(word, "esac", 4) == 0 && case_depth > 0) case_depth--;
