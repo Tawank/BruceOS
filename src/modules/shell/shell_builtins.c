@@ -46,6 +46,9 @@ static const shell_builtin_entry_t s_shell_builtins[] = {
     {"jobs", "List background jobs"},
     {"wait", "Wait for a background job to finish"},
     {"kill", "Send a signal to a job or process"},
+    {"fg", "Bring a background job to the foreground"},
+    {"bg", "Resume a paused job in the background"},
+    {"disown", "Stop tracking a job without touching it"},
 };
 
 static int shell_builtins__find_index(const shell_state_t *state, const char *name) {
@@ -518,6 +521,9 @@ int shell_builtins__run(shell_state_t *state, int argc, char **argv) {
     if (strcmp(argv[0], "jobs") == 0) return shell_jobs__run(state, argc, argv);
     if (strcmp(argv[0], "wait") == 0) return shell_jobs__wait(state, argc, argv);
     if (strcmp(argv[0], "kill") == 0) return shell_jobs__kill(state, argc, argv);
+    if (strcmp(argv[0], "fg") == 0) return shell_jobs__fg(state, argc, argv);
+    if (strcmp(argv[0], "bg") == 0) return shell_jobs__bg(state, argc, argv);
+    if (strcmp(argv[0], "disown") == 0) return shell_jobs__disown(state, argc, argv);
     /* "time" is intercepted in shell_executor__dispatch() before it ever
      * reaches here (it needs to wrap the function/builtin/external dispatch
      * itself), so it's listed for documentation purposes only -- this branch

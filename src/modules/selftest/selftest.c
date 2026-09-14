@@ -221,6 +221,7 @@ static const selftest__case_t selftest__cases[] = {
     SELFTEST_CASE(selftest__run_shell_history_multiline_case),
     SELFTEST_CASE(selftest__run_shell_jobs_case),
     SELFTEST_CASE(selftest__run_shell_kill_case),
+    SELFTEST_CASE(selftest__run_shell_job_control_case),
     SELFTEST_CASE(selftest__run_bnu_case),
     SELFTEST_CASE(selftest__run_bnu_text_case),
     SELFTEST_CASE(selftest__run_bnu_free_stack_case),

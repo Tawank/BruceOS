@@ -218,3 +218,81 @@ int shell_jobs__kill(shell_state_t *state, int argc, char **argv) {
     }
     return status;
 }
+
+/* Shared by "fg"/"bg"/"disown"'s optional single job-spec argument. With no
+ * argument (argc <= 1), defaults to the most recently backgrounded job still
+ * tracked -- the table's own append order, not a real bash "%+" current-job
+ * marker (this shell doesn't keep one). Returns the table index; the two
+ * ways to fail are told apart by argc: (size_t)-1 with argc <= 1 means "no
+ * current job" (the table's empty), (size_t)-1 with argc > 1 means argv[1]
+ * itself didn't resolve ("no such job") -- left for each caller to report so
+ * the message can name argv[1]. */
+static size_t shell_jobs__resolve_current(const shell_state_t *state, int argc, char **argv) {
+    if (argc <= 1) return state->job_count > 0 ? state->job_count - 1 : (size_t)-1;
+    return shell_jobs__find(state, argv[1]);
+}
+
+int shell_jobs__fg(shell_state_t *state, int argc, char **argv) {
+    size_t index = shell_jobs__resolve_current(state, argc, argv);
+    if (index == (size_t)-1) {
+        if (argc <= 1) stdio__printf("shell: fg: no current job\n");
+        else stdio__printf("shell: fg: %s: no such job\n", argv[1]);
+        return 1;
+    }
+    stdio__printf("%s\n", state->jobs[index].command);
+    bruce_process_id_t pid = state->jobs[index].pid;
+    int status = shell_executor__wait(pid);
+    /* Removed by pid rather than re-resolving `index`/argv[1]: a bare "fg"
+     * has no token to re-resolve in the first place, and nothing else can
+     * touch state->jobs while this call is blocked either way (the shell's
+     * own single task). */
+    for (size_t i = 0; i < state->job_count; ++i) {
+        if (state->jobs[i].pid == pid) {
+            shell_jobs__remove_at(state, i);
+            break;
+        }
+    }
+    return status;
+}
+
+/* Nothing in this shell ever pauses a job itself (there's no Ctrl+Z here --
+ * see the README's "Ctrl+C" section for the one keystroke it does turn into
+ * a signal) -- a job only ends up BRUCE_PROCESS_PAUSED via some other
+ * process__pause() caller (e.g. "process pause <pid>" from another session
+ * or script). "bg" still needs to exist for that job: it's this shell's only
+ * way to resume one and keep it backgrounded rather than switching to it. */
+int shell_jobs__bg(shell_state_t *state, int argc, char **argv) {
+    size_t index = shell_jobs__resolve_current(state, argc, argv);
+    if (index == (size_t)-1) {
+        if (argc <= 1) stdio__printf("shell: bg: no current job\n");
+        else stdio__printf("shell: bg: %s: no such job\n", argv[1]);
+        return 1;
+    }
+    bruce_process_id_t pid = state->jobs[index].pid;
+    bruce_process_snapshot_t snapshot;
+    if (process__snapshot(pid, &snapshot) != BRUCE_OK) {
+        stdio__printf("shell: bg: [%d]: no such process\n", state->jobs[index].number);
+        return 1;
+    }
+    if (snapshot.state != BRUCE_PROCESS_PAUSED) {
+        stdio__printf("shell: bg: job %d already in background\n", state->jobs[index].number);
+        return 1;
+    }
+    if (process__resume(pid) != BRUCE_OK) {
+        stdio__printf("shell: bg: [%d]: resume failed\n", state->jobs[index].number);
+        return 1;
+    }
+    stdio__printf("[%d]+ %s &\n", state->jobs[index].number, state->jobs[index].command);
+    return 0;
+}
+
+int shell_jobs__disown(shell_state_t *state, int argc, char **argv) {
+    size_t index = shell_jobs__resolve_current(state, argc, argv);
+    if (index == (size_t)-1) {
+        if (argc <= 1) stdio__printf("shell: disown: no current job\n");
+        else stdio__printf("shell: disown: %s: no such job\n", argv[1]);
+        return 1;
+    }
+    shell_jobs__remove_at(state, index);
+    return 0;
+}

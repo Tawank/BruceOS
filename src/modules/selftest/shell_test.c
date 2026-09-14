@@ -2504,3 +2504,90 @@ bool selftest__run_shell_kill_case(void) {
     printf("[selftest] shell/kill: %s\n", ok ? "OK" : "failed");
     return ok;
 }
+
+bool selftest__run_shell_job_control_case(void) {
+    if (!selftest__shell_register_probe() || !selftest__shell_register_spin_probe()) return false;
+    shell_state_t state;
+    shell__state_init(&state);
+    s_probe_calls = 0;
+    memset(s_probe_arg, 0, sizeof(s_probe_arg));
+
+    /* "fg %N" prints the job's command line, then blocks the same way an
+     * ordinary foreground command does (shell_executor__wait()) -- by the
+     * time it returns, the probe has actually run and the job is reaped. */
+    bool ok = shell__execute_line(&state, "shell_test_probe fg_target &") == 0 && state.job_count == 1;
+    int job_number = ok ? state.jobs[0].number : 0;
+    char line[32];
+    snprintf(line, sizeof(line), "fg %%%d", job_number);
+    ok = ok && shell__execute_line(&state, line) == 0 && state.job_count == 0 && s_probe_calls == 1 &&
+         strcmp(s_probe_arg, "fg_target") == 0;
+
+    /* Bare "fg" (no job spec) defaults to the most recently backgrounded
+     * job -- the older one is left alone -- and relays the job's own real
+     * exit status (37, via the probe's "nonzero" path), not just 0/1.
+     * The older job is a long-running spin process (not a quick-exiting
+     * probe): a job that has *already exited* but was never waited on can
+     * have its exit status silently evicted from the core process layer's
+     * completion table by an unrelated process's exit publishing into the
+     * same slot (process.c's process__publish_completion_locked() reuses
+     * any slot with waiter_pins == 0, i.e. nothing currently blocked on
+     * it) -- a pre-existing core race, not something this job-control
+     * layer can paper over. Keeping "first" genuinely still-running until
+     * the bare "wait" below explicitly kills and reaps it sidesteps that
+     * race entirely. */
+    ok = ok && shell__execute_line(&state, "shell_test_spin &") == 0 &&
+         shell__execute_line(&state, "shell_test_probe nonzero &") == 0 && state.job_count == 2;
+    bruce_process_id_t first_pid = ok ? state.jobs[0].pid : BRUCE_PROCESS_ID_INVALID;
+    ok = ok && shell__execute_line(&state, "fg") == 37 && state.job_count == 1;
+    ok = ok && process__signal(first_pid, BRUCE_PROCESS_SIGNAL_TERM) == BRUCE_OK;
+    /* Bare "wait" (like bash's) always reports status 0 regardless of the
+     * individual jobs' own exit statuses -- only "wait %N" relays a job's
+     * real status (see the "kill %N"/"wait %N" pair further down, and
+     * selftest__run_shell_jobs_case()'s own bare-"wait" check). */
+    ok = ok && shell__execute_line(&state, "wait") == 0 && state.job_count == 0;
+
+    /* Error paths: nothing to pick ("no current job") and an unresolvable
+     * explicit target ("no such job") each fail without side effects. */
+    ok = ok && shell__execute_line(&state, "fg") == 1 && shell__execute_line(&state, "fg %99") == 1;
+
+    /* "bg %N" only does anything to an actually-paused job -- nothing in
+     * this shell itself ever pauses one (see shell_jobs__bg()'s own doc
+     * comment), so the test pauses it directly via the same core_sdk
+     * process__pause() a script's "process pause <pid>" would eventually
+     * reach. Resuming turns it back into an ordinary running background job,
+     * which "kill"/"wait" then reap normally. */
+    ok = ok && shell__execute_line(&state, "shell_test_spin &") == 0 && state.job_count == 1;
+    bruce_process_id_t spin_pid = ok ? state.jobs[0].pid : BRUCE_PROCESS_ID_INVALID;
+    job_number = ok ? state.jobs[0].number : 0;
+    ok = ok && process__pause(spin_pid) == BRUCE_OK;
+    bruce_process_snapshot_t snapshot;
+    ok = ok && process__snapshot(spin_pid, &snapshot) == BRUCE_OK && snapshot.state == BRUCE_PROCESS_PAUSED;
+    snprintf(line, sizeof(line), "bg %%%d", job_number);
+    ok = ok && shell__execute_line(&state, line) == 0 && state.job_count == 1;
+    ok = ok && process__snapshot(spin_pid, &snapshot) == BRUCE_OK && snapshot.state != BRUCE_PROCESS_PAUSED;
+
+    /* "bg" on a job that's already running (not paused) is an error, same as
+     * bash's "job already in background". */
+    ok = ok && shell__execute_line(&state, line) == 1;
+
+    snprintf(line, sizeof(line), "kill %%%d", job_number);
+    ok = ok && shell__execute_line(&state, line) == 0;
+    snprintf(line, sizeof(line), "wait %%%d", job_number);
+    ok = ok && shell__execute_line(&state, line) == 128 + BRUCE_PROCESS_SIGNAL_TERM && state.job_count == 0;
+
+    ok = ok && shell__execute_line(&state, "bg") == 1 && shell__execute_line(&state, "bg %99") == 1;
+
+    /* "disown %N" drops a job from the table without touching the process
+     * itself -- it keeps running (or, as here, simply finishes on its own)
+     * with no "[N]+ Done" notification, since shell_jobs__poll() no longer
+     * knows about it once it's out of the table. */
+    ok = ok && shell__execute_line(&state, "shell_test_probe disowned &") == 0 && state.job_count == 1;
+    job_number = ok ? state.jobs[0].number : 0;
+    snprintf(line, sizeof(line), "disown %%%d", job_number);
+    ok = ok && shell__execute_line(&state, line) == 0 && state.job_count == 0;
+    ok = ok && shell__execute_line(&state, "disown") == 1 && shell__execute_line(&state, "disown %99") == 1;
+
+    shell__state_free(&state);
+    printf("[selftest] shell/job-control: %s\n", ok ? "OK" : "failed");
+    return ok;
+}

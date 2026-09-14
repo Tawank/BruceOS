@@ -108,7 +108,23 @@ whether or not it's tracked, both defaulting to TERM; `-s SIGNAL` or a bare
 `-SIGSPEC` token (name or number, case-insensitive, optional `SIG` prefix)
 picks a different one. A bad target or signal is reported and, for multiple
 targets, doesn't stop the rest -- `kill` only returns 0 if every target was
-signaled. **Not implemented:** backgrounding a pipeline (`a | b &`), a
+signaled. `fg %N`/`fg PID` brings a job to the foreground: it prints the
+job's command line (same text `jobs` would show) then blocks for it the same
+way `shell_executor__wait` blocks for any other foreground command (so
+Ctrl+C relays to it too), returning its real exit status; a bare `fg` (no
+job spec) picks the most recently backgrounded job still tracked -- there's
+no bash-style `%+`/`%-` current/previous marker, just the job table's own
+append order. `bg %N`/bare `bg` resolves a target the same way but never
+blocks: it only does something to a job that's actually paused, resuming it
+and printing `[N]+ CMD &`; nothing in this shell itself ever pauses a job
+(there's no Ctrl+Z/SIGTSTP here), so `bg` is only useful against a job some
+other caller paused via `process__pause()`, and reports "already in
+background" for anything else. `disown %N`/bare `disown` drops a job from
+the table without touching the process itself -- it keeps running, but
+`jobs`/`wait`/the next prompt's completion message no longer know about it.
+All three report "no current job" (bare, nothing to pick) or "no such job"
+(unresolvable target) and return 1 rather than silently doing nothing.
+**Not implemented:** backgrounding a pipeline (`a | b &`), a
 builtin (`cd &`), or a redirected command -- all rejected with an error
 rather than run silently in the foreground. A trailing `&` on a whole
 compound construct (`if ...; fi &`, `for ...; done &`) is not recognized at

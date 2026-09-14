@@ -119,7 +119,7 @@ int shell_executor__status_to_exit_code(const bruce_process_status_t *status) {
     return status->exit_code & 0xff;
 }
 
-static int shell_executor__wait(bruce_process_id_t child) {
+int shell_executor__wait(bruce_process_id_t child) {
     bruce_process_status_t status;
     for (;;) {
         bruce_result_t waited = process__wait_status(child, 100, &status);

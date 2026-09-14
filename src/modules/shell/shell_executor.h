@@ -15,6 +15,16 @@ int shell_executor__page_help(void);
  * an ordinary (non-backgrounded) external command's already does. */
 int shell_executor__status_to_exit_code(const bruce_process_status_t *status);
 
+/* Blocks for `child` to finish, relaying this shell's own INT/TERM (Ctrl+C,
+ * or a real "kill"/"terminate" aimed at the shell itself -- see
+ * process__wait_status()'s BRUCE_ERR_CANCELLED) on to it instead of just
+ * returning, the same way any other foreground external command already
+ * gets Ctrl+C forwarded (see the README's "Ctrl+C" section). Returns the
+ * real exit status via shell_executor__status_to_exit_code(). Exported so
+ * shell_jobs.c's "fg" builtin can bring a background job into the same
+ * foreground-wait treatment an ordinary (non-backgrounded) command gets. */
+int shell_executor__wait(bruce_process_id_t child);
+
 /* $0/$1../$9/$# and named-variable resolution for shell_parser__words()
  * (see shell_executor.c for exactly what this does) -- exported so
  * shell_compound.c's word-list `for NAME in WORD...` can expand its list

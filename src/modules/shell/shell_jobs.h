@@ -54,3 +54,31 @@ int shell_jobs__wait(shell_state_t *state, int argc, char **argv);
  * the first one, returning 0 only if every target was resolved and
  * signaled; "kill" with no targets at all reports usage and returns 1. */
 int shell_jobs__kill(shell_state_t *state, int argc, char **argv);
+
+/* The "fg" builtin: brings a background job into the foreground -- prints its
+ * command line (same text "jobs" would show), then blocks for it via
+ * shell_executor__wait() so it gets the same Ctrl+C relay a plain foreground
+ * command already does, and reports its real exit status. "fg %N"/"fg PID"
+ * targets that job; a bare "fg" targets the most recently backgrounded job
+ * (state->jobs[job_count - 1]) -- there's no bash-style "%+"/"%-"
+ * current/previous marker here, just the table's own append order. Reports
+ * "no current job"/"no such job" and returns 1 if there's nothing to bring
+ * up. */
+int shell_jobs__fg(shell_state_t *state, int argc, char **argv);
+
+/* The "bg" builtin: resumes a paused job in the background (the
+ * process__pause()/process__resume() this shell never itself triggers --
+ * see shell_jobs__bg()'s own doc comment in shell_jobs.c for how a job could
+ * still end up paused). Same target resolution and "most recent job" default
+ * as "fg" above, but never blocks: reports "already in background" and
+ * returns 1 if the job isn't actually paused. */
+int shell_jobs__bg(shell_state_t *state, int argc, char **argv);
+
+/* The "disown" builtin: forgets a tracked job without touching the process
+ * itself -- it keeps running, but "jobs"/"wait"/the next prompt's completion
+ * message no longer know about it (same table removal shell_jobs__remove_at()
+ * already does for a job "wait" finishes reaping, just without ever having
+ * waited). Same target resolution and "most recent job" default as "fg"/"bg".
+ * Always returns 0 once a job is found; "no current job"/"no such job"
+ * returns 1. */
+int shell_jobs__disown(shell_state_t *state, int argc, char **argv);
