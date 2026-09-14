@@ -35,3 +35,29 @@ void shell_builtins__unset(shell_state_t *state, const char *name);
  * returns false (leaving out_path's contents unspecified) if the resolved
  * path would not fit. */
 bool shell_builtins__resolve_path(const shell_state_t *state, const char *path, char *out_path);
+
+/* Runs this shell_state_t's EXIT trap (state->trap_exit), if any, exactly
+ * once -- see state->trap_exit_fired's doc comment in shell_internal.h.
+ * Called from every point in shell_app.c a shell/script run actually ends
+ * (end of shell__run_script(), end of shell__interactive(), and a "-c"
+ * command's own line in shell_app_main()), right before that point computes
+ * its final exit status, so a trap action that itself calls `exit M`
+ * overrides it -- matching bash. A no-op if no EXIT trap is set. */
+void shell_builtins__fire_exit_trap(shell_state_t *state);
+
+/* Checks whether `signal` (BRUCE_PROCESS_SIGNAL_INT/_TERM only -- KILL isn't
+ * catchable, same as real kill(2)/trap) has a trap set (state->trap_int/
+ * trap_term); if so, clears the live signal and runs the trap action (a ""
+ * action, from `trap '' SIGSPEC`, means "ignore" -- the signal is still
+ * cleared, just nothing runs), returning true either way so the caller
+ * skips its own default handling for this signal. Returns false for a
+ * signal with no trap set (the caller should fall back to its own default
+ * behavior) or one this function doesn't own at all.
+ *
+ * Only ever consulted from the handful of points this shell already polls
+ * process__current_signal() at (shell_app.c's idle prompt,
+ * shell_compound__loop_should_stop()) -- a signal delivered while a
+ * foreground external command is running synchronously outside any loop
+ * isn't seen here until the next such poll, since shell_executor__wait()
+ * has no shell_state_t to consult a trap through. */
+bool shell_builtins__fire_signal_trap(shell_state_t *state, bruce_process_signal_t signal);

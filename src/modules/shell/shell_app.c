@@ -74,6 +74,12 @@ void shell__state_free(shell_state_t *state) {
     state->variables = NULL;
     state->variable_count = 0;
     state->variable_capacity = 0;
+    memory__free(state->trap_exit);
+    memory__free(state->trap_int);
+    memory__free(state->trap_term);
+    state->trap_exit = NULL;
+    state->trap_int = NULL;
+    state->trap_term = NULL;
 }
 
 int shell__execute_line(shell_state_t *state, const char *line) {
@@ -398,6 +404,7 @@ done:
     memory__free(delim_copy);
     memory__free(raw_line);
     (void)storage__close(file);
+    shell_builtins__fire_exit_trap(state);
     return state->exit_requested ? state->exit_status : status;
 }
 
@@ -601,29 +608,43 @@ static int shell__interactive(shell_state_t *state, bool suppress_echo) {
         }
         if (length == BRUCE_ERR_CANCELLED) {
             bruce_process_signal_t signal = process__current_signal();
-            if (signal == BRUCE_PROCESS_SIGNAL_INT) {
-                /* Like bash: Ctrl+C at the prompt just throws away whatever
-                 * was being typed and shows a fresh prompt, it doesn't quit
-                 * the shell. TERM/KILL (someone actually closing this shell)
-                 * still fall through below and exit. */
-                (void)process__clear_signal();
-                /* Also discard anything already queued but not yet read (a
-                 * fast paste/burst that arrived before the interrupt) -- a
-                 * real tty flushes pending input on SIGINT the same way
-                 * (termios' NOFLSH-unset default); without this, its
-                 * leftover bytes would survive into the fresh prompt below
-                 * and get replayed as if freshly typed. */
-                (void)stdio__flush_input();
-                (void)stdio__write("^C\r\n", 4);
-                block_used = 0;
-                block[0] = '\0';
-                line_continued = false;
+            if (!shell_builtins__fire_signal_trap(state, signal)) {
+                if (signal == BRUCE_PROCESS_SIGNAL_INT) {
+                    /* Like bash: Ctrl+C at the prompt just throws away
+                     * whatever was being typed and shows a fresh prompt, it
+                     * doesn't quit the shell. TERM/KILL (someone actually
+                     * closing this shell) still fall through below and
+                     * exit. */
+                    (void)process__clear_signal();
+                    /* Also discard anything already queued but not yet read
+                     * (a fast paste/burst that arrived before the
+                     * interrupt) -- a real tty flushes pending input on
+                     * SIGINT the same way (termios' NOFLSH-unset default);
+                     * without this, its leftover bytes would survive into
+                     * the fresh prompt below and get replayed as if freshly
+                     * typed. */
+                    (void)stdio__flush_input();
+                    (void)stdio__write("^C\r\n", 4);
+                    block_used = 0;
+                    block[0] = '\0';
+                    line_continued = false;
+                    continue;
+                }
+                state->exit_requested = true;
+                state->exit_status = 128 + (int)signal;
                 continue;
             }
-            int status = 128 + (int)signal;
-            memory__free(line);
-            memory__free(block);
-            return status;
+            /* A trap ran (or the signal is explicitly ignored via
+             * `trap '' SIGSPEC`) instead of the default handling above --
+             * discard whatever was mid-typed and show a fresh prompt, same
+             * as the untrapped INT case, unless the trap itself asked this
+             * shell to exit (state->exit_requested), which the while loop's
+             * own condition below picks up. */
+            (void)stdio__flush_input();
+            block_used = 0;
+            block[0] = '\0';
+            line_continued = false;
+            continue;
         }
         if (length < 0) break;
         /* A trailing, unescaped "\" outside single quotes -- see
@@ -671,6 +692,7 @@ static int shell__interactive(shell_state_t *state, bool suppress_echo) {
     }
     memory__free(line);
     memory__free(block);
+    shell_builtins__fire_exit_trap(state);
     return state->exit_requested ? state->exit_status : state->last_status;
 }
 
@@ -741,6 +763,7 @@ int shell_app_main(int argc, char **argv) {
     int status;
     if (has_command) {
         status = shell__execute_line(state, command);
+        shell_builtins__fire_exit_trap(state);
         if (state->exit_requested) status = state->exit_status;
     } else if (has_script) {
         status = shell__run_script(state, script);

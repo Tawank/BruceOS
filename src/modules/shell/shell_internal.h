@@ -163,6 +163,30 @@ typedef struct {
      * it to at least 1 on its first call), so the initial size is picked up
      * the first time it's checked. */
     uint32_t tty_generation;
+    /* `trap ACTION SIGSPEC` bodies -- see shell_builtins.c. NULL means "no
+     * trap set" (default disposition); an empty string ("") means "ignore
+     * this signal/exit" (set by `trap '' SIGSPEC`), same distinction bash
+     * makes. Owned strings, heap-allocated by the `trap` builtin and freed
+     * by shell__state_free(). trap_exit fires once, at every point this
+     * shell_state_t's run actually ends (see shell_builtins__fire_exit_trap()
+     * and its call sites in shell_app.c); trap_int/trap_term fire from
+     * shell_builtins__fire_signal_trap(), called wherever this shell already
+     * polls process__current_signal() for a live INT/TERM (the idle prompt
+     * in shell_app.c and shell_compound__loop_should_stop() -- see that
+     * function's own comment for the scope limitation this implies for a
+     * synchronously-running foreground external command). KILL can't appear
+     * here at all: it's not catchable, matching real kill(2)/trap. */
+    char *trap_exit;
+    char *trap_int;
+    char *trap_term;
+    /* Guards trap_exit against firing twice for the same shell_state_t --
+     * shell_app.c calls shell_builtins__fire_exit_trap() from more than one
+     * exit point (end of script, end of interactive loop, end of a -c
+     * command), but only one of those runs for any given invocation, and a
+     * trap action that itself calls `exit` re-enters the same exit point it
+     * was fired from, so this also stops that re-entrant call from firing
+     * the EXIT trap a second time. */
+    bool trap_exit_fired;
 } shell_state_t;
 
 void shell__state_init(shell_state_t *state);

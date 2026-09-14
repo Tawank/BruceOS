@@ -2713,3 +2713,194 @@ bool selftest__run_shell_job_control_case(void) {
     printf("[selftest] shell/job-control: %s\n", ok ? "OK" : "failed");
     return ok;
 }
+
+/* Runs `command` (a "shell -c ..." argument string) as a background child
+ * with no stdin needed and checks it exits with `expected_exit` -- proof
+ * that shell_builtins__fire_exit_trap() is actually wired into
+ * shell_app_main()'s "-c" exit point, since shell__execute_line() (used by
+ * every in-process check below) never calls it on its own. */
+static bool selftest__shell_trap_exit_probe(const char *command, int expected_exit) {
+    int launched = app_runner__run("shell", command, BRUCE_LAUNCH_BACKGROUND);
+    if (launched <= 0) return false;
+    bruce_process_status_t status;
+    return process__wait_status((bruce_process_id_t)launched, 2000, &status) == BRUCE_OK &&
+           status.reason == BRUCE_PROCESS_EXITED && status.exit_code == expected_exit;
+}
+
+/* Covers the `trap` builtin (shell_builtins.c) and its two firing functions:
+ * in-process checks drive a shell_state_t directly (calling
+ * shell_builtins__fire_exit_trap() explicitly, the same way shell_app.c's
+ * own exit points do -- shell__execute_line() alone never reaches it), then
+ * a handful of real spawned processes confirm those exit points and the two
+ * live-signal poll sites (the idle prompt and
+ * shell_compound__loop_should_stop()) actually call it, matching bash's own
+ * EXIT/INT/TERM trap semantics -- including an EXIT trap that calls `exit`
+ * itself overriding the status the run was already ending with. Known,
+ * documented scope limitation (see shell_builtins__fire_signal_trap()'s own
+ * doc comment and the README): a foreground external command running
+ * synchronously outside a loop isn't covered by either poll site, so an
+ * INT/TERM trap doesn't preempt it -- not exercised here since there's
+ * nothing to assert against. */
+bool selftest__run_shell_trap_case(void) {
+    if (!selftest__shell_register_probe()) return false;
+    shell_state_t state;
+    shell__state_init(&state);
+    memset(s_probe_arg, 0, sizeof(s_probe_arg));
+    bool ok =
+        /* Bare "trap"/"trap -l" with nothing set: no crash, exit 0. */
+        shell__execute_line(&state, "trap") == 0 && shell__execute_line(&state, "trap -l") == 0 &&
+        /* Rejects an unknown or untrappable (KILL, by name or number)
+         * signal spec instead of silently accepting it. */
+        shell__execute_line(&state, "trap 'x' NOSUCHSIGNAL") == 2 &&
+        shell__execute_line(&state, "trap 'x' KILL") == 2 && shell__execute_line(&state, "trap 'x' 9") == 2 &&
+        shell__execute_line(&state, "trap 'shell_test_probe exit-trap' EXIT") == 0;
+    shell_builtins__fire_exit_trap(&state);
+    ok = ok && strcmp(s_probe_arg, "exit-trap") == 0;
+    memset(s_probe_arg, 0, sizeof(s_probe_arg));
+    /* trap_exit_fired guards against a second run for this same state. */
+    shell_builtins__fire_exit_trap(&state);
+    ok = ok && s_probe_arg[0] == '\0';
+    /* "trap - EXIT" resets the slot back to the default -- a later fire (on
+     * a state that hasn't already fired) then does nothing at all. */
+    state.trap_exit_fired = false;
+    ok = ok && shell__execute_line(&state, "trap - EXIT") == 0;
+    shell_builtins__fire_exit_trap(&state);
+    ok = ok && s_probe_arg[0] == '\0';
+    shell__state_free(&state);
+
+    /* An EXIT trap that doesn't itself call `exit` never overrides the
+     * status this run was already ending with. */
+    shell_state_t status_state;
+    shell__state_init(&status_state);
+    ok = ok && shell__execute_line(&status_state, "trap 'shell_test_probe ran' EXIT") == 0 &&
+         shell__execute_line(&status_state, "exit 7") == 7;
+    shell_builtins__fire_exit_trap(&status_state);
+    ok = ok && status_state.exit_status == 7 && strcmp(s_probe_arg, "ran") == 0;
+    shell__state_free(&status_state);
+
+    /* ...but an EXIT trap that *does* call `exit` itself overrides that
+     * status -- matching bash. */
+    shell_state_t override_state;
+    shell__state_init(&override_state);
+    ok = ok && shell__execute_line(&override_state, "trap 'exit 5' EXIT") == 0 &&
+         shell__execute_line(&override_state, "exit 3") == 3;
+    shell_builtins__fire_exit_trap(&override_state);
+    ok = ok && override_state.exit_status == 5;
+    shell__state_free(&override_state);
+
+    /* `trap '' SIGSPEC` ("ignore") is distinct from never setting a trap at
+     * all: it's still "set" (non-NULL, so it shows up in `trap`'s listing
+     * and clearing it later with "trap - SIGSPEC" is meaningful) but firing
+     * it runs nothing. */
+    shell_state_t ignore_state;
+    shell__state_init(&ignore_state);
+    memset(s_probe_arg, 0, sizeof(s_probe_arg));
+    ok = ok && shell__execute_line(&ignore_state, "trap '' EXIT") == 0;
+    shell_builtins__fire_exit_trap(&ignore_state);
+    ok = ok && s_probe_arg[0] == '\0' && ignore_state.trap_exit != NULL && ignore_state.trap_exit[0] == '\0';
+    shell__state_free(&ignore_state);
+
+    /* -- Black-box: a real spawned "-c" process actually reaches
+     * shell_app_main()'s own exit point. */
+    ok = ok && selftest__shell_trap_exit_probe("-c \"trap 'shell_test_probe fired' EXIT; true\"", 0) &&
+         strcmp(s_probe_arg, "fired") == 0 &&
+         selftest__shell_trap_exit_probe("-c \"trap 'exit 5' EXIT; exit 3\"", 5);
+
+    /* -- "trap" (bare) listing format, bash's own "trap -- 'ACTION' SIGSPEC"
+     * per line -- needs a real spawned process to capture stdout from. */
+    bruce_stdio_session_t list_session = BRUCE_STDIO_SESSION_INVALID;
+    ok = ok && stdio__session_create(&list_session) == BRUCE_OK &&
+         stdio__session_route_children(list_session) == BRUCE_OK;
+    int list_launched =
+        ok ? app_runner__run("shell", "-c \"trap 'echo hi' INT; trap\"", BRUCE_LAUNCH_BACKGROUND) : 0;
+    (void)stdio__session_route_children(BRUCE_STDIO_SESSION_INVALID);
+    bruce_process_status_t list_status;
+    ok = ok && list_launched > 0 &&
+         process__wait_status((bruce_process_id_t)list_launched, 2000, &list_status) == BRUCE_OK &&
+         list_status.reason == BRUCE_PROCESS_EXITED && list_status.exit_code == 0;
+    char list_output[128] = {0};
+    size_t list_output_size = 0;
+    (void)stdio__session_read_output(list_session, list_output, sizeof(list_output) - 1, &list_output_size);
+    (void)stdio__session_close(list_session);
+    ok = ok && strstr(list_output, "trap -- 'echo hi' INT") != NULL;
+
+    /* -- A live INT signal at the idle prompt: shell_app.c's own handler
+     * runs the trapped action instead of the default "^C, fresh prompt" --
+     * the shell keeps running afterward (nothing here calls exit), and a
+     * later line still runs normally. */
+    bruce_stdio_session_t session = BRUCE_STDIO_SESSION_INVALID;
+    ok = ok && stdio__session_create(&session) == BRUCE_OK && stdio__session_route_children(session) == BRUCE_OK;
+    shell_console__reset_ready();
+    int launched = ok ? app_runner__run("shell", "-i", BRUCE_LAUNCH_BACKGROUND) : 0;
+    (void)stdio__session_route_children(BRUCE_STDIO_SESSION_INVALID);
+    ok = ok && launched > 0;
+    if (ok) {
+        bruce_process_id_t shell_id = (bruce_process_id_t)launched;
+        uint64_t started = runtime__now();
+        while (!shell_console__is_ready() && runtime__now() - started < 1000) (void)runtime__delay(5);
+        /* The second line is itself a shell_test_probe call (not `echo`) so
+         * this can be confirmed via s_probe_calls/s_probe_arg -- the same
+         * way selftest__run_shell_history_multiline_case confirms a
+         * multi-line block actually ran -- instead of scraping raw session
+         * output for a marker. That raw output is mostly per-keystroke ANSI
+         * redraw noise (the console redraws the whole prompt+line on every
+         * character), easily hundreds of bytes for even a short line, so a
+         * fixed-size capture buffer can fill with redraw noise before the
+         * actual command output ever appears in it. */
+        static const char set_trap[] =
+            "trap 'shell_test_probe int-trapped' INT\nshell_test_probe trap-set-confirmed\n";
+        s_probe_calls = 0;
+        memset(s_probe_arg, 0, sizeof(s_probe_arg));
+        ok = shell_console__is_ready() &&
+             stdio__session_write_input(session, set_trap, strlen(set_trap)) == BRUCE_OK;
+
+        /* Keep draining the session's output while the shell echoes and runs
+         * this line: stdio__session_push_output_byte() blocks (busy-waits)
+         * once the fixed-size output buffer fills, so a child that's still
+         * echoing keystrokes would otherwise stall forever mid-line if
+         * nobody ever reads its output (see the history/multiline case's
+         * own comment on this same hazard). The drained bytes themselves are
+         * discarded -- s_probe_calls is the actual signal being waited on. */
+        char drain[256];
+        size_t drain_size = 0;
+        uint64_t wait_start = runtime__now();
+        while (ok && s_probe_calls == 0 && runtime__now() - wait_start < 3000) {
+            (void)stdio__session_read_output(session, drain, sizeof(drain), &drain_size);
+            (void)runtime__delay(10);
+        }
+        ok = ok && s_probe_calls == 1 && strcmp(s_probe_arg, "trap-set-confirmed") == 0;
+        memset(s_probe_arg, 0, sizeof(s_probe_arg));
+
+        ok = ok && process__signal(shell_id, BRUCE_PROCESS_SIGNAL_INT) == BRUCE_OK;
+        if (ok) (void)runtime__delay(100);
+        bruce_process_status_t status;
+        bruce_result_t wait_result = process__wait_status(shell_id, 0, &status);
+        /* Still running -- the trap ran instead of ending the shell. */
+        ok = ok && wait_result == BRUCE_ERR_TIMEOUT && strcmp(s_probe_arg, "int-trapped") == 0;
+        static const char exit_line[] = "exit\n";
+        ok = ok && stdio__session_write_input(session, exit_line, strlen(exit_line)) == BRUCE_OK;
+        ok = ok && process__wait_status(shell_id, 2000, &status) == BRUCE_OK &&
+             status.reason == BRUCE_PROCESS_EXITED && status.exit_code == 0;
+    }
+    (void)stdio__session_close(session);
+
+    /* -- Same live signal, but consulted from
+     * shell_compound__loop_should_stop() instead of the idle prompt: an INT
+     * trap that calls `exit` is what finally ends a "while true" loop that
+     * would otherwise never stop on its own. */
+    int loop_launched = app_runner__run(
+        "shell", "-c \"trap 'exit 42' INT; while true; do :; done\"", BRUCE_LAUNCH_BACKGROUND
+    );
+    ok = ok && loop_launched > 0;
+    if (ok) {
+        (void)runtime__delay(100); /* let the loop actually start spinning */
+        bruce_process_id_t loop_id = (bruce_process_id_t)loop_launched;
+        bruce_process_status_t loop_status;
+        ok = ok && process__signal(loop_id, BRUCE_PROCESS_SIGNAL_INT) == BRUCE_OK &&
+             process__wait_status(loop_id, 2000, &loop_status) == BRUCE_OK &&
+             loop_status.reason == BRUCE_PROCESS_EXITED && loop_status.exit_code == 42;
+    }
+
+    printf("[selftest] shell/trap: %s\n", ok ? "OK" : "failed");
+    return ok;
+}

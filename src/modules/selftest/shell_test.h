@@ -32,3 +32,4 @@ bool selftest__run_shell_history_multiline_case(void);
 bool selftest__run_shell_jobs_case(void);
 bool selftest__run_shell_kill_case(void);
 bool selftest__run_shell_job_control_case(void);
+bool selftest__run_shell_trap_case(void);

@@ -11,6 +11,7 @@
 #include "core_sdk/environment.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
+#include "shell_compound.h"
 #include "shell_condition.h"
 #include "shell_parser.h"
 #include "shell_executor.h"
@@ -52,6 +53,7 @@ static const shell_builtin_entry_t s_shell_builtins[] = {
     {"fg", "Bring a background job to the foreground"},
     {"bg", "Resume a paused job in the background"},
     {"disown", "Stop tracking a job without touching it"},
+    {"trap", "Run a command when a signal is received or the shell exits"},
 };
 
 static int shell_builtins__find_index(const shell_state_t *state, const char *name) {
@@ -365,6 +367,165 @@ static int shell_builtins__local(shell_state_t *state, int argc, char **argv) {
     return 0;
 }
 
+/* The three trap slots this shell tracks -- see state->trap_exit/trap_int/
+ * trap_term in shell_internal.h. EXIT is bash's own pseudo-signal name for
+ * "this shell/script run is ending", not a real bruce_process_signal_t. */
+typedef enum {
+    SHELL_TRAP_EXIT,
+    SHELL_TRAP_INT,
+    SHELL_TRAP_TERM,
+} shell_trap_kind_t;
+
+/* Resolves a `trap` SIGSPEC to one of the three slots above: "EXIT" or "0"
+ * for the pseudo-signal, or INT/TERM by name (optional "SIG" prefix,
+ * case-insensitive) or number -- the same acceptance
+ * shell_jobs__parse_signal() gives `kill`'s SIGSPEC. KILL is deliberately
+ * never accepted here: it isn't catchable by a real process either, so
+ * `trap ... KILL` has nothing to hook -- rejected the same way bash's own
+ * trap rejects it. */
+static bool shell_builtins__parse_trap_signal(const char *text, shell_trap_kind_t *out_kind) {
+    if (text == NULL || text[0] == '\0') return false;
+    if (strcmp(text, "0") == 0) {
+        *out_kind = SHELL_TRAP_EXIT;
+        return true;
+    }
+    const char *name = text;
+    if (strncasecmp(name, "SIG", 3) == 0 && name[3] != '\0') name += 3;
+    if (strcasecmp(name, "EXIT") == 0) {
+        *out_kind = SHELL_TRAP_EXIT;
+        return true;
+    }
+    if (strcasecmp(name, "INT") == 0) {
+        *out_kind = SHELL_TRAP_INT;
+        return true;
+    }
+    if (strcasecmp(name, "TERM") == 0) {
+        *out_kind = SHELL_TRAP_TERM;
+        return true;
+    }
+    char *end = NULL;
+    long value = strtol(text, &end, 10);
+    if (end == text || *end != '\0') return false;
+    if (value == BRUCE_PROCESS_SIGNAL_INT) {
+        *out_kind = SHELL_TRAP_INT;
+        return true;
+    }
+    if (value == BRUCE_PROCESS_SIGNAL_TERM) {
+        *out_kind = SHELL_TRAP_TERM;
+        return true;
+    }
+    return false;
+}
+
+static const char *shell_builtins__trap_name(shell_trap_kind_t kind) {
+    switch (kind) {
+        case SHELL_TRAP_EXIT: return "EXIT";
+        case SHELL_TRAP_INT: return "INT";
+        case SHELL_TRAP_TERM: return "TERM";
+    }
+    return "";
+}
+
+static char **shell_builtins__trap_slot(shell_state_t *state, shell_trap_kind_t kind) {
+    switch (kind) {
+        case SHELL_TRAP_EXIT: return &state->trap_exit;
+        case SHELL_TRAP_INT: return &state->trap_int;
+        case SHELL_TRAP_TERM: return &state->trap_term;
+    }
+    return NULL;
+}
+
+/* `trap` (bare): lists every trap currently set, bash's own "trap -p"
+ * format ("trap -- 'ACTION' SIGSPEC" per line) -- a slot that's NULL (no
+ * trap set, the default disposition) is skipped entirely, but one that's ""
+ * (explicitly ignored via `trap '' SIGSPEC`) is still listed, matching
+ * bash's own distinction between the two.
+ * `trap -l`: lists the signal names this trap implementation understands.
+ * `trap ACTION SIGSPEC...`: sets ACTION (run through shell_compound__run()
+ * verbatim when the trap fires) for every SIGSPEC given; ACTION == "-"
+ * resets those slots back to the default instead of setting a literal "-"
+ * action, matching bash. */
+static int shell_builtins__trap(shell_state_t *state, int argc, char **argv) {
+    if (argc == 1) {
+        static const shell_trap_kind_t kinds[] = {SHELL_TRAP_EXIT, SHELL_TRAP_INT, SHELL_TRAP_TERM};
+        for (size_t i = 0; i < sizeof(kinds) / sizeof(kinds[0]); ++i) {
+            char **slot = shell_builtins__trap_slot(state, kinds[i]);
+            if (*slot == NULL) continue;
+            stdio__printf("trap -- '%s' %s\n", *slot, shell_builtins__trap_name(kinds[i]));
+        }
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "-l") == 0) {
+        stdio__printf("EXIT\nINT\nTERM\n");
+        return 0;
+    }
+    if (argc < 3) {
+        stdio__printf("shell: trap: usage: trap [-l] [ACTION SIGSPEC...]\n");
+        return 2;
+    }
+    const char *action = argv[1];
+    bool reset = strcmp(action, "-") == 0;
+    for (int i = 2; i < argc; ++i) {
+        shell_trap_kind_t kind;
+        if (!shell_builtins__parse_trap_signal(argv[i], &kind)) {
+            stdio__printf("shell: trap: %s: invalid signal specification\n", argv[i]);
+            return 2;
+        }
+        char **slot = shell_builtins__trap_slot(state, kind);
+        memory__free(*slot);
+        if (reset) {
+            *slot = NULL;
+            continue;
+        }
+        *slot = shell_builtins__dup(action, strlen(action));
+        if (*slot == NULL) {
+            stdio__printf("shell: out of memory\n");
+            return 1;
+        }
+    }
+    return 0;
+}
+
+void shell_builtins__fire_exit_trap(shell_state_t *state) {
+    if (state->trap_exit_fired || state->trap_exit == NULL || state->trap_exit[0] == '\0') {
+        state->trap_exit_fired = true;
+        return;
+    }
+    state->trap_exit_fired = true;
+    bool was_exit_requested = state->exit_requested;
+    int saved_status = state->exit_status;
+    /* Cleared so shell_compound__run_sequence() actually executes the trap
+     * body instead of immediately unwinding as if this run were still
+     * ending from whatever set exit_requested before this call. */
+    state->exit_requested = false;
+    (void)shell_compound__run(state, state->trap_exit, NULL, 0);
+    if (!state->exit_requested) {
+        /* The trap action didn't itself call `exit` -- restore the status
+         * this run was already ending with before the trap fired. */
+        state->exit_requested = was_exit_requested;
+        state->exit_status = saved_status;
+    }
+    /* else: the trap action called `exit M` itself -- exit_requested/
+     * exit_status already hold that, exactly the override bash gives an
+     * EXIT trap that calls exit. */
+}
+
+bool shell_builtins__fire_signal_trap(shell_state_t *state, bruce_process_signal_t signal) {
+    shell_trap_kind_t kind;
+    if (signal == BRUCE_PROCESS_SIGNAL_INT) {
+        kind = SHELL_TRAP_INT;
+    } else if (signal == BRUCE_PROCESS_SIGNAL_TERM) {
+        kind = SHELL_TRAP_TERM;
+    } else {
+        return false;
+    }
+    char **slot = shell_builtins__trap_slot(state, kind);
+    if (*slot == NULL) return false;
+    (void)process__clear_signal();
+    if ((*slot)[0] != '\0') (void)shell_compound__run(state, *slot, NULL, 0);
+    return true;
+}
+
 bool shell_builtins__is_builtin(const char *name) {
     for (size_t i = 0; i < sizeof(s_shell_builtins) / sizeof(s_shell_builtins[0]); ++i) {
         if (strcmp(name, s_shell_builtins[i].name) == 0) return true;
@@ -606,6 +767,7 @@ int shell_builtins__run(shell_state_t *state, int argc, char **argv) {
     if (strcmp(argv[0], "fg") == 0) return shell_jobs__fg(state, argc, argv);
     if (strcmp(argv[0], "bg") == 0) return shell_jobs__bg(state, argc, argv);
     if (strcmp(argv[0], "disown") == 0) return shell_jobs__disown(state, argc, argv);
+    if (strcmp(argv[0], "trap") == 0) return shell_builtins__trap(state, argc, argv);
     /* "time" is intercepted in shell_executor__dispatch() before it ever
      * reaches here (it needs to wrap the function/builtin/external dispatch
      * itself), so it's listed for documentation purposes only -- this branch

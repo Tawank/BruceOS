@@ -712,9 +712,20 @@ static bool shell_compound__loop_should_stop(shell_state_t *state) {
     if (state->exit_requested || state->return_requested) return true;
     bruce_process_signal_t signal = process__current_signal();
     if (signal != 0) {
-        state->exit_requested = true;
-        state->exit_status = 128 + (int)signal;
-        return true;
+        if (shell_builtins__fire_signal_trap(state, signal)) {
+            /* A trap ran (or the signal is explicitly ignored via `trap ''
+             * SIGSPEC`) instead of this loop's own default "signal ends the
+             * whole script" handling below -- but the trap action may have
+             * called `exit` itself, which should still end this loop the
+             * same way an untrapped signal would. (A trap calling
+             * break/continue isn't specially handled here -- an edge case
+             * out of scope for this implementation.) */
+            if (state->exit_requested || state->return_requested) return true;
+        } else {
+            state->exit_requested = true;
+            state->exit_status = 128 + (int)signal;
+            return true;
+        }
     }
     (void)runtime__delay(0); /* cooperative yield -- see the .c file's header comment on busy for/while bodies */
     return false;

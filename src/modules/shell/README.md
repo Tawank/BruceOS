@@ -147,6 +147,35 @@ of this so it gets the literal `^C` byte instead.
 the interactive shell (with the last command's exit status); on a non-empty
 line it just deletes the character under the cursor, like Delete.
 
+**`trap ACTION SIGSPEC...`** -- runs ACTION (a shell command string, run
+through the normal parser/executor exactly as typed) when SIGSPEC fires.
+SIGSPEC is `EXIT`/`0`, or `INT`/`TERM` by name (optional `SIG` prefix,
+case-insensitive) or number (`2`/`15`) -- same convention `kill`'s own
+signal spec already uses. `KILL`/`9` is rejected (`invalid signal
+specification`), not silently accepted: it isn't catchable, matching real
+`kill(2)`/`trap`. `ACTION` of `-` resets SIGSPEC back to the default
+disposition instead of setting a literal `-` action; `''` (empty string) is
+"set but do nothing" -- distinct from never trapping at all, since it still
+shows up in a bare `trap`'s listing and a later `trap - SIGSPEC` on it is
+meaningful. A bare `trap` lists every currently-set trap, one per line, in
+bash's own `trap -- 'ACTION' SIGSPEC` format; `trap -l` lists the three
+recognized names. The `EXIT` trap fires exactly once, right when this
+shell's own run actually ends -- falling off the end of a script, an
+interactive session's last prompt (Ctrl+D or the `exit` builtin), or a `-c`
+command finishing -- whichever one of those applies. If the `EXIT` trap
+itself calls `exit N`, that overrides the run's real exit status, the same
+override bash does; if it doesn't, the real status stands. `INT`/`TERM`
+traps fire wherever this shell already polls for a live signal: the idle
+prompt between commands, and each iteration of a `while`/`until`/`for` loop
+(`shell_compound__loop_should_stop()`) -- **not** while a plain foreground
+external command is running outside of a loop, since `shell_executor__wait()`
+has no `shell_state_t*` to consult and so has no way to know a trap exists;
+an untrapped INT/TERM there still gets the old default handling (relayed to
+the child, or ending this shell). Threading trap state through
+`shell_executor__wait()` would be a larger refactor, out of scope here. A
+trap action that itself runs `break`/`continue` isn't specially unwound
+back into the loop it interrupted -- an edge case left unhandled.
+
 **Builtins** (`shell_builtins.c`)
 - `echo`, `true`, `false`, `cd`, `set`, `unset`, `export`, `local`, `clear`,
   `reset`, `help`, `exit [N]`.
@@ -516,3 +545,21 @@ directory), `..._read_case`, `..._stdio_inheritance_case`,
 (Ctrl+D on the shell's own prompt, ending the shell -- not to be confused
 with `..._cat_interactive_case`'s Ctrl+D, which ends a child's stdin read
 instead).
+
+`..._trap_case` covers `trap`: bare `trap`/`trap -l`, rejecting an unknown
+or untrappable (`KILL`, by name or number) signal spec, an `EXIT` trap
+firing exactly once and `trap_exit_fired` guarding a second fire on the same
+`shell_state_t`, `trap - EXIT` resetting the slot, an `EXIT` trap that
+doesn't itself call `exit` never overriding the run's real status versus one
+that does overriding it (matching bash), `trap '' SIGSPEC` being "set but
+does nothing" (distinct from never trapping), a real spawned `-c` process
+actually reaching `shell_app_main()`'s own exit point for its `EXIT` trap,
+`trap`'s bare-listing output format (`trap -- 'ACTION' SIGSPEC`), a live
+`INT` signal at the idle prompt of a real interactive session running the
+trapped action instead of the default "^C, fresh prompt" (confirmed via a
+`shell_test_probe` call, not by scraping the session's raw output -- that's
+mostly per-keystroke ANSI redraw noise, easily large enough to fill a fixed
+capture buffer before the text of interest ever appears in it), and the same
+live signal consulted from `shell_compound__loop_should_stop()` instead,
+where an `INT` trap that calls `exit` is what finally ends a `while true`
+loop that would otherwise never stop on its own.
