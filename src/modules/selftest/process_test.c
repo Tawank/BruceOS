@@ -172,6 +172,64 @@ bool selftest__run_process_registry_growth_case(void) {
     return ok;
 }
 
+static int selftest__worker_instant_exit(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    return 0;
+}
+
+/* Polls until `id`'s process record itself is gone (process__snapshot()
+ * starts returning BRUCE_ERR_NOT_FOUND) -- i.e. it has fully exited and its
+ * exit status has been published -- without ever calling process__wait()/
+ * process__wait_status() on it. That's the point: this proves a completion
+ * survives sitting unconsumed while unrelated processes exit around it,
+ * without the act of synchronizing on it via wait itself being what keeps
+ * it alive. */
+static bool selftest__wait_for_process_gone(bruce_process_id_t id) {
+    bruce_process_snapshot_t snapshot;
+    for (int spins = 0; spins < 500; ++spins) {
+        if (process__snapshot(id, &snapshot) != BRUCE_OK) return true;
+        runtime__delay(2);
+    }
+    return false;
+}
+
+/* Regression test for a real completion-pool bug: process__publish_completion_locked()
+ * used to recycle any completion nobody was *currently blocked* waiting on
+ * the moment a fresh one needed a slot -- but "nobody is blocked right now"
+ * is not the same as "nobody will ever call wait for it," which is in fact
+ * the common background-job pattern (background it, do other things, wait
+ * for it later). Two quick, unrelated processes exiting back to back with
+ * nobody actively waiting on either was enough to silently and permanently
+ * evict the first one's exit status before anyone ever asked for it -- see
+ * process.c's PROCESS__COMPLETION_POOL_SOFT_MAX for the fix. */
+bool selftest__run_process_completion_retention_case(void) {
+    process_create_params_t params = {
+        .name = "selftest_instant",
+        .entry = selftest__worker_instant_exit,
+        .built_in = true,
+        .start_in_background = true,
+        .stack_bytes = 2048,
+    };
+
+    bruce_process_id_t first = BRUCE_PROCESS_ID_INVALID;
+    bool ok = process_registry__create(&params, &first) == BRUCE_OK;
+    ok = ok && selftest__wait_for_process_gone(first);
+
+    bruce_process_id_t second = BRUCE_PROCESS_ID_INVALID;
+    ok = ok && process_registry__create(&params, &second) == BRUCE_OK;
+    ok = ok && selftest__wait_for_process_gone(second);
+
+    /* `first`'s completion must still be retrievable: `second` exiting after
+     * it, with nobody having waited on either yet, must not have evicted it. */
+    bruce_process_status_t status;
+    ok = ok && process__wait_status(first, 0, &status) == BRUCE_OK && status.reason == BRUCE_PROCESS_EXITED;
+    ok = ok && process__wait_status(second, 0, &status) == BRUCE_OK && status.reason == BRUCE_PROCESS_EXITED;
+
+    printf("[selftest] process/completion-retention: %s\n", ok ? "OK" : "FAIL");
+    return ok;
+}
+
 bool selftest__run_process_resource_growth_case(void) {
     s_resource_cleanup_count = 0;
     process_create_params_t params = {

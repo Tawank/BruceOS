@@ -36,6 +36,18 @@ static process__completion_t *s_completions;
 static bruce_process_id_t s_next_process_id = 1;
 static uint64_t s_next_completion_sequence = 1;
 
+/* Below this many tracked completions, publishing one always allocates a new
+ * slot rather than recycling an existing, not-yet-consumed one -- see
+ * process__publish_completion_locked()'s own comment for why reusing too
+ * eagerly is a real correctness bug, not just a cache-efficiency tradeoff.
+ * Only once the pool has grown to this size does it fall back to recycling
+ * the oldest unconsumed entry, bounding worst-case memory the same way the
+ * unconditional-reuse logic used to (e.g. a script that backgrounds
+ * processes in a loop and never waits for any of them). 32 comfortably
+ * covers realistic concurrent usage app-wide (shell job tables alone cap at
+ * SHELL__MAX_JOBS == 8 per shell) while still bounding a pathological case. */
+#define PROCESS__COMPLETION_POOL_SOFT_MAX 32u
+
 static process__record_t *s_fg_head;
 process__record_t *s_fg_tail;
 bruce_process_id_t s_effective_foreground;
@@ -206,25 +218,62 @@ void process__dispose_if_unused_locked(process__record_t *record) {
 }
 
 /* Caller must hold the lock. Pinned completions allocate independently so a
- * large set of simultaneous status waiters cannot prevent process teardown. */
+ * large set of simultaneous status waiters cannot prevent process teardown.
+ *
+ * "waiter_pins > 0" only means "someone is *currently blocked* waiting for
+ * this status right now" -- it says nothing about a completion nobody has
+ * asked for yet, which is actually the common case: the usual pattern is
+ * "background a job, do other things, wait/poll for it later," not "block
+ * on it the instant it exits." An unpinned completion can therefore still
+ * be exactly what a future process__wait_status() call needs. Reusing it
+ * for a *different*, unrelated process's exit the moment the pool has no
+ * fully-free slot -- as this used to do unconditionally -- silently and
+ * permanently destroys that still-wanted status: the owning process__record_t
+ * is already gone by the time this runs (see process__teardown_locked()),
+ * so once its completion is overwritten there is no other copy anywhere,
+ * and every later wait on it fails with BRUCE_ERR_NOT_FOUND forever. Two
+ * background jobs finishing close together with nobody actively blocked on
+ * either one (shell_jobs__poll()'s non-blocking style, not a blocking
+ * "wait") was enough to reproduce this: the earlier job's completion got
+ * evicted by the later job's exit before "wait"/"jobs" ever got to it,
+ * leaving it stuck in the shell's job table forever.
+ *
+ * So: prefer growing the pool over recycling anything not yet consumed,
+ * same as the always-safe "everyone is pinned" case below already does,
+ * up to PROCESS__COMPLETION_POOL_SOFT_MAX entries. Only past that size --
+ * a pathological case, e.g. a script that backgrounds processes in a loop
+ * and never waits for any of them -- does it fall back to recycling the
+ * oldest still-unpinned entry, the same lossy-but-bounded tradeoff as
+ * before, just far less eagerly. */
 static void
 process__publish_completion_locked(process__record_t *record, const bruce_process_status_t *status) {
     process__completion_t *target = NULL;
+    process__completion_t *oldest_unpinned = NULL;
+    size_t pool_size = 0;
     for (process__completion_t *completion = s_completions; completion != NULL;
          completion = completion->next) {
+        ++pool_size;
         if (!completion->in_use) {
             target = completion;
             break;
         }
-        if (completion->waiter_pins == 0 && (target == NULL || completion->sequence < target->sequence)) {
-            target = completion;
+        if (completion->waiter_pins == 0 &&
+            (oldest_unpinned == NULL || completion->sequence < oldest_unpinned->sequence)) {
+            oldest_unpinned = completion;
         }
     }
+    if (target == NULL && pool_size >= PROCESS__COMPLETION_POOL_SOFT_MAX) { target = oldest_unpinned; }
     if (target == NULL) {
         target = calloc(1, sizeof(*target));
-        if (target == NULL) return;
-        target->next = s_completions;
-        s_completions = target;
+        if (target != NULL) {
+            target->next = s_completions;
+            s_completions = target;
+        } else {
+            /* Allocation failed: fall back to recycling the oldest unpinned
+             * entry (if any) rather than dropping this exit status outright. */
+            target = oldest_unpinned;
+            if (target == NULL) return;
+        }
     }
 
     target->in_use = true;

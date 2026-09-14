@@ -105,6 +105,7 @@ static const selftest__case_t selftest__cases[] = {
     SELFTEST_CASE(selftest__run_process_killed_case),
     SELFTEST_CASE(selftest__run_process_clear_signal_case),
     SELFTEST_CASE(selftest__run_process_registry_growth_case),
+    SELFTEST_CASE(selftest__run_process_completion_retention_case),
     SELFTEST_CASE(selftest__run_process_resource_growth_case),
     SELFTEST_CASE(selftest__run_runtime_now_case),
     SELFTEST_CASE(selftest__run_runtime_timer_case),
