@@ -650,6 +650,89 @@ bool selftest__run_shell_loops_case(void) {
         0,
         "start"
     );
+    /* continue inside a for-loop's body skips the rest of *that* iteration
+     * only -- the loop itself keeps going, unlike break. */
+    ok = selftest__shell_loops_step(
+        ok,
+        &state,
+        "sum=0; for n in 1 2 3 4 5; do if [ $n -eq 3 ]; then continue; fi; (( sum += n )); done; "
+        "shell_test_probe $sum",
+        0,
+        "12"
+    );
+    /* continue in a C-style for-loop still runs the loop's own increment
+     * clause before re-testing its condition -- if it didn't, skipping i=2
+     * this way would spin forever instead of finishing at i=5. */
+    ok = selftest__shell_loops_step(
+        ok,
+        &state,
+        "count=0; for ((i=0; i<5; i++)); do if [ $i -eq 2 ]; then continue; fi; (( count++ )); done; "
+        "shell_test_probe $count",
+        0,
+        "4"
+    );
+    /* continue N unwinds N-1 enclosing loops on its way out, then continues
+     * the Nth (target) loop's next iteration rather than stopping it --
+     * here, "continue 2" from inside the inner loop skips straight to the
+     * outer loop's next `i`, without the inner loop's j=3 ever running. */
+    ok = selftest__shell_loops_step(
+        ok,
+        &state,
+        "result=; for i in 1 2 3; do for j in 1 2 3; do if [ $j -eq 2 ]; then continue 2; fi; "
+        "result=\"$result$i-$j \"; done; done; shell_test_probe \"$result\"",
+        0,
+        "1-1 2-1 3-1 "
+    );
+    /* A stray continue outside any loop is reported, not silently treated as
+     * an "unexpected token" (or worse, left to desync the next run()). */
+    ok = selftest__shell_loops_step(ok, &state, "continue", 0, NULL);
+    /* return, bare, uses $?'s value going in (here, `true`'s 0) and stops
+     * the function immediately -- the "unreached" probe after it never
+     * runs, leaving the sentinel arg set just before the call untouched. */
+    ok = selftest__shell_loops_step(ok, &state, "shell_test_probe sentinel", 0, "sentinel");
+    ok = selftest__shell_loops_step(
+        ok, &state, "retbare() { true; return; shell_test_probe unreached; }; retbare", 0, "sentinel"
+    );
+    /* return N reports that exact status instead. */
+    ok = selftest__shell_loops_step(ok, &state, "retval() { return 7; }; retval", 7, NULL);
+    /* A return nested inside a loop/if unwinds straight out of the whole
+     * function -- not just that loop -- so neither the loop's later
+     * iterations (n=3's probe) nor anything after the loop ("unreached")
+     * ever run: the last probe call is still n=1's. */
+    ok = selftest__shell_loops_step(
+        ok,
+        &state,
+        "retloop() { for n in 1 2 3; do if [ $n -eq 2 ]; then return 5; fi; shell_test_probe $n; done; "
+        "shell_test_probe unreached; }; retloop",
+        5,
+        "1"
+    );
+    /* ...but the *caller's* own next statement still runs: the unwind stops
+     * exactly at the call boundary, not one level further out. */
+    ok = selftest__shell_loops_step(ok, &state, "retloop; shell_test_probe after", 0, "after");
+    /* A bare return outside any function call is rejected outright, matching
+     * bash's "return: can only `return' from a function". */
+    ok = selftest__shell_loops_step(ok, &state, "return", 1, NULL);
+    /* shift, bare (N=1 default), drops $1 and shifts $2.. down, updating $#
+     * to match. */
+    ok = selftest__shell_loops_step(
+        ok, &state, "shiftone() { shift; shell_test_probe \"$1:$#\"; }; shiftone a b c", 0, "b:2"
+    );
+    /* shift N drops the first N. */
+    ok = selftest__shell_loops_step(
+        ok, &state, "shifttwo() { shift 2; shell_test_probe \"$1:$#\"; }; shifttwo a b c d", 0, "c:2"
+    );
+    /* shift 0 is a no-op. */
+    ok = selftest__shell_loops_step(
+        ok, &state, "shiftzero() { shift 0; shell_test_probe \"$1:$#\"; }; shiftzero a b", 0, "a:2"
+    );
+    /* Shifting past $# is an error (bash's "shift count out of range") ... */
+    ok = selftest__shell_loops_step(ok, &state, "shiftbig() { shift 5; }; shiftbig a b", 1, NULL);
+    /* ...that leaves the positional parameters untouched rather than
+     * partially shifting or corrupting them. */
+    ok = selftest__shell_loops_step(
+        ok, &state, "shiftbig2() { shift 5; shell_test_probe \"$#\"; }; shiftbig2 a b", 0, "2"
+    );
     /* Malformed constructs are reported, not silently misparsed. */
     ok = selftest__shell_loops_step(ok, &state, "for x in a b", 2, NULL);
     ok = selftest__shell_loops_step(ok, &state, "while true; do echo hi", 2, NULL);

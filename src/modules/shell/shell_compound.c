@@ -258,17 +258,19 @@ static int shell_compound__run_while(shell_state_t *state, const shell_plan_t *p
 static int shell_compound__run_case(shell_state_t *state, const shell_plan_t *plan, size_t *index, bool execute);
 
 /* A run_sequence() pass that was actually executing can stop early, part
- * way through the statements it was walking, because a "break" or "exit"
- * fired inside them (see shell_state_t.break_requested/exit_requested) --
- * leaving *index short of the then/elif/else/fi/do/done boundary it would
- * otherwise have reached. Callers that go on to inspect *index's classify()
- * right after such a call (run_if's then/fi checks below, chiefly) call
- * this first: a non-executing pass can never itself stop early (nothing it
- * does can set either flag), so it always finishes walking to the real
- * boundary, without re-running anything or emitting a second, spurious
- * "missing ..." error over the interrupted one. */
+ * way through the statements it was walking, because a "break"/"continue"/
+ * "return"/"exit" fired inside them (see shell_state_t.break_requested/
+ * continue_requested/return_requested/exit_requested) -- leaving *index
+ * short of the then/elif/else/fi/do/done boundary it would otherwise have
+ * reached. Callers that go on to inspect *index's classify() right after
+ * such a call (run_if's then/fi checks below, chiefly) call this first: a
+ * non-executing pass can never itself stop early (nothing it does can set
+ * any of those flags), so it always finishes walking to the real boundary,
+ * without re-running anything or emitting a second, spurious "missing ..."
+ * error over the interrupted one. */
 static void shell_compound__catch_up(shell_state_t *state, const shell_plan_t *plan, size_t *index, bool was_executing) {
-    if (was_executing && (state->exit_requested || state->break_requested > 0)) {
+    if (was_executing && (state->exit_requested || state->break_requested > 0 || state->continue_requested > 0 ||
+                           state->return_requested)) {
         (void)shell_compound__run_sequence(state, plan, index, false);
     }
 }
@@ -316,9 +318,20 @@ static int shell_compound__run_if(shell_state_t *state, const shell_plan_t *plan
         bool run_branch = cond_execute && have_cond && cond_status == 0;
         if (run_branch) taken = true;
         if (rest_len > 0 && run_branch) status = shell_compound__run_text(state, rest, rest_len);
+        /* body_ran (index actually advancing) distinguishes "this branch had
+         * no further statements past its glued 'then X' -- keep X's own
+         * status" from "it did, so the last one of those wins instead" --
+         * see body_ran's twin in the "else" branch just below for why this
+         * can't just unconditionally take body_status: a return/break/
+         * continue fired by the glued statement above stops run_sequence()
+         * before it consumes anything (index doesn't move), leaving
+         * body_status at its own initial 0 regardless of what the glued
+         * statement's real exit status was. */
+        size_t before_body = *index;
         int body_status = shell_compound__run_sequence(state, plan, index, run_branch);
+        bool body_ran = *index != before_body;
         shell_compound__catch_up(state, plan, index, run_branch);
-        if (run_branch) status = body_status;
+        if (run_branch && body_ran) status = body_status;
 
         if (*index >= plan->count) {
             stdio__printf("shell: if: missing 'fi'\n");
@@ -338,9 +351,12 @@ static int shell_compound__run_if(shell_state_t *state, const shell_plan_t *plan
         bool run_branch = execute && !taken;
         if (run_branch) taken = true;
         if (rest_len > 0 && run_branch) status = shell_compound__run_text(state, rest, rest_len);
+        /* See the "then" branch above for why body_ran gates this. */
+        size_t before_body = *index;
         int body_status = shell_compound__run_sequence(state, plan, index, run_branch);
+        bool body_ran = *index != before_body;
         shell_compound__catch_up(state, plan, index, run_branch);
-        if (run_branch) status = body_status;
+        if (run_branch && body_ran) status = body_status;
     }
 
     if (*index >= plan->count || shell_compound__classify(plan, *index) != SHELL_COMPOUND_FI) {
@@ -366,7 +382,9 @@ static int shell_compound__run_if(shell_state_t *state, const shell_plan_t *plan
  * taken. */
 static int shell_compound__run_sequence(shell_state_t *state, const shell_plan_t *plan, size_t *index, bool execute) {
     int status = 0;
-    while (*index < plan->count && !(execute && (state->exit_requested || state->break_requested > 0))) {
+    while (*index < plan->count &&
+           !(execute && (state->exit_requested || state->break_requested > 0 || state->continue_requested > 0 ||
+                         state->return_requested))) {
         /* A ";;"-tagged entry belongs to an *enclosing* case's next clause
          * (or is "esac" itself), never to whatever body is currently being
          * walked -- checked ahead of classify() since the entry's own text
@@ -658,15 +676,33 @@ static void shell_compound__restore_do(const shell_plan_t *plan, const shell_com
 }
 
 /* True if this iteration should stop the loop: a break (consuming one
- * level) or an exit/kill signal (translated into exit_requested, same as
- * shell_app.c's own interactive-read cancellation handling) fired during
- * the iteration just run. */
+ * level), a continue that still has further loop levels to unwind before
+ * reaching its target, a "return" from the enclosing function, or an
+ * exit/kill signal (translated into exit_requested, same as shell_app.c's
+ * own interactive-read cancellation handling) fired during the iteration
+ * just run.
+ *
+ * "continue" is handled here too, not just in run_sequence()/catch_up(),
+ * because reaching 0 does *not* mean "stop" for it the way it does for
+ * break_requested -- it means "this is the target loop; go on to its next
+ * iteration" -- so it needs its own decrement-and-decide step distinct from
+ * break's. Consuming one level per call, the same way break does, is what
+ * lets "continue N" stop N-1 enclosing loops on its way out before letting
+ * the Nth one actually continue. */
 static bool shell_compound__loop_should_stop(shell_state_t *state) {
     if (state->break_requested > 0) {
         state->break_requested--;
         return true;
     }
-    if (state->exit_requested) return true;
+    if (state->continue_requested > 0) {
+        state->continue_requested--;
+        /* Still >0 after decrementing: this isn't the target loop -- stop it
+         * too, so the level count keeps unwinding outward. ==0: this *is*
+         * the target loop, so don't stop -- let it move on to its next
+         * iteration exactly as if the body had simply finished normally. */
+        return state->continue_requested > 0;
+    }
+    if (state->exit_requested || state->return_requested) return true;
     bruce_process_signal_t signal = process__current_signal();
     if (signal != 0) {
         state->exit_requested = true;
@@ -1183,24 +1219,36 @@ int shell_compound__run(shell_state_t *state, const char *text, char *const *her
     }
     size_t index = 0;
     int status = shell_compound__run_sequence(state, &plan, &index, true);
-    /* A "break" that outlives every enclosing for/while loop in this run --
-     * including one with no loop around it at all -- stops here rather than
-     * silently reaching into whatever runs shell_compound__run() next. This
-     * is also the boundary a function call (shell_compound__call_function())
-     * runs its body through, so it doubles as the "break in a function
-     * doesn't reach into the loop that called it" boundary bash itself
-     * enforces. */
+    /* A "break"/"continue" that outlives every enclosing for/while loop in
+     * this run -- including one with no loop around it at all -- stops here
+     * rather than silently reaching into whatever runs shell_compound__run()
+     * next. This is also the boundary a function call
+     * (shell_compound__call_function()) runs its body through, so it
+     * doubles as the "break/continue in a function doesn't reach into the
+     * loop that called it" boundary bash itself enforces. "return" needs no
+     * equivalent stray check here: the `return` builtin already refuses to
+     * set return_requested at all outside a function call (see its own
+     * comment in shell_builtins.c), so it can never outlive this run() the
+     * way break/continue can. */
     bool stray_break = state->break_requested > 0;
     if (stray_break) {
         stdio__printf("shell: break: only meaningful inside a loop\n");
         state->break_requested = 0;
     }
+    bool stray_continue = state->continue_requested > 0;
+    if (stray_continue) {
+        stdio__printf("shell: continue: only meaningful inside a loop\n");
+        state->continue_requested = 0;
+    }
     /* index<plan.count here means run_sequence stopped without reaching the
      * end of the plan -- ordinarily a real syntax problem (an orphaned
      * then/fi/done/"}" left over from a malformed construct), but also
-     * exactly what a mid-plan "exit"/stray "break" leaves behind on
-     * purpose, so those don't get misreported as one. */
-    if (index < plan.count && !state->exit_requested && !stray_break) {
+     * exactly what a mid-plan "exit"/stray "break"/stray "continue"/"return"
+     * leaves behind on purpose, so those don't get misreported as one
+     * (a "return" is still in flight here -- shell_compound__call_function()
+     * hasn't consumed it yet, that happens right after this call returns). */
+    if (index < plan.count && !state->exit_requested && !stray_break && !stray_continue &&
+        !state->return_requested) {
         stdio__printf(
             "shell: unexpected `%.*s'\n", (int)plan.commands[index].length, plan.commands[index].text
         );
@@ -1431,6 +1479,16 @@ int shell_compound__call_function(shell_state_t *state, int argc, char **argv) {
      * top-level shell_compound__run() call in shell_app.c's
      * shell__run_script() currently ever passes real heredoc bodies. */
     int status = shell_compound__run(state, body, NULL, 0);
+
+    /* A "return" inside this call's body unwinds up through any nested
+     * if/loop constructs (see shell_state_t.return_requested's own comment)
+     * but must stop mattering exactly here: this is the call it belongs to,
+     * so it's consumed the instant that call's own body run returns,
+     * exactly the way saved_positional/saved_frame below are restored to
+     * this call's caller regardless of how the body finished. Left set past
+     * this point, it would incorrectly also cut short whatever run_sequence
+     * in the *caller* invoked this function from. */
+    state->return_requested = false;
 
     /* Unwind in reverse declaration order, restoring each localized name to
      * whatever it held just before this call's first "local NAME" -- or

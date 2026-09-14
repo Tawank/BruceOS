@@ -123,6 +123,32 @@ typedef struct {
      * 0 by shell_compound__run(), the same function-call/top-level-line
      * boundary a real bash restricts break's effect to. */
     int break_requested;
+    /* Set by the `continue` builtin to the number of enclosing for/while
+     * loops still left to unwind before reaching the one whose next
+     * iteration should actually run (N for "continue N", 1 for a bare
+     * "continue"). Given exactly the same propagation break_requested gets
+     * through shell_compound__run_sequence()/catch_up() -- both fields are
+     * checked together everywhere either one is -- but consumed
+     * differently once it reaches its target loop: shell_compound__loop_should_stop()
+     * decrements this one too, except reaching 0 means "run this loop's
+     * next iteration" rather than "stop this loop for good". A stray
+     * "continue" outside any loop is caught and reset the same way a stray
+     * "break" is, by shell_compound__run(). */
+    int continue_requested;
+    /* Set by the `return` builtin -- but only while state->local_frame !=
+     * NULL, i.e. only during an active shell_compound__call_function() call
+     * (the same "are we inside a function call right now" signal `local`
+     * already relies on); a bare top-level "return" is rejected immediately
+     * by the builtin itself instead, matching real bash's "return: can only
+     * `return' from a function". Checked alongside exit_requested
+     * everywhere that unwinds nested if/loop constructs
+     * (shell_compound__run_sequence()/catch_up()/loop_should_stop()) so a
+     * "return" deep inside a function's own loops stops them the same way
+     * "exit" would -- but unlike exit_requested, it's consumed one call
+     * frame up from there: shell_compound__call_function() clears it right
+     * after the shell_compound__run() call that ran the function body
+     * returns, so only that one call unwinds, not its own caller too. */
+    bool return_requested;
     /* Last tty__get_size() generation applied to COLUMNS/LINES -- see
      * shell__sync_tty_size in shell_app.c. Starts at 0 (calloc'd), which
      * never equals a real session's generation (tty__set_size always bumps

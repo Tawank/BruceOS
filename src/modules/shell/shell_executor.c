@@ -1766,12 +1766,15 @@ static int shell_executor__command(shell_state_t *state, const shell_command_t *
 
 int shell_executor__plan(shell_state_t *state, const shell_plan_t *plan) {
     int status = state->last_status;
-    /* A "break" mid-batch (e.g. the ";"-joined "break; echo unreached" in
-     * "if x; then break; echo unreached; fi") must stop the rest of this
-     * batch immediately, the same way exit_requested already does -- see
-     * shell_state_t.break_requested and shell_compound__run_for()/
-     * run_while(), which are what actually consume it. */
-    for (size_t i = 0; i < plan->count && !state->exit_requested && state->break_requested == 0; ++i) {
+    /* A "break"/"continue"/"return" mid-batch (e.g. the ";"-joined
+     * "break; echo unreached" in "if x; then break; echo unreached; fi")
+     * must stop the rest of this batch immediately, the same way
+     * exit_requested already does -- see shell_state_t.break_requested/
+     * continue_requested/return_requested and shell_compound__run_for()/
+     * run_while()/call_function(), which are what actually consume them. */
+    for (size_t i = 0; i < plan->count && !state->exit_requested && state->break_requested == 0 &&
+                       state->continue_requested == 0 && !state->return_requested;
+         ++i) {
         shell_connector_t connector = plan->commands[i].connector;
         bool run = connector == SHELL_CONNECT_NONE || connector == SHELL_CONNECT_SEQUENCE ||
                    (connector == SHELL_CONNECT_AND && status == 0) ||

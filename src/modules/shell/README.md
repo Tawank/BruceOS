@@ -161,6 +161,21 @@ line it just deletes the character under the cursor, like Delete.
   exists; `-x` mirrors `-d` for directories and `-r` for files, since there's
   no executable-bit concept at all here.
 - `break [N]`: multi-level loop break, matching bash's `break N`.
+- `continue [N]`: multi-level "skip to the next iteration", matching bash's
+  `continue N` -- `continue N` unwinds N-1 enclosing loops the same way
+  `break N` does, then lets the Nth (target) one move on to its next
+  iteration instead of stopping it; for a C-style `for`, that still runs the
+  loop's own increment clause first, exactly as if the body had simply
+  finished normally.
+- `return [N]`: only valid inside a function call (an error otherwise, like
+  bash's "return: can only \`return' from a function"). Stops the function
+  immediately -- unwinding any of its own nested `if`/loop constructs on the
+  way out, but never reaching past the call itself into whatever called it --
+  and sets the call's exit status to `N`, or to `$?`'s current value if `N`
+  is omitted.
+- `shift [N]`: shifts the positional parameters (`$1..`) left by `N` (default
+  1), decrementing `$#` to match; `N=0` is a no-op, and `N` greater than `$#`
+  is an error (bash's "shift count out of range") that leaves them untouched.
 - `read [NAME...]`: reads one line from stdin; with no names the line is
   stored in `$REPLY`; with names, splits on whitespace and the last name
   gets the remainder of the line (bash field-splitting behavior). No `-p`,
@@ -302,9 +317,9 @@ line it just deletes the character under the cursor, like Delete.
 - Loops cooperatively yield each iteration (`runtime__delay(0)`) and check
   `process__current_signal()` so they don't starve the scheduler or ignore
   cancellation/kill.
-- `break [N]` unwinds N enclosing loops without corrupting an outer
-  `if`/`for`/`while`'s own parse-position bookkeeping, even when it fires
-  mid-branch with more structure still ahead (verified by a dedicated
+- `break [N]`/`continue [N]` unwind N enclosing loops without corrupting an
+  outer `if`/`for`/`while`'s own parse-position bookkeeping, even when either
+  fires mid-branch with more structure still ahead (verified by a dedicated
   regression case in the selftests).
 - Function definitions: `NAME() { ... }`, `NAME () { ... }`, and
   `function NAME { ... }`. Functions get their own `$0`/positional
@@ -315,13 +330,10 @@ line it just deletes the character under the cursor, like Delete.
   (positional parameters are saved/restored per call); the `factorial`
   example below still uses the accumulator-passing style (each level only
   reads its own arguments *before* recursing and does nothing with global
-  state after the recursive call returns) since there is no `return`.
-- There is no `return` builtin. A function's exit status is simply whatever
-  its last executed command's status was, same as a plain script; use
-  `if`/`elif`/`else` to skip the rest of the body instead of returning
-  early. A `break` with no enclosing loop (including one used to try to
-  "return" out of a function) is reported as a stray break, not absorbed
-  silently.
+  state after the recursive call returns) for illustration, though `return`
+  (see `return [N]` above) works fine for this too. A function's exit status,
+  absent an explicit `return`, is simply whatever its last executed command's
+  status was, same as a plain script.
 - `local NAME[=value]...`: only valid inside a function call (an error
   otherwise, like bash). Shadows the name for the rest of that call --
   including any call it makes in turn, since this is bash's usual *dynamic*
@@ -364,9 +376,9 @@ Roughly in order of how often bash scripts actually use them:
 ## Example
 
 A script exercising most of the above at once: recursive functions (via the
-accumulator trick, since there's no `local`/`return`), C-style and word-list
-`for`, `while` + `read`, nested loops with `break 2`, and `((...))`
-arithmetic including the "copy `$N` into a name first" rule.
+accumulator trick, for illustration), C-style and word-list `for`, `while` +
+`read`, nested loops with `break 2`, and `((...))` arithmetic including the
+"copy `$N` into a name first" rule.
 
 ```sh
 factorial() {

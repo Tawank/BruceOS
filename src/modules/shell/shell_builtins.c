@@ -40,6 +40,9 @@ static const shell_builtin_entry_t s_shell_builtins[] = {
     {"[", "Evaluate a conditional expression"},
     {"[[", "Evaluate a conditional expression"},
     {"break", "Break out of a for/while loop"},
+    {"continue", "Skip to the next iteration of a for/while loop"},
+    {"return", "Return from a shell function"},
+    {"shift", "Shift positional parameters left"},
     {"read", "Read a line into a variable"},
     {"time", "Time how long a command takes"},
     {"local", "Declare a function-local variable"},
@@ -514,6 +517,85 @@ int shell_builtins__run(shell_state_t *state, int argc, char **argv) {
          * catches (and warns about) a break_requested that outlives every
          * loop it could apply to. */
         state->break_requested = (int)levels;
+        return 0;
+    }
+    if (strcmp(argv[0], "continue") == 0) {
+        if (argc > 2) {
+            stdio__printf("shell: continue: too many arguments\n");
+            return 2;
+        }
+        long levels = 1;
+        if (argc == 2) {
+            char *end = NULL;
+            errno = 0;
+            levels = strtol(argv[1], &end, 10);
+            if (errno != 0 || end == argv[1] || *end != '\0' || levels < 1 || levels > INT_MAX) {
+                stdio__printf("shell: continue: numeric argument required\n");
+                return 2;
+            }
+        }
+        /* Only meaningful inside a for/while loop -- shell_compound__run()
+         * catches (and warns about) a continue_requested that outlives
+         * every loop it could apply to, the same way it does for
+         * break_requested. */
+        state->continue_requested = (int)levels;
+        return 0;
+    }
+    if (strcmp(argv[0], "return") == 0) {
+        if (argc > 2) {
+            stdio__printf("shell: return: too many arguments\n");
+            return 2;
+        }
+        int status = state->last_status;
+        if (argc == 2) {
+            char *end = NULL;
+            errno = 0;
+            long parsed = strtol(argv[1], &end, 10);
+            if (errno != 0 || end == argv[1] || *end != '\0' || parsed < INT_MIN || parsed > INT_MAX) {
+                stdio__printf("shell: return: numeric argument required\n");
+                return 2;
+            }
+            status = (int)((unsigned long)parsed & 0xffu);
+        }
+        /* Only meaningful inside a function call -- state->local_frame is
+         * only ever non-NULL for the duration of
+         * shell_compound__call_function()'s own body run (see its doc
+         * comment), the same signal `local` already relies on to find "the
+         * currently executing call". Unlike break/continue, this is checked
+         * (and rejected) right here rather than deferred to some later
+         * unwind-boundary check: a stray "return" has nothing to propagate
+         * into in the first place. */
+        if (state->local_frame == NULL) {
+            stdio__printf("shell: return: can only `return' from a function\n");
+            return 1;
+        }
+        state->return_requested = true;
+        return status;
+    }
+    if (strcmp(argv[0], "shift") == 0) {
+        if (argc > 2) {
+            stdio__printf("shell: shift: too many arguments\n");
+            return 2;
+        }
+        long count = 1;
+        if (argc == 2) {
+            char *end = NULL;
+            errno = 0;
+            count = strtol(argv[1], &end, 10);
+            if (errno != 0 || end == argv[1] || *end != '\0' || count < 0 || count > INT_MAX) {
+                stdio__printf("shell: shift: numeric argument required\n");
+                return 2;
+            }
+        }
+        if (count == 0) return 0;
+        if (count > state->positional_count) {
+            stdio__printf("shell: shift: shift count out of range\n");
+            return 1;
+        }
+        for (long i = 0; i < count; ++i) memory__free(state->positional[i]);
+        int remaining = state->positional_count - (int)count;
+        for (int i = 0; i < remaining; ++i) state->positional[i] = state->positional[i + (int)count];
+        state->positional_count = remaining;
         return 0;
     }
     if (strcmp(argv[0], "read") == 0) return shell_builtins__read(state, argc, argv);
