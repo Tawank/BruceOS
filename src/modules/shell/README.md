@@ -101,7 +101,14 @@ function definitions. `jobs` lists still-running background jobs; `wait`
 (bare) blocks for all of them, `wait %N`/`wait PID` for just one, returning
 its real exit status; `$!` expands to the most recently backgrounded PID. A
 finished job is reported (`[N]+ Done`/`Exit <code>`/`Killed`) right before the
-next prompt. **Not implemented:** backgrounding a pipeline (`a | b &`), a
+next prompt. `kill` is a builtin here too, same as in real bash (not an
+external program -- precisely so it can resolve `%N` against this shell's own
+job table): `kill %N` signals a tracked job, `kill PID` any live process
+whether or not it's tracked, both defaulting to TERM; `-s SIGNAL` or a bare
+`-SIGSPEC` token (name or number, case-insensitive, optional `SIG` prefix)
+picks a different one. A bad target or signal is reported and, for multiple
+targets, doesn't stop the rest -- `kill` only returns 0 if every target was
+signaled. **Not implemented:** backgrounding a pipeline (`a | b &`), a
 builtin (`cd &`), or a redirected command -- all rejected with an error
 rather than run silently in the foreground. A trailing `&` on a whole
 compound construct (`if ...; fi &`, `for ...; done &`) is not recognized at
@@ -202,6 +209,21 @@ line it just deletes the character under the cursor, like Delete.
   after a target, is a syntax error rather than being silently misparsed. A
   command can carry `<` or a here-doc, never both (they're two ways of
   sourcing the same stdin).
+- The output operator also accepts bash's numbered-file-descriptor and
+  combined-stream spellings: `1>`/`1>>` (explicit stdout, same as `>`/`>>`),
+  `2>`/`2>>` ("stderr"), and `&>`/`&>>` (both). BruceOS's stdio model has
+  exactly one output stream per process — there is no real separate stderr to
+  redirect independently of stdout (see `core_sdk/stdio.h`) — so all of these
+  collapse to exactly the same behavior as a plain `>`/`>>` on that one
+  stream: `cmd 2> file` and `cmd > file` do the same thing, and `cmd 2>&1`
+  (a dup-fd target, also accepted; any fd other than 1 or 2 is a syntax
+  error) has nothing left to do since stdout already carries everything a
+  real shell would call stderr. This makes the common `cmd > file 2>&1`
+  idiom for "capture everything into one file" work as expected, and lets a
+  bash script's `2>`/`&>`/`2>&1` redirections parse and run instead of being
+  rejected outright — just without bash's actual stream-separation semantics.
+  (`shell_parser__redirect_op_prefix()`/`shell_parser__at_output_redirect()`
+  in `shell_parser.c`.)
 - Here-docs (`<<DELIM`, `<<-DELIM`, and their single-/double-quoted-delimiter
   forms) are **script-files-only** (`shell__run_script()` in `shell_app.c`):
   a script's body-collection reads the following raw lines up to the
@@ -225,8 +247,9 @@ line it just deletes the character under the cursor, like Delete.
   that's the one place a redirected input genuinely has nowhere to go, since
   a pipe stage's stdin is already spoken for by the previous stage's output.
 - **Not implemented:** here-docs outside a script file, here-strings
-  (`<<<`), multiple/chained redirections, and numbered file descriptors
-  (`2>`).
+  (`<<<`), and multiple/chained redirections of the same direction (e.g.
+  `cmd > a > b`, or `cmd 2> a > b` — two *file-target* output redirections on
+  one command is still a syntax error, whether or not either is fd-numbered).
 
 **Arithmetic — `((...))`** (`shell_arith.c`, `shell_arith.h`)
 - A standalone recursive-descent evaluator, usable as its own statement,

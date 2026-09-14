@@ -7,6 +7,13 @@
 bool shell_builtins__is_builtin(const char *name);
 size_t shell_builtins__count(void);
 const char *shell_builtins__name(size_t index);
+
+/* One-line description of the builtin at `index` (same indexing as
+ * shell_builtins__name()), for `man`'s "Shell Built-ins" listing and its
+ * --gen-md section (see man_app.c) -- shell_executor.c's own "shell help"
+ * listing only ever needed the bare name. Returns NULL for an
+ * out-of-range index. */
+const char *shell_builtins__description(size_t index);
 int shell_builtins__run(shell_state_t *state, int argc, char **argv);
 const char *shell_builtins__get(const shell_state_t *state, const char *name);
 int shell_builtins__set(shell_state_t *state, const char *name, const char *value);

@@ -49,6 +49,25 @@ static bool selftest__shell_register_probe(void) {
     return result == BRUCE_OK || result == BRUCE_ERR_ALREADY_EXISTS;
 }
 
+/* Runs until signaled (INT/TERM) or killed -- unlike selftest__shell_probe(),
+ * which returns immediately and so can't be caught still "Running" by a
+ * "kill" test. runtime__delay() stops returning BRUCE_OK once a signal is
+ * pending, same mechanism selftest__worker_clears_signal() in process_test.c
+ * relies on. */
+static int selftest__shell_probe_spin(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    while (runtime__delay(5) == BRUCE_OK) {}
+    return 0;
+}
+
+static bool selftest__shell_register_spin_probe(void) {
+    bruce_result_t result = app_runner__register(
+        "shell_test_spin", "Shell integration spin probe", "Test", selftest__shell_probe_spin, 0
+    );
+    return result == BRUCE_OK || result == BRUCE_ERR_ALREADY_EXISTS;
+}
+
 bool selftest__run_shell_language_case(void) {
     if (!selftest__shell_register_probe()) return false;
     if (environment__set("INHERITED_SHELL", "visible") != BRUCE_OK) return false;
@@ -1180,6 +1199,126 @@ bool selftest__run_shell_output_redirect_case(void) {
         );
     }
     printf("[selftest] shell/output-redirect: %s\n", ok ? "OK" : "failed");
+    return ok;
+}
+
+/* Exercises the fd-numbered/combined-stream output redirection spellings
+ * ("2>", "2>>", "&>", "2>&1") shell_parser__extract_redirect() accepts on top
+ * of plain ">"/">>" -- see its own doc comment for why they all collapse to
+ * the same behavior here: BruceOS's stdio model has exactly one output
+ * stream per process (no separate stdout/stderr, as
+ * selftest__run_shell_output_redirect_case()'s own comment above notes), so
+ * "2>file" has nothing different to redirect than "1>file"/">file" do, and a
+ * dup target like "2>&1" is already true before it is even written. Reuses
+ * selftest__run_shell_output_redirect_case()'s own source-fixture and
+ * expected-text conventions. */
+bool selftest__run_shell_fd_redirect_case(void) {
+    const char *source_path = "/apps/shell_fd_redirect_source.txt";
+    const char *result_path = "/apps/shell_fd_redirect_result.txt";
+    static const char source_text[] = "alpha\nbeta\n";
+    (void)storage__remove(source_path);
+    (void)storage__remove(result_path);
+    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
+    size_t written = 0;
+    if (storage__open(
+            source_path, BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE | BRUCE_STORAGE_OPEN_TRUNCATE, &file
+        ) != BRUCE_OK ||
+        storage__write(file, source_text, sizeof(source_text) - 1, &written) != BRUCE_OK ||
+        written != sizeof(source_text) - 1 || storage__close(file) != BRUCE_OK) {
+        if (file != BRUCE_FILE_ID_INVALID) (void)storage__close(file);
+        (void)storage__remove(source_path);
+        printf("[selftest] shell/fd-redirect: could not stage fixture\n");
+        return false;
+    }
+
+    shell_state_t state;
+    shell__state_init(&state);
+    char command[160];
+
+    /* "2>" truncates just like ">" would. */
+    snprintf(command, sizeof(command), "cat %s 2> %s", source_path, result_path);
+    int status_stderr = shell__execute_line(&state, command);
+    /* "2>>" appends just like ">>" would. */
+    snprintf(command, sizeof(command), "cat %s 2>> %s", source_path, result_path);
+    int status_stderr_append = shell__execute_line(&state, command);
+
+    char after_stderr_append[64] = {0};
+    size_t after_stderr_append_size = 0;
+    bruce_result_t read_after_stderr_append = BRUCE_ERR_NOT_FOUND;
+    if (storage__open(result_path, BRUCE_STORAGE_OPEN_READ, &file) == BRUCE_OK) {
+        read_after_stderr_append =
+            storage__read(file, after_stderr_append, sizeof(after_stderr_append) - 1, &after_stderr_append_size);
+        (void)storage__close(file);
+    }
+
+    /* "&>" truncates the same single stream "2>"/">" already do. */
+    snprintf(command, sizeof(command), "cat %s &> %s", source_path, result_path);
+    int status_amp = shell__execute_line(&state, command);
+
+    char after_amp[64] = {0};
+    size_t after_amp_size = 0;
+    bruce_result_t read_after_amp = BRUCE_ERR_NOT_FOUND;
+    if (storage__open(result_path, BRUCE_STORAGE_OPEN_READ, &file) == BRUCE_OK) {
+        read_after_amp = storage__read(file, after_amp, sizeof(after_amp) - 1, &after_amp_size);
+        (void)storage__close(file);
+    }
+
+    /* "> file 2>&1" -- the common bash idiom for "capture everything into
+     * one file" -- the "2>&1" trails the real ">" redirect and, on this
+     * single-stream shell, adds nothing beyond confirming what's already
+     * true. */
+    snprintf(command, sizeof(command), "cat %s > %s 2>&1", source_path, result_path);
+    int status_dup = shell__execute_line(&state, command);
+
+    char after_dup[64] = {0};
+    size_t after_dup_size = 0;
+    bruce_result_t read_after_dup = BRUCE_ERR_NOT_FOUND;
+    if (storage__open(result_path, BRUCE_STORAGE_OPEN_READ, &file) == BRUCE_OK) {
+        read_after_dup = storage__read(file, after_dup, sizeof(after_dup) - 1, &after_dup_size);
+        (void)storage__close(file);
+    }
+
+    /* "2>&1" alone, with no real (file-target) redirect on the command at
+     * all, has nothing to do -- confirm it's accepted rather than rejected
+     * as a syntax error, and that it leaves the result file from the
+     * previous check untouched. */
+    snprintf(command, sizeof(command), "cat %s 2>&1", source_path);
+    int status_dup_only = shell__execute_line(&state, command);
+
+    /* Any file descriptor other than 1 or 2 -- or a dup target naming one --
+     * is a parse-time syntax error, same as any other malformed redirection:
+     * shell_parser__extract_redirect() rejects it before the command is even
+     * looked up, so neither of these touches result_path. */
+    snprintf(command, sizeof(command), "cat %s 3> %s", source_path, result_path);
+    int status_bad_fd = shell__execute_line(&state, command);
+    snprintf(command, sizeof(command), "cat %s 2>&3", source_path);
+    int status_bad_dup = shell__execute_line(&state, command);
+
+    shell__state_free(&state);
+    (void)storage__remove(source_path);
+    (void)storage__remove(result_path);
+
+    static const char expected_after_stderr_append[] = "alpha\r\nbeta\r\nalpha\r\nbeta\r\n";
+    static const char expected_after_amp[] = "alpha\r\nbeta\r\n";
+    static const char expected_after_dup[] = "alpha\r\nbeta\r\n";
+    bool ok = status_stderr == 0 && status_stderr_append == 0 && status_amp == 0 && status_dup == 0 &&
+              status_dup_only == 0 && status_bad_fd != 0 && status_bad_dup != 0 &&
+              read_after_stderr_append == BRUCE_OK &&
+              after_stderr_append_size == sizeof(expected_after_stderr_append) - 1 &&
+              memcmp(after_stderr_append, expected_after_stderr_append, sizeof(expected_after_stderr_append) - 1) ==
+                  0 &&
+              read_after_amp == BRUCE_OK && after_amp_size == sizeof(expected_after_amp) - 1 &&
+              memcmp(after_amp, expected_after_amp, sizeof(expected_after_amp) - 1) == 0 &&
+              read_after_dup == BRUCE_OK && after_dup_size == sizeof(expected_after_dup) - 1 &&
+              memcmp(after_dup, expected_after_dup, sizeof(expected_after_dup) - 1) == 0;
+    if (!ok) {
+        printf(
+            "[selftest] shell/fd-redirect: status=%d,%d,%d,%d,%d,%d,%d stderr_append_size=%u amp_size=%u dup_size=%u\n",
+            status_stderr, status_stderr_append, status_amp, status_dup, status_dup_only, status_bad_fd,
+            status_bad_dup, (unsigned)after_stderr_append_size, (unsigned)after_amp_size, (unsigned)after_dup_size
+        );
+    }
+    printf("[selftest] shell/fd-redirect: %s\n", ok ? "OK" : "failed");
     return ok;
 }
 
@@ -2315,5 +2454,53 @@ bool selftest__run_shell_jobs_case(void) {
     shell__state_free(&state);
     (void)storage__remove("/apps/shell_jobs_test_redirect.txt");
     printf("[selftest] shell/jobs: %s\n", ok ? "OK" : "failed");
+    return ok;
+}
+
+bool selftest__run_shell_kill_case(void) {
+    if (!selftest__shell_register_spin_probe()) return false;
+    shell_state_t state;
+    shell__state_init(&state);
+
+    /* Bare "kill %N" (no -s/-SIGSPEC) defaults to TERM, same as bash: the
+     * spinning job actually stops, and "wait" reports the 128+signal exit
+     * code shell_executor__status_to_exit_code() uses for a signal death. */
+    bool ok = shell__execute_line(&state, "shell_test_spin &") == 0 && state.job_count == 1;
+    int job_number = ok ? state.jobs[0].number : 0;
+    char line[24];
+    snprintf(line, sizeof(line), "kill %%%d", job_number);
+    ok = ok && shell__execute_line(&state, line) == 0;
+    snprintf(line, sizeof(line), "wait %%%d", job_number);
+    ok = ok && shell__execute_line(&state, line) == 128 + BRUCE_PROCESS_SIGNAL_TERM && state.job_count == 0;
+
+    /* "kill -s KILL <pid>" (raw PID, not "%N") reaches an untracked-by-number
+     * target the same way real kill(1) can signal any PID -- not just a job
+     * this shell happens to be tracking. */
+    ok = ok && shell__execute_line(&state, "shell_test_spin &") == 0 && state.job_count == 1;
+    bruce_process_id_t pid = ok ? state.jobs[0].pid : BRUCE_PROCESS_ID_INVALID;
+    job_number = ok ? state.jobs[0].number : 0;
+    snprintf(line, sizeof(line), "kill -s KILL %u", (unsigned)pid);
+    ok = ok && shell__execute_line(&state, line) == 0;
+    snprintf(line, sizeof(line), "wait %%%d", job_number);
+    ok = ok && shell__execute_line(&state, line) == 128 + BRUCE_PROCESS_SIGNAL_KILL && state.job_count == 0;
+
+    /* A bare "-SIGSPEC" token (bash's other kill syntax) works the same as
+     * "-s SIGNAL", found anywhere among the arguments. */
+    ok = ok && shell__execute_line(&state, "shell_test_spin &") == 0 && state.job_count == 1;
+    job_number = ok ? state.jobs[0].number : 0;
+    snprintf(line, sizeof(line), "kill -INT %%%d", job_number);
+    ok = ok && shell__execute_line(&state, line) == 0;
+    snprintf(line, sizeof(line), "wait %%%d", job_number);
+    ok = ok && shell__execute_line(&state, line) == 128 + BRUCE_PROCESS_SIGNAL_INT && state.job_count == 0;
+
+    /* Error paths: an unresolvable target and an invalid signal are each
+     * reported and fail (status 1) without touching the job table; no
+     * targets at all is a usage error, same status. */
+    ok = ok && shell__execute_line(&state, "kill %99") == 1 && state.job_count == 0;
+    ok = ok && shell__execute_line(&state, "kill -s BOGUS %99") == 1;
+    ok = ok && shell__execute_line(&state, "kill") == 1;
+
+    shell__state_free(&state);
+    printf("[selftest] shell/kill: %s\n", ok ? "OK" : "failed");
     return ok;
 }

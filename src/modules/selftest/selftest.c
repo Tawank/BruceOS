@@ -41,6 +41,7 @@
 #include "ir_test.h"
 #include "launcher_test.h"
 #include "loader_test.h"
+#include "man_test.h"
 #include "memory_test.h"
 #include "net_test.h"
 #include "notification_test.h"
@@ -168,6 +169,7 @@ static const selftest__case_t selftest__cases[] = {
     SELFTEST_CASE(selftest__run_html_url_case),
     SELFTEST_CASE(selftest__run_html_parser_case),
     SELFTEST_CASE(selftest__run_loader_registry_extensibility_case),
+    SELFTEST_CASE(selftest__run_man_builtin_case),
     SELFTEST_CASE(selftest__run_elf_loader_case),
     SELFTEST_CASE(selftest__run_elf_loader_xip_case),
 #if CONFIG_BRUCE_QEMU_TEST_MODE
@@ -218,6 +220,7 @@ static const selftest__case_t selftest__cases[] = {
     SELFTEST_CASE(selftest__run_shell_eof_case),
     SELFTEST_CASE(selftest__run_shell_history_multiline_case),
     SELFTEST_CASE(selftest__run_shell_jobs_case),
+    SELFTEST_CASE(selftest__run_shell_kill_case),
     SELFTEST_CASE(selftest__run_bnu_case),
     SELFTEST_CASE(selftest__run_bnu_text_case),
     SELFTEST_CASE(selftest__run_bnu_free_stack_case),

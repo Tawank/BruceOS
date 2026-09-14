@@ -225,6 +225,59 @@ bool shell_parser__find_heredoc_marker(
     return false;
 }
 
+/* Recognizes an optional "N"/"&" prefix immediately before an output
+ * redirection operator ('>'/'>>') whose second character sits at `gt_index`
+ * -- e.g. the "2" in "2>out.txt" or the "&" in "&>out.txt" -- so BruceOS can
+ * accept the fd-numbered and combined-stream spellings bash scripts commonly
+ * use. Since BruceOS's stdio model has exactly one output stream per process
+ * (see shell/README.md), all of these end up meaning the same thing as a
+ * bare '>'/'>>' once validated: there is nothing for e.g. "2>" to redirect
+ * *separately* from "1>". `2>&1`/`1>&2`-style dup targets (handled by the
+ * caller, not here) are accordingly accepted as no-ops rather than errors.
+ *
+ * A prefix is only recognized when it is itself a complete token --
+ * immediately preceded by whitespace or the start of the command -- so e.g.
+ * "foo2>bar" (no space before the '2') keeps "foo2" as one word, matching
+ * real shells. Returns the index the whole operator actually starts at
+ * (`gt_index` itself when there is no prefix). *out_fd receives -1 when
+ * there is no digit prefix, the parsed single digit (0-9) when there is one,
+ * or -2 for a multi-digit run (always invalid to BruceOS -- reported by the
+ * caller); *out_amp is set for a "&" prefix. */
+static size_t shell_parser__redirect_op_prefix(const char *text, size_t gt_index, int *out_fd, bool *out_amp) {
+    *out_fd = -1;
+    *out_amp = false;
+    if (gt_index > 0 && isdigit((unsigned char)text[gt_index - 1])) {
+        size_t digit_start = gt_index;
+        while (digit_start > 0 && isdigit((unsigned char)text[digit_start - 1])) digit_start--;
+        if (digit_start == 0 || isspace((unsigned char)text[digit_start - 1])) {
+            *out_fd = (gt_index - digit_start == 1) ? (text[digit_start] - '0') : -2;
+            return digit_start;
+        }
+    } else if (gt_index > 0 && text[gt_index - 1] == '&' && (gt_index == 1 || isspace((unsigned char)text[gt_index - 2]))) {
+        *out_amp = true;
+        return gt_index - 1;
+    }
+    return gt_index;
+}
+
+/* True when a top-level (unquoted, not inside "$(...)"/"`...`"/"((...))")
+ * output redirection operator -- bare '>'/'>>' or one of the fd-prefixed
+ * spellings shell_parser__redirect_op_prefix() recognizes ("2>", "&>", ...)
+ * -- starts at `i`. Used both by shell_parser__extract_redirect()'s initial
+ * scan and by its "is there a second redirection?" check right after the
+ * first one, so both places agree on what counts as an operator. */
+static bool shell_parser__at_output_redirect(const char *text, size_t length, size_t i) {
+    if (i >= length) return false;
+    if (text[i] == '>') return true;
+    if (text[i] == '&' && i + 1 < length && text[i + 1] == '>') return true;
+    if (isdigit((unsigned char)text[i])) {
+        size_t probe = i;
+        while (probe < length && isdigit((unsigned char)text[probe])) probe++;
+        return probe < length && text[probe] == '>';
+    }
+    return false;
+}
+
 /* Detects trailing "< target" / "> target" / ">> target" redirections (at
  * most one input and one output, in either order) and a trailing
  * "<<DELIM"/"<<-DELIM" heredoc marker on an already-trimmed command span
@@ -233,11 +286,24 @@ bool shell_parser__find_heredoc_marker(
  * A heredoc marker consumes the next entry of `heredoc_bodies` in order (see
  * shell_parser__plan()'s own doc comment on that parameter) -- reported as
  * "heredoc ... not supported here" if none is left. Anything beyond that set
- * (a second '<', a second '>', a second heredoc, or non-whitespace after a
- * target) is a syntax error rather than being silently misinterpreted. A
- * '<'/'>' inside a quoted word or a "((...))" arithmetic span (e.g.
- * "(( a > b ))") is never mistaken for an operator, via the same quote- and
- * arith-depth tracking shell_parser__plan()'s own scan uses. */
+ * (a second '<', a second real (file-target) output redirect, a second
+ * heredoc, or non-whitespace after a target) is a syntax error rather than
+ * being silently misinterpreted. A '<'/'>' inside a quoted word or a
+ * "((...))" arithmetic span (e.g. "(( a > b ))") is never mistaken for an
+ * operator, via the same quote- and arith-depth tracking
+ * shell_parser__plan()'s own scan uses.
+ *
+ * The output operator also accepts the fd-numbered/combined-stream spellings
+ * "2>"/"2>>"/"&>"/"&>>"/"1>"/"1>>" (see shell_parser__redirect_op_prefix()'s
+ * doc comment on why these all collapse to the same behavior as a bare
+ * '>'/'>>' here), plus "2>&1"/"1>&2" dup-fd targets, accepted as syntax that
+ * carries no additional effect beyond whatever real (file-target) output
+ * redirection is already on the command -- BruceOS has exactly one output
+ * stream, so by the time a dup target would matter in bash, it is already
+ * true here. A dup target may coexist with one real output redirect, but
+ * not with a second one (still "multiple output redirections are
+ * unsupported"), and any file descriptor other than 1 or 2 (or a multi-digit
+ * one) is rejected as "unsupported file descriptor". */
 static int shell_parser__extract_redirect(
     shell_command_t *command, char *const *heredoc_bodies, size_t heredoc_count, size_t *heredoc_index,
     const char **error
@@ -284,8 +350,16 @@ static int shell_parser__extract_redirect(
             else if (c == ')') arith_depth--;
             continue;
         }
-        if (c == '<' || c == '>') {
+        if (c == '<') {
             op_start = i;
+            break;
+        }
+        if (c == '>') {
+            int prefix_fd = -1;
+            bool prefix_amp = false;
+            op_start = shell_parser__redirect_op_prefix(text, i, &prefix_fd, &prefix_amp);
+            (void)prefix_fd;
+            (void)prefix_amp;
             break;
         }
     }
@@ -295,6 +369,22 @@ static int shell_parser__extract_redirect(
     bool seen_input = false, seen_output = false, seen_heredoc = false;
     for (;;) {
         char op = text[i];
+        size_t op_index = i; /* text[op_index] is the real '>' when `op` was resolved from a prefix below. */
+        int redirect_fd = -1; /* fd named by a "N>" prefix; -1 (no prefix) and "&>" are always fine, no validation needed. */
+        if (op != '<') {
+            /* text[i] is either '>' itself or the start of a "N"/"&" prefix
+             * immediately before one (see shell_parser__redirect_op_prefix()) --
+             * either way, find the '>' and remember what preceded it. */
+            size_t probe = i;
+            if (isdigit((unsigned char)text[probe])) {
+                while (probe < length && isdigit((unsigned char)text[probe])) probe++;
+                redirect_fd = (probe - i == 1) ? (text[i] - '0') : -2;
+            } else if (text[probe] == '&' && probe + 1 < length && text[probe + 1] == '>') {
+                probe += 1;
+            }
+            op_index = probe;
+            op = text[op_index];
+        }
         if (op == '<' && i + 1 < length && text[i + 1] == '<') {
             if (seen_heredoc) {
                 *error = "multiple heredocs are unsupported";
@@ -368,13 +458,12 @@ static int shell_parser__extract_redirect(
             command->input_target.text = text + target_start;
             command->input_target.length = i - target_start;
         } else {
-            bool append = i + 1 < length && text[i + 1] == '>';
-            if (seen_output) {
-                *error = "multiple output redirections are unsupported";
+            bool append = op_index + 1 < length && text[op_index + 1] == '>';
+            if (redirect_fd == -2 || (redirect_fd >= 0 && redirect_fd != 1 && redirect_fd != 2)) {
+                *error = "unsupported file descriptor in redirection";
                 return -1;
             }
-            seen_output = true;
-            i += append ? 2u : 1u;
+            i = op_index + (append ? 2u : 1u);
             while (i < length && isspace((unsigned char)text[i])) i++;
             if (i >= length) {
                 *error = "missing redirection target";
@@ -415,12 +504,44 @@ static int shell_parser__extract_redirect(
                 *error = "missing redirection target";
                 return -1;
             }
-            command->redirect = append ? SHELL_REDIRECT_APPEND : SHELL_REDIRECT_OUT;
-            command->redirect_target.text = text + target_start;
-            command->redirect_target.length = i - target_start;
+            /* "2>&1" / "1>&2": a bare "&" plus digits and nothing else is a
+             * dup-fd target, not a filename. BruceOS has exactly one output
+             * stream, so by the time this would matter in bash it is already
+             * true here -- accept the syntax and otherwise do nothing. */
+            size_t target_len = i - target_start;
+            bool is_dup_target = target_len >= 2 && text[target_start] == '&';
+            int dup_fd = -1;
+            if (is_dup_target) {
+                for (size_t k = target_start + 1; k < i; ++k) {
+                    if (!isdigit((unsigned char)text[k])) {
+                        is_dup_target = false;
+                        break;
+                    }
+                }
+                if (is_dup_target) dup_fd = (target_len - 1 == 1) ? (text[target_start + 1] - '0') : -2;
+            }
+            if (is_dup_target) {
+                if (dup_fd != 1 && dup_fd != 2) {
+                    *error = "unsupported file descriptor in redirection";
+                    return -1;
+                }
+                /* Nothing else to do: BruceOS's single output stream already
+                 * carries what bash would call both stdout and stderr, so a
+                 * dup target has no separate effect here beyond parsing. */
+            } else {
+                if (seen_output) {
+                    *error = "multiple output redirections are unsupported";
+                    return -1;
+                }
+                seen_output = true;
+                command->redirect = append ? SHELL_REDIRECT_APPEND : SHELL_REDIRECT_OUT;
+                command->redirect_target.text = text + target_start;
+                command->redirect_target.length = target_len;
+            }
         }
         while (i < length && isspace((unsigned char)text[i])) i++;
-        if (i < length && (text[i] == '<' || text[i] == '>')) continue;
+        if (i < length && shell_parser__at_output_redirect(text, length, i)) continue;
+        if (i < length && text[i] == '<') continue;
         break;
     }
     if (i < length) {
@@ -599,9 +720,19 @@ int shell_parser__plan(
             connector = SHELL_CONNECT_PIPE;
             operator_size = 1;
         } else if (c == '&') {
-            connector = SHELL_CONNECT_SEQUENCE;
-            operator_size = 1;
-            background_op = true;
+            /* Not every bare '&' backgrounds the command: one right after a
+             * '>' is a "2>&1"/"1>&2" dup-fd target (shell_parser__extract_redirect()
+             * sorts out what follows it), and one that opens its own token
+             * right before a '>' is a "&>"/"&>>" combined-stream redirection
+             * prefix -- neither is the job-control operator, so leave both
+             * as plain text for that per-command pass to parse instead. */
+            bool dup_target_amp = i > 0 && line[i - 1] == '>';
+            bool combined_prefix_amp = token_boundary && i + 1 < length && line[i + 1] == '>';
+            if (!dup_target_amp && !combined_prefix_amp) {
+                connector = SHELL_CONNECT_SEQUENCE;
+                operator_size = 1;
+                background_op = true;
+            }
         }
 
         if (operator_size != 0 || c == '\0') {

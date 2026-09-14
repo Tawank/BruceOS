@@ -41,3 +41,16 @@ int shell_jobs__run(shell_state_t *state, int argc, char **argv);
  * (see shell_executor__status_to_exit_code()); reports "no such job" and
  * returns 1 if `argv[1]` doesn't name a tracked job. */
 int shell_jobs__wait(shell_state_t *state, int argc, char **argv);
+
+/* The "kill" builtin. Like bash's own "kill" (also a shell builtin, not an
+ * external program -- precisely so it can resolve "%N" job specs against
+ * this shell's own job table), sends a signal to one or more targets, each
+ * either "%N" (a tracked job -- see shell_jobs__run() above for what "jobs"
+ * would print) or a raw PID (any live process, tracked or not, matching
+ * real kill(1)'s own reach). Accepts "-s SIGNAL" or a bare "-SIGSPEC" token
+ * (name or number, case-insensitive, with or without the usual "SIG"
+ * prefix; TERM if neither is given, bash's own default) anywhere among the
+ * arguments. Reports and continues past a bad target instead of stopping at
+ * the first one, returning 0 only if every target was resolved and
+ * signaled; "kill" with no targets at all reports usage and returns 1. */
+int shell_jobs__kill(shell_state_t *state, int argc, char **argv);

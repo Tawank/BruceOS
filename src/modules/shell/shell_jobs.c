@@ -1,8 +1,10 @@
 #include "shell_jobs.h"
 
+#include <ctype.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #include "core_sdk/result.h"
 #include "core_sdk/stdio.h"
@@ -103,4 +105,116 @@ int shell_jobs__wait(shell_state_t *state, int argc, char **argv) {
     index = shell_jobs__find(state, argv[1]);
     if (index != (size_t)-1) shell_jobs__remove_at(state, index);
     return shell_executor__status_to_exit_code(&status);
+}
+
+/* Parses a kill signal spec -- "-s SIGNAL"'s value, or a bare "-N"/"-NAME"
+ * token found among shell_jobs__kill()'s arguments -- accepting a signal
+ * number (2/9/15), a bare name (int/term/kill), or a name with the usual
+ * "SIG" prefix, all case-insensitively. A leading '-' is stripped first so
+ * this handles both "-s KILL" (already just "KILL" by the time it gets
+ * here) and the raw "-KILL"/"-9" token the same way. */
+static bool shell_jobs__parse_signal(const char *text, bruce_process_signal_t *out_signal) {
+    if (text == NULL || text[0] == '\0') return false;
+    if (text[0] == '-') text++;
+    if (text[0] == '\0') return false;
+    const char *name = text;
+    if (strncasecmp(name, "SIG", 3) == 0 && name[3] != '\0') name += 3;
+    if (strcasecmp(name, "INT") == 0) {
+        *out_signal = BRUCE_PROCESS_SIGNAL_INT;
+        return true;
+    }
+    if (strcasecmp(name, "TERM") == 0) {
+        *out_signal = BRUCE_PROCESS_SIGNAL_TERM;
+        return true;
+    }
+    if (strcasecmp(name, "KILL") == 0) {
+        *out_signal = BRUCE_PROCESS_SIGNAL_KILL;
+        return true;
+    }
+    char *end = NULL;
+    long value = strtol(text, &end, 10);
+    if (end == text || *end != '\0') return false;
+    if (value != BRUCE_PROCESS_SIGNAL_INT && value != BRUCE_PROCESS_SIGNAL_TERM &&
+        value != BRUCE_PROCESS_SIGNAL_KILL) {
+        return false;
+    }
+    *out_signal = (bruce_process_signal_t)value;
+    return true;
+}
+
+/* True for a token that names a signal rather than a target -- a lone '-'
+ * followed by digits or letters and nothing else (bash's "-SIGSPEC" kill
+ * syntax, e.g. "-9"/"-KILL"/"-TERM"). Neither a "%N" job spec nor a raw PID
+ * can start with '-', so this can't misclassify either. */
+static bool shell_jobs__looks_like_signal_spec(const char *text) {
+    if (text == NULL || text[0] != '-' || text[1] == '\0') return false;
+    for (const char *p = text + 1; *p != '\0'; ++p) {
+        if (!isalnum((unsigned char)*p)) return false;
+    }
+    return true;
+}
+
+/* Resolves a kill target to a PID: "%N" must name a tracked job (there is no
+ * other way to learn its PID -- see shell_jobs__find()); a bare number is
+ * used as-is whether or not it happens to also be a tracked job, matching
+ * real kill(1) (unlike "wait", it isn't limited to jobs this shell knows
+ * about). */
+static bool shell_jobs__resolve_kill_target(const shell_state_t *state, const char *token, bruce_process_id_t *out_pid) {
+    if (token[0] == '%') {
+        size_t index = shell_jobs__find(state, token);
+        if (index == (size_t)-1) return false;
+        *out_pid = state->jobs[index].pid;
+        return true;
+    }
+    char *end = NULL;
+    unsigned long pid = strtoul(token, &end, 10);
+    if (end == token || *end != '\0' || pid == 0) return false;
+    *out_pid = (bruce_process_id_t)pid;
+    return true;
+}
+
+int shell_jobs__kill(shell_state_t *state, int argc, char **argv) {
+    bruce_process_signal_t signal = BRUCE_PROCESS_SIGNAL_TERM;
+    int first_target = 1;
+    if (argc >= 3 && strcmp(argv[1], "-s") == 0) {
+        if (!shell_jobs__parse_signal(argv[2], &signal)) {
+            stdio__printf("shell: kill: %s: invalid signal\n", argv[2]);
+            return 1;
+        }
+        first_target = 3;
+    }
+    /* A "-SIGSPEC" token can appear anywhere among the remaining arguments
+     * (bash doesn't require it first) -- resolved in its own pass so it
+     * applies to every target regardless of where it showed up relative to
+     * them. */
+    for (int i = first_target; i < argc; ++i) {
+        if (!shell_jobs__looks_like_signal_spec(argv[i])) continue;
+        if (!shell_jobs__parse_signal(argv[i], &signal)) {
+            stdio__printf("shell: kill: %s: invalid signal\n", argv[i]);
+            return 1;
+        }
+    }
+
+    int status = 0;
+    int target_count = 0;
+    for (int i = first_target; i < argc; ++i) {
+        if (shell_jobs__looks_like_signal_spec(argv[i])) continue;
+        target_count++;
+        bruce_process_id_t pid = BRUCE_PROCESS_ID_INVALID;
+        if (!shell_jobs__resolve_kill_target(state, argv[i], &pid)) {
+            stdio__printf("shell: kill: %s: no such job or process\n", argv[i]);
+            status = 1;
+            continue;
+        }
+        bruce_result_t result = process__signal(pid, signal);
+        if (result != BRUCE_OK) {
+            stdio__printf("shell: kill: (%s): %s\n", argv[i], result__to_string(result));
+            status = 1;
+        }
+    }
+    if (target_count == 0) {
+        stdio__printf("shell: kill: usage: kill [-s SIGNAL] PID|%%JOB ...\n");
+        return 1;
+    }
+    return status;
 }

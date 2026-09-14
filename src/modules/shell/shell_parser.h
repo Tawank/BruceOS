@@ -36,7 +36,11 @@ typedef enum {
  * shell_parser__plan() -- see its shell_parser__extract_redirect() helper.
  * Input redirection ('<') is tracked separately (shell_command_t's own
  * `input_redirect`/`input_target` below), since a command can carry one of
- * each direction at once (e.g. "sort < in.txt > out.txt"). */
+ * each direction at once (e.g. "sort < in.txt > out.txt"). The operator
+ * itself also accepts "1>"/"2>"/"&>" (and their ">>"-append forms) and
+ * "2>&1"/"1>&2" dup-fd targets -- see shell_parser__extract_redirect()'s own
+ * doc comment for why BruceOS's single-output-stream stdio model makes all
+ * of those collapse to exactly this same OUT/APPEND pair. */
 typedef enum {
     SHELL_REDIRECT_NONE = 0,
     SHELL_REDIRECT_OUT,    /* > : truncate/create */

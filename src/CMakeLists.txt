@@ -30,6 +30,7 @@ set(BRUCE_SELFTEST_SOURCES
     "modules/selftest/ir_test.c"
     "modules/selftest/launcher_test.c"
     "modules/selftest/loader_test.c"
+    "modules/selftest/man_test.c"
     "modules/selftest/memory_test.c"
     "modules/selftest/net_test.c"
     "modules/selftest/notification_test.c"

@@ -16,10 +16,36 @@
 #include "shell_executor.h"
 #include "shell_jobs.h"
 
-static const char *const s_shell_builtin_names[] = {
-    "echo", "true",  "false", "cd",   "set",  "unset", "export", "clear",
-    "reset", "help",  "exit",  "test", "[",    "[[",   "break",  "read",  "time", "local",
-    "jobs", "wait",
+/* Name + one-line description, kept side by side so a new builtin can't add
+ * one without the other -- shell_builtins__description() backs both `man`'s
+ * "Shell Built-ins" listing and its --gen-md section (see man_app.c). */
+typedef struct {
+    const char *name;
+    const char *description;
+} shell_builtin_entry_t;
+
+static const shell_builtin_entry_t s_shell_builtins[] = {
+    {"echo", "Print arguments"},
+    {"true", "Return success"},
+    {"false", "Return failure"},
+    {"cd", "Change the working directory"},
+    {"set", "List shell variables"},
+    {"unset", "Remove a variable"},
+    {"export", "Mark a variable for export to child processes"},
+    {"clear", "Erase the screen"},
+    {"reset", "Reset the terminal"},
+    {"help", "List shell built-ins and usage"},
+    {"exit", "Exit the shell"},
+    {"test", "Evaluate a conditional expression"},
+    {"[", "Evaluate a conditional expression"},
+    {"[[", "Evaluate a conditional expression"},
+    {"break", "Break out of a for/while loop"},
+    {"read", "Read a line into a variable"},
+    {"time", "Time how long a command takes"},
+    {"local", "Declare a function-local variable"},
+    {"jobs", "List background jobs"},
+    {"wait", "Wait for a background job to finish"},
+    {"kill", "Send a signal to a job or process"},
 };
 
 static int shell_builtins__find_index(const shell_state_t *state, const char *name) {
@@ -334,18 +360,22 @@ static int shell_builtins__local(shell_state_t *state, int argc, char **argv) {
 }
 
 bool shell_builtins__is_builtin(const char *name) {
-    for (size_t i = 0; i < sizeof(s_shell_builtin_names) / sizeof(s_shell_builtin_names[0]); ++i) {
-        if (strcmp(name, s_shell_builtin_names[i]) == 0) return true;
+    for (size_t i = 0; i < sizeof(s_shell_builtins) / sizeof(s_shell_builtins[0]); ++i) {
+        if (strcmp(name, s_shell_builtins[i].name) == 0) return true;
     }
     return false;
 }
 
 size_t shell_builtins__count(void) {
-    return sizeof(s_shell_builtin_names) / sizeof(s_shell_builtin_names[0]);
+    return sizeof(s_shell_builtins) / sizeof(s_shell_builtins[0]);
 }
 
 const char *shell_builtins__name(size_t index) {
-    return index < shell_builtins__count() ? s_shell_builtin_names[index] : NULL;
+    return index < shell_builtins__count() ? s_shell_builtins[index].name : NULL;
+}
+
+const char *shell_builtins__description(size_t index) {
+    return index < shell_builtins__count() ? s_shell_builtins[index].description : NULL;
 }
 
 int shell_builtins__run(shell_state_t *state, int argc, char **argv) {
@@ -487,6 +517,7 @@ int shell_builtins__run(shell_state_t *state, int argc, char **argv) {
     if (strcmp(argv[0], "local") == 0) return shell_builtins__local(state, argc, argv);
     if (strcmp(argv[0], "jobs") == 0) return shell_jobs__run(state, argc, argv);
     if (strcmp(argv[0], "wait") == 0) return shell_jobs__wait(state, argc, argv);
+    if (strcmp(argv[0], "kill") == 0) return shell_jobs__kill(state, argc, argv);
     /* "time" is intercepted in shell_executor__dispatch() before it ever
      * reaches here (it needs to wrap the function/builtin/external dispatch
      * itself), so it's listed for documentation purposes only -- this branch
