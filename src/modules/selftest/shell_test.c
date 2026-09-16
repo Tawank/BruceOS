@@ -1229,6 +1229,70 @@ static int selftest__shell_run_pipe_command(const char *command) {
     return status;
 }
 
+/* Exercises shell_executor__pipe_write()'s handling of a pipe destination
+ * that exits (here, a real argument-parse failure) without ever reading its
+ * "--stdin-size N" bytes: "ping" (an external, non-builtin app, so the pipe
+ * itself is legal -- it just isn't a pipe-aware command and never will be,
+ * "--stdin-size" being meaningless for it) is given no host, so it fails
+ * ap_parse() and exits in an instant, having read nothing. The producer side
+ * (three 80-byte "echo" words, comfortably over STDIO__INPUT_CAPACITY's 256
+ * bytes once joined by the pseudo-producer's own separating spaces -- kept
+ * to several words under shell_parser.h's own SHELL__WORD_MAX (256) rather
+ * than one ~300-byte word, which shell_parser__words() would itself reject
+ * as "expanded word too long" before the pipe ever ran at all) guarantees
+ * pipe_write()'s input-feeding loop hits BRUCE_ERR_RESOURCE_LIMIT at least
+ * once with nothing left to ever drain that ring buffer again -- before the
+ * fix this fed loop spun on runtime__delay(1) forever with no liveness check
+ * on the destination at all, hanging the whole pipeline (and, transitively,
+ * this selftest, since shell__execute_line() runs it synchronously) instead
+ * of ever completing. Run as a spawned "shell -c ..." child with a bounded
+ * 5000ms wait (same pattern as selftest__run_shell_pipe_redirect_case()
+ * above) specifically so a regression back to that hang fails this selftest
+ * instead of wedging the whole suite: selftest__shell_run_pipe_command()
+ * returns -1 on a timeout, which is what "status == -1" below actually
+ * catches. The final "> file" redirect also confirms the fix's other half --
+ * that ping's own "error: '--stdin-size' is not a recognised option"
+ * diagnostic (ping never calls ap_unknown_options_as_args(), so
+ * pipe_write()'s own "--stdin-size N" prefix -- meaningless to a command
+ * that was never meant to be a pipe destination -- is rejected outright,
+ * before ap_parse() ever gets as far as noticing "host" is missing too) is
+ * captured and written out rather than being silently discarded once the
+ * destination is known to be gone (see shell_executor__pipe_write()'s
+ * "destination_exited" branch). */
+bool selftest__run_shell_pipe_early_exit_case(void) {
+    const char *result_path = "/apps/shell_pipe_early_exit_result.txt";
+    (void)storage__remove(result_path);
+
+    char word[81];
+    memset(word, 'A', sizeof(word) - 1);
+    word[sizeof(word) - 1] = '\0';
+
+    char command[400];
+    snprintf(command, sizeof(command), "-c \"echo %s %s %s | ping > %s\"", word, word, word, result_path);
+    int status = selftest__shell_run_pipe_command(command);
+
+    char result[128] = {0};
+    size_t result_size = 0;
+    bruce_result_t read_result = BRUCE_ERR_NOT_FOUND;
+    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
+    if (storage__open(result_path, BRUCE_STORAGE_OPEN_READ, &file) == BRUCE_OK) {
+        read_result = storage__read(file, result, sizeof(result) - 1, &result_size);
+        (void)storage__close(file);
+    }
+    (void)storage__remove(result_path);
+
+    bool ok = status != -1 && status != 0 && read_result == BRUCE_OK &&
+              strstr(result, "is not a recognised option") != NULL;
+    if (!ok) {
+        printf(
+            "[selftest] shell/pipe-early-exit: failed (status=%d read=%d result=%.*s)\n", status, (int)read_result,
+            (int)result_size, result
+        );
+    }
+    printf("[selftest] shell/pipe-early-exit: %s\n", ok ? "OK" : "failed");
+    return ok;
+}
+
 /* Exercises "cmd > file" / "cmd >> file" for a plain (non-piped, no "<"/
  * heredoc input) external command -- shell_executor__stream_external_to_file()
  * in shell_executor.c, which writes each output chunk straight to the file

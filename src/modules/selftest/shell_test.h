@@ -21,6 +21,7 @@ bool selftest__run_shell_case_case(void);
 bool selftest__run_shell_glob_case(void);
 bool selftest__run_shell_brace_case(void);
 bool selftest__run_shell_pipe_redirect_case(void);
+bool selftest__run_shell_pipe_early_exit_case(void);
 bool selftest__run_shell_bnu_text_pipe_case(void);
 bool selftest__run_shell_read_case(void);
 bool selftest__run_shell_stdio_inheritance_case(void);

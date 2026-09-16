@@ -4,8 +4,13 @@
 
 #include "core/display/display.h"
 #include "core/image/gif/gif.h"
+#include "core_sdk/app_runner.h"
 #include "core_sdk/display.h"
 #include "core_sdk/image.h"
+#include "core_sdk/process.h"
+#include "core_sdk/runtime.h"
+#include "core_sdk/stdio.h"
+#include "core_sdk/storage.h"
 
 bool selftest__run_image_decode_case(void) {
     static const uint8_t red_gif[] = {
@@ -117,4 +122,221 @@ bool selftest__run_image_decode_case(void) {
     (void)display__present();
     if (!valid) printf("[selftest] image/decode: FAIL, decoded output\n");
     return valid;
+}
+
+/* Exercises image_app_main()'s "--stdin-size N" support (image_loader_app.c)
+ * end to end: launched directly -- no shell involved, the same way
+ * selftest__run_shell_cat_interactive_case() (shell_test.c) launches "cat" --
+ * with its stdio routed to a session this test controls. Launched this way
+ * (BRUCE_LAUNCH_BACKGROUND, no GUI=1), a successful decode also exercises
+ * the piped path's runtime__to_foreground() self-promotion (image_app_main()
+ * would otherwise draw into a hidden, frame_noop display context -- see
+ * display.c -- and this pixel check would see nothing): polls
+ * display__test_read_pixel() for the fixture's known color rather than
+ * asserting immediately, since the child has to actually get scheduled and
+ * draw first. Like every image, once drawn it waits for a keypress that
+ * this piped process could never receive, so it never returns on its own;
+ * process__wait_status() timing out with BRUCE_ERR_TIMEOUT confirms that
+ * (the same signal process_test.c's spin-helper cases use), and
+ * process__kill() cleans it up. A malformed --stdin-size, or a payload
+ * image__get_bitmap_from_memory() can't decode, both return promptly
+ * instead -- the latter via dialog__message()'s non-GUI fallback,
+ * dialog__term_message(), which prints and returns rather than blocking for
+ * a tap this process could never deliver either. */
+bool selftest__run_image_stdin_pipe_case(void) {
+    static const uint8_t red_gif[] = {
+        'G', 'I',  'F', '8', '9', 'a', 1, 0, 1, 0, 0x80, 0, 0, 0xff, 0,    0, 0,    0,
+        0,   0x2c, 0,   0,   0,   0,   1, 0, 1, 0, 0,    2, 2, 0x44, 0x01, 0, 0x3b,
+    };
+    static const uint8_t invalid[] = {'n', 'o', 't', 'i', 'm', 'g'};
+    char arg[32];
+
+    snprintf(arg, sizeof(arg), "--stdin-size %u", (unsigned)sizeof(red_gif));
+    bool decode_ok = false;
+    bool pixel_ok = false;
+    bruce_stdio_session_t session = BRUCE_STDIO_SESSION_INVALID;
+    /* Retried up to a few times: image_app_main() draws with center=true,
+     * fit=true, and image__fit_size() (render.c) scales this 1x1 fixture up
+     * to fill a whole screen dimension, so decoding it needs a real
+     * screen-sized resize buffer from the external heap -- right after the
+     * loader selftests immediately ahead of this one in the full suite
+     * (elf/wasm/js, all heavy external-heap users themselves) that
+     * allocation can transiently fail with BRUCE_ERR_NO_MEMORY under
+     * leftover fragmentation, clearing up again a moment later (the two
+     * sub-cases below, running mere moments after this one, reliably
+     * succeed even when this one hits it). Same category of environment-
+     * driven flakiness image/decode's own CONFIG_BRUCE_QEMU_TEST_MODE guard
+     * (above) works around, just transient instead of permanent. */
+    for (int attempt = 0; attempt < 5 && !(decode_ok && pixel_ok); ++attempt) {
+        if (attempt > 0) (void)runtime__delay(100);
+        pixel_ok = false;
+        session = BRUCE_STDIO_SESSION_INVALID;
+        if (stdio__session_create(&session) == BRUCE_OK && stdio__session_route_children(session) == BRUCE_OK) {
+            int launched = app_runner__run("image", arg, BRUCE_LAUNCH_BACKGROUND);
+            (void)stdio__session_route_children(BRUCE_STDIO_SESSION_INVALID);
+            if (launched > 0) {
+                (void)stdio__session_write_input(session, red_gif, sizeof(red_gif));
+                /* Not (0, 0): the fit-scaled square is centered, so it
+                 * doesn't necessarily reach the corner, but the screen's
+                 * center point is inside it regardless of aspect ratio.
+                 * display__width()/height() are this (hidden, non-
+                 * foreground) selftest process's own viewport -- 0 here,
+                 * not the physical screen -- so the physical size comes
+                 * from the same Kconfig macros display.c itself builds the
+                 * real framebuffer from. */
+                bruce_display_color_t pixel = 0;
+                int16_t center_x = (int16_t)(CONFIG_BRUCE_DISPLAY_WIDTH / 2);
+                int16_t center_y = (int16_t)(CONFIG_BRUCE_DISPLAY_HEIGHT / 2);
+                for (int i = 0; i < 25 && !pixel_ok; ++i) {
+                    (void)runtime__delay(20);
+                    pixel_ok = display__test_read_pixel(center_x, center_y, &pixel) == BRUCE_OK &&
+                               pixel == BRUCE_COLOR_RED;
+                }
+                bruce_process_status_t status;
+                bruce_result_t wait_result = process__wait_status((bruce_process_id_t)launched, 100, &status);
+                decode_ok = wait_result == BRUCE_ERR_TIMEOUT;
+                if (!decode_ok && !(wait_result == BRUCE_OK && status.exit_code == BRUCE_ERR_NO_MEMORY)) {
+                    /* Anything other than transient exhaustion is a real
+                     * failure -- stop retrying and let it be reported. */
+                    (void)process__kill((bruce_process_id_t)launched);
+                    break;
+                }
+                (void)process__kill((bruce_process_id_t)launched);
+            }
+        }
+        (void)stdio__session_close(session);
+    }
+
+    snprintf(arg, sizeof(arg), "--stdin-size %u", (unsigned)sizeof(invalid));
+    bool invalid_payload_ok = false;
+    session = BRUCE_STDIO_SESSION_INVALID;
+    if (stdio__session_create(&session) == BRUCE_OK && stdio__session_route_children(session) == BRUCE_OK) {
+        int launched = app_runner__run("image", arg, BRUCE_LAUNCH_BACKGROUND);
+        (void)stdio__session_route_children(BRUCE_STDIO_SESSION_INVALID);
+        if (launched > 0) {
+            (void)stdio__session_write_input(session, invalid, sizeof(invalid));
+            bruce_process_status_t status;
+            invalid_payload_ok =
+                process__wait_status((bruce_process_id_t)launched, 2000, &status) == BRUCE_OK &&
+                status.reason == BRUCE_PROCESS_EXITED && status.exit_code != 0;
+            if (!invalid_payload_ok) (void)process__kill((bruce_process_id_t)launched);
+        }
+    }
+    (void)stdio__session_close(session);
+
+    session = BRUCE_STDIO_SESSION_INVALID;
+    bool bad_size_ok = false;
+    if (stdio__session_create(&session) == BRUCE_OK && stdio__session_route_children(session) == BRUCE_OK) {
+        int launched = app_runner__run("image", "--stdin-size notanumber", BRUCE_LAUNCH_BACKGROUND);
+        (void)stdio__session_route_children(BRUCE_STDIO_SESSION_INVALID);
+        if (launched > 0) {
+            bruce_process_status_t status;
+            bad_size_ok = process__wait_status((bruce_process_id_t)launched, 2000, &status) == BRUCE_OK &&
+                          status.reason == BRUCE_PROCESS_EXITED && status.exit_code != 0;
+            if (!bad_size_ok) (void)process__kill((bruce_process_id_t)launched);
+        }
+    }
+    (void)stdio__session_close(session);
+
+    bool ok = decode_ok && pixel_ok && invalid_payload_ok && bad_size_ok;
+    if (!ok) {
+        printf(
+            "[selftest] image/stdin_pipe: decode_ok=%d pixel_ok=%d invalid_payload_ok=%d bad_size_ok=%d\n",
+            decode_ok, pixel_ok, invalid_payload_ok, bad_size_ok
+        );
+    }
+    printf("[selftest] image/stdin_pipe: %s\n", ok ? "OK" : "failed");
+    return ok;
+}
+
+/* Exercises image_app_main()'s redraw-on-regain-foreground fix
+ * (image_loader_app.c): input__read() returning BRUCE_ERR_NOT_FOREGROUND
+ * only tells the viewer it lost and regained the screen -- whatever painted
+ * over it while backgrounded isn't restored automatically (see process.h's
+ * bruce_process_snapshot_t.blocked_on_wait doc comment), so
+ * image_viewer__resume_after_handoff() returning true has to be followed by
+ * an actual redraw (image_viewer__present_bitmap()), not a bare retry of the
+ * input wait.
+ *
+ * Launches "image" directly on a small red fixture (a GIF, saved with a
+ * ".png" extension so image_viewer__is_gif()'s extension check keeps it on
+ * the static-image/retained-bitmap path this fix touches -- image decodes by
+ * sniffing content, not by extension, so this still decodes fine), confirms
+ * the initial draw, then plays the "another process steals the screen" role
+ * itself: self-promotes via runtime__to_foreground() and paints the screen
+ * blue (process__foreground_push_locked()'s recompute demotes "image" to
+ * background as a side effect, the same as a real overlay or alt-tab would),
+ * then calls process__foreground() -- unlike runtime__to_foreground(), not
+ * self-only, so this driver can push "image"'s pid back to the front the
+ * same way the launcher/alt-tab would -- and checks the screen goes back to
+ * red. Without the fix it would stay stuck on blue. */
+bool selftest__run_image_redraw_on_regain_case(void) {
+    static const uint8_t red_gif[] = {
+        'G', 'I',  'F', '8', '9', 'a', 1, 0, 1, 0, 0x80, 0, 0, 0xff, 0,    0, 0,    0,
+        0,   0x2c, 0,   0,   0,   0,   1, 0, 1, 0, 0,    2, 2, 0x44, 0x01, 0, 0x3b,
+    };
+    static const char *fixture_path = "/apps/image_selftest_redraw.png";
+    int16_t center_x = (int16_t)(CONFIG_BRUCE_DISPLAY_WIDTH / 2);
+    int16_t center_y = (int16_t)(CONFIG_BRUCE_DISPLAY_HEIGHT / 2);
+
+    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
+    bruce_result_t result = storage__open(
+        fixture_path, BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE | BRUCE_STORAGE_OPEN_TRUNCATE, &file
+    );
+    size_t written = 0;
+    if (result == BRUCE_OK) result = storage__write(file, red_gif, sizeof(red_gif), &written);
+    if (result == BRUCE_OK && written != sizeof(red_gif)) result = BRUCE_ERR_IO;
+    if (file != BRUCE_FILE_ID_INVALID) (void)storage__close(file);
+    if (result != BRUCE_OK) {
+        printf("[selftest] image/redraw_on_regain: FAIL, fixture write\n");
+        return false;
+    }
+
+    bool ok = false;
+    int launched = app_runner__run("image", fixture_path, BRUCE_LAUNCH_FOREGROUND);
+    if (launched > 0) {
+        bruce_display_color_t pixel = 0;
+        bool drew_red = false;
+        for (int i = 0; i < 25 && !drew_red; ++i) {
+            (void)runtime__delay(20);
+            drew_red = display__test_read_pixel(center_x, center_y, &pixel) == BRUCE_OK && pixel == BRUCE_COLOR_RED;
+        }
+
+        bool stole_screen = drew_red && runtime__to_foreground() == BRUCE_OK && display__begin_frame() == BRUCE_OK &&
+                             display__fill_screen(BRUCE_COLOR_BLUE) == BRUCE_OK && display__present() == BRUCE_OK;
+        /* Give "image"'s own task a chance to actually get scheduled and
+         * notice the handoff while backgrounded: it only learns it lost the
+         * foreground the next time it calls input__read() (image_app_main()
+         * loops on that with a 100ms timeout, event_loop.c), which checks
+         * current state at call time rather than an edge-triggered
+         * notification of the transition. Handing the foreground back
+         * before that first call lands would mean it never observes having
+         * been backgrounded at all -- resume_after_handoff() and the redraw
+         * it triggers would never run, and this check would pass for the
+         * wrong reason (the fixture just never got overwritten in the first
+         * place, not because the fix redrew it). */
+        if (stole_screen) (void)runtime__delay(200);
+        bool regained = stole_screen && process__foreground((bruce_process_id_t)launched) == BRUCE_OK;
+
+        bool redrew_red = false;
+        for (int i = 0; regained && i < 25 && !redrew_red; ++i) {
+            (void)runtime__delay(20);
+            redrew_red =
+                display__test_read_pixel(center_x, center_y, &pixel) == BRUCE_OK && pixel == BRUCE_COLOR_RED;
+        }
+
+        ok = drew_red && stole_screen && regained && redrew_red;
+        if (!ok) {
+            printf(
+                "[selftest] image/redraw_on_regain: drew_red=%d stole_screen=%d regained=%d redrew_red=%d\n",
+                drew_red, stole_screen, regained, redrew_red
+            );
+        }
+        (void)process__kill((bruce_process_id_t)launched);
+    } else {
+        printf("[selftest] image/redraw_on_regain: FAIL, launch\n");
+    }
+    (void)storage__remove(fixture_path);
+    printf("[selftest] image/redraw_on_regain: %s\n", ok ? "OK" : "failed");
+    return ok;
 }

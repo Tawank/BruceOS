@@ -2002,15 +2002,17 @@ Options:
 View image files
 
 ```
-Usage: image <path> [args...]
+Usage: image [path] [args...] [options]
 
-Display an image until an input event is received.
+Display an image, or piped stdin, until an input event is received.
 
 Arguments:
-    path (required)
-              Path to a JPEG, PNG, or GIF image
+    path      Path to a JPEG, PNG, or GIF image
 
 Options:
+    --stdin-size <value>
+              Read exactly this many bytes from stdin (used by shell pipes)
+
     -h, --help
               Show this help
 ```

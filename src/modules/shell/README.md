@@ -542,6 +542,13 @@ input's one line proving `stdio__session_close_input()` ends it cleanly
 instead of hanging, and the missing-target error path -- content that traces
 back to the redirected input isn't compared byte-for-byte under
 `CONFIG_BRUCE_QEMU_TEST_MODE`, same reasoning as `..._pipe_redirect_case`),
+`..._pipe_early_exit_case` (a pipe destination that exits without ever
+reading its `--stdin-size N` bytes -- here, a real external command,
+`ping`, given no host -- doesn't hang `shell_executor__pipe_write()`'s
+input-feeding loop forever the way it used to once nothing is left to drain
+that destination's now-permanently-full input channel, and the destination's
+own diagnostic still reaches the redirected output instead of being
+silently discarded once it's known to be gone),
 `..._input_redirect_case`, `..._arith_redirect_case` (`>`/`>>`/`<` on a
 standalone `((...))`, and that an arithmetic error skips the output target),
 `..._heredoc_case`, `..._cat_interactive_case` (bare `cat`'s

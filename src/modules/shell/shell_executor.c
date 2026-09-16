@@ -1152,22 +1152,29 @@ static int shell_executor__pipe_relay_capture(
  * argument prefix (see text_app.c's --stdin-size handling for the convention
  * this follows) so any external program written to expect a piped shell
  * input can size its read. Like any other external command the shell
- * launches, a pipe destination -- "text", "less", or anything else -- runs
- * in the background with no GUI env of its own, and is relayed live to the
- * shell's own terminal by shell_executor__pipe_relay() once the buffer is
- * delivered; a target that wants the physical display instead needs the
- * same explicit "GUI=1" its non-piped invocation would (see
- * shell_executor__dispatch()'s big comment on GUI=1/BRUCE_LAUNCH_FOREGROUND).
+ * launches with no environment overlay of its own, a pipe destination --
+ * "text", "less", or anything else -- always launches in the background
+ * (BRUCE_LAUNCH_BACKGROUND, unconditionally: there's no per-stage "GUI=1"/
+ * "BG=0" support here the way shell_executor__dispatch() has for a plain
+ * command), and is relayed live to the shell's own terminal by
+ * shell_executor__pipe_relay() once the buffer is delivered. A target that
+ * wants the physical display instead promotes itself with
+ * runtime__to_foreground() once it actually has something to draw (see
+ * wifi_app.c's wifi_app_on() for the same "start backgrounded, foreground
+ * myself later" pattern) -- that call needs no cooperation from here, since
+ * it's self-service and works regardless of how the caller was launched.
  * `capture`, when non-NULL, redirects this relaying: the target's output is
  * collected into `*capture` (for a caller such as
  * shell_executor__pipeline() to write out via
  * shell_executor__write_file()) instead of being relayed live to the shell's
  * own stdio, and the shell's own stdin is not forwarded to the target either
  * -- a "producer | consumer > file" destination is never interactive. Takes
- * ownership of `buffer` and frees it itself as soon as every byte has been
- * written to the target's stdin (the caller must not touch or free it
- * afterward): once `capture` is in play, `buffer` (the producer's captured
- * output) and `*capture` (the consumer's, being accumulated) are both
+ * ownership of `buffer` and frees it itself as soon as every byte has either
+ * reached the target's stdin or the target has exited without reading the
+ * rest (see the input-feeding loop's own comment on telling that apart from
+ * ordinary backpressure) -- the caller must not touch or free it afterward:
+ * once `capture` is in play, `buffer` (the producer's captured output) and
+ * `*capture` (the consumer's, being accumulated) are both
  * memory__external_*-backed allocations, and freeing the source the moment
  * it's no longer needed -- rather than leaving it alive for the rest of this
  * call, as the caller freeing it only after this function returns would --
@@ -1208,6 +1215,8 @@ static int shell_executor__pipe_write(
     int status = 0;
     size_t offset = 0;
     bool out_of_memory = false;
+    bool destination_exited = false;
+    bruce_process_status_t exited_status = {0};
     while (offset < buffer->length) {
         if (capture != NULL) {
             (void)shell_executor__pipe_drain_output_capture(session, capture, &out_of_memory);
@@ -1224,7 +1233,21 @@ static int shell_executor__pipe_write(
             offset += chunk;
         } else if (written == BRUCE_ERR_RESOURCE_LIMIT) {
             /* The child may be waiting for room in its output channel before
-             * it can consume more input. Draining above breaks that cycle. */
+             * it can consume more input, which draining above already
+             * breaks that cycle for -- but a destination that doesn't read
+             * its "--stdin-size N" bytes at all (an argument-parse failure
+             * before its first stdio__read(), a crash, ...) leaves this
+             * input channel permanently full with nobody left to drain it,
+             * which would otherwise retry here forever with no way out (not
+             * even Ctrl+C: unlike shell_executor__wait()'s own
+             * process__wait_status() loop, a plain runtime__delay() here
+             * never polls for a pending signal). A non-blocking poll tells
+             * the two apart: still alive means keep waiting on real
+             * backpressure, already exited means stop feeding it. */
+            if (process__wait_status((bruce_process_id_t)launched, 0, &exited_status) == BRUCE_OK) {
+                destination_exited = true;
+                break;
+            }
             (void)runtime__delay(1);
         } else {
             status = 1;
@@ -1238,7 +1261,19 @@ static int shell_executor__pipe_write(
      * most one memory__external_*-backed pipe buffer (this one, or `*capture`
      * once relaying starts collecting into it) is ever alive at a time. */
     shell_executor__buffer_free(buffer);
-    if (status == 0) {
+    if (destination_exited) {
+        /* The destination is already gone, so shell_executor__pipe_relay()/
+         * pipe_relay_capture() below would only rediscover the same exit via
+         * their own process__wait_status() poll, having relayed nothing in
+         * the meantime. Drain whatever it did manage to write first --
+         * typically a diagnostic from failing to parse its own arguments --
+         * directly instead, the same way a real pipe's reader exiting early
+         * still lets whatever it already printed through, rather than
+         * discarding it the way the plain error path below does. */
+        if (capture != NULL) (void)shell_executor__pipe_drain_output_capture(session, capture, &out_of_memory);
+        else (void)shell_executor__pipe_drain_output(session);
+        status = shell_executor__status_to_exit_code(&exited_status);
+    } else if (status == 0) {
         status = capture != NULL ? shell_executor__pipe_relay_capture(session, (bruce_process_id_t)launched, capture)
                                   : shell_executor__pipe_relay(session, (bruce_process_id_t)launched);
         if (status == -1) {
