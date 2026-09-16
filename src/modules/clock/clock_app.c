@@ -111,7 +111,16 @@ static int clock_app__show(bool gui) {
         result = input__wait(200, &code);
         if (result == BRUCE_OK && code == BRUCE_INPUT_CODE_BACK) return BRUCE_OK;
         if (result == BRUCE_OK && code == BRUCE_INPUT_CODE_SELECT) return CLOCK_APP_OPEN_MENU;
-        if (result == BRUCE_ERR_NOT_FOREGROUND && clock_app__resume_after_handoff()) continue;
+        if (result == BRUCE_ERR_NOT_FOREGROUND && clock_app__resume_after_handoff()) {
+            /* Whatever painted over the screen while backgrounded isn't
+             * restored automatically on switching back (see
+             * image_loader_app.c's identical fix), but the draw above only
+             * runs when now.second/hint_visible actually changed -- reset
+             * last_second so that check can't spuriously stay true and skip
+             * the redraw this regain needs. */
+            last_second = UINT8_MAX;
+            continue;
+        }
         if (result != BRUCE_OK && result != BRUCE_ERR_TIMEOUT) return result;
     }
 }
@@ -180,7 +189,13 @@ static int clock_app__timer(const char *argument, bool gui) {
             int32_t code = 0;
             result = input__wait(100, &code);
             if (result == BRUCE_OK && code == BRUCE_INPUT_CODE_BACK) return BRUCE_OK;
-            if (result == BRUCE_ERR_NOT_FOREGROUND && clock_app__resume_after_handoff()) continue;
+            if (result == BRUCE_ERR_NOT_FOREGROUND && clock_app__resume_after_handoff()) {
+                /* Same stale-redraw fix as clock_app__show() above: the draw
+                 * only runs when remaining actually changed, so reset
+                 * last_remaining to guarantee this regain forces one. */
+                last_remaining = UINT32_MAX;
+                continue;
+            }
             if (result != BRUCE_OK && result != BRUCE_ERR_TIMEOUT) return result;
         } else if (runtime__delay(100) != BRUCE_OK) return BRUCE_ERR_CANCELLED;
     }
@@ -242,7 +257,13 @@ static int clock_app__alarm(const char *argument, bool gui) {
             int32_t code = 0;
             result = input__wait(200, &code);
             if (result == BRUCE_OK && code == BRUCE_INPUT_CODE_BACK) return BRUCE_OK;
-            if (result == BRUCE_ERR_NOT_FOREGROUND && clock_app__resume_after_handoff()) continue;
+            if (result == BRUCE_ERR_NOT_FOREGROUND && clock_app__resume_after_handoff()) {
+                /* Same stale-redraw fix as clock_app__show() above: the draw
+                 * only runs when now.second actually changed, so reset
+                 * last_second to guarantee this regain forces one. */
+                last_second = UINT8_MAX;
+                continue;
+            }
             if (result != BRUCE_OK && result != BRUCE_ERR_TIMEOUT) return result;
         } else if (runtime__delay(200) != BRUCE_OK) return BRUCE_ERR_CANCELLED;
     }

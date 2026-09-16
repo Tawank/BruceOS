@@ -345,7 +345,15 @@ static bruce_result_t archive_app__run_viewer(bruce_viewer_id_t viewer) {
     for (;;) {
         bruce_input_event_t event;
         bruce_result_t result = input__read(&event, 100);
-        if (result == BRUCE_ERR_NOT_FOREGROUND && archive_app__resume_after_handoff()) continue;
+        if (result == BRUCE_ERR_NOT_FOREGROUND && archive_app__resume_after_handoff()) {
+            /* Whatever painted over the screen while backgrounded isn't
+             * restored automatically on switching back (see
+             * image_loader_app.c's identical fix) -- dialog__viewer_scroll()
+             * always repaints from scratch even for a zero-length scroll, so
+             * this is the viewer framework's own way to force that redraw. */
+            (void)dialog__viewer_scroll(viewer, 0);
+            continue;
+        }
         if (result == BRUCE_ERR_NOT_FOREGROUND) break;
         if (result != BRUCE_OK || event.action != BRUCE_INPUT_PRESS) continue;
 
