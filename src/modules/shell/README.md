@@ -176,9 +176,35 @@ the child, or ending this shell). Threading trap state through
 trap action that itself runs `break`/`continue` isn't specially unwound
 back into the loop it interrupted -- an edge case left unhandled.
 
+**`printf FORMAT [ARGUMENT...]`** -- bash-compatible formatted output.
+FORMAT is first backslash-unescaped (`\\`, `\a \b \e \f \n \r \t \v`, `\"`,
+`\NNN` 1-3 octal digits, `\xHH` 1-2 hex digits; an unrecognized `\X` is left
+as literal `\X`), then scanned left to right: literal text passes through
+unchanged, `%%` emits a literal `%` and consumes no ARGUMENT, and every other
+`%...` conversion consumes one ARGUMENT (or `""` if none are left -- `%d`
+and the other numeric conversions then parse that empty string as `0`,
+rather than erroring). Flags (`-+ 0#`), a width, and a `.precision` are all
+accepted and passed straight through to the underlying `vsnprintf` via a
+reconstructed sub-format; only a literal numeric width/precision is
+supported, not `*` (dynamic width/precision from an ARGUMENT) -- that's
+rejected as an invalid format, same as an unrecognized conversion character.
+Conversions: `%s` (the ARGUMENT as-is), `%b` (the ARGUMENT with its own
+backslash escapes additionally decoded, same table as FORMAT's), `%c` (just
+the ARGUMENT's first character, or nothing at all if the ARGUMENT is empty),
+`%d`/`%i` (signed), `%o`/`%u`/`%x`/`%X` (unsigned, given ARGUMENT is parsed
+via `strtol(text, &end, 0)` -- so `0x`/`0`-prefixed ARGUMENTs are read in
+hex/octal, matching `shell_arith.c`'s own numeric-argument convention). If
+FORMAT contains at least one argument-consuming conversion, it's rerun
+against whatever ARGUMENTs are left over once it's been scanned once fully,
+same as bash; with none, it always runs exactly once no matter how many
+ARGUMENTs were given (`printf 'plain\n' ignored extra` prints `plain` once).
+Not implemented: `-v NAME` (assign to a shell variable instead of writing to
+stdout), any floating-point conversion (`%e %f %g` etc.), and the
+`%(FORMAT)T` strftime conversion.
+
 **Builtins** (`shell_builtins.c`)
-- `echo`, `true`, `false`, `cd`, `set`, `unset`, `export`, `local`, `clear`,
-  `reset`, `help`, `exit [N]`.
+- `echo`, `printf`, `true`, `false`, `cd`, `set`, `unset`, `export`, `local`,
+  `clear`, `reset`, `help`, `exit [N]`.
 - `test` / `[` / `[[`: `-eq -ne -lt -le -gt -ge` (integer comparison),
   `=` / `!=` (string comparison), `-z` / `-n` (empty/non-empty), `-e -f -d
   -r -w -x` (file tests, resolved against `$PWD` like any other path
@@ -563,3 +589,24 @@ capture buffer before the text of interest ever appears in it), and the same
 live signal consulted from `shell_compound__loop_should_stop()` instead,
 where an `INT` trap that calls `exit` is what finally ends a `while true`
 loop that would otherwise never stop on its own.
+
+`..._printf_case` covers `printf`: `%s`/`%d` basics, backslash-escape
+decoding of FORMAT (`\t`, `\n`, `%%` as a literal `%` consuming no
+ARGUMENT), width/flags (right-justify, left-justify, zero-pad) passed
+through to the reconstructed sub-format, `%x`/`%X`/`%o` radix conversions,
+`%c` printing just an ARGUMENT's first character (and nothing at all for an
+empty one), `%b`'s additional backslash-decoding of its own ARGUMENT on top
+of `%s`'s usual behavior, FORMAT recycling against leftover ARGUMENTs when
+it has at least one argument-consuming conversion but never recycling with
+none (extra ARGUMENTs then simply ignored), a missing ARGUMENT defaulting to
+`""`/`0` instead of erroring, a missing FORMAT being a usage error (status
+2, same convention `trap`'s own usage error uses), and an unrecognized
+conversion character being a different, status-1 error (matching bash's own
+distinction between the two). Every case redirects the builtin's output to a
+real file and reads it back, reusing
+`selftest__run_shell_builtin_redirect_case()`'s own pattern rather than any
+session/child-process machinery, since printf's output has nothing
+timing-sensitive about it; each expected string spells a printf-emitted
+newline as `\r\n`, not `\n`, per the same ONLCR session-output convention
+noted on `..._output_redirect_case`'s and `..._builtin_redirect_case`'s own
+`expected[]` arrays.

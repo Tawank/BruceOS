@@ -27,6 +27,7 @@ typedef struct {
 
 static const shell_builtin_entry_t s_shell_builtins[] = {
     {"echo", "Print arguments"},
+    {"printf", "Print formatted output"},
     {"true", "Return success"},
     {"false", "Return failure"},
     {"cd", "Change the working directory"},
@@ -526,6 +527,232 @@ bool shell_builtins__fire_signal_trap(shell_state_t *state, bruce_process_signal
     return true;
 }
 
+/* Decodes printf-style backslash escapes: `\\`, `\a`, `\b`, `\e`, `\f`,
+ * `\n`, `\r`, `\t`, `\v`, `\"` (kept as a literal quote, so a shell-quoted
+ * FORMAT that embeds one round-trips), `\NNN` (1-3 octal digits) and `\xHH`
+ * (1-2 hex digits). An unrecognized backslash sequence -- including a
+ * trailing lone `\` -- is left exactly as written (backslash and all)
+ * rather than being treated as an error, matching bash's own leniency here.
+ * Reused for both FORMAT itself (once, up front) and each `%b` ARGUMENT.
+ * Writes into `dest`, which the caller must size to at least `length` bytes
+ * -- every case here consumes at least as many source bytes as it emits --
+ * and returns the decoded length (`dest` is *not* NUL-terminated). */
+static size_t shell_builtins__printf_unescape(const char *src, size_t length, char *dest) {
+    size_t out = 0;
+    for (size_t i = 0; i < length; ++i) {
+        if (src[i] != '\\' || i + 1 >= length) {
+            dest[out++] = src[i];
+            continue;
+        }
+        char c = src[++i];
+        switch (c) {
+            case '\\': dest[out++] = '\\'; break;
+            case 'a': dest[out++] = '\a'; break;
+            case 'b': dest[out++] = '\b'; break;
+            case 'e': dest[out++] = '\033'; break;
+            case 'f': dest[out++] = '\f'; break;
+            case 'n': dest[out++] = '\n'; break;
+            case 'r': dest[out++] = '\r'; break;
+            case 't': dest[out++] = '\t'; break;
+            case 'v': dest[out++] = '\v'; break;
+            case '"': dest[out++] = '"'; break;
+            case 'x': {
+                int value = 0, digits = 0;
+                while (digits < 2 && i + 1 < length && isxdigit((unsigned char)src[i + 1])) {
+                    char h = src[++i];
+                    int nibble = isdigit((unsigned char)h) ? h - '0' : tolower((unsigned char)h) - 'a' + 10;
+                    value = value * 16 + nibble;
+                    digits++;
+                }
+                if (digits == 0) {
+                    dest[out++] = '\\';
+                    dest[out++] = 'x';
+                } else {
+                    dest[out++] = (char)value;
+                }
+                break;
+            }
+            default:
+                if (c >= '0' && c <= '7') {
+                    int value = c - '0', digits = 1;
+                    while (digits < 3 && i + 1 < length && src[i + 1] >= '0' && src[i + 1] <= '7') {
+                        value = value * 8 + (src[++i] - '0');
+                        digits++;
+                    }
+                    dest[out++] = (char)value;
+                } else {
+                    dest[out++] = '\\';
+                    dest[out++] = c;
+                }
+                break;
+        }
+    }
+    return out;
+}
+
+/* Parses one printf-style conversion starting at format[*i] == '%':
+ * optional flags (`-+ 0#`), optional width, optional `.` + precision, then
+ * the conversion character itself -- `*` (dynamic width/precision pulled
+ * from an argument) isn't recognized as a flag/digit, so a specifier using
+ * it falls through to the "invalid" return below, same as any other
+ * unsupported conversion character. On success, copies the whole
+ * specifier -- leading '%' through the conversion character -- into `spec`
+ * (NUL-terminated) and returns the conversion character; advances *i to
+ * just past it. Returns 0 (and still advances *i, past whatever it did
+ * recognize) if the specifier is malformed or its conversion character
+ * isn't one of "diouxXcsb%". */
+static char shell_builtins__printf_spec(const char *format, size_t length, size_t *i, char *spec, size_t spec_cap) {
+    size_t start = *i;
+    size_t pos = start + 1;
+    /* format[pos] != '\0' guards every strchr() below against its one
+     * gotcha: strchr(s, '\0') always "matches" (the needle string's own
+     * terminator), which would otherwise treat an embedded NUL byte -- from
+     * a `\0` octal escape decoded into the middle of FORMAT -- as a valid
+     * flag or conversion character instead of the garbage byte it is. */
+    while (pos < length && format[pos] != '\0' && strchr("-+ 0#", format[pos]) != NULL) pos++;
+    while (pos < length && isdigit((unsigned char)format[pos])) pos++;
+    if (pos < length && format[pos] == '.') {
+        pos++;
+        while (pos < length && isdigit((unsigned char)format[pos])) pos++;
+    }
+    if (pos >= length || format[pos] == '\0' || strchr("diouxXcsb%", format[pos]) == NULL) {
+        *i = pos < length ? pos + 1 : pos;
+        return 0;
+    }
+    char conv = format[pos];
+    size_t spec_len = pos - start + 1;
+    *i = pos + 1;
+    if (spec_len + 1 > spec_cap) return 0; /* absurd width/precision -- bail rather than overflow spec */
+    memcpy(spec, format + start, spec_len);
+    spec[spec_len] = '\0';
+    return conv;
+}
+
+/* `strtol(..., 0)`, same base-0 (plain decimal or a 0x/0-prefixed literal)
+ * convention shell_arith.c's own number parsing uses; an empty or entirely
+ * non-numeric ARG is silently 0 rather than an error, same leniency
+ * shell_arith.c already applies elsewhere. */
+static long shell_builtins__printf_parse_long(const char *text) {
+    if (text == NULL || text[0] == '\0') return 0;
+    char *end = NULL;
+    return strtol(text, &end, 0);
+}
+
+/* `printf FORMAT [ARGUMENT...]`: bash-style formatted output. FORMAT's
+ * backslash escapes are decoded once up front (see
+ * shell_builtins__printf_unescape()), then scanned left to right, copying
+ * literal text through unchanged and consuming one ARGUMENT per conversion
+ * (`%%` consumes none). If ARGUMENTs remain once FORMAT is exhausted, the
+ * whole of FORMAT runs again against them, repeating until every ARGUMENT
+ * has been consumed -- bash's own recycling behavior -- but only when
+ * FORMAT contains at least one argument-consuming conversion; otherwise it
+ * always runs exactly once no matter how many ARGUMENTs were given, same as
+ * bash ("printf hi extra" prints "hi" once, not twice). A conversion with
+ * no ARGUMENT left to consume (either because none were given at all, or
+ * this is the last, short pass of a recycle) uses "" (or, for the numeric
+ * conversions, the same string parsed as 0) rather than erroring, matching
+ * bash's own "not enough arguments" fallback. Supports `%s`, `%b` (like
+ * `%s`, but backslash-decodes the argument first), `%c`, `%d`/`%i`, `%o`,
+ * `%u`, `%x`/`%X`, and `%%`, each with the usual flags/width/precision
+ * (parsed but not interpreted here -- passed straight through to the
+ * underlying vsnprintf via a per-conversion sub-format built from the
+ * matched specifier). Not implemented: `-v NAME` (assign into a variable
+ * instead of printing), floating-point conversions (`%e/%f/%g` and
+ * friends), `%(FORMAT)T` (strftime), and `*` dynamic width/precision. */
+static int shell_builtins__printf(int argc, char **argv) {
+    if (argc < 2) {
+        stdio__printf("shell: printf: usage: printf FORMAT [ARGUMENT...]\n");
+        return 2;
+    }
+    const char *raw_format = argv[1];
+    size_t raw_length = strlen(raw_format);
+    char *format = memory__malloc(raw_length + 1);
+    if (format == NULL) {
+        stdio__printf("shell: out of memory\n");
+        return 1;
+    }
+    size_t format_length = shell_builtins__printf_unescape(raw_format, raw_length, format);
+    format[format_length] = '\0';
+
+    int arg_index = 2;
+    bool any_conversion = false;
+    int status = 0;
+    int consumed_before_pass;
+    do {
+        consumed_before_pass = arg_index;
+        for (size_t i = 0; i < format_length;) {
+            if (format[i] != '%') {
+                (void)stdio__write(&format[i], 1);
+                i++;
+                continue;
+            }
+            size_t start = i;
+            char spec[32];
+            char conv = shell_builtins__printf_spec(format, format_length, &i, spec, sizeof(spec));
+            if (conv == 0) {
+                stdio__printf("shell: printf: %.*s: invalid format\n", (int)(i - start), format + start);
+                status = 1;
+                goto done;
+            }
+            if (conv == '%') {
+                (void)stdio__write("%", 1);
+                continue;
+            }
+            any_conversion = true;
+            const char *arg = arg_index < argc ? argv[arg_index++] : "";
+            char sub_spec[40];
+            size_t spec_length = strlen(spec);
+            switch (conv) {
+                case 's': stdio__printf(spec, arg); break;
+                case 'b': {
+                    size_t arg_length = strlen(arg);
+                    char *decoded = memory__malloc(arg_length + 1);
+                    if (decoded == NULL) {
+                        stdio__printf("shell: out of memory\n");
+                        status = 1;
+                        goto done;
+                    }
+                    size_t decoded_length = shell_builtins__printf_unescape(arg, arg_length, decoded);
+                    decoded[decoded_length] = '\0';
+                    memcpy(sub_spec, spec, spec_length - 1);
+                    sub_spec[spec_length - 1] = 's';
+                    sub_spec[spec_length] = '\0';
+                    stdio__printf(sub_spec, decoded);
+                    memory__free(decoded);
+                    break;
+                }
+                /* An empty ARG has no "first character" -- bash's own %c
+                 * prints nothing for one rather than a literal NUL byte. */
+                case 'c':
+                    if (arg[0] != '\0') stdio__printf(spec, (int)(unsigned char)arg[0]);
+                    break;
+                case 'd':
+                case 'i':
+                    memcpy(sub_spec, spec, spec_length - 1);
+                    sub_spec[spec_length - 1] = 'l';
+                    sub_spec[spec_length] = conv;
+                    sub_spec[spec_length + 1] = '\0';
+                    stdio__printf(sub_spec, shell_builtins__printf_parse_long(arg));
+                    break;
+                case 'o':
+                case 'u':
+                case 'x':
+                case 'X':
+                    memcpy(sub_spec, spec, spec_length - 1);
+                    sub_spec[spec_length - 1] = 'l';
+                    sub_spec[spec_length] = conv;
+                    sub_spec[spec_length + 1] = '\0';
+                    stdio__printf(sub_spec, (unsigned long)shell_builtins__printf_parse_long(arg));
+                    break;
+                default: break; /* unreachable -- shell_builtins__printf_spec() only returns "diouxXcsb%" */
+            }
+        }
+    } while (any_conversion && arg_index < argc && arg_index > consumed_before_pass);
+done:
+    memory__free(format);
+    return status;
+}
+
 bool shell_builtins__is_builtin(const char *name) {
     for (size_t i = 0; i < sizeof(s_shell_builtins) / sizeof(s_shell_builtins[0]); ++i) {
         if (strcmp(name, s_shell_builtins[i].name) == 0) return true;
@@ -551,6 +778,7 @@ int shell_builtins__run(shell_state_t *state, int argc, char **argv) {
         stdio__printf("\n");
         return 0;
     }
+    if (strcmp(argv[0], "printf") == 0) return shell_builtins__printf(argc, argv);
     if (strcmp(argv[0], "true") == 0) return 0;
     if (strcmp(argv[0], "false") == 0) return 1;
     if (strcmp(argv[0], "test") == 0 || strcmp(argv[0], "[") == 0 || strcmp(argv[0], "[[") == 0) {

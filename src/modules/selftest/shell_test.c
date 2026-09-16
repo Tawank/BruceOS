@@ -2904,3 +2904,122 @@ bool selftest__run_shell_trap_case(void) {
     printf("[selftest] shell/trap: %s\n", ok ? "OK" : "failed");
     return ok;
 }
+
+/* Runs COMMAND (a `printf ... > PATH` line, PATH truncated/created fresh by
+ * the redirect itself), then reads PATH back and compares its whole content
+ * against EXPECTED -- the same "redirect a builtin's output to a real file,
+ * then read the file back" pattern selftest__run_shell_builtin_redirect_case()
+ * establishes, reused here since it needs no session/child-process machinery
+ * at all for output this deterministic (unlike an interactive read()'s live
+ * echo, a builtin's redirected output has nothing timing-sensitive about
+ * it). Returns false (and prints a diagnostic) if COMMAND's own exit status
+ * isn't 0, the file's content doesn't match EXPECTED byte-for-byte, or the
+ * two APPEND commands (each optional, NULL to skip) don't also succeed --
+ * used to build up multi-line expected content across more than one printf
+ * call against the same file. */
+static bool selftest__shell_printf_probe(
+    shell_state_t *state, const char *path, const char *command, const char *append1, const char *append2,
+    const char *expected
+) {
+    (void)storage__remove(path);
+    int status = shell__execute_line(state, command);
+    if (status == 0 && append1 != NULL) status = shell__execute_line(state, append1);
+    if (status == 0 && append2 != NULL) status = shell__execute_line(state, append2);
+    char result[128] = {0};
+    size_t result_size = 0;
+    bruce_result_t read_result = BRUCE_ERR_NOT_FOUND;
+    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
+    if (storage__open(path, BRUCE_STORAGE_OPEN_READ, &file) == BRUCE_OK) {
+        read_result = storage__read(file, result, sizeof(result) - 1, &result_size);
+        (void)storage__close(file);
+    }
+    size_t expected_length = strlen(expected);
+    bool ok = status == 0 && read_result == BRUCE_OK && result_size == expected_length &&
+              memcmp(result, expected, expected_length) == 0;
+    if (!ok) {
+        printf(
+            "[selftest] shell/printf: %s failed (status=%d read=%d result=%.*s)\n", command, status,
+            (int)read_result, (int)result_size, result
+        );
+    }
+    (void)storage__remove(path);
+    return ok;
+}
+
+bool selftest__run_shell_printf_case(void) {
+    shell_state_t state;
+    shell__state_init(&state);
+
+    /* Every expected[] string below spells a printf-emitted newline as
+     * "\r\n", not "\n" -- same ONLCR session-output convention noted on
+     * selftest__run_shell_output_redirect_case()'s and
+     * selftest__run_shell_builtin_redirect_case()'s own expected[] arrays:
+     * the capture session redirected output goes through applies it to
+     * every '\n' a builtin writes, printf included. */
+    bool ok =
+        selftest__shell_printf_probe(
+            &state, "/apps/shell_printf_basic.txt", "printf '%s-%d\\n' foo 42 > /apps/shell_printf_basic.txt", NULL,
+            NULL, "foo-42\r\n"
+        ) &&
+        /* `\t`/`\n` reach printf's own FORMAT argument as literal backslash
+         * pairs -- single-quoted, so this shell's own parser doesn't decode
+         * them first -- for printf's own escape decoding to turn into a real
+         * tab/newline; `%%` is a literal '%', consuming no argument. */
+        selftest__shell_printf_probe(
+            &state, "/apps/shell_printf_escape.txt",
+            "printf 'tab\\there %%\\n' > /apps/shell_printf_escape.txt", NULL, NULL, "tab\there %\r\n"
+        ) &&
+        /* Width/flags (right-justify, left-justify, zero-pad) pass straight
+         * through to the underlying vsnprintf via the reconstructed
+         * "%5ld"/"%-5ld"/"%05ld" sub-format -- see shell_builtins__printf(). */
+        selftest__shell_printf_probe(
+            &state, "/apps/shell_printf_width.txt", "printf '[%5d]\\n' 3 > /apps/shell_printf_width.txt",
+            "printf '[%-5d]\\n' 3 >> /apps/shell_printf_width.txt",
+            "printf '[%05d]\\n' 7 >> /apps/shell_printf_width.txt", "[    3]\r\n[3    ]\r\n[00007]\r\n"
+        );
+    ok = ok && selftest__shell_printf_probe(
+                    &state, "/apps/shell_printf_radix.txt",
+                    "printf '%x %X %o\\n' 255 255 8 > /apps/shell_printf_radix.txt", NULL, NULL, "ff FF 10\r\n"
+                );
+    /* %c prints just the ARG's first character -- and, unlike bash embedding
+     * a stray NUL byte for one, nothing at all when the ARG is empty. */
+    ok = ok && selftest__shell_printf_probe(
+                    &state, "/apps/shell_printf_char.txt", "printf '<%c>\\n' hello > /apps/shell_printf_char.txt",
+                    "printf '<%c>\\n' '' >> /apps/shell_printf_char.txt", NULL, "<h>\r\n<>\r\n"
+                );
+    /* %b additionally backslash-decodes its own ARG (here, single-quoted so
+     * this shell's parser leaves the "\n" untouched for printf itself to
+     * decode) on top of %s's usual behavior -- FORMAT's own trailing "\n" is
+     * a second, separately-decoded newline. */
+    ok = ok && selftest__shell_printf_probe(
+                    &state, "/apps/shell_printf_b.txt", "printf '%b\\n' 'literal\\nescape' > /apps/shell_printf_b.txt",
+                    NULL, NULL, "literal\r\nescape\r\n"
+                );
+    /* FORMAT recycles against leftover ARGUMENTs when it has at least one
+     * argument-consuming conversion (three ARGs, one %s -> three passes) --
+     * but never recycles at all when it has none, no matter how many extra
+     * ARGUMENTs were given. */
+    ok = ok && selftest__shell_printf_probe(
+                    &state, "/apps/shell_printf_recycle.txt", "printf '[%s]' a b c > /apps/shell_printf_recycle.txt",
+                    "printf '\\n' >> /apps/shell_printf_recycle.txt", NULL, "[a][b][c]\r\n"
+                );
+    ok = ok && selftest__shell_printf_probe(
+                    &state, "/apps/shell_printf_no_recycle.txt",
+                    "printf 'plain\\n' ignored extra > /apps/shell_printf_no_recycle.txt", NULL, NULL, "plain\r\n"
+                );
+    /* A conversion with no ARGUMENT left (here, none given at all) uses ""
+     * for %s and 0 for a numeric conversion instead of erroring. */
+    ok = ok && selftest__shell_printf_probe(
+                    &state, "/apps/shell_printf_missing.txt",
+                    "printf '[%s][%d]\\n' > /apps/shell_printf_missing.txt", NULL, NULL, "[][0]\r\n"
+                );
+
+    /* No FORMAT at all: usage error, status 2 -- same convention `trap`'s
+     * own usage error uses. An unrecognized conversion character: status 1,
+     * matching bash's real printf (distinct from the usage-error case). */
+    ok = ok && shell__execute_line(&state, "printf") == 2 && shell__execute_line(&state, "printf '%q\\n'") == 1;
+    shell__state_free(&state);
+
+    printf("[selftest] shell/printf: %s\n", ok ? "OK" : "failed");
+    return ok;
+}
