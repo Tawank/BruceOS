@@ -1,6 +1,7 @@
 #include "bnu_app.h"
 #include "bnu_internal.h"
 
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -179,11 +180,22 @@ static bool less__scroll_up(less__state_t *state, size_t rows) {
     return true;
 }
 
+/* Always case-insensitive, same as real less(1)'s "-i" -- there's no "-I"/
+ * smart-case toggle here since state->search has nowhere to remember flags
+ * across a run, and unconditional case-folding is what most people expect
+ * from "/searchterm" anyway. */
+static bool less__ci_equal(const char *a, const char *b, size_t length) {
+    for (size_t i = 0; i < length; ++i) {
+        if (tolower((unsigned char)a[i]) != tolower((unsigned char)b[i])) return false;
+    }
+    return true;
+}
+
 static bool
 less__find(const char *data, size_t length, size_t from, const char *needle, size_t needle_len, size_t *out_offset) {
     if (needle_len == 0 || from > length || needle_len > length - from) return false;
     for (size_t i = from; i + needle_len <= length; ++i) {
-        if (memcmp(data + i, needle, needle_len) == 0) {
+        if (less__ci_equal(data + i, needle, needle_len)) {
             *out_offset = less__line_start(data, i);
             return true;
         }
