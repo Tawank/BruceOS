@@ -64,3 +64,13 @@ bruce_result_t bnu__load_stdin(size_t size, const void **out_data, size_t *out_l
 bruce_result_t bnu__regex_compile(
     const char *pattern, bool ignore_case, regex_t *out_re, char *error, size_t error_capacity
 );
+
+/* Matches `text[0..length)` -- one line, a slice of a whole file/stdin
+ * buffer already loaded elsewhere, not its own NUL-terminated string --
+ * against `re` (from bnu__regex_compile()). Uses REG_STARTEND (a BSD
+ * regexec() extension) to search that exact byte range directly instead of
+ * copying the line out into its own NUL-terminated buffer first; `^`/`$`
+ * anchor to `text`/`text + length` under REG_STARTEND, matching a one-line-
+ * at-a-time caller's expectations. Shared by grep (bnu_grep_app.c) and sed
+ * (bnu_sed_app.c). */
+bool bnu__regex_matches(const regex_t *re, const char *text, size_t length);

@@ -166,3 +166,8 @@ bruce_result_t bnu__regex_compile(
     }
     return BRUCE_OK;
 }
+
+bool bnu__regex_matches(const regex_t *re, const char *text, size_t length) {
+    regmatch_t range = {.rm_so = 0, .rm_eo = (regoff_t)length};
+    return regexec(re, text, 1, &range, REG_STARTEND) == 0;
+}

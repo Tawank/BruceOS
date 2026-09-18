@@ -168,6 +168,7 @@ static const bruce_app_descriptor_t s_default_apps[] = {
     {"less",                 "Page through text",                                         "Content", bnu_less_app_main,            0                     },
     {"md5sum",               "Print MD5 checksums",                                       "Content", bnu_md5sum_app_main,          0                     },
     {"rev",                  "Reverse the characters of each line",                       "Content", bnu_rev_app_main,             0                     },
+    {"sed",                  "Edit text with a stream editor script",                     "Content", bnu_sed_app_main,             0                     },
     {"seq",                  "Print a sequence of numbers",                               "Content", bnu_seq_app_main,             0                     },
     {"sha256sum",            "Print SHA-256 checksums",                                   "Content", bnu_sha256sum_app_main,       0                     },
     {"sort",                 "Sort the lines of a file or stdin",                         "Content", bnu_sort_app_main,            0                     },

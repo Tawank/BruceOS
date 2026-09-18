@@ -20,6 +20,7 @@
 #include "base64_test.h"
 #include "bluetooth_test.h"
 #include "bnu_test.h"
+#include "bnu_sed_test.h"
 #include "clock_test.h"
 #include "compress_test.h"
 #include "config_test.h"
@@ -229,6 +230,7 @@ static const selftest__case_t selftest__cases[] = {
     SELFTEST_CASE(selftest__run_shell_trap_case),
     SELFTEST_CASE(selftest__run_shell_printf_case),
     SELFTEST_CASE(selftest__run_bnu_case),
+    SELFTEST_CASE(selftest__run_bnu_sed_case),
     SELFTEST_CASE(selftest__run_bnu_text_case),
     SELFTEST_CASE(selftest__run_bnu_free_stack_case),
     SELFTEST_CASE(selftest__run_launcher_apps_discovery_case),

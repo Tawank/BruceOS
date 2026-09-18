@@ -35,6 +35,7 @@ int bnu_md5sum_app_main(int argc, char **argv);
 int bnu_sha256sum_app_main(int argc, char **argv);
 int bnu_crc32_app_main(int argc, char **argv);
 int bnu_grep_app_main(int argc, char **argv);
+int bnu_sed_app_main(int argc, char **argv);
 int bnu_wc_app_main(int argc, char **argv);
 int bnu_tr_app_main(int argc, char **argv);
 int bnu_uniq_app_main(int argc, char **argv);

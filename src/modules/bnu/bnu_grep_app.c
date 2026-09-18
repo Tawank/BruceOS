@@ -149,21 +149,6 @@ static bool bnu__grep_contains(
     return false;
 }
 
-/* Matches `text[0..length)` -- one line, a slice of the whole file/stdin
- * buffer this command already loaded, not its own NUL-terminated string --
- * against `re` (compiled by bnu__regex_compile()). REG_STARTEND is a BSD
- * regexec() extension that takes its search range as pmatch[0] *input*
- * instead of requiring a NUL-terminated C string, which is exactly what's
- * needed here: copying every line out into its own scratch buffer first
- * just to satisfy plain POSIX regexec() would be wasted work (and a second
- * size cap to think about) when the source buffer already has the bytes.
- * `^`/`$` anchor to `text`/`text + length` under REG_STARTEND, matching
- * this function's one-line-at-a-time caller's expectations. */
-static bool bnu__regex_matches(const regex_t *re, const char *text, size_t length) {
-    regmatch_t range = {.rm_so = 0, .rm_eo = (regoff_t)length};
-    return regexec(re, text, 1, &range, REG_STARTEND) == 0;
-}
-
 static void bnu__grep_print_line(
     const bnu_grep_options_t *opt, const char *filename, uint32_t number, char separator, const char *text,
     size_t length
