@@ -87,6 +87,21 @@ bool selftest__run_bnu_case(void) {
     char *grep_miss_argv[] = {"grep", "-q", "not-present-anywhere", "/selftest_bnu_grep.txt"};
     char *grep_context_invalid_argv[] = {"grep", "-A", "99999", "needle", "/selftest_bnu_grep.txt"};
     char *grep_no_pattern_argv[] = {"grep"};
+    /* ERE alternation + anchors: matches only the two whole-line entries,
+     * not "beta needle"/"delta needle" (which contain "needle" but aren't
+     * exactly "alpha" or "epsilon") -- something a plain substring search
+     * could never express, so this is the actual regex-vs-literal behavior
+     * change, not just a re-run of the same literal case through the new
+     * code path. */
+    char *grep_regex_argv[] = {"grep", "-q", "^(alpha|epsilon)$", "/selftest_bnu_grep.txt"};
+    /* "needle$" as a literal fixed string: no line ends with the four
+     * literal characters n-e-e-d-l-e-$ (there's no '$' anywhere in the
+     * fixture), so -F must report no match even though the same text
+     * unquoted as a regex (anchored "needle" at end of line) would match
+     * "beta needle"/"delta needle" above -- proves -F actually suppresses
+     * regex interpretation instead of being silently ignored. */
+    char *grep_literal_argv[] = {"grep", "-F", "-q", "needle$", "/selftest_bnu_grep.txt"};
+    char *grep_bad_pattern_argv[] = {"grep", "-q", "(", "/selftest_bnu_grep.txt"};
     char *wc_argv[] = {"wc", "/selftest_bnu_wc.txt"};
     char *wc_flags_argv[] = {"wc", "-l", "-w", "/selftest_bnu_wc.txt"};
     char *wc_missing_argv[] = {"wc", "/selftest_bnu_wc_missing.txt"};
@@ -222,6 +237,8 @@ bool selftest__run_bnu_case(void) {
     bruce_result_t grep_match_result = bnu_grep_app_main(8, grep_argv);
     bruce_result_t grep_invert_result = bnu_grep_app_main(5, grep_invert_argv);
     bruce_result_t grep_miss_result = bnu_grep_app_main(4, grep_miss_argv);
+    bruce_result_t grep_regex_result = bnu_grep_app_main(4, grep_regex_argv);
+    bruce_result_t grep_literal_result = bnu_grep_app_main(5, grep_literal_argv);
 #if CONFIG_BRUCE_QEMU_TEST_MODE
     BNU_CHECK_BOOL(
         ok, grep_match_result == BRUCE_OK || grep_match_result == BRUCE_ERR_NOT_FOUND, "grep -n -A 1 -B 1"
@@ -232,13 +249,29 @@ bool selftest__run_bnu_case(void) {
     BNU_CHECK_BOOL(
         ok, grep_miss_result == BRUCE_OK || grep_miss_result == BRUCE_ERR_NOT_FOUND, "grep -q (no match)"
     );
+    BNU_CHECK_BOOL(
+        ok, grep_regex_result == BRUCE_OK || grep_regex_result == BRUCE_ERR_NOT_FOUND, "grep -q (regex alternation)"
+    );
+    BNU_CHECK_BOOL(
+        ok, grep_literal_result == BRUCE_ERR_NOT_FOUND, "grep -F -q (literal '$' not a regex anchor)"
+    );
 #else
     BNU_CHECK_RESULT(ok, grep_match_result, BRUCE_OK, "grep -n -A 1 -B 1");
     BNU_CHECK_RESULT(ok, grep_invert_result, BRUCE_OK, "grep -v -q");
     BNU_CHECK_RESULT(ok, grep_miss_result, BRUCE_ERR_NOT_FOUND, "grep -q (no match)");
+    BNU_CHECK_RESULT(ok, grep_regex_result, BRUCE_OK, "grep -q (regex alternation)");
+    BNU_CHECK_RESULT(
+        ok, grep_literal_result, BRUCE_ERR_NOT_FOUND, "grep -F -q (literal '$' not a regex anchor)"
+    );
 #endif
     BNU_CHECK_RESULT(
         ok, bnu_grep_app_main(5, grep_context_invalid_argv), BRUCE_ERR_INVALID_ARGUMENT, "grep -A 99999"
+    );
+    /* regcomp() runs before any file is even opened (see bnu_grep_app_main()'s
+     * doc comment), so this doesn't depend on the fixture's content and needs
+     * no QEMU-swap-backend leniency like the cases above. */
+    BNU_CHECK_RESULT(
+        ok, bnu_grep_app_main(4, grep_bad_pattern_argv), BRUCE_ERR_INVALID_ARGUMENT, "grep -q (invalid regex)"
     );
     BNU_CHECK_RESULT(
         ok, bnu_grep_app_main(1, grep_no_pattern_argv), BRUCE_ERR_INVALID_ARGUMENT, "grep (no pattern)"

@@ -154,3 +154,15 @@ bruce_result_t bnu__load_stdin(size_t size, const void **out_data, size_t *out_l
     *out_length = offset;
     return BRUCE_OK;
 }
+
+bruce_result_t bnu__regex_compile(
+    const char *pattern, bool ignore_case, regex_t *out_re, char *error, size_t error_capacity
+) {
+    int flags = REG_EXTENDED | (ignore_case ? REG_ICASE : 0);
+    int status = regcomp(out_re, pattern, flags);
+    if (status != 0) {
+        if (error != NULL && error_capacity > 0) (void)regerror(status, out_re, error, error_capacity);
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    return BRUCE_OK;
+}

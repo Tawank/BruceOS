@@ -18,6 +18,7 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <ctype.h>
+#include <regex.h> /* needs size_t already defined -- see string.h/stdio.h above */
 
 #include "rom/ets_sys.h"
 
@@ -126,6 +127,16 @@ static const struct esp_elfsym g_esp_libc_elfsyms[] = {
 
     ESP_ELFSYM_EXPORT(longjmp),
     ESP_ELFSYM_EXPORT(setjmp),
+
+    /* regex.h -- POSIX regcomp()/regexec() (picolibc's BSD "Henry Spencer"
+     * engine), so an ELF app can link against the same regex support
+     * bnu_grep_app.c uses on the firmware side (see bnu_internal.h) without
+     * vendoring its own copy. */
+
+    ESP_ELFSYM_EXPORT(regcomp),
+    ESP_ELFSYM_EXPORT(regexec),
+    ESP_ELFSYM_EXPORT(regfree),
+    ESP_ELFSYM_EXPORT(regerror),
 
     ESP_ELFSYM_END
 };

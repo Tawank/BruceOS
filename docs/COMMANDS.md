@@ -1911,14 +1911,16 @@ Search for text in files or stdin
 ```
 Usage: grep <pattern> [args...] [options]
 
-Search for a literal substring in files or stdin (no regular expressions).
+Search for PATTERN (a POSIX extended regular expression by default) in files or stdin.
 
 Arguments:
     pattern (required)
-              Literal substring to search for (no regex)
+              POSIX extended regular expression to search for (see -F)
 
 Options:
     -i        Ignore case when matching
+
+    -F        Treat PATTERN as a literal fixed string instead of a regular expression
 
     -v        Select non-matching lines instead
 

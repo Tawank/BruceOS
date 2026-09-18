@@ -16,11 +16,18 @@
 /*
  * Text search command: grep.
  *
- * Basic substring search only -- no regular expressions. Content is loaded
- * fully into external memory (capped at BNU_GREP_MAX_BYTES, the same limit
- * `less` uses for the same reason) and read back through a read-only map;
- * context lines (-A/-B/-C) then just reference spans of that buffer
- * directly instead of being copied into a separate line buffer.
+ * PATTERN is a POSIX extended regular expression (ERE) by default, matched
+ * via the toolchain libc's regcomp()/regexec() (see bnu__regex_compile() in
+ * bnu_internal.h/bnu_app.c); -F reverts to the original literal-substring
+ * scan (bnu__grep_contains()) for a caller that wants a fixed string taken
+ * completely literally, or just doesn't want to pay for a regex compile.
+ * Content is loaded fully into external memory (capped at BNU_GREP_MAX_BYTES,
+ * the same limit `less` uses for the same reason) and read back through a
+ * read-only map; context lines (-A/-B/-C) then just reference spans of that
+ * buffer directly instead of being copied into a separate line buffer, and
+ * the regex path matches those same spans in place too (see
+ * bnu__regex_matches()'s REG_STARTEND use) rather than copying each line out
+ * into its own NUL-terminated buffer first.
  */
 
 #define BNU_GREP_MAX_BYTES (512u * 1024u)
@@ -44,6 +51,10 @@ typedef struct {
     bool silent;
     uint32_t before;
     uint32_t after;
+    /* When true, `pattern`/`pattern_length` are matched literally
+     * (bnu__grep_contains()) instead of through `regex` (-F). */
+    bool literal;
+    regex_t regex;
 } bnu_grep_options_t;
 
 /* Per-source (per-file/stdin) working state; `ring` is allocated once by the
@@ -138,6 +149,21 @@ static bool bnu__grep_contains(
     return false;
 }
 
+/* Matches `text[0..length)` -- one line, a slice of the whole file/stdin
+ * buffer this command already loaded, not its own NUL-terminated string --
+ * against `re` (compiled by bnu__regex_compile()). REG_STARTEND is a BSD
+ * regexec() extension that takes its search range as pmatch[0] *input*
+ * instead of requiring a NUL-terminated C string, which is exactly what's
+ * needed here: copying every line out into its own scratch buffer first
+ * just to satisfy plain POSIX regexec() would be wasted work (and a second
+ * size cap to think about) when the source buffer already has the bytes.
+ * `^`/`$` anchor to `text`/`text + length` under REG_STARTEND, matching
+ * this function's one-line-at-a-time caller's expectations. */
+static bool bnu__regex_matches(const regex_t *re, const char *text, size_t length) {
+    regmatch_t range = {.rm_so = 0, .rm_eo = (regoff_t)length};
+    return regexec(re, text, 1, &range, REG_STARTEND) == 0;
+}
+
 static void bnu__grep_print_line(
     const bnu_grep_options_t *opt, const char *filename, uint32_t number, char separator, const char *text,
     size_t length
@@ -197,8 +223,9 @@ static void bnu__grep_process_buffer(
         number++;
         const char *line_text = data + line_start;
 
-        bool matches =
-            bnu__grep_contains(line_text, line_length, opt->pattern, opt->pattern_length, opt->ignore_case);
+        bool matches = opt->literal
+                           ? bnu__grep_contains(line_text, line_length, opt->pattern, opt->pattern_length, opt->ignore_case)
+                           : bnu__regex_matches(&opt->regex, line_text, line_length);
         if (opt->invert) matches = !matches;
 
         if (matches) {
@@ -243,10 +270,12 @@ static bruce_result_t bnu__grep_run_source(
 
 int bnu_grep_app_main(int argc, char **argv) {
     ArgParser *parser =
-        bnu__new_parser("Search for a literal substring in files or stdin (no regular expressions).");
+        bnu__new_parser("Search for PATTERN (a POSIX extended regular expression by default) in files or stdin.");
     if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
     ap_add_flag(parser, "i");
     ap_set_opt_help(parser, "i", "Ignore case when matching");
+    ap_add_flag(parser, "F");
+    ap_set_opt_help(parser, "F", "Treat PATTERN as a literal fixed string instead of a regular expression");
     ap_add_flag(parser, "v");
     ap_set_opt_help(parser, "v", "Select non-matching lines instead");
     ap_add_flag(parser, "n");
@@ -265,7 +294,7 @@ int bnu_grep_app_main(int argc, char **argv) {
     ap_set_opt_help(parser, "C", "Print NUM lines of context before and after each match (like -A NUM -B NUM)");
     ap_add_str_opt(parser, "stdin-size", NULL);
     ap_set_opt_help(parser, "stdin-size", "Read exactly this many bytes from stdin (used by shell pipes)");
-    ap_add_required_arg(parser, "pattern", "Literal substring to search for (no regex)");
+    ap_add_required_arg(parser, "pattern", "POSIX extended regular expression to search for (see -F)");
     ap_allow_extra_args(parser);
     ap_unknown_options_as_args(parser);
     if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
@@ -277,6 +306,7 @@ int bnu_grep_app_main(int argc, char **argv) {
         .count_only = ap_found(parser, "c"),
         .list_only = ap_found(parser, "l"),
         .silent = ap_found(parser, "q"),
+        .literal = ap_found(parser, "F"),
     };
 
     bool a_found = ap_found(parser, "A");
@@ -298,10 +328,26 @@ int bnu_grep_app_main(int argc, char **argv) {
     int file_count = total - 1;
     opt.show_filename = file_count > 1;
 
+    /* Compiled once up front (real grep does the same) so a bad pattern is
+     * reported immediately, before opening any files -- not, say, after
+     * already having printed matches from an earlier file argument. Skipped
+     * entirely for -F, which never touches opt.regex (bnu__grep_process_buffer()
+     * checks opt->literal before ever reading it). */
+    if (!opt.literal) {
+        char error[128];
+        bruce_result_t regex_result = bnu__regex_compile(opt.pattern, opt.ignore_case, &opt.regex, error, sizeof(error));
+        if (regex_result != BRUCE_OK) {
+            stdio__printf("grep: %s: %s\n", opt.pattern, error);
+            ap_free(parser);
+            return regex_result;
+        }
+    }
+
     bnu_grep_line_t *ring = NULL;
     if (opt.before > 0) {
         ring = memory__malloc(opt.before * sizeof(*ring));
         if (ring == NULL) {
+            if (!opt.literal) regfree(&opt.regex);
             ap_free(parser);
             return BRUCE_ERR_NO_MEMORY;
         }
@@ -351,6 +397,7 @@ int bnu_grep_app_main(int argc, char **argv) {
     }
 
     if (ring != NULL) memory__free(ring);
+    if (!opt.literal) regfree(&opt.regex);
     ap_free(parser);
     if (result != BRUCE_OK) return result;
     return matched_any ? BRUCE_OK : BRUCE_ERR_NOT_FOUND;

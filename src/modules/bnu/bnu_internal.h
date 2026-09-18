@@ -6,8 +6,12 @@
  */
 
 #include <stdbool.h>
-#include <stddef.h>
+#include <stddef.h> /* must precede regex.h -- see below */
 #include <stdint.h>
+/* picolibc's regex.h uses size_t without requesting it (only `#define
+ * __need_ptrdiff_t`), so it needs <stddef.h> included first or it won't
+ * compile. */
+#include <regex.h>
 
 #include "args.h"
 #include "core_sdk/result.h"
@@ -48,3 +52,15 @@ bruce_result_t bnu__load_path(const char *path, size_t max_bytes, const void **o
  * text_app.c, which originated it). Caller frees the buffer with
  * memory__external_free(). */
 bruce_result_t bnu__load_stdin(size_t size, const void **out_data, size_t *out_length);
+
+/* Compiles `pattern` as a POSIX ERE, case-insensitively if `ignore_case`.
+ * No REG_NOSUB: callers match via REG_STARTEND (bnu_grep_app.c's
+ * bnu__regex_matches()), which needs pmatch[] honored even for a plain
+ * match/no-match answer.
+ *
+ * BRUCE_OK: `*out_re` is compiled; caller must regfree() it.
+ * BRUCE_ERR_INVALID_ARGUMENT: `error` (if given) holds regerror()'s message;
+ * `*out_re` must NOT be regfree()'d. */
+bruce_result_t bnu__regex_compile(
+    const char *pattern, bool ignore_case, regex_t *out_re, char *error, size_t error_capacity
+);
