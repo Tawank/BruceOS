@@ -44,6 +44,7 @@ set(BRUCE_SELFTEST_SOURCES
     "modules/selftest/process_test.c"
     "modules/selftest/shell_test.c"
     "modules/selftest/ssh_sftp_test.c"
+    "modules/selftest/stdio_test.c"
     "modules/selftest/terminal_test.c"
     "modules/selftest/udp_test.c"
     "modules/selftest/wasm_bruce_sdk_test.c"

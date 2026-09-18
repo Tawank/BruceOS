@@ -391,6 +391,11 @@ static bool shell_executor__buffer_append(shell_executor__buffer_t *buffer, cons
 static int shell_executor__capture_external(int argc, char **argv, shell_executor__buffer_t *out_buffer) {
     bruce_stdio_session_t session = BRUCE_STDIO_SESSION_INVALID;
     if (stdio__session_create(&session) != BRUCE_OK) return 1;
+    /* Captured verbatim into `out_buffer` for the next pipe stage or
+     * "$(...)", never rendered through a terminal grid -- raw, or a '\n'
+     * inside binary output (a piped image, ...) picks up a corrupting '\r'.
+     * See stdio__session_set_raw()'s doc comment. */
+    (void)stdio__session_set_raw(session, true);
     if (stdio__session_route_children(session) != BRUCE_OK) {
         (void)stdio__session_close(session);
         return 1;
@@ -754,6 +759,9 @@ static bool shell_executor__read_file(const char *path, shell_executor__buffer_t
 static int shell_executor__stream_external_to_file(int argc, char **argv, bruce_file_id_t file) {
     bruce_stdio_session_t session = BRUCE_STDIO_SESSION_INVALID;
     if (stdio__session_create(&session) != BRUCE_OK) return 1;
+    /* Streamed verbatim into `file` -- see shell_executor__capture_external()'s
+     * identical raw-session comment above. */
+    (void)stdio__session_set_raw(session, true);
     if (stdio__session_route_children(session) != BRUCE_OK) {
         (void)stdio__session_close(session);
         return 1;
@@ -858,7 +866,11 @@ static int shell_executor__builtin_redirected(
         return 2;
     }
     bruce_stdio_session_t capture = BRUCE_STDIO_SESSION_INVALID;
-    if (stdio__session_create(&capture) != BRUCE_OK || stdio__session_capture_self(capture) != BRUCE_OK) {
+    bool created = stdio__session_create(&capture) == BRUCE_OK;
+    /* Written straight to `file` below -- see shell_executor__capture_external()'s
+     * identical raw-session comment above. */
+    if (created) (void)stdio__session_set_raw(capture, true);
+    if (!created || stdio__session_capture_self(capture) != BRUCE_OK) {
         stdio__printf("shell: %s: out of memory\n", path);
         if (capture != BRUCE_STDIO_SESSION_INVALID) (void)stdio__session_close(capture);
         (void)storage__close(file);
@@ -933,6 +945,10 @@ static int shell_executor__builtin_with_input(
         shell_executor__buffer_free(input);
         return 2;
     }
+    /* Written straight to `file` below when has_output -- see
+     * shell_executor__capture_external()'s identical raw-session comment
+     * above. */
+    (void)stdio__session_set_raw(capture, true);
     bool queued = true;
     if (input->length > 0) {
         bruce_result_t written = stdio__session_write_input(capture, input->data, input->length);
@@ -1187,6 +1203,14 @@ static int shell_executor__pipe_write(
         shell_executor__buffer_free(buffer);
         return 1;
     }
+    /* The target's own output, whether relayed live below or captured for a
+     * further pipe stage/redirect -- see shell_executor__capture_external()'s
+     * identical raw-session comment above. A relayed destination that's
+     * genuinely interactive (e.g. "less") still renders correctly: the one
+     * real ONLCR translation it needs happens where its bytes finally reach
+     * the shell's own terminal-connected session, in
+     * shell_executor__pipe_relay()'s stdio__write() call below. */
+    (void)stdio__session_set_raw(session, true);
     /* Establishes the new session's tty geometry before the target starts, so
      * an interactive destination (e.g. "less") sees a real screen size from
      * its very first tty__isatty()/tty__get_size() call instead of looking

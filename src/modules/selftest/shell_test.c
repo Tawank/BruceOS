@@ -1125,11 +1125,12 @@ bool selftest__run_shell_brace_case(void) {
  * reflect memcpy writes -- the same documented glitch bnu_test.c's grep case
  * works around (see the comment there and memory_test.c's own
  * CONFIG_BRUCE_QEMU_TEST_MODE guards). On real hardware PSRAM is available
- * and content is compared exactly, including the '\r' that
- * stdio__session_write_output()'s ONLCR translation inserts before every
- * '\n' relayed through a routed session -- a pre-existing characteristic of
- * the whole capture pipeline (also shared by "cmd > file"), not unique to
- * this fix. */
+ * and content is compared exactly: plain '\n', not '\r\n' -- these are
+ * headless capture/redirect sessions with no terminal grid on the other end
+ * (stdio__session_set_raw(), shell_executor__capture_external()/
+ * pipe_write()), so stdio__session_write_output()'s ONLCR translation is
+ * disabled on them rather than mangling whatever binary payload happens to
+ * contain a '\n' byte (a piped image being the case that surfaced this). */
 bool selftest__run_shell_pipe_redirect_case(void) {
     const char *source_path = "/apps/shell_pipe_source.txt";
     const char *result_path = "/apps/shell_pipe_result.txt";
@@ -1191,7 +1192,7 @@ bool selftest__run_shell_pipe_redirect_case(void) {
 #if CONFIG_BRUCE_QEMU_TEST_MODE
     bool ok = status_a == 0 && status_b == 0 && read_result == BRUCE_OK && result_size > 0;
 #else
-    static const char expected[] = "line1\r\nline2\r\nline1\r\nline2\r\n";
+    static const char expected[] = "line1\nline2\nline1\nline2\n";
     bool ok = status_a == 0 && status_b == 0 && read_result == BRUCE_OK &&
               result_size == sizeof(expected) - 1 && memcmp(result, expected, sizeof(expected) - 1) == 0;
 #endif
@@ -1369,11 +1370,7 @@ bool selftest__run_shell_output_redirect_case(void) {
     (void)storage__remove(source_path);
     (void)storage__remove(result_path);
 
-    /* "\r\n", not "\n" -- the same routed-session line-ending convention
-     * documented on selftest__run_shell_pipe_redirect_case()'s own
-     * expected[] applies here too: a child's stdout crosses the same
-     * console-style stdio session either way. */
-    static const char expected_after_append[] = "alpha\r\nbeta\r\nalpha\r\nbeta\r\n";
+    static const char expected_after_append[] = "alpha\nbeta\nalpha\nbeta\n";
     bool ok = status_truncate == 0 && status_append == 0 && status_fail != 0 && read_after_append == BRUCE_OK &&
               after_append_size == sizeof(expected_after_append) - 1 &&
               memcmp(after_append, expected_after_append, sizeof(expected_after_append) - 1) == 0 &&
@@ -1484,9 +1481,9 @@ bool selftest__run_shell_fd_redirect_case(void) {
     (void)storage__remove(source_path);
     (void)storage__remove(result_path);
 
-    static const char expected_after_stderr_append[] = "alpha\r\nbeta\r\nalpha\r\nbeta\r\n";
-    static const char expected_after_amp[] = "alpha\r\nbeta\r\n";
-    static const char expected_after_dup[] = "alpha\r\nbeta\r\n";
+    static const char expected_after_stderr_append[] = "alpha\nbeta\nalpha\nbeta\n";
+    static const char expected_after_amp[] = "alpha\nbeta\n";
+    static const char expected_after_dup[] = "alpha\nbeta\n";
     bool ok = status_stderr == 0 && status_stderr_append == 0 && status_amp == 0 && status_dup == 0 &&
               status_dup_only == 0 && status_bad_fd != 0 && status_bad_dup != 0 &&
               read_after_stderr_append == BRUCE_OK &&
@@ -1647,16 +1644,13 @@ bool selftest__run_shell_builtin_redirect_case(void) {
     (void)storage__remove(combo_path);
     (void)storage__remove(show_path);
 
-    /* "\r\n", not "\n" -- same ONLCR session-output convention noted on
-     * selftest__run_shell_output_redirect_case()'s own expected[] above: the
-     * capture session this goes through applies it just the same as any
-     * other session. expected_combo/expected_show both lead with
-     * "redirected\r\n" -- stdio__read_line()'s own per-byte echo of what it
-     * consumed from the redirected input, landing in the same captured
-     * output as whatever the builtin/function prints afterward (see the
-     * comment above the "combo" statement). */
-    static const char expected_echo[] = "hello world\r\nagain\r\n";
-    static const char expected_func[] = "hi\r\nthere\r\n";
+    /* expected_combo/expected_show both lead with "redirected\n" --
+     * stdio__read_line()'s own per-byte echo of what it consumed from the
+     * redirected input, landing in the same captured output as whatever the
+     * builtin/function prints afterward (see the comment above the "combo"
+     * statement). */
+    static const char expected_echo[] = "hello world\nagain\n";
+    static const char expected_func[] = "hi\nthere\n";
     bool ok = staged && status_echo == 0 && status_echo_append == 0 && status_def == 0 && status_func == 0 &&
               status_read == 0 && status_confirm == 0 && status_combo == 0 && status_show_def == 0 &&
               status_show == 0 && status_twice_def == 0 && status_missing == 1 && read_echo == BRUCE_OK &&
@@ -1683,9 +1677,9 @@ bool selftest__run_shell_builtin_redirect_case(void) {
     ok = ok && read_confirm == BRUCE_OK && confirm_size > 0 && read_combo == BRUCE_OK && combo_size > 0 &&
          read_show == BRUCE_OK && show_size > 0;
 #else
-    static const char expected_confirm[] = "confirmed:redirected\r\n";
-    static const char expected_combo[] = "redirected\r\n";
-    static const char expected_show[] = "redirected\r\ngot:redirected\r\n";
+    static const char expected_confirm[] = "confirmed:redirected\n";
+    static const char expected_combo[] = "redirected\n";
+    static const char expected_show[] = "redirected\ngot:redirected\n";
     ok = ok && status_twice == 1 && read_confirm == BRUCE_OK && confirm_size == sizeof(expected_confirm) - 1 &&
          memcmp(confirm_result, expected_confirm, sizeof(expected_confirm) - 1) == 0 && read_combo == BRUCE_OK &&
          combo_size == sizeof(expected_combo) - 1 &&
@@ -1772,7 +1766,7 @@ bool selftest__run_shell_input_redirect_case(void) {
 #if CONFIG_BRUCE_QEMU_TEST_MODE
     bool ok = status == 0 && read_result == BRUCE_OK && result_size > 0 && rejections;
 #else
-    static const char expected[] = "line1\r\nline2\r\n";
+    static const char expected[] = "line1\nline2\n";
     bool ok = status == 0 && read_result == BRUCE_OK && result_size == sizeof(expected) - 1 &&
               memcmp(result, expected, sizeof(expected) - 1) == 0 && rejections;
 #endif
@@ -1961,9 +1955,9 @@ bool selftest__run_shell_heredoc_case(void) {
     bool ok = status == 0 && read_expand == BRUCE_OK && expand_size > 0 && read_literal == BRUCE_OK &&
               literal_size > 0 && read_striptabs == BRUCE_OK && striptabs_size > 0;
 #else
-    static const char expected_expand[] = "hello world\r\n";
-    static const char expected_literal[] = "literal $x\r\n";
-    static const char expected_striptabs[] = "tabbed\r\n";
+    static const char expected_expand[] = "hello world\n";
+    static const char expected_literal[] = "literal $x\n";
+    static const char expected_striptabs[] = "tabbed\n";
     bool ok = status == 0 && read_expand == BRUCE_OK && expand_size == sizeof(expected_expand) - 1 &&
               memcmp(expand_result, expected_expand, sizeof(expected_expand) - 1) == 0 && read_literal == BRUCE_OK &&
               literal_size == sizeof(expected_literal) - 1 &&
@@ -3014,16 +3008,10 @@ bool selftest__run_shell_printf_case(void) {
     shell_state_t state;
     shell__state_init(&state);
 
-    /* Every expected[] string below spells a printf-emitted newline as
-     * "\r\n", not "\n" -- same ONLCR session-output convention noted on
-     * selftest__run_shell_output_redirect_case()'s and
-     * selftest__run_shell_builtin_redirect_case()'s own expected[] arrays:
-     * the capture session redirected output goes through applies it to
-     * every '\n' a builtin writes, printf included. */
     bool ok =
         selftest__shell_printf_probe(
             &state, "/apps/shell_printf_basic.txt", "printf '%s-%d\\n' foo 42 > /apps/shell_printf_basic.txt", NULL,
-            NULL, "foo-42\r\n"
+            NULL, "foo-42\n"
         ) &&
         /* `\t`/`\n` reach printf's own FORMAT argument as literal backslash
          * pairs -- single-quoted, so this shell's own parser doesn't decode
@@ -3031,7 +3019,7 @@ bool selftest__run_shell_printf_case(void) {
          * tab/newline; `%%` is a literal '%', consuming no argument. */
         selftest__shell_printf_probe(
             &state, "/apps/shell_printf_escape.txt",
-            "printf 'tab\\there %%\\n' > /apps/shell_printf_escape.txt", NULL, NULL, "tab\there %\r\n"
+            "printf 'tab\\there %%\\n' > /apps/shell_printf_escape.txt", NULL, NULL, "tab\there %\n"
         ) &&
         /* Width/flags (right-justify, left-justify, zero-pad) pass straight
          * through to the underlying vsnprintf via the reconstructed
@@ -3039,17 +3027,17 @@ bool selftest__run_shell_printf_case(void) {
         selftest__shell_printf_probe(
             &state, "/apps/shell_printf_width.txt", "printf '[%5d]\\n' 3 > /apps/shell_printf_width.txt",
             "printf '[%-5d]\\n' 3 >> /apps/shell_printf_width.txt",
-            "printf '[%05d]\\n' 7 >> /apps/shell_printf_width.txt", "[    3]\r\n[3    ]\r\n[00007]\r\n"
+            "printf '[%05d]\\n' 7 >> /apps/shell_printf_width.txt", "[    3]\n[3    ]\n[00007]\n"
         );
     ok = ok && selftest__shell_printf_probe(
                     &state, "/apps/shell_printf_radix.txt",
-                    "printf '%x %X %o\\n' 255 255 8 > /apps/shell_printf_radix.txt", NULL, NULL, "ff FF 10\r\n"
+                    "printf '%x %X %o\\n' 255 255 8 > /apps/shell_printf_radix.txt", NULL, NULL, "ff FF 10\n"
                 );
     /* %c prints just the ARG's first character -- and, unlike bash embedding
      * a stray NUL byte for one, nothing at all when the ARG is empty. */
     ok = ok && selftest__shell_printf_probe(
                     &state, "/apps/shell_printf_char.txt", "printf '<%c>\\n' hello > /apps/shell_printf_char.txt",
-                    "printf '<%c>\\n' '' >> /apps/shell_printf_char.txt", NULL, "<h>\r\n<>\r\n"
+                    "printf '<%c>\\n' '' >> /apps/shell_printf_char.txt", NULL, "<h>\n<>\n"
                 );
     /* %b additionally backslash-decodes its own ARG (here, single-quoted so
      * this shell's parser leaves the "\n" untouched for printf itself to
@@ -3057,7 +3045,7 @@ bool selftest__run_shell_printf_case(void) {
      * a second, separately-decoded newline. */
     ok = ok && selftest__shell_printf_probe(
                     &state, "/apps/shell_printf_b.txt", "printf '%b\\n' 'literal\\nescape' > /apps/shell_printf_b.txt",
-                    NULL, NULL, "literal\r\nescape\r\n"
+                    NULL, NULL, "literal\nescape\n"
                 );
     /* FORMAT recycles against leftover ARGUMENTs when it has at least one
      * argument-consuming conversion (three ARGs, one %s -> three passes) --
@@ -3065,17 +3053,17 @@ bool selftest__run_shell_printf_case(void) {
      * ARGUMENTs were given. */
     ok = ok && selftest__shell_printf_probe(
                     &state, "/apps/shell_printf_recycle.txt", "printf '[%s]' a b c > /apps/shell_printf_recycle.txt",
-                    "printf '\\n' >> /apps/shell_printf_recycle.txt", NULL, "[a][b][c]\r\n"
+                    "printf '\\n' >> /apps/shell_printf_recycle.txt", NULL, "[a][b][c]\n"
                 );
     ok = ok && selftest__shell_printf_probe(
                     &state, "/apps/shell_printf_no_recycle.txt",
-                    "printf 'plain\\n' ignored extra > /apps/shell_printf_no_recycle.txt", NULL, NULL, "plain\r\n"
+                    "printf 'plain\\n' ignored extra > /apps/shell_printf_no_recycle.txt", NULL, NULL, "plain\n"
                 );
     /* A conversion with no ARGUMENT left (here, none given at all) uses ""
      * for %s and 0 for a numeric conversion instead of erroring. */
     ok = ok && selftest__shell_printf_probe(
                     &state, "/apps/shell_printf_missing.txt",
-                    "printf '[%s][%d]\\n' > /apps/shell_printf_missing.txt", NULL, NULL, "[][0]\r\n"
+                    "printf '[%s][%d]\\n' > /apps/shell_printf_missing.txt", NULL, NULL, "[][0]\n"
                 );
 
     /* No FORMAT at all: usage error, status 2 -- same convention `trap`'s

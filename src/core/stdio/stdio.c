@@ -47,6 +47,7 @@ typedef struct {
     uint32_t tty_generation; /* 0 == size never set (not a tty) */
     bruce_tty_mode_t tty_mode;
     bool output_last_was_cr; /* tracks '\r' across write() calls, for ONLCR translation */
+    bool raw;                /* skips ONLCR translation -- see stdio__session_set_raw() */
     /* True when the last byte this session's owner wrote was not '\n' -- i.e.
      * there's an unterminated partial line sitting on the current row. Starts
      * false (nothing written yet counts as "at column 0"), same as a session
@@ -182,6 +183,20 @@ bruce_result_t stdio__session_close(bruce_stdio_session_t session) {
     (void)process_registry__resource_release(resource);
     free(entry);
     (void)process_registry__set_child_stdio_session(BRUCE_STDIO_SESSION_INVALID);
+    return BRUCE_OK;
+}
+
+bruce_result_t stdio__session_set_raw(bruce_stdio_session_t session, bool raw) {
+    bruce_process_id_t owner = process__current_id();
+    stdio__ensure_init();
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    stdio__session_t *entry = stdio__find_locked(session);
+    if (!stdio__owned_locked(entry, owner)) {
+        xSemaphoreGive(s_lock);
+        return entry == NULL ? BRUCE_ERR_NOT_FOUND : BRUCE_ERR_PERMISSION;
+    }
+    entry->raw = raw;
+    xSemaphoreGive(s_lock);
     return BRUCE_OK;
 }
 
@@ -412,7 +427,12 @@ static bool stdio__session_push_output_byte(bruce_stdio_session_t session, char 
  * layer in between, so callers writing a bare '\n' (as every stdio__printf
  * caller does) would print a staircase instead of a newline. Applying the
  * same ONLCR translation here keeps session output behaving like a normal
- * terminal without requiring every caller to spell out "\r\n". */
+ * terminal without requiring every caller to spell out "\r\n" -- except for
+ * a session marked raw (stdio__session_set_raw()), which skips it entirely:
+ * that's a headless byte pipe (a pipe/redirect destination's stdin, a
+ * captured producer's/builtin's output, ...) with no terminal grid on the
+ * other end, where '\n' is just another data byte and inserting '\r' ahead
+ * of it corrupts whatever binary payload happens to contain one. */
 static bruce_result_t
 stdio__session_write_output(bruce_stdio_session_t session, const void *data, size_t size) {
     if (data == NULL || size == 0) return BRUCE_ERR_INVALID_ARGUMENT;
@@ -427,7 +447,7 @@ stdio__session_write_output(bruce_stdio_session_t session, const void *data, siz
                 xSemaphoreGive(s_lock);
                 return BRUCE_ERR_NOT_FOUND;
             }
-            bool need_cr = !entry->output_last_was_cr;
+            bool need_cr = !entry->raw && !entry->output_last_was_cr;
             xSemaphoreGive(s_lock);
             if (need_cr && !stdio__session_push_output_byte(session, '\r')) return BRUCE_ERR_CANCELLED;
         }

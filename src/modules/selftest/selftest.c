@@ -54,6 +54,7 @@
 #include "process_test.h"
 #include "shell_test.h"
 #include "ssh_sftp_test.h"
+#include "stdio_test.h"
 #include "terminal_test.h"
 #include "udp_test.h"
 #include "wasm_bruce_sdk_test.h"
@@ -229,6 +230,7 @@ static const selftest__case_t selftest__cases[] = {
     SELFTEST_CASE(selftest__run_shell_job_control_case),
     SELFTEST_CASE(selftest__run_shell_trap_case),
     SELFTEST_CASE(selftest__run_shell_printf_case),
+    SELFTEST_CASE(selftest__run_stdio_raw_session_case),
     SELFTEST_CASE(selftest__run_bnu_case),
     SELFTEST_CASE(selftest__run_bnu_sed_case),
     SELFTEST_CASE(selftest__run_bnu_text_case),

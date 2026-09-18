@@ -133,6 +133,25 @@ bruce_result_t stdio__session_create(bruce_stdio_session_t *out_session);
 bruce_result_t stdio__session_close(bruce_stdio_session_t session);
 
 /**
+ * @brief Enables or disables ONLCR translation ('\n' -> "\r\n") on a session's output.
+ *
+ * A session defaults to translating, matching a real terminal's own ONLCR
+ * behavior -- the right default for anything a caller might render through a
+ * terminal grid (see stdio__session_write_output()'s doc comment in
+ * stdio.c). A session that instead moves bytes between two programs
+ * verbatim -- feeding a pipe/redirect destination's stdin, capturing a
+ * producer's or builtin's output for the next pipe stage, "$(...)", or a
+ * ">"/">>" file -- must disable it, or any '\n' byte inside genuinely binary
+ * output (a piped image, a base64/hash decode, ...) comes out with a
+ * spurious '\r' in front of it. Must be called right after creating the
+ * session, before anything writes to it.
+ *
+ * @param session Session to change. Must be owned by the caller.
+ * @param raw True to disable ONLCR translation, false to restore the default.
+ */
+bruce_result_t stdio__session_set_raw(bruce_stdio_session_t session, bool raw);
+
+/**
  * @brief Routes subsequently launched child processes' stdio through `session`.
  *
  * Routing a session makes subsequently launched child processes use it
