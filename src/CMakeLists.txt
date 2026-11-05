@@ -259,6 +259,7 @@ idf_component_register(SRCS
                     cjson
                     bt
                     esp_event
+                    espcoredump
                     driver
                     esp_adc
                     esp_driver_gpio

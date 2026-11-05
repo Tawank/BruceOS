@@ -798,6 +798,7 @@ int terminal_app_main(int argc, char **argv) {
     memory__free(startup_line);
     startup_line = NULL;
 
+    bool was_backgrounded = false;
     while (!state.exit_requested) {
         terminal__drain_output(&state);
         if (state.child != BRUCE_PROCESS_ID_INVALID) {
@@ -819,8 +820,13 @@ int terminal_app_main(int argc, char **argv) {
         bruce_result_t input_result = input__read(&event, TERMINAL__INPUT_TIMEOUT_MS);
         if (input_result == BRUCE_ERR_NOT_FOREGROUND) {
             (void)runtime__delay(TERMINAL__HIDDEN_DELAY_MS);
-            state.dirty = true;
+            was_backgrounded = true;
             continue;
+        }
+
+        if (was_backgrounded) {
+            was_backgrounded = false;
+            state.dirty = true;
         }
         if (input_result != BRUCE_OK || event.action != BRUCE_INPUT_PRESS) continue;
         terminal__handle_input(&state, &event);

@@ -13,6 +13,14 @@
 #include "esp_adc/adc_cali_scheme.h" // IWYU pragma: keep
 #include "esp_adc/adc_oneshot.h"     // IWYU pragma: keep
 #include "esp_sleep.h"
+#include "sdkconfig.h"
+#if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
+#include <stdio.h>
+#include <stdlib.h>
+
+#include "esp_core_dump.h"
+#include "esp_flash.h"
+#endif
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -79,6 +87,109 @@ bruce_result_t device__power_off(uint32_t delay_ms) {
                    pdPASS
                ? BRUCE_OK
                : BRUCE_ERR_NO_MEMORY;
+}
+
+#if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
+/* ESP-IDF reports "nothing saved" several ways (erased partition, bad size,
+ * bad checksum); callers only need to know there is no usable dump. */
+static bruce_result_t device__coredump_locate(size_t *out_address, size_t *out_size) {
+    if (esp_core_dump_image_check() != ESP_OK) return BRUCE_ERR_NOT_FOUND;
+    size_t address = 0;
+    size_t size = 0;
+    if (esp_core_dump_image_get(&address, &size) != ESP_OK || size == 0) return BRUCE_ERR_NOT_FOUND;
+    *out_address = address;
+    *out_size = size;
+    return BRUCE_OK;
+}
+#endif
+
+bruce_result_t device__coredump_get_size(size_t *out_size) {
+    bruce_result_t permission = permission__check(BRUCE_PERMISSION_PROCESS);
+    if (permission != BRUCE_OK) return permission;
+    if (out_size == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+#if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
+    size_t address = 0;
+    return device__coredump_locate(&address, out_size);
+#else
+    return BRUCE_ERR_UNSUPPORTED;
+#endif
+}
+
+bruce_result_t device__coredump_get_summary(bruce_device_coredump_summary_t *out_summary) {
+    bruce_result_t permission = permission__check(BRUCE_PERMISSION_PROCESS);
+    if (permission != BRUCE_OK) return permission;
+    if (out_summary == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+#if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
+    size_t address = 0;
+    size_t size = 0;
+    bruce_result_t result = device__coredump_locate(&address, &size);
+    if (result != BRUCE_OK) return result;
+
+    /* ~300 bytes; heap rather than the caller's (often default-sized) stack. */
+    esp_core_dump_summary_t *summary = calloc(1, sizeof(*summary));
+    if (summary == NULL) return BRUCE_ERR_NO_MEMORY;
+    if (esp_core_dump_get_summary(summary) != ESP_OK) {
+        free(summary);
+        return BRUCE_ERR_IO;
+    }
+
+    memset(out_summary, 0, sizeof(*out_summary));
+    snprintf(out_summary->task, sizeof(out_summary->task), "%.*s", (int)sizeof(summary->exc_task), summary->exc_task);
+    out_summary->pc = summary->exc_pc;
+    uint32_t depth = summary->exc_bt_info.depth;
+    if (depth > BRUCE_DEVICE_COREDUMP_BACKTRACE_MAX) depth = BRUCE_DEVICE_COREDUMP_BACKTRACE_MAX;
+    for (uint32_t i = 0; i < depth; ++i) out_summary->backtrace[i] = summary->exc_bt_info.bt[i];
+    out_summary->backtrace_depth = depth;
+    out_summary->backtrace_corrupted = summary->exc_bt_info.corrupted;
+#if CONFIG_IDF_TARGET_ARCH_XTENSA
+    out_summary->exception_cause = summary->ex_info.exc_cause;
+    out_summary->exception_address = summary->ex_info.exc_vaddr;
+#endif
+    snprintf(
+        out_summary->app_elf_sha256,
+        sizeof(out_summary->app_elf_sha256),
+        "%.*s",
+        (int)sizeof(summary->app_elf_sha256),
+        (const char *)summary->app_elf_sha256
+    );
+    free(summary);
+    if (esp_core_dump_get_panic_reason(out_summary->reason, sizeof(out_summary->reason)) != ESP_OK) {
+        out_summary->reason[0] = '\0';
+    }
+    return BRUCE_OK;
+#else
+    return BRUCE_ERR_UNSUPPORTED;
+#endif
+}
+
+bruce_result_t device__coredump_read(size_t offset, void *buffer, size_t size) {
+    bruce_result_t permission = permission__check(BRUCE_PERMISSION_PROCESS);
+    if (permission != BRUCE_OK) return permission;
+    if (buffer == NULL && size > 0) return BRUCE_ERR_INVALID_ARGUMENT;
+#if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
+    size_t address = 0;
+    size_t image_size = 0;
+    bruce_result_t result = device__coredump_locate(&address, &image_size);
+    if (result != BRUCE_OK) return result;
+    if (offset > image_size || size > image_size - offset) return BRUCE_ERR_INVALID_ARGUMENT;
+    if (size == 0) return BRUCE_OK;
+    return esp_flash_read(NULL, buffer, (uint32_t)(address + offset), (uint32_t)size) == ESP_OK ? BRUCE_OK
+                                                                                                : BRUCE_ERR_IO;
+#else
+    (void)offset;
+    (void)size;
+    return BRUCE_ERR_UNSUPPORTED;
+#endif
+}
+
+bruce_result_t device__coredump_erase(void) {
+    bruce_result_t permission = permission__check(BRUCE_PERMISSION_PROCESS);
+    if (permission != BRUCE_OK) return permission;
+#if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
+    return esp_core_dump_image_erase() == ESP_OK ? BRUCE_OK : BRUCE_ERR_IO;
+#else
+    return BRUCE_ERR_UNSUPPORTED;
+#endif
 }
 
 void device__power_hold_init(void) {

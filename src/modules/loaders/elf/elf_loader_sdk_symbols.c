@@ -1916,6 +1916,10 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(device__get_battery),
     ESP_ELFSYM_EXPORT(device__restart),
     ESP_ELFSYM_EXPORT(device__power_off),
+    ESP_ELFSYM_EXPORT(device__coredump_get_size),
+    ESP_ELFSYM_EXPORT(device__coredump_get_summary),
+    ESP_ELFSYM_EXPORT(device__coredump_read),
+    ESP_ELFSYM_EXPORT(device__coredump_erase),
 
     /* Wall clock */
     ESP_ELFSYM_EXPORT(clock__get_utc),

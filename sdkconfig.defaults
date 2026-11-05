@@ -132,3 +132,9 @@ CONFIG_WAMR_INTERP_CLASSIC=y
 CONFIG_WAMR_INTERP_LOADER_NORMAL=y
 CONFIG_WAMR_ENABLE_MULTI_MODULE=n
 CONFIG_WAMR_ENABLE_SHARED_MEMORY=n
+
+# Save a core dump to the existing `coredump` partition on panic, so crashes
+# with a corrupted backtrace (e.g. the "task stack is sane" cache asserts) can
+# still be decoded afterwards with `idf.py coredump-info`.
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y

@@ -9,6 +9,7 @@
 
 #include "args.h"
 #include "core_sdk/audio.h"
+#include "core_sdk/base64.h"
 #include "core_sdk/clock.h"
 #include "core_sdk/device.h"
 #include "core_sdk/input.h"
@@ -19,7 +20,7 @@
 #include "core_sdk/stdio.h"
 #include "core_sdk/tty.h"
 
-/* System commands: free, top, shutdown, reboot, stty, date, sleep, tone, wev. */
+/* System commands: free, top, shutdown, reboot, coredump, stty, date, sleep, tone, wev. */
 
 /* Heap-allocated, not a local array: on top of the legend/block-map buffers
  * `free -m` already keeps on the heap, this is another ~1.7K that a stack
@@ -925,6 +926,108 @@ int bnu_reboot_app_main(int argc, char **argv) {
     ap_free(parser);
     stdio__printf("Rebooting...\n");
     return device__restart(0);
+}
+
+/* 57 input bytes encode to exactly one 76-character base64 line. */
+#define BNU_COREDUMP_LINE_BYTES 57u
+#define BNU_COREDUMP_YIELD_LINES 16u
+
+static bruce_result_t bnu__coredump_print_info(void) {
+    size_t size = 0;
+    bruce_result_t result = device__coredump_get_size(&size);
+    if (result == BRUCE_ERR_NOT_FOUND) {
+        stdio__printf("No core dump saved.\n");
+        return BRUCE_OK;
+    }
+    if (result != BRUCE_OK) return result;
+
+    bruce_device_coredump_summary_t *summary = malloc(sizeof(*summary));
+    if (summary == NULL) return BRUCE_ERR_NO_MEMORY;
+    result = device__coredump_get_summary(summary);
+    if (result != BRUCE_OK) {
+        free(summary);
+        return result;
+    }
+    stdio__printf("Crashed task: %s\n", summary->task[0] != '\0' ? summary->task : "?");
+    stdio__printf("PC:           0x%08" PRIx32 "\n", summary->pc);
+    if (summary->reason[0] != '\0') stdio__printf("Reason:       %s\n", summary->reason);
+    if (summary->exception_cause != 0 || summary->exception_address != 0) {
+        stdio__printf(
+            "Exception:    cause %" PRIu32 ", address 0x%08" PRIx32 "\n",
+            summary->exception_cause,
+            summary->exception_address
+        );
+    }
+    stdio__printf("Backtrace:   ");
+    for (uint32_t i = 0; i < summary->backtrace_depth; ++i) stdio__printf(" 0x%08" PRIx32, summary->backtrace[i]);
+    stdio__printf("%s\n", summary->backtrace_corrupted ? " |<-CORRUPTED" : "");
+    stdio__printf("ELF SHA256:   %s\n", summary->app_elf_sha256);
+    stdio__printf("Dump size:    %u bytes\n", (unsigned)size);
+    stdio__printf(
+        "\nFull decode on the host (all tasks):\n"
+        "  coredump raw > core.b64   (then copy core.b64 to the PC)\n"
+        "  idf.py coredump-info -c core.b64 --core-format b64\n"
+    );
+    free(summary);
+    return BRUCE_OK;
+}
+
+/* Base64 lines only, so the output can be redirected or copied from a serial
+ * log straight into a file for `idf.py coredump-info --core-format b64`. */
+static bruce_result_t bnu__coredump_print_raw(void) {
+    size_t size = 0;
+    bruce_result_t result = device__coredump_get_size(&size);
+    if (result == BRUCE_ERR_NOT_FOUND) stdio__printf("No core dump saved.\n");
+    if (result != BRUCE_OK) return result;
+
+    uint8_t chunk[BNU_COREDUMP_LINE_BYTES];
+    char line[BRUCE_BASE64_ENCODED_SIZE(BNU_COREDUMP_LINE_BYTES) + 1];
+    unsigned lines = 0;
+    for (size_t offset = 0; offset < size; offset += BNU_COREDUMP_LINE_BYTES) {
+        size_t length = size - offset < BNU_COREDUMP_LINE_BYTES ? size - offset : BNU_COREDUMP_LINE_BYTES;
+        result = device__coredump_read(offset, chunk, length);
+        if (result == BRUCE_OK) result = base64__encode(chunk, length, line, sizeof(line));
+        if (result != BRUCE_OK) return result;
+        stdio__printf("%s\n", line);
+        /* Same reason as memorydump: a continuously writable serial port can
+         * otherwise starve the idle task long enough to trip its watchdog. */
+        if (++lines % BNU_COREDUMP_YIELD_LINES == 0) {
+            result = runtime__delay(1);
+            if (result != BRUCE_OK) return result;
+        }
+    }
+    return BRUCE_OK;
+}
+
+int bnu_coredump_app_main(int argc, char **argv) {
+    ArgParser *parser = bnu__new_parser(
+        "Show the core dump saved by the last crash: 'info' (default) prints the crashed task, PC and "
+        "backtrace; 'raw' prints the whole dump as base64 for idf.py coredump-info; 'erase' deletes it."
+    );
+    if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
+    ap_add_optional_arg(parser, "action", "'info', 'raw', or 'erase'");
+    if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
+    const char *action = ap_get_arg(parser, "action");
+    char action_copy[8] = "info";
+    if (action != NULL) snprintf(action_copy, sizeof(action_copy), "%s", action);
+    ap_free(parser);
+
+    bruce_result_t result;
+    if (strcmp(action_copy, "info") == 0) {
+        result = bnu__coredump_print_info();
+    } else if (strcmp(action_copy, "raw") == 0) {
+        result = bnu__coredump_print_raw();
+    } else if (strcmp(action_copy, "erase") == 0) {
+        result = device__coredump_erase();
+        if (result == BRUCE_OK) stdio__printf("Core dump erased.\n");
+    } else {
+        stdio__printf("coredump: unknown action '%s'\n", action_copy);
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    if (result == BRUCE_ERR_UNSUPPORTED) {
+        stdio__printf("coredump: this firmware was built without CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH\n");
+    }
+    return result;
 }
 
 int bnu_stty_app_main(int argc, char **argv) {

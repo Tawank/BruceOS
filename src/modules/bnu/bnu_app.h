@@ -48,6 +48,7 @@ int bnu_wl_copy_app_main(int argc, char **argv);
 int bnu_wl_paste_app_main(int argc, char **argv);
 int bnu_xxd_app_main(int argc, char **argv);
 int bnu_memorydump_app_main(int argc, char **argv);
+int bnu_coredump_app_main(int argc, char **argv);
 int bnu_gzip_app_main(int argc, char **argv);
 int bnu_gunzip_app_main(int argc, char **argv);
 int bnu_tar_app_main(int argc, char **argv);
