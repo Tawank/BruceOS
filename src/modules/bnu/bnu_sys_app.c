@@ -936,7 +936,11 @@ static bruce_result_t bnu__coredump_print_info(void) {
     size_t size = 0;
     bruce_result_t result = device__coredump_get_size(&size);
     if (result == BRUCE_ERR_NOT_FOUND) {
-        stdio__printf("No core dump saved.\n");
+        stdio__printf("No core dump saved (partition is blank).\n");
+        return BRUCE_OK;
+    }
+    if (result == BRUCE_ERR_INVALID_STATE) {
+        stdio__printf("Core dump partition was written but its header is damaged.\n");
         return BRUCE_OK;
     }
     if (result != BRUCE_OK) return result;
@@ -944,6 +948,15 @@ static bruce_result_t bnu__coredump_print_info(void) {
     bruce_device_coredump_summary_t *summary = malloc(sizeof(*summary));
     if (summary == NULL) return BRUCE_ERR_NO_MEMORY;
     result = device__coredump_get_summary(summary);
+    if (result == BRUCE_ERR_INVALID_STATE) {
+        free(summary);
+        stdio__printf(
+            "A %u-byte core dump is saved but its checksum is invalid (the crash handler probably\n"
+            "didn't finish writing it). 'coredump raw' still exports it for idf.py coredump-info.\n",
+            (unsigned)size
+        );
+        return BRUCE_OK;
+    }
     if (result != BRUCE_OK) {
         free(summary);
         return result;
@@ -977,7 +990,8 @@ static bruce_result_t bnu__coredump_print_info(void) {
 static bruce_result_t bnu__coredump_print_raw(void) {
     size_t size = 0;
     bruce_result_t result = device__coredump_get_size(&size);
-    if (result == BRUCE_ERR_NOT_FOUND) stdio__printf("No core dump saved.\n");
+    if (result == BRUCE_ERR_NOT_FOUND) stdio__printf("No core dump saved (partition is blank).\n");
+    if (result == BRUCE_ERR_INVALID_STATE) stdio__printf("Core dump header is damaged; nothing to export.\n");
     if (result != BRUCE_OK) return result;
 
     uint8_t chunk[BNU_COREDUMP_LINE_BYTES];

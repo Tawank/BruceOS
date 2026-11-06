@@ -65,7 +65,6 @@ CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=5120
 # always pulls from internal RAM with no PSRAM fallback, so every KB of
 # internal headroom directly affects which apps can even launch.
 CONFIG_ESP32S3_INSTRUCTION_CACHE_16KB=y
-CONFIG_ESP32S3_DATA_CACHE_16KB=y
 
 # ESP-IDF's default Wi-Fi buffer pools (32 dynamic RX + 32 dynamic TX
 # buffers) are sized for routing/high-throughput use, not this device's

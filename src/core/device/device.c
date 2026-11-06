@@ -90,13 +90,17 @@ bruce_result_t device__power_off(uint32_t delay_ms) {
 }
 
 #if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
-/* ESP-IDF reports "nothing saved" several ways (erased partition, bad size,
- * bad checksum); callers only need to know there is no usable dump. */
-static bruce_result_t device__coredump_locate(size_t *out_address, size_t *out_size) {
-    if (esp_core_dump_image_check() != ESP_OK) return BRUCE_ERR_NOT_FOUND;
+/* BRUCE_ERR_NOT_FOUND: blank partition (nothing was ever written).
+ * BRUCE_ERR_INVALID_STATE: something was written but its header is
+ * damaged, or (when require_valid) its checksum doesn't match -- typically a
+ * crash handler that didn't finish writing the dump. */
+static bruce_result_t device__coredump_locate(size_t *out_address, size_t *out_size, bool require_valid) {
     size_t address = 0;
     size_t size = 0;
-    if (esp_core_dump_image_get(&address, &size) != ESP_OK || size == 0) return BRUCE_ERR_NOT_FOUND;
+    esp_err_t err = esp_core_dump_image_get(&address, &size);
+    if (err == ESP_ERR_NOT_FOUND) return BRUCE_ERR_NOT_FOUND;
+    if (err != ESP_OK || size == 0) return BRUCE_ERR_INVALID_STATE;
+    if (require_valid && esp_core_dump_image_check() != ESP_OK) return BRUCE_ERR_INVALID_STATE;
     *out_address = address;
     *out_size = size;
     return BRUCE_OK;
@@ -109,7 +113,7 @@ bruce_result_t device__coredump_get_size(size_t *out_size) {
     if (out_size == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
 #if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
     size_t address = 0;
-    return device__coredump_locate(&address, out_size);
+    return device__coredump_locate(&address, out_size, false);
 #else
     return BRUCE_ERR_UNSUPPORTED;
 #endif
@@ -122,7 +126,7 @@ bruce_result_t device__coredump_get_summary(bruce_device_coredump_summary_t *out
 #if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
     size_t address = 0;
     size_t size = 0;
-    bruce_result_t result = device__coredump_locate(&address, &size);
+    bruce_result_t result = device__coredump_locate(&address, &size, true);
     if (result != BRUCE_OK) return result;
 
     /* ~300 bytes; heap rather than the caller's (often default-sized) stack. */
@@ -169,7 +173,7 @@ bruce_result_t device__coredump_read(size_t offset, void *buffer, size_t size) {
 #if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
     size_t address = 0;
     size_t image_size = 0;
-    bruce_result_t result = device__coredump_locate(&address, &image_size);
+    bruce_result_t result = device__coredump_locate(&address, &image_size, false);
     if (result != BRUCE_OK) return result;
     if (offset > image_size || size > image_size - offset) return BRUCE_ERR_INVALID_ARGUMENT;
     if (size == 0) return BRUCE_OK;

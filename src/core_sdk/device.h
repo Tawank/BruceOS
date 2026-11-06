@@ -92,7 +92,11 @@ typedef struct {
  * @brief Returns the size in bytes of the saved core dump image.
  *
  * @param out_size Receives the image size.
- * @return BRUCE_OK, BRUCE_ERR_NOT_FOUND when no valid dump is saved, or
+ * Succeeds even when the dump's checksum is invalid, so a partially written
+ * dump can still be exported with device__coredump_read().
+ *
+ * @return BRUCE_OK, BRUCE_ERR_NOT_FOUND when the partition is blank,
+ *         BRUCE_ERR_INVALID_STATE when the dump header is damaged, or
  *         BRUCE_ERR_UNSUPPORTED when core dumps are disabled in this build.
  * @permission process
  */
@@ -102,7 +106,8 @@ bruce_result_t device__coredump_get_size(size_t *out_size);
  * @brief Decodes the crashed task, PC, backtrace, and panic reason from the saved core dump.
  *
  * @param out_summary Receives the summary.
- * @return BRUCE_OK, BRUCE_ERR_NOT_FOUND when no valid dump is saved, or
+ * @return BRUCE_OK, BRUCE_ERR_NOT_FOUND when the partition is blank,
+ *         BRUCE_ERR_INVALID_STATE when the dump is damaged or its checksum fails, or
  *         BRUCE_ERR_UNSUPPORTED when core dumps are disabled in this build.
  * @permission process
  */

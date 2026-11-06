@@ -139,6 +139,7 @@ idf_component_register(SRCS
                      "core/process/process.c"
                       "core/process/process_api.c"
                       "core/process/process_environment.c"
+                      "core/process/process_stack_guard.c"
                       "core/process/runtime_timer.c"
                     "core/tcp/tcp.c"
                     "core/udp/udp.c"
@@ -308,6 +309,12 @@ idf_component_register(SRCS
 target_link_options(${COMPONENT_LIB} INTERFACE
                     "LINKER:--wrap=jpeg_get_large"
                     "LINKER:--wrap=jpeg_open_backing_store"
+                    # Diagnostics for the "task stack is sane" cache asserts;
+                    # see core/process/process_stack_guard.c.
+                    "LINKER:--wrap=esp_cache_freeze_caches_disable_interrupts"
+                    "LINKER:--wrap=spi_flash_disable_interrupts_caches_and_other_cpu"
+                    "LINKER:-u,__wrap_esp_cache_freeze_caches_disable_interrupts"
+                    "LINKER:-u,__wrap_spi_flash_disable_interrupts_caches_and_other_cpu"
                     "LINKER:-u,__muldi3")
 
 # wolfSSH/wolfSSL build fixups for this ESP-IDF v6 / PSRAM-less / software-crypto
