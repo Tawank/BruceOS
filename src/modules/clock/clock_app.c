@@ -289,7 +289,7 @@ static int clock_app__gui(void) {
         if (result != CLOCK_APP_OPEN_MENU) return result;
 
         size_t selected = 0;
-        bruce_result_t choice_result = dialog__choice("Clock", "Clock tools", choices, 4, &selected);
+        bruce_result_t choice_result = dialog__choice("Clock", NULL, choices, 4, &selected);
         if (choice_result == BRUCE_ERR_CANCELLED && clock_app__resume_after_handoff()) {
             (void)input__flush();
             continue;
