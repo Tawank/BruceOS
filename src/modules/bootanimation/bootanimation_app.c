@@ -285,7 +285,7 @@ static bruce_result_t bootanimation__draw_custom_image(const char *path) {
     };
     bruce_result_t result = display__begin_frame();
     if (result == BRUCE_OK) result = display__fill_screen(options.background);
-    if (result == BRUCE_OK) result = image__draw_path(path, &options, NULL);
+    if (result == BRUCE_OK) result = image__draw_from_path(path, &options, NULL);
     if (result == BRUCE_OK) result = display__present();
     return result;
 }

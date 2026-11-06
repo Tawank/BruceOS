@@ -1004,7 +1004,7 @@ fit without upscaling, preserve aspect ratio, and composite transparency over a
 caller-selected background. The owner draws with `image__draw_bitmap()` and
 must call `image__bitmap_release()` afterward. Drawing centers relative to
 caller coordinates, updates the active render target, and leaves frame
-presentation to the caller. `image__draw_path()` is a convenience operation
+presentation to the caller. `image__draw_from_path()` is a convenience operation
 that decodes, draws once, and releases the bitmap. The image loader registers `.jpg`, `.jpeg`, `.png`,
 and `.gif` case-insensitively; its viewer fits, centers, presents, animates GIF
 frames, and remains open until input. File manager image viewing and

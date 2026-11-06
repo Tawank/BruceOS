@@ -310,7 +310,7 @@ bruce_result_t image__get_bitmap_from_file(
 }
 
 bruce_result_t
-image__draw_path(const char *path, const bruce_image_draw_options_t *options, bruce_image_info_t *out_info) {
+image__draw_from_path(const char *path, const bruce_image_draw_options_t *options, bruce_image_info_t *out_info) {
     image_bitmap_t bitmap = {0};
     bruce_result_t result = image__get_bitmap_from_file(path, options, &bitmap);
     if (result == BRUCE_OK) result = image__draw_bitmap(&bitmap, options);

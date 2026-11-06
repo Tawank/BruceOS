@@ -10965,11 +10965,11 @@ Opens and decodes an image through process-owned Core storage.
 
 ---
 
-## image__draw_path()
+## image__draw_from_path()
 
 ```c
 bruce_result_t
-image__draw_path(const char *path, const bruce_image_draw_options_t *options, bruce_image_info_t *out_info);
+image__draw_from_path(const char *path, const bruce_image_draw_options_t *options, bruce_image_info_t *out_info);
 ```
 
 Decodes, draws, and releases an image from Core storage.

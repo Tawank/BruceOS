@@ -188,7 +188,7 @@ int image_app_main(int argc, char **argv) {
      * into the static branch below rather than image_viewer__draw_gif(). */
     bool is_gif = !from_stdin && image_viewer__is_gif(path);
     /* Retained (not released right after this first draw, unlike the single-
-     * shot image__draw_path() the non-piped case used to call directly) so
+     * shot image__draw_from_path() the non-piped case used to call directly) so
      * the redraw-on-regain-foreground path below can redraw it again without
      * re-decoding. */
     image_bitmap_t bitmap = {0};

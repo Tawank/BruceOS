@@ -5,7 +5,6 @@
 #include <stdint.h>
 
 #include "core_sdk/display.h"
-#include "core_sdk/memory.h"
 #include "core_sdk/result.h"
 
 /**
@@ -96,7 +95,7 @@ bruce_result_t image__get_bitmap_from_file(
  * @param out_info Receives the decoded image's format/dimensions.
  */
 bruce_result_t
-image__draw_path(const char *path, const bruce_image_draw_options_t *options, bruce_image_info_t *out_info);
+image__draw_from_path(const char *path, const bruce_image_draw_options_t *options, bruce_image_info_t *out_info);
 
 /**
  * @brief Draws an owned bitmap into the active render target without releasing it.
