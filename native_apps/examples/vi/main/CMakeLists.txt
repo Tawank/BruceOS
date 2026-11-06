@@ -1,15 +1,13 @@
-include("${CMAKE_CURRENT_LIST_DIR}/vi_sources.cmake")
-
 idf_component_register(
-    SRCS "main.c" "busybox_shim.c" "${VI_UPSTREAM_C}"
+    SRCS "main.c" "busybox_shim.c" "vi.c"
     INCLUDE_DIRS "." "../../../include" "../../../../src")
 
-# BusyBox's vi.c is compiled here completely unmodified (see libbb.h's own
-# comment for why: it's a from-scratch, hand-written stand-in for
-# BusyBox's real Kbuild-generated libbb.h/config.h, not a fork of either --
-# vi.c itself was never touched). Same rationale as doom's equivalent list:
+# BusyBox's vi.c is vendored in this directory (see libbb.h's own comment
+# for why the surrounding libbb.h/config.h are a from-scratch, hand-written
+# stand-in for BusyBox's real Kbuild-generated ones, not a fork of either).
+# Same rationale as doom's equivalent list:
 # these are long-standing, harmless patterns in upstream vi.c against any
-# sufficiently strict compiler, not anything introduced by fetching it here.
+# sufficiently strict compiler, not anything introduced by vendoring it here.
 target_compile_options(${COMPONENT_LIB} PRIVATE
     -Wno-error=sign-compare
     -Wno-error=type-limits

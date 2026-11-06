@@ -10,9 +10,9 @@ binary, which BruceOS has no shell to exec in the first place; see "No
 ## Porting approach
 
 Unlike `doom/` and `nes/`, which vendor/fetch a whole multi-file engine,
-this app needs exactly one upstream file: BusyBox's `editors/vi.c`. It's
-fetched **completely unmodified** (`main/vi_sources.cmake`, pinned to a
-commit, integrity-checked via `EXPECTED_HASH`) -- every adaptation lives in
+this app needs exactly one upstream file: BusyBox's `editors/vi.c`, vendored
+as `main/vi.c` (originally BusyBox commit `371fe9f71d445d18be28c82a2a6d82115c8af19d`,
+from the `github.com/mirror/busybox` mirror). Adaptations live mostly in
 this app's own `main/libbb.h` (a from-scratch, hand-written stand-in for
 BusyBox's real Kbuild-generated `libbb.h`, not a fork of it) and
 `main/busybox_shim.c` (implementing the ~20 libbb helper functions vi.c

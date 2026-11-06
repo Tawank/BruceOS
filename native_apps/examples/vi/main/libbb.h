@@ -4,7 +4,7 @@
  * copy or trimmed fork of it. Real libbb.h is generated against BusyBox's
  * own Kbuild/Kconfig config system and pulls in its entire libbb runtime
  * (string/xfuncs/read_key/procps/... -- thousands of lines across dozens
- * of files); vi.c itself (fetched unmodified, see vi_sources.cmake) only
+ * of files); vi.c itself (vendored in this directory) only
  * calls a small, finite set of libbb-prefixed helpers, so this declares
  * just those, backed by busybox_shim.c, plus the handful of feature-flag
  * macros vi.c's own #if/#ifdef blocks branch on -- hardcoded to fixed
@@ -131,7 +131,7 @@
  * m_misc.c errno issue, except unavoidable here: vi.c itself has one bare
  * "errno" read (readit(), "if (errno == EAGAIN) // paranoia", not gated
  * behind any disabled feature flag) plus several in this shim's own
- * busybox_shim.c, and vi.c is fetched unmodified -- so instead of editing
+ * busybox_shim.c, and vi.c is vendored as upstream wrote it -- so instead of editing
  * every call site, force the safe form for the whole translation unit.
  * __errno() is already an exported Bruce SDK symbol (elf_loader_sdk_symbols.c,
  * used today by the firmware side to set errno on this app's behalf for
@@ -186,7 +186,7 @@ typedef jmp_buf sigjmp_buf;
  * handful vi.c's do_cmd() switch actually references are defined -- it
  * also has an already-#if-0'd-out KEYCODE_FUN1..12 block and never
  * references the Ctrl/Alt/BACKSPACE/D/CURSOR_POS variants real BusyBox
- * defines (checked by grepping the fetched vi.c itself), so those are
+ * defines (checked by grepping the vendored vi.c itself), so those are
  * left out rather than carried along unused. KEYCODE_BUFFER_SIZE sizes
  * vi.c's own "readbuffer" scratch array; safe_read_key() below doesn't
  * actually use its contents (see busybox_shim.c), just needs the array

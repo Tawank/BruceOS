@@ -1,7 +1,6 @@
-/* Implements the ~20 libbb helpers editors/vi.c (fetched unmodified, see
- * vi_sources.cmake) calls, declared in libbb.h. vi.c itself is never
- * patched -- everything it expects from "libbb" is supplied from here
- * instead, per libbb.h's own top comment.
+/* Implements the ~20 libbb helpers editors/vi.c (vendored as vi.c)
+ * calls, declared in libbb.h. Everything vi.c expects from "libbb" is
+ * supplied from here instead, per libbb.h's own top comment.
  *
  * Two kinds of helper live in this file:
  *  - Plain C helpers (xmalloc/xzalloc/xrealloc/xstrdup/xstrndup/xasprintf/
@@ -23,7 +22,7 @@
  * paths share one static one-byte pushback slot below: a safe_poll() that
  * finds a byte stashes it there instead of discarding it, and the next
  * safe_read_key() (or a later safe_poll()) drains that slot first. This
- * is safe *only* because grepping the fetched vi.c confirms these two are
+ * is safe *only* because grepping the vendored vi.c confirms these two are
  * its sole stdin entry points -- no bare read(STDIN_FILENO, ...) exists
  * anywhere else in it that could race past this slot. */
 
