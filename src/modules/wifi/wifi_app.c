@@ -448,7 +448,7 @@ static int wifi_app_on(void) {
         (void)notification__push("Wi-Fi connected", 3000);
         return 0;
     }
-    if (connect_result == BRUCE_ERR_NOT_FOUND && runtime__gui_requested()) {
+    if (connect_result == BRUCE_ERR_NOT_FOUND && runtime__is_gui_requested()) {
         bruce_result_t foreground_result = runtime__to_foreground();
         if (foreground_result != BRUCE_OK) return -1;
         (void)notification__push("Choose a Wi-Fi network", 3000);
@@ -538,7 +538,7 @@ int wifi_app_main(int argc, char **argv) {
     else if (command == off) result = wifi_app_off("Wi-Fi disconnected");
     else if (command == toggle) result = wifi_app_toggle();
     else if (command == add) result = wifi_app_add(add);
-    else if (command == scan) result = runtime__gui_requested() ? wifi_app__gui() : wifi_app_scan();
+    else if (command == scan) result = runtime__is_gui_requested() ? wifi_app__gui() : wifi_app_scan();
     else if (command == connect) result = wifi_app_connect(connect);
     else if (command == status) result = wifi_app_status();
     else if (command == ap) {

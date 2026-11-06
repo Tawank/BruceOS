@@ -62,7 +62,7 @@ little-endian `uint32_t` fields in the order declared by
 The supported SDK slice exports:
 
 - runtime: `runtime__now`, `runtime__sleep`, `runtime__delay`,
-  `runtime__gui_requested`;
+  `runtime__is_gui_requested`;
 - process: current ID/signal, foreground/background switching, signal,
   terminate, pause, resume, kill, and wait;
 - permissions: `permission__check` for introspection;

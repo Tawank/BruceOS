@@ -284,7 +284,7 @@ static int bruce_launcher_config__grid_labels_cli(const char *state) {
 }
 
 int bruce_launcher_config__run(int argc, char **argv) {
-    if (runtime__gui_requested()) return bruce_launcher_config__gui();
+    if (runtime__is_gui_requested()) return bruce_launcher_config__gui();
 
     ArgParser *root = ap_new_parser();
     if (root == NULL) return BRUCE_ERR_NO_MEMORY;

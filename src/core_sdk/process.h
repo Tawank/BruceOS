@@ -105,6 +105,18 @@ bruce_process_id_t process__current_id(void);
 bruce_process_signal_t process__current_signal(void);
 
 /**
+ * @brief Returns whether the calling process is in the background.
+ *
+ * Cheap enough to call every frame. Core clears an app's screen when it
+ * returns to the foreground, so apps that redraw only what changed can
+ * watch this go from true to false and repaint everything.
+ *
+ * @return true if the caller's state is BRUCE_PROCESS_BACKGROUND; false
+ *         otherwise, or if the caller is not a managed process.
+ */
+bool process__is_background(void);
+
+/**
  * @brief Lists live processes.
  *
  * @param snapshots Array to receive process snapshots.

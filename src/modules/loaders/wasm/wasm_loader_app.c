@@ -737,7 +737,7 @@ int wasm_loader__app_main(int argc, char **argv) {
     const bruce_environment_variable_t gui_env[] = {
         {.name = "GUI", .value = "1"}
     };
-    bool gui = runtime__gui_requested();
+    bool gui = runtime__is_gui_requested();
     int result = wasm_loader__open(
         path, arg[0] != '\0' ? arg : NULL, mode, gui ? gui_env : NULL, gui ? 1u : 0u
     );

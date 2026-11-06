@@ -14,6 +14,6 @@
  * "GUI=1 bparted" (what the launcher menu's "Partitions" entry runs) opens
  * the GUI, plain "bparted ..." from a terminal/script runs the CLI. */
 int bparted_app_main(int argc, char **argv) {
-    if (runtime__gui_requested()) return bparted_gui__main(argc, argv);
+    if (runtime__is_gui_requested()) return bparted_gui__main(argc, argv);
     return bparted_cli__main(argc, argv);
 }

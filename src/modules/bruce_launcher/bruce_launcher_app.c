@@ -934,7 +934,7 @@ static int bruce_launcher__run_entry(const bruce_launcher_entry_t *entry) {
      * launcher only picks the default for entries that don't say. */
     const char *command = entry->command;
     char *prefixed_command = NULL;
-    if (runtime__gui_requested() && !bruce_launcher__command_sets(entry->command, "GUI")) {
+    if (runtime__is_gui_requested() && !bruce_launcher__command_sets(entry->command, "GUI")) {
         size_t capacity = strlen(entry->command) + sizeof("GUI=1 ");
         prefixed_command = (char *)memory__malloc(capacity);
         if (prefixed_command == NULL) return BRUCE_ERR_NO_MEMORY;
@@ -1457,7 +1457,7 @@ int bruce_launcher_app_main(int argc, char **argv) {
     }
 
     int result;
-    if (runtime__gui_requested()) {
+    if (runtime__is_gui_requested()) {
         const bruce_dialog_window_renderer_t window_renderer = {
             .padding_top = BRUCE_LAUNCHER_STATUS_H + 1,
             .padding_right = BRUCE_LAUNCHER_BORDER_PAD + 1,

@@ -193,7 +193,7 @@ static int bluetooth_hid_app__gui(void) {
 }
 
 int bluetooth_hid_app_main(int argc, char **argv) {
-    if (runtime__gui_requested()) { return bluetooth_hid_app__gui(); }
+    if (runtime__is_gui_requested()) { return bluetooth_hid_app__gui(); }
 
     ArgParser *root = ap_new_parser();
     if (root == NULL) return BRUCE_ERR_NO_MEMORY;

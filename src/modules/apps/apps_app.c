@@ -184,7 +184,7 @@ int apps_app_main(int argc, char **argv) {
     }
     ap_free(parser);
 
-    bool gui = runtime__gui_requested();
+    bool gui = runtime__is_gui_requested();
 
     const char *directories[] = {"/apps", "/scripts"};
     size_t capacity = 0;

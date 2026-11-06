@@ -585,7 +585,7 @@ int archive_app_main(int argc, char **argv) {
     if (path_length < 0 || (size_t)path_length >= sizeof(archive_path)) return BRUCE_ERR_INVALID_ARGUMENT;
 
     bool zip = archive_app__is_zip(archive_path);
-    bool gui = runtime__gui_requested();
+    bool gui = runtime__is_gui_requested();
     const char *basename = archive_app__basename(archive_path);
 
     archive_app__entries_t entries;

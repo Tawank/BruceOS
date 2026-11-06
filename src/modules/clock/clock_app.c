@@ -342,7 +342,7 @@ int clock_app_main(int argc, char **argv) {
     }
 
     ArgParser *command = ap_get_cmd_parser(root);
-    bool gui = runtime__gui_requested();
+    bool gui = runtime__is_gui_requested();
     bool run_show = command == NULL || command == show;
     bool run_timer = command == timer;
     const char *duration_arg = run_timer ? ap_get_arg(timer, "duration") : NULL;

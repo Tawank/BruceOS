@@ -261,7 +261,7 @@ int bluetooth_app_main(int argc, char **argv) {
         return result;
     }
 
-    int result = runtime__gui_requested() ? bluetooth_app__scan_gui() : bluetooth_app__scan_terminal();
+    int result = runtime__is_gui_requested() ? bluetooth_app__scan_gui() : bluetooth_app__scan_terminal();
     ap_free(root);
     return result;
 }

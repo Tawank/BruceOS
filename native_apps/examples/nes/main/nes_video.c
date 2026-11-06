@@ -5,6 +5,7 @@
 
 #include "core_sdk/display.h"
 #include "core_sdk/memory.h"
+#include "core_sdk/process.h"
 #include "core_sdk/runtime.h"
 
 #include "bitmap.h"
@@ -367,6 +368,7 @@ static int s_last_draw_width = -1;
 static int s_last_draw_height = -1;
 static int s_last_screen_width = -1;
 static int s_last_screen_height = -1;
+static bool s_was_background;
 
 static void video_blit(bitmap_t *bitmap, int num_dirties, rect_t *dirty_rects) {
     (void)num_dirties;
@@ -377,6 +379,17 @@ static void video_blit(bitmap_t *bitmap, int num_dirties, rect_t *dirty_rects) {
     bool late = skip_track_debt(now_ms, stall);
     bool display_capped = skip_display_frame(stall);
     bool skip_blit = late || display_capped;
+
+    /* Core clears the screen when we come back to the foreground (e.g. via
+     * Alt+Tab), so the per-batch "unchanged since last frame" checksums no
+     * longer match what's on screen. Forgetting the cached geometry also
+     * resets every checksum, so the next frame repaints everything. */
+    if (process__is_background()) {
+        s_was_background = true;
+    } else if (s_was_background) {
+        s_was_background = false;
+        s_last_screen_width = -1;
+    }
 
     int screen_width = display__width();
     int screen_height = display__height();

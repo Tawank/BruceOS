@@ -715,7 +715,7 @@ int ir_app_main(int argc, char **argv) {
     }
 
     ArgParser *command = ap_get_cmd_parser(root);
-    bool gui = runtime__gui_requested();
+    bool gui = runtime__is_gui_requested();
     /* Bare "ir" with no launcher.json subcommand (e.g. launched directly from
      * the Apps list) still falls back to the app's own interactive menu. Any
      * subcommand -- whether typed at a terminal or declared in launcher.json

@@ -29,6 +29,15 @@ bruce_process_signal_t process__current_signal(void) {
     return signal;
 }
 
+bool process__is_background(void) {
+    process__ensure_init();
+    process__lock();
+    process__record_t *self = process__find_by_handle_locked(xTaskGetCurrentTaskHandle());
+    bool background = self != NULL && self->state == BRUCE_PROCESS_BACKGROUND;
+    process__unlock();
+    return background;
+}
+
 bruce_result_t process__list(bruce_process_snapshot_t *snapshots, size_t capacity, size_t *out_count) {
     process__ensure_init();
     if (out_count == NULL || (capacity != 0 && snapshots == NULL)) { return BRUCE_ERR_INVALID_ARGUMENT; }
@@ -593,7 +602,7 @@ bruce_result_t runtime__sleep(uint32_t milliseconds) { return process__wait_ms(m
 
 bruce_result_t runtime__delay(uint32_t milliseconds) { return process__wait_ms(milliseconds, false); }
 
-bool runtime__gui_requested(void) {
+bool runtime__is_gui_requested(void) {
     const char *value = environment__get("GUI");
     return value != NULL && strcmp(value, "1") == 0;
 }

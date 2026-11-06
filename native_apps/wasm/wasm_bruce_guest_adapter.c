@@ -82,7 +82,7 @@ static uint32_t wasm_bruce_guest_adapter__offset(const volatile void *pointer) {
 BRUCE_WASM_IMPORT("runtime__now") extern uint64_t wasm_import__runtime_now(void);
 BRUCE_WASM_IMPORT("runtime__sleep") extern int32_t wasm_import__runtime_sleep(uint32_t milliseconds);
 BRUCE_WASM_IMPORT("runtime__delay") extern int32_t wasm_import__runtime_delay(uint32_t milliseconds);
-BRUCE_WASM_IMPORT("runtime__gui_requested") extern int32_t wasm_import__runtime_gui_requested(void);
+BRUCE_WASM_IMPORT("runtime__is_gui_requested") extern int32_t wasm_import__runtime_gui_requested(void);
 
 uint64_t runtime__now(void) { return wasm_import__runtime_now(); }
 
@@ -94,10 +94,11 @@ bruce_result_t runtime__delay(uint32_t milliseconds) {
     return (bruce_result_t)wasm_import__runtime_delay(milliseconds);
 }
 
-bool runtime__gui_requested(void) { return wasm_import__runtime_gui_requested() != 0; }
+bool runtime__is_gui_requested(void) { return wasm_import__runtime_gui_requested() != 0; }
 
 BRUCE_WASM_IMPORT("process__current_id") extern uint32_t wasm_import__process_current_id(void);
 BRUCE_WASM_IMPORT("process__current_signal") extern int32_t wasm_import__process_current_signal(void);
+BRUCE_WASM_IMPORT("process__is_background") extern int32_t wasm_import__process_is_background(void);
 BRUCE_WASM_IMPORT("process__switch_next") extern int32_t wasm_import__process_switch_next(void);
 BRUCE_WASM_IMPORT("process__switch_previous") extern int32_t wasm_import__process_switch_previous(void);
 BRUCE_WASM_IMPORT("process__to_background") extern int32_t wasm_import__process_to_background(void);
@@ -115,6 +116,8 @@ bruce_process_id_t process__current_id(void) { return wasm_import__process_curre
 bruce_process_signal_t process__current_signal(void) {
     return (bruce_process_signal_t)wasm_import__process_current_signal();
 }
+
+bool process__is_background(void) { return wasm_import__process_is_background() != 0; }
 
 bruce_result_t process__switch_next(void) { return (bruce_result_t)wasm_import__process_switch_next(); }
 

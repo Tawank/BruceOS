@@ -155,7 +155,7 @@ int filemanager_app_main(int argc, char **argv) {
         return BRUCE_OK;
     }
 
-    bool gui = runtime__gui_requested();
+    bool gui = runtime__is_gui_requested();
     const bruce_dialog_choice_t actions[] = {
         {.label = "Open",         .value = "open"       },
         {.label = "Open with...", .value = "openw"      },

@@ -725,7 +725,7 @@ int nc_app_main(int argc, char **argv) {
         return result;
     }
 
-    if (!ap_has_args(root) && runtime__gui_requested()) {
+    if (!ap_has_args(root) && runtime__is_gui_requested()) {
         ap_free(root);
         return nc_app__gui();
     }

@@ -40,7 +40,7 @@ typedef struct {
 void bruce_launcher_config__load(bruce_launcher_render_config_t *out);
 
 /* Entry point for "bruce_launcher config ...": a GUI screen (dialog__choice_launcher
- * loop, mirroring config_app's display/theme screens) when runtime__gui_requested(),
+ * loop, mirroring config_app's display/theme screens) when runtime__is_gui_requested(),
  * an ArgParser CLI otherwise. `argc`/`argv` are everything after "config",
  * with argv[0] standing in for the sub-command's own program name (ap_parse's
  * usual convention) -- i.e. bruce_launcher_app_main should call this with

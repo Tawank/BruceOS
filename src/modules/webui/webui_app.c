@@ -180,7 +180,7 @@ static int webui_app__gui(void) {
 static void webui_app__print_help(void) { stdio__printf("Usage: webui [status|stop|start ap|start sta]\n"); }
 
 int webui_app_main(int argc, char **argv) {
-    if (runtime__gui_requested()) { return webui_app__gui(); }
+    if (runtime__is_gui_requested()) { return webui_app__gui(); }
     if (argc == 2 && (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)) {
         webui_app__print_help();
         return BRUCE_OK;

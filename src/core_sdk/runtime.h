@@ -85,7 +85,7 @@ bruce_result_t runtime__timer_stop(bruce_timer_id_t timer_id);
  * Use this to decide whether the app should draw to the display or interact
  * through standard input and output.
  */
-bool runtime__gui_requested(void);
+bool runtime__is_gui_requested(void);
 
 /**
  * @brief Gives the calling process foreground ownership.

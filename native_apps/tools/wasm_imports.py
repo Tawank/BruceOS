@@ -21,7 +21,7 @@ SUPPORTED_BRUCE_SDK_SIGNATURES = {
     "runtime__now": FunctionType((), (I64,)),
     **{name: FunctionType((I32,), (I32,)) for name in ("runtime__sleep", "runtime__delay")},
     **{name: FunctionType((), (I32,)) for name in (
-        "runtime__gui_requested", "process__current_id", "process__current_signal",
+        "runtime__is_gui_requested", "process__current_id", "process__current_signal", "process__is_background",
         "process__switch_next", "process__switch_previous", "process__to_background",
         "process__to_foreground", "config__get_time_clock24hr", "config__get_color_primary",
         "config__get_color_secondary", "config__get_color_background", "config__get_color_surface",

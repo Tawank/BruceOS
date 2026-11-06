@@ -9,5 +9,5 @@
 
 /* Runs the editor until the user backs all the way out of it (BRUCE_OK), or
  * a real storage failure occurs. GUI only -- callers should only reach this
- * once runtime__gui_requested() is already known true. */
+ * once runtime__is_gui_requested() is already known true. */
 bruce_result_t bruce_launcher_menu_editor__run(void);

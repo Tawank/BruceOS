@@ -75,9 +75,9 @@ static int32_t wasm_runtime__delay(wasm_exec_env_t exec_env, uint32_t millisecon
     return runtime__delay(milliseconds);
 }
 
-static int32_t wasm_runtime__gui_requested(wasm_exec_env_t exec_env) {
+static int32_t wasm_runtime__is_gui_requested(wasm_exec_env_t exec_env) {
     (void)exec_env;
-    return runtime__gui_requested() ? 1 : 0;
+    return runtime__is_gui_requested() ? 1 : 0;
 }
 
 static uint32_t wasm_process__current_id(wasm_exec_env_t exec_env) {
@@ -88,6 +88,11 @@ static uint32_t wasm_process__current_id(wasm_exec_env_t exec_env) {
 static int32_t wasm_process__current_signal(wasm_exec_env_t exec_env) {
     (void)exec_env;
     return process__current_signal();
+}
+
+static int32_t wasm_process__is_background(wasm_exec_env_t exec_env) {
+    (void)exec_env;
+    return process__is_background() ? 1 : 0;
 }
 
 #define WASM_NO_ARG_RESULT_WRAPPER(wrapper, function)                                                        \
@@ -515,9 +520,10 @@ static NativeSymbol s_native_symbols[] = {
     BRUCE_WASM_NATIVE("runtime__now", wasm_runtime__now, "()I"),
     BRUCE_WASM_NATIVE("runtime__sleep", wasm_runtime__sleep, "(i)i"),
     BRUCE_WASM_NATIVE("runtime__delay", wasm_runtime__delay, "(i)i"),
-    BRUCE_WASM_NATIVE("runtime__gui_requested", wasm_runtime__gui_requested, "()i"),
+    BRUCE_WASM_NATIVE("runtime__is_gui_requested", wasm_runtime__is_gui_requested, "()i"),
     BRUCE_WASM_NATIVE("process__current_id", wasm_process__current_id, "()i"),
     BRUCE_WASM_NATIVE("process__current_signal", wasm_process__current_signal, "()i"),
+    BRUCE_WASM_NATIVE("process__is_background", wasm_process__is_background, "()i"),
     BRUCE_WASM_NATIVE("process__clear_signal", wasm_process__clear_signal, "()i"),
     BRUCE_WASM_NATIVE("process__switch_next", wasm_process__switch_next, "()i"),
     BRUCE_WASM_NATIVE("process__switch_previous", wasm_process__switch_previous, "()i"),

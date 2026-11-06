@@ -64,7 +64,7 @@ int launcher_app_main(int argc, char **argv) {
         return BRUCE_OK;
     }
     if (argc > 1 && strcmp(argv[1], "config") == 0) {
-        int result = launcher__run_target(runtime__gui_requested(), BRUCE_LAUNCH_FOREGROUND, "config");
+        int result = launcher__run_target(runtime__is_gui_requested(), BRUCE_LAUNCH_FOREGROUND, "config");
         return result < 0 ? result : 0;
     }
 
@@ -75,7 +75,7 @@ int launcher_app_main(int argc, char **argv) {
             snapshot.state == BRUCE_PROCESS_BACKGROUND) {
             mode = BRUCE_LAUNCH_BACKGROUND;
         }
-        bool gui = runtime__gui_requested();
+        bool gui = runtime__is_gui_requested();
         int result = launcher__start(gui, mode);
         return result < 0 ? result : 0;
     }

@@ -157,7 +157,7 @@ int nrf24_app_main(int argc, char **argv) {
     }
 
     ArgParser *command = ap_get_cmd_parser(root);
-    bool gui = runtime__gui_requested();
+    bool gui = runtime__is_gui_requested();
     if (command == NULL && gui) {
         ap_free(root);
         return nrf24_app__gui();

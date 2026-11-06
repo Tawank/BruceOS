@@ -894,7 +894,7 @@ int config_app_main(int argc, char **argv) {
     bool display_hierarchy = root_action == display;
     bool theme_hierarchy = root_action == theme;
     bool audio_hierarchy = root_action == audio;
-    bool gui = runtime__gui_requested();
+    bool gui = runtime__is_gui_requested();
     int result;
     if (clock_hierarchy) {
         result = gui ? config_app__clock_gui()

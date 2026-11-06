@@ -12991,7 +12991,7 @@ queued behind it.
 
 Callers don't choose or need to know how the notification will be shown:
 whether the calling process was launched with GUI interaction (see
-core_sdk/runtime.h's runtime__gui_requested()) is captured here, at push
+core_sdk/runtime.h's runtime__is_gui_requested()) is captured here, at push
 time, and travels with the request so the consumer can render a GUI
 banner or print a console line as appropriate -- see
 notification__wait_request().
@@ -14006,6 +14006,28 @@ Zero when no cooperative signal is pending.
 
 ---
 
+## process__is_background()
+
+```c
+bool process__is_background(void);
+```
+
+Returns whether the calling process is in the background.
+
+Cheap enough to call every frame. Core clears an app's screen when it
+returns to the foreground, so apps that redraw only what changed can
+watch this go from true to false and repaint everything.
+
+@return true if the caller's state is BRUCE_PROCESS_BACKGROUND; false
+        otherwise, or if the caller is not a managed process.
+
+### Returns
+
+`bool`
+
+
+---
+
 ## process__list()
 
 ```c
@@ -14742,10 +14764,10 @@ Stops a timer started with runtime__timer_start().
 
 ---
 
-## runtime__gui_requested()
+## runtime__is_gui_requested()
 
 ```c
-bool runtime__gui_requested(void);
+bool runtime__is_gui_requested(void);
 ```
 
 Checks whether the current app is running in GUI mode.
