@@ -80,6 +80,117 @@
 #include "core_sdk/udp.h"
 #include "core_sdk/wifi.h"
 
+/* core_sdk/curses.h's small, representative export subset below needs
+ * extern declarations for functions/globals real ncurses defines --
+ * deliberately NOT via `#include "core_sdk/curses.h"` itself, which pulls
+ * in real ncurses/curses.h. That header's macros (bool, TRUE, FALSE, OK,
+ * ERR, and the many single-word addch()/clear()/move()/...-style
+ * stdscr-shorthand macros) would silently redefine identifiers this
+ * file's thousands of unrelated lines use for their own purposes -- a
+ * native app including core_sdk/curses.h directly still gets the real
+ * header with all of those, only this shared file avoids them. WINDOW is
+ * kept as an opaque forward-declared type here for the same reason: this
+ * file only ever takes its address (for stdscr/curscr), never looks
+ * inside it. */
+typedef struct _win_st WINDOW;
+extern WINDOW *initscr(void);
+extern int endwin(void);
+extern bool isendwin(void);
+extern WINDOW *newwin(int lines, int columns, int begin_y, int begin_x);
+extern int delwin(WINDOW *win);
+extern WINDOW *subwin(WINDOW *orig, int lines, int columns, int begin_y, int begin_x);
+extern WINDOW *derwin(WINDOW *orig, int lines, int columns, int begin_y, int begin_x);
+extern int wrefresh(WINDOW *win);
+extern int wnoutrefresh(WINDOW *win);
+extern int doupdate(void);
+extern int redrawwin(WINDOW *win);
+extern int wmove(WINDOW *win, int y, int x);
+extern int waddch(WINDOW *win, unsigned int ch); /* chtype, non-widec build (see components/ncurses) */
+extern int waddstr(WINDOW *win, const char *str);
+extern int waddnstr(WINDOW *win, const char *str, int n);
+extern int wprintw(WINDOW *win, const char *fmt, ...);
+extern int vwprintw(WINDOW *win, const char *fmt, va_list args);
+extern int wgetch(WINDOW *win);
+extern int wgetnstr(WINDOW *win, char *str, int n);
+extern int keypad(WINDOW *win, bool enable);
+extern int nodelay(WINDOW *win, bool enable);
+extern int wtimeout(WINDOW *win, int delay_ms);
+extern int notimeout(WINDOW *win, bool enable);
+extern int intrflush(WINDOW *win, bool enable);
+extern int raw(void);
+extern int noraw(void);
+extern int cbreak(void);
+extern int nocbreak(void);
+extern int echo(void);
+extern int noecho(void);
+extern int nl(void);
+extern int nonl(void);
+extern void qiflush(void);
+extern void noqiflush(void);
+/* wattron()/wattroff() -- and therefore attron()/attroff(), which chain
+ * through them -- are unconditional macros in real curses.h expanding to
+ * wattr_on()/wattr_off() instead (not gated behind any wide-char/opaque
+ * build option; verified by reading the generated header directly, not
+ * assumed), so those are the real symbols a native app's compiled code
+ * actually calls, not wattron/wattroff themselves. Exporting both wattron
+ * AND wattr_on costs nothing and covers the (nonexistent in practice, but
+ * harmless to allow for) case of a caller that somehow bypasses the macro. */
+extern int wattron(WINDOW *win, int attrs);
+extern int wattroff(WINDOW *win, int attrs);
+extern int wattrset(WINDOW *win, int attrs);
+extern int wattr_on(WINDOW *win, unsigned int attrs, void *opts);
+extern int wattr_off(WINDOW *win, unsigned int attrs, void *opts);
+extern int leaveok(WINDOW *win, bool enable);
+extern int use_default_colors(void);
+extern int wattr_set(WINDOW *win, int attrs, short pair, void *opts);
+extern int wstandout(WINDOW *win);
+extern int wstandend(WINDOW *win);
+extern int wchgat(WINDOW *win, int n, int attrs, short pair, const void *opts);
+extern int start_color(void);
+extern bool has_colors(void);
+extern bool can_change_color(void);
+extern int init_pair(short pair, short fg, short bg);
+extern int init_color(short color, short r, short g, short b);
+extern int pair_content(short pair, short *fg, short *bg);
+extern int box(WINDOW *win, unsigned int vertical, unsigned int horizontal); /* chtype */
+extern int wborder( /* all chtype */
+    WINDOW *win, unsigned int ls, unsigned int rs, unsigned int ts, unsigned int bs, unsigned int tl,
+    unsigned int tr, unsigned int bl, unsigned int br
+);
+extern int whline(WINDOW *win, unsigned int ch, int n); /* chtype */
+extern int wvline(WINDOW *win, unsigned int ch, int n); /* chtype */
+extern int werase(WINDOW *win);
+extern int wclear(WINDOW *win);
+extern int wclrtobot(WINDOW *win);
+extern int wclrtoeol(WINDOW *win);
+extern int scroll(WINDOW *win);
+extern int wscrl(WINDOW *win, int n);
+extern int wsetscrreg(WINDOW *win, int top, int bottom);
+extern int touchwin(WINDOW *win);
+extern int wtouchln(WINDOW *win, int y, int n, int changed);
+extern int curs_set(int visibility);
+extern int flushinp(void);
+extern int ungetch(int ch);
+extern int def_prog_mode(void);
+extern int def_shell_mode(void);
+extern int reset_prog_mode(void);
+extern int reset_shell_mode(void);
+extern int savetty(void);
+extern int resetty(void);
+extern int baudrate(void);
+extern int napms(int ms);
+extern int beep(void);
+extern int flash(void);
+extern WINDOW *stdscr;
+extern WINDOW *curscr;
+extern int COLS;
+extern int LINES;
+extern int ESCDELAY;
+extern int TABSIZE;
+extern int COLORS;
+extern int COLOR_PAIRS;
+extern char ttytype[];
+
 /* GCC emits these libgcc helpers for floating-point operations in ELF apps.
  * Keep them in the restricted resolver so portable C code does not need to
  * carry target-specific libgcc objects inside every loadable image. */
@@ -2024,6 +2135,113 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(ap_had_memory_error),
     ESP_ELFSYM_EXPORT(ap_get_zeroth_root_arg),
 
+    /* core_sdk/curses.h (components/ncurses). Declared via the narrow
+     * bruce_curses_extern_decls block above instead of #include
+     * "core_sdk/curses.h" directly here: that header pulls in real
+     * ncurses/curses.h, whose macros (bool, TRUE, FALSE, OK, ERR, ...)
+     * would silently redefine identifiers this huge, unrelated file
+     * uses throughout for its own purposes. A native app including
+     * core_sdk/curses.h itself still gets the real macro-laden header
+     * and the real move()/addch()/clear()/... conveniences -- only this
+     * export table avoids them.
+     *
+     * Not an exhaustive export of ncurses' API surface -- see
+     * components/ncurses/README.md's "What's NOT yet done". This is a
+     * representative, verified-against-the-real-build subset (every name
+     * below was checked with `nm` against the actual compiled archive
+     * before being added) covering screen setup/teardown, windows,
+     * output, input/timeouts, tty mode, attributes, color, and borders.
+     * Add more here as apps built against core_sdk/curses.h need them --
+     * each addition needs only the matching extern declaration above and
+     * an ESP_ELFSYM_EXPORT() line, not a new vendoring or ownership
+     * change. */
+    ESP_ELFSYM_EXPORT(initscr),
+    ESP_ELFSYM_EXPORT(endwin),
+    ESP_ELFSYM_EXPORT(isendwin),
+    ESP_ELFSYM_EXPORT(newwin),
+    ESP_ELFSYM_EXPORT(delwin),
+    ESP_ELFSYM_EXPORT(subwin),
+    ESP_ELFSYM_EXPORT(derwin),
+    ESP_ELFSYM_EXPORT(wrefresh),
+    ESP_ELFSYM_EXPORT(wnoutrefresh),
+    ESP_ELFSYM_EXPORT(doupdate),
+    ESP_ELFSYM_EXPORT(redrawwin),
+    ESP_ELFSYM_EXPORT(wmove),
+    ESP_ELFSYM_EXPORT(waddch),
+    ESP_ELFSYM_EXPORT(waddstr),
+    ESP_ELFSYM_EXPORT(waddnstr),
+    ESP_ELFSYM_EXPORT(wprintw),
+    ESP_ELFSYM_EXPORT(vwprintw),
+    ESP_ELFSYM_EXPORT(wgetch),
+    ESP_ELFSYM_EXPORT(wgetnstr),
+    ESP_ELFSYM_EXPORT(keypad),
+    ESP_ELFSYM_EXPORT(nodelay),
+    ESP_ELFSYM_EXPORT(wtimeout),
+    ESP_ELFSYM_EXPORT(notimeout),
+    ESP_ELFSYM_EXPORT(intrflush),
+    ESP_ELFSYM_EXPORT(raw),
+    ESP_ELFSYM_EXPORT(noraw),
+    ESP_ELFSYM_EXPORT(cbreak),
+    ESP_ELFSYM_EXPORT(nocbreak),
+    ESP_ELFSYM_EXPORT(echo),
+    ESP_ELFSYM_EXPORT(noecho),
+    ESP_ELFSYM_EXPORT(nl),
+    ESP_ELFSYM_EXPORT(nonl),
+    ESP_ELFSYM_EXPORT(qiflush),
+    ESP_ELFSYM_EXPORT(noqiflush),
+    ESP_ELFSYM_EXPORT(wattron),
+    ESP_ELFSYM_EXPORT(wattroff),
+    ESP_ELFSYM_EXPORT(wattrset),
+    ESP_ELFSYM_EXPORT(wattr_set),
+    ESP_ELFSYM_EXPORT(wattr_on),
+    ESP_ELFSYM_EXPORT(wattr_off),
+    ESP_ELFSYM_EXPORT(leaveok),
+    ESP_ELFSYM_EXPORT(use_default_colors),
+    ESP_ELFSYM_EXPORT(wstandout),
+    ESP_ELFSYM_EXPORT(wstandend),
+    ESP_ELFSYM_EXPORT(wchgat),
+    ESP_ELFSYM_EXPORT(start_color),
+    ESP_ELFSYM_EXPORT(has_colors),
+    ESP_ELFSYM_EXPORT(can_change_color),
+    ESP_ELFSYM_EXPORT(init_pair),
+    ESP_ELFSYM_EXPORT(init_color),
+    ESP_ELFSYM_EXPORT(pair_content),
+    ESP_ELFSYM_EXPORT(box),
+    ESP_ELFSYM_EXPORT(wborder),
+    ESP_ELFSYM_EXPORT(whline),
+    ESP_ELFSYM_EXPORT(wvline),
+    ESP_ELFSYM_EXPORT(werase),
+    ESP_ELFSYM_EXPORT(wclear),
+    ESP_ELFSYM_EXPORT(wclrtobot),
+    ESP_ELFSYM_EXPORT(wclrtoeol),
+    ESP_ELFSYM_EXPORT(scroll),
+    ESP_ELFSYM_EXPORT(wscrl),
+    ESP_ELFSYM_EXPORT(wsetscrreg),
+    ESP_ELFSYM_EXPORT(touchwin),
+    ESP_ELFSYM_EXPORT(wtouchln),
+    ESP_ELFSYM_EXPORT(curs_set),
+    ESP_ELFSYM_EXPORT(flushinp),
+    ESP_ELFSYM_EXPORT(ungetch),
+    ESP_ELFSYM_EXPORT(def_prog_mode),
+    ESP_ELFSYM_EXPORT(def_shell_mode),
+    ESP_ELFSYM_EXPORT(reset_prog_mode),
+    ESP_ELFSYM_EXPORT(reset_shell_mode),
+    ESP_ELFSYM_EXPORT(savetty),
+    ESP_ELFSYM_EXPORT(resetty),
+    ESP_ELFSYM_EXPORT(baudrate),
+    ESP_ELFSYM_EXPORT(napms),
+    ESP_ELFSYM_EXPORT(beep),
+    ESP_ELFSYM_EXPORT(flash),
+    ESP_ELFSYM_EXPORT(stdscr),
+    ESP_ELFSYM_EXPORT(curscr),
+    ESP_ELFSYM_EXPORT(COLS),
+    ESP_ELFSYM_EXPORT(LINES),
+    ESP_ELFSYM_EXPORT(ESCDELAY),
+    ESP_ELFSYM_EXPORT(TABSIZE),
+    ESP_ELFSYM_EXPORT(COLORS),
+    ESP_ELFSYM_EXPORT(COLOR_PAIRS),
+    ESP_ELFSYM_EXPORT(ttytype),
+
     /* Process environment */
     ESP_ELFSYM_EXPORT(environment__global_get),
     ESP_ELFSYM_EXPORT(environment__global_set),
@@ -2393,6 +2611,7 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(ssh__close),
     ESP_ELFSYM_EXPORT(stdio__read),
     ESP_ELFSYM_EXPORT(stdio__read_line),
+    ESP_ELFSYM_EXPORT(stdio__flush_input),
     ESP_ELFSYM_EXPORT(stdio__write),
     ESP_ELFSYM_EXPORT(stdio__printf),
     ESP_ELFSYM_EXPORT(stdio__vprintf),

@@ -257,6 +257,7 @@ idf_component_register(SRCS
                     "modules/privileged/permissions/permissions_app.c"
                     REQUIRES
                     args
+                    ncurses
                     cjson
                     bt
                     esp_event

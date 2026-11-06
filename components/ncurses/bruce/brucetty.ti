@@ -1,0 +1,32 @@
+#	BruceOS terminal app (terminal_ansi.c) capability description.
+#	Hand-written against that file's actual CSI/SGR/charset coverage --
+#	NOT copied from any real terminal's terminfo entry. Used to generate
+#	components/ncurses's compiled-in fallback table (no terminfo
+#	database on-device).
+brucetty|BruceOS terminal_ansi.c,
+	am, mir, msgr, xenl, mc5i, npc,
+	colors#256, pairs#32767, cols#80, lines#24, ncv#0,
+	bel=^G, cr=^M, cud1=^J, ind=^J, ht=^I,
+	clear=\E[H\E[2J, home=\E[H,
+	cup=\E[%i%p1%d;%p2%dH, hpa=\E[%i%p1%dG, vpa=\E[%i%p1%dd,
+	cuu1=\E[A, cud1=\E[B, cuf1=\E[C, cub1=\E[D,
+	cuu=\E[%p1%dA, cud=\E[%p1%dB, cuf=\E[%p1%dC, cub=\E[%p1%dD,
+	nel=\E[E, ri=\EM, rin=\E[%p1%dT, indn=\E[%p1%dS,
+	civis=\E[?25l, cnorm=\E[?25h, cvvis=\E[?25h,
+	sc=\E7, rc=\E8,
+	smcup=\E[?1049h, rmcup=\E[?1049l,
+	smam=\E[?7h, rmam=\E[?7l,
+	el=\E[K, el1=\E[1K, ed=\E[J,
+	dch1=\E[P, dch=\E[%p1%dP, ich1=\E[@, ich=\E[%p1%d@,
+	il1=\E[L, il=\E[%p1%dL, dl1=\E[M, dl=\E[%p1%dM,
+	ech=\E[%p1%dX, rep=%p1%c\E[%p2%{1}%-%db,
+	csr=\E[%i%p1%d;%p2%dr,
+	sgr0=\E[m, bold=\E[1m, dim=\E[2m, smul=\E[4m, rmul=\E[24m,
+	rev=\E[7m, smso=\E[7m, rmso=\E[27m,
+	setaf=\E[38;5;%p1%dm, setab=\E[48;5;%p1%dm, op=\E[39;49m,
+	smacs=\E(0, rmacs=\E(B, enacs=,
+	acsc=``aaffggiijjkkllmmnnooppqqrrssttuuvvwwxxyyzz{{||}}~~,
+	kcuu1=\EOA, kcud1=\EOB, kcuf1=\EOC, kcub1=\EOD,
+	khome=\E[H, kdch1=\E[3~, kbs=^?,
+	u6=\E[%i%d;%dR, u7=\E[6n, u8=\E[?1;0c, u9=\Ec,
+	rs1=\Ec,
