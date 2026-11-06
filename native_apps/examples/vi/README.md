@@ -16,8 +16,10 @@ from the `github.com/mirror/busybox` mirror). Adaptations live mostly in
 this app's own `main/libbb.h` (a from-scratch, hand-written stand-in for
 BusyBox's real Kbuild-generated `libbb.h`, not a fork of it) and
 `main/busybox_shim.c` (implementing the ~20 libbb helper functions vi.c
-calls). See both files' own top comments for the full design rationale;
-the short version:
+calls). The one local change to `vi.c` itself is the `iw`/`iW` text objects
+(`ciw`, `diw`, `yiw`, `ciW`, ...), added in `find_range()`. See both files'
+own top comments for the full design rationale; the short version:
+
 
 - **Terminal I/O.** `core_sdk/stdio.h` already behaves like a real pty for
   any ELF app (`stdio__read`/`stdio__write`, no OS-level line-discipline --

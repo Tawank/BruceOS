@@ -1428,7 +1428,30 @@ static char *text_yank(char *p, char *q, int dest, int buftype)
 	reg[dest] = xstrndup(p, cnt + 1);
 	regtype[dest] = buftype;
 	free(oldreg);
+	// the default register is the system clipboard too
+	if (dest == 26)
+		clipboard__set_text(reg[dest]);
 	return p;
+}
+
+// make the default register match the system clipboard before a put, in case
+// another app changed it; text ending in a newline is a line-wise put
+static void sync_default_reg_from_clipboard(void)
+{
+	const char *clip;
+	size_t len;
+
+	if (YDreg != 26 || clipboard__kind() != BRUCE_CLIPBOARD_TEXT)
+		return;
+	clip = clipboard__get_text();
+	if (clip == NULL || clip[0] == '\0')
+		return;
+	if (reg[26] != NULL && strcmp(reg[26], clip) == 0)
+		return;
+	free(reg[26]);
+	reg[26] = xstrdup(clip);
+	len = strlen(clip);
+	regtype[26] = (clip[len - 1] == '\n') ? WHOLE : PARTIAL;
 }
 
 static char what_reg(void)
@@ -3556,6 +3579,19 @@ static int at_eof(const char *s)
 	return ((s == end - 2 && s[1] == '\n') || s == end - 1);
 }
 
+// Word class for "iw"/"iW": 3 = newline (never part of a range), 0 = blank,
+// 1 = word char (or any non-blank for big words), 2 = punctuation.
+static int inner_word_class(int ch, int big)
+{
+	if (ch == '\n')
+		return 3;
+	if (isspace(ch))
+		return 0;
+	if (big || isalnum(ch) || ch == '_')
+		return 1;
+	return 2;
+}
+
 static int find_range(char **start, char **stop, int cmd)
 {
 	char *p, *q, *t;
@@ -3584,6 +3620,23 @@ static int find_range(char **start, char **stop, int cmd)
 			do_cmd('j');
 			if (cmd_error)
 				buftype = -1;
+		}
+	} else if (c == 'i') {
+		// text object: "iw" / "iW" select the word under the cursor
+		int c2 = get_one_char();
+		if (c2 == 'w' || c2 == 'W') {
+			int big = (c2 == 'W');
+			int k = inner_word_class(*dot, big);
+			if (k != 3) {
+				char *s = dot, *e = dot;
+				while (s > text && inner_word_class(s[-1], big) == k)
+					s--;
+				while (e < end - 1 && inner_word_class(e[1], big) == k)
+					e++;
+				p = s;
+				dot = e;
+				buftype = PARTIAL;
+			}
 		}
 	} else if (strchr("^%$0bBeEfFtThnN/?|{}\b\177", c)) {
 		// Most operate on char positions within a line.  Of those that
@@ -3915,6 +3968,7 @@ static void do_cmd(int c)
 		break;
 	case 'P':			// P- Put register before
 	case 'p':			// p- put register after
+		sync_default_reg_from_clipboard();
 		p = reg[YDreg];
 		if (p == NULL) {
 			status_line_bold("Nothing in register %c", what_reg());

@@ -154,6 +154,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "core_sdk/clipboard.h" /* vi.c's default register mirrors the system clipboard */
+
 #ifndef ARRAY_SIZE
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 #endif
