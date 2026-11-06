@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -41,6 +42,10 @@ typedef struct {
      * see BRUCE_MANIFEST_HEAP_MAX. 0 (the default) if the manifest omits
      * heapSize. */
     uint32_t heap_size;
+    /* True when the manifest sets "terminal": true -- the app does its I/O
+     * through stdio/tty, so a GUI launch runs it inside the terminal app
+     * rather than on the physical console. False (the default) if absent. */
+    bool terminal;
     char permissions[BRUCE_MANIFEST_MAX_PERMISSIONS][BRUCE_MANIFEST_PERMISSION_NAME_MAX];
     size_t permission_count;
 } bruce_manifest_t;
@@ -64,6 +69,7 @@ typedef struct {
  * coreAbiVersion/stackSize (BRUCE_MANIFEST_STACK_MIN-
  * BRUCE_MANIFEST_STACK_MAX inclusive); an optional heapSize (0-
  * BRUCE_MANIFEST_HEAP_MAX inclusive, see bruce_manifest_t.heap_size); and an
+ * optional boolean terminal (see bruce_manifest_t.terminal); and an
  * optional permissions array (each name must be a known bruce_permission_t
  * name, no duplicates). appIcon is either base64 (decodes to exactly
  * BRUCE_MANIFEST_ICON_BYTES bytes, stored in bruce_manifest_t.app_icon) or

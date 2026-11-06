@@ -3,7 +3,8 @@
 A native ELF port of [BusyBox](https://busybox.net/)'s `vi` -- a small,
 self-contained vi clone (not a wrapper around a shell-out to a real vi/vim
 binary, which BruceOS has no shell to exec in the first place; see "No
-`:!cmd`" below). Opens with no argument shows a file picker rooted at `/`;
+`:!cmd`" below). With no argument it opens an empty, unnamed buffer (the manifest's
+`"terminal": true` makes the launcher run it inside the terminal app);
 `:w`/`:wq`/`ZZ` save back to the same path.
 
 ## Porting approach

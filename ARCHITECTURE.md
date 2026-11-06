@@ -603,6 +603,11 @@ terminal forwards character and navigation-key bytes directly to its interactive
 shell, which renders and edits its prompt inline with command output just like
 the physical console. Interactive children such as SSH use that same terminal.
 
+An ELF app whose manifest sets `"terminal": true` (a stdio/tty program such as
+`vi`) is relaunched by the ELF loader inside `terminal` whenever it is started
+with `GUI=1` (launcher, Apps list, file manager). The terminal's shell runs it
+with `GUI=0`, so shell and serial launches run it directly.
+
 The built-in `shell` module owns command-language parsing and execution. It
 supports whitespace-delimited words, literal single quotes, expandable double
 quotes, backslash escaping, `NAME=value`, `$NAME`, `${NAME}`, `$?`, token-boundary

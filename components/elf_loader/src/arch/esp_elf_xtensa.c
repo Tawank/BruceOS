@@ -103,6 +103,11 @@ int esp_elf_arch_relocate_at(esp_elf_t *elf, const elf32_rela_t *rela,
     case R_XTENSA_RTLD:
         break;
     case R_XTENSA_GLOB_DAT:
+        /* S + A: a GOT slot can point into the middle of a symbol (e.g.
+         * `_ctype_b + 80`, which the ctype macros compile to); dropping the
+         * addend leaves the pointer off by that much. */
+        addr += (uint32_t)rela->addend;
+        /* fall through */
     case R_XTENSA_JMP_SLOT:
 #ifdef CONFIG_ELF_LOADER_CACHE_OFFSET
         *where = elf_remap_text(elf, addr);

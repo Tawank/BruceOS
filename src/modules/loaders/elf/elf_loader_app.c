@@ -208,6 +208,37 @@ static const esp_elf_xip_ops_t s_xip_ops = {
 };
 #endif
 
+/* Relaunches `path` inside a GUI terminal window. The terminal re-quotes each
+ * of its startup arguments, so the path and `arg` are handed over as separate
+ * shell-style tokens. */
+static int elf_loader__open_in_terminal(const char *path, const char *arg, bruce_launch_mode_t mode) {
+    size_t arg_length = arg != NULL ? strlen(arg) : 0;
+    size_t capacity = strlen(path) * 2u + arg_length + 4u;
+    char *terminal_arg = malloc(capacity);
+    if (terminal_arg == NULL) return BRUCE_ERR_NO_MEMORY;
+
+    size_t used = 0;
+    terminal_arg[used++] = '"';
+    for (const char *p = path; *p != '\0'; ++p) {
+        if (*p == '"' || *p == '\\') terminal_arg[used++] = '\\';
+        terminal_arg[used++] = *p;
+    }
+    terminal_arg[used++] = '"';
+    if (arg_length > 0) {
+        terminal_arg[used++] = ' ';
+        memcpy(terminal_arg + used, arg, arg_length);
+        used += arg_length;
+    }
+    terminal_arg[used] = '\0';
+
+    const bruce_environment_variable_t gui_env[] = {
+        {.name = "GUI", .value = "1"}
+    };
+    int result = app_runner__run_with_environment("terminal", terminal_arg, mode, gui_env, 1);
+    free(terminal_arg);
+    return result;
+}
+
 static int elf_loader__open(
     const char *path, const char *arg, bruce_launch_mode_t mode,
     const bruce_environment_variable_t *environment, size_t environment_count
@@ -225,6 +256,15 @@ static int elf_loader__open(
 
     bruce_app_inspection_t *inspection = manifest__inspect_elf(normalized_path);
     if (inspection == NULL) { return BRUCE_ERR_MANIFEST_INVALID; }
+
+    /* A terminal app (manifest "terminal": true) launched with a GUI has no
+     * stdio session routed to it, so its output would land on the physical
+     * console. Relaunch it through the terminal app instead: its shell runs
+     * the app with an explicit GUI=0, so that second pass skips this branch. */
+    if (inspection->manifest.terminal && app_runner__environment_requests_gui(environment, environment_count)) {
+        memory__free(inspection);
+        return elf_loader__open_in_terminal(normalized_path, arg, mode);
+    }
 
     const char *permission_key = elf_loader__basename(normalized_path);
 
@@ -414,6 +454,35 @@ static int elf_loader__open(
     return result;
 }
 
+/* Waits for the app spawned by elf_loader__open() and returns its exit code,
+ * forwarding a signal aimed at this loader process (the shell delivers Ctrl+C
+ * to the process it launched) on to the app. */
+static int elf_loader__wait_for_app(bruce_process_id_t app) {
+    bruce_process_status_t status;
+    for (;;) {
+        bruce_result_t waited = process__wait_status(app, 100, &status);
+        if (waited == BRUCE_OK) break;
+        if (waited == BRUCE_ERR_TIMEOUT) continue;
+        if (waited == BRUCE_ERR_CANCELLED) {
+            bruce_process_signal_t signal = process__current_signal();
+            if (signal != BRUCE_PROCESS_SIGNAL_INT && signal != BRUCE_PROCESS_SIGNAL_TERM) {
+                signal = BRUCE_PROCESS_SIGNAL_TERM;
+            }
+            (void)process__signal(app, signal);
+            if (process__wait_status(app, 500, &status) != BRUCE_OK) {
+                (void)process__kill(app);
+                (void)process__wait_status(app, 500, &status);
+            }
+            return 128 + (int)signal;
+        }
+        return 1;
+    }
+    if (status.reason == BRUCE_PROCESS_TERMINATED || status.reason == BRUCE_PROCESS_KILLED) {
+        return 128 + (int)status.signal;
+    }
+    return status.exit_code < 0 ? 1 : status.exit_code & 0xff;
+}
+
 /* Built-in "elf" command entry: "elf ./target.elf <args>..." loads the
  * named ELF file and passes the remaining arguments to it.  This lets users
  * (and ELF apps themselves) chain loaders: the first loader can be the
@@ -493,6 +562,12 @@ int elf_loader__app_main(int argc, char **argv) {
         ext_mem_loader__format_error_message(elf_loader__basename(path), result, message, sizeof(message));
         (void)dialog__message(BRUCE_DIALOG_ERROR, "Launch failed", message);
     }
+    /* A CLI launch (the shell, with GUI=0) has to see the app's real exit:
+     * the shell waits on this "elf" process, and if it returned right after
+     * the spawn the shell would go back to reading the same stdio session as
+     * the app, taking its keystrokes (vi in a terminal window). GUI launches
+     * keep returning immediately -- their callers don't wait on this process. */
+    if (result > 0 && !gui) return elf_loader__wait_for_app((bruce_process_id_t)result);
     return result;
 }
 

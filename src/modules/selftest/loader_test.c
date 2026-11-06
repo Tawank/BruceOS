@@ -111,6 +111,35 @@ bool selftest__run_manifest_parse_case(void) {
         return false;
     }
 
+    char terminal_json[512];
+    snprintf(
+        terminal_json,
+        sizeof(terminal_json),
+        "{\"appName\":\"x\",\"appIcon\":\"%s\",\"coreAbiVersion\":2,\"stackSize\":8192,"
+        "\"terminal\":true}",
+        icon_b64
+    );
+    bruce_manifest_t *terminal_manifest = manifest__parse(terminal_json, strlen(terminal_json));
+    if (terminal_manifest == NULL || !terminal_manifest->terminal) {
+        printf("[selftest] loader/manifest_parse: terminal flag mismatch or rejected\n");
+        memory__free(terminal_manifest);
+        return false;
+    }
+    memory__free(terminal_manifest);
+
+    char bad_terminal_json[512];
+    snprintf(
+        bad_terminal_json,
+        sizeof(bad_terminal_json),
+        "{\"appName\":\"x\",\"appIcon\":\"%s\",\"coreAbiVersion\":2,\"stackSize\":8192,"
+        "\"terminal\":\"yes\"}",
+        icon_b64
+    );
+    if (manifest__parse(bad_terminal_json, strlen(bad_terminal_json)) != NULL) {
+        printf("[selftest] loader/manifest_parse: non-boolean terminal accepted\n");
+        return false;
+    }
+
     /* Negative cases: out-of-range stack size, unknown permission name, and
      * a duplicate permission must each be rejected. */
     char bad_stack_json[512];
