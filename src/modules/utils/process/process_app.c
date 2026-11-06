@@ -10,6 +10,7 @@
 #include "core_sdk/config.h"
 #include "core_sdk/display.h"
 #include "core_sdk/input.h"
+#include "core_sdk/memory.h"
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
 #include "core_sdk/runtime.h"
@@ -44,17 +45,22 @@ static int process_app__resolve_target(const char *target, bruce_process_id_t *o
     if (parsed == BRUCE_OK) return BRUCE_OK;
     if (target == NULL || target[0] == '\0' || (target[0] >= '0' && target[0] <= '9')) return parsed;
 
-    bruce_process_snapshot_t processes[PROCESS_APP__MAX_PROCESSES];
+    /* ~1.7K of snapshots: heap, not this process's default-sized stack. */
+    bruce_process_snapshot_t *processes = memory__malloc(PROCESS_APP__MAX_PROCESSES * sizeof(*processes));
+    if (processes == NULL) return BRUCE_ERR_NO_MEMORY;
     size_t count = 0;
     int result = process__list(processes, PROCESS_APP__MAX_PROCESSES, &count);
-    if (result != BRUCE_OK) return result;
-
     bruce_process_id_t match = BRUCE_PROCESS_ID_INVALID;
-    for (size_t i = 0; i < count; ++i) {
+    for (size_t i = 0; result == BRUCE_OK && i < count; ++i) {
         if (strcmp(processes[i].name, target) != 0) continue;
-        if (match != BRUCE_PROCESS_ID_INVALID) return BRUCE_ERR_BUSY;
+        if (match != BRUCE_PROCESS_ID_INVALID) {
+            result = BRUCE_ERR_BUSY;
+            break;
+        }
         match = processes[i].id;
     }
+    memory__free(processes);
+    if (result != BRUCE_OK) return result;
     if (match == BRUCE_PROCESS_ID_INVALID) return BRUCE_ERR_NOT_FOUND;
     *out_id = match;
     return BRUCE_OK;
@@ -167,7 +173,7 @@ process_app__preview_draw_page(const bruce_process_snapshot_t *processes, size_t
     return display__set_tiles(tiles, count);
 }
 
-static int process_app__preview(void) {
+static int process_app__preview_run(bruce_process_snapshot_t *candidates) {
     size_t page = 0;
     int selected = 0;
     bool redraw = true;
@@ -175,7 +181,6 @@ static int process_app__preview(void) {
     size_t drawn_count = 0;
 
     for (;;) {
-        bruce_process_snapshot_t candidates[PROCESS_APP__MAX_PROCESSES];
         size_t total = process_app__preview_candidates(candidates, PROCESS_APP__MAX_PROCESSES);
         size_t pages = total == 0 ? 1 : (total + BRUCE_DISPLAY_MAX_TILES - 1) / BRUCE_DISPLAY_MAX_TILES;
         if (page >= pages) page = pages - 1;
@@ -244,6 +249,14 @@ static int process_app__preview(void) {
             redraw = true;
         }
     }
+}
+
+static int process_app__preview(void) {
+    bruce_process_snapshot_t *candidates = memory__malloc(PROCESS_APP__MAX_PROCESSES * sizeof(*candidates));
+    if (candidates == NULL) return BRUCE_ERR_NO_MEMORY;
+    int result = process_app__preview_run(candidates);
+    memory__free(candidates);
+    return result;
 }
 
 int process_app_main(int argc, char **argv) {
