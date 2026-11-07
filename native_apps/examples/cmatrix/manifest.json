@@ -5,7 +5,6 @@
   "coreAbiVersion": 4,
   "permissions": [],
   "stackSize": 4096,
-  "heapSize": 24000,
   "terminal": true,
   "targets": ["elf"]
 }

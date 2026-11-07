@@ -90,7 +90,19 @@ static void terminal__grid_size(float scale, int *out_columns, int *out_rows) {
     if (char_w < 1) char_w = 1;
     if (char_h < 1) char_h = 1;
     int columns = (width - 2 * TERMINAL__FRAME_MARGIN) / char_w;
-    int rows = (height - TERMINAL__TITLE_H - 2 * TERMINAL__FRAME_MARGIN) / char_h;
+    /* Only one TERMINAL__FRAME_MARGIN here, not two: the title bar
+     * (TERMINAL__TITLE_H) is already the effective top margin, and
+     * terminal__draw_grid()/terminal__draw_cursor_at() add no further
+     * vertical margin of their own beyond it (unlike columns, which
+     * really do get FRAME_MARGIN on the left in terminal__draw_grid()'s
+     * own x offset, matching this formula's symmetric left+right
+     * reservation). Reserving a second margin's worth of height here
+     * that nothing downstream ever uses wasted close to a full text
+     * row of vertical space on small screens (confirmed on a 135px-tall
+     * panel: this was computing 11 rows where 12 actually fit, visible
+     * as a "missing" row of blank space at the bottom of every
+     * full-screen app -- shell, vi, cmatrix). */
+    int rows = (height - TERMINAL__TITLE_H - TERMINAL__FRAME_MARGIN) / char_h;
     if (columns < 1) columns = 1;
     if (rows < 1) rows = 1;
     if (columns > TERMINAL__MAX_COLUMNS) columns = TERMINAL__MAX_COLUMNS;
