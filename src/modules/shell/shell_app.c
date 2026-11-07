@@ -3,7 +3,9 @@
 #include <ctype.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "args.h"
@@ -120,26 +122,83 @@ static bool shell__block_append(
  * shell_compound__call_function()). */
 #define SHELL_APP__MAX_HEREDOCS 8
 
+/* Abstracts shell_app__run_block_source()'s shared block-reading loop (and
+ * the heredoc-body collector it drives) over two different byte sources: a
+ * script file on storage, or stdin itself when "shell" is launched with no
+ * -i/-c/script and finds itself fed by a pipe (see shell_app_main()'s
+ * STDIN_SIZE check -- the same environment-variable convention
+ * shell_executor__pipe_write() now uses for every piped-into app). `remaining`
+ * bounds how many more bytes a stdin source will ever read -- STDIN_SIZE's
+ * value, kept as a defensive cap even though the real termination signal is
+ * EOF itself (stdio__read() returning BRUCE_ERR_NOT_FOUND once
+ * shell_executor__pipe_write() calls stdio__session_close_input() -- see its
+ * own doc comment) -- SIZE_MAX when STDIN_SIZE was missing or unparseable,
+ * i.e. "trust EOF alone". `eof` latches true the moment either happens, so a
+ * source that's already finished keeps reporting a clean zero-byte read
+ * (matching storage__read() at real end-of-file) instead of asking
+ * stdio__read() again needlessly. */
+typedef struct {
+    bool is_stdin;
+    bruce_file_id_t file;
+    size_t remaining;
+    bool eof;
+} shell_app__source_t;
+
+/* Reads up to `capacity` bytes into `buf` from `source`, blocking (for a
+ * stdin source) until at least one byte is available or the source ends --
+ * never returns a non-BRUCE_OK result for a clean end-of-source, only for a
+ * genuine error, matching storage__read()'s own "BRUCE_OK with *out_size ==
+ * 0" end-of-file convention so the shared loop below needs no separate EOF
+ * check per source kind. */
+static bruce_result_t
+shell_app__source_read(shell_app__source_t *source, char *buf, size_t capacity, size_t *out_size) {
+    if (!source->is_stdin) return storage__read(source->file, buf, capacity, out_size);
+    *out_size = 0;
+    if (source->eof) return BRUCE_OK;
+    size_t want = capacity;
+    if (source->remaining != SIZE_MAX && want > source->remaining) want = source->remaining;
+    if (want == 0) {
+        source->eof = true;
+        return BRUCE_OK;
+    }
+    for (;;) {
+        size_t got = 0;
+        bruce_result_t result = stdio__read(buf, want, 100, &got);
+        if (result == BRUCE_OK) {
+            *out_size = got;
+            if (source->remaining != SIZE_MAX) source->remaining -= got;
+            return BRUCE_OK;
+        }
+        if (result == BRUCE_ERR_NOT_FOUND) {
+            source->eof = true;
+            return BRUCE_OK;
+        }
+        if (result == BRUCE_ERR_TIMEOUT) continue;
+        return result;
+    }
+}
+
 /* Reads one more raw line into `out` (`out_capacity` bytes, NUL-terminated,
- * a trailing '\r' stripped same as shell__run_script()'s own line handling),
- * pulling bytes from `*chunk_pos`/`*chunk_size` within `chunk` and refilling
- * via storage__read() on `file` as needed -- the very same byte cursor
- * shell__run_script()'s own reading loop advances, shared by pointer so
- * control returns there exactly where this function leaves off, whether
- * that's mid-chunk or needing a fresh read. Used only while collecting a
- * heredoc body (see shell_app__collect_heredoc_body() below), where lines
- * must be read raw -- never joined into `block` or checked against
- * shell_compound__pending() -- until the delimiter line turns up. Returns
- * the line's length (never counting a line that doesn't fit -- see
- * *overlong), or -1 at real end-of-file with nothing left to read at all. */
+ * a trailing '\r' stripped same as shell_app__run_block_source()'s own line
+ * handling), pulling bytes from `*chunk_pos`/`*chunk_size` within `chunk` and
+ * refilling via shell_app__source_read() on `source` as needed -- the very
+ * same byte cursor shell_app__run_block_source()'s own reading loop advances,
+ * shared by pointer so control returns there exactly where this function
+ * leaves off, whether that's mid-chunk or needing a fresh read. Used only
+ * while collecting a heredoc body (see shell_app__collect_heredoc_body()
+ * below), where lines must be read raw -- never joined into `block` or
+ * checked against shell_compound__pending() -- until the delimiter line turns
+ * up. Returns the line's length (never counting a line that doesn't fit --
+ * see *overlong), or -1 at real end-of-file with nothing left to read at
+ * all. */
 static int shell_app__heredoc_read_line(
-    bruce_file_id_t file, char *chunk, size_t chunk_capacity, size_t *chunk_pos, size_t *chunk_size, char *out,
-    size_t out_capacity, bool *overlong
+    shell_app__source_t *source, char *chunk, size_t chunk_capacity, size_t *chunk_pos, size_t *chunk_size,
+    char *out, size_t out_capacity, bool *overlong
 ) {
     size_t used = 0;
     for (;;) {
         if (*chunk_pos >= *chunk_size) {
-            bruce_result_t read = storage__read(file, chunk, chunk_capacity, chunk_size);
+            bruce_result_t read = shell_app__source_read(source, chunk, chunk_capacity, chunk_size);
             *chunk_pos = 0;
             if (read != BRUCE_OK || *chunk_size == 0) {
                 if (used == 0) return -1;
@@ -175,7 +234,7 @@ static int shell_app__heredoc_read_line(
  * is tight enough that this function's own frame plus shell__run_script()'s
  * already caused a stack overflow before this was moved to the heap. */
 static int shell_app__collect_heredoc_body(
-    bruce_file_id_t file, char *chunk, size_t chunk_capacity, size_t *chunk_pos, size_t *chunk_size,
+    shell_app__source_t *source, char *chunk, size_t chunk_capacity, size_t *chunk_pos, size_t *chunk_size,
     bool strip_tabs, const char *delim, size_t delim_len, char *raw_line, size_t raw_line_capacity, char **out_raw
 ) {
     char *body = memory__malloc(1);
@@ -185,7 +244,7 @@ static int shell_app__collect_heredoc_body(
     for (;;) {
         bool overlong = false;
         int length = shell_app__heredoc_read_line(
-            file, chunk, chunk_capacity, chunk_pos, chunk_size, raw_line, raw_line_capacity, &overlong
+            source, chunk, chunk_capacity, chunk_pos, chunk_size, raw_line, raw_line_capacity, &overlong
         );
         if (overlong) {
             memory__free(body);
@@ -233,13 +292,19 @@ static void shell_app__heredoc_bodies_free(char **heredoc_bodies, size_t *heredo
     *heredoc_count = 0;
 }
 
-static int shell__run_script(shell_state_t *state, const char *path) {
-    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
-    bruce_result_t opened = storage__open(path, BRUCE_STORAGE_OPEN_READ, &file);
-    if (opened != BRUCE_OK) {
-        stdio__printf("shell: %s: cannot open (%d)\n", path, opened);
-        return 1;
-    }
+/* Shared by shell__run_script() (a ".sh" path, from storage) and
+ * shell__run_stdin() ("shell" launched plain and fed by a pipe -- see
+ * shell_app_main()'s STDIN_SIZE check) -- everything about reading a
+ * non-interactive command stream and running it block by block is identical
+ * between the two, down to heredoc handling; only where the bytes actually
+ * come from differs, which `source` (shell_app__source_t, above) already
+ * abstracts away. `label` names the source in error messages ("shell: %s:
+ * ...") -- the script's own path, or "stdin" for a piped script, matching
+ * how bash itself refers to piped/heredoc script input. Does not open or
+ * close whatever `source` wraps -- that's the caller's job, before and after
+ * this call respectively, same division as shell_app__collect_heredoc_body()
+ * already has with its own `source` parameter. */
+static int shell_app__run_block_source(shell_state_t *state, const char *label, shell_app__source_t *source) {
     char *line = memory__malloc(SHELL__LINE_MAX);
     char *block = memory__malloc(SHELL__BLOCK_MAX);
     /* Heredoc scratch space, heap-allocated for the same stack-budget reason
@@ -256,7 +321,6 @@ static int shell__run_script(shell_state_t *state, const char *path) {
         memory__free(block);
         memory__free(delim_copy);
         memory__free(raw_line);
-        (void)storage__close(file);
         return 1;
     }
     size_t used = 0;
@@ -274,10 +338,10 @@ static int shell__run_script(shell_state_t *state, const char *path) {
     size_t chunk_size = 0;
     for (;;) {
         if (chunk_pos >= chunk_size) {
-            bruce_result_t read = storage__read(file, chunk, sizeof(chunk), &chunk_size);
+            bruce_result_t read = shell_app__source_read(source, chunk, sizeof(chunk), &chunk_size);
             chunk_pos = 0;
             if (read != BRUCE_OK) {
-                stdio__printf("shell: %s: read error (%d)\n", path, read);
+                stdio__printf("shell: %s: read error (%d)\n", label, read);
                 status = 1;
                 break;
             }
@@ -286,7 +350,7 @@ static int shell__run_script(shell_state_t *state, const char *path) {
         char c = chunk[chunk_pos++];
         if (c == '\n') {
             if (overlong) {
-                stdio__printf("shell: %s: script line too long\n", path);
+                stdio__printf("shell: %s: script line too long\n", label);
                 status = 2;
                 goto done;
             }
@@ -302,19 +366,19 @@ static int shell__run_script(shell_state_t *state, const char *path) {
             bool has_marker =
                 shell_parser__find_heredoc_marker(line, used, &strip_tabs, &literal, &delim, &delim_len, &marker_error);
             if (marker_error != NULL) {
-                stdio__printf("shell: %s: %s\n", path, marker_error);
+                stdio__printf("shell: %s: %s\n", label, marker_error);
                 status = 2;
                 goto done;
             }
             if (!shell__block_append(block, SHELL__BLOCK_MAX, &block_used, line, used, false)) {
-                stdio__printf("shell: %s: script block too long\n", path);
+                stdio__printf("shell: %s: script block too long\n", label);
                 status = 2;
                 goto done;
             }
             used = 0;
             if (has_marker) {
                 if (heredoc_count >= SHELL_APP__MAX_HEREDOCS) {
-                    stdio__printf("shell: %s: too many heredocs\n", path);
+                    stdio__printf("shell: %s: too many heredocs\n", label);
                     status = 2;
                     goto done;
                 }
@@ -326,23 +390,23 @@ static int shell__run_script(shell_state_t *state, const char *path) {
                  * space, handed down for shell_app__collect_heredoc_body() to
                  * read each body line into. */
                 if (delim_len >= SHELL__LINE_MAX) {
-                    stdio__printf("shell: %s: heredoc delimiter too long\n", path);
+                    stdio__printf("shell: %s: heredoc delimiter too long\n", label);
                     status = 2;
                     goto done;
                 }
                 memcpy(delim_copy, delim, delim_len);
                 char *raw_body = NULL;
                 int collected = shell_app__collect_heredoc_body(
-                    file, chunk, sizeof(chunk), &chunk_pos, &chunk_size, strip_tabs, delim_copy, delim_len, raw_line,
-                    SHELL__LINE_MAX, &raw_body
+                    source, chunk, sizeof(chunk), &chunk_pos, &chunk_size, strip_tabs, delim_copy, delim_len,
+                    raw_line, SHELL__LINE_MAX, &raw_body
                 );
                 if (collected == 1) {
-                    stdio__printf("shell: %s: unexpected end of file (unterminated heredoc)\n", path);
+                    stdio__printf("shell: %s: unexpected end of file (unterminated heredoc)\n", label);
                     status = 2;
                     goto done;
                 }
                 if (collected != 0) {
-                    stdio__printf("shell: %s: heredoc body too long\n", path);
+                    stdio__printf("shell: %s: heredoc body too long\n", label);
                     status = 2;
                     goto done;
                 }
@@ -356,7 +420,7 @@ static int shell__run_script(shell_state_t *state, const char *path) {
                     memory__free(raw_body);
                     if (expanded == NULL) {
                         stdio__printf(
-                            "shell: %s: %s\n", path, expand_error != NULL ? expand_error : "heredoc expansion failed"
+                            "shell: %s: %s\n", label, expand_error != NULL ? expand_error : "heredoc expansion failed"
                         );
                         status = 2;
                         goto done;
@@ -379,19 +443,19 @@ static int shell__run_script(shell_state_t *state, const char *path) {
         }
     }
     if (overlong) {
-        stdio__printf("shell: %s: script line too long\n", path);
+        stdio__printf("shell: %s: script line too long\n", label);
         status = 2;
     } else if (!state->exit_requested && (used > 0 || block_used > 0)) {
         if (used > 0) {
             if (line[used - 1] == '\r') used--;
             if (!shell__block_append(block, SHELL__BLOCK_MAX, &block_used, line, used, false)) {
-                stdio__printf("shell: %s: script block too long\n", path);
+                stdio__printf("shell: %s: script block too long\n", label);
                 status = 2;
                 goto done;
             }
         }
         if (shell_compound__pending(block)) {
-            stdio__printf("shell: %s: unexpected end of file (unterminated if/function)\n", path);
+            stdio__printf("shell: %s: unexpected end of input (unterminated if/function)\n", label);
             status = 2;
         } else {
             status = shell_compound__run(state, block, heredoc_bodies, heredoc_count);
@@ -403,9 +467,42 @@ done:
     memory__free(block);
     memory__free(delim_copy);
     memory__free(raw_line);
-    (void)storage__close(file);
     shell_builtins__fire_exit_trap(state);
     return state->exit_requested ? state->exit_status : status;
+}
+
+/* "shell /path/to/script.sh" -- runs a script file from storage, block by
+ * block, via shell_app__run_block_source() above. */
+static int shell__run_script(shell_state_t *state, const char *path) {
+    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
+    bruce_result_t opened = storage__open(path, BRUCE_STORAGE_OPEN_READ, &file);
+    if (opened != BRUCE_OK) {
+        stdio__printf("shell: %s: cannot open (%d)\n", path, opened);
+        return 1;
+    }
+    shell_app__source_t source = {.is_stdin = false, .file = file};
+    int status = shell_app__run_block_source(state, path, &source);
+    (void)storage__close(file);
+    return status;
+}
+
+/* "shell" launched plain (no -i/-c/script) and fed by a pipe -- the
+ * "curl ... | shell" case shell_app_main() detects via the STDIN_SIZE
+ * environment variable shell_executor__pipe_write() sets on every piped
+ * target. Runs the piped bytes as a script, block by block, exactly like
+ * shell__run_script() does for a file, via the same
+ * shell_app__run_block_source(); the one difference is where bytes come from
+ * (stdio__read() instead of storage__read(), see shell_app__source_read()).
+ * `stdin_size` is STDIN_SIZE's parsed value when it was present and valid,
+ * SIZE_MAX otherwise (missing, or not a plain number) -- either way this
+ * still terminates correctly on the real EOF
+ * shell_executor__pipe_write() now signals via
+ * stdio__session_close_input() once it finishes feeding this process; the
+ * byte count is only an extra defensive cap, not what parsing actually
+ * relies on. */
+static int shell__run_stdin(shell_state_t *state, size_t stdin_size) {
+    shell_app__source_t source = {.is_stdin = true, .remaining = stdin_size};
+    return shell_app__run_block_source(state, "stdin", &source);
 }
 
 /* Bash's "cmd \" -> keep typing on the next line: true when `line`
@@ -760,6 +857,27 @@ int shell_app_main(int argc, char **argv) {
     }
     shell__state_init(state);
 
+    /* "curl ... | shell" (or any other producer piping into a plain "shell"
+     * invocation): shell_executor__pipe_write() sets STDIN_SIZE on every
+     * piped target, the same environment-variable convention every other
+     * piped-into app (text, the bnu_* tools, ...) now reads. Only applies to
+     * the plain invocation -- -i always means "run interactively" regardless
+     * of what's piped in (matching every existing "shell -i" launch site:
+     * terminal_app.c, serial_commands_app.c, the selftest suite), and -c/a
+     * script path already pick their own non-interactive mode above. A
+     * present-but-unparseable value still counts as "I was piped into" (just
+     * with no usable byte cap -- shell__run_stdin() falls back to trusting
+     * EOF alone, see its own doc comment), so this only checks that the
+     * variable exists at all, not that it parsed. */
+    const char *stdin_size_value = !interactive_flag ? environment__get("STDIN_SIZE") : NULL;
+    bool from_stdin = stdin_size_value != NULL;
+    size_t stdin_size = SIZE_MAX;
+    if (from_stdin) {
+        char *end = NULL;
+        unsigned long parsed = strtoul(stdin_size_value, &end, 10);
+        if (stdin_size_value[0] != '\0' && end != NULL && *end == '\0') stdin_size = (size_t)parsed;
+    }
+
     int status;
     if (has_command) {
         status = shell__execute_line(state, command);
@@ -767,6 +885,8 @@ int shell_app_main(int argc, char **argv) {
         if (state->exit_requested) status = state->exit_status;
     } else if (has_script) {
         status = shell__run_script(state, script);
+    } else if (from_stdin) {
+        status = shell__run_stdin(state, stdin_size);
     } else {
         status = shell__interactive(state, no_echo);
     }
