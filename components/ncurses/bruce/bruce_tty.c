@@ -47,6 +47,47 @@ int bruce_curses__get_screen_size(int *out_rows, int *out_columns) {
     return 0;
 }
 
+/* ---- fileno() replacement --------------------------------------------
+ *
+ * Real ncurses source calls fileno(FILE*) in several places (lib_set_
+ * term.c, lib_newterm.c, lib_tputs.c, lib_mvcur.c) to get a raw fd for
+ * *direct* write()/isatty()-style syscalls -- most importantly
+ * lib_set_term.c's `sp->_ofd = fileno(output)`, which tty/lib_tputs.c's
+ * _nc_outch() and _nc_flush() then write() through directly, bypassing
+ * the FILE*-level stdio this port already wired up correctly
+ * (bruce_elf__fwrite() and friends, exported via elf_loader_sdk_
+ * symbols.c).
+ *
+ * picolibc's real fileno() isn't a macro -- it's a genuine function
+ * that reads a field out of a real picolibc FILE struct. BruceOS's own
+ * stdin/stdout/stderr (exported as those exact names, see elf_loader_
+ * sdk_symbols.c's own comment) are NOT real picolibc FILE structs: each
+ * is a bruce_elf_file_t box simply cast to (FILE *). Calling the real
+ * fileno() on one reads whatever picolibc's struct layout expects at
+ * that byte offset against a completely different struct's memory --
+ * undefined, and in practice some fd that has nothing to do with this
+ * process's actual console (observed on real hardware: ncurses output
+ * landing on the serial console instead of the routed terminal
+ * session, exactly BruceOS's own documented fallback for "no session
+ * routed" -- not a crash, just the wrong, uninitended destination).
+ *
+ * This sidesteps the problem entirely instead of trying to make
+ * fileno() itself safe on a fake struct: it never reads the FILE*'s
+ * contents at all, just compares the pointer against the three real
+ * exported identities every ELF app already has. This port never
+ * redirects curses to any other FILE* (upstream's own -t/tty flag is
+ * removed -- see native_apps/examples/cmatrix/README.md for the first
+ * app built against this), so stdin/stdout/stderr are the only cases
+ * that can legitimately occur. */
+#include <stdio.h>
+
+int bruce_curses__fileno(void *file_ptr) {
+    if (file_ptr == (void *)stdout) return 1;
+    if (file_ptr == (void *)stdin) return 0;
+    if (file_ptr == (void *)stderr) return 2;
+    return -1;
+}
+
 #include <curses.priv.h>
 #include <term.h>
 

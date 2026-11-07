@@ -275,6 +275,80 @@ otherwise take):
   `$TERM` unset, and `$TERM` set to an unrelated value (`xterm`) -- both
   now succeed, where both failed before this fix.
 
+- **Output landing on the serial console instead of the routed terminal
+  session.** Real ncurses doesn't only write through `FILE*` -- `tty/
+  lib_tputs.c`'s `_nc_flush()`/`_nc_outch()` do raw `write(fd, ...)`
+  syscalls directly, using an fd cached in `SCREEN::_ofd`, set once in
+  `base/lib_set_term.c` via `fileno(output)`. `fileno()` is a real
+  picolibc function (not a macro) that reads a field out of a genuine
+  picolibc `FILE` struct -- but BruceOS's own `stdin`/`stdout`/`stderr`
+  (exported as those exact names -- see `elf_loader_sdk_symbols.c`'s own
+  comment) are each a `bruce_elf_file_t` box simply cast to `(FILE *)`,
+  nothing like picolibc's real struct layout. Calling real `fileno()` on
+  one reads undefined memory at whatever offset picolibc expects,
+  producing a fd that has nothing to do with the process's actual
+  console -- in practice, exactly BruceOS's own documented fallback for
+  "no session routed" (`stdio.h`'s own doc comment), i.e. the serial
+  console, confirmed on real hardware running `cmatrix` (the first app
+  built against this). `base/lib_getch.c`'s *input* path (`SCREEN::_ifd`,
+  set the same way in `base/lib_newterm.c`) has the identical problem,
+  not yet observed as a symptom only because this port's own
+  `tty/lib_twait.c` rewrite never needs that fd for the input path it
+  actually exercises (see its own comment) -- fixed anyway, since
+  nothing guarantees every caller takes that same path.
+
+  Fixed with `bruce_curses__fileno()` (`bruce/bruce_tty.c`): rather than
+  trying to make `fileno()` itself safe against a fake struct, it never
+  reads the `FILE*`'s contents at all -- just compares the pointer
+  against the three real exported identities (`stdin`/`stdout`/
+  `stderr`) every ELF app already has, which is sound precisely because
+  this port removed upstream's `-t`/alternate-tty redirection feature
+  (see `native_apps/examples/cmatrix/README.md`), so those three are the
+  only `FILE*` values that can legitimately reach any of these call
+  sites. Patched at every real (non-dead-code) `fileno()` call site in
+  the vendored tree: `lib_set_term.c`'s `_ofd` assignment, `lib_newterm.c`'s
+  `_ifd`/`typeahead()`/`TINFO_SETUP_TERM()` calls, `lib_tputs.c`'s two
+  direct `write()`s, and `lib_mvcur.c`'s one `isatty()`-style check
+  (`lib_initscr.c`'s own `fileno()` calls are dead, `__CYGWIN__`-only;
+  `lib_baudrate.c`'s is dead, `TRACE`-only; `tty/hashmap.c`'s whole
+  `main()` is dead, `HASHDEBUG`-only).
+
+  Notably, host testing never caught this: a host build's `stdout`/
+  `stdin` really are genuine `FILE*` objects with the real struct layout
+  `fileno()` expects, so every host test in this README ran the real
+  code path correctly by accident, not because the fix was verified --
+  the bug only exists where BruceOS's `FILE*` boxing diverges from
+  picolibc's real struct, which no host test represents. Worth
+  remembering for whoever extends this port next: a function compiling
+  and even running without a relocation error against BruceOS's ELF
+  loader is not the same as it reading correct data, when what it reads
+  depends on a struct layout BruceOS's own `FILE*` doesn't actually have.
+
+- **The real fix for serial-only output: `write()` itself, not `fileno()`.**
+  The `fileno()` fix above was real and necessary (confirmed by the
+  diagnostic below -- a correctly-routed session was consistently
+  verified), but not sufficient: output still landed on serial even with
+  a proven-correct fd and a proven-correct, live-routed session. Isolated
+  with a temporary diagnostic in `cmatrix.c` that called `stdio__printf()`
+  directly, bypassing curses entirely -- *that* call correctly reached
+  the terminal window every time, while curses' own output, moments
+  later in the exact same process, still didn't. The one real difference:
+  `stdio__printf()` is a name BruceOS invented, with no real libc
+  function to collide with, while `tinfo/lib_tputs.c`'s `_nc_flush()`/
+  `_nc_outch()` (and `tinfo/lib_print.c`'s `mcprint()`, not currently
+  reachable from any app) call the real POSIX `write()` syscall by name
+  directly. picolibc/ESP-IDF has its own genuine `write()` implementation
+  (needed for the *firmware's* own console I/O), and it apparently gets
+  linked in ahead of, or instead of, this ELF loader's dynamic override
+  for that one specific, real-syscall-shaped name -- regardless of which
+  fd value is passed, since BruceOS's session-routed stdio is never
+  reached at all. Fixed by replacing every real `write()` call in the
+  vendored tree with `stdio__write()` (`core_sdk/stdio.h`) directly, the
+  same call the diagnostic proved reaches the terminal correctly -- an
+  invented BruceOS name has nothing to collide with. `fileno()`'s fix is
+  kept regardless: `SCREEN::_ofd` is still used as a validity gate
+  (`>= 0`) even though its value no longer feeds a real syscall.
+
 ## What's NOT yet done
 
 - **A clean ESP32/picolibc build has not been confirmed end-to-end.**

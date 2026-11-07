@@ -34,6 +34,14 @@
  *     and: Juergen Pfeifer                                                 *
  ****************************************************************************/
 
+/* BruceOS patch: stdio__write(), core_sdk/stdio.h -- see this file's own
+ * call site below, and tinfo/lib_tputs.c's matching comment for the full
+ * reasoning (a real write() syscall risks resolving to picolibc/ESP-
+ * IDF's own real implementation instead of this ELF loader's dynamic
+ * override). Not currently reachable from any app (mcprint() isn't
+ * exported), but fixed for consistency in case that changes. */
+#include "core_sdk/stdio.h"
+
 #include <curses.priv.h>
 
 #ifndef CUR
@@ -90,7 +98,12 @@ NCURSES_SP_NAME(mcprint) (NCURSES_SP_DCLx char *data, int len)
      * data has actually been shipped to the terminal.  If the write(2)
      * operation is truly atomic we're protected from this.
      */
-    result = (int) write(TerminalOf(SP_PARM)->Filedes, mybuf, need);
+    /* BruceOS patch: see this file's own top comment. stdio__write()
+     * writes the whole buffer or fails, matching the original write(2)
+     * call's "bytes written, or -1" result shape well enough for this
+     * function's own caller (which only ever checks for a negative
+     * return). */
+    result = stdio__write(mybuf, need) == BRUCE_OK ? (int) need : -1;
 
     /*
      * By giving up our scheduler slot here we increase the odds that the

@@ -43,6 +43,10 @@
 
 #define NEW_PAIR_INTERNAL 1
 
+/* BruceOS patch: bruce_curses__fileno(), defined in bruce/bruce_tty.c --
+ * see that function's own comment and this file's call site below. */
+extern int bruce_curses__fileno(void *file_ptr);
+
 #include <curses.priv.h>
 #include <tic.h>
 #include <new_pair.h>
@@ -435,7 +439,12 @@ NCURSES_SP_NAME(_nc_setupscreen) (
     sp->_columns = (NCURSES_SIZE_T) scolumns;
 
     fflush(output);
-    sp->_ofd = output ? fileno(output) : -1;
+    /* BruceOS patch: see bruce/bruce_tty.c's own comment -- the real
+     * fileno() on our fake FILE* is undefined, and this is the field
+     * tty/lib_tputs.c's _nc_flush()/_nc_outch() write() through
+     * directly, bypassing this port's correctly-wired FILE*-level
+     * stdio otherwise. */
+    sp->_ofd = output ? bruce_curses__fileno(output) : -1;
     sp->_ofp = output;
 #if defined(EXP_WIN32_DRIVER)
     if (output)

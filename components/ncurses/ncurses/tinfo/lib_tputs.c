@@ -42,6 +42,14 @@
  *
  */
 
+/* BruceOS patch: stdio__write(), core_sdk/stdio.h -- see this file's own
+ * call sites below (NCURSES_SP_NAME(_nc_flush)()'s comment has the full
+ * reasoning). Included ahead of curses.priv.h/term.h for the same
+ * "avoid their short macro names" reason bruce/bruce_tty.c's own
+ * includes are ordered this way, though stdio.h in particular doesn't
+ * currently define anything that would collide. */
+#include "core_sdk/stdio.h"
+
 #include <curses.priv.h>
 
 #ifndef CUR
@@ -132,19 +140,25 @@ NCURSES_SP_NAME(_nc_flush) (NCURSES_SP_DCL0)
 
 	    TR(TRACE_CHARPUT, ("flushing %ld/%ld bytes",
 			       (unsigned long) amount, _nc_outchars));
-	    while (amount) {
-		ssize_t res = write(SP_PARM->_ofd, buf, amount);
-		if (res > 0) {
-		    /* if the write was incomplete, try again */
-		    amount -= (size_t) res;
-		    buf += res;
-		} else if (errno == EAGAIN) {
-		    continue;
-		} else if (errno == EINTR) {
-		    continue;
-		} else {
-		    break;	/* an error we can not recover from */
-		}
+	    /* BruceOS patch: a real write(fd, ...) syscall against this
+	     * port's fd 1 risks resolving to picolibc/ESP-IDF's own real
+	     * write() (which genuinely exists, for firmware's own console
+	     * I/O) instead of the dynamically-resolved override this ELF
+	     * loader otherwise provides for POSIX-named functions -- unlike
+	     * every other BruceOS SDK call in this file (an invented name
+	     * with no real libc counterpart to collide with), "write" is a
+	     * real POSIX syscall name picolibc may link statically
+	     * regardless of fd value, bypassing BruceOS's own session-
+	     * routed stdio entirely (observed on real hardware: output
+	     * landing on the physical serial console even with a verified,
+	     * correctly-routed session and a verified-correct fd -- see
+	     * components/ncurses/README.md). stdio__write() (core_sdk/
+	     * stdio.h) is BruceOS's own invented name with nothing to
+	     * collide with, so it reaches the real session-routed stdio
+	     * unambiguously, and already writes the whole buffer or fails,
+	     * so no retry loop is needed. */
+	    if (stdio__write(buf, amount) == BRUCE_OK) {
+		amount = 0;
 	    }
 	} else if (SP_PARM->out_buffer == 0) {
 	    TR(TRACE_CHARPUT, ("flushing stdout"));
@@ -186,12 +200,16 @@ NCURSES_SP_NAME(_nc_outch) (NCURSES_SP_DCLx int ch)
 	     * POSIX says write() is safe in a signal handler, but the
 	     * buffered I/O is not.
 	     */
-	    if (write(fileno(NC_OUTPUT(SP_PARM)), &tmp, (size_t) 1) == -1)
+	    /* BruceOS patch: see the matching comment in
+	     * NCURSES_SP_NAME(_nc_flush)() above -- stdio__write() instead
+	     * of a real write() syscall, same reasoning. */
+	    if (stdio__write(&tmp, (size_t) 1) != BRUCE_OK)
 		rc = ERR;
 	}
     } else {
 	char tmp = (char) ch;
-	if (write(fileno(stdout), &tmp, (size_t) 1) == -1)
+	/* BruceOS patch: see NCURSES_SP_NAME(_nc_flush)()'s comment above. */
+	if (stdio__write(&tmp, (size_t) 1) != BRUCE_OK)
 	    rc = ERR;
     }
     return rc;

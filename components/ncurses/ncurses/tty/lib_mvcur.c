@@ -153,6 +153,10 @@
  * have parm_right_cursor, tab motions don't win you a lot anyhow.
  */
 
+/* BruceOS patch: bruce_curses__fileno(), defined in bruce/bruce_tty.c --
+ * see that function's own comment and this file's call site below. */
+extern int bruce_curses__fileno(void *file_ptr);
+
 #include <curses.priv.h>
 #include <ctype.h>
 
@@ -328,7 +332,8 @@ NCURSES_EXPORT(void)
 NCURSES_SP_NAME(_nc_mvcur_init) (NCURSES_SP_DCL0)
 /* initialize the cost structure */
 {
-    if (SP_PARM->_ofp && NC_ISATTY(fileno(SP_PARM->_ofp))) {
+    /* BruceOS patch: see bruce/bruce_tty.c's own comment. */
+    if (SP_PARM->_ofp && NC_ISATTY(bruce_curses__fileno(SP_PARM->_ofp))) {
 	SP_PARM->_char_padding = ((BAUDBYTE * 1000 * 10)
 				  / (BAUDRATE(SP_PARM) > 0
 				     ? BAUDRATE(SP_PARM)

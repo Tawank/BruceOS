@@ -53,6 +53,10 @@
  * bruce/bruce_curses_owner.c -- see this file's own call site below. */
 extern int bruce_curses__try_acquire(void);
 
+/* BruceOS patch: bruce_curses__fileno(), defined in bruce/bruce_tty.c --
+ * see that function's own comment and this file's call sites below. */
+extern int bruce_curses__fileno(void *file_ptr);
+
 MODULE_ID("$Id: lib_newterm.c,v 1.104 2022/07/09 18:58:58 tom Exp $")
 
 #ifdef USE_TERM_DRIVER
@@ -244,8 +248,9 @@ NCURSES_SP_NAME(newterm) (NCURSES_SP_DCLx
     INIT_TERM_DRIVER();
     /* this loads the capability entry, then sets LINES and COLS */
     if (
+	   /* BruceOS patch: see bruce/bruce_tty.c's own comment. */
 	   TINFO_SETUP_TERM(&new_term, name,
-			    fileno(_ofp), &errret, FALSE) != ERR) {
+			    bruce_curses__fileno(_ofp), &errret, FALSE) != ERR) {
 	int slk_format;
 	int filter_mode;
 
@@ -325,8 +330,9 @@ NCURSES_SP_NAME(newterm) (NCURSES_SP_DCLx
 	    if (slk_format && NumLabels > 0 && SLK_STDFMT(slk_format))
 		_nc_slk_initialize(StdScreen(SP_PARM), cols);
 
-	    SP_PARM->_ifd = fileno(_ifp);
-	    NCURSES_SP_NAME(typeahead) (NCURSES_SP_ARGx fileno(_ifp));
+	    /* BruceOS patch: see bruce/bruce_tty.c's own comment. */
+	    SP_PARM->_ifd = bruce_curses__fileno(_ifp);
+	    NCURSES_SP_NAME(typeahead) (NCURSES_SP_ARGx bruce_curses__fileno(_ifp));
 #ifdef TERMIOS
 	    SP_PARM->_use_meta = ((new_term->Ottyb.c_cflag & CSIZE) == CS8 &&
 				  !(new_term->Ottyb.c_iflag & ISTRIP)) ||
