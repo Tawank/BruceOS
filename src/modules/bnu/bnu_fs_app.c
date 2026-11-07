@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "args.h"
+#include "core_sdk/environment.h"
 #include "core_sdk/filetype.h"
 #include "core_sdk/format.h"
 #include "core_sdk/memory.h"
@@ -373,10 +374,10 @@ static bruce_result_t bnu__cat_file(const char *path) {
  * everything up front the way uniq/cut/sort/rev do (see
  * bnu__text_load_source() in bnu_text_app.c): cat only ever needs to see
  * each byte once, so streaming keeps it working on input larger than
- * BNU_TEXT_MAX_BYTES too. `size` comes from the shell's own hidden
- * "--stdin-size N" prefix (see bnu_tr_app_main()'s doc comment for why that
- * exists) -- there's no file to open, just `size` bytes already waiting on
- * stdin. */
+ * BNU_TEXT_MAX_BYTES too. `size` comes from the shell's own
+ * STDIN_SIZE environment variable (see bnu_tr_app_main()'s doc comment for
+ * why that exists) -- there's no file to open, just `size` bytes already
+ * waiting on stdin. */
 static bruce_result_t bnu__cat_stdin(size_t size) {
     unsigned char buffer[256];
     size_t offset = 0;
@@ -393,7 +394,7 @@ static bruce_result_t bnu__cat_stdin(size_t size) {
     return result;
 }
 
-/* Bare "cat" with no file and no "--stdin-size" (i.e. not fed by a pipe,
+/* Bare "cat" with no file and no STDIN_SIZE (i.e. not fed by a pipe,
  * redirect, or heredoc -- those always know their exact byte count up front
  * and go through bnu__cat_stdin() above instead): mirrors bash's own `cat`
  * with no arguments, echoing each typed line back out until Ctrl+D. Reads a
@@ -415,8 +416,6 @@ static bruce_result_t bnu__cat_interactive(void) {
 int bnu_cat_app_main(int argc, char **argv) {
     ArgParser *parser = bnu__new_parser("Print the contents of one or more files, or piped stdin.");
     if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
-    ap_add_str_opt(parser, "stdin-size", NULL);
-    ap_set_opt_help(parser, "stdin-size", "Read exactly this many bytes from stdin (used by shell pipes)");
     ap_add_optional_arg(parser, "file", "File path to print (reads stdin if omitted)");
     ap_allow_extra_args(parser);
     ap_unknown_options_as_args(parser);
@@ -424,13 +423,12 @@ int bnu_cat_app_main(int argc, char **argv) {
 
     int path_count = ap_count_args(parser);
     if (path_count == 0) {
-        /* Mirrors bnu__head_tail_app_main()'s "stdin-size" handling above:
-         * distinguish "--stdin-size was given but garbled" from "no
-         * --stdin-size at all", which (unlike head/tail) isn't an error here
-         * -- it means cat is bare, at an interactive prompt, so it falls
-         * back to bnu__cat_interactive() instead. */
-        const char *stdin_size_arg =
-            ap_found(parser, "stdin-size") ? ap_get_str_value(parser, "stdin-size") : NULL;
+        /* Mirrors bnu__head_tail_app_main()'s STDIN_SIZE handling above:
+         * distinguish "STDIN_SIZE was set but garbled" from "no STDIN_SIZE
+         * at all", which (unlike head/tail) isn't an error here -- it means
+         * cat is bare, at an interactive prompt, so it falls back to
+         * bnu__cat_interactive() instead. */
+        const char *stdin_size_arg = environment__get("STDIN_SIZE");
         char *end = NULL;
         unsigned long parsed = stdin_size_arg != NULL ? strtoul(stdin_size_arg, &end, 10) : 0;
         bool from_stdin = stdin_size_arg != NULL && stdin_size_arg[0] != '\0' && end != NULL && *end == '\0';
@@ -623,7 +621,7 @@ static bool bnu__head_tail_legacy_count(const char *arg, unsigned long *out_line
 
 /* Shared body of head and tail: parse "-n lines" (or the legacy "-N"
  * shorthand -- see bnu__head_tail_legacy_count()) plus the usual file-or-
- * stdin argument (see bnu_less_app_main()'s "--stdin-size" handling, which
+ * stdin argument (see bnu_less_app_main()'s STDIN_SIZE handling, which
  * this mirrors), load the whole input, and print the requested slice. */
 static int bnu__head_tail_app_main(int argc, char **argv, bool tail) {
     const char *command = tail ? "tail" : "head";
@@ -634,8 +632,6 @@ static int bnu__head_tail_app_main(int argc, char **argv, bool tail) {
     if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
     ap_add_int_opt(parser, "n", BNU_HEAD_TAIL_DEFAULT_LINES);
     ap_set_opt_help(parser, "n", "Number of lines to print (also settable as e.g. -4)");
-    ap_add_str_opt(parser, "stdin-size", NULL);
-    ap_set_opt_help(parser, "stdin-size", "Read exactly this many bytes from stdin (used by shell pipes)");
     ap_add_optional_arg(parser, "file", "File to read (reads stdin if omitted)");
     ap_unknown_options_as_args(parser);
     ap_first_pos_arg_ends_option_parsing(parser);
@@ -666,8 +662,7 @@ static int bnu__head_tail_app_main(int argc, char **argv, bool tail) {
         }
         path_arg = value;
     }
-    const char *stdin_size_arg =
-        ap_found(parser, "stdin-size") ? ap_get_str_value(parser, "stdin-size") : NULL;
+    const char *stdin_size_arg = environment__get("STDIN_SIZE");
     char *end = NULL;
     unsigned long parsed_stdin_size = stdin_size_arg != NULL ? strtoul(stdin_size_arg, &end, 10) : 0;
     bool stdin_requested = stdin_size_arg != NULL;

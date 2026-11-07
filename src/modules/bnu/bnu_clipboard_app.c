@@ -8,6 +8,7 @@
 
 #include "args.h"
 #include "core_sdk/clipboard.h"
+#include "core_sdk/environment.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/result.h"
 #include "core_sdk/stdio.h"
@@ -116,8 +117,6 @@ int bnu_wl_copy_app_main(int argc, char **argv) {
     if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
     ap_add_str_opt(parser, "n", NULL);
     ap_set_opt_help(parser, "n", "Suggested filename, if the content ends up copied as binary data");
-    ap_add_str_opt(parser, "stdin-size", NULL);
-    ap_set_opt_help(parser, "stdin-size", "Read exactly this many bytes from stdin (used by shell pipes)");
     ap_add_optional_arg(parser, "file", "File to copy (reads stdin if omitted)");
     ap_unknown_options_as_args(parser);
     ap_first_pos_arg_ends_option_parsing(parser);
@@ -125,7 +124,7 @@ int bnu_wl_copy_app_main(int argc, char **argv) {
 
     const char *name_arg = ap_found(parser, "n") ? ap_get_str_value(parser, "n") : NULL;
     const char *path_arg = ap_get_arg(parser, "file");
-    const char *stdin_size_arg = ap_found(parser, "stdin-size") ? ap_get_str_value(parser, "stdin-size") : NULL;
+    const char *stdin_size_arg = environment__get("STDIN_SIZE");
     bool from_stdin = path_arg == NULL;
     char path[BRUCE_STORAGE_PATH_MAX] = {0};
     bool path_resolved = from_stdin || bnu__resolve_path(path_arg, path);

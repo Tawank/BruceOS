@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "args.h"
+#include "core_sdk/environment.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/result.h"
 #include "core_sdk/stdio.h"
@@ -277,8 +278,6 @@ int bnu_grep_app_main(int argc, char **argv) {
     ap_set_opt_help(parser, "B", "Print NUM lines of context before each match");
     ap_add_int_opt(parser, "C", 0);
     ap_set_opt_help(parser, "C", "Print NUM lines of context before and after each match (like -A NUM -B NUM)");
-    ap_add_str_opt(parser, "stdin-size", NULL);
-    ap_set_opt_help(parser, "stdin-size", "Read exactly this many bytes from stdin (used by shell pipes)");
     ap_add_required_arg(parser, "pattern", "POSIX extended regular expression to search for (see -F)");
     ap_allow_extra_args(parser);
     ap_unknown_options_as_args(parser);
@@ -306,7 +305,7 @@ int bnu_grep_app_main(int argc, char **argv) {
     opt.before = (uint32_t)before;
     opt.after = (uint32_t)after;
 
-    const char *stdin_size_arg = ap_get_str_value(parser, "stdin-size");
+    const char *stdin_size_arg = environment__get("STDIN_SIZE");
     int total = ap_count_args(parser);
     opt.pattern = ap_get_arg_at_index(parser, 0);
     opt.pattern_length = opt.pattern != NULL ? strlen(opt.pattern) : 0;

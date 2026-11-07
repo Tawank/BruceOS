@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "args.h"
+#include "core_sdk/environment.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/result.h"
 #include "core_sdk/stdio.h"
@@ -542,8 +543,6 @@ static bruce_result_t less__load_stdin(size_t size, const void **out_data, size_
 int bnu_less_app_main(int argc, char **argv) {
     ArgParser *parser = bnu__new_parser("View a file, or piped stdin, one screen at a time.");
     if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
-    ap_add_str_opt(parser, "stdin-size", NULL);
-    ap_set_opt_help(parser, "stdin-size", "Read exactly this many bytes from stdin (used by shell pipes)");
     ap_add_flag(parser, "S");
     ap_set_opt_help(parser, "S", "Chop long lines instead of wrapping them");
     ap_add_optional_arg(parser, "path", "File to view");
@@ -554,7 +553,7 @@ int bnu_less_app_main(int argc, char **argv) {
     bool chop_long_lines = ap_found(parser, "S");
 
     const char *path_arg = ap_get_arg(parser, "path");
-    const char *stdin_size_arg = ap_found(parser, "stdin-size") ? ap_get_str_value(parser, "stdin-size") : NULL;
+    const char *stdin_size_arg = environment__get("STDIN_SIZE");
     char *end = NULL;
     unsigned long parsed_stdin_size = stdin_size_arg != NULL ? strtoul(stdin_size_arg, &end, 10) : 0;
     bool stdin_requested = stdin_size_arg != NULL;

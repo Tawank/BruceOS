@@ -1164,10 +1164,13 @@ static int shell_executor__pipe_relay_capture(
 }
 
 /* Feeds a captured buffer to `target`'s stdin over a fresh stdio session,
- * telling it up front how many bytes are coming via a "--stdin-size N"
- * argument prefix (see text_app.c's --stdin-size handling for the convention
- * this follows) so any external program written to expect a piped shell
- * input can size its read. Like any other external command the shell
+ * telling it up front how many bytes are coming via a STDIN_SIZE
+ * environment variable (see text_app.c's STDIN_SIZE handling for the
+ * convention this follows) so any external program written to expect a
+ * piped shell input can size its read -- and, once every byte has been
+ * written, closing the session's input side (stdio__session_close_input())
+ * to deliver a real end-of-input to anything that reads in a loop instead.
+ * Like any other external command the shell
  * launches with no environment overlay of its own, a pipe destination --
  * "text", "less", or anything else -- always launches in the background
  * (BRUCE_LAUNCH_BACKGROUND, unconditionally: there's no per-stage "GUI=1"/
@@ -1226,10 +1229,21 @@ static int shell_executor__pipe_write(
         shell_executor__buffer_free(buffer);
         return 1;
     }
-    char prefix[48];
-    snprintf(prefix, sizeof(prefix), "--stdin-size %u", (unsigned)buffer->length);
-    int launched =
-        shell_executor__launch_external(target_argc, target_words, prefix, NULL, 0, BRUCE_LAUNCH_BACKGROUND);
+    /* STDIN_SIZE travels as an environment variable rather than an argv
+     * prefix now: an external command that has no idea what it means (e.g.
+     * "ping") previously choked on it as an unrecognized option before ever
+     * reaching its own argument list -- an env var it never looks at is
+     * silently ignored instead, the same as any other inherited variable a
+     * program doesn't care about. */
+    char stdin_size_value[32];
+    snprintf(stdin_size_value, sizeof(stdin_size_value), "%u", (unsigned)buffer->length);
+    bruce_environment_variable_t stdin_size_env[] = {
+        {.name = "STDIN_SIZE", .value = stdin_size_value},
+    };
+    int launched = shell_executor__launch_external(
+        target_argc, target_words, NULL, stdin_size_env,
+        sizeof(stdin_size_env) / sizeof(stdin_size_env[0]), BRUCE_LAUNCH_BACKGROUND
+    );
     (void)stdio__session_route_children(BRUCE_STDIO_SESSION_INVALID);
     if (launched <= 0) {
         (void)stdio__session_close(session);
@@ -1259,7 +1273,7 @@ static int shell_executor__pipe_write(
             /* The child may be waiting for room in its output channel before
              * it can consume more input, which draining above already
              * breaks that cycle for -- but a destination that doesn't read
-             * its "--stdin-size N" bytes at all (an argument-parse failure
+             * its piped bytes at all (an argument-parse failure
              * before its first stdio__read(), a crash, ...) leaves this
              * input channel permanently full with nobody left to drain it,
              * which would otherwise retry here forever with no way out (not
@@ -1278,6 +1292,16 @@ static int shell_executor__pipe_write(
             break;
         }
     }
+    /* Nothing more will ever be written to this session's input, whether the
+     * loop above delivered the whole buffer or gave up early on a write
+     * error -- either way the target has everything it's going to get. This
+     * is the real end-of-input signal STDIN_SIZE was always a stand-in for
+     * (see stdio__session_close_input()'s own doc comment): a target that
+     * reads in a loop until EOF, rather than relying on a byte count it was
+     * told up front, now gets one. Skipped when the target has already
+     * exited (destination_exited) -- its session is on its way out anyway,
+     * and there's nothing left on the other end to signal. */
+    if (!destination_exited) (void)stdio__session_close_input(session);
     /* The source buffer's job ends here -- everything of it that's going to
      * reach the target has already been written to its stdin. Freeing it now
      * rather than leaving it to the caller (after this function returns)
@@ -1318,9 +1342,9 @@ static int shell_executor__pipe_write(
  * `input` is the file's content or the (already expanded, unless the
  * heredoc's delimiter was quoted) heredoc body respectively, fed to the
  * command's stdin the exact same way a pipe producer's captured output
- * would be (shell_executor__pipe_write() -- including its "--stdin-size N"
- * convention any external program written to expect piped input already
- * relies on). Always takes ownership of `input`, freeing it via
+ * would be (shell_executor__pipe_write() -- including its STDIN_SIZE
+ * environment-variable convention any external program written to expect
+ * piped input already relies on). Always takes ownership of `input`, freeing it via
  * shell_executor__pipe_write() even on an early exit below.
  *
  * When `command` carries no output redirect of its own, the command's own

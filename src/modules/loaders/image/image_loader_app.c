@@ -8,6 +8,7 @@
 #include "args.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/display.h"
+#include "core_sdk/environment.h"
 #include "core_sdk/image.h"
 #include "core_sdk/input.h"
 #include "core_sdk/memory.h"
@@ -16,7 +17,7 @@
 #include "core_sdk/runtime.h"
 #include "core_sdk/stdio.h"
 
-/* Same cap as bnu_pager_app.c's "less" uses for its own "--stdin-size"
+/* Same cap as bnu_pager_app.c's "less" uses for its own STDIN_SIZE
  * fixture (LESS_MAX_BYTES) -- plenty for anything this display can show, and
  * small enough that a runaway/adversarial byte count can't be used to exhaust
  * the external heap a piped `curl url | image` decodes into. */
@@ -47,8 +48,10 @@ static bool image_viewer__resume_after_handoff(void) {
 
 /* Mirrors bnu_pager_app.c's less__load_stdin(): reads exactly `size` bytes
  * (the shell already knows this count -- see shell_executor__pipe_write()'s
- * "--stdin-size N" convention -- because piping has no real EOF signal here)
- * into an owned memory__external_malloc() buffer, chunked through a small
+ * STDIN_SIZE environment-variable convention, read via environment__get()
+ * below -- rather than looping until the real EOF stdio__session_close_input()
+ * now delivers, which would need a growable buffer instead of this fixed-size
+ * one) into an owned memory__external_malloc() buffer, chunked through a small
  * stack buffer since stdio__read() has no direct-into-external-memory form. */
 static bruce_result_t image_viewer__load_stdin(size_t size, const void **out_data, size_t *out_length) {
     const void *data = NULL;
@@ -122,8 +125,6 @@ int image_app_main(int argc, char **argv) {
     ArgParser *parser = ap_new_parser();
     if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
     ap_set_helptext(parser, "Display an image, or piped stdin, until an input event is received.");
-    ap_add_str_opt(parser, "stdin-size", NULL);
-    ap_set_opt_help(parser, "stdin-size", "Read exactly this many bytes from stdin (used by shell pipes)");
     ap_add_optional_arg(parser, "path", "Path to a JPEG, PNG, or GIF image");
     ap_unknown_options_as_args(parser);
     ap_allow_extra_args(parser);
@@ -135,7 +136,7 @@ int image_app_main(int argc, char **argv) {
         return status == AP_STATUS_NO_MEMORY ? BRUCE_ERR_NO_MEMORY : BRUCE_ERR_INVALID_ARGUMENT;
     }
     const char *path = ap_get_arg(parser, "path");
-    const char *stdin_size_arg = ap_found(parser, "stdin-size") ? ap_get_str_value(parser, "stdin-size") : NULL;
+    const char *stdin_size_arg = environment__get("STDIN_SIZE");
     char *end = NULL;
     unsigned long parsed_stdin_size = stdin_size_arg != NULL ? strtoul(stdin_size_arg, &end, 10) : 0;
     bool stdin_requested = stdin_size_arg != NULL;

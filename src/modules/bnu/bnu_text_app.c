@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "args.h"
+#include "core_sdk/environment.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/result.h"
 #include "core_sdk/stdio.h"
@@ -112,8 +113,6 @@ int bnu_uniq_app_main(int argc, char **argv) {
     ap_set_opt_help(parser, "u", "Print only lines that were not repeated");
     ap_add_flag(parser, "i");
     ap_set_opt_help(parser, "i", "Ignore case when comparing lines");
-    ap_add_str_opt(parser, "stdin-size", NULL);
-    ap_set_opt_help(parser, "stdin-size", "Read exactly this many bytes from stdin (used by shell pipes)");
     ap_add_optional_arg(parser, "file", "File to read (defaults to stdin)");
     ap_unknown_options_as_args(parser);
     if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
@@ -123,7 +122,7 @@ int bnu_uniq_app_main(int argc, char **argv) {
     bool uniques_only = ap_found(parser, "u");
     bool ignore_case = ap_found(parser, "i");
     const char *file_arg = ap_get_arg(parser, "file");
-    const char *stdin_size_arg = ap_get_str_value(parser, "stdin-size");
+    const char *stdin_size_arg = environment__get("STDIN_SIZE");
     ap_free(parser);
 
     const void *data = NULL;
@@ -229,8 +228,6 @@ int bnu_cut_app_main(int argc, char **argv) {
     ap_set_opt_help(parser, "c", "Character list to keep, e.g. 1-4,8");
     ap_add_str_opt(parser, "d", NULL);
     ap_set_opt_help(parser, "d", "Field separator for -f (default: tab)");
-    ap_add_str_opt(parser, "stdin-size", NULL);
-    ap_set_opt_help(parser, "stdin-size", "Read exactly this many bytes from stdin (used by shell pipes)");
     ap_add_optional_arg(parser, "file", "File to read (defaults to stdin)");
     ap_unknown_options_as_args(parser);
     if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
@@ -240,7 +237,7 @@ int bnu_cut_app_main(int argc, char **argv) {
     const char *delim_arg = ap_get_str_value(parser, "d");
     char delim = delim_arg != NULL && delim_arg[0] != '\0' ? delim_arg[0] : '\t';
     const char *file_arg = ap_get_arg(parser, "file");
-    const char *stdin_size_arg = ap_get_str_value(parser, "stdin-size");
+    const char *stdin_size_arg = environment__get("STDIN_SIZE");
 
     bool by_chars = char_list != NULL;
     const char *list = by_chars ? char_list : field_list;
@@ -351,8 +348,6 @@ int bnu_sort_app_main(int argc, char **argv) {
     ap_set_opt_help(parser, "n", "Compare by each line's leading numeric value");
     ap_add_flag(parser, "u");
     ap_set_opt_help(parser, "u", "Discard lines identical to the one before them, once sorted");
-    ap_add_str_opt(parser, "stdin-size", NULL);
-    ap_set_opt_help(parser, "stdin-size", "Read exactly this many bytes from stdin (used by shell pipes)");
     ap_add_optional_arg(parser, "file", "File to read (defaults to stdin)");
     ap_unknown_options_as_args(parser);
     if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
@@ -361,7 +356,7 @@ int bnu_sort_app_main(int argc, char **argv) {
     bool numeric = ap_found(parser, "n");
     bool unique = ap_found(parser, "u");
     const char *file_arg = ap_get_arg(parser, "file");
-    const char *stdin_size_arg = ap_get_str_value(parser, "stdin-size");
+    const char *stdin_size_arg = environment__get("STDIN_SIZE");
 
     const void *data = NULL;
     size_t length = 0;
@@ -421,14 +416,12 @@ int bnu_sort_app_main(int argc, char **argv) {
 int bnu_rev_app_main(int argc, char **argv) {
     ArgParser *parser = bnu__new_parser("Reverse the characters of each line in a file or stdin.");
     if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
-    ap_add_str_opt(parser, "stdin-size", NULL);
-    ap_set_opt_help(parser, "stdin-size", "Read exactly this many bytes from stdin (used by shell pipes)");
     ap_add_optional_arg(parser, "file", "File to read (defaults to stdin)");
     ap_unknown_options_as_args(parser);
     if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
 
     const char *file_arg = ap_get_arg(parser, "file");
-    const char *stdin_size_arg = ap_get_str_value(parser, "stdin-size");
+    const char *stdin_size_arg = environment__get("STDIN_SIZE");
 
     const void *data = NULL;
     size_t length = 0;
@@ -507,8 +500,6 @@ int bnu_tr_app_main(int argc, char **argv) {
     ap_set_opt_help(parser, "d", "Delete characters found in SET1 instead of translating them");
     ap_add_flag(parser, "s");
     ap_set_opt_help(parser, "s", "Squeeze consecutive output characters found in SET2 (or SET1 alone)");
-    ap_add_str_opt(parser, "stdin-size", NULL);
-    ap_set_opt_help(parser, "stdin-size", "Read exactly this many bytes from stdin (used by shell pipes)");
     ap_add_required_arg(parser, "set1", "Source character set (supports a-z ranges and \\n \\t \\r)");
     ap_add_optional_arg(parser, "set2", "Replacement character set");
     if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
@@ -517,7 +508,7 @@ int bnu_tr_app_main(int argc, char **argv) {
     bool squeeze_mode = ap_found(parser, "s");
     const char *set1 = ap_get_arg(parser, "set1");
     const char *set2 = ap_get_arg(parser, "set2");
-    const char *stdin_size_arg = ap_get_str_value(parser, "stdin-size");
+    const char *stdin_size_arg = environment__get("STDIN_SIZE");
 
     if (!delete_mode && !squeeze_mode && set2 == NULL) {
         stdio__printf("tr: missing SET2 (needed to translate; use -d or -s for a single set)\n");
@@ -620,14 +611,12 @@ int bnu_tee_app_main(int argc, char **argv) {
     if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
     ap_add_flag(parser, "a");
     ap_set_opt_help(parser, "a", "Append to the files instead of overwriting them");
-    ap_add_str_opt(parser, "stdin-size", NULL);
-    ap_set_opt_help(parser, "stdin-size", "Read exactly this many bytes from stdin (used by shell pipes)");
     ap_allow_extra_args(parser);
     ap_unknown_options_as_args(parser);
     if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
 
     bool append = ap_found(parser, "a");
-    const char *stdin_size_arg = ap_get_str_value(parser, "stdin-size");
+    const char *stdin_size_arg = environment__get("STDIN_SIZE");
     int file_count = ap_count_args(parser);
 
     char *end = NULL;

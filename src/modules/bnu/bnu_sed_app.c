@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "args.h"
+#include "core_sdk/environment.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/result.h"
 #include "core_sdk/stdio.h"
@@ -344,8 +345,6 @@ int bnu_sed_app_main(int argc, char **argv) {
     if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
     ap_add_flag(parser, "n");
     ap_set_opt_help(parser, "n", "Suppress automatic printing; only an explicit 'p' command emits a line");
-    ap_add_str_opt(parser, "stdin-size", NULL);
-    ap_set_opt_help(parser, "stdin-size", "Read exactly this many bytes from stdin (used by shell pipes)");
     ap_add_required_arg(
         parser, "script", "s<delim>PATTERN<delim>REPLACEMENT<delim>[gi], [/PATTERN/]d, or [/PATTERN/]p"
     );
@@ -364,7 +363,7 @@ int bnu_sed_app_main(int argc, char **argv) {
     }
     bnu_sed_options_t opt = {.script = &script, .suppress = ap_found(parser, "n")};
 
-    const char *stdin_size_arg = ap_get_str_value(parser, "stdin-size");
+    const char *stdin_size_arg = environment__get("STDIN_SIZE");
     int total = ap_count_args(parser);
     int file_count = total - 1;
 

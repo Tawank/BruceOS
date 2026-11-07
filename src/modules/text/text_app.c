@@ -10,6 +10,7 @@
 #include "core_sdk/config.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/display.h"
+#include "core_sdk/environment.h"
 #include "core_sdk/input.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/process.h"
@@ -620,8 +621,6 @@ int text_app_main(int argc, char **argv) {
     ap_set_opt_help(parser, "r", "Alias for --read-only");
     ap_add_flag(parser, "read-only");
     ap_set_opt_help(parser, "read-only", "View without allowing edits or saves");
-    ap_add_str_opt(parser, "stdin-size", NULL);
-    ap_set_opt_help(parser, "stdin-size", "Read exactly this many bytes from stdin (used by shell pipes)");
     ap_add_optional_arg(parser, "path", "Path to a text file or save destination for piped input");
     ap_unknown_options_as_args(parser);
     ap_allow_extra_args(parser);
@@ -634,8 +633,7 @@ int text_app_main(int argc, char **argv) {
     }
     const char *path_arg = ap_get_arg(parser, "path");
     bool read_only = ap_found(parser, "r") || ap_found(parser, "read-only");
-    const char *stdin_size_arg =
-        ap_found(parser, "stdin-size") ? ap_get_str_value(parser, "stdin-size") : NULL;
+    const char *stdin_size_arg = environment__get("STDIN_SIZE");
     char *end = NULL;
     unsigned long parsed_stdin_size = stdin_size_arg != NULL ? strtoul(stdin_size_arg, &end, 10) : 0;
     bool stdin_requested = stdin_size_arg != NULL;

@@ -6,6 +6,7 @@
 #include "core/image/gif/gif.h"
 #include "core_sdk/app_runner.h"
 #include "core_sdk/display.h"
+#include "core_sdk/environment.h"
 #include "core_sdk/image.h"
 #include "core_sdk/process.h"
 #include "core_sdk/runtime.h"
@@ -124,21 +125,23 @@ bool selftest__run_image_decode_case(void) {
     return valid;
 }
 
-/* Exercises image_app_main()'s "--stdin-size N" support (image_loader_app.c)
- * end to end: launched directly -- no shell involved, the same way
+/* Exercises image_app_main()'s STDIN_SIZE support (image_loader_app.c) end to
+ * end: launched directly -- no shell involved, the same way
  * selftest__run_shell_cat_interactive_case() (shell_test.c) launches "cat" --
- * with its stdio routed to a session this test controls. Launched this way
- * (BRUCE_LAUNCH_BACKGROUND, no GUI=1), a successful decode also exercises
- * the piped path's runtime__to_foreground() self-promotion (image_app_main()
- * would otherwise draw into a hidden, frame_noop display context -- see
- * display.c -- and this pixel check would see nothing): polls
- * display__test_read_pixel() for the fixture's known color rather than
- * asserting immediately, since the child has to actually get scheduled and
- * draw first. Like every image, once drawn it waits for a keypress that
- * this piped process could never receive, so it never returns on its own;
- * process__wait_status() timing out with BRUCE_ERR_TIMEOUT confirms that
- * (the same signal process_test.c's spin-helper cases use), and
- * process__kill() cleans it up. A malformed --stdin-size, or a payload
+ * with its stdio routed to a session this test controls and STDIN_SIZE
+ * passed as an environment variable overlay (app_runner__run_with_environment()),
+ * the same way shell_executor__pipe_write() feeds a real pipe's destination
+ * now. Launched this way (BRUCE_LAUNCH_BACKGROUND, no GUI=1), a successful
+ * decode also exercises the piped path's runtime__to_foreground()
+ * self-promotion (image_app_main() would otherwise draw into a hidden,
+ * frame_noop display context -- see display.c -- and this pixel check would
+ * see nothing): polls display__test_read_pixel() for the fixture's known
+ * color rather than asserting immediately, since the child has to actually
+ * get scheduled and draw first. Like every image, once drawn it waits for a
+ * keypress that this piped process could never receive, so it never returns
+ * on its own; process__wait_status() timing out with BRUCE_ERR_TIMEOUT
+ * confirms that (the same signal process_test.c's spin-helper cases use),
+ * and process__kill() cleans it up. A malformed STDIN_SIZE, or a payload
  * image__get_bitmap_from_memory() can't decode, both return promptly
  * instead -- the latter via dialog__message()'s non-GUI fallback,
  * dialog__term_message(), which prints and returns rather than blocking for
@@ -149,9 +152,10 @@ bool selftest__run_image_stdin_pipe_case(void) {
         0,   0x2c, 0,   0,   0,   0,   1, 0, 1, 0, 0,    2, 2, 0x44, 0x01, 0, 0x3b,
     };
     static const uint8_t invalid[] = {'n', 'o', 't', 'i', 'm', 'g'};
-    char arg[32];
+    char size_value[16];
 
-    snprintf(arg, sizeof(arg), "--stdin-size %u", (unsigned)sizeof(red_gif));
+    snprintf(size_value, sizeof(size_value), "%u", (unsigned)sizeof(red_gif));
+    bruce_environment_variable_t size_env[] = {{.name = "STDIN_SIZE", .value = size_value}};
     bool decode_ok = false;
     bool pixel_ok = false;
     bruce_stdio_session_t session = BRUCE_STDIO_SESSION_INVALID;
@@ -172,7 +176,9 @@ bool selftest__run_image_stdin_pipe_case(void) {
         pixel_ok = false;
         session = BRUCE_STDIO_SESSION_INVALID;
         if (stdio__session_create(&session) == BRUCE_OK && stdio__session_route_children(session) == BRUCE_OK) {
-            int launched = app_runner__run("image", arg, BRUCE_LAUNCH_BACKGROUND);
+            int launched = app_runner__run_with_environment(
+                "image", NULL, BRUCE_LAUNCH_BACKGROUND, size_env, 1
+            );
             (void)stdio__session_route_children(BRUCE_STDIO_SESSION_INVALID);
             if (launched > 0) {
                 (void)stdio__session_write_input(session, red_gif, sizeof(red_gif));
@@ -207,11 +213,11 @@ bool selftest__run_image_stdin_pipe_case(void) {
         (void)stdio__session_close(session);
     }
 
-    snprintf(arg, sizeof(arg), "--stdin-size %u", (unsigned)sizeof(invalid));
+    snprintf(size_value, sizeof(size_value), "%u", (unsigned)sizeof(invalid));
     bool invalid_payload_ok = false;
     session = BRUCE_STDIO_SESSION_INVALID;
     if (stdio__session_create(&session) == BRUCE_OK && stdio__session_route_children(session) == BRUCE_OK) {
-        int launched = app_runner__run("image", arg, BRUCE_LAUNCH_BACKGROUND);
+        int launched = app_runner__run_with_environment("image", NULL, BRUCE_LAUNCH_BACKGROUND, size_env, 1);
         (void)stdio__session_route_children(BRUCE_STDIO_SESSION_INVALID);
         if (launched > 0) {
             (void)stdio__session_write_input(session, invalid, sizeof(invalid));
@@ -226,8 +232,10 @@ bool selftest__run_image_stdin_pipe_case(void) {
 
     session = BRUCE_STDIO_SESSION_INVALID;
     bool bad_size_ok = false;
+    bruce_environment_variable_t bad_size_env[] = {{.name = "STDIN_SIZE", .value = "notanumber"}};
     if (stdio__session_create(&session) == BRUCE_OK && stdio__session_route_children(session) == BRUCE_OK) {
-        int launched = app_runner__run("image", "--stdin-size notanumber", BRUCE_LAUNCH_BACKGROUND);
+        int launched =
+            app_runner__run_with_environment("image", NULL, BRUCE_LAUNCH_BACKGROUND, bad_size_env, 1);
         (void)stdio__session_route_children(BRUCE_STDIO_SESSION_INVALID);
         if (launched > 0) {
             bruce_process_status_t status;

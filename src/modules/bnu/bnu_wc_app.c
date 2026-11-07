@@ -6,6 +6,7 @@
 #include <stdlib.h>
 
 #include "args.h"
+#include "core_sdk/environment.h"
 #include "core_sdk/result.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
@@ -92,8 +93,6 @@ int bnu_wc_app_main(int argc, char **argv) {
     ap_set_opt_help(parser, "w", "Print only the word count");
     ap_add_flag(parser, "c");
     ap_set_opt_help(parser, "c", "Print only the byte count");
-    ap_add_str_opt(parser, "stdin-size", NULL);
-    ap_set_opt_help(parser, "stdin-size", "Read exactly this many bytes from stdin (used by shell pipes)");
     ap_allow_extra_args(parser);
     ap_unknown_options_as_args(parser);
     if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
@@ -103,7 +102,7 @@ int bnu_wc_app_main(int argc, char **argv) {
     bool show_bytes = ap_found(parser, "c");
     if (!show_lines && !show_words && !show_bytes) show_lines = show_words = show_bytes = true;
 
-    const char *stdin_size_arg = ap_get_str_value(parser, "stdin-size");
+    const char *stdin_size_arg = environment__get("STDIN_SIZE");
     int file_count = ap_count_args(parser);
 
     bruce_result_t result = BRUCE_OK;

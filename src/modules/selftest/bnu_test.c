@@ -352,7 +352,7 @@ bool selftest__run_bnu_text_case(void) {
      * so unlike the fixtures above there's no way to exercise a full run
      * here without a routed session behind stdio__read() -- these two just
      * pin the argument-validation branches that return before ever
-     * touching stdio (missing SET2, missing --stdin-size). */
+     * touching stdio (missing SET2, missing STDIN_SIZE). */
     char *tr_no_set2_argv[] = {"tr", "a-z"};
     char *tee_no_input_argv[] = {"tee"};
     static const char text[] = "one two three\nfour five\n";

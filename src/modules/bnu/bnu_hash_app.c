@@ -7,6 +7,7 @@
 
 #include "args.h"
 #include "core_sdk/base64.h"
+#include "core_sdk/environment.h"
 #include "core_sdk/hash.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/result.h"
@@ -27,11 +28,12 @@
 #define BNU_HASH_CHUNK_SIZE 256
 #define BNU_BASE64_DEFAULT_WRAP 76
 
-/* Shared by all four commands: parses the shell's "--stdin-size N" piping
- * convention (see bnu_less_app_main() in bnu_pager_app.c for the original
- * of this pattern). `size_arg` is the already-`ap_found()` option value;
- * returns false (after printing its own "invalid --stdin-size" line under
- * `command`) for anything that isn't a plain unsigned integer. */
+/* Shared by all four commands: parses the shell's STDIN_SIZE environment-
+ * variable piping convention (see bnu_less_app_main() in bnu_pager_app.c for
+ * the original of this pattern). `size_arg` is the already-fetched
+ * environment__get("STDIN_SIZE") value; returns false (after printing its
+ * own "invalid --stdin-size" line under `command`) for anything that isn't a
+ * plain unsigned integer. */
 static bool bnu__hash_parse_stdin_size(const char *command, const char *size_arg, unsigned long *out_size) {
     char *end = NULL;
     unsigned long parsed = strtoul(size_arg, &end, 10);
@@ -122,15 +124,13 @@ static int bnu__digest_app_main(
 ) {
     ArgParser *parser = bnu__new_parser(helptext);
     if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
-    ap_add_str_opt(parser, "stdin-size", NULL);
-    ap_set_opt_help(parser, "stdin-size", "Read exactly this many bytes from stdin (used by shell pipes)");
     ap_add_optional_arg(parser, "file", "File(s) to checksum (reads stdin if omitted)");
     ap_allow_extra_args(parser);
     ap_unknown_options_as_args(parser);
     if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
 
     int path_count = ap_count_args(parser);
-    const char *stdin_size_arg = ap_found(parser, "stdin-size") ? ap_get_str_value(parser, "stdin-size") : NULL;
+    const char *stdin_size_arg = environment__get("STDIN_SIZE");
     if (path_count == 0 && stdin_size_arg == NULL) {
         stdio__printf("%s: missing file operand\n", command);
         ap_free(parser);
@@ -203,15 +203,13 @@ static bruce_result_t bnu__crc32_feed(void *context, const void *data, size_t si
 int bnu_crc32_app_main(int argc, char **argv) {
     ArgParser *parser = bnu__new_parser("Print CRC-32 checksums.");
     if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
-    ap_add_str_opt(parser, "stdin-size", NULL);
-    ap_set_opt_help(parser, "stdin-size", "Read exactly this many bytes from stdin (used by shell pipes)");
     ap_add_optional_arg(parser, "file", "File(s) to checksum (reads stdin if omitted)");
     ap_allow_extra_args(parser);
     ap_unknown_options_as_args(parser);
     if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
 
     int path_count = ap_count_args(parser);
-    const char *stdin_size_arg = ap_found(parser, "stdin-size") ? ap_get_str_value(parser, "stdin-size") : NULL;
+    const char *stdin_size_arg = environment__get("STDIN_SIZE");
     if (path_count == 0 && stdin_size_arg == NULL) {
         stdio__printf("crc32: missing file operand\n");
         ap_free(parser);
@@ -371,8 +369,6 @@ int bnu_base64_app_main(int argc, char **argv) {
     ap_set_opt_help(parser, "d", "Decode instead of encode");
     ap_add_int_opt(parser, "w", BNU_BASE64_DEFAULT_WRAP);
     ap_set_opt_help(parser, "w", "Wrap encoded output at this many columns, 0 for no wrapping");
-    ap_add_str_opt(parser, "stdin-size", NULL);
-    ap_set_opt_help(parser, "stdin-size", "Read exactly this many bytes from stdin (used by shell pipes)");
     ap_add_optional_arg(parser, "file", "File to encode/decode (reads stdin if omitted)");
     ap_unknown_options_as_args(parser);
     ap_first_pos_arg_ends_option_parsing(parser);
@@ -381,7 +377,7 @@ int bnu_base64_app_main(int argc, char **argv) {
     bool decode = ap_found(parser, "d");
     int wrap = ap_get_int_value(parser, "w");
     const char *path_arg = ap_get_arg(parser, "file");
-    const char *stdin_size_arg = ap_found(parser, "stdin-size") ? ap_get_str_value(parser, "stdin-size") : NULL;
+    const char *stdin_size_arg = environment__get("STDIN_SIZE");
     bool from_stdin = path_arg == NULL;
     char path[BRUCE_STORAGE_PATH_MAX] = {0};
     bool path_resolved = from_stdin || bnu__resolve_path(path_arg, path);

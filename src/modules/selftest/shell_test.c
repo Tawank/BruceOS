@@ -1232,34 +1232,33 @@ static int selftest__shell_run_pipe_command(const char *command) {
 
 /* Exercises shell_executor__pipe_write()'s handling of a pipe destination
  * that exits (here, a real argument-parse failure) without ever reading its
- * "--stdin-size N" bytes: "ping" (an external, non-builtin app, so the pipe
- * itself is legal -- it just isn't a pipe-aware command and never will be,
- * "--stdin-size" being meaningless for it) is given no host, so it fails
- * ap_parse() and exits in an instant, having read nothing. The producer side
- * (three 80-byte "echo" words, comfortably over STDIO__INPUT_CAPACITY's 256
- * bytes once joined by the pseudo-producer's own separating spaces -- kept
- * to several words under shell_parser.h's own SHELL__WORD_MAX (256) rather
- * than one ~300-byte word, which shell_parser__words() would itself reject
- * as "expanded word too long" before the pipe ever ran at all) guarantees
- * pipe_write()'s input-feeding loop hits BRUCE_ERR_RESOURCE_LIMIT at least
- * once with nothing left to ever drain that ring buffer again -- before the
- * fix this fed loop spun on runtime__delay(1) forever with no liveness check
- * on the destination at all, hanging the whole pipeline (and, transitively,
- * this selftest, since shell__execute_line() runs it synchronously) instead
- * of ever completing. Run as a spawned "shell -c ..." child with a bounded
- * 5000ms wait (same pattern as selftest__run_shell_pipe_redirect_case()
- * above) specifically so a regression back to that hang fails this selftest
- * instead of wedging the whole suite: selftest__shell_run_pipe_command()
- * returns -1 on a timeout, which is what "status == -1" below actually
- * catches. The final "> file" redirect also confirms the fix's other half --
- * that ping's own "error: '--stdin-size' is not a recognised option"
- * diagnostic (ping never calls ap_unknown_options_as_args(), so
- * pipe_write()'s own "--stdin-size N" prefix -- meaningless to a command
- * that was never meant to be a pipe destination -- is rejected outright,
- * before ap_parse() ever gets as far as noticing "host" is missing too) is
- * captured and written out rather than being silently discarded once the
- * destination is known to be gone (see shell_executor__pipe_write()'s
- * "destination_exited" branch). */
+ * piped bytes: "ping" (an external, non-builtin app, so the pipe itself is
+ * legal -- it just isn't a pipe-aware command and never will be) is given no
+ * host, so it fails ap_parse() on its own missing required "host" argument
+ * and exits in an instant, having read nothing. STDIN_SIZE now arrives as an
+ * environment variable rather than an argv prefix (see
+ * shell_executor__pipe_write()), so this failure is ping's own -- not an
+ * injected "--stdin-size" option it never asked for being rejected first.
+ * The producer side (three 80-byte "echo" words, comfortably over
+ * STDIO__INPUT_CAPACITY's 256 bytes once joined by the pseudo-producer's own
+ * separating spaces -- kept to several words under shell_parser.h's own
+ * SHELL__WORD_MAX (256) rather than one ~300-byte word, which
+ * shell_parser__words() would itself reject as "expanded word too long"
+ * before the pipe ever ran at all) guarantees pipe_write()'s input-feeding
+ * loop hits BRUCE_ERR_RESOURCE_LIMIT at least once with nothing left to ever
+ * drain that ring buffer again -- before the fix this fed loop spun on
+ * runtime__delay(1) forever with no liveness check on the destination at
+ * all, hanging the whole pipeline (and, transitively, this selftest, since
+ * shell__execute_line() runs it synchronously) instead of ever completing.
+ * Run as a spawned "shell -c ..." child with a bounded 5000ms wait (same
+ * pattern as selftest__run_shell_pipe_redirect_case() above) specifically so
+ * a regression back to that hang fails this selftest instead of wedging the
+ * whole suite: selftest__shell_run_pipe_command() returns -1 on a timeout,
+ * which is what "status == -1" below actually catches. The final "> file"
+ * redirect also confirms the fix's other half -- that ping's own
+ * "missing required argument <host>" diagnostic is captured and written out
+ * rather than being silently discarded once the destination is known to be
+ * gone (see shell_executor__pipe_write()'s "destination_exited" branch). */
 bool selftest__run_shell_pipe_early_exit_case(void) {
     const char *result_path = "/apps/shell_pipe_early_exit_result.txt";
     (void)storage__remove(result_path);
@@ -1283,7 +1282,7 @@ bool selftest__run_shell_pipe_early_exit_case(void) {
     (void)storage__remove(result_path);
 
     bool ok = status != -1 && status != 0 && read_result == BRUCE_OK &&
-              strstr(result, "is not a recognised option") != NULL;
+              strstr(result, "missing required argument") != NULL;
     if (!ok) {
         printf(
             "[selftest] shell/pipe-early-exit: failed (status=%d read=%d result=%.*s)\n", status, (int)read_result,
@@ -1702,7 +1701,7 @@ bool selftest__run_shell_builtin_redirect_case(void) {
 
 /* Exercises "cmd < file" -- shell_executor__load_redirect_input() in
  * shell_executor.c, which reads `file` in full and feeds it to the command's
- * stdin via shell_executor__pipe_write() (the same "--stdin-size N"-fed
+ * stdin via shell_executor__pipe_write() (the same STDIN_SIZE-fed
  * mechanism a "|" pipe destination already uses). The one content check runs
  * as a spawned "shell -c ..." child with its own routed stdio session, the
  * same pattern (and for the same reason -- see its own doc comment)
@@ -1864,7 +1863,7 @@ bool selftest__run_shell_arith_redirect_case(void) {
  * this can read it back afterward -- run as a spawned "shell <path>" child
  * with a routed session, the same reasoning as
  * selftest__run_shell_input_redirect_case() above. "cat" reads the heredoc
- * body via its "--stdin-size" fallback (see bnu__cat_stdin() in
+ * body via its STDIN_SIZE fallback (see bnu__cat_stdin() in
  * bnu_fs_app.c), the same as the other bnu text tools a piped/redirected
  * source can target. Each heredoc here is also combined with ">", the one
  * case that still buffers instead of streaming (see
@@ -1978,8 +1977,8 @@ bool selftest__run_shell_heredoc_case(void) {
 /* Exercises bnu_cat_app_main()'s interactive fallback (bnu__cat_interactive()
  * in bnu_fs_app.c) and, underneath it, stdio__read_line()'s new Ctrl+D
  * handling -- neither is reached by the heredoc/redirect cases above, which
- * only ever exercise the known-byte-count "--stdin-size" path. Launches
- * "cat" directly (no shell involved -- bare, no file, no "--stdin-size")
+ * only ever exercise the known-byte-count STDIN_SIZE path. Launches
+ * "cat" directly (no shell involved -- bare, no file, no STDIN_SIZE)
  * with its stdio routed to a session this test controls, the same way the
  * heredoc case's spawned "shell" child inherits its session; feeds two typed
  * lines and a Ctrl+D (0x04) on an empty line into the session's input queue,
@@ -2033,7 +2032,7 @@ bool selftest__run_shell_cat_interactive_case(void) {
 /* tr and tee (see bnu_text_app.c) have no file-argument mode at all -- like
  * real tr/tee, they only ever read piped stdin -- so unlike bnu_test.c's
  * other bnu_*_app_main() fixtures, calling them directly with a
- * "--stdin-size N" argv but no routed session behind it would have nothing
+ * STDIN_SIZE environment variable but no routed session behind it would have nothing
  * to read from. This exercises them the same way
  * selftest__run_shell_pipe_redirect_case() above exercises "cat | head": a
  * real "shell -c ..." pipe, with the same QEMU pipe-buffer caveat that

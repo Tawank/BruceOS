@@ -8,6 +8,7 @@
 #include <stdlib.h>
 
 #include "args.h"
+#include "core_sdk/environment.h"
 #include "core_sdk/result.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
@@ -144,8 +145,6 @@ int bnu_xxd_app_main(int argc, char **argv) {
     ap_set_opt_help(parser, "s", "Start at this byte offset (decimal or 0x-prefixed)");
     ap_add_flag(parser, "p");
     ap_set_opt_help(parser, "p", "Plain hexadecimal output without addresses or ASCII");
-    ap_add_str_opt(parser, "stdin-size", NULL);
-    ap_set_opt_help(parser, "stdin-size", "Read exactly this many bytes from stdin (used by shell pipes)");
     ap_add_optional_arg(parser, "file", "File to dump (reads stdin if omitted)");
     if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
 
@@ -188,7 +187,7 @@ int bnu_xxd_app_main(int argc, char **argv) {
         if (result != BRUCE_OK) stdio__printf("xxd: %s: %s\n", file_arg, result__to_string(result));
     } else {
         uint64_t stdin_size = 0;
-        if (!bnu__xxd_parse_u64(ap_get_str_value(parser, "stdin-size"), &stdin_size)) {
+        if (!bnu__xxd_parse_u64(environment__get("STDIN_SIZE"), &stdin_size)) {
             stdio__printf("xxd: missing file operand\n");
             result = BRUCE_ERR_INVALID_ARGUMENT;
         } else {
