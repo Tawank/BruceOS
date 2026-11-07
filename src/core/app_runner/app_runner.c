@@ -582,15 +582,25 @@ int app_runner__run_with_environment(
         result = create_result == BRUCE_OK ? (int)process_id : (int)create_result;
     } else {
         /* 2. every registered loader, in registration order, matching
-         * /bin/<app_name><extension>. */
+         * /bin/<app_name><extension> or, failing that, the same exact
+         * match against /apps/<app_name><extension>  */
         result = BRUCE_ERR_NOT_FOUND;
         size_t total_loaders = app_runner__total_loader_count();
         for (size_t i = 0; i < total_loaders; ++i) {
             bruce_loader_descriptor_t loader = app_runner__loader_at(i);
             char path[APP_RUNNER_PATH_MAX];
-            int written = snprintf(path, sizeof(path), "/bin/%s%s", app_name, loader.extension);
-            if (written < 0 || (size_t)written >= sizeof(path)) { continue; }
-            if (storage__exists_internal(path)) {
+            bool found = false;
+            static const char *const search_dirs[] = {"/bin", "/apps"};
+            for (size_t dir_index = 0; dir_index < sizeof(search_dirs) / sizeof(search_dirs[0]); ++dir_index) {
+                int written =
+                    snprintf(path, sizeof(path), "%s/%s%s", search_dirs[dir_index], app_name, loader.extension);
+                if (written < 0 || (size_t)written >= sizeof(path)) { continue; }
+                if (storage__exists_internal(path)) {
+                    found = true;
+                    break;
+                }
+            }
+            if (found) {
                 char loader_arg[APP_RUNNER_PATH_MAX + 1 + 256];
                 int written_arg = snprintf(
                     loader_arg,
