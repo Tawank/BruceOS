@@ -439,12 +439,23 @@ RAW_GLYPHS = {
     0x2591: (0x0092, 0x0249, 0x0124, 0x0092, 0x0249),  # ░ light shade (~25%)
     0x2592: (0x0155, 0x02AA, 0x0155, 0x02AA, 0x0155),  # ▒ medium shade (50%)
     0x2593: (0x036D, 0x01B6, 0x02DB, 0x036D, 0x01B6),  # ▓ dark shade (~75%)
-    0x259B: (0x03FF, 0x03FF, 0x03FF, 0x001F, 0x001F),  # ▛ quadrant UL+UR+LL
+    # ▛ quadrant UL+UR+LL (missing LR) -- see the quadrant-block loop below
+    # for the rest of this family (U+2596-259F), derived by the same rule
+    # this one glyph was already hand-authored with.
+    0x259B: (0x03FF, 0x03FF, 0x03FF, 0x001F, 0x001F),
     # Status / navigation marks.
     0x2022: (0x0000, 0x0030, 0x0030, 0x0030, 0x0000),  # • bullet
+    0x00B7: (0x0000, 0x0000, 0x0030, 0x0000, 0x0000),  # · middle dot -- smaller/narrower than •
     0x203B: (0x0022, 0x0094, 0x00C8, 0x0094, 0x0022),  # ※ reference mark
     0x2192: (0x0020, 0x0020, 0x00A8, 0x0070, 0x0020),  # → rightwards arrow
     0x2190: (0x0020, 0x0070, 0x00A8, 0x0020, 0x0020),  # ← leftwards arrow
+    # ❯ heavy right-pointing angle quotation mark ornament -- Claude Code's
+    # own CLI prompt chevron and breadcrumb separator; missing here (along
+    # with middle dot above) meant both fell back to the font's unknown-
+    # glyph placeholder instead of rendering.
+    0x276F: rows_to_cols([
+        ".....", ".....", ".#...", "..#..", "...#.", "...#.", "..#..", ".#...", ".....", ".....",
+    ]),
     0x2026: (0x0180, 0x0000, 0x0180, 0x0000, 0x0180),  # … horizontal ellipsis
     0x2013: (0x0000, 0x0010, 0x0010, 0x0010, 0x0000),  # – en dash
     0x2014: (0x0010, 0x0010, 0x0010, 0x0010, 0x0010),  # — em dash
@@ -461,6 +472,42 @@ RAW_GLYPHS = {
         ".....", "#####", "#####", ".....", "#####", "#####", ".....", "#####", "#####", ".....",
     ]),
 }
+
+# The rest of the quadrant-block family (U+2596-259F) -- U+259B (▛) above was
+# already hand-authored as (0x03FF, 0x03FF, 0x03FF, 0x001F, 0x001F): the left
+# two columns plus the *middle* column (0x03FF = both halves) whenever either
+# left quadrant (UL/LL) is present, and the right two columns (0x001F/0x03E0
+# for just the upper/lower half) reflecting UR/LR independently. That rule --
+# column 2 leans left, following whichever of UL/LL is actually present --
+# reproduces ▛ exactly, so the other seven combinations in this family use it
+# too, rather than hand-typing seven more magic bit patterns that would be
+# easy to get subtly wrong (this font's one open, user-reported bug so far --
+# see gen_display_font.py's own history -- was exactly this kind of missing-
+# glyph gap in a pixel-art sprite built from these blocks). Keyed by
+# (upper_left, upper_right, lower_left, lower_right).
+_QUADRANT_UPPER, _QUADRANT_LOWER = 0x001F, 0x03E0
+_QUADRANTS = {
+    (True, False, False, False): 0x2598,  # ▘ UL
+    (False, True, False, False): 0x259D,  # ▝ UR
+    (False, False, True, False): 0x2596,  # ▖ LL
+    (False, False, False, True): 0x2597,  # ▗ LR
+    (True, False, True, False): None,  # UL+LL is plain ▌, already defined above
+    (False, True, False, True): None,  # UR+LR is plain ▐, already defined above
+    (True, True, False, False): None,  # UL+UR is plain ▀, already defined above
+    (False, False, True, True): None,  # LL+LR is plain ▄, already defined above
+    (True, False, False, True): 0x259A,  # ▚ UL+LR (diagonal)
+    (False, True, True, False): 0x259E,  # ▞ UR+LL (diagonal)
+    (True, True, True, False): 0x259B,  # ▛ UL+UR+LL (already hand-authored above)
+    (True, True, False, True): 0x259C,  # ▜ UL+UR+LR
+    (True, False, True, True): 0x2599,  # ▙ UL+LL+LR
+    (False, True, True, True): 0x259F,  # ▟ UR+LL+LR
+}
+for (_ul, _ur, _ll, _lr), _cp in _QUADRANTS.items():
+    if _cp is None or _cp == 0x259B:
+        continue  # plain half-blocks already have their own entries; ▛ is already set
+    _left_col = (_QUADRANT_UPPER if _ul else 0) | (_QUADRANT_LOWER if _ll else 0)
+    _right_col = (_QUADRANT_UPPER if _ur else 0) | (_QUADRANT_LOWER if _lr else 0)
+    RAW_GLYPHS[_cp] = (_left_col, _left_col, _left_col, _right_col, _right_col)
 
 # Eight-spoked star glyphs used interchangeably as spinner animation frames
 # (e.g. Claude Code's "thinking" indicator cycles through several of these) --
