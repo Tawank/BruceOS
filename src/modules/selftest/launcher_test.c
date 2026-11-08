@@ -72,8 +72,13 @@ static bruce_result_t selftest__launcher_choice_provider(
 
     if (s_launcher_test_state == LAUNCHER_TEST_STATE_APPS_SELECT_APP && is_root) {
         /* The terminal launcher returns to its choice loop after spawning Apps.
-         * Yield until Apps has consumed the shared test provider. */
-        for (int waited = 0; waited < 200 && !s_launcher_test_found; waited += 10) {
+         * Yield until Apps has consumed the shared test provider. 4000ms, not
+         * 2000: this used to match selftest__run_launcher_apps_discovery_case()'s
+         * own outer process__wait() exactly, leaving zero slack for anything
+         * after this loop gives up -- bumped alongside that wait's own 5000ms
+         * (see its doc comment), kept a little under it so this inner loop is
+         * never itself the reason the outer wait times out first. */
+        for (int waited = 0; waited < 4000 && !s_launcher_test_found; waited += 10) {
             (void)runtime__delay(10);
         }
         s_launcher_test_state = LAUNCHER_TEST_STATE_ROOT_EXIT;
@@ -120,8 +125,17 @@ bool selftest__run_launcher_apps_discovery_case(void) {
 
     dialog__test_set_choice_provider(selftest__launcher_choice_provider);
     int result = app_runner__run("apps", "", BRUCE_LAUNCH_BACKGROUND);
+    /* 5000ms, not 2000: the "apps" app's own directory scan + dialog render
+     * can, under QEMU, take longer than the 2000ms this used to allow --
+     * observed timing out here while "apps" was still mid-launch, with its
+     * "No .elf/.wasm/.js files" fallback message (it never got far enough
+     * to see this test's own fixture file) only printing a full second
+     * *after* this wait had already given up and this test's own cleanup
+     * (storage__remove(path) below) had already deleted that file out from
+     * under it. 5000ms matches the margin selftest__run_visual_cases()
+     * already uses for its own GUI child wait, for the same reason. */
     bruce_result_t wait_result =
-        result > 0 ? process__wait((bruce_process_id_t)result, 2000) : BRUCE_ERR_INVALID_ARGUMENT;
+        result > 0 ? process__wait((bruce_process_id_t)result, 5000) : BRUCE_ERR_INVALID_ARGUMENT;
     dialog__test_set_choice_provider(NULL);
 
     storage__remove(path);

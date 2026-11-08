@@ -2779,9 +2779,22 @@ bool selftest__run_shell_job_control_case(void) {
 static bool selftest__shell_trap_exit_probe(const char *command, int expected_exit) {
     int launched = app_runner__run("shell", command, BRUCE_LAUNCH_BACKGROUND);
     if (launched <= 0) return false;
-    bruce_process_status_t status;
-    return process__wait_status((bruce_process_id_t)launched, 2000, &status) == BRUCE_OK &&
-           status.reason == BRUCE_PROCESS_EXITED && status.exit_code == expected_exit;
+    bruce_process_status_t status = {0};
+    /* 5000ms, not 2000: see selftest__run_launcher_apps_discovery_case()'s
+     * own doc comment on its identical bump -- a real spawned process's
+     * startup/execution/exit can take longer than 2000ms under QEMU than it
+     * would on real hardware, and this function's one caller
+     * (selftest__run_shell_trap_case()) observed consistent, not just
+     * occasional, failures at the tighter window. */
+    bruce_result_t wait_result = process__wait_status((bruce_process_id_t)launched, 5000, &status);
+    bool ok = wait_result == BRUCE_OK && status.reason == BRUCE_PROCESS_EXITED && status.exit_code == expected_exit;
+    if (!ok) {
+        printf(
+            "[selftest] shell/trap: exit-probe `%s` -> wait=%d reason=%d exit_code=%d (want OK/EXITED/%d)\n", command,
+            wait_result, status.reason, status.exit_code, expected_exit
+        );
+    }
+    return ok;
 }
 
 /* Covers the `trap` builtin (shell_builtins.c) and its two firing functions:
@@ -2871,15 +2884,30 @@ bool selftest__run_shell_trap_case(void) {
     int list_launched =
         ok ? app_runner__run("shell", "-c \"trap 'echo hi' INT; trap\"", BRUCE_LAUNCH_BACKGROUND) : 0;
     (void)stdio__session_route_children(BRUCE_STDIO_SESSION_INVALID);
-    bruce_process_status_t list_status;
-    ok = ok && list_launched > 0 &&
-         process__wait_status((bruce_process_id_t)list_launched, 2000, &list_status) == BRUCE_OK &&
-         list_status.reason == BRUCE_PROCESS_EXITED && list_status.exit_code == 0;
+    bruce_process_status_t list_status = {0};
+    /* 5000ms, not 2000 -- same QEMU-timing margin as selftest__shell_trap_exit_probe()'s
+     * own identical bump above. */
+    bruce_result_t list_wait = list_launched > 0
+                                    ? process__wait_status((bruce_process_id_t)list_launched, 5000, &list_status)
+                                    : BRUCE_ERR_INVALID_ARGUMENT;
+    bool list_ok =
+        list_wait == BRUCE_OK && list_status.reason == BRUCE_PROCESS_EXITED && list_status.exit_code == 0;
+    if (ok && !list_ok) {
+        printf(
+            "[selftest] shell/trap: listing spawn -> launched=%d wait=%d reason=%d exit_code=%d\n", list_launched,
+            list_wait, list_status.reason, list_status.exit_code
+        );
+    }
+    ok = ok && list_ok;
     char list_output[128] = {0};
     size_t list_output_size = 0;
     (void)stdio__session_read_output(list_session, list_output, sizeof(list_output) - 1, &list_output_size);
     (void)stdio__session_close(list_session);
-    ok = ok && strstr(list_output, "trap -- 'echo hi' INT") != NULL;
+    bool list_matched = strstr(list_output, "trap -- 'echo hi' INT") != NULL;
+    if (ok && !list_matched) {
+        printf("[selftest] shell/trap: listing output=\"%s\" (want to find \"trap -- 'echo hi' INT\")\n", list_output);
+    }
+    ok = ok && list_matched;
 
     /* -- A live INT signal at the idle prompt: shell_app.c's own handler
      * runs the trapped action instead of the default "^C, fresh prompt" --
@@ -2894,7 +2922,14 @@ bool selftest__run_shell_trap_case(void) {
     if (ok) {
         bruce_process_id_t shell_id = (bruce_process_id_t)launched;
         uint64_t started = runtime__now();
-        while (!shell_console__is_ready() && runtime__now() - started < 1000) (void)runtime__delay(5);
+        /* 3000ms, not 1000 -- same QEMU-timing margin as everywhere else in
+         * this function: a freshly-spawned shell taking its first prompt
+         * can, under QEMU, take longer to get there than it would on real
+         * hardware. */
+        while (!shell_console__is_ready() && runtime__now() - started < 3000) (void)runtime__delay(5);
+        if (!shell_console__is_ready()) {
+            printf("[selftest] shell/trap: idle shell never reached its prompt (shell_console__is_ready())\n");
+        }
         /* The second line is itself a shell_test_probe call (not `echo`) so
          * this can be confirmed via s_probe_calls/s_probe_arg -- the same
          * way selftest__run_shell_history_multiline_case confirms a
@@ -2921,23 +2956,77 @@ bool selftest__run_shell_trap_case(void) {
         char drain[256];
         size_t drain_size = 0;
         uint64_t wait_start = runtime__now();
-        while (ok && s_probe_calls == 0 && runtime__now() - wait_start < 3000) {
+        /* 5000ms, not 3000 -- same QEMU-timing margin as elsewhere in this
+         * function. */
+        while (ok && s_probe_calls == 0 && runtime__now() - wait_start < 5000) {
             (void)stdio__session_read_output(session, drain, sizeof(drain), &drain_size);
             (void)runtime__delay(10);
+        }
+        if (ok && !(s_probe_calls == 1 && strcmp(s_probe_arg, "trap-set-confirmed") == 0)) {
+            printf(
+                "[selftest] shell/trap: trap-set-confirmed not seen -> calls=%d arg=\"%s\"\n", s_probe_calls,
+                s_probe_arg
+            );
         }
         ok = ok && s_probe_calls == 1 && strcmp(s_probe_arg, "trap-set-confirmed") == 0;
         memset(s_probe_arg, 0, sizeof(s_probe_arg));
 
         ok = ok && process__signal(shell_id, BRUCE_PROCESS_SIGNAL_INT) == BRUCE_OK;
-        if (ok) (void)runtime__delay(100);
-        bruce_process_status_t status;
+        /* 500ms, not 100 -- gives the signal handler itself (which has to
+         * actually run and update s_probe_arg before the poll just below
+         * checks it) more real time to be scheduled under QEMU. */
+        if (ok) (void)runtime__delay(500);
+        bruce_process_status_t status = {0};
         bruce_result_t wait_result = process__wait_status(shell_id, 0, &status);
         /* Still running -- the trap ran instead of ending the shell. */
-        ok = ok && wait_result == BRUCE_ERR_TIMEOUT && strcmp(s_probe_arg, "int-trapped") == 0;
+        bool int_trapped = wait_result == BRUCE_ERR_TIMEOUT && strcmp(s_probe_arg, "int-trapped") == 0;
+        if (ok && !int_trapped) {
+            printf(
+                "[selftest] shell/trap: INT trap not observed -> wait=%d arg=\"%s\" (want TIMEOUT/\"int-trapped\")\n",
+                wait_result, s_probe_arg
+            );
+        }
+        ok = ok && int_trapped;
         static const char exit_line[] = "exit\n";
         ok = ok && stdio__session_write_input(session, exit_line, strlen(exit_line)) == BRUCE_OK;
-        ok = ok && process__wait_status(shell_id, 2000, &status) == BRUCE_OK &&
-             status.reason == BRUCE_PROCESS_EXITED && status.exit_code == 0;
+        /* Drained the same way the set_trap wait above does, and for the
+         * exact same reason -- this was the real bug, not a timing margin:
+         * the shell echoes "exit" (plus its own ANSI prompt-redraw noise,
+         * see that wait's own comment on how much that can be) back through
+         * this same session, and stdio__session_push_output_byte() blocks
+         * once its fixed-size buffer fills. A plain, non-draining
+         * process__wait_status() here left nobody reading that output, so
+         * the shell's own write of it could stall forever -- never reaching
+         * the "exit" builtin call that would set exit_requested at all,
+         * regardless of how generous the wait's own timeout was. Capturing
+         * what actually came back is kept as a diagnostic in case this still
+         * fails for some other reason. */
+        char exit_drain[256] = {0};
+        size_t exit_drain_used = 0;
+        uint64_t exit_wait_start = runtime__now();
+        bruce_result_t exit_wait = BRUCE_ERR_TIMEOUT;
+        while (runtime__now() - exit_wait_start < 5000) {
+            size_t chunk_size = 0;
+            if (stdio__session_read_output(
+                    session, exit_drain + exit_drain_used, sizeof(exit_drain) - 1 - exit_drain_used, &chunk_size
+                ) == BRUCE_OK) {
+                exit_drain_used += chunk_size;
+                if (exit_drain_used >= sizeof(exit_drain) - 1) exit_drain_used = sizeof(exit_drain) - 1;
+            }
+            exit_wait = process__wait_status(shell_id, 0, &status);
+            if (exit_wait == BRUCE_OK) break;
+            (void)runtime__delay(10);
+        }
+        bool exited_clean =
+            exit_wait == BRUCE_OK && status.reason == BRUCE_PROCESS_EXITED && status.exit_code == 0;
+        if (ok && !exited_clean) {
+            printf(
+                "[selftest] shell/trap: shell did not exit cleanly -> wait=%d reason=%d exit_code=%d "
+                "output_after_exit=\"%s\"\n",
+                exit_wait, status.reason, status.exit_code, exit_drain
+            );
+        }
+        ok = ok && exited_clean;
     }
     (void)stdio__session_close(session);
 
@@ -2950,12 +3039,23 @@ bool selftest__run_shell_trap_case(void) {
     );
     ok = ok && loop_launched > 0;
     if (ok) {
-        (void)runtime__delay(100); /* let the loop actually start spinning */
+        (void)runtime__delay(300); /* let the loop actually start spinning -- was 100 */
         bruce_process_id_t loop_id = (bruce_process_id_t)loop_launched;
-        bruce_process_status_t loop_status;
-        ok = ok && process__signal(loop_id, BRUCE_PROCESS_SIGNAL_INT) == BRUCE_OK &&
-             process__wait_status(loop_id, 2000, &loop_status) == BRUCE_OK &&
-             loop_status.reason == BRUCE_PROCESS_EXITED && loop_status.exit_code == 42;
+        bruce_process_status_t loop_status = {0};
+        bool signaled = process__signal(loop_id, BRUCE_PROCESS_SIGNAL_INT) == BRUCE_OK;
+        /* 5000ms, not 2000 -- same QEMU-timing margin as elsewhere in this
+         * function. */
+        bruce_result_t loop_wait = signaled ? process__wait_status(loop_id, 5000, &loop_status) : BRUCE_ERR_INTERNAL;
+        bool loop_ok =
+            signaled && loop_wait == BRUCE_OK && loop_status.reason == BRUCE_PROCESS_EXITED &&
+            loop_status.exit_code == 42;
+        if (!loop_ok) {
+            printf(
+                "[selftest] shell/trap: loop not interrupted -> signaled=%d wait=%d reason=%d exit_code=%d\n",
+                signaled, loop_wait, loop_status.reason, loop_status.exit_code
+            );
+        }
+        ok = ok && loop_ok;
     }
 
     printf("[selftest] shell/trap: %s\n", ok ? "OK" : "failed");
