@@ -3074,3 +3074,166 @@ bool selftest__run_shell_printf_case(void) {
     printf("[selftest] shell/printf: %s\n", ok ? "OK" : "failed");
     return ok;
 }
+
+/* Like selftest__shell_glob_step() above, for selftest__run_shell_array_case()
+ * below. */
+static bool selftest__shell_array_step(
+    bool ok_so_far, shell_state_t *state, const char *line, int expected_status, const char *expected_arg
+) {
+    if (!ok_so_far) return false;
+    int status = shell__execute_line(state, line);
+    bool ok = status == expected_status && (expected_arg == NULL || strcmp(s_probe_arg, expected_arg) == 0);
+    if (!ok) {
+        printf(
+            "[selftest] shell/array: `%s` -> status=%d (want %d) arg=\"%s\" (want \"%s\")\n", line, status,
+            expected_status, s_probe_arg, expected_arg != NULL ? expected_arg : "(unchecked)"
+        );
+    }
+    return ok;
+}
+
+/* Exercises bash-style indexed arrays end to end (shell_array.h): literal
+ * assignment ("NAME=(a b c)"), append ("NAME+=(x)"), single-element
+ * assignment ("NAME[i]=x", the index itself an arithmetic expression, not
+ * just a bare digit), element lookup ("${NAME[i]}"), length ("${#NAME[@]}"
+ * both in plain expansion and inside "((...))"), a sparse hole left by
+ * "unset NAME[i]" (shell_array__unset_index() -- a different, narrower
+ * operation than "unset NAME", which drops the whole array), the
+ * "${NAME[@]}" reindex/compaction idiom ("NAME=("${NAME[@]}")", which closes
+ * over those holes -- see shell_parser.c's "is this word *exactly*
+ * "${NAME[@]}"?" special case, the one shape that splits into separate words
+ * instead of joining into one), "${#NAME}" scalar string length (unrelated
+ * to arrays, but handled by the same braced-"${...}" parsing this feature
+ * added), and an empty array literal. shell_test_probe's own
+ * "argv[1]==argv[2] -> status 0" convention (see its doc comment above) is
+ * what each selftest__shell_array_step() call's `expected_arg` is actually
+ * compared against. */
+bool selftest__run_shell_array_case(void) {
+    if (!selftest__shell_register_probe()) return false;
+    shell_state_t state;
+    shell__state_init(&state);
+    s_probe_calls = 0;
+
+    bool ok = true;
+    /* Multi-element literal assignment, spaced out on one line -- indexing
+     * reads back exactly what was given, in order. */
+    ok = selftest__shell_array_step(ok, &state, "colors=(red green blue)", 0, NULL);
+    ok = selftest__shell_array_step(ok, &state, "shell_test_probe ${colors[0]} red", 0, "red");
+    ok = selftest__shell_array_step(ok, &state, "shell_test_probe ${colors[1]} green", 0, "green");
+    ok = selftest__shell_array_step(ok, &state, "shell_test_probe ${colors[2]} blue", 0, "blue");
+    ok = selftest__shell_array_step(ok, &state, "shell_test_probe ${#colors[@]} 3", 0, "3");
+    /* Quoted, "${#NAME[@]}" is still just the one scalar number -- NOT the
+     * one shape ("${NAME[@]}", no "#") that splits into separate words (see
+     * shell_parser__is_whole_array_at_word()'s own doc comment). A real,
+     * caught regression: without its "#"-prefix exclusion, this quoted form
+     * resolved "#colors" as a (nonexistent) array name and silently
+     * produced zero words instead of one number, vanishing the whole
+     * argument rather than just getting its value wrong. */
+    ok = selftest__shell_array_step(ok, &state, "shell_test_probe \"${#colors[@]}\" 3", 0, "3");
+    /* The index is a real arithmetic expression, not just a bare digit --
+     * same evaluator "$((...))" uses. */
+    ok = selftest__shell_array_step(ok, &state, "i=1; shell_test_probe ${colors[i+1]} blue", 0, "blue");
+    /* "NAME+=(x)" appends one past the current highest index. */
+    ok = selftest__shell_array_step(ok, &state, "colors+=(yellow)", 0, NULL);
+    ok = selftest__shell_array_step(ok, &state, "shell_test_probe ${colors[3]} yellow", 0, "yellow");
+    ok = selftest__shell_array_step(ok, &state, "shell_test_probe ${#colors[@]} 4", 0, "4");
+    /* "NAME[i]=value" as its own standalone statement -- a single-element
+     * assignment, distinct from both the whole-array literal and append
+     * forms above. */
+    ok = selftest__shell_array_step(ok, &state, "colors[0]=purple", 0, NULL);
+    ok = selftest__shell_array_step(ok, &state, "shell_test_probe ${colors[0]} purple", 0, "purple");
+    /* "${#NAME[idx]}" -- the length of one *element*'s string value (not the
+     * array's own element count, "${#NAME[@]}" above), proving the length
+     * operator and a real index subscript compose correctly. */
+    ok = selftest__shell_array_step(ok, &state, "shell_test_probe ${#colors[0]} 6", 0, "6");
+    /* "${#NAME}" -- a plain scalar's string length, unrelated to arrays, but
+     * added to shell_parser.c's "${...}" handling by this same feature. */
+    ok = selftest__shell_array_step(ok, &state, "greeting=hello; shell_test_probe ${#greeting} 5", 0, "5");
+    /* "unset NAME[i]" removes just that one element (a sparse hole), not the
+     * whole array -- the element count drops, but a later, still-set index
+     * is completely unaffected. */
+    ok = selftest__shell_array_step(ok, &state, "unset colors[1]", 0, NULL);
+    ok = selftest__shell_array_step(ok, &state, "shell_test_probe ${#colors[@]} 3", 0, "3");
+    ok = selftest__shell_array_step(ok, &state, "shell_test_probe ${colors[2]} blue", 0, "blue");
+    /* "NAME=("${NAME[@]}")" -- the reindex/compaction idiom: a standalone
+     * double-quoted "${NAME[@]}" splits into one word per *surviving*
+     * element (skipping the hole left above), so reassigning from it closes
+     * the gap and renumbers from 0. A "for IN "${NAME[@]}"" loop (same
+     * splitting) proves every surviving element came through, in order. */
+    ok = selftest__shell_array_step(ok, &state, "colors=(\"${colors[@]}\")", 0, NULL);
+    ok = selftest__shell_array_step(ok, &state, "shell_test_probe ${#colors[@]} 3", 0, "3");
+    ok = selftest__shell_array_step(
+        ok, &state, "sum=; for c in \"${colors[@]}\"; do sum=\"$sum$c,\"; done; shell_test_probe \"$sum\"", 0,
+        "purple,blue,yellow,"
+    );
+    /* "${#NAME[@]}" also resolves inside "((...))" arithmetic (shell_arith.c),
+     * not just plain "${...}" expansion -- the one array form actually used
+     * that way by any script this shell runs (a C-style for-loop condition). */
+    ok = selftest__shell_array_step(
+        ok, &state, "total=0; for ((j = 0; j < ${#colors[@]}; j++)); do total=$((total + 1)); done; "
+                    "shell_test_probe $total 3",
+        0, "3"
+    );
+    /* An empty literal, and "unset NAME" dropping the whole array (as
+     * opposed to "unset NAME[i]" above, just one element) -- both read back
+     * as a zero-length array, same as bash's own "${#undef[@]}". */
+    ok = selftest__shell_array_step(ok, &state, "empty=()", 0, NULL);
+    ok = selftest__shell_array_step(ok, &state, "shell_test_probe ${#empty[@]} 0", 0, "0");
+    ok = selftest__shell_array_step(ok, &state, "unset colors", 0, NULL);
+    ok = selftest__shell_array_step(ok, &state, "shell_test_probe ${#colors[@]} 0", 0, "0");
+
+    shell__state_free(&state);
+    printf("[selftest] shell/array: %s\n", ok ? "OK" : "failed");
+    return ok;
+}
+
+/* Like selftest__run_shell_multiline_case() above (a real script FILE, not a
+ * single shell__execute_line() call, so the lines genuinely arrive one at a
+ * time through shell_app.c's own run_block_source() loop) -- but for an
+ * array literal that spans several *physical* lines, specifically exercising
+ * shell_compound__pending()'s new paren_depth tracking (does it correctly
+ * keep asking for more lines while a "NAME=(" is still open?) together with
+ * shell_parser__plan()'s own copy of that same tracking (does the eventual,
+ * complete multi-line block still split into the right words once it's
+ * flushed, rather than misreading an embedded '\n' as a statement
+ * separator?) -- neither of which a same-line shell__execute_line() call
+ * above would ever touch, since it hands shell_parser__plan() an already-
+ * complete string with no line-accumulation step at all. */
+bool selftest__run_shell_array_multiline_case(void) {
+    if (!selftest__shell_register_probe()) return false;
+    const char *path = "/apps/shell_array_multiline_test.sh";
+    const char script[] = "colors=(\n"
+                          "\tred\n"
+                          "\tgreen\n"
+                          "\tblue\n"
+                          ")\n"
+                          "sum=\n"
+                          "for c in \"${colors[@]}\"; do\n"
+                          "  sum=\"$sum$c,\"\n"
+                          "done\n"
+                          "shell_test_probe \"$sum\"\n";
+    (void)storage__remove(path);
+    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
+    size_t written = 0;
+    if (storage__open(
+            path, BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE | BRUCE_STORAGE_OPEN_TRUNCATE, &file
+        ) != BRUCE_OK ||
+        storage__write(file, script, sizeof(script) - 1, &written) != BRUCE_OK ||
+        written != sizeof(script) - 1 || storage__close(file) != BRUCE_OK) {
+        if (file != BRUCE_FILE_ID_INVALID) (void)storage__close(file);
+        (void)storage__remove(path);
+        return false;
+    }
+    char *argv[] = {"shell", (char *)path, NULL};
+    int status = shell_app_main(2, argv);
+    (void)storage__remove(path);
+    bool ok = status == 0 && strcmp(s_probe_arg, "red,green,blue,") == 0;
+    if (!ok) {
+        printf(
+            "[selftest] shell/array-multiline: status=%d arg=\"%s\" (want 0 \"red,green,blue,\")\n", status,
+            s_probe_arg
+        );
+    }
+    printf("[selftest] shell/array-multiline: %s\n", ok ? "OK" : "failed");
+    return ok;
+}

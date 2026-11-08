@@ -213,6 +213,7 @@ idf_component_register(SRCS
                      "modules/loaders/js/wifi_js.c"
                      "modules/shell/shell_app.c"
                      "modules/shell/shell_arith.c"
+                     "modules/shell/shell_array.c"
                      "modules/shell/shell_condition.c"
                      "modules/shell/shell_compound.c"
                      "modules/shell/shell_brace.c"
@@ -617,6 +618,7 @@ target_include_directories(bruce_sdk_builtin_utils_storage_commands_check PRIVAT
 add_library(bruce_sdk_builtin_shell_check OBJECT
             "modules/shell/shell_app.c"
             "modules/shell/shell_arith.c"
+            "modules/shell/shell_array.c"
             "modules/shell/shell_condition.c"
             "modules/shell/shell_compound.c"
             "modules/shell/shell_brace.c"

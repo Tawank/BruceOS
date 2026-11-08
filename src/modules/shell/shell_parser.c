@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "core_sdk/memory.h"
@@ -614,6 +615,23 @@ int shell_parser__plan(
      * recognition of the construct; "[[ ]]" never nests, so this is a flag,
      * not a depth counter like arith_depth. */
     bool in_double_bracket = false;
+    /* Tracks a bare, unparenthesized "NAME=("/"NAME+=(" array-literal span
+     * (shell_array.h) the same way arith_depth/in_double_bracket above track
+     * their own constructs: while open, ';'/'&&'/'||'/'|'/'\n' inside it are
+     * left as plain text instead of being parsed as statement connectors, so
+     * a multi-line element list reaches shell_parser__words() as the one
+     * command its tokenizer already knows how to split (a bare, unquoted
+     * '('/')' is always its own one-character word there -- see its own doc
+     * comment). Never decremented below 0: a `case` clause's own bare
+     * pattern-terminator ')' (e.g. "h) usage; exit 0;;") looks identical to
+     * a real close paren from this flat scan alone, with no case/esac
+     * tracking of its own in this function to gate on the way
+     * shell_compound__pending() does -- but since no real '(' ever precedes
+     * one in any script this shell runs today, paren_depth is already 0
+     * there and the floor below leaves it alone; a script whose case body
+     * itself opened an unclosed array literal would need real case/esac
+     * tracking here too, which this deliberately doesn't add. */
+    int paren_depth = 0;
 
     for (size_t i = 0; i <= length; ++i) {
         char c = i < length ? line[i] : '\0';
@@ -675,6 +693,16 @@ int shell_parser__plan(
             /* Never swallow the end-of-buffer sentinel here: even an
              * unterminated "((" must still fall through to the flush logic
              * below so the last command isn't silently dropped. */
+            token_boundary = isspace((unsigned char)c);
+            continue;
+        }
+        if (c == '(') paren_depth++;
+        else if (c == ')' && paren_depth > 0) paren_depth--;
+        if (paren_depth > 0 && c != '\0') {
+            /* Same "never swallow end-of-buffer" reasoning as arith_depth's
+             * own sentinel note just above -- an unterminated array literal
+             * must still flush at the end of the buffer rather than
+             * vanishing silently. */
             token_boundary = isspace((unsigned char)c);
             continue;
         }
@@ -991,18 +1019,101 @@ static int shell_parser__expand(
     }
     if (command->text[i + 1] == '{') {
         i += 2;
-        while (i < command->length && command->text[i] != '}') {
+        /* "${#NAME}" (scalar string length) / "${#NAME[@]}" (array element
+         * count) -- a leading '#' right after the brace, not to be confused
+         * with the *un*-braced "$#" (positional parameter count) handled
+         * above, which never reaches this branch at all. */
+        bool length_mode = i < command->length && command->text[i] == '#';
+        if (length_mode) i++;
+        while (i < command->length && command->text[i] != '}' && command->text[i] != '[') {
             if (name_length + 1 >= sizeof(name)) {
                 *error = "variable name too long";
                 return -1;
             }
             name[name_length++] = command->text[i++];
         }
+        /* "${NAME[subscript]}" -- an array reference; this shell has no
+         * bare-scalar meaning for a "[...]" suffix, matching bash's own rule
+         * that subscripting only ever applies to an array. `subscript_kind`
+         * is '@'/'*' for the whole-array forms ("${NAME[@]}"/"${NAME[*]}",
+         * and by extension "${#NAME[@]}"/"${#NAME[*]}"); '\0' means a real
+         * index expression sits in text[subscript_start, subscript_start +
+         * subscript_len), still unevaluated at this point. */
+        bool has_subscript = i < command->length && command->text[i] == '[';
+        char subscript_kind = '\0';
+        size_t subscript_start = 0, subscript_len = 0;
+        if (has_subscript) {
+            i++;
+            subscript_start = i;
+            int depth = 1;
+            while (i < command->length && depth > 0) {
+                if (command->text[i] == '[') depth++;
+                else if (command->text[i] == ']' && --depth == 0) break;
+                i++;
+            }
+            if (i >= command->length || command->text[i] != ']') {
+                *error = "unterminated array subscript";
+                return -1;
+            }
+            subscript_len = i - subscript_start;
+            i++;
+            if (subscript_len == 1 &&
+                (command->text[subscript_start] == '@' || command->text[subscript_start] == '*')) {
+                subscript_kind = command->text[subscript_start];
+            }
+        }
         if (i >= command->length || command->text[i] != '}') {
             *error = "unterminated variable expansion";
             return -1;
         }
         *position = i + 1;
+        if (!shell_parser__valid_name(name, name_length)) {
+            *error = "invalid variable name";
+            return -1;
+        }
+        name[name_length] = '\0';
+        if (!has_subscript) {
+            if (!length_mode) {
+                const char *value = lookup != NULL ? lookup(context, name) : NULL;
+                return value == NULL || shell_dynbuf__append(word, value, strlen(value)) ? 0 : -1;
+            }
+            const char *value = lookup != NULL ? lookup(context, name) : NULL;
+            char formatted[12];
+            int written = snprintf(formatted, sizeof(formatted), "%zu", value != NULL ? strlen(value) : 0);
+            return written > 0 && shell_dynbuf__append(word, formatted, (size_t)written) ? 0 : -1;
+        }
+        /* Composite lookup keys below piggyback on the plain string-keyed
+         * `lookup` callback instead of a dedicated array-lookup callback --
+         * see shell_executor__lookup()'s own doc comment in shell_executor.c
+         * for why, and what each sentinel byte means. */
+        if (subscript_kind != '\0') {
+            char key[SHELL__PARSED_NAME_MAX + 2];
+            int written = snprintf(key, sizeof(key), "%s%c", name, length_mode ? '\x02' : '\x04');
+            if (written <= 0 || (size_t)written >= sizeof(key)) {
+                *error = "variable name too long";
+                return -1;
+            }
+            const char *value = lookup != NULL ? lookup(context, key) : NULL;
+            return value == NULL || shell_dynbuf__append(word, value, strlen(value)) ? 0 : -1;
+        }
+        char *index_text =
+            arith != NULL ? arith(context, command->text + subscript_start, subscript_len, error) : NULL;
+        if (index_text == NULL) {
+            if (*error == NULL) *error = "invalid array subscript";
+            return -1;
+        }
+        char key[SHELL__PARSED_NAME_MAX + 16];
+        int written = snprintf(key, sizeof(key), "%s\x01%s", name, index_text);
+        memory__free(index_text);
+        if (written <= 0 || (size_t)written >= sizeof(key)) {
+            *error = "variable name too long";
+            return -1;
+        }
+        const char *value = lookup != NULL ? lookup(context, key) : NULL;
+        if (!length_mode) return value == NULL || shell_dynbuf__append(word, value, strlen(value)) ? 0 : -1;
+        char formatted[12];
+        int formatted_written = snprintf(formatted, sizeof(formatted), "%zu", value != NULL ? strlen(value) : 0);
+        return formatted_written > 0 && shell_dynbuf__append(word, formatted, (size_t)formatted_written) ? 0 : -1;
     } else {
         i++;
         if (!(isalpha((unsigned char)command->text[i]) || command->text[i] == '_')) {
@@ -1111,6 +1222,36 @@ static bool shell_parser__looks_like_assignment(const char *word) {
     return shell_parser__valid_name(word, (size_t)(equals - word));
 }
 
+/* True if `word` has the shape of this shell's array-subscript syntax
+ * (shell_array.h): a valid variable name immediately followed by '[',
+ * closed by a ']' that's either the word's very last character ("NAME[idx]"
+ * -- a bare element reference, e.g. "unset NAME[idx]"'s own argument) or
+ * immediately followed by '=' ("NAME[idx]=value" -- a single-element
+ * assignment). shell_parser__push_word() below needs this as its own,
+ * separate check from shell_parser__looks_like_assignment() above: a bare
+ * "NAME[idx]" has no '=' at all for that function to find, and
+ * "NAME[idx]=value" has brackets in the part *before* its own '=', which
+ * fails shell_parser__valid_name() there too. Without this, both shapes
+ * are indistinguishable from an ordinary bracket-class glob pattern to
+ * shell_glob__has_metachars() -- "colors[1]" looks exactly like a pattern
+ * matching any real file named "colors" + one of the characters in "1", and
+ * nullglob-off bash-style fallback only saves a *literal* mismatch; a
+ * coincidental same-shaped file elsewhere on the filesystem would silently
+ * replace the array reference with that file's name instead. Deliberately
+ * narrower than that: "file[12].txt" (trailing text after the ']' that
+ * isn't "=value") is a real glob pattern this shell has no array syntax for
+ * and must still expand normally -- only a subscript that is the entire
+ * rest of the word, or immediately followed by an assignment, is this
+ * shell's own syntax rather than someone else's glob pattern. */
+static bool shell_parser__looks_like_array_reference(const char *word) {
+    const char *bracket = strchr(word, '[');
+    if (bracket == NULL || bracket == word) return false;
+    if (!shell_parser__valid_name(word, (size_t)(bracket - word))) return false;
+    const char *close = strchr(bracket, ']');
+    if (close == NULL) return false;
+    return close[1] == '\0' || close[1] == '=';
+}
+
 /* Pushes one already fully-expanded word into `list`, running it through
  * real pathname expansion first when it's eligible (see shell_glob.h): on a
  * real filesystem match, `finished` is replaced by however many matched
@@ -1122,7 +1263,9 @@ static bool shell_parser__looks_like_assignment(const char *word) {
  * is false (no part of it was single-/double-quoted or backslash-escaped --
  * see shell_parser__process_word()'s own doc comment on that flag) and it doesn't
  * merely look like a "NAME=value" assignment (shell_parser__looks_like_assignment()
- * above); a NAME=value word IS still checked for `any_quoted` first, so e.g.
+ * above) or an array-subscript reference/assignment
+ * (shell_parser__looks_like_array_reference() above, for "NAME[idx]"/
+ * "NAME[idx]=value" -- shell_array.h); a NAME=value word IS still checked for `any_quoted` first, so e.g.
  * `pattern="*.txt"` (quoted) and `pattern=*.txt` (unquoted, assignment-shaped)
  * both correctly skip expansion, each for its own reason. Takes ownership of
  * `finished` either way. Returns false (with *error set) only on a real
@@ -1131,7 +1274,8 @@ static bool shell_parser__push_word(
     shell_word_list_t *list, char *finished, bool any_quoted, shell_variable_lookup_fn lookup, void *context,
     const char **error
 ) {
-    if (!any_quoted && !shell_parser__looks_like_assignment(finished) && shell_glob__has_metachars(finished)) {
+    if (!any_quoted && !shell_parser__looks_like_assignment(finished) &&
+        !shell_parser__looks_like_array_reference(finished) && shell_glob__has_metachars(finished)) {
         const char *pwd = lookup != NULL ? lookup(context, "PWD") : NULL;
         size_t match_count = 0;
         char **matches = shell_glob__expand_path(finished, pwd, &match_count);
@@ -1196,6 +1340,21 @@ static bool shell_parser__process_word(
     while (i < command->length) {
         char c = command->text[i];
         if (!single && !double_quote && isspace((unsigned char)c)) break;
+        /* A bare, unquoted '('/')' always ends a word too -- this shell has
+         * no other use for either character outside of "$(...)"/"`...`"
+         * command substitution and "((...))" arithmetic, both of which are
+         * fully consumed in one jump (see the '$'/'`' branch below and
+         * shell_parser__expand()'s own "$((" handling) long before the
+         * per-character scan here ever sees their *internal* parens -- so
+         * the only bare ones left at this point are array-literal syntax:
+         * "NAME=(", "NAME+=(", an element word, or the closing ")" (see
+         * shell_array.h, and shell_parser__words()'s own handling of this
+         * same character immediately below, which is what actually turns a
+         * bare '(' or ')' into its own one-character word once this
+         * function stops here instead of consuming it). Never fires on this
+         * word's very first character for the same reason
+         * shell_parser__word_span_end() never does either. */
+        if (!single && !double_quote && (c == '(' || c == ')')) break;
         started = true;
         if (!double_quote && c == '\'') {
             single = !single;
@@ -1300,6 +1459,13 @@ static size_t shell_parser__word_span_end(const shell_command_t *command, size_t
     while (i < command->length) {
         char c = command->text[i];
         if (!single && !double_quote && isspace((unsigned char)c)) break;
+        /* A bare, unquoted '('/')' is also a word boundary -- see
+         * shell_parser__process_word()'s identical check for why (array
+         * literals, shell_array.h). Never fires on the very first character
+         * of this span: shell_parser__words()'s own outer loop already
+         * intercepts a word that *starts* with '(' or ')' before ever
+         * calling this function on it. */
+        if (!single && !double_quote && (c == '(' || c == ')')) break;
         if (!double_quote && c == '\'') {
             single = !single;
             i++;
@@ -1376,6 +1542,87 @@ static bool shell_parser__expand_brace_word(
     return ok;
 }
 
+/* True if the word spanning text[start, end) is EXACTLY a double-quoted
+ * "${NAME[@]}" with nothing else around it -- the one shape bash gives
+ * special, splits-into-separate-words treatment (every other quoting of an
+ * array -- unquoted, or "${NAME[*]}"/"${NAME[@]}" as only part of a larger
+ * word -- instead joins into a single space-separated string; see
+ * shell_array__join()'s own doc comment in shell_array.h). On a match,
+ * out_name/out_name_length point at NAME within `text` (borrowed, not
+ * NUL-terminated). */
+static bool shell_parser__is_whole_array_at_word(
+    const char *text, size_t start, size_t end, const char **out_name, size_t *out_name_length
+) {
+    if (end < start + 9 || text[start] != '"' || text[end - 1] != '"') return false;
+    if (text[start + 1] != '$' || text[start + 2] != '{' || text[end - 2] != '}') return false;
+    size_t inner_start = start + 3;
+    size_t inner_end = end - 2;
+    /* "${#NAME[@]}" is the *length* form (shell_parser__expand()'s own
+     * length_mode handling, a single scalar number) -- never this
+     * whole-array word split, which has no "#" case of its own at all.
+     * Without this, "#colors" (the '#' swept in as part of the "name")
+     * resolves to no such array, so the whole-array lookup below silently
+     * produces zero words instead of the one number this should be --
+     * eating the entire argument rather than just getting its value wrong. */
+    if (inner_start < inner_end && text[inner_start] == '#') return false;
+    if (inner_end < inner_start + 3 || text[inner_end - 3] != '[' || text[inner_end - 1] != ']') return false;
+    if (text[inner_end - 2] != '@') return false; /* "${NAME[*]}" still joins into one word, unlike "[@]" */
+    *out_name = text + inner_start;
+    *out_name_length = inner_end - 3 - inner_start;
+    return *out_name_length > 0;
+}
+
+/* Pushes every element of the array named by `name`/`name_length` (borrowed,
+ * not NUL-terminated -- see shell_parser__is_whole_array_at_word() above) as
+ * its own separate word onto `list`, via the same composite-key `lookup`
+ * calls shell_parser__expand()'s "${NAME[idx]}"/"${#NAME[@]}" handling uses
+ * (see shell_executor__lookup()'s own doc comment in shell_executor.c for
+ * what the sentinel bytes mean) -- an array with no elements at all pushes
+ * nothing, matching bash's own "${empty_arr[@]}" expanding to zero words
+ * rather than one empty one. Returns false (with *error set) only on a real
+ * failure: an oversized name, too many words, or out of memory. */
+static bool shell_parser__push_whole_array_words(
+    shell_word_list_t *list, const char *name, size_t name_length, shell_variable_lookup_fn lookup, void *context,
+    const char **error
+) {
+    char array_name[SHELL__PARSED_NAME_MAX];
+    if (name_length >= sizeof(array_name)) {
+        *error = "variable name too long";
+        return false;
+    }
+    memcpy(array_name, name, name_length);
+    array_name[name_length] = '\0';
+    /* The array's full index range ("NAME\x05", shell_array__index_bound()),
+     * NOT its element *count* ("NAME\x02", shell_array__length()) -- the
+     * latter already excludes holes, so using it as this loop's upper bound
+     * would stop short of any still-set index that comes after one (e.g. an
+     * element appended after an earlier "unset NAME[i]"), silently dropping
+     * it instead of just skipping the hole itself the way the `continue`
+     * below does. */
+    char bound_key[SHELL__PARSED_NAME_MAX + 2];
+    snprintf(bound_key, sizeof(bound_key), "%s\x05", array_name);
+    const char *bound_text = lookup != NULL ? lookup(context, bound_key) : NULL;
+    long count = bound_text != NULL ? strtol(bound_text, NULL, 10) : 0;
+    for (long i = 0; i < count; ++i) {
+        char element_key[SHELL__PARSED_NAME_MAX + 16];
+        snprintf(element_key, sizeof(element_key), "%s\x01%ld", array_name, i);
+        const char *value = lookup != NULL ? lookup(context, element_key) : NULL;
+        if (value == NULL) continue; /* a sparse hole (shell_array__unset_index()) contributes no word at all */
+        char *copy = memory__malloc(strlen(value) + 1);
+        if (copy == NULL) {
+            *error = "out of memory";
+            return false;
+        }
+        memcpy(copy, value, strlen(value) + 1);
+        if (!shell_word_list__push(list, copy)) {
+            memory__free(copy);
+            *error = list->count >= SHELL__MAX_WORDS ? "too many words" : "out of memory";
+            return false;
+        }
+    }
+    return true;
+}
+
 int shell_parser__words(
     const shell_command_t *command, char ***out_words, int *word_count, shell_variable_lookup_fn lookup,
     shell_command_substitution_fn substitute, shell_arith_word_fn arith, void *context, int last_status,
@@ -1391,6 +1638,30 @@ int shell_parser__words(
         while (i < command->length && isspace((unsigned char)command->text[i])) i++;
         if (i >= command->length) break;
 
+        /* A bare, unquoted '(' or ')' is its own one-character word -- see
+         * shell_parser__process_word()'s identical boundary check for why
+         * (array literals, shell_array.h): "NAME=(a b)" tokenizes as
+         * "NAME=", "(", "a", "b", ")", which shell_executor__dispatch()
+         * recognizes by that exact shape. */
+        if (command->text[i] == '(' || command->text[i] == ')') {
+            char *paren = memory__malloc(2);
+            if (paren == NULL) {
+                shell_word_list__free(&list);
+                *error = "out of memory";
+                return -1;
+            }
+            paren[0] = command->text[i];
+            paren[1] = '\0';
+            if (!shell_word_list__push(&list, paren)) {
+                memory__free(paren);
+                shell_word_list__free(&list);
+                *error = list.count >= SHELL__MAX_WORDS ? "too many words" : "out of memory";
+                return -1;
+            }
+            i++;
+            continue;
+        }
+
         /* "{a,b,c}"-style brace expansion runs strictly before everything
          * else this loop does to a word, on the word's raw, still-untouched
          * text (see shell_brace.h) -- purely textual, so a peek at just this
@@ -1400,6 +1671,23 @@ int shell_parser__words(
          * shell_parser__expand_brace_word() above -- deliberately kept out
          * of this function's own frame, see that function's doc comment. */
         size_t span_end = shell_parser__word_span_end(command, i);
+        /* "${NAME[@]}" as an entire standalone double-quoted word splits
+         * into one word per array element instead -- see
+         * shell_parser__is_whole_array_at_word()'s own doc comment above for
+         * why this is the one shape that needs different handling from
+         * ordinary expansion. Checked before the brace-group peek below
+         * since this span is never a brace group anyway (it's a single
+         * quoted "${...}" expansion, not "{a,b,c}" syntax). */
+        const char *array_name = NULL;
+        size_t array_name_length = 0;
+        if (shell_parser__is_whole_array_at_word(command->text, i, span_end, &array_name, &array_name_length)) {
+            if (!shell_parser__push_whole_array_words(&list, array_name, array_name_length, lookup, context, error)) {
+                shell_word_list__free(&list);
+                return -1;
+            }
+            i = span_end;
+            continue;
+        }
         if (shell_brace__has_group(command->text + i, span_end - i)) {
             if (!shell_parser__expand_brace_word(
                     &list, command->text + i, span_end - i, lookup, substitute, arith, context, last_status, error

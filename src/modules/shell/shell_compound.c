@@ -1310,6 +1310,28 @@ bool shell_compound__pending(const char *text) {
      * treatment as if_depth/loop_depth above -- a clause's own ";;"/pattern
      * words never need tracking here, only the outermost case/esac pair. */
     int case_depth = 0;
+    /* A bare, unquoted, unclosed '(' -- specifically "NAME=("/"NAME+=(" array
+     * literal syntax (shell_array.h), which may itself span several
+     * physical lines before its matching ')' -- so a line ending mid-array
+     * still asks for more input, the same way an open "if"/"{"/heredoc
+     * marker already does. Only tracked while case_depth == 0: a case
+     * clause's own bare pattern-terminator ')' (e.g. "h) usage; exit 0;;")
+     * is indistinguishable from a real close paren by this flat per-character
+     * scan alone, but no clause body in any script this shell runs today
+     * ever opens an array literal of its own, so ignoring parens entirely
+     * inside case/esac is a safe simplification rather than a real
+     * ambiguity. Only counted outside quotes too (same gating this
+     * function's word-keyword tracking already gets): a "$(cmd)"'s own
+     * internal parens -- e.g. "$(tput setaf 111)" inside an array literal's
+     * element list -- are always written quoted in any script this shell
+     * runs today, so the same quote-gating that already keeps this
+     * function's other tracking from misreading quoted text keeps those
+     * from being double-counted here too, without needing this function to
+     * also learn shell_parser__plan()'s own dedicated "$(...)"-span-skipping
+     * logic. An unquoted "$(...)"/bare "((...))" would still be
+     * miscounted -- not a real risk for anything this shell runs today,
+     * since neither ever leaves a paren open across a '\n' in practice. */
+    int paren_depth = 0;
     char word[8];
     size_t word_len = 0;
     bool word_clean = true;
@@ -1363,6 +1385,10 @@ bool shell_compound__pending(const char *text) {
             if (word_len < sizeof(word)) word[word_len++] = c;
             continue;
         }
+        if (case_depth == 0) {
+            if (c == '(') paren_depth++;
+            else if (c == ')' && paren_depth > 0) paren_depth--;
+        }
         if (c == '#' && word_len == 0) {
             in_comment = true;
             continue;
@@ -1371,7 +1397,8 @@ bool shell_compound__pending(const char *text) {
         if (word_len < sizeof(word)) word[word_len++] = c;
         else word_clean = false;
     }
-    return single || double_quote || if_depth > 0 || brace_depth > 0 || loop_depth > 0 || case_depth > 0;
+    return single || double_quote || if_depth > 0 || brace_depth > 0 || loop_depth > 0 || case_depth > 0 ||
+           paren_depth > 0;
 }
 
 static shell_function_t *shell_compound__find_function(const shell_state_t *state, const char *name) {

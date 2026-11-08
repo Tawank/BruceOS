@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "shell_array.h"
 #include "shell_builtins.h"
 
 /* Recursive-descent parser/evaluator over the raw text directly (no separate
@@ -92,6 +93,61 @@ static bool shell_arith__parse_primary(shell_arith__cursor_t *c, shell_arith__va
         }
         c->p++;
         out->is_lvalue = false; /* "(x)++" is unsupported, matching this basic implementation's scope */
+        return true;
+    }
+    /* "${#NAME}" (scalar string length) / "${#NAME[@]}" (array element
+     * count) -- the one piece of "${...}" syntax actually used inside this
+     * script's "((...))" headers (see for-loop conditions like
+     * `i < "${#snowflakes[@]}"`); shell_arith__read_name() below has no
+     * concept of "{"/"["/length at all, so this is handled as its own
+     * special case first, ahead of the plain bare-name branch, rather than
+     * taught to it. A plain "${NAME}"/"${NAME[@]}" *value* (not a length)
+     * in arithmetic context, and a real "${NAME[idx]}" element subscript,
+     * are both left unsupported here -- neither is exercised by anything
+     * this shell runs today. */
+    if (ch == '$' && c->p + 1 < c->end && c->p[1] == '{') {
+        c->p += 2;
+        bool length_mode = c->p < c->end && *c->p == '#';
+        if (length_mode) c->p++;
+        const char *name_start = c->p;
+        while (c->p < c->end && *c->p != '}' && *c->p != '[') c->p++;
+        size_t name_len = (size_t)(c->p - name_start);
+        char name[SHELL__VARIABLE_NAME_MAX];
+        if (name_len == 0 || name_len >= sizeof(name)) {
+            c->error = "syntax error";
+            return false;
+        }
+        memcpy(name, name_start, name_len);
+        name[name_len] = '\0';
+        bool is_array_whole = false;
+        if (c->p < c->end && *c->p == '[') {
+            c->p++;
+            const char *sub_start = c->p;
+            while (c->p < c->end && *c->p != ']') c->p++;
+            if (c->p >= c->end) {
+                c->error = "syntax error";
+                return false;
+            }
+            is_array_whole =
+                (c->p - sub_start) == 1 && (*sub_start == '@' || *sub_start == '*');
+            c->p++;
+            if (!is_array_whole) {
+                c->error = "array subscript unsupported in arithmetic context";
+                return false;
+            }
+        }
+        if (c->p >= c->end || *c->p != '}' || !length_mode) {
+            c->error = "syntax error";
+            return false;
+        }
+        c->p++;
+        if (is_array_whole) {
+            out->value = (long)shell_array__length(c->state, name);
+        } else {
+            const char *value = shell_builtins__get(c->state, name);
+            out->value = (long)(value != NULL ? strlen(value) : 0);
+        }
+        out->is_lvalue = false;
         return true;
     }
     if (ch == '$' || isalpha((unsigned char)ch) || ch == '_') {

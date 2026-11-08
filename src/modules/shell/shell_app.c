@@ -9,7 +9,6 @@
 #include <string.h>
 
 #include "args.h"
-#include "core_sdk/app_runner.h"
 #include "core_sdk/environment.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/process.h"
@@ -17,6 +16,7 @@
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
 #include "core_sdk/tty.h"
+#include "shell_array.h"
 #include "shell_compound.h"
 #include "shell_builtins.h"
 #include "shell_console.h"
@@ -76,6 +76,7 @@ void shell__state_free(shell_state_t *state) {
     state->variables = NULL;
     state->variable_count = 0;
     state->variable_capacity = 0;
+    shell_array__free_all(state);
     memory__free(state->trap_exit);
     memory__free(state->trap_int);
     memory__free(state->trap_term);

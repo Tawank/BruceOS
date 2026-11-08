@@ -32,6 +32,33 @@
  * SHELL__MAX_FUNCTIONS plays above: a handful of background jobs from one
  * interactive shell is the realistic ceiling. */
 #define SHELL__MAX_JOBS 8
+/* Bash-style indexed arrays (see shell_array.h) -- a separate, small table
+ * from the scalar `variables` below, sized for the handful of arrays a
+ * script realistically keeps alive at once (a color palette, an animation's
+ * live particle list, ...), not a general-purpose collection count. */
+#define SHELL__MAX_ARRAYS 8
+#define SHELL__ARRAY_NAME_MAX SHELL__VARIABLE_NAME_MAX
+/* Per-array element cap -- a safety net against a runaway script growing one
+ * forever (e.g. "arr+=(x)" in an infinite loop with nothing ever trimming
+ * it), not a preallocation size: elements[] grows on demand same as
+ * `variables` does. */
+#define SHELL__MAX_ARRAY_ELEMENTS 128
+#define SHELL__ARRAY_ELEMENT_MAX SHELL__VARIABLE_VALUE_MAX
+
+typedef struct {
+    char *name;
+    /* elements[i] == NULL means index i is an unset hole (see
+     * shell_array__unset_index()) -- a sparse array still owns the slot in
+     * this backing storage, just with nothing in it, matching real bash's
+     * own sparse-array behavior. */
+    char **elements;
+    /* One past the highest index ever assigned (NOT shell_array__length()'s
+     * "how many are actually set" count -- a hole below this still counts
+     * toward it, same as bash's own "${!arr[@]}"/highest-index bookkeeping,
+     * even though this shell has no "${!arr[@]}" of its own). */
+    size_t count;
+    size_t capacity; /* allocated length of `elements` */
+} shell_array_t;
 
 typedef struct {
     char *name;
@@ -82,6 +109,11 @@ typedef struct {
     shell_variable_t *variables;
     size_t variable_count;
     size_t variable_capacity;
+    /* Bash-style indexed arrays (see shell_array.h) -- a name is either a
+     * scalar (above) or an array (here), never both at once. */
+    shell_array_t *arrays;
+    size_t array_count;
+    size_t array_capacity;
     shell_function_t *functions;
     size_t function_count;
     size_t function_capacity;
@@ -117,6 +149,19 @@ typedef struct {
      * reformat on each lookup as to cache, so this stays a plain scratch
      * buffer rather than a separately-tracked "already formatted" flag. */
     char pid_text[12];
+    /* Scratch space for shell_executor__lookup()'s array-expansion sentinels
+     * (see shell_array.h and shell_parser.c's "${...}" braced-form
+     * handling) -- "${#NAME[@]}"'s formatted element count, and
+     * "${NAME[@]}"/"${NAME[*]}"'s space-joined elements, respectively. Same
+     * "reformat into a fixed scratch buffer on every lookup rather than
+     * track a separate dirty flag" tradeoff positional_count_text/pid_text
+     * above already make -- cheap enough not to bother caching. Sized
+     * generously for a handful of short ANSI color-code elements (this
+     * shell's realistic array use case), not a hard content limit:
+     * snprintf() truncates rather than overflowing if a join ever runs
+     * longer. */
+    char array_length_text[12];
+    char array_join_text[256];
     int last_status;
     bool exit_requested;
     int exit_status;

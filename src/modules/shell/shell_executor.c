@@ -2,6 +2,7 @@
 
 #include <ctype.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "core_sdk/app_runner.h"
@@ -14,6 +15,7 @@
 #include "core_sdk/storage.h"
 #include "core_sdk/tty.h"
 #include "shell_arith.h"
+#include "shell_array.h"
 #include "shell_builtins.h"
 #include "shell_compound.h"
 #include "shell_jobs.h"
@@ -55,6 +57,61 @@ const char *shell_executor__lookup(void *context, const char *name) {
             snprintf(state->pid_text, sizeof(state->pid_text), "%u", (unsigned)process__current_id());
             return state->pid_text;
         }
+    }
+    /* Array-element/length/join lookups, encoded by shell_parser__expand()'s
+     * "${...}" braced-form handling as "NAME<sentinel>[index]" -- piggybacking
+     * on this same plain string-keyed callback rather than threading a
+     * dedicated array-lookup callback through every one of
+     * shell_parser.c's many call sites (shell_parser__words(),
+     * shell_parser__expand_text(), shell_executor__resolve_redirect_target(),
+     * ...). None of these sentinel bytes can appear in a real variable name
+     * (shell_parser__valid_name() only allows alnum/underscore), so they can
+     * never collide with an actual scalar/array name -- see shell_array.h
+     * for what each operation actually does. */
+    const char *array_length_marker = strchr(name, '\x02');
+    const char *array_join_marker = strchr(name, '\x04');
+    /* "NAME\x05" -- shell_array__index_bound(), not shell_array__length():
+     * see shell_parser.c's shell_parser__push_whole_array_words(), the one
+     * caller that needs this instead of the element *count* -- it has to
+     * keep visiting every index up through the array's highest-ever-set one
+     * even after a hole, or a still-set index past that hole (e.g. one
+     * appended after "unset NAME[i]" removed an earlier one) would never be
+     * reached at all. */
+    const char *array_bound_marker = strchr(name, '\x05');
+    const char *array_index_marker = strchr(name, '\x01');
+    const char *marker = array_length_marker != NULL ? array_length_marker
+                          : array_join_marker != NULL ? array_join_marker
+                          : array_bound_marker != NULL ? array_bound_marker
+                                                        : array_index_marker;
+    if (marker != NULL) {
+        char array_name[SHELL__ARRAY_NAME_MAX];
+        size_t array_name_length = (size_t)(marker - name);
+        if (array_name_length >= sizeof(array_name)) return NULL;
+        memcpy(array_name, name, array_name_length);
+        array_name[array_name_length] = '\0';
+        if (marker == array_length_marker) {
+            snprintf(
+                state->array_length_text, sizeof(state->array_length_text), "%zu",
+                shell_array__length(state, array_name)
+            );
+            return state->array_length_text;
+        }
+        if (marker == array_join_marker) {
+            char *joined = shell_array__join(state, array_name);
+            if (joined == NULL) return NULL;
+            snprintf(state->array_join_text, sizeof(state->array_join_text), "%s", joined);
+            memory__free(joined);
+            return state->array_join_text;
+        }
+        if (marker == array_bound_marker) {
+            snprintf(
+                state->array_length_text, sizeof(state->array_length_text), "%zu",
+                shell_array__index_bound(state, array_name)
+            );
+            return state->array_length_text;
+        }
+        long index = strtol(marker + 1, NULL, 10);
+        return shell_array__get(state, array_name, index > 0 ? (size_t)index : 0);
     }
     return shell_builtins__get(state, name);
 }
@@ -1567,12 +1624,112 @@ out_of_memory:
     return 1;
 }
 
+/* True if `word` has the shape of a bare array-literal assignment prefix --
+ * "NAME=" or "NAME+=" with nothing after the '='/'+=' at all (shell_array.h,
+ * and shell_parser.c's tokenizer: a bare, unquoted '(' is always its own
+ * one-character word, so "NAME=(a b)" always arrives here as the separate
+ * words "NAME=", "(", "a", "b", ")", never as one combined "NAME=(a" word
+ * the way it would without that change). `*out_append` is set true for the
+ * "+=" form. Does not by itself confirm this is actually an array literal --
+ * see its one caller below, which also requires the very next word to be
+ * exactly "(". */
+static bool shell_executor__is_array_literal_prefix(const char *word, bool *out_append) {
+    size_t length = strlen(word);
+    if (length == 0 || word[length - 1] != '=') return false;
+    bool append = length >= 2 && word[length - 2] == '+';
+    size_t name_length = length - (append ? 2u : 1u);
+    if (name_length == 0 || !shell_parser__valid_name(word, name_length)) return false;
+    *out_append = append;
+    return true;
+}
+
+/* Runs "NAME=(elem...)" (append == false) or "NAME+=(elem...)" (append ==
+ * true) once shell_executor__dispatch() has already confirmed the shape:
+ * words[0] is "NAME="/"NAME+=", words[1] is "(", and words[argc - 1] is ")"
+ * -- so every word strictly between those two is one array element, in
+ * order. Returns 0 on success, or shell_array__assign()/shell_array__append()'s
+ * own error code (an error message is already printed by whichever of those
+ * failed). */
+static int shell_executor__run_array_literal(shell_state_t *state, char **words, int argc, bool append) {
+    char name[SHELL__ARRAY_NAME_MAX];
+    size_t suffix_length = append ? 2u : 1u;
+    size_t name_length = strlen(words[0]) - suffix_length;
+    if (name_length >= sizeof(name)) {
+        stdio__printf("shell: array name too long\n");
+        return 2;
+    }
+    memcpy(name, words[0], name_length);
+    name[name_length] = '\0';
+    char **elements = words + 2;
+    size_t element_count = (size_t)(argc - 3); /* excludes words[0] ("NAME=") and the "(" / ")" bookends */
+    if (!append) return shell_array__assign(state, name, elements, element_count);
+    for (size_t i = 0; i < element_count; ++i) {
+        int status = shell_array__append(state, name, elements[i]);
+        if (status != 0) return status;
+    }
+    return 0;
+}
+
+/* "NAME[expr]=value" -- a single array-element assignment as a standalone
+ * statement (shell_array.h); `expr` is evaluated the same arithmetic way a
+ * "${NAME[expr]}" subscript is (shell_parser.c's "${...}" handling), just
+ * via shell_arith__eval() directly. Returns true (and performs the
+ * assignment, leaving its exit code in *out_status) only when `word` has
+ * exactly this shape; false means "not an array-element assignment at all",
+ * for the caller to fall through to ordinary dispatch. Deliberately only
+ * recognized as the command's entire single word (see the one call site
+ * below) -- unlike a scalar "NAME=value" prefix, this shell doesn't support
+ * "arr[i]=value cmd args" as a per-command environment overlay, just the
+ * standalone statement this script actually uses. */
+static bool shell_executor__try_array_element_assignment(shell_state_t *state, const char *word, int *out_status) {
+    const char *bracket = strchr(word, '[');
+    const char *equals = strchr(word, '=');
+    if (bracket == NULL || equals == NULL || equals < bracket) return false;
+    const char *close = strchr(bracket, ']');
+    if (close == NULL || close + 1 != equals) return false;
+    size_t name_length = (size_t)(bracket - word);
+    if (name_length == 0 || !shell_parser__valid_name(word, name_length)) return false;
+    char name[SHELL__ARRAY_NAME_MAX];
+    if (name_length >= sizeof(name)) {
+        stdio__printf("shell: array name too long\n");
+        *out_status = 2;
+        return true;
+    }
+    memcpy(name, word, name_length);
+    name[name_length] = '\0';
+    long index = 0;
+    const char *arith_error = NULL;
+    if (!shell_arith__eval(state, bracket + 1, (size_t)(close - bracket - 1), &index, &arith_error)) {
+        stdio__printf("shell: %s\n", arith_error != NULL ? arith_error : "invalid array subscript");
+        *out_status = 2;
+        return true;
+    }
+    *out_status = shell_array__set(state, name, index > 0 ? (size_t)index : 0, equals + 1);
+    return true;
+}
+
 /* Consumes leading NAME=value assignment words, then dispatches the
  * remainder (if any) to a builtin or an external process. `words` is
  * borrowed; the caller owns and frees it. `command` is only consulted for
  * its redirect fields (see shell_parser.h) -- `words`/`argc` are already the
  * result of word-splitting `command`'s (possibly redirect-shortened) text. */
 static int shell_executor__dispatch(shell_state_t *state, const shell_command_t *command, char **words, int argc) {
+    /* "NAME=(elem...)" / "NAME+=(elem...)" -- checked before anything else
+     * below, which would otherwise misread words[0] ("NAME=", a valid
+     * "NAME=value" shape with an empty value) as an ordinary scalar
+     * assignment and then try to run "(" itself as a command name. */
+    bool array_append = false;
+    if (argc >= 3 && strcmp(words[1], "(") == 0 && shell_executor__is_array_literal_prefix(words[0], &array_append)) {
+        if (strcmp(words[argc - 1], ")") != 0) {
+            stdio__printf("shell: array assignment: missing closing ')'\n");
+            return 2;
+        }
+        return shell_executor__run_array_literal(state, words, argc, array_append);
+    }
+    if (argc == 1) {
+        int status = 0;
+        if (shell_executor__try_array_element_assignment(state, words[0], &status)) return status;
+    }
     int first_command = 0;
     shell_executor__environment_t environment = {0};
     /* Defaults to background: the shell itself is always a background

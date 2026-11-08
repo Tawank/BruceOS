@@ -11,6 +11,8 @@
 #include "core_sdk/environment.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
+#include "shell_arith.h"
+#include "shell_array.h"
 #include "shell_compound.h"
 #include "shell_condition.h"
 #include "shell_parser.h"
@@ -801,10 +803,43 @@ int shell_builtins__run(shell_state_t *state, int argc, char **argv) {
             return 2;
         }
         for (int arg = 1; arg < argc; ++arg) {
+            /* "unset NAME[subscript]" -- removes just that one array
+             * element (a sparse hole, shell_array__unset_index()), not the
+             * whole array; `subscript` is evaluated the same arithmetic way
+             * "${NAME[subscript]}" is (shell_parser.c's "${...}" handling),
+             * just via shell_arith__eval() directly since this builtin has
+             * no `arith` callback of its own to call through. */
+            const char *bracket = strchr(argv[arg], '[');
+            if (bracket != NULL) {
+                size_t name_length = (size_t)(bracket - argv[arg]);
+                size_t total_length = strlen(argv[arg]);
+                if (total_length == 0 || argv[arg][total_length - 1] != ']' || name_length == 0 ||
+                    !shell_parser__valid_name(argv[arg], name_length)) {
+                    stdio__printf("shell: unset: invalid array subscript\n");
+                    return 2;
+                }
+                char name[SHELL__ARRAY_NAME_MAX];
+                if (name_length >= sizeof(name)) {
+                    stdio__printf("shell: array name too long\n");
+                    return 2;
+                }
+                memcpy(name, argv[arg], name_length);
+                name[name_length] = '\0';
+                size_t expr_length = total_length - name_length - 2; /* minus '[' and the trailing ']' */
+                long index = 0;
+                const char *arith_error = NULL;
+                if (!shell_arith__eval(state, bracket + 1, expr_length, &index, &arith_error)) {
+                    stdio__printf("shell: unset: %s\n", arith_error != NULL ? arith_error : "invalid array subscript");
+                    return 2;
+                }
+                shell_array__unset_index(state, name, index > 0 ? (size_t)index : 0);
+                continue;
+            }
             if (!shell_parser__valid_name(argv[arg], strlen(argv[arg]))) {
                 stdio__printf("shell: invalid variable name\n");
                 return 2;
             }
+            shell_array__unset(state, argv[arg]); /* a no-op if `argv[arg]` is actually a scalar, or unset already */
             shell_builtins__unset(state, argv[arg]);
         }
         return 0;
