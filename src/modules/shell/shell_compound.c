@@ -1092,7 +1092,17 @@ static int shell_compound__run_case(shell_state_t *state, const shell_plan_t *pl
     char *word_value = NULL;
     if (execute) {
         const char *error = NULL;
-        word_value = shell_parser__expand_text(
+        /* shell_parser__expand_word(), not shell_parser__expand_text() --
+         * this is a real shell WORD (quote-aware: "$opt" must strip its own
+         * quotes, not match them literally against every pattern), not a
+         * heredoc body (which has no quoting of its own at all -- a literal
+         * '"' there is just a literal character, exactly what expand_text()
+         * assumes). Using expand_text() here was a real, pre-existing bug:
+         * a quoted subject like `case "$opt" in h) ...` would carry its own
+         * quote characters into the compared value, verbatim, so it could
+         * never match any pattern -- only an unquoted `case $opt in` ever
+         * worked. */
+        word_value = shell_parser__expand_word(
             word_text, word_len, shell_executor__lookup, shell_executor__run_substitution,
             shell_executor__eval_arith_word, state, state->last_status, &error
         );

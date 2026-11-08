@@ -162,6 +162,12 @@ typedef struct {
      * longer. */
     char array_length_text[12];
     char array_join_text[256];
+    /* "$RANDOM"'s formatted expansion -- scratch space for
+     * shell_executor__lookup() the same way positional_count_text/pid_text
+     * are for $#/$$, just freshly reformatted (from a new esp_random() draw,
+     * not a cached/reread value) on every single lookup, matching bash's
+     * own "$RANDOM" semantics: a different number every time it's read. */
+    char random_text[12];
     int last_status;
     bool exit_requested;
     int exit_status;

@@ -174,6 +174,23 @@ char *shell_parser__expand_text(
     shell_arith_word_fn arith, void *context, int last_status, const char **error
 );
 
+/* Expands `text` (`length` bytes) as a single shell WORD -- quotes
+ * (stripped), backslash-escapes, and $NAME/${NAME}/$(...)/`...`/$((...))
+ * expansion -- but, unlike shell_parser__words()'s own per-word handling,
+ * never splits on whitespace (the whole span is one unit, consumed
+ * unconditionally) and never pathname-globs the result. Used for `case`'s
+ * own WORD (shell_compound__run_case()), which real bash expands but
+ * explicitly does not field-split or pathname-expand afterward, unlike an
+ * ordinary command argument. Returns a heap-allocated (memory__malloc(),
+ * caller-owned via memory__free()), NUL-terminated string -- real, owned,
+ * and empty for a span that was empty or entirely quoted away -- or NULL on
+ * a real failure (an unterminated quote/"$(...)"/"$((...))", the expansion
+ * exceeding SHELL__WORD_MAX, or out of memory) with *error set. */
+char *shell_parser__expand_word(
+    const char *text, size_t length, shell_variable_lookup_fn lookup, shell_command_substitution_fn substitute,
+    shell_arith_word_fn arith, void *context, int last_status, const char **error
+);
+
 /* Tokenizes `command` into a heap-allocated, NULL-terminated argv-style array:
  * each word is allocated to its exact final length. `lookup`/`substitute`/
  * `arith` are called with the same `context` for $NAME/$(...)-or-`...`/

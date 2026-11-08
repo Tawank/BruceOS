@@ -1443,6 +1443,99 @@ static bool shell_parser__process_word(
     return true;
 }
 
+/* Expands `text[0..length)` as a single, continuous unit -- quotes
+ * (stripped), backslash-escapes, and `$NAME`/`$(...)`/`` `...` ``/`$((...))`
+ * expansion, exactly like shell_parser__process_word() above -- but, unlike
+ * that function, never stops at an unquoted whitespace or bare '('/')'
+ * partway through (the whole span is consumed, from start to `length`
+ * unconditionally) and never pathname-globs the result. This is `case`'s
+ * own WORD (shell_compound__run_case()'s one caller): real bash expands it
+ * (parameter/command/arithmetic substitution, quote removal) but explicitly
+ * does *not* field-split or pathname-expand it afterward, unlike an
+ * ordinary command argument -- shell_parser__words()/process_word() (built
+ * for exactly that ordinary-argument splitting) would wrongly split a case
+ * subject that happens to expand to something containing whitespace, and
+ * shell_parser__push_word()'s real filesystem glob would wrongly fire on
+ * one that happens to expand to something shaped like a pattern. Returns
+ * NULL (with *error set to a static string) only on a real failure: an
+ * unterminated quote, the expansion exceeding its size cap, or out of
+ * memory; an entirely-empty or entirely-quoted-away result still returns a
+ * real, owned empty string, same as shell_parser__expand_text()'s own
+ * "nothing accumulated" case. */
+char *shell_parser__expand_word(
+    const char *text, size_t length, shell_variable_lookup_fn lookup, shell_command_substitution_fn substitute,
+    shell_arith_word_fn arith, void *context, int last_status, const char **error
+) {
+    shell_command_t command = {.text = text, .length = length};
+    shell_dynbuf_t word = {.initial_capacity = 32, .max_capacity = SHELL__WORD_MAX};
+    bool single = false;
+    bool double_quote = false;
+    size_t i = 0;
+    while (i < command.length) {
+        char c = command.text[i];
+        if (!double_quote && c == '\'') {
+            single = !single;
+            i++;
+            continue;
+        }
+        if (!single && c == '"') {
+            double_quote = !double_quote;
+            i++;
+            continue;
+        }
+        if (!single && c == '\\') {
+            i++;
+            if (i >= command.length || !shell_dynbuf__append(&word, command.text + i, 1)) {
+                *error = "word too long";
+                memory__free(word.data);
+                return NULL;
+            }
+            i++;
+            continue;
+        }
+        if (!single && c == '$') {
+            if (shell_parser__expand(&command, &i, &word, lookup, substitute, arith, context, last_status, error) !=
+                0) {
+                if (*error == NULL) *error = "expanded word too long";
+                memory__free(word.data);
+                return NULL;
+            }
+            continue;
+        }
+        if (!single && c == '`') {
+            size_t end = 0;
+            if (!shell_parser__substitution_span(command.text, command.length, i, true, &end)) {
+                *error = "unterminated command substitution";
+                memory__free(word.data);
+                return NULL;
+            }
+            size_t content_start = i + 1;
+            size_t content_len = (end - 1) - content_start;
+            if (shell_parser__splice_substitution(&command, content_start, content_len, &word, substitute, context, error) !=
+                0) {
+                memory__free(word.data);
+                return NULL;
+            }
+            i = end;
+            continue;
+        }
+        if (!shell_dynbuf__append(&word, command.text + i, 1)) {
+            *error = "word too long";
+            memory__free(word.data);
+            return NULL;
+        }
+        i++;
+    }
+    if (single || double_quote) {
+        *error = "unterminated quote";
+        memory__free(word.data);
+        return NULL;
+    }
+    char *finished = shell_dynbuf__finish(&word);
+    if (finished == NULL) *error = "out of memory";
+    return finished;
+}
+
 /* Finds the end of the word starting at `command->text[start]` (which must
  * not itself be whitespace) using the exact same unquoted-whitespace-ends-
  * a-word rule shell_parser__process_word() above uses -- just without that

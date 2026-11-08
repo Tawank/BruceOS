@@ -3237,3 +3237,151 @@ bool selftest__run_shell_array_multiline_case(void) {
     printf("[selftest] shell/array-multiline: %s\n", ok ? "OK" : "failed");
     return ok;
 }
+
+/* "$RANDOM" (shell_executor__lookup()'s "RANDOM" special case, and
+ * shell_arith.c's identical copy for "((...))"/"$((...))" contexts, which
+ * never routes through that lookup function at all): every read is a fresh
+ * esp_random() draw in 0..32767, never cached. Can't check an exact value
+ * (it's genuinely random), so this checks the one thing that's actually
+ * deterministic: every draw lands in bash's documented range, in both
+ * contexts, and a real hardware RNG essentially never produces the same
+ * value many draws in a row -- the collision check below would only ever
+ * misfire on a correctly-working RNG by astronomical chance, so a failure
+ * here is really a stuck/constant value, not a flaky test. */
+bool selftest__run_shell_random_case(void) {
+    if (!selftest__shell_register_probe()) return false;
+    shell_state_t state;
+    shell__state_init(&state);
+
+    bool ok = true;
+    bool saw_different_value = false;
+    long first_value = -1;
+    for (int i = 0; i < 8 && ok; ++i) {
+        memset(s_probe_arg, 0, sizeof(s_probe_arg));
+        ok = shell__execute_line(&state, "shell_test_probe $RANDOM") == 0;
+        char *end = NULL;
+        long value = ok ? strtol(s_probe_arg, &end, 10) : -1;
+        ok = ok && end != NULL && *end == '\0' && value >= 0 && value <= 32767;
+        if (i == 0) first_value = value;
+        else if (value != first_value) saw_different_value = true;
+    }
+    ok = ok && saw_different_value;
+    /* Same range check inside "((...))" arithmetic -- a different code path
+     * (shell_arith.c's shell_arith__load()), not just the plain "$RANDOM"
+     * expansion above. */
+    ok = ok &&
+         /* "&&" itself already evaluates to 1/0 (no need for "? :", which
+          * shell_arith.h's own doc comment marks unsupported -- using it
+          * anyway here was a real bug in this test, not in $RANDOM or
+          * shell_arith.c, caught by the exact "shell: syntax error" bash's
+          * own arithmetic would never produce for this. */
+         shell__execute_line(&state, "shell_test_probe $((RANDOM >= 0 && RANDOM <= 32767)) 1") == 0;
+
+    shell__state_free(&state);
+    printf("[selftest] shell/random: %s\n", ok ? "OK" : "failed");
+    return ok;
+}
+
+/* Like selftest__shell_glob_step() above, for selftest__run_shell_getopts_case()
+ * below. */
+static bool selftest__shell_getopts_step(
+    bool ok_so_far, shell_state_t *state, const char *line, int expected_status, const char *expected_arg
+) {
+    if (!ok_so_far) return false;
+    int status = shell__execute_line(state, line);
+    bool ok = status == expected_status && (expected_arg == NULL || strcmp(s_probe_arg, expected_arg) == 0);
+    if (!ok) {
+        printf(
+            "[selftest] shell/getopts: `%s` -> status=%d (want %d) arg=\"%s\" (want \"%s\")\n", line, status,
+            expected_status, s_probe_arg, expected_arg != NULL ? expected_arg : "(unchecked)"
+        );
+    }
+    return ok;
+}
+
+/* Exercises the "getopts OPTSTRING NAME" builtin (shell_builtins.c) against
+ * this call's own positional parameters -- the one form xmas.ysap.sh's
+ * "while getopts 'c:hs:' opt; do ... done" (no trailing args) actually uses
+ * -- covering: a flag option (no argument), an option whose argument is the
+ * next word, one whose argument is jammed onto the same word ("-cvalue"),
+ * an unrecognized option (both bash's own "illegal option" message and
+ * OPTSTRING's leading ':' "silent" form), a required argument that's
+ * missing (both forms), the loop naturally ending (OPTIND left pointing at
+ * the first non-option word, for a "shift $((OPTIND - 1))" afterward), and
+ * "--" explicitly ending option processing. Defines a function per case so
+ * each gets its own fresh, real "$@"/$1.. (shell_compound__call_function()),
+ * matching how xmas.ysap.sh's own main()/tput() each parse their own
+ * call's arguments, not some shared/global positional list. */
+bool selftest__run_shell_getopts_case(void) {
+    if (!selftest__shell_register_probe()) return false;
+    shell_state_t state;
+    shell__state_init(&state);
+
+    bool ok = true;
+    /* Every function below declares "local OPTIND" (even the ones that
+     * never read it back) -- $OPTIND is an ordinary global scalar, exactly
+     * like real bash's own, that persists across these calls sharing one
+     * `state` unless each localizes it: without that, a later step would
+     * silently inherit whatever OPTIND an earlier one left getopts at,
+     * rather than starting fresh at 1 -- the same convention
+     * xmas.ysap.sh's own main()/tput() rely on ("local OPTIND OPTARG opt
+     * i"). $OPTARG is likewise an ordinary scalar, confirmed readable via
+     * shell_test_probe once the function returns. */
+    ok = selftest__shell_getopts_step(
+        ok, &state,
+        "f() { local opt OPTIND; local seen=; while getopts 'hc:' opt; do "
+        "case \"$opt\" in h) seen=\"${seen}h\";; c) seen=\"${seen}c=$OPTARG\";; esac; done; "
+        "shell_test_probe \"$seen\"; }; f -h -c value",
+        0, "hc=value"
+    );
+    /* The argument jammed onto the same word ("-cvalue"), not a separate
+     * one. */
+    ok = selftest__shell_getopts_step(
+        ok, &state,
+        "f() { local opt OPTIND; while getopts 'c:' opt; do shell_test_probe \"$OPTARG\"; done; }; f -cjammed", 0,
+        "jammed"
+    );
+    /* An unrecognized option -- OPTSTRING with no leading ':' prints bash's
+     * own "illegal option" message and sets NAME to '?'; OPTIND still
+     * advances so the loop terminates instead of spinning on the same bad
+     * option forever. */
+    ok = selftest__shell_getopts_step(
+        ok, &state, "f() { local opt OPTIND; getopts 'h' opt -x; shell_test_probe \"$opt\"; }; f", 0, "?"
+    );
+    /* The same unrecognized option, but OPTSTRING's leading ':' asks for
+     * "silent" reporting instead: no message, NAME is still '?', but OPTARG
+     * carries the bad option character itself. */
+    ok = selftest__shell_getopts_step(
+        ok, &state, "f() { local opt OPTIND; getopts ':h' opt -x; shell_test_probe \"$OPTARG\"; }; f", 0, "x"
+    );
+    /* A required argument that's missing entirely -- verbose mode reports
+     * it and sets NAME to '?'; silent mode sets NAME to ':' instead, with
+     * OPTARG carrying the option character (same distinction bash makes). */
+    ok = selftest__shell_getopts_step(
+        ok, &state, "f() { local opt OPTIND; getopts 'c:' opt -c; shell_test_probe \"$opt\"; }; f", 0, "?"
+    );
+    ok = selftest__shell_getopts_step(
+        ok, &state, "f() { local opt OPTIND; getopts ':c:' opt -c; shell_test_probe \"$opt\"; }; f", 0, ":"
+    );
+    /* Running out of options (a non-option word, left unconsumed, OPTIND
+     * still pointing at it) ends the loop with status 1 -- the usual "while
+     * getopts ...; do ... done" exit. */
+    ok = selftest__shell_getopts_step(
+        ok, &state,
+        "f() { local opt OPTIND; local n=0; while getopts 'h' opt; do n=$((n + 1)); done; "
+        "shift \"$((OPTIND - 1))\"; shell_test_probe \"$n:$1\"; }; f -h plainarg",
+        0, "1:plainarg"
+    );
+    /* "--" explicitly ends option processing too, consumed (unlike a plain
+     * non-option word, which is left for the caller). */
+    ok = selftest__shell_getopts_step(
+        ok, &state,
+        "f() { local opt OPTIND; local n=0; while getopts 'h' opt; do n=$((n + 1)); done; "
+        "shift \"$((OPTIND - 1))\"; shell_test_probe \"$n:$1\"; }; f -h -- after",
+        0, "1:after"
+    );
+
+    shell__state_free(&state);
+    printf("[selftest] shell/getopts: %s\n", ok ? "OK" : "failed");
+    return ok;
+}

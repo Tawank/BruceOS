@@ -36,4 +36,6 @@ bool selftest__run_shell_job_control_case(void);
 bool selftest__run_shell_trap_case(void);
 bool selftest__run_shell_array_case(void);
 bool selftest__run_shell_array_multiline_case(void);
+bool selftest__run_shell_random_case(void);
+bool selftest__run_shell_getopts_case(void);
 bool selftest__run_shell_printf_case(void);

@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "esp_random.h"
+
 #include "shell_array.h"
 #include "shell_builtins.h"
 
@@ -46,6 +48,14 @@ static bool shell_arith__store(shell_arith__cursor_t *c, const char *name, long 
 }
 
 static long shell_arith__load(shell_arith__cursor_t *c, const char *name) {
+    /* "$RANDOM" inside "((...))"/"$((...))" -- same fresh-draw-every-read
+     * semantics as shell_executor__lookup()'s own identical check for every
+     * other expansion context (see its doc comment there for why an
+     * explicit "RANDOM=value" is accepted but has no effect). Arithmetic
+     * never routes through that lookup function at all -- bare names here
+     * resolve straight through shell_builtins__get() -- so this needs its
+     * own copy of the same check. */
+    if (strcmp(name, "RANDOM") == 0) return (long)(esp_random() % 32768u);
     const char *text = shell_builtins__get(c->state, name);
     if (text == NULL || text[0] == '\0') return 0;
     char *stop = NULL;

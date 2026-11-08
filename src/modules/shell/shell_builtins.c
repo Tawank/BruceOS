@@ -48,6 +48,7 @@ static const shell_builtin_entry_t s_shell_builtins[] = {
     {"return", "Return from a shell function"},
     {"shift", "Shift positional parameters left"},
     {"read", "Read a line into a variable"},
+    {"getopts", "Parse positional-parameter options one at a time"},
     {"time", "Time how long a command takes"},
     {"local", "Declare a function-local variable"},
     {"jobs", "List background jobs"},
@@ -280,6 +281,140 @@ static int shell_builtins__read(shell_state_t *state, int argc, char **argv) {
         cursor = value_end;
     }
     return 0;
+}
+
+/* The "getopts OPTSTRING NAME [arg ...]" builtin -- a small, bash-compatible
+ * subset: supports OPTSTRING's leading ':' for "silent" error reporting
+ * (OPTARG/NAME carry the bad option instead of this builtin printing its own
+ * message), a "letter:" entry requiring an argument (either the rest of the
+ * same word, e.g. "-cvalue", or the next one, e.g. "-c value"), and "--"
+ * ending option processing. Does NOT support bash's combined short flags in
+ * one word (e.g. "-hc" meaning both "-h" and "-c") -- that needs an extra
+ * piece of state (a mid-word character offset alongside OPTIND) this
+ * implementation doesn't keep; every option this shell's own scripts use
+ * getopts for is its own separate word, matching the common, simpler
+ * convention real-world scripts (including this feature's original target,
+ * xmas.ysap.sh) already follow. $OPTIND/$OPTARG are ordinary scalar
+ * variables (shell_builtins__get()/set()) -- nothing getopts-specific about
+ * their storage -- so "local OPTIND OPTARG" before a function's own
+ * "while getopts ..." loop already gives it a fresh, isolated copy via the
+ * existing `local` mechanism, same as any other variable.
+ *
+ * With no explicit `arg`s, parses this call's own positional parameters
+ * (state->positional[], i.e. "$@") -- the common case, and the only one
+ * xmas.ysap.sh's own "while getopts 'c:hs:' opt; do ... done" (no trailing
+ * args) relies on. Returns 0 and sets NAME to the option character (and
+ * OPTARG, for one that takes an argument) each time an option is
+ * successfully parsed; returns 1 (ending the usual "while getopts ...; do"
+ * loop) once every argument is consumed, or at the first argument that
+ * doesn't start with '-' at all (left unconsumed -- OPTIND still points at
+ * it, for a "shift $((OPTIND - 1))" idiom afterward to hand it to the
+ * caller as an ordinary positional argument) or is exactly "--" (consumed,
+ * OPTIND advances past it). */
+static int shell_builtins__getopts(shell_state_t *state, int argc, char **argv) {
+    if (argc < 3) {
+        stdio__printf("shell: usage: getopts optstring name [arg ...]\n");
+        return 2;
+    }
+    const char *optstring = argv[1];
+    const char *name = argv[2];
+    if (!shell_parser__valid_name(name, strlen(name))) {
+        stdio__printf("shell: getopts: %s: not a valid identifier\n", name);
+        return 2;
+    }
+    char **args;
+    int arg_count;
+    if (argc > 3) {
+        args = argv + 3;
+        arg_count = argc - 3;
+    } else {
+        args = state->positional;
+        arg_count = state->positional_count;
+    }
+
+    const char *optind_text = shell_builtins__get(state, "OPTIND");
+    long optind = optind_text != NULL ? strtol(optind_text, NULL, 10) : 1;
+    if (optind < 1) optind = 1;
+
+    bool silent = optstring[0] == ':';
+    const char *opts = silent ? optstring + 1 : optstring;
+
+    const char *current = optind <= arg_count ? args[optind - 1] : NULL;
+    bool is_double_dash = current != NULL && strcmp(current, "--") == 0;
+    bool end_of_options = current == NULL || current[0] != '-' || current[1] == '\0' || is_double_dash;
+    if (end_of_options) {
+        /* "--" is consumed (OPTIND moves past it); any other non-option
+         * word, or simply running out of them, is left in place for the
+         * caller's own "shift $((OPTIND - 1))" to pick up. Checked here,
+         * not left to fall through to the ordinary option-letter path below
+         * (which would otherwise treat it as option '-', its second
+         * character): both of "--"'s characters pass that path's own
+         * "starts with '-' and has a second character" check, so without
+         * `is_double_dash` folded into this condition, "--" would never
+         * reach this branch at all. */
+        if (is_double_dash) {
+            char next[16];
+            snprintf(next, sizeof(next), "%ld", optind + 1);
+            (void)shell_builtins__set(state, "OPTIND", next);
+        }
+        (void)shell_builtins__set(state, name, "?");
+        return 1;
+    }
+
+    char opt = current[1];
+    const char *found = strchr(opts, opt);
+    char opt_text[2] = {opt, '\0'};
+    if (found == NULL || opt == ':') {
+        if (silent) {
+            (void)shell_builtins__set(state, name, "?");
+            (void)shell_builtins__set(state, "OPTARG", opt_text);
+        } else {
+            stdio__printf("shell: illegal option -- %c\n", opt);
+            (void)shell_builtins__set(state, name, "?");
+        }
+        char next[16];
+        snprintf(next, sizeof(next), "%ld", optind + 1);
+        (void)shell_builtins__set(state, "OPTIND", next);
+        return 0;
+    }
+
+    bool needs_arg = found[1] == ':';
+    if (!needs_arg) {
+        char next[16];
+        snprintf(next, sizeof(next), "%ld", optind + 1);
+        (void)shell_builtins__set(state, "OPTIND", next);
+        return shell_builtins__set(state, name, opt_text);
+    }
+
+    const char *optarg_value;
+    long new_optind;
+    if (current[2] != '\0') {
+        /* "-cvalue" -- the argument is the rest of this same word. */
+        optarg_value = current + 2;
+        new_optind = optind + 1;
+    } else if (optind < arg_count) {
+        /* "-c value" -- the argument is the next word. */
+        optarg_value = args[optind];
+        new_optind = optind + 2;
+    } else {
+        if (silent) {
+            (void)shell_builtins__set(state, name, ":");
+            (void)shell_builtins__set(state, "OPTARG", opt_text);
+        } else {
+            stdio__printf("shell: option requires an argument -- %c\n", opt);
+            (void)shell_builtins__set(state, name, "?");
+        }
+        char next[16];
+        snprintf(next, sizeof(next), "%ld", optind + 1);
+        (void)shell_builtins__set(state, "OPTIND", next);
+        return 0;
+    }
+    char next[16];
+    snprintf(next, sizeof(next), "%ld", new_optind);
+    int status = shell_builtins__set(state, "OPTARG", optarg_value);
+    if (status == 0) status = shell_builtins__set(state, "OPTIND", next);
+    if (status == 0) status = shell_builtins__set(state, name, opt_text);
+    return status;
 }
 
 /* Adds `name` to the innermost active function call's `local` frame the
@@ -1023,6 +1158,7 @@ int shell_builtins__run(shell_state_t *state, int argc, char **argv) {
         return 0;
     }
     if (strcmp(argv[0], "read") == 0) return shell_builtins__read(state, argc, argv);
+    if (strcmp(argv[0], "getopts") == 0) return shell_builtins__getopts(state, argc, argv);
     if (strcmp(argv[0], "local") == 0) return shell_builtins__local(state, argc, argv);
     if (strcmp(argv[0], "jobs") == 0) return shell_jobs__run(state, argc, argv);
     if (strcmp(argv[0], "wait") == 0) return shell_jobs__wait(state, argc, argv);

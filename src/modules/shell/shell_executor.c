@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "esp_random.h"
+
 #include "core_sdk/app_runner.h"
 #include "core_sdk/ext_mem_loader.h"
 #include "core_sdk/memory.h"
@@ -57,6 +59,21 @@ const char *shell_executor__lookup(void *context, const char *name) {
             snprintf(state->pid_text, sizeof(state->pid_text), "%u", (unsigned)process__current_id());
             return state->pid_text;
         }
+    }
+    /* "$RANDOM" -- a fresh 0..32767 draw (esp_random() is a real hardware
+     * RNG, not a seeded pseudo-random stream, so there's no "srand(seed)"
+     * equivalent -- an explicit "RANDOM=value" assignment is accepted like
+     * any other scalar write, but, matching this shell's simplified scope,
+     * has no effect: this check runs before shell_builtins__get() ever
+     * would, so any stored value is always shadowed by a new draw here).
+     * Checked outside the single-char block above since "RANDOM" is a whole
+     * word, not a single punctuation character. shell_arith.c's own
+     * shell_arith__load() has an identical check of its own for "$((...))"/
+     * "((...))" arithmetic contexts, which never call through this lookup
+     * function at all. */
+    if (strcmp(name, "RANDOM") == 0) {
+        snprintf(state->random_text, sizeof(state->random_text), "%u", (unsigned)(esp_random() % 32768u));
+        return state->random_text;
     }
     /* Array-element/length/join lookups, encoded by shell_parser__expand()'s
      * "${...}" braced-form handling as "NAME<sentinel>[index]" -- piggybacking
