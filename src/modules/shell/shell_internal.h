@@ -14,7 +14,15 @@
  * words are heap-allocated to their actual length. */
 #define SHELL__MAX_VARIABLES 24
 #define SHELL__VARIABLE_NAME_MAX 32
-#define SHELL__VARIABLE_VALUE_MAX 128
+/* 2048, not the 128 this started at: fine for every short scalar (a path, a
+ * color code, a counter), but "read -r -d '' VAR <<-EOF ... EOF" (a whole
+ * heredoc slurped into one scalar instead of split across several lines --
+ * e.g. a multi-line ASCII-art block, possibly with embedded ANSI color
+ * codes) routinely needs several hundred bytes once it's one value. Heap-
+ * allocated to the value's actual length (shell_variable_t owns its own
+ * copy, not a fixed buffer), so raising this costs nothing for a script
+ * that never needs it. */
+#define SHELL__VARIABLE_VALUE_MAX 2048
 #define SHELL__LINE_MAX 512
 /* A multi-line construct (if/fi, a function body) accumulates several
  * physical lines before it runs -- see shell_compound__pending() and its

@@ -239,48 +239,177 @@ static int shell_builtins__cd(shell_state_t *state, int argc, char **argv) {
     return status == 0 ? shell_builtins__export(state, "PWD") : status;
 }
 
+/* Default $IFS (space/tab/newline), used whenever the variable itself is
+ * unset -- same fallback bash applies. An *explicitly* empty "IFS=" (as in
+ * "IFS= read -r line", used throughout a script like xmas.ysap.sh to keep a
+ * line's own leading/trailing whitespace -- its tree/sign/moon art is
+ * meaningless without it) is a real, different value from "unset": it
+ * disables field-splitting and trimming entirely, not "fall back to the
+ * default" -- see shell_builtins__read()'s own doc comment on how that
+ * falls out of the same code with no special case. */
+#define SHELL_READ__DEFAULT_IFS " \t\n"
+
+/* True if `c` is one of `ifs`'s characters -- `read`'s only use for $IFS
+ * (shell_builtins__read() below): deciding where one field ends and the
+ * next begins, and how much leading/trailing whitespace a field strips.
+ * This shell doesn't distinguish IFS-whitespace from other IFS characters
+ * the way bash itself does (consecutive IFS-whitespace collapses into one
+ * separator; a non-whitespace IFS character like a literal ':' instead
+ * marks an empty field between two of them) -- a deliberate simplification,
+ * since every $IFS this shell's own scripts actually set is either the
+ * default or empty. */
+static bool shell_builtins__read_is_ifs(const char *ifs, char c) {
+    return c != '\0' && strchr(ifs, c) != NULL;
+}
+
+/* Reads bytes directly from stdin (bypassing stdio__read_line()'s own
+ * newline-terminated, echoing behavior -- echo only makes sense for an
+ * interactive line; "read -d" is almost always fed by a pipe/heredoc, like
+ * every one of this shell's own callers) until `delimiter` (when
+ * `has_delimiter`) or real end-of-input, whichever comes first -- the same
+ * EOF stdio__read() itself reports once whatever fed this process' stdin
+ * calls stdio__session_close_input() (shell_executor.c's own doc comment on
+ * that). `!has_delimiter` ("read -d ''", an empty argument) means read
+ * everything up to that real EOF with no byte-level delimiter at all, the
+ * "slurp a whole multi-line heredoc into one scalar" mode
+ * xmas.ysap.sh's TREE/SIGN/MOON all rely on. Growable, not a fixed
+ * SHELL__LINE_MAX buffer, since a slurped heredoc routinely needs more than
+ * one line's worth of space -- capped at SHELL__HEREDOC_MAX, the same
+ * runaway-input guard an ordinary heredoc body already gets. Returns true
+ * (with *out_line heap-owned, NUL-terminated, memory__free()) on a clean
+ * read (even an empty one right at EOF, matching stdio__read_line()'s own
+ * "empty line" case) or false on real end-of-input with nothing read at
+ * all, or out of memory. */
+static bool shell_builtins__read_until(bool has_delimiter, char delimiter, char **out_line, size_t *out_len) {
+    size_t capacity = 128;
+    char *buf = memory__malloc(capacity);
+    if (buf == NULL) return false;
+    size_t used = 0;
+    bool saw_any_byte = false;
+    for (;;) {
+        char byte;
+        size_t got = 0;
+        bruce_result_t result = stdio__read(&byte, 1, 100, &got);
+        if (result == BRUCE_ERR_TIMEOUT) continue; /* nothing yet -- keep waiting */
+        if (result != BRUCE_OK || got == 0) break; /* real EOF (BRUCE_ERR_NOT_FOUND) or a genuine error */
+        saw_any_byte = true;
+        if (has_delimiter && byte == delimiter) break; /* consumed, not stored -- same as a real line's own '\n' */
+        if (used + 1 >= capacity) {
+            if (capacity >= SHELL__HEREDOC_MAX) {
+                memory__free(buf);
+                return false;
+            }
+            size_t new_capacity = capacity * 2;
+            if (new_capacity > SHELL__HEREDOC_MAX) new_capacity = SHELL__HEREDOC_MAX;
+            char *grown = memory__realloc(buf, new_capacity);
+            if (grown == NULL) {
+                memory__free(buf);
+                return false;
+            }
+            buf = grown;
+            capacity = new_capacity;
+        }
+        buf[used++] = byte;
+    }
+    if (!saw_any_byte) {
+        memory__free(buf);
+        return false;
+    }
+    buf[used] = '\0';
+    *out_line = buf;
+    *out_len = used;
+    return true;
+}
+
 /* Reads one line from stdin (echoing as it's typed, same as a real
- * terminal's cooked-mode echo -- `read` itself never echoes) and splits it
- * on whitespace into argv[1..argc)'s variables, the last of which gets
- * whatever's left of the line (not just its first word), matching bash's
- * own `read` field-splitting. With no variable names at all, the whole
- * (untrimmed) line goes to $REPLY, also matching bash. Returns 1 on EOF/
- * read error (no variables are touched), 2 on a bad variable name, else the
- * exit status of the assignment(s). */
+ * terminal's cooked-mode echo -- `read` itself never echoes) with "-r"
+ * (accepted but a no-op: this shell's own line-reading never did bash's
+ * non-"-r" backslash-continuation/backslash-removal in the first place, so
+ * there's no distinct behavior to turn off) and "-d DELIM" (read until
+ * DELIM -- or, if DELIM is itself an empty argument, until real end-of-
+ * input -- instead of one newline-terminated line; see
+ * shell_builtins__read_until()'s own doc comment), then splits the result
+ * across argv[..]'s variables per $IFS (shell_builtins__read_is_ifs()).
+ * Returns 1 on EOF/read error (no variables are touched), 2 on a bad flag/
+ * variable name, else the exit status of the assignment(s). */
 static int shell_builtins__read(shell_state_t *state, int argc, char **argv) {
-    for (int i = 1; i < argc; ++i) {
+    bool has_delimiter = false;
+    char delimiter = '\n';
+    int arg_i = 1;
+    for (; arg_i < argc; ++arg_i) {
+        if (strcmp(argv[arg_i], "-r") == 0) continue;
+        if (strcmp(argv[arg_i], "-d") == 0) {
+            if (arg_i + 1 >= argc) {
+                stdio__printf("shell: read: -d: option requires an argument\n");
+                return 2;
+            }
+            arg_i++;
+            has_delimiter = argv[arg_i][0] != '\0';
+            delimiter = has_delimiter ? argv[arg_i][0] : '\0';
+            continue;
+        }
+        break;
+    }
+    for (int i = arg_i; i < argc; ++i) {
         if (!shell_parser__valid_name(argv[i], strlen(argv[i]))) {
             stdio__printf("shell: read: %s: invalid variable name\n", argv[i]);
             return 2;
         }
     }
-    char line[SHELL__LINE_MAX];
-    int length = stdio__read_line(line, sizeof(line), false);
-    if (length < 0) return 1;
 
-    if (argc == 1) return shell_builtins__set(state, "REPLY", line);
+    char *line = NULL;
+    size_t line_len = 0;
+    bool used_delim_mode = has_delimiter || delimiter != '\n';
+    /* A bare "read" (no "-d" at all) keeps stdio__read_line()'s own
+     * interactive-friendly behavior (echo, a fixed SHELL__LINE_MAX cap) --
+     * "-d" (any argument, even the default '\n' spelled out explicitly)
+     * switches to the byte-level, growable reader above instead, matching
+     * the shape every one of this shell's own "-d"-using scripts actually
+     * needs (always fed by a pipe/heredoc, never typed interactively). */
+    if (!used_delim_mode) {
+        char buf[SHELL__LINE_MAX];
+        int length = stdio__read_line(buf, sizeof(buf), false);
+        if (length < 0) return 1;
+        line = shell_builtins__dup(buf, (size_t)length);
+        if (line == NULL) {
+            stdio__printf("shell: out of memory\n");
+            return 1;
+        }
+        line_len = (size_t)length;
+    } else {
+        if (!shell_builtins__read_until(has_delimiter, delimiter, &line, &line_len)) return 1;
+    }
+
+    const char *ifs = shell_builtins__get(state, "IFS");
+    if (ifs == NULL) ifs = SHELL_READ__DEFAULT_IFS;
+
+    char *reply_name = (char *)"REPLY";
+    char **targets = arg_i < argc ? argv + arg_i : &reply_name;
+    int target_count = arg_i < argc ? argc - arg_i : 1;
 
     char *cursor = line;
-    for (int i = 1; i < argc; ++i) {
-        while (*cursor != '\0' && isspace((unsigned char)*cursor)) cursor++;
-        bool last = i == argc - 1;
+    int status = 0;
+    for (int i = 0; i < target_count; ++i) {
+        while (*cursor != '\0' && shell_builtins__read_is_ifs(ifs, *cursor)) cursor++;
+        bool last = i == target_count - 1;
         char *value_start = cursor;
         char *value_end;
         if (last) {
             value_end = cursor + strlen(cursor);
-            while (value_end > value_start && isspace((unsigned char)value_end[-1])) value_end--;
+            while (value_end > value_start && shell_builtins__read_is_ifs(ifs, value_end[-1])) value_end--;
         } else {
             value_end = cursor;
-            while (*value_end != '\0' && !isspace((unsigned char)*value_end)) value_end++;
+            while (*value_end != '\0' && !shell_builtins__read_is_ifs(ifs, *value_end)) value_end++;
         }
         char saved = *value_end;
         *value_end = '\0';
-        int status = shell_builtins__set(state, argv[i], value_start);
+        status = shell_builtins__set(state, targets[i], value_start);
         *value_end = saved;
-        if (status != 0) return status;
+        if (status != 0) break;
         cursor = value_end;
     }
-    return 0;
+    memory__free(line);
+    return status;
 }
 
 /* The "getopts OPTSTRING NAME [arg ...]" builtin -- a small, bash-compatible

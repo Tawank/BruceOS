@@ -644,6 +644,44 @@ char *shell_executor__eval_arith_word(void *context, const char *text, size_t le
     return result;
 }
 
+/* Expands `span` (e.g. a here-string's own WORD, "$t" in "cmd <<< \"$t\"")
+ * exactly like shell_executor__resolve_redirect_target() just below, through
+ * the same ordinary-word expansion (quotes, escapes, $variable references)
+ * and the same "exactly one resulting word" requirement -- but, unlike that
+ * function, returns the expanded value itself rather than resolving it as a
+ * file path: a here-string's WORD is the literal content to feed a
+ * command's stdin, never a path. On success, *out_value is heap-allocated
+ * and owned by the caller. */
+static int shell_executor__expand_single_word(
+    shell_state_t *state, const shell_word_span_t *span, char **out_value, const char **error
+) {
+    shell_command_t pseudo = {.text = span->text, .length = span->length};
+    char **words = NULL;
+    int argc = 0;
+    if (shell_parser__words(
+            &pseudo, &words, &argc, shell_executor__lookup, shell_executor__run_substitution,
+            shell_executor__eval_arith_word, state, state->last_status, error
+        ) != 0) {
+        return -1;
+    }
+    if (argc != 1) {
+        shell_parser__free_words(words, argc);
+        *error = argc == 0 ? "missing here-string word" : "ambiguous here-string word";
+        return -1;
+    }
+    size_t length = strlen(words[0]);
+    char *heap_value = memory__malloc(length + 1u);
+    if (heap_value == NULL) {
+        shell_parser__free_words(words, argc);
+        *error = "out of memory";
+        return -1;
+    }
+    memcpy(heap_value, words[0], length + 1u);
+    shell_parser__free_words(words, argc);
+    *out_value = heap_value;
+    return 0;
+}
+
 /* Expands a redirection target span (e.g. the "file.txt" in "cmd > file.txt")
  * exactly the way an ordinary argv word is expanded -- quotes, escapes, and
  * $variable references all work -- by wrapping it in a one-off
@@ -1072,20 +1110,24 @@ static int shell_executor__builtin_with_input(
     return write_ok ? status : 1;
 }
 
-/* Loads the bytes a "<target"-redirected or heredoc-redirected command
- * should receive on stdin into a fresh buffer, for either a builtin/function
+/* Loads the bytes a "<target"-redirected, heredoc-redirected, or here-
+ * string-redirected ("<<<WORD") command should receive on stdin into a
+ * fresh buffer, for either a builtin/function
  * (shell_executor__builtin_with_input()) or an external command
  * (shell_executor__external_with_input()) to consume -- both used to
  * duplicate this as four separate wrapper functions
  * (builtin/external × input/heredoc), which differed only in which of those
  * two they went on to call. Reads `command->input_target` via
- * shell_executor__read_file() when `command->input_redirect` is set,
- * otherwise copies `command->heredoc_body` verbatim (already collected and,
- * unless quoted, $-expanded by the parser). On failure, *out_input is left
- * empty, an error has already been printed, and *out_status is set to the
- * exact code the removed wrappers used to return for that failure (2 for a
- * bad redirection target, 1 for a read/open/out-of-memory failure) --
- * *out_status is left untouched on success. */
+ * shell_executor__read_file() when `command->input_redirect` is set;
+ * expands `command->here_string` via shell_executor__expand_single_word()
+ * (plus a trailing '\n', matching bash's own here-string behavior) when
+ * `command->has_here_string` is set; otherwise copies `command->heredoc_body`
+ * verbatim (already collected and, unless quoted, $-expanded by the
+ * parser). On failure, *out_input is left empty, an error has already been
+ * printed, and *out_status is set to the exact code the removed wrappers
+ * used to return for that failure (2 for a bad redirection target/here-
+ * string word, 1 for a read/open/out-of-memory failure) -- *out_status is
+ * left untouched on success. */
 static bool shell_executor__load_redirect_input(
     shell_state_t *state, const shell_command_t *command, shell_executor__buffer_t *out_input, int *out_status
 ) {
@@ -1106,6 +1148,32 @@ static bool shell_executor__load_redirect_input(
         memory__free(path);
         return ok;
     }
+    if (command->has_here_string) {
+        char *value = NULL;
+        const char *error = NULL;
+        if (shell_executor__expand_single_word(state, &command->here_string, &value, &error) != 0) {
+            stdio__printf("shell: %s\n", error != NULL ? error : "here-string error");
+            *out_status = 2;
+            return false;
+        }
+        /* bash always appends exactly one '\n' after a here-string's own
+         * value, regardless of whether the value itself already ends in
+         * one -- e.g. xmas.ysap.sh's own "while IFS= read -r line; do ...
+         * done <<< \"$t\"" relies on this to see $t's own last line at all
+         * (read -r needs a trailing delimiter to recognize that line as
+         * complete). */
+        size_t value_length = strlen(value);
+        bool ok = (value_length == 0 || shell_executor__buffer_append(out_input, value, value_length)) &&
+                  shell_executor__buffer_append(out_input, "\n", 1);
+        memory__free(value);
+        if (!ok) {
+            stdio__printf("shell: out of memory\n");
+            shell_executor__buffer_free(out_input);
+            *out_status = 1;
+            return false;
+        }
+        return true;
+    }
     size_t body_length = strlen(command->heredoc_body);
     if (body_length > 0 && !shell_executor__buffer_append(out_input, command->heredoc_body, body_length)) {
         stdio__printf("shell: out of memory\n");
@@ -1114,6 +1182,45 @@ static bool shell_executor__load_redirect_input(
         return false;
     }
     return true;
+}
+
+bruce_result_t shell_executor__setup_redirected_stdin(
+    shell_state_t *state, const shell_command_t *command, bruce_stdio_session_t *out_session
+) {
+    *out_session = BRUCE_STDIO_SESSION_INVALID;
+    shell_executor__buffer_t input;
+    int status = 1;
+    if (!shell_executor__load_redirect_input(state, command, &input, &status)) {
+        return status == 2 ? BRUCE_ERR_INVALID_ARGUMENT : BRUCE_ERR_IO;
+    }
+    bruce_stdio_session_t session = BRUCE_STDIO_SESSION_INVALID;
+    if (stdio__session_create(&session) != BRUCE_OK) {
+        stdio__printf("shell: out of memory\n");
+        shell_executor__buffer_free(&input);
+        return BRUCE_ERR_NO_MEMORY;
+    }
+    (void)stdio__session_set_raw(session, true);
+    bool queued = true;
+    if (input.length > 0) {
+        queued = stdio__session_write_input(session, input.data, input.length) == BRUCE_OK;
+        if (!queued) stdio__printf("shell: input too large to redirect into a loop\n");
+    }
+    shell_executor__buffer_free(&input);
+    if (queued) (void)stdio__session_close_input(session); /* real EOF once this is consumed -- see
+                                                                stdio__session_close_input()'s own doc comment. */
+    if (!queued || stdio__session_capture_self(session) != BRUCE_OK) {
+        if (queued) stdio__printf("shell: out of memory\n");
+        (void)stdio__session_close(session);
+        return BRUCE_ERR_NO_MEMORY;
+    }
+    *out_session = session;
+    return BRUCE_OK;
+}
+
+void shell_executor__teardown_redirected_stdin(bruce_stdio_session_t session) {
+    if (session == BRUCE_STDIO_SESSION_INVALID) return;
+    (void)stdio__session_release_self();
+    (void)stdio__session_close(session);
 }
 
 /* Pumps `session` bidirectionally between `child` and the shell process's own
@@ -1490,7 +1597,9 @@ static int shell_executor__pipeline(shell_state_t *state, const shell_command_t 
     bool invalid = false;
     bool has_stage_input = false;
     for (size_t i = 0; i < count; ++i) {
-        if (commands[i].input_redirect || commands[i].heredoc_body != NULL) has_stage_input = true;
+        if (commands[i].input_redirect || commands[i].heredoc_body != NULL || commands[i].has_here_string) {
+            has_stage_input = true;
+        }
         if (stage_argc[i] == 0) {
             invalid = true;
         } else if (i == 0) {
@@ -1509,7 +1618,7 @@ static int shell_executor__pipeline(shell_state_t *state, const shell_command_t 
      * the first stage -- feeding it *instead* of piping into it -- isn't
      * wired up here at all yet. Rejected outright rather than silently
      * ignored (which is what would otherwise happen: nothing here ever
-     * consults commands[i].input_redirect/heredoc_body). */
+     * consults commands[i].input_redirect/heredoc_body/has_here_string). */
     if (has_stage_input) {
         stdio__printf("shell: '<'/heredoc input is not supported on a piped command\n");
         for (size_t i = 0; i < count; ++i) shell_parser__free_words(stage_words[i], stage_argc[i]);
@@ -1725,6 +1834,77 @@ static bool shell_executor__try_array_element_assignment(shell_state_t *state, c
     return true;
 }
 
+/* One NAME=value prefix's save/restore record for
+ * shell_executor__apply_temp_environment()/shell_executor__restore_temp_environment()
+ * below -- `previous_value` is a copy of whatever shell_builtins__get()
+ * returned for `name` right before this temporarily overrode it, or NULL if
+ * `name` didn't exist at all yet (in which case restoring unsets it instead
+ * of putting a value back), the same distinction shell_local_entry_t
+ * (shell_internal.h) already makes for `local`'s own save/restore. */
+typedef struct {
+    char *name;
+    char *previous_value;
+} shell_executor__env_save_t;
+
+/* "NAME=value cmd" temporarily sets NAME for cmd's own duration when cmd is
+ * an external process (environment.items[], passed to app_runner__run*()) --
+ * but a builtin or function runs in-process, sharing this shell's own
+ * shell_builtins__get()/set() variable table directly, which that path never
+ * touches at all. Without this, "IFS= read -r line" (used throughout e.g.
+ * xmas.ysap.sh to keep a line's own leading/trailing whitespace) would set
+ * IFS as if for an external command that never runs, while `read` itself --
+ * right here, in-process -- still saw whatever IFS already was. Saves each
+ * `environment[i]`'s current value into `saves[i]` (caller-allocated,
+ * `count` entries) and overwrites it via shell_builtins__set(), matching
+ * bash's own "the assignment is visible to this one command only" rule for
+ * a builtin/function target. Returns 0 on success, or the first non-zero
+ * status one of the shell_builtins__set() calls reports -- the caller
+ * should still call shell_executor__restore_temp_environment() on whatever
+ * prefix count actually got applied (every entry up to and including the
+ * one that failed records a valid save, even on failure, so restoring the
+ * same `count` is always safe). */
+static int shell_executor__apply_temp_environment(
+    shell_state_t *state, const bruce_environment_variable_t *environment, size_t count,
+    shell_executor__env_save_t *saves
+) {
+    for (size_t i = 0; i < count; ++i) {
+        saves[i].name = NULL;
+        saves[i].previous_value = NULL;
+        const char *current = shell_builtins__get(state, environment[i].name);
+        size_t name_len = strlen(environment[i].name);
+        saves[i].name = memory__malloc(name_len + 1);
+        if (saves[i].name == NULL) return 1;
+        memcpy(saves[i].name, environment[i].name, name_len + 1);
+        if (current != NULL) {
+            size_t value_len = strlen(current);
+            saves[i].previous_value = memory__malloc(value_len + 1);
+            if (saves[i].previous_value == NULL) return 1;
+            memcpy(saves[i].previous_value, current, value_len + 1);
+        }
+        int status = shell_builtins__set(state, environment[i].name, environment[i].value);
+        if (status != 0) return status;
+    }
+    return 0;
+}
+
+/* Undoes shell_executor__apply_temp_environment() for `saves[0..count)`,
+ * restoring each name to its own saved previous value (or unsetting it, if
+ * it didn't have one) and freeing the save record -- a `saves[i]` whose
+ * `name` is NULL (apply failed before reaching it) is skipped, so this is
+ * always safe to call with the same `count` apply was given, success or
+ * failure alike. */
+static void shell_executor__restore_temp_environment(
+    shell_state_t *state, shell_executor__env_save_t *saves, size_t count
+) {
+    for (size_t i = 0; i < count; ++i) {
+        if (saves[i].name == NULL) continue;
+        if (saves[i].previous_value != NULL) (void)shell_builtins__set(state, saves[i].name, saves[i].previous_value);
+        else shell_builtins__unset(state, saves[i].name);
+        memory__free(saves[i].name);
+        memory__free(saves[i].previous_value);
+    }
+}
+
 /* Consumes leading NAME=value assignment words, then dispatches the
  * remainder (if any) to a builtin or an external process. `words` is
  * borrowed; the caller owns and frees it. `command` is only consulted for
@@ -1821,9 +2001,13 @@ static int shell_executor__dispatch(shell_state_t *state, const shell_command_t 
          * with no command is rejected instead: unlike a file, its body has
          * already been read from the script by the time this runs (see
          * shell_command_t's own doc comment on `heredoc_body`), so silently
-         * discarding it would be more surprising than useful. */
-        if (command->heredoc_body != NULL) {
-            stdio__printf("shell: heredoc with no command has no effect\n");
+         * discarding it would be more surprising than useful. A bare
+         * "<<<WORD" here-string is rejected the same way a heredoc is, for
+         * the same reason: WORD has to be expanded to know whether that
+         * expansion itself even succeeds, so there's no silent-no-op path
+         * left once nothing would ever read the result anyway. */
+        if (command->heredoc_body != NULL || command->has_here_string) {
+            stdio__printf("shell: %s with no command has no effect\n", command->has_here_string ? "here-string" : "heredoc");
             return 2;
         }
         bool ok = true;
@@ -1866,9 +2050,23 @@ static int shell_executor__dispatch(shell_state_t *state, const shell_command_t 
     int result;
     uint64_t started_at = timed ? runtime__now() : 0;
     bool redirected = command->redirect != SHELL_REDIRECT_NONE || command->input_redirect ||
-                       command->heredoc_body != NULL;
-    bool output_only_redirect =
-        command->redirect != SHELL_REDIRECT_NONE && !command->input_redirect && command->heredoc_body == NULL;
+                       command->heredoc_body != NULL || command->has_here_string;
+    bool output_only_redirect = command->redirect != SHELL_REDIRECT_NONE && !command->input_redirect &&
+                                 command->heredoc_body == NULL && !command->has_here_string;
+    /* A backgrounded function/builtin is rejected just below (see
+     * "background jobs only support external commands and shell functions"
+     * -- a builtin never backgrounds at all, and a backgrounded function
+     * detaches onto its own process, where a temporary override of this
+     * (parent) shell's own variables would never even be visible to it), so
+     * only a *foreground* function/builtin needs its "NAME=value" prefixes
+     * applied to shell_builtins__get()/set() for the dispatch below (an
+     * external command already gets them via `environment.items` instead,
+     * see shell_executor__external() and friends). */
+    bool apply_prefix_to_self = (is_function || is_builtin) && !command->background && environment.count > 0;
+    shell_executor__env_save_t prefix_saves[SHELL__MAX_VARIABLES];
+    if (apply_prefix_to_self) {
+        (void)shell_executor__apply_temp_environment(state, environment.items, environment.count, prefix_saves);
+    }
     if (command->background) {
         /* v1 scope: only a plain external command or a shell function can be
          * backgrounded -- see shell_executor__external_background()/
@@ -1911,6 +2109,9 @@ static int shell_executor__dispatch(shell_state_t *state, const shell_command_t 
                   : is_builtin
                       ? shell_builtins__run(state, remaining, argv)
                       : shell_executor__external(remaining, argv, environment.items, environment.count, mode);
+    }
+    if (apply_prefix_to_self) {
+        shell_executor__restore_temp_environment(state, prefix_saves, environment.count);
     }
     /* Only wall-clock ("real") time is available here -- the process SDK
      * exposes a live cpu_percent gauge (see bruce_process_snapshot_t) but no
@@ -1988,6 +2189,13 @@ static int shell_executor__command(shell_state_t *state, const shell_command_t *
          * still touching the file even though the command itself never
          * writes to it. */
         bool input_ok = !command->input_redirect || shell_executor__probe_input_target(state, &command->input_target);
+        if (input_ok && command->has_here_string) {
+            char *unused_value = NULL;
+            const char *here_error = NULL;
+            input_ok = shell_executor__expand_single_word(state, &command->here_string, &unused_value, &here_error) == 0;
+            memory__free(unused_value);
+            if (!input_ok) stdio__printf("shell: %s\n", here_error != NULL ? here_error : "here-string error");
+        }
         if (!input_ok) return 2;
         long value = 0;
         const char *arith_error = NULL;

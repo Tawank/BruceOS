@@ -76,6 +76,22 @@ typedef struct {
      * the only place that currently supplies any). This command borrows the
      * pointer; it does not own or free it. */
     const char *heredoc_body;
+    /* "<<<WORD" (a here-string) -- mutually exclusive with `input_redirect`
+     * and `heredoc_body` above (bash itself allows only one stdin source
+     * per command too). Unlike `heredoc_body`, this is a *raw, unexpanded*
+     * span into `text` (shell_parser__extract_redirect() in shell_parser.c
+     * just locates WORD here, the same way `redirect_target`/`input_target`
+     * above are spans, not already-resolved values) -- WORD needs real
+     * "$..."/"$(...)" expansion at the point this command actually runs,
+     * which a heredoc's already-collected, already-(optionally)-expanded
+     * body never does, so it can't just be computed once up front the way
+     * that field is. shell_executor.c's shell_executor__load_redirect_input()
+     * is what actually expands it (as a single word, same rule an ordinary
+     * redirect target already follows, but without that target's own
+     * path-resolution step) and appends a trailing '\n', matching bash's
+     * own here-string behavior. */
+    bool has_here_string;
+    shell_word_span_t here_string;
     /* Set when this command was terminated by a bare "&" rather than
      * ";"/"&&"/"||"/end-of-line: shell_executor__dispatch() launches it and
      * returns immediately instead of waiting for it to finish -- see

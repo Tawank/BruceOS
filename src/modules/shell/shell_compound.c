@@ -855,12 +855,32 @@ static int shell_compound__run_while(
     size_t body_end = *index;
     if (have_done) (*index)++;
 
+    /* "done"'s own trailing redirect, if any, applies to the *whole* loop --
+     * bash's own "while ...; do ...; done <<< \"$t\"" feeds every "read"
+     * inside the loop (both COND and BODY, every iteration) from the one
+     * shared source, not just whichever single command would otherwise
+     * read it. shell_parser__extract_redirect() already parses it onto
+     * this "done" command same as any other (nothing special needed
+     * there) -- it just went unused until now, since nothing downstream of
+     * a plain simple command ever consulted a compound command's own
+     * redirect fields. */
+    const shell_command_t *done_command = have_done ? &plan->commands[body_end] : NULL;
+    bool loop_redirected = done_command != NULL &&
+                            (done_command->input_redirect || done_command->heredoc_body != NULL ||
+                             done_command->has_here_string);
+
     int result;
     if (!have_done) {
         result = 2;
     } else if (!execute) {
         result = 0;
     } else {
+        bruce_stdio_session_t redirect_session = BRUCE_STDIO_SESSION_INVALID;
+        if (loop_redirected && shell_executor__setup_redirected_stdin(state, done_command, &redirect_session) !=
+                                    BRUCE_OK) {
+            shell_compound__restore_do(plan, &do_span);
+            return 2;
+        }
         int status = 0;
         for (;;) {
             int cond_status = 0;
@@ -877,6 +897,7 @@ static int shell_compound__run_while(
             status = shell_compound__run_loop_body(state, plan, body_start, body_end);
             if (shell_compound__loop_should_stop(state)) break;
         }
+        if (loop_redirected) shell_executor__teardown_redirected_stdin(redirect_session);
         result = status;
     }
     shell_compound__restore_do(plan, &do_span);

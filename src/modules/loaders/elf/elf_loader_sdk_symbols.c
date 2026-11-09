@@ -9,10 +9,8 @@
  * if ELF apps are expected to call them directly.
  */
 
-#include <assert.h>
 #include <ctype.h>
 #include <dirent.h>
-#include <errno.h>
 #include <fcntl.h>
 #include <math.h>
 #include <pthread.h>

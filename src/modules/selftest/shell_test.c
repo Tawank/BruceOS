@@ -3485,3 +3485,170 @@ bool selftest__run_shell_getopts_case(void) {
     printf("[selftest] shell/getopts: %s\n", ok ? "OK" : "failed");
     return ok;
 }
+
+/* Like selftest__shell_glob_step() above, for
+ * selftest__run_shell_pattern_substitution_case() below. */
+static bool selftest__shell_pattern_step(
+    bool ok_so_far, shell_state_t *state, const char *line, int expected_status, const char *expected_arg
+) {
+    if (!ok_so_far) return false;
+    int status = shell__execute_line(state, line);
+    bool ok = status == expected_status && (expected_arg == NULL || strcmp(s_probe_arg, expected_arg) == 0);
+    if (!ok) {
+        printf(
+            "[selftest] shell/pattern: `%s` -> status=%d (want %d) arg=\"%s\" (want \"%s\")\n", line, status,
+            expected_status, s_probe_arg, expected_arg != NULL ? expected_arg : "(unchecked)"
+        );
+    }
+    return ok;
+}
+
+/* Exercises "${NAME/pattern/replacement}" (first match only) and
+ * "${NAME//pattern/replacement}" (every match) -- shell_parser.c's
+ * shell_parser__pattern_substitute(), used throughout xmas.ysap.sh to splice
+ * ANSI color codes into its tree template (e.g.
+ * "${t//" *"/" ${COLOR_STAR}*${COLOR_TREE} "}"). Covers: a single
+ * replacement, a global replacement, a pattern/replacement that itself needs
+ * expansion (variables inside both spans), no match at all (value passes
+ * through unchanged), and deleting a match outright (empty replacement).
+ * Deliberately literal-substring matching, not glob matching -- see
+ * shell_parser__pattern_substitute()'s own doc comment for why. */
+bool selftest__run_shell_pattern_substitution_case(void) {
+    if (!selftest__shell_register_probe()) return false;
+    shell_state_t state;
+    shell__state_init(&state);
+
+    bool ok = true;
+    ok = selftest__shell_pattern_step(ok, &state, "s='a b a b a'; shell_test_probe ${s/a/X} 'X b a b a'", 0, "X b a b a");
+    ok = selftest__shell_pattern_step(ok, &state, "s='a b a b a'; shell_test_probe ${s//a/X} 'X b X b X'", 0, "X b X b X");
+    /* Pattern and replacement are both expanded first, so a variable inside
+     * either one works -- not just literal text. */
+    ok = selftest__shell_pattern_step(
+        ok, &state, "RED=RR; RST=GG; t='a 1 b'; shell_test_probe \"${t// 1 / ${RED}o${RST} }\" 'a RRoGG b'", 0,
+        "a RRoGG b"
+    );
+    /* No match -> the value passes through unchanged. */
+    ok = selftest__shell_pattern_step(ok, &state, "s=hello; shell_test_probe ${s/zzz/Q} hello", 0, "hello");
+    /* Empty replacement deletes the match. */
+    ok = selftest__shell_pattern_step(ok, &state, "s='a-b-c'; shell_test_probe ${s/-/} ab-c", 0, "ab-c");
+
+    shell__state_free(&state);
+    printf("[selftest] shell/pattern-substitution: %s\n", ok ? "OK" : "failed");
+    return ok;
+}
+
+/* Like selftest__shell_glob_step() above, for
+ * selftest__run_shell_ansi_quote_case() below. */
+static bool selftest__shell_ansi_quote_step(
+    bool ok_so_far, shell_state_t *state, const char *line, int expected_status, const char *expected_arg
+) {
+    if (!ok_so_far) return false;
+    int status = shell__execute_line(state, line);
+    bool ok = status == expected_status && (expected_arg == NULL || strcmp(s_probe_arg, expected_arg) == 0);
+    if (!ok) {
+        printf(
+            "[selftest] shell/ansi-quote: `%s` -> status=%d (want %d) arg=\"%s\" (want \"%s\")\n", line, status,
+            expected_status, s_probe_arg, expected_arg != NULL ? expected_arg : "(unchecked)"
+        );
+    }
+    return ok;
+}
+
+/* Exercises "$'...'" ANSI-C quoting (shell_parser__decode_ansi_string()) --
+ * needed by xmas.ysap.sh's own color definitions, e.g.
+ * COLOR1=$'\e[38;5;87m'. Covers \n/\t/\e escapes, \xHH hex, \NNN octal, and
+ * an unrecognized escape keeping its backslash literally. */
+bool selftest__run_shell_ansi_quote_case(void) {
+    if (!selftest__shell_register_probe()) return false;
+    shell_state_t state;
+    shell__state_init(&state);
+
+    bool ok = true;
+    ok = selftest__shell_ansi_quote_step(ok, &state, "t=$'a\\tb'; shell_test_probe \"${#t}\" 3", 0, "3");
+    ok = selftest__shell_ansi_quote_step(ok, &state, "t=$'\\x41\\x42'; shell_test_probe \"$t\" AB", 0, "AB");
+    ok = selftest__shell_ansi_quote_step(ok, &state, "t=$'\\101\\102'; shell_test_probe \"$t\" AB", 0, "AB");
+    ok = selftest__shell_ansi_quote_step(ok, &state, "t=$'esc:\\e'; shell_test_probe \"${#t}\" 5", 0, "5");
+    /* An unrecognized escape keeps its backslash literally. */
+    ok = selftest__shell_ansi_quote_step(ok, &state, "t=$'\\q'; shell_test_probe \"$t\" '\\q'", 0, "\\q");
+
+    shell__state_free(&state);
+    printf("[selftest] shell/ansi-quote: %s\n", ok ? "OK" : "failed");
+    return ok;
+}
+
+/* Like selftest__shell_glob_step() above, for
+ * selftest__run_shell_herestring_case() below. */
+static bool selftest__shell_herestring_step(
+    bool ok_so_far, shell_state_t *state, const char *line, int expected_status, const char *expected_arg
+) {
+    if (!ok_so_far) return false;
+    int status = shell__execute_line(state, line);
+    bool ok = status == expected_status && (expected_arg == NULL || strcmp(s_probe_arg, expected_arg) == 0);
+    if (!ok) {
+        printf(
+            "[selftest] shell/herestring: `%s` -> status=%d (want %d) arg=\"%s\" (want \"%s\")\n", line, status,
+            expected_status, s_probe_arg, expected_arg != NULL ? expected_arg : "(unchecked)"
+        );
+    }
+    return ok;
+}
+
+/* Exercises "<<<WORD" here-strings (shell_parser__extract_redirect()'s
+ * has_here_string branch, fed through shell_executor__load_redirect_input())
+ * and "read -r -d ''" (shell_builtins__read_until(), a byte-level
+ * read-until-delimiter-or-EOF mode distinct from the default
+ * stdio__read_line() path) -- together these are how xmas.ysap.sh slurps its
+ * multi-line TREE/SIGN/MOON templates into one scalar and then walks them
+ * line by line. Also covers "IFS= read -r line" actually applying its own
+ * "NAME=value" prefix to *this* shell's own $IFS for the read builtin's own
+ * duration (shell_executor__apply_temp_environment()/
+ * shell_executor__restore_temp_environment()) -- without that fix, a
+ * read/while-read pair run as a builtin (not an external process) never saw
+ * the override at all, silently falling back to the default IFS and
+ * stripping every line's leading/trailing whitespace regardless of the
+ * "IFS=" prefix actually written. */
+bool selftest__run_shell_herestring_case(void) {
+    if (!selftest__shell_register_probe()) return false;
+    shell_state_t state;
+    shell__state_init(&state);
+
+    bool ok = true;
+    /* A plain here-string: WORD is expanded (quote-aware), then a single
+     * trailing newline is appended before `read` sees it, matching bash. */
+    ok = selftest__shell_herestring_step(ok, &state, "read -r line <<< hello; shell_test_probe \"$line\" hello", 0, "hello");
+    ok = selftest__shell_herestring_step(
+        ok, &state, "x=world; read -r line <<< \"hi $x\"; shell_test_probe \"$line\" 'hi world'", 0, "hi world"
+    );
+    /* "read -r -d ''" slurps everything up to (real) EOF into one scalar;
+     * with no "IFS=" prefix, `read` still trims the overall leading/trailing
+     * default-IFS whitespace off that one scalar, so the here-string's own
+     * appended trailing "\n" disappears again here (it's whitespace). */
+    ok = selftest__shell_herestring_step(
+        ok, &state, "read -r -d '' t <<< $'one\\ntwo'; shell_test_probe \"$t\" $'one\\ntwo'", 0, "one\ntwo"
+    );
+    /* "while IFS= read -r line; do ...; done <<< \"$t\"" -- the compound
+     * form, attaching one shared here-string to the *whole* loop (not just
+     * one command inside it); $IFS='' means no trimming at all, so each
+     * line's own leading/trailing whitespace survives, including the extra
+     * empty final line the here-string's own appended "\n" produces after
+     * $t's own trailing "\n". */
+    ok = selftest__shell_herestring_step(
+        ok, &state,
+        "t=$'  a\\n  b'; sum=; while IFS= read -r line; do sum=\"$sum[$line]\"; done <<< \"$t\"; "
+        "shell_test_probe \"$sum\" '[  a][  b]'",
+        0, "[  a][  b]"
+    );
+    /* Without the "IFS=" prefix (default IFS), each line's leading/trailing
+     * whitespace IS stripped by `read` -- confirming the fix only suppresses
+     * trimming when the prefix is actually given, not unconditionally. */
+    ok = selftest__shell_herestring_step(
+        ok, &state,
+        "t=$'  a\\n  b'; sum=; while read -r line; do sum=\"$sum[$line]\"; done <<< \"$t\"; "
+        "shell_test_probe \"$sum\" '[a][b]'",
+        0, "[a][b]"
+    );
+
+    shell__state_free(&state);
+    printf("[selftest] shell/herestring: %s\n", ok ? "OK" : "failed");
+    return ok;
+}

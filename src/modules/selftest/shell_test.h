@@ -38,4 +38,7 @@ bool selftest__run_shell_array_case(void);
 bool selftest__run_shell_array_multiline_case(void);
 bool selftest__run_shell_random_case(void);
 bool selftest__run_shell_getopts_case(void);
+bool selftest__run_shell_pattern_substitution_case(void);
+bool selftest__run_shell_ansi_quote_case(void);
+bool selftest__run_shell_herestring_case(void);
 bool selftest__run_shell_printf_case(void);

@@ -216,6 +216,23 @@ bool shell_parser__find_heredoc_marker(
             i = end - 1;
             continue;
         }
+        /* "<<" opens a real heredoc marker here -- but "<<<" (a here-string,
+         * shell_parser__extract_redirect()'s own doc comment on
+         * shell_command_t::here_string) is a different construct entirely,
+         * with no body to collect from upcoming lines at all: WORD is a
+         * normal word on this same line, nothing more. Skipping all three
+         * characters at once (not just bailing on this one position) matters:
+         * the loop's own next iteration would otherwise land on the *middle*
+         * '<' of "<<<", which looks exactly like a fresh, real ".."
+         * followed by a non-'<' character -- the same false match this
+         * check exists to rule out, just one byte later. Without this, a
+         * line ending in e.g. "done <<< \"$t\"" would be wrongly treated as
+         * opening a heredoc, sending shell_app.c off collecting a body from
+         * lines that were never meant to be one. */
+        if (c == '<' && i + 1 < length && line[i + 1] == '<' && i + 2 < length && line[i + 2] == '<') {
+            i += 2;
+            continue;
+        }
         if (c == '<' && i + 1 < length && line[i + 1] == '<') {
             size_t end = 0;
             return shell_parser__scan_heredoc_marker(
@@ -386,7 +403,68 @@ static int shell_parser__extract_redirect(
             op_index = probe;
             op = text[op_index];
         }
-        if (op == '<' && i + 1 < length && text[i + 1] == '<') {
+        if (op == '<' && i + 2 < length && text[i + 1] == '<' && text[i + 2] == '<') {
+            /* "<<<WORD" -- a here-string, mutually exclusive with a real
+             * heredoc or "<" redirect the same way those already are with
+             * each other (seen_heredoc covers both, since this sets it
+             * too). WORD is a single shell word -- quote-aware, stops at
+             * the first unquoted whitespace -- same scanning rule the plain
+             * "< target" branch below already uses for its own target, just
+             * captured as a raw span (shell_command_t::here_string) instead
+             * of being resolved as a file path: shell_executor.c expands it
+             * at the point this command actually runs (see that field's own
+             * doc comment in shell_parser.h for why it can't be resolved
+             * here, unlike a real heredoc's already-collected body). */
+            if (seen_heredoc) {
+                *error = "multiple heredocs are unsupported";
+                return -1;
+            }
+            seen_heredoc = true;
+            i += 3;
+            while (i < length && isspace((unsigned char)text[i])) i++;
+            if (i >= length) {
+                *error = "missing here-string word";
+                return -1;
+            }
+            size_t word_start = i;
+            bool w_single = false, w_double = false, w_escaped = false;
+            while (i < length) {
+                char c = text[i];
+                if (w_escaped) {
+                    w_escaped = false;
+                    i++;
+                    continue;
+                }
+                if (!w_single && c == '\\') {
+                    w_escaped = true;
+                    i++;
+                    continue;
+                }
+                if (!w_double && c == '\'') {
+                    w_single = !w_single;
+                    i++;
+                    continue;
+                }
+                if (!w_single && c == '"') {
+                    w_double = !w_double;
+                    i++;
+                    continue;
+                }
+                if (!w_single && !w_double && isspace((unsigned char)c)) break;
+                i++;
+            }
+            if (w_single || w_double) {
+                *error = "unterminated quote in here-string word";
+                return -1;
+            }
+            if (i == word_start) {
+                *error = "missing here-string word";
+                return -1;
+            }
+            command->has_here_string = true;
+            command->here_string.text = text + word_start;
+            command->here_string.length = i - word_start;
+        } else if (op == '<' && i + 1 < length && text[i + 1] == '<') {
             if (seen_heredoc) {
                 *error = "multiple heredocs are unsupported";
                 return -1;
@@ -952,6 +1030,105 @@ static int shell_parser__splice_arith(
     return appended ? 0 : -1;
 }
 
+/* Scans forward from `text[start]` for the next unquoted, unescaped '}' --
+ * and, when `stop_at_slash` is set, also for the next such '/' -- at brace-
+ * nesting depth 0: depth only tracks a nested "${...}" (bumped on "${",
+ * dropped on its own matching '}'), the one nesting shape
+ * "${NAME/pattern/replacement}"'s own pattern/replacement spans actually
+ * need (e.g. a replacement like "${COLOR_STAR}*${COLOR_TREE}") -- a literal
+ * '/' or '}' inside single/double quotes, or inside a "$(...)"/`` `...` ``
+ * span, is not recognized, a documented scope limitation (neither ever
+ * appears in a pattern/replacement this shell's own scripts actually use).
+ * On a match, *out_i is the delimiter's own index (not yet consumed) and
+ * *out_delim is which one it was; returns false (unterminated) if neither
+ * is found before `length`. */
+static bool shell_parser__find_pattern_delim(
+    const char *text, size_t length, size_t start, bool stop_at_slash, size_t *out_i, char *out_delim
+) {
+    bool single = false, double_quote = false;
+    int depth = 0;
+    size_t i = start;
+    while (i < length) {
+        char c = text[i];
+        if (!double_quote && c == '\'') {
+            single = !single;
+            i++;
+            continue;
+        }
+        if (!single && c == '"') {
+            double_quote = !double_quote;
+            i++;
+            continue;
+        }
+        if (single || double_quote) {
+            i++;
+            continue;
+        }
+        if (c == '\\' && i + 1 < length) {
+            i += 2;
+            continue;
+        }
+        if (c == '$' && i + 1 < length && text[i + 1] == '{') {
+            depth++;
+            i += 2;
+            continue;
+        }
+        if (c == '}' && depth > 0) {
+            depth--;
+            i++;
+            continue;
+        }
+        if (depth == 0 && (c == '}' || (stop_at_slash && c == '/'))) {
+            *out_i = i;
+            *out_delim = c;
+            return true;
+        }
+        i++;
+    }
+    return false;
+}
+
+/* Appends `value` into `word`, with every (`replace_all`) or just the first
+ * (!`replace_all`) literal occurrence of `pattern` replaced by
+ * `replacement` -- "${NAME/pattern/replacement}"/"${NAME//pattern/replacement}"'s
+ * own substitution step (shell_parser__expand()'s braced-form handling,
+ * above), once `value`/`pattern`/`replacement` are already fully expanded,
+ * plain strings. `pattern` is matched literally, not as a glob pattern --
+ * see that call site's own doc comment for why. An empty `pattern` never
+ * matches anything (bash's own rule too: matching an empty pattern at every
+ * position would otherwise insert `replacement` between every character of
+ * `value`). Returns 0 on success, -1 (with *error set) only on a real
+ * failure (the expanded word outgrowing SHELL__WORD_MAX). */
+static int shell_parser__pattern_substitute(
+    shell_dynbuf_t *word, const char *value, const char *pattern, const char *replacement, bool replace_all,
+    const char **error
+) {
+    size_t pattern_len = strlen(pattern);
+    size_t value_len = strlen(value);
+    size_t replacement_len = strlen(replacement);
+    bool replaced_once = false;
+    size_t i = 0;
+    while (i < value_len) {
+        bool can_match = pattern_len > 0 && (replace_all || !replaced_once);
+        bool matches = can_match && value_len - i >= pattern_len && memcmp(value + i, pattern, pattern_len) == 0;
+        if (matches) {
+            if (!shell_dynbuf__append(word, replacement, replacement_len)) {
+                *error = "expanded word too long";
+                return -1;
+            }
+            i += pattern_len;
+            replaced_once = true;
+            continue;
+        }
+        if (!shell_dynbuf__append(word, value + i, 1)) {
+            *error = "expanded word too long";
+            return -1;
+        }
+        i++;
+    }
+    return 0;
+}
+
 static int shell_parser__expand(
     const shell_command_t *command, size_t *position, shell_dynbuf_t *word, shell_variable_lookup_fn lookup,
     shell_command_substitution_fn substitute, shell_arith_word_fn arith, void *context, int last_status,
@@ -1025,7 +1202,8 @@ static int shell_parser__expand(
          * above, which never reaches this branch at all. */
         bool length_mode = i < command->length && command->text[i] == '#';
         if (length_mode) i++;
-        while (i < command->length && command->text[i] != '}' && command->text[i] != '[') {
+        while (i < command->length && command->text[i] != '}' && command->text[i] != '[' &&
+               command->text[i] != '/') {
             if (name_length + 1 >= sizeof(name)) {
                 *error = "variable name too long";
                 return -1;
@@ -1061,6 +1239,78 @@ static int shell_parser__expand(
                 (command->text[subscript_start] == '@' || command->text[subscript_start] == '*')) {
                 subscript_kind = command->text[subscript_start];
             }
+        }
+        /* "${NAME/pattern/replacement}" (first match) / "${NAME//pattern/replacement}"
+         * (every match) -- a plain scalar operation, never combined with an
+         * array subscript above (this shell's own scripts never need
+         * "${arr[i]/pat/repl}", so that combination is out of scope here).
+         * `pattern` is matched as a literal substring, not a real glob
+         * pattern the way bash's own version is -- a documented, deliberate
+         * simplification (see shell_parser__pattern_substitute()'s own doc
+         * comment) rather than reusing shell_glob__match(), which is built
+         * to match a pattern against an *entire* string, not find where one
+         * matches as a substring partway through; every pattern this
+         * shell's own scripts use for this (e.g. xmas.ysap.sh's own
+         * "${t// 1 / ...}") is already a plain literal anyway, including one
+         * that escapes what would otherwise be a glob metacharacter (`\*`),
+         * since `pattern` is still expanded as an ordinary word first (quotes
+         * stripped, backslash-escapes resolved) exactly like `replacement`
+         * is, before either is used. */
+        bool has_pattern_sub = !has_subscript && i < command->length && command->text[i] == '/';
+        if (has_pattern_sub) {
+            i++;
+            bool replace_all = i < command->length && command->text[i] == '/';
+            if (replace_all) i++;
+            size_t pattern_start = i;
+            size_t delim_i = 0;
+            char delim = '\0';
+            if (!shell_parser__find_pattern_delim(command->text, command->length, i, true, &delim_i, &delim)) {
+                *error = "unterminated variable expansion";
+                return -1;
+            }
+            size_t pattern_len = delim_i - pattern_start;
+            size_t replacement_start = delim_i, replacement_len = 0;
+            size_t after = delim_i;
+            if (delim == '/') {
+                after = delim_i + 1;
+                size_t brace_i = 0;
+                char brace_delim = '\0';
+                if (!shell_parser__find_pattern_delim(command->text, command->length, after, false, &brace_i,
+                                                        &brace_delim)) {
+                    *error = "unterminated variable expansion";
+                    return -1;
+                }
+                replacement_start = after;
+                replacement_len = brace_i - after;
+                after = brace_i;
+            } else {
+                replacement_start = delim_i;
+                replacement_len = 0;
+            }
+            *position = after + 1;
+            if (!shell_parser__valid_name(name, name_length)) {
+                *error = "invalid variable name";
+                return -1;
+            }
+            name[name_length] = '\0';
+            char *pattern_text =
+                shell_parser__expand_word(command->text + pattern_start, pattern_len, lookup, substitute, arith,
+                                           context, last_status, error);
+            if (pattern_text == NULL) return -1;
+            char *replacement_text =
+                shell_parser__expand_word(command->text + replacement_start, replacement_len, lookup, substitute,
+                                           arith, context, last_status, error);
+            if (replacement_text == NULL) {
+                memory__free(pattern_text);
+                return -1;
+            }
+            const char *value = lookup != NULL ? lookup(context, name) : NULL;
+            int status = shell_parser__pattern_substitute(
+                word, value != NULL ? value : "", pattern_text, replacement_text, replace_all, error
+            );
+            memory__free(pattern_text);
+            memory__free(replacement_text);
+            return status;
         }
         if (i >= command->length || command->text[i] != '}') {
             *error = "unterminated variable expansion";
@@ -1301,6 +1551,95 @@ static bool shell_parser__push_word(
     return true;
 }
 
+/* Decodes a "$'...'" (ANSI-C quoted) string's body -- `text[*io_i]` is the
+ * first byte after the opening "$'", already consumed by the caller --
+ * appending the decoded bytes into `word` until the closing (unescaped) "'"
+ * , which this also consumes. Recognizes the same backslash escapes bash's
+ * own $'...' does: \\, \', \", \a, \b, \e/\E (ESC), \f, \n, \r, \t, \v,
+ * \xHH (1-2 hex digits), \NNN (1-3 octal digits); any other backslash
+ * sequence keeps its backslash literally, the same leniency
+ * shell_builtins__printf_unescape() already documents for FORMAT decoding
+ * (a separate, static copy, not shared -- this has to work from
+ * shell_parser.c, which doesn't link against shell_builtins.c's own
+ * helpers). Needed for e.g. xmas.ysap.sh's own "COLOR1=$'\e[38;5;87m'".
+ * *io_i is left just past the closing quote either way. Returns false (with
+ * *error set) only on a real failure: an unterminated string, or the word
+ * outgrowing its size cap. */
+static bool shell_parser__decode_ansi_string(const char *text, size_t length, size_t *io_i, shell_dynbuf_t *word,
+                                              const char **error) {
+    size_t i = *io_i;
+    while (i < length && text[i] != '\'') {
+        char decoded = text[i];
+        size_t consumed = 1;
+        if (text[i] == '\\' && i + 1 < length) {
+            char next = text[i + 1];
+            consumed = 2;
+            if (next == '\\' || next == '\'' || next == '"') {
+                decoded = next;
+            } else if (next == 'a') {
+                decoded = '\a';
+            } else if (next == 'b') {
+                decoded = '\b';
+            } else if (next == 'e' || next == 'E') {
+                decoded = '\x1b';
+            } else if (next == 'f') {
+                decoded = '\f';
+            } else if (next == 'n') {
+                decoded = '\n';
+            } else if (next == 'r') {
+                decoded = '\r';
+            } else if (next == 't') {
+                decoded = '\t';
+            } else if (next == 'v') {
+                decoded = '\v';
+            } else if (next == 'x') {
+                size_t j = i + 2;
+                int value = 0, digits = 0;
+                while (j < length && digits < 2 && isxdigit((unsigned char)text[j])) {
+                    char hex = (char)tolower((unsigned char)text[j]);
+                    value = value * 16 + (hex >= 'a' ? hex - 'a' + 10 : hex - '0');
+                    j++;
+                    digits++;
+                }
+                if (digits == 0) {
+                    decoded = '\\';
+                    consumed = 1;
+                } else {
+                    decoded = (char)value;
+                    consumed = j - i;
+                }
+            } else if (next >= '0' && next <= '7') {
+                size_t j = i + 1;
+                int value = 0, digits = 0;
+                while (j < length && digits < 3 && text[j] >= '0' && text[j] <= '7') {
+                    value = value * 8 + (text[j] - '0');
+                    j++;
+                    digits++;
+                }
+                decoded = (char)value;
+                consumed = j - i;
+            } else {
+                decoded = '\\';
+                consumed = 1;
+            }
+        }
+        if (!shell_dynbuf__append(word, &decoded, 1)) {
+            *error = "word too long";
+            *io_i = i;
+            return false;
+        }
+        i += consumed;
+    }
+    if (i >= length) {
+        *error = "unterminated quote";
+        *io_i = i;
+        return false;
+    }
+    i++;
+    *io_i = i;
+    return true;
+}
+
 /* Tokenizes and fully expands exactly one word starting at `command->text[*io_i]`
  * (which must not itself be whitespace) -- quotes, `$NAME`/`$(...)`/`` `...` ``
  * expansion, and (via shell_parser__push_word()) pathname expansion -- and
@@ -1378,6 +1717,16 @@ static bool shell_parser__process_word(
                 return false;
             }
             i++;
+            continue;
+        }
+        if (!single && c == '$' && i + 1 < command->length && command->text[i + 1] == '\'') {
+            any_quoted = true;
+            i += 2;
+            if (!shell_parser__decode_ansi_string(command->text, command->length, &i, &word, error)) {
+                memory__free(word.data);
+                *io_i = i;
+                return false;
+            }
             continue;
         }
         if (!single && c == '$') {
@@ -1491,6 +1840,14 @@ char *shell_parser__expand_word(
                 return NULL;
             }
             i++;
+            continue;
+        }
+        if (!single && c == '$' && i + 1 < command.length && command.text[i + 1] == '\'') {
+            i += 2;
+            if (!shell_parser__decode_ansi_string(command.text, command.length, &i, &word, error)) {
+                memory__free(word.data);
+                return NULL;
+            }
             continue;
         }
         if (!single && c == '$') {
