@@ -30,18 +30,40 @@
  * (see core_sdk/tty.h). Cheap no-op once nothing has changed, so it's safe
  * to call before every interactive read -- that's the only way a resize
  * becomes visible without a SIGWINCH equivalent (see tty.h's generation
- * counter). Also a no-op when the session has no known size at all (a
- * plain pipe, or the physical serial console), same as a real tty check. */
+ * counter).
+ *
+ * A session with no known size at all -- a plain output-capture pipe
+ * (shell_executor__capture_external()'s "$(...)" child, deliberately never
+ * given one), or a genuinely sizeless physical console (a raw serial/UART
+ * link has no mechanism to report window geometry the way a real terminal
+ * emulator or BruceOS's own GUI Terminal app does) -- falls back to a
+ * plain 80x24 default instead of leaving $COLUMNS/$LINES unset: a script
+ * that sizes itself off them (xmas.ysap.sh's own "$((RANDOM % COLUMNS))")
+ * would otherwise divide by that literal zero. Applied at most once per
+ * session (gated on state->tty_generation still being its startup value of
+ * 0, which a real size can never produce -- see tty__set_size()'s own
+ * `tty_generation++`) and only when nothing already holds a real value
+ * (inherited from a parent that had one, including a parent's own earlier
+ * fallback) -- so a real resize arriving later still wins over this, and a
+ * forked "$(...)" child doesn't clobber a perfectly good inherited value
+ * just because its own capture session was never meant to carry a size of
+ * its own. */
 static void shell__sync_tty_size(shell_state_t *state) {
     bruce_tty_size_t size;
-    if (!tty__isatty() || tty__get_size(&size) != BRUCE_OK || size.generation == state->tty_generation) return;
-    state->tty_generation = size.generation;
-    char columns[8];
-    char rows[8];
-    snprintf(columns, sizeof(columns), "%u", (unsigned)size.columns);
-    snprintf(rows, sizeof(rows), "%u", (unsigned)size.rows);
-    if (shell_builtins__set(state, "COLUMNS", columns) == 0) (void)shell_builtins__export(state, "COLUMNS");
-    if (shell_builtins__set(state, "LINES", rows) == 0) (void)shell_builtins__export(state, "LINES");
+    if (tty__isatty() && tty__get_size(&size) == BRUCE_OK) {
+        if (size.generation == state->tty_generation) return;
+        state->tty_generation = size.generation;
+        char columns[8];
+        char rows[8];
+        snprintf(columns, sizeof(columns), "%u", (unsigned)size.columns);
+        snprintf(rows, sizeof(rows), "%u", (unsigned)size.rows);
+        if (shell_builtins__set(state, "COLUMNS", columns) == 0) (void)shell_builtins__export(state, "COLUMNS");
+        if (shell_builtins__set(state, "LINES", rows) == 0) (void)shell_builtins__export(state, "LINES");
+        return;
+    }
+    if (state->tty_generation != 0 || shell_builtins__get(state, "COLUMNS") != NULL) return;
+    if (shell_builtins__set(state, "COLUMNS", "80") == 0) (void)shell_builtins__export(state, "COLUMNS");
+    if (shell_builtins__set(state, "LINES", "24") == 0) (void)shell_builtins__export(state, "LINES");
 }
 
 void shell__state_init(shell_state_t *state) {

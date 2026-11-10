@@ -12,7 +12,36 @@
 
 /* Safety caps against runaway scripts, not preallocation sizes: variables and
  * words are heap-allocated to their actual length. */
-#define SHELL__MAX_VARIABLES 24
+/* 24 was tight enough that a real-world script with ~20 top-level scalars/
+ * arrays plus a dozen-odd "local"s in its main loop (e.g. xmas.ysap.sh) hits
+ * "variable limit reached" immediately on entry -- both state->variables[]
+ * and each call's shell_local_frame_t grow on demand (shell_builtins.c), so
+ * raising this costs nothing for a script that never needs it. */
+#define SHELL__MAX_VARIABLES 128
+/* Deliberately NOT SHELL__MAX_VARIABLES, and deliberately small: this bounds
+ * the "NAME=value ... command" prefix overlay in front of one command (and,
+ * via shell_executor.c's own shell_executor__env_save_t prefix_saves[]/
+ * cli_environment[], two genuine *stack* arrays sized to it, declared on
+ * every single command dispatch and every external launch respectively) --
+ * nothing like the 100+ simultaneously-live script variables/locals
+ * SHELL__MAX_VARIABLES above exists to cover. Reusing that bigger cap here
+ * once actually shipped (briefly, this same round of fixes) blew up both
+ * stack arrays by over 1 KiB apiece on every command this shell runs,
+ * overflowing the shell task's real stack on the very first external
+ * command launched -- a silent-until-it-isn't Guru Meditation
+ * (LoadProhibited) crash, not a "safety cap" in the no-cost-if-unneeded
+ * sense those two constants' own comments describe. A real command line is
+ * never prefixed by more than a handful of "NAME=value"s, so this stays at
+ * the original, stack-safe 24. */
+#define SHELL__MAX_PREFIX_ENVIRONMENT 24
+/* Also deliberately NOT SHELL__MAX_COMMANDS, for the exact same reason
+ * SHELL__MAX_PREFIX_ENVIRONMENT above isn't SHELL__MAX_VARIABLES:
+ * shell_executor__pipeline()'s own `stage_words[]`/`stage_argc[]` are real
+ * *stack* arrays, sized to however many "|"-joined stages one pipeline has
+ * -- nothing like the 256 statements SHELL__MAX_COMMANDS now allows a whole
+ * function body to flatten into. A real pipeline is never more than a
+ * handful of stages long. */
+#define SHELL__MAX_PIPELINE_STAGES 16
 #define SHELL__VARIABLE_NAME_MAX 32
 /* 2048, not the 128 this started at: fine for every short scalar (a path, a
  * color code, a counter), but "read -r -d '' VAR <<-EOF ... EOF" (a whole

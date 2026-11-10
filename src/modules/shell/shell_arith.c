@@ -33,8 +33,18 @@ typedef struct {
     char name[SHELL__VARIABLE_NAME_MAX];
 } shell_arith__value_t;
 
+/* Also skips a bare '\'' or '"' -- real bash lets every operand inside
+ * "((...))"/"$((...))" be quoted (e.g. "i < \"${#x[@]}\"", a quoted
+ * array-length reference like the C-style "for" header in xmas.ysap.sh's
+ * own snowfall loop needs), but quoting is a pure no-op there: there's no
+ * word-splitting to suppress inside an arithmetic context in the first
+ * place, so the quote characters themselves carry no meaning and are
+ * simply dropped, exactly like whitespace. This intentionally doesn't
+ * track open/close pairing or treat the two quote characters differently
+ * (unlike shell_parser.c's real quote handling) -- in bash's own arithmetic
+ * grammar a quote here is never anything but filler around an operand. */
 static void shell_arith__skip_ws(shell_arith__cursor_t *c) {
-    while (c->p < c->end && isspace((unsigned char)*c->p)) c->p++;
+    while (c->p < c->end && (isspace((unsigned char)*c->p) || *c->p == '\'' || *c->p == '"')) c->p++;
 }
 
 static bool shell_arith__store(shell_arith__cursor_t *c, const char *name, long value) {
@@ -157,6 +167,38 @@ static bool shell_arith__parse_primary(shell_arith__cursor_t *c, shell_arith__va
             const char *value = shell_builtins__get(c->state, name);
             out->value = (long)(value != NULL ? strlen(value) : 0);
         }
+        out->is_lvalue = false;
+        return true;
+    }
+    /* "$1".."$9" (a function call's positional parameters) / "$#" (how many
+     * there are) -- per-call state living in state->positional/
+     * positional_count (shell_compound__call_function()), not an assignable
+     * NAME=value variable shell_arith__read_name() below knows how to read
+     * (it requires an alpha/'_' right after the '$', so a bare digit there
+     * -- e.g. "$(($1 + 1))", xmas.ysap.sh's own "tput()" override computing
+     * a cursor row/column from its own arguments -- would otherwise fail
+     * outright with "syntax error" before ever reaching
+     * shell_executor__lookup()'s identical, already-correct handling of the
+     * exact same forms in every *non*-arithmetic context ($1 in a plain
+     * word, "${1}", ...). Mirrors shell_arith__load()'s own "a non-numeric
+     * variable reads as 0" leniency, and is never an lvalue -- "$1++"/
+     * "$1 = x" are as meaningless here as they are in real bash. */
+    if (ch == '$' && c->p + 1 < c->end && ((c->p[1] >= '1' && c->p[1] <= '9') || c->p[1] == '#' || c->p[1] == '0')) {
+        char key = c->p[1];
+        c->p += 2;
+        long value = 0;
+        if (key == '#') {
+            value = (long)c->state->positional_count;
+        } else if (key != '0') {
+            int index = key - '1';
+            const char *text = index < c->state->positional_count ? c->state->positional[index] : NULL;
+            if (text != NULL) {
+                char *stop = NULL;
+                long parsed = strtol(text, &stop, 0);
+                value = stop == text ? 0 : parsed;
+            }
+        }
+        out->value = value;
         out->is_lvalue = false;
         return true;
     }

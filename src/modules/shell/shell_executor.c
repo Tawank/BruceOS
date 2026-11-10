@@ -150,10 +150,10 @@ static void shell_executor__environment_free(shell_executor__environment_t *envi
 static bool shell_executor__environment_push(
     shell_executor__environment_t *environment, const bruce_environment_variable_t *variable
 ) {
-    if (environment->count >= SHELL__MAX_VARIABLES) return false;
+    if (environment->count >= SHELL__MAX_PREFIX_ENVIRONMENT) return false;
     if (environment->count >= environment->capacity) {
         size_t new_capacity = environment->capacity == 0 ? 4u : environment->capacity * 2u;
-        if (new_capacity > SHELL__MAX_VARIABLES) new_capacity = SHELL__MAX_VARIABLES;
+        if (new_capacity > SHELL__MAX_PREFIX_ENVIRONMENT) new_capacity = SHELL__MAX_PREFIX_ENVIRONMENT;
         bruce_environment_variable_t *grown =
             memory__realloc(environment->items, new_capacity * sizeof(*grown));
         if (grown == NULL) return false;
@@ -231,8 +231,8 @@ static int shell_executor__launch_external(
      * default, so mask that inherited value; a command-local GUI=1 entry is
      * copied after this default and therefore still wins. This also covers
      * producer and destination launches, whose callers pass no overlay. */
-    if (environment_count > SHELL__MAX_VARIABLES) return BRUCE_ERR_RESOURCE_LIMIT;
-    bruce_environment_variable_t cli_environment[SHELL__MAX_VARIABLES + 1u];
+    if (environment_count > SHELL__MAX_PREFIX_ENVIRONMENT) return BRUCE_ERR_RESOURCE_LIMIT;
+    bruce_environment_variable_t cli_environment[SHELL__MAX_PREFIX_ENVIRONMENT + 1u];
     cli_environment[0] = (bruce_environment_variable_t){.name = "GUI", .value = "0"};
     if (environment_count > 0) {
         memcpy(cli_environment + 1u, environment, environment_count * sizeof(*environment));
@@ -1576,8 +1576,12 @@ static int shell_executor__external_with_input(
  * stage must be a real external command, since only a real process has
  * stdin to feed the previous stage's captured output into. */
 static int shell_executor__pipeline(shell_state_t *state, const shell_command_t *commands, size_t count) {
-    char **stage_words[SHELL__MAX_COMMANDS] = {0};
-    int stage_argc[SHELL__MAX_COMMANDS] = {0};
+    if (count > SHELL__MAX_PIPELINE_STAGES) {
+        stdio__printf("shell: too many pipeline stages\n");
+        return 2;
+    }
+    char **stage_words[SHELL__MAX_PIPELINE_STAGES] = {0};
+    int stage_argc[SHELL__MAX_PIPELINE_STAGES] = {0};
     const char *error = NULL;
     bool parse_failed = false;
     for (size_t i = 0; i < count && !parse_failed; ++i) {
@@ -1955,7 +1959,7 @@ static int shell_executor__dispatch(shell_state_t *state, const shell_command_t 
             shell_executor__environment_free(&environment);
             return 2;
         }
-        if (name_length >= SHELL__VARIABLE_NAME_MAX || environment.count >= SHELL__MAX_VARIABLES) {
+        if (name_length >= SHELL__VARIABLE_NAME_MAX || environment.count >= SHELL__MAX_PREFIX_ENVIRONMENT) {
             stdio__printf("shell: variable name too long\n");
             shell_executor__environment_free(&environment);
             return 2;
@@ -2063,7 +2067,7 @@ static int shell_executor__dispatch(shell_state_t *state, const shell_command_t 
      * external command already gets them via `environment.items` instead,
      * see shell_executor__external() and friends). */
     bool apply_prefix_to_self = (is_function || is_builtin) && !command->background && environment.count > 0;
-    shell_executor__env_save_t prefix_saves[SHELL__MAX_VARIABLES];
+    shell_executor__env_save_t prefix_saves[SHELL__MAX_PREFIX_ENVIRONMENT];
     if (apply_prefix_to_self) {
         (void)shell_executor__apply_temp_environment(state, environment.items, environment.count, prefix_saves);
     }

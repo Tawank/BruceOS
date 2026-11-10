@@ -122,9 +122,18 @@ static bool shell_compound__parse_header(const char *raw, size_t raw_length, cha
         has_prefix = true;
     }
 
+    /* Unlike a variable name (shell_parser__valid_name(), deliberately not
+     * reused here), bash lets a function name be almost any non-whitespace
+     * text -- "get-msecs", "my.plugin.func", etc. are all real, common
+     * function names in scripts this shell runs. The only characters that
+     * actually have to stop this scan are the ones that end the header
+     * itself: whitespace before "()"/"{", or the "(" of "()" directly. */
     size_t name_len = 0;
-    while (name_len < len && (isalnum((unsigned char)text[name_len]) || text[name_len] == '_')) name_len++;
-    if (name_len == 0 || name_len >= name_cap || !shell_parser__valid_name(text, name_len)) return false;
+    while (name_len < len && !isspace((unsigned char)text[name_len]) && text[name_len] != '(' &&
+           text[name_len] != ')' && text[name_len] != '{') {
+        name_len++;
+    }
+    if (name_len == 0 || name_len >= name_cap) return false;
 
     size_t rs = name_len;
     size_t rl = len - name_len;
@@ -1320,6 +1329,64 @@ int shell_compound__run(shell_state_t *state, const char *text, char *const *her
     return status;
 }
 
+/* Finds the end of a "${...}" span -- ANY of them, not just bash 5.3's
+ * "${ list; }" (see shell_parser.c's shell_parser__brace_command_span())
+ * -- starting at `p[0] == '$'`/`p[1] == '{'`. This scan's caller tracks
+ * brace-nesting by looking for a bare, whitespace-bounded "{" or "}" word
+ * (shell_compound__pending()'s own `word_len == 1` checks below), which a
+ * parameter expansion's own closing '}' looks exactly like whenever its
+ * pattern/replacement contains an unescaped, unquoted space of its own --
+ * e.g. real-world bash like "${t// 0 / ${COLOR}o${RST} }" (pattern
+ * substitution splicing in other expansions). Without skipping the whole
+ * "${...}" as one atomic span, that lone trailing "}" -- never preceded by
+ * its own stray "{" word, since the real open brace is glued to the '$'
+ * right before it -- decrements brace_depth with no matching increment,
+ * silently closing an enclosing function/group body (a real "NAME() {")
+ * several statements too early. Shares its brace-depth/quote-skip algorithm
+ * with shell_parser.c's shell_parser__brace_command_span(), kept
+ * deliberately in sync with it, but can't call it directly: different
+ * translation unit, and a NUL-terminated char* here rather than that
+ * function's length-bounded span. Returns a pointer to the span's closing
+ * '}' (not past it, matching how every other branch in the caller's loop
+ * leaves `p` for its own `++p` to land just past what was consumed), or
+ * NULL if the span is never closed before the NUL terminator -- callers
+ * then fall through to ordinary one-character-at-a-time handling, the same
+ * lenient behavior malformed input already got before this existed. */
+static const char *shell_compound__skip_brace_command(const char *p) {
+    const char *i = p + 2;
+    int depth = 1;
+    bool single = false, double_quote = false;
+    while (*i != '\0') {
+        char c = *i;
+        if (!double_quote && c == '\'') {
+            single = !single;
+            i++;
+            continue;
+        }
+        if (!single && c == '"') {
+            double_quote = !double_quote;
+            i++;
+            continue;
+        }
+        if (single || double_quote) {
+            i++;
+            continue;
+        }
+        if (c == '\\' && i[1] != '\0') {
+            i += 2;
+            continue;
+        }
+        if (c == '{') {
+            depth++;
+        } else if (c == '}') {
+            depth--;
+            if (depth == 0) return i;
+        }
+        i++;
+    }
+    return NULL;
+}
+
 bool shell_compound__pending(const char *text) {
     if (text == NULL) return false;
     bool single = false;
@@ -1415,6 +1482,24 @@ bool shell_compound__pending(const char *text) {
         if (single || double_quote) {
             if (word_len < sizeof(word)) word[word_len++] = c;
             continue;
+        }
+        /* "${...}" (see shell_compound__skip_brace_command()'s own doc
+         * comment above) -- any parameter expansion whose pattern/
+         * replacement contains an unquoted space (e.g.
+         * "${t// 0 / ${COLOR}o${RST} }") would otherwise have its own
+         * closing "}" misread as this scan's bare one-character "{"/"}"
+         * brace-nesting word below, closing a real function/group body
+         * early -- that interior "}" has no matching "{" word of its own
+         * in this flat scan (the real open brace is glued to the '$' right
+         * before it), so it would decrement brace_depth right out from
+         * under the function's real, still-open "{". */
+        if (!single && !double_quote && c == '$' && *(p + 1) == '{') {
+            const char *end = shell_compound__skip_brace_command(p);
+            if (end != NULL) {
+                p = end;
+                word_clean = false;
+                continue;
+            }
         }
         if (case_depth == 0) {
             if (c == '(') paren_depth++;

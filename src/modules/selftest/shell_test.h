@@ -42,3 +42,4 @@ bool selftest__run_shell_pattern_substitution_case(void);
 bool selftest__run_shell_ansi_quote_case(void);
 bool selftest__run_shell_herestring_case(void);
 bool selftest__run_shell_printf_case(void);
+bool selftest__run_shell_xmas_compat_case(void);

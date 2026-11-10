@@ -11,6 +11,7 @@
 #include "core_sdk/environment.h"
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
+#include "core_sdk/tty.h"
 #include "shell_arith.h"
 #include "shell_array.h"
 #include "shell_compound.h"
@@ -58,6 +59,7 @@ static const shell_builtin_entry_t s_shell_builtins[] = {
     {"bg", "Resume a paused job in the background"},
     {"disown", "Stop tracking a job without touching it"},
     {"trap", "Run a command when a signal is received or the shell exits"},
+    {"tput", "Query terminal capabilities (cols/lines)"},
 };
 
 static int shell_builtins__find_index(const shell_state_t *state, const char *name) {
@@ -480,12 +482,23 @@ static int shell_builtins__getopts(shell_state_t *state, int argc, char **argv) 
          * character): both of "--"'s characters pass that path's own
          * "starts with '-' and has a second character" check, so without
          * `is_double_dash` folded into this condition, "--" would never
-         * reach this branch at all. */
-        if (is_double_dash) {
-            char next[16];
-            snprintf(next, sizeof(next), "%ld", optind + 1);
-            (void)shell_builtins__set(state, "OPTIND", next);
-        }
+         * reach this branch at all.
+         *
+         * OPTIND is written unconditionally here, even when it isn't
+         * moving (the common "first arg isn't an option at all" case) --
+         * `optind` above already defaults to 1 when $OPTIND comes back
+         * unset/unparseable, but that default only lives in this
+         * function's own local C variable until something writes it back.
+         * The standard "local OPTIND OPTARG" idiom before a function's own
+         * "while getopts ...; do ... done" (see this function's own doc
+         * comment) deliberately leaves the script-visible $OPTIND unset on
+         * entry, specifically so a subsequent "shift $((OPTIND - 1))"
+         * right after the loop can rely on it -- skipping the write here
+         * left that $OPTIND unset forever whenever the very first arg
+         * isn't an option, breaking exactly that idiom. */
+        char next[16];
+        snprintf(next, sizeof(next), "%ld", is_double_dash ? optind + 1 : optind);
+        (void)shell_builtins__set(state, "OPTIND", next);
         (void)shell_builtins__set(state, name, "?");
         return 1;
     }
@@ -595,6 +608,25 @@ static int shell_builtins__local_track(shell_state_t *state, const char *name) {
     return 0;
 }
 
+/* True if `word` has the shape of a bare array-literal assignment prefix --
+ * "NAME=" or "NAME+=" with nothing after the '='/'+=' at all. Duplicated
+ * from shell_executor.c's own identical, `static`, same-named check (not
+ * exported there, and small enough that sharing it isn't worth a header
+ * change) -- shell_builtins__local() below needs this same shape test for
+ * "local NAME=(elem...)", which shell_parser.c's tokenizer hands it as the
+ * separate words "NAME=", "(", elements..., ")" (a bare, unquoted '(' is
+ * always its own one-character word), the same way a plain top-level
+ * "NAME=(...)" array literal already arrives at shell_executor__dispatch(). */
+static bool shell_builtins__is_array_literal_prefix(const char *word, bool *out_append) {
+    size_t length = strlen(word);
+    if (length == 0 || word[length - 1] != '=') return false;
+    bool append = length >= 2 && word[length - 2] == '+';
+    size_t name_length = length - (append ? 2u : 1u);
+    if (name_length == 0 || !shell_parser__valid_name(word, name_length)) return false;
+    *out_append = append;
+    return true;
+}
+
 /* `local NAME[=value]...`: only valid while a function call is executing --
  * state->local_frame is set up around the body's run by
  * shell_compound__call_function() (see shell_local_frame_t in
@@ -603,13 +635,56 @@ static int shell_builtins__local_track(shell_state_t *state, const char *name) {
  * it held before -- or as freshly unset, if it wasn't set at all -- for the
  * rest of this call, same as bash. A bare NAME (no "=value") behaves like
  * bash's own "local x": it starts out empty, distinct from whatever a
- * same-named variable outside this call might hold. */
+ * same-named variable outside this call might hold.
+ *
+ * "local NAME=(elem...)"/"local NAME+=(elem...)" is a special case: arrays
+ * (shell_array.h) live in their own separate state->arrays[] table, not
+ * state->variables[], so shell_builtins__local_track()'s snapshot/restore
+ * (built for the scalar table) can't scope one the way it does an ordinary
+ * local scalar -- the array this creates/updates is really global once this
+ * call returns, a known, narrower gap than real bash's "local -a". Still
+ * far better than the alternative of erroring out: without this, each of
+ * the tokenizer's separate words for the literal -- "NAME=", "(", every
+ * element, ")" -- would otherwise be walked one at a time below as if each
+ * were its own bare `local` NAME, and that lone trailing ")" fails
+ * shell_parser__valid_name() outright (real-world fallout: xmas.ysap.sh's
+ * own "local snowflakes=()" before its animation loop). */
 static int shell_builtins__local(shell_state_t *state, int argc, char **argv) {
     if (state->local_frame == NULL) {
         stdio__printf("shell: local: can only be used inside a function\n");
         return 1;
     }
     for (int i = 1; i < argc; ++i) {
+        bool append = false;
+        if (i + 1 < argc && strcmp(argv[i + 1], "(") == 0 &&
+            shell_builtins__is_array_literal_prefix(argv[i], &append)) {
+            size_t name_length = strlen(argv[i]) - (append ? 2u : 1u);
+            char array_name[SHELL__ARRAY_NAME_MAX];
+            if (name_length >= sizeof(array_name)) {
+                stdio__printf("shell: array name too long\n");
+                return 2;
+            }
+            memcpy(array_name, argv[i], name_length);
+            array_name[name_length] = '\0';
+            int close = i + 2;
+            while (close < argc && strcmp(argv[close], ")") != 0) close++;
+            if (close >= argc) {
+                stdio__printf("shell: local: missing ')'\n");
+                return 2;
+            }
+            int status;
+            if (append) {
+                status = 0;
+                for (int k = i + 2; k < close && status == 0; ++k) {
+                    status = shell_array__append(state, array_name, argv[k]);
+                }
+            } else {
+                status = shell_array__assign(state, array_name, argv + i + 2, (size_t)(close - (i + 2)));
+            }
+            if (status != 0) return status;
+            i = close;
+            continue;
+        }
         char *equals = strchr(argv[i], '=');
         const char *name = argv[i];
         char name_buffer[SHELL__VARIABLE_NAME_MAX];
@@ -1038,13 +1113,134 @@ const char *shell_builtins__description(size_t index) {
     return index < shell_builtins__count() ? s_shell_builtins[index].description : NULL;
 }
 
-int shell_builtins__run(shell_state_t *state, int argc, char **argv) {
-    if (strcmp(argv[0], "echo") == 0) {
-        for (int i = 1; i < argc; ++i) stdio__printf("%s%s", i > 1 ? " " : "", argv[i]);
-        stdio__printf("\n");
-        return 0;
+/* "tput cols" / "tput lines" -- BruceOS has no standalone `tput` program at
+ * all (no terminfo database, no ncurses), so a script that calls real
+ * "$(tput cols)"/"$(tput lines)" via command substitution -- rather than
+ * reading $COLUMNS/$LINES directly, which shell_app.c's own
+ * shell__sync_tty_size() already keeps current -- would otherwise get
+ * "tput: not found" and an empty result (e.g. xmas.ysap.sh, which overrides
+ * a "tput()" shell *function* for direct calls like "tput cup ..." but
+ * still shells out to the real "$(tput cols)" to size the terminal; command
+ * substitution forks a brand new shell instance with no knowledge of that
+ * function, so only a real external/builtin command can answer it there).
+ * Every other subcommand (colors, cursor movement, ...) is deliberately
+ * left unimplemented -- those need a real terminfo-style capability
+ * database this shell doesn't have, and any script that cares already
+ * brings its own "tput()" override (as xmas.ysap.sh's own big comment on
+ * the subject explains) that only ever needs this builtin for the two
+ * numeric queries a function override can't answer for itself.
+ *
+ * An unsupported subcommand prints nothing at all (just a nonzero exit) --
+ * real tput would normally report a missing capability on stderr, outside
+ * whatever's capturing its stdout, but this shell has no separate stderr
+ * stream to put it on, so printing anything here lands right in the
+ * caller's own stdout instead. That matters a great deal for a script like
+ * xmas.ysap.sh: "COLOR_TREE=$(tput setaf 2)" (and COLOR_STAR/COLOR_RST/
+ * every COLOR_LIGHTS/SNOWFLAKE_COLORS array element) all run via "$(tput
+ * setaf N)"/"$(tput sgr0)" *before* the script's own "tput()" function
+ * override further down is even defined -- reaching this builtin instead,
+ * for every one of them, until that point. An error message here used to
+ * get captured as each of those colors' entire value instead of a real
+ * ANSI code, corrupting every line of the tree/sign/moon it ever
+ * touched -- which is exactly what sent a real device's GUI Terminal app
+ * (whose "ESC[?1049h" alternate-screen switch is otherwise honored
+ * correctly, confirmed via a clean black screen right after it) straight
+ * to a black screen with nothing drawn afterward at all.
+ *
+ * Checks $COLUMNS/$LINES *first*, falling back to a direct tty__get_size()
+ * query only when neither is set to a nonzero value. This matters
+ * specifically because this builtin's own caller is routinely a forked
+ * "shell -c" command-substitution child (see this function's own doc
+ * comment above on why "$(tput cols)" needs a real command at all) -- that
+ * child's *own* routed stdio session is the one-shot pipe feeding its
+ * captured output back to the parent, not a tty, so tty__isatty() is
+ * always false there and a direct query always fails, even though the
+ * *parent* shell already knows its own real size and already exports it
+ * (shell_app.c's shell__sync_tty_size()) -- shell__state_init() imports
+ * every exported variable from this process's environment before this
+ * builtin ever runs, so that correct, already-known value is sitting right
+ * there in $COLUMNS/$LINES the whole time. Querying tty__get_size()
+ * directly first, the way an earlier version of this function did, threw
+ * that inherited value away and reported 0 instead -- on real hardware,
+ * not just a test harness with no tty of its own at all -- which is
+ * exactly what broke "$((RANDOM % COLUMNS))"-style arithmetic in
+ * xmas.ysap.sh's own snowfall loop ("modulo by zero", repeating every
+ * frame). */
+static int shell_builtins__tput(shell_state_t *state, int argc, char **argv) {
+    if (argc != 2 || (strcmp(argv[1], "cols") != 0 && strcmp(argv[1], "lines") != 0)) return 2;
+    bool want_cols = strcmp(argv[1], "cols") == 0;
+    const char *inherited = shell_builtins__get(state, want_cols ? "COLUMNS" : "LINES");
+    unsigned value = inherited != NULL ? (unsigned)strtoul(inherited, NULL, 10) : 0;
+    if (value == 0) {
+        bruce_tty_size_t size;
+        value = tty__isatty() && tty__get_size(&size) == BRUCE_OK ? (want_cols ? size.columns : size.rows) : 0;
     }
+    stdio__printf("%u\n", value);
+    return value != 0 ? 0 : 1;
+}
+
+/* "echo [-neE] [ARG ...]" -- bash's builtin, not merely "print the argv
+ * joined by spaces": real scripts (e.g. xmas.ysap.sh's own "tput()"
+ * override, "echo -n "$ESC[...]"" for every escape sequence it emits) lean
+ * on "-n" to suppress the trailing newline just as much as on the text
+ * itself. Leading args are consumed as a run of combined "-n"/"-e"/"-E"
+ * flags (e.g. "-ne", matching bash's own grammar) for as long as each one
+ * is entirely "-" followed by only those three letters; the first arg that
+ * doesn't fit that shape -- including a bare "-", "--", or any real content
+ * that merely starts with '-' -- ends flag parsing there and is printed as
+ * ordinary output, exactly like bash. "-e" decodes backslash escapes in
+ * every ARG printed after it via shell_builtins__printf_unescape() (shared
+ * with printf's own "%b") -- not a perfect match for bash's "echo -e" (that
+ * one wants "\0NNN" for an octal escape, this accepts bare "\NNN" too, same
+ * as printf's "%b"), but the same common escape set ("\n"/"\t"/"\e"/"\xHH"/
+ * ...) either way. "\c" (stop *all* further output, including the trailing
+ * newline) is not implemented -- a real but rare bash extra. */
+static int shell_builtins__echo(int argc, char **argv) {
+    int i = 1;
+    bool suppress_newline = false;
+    bool interpret_escapes = false;
+    for (; i < argc && argv[i][0] == '-' && argv[i][1] != '\0'; ++i) {
+        bool all_flag_chars = true;
+        for (const char *p = argv[i] + 1; *p != '\0'; ++p) {
+            if (*p != 'n' && *p != 'e' && *p != 'E') {
+                all_flag_chars = false;
+                break;
+            }
+        }
+        if (!all_flag_chars) break;
+        for (const char *p = argv[i] + 1; *p != '\0'; ++p) {
+            if (*p == 'n') suppress_newline = true;
+            else if (*p == 'e') interpret_escapes = true;
+            else interpret_escapes = false; /* 'E' */
+        }
+    }
+    bool first = true;
+    for (; i < argc; ++i) {
+        if (!first) stdio__printf(" ");
+        first = false;
+        if (!interpret_escapes) {
+            stdio__printf("%s", argv[i]);
+            continue;
+        }
+        size_t arg_length = strlen(argv[i]);
+        char *decoded = memory__malloc(arg_length + 1u);
+        if (decoded == NULL) {
+            stdio__printf("%s", argv[i]);
+            continue;
+        }
+        size_t decoded_length = shell_builtins__printf_unescape(argv[i], arg_length, decoded);
+        decoded[decoded_length] = '\0';
+        stdio__printf("%s", decoded);
+        memory__free(decoded);
+    }
+    if (!suppress_newline) stdio__printf("\n");
+    return 0;
+}
+
+int shell_builtins__run(shell_state_t *state, int argc, char **argv) {
+    if (strcmp(argv[0], "echo") == 0) return shell_builtins__echo(argc, argv);
     if (strcmp(argv[0], "printf") == 0) return shell_builtins__printf(argc, argv);
+    if (strcmp(argv[0], "tput") == 0) return shell_builtins__tput(state, argc, argv);
     if (strcmp(argv[0], "true") == 0) return 0;
     if (strcmp(argv[0], "false") == 0) return 1;
     if (strcmp(argv[0], "test") == 0 || strcmp(argv[0], "[") == 0 || strcmp(argv[0], "[[") == 0) {

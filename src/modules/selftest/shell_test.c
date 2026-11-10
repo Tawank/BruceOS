@@ -3652,3 +3652,124 @@ bool selftest__run_shell_herestring_case(void) {
     printf("[selftest] shell/herestring: %s\n", ok ? "OK" : "failed");
     return ok;
 }
+
+/* Like selftest__shell_herestring_step() above, for
+ * selftest__run_shell_xmas_compat_case() below. */
+static bool selftest__shell_xmas_compat_step(
+    bool ok_so_far, shell_state_t *state, const char *line, int expected_status, const char *expected_arg
+) {
+    if (!ok_so_far) return false;
+    int status = shell__execute_line(state, line);
+    bool ok = status == expected_status && (expected_arg == NULL || strcmp(s_probe_arg, expected_arg) == 0);
+    if (!ok) {
+        printf(
+            "[selftest] shell/xmas-compat: `%s` -> status=%d (want %d) arg=\"%s\" (want \"%s\")\n", line, status,
+            expected_status, s_probe_arg, expected_arg != NULL ? expected_arg : "(unchecked)"
+        );
+    }
+    return ok;
+}
+
+/* A grab-bag of fixes made while getting the real "curl xmas.ysap.sh |
+ * shell" script running end to end, past what the dedicated herestring/
+ * pattern-substitution/ANSI-quote cases above already cover:
+ *   - a function name may contain '-' (shell_compound__parse_header()) --
+ *     xmas.ysap.sh's own "get-msecs"/"start-timer"/"end-timer".
+ *   - "${ list; }" (bash 5.3's brace-group command substitution, run like
+ *     "$(list)" but without forking a subshell to do it) is recognized at
+ *     all, instead of corrupting the parse of everything after it.
+ *   - "getopts" writes $OPTIND back even when it stops at the very first
+ *     non-option argument (not just when it consumes a "--") -- the
+ *     standard "local OPTIND OPTARG; while getopts ...; done; shift
+ *     $((OPTIND - 1))" idiom needs this to get a real number rather than
+ *     unset/empty.
+ *   - "echo" recognizes "-n"/"-e"/"-E" at all (it used to print every
+ *     argument literally, "-n" included, with an unconditional newline).
+ *   - "$1".."$9"/"$#" resolve inside "((...))"/"$((...))" arithmetic, the
+ *     same as they already did everywhere else.
+ *   - a quote character inside arithmetic context is skipped like
+ *     whitespace (bash: quoting there is a no-op), not a syntax error.
+ *   - "local NAME=(elem...)" is recognized as one array-literal
+ *     declaration, not walked word-by-word as if each tokenizer fragment
+ *     ("NAME=(", each element, the closing ")") were its own bare `local`
+ *     name. */
+bool selftest__run_shell_xmas_compat_case(void) {
+    if (!selftest__shell_register_probe()) return false;
+    shell_state_t state;
+    shell__state_init(&state);
+
+    bool ok = true;
+    /* A session with no known tty size at all -- this selftest's own, or a
+     * real raw serial/UART console with no mechanism to report window
+     * geometry the way a real terminal emulator or BruceOS's own GUI
+     * Terminal app does -- gets a plain 80x24 default
+     * (shell_app.c's shell__sync_tty_size()) rather than leaving
+     * $COLUMNS/$LINES unset/0 forever: a size-dependent script
+     * (xmas.ysap.sh's own "$((RANDOM % COLUMNS))") would otherwise divide
+     * by that literal zero on a plain serial console too, not just inside
+     * a "$(...)" child. Checked first, before anything below gets a chance
+     * to set $COLUMNS/$LINES itself. */
+    ok = selftest__shell_xmas_compat_step(
+        ok, &state, "shell_test_probe \"$COLUMNS,$LINES\" 80,24", 0, "80,24"
+    );
+    ok = selftest__shell_xmas_compat_step(
+        ok, &state, "get-msecs() { shell_test_probe called; }; get-msecs", 0, "called"
+    );
+    ok = selftest__shell_xmas_compat_step(
+        ok, &state, "x=${ echo hi; }; shell_test_probe \"$x\" hi", 0, "hi"
+    );
+    ok = selftest__shell_xmas_compat_step(
+        ok,
+        &state,
+        "f() { local OPTIND OPTARG opt; while getopts 'a' opt; do :; done; shell_test_probe \"$OPTIND\" 1; };"
+        " f cup 1 2",
+        0, "1"
+    );
+    ok = selftest__shell_xmas_compat_step(
+        ok, &state, "shell_test_probe \"$(echo -n a; echo -n b)\" ab", 0, "ab"
+    );
+    ok = selftest__shell_xmas_compat_step(
+        ok, &state, "shell_test_probe \"$(echo -e 'a\\tb')\" $'a\\tb'", 0, "a\tb"
+    );
+    ok = selftest__shell_xmas_compat_step(
+        ok, &state, "f() { shell_test_probe $(($1 + 1)) 6; }; f 5", 0, "6"
+    );
+    ok = selftest__shell_xmas_compat_step(
+        ok, &state, "x=5; shell_test_probe $(( \"$x\" + 1 )) 6", 0, "6"
+    );
+    ok = selftest__shell_xmas_compat_step(
+        ok, &state, "f() { local arr=(a b c); shell_test_probe \"${arr[1]}\" b; }; f", 0, "b"
+    );
+    /* "tput cols"/"tput lines" prefer the shell's own $COLUMNS/$LINES over a
+     * direct tty query -- this is the path a "$(tput cols)" command
+     * substitution actually runs through (shell_executor__capture_external()
+     * deliberately never gives that forked child's session a tty size at
+     * all, by design, so tty__isatty() is always false there), and this
+     * selftest's own session has no real tty either, the same as that
+     * forked child. Without the fallback, xmas.ysap.sh's own
+     * "COLUMNS=$(tput cols)" clobbers a perfectly good, already-exported
+     * $COLUMNS with 0, and "$((RANDOM % COLUMNS))" in its snowfall loop then
+     * divides by that zero every single frame -- confirmed on real
+     * hardware, not just a test harness with no tty of its own. */
+    ok = selftest__shell_xmas_compat_step(
+        ok, &state, "export COLUMNS=100; shell_test_probe $(tput cols) 100", 0, "100"
+    );
+    /* An unsupported tput subcommand ("setaf"/"sgr0"/... -- anything but
+     * "cols"/"lines") prints nothing and just fails, rather than an error
+     * message that command substitution would capture as if it were the
+     * real output. This mattered for real: xmas.ysap.sh's own
+     * "COLOR_TREE=$(tput setaf 2)" (and COLOR_STAR/COLOR_RST/every
+     * COLOR_LIGHTS/SNOWFLAKE_COLORS array element) all run via "$(tput
+     * setaf N)"/"$(tput sgr0)" *before* the script's own "tput()" function
+     * override further down is even defined, so every one of them reached
+     * this builtin -- and an error message here used to get captured as
+     * each color's entire value instead of a real ANSI code, corrupting
+     * every drawn line it ever touched (confirmed on a real device: the
+     * GUI Terminal app's alternate-screen clear worked fine, then nothing
+     * ever appeared afterward). */
+    ok = selftest__shell_xmas_compat_step(ok, &state, "shell_test_probe \"$(tput setaf 2)\"", 0, "");
+
+    shell__state_free(&state);
+    printf("[selftest] shell/xmas-compat: %s\n", ok ? "OK" : "failed");
+    return ok;
+}

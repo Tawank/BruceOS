@@ -3,10 +3,24 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#define SHELL__MAX_COMMANDS 32
+/* 32 was tight enough that a single real-world function body with a few
+ * dozen statements in its loop (e.g. an animation main loop) could overflow
+ * it outright ("too many commands") -- shell_parser__plan() flattens an
+ * entire compound block (a whole function body, not just one of its nested
+ * loops) into one plan with no nesting-awareness, so this has to cover a
+ * script's single largest function, not just one line. */
+#define SHELL__MAX_COMMANDS 256
 /* Safety caps against runaway expansions, not preallocation sizes. */
 #define SHELL__MAX_WORDS 24
-#define SHELL__WORD_MAX 256
+/* 256 was tight enough that a single word built from several ${NAME/pat/
+ * repl} substitutions splicing in ANSI color codes (e.g. xmas.ysap.sh's own
+ * "t=${t// 0 / ${COLOR_LIGHTS[...]}o${COLOR_TREE} }" run four times over an
+ * already-sizeable multi-line tree-art variable) routinely blows past it
+ * well before the result is even assigned anywhere -- shell_dynbuf_t grows
+ * on demand up to this cap, so raising it costs nothing for a word that
+ * never needs it. Matches SHELL__VARIABLE_VALUE_MAX (shell_internal.h) --
+ * no point building a word bigger than a variable could ever hold anyway. */
+#define SHELL__WORD_MAX 2048
 #define SHELL__PARSED_NAME_MAX 32
 /* Safety cap on a "<<DELIM" heredoc body's expanded size (see
  * shell_parser__expand_text() below) -- deliberately bigger than

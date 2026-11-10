@@ -121,6 +121,74 @@ shell_parser__substitution_span(const char *text, size_t length, size_t start, b
     return false;
 }
 
+/* Finds the end of a "${ list; }" span (bash 5.3's brace-group command
+ * substitution -- runs `list` and captures its stdout, same as "$(list)" but
+ * without forking a subshell to do it). `start` points at the '$' with
+ * text[start+1] == '{' and text[start+2] whitespace -- that mandatory space
+ * right after '{' is what the caller uses to tell this apart from an
+ * ordinary "${NAME...}" parameter expansion, which never starts with one.
+ * Tracks nested '{'/'}' pairs the same way shell_parser__substitution_span()
+ * above tracks nested '('/')', and skips quoted content within the span, but
+ * does not itself special-case any inner "$(...)"/"${...}" (unlike that
+ * function, which does track nested command substitutions) -- a documented
+ * scope limitation, since none of this shell's own scripts nest braces
+ * inside this form. This shell has no real subshell-less execution path, so
+ * callers treat the captured content exactly like a "$(...)" span: run it
+ * through the same shell_command_substitution_fn and splice its output in. */
+static bool shell_parser__brace_command_span(const char *text, size_t length, size_t start, size_t *out_end) {
+    size_t i = start + 2;
+    int depth = 1;
+    bool single = false, double_quote = false, escaped = false;
+    while (i < length) {
+        char c = text[i];
+        if (escaped) {
+            escaped = false;
+            i++;
+            continue;
+        }
+        if (!single && c == '\\') {
+            escaped = true;
+            i++;
+            continue;
+        }
+        if (!double_quote && c == '\'') {
+            single = !single;
+            i++;
+            continue;
+        }
+        if (!single && c == '"') {
+            double_quote = !double_quote;
+            i++;
+            continue;
+        }
+        if (single || double_quote) {
+            i++;
+            continue;
+        }
+        if (c == '{') {
+            depth++;
+        } else if (c == '}') {
+            depth--;
+            if (depth == 0) {
+                *out_end = i + 1;
+                return true;
+            }
+        }
+        i++;
+    }
+    return false;
+}
+
+/* True when text[start] == '$' and text[start+1] == '{' and the byte right
+ * after that '{' is whitespace -- the shape shell_parser__brace_command_span()
+ * above matches, as opposed to an ordinary "${NAME...}" parameter expansion
+ * (which never has a space there). Shared by every top-level scan that needs
+ * to skip over this span as one opaque unit, the same way each already skips
+ * "$(...)"/"`...`" via shell_parser__substitution_span(). */
+static bool shell_parser__is_brace_command_start(const char *text, size_t length, size_t i) {
+    return text[i] == '$' && i + 2 < length && text[i + 1] == '{' && isspace((unsigned char)text[i + 2]);
+}
+
 /* Parses the "<<"/"<<-" heredoc marker starting at text[start] (caller has
  * already confirmed text[start] == '<' && text[start + 1] == '<') -- the
  * optional '-' and the delimiter word that follows on the same line (bare,
@@ -210,6 +278,15 @@ bool shell_parser__find_heredoc_marker(
         if ((c == '$' && i + 1 < length && line[i + 1] == '(') || c == '`') {
             size_t end = 0;
             if (!shell_parser__substitution_span(line, length, i, c == '`', &end)) {
+                *error = "unterminated command substitution";
+                return false;
+            }
+            i = end - 1;
+            continue;
+        }
+        if (shell_parser__is_brace_command_start(line, length, i)) {
+            size_t end = 0;
+            if (!shell_parser__brace_command_span(line, length, i, &end)) {
                 *error = "unterminated command substitution";
                 return false;
             }
@@ -353,6 +430,15 @@ static int shell_parser__extract_redirect(
         if ((c == '$' && i + 1 < length && text[i + 1] == '(') || c == '`') {
             size_t end = 0;
             if (!shell_parser__substitution_span(text, length, i, c == '`', &end)) {
+                *error = "unterminated command substitution";
+                return -1;
+            }
+            i = end - 1;
+            continue;
+        }
+        if (shell_parser__is_brace_command_start(text, length, i)) {
+            size_t end = 0;
+            if (!shell_parser__brace_command_span(text, length, i, &end)) {
                 *error = "unterminated command substitution";
                 return -1;
             }
@@ -646,6 +732,20 @@ int shell_parser__plan(
     size_t start = 0;
     size_t heredoc_index = 0;
     shell_connector_t next_connector = SHELL_CONNECT_NONE;
+    /* True whenever `next_connector` was set only by a blank/comment-only
+     * line's own trailing '\n' (see the `c != '\n'` leniency below this
+     * loop already has), rather than by a real operator the script
+     * actually wrote. A second real operator arriving on top of that --
+     * e.g. "done\n\t;;" (a loop's "done", a blank/indented line, then a
+     * case clause's own "ending) is still only ONE meaningful connector
+     * from the script's point of view, just like "done;;" on one line
+     * would be -- so it's allowed to upgrade a soft placeholder instead of
+     * tripping the "two operators with nothing real between them" check
+     * below, the same way that check already exempts an incoming '\n'
+     * outright. Cleared the moment a real command is pushed (next_connector
+     * itself resets to NONE then too) or a real operator does this same
+     * upgrade. */
+    bool next_connector_soft = false;
     bool single = false;
     bool double_quote = false;
     bool escaped = false;
@@ -745,6 +845,16 @@ int shell_parser__plan(
         if ((c == '$' && i + 1 < length && line[i + 1] == '(') || c == '`') {
             size_t end = 0;
             if (!shell_parser__substitution_span(line, length, i, c == '`', &end)) {
+                *error = "unterminated command substitution";
+                return -1;
+            }
+            i = end - 1;
+            token_boundary = false;
+            continue;
+        }
+        if (shell_parser__is_brace_command_start(line, length, i)) {
+            size_t end = 0;
+            if (!shell_parser__brace_command_span(line, length, i, &end)) {
                 *error = "unterminated command substitution";
                 return -1;
             }
@@ -865,8 +975,10 @@ int shell_parser__plan(
                 }
                 if (background_op) plan->commands[plan->count - 1].background = true;
                 next_connector = SHELL_CONNECT_NONE;
+                next_connector_soft = false;
             } else if (
-                operator_size != 0 && c != '\n' && (plan->count == 0 || next_connector != SHELL_CONNECT_NONE)
+                operator_size != 0 && c != '\n' &&
+                (plan->count == 0 || (next_connector != SHELL_CONNECT_NONE && !next_connector_soft))
             ) {
                 *error = "unexpected operator";
                 return -1;
@@ -879,7 +991,10 @@ int shell_parser__plan(
                  * with nothing before it, which is a real syntax error, this
                  * is just whitespace and must not downgrade or clobber
                  * whatever real connector (if any) is already pending. */
-                if (c != '\n' || next_connector == SHELL_CONNECT_NONE) next_connector = connector;
+                if (c != '\n' || next_connector == SHELL_CONNECT_NONE) {
+                    next_connector = connector;
+                    next_connector_soft = (c == '\n');
+                }
                 i += operator_size - 1;
                 start = i + 1;
                 comment_start = SIZE_MAX;
@@ -1193,6 +1308,27 @@ static int shell_parser__expand(
         *position = i + 2;
         const char *value = lookup != NULL ? lookup(context, key) : NULL;
         return value == NULL || shell_dynbuf__append(word, value, strlen(value)) ? 0 : -1;
+    }
+    /* "${ list; }" -- bash 5.3's brace-group command substitution: runs
+     * `list` and captures its stdout, the same as "$(list)" but without
+     * forking a subshell to do it (see shell_parser__brace_command_span()'s
+     * own doc comment above). This shell has no real subshell-less
+     * execution path of its own, so it's spliced in exactly like "$(...)"
+     * is just below -- functionally equivalent from any script's point of
+     * view, since neither form lets the body observe or mutate this shell's
+     * own variables either way. Checked ahead of the ordinary "${NAME...}"
+     * branch right below: the mandatory space right after '{' is what tells
+     * the two apart (shell_parser__is_brace_command_start()'s own check). */
+    if (command->text[i + 1] == '{' && i + 2 < command->length && isspace((unsigned char)command->text[i + 2])) {
+        size_t end = 0;
+        if (!shell_parser__brace_command_span(command->text, command->length, i, &end)) {
+            *error = "unterminated command substitution";
+            return -1;
+        }
+        size_t content_start = i + 2;
+        size_t content_len = (end - 1) - content_start;
+        *position = end;
+        return shell_parser__splice_substitution(command, content_start, content_len, word, substitute, context, error);
     }
     if (command->text[i + 1] == '{') {
         i += 2;
