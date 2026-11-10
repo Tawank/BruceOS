@@ -868,29 +868,18 @@ int shell_parser__plan(
             continue;
         }
         if (arith_depth == 0 && c == '(' && i + 1 < length && line[i + 1] == '(') {
-            /* This is the first '(' of the doubled "((" opener; the second
-             * one is counted by the ordinary +1 below when the next loop
-             * iteration reaches it -- setting arith_depth to 2 here too
-             * would double-count it. */
             arith_depth = 1;
         } else if (arith_depth > 0) {
             if (c == '(') arith_depth++;
             else if (c == ')') arith_depth--;
         }
         if (arith_depth > 0 && c != '\0') {
-            /* Never swallow the end-of-buffer sentinel here: even an
-             * unterminated "((" must still fall through to the flush logic
-             * below so the last command isn't silently dropped. */
             token_boundary = isspace((unsigned char)c);
             continue;
         }
         if (c == '(') paren_depth++;
         else if (c == ')' && paren_depth > 0) paren_depth--;
         if (paren_depth > 0 && c != '\0') {
-            /* Same "never swallow end-of-buffer" reasoning as arith_depth's
-             * own sentinel note just above -- an unterminated array literal
-             * must still flush at the end of the buffer rather than
-             * vanishing silently. */
             token_boundary = isspace((unsigned char)c);
             continue;
         }
@@ -904,21 +893,12 @@ int shell_parser__plan(
             in_double_bracket = false;
         }
         if (in_double_bracket && c != '\0') {
-            /* Same reasoning as arith_depth's own sentinel note above: an
-             * unterminated "[[" must still fall through and flush at the
-             * end of the buffer rather than swallowing it -- once flushed,
-             * shell_condition__run() reports the missing "]]" itself with a
-             * clearer message than a parse error here would. */
             token_boundary = isspace((unsigned char)c);
             continue;
         }
         shell_connector_t connector = SHELL_CONNECT_NONE;
         size_t operator_size = 0;
-        /* Set when this iteration's operator is a lone "&": the command
-         * about to be flushed below is backgrounded (see
-         * shell_command_t::background), and -- same as ";" -- whatever
-         * follows just runs next unconditionally, hence SHELL_CONNECT_SEQUENCE
-         * rather than a new connector kind of its own. */
+
         bool background_op = false;
         if (c == ';' && i + 1 < length && line[i + 1] == ';') {
             connector = SHELL_CONNECT_CASE_END;
@@ -936,13 +916,7 @@ int shell_parser__plan(
             connector = SHELL_CONNECT_PIPE;
             operator_size = 1;
         } else if (c == '&') {
-            /* Not every bare '&' backgrounds the command: one right after a
-             * '>' is a "2>&1"/"1>&2" dup-fd target (shell_parser__extract_redirect()
-             * sorts out what follows it), and one that opens its own token
-             * right before a '>' is a "&>"/"&>>" combined-stream redirection
-             * prefix -- neither is the job-control operator, so leave both
-             * as plain text for that per-command pass to parse instead. */
-            bool dup_target_amp = i > 0 && line[i - 1] == '>';
+            bool dup_target_amp = i > 0 && (line[i - 1] == '>' || line[i - 1] == '<');
             bool combined_prefix_amp = token_boundary && i + 1 < length && line[i + 1] == '>';
             if (!dup_target_amp && !combined_prefix_amp) {
                 connector = SHELL_CONNECT_SEQUENCE;
@@ -1303,7 +1277,7 @@ static int shell_parser__expand(
      * collect more digits. An unset positional parameter expands to nothing,
      * same as an unset named variable below. */
     if (command->text[i + 1] == '#' || command->text[i + 1] == '!' || command->text[i + 1] == '$' ||
-        isdigit((unsigned char)command->text[i + 1])) {
+        command->text[i + 1] == '@' || command->text[i + 1] == '*' || isdigit((unsigned char)command->text[i + 1])) {
         char key[2] = {command->text[i + 1], '\0'};
         *position = i + 2;
         const char *value = lookup != NULL ? lookup(context, key) : NULL;

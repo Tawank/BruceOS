@@ -238,6 +238,7 @@ static const selftest__case_t selftest__cases[] = {
     SELFTEST_CASE(selftest__run_shell_herestring_case),
     SELFTEST_CASE(selftest__run_shell_printf_case),
     SELFTEST_CASE(selftest__run_shell_xmas_compat_case),
+    SELFTEST_CASE(selftest__run_shell_nightfall_compat_case),
     SELFTEST_CASE(selftest__run_stdio_raw_session_case),
     SELFTEST_CASE(selftest__run_bnu_case),
     SELFTEST_CASE(selftest__run_bnu_sed_case),

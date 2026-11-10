@@ -3773,3 +3773,24 @@ bool selftest__run_shell_xmas_compat_case(void) {
     printf("[selftest] shell/xmas-compat: %s\n", ok ? "OK" : "failed");
     return ok;
 }
+
+bool selftest__run_shell_nightfall_compat_case(void) {
+    if (!selftest__shell_register_probe()) return false;
+    shell_state_t state;
+    shell__state_init(&state);
+
+    bool ok = true;
+    ok = selftest__shell_xmas_compat_step(ok, &state, "! false; shell_test_probe $?", 0, "0");
+    ok = selftest__shell_xmas_compat_step(ok, &state, "! true; shell_test_probe $?", 0, "1");
+    ok = selftest__shell_xmas_compat_step(ok, &state, "[[ -t 5 ]]; shell_test_probe $?", 0, "1");
+    ok = selftest__shell_xmas_compat_step(ok, &state, "command -v echo; shell_test_probe $?", 0, "0");
+    ok = selftest__shell_xmas_compat_step(ok, &state, "command -v nope_at_all; shell_test_probe $?", 0, "1");
+    ok = selftest__shell_xmas_compat_step(ok, &state, "f() { shell_test_probe \"$@\"; }; f a b", 0, "a b");
+    ok = selftest__shell_xmas_compat_step(
+        ok, &state, "f() { read x <&3; }; g() { shell_test_probe ok; }; g", 0, "ok"
+    );
+
+    shell__state_free(&state);
+    printf("[selftest] shell/nightfall-compat: %s\n", ok ? "OK" : "failed");
+    return ok;
+}

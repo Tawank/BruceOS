@@ -10,6 +10,7 @@
 #include "core_sdk/memory.h"
 #include "core_sdk/environment.h"
 #include "core_sdk/stdio.h"
+#include "core_sdk/app_runner.h"
 #include "core_sdk/storage.h"
 #include "core_sdk/tty.h"
 #include "shell_arith.h"
@@ -60,6 +61,7 @@ static const shell_builtin_entry_t s_shell_builtins[] = {
     {"disown", "Stop tracking a job without touching it"},
     {"trap", "Run a command when a signal is received or the shell exits"},
     {"tput", "Query terminal capabilities (cols/lines)"},
+    {"command", "Check whether a command exists (-v/-V)"},
 };
 
 static int shell_builtins__find_index(const shell_state_t *state, const char *name) {
@@ -1179,6 +1181,31 @@ static int shell_builtins__tput(shell_state_t *state, int argc, char **argv) {
     return value != 0 ? 0 : 1;
 }
 
+static bool shell_builtins__external_exists(const char *name) {
+    size_t count = app_runner__command_count();
+    for (size_t i = 0; i < count; ++i) {
+        const char *existing = app_runner__command_name(i);
+        if (existing != NULL && strcmp(existing, name) == 0) return true;
+    }
+    return false;
+}
+
+/* "command -v NAME": prints NAME and returns 0 if it's a known builtin,
+ * function, or registered app; else prints nothing and returns 1 -- e.g.
+ * nightfall.ysap.sh's own "if ! command -v ffplay &>/dev/null". Only -v/-V
+ * (existence query) is implemented; "command NAME args..." (run NAME
+ * bypassing a same-named function) is not. */
+static int shell_builtins__command(shell_state_t *state, int argc, char **argv) {
+    if (argc == 3 && (strcmp(argv[1], "-v") == 0 || strcmp(argv[1], "-V") == 0)) {
+        const char *name = argv[2];
+        bool exists = shell_compound__is_function(state, name) || shell_builtins__is_builtin(name) ||
+                      shell_builtins__external_exists(name);
+        if (exists) stdio__printf("%s\n", name);
+        return exists ? 0 : 1;
+    }
+    return 2;
+}
+
 /* "echo [-neE] [ARG ...]" -- bash's builtin, not merely "print the argv
  * joined by spaces": real scripts (e.g. xmas.ysap.sh's own "tput()"
  * override, "echo -n "$ESC[...]"" for every escape sequence it emits) lean
@@ -1241,6 +1268,7 @@ int shell_builtins__run(shell_state_t *state, int argc, char **argv) {
     if (strcmp(argv[0], "echo") == 0) return shell_builtins__echo(argc, argv);
     if (strcmp(argv[0], "printf") == 0) return shell_builtins__printf(argc, argv);
     if (strcmp(argv[0], "tput") == 0) return shell_builtins__tput(state, argc, argv);
+    if (strcmp(argv[0], "command") == 0) return shell_builtins__command(state, argc, argv);
     if (strcmp(argv[0], "true") == 0) return 0;
     if (strcmp(argv[0], "false") == 0) return 1;
     if (strcmp(argv[0], "test") == 0 || strcmp(argv[0], "[") == 0 || strcmp(argv[0], "[[") == 0) {

@@ -105,6 +105,9 @@ void shell__state_free(shell_state_t *state) {
     state->trap_exit = NULL;
     state->trap_int = NULL;
     state->trap_term = NULL;
+    memory__free(state->positional_join_text);
+    state->positional_join_text = NULL;
+    state->positional_join_capacity = 0;
 }
 
 int shell__execute_line(shell_state_t *state, const char *line) {

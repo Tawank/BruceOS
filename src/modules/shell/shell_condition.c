@@ -7,6 +7,7 @@
 
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
+#include "core_sdk/tty.h"
 #include "shell_builtins.h"
 
 /* Basic bash-like test(1) subset: unary -z/-n, the -e/-f/-d/-r/-w/-x file
@@ -122,6 +123,7 @@ static int shell_condition__eval_base(const shell_state_t *state, int argc, char
     if (argc == 2) {
         if (strcmp(argv[0], "-z") == 0) return shell_condition__truthy(argv[1]) ? 1 : 0;
         if (strcmp(argv[0], "-n") == 0) return shell_condition__truthy(argv[1]) ? 0 : 1;
+        if (strcmp(argv[0], "-t") == 0) return tty__isatty() ? 0 : 1;
         int file_test = shell_condition__file_test(state, argv[0], argv[1]);
         if (file_test != -1) return file_test;
         stdio__printf("shell: test: %s: unsupported unary operator\n", argv[0]);

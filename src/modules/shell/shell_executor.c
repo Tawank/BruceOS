@@ -59,6 +59,26 @@ const char *shell_executor__lookup(void *context, const char *name) {
             snprintf(state->pid_text, sizeof(state->pid_text), "%u", (unsigned)process__current_id());
             return state->pid_text;
         }
+        if (name[0] == '@' || name[0] == '*') {
+            size_t needed = 1;
+            for (int i = 0; i < state->positional_count; ++i) {
+                needed += strlen(state->positional[i]) + (i > 0 ? 1u : 0u);
+            }
+            if (needed > state->positional_join_capacity) {
+                char *grown = memory__realloc(state->positional_join_text, needed);
+                if (grown == NULL) return "";
+                state->positional_join_text = grown;
+                state->positional_join_capacity = needed;
+            }
+            char *out = state->positional_join_text;
+            size_t used = 0;
+            for (int i = 0; i < state->positional_count; ++i) {
+                int written = snprintf(out + used, needed - used, "%s%s", i > 0 ? " " : "", state->positional[i]);
+                if (written > 0) used += (size_t)written;
+            }
+            if (state->positional_count == 0) out[0] = '\0';
+            return out;
+        }
     }
     /* "$RANDOM" -- a fresh 0..32767 draw (esp_random() is a real hardware
      * RNG, not a seeded pseudo-random stream, so there's no "srand(seed)"
@@ -232,7 +252,12 @@ static int shell_executor__launch_external(
      * copied after this default and therefore still wins. This also covers
      * producer and destination launches, whose callers pass no overlay. */
     if (environment_count > SHELL__MAX_PREFIX_ENVIRONMENT) return BRUCE_ERR_RESOURCE_LIMIT;
-    bruce_environment_variable_t cli_environment[SHELL__MAX_PREFIX_ENVIRONMENT + 1u];
+    bruce_environment_variable_t *cli_environment =
+        memory__malloc((SHELL__MAX_PREFIX_ENVIRONMENT + 1u) * sizeof(*cli_environment));
+    if (cli_environment == NULL) {
+        stdio__printf("shell: out of memory\n");
+        return 1;
+    }
     cli_environment[0] = (bruce_environment_variable_t){.name = "GUI", .value = "0"};
     if (environment_count > 0) {
         memcpy(cli_environment + 1u, environment, environment_count * sizeof(*environment));
@@ -255,6 +280,7 @@ static int shell_executor__launch_external(
     char *arguments = memory__malloc(capacity);
     if (arguments == NULL) {
         stdio__printf("shell: out of memory\n");
+        memory__free(cli_environment);
         return 1;
     }
     used = 0;
@@ -268,6 +294,7 @@ static int shell_executor__launch_external(
         if (!shell_executor__append_arg(arguments, capacity, &used, argv[i])) {
             stdio__printf("shell: arguments too long\n");
             memory__free(arguments);
+            memory__free(cli_environment);
             return 2;
         }
     }
@@ -282,6 +309,7 @@ static int shell_executor__launch_external(
         );
     }
     memory__free(arguments);
+    memory__free(cli_environment);
     return launched;
 }
 
@@ -1915,6 +1943,10 @@ static void shell_executor__restore_temp_environment(
  * its redirect fields (see shell_parser.h) -- `words`/`argc` are already the
  * result of word-splitting `command`'s (possibly redirect-shortened) text. */
 static int shell_executor__dispatch(shell_state_t *state, const shell_command_t *command, char **words, int argc) {
+    if (argc >= 2 && strcmp(words[0], "!") == 0) {
+        int status = shell_executor__dispatch(state, command, words + 1, argc - 1);
+        return status == 0 ? 1 : 0;
+    }
     /* "NAME=(elem...)" / "NAME+=(elem...)" -- checked before anything else
      * below, which would otherwise misread words[0] ("NAME=", a valid
      * "NAME=value" shape with an empty value) as an ordinary scalar
@@ -2067,7 +2099,11 @@ static int shell_executor__dispatch(shell_state_t *state, const shell_command_t 
      * external command already gets them via `environment.items` instead,
      * see shell_executor__external() and friends). */
     bool apply_prefix_to_self = (is_function || is_builtin) && !command->background && environment.count > 0;
-    shell_executor__env_save_t prefix_saves[SHELL__MAX_PREFIX_ENVIRONMENT];
+    shell_executor__env_save_t *prefix_saves = NULL;
+    if (apply_prefix_to_self) {
+        prefix_saves = memory__malloc(SHELL__MAX_PREFIX_ENVIRONMENT * sizeof(*prefix_saves));
+        apply_prefix_to_self = prefix_saves != NULL;
+    }
     if (apply_prefix_to_self) {
         (void)shell_executor__apply_temp_environment(state, environment.items, environment.count, prefix_saves);
     }
@@ -2117,6 +2153,7 @@ static int shell_executor__dispatch(shell_state_t *state, const shell_command_t 
     if (apply_prefix_to_self) {
         shell_executor__restore_temp_environment(state, prefix_saves, environment.count);
     }
+    memory__free(prefix_saves);
     /* Only wall-clock ("real") time is available here -- the process SDK
      * exposes a live cpu_percent gauge (see bruce_process_snapshot_t) but no
      * cumulative user/sys CPU time to report alongside it, unlike bash's

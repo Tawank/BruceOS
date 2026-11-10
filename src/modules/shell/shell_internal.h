@@ -58,7 +58,14 @@
  * callers in shell_app.c. This bounds that accumulation buffer, same
  * "runaway input" role SHELL__LINE_MAX plays for a single line. */
 #define SHELL__BLOCK_MAX 4096
-#define SHELL__MAX_FUNCTIONS 8
+/* 8 was tight enough that a real-world script defining a handful of small
+ * helpers plus its own "tput()" override and a "main" (e.g. nightfall.ysap.sh:
+ * tput/fatal/cleanup/make-url/stop/play/play-song-task/
+ * read-keyboard-events-task/main, 9 functions) hits "function limit reached"
+ * partway through loading -- state->functions[] grows on demand
+ * (shell_compound.c), so raising this costs nothing for a script that
+ * never needs it. */
+#define SHELL__MAX_FUNCTIONS 32
 #define SHELL__FUNCTION_NAME_MAX SHELL__VARIABLE_NAME_MAX
 #define SHELL__FUNCTION_BODY_MAX SHELL__BLOCK_MAX
 /* $1..$9: bash only ever expands a single digit unbraced ($10 is $1 followed
@@ -168,6 +175,16 @@ typedef struct {
      * shell_executor__lookup() -- see shell_parser__expand()'s digit branch
      * in shell_parser.c, which is what actually asks for "#". */
     char positional_count_text[4];
+    /* "$@"/"$*"'s formatted expansion (space-joined positional parameters).
+     * Heap-allocated (grown on demand, freed in shell__state_free()) rather
+     * than a fixed struct field: shell_state_t is stack-declared everywhere
+     * (every selftest case, every shell invocation), so a field here is a
+     * permanent cost paid by every one of them whether or not "$@"/"$*" is
+     * ever used. Not a real bash "$@" (each positional kept as its own word
+     * when quoted); this shell has no multi-word expansion result type, so
+     * this collapses both forms to one joined scalar. */
+    char *positional_join_text;
+    size_t positional_join_capacity;
     /* "cmd &" background jobs -- see shell_jobs.c. `last_background_pid` is
      * $!'s value (0/BRUCE_PROCESS_ID_INVALID before any "&" has run this
      * session); `last_background_pid_text` is $!'s formatted expansion,
