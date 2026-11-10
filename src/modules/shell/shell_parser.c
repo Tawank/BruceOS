@@ -686,7 +686,7 @@ static int shell_parser__extract_redirect(
                 if (is_dup_target) dup_fd = (target_len - 1 == 1) ? (text[target_start + 1] - '0') : -2;
             }
             if (is_dup_target) {
-                if (dup_fd != 1 && dup_fd != 2) {
+                if (dup_fd == -2) {
                     *error = "unsupported file descriptor in redirection";
                     return -1;
                 }
