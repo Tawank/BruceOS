@@ -307,7 +307,7 @@ static void archive_app__draw_footer_usage(void *context) {
 }
 
 static void archive_app__show_error(const char *action, bruce_result_t result) {
-    char message[96];
+    char message[160];
     snprintf(message, sizeof(message), "%s failed: %s", action, result__to_string(result));
     (void)dialog__message(BRUCE_DIALOG_ERROR, "Archive", message);
 }

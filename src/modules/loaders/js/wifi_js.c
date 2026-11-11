@@ -115,6 +115,7 @@ JSValue native_httpFetch(JSContext *ctx, JSValue *this_val, int argc, JSValue *a
     size_t body_len = 0;
     const char *headers[WIFI_JS_MAX_HEADERS * 2];
     size_t header_count = 0;
+    JSCStringBuf object_header_key_bufs[WIFI_JS_MAX_HEADERS];
     uint8_t return_response_type = 0; /* 0 = string, 1 = binary, 2 = json */
 
     JSCStringBuf body_buf;
@@ -203,7 +204,9 @@ JSValue native_httpFetch(JSContext *ctx, JSValue *this_val, int argc, JSValue *a
                 } else if (JS_IsObject(ctx, jsv_headers)) {
                     uint32_t prop_count = 0;
                     for (uint32_t index = 0; header_count < WIFI_JS_MAX_HEADERS; ++index) {
-                        const char *key = JS_GetOwnPropertyByIndex(ctx, index, &prop_count, jsv_headers);
+                        const char *key = JS_GetOwnPropertyByIndex(
+                            ctx, index, &prop_count, jsv_headers, &object_header_key_bufs[header_count]
+                        );
                         if (key == NULL) break;
                         JSValue value_val = JS_GetPropertyStr(ctx, jsv_headers, key);
                         if (!JS_IsUndefined(value_val) &&

@@ -35,6 +35,7 @@
 #endif
 
 #define AUDIO__MAX_ASYNC_TONES 4u
+#define AUDIO__PRODUCER_TASK_PRIORITY (tskIDLE_PRIORITY + 4u)
 
 typedef struct {
     uint32_t frequency_hz;
@@ -387,7 +388,8 @@ bruce_result_t audio__tone(uint32_t frequency_hz, uint32_t duration_ms, bool non
         return BRUCE_ERR_NO_MEMORY;
     }
     *task_params = params;
-    if (xTaskCreate(audio__tone_task, "audio_tone", 4096, task_params, 4, NULL) != pdPASS) {
+    if (xTaskCreate(audio__tone_task, "audio_tone", 4096, task_params, AUDIO__PRODUCER_TASK_PRIORITY, NULL) !=
+        pdPASS) {
         free(task_params);
         portENTER_CRITICAL(&s_audio_init_mux);
         s_async_tone_count--;
@@ -866,6 +868,7 @@ bruce_result_t audio__file_play(const char *path) {
         .built_in = true,
         .start_in_background = true,
         .stack_bytes = AUDIO__FILE_PLAY_TASK_STACK_BYTES,
+        .priority = AUDIO__PRODUCER_TASK_PRIORITY,
         .process_entry = audio__file_play_process_entry,
         .process_entry_context = context,
         .process_entry_cleanup = audio__file_play_process_cleanup,

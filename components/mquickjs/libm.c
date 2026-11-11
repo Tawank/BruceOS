@@ -33,7 +33,6 @@
 #include <stdio.h>
 #include <inttypes.h>
 #include <math.h>
-#define NDEBUG
 #include <assert.h>
 
 #include "cutils.h"

@@ -471,7 +471,7 @@ static int wasm_loader__entry(void *context) {
             snprintf(
                 message,
                 sizeof(message),
-                "Can't run %s. It may be built for a different Bruce version.\n%s",
+                "Can't run %.64s. It may be built for a different Bruce version.\n%.64s",
                 wasm_loader__basename(ctx->path),
                 detail
             );
@@ -536,7 +536,7 @@ static int wasm_loader__process_entry(void *context) {
         if (ctx->gui) {
             char message[192];
             snprintf(
-                message, sizeof(message), "Can't run %s: %s", wasm_loader__basename(ctx->path), error_buf
+                message, sizeof(message), "Can't run %.85s: %.85s", wasm_loader__basename(ctx->path), error_buf
             );
             (void)dialog__message(BRUCE_DIALOG_ERROR, "Launch failed", message);
         }
@@ -618,6 +618,7 @@ static int wasm_loader__open(
         return BRUCE_ERR_NO_MEMORY;
     }
     strncpy(ctx->path, normalized_path, sizeof(ctx->path) - 1u);
+    ctx->path[sizeof(ctx->path) - 1u] = '\0';
     ctx->argc = argc + 1;
     ctx->argv = full_argv;
 

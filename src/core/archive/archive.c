@@ -367,6 +367,7 @@ static bruce_result_t archive__list_visitor(mtar_t *tar, const mtar_header_t *he
     bruce_archive_entry_t entry;
     memset(&entry, 0, sizeof(entry));
     strncpy(entry.name, header->name, sizeof(entry.name) - 1);
+    entry.name[sizeof(entry.name) - 1] = '\0';
     entry.size = header->size;
     entry.is_directory = header->type == MTAR_TDIR;
     return ctx->callback(ctx->user_context, &entry) ? BRUCE_OK : BRUCE_ERR_CANCELLED;

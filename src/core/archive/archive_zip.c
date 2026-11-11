@@ -247,6 +247,7 @@ bruce_result_t archive__zip_list(const char *archive_path, bruce_archive_list_fn
         bruce_archive_entry_t entry;
         memset(&entry, 0, sizeof(entry));
         strncpy(entry.name, name, sizeof(entry.name) - 1);
+        entry.name[sizeof(entry.name) - 1] = '\0';
         entry.size = (size_t)info.uncompressed_size;
         size_t name_len = strlen(entry.name);
         entry.is_directory = name_len > 0 && entry.name[name_len - 1] == '/';

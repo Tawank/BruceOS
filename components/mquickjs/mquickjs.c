@@ -2742,7 +2742,8 @@ JSValue JS_GetPropertyUint32(JSContext *ctx, JSValue obj, uint32_t idx)
 const char *JS_GetOwnPropertyByIndex(JSContext *ctx,
                                     uint32_t property_index,
                                     uint32_t *pcount,
-                                    JSValue val)
+                                    JSValue val,
+                                    JSCStringBuf *buf)
 {
     JSValueArray *arr;
     JSProperty *pr;
@@ -2764,13 +2765,11 @@ const char *JS_GetOwnPropertyByIndex(JSContext *ctx,
         return NULL;
     }
 
-    JSCStringBuf buf;
-
     for (i = 0, j = 0; j < prop_count; i++) {
         pr = (JSProperty *)&arr->arr[2 + (hash_mask + 1) + 3 * i];
         if (pr->key != JS_UNINITIALIZED) {
             if (j == property_index && JS_IsString(ctx, pr->key)) {
-                return JS_ToCString(ctx, pr->key, &buf);
+                return JS_ToCString(ctx, pr->key, buf);
             }
 
             j++;

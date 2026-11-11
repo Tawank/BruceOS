@@ -425,6 +425,7 @@ void process__fill_snapshot_locked(const process__record_t *record, bruce_proces
     out_snapshot->id = record->id;
     out_snapshot->state = record->state;
     strncpy(out_snapshot->name, record->name, BRUCE_PROCESS_NAME_MAX - 1);
+    out_snapshot->name[BRUCE_PROCESS_NAME_MAX - 1] = '\0';
     out_snapshot->stack_high_water_bytes = record->stack_high_water_bytes;
     out_snapshot->stack_total_bytes = record->stack_total_bytes;
     out_snapshot->cpu_percent = record->cpu_percent;

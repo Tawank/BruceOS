@@ -129,6 +129,7 @@ JSValue native_dialogChoice(JSContext *ctx, JSValue *this_val, int argc, JSValue
     bruce_dialog_choice_t choices[32] = {0};
     size_t choice_count = 0;
     char value_storage[32][64];
+    JSCStringBuf key_bufs[32];
 
     if (JS_GetClassID(ctx, choices_in) == JS_CLASS_ARRAY) {
         uint32_t len = js_native_array_length(ctx, choices_in);
@@ -162,7 +163,8 @@ JSValue native_dialogChoice(JSContext *ctx, JSValue *this_val, int argc, JSValue
     } else {
         uint32_t prop_count = 0;
         for (uint32_t idx = 0; choice_count < 32; ++idx) {
-            const char *key = JS_GetOwnPropertyByIndex(ctx, idx, &prop_count, choices_in);
+            const char *key =
+                JS_GetOwnPropertyByIndex(ctx, idx, &prop_count, choices_in, &key_bufs[choice_count]);
             if (key == NULL) { break; }
             JSValue val = JS_GetPropertyStr(ctx, choices_in, key);
             if (JS_IsString(ctx, val)) {

@@ -84,7 +84,10 @@ static void dialog__pick_file_go_up(char *current_path) {
 static void
 dialog__pick_file_note_returning_from(const char *current_path, char *out_name, size_t out_name_size) {
     const char *last_slash = strrchr(current_path, '/');
-    snprintf(out_name, out_name_size, "%s", last_slash != NULL ? last_slash + 1 : current_path);
+    snprintf(
+        out_name, out_name_size, "%.*s", (int)out_name_size - 1,
+        last_slash != NULL ? last_slash + 1 : current_path
+    );
 }
 
 /* Whole-number binary-prefix size, e.g. 20480 -> "20KiB", 2097152 -> "2MiB".

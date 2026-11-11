@@ -280,7 +280,9 @@ JSValue __js_printf_like(3, 4) JS_ThrowError(JSContext *ctx, JSObjectClassEnum e
 JSValue JS_ThrowOutOfMemory(JSContext *ctx);
 JSValue JS_GetPropertyStr(JSContext *ctx, JSValue this_obj, const char *str);
 JSValue JS_GetPropertyUint32(JSContext *ctx, JSValue obj, uint32_t idx);
-const char *JS_GetOwnPropertyByIndex(JSContext *ctx, uint32_t property_index, uint32_t *pcount, JSValue val);
+const char *JS_GetOwnPropertyByIndex(
+    JSContext *ctx, uint32_t property_index, uint32_t *pcount, JSValue val, JSCStringBuf *buf
+);
 JSValue JS_SetPropertyStr(JSContext *ctx, JSValue this_obj,
                           const char *str, JSValue val);
 JSValue JS_SetPropertyUint32(JSContext *ctx, JSValue this_obj,
