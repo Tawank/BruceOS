@@ -506,7 +506,7 @@ memory_external__allocate_page_locked(memory_external__record_t *record, size_t 
     }
 
     const void *mapped = NULL;
-    esp_partition_mmap_memory_t mapping = executable ? ESP_PARTITION_MMAP_INST : ESP_PARTITION_MMAP_DATA;
+    esp_partition_mmap_flag_t mapping = executable ? ESP_PARTITION_MMAP_INST : ESP_PARTITION_MMAP_DATA;
     if (esp_partition_mmap(partition, record->offset, record->size, mapping, &mapped, &record->mmap_handle) !=
         ESP_OK) {
         for (size_t i = 0; i < wanted; ++i) s_pages[first + i] = false;

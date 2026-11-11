@@ -89,8 +89,8 @@ bruce_result_t audio__stream_close(void);
  * @brief Starts playing a local audio file in the background and returns
  * immediately.
  *
- * Only WAV (8- or 16-bit PCM, mono or stereo, any sample rate -- resampled
- * to audio__stream_sample_rate()) is understood; anything else returns
+ * WAV (8- or 16-bit PCM, mono or stereo, any sample rate -- resampled to
+ * audio__stream_sample_rate()) and MP3 are understood; anything else returns
  * BRUCE_ERR_UNSUPPORTED without side effects, checked synchronously before
  * this returns (so a bad path or unsupported file is reported right away,
  * not discovered later in the background). A valid file is then handed off
@@ -107,6 +107,23 @@ bruce_result_t audio__stream_close(void);
  * its background process is killed without audio__file_stop() being called
  * first. No permission is required beyond already being able to read
  * `path` -- any process can start playback.
+ *
+ * MP3 playback decodes via esp_audio_simple_player, whose decoder runs on
+ * its own internal task rather than this process's; since a storage file
+ * handle can't be read across tasks that way, compressed bytes are streamed
+ * through a small fixed-size RAM ring instead (refilled from storage by
+ * this process's own task), so supported file size isn't bounded by RAM --
+ * unlike, say, loading the whole file into RAM up front would be, which
+ * matters on the boards this targets that have no PSRAM at all. seek()
+ * returns BRUCE_ERR_UNSUPPORTED and position_ms()/duration_ms() return 0
+ * for MP3 (position/duration tracking isn't implemented for it).
+ *
+ * This call itself never waits for the file to actually open -- that still
+ * happens in the background process, same as decoding. audio__file_is_open()
+ * covers the gap: it reports true from the moment this function returns
+ * until that process either opens the file for real or fails, so a caller
+ * that polls is_open()/is_playing() right away (to wait for playback to
+ * finish, say) can't mistake "hasn't opened yet" for "already finished".
  *
  * @param path Absolute, normalized path to the audio file.
  * @permission none
@@ -135,7 +152,8 @@ bruce_result_t audio__file_resume(void);
  * Takes effect the next time audio__file_play()'s own loop polls for it --
  * not necessarily instantaneous. A position past the end of the file clamps
  * to the end (audio__file_play() then finishes as if playback reached it
- * normally).
+ * normally). Returns BRUCE_ERR_UNSUPPORTED for a currently-playing MP3 (see
+ * audio__file_play()).
  *
  * @param position_ms Target position, in milliseconds from the start.
  * @permission none
@@ -154,10 +172,12 @@ bruce_result_t audio__file_seek(uint32_t position_ms);
 bruce_result_t audio__file_stop(void);
 
 /**
- * @brief True while a file opened by audio__file_play() is open, whether
- * actively playing or paused.
+ * @brief True while a file started by audio__file_play() is open (playing
+ * or paused), or still in the process of opening.
  *
- * False once it finishes, is stopped, or fails to open in the first place.
+ * True from the moment audio__file_play() returns, since opening happens in
+ * the background; false once it either fails to open, or finishes/is
+ * stopped after having opened.
  *
  * @permission none
  */

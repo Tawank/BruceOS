@@ -37,7 +37,7 @@ static inline bool IRAM_ATTR process_stack_guard__sp_is_sane(const void *sp) {
 static void __attribute__((noinline)) process_stack_guard__report(const char *operation, uint32_t sp, uint32_t caller) {
     TaskHandle_t task = xTaskGetCurrentTaskHandle();
     const char *name = task != NULL ? pcTaskGetName(task) : NULL;
-    uint8_t *stack_start = task != NULL ? pxTaskGetStackStart(task) : NULL;
+    StackType_t *stack_start = task != NULL ? xTaskGetStackStart(task) : NULL;
     esp_rom_printf(
         "\n[stack_guard] %s with bad SP 0x%08x on core %d\n"
         "[stack_guard] task '%s' (handle %p), stack starts at %p\n"

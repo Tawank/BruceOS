@@ -64,14 +64,14 @@ static const bruce_app_descriptor_t s_default_apps[] = {
     {"bruce_launcher",       "Open the Bruce launcher",                                   "System",  bruce_launcher_app_main,      0    },
     {"clock",                "Show clock and timer tools",                                "System",  clock_app_main,               0    },
     {"config",               "Configure Bruce settings",                                  "System",  config_app_main,              8192 },
-    {"coredump",             "Show or export the last crash's core dump",                 "System",  bnu_coredump_app_main,        8192u},
+    {"coredump",             "Show or export the last crash's core dump",                 "System",  bnu_coredump_app_main,        8192 },
     {"date",                 "Show or set the date and time",                             "System",  bnu_date_app_main,            0    },
     {"free",                 "Show memory usage",                                         "System",  bnu_free_app_main,            0    },
     {"memorydump",           "Dump a validated memory range",                             "System",  bnu_memorydump_app_main,      0    },
-    {"launcher",             "Launches configured launcher",                              "System",  launcher_app_main,            3072u},
+    {"launcher",             "Launches configured launcher",                              "System",  launcher_app_main,            3072 },
     {"man",                  "List commands or show command manuals",                     "System",  man_app_main,                 0    },
     {"menu",                 "Open the system menu",                                      "System",  system_menu_app_main,         0    },
-    {"notification_service", "The notification service",                                  "System",  notification_service_main,    0    },
+    {"notification_service", "The notification service",                                  "System",  notification_service_main,    3072 },
     {"notify",               "Send a notification",                                       "System",  notify_app_main,              0    },
     {"permissions",          "Manage application permissions",                            "System",  permissions_app_main,         8192 },
     {"process",              "List and manage processes",                                 "System",  process_app_main,             0    },
@@ -139,9 +139,9 @@ static const bruce_app_descriptor_t s_default_apps[] = {
 
     /* Shell - terminals, shells, and command frontends. */
     {"serial_commands",      "Run the terminal command service",                          "Shell",   serial_commands_app_main,     3072 },
-    {"shell",                "Run the command shell",                                     "Shell",   shell_app_main,               8192 },
+    {"shell",                "Run the command shell",                                     "Shell",   shell_app_main,               0    },
     {"stty",                 "Configure terminal settings",                               "Shell",   bnu_stty_app_main,            0    },
-    {"terminal",             "Open a terminal",                                           "Shell",   terminal_app_main,            8192 },
+    {"terminal",             "Open a terminal",                                           "Shell",   terminal_app_main,            0    },
 
     /* Content - viewing and editing text and images. */
     {"base64",               "Base64 encode or decode data",                              "Content", bnu_base64_app_main,          0    },

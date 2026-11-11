@@ -304,6 +304,7 @@ idf_component_register(SRCS
                      minizip
                      mquickjs
                      wasm-micro-runtime
+                     esp_audio_simple_player
                     INCLUDE_DIRS
                     "."
                       PRIV_INCLUDE_DIRS

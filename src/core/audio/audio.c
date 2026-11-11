@@ -1,5 +1,6 @@
 #include "core_sdk/audio.h"
 
+#include <ctype.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -7,12 +8,19 @@
 
 #include "core/config/config.h"
 #include "core/process/process.h"
+#include "core_sdk/memory.h"
 #include "core_sdk/runtime.h"
 #include "core_sdk/storage.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "sdkconfig.h"
+
+#include "esp_audio_simple_player.h"
+#include "esp_gmf_err.h"
+#include "esp_log.h"
+
+#define TAG "bruce_audio"
 
 #if CONFIG_BRUCE_AUDIO_BACKEND_I2S
 #if CONFIG_BRUCE_AUDIO_ES8311_CODEC
@@ -36,6 +44,15 @@
 
 #define AUDIO__MAX_ASYNC_TONES 4u
 #define AUDIO__PRODUCER_TASK_PRIORITY (tskIDLE_PRIORITY + 4u)
+/* esp_audio_simple_player's own decode task (MP3 decode + resample +
+ * channel/bit conversion) is CPU-heavy enough to stay runnable back-to-back
+ * for whole seconds at a time once its input ring is primed -- at
+ * AUDIO__PRODUCER_TASK_PRIORITY (reserved for work that must preempt
+ * everything to protect the I2S ring's ~85ms headroom) that starved the
+ * idle task (task watchdog) and the UI/shell below it. It only needs to
+ * stay ahead of audio__mp3_play_blocking()'s own drain loop on average, not
+ * preempt it, so it runs below ordinary foreground-app priority instead. */
+#define AUDIO__MP3_DECODE_TASK_PRIORITY (tskIDLE_PRIORITY + 1u)
 
 typedef struct {
     uint32_t frequency_hz;
@@ -566,6 +583,12 @@ typedef struct {
     uint32_t data_position; /* bytes into the data chunk already consumed */
 } audio__wav_t;
 
+typedef enum {
+    AUDIO__FILE_FORMAT_NONE = 0,
+    AUDIO__FILE_FORMAT_WAV,
+    AUDIO__FILE_FORMAT_MP3,
+} audio__file_format_t;
+
 static volatile bool s_file_open;
 static volatile bool s_file_playing;
 static volatile bool s_file_stop_requested;
@@ -573,6 +596,45 @@ static volatile bool s_file_seek_requested;
 static volatile uint32_t s_file_seek_target_ms;
 static bruce_resource_id_t s_file_resource;
 static audio__wav_t s_file_wav;
+static audio__file_format_t s_file_format;
+static esp_asp_handle_t s_mp3_handle;
+
+/* Reports whether the process audio__file_play() just spawned actually
+ * opened the file, for audio__file_play() itself to wait on below -- see
+ * its own comment on why this is needed (in short: a caller polling
+ * audio__file_is_open() right after audio__file_play() returns can't tell
+ * "hasn't opened yet" apart from "already finished", and MP3's own setup
+ * -- reading the whole file into RAM, building the esp_audio_simple_player
+ * pipeline -- takes long enough that losing that race is the common case,
+ * not an edge case). s_file_open_token identifies which audio__file_play()
+ * call a given s_file_open_result belongs to, since only one play session
+ * is tracked by s_file_open/s_file_format/etc. at a time but a new call can
+ * be made (and get BRUCE_ERR_BUSY from audio__stream_open()) before a
+ * slow-to-fail previous one has published its own result. */
+static volatile uint32_t s_file_open_token;
+static volatile uint32_t s_file_open_result_token;
+static volatile bruce_result_t s_file_open_result;
+
+/* True from the moment audio__file_play() spawns its background process
+ * until that process either opens the file (s_file_open becomes true) or
+ * fails (audio__file_publish_open_result() below). audio__file_play() itself
+ * no longer waits for either -- it returns right away, matching its own
+ * documented non-blocking contract -- so a caller that immediately polls
+ * audio__file_is_open()/_is_playing() (ffplay's wait loop, for one) needs
+ * some way to see "still opening" rather than mistaking that gap for
+ * "already finished" and giving up instantly. audio__file_is_open() folds
+ * this in below. */
+static volatile bool s_file_opening;
+
+/* Must NOT be called with s_audio_mutex held. */
+static void audio__file_publish_open_result(uint32_t token, bruce_result_t result) {
+    audio__ensure_mutex();
+    xSemaphoreTake(s_audio_mutex, portMAX_DELAY);
+    s_file_open_result_token = token;
+    s_file_open_result = result;
+    s_file_opening = false;
+    xSemaphoreGive(s_audio_mutex);
+}
 
 static bool audio__file_read_exact(bruce_file_id_t file, void *buffer, size_t size) {
     size_t got = 0;
@@ -642,13 +704,29 @@ static bool audio__wav_open(const char *path, audio__wav_t *out) {
     return true;
 }
 
-/* Must be called with s_audio_mutex held. */
+/* Must be called with s_audio_mutex held. Format-specific teardown: a WAV
+ * play owns a storage handle directly; an MP3 play owns an
+ * esp_audio_simple_player instance instead (see the MP3 section below for
+ * why its storage handle and RAM buffers are never held past the preload
+ * step, so there's nothing format-specific to release for those here). Also
+ * reached from the force-kill resource-cleanup path (audio__file_cleanup()
+ * below), so esp_audio_simple_player_stop()/_destroy() briefly blocking
+ * while its own task unwinds is an accepted tradeoff of integrating a
+ * stateful third-party player, same as storage__close() doing real flash
+ * I/O here for the WAV case. */
 static void audio__file_teardown_locked(void) {
-    if (s_file_open) storage__close(s_file_wav.file);
+    if (s_file_format == AUDIO__FILE_FORMAT_WAV && s_file_open) {
+        storage__close(s_file_wav.file);
+    } else if (s_file_format == AUDIO__FILE_FORMAT_MP3 && s_mp3_handle != NULL) {
+        (void)esp_audio_simple_player_stop(s_mp3_handle);
+        (void)esp_audio_simple_player_destroy(s_mp3_handle);
+        s_mp3_handle = NULL;
+    }
     s_file_open = false;
     s_file_playing = false;
     s_file_stop_requested = false;
     s_file_seek_requested = false;
+    s_file_format = AUDIO__FILE_FORMAT_NONE;
     s_file_resource = BRUCE_RESOURCE_ID_INVALID;
     memset(&s_file_wav, 0, sizeof(s_file_wav));
 }
@@ -715,29 +793,38 @@ static int16_t audio__wav_sample_to_pcm16(const uint8_t *raw, uint16_t bits_per_
     return (int16_t)((uint16_t)raw[0] | ((uint16_t)raw[1] << 8));
 }
 
-static bruce_result_t audio__file_play_blocking(const char *path) {
+static bruce_result_t audio__file_play_blocking(const char *path, uint32_t token) {
     audio__wav_t wav;
-    if (!audio__wav_open(path, &wav)) return BRUCE_ERR_UNSUPPORTED;
+    if (!audio__wav_open(path, &wav)) {
+        audio__file_publish_open_result(token, BRUCE_ERR_UNSUPPORTED);
+        return BRUCE_ERR_UNSUPPORTED;
+    }
 
     bruce_result_t opened = audio__stream_open(wav.channels);
     if (opened != BRUCE_OK) {
         storage__close(wav.file);
+        audio__file_publish_open_result(token, opened);
         return opened;
     }
 
     if (!process_registry__operation_begin()) {
         (void)audio__stream_close();
         storage__close(wav.file);
+        audio__file_publish_open_result(token, BRUCE_ERR_CANCELLED);
         return BRUCE_ERR_CANCELLED;
     }
     audio__ensure_mutex();
     xSemaphoreTake(s_audio_mutex, portMAX_DELAY);
     s_file_wav = wav;
+    s_file_format = AUDIO__FILE_FORMAT_WAV;
     s_file_open = true;
     s_file_playing = true;
     s_file_stop_requested = false;
     s_file_seek_requested = false;
     s_file_resource = process_registry__resource_register(audio__file_cleanup, NULL);
+    s_file_open_result_token = token;
+    s_file_open_result = BRUCE_OK;
+    s_file_opening = false;
     xSemaphoreGive(s_audio_mutex);
     process_registry__operation_end();
 
@@ -832,18 +919,406 @@ static bruce_result_t audio__file_play_blocking(const char *path) {
     return BRUCE_OK;
 }
 
-/* Context for audio__file_play_process_entry() below -- a heap copy of the
- * path, since the caller's own stack/path buffer won't outlive this call
- * once audio__file_play() returns. Freed by audio__file_play_process_cleanup()
- * regardless of how the spawned process ends (normal return, force-kill,
- * or never starting at all). */
+/* Context for audio__file_play_process_entry()/audio__mp3_play_process_entry()
+ * below -- a heap copy of the path (the caller's own stack/path buffer
+ * won't outlive this call once audio__file_play() returns) plus the open
+ * token audio__file_play() generated for this call, so the blocking
+ * function can publish its result under the right token (see
+ * s_file_open_token's own comment above). Freed by
+ * audio__file_play_process_cleanup() regardless of how the spawned process
+ * ends (normal return, force-kill, or never starting at all). */
+typedef struct {
+    char *path;
+    uint32_t token;
+} audio__file_play_context_t;
+
 static int audio__file_play_process_entry(void *context) {
-    char *path = context;
-    (void)audio__file_play_blocking(path);
+    audio__file_play_context_t *ctx = context;
+    (void)audio__file_play_blocking(ctx->path, ctx->token);
     return 0;
 }
 
-static void audio__file_play_process_cleanup(void *context) { free(context); }
+static void audio__file_play_process_cleanup(void *context) {
+    audio__file_play_context_t *ctx = context;
+    /* Covers force-kill during the open window: the process never got to
+     * call audio__file_publish_open_result() (or anything else) for its own
+     * token, so without this s_file_opening would stay stuck true forever. */
+    audio__ensure_mutex();
+    xSemaphoreTake(s_audio_mutex, portMAX_DELAY);
+    if (s_file_open_result_token != ctx->token) s_file_opening = false;
+    xSemaphoreGive(s_audio_mutex);
+    free(ctx->path);
+    free(ctx);
+}
+
+/* MP3 playback -- esp_audio_simple_player, "raw://" input scheme ---------
+ *
+ * esp_audio_simple_player decodes on its OWN internal FreeRTOS task, not
+ * this process's, so its in/out callbacks can't call
+ * storage__read()/audio__stream_write() directly: both are process-owned by
+ * whichever process opened the handle/stream (see
+ * storage__file_owned_by_caller_locked() in core/storage/storage.c and
+ * audio__stream_write() above), and a task process_registry never created
+ * resolves to BRUCE_PROCESS_ID_INVALID, so it gets rejected -- the exact
+ * problem process_registry__create(built_in=true) above already solved one
+ * level up for this process's own task, now one level deeper.
+ *
+ * Worked around by:
+ *   - a small ring of still-compressed bytes (audio__mp3_source_t), filled
+ *     from storage__read() by this process's own task (audio__mp3_source_fill(),
+ *     called from audio__mp3_play_blocking()'s own loop below, interleaved
+ *     with draining the output ring). The "in" callback just drains that
+ *     ring -- a plain memcpy, no storage call, no process-identity check,
+ *     safe from any task -- and waits (vTaskDelay) for more if it's
+ *     temporarily empty but the file isn't finished yet. This keeps RAM use
+ *     flat regardless of file size, unlike reading the whole file into RAM
+ *     up front: most boards this targets have no PSRAM at all (confirmed
+ *     for e.g. m5stack-cardputer/-adv, both plain ESP32-S3FN8), so even a
+ *     ~700KB MP3 would never fit as one allocation on internal RAM alongside
+ *     everything else already running.
+ *   - the "out" callback copies decoded PCM into a small intermediate ring
+ *     (its own plain FreeRTOS mutex, no process-ownership concept), which
+ *     this process's own task (audio__mp3_play_blocking()'s loop) drains
+ *     into audio__stream_write() the normal way.
+ * Both rings come from memory__external_malloc_writable() (PSRAM when
+ * available, otherwise internal RAM, never flash-backed swap -- see
+ * core_sdk/memory.h), and are small/fixed-size regardless of file size.
+ *
+ * Position/duration/seek are not tracked for MP3 -- see audio.h. */
+#define AUDIO__MP3_PCM_RING_FRAMES 2048u  /* stereo int16 frames, ~8KB */
+#define AUDIO__MP3_INPUT_RING_BYTES 16384u /* compressed bytes, ~1s at 128kbps */
+#define AUDIO__MP3_TRANSFER_FRAMES 256u
+
+typedef struct {
+    SemaphoreHandle_t lock;
+    uint8_t *ring; /* AUDIO__MP3_INPUT_RING_BYTES long */
+    size_t write_pos;
+    size_t read_pos;
+    size_t filled;
+    bruce_file_id_t file;
+    size_t file_size;
+    size_t total_read; /* bytes pulled from `file` into the ring so far */
+} audio__mp3_source_t;
+
+/* Pulls more compressed bytes from storage into the ring, up to whatever
+ * free space is contiguous from the current write position (a second call
+ * picks up past the wrap, same as a single-producer ring normally works).
+ * Only ever called from this process's own task -- the one that actually
+ * owns `file`'s storage handle -- never from esp_audio_simple_player's. */
+static void audio__mp3_source_fill(audio__mp3_source_t *source) {
+    if (source->total_read >= source->file_size) return;
+    xSemaphoreTake(source->lock, portMAX_DELAY);
+    size_t free_bytes = AUDIO__MP3_INPUT_RING_BYTES - source->filled;
+    size_t write_pos = source->write_pos;
+    xSemaphoreGive(source->lock);
+    if (free_bytes == 0) return;
+
+    size_t contiguous = AUDIO__MP3_INPUT_RING_BYTES - write_pos;
+    size_t want = free_bytes < contiguous ? free_bytes : contiguous;
+    size_t remaining_in_file = source->file_size - source->total_read;
+    if (want > remaining_in_file) want = remaining_in_file;
+    if (want == 0) return;
+
+    size_t got = 0;
+    if (storage__read(source->file, source->ring + write_pos, want, &got) != BRUCE_OK) return;
+
+    xSemaphoreTake(source->lock, portMAX_DELAY);
+    source->write_pos = (source->write_pos + got) % AUDIO__MP3_INPUT_RING_BYTES;
+    source->filled += got;
+    xSemaphoreGive(source->lock);
+    source->total_read += got;
+}
+
+/* Runs on esp_audio_simple_player's own task. Waits (briefly, via
+ * vTaskDelay -- see audio__mp3_out_cb()'s identical reasoning) for
+ * audio__mp3_source_fill() to top the ring up if it's temporarily empty but
+ * the file isn't fully read yet; returns less than requested (down to 0) at
+ * genuine end-of-file, same as fread(). */
+static int audio__mp3_in_cb(uint8_t *data, int data_size, void *ctx) {
+    audio__mp3_source_t *source = ctx;
+    size_t want = (size_t)data_size;
+    size_t got_total = 0;
+    while (got_total < want) {
+        xSemaphoreTake(source->lock, portMAX_DELAY);
+        size_t avail = source->filled;
+        size_t chunk = want - got_total;
+        if (chunk > avail) chunk = avail;
+        size_t contiguous = AUDIO__MP3_INPUT_RING_BYTES - source->read_pos;
+        size_t first = chunk < contiguous ? chunk : contiguous;
+        if (first > 0) memcpy(data + got_total, source->ring + source->read_pos, first);
+        if (chunk > first) memcpy(data + got_total + first, source->ring, chunk - first);
+        source->read_pos = (source->read_pos + chunk) % AUDIO__MP3_INPUT_RING_BYTES;
+        source->filled -= chunk;
+        bool eof = source->total_read >= source->file_size;
+        xSemaphoreGive(source->lock);
+        got_total += chunk;
+        if (chunk == 0) {
+            if (eof) break;
+            vTaskDelay(pdMS_TO_TICKS(5));
+        }
+    }
+    return (int)got_total;
+}
+
+typedef struct {
+    SemaphoreHandle_t lock;
+    int16_t *ring; /* stereo int16 frames, AUDIO__MP3_PCM_RING_FRAMES long */
+    size_t write_pos;
+    size_t read_pos;
+    size_t filled;
+    volatile bool finished;
+} audio__mp3_pipe_t;
+
+/* Runs on esp_audio_simple_player's own task; forced to stereo 16-bit PCM
+ * by the CH_CVT/BIT_CVT sdkconfig defaults, so `data` is always int16 L/R
+ * pairs. Blocks (briefly, via vTaskDelay -- not runtime__sleep(), which
+ * polls this process's own kill signal, the wrong process to ask from this
+ * task) when the intermediate ring is full, applying backpressure to the
+ * decoder same as a blocking hardware write would. */
+static int audio__mp3_out_cb(uint8_t *data, int data_size, void *ctx) {
+    audio__mp3_pipe_t *pipe = ctx;
+    const int16_t *samples = (const int16_t *)data;
+    size_t frame_count = (size_t)data_size / (2u * sizeof(int16_t));
+    size_t written = 0;
+    while (written < frame_count) {
+        xSemaphoreTake(pipe->lock, portMAX_DELAY);
+        size_t free_frames = AUDIO__MP3_PCM_RING_FRAMES - pipe->filled;
+        size_t chunk = frame_count - written;
+        if (chunk > free_frames) chunk = free_frames;
+        for (size_t i = 0; i < chunk; ++i) {
+            pipe->ring[pipe->write_pos * 2u] = samples[(written + i) * 2u];
+            pipe->ring[pipe->write_pos * 2u + 1u] = samples[(written + i) * 2u + 1u];
+            pipe->write_pos = (pipe->write_pos + 1u) % AUDIO__MP3_PCM_RING_FRAMES;
+        }
+        pipe->filled += chunk;
+        written += chunk;
+        xSemaphoreGive(pipe->lock);
+        if (chunk == 0) vTaskDelay(pdMS_TO_TICKS(5));
+    }
+    return data_size;
+}
+
+/* Runs on esp_audio_simple_player's own task. */
+static int audio__mp3_event_cb(esp_asp_event_pkt_t *event, void *ctx) {
+    audio__mp3_pipe_t *pipe = ctx;
+    if (event->type == ESP_ASP_EVENT_TYPE_STATE) {
+        esp_asp_state_t state = ESP_ASP_STATE_NONE;
+        memcpy(&state, event->payload, event->payload_size);
+        if (state == ESP_ASP_STATE_FINISHED || state == ESP_ASP_STATE_STOPPED ||
+            state == ESP_ASP_STATE_ERROR) {
+            pipe->finished = true;
+        }
+    }
+    return 0;
+}
+
+static bruce_result_t audio__mp3_play_blocking(const char *path, uint32_t token) {
+    bruce_file_id_t file;
+    if (storage__open(path, BRUCE_STORAGE_OPEN_READ, &file) != BRUCE_OK) {
+        ESP_LOGE(TAG, "mp3: could not open %s", path);
+        audio__file_publish_open_result(token, BRUCE_ERR_UNSUPPORTED);
+        return BRUCE_ERR_UNSUPPORTED;
+    }
+    uint64_t file_size = 0;
+    if (storage__seek(file, 0, SEEK_END, &file_size) != BRUCE_OK || file_size == 0 ||
+        storage__seek(file, 0, SEEK_SET, NULL) != BRUCE_OK) {
+        ESP_LOGE(TAG, "mp3: could not determine size of %s", path);
+        storage__close(file);
+        audio__file_publish_open_result(token, BRUCE_ERR_UNSUPPORTED);
+        return BRUCE_ERR_UNSUPPORTED;
+    }
+
+    const void *input_ring_buffer = memory__external_malloc_writable(AUDIO__MP3_INPUT_RING_BYTES);
+    if (input_ring_buffer == NULL) {
+        ESP_LOGE(TAG, "mp3: out of memory for input ring");
+        storage__close(file);
+        audio__file_publish_open_result(token, BRUCE_ERR_NO_MEMORY);
+        return BRUCE_ERR_NO_MEMORY;
+    }
+
+    const void *pcm_ring_buffer =
+        memory__external_malloc_writable(AUDIO__MP3_PCM_RING_FRAMES * 2u * sizeof(int16_t));
+    if (pcm_ring_buffer == NULL) {
+        ESP_LOGE(TAG, "mp3: out of memory for PCM ring");
+        (void)memory__external_free(input_ring_buffer);
+        storage__close(file);
+        audio__file_publish_open_result(token, BRUCE_ERR_NO_MEMORY);
+        return BRUCE_ERR_NO_MEMORY;
+    }
+
+    bruce_result_t opened = audio__stream_open(2);
+    if (opened != BRUCE_OK) {
+        ESP_LOGE(TAG, "mp3: audio__stream_open() failed: %d", (int)opened);
+        (void)memory__external_free(pcm_ring_buffer);
+        (void)memory__external_free(input_ring_buffer);
+        storage__close(file);
+        audio__file_publish_open_result(token, opened);
+        return opened;
+    }
+
+    audio__mp3_source_t source = {0};
+    source.lock = xSemaphoreCreateMutex();
+    source.ring = (uint8_t *)input_ring_buffer;
+    source.file = file;
+    source.file_size = (size_t)file_size;
+
+    audio__mp3_pipe_t pipe = {0};
+    pipe.lock = xSemaphoreCreateMutex();
+    pipe.ring = (int16_t *)pcm_ring_buffer;
+    if (source.lock == NULL || pipe.lock == NULL) {
+        ESP_LOGE(TAG, "mp3: out of memory for ring locks");
+        if (source.lock != NULL) vSemaphoreDelete(source.lock);
+        if (pipe.lock != NULL) vSemaphoreDelete(pipe.lock);
+        (void)audio__stream_close();
+        (void)memory__external_free(pcm_ring_buffer);
+        (void)memory__external_free(input_ring_buffer);
+        storage__close(file);
+        audio__file_publish_open_result(token, BRUCE_ERR_NO_MEMORY);
+        return BRUCE_ERR_NO_MEMORY;
+    }
+
+    /* Prime the input ring before the decoder's first pull so it doesn't
+     * immediately starve waiting on this process's own (much slower,
+     * polling) main loop below. */
+    while (source.filled < AUDIO__MP3_INPUT_RING_BYTES && source.total_read < source.file_size) {
+        size_t filled_before = source.filled;
+        audio__mp3_source_fill(&source);
+        if (source.filled == filled_before) break; /* a read failed; let the decoder discover EOF */
+    }
+
+    esp_asp_cfg_t cfg = {
+        .in = {.cb = audio__mp3_in_cb, .user_ctx = &source},
+        .out = {.cb = audio__mp3_out_cb, .user_ctx = &pipe},
+        .task_prio = (int)AUDIO__MP3_DECODE_TASK_PRIORITY,
+        .task_stack = 6 * 1024,
+    };
+    esp_asp_handle_t handle = NULL;
+    esp_gmf_err_t new_result = esp_audio_simple_player_new(&cfg, &handle);
+    if (new_result != ESP_GMF_ERR_OK || handle == NULL) {
+        ESP_LOGE(TAG, "mp3: esp_audio_simple_player_new() failed: %d", (int)new_result);
+        vSemaphoreDelete(source.lock);
+        vSemaphoreDelete(pipe.lock);
+        (void)audio__stream_close();
+        (void)memory__external_free(pcm_ring_buffer);
+        (void)memory__external_free(input_ring_buffer);
+        storage__close(file);
+        audio__file_publish_open_result(token, BRUCE_ERR_NO_MEMORY);
+        return BRUCE_ERR_NO_MEMORY;
+    }
+    (void)esp_audio_simple_player_set_event(handle, audio__mp3_event_cb, &pipe);
+
+    if (!process_registry__operation_begin()) {
+        (void)esp_audio_simple_player_destroy(handle);
+        vSemaphoreDelete(source.lock);
+        vSemaphoreDelete(pipe.lock);
+        (void)audio__stream_close();
+        (void)memory__external_free(pcm_ring_buffer);
+        (void)memory__external_free(input_ring_buffer);
+        storage__close(file);
+        audio__file_publish_open_result(token, BRUCE_ERR_CANCELLED);
+        return BRUCE_ERR_CANCELLED;
+    }
+    audio__ensure_mutex();
+    xSemaphoreTake(s_audio_mutex, portMAX_DELAY);
+    s_file_format = AUDIO__FILE_FORMAT_MP3;
+    s_mp3_handle = handle;
+    s_file_open = true;
+    s_file_playing = true;
+    s_file_stop_requested = false;
+    s_file_seek_requested = false;
+    s_file_resource = process_registry__resource_register(audio__file_cleanup, NULL);
+    s_file_open_result_token = token;
+    s_file_open_result = BRUCE_OK;
+    s_file_opening = false;
+    xSemaphoreGive(s_audio_mutex);
+    process_registry__operation_end();
+
+    esp_gmf_err_t run_result = esp_audio_simple_player_run(handle, "raw://local/audio.mp3", NULL);
+    if (run_result != ESP_GMF_ERR_OK) {
+        ESP_LOGE(TAG, "mp3: esp_audio_simple_player_run() failed: %d", (int)run_result);
+        pipe.finished = true;
+    } else {
+        ESP_LOGI(TAG, "mp3: playing %s (%u bytes)", path, (unsigned)source.file_size);
+    }
+
+    int16_t transfer[AUDIO__MP3_TRANSFER_FRAMES * 2u];
+    bool was_playing = true;
+    for (;;) {
+        if (process__current_signal() != 0) break;
+        audio__file_poll_t poll;
+        if (!audio__file_poll_locked(&poll)) break; /* device shutting down */
+        if (poll.stop) {
+            (void)esp_audio_simple_player_stop(handle);
+            break;
+        }
+        if (poll.playing != was_playing) {
+            if (poll.playing) (void)esp_audio_simple_player_resume(handle);
+            else (void)esp_audio_simple_player_pause(handle);
+            was_playing = poll.playing;
+        }
+
+        audio__mp3_source_fill(&source);
+
+        xSemaphoreTake(pipe.lock, portMAX_DELAY);
+        size_t want = pipe.filled < AUDIO__MP3_TRANSFER_FRAMES ? pipe.filled : AUDIO__MP3_TRANSFER_FRAMES;
+        for (size_t i = 0; i < want; ++i) {
+            transfer[i * 2u] = pipe.ring[pipe.read_pos * 2u];
+            transfer[i * 2u + 1u] = pipe.ring[pipe.read_pos * 2u + 1u];
+            pipe.read_pos = (pipe.read_pos + 1u) % AUDIO__MP3_PCM_RING_FRAMES;
+        }
+        pipe.filled -= want;
+        bool finished = pipe.finished && pipe.filled == 0;
+        xSemaphoreGive(pipe.lock);
+
+        if (want > 0) {
+            size_t written = 0;
+            while (written < want && process__current_signal() == 0) {
+                size_t copied = audio__stream_write(transfer + written * 2u, want - written);
+                if (copied == 0) {
+                    if (runtime__sleep(10u) != BRUCE_OK) break;
+                    continue;
+                }
+                written += copied;
+            }
+        } else if (finished) {
+            break;
+        } else {
+            (void)runtime__sleep(10u);
+        }
+    }
+
+    vSemaphoreDelete(source.lock);
+    vSemaphoreDelete(pipe.lock);
+    (void)memory__external_free(pcm_ring_buffer);
+    (void)memory__external_free(input_ring_buffer);
+    storage__close(file);
+
+    bruce_resource_id_t resource = BRUCE_RESOURCE_ID_INVALID;
+    if (process_registry__operation_begin()) {
+        xSemaphoreTake(s_audio_mutex, portMAX_DELAY);
+        resource = s_file_resource;
+        audio__file_teardown_locked();
+        xSemaphoreGive(s_audio_mutex);
+        process_registry__operation_end();
+    }
+    (void)audio__stream_close();
+    if (resource != BRUCE_RESOURCE_ID_INVALID) process_registry__resource_release(resource);
+    return BRUCE_OK;
+}
+
+static int audio__mp3_play_process_entry(void *context) {
+    audio__file_play_context_t *ctx = context;
+    (void)audio__mp3_play_blocking(ctx->path, ctx->token);
+    return 0;
+}
+
+static bool audio__path_has_mp3_extension(const char *path) {
+    size_t length = strlen(path);
+    if (length < 4) return false;
+    const char *suffix = path + length - 4;
+    return (suffix[0] == '.') && (tolower((unsigned char)suffix[1]) == 'm') &&
+           (tolower((unsigned char)suffix[2]) == 'p') && (tolower((unsigned char)suffix[3]) == '3');
+}
 
 bruce_result_t audio__file_play(const char *path) {
     if (path == NULL || path[0] == '\0') return BRUCE_ERR_INVALID_ARGUMENT;
@@ -854,14 +1329,45 @@ bruce_result_t audio__file_play(const char *path) {
      * caller immediately instead of silently failing in the background --
      * closed right away because the spawned process below reopens the file
      * itself (a storage handle can't cross processes). Cheap: this only
-     * reads the WAV header, not the audio data. */
+     * reads the WAV header or probes the MP3's existence/size, never the
+     * full audio data. */
     audio__wav_t probe;
-    if (!audio__wav_open(path, &probe)) return BRUCE_ERR_UNSUPPORTED;
-    storage__close(probe.file);
+    bool is_wav = audio__wav_open(path, &probe);
+    if (is_wav) storage__close(probe.file);
+    bool is_mp3 = false;
+    if (!is_wav && audio__path_has_mp3_extension(path)) {
+        bruce_file_id_t probe_file;
+        if (storage__open(path, BRUCE_STORAGE_OPEN_READ, &probe_file) == BRUCE_OK) {
+            uint64_t size = 0;
+            is_mp3 = storage__seek(probe_file, 0, SEEK_END, &size) == BRUCE_OK && size > 0;
+            storage__close(probe_file);
+        }
+    }
+    if (!is_wav && !is_mp3) return BRUCE_ERR_UNSUPPORTED;
 
-    char *context = malloc(path_length + 1);
+    audio__file_play_context_t *context = malloc(sizeof(*context));
     if (context == NULL) return BRUCE_ERR_NO_MEMORY;
-    memcpy(context, path, path_length + 1);
+    context->path = malloc(path_length + 1);
+    if (context->path == NULL) {
+        free(context);
+        return BRUCE_ERR_NO_MEMORY;
+    }
+    memcpy(context->path, path, path_length + 1);
+
+    audio__ensure_mutex();
+    xSemaphoreTake(s_audio_mutex, portMAX_DELAY);
+    uint32_t token = ++s_file_open_token;
+    /* Set before the process is even spawned, so there's no gap in which a
+     * caller that polls audio__file_is_open() immediately after this
+     * function returns (ffplay's wait loop, for one) could see "not open"
+     * and mistake "hasn't opened yet" for "already finished" -- see
+     * s_file_opening's own comment above. Cleared once the spawned process
+     * actually opens or fails (audio__file_publish_open_result(), the two
+     * success paths, or, if it's force-killed before either, the process's
+     * own cleanup callback). */
+    s_file_opening = true;
+    xSemaphoreGive(s_audio_mutex);
+    context->token = token;
 
     process_create_params_t params = {
         .name = "audio.file",
@@ -869,13 +1375,17 @@ bruce_result_t audio__file_play(const char *path) {
         .start_in_background = true,
         .stack_bytes = AUDIO__FILE_PLAY_TASK_STACK_BYTES,
         .priority = AUDIO__PRODUCER_TASK_PRIORITY,
-        .process_entry = audio__file_play_process_entry,
+        .process_entry = is_wav ? audio__file_play_process_entry : audio__mp3_play_process_entry,
         .process_entry_context = context,
         .process_entry_cleanup = audio__file_play_process_cleanup,
     };
     bruce_process_id_t spawned_id = BRUCE_PROCESS_ID_INVALID;
     bruce_result_t created = process_registry__create(&params, &spawned_id);
     if (created != BRUCE_OK) {
+        xSemaphoreTake(s_audio_mutex, portMAX_DELAY);
+        s_file_opening = false;
+        xSemaphoreGive(s_audio_mutex);
+        free(context->path);
         free(context);
         return created;
     }
@@ -904,7 +1414,9 @@ bruce_result_t audio__file_seek(uint32_t position_ms) {
     audio__ensure_mutex();
     xSemaphoreTake(s_audio_mutex, portMAX_DELAY);
     bruce_result_t result = s_file_open ? BRUCE_OK : BRUCE_ERR_INVALID_STATE;
-    if (result == BRUCE_OK) {
+    if (result == BRUCE_OK && s_file_format == AUDIO__FILE_FORMAT_MP3) {
+        result = BRUCE_ERR_UNSUPPORTED;
+    } else if (result == BRUCE_OK) {
         s_file_seek_target_ms = position_ms;
         s_file_seek_requested = true;
     }
@@ -924,7 +1436,7 @@ bruce_result_t audio__file_stop(void) {
 bool audio__file_is_open(void) {
     audio__ensure_mutex();
     xSemaphoreTake(s_audio_mutex, portMAX_DELAY);
-    bool open = s_file_open;
+    bool open = s_file_open || s_file_opening;
     xSemaphoreGive(s_audio_mutex);
     return open;
 }

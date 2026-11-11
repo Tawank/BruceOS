@@ -3,6 +3,11 @@ dependencies:
   espressif/cjson: ^1.7.19~2
   espressif/elf_loader:
     override_path: ../components/elf_loader
+  # MP3 decode for audio__file_play() (core/audio/audio.c) -- pulls in
+  # gmf_audio/gmf_io and their own deps (esp_audio_codec, esp_codec_dev,
+  # esp_asrc, ...) transitively via the component manager, same as any
+  # other registry dependency below.
+  espressif/esp_audio_simple_player: ^1.1.0
   espressif/esp_jpeg: ^1.3.1
   libjpeg-turbo:
     git: https://github.com/Tawank/libjpeg-turbo.git

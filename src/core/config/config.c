@@ -526,7 +526,19 @@ void config__init_defaults(void) {
 bool config__init(void) {
     config__ensure_mutex();
     config__init_defaults();
-    if (!storage__mkdir_internal(CONFIG__DIRECTORY)) return false;
+    /* storage__mkdir_internal() is a real flash stat()/mkdir() syscall, not
+     * cheap -- skip it once config__load() has already succeeded once (it
+     * only sets s_loaded after the directory was confirmed to exist), since
+     * every config getter calls config__init() on every call, some of them
+     * (e.g. audio__stream_write(), once per PCM chunk during playback) many
+     * times a second. Without this, that flash op's own interrupts-and-
+     * caches-disabled section run back-to-back often enough to starve the
+     * idle task and trip the watchdog -- see audio__stream_write() in
+     * core/audio/audio.c. */
+    config__lock();
+    bool already_loaded = s_loaded;
+    config__unlock();
+    if (!already_loaded && !storage__mkdir_internal(CONFIG__DIRECTORY)) return false;
     return config__load();
 }
 
