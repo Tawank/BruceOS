@@ -84,3 +84,109 @@ size_t audio__stream_write(const int16_t *samples, size_t frame_count);
  * @permission none
  */
 bruce_result_t audio__stream_close(void);
+
+/**
+ * @brief Starts playing a local audio file in the background and returns
+ * immediately.
+ *
+ * Only WAV (8- or 16-bit PCM, mono or stereo, any sample rate -- resampled
+ * to audio__stream_sample_rate()) is understood; anything else returns
+ * BRUCE_ERR_UNSUPPORTED without side effects, checked synchronously before
+ * this returns (so a bad path or unsupported file is reported right away,
+ * not discovered later in the background). A valid file is then handed off
+ * to a dedicated background process this call spawns, built on top of
+ * audio__stream_open()/write()/close(), so playback shares their one-
+ * stream-at-a-time exclusivity (that background process gets BRUCE_ERR_BUSY
+ * internally, silently, if a tone or another file is already playing --
+ * call audio__file_is_playing() first if the caller needs to know).
+ * audio__file_pause()/_resume()/_seek()/_stop() below control whatever file
+ * is currently playing from any process, including this call's own caller
+ * -- they just set a request flag the background process's loop reacts to.
+ * audio__file_is_open()/_is_playing()/_position_ms()/_duration_ms() are
+ * likewise safe to call from anywhere. The file closes automatically if
+ * its background process is killed without audio__file_stop() being called
+ * first. No permission is required beyond already being able to read
+ * `path` -- any process can start playback.
+ *
+ * @param path Absolute, normalized path to the audio file.
+ * @permission none
+ */
+bruce_result_t audio__file_play(const char *path);
+
+/**
+ * @brief Pauses the file currently playing via audio__file_play(), without
+ * closing it.
+ *
+ * @permission none
+ */
+bruce_result_t audio__file_pause(void);
+
+/**
+ * @brief Resumes a file paused with audio__file_pause().
+ *
+ * @permission none
+ */
+bruce_result_t audio__file_resume(void);
+
+/**
+ * @brief Requests that the currently playing file jump to an absolute
+ * position.
+ *
+ * Takes effect the next time audio__file_play()'s own loop polls for it --
+ * not necessarily instantaneous. A position past the end of the file clamps
+ * to the end (audio__file_play() then finishes as if playback reached it
+ * normally).
+ *
+ * @param position_ms Target position, in milliseconds from the start.
+ * @permission none
+ */
+bruce_result_t audio__file_seek(uint32_t position_ms);
+
+/**
+ * @brief Stops the file currently playing via audio__file_play() and closes
+ * it.
+ *
+ * Takes effect the next time audio__file_play()'s own loop polls for it,
+ * same as audio__file_seek().
+ *
+ * @permission none
+ */
+bruce_result_t audio__file_stop(void);
+
+/**
+ * @brief True while a file opened by audio__file_play() is open, whether
+ * actively playing or paused.
+ *
+ * False once it finishes, is stopped, or fails to open in the first place.
+ *
+ * @permission none
+ */
+bool audio__file_is_open(void);
+
+/**
+ * @brief True while a file opened by audio__file_play() is actively
+ * playing (false if paused, stopped, finished, or never opened).
+ *
+ * @permission none
+ */
+bool audio__file_is_playing(void);
+
+/**
+ * @brief Current playback position of the file opened by
+ * audio__file_play(), in milliseconds from the start.
+ *
+ * 0 if no file is open.
+ *
+ * @permission none
+ */
+uint32_t audio__file_position_ms(void);
+
+/**
+ * @brief Total duration of the file opened by audio__file_play(), in
+ * milliseconds.
+ *
+ * 0 if no file is open or its length couldn't be determined.
+ *
+ * @permission none
+ */
+uint32_t audio__file_duration_ms(void);

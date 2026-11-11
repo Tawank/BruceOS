@@ -28,6 +28,7 @@
 #include "modules/clock/clock_app.h"
 #include "modules/config/config_app.h"
 #include "modules/device_bus/device_bus_app.h"
+#include "modules/ffplay/ffplay_app.h"
 #include "modules/filemanager/filemanager_app.h"
 #include "modules/input/input_app.h"
 #include "modules/ir/ir_app.h"
@@ -79,6 +80,7 @@ static const bruce_app_descriptor_t s_default_apps[] = {
     {"shutdown",             "Power off the device",                                      "System",  bnu_shutdown_app_main,        0    },
     {"sleep",                "Pause for a duration",                                      "System",  bnu_sleep_app_main,           0    },
     {"tone",                 "Play a square-wave audio tone",                             "System",  bnu_tone_app_main,            0    },
+    {"ffplay",               "Minimal ffplay stand-in (plays local .wav)",                "System",  ffplay_app_main,              8192 },
     {"top",                  "Processes, CPU, RAM usage",                                 "System",  bnu_top_app_main,             0    },
     {"wev",                  "Print raw input events",                                    "System",  bnu_wev_app_main,             0    },
 

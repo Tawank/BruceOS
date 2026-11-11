@@ -1,11 +1,14 @@
 #include "core_sdk/audio.h"
 
 #include <stdatomic.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "core/config/config.h"
 #include "core/process/process.h"
+#include "core_sdk/runtime.h"
+#include "core_sdk/storage.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -523,4 +526,436 @@ bruce_result_t audio__stream_close(void) {
     }
     process_registry__operation_end();
     return result;
+}
+
+/* File playback (audio__file_play() and friends below) -- see
+ * core_sdk/audio.h's own doc comments for the concurrency model.
+ * audio__file_play_blocking() below is the actual decode/resample/stream
+ * loop; it owns the storage file handle it opens, so it must run to
+ * completion on a single process's task (a handle can't cross processes --
+ * see core_sdk/storage.h). audio__file_play() itself just validates the
+ * path quickly and hands the real work to a dedicated background process
+ * via process_registry__create(), so callers get a simple, non-blocking
+ * call without needing to know any of that -- same shape as
+ * `ffplay song.wav &` in the shell, just done for them. pause/seek/stop are
+ * request flags audio__file_play_blocking()'s own loop polls, since they're
+ * meant to be called from a different process while that one plays.
+ * Guarded by s_audio_mutex like the rest of this file. The spawned process
+ * is created with built_in=true (same as any other built-in command's own
+ * process), which permission__check() always grants every permission to --
+ * for now, any process can play any audio file it can already read, no
+ * extra permission prompt. (app_runner__spawn_loader_process_owned() was
+ * tried first, but it always creates a non-built-in process keyed by its
+ * permission_key, which is right for untrusted ELF/JS loader content but
+ * meant this got treated as a brand new, never-granted app and prompted
+ * for storage permission on real hardware -- process_registry__create() is
+ * available here because audio.c is a Core module, not a sandboxed
+ * loader.) */
+#define AUDIO__FILE_READ_FRAMES 512u
+#define AUDIO__FILE_PLAY_TASK_STACK_BYTES 8192u
+
+typedef struct {
+    bruce_file_id_t file;
+    uint16_t channels;
+    uint16_t bits_per_sample; /* 8 (unsigned PCM) or 16 (signed PCM) */
+    uint32_t sample_rate;
+    uint32_t data_start;    /* file offset where the "data" chunk's bytes begin, for seeking */
+    uint32_t data_size;     /* total bytes in the "data" chunk */
+    uint32_t data_position; /* bytes into the data chunk already consumed */
+} audio__wav_t;
+
+static volatile bool s_file_open;
+static volatile bool s_file_playing;
+static volatile bool s_file_stop_requested;
+static volatile bool s_file_seek_requested;
+static volatile uint32_t s_file_seek_target_ms;
+static bruce_resource_id_t s_file_resource;
+static audio__wav_t s_file_wav;
+
+static bool audio__file_read_exact(bruce_file_id_t file, void *buffer, size_t size) {
+    size_t got = 0;
+    return storage__read(file, buffer, size, &got) == BRUCE_OK && got == size;
+}
+
+/* Opens `path` as an 8- or 16-bit PCM .wav file (mono or stereo, any sample
+ * rate). Only the common cases are handled: PCM format tag (1), 8 bits/
+ * sample (unsigned) or 16 bits/sample (signed). Anything else (a
+ * compressed format, 24/32-bit samples, a missing or malformed header, or
+ * just not a .wav at all) returns false -- this is a minimal reader, not a
+ * general RIFF/WAV parser. */
+static bool audio__wav_open(const char *path, audio__wav_t *out) {
+    bruce_file_id_t file;
+    if (storage__open(path, BRUCE_STORAGE_OPEN_READ, &file) != BRUCE_OK) return false;
+
+    uint8_t riff_header[12];
+    if (!audio__file_read_exact(file, riff_header, sizeof(riff_header)) || memcmp(riff_header, "RIFF", 4) != 0 ||
+        memcmp(riff_header + 8, "WAVE", 4) != 0) {
+        storage__close(file);
+        return false;
+    }
+
+    bool have_fmt = false, have_data = false;
+    uint16_t audio_format = 0, channels = 0, bits_per_sample = 0;
+    uint32_t sample_rate = 0, data_size = 0, data_start = 0;
+    while (!have_data) {
+        uint8_t chunk_header[8];
+        if (!audio__file_read_exact(file, chunk_header, sizeof(chunk_header))) break;
+        uint32_t chunk_size = (uint32_t)chunk_header[4] | ((uint32_t)chunk_header[5] << 8) |
+                               ((uint32_t)chunk_header[6] << 16) | ((uint32_t)chunk_header[7] << 24);
+        if (memcmp(chunk_header, "fmt ", 4) == 0) {
+            uint8_t fmt[16];
+            if (chunk_size < sizeof(fmt) || !audio__file_read_exact(file, fmt, sizeof(fmt))) break;
+            audio_format = (uint16_t)(fmt[0] | (fmt[1] << 8));
+            channels = (uint16_t)(fmt[2] | (fmt[3] << 8));
+            sample_rate =
+                (uint32_t)fmt[4] | ((uint32_t)fmt[5] << 8) | ((uint32_t)fmt[6] << 16) | ((uint32_t)fmt[7] << 24);
+            bits_per_sample = (uint16_t)(fmt[14] | (fmt[15] << 8));
+            uint32_t skip = chunk_size - (uint32_t)sizeof(fmt);
+            if (skip > 0 && storage__seek(file, (int64_t)skip, SEEK_CUR, NULL) != BRUCE_OK) break;
+            have_fmt = true;
+        } else if (memcmp(chunk_header, "data", 4) == 0) {
+            data_size = chunk_size;
+            uint64_t position = 0;
+            if (storage__seek(file, 0, SEEK_CUR, &position) != BRUCE_OK) break;
+            data_start = (uint32_t)position;
+            have_data = true;
+        } else {
+            uint32_t skip = chunk_size + (chunk_size & 1u); /* chunks are word-aligned */
+            if (storage__seek(file, (int64_t)skip, SEEK_CUR, NULL) != BRUCE_OK) break;
+        }
+    }
+
+    if (!have_fmt || !have_data || audio_format != 1 || (bits_per_sample != 8 && bits_per_sample != 16) ||
+        (channels != 1 && channels != 2) || sample_rate == 0) {
+        storage__close(file);
+        return false;
+    }
+    out->file = file;
+    out->channels = channels;
+    out->bits_per_sample = bits_per_sample;
+    out->sample_rate = sample_rate;
+    out->data_start = data_start;
+    out->data_size = data_size;
+    out->data_position = 0;
+    return true;
+}
+
+/* Must be called with s_audio_mutex held. */
+static void audio__file_teardown_locked(void) {
+    if (s_file_open) storage__close(s_file_wav.file);
+    s_file_open = false;
+    s_file_playing = false;
+    s_file_stop_requested = false;
+    s_file_seek_requested = false;
+    s_file_resource = BRUCE_RESOURCE_ID_INVALID;
+    memset(&s_file_wav, 0, sizeof(s_file_wav));
+}
+
+/* Automatic per-process cleanup -- see audio__stream_cleanup()'s identical
+ * comment above on why this must stay this simple. */
+static void audio__file_cleanup(void *context) {
+    (void)context;
+    audio__ensure_mutex();
+    xSemaphoreTake(s_audio_mutex, portMAX_DELAY);
+    audio__file_teardown_locked();
+    xSemaphoreGive(s_audio_mutex);
+}
+
+typedef struct {
+    bool stop;
+    bool playing;
+    bool seek;
+    uint32_t seek_ms;
+} audio__file_poll_t;
+
+/* Every s_audio_mutex critical section below is its own short
+ * process_registry__operation_begin()/_end() pair rather than one spanning
+ * audio__file_play()'s whole (potentially minutes-long) loop -- see
+ * audio__stream_open()'s identical comment on why: force-kill waits out
+ * whatever operation is in progress before deleting the task, so wrapping
+ * the entire loop in one pair would make a stuck/long-playing file
+ * unkillable for its whole duration, and *not* wrapping each mutex section
+ * at all would risk force-kill deleting this task mid-section and leaving
+ * s_audio_mutex locked forever. Returns false (nothing read) if shutdown
+ * has already started. */
+static bool audio__file_poll_locked(audio__file_poll_t *out) {
+    if (!process_registry__operation_begin()) return false;
+    xSemaphoreTake(s_audio_mutex, portMAX_DELAY);
+    out->stop = s_file_stop_requested;
+    out->playing = s_file_playing;
+    out->seek = s_file_seek_requested;
+    out->seek_ms = s_file_seek_target_ms;
+    if (out->seek) s_file_seek_requested = false;
+    xSemaphoreGive(s_audio_mutex);
+    process_registry__operation_end();
+    return true;
+}
+
+/* Publishes `data_position` (already advanced in audio__file_play()'s own
+ * local `wav` copy) to the shared s_file_wav that
+ * audio__file_position_ms()/_duration_ms() read from another process --
+ * best-effort: silently skipped if shutdown has already started, same as
+ * audio__file_poll_locked() above. */
+static void audio__file_publish_position_locked(uint32_t data_position) {
+    if (!process_registry__operation_begin()) return;
+    xSemaphoreTake(s_audio_mutex, portMAX_DELAY);
+    s_file_wav.data_position = data_position;
+    xSemaphoreGive(s_audio_mutex);
+    process_registry__operation_end();
+}
+
+/* Reads one sample at `bits_per_sample` from `raw` and returns it as signed
+ * 16-bit PCM. 8-bit WAV samples are unsigned (128 = silence), so they're
+ * recentered and scaled up; 16-bit samples are already signed and are just
+ * decoded little-endian. */
+static int16_t audio__wav_sample_to_pcm16(const uint8_t *raw, uint16_t bits_per_sample) {
+    if (bits_per_sample == 8) return (int16_t)(((int)raw[0] - 128) * 256);
+    return (int16_t)((uint16_t)raw[0] | ((uint16_t)raw[1] << 8));
+}
+
+static bruce_result_t audio__file_play_blocking(const char *path) {
+    audio__wav_t wav;
+    if (!audio__wav_open(path, &wav)) return BRUCE_ERR_UNSUPPORTED;
+
+    bruce_result_t opened = audio__stream_open(wav.channels);
+    if (opened != BRUCE_OK) {
+        storage__close(wav.file);
+        return opened;
+    }
+
+    if (!process_registry__operation_begin()) {
+        (void)audio__stream_close();
+        storage__close(wav.file);
+        return BRUCE_ERR_CANCELLED;
+    }
+    audio__ensure_mutex();
+    xSemaphoreTake(s_audio_mutex, portMAX_DELAY);
+    s_file_wav = wav;
+    s_file_open = true;
+    s_file_playing = true;
+    s_file_stop_requested = false;
+    s_file_seek_requested = false;
+    s_file_resource = process_registry__resource_register(audio__file_cleanup, NULL);
+    xSemaphoreGive(s_audio_mutex);
+    process_registry__operation_end();
+
+    uint32_t out_rate = audio__stream_sample_rate();
+    size_t sample_bytes = (size_t)wav.bits_per_sample / 8u;
+    size_t frame_bytes = (size_t)wav.channels * sample_bytes;
+    uint8_t *in_buf = malloc(AUDIO__FILE_READ_FRAMES * frame_bytes);
+    int16_t *out_buf = malloc(AUDIO__FILE_READ_FRAMES * (size_t)wav.channels * sizeof(int16_t));
+    bool out_of_memory = in_buf == NULL || out_buf == NULL;
+
+    size_t in_count = 0, in_pos = 0;
+    int16_t current_frame[2] = {0, 0};
+    uint32_t acc = 0;
+    bool done = out_of_memory;
+    while (!done) {
+        if (process__current_signal() != 0) break;
+
+        audio__file_poll_t poll;
+        if (!audio__file_poll_locked(&poll)) break; /* device shutting down */
+
+        if (poll.stop) break;
+        if (poll.seek) {
+            uint64_t target_frame = ((uint64_t)poll.seek_ms * wav.sample_rate) / 1000u;
+            uint64_t byte_offset = target_frame * frame_bytes;
+            if (byte_offset > wav.data_size) byte_offset = wav.data_size;
+            if (storage__seek(wav.file, (int64_t)(wav.data_start + byte_offset), SEEK_SET, NULL) == BRUCE_OK) {
+                wav.data_position = (uint32_t)byte_offset;
+                audio__file_publish_position_locked(wav.data_position);
+                in_count = 0;
+                in_pos = 0;
+                acc = 0;
+            }
+        }
+        if (!poll.playing) {
+            (void)runtime__sleep(20u);
+            continue;
+        }
+
+        if (in_pos >= in_count) {
+            size_t want = AUDIO__FILE_READ_FRAMES * frame_bytes;
+            size_t remaining = wav.data_size - wav.data_position;
+            if (want > remaining) want = remaining;
+            size_t got = 0;
+            if (want == 0 || storage__read(wav.file, in_buf, want, &got) != BRUCE_OK || got == 0) break;
+            wav.data_position += (uint32_t)got;
+            audio__file_publish_position_locked(wav.data_position);
+            in_count = got / frame_bytes;
+            in_pos = 0;
+        }
+
+        size_t out_count = 0;
+        while (in_pos < in_count && out_count < AUDIO__FILE_READ_FRAMES) {
+            acc += wav.sample_rate;
+            while (acc >= out_rate && in_pos < in_count) {
+                acc -= out_rate;
+                const uint8_t *frame = in_buf + in_pos * frame_bytes;
+                current_frame[0] = audio__wav_sample_to_pcm16(frame, wav.bits_per_sample);
+                if (wav.channels == 2) {
+                    current_frame[1] = audio__wav_sample_to_pcm16(frame + sample_bytes, wav.bits_per_sample);
+                }
+                in_pos++;
+            }
+            out_buf[out_count * wav.channels] = current_frame[0];
+            if (wav.channels == 2) out_buf[out_count * wav.channels + 1] = current_frame[1];
+            out_count++;
+        }
+
+        size_t written = 0;
+        while (written < out_count && process__current_signal() == 0) {
+            size_t copied = audio__stream_write(out_buf + written * wav.channels, out_count - written);
+            if (copied == 0) {
+                if (runtime__sleep(10u) != BRUCE_OK) break;
+                continue;
+            }
+            written += copied;
+        }
+    }
+
+    free(in_buf);
+    free(out_buf);
+
+    bruce_resource_id_t resource = BRUCE_RESOURCE_ID_INVALID;
+    if (process_registry__operation_begin()) {
+        xSemaphoreTake(s_audio_mutex, portMAX_DELAY);
+        resource = s_file_resource;
+        audio__file_teardown_locked();
+        xSemaphoreGive(s_audio_mutex);
+        process_registry__operation_end();
+    }
+    (void)audio__stream_close();
+    if (resource != BRUCE_RESOURCE_ID_INVALID) process_registry__resource_release(resource);
+    return BRUCE_OK;
+}
+
+/* Context for audio__file_play_process_entry() below -- a heap copy of the
+ * path, since the caller's own stack/path buffer won't outlive this call
+ * once audio__file_play() returns. Freed by audio__file_play_process_cleanup()
+ * regardless of how the spawned process ends (normal return, force-kill,
+ * or never starting at all). */
+static int audio__file_play_process_entry(void *context) {
+    char *path = context;
+    (void)audio__file_play_blocking(path);
+    return 0;
+}
+
+static void audio__file_play_process_cleanup(void *context) { free(context); }
+
+bruce_result_t audio__file_play(const char *path) {
+    if (path == NULL || path[0] == '\0') return BRUCE_ERR_INVALID_ARGUMENT;
+    size_t path_length = strlen(path);
+    if (path_length >= BRUCE_STORAGE_PATH_MAX) return BRUCE_ERR_INVALID_ARGUMENT;
+
+    /* Quick synchronous validation so a bad path/format is reported to the
+     * caller immediately instead of silently failing in the background --
+     * closed right away because the spawned process below reopens the file
+     * itself (a storage handle can't cross processes). Cheap: this only
+     * reads the WAV header, not the audio data. */
+    audio__wav_t probe;
+    if (!audio__wav_open(path, &probe)) return BRUCE_ERR_UNSUPPORTED;
+    storage__close(probe.file);
+
+    char *context = malloc(path_length + 1);
+    if (context == NULL) return BRUCE_ERR_NO_MEMORY;
+    memcpy(context, path, path_length + 1);
+
+    process_create_params_t params = {
+        .name = "audio.file",
+        .built_in = true,
+        .start_in_background = true,
+        .stack_bytes = AUDIO__FILE_PLAY_TASK_STACK_BYTES,
+        .process_entry = audio__file_play_process_entry,
+        .process_entry_context = context,
+        .process_entry_cleanup = audio__file_play_process_cleanup,
+    };
+    bruce_process_id_t spawned_id = BRUCE_PROCESS_ID_INVALID;
+    bruce_result_t created = process_registry__create(&params, &spawned_id);
+    if (created != BRUCE_OK) {
+        free(context);
+        return created;
+    }
+    return BRUCE_OK;
+}
+
+bruce_result_t audio__file_pause(void) {
+    audio__ensure_mutex();
+    xSemaphoreTake(s_audio_mutex, portMAX_DELAY);
+    bruce_result_t result = s_file_open ? BRUCE_OK : BRUCE_ERR_INVALID_STATE;
+    if (result == BRUCE_OK) s_file_playing = false;
+    xSemaphoreGive(s_audio_mutex);
+    return result;
+}
+
+bruce_result_t audio__file_resume(void) {
+    audio__ensure_mutex();
+    xSemaphoreTake(s_audio_mutex, portMAX_DELAY);
+    bruce_result_t result = s_file_open ? BRUCE_OK : BRUCE_ERR_INVALID_STATE;
+    if (result == BRUCE_OK) s_file_playing = true;
+    xSemaphoreGive(s_audio_mutex);
+    return result;
+}
+
+bruce_result_t audio__file_seek(uint32_t position_ms) {
+    audio__ensure_mutex();
+    xSemaphoreTake(s_audio_mutex, portMAX_DELAY);
+    bruce_result_t result = s_file_open ? BRUCE_OK : BRUCE_ERR_INVALID_STATE;
+    if (result == BRUCE_OK) {
+        s_file_seek_target_ms = position_ms;
+        s_file_seek_requested = true;
+    }
+    xSemaphoreGive(s_audio_mutex);
+    return result;
+}
+
+bruce_result_t audio__file_stop(void) {
+    audio__ensure_mutex();
+    xSemaphoreTake(s_audio_mutex, portMAX_DELAY);
+    bruce_result_t result = s_file_open ? BRUCE_OK : BRUCE_ERR_INVALID_STATE;
+    if (result == BRUCE_OK) s_file_stop_requested = true;
+    xSemaphoreGive(s_audio_mutex);
+    return result;
+}
+
+bool audio__file_is_open(void) {
+    audio__ensure_mutex();
+    xSemaphoreTake(s_audio_mutex, portMAX_DELAY);
+    bool open = s_file_open;
+    xSemaphoreGive(s_audio_mutex);
+    return open;
+}
+
+bool audio__file_is_playing(void) {
+    audio__ensure_mutex();
+    xSemaphoreTake(s_audio_mutex, portMAX_DELAY);
+    bool playing = s_file_open && s_file_playing;
+    xSemaphoreGive(s_audio_mutex);
+    return playing;
+}
+
+uint32_t audio__file_position_ms(void) {
+    audio__ensure_mutex();
+    xSemaphoreTake(s_audio_mutex, portMAX_DELAY);
+    uint32_t ms = 0;
+    if (s_file_open && s_file_wav.sample_rate > 0) {
+        uint32_t frame_bytes = (uint32_t)s_file_wav.channels * ((uint32_t)s_file_wav.bits_per_sample / 8u);
+        uint32_t frames = s_file_wav.data_position / frame_bytes;
+        ms = (uint32_t)(((uint64_t)frames * 1000u) / s_file_wav.sample_rate);
+    }
+    xSemaphoreGive(s_audio_mutex);
+    return ms;
+}
+
+uint32_t audio__file_duration_ms(void) {
+    audio__ensure_mutex();
+    xSemaphoreTake(s_audio_mutex, portMAX_DELAY);
+    uint32_t ms = 0;
+    if (s_file_open && s_file_wav.sample_rate > 0) {
+        uint32_t frame_bytes = (uint32_t)s_file_wav.channels * ((uint32_t)s_file_wav.bits_per_sample / 8u);
+        uint32_t frames = s_file_wav.data_size / frame_bytes;
+        ms = (uint32_t)(((uint64_t)frames * 1000u) / s_file_wav.sample_rate);
+    }
+    xSemaphoreGive(s_audio_mutex);
+    return ms;
 }

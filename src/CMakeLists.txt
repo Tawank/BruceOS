@@ -231,6 +231,7 @@ idf_component_register(SRCS
                     "modules/ssh/ssh_sftp_app.c"
                      "modules/nc/nc_app.c"
                      "modules/nmap/nmap_app.c"
+                     "modules/ffplay/ffplay_app.c"
                      "modules/text/text_app.c"
                      "modules/utils/launcher/launcher_app.c"
                      "modules/utils/man/man_app.c"
@@ -649,6 +650,11 @@ add_library(bruce_sdk_builtin_nc_check OBJECT "modules/nc/nc_app.c")
 target_include_directories(bruce_sdk_builtin_nc_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/nc")
+
+add_library(bruce_sdk_builtin_ffplay_check OBJECT "modules/ffplay/ffplay_app.c")
+target_include_directories(bruce_sdk_builtin_ffplay_check PRIVATE
+                           "${CMAKE_CURRENT_LIST_DIR}"
+                           "${CMAKE_CURRENT_LIST_DIR}/modules/ffplay")
 
 add_library(bruce_sdk_builtin_nmap_check OBJECT "modules/nmap/nmap_app.c")
 target_include_directories(bruce_sdk_builtin_nmap_check PRIVATE

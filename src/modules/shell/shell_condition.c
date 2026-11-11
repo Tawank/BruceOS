@@ -118,6 +118,14 @@ static int shell_condition__file_test(const shell_state_t *state, const char *op
 /* The innermost tier: no more &&/||/-a/-o left to split on, just a leaf
  * unary/binary test (or a bare truthiness check). */
 static int shell_condition__eval_base(const shell_state_t *state, int argc, char **argv) {
+    /* "! EXPR" (e.g. "[[ ! -t 1 ]]", "[ ! -f x ]") -- binds to the immediately
+     * following unary/binary test, same precedence as bash's own "!" here.
+     * Without this, "! -t 1" reads as the 3-arg binary-operator case below
+     * with op="-t", producing "unsupported operator" instead of negating. */
+    if (argc >= 1 && strcmp(argv[0], "!") == 0) {
+        int inner = shell_condition__eval_base(state, argc - 1, argv + 1);
+        return inner == 2 ? 2 : (inner == 0 ? 1 : 0);
+    }
     if (argc == 0) return 1;
     if (argc == 1) return shell_condition__truthy(argv[0]) ? 0 : 1;
     if (argc == 2) {
