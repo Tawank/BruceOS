@@ -22,6 +22,7 @@
 #include "core_sdk/permission.h"
 #include "core_sdk/process.h"
 #include "core_sdk/runtime.h"
+#include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
 
 static size_t s_call_count;
@@ -99,6 +100,7 @@ static uintptr_t elf_loader__find_symbol(const char *sym_name) {
     if (sym_name != NULL) {
         strncpy(s_missing_symbol, sym_name, sizeof(s_missing_symbol) - 1);
         s_missing_symbol[sizeof(s_missing_symbol) - 1] = '\0';
+        stdio__printf("ELF: Can't find symbol %s\n", s_missing_symbol);
     }
     return 0;
 }
@@ -377,6 +379,12 @@ static int elf_loader__open(
     bruce_result_t release_result = ext_mem_loader__release_image(&image);
     if (relocate_result != 0 || release_result != BRUCE_OK) {
         printf(
+            "[elf_loader] %s: relocation failed (relocate=%d, release=%d)\n",
+            ctx->permission_key,
+            relocate_result,
+            release_result
+        );
+        stdio__printf(
             "[elf_loader] %s: relocation failed (relocate=%d, release=%d)\n",
             ctx->permission_key,
             relocate_result,

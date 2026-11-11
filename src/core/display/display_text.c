@@ -2,7 +2,38 @@
 
 #include "core_sdk/display.h"
 
+#include "esp_log.h"
+
 #include <math.h>
+
+#define TAG "bruce_display"
+
+/* Re-encodes a codepoint back to UTF-8 so it can be logged as the actual
+ * glyph character alongside its numeric code. */
+static size_t display__utf8_encode(uint32_t codepoint, char out[5]) {
+    if (codepoint < 0x80) {
+        out[0] = (char)codepoint;
+        out[1] = '\0';
+        return 1;
+    } else if (codepoint < 0x800) {
+        out[0] = (char)(0xC0 | (codepoint >> 6));
+        out[1] = (char)(0x80 | (codepoint & 0x3F));
+        out[2] = '\0';
+        return 2;
+    } else if (codepoint < 0x10000) {
+        out[0] = (char)(0xE0 | (codepoint >> 12));
+        out[1] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
+        out[2] = (char)(0x80 | (codepoint & 0x3F));
+        out[3] = '\0';
+        return 3;
+    }
+    out[0] = (char)(0xF0 | (codepoint >> 18));
+    out[1] = (char)(0x80 | ((codepoint >> 12) & 0x3F));
+    out[2] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
+    out[3] = (char)(0x80 | (codepoint & 0x3F));
+    out[4] = '\0';
+    return 4;
+}
 
 /* Font-agnostic text renderer: walks a UTF-8 string, asks the active
  * display__font_t (display_internal__active_font(), see display_font.h) for
@@ -132,6 +163,9 @@ display__draw_char(display__process_context_t *context, int16_t x, int16_t y, ui
     } else {
         /* Callers only reach display__draw_char() for codepoint >= 0x20
          * (control characters are handled by display__print() itself). */
+        char utf8[5];
+        display__utf8_encode(codepoint, utf8);
+        ESP_LOGE(TAG, "error: unsupported glyph %u %s", (unsigned)codepoint, utf8);
         display__draw_tofu(context, x, y);
     }
     return advance;
