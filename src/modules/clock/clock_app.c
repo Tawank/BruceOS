@@ -1,11 +1,13 @@
 #include "clock_app.h"
 
 #include "core_sdk/args.h"
+#include "core_sdk/audio.h"
 #include "core_sdk/clock.h"
 #include "core_sdk/config.h"
 #include "core_sdk/dialog.h"
 #include "core_sdk/display.h"
 #include "core_sdk/input.h"
+#include "core_sdk/notification.h"
 #include "core_sdk/process.h"
 #include "core_sdk/result.h"
 #include "core_sdk/runtime.h"
@@ -28,6 +30,20 @@ static bool clock_app__resume_after_handoff(void) {
         if (runtime__delay(20) != BRUCE_OK || process__snapshot(self, &snapshot) != BRUCE_OK) return false;
     } while (snapshot.state == BRUCE_PROCESS_BACKGROUND);
     return snapshot.state == BRUCE_PROCESS_FOREGROUND;
+}
+
+static void clock_app__play_alert_tone(void) {
+    for (int i = 0; i < 3; ++i) {
+        (void)audio__tone(1500, 150, false);
+        (void)runtime__delay(100);
+    }
+}
+
+/* Fired while this app isn't the foreground app -- surface it via the
+ * shared overlay/notification banner instead of a GUI dialog, since a
+ * backgrounded process can't present its own frames. */
+static void clock_app__notify_fired(const char *text) {
+    if (process__is_background()) { (void)notification__push(text, 10000u); }
 }
 
 static void clock_app__format_time(const bruce_clock_datetime_t *now, char *out, size_t size) {
@@ -181,14 +197,18 @@ static int clock_app__timer(const char *argument, bool gui) {
                 (unsigned long)(remaining / 60u % 60u),
                 (unsigned long)(remaining % 60u)
             );
-            if (gui) (void)clock_app__draw("Timer", formatted, "BACK to cancel");
+            if (gui) (void)clock_app__draw("Timer", formatted, "SELECT to cancel, BACK to minimise");
             else stdio__printf("%s\n", formatted);
             last_remaining = remaining;
         }
         if (gui) {
             int32_t code = 0;
             result = input__wait(100, &code);
-            if (result == BRUCE_OK && code == BRUCE_INPUT_CODE_BACK) return BRUCE_OK;
+            if (result == BRUCE_OK && code == BRUCE_INPUT_CODE_SELECT) return BRUCE_OK;
+            if (result == BRUCE_OK && code == BRUCE_INPUT_CODE_BACK) {
+                (void)process__to_background();
+                continue;
+            }
             if (result == BRUCE_ERR_NOT_FOREGROUND && clock_app__resume_after_handoff()) {
                 /* Same stale-redraw fix as clock_app__show() above: the draw
                  * only runs when remaining actually changed, so reset
@@ -199,6 +219,8 @@ static int clock_app__timer(const char *argument, bool gui) {
             if (result != BRUCE_OK && result != BRUCE_ERR_TIMEOUT) return result;
         } else if (runtime__delay(100) != BRUCE_OK) return BRUCE_ERR_CANCELLED;
     }
+    clock_app__notify_fired("Timer: TIME'S UP!");
+    clock_app__play_alert_tone();
     if (gui) (void)dialog__message(BRUCE_DIALOG_SUCCESS, "Timer", "TIME'S UP!");
     else stdio__printf("TIME'S UP!\n");
     return BRUCE_OK;
@@ -250,13 +272,17 @@ static int clock_app__alarm(const char *argument, bool gui) {
                 (unsigned long)(target / 60u % 60u),
                 (unsigned long)(target % 60u)
             );
-            (void)clock_app__draw("Alarm set", message, "BACK to cancel");
+            (void)clock_app__draw("Alarm set", message, "SELECT to cancel, BACK to minimise");
             last_second = now.second;
         }
         if (gui) {
             int32_t code = 0;
             result = input__wait(200, &code);
-            if (result == BRUCE_OK && code == BRUCE_INPUT_CODE_BACK) return BRUCE_OK;
+            if (result == BRUCE_OK && code == BRUCE_INPUT_CODE_SELECT) return BRUCE_OK;
+            if (result == BRUCE_OK && code == BRUCE_INPUT_CODE_BACK) {
+                (void)process__to_background();
+                continue;
+            }
             if (result == BRUCE_ERR_NOT_FOREGROUND && clock_app__resume_after_handoff()) {
                 /* Same stale-redraw fix as clock_app__show() above: the draw
                  * only runs when now.second actually changed, so reset
@@ -267,6 +293,8 @@ static int clock_app__alarm(const char *argument, bool gui) {
             if (result != BRUCE_OK && result != BRUCE_ERR_TIMEOUT) return result;
         } else if (runtime__delay(200) != BRUCE_OK) return BRUCE_ERR_CANCELLED;
     }
+    clock_app__notify_fired("Alarm!");
+    clock_app__play_alert_tone();
     if (gui) (void)dialog__message(BRUCE_DIALOG_WARNING, "Alarm", "ALARM!");
     else stdio__printf("ALARM!\n");
     return BRUCE_OK;
