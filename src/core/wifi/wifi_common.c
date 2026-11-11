@@ -239,17 +239,11 @@ bruce_result_t wifi__disconnect(void) {
     return stop_err == ESP_OK && deinit_err == ESP_OK ? BRUCE_OK : BRUCE_ERR_IO;
 }
 
-bruce_result_t wifi__connect(const char *ssid, const char *password, uint32_t timeout_ms) {
-    bruce_result_t result = permission__check(BRUCE_PERMISSION_WIFI);
-    if (result != BRUCE_OK) return result;
-    if (ssid == NULL || ssid[0] == '\0' ||
-        strnlen(ssid, CONFIG__WIFI_SSID_MAX_LEN + 1) > CONFIG__WIFI_SSID_MAX_LEN || password == NULL ||
-        strnlen(password, CONFIG__WIFI_PASSWORD_MAX_LEN + 1) > CONFIG__WIFI_PASSWORD_MAX_LEN) {
-        return BRUCE_ERR_INVALID_ARGUMENT;
-    }
-    result = wifi__init();
-    if (result != BRUCE_OK) return result;
-
+/* One attempt at connecting to `ssid`/`password`, already validated and
+ * Wi-Fi already initialized by wifi__connect() below, which also owns the
+ * "connecting" status icon across every attempt (not pushed/removed here)
+ * so retrying doesn't flicker it off and back on. */
+static bruce_result_t wifi__connect_attempt(const char *ssid, const char *password, uint32_t timeout_ms) {
     wifi_config_t station = {0};
     wifi__copy((char *)station.sta.ssid, sizeof(station.sta.ssid), ssid);
     wifi__copy((char *)station.sta.password, sizeof(station.sta.password), password);
@@ -260,7 +254,14 @@ bruce_result_t wifi__connect(const char *ssid, const char *password, uint32_t ti
         return BRUCE_ERR_IO;
     }
     s_ap_running = false;
+    /* wifi__set_connected(false) removes the status icon outright (it also
+     * runs on a real WIFI_EVENT_STA_DISCONNECTED, where there should be
+     * nothing shown until a new attempt starts) -- re-pushed immediately
+     * after rather than left off for the whole attempt, so there's no gap
+     * between the "wifi-cancel" icon wifi__connect() below already showed
+     * and this attempt actually starting. */
     wifi__set_connected(false);
+    (void)status_icon__push_named(WIFI__STATUS_ICON_KEY, "wifi-cancel");
     esp_err_t err = esp_wifi_connect();
     xSemaphoreGive(s_wifi_mutex);
     if (err != ESP_OK) {
@@ -271,11 +272,52 @@ bruce_result_t wifi__connect(const char *ssid, const char *password, uint32_t ti
     if (timeout_ms == 0) { timeout_ms = WIFI__DEFAULT_CONNECT_TIMEOUT_MS; }
     EventBits_t bits =
         xEventGroupWaitBits(s_wifi_events, WIFI__CONNECTED_BIT, pdFALSE, pdFALSE, pdMS_TO_TICKS(timeout_ms));
-    if ((bits & WIFI__CONNECTED_BIT) == 0) { return BRUCE_ERR_TIMEOUT; }
+    if ((bits & WIFI__CONNECTED_BIT) == 0) return BRUCE_ERR_TIMEOUT;
+
     xSemaphoreTake(s_wifi_mutex, portMAX_DELAY);
     wifi__copy(s_active_ssid, sizeof(s_active_ssid), ssid);
     xSemaphoreGive(s_wifi_mutex);
     return BRUCE_OK;
+}
+
+/* A timeout is common enough on the first attempt alone (a slow handshake,
+ * a momentarily busy AP, ...) that giving up immediately wastes a
+ * perfectly good saved credential -- retried once before this reports
+ * failure. Not retried for BRUCE_ERR_IO (esp_wifi_set_config()/
+ * esp_wifi_connect() itself rejecting the request): that is a
+ * configuration problem, not a transient one, and would just fail the
+ * same way again. */
+#define WIFI__CONNECT_MAX_ATTEMPTS 2u
+
+bruce_result_t wifi__connect(const char *ssid, const char *password, uint32_t timeout_ms) {
+    bruce_result_t result = permission__check(BRUCE_PERMISSION_WIFI);
+    if (result != BRUCE_OK) return result;
+    if (ssid == NULL || ssid[0] == '\0' ||
+        strnlen(ssid, CONFIG__WIFI_SSID_MAX_LEN + 1) > CONFIG__WIFI_SSID_MAX_LEN || password == NULL ||
+        strnlen(password, CONFIG__WIFI_PASSWORD_MAX_LEN + 1) > CONFIG__WIFI_PASSWORD_MAX_LEN) {
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    /* Pushed before wifi__init() (which can itself take a couple of seconds
+     * on a cold start -- NVS/driver/netif bring-up) rather than after, so
+     * the user sees a response the instant Wi-Fi is turned on instead of a
+     * blank status bar until init happens to finish. Removed below if
+     * init itself fails, since there's nothing to cancel at that point. */
+    (void)status_icon__push_named(WIFI__STATUS_ICON_KEY, "wifi-cancel");
+    result = wifi__init();
+    if (result != BRUCE_OK) {
+        (void)status_icon__remove(WIFI__STATUS_ICON_KEY);
+        return result;
+    }
+
+    bruce_result_t attempt_result = BRUCE_ERR_TIMEOUT;
+    for (uint32_t attempt = 0; attempt < WIFI__CONNECT_MAX_ATTEMPTS; ++attempt) {
+        attempt_result = wifi__connect_attempt(ssid, password, timeout_ms);
+        if (attempt_result == BRUCE_OK) return BRUCE_OK;
+        if (attempt_result != BRUCE_ERR_TIMEOUT) break;
+        ESP_LOGW(TAG, "wifi: connect to %s timed out, retrying once", ssid);
+    }
+    (void)status_icon__remove(WIFI__STATUS_ICON_KEY);
+    return attempt_result;
 }
 
 bruce_result_t wifi__scan_start(void) {
@@ -408,18 +450,65 @@ bruce_result_t wifi__connect_known(void) {
     if (result != BRUCE_OK) return result;
 
     if (wifi__is_connected()) return BRUCE_OK;
+    /* Shown from the very start of "wifi on" (this is what it calls first),
+     * not just once wifi__connect() itself is about to block on a specific
+     * candidate below -- otherwise it wouldn't appear until after the scan
+     * below finishes and a saved network is actually found, which can take
+     * a few seconds on its own. Removed below if nothing ever connects;
+     * replaced by the real connected icon (same key) if something does. */
+    (void)status_icon__push_named(WIFI__STATUS_ICON_KEY, "wifi-cancel");
     wifi__network_t networks[16];
     int count = wifi__scan(networks, 16);
-    if (count < 0) return (bruce_result_t)count;
+    if (count < 0) {
+        (void)status_icon__remove(WIFI__STATUS_ICON_KEY);
+        return (bruce_result_t)count;
+    }
+    /* Whether a saved credential matched a nearby SSID at all, kept separate
+     * from whether connecting with it actually worked -- the two used to be
+     * conflated into a single BRUCE_ERR_NOT_FOUND return either way, which is
+     * where wifi_app_on()'s "No saved Wi-Fi network is in range" message
+     * (only shown for BRUCE_ERR_NOT_FOUND) came from even when a saved
+     * network truly was right there and matched, but the connect attempt
+     * itself timed out or got rejected (e.g. a stale saved password) --
+     * confirmed from a real device log where the saved and nearby SSIDs
+     * were byte-for-byte identical, yet this still fell through to that
+     * "not in range" message 10 seconds later. */
+    bool attempted = false;
+    bruce_result_t last_attempt_result = BRUCE_ERR_NOT_FOUND;
     for (int i = 0; i < count; ++i) {
         const bruce_config_wifi_credential_t *credential =
             config__find_wifi_credential(networks[i].ssid);
         if (credential != NULL) {
-            bruce_result_t result =
+            attempted = true;
+            last_attempt_result =
                 wifi__connect(credential->ssid, credential->password, WIFI__DEFAULT_CONNECT_TIMEOUT_MS);
-            if (result == BRUCE_OK) return BRUCE_OK;
+            if (last_attempt_result == BRUCE_OK) return BRUCE_OK;
         }
     }
+    (void)status_icon__remove(WIFI__STATUS_ICON_KEY);
+    if (attempted) {
+        ESP_LOGW(
+            TAG, "wifi: a saved network was nearby but failed to connect: %d", (int)last_attempt_result
+        );
+        return last_attempt_result;
+    }
+    /* Genuinely nothing matched -- config__find_wifi_credential() above is
+     * an exact strcmp() against the scanned SSID, so if a network that
+     * looks saved still ends up here, the two strings differ in some way
+     * that doesn't show up just reading the scan table (case, a trailing
+     * space from how the credential was entered, ...). Logged in quotes,
+     * both lists, so that's visible on the next read instead of having to
+     * guess at it again. */
+    size_t saved_count = config__wifi_credential_count();
+    ESP_LOGW(
+        TAG, "wifi: no saved credential matched any of %d nearby network(s) (%u saved):", count,
+        (unsigned)saved_count
+    );
+    for (size_t i = 0; i < saved_count; ++i) {
+        const bruce_config_wifi_credential_t *credential = config__wifi_credential_at(i);
+        if (credential != NULL) ESP_LOGW(TAG, "  saved:  \"%s\"", credential->ssid);
+    }
+    for (int i = 0; i < count; ++i) { ESP_LOGW(TAG, "  nearby: \"%s\"", networks[i].ssid); }
     return BRUCE_ERR_NOT_FOUND;
 }
 

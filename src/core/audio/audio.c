@@ -19,6 +19,7 @@
 #include "esp_audio_simple_player.h"
 #include "esp_gmf_err.h"
 #include "esp_log.h"
+#include "esp_system.h"
 
 #define TAG "bruce_audio"
 
@@ -985,8 +986,17 @@ static void audio__file_play_process_cleanup(void *context) {
  * core_sdk/memory.h), and are small/fixed-size regardless of file size.
  *
  * Position/duration/seek are not tracked for MP3 -- see audio.h. */
-#define AUDIO__MP3_PCM_RING_FRAMES 2048u  /* stereo int16 frames, ~8KB */
-#define AUDIO__MP3_INPUT_RING_BYTES 16384u /* compressed bytes, ~1s at 128kbps */
+/* Trimmed from 2048/16384 (8KB/16KB): these boards have no PSRAM, so both
+ * rings live in internal RAM (memory__external_malloc_writable() can't put
+ * them anywhere else -- see its own doc comment), competing for the same
+ * pool esp_audio_simple_player's pipeline needs its own one-shot internal
+ * allocations from (e.g. the rate converter's ~15KB coefficients matrix,
+ * opened once at playback start -- CONFIG_AUDIO_SIMPLE_PLAYER_RESAMPLE_DEST_RATE
+ * in sdkconfig.defaults). Smaller rings mean less headroom against a slow
+ * storage read or a backed-up I2S write before audio audibly stutters, but
+ * that's a straight tradeoff against the pipeline failing to open at all. */
+#define AUDIO__MP3_PCM_RING_FRAMES 1024u  /* stereo int16 frames, ~4KB */
+#define AUDIO__MP3_INPUT_RING_BYTES 8192u /* compressed bytes, ~0.5s at 128kbps */
 #define AUDIO__MP3_TRANSFER_FRAMES 256u
 
 typedef struct {
@@ -1233,6 +1243,16 @@ static bruce_result_t audio__mp3_play_blocking(const char *path, uint32_t token)
     xSemaphoreGive(s_audio_mutex);
     process_registry__operation_end();
 
+    /* The pipeline's own elements (decoder, resampler, ...) open -- and do
+     * their own one-shot internal allocations, e.g. the resampler's
+     * coefficients matrix -- asynchronously on esp_audio_simple_player's own
+     * task after this call, not synchronously inside it, so a failure there
+     * (logged by esp_ae/esp_gmf itself, then delivered to
+     * audio__mp3_event_cb() as ESP_GMF_EVENT_STATE_ERROR) can't be caught by
+     * checking run_result alone. Logged here so a failure a few lines later
+     * in the serial log has the actual free-heap number next to it instead
+     * of requiring another guess at how much headroom the pipeline needed. */
+    ESP_LOGI(TAG, "mp3: free heap before run(): %u bytes", (unsigned)esp_get_free_heap_size());
     esp_gmf_err_t run_result = esp_audio_simple_player_run(handle, "raw://local/audio.mp3", NULL);
     if (run_result != ESP_GMF_ERR_OK) {
         ESP_LOGE(TAG, "mp3: esp_audio_simple_player_run() failed: %d", (int)run_result);

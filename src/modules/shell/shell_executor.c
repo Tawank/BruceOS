@@ -1501,16 +1501,38 @@ static int shell_executor__pipe_write(
             break;
         }
     }
-    /* Nothing more will ever be written to this session's input, whether the
-     * loop above delivered the whole buffer or gave up early on a write
-     * error -- either way the target has everything it's going to get. This
-     * is the real end-of-input signal STDIN_SIZE was always a stand-in for
-     * (see stdio__session_close_input()'s own doc comment): a target that
-     * reads in a loop until EOF, rather than relying on a byte count it was
-     * told up front, now gets one. Skipped when the target has already
-     * exited (destination_exited) -- its session is on its way out anyway,
-     * and there's nothing left on the other end to signal. */
-    if (!destination_exited) (void)stdio__session_close_input(session);
+    /* Nothing more of the piped buffer will ever be written, whether the
+     * loop above delivered the whole thing or gave up early on a write
+     * error -- either way the target has everything the pipe/redirect
+     * itself is going to give it. For a "producer | consumer > file"
+     * destination (capture != NULL, never interactive -- see this
+     * function's own doc comment) that's also the real end-of-input signal
+     * STDIN_SIZE was always a stand-in for (see stdio__session_close_input()'s
+     * own doc comment): a target that reads in a loop until EOF, rather than
+     * relying on a byte count it was told up front, now gets one.
+     *
+     * Skipped for a live destination (capture == NULL): once fed, control
+     * passes to shell_executor__pipe_relay() below, which keeps forwarding
+     * real keystrokes from the shell's own terminal into this exact same
+     * session for as long as the destination runs -- an interactive pager
+     * like "less" depends on that to receive q/space/arrow keys after its
+     * piped content has been delivered. stdio__session_close_input() closes
+     * the input side *permanently* (stdio__session_write_input() itself
+     * starts failing, not just reads), so calling it here raced the very
+     * first poll in less's own input loop: it saw "closed, nothing queued"
+     * (BRUCE_ERR_NOT_FOUND, indistinguishable from Ctrl+C/cancellation) and
+     * quit instantly, before the user could ever press a key -- the screen
+     * clears to draw the first page and clears again on that immediate exit,
+     * which is all "cmd | less" ever showed. Every built-in pipe consumer
+     * (grep, sed, wc, text, less's own content load, ...) already reads
+     * exactly STDIN_SIZE bytes and stops there regardless of this, so
+     * skipping it here costs nothing for them; only a hypothetical consumer
+     * that both ignores STDIN_SIZE and loops on true EOF would notice, and
+     * none of this codebase's own commands do that. Still skipped (same as
+     * before) when the target has already exited (destination_exited) --
+     * its session is on its way out anyway, and there's nothing left on the
+     * other end to signal. */
+    if (!destination_exited && capture != NULL) (void)stdio__session_close_input(session);
     /* The source buffer's job ends here -- everything of it that's going to
      * reach the target has already been written to its stdin. Freeing it now
      * rather than leaving it to the caller (after this function returns)

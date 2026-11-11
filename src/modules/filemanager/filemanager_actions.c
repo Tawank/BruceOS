@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 
 #include "core_sdk/app_runner.h"
 #include "core_sdk/dialog.h"
@@ -91,39 +92,114 @@ bruce_result_t filemanager__open_default(const char *path, bool gui) {
     return process__wait((bruce_process_id_t)process, UINT32_MAX);
 }
 
-bruce_result_t filemanager__pick_open_with_app(const char *path, bool gui) {
-    const bruce_dialog_choice_t choices[] = {
-        {.label = "Text",       .value = "text"  },
-        {.label = "Image",      .value = "image" },
-        {.label = "Wasm",       .value = "wasm"  },
-        {.label = "ELF",        .value = "elf"   },
-        {.label = "JavaScript", .value = "js"    },
-        {.label = "Cancel",     .value = "cancel"},
+#define FILEMANAGER_OPEN_WITH_APPS_MAX 12
+
+static bruce_result_t filemanager__run_terminal_command(const char *command_line) {
+    const bruce_environment_variable_t gui_env[] = {
+        {.name = "GUI", .value = "1"}
     };
-    /* Heap, not a local: sized off BRUCE_STORAGE_PATH_MAX, not
-     * BRUCE_STORAGE_NAME_MAX, since `path` (and thus
-     * filemanager__basename(path), when it has no '/') is only ever as long
-     * as a full path but the compiler can't see that bound through the
-     * pointer - a NAME_MAX-sized buffer would warn (-Werror=format-truncation)
-     * on the snprintf below. That makes it too big to keep piling onto the
-     * caller's task stack on top of dialog__choice()'s own frame below. */
+    int process = app_runner__run_with_environment("terminal", command_line, BRUCE_LAUNCH_FOREGROUND, gui_env, 1u);
+    if (process <= 0) return (bruce_result_t)process;
+    return process__wait((bruce_process_id_t)process, UINT32_MAX);
+}
+
+static bool filemanager__strip_app_extension(const char *filename, char *out_name, size_t out_size) {
+    static const char *const extensions[] = {".elf", ".wasm", ".js"};
+    size_t name_length = strlen(filename);
+    for (size_t i = 0; i < sizeof(extensions) / sizeof(extensions[0]); ++i) {
+        size_t extension_length = strlen(extensions[i]);
+        if (name_length > extension_length &&
+            strcasecmp(filename + name_length - extension_length, extensions[i]) == 0) {
+            size_t base_length = name_length - extension_length;
+            if (base_length >= out_size) return false;
+            memcpy(out_name, filename, base_length);
+            out_name[base_length] = '\0';
+            return true;
+        }
+    }
+    return false;
+}
+
+static size_t filemanager__list_installed_apps(char names[][BRUCE_STORAGE_NAME_MAX], size_t capacity) {
+    size_t total = 0;
+    if (storage__list("/apps", NULL, 0, &total) != BRUCE_OK || total == 0) return 0;
+    bruce_storage_entry_t *entries = memory__calloc(total, sizeof(*entries));
+    if (entries == NULL) return 0;
+    size_t count = 0;
+    if (storage__list("/apps", entries, total, &total) == BRUCE_OK) {
+        for (size_t i = 0; i < total && count < capacity; ++i) {
+            if (entries[i].type != BRUCE_STORAGE_ENTRY_FILE) continue;
+            if (filemanager__strip_app_extension(entries[i].name, names[count], BRUCE_STORAGE_NAME_MAX)) count++;
+        }
+    }
+    memory__free(entries);
+    return count;
+}
+
+bruce_result_t filemanager__pick_open_with_app(const char *path, bool gui) {
+    char app_names[FILEMANAGER_OPEN_WITH_APPS_MAX][BRUCE_STORAGE_NAME_MAX];
+    size_t app_count = filemanager__list_installed_apps(app_names, FILEMANAGER_OPEN_WITH_APPS_MAX);
+
+    size_t capacity = 8u + app_count;
+    bruce_dialog_choice_t *choices = memory__malloc(capacity * sizeof(*choices));
+    if (choices == NULL) return BRUCE_ERR_NO_MEMORY;
+    size_t n = 0;
+    choices[n++] = (bruce_dialog_choice_t){.label = "Text", .value = "text"};
+    choices[n++] = (bruce_dialog_choice_t){.label = "xxd (hex dump)", .value = "xxd"};
+    size_t apps_start = n;
+    for (size_t i = 0; i < app_count; ++i) choices[n++] = (bruce_dialog_choice_t){.label = app_names[i], .value = app_names[i]};
+    size_t apps_end = n;
+    choices[n++] = (bruce_dialog_choice_t){.label = "Custom command...", .value = "custom"};
+    choices[n++] = (bruce_dialog_choice_t){.label = "Cancel", .value = "cancel"};
+
     char *title = memory__malloc(16 + BRUCE_STORAGE_PATH_MAX);
-    if (title == NULL) return BRUCE_ERR_NO_MEMORY;
+    if (title == NULL) {
+        memory__free(choices);
+        return BRUCE_ERR_NO_MEMORY;
+    }
     snprintf(title, 16 + BRUCE_STORAGE_PATH_MAX, "Open with %s", filemanager__basename(path));
 
     size_t selected = 0;
-    bruce_result_t result =
-        dialog__choice(title, NULL, choices, sizeof(choices) / sizeof(choices[0]), &selected);
+    bruce_result_t result = dialog__choice(title, NULL, choices, n, &selected);
     memory__free(title);
-    if (result != BRUCE_OK || strcmp(choices[selected].value, "cancel") == 0)
+    if (result != BRUCE_OK || strcmp(choices[selected].value, "cancel") == 0) {
+        memory__free(choices);
         return result == BRUCE_OK ? BRUCE_ERR_CANCELLED : result;
+    }
 
-    const char *app = choices[selected].value;
+    if (selected >= apps_start && selected < apps_end) {
+        char app_name[BRUCE_STORAGE_NAME_MAX];
+        snprintf(app_name, sizeof(app_name), "%s", choices[selected].value);
+        memory__free(choices);
+        return filemanager__run_named_app(app_name, path, true, false);
+    }
+
+    char app[16];
+    snprintf(app, sizeof(app), "%s", choices[selected].value);
+    memory__free(choices);
+
     if (strcmp(app, "text") == 0) return filemanager__run_named_app("text", path, gui, false);
-    if (strcmp(app, "image") == 0) return filemanager__run_named_app("image", path, gui, false);
-    if (strcmp(app, "wasm") == 0) return filemanager__run_named_app("wasm", path, true, false);
-    if (strcmp(app, "elf") == 0) return filemanager__run_named_app("elf", path, true, false);
-    if (strcmp(app, "js") == 0) return filemanager__run_named_app("js", path, gui, false);
+
+    char escaped_path[BRUCE_STORAGE_PATH_MAX * 2 + 8];
+    if (!filemanager__escape_arg(path, escaped_path, sizeof(escaped_path))) return BRUCE_ERR_INVALID_PATH;
+
+    if (strcmp(app, "xxd") == 0) {
+        char command[sizeof(escaped_path) + 8];
+        int written = snprintf(command, sizeof(command), "xxd %s", escaped_path);
+        if (written < 0 || (size_t)written >= sizeof(command)) return BRUCE_ERR_RESOURCE_LIMIT;
+        return filemanager__run_terminal_command(command);
+    }
+    if (strcmp(app, "custom") == 0) {
+        /* Pre-filled with the (escaped) path rather than empty, so the user
+         * edits it into a full command (e.g. "xxd -l 64 <path>", "cat <path>
+         * | grep foo") instead of typing the path themselves. */
+        char command[BRUCE_STORAGE_PATH_MAX * 2 + 64];
+        bruce_result_t text_result =
+            dialog__text_input("Custom command", "Command", escaped_path, false, command, sizeof(command));
+        if (text_result != BRUCE_OK) return text_result;
+        if (command[0] == '\0') return BRUCE_ERR_CANCELLED;
+        return filemanager__run_terminal_command(command);
+    }
     return BRUCE_ERR_NOT_FOUND;
 }
 

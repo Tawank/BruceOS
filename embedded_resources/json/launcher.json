@@ -38,6 +38,8 @@
     "LED Config": "config led",
     "Audio Config": "config audio",
     "System Config": {
+      "$INSTANT_BOOT_TEXT": "BG=1 config system instant-boot toggle",
+      "$WIFI_STARTUP_TEXT": "BG=1 config system wifi-startup toggle",
       "Startup Apps": "config system startup",
       "Clock": "config system clock",
       "Advanced": {

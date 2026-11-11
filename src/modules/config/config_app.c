@@ -265,6 +265,110 @@ static int config_app__startup_cli(
     return BRUCE_ERR_INVALID_ARGUMENT;
 }
 
+/* "Instant boot" and "WiFi on startup" below aren't their own stored
+ * settings -- each is really just whether one specific line is present in
+ * the startup app list (see autostart.c), inverted for the boot-animation
+ * case since removing it is what makes boot faster/"instant". Piggybacking
+ * on the startup list this way means they show up (and can be reordered or
+ * removed) in "Startup apps" too, rather than being a second, separate
+ * source of truth that could drift out of sync with it. */
+#define CONFIG_APP__BOOTANIMATION_STARTUP_CMD "BG=0 bootanimation"
+#define CONFIG_APP__WIFI_STARTUP_CMD "wifi on"
+
+static bool config_app__startup_has(const char *command) {
+    const bruce_config_startup_apps_t *apps = config__get_startup_apps();
+    if (apps == NULL) return false;
+    for (size_t i = 0; i < apps->count; ++i) {
+        if (strcmp(apps->items[i], command) == 0) return true;
+    }
+    return false;
+}
+
+static bool config_app__instant_boot_enabled(void) {
+    return !config_app__startup_has(CONFIG_APP__BOOTANIMATION_STARTUP_CMD);
+}
+
+/* config__remove_startup_app()/config__add_startup_app() already no-op
+ * (BRUCE_OK) when asked to add an entry that's already there, but
+ * config__remove_startup_app() reports BRUCE_ERR_NOT_FOUND when it's
+ * already gone -- treated as success here too, since from this toggle's
+ * point of view "already in the requested state" isn't a failure. */
+static bruce_result_t config_app__set_instant_boot(bool enabled) {
+    bruce_result_t result = enabled ? config__remove_startup_app(CONFIG_APP__BOOTANIMATION_STARTUP_CMD)
+                                     : config__add_startup_app(CONFIG_APP__BOOTANIMATION_STARTUP_CMD);
+    return result == BRUCE_ERR_NOT_FOUND ? BRUCE_OK : result;
+}
+
+static int config_app__instant_boot_gui(void) {
+    for (;;) {
+        bool enabled = config_app__instant_boot_enabled();
+        char label[40];
+        snprintf(label, sizeof(label), "Instant boot: %s", enabled ? "ON" : "OFF");
+        const bruce_dialog_choice_t choices[] = {
+            {.label = label, .value = "toggle"},
+            {.label = "Back", .value = "back"  },
+        };
+        size_t selected = 0;
+        bruce_result_t result = dialog__choice_launcher("Instant boot", NULL, choices, 2, &selected);
+        if (result == BRUCE_ERR_CANCELLED) return BRUCE_OK;
+        if (result != BRUCE_OK) return result;
+        if (strcmp(choices[selected].value, "back") == 0) return BRUCE_OK;
+        bruce_result_t set_result = config_app__set_instant_boot(!enabled);
+        if (set_result != BRUCE_OK) return set_result;
+    }
+}
+
+static int config_app__instant_boot_cli(ArgParser *instant_boot, ArgParser *toggle) {
+    if (ap_get_cmd_parser(instant_boot) == toggle) return config_app__set_instant_boot(!config_app__instant_boot_enabled());
+    const char *state = ap_get_arg(instant_boot, "state");
+    if (state == NULL) {
+        stdio__printf("Instant boot: %s\n", config_app__instant_boot_enabled() ? "on" : "off");
+        return BRUCE_OK;
+    }
+    bool value;
+    return config_app__parse_on_off(state, &value) ? config_app__set_instant_boot(value)
+                                                    : BRUCE_ERR_INVALID_ARGUMENT;
+}
+
+static bool config_app__wifi_startup_enabled(void) { return config_app__startup_has(CONFIG_APP__WIFI_STARTUP_CMD); }
+
+static bruce_result_t config_app__set_wifi_startup(bool enabled) {
+    bruce_result_t result = enabled ? config__add_startup_app(CONFIG_APP__WIFI_STARTUP_CMD)
+                                     : config__remove_startup_app(CONFIG_APP__WIFI_STARTUP_CMD);
+    return result == BRUCE_ERR_NOT_FOUND ? BRUCE_OK : result;
+}
+
+static int config_app__wifi_startup_gui(void) {
+    for (;;) {
+        bool enabled = config_app__wifi_startup_enabled();
+        char label[40];
+        snprintf(label, sizeof(label), "WiFi on startup: %s", enabled ? "ON" : "OFF");
+        const bruce_dialog_choice_t choices[] = {
+            {.label = label, .value = "toggle"},
+            {.label = "Back", .value = "back"  },
+        };
+        size_t selected = 0;
+        bruce_result_t result = dialog__choice_launcher("WiFi on startup", NULL, choices, 2, &selected);
+        if (result == BRUCE_ERR_CANCELLED) return BRUCE_OK;
+        if (result != BRUCE_OK) return result;
+        if (strcmp(choices[selected].value, "back") == 0) return BRUCE_OK;
+        bruce_result_t set_result = config_app__set_wifi_startup(!enabled);
+        if (set_result != BRUCE_OK) return set_result;
+    }
+}
+
+static int config_app__wifi_startup_cli(ArgParser *wifi_startup, ArgParser *toggle) {
+    if (ap_get_cmd_parser(wifi_startup) == toggle) return config_app__set_wifi_startup(!config_app__wifi_startup_enabled());
+    const char *state = ap_get_arg(wifi_startup, "state");
+    if (state == NULL) {
+        stdio__printf("WiFi on startup: %s\n", config_app__wifi_startup_enabled() ? "on" : "off");
+        return BRUCE_OK;
+    }
+    bool value;
+    return config_app__parse_on_off(state, &value) ? config_app__set_wifi_startup(value)
+                                                    : BRUCE_ERR_INVALID_ARGUMENT;
+}
+
 /* Returns the index into `values` closest to `current`, for pre-selecting a choice dialog. */
 static size_t config_app__closest_index(const int *values, size_t count, int current) {
     size_t best = 0;
@@ -780,6 +884,10 @@ int config_app_main(int argc, char **argv) {
     ArgParser *startup_remove = startup != NULL ? ap_new_cmd(startup, "remove") : NULL;
     ArgParser *startup_up = startup != NULL ? ap_new_cmd(startup, "up") : NULL;
     ArgParser *startup_down = startup != NULL ? ap_new_cmd(startup, "down") : NULL;
+    ArgParser *instant_boot = system != NULL ? ap_new_cmd(system, "instant-boot") : NULL;
+    ArgParser *instant_boot_toggle = instant_boot != NULL ? ap_new_cmd(instant_boot, "toggle") : NULL;
+    ArgParser *wifi_startup = system != NULL ? ap_new_cmd(system, "wifi-startup") : NULL;
+    ArgParser *wifi_startup_toggle = wifi_startup != NULL ? ap_new_cmd(wifi_startup, "toggle") : NULL;
     ArgParser *display = ap_new_cmd(root, "display");
     ArgParser *display_buffered = display != NULL ? ap_new_cmd(display, "buffered") : NULL;
     ArgParser *display_brightness = display != NULL ? ap_new_cmd(display, "brightness") : NULL;
@@ -808,6 +916,10 @@ int config_app_main(int argc, char **argv) {
         startup_remove,
         startup_up,
         startup_down,
+        instant_boot,
+        instant_boot_toggle,
+        wifi_startup,
+        wifi_startup_toggle,
         display,
         display_buffered,
         display_brightness,
@@ -854,6 +966,12 @@ int config_app_main(int argc, char **argv) {
     ap_add_required_arg(startup_up, "name", "Application name or quoted command line");
     ap_set_helptext(startup_down, "Move an application one slot later in the startup list.");
     ap_add_required_arg(startup_down, "name", "Application name or quoted command line");
+    ap_set_helptext(instant_boot, "Skip the boot animation for a faster startup.");
+    ap_add_optional_arg(instant_boot, "state", "on or off (required outside GUI mode)");
+    ap_set_helptext(instant_boot_toggle, "Toggle instant boot on or off.");
+    ap_set_helptext(wifi_startup, "Connect to Wi-Fi automatically at boot.");
+    ap_add_optional_arg(wifi_startup, "state", "on or off (required outside GUI mode)");
+    ap_set_helptext(wifi_startup_toggle, "Toggle Wi-Fi on startup on or off.");
     ap_set_helptext(display, "Configure display rendering.");
     ap_set_helptext(display_buffered, "Enable smooth buffered rendering or direct low-memory drawing.");
     ap_add_optional_arg(display_buffered, "state", "on or off");
@@ -891,6 +1009,8 @@ int config_app_main(int argc, char **argv) {
     ArgParser *root_action = ap_get_cmd_parser(root);
     bool clock_hierarchy = root_action == system && ap_get_cmd_parser(system) == clock;
     bool startup_hierarchy = root_action == system && ap_get_cmd_parser(system) == startup;
+    bool instant_boot_hierarchy = root_action == system && ap_get_cmd_parser(system) == instant_boot;
+    bool wifi_startup_hierarchy = root_action == system && ap_get_cmd_parser(system) == wifi_startup;
     bool display_hierarchy = root_action == display;
     bool theme_hierarchy = root_action == theme;
     bool audio_hierarchy = root_action == audio;
@@ -902,6 +1022,10 @@ int config_app_main(int argc, char **argv) {
     } else if (startup_hierarchy) {
         result = gui ? config_app__startup_gui()
                      : config_app__startup_cli(startup, startup_add, startup_remove, startup_up, startup_down);
+    } else if (instant_boot_hierarchy) {
+        result = gui ? config_app__instant_boot_gui() : config_app__instant_boot_cli(instant_boot, instant_boot_toggle);
+    } else if (wifi_startup_hierarchy) {
+        result = gui ? config_app__wifi_startup_gui() : config_app__wifi_startup_cli(wifi_startup, wifi_startup_toggle);
     } else if (audio_hierarchy) {
         result = gui ? config_app__audio_gui() : config_app__audio_cli(audio, audio_enabled, audio_volume);
     } else if (display_hierarchy) {

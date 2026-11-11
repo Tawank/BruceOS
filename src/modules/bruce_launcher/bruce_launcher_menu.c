@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "cJSON.h"
+#include "core_sdk/config.h"
 #include "core_sdk/manifest.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/notification.h"
@@ -81,6 +82,23 @@ static bruce_launcher_menu_t *bruce_launcher__menu_create(
     return menu;
 }
 
+/* "Instant boot"/"WiFi on startup" (see config_app.c's own identically
+ * named #defines) aren't their own stored settings -- each is really just
+ * whether one specific line is present in the startup app list. Duplicated
+ * here rather than shared via a header: it's two string literals, and this
+ * is the only other place that needs them. */
+#define BRUCE_LAUNCHER_BOOTANIMATION_STARTUP_CMD "BG=0 bootanimation"
+#define BRUCE_LAUNCHER_WIFI_STARTUP_CMD "wifi on"
+
+static bool bruce_launcher__startup_has(const char *command) {
+    const bruce_config_startup_apps_t *apps = config__get_startup_apps();
+    if (apps == NULL) return false;
+    for (size_t i = 0; i < apps->count; ++i) {
+        if (strcmp(apps->items[i], command) == 0) return true;
+    }
+    return false;
+}
+
 /* Entries whose action toggles carry a "$NAME" placeholder as their label in
  * launcher.json and get their text resolved here, at render time rather than
  * at parse time: the menu tree is parsed once per launcher session and then
@@ -94,6 +112,14 @@ const char *bruce_launcher__entry_label(const bruce_launcher_entry_t *entry) {
     }
     if (strcmp(entry->label, "$WIFI_AP_CONNECT_TEXT") == 0) {
         return wifi__is_ap_running() ? "Stop AP" : "Start AP";
+    }
+    if (strcmp(entry->label, "$INSTANT_BOOT_TEXT") == 0) {
+        return bruce_launcher__startup_has(BRUCE_LAUNCHER_BOOTANIMATION_STARTUP_CMD) ? "Instant Boot: OFF"
+                                                                                      : "Instant Boot: ON";
+    }
+    if (strcmp(entry->label, "$WIFI_STARTUP_TEXT") == 0) {
+        return bruce_launcher__startup_has(BRUCE_LAUNCHER_WIFI_STARTUP_CMD) ? "WiFi on Startup: ON"
+                                                                            : "WiFi on Startup: OFF";
     }
     return entry->label;
 }
