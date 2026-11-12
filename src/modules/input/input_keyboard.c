@@ -421,6 +421,21 @@ void input_keyboard__poll(void) {
                         int32_t code = input__kb_char_code(label);
                         if (y == 0 && x == 0 && !s_kb_shift_held) {
                             input__emit(BRUCE_INPUT_KEY, BRUCE_INPUT_PRESS, BRUCE_INPUT_CODE_BACK, -1);
+                        } else if (s_kb_ctrl_held && code == ';') {
+                            /* ';'/'.' already double as the UP/DOWN nav
+                             * codes elsewhere (BRUCE_INPUT_CODE_UP/DOWN are
+                             * literally their ASCII values -- see input.h),
+                             * so Ctrl+;/Ctrl+. reads as "Ctrl+Up"/"Ctrl+Down"
+                             * on this layout; terminal_app.c binds them to
+                             * scrollback page up/down. Emitted with
+                             * value=-1 (not code) so semantic_key checks
+                             * downstream treat this as the semantic/action
+                             * key it is, the same way Fn-nav codes are
+                             * distinguished from a literal typed character
+                             * above despite sharing a numeric value. */
+                            input__emit(BRUCE_INPUT_KEY, BRUCE_INPUT_PRESS, BRUCE_INPUT_CODE_PAGE_UP, -1);
+                        } else if (s_kb_ctrl_held && code == '.') {
+                            input__emit(BRUCE_INPUT_KEY, BRUCE_INPUT_PRESS, BRUCE_INPUT_CODE_PAGE_DOWN, -1);
                         } else {
                             if (s_kb_ctrl_held && code >= 'a' && code <= 'z') code &= 0x1f;
                             if (s_kb_ctrl_held && code >= 'A' && code <= 'Z') code &= 0x1f;

@@ -73,11 +73,45 @@ static void terminal_grid__clamp_cursor(terminal_grid_t *grid) {
     if (grid->cursor_x >= grid->columns) grid->cursor_x = (uint16_t)(grid->columns - 1);
 }
 
+/* Appends one row to the scrollback ring (overwriting the oldest once
+ * full), called from terminal_grid__scroll_up() for each row about to be
+ * discarded off the top of the screen. If the user is currently paged
+ * back (offset > 0), the offset grows by one to keep the view pinned to
+ * the same lines it was already showing instead of sliding toward the
+ * new tail -- every push moves the live boundary one line further from
+ * wherever the view's top currently sits. Clamped to the (possibly
+ * unchanged, if the ring was already full) new count, so a view already
+ * pinned at the very oldest retained line stays there instead of pointing
+ * past what's left once that line is the one dropped to make room.
+ * offset == 0 (following live output) is deliberately left alone --
+ * that's the one state meant to keep tracking the tail. */
+static void terminal_grid__push_scrollback(terminal_grid_t *grid, const terminal_cell_t *row) {
+    if (grid->scrollback == NULL || grid->scrollback_capacity == 0) return;
+    terminal_cell_t *slot = grid->scrollback + (size_t)grid->scrollback_write * grid->columns;
+    memcpy(slot, row, sizeof(terminal_cell_t) * grid->columns);
+    grid->scrollback_write = (uint16_t)((grid->scrollback_write + 1) % grid->scrollback_capacity);
+    if (grid->scrollback_count < grid->scrollback_capacity) grid->scrollback_count++;
+    if (grid->scrollback_offset > 0) {
+        grid->scrollback_offset = (uint16_t)(grid->scrollback_offset + 1 > grid->scrollback_count
+                                                  ? grid->scrollback_count
+                                                  : grid->scrollback_offset + 1);
+    }
+}
+
 static void terminal_grid__scroll_up(terminal_grid_t *grid, uint16_t n) {
     terminal_cell_t *base = grid->alt_screen_active ? grid->alt_cells : grid->cells;
     uint16_t region_rows = (uint16_t)(grid->scroll_bottom - grid->scroll_top + 1);
     if (n > region_rows) n = region_rows;
     if (n == 0) return;
+    /* Only the ordinary "whole screen scrolled because output ran past the
+     * bottom" case feeds scrollback -- not a narrower DECSTBM margin (a
+     * split-pane layout's scroll is app-controlled, not "history"), and
+     * never the alternate screen (see the struct's doc comment). */
+    if (!grid->alt_screen_active && grid->scroll_top == 0 && grid->scroll_bottom == (uint16_t)(grid->rows - 1)) {
+        for (uint16_t i = 0; i < n; ++i) {
+            terminal_grid__push_scrollback(grid, base + (size_t)(grid->scroll_top + i) * grid->columns);
+        }
+    }
     for (uint16_t y = grid->scroll_top; (uint16_t)(y + n) <= grid->scroll_bottom; ++y) {
         memcpy(
             base + (size_t)y * grid->columns, base + (size_t)(y + n) * grid->columns,
@@ -761,11 +795,14 @@ static void terminal_grid__consume_byte(terminal_grid_t *grid, uint8_t byte) {
  * ------------------------------------------------------------------------- */
 
 void terminal_grid__init(
-    terminal_grid_t *grid, terminal_cell_t *cells, terminal_cell_t *alt_cells, uint16_t columns, uint16_t rows
+    terminal_grid_t *grid, terminal_cell_t *cells, terminal_cell_t *alt_cells, terminal_cell_t *scrollback,
+    uint16_t scrollback_capacity, uint16_t columns, uint16_t rows
 ) {
     memset(grid, 0, sizeof(*grid));
     grid->cells = cells;
     grid->alt_cells = alt_cells;
+    grid->scrollback = scrollback;
+    grid->scrollback_capacity = scrollback_capacity;
     grid->columns = columns;
     grid->rows = rows;
     grid->scroll_top = 0;
@@ -787,4 +824,36 @@ void terminal_grid__feed(terminal_grid_t *grid, const char *input, size_t input_
 
 const terminal_cell_t *terminal_grid__active_cells(const terminal_grid_t *grid) {
     return grid->alt_screen_active ? grid->alt_cells : grid->cells;
+}
+
+const terminal_cell_t *terminal_grid__view_row(const terminal_grid_t *grid, uint16_t row) {
+    if (grid->scrollback_offset == 0 || grid->alt_screen_active || grid->scrollback_count == 0) {
+        return terminal_grid__row((terminal_grid_t *)grid, row);
+    }
+    /* Combined timeline: scrollback[0..count) oldest-to-newest, immediately
+     * followed by the live screen's rows[0..rows). The view window is
+     * `rows` tall, slid back by scrollback_offset lines from the live
+     * screen's top -- exactly like any pager. */
+    int32_t combined = (int32_t)grid->scrollback_count - (int32_t)grid->scrollback_offset + (int32_t)row;
+    if (combined < (int32_t)grid->scrollback_count) {
+        uint16_t oldest = (uint16_t)(
+            ((uint32_t)grid->scrollback_write + grid->scrollback_capacity - grid->scrollback_count) %
+            grid->scrollback_capacity
+        );
+        uint16_t physical = (uint16_t)(((uint32_t)oldest + (uint32_t)combined) % grid->scrollback_capacity);
+        return grid->scrollback + (size_t)physical * grid->columns;
+    }
+    uint16_t live_row = (uint16_t)(combined - (int32_t)grid->scrollback_count);
+    return terminal_grid__row((terminal_grid_t *)grid, live_row);
+}
+
+void terminal_grid__scroll_view(terminal_grid_t *grid, int32_t delta_rows) {
+    if (grid->alt_screen_active || grid->scrollback_capacity == 0) {
+        grid->scrollback_offset = 0;
+        return;
+    }
+    int32_t next = (int32_t)grid->scrollback_offset + delta_rows;
+    if (next < 0) next = 0;
+    if (next > (int32_t)grid->scrollback_count) next = (int32_t)grid->scrollback_count;
+    grid->scrollback_offset = (uint16_t)next;
 }

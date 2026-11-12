@@ -332,37 +332,44 @@ static int elf_loader__open(
         return stage_result;
     }
 
-    /* Best-effort: give both the relocation below and the new app's stack
-     * (and its manifest-declared expected heap use, if any -- see
-     * BRUCE_MANIFEST_HEAP_MAX) a better chance of fitting by asking
-     * registered subsystems (e.g. the display framebuffer) to shrink first
-     * -- a no-op if the largest contiguous internal block already covers
-     * this on its own, otherwise reclaims whatever is available even if
-     * that falls short of the full total (see memory__reclaim()). This has
-     * to run BEFORE esp_elf_init()/esp_elf_relocate[_xip]() below, not
-     * after: even on the no-PSRAM/XIP path, where the relocated code itself
-     * ends up in swap rather than internal RAM (see s_xip_ops above),
-     * relocation still needs one contiguous internal-RAM scratch buffer to
-     * assemble the relocated .text (and staged .rodata) into before it's
-     * flashed out and freed (esp_elf.c's esp_elf_relocate_internal()) --
-     * that malloc is exactly as vulnerable to a fragmented heap as the
-     * process's own stack/heap is, and total free memory looking fine
-     * (`free`'s "free" column) says nothing about whether a contiguous
-     * block that size actually exists (`free`'s "lrgst" column is the one
-     * that matters here). image.size (the whole staged ELF file) is a
-     * deliberately generous stand-in for the exact .text/.rodata size --
-     * that isn't known until relocation parses the section headers, which
-     * is the same call this is trying to give room to succeed -- and
-     * memory__reclaim() reclaiming more than strictly needed from a
-     * best-effort provider is harmless, just possibly disturbs one more
-     * subsystem than the bare minimum would have. A failure here (nothing
-     * worth reclaiming, or no memory pressure at all) is not a reason to
-     * abort the launch; relocation and the spawn below simply fail on their
-     * own if truly out of memory, same as before this existed.
+    /* Best-effort: give the new app's stack (and its manifest-declared
+     * expected heap use, if any -- see BRUCE_MANIFEST_HEAP_MAX) a better
+     * chance of fitting by asking registered subsystems (e.g. the display
+     * framebuffer) to shrink first -- a no-op if the largest contiguous
+     * internal block already covers this on its own, otherwise reclaims
+     * whatever is available even if that falls short of the full total (see
+     * memory__reclaim()). This has to run BEFORE esp_elf_init()/
+     * esp_elf_relocate[_xip]() below so the freed room is there by the time
+     * the new process's stack/heap actually need it. A failure here
+     * (nothing worth reclaiming, or no memory pressure at all) is not a
+     * reason to abort the launch; the spawn below simply fails on its own
+     * if truly out of memory, same as before this existed.
      * elf_loader__entry() adopts the credit once the new process actually
-     * exists (see bruce_memory_reclaim_token_t's field comment above). */
+     * exists (see bruce_memory_reclaim_token_t's field comment above).
+     *
+     * image.size (the whole staged ELF file -- symtab/strtab/relocations
+     * and all, a much bigger number than the .text/.rodata that actually
+     * needs room) is only folded into this ask on the PSRAM build.
+     * esp_elf_relocate() there has no fallback if its one-shot
+     * esp_elf_malloc(text_work_size, ...) can't find a contiguous block, so
+     * a generous pre-reclaim is the only thing standing between it and a
+     * hard failure. The XIP (no-PSRAM) build doesn't need that insurance:
+     * esp_elf_relocate_xip() already degrades gracefully on the same
+     * failure via esp_elf_stream_text_to_xip(), which streams the relocated
+     * output straight to swap in flash-sector-sized windows instead of
+     * requiring one contiguous internal-RAM buffer (see its own doc
+     * comment). Disturbing another subsystem -- forcing the display out of
+     * its DMA framebuffer -- just to avoid ever taking that already-safe
+     * fallback isn't worth it. */
     (void)memory__reclaim(
-        inspection->manifest.stack_size + inspection->manifest.heap_size + image.size, NULL, &ctx->reclaim_token
+        inspection->manifest.stack_size + inspection->manifest.heap_size +
+#if CONFIG_ELF_LOADER_LOAD_PSRAM
+            image.size,
+#else
+            0,
+#endif
+        NULL,
+        &ctx->reclaim_token
     );
 
     int relocate_result = esp_elf_init(&ctx->elf);

@@ -2294,7 +2294,7 @@ bool selftest__run_shell_prompt_wrap_scroll_case(void) {
     terminal_cell_t cells[10 * 3];
     terminal_cell_t alt_cells[10 * 3];
     terminal_grid_t grid;
-    terminal_grid__init(&grid, cells, alt_cells, columns, rows);
+    terminal_grid__init(&grid, cells, alt_cells, NULL, 0, columns, rows);
     if (ok) terminal_grid__feed(&grid, captured, captured_size);
 
     /* selftest__shell_terminal_row_text()'s bound check reserves room for a

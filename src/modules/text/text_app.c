@@ -309,7 +309,17 @@ static void text__render(const char *path, text_editor_t *editor) {
             for (size_t i = 0; i < count && visible_position < end; ++i) {
                 size_t bytes = text__utf8_next(editor->data + visible_position, end - visible_position);
                 if (written + bytes >= sizeof(visible)) break;
-                memcpy(visible + written, editor->data + visible_position, bytes);
+                if (bytes == 1 && editor->data[visible_position] == '\t') {
+                    /* display__print() treats any byte < 0x20 as a zero-width
+                     * no-op (see display_text.c), which would silently collapse
+                     * this column and shift every later glyph on the line one
+                     * cell to the left of where the cursor/selection-highlight
+                     * math below (which counts this byte as one column) expects
+                     * it. Draw a blank cell instead so the drawn width matches. */
+                    visible[written] = ' ';
+                } else {
+                    memcpy(visible + written, editor->data + visible_position, bytes);
+                }
                 written += bytes;
                 visible_position += bytes;
             }

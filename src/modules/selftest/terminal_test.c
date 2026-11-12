@@ -334,7 +334,7 @@ bool selftest__run_terminal_editing_case(void) {
     terminal_cell_t sgr_cells[16];
     terminal_cell_t sgr_alt_cells[16];
     terminal_grid_t sgr_grid;
-    terminal_grid__init(&sgr_grid, sgr_cells, sgr_alt_cells, 16, 1);
+    terminal_grid__init(&sgr_grid, sgr_cells, sgr_alt_cells, NULL, 0, 16, 1);
     static const char ansi_part_one[] = "plain\033[3";
     static const char ansi_part_two[] = "1mred\033[0m";
     terminal_grid__feed(&sgr_grid, ansi_part_one, sizeof(ansi_part_one) - 1);
@@ -348,7 +348,7 @@ bool selftest__run_terminal_editing_case(void) {
     terminal_cell_t cursor_cells[32];
     terminal_cell_t cursor_alt_cells[32];
     terminal_grid_t cursor_grid;
-    terminal_grid__init(&cursor_grid, cursor_cells, cursor_alt_cells, 16, 2);
+    terminal_grid__init(&cursor_grid, cursor_cells, cursor_alt_cells, NULL, 0, 16, 2);
     static const char cursor_input[] = "abc\r\nx\033[D!\r\033[2Kbruce$ x";
     terminal_grid__feed(&cursor_grid, cursor_input, sizeof(cursor_input) - 1);
     char cursor_row0[17] = {0};
@@ -406,7 +406,7 @@ bool selftest__run_terminal_ansi_escapes_case(void) {
     terminal_cell_t g0_cells[16];
     terminal_cell_t g0_alt_cells[16];
     terminal_grid_t g0_grid;
-    terminal_grid__init(&g0_grid, g0_cells, g0_alt_cells, 16, 1);
+    terminal_grid__init(&g0_grid, g0_cells, g0_alt_cells, NULL, 0, 16, 1);
     /* smacs, draw a box top ("lqqk"), rmacs, then a plain letter -- the
      * designator bytes themselves ('0', 'B') must not leak into the grid as
      * literal text. */
@@ -419,7 +419,7 @@ bool selftest__run_terminal_ansi_escapes_case(void) {
     terminal_cell_t g1_cells[16];
     terminal_cell_t g1_alt_cells[16];
     terminal_grid_t g1_grid;
-    terminal_grid__init(&g1_grid, g1_cells, g1_alt_cells, 16, 1);
+    terminal_grid__init(&g1_grid, g1_cells, g1_alt_cells, NULL, 0, 16, 1);
     /* Designate G1 as special graphics, SO to invoke it, draw a box bottom
      * ("mvj"), SI back to G0 (still plain ASCII), then a plain letter. */
     static const char g1_input[] = "\033)0\x0emvj\x0fy";
@@ -431,7 +431,7 @@ bool selftest__run_terminal_ansi_escapes_case(void) {
     terminal_cell_t rep_cells[16];
     terminal_cell_t rep_alt_cells[16];
     terminal_grid_t rep_grid;
-    terminal_grid__init(&rep_grid, rep_cells, rep_alt_cells, 16, 1);
+    terminal_grid__init(&rep_grid, rep_cells, rep_alt_cells, NULL, 0, 16, 1);
     /* One 'q', then CSI 3 b repeats it 3 more times, then a plain 'X' --
      * without REP support this whole run used to just vanish. */
     static const char rep_input[] = "q\033[3bX";
@@ -443,7 +443,7 @@ bool selftest__run_terminal_ansi_escapes_case(void) {
     terminal_cell_t deckm_cells[16];
     terminal_cell_t deckm_alt_cells[16];
     terminal_grid_t deckm_grid;
-    terminal_grid__init(&deckm_grid, deckm_cells, deckm_alt_cells, 16, 1);
+    terminal_grid__init(&deckm_grid, deckm_cells, deckm_alt_cells, NULL, 0, 16, 1);
     /* CSI ?1h (DECCKM on) must be tracked, not silently dropped like an
      * unsupported private mode -- see terminal_grid_t.application_cursor_keys's
      * doc comment for why: htop/less/vi over ssh or the shell request this on

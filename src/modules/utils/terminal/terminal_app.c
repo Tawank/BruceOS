@@ -31,6 +31,19 @@
  * allocation bounded; no real board's display comes close to this. */
 #define TERMINAL__MAX_COLUMNS 200
 #define TERMINAL__MAX_ROWS 80
+/* Scrollback depth, in rows, independent of the live grid's row count (see
+ * TERMINAL__SCROLLBACK_ROWS's use in terminal__apply_font_scale()/the
+ * initial setup below) -- a flat row count rather than "N pages" so a
+ * zoomed-out grid (more rows AND more columns at once) can't make this
+ * balloon. Still scales with columns, which is unavoidable (a wider screen's
+ * history lines are wider too) and is exactly why this stays a modest flat
+ * number instead of also multiplying by rows: on the one board this feature
+ * reaches (Cardputer -- the only keyboard-equipped board, see
+ * terminal__apply_font_scale()'s own comment on scarce internal SRAM
+ * there), this buffer competes with the exact same no-PSRAM internal RAM
+ * audio/ELF-loader/display work elsewhere in this codebase already fights
+ * over. */
+#define TERMINAL__SCROLLBACK_ROWS 48
 #define TERMINAL__INPUT_TIMEOUT_MS 50
 #define TERMINAL__HIDDEN_DELAY_MS 20
 #define TERMINAL__CHILD_STOP_TIMEOUT_MS 500
@@ -55,8 +68,10 @@
 typedef struct {
     terminal_cell_t *cells;
     terminal_cell_t *alt_cells;
+    terminal_cell_t *scrollback;
     bool cells_external;
     bool alt_cells_external;
+    bool scrollback_external;
     terminal_grid_t grid;
     bruce_stdio_session_t session;
     bruce_process_id_t child;
@@ -64,6 +79,7 @@ typedef struct {
     bool exit_requested;
     float font_scale;      /* See TERMINAL__FONT_SCALE_MIN/MAX above. */
     size_t cell_capacity;  /* Cells `cells`/`alt_cells` can each hold -- see terminal__apply_font_scale(). */
+    size_t scrollback_cell_capacity; /* Cells `scrollback` can hold -- TERMINAL__SCROLLBACK_ROWS * columns. */
 
     /* Keyboard-driven copy mode -- there's no mouse to drag-select with, so
      * this is this terminal's take on tmux/screen's copy-mode: SELECT/BTN_A
@@ -141,6 +157,7 @@ static void terminal__free_buffer(void *data, bool external) {
 static void terminal__free_buffers(terminal__state_t *state) {
     terminal__free_buffer(state->cells, state->cells_external);
     terminal__free_buffer(state->alt_cells, state->alt_cells_external);
+    terminal__free_buffer(state->scrollback, state->scrollback_external);
 }
 
 static void terminal__drain_output(terminal__state_t *state) {
@@ -156,6 +173,13 @@ static void terminal__drain_output(terminal__state_t *state) {
 }
 
 static void terminal__write_input(terminal__state_t *state, const char *bytes, size_t size) {
+    /* Typing resumes following live output, same as every other terminal's
+     * copy-mode/scrollback: there's no sense sending keystrokes to the
+     * child while staring at a frozen page of history. */
+    if (state->grid.scrollback_offset != 0) {
+        terminal_grid__scroll_view(&state->grid, -(int32_t)state->grid.scrollback_offset);
+        state->dirty = true;
+    }
     (void)stdio__session_write_input(state->session, bytes, size);
 }
 
@@ -166,7 +190,6 @@ static void terminal__write_input(terminal__state_t *state, const char *bytes, s
  * colored status bar) still paints correctly. */
 static void terminal__draw_grid(const terminal__state_t *state, uint16_t theme_fg, uint16_t theme_bg) {
     const terminal_grid_t *grid = &state->grid;
-    const terminal_cell_t *cells = terminal_grid__active_cells(grid);
     /* Matches display__print()'s own per-glyph advance -- lroundf(cell_width
      * * text_size) -- so a run's start x lines up with wherever the previous
      * run's glyphs actually landed instead of drifting from it. */
@@ -174,7 +197,7 @@ static void terminal__draw_grid(const terminal__state_t *state, uint16_t theme_f
     int char_h = (int)lroundf((float)TERMINAL__CHAR_H * state->font_scale);
     char text[TERMINAL__MAX_COLUMNS * 4 + 1];
     for (uint16_t y = 0; y < grid->rows; ++y) {
-        const terminal_cell_t *row = cells + (size_t)y * grid->columns;
+        const terminal_cell_t *row = terminal_grid__view_row(grid, y);
         uint16_t x = 0;
         while (x < grid->columns) {
             const terminal_cell_t *first = &row[x];
@@ -231,8 +254,7 @@ static void terminal__draw_cursor_at(
     int16_t x = TERMINAL__FRAME_MARGIN + (int16_t)(column * char_w);
     int16_t y = TERMINAL__TITLE_H + row * char_h;
     display__fill_rect(x, y, (int16_t)char_w, (int16_t)char_h, theme_fg);
-    const terminal_cell_t *cells = terminal_grid__active_cells(grid);
-    const terminal_cell_t *cell = &cells[(size_t)row * grid->columns + column];
+    const terminal_cell_t *cell = &terminal_grid__view_row(grid, row)[column];
     if (cell->utf8_len > 0) {
         char glyph[5];
         memcpy(glyph, cell->utf8, cell->utf8_len);
@@ -251,7 +273,11 @@ static void terminal__draw_cursor_at(
 static void
 terminal__draw_cursor(const terminal__state_t *state, uint16_t theme_fg, uint16_t theme_bg, uint16_t theme_text) {
     (void)theme_bg;
-    if (!state->grid.cursor_visible) return;
+    /* The cursor marks the LIVE write position, which isn't even on screen
+     * while paged back into scrollback history -- drawing it at
+     * grid.cursor_x/y would land it over whatever history happens to be at
+     * that cell instead, misleadingly implying that's where it is. */
+    if (!state->grid.cursor_visible || state->grid.scrollback_offset != 0) return;
     terminal__draw_cursor_at(state, state->grid.cursor_x, state->grid.cursor_y, theme_fg, theme_text);
 }
 
@@ -277,7 +303,6 @@ static void terminal__selection_range(
 static void terminal__draw_selection(const terminal__state_t *state, uint16_t theme_fg, uint16_t theme_text) {
     if (!state->selection_active) return;
     const terminal_grid_t *grid = &state->grid;
-    const terminal_cell_t *cells = terminal_grid__active_cells(grid);
     int char_w = (int)lroundf((float)TERMINAL__CHAR_W * state->font_scale);
     int char_h = (int)lroundf((float)TERMINAL__CHAR_H * state->font_scale);
     uint16_t start_y, start_x, end_y, end_x;
@@ -286,7 +311,7 @@ static void terminal__draw_selection(const terminal__state_t *state, uint16_t th
     for (uint16_t y = start_y; y <= end_y; ++y) {
         uint16_t col_start = (y == start_y) ? start_x : 0;
         uint16_t col_end = (y == end_y) ? end_x : (uint16_t)(grid->columns - 1);
-        const terminal_cell_t *row = cells + (size_t)y * grid->columns;
+        const terminal_cell_t *row = terminal_grid__view_row(grid, y);
         size_t text_len = 0;
         for (uint16_t x = col_start; x <= col_end; ++x) {
             const terminal_cell_t *cell = &row[x];
@@ -396,7 +421,33 @@ static void terminal__apply_font_scale(terminal__state_t *state, float new_scale
         state->alt_cells_external = new_alt_cells_external;
         state->cell_capacity = needed_cells;
     }
-    terminal_grid__init(&state->grid, state->cells, state->alt_cells, (uint16_t)columns, (uint16_t)rows);
+    /* Grown independently of cells/alt_cells -- its size tracks columns
+     * only (TERMINAL__SCROLLBACK_ROWS is a flat row count, not a multiple
+     * of rows), so it would otherwise be reallocated needlessly on a scale
+     * change that resizes rows but not columns. A failed allocation here
+     * is not fatal the way cells/alt_cells running out is: scrollback is a
+     * nice-to-have, so this falls back to shrinking it to whatever's left
+     * (possibly 0, disabling it) rather than aborting the whole rescale. */
+    size_t needed_scrollback_cells = (size_t)columns * TERMINAL__SCROLLBACK_ROWS;
+    if (needed_scrollback_cells > state->scrollback_cell_capacity) {
+        void *new_scrollback = NULL;
+        bool new_scrollback_external = false;
+        bruce_result_t scrollback_alloc = terminal__alloc_buffer(
+            &new_scrollback, &new_scrollback_external, needed_scrollback_cells * sizeof(terminal_cell_t)
+        );
+        if (scrollback_alloc == BRUCE_OK) {
+            terminal__free_buffer(state->scrollback, state->scrollback_external);
+            state->scrollback = new_scrollback;
+            state->scrollback_external = new_scrollback_external;
+            state->scrollback_cell_capacity = needed_scrollback_cells;
+        }
+    }
+    uint16_t scrollback_rows =
+        columns > 0 ? (uint16_t)(state->scrollback_cell_capacity / (size_t)columns) : (uint16_t)0;
+    terminal_grid__init(
+        &state->grid, state->cells, state->alt_cells, state->scrollback, scrollback_rows, (uint16_t)columns,
+        (uint16_t)rows
+    );
     (void)tty__set_size(state->session, (uint16_t)columns, (uint16_t)rows);
     state->font_scale = new_scale;
     state->dirty = true;
@@ -419,7 +470,6 @@ static void terminal__paste_clipboard(terminal__state_t *state) {
  * terminal doesn't copy the unwritten padding after a short line. */
 static void terminal__copy_selection(const terminal__state_t *state) {
     const terminal_grid_t *grid = &state->grid;
-    const terminal_cell_t *cells = terminal_grid__active_cells(grid);
     uint16_t start_y, start_x, end_y, end_x;
     terminal__selection_range(state, &start_y, &start_x, &end_y, &end_x);
 
@@ -431,7 +481,7 @@ static void terminal__copy_selection(const terminal__state_t *state) {
     for (uint16_t y = start_y; y <= end_y; ++y) {
         uint16_t col_start = (y == start_y) ? start_x : 0;
         uint16_t col_end = (y == end_y) ? end_x : (uint16_t)(grid->columns - 1);
-        const terminal_cell_t *row = cells + (size_t)y * grid->columns;
+        const terminal_cell_t *row = terminal_grid__view_row(grid, y);
         size_t line_start = len;
         for (uint16_t x = col_start; x <= col_end; ++x) {
             const terminal_cell_t *cell = &row[x];
@@ -627,6 +677,26 @@ static void terminal__handle_input(terminal__state_t *state, const bruce_input_e
         terminal__apply_font_scale(state, state->font_scale + TERMINAL__FONT_SCALE_STEP);
         return;
     }
+    /* Ctrl+;/Ctrl+. (see input_keyboard.c) page up/down. On the primary
+     * screen this pages local scrollback history, handled entirely here,
+     * never forwarded to the child -- same as zoom above. On the alternate
+     * screen there's no local scrollback to show (see terminal_grid_t's
+     * doc comment) -- deliberately NOT swallowed as a no-op there, since a
+     * full-screen app (htop, less, a TUI chat client, ...) commonly has its
+     * own internal scrolling and expects to see Page Up/Down itself; this
+     * falls through to the generic key-forwarding block below instead,
+     * which sends it the standard CSI 5~/6~ bytes like any other
+     * navigation key. */
+    if (semantic_key && event->code == BRUCE_INPUT_CODE_PAGE_UP && !state->grid.alt_screen_active) {
+        terminal_grid__scroll_view(&state->grid, (int32_t)state->grid.rows);
+        state->dirty = true;
+        return;
+    }
+    if (semantic_key && event->code == BRUCE_INPUT_CODE_PAGE_DOWN && !state->grid.alt_screen_active) {
+        terminal_grid__scroll_view(&state->grid, -(int32_t)state->grid.rows);
+        state->dirty = true;
+        return;
+    }
     if (semantic_key || event->type != BRUCE_INPUT_KEY) {
         /* Arrow keys are CSI ("\033[A", ...) normally, but SS3 ("\033OA",
          * ...) once the remote side has asked for DECCKM/application cursor
@@ -649,6 +719,8 @@ static void terminal__handle_input(terminal__state_t *state, const bruce_input_e
             case BRUCE_INPUT_CODE_LEFT: sequence = app_mode ? "\033OD" : "\033[D"; break;
             case BRUCE_INPUT_CODE_HOME: sequence = "\033[H"; break;
             case BRUCE_INPUT_CODE_DELETE: sequence = "\033[3~"; break;
+            case BRUCE_INPUT_CODE_PAGE_UP: sequence = "\033[5~"; break;
+            case BRUCE_INPUT_CODE_PAGE_DOWN: sequence = "\033[6~"; break;
             default: break;
         }
         if (sequence != NULL) terminal__write_input(state, sequence, strlen(sequence));
@@ -783,7 +855,23 @@ int terminal_app_main(int argc, char **argv) {
         return BRUCE_ERR_NO_MEMORY;
     }
     state.cell_capacity = (size_t)columns * (size_t)rows;
-    terminal_grid__init(&state.grid, state.cells, state.alt_cells, (uint16_t)columns, (uint16_t)rows);
+
+    /* Best-effort, same as terminal__apply_font_scale()'s later resizes:
+     * scrollback is a nice-to-have, so a failed allocation here just leaves
+     * it disabled (scrollback_rows stays 0) rather than failing the whole
+     * terminal launch the way cells/alt_cells running out does above. */
+    void *scrollback_data = NULL;
+    size_t scrollback_buffer_size = (size_t)columns * TERMINAL__SCROLLBACK_ROWS * sizeof(terminal_cell_t);
+    if (terminal__alloc_buffer(&scrollback_data, &state.scrollback_external, scrollback_buffer_size) == BRUCE_OK) {
+        state.scrollback = scrollback_data;
+        state.scrollback_cell_capacity = (size_t)columns * TERMINAL__SCROLLBACK_ROWS;
+    }
+    uint16_t scrollback_rows =
+        columns > 0 ? (uint16_t)(state.scrollback_cell_capacity / (size_t)columns) : (uint16_t)0;
+    terminal_grid__init(
+        &state.grid, state.cells, state.alt_cells, state.scrollback, scrollback_rows, (uint16_t)columns,
+        (uint16_t)rows
+    );
     terminal_grid__feed(
         &state.grid, "Bruce terminal\r\nType a command and press Enter.\r\n",
         strlen("Bruce terminal\r\nType a command and press Enter.\r\n")

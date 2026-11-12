@@ -76,6 +76,25 @@ typedef struct {
     uint16_t rows;
     bool alt_screen_active;
 
+    /* Scrollback: a caller-owned ring buffer of scrollback_capacity *
+     * columns cells, oldest line first once full (see
+     * terminal_grid__view_row()). Only ever fed from the PRIMARY screen's
+     * own full-width scroll-up (terminal_grid__scroll_up()) -- never while
+     * alt_screen_active, matching real terminals, which suspend scrollback
+     * for full-screen apps (vim/htop/less) since their alternate screen is
+     * never "scrolled" in the usual sense. terminal_grid__init() resets
+     * scrollback_count/write/offset to 0 (discarding history) but leaves
+     * the buffer's contents alone -- same "clears on resize" contract as
+     * cells/alt_cells, just without needing to actually touch the memory. */
+    terminal_cell_t *scrollback;
+    uint16_t scrollback_capacity; /* rows the ring buffer can hold */
+    uint16_t scrollback_count;    /* valid rows currently stored, 0..capacity */
+    uint16_t scrollback_write;    /* next ring slot a push will write */
+    /* How many rows the user has paged back from the live tail, 0..count.
+     * 0 means "following live output" (the normal state); see
+     * terminal_grid__scroll_view(). */
+    uint16_t scrollback_offset;
+
     /* Cursor. */
     uint16_t cursor_x;
     uint16_t cursor_y;
@@ -160,17 +179,41 @@ typedef struct {
 
 /* Initializes `grid` to a blank columns x rows screen. `cells` and
  * `alt_cells` must each point at caller-owned, zeroed-or-not buffers of
- * columns * rows terminal_cell_t (this clears them). */
+ * columns * rows terminal_cell_t (this clears them). `scrollback` must
+ * point at a caller-owned buffer of scrollback_capacity * columns
+ * terminal_cell_t (NULL/0 disables scrollback entirely) -- unlike `cells`/
+ * `alt_cells`, its contents are left untouched (only scrollback_count/
+ * write/offset are reset), since a discarded ring buffer's old bytes are
+ * already unreachable once its count is 0. */
 void terminal_grid__init(
-    terminal_grid_t *grid, terminal_cell_t *cells, terminal_cell_t *alt_cells, uint16_t columns, uint16_t rows
+    terminal_grid_t *grid, terminal_cell_t *cells, terminal_cell_t *alt_cells, terminal_cell_t *scrollback,
+    uint16_t scrollback_capacity, uint16_t columns, uint16_t rows
 );
 
 /* Feeds raw child-process output through the parser, mutating the grid. */
 void terminal_grid__feed(terminal_grid_t *grid, const char *input, size_t input_size);
 
 /* The currently-visible screen (primary or alternate), row-major,
- * columns * rows cells. */
+ * columns * rows cells. Always the live screen, regardless of
+ * scrollback_offset -- see terminal_grid__view_row() for the renderer's
+ * actual per-row accessor. */
 const terminal_cell_t *terminal_grid__active_cells(const terminal_grid_t *grid);
+
+/* Returns the row to render at view-relative row `row` (0..rows-1, 0 =
+ * top of screen), accounting for scrollback_offset: rows at the top of the
+ * view come from scrollback history, the rest from the live screen, same
+ * as any pager. Falls back to the plain live row whenever offset is 0,
+ * there's no scrollback to show, or the alternate screen is active (which
+ * never has scrollback -- see the struct's doc comment). The returned
+ * pointer is valid until the next terminal_grid__feed()/scroll_view()
+ * call. */
+const terminal_cell_t *terminal_grid__view_row(const terminal_grid_t *grid, uint16_t row);
+
+/* Adjusts how far back the view is paged into scrollback history by
+ * `delta_rows` (positive = further into history/page up, negative = back
+ * toward live output/page down), clamped to [0, scrollback_count]. A no-op
+ * while the alternate screen is active (see the struct's doc comment). */
+void terminal_grid__scroll_view(terminal_grid_t *grid, int32_t delta_rows);
 
 /* Copies out any bytes the emulator wants written back to the child (see
  * `response` above) and clears the pending response. Returns the number of
