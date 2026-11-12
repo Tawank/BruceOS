@@ -192,6 +192,20 @@ bool audio__file_is_open(void);
 bool audio__file_is_playing(void);
 
 /**
+ * @brief Current peak level of the file playing via audio__file_play(), as
+ * a percentage of full scale (0-100).
+ *
+ * Reflects whichever chunk of decoded PCM was most recently handed to the
+ * output stream, so it updates several times a second during playback;
+ * 0 while paused, stopped, or no file is open. A plain sample peak, not a
+ * calibrated loudness measurement -- meant for a simple level meter or a
+ * music-reactive animation, not accurate metering.
+ *
+ * @permission none
+ */
+uint8_t audio__file_level(void);
+
+/**
  * @brief Current playback position of the file opened by
  * audio__file_play(), in milliseconds from the start.
  *

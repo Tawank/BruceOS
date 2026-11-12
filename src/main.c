@@ -40,6 +40,7 @@
 #include "modules/nmap/nmap_app.h"
 #include "modules/notification_service/notification_service.h"
 #include "modules/nrf24/nrf24_app.h"
+#include "modules/player/player_app.h"
 #include "modules/privileged/permissions/permissions_app.h"
 #include "modules/selftest/selftest.h"
 #include "modules/shell/shell_app.h"
@@ -153,6 +154,7 @@ static const bruce_app_descriptor_t s_default_apps[] = {
     {"image",                "View image files",                                          "Content", image_app_main,               8192 },
     {"less",                 "Page through text",                                         "Content", bnu_less_app_main,            0    },
     {"md5sum",               "Print MD5 checksums",                                       "Content", bnu_md5sum_app_main,          0    },
+    {"player",               "Play .wav/.mp3 audio files",                                "Content", player_app_main,              8192 },
     {"rev",                  "Reverse the characters of each line",                       "Content", bnu_rev_app_main,             0    },
     {"sed",                  "Edit text with a stream editor script",                     "Content", bnu_sed_app_main,             0    },
     {"seq",                  "Print a sequence of numbers",                               "Content", bnu_seq_app_main,             0    },
@@ -258,5 +260,5 @@ void app_main(void) {
     return;
 #endif
 
-    esp_log_level_set("*", ESP_LOG_WARN);
+    esp_log_level_set("*", ESP_LOG_INFO);
 }

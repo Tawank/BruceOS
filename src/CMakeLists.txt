@@ -232,6 +232,7 @@ idf_component_register(SRCS
                      "modules/nc/nc_app.c"
                      "modules/nmap/nmap_app.c"
                      "modules/ffplay/ffplay_app.c"
+                     "modules/player/player_app.c"
                      "modules/text/text_app.c"
                      "modules/utils/launcher/launcher_app.c"
                      "modules/utils/man/man_app.c"
@@ -657,6 +658,11 @@ target_include_directories(bruce_sdk_builtin_ffplay_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/ffplay")
 
+add_library(bruce_sdk_builtin_player_check OBJECT "modules/player/player_app.c")
+target_include_directories(bruce_sdk_builtin_player_check PRIVATE
+                           "${CMAKE_CURRENT_LIST_DIR}"
+                           "${CMAKE_CURRENT_LIST_DIR}/modules/player")
+
 add_library(bruce_sdk_builtin_nmap_check OBJECT "modules/nmap/nmap_app.c")
 target_include_directories(bruce_sdk_builtin_nmap_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
@@ -748,6 +754,7 @@ set(BRUCE_ARGS_SDK_CHECK_TARGETS
     bruce_sdk_builtin_notification_check
     bruce_sdk_builtin_nc_check
     bruce_sdk_builtin_nmap_check
+    bruce_sdk_builtin_player_check
     bruce_sdk_builtin_ssh_check
     bruce_sdk_builtin_ssh_sftp_check
     bruce_sdk_builtin_system_menu_check

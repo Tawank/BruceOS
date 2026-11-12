@@ -599,6 +599,14 @@ static bruce_resource_id_t s_file_resource;
 static audio__wav_t s_file_wav;
 static audio__file_format_t s_file_format;
 static esp_asp_handle_t s_mp3_handle;
+/* Peak absolute sample value of the most recently decoded PCM chunk,
+ * updated every time either playback loop below produces one (several
+ * times a second) -- audio__file_level() below reads it for a simple
+ * level-meter/reactive-visualization API. Not locked by s_audio_mutex like
+ * the rest of this group: a single aligned int16_t load/store is already
+ * atomic on this target, and a one-chunk-stale read is harmless for what
+ * this is used for. */
+static volatile int16_t s_file_level_peak;
 
 /* Reports whether the process audio__file_play() just spawned actually
  * opened the file, for audio__file_play() itself to wait on below -- see
@@ -729,7 +737,37 @@ static void audio__file_teardown_locked(void) {
     s_file_seek_requested = false;
     s_file_format = AUDIO__FILE_FORMAT_NONE;
     s_file_resource = BRUCE_RESOURCE_ID_INVALID;
+    s_file_level_peak = 0;
     memset(&s_file_wav, 0, sizeof(s_file_wav));
+}
+
+/* Shared by both the WAV and MP3 playback loops below, right before each
+ * decoded chunk (interleaved signed 16-bit PCM, `channels` per frame) is
+ * handed to audio__stream_write(). Neither loop otherwise consulted the
+ * global sound setting at all -- unlike audio__tone(), which already scales
+ * its synthesized samples by config__get_audio_settings()'s volume, a
+ * played file went straight to the output stream at full scale regardless
+ * of the configured volume or the sound-enabled toggle. Scaling in place
+ * here, before the peak used for audio__file_level() is taken, makes both
+ * consistent: the configured volume now actually affects file playback,
+ * and a reactive UI reading the level goes flat when sound is muted or
+ * turned all the way down, not just when nothing is playing. */
+static void audio__file_apply_volume_and_track_level(int16_t *frames, size_t frame_count, size_t channels) {
+    bool enabled = false;
+    int volume = 0;
+    config__get_audio_settings(&enabled, &volume);
+    if (!enabled) volume = 0;
+    else if (volume > 100) volume = 100;
+    else if (volume < 0) volume = 0;
+
+    size_t total_samples = frame_count * channels;
+    int32_t peak = 0; /* int32_t: -INT16_MIN (32768) doesn't fit back in int16_t */
+    for (size_t i = 0; i < total_samples; ++i) {
+        if (volume != 100) frames[i] = (int16_t)(((int32_t)frames[i] * volume) / 100);
+        int32_t magnitude = frames[i] < 0 ? -(int32_t)frames[i] : (int32_t)frames[i];
+        if (magnitude > peak) peak = magnitude;
+    }
+    s_file_level_peak = (int16_t)(peak > INT16_MAX ? INT16_MAX : peak);
 }
 
 /* Automatic per-process cleanup -- see audio__stream_cleanup()'s identical
@@ -860,6 +898,7 @@ static bruce_result_t audio__file_play_blocking(const char *path, uint32_t token
             }
         }
         if (!poll.playing) {
+            s_file_level_peak = 0;
             (void)runtime__sleep(20u);
             continue;
         }
@@ -892,6 +931,8 @@ static bruce_result_t audio__file_play_blocking(const char *path, uint32_t token
             if (wav.channels == 2) out_buf[out_count * wav.channels + 1] = current_frame[1];
             out_count++;
         }
+
+        audio__file_apply_volume_and_track_level(out_buf, out_count, wav.channels);
 
         size_t written = 0;
         while (written < out_count && process__current_signal() == 0) {
@@ -1008,6 +1049,13 @@ typedef struct {
     bruce_file_id_t file;
     size_t file_size;
     size_t total_read; /* bytes pulled from `file` into the ring so far */
+    /* Set (no lock needed -- see s_file_level_peak's identical reasoning)
+     * right before an early user-requested stop, so audio__mp3_in_cb() can
+     * bail out the same way it already does at genuine end-of-file instead
+     * of retrying forever for input that audio__mp3_source_fill() has
+     * stopped being called to provide -- see the stop path in
+     * audio__mp3_play_blocking() for why that call stops. */
+    volatile bool stop_requested;
 } audio__mp3_source_t;
 
 /* Pulls more compressed bytes from storage into the ring, up to whatever
@@ -1060,10 +1108,11 @@ static int audio__mp3_in_cb(uint8_t *data, int data_size, void *ctx) {
         source->read_pos = (source->read_pos + chunk) % AUDIO__MP3_INPUT_RING_BYTES;
         source->filled -= chunk;
         bool eof = source->total_read >= source->file_size;
+        bool stop_requested = source->stop_requested;
         xSemaphoreGive(source->lock);
         got_total += chunk;
         if (chunk == 0) {
-            if (eof) break;
+            if (eof || stop_requested) break;
             vTaskDelay(pdMS_TO_TICKS(5));
         }
     }
@@ -1262,22 +1311,58 @@ static bruce_result_t audio__mp3_play_blocking(const char *path, uint32_t token)
     }
 
     int16_t transfer[AUDIO__MP3_TRANSFER_FRAMES * 2u];
-    bool was_playing = true;
     for (;;) {
         if (process__current_signal() != 0) break;
         audio__file_poll_t poll;
         if (!audio__file_poll_locked(&poll)) break; /* device shutting down */
         if (poll.stop) {
-            (void)esp_audio_simple_player_stop(handle);
-            break;
+            /* esp_audio_simple_player_stop() is a synchronous call: it waits
+             * for the decoder's own task to notice a stop request, which it
+             * only ever checks *between* whole process cycles (one call
+             * through decode -> bit-convert -> resample -> out_cb). Calling
+             * it from this task deadlocks against that task, the same way
+             * esp_audio_simple_player_pause() did (removed above) -- and
+             * draining/pre-feeding the rings just once before the call (two
+             * earlier attempts at this) is still racy: the decoder task runs
+             * its own loop independently and can start another cycle, and
+             * get stuck on either ring again, in the gap between our last
+             * drain and the stop() call actually blocking on it.
+             *
+             * So never call stop() from here at all. Instead, flag the input
+             * side to report EOF immediately (same as audio__mp3_in_cb()
+             * already does at genuine end of file) and fall through to the
+             * ordinary pump logic below, same as every other iteration --
+             * exactly like a natural end-of-track exit, which has never
+             * deadlocked, because the decoder reaches ESP_ASP_STATE_FINISHED
+             * (audio__mp3_event_cb() -> pipe.finished) on its own and this
+             * loop's own `finished` check below breaks out once it does. The
+             * now-redundant esp_audio_simple_player_stop() call still happens
+             * once, safely, in audio__file_teardown_locked() after this loop
+             * exits -- by then the decoder task has already reached a
+             * terminal state, so that call returns immediately instead of
+             * waiting on anything. */
+            source.stop_requested = true;
         }
-        if (poll.playing != was_playing) {
-            if (poll.playing) (void)esp_audio_simple_player_resume(handle);
-            else (void)esp_audio_simple_player_pause(handle);
-            was_playing = poll.playing;
+        if (!poll.playing && !source.stop_requested) {
+            /* Deliberately never calls esp_audio_simple_player_pause() here:
+             * that was tried and deadlocks the decoder's own task against
+             * this very loop -- pause() blocks this task waiting for the
+             * decoder to acknowledge, but the decoder can't acknowledge
+             * because it's blocked inside its output callback waiting for
+             * ring space that only this (now-blocked) loop could free.
+             * Simply not draining the ring here is safe instead: once it
+             * fills (AUDIO__MP3_PCM_RING_FRAMES), the decoder's own output
+             * callback already retries/backs off on its own (the same
+             * mechanism that already handles the ring being momentarily
+             * full during ordinary playback) -- nothing is lost, and
+             * resuming (just draining again below) picks up right where
+             * decoding left off. */
+            s_file_level_peak = 0;
+            (void)runtime__sleep(10u);
+            continue;
         }
 
-        audio__mp3_source_fill(&source);
+        if (!source.stop_requested) audio__mp3_source_fill(&source);
 
         xSemaphoreTake(pipe.lock, portMAX_DELAY);
         size_t want = pipe.filled < AUDIO__MP3_TRANSFER_FRAMES ? pipe.filled : AUDIO__MP3_TRANSFER_FRAMES;
@@ -1291,6 +1376,8 @@ static bruce_result_t audio__mp3_play_blocking(const char *path, uint32_t token)
         xSemaphoreGive(pipe.lock);
 
         if (want > 0) {
+            audio__file_apply_volume_and_track_level(transfer, want, 2);
+
             size_t written = 0;
             while (written < want && process__current_signal() == 0) {
                 size_t copied = audio__stream_write(transfer + written * 2u, want - written);
@@ -1467,6 +1554,14 @@ bool audio__file_is_playing(void) {
     bool playing = s_file_open && s_file_playing;
     xSemaphoreGive(s_audio_mutex);
     return playing;
+}
+
+uint8_t audio__file_level(void) {
+    audio__ensure_mutex();
+    xSemaphoreTake(s_audio_mutex, portMAX_DELAY);
+    int16_t peak = s_file_open && s_file_playing ? s_file_level_peak : 0;
+    xSemaphoreGive(s_audio_mutex);
+    return (uint8_t)(((int32_t)peak * 100) / INT16_MAX);
 }
 
 uint32_t audio__file_position_ms(void) {

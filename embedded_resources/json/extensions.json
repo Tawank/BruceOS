@@ -139,12 +139,14 @@
     },
     {
       "description": "MP3 audio",
+      "program": "player",
       "extensions": [".mp3"],
       "mimetypes": ["audio/mpeg"],
       "icon": "file-music"
     },
     {
       "description": "WAV audio",
+      "program": "player",
       "extensions": [".wav"],
       "mimetypes": ["audio/wav"],
       "icon": "file-music"
