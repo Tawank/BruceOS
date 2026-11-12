@@ -43,7 +43,7 @@
  * users elsewhere in the tree/SDK), and claiming the full length leaves no
  * room for that, which fails at link time (confirmed: "region `rtc_slow_seg'
  * overflowed by 36 bytes" at exactly 8192u). 8000u leaves room for ESP-IDF
- * RTC sleep code and timer state, including a 32-byte margin with v6.0.2.
+ * RTC sleep code and timer state, including a 32-byte margin with v6.1.
  */
 #define MEMORY_RTC__POOL_SIZE 8000u
 /* Minimum leftover worth splitting off into its own free chunk when an

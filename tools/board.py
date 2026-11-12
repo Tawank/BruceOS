@@ -213,7 +213,7 @@ def main() -> int:
     if shutil.which("idf.py") is None:
         print(
             "error: idf.py not found on PATH. Activate ESP-IDF first, e.g.:\n"
-            "  source ~/.espressif/v6.0.2/esp-idf/export.sh",
+            "  source ~/.espressif/v6.1/esp-idf/export.sh",
             file=sys.stderr,
         )
         return 1

@@ -244,6 +244,6 @@ display__overlay_destroy(overlay); /* also happens automatically on exit */
 ## ESP-IDF v6 compatibility note
 
 `espressif/elf_loader` v1.3.1 originally required a small patch to build against
-ESP-IDF v6.0.2.  The current build setup no longer relies on a separate
+ESP-IDF v6.1.  The current build setup no longer relies on a separate
 `tools/apply_patches.sh` or `patches/` directory; the managed component builds
 as configured by this project.

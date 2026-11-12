@@ -13,11 +13,8 @@
 #define DIALOG__CHAR_H 10
 #define DIALOG__WINDOW_RADIUS 5
 #define DIALOG__WINDOW_INSET 4
-/* Text size dialog__gui_message()/dialog__gui_message_show() draw their
- * title bar and body message at -- bigger than the rest of the chrome since
- * a message dialog is nothing but this text, so it reads as the main
- * content rather than another status line. */
-#define DIALOG__MESSAGE_TEXT_SIZE 2
+#define DIALOG__MESSAGE_TITLE_SIZE 2
+#define DIALOG__MESSAGE_TEXT_SIZE 1
 
 static bruce_result_t dialog__gui_wait_for_any_key(void) {
     /* Discard whatever's still queued (e.g. the press that opened this
@@ -66,14 +63,14 @@ dialog__gui_message_frame(bruce_dialog_kind_t kind, const char *title, const cha
 
     display__fill_round_rect(left, top, viewport_w, viewport_h, DIALOG__WINDOW_RADIUS, surface);
 
-    int title_h = title != NULL && title[0] != '\0' ? DIALOG__CHAR_H * DIALOG__MESSAGE_TEXT_SIZE + 4 : 0;
+    int title_h = title != NULL && title[0] != '\0' ? DIALOG__CHAR_H * DIALOG__MESSAGE_TITLE_SIZE + 4 : 0;
     if (title_h > 0) {
         /* Flush to the window's square top edge, not content_left/top's
          * inset - display__draw_round_rect() below redraws the rounded
          * outline on top of it, clipping these corners back round. */
         display__fill_rect(left, top, viewport_w, title_h, accent);
         display__set_text_color(text);
-        display__set_text_size(DIALOG__MESSAGE_TEXT_SIZE);
+        display__set_text_size(DIALOG__MESSAGE_TITLE_SIZE);
         display__set_text_bg_color(accent);
         display__set_cursor(content_left, content_top);
         display__print(title);
@@ -86,7 +83,7 @@ dialog__gui_message_frame(bruce_dialog_kind_t kind, const char *title, const cha
     display__set_text_color(text);
     display__set_text_size(DIALOG__MESSAGE_TEXT_SIZE);
     display__set_text_bg_color(surface);
-    int message_y = content_top + title_h + 4;
+    int message_y = content_top + title_h;
     display__set_cursor(content_left, message_y);
 
     if (message != NULL) {

@@ -34,7 +34,7 @@ dependencies:
   idf:
     source:
       type: idf
-    version: 6.0.2
+    version: 6.1.0
   nofrendo:
     component_hash: a08189e022b0b161006f227eff576e745c4dc5ea6476947aa3bb6472c5478e16
     dependencies:

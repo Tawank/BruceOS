@@ -23,7 +23,7 @@ More custom devkit boards coming soon! Stay across our communities!
 ## :building_construction: How to install
 
 ```sh
-source ~/.espressif/v6.0.2/esp-idf/export.sh
+source ~/.espressif/v6.1/esp-idf/export.sh
 idf.py -p PORT flash
 ```
 
@@ -34,7 +34,7 @@ Install [ESP-IDF](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/ge
 then build by sourcing the ESP-IDF environment and running:
 
 ```sh
-source ~/.espressif/v6.0.2/esp-idf/export.sh
+source ~/.espressif/v6.1/esp-idf/export.sh
 idf.py build
 ```
 
@@ -44,7 +44,7 @@ board-specific `sdkconfig.defaults` (see `boards/<board>/`) and puts the
 build output in its own `build-board/<board>/` directory:
 
 ```sh
-source ~/.espressif/v6.0.2/esp-idf/export.sh
+source ~/.espressif/v6.1/esp-idf/export.sh
 python tools/board.py --list                 # show available board ids
 python tools/board.py m5stack-cplus2 build
 python tools/board.py m5stack-cplus2 flash monitor -p PORT
@@ -54,7 +54,7 @@ python tools/board.py m5stack-cplus2 flash monitor -p PORT
 
 Perequisites:
 ```sh
-source ~/.espressif/v6.0.2/esp-idf/export.sh
+source ~/.espressif/v6.1/esp-idf/export.sh
 python -m pip install pytest pytest-embedded pytest-embedded-idf pytest-embedded-qemu
 python $IDF_PATH/tools/idf_tools.py install qemu-xtensa qemu-riscv32
 
@@ -62,7 +62,7 @@ python $IDF_PATH/tools/idf_tools.py install qemu-xtensa qemu-riscv32
 
 Then run the tests with:
 ```sh
-source ~/.espressif/v6.0.2/esp-idf/export.sh
+source ~/.espressif/v6.1/esp-idf/export.sh
 idf.py -B build-qemu build
 python -m pytest tests/pytest_firmware.py
 ```

@@ -1,4 +1,4 @@
-FROM espressif/idf:v6.0.2
+FROM espressif/idf:v6.1
 
 # Host tools used by the board build wrapper.
 RUN apt-get update \

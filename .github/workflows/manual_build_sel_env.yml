@@ -37,7 +37,7 @@ jobs:
   firmware:
     name: Build ${{ inputs.environment }}
     runs-on: ubuntu-latest
-    container: espressif/idf:v6.0.2
+    container: espressif/idf:v6.1
     steps:
       - uses: actions/checkout@v4
         with:

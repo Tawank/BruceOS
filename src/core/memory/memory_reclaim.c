@@ -7,9 +7,12 @@
 #include "freertos/semphr.h"
 
 #include "esp_heap_caps.h"
+#include "esp_log.h"
 
 #include "core/process/process.h"
 #include "core_sdk/process.h"
+
+#define TAG "memory_reclaim"
 
 #define MEMORY_RECLAIM__MAX_PROVIDERS 8u
 
@@ -26,7 +29,9 @@ typedef struct {
  * this is Core bookkeeping, not a tracked app allocation. */
 typedef struct {
     void (*restore[MEMORY_RECLAIM__MAX_PROVIDERS])(void);
+    const char *names[MEMORY_RECLAIM__MAX_PROVIDERS]; /* parallel to restore[], for the restore-time log */
     size_t count;
+    size_t freed; /* total bytes memory__reclaim() freed to grant this; logged again on restore */
 } memory_reclaim__grant_t;
 
 static StaticSemaphore_t s_mutex_storage;
@@ -65,7 +70,17 @@ bruce_result_t memory__register_reclaimable(const bruce_reclaim_provider_t *prov
  * first (see memory__reclaim_adopt()). */
 static void memory_reclaim__restore(void *context) {
     memory_reclaim__grant_t *grant = (memory_reclaim__grant_t *)context;
-    for (size_t i = 0; i < grant->count; ++i) grant->restore[i]();
+    for (size_t i = 0; i < grant->count; ++i) {
+        grant->restore[i]();
+        ESP_LOGW(TAG, "restored '%s'", grant->names[i]);
+    }
+    ESP_LOGW(
+        TAG, "restored %u provider(s), giving back up to %u bytes it had reclaimed -- largest free block now %u, "
+             "%u total free",
+        (unsigned)grant->count, (unsigned)grant->freed,
+        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL)
+    );
     free(grant);
 }
 
@@ -85,7 +100,13 @@ bruce_result_t memory__reclaim(
      * display out of buffered mode), so it should only happen when a
      * request this size would actually have somewhere to trip -- total free
      * bytes looking tight is not that; a too-small largest block is. */
-    if (heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) >= needed_bytes) return BRUCE_OK;
+    size_t largest_before = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+    if (largest_before >= needed_bytes) return BRUCE_OK;
+
+    ESP_LOGW(
+        TAG, "need %u bytes but largest free block is only %u (%u total free) -- asking registered providers",
+        (unsigned)needed_bytes, (unsigned)largest_before, (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL)
+    );
 
     memory_reclaim__ensure_mutex();
     xSemaphoreTake(s_mutex, portMAX_DELAY);
@@ -104,19 +125,31 @@ bruce_result_t memory__reclaim(
     memory_reclaim__grant_t *grant = malloc(sizeof(*grant));
     if (grant == NULL) return BRUCE_ERR_NO_MEMORY;
     grant->count = 0;
+    grant->freed = 0;
 
     size_t freed = 0;
     for (size_t i = 0; i < count && freed < needed_bytes; ++i) {
         size_t provider_freed = snapshot[i].provider.reclaim();
         if (provider_freed == 0) continue;
-        grant->restore[grant->count++] = snapshot[i].provider.restore;
+        ESP_LOGW(TAG, "'%s' gave back %u bytes", snapshot[i].provider.name, (unsigned)provider_freed);
+        grant->restore[grant->count] = snapshot[i].provider.restore;
+        grant->names[grant->count] = snapshot[i].provider.name;
+        grant->count++;
         freed += provider_freed;
     }
+    grant->freed = freed;
 
     if (grant->count == 0) {
+        ESP_LOGW(TAG, "no registered provider had anything to give for %u bytes needed", (unsigned)needed_bytes);
         free(grant);
         return BRUCE_ERR_NO_MEMORY;
     }
+
+    ESP_LOGW(
+        TAG, "freed %u of %u bytes needed -- largest free block now %u (%u total free)", (unsigned)freed,
+        (unsigned)needed_bytes, (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL)
+    );
 
     bruce_resource_id_t resource_id = process_registry__resource_register(memory_reclaim__restore, grant);
     if (resource_id == BRUCE_RESOURCE_ID_INVALID) {
