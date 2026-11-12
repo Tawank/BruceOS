@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "core_sdk/dialog.h"
 #include "core_sdk/display.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/process.h"
@@ -437,9 +438,20 @@ static void video_blit(bitmap_t *bitmap, int num_dirties, rect_t *dirty_rects) {
     if (scaled_lines_needed > s_scaled_lines_capacity) {
         uint16_t *scaled_lines = memory__realloc(s_scaled_lines, scaled_lines_needed * sizeof(*scaled_lines));
         if (scaled_lines == NULL) {
-            perf_track_and_report(now_ms, stall, 0, 0, 0, 0, false, 0, 0);
-            s_last_iter_ms = now_ms;
-            pace_frame();
+            /* Nothing frees up between frames to make this succeed later --
+             * every subsequent call would hit this same NULL again,
+             * forever, which looked like a frozen black screen with no
+             * indication why (the only visible symptom was display fps
+             * stuck at 0 in the printf below). Surface it and power off
+             * the emulator cleanly instead of silently skipping forever;
+             * nes_emulate()'s loop checks nes.poweroff at the top of every
+             * iteration, so this is the last frame rendered either way. */
+            printf("nes: out of memory, cannot render video -- stopping\n");
+            dialog__message(
+                BRUCE_DIALOG_ERROR, "Out of memory",
+                "Not enough free RAM to render NES video. Close other apps and try again."
+            );
+            nes_poweroff();
             return;
         }
         s_scaled_lines = scaled_lines;

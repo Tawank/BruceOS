@@ -5,6 +5,6 @@
   "coreAbiVersion": 4,
   "permissions": ["storage"],
   "stackSize": 16384,
-  "heapSize": 4718592,
+  "heapSize": 100592,
   "targets": ["elf"]
 }

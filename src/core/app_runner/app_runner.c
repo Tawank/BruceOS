@@ -289,47 +289,77 @@ int app_runner__run_path_with_environment(
     bruce_result_t permission_result = permission__check(BRUCE_PERMISSION_EXECUTE);
     if (permission_result != BRUCE_OK) { return permission_result; }
 
-    char normalized_path[APP_RUNNER_PATH_MAX];
-    if (!app_runner__normalize_path(path, normalized_path, sizeof(normalized_path))) {
+    /* normalized_path/configured_program/loader_arg bundled into one
+     * heap allocation (rather than three separate stack locals, ~600 bytes
+     * combined) because this runs on whichever task launched the app --
+     * typically "shell" (see shell_executor__launch_external(), which
+     * already heap-allocates its own locals for the same reason), whose
+     * stack budget is small and shared with everything else already on its
+     * call stack down into process creation and ELF/manifest loading. A
+     * stack overflow launching an ELF straight from the shell (as opposed
+     * to the GUI launcher, whose task has more headroom) was traced to
+     * exactly this kind of accumulated per-frame cost. */
+    struct {
+        char normalized_path[APP_RUNNER_PATH_MAX];
+        char configured_program[APP_RUNNER_LOADER_PROGRAM_MAX];
+        char loader_arg[APP_RUNNER_PATH_MAX + 1 + 256];
+    } *scratch = malloc(sizeof(*scratch));
+    if (scratch == NULL) return BRUCE_ERR_NO_MEMORY;
+
+    if (!app_runner__normalize_path(path, scratch->normalized_path, sizeof(scratch->normalized_path))) {
+        free(scratch);
         return BRUCE_ERR_INVALID_PATH;
     }
 
-    bruce_loader_descriptor_t loader = app_runner__find_loader_for_path(normalized_path);
-    char configured_program[APP_RUNNER_LOADER_PROGRAM_MAX];
+    bruce_loader_descriptor_t loader = app_runner__find_loader_for_path(scratch->normalized_path);
     const char *program = loader.program;
     if (app_runner__config_program_for_extension(
-            normalized_path, configured_program, sizeof(configured_program)
+            scratch->normalized_path, scratch->configured_program, sizeof(scratch->configured_program)
         )) {
-        program = configured_program;
+        program = scratch->configured_program;
     }
     if (program == NULL) {
         /* Neither a built-in loader nor extensions.conf claimed this
          * extension (or the path has none) - fall back to sniffing a
          * shebang line, e.g. an extensionless script or one whose
-         * extension isn't configured. */
-        bruce_filetype_info_t info;
-        if (filetype__identify(normalized_path, &info) == BRUCE_OK && !info.is_directory &&
-            info.program[0] != '\0' && strlen(info.program) < sizeof(configured_program)) {
-            strncpy(configured_program, info.program, sizeof(configured_program) - 1);
-            configured_program[sizeof(configured_program) - 1] = '\0';
-            program = configured_program;
+         * extension isn't configured. bruce_filetype_info_t (~350+ bytes,
+         * mostly fixed-size description/mimetype/icon/action buffers this
+         * call never looks at) is heap-allocated too, and only in this
+         * already-uncommon branch, rather than paid for on every call. */
+        bruce_filetype_info_t *info = malloc(sizeof(*info));
+        if (info != NULL) {
+            if (filetype__identify(scratch->normalized_path, info) == BRUCE_OK && !info->is_directory &&
+                info->program[0] != '\0' && strlen(info->program) < sizeof(scratch->configured_program)) {
+                strncpy(scratch->configured_program, info->program, sizeof(scratch->configured_program) - 1);
+                scratch->configured_program[sizeof(scratch->configured_program) - 1] = '\0';
+                program = scratch->configured_program;
+            }
+            free(info);
         }
     }
     if (program == NULL) {
-        // printf("app_runner__run_path: normalized_path=%s, loader=NULL\n", normalized_path);
+        // printf("app_runner__run_path: normalized_path=%s, loader=NULL\n", scratch->normalized_path);
+        free(scratch);
         return BRUCE_ERR_NOT_FOUND;
     }
-    char loader_arg[APP_RUNNER_PATH_MAX + 1 + 256];
     int written = snprintf(
-        loader_arg,
-        sizeof(loader_arg),
+        scratch->loader_arg,
+        sizeof(scratch->loader_arg),
         "\"%s\"%s%s",
-        normalized_path,
+        scratch->normalized_path,
         arg != NULL && arg[0] != '\0' ? " " : "",
         arg != NULL ? arg : ""
     );
-    if (written < 0 || (size_t)written >= sizeof(loader_arg)) return BRUCE_ERR_INVALID_ARGUMENT;
-    return app_runner__run_with_environment(program, loader_arg, mode, environment, environment_count);
+    if (written < 0 || (size_t)written >= sizeof(scratch->loader_arg)) {
+        free(scratch);
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    /* scratch is heap, not stack, so holding it open across this call costs
+     * nothing on this frame -- no need to copy program/loader_arg out of it
+     * first, just free it after. */
+    int result = app_runner__run_with_environment(program, scratch->loader_arg, mode, environment, environment_count);
+    free(scratch);
+    return result;
 }
 
 int app_runner__run_path(const char *path, const char *arg, bruce_launch_mode_t mode) {
@@ -585,40 +615,55 @@ int app_runner__run_with_environment(
          * /bin/<app_name><extension> or, failing that, the same exact
          * match against /apps/<app_name><extension>  */
         result = BRUCE_ERR_NOT_FOUND;
-        size_t total_loaders = app_runner__total_loader_count();
-        for (size_t i = 0; i < total_loaders; ++i) {
-            bruce_loader_descriptor_t loader = app_runner__loader_at(i);
+        /* Heap, not stack, for the same reason app_runner__run_path_with_
+         * environment() heap-allocates its own equivalents: this runs on
+         * whatever task launched the app (often "shell", a tight stack
+         * budget shared with everything else down into process creation
+         * and ELF/manifest loading), and loader_arg alone is ~400 bytes. */
+        struct {
             char path[APP_RUNNER_PATH_MAX];
-            bool found = false;
-            static const char *const search_dirs[] = {"/bin", "/apps"};
-            for (size_t dir_index = 0; dir_index < sizeof(search_dirs) / sizeof(search_dirs[0]); ++dir_index) {
-                int written =
-                    snprintf(path, sizeof(path), "%s/%s%s", search_dirs[dir_index], app_name, loader.extension);
-                if (written < 0 || (size_t)written >= sizeof(path)) { continue; }
-                if (storage__exists_internal(path)) {
-                    found = true;
+            char loader_arg[APP_RUNNER_PATH_MAX + 1 + 256];
+        } *scratch = malloc(sizeof(*scratch));
+        if (scratch == NULL) {
+            result = BRUCE_ERR_NO_MEMORY;
+        } else {
+            size_t total_loaders = app_runner__total_loader_count();
+            for (size_t i = 0; i < total_loaders; ++i) {
+                bruce_loader_descriptor_t loader = app_runner__loader_at(i);
+                bool found = false;
+                static const char *const search_dirs[] = {"/bin", "/apps"};
+                for (size_t dir_index = 0; dir_index < sizeof(search_dirs) / sizeof(search_dirs[0]);
+                     ++dir_index) {
+                    int written = snprintf(
+                        scratch->path, sizeof(scratch->path), "%s/%s%s", search_dirs[dir_index], app_name,
+                        loader.extension
+                    );
+                    if (written < 0 || (size_t)written >= sizeof(scratch->path)) { continue; }
+                    if (storage__exists_internal(scratch->path)) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (found) {
+                    int written_arg = snprintf(
+                        scratch->loader_arg,
+                        sizeof(scratch->loader_arg),
+                        "\"%s\"%s%s",
+                        scratch->path,
+                        arg != NULL && arg[0] != '\0' ? " " : "",
+                        arg != NULL ? arg : ""
+                    );
+                    if (written_arg < 0 || (size_t)written_arg >= sizeof(scratch->loader_arg)) {
+                        result = BRUCE_ERR_INVALID_ARGUMENT;
+                    } else {
+                        result = app_runner__run_with_environment(
+                            loader.program, scratch->loader_arg, mode, environment, environment_count
+                        );
+                    }
                     break;
                 }
             }
-            if (found) {
-                char loader_arg[APP_RUNNER_PATH_MAX + 1 + 256];
-                int written_arg = snprintf(
-                    loader_arg,
-                    sizeof(loader_arg),
-                    "\"%s\"%s%s",
-                    path,
-                    arg != NULL && arg[0] != '\0' ? " " : "",
-                    arg != NULL ? arg : ""
-                );
-                if (written_arg < 0 || (size_t)written_arg >= sizeof(loader_arg)) {
-                    result = BRUCE_ERR_INVALID_ARGUMENT;
-                } else {
-                    result = app_runner__run_with_environment(
-                        loader.program, loader_arg, mode, environment, environment_count
-                    );
-                }
-                break;
-            }
+            free(scratch);
         }
     }
 

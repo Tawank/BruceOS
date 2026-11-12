@@ -34,7 +34,7 @@ dependencies:
   idf:
     source:
       type: idf
-    version: 6.0.2
+    version: 6.1.0
   jet:
     component_hash: 70a5f989b51f22b6cbde9a79bceb3ea35c9c25d70cd89f4c89a55db106b4a466
     dependencies:

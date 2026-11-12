@@ -5,6 +5,7 @@
  * display/controller/sound reads living in their own files. */
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "core_sdk/memory.h"
@@ -79,6 +80,15 @@ void mem_free_readonly(void *buffer, int size) {
     /* Never migrated (alloc/memcpy failed, or both slots were taken) --
      * still the original mem_alloc()'d buffer. */
     memory__free(buffer);
+}
+
+void osd_log_meminfo(void) {
+    bruce_memory_stats_t stats;
+    if (memory__get_stats(&stats) != BRUCE_OK) return;
+    printf(
+        "nofrendo: internal free=%u largest=%u (total=%u)\n", (unsigned)stats.internal_free,
+        (unsigned)stats.internal_largest_block, (unsigned)stats.internal_total
+    );
 }
 
 static bool config_open(void) { return false; }
