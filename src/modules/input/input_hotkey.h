@@ -26,9 +26,11 @@
  *   BTN_START BTN_SELECT BTN_THUMB_L BTN_THUMB_R
  *
  * A hotkey `action` may be either an AppRunner command line (launched the
- * same way a launcher entry is, e.g. "process preview") or "emit <NAME>",
- * which rebinds the chord to inject a press+release of the named code
- * instead -- e.g. "emit NEXT" emits BRUCE_INPUT_CODE_NEXT.
+ * same way a launcher entry is, e.g. "process preview") or "bind <NAME>",
+ * which rebinds the key/button to the named code instead, e.g.
+ * "bind NEXT". A plain button press mirrors real press/release timing onto
+ * the target (input_buttons.c); chords and held actions fire an instant
+ * press+release pulse instead (input_hotkey__run_action() below).
  */
 
 /* Splits an optional leading "<N>s" / "<N>ms" duration token off `key`.
@@ -66,7 +68,9 @@ bool input_hotkey__find_by_hold(
     size_t action_size
 );
 
-/* Runs a matched hotkey action: "emit <NAME>" injects a press+release of
- * the named code; anything else is an AppRunner command line, launched
- * foreground the same way a launcher entry is. No-op for NULL/empty. */
+/* True iff `action` is "bind <NAME>" with a recognized target; fills *out_code. */
+bool input_hotkey__resolve_bind(const char *action, int32_t *out_code);
+
+/* Runs a matched hotkey action: a bind fires a press+release pulse of its
+ * target, anything else launches as an AppRunner command. No-op for NULL/empty. */
 void input_hotkey__run_action(const char *action);

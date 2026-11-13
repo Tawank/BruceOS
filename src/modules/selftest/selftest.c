@@ -289,7 +289,7 @@ static const selftest__case_t selftest__cases[] = {
     SELFTEST_CASE(selftest__run_input_hotkey_duration_case),
     SELFTEST_CASE(selftest__run_input_hotkey_code_name_case),
     SELFTEST_CASE(selftest__run_input_hotkey_find_case),
-    SELFTEST_CASE(selftest__run_input_hotkey_emit_case),
+    SELFTEST_CASE(selftest__run_input_hotkey_bind_case),
     SELFTEST_CASE(selftest__run_bluetooth_hid_keyboard_translation_case),
     SELFTEST_CASE(selftest__run_bluetooth_hid_validation_case),
     SELFTEST_CASE(selftest__run_dialog_text_input_case),

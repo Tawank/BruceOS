@@ -256,7 +256,7 @@ bool selftest__run_input_check_case(void) {
 
 /* ------------------------------------------------------------------------ */
 /* input_hotkey.c: chord duration parsing, name<->code lookup, config       */
-/* matching, and "emit" action dispatch. Pure logic (no GPIO), so it's      */
+/* matching, and "bind" action dispatch. Pure logic (no GPIO), so it's      */
 /* exercised directly rather than through input_buttons__poll().            */
 /* ------------------------------------------------------------------------ */
 
@@ -333,10 +333,10 @@ bool selftest__run_input_hotkey_find_case(void) {
     }
 
     const bruce_config_hotkey_t test_hotkeys[] = {
-        {"BTN_A",       "emit PREV"},
+        {"BTN_A",       "bind PREV"},
         {"500ms BTN_A", "menu top"},
         {"2s BTN_B",    "menu top"},
-        {"BTN_C",       "emit NEXT"},
+        {"BTN_C",       "bind NEXT"},
     };
     bool set_ok = config__set_hotkeys(test_hotkeys, 4) == BRUCE_OK;
 
@@ -350,9 +350,9 @@ bool selftest__run_input_hotkey_find_case(void) {
     bool instant_match =
         input_hotkey__find("BTN_C", &hold_ms, action, sizeof(action), &hotkey_index) && hold_ms == 0 &&
         hotkey_index == 3 &&
-        strcmp(action, "emit NEXT") == 0;
+        strcmp(action, "bind NEXT") == 0;
     bool instant_a = input_hotkey__find_by_hold("BTN_A", false, &hold_ms, action, sizeof(action)) &&
-                     hold_ms == 0 && strcmp(action, "emit PREV") == 0;
+                     hold_ms == 0 && strcmp(action, "bind PREV") == 0;
     bool hold_a = input_hotkey__find_by_hold("BTN_A", true, &hold_ms, action, sizeof(action)) &&
                   hold_ms == 500 && strcmp(action, "menu top") == 0;
     bool no_match = !input_hotkey__find("BTN_X", &hold_ms, action, sizeof(action), NULL);
@@ -364,10 +364,10 @@ bool selftest__run_input_hotkey_find_case(void) {
     return ok;
 }
 
-bool selftest__run_input_hotkey_emit_case(void) {
+bool selftest__run_input_hotkey_bind_case(void) {
     (void)input__flush();
 
-    input_hotkey__run_action("emit NEXT");
+    input_hotkey__run_action("bind NEXT");
 
     bruce_input_event_t press;
     bruce_input_event_t release;
@@ -378,7 +378,7 @@ bool selftest__run_input_hotkey_emit_case(void) {
                     release.action == BRUCE_INPUT_RELEASE && release.code == BRUCE_INPUT_CODE_NEXT;
     if (!emitted) {
         printf(
-            "[selftest] input/hotkey-emit: FAIL, press=%d/%" PRId32 " release=%d/%" PRId32 "\n",
+            "[selftest] input/hotkey-bind: FAIL, press=%d/%" PRId32 " release=%d/%" PRId32 "\n",
             press_result,
             press.code,
             release_result,
@@ -387,15 +387,15 @@ bool selftest__run_input_hotkey_emit_case(void) {
         return false;
     }
 
-    /* An unknown "emit" target is recognized-but-inert: no command lookup,
+    /* An unknown "bind" target is recognized-but-inert: no command lookup,
      * no injected event. */
-    input_hotkey__run_action("emit NOT_A_REAL_TARGET");
+    input_hotkey__run_action("bind NOT_A_REAL_TARGET");
     bruce_input_event_t stray;
     if (input__read(&stray, 0) != BRUCE_ERR_TIMEOUT) {
-        printf("[selftest] input/hotkey-emit: FAIL, unknown target injected an event\n");
+        printf("[selftest] input/hotkey-bind: FAIL, unknown target injected an event\n");
         return false;
     }
 
-    printf("[selftest] input/hotkey-emit: OK\n");
+    printf("[selftest] input/hotkey-bind: OK\n");
     return true;
 }

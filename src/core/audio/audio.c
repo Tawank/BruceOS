@@ -572,7 +572,7 @@ bruce_result_t audio__stream_close(void) {
  * available here because audio.c is a Core module, not a sandboxed
  * loader.) */
 #define AUDIO__FILE_READ_FRAMES 512u
-#define AUDIO__FILE_PLAY_TASK_STACK_BYTES 8192u
+#define AUDIO__FILE_PLAY_TASK_STACK_BYTES 4096u
 
 typedef struct {
     bruce_file_id_t file;
@@ -607,6 +607,22 @@ static esp_asp_handle_t s_mp3_handle;
  * atomic on this target, and a one-chunk-stale read is harmless for what
  * this is used for. */
 static volatile int16_t s_file_level_peak;
+/* MP3-only position/duration/bitrate, read by audio__file_position_ms()/
+ * _duration_ms() and by audio__mp3_play_blocking() itself on a seek -- WAV
+ * tracks the same information from its own header fields in s_file_wav
+ * instead (sample-accurate, since raw PCM has no decoding involved). None of
+ * these three exist for MP3 up front: bitrate is a running average
+ * computed by audio__mp3_play_blocking()'s own loop from bytes read vs. ms
+ * decoded so far (the decoder's own ESP_ASP_EVENT_TYPE_MUSIC_INFO doesn't
+ * report a usable one -- see audio__mp3_event_cb()), so it reads as 0 for
+ * the first fraction of a second of playback, and duration/seek derived
+ * from it are *estimates* even once it settles -- there's no frame index
+ * here, so a constant bitrate is assumed across the whole file, true for
+ * the overwhelming majority of MP3s but not for VBR ones. Not locked by
+ * s_audio_mutex, same reasoning as s_file_level_peak above. */
+static volatile uint32_t s_mp3_position_ms;
+static volatile uint32_t s_mp3_duration_ms;
+static volatile uint32_t s_mp3_bitrate_bps;
 
 /* Reports whether the process audio__file_play() just spawned actually
  * opened the file, for audio__file_play() itself to wait on below -- see
@@ -738,6 +754,9 @@ static void audio__file_teardown_locked(void) {
     s_file_format = AUDIO__FILE_FORMAT_NONE;
     s_file_resource = BRUCE_RESOURCE_ID_INVALID;
     s_file_level_peak = 0;
+    s_mp3_position_ms = 0;
+    s_mp3_duration_ms = 0;
+    s_mp3_bitrate_bps = 0;
     memset(&s_file_wav, 0, sizeof(s_file_wav));
 }
 
@@ -1039,6 +1058,12 @@ static void audio__file_play_process_cleanup(void *context) {
 #define AUDIO__MP3_PCM_RING_FRAMES 1024u  /* stereo int16 frames, ~4KB */
 #define AUDIO__MP3_INPUT_RING_BYTES 8192u /* compressed bytes, ~0.5s at 128kbps */
 #define AUDIO__MP3_TRANSFER_FRAMES 256u
+/* Mirrors sdkconfig.defaults' CONFIG_AUDIO_SIMPLE_PLAYER_RESAMPLE_DEST_RATE:
+ * every MP3, whatever its own sample rate, is resampled to this rate before
+ * reaching audio__mp3_out_cb(), so counting frames drained from the PCM ring
+ * (below) already counts at a fixed, known rate -- used for position
+ * reporting instead of tracking the source file's own sample rate. */
+#define AUDIO__MP3_OUTPUT_SAMPLE_RATE 48000u
 
 typedef struct {
     SemaphoreHandle_t lock;
@@ -1168,6 +1193,14 @@ static int audio__mp3_event_cb(esp_asp_event_pkt_t *event, void *ctx) {
             pipe->finished = true;
         }
     }
+    /* ESP_ASP_EVENT_TYPE_MUSIC_INFO is deliberately not handled here: traced
+     * through esp_gmf_audio_dec.c, its payload's bitrate field is never
+     * actually populated for MP3 decode in this version of the library (only
+     * sample rate/bits/channels ever get updated) -- it always reads back
+     * as 0, so it can't be used to estimate duration or a seek's byte
+     * offset. audio__mp3_play_blocking()'s own loop computes a running
+     * average bitrate instead, directly from bytes read vs. ms decoded so
+     * far -- see s_mp3_bitrate_bps's doc comment above. */
     return 0;
 }
 
@@ -1236,164 +1269,275 @@ static bruce_result_t audio__mp3_play_blocking(const char *path, uint32_t token)
         return BRUCE_ERR_NO_MEMORY;
     }
 
-    /* Prime the input ring before the decoder's first pull so it doesn't
-     * immediately starve waiting on this process's own (much slower,
-     * polling) main loop below. */
-    while (source.filled < AUDIO__MP3_INPUT_RING_BYTES && source.total_read < source.file_size) {
-        size_t filled_before = source.filled;
-        audio__mp3_source_fill(&source);
-        if (source.filled == filled_before) break; /* a read failed; let the decoder discover EOF */
-    }
-
-    esp_asp_cfg_t cfg = {
-        .in = {.cb = audio__mp3_in_cb, .user_ctx = &source},
-        .out = {.cb = audio__mp3_out_cb, .user_ctx = &pipe},
-        .task_prio = (int)AUDIO__MP3_DECODE_TASK_PRIORITY,
-        .task_stack = 6 * 1024,
-    };
-    esp_asp_handle_t handle = NULL;
-    esp_gmf_err_t new_result = esp_audio_simple_player_new(&cfg, &handle);
-    if (new_result != ESP_GMF_ERR_OK || handle == NULL) {
-        ESP_LOGE(TAG, "mp3: esp_audio_simple_player_new() failed: %d", (int)new_result);
-        vSemaphoreDelete(source.lock);
-        vSemaphoreDelete(pipe.lock);
-        (void)audio__stream_close();
-        (void)memory__external_free(pcm_ring_buffer);
-        (void)memory__external_free(input_ring_buffer);
-        storage__close(file);
-        audio__file_publish_open_result(token, BRUCE_ERR_NO_MEMORY);
-        return BRUCE_ERR_NO_MEMORY;
-    }
-    (void)esp_audio_simple_player_set_event(handle, audio__mp3_event_cb, &pipe);
-
-    if (!process_registry__operation_begin()) {
-        (void)esp_audio_simple_player_destroy(handle);
-        vSemaphoreDelete(source.lock);
-        vSemaphoreDelete(pipe.lock);
-        (void)audio__stream_close();
-        (void)memory__external_free(pcm_ring_buffer);
-        (void)memory__external_free(input_ring_buffer);
-        storage__close(file);
-        audio__file_publish_open_result(token, BRUCE_ERR_CANCELLED);
-        return BRUCE_ERR_CANCELLED;
-    }
-    audio__ensure_mutex();
-    xSemaphoreTake(s_audio_mutex, portMAX_DELAY);
-    s_file_format = AUDIO__FILE_FORMAT_MP3;
-    s_mp3_handle = handle;
-    s_file_open = true;
-    s_file_playing = true;
-    s_file_stop_requested = false;
-    s_file_seek_requested = false;
-    s_file_resource = process_registry__resource_register(audio__file_cleanup, NULL);
-    s_file_open_result_token = token;
-    s_file_open_result = BRUCE_OK;
-    s_file_opening = false;
-    xSemaphoreGive(s_audio_mutex);
-    process_registry__operation_end();
-
-    /* The pipeline's own elements (decoder, resampler, ...) open -- and do
-     * their own one-shot internal allocations, e.g. the resampler's
-     * coefficients matrix -- asynchronously on esp_audio_simple_player's own
-     * task after this call, not synchronously inside it, so a failure there
-     * (logged by esp_ae/esp_gmf itself, then delivered to
-     * audio__mp3_event_cb() as ESP_GMF_EVENT_STATE_ERROR) can't be caught by
-     * checking run_result alone. Logged here so a failure a few lines later
-     * in the serial log has the actual free-heap number next to it instead
-     * of requiring another guess at how much headroom the pipeline needed. */
-    ESP_LOGI(TAG, "mp3: free heap before run(): %u bytes", (unsigned)esp_get_free_heap_size());
-    esp_gmf_err_t run_result = esp_audio_simple_player_run(handle, "raw://local/audio.mp3", NULL);
-    if (run_result != ESP_GMF_ERR_OK) {
-        ESP_LOGE(TAG, "mp3: esp_audio_simple_player_run() failed: %d", (int)run_result);
-        pipe.finished = true;
-    } else {
-        ESP_LOGI(TAG, "mp3: playing %s (%u bytes)", path, (unsigned)source.file_size);
-    }
-
     int16_t transfer[AUDIO__MP3_TRANSFER_FRAMES * 2u];
+    /* Everything below runs once per esp_audio_simple_player session. A
+     * fresh session is created from scratch -- the library exposes no seek
+     * API -- for the initial play and again for every seek, each starting
+     * the decoder at a (re-primed) byte offset into the same still-open
+     * file; `start_byte_offset`/`position_base_ms` carry the target across
+     * iterations. A session that reaches a natural end (nothing left to
+     * seek to) just breaks out below instead of looping again. */
+    size_t start_byte_offset = 0;
+    uint32_t position_base_ms = 0;
+    bool first_session = true;
+
     for (;;) {
-        if (process__current_signal() != 0) break;
-        audio__file_poll_t poll;
-        if (!audio__file_poll_locked(&poll)) break; /* device shutting down */
-        if (poll.stop) {
-            /* esp_audio_simple_player_stop() is a synchronous call: it waits
-             * for the decoder's own task to notice a stop request, which it
-             * only ever checks *between* whole process cycles (one call
-             * through decode -> bit-convert -> resample -> out_cb). Calling
-             * it from this task deadlocks against that task, the same way
-             * esp_audio_simple_player_pause() did (removed above) -- and
-             * draining/pre-feeding the rings just once before the call (two
-             * earlier attempts at this) is still racy: the decoder task runs
-             * its own loop independently and can start another cycle, and
-             * get stuck on either ring again, in the gap between our last
-             * drain and the stop() call actually blocking on it.
-             *
-             * So never call stop() from here at all. Instead, flag the input
-             * side to report EOF immediately (same as audio__mp3_in_cb()
-             * already does at genuine end of file) and fall through to the
-             * ordinary pump logic below, same as every other iteration --
-             * exactly like a natural end-of-track exit, which has never
-             * deadlocked, because the decoder reaches ESP_ASP_STATE_FINISHED
-             * (audio__mp3_event_cb() -> pipe.finished) on its own and this
-             * loop's own `finished` check below breaks out once it does. The
-             * now-redundant esp_audio_simple_player_stop() call still happens
-             * once, safely, in audio__file_teardown_locked() after this loop
-             * exits -- by then the decoder task has already reached a
-             * terminal state, so that call returns immediately instead of
-             * waiting on anything. */
-            source.stop_requested = true;
+        if (storage__seek(file, (int64_t)start_byte_offset, SEEK_SET, NULL) != BRUCE_OK) break;
+        source.write_pos = 0;
+        source.read_pos = 0;
+        source.filled = 0;
+        source.total_read = start_byte_offset;
+        source.stop_requested = false;
+        pipe.write_pos = 0;
+        pipe.read_pos = 0;
+        pipe.filled = 0;
+        pipe.finished = false;
+
+        /* Prime the input ring before the decoder's first pull so it doesn't
+         * immediately starve waiting on this process's own (much slower,
+         * polling) main loop below. */
+        while (source.filled < AUDIO__MP3_INPUT_RING_BYTES && source.total_read < source.file_size) {
+            size_t filled_before = source.filled;
+            audio__mp3_source_fill(&source);
+            if (source.filled == filled_before) break; /* a read failed; let the decoder discover EOF */
         }
-        if (!poll.playing && !source.stop_requested) {
-            /* Deliberately never calls esp_audio_simple_player_pause() here:
-             * that was tried and deadlocks the decoder's own task against
-             * this very loop -- pause() blocks this task waiting for the
-             * decoder to acknowledge, but the decoder can't acknowledge
-             * because it's blocked inside its output callback waiting for
-             * ring space that only this (now-blocked) loop could free.
-             * Simply not draining the ring here is safe instead: once it
-             * fills (AUDIO__MP3_PCM_RING_FRAMES), the decoder's own output
-             * callback already retries/backs off on its own (the same
-             * mechanism that already handles the ring being momentarily
-             * full during ordinary playback) -- nothing is lost, and
-             * resuming (just draining again below) picks up right where
-             * decoding left off. */
-            s_file_level_peak = 0;
-            (void)runtime__sleep(10u);
+
+        esp_asp_cfg_t cfg = {
+            .in = {.cb = audio__mp3_in_cb, .user_ctx = &source},
+            .out = {.cb = audio__mp3_out_cb, .user_ctx = &pipe},
+            .task_prio = (int)AUDIO__MP3_DECODE_TASK_PRIORITY,
+            .task_stack = 6 * 1024,
+        };
+        esp_asp_handle_t handle = NULL;
+        esp_gmf_err_t new_result = esp_audio_simple_player_new(&cfg, &handle);
+        if (new_result != ESP_GMF_ERR_OK || handle == NULL) {
+            ESP_LOGE(TAG, "mp3: esp_audio_simple_player_new() failed: %d", (int)new_result);
+            if (!first_session) break; /* a seek-restart failing just ends playback, like any other mid-track error */
+            vSemaphoreDelete(source.lock);
+            vSemaphoreDelete(pipe.lock);
+            (void)audio__stream_close();
+            (void)memory__external_free(pcm_ring_buffer);
+            (void)memory__external_free(input_ring_buffer);
+            storage__close(file);
+            audio__file_publish_open_result(token, BRUCE_ERR_NO_MEMORY);
+            return BRUCE_ERR_NO_MEMORY;
+        }
+        (void)esp_audio_simple_player_set_event(handle, audio__mp3_event_cb, &pipe);
+
+        if (first_session) {
+            if (!process_registry__operation_begin()) {
+                (void)esp_audio_simple_player_destroy(handle);
+                vSemaphoreDelete(source.lock);
+                vSemaphoreDelete(pipe.lock);
+                (void)audio__stream_close();
+                (void)memory__external_free(pcm_ring_buffer);
+                (void)memory__external_free(input_ring_buffer);
+                storage__close(file);
+                audio__file_publish_open_result(token, BRUCE_ERR_CANCELLED);
+                return BRUCE_ERR_CANCELLED;
+            }
+            audio__ensure_mutex();
+            xSemaphoreTake(s_audio_mutex, portMAX_DELAY);
+            s_file_format = AUDIO__FILE_FORMAT_MP3;
+            s_mp3_handle = handle;
+            s_file_open = true;
+            s_file_playing = true;
+            s_file_stop_requested = false;
+            s_file_seek_requested = false;
+            s_file_resource = process_registry__resource_register(audio__file_cleanup, NULL);
+            s_file_open_result_token = token;
+            s_file_open_result = BRUCE_OK;
+            s_file_opening = false;
+            xSemaphoreGive(s_audio_mutex);
+            process_registry__operation_end();
+        } else if (process_registry__operation_begin()) {
+            xSemaphoreTake(s_audio_mutex, portMAX_DELAY);
+            s_mp3_handle = handle;
+            xSemaphoreGive(s_audio_mutex);
+            process_registry__operation_end();
+        }
+
+        /* The pipeline's own elements (decoder, resampler, ...) open -- and do
+         * their own one-shot internal allocations, e.g. the resampler's
+         * coefficients matrix -- asynchronously on esp_audio_simple_player's own
+         * task after this call, not synchronously inside it, so a failure there
+         * (logged by esp_ae/esp_gmf itself, then delivered to
+         * audio__mp3_event_cb() as ESP_GMF_EVENT_STATE_ERROR) can't be caught by
+         * checking run_result alone. Logged here so a failure a few lines later
+         * in the serial log has the actual free-heap number next to it instead
+         * of requiring another guess at how much headroom the pipeline needed. */
+        ESP_LOGI(TAG, "mp3: free heap before run(): %u bytes", (unsigned)esp_get_free_heap_size());
+        esp_gmf_err_t run_result = esp_audio_simple_player_run(handle, "raw://local/audio.mp3", NULL);
+        if (run_result != ESP_GMF_ERR_OK) {
+            ESP_LOGE(TAG, "mp3: esp_audio_simple_player_run() failed: %d", (int)run_result);
+            pipe.finished = true;
+        } else {
+            ESP_LOGI(TAG, "mp3: playing %s (%u bytes) from offset %u", path, (unsigned)source.file_size,
+                     (unsigned)start_byte_offset);
+        }
+
+        bool want_restart = false;
+        uint32_t restart_target_ms = 0;
+        uint32_t played_frames_this_session = 0;
+
+        for (;;) {
+            if (process__current_signal() != 0) goto done;
+            audio__file_poll_t poll;
+            if (!audio__file_poll_locked(&poll)) goto done; /* device shutting down */
+            if (poll.stop) {
+                /* esp_audio_simple_player_stop() is a synchronous call: it waits
+                 * for the decoder's own task to notice a stop request, which it
+                 * only ever checks *between* whole process cycles (one call
+                 * through decode -> bit-convert -> resample -> out_cb). Calling
+                 * it from this task deadlocks against that task, the same way
+                 * esp_audio_simple_player_pause() did (removed above) -- and
+                 * draining/pre-feeding the rings just once before the call (two
+                 * earlier attempts at this) is still racy: the decoder task runs
+                 * its own loop independently and can start another cycle, and
+                 * get stuck on either ring again, in the gap between our last
+                 * drain and the stop() call actually blocking on it.
+                 *
+                 * So never call stop() from here at all. Instead, flag the input
+                 * side to report EOF immediately (same as audio__mp3_in_cb()
+                 * already does at genuine end of file) and fall through to the
+                 * ordinary pump logic below, same as every other iteration --
+                 * exactly like a natural end-of-track exit, which has never
+                 * deadlocked, because the decoder reaches ESP_ASP_STATE_FINISHED
+                 * (audio__mp3_event_cb() -> pipe.finished) on its own and this
+                 * loop's own `finished` check below breaks out once it does. The
+                 * now-redundant esp_audio_simple_player_stop() call still happens
+                 * once, safely, in audio__file_teardown_locked() after this loop
+                 * exits -- by then the decoder task has already reached a
+                 * terminal state, so that call returns immediately instead of
+                 * waiting on anything. */
+                source.stop_requested = true;
+            }
+            if (poll.seek && !want_restart) {
+                /* Same reasoning as the stop case above: never call any
+                 * esp_audio_simple_player_*() control API from here.
+                 * Flagging early EOF drains this session down to a clean
+                 * ESP_ASP_STATE_FINISHED the same way a stop does, and once
+                 * `finished` is observed below, a brand new session starts
+                 * at the seeked-to byte offset instead of tearing this whole
+                 * function down. */
+                want_restart = true;
+                restart_target_ms = poll.seek_ms;
+                source.stop_requested = true;
+            }
+            if (!poll.playing && !source.stop_requested) {
+                /* Deliberately never calls esp_audio_simple_player_pause() here:
+                 * that was tried and deadlocks the decoder's own task against
+                 * this very loop -- pause() blocks this task waiting for the
+                 * decoder to acknowledge, but the decoder can't acknowledge
+                 * because it's blocked inside its output callback waiting for
+                 * ring space that only this (now-blocked) loop could free.
+                 * Simply not draining the ring here is safe instead: once it
+                 * fills (AUDIO__MP3_PCM_RING_FRAMES), the decoder's own output
+                 * callback already retries/backs off on its own (the same
+                 * mechanism that already handles the ring being momentarily
+                 * full during ordinary playback) -- nothing is lost, and
+                 * resuming (just draining again below) picks up right where
+                 * decoding left off. */
+                s_file_level_peak = 0;
+                (void)runtime__sleep(10u);
+                continue;
+            }
+
+            if (!source.stop_requested) audio__mp3_source_fill(&source);
+
+            xSemaphoreTake(pipe.lock, portMAX_DELAY);
+            size_t want = pipe.filled < AUDIO__MP3_TRANSFER_FRAMES ? pipe.filled : AUDIO__MP3_TRANSFER_FRAMES;
+            for (size_t i = 0; i < want; ++i) {
+                transfer[i * 2u] = pipe.ring[pipe.read_pos * 2u];
+                transfer[i * 2u + 1u] = pipe.ring[pipe.read_pos * 2u + 1u];
+                pipe.read_pos = (pipe.read_pos + 1u) % AUDIO__MP3_PCM_RING_FRAMES;
+            }
+            pipe.filled -= want;
+            bool finished = pipe.finished && pipe.filled == 0;
+            xSemaphoreGive(pipe.lock);
+
+            if (want > 0) {
+                audio__file_apply_volume_and_track_level(transfer, want, 2);
+                played_frames_this_session += (uint32_t)want;
+                s_mp3_position_ms = position_base_ms + (uint32_t)(((uint64_t)played_frames_this_session * 1000u) /
+                                                                   AUDIO__MP3_OUTPUT_SAMPLE_RATE);
+                /* Gated on >300ms decoded so the ratio has settled past the
+                 * input ring's own priming (otherwise the first update or
+                 * two, with very little decoded time in the denominator,
+                 * reads as a wildly too-high bitrate / too-low duration for
+                 * a brief moment). Recomputed every chunk after that so a
+                 * VBR file's average keeps refining as more of it decodes,
+                 * rather than freezing at an early guess. */
+                if (s_mp3_position_ms > 300u) {
+                    s_mp3_bitrate_bps = (uint32_t)(((uint64_t)source.total_read * 8000u) / s_mp3_position_ms);
+                    s_mp3_duration_ms = s_mp3_bitrate_bps > 0
+                                            ? (uint32_t)(((uint64_t)source.file_size * 8000u) / s_mp3_bitrate_bps)
+                                            : 0;
+                }
+
+                size_t written = 0;
+                while (written < want && process__current_signal() == 0) {
+                    size_t copied = audio__stream_write(transfer + written * 2u, want - written);
+                    if (copied == 0) {
+                        if (runtime__sleep(10u) != BRUCE_OK) break;
+                        continue;
+                    }
+                    written += copied;
+                }
+            } else if (finished) {
+                break;
+            } else {
+                (void)runtime__sleep(10u);
+            }
+        }
+
+        /* `finished` above only goes true once the decoder task has reached
+         * a terminal state (FINISHED/STOPPED/ERROR), and (confirmed by
+         * reading esp_gmf_task.c itself) that only happens after its own
+         * close-job cleanup loop has already completed -- so destroying it
+         * here is always safe, never a wait on anything. Nulling the shared
+         * handle first (same lock/registry pattern as publishing it above)
+         * keeps audio__file_teardown_locked()'s own stop()+destroy() from
+         * ever running on a handle this function already destroyed. */
+        if (process_registry__operation_begin()) {
+            xSemaphoreTake(s_audio_mutex, portMAX_DELAY);
+            s_mp3_handle = NULL;
+            xSemaphoreGive(s_audio_mutex);
+            process_registry__operation_end();
+        }
+        (void)esp_audio_simple_player_destroy(handle);
+
+        if (!want_restart) break;
+
+        /* Approximate: there's no frame index here to look up an exact byte
+         * offset for a timestamp, so this assumes a constant bitrate across
+         * the whole file (true for the overwhelming majority of MP3s, off
+         * by some amount for VBR ones) using s_mp3_bitrate_bps, the running
+         * average this loop computes above. The decoder is relied on to
+         * resync to the next valid frame on its own from whatever byte this
+         * lands on mid-frame -- standard behaviour for this class of
+         * decoder, and exactly what a seek on a real MP3 player does
+         * without a precomputed frame index either. If the bitrate isn't
+         * known yet (seeking in the first ~300ms after opening, before the
+         * estimate above has settled), the seek is dropped rather than
+         * guessing -- resuming from roughly where this session left off
+         * (source.total_read, slightly ahead of what's actually been
+         * decoded by the input ring's own lookahead -- same order of
+         * imprecision already accepted above) instead of restarting from
+         * this session's original start offset and losing progress. */
+        if (s_mp3_bitrate_bps == 0) {
+            start_byte_offset = source.total_read;
+            position_base_ms = s_mp3_position_ms;
+            first_session = false;
             continue;
         }
-
-        if (!source.stop_requested) audio__mp3_source_fill(&source);
-
-        xSemaphoreTake(pipe.lock, portMAX_DELAY);
-        size_t want = pipe.filled < AUDIO__MP3_TRANSFER_FRAMES ? pipe.filled : AUDIO__MP3_TRANSFER_FRAMES;
-        for (size_t i = 0; i < want; ++i) {
-            transfer[i * 2u] = pipe.ring[pipe.read_pos * 2u];
-            transfer[i * 2u + 1u] = pipe.ring[pipe.read_pos * 2u + 1u];
-            pipe.read_pos = (pipe.read_pos + 1u) % AUDIO__MP3_PCM_RING_FRAMES;
-        }
-        pipe.filled -= want;
-        bool finished = pipe.finished && pipe.filled == 0;
-        xSemaphoreGive(pipe.lock);
-
-        if (want > 0) {
-            audio__file_apply_volume_and_track_level(transfer, want, 2);
-
-            size_t written = 0;
-            while (written < want && process__current_signal() == 0) {
-                size_t copied = audio__stream_write(transfer + written * 2u, want - written);
-                if (copied == 0) {
-                    if (runtime__sleep(10u) != BRUCE_OK) break;
-                    continue;
-                }
-                written += copied;
-            }
-        } else if (finished) {
-            break;
-        } else {
-            (void)runtime__sleep(10u);
-        }
+        uint64_t target_offset = ((uint64_t)restart_target_ms * s_mp3_bitrate_bps) / 8000u;
+        start_byte_offset = target_offset >= source.file_size ? source.file_size : (size_t)target_offset;
+        position_base_ms = restart_target_ms;
+        first_session = false;
     }
 
+done:
     vSemaphoreDelete(source.lock);
     vSemaphoreDelete(pipe.lock);
     (void)memory__external_free(pcm_ring_buffer);
@@ -1521,9 +1665,7 @@ bruce_result_t audio__file_seek(uint32_t position_ms) {
     audio__ensure_mutex();
     xSemaphoreTake(s_audio_mutex, portMAX_DELAY);
     bruce_result_t result = s_file_open ? BRUCE_OK : BRUCE_ERR_INVALID_STATE;
-    if (result == BRUCE_OK && s_file_format == AUDIO__FILE_FORMAT_MP3) {
-        result = BRUCE_ERR_UNSUPPORTED;
-    } else if (result == BRUCE_OK) {
+    if (result == BRUCE_OK) {
         s_file_seek_target_ms = position_ms;
         s_file_seek_requested = true;
     }
@@ -1568,7 +1710,9 @@ uint32_t audio__file_position_ms(void) {
     audio__ensure_mutex();
     xSemaphoreTake(s_audio_mutex, portMAX_DELAY);
     uint32_t ms = 0;
-    if (s_file_open && s_file_wav.sample_rate > 0) {
+    if (s_file_open && s_file_format == AUDIO__FILE_FORMAT_MP3) {
+        ms = s_mp3_position_ms;
+    } else if (s_file_open && s_file_wav.sample_rate > 0) {
         uint32_t frame_bytes = (uint32_t)s_file_wav.channels * ((uint32_t)s_file_wav.bits_per_sample / 8u);
         uint32_t frames = s_file_wav.data_position / frame_bytes;
         ms = (uint32_t)(((uint64_t)frames * 1000u) / s_file_wav.sample_rate);
@@ -1581,7 +1725,9 @@ uint32_t audio__file_duration_ms(void) {
     audio__ensure_mutex();
     xSemaphoreTake(s_audio_mutex, portMAX_DELAY);
     uint32_t ms = 0;
-    if (s_file_open && s_file_wav.sample_rate > 0) {
+    if (s_file_open && s_file_format == AUDIO__FILE_FORMAT_MP3) {
+        ms = s_mp3_duration_ms;
+    } else if (s_file_open && s_file_wav.sample_rate > 0) {
         uint32_t frame_bytes = (uint32_t)s_file_wav.channels * ((uint32_t)s_file_wav.bits_per_sample / 8u);
         uint32_t frames = s_file_wav.data_size / frame_bytes;
         ms = (uint32_t)(((uint64_t)frames * 1000u) / s_file_wav.sample_rate);

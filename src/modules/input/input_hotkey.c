@@ -165,20 +165,26 @@ static bool input_hotkey__command_requests_background(const char *command) {
     }
 }
 
-#define INPUT_HOTKEY__EMIT_PREFIX "emit "
+#define INPUT_HOTKEY__BIND_PREFIX "bind "
 
-/* Handles an "emit <NAME>" action. Returns true iff `action` was in that
- * form (regardless of whether NAME was recognized), so the caller never
- * falls through to treat it as an AppRunner command. */
-static bool input_hotkey__run_emit(const char *action) {
-    if (strncmp(action, INPUT_HOTKEY__EMIT_PREFIX, strlen(INPUT_HOTKEY__EMIT_PREFIX)) != 0) return false;
-
-    const char *name = action + strlen(INPUT_HOTKEY__EMIT_PREFIX);
+bool input_hotkey__resolve_bind(const char *action, int32_t *out_code) {
+    if (action == NULL || strncmp(action, INPUT_HOTKEY__BIND_PREFIX, strlen(INPUT_HOTKEY__BIND_PREFIX)) != 0) {
+        return false;
+    }
+    const char *name = action + strlen(INPUT_HOTKEY__BIND_PREFIX);
     while (isspace((unsigned char)*name)) name++;
+    return input_hotkey__code_for_name(name, out_code);
+}
+
+/* Fires an immediate press+release pulse of a "bind <NAME>" action's target. */
+static bool input_hotkey__run_bind(const char *action) {
+    if (strncmp(action, INPUT_HOTKEY__BIND_PREFIX, strlen(INPUT_HOTKEY__BIND_PREFIX)) != 0) return false;
 
     int32_t code;
-    if (!input_hotkey__code_for_name(name, &code)) {
-        ESP_LOGW(TAG, "hotkey remap '%s' has unknown target '%s'", action, name);
+    if (!input_hotkey__resolve_bind(action, &code)) {
+        const char *name = action + strlen(INPUT_HOTKEY__BIND_PREFIX);
+        while (isspace((unsigned char)*name)) name++;
+        ESP_LOGW(TAG, "hotkey bind '%s' has unknown target '%s'", action, name);
         return true;
     }
     input__emit(BRUCE_INPUT_BUTTON, BRUCE_INPUT_PRESS, code, 1);
@@ -189,7 +195,7 @@ static bool input_hotkey__run_emit(const char *action) {
 void input_hotkey__run_action(const char *action) {
     if (action == NULL || action[0] == '\0') return;
 
-    if (input_hotkey__run_emit(action)) return;
+    if (input_hotkey__run_bind(action)) return;
 
     if (strcmp(action, "process switch next") == 0 || strcmp(action, "task switch next") == 0) {
         (void)process__switch_next();

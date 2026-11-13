@@ -5,6 +5,7 @@
 #include "input_buttons.h"
 #include "input_common.h"
 #include "input_encoder.h"
+#include "input_hotkey.h"
 #include "input_keyboard.h"
 #if CONFIG_BRUCE_TOUCH_ENABLED
 #include "input_touch.h"
@@ -15,8 +16,11 @@
 #include "core_sdk/runtime.h"
 #include "core_sdk/stdio.h"
 
+#include "esp_log.h"
 #include "freertos/FreeRTOS.h" // IWYU pragma: keep
 #include "sdkconfig.h"
+
+#define TAG "bruce_input"
 
 #ifndef INPUT__POLL_PERIOD_MS
 #ifdef CONFIG_BRUCE_INPUT_POLL_PERIOD_MS
@@ -35,6 +39,9 @@ void input__emit(bruce_input_type_t type, bruce_input_action_t action, int32_t c
         .code = code,
         .value = type == BRUCE_INPUT_KEY && value == 0 ? code : value,
     };
+    /* Debug aid: remove once done. */
+    ESP_LOGW(TAG, "emit %s %s", action == BRUCE_INPUT_PRESS ? "PRESS" : "RELEASE",
+             input_hotkey__name_for_code(code) ? input_hotkey__name_for_code(code) : "?");
     (void)input__inject(&event);
 }
 

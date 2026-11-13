@@ -140,7 +140,7 @@ static const bruce_app_descriptor_t s_default_apps[] = {
 
     /* Shell - terminals, shells, and command frontends. */
     {"serial_commands",      "Run the terminal command service",                          "Shell",   serial_commands_app_main,     3072 },
-    {"shell",                "Run the command shell",                                     "Shell",   shell_app_main,               0    },
+    {"shell",                "Run the command shell",                                     "Shell",   shell_app_main,               8192 },
     {"stty",                 "Configure terminal settings",                               "Shell",   bnu_stty_app_main,            0    },
     {"terminal",             "Open a terminal",                                           "Shell",   terminal_app_main,            0    },
 
@@ -154,7 +154,7 @@ static const bruce_app_descriptor_t s_default_apps[] = {
     {"image",                "View image files",                                          "Content", image_app_main,               8192 },
     {"less",                 "Page through text",                                         "Content", bnu_less_app_main,            0    },
     {"md5sum",               "Print MD5 checksums",                                       "Content", bnu_md5sum_app_main,          0    },
-    {"player",               "Play .wav/.mp3 audio files",                                "Content", player_app_main,              8192 },
+    {"player",               "Play .wav/.mp3 audio files",                                "Content", player_app_main,              0    },
     {"rev",                  "Reverse the characters of each line",                       "Content", bnu_rev_app_main,             0    },
     {"sed",                  "Edit text with a stream editor script",                     "Content", bnu_sed_app_main,             0    },
     {"seq",                  "Print a sequence of numbers",                               "Content", bnu_seq_app_main,             0    },

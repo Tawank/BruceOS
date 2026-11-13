@@ -1221,9 +1221,9 @@ runs an instant binding for the same key if configured. Only one instant and one
 can usefully target the same key or chord per config; the first configured
 instant binding and the first configured hold binding each win. Besides an AppRunner command line, a button
 hotkey's action may be
-`emit <NAME>`, which rebinds it to inject a press+release of a different
-semantic code instead of launching anything -- e.g. `"BTN_C": "emit
-NEXT"` preserves BTN_C and emits the independent `NEXT` semantic code. Setters
+`bind <NAME>`, which rebinds the physical button to a different semantic
+code instead of launching anything -- e.g. `"BTN_C": "bind NEXT"` reports a
+BTN_C press/release as a `NEXT` press/release instead. Setters
 validate and atomically persist immediately. The following
 values are permanently protected from ELF and JS, even with `config`:
 `wifiAp.ssid`, `wifiAp.pwd`, `webUI.pwd`, `wifiCredentials`, `wifiMAC`, and

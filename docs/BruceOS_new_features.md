@@ -110,9 +110,9 @@ BruceOS stores its main system settings in `bruce.conf`:
     "ctrl + tab": "process preview",
     "ctrl + space": "launcher",
     "500ms BTN_A": "GUI=1 OVERLAY=1 menu",
-    "BTN_A": "emit PREV",
-    "BTN_B": "emit SELECT",
-    "BTN_C": "emit NEXT"
+    "BTN_A": "bind PREV",
+    "BTN_B": "bind SELECT",
+    "BTN_C": "bind NEXT"
   },
   "led": {
     ...

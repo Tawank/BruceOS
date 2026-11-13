@@ -195,9 +195,12 @@ CONFIG_BRUCE_SD_PIN_CS=39
 # Buttons: this board's only physical input besides the encoder's own turn
 # motion is the encoder's center press (legacy ENCODER_KEY/SEL_BTN), mapped
 # to BUTTON_A. Unlike the CC1101 variant there is no separate back button
-# (no BK_BTN on this board).
-CONFIG_BRUCE_BUTTON_A_ENABLED=y
-CONFIG_BRUCE_BUTTON_A_GPIO=0
+# (no BK_BTN on this board). BRUCE_BUTTON_SELECT_ENABLED defaults to y on
+# its own GPIO0 (Kconfig.projbuild), which without this override would
+# double up with BUTTON_A on the same pin.
+CONFIG_BRUCE_BUTTON_SELECT_ENABLED=y
+CONFIG_BRUCE_BUTTON_SELECT_GPIO=0
+# CONFIG_BRUCE_BUTTON_A_ENABLED is not set
 # CONFIG_BRUCE_BUTTON_B_ENABLED is not set
 # CONFIG_BRUCE_BUTTON_C_ENABLED is not set
 

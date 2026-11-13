@@ -114,9 +114,16 @@ bruce_result_t audio__stream_close(void);
  * through a small fixed-size RAM ring instead (refilled from storage by
  * this process's own task), so supported file size isn't bounded by RAM --
  * unlike, say, loading the whole file into RAM up front would be, which
- * matters on the boards this targets that have no PSRAM at all. seek()
- * returns BRUCE_ERR_UNSUPPORTED and position_ms()/duration_ms() return 0
- * for MP3 (position/duration tracking isn't implemented for it).
+ * matters on the boards this targets that have no PSRAM at all.
+ *
+ * position_ms()/duration_ms() and seek() all work for MP3 too, but only as
+ * estimates: there's no frame index here, so they assume a constant bitrate
+ * across the whole file (true for the overwhelming majority of MP3s, off by
+ * some amount for VBR ones) derived from the decoder's own reported bitrate,
+ * which also means all three read as 0/no-op for the first instant of
+ * playback before the decoder has reported it. A seek restarts MP3 decoding
+ * from scratch at the estimated byte offset (the library has no seek API of
+ * its own), so it's slower than a WAV seek and briefly interrupts output.
  *
  * This call itself never waits for the file to actually open -- that still
  * happens in the background process, same as decoding. audio__file_is_open()
@@ -152,8 +159,8 @@ bruce_result_t audio__file_resume(void);
  * Takes effect the next time audio__file_play()'s own loop polls for it --
  * not necessarily instantaneous. A position past the end of the file clamps
  * to the end (audio__file_play() then finishes as if playback reached it
- * normally). Returns BRUCE_ERR_UNSUPPORTED for a currently-playing MP3 (see
- * audio__file_play()).
+ * normally). For MP3 this is an estimate and restarts decoding from scratch
+ * (see audio__file_play()).
  *
  * @param position_ms Target position, in milliseconds from the start.
  * @permission none

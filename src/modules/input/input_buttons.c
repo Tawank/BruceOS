@@ -45,28 +45,25 @@
 #if INPUT__HAS_BUTTON_A || INPUT__HAS_BUTTON_B || INPUT__HAS_BUTTON_C || INPUT__HAS_BUTTON_D ||              \
     INPUT__HAS_BUTTON_0
 
-/* Per-button state.
- *
- * hold_pending/hold_ms/hold_action support the "<N>s <BTN_NAME>" hotkey
- * syntax (see input_hotkey.h): a button with such a binding configured
- * defers its normal press event until the outcome is known -- either the
- * hold threshold is reached (the hotkey action runs instead) or the button
- * is released early (the raw tap and any instant hotkey action run). Buttons
- * with no hold binding are unaffected and behave exactly as before, with
- * zero added latency. Instant command hotkeys consume their press+release
- * pair, while `emit` rebindings preserve the raw pair and add their
- * configured semantic pair. */
+/* hold_pending/hold_ms/hold_action: "<N>s <BTN_NAME>" hotkey syntax. */
 typedef struct {
     int pin;
     int32_t code;
     bool active_low;
     bool last_stable;
-    uint64_t last_event_ms;
+    /* Confirm-then-commit debounce: a reading opposite last_stable must
+     * read the same way for a full INPUT__DEBOUNCE_MS before it commits. */
+    bool pending;
+    bool pending_level;
+    uint64_t pending_since_ms;
     uint64_t press_start_ms;
     bool hold_pending;
     uint32_t hold_ms;
     bool hold_fired;
     bool hotkey_consumed;
+    /* Set when this press matched a "bind <NAME>" instead of a command. */
+    bool bind_active;
+    int32_t bind_code;
     char hold_action[BRUCE_CONFIG_HOTKEY_ACTION_MAX_LEN + 1];
     char instant_action[BRUCE_CONFIG_HOTKEY_ACTION_MAX_LEN + 1];
 } input__button_t;
@@ -110,9 +107,13 @@ void input_buttons__poll(void) {
         bool pressed = btn->active_low ? raw : !raw;
 
         if (pressed != btn->last_stable) {
-            if (now - btn->last_event_ms >= INPUT__DEBOUNCE_MS) {
+            if (!btn->pending || btn->pending_level != pressed) {
+                btn->pending = true;
+                btn->pending_level = pressed;
+                btn->pending_since_ms = now;
+            } else if (now - btn->pending_since_ms >= INPUT__DEBOUNCE_MS) {
+                btn->pending = false;
                 btn->last_stable = pressed;
-                btn->last_event_ms = now;
 
                 if (pressed) {
                     btn->press_start_ms = now;
@@ -136,44 +137,53 @@ void input_buttons__poll(void) {
                                                               );
 
                     if (hold_matched) {
-                        /* Hold hotkey: defer the press until we know whether
-                         * this becomes a hold or a quick tap. */
                         btn->hold_pending = true;
                         btn->hold_ms = hold_ms;
                         snprintf(btn->hold_action, sizeof(btn->hold_action), "%s", hold_action);
                     } else {
                         btn->hold_pending = false;
-                        if (instant_matched) {
-                            bool rebind = strncmp(btn->instant_action, "emit ", 5) == 0;
-                            if (rebind) {
-                                input__emit(BRUCE_INPUT_BUTTON, BRUCE_INPUT_PRESS, btn->code, 1);
-                            }
+                        btn->bind_active = instant_matched &&
+                                            input_hotkey__resolve_bind(btn->instant_action, &btn->bind_code);
+                        if (btn->bind_active) {
+                            input__emit(BRUCE_INPUT_BUTTON, BRUCE_INPUT_PRESS, btn->bind_code, 1);
+                        } else if (instant_matched) {
                             input_hotkey__run_action(btn->instant_action);
-                            btn->hotkey_consumed = !rebind;
+                            btn->hotkey_consumed = true;
                         } else {
                             input__emit(BRUCE_INPUT_BUTTON, BRUCE_INPUT_PRESS, btn->code, 1);
                         }
                     }
                 } else if (btn->hold_pending) {
                     if (!btn->hold_fired) {
-                        /* Released before the hold threshold: emit the raw
-                         * tap, then run its instant action if configured. */
-                        input__emit(BRUCE_INPUT_BUTTON, BRUCE_INPUT_PRESS, btn->code, 1);
-                        input__emit(BRUCE_INPUT_BUTTON, BRUCE_INPUT_RELEASE, btn->code, 0);
-                        if (btn->instant_action[0] != '\0') input_hotkey__run_action(btn->instant_action);
+                        int32_t bind_code;
+                        if (btn->instant_action[0] != '\0' &&
+                            input_hotkey__resolve_bind(btn->instant_action, &bind_code)) {
+                            input__emit(BRUCE_INPUT_BUTTON, BRUCE_INPUT_PRESS, bind_code, 1);
+                            input__emit(BRUCE_INPUT_BUTTON, BRUCE_INPUT_RELEASE, bind_code, 0);
+                        } else {
+                            input__emit(BRUCE_INPUT_BUTTON, BRUCE_INPUT_PRESS, btn->code, 1);
+                            input__emit(BRUCE_INPUT_BUTTON, BRUCE_INPUT_RELEASE, btn->code, 0);
+                            if (btn->instant_action[0] != '\0') input_hotkey__run_action(btn->instant_action);
+                        }
                     }
                     btn->hold_pending = false;
                     btn->instant_action[0] = '\0';
+                } else if (btn->bind_active) {
+                    input__emit(BRUCE_INPUT_BUTTON, BRUCE_INPUT_RELEASE, btn->bind_code, 0);
+                    btn->bind_active = false;
                 } else if (btn->hotkey_consumed) {
                     btn->hotkey_consumed = false;
                 } else {
                     input__emit(BRUCE_INPUT_BUTTON, BRUCE_INPUT_RELEASE, btn->code, 0);
                 }
             }
-        } else if (btn->last_stable && btn->hold_pending && !btn->hold_fired &&
-                   now - btn->press_start_ms >= btn->hold_ms) {
-            btn->hold_fired = true;
-            input_hotkey__run_action(btn->hold_action);
+        } else {
+            btn->pending = false;
+            if (btn->last_stable && btn->hold_pending && !btn->hold_fired &&
+                now - btn->press_start_ms >= btn->hold_ms) {
+                btn->hold_fired = true;
+                input_hotkey__run_action(btn->hold_action);
+            }
         }
     }
 }

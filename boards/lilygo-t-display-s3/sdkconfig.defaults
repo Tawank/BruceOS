@@ -53,13 +53,6 @@ CONFIG_BRUCE_DISPLAY_GAP_Y_ROTATION3=35
 # backend that doesn't apply.
 CONFIG_BRUCE_AUDIO_BACKEND_NONE=y
 
-# Battery: GPIO15 must be driven high at boot to enable the battery-sense
-# path (legacy PIN_POWER_ON) - see BRUCE_POWER_HOLD_GPIO's help text.
-# ANALOG_BAT_PIN (GPIO4) is ESP32-S3 ADC1 channel 3.
-CONFIG_BRUCE_POWER_HOLD_GPIO=15
-CONFIG_BRUCE_BATTERY_ENABLED=y
-CONFIG_BRUCE_BATTERY_ADC_CHANNEL=3
-
 # SD card: its own SPI host (does not share with the display, which is on
 # the parallel bus here, not SPI).
 CONFIG_BRUCE_SD_ENABLED=y
@@ -78,6 +71,13 @@ CONFIG_BRUCE_BUTTON_A_GPIO=0
 CONFIG_BRUCE_BUTTON_B_ENABLED=y
 CONFIG_BRUCE_BUTTON_B_GPIO=14
 # CONFIG_BRUCE_BUTTON_C_ENABLED is not set
+
+# Battery: GPIO15 must be driven high at boot to enable the battery-sense
+# path (legacy PIN_POWER_ON) - see BRUCE_POWER_HOLD_GPIO's help text.
+# ANALOG_BAT_PIN (GPIO4) is ESP32-S3 ADC1 channel 3.
+CONFIG_BRUCE_POWER_HOLD_GPIO=15
+CONFIG_BRUCE_BATTERY_ENABLED=y
+CONFIG_BRUCE_BATTERY_ADC_CHANNEL=3
 
 # No GPIO matrix keyboard on this board.
 # CONFIG_BRUCE_KEYBOARD_ENABLED is not set
