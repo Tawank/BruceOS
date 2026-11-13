@@ -7,6 +7,7 @@
 
 #include "core_sdk/app_runner.h"
 #include "core_sdk/dialog.h"
+#include "core_sdk/display.h"
 #include "core_sdk/environment.h"
 #include "core_sdk/ext_mem_loader.h"
 #include "core_sdk/filetype.h"
@@ -266,7 +267,7 @@ bruce_result_t filemanager__view_file(const char *path, bool gui) {
     for (;;) {
         bruce_input_event_t event;
         result = input__read(&event, 100);
-        if (result == BRUCE_ERR_NOT_FOREGROUND && filemanager__resume_after_handoff()) {
+        if (result == BRUCE_ERR_NOT_FOREGROUND && display__await_redraw()) {
             /* Whatever painted over the screen while backgrounded isn't
              * restored automatically on switching back (see
              * image_loader_app.c's identical fix) -- dialog__viewer_scroll()

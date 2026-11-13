@@ -98,7 +98,7 @@ typedef struct {
      * before its first frame (see dialog__gui_choice()'s doc comment on why
      * that flush exists). Set this for exactly one re-issued call of the
      * *same* list after a caller detects it lost and regained foreground
-     * mid-dialog (see e.g. filemanager__resume_after_handoff()) and is
+     * mid-dialog (see e.g. display__await_redraw()) and is
      * redrawing rather than treating that as Back/Esc - otherwise a
      * follow-up key that arrived during the interruption (e.g. the system
      * menu's "Esc" button injecting a Back press once it backgrounds

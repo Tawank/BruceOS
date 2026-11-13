@@ -262,7 +262,7 @@ bool selftest__run_image_stdin_pipe_case(void) {
  * only tells the viewer it lost and regained the screen -- whatever painted
  * over it while backgrounded isn't restored automatically (see process.h's
  * bruce_process_snapshot_t.blocked_on_wait doc comment), so
- * image_viewer__resume_after_handoff() returning true has to be followed by
+ * display__await_redraw() returning true has to be followed by
  * an actual redraw (image_viewer__present_bitmap()), not a bare retry of the
  * input wait.
  *
@@ -319,7 +319,7 @@ bool selftest__run_image_redraw_on_regain_case(void) {
          * current state at call time rather than an edge-triggered
          * notification of the transition. Handing the foreground back
          * before that first call lands would mean it never observes having
-         * been backgrounded at all -- resume_after_handoff() and the redraw
+         * been backgrounded at all -- display__await_redraw() and the redraw
          * it triggers would never run, and this check would pass for the
          * wrong reason (the fixture just never got overwritten in the first
          * place, not because the fix redrew it). */

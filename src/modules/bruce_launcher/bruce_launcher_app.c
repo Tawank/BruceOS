@@ -1014,13 +1014,6 @@ static int bruce_launcher__flatten_menu(
     return count;
 }
 
-/* Forward declaration: a dialog__choice_search_launcher() call can lose (and
- * this process later regain) foreground the same way dialog__choice_launcher()
- * does -- see the doc comment on the definition below -- and the palette
- * tells that apart from a genuine Back the same way bruce_launcher__run_gui_menu()
- * does for a submenu. */
-static bool bruce_launcher__resume_after_handoff(void);
-
 /* Opens a live-filtering search over every command the launcher knows about,
  * seeded with `first_char` (the printable keypress that triggered it -- see
  * the root menu's input loop below). The search box, list, scrolling and
@@ -1066,7 +1059,7 @@ static void bruce_launcher__run_command_palette(const bruce_launcher_menu_t *roo
         result = dialog__choice_search_launcher(
             NULL, "Find: ", choices, (size_t)item_count, query, sizeof(query), &selected
         );
-        if (result == BRUCE_ERR_CANCELLED && bruce_launcher__resume_after_handoff()) {
+        if (result == BRUCE_ERR_CANCELLED && display__await_redraw()) {
             /* Foreground was lost (alt-tab, system_menu, ...) and has now
              * returned: reopen the search with whatever the user had already
              * typed, instead of treating the handoff as the user backing all
@@ -1087,26 +1080,6 @@ static void bruce_launcher__run_command_palette(const bruce_launcher_menu_t *roo
 /* -------------------------------------------------------------------------- */
 /* GUI menu runner                                                            */
 /* -------------------------------------------------------------------------- */
-
-/* A dialog__choice_launcher() call losing (and this process later regaining)
- * foreground - e.g. the process switcher, or system_menu's overlay taking it
- * while its own dialog is open - surfaces as BRUCE_ERR_CANCELLED same as a
- * genuine Back/Esc (see core/dialog/dialog.c); this tells them apart the same
- * way archive_app.c/filemanager_app.c's identical helper does, so a real
- * handoff redraws the same submenu instead of being treated as the user
- * stepping back a level. */
-static bool bruce_launcher__resume_after_handoff(void) {
-    bruce_process_snapshot_t snapshot;
-    bruce_process_id_t self = process__current_id();
-    if (self == BRUCE_PROCESS_ID_INVALID || process__snapshot(self, &snapshot) != BRUCE_OK ||
-        snapshot.state != BRUCE_PROCESS_BACKGROUND) {
-        return false;
-    }
-    do {
-        if (runtime__delay(20) != BRUCE_OK || process__snapshot(self, &snapshot) != BRUCE_OK) return false;
-    } while (snapshot.state == BRUCE_PROCESS_BACKGROUND);
-    return snapshot.state == BRUCE_PROCESS_FOREGROUND;
-}
 
 /* The root is a horizontal carousel. Nested menus use Core's choice renderer
  * inside the launcher's status bar and outer border. */
@@ -1133,7 +1106,7 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
         size_t depth = 0;
         const bruce_launcher_menu_t *current = menu;
         /* Persists across a spurious-cancel redraw of the same `current` (see
-         * the BRUCE_ERR_CANCELLED/resume_after_handoff branch below) instead
+         * the BRUCE_ERR_CANCELLED/display__await_redraw() branch below) instead
          * of snapping back to row 0 every time; reset to 0 wherever `current`
          * itself actually changes. */
         size_t selected = 0;
@@ -1160,7 +1133,7 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
             submenu_params.skip_initial_flush = false; /* one-shot: only meant for the call just made */
             s_live_choices.count = 0;
             if (result == BRUCE_ERR_CANCELLED) {
-                if (bruce_launcher__resume_after_handoff()) {
+                if (display__await_redraw()) {
                     /* Foreground was lost (alt-tab, system_menu, ...) and has
                      * now returned: redraw the same menu with the same row
                      * still highlighted (dialog__choice_launcher_ex() reports
@@ -1280,7 +1253,7 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
              * regains foreground. Invalidate the cached selection so that
              * frame repaints the whole launcher, not only the status bar. */
             last_drawn = -1;
-            (void)runtime__sleep(BRUCE_LAUNCHER_BACKGROUND_WAIT_MS);
+            if (!display__await_redraw()) (void)runtime__delay(20);
             continue;
         }
         if (result != BRUCE_OK || ev.action != BRUCE_INPUT_PRESS) { continue; }

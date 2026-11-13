@@ -15,15 +15,6 @@
 
 #include "core_sdk/result.h"
 
-/* True if the calling process was foregrounded again after being sent to
- * the background (e.g. by a hotkey) and is blocking on that; waits for the
- * transition back to BRUCE_PROCESS_FOREGROUND. False if it was never
- * backgrounded, so the caller's own input__read()/dialog__choice() error
- * handling should run instead. Used by both filemanager_app.c's main loop
- * and filemanager__view_file()'s own input loop, each time a read comes
- * back BRUCE_ERR_NOT_FOREGROUND / BRUCE_ERR_CANCELLED. */
-bool filemanager__resume_after_handoff(void);
-
 /* Waits for a foreground child to exit or be sent to the background (minimized/switched away). */
 bruce_result_t filemanager__wait_child(int process);
 

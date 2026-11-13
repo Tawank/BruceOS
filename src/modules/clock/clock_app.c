@@ -19,19 +19,6 @@
 #define CLOCK_APP__MENU_HINT_MS 5000u
 
 
-static bool clock_app__resume_after_handoff(void) {
-    bruce_process_snapshot_t snapshot;
-    bruce_process_id_t self = process__current_id();
-    if (self == BRUCE_PROCESS_ID_INVALID || process__snapshot(self, &snapshot) != BRUCE_OK ||
-        snapshot.state != BRUCE_PROCESS_BACKGROUND) {
-        return false;
-    }
-    do {
-        if (runtime__delay(20) != BRUCE_OK || process__snapshot(self, &snapshot) != BRUCE_OK) return false;
-    } while (snapshot.state == BRUCE_PROCESS_BACKGROUND);
-    return snapshot.state == BRUCE_PROCESS_FOREGROUND;
-}
-
 static void clock_app__play_alert_tone(void) {
     for (int i = 0; i < 3; ++i) {
         (void)audio__tone(1500, 150, false);
@@ -127,7 +114,7 @@ static int clock_app__show(bool gui) {
         result = input__wait(200, &code);
         if (result == BRUCE_OK && code == BRUCE_INPUT_CODE_BACK) return BRUCE_OK;
         if (result == BRUCE_OK && code == BRUCE_INPUT_CODE_SELECT) return CLOCK_APP_OPEN_MENU;
-        if (result == BRUCE_ERR_NOT_FOREGROUND && clock_app__resume_after_handoff()) {
+        if (result == BRUCE_ERR_NOT_FOREGROUND && display__await_redraw()) {
             /* Whatever painted over the screen while backgrounded isn't
              * restored automatically on switching back (see
              * image_loader_app.c's identical fix), but the draw above only
@@ -209,7 +196,7 @@ static int clock_app__timer(const char *argument, bool gui) {
                 (void)process__to_background();
                 continue;
             }
-            if (result == BRUCE_ERR_NOT_FOREGROUND && clock_app__resume_after_handoff()) {
+            if (result == BRUCE_ERR_NOT_FOREGROUND && display__await_redraw()) {
                 /* Same stale-redraw fix as clock_app__show() above: the draw
                  * only runs when remaining actually changed, so reset
                  * last_remaining to guarantee this regain forces one. */
@@ -283,7 +270,7 @@ static int clock_app__alarm(const char *argument, bool gui) {
                 (void)process__to_background();
                 continue;
             }
-            if (result == BRUCE_ERR_NOT_FOREGROUND && clock_app__resume_after_handoff()) {
+            if (result == BRUCE_ERR_NOT_FOREGROUND && display__await_redraw()) {
                 /* Same stale-redraw fix as clock_app__show() above: the draw
                  * only runs when now.second actually changed, so reset
                  * last_second to guarantee this regain forces one. */
@@ -318,7 +305,7 @@ static int clock_app__gui(void) {
 
         size_t selected = 0;
         bruce_result_t choice_result = dialog__choice("Clock", NULL, choices, 4, &selected);
-        if (choice_result == BRUCE_ERR_CANCELLED && clock_app__resume_after_handoff()) {
+        if (choice_result == BRUCE_ERR_CANCELLED && display__await_redraw()) {
             (void)input__flush();
             continue;
         }

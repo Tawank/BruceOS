@@ -930,6 +930,7 @@ int terminal_app_main(int argc, char **argv) {
         bruce_result_t input_result = input__read(&event, TERMINAL__INPUT_TIMEOUT_MS);
         if (input_result == BRUCE_ERR_NOT_FOREGROUND) {
             (void)runtime__delay(TERMINAL__HIDDEN_DELAY_MS);
+            if (display__viewport_changed()) state.dirty = true;
             was_backgrounded = true;
             continue;
         }

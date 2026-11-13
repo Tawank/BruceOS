@@ -7,6 +7,7 @@
 #include "core_sdk/config.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/process.h"
+#include "core_sdk/runtime.h"
 #include "display_driver.h"
 #include "display_internal.h"
 #include "esp_attr.h"
@@ -1303,6 +1304,30 @@ bruce_result_t display__present(void) {
     return result;
 }
 
+bool display__viewport_changed(void) {
+    bruce_process_id_t caller = process__current_id();
+    display__lock();
+    display__process_context_t *context = display__find_context_locked(caller);
+    bool changed =
+        context != NULL && !context->hidden && context->viewport_generation != context->frame_generation;
+    display__unlock();
+    return changed;
+}
+
+bool display__await_redraw(void) {
+    bruce_process_snapshot_t snapshot;
+    bruce_process_id_t self = process__current_id();
+    if (self == BRUCE_PROCESS_ID_INVALID || process__snapshot(self, &snapshot) != BRUCE_OK ||
+        snapshot.state != BRUCE_PROCESS_BACKGROUND) {
+        return false;
+    }
+    do {
+        if (runtime__delay(20) != BRUCE_OK || process__snapshot(self, &snapshot) != BRUCE_OK) return false;
+        if (snapshot.state == BRUCE_PROCESS_BACKGROUND && display__viewport_changed()) return true;
+    } while (snapshot.state == BRUCE_PROCESS_BACKGROUND);
+    return snapshot.state == BRUCE_PROCESS_FOREGROUND;
+}
+
 bruce_result_t display__flush(void) {
     bruce_process_id_t caller = process__current_id();
     display__lock();
@@ -1314,6 +1339,18 @@ bruce_result_t display__flush(void) {
         if (result != BRUCE_OK) return result;
     }
     return display__present();
+}
+
+/* A tiled app may be mid-frame; its frame turns into a no-op and its next one sees the new viewport. */
+static void display__untile_all_locked(void) {
+    for (int i = 0; i < DISPLAY__MAX_CONTEXTS; ++i) {
+        display__process_context_t *context = &s_contexts[i];
+        if (!context->in_use || !context->tiled) continue;
+        context->tiled = false;
+        if (context->frame_active) context->frame_noop = true;
+        display__set_visibility_locked(context);
+    }
+    s_dashboard_layout = false;
 }
 
 bruce_result_t display__set_tiles(const bruce_display_tile_t *tiles, size_t count) {
@@ -1354,24 +1391,9 @@ bruce_result_t display__set_tiles(const bruce_display_tile_t *tiles, size_t coun
             }
         }
     }
-    for (int i = 0; i < DISPLAY__MAX_CONTEXTS; ++i) {
-        if (s_contexts[i].in_use && s_contexts[i].frame_active && s_contexts[i].tiled) {
-            display__unlock();
-            return BRUCE_ERR_BUSY;
-        }
-    }
+    display__untile_all_locked();
     for (size_t i = 0; i < count; ++i) {
-        if (targets[i]->frame_active) {
-            display__unlock();
-            return BRUCE_ERR_BUSY;
-        }
-    }
-    for (int i = 0; i < DISPLAY__MAX_CONTEXTS; ++i) {
-        if (!s_contexts[i].in_use) continue;
-        s_contexts[i].tiled = false;
-        display__set_visibility_locked(&s_contexts[i]);
-    }
-    for (size_t i = 0; i < count; ++i) {
+        if (targets[i]->frame_active) targets[i]->frame_noop = true;
         if (targets[i]->lock != NULL) xSemaphoreTake(targets[i]->lock, portMAX_DELAY);
         targets[i]->tiled = true;
         targets[i]->viewport = tiles[i].rect;
@@ -1427,9 +1449,9 @@ void display__process_state_changed(bruce_process_id_t process_id, bruce_process
     display__lock();
     display__process_context_t *context = display__find_context_locked(process_id);
     if (context != NULL) {
-        if (context->gui_requested && state == BRUCE_PROCESS_FOREGROUND &&
-            context->state != BRUCE_PROCESS_FOREGROUND) {
-            context->clear_on_next_frame = true;
+        if (state == BRUCE_PROCESS_FOREGROUND && context->state != BRUCE_PROCESS_FOREGROUND) {
+            if (context->gui_requested) context->clear_on_next_frame = true;
+            display__untile_all_locked();
         }
         context->state = state;
         if (state != BRUCE_PROCESS_FOREGROUND && context->frame_active && !context->tiled)

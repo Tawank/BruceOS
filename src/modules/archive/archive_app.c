@@ -312,25 +312,6 @@ static void archive_app__show_error(const char *action, bruce_result_t result) {
     (void)dialog__message(BRUCE_DIALOG_ERROR, "Archive", message);
 }
 
-/* A dialog__choice_ex()/dialog__text_input() call losing (and this process
- * later regaining) foreground - e.g. the launcher's own switcher, or a
- * child process this app spawned via "Open" taking it - surfaces as
- * BRUCE_ERR_CANCELLED same as a genuine Back/Esc; this tells them apart the
- * same way filemanager_app.c's identical helper does, so a real handoff
- * redraws instead of being treated as the user backing out. */
-static bool archive_app__resume_after_handoff(void) {
-    bruce_process_snapshot_t snapshot;
-    bruce_process_id_t self = process__current_id();
-    if (self == BRUCE_PROCESS_ID_INVALID || process__snapshot(self, &snapshot) != BRUCE_OK ||
-        snapshot.state != BRUCE_PROCESS_BACKGROUND) {
-        return false;
-    }
-    do {
-        if (runtime__delay(20) != BRUCE_OK || process__snapshot(self, &snapshot) != BRUCE_OK) return false;
-    } while (snapshot.state == BRUCE_PROCESS_BACKGROUND);
-    return snapshot.state == BRUCE_PROCESS_FOREGROUND;
-}
-
 /* ------------------------------------------------------------------------ */
 /* "View": read one entry into memory and show it, nothing written to disk  */
 /* ------------------------------------------------------------------------ */
@@ -345,7 +326,7 @@ static bruce_result_t archive_app__run_viewer(bruce_viewer_id_t viewer) {
     for (;;) {
         bruce_input_event_t event;
         bruce_result_t result = input__read(&event, 100);
-        if (result == BRUCE_ERR_NOT_FOREGROUND && archive_app__resume_after_handoff()) {
+        if (result == BRUCE_ERR_NOT_FOREGROUND && display__await_redraw()) {
             /* Whatever painted over the screen while backgrounded isn't
              * restored automatically on switching back (see
              * image_loader_app.c's identical fix) -- dialog__viewer_scroll()
@@ -532,7 +513,7 @@ static bruce_result_t archive_app__folder_menu(
     bruce_result_t result;
     do {
         result = dialog__choice(label, NULL, choices, sizeof(choices) / sizeof(choices[0]), &selected);
-    } while (result == BRUCE_ERR_CANCELLED && archive_app__resume_after_handoff());
+    } while (result == BRUCE_ERR_CANCELLED && display__await_redraw());
     if (result != BRUCE_OK) return result;
 
     const char *action = choices[selected].value;
@@ -553,7 +534,7 @@ archive_app__file_menu(const char *archive_path, bool zip, bool gui, const char 
     bruce_result_t result;
     do {
         result = dialog__choice(label, NULL, choices, sizeof(choices) / sizeof(choices[0]), &selected);
-    } while (result == BRUCE_ERR_CANCELLED && archive_app__resume_after_handoff());
+    } while (result == BRUCE_ERR_CANCELLED && display__await_redraw());
     if (result != BRUCE_OK) return result;
 
     const char *action = choices[selected].value;
@@ -669,7 +650,7 @@ int archive_app_main(int argc, char **argv) {
         memory__free(choices);
         memory__free(right_texts);
 
-        if (result == BRUCE_ERR_CANCELLED && archive_app__resume_after_handoff()) {
+        if (result == BRUCE_ERR_CANCELLED && display__await_redraw()) {
             memory__free(children);
             (void)input__flush();
             continue;

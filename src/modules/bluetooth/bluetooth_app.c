@@ -5,6 +5,7 @@
 #include "args.h"
 #include "core_sdk/bluetooth.h"
 #include "core_sdk/dialog.h"
+#include "core_sdk/display.h"
 #include "core_sdk/input.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/process.h"
@@ -17,25 +18,12 @@
 #define BLUETOOTH_APP__SCAN_MS 5000u
 #define BLUETOOTH_APP__SCAN_POLL_INTERVAL_MS 100u
 
-static bool bluetooth_app__resume_after_handoff(void) {
-    bruce_process_snapshot_t snapshot;
-    bruce_process_id_t self = process__current_id();
-    if (self == BRUCE_PROCESS_ID_INVALID || process__snapshot(self, &snapshot) != BRUCE_OK ||
-        snapshot.state != BRUCE_PROCESS_BACKGROUND) {
-        return false;
-    }
-    do {
-        if (runtime__delay(20) != BRUCE_OK || process__snapshot(self, &snapshot) != BRUCE_OK) return false;
-    } while (snapshot.state == BRUCE_PROCESS_BACKGROUND);
-    return snapshot.state == BRUCE_PROCESS_FOREGROUND;
-}
-
 static bruce_result_t
 bluetooth_app__message(bruce_dialog_kind_t type, const char *title, const char *message) {
     bruce_result_t result;
     do {
         result = dialog__message(type, title, message);
-    } while (result == BRUCE_ERR_CANCELLED && bluetooth_app__resume_after_handoff());
+    } while (result == BRUCE_ERR_CANCELLED && display__await_redraw());
     return result;
 }
 
@@ -126,7 +114,7 @@ static int bluetooth_app__gui_scan(bluetooth__device_t *devices, size_t capacity
             &selected,
             &complete
         );
-        if (dialog_result == BRUCE_ERR_CANCELLED && scan.active && bluetooth_app__resume_after_handoff()) {
+        if (dialog_result == BRUCE_ERR_CANCELLED && scan.active && display__await_redraw()) {
             (void)input__flush();
             continue;
         }
@@ -170,7 +158,7 @@ static int bluetooth_app__scan_gui(void) {
                     sizeof(choices) / sizeof(choices[0]),
                     &selected
                 );
-            } while (choice_result == BRUCE_ERR_CANCELLED && bluetooth_app__resume_after_handoff());
+            } while (choice_result == BRUCE_ERR_CANCELLED && display__await_redraw());
             if (choice_result == BRUCE_OK && selected == 0) continue;
             break;
         }
@@ -206,7 +194,7 @@ static int bluetooth_app__scan_gui(void) {
                 choice_result = dialog__choice_launcher(
                     "BLE Advertisements", NULL, choices, (size_t)count + 2u, &selected
                 );
-            } while (choice_result == BRUCE_ERR_CANCELLED && bluetooth_app__resume_after_handoff());
+            } while (choice_result == BRUCE_ERR_CANCELLED && display__await_redraw());
             if (choice_result != BRUCE_OK || selected == (size_t)count + 1u) break;
             if (selected == (size_t)count) {
                 rescan = true;

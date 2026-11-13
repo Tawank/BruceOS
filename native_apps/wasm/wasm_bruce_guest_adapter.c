@@ -99,6 +99,8 @@ bool runtime__is_gui_requested(void) { return wasm_import__runtime_gui_requested
 BRUCE_WASM_IMPORT("process__current_id") extern uint32_t wasm_import__process_current_id(void);
 BRUCE_WASM_IMPORT("process__current_signal") extern int32_t wasm_import__process_current_signal(void);
 BRUCE_WASM_IMPORT("process__is_background") extern int32_t wasm_import__process_is_background(void);
+BRUCE_WASM_IMPORT("display__viewport_changed") extern int32_t wasm_import__display_viewport_changed(void);
+BRUCE_WASM_IMPORT("display__await_redraw") extern int32_t wasm_import__display_await_redraw(void);
 BRUCE_WASM_IMPORT("process__switch_next") extern int32_t wasm_import__process_switch_next(void);
 BRUCE_WASM_IMPORT("process__switch_previous") extern int32_t wasm_import__process_switch_previous(void);
 BRUCE_WASM_IMPORT("process__to_background") extern int32_t wasm_import__process_to_background(void);
@@ -118,6 +120,10 @@ bruce_process_signal_t process__current_signal(void) {
 }
 
 bool process__is_background(void) { return wasm_import__process_is_background() != 0; }
+
+bool display__viewport_changed(void) { return wasm_import__display_viewport_changed() != 0; }
+
+bool display__await_redraw(void) { return wasm_import__display_await_redraw() != 0; }
 
 bruce_result_t process__switch_next(void) { return (bruce_result_t)wasm_import__process_switch_next(); }
 

@@ -28,24 +28,6 @@ static bool image_viewer__is_gif(const char *path) {
     return extension != NULL && strcasecmp(extension, ".gif") == 0;
 }
 
-/* input__read() surfaces BRUCE_ERR_NOT_FOREGROUND when another process takes
- * over the screen (e.g. alt-tab, or system_menu's overlay); wait here until
- * we're either back in the foreground or the process is gone for good, so
- * that's told apart from a genuine "close the viewer" press. Same pattern as
- * archive_app.c/filemanager_app.c's identical helper. */
-static bool image_viewer__resume_after_handoff(void) {
-    bruce_process_snapshot_t snapshot;
-    bruce_process_id_t self = process__current_id();
-    if (self == BRUCE_PROCESS_ID_INVALID || process__snapshot(self, &snapshot) != BRUCE_OK ||
-        snapshot.state != BRUCE_PROCESS_BACKGROUND) {
-        return false;
-    }
-    do {
-        if (runtime__delay(20) != BRUCE_OK || process__snapshot(self, &snapshot) != BRUCE_OK) return false;
-    } while (snapshot.state == BRUCE_PROCESS_BACKGROUND);
-    return snapshot.state == BRUCE_PROCESS_FOREGROUND;
-}
-
 /* Mirrors bnu_pager_app.c's less__load_stdin(): reads exactly `size` bytes
  * (the shell already knows this count -- see shell_executor__pipe_write()'s
  * STDIN_SIZE environment-variable convention, read via environment__get()
@@ -111,7 +93,7 @@ static bruce_result_t image_viewer__draw_gif(const char *path, const bruce_image
         bruce_input_event_t event;
         bruce_result_t input_result = input__read(&event, delay_ms == 0 ? 100 : delay_ms);
         if (input_result == BRUCE_ERR_NOT_FOREGROUND) {
-            if (image_viewer__resume_after_handoff()) continue;
+            if (display__await_redraw()) continue;
             break;
         }
         if (input_result == BRUCE_OK && event.action == BRUCE_INPUT_PRESS) break;
@@ -241,7 +223,7 @@ int image_app_main(int argc, char **argv) {
             bruce_input_event_t event;
             bruce_result_t input_result = input__read(&event, 100);
             if (input_result == BRUCE_ERR_NOT_FOREGROUND) {
-                if (image_viewer__resume_after_handoff()) {
+                if (display__await_redraw()) {
                     (void)image_viewer__present_bitmap(&bitmap, &options);
                     continue;
                 }

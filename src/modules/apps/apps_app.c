@@ -10,6 +10,7 @@
 #include "args.h"
 #include "core_sdk/app_runner.h"
 #include "core_sdk/dialog.h"
+#include "core_sdk/display.h"
 #include "core_sdk/ext_mem_loader.h"
 #include "core_sdk/input.h"
 #include "core_sdk/launcher.h"
@@ -41,19 +42,6 @@ static bool apps__has_extension(const char *name, const char *extension) {
     size_t extension_length = strlen(extension);
     return name_length > extension_length &&
            strcasecmp(name + name_length - extension_length, extension) == 0;
-}
-
-static bool apps__resume_after_handoff(void) {
-    bruce_process_snapshot_t snapshot;
-    bruce_process_id_t self = process__current_id();
-    if (self == BRUCE_PROCESS_ID_INVALID || process__snapshot(self, &snapshot) != BRUCE_OK ||
-        snapshot.state != BRUCE_PROCESS_BACKGROUND) {
-        return false;
-    }
-    do {
-        if (runtime__delay(20) != BRUCE_OK || process__snapshot(self, &snapshot) != BRUCE_OK) return false;
-    } while (snapshot.state == BRUCE_PROCESS_BACKGROUND);
-    return snapshot.state == BRUCE_PROCESS_FOREGROUND;
 }
 
 static size_t apps__directory_count(const char *path) {
@@ -245,7 +233,7 @@ int apps_app_main(int argc, char **argv) {
         size_t selected = 0;
         long_press = false;
         result = dialog__choice_ex("Apps", NULL, choices, count, &selected, &list_params);
-        if (result == BRUCE_ERR_CANCELLED && apps__resume_after_handoff()) continue;
+        if (result == BRUCE_ERR_CANCELLED && display__await_redraw()) continue;
         if (result == BRUCE_ERR_CANCELLED) break;
         if (result != BRUCE_OK) {
             apps__show_error("Browse", result);

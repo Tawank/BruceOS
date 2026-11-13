@@ -95,6 +95,16 @@ static int32_t wasm_process__is_background(wasm_exec_env_t exec_env) {
     return process__is_background() ? 1 : 0;
 }
 
+static int32_t wasm_display__viewport_changed(wasm_exec_env_t exec_env) {
+    (void)exec_env;
+    return display__viewport_changed() ? 1 : 0;
+}
+
+static int32_t wasm_display__await_redraw(wasm_exec_env_t exec_env) {
+    (void)exec_env;
+    return display__await_redraw() ? 1 : 0;
+}
+
 #define WASM_NO_ARG_RESULT_WRAPPER(wrapper, function)                                                        \
     static int32_t wrapper(wasm_exec_env_t exec_env) {                                                       \
         (void)exec_env;                                                                                      \
@@ -576,6 +586,8 @@ static NativeSymbol s_native_symbols[] = {
     BRUCE_WASM_NATIVE("display__draw_centre_string", wasm_display__draw_centre_string, "(iii)i"),
     BRUCE_WASM_NATIVE("display__get_font_metrics", wasm_display__get_font_metrics, "(ii)i"),
     BRUCE_WASM_NATIVE("display__present", wasm_display__present, "()i"),
+    BRUCE_WASM_NATIVE("display__viewport_changed", wasm_display__viewport_changed, "()i"),
+    BRUCE_WASM_NATIVE("display__await_redraw", wasm_display__await_redraw, "()i"),
     BRUCE_WASM_NATIVE("clock__get_local", wasm_clock__get_local, "(i)i"),
     BRUCE_WASM_NATIVE("process__snapshot", wasm_process__snapshot, "(ii)i"),
     BRUCE_WASM_NATIVE("input__flush", wasm_input__flush, "()i"),

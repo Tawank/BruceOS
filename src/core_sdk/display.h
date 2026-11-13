@@ -581,6 +581,18 @@ bruce_result_t display__begin_frame(void);
  */
 bruce_result_t display__present(void);
 
+/** @brief True when the caller's visible viewport moved or reappeared since its last frame. */
+bool display__viewport_changed(void);
+
+/**
+ * @brief Blocks while the caller is in the background.
+ *
+ * Returns true when the caller should redraw: it is foreground again, or its
+ * background viewport changed (e.g. it was tiled into the process preview).
+ * Returns false when the caller is not in the background.
+ */
+bool display__await_redraw(void);
+
 /**
  * @brief Built-in launcher layout operation. Not exported to external runtimes.
  *

@@ -49,23 +49,6 @@ static int dialog__compare_file_picker_entries(const void *left, const void *rig
     return strcasecmp(left_entry->name, right_entry->name);
 }
 
-/* True if the picker's choice dialog was cancelled because the process lost
- * (and has now regained) foreground - e.g. the user alt-tabbed away and
- * back - rather than a genuine Back/Esc press. Blocks until foreground
- * returns so the caller can redraw the same listing instead of unwinding. */
-static bool dialog__pick_file_resume_after_handoff(void) {
-    bruce_process_snapshot_t snapshot;
-    bruce_process_id_t self = process__current_id();
-    if (self == BRUCE_PROCESS_ID_INVALID || process__snapshot(self, &snapshot) != BRUCE_OK ||
-        snapshot.state != BRUCE_PROCESS_BACKGROUND) {
-        return false;
-    }
-    do {
-        if (runtime__delay(20) != BRUCE_OK || process__snapshot(self, &snapshot) != BRUCE_OK) return false;
-    } while (snapshot.state == BRUCE_PROCESS_BACKGROUND);
-    return snapshot.state == BRUCE_PROCESS_FOREGROUND;
-}
-
 /* Strips the last path component in place, e.g. "/a/b" -> "/a", "/a" -> "/". */
 static void dialog__pick_file_go_up(char *current_path) {
     char *last_slash = strrchr(current_path, '/');
@@ -372,7 +355,7 @@ static bruce_result_t dialog__gui_pick_file_run(
 
         const char *picked = values[out_selected];
         /* Remembered so a spurious cancel from briefly losing foreground
-         * (dialog__pick_file_resume_after_handoff() below) can redraw this
+         * (display__await_redraw() below) can redraw this
          * same listing with the same row still selected instead of
          * resetting to the top - overwritten below by the more specific
          * up-navigation/descend cases when those actually apply. */
@@ -390,7 +373,7 @@ static bruce_result_t dialog__gui_pick_file_run(
              * a follow-up key already queued (e.g. the system menu's
              * injected Back press for its "Esc" button) survives into that
              * redraw instead of being silently discarded. */
-            if (dialog__pick_file_resume_after_handoff()) {
+            if (display__await_redraw()) {
                 effective_params->skip_initial_flush = true;
                 continue;
             }

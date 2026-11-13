@@ -2402,6 +2402,8 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(display__buffer_footprint),
     ESP_ELFSYM_EXPORT(display__begin_frame),
     ESP_ELFSYM_EXPORT(display__present),
+    ESP_ELFSYM_EXPORT(display__viewport_changed),
+    ESP_ELFSYM_EXPORT(display__await_redraw),
     ESP_ELFSYM_EXPORT(display__screen_width),
     ESP_ELFSYM_EXPORT(display__screen_height),
 

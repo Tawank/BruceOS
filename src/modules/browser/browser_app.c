@@ -14,6 +14,7 @@
 #include "browser_page.h"
 #include "browser_render.h"
 #include "core_sdk/dialog.h"
+#include "core_sdk/display.h"
 #include "core_sdk/input.h"
 #include "core_sdk/notification.h"
 #include "core_sdk/clipboard.h"
@@ -90,23 +91,6 @@ static void browser_app__jump_to_item(browser_app_state_t *state, int item_index
     state->view.selected_link = -1;
     state->view.selected_image = -1;
     state->view.row_y = -1;
-}
-
-/* Mirrors modules/filemanager's own pattern: input__read() surfaces
- * BRUCE_ERR_NOT_FOREGROUND when another process takes over the screen (e.g. a
- * permission prompt); wait here until we're either back in the foreground or
- * the process is gone for good. */
-static bool browser_app__resume_after_handoff(void) {
-    bruce_process_snapshot_t snapshot;
-    bruce_process_id_t self = process__current_id();
-    if (self == BRUCE_PROCESS_ID_INVALID || process__snapshot(self, &snapshot) != BRUCE_OK ||
-        snapshot.state != BRUCE_PROCESS_BACKGROUND) {
-        return false;
-    }
-    do {
-        if (runtime__delay(20) != BRUCE_OK || process__snapshot(self, &snapshot) != BRUCE_OK) return false;
-    } while (snapshot.state == BRUCE_PROCESS_BACKGROUND);
-    return snapshot.state == BRUCE_PROCESS_FOREGROUND;
 }
 
 static void browser_app__navigate(browser_app_state_t *state, const char *raw_url, bool push_history) {
@@ -553,7 +537,7 @@ int browser_app_main(int argc, char **argv) {
         bruce_input_event_t event;
         bruce_result_t read_result = input__read(&event, UINT32_MAX);
         if (read_result == BRUCE_ERR_NOT_FOREGROUND) {
-            if (browser_app__resume_after_handoff()) {
+            if (display__await_redraw()) {
                 /* No input__flush() here (unlike the startup one above): a
                  * process that just handed focus back to us - e.g. the
                  * system menu's "Esc" item - may have injected an event (a

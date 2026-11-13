@@ -28,6 +28,7 @@ SUPPORTED_BRUCE_SDK_SIGNATURES = {
         "config__get_color_text", "config__get_color_text_muted", "config__get_color_border",
         "config__get_color_success", "config__get_color_warning", "config__get_color_error",
         "display__width", "display__height", "display__begin_frame", "display__present",
+        "display__viewport_changed", "display__await_redraw",
         "input__flush",
     )},
     **{name: FunctionType((I32,), (I32,)) for name in (

@@ -7,6 +7,7 @@
 
 #include "core_sdk/app_runner.h"
 #include "core_sdk/dialog.h"
+#include "core_sdk/display.h"
 #include "core_sdk/environment.h"
 #include "core_sdk/ext_mem_loader.h"
 #include "core_sdk/filetype.h"
@@ -31,19 +32,6 @@
  * filemanager_actions.c, Copy/Paste in filemanager_clipboard.c, and the
  * "/Network" folder feature in filemanager_network.c -- this file just wires
  * them together behind the action menus below. */
-
-bool filemanager__resume_after_handoff(void) {
-    bruce_process_snapshot_t snapshot;
-    bruce_process_id_t self = process__current_id();
-    if (self == BRUCE_PROCESS_ID_INVALID || process__snapshot(self, &snapshot) != BRUCE_OK ||
-        snapshot.state != BRUCE_PROCESS_BACKGROUND) {
-        return false;
-    }
-    do {
-        if (runtime__delay(20) != BRUCE_OK || process__snapshot(self, &snapshot) != BRUCE_OK) return false;
-    } while (snapshot.state == BRUCE_PROCESS_BACKGROUND);
-    return snapshot.state == BRUCE_PROCESS_FOREGROUND;
-}
 
 bruce_result_t filemanager__wait_child(int process) {
     if (process <= 0) return (bruce_result_t)process;
@@ -241,7 +229,7 @@ int filemanager_app_main(int argc, char **argv) {
         char path[BRUCE_STORAGE_PATH_MAX];
         bruce_result_t result =
             dialog__pick_file_ex(last_path, NULL, path, sizeof(path), "Filemanager", &action_params);
-        if (result == BRUCE_ERR_CANCELLED && filemanager__resume_after_handoff()) {
+        if (result == BRUCE_ERR_CANCELLED && display__await_redraw()) {
             (void)input__flush();
             continue;
         }
@@ -306,7 +294,7 @@ int filemanager_app_main(int argc, char **argv) {
             : is_folder ? sizeof(folder_actions) / sizeof(folder_actions[0])
                         : file_actions_count;
         result = dialog__choice(path, NULL, menu, menu_count, &selected);
-        if (result == BRUCE_ERR_CANCELLED && filemanager__resume_after_handoff()) {
+        if (result == BRUCE_ERR_CANCELLED && display__await_redraw()) {
             (void)input__flush();
             continue;
         }
