@@ -33,6 +33,8 @@ typedef uint32_t bruce_ssh_id_t;
 typedef uint32_t bruce_pubsub_id_t;
 
 #define BRUCE_PROCESS_ID_INVALID ((bruce_process_id_t)0)
+/* Most processes alive at once; starting another fails with BRUCE_ERR_RESOURCE_LIMIT. */
+#define BRUCE_PROCESS_MAX 32
 #define BRUCE_RESOURCE_ID_INVALID ((bruce_resource_id_t)0)
 #define BRUCE_FILE_ID_INVALID ((bruce_file_id_t)0)
 #define BRUCE_VIEWER_ID_INVALID ((bruce_viewer_id_t)0)

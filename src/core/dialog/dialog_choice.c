@@ -52,26 +52,6 @@ void dialog__set_window_renderer(const bruce_dialog_window_renderer_t *renderer,
     s_window_renderer_set = true;
 }
 
-/* Blocks until the SELECT press dialog__gui_choice() just consumed either
- * releases or has been held DIALOG__LONG_PRESS_MS, whichever comes first -
- * distinguishing a long press from a plain tap for a long_press_enabled
- * caller. `press_started_at` and the checks below both use runtime__now();
- * input event timestamps use the FreeRTOS tick epoch and cannot safely be
- * compared with runtime__now()'s ESP timer epoch. Only reached when a caller
- * opts in, so every existing dialog__choice()/_ex() caller keeps returning
- * on the raw PRESS exactly as before this existed. */
-static bool dialog__gui_wait_long_press(uint64_t press_started_at) {
-    for (;;) {
-        if (runtime__now() - press_started_at >= DIALOG__LONG_PRESS_MS) { return true; }
-        bruce_input_event_t ev;
-        bruce_result_t result = input__read(&ev, 20);
-        if (result == BRUCE_ERR_NOT_FOREGROUND) { return false; }
-        if (result == BRUCE_OK && ev.action == BRUCE_INPUT_RELEASE && ev.code == BRUCE_INPUT_CODE_SELECT) {
-            return false;
-        }
-    }
-}
-
 /* -------------------------------------------------------------------------- */
 /* Row label rendering                                                        */
 /* -------------------------------------------------------------------------- */
@@ -504,7 +484,7 @@ bruce_result_t dialog__gui_choice(
                 break;
             case BRUCE_INPUT_CODE_SELECT:
                 if (long_press_enabled) {
-                    bool is_long_press = dialog__gui_wait_long_press(runtime__now());
+                    bool is_long_press = input__wait_long_press(&ev, DIALOG__LONG_PRESS_MS);
                     if (render_params->out_long_press != NULL) { *render_params->out_long_press = is_long_press; }
                 }
                 *out_selected = (size_t)selected;

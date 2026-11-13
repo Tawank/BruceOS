@@ -4,7 +4,6 @@
 #include "core/event_loop/event_loop.h"
 #include "core/memory/memory.h"
 #include "core/stdio/stdio.h"
-#include "core_sdk/display.h"
 #include "core_sdk/permission.h"
 #include "core_sdk/process.h"
 
@@ -571,6 +570,15 @@ static void process__trampoline(void *arg) {
     vTaskSuspend(NULL);
 }
 
+/* Caller must hold the lock. */
+static size_t process__live_count_locked(void) {
+    size_t count = 0;
+    for (process__record_t *record = s_processes; record != NULL; record = record->next) {
+        if (record->in_use) count++;
+    }
+    return count;
+}
+
 bruce_result_t
 process_registry__create(const process_create_params_t *params, bruce_process_id_t *out_process_id) {
     process__ensure_init();
@@ -586,6 +594,11 @@ process_registry__create(const process_create_params_t *params, bruce_process_id
     if (!process__dup_argv(params->argc, params->argv, &argv_copy)) { return BRUCE_ERR_NO_MEMORY; }
 
     process__lock();
+    if (process__live_count_locked() >= BRUCE_PROCESS_MAX) {
+        process__unlock();
+        process__free_argv(params->argc, argv_copy);
+        return BRUCE_ERR_RESOURCE_LIMIT;
+    }
     process__record_t *record = calloc(1, sizeof(*record));
     if (record == NULL) {
         process__unlock();

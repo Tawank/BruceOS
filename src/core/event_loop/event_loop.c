@@ -181,6 +181,21 @@ bruce_result_t input__wait(uint32_t timeout_ms, int32_t *out_code) {
     }
 }
 
+bool input__wait_long_press(const bruce_input_event_t *press, uint32_t long_ms) {
+    if (press == NULL) { return false; }
+    uint64_t long_at = press->timestamp_ms + long_ms;
+    for (;;) {
+        if (event_loop__now_ms() >= long_at) { return true; }
+        bruce_input_event_t event;
+        bruce_result_t result = input__read(&event, 20);
+        if (result == BRUCE_ERR_TIMEOUT) { continue; }
+        if (result != BRUCE_OK) { return false; }
+        if (event.action == BRUCE_INPUT_RELEASE && event.code == press->code) {
+            return event.timestamp_ms >= long_at;
+        }
+    }
+}
+
 bool input__check(int32_t code, bool consume) {
     bruce_process_id_t caller = process__current_id();
     event_loop__lock();

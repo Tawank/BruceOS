@@ -26,7 +26,7 @@
  * `free -m` already keeps on the heap, this is another ~1.7K that a stack
  * array would add on top of the caller's own frame, and this runs on that
  * process's own (small, default-sized) stack. */
-#define BNU_PROCESS_SNAPSHOT_MAX 16
+#define BNU_PROCESS_SNAPSHOT_MAX BRUCE_PROCESS_MAX
 
 #define BNU_MEMORY_LAYOUT_WIDTH 48
 

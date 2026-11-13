@@ -4,6 +4,7 @@
 
 #include "core_sdk/app_runner.h"
 #include "core_sdk/config.h"
+#include "core_sdk/memory.h"
 #include "core_sdk/process.h"
 #include "core_sdk/runtime.h"
 #include "core_sdk/stdio.h"
@@ -18,10 +19,9 @@ static bool launcher__has_arg(int argc, char **argv, const char *arg) {
     return false;
 }
 
-static bool launcher__has_foreground(void) {
-    bruce_process_snapshot_t processes[8];
+static bool launcher__has_foreground(bruce_process_snapshot_t *processes) {
     size_t count = 0;
-    if (process__list(processes, 8, &count) != BRUCE_OK) return true;
+    if (process__list(processes, BRUCE_PROCESS_MAX, &count) != BRUCE_OK) return true;
     for (size_t i = 0; i < count; ++i) {
         if (processes[i].state == BRUCE_PROCESS_FOREGROUND) return true;
     }
@@ -58,6 +58,30 @@ static int launcher__start(bool gui, bruce_launch_mode_t mode) {
     return launcher__run_target(gui, mode, NULL);
 }
 
+/* Keeps a launcher in the foreground whenever nothing else is. */
+static int launcher__supervise(bruce_process_snapshot_t *processes) {
+    bruce_process_id_t child = BRUCE_PROCESS_ID_INVALID;
+    if (runtime__delay(LAUNCHER__SUPERVISOR_INTERVAL_MS) != BRUCE_OK) return BRUCE_ERR_CANCELLED;
+    for (;;) {
+        if (child != BRUCE_PROCESS_ID_INVALID) {
+            bruce_result_t wait_result = process__wait(child, LAUNCHER__SUPERVISOR_INTERVAL_MS);
+            if (wait_result == BRUCE_ERR_TIMEOUT) continue;
+            child = BRUCE_PROCESS_ID_INVALID;
+            if (runtime__delay(LAUNCHER__SUPERVISOR_INTERVAL_MS) != BRUCE_OK) return BRUCE_ERR_CANCELLED;
+        }
+        if (launcher__has_foreground(processes)) {
+            if (runtime__delay(LAUNCHER__SUPERVISOR_INTERVAL_MS) != BRUCE_OK) return BRUCE_ERR_CANCELLED;
+            continue;
+        }
+        int result = launcher__start(true, BRUCE_LAUNCH_FOREGROUND);
+        if (result >= 0) child = (bruce_process_id_t)result;
+        else {
+            stdio__printf("Launcher failed to start with code %d\n", result);
+            if (runtime__delay(LAUNCHER__SUPERVISOR_INTERVAL_MS) != BRUCE_OK) return BRUCE_ERR_CANCELLED;
+        }
+    }
+}
+
 int launcher_app_main(int argc, char **argv) {
     if (launcher__has_arg(argc, argv, "--help") || launcher__has_arg(argc, argv, "-h")) {
         stdio__printf("Launches configured launcher.\nUsage: launcher [config|-s]\n");
@@ -80,24 +104,9 @@ int launcher_app_main(int argc, char **argv) {
         return result < 0 ? result : 0;
     }
 
-    bruce_process_id_t child = BRUCE_PROCESS_ID_INVALID;
-    if (runtime__delay(LAUNCHER__SUPERVISOR_INTERVAL_MS) != BRUCE_OK) return BRUCE_ERR_CANCELLED;
-    for (;;) {
-        if (child != BRUCE_PROCESS_ID_INVALID) {
-            bruce_result_t wait_result = process__wait(child, LAUNCHER__SUPERVISOR_INTERVAL_MS);
-            if (wait_result == BRUCE_ERR_TIMEOUT) continue;
-            child = BRUCE_PROCESS_ID_INVALID;
-            if (runtime__delay(LAUNCHER__SUPERVISOR_INTERVAL_MS) != BRUCE_OK) return BRUCE_ERR_CANCELLED;
-        }
-        if (launcher__has_foreground()) {
-            if (runtime__delay(LAUNCHER__SUPERVISOR_INTERVAL_MS) != BRUCE_OK) return BRUCE_ERR_CANCELLED;
-            continue;
-        }
-        int result = launcher__start(true, BRUCE_LAUNCH_FOREGROUND);
-        if (result >= 0) child = (bruce_process_id_t)result;
-        else {
-            stdio__printf("Launcher failed to start with code %d\n", result);
-            if (runtime__delay(LAUNCHER__SUPERVISOR_INTERVAL_MS) != BRUCE_OK) return BRUCE_ERR_CANCELLED;
-        }
-    }
+    bruce_process_snapshot_t *processes = memory__malloc(BRUCE_PROCESS_MAX * sizeof(*processes));
+    if (processes == NULL) return BRUCE_ERR_NO_MEMORY;
+    int result = launcher__supervise(processes);
+    memory__free(processes);
+    return result;
 }

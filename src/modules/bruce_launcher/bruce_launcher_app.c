@@ -17,7 +17,6 @@
 #include "core_sdk/ext_mem_loader.h"
 #include "core_sdk/input.h"
 #include "core_sdk/memory.h"
-#include "core_sdk/process.h"
 #include "core_sdk/result.h"
 #include "core_sdk/runtime.h"
 #include "core_sdk/status_icon.h"
@@ -29,7 +28,6 @@
 #define BRUCE_LAUNCHER_FONT_SMALL 1
 #define BRUCE_LAUNCHER_FONT_MEDIUM 2
 #define BRUCE_LAUNCHER_FONT_ADVANCE 6
-#define BRUCE_LAUNCHER_PROCESSES_APP "__processes"
 #define BRUCE_LAUNCHER_SLIDE_DURATION_MS 160
 #define BRUCE_LAUNCHER_EASING_SCALE 1000
 #define BRUCE_LAUNCHER_STATUS_REFRESH_MS 1000
@@ -745,154 +743,6 @@ static bruce_result_t bruce_launcher__animate_root_menu(
     }
 }
 
-static size_t bruce_launcher__process_candidates(bruce_process_snapshot_t *processes, size_t capacity) {
-    size_t count = 0;
-    size_t written = 0;
-    bruce_process_id_t self = process__current_id();
-    if (process__list(processes, capacity, &count) != BRUCE_OK) { return 0; }
-    for (size_t i = 0; i < count; ++i) {
-        if (processes[i].id != self && processes[i].presentable && !processes[i].blocked_on_wait &&
-            processes[i].state == BRUCE_PROCESS_BACKGROUND) {
-            if (written != i) processes[written] = processes[i];
-            written++;
-        }
-    }
-    return written;
-}
-
-static void bruce_launcher__process_layout(
-    const bruce_process_snapshot_t *processes, size_t count, int selected, bruce_display_tile_t *tiles,
-    const bruce_launcher_theme_t *theme
-) {
-    int w = display__width();
-    int h = display__height();
-    int top = BRUCE_LAUNCHER_STATUS_H + 2;
-    int cols = (count == 1 || (count == 2 && h > w)) ? 1 : 2;
-    int rows = (int)((count + (size_t)cols - 1) / (size_t)cols);
-    int cell_w = w / cols;
-    int cell_h = (h - top) / rows;
-
-    display__fill_screen(theme->bg);
-    display__set_text_size(1);
-    display__set_text_color(theme->pri);
-    display__set_text_bg_color(theme->bg);
-    display__set_cursor(4, 7);
-    display__print("Processes  arrows: move  select: open  back: exit");
-    display__draw_line(0, BRUCE_LAUNCHER_STATUS_H, w - 1, BRUCE_LAUNCHER_STATUS_H, theme->pri);
-
-    for (size_t i = 0; i < count; ++i) {
-        int col = (int)i % cols;
-        int row = (int)i / cols;
-        int cell_x = col * cell_w;
-        int cell_y = top + row * cell_h;
-        int right = col == cols - 1 ? w : cell_x + cell_w;
-        int bottom = row == rows - 1 ? h : cell_y + cell_h;
-        tiles[i].process_id = processes[i].id;
-        tiles[i].rect = (bruce_display_rect_t){
-            .x = cell_x + 3,
-            .y = cell_y + 12,
-            .width = right - cell_x - 6,
-            .height = bottom - cell_y - 15,
-        };
-        display__set_cursor(cell_x + 4, cell_y + 2);
-        display__print(processes[i].name);
-        display__draw_rect(
-            cell_x + 1,
-            cell_y + 10,
-            right - cell_x - 2,
-            bottom - cell_y - 11,
-            (int)i == selected ? theme->pri : theme->sec
-        );
-    }
-}
-
-static bruce_result_t bruce_launcher__draw_process_page(
-    const bruce_process_snapshot_t *processes, size_t count, int selected, const bruce_launcher_theme_t *theme
-) {
-    bruce_result_t result = display__set_tiles(NULL, 0);
-    if (result != BRUCE_OK) { return result; }
-    result = display__begin_frame();
-    if (result != BRUCE_OK) { return result; }
-    bruce_display_tile_t tiles[BRUCE_DISPLAY_MAX_TILES];
-    bruce_launcher__process_layout(processes, count, selected, tiles, theme);
-    result = display__present();
-    if (result != BRUCE_OK || count == 0) { return result; }
-    return display__set_tiles(tiles, count);
-}
-
-static int bruce_launcher__run_process_switcher(const bruce_launcher_theme_t *theme) {
-    const size_t candidate_capacity = 16;
-    bruce_process_snapshot_t *candidates =
-        (bruce_process_snapshot_t *)memory__calloc(candidate_capacity, sizeof(*candidates));
-    if (candidates == NULL) return BRUCE_ERR_NO_MEMORY;
-
-    size_t page = 0;
-    int selected = 0;
-    bool redraw = true;
-    for (;;) {
-        size_t total = bruce_launcher__process_candidates(candidates, candidate_capacity);
-        size_t pages = total == 0 ? 1 : (total + BRUCE_DISPLAY_MAX_TILES - 1) / BRUCE_DISPLAY_MAX_TILES;
-        if (page >= pages) page = pages - 1;
-        size_t start = page * BRUCE_DISPLAY_MAX_TILES;
-        size_t page_count = total > start ? total - start : 0;
-        if (page_count > BRUCE_DISPLAY_MAX_TILES) page_count = BRUCE_DISPLAY_MAX_TILES;
-        if (selected >= (int)page_count) selected = page_count > 0 ? (int)page_count - 1 : 0;
-
-        if (redraw) {
-            bruce_result_t draw =
-                bruce_launcher__draw_process_page(&candidates[start], page_count, selected, theme);
-            if (draw == BRUCE_ERR_BUSY) {
-                (void)runtime__delay(20);
-                continue;
-            }
-            redraw = false;
-        }
-
-        bruce_input_event_t event;
-        bruce_result_t input_result = input__read(&event, 100);
-        if (input_result == BRUCE_ERR_NOT_FOREGROUND) {
-            memory__free(candidates);
-            return 0;
-        }
-        if (input_result != BRUCE_OK || event.action != BRUCE_INPUT_PRESS) { continue; }
-        if (event.code == BRUCE_INPUT_CODE_BACK || event.code == BRUCE_INPUT_CODE_BUTTON_B) {
-            (void)display__set_tiles(NULL, 0);
-            memory__free(candidates);
-            return 0;
-        }
-        if ((event.code == BRUCE_INPUT_CODE_UP || event.code == BRUCE_INPUT_CODE_PREV ||
-             event.code == BRUCE_INPUT_CODE_LEFT) &&
-            selected > 0) {
-            selected--;
-            redraw = true;
-        } else if ((event.code == BRUCE_INPUT_CODE_DOWN || event.code == BRUCE_INPUT_CODE_NEXT ||
-                    event.code == BRUCE_INPUT_CODE_RIGHT) &&
-                   selected + 1 < (int)page_count) {
-            selected++;
-            redraw = true;
-        } else if (event.code == BRUCE_INPUT_CODE_LEFT && page > 0) {
-            page--;
-            selected = 0;
-            redraw = true;
-        } else if (event.code == BRUCE_INPUT_CODE_RIGHT && page + 1 < pages) {
-            page++;
-            selected = 0;
-            redraw = true;
-        } else if ((event.code == BRUCE_INPUT_CODE_SELECT || event.code == BRUCE_INPUT_CODE_BUTTON_A) &&
-                   page_count > 0) {
-            bruce_process_id_t target = candidates[start + (size_t)selected].id;
-            bruce_process_snapshot_t snapshot;
-            if (process__snapshot(target, &snapshot) == BRUCE_OK) {
-                (void)display__set_tiles(NULL, 0);
-                (void)process__foreground(target);
-                memory__free(candidates);
-                return 0;
-            }
-            redraw = true;
-        }
-    }
-}
-
 /* -------------------------------------------------------------------------- */
 /* Command dispatch                                                           */
 /* -------------------------------------------------------------------------- */
@@ -916,12 +766,6 @@ static bool bruce_launcher__command_sets(const char *command, const char *name) 
 }
 
 static int bruce_launcher__run_entry(const bruce_launcher_entry_t *entry) {
-    if (strcmp(entry->command, BRUCE_LAUNCHER_PROCESSES_APP) == 0) {
-        bruce_launcher_theme_t theme;
-        bruce_launcher__get_theme(&theme);
-        return bruce_launcher__run_process_switcher(&theme);
-    }
-
     /* Everything launched from the GUI menu is GUI=1 unless the entry opts out
      * explicitly, including "BG=1" entries: those run headless (they never take
      * the foreground, so the launcher stays on screen), but GUI=1 is what makes

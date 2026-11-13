@@ -594,7 +594,7 @@ bool display__viewport_changed(void);
 bool display__await_redraw(void);
 
 /**
- * @brief Built-in launcher layout operation. Not exported to external runtimes.
+ * @brief Tiles background apps for the process preview. Built-in only, not exported to external runtimes.
  *
  * @param tiles New tile layout (one rect per process).
  * @param count Number of entries in tiles.

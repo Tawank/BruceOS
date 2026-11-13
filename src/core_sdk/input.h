@@ -158,6 +158,15 @@ bruce_result_t input__peek(bruce_input_event_t *out_event);
 bruce_result_t input__wait(uint32_t timeout_ms, int32_t *out_code);
 
 /**
+ * @brief Waits for `press` to be released and reports whether it was held at least `long_ms`.
+ *
+ * Judged by event timestamps, so a press replayed on release (a key with timed
+ * binds) counts its real hold time. Returns true once held `long_ms` without a
+ * release, and false if the caller loses the foreground.
+ */
+bool input__wait_long_press(const bruce_input_event_t *press, uint32_t long_ms);
+
+/**
  * @brief Checks whether a press event for `code` is queued.
  *
  * If `consume` is true the first matching press event is removed from the

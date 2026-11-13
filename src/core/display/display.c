@@ -20,7 +20,7 @@
 #include "sdkconfig.h"
 
 #define TAG "bruce_display"
-#define DISPLAY__MAX_CONTEXTS 16
+#define DISPLAY__MAX_CONTEXTS BRUCE_PROCESS_MAX
 #define DISPLAY__MAX_RENDER_REQUESTS 8
 #define DISPLAY__ROW_BUF_PIXELS                                                                              \
     (DISPLAY__NATIVE_WIDTH > DISPLAY__NATIVE_HEIGHT ? DISPLAY__NATIVE_WIDTH : DISPLAY__NATIVE_HEIGHT)
@@ -71,6 +71,7 @@ static display__process_context_t s_contexts[DISPLAY__MAX_CONTEXTS];
 static display__process_context_t s_system_context;
 static SemaphoreHandle_t s_transfer_done;
 static bool s_dashboard_layout;
+static bruce_process_id_t s_tile_owner;
 /* display__request_render_mode(): each live entry is one process's standing
  * request for a rendering mode leaner than the default. The display's actual
  * mode (see display__apply_effective_render_mode_locked()) is always the
@@ -1225,6 +1226,26 @@ static void display__reclaim_restore(void) {
     display__unlock();
 }
 
+/* A tiled app may be mid-frame; its frame turns into a no-op and its next one sees the new viewport. */
+static void display__untile_all_locked(void) {
+    for (int i = 0; i < DISPLAY__MAX_CONTEXTS; ++i) {
+        display__process_context_t *context = &s_contexts[i];
+        if (!context->in_use || !context->tiled) continue;
+        context->tiled = false;
+        if (context->frame_active) context->frame_noop = true;
+        display__set_visibility_locked(context);
+    }
+    s_dashboard_layout = false;
+    s_tile_owner = BRUCE_PROCESS_ID_INVALID;
+}
+
+/* The tile owner draws only between the tiles, so its frame may run alongside theirs. */
+static bool display__frames_may_overlap_locked(
+    const display__process_context_t *a, const display__process_context_t *b
+) {
+    return (a->process_id == s_tile_owner && b->tiled) || (b->process_id == s_tile_owner && a->tiled);
+}
+
 bruce_result_t display__begin_frame(void) {
     bruce_process_id_t caller = process__current_id();
     process_registry__mark_presentable(caller);
@@ -1249,7 +1270,8 @@ bruce_result_t display__begin_frame(void) {
         for (int i = 0; i < DISPLAY__MAX_CONTEXTS; ++i) {
             display__process_context_t *other = &s_contexts[i];
             if (other != context && other->in_use && other->frame_active && !other->frame_noop &&
-                display__rects_overlap(context->viewport, other->viewport)) {
+                display__rects_overlap(context->viewport, other->viewport) &&
+                !display__frames_may_overlap_locked(context, other)) {
                 context->frame_active = false;
                 display__unlock();
                 return BRUCE_ERR_BUSY;
@@ -1341,18 +1363,6 @@ bruce_result_t display__flush(void) {
     return display__present();
 }
 
-/* A tiled app may be mid-frame; its frame turns into a no-op and its next one sees the new viewport. */
-static void display__untile_all_locked(void) {
-    for (int i = 0; i < DISPLAY__MAX_CONTEXTS; ++i) {
-        display__process_context_t *context = &s_contexts[i];
-        if (!context->in_use || !context->tiled) continue;
-        context->tiled = false;
-        if (context->frame_active) context->frame_noop = true;
-        display__set_visibility_locked(context);
-    }
-    s_dashboard_layout = false;
-}
-
 bruce_result_t display__set_tiles(const bruce_display_tile_t *tiles, size_t count) {
     bool built_in = false;
     if ((count > 0 && tiles == NULL) || count > BRUCE_DISPLAY_MAX_TILES ||
@@ -1411,6 +1421,7 @@ bruce_result_t display__set_tiles(const bruce_display_tile_t *tiles, size_t coun
         }
     }
     s_dashboard_layout = count > 0;
+    if (count > 0) s_tile_owner = caller;
     display__unlock();
     return BRUCE_OK;
 }
