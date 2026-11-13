@@ -404,16 +404,27 @@ static void text__render(const char *path, text_editor_t *editor) {
 static bruce_result_t text__edit_line(text_editor_t *editor) {
     size_t start = text__line_start(editor, editor->cursor);
     size_t end = text__line_end(editor, editor->cursor);
-    char line[TEXT_LINE_INPUT_MAX];
+    char current[TEXT_LINE_INPUT_MAX];
     size_t length = end - start;
-    if (length >= sizeof(line)) return BRUCE_ERR_RESOURCE_LIMIT;
-    memcpy(line, editor->data + start, length);
-    line[length] = '\0';
+    if (length >= sizeof(current)) return BRUCE_ERR_RESOURCE_LIMIT;
+    memcpy(current, editor->data + start, length);
+    current[length] = '\0';
 
+    char edited[TEXT_LINE_INPUT_MAX];
     bruce_result_t result =
-        dialog__text_input("Text editor", "Edit current line", line, false, line, sizeof(line));
+        dialog__text_input("Text editor", "Edit current line", current, false, edited, sizeof(edited));
     if (result != BRUCE_OK) return result;
-    return text__replace(editor, start, end, line, strlen(line));
+    return text__replace(editor, start, end, edited, strlen(edited));
+}
+
+static bruce_result_t text__delete_line(text_editor_t *editor) {
+    size_t start = text__line_start(editor, editor->cursor);
+    size_t end = text__line_end(editor, editor->cursor);
+    if (end < editor->length) end++;
+    else if (start > 0) start--;
+    bruce_result_t result = text__replace(editor, start, end, NULL, 0);
+    if (result == BRUCE_OK) editor->cursor = text__line_start(editor, editor->cursor);
+    return result;
 }
 
 static bruce_result_t text__show_error(const char *action, bruce_result_t result) {
@@ -464,36 +475,41 @@ static bruce_result_t text__exit_prompt(char *path, size_t path_size, text_edito
 }
 
 static bruce_result_t text__actions(char *path, size_t path_size, text_editor_t *editor, bool *out_exit) {
-    const bruce_dialog_choice_t choices[] = {
-        {.label = "Edit current line", .value = "edit"  },
-        {.label = "Copy",              .value = "copy"  },
-        {.label = "Paste",             .value = "paste" },
-        {.label = "Save",              .value = "save"  },
-        {.label = "Exit",              .value = "exit"  },
-        {.label = "Cancel",            .value = "cancel"},
-    };
+    bruce_dialog_choice_t choices[8];
+    size_t count = 0;
+    if (!editor->read_only) {
+        choices[count++] = (bruce_dialog_choice_t){.label = "Edit line", .value = "edit"};
+        choices[count++] = (bruce_dialog_choice_t){.label = "Delete line", .value = "delete"};
+    }
+    choices[count++] = (bruce_dialog_choice_t){.label = "Copy", .value = "copy"};
+    if (!editor->read_only) {
+        choices[count++] = (bruce_dialog_choice_t){.label = "Paste", .value = "paste"};
+        choices[count++] = (bruce_dialog_choice_t){.label = "Save", .value = "save"};
+    }
+    choices[count++] = (bruce_dialog_choice_t){.label = "Exit", .value = "exit"};
+    choices[count++] = (bruce_dialog_choice_t){.label = "Cancel", .value = "cancel"};
+
     size_t selected = 0;
     *out_exit = false;
     char title[BRUCE_STORAGE_PATH_MAX + 16u];
     snprintf(title, sizeof(title), "Text editor - %s", text__basename(path));
-    bruce_result_t result =
-        dialog__choice(title, NULL, choices, sizeof(choices) / sizeof(choices[0]), &selected);
+    bruce_result_t result = dialog__choice(title, NULL, choices, count, &selected);
     if (result == BRUCE_ERR_CANCELLED) return BRUCE_OK;
     if (result != BRUCE_OK) return result;
-    if (strcmp(choices[selected].value, "cancel") == 0) return BRUCE_OK;
-    if (strcmp(choices[selected].value, "edit") == 0) {
-        if (editor->read_only) return BRUCE_OK;
+    const char *action = choices[selected].value;
+    if (strcmp(action, "cancel") == 0) return BRUCE_OK;
+    if (strcmp(action, "edit") == 0) {
         result = text__edit_line(editor);
         return result == BRUCE_ERR_CANCELLED ? BRUCE_OK : result;
     }
-    if (strcmp(choices[selected].value, "copy") == 0) {
+    if (strcmp(action, "delete") == 0) return text__delete_line(editor);
+    if (strcmp(action, "copy") == 0) {
         editor->selection_anchor = editor->cursor;
         editor->selection_active = true;
         return BRUCE_OK;
     }
-    if (strcmp(choices[selected].value, "paste") == 0) return text__paste(editor);
-    if (strcmp(choices[selected].value, "save") == 0) {
-        if (editor->read_only) return BRUCE_OK;
+    if (strcmp(action, "paste") == 0) return text__paste(editor);
+    if (strcmp(action, "save") == 0) {
         result = text__save_to_path(path, path_size, editor);
         if (result == BRUCE_ERR_CANCELLED) return BRUCE_OK;
         if (result == BRUCE_OK) (void)dialog__message(BRUCE_DIALOG_SUCCESS, "Text editor", "File saved");
@@ -583,13 +599,8 @@ static bruce_result_t text__run_editor(char *path, size_t path_size, text_editor
                 result = text__replace(editor, editor->cursor, next, NULL, 0);
             }
         } else if (
-            !editor->selection_active && !editor->read_only && semantic &&
-            (event.code == BRUCE_INPUT_CODE_SELECT || event.code == BRUCE_INPUT_CODE_BUTTON_A)
-        ) {
-            result = text__edit_line(editor);
-            if (result == BRUCE_ERR_CANCELLED) result = BRUCE_OK;
-        } else if (
-            semantic && (event.code == BRUCE_INPUT_CODE_MENU || event.code == BRUCE_INPUT_CODE_BACK ||
+            semantic && (event.code == BRUCE_INPUT_CODE_SELECT || event.code == BRUCE_INPUT_CODE_BUTTON_A ||
+                         event.code == BRUCE_INPUT_CODE_MENU || event.code == BRUCE_INPUT_CODE_BACK ||
                          event.code == BRUCE_INPUT_CODE_BUTTON_B)
         ) {
             if (editor->selection_active) {
