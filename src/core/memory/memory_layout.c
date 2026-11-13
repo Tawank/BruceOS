@@ -23,6 +23,11 @@ typedef struct {
      * through to the DRAM default and misreport which region a block is
      * actually in. */
     bruce_memory_region_t forced_region;
+    /* Fetched once before the walk starts -- see
+     * memory_external__snapshot_ram_owners()'s doc comment for why the
+     * visitor can't take memory_external.c's lock itself mid-walk. */
+    memory_external__ram_owner_t ram_owners[MEMORY_EXTERNAL__MAX_OBJECTS];
+    size_t ram_owner_count;
 } memory_layout__walk_t;
 
 typedef struct {
@@ -82,6 +87,18 @@ static bool memory_layout__visit(
             item.requested_size = header->size;
             item.owner_id = header->owner_id;
             item.is_stack = header->is_stack;
+        }
+    }
+    /* Not a memory__malloc() block -- check the pre-fetched memory_external
+     * snapshot instead (those allocations carry no header of their own). */
+    if (!item.tracked && block.used) {
+        for (size_t i = 0; i < walk->ram_owner_count; ++i) {
+            if (walk->ram_owners[i].ptr == block.ptr) {
+                item.tracked = true;
+                item.requested_size = walk->ram_owners[i].size;
+                item.owner_id = walk->ram_owners[i].owner_id;
+                break;
+            }
         }
     }
     walk->blocks[index] = item;
@@ -154,6 +171,8 @@ bruce_result_t memory__get_layout(
         .capacity = capacity,
         .backend = backend,
     };
+    walk.ram_owner_count =
+        memory_external__snapshot_ram_owners(walk.ram_owners, MEMORY_EXTERNAL__MAX_OBJECTS);
     heap_caps_walk(caps, memory_layout__visit, &walk);
     if (backend == BRUCE_MEMORY_BACKEND_INTERNAL) {
         /* The RTC pool (memory_rtc.c) isn't a heap_caps region at all - fold

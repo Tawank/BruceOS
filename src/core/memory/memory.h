@@ -69,6 +69,19 @@ bruce_result_t memory_external__layout(
 bruce_result_t memory_external__read(uintptr_t offset, void *buffer, size_t size);
 bruce_result_t memory_external__readable_size(uintptr_t offset, size_t *out_size);
 
+#define MEMORY_EXTERNAL__MAX_OBJECTS 32u /* s_records[] size; callers use it to size a snapshot buffer. */
+
+typedef struct {
+    const void *ptr;
+    bruce_process_id_t owner_id;
+    size_t size;
+} memory_external__ram_owner_t;
+
+/* Snapshot of every PSRAM/internal memory_external allocation, for
+ * memory_layout.c to attribute a block with no memory__header_t of its
+ * own. `out` must hold at least MEMORY_EXTERNAL__MAX_OBJECTS entries. */
+size_t memory_external__snapshot_ram_owners(memory_external__ram_owner_t *out, size_t capacity);
+
 /*
  * Small first-fit suballocator over a static RTC-memory pool - see
  * memory_rtc.c for what backs it and why it exists outside esp_heap_caps.

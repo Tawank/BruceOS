@@ -20,3 +20,8 @@ uint64_t input__now_ms(void);
  * value defaults to code for BRUCE_INPUT_KEY events with value == 0, so
  * character-key callers can pass 0 and get a sane default. */
 void input__emit(bruce_input_type_t type, bruce_input_action_t action, int32_t code, int32_t value);
+
+/* Same as input__emit() but with an explicit timestamp; 0 means now. */
+void input__emit_at(
+    bruce_input_type_t type, bruce_input_action_t action, int32_t code, int32_t value, uint64_t timestamp_ms
+);

@@ -31,6 +31,17 @@
 #define PLAYER_APP__BAR_COUNT 12
 #define PLAYER_APP__BAR_WOBBLE_PERIOD_TICKS 20u /* ~20 * input__wait's 80ms poll below */
 
+/* The four controls PREV/NEXT cycle focus through; SELECT activates
+ * whichever is focused. Play/pause starts focused, so SELECT alone (no
+ * navigation at all) behaves exactly as before this existed. */
+typedef enum {
+    PLAYER_APP__BUTTON_PREV,
+    PLAYER_APP__BUTTON_PLAY_PAUSE,
+    PLAYER_APP__BUTTON_NEXT,
+    PLAYER_APP__BUTTON_MINIMIZE,
+    PLAYER_APP__BUTTON_COUNT,
+} player__button_t;
+
 static const uint16_t PLAYER_APP__BAR_COLORS[] = {
     BRUCE_COLOR_RED,    BRUCE_COLOR_ORANGE, BRUCE_COLOR_YELLOW, BRUCE_COLOR_GREEN,
     BRUCE_COLOR_CYAN,   BRUCE_COLOR_BLUE,   BRUCE_COLOR_MAGENTA, BRUCE_COLOR_PURPLE,
@@ -192,6 +203,29 @@ static void player__go_next(player__playlist_t *playlist, char *title, size_t ti
     if (player__play_track(playlist, title, title_size) == BRUCE_OK) *paused = false;
 }
 
+static void player__move_focus(int *focused, int delta) {
+    *focused = (*focused + delta + PLAYER_APP__BUTTON_COUNT) % PLAYER_APP__BUTTON_COUNT;
+}
+
+/* Runs whichever control is focused; sets *minimize true for the one that
+ * has no immediate effect of its own -- the caller exits on that, without
+ * stopping playback (unlike BACK). */
+static void player__activate_focused(
+    int focused, player__playlist_t *playlist, char *title, size_t title_size, bool *paused, bool *minimize
+) {
+    *minimize = false;
+    switch ((player__button_t)focused) {
+        case PLAYER_APP__BUTTON_PREV: player__go_prev(playlist, title, title_size, paused); break;
+        case PLAYER_APP__BUTTON_PLAY_PAUSE:
+            *paused = !*paused;
+            (void)(*paused ? audio__file_pause() : audio__file_resume());
+            break;
+        case PLAYER_APP__BUTTON_NEXT: player__go_next(playlist, title, title_size, paused); break;
+        case PLAYER_APP__BUTTON_MINIMIZE: *minimize = true; break;
+        default: break;
+    }
+}
+
 static void player__seek_backward(void) {
     uint32_t position = audio__file_position_ms();
     (void)audio__file_seek(position > PLAYER_APP__SEEK_STEP_MS ? position - PLAYER_APP__SEEK_STEP_MS : 0);
@@ -252,7 +286,13 @@ static void player__draw_skip_icon(int16_t cx, int16_t cy, int16_t half, bool ne
     }
 }
 
-static bruce_result_t player__draw(const char *title, player__playlist_t *playlist, bool paused) {
+/* A single bar along the bottom edge -- the universal "minimize window" glyph. */
+static void player__draw_minimize_icon(int16_t cx, int16_t cy, int16_t half, uint16_t color) {
+    int16_t bar_height = half / 3 > 0 ? half / 3 : 1;
+    (void)display__fill_rect(cx - half, cy + half - bar_height, half * 2, bar_height, color);
+}
+
+static bruce_result_t player__draw(const char *title, player__playlist_t *playlist, bool paused, int focused) {
     int width = display__width();
     int height = display__height();
     uint16_t primary = config__get_color_primary();
@@ -318,15 +358,37 @@ static bruce_result_t player__draw(const char *title, player__playlist_t *playli
     (void)display__draw_string(position_text, (int16_t)margin, (int16_t)time_row_y);
     (void)display__draw_right_string(duration_text, (int16_t)(width - margin), (int16_t)time_row_y);
 
-    /* Prev / play-pause / next controls. */
+    /* Prev / play-pause / next / minimize controls. PREV/NEXT move `focused`
+     * among these instead of acting directly, so SELECT can activate
+     * whichever one is highlighted -- a focused control draws on top of a
+     * filled square in the inverse of its own color, same convention as a
+     * selected row in a list dialog (see dialog_choice.c). */
     int controls_y = time_row_y + char_height + 8;
-    int controls_spacing = width / 4;
-    int center_x = width / 2;
     int icon_half = 10;
+    int highlight_half = icon_half + 5;
     uint16_t has_siblings_color = playlist->count > 1 ? primary : secondary;
-    player__draw_skip_icon((int16_t)(center_x - controls_spacing), (int16_t)controls_y, (int16_t)icon_half, false, has_siblings_color);
-    player__draw_play_pause_icon((int16_t)center_x, (int16_t)controls_y, (int16_t)icon_half, paused, primary);
-    player__draw_skip_icon((int16_t)(center_x + controls_spacing), (int16_t)controls_y, (int16_t)icon_half, true, has_siblings_color);
+    int16_t button_x[PLAYER_APP__BUTTON_COUNT];
+    for (int i = 0; i < PLAYER_APP__BUTTON_COUNT; ++i) {
+        button_x[i] = (int16_t)(width * (2 * i + 1) / (2 * PLAYER_APP__BUTTON_COUNT));
+    }
+    uint16_t button_color[PLAYER_APP__BUTTON_COUNT] = {has_siblings_color, primary, has_siblings_color, primary};
+    for (int i = 0; i < PLAYER_APP__BUTTON_COUNT; ++i) {
+        uint16_t color = button_color[i];
+        if (i == focused) {
+            (void)display__fill_rect(
+                (int16_t)(button_x[i] - highlight_half), (int16_t)(controls_y - highlight_half),
+                (int16_t)(highlight_half * 2), (int16_t)(highlight_half * 2), primary
+            );
+            color = background;
+        }
+        switch ((player__button_t)i) {
+            case PLAYER_APP__BUTTON_PREV: player__draw_skip_icon(button_x[i], (int16_t)controls_y, (int16_t)icon_half, false, color); break;
+            case PLAYER_APP__BUTTON_PLAY_PAUSE: player__draw_play_pause_icon(button_x[i], (int16_t)controls_y, (int16_t)icon_half, paused, color); break;
+            case PLAYER_APP__BUTTON_NEXT: player__draw_skip_icon(button_x[i], (int16_t)controls_y, (int16_t)icon_half, true, color); break;
+            case PLAYER_APP__BUTTON_MINIMIZE: player__draw_minimize_icon(button_x[i], (int16_t)controls_y, (int16_t)icon_half, color); break;
+            default: break;
+        }
+    }
 
     /* Volume. */
     char volume_text[32];
@@ -397,7 +459,8 @@ int player_app_main(int argc, char **argv) {
 
     (void)input__flush();
     bool paused = false;
-    /* LEFT/RIGHT are dual-purpose (tap = prev/next, hold = seek), which
+    int focused = PLAYER_APP__BUTTON_PLAY_PAUSE;
+    /* LEFT/RIGHT are dual-purpose (tap = move focus, hold = seek), which
      * input__wait() can't distinguish -- it only ever reports presses (see
      * its own doc comment: "release and change events are ignored"). Using
      * input__read() instead and tracking the held code/press time here
@@ -420,7 +483,7 @@ int player_app_main(int argc, char **argv) {
             break;
         }
 
-        (void)player__draw(title, &playlist, paused);
+        (void)player__draw(title, &playlist, paused, focused);
 
         bruce_input_event_t event;
         bruce_result_t input_result = input__read(&event, 80);
@@ -448,10 +511,7 @@ int player_app_main(int argc, char **argv) {
         if (event.action == BRUCE_INPUT_RELEASE) {
             if (event.code == held_code) {
                 /* Released before the long-press threshold -- a tap. */
-                if (!long_press_fired) {
-                    if (held_code == BRUCE_INPUT_CODE_LEFT) player__go_prev(&playlist, title, sizeof(title), &paused);
-                    else player__go_next(&playlist, title, sizeof(title), &paused);
-                }
+                if (!long_press_fired) player__move_focus(&focused, held_code == BRUCE_INPUT_CODE_LEFT ? -1 : 1);
                 held_code = 0;
                 long_press_fired = false;
             }
@@ -462,15 +522,17 @@ int player_app_main(int argc, char **argv) {
         switch (event.code) {
             case BRUCE_INPUT_CODE_BACK:
                 goto done;
-            case BRUCE_INPUT_CODE_SELECT:
-                paused = !paused;
-                (void)(paused ? audio__file_pause() : audio__file_resume());
+            case BRUCE_INPUT_CODE_SELECT: {
+                bool minimize = false;
+                player__activate_focused(focused, &playlist, title, sizeof(title), &paused, &minimize);
+                if (minimize) goto minimized;
                 break;
+            }
             case BRUCE_INPUT_CODE_PREV:
-                player__go_prev(&playlist, title, sizeof(title), &paused);
+                player__move_focus(&focused, -1);
                 break;
             case BRUCE_INPUT_CODE_NEXT:
-                player__go_next(&playlist, title, sizeof(title), &paused);
+                player__move_focus(&focused, 1);
                 break;
             case BRUCE_INPUT_CODE_UP: {
                 int volume = config__get_sound_volume() + PLAYER_APP__VOLUME_STEP;
@@ -494,6 +556,7 @@ int player_app_main(int argc, char **argv) {
     }
 done:
     (void)audio__file_stop();
+minimized:
     player__free_playlist(&playlist);
     return BRUCE_OK;
 }

@@ -125,10 +125,10 @@ static void config__set_defaults(config__t *cfg) {
 
 #if CONFIG_BRUCE_BUTTON_SELECT_ENABLED && !CONFIG_BRUCE_BUTTON_A_ENABLED && !CONFIG_BRUCE_BUTTON_B_ENABLED && \
     !CONFIG_BRUCE_BUTTON_C_ENABLED && !CONFIG_BRUCE_BUTTON_D_ENABLED
-    config__assign(&cfg->hotkeys.items[3].key, "500ms SELECT");
+    config__assign(&cfg->hotkeys.items[3].key, "2s SELECT");
     config__assign(&cfg->hotkeys.items[3].action, "GUI=1 OVERLAY=1 menu");
 #else
-    config__assign(&cfg->hotkeys.items[3].key, "500ms BTN_A");
+    config__assign(&cfg->hotkeys.items[3].key, "2s BTN_A");
     config__assign(&cfg->hotkeys.items[3].action, "GUI=1 OVERLAY=1 menu");
 #endif
 

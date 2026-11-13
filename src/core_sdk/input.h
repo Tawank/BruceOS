@@ -81,6 +81,7 @@ typedef struct {
     bruce_input_action_t action;
     int32_t code;
     int32_t value;
+    /* A RELEASE stamped in the future means the button stays held until then. */
     uint64_t timestamp_ms;
     bruce_process_id_t source_process_id;
 } bruce_input_event_t;

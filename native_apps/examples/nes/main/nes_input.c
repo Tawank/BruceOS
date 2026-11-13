@@ -1,6 +1,7 @@
 #include <stdint.h>
 
 #include "core_sdk/input.h"
+#include "core_sdk/runtime.h"
 
 #include "noftypes.h"
 
@@ -9,21 +10,11 @@
 #include "nes_input.h" // IWYU pragma: keep
 #include "osd.h"
 
-static int s_select_pressed_event;
-static int s_select_pending_release;
-static uint64_t s_select_press_time_ms;
+#define NES_INPUT__ENCODER_HOLD_MS 130
+#define NES_INPUT__JOYPAD_COUNT (event_joypad1_right - event_joypad1_a + 1)
 
-/* A rotary encoder's turn (BRUCE_INPUT_ENCODER -- see input_encoder.c)
- * arrives as an instantaneous pulse with no real hold duration, same as the
- * keyboard-chord/hotkey pulses above, but far more often: a deliberate
- * "keep turning" gesture. Stretching each pulse across a few emulated
- * frames instead of 1 is what makes that read as holding a direction
- * (walking) rather than just tapping it (turning in place). A PREV/NEXT
- * from an actual button (BRUCE_INPUT_BUTTON) already carries its own real
- * press/release timing and goes through the normal path below instead. */
-#define NES_INPUT__STRETCH_FRAMES 8
-static int s_stretch_event;
-static int s_stretch_frames_left;
+/* 0 = no release pending; released on the first frame at or after this time. */
+static uint64_t s_release_at_ms[NES_INPUT__JOYPAD_COUNT];
 
 static int event_for_code(int32_t code) {
     switch (code) {
@@ -59,64 +50,58 @@ static int event_for_code(int32_t code) {
     }
 }
 
+static int event_for_input(const bruce_input_event_t *input) {
+    if (input->code == BRUCE_INPUT_CODE_SELECT && input->type == BRUCE_INPUT_BUTTON) return event_joypad1_a;
+    return event_for_code(input->code);
+}
+
+static void set_joypad(int event_code, int state) {
+    event_t handler = event_get(event_code);
+    if (handler != NULL) handler(state);
+}
+
+static void press(int event_code) {
+    s_release_at_ms[event_code - event_joypad1_a] = 0;
+    set_joypad(event_code, INP_STATE_MAKE);
+}
+
+/* Deferred to a later frame so even an instant tap is seen by the game. */
+static void schedule_release(int event_code, uint64_t at_ms) {
+    s_release_at_ms[event_code - event_joypad1_a] = at_ms != 0 ? at_ms : 1;
+}
+
+static void apply_due_releases(uint64_t now_ms) {
+    for (int i = 0; i < NES_INPUT__JOYPAD_COUNT; ++i) {
+        if (s_release_at_ms[i] != 0 && s_release_at_ms[i] <= now_ms) {
+            s_release_at_ms[i] = 0;
+            set_joypad(event_joypad1_a + i, INP_STATE_BREAK);
+        }
+    }
+}
+
 void osd_getinput(void) {
-    if (s_select_pending_release != 0) {
-        event_t handler = event_get(s_select_pending_release);
-        if (handler != NULL) handler(INP_STATE_BREAK);
-        s_select_pending_release = 0;
-    }
-    if (s_stretch_event != 0 && --s_stretch_frames_left <= 0) {
-        event_t handler = event_get(s_stretch_event);
-        if (handler != NULL) handler(INP_STATE_BREAK);
-        s_stretch_event = 0;
-    }
+    uint64_t now_ms = runtime__now();
+    apply_due_releases(now_ms);
 
     bruce_input_event_t input;
     while (input__poll(&input) == BRUCE_OK) {
         if (input.action == BRUCE_INPUT_CHANGE) continue;
-        int state = input.action == BRUCE_INPUT_PRESS ? INP_STATE_MAKE : INP_STATE_BREAK;
-        if (input.code == BRUCE_INPUT_CODE_BACK && state == INP_STATE_MAKE) {
-            event_t quit = event_get(event_quit);
-            if (quit != NULL) quit(state);
+        if (input.code == BRUCE_INPUT_CODE_BACK && input.action == BRUCE_INPUT_PRESS) {
+            set_joypad(event_quit, INP_STATE_MAKE);
             continue;
         }
+        int event_code = event_for_input(&input);
+        if (event_code == 0) continue;
+
         if (input.type == BRUCE_INPUT_ENCODER) {
-            if (state != INP_STATE_MAKE) continue; /* release is handled by the countdown above */
-            int event_code = input.code == BRUCE_INPUT_CODE_PREV ? event_joypad1_left : event_joypad1_right;
-            if (s_stretch_event != event_code) {
-                if (s_stretch_event != 0) {
-                    event_t old = event_get(s_stretch_event);
-                    if (old != NULL) old(INP_STATE_BREAK);
-                }
-                event_t handler = event_get(event_code);
-                if (handler != NULL) handler(INP_STATE_MAKE);
-                s_stretch_event = event_code;
-            }
-            s_stretch_frames_left = NES_INPUT__STRETCH_FRAMES;
-            continue;
+            if (input.action != BRUCE_INPUT_PRESS) continue;
+            press(event_code);
+            schedule_release(event_code, now_ms + NES_INPUT__ENCODER_HOLD_MS);
+        } else if (input.action == BRUCE_INPUT_PRESS) {
+            press(event_code);
+        } else {
+            schedule_release(event_code, input.timestamp_ms);
         }
-        if (input.code == BRUCE_INPUT_CODE_SELECT) {
-            int event_code = input.type == BRUCE_INPUT_BUTTON ? event_joypad1_a : event_joypad1_start;
-            if (state == INP_STATE_MAKE) {
-                event_t handler = event_get(event_code);
-                if (handler != NULL) handler(state);
-                s_select_pressed_event = event_code;
-                s_select_press_time_ms = input.timestamp_ms;
-            } else if (s_select_pressed_event == event_code && input.timestamp_ms == s_select_press_time_ms) {
-                /* A system action injects its whole tap at once. Give it one
-                 * emulation frame while preserving real button hold times. */
-                s_select_pending_release = event_code;
-                s_select_pressed_event = 0;
-            } else {
-                event_t handler = event_get(event_code);
-                if (handler != NULL) handler(state);
-                s_select_pressed_event = 0;
-            }
-            continue;
-        }
-        int event_code = event_for_code(input.code);
-        event_t handler = event_code != 0 ? event_get(event_code) : NULL;
-        if (handler != NULL) handler(state);
     }
 }
 

@@ -20,7 +20,9 @@
 #define MEMORY_EXTERNAL__FLASH_SECTOR 4096u
 #define MEMORY_EXTERNAL__MMU_PAGE 65536u
 #define MEMORY_EXTERNAL__MAX_PAGES 32u
-#define MEMORY_EXTERNAL__MAX_OBJECTS 32u
+/* MEMORY_EXTERNAL__MAX_OBJECTS itself is defined in memory.h -- shared with
+ * memory_external__snapshot_ram_owners()'s caller, which needs it to size
+ * a buffer without guessing this file's own internal capacity. */
 /* Slots subdivide one 64KB swap page into MEMORY_EXTERNAL__FLASH_SECTOR-sized
  * (4KB) pieces so several small, non-executable, same-process allocations can
  * share one physical page instead of each rounding up to a whole one. See the
@@ -141,6 +143,29 @@ static memory_external__record_t *memory_external__record_at_locked(const void *
         if (record->backend != BRUCE_MEMORY_BACKEND_INVALID && record->data == ptr) return record;
     }
     return NULL;
+}
+
+/* Snapshot, not a lookup called from inside heap_caps_walk(): that call
+ * holds the heap's own lock, and alloc() takes s_mutex before calling
+ * heap_caps_malloc() -- locking here from inside the walk would invert
+ * that order. PSRAM/internal only: their `data` is heap_caps_malloc()'s
+ * own return value, so it's an exact match for a walked block's address;
+ * SWAP/slot records point into flash mmap or a shared page instead. */
+size_t memory_external__snapshot_ram_owners(memory_external__ram_owner_t *out, size_t capacity) {
+    memory_external__ensure_mutex();
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    size_t count = 0;
+    for (size_t i = 0; i < MEMORY_EXTERNAL__MAX_OBJECTS && count < capacity; ++i) {
+        const memory_external__record_t *record = &s_records[i];
+        if (record->backend == BRUCE_MEMORY_BACKEND_PSRAM || record->backend == BRUCE_MEMORY_BACKEND_INTERNAL) {
+            out[count].ptr = record->data;
+            out[count].owner_id = record->owner_id;
+            out[count].size = record->size;
+            count++;
+        }
+    }
+    xSemaphoreGive(s_mutex);
+    return count;
 }
 
 static bruce_result_t memory_external__object_for_pointer(const void *ptr, bruce_memory_object_t *out_object) {

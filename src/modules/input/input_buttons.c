@@ -46,84 +46,86 @@
 #if INPUT__HAS_BUTTON_A || INPUT__HAS_BUTTON_B || INPUT__HAS_BUTTON_C || INPUT__HAS_BUTTON_D ||              \
     INPUT__HAS_BUTTON_0
 
-/* tiers: "<N>s <BTN_NAME>" hotkey syntax. The currently active tier fires
- * (and releases) in real time against the actual press/release, instead of
- * being decided only at release -- see input_buttons__activate()'s comment
- * for why. */
 typedef struct {
     int pin;
     int32_t code;
     bool active_low;
     bool last_stable;
-    /* Confirm-then-commit debounce: a reading opposite last_stable must
-     * read the same way for a full INPUT__DEBOUNCE_MS before it commits. */
     bool pending;
     bool pending_level;
     uint64_t pending_since_ms;
     uint64_t press_start_ms;
-    size_t active_tier;
-    /* Set by input_buttons__activate(): exactly one of these (or neither,
-     * for a one-shot command tier) is true at a time. */
-    bool bind_active;
-    bool raw_active;
-    int32_t bind_code;
     input_hotkey__tier_t tiers[INPUT__MAX_TIERS];
     size_t tier_count;
+    bool fired;
+    bool holding;
+    int32_t held_code;
 } input__button_t;
 
 static input__button_t s_buttons[] = {
 #if INPUT__HAS_BUTTON_A
-    {.pin = INPUT__PIN_BUTTON_A, .code = INPUT__BUTTON_A_CODE, .active_low = true, .last_stable = true},
+    {.pin = INPUT__PIN_BUTTON_A, .code = INPUT__BUTTON_A_CODE, .active_low = true},
 #endif
 #if INPUT__HAS_BUTTON_B
-    {.pin = INPUT__PIN_BUTTON_B, .code = INPUT__BUTTON_B_CODE, .active_low = true, .last_stable = true},
+    {.pin = INPUT__PIN_BUTTON_B, .code = INPUT__BUTTON_B_CODE, .active_low = true},
 #endif
 #if INPUT__HAS_BUTTON_C
-    {.pin = INPUT__PIN_BUTTON_C, .code = INPUT__BUTTON_C_CODE, .active_low = true, .last_stable = true},
+    {.pin = INPUT__PIN_BUTTON_C, .code = INPUT__BUTTON_C_CODE, .active_low = true},
 #endif
 #if INPUT__HAS_BUTTON_D
-    {.pin = INPUT__PIN_BUTTON_D, .code = INPUT__BUTTON_D_CODE, .active_low = true, .last_stable = true},
+    {.pin = INPUT__PIN_BUTTON_D, .code = INPUT__BUTTON_D_CODE, .active_low = true},
 #endif
 #if INPUT__HAS_BUTTON_0
-    {.pin = INPUT__PIN_BUTTON_0, .code = INPUT__BUTTON_0_CODE, .active_low = true, .last_stable = true},
+    {.pin = INPUT__PIN_BUTTON_0, .code = INPUT__BUTTON_0_CODE, .active_low = true},
 #endif
 };
 
-/* Fires tier `idx`'s press in real time, the moment it actually applies --
- * a bind mirrors the physical button onto its target, a command just runs
- * once, a plain tap (no action configured) emits the raw code. This is a
- * deliberate departure from waiting until release to decide: that would
- * suppress a short tier's press entirely on a long hold, but it also flattens
- * every real hold down to a zero-duration pulse, which breaks anything that
- * reads how long a button was actually held (e.g. jump height, walking, in
- * an emulator). Promoting live means a very long hold can show both the
- * short tier's effect and the long one's, instead of only the long one -- an
- * accepted tradeoff for keeping real timing intact. */
-static void input_buttons__activate(input__button_t *btn, size_t idx) {
-    btn->active_tier = idx;
-    const char *action = btn->tiers[idx].action;
-    btn->bind_active = action[0] != '\0' && input_hotkey__resolve_bind(action, &btn->bind_code);
-    btn->raw_active = false;
-    if (btn->bind_active) {
-        input__emit(BRUCE_INPUT_BUTTON, BRUCE_INPUT_PRESS, btn->bind_code, 1);
-    } else if (action[0] != '\0') {
+static void input_buttons__fire(input__button_t *btn, size_t tier) {
+    const char *action = btn->tiers[tier].action;
+    btn->fired = true;
+    if (action[0] == '\0') {
+        btn->held_code = btn->code;
+    } else if (!input_hotkey__resolve_bind(action, &btn->held_code)) {
         input_hotkey__run_action(action);
-    } else {
-        btn->raw_active = true;
-        input__emit(BRUCE_INPUT_BUTTON, BRUCE_INPUT_PRESS, btn->code, 1);
+        return;
     }
+    btn->holding = true;
+    input__emit(BRUCE_INPUT_BUTTON, BRUCE_INPUT_PRESS, btn->held_code, 1);
 }
 
-/* Releases whatever input_buttons__activate() last pressed; a no-op for a
- * one-shot command tier, which has nothing to release. */
-static void input_buttons__deactivate(input__button_t *btn) {
-    if (btn->bind_active) {
-        input__emit(BRUCE_INPUT_BUTTON, BRUCE_INPUT_RELEASE, btn->bind_code, 0);
-    } else if (btn->raw_active) {
-        input__emit(BRUCE_INPUT_BUTTON, BRUCE_INPUT_RELEASE, btn->code, 0);
+static void input_buttons__release_at(input__button_t *btn, uint64_t timestamp_ms) {
+    if (btn->holding) input__emit_at(BRUCE_INPUT_BUTTON, BRUCE_INPUT_RELEASE, btn->held_code, 0, timestamp_ms);
+    btn->holding = false;
+}
+
+static size_t input_buttons__reached_tier(const input__button_t *btn, uint64_t held_ms) {
+    size_t tier = 0;
+    while (tier + 1 < btn->tier_count && btn->tiers[tier + 1].hold_ms <= held_ms) tier++;
+    return tier;
+}
+
+static void input_buttons__on_press(input__button_t *btn, uint64_t now) {
+    btn->press_start_ms = now;
+    btn->fired = false;
+    btn->tier_count = input_hotkey__find_tiers(input_hotkey__name_for_code(btn->code), btn->tiers, INPUT__MAX_TIERS);
+    if (btn->tier_count == 1) input_buttons__fire(btn, 0);
+}
+
+static void input_buttons__on_hold(input__button_t *btn, uint64_t now) {
+    if (btn->fired) return;
+    size_t last = btn->tier_count - 1;
+    if (input_buttons__reached_tier(btn, now - btn->press_start_ms) == last) input_buttons__fire(btn, last);
+}
+
+/* A deferred tap is replayed with its real hold time by stamping the release in the future. */
+static void input_buttons__on_release(input__button_t *btn, uint64_t now) {
+    if (btn->fired) {
+        input_buttons__release_at(btn, 0);
+        return;
     }
-    btn->bind_active = false;
-    btn->raw_active = false;
+    uint64_t held_ms = now - btn->press_start_ms;
+    input_buttons__fire(btn, input_buttons__reached_tier(btn, held_ms));
+    input_buttons__release_at(btn, now + held_ms);
 }
 
 void input_buttons__init(void) {
@@ -156,30 +158,14 @@ void input_buttons__poll(void) {
                 btn->last_stable = pressed;
 
                 if (pressed) {
-                    btn->press_start_ms = now;
-                    const char *name = input_hotkey__name_for_code(btn->code);
-                    btn->tier_count = input_hotkey__find_tiers(name, btn->tiers, INPUT__MAX_TIERS);
-                    input_buttons__activate(btn, 0);
+                    input_buttons__on_press(btn, now);
                 } else {
-                    input_buttons__deactivate(btn);
+                    input_buttons__on_release(btn, now);
                 }
             }
         } else {
             btn->pending = false;
-            if (btn->last_stable) {
-                uint64_t held_ms = now - btn->press_start_ms;
-                size_t target = 0;
-                for (size_t t = btn->tier_count; t-- > 0;) {
-                    if (btn->tiers[t].hold_ms <= held_ms) {
-                        target = t;
-                        break;
-                    }
-                }
-                if (target > btn->active_tier) {
-                    input_buttons__deactivate(btn);
-                    input_buttons__activate(btn, target);
-                }
-            }
+            if (pressed) input_buttons__on_hold(btn, now);
         }
     }
 }

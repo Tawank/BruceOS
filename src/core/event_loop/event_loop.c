@@ -3,6 +3,7 @@
 #include "core/process/process.h"
 #include "core_sdk/input.h"
 #include "core_sdk/permission.h"
+#include "core_sdk/runtime.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -24,7 +25,7 @@ static void event_loop__lock(void) { xSemaphoreTakeRecursive(s_mutex, portMAX_DE
 
 static void event_loop__unlock(void) { xSemaphoreGiveRecursive(s_mutex); }
 
-static uint64_t event_loop__now_ms(void) { return (uint64_t)xTaskGetTickCount() * portTICK_PERIOD_MS; }
+static uint64_t event_loop__now_ms(void) { return runtime__now(); }
 
 static bool event_loop__caller_is_foreground_locked(bruce_process_id_t caller) {
     return caller != BRUCE_PROCESS_ID_INVALID && caller == s_foreground_process_id;
@@ -231,7 +232,7 @@ bruce_result_t input__inject(const bruce_input_event_t *event) {
     if (permission != BRUCE_OK) { return permission; }
 
     bruce_input_event_t queued_event = *event;
-    queued_event.timestamp_ms = event_loop__now_ms();
+    if (queued_event.timestamp_ms == 0) queued_event.timestamp_ms = event_loop__now_ms();
     queued_event.source_process_id = process__current_id();
 
     event_loop__lock();
