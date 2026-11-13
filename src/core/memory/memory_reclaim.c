@@ -75,11 +75,14 @@ static void memory_reclaim__restore(void *context) {
         ESP_LOGW(TAG, "restored '%s'", grant->names[i]);
     }
     ESP_LOGW(
-        TAG, "restored %u provider(s), giving back up to %u bytes it had reclaimed -- largest free block now %u, "
-             "%u total free",
+        TAG,
+        "restored %u provider(s), giving back up to %u bytes it had reclaimed -- largest free block now %u "
+        "internal (%u total free), %u psram (%u total free)",
         (unsigned)grant->count, (unsigned)grant->freed,
         (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
-        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL)
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM),
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM)
     );
     free(grant);
 }
@@ -95,17 +98,27 @@ bruce_result_t memory__reclaim(
     }
     if (needed_bytes == 0) return BRUCE_OK;
 
-    /* Nothing to do if the largest contiguous internal block can already
-     * cover the request on its own: reclaiming is disruptive (e.g. drops the
-     * display out of buffered mode), so it should only happen when a
-     * request this size would actually have somewhere to trip -- total free
-     * bytes looking tight is not that; a too-small largest block is. */
-    size_t largest_before = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
-    if (largest_before >= needed_bytes) return BRUCE_OK;
+    /* Nothing to do if the largest contiguous block in either internal RAM
+     * or PSRAM can already cover the request on its own: reclaiming is
+     * disruptive (e.g. drops the display out of buffered mode), so it
+     * should only happen when a request this size would actually have
+     * nowhere to fit -- total free bytes looking tight is not that; a
+     * too-small largest block, in every pool the caller could plausibly
+     * mean, is. Registered providers only ever give back internal RAM, so
+     * this can't help a PSRAM-only shortfall either way -- checking PSRAM
+     * here is purely to avoid disturbing internal-RAM providers over a
+     * request PSRAM alone already has room for. */
+    size_t largest_internal_before = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+    size_t largest_psram_before = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM);
+    if (largest_internal_before >= needed_bytes || largest_psram_before >= needed_bytes) return BRUCE_OK;
 
     ESP_LOGW(
-        TAG, "need %u bytes but largest free block is only %u (%u total free) -- asking registered providers",
-        (unsigned)needed_bytes, (unsigned)largest_before, (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL)
+        TAG,
+        "need %u bytes but largest free block is only %u internal (%u total free), %u psram (%u total free) -- "
+        "asking registered providers",
+        (unsigned)needed_bytes, (unsigned)largest_internal_before,
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL), (unsigned)largest_psram_before,
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM)
     );
 
     memory_reclaim__ensure_mutex();
@@ -146,9 +159,13 @@ bruce_result_t memory__reclaim(
     }
 
     ESP_LOGW(
-        TAG, "freed %u of %u bytes needed -- largest free block now %u (%u total free)", (unsigned)freed,
-        (unsigned)needed_bytes, (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
-        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL)
+        TAG,
+        "freed %u of %u bytes needed -- largest free block now %u internal (%u total free), %u psram (%u total "
+        "free)",
+        (unsigned)freed, (unsigned)needed_bytes, (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM),
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM)
     );
 
     bruce_resource_id_t resource_id = process_registry__resource_register(memory_reclaim__restore, grant);

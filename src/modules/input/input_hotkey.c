@@ -122,29 +122,38 @@ bool input_hotkey__find(
     return false;
 }
 
-bool input_hotkey__find_by_hold(
-    const char *name,
-    bool want_hold,
-    uint32_t *out_hold_ms,
-    char *out_action,
-    size_t action_size
-) {
-    if (name == NULL) return false;
+size_t input_hotkey__find_tiers(const char *name, input_hotkey__tier_t *out_tiers, size_t max_tiers) {
+    out_tiers[0].hold_ms = 0;
+    out_tiers[0].action[0] = '\0';
+    size_t count = 1;
+    if (name == NULL || max_tiers == 0) return count;
+
     const bruce_config_hotkeys_t *hotkeys = config__get_hotkeys();
-    if (hotkeys == NULL) return false;
+    if (hotkeys == NULL) return count;
 
     for (size_t i = 0; i < hotkeys->count; ++i) {
         uint32_t hold_ms = 0;
         const char *rest = NULL;
         input_hotkey__split_duration(hotkeys->items[i].key, &hold_ms, &rest);
-        if (strcmp(rest, name) != 0 || (hold_ms > 0) != want_hold) continue;
+        if (strcmp(rest, name) != 0) continue;
 
-        int written = snprintf(out_action, action_size, "%s", hotkeys->items[i].action);
-        if (written < 0 || (size_t)written >= action_size) return false;
-        *out_hold_ms = hold_ms;
-        return true;
+        if (hold_ms == 0) {
+            if (out_tiers[0].action[0] == '\0') {
+                snprintf(out_tiers[0].action, sizeof(out_tiers[0].action), "%s", hotkeys->items[i].action);
+            }
+            continue;
+        }
+        if (count >= max_tiers) continue;
+        size_t pos = count;
+        while (pos > 1 && out_tiers[pos - 1].hold_ms > hold_ms) {
+            out_tiers[pos] = out_tiers[pos - 1];
+            pos--;
+        }
+        out_tiers[pos].hold_ms = hold_ms;
+        snprintf(out_tiers[pos].action, sizeof(out_tiers[pos].action), "%s", hotkeys->items[i].action);
+        count++;
     }
-    return false;
+    return count;
 }
 
 /* True iff `command`'s leading "key=value" environment tokens (the same

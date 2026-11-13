@@ -4,6 +4,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "core_sdk/config.h"
+
 /*
  * Shared hotkey-chord parsing and action dispatch used by both the
  * keyboard (input_keyboard.c) and physical-button (input_buttons.c)
@@ -58,15 +60,16 @@ bool input_hotkey__find(
     const char *name, uint32_t *out_hold_ms, char *out_action, size_t action_size, size_t *out_index
 );
 
-/* Finds the first configured instant (`want_hold` false) or hold (`want_hold`
- * true) hotkey for `name`. This lets physical buttons have one of each. */
-bool input_hotkey__find_by_hold(
-    const char *name,
-    bool want_hold,
-    uint32_t *out_hold_ms,
-    char *out_action,
-    size_t action_size
-);
+typedef struct {
+    uint32_t hold_ms; /* 0 for the instant tier */
+    char action[BRUCE_CONFIG_HOTKEY_ACTION_MAX_LEN + 1];
+} input_hotkey__tier_t;
+
+/* Collects every binding configured for `name` into out_tiers, sorted
+ * ascending by hold duration. out_tiers[0] is always the instant
+ * (hold_ms == 0) tier, empty action if none configured. Returns the tier
+ * count (always >= 1); extra tiers past max_tiers are dropped. */
+size_t input_hotkey__find_tiers(const char *name, input_hotkey__tier_t *out_tiers, size_t max_tiers);
 
 /* True iff `action` is "bind <NAME>" with a recognized target; fills *out_code. */
 bool input_hotkey__resolve_bind(const char *action, int32_t *out_code);

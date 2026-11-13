@@ -13,6 +13,18 @@ static int s_select_pressed_event;
 static int s_select_pending_release;
 static uint64_t s_select_press_time_ms;
 
+/* A rotary encoder's turn (BRUCE_INPUT_ENCODER -- see input_encoder.c)
+ * arrives as an instantaneous pulse with no real hold duration, same as the
+ * keyboard-chord/hotkey pulses above, but far more often: a deliberate
+ * "keep turning" gesture. Stretching each pulse across a few emulated
+ * frames instead of 1 is what makes that read as holding a direction
+ * (walking) rather than just tapping it (turning in place). A PREV/NEXT
+ * from an actual button (BRUCE_INPUT_BUTTON) already carries its own real
+ * press/release timing and goes through the normal path below instead. */
+#define NES_INPUT__STRETCH_FRAMES 8
+static int s_stretch_event;
+static int s_stretch_frames_left;
+
 static int event_for_code(int32_t code) {
     switch (code) {
         case BRUCE_INPUT_CODE_UP:
@@ -53,6 +65,11 @@ void osd_getinput(void) {
         if (handler != NULL) handler(INP_STATE_BREAK);
         s_select_pending_release = 0;
     }
+    if (s_stretch_event != 0 && --s_stretch_frames_left <= 0) {
+        event_t handler = event_get(s_stretch_event);
+        if (handler != NULL) handler(INP_STATE_BREAK);
+        s_stretch_event = 0;
+    }
 
     bruce_input_event_t input;
     while (input__poll(&input) == BRUCE_OK) {
@@ -61,6 +78,21 @@ void osd_getinput(void) {
         if (input.code == BRUCE_INPUT_CODE_BACK && state == INP_STATE_MAKE) {
             event_t quit = event_get(event_quit);
             if (quit != NULL) quit(state);
+            continue;
+        }
+        if (input.type == BRUCE_INPUT_ENCODER) {
+            if (state != INP_STATE_MAKE) continue; /* release is handled by the countdown above */
+            int event_code = input.code == BRUCE_INPUT_CODE_PREV ? event_joypad1_left : event_joypad1_right;
+            if (s_stretch_event != event_code) {
+                if (s_stretch_event != 0) {
+                    event_t old = event_get(s_stretch_event);
+                    if (old != NULL) old(INP_STATE_BREAK);
+                }
+                event_t handler = event_get(event_code);
+                if (handler != NULL) handler(INP_STATE_MAKE);
+                s_stretch_event = event_code;
+            }
+            s_stretch_frames_left = NES_INPUT__STRETCH_FRAMES;
             continue;
         }
         if (input.code == BRUCE_INPUT_CODE_SELECT) {

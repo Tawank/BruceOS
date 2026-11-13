@@ -311,10 +311,11 @@ typedef struct {
 /**
  * @brief Tries to free at least `needed_bytes` from registered subsystems before a big allocation.
  *
- * A no-op (BRUCE_OK, nothing freed) if the largest contiguous internal block
- * can already cover `needed_bytes` on its own -- total free memory looking
- * tight is not a reason to disturb anything (e.g. change the display's
- * rendering mode); a too-small largest block is. Otherwise, reclaims
+ * A no-op (BRUCE_OK, nothing freed) if the largest contiguous block in
+ * either internal RAM or PSRAM can already cover `needed_bytes` on its own
+ * -- total free memory looking tight is not a reason to disturb anything
+ * (e.g. change the display's rendering mode); a too-small largest block,
+ * in every pool the caller could plausibly mean, is. Otherwise, reclaims
  * whatever registered providers can offer, even if that falls short of
  * `needed_bytes` -- partial headroom is still real headroom, so this is not
  * an all-or-nothing request. Reclaiming stops once enough has been freed, so

@@ -71,13 +71,13 @@ void input_encoder__poll(void) {
     s_encoder_accum += step;
     while (s_encoder_accum >= INPUT__ENCODER_STEPS_PER_DETENT) {
         s_encoder_accum -= INPUT__ENCODER_STEPS_PER_DETENT;
-        input__emit(BRUCE_INPUT_BUTTON, BRUCE_INPUT_PRESS, BRUCE_INPUT_CODE_NEXT, 1);
-        input__emit(BRUCE_INPUT_BUTTON, BRUCE_INPUT_RELEASE, BRUCE_INPUT_CODE_NEXT, 0);
+        input__emit(BRUCE_INPUT_ENCODER, BRUCE_INPUT_PRESS, BRUCE_INPUT_CODE_NEXT, 1);
+        input__emit(BRUCE_INPUT_ENCODER, BRUCE_INPUT_RELEASE, BRUCE_INPUT_CODE_NEXT, 0);
     }
     while (s_encoder_accum <= -INPUT__ENCODER_STEPS_PER_DETENT) {
         s_encoder_accum += INPUT__ENCODER_STEPS_PER_DETENT;
-        input__emit(BRUCE_INPUT_BUTTON, BRUCE_INPUT_PRESS, BRUCE_INPUT_CODE_PREV, 1);
-        input__emit(BRUCE_INPUT_BUTTON, BRUCE_INPUT_RELEASE, BRUCE_INPUT_CODE_PREV, 0);
+        input__emit(BRUCE_INPUT_ENCODER, BRUCE_INPUT_PRESS, BRUCE_INPUT_CODE_PREV, 1);
+        input__emit(BRUCE_INPUT_ENCODER, BRUCE_INPUT_RELEASE, BRUCE_INPUT_CODE_PREV, 0);
     }
 }
 

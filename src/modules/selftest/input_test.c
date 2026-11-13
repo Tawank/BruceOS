@@ -334,32 +334,42 @@ bool selftest__run_input_hotkey_find_case(void) {
 
     const bruce_config_hotkey_t test_hotkeys[] = {
         {"BTN_A",       "bind PREV"},
+        {"50ms BTN_A",  "bind SELECT"},
         {"500ms BTN_A", "menu top"},
         {"2s BTN_B",    "menu top"},
         {"BTN_C",       "bind NEXT"},
     };
-    bool set_ok = config__set_hotkeys(test_hotkeys, 4) == BRUCE_OK;
+    bool set_ok = config__set_hotkeys(test_hotkeys, 5) == BRUCE_OK;
 
     uint32_t hold_ms = 0;
     char action[BRUCE_CONFIG_HOTKEY_ACTION_MAX_LEN + 1] = {0};
     size_t hotkey_index = BRUCE_CONFIG_HOTKEY_MAX_COUNT;
     bool hold_match =
         input_hotkey__find("BTN_B", &hold_ms, action, sizeof(action), &hotkey_index) && hold_ms == 2000 &&
-        hotkey_index == 2 &&
+        hotkey_index == 3 &&
         strcmp(action, "menu top") == 0;
     bool instant_match =
         input_hotkey__find("BTN_C", &hold_ms, action, sizeof(action), &hotkey_index) && hold_ms == 0 &&
-        hotkey_index == 3 &&
+        hotkey_index == 4 &&
         strcmp(action, "bind NEXT") == 0;
-    bool instant_a = input_hotkey__find_by_hold("BTN_A", false, &hold_ms, action, sizeof(action)) &&
-                     hold_ms == 0 && strcmp(action, "bind PREV") == 0;
-    bool hold_a = input_hotkey__find_by_hold("BTN_A", true, &hold_ms, action, sizeof(action)) &&
-                  hold_ms == 500 && strcmp(action, "menu top") == 0;
+
+    input_hotkey__tier_t tiers[3];
+    size_t tier_count = input_hotkey__find_tiers("BTN_A", tiers, 3);
+    bool tiers_a = tier_count == 3 && tiers[0].hold_ms == 0 && strcmp(tiers[0].action, "bind PREV") == 0 &&
+                   tiers[1].hold_ms == 50 && strcmp(tiers[1].action, "bind SELECT") == 0 &&
+                   tiers[2].hold_ms == 500 && strcmp(tiers[2].action, "menu top") == 0;
+
+    size_t tier_count_c = input_hotkey__find_tiers("BTN_C", tiers, 3);
+    bool tiers_c = tier_count_c == 1 && tiers[0].hold_ms == 0 && strcmp(tiers[0].action, "bind NEXT") == 0;
+
+    size_t tier_count_x = input_hotkey__find_tiers("BTN_X", tiers, 3);
+    bool tiers_x = tier_count_x == 1 && tiers[0].action[0] == '\0';
+
     bool no_match = !input_hotkey__find("BTN_X", &hold_ms, action, sizeof(action), NULL);
 
     bool restored = config__set_hotkeys(original, original_count) == BRUCE_OK;
 
-    bool ok = set_ok && hold_match && instant_match && instant_a && hold_a && no_match && restored;
+    bool ok = set_ok && hold_match && instant_match && tiers_a && tiers_c && tiers_x && no_match && restored;
     printf("[selftest] input/hotkey-find: %s\n", ok ? "OK" : "FAIL");
     return ok;
 }

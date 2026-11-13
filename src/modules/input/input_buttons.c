@@ -8,7 +8,6 @@
 #include "input_common.h"
 #include "input_hotkey.h"
 
-#include "core_sdk/config.h"
 #include "core_sdk/gpio.h"
 #include "sdkconfig.h"
 
@@ -42,10 +41,15 @@
 #define INPUT__BUTTON_D_CODE BRUCE_INPUT_CODE_BUTTON_X
 #endif
 
+#define INPUT__MAX_TIERS 3
+
 #if INPUT__HAS_BUTTON_A || INPUT__HAS_BUTTON_B || INPUT__HAS_BUTTON_C || INPUT__HAS_BUTTON_D ||              \
     INPUT__HAS_BUTTON_0
 
-/* hold_pending/hold_ms/hold_action: "<N>s <BTN_NAME>" hotkey syntax. */
+/* tiers: "<N>s <BTN_NAME>" hotkey syntax. The currently active tier fires
+ * (and releases) in real time against the actual press/release, instead of
+ * being decided only at release -- see input_buttons__activate()'s comment
+ * for why. */
 typedef struct {
     int pin;
     int32_t code;
@@ -57,15 +61,14 @@ typedef struct {
     bool pending_level;
     uint64_t pending_since_ms;
     uint64_t press_start_ms;
-    bool hold_pending;
-    uint32_t hold_ms;
-    bool hold_fired;
-    bool hotkey_consumed;
-    /* Set when this press matched a "bind <NAME>" instead of a command. */
+    size_t active_tier;
+    /* Set by input_buttons__activate(): exactly one of these (or neither,
+     * for a one-shot command tier) is true at a time. */
     bool bind_active;
+    bool raw_active;
     int32_t bind_code;
-    char hold_action[BRUCE_CONFIG_HOTKEY_ACTION_MAX_LEN + 1];
-    char instant_action[BRUCE_CONFIG_HOTKEY_ACTION_MAX_LEN + 1];
+    input_hotkey__tier_t tiers[INPUT__MAX_TIERS];
+    size_t tier_count;
 } input__button_t;
 
 static input__button_t s_buttons[] = {
@@ -85,6 +88,43 @@ static input__button_t s_buttons[] = {
     {.pin = INPUT__PIN_BUTTON_0, .code = INPUT__BUTTON_0_CODE, .active_low = true, .last_stable = true},
 #endif
 };
+
+/* Fires tier `idx`'s press in real time, the moment it actually applies --
+ * a bind mirrors the physical button onto its target, a command just runs
+ * once, a plain tap (no action configured) emits the raw code. This is a
+ * deliberate departure from waiting until release to decide: that would
+ * suppress a short tier's press entirely on a long hold, but it also flattens
+ * every real hold down to a zero-duration pulse, which breaks anything that
+ * reads how long a button was actually held (e.g. jump height, walking, in
+ * an emulator). Promoting live means a very long hold can show both the
+ * short tier's effect and the long one's, instead of only the long one -- an
+ * accepted tradeoff for keeping real timing intact. */
+static void input_buttons__activate(input__button_t *btn, size_t idx) {
+    btn->active_tier = idx;
+    const char *action = btn->tiers[idx].action;
+    btn->bind_active = action[0] != '\0' && input_hotkey__resolve_bind(action, &btn->bind_code);
+    btn->raw_active = false;
+    if (btn->bind_active) {
+        input__emit(BRUCE_INPUT_BUTTON, BRUCE_INPUT_PRESS, btn->bind_code, 1);
+    } else if (action[0] != '\0') {
+        input_hotkey__run_action(action);
+    } else {
+        btn->raw_active = true;
+        input__emit(BRUCE_INPUT_BUTTON, BRUCE_INPUT_PRESS, btn->code, 1);
+    }
+}
+
+/* Releases whatever input_buttons__activate() last pressed; a no-op for a
+ * one-shot command tier, which has nothing to release. */
+static void input_buttons__deactivate(input__button_t *btn) {
+    if (btn->bind_active) {
+        input__emit(BRUCE_INPUT_BUTTON, BRUCE_INPUT_RELEASE, btn->bind_code, 0);
+    } else if (btn->raw_active) {
+        input__emit(BRUCE_INPUT_BUTTON, BRUCE_INPUT_RELEASE, btn->code, 0);
+    }
+    btn->bind_active = false;
+    btn->raw_active = false;
+}
 
 void input_buttons__init(void) {
     for (size_t i = 0; i < sizeof(s_buttons) / sizeof(s_buttons[0]); ++i) {
@@ -117,72 +157,28 @@ void input_buttons__poll(void) {
 
                 if (pressed) {
                     btn->press_start_ms = now;
-                    btn->hold_fired = false;
-                    btn->hotkey_consumed = false;
-
                     const char *name = input_hotkey__name_for_code(btn->code);
-                    uint32_t hold_ms = 0;
-                    uint32_t instant_hold_ms = 0;
-                    char hold_action[BRUCE_CONFIG_HOTKEY_ACTION_MAX_LEN + 1] = {0};
-                    btn->instant_action[0] = '\0';
-                    bool hold_matched = name != NULL && input_hotkey__find_by_hold(
-                                                               name, true, &hold_ms, hold_action, sizeof(hold_action)
-                                                           );
-                    bool instant_matched = name != NULL && input_hotkey__find_by_hold(
-                                                                  name,
-                                                                  false,
-                                                                  &instant_hold_ms,
-                                                                  btn->instant_action,
-                                                                  sizeof(btn->instant_action)
-                                                              );
-
-                    if (hold_matched) {
-                        btn->hold_pending = true;
-                        btn->hold_ms = hold_ms;
-                        snprintf(btn->hold_action, sizeof(btn->hold_action), "%s", hold_action);
-                    } else {
-                        btn->hold_pending = false;
-                        btn->bind_active = instant_matched &&
-                                            input_hotkey__resolve_bind(btn->instant_action, &btn->bind_code);
-                        if (btn->bind_active) {
-                            input__emit(BRUCE_INPUT_BUTTON, BRUCE_INPUT_PRESS, btn->bind_code, 1);
-                        } else if (instant_matched) {
-                            input_hotkey__run_action(btn->instant_action);
-                            btn->hotkey_consumed = true;
-                        } else {
-                            input__emit(BRUCE_INPUT_BUTTON, BRUCE_INPUT_PRESS, btn->code, 1);
-                        }
-                    }
-                } else if (btn->hold_pending) {
-                    if (!btn->hold_fired) {
-                        int32_t bind_code;
-                        if (btn->instant_action[0] != '\0' &&
-                            input_hotkey__resolve_bind(btn->instant_action, &bind_code)) {
-                            input__emit(BRUCE_INPUT_BUTTON, BRUCE_INPUT_PRESS, bind_code, 1);
-                            input__emit(BRUCE_INPUT_BUTTON, BRUCE_INPUT_RELEASE, bind_code, 0);
-                        } else {
-                            input__emit(BRUCE_INPUT_BUTTON, BRUCE_INPUT_PRESS, btn->code, 1);
-                            input__emit(BRUCE_INPUT_BUTTON, BRUCE_INPUT_RELEASE, btn->code, 0);
-                            if (btn->instant_action[0] != '\0') input_hotkey__run_action(btn->instant_action);
-                        }
-                    }
-                    btn->hold_pending = false;
-                    btn->instant_action[0] = '\0';
-                } else if (btn->bind_active) {
-                    input__emit(BRUCE_INPUT_BUTTON, BRUCE_INPUT_RELEASE, btn->bind_code, 0);
-                    btn->bind_active = false;
-                } else if (btn->hotkey_consumed) {
-                    btn->hotkey_consumed = false;
+                    btn->tier_count = input_hotkey__find_tiers(name, btn->tiers, INPUT__MAX_TIERS);
+                    input_buttons__activate(btn, 0);
                 } else {
-                    input__emit(BRUCE_INPUT_BUTTON, BRUCE_INPUT_RELEASE, btn->code, 0);
+                    input_buttons__deactivate(btn);
                 }
             }
         } else {
             btn->pending = false;
-            if (btn->last_stable && btn->hold_pending && !btn->hold_fired &&
-                now - btn->press_start_ms >= btn->hold_ms) {
-                btn->hold_fired = true;
-                input_hotkey__run_action(btn->hold_action);
+            if (btn->last_stable) {
+                uint64_t held_ms = now - btn->press_start_ms;
+                size_t target = 0;
+                for (size_t t = btn->tier_count; t-- > 0;) {
+                    if (btn->tiers[t].hold_ms <= held_ms) {
+                        target = t;
+                        break;
+                    }
+                }
+                if (target > btn->active_tier) {
+                    input_buttons__deactivate(btn);
+                    input_buttons__activate(btn, target);
+                }
             }
         }
     }
