@@ -24,6 +24,9 @@
  * back BRUCE_ERR_NOT_FOREGROUND / BRUCE_ERR_CANCELLED. */
 bool filemanager__resume_after_handoff(void);
 
+/* Waits for a foreground child to exit or be sent to the background (minimized/switched away). */
+bruce_result_t filemanager__wait_child(int process);
+
 /* Basename (the part after the last '/', or the whole string if there is
  * none) of a storage path. Never fails -- always returns a pointer into
  * `path` itself. */

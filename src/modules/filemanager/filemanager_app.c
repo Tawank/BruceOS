@@ -45,6 +45,17 @@ bool filemanager__resume_after_handoff(void) {
     return snapshot.state == BRUCE_PROCESS_FOREGROUND;
 }
 
+bruce_result_t filemanager__wait_child(int process) {
+    if (process <= 0) return (bruce_result_t)process;
+    bruce_process_snapshot_t snapshot;
+    for (;;) {
+        bruce_result_t result = process__wait((bruce_process_id_t)process, 100);
+        if (result != BRUCE_ERR_TIMEOUT) return result;
+        if (process__snapshot((bruce_process_id_t)process, &snapshot) != BRUCE_OK) return BRUCE_OK;
+        if (snapshot.state == BRUCE_PROCESS_BACKGROUND) return BRUCE_OK;
+    }
+}
+
 const char *filemanager__basename(const char *path) {
     const char *slash = strrchr(path, '/');
     return slash != NULL ? slash + 1 : path;
@@ -96,8 +107,7 @@ filemanager__run_named_app(const char *app, const char *path, bool gui, bool rea
     int process = app_runner__run_with_environment(
         app, arg_string, BRUCE_LAUNCH_FOREGROUND, gui ? gui_env : NULL, gui ? 1u : 0u
     );
-    if (process <= 0) return (bruce_result_t)process;
-    return process__wait((bruce_process_id_t)process, UINT32_MAX);
+    return filemanager__wait_child(process);
 }
 
 void filemanager__show_error(const char *action, bruce_result_t result) {

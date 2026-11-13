@@ -207,13 +207,9 @@ static void player__move_focus(int *focused, int delta) {
     *focused = (*focused + delta + PLAYER_APP__BUTTON_COUNT) % PLAYER_APP__BUTTON_COUNT;
 }
 
-/* Runs whichever control is focused; sets *minimize true for the one that
- * has no immediate effect of its own -- the caller exits on that, without
- * stopping playback (unlike BACK). */
 static void player__activate_focused(
-    int focused, player__playlist_t *playlist, char *title, size_t title_size, bool *paused, bool *minimize
+    int focused, player__playlist_t *playlist, char *title, size_t title_size, bool *paused
 ) {
-    *minimize = false;
     switch ((player__button_t)focused) {
         case PLAYER_APP__BUTTON_PREV: player__go_prev(playlist, title, title_size, paused); break;
         case PLAYER_APP__BUTTON_PLAY_PAUSE:
@@ -221,7 +217,7 @@ static void player__activate_focused(
             (void)(*paused ? audio__file_pause() : audio__file_resume());
             break;
         case PLAYER_APP__BUTTON_NEXT: player__go_next(playlist, title, title_size, paused); break;
-        case PLAYER_APP__BUTTON_MINIMIZE: *minimize = true; break;
+        case PLAYER_APP__BUTTON_MINIMIZE: (void)process__to_background(); break;
         default: break;
     }
 }
@@ -232,22 +228,6 @@ static void player__seek_backward(void) {
 }
 
 static void player__seek_forward(void) { (void)audio__file_seek(audio__file_position_ms() + PLAYER_APP__SEEK_STEP_MS); }
-
-/* Same pattern as clock_app.c/image_loader_app.c's identical helper: waits
- * out a temporary loss of foreground (an overlay, alt-tab) so that's told
- * apart from this process actually being killed. */
-static bool player__resume_after_handoff(void) {
-    bruce_process_snapshot_t snapshot;
-    bruce_process_id_t self = process__current_id();
-    if (self == BRUCE_PROCESS_ID_INVALID || process__snapshot(self, &snapshot) != BRUCE_OK ||
-        snapshot.state != BRUCE_PROCESS_BACKGROUND) {
-        return false;
-    }
-    do {
-        if (runtime__delay(20) != BRUCE_OK || process__snapshot(self, &snapshot) != BRUCE_OK) return false;
-    } while (snapshot.state == BRUCE_PROCESS_BACKGROUND);
-    return snapshot.state == BRUCE_PROCESS_FOREGROUND;
-}
 
 static void player__format_time(uint32_t milliseconds, char *out, size_t size) {
     uint32_t total_seconds = milliseconds / 1000u;
@@ -496,14 +476,10 @@ int player_app_main(int argc, char **argv) {
         }
 
         if (input_result == BRUCE_ERR_NOT_FOREGROUND) {
-            if (player__resume_after_handoff()) {
-                /* Any LEFT/RIGHT release while backgrounded was missed, so
-                 * don't trust a hold that may no longer be physically true. */
-                held_code = 0;
-                long_press_fired = false;
-                continue;
-            }
-            break;
+            held_code = 0;
+            long_press_fired = false;
+            if (runtime__delay(100) != BRUCE_OK) break;
+            continue;
         }
         if (input_result == BRUCE_ERR_TIMEOUT) continue; /* just redraw/animate again */
         if (input_result != BRUCE_OK) break; /* e.g. input deinitialized during shutdown */
@@ -522,12 +498,9 @@ int player_app_main(int argc, char **argv) {
         switch (event.code) {
             case BRUCE_INPUT_CODE_BACK:
                 goto done;
-            case BRUCE_INPUT_CODE_SELECT: {
-                bool minimize = false;
-                player__activate_focused(focused, &playlist, title, sizeof(title), &paused, &minimize);
-                if (minimize) goto minimized;
+            case BRUCE_INPUT_CODE_SELECT:
+                player__activate_focused(focused, &playlist, title, sizeof(title), &paused);
                 break;
-            }
             case BRUCE_INPUT_CODE_PREV:
                 player__move_focus(&focused, -1);
                 break;
@@ -556,7 +529,6 @@ int player_app_main(int argc, char **argv) {
     }
 done:
     (void)audio__file_stop();
-minimized:
     player__free_playlist(&playlist);
     return BRUCE_OK;
 }

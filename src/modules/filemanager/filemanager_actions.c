@@ -88,8 +88,7 @@ bruce_result_t filemanager__open_default(const char *path, bool gui) {
     int process = app_runner__run_path_with_environment(
         path, NULL, BRUCE_LAUNCH_FOREGROUND, gui ? gui_env : NULL, gui ? 1u : 0u
     );
-    if (process <= 0) return (bruce_result_t)process;
-    return process__wait((bruce_process_id_t)process, UINT32_MAX);
+    return filemanager__wait_child(process);
 }
 
 #define FILEMANAGER_OPEN_WITH_APPS_MAX 12
@@ -99,8 +98,7 @@ static bruce_result_t filemanager__run_terminal_command(const char *command_line
         {.name = "GUI", .value = "1"}
     };
     int process = app_runner__run_with_environment("terminal", command_line, BRUCE_LAUNCH_FOREGROUND, gui_env, 1u);
-    if (process <= 0) return (bruce_result_t)process;
-    return process__wait((bruce_process_id_t)process, UINT32_MAX);
+    return filemanager__wait_child(process);
 }
 
 static bool filemanager__strip_app_extension(const char *filename, char *out_name, size_t out_size) {
