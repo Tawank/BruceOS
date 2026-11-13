@@ -12,9 +12,11 @@
 #include "esp_attr.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_memory_utils.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h" // IWYU pragma: keep
 #include "freertos/semphr.h"
+#include "sdkconfig.h"
 
 #define TAG "bruce_display"
 #define DISPLAY__MAX_CONTEXTS 16
@@ -636,6 +638,18 @@ static void display__release_resources_locked(void) {
     if (s_transfer_mutex != NULL) xSemaphoreGive(s_transfer_mutex);
 }
 
+/* A PSRAM framebuffer is never DMA'd directly; transfers go through the internal pack buffer. */
+static bruce_display_color_t *display__alloc_framebuffer(bool *dma) {
+#if CONFIG_SPIRAM
+    bruce_display_color_t *framebuffer = heap_caps_malloc(DISPLAY__FB_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (framebuffer != NULL) {
+        *dma = false;
+        return framebuffer;
+    }
+#endif
+    return heap_caps_malloc(DISPLAY__FB_SIZE, MALLOC_CAP_INTERNAL | (*dma ? MALLOC_CAP_DMA : MALLOC_CAP_8BIT));
+}
+
 /* Switches the live rendering mode between buffered (with or without a
  * DMA-capable framebuffer) and direct, at runtime -- the same allocation
  * display__init() does up front, just replayed on demand. Used by
@@ -656,8 +670,7 @@ static bruce_result_t display__reconfigure_render_mode_locked(bool buffered, boo
     bool new_dma = buffered && dma;
 
     if (buffered) {
-        uint32_t framebuffer_caps = MALLOC_CAP_INTERNAL | (new_dma ? MALLOC_CAP_DMA : MALLOC_CAP_8BIT);
-        new_framebuffer = heap_caps_malloc(DISPLAY__FB_SIZE, framebuffer_caps);
+        new_framebuffer = display__alloc_framebuffer(&new_dma);
         if (new_framebuffer == NULL) return BRUCE_ERR_NO_MEMORY;
         new_pack_buffer = heap_caps_malloc(
             DISPLAY__DIRECT_BUF_PIXELS * sizeof(*new_pack_buffer), MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA
@@ -711,6 +724,9 @@ static bruce_result_t display__apply_effective_render_mode_locked(void) {
     /* s_reclaim_forced_direct is a standing, process-independent floor on top
      * of the per-process requests above -- see its declaration. */
     if (s_reclaim_forced_direct) target = BRUCE_DISPLAY_MODE_DIRECT;
+    if (target == BRUCE_DISPLAY_MODE_BUFFERED_DMA && esp_ptr_external_ram(s_framebuffer)) {
+        target = BRUCE_DISPLAY_MODE_BUFFERED;
+    }
     if (target == display__current_render_mode_locked()) return BRUCE_OK;
     return display__reconfigure_render_mode_locked(
         target != BRUCE_DISPLAY_MODE_DIRECT, target == BRUCE_DISPLAY_MODE_BUFFERED_DMA
@@ -746,9 +762,7 @@ bruce_result_t display__init(void) {
     s_buffered_rendering = config__get_display_buffered_rendering();
     s_dma_framebuffer = s_buffered_rendering && config__get_display_dma_framebuffer();
     if (s_buffered_rendering) {
-        uint32_t framebuffer_caps =
-            MALLOC_CAP_INTERNAL | (s_dma_framebuffer ? MALLOC_CAP_DMA : MALLOC_CAP_8BIT);
-        s_framebuffer = heap_caps_malloc(DISPLAY__FB_SIZE, framebuffer_caps);
+        s_framebuffer = display__alloc_framebuffer(&s_dma_framebuffer);
         if (s_framebuffer == NULL) {
             ESP_LOGE(TAG, "failed to allocate framebuffer");
             display_driver__deinit();

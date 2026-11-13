@@ -18,6 +18,7 @@
 
 #include "esp_audio_simple_player.h"
 #include "esp_gmf_err.h"
+#include "esp_gmf_oal_mem.h"
 #include "esp_log.h"
 #include "esp_system.h"
 
@@ -127,6 +128,12 @@ static bruce_result_t audio__es8311_enable(void) {
 #define AUDIO__I2S_DMA_FRAME_COUNT 240u
 #define AUDIO__I2S_DMA_RING_FRAMES (AUDIO__I2S_DMA_DESC_COUNT * AUDIO__I2S_DMA_FRAME_COUNT)
 #define AUDIO__STREAM_RING_FRAMES 4096u
+/* The ring is read from the I2S ISR, which may only touch PSRAM when it is not IRAM-safe. */
+#if CONFIG_SPIRAM && !CONFIG_I2S_ISR_IRAM_SAFE
+#define AUDIO__STREAM_RING_CAPS (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
+#else
+#define AUDIO__STREAM_RING_CAPS (MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)
+#endif
 
 /* A single producer app writes the FIFO while the I2S ISR consumes it. The
  * cursors are monotonically increasing, so each side owns one cursor and no
@@ -457,9 +464,8 @@ bruce_result_t audio__stream_open(uint8_t channels) {
         result = BRUCE_ERR_BUSY;
     } else {
 #if CONFIG_BRUCE_AUDIO_BACKEND_I2S && !CONFIG_BRUCE_QEMU_TEST_MODE
-        s_stream_ring = heap_caps_malloc(
-            AUDIO__STREAM_RING_FRAMES * 2u * sizeof(*s_stream_ring), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT
-        );
+        s_stream_ring =
+            heap_caps_malloc(AUDIO__STREAM_RING_FRAMES * 2u * sizeof(*s_stream_ring), AUDIO__STREAM_RING_CAPS);
         if (s_stream_ring == NULL) {
             result = BRUCE_ERR_NO_MEMORY;
         } else {
@@ -1307,6 +1313,7 @@ static bruce_result_t audio__mp3_play_blocking(const char *path, uint32_t token)
             .out = {.cb = audio__mp3_out_cb, .user_ctx = &pipe},
             .task_prio = (int)AUDIO__MP3_DECODE_TASK_PRIORITY,
             .task_stack = 6 * 1024,
+            .task_stack_in_ext = esp_gmf_oal_mem_spiram_stack_is_enabled(),
         };
         esp_asp_handle_t handle = NULL;
         esp_gmf_err_t new_result = esp_audio_simple_player_new(&cfg, &handle);
