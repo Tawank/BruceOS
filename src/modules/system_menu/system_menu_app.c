@@ -31,7 +31,7 @@ static const char *const SYSTEM_MENU__DEFAULT_ITEMS_JSON =
     "{\"icon\":\"cancel\",\"label\":\"Cancel\",\"action\":\"cancel\"},"
     "{\"icon\":\"keyboard-esc\",\"label\":\"Esc\",\"action\":\"input.esc\"},"
     "{\"icon\":\"keyboard-return\",\"label\":\"Enter\",\"action\":\"input.enter\"},"
-    "{\"icon\":\"arrange-bring-forward\",\"label\":\"Switch\",\"action\":\"process.next\"},"
+    "{\"icon\":\"arrange-bring-forward\",\"label\":\"Switch\",\"action\":\"process.preview\"},"
     "{\"icon\":\"apps\",\"label\":\"Launcher\",\"action\":\"launcher\"},"
     "{\"icon\":\"power\",\"label\":\"Off\",\"action\":\"shutdown now\"}"
     "]";
@@ -175,6 +175,8 @@ static int system_menu__run_action(const char *action) {
         result = strcmp(action, "process.next") == 0 ? process__switch_next() : process__switch_previous();
         return result == BRUCE_ERR_NOT_FOUND ? BRUCE_OK : result;
     }
+    if (strcmp(action, "process.preview") == 0)
+        return app_runner__run_command("GUI=1 process preview", BRUCE_LAUNCH_FOREGROUND);
     if (strcmp(action, "launcher") == 0)
         return app_runner__run_command("GUI=1 launcher", BRUCE_LAUNCH_FOREGROUND);
     if (strcmp(action, "device.power_off") == 0) return device__power_off(0);

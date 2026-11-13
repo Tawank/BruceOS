@@ -15,7 +15,7 @@
 #include "core_sdk/result.h"
 #include "core_sdk/runtime.h"
 
-#define PROCESS_APP__MAX_PROCESSES 16
+#define PROCESS_APP__MAX_PROCESSES 32
 #define PROCESS_APP__PREVIEW_HEADER_H 25
 
 static int process_app__parse_id(const char *value, bruce_process_id_t *out_id) {
@@ -45,7 +45,7 @@ static int process_app__resolve_target(const char *target, bruce_process_id_t *o
     if (parsed == BRUCE_OK) return BRUCE_OK;
     if (target == NULL || target[0] == '\0' || (target[0] >= '0' && target[0] <= '9')) return parsed;
 
-    /* ~1.7K of snapshots: heap, not this process's default-sized stack. */
+    /* Snapshots go on the heap, not this process's default-sized stack. */
     bruce_process_snapshot_t *processes = memory__malloc(PROCESS_APP__MAX_PROCESSES * sizeof(*processes));
     if (processes == NULL) return BRUCE_ERR_NO_MEMORY;
     size_t count = 0;
@@ -174,20 +174,18 @@ process_app__preview_draw_page(const bruce_process_snapshot_t *processes, size_t
 }
 
 static int process_app__preview_run(bruce_process_snapshot_t *candidates) {
-    size_t page = 0;
-    int selected = 0;
+    size_t index = 0;
     bool redraw = true;
     bruce_process_id_t drawn_ids[BRUCE_DISPLAY_MAX_TILES] = {0};
     size_t drawn_count = 0;
 
     for (;;) {
         size_t total = process_app__preview_candidates(candidates, PROCESS_APP__MAX_PROCESSES);
-        size_t pages = total == 0 ? 1 : (total + BRUCE_DISPLAY_MAX_TILES - 1) / BRUCE_DISPLAY_MAX_TILES;
-        if (page >= pages) page = pages - 1;
-        size_t start = page * BRUCE_DISPLAY_MAX_TILES;
-        size_t page_count = total > start ? total - start : 0;
+        if (index >= total) index = total > 0 ? total - 1 : 0;
+        size_t start = index - index % BRUCE_DISPLAY_MAX_TILES;
+        size_t page_count = total - start;
         if (page_count > BRUCE_DISPLAY_MAX_TILES) page_count = BRUCE_DISPLAY_MAX_TILES;
-        if (selected >= (int)page_count) selected = page_count > 0 ? (int)page_count - 1 : 0;
+        int selected = (int)(index - start);
 
         /* Redraw live as apps enter or leave the background set. */
         if (!redraw && page_count != drawn_count) redraw = true;
@@ -221,25 +219,17 @@ static int process_app__preview_run(bruce_process_snapshot_t *candidates) {
         }
         if ((event.code == BRUCE_INPUT_CODE_UP || event.code == BRUCE_INPUT_CODE_PREV ||
              event.code == BRUCE_INPUT_CODE_LEFT) &&
-            selected > 0) {
-            selected--;
+            total > 0) {
+            index = (index + total - 1) % total;
             redraw = true;
         } else if ((event.code == BRUCE_INPUT_CODE_DOWN || event.code == BRUCE_INPUT_CODE_NEXT ||
                     event.code == BRUCE_INPUT_CODE_RIGHT) &&
-                   selected + 1 < (int)page_count) {
-            selected++;
-            redraw = true;
-        } else if (event.code == BRUCE_INPUT_CODE_LEFT && page > 0) {
-            page--;
-            selected = 0;
-            redraw = true;
-        } else if (event.code == BRUCE_INPUT_CODE_RIGHT && page + 1 < pages) {
-            page++;
-            selected = 0;
+                   total > 0) {
+            index = (index + 1) % total;
             redraw = true;
         } else if ((event.code == BRUCE_INPUT_CODE_SELECT || event.code == BRUCE_INPUT_CODE_BUTTON_A) &&
-                   page_count > 0) {
-            bruce_process_id_t target = candidates[start + (size_t)selected].id;
+                   total > 0) {
+            bruce_process_id_t target = candidates[index].id;
             bruce_process_snapshot_t snapshot;
             if (process__snapshot(target, &snapshot) == BRUCE_OK) {
                 (void)display__set_tiles(NULL, 0);
