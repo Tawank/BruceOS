@@ -301,15 +301,24 @@ bool selftest__run_image_redraw_on_regain_case(void) {
     }
 
     bool ok = false;
-    int launched = app_runner__run("image", fixture_path, BRUCE_LAUNCH_FOREGROUND);
-    if (launched > 0) {
-        bruce_display_color_t pixel = 0;
-        bool drew_red = false;
+    /* Retried like image/stdin_pipe above: decoding the 1x1 fixture needs a
+     * screen-sized resize buffer from the external heap, which can
+     * transiently fail with BRUCE_ERR_NO_MEMORY right after the heavy
+     * loader selftests, making "image" exit without ever drawing. */
+    int launched = 0;
+    bruce_display_color_t pixel = 0;
+    bool drew_red = false;
+    for (int attempt = 0; attempt < 5 && !drew_red; ++attempt) {
+        if (attempt > 0) (void)runtime__delay(100);
+        launched = app_runner__run("image", fixture_path, BRUCE_LAUNCH_FOREGROUND);
+        if (launched <= 0) break;
         for (int i = 0; i < 25 && !drew_red; ++i) {
             (void)runtime__delay(20);
             drew_red = display__test_read_pixel(center_x, center_y, &pixel) == BRUCE_OK && pixel == BRUCE_COLOR_RED;
         }
-
+        if (!drew_red) (void)process__kill((bruce_process_id_t)launched);
+    }
+    if (launched > 0) {
         bool stole_screen = drew_red && runtime__to_foreground() == BRUCE_OK && display__begin_frame() == BRUCE_OK &&
                              display__fill_screen(BRUCE_COLOR_BLUE) == BRUCE_OK && display__present() == BRUCE_OK;
         /* Give "image"'s own task a chance to actually get scheduled and

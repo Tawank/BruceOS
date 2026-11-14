@@ -555,6 +555,16 @@ memory_external__allocate_page_locked(memory_external__record_t *record, size_t 
          * hardware does, so route it through a plain RAM mirror instead. */
         uint8_t *shadow = heap_caps_malloc(record->size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
         if (shadow == NULL) {
+            /* QEMU has no PSRAM, so a screen-sized object (e.g. the image
+             * viewer's fit-to-screen bitmap) needs one contiguous internal
+             * block. Ask registered providers (the display's buffer) to
+             * make room, as other big allocations do; restored when the
+             * calling process exits. */
+            if (memory__reclaim(record->size, NULL, NULL) == BRUCE_OK) {
+                shadow = heap_caps_malloc(record->size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+            }
+        }
+        if (shadow == NULL) {
             esp_partition_munmap(record->mmap_handle);
             for (size_t i = 0; i < wanted; ++i) s_pages[first + i] = false;
             memset(record, 0, sizeof(*record));

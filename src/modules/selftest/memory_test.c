@@ -205,22 +205,37 @@ bool selftest__run_external_memory_slab_case(void) {
      * all (see memory_external__allocate_internal_locked()'s fallback). */
     bool both_swap = object_a.backend == BRUCE_MEMORY_BACKEND_SWAP && object_b.backend == BRUCE_MEMORY_BACKEND_SWAP;
     if (both_swap) {
+        /* Compare pages via the allocator's own layout, not the data
+         * pointers: under QEMU record->data is a heap shadow of the page
+         * that is not 64KB-aligned, so two slots of one page can straddle
+         * a 64KB address boundary. */
         const size_t mmu_page = 65536u;
-        ok = ok && (uintptr_t)data_a / mmu_page == (uintptr_t)data_b / mmu_page;
-
-        bruce_memory_layout_block_t blocks[8];
+        bruce_memory_layout_block_t blocks[32];
         size_t count = 0;
-        ok = ok && memory_external__layout(blocks, 8, &count) == BRUCE_OK;
-        bool found_small_block = false;
-        for (size_t i = 0; i < count && i < 8; ++i) {
+        ok = ok && memory_external__layout(blocks, 32, &count) == BRUCE_OK && count <= 32;
+        bool found_a = false;
+        bool found_b = false;
+        size_t page_a = 0;
+        size_t page_b = 0;
+        for (size_t i = 0; i < count && i < 32; ++i) {
             if (blocks[i].handle == object_a.handle) {
+                found_a = true;
+                page_a = blocks[i].address / mmu_page;
                 /* The whole point of slab support: a 4KB request no longer
                  * reserves a whole 64KB page for itself. */
-                found_small_block = blocks[i].size < mmu_page;
-                break;
+                ok = ok && blocks[i].size < mmu_page;
+            } else if (blocks[i].handle == object_b.handle) {
+                found_b = true;
+                page_b = blocks[i].address / mmu_page;
             }
         }
-        ok = ok && found_small_block;
+        ok = ok && found_a && found_b && page_a == page_b;
+        if (!ok) {
+            printf(
+                "[selftest] memory/external_slab: layout found_a=%d found_b=%d page_a=%u page_b=%u count=%u\n",
+                found_a, found_b, (unsigned)page_a, (unsigned)page_b, (unsigned)count
+            );
+        }
     }
 
     uint8_t pattern_a1[64];
