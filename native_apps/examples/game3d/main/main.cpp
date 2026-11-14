@@ -187,6 +187,15 @@ extern "C" int app_main(int argc, char **argv) {
     int animBoxIdx = -1;
     int32_t animBX0 = 0, animBZ0 = 0, animBX1 = 0, animBZ1 = 0;
 
+    // Faces the player along (dr, dc) where it stands, e.g. a turn or a blocked move.
+    auto turnTo = [&](int dr, int dc) {
+        facingDr = dr;
+        facingDc = dc;
+        rebuildFaceGeometry(faceObj, beakMat, accentMat, facingDr, facingDc);
+        faceObj->setPosition(cellWorldX(gs.playerC, gs.cols), kPlayerH / 2, cellWorldZ(gs.playerR, gs.rows));
+        dirty = true;
+    };
+
     bool running = true;
     while (running) {
         // Standard event-loop drain (see native_apps/examples/nes's
@@ -203,7 +212,9 @@ extern "C" int app_main(int argc, char **argv) {
             }
             if (animActive) continue; // mid-slide: drop everything else
 
-            if (ev.code == BRUCE_INPUT_CODE_SELECT) {
+            // The keyboard's Enter shares SELECT's code; only its source tells them apart.
+            bool enterKey = ev.code == BRUCE_INPUT_CODE_SELECT && ev.type == BRUCE_INPUT_KEY;
+            if (enterKey || (gs.solved && ev.code == BRUCE_INPUT_CODE_SELECT)) {
                 if (gs.solved) levelIndex = (levelIndex + 1) % kLevelCount;
                 reloadLevel(levelIndex); // also serves as "restart" when not solved
                 continue;
@@ -216,12 +227,16 @@ extern "C" int app_main(int argc, char **argv) {
                 case BRUCE_INPUT_CODE_DOWN: dr = -1; break;
                 case BRUCE_INPUT_CODE_LEFT: dc = -1; break;
                 case BRUCE_INPUT_CODE_RIGHT: dc = 1; break;
+                case BRUCE_INPUT_CODE_NEXT: turnTo(-facingDc, facingDr); continue; // clockwise
+                case BRUCE_INPUT_CODE_PREV: turnTo(facingDc, -facingDr); continue;
+                case BRUCE_INPUT_CODE_SELECT:
+                    dr = facingDr;
+                    dc = facingDc;
+                    break;
                 default: continue;
             }
 
-            facingDr = dr;
-            facingDc = dc;
-            rebuildFaceGeometry(faceObj, beakMat, accentMat, facingDr, facingDc);
+            turnTo(dr, dc);
             int oldR = gs.playerR, oldC = gs.playerC;
             MoveResult res = tryMove(gs, dr, dc);
             if (res.moved) {
@@ -242,14 +257,6 @@ extern "C" int app_main(int argc, char **argv) {
                 }
                 animActive = true;
                 animFrame = 0;
-            } else {
-                // Blocked: still snap the face to the direction that was
-                // tried (rebuildFaceGeometry() above already did the
-                // shape), no animation needed.
-                int32_t px = cellWorldX(gs.playerC, gs.cols);
-                int32_t pz = cellWorldZ(gs.playerR, gs.rows);
-                faceObj->setPosition(px, kPlayerH / 2, pz);
-                dirty = true;
             }
         }
 

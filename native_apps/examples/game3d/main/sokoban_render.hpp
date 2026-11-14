@@ -259,7 +259,7 @@ inline void drawHud(const GameState &gs, int levelIndex, int width, int height) 
         display__fill_rect(0, by, (int16_t)width, (int16_t)kHudBarH, kHudBg);
         display__set_text_color(rgb565(150, 158, 180));
         display__set_text_bg_color(kHudBg);
-        display__draw_centre_string("SELECT restart  BACK exit", (int16_t)(width / 2), (int16_t)(by + 4));
+        display__draw_centre_string("SELECT go  ENTER restart  BACK exit", (int16_t)(width / 2), (int16_t)(by + 4));
     }
 }
 

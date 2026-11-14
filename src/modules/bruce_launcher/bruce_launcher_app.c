@@ -1054,7 +1054,11 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
             submenu_params.skip_initial_flush = false; /* one-shot: only meant for the call just made */
             s_live_choices.count = 0;
             if (result == BRUCE_ERR_CANCELLED) {
-                if (display__await_redraw()) {
+                /* Shown in a preview tile: redraw every second so the header clock keeps ticking. */
+                bool tiled = process__is_background() && display__width() > 0;
+                bool redraw = tiled ? runtime__delay(BRUCE_LAUNCHER_STATUS_REFRESH_MS) == BRUCE_OK
+                                    : display__await_redraw();
+                if (redraw) {
                     /* Foreground was lost (alt-tab, system_menu, ...) and has
                      * now returned: redraw the same menu with the same row
                      * still highlighted (dialog__choice_launcher_ex() reports
@@ -1355,6 +1359,7 @@ int bruce_launcher_app_main(int argc, char **argv) {
             .padding_right = BRUCE_LAUNCHER_BORDER_PAD + 1,
             .padding_bottom = BRUCE_LAUNCHER_BORDER_PAD + 1,
             .padding_left = BRUCE_LAUNCHER_BORDER_PAD + 1,
+            .compact_padding_top = BRUCE_LAUNCHER_COMPACT_HEADER_H + 1,
             .text_size = bruce_launcher__submenu_font_size(),
             .draw_border = bruce_launcher__window_draw_border,
             .draw_status = bruce_launcher__window_draw_status,

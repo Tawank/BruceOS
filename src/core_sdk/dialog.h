@@ -360,6 +360,9 @@ typedef struct {
     int padding_right;
     int padding_bottom;
     int padding_left;
+    /* Top space to reserve instead in a quarter-screen preview tile, where the
+     * frame draws its compact form; the other sides get none there. */
+    int compact_padding_top;
     /* Font size window-chrome content should use; <= 0 falls back to 1. */
     int text_size;
     /* Paints the full window frame. Called once per dialog__choice() call,

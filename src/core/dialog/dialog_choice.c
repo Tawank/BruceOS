@@ -272,14 +272,15 @@ bruce_result_t dialog__gui_choice(
     int w = display__width();
     int h = display__height();
     bool compact = dialog__gui_compact(w, h);
-    bool render_launcher =
-        !compact && render_params != NULL && render_params->render_launcher && s_window_renderer_set;
+    bool render_launcher = render_params != NULL && render_params->render_launcher && s_window_renderer_set;
     const bruce_dialog_render_params_t *params = compact ? NULL : render_params;
     int pad_left = params != NULL ? params->padding_left : 0;
     int pad_top = params != NULL ? params->padding_top : 0;
     int pad_right = params != NULL ? params->padding_right : 0;
     int pad_bottom = params != NULL ? params->padding_bottom : 0;
-    if (render_launcher) {
+    if (render_launcher && compact) {
+        pad_top = s_window_renderer.compact_padding_top;
+    } else if (render_launcher) {
         pad_left = s_window_renderer.padding_left;
         pad_top = s_window_renderer.padding_top;
         pad_right = s_window_renderer.padding_right;
@@ -290,7 +291,7 @@ bruce_result_t dialog__gui_choice(
     int right = w - pad_right;
     int bottom = h - pad_bottom;
     bool render_borders =
-        compact || (!render_launcher && (render_params == NULL || render_params->render_borders));
+        !render_launcher && (compact || render_params == NULL || render_params->render_borders);
     bool padded = pad_left > 0 || pad_top > 0 || pad_right > 0 || pad_bottom > 0;
     bool render_window = render_borders && params != NULL && padded;
     int viewport_w = right - left;
