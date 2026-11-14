@@ -68,12 +68,25 @@ key events (letters, digits, etc.) -- useful for cheat codes.
   scale-blit to the actual (runtime-queried) screen size itself, batching
   rows per `display__draw_rgb_bitmap()` call the same way `nes_video.c`
   does for the NES's fixed framebuffer.
-- **Audio.** Disabled, same as `nes/`'s NES emulation -- the public Bruce
-  ELF SDK does not expose an audio stream API. `doomfeatures.h`'s
-  `FEATURE_SOUND` is left undefined so the SDL-based sound/music backends
-  (`i_sdlsound.c`, `i_sdlmusic.c`) are excluded entirely rather than stubbed;
-  `i_sound.c`'s own hooks (`I_InitSound` etc.) already no-op cleanly without
-  them.
+- **Audio.** Sound effects play through the Core PCM stream
+  (`audio__stream_open()`/`audio__stream_write()`, `core_sdk/audio.h`);
+  music does not. `CMakeLists.txt` defines `FEATURE_SOUND`, so
+  `i_sound.c` routes through `DG_sound_module`/`DG_music_module`, both
+  implemented in `doom_sound.c` -- the SDL sound/music backends
+  (`i_sdlsound.c`, `i_sdlmusic.c`) stay excluded, and `compat/SDL_mixer.h`
+  is an empty header that satisfies `i_sound.c`'s unconditional
+  `#include <SDL_mixer.h>` without patching upstream. Sound lumps (8-bit
+  unsigned DMX PCM, usually 11025 Hz) are loaded lazily, pinned
+  `PU_STATIC` only while a channel plays them, and resampled
+  (nearest-neighbour, 16.16 fixed point) to `audio__stream_sample_rate()`
+  in a mono mix -- stereo separation is ignored. Mixing happens on the
+  game thread in `Update()`, once per `doomgeneric_Tick()`, filling as
+  much of the stream FIFO as is free, so playback tolerates frames slower
+  than a tic at the cost of up to one FIFO's worth of latency. If the
+  stream can't be opened (another app holds it) the game just runs
+  silent. Music would need an OPL2 synth emulator for Doom's MUS tracks,
+  which doomgeneric doesn't include and which would compete with the
+  renderer for CPU; `DG_music_module` is a no-op stub.
 - **Joystick.** `doomgeneric/i_joystick.c` needed no changes -- like
   `i_sound.c`, this fork already guards its SDL_Joystick calls behind
   `#ifdef ORIGCODE` (never defined here, see `config.h`), so the functions

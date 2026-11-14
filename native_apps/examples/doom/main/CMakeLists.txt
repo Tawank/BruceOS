@@ -1,8 +1,8 @@
 include("${CMAKE_CURRENT_LIST_DIR}/doomgeneric_sources.cmake")
 
 idf_component_register(
-    SRCS "main.c" "doom_video.c" "doom_input.c" ${DOOMGENERIC_SOURCES}
-    INCLUDE_DIRS "." "${DOOMGENERIC_DIR}" "../../../include" "../../../../src")
+    SRCS "main.c" "doom_video.c" "doom_input.c" "doom_sound.c" ${DOOMGENERIC_SOURCES}
+    INCLUDE_DIRS "." "compat" "${DOOMGENERIC_DIR}" "../../../include" "../../../../src")
 
 # Must reach every source: doomgeneric.c sizes DG_ScreenBuffer and i_video.c picks its scale from these.
 target_compile_definitions(${COMPONENT_LIB} PRIVATE DOOMGENERIC_RESX=320 DOOMGENERIC_RESY=200)
@@ -12,6 +12,10 @@ target_compile_definitions(${COMPONENT_LIB} PRIVATE DOOMGENERIC_RESX=320 DOOMGEN
 # promotes several of its long-standing, harmless patterns to hard errors.
 # None of these were introduced by fetching it here -- they're present in
 # upstream doomgeneric against any sufficiently strict compiler.
+#
+# FEATURE_SOUND routes i_sound.c through DG_sound_module/DG_music_module
+# (doom_sound.c) instead of compiling the sound layer out.
+target_compile_definitions(${COMPONENT_LIB} PRIVATE FEATURE_SOUND)
 target_compile_options(${COMPONENT_LIB} PRIVATE
     -Wno-error=implicit-function-declaration
     -Wno-error=implicit-int

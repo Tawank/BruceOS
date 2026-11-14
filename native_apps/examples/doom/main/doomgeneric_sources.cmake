@@ -58,8 +58,8 @@ endif()
 # backends alongside the portable engine; this port supplies its own
 # frontend (main.c + doom_video.c + doom_input.c, following the same
 # DG_Init/DG_DrawFrame/DG_SleepMs/DG_GetTicksMs/DG_GetKey interface they
-# implement) instead, and disables audio entirely (see ../README.md), so
-# none of these compile or link here -- excluding them in this file (kept
+# implement) and its own sound module (doom_sound.c, see ../README.md)
+# instead, so none of these compile or link here -- excluding them in this file (kept
 # in this app's own tree, not upstream's) is what lets the engine be
 # consumed straight from ozkl/doomgeneric with no fork to maintain.
 file(GLOB DOOMGENERIC_SOURCES "${DOOMGENERIC_DIR}/*.c")
