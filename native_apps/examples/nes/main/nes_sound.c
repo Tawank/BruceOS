@@ -65,8 +65,6 @@ void nes_sound_pump(void) {
 
     audio_playfunc(audio_samples, (int)generate);
 
-    for (uint32_t i = 0; i < generate; i++) { audio_samples[i] = (int16_t)(audio_samples[i] >> 2); }
-
     (void)audio__stream_write(audio_samples, generate);
 }
 

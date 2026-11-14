@@ -18,9 +18,10 @@
  * @brief Plays a square-wave tone using the board speaker or buzzer.
  *
  * A non-blocking tone is queued in a worker task; a blocking tone returns
- * after its duration. Concurrent tones are serialized (and, per
- * audio__stream_open() below, serialized against any open stream too) and
- * the bounded asynchronous queue returns BRUCE_ERR_RESOURCE_LIMIT when full.
+ * after its duration. Concurrent tones are serialized with each other,
+ * but on PCM backends a tone is mixed over any open streams rather than
+ * excluding them. The bounded asynchronous queue returns
+ * BRUCE_ERR_RESOURCE_LIMIT when full.
  *
  * @param frequency_hz Tone frequency in Hz (BRUCE_AUDIO_MIN/MAX_FREQUENCY_HZ).
  * @param duration_ms Tone duration in milliseconds (up to BRUCE_AUDIO_MAX_TONE_DURATION_MS).
@@ -42,11 +43,11 @@ uint32_t audio__stream_sample_rate(void);
 /**
  * @brief Opens PCM audio output.
  *
- * Shares the same underlying output as audio__tone() -- while a stream is
- * open, a concurrent audio__tone() call still works but blocks until the
- * stream write in progress, if any, finishes. Only one stream may be open
- * device-wide at a time; calling this while another process's stream is
- * open returns BRUCE_ERR_BUSY. If the owning process exits or is killed
+ * Several processes may each hold one stream at once (a small fixed number
+ * of slots device-wide); their output, and any audio__tone(), is summed by
+ * the mixer with saturation. A stream that underruns only goes silent
+ * itself. A second open by the same process, or an open when every slot is
+ * taken, returns BRUCE_ERR_BUSY. If the owning process exits or is killed
  * without calling audio__stream_close() itself, the stream is torn down
  * automatically.
  *
@@ -95,10 +96,11 @@ bruce_result_t audio__stream_close(void);
  * this returns (so a bad path or unsupported file is reported right away,
  * not discovered later in the background). A valid file is then handed off
  * to a dedicated background process this call spawns, built on top of
- * audio__stream_open()/write()/close(), so playback shares their one-
- * stream-at-a-time exclusivity (that background process gets BRUCE_ERR_BUSY
- * internally, silently, if a tone or another file is already playing --
- * call audio__file_is_playing() first if the caller needs to know).
+ * audio__stream_open()/write()/close(), so it is mixed with other apps'
+ * streams and tones (only one file plays at a time; the background process
+ * gets BRUCE_ERR_BUSY internally, silently, if another file is already
+ * playing or every stream slot is taken -- call audio__file_is_playing()
+ * first if the caller needs to know).
  * audio__file_pause()/_resume()/_seek()/_stop() below control whatever file
  * is currently playing from any process, including this call's own caller
  * -- they just set a request flag the background process's loop reacts to.
