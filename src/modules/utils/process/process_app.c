@@ -1,4 +1,5 @@
 #include "process_app.h"
+#include "process_internal.h"
 
 #include <errno.h> // IWYU pragma: keep
 #include <stdint.h>
@@ -204,19 +205,14 @@ static bruce_result_t process_app__preview_draw_selection(size_t count, int sele
     return display__present();
 }
 
-/* Long-press menu for one app; returns true when the user chose to switch to it. */
-static bool process_app__preview_menu(const bruce_process_snapshot_t *process) {
-    static const bruce_dialog_choice_t choices[] = {
-        {.label = "Switch to", .value = "switch"},
-        {.label = "Kill", .value = "kill"},
-        {.label = "Cancel", .value = "cancel"},
-    };
-    (void)display__set_tiles(NULL, 0);
+bool process_app__menu(const bruce_process_snapshot_t *process, bool can_switch) {
+    bruce_dialog_choice_t choices[3];
+    size_t count = 0;
+    if (can_switch) choices[count++] = (bruce_dialog_choice_t){.label = "Switch to", .value = "switch"};
+    choices[count++] = (bruce_dialog_choice_t){.label = "Kill", .value = "kill"};
+    choices[count++] = (bruce_dialog_choice_t){.label = "Cancel", .value = "cancel"};
     size_t selected = 0;
-    if (dialog__choice(process->name, NULL, choices, sizeof(choices) / sizeof(choices[0]), &selected) !=
-        BRUCE_OK) {
-        return false;
-    }
+    if (dialog__choice(process->name, NULL, choices, count, &selected) != BRUCE_OK) return false;
     if (strcmp(choices[selected].value, "kill") == 0) (void)process__kill(process->id);
     return strcmp(choices[selected].value, "switch") == 0;
 }
@@ -278,7 +274,8 @@ static int process_app__preview_run(bruce_process_snapshot_t *candidates) {
             bruce_process_snapshot_t target = candidates[index];
             bool switch_to = true;
             if (input__wait_long_press(&event, PROCESS_APP__PREVIEW_LONG_PRESS_MS)) {
-                switch_to = process_app__preview_menu(&target);
+                (void)display__set_tiles(NULL, 0);
+                switch_to = process_app__menu(&target, true);
             }
             bruce_process_snapshot_t snapshot;
             if (switch_to && process__snapshot(target.id, &snapshot) == BRUCE_OK) {
@@ -290,10 +287,11 @@ static int process_app__preview_run(bruce_process_snapshot_t *candidates) {
     }
 }
 
-static int process_app__preview(void) {
+int process_app__preview(void) {
     bruce_process_snapshot_t *candidates = memory__malloc(BRUCE_PROCESS_MAX * sizeof(*candidates));
     if (candidates == NULL) return BRUCE_ERR_NO_MEMORY;
     int result = process_app__preview_run(candidates);
+    (void)display__set_tiles(NULL, 0);
     memory__free(candidates);
     return result;
 }
@@ -301,13 +299,15 @@ static int process_app__preview(void) {
 int process_app_main(int argc, char **argv) {
     ArgParser *root = ap_new_parser();
     if (root == NULL) return BRUCE_ERR_NO_MEMORY;
-    ap_set_helptext(root, "Switch, preview, signal, or force-kill managed processes.");
+    ap_set_helptext(root, "List, switch, preview, signal, or force-kill managed processes.");
 
     ArgParser *switch_command = ap_new_cmd(root, "switch");
     ArgParser *signal_command = ap_new_cmd(root, "signal");
     ArgParser *kill_command = ap_new_cmd(root, "kill");
     ArgParser *preview_command = ap_new_cmd(root, "preview");
-    if (switch_command == NULL || signal_command == NULL || kill_command == NULL || preview_command == NULL) {
+    ArgParser *list_command = ap_new_cmd(root, "list");
+    if (switch_command == NULL || signal_command == NULL || kill_command == NULL || preview_command == NULL ||
+        list_command == NULL) {
         ap_free(root);
         return BRUCE_ERR_NO_MEMORY;
     }
@@ -322,6 +322,7 @@ int process_app_main(int argc, char **argv) {
     ap_add_required_arg(kill_command, "target", "Process ID or exact process name");
     ap_unknown_options_as_args(kill_command);
     ap_set_helptext(preview_command, "Tile background GUI apps in a live preview grid");
+    ap_set_helptext(list_command, "List processes with CPU and memory use (task manager with GUI=1)");
 
     if (!ap_parse(root, argc, argv)) {
         ap_status_t status = ap_get_status(root);
@@ -345,6 +346,8 @@ int process_app_main(int argc, char **argv) {
         result = process_app__kill(ap_get_arg(kill_command, "target"));
     } else if (command == preview_command) {
         result = process_app__preview();
+    } else if (command == list_command) {
+        result = process_list__run();
     } else {
         ap_print_help(root);
         result = BRUCE_ERR_INVALID_ARGUMENT;

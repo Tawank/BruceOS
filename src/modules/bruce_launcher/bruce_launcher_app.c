@@ -34,6 +34,8 @@
 #define BRUCE_LAUNCHER_STATUS_TEXT_Y 11
 #define BRUCE_LAUNCHER_STATUS_CORNER_INSET 6
 #define BRUCE_LAUNCHER_BACKGROUND_WAIT_MS 1000
+/* Header height of the compact view shown in a quarter-screen preview tile. */
+#define BRUCE_LAUNCHER_COMPACT_HEADER_H 12
 /* Command palette: every command in the tree, flattened, capped well above
  * any realistic config (root + submenus stay well under this even at
  * BRUCE_LAUNCHER_MAX_ENTRIES per level a few levels deep). */
@@ -66,10 +68,49 @@ static int bruce_launcher__submenu_font_size(void) {
     return display__width() >= 200 ? BRUCE_LAUNCHER_FONT_MEDIUM : BRUCE_LAUNCHER_FONT_SMALL;
 }
 
+/* A quarter-screen preview tile is too small for the status bar and icons, so it gets a compact view. */
+static bool bruce_launcher__compact(void) {
+    return display__width() * display__height() * 4 < display__screen_width() * display__screen_height();
+}
+
+static void bruce_launcher__format_clock(char *out, size_t size) {
+    snprintf(out, size, "--:--:--");
+    bruce_clock_datetime_t time;
+    if (clock__get_local(&time) != BRUCE_OK) return;
+    int hour = time.hour;
+    if (!config__get_time_clock24hr()) {
+        hour %= 12;
+        if (hour == 0) hour = 12;
+    }
+    snprintf(out, size, "%02d:%02d:%02d", hour, time.minute, time.second);
+}
+
+static void bruce_launcher__draw_compact_status(const bruce_launcher_theme_t *theme) {
+    int w = display__width();
+    display__fill_rect(0, 0, (int16_t)w, BRUCE_LAUNCHER_COMPACT_HEADER_H, theme->bg);
+    display__set_text_color(theme->pri);
+    display__set_text_bg_color(theme->bg);
+    display__set_text_size(BRUCE_LAUNCHER_FONT_SMALL);
+    char text[13];
+    bruce_launcher__format_clock(text, sizeof(text));
+    display__set_cursor(3, 2);
+    display__print(text);
+    int battery = device__get_battery();
+    if (battery >= 0) {
+        snprintf(text, sizeof(text), "%d%%", battery);
+        display__set_cursor((int16_t)(w - 3 - (int)strlen(text) * BRUCE_LAUNCHER_FONT_ADVANCE), 2);
+        display__print(text);
+    }
+}
+
 static uint32_t bruce_launcher__draw_status_bar(const bruce_launcher_theme_t *theme) {
     size_t count = 0;
     uint32_t revision = 0;
     if (status_icon__list(NULL, 0, &count, &revision) != BRUCE_OK) { return revision; }
+    if (bruce_launcher__compact()) {
+        bruce_launcher__draw_compact_status(theme);
+        return revision;
+    }
     int w = display__width();
     display__fill_rect(
         BRUCE_LAUNCHER_BORDER_PAD + BRUCE_LAUNCHER_STATUS_CORNER_INSET,
@@ -82,17 +123,8 @@ static uint32_t bruce_launcher__draw_status_bar(const bruce_launcher_theme_t *th
     display__set_text_bg_color(theme->bg);
     display__set_text_size(BRUCE_LAUNCHER_FONT_SMALL);
 
-    char clock_text[13] = "--:--:--";
-    bruce_clock_datetime_t time;
-    if (clock__get_local(&time) == BRUCE_OK) {
-        bool clock24 = config__get_time_clock24hr();
-        int hour = time.hour;
-        if (!clock24) {
-            hour %= 12;
-            if (hour == 0) hour = 12;
-        }
-        snprintf(clock_text, sizeof(clock_text), "%02d:%02d:%02d", hour, time.minute, time.second);
-    }
+    char clock_text[13];
+    bruce_launcher__format_clock(clock_text, sizeof(clock_text));
     int clock_x = BRUCE_LAUNCHER_BORDER_PAD + 8;
     display__set_cursor(clock_x, BRUCE_LAUNCHER_STATUS_TEXT_Y);
     display__print(clock_text);
@@ -143,6 +175,11 @@ static void bruce_launcher__draw_main_border(const bruce_launcher_theme_t *theme
     int h = display__height();
 
     display__fill_screen(theme->bg);
+    if (bruce_launcher__compact()) {
+        const int16_t line_y = BRUCE_LAUNCHER_COMPACT_HEADER_H;
+        display__draw_line(0, line_y, (int16_t)(w - 1), line_y, theme->pri);
+        return;
+    }
     display__draw_round_rect(
         BRUCE_LAUNCHER_BORDER_PAD,
         BRUCE_LAUNCHER_BORDER_PAD,
@@ -544,6 +581,42 @@ static void bruce_launcher__draw_root_menu_grid(
     }
 }
 
+/* Compact view: the selected entry's icon sized to the space left, neighbors beside it, label below. */
+static void bruce_launcher__draw_root_menu_compact(
+    const bruce_launcher_menu_t *menu, int selected, const bruce_launcher_theme_t *theme
+) {
+    int w = display__width();
+    int h = display__height();
+    int16_t char_w = BRUCE_LAUNCHER_FONT_ADVANCE, char_h = 10;
+    (void)display__get_font_metrics(&char_w, &char_h);
+    int top = BRUCE_LAUNCHER_COMPACT_HEADER_H + 3;
+    int label_y = h - 2 - char_h;
+    int icon_size = label_y - 2 - top;
+    if (icon_size > 32) icon_size = 32;
+    const bruce_launcher_entry_t *entries = bruce_launcher__menu_entries(menu);
+    const bruce_launcher_entry_t *entry = &entries[selected];
+    if (icon_size >= 8) {
+        int icon_cy = top + (label_y - 2 - top) / 2;
+        bruce_launcher__draw_entry_icon(entry, w / 2, icon_cy, icon_size, theme->pri);
+        int side_size = icon_size * 2 / 3;
+        if (menu->entry_count > 1 && side_size >= 8) {
+            int spacing = w / 3;
+            int max_spacing = w / 2 - side_size / 2 - 3;
+            if (spacing > max_spacing) spacing = max_spacing;
+            int previous = (selected + menu->entry_count - 1) % menu->entry_count;
+            int next = (selected + 1) % menu->entry_count;
+            int left_x = w / 2 - spacing;
+            int right_x = w / 2 + spacing;
+            bruce_launcher__draw_entry_icon(&entries[previous], left_x, icon_cy, side_size, theme->sec);
+            bruce_launcher__draw_entry_icon(&entries[next], right_x, icon_cy, side_size, theme->sec);
+        }
+    }
+    const char *label = bruce_launcher__entry_label(entry);
+    bruce_launcher__draw_label_fit(
+        label, w / 2, label_y, BRUCE_LAUNCHER_FONT_SMALL, w - 8, theme->pri, theme->bg
+    );
+}
+
 /* Root-menu entry point: dispatches to whichever layout render.layout
  * selects (see bruce_launcher_config.h). Nested submenus never call this --
  * they always use Core's plain list dialog (dialog__choice_launcher),
@@ -562,6 +635,10 @@ static void bruce_launcher__draw_root_menu(
         int text_w = (int)strlen(empty_label) * BRUCE_LAUNCHER_FONT_ADVANCE * BRUCE_LAUNCHER_FONT_SMALL;
         display__set_cursor((w - text_w) / 2, (h + BRUCE_LAUNCHER_STATUS_H) / 2);
         display__print(empty_label);
+        return;
+    }
+    if (bruce_launcher__compact()) {
+        bruce_launcher__draw_root_menu_compact(menu, selected, theme);
         return;
     }
 
@@ -1093,11 +1170,9 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
         bruce_input_event_t ev;
         bruce_result_t result = input__read(&ev, 100);
         if (result == BRUCE_ERR_NOT_FOREGROUND) {
-            /* Core clears this process's display on its first frame after it
-             * regains foreground. Invalidate the cached selection so that
-             * frame repaints the whole launcher, not only the status bar. */
-            last_drawn = -1;
-            if (!display__await_redraw()) (void)runtime__delay(20);
+            /* Visible in a preview tile: keep looping so the status bar clock stays live. */
+            (void)runtime__delay(100);
+            if (display__viewport_changed()) last_drawn = -1;
             continue;
         }
         if (result != BRUCE_OK || ev.action != BRUCE_INPUT_PRESS) { continue; }

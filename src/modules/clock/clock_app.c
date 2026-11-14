@@ -19,6 +19,9 @@
 #define CLOCK_APP__MENU_HINT_MS 5000u
 
 
+/* Keeps a backgrounded loop running so timers still fire and a preview tile stays live. */
+static bool clock_app__background_tick(void) { return runtime__delay(200) == BRUCE_OK; }
+
 static void clock_app__play_alert_tone(void) {
     for (int i = 0; i < 3; ++i) {
         (void)audio__tone(1500, 150, false);
@@ -44,6 +47,7 @@ static void clock_app__format_time(const bruce_clock_datetime_t *now, char *out,
     snprintf(out, size, "%02u:%02u:%02u %s", hour, now->minute, now->second, now->hour < 12 ? "AM" : "PM");
 }
 
+/* Title on top, optional footer at the bottom, and the main text as large as fits between them. */
 static bruce_result_t clock_app__draw(const char *title, const char *main_text, const char *footer) {
     int width = display__width();
     int height = display__height();
@@ -52,27 +56,38 @@ static bruce_result_t clock_app__draw(const char *title, const char *main_text, 
     uint16_t background = config__get_color_background();
     bruce_result_t result = display__begin_frame();
     if (result != BRUCE_OK) return result;
+    int16_t char_w = 6;
+    int16_t char_h = 10;
+    (void)display__get_font_metrics(&char_w, &char_h);
+    bool roomy = height >= 100;
+    const int frame = roomy ? 4 : 2;
+    const int inset = roomy ? 10 : 6;
+
     (void)display__fill_screen(background);
-    (void)display__draw_rect(4, 4, width - 8, height - 8, primary);
+    (void)display__draw_rect(frame, frame, width - 2 * frame, height - 2 * frame, primary);
     (void)display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
-    (void)display__set_text_color(secondary);
     (void)display__set_text_size(1);
-    (void)display__draw_centre_string(title, width / 2, 14);
+    (void)display__set_text_color(secondary);
+    (void)display__draw_centre_string(title, width / 2, inset);
+
+    int top = inset + char_h + 2;
+    int bottom = height - inset;
+    int footer_y = bottom - char_h;
+    if (footer != NULL && footer_y - top >= 2 * char_h) {
+        (void)display__draw_centre_string(footer, width / 2, footer_y);
+        bottom = footer_y - 2;
+    }
+
     int text_size = 4;
-    while (text_size > 1 && (int)strlen(main_text) * 6 * text_size > width - 16) text_size--;
+    int text_w = (int)strlen(main_text) * char_w;
+    while (text_size > 1 && (text_w * text_size > width - 2 * inset || char_h * text_size > bottom - top)) {
+        text_size--;
+    }
     (void)display__set_text_color(primary);
-    (void)display__set_text_size((uint8_t)text_size);
-    int16_t font_width = 0;
-    int16_t font_height = 0;
-    if (display__get_font_metrics(&font_width, &font_height) != BRUCE_OK || font_height <= 0) {
-        font_height = 8;
-    }
-    (void)display__draw_centre_string(main_text, width / 2, (height - font_height * text_size) / 2);
-    if (footer != NULL) {
-        (void)display__set_text_color(secondary);
-        (void)display__set_text_size(1);
-        (void)display__draw_centre_string(footer, width / 2, height - 24);
-    }
+    (void)display__set_text_size((float)text_size);
+    int main_y = top + (bottom - top - char_h * text_size) / 2;
+    (void)display__draw_centre_string(main_text, width / 2, main_y);
+    (void)display__set_text_size(1);
     return display__present();
 }
 
@@ -114,14 +129,8 @@ static int clock_app__show(bool gui) {
         result = input__wait(200, &code);
         if (result == BRUCE_OK && code == BRUCE_INPUT_CODE_BACK) return BRUCE_OK;
         if (result == BRUCE_OK && code == BRUCE_INPUT_CODE_SELECT) return CLOCK_APP_OPEN_MENU;
-        if (result == BRUCE_ERR_NOT_FOREGROUND && display__await_redraw()) {
-            /* Whatever painted over the screen while backgrounded isn't
-             * restored automatically on switching back (see
-             * image_loader_app.c's identical fix), but the draw above only
-             * runs when now.second/hint_visible actually changed -- reset
-             * last_second so that check can't spuriously stay true and skip
-             * the redraw this regain needs. */
-            last_second = UINT8_MAX;
+        if (result == BRUCE_ERR_NOT_FOREGROUND && clock_app__background_tick()) {
+            if (display__viewport_changed()) last_second = UINT8_MAX;
             continue;
         }
         if (result != BRUCE_OK && result != BRUCE_ERR_TIMEOUT) return result;
@@ -196,11 +205,8 @@ static int clock_app__timer(const char *argument, bool gui) {
                 (void)process__to_background();
                 continue;
             }
-            if (result == BRUCE_ERR_NOT_FOREGROUND && display__await_redraw()) {
-                /* Same stale-redraw fix as clock_app__show() above: the draw
-                 * only runs when remaining actually changed, so reset
-                 * last_remaining to guarantee this regain forces one. */
-                last_remaining = UINT32_MAX;
+            if (result == BRUCE_ERR_NOT_FOREGROUND && clock_app__background_tick()) {
+                if (display__viewport_changed()) last_remaining = UINT32_MAX;
                 continue;
             }
             if (result != BRUCE_OK && result != BRUCE_ERR_TIMEOUT) return result;
@@ -270,11 +276,8 @@ static int clock_app__alarm(const char *argument, bool gui) {
                 (void)process__to_background();
                 continue;
             }
-            if (result == BRUCE_ERR_NOT_FOREGROUND && display__await_redraw()) {
-                /* Same stale-redraw fix as clock_app__show() above: the draw
-                 * only runs when now.second actually changed, so reset
-                 * last_second to guarantee this regain forces one. */
-                last_second = UINT8_MAX;
+            if (result == BRUCE_ERR_NOT_FOREGROUND && clock_app__background_tick()) {
+                if (display__viewport_changed()) last_second = UINT8_MAX;
                 continue;
             }
             if (result != BRUCE_OK && result != BRUCE_ERR_TIMEOUT) return result;

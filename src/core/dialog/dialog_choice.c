@@ -258,33 +258,48 @@ static void dialog__gui_choice_draw_list(
 /* Choice-list renderer                                                       */
 /* -------------------------------------------------------------------------- */
 
+/* A quarter-screen preview tile gets a bare list: a one-line title over small rows, no chrome. */
+static bool dialog__gui_compact(int w, int h) {
+    return w * h * 4 < display__screen_width() * display__screen_height();
+}
+
 bruce_result_t dialog__gui_choice(
     const char *title, const char *message, const bruce_dialog_choice_t *choices, size_t choice_count,
     size_t *out_selected, const bruce_dialog_render_params_t *render_params, const dialog__choice_poll_t *poll
 ) {
-    bool render_launcher = render_params != NULL && render_params->render_launcher && s_window_renderer_set;
     int selected = out_selected != NULL && *out_selected < choice_count ? (int)*out_selected : 0;
     int first_visible = 0;
     int w = display__width();
     int h = display__height();
-    int left = render_launcher ? s_window_renderer.padding_left
-                               : (render_params != NULL ? render_params->padding_left : 0);
-    int top = render_launcher ? s_window_renderer.padding_top
-                              : (render_params != NULL ? render_params->padding_top : 0);
-    int right = w - (render_launcher ? s_window_renderer.padding_right
-                                     : (render_params != NULL ? render_params->padding_right : 0));
-    int bottom = h - (render_launcher ? s_window_renderer.padding_bottom
-                                      : (render_params != NULL ? render_params->padding_bottom : 0));
-    bool render_borders = !render_launcher && (render_params == NULL || render_params->render_borders);
-    bool render_window = render_borders && render_params != NULL &&
-                         (render_params->padding_top > 0 || render_params->padding_right > 0 ||
-                          render_params->padding_bottom > 0 || render_params->padding_left > 0);
+    bool compact = dialog__gui_compact(w, h);
+    bool render_launcher =
+        !compact && render_params != NULL && render_params->render_launcher && s_window_renderer_set;
+    const bruce_dialog_render_params_t *params = compact ? NULL : render_params;
+    int pad_left = params != NULL ? params->padding_left : 0;
+    int pad_top = params != NULL ? params->padding_top : 0;
+    int pad_right = params != NULL ? params->padding_right : 0;
+    int pad_bottom = params != NULL ? params->padding_bottom : 0;
+    if (render_launcher) {
+        pad_left = s_window_renderer.padding_left;
+        pad_top = s_window_renderer.padding_top;
+        pad_right = s_window_renderer.padding_right;
+        pad_bottom = s_window_renderer.padding_bottom;
+    }
+    int left = pad_left;
+    int top = pad_top;
+    int right = w - pad_right;
+    int bottom = h - pad_bottom;
+    bool render_borders =
+        compact || (!render_launcher && (render_params == NULL || render_params->render_borders));
+    bool padded = pad_left > 0 || pad_top > 0 || pad_right > 0 || pad_bottom > 0;
+    bool render_window = render_borders && params != NULL && padded;
     int viewport_w = right - left;
     int viewport_h = bottom - top;
     int text_size = render_params != NULL && render_params->text_size > 0 ? render_params->text_size
                     : render_launcher && s_window_renderer.text_size > 0  ? s_window_renderer.text_size
                     : render_launcher                                     ? 1
                                                                           : dialog__default_list_text_size();
+    if (compact) text_size = 1;
 
     uint16_t pri, sec, bg, surface, text, text_muted, border, success, warning, error;
     dialog__get_colors(&pri, &sec, &bg, &surface, &text, &text_muted, &border, &success, &warning, &error);
@@ -309,9 +324,10 @@ bruce_result_t dialog__gui_choice(
     int title_h = render_window ? (title != NULL && title[0] != '\0' ? DIALOG__CHAR_H + 4 : 0)
                   : render_borders || (title != NULL && title[0] != '\0') ? DIALOG__CHAR_H + 4
                                                                           : 0;
-    int footer_h = render_window ? 0 : (render_borders ? DIALOG__CHAR_H + 4 : 0);
-    int message_h = (message != NULL && message[0] != '\0') ? (DIALOG__CHAR_H + 2) : 0;
-    int list_gap = (title_h > 0 || message_h > 0) && render_params != NULL ? render_params->list_gap : 0;
+    int footer_h = render_window || compact ? 0 : (render_borders ? DIALOG__CHAR_H + 4 : 0);
+    int message_h = !compact && message != NULL && message[0] != '\0' ? (DIALOG__CHAR_H + 2) : 0;
+    int list_gap =
+        !compact && (title_h > 0 || message_h > 0) && render_params != NULL ? render_params->list_gap : 0;
     int usable_h = content_h - title_h - message_h - footer_h - list_gap;
     if (usable_h < row_h) { return BRUCE_ERR_INVALID_ARGUMENT; }
     int items_per_page = usable_h / row_h;

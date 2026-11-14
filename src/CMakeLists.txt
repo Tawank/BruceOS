@@ -241,6 +241,7 @@ idf_component_register(SRCS
                      "modules/utils/terminal/terminal_app.c"
                      "modules/utils/terminal/terminal_ansi.c"
                      "modules/utils/process/process_app.c"
+                     "modules/utils/process/process_list.c"
                     "modules/utils/notify/notify_app.c"
                     "modules/notification_service/notification_service.c"
                      "modules/ir/ir_app.c"
@@ -601,7 +602,8 @@ target_include_directories(bruce_sdk_builtin_utils_terminal_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}/modules/utils/terminal")
 
 add_library(bruce_sdk_builtin_utils_process_check OBJECT
-            "modules/utils/process/process_app.c")
+            "modules/utils/process/process_app.c"
+            "modules/utils/process/process_list.c")
 target_include_directories(bruce_sdk_builtin_utils_process_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/utils/process")
