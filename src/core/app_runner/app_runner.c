@@ -604,6 +604,7 @@ int app_runner__run_with_environment(
             const bruce_app_descriptor_t *app = app_runner__at(i);
             if (app->entry == entry) {
                 params.stack_bytes = app->stack_bytes;
+                params.single_instance = app->single_instance;
                 break;
             }
         }

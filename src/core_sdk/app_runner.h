@@ -53,6 +53,9 @@ typedef struct {
     const char *category;
     bruce_app_entry_t entry;
     uint32_t stack_bytes;
+    /* A GUI launch while an instance is already running foregrounds that
+     * instance instead of starting another. Optional; defaults to false. */
+    bool single_instance;
 } bruce_app_descriptor_t;
 
 /**

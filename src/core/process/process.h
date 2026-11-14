@@ -54,6 +54,13 @@ typedef struct {
     /* Starts over the currently visible framebuffer instead of clearing it.
      * Used by system UI that renders exclusively through display overlays. */
     bool preserve_display;
+    /* When set on a GUI launch and a live GUI process with the same `name`
+     * already exists, that process is brought to the foreground and its id is
+     * returned instead of creating a second one. Loaders that own resources
+     * handed to the new process must check first with
+     * process_registry__activate_single_instance(), since a hit here creates
+     * nothing that would ever run process_entry_cleanup. */
+    bool single_instance;
     /* Temporary assignments applied after inheriting the parent's exported
      * environment. The strings are borrowed only for this call. */
     const bruce_environment_variable_t *environment;
@@ -84,6 +91,10 @@ typedef struct {
  * allocation or FreeRTOS task creation failed). */
 bruce_result_t
 process_registry__create(const process_create_params_t *params, bruce_process_id_t *out_process_id);
+
+/* Foregrounds the live GUI process called `name`, if any. Returns BRUCE_OK and
+ * its id via *out_process_id, or BRUCE_ERR_NOT_FOUND. */
+bruce_result_t process_registry__activate_single_instance(const char *name, bruce_process_id_t *out_process_id);
 
 /* Loads process-global environment defaults from /config/.env. Missing files
  * are created with an explanatory template. Call once after storage init. */

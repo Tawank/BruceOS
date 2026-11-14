@@ -158,6 +158,29 @@ void process__lock(void) { xSemaphoreTakeRecursive(s_lock, portMAX_DELAY); }
 void process__unlock(void) { xSemaphoreGiveRecursive(s_lock); }
 
 /* Caller must hold the lock. */
+static bool process__activate_gui_instance_locked(const char *name, bruce_process_id_t *out_process_id) {
+    for (process__record_t *record = s_processes; record != NULL; record = record->next) {
+        if (!record->in_use || !record->gui_requested || record->state == BRUCE_PROCESS_STOPPING ||
+            strcmp(record->name, name) != 0) {
+            continue;
+        }
+        if (record->state == BRUCE_PROCESS_BACKGROUND) process__foreground_push_locked(record->id);
+        *out_process_id = record->id;
+        return true;
+    }
+    return false;
+}
+
+bruce_result_t process_registry__activate_single_instance(const char *name, bruce_process_id_t *out_process_id) {
+    if (name == NULL || out_process_id == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    process__ensure_init();
+    process__lock();
+    bool found = process__activate_gui_instance_locked(name, out_process_id);
+    process__unlock();
+    return found ? BRUCE_OK : BRUCE_ERR_NOT_FOUND;
+}
+
+/* Caller must hold the lock. */
 process__record_t *process__find_by_id_locked(bruce_process_id_t id) {
     if (id == BRUCE_PROCESS_ID_INVALID) { return NULL; }
     for (process__record_t *record = s_processes; record != NULL; record = record->next) {
@@ -594,6 +617,12 @@ process_registry__create(const process_create_params_t *params, bruce_process_id
     if (!process__dup_argv(params->argc, params->argv, &argv_copy)) { return BRUCE_ERR_NO_MEMORY; }
 
     process__lock();
+    const char *name = params->name != NULL && params->name[0] != '\0' ? params->name : "app";
+    if (params->single_instance && params->gui_requested && process__activate_gui_instance_locked(name, out_process_id)) {
+        process__unlock();
+        process__free_argv(params->argc, argv_copy);
+        return BRUCE_OK;
+    }
     if (process__live_count_locked() >= BRUCE_PROCESS_MAX) {
         process__unlock();
         process__free_argv(params->argc, argv_copy);
@@ -636,11 +665,7 @@ process_registry__create(const process_create_params_t *params, bruce_process_id
         process__free_argv(params->argc, argv_copy);
         return environment_result;
     }
-    strncpy(
-        record->name,
-        params->name != NULL && params->name[0] != '\0' ? params->name : "app",
-        BRUCE_PROCESS_NAME_MAX - 1
-    );
+    strncpy(record->name, name, BRUCE_PROCESS_NAME_MAX - 1);
     record->built_in = params->built_in;
     record->gui_requested = params->gui_requested;
     if (params->permission_key != NULL && params->permission_key[0] != '\0') {

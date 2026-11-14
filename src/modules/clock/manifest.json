@@ -5,6 +5,7 @@
   "coreAbiVersion": 4,
   "permissions": ["config"],
   "stackSize": 6144,
+  "singleInstance": true,
   "build": {
     "sources": [
       "clock_app.c",

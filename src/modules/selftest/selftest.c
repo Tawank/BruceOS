@@ -104,6 +104,7 @@ typedef struct {
  * subset without a second, separately-maintained list to keep in sync. */
 static const selftest__case_t selftest__cases[] = {
     SELFTEST_CASE(selftest__run_process_normal_exit_case),
+    SELFTEST_CASE(selftest__run_process_single_instance_case),
     SELFTEST_CASE(selftest__run_process_status_case),
     SELFTEST_CASE(selftest__run_process_killed_case),
     SELFTEST_CASE(selftest__run_process_clear_signal_case),

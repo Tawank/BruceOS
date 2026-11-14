@@ -270,6 +270,14 @@ static int elf_loader__open(
 
     const char *permission_key = elf_loader__basename(normalized_path);
 
+    bruce_process_id_t running_instance = BRUCE_PROCESS_ID_INVALID;
+    if (inspection->manifest.single_instance &&
+        app_runner__environment_requests_gui(environment, environment_count) &&
+        process_registry__activate_single_instance(permission_key, &running_instance) == BRUCE_OK) {
+        memory__free(inspection);
+        return (int)running_instance;
+    }
+
     const char *permission_names[BRUCE_MANIFEST_MAX_PERMISSIONS];
     for (size_t i = 0; i < inspection->manifest.permission_count; ++i) {
         permission_names[i] = inspection->manifest.permissions[i];

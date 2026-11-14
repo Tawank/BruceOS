@@ -46,6 +46,10 @@ typedef struct {
      * through stdio/tty, so a GUI launch runs it inside the terminal app
      * rather than on the physical console. False (the default) if absent. */
     bool terminal;
+    /* True when the manifest sets "singleInstance": true -- a GUI launch while
+     * an instance is already running foregrounds it instead of starting
+     * another. Honoured by the ELF loader. False (the default) if absent. */
+    bool single_instance;
     char permissions[BRUCE_MANIFEST_MAX_PERMISSIONS][BRUCE_MANIFEST_PERMISSION_NAME_MAX];
     size_t permission_count;
 } bruce_manifest_t;

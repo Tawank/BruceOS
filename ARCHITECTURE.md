@@ -608,6 +608,15 @@ An ELF app whose manifest sets `"terminal": true` (a stdio/tty program such as
 with `GUI=1` (launcher, Apps list, file manager). The terminal's shell runs it
 with `GUI=0`, so shell and serial launches run it directly.
 
+An app can be limited to one GUI instance: built-ins set `single_instance` in
+their `bruce_app_descriptor_t`, ELF apps set `"singleInstance": true` in the
+manifest. Launching it with `GUI=1` while an instance is running brings that
+instance to the foreground and returns its process id instead of starting
+another. Launches without a GUI (shell, serial) are unaffected. Core checks
+this in `process_registry__create()` under the registry lock; the ELF loader
+checks first, before loading the image, so nothing is allocated for a launch
+that will be redirected.
+
 The built-in `shell` module owns command-language parsing and execution. It
 supports whitespace-delimited words, literal single quotes, expandable double
 quotes, backslash escaping, `NAME=value`, `$NAME`, `${NAME}`, `$?`, token-boundary

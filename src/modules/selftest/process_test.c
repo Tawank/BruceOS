@@ -639,3 +639,34 @@ bool selftest__run_process_app_kill_case(void) {
     printf("[selftest] process/app-kill: %s\n", ok ? "OK" : "FAIL");
     return ok;
 }
+
+bool selftest__run_process_single_instance_case(void) {
+    process_create_params_t params = {
+        .name = "selftest_single",
+        .entry = selftest__worker_wait_for_kill,
+        .built_in = true,
+        .gui_requested = true,
+        .single_instance = true,
+        .start_in_background = true,
+        .stack_bytes = 2048,
+    };
+    bruce_process_id_t first = BRUCE_PROCESS_ID_INVALID;
+    bruce_process_id_t second = BRUCE_PROCESS_ID_INVALID;
+    bruce_process_id_t found = BRUCE_PROCESS_ID_INVALID;
+    bruce_process_id_t headless = BRUCE_PROCESS_ID_INVALID;
+
+    bool ok = process_registry__create(&params, &first) == BRUCE_OK && first != BRUCE_PROCESS_ID_INVALID;
+    ok = ok && process_registry__create(&params, &second) == BRUCE_OK && second == first;
+    ok = ok && process_registry__activate_single_instance("selftest_single", &found) == BRUCE_OK && found == first;
+    ok = ok && process_registry__activate_single_instance("selftest_missing", &found) == BRUCE_ERR_NOT_FOUND;
+
+    params.gui_requested = false;
+    ok = ok && process_registry__create(&params, &headless) == BRUCE_OK && headless != first;
+
+    (void)process__kill(first);
+    if (headless != BRUCE_PROCESS_ID_INVALID) (void)process__kill(headless);
+    (void)process__wait(first, 0);
+    ok = ok && process_registry__activate_single_instance("selftest_single", &found) == BRUCE_ERR_NOT_FOUND;
+    printf("[selftest] process/single-instance: %s\n", ok ? "OK" : "FAIL");
+    return ok;
+}

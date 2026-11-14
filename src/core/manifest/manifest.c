@@ -99,6 +99,7 @@ bruce_manifest_t *manifest__parse(const char *json, size_t json_len) {
     const cJSON *stack = cJSON_GetObjectItemCaseSensitive(root, "stackSize");
     const cJSON *heap = cJSON_GetObjectItemCaseSensitive(root, "heapSize");
     const cJSON *terminal = cJSON_GetObjectItemCaseSensitive(root, "terminal");
+    const cJSON *single_instance = cJSON_GetObjectItemCaseSensitive(root, "singleInstance");
     const cJSON *permissions = cJSON_GetObjectItemCaseSensitive(root, "permissions");
 
     bool ok = cJSON_IsString(name) && name->valuestring != NULL && name->valuestring[0] != '\0' &&
@@ -114,6 +115,7 @@ bruce_manifest_t *manifest__parse(const char *json, size_t json_len) {
          (heap == NULL ||
           (cJSON_IsNumber(heap) && heap->valuedouble >= 0 && heap->valuedouble <= BRUCE_MANIFEST_HEAP_MAX));
     ok = ok && (terminal == NULL || cJSON_IsBool(terminal));
+    ok = ok && (single_instance == NULL || cJSON_IsBool(single_instance));
     ok = ok && (permissions == NULL || cJSON_IsArray(permissions));
     if (!ok) {
         memory__free(out_manifest);
@@ -145,6 +147,7 @@ bruce_manifest_t *manifest__parse(const char *json, size_t json_len) {
     out_manifest->stack_size = (uint32_t)stack->valuedouble;
     out_manifest->heap_size = heap != NULL ? (uint32_t)heap->valuedouble : 0;
     out_manifest->terminal = cJSON_IsTrue(terminal);
+    out_manifest->single_instance = cJSON_IsTrue(single_instance);
 
     size_t permission_count = 0;
     if (permissions != NULL) {
