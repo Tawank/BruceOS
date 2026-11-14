@@ -5,16 +5,13 @@
 // doomgeneric/i_video.c, driven entirely by the "-gfxmode rgb565" argument
 // main.c passes to doomgeneric_Create() -- see main.c's comment for why.
 //
-// DOOMGENERIC_RESX/RESY (below) are pinned to Doom's own native 320x200
+// DOOMGENERIC_RESX/RESY (set in main/CMakeLists.txt) are pinned to Doom's own native 320x200
 // resolution rather than the real display's, so i_video.c's own internal
 // scale factor (fb_scaling = xres/SCREENWIDTH) always comes out to 1 and
 // DG_ScreenBuffer holds a flat, unscaled 320x200 RGB565 image every frame --
 // this file does the one scale-blit to the actual (runtime-queried, never
 // hardcoded -- see core_sdk/display.h) screen size itself, the same
 // division of labor nes_video.c uses for the NES's fixed 256x224 buffer.
-
-#define DOOMGENERIC_RESX 320
-#define DOOMGENERIC_RESY 200
 
 #include <stdint.h>
 #include <stdio.h>

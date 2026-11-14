@@ -4,6 +4,9 @@ idf_component_register(
     SRCS "main.c" "doom_video.c" "doom_input.c" ${DOOMGENERIC_SOURCES}
     INCLUDE_DIRS "." "${DOOMGENERIC_DIR}" "../../../include" "../../../../src")
 
+# Must reach every source: doomgeneric.c sizes DG_ScreenBuffer and i_video.c picks its scale from these.
+target_compile_definitions(${COMPONENT_LIB} PRIVATE DOOMGENERIC_RESX=320 DOOMGENERIC_RESY=200)
+
 # doomgeneric is a 1990s-2020s-vintage C codebase (chocolate-doom-derived)
 # built for permissive desktop toolchains; ESP-IDF's default warning set
 # promotes several of its long-standing, harmless patterns to hard errors.

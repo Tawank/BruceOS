@@ -454,7 +454,10 @@ void input_keyboard__poll(void) {
                         if (!s_kb_hold_fired[y][x]) {
                             int32_t code = input__kb_char_code(s_kb_normal[y][x]);
                             if (code != 0) {
-                                input__emit(BRUCE_INPUT_KEY, BRUCE_INPUT_PRESS, code, code);
+                                /* A tapped Esc replays as the semantic Back key, same as an unbound press. */
+                                bool esc = y == 0 && x == 0;
+                                input__emit(BRUCE_INPUT_KEY, BRUCE_INPUT_PRESS, esc ? BRUCE_INPUT_CODE_BACK : code,
+                                            esc ? -1 : code);
                                 input__emit(BRUCE_INPUT_KEY, BRUCE_INPUT_RELEASE, code, code);
                             }
                         }

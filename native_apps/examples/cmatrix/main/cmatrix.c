@@ -185,6 +185,8 @@ int app_main(int argc, char *argv[]) {
         if ((keypress = wgetch(stdscr)) != ERR) {
             switch (keypress) {
             case 'q':
+            case 27: /* Esc */
+            case 3:  /* Ctrl+C: no SIGINT here, it arrives as a plain byte */
                 finish();
                 break;
             case 'a':

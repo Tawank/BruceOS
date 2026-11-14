@@ -205,7 +205,8 @@ int apps_app_main(int argc, char **argv) {
 
     apps__disambiguate_labels(apps, count);
     qsort(apps, count, sizeof(*apps), apps__compare);
-    bruce_dialog_choice_t *choices = memory__calloc(count, sizeof(*choices));
+    /* One extra row: "Back", for devices without a back key. */
+    bruce_dialog_choice_t *choices = memory__calloc(count + 1, sizeof(*choices));
     if (choices == NULL) {
         memory__free(apps);
         return BRUCE_ERR_NO_MEMORY;
@@ -217,6 +218,8 @@ int apps_app_main(int argc, char **argv) {
             apps[i].icon_name[0] != '\0' ? apps[i].icon_name : app_runner__icon_for_path(apps[i].path);
         choices[i].right_text = NULL;
     }
+    choices[count].label = "Back";
+    choices[count].value = "back";
 
     /* render_launcher styles this like dialog__choice_launcher() did; the
      * only change is opting into long_press_enabled so holding SELECT on a
@@ -232,11 +235,16 @@ int apps_app_main(int argc, char **argv) {
     for (;;) {
         size_t selected = 0;
         long_press = false;
-        result = dialog__choice_ex("Apps", NULL, choices, count, &selected, &list_params);
+        result = dialog__choice_ex("Apps", NULL, choices, count + 1, &selected, &list_params);
         if (result == BRUCE_ERR_CANCELLED && display__await_redraw()) continue;
         if (result == BRUCE_ERR_CANCELLED) break;
         if (result != BRUCE_OK) {
             apps__show_error("Browse", result);
+            break;
+        }
+
+        if (selected == count) {
+            result = BRUCE_ERR_CANCELLED;
             break;
         }
 

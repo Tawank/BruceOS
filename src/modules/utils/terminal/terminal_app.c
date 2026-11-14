@@ -649,13 +649,14 @@ static void terminal__handle_input(terminal__state_t *state, const bruce_input_e
     }
     bool semantic_key = event->type == BRUCE_INPUT_KEY && event->value != event->code;
     /* Esc on the device keyboards is the semantic Back key. In a raw-mode
-     * program (vi, set via tty__set_mode) it is the program's Esc and goes to
-     * it as 0x1b; otherwise (the shell prompt, cooked programs) it closes the
-     * terminal. The B button always closes. */
+     * program (vi, set via tty__set_mode) or a full-screen one on the alternate
+     * screen (ncurses apps) it is the program's Esc and goes to it as 0x1b;
+     * otherwise (the shell prompt, cooked programs) it closes the terminal.
+     * The B button always closes. */
     if (semantic_key && event->code == BRUCE_INPUT_CODE_BACK && state->child != BRUCE_PROCESS_ID_INVALID) {
         bruce_tty_mode_t mode = BRUCE_TTY_MODE_COOKED;
         (void)tty__get_mode_of(state->session, &mode);
-        if (mode == BRUCE_TTY_MODE_RAW) {
+        if (mode == BRUCE_TTY_MODE_RAW || state->grid.alt_screen_active) {
             terminal__write_input(state, "\033", 1);
             return;
         }

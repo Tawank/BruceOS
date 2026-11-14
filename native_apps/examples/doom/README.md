@@ -30,7 +30,18 @@ IWADs both work.
 | Automap toggle | Button X |
 | Automap zoom out / in | L2 / R2 |
 | Menu / back | Back, Menu, or Select (gamepad) |
-| Confirm | Select (D-pad), Start, or Button Y |
+| Confirm | Select (D-pad, in menus), Start, or Button Y |
+
+### 3-button devices (encoder: PREV / NEXT / SELECT)
+
+| Action | Input |
+| --- | --- |
+| Turn left / right | PREV / NEXT (each detent turns a bit; keep spinning to keep turning) |
+| Walk forward on / off (slower than normal walking) | Click SELECT |
+| Fire + use (opens doors, switches) | Double-click SELECT |
+| Menu up / down | PREV / NEXT while the menu is open |
+| Menu confirm | SELECT while the menu is open |
+| Menu / back | BACK (e.g. its timed bind on SELECT) |
 
 A physical keyboard, if the device has one, also works via its own ASCII
 key events (letters, digits, etc.) -- useful for cheat codes.
