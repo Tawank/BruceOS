@@ -452,6 +452,33 @@ bruce_result_t dialog__number_input(
 );
 
 /**
+ * @brief Duration picker (HH:MM:SS, hours 0-99) for a timer.
+ *
+ * Arrow keys move between fields and change the focused value directly.
+ * With only PREV/NEXT/SELECT, PREV/NEXT jump between fields and OK, and
+ * SELECT toggles editing the focused field, during which PREV/NEXT change
+ * its value. GUI only; returns BRUCE_ERR_UNSUPPORTED for a terminal caller.
+ *
+ * @param title Optional short title shown at the top of the dialog.
+ * @param seconds In: initial duration in seconds. Out: the chosen duration.
+ * @return BRUCE_OK, or BRUCE_ERR_CANCELLED if dismissed.
+ * @note Built-in modules only; not exported to ELF.
+ */
+bruce_result_t dialog__duration_input(const char *title, uint32_t *seconds);
+
+/**
+ * @brief Time-of-day picker (HH:MM, hours 0-23) for an alarm.
+ *
+ * Navigates exactly like dialog__duration_input().
+ *
+ * @param title Optional short title shown at the top of the dialog.
+ * @param seconds In: initial seconds since midnight. Out: the chosen time.
+ * @return BRUCE_OK, or BRUCE_ERR_CANCELLED if dismissed.
+ * @note Built-in modules only; not exported to ELF.
+ */
+bruce_result_t dialog__time_of_day_input(const char *title, uint32_t *seconds);
+
+/**
  * @brief Opens a scrollable text viewer dialog.
  *
  * @param title Optional short title shown at the top of the viewer.

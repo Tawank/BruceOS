@@ -233,8 +233,8 @@ static void display__draw_triangle_fill(
     int16_t dx3 = x2 - x1;
     for (int16_t y = y0; y <= y2; ++y) {
         if (dy1 == 0 && dy2 == 0) { break; }
-        int32_t xa = (y <= y1 || dy1 == 0)
-                         ? (dy1 == 0 ? x0 : (int32_t)x0 + (int32_t)dx1 * (y - y0) / dy1)
+        int32_t xa = (y <= y1 && dy1 != 0)
+                         ? (int32_t)x0 + (int32_t)dx1 * (y - y0) / dy1
                          : (dy3 == 0 ? x1 : (int32_t)x1 + (int32_t)dx3 * (y - y1) / dy3);
         int32_t xb = dy2 == 0 ? x0 : (int32_t)x0 + (int32_t)dx2 * (y - y0) / dy2;
         if (xa > xb) { int32_t t = xa; xa = xb; xb = t; }

@@ -151,19 +151,12 @@ static bool clock_app__parse_duration(const char *text, uint32_t *out_seconds) {
 }
 
 static bruce_result_t clock_app__prompt_duration(uint32_t *out_seconds) {
-    char hours_text[4] = "0";
-    char minutes_text[4] = "0";
-    char seconds_text[4] = "0";
-    if (dialog__number_input("Timer", "Hours (0-99)", "0", hours_text, sizeof(hours_text)) != BRUCE_OK ||
-        dialog__number_input("Timer", "Minutes (0-59)", "0", minutes_text, sizeof(minutes_text)) !=
-            BRUCE_OK ||
-        dialog__number_input("Timer", "Seconds (0-59)", "0", seconds_text, sizeof(seconds_text)) !=
-            BRUCE_OK) {
-        return BRUCE_ERR_CANCELLED;
-    }
-    char duration[16];
-    snprintf(duration, sizeof(duration), "%s:%s:%s", hours_text, minutes_text, seconds_text);
-    return clock_app__parse_duration(duration, out_seconds) ? BRUCE_OK : BRUCE_ERR_INVALID_ARGUMENT;
+    uint32_t seconds = 0;
+    bruce_result_t result = dialog__duration_input("Timer", &seconds);
+    if (result != BRUCE_OK) return result;
+    if (seconds == 0) return BRUCE_ERR_INVALID_ARGUMENT;
+    *out_seconds = seconds;
+    return BRUCE_OK;
 }
 
 static int clock_app__timer(const char *argument, bool gui) {
@@ -228,16 +221,9 @@ static bool clock_app__parse_alarm(const char *text, uint32_t *out_seconds_of_da
     return true;
 }
 
-static bruce_result_t clock_app__prompt_alarm(uint32_t *out_seconds_of_day) {
-    char hours[4] = "0";
-    char minutes[4] = "0";
-    if (dialog__number_input("Alarm", "Hour (0-23)", "0", hours, sizeof(hours)) != BRUCE_OK ||
-        dialog__number_input("Alarm", "Minute (0-59)", "0", minutes, sizeof(minutes)) != BRUCE_OK) {
-        return BRUCE_ERR_CANCELLED;
-    }
-    char value[12];
-    snprintf(value, sizeof(value), "%s:%s", hours, minutes);
-    return clock_app__parse_alarm(value, out_seconds_of_day) ? BRUCE_OK : BRUCE_ERR_INVALID_ARGUMENT;
+static bruce_result_t clock_app__prompt_alarm(const bruce_clock_datetime_t *now, uint32_t *out_seconds_of_day) {
+    *out_seconds_of_day = now->hour * 3600u + now->minute * 60u;
+    return dialog__time_of_day_input("Alarm", out_seconds_of_day);
 }
 
 static int clock_app__alarm(const char *argument, bool gui) {
@@ -247,7 +233,7 @@ static int clock_app__alarm(const char *argument, bool gui) {
     uint32_t target = 0;
     result = argument != NULL
                  ? (clock_app__parse_alarm(argument, &target) ? BRUCE_OK : BRUCE_ERR_INVALID_ARGUMENT)
-                 : (gui ? clock_app__prompt_alarm(&target) : BRUCE_ERR_INVALID_ARGUMENT);
+                 : (gui ? clock_app__prompt_alarm(&now, &target) : BRUCE_ERR_INVALID_ARGUMENT);
     if (result != BRUCE_OK) return result == BRUCE_ERR_CANCELLED ? BRUCE_OK : result;
     uint8_t last_second = UINT8_MAX;
     (void)input__flush();

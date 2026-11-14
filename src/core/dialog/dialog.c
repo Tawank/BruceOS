@@ -2,6 +2,7 @@
 #include "dialog_choice.h"
 #include "dialog_gui_common.h"
 #include "dialog_input.h"
+#include "dialog_time.h"
 #include "dialog_internal.h"
 #include "dialog_message.h"
 #include "dialog_pick_file.h"
@@ -374,4 +375,18 @@ bruce_result_t dialog__number_input(
     return dialog__term_input(
         title, prompt, initial_text, false, buffer, buffer_size, dialog__validate_number
     );
+}
+
+bruce_result_t dialog__duration_input(const char *title, uint32_t *seconds) {
+    if (seconds == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    s_last_call_was_gui = dialog__current_process_wants_gui();
+    if (!s_last_call_was_gui) return BRUCE_ERR_UNSUPPORTED;
+    return dialog__time_gui_run(title, true, 99, seconds);
+}
+
+bruce_result_t dialog__time_of_day_input(const char *title, uint32_t *seconds) {
+    if (seconds == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    s_last_call_was_gui = dialog__current_process_wants_gui();
+    if (!s_last_call_was_gui) return BRUCE_ERR_UNSUPPORTED;
+    return dialog__time_gui_run(title, false, 23, seconds);
 }

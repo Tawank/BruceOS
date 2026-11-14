@@ -82,6 +82,7 @@ idf_component_register(SRCS
                     "core/dialog/dialog_message.c"
                     "core/dialog/dialog_pick_file.c"
                     "core/dialog/dialog_term.c"
+                    "core/dialog/dialog_time.c"
                     "core/dialog/dialog_viewer.c"
                     "core/device/board_i2c.c"
                     "core/device/device.c"

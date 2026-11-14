@@ -12,6 +12,10 @@
 #define DIALOG__CHAR_H 10
 #define DIALOG__TEXT_SIZE 1
 #define DIALOG__MARGIN 2
+#define DIALOG__TEXT_COLS 12
+#define DIALOG__HEX_COLS 5
+#define DIALOG__NUMPAD_COLS 3
+#define DIALOG__NUMPAD_ROOMY_HEIGHT 240
 
 enum {
     DIALOG__KEY_OK = 1,
@@ -177,16 +181,12 @@ static const dialog__key_t s_hex_keys[5][5] = {
      {">", 0, DIALOG__KEY_CURSOR_RIGHT}                                                  },
 };
 
-static const dialog__key_t s_num_keys[5][5] = {
-    {{"1", '1', 0},             {"2", '2', 0}, {"3", '3', 0}, {NULL, 0, 0}, {NULL, 0, 0}},
-    {{"4", '4', 0},             {"5", '5', 0}, {"6", '6', 0}, {NULL, 0, 0}, {NULL, 0, 0}},
-    {{"7", '7', 0},             {"8", '8', 0}, {"9", '9', 0}, {NULL, 0, 0}, {NULL, 0, 0}},
-    {{"-", '-', 0},             {"0", '0', 0}, {".", '.', 0}, {NULL, 0, 0}, {NULL, 0, 0}},
-    {{"OK", 0, DIALOG__KEY_OK},
-     {"DEL", 0, DIALOG__KEY_DELETE},
-     {"CAN", 0, DIALOG__KEY_CANCEL},
-     {"<", 0, DIALOG__KEY_CURSOR_LEFT},
-     {">", 0, DIALOG__KEY_CURSOR_RIGHT}                                                 },
+static const dialog__key_t s_num_keys[5][DIALOG__NUMPAD_COLS] = {
+    {{"1", '1', 0},             {"2", '2', 0},                  {"3", '3', 0}                    },
+    {{"4", '4', 0},             {"5", '5', 0},                  {"6", '6', 0}                    },
+    {{"7", '7', 0},             {"8", '8', 0},                  {"9", '9', 0}                    },
+    {{"-", '-', 0},             {"0", '0', 0},                  {".", '.', 0}                    },
+    {{"OK", 0, DIALOG__KEY_OK}, {"DEL", 0, DIALOG__KEY_DELETE}, {"CAN", 0, DIALOG__KEY_CANCEL}},
 };
 
 typedef struct {
@@ -197,6 +197,13 @@ typedef struct {
     size_t buffer_size, len, max_len, cursor;
     const char *title, *prompt;
 } dialog__keyboard_state_t;
+
+typedef struct {
+    int title_h, title_size;
+    int prompt_y, prompt_size;
+    int textbox_y, textbox_h, input_y, input_size;
+    int keys_y, cell_w, cell_h, label_size;
+} dialog__layout_t;
 
 static const char *
 dialog__diacritic_label(const dialog__keyboard_state_t *st, int row, int col, const char *label) {
@@ -297,17 +304,17 @@ static bool dialog__key_validate(const dialog__keyboard_state_t *st, char c, dia
     return isdigit((unsigned char)c) != 0;
 }
 
-static void dialog__input_clear_and_title(const char *title) {
+static void dialog__input_clear_and_title(const char *title, const dialog__layout_t *layout) {
     uint16_t pri, sec, bg, surface, text, muted, border, success, warning, error;
     config__get_colors_internal(
         &pri, &sec, &bg, &surface, &text, &muted, &border, &success, &warning, &error
     );
     (void)display__fill_screen(bg);
-    display__fill_rect(0, 0, display__width(), DIALOG__CHAR_H + 4, pri);
+    display__fill_rect(0, 0, display__width(), layout->title_h, pri);
     display__set_text_color(text);
-    display__set_text_size(DIALOG__TEXT_SIZE);
+    display__set_text_size(layout->title_size);
     display__set_text_bg_color(pri);
-    display__set_cursor(DIALOG__MARGIN, DIALOG__MARGIN);
+    display__set_cursor(DIALOG__MARGIN, (layout->title_h - DIALOG__CHAR_H * layout->title_size) / 2);
     display__print(title != NULL ? title : "");
 }
 
@@ -327,14 +334,44 @@ static uint16_t dialog__input_primary_color(void) {
     return pri;
 }
 
-static void
-dialog__keyboard_layout(const dialog__keyboard_state_t *st, int *text_area_h, int *cell_w, int *cell_h) {
+static dialog__layout_t dialog__keyboard_layout(const dialog__keyboard_state_t *st) {
     int w = display__width(), h = display__height();
-    *text_area_h = st->cols == 12 ? DIALOG__CHAR_H * 3 + 4 : DIALOG__CHAR_H * 5 + 12;
-    *cell_w = w / st->cols;
-    *cell_h = (h - *text_area_h) / st->rows;
-    if (*cell_w < 1) *cell_w = 1;
-    if (*cell_h < 1) *cell_h = 1;
+    dialog__layout_t layout = {
+        .title_size = DIALOG__TEXT_SIZE, .prompt_size = DIALOG__TEXT_SIZE, .input_size = DIALOG__TEXT_SIZE
+    };
+    if (st->cols == DIALOG__TEXT_COLS) {
+        layout.prompt_y = DIALOG__MARGIN;
+        layout.textbox_y = DIALOG__CHAR_H + 4;
+        layout.textbox_h = DIALOG__CHAR_H * 2;
+        layout.input_y = layout.textbox_y - 1;
+        layout.input_size = 2;
+        layout.keys_y = DIALOG__CHAR_H * 3 + 4;
+        layout.label_size = 2;
+    } else if (st->cols == DIALOG__NUMPAD_COLS) {
+        bool roomy = h >= DIALOG__NUMPAD_ROOMY_HEIGHT;
+        layout.title_h = DIALOG__CHAR_H + 4;
+        layout.prompt_size = 2;
+        layout.prompt_y = layout.title_h + 4;
+        layout.textbox_y = layout.prompt_y + DIALOG__CHAR_H * layout.prompt_size + 2;
+        layout.input_size = roomy ? 3 : 2;
+        layout.textbox_h = DIALOG__CHAR_H * layout.input_size + 6;
+        layout.input_y = layout.textbox_y + (layout.textbox_h - DIALOG__CHAR_H * layout.input_size) / 2;
+        layout.keys_y = layout.textbox_y + layout.textbox_h + 4;
+        layout.label_size = roomy ? 2 : 1;
+    } else {
+        layout.title_h = DIALOG__CHAR_H + 4;
+        layout.prompt_y = DIALOG__CHAR_H + 8;
+        layout.textbox_y = DIALOG__CHAR_H * 2 + 10;
+        layout.textbox_h = DIALOG__CHAR_H * 2 + 4;
+        layout.input_y = layout.textbox_y - 1;
+        layout.keys_y = DIALOG__CHAR_H * 5 + 12;
+        layout.label_size = DIALOG__TEXT_SIZE;
+    }
+    layout.cell_w = w / st->cols;
+    layout.cell_h = (h - layout.keys_y) / st->rows;
+    if (layout.cell_w < 1) layout.cell_w = 1;
+    if (layout.cell_h < 1) layout.cell_h = 1;
+    return layout;
 }
 
 static char
@@ -350,8 +387,8 @@ dialog__text_key_code(const dialog__keyboard_state_t *st, int row, int col, cons
 }
 
 static void dialog__keyboard_draw_cell(
-    const dialog__keyboard_state_t *st, dialog__input_kind_t kind, int row, int col, int text_area_h,
-    int cell_w, int cell_h, uint16_t bg
+    const dialog__keyboard_state_t *st, dialog__input_kind_t kind, int row, int col,
+    const dialog__layout_t *layout, uint16_t bg
 ) {
     const dialog__key_t *key = &st->keys[row * st->cols + col];
     if (!dialog__key_valid(key)) return;
@@ -359,8 +396,9 @@ static void dialog__keyboard_draw_cell(
     if (st->cols == 12 && row == 4) {
         if (col == 0 || col == 2 || col == 4 || col == 6) width = 2;
     }
-    int x = col * cell_w, y = text_area_h + row * cell_h;
-    int key_w = width * cell_w;
+    int cell_h = layout->cell_h;
+    int x = col * layout->cell_w, y = layout->keys_y + row * cell_h;
+    int key_w = width * layout->cell_w;
     bool selected = row == st->sel_row && col == st->sel_col;
     const char *label = key->label;
     char transformed[2];
@@ -380,7 +418,7 @@ static void dialog__keyboard_draw_cell(
         }
         display__set_text_color(BRUCE_COLOR_WHITE);
     }
-    int text_size = st->cols == 12 ? 2 : DIALOG__TEXT_SIZE;
+    int text_size = layout->label_size;
     if (st->cols == 12 && row == 4 && col == 10) text_size = DIALOG__TEXT_SIZE;
     int label_x = x + (key_w - dialog__utf8_length(label) * DIALOG__CHAR_W * text_size) / 2;
     int label_y = y + (cell_h - DIALOG__CHAR_H * text_size) / 2;
@@ -397,32 +435,33 @@ static void dialog__keyboard_draw_cell(
 static bruce_result_t dialog__keyboard_draw(dialog__keyboard_state_t *st, dialog__input_kind_t kind) {
     bruce_result_t result = display__begin_frame();
     if (result != BRUCE_OK) return result;
-    int w = display__width(), text_area_h, cell_w, cell_h;
-    dialog__keyboard_layout(st, &text_area_h, &cell_w, &cell_h);
-    if (st->cols == 12) {
+    int w = display__width();
+    dialog__layout_t layout = dialog__keyboard_layout(st);
+    if (layout.title_h == 0) {
         (void)display__fill_screen(dialog__input_background_color());
     } else {
-        dialog__input_clear_and_title(st->title);
+        dialog__input_clear_and_title(st->title, &layout);
     }
     display__set_text_color(BRUCE_COLOR_WHITE);
-    display__set_text_size(DIALOG__TEXT_SIZE);
+    display__set_text_size(layout.prompt_size);
     display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
-    int prompt_y = st->cols == 12 ? DIALOG__MARGIN : DIALOG__CHAR_H + 8;
-    display__set_cursor(DIALOG__MARGIN, prompt_y);
+    display__set_cursor(DIALOG__MARGIN, layout.prompt_y);
     display__print(st->prompt != NULL ? st->prompt : (st->title != NULL ? st->title : ""));
-    char counter[32];
-    snprintf(counter, sizeof(counter), "%zu/%zu", st->len, st->max_len);
-    display__set_cursor(w - (int)strlen(counter) * DIALOG__CHAR_W - DIALOG__MARGIN, prompt_y);
-    display__print(counter);
-    int textbox_y = st->cols == 12 ? DIALOG__CHAR_H + 4 : DIALOG__CHAR_H * 2 + 10;
-    int textbox_h = st->cols == 12 ? DIALOG__CHAR_H * 2 : DIALOG__CHAR_H * 2 + 4;
+    if (layout.prompt_size == DIALOG__TEXT_SIZE) {
+        char counter[32];
+        snprintf(counter, sizeof(counter), "%zu/%zu", st->len, st->max_len);
+        display__set_cursor(w - (int)strlen(counter) * DIALOG__CHAR_W - DIALOG__MARGIN, layout.prompt_y);
+        display__print(counter);
+    }
     display__fill_rect(
-        DIALOG__MARGIN, textbox_y, w - 2 * DIALOG__MARGIN, textbox_h, dialog__input_background_color()
+        DIALOG__MARGIN, layout.textbox_y, w - 2 * DIALOG__MARGIN, layout.textbox_h,
+        dialog__input_background_color()
     );
     display__draw_rect(
-        DIALOG__MARGIN, textbox_y, w - 2 * DIALOG__MARGIN, textbox_h, dialog__input_primary_color()
+        DIALOG__MARGIN, layout.textbox_y, w - 2 * DIALOG__MARGIN, layout.textbox_h,
+        dialog__input_primary_color()
     );
-    int input_text_size = st->cols == 12 ? 2 : DIALOG__TEXT_SIZE;
+    int input_text_size = layout.input_size;
     display__set_text_size(input_text_size);
     int max_chars = (w - 4 * DIALOG__MARGIN) / (DIALOG__CHAR_W * input_text_size);
     if (max_chars < 1) max_chars = 1;
@@ -437,7 +476,7 @@ static bruce_result_t dialog__keyboard_draw(dialog__keyboard_state_t *st, dialog
     }
 
     int input_x = DIALOG__MARGIN + 2;
-    int input_y = textbox_y - 1;
+    int input_y = layout.input_y;
     int cursor_column = chars_before_cursor;
     int drawn_chars = 0;
     for (size_t offset = view_start; offset < st->len && drawn_chars < max_chars;) {
@@ -468,7 +507,7 @@ static bruce_result_t dialog__keyboard_draw(dialog__keyboard_state_t *st, dialog
     uint16_t bg = dialog__input_background_color();
     for (int row = 0; row < st->rows; ++row)
         for (int col = 0; col < st->cols; ++col)
-            dialog__keyboard_draw_cell(st, kind, row, col, text_area_h, cell_w, cell_h, bg);
+            dialog__keyboard_draw_cell(st, kind, row, col, &layout, bg);
     return display__present();
 }
 
@@ -477,11 +516,10 @@ static bruce_result_t dialog__keyboard_draw_selection(
 ) {
     bruce_result_t result = display__begin_frame();
     if (result != BRUCE_OK) return result;
-    int text_area_h, cell_w, cell_h;
-    dialog__keyboard_layout(st, &text_area_h, &cell_w, &cell_h);
+    dialog__layout_t layout = dialog__keyboard_layout(st);
     uint16_t bg = dialog__input_background_color();
-    dialog__keyboard_draw_cell(st, kind, previous_row, previous_col, text_area_h, cell_w, cell_h, bg);
-    dialog__keyboard_draw_cell(st, kind, st->sel_row, st->sel_col, text_area_h, cell_w, cell_h, bg);
+    dialog__keyboard_draw_cell(st, kind, previous_row, previous_col, &layout, bg);
+    dialog__keyboard_draw_cell(st, kind, st->sel_row, st->sel_col, &layout, bg);
     return display__present();
 }
 
@@ -494,15 +532,15 @@ bruce_result_t dialog__input_gui_run(
     if (kind == DIALOG__INPUT_TEXT) {
         keys = &s_text_keys[0][0];
         rows = 5;
-        cols = 12;
+        cols = DIALOG__TEXT_COLS;
     } else if (kind == DIALOG__INPUT_HEX) {
         keys = &s_hex_keys[0][0];
         rows = 5;
-        cols = 5;
+        cols = DIALOG__HEX_COLS;
     } else {
         keys = &s_num_keys[0][0];
         rows = 5;
-        cols = 5;
+        cols = DIALOG__NUMPAD_COLS;
     }
     dialog__keyboard_state_t st = {
         .keys = keys,
