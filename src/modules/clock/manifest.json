@@ -4,10 +4,14 @@
   "appIcon": "icon:clock-outline",
   "coreAbiVersion": 4,
   "permissions": ["config"],
-  "stackSize": 4096,
+  "stackSize": 6144,
   "build": {
     "sources": [
-      "clock_app.c"
+      "clock_app.c",
+      "clock_gui.c",
+      "clock_model.c",
+      "clock_screens.c",
+      "clock_ui.c"
     ],
     "includeDirs": ["."],
     "targets": ["elf", "wasm"]

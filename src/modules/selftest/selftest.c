@@ -22,6 +22,7 @@
 #include "bnu_test.h"
 #include "bnu_sed_test.h"
 #include "clock_test.h"
+#include "clock_model_test.h"
 #include "compress_test.h"
 #include "config_test.h"
 #include "core_launcher_test.h"
@@ -120,6 +121,7 @@ static const selftest__case_t selftest__cases[] = {
     SELFTEST_CASE(selftest__run_process_app_kill_case),
     SELFTEST_CASE(selftest__run_device_state_case),
     SELFTEST_CASE(selftest__run_clock_case),
+    SELFTEST_CASE(selftest__run_clock_model_case),
     SELFTEST_CASE(selftest__run_compress_one_shot_case),
     SELFTEST_CASE(selftest__run_compress_streaming_case),
     SELFTEST_CASE(selftest__run_compress_corrupt_input_case),

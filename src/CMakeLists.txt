@@ -7,6 +7,7 @@ set(BRUCE_SELFTEST_SOURCES
     "modules/selftest/base64_test.c"
     "modules/selftest/bluetooth_test.c"
     "modules/selftest/clock_test.c"
+    "modules/selftest/clock_model_test.c"
     "modules/selftest/bnu_test.c"
     "modules/selftest/bnu_sed_test.c"
     "modules/selftest/compress_test.c"
@@ -173,6 +174,10 @@ idf_component_register(SRCS
                     "modules/bluetooth/bluetooth_app.c"
                     "modules/bluetooth_hid/bluetooth_hid_app.c"
                     "modules/clock/clock_app.c"
+                    "modules/clock/clock_gui.c"
+                    "modules/clock/clock_model.c"
+                    "modules/clock/clock_screens.c"
+                    "modules/clock/clock_ui.c"
                     "modules/config/config_app.c"
                     "modules/device_bus/device_bus_app.c"
                      "modules/filemanager/filemanager_app.c"
@@ -488,7 +493,12 @@ target_include_directories(bruce_sdk_builtin_input_check PRIVATE
 # equivalent and isn't hardware access requiring a permission gate.
 target_link_libraries(bruce_sdk_builtin_input_check PRIVATE idf::esp_rom idf::freertos idf::log)
 
-add_library(bruce_sdk_builtin_clock_check OBJECT "modules/clock/clock_app.c")
+add_library(bruce_sdk_builtin_clock_check OBJECT
+            "modules/clock/clock_app.c"
+            "modules/clock/clock_gui.c"
+            "modules/clock/clock_model.c"
+            "modules/clock/clock_screens.c"
+            "modules/clock/clock_ui.c")
 target_include_directories(bruce_sdk_builtin_clock_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/clock")
