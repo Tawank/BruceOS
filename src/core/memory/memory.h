@@ -4,27 +4,29 @@
 
 #include <stddef.h>
 
-#define MEMORY__MAGIC 0x42524d31u /* "BRM1" */
+#define MEMORY__MAGIC 0x42524d31u       /* "BRM1": a memory__malloc() block */
+#define MEMORY__STACK_MAGIC 0x42525331u /* "BRS1": a process stack, see process_registry__create() */
 
+/* Payloads of at least this many bytes start 16-byte aligned, as ESP32-S3
+ * 128-bit vector stores (EE.VST.128) need: they silently round the address
+ * down, so an unaligned buffer gets written *before* its start - straight
+ * over this header. Smaller ones keep the allocator's plain 4-byte
+ * alignment rather than paying aligned-allocation slack on every tiny block. */
+#define MEMORY__ALIGNED_MIN_SIZE 64u
+#define MEMORY__ALIGNMENT 16u
+
+/* Exactly MEMORY__ALIGNMENT bytes, so an aligned block yields an aligned
+ * payload. Nothing else lives here on purpose: which pool a block came from
+ * is answered by its address (memory_rtc__contains()), never by a byte a
+ * stray write could flip. */
 typedef struct {
     uint32_t magic;
-    size_t size;
+    uint32_t size;
     bruce_resource_id_t resource_id;
     bruce_process_id_t owner_id;
-    /* See bruce_memory_layout_block_t.is_stack - carried straight through by
-     * memory_layout__visit(). Always false for memory__malloc()'s own
-     * headers; only process_registry__create() ever sets this true, for the
-     * header it builds by hand ahead of its own xTaskCreateStatic() stack
-     * buffer. */
-    bool is_stack;
-    /* True when this header (and its payload) live inside the small RTC
-     * memory pool (see memory_rtc.c) rather than the general heap - set by
-     * memory__malloc() when memory_rtc__alloc() supplied the backing memory.
-     * memory__free()/memory__cleanup() check this to return the block to
-     * that pool with memory_rtc__free() instead of calling free() on memory
-     * libc never allocated. */
-    bool is_rtc_pool;
 } memory__header_t;
+
+_Static_assert(sizeof(memory__header_t) == MEMORY__ALIGNMENT, "memory__header_t must keep payloads aligned");
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -91,6 +93,7 @@ size_t memory_external__snapshot_ram_owners(memory_external__ram_owner_t *out, s
  */
 void *memory_rtc__alloc(size_t size);
 void memory_rtc__free(void *ptr);
+bool memory_rtc__contains(const void *ptr);
 
 /* One chunk (free or used) as reported by memory_rtc__walk() - address/size
  * of the payload following memory_rtc.c's internal chunk header, exactly
@@ -123,7 +126,7 @@ void memory_rtc__walk(
  * caller) - hides exactly where those bytes physically come from behind one
  * call, the same way memory__malloc() does for ordinary allocations.
  * process.c owns everything about *being* a stack (the header's
- * magic/size/resource_id/owner_id/is_stack fields, xTaskCreateStatic(),
+ * magic/size/resource_id/owner_id fields, xTaskCreateStatic(),
  * teardown ordering); it has no business also knowing which capability flag
  * or hand-rolled pool is safe to try for a stack pointer specifically, or in
  * what order - that's a memory-placement decision, so it lives here with
@@ -134,8 +137,8 @@ void memory_rtc__walk(
  * Returns raw, unheadered memory sized exactly total_bytes (the caller adds
  * sizeof(memory__header_t) itself, same as memory__malloc()'s own total) -
  * NULL on failure. memory__stack_free() releases whatever
- * memory__stack_alloc() returned; unlike memory__free()'s is_rtc_pool
- * dispatch, no header inspection is needed to free it - every source this
+ * memory__stack_alloc() returned; unlike memory__free()'s RTC-pool
+ * dispatch, no address check is needed to free it - every source this
  * function can pick from is released identically.
  */
 void *memory__stack_alloc(size_t total_bytes);

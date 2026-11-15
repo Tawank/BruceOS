@@ -115,6 +115,7 @@ static const selftest__case_t selftest__cases[] = {
     SELFTEST_CASE(selftest__run_runtime_timer_case),
     SELFTEST_CASE(selftest__run_audio_stream_nonblocking_case),
     SELFTEST_CASE(selftest__run_external_memory_case),
+    SELFTEST_CASE(selftest__run_memory_alignment_case),
     SELFTEST_CASE(selftest__run_memory_layout_case),
     SELFTEST_CASE(selftest__run_external_memory_xip_case),
     SELFTEST_CASE(selftest__run_external_memory_slab_case),

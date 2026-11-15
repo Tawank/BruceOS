@@ -94,6 +94,10 @@ typedef struct {
  * with no current process returns NULL, the same result as an allocation
  * failure.
  *
+ * Allocations of 64 bytes or more start 16-byte aligned, so they are safe
+ * targets for ESP32-S3 128-bit vector stores; smaller ones are 4-byte
+ * aligned. memory__realloc() keeps the same guarantee for the new size.
+ *
  * @param size Number of bytes to allocate.
  */
 void *memory__malloc(size_t size);

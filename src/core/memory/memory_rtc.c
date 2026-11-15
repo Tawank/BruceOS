@@ -138,8 +138,14 @@ void *memory_rtc__alloc(size_t size) {
     return result;
 }
 
+bool memory_rtc__contains(const void *ptr) {
+    uintptr_t address = (uintptr_t)ptr;
+    uintptr_t pool_start = (uintptr_t)s_rtc_pool;
+    return address >= pool_start + sizeof(memory_rtc__chunk_t) && address < pool_start + sizeof(s_rtc_pool);
+}
+
 void memory_rtc__free(void *ptr) {
-    if (ptr == NULL) return;
+    if (!memory_rtc__contains(ptr)) return;
     memory_rtc__ensure_mutex();
     xSemaphoreTake(s_mutex, portMAX_DELAY);
     memory_rtc__chunk_t *chunk = ((memory_rtc__chunk_t *)ptr) - 1;

@@ -8,6 +8,24 @@
 #include "core_sdk/memory.h"
 #include "core_sdk/process.h"
 
+static bool selftest__is_aligned(const void *ptr) { return ((uintptr_t)ptr & (MEMORY__ALIGNMENT - 1)) == 0; }
+
+bool selftest__run_memory_alignment_case(void) {
+    uint8_t *buffer = memory__malloc(MEMORY__ALIGNED_MIN_SIZE);
+    uint8_t *small = memory__malloc(8);
+    bool ok = buffer != NULL && small != NULL && selftest__is_aligned(buffer);
+    if (ok) {
+        memset(small, 0x5a, 8);
+        uint8_t *grown = memory__realloc(small, 4 * MEMORY__ALIGNED_MIN_SIZE);
+        if (grown != NULL) small = grown;
+        ok = grown != NULL && selftest__is_aligned(grown) && grown[0] == 0x5a && grown[7] == 0x5a;
+    }
+    memory__free(buffer);
+    memory__free(small);
+    if (!ok) printf("[selftest] memory/alignment: large allocation not %u-byte aligned\n", MEMORY__ALIGNMENT);
+    return ok;
+}
+
 bool selftest__run_memory_layout_case(void) {
     void *allocation = memory__malloc(123);
     if (allocation == NULL) {

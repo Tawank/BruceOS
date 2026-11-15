@@ -225,15 +225,22 @@ inline void frameCameraOnPlayer(Camera &camera, int32_t px, int32_t pz, int widt
     camera.farPlane = (int32_t)(offset * 3.5f) + kTile * 4;
 }
 
+// Narrower than the full help line (a preview tile, small panels): shorter texts.
+constexpr int kHudCompactBelowW = 216;
+
 // Only touches the display when the HUD's content changed: the bars now
 // live in their own screen rows (kHudBarH above), untouched by the scene
 // blit. Text uses an opaque, fixed-width background instead of a separate
 // fill_rect erase -- redoing that erase+redraw every dirty frame (~6x per
 // move, during slide animation) was what caused the visible flicker.
-inline void drawHud(const GameState &gs, int levelIndex, int width, int height) {
+//
+// `redrawAll` repaints both bars from scratch, for when Core cleared the
+// viewport (back from the background, tiled into the preview).
+inline void drawHud(const GameState &gs, int levelIndex, int width, int height, bool redrawAll) {
     static int lastLevel = -1, lastMoves = -1;
     static bool lastSolved = false, everDrawn = false;
-    bool firstDraw = !everDrawn;
+    bool firstDraw = !everDrawn || redrawAll;
+    bool compact = width < kHudCompactBelowW;
     bool bannerChanged = firstDraw || gs.solved != lastSolved;
     if (!firstDraw && !bannerChanged && levelIndex == lastLevel && gs.moves == lastMoves) return;
     lastLevel = levelIndex;
@@ -243,7 +250,8 @@ inline void drawHud(const GameState &gs, int levelIndex, int width, int height) 
 
     if (firstDraw) display__fill_rect(0, 0, (int16_t)width, (int16_t)kHudBarH, kHudBg);
     char line[48];
-    std::snprintf(line, sizeof(line), "Level %d/%d   Moves %-5d", levelIndex + 1, kLevelCount, gs.moves);
+    std::snprintf(line, sizeof(line), compact ? "L%d/%d  Moves %-5d" : "Level %d/%d   Moves %-5d", levelIndex + 1,
+                  kLevelCount, gs.moves);
     display__set_text_color(BRUCE_COLOR_WHITE);
     display__set_text_bg_color(kHudBg);
     display__draw_string(line, 4, 4);
@@ -254,12 +262,15 @@ inline void drawHud(const GameState &gs, int levelIndex, int width, int height) 
         display__fill_rect(0, by, (int16_t)width, (int16_t)kHudBarH, kSolvedBg);
         display__set_text_color(rgb565(255, 235, 130));
         display__set_text_bg_color(kSolvedBg);
-        display__draw_centre_string("SOLVED! SELECT for next level", (int16_t)(width / 2), (int16_t)(by + 4));
+        display__draw_centre_string(compact ? "SOLVED!" : "SOLVED! SELECT for next level", (int16_t)(width / 2),
+                                    (int16_t)(by + 4));
     } else {
         display__fill_rect(0, by, (int16_t)width, (int16_t)kHudBarH, kHudBg);
         display__set_text_color(rgb565(150, 158, 180));
         display__set_text_bg_color(kHudBg);
-        display__draw_centre_string("SELECT go  ENTER restart  BACK exit", (int16_t)(width / 2), (int16_t)(by + 4));
+        if (!compact) {
+            display__draw_centre_string("SELECT go  ENTER restart  BACK exit", (int16_t)(width / 2), (int16_t)(by + 4));
+        }
     }
 }
 

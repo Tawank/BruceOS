@@ -40,6 +40,27 @@ namespace {
 constexpr int kAnimTotalFrames = 6;
 constexpr uint32_t kAnimFrameDelayMs = 16;
 constexpr uint32_t kIdleDelayMs = 30; // turn-based: no need to poll at 60fps while idle
+
+// Draws the full-size rendered scene shrunk into a smaller viewport (the
+// process preview tile), nearest-neighbour, one row at a time through `row`
+// so no second framebuffer is needed. Letterboxed to keep the aspect ratio,
+// using the scene's own corner pixel (always background) for the bars; the
+// caller draws the HUD bars around it.
+void drawSceneScaled(const uint16_t *scene, int sceneW, int sceneH, uint16_t *row, int viewY, int viewW, int viewH) {
+    int drawH = sceneH * viewW / sceneW;
+    if (drawH > viewH) drawH = viewH;
+    if (drawH < 1) drawH = 1;
+    const int top = (viewH - drawH) / 2;
+    for (int y = 0; y < viewH; y++) {
+        if (y >= top && y < top + drawH) {
+            const uint16_t *src = scene + (size_t)((y - top) * sceneH / drawH) * (size_t)sceneW;
+            for (int x = 0; x < viewW; x++) row[x] = src[x * sceneW / viewW];
+        } else {
+            for (int x = 0; x < viewW; x++) row[x] = scene[0];
+        }
+        display__draw_rgb_bitmap(0, (int16_t)(viewY + y), row, (int16_t)viewW, 1);
+    }
+}
 } // namespace
 
 extern "C" int app_main(int argc, char **argv) {
@@ -52,27 +73,6 @@ extern "C" int app_main(int argc, char **argv) {
     if (width <= 0 || height <= 0) {
         printf("game3d: no viewport, exiting\n");
         return 0;
-    }
-
-    // Hand back Core's off-screen framebuffer RAM before allocating our own
-    // colour buffer below: there's no API to draw straight into Core's
-    // buffer (apps are isolated from it, same as any other core/ internal),
-    // so this app always needs its own width*gameHeight*2 bytes regardless -
-    // requesting DIRECT mode just guarantees Core's copy is freed rather
-    // than leaving it allocated-and-unused alongside ours. This is on top
-    // of (not a replacement for) the ELF loader's automatic
-    // memory__reclaim() ahead of app_main(), which only drops Core into
-    // DIRECT if the manifest's declared heap/stack size didn't already fit -
-    // a request here covers the common case where it did fit but this
-    // buffer still doesn't need to coexist with Core's. Released
-    // automatically when this process exits (display__request_render_mode()),
-    // so the display returns to whatever mode the remaining live requests
-    // (if any) call for - same as process_app's tile preview, which depends
-    // on Core's shared framebuffer and would have nowhere to composite into
-    // while this request is held; this game is a full-screen foreground
-    // app, so that trade-off is acceptable while it's running.
-    if (display__request_render_mode(BRUCE_DISPLAY_MODE_DIRECT) != BRUCE_OK) {
-        printf("game3d: direct render mode request failed, continuing buffered\n");
     }
 
     initializeTrigTables();
@@ -89,11 +89,20 @@ extern "C" int app_main(int argc, char **argv) {
         gameY = 0;
     }
 
-    uint16_t *framebuffer = new uint16_t[(size_t)width * (size_t)gameHeight];
-    if (framebuffer == nullptr) {
+    // Jet's ESP32-S3 clear writes rows with 128-bit vector stores, which
+    // silently round the address down to 16 bytes. memory__malloc() only
+    // guarantees 4-byte alignment (its header is 20 bytes), so an unaligned
+    // buffer has row 0 written over the allocation header in front of it -
+    // corrupting the heap once the buffer is freed. Over-allocate and align.
+    constexpr uintptr_t kFramebufferAlign = 16;
+    uint16_t *framebufferAllocation =
+        new uint16_t[(size_t)width * (size_t)gameHeight + kFramebufferAlign / sizeof(uint16_t)];
+    if (framebufferAllocation == nullptr) {
         printf("game3d: framebuffer allocation failed (%dx%d)\n", width, gameHeight);
         return 1;
     }
+    uint16_t *framebuffer = reinterpret_cast<uint16_t *>(
+        (reinterpret_cast<uintptr_t>(framebufferAllocation) + kFramebufferAlign - 1) & ~(kFramebufferAlign - 1));
 
     // Diagnostic only: logged at each major allocation step (and later,
     // each move) so a hardware crash/hang tells us which step ran out of
@@ -141,7 +150,7 @@ extern "C" int app_main(int argc, char **argv) {
     if (!matsOk || !accentMat) {
         printf("game3d: material allocation failed\n");
         logHeap("material allocation failed");
-        delete[] framebuffer;
+        delete[] framebufferAllocation;
         return 1;
     }
     logHeap("after materials");
@@ -157,7 +166,7 @@ extern "C" int app_main(int argc, char **argv) {
 
     if (!floorObj || !wallObj || !playerObj || !faceObj || !boxObj[0] || !boxObj[1] || !boxObj[2] || !boxObj[3]) {
         printf("game3d: object allocation failed\n");
-        delete[] framebuffer;
+        delete[] framebufferAllocation;
         return 1;
     }
 
@@ -196,6 +205,10 @@ extern "C" int app_main(int argc, char **argv) {
         dirty = true;
     };
 
+    // One scanline for drawSceneScaled(); without it the preview tile just stays blank.
+    uint16_t *previewRow = new uint16_t[width];
+
+    bool hudCleared = true;
     bool running = true;
     while (running) {
         // Standard event-loop drain (see native_apps/examples/nes's
@@ -282,14 +295,32 @@ extern "C" int app_main(int argc, char **argv) {
             dirty = true;
         }
 
-        if (dirty) {
+        // Tiled into the process preview, back in the foreground, or moved:
+        // Core cleared our viewport, so the scene has to be drawn again.
+        if (display__viewport_changed()) {
+            dirty = true;
+            hudCleared = true;
+        }
+
+        // A backgrounded app that isn't tiled has no viewport (0x0); keep the
+        // frame pending until it is visible again.
+        const int viewW = display__width();
+        const int viewH = display__height();
+        if (dirty && viewW > 0 && viewH > 0) {
             scene.render();
             if (display__begin_frame() == BRUCE_OK) {
-                display__draw_rgb_bitmap(0, (int16_t)gameY, framebuffer, (int16_t)width, (int16_t)gameHeight);
-                drawHud(gs, levelIndex, width, height);
+                if (viewW == width && viewH == height) {
+                    display__draw_rgb_bitmap(0, (int16_t)gameY, framebuffer, (int16_t)width, (int16_t)gameHeight);
+                    drawHud(gs, levelIndex, width, height, hudCleared);
+                } else if (previewRow != nullptr && viewW <= width) {
+                    const int hudH = viewH > 3 * kHudBarH ? kHudBarH : 0;
+                    drawSceneScaled(framebuffer, width, gameHeight, previewRow, hudH, viewW, viewH - 2 * hudH);
+                    if (hudH > 0) drawHud(gs, levelIndex, viewW, viewH, true);
+                }
                 display__present();
             }
             dirty = false;
+            hudCleared = false;
         }
 
         // Turn-based game: pace tightly while a slide animation is
@@ -310,7 +341,8 @@ extern "C" int app_main(int argc, char **argv) {
     deleteShadedMaterial(beakMat);
     delete accentMat;
     for (int i = 0; i < kMaxBoxes; i++) deleteShadedMaterial(boxMat[i]);
-    delete[] framebuffer;
+    delete[] previewRow;
+    delete[] framebufferAllocation;
     printf("game3d exiting\n");
     return 0;
 }

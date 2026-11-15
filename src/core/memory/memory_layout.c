@@ -80,13 +80,14 @@ static bool memory_layout__visit(
     };
     if (block.used && block.size >= sizeof(memory__header_t)) {
         const memory__header_t *header = block.ptr;
-        if (header->magic == MEMORY__MAGIC && header->size <= block.size - sizeof(*header) &&
+        bool is_stack = header->magic == MEMORY__STACK_MAGIC;
+        if ((header->magic == MEMORY__MAGIC || is_stack) && header->size <= block.size - sizeof(*header) &&
             header->resource_id != BRUCE_RESOURCE_ID_INVALID &&
             header->owner_id != BRUCE_PROCESS_ID_INVALID) {
             item.tracked = true;
             item.requested_size = header->size;
             item.owner_id = header->owner_id;
-            item.is_stack = header->is_stack;
+            item.is_stack = is_stack;
         }
     }
     /* Not a memory__malloc() block -- check the pre-fetched memory_external
