@@ -1,0 +1,10 @@
+{
+  "appName": "Maps",
+  "entryPoint": "app_main",
+  "appIcon": "icon:map-marker",
+  "coreAbiVersion": 4,
+  "permissions": ["storage", "http", "wifi"],
+  "stackSize": 16384,
+  "heapSize": 524288,
+  "targets": ["elf"]
+}
