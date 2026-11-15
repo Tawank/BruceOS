@@ -1,5 +1,6 @@
 #include "config.h"
 
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,6 +16,15 @@
 
 static StaticSemaphore_t s_config_mutex_storage;
 static SemaphoreHandle_t s_config_mutex;
+static StaticSemaphore_t s_save_mutex_storage;
+static SemaphoreHandle_t s_save_mutex;
+static uint32_t s_save_generation;
+static uint32_t s_saved_generation;
+/* Audio settings mirrored for lock-free reads, see config__get_audio_settings(). */
+#define CONFIG__AUDIO_PUBLISHED 0x200u
+#define CONFIG__AUDIO_ENABLED 0x100u
+#define CONFIG__AUDIO_VOLUME_MASK 0xFFu
+static atomic_uint s_audio_settings;
 static portMUX_TYPE s_config_init_mux = portMUX_INITIALIZER_UNLOCKED;
 static bool s_defaults_initialized;
 static bool s_loaded;
@@ -24,6 +34,7 @@ static void config__ensure_mutex(void) {
     if (s_config_mutex != NULL) return;
     portENTER_CRITICAL(&s_config_init_mux);
     if (s_config_mutex == NULL) { s_config_mutex = xSemaphoreCreateMutexStatic(&s_config_mutex_storage); }
+    if (s_save_mutex == NULL) { s_save_mutex = xSemaphoreCreateMutexStatic(&s_save_mutex_storage); }
     portEXIT_CRITICAL(&s_config_init_mux);
 }
 
@@ -175,6 +186,7 @@ static void config__validate(config__t *cfg) {
 
     if (cfg->timeTimezone < -12 || cfg->timeTimezone > 14) cfg->timeTimezone = 0;
 
+    if (cfg->soundVolume < 0) cfg->soundVolume = 0;
     if (cfg->soundVolume > 100) cfg->soundVolume = 100;
 
     if (cfg->ledBrightness < 0) cfg->ledBrightness = 0;
@@ -490,20 +502,46 @@ static cJSON *config__build_json(const config__t *cfg) {
 /* Load / save                                                               */
 /* ------------------------------------------------------------------------ */
 
-static bool config__save_locked(void) {
+static void config__publish_audio_locked(void) {
+    unsigned settings = CONFIG__AUDIO_PUBLISHED | ((unsigned)s_config.soundVolume & CONFIG__AUDIO_VOLUME_MASK);
+    if (s_config.soundEnabled) settings |= CONFIG__AUDIO_ENABLED;
+    atomic_store_explicit(&s_audio_settings, settings, memory_order_release);
+}
+
+static char *config__serialize_locked(void) {
     cJSON *root = config__build_json(&s_config);
-    if (root == NULL) return false;
+    if (root == NULL) return NULL;
 
     char *text = cJSON_Print(root);
     cJSON_Delete(root);
-    if (text == NULL) return false;
+    if (text == NULL) return NULL;
 
     /* cJSON pretty printing uses a tab after each object key. */
     for (char *separator = strstr(text, ":\t"); separator != NULL; separator = strstr(separator + 2, ":\t")) {
         separator[1] = ' ';
     }
+    return text;
+}
 
-    bool saved = storage__write_file_atomic(CONFIG__FILE_PATH, text, strlen(text));
+/* Snapshots the config under the lock, then releases it before writing, so
+ * readers never wait on flash - audio playback reads the volume for every
+ * chunk and would otherwise stall (and crackle) for the whole write. Saves
+ * are numbered: one that finishes serializing late can't overwrite a newer
+ * snapshot already on flash. */
+static bool config__save_and_unlock(void) {
+    config__publish_audio_locked();
+    char *text = config__serialize_locked();
+    uint32_t generation = ++s_save_generation;
+    config__unlock();
+    if (text == NULL) return false;
+
+    xSemaphoreTake(s_save_mutex, portMAX_DELAY);
+    bool saved = true;
+    if (generation > s_saved_generation) {
+        saved = storage__write_file_atomic(CONFIG__FILE_PATH, text, strlen(text));
+        if (saved) s_saved_generation = generation;
+    }
+    xSemaphoreGive(s_save_mutex);
     cJSON_free(text);
     return saved;
 }
@@ -558,17 +596,19 @@ bool config__load(void) {
     if (text != NULL) storage__free(text);
     config__validate(&s_config);
     s_loaded = true;
-    bool result = read || config__save_locked();
-    config__unlock();
-    return result;
+    config__publish_audio_locked();
+    if (read) {
+        config__unlock();
+        return true;
+    }
+    return config__save_and_unlock();
 }
 
 bool config__save(void) {
     if (!config__init()) return false;
     config__lock();
     config__validate(&s_config);
-    bool saved = config__save_locked();
-    config__unlock();
+    bool saved = config__save_and_unlock();
     return saved;
 }
 
@@ -576,8 +616,7 @@ bool config__factory_reset(void) {
     if (!config__init()) return false;
     config__lock();
     config__set_defaults(&s_config);
-    bool saved = config__save_locked();
-    config__unlock();
+    bool saved = config__save_and_unlock();
     return saved;
 }
 
@@ -623,8 +662,7 @@ typedef bruce_result_t (*config__guard_fn_t)(void);
         config__lock();                                                                                      \
         config__assign(&s_config.FIELD, value);                                                              \
         config__validate(&s_config);                                                                         \
-        bool saved = config__save_locked();                                                                  \
-        config__unlock();                                                                                    \
+        bool saved = config__save_and_unlock();                                                              \
         return saved ? BRUCE_OK : BRUCE_ERR_IO;                                                              \
     }
 #define CONFIG__DEFINE_STRING_FIELD(NAME, FIELD, MAX_LEN)                                                    \
@@ -645,8 +683,7 @@ typedef bruce_result_t (*config__guard_fn_t)(void);
         config__lock();                                                                                      \
         s_config.FIELD = value;                                                                              \
         config__validate(&s_config);                                                                         \
-        bool saved = config__save_locked();                                                                  \
-        config__unlock();                                                                                    \
+        bool saved = config__save_and_unlock();                                                              \
         return saved ? BRUCE_OK : BRUCE_ERR_IO;                                                              \
     }
 #define CONFIG__DEFINE_INT_FIELD(NAME, FIELD) CONFIG__DEFINE_INT_FIELD_GUARDED(NAME, FIELD, config__guard)
@@ -666,8 +703,7 @@ typedef bruce_result_t (*config__guard_fn_t)(void);
         config__lock();                                                                                      \
         s_config.FIELD = value;                                                                              \
         config__validate(&s_config);                                                                         \
-        bool saved = config__save_locked();                                                                  \
-        config__unlock();                                                                                    \
+        bool saved = config__save_and_unlock();                                                              \
         return saved ? BRUCE_OK : BRUCE_ERR_IO;                                                              \
     }
 #define CONFIG__DEFINE_BOOL_FIELD(NAME, FIELD) CONFIG__DEFINE_BOOL_FIELD_GUARDED(NAME, FIELD, config__guard)
@@ -689,8 +725,7 @@ typedef bruce_result_t (*config__guard_fn_t)(void);
         config__lock();                                                                                      \
         s_config.FIELD = value ? 1 : 0;                                                                      \
         config__validate(&s_config);                                                                         \
-        bool saved = config__save_locked();                                                                  \
-        config__unlock();                                                                                    \
+        bool saved = config__save_and_unlock();                                                              \
         return saved ? BRUCE_OK : BRUCE_ERR_IO;                                                              \
     }
 #define CONFIG__DEFINE_BOOL_INT_FIELD(NAME, FIELD)                                                           \
@@ -711,8 +746,7 @@ typedef bruce_result_t (*config__guard_fn_t)(void);
         config__lock();                                                                                      \
         s_config.FIELD = value;                                                                              \
         config__validate(&s_config);                                                                         \
-        bool saved = config__save_locked();                                                                  \
-        config__unlock();                                                                                    \
+        bool saved = config__save_and_unlock();                                                              \
         return saved ? BRUCE_OK : BRUCE_ERR_IO;                                                              \
     }
 #define CONFIG__DEFINE_FLOAT_FIELD(NAME, FIELD) CONFIG__DEFINE_FLOAT_FIELD_GUARDED(NAME, FIELD, config__guard)
@@ -732,8 +766,7 @@ typedef bruce_result_t (*config__guard_fn_t)(void);
         config__lock();                                                                                      \
         s_config.FIELD = value;                                                                              \
         config__validate(&s_config);                                                                         \
-        bool saved = config__save_locked();                                                                  \
-        config__unlock();                                                                                    \
+        bool saved = config__save_and_unlock();                                                              \
         return saved ? BRUCE_OK : BRUCE_ERR_IO;                                                              \
     }
 #define CONFIG__DEFINE_UINT16_FIELD(NAME, FIELD)                                                             \
@@ -754,8 +787,7 @@ typedef bruce_result_t (*config__guard_fn_t)(void);
         config__lock();                                                                                      \
         s_config.FIELD = value;                                                                              \
         config__validate(&s_config);                                                                         \
-        bool saved = config__save_locked();                                                                  \
-        config__unlock();                                                                                    \
+        bool saved = config__save_and_unlock();                                                              \
         return saved ? BRUCE_OK : BRUCE_ERR_IO;                                                              \
     }
 #define CONFIG__DEFINE_UINT32_FIELD(NAME, FIELD)                                                             \
@@ -776,8 +808,7 @@ bruce_result_t config__set_wifi_ap(const char *ssid, const char *password) {
     config__lock();
     config__assign(&s_config.wifiApSsid, ssid);
     config__assign(&s_config.wifiApPassword, password);
-    bool saved = config__save_locked();
-    config__unlock();
+    bool saved = config__save_and_unlock();
     return saved ? BRUCE_OK : BRUCE_ERR_IO;
 }
 
@@ -823,8 +854,7 @@ bruce_result_t config__add_or_update_wifi_credential(const char *ssid, const cha
     for (size_t i = 0; i < s_config.wifiCredentialCount; ++i) {
         if (strcmp(s_config.wifiCredentials[i].ssid, ssid) == 0) {
             config__assign(&s_config.wifiCredentials[i].password, password);
-            bool saved = config__save_locked();
-            config__unlock();
+            bool saved = config__save_and_unlock();
             return saved ? BRUCE_OK : BRUCE_ERR_IO;
         }
     }
@@ -836,8 +866,7 @@ bruce_result_t config__add_or_update_wifi_credential(const char *ssid, const cha
     slot->ssid = config__strdup(ssid);
     slot->password = config__strdup(password);
     ++s_config.wifiCredentialCount;
-    bool saved = config__save_locked();
-    config__unlock();
+    bool saved = config__save_and_unlock();
     return saved ? BRUCE_OK : BRUCE_ERR_IO;
 }
 
@@ -873,8 +902,7 @@ bruce_result_t config__set_colors(const bruce_config_theme_colors_t *colors) {
     s_config.colorWarning = colors->warning;
     s_config.colorError = colors->error;
     config__validate(&s_config);
-    bool saved = config__save_locked();
-    config__unlock();
+    bool saved = config__save_and_unlock();
     return saved ? BRUCE_OK : BRUCE_ERR_IO;
 }
 
@@ -892,17 +920,19 @@ CONFIG__DEFINE_BOOL_FIELD(time_clock24hr, timeClock24hr)
 CONFIG__DEFINE_BOOL_FIELD(sound_enabled, soundEnabled)
 CONFIG__DEFINE_INT_FIELD(sound_volume, soundVolume)
 
+/* Lock-free: audio playback calls this for every chunk and must never wait
+ * behind a writer. A change in progress is simply picked up by the next call. */
 void config__get_audio_settings(bool *enabled, int *volume) {
     if (enabled == NULL || volume == NULL) return;
-    if (!config__init()) {
+    unsigned settings = atomic_load_explicit(&s_audio_settings, memory_order_acquire);
+    if (!(settings & CONFIG__AUDIO_PUBLISHED) && !config__init()) {
         *enabled = false;
         *volume = 0;
         return;
     }
-    config__lock();
-    *enabled = s_config.soundEnabled;
-    *volume = s_config.soundVolume;
-    config__unlock();
+    settings = atomic_load_explicit(&s_audio_settings, memory_order_acquire);
+    *enabled = (settings & CONFIG__AUDIO_ENABLED) != 0;
+    *volume = (int)(settings & CONFIG__AUDIO_VOLUME_MASK);
 }
 
 void config__get_colors_internal(
@@ -983,8 +1013,7 @@ bruce_result_t config__set_hotkeys(const bruce_config_hotkey_t *values, size_t c
     }
     memcpy(s_config.hotkeys.items, copies, sizeof(copies));
     s_config.hotkeys.count = count;
-    bool saved = config__save_locked();
-    config__unlock();
+    bool saved = config__save_and_unlock();
     return saved ? BRUCE_OK : BRUCE_ERR_IO;
 }
 
@@ -1028,8 +1057,7 @@ bruce_result_t config__set_startup_apps(const char *const *values, size_t count)
     config__clear_string_array(s_config.startup.items, CONFIG__STARTUP_APP_MAX_COUNT);
     memcpy(s_config.startup.items, copies, sizeof(copies));
     s_config.startup.count = count;
-    bool saved = config__save_locked();
-    config__unlock();
+    bool saved = config__save_and_unlock();
     return saved ? BRUCE_OK : BRUCE_ERR_IO;
 }
 
@@ -1058,8 +1086,7 @@ bruce_result_t config__add_startup_app(const char *key) {
         return BRUCE_ERR_NO_MEMORY;
     }
     s_config.startup.items[s_config.startup.count++] = copy;
-    bool saved = config__save_locked();
-    config__unlock();
+    bool saved = config__save_and_unlock();
     return saved ? BRUCE_OK : BRUCE_ERR_IO;
 }
 
@@ -1088,8 +1115,7 @@ bruce_result_t config__remove_startup_app(const char *key) {
         (s_config.startup.count - index) * sizeof(s_config.startup.items[0])
     );
     s_config.startup.items[s_config.startup.count] = NULL;
-    bool saved = config__save_locked();
-    config__unlock();
+    bool saved = config__save_and_unlock();
     return saved ? BRUCE_OK : BRUCE_ERR_IO;
 }
 

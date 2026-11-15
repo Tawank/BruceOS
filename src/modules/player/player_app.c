@@ -12,6 +12,7 @@
 #include "core_sdk/dialog.h"
 #include "core_sdk/display.h"
 #include "core_sdk/environment.h"
+#include "core_sdk/icon.h"
 #include "core_sdk/input.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/process.h"
@@ -27,7 +28,7 @@
 
 #define PLAYER_APP__SEEK_STEP_MS 5000u
 #define PLAYER_APP__LONG_PRESS_MS 500u
-#define PLAYER_APP__VOLUME_STEP 5
+#define PLAYER_APP__VOLUME_STEP 20
 #define PLAYER_APP__BAR_COUNT 12
 #define PLAYER_APP__BAR_WOBBLE_PERIOD_TICKS 20u /* ~20 * input__wait's 80ms poll below */
 
@@ -306,11 +307,20 @@ static void player__draw_close(int width, int margin, int char_height, bool focu
     player__draw_close_icon(cx, cy, half, color);
 }
 
-/* Box plus cone, with the cone's mouth at cx + half. */
+static const char *player__speaker_icon_name(int volume) {
+    if (volume <= 0) return "volume-off";
+    if (volume < 34) return "volume-low";
+    if (volume < 67) return "volume-medium";
+    return "volume-high";
+}
+
 static void player__draw_speaker_icon(int16_t cx, int16_t cy, int16_t half, uint16_t color) {
-    int16_t box = half * 2 / 3 > 0 ? half * 2 / 3 : 1;
-    (void)display__fill_rect(cx - half, cy - box / 2, box, box, color);
-    (void)display__fill_triangle(cx - half + box - 1, cy, cx + half, cy - half, cx + half, cy + half, color);
+    const bruce_icon_t *icon = icon__get(player__speaker_icon_name(config__get_sound_volume()));
+    if (icon == NULL) return;
+    int16_t size = (int16_t)(half * 2);
+    (void)display__draw_bitmap_scaled(
+        (int16_t)(cx - half), (int16_t)(cy - half), icon->bits, icon->width, icon->height, size, size, color
+    );
 }
 
 /* Speaker with the current volume written beside it. */
