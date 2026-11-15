@@ -151,9 +151,10 @@ static bruce_result_t audio__es8311_enable(void) {
  * defined (silent, when nothing is playing) signal -- which is what keeps the
  * amp from hissing on a floating line (see audio__i2s_ensure_channel_locked()).
  *
- * s_master_gain: the user's volume as Q15, applied once to the sum rather
- * than per sample in every producer. s_isr_ticks: bumped at the end of every
- * callback; stream teardown waits for it to move before freeing a ring.
+ * s_master_gain: the user's volume as Q15 (see audio__set_master_volume()),
+ * applied once to the sum rather than per sample in every producer.
+ * s_isr_ticks: bumped at the end of every callback; stream teardown waits
+ * for it to move before freeing a ring.
  * The tone voice is a square wave synthesized in the callback: the producer
  * sets step/phase and then arms it by storing a nonzero s_tone_frames, and the
  * callback counts that down to zero. */
@@ -164,10 +165,14 @@ static atomic_uint_fast32_t s_tone_frames;
 static uint32_t s_tone_step;
 static uint32_t s_tone_phase;
 
+/* Loudness is perceived logarithmically, so a linear gain leaves most of the
+ * slider sounding the same (50% is only -6 dB on a full-scale square tone).
+ * Squaring spreads it out: 50% is -12 dB, 10% is -40 dB. */
 static void audio__set_master_volume(int volume) {
     if (volume > 100) volume = 100;
     if (volume < 0) volume = 0;
-    atomic_store_explicit(&s_master_gain, ((uint32_t)volume * AUDIO__GAIN_UNITY) / 100u, memory_order_relaxed);
+    uint32_t gain = ((uint32_t)(volume * volume) * AUDIO__GAIN_UNITY) / 10000u;
+    atomic_store_explicit(&s_master_gain, gain, memory_order_relaxed);
 }
 
 static bool IRAM_ATTR audio__i2s_on_sent(i2s_chan_handle_t handle, i2s_event_data_t *event, void *context) {
@@ -848,7 +853,7 @@ static void audio__file_apply_volume_and_track_level(int16_t *frames, size_t fra
         int32_t magnitude = frames[i] < 0 ? -(int32_t)frames[i] : (int32_t)frames[i];
         if (magnitude > peak) peak = magnitude;
     }
-    peak = (peak * volume) / 100;
+    peak = (peak * volume * volume) / 10000; /* the mixer's curve, see audio__set_master_volume() */
     s_file_level_peak = (int16_t)(peak > INT16_MAX ? INT16_MAX : peak);
 }
 
