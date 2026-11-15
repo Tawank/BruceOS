@@ -43,20 +43,26 @@ constexpr uint32_t kIdleDelayMs = 30; // turn-based: no need to poll at 60fps wh
 
 // Draws the full-size rendered scene shrunk into a smaller viewport (the
 // process preview tile), nearest-neighbour, one row at a time through `row`
-// so no second framebuffer is needed. Letterboxed to keep the aspect ratio,
-// using the scene's own corner pixel (always background) for the bars; the
+// so no second framebuffer is needed. Fitted inside the viewport at the
+// scene's own aspect ratio and letterboxed on whichever axis is left over,
+// using the scene's corner pixel (always background) for the bars; the
 // caller draws the HUD bars around it.
 void drawSceneScaled(const uint16_t *scene, int sceneW, int sceneH, uint16_t *row, int viewY, int viewW, int viewH) {
+    int drawW = viewW;
     int drawH = sceneH * viewW / sceneW;
-    if (drawH > viewH) drawH = viewH;
+    if (drawH > viewH) {
+        drawH = viewH;
+        drawW = sceneW * viewH / sceneH;
+    }
+    if (drawW < 1) drawW = 1;
     if (drawH < 1) drawH = 1;
+    const int left = (viewW - drawW) / 2;
     const int top = (viewH - drawH) / 2;
     for (int y = 0; y < viewH; y++) {
+        for (int x = 0; x < viewW; x++) row[x] = scene[0];
         if (y >= top && y < top + drawH) {
             const uint16_t *src = scene + (size_t)((y - top) * sceneH / drawH) * (size_t)sceneW;
-            for (int x = 0; x < viewW; x++) row[x] = src[x * sceneW / viewW];
-        } else {
-            for (int x = 0; x < viewW; x++) row[x] = scene[0];
+            for (int x = 0; x < drawW; x++) row[left + x] = src[x * sceneW / drawW];
         }
         display__draw_rgb_bitmap(0, (int16_t)(viewY + y), row, (int16_t)viewW, 1);
     }

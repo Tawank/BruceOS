@@ -320,12 +320,21 @@ function main() {
   var INPUT_CODE_DOWN = 0x02e;
   var INPUT_CODE_SELECT = 0x00a;
   var INPUT_CODE_BACK = 0x060;
+  var INPUT_CODE_PREV = 0x109;
+  var INPUT_CODE_NEXT = 0x10A;
+
+  // A rotary encoder step arrives as a press and its release in the same
+  // instant, so it can never be "held": turning forward jumps, and each step
+  // back ducks for DUCK_STEP_MS.
+  var DUCK_STEP_MS = 350;
 
   // Held state for each logical action, updated from the raw press/release
   // event stream so it reflects how long a key is actually held rather than
   // a single edge/repeat event.
   var jumpKeyDown = false; // Enter or Up
+  var jumpRequested = false; // latched on press, so quick taps are never lost
   var duckKeyDown = false; // Down
+  var duckUntil = 0; // encoder ducking deadline, ms
   var exitRequested = false; // Esc
 
   // Drains every queued input event (see core_sdk/input.h's event loop).
@@ -339,6 +348,11 @@ function main() {
       var isDown = event.action === 'press';
       if (event.code === INPUT_CODE_SELECT || event.code === INPUT_CODE_UP) {
         jumpKeyDown = isDown;
+        if (isDown) jumpRequested = true;
+      } else if (event.code === INPUT_CODE_NEXT) {
+        if (isDown) jumpRequested = true;
+      } else if (event.code === INPUT_CODE_PREV) {
+        if (isDown) duckUntil = now() + DUCK_STEP_MS;
       } else if (event.code === INPUT_CODE_DOWN) {
         duckKeyDown = isDown;
       } else if (event.code === INPUT_CODE_BACK && isDown) {
@@ -350,13 +364,17 @@ function main() {
   function handleInput() {
     pollInputEvents();
 
-    if (jumpKeyDown && !dinoIsJumping && !dinoIsDucking) {
+    var wantsDuck = duckKeyDown || now() < duckUntil;
+    if ((jumpRequested || jumpKeyDown) && !dinoIsJumping) {
       dinoVelocity = JUMP_VELOCITY;
       dinoIsJumping = true;
+      duckUntil = 0;
+      wantsDuck = duckKeyDown;
       audio.tone(494, 40, true);
     }
+    jumpRequested = false;
 
-    dinoIsDucking = duckKeyDown && !dinoIsJumping;
+    dinoIsDucking = wantsDuck && !dinoIsJumping;
   }
 
   // ---------------------------------------------------------------------
@@ -488,7 +506,7 @@ function main() {
     while (scoreText.length < 5) {
       scoreText = '0' + scoreText;
     }
-    display.drawText(scoreText, displayWidth - 10 - textWidth(scoreText, 1), 5);
+    display.drawText(scoreText, displayWidth - 10 - textWidth(scoreText, 2), 5);
   }
 
   function textWidth(text, size) {
@@ -543,6 +561,7 @@ function main() {
     drawGameOverOverlay();
     display.present();
     delay(500);
+    drainAndCheckAnyPress(); // input from the moment of the crash must not restart straight away
     while (!drainAndCheckAnyPress() && !exitRequested) {
       display.beginFrame();
       drawScene();
@@ -557,6 +576,10 @@ function main() {
     dinoVelocity = 0;
     dinoIsJumping = false;
     dinoIsDucking = false;
+    jumpKeyDown = false;
+    jumpRequested = false;
+    duckKeyDown = false;
+    duckUntil = 0;
 
     obstacleX = displayWidth + 50;
     delay(500);
