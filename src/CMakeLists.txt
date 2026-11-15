@@ -176,6 +176,7 @@ idf_component_register(SRCS
                     "modules/clock/clock_app.c"
                     "modules/clock/clock_gui.c"
                     "modules/clock/clock_model.c"
+                    "modules/clock/clock_overlay.c"
                     "modules/clock/clock_screens.c"
                     "modules/clock/clock_ui.c"
                     "modules/config/config_app.c"
@@ -497,6 +498,7 @@ add_library(bruce_sdk_builtin_clock_check OBJECT
             "modules/clock/clock_app.c"
             "modules/clock/clock_gui.c"
             "modules/clock/clock_model.c"
+            "modules/clock/clock_overlay.c"
             "modules/clock/clock_screens.c"
             "modules/clock/clock_ui.c")
 target_include_directories(bruce_sdk_builtin_clock_check PRIVATE

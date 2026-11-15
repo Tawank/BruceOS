@@ -7,6 +7,7 @@
 #define CLOCK_SCREENS__GAP 3
 #define CLOCK_SCREENS__GLYPH_H 10
 #define CLOCK_SCREENS__TALL_DISPLAY_H 100
+#define CLOCK_SCREENS__PREVIEW_DETAIL_H 60
 
 typedef struct {
     int16_t margin;
@@ -115,9 +116,34 @@ static void clock_screens__add_face(clock_ui_t *ui, const clock_scene_t *scene, 
     clock_ui__label(ui, 0, 0, width, date_h, date)->tone = CLOCK_TONE_MUTED;
 }
 
+static void clock_screens__add_headline(clock_ui_t *ui, const clock_scene_t *scene, const clock_headline_t *headline) {
+    bool detailed = scene->height >= CLOCK_SCREENS__PREVIEW_DETAIL_H;
+    int16_t band_h = detailed ? CLOCK_SCREENS__GLYPH_H + 6 : 0;
+    int16_t big_h = scene->height - 2 * band_h;
+    char text[CLOCK_UI__LABEL_MAX];
+    clock_screens__format_seconds(headline->seconds, text, sizeof(text));
+    clock_item_t *big = clock_ui__label(ui, 0, band_h, scene->width, big_h, text);
+    big->text_size = clock_ui__fit_text_size(text, scene->width - 8, big_h, 4);
+    big->tone = CLOCK_TONE_PRIMARY;
+    if (!detailed) return;
+
+    const char *caption = headline->kind == CLOCK_HEADLINE_STOPWATCH ? "Stopwatch" : "Timer";
+    clock_ui__label(ui, 0, 0, scene->width, band_h, caption)->tone = CLOCK_TONE_MUTED;
+    if (scene->local == NULL) return;
+    char now[CLOCK_UI__LABEL_MAX];
+    clock_screens__format_time_of_day(scene->local, now, sizeof(now));
+    clock_ui__label(ui, 0, scene->height - band_h, scene->width, band_h, now)->tone = CLOCK_TONE_MUTED;
+}
+
+/* Previewed (or tiled) clocks show what matters most: stopwatch, then the soonest timer, then the time. */
 void clock_screens__build_preview(clock_ui_t *ui, const clock_scene_t *scene) {
     clock_ui__begin(ui, scene->height);
-    clock_screens__add_face(ui, scene, scene->height, scene->height >= 2 * CLOCK_SCREENS__GLYPH_H * 3);
+    clock_headline_t headline = clock_model__headline(scene->model, scene->now_ms);
+    if (headline.kind != CLOCK_HEADLINE_NONE) {
+        clock_screens__add_headline(ui, scene, &headline);
+        return;
+    }
+    clock_screens__add_face(ui, scene, scene->height, scene->height >= CLOCK_SCREENS__PREVIEW_DETAIL_H);
 }
 
 static void clock_screens__build_face(clock_ui_t *ui, const clock_scene_t *scene, const clock_layout_t *layout, bool menu_open) {

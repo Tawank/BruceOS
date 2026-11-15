@@ -1,5 +1,6 @@
 #include "clock_gui.h"
 
+#include "clock_overlay.h"
 #include "core_sdk/app_config.h"
 #include "core_sdk/audio.h"
 #include "core_sdk/dialog.h"
@@ -23,11 +24,13 @@
 typedef struct {
     clock_model_t model;
     clock_ui_t ui;
+    clock_overlay_t overlay;
     clock_screen_t screen;
     bool menu_open;
     uint64_t started_ms;
     uint32_t drawn_signature;
     bool has_drawn;
+    bool backgrounded;
 } clock_gui_t;
 
 typedef struct {
@@ -114,7 +117,6 @@ static void clock_gui__add_alarm(clock_gui_t *gui, const clock_now_t *now) {
 /* Returns true when the app should exit. */
 static bool clock_gui__close(clock_gui_t *gui) {
     if (!clock_model__is_active(&gui->model)) return true;
-    clock_gui__show_screen(gui, CLOCK_SCREEN_FACE, false);
     (void)process__to_background();
     return false;
 }
@@ -179,6 +181,7 @@ static bool clock_gui__on_key(clock_gui_t *gui, int32_t code, const clock_now_t 
 }
 
 static void clock_gui__redraw_if_changed(clock_gui_t *gui, const clock_now_t *now) {
+    if (process__is_background() && display__width() == 0) return;
     clock_scene_t scene = clock_gui__scene(gui, now);
     if (process__is_background()) clock_screens__build_preview(&gui->ui, &scene);
     else clock_screens__build(&gui->ui, &scene, gui->screen, gui->menu_open);
@@ -191,9 +194,33 @@ static void clock_gui__redraw_if_changed(clock_gui_t *gui, const clock_now_t *no
     gui->has_drawn = true;
 }
 
+/* A minimised clock that is not tiled into the process preview has no viewport, so it badges the screen instead. */
+static void clock_gui__update_overlay(clock_gui_t *gui) {
+    clock_headline_t headline = clock_model__headline(&gui->model, runtime__now());
+    bool hidden = process__is_background() && display__width() == 0;
+    clock_overlay__update(&gui->overlay, &headline, hidden);
+}
+
 static uint32_t clock_gui__poll_ms(const clock_gui_t *gui) {
     bool stopwatch_visible = gui->screen == CLOCK_SCREEN_STOPWATCH && gui->model.stopwatch.running;
     return stopwatch_visible ? CLOCK_GUI__STOPWATCH_POLL_MS : CLOCK_GUI__IDLE_POLL_MS;
+}
+
+static clock_screen_t clock_gui__screen_for_headline(const clock_model_t *model) {
+    switch (clock_model__headline(model, runtime__now()).kind) {
+    case CLOCK_HEADLINE_STOPWATCH: return CLOCK_SCREEN_STOPWATCH;
+    case CLOCK_HEADLINE_TIMER: return CLOCK_SCREEN_TIMERS;
+    default: return CLOCK_SCREEN_FACE;
+    }
+}
+
+/* Coming back from the background opens whatever was left running. */
+static void clock_gui__follow_foreground(clock_gui_t *gui) {
+    bool background = process__is_background();
+    if (gui->backgrounded && !background) {
+        clock_gui__show_screen(gui, clock_gui__screen_for_headline(&gui->model), false);
+    }
+    gui->backgrounded = background;
 }
 
 static int clock_gui__loop(clock_gui_t *gui) {
@@ -204,6 +231,8 @@ static int clock_gui__loop(clock_gui_t *gui) {
             clock_gui__announce(&event);
             continue;
         }
+        clock_gui__follow_foreground(gui);
+        clock_gui__update_overlay(gui);
         clock_gui__redraw_if_changed(gui, &now);
 
         bruce_input_event_t input;

@@ -49,10 +49,25 @@ typedef struct {
     uint32_t seconds;
 } clock_event_t;
 
+typedef enum {
+    CLOCK_HEADLINE_NONE,
+    CLOCK_HEADLINE_STOPWATCH,
+    CLOCK_HEADLINE_TIMER,
+} clock_headline_kind_t;
+
+typedef struct {
+    clock_headline_kind_t kind;
+    uint32_t seconds;
+} clock_headline_t;
+
 /* Absolute local time in seconds, as returned by clock__datetime_to_epoch(). */
 int64_t clock_alarm__next_fire(const clock_alarm_t *alarm, int64_t now_s);
 
 bool clock_model__is_active(const clock_model_t *model);
+
+/* The one thing worth showing while minimised: the stopwatch if it holds time, else the soonest timer,
+ * running ones before paused ones. */
+clock_headline_t clock_model__headline(const clock_model_t *model, uint64_t now_ms);
 
 /* Fires at most one due timer or alarm; fired timers are removed, fired alarms are disabled. */
 clock_event_t clock_model__tick(clock_model_t *model, uint64_t now_ms, int64_t now_s);

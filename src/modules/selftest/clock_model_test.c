@@ -86,6 +86,39 @@ static bool clock_model_test__stopwatch(void) {
     return true;
 }
 
+static bool clock_model_test__headline(void) {
+    clock_model_t model;
+    memset(&model, 0, sizeof(model));
+    CLOCK_MODEL_TEST__CHECK(clock_model__headline(&model, 0).kind == CLOCK_HEADLINE_NONE);
+
+    CLOCK_MODEL_TEST__CHECK(clock_model__add_timer(&model, 60, 0));
+    CLOCK_MODEL_TEST__CHECK(clock_model__add_timer(&model, 30, 0));
+    clock_headline_t headline = clock_model__headline(&model, 10000);
+    CLOCK_MODEL_TEST__CHECK(headline.kind == CLOCK_HEADLINE_TIMER && headline.seconds == 20);
+
+    clock_model__toggle_timer(&model, 1, 10000);
+    headline = clock_model__headline(&model, 10000);
+    CLOCK_MODEL_TEST__CHECK(headline.kind == CLOCK_HEADLINE_TIMER && headline.seconds == 50);
+
+    clock_stopwatch__toggle(&model.stopwatch, 4000);
+    headline = clock_model__headline(&model, 10000);
+    CLOCK_MODEL_TEST__CHECK(headline.kind == CLOCK_HEADLINE_STOPWATCH && headline.seconds == 6);
+
+    clock_stopwatch__toggle(&model.stopwatch, 10000);
+    headline = clock_model__headline(&model, 10000);
+    CLOCK_MODEL_TEST__CHECK(headline.kind == CLOCK_HEADLINE_STOPWATCH && headline.seconds == 6);
+
+    clock_stopwatch__reset(&model.stopwatch);
+    clock_model__remove_timer(&model, 0);
+    headline = clock_model__headline(&model, 10000);
+    CLOCK_MODEL_TEST__CHECK(headline.kind == CLOCK_HEADLINE_TIMER && headline.seconds == 20);
+    CLOCK_MODEL_TEST__CHECK(clock_model__is_active(&model));
+    clock_model__remove_timer(&model, 0);
+    CLOCK_MODEL_TEST__CHECK(!clock_model__is_active(&model));
+    return true;
+}
+
 bool selftest__run_clock_model_case(void) {
-    return clock_model_test__timers() && clock_model_test__alarms() && clock_model_test__stopwatch();
+    return clock_model_test__timers() && clock_model_test__alarms() && clock_model_test__stopwatch() &&
+           clock_model_test__headline();
 }

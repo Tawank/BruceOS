@@ -11,6 +11,7 @@
       "clock_app.c",
       "clock_gui.c",
       "clock_model.c",
+      "clock_overlay.c",
       "clock_screens.c",
       "clock_ui.c"
     ],

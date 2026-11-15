@@ -7,20 +7,35 @@ int64_t clock_alarm__next_fire(const clock_alarm_t *alarm, int64_t now_s) {
     return fire_s > now_s ? fire_s : fire_s + CLOCK_MODEL__SECONDS_PER_DAY;
 }
 
+static bool clock_stopwatch__in_use(const clock_stopwatch_t *stopwatch) {
+    return stopwatch->running || stopwatch->elapsed_ms > 0;
+}
+
 bool clock_model__is_active(const clock_model_t *model) {
-    for (size_t i = 0; i < model->timer_count; ++i) {
-        if (model->timers[i].running) return true;
-    }
     for (size_t i = 0; i < model->alarm_count; ++i) {
         if (model->alarms[i].enabled) return true;
     }
-    return model->stopwatch.running;
+    return model->timer_count > 0 || clock_stopwatch__in_use(&model->stopwatch);
 }
 
 uint32_t clock_timer__remaining_s(const clock_timer_t *timer, uint64_t now_ms) {
     uint32_t remaining_ms = timer->remaining_ms;
     if (timer->running) remaining_ms = now_ms < timer->deadline_ms ? (uint32_t)(timer->deadline_ms - now_ms) : 0;
     return (remaining_ms + 999u) / 1000u;
+}
+
+clock_headline_t clock_model__headline(const clock_model_t *model, uint64_t now_ms) {
+    if (clock_stopwatch__in_use(&model->stopwatch)) {
+        return (clock_headline_t){CLOCK_HEADLINE_STOPWATCH, clock_stopwatch__elapsed_ms(&model->stopwatch, now_ms) / 1000u};
+    }
+    const clock_timer_t *best = NULL;
+    for (size_t i = 0; i < model->timer_count; ++i) {
+        const clock_timer_t *timer = &model->timers[i];
+        bool sooner = best != NULL && clock_timer__remaining_s(timer, now_ms) < clock_timer__remaining_s(best, now_ms);
+        if (best == NULL || (timer->running && !best->running) || (timer->running == best->running && sooner)) best = timer;
+    }
+    if (best == NULL) return (clock_headline_t){CLOCK_HEADLINE_NONE, 0};
+    return (clock_headline_t){CLOCK_HEADLINE_TIMER, clock_timer__remaining_s(best, now_ms)};
 }
 
 clock_event_t clock_model__tick(clock_model_t *model, uint64_t now_ms, int64_t now_s) {
