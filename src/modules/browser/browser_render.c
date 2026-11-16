@@ -366,7 +366,7 @@ bruce_result_t browser_render__draw(
 }
 
 bruce_result_t browser_render__draw_loading(
-    const browser_document_t *doc, const browser_history_t *history, int progress
+    const browser_document_t *doc, const browser_history_t *history, int progress, const char *message
 ) {
     bruce_result_t result = display__begin_frame();
     if (result != BRUCE_OK) return result;
@@ -374,5 +374,14 @@ bruce_result_t browser_render__draw_loading(
     browser_render__get_theme(&theme);
     (void)display__fill_screen(theme.background);
     browser_render__draw_chrome(doc, history, progress < 0 ? 0 : progress, &theme);
+    if (message != NULL) {
+        int16_t char_width, char_height;
+        browser_render__metrics(&char_width, &char_height);
+        int y = browser_render__chrome_height() + browser_render__view_height() / 2 - char_height;
+        (void)display__set_text_color(theme.text);
+        (void)display__draw_centre_string(message, display__width() / 2, y);
+        (void)display__set_text_color(theme.text_muted);
+        (void)display__draw_centre_string("Back to stop", display__width() / 2, y + char_height + 4);
+    }
     return display__present();
 }

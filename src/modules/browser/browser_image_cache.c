@@ -11,15 +11,14 @@
 #include "core_sdk/runtime.h"
 #include "core_sdk/storage.h"
 
-/* A failed fetch is retried once, after a short delay, before it's cached as
- * a failure. On a board with no PSRAM, an HTTPS image fetch competes with
+/* A failed fetch is retried once before it's cached as a failure. On a board with no PSRAM, an HTTPS image fetch competes with
  * everything else for internal RAM, and the specific failure this guards
  * against -- mbedTLS's per-request TLS buffer needing a contiguous ~16 KiB
  * block that internal-heap fragmentation doesn't currently have, even though
  * plenty of free bytes exist in smaller pieces -- is usually transient: the
  * fragmentation picture shifts constantly as other things allocate and free.
  * One retry a moment later costs little and recovers the common case. */
-#define BROWSER_IMAGE_RETRY_DELAY_MS 150u
+#define BROWSER_IMAGE_FETCH_ATTEMPTS 2
 
 typedef struct {
     char url[BROWSER_URL_MAX];
@@ -40,6 +39,10 @@ typedef struct {
 struct browser_image_cache {
     browser_image_cache_slot_t slots[BROWSER_IMAGE_CACHE_SLOTS];
     uint32_t clock;
+    /* The one image being fetched in the background, if any. */
+    bruce_http_job_id_t job;
+    char job_url[BROWSER_URL_MAX];
+    int job_attempts;
 };
 
 bruce_result_t browser_image_cache__create(browser_image_cache_t **out_cache) {
@@ -59,6 +62,7 @@ static void browser_image_cache__release_slot(browser_image_cache_slot_t *slot) 
 
 void browser_image_cache__destroy(browser_image_cache_t *cache) {
     if (cache == NULL) return;
+    http__request_cancel(cache->job);
     for (size_t i = 0; i < BROWSER_IMAGE_CACHE_SLOTS; ++i) {
         browser_image_cache__release_slot(&cache->slots[i]);
     }
@@ -81,25 +85,69 @@ static browser_image_cache_slot_t *browser_image_cache__slot_to_reuse(browser_im
     return oldest;
 }
 
-/* One fetch attempt: BRUCE_OK plus a filled `*response` on success (2xx with
- * a body), otherwise a negative BRUCE_ERR_* and `*response` untouched. */
-static bruce_result_t browser_image_cache__fetch_once(const char *url, bruce_http_response_t *response) {
+static bruce_result_t browser_image_cache__start_fetch(browser_image_cache_t *cache, const char *url) {
     bruce_http_request_t request = {
         .url = url,
         .method = "GET",
         .max_response_bytes = BROWSER_IMAGE_MAX_BYTES,
     };
-    bruce_http_response_t attempt = {0};
-    bruce_result_t result = http__request(&request, &attempt);
-    if (result == BRUCE_OK && (attempt.status_code < 200 || attempt.status_code >= 300 || attempt.body == NULL)) {
-        http__response_free(&attempt);
-        result = BRUCE_ERR_IO;
-    }
-    if (result == BRUCE_OK) *response = attempt;
+    bruce_result_t result = http__request_start(&request, &cache->job);
+    if (result == BRUCE_OK) cache->job_attempts++;
     return result;
 }
 
-static bruce_result_t browser_image_cache__get_encoded(browser_image_cache_t *cache, const char *url, const void **out_data, size_t *out_len) {
+/* Stores a fetch outcome in `url`'s slot: the bytes, or a failure remembered
+ * for BROWSER_IMAGE_FAIL_COOLDOWN_MS. */
+static void browser_image_cache__store(
+    browser_image_cache_t *cache, const char *url, bruce_result_t result, bruce_http_response_t *response
+) {
+    /* Reuse an expired failure record for this same URL if there is one, so a
+     * URL that keeps failing doesn't churn through every other slot. */
+    browser_image_cache_slot_t *slot = browser_image_cache__find(cache, url);
+    if (slot == NULL) slot = browser_image_cache__slot_to_reuse(cache);
+    if (slot->valid) browser_image_cache__release_slot(slot);
+    snprintf(slot->url, sizeof(slot->url), "%s", url);
+    slot->last_used = ++cache->clock;
+    slot->valid = true;
+    slot->failed = result != BRUCE_OK;
+    slot->bitmap_failed = false;
+    if (slot->failed) {
+        slot->failure = result;
+        slot->retry_at_ms = runtime__now() + BROWSER_IMAGE_FAIL_COOLDOWN_MS;
+        slot->response = (bruce_http_response_t){0};
+    } else {
+        slot->response = *response;
+    }
+}
+
+bool browser_image_cache__poll(browser_image_cache_t *cache, const char **out_url) {
+    if (cache == NULL || cache->job == BRUCE_HTTP_JOB_ID_INVALID) return false;
+    bruce_http_response_t response = {0};
+    bruce_result_t result = http__request_poll(cache->job, &response);
+    if (result == BRUCE_ERR_BUSY) return false;
+    cache->job = BRUCE_HTTP_JOB_ID_INVALID;
+
+    bool usable = response.status_code >= 200 && response.status_code < 300 && response.body != NULL;
+    if (result == BRUCE_OK && !usable) {
+        http__response_free(&response);
+        result = BRUCE_ERR_IO;
+    }
+    if (result != BRUCE_OK && cache->job_attempts < BROWSER_IMAGE_FETCH_ATTEMPTS &&
+        browser_image_cache__start_fetch(cache, cache->job_url) == BRUCE_OK) {
+        return false;
+    }
+    browser_image_cache__store(cache, cache->job_url, result, &response);
+    if (out_url != NULL) *out_url = cache->job_url;
+    return true;
+}
+
+bool browser_image_cache__loading(const browser_image_cache_t *cache) {
+    return cache != NULL && cache->job != BRUCE_HTTP_JOB_ID_INVALID;
+}
+
+static bruce_result_t browser_image_cache__get_encoded(
+    browser_image_cache_t *cache, const char *url, const void **out_data, size_t *out_len
+) {
     if (cache == NULL || url == NULL || url[0] == '\0' || out_data == NULL || out_len == NULL)
         return BRUCE_ERR_INVALID_ARGUMENT;
 
@@ -115,42 +163,19 @@ static bruce_result_t browser_image_cache__get_encoded(browser_image_cache_t *ca
          * same failure again without touching the network at all. */
         return slot->failure;
     }
-
-    bruce_http_response_t response = {0};
-    bruce_result_t result = browser_image_cache__fetch_once(url, &response);
-    if (result != BRUCE_OK) {
-        /* Most failures here are a transient internal-RAM squeeze (see the
-         * comment on BROWSER_IMAGE_RETRY_DELAY_MS above), not a permanently
-         * bad URL, so it's worth one retry before giving up on it. */
-        (void)runtime__delay(BROWSER_IMAGE_RETRY_DELAY_MS);
-        result = browser_image_cache__fetch_once(url, &response);
+    if (cache->job != BRUCE_HTTP_JOB_ID_INVALID) {
+        if (strcmp(cache->job_url, url) == 0) return BRUCE_ERR_BUSY;
+        http__request_cancel(cache->job); /* the user moved on to another image */
+        cache->job = BRUCE_HTTP_JOB_ID_INVALID;
     }
-
-    /* Reuse the slot we already found (an expired failure record for this
-     * same URL) if there was one, so a URL that keeps failing doesn't churn
-     * through every other slot's cache each time its cooldown lapses. */
-    if (slot == NULL) slot = browser_image_cache__slot_to_reuse(cache);
-    if (slot->valid) browser_image_cache__release_slot(slot);
-    snprintf(slot->url, sizeof(slot->url), "%s", url);
-    slot->last_used = ++cache->clock;
-
+    snprintf(cache->job_url, sizeof(cache->job_url), "%s", url);
+    cache->job_attempts = 0;
+    bruce_result_t result = browser_image_cache__start_fetch(cache, url);
     if (result != BRUCE_OK) {
-        slot->valid = true;
-        slot->failed = true;
-        slot->failure = result;
-        slot->retry_at_ms = runtime__now() + BROWSER_IMAGE_FAIL_COOLDOWN_MS;
-        slot->response = (bruce_http_response_t){0};
+        browser_image_cache__store(cache, url, result, NULL);
         return result;
     }
-
-    slot->response = response;
-    slot->valid = true;
-    slot->failed = false;
-    slot->bitmap_failed = false;
-
-    *out_data = slot->response.body;
-    *out_len = slot->response.body_len;
-    return BRUCE_OK;
+    return BRUCE_ERR_BUSY;
 }
 
 bruce_result_t browser_image_cache__get(

@@ -105,7 +105,9 @@ bruce_result_t browser_render__draw(
 );
 
 /* Draws an empty loading view with the URL chrome visible. `progress` is
- * clamped to 0..100 and fills the blue-gray chrome from left to right. */
+ * clamped to 0..100 and fills the blue-gray chrome from left to right;
+ * `message` (e.g. "Connecting Wi-Fi...") is centred below it with a hint
+ * that Back stops the load. */
 bruce_result_t browser_render__draw_loading(
-    const browser_document_t *doc, const browser_history_t *history, int progress
+    const browser_document_t *doc, const browser_history_t *history, int progress, const char *message
 );

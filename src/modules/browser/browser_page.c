@@ -6,9 +6,14 @@
 
 #include "core_sdk/html.h"
 #include "core_sdk/http.h"
+#include "core_sdk/memory.h"
 
 #define BROWSER_PAGE_MAX_RESPONSE_BYTES (512u * 1024u)
 #define BROWSER_PAGE_USER_AGENT "Bruce-Browser/1.0"
+/* Per load_step(): enough to keep up with the network, short enough that
+ * input is checked again quickly on a slow device. */
+#define BROWSER_PAGE_READ_CHUNK 1024u
+#define BROWSER_PAGE_READS_PER_STEP 8
 
 /* Longest indent marker browser_page__add_list_marker() will build, sized for
  * BROWSER_PAGE_MAX_INDENT levels of "  " plus "- " -- comfortably under this
@@ -25,10 +30,16 @@ typedef struct {
     bruce_html_parser_t *parser;
     int current_link;
     int current_heading;
-    size_t received;
-    browser_page_progress_cb_t progress_cb;
-    void *progress_context;
 } browser_page_event_state_t;
+
+struct browser_page_load {
+    browser_page_event_state_t state;
+    bruce_http_job_id_t job;
+    size_t received;
+    int status_code;
+    bool done;
+    bruce_result_t result; /* Once done. */
+};
 
 /* <li> nesting depth (BRUCE_HTML_EVENT_LIST_ITEM_START's `value`) is 1 for a
  * top-level item, so it isn't indented; a nested list's items get a leading
@@ -125,16 +136,6 @@ static void browser_page__on_event(const bruce_html_event_t *event, void *contex
     }
 }
 
-static bruce_result_t browser_page__on_chunk(const void *data, size_t data_len, void *context) {
-    browser_page_event_state_t *state = context;
-    bruce_result_t result = html__parser_feed(state->parser, data, data_len);
-    if (result == BRUCE_OK) {
-        state->received += data_len;
-        if (state->progress_cb != NULL) state->progress_cb(state->received, state->progress_context);
-    }
-    return result;
-}
-
 bool browser_page__normalize_url(const char *raw_url, char *out_url, size_t out_capacity) {
     if (raw_url == NULL || raw_url[0] == '\0' || out_url == NULL) return false;
     int written = strstr(raw_url, "://") != NULL ? snprintf(out_url, out_capacity, "%s", raw_url)
@@ -142,27 +143,31 @@ bool browser_page__normalize_url(const char *raw_url, char *out_url, size_t out_
     return written >= 0 && (size_t)written < out_capacity;
 }
 
-bruce_result_t browser_page__fetch(
-    const char *url, browser_document_t *doc, int *out_status_code, browser_page_progress_cb_t progress_cb,
-    void *progress_context
-) {
-    if (url == NULL || url[0] == '\0' || doc == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
-    if (out_status_code != NULL) *out_status_code = 0;
+static void browser_page__finish(browser_page_load_t *load) {
+    if (load->done) return;
+    load->done = true;
+    (void)html__parser_finish(load->state.parser);
+    /* The document won't grow again until the next navigation resets it --
+     * release whatever doubling-growth slack the items array still holds. */
+    browser_document__shrink_to_fit(load->state.doc);
+}
 
+bruce_result_t
+browser_page__load_start(const char *url, browser_document_t *doc, browser_page_load_t **out_load) {
+    if (url == NULL || url[0] == '\0' || doc == NULL || out_load == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    *out_load = NULL;
     browser_document__reset(doc);
     browser_document__set_url(doc, url);
 
-    browser_page_event_state_t state = {
-        .doc = doc,
-        .current_link = -1,
-        .current_heading = 0,
-        .progress_cb = progress_cb,
-        .progress_context = progress_context,
-    };
-    bruce_html_parser_t *parser = NULL;
-    bruce_result_t result = html__parser_create(url, browser_page__on_event, &state, &parser);
-    if (result != BRUCE_OK) return result;
-    state.parser = parser;
+    browser_page_load_t *load = memory__malloc(sizeof(*load));
+    if (load == NULL) return BRUCE_ERR_NO_MEMORY;
+    *load = (browser_page_load_t){.state = {.doc = doc, .current_link = -1}};
+    bruce_result_t result =
+        html__parser_create(url, browser_page__on_event, &load->state, &load->state.parser);
+    if (result != BRUCE_OK) {
+        memory__free(load);
+        return result;
+    }
 
     const char *headers[] = {"User-Agent", BROWSER_PAGE_USER_AGENT};
     bruce_http_request_t request = {
@@ -171,20 +176,52 @@ bruce_result_t browser_page__fetch(
         .headers = headers,
         .header_count = 1,
         .max_response_bytes = BROWSER_PAGE_MAX_RESPONSE_BYTES,
-        .on_response_chunk = browser_page__on_chunk,
-        .response_chunk_context = &state,
+        .stream = true,
     };
-    bruce_http_response_t response = {0};
-    result = http__request(&request, &response);
-    if (result == BRUCE_OK) {
-        if (out_status_code != NULL) *out_status_code = response.status_code;
-        (void)html__parser_finish(parser);
-        /* The document won't grow again until the next navigation resets it
-         * -- release whatever doubling-growth slack the items array is
-         * still holding from parsing this page. */
-        browser_document__shrink_to_fit(doc);
+    result = http__request_start(&request, &load->job);
+    if (result != BRUCE_OK) {
+        html__parser_destroy(load->state.parser);
+        memory__free(load);
+        return result;
     }
-    http__response_free(&response);
-    html__parser_destroy(parser);
+    *out_load = load;
+    return BRUCE_OK;
+}
+
+bruce_result_t
+browser_page__load_step(browser_page_load_t *load, int *out_status_code, size_t *out_received) {
+    if (load == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    bruce_result_t result = load->done ? load->result : BRUCE_ERR_BUSY;
+    char chunk[BROWSER_PAGE_READ_CHUNK];
+    for (int i = 0; i < BROWSER_PAGE_READS_PER_STEP && !load->done; ++i) {
+        size_t len = 0;
+        result = http__request_read(load->job, chunk, sizeof(chunk), &len, &load->status_code);
+        if (result == BRUCE_OK && len > 0) {
+            result = html__parser_feed(load->state.parser, chunk, len);
+            load->received += len;
+            if (result == BRUCE_OK) {
+                result = BRUCE_ERR_BUSY;
+                continue;
+            }
+            http__request_cancel(load->job);
+        }
+        if (result != BRUCE_ERR_BUSY) {
+            load->result = result;
+            browser_page__finish(load);
+        }
+        break;
+    }
+    if (out_status_code != NULL) *out_status_code = load->status_code;
+    if (out_received != NULL) *out_received = load->received;
     return result;
+}
+
+void browser_page__load_end(browser_page_load_t *load) {
+    if (load == NULL) return;
+    if (!load->done) {
+        http__request_cancel(load->job);
+        browser_page__finish(load);
+    }
+    html__parser_destroy(load->state.parser);
+    memory__free(load);
 }

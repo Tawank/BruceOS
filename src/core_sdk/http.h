@@ -53,6 +53,13 @@ typedef struct {
      * total bytes delivered. */
     bruce_http_response_chunk_cb_t on_response_chunk;
     void *response_chunk_context;
+
+    /* Background requests only (http__request_start()): read the body in
+     * pieces with http__request_read() as it arrives instead of collecting
+     * it whole with http__request_poll(). Core then holds only a small
+     * window and pauses the transfer until the caller reads, so bodies of
+     * any size up to `max_response_bytes` stream in bounded memory. */
+    bool stream;
 } bruce_http_request_t;
 
 typedef struct {
@@ -107,7 +114,8 @@ typedef uint32_t bruce_http_job_id_t;
  *
  * Same request fields as http__request(), except `on_response_chunk` must be
  * NULL: the body is buffered (up to `max_response_bytes`) and collected with
- * http__request_poll(). At most BRUCE_HTTP_ASYNC_MAX_HEADERS header pairs.
+ * http__request_poll(), or with `stream` set, read piece by piece with
+ * http__request_read(). At most BRUCE_HTTP_ASYNC_MAX_HEADERS header pairs.
  *
  * Requests run on a Core worker pool, up to 4 at once on boards with PSRAM
  * and 1 without; the rest wait in order. Each worker keeps its connection
@@ -125,7 +133,7 @@ typedef uint32_t bruce_http_job_id_t;
 bruce_result_t http__request_start(const bruce_http_request_t *request, bruce_http_job_id_t *out_job);
 
 /**
- * @brief Collects a background request.
+ * @brief Collects a buffered background request.
  *
  * Returns BRUCE_ERR_BUSY while it is still queued or running. Otherwise
  * returns the request's result and forgets the job: on BRUCE_OK `response`
@@ -137,6 +145,26 @@ bruce_result_t http__request_start(const bruce_http_request_t *request, bruce_ht
  * @param response Receives the response once the job is done.
  */
 bruce_result_t http__request_poll(bruce_http_job_id_t job, bruce_http_response_t *response);
+
+/**
+ * @brief Reads the next piece of a streaming background request (`stream` set).
+ *
+ * Returns BRUCE_OK with `*out_len` > 0 for body bytes, BRUCE_ERR_BUSY while
+ * nothing new has arrived yet, and once the body is fully read, the
+ * request's result with `*out_len` == 0 - BRUCE_OK for a complete body - after
+ * which the job is forgotten. `*out_status_code` is the HTTP status once the
+ * response headers are in, else 0. BRUCE_ERR_INVALID_STATE for a buffered
+ * job, which http__request_poll() collects instead.
+ *
+ * @param job Job id from http__request_start().
+ * @param buffer Receives up to `capacity` body bytes.
+ * @param capacity Size of buffer in bytes.
+ * @param out_len Receives how many bytes were written to buffer.
+ * @param out_status_code Optional; receives the HTTP status code.
+ */
+bruce_result_t http__request_read(
+    bruce_http_job_id_t job, void *buffer, size_t capacity, size_t *out_len, int *out_status_code
+);
 
 /**
  * @brief Drops a background request; no-op for unknown jobs.

@@ -2303,6 +2303,7 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(http__response_free),
     ESP_ELFSYM_EXPORT(http__request_start),
     ESP_ELFSYM_EXPORT(http__request_poll),
+    ESP_ELFSYM_EXPORT(http__request_read),
     ESP_ELFSYM_EXPORT(http__request_cancel),
 
     /* Input (read is foreground-only; inject requires input permission) */

@@ -4,15 +4,16 @@
  * Small bounded cache of fetched inline images, keyed by URL. Images are loaded on demand, not automatically: browser_render.c
  * only ever calls browser_image_cache__peek() while drawing, which never
  * touches the network -- a page with several images scrolls just as fast as
- * one with none. browser_app.c calls browser_image_cache__get() exactly
- * once, when the user highlights an image and presses Select, to actually
- * fetch it; after that, the cache decodes and box-fits it once into a memory__external-backed RGB565 bitmap. Redraws borrow that fitted bitmap and perform no
+ * one with none. browser_app.c calls browser_image_cache__get() when the user
+ * highlights an image and presses Select, which starts a background fetch;
+ * browser_image_cache__poll() reports when it lands. After that, the cache decodes and box-fits it once into a memory__external-backed RGB565 bitmap. Redraws borrow that fitted bitmap and perform no
  * image decoding, scaling, or allocation. The slot also keeps the original
  * fetched bytes around (see browser_image_cache__save()/__raw()) so a loaded
  * image can be written out to storage, or put on the clipboard, as the real
  * file it is, not the decoded pixel data.
  */
 
+#include <stdbool.h>
 #include <stddef.h>
 
 #include "core_sdk/image.h"
@@ -33,14 +34,24 @@ typedef struct browser_image_cache browser_image_cache_t;
 bruce_result_t browser_image_cache__create(browser_image_cache_t **out_cache);
 void browser_image_cache__destroy(browser_image_cache_t *cache);
 
-/* Fetches and decodes `url` on first use, then fits it into an external-
- * backed bitmap for the requested box. The borrowed result remains valid
- * until a later get()/peek() evicts its LRU slot or the cache is destroyed.
- * Fetch and decode failures are cached to avoid repeated work. */
+/* Fits an already-fetched `url` into an external-backed bitmap for the
+ * requested box. Not fetched yet: starts a background fetch (cancelling one
+ * for a different image) and returns BRUCE_ERR_BUSY; call again once
+ * browser_image_cache__poll() reports it landed. The borrowed result
+ * remains valid until a later get()/peek() evicts its LRU slot or the cache
+ * is destroyed. Fetch and decode failures are cached to avoid repeated work. */
 bruce_result_t browser_image_cache__get(
     browser_image_cache_t *cache, const char *url, uint16_t box_width, uint16_t box_height,
     bruce_display_color_t background, const image_bitmap_t **out_bitmap
 );
+
+/* Collects the background fetch. Returns true once it has finished, either
+ * way, with `*out_url` set to the image's URL -- get() for it then returns the
+ * image or the failure. */
+bool browser_image_cache__poll(browser_image_cache_t *cache, const char **out_url);
+
+/* True while a background image fetch is running. */
+bool browser_image_cache__loading(const browser_image_cache_t *cache);
 
 /* Borrows an already-fitted bitmap without fetching, decoding, scaling, or
  * allocating. Returns BRUCE_ERR_NOT_FOUND until get() succeeds. */

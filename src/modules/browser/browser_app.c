@@ -22,33 +22,53 @@
 #include "core_sdk/result.h"
 #include "core_sdk/runtime.h"
 #include "core_sdk/storage.h"
+#include "core_sdk/wifi.h"
 
 /* Where "Save image"/"Copy image" (see browser_app__image_menu()) write a
  * fetched image, created on first use. */
 #define BROWSER_DOWNLOAD_DIR "/Downloads"
+/* Input wait while a page, Wi-Fi connect or image is in flight; the loop does
+ * a slice of that work every time it wakes. Idle, it blocks on input. */
+#define BROWSER_BUSY_POLL_MS 30
+
+typedef enum {
+    BROWSER_LOAD_IDLE,
+    BROWSER_LOAD_CONNECTING,
+    BROWSER_LOAD_PAGE,
+} browser_load_phase_t;
 
 typedef struct {
     browser_document_t *doc;
     browser_history_t *history;
     browser_image_cache_t *image_cache;
     browser_view_state_t view;
+    browser_load_phase_t phase;
+    browser_page_load_t *load;
+    char load_url[BROWSER_URL_MAX];
+    bool load_push_history;
+    int load_percent;
 } browser_app_state_t;
 
-typedef struct {
-    browser_app_state_t *state;
-    int last_percent;
-} browser_app_progress_t;
+static const char *browser_app__load_message(const browser_app_state_t *state) {
+    return state->phase == BROWSER_LOAD_CONNECTING ? "Connecting Wi-Fi..." : "Loading...";
+}
 
-static void browser_app__show_progress(size_t received, void *context) {
-    browser_app_progress_t *progress = context;
-    /* Content-Length is not exposed by the streaming HTTP callback. Advance
-     * quickly for small pages and asymptotically reserve the final segment
-     * for request completion instead of displaying a false exact percent. */
+static void browser_app__draw_loading(browser_app_state_t *state, int percent) {
+    state->load_percent = percent;
+    (void)browser_render__draw_loading(state->doc, state->history, percent, browser_app__load_message(state));
+}
+
+static void browser_app__redraw(browser_app_state_t *state) {
+    if (state->phase != BROWSER_LOAD_IDLE) browser_app__draw_loading(state, state->load_percent);
+    else (void)browser_render__draw(state->doc, &state->view, state->history, state->image_cache);
+}
+
+/* Content-Length is not known while streaming. Advance quickly for small
+ * pages and asymptotically reserve the final segment for completion instead
+ * of displaying a false exact percent. */
+static int browser_app__load_percent(size_t received) {
     int percent = 8 + (int)(received * 84u / (received + 32768u));
-    if (percent > 92) percent = 92;
-    if (percent < progress->last_percent + 2) return;
-    progress->last_percent = percent;
-    (void)browser_render__draw_loading(progress->state->doc, progress->state->history, percent);
+    return percent > 92 ? 92 : percent;
 }
 
 static size_t browser_app__page_url_len(const char *url) {
@@ -93,27 +113,23 @@ static void browser_app__jump_to_item(browser_app_state_t *state, int item_index
     state->view.row_y = -1;
 }
 
-static void browser_app__navigate(browser_app_state_t *state, const char *raw_url, bool push_history) {
-    char url[BROWSER_URL_MAX];
-    if (!browser_page__normalize_url(raw_url, url, sizeof(url))) {
-        (void)notification__push("Invalid URL", 2000);
-        return;
-    }
+/* Puts a finished, failed or stopped load on screen. A stopped page keeps
+ * whatever had already streamed in. */
+static void browser_app__finish_load(
+    browser_app_state_t *state, bruce_result_t result, int status_code, const char *failed_to
+) {
+    browser_page__load_end(state->load);
+    state->load = NULL;
+    state->phase = BROWSER_LOAD_IDLE;
 
-    browser_document__reset(state->doc);
-    browser_document__set_url(state->doc, url);
-    (void)browser_render__draw_loading(state->doc, state->history, 0);
-    int status_code = 0;
-    browser_app_progress_t progress = {.state = state, .last_percent = 0};
-    bruce_result_t result =
-        browser_page__fetch(url, state->doc, &status_code, browser_app__show_progress, &progress);
-
-    if (result != BRUCE_OK) {
+    if (result == BRUCE_ERR_CANCELLED) {
+        (void)notification__push("Stopped", 1500);
+    } else if (result != BRUCE_OK) {
         browser_document__reset(state->doc);
-        browser_document__set_url(state->doc, url);
+        browser_document__set_url(state->doc, state->load_url);
         browser_document__set_title(state->doc, "Error", 5);
         char message[96];
-        snprintf(message, sizeof(message), "Could not load this page: %s", result__to_string(result));
+        snprintf(message, sizeof(message), "Could not %s: %s", failed_to, result__to_string(result));
         browser_document__add_text(state->doc, message, strlen(message), 0, -1);
     } else if (status_code < 200 || status_code >= 300) {
         char note[32];
@@ -121,39 +137,119 @@ static void browser_app__navigate(browser_app_state_t *state, const char *raw_ur
         (void)notification__push(note, 2500);
     }
 
-    if (push_history) browser_history__push(state->history, url);
+    if (state->load_push_history) browser_history__push(state->history, state->load_url);
     state->view.scroll_y = 0;
     state->view.selected_link = -1;
     state->view.selected_image = -1;
     state->view.row_y = -1;
 }
 
-/* Fetches the currently selected image over HTTP, if it hasn't been already.
+static void browser_app__start_page(browser_app_state_t *state) {
+    bruce_result_t result = browser_page__load_start(state->load_url, state->doc, &state->load);
+    if (result != BRUCE_OK) {
+        browser_app__finish_load(state, result, 0, "load this page");
+        return;
+    }
+    state->phase = BROWSER_LOAD_PAGE;
+    browser_app__draw_loading(state, 0);
+}
+
+/* Starts a load and returns at once; browser_app__step() carries it on. Wi-Fi
+ * that isn't up yet is connected first, in the background too. */
+static void browser_app__navigate(browser_app_state_t *state, const char *raw_url, bool push_history) {
+    char url[BROWSER_URL_MAX];
+    if (!browser_page__normalize_url(raw_url, url, sizeof(url))) {
+        (void)notification__push("Invalid URL", 2000);
+        return;
+    }
+    browser_page__load_end(state->load); /* a newer navigation replaces one still running */
+    state->load = NULL;
+    snprintf(state->load_url, sizeof(state->load_url), "%s", url);
+    state->load_push_history = push_history;
+    browser_document__reset(state->doc);
+    browser_document__set_url(state->doc, url);
+
+    if (!wifi__is_connected()) {
+        bruce_result_t result = wifi__connect_known_start();
+        if (result != BRUCE_OK) {
+            browser_app__finish_load(state, result, 0, "connect to Wi-Fi");
+            return;
+        }
+        state->phase = BROWSER_LOAD_CONNECTING;
+        browser_app__draw_loading(state, 0);
+        return;
+    }
+    browser_app__start_page(state);
+}
+
+static void browser_app__stop_load(browser_app_state_t *state) {
+    if (state->phase != BROWSER_LOAD_IDLE) browser_app__finish_load(state, BRUCE_ERR_CANCELLED, 0, NULL);
+}
+
+static void
+browser_app__fit_image(browser_app_state_t *state, const char *url, const image_bitmap_t **bitmap) {
+    /* box_height is the full viewport, not BROWSER_IMAGE_BOX_HEIGHT: fit
+     * (see image__bitmap_resize()) preserves aspect and never upscales, so a
+     * square/vertical image naturally comes out height-constrained -- filling
+     * up to the viewport -- while a horizontal one stays width-constrained.
+     * No orientation check needed; browser_layout__walk() picks up whichever
+     * height results. */
+    bruce_result_t result = browser_image_cache__get(
+        state->image_cache,
+        url,
+        (uint16_t)browser_render__content_width(),
+        (uint16_t)browser_render__view_height(),
+        BRUCE_COLOR_BLACK,
+        bitmap
+    );
+    if (result == BRUCE_ERR_BUSY) (void)notification__push("Loading image...", 30000);
+}
+
+/* One slice of background work: Wi-Fi connect, page streaming, image fetch. */
+static void browser_app__step(browser_app_state_t *state) {
+    if (state->phase == BROWSER_LOAD_CONNECTING) {
+        bruce_result_t result = wifi__connect_known_poll();
+        if (result == BRUCE_OK) browser_app__start_page(state);
+        else if (result != BRUCE_ERR_BUSY) browser_app__finish_load(state, result, 0, "connect to Wi-Fi");
+        if (result != BRUCE_ERR_BUSY) browser_app__redraw(state);
+    } else if (state->phase == BROWSER_LOAD_PAGE) {
+        int status_code = 0;
+        size_t received = 0;
+        bruce_result_t result = browser_page__load_step(state->load, &status_code, &received);
+        if (result == BRUCE_ERR_BUSY) {
+            int percent = browser_app__load_percent(received);
+            if (percent >= state->load_percent + 2) browser_app__draw_loading(state, percent);
+        } else {
+            browser_app__finish_load(state, result, status_code, "load this page");
+            browser_app__redraw(state);
+        }
+    }
+
+    const char *image_url = NULL;
+    if (browser_image_cache__poll(state->image_cache, &image_url)) {
+        (void)notification__dismiss();
+        const image_bitmap_t *bitmap = NULL;
+        browser_app__fit_image(state, image_url, &bitmap);
+        if (bitmap == NULL) (void)notification__push("Could not load image", 2000);
+        if (state->phase == BROWSER_LOAD_IDLE) browser_app__redraw(state);
+    }
+}
+
+static bool browser_app__busy(const browser_app_state_t *state) {
+    return state->phase != BROWSER_LOAD_IDLE || browser_image_cache__loading(state->image_cache);
+}
+
+/* Starts fetching the currently selected image, if it hasn't been already.
  * See browser_image_cache.h's file comment for why this is the only place
- * that ever calls browser_image_cache__get() -- drawing only ever peek()s,
- * so a page with several images scrolls exactly as fast as one with none;
- * loading one is a deliberate, explicit action. */
+ * that ever fetches one -- drawing only ever peek()s, so a page with several
+ * images scrolls exactly as fast as one with none; loading one is a
+ * deliberate, explicit action. It lands in browser_app__step(). */
 static void browser_app__load_image(browser_app_state_t *state) {
     if (state->view.selected_image < 0) return;
     const char *url = state->doc->images[state->view.selected_image].url;
     const image_bitmap_t *bitmap = NULL;
     if (browser_image_cache__peek(state->image_cache, url, &bitmap) == BRUCE_ERR_NOT_FOUND) {
-        (void)notification__push("Loading image...", 30000);
-        /* box_height is the full viewport, not BROWSER_IMAGE_BOX_HEIGHT: fit
-         * (see image__bitmap_resize()) preserves aspect and never upscales,
-         * so a square/vertical image naturally comes out height-constrained
-         * -- filling up to the viewport -- while a horizontal one stays
-         * width-constrained, same as before. No orientation check needed
-         * here; browser_layout__walk() picks up whichever height results. */
-        (void)browser_image_cache__get(
-            state->image_cache,
-            url,
-            (uint16_t)browser_render__content_width(),
-            (uint16_t)browser_render__view_height(),
-            BRUCE_COLOR_BLACK,
-            &bitmap
-        );
-        (void)notification__dismiss();
+        browser_app__fit_image(state, url, &bitmap);
     }
 }
 
@@ -439,6 +535,12 @@ static void browser_app__image_menu(browser_app_state_t *state, const char *url,
 static bool browser_app__handle_event(browser_app_state_t *state, const bruce_input_event_t *event) {
     if (event->action != BRUCE_INPUT_PRESS) return true;
     bool semantic = event->type != BRUCE_INPUT_KEY || event->value != event->code;
+    if (state->phase != BROWSER_LOAD_IDLE) {
+        bool stop = event->code == 0x1b || event->code == '\b' ||
+                    (event->code == BRUCE_INPUT_CODE_BACK && semantic);
+        if (stop) browser_app__stop_load(state);
+        return true;
+    }
 
     switch (event->code) {
         case BRUCE_INPUT_CODE_BACK:
@@ -529,13 +631,15 @@ int browser_app_main(int argc, char **argv) {
         return result;
     }
 
-    browser_app__navigate(&state, start_url, true);
     (void)input__flush();
-    (void)browser_render__draw(state.doc, &state.view, state.history, state.image_cache);
+    browser_app__navigate(&state, start_url, true);
+    browser_app__redraw(&state);
 
     for (;;) {
         bruce_input_event_t event;
-        bruce_result_t read_result = input__read(&event, UINT32_MAX);
+        bool busy = browser_app__busy(&state);
+        bruce_result_t read_result = input__read(&event, busy ? BROWSER_BUSY_POLL_MS : UINT32_MAX);
+        if (busy) browser_app__step(&state);
         if (read_result == BRUCE_ERR_NOT_FOREGROUND) {
             if (display__await_redraw()) {
                 /* No input__flush() here (unlike the startup one above): a
@@ -545,7 +649,7 @@ int browser_app_main(int argc, char **argv) {
                  * Flushing would silently discard it before this loop's next
                  * input__read() ever sees it. filemanager's own equivalent
                  * retry loop doesn't flush here either. */
-                (void)browser_render__draw(state.doc, &state.view, state.history, state.image_cache);
+                browser_app__redraw(&state);
                 continue;
             }
             break;
@@ -558,11 +662,10 @@ int browser_app_main(int argc, char **argv) {
          * the whole document layout and flushes the full framebuffer, so
          * doing it twice per detent instead of once is what makes fast
          * encoder spins visibly lag the display behind the knob. */
-        if (event.action == BRUCE_INPUT_PRESS) {
-            (void)browser_render__draw(state.doc, &state.view, state.history, state.image_cache);
-        }
+        if (event.action == BRUCE_INPUT_PRESS) browser_app__redraw(&state);
     }
 
+    browser_page__load_end(state.load);
     browser_document__destroy(state.doc);
     browser_history__destroy(state.history);
     browser_image_cache__destroy(state.image_cache);

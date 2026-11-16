@@ -42,6 +42,8 @@
 #define HTTP_ASYNC__ORIGIN_MAX 128
 #define HTTP_ASYNC__HEADER_NAME_MAX 48
 #define HTTP_ASYNC__MIN_BUFFER 4096
+#define HTTP_ASYNC__STREAM_WINDOW 8192
+#define HTTP_ASYNC__STREAM_WAIT_MS 5
 
 typedef enum {
     HTTP_ASYNC__FREE,
@@ -67,11 +69,15 @@ typedef struct {
     uint32_t timeout_ms;
     size_t max_response_bytes;
 
+    bool stream;
+
     bruce_result_t result;
     int status_code;
     uint8_t *response;
     size_t response_len;
     size_t response_capacity;
+    size_t read_offset;    /* Stream jobs: bytes before this were handed to the app. */
+    size_t received_total; /* Body bytes received, counted against max_response_bytes. */
 } http_async__job_t;
 
 typedef struct {
@@ -210,8 +216,7 @@ static bool http_async__reserve(http_async__job_t *job, size_t needed) {
 }
 
 static void http_async__append(http_async__job_t *job, const void *data, size_t len) {
-    if (job->result != BRUCE_OK || http_async__is_cancelled(job)) return;
-    if (len > job->max_response_bytes - job->response_len) {
+    if (len > job->max_response_bytes - job->received_total) {
         job->result = BRUCE_ERR_RESOURCE_LIMIT;
         return;
     }
@@ -221,6 +226,33 @@ static void http_async__append(http_async__job_t *job, const void *data, size_t 
     }
     memcpy(job->response + job->response_len, data, len);
     job->response_len += len;
+    job->received_total += len;
+}
+
+/* Stream jobs share the buffer with http__request_read(), so it is only
+ * touched under the lock. Holds the transfer (and with it TCP) while the
+ * unread window is full, which keeps memory bounded however big the body. */
+static void http_async__append_stream(http_async__job_t *job, const void *data, size_t len) {
+    http_async__lock();
+    while (!http_async__is_cancelled(job) && job->response_len > job->read_offset &&
+           job->response_len - job->read_offset + len > HTTP_ASYNC__STREAM_WINDOW) {
+        http_async__unlock();
+        vTaskDelay(pdMS_TO_TICKS(HTTP_ASYNC__STREAM_WAIT_MS));
+        http_async__lock();
+    }
+    if (job->read_offset > 0) {
+        memmove(job->response, job->response + job->read_offset, job->response_len - job->read_offset);
+        job->response_len -= job->read_offset;
+        job->read_offset = 0;
+    }
+    if (!http_async__is_cancelled(job)) http_async__append(job, data, len);
+    http_async__unlock();
+}
+
+static void http_async__set_status(http_async__job_t *job, int status_code) {
+    http_async__lock();
+    job->status_code = status_code;
+    http_async__unlock();
 }
 
 static esp_err_t http_async__event(esp_http_client_event_t *evt) {
@@ -234,12 +266,19 @@ static esp_err_t http_async__event(esp_http_client_event_t *evt) {
             snprintf(worker->location, sizeof(worker->location), "%s", evt->header_value);
         } else if (strcasecmp(evt->header_key, "Content-Length") == 0 &&
                    http__parse_content_length(evt->header_value, &length)) {
-            if (length <= job->max_response_bytes) (void)http_async__reserve(job, length);
+            bool fits = length <= (job->stream ? HTTP_ASYNC__STREAM_WINDOW : job->max_response_bytes);
+            if (fits && !job->stream) (void)http_async__reserve(job, length);
         }
     } else if (evt->event_id == HTTP_EVENT_ON_DATA) {
         int status = esp_http_client_get_status_code(evt->client);
         bool redirect = http__is_redirect_status(status) && worker->location[0] != '\0';
-        if (!redirect) http_async__append(job, evt->data, (size_t)evt->data_len);
+        if (redirect || job->result != BRUCE_OK || http_async__is_cancelled(job)) return ESP_OK;
+        if (job->stream) {
+            if (job->status_code != status) http_async__set_status(job, status);
+            http_async__append_stream(job, evt->data, (size_t)evt->data_len);
+        } else {
+            http_async__append(job, evt->data, (size_t)evt->data_len);
+        }
     }
     return ESP_OK;
 }
@@ -298,7 +337,8 @@ static void http_async__prepare(http_async__worker_t *worker, const char *method
 
 /* One request, on the kept-alive connection when it serves the same origin.
  * A kept connection the server already dropped fails fast, so that case gets
- * one retry on a fresh connection. */
+ * one retry on a fresh connection - unless body bytes already reached a
+ * streaming reader, who must not see them twice. */
 static esp_err_t
 http_async__perform(http_async__worker_t *worker, const char *url, const char *method, bool send_body) {
     char origin[HTTP_ASYNC__ORIGIN_MAX];
@@ -312,18 +352,22 @@ http_async__perform(http_async__worker_t *worker, const char *url, const char *m
             http_async__close(worker);
             return ESP_FAIL;
         }
+        http_async__job_t *job = worker->job;
         http_async__prepare(worker, method, send_body);
-        worker->job->response_len = 0;
-        worker->job->result = BRUCE_OK;
+        if (!job->stream) {
+            job->response_len = 0;
+            job->received_total = 0;
+        }
+        job->result = BRUCE_OK;
         worker->location[0] = '\0';
 
         esp_err_t err = esp_http_client_perform(worker->client);
         if (err == ESP_OK) {
-            worker->job->status_code = esp_http_client_get_status_code(worker->client);
+            http_async__set_status(job, esp_http_client_get_status_code(worker->client));
             return ESP_OK;
         }
         http_async__close(worker);
-        if (!reused) return err;
+        if (!reused || job->received_total > 0) return err;
         reused = false;
     }
 }
@@ -461,6 +505,7 @@ bruce_result_t http__request_start(const bruce_http_request_t *request, bruce_ht
     job->timeout_ms = request->timeout_ms > 0 ? request->timeout_ms : HTTP_ASYNC__DEFAULT_TIMEOUT_MS;
     job->max_response_bytes =
         request->max_response_bytes > 0 ? request->max_response_bytes : BRUCE_HTTP_DEFAULT_MAX_RESPONSE_BYTES;
+    job->stream = request->stream;
     bool copied = http_async__copy_request(job, request);
     bruce_http_job_id_t id = job->id;
     if (!copied) http_async__release_locked(job);
@@ -496,6 +541,10 @@ bruce_result_t http__request_poll(bruce_http_job_id_t id, bruce_http_response_t 
         http_async__unlock();
         return BRUCE_ERR_NOT_FOUND;
     }
+    if (job->stream) {
+        http_async__unlock();
+        return BRUCE_ERR_INVALID_STATE;
+    }
     if (job->state != HTTP_ASYNC__DONE) {
         http_async__unlock();
         return BRUCE_ERR_BUSY;
@@ -511,20 +560,64 @@ bruce_result_t http__request_poll(bruce_http_job_id_t id, bruce_http_response_t 
     (void)process_registry__resource_release(resource_id);
 
     if (result == BRUCE_OK) {
-        /* Copied into the caller's own memory: PSRAM when fitted, never flash swap. */
-        char *owned = (char *)memory__external_malloc_writable(body_len + 1);
-        if (owned != NULL) {
-            if (body_len > 0) memcpy(owned, body, body_len);
-            owned[body_len] = '\0';
+        /* Into the caller's own external memory - PSRAM, or flash swap on
+         * boards without it - like http__request()'s buffered bodies. */
+        static const char nul = '\0';
+        const void *owned = memory__external_malloc(body_len + 1);
+        bool copied = owned != NULL &&
+                      (body_len == 0 || memory__external_memcpy(owned, 0, body, body_len) == BRUCE_OK) &&
+                      memory__external_memcpy(owned, body_len, &nul, 1) == BRUCE_OK;
+        if (copied) {
             response->status_code = status_code;
-            response->body = owned;
+            response->body = (char *)owned;
             response->body_len = body_len;
             response->body_object = owned;
         } else {
+            (void)memory__external_free(owned);
             result = BRUCE_ERR_NO_MEMORY;
         }
     }
     heap_caps_free(body);
+    return result;
+}
+
+bruce_result_t http__request_read(
+    bruce_http_job_id_t id, void *buffer, size_t capacity, size_t *out_len, int *out_status_code
+) {
+    if (out_len == NULL || (capacity > 0 && buffer == NULL)) return BRUCE_ERR_INVALID_ARGUMENT;
+    *out_len = 0;
+    if (out_status_code != NULL) *out_status_code = 0;
+    if (s_lock == NULL) return BRUCE_ERR_NOT_FOUND;
+
+    http_async__lock();
+    http_async__job_t *job = http_async__find_owned_locked(id);
+    if (job == NULL || job->cancelled) {
+        http_async__unlock();
+        return BRUCE_ERR_NOT_FOUND;
+    }
+    if (!job->stream) {
+        http_async__unlock();
+        return BRUCE_ERR_INVALID_STATE;
+    }
+    if (out_status_code != NULL) *out_status_code = job->status_code;
+    size_t available = job->response_len - job->read_offset;
+    if (available > 0) {
+        size_t n = available < capacity ? available : capacity;
+        memcpy(buffer, job->response + job->read_offset, n);
+        job->read_offset += n;
+        http_async__unlock();
+        *out_len = n;
+        return BRUCE_OK;
+    }
+    if (job->state != HTTP_ASYNC__DONE) {
+        http_async__unlock();
+        return BRUCE_ERR_BUSY;
+    }
+    bruce_result_t result = job->result;
+    bruce_resource_id_t resource_id = job->resource_id;
+    http_async__release_locked(job);
+    http_async__unlock();
+    (void)process_registry__resource_release(resource_id);
     return result;
 }
 
