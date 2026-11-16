@@ -343,8 +343,10 @@ bruce_result_t http__request_poll(bruce_http_job_id_t job, bruce_http_response_t
     fakes.http_jobs[slot].used = false;
     if (fakes.http_result != BRUCE_OK) return fakes.http_result;
     response->status_code = fakes.http_status;
-    response->body = calloc(1, fakes.http_body_len + 1);
-    response->body_len = fakes.http_body_len;
+    size_t len = fakes.http_body != NULL ? strlen(fakes.http_body) : fakes.http_body_len;
+    response->body = calloc(1, len + 1);
+    if (fakes.http_body != NULL) memcpy(response->body, fakes.http_body, len);
+    response->body_len = len;
     return BRUCE_OK;
 }
 
@@ -447,8 +449,9 @@ bruce_result_t dialog__text_input(
 }
 
 bruce_result_t dialog__message(bruce_dialog_kind_t kind, const char *title, const char *message) {
-    (void)kind, (void)title, (void)message;
+    (void)kind, (void)title;
     fakes.message_count++;
+    snprintf(fakes.message, sizeof(fakes.message), "%s", message);
     return BRUCE_OK;
 }
 

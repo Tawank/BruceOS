@@ -18,7 +18,7 @@ typedef enum {
 } hud_button_t;
 
 typedef struct {
-    int x, y, size;
+    int x, y, w, h;
 } hud_rect_t;
 
 typedef struct {
@@ -26,9 +26,16 @@ typedef struct {
     const char *status_icon;
     hud_nav_mode_t nav_mode;
     const char *hint[2]; /* Short-lived message centred near the bottom. */
+    const char *hint_icon;
+    bool pin;            /* Marker for the place found by search. */
+    double pin_lat;
+    double pin_lon;
+    const char *place;   /* Pinned place's name, shown in the search box. */
     bool zoom_buttons;   /* On-screen +/- for touch screens. */
 } hud_state_t;
 
 const char *hud__nav_icon(hud_nav_mode_t mode);
 hud_rect_t hud__button_rect(hud_button_t button, int width, int height);
+hud_rect_t hud__search_rect(const map_view_t *view, const hud_state_t *state, int width);
+
 void hud__draw(const map_view_t *view, const hud_state_t *state, int width, int height);

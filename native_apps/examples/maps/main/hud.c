@@ -19,6 +19,7 @@
 #define HUD_CROSS 6
 #define HUD_BUTTON_SIZE 28
 #define HUD_BUTTON_ICON 20
+#define HUD_PIN_SIZE 24
 
 static int16_t s_char_w = 6;
 static int16_t s_char_h = 8;
@@ -28,7 +29,12 @@ const char *hud__nav_icon(hud_nav_mode_t mode) {
     return mode < HUD_NAV_COUNT ? icons[mode] : NULL;
 }
 
-static int hud__text_width(const char *text) { return (int)strlen(text) * s_char_w; }
+/* Counts characters, not UTF-8 bytes. */
+static int hud__text_width(const char *text) {
+    int chars = 0;
+    for (const unsigned char *c = (const unsigned char *)text; *c != '\0'; ++c) chars += (*c & 0xC0) != 0x80;
+    return chars * s_char_w;
+}
 
 static int hud__pill_height(void) { return s_char_h + 2 * HUD_PAD; }
 
@@ -73,27 +79,75 @@ static void hud__draw_crosshair(int cx, int cy) {
     display__fill_circle(cx, cy, 2, HUD_ACCENT);
 }
 
-static int hud__draw_coordinates(const map_view_t *view) {
+/* The marker's tip touches the place; a dark halo keeps it visible on any map colour. */
+static void hud__draw_pin(const map_view_t *view, double lat, double lon, int width, int height) {
+    geo_point_t point = geo__from_lat_lon(lat, lon, view->zoom);
+    int x = point.x - view->center.x + width / 2 - HUD_PIN_SIZE / 2;
+    int y = point.y - view->center.y + height / 2 - HUD_PIN_SIZE + 2;
+    if (x < -HUD_PIN_SIZE || x > width || y < -HUD_PIN_SIZE || y > height) return;
+    static const int8_t halo[][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
+    for (size_t i = 0; i < sizeof(halo) / sizeof(halo[0]); ++i) {
+        hud__icon("map-marker", x + halo[i][0], y + halo[i][1], HUD_PIN_SIZE, HUD_INK);
+    }
+    hud__icon("map-marker", x, y, HUD_PIN_SIZE, HUD_ACCENT);
+}
+
+static void hud__draw_coordinates(const map_view_t *view) {
     double lat = 0, lon = 0;
     char lat_text[16], lon_text[16], text[40];
     map_view__center(view, &lat, &lon);
     hud__format_degrees(lat_text, sizeof(lat_text), lat);
     hud__format_degrees(lon_text, sizeof(lon_text), lon);
     snprintf(text, sizeof(text), "%s, %s", lat_text, lon_text);
-    hud__pill(text, NULL, HUD_MARGIN, HUD_MARGIN, HUD_TEXT);
-    return HUD_MARGIN + hud__pill_width(text, NULL);
+    hud__pill(text, NULL, HUD_MARGIN, hud__row_y(1), HUD_TEXT);
 }
 
-/* Zoom level, plus the pan direction Prev/Next move in. Next to the
- * coordinates when it fits, under them on narrow screens. Returns the row. */
-static int hud__draw_zoom(const map_view_t *view, hud_nav_mode_t mode, int width, int coordinates_end) {
+static void hud__zoom_text(const map_view_t *view, hud_nav_mode_t mode, char *text, size_t capacity,
+                           const char **icon) {
+    snprintf(text, capacity, "z%d", view->zoom);
+    *icon = mode == HUD_NAV_ZOOM ? NULL : hud__nav_icon(mode);
+}
+
+/* Zoom level, plus the pan direction Prev/Next move in, top right. */
+static void hud__draw_zoom(const map_view_t *view, hud_nav_mode_t mode, int width) {
     char text[8];
-    snprintf(text, sizeof(text), "z%d", view->zoom);
-    const char *icon = mode == HUD_NAV_ZOOM ? NULL : hud__nav_icon(mode);
-    int x = width - HUD_MARGIN - hud__pill_width(text, icon);
-    int row = x > coordinates_end + HUD_MARGIN ? 0 : 1;
-    hud__pill(text, icon, x, hud__row_y(row), HUD_TEXT);
-    return row;
+    const char *icon = NULL;
+    hud__zoom_text(view, mode, text, sizeof(text), &icon);
+    hud__pill(text, icon, width - HUD_MARGIN - hud__pill_width(text, icon), HUD_MARGIN, HUD_TEXT);
+}
+
+/* Fills the top row up to the zoom badge. */
+hud_rect_t hud__search_rect(const map_view_t *view, const hud_state_t *state, int width) {
+    char text[8];
+    const char *icon = NULL;
+    hud__zoom_text(view, state->nav_mode, text, sizeof(text), &icon);
+    int w = width - 2 * HUD_MARGIN - HUD_GAP - hud__pill_width(text, icon);
+    return (hud_rect_t){.x = HUD_MARGIN, .y = HUD_MARGIN, .w = w, .h = hud__pill_height()};
+}
+
+/* The name up to its first comma, cut with "..." when wider than `max_width`. */
+static void hud__fit_name(const char *name, int max_width, char *out, size_t capacity) {
+    size_t len = strcspn(name, ",");
+    snprintf(out, capacity, "%.*s", (int)len, name);
+    if (hud__text_width(out) <= max_width) return;
+    int keep = max_width / s_char_w - 3;
+    size_t bytes = 0;
+    for (int chars = 0; out[bytes] != '\0'; ++bytes) {
+        if (((unsigned char)out[bytes] & 0xC0) != 0x80 && chars++ == keep) break;
+    }
+    snprintf(out + bytes, capacity - bytes, "...");
+}
+
+static void hud__draw_search(const map_view_t *view, const hud_state_t *state, int width) {
+    hud_rect_t box = hud__search_rect(view, state, width);
+    display__fill_round_rect(box.x, box.y, box.w, box.h, box.h / 2, HUD_PANEL);
+    int icon_x = box.x + HUD_PAD + 1;
+    hud__icon("magnify", icon_x, box.y + (box.h - hud__icon_size()) / 2, hud__icon_size(), HUD_TEXT);
+    int text_x = icon_x + hud__icon_size() + HUD_GAP;
+    char text[64];
+    if (state->place != NULL) hud__fit_name(state->place, box.x + box.w - HUD_PAD - text_x, text, sizeof(text));
+    display__set_text_color(state->place != NULL ? HUD_TEXT : HUD_MUTED);
+    display__draw_string(state->place != NULL ? text : "Search", text_x, box.y + HUD_PAD);
 }
 
 static void hud__draw_scale(const map_view_t *view, int height) {
@@ -131,7 +185,7 @@ static void hud__draw_attribution(int width, int height) {
 
 hud_rect_t hud__button_rect(hud_button_t button, int width, int height) {
     int y = height / 2 + (button == HUD_BUTTON_ZOOM_IN ? -HUD_BUTTON_SIZE - 2 : 2);
-    return (hud_rect_t){.x = width - HUD_MARGIN - HUD_BUTTON_SIZE, .y = y, .size = HUD_BUTTON_SIZE};
+    return (hud_rect_t){.x = width - HUD_MARGIN - HUD_BUTTON_SIZE, .y = y, .w = HUD_BUTTON_SIZE, .h = HUD_BUTTON_SIZE};
 }
 
 static void hud__draw_buttons(int width, int height) {
@@ -139,7 +193,7 @@ static void hud__draw_buttons(int width, int height) {
     const int inset = (HUD_BUTTON_SIZE - HUD_BUTTON_ICON) / 2;
     for (int button = HUD_BUTTON_ZOOM_IN; button <= HUD_BUTTON_ZOOM_OUT; ++button) {
         hud_rect_t rect = hud__button_rect(button, width, height);
-        display__fill_round_rect(rect.x, rect.y, rect.size, rect.size, 6, HUD_PANEL);
+        display__fill_round_rect(rect.x, rect.y, rect.w, rect.h, 6, HUD_PANEL);
         hud__icon(icons[button], rect.x + inset, rect.y + inset, HUD_BUTTON_ICON, HUD_TEXT);
     }
 }
@@ -161,14 +215,16 @@ void hud__draw(const map_view_t *view, const hud_state_t *state, int width, int 
     display__get_font_metrics(&s_char_w, &s_char_h);
     display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
 
+    if (state->pin) hud__draw_pin(view, state->pin_lat, state->pin_lon, width, height);
     hud__draw_crosshair(width / 2, height / 2);
-    int coordinates_end = hud__draw_coordinates(view);
-    int zoom_row = hud__draw_zoom(view, state->nav_mode, width, coordinates_end);
+    hud__draw_search(view, state, width);
+    hud__draw_zoom(view, state->nav_mode, width);
+    hud__draw_coordinates(view);
     hud__draw_scale(view, height);
     hud__draw_attribution(width, height);
     if (state->zoom_buttons) hud__draw_buttons(width, height);
     if (state->status != NULL) {
-        hud__pill(state->status, state->status_icon, HUD_MARGIN, hud__row_y(1 + zoom_row), HUD_ACCENT);
+        hud__pill(state->status, state->status_icon, HUD_MARGIN, hud__row_y(2), HUD_ACCENT);
     }
-    hud__draw_hint(state->hint, hud__nav_icon(state->nav_mode), width, height);
+    hud__draw_hint(state->hint, state->hint_icon, width, height);
 }

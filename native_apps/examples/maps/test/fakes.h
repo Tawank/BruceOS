@@ -59,6 +59,7 @@ typedef struct {
     bruce_result_t http_result;
     int http_status;
     size_t http_body_len;
+    const char *http_body; /* Response body; zeros of http_body_len when NULL. */
     bool http_manual; /* Jobs stay busy until fakes__http_finish_all(). */
     struct {
         bool used;
@@ -97,6 +98,7 @@ typedef struct {
     char choice_icons[8][32];
     char choice_right_text[8][8];
     int message_count;
+    char message[64];
 } fakes_t;
 
 extern fakes_t fakes;

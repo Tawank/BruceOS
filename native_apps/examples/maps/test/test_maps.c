@@ -179,7 +179,7 @@ static void touch_drag_moves_map_with_finger(void) {
     stop();
 }
 
-static void menu_go_to_coordinates(void) {
+static void menu_search_jumps_to_coordinates(void) {
     start();
     fakes.choice_result = BRUCE_OK;
     fakes.choice = 1;
@@ -189,16 +189,18 @@ static void menu_go_to_coordinates(void) {
     map_view__center(&app.view, &lat, &lon);
     CHECK_NEAR(lat, -33.8688, 0.0001);
     CHECK_NEAR(lon, 151.2093, 0.0001);
-    CHECK_EQ(app.view.zoom, MAPS_GOTO_ZOOM);
+    CHECK_EQ(app.view.zoom, MAPS_PLACE_ZOOM);
+    CHECK(app.hud.pin);
+    CHECK_EQ(fakes.http_calls, 0);
     CHECK_EQ(fakes.message_count, 0);
     stop();
 }
 
-static void go_to_accepts_space_separator_and_keeps_deep_zoom(void) {
+static void coordinates_keep_deep_zoom(void) {
     start();
     map_view__zoom(&app.view, 7);
     fakes.text_input = "40.7128 -74.006";
-    maps__go_to(&app);
+    maps__search(&app);
     double lat = 0, lon = 0;
     map_view__center(&app.view, &lat, &lon);
     CHECK_NEAR(lat, 40.7128, 0.0001);
@@ -206,17 +208,129 @@ static void go_to_accepts_space_separator_and_keeps_deep_zoom(void) {
     stop();
 }
 
-static void go_to_rejects_bad_input(void) {
-    const char *inputs[] = {"abc", "50.1", "91, 10", "10, 181"};
-    for (size_t i = 0; i < sizeof(inputs) / sizeof(inputs[0]); ++i) {
-        start();
-        geo_point_t before = app.view.center;
-        fakes.text_input = inputs[i];
-        maps__go_to(&app);
-        CHECK_EQ(app.view.center.x, before.x);
-        CHECK_EQ(fakes.message_count, (int)i + 1);
-        stop();
-    }
+static const char *const s_two_places =
+    "[{\"lat\":\"50.0547\",\"lon\":\"19.9354\",\"display_name\":\"Wawel, Kraków, Poland\"},"
+    "{\"lat\":\"52.2297\",\"lon\":\"21.0122\",\"display_name\":\"Warsaw, Poland\"}]";
+
+static void run_search(const char *query) {
+    fakes.text_input = query;
+    maps__search(&app);
+    for (int i = 0; i < 10 && app.search.state != SEARCH_IDLE; ++i) maps__poll_search(&app);
+}
+
+static void search_lists_places_with_distance(void) {
+    start();
+    map_view__set(&app.view, 50.06, 19.94, 12);
+    fakes.http_body = s_two_places;
+    fakes.choice_result = BRUCE_OK;
+    fakes.choice = 1;
+    run_search("wawel castle");
+    CHECK(strstr(fakes.http_url, "q=wawel%20castle&format=jsonv2") != NULL);
+    CHECK_STR(fakes.http_user_agent, "BruceOS-Maps/0.1");
+    CHECK_EQ(fakes.choice_count, 2u);
+    CHECK_STR(fakes.choice_labels[0], "Wawel, Kraków, Poland");
+    CHECK(strstr(fakes.choice_right_text[0], " m") != NULL);
+    CHECK_STR(fakes.choice_right_text[1], "252 km");
+    double lat = 0, lon = 0;
+    map_view__center(&app.view, &lat, &lon);
+    CHECK_NEAR(lat, 52.2297, 0.0001);
+    CHECK_EQ(app.view.zoom, MAPS_PLACE_ZOOM);
+    CHECK(app.hud.pin);
+    CHECK_STR(app.hud.place, "Warsaw, Poland");
+    stop();
+}
+
+static void single_result_goes_straight_there(void) {
+    start();
+    fakes.http_body = "[{\"lat\":\"1.5\",\"lon\":\"2.5\",\"display_name\":\"Somewhere\"}]";
+    run_search("somewhere");
+    CHECK_EQ(fakes.choice_calls, 0);
+    CHECK_NEAR(app.hud.pin_lat, 1.5, 1e-9);
+    stop();
+}
+
+static void search_reports_nothing_found_and_errors(void) {
+    start();
+    fakes.http_body = "[]";
+    run_search("nowhere");
+    CHECK_STR(fakes.message, "No places found");
+    fakes.http_status = 503;
+    run_search("busy");
+    CHECK_STR(fakes.message, "Search failed, try again later");
+    CHECK(!app.hud.pin);
+    stop();
+}
+
+static void search_connects_wifi_first(void) {
+    start();
+    fakes.wifi_connected = false;
+    fakes.wifi_connect_manual = true;
+    fakes.http_body = s_two_places;
+    fakes.text_input = "wawel";
+    maps__search(&app);
+    maps__poll_search(&app);
+    maps__update_status(&app, 0);
+    CHECK_STR(app.hud.status, "Connecting");
+    CHECK_EQ(fakes.http_calls, 0);
+    fakes__wifi_finish();
+    fakes.http_manual = true;
+    maps__poll_search(&app);
+    maps__update_status(&app, 3);
+    CHECK_STR(app.hud.status, "Searching");
+    CHECK_STR(app.hud.status_icon, "magnify");
+    CHECK_EQ(fakes.http_calls, 1);
+    stop();
+}
+
+static void search_without_wifi_says_so(void) {
+    start();
+    fakes.wifi_connected = false;
+    fakes.wifi_connect_ok = false;
+    fakes.wifi_connect_manual = true;
+    fakes.text_input = "wawel";
+    maps__search(&app);
+    fakes__wifi_finish();
+    maps__poll_search(&app);
+    CHECK_STR(fakes.message, "No Wi-Fi connection");
+    CHECK_EQ(app.search.state, SEARCH_IDLE);
+    stop();
+}
+
+static void back_cancels_search_not_app(void) {
+    start();
+    fakes.http_manual = true;
+    fakes.text_input = "wawel";
+    maps__search(&app);
+    press(BRUCE_INPUT_BUTTON, BRUCE_INPUT_CODE_BACK);
+    CHECK(app.running);
+    CHECK_EQ(app.search.state, SEARCH_IDLE);
+    CHECK_EQ(fakes.http_cancels, 1);
+    press(BRUCE_INPUT_BUTTON, BRUCE_INPUT_CODE_BACK);
+    CHECK(!app.running);
+    stop();
+}
+
+static void menu_offers_clear_pin_with_a_pin(void) {
+    start();
+    maps__show_place(&app, 50, 20, "Here");
+    fakes.choice_result = BRUCE_OK;
+    fakes.choice = 2;
+    maps__menu(&app);
+    CHECK_EQ(fakes.choice_count, 6u);
+    CHECK_STR(fakes.choice_labels[2], "Clear pin");
+    CHECK(!app.hud.pin);
+    CHECK(app.hud.place == NULL);
+    maps__menu(&app);
+    CHECK_EQ(fakes.choice_count, 5u);
+    stop();
+}
+
+static void coordinates_name_the_pin(void) {
+    start();
+    fakes.text_input = " 50.0614,19.9372 ";
+    maps__search(&app);
+    CHECK_STR(app.hud.place, "50.0614 19.9372");
+    stop();
 }
 
 static void menu_toggles_online_and_saves(void) {
@@ -320,8 +434,8 @@ static void tapping_zoom_buttons_zooms(void) {
     touch(BRUCE_INPUT_PRESS, in.x + 2, in.y + 2);
     touch(BRUCE_INPUT_RELEASE, in.x + 2, in.y + 2);
     CHECK_EQ(app.view.zoom, 11);
-    touch(BRUCE_INPUT_PRESS, out.x + out.size - 1, out.y + out.size - 1);
-    touch(BRUCE_INPUT_RELEASE, out.x + out.size - 1, out.y + out.size - 1);
+    touch(BRUCE_INPUT_PRESS, out.x + out.w - 1, out.y + out.h - 1);
+    touch(BRUCE_INPUT_RELEASE, out.x + out.w - 1, out.y + out.h - 1);
     CHECK_EQ(app.view.zoom, 10);
     stop();
 }
@@ -429,6 +543,17 @@ static void map_stays_responsive_while_wifi_connects(void) {
     stop();
 }
 
+static void tapping_search_box_opens_search(void) {
+    start();
+    fakes.text_input = "1, 2";
+    hud_rect_t box = hud__search_rect(&app.view, &app.hud, 240);
+    bruce_input_event_t tap = {.type = BRUCE_INPUT_TOUCH, .action = BRUCE_INPUT_PRESS,
+                               .code = box.x + box.w / 2, .value = box.y + 2};
+    maps__handle(&app, &tap);
+    CHECK_STR(app.hud.place, "1 2");
+    stop();
+}
+
 SUITE(maps_tests,
       TEST(arrows_pan_a_quarter_screen),
       TEST(releases_are_ignored),
@@ -442,9 +567,17 @@ SUITE(maps_tests,
       TEST(prev_next_follow_nav_mode),
       TEST(cancelled_menu_changes_nothing),
       TEST(touch_drag_moves_map_with_finger),
-      TEST(menu_go_to_coordinates),
-      TEST(go_to_accepts_space_separator_and_keeps_deep_zoom),
-      TEST(go_to_rejects_bad_input),
+      TEST(menu_search_jumps_to_coordinates),
+      TEST(coordinates_keep_deep_zoom),
+      TEST(search_lists_places_with_distance),
+      TEST(single_result_goes_straight_there),
+      TEST(search_reports_nothing_found_and_errors),
+      TEST(search_connects_wifi_first),
+      TEST(search_without_wifi_says_so),
+      TEST(back_cancels_search_not_app),
+      TEST(menu_offers_clear_pin_with_a_pin),
+      TEST(coordinates_name_the_pin),
+      TEST(tapping_search_box_opens_search),
       TEST(menu_toggles_online_and_saves),
       TEST(menu_exit_stops),
       TEST(view_saved_only_when_moved),

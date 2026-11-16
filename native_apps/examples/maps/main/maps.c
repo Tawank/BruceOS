@@ -1,16 +1,18 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "bruce_sdk.h"
 #include "geo.h"
 #include "hud.h"
 #include "map_view.h"
+#include "search.h"
 #include "settings.h"
 #include "tiles.h"
 
 #define MAPS_IDLE_DELAY_MS 30
-#define MAPS_GOTO_ZOOM 15
+#define MAPS_PLACE_ZOOM 16
 #define MAPS_LONG_PRESS_MS 500
 #define MAPS_HINT_MS 2000
 #define MAPS_PENDING_MAX 16
@@ -22,6 +24,8 @@ typedef struct {
     tiles_t tiles;
     hud_state_t hud;
     uint64_t hint_until_ms;
+    search_t search;
+    char place[SEARCH_NAME_MAX];
     bool running;
     bool dirty;
     bool stalled; /* Every pending tile waits for a download slot. */
@@ -59,12 +63,17 @@ static hud_nav_mode_t maps__next_nav_mode(const maps_t *app) {
     return (app->hud.nav_mode + 1) % HUD_NAV_COUNT;
 }
 
+static void maps__show_hint(maps_t *app, const char *icon, const char *line, const char *tip, uint32_t ms) {
+    app->hud.hint_icon = icon;
+    app->hud.hint[0] = line;
+    app->hud.hint[1] = tip;
+    app->hint_until_ms = runtime__now() + ms;
+    app->dirty = true;
+}
+
 static void maps__set_nav_mode(maps_t *app, hud_nav_mode_t mode, bool from_menu) {
     app->hud.nav_mode = mode;
-    app->hud.hint[0] = s_nav_hints[mode];
-    app->hud.hint[1] = from_menu ? "Tip: hold Select" : NULL;
-    app->hint_until_ms = runtime__now() + MAPS_HINT_MS;
-    app->dirty = true;
+    maps__show_hint(app, hud__nav_icon(mode), s_nav_hints[mode], from_menu ? "Tip: hold Select" : NULL, MAPS_HINT_MS);
 }
 
 static void maps__expire_hint(maps_t *app) {
@@ -73,22 +82,105 @@ static void maps__expire_hint(maps_t *app) {
     app->dirty = true;
 }
 
-static void maps__go_to(maps_t *app) {
-    char text[48] = {0};
-    if (dialog__text_input("Go to", "lat, lon", NULL, false, text, sizeof(text)) != BRUCE_OK) return;
+static void maps__show_place(maps_t *app, double lat, double lon, const char *name) {
+    int zoom = app->view.zoom > MAPS_PLACE_ZOOM ? app->view.zoom : MAPS_PLACE_ZOOM;
+    map_view__set(&app->view, lat, lon, zoom);
+    app->hud.pin = true;
+    app->hud.pin_lat = lat;
+    app->hud.pin_lon = lon;
+    snprintf(app->place, sizeof(app->place), "%s", name);
+    app->hud.place = app->place;
+    app->dirty = true;
+}
 
-    char *end = NULL;
-    double lat = strtod(text, &end);
-    const char *lon_text = end;
-    while (*lon_text == ',' || *lon_text == ' ') lon_text++;
-    double lon = strtod(lon_text, &end);
-    bool valid = end != lon_text && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180;
-    if (!valid) {
-        dialog__message(BRUCE_DIALOG_WARNING, "Go to", "Use the form: 50.0614, 19.9372");
+static void maps__clear_pin(maps_t *app) {
+    app->hud.pin = false;
+    app->hud.place = NULL;
+}
+
+/* "50.06, 19.94" reads as one name; the search box cuts names at the first comma. */
+static void maps__coordinates_name(const char *text, char *out, size_t capacity) {
+    size_t len = 0;
+    for (const char *c = text; *c != '\0' && len + 1 < capacity; ++c) {
+        char ch = *c == ',' ? ' ' : *c;
+        if (ch == ' ' && (len == 0 || out[len - 1] == ' ')) continue;
+        out[len++] = ch;
+    }
+    while (len > 0 && out[len - 1] == ' ') len--;
+    out[len] = '\0';
+}
+
+static double maps__distance_m(const maps_t *app, const search_place_t *place) {
+    double lat = 0, lon = 0;
+    map_view__center(&app->view, &lat, &lon);
+    const double rad = M_PI / 180.0;
+    double a = pow(sin((place->lat - lat) * rad / 2), 2) +
+               cos(lat * rad) * cos(place->lat * rad) * pow(sin((place->lon - lon) * rad / 2), 2);
+    return 2 * 6371000.0 * asin(sqrt(a));
+}
+
+static void maps__format_distance(char *out, size_t capacity, double meters) {
+    long m = (long)(meters + 0.5);
+    if (m < 1000) snprintf(out, capacity, "%ld m", m);
+    else if (m < 10000) snprintf(out, capacity, "%ld.%ld km", m / 1000, m % 1000 / 100);
+    else snprintf(out, capacity, "%ld km", m / 1000);
+}
+
+static void maps__pick_place(maps_t *app, const search_place_t *places, size_t count) {
+    if (count == 1) {
+        maps__show_place(app, places[0].lat, places[0].lon, places[0].name);
         return;
     }
-    int zoom = app->view.zoom > MAPS_GOTO_ZOOM ? app->view.zoom : MAPS_GOTO_ZOOM;
-    map_view__set(&app->view, lat, lon, zoom);
+    bruce_dialog_choice_t choices[SEARCH_RESULTS_MAX];
+    char distances[SEARCH_RESULTS_MAX][12];
+    for (size_t i = 0; i < count; ++i) {
+        maps__format_distance(distances[i], sizeof(distances[i]), maps__distance_m(app, &places[i]));
+        choices[i] = (bruce_dialog_choice_t){
+            .label = places[i].name, .icon_name = "map-marker", .right_text = distances[i]};
+    }
+    size_t selected = 0;
+    if (dialog__choice("Places", NULL, choices, count, &selected) == BRUCE_OK) {
+        maps__show_place(app, places[selected].lat, places[selected].lon, places[selected].name);
+    }
+}
+
+static void maps__search_finished(maps_t *app, bruce_result_t result, const search_place_t *places, size_t count) {
+    app->dirty = true;
+    if (result != BRUCE_OK) {
+        const char *message = wifi__is_connected() ? "Search failed, try again later" : "No Wi-Fi connection";
+        dialog__message(BRUCE_DIALOG_WARNING, "Search", message);
+    } else if (count == 0) {
+        dialog__message(BRUCE_DIALOG_INFO, "Search", "No places found");
+    } else {
+        maps__pick_place(app, places, count);
+    }
+}
+
+/* Coordinates jump straight there; anything else asks the search server. */
+static void maps__search(maps_t *app) {
+    char text[SEARCH_QUERY_MAX] = {0};
+    app->dirty = true;
+    if (dialog__text_input("Search", "place or lat, lon", NULL, false, text, sizeof(text)) != BRUCE_OK) return;
+    double lat = 0, lon = 0;
+    if (search__parse_coordinates(text, &lat, &lon)) {
+        char name[SEARCH_QUERY_MAX];
+        maps__coordinates_name(text, name, sizeof(name));
+        maps__show_place(app, lat, lon, name);
+        return;
+    }
+    if (text[strspn(text, " ")] == '\0') return;
+    bruce_result_t result = search__start(
+        &app->search, app->settings.search_url, text, &app->view, display__width(), display__height()
+    );
+    if (result != BRUCE_OK) maps__search_finished(app, result, NULL, 0);
+}
+
+static void maps__poll_search(maps_t *app) {
+    if (app->search.state == SEARCH_IDLE) return;
+    search_place_t places[SEARCH_RESULTS_MAX];
+    size_t count = 0;
+    bruce_result_t result = search__poll(&app->search, places, &count);
+    if (result != BRUCE_ERR_BUSY) maps__search_finished(app, result, places, count);
 }
 
 static void maps__toggle_online(maps_t *app) {
@@ -97,23 +189,33 @@ static void maps__toggle_online(maps_t *app) {
 }
 
 static void maps__menu(maps_t *app) {
-    enum { NAV_MODE, GO_TO, ONLINE, EXIT, BACK };
+    enum { NAV_MODE, SEARCH, CLEAR_PIN, ONLINE, EXIT, BACK };
     hud_nav_mode_t next_mode = maps__next_nav_mode(app);
     char nav_label[32];
     snprintf(nav_label, sizeof(nav_label), "Change to %s", s_nav_names[next_mode]);
-    const bruce_dialog_choice_t choices[] = {
+    const bruce_dialog_choice_t all[] = {
         [NAV_MODE] = {.label = nav_label, .icon_name = hud__nav_icon(next_mode)},
-        [GO_TO] = {.label = "Go to coordinates", .icon_name = "map-marker"},
+        [SEARCH] = {.label = "Search", .icon_name = "magnify"},
+        [CLEAR_PIN] = {.label = "Clear pin", .icon_name = "map-marker"},
         [ONLINE] = {.label = "Online tiles", .icon_name = "earth",
                     .right_text = app->tiles.online ? "On" : "Off"},
         [EXIT] = {.label = "Exit", .icon_name = "power"},
         [BACK] = {.label = "Back", .icon_name = "arrow-left"},
     };
+    bruce_dialog_choice_t choices[sizeof(all) / sizeof(all[0])];
+    int actions[sizeof(all) / sizeof(all[0])];
+    size_t count = 0;
+    for (int i = 0; i < (int)(sizeof(all) / sizeof(all[0])); ++i) {
+        if (i == CLEAR_PIN && !app->hud.pin) continue;
+        choices[count] = all[i];
+        actions[count++] = i;
+    }
     size_t selected = 0;
-    if (dialog__choice("Maps", NULL, choices, sizeof(choices) / sizeof(choices[0]), &selected) == BRUCE_OK) {
-        switch (selected) {
+    if (dialog__choice("Maps", NULL, choices, count, &selected) == BRUCE_OK) {
+        switch (actions[selected]) {
             case NAV_MODE: maps__set_nav_mode(app, next_mode, true); break;
-            case GO_TO: maps__go_to(app); break;
+            case SEARCH: maps__search(app); break;
+            case CLEAR_PIN: maps__clear_pin(app); break;
             case ONLINE: maps__toggle_online(app); break;
             case EXIT: app->running = false; break;
             case BACK: break;
@@ -131,9 +233,12 @@ static void maps__select(maps_t *app, const bruce_input_event_t *event) {
     maps__menu(app);
 }
 
-static bool maps__hit(hud_button_t button, int32_t x, int32_t y) {
-    hud_rect_t rect = hud__button_rect(button, display__width(), display__height());
-    return x >= rect.x && x < rect.x + rect.size && y >= rect.y && y < rect.y + rect.size;
+static bool maps__hit(hud_rect_t rect, int32_t x, int32_t y) {
+    return x >= rect.x && x < rect.x + rect.w && y >= rect.y && y < rect.y + rect.h;
+}
+
+static bool maps__hit_button(hud_button_t button, int32_t x, int32_t y) {
+    return maps__hit(hud__button_rect(button, display__width(), display__height()), x, y);
 }
 
 /* Drag pans; the +/- buttons appear with the first touch, so keypad boards never see them. */
@@ -142,8 +247,10 @@ static void maps__touch(maps_t *app, const bruce_input_event_t *event) {
         app->dirty |= !app->hud.zoom_buttons;
         app->hud.zoom_buttons = true;
         app->touch_on_button = true;
-        if (maps__hit(HUD_BUTTON_ZOOM_IN, event->code, event->value)) maps__zoom(app, 1);
-        else if (maps__hit(HUD_BUTTON_ZOOM_OUT, event->code, event->value)) maps__zoom(app, -1);
+        hud_rect_t search = hud__search_rect(&app->view, &app->hud, display__width());
+        if (maps__hit_button(HUD_BUTTON_ZOOM_IN, event->code, event->value)) maps__zoom(app, 1);
+        else if (maps__hit_button(HUD_BUTTON_ZOOM_OUT, event->code, event->value)) maps__zoom(app, -1);
+        else if (maps__hit(search, event->code, event->value)) maps__search(app);
         else app->touch_on_button = false;
     } else if (event->action == BRUCE_INPUT_CHANGE && !app->touch_on_button) {
         maps__pan(app, app->touch_x - event->code, app->touch_y - event->value);
@@ -162,7 +269,11 @@ static void maps__handle(maps_t *app, const bruce_input_event_t *event) {
     int step_x = display__width() / 4;
     int step_y = display__height() / 4;
     switch (event->code) {
-        case BRUCE_INPUT_CODE_BACK: app->running = false; break;
+        case BRUCE_INPUT_CODE_BACK:
+            if (app->search.state != SEARCH_IDLE) search__cancel(&app->search);
+            else app->running = false;
+            app->dirty = true;
+            break;
         case BRUCE_INPUT_CODE_UP: maps__pan(app, 0, -step_y); break;
         case BRUCE_INPUT_CODE_DOWN: maps__pan(app, 0, step_y); break;
         case BRUCE_INPUT_CODE_LEFT: maps__pan(app, -step_x, 0); break;
@@ -183,10 +294,15 @@ static void maps__handle(maps_t *app, const bruce_input_event_t *event) {
 /* Redraws only when the text changes; the strings are literals, so pointers compare. */
 static void maps__update_status(maps_t *app, size_t loading) {
     const char *before = app->hud.status;
-    bool connecting = loading == 0 && app->tiles.connecting;
-    bool offline = loading == 0 && !connecting && app->tiles.network_down;
-    app->hud.status = loading > 0 ? "Loading" : connecting ? "Connecting" : offline ? "No Wi-Fi" : NULL;
-    app->hud.status_icon = connecting ? "wifi" : offline ? "wifi-cancel" : NULL;
+    bool searching = app->search.state == SEARCH_RUNNING;
+    bool connecting = app->search.state == SEARCH_CONNECTING || (loading == 0 && app->tiles.connecting);
+    bool offline = !searching && !connecting && loading == 0 && app->tiles.network_down;
+    app->hud.status = searching    ? "Searching"
+                      : connecting ? "Connecting"
+                      : loading > 0 ? "Loading"
+                      : offline    ? "No Wi-Fi"
+                                   : NULL;
+    app->hud.status_icon = searching ? "magnify" : connecting ? "wifi" : offline ? "wifi-cancel" : NULL;
     if (app->hud.status != before) app->dirty = true;
 }
 
@@ -242,6 +358,7 @@ static void maps__run(maps_t *app) {
         bruce_input_event_t event;
         while (app->running && input__poll(&event) == BRUCE_OK) maps__handle(app, &event);
         maps__expire_hint(app);
+        maps__poll_search(app);
         if (tiles__check_network(&app->tiles)) app->dirty = true;
         if (display__viewport_changed()) app->dirty = true;
 
@@ -297,6 +414,7 @@ int app_main(int argc, char **argv) {
     maps__run(app);
 
     maps__save_view(app);
+    search__cancel(&app->search);
     tiles__deinit(&app->tiles);
     memory__free(app);
     return 0;

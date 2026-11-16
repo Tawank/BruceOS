@@ -5,6 +5,7 @@
 
 #define SETTINGS_DEFAULT_TILE_DIR "/sdcard/maps/tiles"
 #define SETTINGS_DEFAULT_TILE_URL "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+#define SETTINGS_DEFAULT_SEARCH_URL "https://nominatim.openstreetmap.org/search"
 
 void settings__load(settings_t *settings) {
     settings->lat_e6 = app_config__get_int(NULL, "view.lat_e6", 50000000);
@@ -17,6 +18,9 @@ void settings__load(settings_t *settings) {
     );
     app_config__get_string(
         NULL, "tiles.url", SETTINGS_DEFAULT_TILE_URL, settings->tile_url, sizeof(settings->tile_url)
+    );
+    app_config__get_string(
+        NULL, "search.url", SETTINGS_DEFAULT_SEARCH_URL, settings->search_url, sizeof(settings->search_url)
     );
 }
 
