@@ -284,7 +284,28 @@ bruce_result_t wifi__connect_known(void) {
     return fakes.wifi_connect_ok ? BRUCE_OK : BRUCE_ERR_IO;
 }
 
-bruce_result_t http__request(const bruce_http_request_t *request, bruce_http_response_t *response) {
+int fakes__http_active(void) {
+    int active = 0;
+    for (size_t i = 0; i < FAKE_JOBS_MAX; ++i) active += fakes.http_jobs[i].used;
+    return active;
+}
+
+void fakes__http_finish_all(void) {
+    for (size_t i = 0; i < FAKE_JOBS_MAX; ++i) fakes.http_jobs[i].done = true;
+}
+
+static int fakes__http_job(bruce_http_job_id_t id) {
+    for (int i = 0; i < FAKE_JOBS_MAX; ++i) {
+        if (fakes.http_jobs[i].used && fakes.http_jobs[i].id == id) return i;
+    }
+    return -1;
+}
+
+bruce_result_t http__request_start(const bruce_http_request_t *request, bruce_http_job_id_t *out_job) {
+    if (fakes.http_start_result != BRUCE_OK) return fakes.http_start_result;
+    int slot = -1;
+    for (int i = 0; i < FAKE_JOBS_MAX && slot < 0; ++i) slot = fakes.http_jobs[i].used ? -1 : i;
+    if (slot < 0) return BRUCE_ERR_RESOURCE_LIMIT;
     fakes.http_calls++;
     snprintf(fakes.http_url, sizeof(fakes.http_url), "%s", request->url);
     for (size_t i = 0; i < request->header_count; ++i) {
@@ -292,20 +313,39 @@ bruce_result_t http__request(const bruce_http_request_t *request, bruce_http_res
             snprintf(fakes.http_user_agent, sizeof(fakes.http_user_agent), "%s", request->headers[2 * i + 1]);
         }
     }
-    memset(response, 0, sizeof(*response));
-    if (fakes.http_result != BRUCE_OK) return fakes.http_result;
-    response->status_code = fakes.http_status;
-    static const char chunk[100] = {0};
-    for (size_t sent = 0; sent < fakes.http_body_len; sent += sizeof(chunk)) {
-        size_t size = fakes.http_body_len - sent < sizeof(chunk) ? fakes.http_body_len - sent : sizeof(chunk);
-        bruce_result_t result = request->on_response_chunk(chunk, size, request->response_chunk_context);
-        if (result != BRUCE_OK) return result;
-        response->body_len += size;
-    }
+    fakes.http_jobs[slot].used = true;
+    fakes.http_jobs[slot].done = !fakes.http_manual;
+    fakes.http_jobs[slot].id = (bruce_http_job_id_t)fakes.http_calls;
+    *out_job = fakes.http_jobs[slot].id;
+    int active = fakes__http_active();
+    if (active > fakes.http_max_active) fakes.http_max_active = active;
     return BRUCE_OK;
 }
 
-void http__response_free(bruce_http_response_t *response) { (void)response; }
+bruce_result_t http__request_poll(bruce_http_job_id_t job, bruce_http_response_t *response) {
+    memset(response, 0, sizeof(*response));
+    int slot = fakes__http_job(job);
+    if (slot < 0) return BRUCE_ERR_NOT_FOUND;
+    if (!fakes.http_jobs[slot].done) return BRUCE_ERR_BUSY;
+    fakes.http_jobs[slot].used = false;
+    if (fakes.http_result != BRUCE_OK) return fakes.http_result;
+    response->status_code = fakes.http_status;
+    response->body = calloc(1, fakes.http_body_len + 1);
+    response->body_len = fakes.http_body_len;
+    return BRUCE_OK;
+}
+
+void http__request_cancel(bruce_http_job_id_t job) {
+    int slot = fakes__http_job(job);
+    if (slot < 0) return;
+    fakes.http_jobs[slot].used = false;
+    fakes.http_cancels++;
+}
+
+void http__response_free(bruce_http_response_t *response) {
+    free(response->body);
+    memset(response, 0, sizeof(*response));
+}
 
 /* ---- memory ------------------------------------------------------------- */
 

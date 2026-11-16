@@ -358,6 +358,50 @@ static void no_wifi_status_clears_when_wifi_comes_back(void) {
     stop();
 }
 
+static void scrolling_keeps_five_downloads_and_cancels_far_ones(void) {
+    start();
+    fakes.width = 240;
+    fakes.height = 320;
+    fakes.http_manual = true;
+    tiles__set_online(&app.tiles, true);
+    app.view.center = (geo_point_t){10 * GEO_TILE_SIZE, 12 * GEO_TILE_SIZE + 128}; /* 2x3 tiles visible */
+    fakes.polls_until_back = 10;
+    maps__run(&app);
+    CHECK_EQ(fakes.http_calls, 5);
+    CHECK_EQ(app.tiles.download_count, 5u);
+    CHECK_STR(app.hud.status, "Loading");
+
+    map_view__pan(&app.view, 20 * GEO_TILE_SIZE, 0);
+    app.running = true;
+    fakes.polls_until_back = 10;
+    maps__run(&app);
+    CHECK_EQ(fakes.http_cancels, 5);
+    CHECK_EQ(fakes.http_calls, 10);
+    CHECK(fakes.http_max_active <= TILES_DOWNLOADS_MAX);
+
+    fakes__http_finish_all();
+    app.running = true;
+    fakes.polls_until_back = 20;
+    maps__run(&app);
+    CHECK(fakes.http_max_active <= TILES_DOWNLOADS_MAX);
+    CHECK(fakes.decode_count >= 5);
+    stop();
+}
+
+static void stays_responsive_while_downloading(void) {
+    start();
+    fakes.http_manual = true;
+    tiles__set_online(&app.tiles, true);
+    fakes__push(BRUCE_INPUT_KEY, BRUCE_INPUT_PRESS, BRUCE_INPUT_CODE_RIGHT, 0);
+    fakes.polls_until_back = 6;
+    geo_point_t before = app.view.center;
+    maps__run(&app);
+    CHECK_EQ(app.view.center.x, before.x + 240 / 4);
+    CHECK(fakes.http_calls > 0);
+    CHECK_EQ(fakes.decode_count, 0);
+    stop();
+}
+
 SUITE(maps_tests,
       TEST(arrows_pan_a_quarter_screen),
       TEST(releases_are_ignored),
@@ -384,4 +428,6 @@ SUITE(maps_tests,
       TEST(tapping_zoom_buttons_zooms),
       TEST(drag_from_button_does_not_pan),
       TEST(app_main_draws_loads_and_exits),
-      TEST(no_wifi_status_clears_when_wifi_comes_back))
+      TEST(no_wifi_status_clears_when_wifi_comes_back),
+      TEST(scrolling_keeps_five_downloads_and_cancels_far_ones),
+      TEST(stays_responsive_while_downloading))

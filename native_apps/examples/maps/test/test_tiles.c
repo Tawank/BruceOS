@@ -10,6 +10,18 @@ static tiles_t tiles;
 
 static void init(bool online) { CHECK(tiles__init(&tiles, 6, DIR, URL, online)); }
 
+/* Download, store on SD, then decode: the whole trip for one tile. */
+static void fetch(tile_key_t key) {
+    CHECK_EQ(tiles__load(&tiles, key), TILE_DOWNLOADING);
+    CHECK(tiles__poll(&tiles));
+    CHECK_EQ(tiles__load(&tiles, key), TILE_LOADED);
+}
+
+static bool keep_x_one(tile_key_t key, void *context) {
+    (void)context;
+    return key.x == 1;
+}
+
 static void slot_count_follows_psram(void) {
     init(false);
     CHECK_EQ(tiles.slot_count, 6u);
@@ -30,67 +42,112 @@ static void loads_tile_from_sd_without_network(void) {
     fakes__add_file(DIR "/3/4/2.png", 500);
     init(true);
     tile_key_t key = {3, 4, 2};
-    CHECK(tiles__get(&tiles, key) == NULL);
-    tiles__load(&tiles, key);
-    const image_bitmap_t *bitmap = tiles__get(&tiles, key);
-    CHECK(bitmap != NULL);
+    CHECK(tiles__needs_load(&tiles, key));
+    CHECK_EQ(tiles__load(&tiles, key), TILE_LOADED);
+    CHECK(tiles__get(&tiles, key) != NULL);
+    CHECK(!tiles__needs_load(&tiles, key));
     CHECK_EQ(fakes.http_calls, 0);
-    CHECK_EQ(fakes.decode_count, 1);
-    CHECK(!tiles__is_missing(&tiles, key));
     tiles__deinit(&tiles);
 }
 
 static void offline_missing_tile_is_remembered(void) {
     init(false);
     tile_key_t key = {3, 4, 2};
-    tiles__load(&tiles, key);
-    CHECK(tiles__get(&tiles, key) == NULL);
+    CHECK_EQ(tiles__load(&tiles, key), TILE_MISSING);
     CHECK(tiles__is_missing(&tiles, key));
+    CHECK(!tiles__needs_load(&tiles, key));
     CHECK_EQ(fakes.http_calls, 0);
     CHECK_EQ(fakes.wifi_connect_calls, 0);
     tiles__deinit(&tiles);
 }
 
-static void online_download_goes_to_sd_cache(void) {
+static void download_lands_in_sd_cache(void) {
     init(true);
     tile_key_t key = {12, 2271, 1388};
-    tiles__load(&tiles, key);
+    CHECK_EQ(tiles__load(&tiles, key), TILE_DOWNLOADING);
     CHECK_STR(fakes.http_url, "https://tiles.test/12/2271/1388.png?key=abc");
     CHECK_STR(fakes.http_user_agent, "BruceOS-Maps/0.1");
+    CHECK(!tiles__needs_load(&tiles, key));
+
+    CHECK(tiles__poll(&tiles));
     CHECK(fakes__file_exists(DIR "/12/2271/1388.png"));
     CHECK(!fakes__file_exists(DIR "/12/2271/1388.png.part"));
     CHECK(fakes.mkdir_count >= 5);
-    CHECK(tiles__get(&tiles, key) != NULL);
+    CHECK(tiles__needs_load(&tiles, key));
+    CHECK_EQ(tiles__load(&tiles, key), TILE_LOADED);
+    CHECK_EQ(fakes.http_calls, 1);
     tiles__deinit(&tiles);
 }
 
-static void cached_download_is_not_fetched_again(void) {
+static void download_runs_in_background(void) {
+    fakes.http_manual = true;
     init(true);
     tile_key_t key = {5, 1, 1};
-    tiles__load(&tiles, key);
-    tiles__deinit(&tiles);
-    init(true);
-    tiles__load(&tiles, key);
-    CHECK_EQ(fakes.http_calls, 1);
-    CHECK(tiles__get(&tiles, key) != NULL);
+    CHECK_EQ(tiles__load(&tiles, key), TILE_DOWNLOADING);
+    CHECK(!tiles__poll(&tiles));
+    CHECK(!tiles__poll(&tiles));
+    CHECK(!fakes__file_exists(DIR "/5/1/1.png"));
+    fakes__http_finish_all();
+    CHECK(tiles__poll(&tiles));
+    CHECK(fakes__file_exists(DIR "/5/1/1.png"));
     tiles__deinit(&tiles);
 }
 
-static void http_error_leaves_no_file(void) {
+static void at_most_five_downloads_at_once(void) {
+    fakes.http_manual = true;
+    init(true);
+    for (int x = 0; x < TILES_DOWNLOADS_MAX; ++x) CHECK_EQ(tiles__load(&tiles, (tile_key_t){9, x, 0}), TILE_DOWNLOADING);
+    tile_key_t extra = {9, 7, 0};
+    CHECK_EQ(tiles__load(&tiles, extra), TILE_DEFERRED);
+    CHECK(tiles__needs_load(&tiles, extra));
+    CHECK_EQ(fakes.http_calls, TILES_DOWNLOADS_MAX);
+    CHECK_EQ(fakes.http_max_active, TILES_DOWNLOADS_MAX);
+
+    fakes__http_finish_all();
+    CHECK(tiles__poll(&tiles));
+    CHECK_EQ(tiles.download_count, 0u);
+    CHECK_EQ(tiles__load(&tiles, extra), TILE_DOWNLOADING);
+    tiles__deinit(&tiles);
+}
+
+static void core_job_limit_defers(void) {
+    fakes.http_start_result = BRUCE_ERR_RESOURCE_LIMIT;
+    init(true);
+    tile_key_t key = {5, 1, 1};
+    CHECK_EQ(tiles__load(&tiles, key), TILE_DEFERRED);
+    CHECK(!tiles__is_missing(&tiles, key));
+    tiles__deinit(&tiles);
+}
+
+static void failed_downloads_leave_no_file(void) {
     fakes.http_status = 404;
     init(true);
     tile_key_t key = {5, 1, 1};
     tiles__load(&tiles, key);
+    tiles__poll(&tiles);
     CHECK(!fakes__file_exists(DIR "/5/1/1.png"));
     CHECK(!fakes__file_exists(DIR "/5/1/1.png.part"));
     CHECK(tiles__is_missing(&tiles, key));
 
     fakes.http_status = 200;
-    fakes.http_result = BRUCE_ERR_TIMEOUT;
+    fakes.http_result = BRUCE_ERR_IO;
     tile_key_t other = {5, 2, 1};
     tiles__load(&tiles, other);
-    CHECK(!fakes__file_exists(DIR "/5/2/1.png.part"));
+    tiles__poll(&tiles);
     CHECK(tiles__is_missing(&tiles, other));
+    CHECK(!tiles.network_down);
+    tiles__deinit(&tiles);
+}
+
+static void lost_wifi_during_download_shows_no_wifi(void) {
+    fakes.http_manual = true;
+    init(true);
+    tiles__load(&tiles, (tile_key_t){5, 1, 1});
+    fakes.wifi_connected = false;
+    fakes.http_result = BRUCE_ERR_IO;
+    fakes__http_finish_all();
+    tiles__poll(&tiles);
+    CHECK(tiles.network_down);
     tiles__deinit(&tiles);
 }
 
@@ -98,16 +155,47 @@ static void empty_response_is_rejected(void) {
     fakes.http_body_len = 0;
     init(true);
     tiles__load(&tiles, (tile_key_t){5, 1, 1});
+    tiles__poll(&tiles);
     CHECK(!fakes__file_exists(DIR "/5/1/1.png"));
     tiles__deinit(&tiles);
+}
+
+static void cancel_unless_drops_unwanted_downloads(void) {
+    fakes.http_manual = true;
+    init(true);
+    for (int x = 0; x < 3; ++x) tiles__load(&tiles, (tile_key_t){9, x, 0});
+    CHECK(tiles__cancel_unless(&tiles, keep_x_one, NULL));
+    CHECK(!tiles__cancel_unless(&tiles, keep_x_one, NULL));
+    CHECK_EQ(fakes.http_cancels, 2);
+    CHECK_EQ(tiles.download_count, 1u);
+    CHECK_EQ(tiles.downloads[0].key.x, 1);
+    CHECK(tiles__needs_load(&tiles, (tile_key_t){9, 0, 0}));
+    CHECK(!tiles__is_missing(&tiles, (tile_key_t){9, 2, 0}));
+    tiles__deinit(&tiles);
+}
+
+static void going_offline_and_deinit_cancel_downloads(void) {
+    fakes.http_manual = true;
+    init(true);
+    tiles__load(&tiles, (tile_key_t){9, 0, 0});
+    tiles__load(&tiles, (tile_key_t){9, 1, 0});
+    tiles__set_online(&tiles, false);
+    CHECK_EQ(fakes.http_cancels, 2);
+    CHECK_EQ(tiles.download_count, 0u);
+
+    tiles__set_online(&tiles, true);
+    tiles__load(&tiles, (tile_key_t){9, 2, 0});
+    tiles__deinit(&tiles);
+    CHECK_EQ(fakes.http_cancels, 3);
+    CHECK_EQ(fakes__http_active(), 0);
 }
 
 static void connects_wifi_once_and_gives_up(void) {
     fakes.wifi_connected = false;
     fakes.wifi_connect_ok = false;
     init(true);
-    tiles__load(&tiles, (tile_key_t){5, 1, 1});
-    tiles__load(&tiles, (tile_key_t){5, 2, 1});
+    CHECK_EQ(tiles__load(&tiles, (tile_key_t){5, 1, 1}), TILE_MISSING);
+    CHECK_EQ(tiles__load(&tiles, (tile_key_t){5, 2, 1}), TILE_MISSING);
     CHECK_EQ(fakes.wifi_connect_calls, 1);
     CHECK_EQ(fakes.http_calls, 0);
     CHECK(tiles.network_down);
@@ -117,9 +205,8 @@ static void connects_wifi_once_and_gives_up(void) {
 static void connects_wifi_when_needed(void) {
     fakes.wifi_connected = false;
     init(true);
-    tiles__load(&tiles, (tile_key_t){5, 1, 1});
+    fetch((tile_key_t){5, 1, 1});
     CHECK_EQ(fakes.wifi_connect_calls, 1);
-    CHECK_EQ(fakes.http_calls, 1);
     CHECK(!tiles.network_down);
     tiles__deinit(&tiles);
 }
@@ -129,15 +216,17 @@ static void wrong_tile_size_is_rejected(void) {
     fakes__add_file(DIR "/3/4/2.png", 500);
     init(false);
     tile_key_t key = {3, 4, 2};
-    tiles__load(&tiles, key);
+    CHECK_EQ(tiles__load(&tiles, key), TILE_MISSING);
     CHECK(tiles__get(&tiles, key) == NULL);
-    CHECK(tiles__is_missing(&tiles, key));
     tiles__deinit(&tiles);
 }
 
 static void evicts_least_recently_used(void) {
     fakes.psram_free = 2 * TILE_BYTES;
-    CHECK(tiles__init(&tiles, 2, DIR, URL, true));
+    fakes__add_file(DIR "/5/1/1.png", 1);
+    fakes__add_file(DIR "/5/2/1.png", 1);
+    fakes__add_file(DIR "/5/3/1.png", 1);
+    CHECK(tiles__init(&tiles, 2, DIR, URL, false));
     tile_key_t a = {5, 1, 1}, b = {5, 2, 1}, c = {5, 3, 1};
     tiles__load(&tiles, a);
     tiles__load(&tiles, b);
@@ -171,8 +260,7 @@ static void going_online_retries_missing(void) {
     CHECK(!tiles.network_down);
     CHECK(!tiles__is_missing(&tiles, key));
     fakes.wifi_connect_ok = true;
-    tiles__load(&tiles, key);
-    CHECK(tiles__get(&tiles, key) != NULL);
+    fetch(key);
     tiles__deinit(&tiles);
 }
 
@@ -193,10 +281,7 @@ static void wifi_turned_on_later_clears_no_wifi(void) {
     CHECK(!tiles.network_down);
     CHECK(!tiles__is_missing(&tiles, key));
     CHECK(!tiles__check_network(&tiles));
-
-    tiles__load(&tiles, key);
-    CHECK_EQ(fakes.http_calls, 1);
-    CHECK(tiles__get(&tiles, key) != NULL);
+    fetch(key);
     tiles__deinit(&tiles);
 }
 
@@ -211,12 +296,10 @@ static void retries_saved_wifi_every_30_seconds(void) {
 
     fakes.now_ms = 30000;
     fakes.wifi_connect_ok = true;
-    tile_key_t key = {5, 3, 1};
-    tiles__load(&tiles, key);
+    fetch((tile_key_t){5, 3, 1});
     CHECK_EQ(fakes.wifi_connect_calls, 2);
     CHECK(!tiles.network_down);
     CHECK(!tiles__is_missing(&tiles, (tile_key_t){5, 1, 1}));
-    CHECK(tiles__get(&tiles, key) != NULL);
     tiles__deinit(&tiles);
 }
 
@@ -224,10 +307,15 @@ SUITE(tiles_tests,
       TEST(slot_count_follows_psram),
       TEST(loads_tile_from_sd_without_network),
       TEST(offline_missing_tile_is_remembered),
-      TEST(online_download_goes_to_sd_cache),
-      TEST(cached_download_is_not_fetched_again),
-      TEST(http_error_leaves_no_file),
+      TEST(download_lands_in_sd_cache),
+      TEST(download_runs_in_background),
+      TEST(at_most_five_downloads_at_once),
+      TEST(core_job_limit_defers),
+      TEST(failed_downloads_leave_no_file),
+      TEST(lost_wifi_during_download_shows_no_wifi),
       TEST(empty_response_is_rejected),
+      TEST(cancel_unless_drops_unwanted_downloads),
+      TEST(going_offline_and_deinit_cancel_downloads),
       TEST(connects_wifi_once_and_gives_up),
       TEST(connects_wifi_when_needed),
       TEST(wrong_tile_size_is_rejected),

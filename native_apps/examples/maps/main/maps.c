@@ -13,6 +13,7 @@
 #define MAPS_GOTO_ZOOM 15
 #define MAPS_LONG_PRESS_MS 500
 #define MAPS_HINT_MS 2000
+#define MAPS_PENDING_MAX 16
 
 typedef struct {
     settings_t settings;
@@ -23,6 +24,7 @@ typedef struct {
     uint64_t hint_until_ms;
     bool running;
     bool dirty;
+    bool stalled; /* Every pending tile waits for a download slot. */
     int32_t touch_x;
     int32_t touch_y;
     bool touch_on_button;
@@ -178,10 +180,13 @@ static void maps__handle(maps_t *app, const bruce_input_event_t *event) {
     }
 }
 
-static void maps__update_status(maps_t *app, size_t pending) {
-    bool offline = pending == 0 && app->tiles.network_down;
-    app->hud.status = pending > 0 ? "Loading" : offline ? "No Wi-Fi" : NULL;
+/* Redraws only when the text changes; the strings are literals, so pointers compare. */
+static void maps__update_status(maps_t *app, size_t loading) {
+    const char *before = app->hud.status;
+    bool offline = loading == 0 && app->tiles.network_down;
+    app->hud.status = loading > 0 ? "Loading" : offline ? "No Wi-Fi" : NULL;
     app->hud.status_icon = offline ? "wifi-cancel" : NULL;
+    if (app->hud.status != before) app->dirty = true;
 }
 
 static bool maps__draw(maps_t *app, int width, int height) {
@@ -206,6 +211,31 @@ static void maps__save_view(maps_t *app) {
     settings__save_view(&view);
 }
 
+typedef struct {
+    const map_view_t *view;
+    int width;
+    int height;
+} maps_screen_t;
+
+static bool maps__keep_download(tile_key_t key, void *context) {
+    const maps_screen_t *screen = context;
+    return map_view__is_near(screen->view, key, screen->width, screen->height);
+}
+
+/* Nearest first: SD tiles decode at once, the rest start downloading. */
+static void maps__load_tiles(maps_t *app, const tile_key_t *keys, size_t count) {
+    bool progressed = false;
+    for (size_t i = 0; i < count; ++i) {
+        tile_load_t result = tiles__load(&app->tiles, keys[i]);
+        if (result == TILE_LOADED) {
+            app->dirty = true;
+            return;
+        }
+        progressed |= result != TILE_DEFERRED;
+    }
+    app->stalled = !progressed;
+}
+
 static void maps__run(maps_t *app) {
     while (app->running) {
         bruce_input_event_t event;
@@ -222,14 +252,18 @@ static void maps__run(maps_t *app) {
             continue;
         }
 
-        tile_key_t next = {0};
-        size_t pending = map_view__next_pending(&app->view, &app->tiles, width, height, &next);
+        maps_screen_t screen = {.view = &app->view, .width = width, .height = height};
+        if (tiles__cancel_unless(&app->tiles, maps__keep_download, &screen)) app->stalled = false;
+        if (tiles__poll(&app->tiles)) app->stalled = false;
+
+        tile_key_t pending[MAPS_PENDING_MAX];
+        size_t count = map_view__pending(&app->view, &app->tiles, width, height, pending, MAPS_PENDING_MAX);
+        maps__update_status(app, count + app->tiles.download_count);
         if (app->dirty) {
-            maps__update_status(app, pending);
             app->dirty = !maps__draw(app, width, height);
-        } else if (pending > 0) {
-            tiles__load(&app->tiles, next);
-            app->dirty = true;
+            app->stalled = false;
+        } else if (count > 0 && !app->stalled) {
+            maps__load_tiles(app, pending, count);
         } else {
             runtime__delay(MAPS_IDLE_DELAY_MS);
         }

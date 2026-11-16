@@ -93,6 +93,60 @@ typedef struct {
  */
 bruce_result_t http__request(const bruce_http_request_t *request, bruce_http_response_t *response);
 
+/* ---- Background requests ------------------------------------------------ */
+
+typedef uint32_t bruce_http_job_id_t;
+#define BRUCE_HTTP_JOB_ID_INVALID ((bruce_http_job_id_t)0)
+
+/* Unfinished background requests one process may have at a time. */
+#define BRUCE_HTTP_ASYNC_MAX_JOBS 8
+#define BRUCE_HTTP_ASYNC_MAX_HEADERS 16
+
+/**
+ * @brief Starts `request` in the background and returns at once.
+ *
+ * Same request fields as http__request(), except `on_response_chunk` must be
+ * NULL: the body is buffered (up to `max_response_bytes`) and collected with
+ * http__request_poll(). At most BRUCE_HTTP_ASYNC_MAX_HEADERS header pairs.
+ *
+ * Requests run on a Core worker pool, up to 4 at once on boards with PSRAM
+ * and 1 without; the rest wait in order. Each worker keeps its connection
+ * open for about 10 s, so further requests to the same scheme/host/port
+ * reuse it instead of repeating the TCP/TLS handshake. Unfinished requests
+ * are cancelled when the process exits.
+ *
+ * Returns BRUCE_ERR_RESOURCE_LIMIT while the caller already has
+ * BRUCE_HTTP_ASYNC_MAX_JOBS unfinished requests.
+ *
+ * @param request Request to perform; copied, so it may be freed on return.
+ * @param out_job Receives the job id for http__request_poll()/cancel().
+ * @permission http
+ */
+bruce_result_t http__request_start(const bruce_http_request_t *request, bruce_http_job_id_t *out_job);
+
+/**
+ * @brief Collects a background request.
+ *
+ * Returns BRUCE_ERR_BUSY while it is still queued or running. Otherwise
+ * returns the request's result and forgets the job: on BRUCE_OK `response`
+ * holds the status code and body (no headers) and must be released with
+ * http__response_free(). BRUCE_ERR_NOT_FOUND for an unknown, cancelled, or
+ * already collected job, or one owned by another process.
+ *
+ * @param job Job id from http__request_start().
+ * @param response Receives the response once the job is done.
+ */
+bruce_result_t http__request_poll(bruce_http_job_id_t job, bruce_http_response_t *response);
+
+/**
+ * @brief Drops a background request; no-op for unknown jobs.
+ *
+ * A transfer already on the wire finishes in the background and is discarded.
+ *
+ * @param job Job id from http__request_start().
+ */
+void http__request_cancel(bruce_http_job_id_t job);
+
 /**
  * @brief Releases an HTTP response.
  *

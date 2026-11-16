@@ -2299,6 +2299,9 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(wifi__get_mac),
     ESP_ELFSYM_EXPORT(http__request),
     ESP_ELFSYM_EXPORT(http__response_free),
+    ESP_ELFSYM_EXPORT(http__request_start),
+    ESP_ELFSYM_EXPORT(http__request_poll),
+    ESP_ELFSYM_EXPORT(http__request_cancel),
 
     /* Input (read is foreground-only; inject requires input permission) */
     ESP_ELFSYM_EXPORT(input__read),

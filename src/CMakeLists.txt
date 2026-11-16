@@ -105,6 +105,7 @@ idf_component_register(SRCS
                     "core/icmp/icmp.c"
                     "core/icon/icon.c"
                     "core/http/http.c"
+                    "core/http/http_async.c"
                     "core/image/image.c"
                     "core/image/gif/gif.c"
                     "core/image/jpg/jpg.c"

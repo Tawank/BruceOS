@@ -43,7 +43,11 @@ Tiles are 256x256 PNGs in the usual `z/x/y` layout:
 
 Any tool that exports an OSM-style tile folder works for offline use.
 Downloaded tiles go to the same folder, so everything viewed once also
-works offline later.
+works offline later. Downloads run in the background (at most 5 at once)
+through `http__request_start()`, so the map stays responsive; tiles that
+scroll off screen are cancelled. The core reuses each connection
+(keep-alive), so a burst of tiles from one server pays for one TLS
+handshake instead of one per tile.
 
 ## Settings
 

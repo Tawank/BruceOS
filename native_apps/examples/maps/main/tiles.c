@@ -42,7 +42,13 @@ bool tiles__init(tiles_t *tiles, size_t min_slots, const char *dir, const char *
     return tiles->slots != NULL;
 }
 
+static void tiles__cancel_downloads(tiles_t *tiles) {
+    for (size_t i = 0; i < tiles->download_count; ++i) http__request_cancel(tiles->downloads[i].job);
+    tiles->download_count = 0;
+}
+
 void tiles__deinit(tiles_t *tiles) {
+    tiles__cancel_downloads(tiles);
     for (size_t i = 0; i < tiles->slot_count; ++i) image__bitmap_release(&tiles->slots[i].bitmap);
     memory__free(tiles->slots);
     tiles->slots = NULL;
@@ -54,6 +60,7 @@ static void tiles__forget_missing(tiles_t *tiles) {
 }
 
 void tiles__set_online(tiles_t *tiles, bool online) {
+    tiles__cancel_downloads(tiles);
     tiles->online = online;
     tiles->network_down = false;
     tiles__forget_missing(tiles);
@@ -156,41 +163,16 @@ static bool tiles__network_ready(tiles_t *tiles) {
     return true;
 }
 
-static bruce_result_t tiles__write_chunk(const void *data, size_t size, void *context) {
-    size_t written = 0;
-    bruce_result_t result = storage__write(*(bruce_file_id_t *)context, data, size, &written);
-    return result == BRUCE_OK && written == size ? BRUCE_OK : BRUCE_ERR_IO;
+static bool tiles__is_downloading(const tiles_t *tiles, tile_key_t key) {
+    for (size_t i = 0; i < tiles->download_count; ++i) {
+        if (tiles__same(tiles->downloads[i].key, key)) return true;
+    }
+    return false;
 }
 
-static bool tiles__download(tiles_t *tiles, tile_key_t key, const char *path) {
-    char url[192];
-    char part_path[BRUCE_STORAGE_PATH_MAX];
-    tiles__url(tiles, key, url, sizeof(url));
-    snprintf(part_path, sizeof(part_path), "%s.part", path);
-    tiles__make_parent_dirs(path);
-
-    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
-    uint32_t flags = BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE | BRUCE_STORAGE_OPEN_TRUNCATE;
-    if (storage__open(part_path, flags, &file) != BRUCE_OK) return false;
-
-    static const char *const headers[] = {"User-Agent", TILES_USER_AGENT};
-    bruce_http_request_t request = {
-        .url = url,
-        .headers = headers,
-        .header_count = 1,
-        .timeout_ms = TILES_DOWNLOAD_TIMEOUT_MS,
-        .max_response_bytes = TILES_DOWNLOAD_MAX_BYTES,
-        .on_response_chunk = tiles__write_chunk,
-        .response_chunk_context = &file,
-    };
-    bruce_http_response_t response = {0};
-    bool ok = http__request(&request, &response) == BRUCE_OK && response.status_code == 200 &&
-              response.body_len > 0;
-    http__response_free(&response);
-    ok = storage__close(file) == BRUCE_OK && ok;
-    ok = ok && storage__rename(part_path, path) == BRUCE_OK;
-    if (!ok) (void)storage__remove(part_path);
-    return ok;
+bool tiles__needs_load(tiles_t *tiles, tile_key_t key) {
+    if (tiles__is_missing(tiles, key) || tiles__is_downloading(tiles, key)) return false;
+    return tiles__get(tiles, key) == NULL;
 }
 
 static bool tiles__decode(tiles_t *tiles, tile_key_t key, const char *path) {
@@ -207,12 +189,95 @@ static bool tiles__decode(tiles_t *tiles, tile_key_t key, const char *path) {
     return true;
 }
 
-void tiles__load(tiles_t *tiles, tile_key_t key) {
+static tile_load_t tiles__start_download(tiles_t *tiles, tile_key_t key) {
+    if (tiles->download_count >= TILES_DOWNLOADS_MAX) return TILE_DEFERRED;
+    char url[192];
+    tiles__url(tiles, key, url, sizeof(url));
+    static const char *const headers[] = {"User-Agent", TILES_USER_AGENT};
+    bruce_http_request_t request = {
+        .url = url,
+        .headers = headers,
+        .header_count = 1,
+        .timeout_ms = TILES_DOWNLOAD_TIMEOUT_MS,
+        .max_response_bytes = TILES_DOWNLOAD_MAX_BYTES,
+    };
+    bruce_http_job_id_t job = BRUCE_HTTP_JOB_ID_INVALID;
+    bruce_result_t result = http__request_start(&request, &job);
+    if (result == BRUCE_ERR_RESOURCE_LIMIT) return TILE_DEFERRED;
+    if (result != BRUCE_OK) {
+        tiles__mark_missing(tiles, key);
+        return TILE_MISSING;
+    }
+    tiles->downloads[tiles->download_count++] = (tile_download_t){.key = key, .job = job};
+    return TILE_DOWNLOADING;
+}
+
+tile_load_t tiles__load(tiles_t *tiles, tile_key_t key) {
     char path[BRUCE_STORAGE_PATH_MAX];
     tiles__path(tiles, key, path, sizeof(path));
-
     bool exists = false;
     (void)storage__exists(path, &exists);
-    if (!exists && tiles__network_ready(tiles)) exists = tiles__download(tiles, key, path);
-    if (!exists || !tiles__decode(tiles, key, path)) tiles__mark_missing(tiles, key);
+    if (exists && tiles__decode(tiles, key, path)) return TILE_LOADED;
+    if (!exists && tiles__network_ready(tiles)) return tiles__start_download(tiles, key);
+    tiles__mark_missing(tiles, key);
+    return TILE_MISSING;
+}
+
+/* Written to a .part file first so a half-written tile never looks complete. */
+static bool tiles__save(const tiles_t *tiles, tile_key_t key, const bruce_http_response_t *response) {
+    char path[BRUCE_STORAGE_PATH_MAX];
+    char part_path[BRUCE_STORAGE_PATH_MAX + sizeof(".part")];
+    tiles__path(tiles, key, path, sizeof(path));
+    snprintf(part_path, sizeof(part_path), "%s.part", path);
+    tiles__make_parent_dirs(path);
+
+    bruce_file_id_t file = BRUCE_FILE_ID_INVALID;
+    uint32_t flags = BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE | BRUCE_STORAGE_OPEN_TRUNCATE;
+    if (storage__open(part_path, flags, &file) != BRUCE_OK) return false;
+    size_t written = 0;
+    bool ok = storage__write(file, response->body, response->body_len, &written) == BRUCE_OK &&
+              written == response->body_len;
+    ok = storage__close(file) == BRUCE_OK && ok;
+    ok = ok && storage__rename(part_path, path) == BRUCE_OK;
+    if (!ok) (void)storage__remove(part_path);
+    return ok;
+}
+
+static void
+tiles__finish(tiles_t *tiles, tile_key_t key, bruce_result_t result, const bruce_http_response_t *response) {
+    bool ok = result == BRUCE_OK && response->status_code == 200 && response->body_len > 0 &&
+              tiles__save(tiles, key, response);
+    if (!ok) tiles__mark_missing(tiles, key);
+    if (result == BRUCE_ERR_IO && !wifi__is_connected()) tiles->network_down = true;
+}
+
+bool tiles__poll(tiles_t *tiles) {
+    bool finished = false;
+    for (size_t i = 0; i < tiles->download_count;) {
+        tile_download_t download = tiles->downloads[i];
+        bruce_http_response_t response = {0};
+        bruce_result_t result = http__request_poll(download.job, &response);
+        if (result == BRUCE_ERR_BUSY) {
+            ++i;
+            continue;
+        }
+        tiles__finish(tiles, download.key, result, &response);
+        http__response_free(&response);
+        tiles->downloads[i] = tiles->downloads[--tiles->download_count];
+        finished = true;
+    }
+    return finished;
+}
+
+bool tiles__cancel_unless(tiles_t *tiles, bool (*keep)(tile_key_t key, void *context), void *context) {
+    size_t before = tiles->download_count;
+    for (size_t i = 0; i < tiles->download_count;) {
+        if (keep(tiles->downloads[i].key, context)) {
+            ++i;
+            continue;
+        }
+        http__request_cancel(tiles->downloads[i].job);
+        tiles->downloads[i] = tiles->downloads[--tiles->download_count];
+    }
+    return tiles->download_count != before;
 }

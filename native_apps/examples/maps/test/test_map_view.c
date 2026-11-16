@@ -1,3 +1,5 @@
+#include <stdlib.h>
+
 #include "fakes.h"
 #include "map_view.h"
 #include "test.h"
@@ -64,38 +66,77 @@ static void max_visible_tiles_covers_any_offset(void) {
     CHECK_EQ(map_view__max_visible_tiles(256, 256), 4u);
 }
 
-static void next_pending_starts_at_centre_tile(void) {
+static void pending_starts_at_centre_tile(void) {
     init_tiles();
     map_view_t view = view_at_tile(5, 10, 12);
-    tile_key_t key = {0};
-    CHECK_EQ(map_view__next_pending(&view, &tiles, 240, 135, &key), 1u);
-    CHECK_EQ(key.z, 5);
-    CHECK_EQ(key.x, 10);
-    CHECK_EQ(key.y, 12);
+    tile_key_t keys[8];
+    CHECK_EQ(map_view__pending(&view, &tiles, 240, 135, keys, 8), 1u);
+    CHECK_EQ(keys[0].z, 5);
+    CHECK_EQ(keys[0].x, 10);
+    CHECK_EQ(keys[0].y, 12);
     tiles__deinit(&tiles);
 }
 
-static void next_pending_skips_cached_and_missing(void) {
+static void pending_is_sorted_nearest_first(void) {
+    init_tiles();
+    map_view_t view = {.zoom = 6, .center = {10 * GEO_TILE_SIZE + 200, 12 * GEO_TILE_SIZE + 128}};
+    tile_key_t keys[8];
+    size_t count = map_view__pending(&view, &tiles, 240, 320, keys, 8);
+    CHECK_EQ(count, 6u);
+    CHECK_EQ(keys[0].x, 10);
+    CHECK_EQ(keys[0].y, 12);
+    int32_t previous = 0;
+    for (size_t i = 0; i < count; ++i) {
+        int32_t dx = keys[i].x * GEO_TILE_SIZE + 128 - view.center.x;
+        int32_t dy = keys[i].y * GEO_TILE_SIZE + 128 - view.center.y;
+        int32_t distance = abs(dx) + abs(dy);
+        CHECK(distance >= previous);
+        previous = distance;
+    }
+    CHECK_EQ(map_view__pending(&view, &tiles, 240, 320, keys, 2), 2u);
+    CHECK_EQ(keys[0].x, 10);
+    CHECK_EQ(keys[0].y, 12);
+    tiles__deinit(&tiles);
+}
+
+static void pending_skips_cached_missing_and_downloading(void) {
     init_tiles();
     map_view_t view = {.zoom = 5, .center = {10 * GEO_TILE_SIZE, 12 * GEO_TILE_SIZE}};
-    tile_key_t key = {0};
-    CHECK_EQ(map_view__next_pending(&view, &tiles, 240, 135, &key), 4u);
+    tile_key_t keys[8];
+    CHECK_EQ(map_view__pending(&view, &tiles, 240, 135, keys, 8), 4u);
 
     put_tile(0, (tile_key_t){5, 10, 12}, fakes__bitmap(GEO_TILE_SIZE, 1, false));
     tiles.missing[0] = (tile_key_t){5, 9, 12};
     tiles.missing_count = 1;
-    CHECK_EQ(map_view__next_pending(&view, &tiles, 240, 135, &key), 2u);
-    CHECK_EQ(key.y, 11);
+    tiles.downloads[0] = (tile_download_t){.key = {5, 10, 11}, .job = 99};
+    tiles.download_count = 1;
+    CHECK_EQ(map_view__pending(&view, &tiles, 240, 135, keys, 8), 1u);
+    CHECK_EQ(keys[0].x, 9);
+    CHECK_EQ(keys[0].y, 11);
+    tiles.download_count = 0;
     tiles__deinit(&tiles);
 }
 
-static void next_pending_wraps_tile_x(void) {
+static void pending_wraps_tile_x(void) {
     init_tiles();
     map_view_t view = {.zoom = 2, .center = {0, 2 * GEO_TILE_SIZE}};
-    tile_key_t key = {0};
-    CHECK_EQ(map_view__next_pending(&view, &tiles, 240, 135, &key), 4u);
-    CHECK(key.x == 0 || key.x == 3);
+    tile_key_t keys[8];
+    CHECK_EQ(map_view__pending(&view, &tiles, 240, 135, keys, 8), 4u);
+    for (size_t i = 0; i < 4; ++i) CHECK(keys[i].x == 0 || keys[i].x == 3);
     tiles__deinit(&tiles);
+}
+
+static void near_covers_screen_plus_one_tile(void) {
+    map_view_t view = view_at_tile(5, 10, 12);
+    CHECK(map_view__is_near(&view, (tile_key_t){5, 10, 12}, 240, 135));
+    CHECK(map_view__is_near(&view, (tile_key_t){5, 11, 13}, 240, 135));
+    CHECK(map_view__is_near(&view, (tile_key_t){5, 9, 11}, 240, 135));
+    CHECK(!map_view__is_near(&view, (tile_key_t){5, 12, 12}, 240, 135));
+    CHECK(!map_view__is_near(&view, (tile_key_t){5, 10, 14}, 240, 135));
+    CHECK(!map_view__is_near(&view, (tile_key_t){6, 20, 24}, 240, 135));
+
+    map_view_t edge = {.zoom = 2, .center = {10, 2 * GEO_TILE_SIZE}};
+    CHECK(map_view__is_near(&edge, (tile_key_t){2, 3, 2}, 240, 135));
 }
 
 static void draw_places_cached_tile(void) {
@@ -175,9 +216,11 @@ SUITE(map_view_tests,
       TEST(pan_wraps_x_and_clamps_y),
       TEST(zoom_scales_centre_and_stops_at_limits),
       TEST(max_visible_tiles_covers_any_offset),
-      TEST(next_pending_starts_at_centre_tile),
-      TEST(next_pending_skips_cached_and_missing),
-      TEST(next_pending_wraps_tile_x),
+      TEST(pending_starts_at_centre_tile),
+      TEST(pending_is_sorted_nearest_first),
+      TEST(pending_skips_cached_missing_and_downloading),
+      TEST(pending_wraps_tile_x),
+      TEST(near_covers_screen_plus_one_tile),
       TEST(draw_places_cached_tile),
       TEST(draw_uses_placeholder_without_data),
       TEST(draw_fills_water_outside_world),

@@ -1,5 +1,6 @@
 #include "core_sdk/http.h"
 
+#include "core/http/http.h"
 #include "core/network/network.h"
 
 #include <limits.h>
@@ -58,7 +59,7 @@ typedef struct {
 
 static const char *const TAG = "bruce_http";
 
-static esp_http_client_method_t http__method_from_string(const char *method) {
+esp_http_client_method_t http__method_from_string(const char *method) {
     if (method == NULL || method[0] == '\0') { return HTTP_METHOD_GET; }
     if (strcasecmp(method, "GET") == 0) return HTTP_METHOD_GET;
     if (strcasecmp(method, "POST") == 0) return HTTP_METHOD_POST;
@@ -129,7 +130,7 @@ static const char *http__find_header(const http__request_state_t *state, const c
     return NULL;
 }
 
-static bool http__is_redirect_status(int status_code) {
+bool http__is_redirect_status(int status_code) {
     return status_code == 301 || status_code == 302 || status_code == 303 || status_code == 307 ||
            status_code == 308;
 }
@@ -138,7 +139,7 @@ static bool http__is_redirect_status(int status_code) {
  * purely digits (including empty strings, negative signs, and trailing
  * garbage) so a malformed header falls back to the internal arena instead of
  * being misread. */
-static bool http__parse_content_length(const char *value, size_t *out_length) {
+bool http__parse_content_length(const char *value, size_t *out_length) {
     if (value == NULL || value[0] == '\0') return false;
     char *end = NULL;
     unsigned long long parsed = strtoull(value, &end, 10);

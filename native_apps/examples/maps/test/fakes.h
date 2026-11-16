@@ -6,6 +6,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "core_sdk/http.h"
 #include "core_sdk/image.h"
 #include "core_sdk/input.h"
 #include "core_sdk/result.h"
@@ -14,6 +15,7 @@
 #define FAKE_FILES_MAX 128
 #define FAKE_CONFIG_MAX 16
 #define FAKE_EVENTS_MAX 16
+#define FAKE_JOBS_MAX 32
 
 typedef enum {
     FAKE_FILL_RECT,
@@ -50,12 +52,21 @@ typedef struct {
     int decode_count;
     uint16_t decode_size;
 
-    int http_calls;
+    int http_calls; /* Background requests started. */
     char http_url[256];
     char http_user_agent[64];
+    bruce_result_t http_start_result;
     bruce_result_t http_result;
     int http_status;
     size_t http_body_len;
+    bool http_manual; /* Jobs stay busy until fakes__http_finish_all(). */
+    struct {
+        bool used;
+        bool done;
+        bruce_http_job_id_t id;
+    } http_jobs[FAKE_JOBS_MAX];
+    int http_cancels;
+    int http_max_active;
 
     bool wifi_connected;
     bool wifi_connect_ok;
@@ -97,6 +108,8 @@ const fake_draw_t *fakes__find_prefix(const char *prefix);
 const fake_draw_t *fakes__find_icon(const char *name);
 void fakes__push(bruce_input_type_t type, bruce_input_action_t action, int32_t code, int32_t value);
 void fakes__config_set(const char *key, const char *value);
+void fakes__http_finish_all(void);
+int fakes__http_active(void);
 const char *fakes__config_get(const char *key);
 
 /* Heap bitmap of `size` x `size` pixels, pixel i = fill + i when `ramp`, else fill. */

@@ -19,7 +19,10 @@ void map_view__zoom(map_view_t *view, int delta);
 size_t map_view__max_visible_tiles(int width, int height);
 void map_view__draw(const map_view_t *view, tiles_t *tiles, int width, int height);
 
-/* Visible tile still to load, nearest to the centre first. Returns how many are pending. */
-size_t map_view__next_pending(
-    const map_view_t *view, tiles_t *tiles, int width, int height, tile_key_t *out_key
+/* Visible tiles still to load, nearest to the centre first. Returns how many, at most `capacity`. */
+size_t map_view__pending(
+    const map_view_t *view, tiles_t *tiles, int width, int height, tile_key_t *out_keys, size_t capacity
 );
+
+/* At this zoom and on screen or one tile off it: still worth downloading. */
+bool map_view__is_near(const map_view_t *view, tile_key_t key, int width, int height);
