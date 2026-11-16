@@ -1,7 +1,7 @@
 {
   "appName": "Maps",
   "entryPoint": "app_main",
-  "appIcon": "icon:map-marker",
+  "appIcon": "icon:compass",
   "coreAbiVersion": 4,
   "permissions": ["storage", "http", "wifi"],
   "stackSize": 16384,

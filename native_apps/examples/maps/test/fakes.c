@@ -8,6 +8,7 @@
 #include "core_sdk/dialog.h"
 #include "core_sdk/display.h"
 #include "core_sdk/http.h"
+#include "core_sdk/icon.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/runtime.h"
 #include "core_sdk/storage.h"
@@ -65,6 +66,13 @@ const fake_draw_t *fakes__find_prefix(const char *prefix) {
     for (size_t i = 0; i < fakes.draw_count; ++i) {
         const fake_draw_t *draw = &fakes.draws[i];
         if (draw->kind == FAKE_STRING && strncmp(draw->text, prefix, strlen(prefix)) == 0) return draw;
+    }
+    return NULL;
+}
+
+const fake_draw_t *fakes__find_icon(const char *name) {
+    for (size_t i = 0; i < fakes.draw_count; ++i) {
+        if (fakes.draws[i].kind == FAKE_ICON && strcmp(fakes.draws[i].text, name) == 0) return &fakes.draws[i];
     }
     return NULL;
 }
@@ -149,6 +157,27 @@ bruce_result_t display__draw_rgb_bitmap(int16_t x, int16_t y, const uint16_t *bi
 bruce_result_t display__draw_string(const char *text, int16_t x, int16_t y) {
     fake_draw_t *draw = fakes__record(FAKE_STRING, x, y, 0, 0, 0);
     if (draw != NULL) snprintf(draw->text, sizeof(draw->text), "%s", text);
+    return BRUCE_OK;
+}
+
+/* Each icon's bits point at its own name, so a draw can be traced back to it. */
+const bruce_icon_t *icon__get(const char *name) {
+    static char names[16][32];
+    static bruce_icon_t icons[16];
+    static size_t next;
+    size_t slot = next++ % 16;
+    snprintf(names[slot], sizeof(names[slot]), "%s", name);
+    icons[slot] = (bruce_icon_t){.width = 24, .height = 24, .bits = (const uint8_t *)names[slot]};
+    return &icons[slot];
+}
+
+bruce_result_t display__draw_bitmap_scaled(
+    int16_t x, int16_t y, const uint8_t *bitmap, int16_t w, int16_t h, int16_t dw, int16_t dh,
+    bruce_display_color_t color
+) {
+    (void)w, (void)h, (void)dh;
+    fake_draw_t *draw = fakes__record(FAKE_ICON, x, y, dw, dh, color);
+    if (draw != NULL) snprintf(draw->text, sizeof(draw->text), "%s", (const char *)bitmap);
     return BRUCE_OK;
 }
 
@@ -352,6 +381,8 @@ bool input__wait_long_press(const bruce_input_event_t *press, uint32_t long_ms) 
     return fakes.long_press;
 }
 
+uint64_t runtime__now(void) { return fakes.now_ms; }
+
 bruce_result_t dialog__text_input(
     const char *title, const char *prompt, const char *initial_text, bool mask_input, char *buffer,
     size_t buffer_size
@@ -374,8 +405,12 @@ bruce_result_t dialog__choice(
 ) {
     (void)title, (void)message;
     fakes.choice_calls++;
-    for (size_t i = 0; i < choice_count && i < 2; ++i) {
+    fakes.choice_count = choice_count;
+    for (size_t i = 0; i < choice_count && i < 8; ++i) {
         const char *right = choices[i].right_text != NULL ? choices[i].right_text : "";
+        const char *icon = choices[i].icon_name != NULL ? choices[i].icon_name : "";
+        snprintf(fakes.choice_labels[i], sizeof(fakes.choice_labels[i]), "%s", choices[i].label);
+        snprintf(fakes.choice_icons[i], sizeof(fakes.choice_icons[i]), "%s", icon);
         snprintf(fakes.choice_right_text[i], sizeof(fakes.choice_right_text[i]), "%s", right);
     }
     *out_selected = fakes.choice;

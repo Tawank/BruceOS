@@ -68,39 +68,99 @@ static void back_exits(void) {
     stop();
 }
 
-static void encoder_click_cycles_wheel(void) {
+static void hold_select_switches_mode_with_hint(void) {
     start();
-    press(BRUCE_INPUT_ENCODER, BRUCE_INPUT_CODE_NEXT);
-    CHECK_EQ(app.view.zoom, 11);
-
+    fakes.long_press = true;
+    fakes.now_ms = 1000;
     press(BRUCE_INPUT_BUTTON, BRUCE_INPUT_CODE_SELECT);
-    CHECK_EQ(app.hud.wheel_mode, HUD_WHEEL_PAN_X);
-    geo_point_t before = app.view.center;
-    press(BRUCE_INPUT_ENCODER, BRUCE_INPUT_CODE_PREV);
-    CHECK_EQ(app.view.center.x, before.x - 240 / 8);
-
-    press(BRUCE_INPUT_BUTTON, BRUCE_INPUT_CODE_SELECT);
-    CHECK_EQ(app.hud.wheel_mode, HUD_WHEEL_PAN_Y);
-    press(BRUCE_INPUT_ENCODER, BRUCE_INPUT_CODE_NEXT);
-    CHECK_EQ(app.view.center.y, before.y + 135 / 8);
-
-    press(BRUCE_INPUT_BUTTON, BRUCE_INPUT_CODE_SELECT);
-    CHECK_EQ(app.hud.wheel_mode, HUD_WHEEL_ZOOM);
     CHECK_EQ(fakes.choice_calls, 0);
+    CHECK_EQ(app.hud.nav_mode, HUD_NAV_UP_DOWN);
+    CHECK_STR(app.hud.hint[0], "Move up/down");
+    CHECK(app.hud.hint[1] == NULL);
+    press(BRUCE_INPUT_BUTTON, BRUCE_INPUT_CODE_SELECT);
+    CHECK_EQ(app.hud.nav_mode, HUD_NAV_LEFT_RIGHT);
     stop();
 }
 
-static void long_press_enter_and_menu_open_menu(void) {
+static void hint_disappears_after_two_seconds(void) {
     start();
     fakes.long_press = true;
+    fakes.now_ms = 1000;
     press(BRUCE_INPUT_BUTTON, BRUCE_INPUT_CODE_SELECT);
-    CHECK_EQ(fakes.choice_calls, 1);
-    CHECK_EQ(app.hud.wheel_mode, HUD_WHEEL_ZOOM);
+    app.dirty = false;
+    fakes.now_ms = 2999;
+    maps__expire_hint(&app);
+    CHECK(app.hud.hint[0] != NULL);
+    CHECK(!app.dirty);
+    fakes.now_ms = 3000;
+    maps__expire_hint(&app);
+    CHECK(app.hud.hint[0] == NULL);
+    CHECK(app.dirty);
+    stop();
+}
 
-    fakes.long_press = false;
+static void held_enter_key_still_opens_menu(void) {
+    start();
+    fakes.long_press = true;
+    press(BRUCE_INPUT_KEY, BRUCE_INPUT_CODE_SELECT);
+    CHECK_EQ(fakes.choice_calls, 1);
+    CHECK_EQ(app.hud.nav_mode, HUD_NAV_ZOOM);
+    stop();
+}
+
+static void select_enter_and_menu_open_menu(void) {
+    start();
+    press(BRUCE_INPUT_BUTTON, BRUCE_INPUT_CODE_SELECT);
     press(BRUCE_INPUT_KEY, BRUCE_INPUT_CODE_SELECT);
     press(BRUCE_INPUT_BUTTON, BRUCE_INPUT_CODE_MENU);
     CHECK_EQ(fakes.choice_calls, 3);
+    CHECK_EQ(app.hud.nav_mode, HUD_NAV_ZOOM);
+    stop();
+}
+
+static void first_menu_item_cycles_nav_mode(void) {
+    start();
+    fakes.choice_result = BRUCE_OK;
+    fakes.choice = 0;
+    maps__menu(&app);
+    CHECK_STR(fakes.choice_labels[0], "Change to up/down");
+    CHECK_EQ(app.hud.nav_mode, HUD_NAV_UP_DOWN);
+    CHECK_STR(app.hud.hint[0], "Move up/down");
+    CHECK_STR(app.hud.hint[1], "Tip: hold Select");
+    maps__menu(&app);
+    CHECK_STR(fakes.choice_labels[0], "Change to left/right");
+    CHECK_EQ(app.hud.nav_mode, HUD_NAV_LEFT_RIGHT);
+    maps__menu(&app);
+    CHECK_STR(fakes.choice_labels[0], "Change to zoom");
+    CHECK_EQ(app.hud.nav_mode, HUD_NAV_ZOOM);
+    stop();
+}
+
+static void prev_next_follow_nav_mode(void) {
+    start();
+    press(BRUCE_INPUT_BUTTON, BRUCE_INPUT_CODE_NEXT);
+    CHECK_EQ(app.view.zoom, 11);
+    press(BRUCE_INPUT_BUTTON, BRUCE_INPUT_CODE_PREV);
+    CHECK_EQ(app.view.zoom, 10);
+
+    geo_point_t before = app.view.center;
+    app.hud.nav_mode = HUD_NAV_UP_DOWN;
+    press(BRUCE_INPUT_BUTTON, BRUCE_INPUT_CODE_PREV);
+    CHECK_EQ(app.view.center.y, before.y - 135 / 4);
+    CHECK_EQ(app.view.center.x, before.x);
+
+    app.hud.nav_mode = HUD_NAV_LEFT_RIGHT;
+    press(BRUCE_INPUT_ENCODER, BRUCE_INPUT_CODE_NEXT);
+    CHECK_EQ(app.view.center.x, before.x + 240 / 4);
+    CHECK_EQ(app.view.zoom, 10);
+    stop();
+}
+
+static void cancelled_menu_changes_nothing(void) {
+    start();
+    maps__menu(&app);
+    CHECK_EQ(app.hud.nav_mode, HUD_NAV_ZOOM);
+    CHECK(app.running);
     stop();
 }
 
@@ -122,7 +182,7 @@ static void touch_drag_moves_map_with_finger(void) {
 static void menu_go_to_coordinates(void) {
     start();
     fakes.choice_result = BRUCE_OK;
-    fakes.choice = 0;
+    fakes.choice = 1;
     fakes.text_input = "-33.8688, 151.2093";
     maps__menu(&app);
     double lat = 0, lon = 0;
@@ -162,13 +222,13 @@ static void go_to_rejects_bad_input(void) {
 static void menu_toggles_online_and_saves(void) {
     start();
     fakes.choice_result = BRUCE_OK;
-    fakes.choice = 1;
+    fakes.choice = 2;
     maps__menu(&app);
-    CHECK_STR(fakes.choice_right_text[1], "Off");
+    CHECK_STR(fakes.choice_right_text[2], "Off");
     CHECK(app.tiles.online);
     CHECK_STR(fakes__config_get("tiles.online"), "true");
     maps__menu(&app);
-    CHECK_STR(fakes.choice_right_text[1], "On");
+    CHECK_STR(fakes.choice_right_text[2], "On");
     CHECK(!app.tiles.online);
     stop();
 }
@@ -176,7 +236,7 @@ static void menu_toggles_online_and_saves(void) {
 static void menu_exit_stops(void) {
     start();
     fakes.choice_result = BRUCE_OK;
-    fakes.choice = 4;
+    fakes.choice = 3;
     maps__menu(&app);
     CHECK(!app.running);
     stop();
@@ -194,10 +254,84 @@ static void view_saved_only_when_moved(void) {
 
 static void status_reflects_loading_and_network(void) {
     start();
-    CHECK_STR(maps__status(&app, 2), "Loading");
-    CHECK(maps__status(&app, 0) == NULL);
+    maps__update_status(&app, 2);
+    CHECK_STR(app.hud.status, "Loading");
+    CHECK(app.hud.status_icon == NULL);
+    maps__update_status(&app, 0);
+    CHECK(app.hud.status == NULL);
     app.tiles.network_down = true;
-    CHECK_STR(maps__status(&app, 0), "No Wi-Fi");
+    maps__update_status(&app, 0);
+    CHECK_STR(app.hud.status, "No Wi-Fi");
+    CHECK_STR(app.hud.status_icon, "wifi-cancel");
+    stop();
+}
+
+static void menu_has_icons_and_back_last(void) {
+    start();
+    maps__menu(&app);
+    CHECK_EQ(fakes.choice_count, 5u);
+    CHECK_STR(fakes.choice_icons[0], "arrow-up-down");
+    CHECK_STR(fakes.choice_labels[4], "Back");
+    CHECK_STR(fakes.choice_icons[4], "arrow-left");
+    CHECK_STR(fakes.choice_icons[3], "power");
+    app.hud.nav_mode = HUD_NAV_LEFT_RIGHT;
+    maps__menu(&app);
+    CHECK_STR(fakes.choice_icons[0], "plus");
+    stop();
+}
+
+static void menu_back_just_closes(void) {
+    start();
+    fakes.choice_result = BRUCE_OK;
+    fakes.choice = 4;
+    map_view_t before = app.view;
+    maps__menu(&app);
+    CHECK(app.running);
+    CHECK_EQ(app.hud.nav_mode, HUD_NAV_ZOOM);
+    CHECK_EQ(app.view.center.x, before.center.x);
+    CHECK(app.tiles.online == false);
+    stop();
+}
+
+static void touch(bruce_input_action_t action, int32_t x, int32_t y) {
+    bruce_input_event_t event = {.type = BRUCE_INPUT_TOUCH, .action = action, .code = x, .value = y};
+    maps__handle(&app, &event);
+}
+
+static void first_touch_shows_zoom_buttons(void) {
+    start();
+    CHECK(!app.hud.zoom_buttons);
+    touch(BRUCE_INPUT_PRESS, 10, 10);
+    CHECK(app.hud.zoom_buttons);
+    CHECK(app.dirty);
+    stop();
+}
+
+static void tapping_zoom_buttons_zooms(void) {
+    start();
+    hud_rect_t in = hud__button_rect(HUD_BUTTON_ZOOM_IN, 240, 135);
+    hud_rect_t out = hud__button_rect(HUD_BUTTON_ZOOM_OUT, 240, 135);
+    touch(BRUCE_INPUT_PRESS, in.x + 2, in.y + 2);
+    touch(BRUCE_INPUT_RELEASE, in.x + 2, in.y + 2);
+    CHECK_EQ(app.view.zoom, 11);
+    touch(BRUCE_INPUT_PRESS, out.x + out.size - 1, out.y + out.size - 1);
+    touch(BRUCE_INPUT_RELEASE, out.x + out.size - 1, out.y + out.size - 1);
+    CHECK_EQ(app.view.zoom, 10);
+    stop();
+}
+
+static void drag_from_button_does_not_pan(void) {
+    start();
+    hud_rect_t in = hud__button_rect(HUD_BUTTON_ZOOM_IN, 240, 135);
+    touch(BRUCE_INPUT_PRESS, in.x + 2, in.y + 2);
+    geo_point_t after_tap = app.view.center;
+    touch(BRUCE_INPUT_CHANGE, in.x - 40, in.y + 2);
+    CHECK_EQ(app.view.center.x, after_tap.x);
+    touch(BRUCE_INPUT_RELEASE, in.x - 40, in.y + 2);
+
+    touch(BRUCE_INPUT_PRESS, 50, 50);
+    touch(BRUCE_INPUT_CHANGE, 60, 50);
+    CHECK_EQ(app.view.center.x, after_tap.x - 10);
     stop();
 }
 
@@ -211,13 +345,31 @@ static void app_main_draws_loads_and_exits(void) {
     CHECK_EQ(fakes.config_writes, 0);
 }
 
+static void no_wifi_status_clears_when_wifi_comes_back(void) {
+    start();
+    tiles__set_online(&app.tiles, true);
+    app.tiles.network_down = true;
+    fakes.wifi_connected = true;
+    fakes.now_ms = 5000;
+    fakes.polls_until_back = 3;
+    maps__run(&app);
+    CHECK(!app.tiles.network_down);
+    CHECK(app.hud.status == NULL || strcmp(app.hud.status, "No Wi-Fi") != 0);
+    stop();
+}
+
 SUITE(maps_tests,
       TEST(arrows_pan_a_quarter_screen),
       TEST(releases_are_ignored),
       TEST(plus_minus_and_zoom_codes_zoom),
       TEST(back_exits),
-      TEST(encoder_click_cycles_wheel),
-      TEST(long_press_enter_and_menu_open_menu),
+      TEST(hold_select_switches_mode_with_hint),
+      TEST(hint_disappears_after_two_seconds),
+      TEST(held_enter_key_still_opens_menu),
+      TEST(select_enter_and_menu_open_menu),
+      TEST(first_menu_item_cycles_nav_mode),
+      TEST(prev_next_follow_nav_mode),
+      TEST(cancelled_menu_changes_nothing),
       TEST(touch_drag_moves_map_with_finger),
       TEST(menu_go_to_coordinates),
       TEST(go_to_accepts_space_separator_and_keeps_deep_zoom),
@@ -226,4 +378,10 @@ SUITE(maps_tests,
       TEST(menu_exit_stops),
       TEST(view_saved_only_when_moved),
       TEST(status_reflects_loading_and_network),
-      TEST(app_main_draws_loads_and_exits))
+      TEST(menu_has_icons_and_back_last),
+      TEST(menu_back_just_closes),
+      TEST(first_touch_shows_zoom_buttons),
+      TEST(tapping_zoom_buttons_zooms),
+      TEST(drag_from_button_does_not_pan),
+      TEST(app_main_draws_loads_and_exits),
+      TEST(no_wifi_status_clears_when_wifi_comes_back))

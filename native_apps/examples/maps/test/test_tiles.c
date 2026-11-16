@@ -176,6 +176,50 @@ static void going_online_retries_missing(void) {
     tiles__deinit(&tiles);
 }
 
+static void wifi_turned_on_later_clears_no_wifi(void) {
+    fakes.wifi_connected = false;
+    fakes.wifi_connect_ok = false;
+    init(true);
+    tile_key_t key = {5, 1, 1};
+    tiles__load(&tiles, key);
+    CHECK(tiles.network_down);
+    CHECK(!tiles__check_network(&tiles));
+
+    fakes.wifi_connected = true;
+    fakes.now_ms = 500;
+    CHECK(!tiles__check_network(&tiles));
+    fakes.now_ms = 1000;
+    CHECK(tiles__check_network(&tiles));
+    CHECK(!tiles.network_down);
+    CHECK(!tiles__is_missing(&tiles, key));
+    CHECK(!tiles__check_network(&tiles));
+
+    tiles__load(&tiles, key);
+    CHECK_EQ(fakes.http_calls, 1);
+    CHECK(tiles__get(&tiles, key) != NULL);
+    tiles__deinit(&tiles);
+}
+
+static void retries_saved_wifi_every_30_seconds(void) {
+    fakes.wifi_connected = false;
+    fakes.wifi_connect_ok = false;
+    init(true);
+    tiles__load(&tiles, (tile_key_t){5, 1, 1});
+    fakes.now_ms = 29999;
+    tiles__load(&tiles, (tile_key_t){5, 2, 1});
+    CHECK_EQ(fakes.wifi_connect_calls, 1);
+
+    fakes.now_ms = 30000;
+    fakes.wifi_connect_ok = true;
+    tile_key_t key = {5, 3, 1};
+    tiles__load(&tiles, key);
+    CHECK_EQ(fakes.wifi_connect_calls, 2);
+    CHECK(!tiles.network_down);
+    CHECK(!tiles__is_missing(&tiles, (tile_key_t){5, 1, 1}));
+    CHECK(tiles__get(&tiles, key) != NULL);
+    tiles__deinit(&tiles);
+}
+
 SUITE(tiles_tests,
       TEST(slot_count_follows_psram),
       TEST(loads_tile_from_sd_without_network),
@@ -189,4 +233,6 @@ SUITE(tiles_tests,
       TEST(wrong_tile_size_is_rejected),
       TEST(evicts_least_recently_used),
       TEST(missing_list_keeps_newest),
-      TEST(going_online_retries_missing))
+      TEST(going_online_retries_missing),
+      TEST(wifi_turned_on_later_clears_no_wifi),
+      TEST(retries_saved_wifi_every_30_seconds))

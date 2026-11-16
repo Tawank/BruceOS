@@ -5,6 +5,7 @@
 
 #include "core_sdk/http.h"
 #include "core_sdk/memory.h"
+#include "core_sdk/runtime.h"
 #include "core_sdk/storage.h"
 #include "core_sdk/wifi.h"
 #include "geo.h"
@@ -14,7 +15,8 @@
 #define TILES_SWAP_SLOTS 6
 #define TILES_DOWNLOAD_MAX_BYTES (256u * 1024u)
 #define TILES_DOWNLOAD_TIMEOUT_MS 15000
-#define TILES_WIFI_TIMEOUT_MS 10000
+#define TILES_NETWORK_CHECK_MS 1000
+#define TILES_WIFI_RETRY_MS 30000
 #define TILES_USER_AGENT "BruceOS-Maps/0.1"
 
 static bool tiles__same(tile_key_t a, tile_key_t b) { return a.z == b.z && a.x == b.x && a.y == b.y; }
@@ -46,11 +48,30 @@ void tiles__deinit(tiles_t *tiles) {
     tiles->slots = NULL;
 }
 
+static void tiles__forget_missing(tiles_t *tiles) {
+    tiles->missing_count = 0;
+    tiles->missing_next = 0;
+}
+
 void tiles__set_online(tiles_t *tiles, bool online) {
     tiles->online = online;
     tiles->network_down = false;
-    tiles->missing_count = 0;
-    tiles->missing_next = 0;
+    tiles__forget_missing(tiles);
+}
+
+static void tiles__network_back(tiles_t *tiles) {
+    tiles->network_down = false;
+    tiles__forget_missing(tiles);
+}
+
+bool tiles__check_network(tiles_t *tiles) {
+    if (!tiles->network_down) return false;
+    uint64_t now = runtime__now();
+    if (now < tiles->network_checked_ms + TILES_NETWORK_CHECK_MS) return false;
+    tiles->network_checked_ms = now;
+    if (!wifi__is_connected()) return false;
+    tiles__network_back(tiles);
+    return true;
 }
 
 const image_bitmap_t *tiles__get(tiles_t *tiles, tile_key_t key) {
@@ -120,11 +141,19 @@ static void tiles__make_parent_dirs(const char *path) {
     }
 }
 
+/* Uses Wi-Fi when it is up; otherwise tries the saved network, at most every 30 s. */
 static bool tiles__network_ready(tiles_t *tiles) {
-    if (!tiles->online || tiles->network_down) return false;
-    if (wifi__is_connected()) return true;
-    tiles->network_down = wifi__connect_known() != BRUCE_OK || !wifi__is_connected();
-    return !tiles->network_down;
+    if (!tiles->online) return false;
+    if (!wifi__is_connected()) {
+        if (tiles->network_down && runtime__now() < tiles->wifi_retry_ms) return false;
+        tiles->wifi_retry_ms = runtime__now() + TILES_WIFI_RETRY_MS;
+        if (wifi__connect_known() != BRUCE_OK || !wifi__is_connected()) {
+            tiles->network_down = true;
+            return false;
+        }
+    }
+    if (tiles->network_down) tiles__network_back(tiles);
+    return true;
 }
 
 static bruce_result_t tiles__write_chunk(const void *data, size_t size, void *context) {

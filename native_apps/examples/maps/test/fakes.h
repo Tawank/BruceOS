@@ -20,6 +20,7 @@ typedef enum {
     FAKE_RGB_BITMAP,
     FAKE_ROUND_RECT,
     FAKE_STRING,
+    FAKE_ICON, /* text holds the icon name */
 } fake_draw_kind_t;
 
 typedef struct {
@@ -73,11 +74,15 @@ typedef struct {
     size_t event_count, event_next;
     int polls_until_back; /* >0: Back arrives after this many empty polls. */
     bool long_press;
+    uint64_t now_ms;
     const char *text_input;
     size_t choice;
     bruce_result_t choice_result;
     int choice_calls;
-    char choice_right_text[2][8];
+    size_t choice_count;
+    char choice_labels[8][32];
+    char choice_icons[8][32];
+    char choice_right_text[8][8];
     int message_count;
 } fakes_t;
 
@@ -89,6 +94,7 @@ bool fakes__file_exists(const char *path);
 size_t fakes__count(fake_draw_kind_t kind);
 const fake_draw_t *fakes__find_string(const char *text);
 const fake_draw_t *fakes__find_prefix(const char *prefix);
+const fake_draw_t *fakes__find_icon(const char *name);
 void fakes__push(bruce_input_type_t type, bruce_input_action_t action, int32_t code, int32_t value);
 void fakes__config_set(const char *key, const char *value);
 const char *fakes__config_get(const char *key);

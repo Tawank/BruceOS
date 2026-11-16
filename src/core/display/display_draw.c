@@ -191,6 +191,52 @@ static void display__draw_circle_helper(
     }
 }
 
+#define DISPLAY__SIDE_RIGHT 1u
+#define DISPLAY__SIDE_LEFT 2u
+
+/* One rounded end of a filled round rect: vertical spans of a half circle
+ * around (cx, cy), each stretched by `delta` rows so the ends stay exactly as
+ * tall as the rect. Full corner circles would overhang it by a pixel when the
+ * radius is half the height, as in a pill. */
+static void display__fill_round_side(
+    display__process_context_t *context, int16_t cx, int16_t cy, int16_t r, unsigned sides, int16_t delta,
+    bruce_display_color_t color
+) {
+    int16_t f = 1 - r;
+    int16_t ddf_x = 1;
+    int16_t ddf_y = -2 * r;
+    int16_t x = 0;
+    int16_t y = r;
+    int16_t prev_x = x;
+    int16_t prev_y = y;
+    bool right = sides & DISPLAY__SIDE_RIGHT;
+    bool left = sides & DISPLAY__SIDE_LEFT;
+    delta++;
+    while (x < y) {
+        if (f >= 0) {
+            y--;
+            ddf_y += 2;
+            f += ddf_y;
+        }
+        x++;
+        ddf_x += 2;
+        f += ddf_x;
+        if (x < y + 1) {
+            int16_t len = 2 * y + delta;
+            if (right) display_internal__fill_rect(context, cx + x, cy - y, 1, len, color);
+            if (left) display_internal__fill_rect(context, cx - x, cy - y, 1, len, color);
+        }
+        if (y != prev_y) {
+            int16_t top = cy - prev_x;
+            int16_t len = 2 * prev_x + delta;
+            if (right) display_internal__fill_rect(context, cx + prev_y, top, 1, len, color);
+            if (left) display_internal__fill_rect(context, cx - prev_y, top, 1, len, color);
+            prev_y = y;
+        }
+        prev_x = x;
+    }
+}
+
 static void display__draw_arc_helper(
     display__process_context_t *context, int16_t cx, int16_t cy, int16_t r, int start_angle, int end_angle,
     bruce_display_color_t color
@@ -398,12 +444,10 @@ bruce_result_t display__fill_round_rect(
     if (result != BRUCE_OK) { return result; }
     int16_t max_r = (w < h ? w : h) / 2;
     if (r > max_r) r = max_r;
+    if (r < 0) r = 0;
     display_internal__fill_rect(context, x + r, y, w - 2 * r, h, color);
-    display_internal__fill_rect(context, x, y + r, w, h - 2 * r, color);
-    display__draw_circle_helper(context, x + r, y + r, r, color, true);
-    display__draw_circle_helper(context, x + w - r - 1, y + r, r, color, true);
-    display__draw_circle_helper(context, x + r, y + h - r - 1, r, color, true);
-    display__draw_circle_helper(context, x + w - r - 1, y + h - r - 1, r, color, true);
+    display__fill_round_side(context, x + w - r - 1, y + r, r, DISPLAY__SIDE_RIGHT, h - 2 * r - 1, color);
+    display__fill_round_side(context, x + r, y + r, r, DISPLAY__SIDE_LEFT, h - 2 * r - 1, color);
     display_internal__unlock(context);
     return BRUCE_OK;
 }

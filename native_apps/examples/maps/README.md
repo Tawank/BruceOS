@@ -18,14 +18,20 @@ make -C native_apps/examples/maps/test
 
 ## Controls
 
-| Action      | Keyboard           | Encoder                       | Touch |
-|-------------|--------------------|-------------------------------|-------|
-| Pan         | arrows             | click to switch wheel to pan  | drag  |
-| Zoom        | `+` / `-`          | wheel                         |       |
-| Menu        | Enter              | long press                    |       |
-| Exit        | Back               | menu > Exit                   |       |
+| Action | Keyboard  | 3 buttons / encoder          | Touch          |
+|--------|-----------|------------------------------|----------------|
+| Zoom   | `+` / `-` | Prev / Next                  | `+` / `-` buttons |
+| Pan    | arrows    | Prev / Next after switching  | drag           |
+| Mode   |           | hold Select                  |                |
+| Menu   | Enter     | Select                       |                |
+| Exit   | Back      | menu > Exit                  |                |
 
-The menu has *Go to coordinates*, *Online tiles* on/off and zoom.
+Holding Select, or the first menu item *Change to ...*, switches what
+Prev/Next do: zoom, then up/down, then left/right. A short hint on the map
+confirms the new mode, e.g. "Move up/down", and the zoom badge shows an
+arrow icon while Prev/Next pan. The menu also has *Go to coordinates*,
+*Online tiles* on/off, *Exit* and *Back*. On touch screens the +/- buttons
+appear after the first touch.
 
 ## Tiles
 
