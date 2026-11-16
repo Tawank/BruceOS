@@ -190,24 +190,44 @@ static void going_offline_and_deinit_cancel_downloads(void) {
     CHECK_EQ(fakes__http_active(), 0);
 }
 
-static void connects_wifi_once_and_gives_up(void) {
+/* Not connected and no saved network in range. */
+static void offline_start(void) {
     fakes.wifi_connected = false;
     fakes.wifi_connect_ok = false;
+}
+
+static void connects_wifi_in_background(void) {
+    offline_start();
+    fakes.wifi_connect_ok = true;
+    fakes.wifi_connect_manual = true;
     init(true);
-    CHECK_EQ(tiles__load(&tiles, (tile_key_t){5, 1, 1}), TILE_MISSING);
+    tile_key_t key = {5, 1, 1};
+    CHECK_EQ(tiles__load(&tiles, key), TILE_MISSING);
+    CHECK(tiles.connecting);
+    CHECK_EQ(fakes.wifi_connect_calls, 1);
+    CHECK(!tiles__check_network(&tiles));
     CHECK_EQ(tiles__load(&tiles, (tile_key_t){5, 2, 1}), TILE_MISSING);
     CHECK_EQ(fakes.wifi_connect_calls, 1);
-    CHECK_EQ(fakes.http_calls, 0);
-    CHECK(tiles.network_down);
+
+    fakes__wifi_finish();
+    CHECK(tiles__check_network(&tiles));
+    CHECK(!tiles.connecting);
+    CHECK(!tiles.network_down);
+    CHECK(!tiles__is_missing(&tiles, key));
+    fetch(key);
     tiles__deinit(&tiles);
 }
 
-static void connects_wifi_when_needed(void) {
-    fakes.wifi_connected = false;
+static void failed_connect_shows_no_wifi(void) {
+    offline_start();
     init(true);
-    fetch((tile_key_t){5, 1, 1});
+    CHECK_EQ(tiles__load(&tiles, (tile_key_t){5, 1, 1}), TILE_MISSING);
+    CHECK(tiles__check_network(&tiles));
+    CHECK(tiles.network_down);
+    CHECK(!tiles.connecting);
+    CHECK_EQ(tiles__load(&tiles, (tile_key_t){5, 2, 1}), TILE_MISSING);
     CHECK_EQ(fakes.wifi_connect_calls, 1);
-    CHECK(!tiles.network_down);
+    CHECK_EQ(fakes.http_calls, 0);
     tiles__deinit(&tiles);
 }
 
@@ -249,29 +269,31 @@ static void missing_list_keeps_newest(void) {
 }
 
 static void going_online_retries_missing(void) {
-    fakes.wifi_connected = false;
-    fakes.wifi_connect_ok = false;
+    offline_start();
     init(true);
     tile_key_t key = {5, 1, 1};
     tiles__load(&tiles, key);
+    tiles__check_network(&tiles);
     CHECK(tiles__is_missing(&tiles, key));
 
     tiles__set_online(&tiles, true);
     CHECK(!tiles.network_down);
     CHECK(!tiles__is_missing(&tiles, key));
     fakes.wifi_connect_ok = true;
+    CHECK_EQ(tiles__load(&tiles, key), TILE_MISSING);
+    CHECK_EQ(fakes.wifi_connect_calls, 2);
+    CHECK(tiles__check_network(&tiles));
     fetch(key);
     tiles__deinit(&tiles);
 }
 
-static void wifi_turned_on_later_clears_no_wifi(void) {
-    fakes.wifi_connected = false;
-    fakes.wifi_connect_ok = false;
+static void wifi_turned_on_elsewhere_clears_no_wifi(void) {
+    offline_start();
     init(true);
     tile_key_t key = {5, 1, 1};
     tiles__load(&tiles, key);
+    CHECK(tiles__check_network(&tiles));
     CHECK(tiles.network_down);
-    CHECK(!tiles__check_network(&tiles));
 
     fakes.wifi_connected = true;
     fakes.now_ms = 500;
@@ -286,20 +308,36 @@ static void wifi_turned_on_later_clears_no_wifi(void) {
 }
 
 static void retries_saved_wifi_every_30_seconds(void) {
-    fakes.wifi_connected = false;
-    fakes.wifi_connect_ok = false;
+    offline_start();
     init(true);
     tiles__load(&tiles, (tile_key_t){5, 1, 1});
+    tiles__check_network(&tiles);
     fakes.now_ms = 29999;
     tiles__load(&tiles, (tile_key_t){5, 2, 1});
     CHECK_EQ(fakes.wifi_connect_calls, 1);
 
     fakes.now_ms = 30000;
     fakes.wifi_connect_ok = true;
-    fetch((tile_key_t){5, 3, 1});
+    tiles__load(&tiles, (tile_key_t){5, 3, 1});
     CHECK_EQ(fakes.wifi_connect_calls, 2);
+    CHECK(tiles__check_network(&tiles));
     CHECK(!tiles.network_down);
     CHECK(!tiles__is_missing(&tiles, (tile_key_t){5, 1, 1}));
+    fetch((tile_key_t){5, 3, 1});
+    tiles__deinit(&tiles);
+}
+
+static void going_offline_stops_following_connect(void) {
+    offline_start();
+    fakes.wifi_connect_manual = true;
+    init(true);
+    tiles__load(&tiles, (tile_key_t){5, 1, 1});
+    CHECK(tiles.connecting);
+    tiles__set_online(&tiles, false);
+    CHECK(!tiles.connecting);
+    CHECK(!tiles__check_network(&tiles));
+    CHECK_EQ(tiles__load(&tiles, (tile_key_t){5, 2, 1}), TILE_MISSING);
+    CHECK_EQ(fakes.wifi_connect_calls, 1);
     tiles__deinit(&tiles);
 }
 
@@ -316,11 +354,12 @@ SUITE(tiles_tests,
       TEST(empty_response_is_rejected),
       TEST(cancel_unless_drops_unwanted_downloads),
       TEST(going_offline_and_deinit_cancel_downloads),
-      TEST(connects_wifi_once_and_gives_up),
-      TEST(connects_wifi_when_needed),
+      TEST(connects_wifi_in_background),
+      TEST(failed_connect_shows_no_wifi),
       TEST(wrong_tile_size_is_rejected),
       TEST(evicts_least_recently_used),
       TEST(missing_list_keeps_newest),
       TEST(going_online_retries_missing),
-      TEST(wifi_turned_on_later_clears_no_wifi),
-      TEST(retries_saved_wifi_every_30_seconds))
+      TEST(wifi_turned_on_elsewhere_clears_no_wifi),
+      TEST(retries_saved_wifi_every_30_seconds),
+      TEST(going_offline_stops_following_connect))

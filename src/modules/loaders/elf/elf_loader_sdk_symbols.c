@@ -2287,6 +2287,8 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(wifi__disconnect),
     ESP_ELFSYM_EXPORT(wifi__connect),
     ESP_ELFSYM_EXPORT(wifi__connect_known),
+    ESP_ELFSYM_EXPORT(wifi__connect_known_start),
+    ESP_ELFSYM_EXPORT(wifi__connect_known_poll),
     ESP_ELFSYM_EXPORT(wifi__setup_ap),
     ESP_ELFSYM_EXPORT(wifi__scan),
     ESP_ELFSYM_EXPORT(wifi__scan_start),

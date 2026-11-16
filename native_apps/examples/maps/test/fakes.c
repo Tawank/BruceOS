@@ -278,10 +278,23 @@ void image__bitmap_release(image_bitmap_t *bitmap) {
 
 bool wifi__is_connected(void) { return fakes.wifi_connected; }
 
-bruce_result_t wifi__connect_known(void) {
-    fakes.wifi_connect_calls++;
+void fakes__wifi_finish(void) {
+    fakes.wifi_connect_busy = false;
     fakes.wifi_connected = fakes.wifi_connect_ok;
-    return fakes.wifi_connect_ok ? BRUCE_OK : BRUCE_ERR_IO;
+}
+
+bruce_result_t wifi__connect_known_start(void) {
+    if (fakes.wifi_connected) return BRUCE_OK;
+    if (fakes.wifi_connect_busy) return BRUCE_OK;
+    fakes.wifi_connect_calls++;
+    fakes.wifi_connect_busy = true;
+    if (!fakes.wifi_connect_manual) fakes__wifi_finish();
+    return BRUCE_OK;
+}
+
+bruce_result_t wifi__connect_known_poll(void) {
+    if (fakes.wifi_connect_busy) return BRUCE_ERR_BUSY;
+    return fakes.wifi_connected ? BRUCE_OK : BRUCE_ERR_NOT_FOUND;
 }
 
 int fakes__http_active(void) {

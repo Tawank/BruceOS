@@ -36,6 +36,25 @@ bruce_result_t wifi__connect(const char *ssid, const char *password, uint32_t ti
 /** @brief Connects using a previously saved Wi-Fi credential (see config.h). */
 bruce_result_t wifi__connect_known(void);
 
+/**
+ * @brief Starts wifi__connect_known() on a Core task and returns at once.
+ *
+ * The scan and connect attempts can take many seconds; this keeps the caller
+ * responsive. Joins a background connect that is already running, and
+ * returns BRUCE_OK straight away when Wi-Fi is already connected. Follow up
+ * with wifi__connect_known_poll().
+ */
+bruce_result_t wifi__connect_known_start(void);
+
+/**
+ * @brief Result of the background connect.
+ *
+ * BRUCE_ERR_BUSY while it runs, BRUCE_OK once Wi-Fi is connected, otherwise
+ * what the last wifi__connect_known_start() ended with (BRUCE_ERR_NOT_FOUND
+ * when no saved network is in range, BRUCE_ERR_INVALID_STATE if none ran).
+ */
+bruce_result_t wifi__connect_known_poll(void);
+
 /** @brief Starts the configured Wi-Fi access point. */
 bruce_result_t wifi__setup_ap(void);
 

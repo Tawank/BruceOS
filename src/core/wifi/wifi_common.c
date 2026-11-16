@@ -19,6 +19,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "freertos/semphr.h"
+#include "freertos/task.h"
 #include "lwip/inet.h"
 #include "nvs_flash.h"
 
@@ -32,6 +33,7 @@
  * (see wifi__scan_poll()). */
 #define WIFI__SCAN_CACHE_MAX 32
 #define WIFI__STATUS_ICON_KEY "core.wifi"
+#define WIFI__CONNECT_TASK_STACK 6144
 
 static const char *const TAG = "bruce_wifi";
 static StaticSemaphore_t s_wifi_mutex_storage;
@@ -289,9 +291,10 @@ static bruce_result_t wifi__connect_attempt(const char *ssid, const char *passwo
  * same way again. */
 #define WIFI__CONNECT_MAX_ATTEMPTS 2u
 
-bruce_result_t wifi__connect(const char *ssid, const char *password, uint32_t timeout_ms) {
-    bruce_result_t result = permission__check(BRUCE_PERMISSION_WIFI);
-    if (result != BRUCE_OK) return result;
+/* The unchecked variants below do the work for both the public wifi__*
+ * calls, which check the caller's `wifi` permission first, and Core's own
+ * background connect task, which has no process to check. */
+static bruce_result_t wifi__connect_unchecked(const char *ssid, const char *password, uint32_t timeout_ms) {
     if (ssid == NULL || ssid[0] == '\0' ||
         strnlen(ssid, CONFIG__WIFI_SSID_MAX_LEN + 1) > CONFIG__WIFI_SSID_MAX_LEN || password == NULL ||
         strnlen(password, CONFIG__WIFI_PASSWORD_MAX_LEN + 1) > CONFIG__WIFI_PASSWORD_MAX_LEN) {
@@ -303,7 +306,7 @@ bruce_result_t wifi__connect(const char *ssid, const char *password, uint32_t ti
      * blank status bar until init happens to finish. Removed below if
      * init itself fails, since there's nothing to cancel at that point. */
     (void)status_icon__push_named(WIFI__STATUS_ICON_KEY, "wifi-cancel");
-    result = wifi__init();
+    bruce_result_t result = wifi__init();
     if (result != BRUCE_OK) {
         (void)status_icon__remove(WIFI__STATUS_ICON_KEY);
         return result;
@@ -320,10 +323,13 @@ bruce_result_t wifi__connect(const char *ssid, const char *password, uint32_t ti
     return attempt_result;
 }
 
-bruce_result_t wifi__scan_start(void) {
+bruce_result_t wifi__connect(const char *ssid, const char *password, uint32_t timeout_ms) {
     bruce_result_t result = permission__check(BRUCE_PERMISSION_WIFI);
-    if (result != BRUCE_OK) return result;
-    result = wifi__init();
+    return result == BRUCE_OK ? wifi__connect_unchecked(ssid, password, timeout_ms) : result;
+}
+
+static bruce_result_t wifi__scan_start_unchecked(void) {
+    bruce_result_t result = wifi__init();
     if (result != BRUCE_OK) return result;
     xSemaphoreTake(s_wifi_mutex, portMAX_DELAY);
     if (!wifi__start_locked(WIFI_MODE_STA)) {
@@ -389,9 +395,12 @@ static void wifi__scan_fill_cache_locked(void) {
     s_scan_cache_ready = true;
 }
 
-int wifi__scan_poll(wifi__network_t *networks, size_t capacity, uint32_t timeout_ms) {
+bruce_result_t wifi__scan_start(void) {
     bruce_result_t result = permission__check(BRUCE_PERMISSION_WIFI);
-    if (result != BRUCE_OK) return (int)result;
+    return result == BRUCE_OK ? wifi__scan_start_unchecked() : result;
+}
+
+static int wifi__scan_poll_unchecked(wifi__network_t *networks, size_t capacity, uint32_t timeout_ms) {
     if (capacity != 0 && networks == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     if (s_wifi_events == NULL) return BRUCE_ERR_IO;
 
@@ -426,6 +435,11 @@ int wifi__scan_poll(wifi__network_t *networks, size_t capacity, uint32_t timeout
     return scan_result;
 }
 
+int wifi__scan_poll(wifi__network_t *networks, size_t capacity, uint32_t timeout_ms) {
+    bruce_result_t result = permission__check(BRUCE_PERMISSION_WIFI);
+    return result == BRUCE_OK ? wifi__scan_poll_unchecked(networks, capacity, timeout_ms) : (int)result;
+}
+
 bruce_result_t wifi__scan_cancel(void) {
     if (s_wifi_events == NULL) return BRUCE_OK;
     xSemaphoreTake(s_wifi_mutex, portMAX_DELAY);
@@ -437,19 +451,21 @@ bruce_result_t wifi__scan_cancel(void) {
     return esp_wifi_scan_stop() == ESP_OK ? BRUCE_OK : BRUCE_ERR_IO; /* best-effort */
 }
 
-int wifi__scan(wifi__network_t *networks, size_t capacity) {
-    bruce_result_t result = wifi__scan_start();
+static int wifi__scan_unchecked(wifi__network_t *networks, size_t capacity) {
+    bruce_result_t result = wifi__scan_start_unchecked();
     if (result != BRUCE_OK) return (int)result;
-    int scan_result = wifi__scan_poll(networks, capacity, WIFI__SCAN_TIMEOUT_MS);
+    int scan_result = wifi__scan_poll_unchecked(networks, capacity, WIFI__SCAN_TIMEOUT_MS);
     if (scan_result == BRUCE_ERR_TIMEOUT) { (void)wifi__scan_cancel(); }
     return scan_result;
 }
 
-bruce_result_t wifi__connect_known(void) {
+int wifi__scan(wifi__network_t *networks, size_t capacity) {
     bruce_result_t result = permission__check(BRUCE_PERMISSION_WIFI);
-    if (result != BRUCE_OK) return result;
+    return result == BRUCE_OK ? wifi__scan_unchecked(networks, capacity) : (int)result;
+}
 
-    if (wifi__is_connected()) return BRUCE_OK;
+static bruce_result_t wifi__connect_known_unchecked(void) {
+    if (wifi__is_connected_internal()) return BRUCE_OK;
     /* Shown from the very start of "wifi on" (this is what it calls first),
      * not just once wifi__connect() itself is about to block on a specific
      * candidate below -- otherwise it wouldn't appear until after the scan
@@ -458,7 +474,7 @@ bruce_result_t wifi__connect_known(void) {
      * replaced by the real connected icon (same key) if something does. */
     (void)status_icon__push_named(WIFI__STATUS_ICON_KEY, "wifi-cancel");
     wifi__network_t networks[16];
-    int count = wifi__scan(networks, 16);
+    int count = wifi__scan_unchecked(networks, 16);
     if (count < 0) {
         (void)status_icon__remove(WIFI__STATUS_ICON_KEY);
         return (bruce_result_t)count;
@@ -480,8 +496,9 @@ bruce_result_t wifi__connect_known(void) {
             config__find_wifi_credential(networks[i].ssid);
         if (credential != NULL) {
             attempted = true;
-            last_attempt_result =
-                wifi__connect(credential->ssid, credential->password, WIFI__DEFAULT_CONNECT_TIMEOUT_MS);
+            last_attempt_result = wifi__connect_unchecked(
+                credential->ssid, credential->password, WIFI__DEFAULT_CONNECT_TIMEOUT_MS
+            );
             if (last_attempt_result == BRUCE_OK) return BRUCE_OK;
         }
     }
@@ -510,6 +527,59 @@ bruce_result_t wifi__connect_known(void) {
     }
     for (int i = 0; i < count; ++i) { ESP_LOGW(TAG, "  nearby: \"%s\"", networks[i].ssid); }
     return BRUCE_ERR_NOT_FOUND;
+}
+
+bruce_result_t wifi__connect_known(void) {
+    bruce_result_t result = permission__check(BRUCE_PERMISSION_WIFI);
+    return result == BRUCE_OK ? wifi__connect_known_unchecked() : result;
+}
+
+/* One background wifi__connect_known() at a time; later starts join it. */
+static portMUX_TYPE s_connect_mux = portMUX_INITIALIZER_UNLOCKED;
+static bool s_connect_running;
+static bruce_result_t s_connect_result = BRUCE_ERR_INVALID_STATE;
+
+static void wifi__connect_known_task(void *arg) {
+    (void)arg;
+    bruce_result_t result = wifi__connect_known_unchecked();
+    portENTER_CRITICAL(&s_connect_mux);
+    s_connect_result = result;
+    s_connect_running = false;
+    portEXIT_CRITICAL(&s_connect_mux);
+    vTaskDelete(NULL);
+}
+
+bruce_result_t wifi__connect_known_start(void) {
+    bruce_result_t result = permission__check(BRUCE_PERMISSION_WIFI);
+    if (result != BRUCE_OK) return result;
+    if (wifi__is_connected_internal()) return BRUCE_OK;
+
+    portENTER_CRITICAL(&s_connect_mux);
+    bool start = !s_connect_running;
+    s_connect_running = true;
+    portEXIT_CRITICAL(&s_connect_mux);
+    if (!start) return BRUCE_OK;
+
+    BaseType_t created =
+        xTaskCreate(wifi__connect_known_task, "wifi_connect", WIFI__CONNECT_TASK_STACK, NULL, 4, NULL);
+    if (created != pdPASS) {
+        portENTER_CRITICAL(&s_connect_mux);
+        s_connect_running = false;
+        portEXIT_CRITICAL(&s_connect_mux);
+        return BRUCE_ERR_NO_MEMORY;
+    }
+    return BRUCE_OK;
+}
+
+bruce_result_t wifi__connect_known_poll(void) {
+    bruce_result_t result = permission__check(BRUCE_PERMISSION_WIFI);
+    if (result != BRUCE_OK) return result;
+    portENTER_CRITICAL(&s_connect_mux);
+    bool running = s_connect_running;
+    result = s_connect_result;
+    portEXIT_CRITICAL(&s_connect_mux);
+    if (running) return BRUCE_ERR_BUSY;
+    return wifi__is_connected_internal() ? BRUCE_OK : result;
 }
 
 bruce_result_t wifi__setup_ap(void) {

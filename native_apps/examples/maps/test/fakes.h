@@ -70,7 +70,9 @@ typedef struct {
 
     bool wifi_connected;
     bool wifi_connect_ok;
-    int wifi_connect_calls;
+    int wifi_connect_calls;  /* Background connects started. */
+    bool wifi_connect_manual; /* Connect stays busy until fakes__wifi_finish(). */
+    bool wifi_connect_busy;
 
     size_t psram_free;
 
@@ -109,6 +111,7 @@ const fake_draw_t *fakes__find_icon(const char *name);
 void fakes__push(bruce_input_type_t type, bruce_input_action_t action, int32_t code, int32_t value);
 void fakes__config_set(const char *key, const char *value);
 void fakes__http_finish_all(void);
+void fakes__wifi_finish(void);
 int fakes__http_active(void);
 const char *fakes__config_get(const char *key);
 

@@ -47,7 +47,10 @@ works offline later. Downloads run in the background (at most 5 at once)
 through `http__request_start()`, so the map stays responsive; tiles that
 scroll off screen are cancelled. The core reuses each connection
 (keep-alive), so a burst of tiles from one server pays for one TLS
-handshake instead of one per tile.
+handshake instead of one per tile. When Wi-Fi is off, the app connects to a
+saved network in the background (`wifi__connect_known_start()`, at most
+every 30 s) and shows "Connecting" meanwhile; turning Wi-Fi on elsewhere is
+picked up within a second.
 
 ## Settings
 

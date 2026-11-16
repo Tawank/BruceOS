@@ -263,6 +263,12 @@ static void status_reflects_loading_and_network(void) {
     maps__update_status(&app, 0);
     CHECK_STR(app.hud.status, "No Wi-Fi");
     CHECK_STR(app.hud.status_icon, "wifi-cancel");
+    app.tiles.connecting = true;
+    maps__update_status(&app, 0);
+    CHECK_STR(app.hud.status, "Connecting");
+    CHECK_STR(app.hud.status_icon, "wifi");
+    maps__update_status(&app, 3);
+    CHECK_STR(app.hud.status, "Loading");
     stop();
 }
 
@@ -402,6 +408,27 @@ static void stays_responsive_while_downloading(void) {
     stop();
 }
 
+static void map_stays_responsive_while_wifi_connects(void) {
+    start();
+    fakes.wifi_connected = false;
+    fakes.wifi_connect_manual = true;
+    tiles__set_online(&app.tiles, true);
+    fakes__push(BRUCE_INPUT_KEY, BRUCE_INPUT_PRESS, BRUCE_INPUT_CODE_RIGHT, 0);
+    fakes.polls_until_back = 6;
+    geo_point_t before = app.view.center;
+    maps__run(&app);
+    CHECK_EQ(app.view.center.x, before.x + 240 / 4);
+    CHECK_EQ(fakes.wifi_connect_calls, 1);
+    CHECK_STR(app.hud.status, "Connecting");
+
+    fakes__wifi_finish();
+    app.running = true;
+    fakes.polls_until_back = 6;
+    maps__run(&app);
+    CHECK(fakes.http_calls > 0);
+    stop();
+}
+
 SUITE(maps_tests,
       TEST(arrows_pan_a_quarter_screen),
       TEST(releases_are_ignored),
@@ -430,4 +457,5 @@ SUITE(maps_tests,
       TEST(app_main_draws_loads_and_exits),
       TEST(no_wifi_status_clears_when_wifi_comes_back),
       TEST(scrolling_keeps_five_downloads_and_cancels_far_ones),
-      TEST(stays_responsive_while_downloading))
+      TEST(stays_responsive_while_downloading),
+      TEST(map_stays_responsive_while_wifi_connects))

@@ -62,6 +62,8 @@ static void tiles__forget_missing(tiles_t *tiles) {
 void tiles__set_online(tiles_t *tiles, bool online) {
     tiles__cancel_downloads(tiles);
     tiles->online = online;
+    tiles->connecting = false;
+    tiles->wifi_retry_ms = 0;
     tiles->network_down = false;
     tiles__forget_missing(tiles);
 }
@@ -72,6 +74,14 @@ static void tiles__network_back(tiles_t *tiles) {
 }
 
 bool tiles__check_network(tiles_t *tiles) {
+    if (tiles->connecting) {
+        bruce_result_t result = wifi__connect_known_poll();
+        if (result == BRUCE_ERR_BUSY) return false;
+        tiles->connecting = false;
+        if (result == BRUCE_OK) tiles__network_back(tiles);
+        else tiles->network_down = true;
+        return true;
+    }
     if (!tiles->network_down) return false;
     uint64_t now = runtime__now();
     if (now < tiles->network_checked_ms + TILES_NETWORK_CHECK_MS) return false;
@@ -148,19 +158,20 @@ static void tiles__make_parent_dirs(const char *path) {
     }
 }
 
-/* Uses Wi-Fi when it is up; otherwise tries the saved network, at most every 30 s. */
+/* Uses Wi-Fi when it is up; otherwise starts connecting to a saved network in
+ * the background, at most every 30 s, and reports not ready meanwhile. */
 static bool tiles__network_ready(tiles_t *tiles) {
     if (!tiles->online) return false;
-    if (!wifi__is_connected()) {
-        if (tiles->network_down && runtime__now() < tiles->wifi_retry_ms) return false;
-        tiles->wifi_retry_ms = runtime__now() + TILES_WIFI_RETRY_MS;
-        if (wifi__connect_known() != BRUCE_OK || !wifi__is_connected()) {
-            tiles->network_down = true;
-            return false;
-        }
+    if (wifi__is_connected()) {
+        if (tiles->network_down) tiles__network_back(tiles);
+        return true;
     }
-    if (tiles->network_down) tiles__network_back(tiles);
-    return true;
+    if (!tiles->connecting && runtime__now() >= tiles->wifi_retry_ms) {
+        tiles->wifi_retry_ms = runtime__now() + TILES_WIFI_RETRY_MS;
+        tiles->connecting = wifi__connect_known_start() == BRUCE_OK;
+        if (!tiles->connecting) tiles->network_down = true;
+    }
+    return false;
 }
 
 static bool tiles__is_downloading(const tiles_t *tiles, tile_key_t key) {

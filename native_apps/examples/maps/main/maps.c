@@ -183,9 +183,10 @@ static void maps__handle(maps_t *app, const bruce_input_event_t *event) {
 /* Redraws only when the text changes; the strings are literals, so pointers compare. */
 static void maps__update_status(maps_t *app, size_t loading) {
     const char *before = app->hud.status;
-    bool offline = loading == 0 && app->tiles.network_down;
-    app->hud.status = loading > 0 ? "Loading" : offline ? "No Wi-Fi" : NULL;
-    app->hud.status_icon = offline ? "wifi-cancel" : NULL;
+    bool connecting = loading == 0 && app->tiles.connecting;
+    bool offline = loading == 0 && !connecting && app->tiles.network_down;
+    app->hud.status = loading > 0 ? "Loading" : connecting ? "Connecting" : offline ? "No Wi-Fi" : NULL;
+    app->hud.status_icon = connecting ? "wifi" : offline ? "wifi-cancel" : NULL;
     if (app->hud.status != before) app->dirty = true;
 }
 
