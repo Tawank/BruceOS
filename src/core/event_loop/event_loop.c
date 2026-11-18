@@ -9,6 +9,7 @@
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "sdkconfig.h"
 
 #define EVENT_LOOP__QUEUE_LENGTH 16
 
@@ -194,6 +195,14 @@ bool input__wait_long_press(const bruce_input_event_t *press, uint32_t long_ms) 
             return event.timestamp_ms >= long_at;
         }
     }
+}
+
+bool input__has_touch(void) {
+#if CONFIG_BRUCE_TOUCH_ENABLED
+    return true;
+#else
+    return false;
+#endif
 }
 
 bool input__check(int32_t code, bool consume) {

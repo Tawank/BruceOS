@@ -1,5 +1,6 @@
 #include "display_driver.h"
 
+#include "display_epd.h"
 #include "display_internal.h"
 
 #include "core/device/board_i2c.h" // IWYU pragma: keep
@@ -189,7 +190,9 @@ static bruce_result_t display_driver__backlight_init(void) {
 static bruce_result_t display_driver__panel_init(void) {
     display_driver__boot_backlight_off();
 
-#if CONFIG_BRUCE_DISPLAY_BUS_I80
+#if CONFIG_BRUCE_DISPLAY_PANEL_UC8253
+    return display_epd__init();
+#elif CONFIG_BRUCE_DISPLAY_BUS_I80
     esp_lcd_i80_bus_config_t bus_config = {
         .dc_gpio_num = DISPLAY__PIN_DC,
         .wr_gpio_num = (gpio_num_t)CONFIG_BRUCE_DISPLAY_PIN_WR,
@@ -318,6 +321,9 @@ void display_driver__deinit(void) {
         ledc_timer_rst(DISPLAY__BL_LEDC_MODE, DISPLAY__BL_LEDC_TIMER);
         s_backlight_initialized = false;
     }
+#if CONFIG_BRUCE_DISPLAY_PANEL_UC8253
+    display_epd__deinit();
+#endif
     if (s_panel != NULL) {
         esp_lcd_panel_disp_on_off(s_panel, false);
         esp_lcd_panel_del(s_panel);
@@ -341,6 +347,10 @@ void display_driver__deinit(void) {
 }
 
 void display_driver__configure_rotation(uint8_t rotation) {
+#if CONFIG_BRUCE_DISPLAY_PANEL_UC8253
+    display_epd__configure_rotation(rotation);
+    return;
+#endif
     bool swap_xy = false;
     bool mirror_x = false;
     bool mirror_y = false;
@@ -380,6 +390,9 @@ void display_driver__configure_rotation(uint8_t rotation) {
 bruce_result_t display_driver__draw_bitmap(
     int x_start, int y_start, int x_end, int y_end, const bruce_display_color_t *pixels
 ) {
+#if CONFIG_BRUCE_DISPLAY_PANEL_UC8253
+    return display_epd__draw_bitmap(x_start, y_start, x_end, y_end, pixels);
+#endif
     return esp_lcd_panel_draw_bitmap(s_panel, x_start, y_start, x_end, y_end, pixels) == ESP_OK
                ? BRUCE_OK
                : BRUCE_ERR_IO;
@@ -388,9 +401,8 @@ bruce_result_t display_driver__draw_bitmap(
 void display_driver__set_backlight(uint8_t brightness) {
     if (!s_backlight_initialized) return;
 #if CONFIG_BRUCE_DISPLAY_BACKLIGHT_MAX_LEVEL < 255
-    if (brightness > CONFIG_BRUCE_DISPLAY_BACKLIGHT_MAX_LEVEL) {
-        brightness = CONFIG_BRUCE_DISPLAY_BACKLIGHT_MAX_LEVEL;
-    }
+    /* Scaled, not clamped, so every step below 100% still differs. */
+    brightness = (uint8_t)((brightness * CONFIG_BRUCE_DISPLAY_BACKLIGHT_MAX_LEVEL + 254) / 255);
 #endif
     /* At the default config (255) the cap above is compiled out entirely --
      * per its Kconfig help text, 255 means "no cap" -- since brightness
@@ -405,9 +417,8 @@ void display_driver__set_backlight(uint8_t brightness) {
 void display_driver__fade_backlight(uint8_t brightness, uint32_t duration_ms) {
     if (!s_backlight_initialized) return;
 #if CONFIG_BRUCE_DISPLAY_BACKLIGHT_MAX_LEVEL < 255
-    if (brightness > CONFIG_BRUCE_DISPLAY_BACKLIGHT_MAX_LEVEL) {
-        brightness = CONFIG_BRUCE_DISPLAY_BACKLIGHT_MAX_LEVEL;
-    }
+    /* Scaled, not clamped, so every step below 100% still differs. */
+    brightness = (uint8_t)((brightness * CONFIG_BRUCE_DISPLAY_BACKLIGHT_MAX_LEVEL + 254) / 255);
 #endif
     uint32_t duty = ((uint32_t)brightness * DISPLAY__LEDC_MAX_DUTY) / 255;
     if (ledc_set_fade_with_time(DISPLAY__BL_LEDC_MODE, DISPLAY__BL_LEDC_CHANNEL, duty, duration_ms) != ESP_OK ||
@@ -417,9 +428,15 @@ void display_driver__fade_backlight(uint8_t brightness, uint32_t duration_ms) {
 }
 
 bruce_result_t display_driver__invert(bool invert) {
+#if CONFIG_BRUCE_DISPLAY_PANEL_UC8253
+    return display_epd__invert(invert);
+#endif
     return esp_lcd_panel_invert_color(s_panel, invert) == ESP_OK ? BRUCE_OK : BRUCE_ERR_IO;
 }
 
 bruce_result_t display_driver__set_enabled(bool enabled) {
+#if CONFIG_BRUCE_DISPLAY_PANEL_UC8253
+    return display_epd__set_enabled(enabled);
+#endif
     return esp_lcd_panel_disp_on_off(s_panel, enabled) == ESP_OK ? BRUCE_OK : BRUCE_ERR_IO;
 }

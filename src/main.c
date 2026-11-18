@@ -63,7 +63,7 @@ static const bruce_app_descriptor_t s_default_apps[] = {
     /* System - boot, launcher, config, diagnostics, power. */
     {"apps",                 "Browse installed apps",                                     "System",  apps_app_main,                0,     false},
     {"bootanimation",        "Play the boot animation",                                   "System",  bootanimation_app_main,       0,     false},
-    {"bruce_launcher",       "Open the Bruce launcher",                                   "System",  bruce_launcher_app_main,      0,     false},
+    {"bruce_launcher",       "Open the Bruce launcher",                                   "System",  bruce_launcher_app_main,      0,     true },
     {"clock",                "Show clock and timer tools",                                "System",  clock_app_main,               6144,  true },
     {"config",               "Configure Bruce settings",                                  "System",  config_app_main,              8192,  false},
     {"coredump",             "Show or export the last crash's core dump",                 "System",  bnu_coredump_app_main,        8192,  false},
@@ -239,7 +239,7 @@ void quemu_test_mode__wait_for_serial_ready(void) {
 #endif
 
 void app_main(void) {
-    ESP_LOGI("boot", "reset reason: %d\n", (int)esp_reset_reason());
+    ESP_LOGW("boot", "reset reason: %d", (int)esp_reset_reason());
     device__power_hold_init();
     display__boot_backlight_off();
 

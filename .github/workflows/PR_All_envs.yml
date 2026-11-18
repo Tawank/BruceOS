@@ -35,6 +35,7 @@ jobs:
           - "lilygo-t-embed"
           - "lilygo-t-display-s3"
           - "lilygo-t-display-ttgo"
+          - "lilygo-t-deck-max"
           - "xk404"
     steps:
       - uses: actions/checkout@v4

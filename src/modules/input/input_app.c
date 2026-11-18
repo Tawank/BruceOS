@@ -1,5 +1,6 @@
 #include "input_app.h"
 
+#include "sdkconfig.h"
 #include <string.h>
 
 #include "input_buttons.h"

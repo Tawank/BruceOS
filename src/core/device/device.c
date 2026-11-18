@@ -1,5 +1,7 @@
 #include "device.h"
 
+#include "board_i2c.h"
+
 #include "core_sdk/device.h"
 #include "core_sdk/permission.h"
 #include "core_sdk/pubsub.h"  // IWYU pragma: keep
@@ -196,6 +198,33 @@ bruce_result_t device__coredump_erase(void) {
 #endif
 }
 
+#if CONFIG_BRUCE_BOARD_XL9555_ENABLED
+/* All 16 pins become outputs: low for a moment (pulsing active-low resets),
+ * then the board's levels. Registers 0x02/0x03 are the output ports,
+ * 0x06/0x07 the direction (0 = output). */
+static void device__xl9555_init(void) {
+    i2c_master_bus_handle_t bus = board_i2c__acquire();
+    i2c_device_config_t config = {
+        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+        .device_address = CONFIG_BRUCE_BOARD_XL9555_I2C_ADDR,
+        .scl_speed_hz = CONFIG_BRUCE_BOARD_I2C_FREQ_HZ,
+    };
+    i2c_master_dev_handle_t dev = NULL;
+    if (bus == NULL || i2c_master_bus_add_device(bus, &config, &dev) != ESP_OK) return;
+
+    uint16_t levels = CONFIG_BRUCE_BOARD_XL9555_OUTPUTS;
+    uint8_t low[] = {0x02, 0x00, 0x00};
+    uint8_t outputs[] = {0x06, 0x00, 0x00};
+    uint8_t board[] = {0x02, (uint8_t)levels, (uint8_t)(levels >> 8)};
+    bool ok = i2c_master_transmit(dev, low, sizeof(low), 100) == ESP_OK &&
+              i2c_master_transmit(dev, outputs, sizeof(outputs), 100) == ESP_OK;
+    vTaskDelay(pdMS_TO_TICKS(20));
+    ok = ok && i2c_master_transmit(dev, board, sizeof(board), 100) == ESP_OK;
+    if (!ok) printf("XL9555 GPIO expander did not respond\n");
+    (void)i2c_master_bus_rm_device(dev);
+}
+#endif
+
 void device__power_hold_init(void) {
 #if CONFIG_BRUCE_POWER_HOLD_GPIO >= 0
     gpio_config_t cfg = {
@@ -204,6 +233,16 @@ void device__power_hold_init(void) {
     };
     gpio_config(&cfg);
     gpio_set_level((gpio_num_t)CONFIG_BRUCE_POWER_HOLD_GPIO, 1);
+#endif
+#if CONFIG_BRUCE_BOARD_GPIO_HIGH_MASK
+    gpio_config_t high = {.pin_bit_mask = CONFIG_BRUCE_BOARD_GPIO_HIGH_MASK, .mode = GPIO_MODE_OUTPUT};
+    gpio_config(&high);
+    for (int pin = 0; pin < 64; ++pin) {
+        if ((uint64_t)CONFIG_BRUCE_BOARD_GPIO_HIGH_MASK & (1ULL << pin)) gpio_set_level((gpio_num_t)pin, 1);
+    }
+#endif
+#if CONFIG_BRUCE_BOARD_XL9555_ENABLED
+    device__xl9555_init();
 #endif
 }
 

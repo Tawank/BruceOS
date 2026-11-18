@@ -2,6 +2,8 @@
 
 #include "dialog_gui_common.h"
 
+#include "core/config/config.h"
+
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -32,6 +34,10 @@
  * right edge of a list that doesn't fit on one page. */
 #define DIALOG__SCROLLBAR_W 4
 #define DIALOG__SCROLLBAR_GAP 3
+/* Minimum row height on touchscreens, so a row fits a fingertip. */
+#define DIALOG__TOUCH_ROW_H 32
+/* How long a tapped row stays highlighted before the dialog returns. */
+#define DIALOG__TAP_FLASH_MS 50
 
 /* -------------------------------------------------------------------------- */
 /* Window renderer registry                                                   */
@@ -195,12 +201,14 @@ static void dialog__gui_choice_draw_list(
     bool list_scrollable = total > items_per_page;
     int row_w = list_scrollable ? content_w - DIALOG__SCROLLBAR_W - DIALOG__SCROLLBAR_GAP : content_w;
 
+    int text_h = DIALOG__CHAR_H * text_size;
     for (int i = first_visible; i <= last_visible; ++i) {
         int index = order != NULL ? order[i] : i;
-        int y = list_y + (i - first_visible) * row_h;
+        int row_y = list_y + (i - first_visible) * row_h;
+        int y = row_y + (row_h - text_h) / 2 - 1; /* Text top: centered in the row. */
         bool is_selected = i == selected;
         if (is_selected) {
-            display__fill_rect(content_left, y, row_w, row_h, text_color);
+            display__fill_rect(content_left, row_y, row_w, row_h, text_color);
             display__set_text_color(background_color);
         } else {
             display__set_text_color(text_color);
@@ -211,7 +219,7 @@ static void dialog__gui_choice_draw_list(
         int label_right = content_left + row_w - DIALOG__MARGIN;
         const bruce_icon_t *icon = icon__get(choices[index].icon_name);
         if (icon != NULL) {
-            int icon_size = row_h - 2;
+            int icon_size = text_h;
             display__draw_bitmap_scaled(
                 label_left,
                 y + 1,
@@ -321,7 +329,12 @@ bruce_result_t dialog__gui_choice(
     int content_h = viewport_h - (render_window ? 2 * DIALOG__WINDOW_INSET : 0);
     if (content_w <= 0 || content_h <= 0) { return BRUCE_ERR_INVALID_ARGUMENT; }
 
+    /* Touchscreens get finger-sized rows, a tap picks a row, a drag scrolls,
+     * and the selection only shows once a navigation key is used. */
+    bool touch = input__has_touch() && !compact;
+    bool show_selection = !touch;
     int row_h = DIALOG__CHAR_H * text_size + 2;
+    if (touch && row_h < DIALOG__TOUCH_ROW_H) row_h = DIALOG__TOUCH_ROW_H;
     int title_h = render_window ? (title != NULL && title[0] != '\0' ? DIALOG__CHAR_H + 4 : 0)
                   : render_borders || (title != NULL && title[0] != '\0') ? DIALOG__CHAR_H + 4
                                                                           : 0;
@@ -332,6 +345,10 @@ bruce_result_t dialog__gui_choice(
     int usable_h = content_h - title_h - message_h - footer_h - list_gap;
     if (usable_h < row_h) { return BRUCE_ERR_INVALID_ARGUMENT; }
     int items_per_page = usable_h / row_h;
+    int list_y = content_top + title_h + message_h + list_gap;
+    int touch_y = -1, touch_first_visible = 0;
+    bool touch_dragged = false;
+    bool tap_pending = false;
     bool redraw = true;
     bool launcher_border_drawn = false;
     uint64_t rendered_at = 0;
@@ -415,7 +432,7 @@ bruce_result_t dialog__gui_choice(
                  * see dialog__default_render_params()); a windowed dialog's
                  * bar sits on content_fill_color (surface) instead, where
                  * text_color already reads fine. */
-                display__set_text_color(title_on_pri_fill ? text : text_color);
+                display__set_text_color(title_on_pri_fill ? config__high_contrast_text_on(pri) : text_color);
                 display__set_text_size(DIALOG__TEXT_SIZE);
                 display__set_text_bg_color(title_on_pri_fill ? pri : content_fill_color);
                 display__set_cursor(content_left + DIALOG__MARGIN, content_top + DIALOG__MARGIN);
@@ -430,9 +447,8 @@ bruce_result_t dialog__gui_choice(
                 display__print(message);
             }
 
-            int list_y = content_top + title_h + message_h + list_gap;
             dialog__gui_choice_draw_list(
-                choices, NULL, (int)choice_count, selected, first_visible, items_per_page, list_y, content_left,
+                choices, NULL, (int)choice_count, show_selection ? selected : -1, first_visible, items_per_page, list_y, content_left,
                 content_w, row_h, usable_h, text_size, background_color, text_color, border, now, selected_at,
                 &selected_label_overflows
             );
@@ -458,6 +474,11 @@ bruce_result_t dialog__gui_choice(
             rendered_at = runtime__now();
             redraw = false;
         }
+        if (tap_pending) {
+            (void)runtime__delay(DIALOG__TAP_FLASH_MS);
+            *out_selected = (size_t)selected;
+            return BRUCE_OK;
+        }
 
         uint32_t input_timeout_ms = 100;
         if (poll != NULL) {
@@ -471,9 +492,55 @@ bruce_result_t dialog__gui_choice(
             *out_selected = (size_t)selected;
             return BRUCE_ERR_CANCELLED;
         }
-        if (input_result != BRUCE_OK || ev.action != BRUCE_INPUT_PRESS) { continue; }
+        if (input_result != BRUCE_OK) continue;
+
+        if (ev.type == BRUCE_INPUT_TOUCH) {
+            if (!touch) continue;
+            if (ev.action == BRUCE_INPUT_PRESS) {
+                touch_y = ev.value;
+                touch_first_visible = first_visible;
+                touch_dragged = false;
+                if (show_selection) {
+                    show_selection = false;
+                    redraw = true;
+                }
+            } else if (ev.action == BRUCE_INPUT_CHANGE && touch_y >= 0) {
+                int moved_rows = (touch_y - (int)ev.value) / row_h;
+                if (moved_rows != 0) touch_dragged = true;
+                int max_first = (int)choice_count - items_per_page;
+                int first = touch_first_visible + moved_rows;
+                if (first > max_first) first = max_first;
+                if (first < 0) first = 0;
+                if (first != first_visible) {
+                    first_visible = first;
+                    /* Keep the (hidden) selection on screen, or the redraw scrolls back to it. */
+                    if (selected < first_visible) selected = first_visible;
+                    if (selected >= first_visible + items_per_page) selected = first_visible + items_per_page - 1;
+                    redraw = true;
+                }
+            } else if (ev.action == BRUCE_INPUT_RELEASE && touch_y >= 0) {
+                int row = touch_y >= list_y ? (touch_y - list_y) / row_h : -1;
+                int index = first_visible + row;
+                touch_y = -1;
+                if (!touch_dragged && row >= 0 && row < items_per_page && index < (int)choice_count) {
+                    /* Highlight the row on the next frame, then return it. */
+                    selected = index;
+                    show_selection = true;
+                    tap_pending = true;
+                    redraw = true;
+                }
+            }
+            continue;
+        }
+        if (ev.action != BRUCE_INPUT_PRESS) continue;
 
         int previous_selected = selected;
+        if (!show_selection && ev.code != BRUCE_INPUT_CODE_BACK) {
+            /* With the selection hidden, the first key press only reveals it. */
+            show_selection = true;
+            redraw = true;
+            continue;
+        }
         switch (ev.code) {
             case BRUCE_INPUT_CODE_UP:
             case BRUCE_INPUT_CODE_PREV:
@@ -682,7 +749,7 @@ bruce_result_t dialog__gui_choice_search(
             if (title_h > 0) {
                 bool title_on_pri_fill = render_borders && !render_window;
                 if (title_on_pri_fill) { display__fill_rect(left, top, viewport_w, title_h, pri); }
-                display__set_text_color(title_on_pri_fill ? text : text_color);
+                display__set_text_color(title_on_pri_fill ? config__high_contrast_text_on(pri) : text_color);
                 display__set_text_size(DIALOG__TEXT_SIZE);
                 display__set_text_bg_color(title_on_pri_fill ? pri : content_fill_color);
                 display__set_cursor(content_left + DIALOG__MARGIN, content_top + DIALOG__MARGIN);

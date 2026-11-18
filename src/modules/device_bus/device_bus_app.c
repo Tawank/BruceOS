@@ -1,5 +1,6 @@
 #include "device_bus_app.h"
 #include "core_sdk/result.h"
+#include "sdkconfig.h"
 
 #if CONFIG_BRUCE_BOARD_I2C_ENABLED
 
@@ -49,6 +50,7 @@ static bool s_touch_ready;
 static bool s_touch_prev_pressed;
 static int32_t s_touch_prev_x;
 static int32_t s_touch_prev_y;
+static int32_t s_touch_prev_key = -1;
 
 static void device_bus__touch_reset(void) {
 #if CONFIG_BRUCE_TOUCH_PIN_RST >= 0
@@ -86,11 +88,62 @@ static bool device_bus__touch_ensure_device(i2c_master_bus_handle_t bus) {
         .scl_speed_hz = CONFIG_BRUCE_BOARD_I2C_FREQ_HZ,
     };
     if (i2c_master_bus_add_device(bus, &dev_config, &s_touch_dev) != ESP_OK) return false;
+#if CONFIG_BRUCE_TOUCH_CST3530
+    /* Normal reporting mode, as Hynitron's driver sets it. */
+    static const uint8_t normal_mode[][4] = {
+        {0xD0, 0x00, 0x04, 0x00}, {0xD0, 0x00, 0x04, 0x00}, {0xD0, 0x00, 0x00, 0x00},
+        {0xD0, 0x00, 0x0C, 0x00}, {0xD0, 0x00, 0x01, 0x00},
+    };
+    for (size_t i = 0; i < sizeof(normal_mode) / sizeof(normal_mode[0]); ++i) {
+        (void)i2c_master_transmit(s_touch_dev, normal_mode[i], sizeof(normal_mode[i]), 50);
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
+#endif
     s_touch_ready = true;
     return true;
 }
 
-static bool device_bus__touch_read(int32_t *out_x, int32_t *out_y) {
+#if CONFIG_BRUCE_TOUCH_CST3530
+/* Hynitron CST3530/CST66xx report (Hynitron's hyn_cst66xx.c): a 4-byte
+ * header (16-bit checksum, type 0xFF for points, key/finger counts), then 5
+ * bytes per key and finger. Keys come first; only the first finger is used.
+ * The controller also answers with other frame types and stale data, which
+ * the type and checksum reject. */
+static bool device_bus__touch_read(int32_t *out_x, int32_t *out_y, int32_t *out_key) {
+    *out_key = -1;
+    static const uint8_t report_reg[] = {0xD0, 0x07, 0x00, 0x00};
+    static const uint8_t report_ack[] = {0xD0, 0x00, 0x02, 0xAB};
+    uint8_t report[4 + 5 * 5] = {0};
+    /* Separate write and read, with a stop between them, as Hynitron's driver does. */
+    if (i2c_master_transmit(s_touch_dev, report_reg, sizeof(report_reg), 50) != ESP_OK ||
+        i2c_master_receive(s_touch_dev, report, sizeof(report), 50) != ESP_OK) {
+        return false;
+    }
+    (void)i2c_master_transmit(s_touch_dev, report_ack, sizeof(report_ack), 50);
+
+    int fingers = report[3] & 0x0F;
+    int keys = report[3] >> 4;
+    if (report[2] != 0xFF || keys + fingers == 0 || keys + fingers > 5) return false;
+    uint16_t sum = 0x55;
+    for (int i = 4; i < 4 + (keys + fingers) * 5; ++i) sum += report[i];
+    if (sum != (report[0] | report[1] << 8)) return false;
+
+    /* Key byte: id in the low nibble, 1 = pressed in the high nibble. */
+    if (keys > 0 && (report[8] >> 4) != 0) *out_key = report[8] & 0x0F;
+    if (fingers == 0) return false;
+    const uint8_t *point = &report[4 + keys * 5];
+    if ((point[4] >> 4) == 0) return false;
+
+    int32_t x = point[0] | ((int32_t)(point[3] & 0x0F) << 8);
+    int32_t y = point[1] | ((int32_t)(point[3] & 0xF0) << 4);
+    device_bus__touch_apply_orientation(&x, &y);
+    *out_x = x;
+    *out_y = y;
+    return true;
+}
+#else
+static bool device_bus__touch_read(int32_t *out_x, int32_t *out_y, int32_t *out_key) {
+    *out_key = -1;
     uint8_t status_reg = DEVICE_BUS__TOUCH_REG_TD_STATUS;
     uint8_t status = 0;
     if (i2c_master_transmit_receive(s_touch_dev, &status_reg, 1, &status, 1, -1) != ESP_OK) return false;
@@ -109,9 +162,10 @@ static bool device_bus__touch_read(int32_t *out_x, int32_t *out_y) {
     *out_y = y;
     return true;
 }
+#endif
 
-static void device_bus__touch_publish(bruce_input_action_t action, int32_t x, int32_t y) {
-    bruce_device_touch_message_t message = {.action = action, .x = x, .y = y};
+static void device_bus__touch_publish(bruce_input_action_t action, int32_t x, int32_t y, int32_t key) {
+    bruce_device_touch_message_t message = {.action = action, .x = x, .y = y, .key = key};
     (void)pubsub__publish(BRUCE_DEVICE_TOPIC_TOUCH, &message, sizeof(message));
 }
 
@@ -120,14 +174,21 @@ static void device_bus__touch_poll(i2c_master_bus_handle_t bus) {
 
     int32_t x = 0;
     int32_t y = 0;
-    bool pressed = device_bus__touch_read(&x, &y);
+    int32_t key = -1;
+    bool pressed = device_bus__touch_read(&x, &y, &key);
 
     if (pressed && !s_touch_prev_pressed) {
-        device_bus__touch_publish(BRUCE_INPUT_PRESS, x, y);
+        device_bus__touch_publish(BRUCE_INPUT_PRESS, x, y, -1);
     } else if (pressed && s_touch_prev_pressed && (x != s_touch_prev_x || y != s_touch_prev_y)) {
-        device_bus__touch_publish(BRUCE_INPUT_CHANGE, x, y);
+        device_bus__touch_publish(BRUCE_INPUT_CHANGE, x, y, -1);
     } else if (!pressed && s_touch_prev_pressed) {
-        device_bus__touch_publish(BRUCE_INPUT_RELEASE, s_touch_prev_x, s_touch_prev_y);
+        device_bus__touch_publish(BRUCE_INPUT_RELEASE, s_touch_prev_x, s_touch_prev_y, -1);
+    }
+
+    if (key != s_touch_prev_key) {
+        if (s_touch_prev_key >= 0) device_bus__touch_publish(BRUCE_INPUT_RELEASE, 0, 0, s_touch_prev_key);
+        if (key >= 0) device_bus__touch_publish(BRUCE_INPUT_PRESS, 0, 0, key);
+        s_touch_prev_key = key;
     }
 
     s_touch_prev_pressed = pressed;

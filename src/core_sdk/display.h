@@ -80,6 +80,13 @@ int display__width(void);
 int display__height(void);
 
 /**
+ * @brief True on e-paper panels: black and white only, and every visible
+ * change costs a slow screen refresh, so avoid animations and ticking
+ * seconds.
+ */
+bool display__is_epaper(void);
+
+/**
  * @brief Full physical screen width, independent of the caller's own viewport.
  *
  * (which may be smaller, tiled, or zero while hidden/background). Meant for

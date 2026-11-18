@@ -2,6 +2,8 @@
 
 #include "dialog_gui_common.h"
 
+#include "core/config/config.h"
+
 #include <stdint.h>
 
 #include "core_sdk/display.h"
@@ -69,7 +71,7 @@ dialog__gui_message_frame(bruce_dialog_kind_t kind, const char *title, const cha
          * inset - display__draw_round_rect() below redraws the rounded
          * outline on top of it, clipping these corners back round. */
         display__fill_rect(left, top, viewport_w, title_h, accent);
-        display__set_text_color(text);
+        display__set_text_color(config__high_contrast_text_on(accent));
         display__set_text_size(DIALOG__MESSAGE_TITLE_SIZE);
         display__set_text_bg_color(accent);
         display__set_cursor(content_left, content_top);

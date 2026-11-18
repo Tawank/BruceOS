@@ -391,6 +391,24 @@ bool config__get_display_dma_framebuffer(void);
 bruce_result_t config__set_display_dma_framebuffer(bool value);
 
 /**
+ * @brief Whether text on coloured bars (e.g. dialog titles on the primary
+ * colour) switches to the background colour when that reads better.
+ *
+ * On by default on e-paper, where text and primary are both black.
+ *
+ * @permission config
+ */
+bool config__get_display_high_contrast(void);
+
+/**
+ * @brief Sets high contrast; see config__get_display_high_contrast().
+ *
+ * @param value New setting.
+ * @permission config
+ */
+bruce_result_t config__set_display_high_contrast(bool value);
+
+/**
  * @brief Launcher command run at startup.
  *
  * @permission config

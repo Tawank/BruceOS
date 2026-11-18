@@ -77,6 +77,35 @@ menu "Bruce hardware configuration"
             depends on BRUCE_BOARD_I2C_ENABLED
             default 400000
             range 100000 1000000
+
+        config BRUCE_BOARD_GPIO_HIGH_MASK
+            hex "GPIOs driven high at boot (bit n = GPIO n)"
+            default 0x0
+            help
+                For chip-selects and resets of devices sharing the SD card's
+                SPI bus that Bruce has no driver for, so they stay off the
+                bus. Set before storage and display init.
+
+        config BRUCE_BOARD_XL9555_ENABLED
+            bool "XL9555 GPIO expander on the board I2C bus"
+            depends on BRUCE_BOARD_I2C_ENABLED
+            default n
+            help
+                Sets all 16 XL9555 pins as outputs at boot: low for 20 ms,
+                which also pulses any active-low reset lines, then
+                BRUCE_BOARD_XL9555_OUTPUTS. Used for power enables and
+                reset lines, e.g. on the LilyGO T-Deck MAX.
+
+        config BRUCE_BOARD_XL9555_I2C_ADDR
+            hex "XL9555 I2C address"
+            depends on BRUCE_BOARD_XL9555_ENABLED
+            default 0x20
+
+        config BRUCE_BOARD_XL9555_OUTPUTS
+            hex "XL9555 output levels (bit n = pin n, port 1 is bits 8-15)"
+            depends on BRUCE_BOARD_XL9555_ENABLED
+            range 0x0 0xFFFF
+            default 0x0
     endmenu
 
     menu "Display"
@@ -112,6 +141,13 @@ menu "Bruce hardware configuration"
 
             config BRUCE_DISPLAY_PANEL_ILI9341
                 bool "ILI9341"
+
+            config BRUCE_DISPLAY_PANEL_UC8253
+                bool "UC8253 black-and-white e-paper (e.g. GDEQ031T10)"
+                help
+                    SPI only. Drawing goes into a 1-bit buffer (dithered)
+                    and the panel refreshes in the background shortly
+                    after drawing stops.
         endchoice
 
         choice BRUCE_DISPLAY_BUS
@@ -127,6 +163,7 @@ menu "Bruce hardware configuration"
 
             config BRUCE_DISPLAY_BUS_I80
                 bool "8-bit parallel (i80)"
+                depends on !BRUCE_DISPLAY_PANEL_UC8253
         endchoice
 
         config BRUCE_DISPLAY_SPI_HOST
@@ -255,6 +292,12 @@ menu "Bruce hardware configuration"
                 always on once powered, or gated through an I2C GPIO
                 expander (see BRUCE_DISPLAY_BACKLIGHT_I2C_EXPANDER_ENABLED
                 below). Either way the driver skips backlight PWM setup.
+
+        config BRUCE_DISPLAY_PIN_BUSY
+            int "E-paper BUSY GPIO"
+            depends on BRUCE_DISPLAY_PANEL_UC8253
+            default -1
+            range -1 48
 
         config BRUCE_DISPLAY_BACKLIGHT_I2C_EXPANDER_ENABLED
             bool "Backlight enabled via I2C GPIO expander (AW9523)"
@@ -610,8 +653,23 @@ menu "Bruce hardware configuration"
             depends on BRUCE_BOARD_I2C_ENABLED
             default n
             help
-                A 7-row/8-column Cardputer-layout keyboard connected through
-                a TCA8418 keypad controller, as used by the Cardputer ADV.
+                A matrix keyboard connected through a TCA8418 keypad
+                controller, as used by the Cardputer ADV and T-Deck MAX.
+
+        choice BRUCE_KEYBOARD_TCA8418_LAYOUT
+            prompt "TCA8418 keyboard layout"
+            depends on BRUCE_KEYBOARD_TCA8418_ENABLED
+            default BRUCE_KEYBOARD_LAYOUT_CARDPUTER
+
+            config BRUCE_KEYBOARD_LAYOUT_CARDPUTER
+                bool "Cardputer ADV (7x8 matrix)"
+
+            config BRUCE_KEYBOARD_LAYOUT_TDECK
+                bool "T-Deck MAX (4x10 matrix, BlackBerry style)"
+                help
+                    Alt types the symbol printed on a key, Sym is Fn, and
+                    the microphone key is Esc/Back.
+        endchoice
 
         config BRUCE_KEYBOARD_TCA8418_I2C_ADDR
             hex "TCA8418 I2C address"
@@ -790,7 +848,7 @@ menu "Bruce hardware configuration"
 
     menu "Touch"
         config BRUCE_TOUCH_ENABLED
-            bool "Touchscreen available (FT5x06/FT6336 family, I2C)"
+            bool "Touchscreen available (I2C)"
             depends on BRUCE_BOARD_I2C_ENABLED
             default n
             help
@@ -802,9 +860,22 @@ menu "Bruce hardware configuration"
                 for BRUCE_INPUT_TOUCH themselves, same as
                 BRUCE_INPUT_BUTTON/KEY are handled today.
 
+        choice BRUCE_TOUCH_CONTROLLER
+            prompt "Touch controller"
+            depends on BRUCE_TOUCH_ENABLED
+            default BRUCE_TOUCH_FT5X06
+
+            config BRUCE_TOUCH_FT5X06
+                bool "FT5x06 / FT6336"
+
+            config BRUCE_TOUCH_CST3530
+                bool "Hynitron CST3530 / CST66xx"
+        endchoice
+
         config BRUCE_TOUCH_I2C_ADDR
             hex "Touch controller I2C address"
             depends on BRUCE_TOUCH_ENABLED
+            default 0x1A if BRUCE_TOUCH_CST3530
             default 0x38
 
         config BRUCE_TOUCH_PIN_RST

@@ -49,6 +49,7 @@ typedef struct {
     int displayRotation;
     bool displayBufferedRendering;
     bool displayDmaFramebuffer;
+    bool displayHighContrast;
 
     const char *launcher;
 
@@ -106,6 +107,12 @@ void config__get_colors_internal(
     uint16_t *pri, uint16_t *sec, uint16_t *bg, uint16_t *surface, uint16_t *text, uint16_t *text_muted,
     uint16_t *border, uint16_t *success, uint16_t *warning, uint16_t *error
 );
+
+/* Colour for text drawn on a `fill` such as a title bar in the primary
+ * colour. Normally the text colour; with high contrast on (e.g. e-paper,
+ * where text and primary are both black) whichever of text or background
+ * stands out more from `fill`. */
+uint16_t config__high_contrast_text_on(uint16_t fill);
 
 /* Compatibility initializer. New callers should use config__init(). */
 void config__init_defaults(void);

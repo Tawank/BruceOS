@@ -865,6 +865,14 @@ void display__deinit(void) {
     display__unlock();
 }
 
+bool display__is_epaper(void) {
+#if CONFIG_BRUCE_DISPLAY_PANEL_UC8253
+    return true;
+#else
+    return false;
+#endif
+}
+
 int display__width(void) {
     bruce_process_id_t caller = process__current_id();
     /* A process's viewport isn't sized until it's promoted to a real GUI

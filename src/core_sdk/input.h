@@ -183,6 +183,9 @@ bool input__wait_long_press(const bruce_input_event_t *press, uint32_t long_ms);
  */
 bool input__check(int32_t code, bool consume);
 
+/** @brief True if the device has a touchscreen (BRUCE_INPUT_TOUCH events). */
+bool input__has_touch(void);
+
 /**
  * @brief Adds an event to the input queue.
  *

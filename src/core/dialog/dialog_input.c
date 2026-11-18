@@ -311,7 +311,7 @@ static void dialog__input_clear_and_title(const char *title, const dialog__layou
     );
     (void)display__fill_screen(bg);
     display__fill_rect(0, 0, display__width(), layout->title_h, pri);
-    display__set_text_color(text);
+    display__set_text_color(config__high_contrast_text_on(pri));
     display__set_text_size(layout->title_size);
     display__set_text_bg_color(pri);
     display__set_cursor(DIALOG__MARGIN, (layout->title_h - DIALOG__CHAR_H * layout->title_size) / 2);

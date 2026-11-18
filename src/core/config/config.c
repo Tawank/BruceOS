@@ -103,6 +103,14 @@ static void config__set_defaults(config__t *cfg) {
     config__free_config(cfg);
     memset(cfg, 0, sizeof(*cfg));
 
+#if CONFIG_BRUCE_DISPLAY_PANEL_UC8253
+    /* The "E-paper" theme preset: black ink on white paper. */
+    cfg->colorPrimary = cfg->colorSecondary = 0x0000;
+    cfg->colorBackground = cfg->colorSurface = 0xFFFF;
+    cfg->colorText = cfg->colorTextMuted = cfg->colorBorder = 0x0000;
+    cfg->colorSuccess = cfg->colorWarning = cfg->colorError = 0x0000;
+    cfg->displayHighContrast = true;
+#else
     cfg->colorPrimary = 0xA80F;
     cfg->colorSecondary = 0xA80F - 0x2000;
     cfg->colorBackground = 0x0000;
@@ -113,6 +121,7 @@ static void config__set_defaults(config__t *cfg) {
     cfg->colorSuccess = 0x07E0;
     cfg->colorWarning = 0xFD20;
     cfg->colorError = 0xF800;
+#endif
     cfg->displayRotation = 0;
     cfg->displayBufferedRendering = true;
     cfg->displayDmaFramebuffer = true;
@@ -308,6 +317,7 @@ static void config__parse_json(config__t *cfg, const cJSON *root) {
         json_get_int(display, "brightness", &cfg->displayBrightness);
         json_get_bool(display, "bufferedRendering", &cfg->displayBufferedRendering);
         json_get_bool(display, "dmaFramebuffer", &cfg->displayDmaFramebuffer);
+        json_get_bool(display, "highContrast", &cfg->displayHighContrast);
     }
 
     const cJSON *time = cJSON_GetObjectItemCaseSensitive(root, "time");
@@ -440,6 +450,7 @@ static cJSON *config__build_json(const config__t *cfg) {
     cJSON_AddNumberToObject(display, "brightness", cfg->displayBrightness);
     cJSON_AddBoolToObject(display, "bufferedRendering", cfg->displayBufferedRendering);
     cJSON_AddBoolToObject(display, "dmaFramebuffer", cfg->displayDmaFramebuffer);
+    cJSON_AddBoolToObject(display, "highContrast", cfg->displayHighContrast);
 
     cJSON *time = cJSON_AddObjectToObject(root, "time");
     cJSON_AddBoolToObject(time, "automaticUpdateViaNTP", cfg->timeAutomaticUpdateViaNTP);
@@ -909,6 +920,7 @@ bruce_result_t config__set_colors(const bruce_config_theme_colors_t *colors) {
 CONFIG__DEFINE_INT_FIELD(display_rotation, displayRotation)
 CONFIG__DEFINE_BOOL_FIELD(display_buffered_rendering, displayBufferedRendering)
 CONFIG__DEFINE_BOOL_FIELD(display_dma_framebuffer, displayDmaFramebuffer)
+CONFIG__DEFINE_BOOL_FIELD(display_high_contrast, displayHighContrast)
 CONFIG__DEFINE_STRING_FIELD(launcher, launcher, CONFIG__LAUNCHER_APP_MAX_LEN)
 
 CONFIG__DEFINE_INT_FIELD(display_dim_timeout, displayDimTimeout)
@@ -933,6 +945,22 @@ void config__get_audio_settings(bool *enabled, int *volume) {
     settings = atomic_load_explicit(&s_audio_settings, memory_order_acquire);
     *enabled = (settings & CONFIG__AUDIO_ENABLED) != 0;
     *volume = (int)(settings & CONFIG__AUDIO_VOLUME_MASK);
+}
+
+static int config__luma(uint16_t color) {
+    return (((color >> 11) << 3) * 77 + (((color >> 5) & 0x3F) << 2) * 150 + ((color & 0x1F) << 3) * 29) >> 8;
+}
+
+uint16_t config__high_contrast_text_on(uint16_t fill) {
+    uint16_t pri, sec, bg, surface, text, muted, border, success, warning, error;
+    config__get_colors_internal(&pri, &sec, &bg, &surface, &text, &muted, &border, &success, &warning, &error);
+    config__lock();
+    bool high_contrast = s_config.displayHighContrast;
+    config__unlock();
+    if (!high_contrast) return text;
+    int to_text = abs(config__luma(text) - config__luma(fill));
+    int to_bg = abs(config__luma(bg) - config__luma(fill));
+    return to_text >= to_bg ? text : bg;
 }
 
 void config__get_colors_internal(

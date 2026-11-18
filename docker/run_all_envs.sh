@@ -18,6 +18,7 @@ DEFAULT_ENVS=(
   lilygo-t-embed
   lilygo-t-display-s3
   lilygo-t-display-ttgo
+  lilygo-t-deck-max
   xk404
 )
 

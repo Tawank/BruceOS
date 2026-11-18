@@ -2,6 +2,8 @@
 
 #include "dialog_gui_common.h"
 
+#include "core/config/config.h"
+
 #include <stdio.h>
 
 #include "core_sdk/display.h"
@@ -83,7 +85,7 @@ static void dialog__time_draw_title(
 ) {
     display__fill_screen(colors->background);
     display__fill_rect(0, 0, display__width(), layout->title_h, colors->primary);
-    display__set_text_color(colors->text);
+    display__set_text_color(config__high_contrast_text_on(colors->primary));
     display__set_text_size(1);
     display__set_text_bg_color(colors->primary);
     display__set_cursor(DIALOG__MARGIN, DIALOG__MARGIN);

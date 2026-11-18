@@ -2,6 +2,7 @@
 
 #include <string.h>
 
+#include "core/device/board_i2c.h"
 #include "core/process/process.h"
 #include "core_sdk/i2c.h"
 #include "core_sdk/permission.h"
@@ -10,6 +11,7 @@
 #include "esp_err.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "sdkconfig.h"
 #include "soc/soc_caps.h"
 
 #define I2C__MAX_HANDLES 8
@@ -19,6 +21,7 @@ typedef struct {
     int sda;
     int scl;
     bool pullups;
+    bool borrowed; /* The board bus, owned by board_i2c.c. */
     size_t references;
     i2c_master_bus_handle_t handle;
 } i2c__physical_bus_t;
@@ -73,7 +76,7 @@ static void i2c__release_locked(i2c__slot_t *slot) {
     i2c__physical_bus_t *bus = &s_buses[slot->port];
     memset(slot, 0, sizeof(*slot));
     if (--bus->references == 0) {
-        (void)i2c_del_master_bus(bus->handle);
+        if (!bus->borrowed) (void)i2c_del_master_bus(bus->handle);
         memset(bus, 0, sizeof(*bus));
     }
 }
@@ -149,7 +152,14 @@ bruce_result_t i2c__open(const bruce_i2c_bus_config_t *config, bruce_i2c_id_t *o
             .glitch_ignore_cnt = 7,
             .flags.enable_internal_pullup = config->enable_internal_pullups,
         };
-        esp_err_t error = i2c_new_master_bus(&bus_config, &bus->handle);
+#if CONFIG_BRUCE_BOARD_I2C_ENABLED
+        /* Two controllers can't drive the same pins: share the board bus. */
+        if (config->sda == CONFIG_BRUCE_BOARD_I2C_SDA_GPIO && config->scl == CONFIG_BRUCE_BOARD_I2C_SCL_GPIO) {
+            bus->handle = board_i2c__acquire();
+            bus->borrowed = bus->handle != NULL;
+        }
+#endif
+        esp_err_t error = bus->borrowed ? ESP_OK : i2c_new_master_bus(&bus_config, &bus->handle);
         bruce_result_t result = error == ESP_ERR_NOT_FOUND ? BRUCE_ERR_BUSY : i2c__esp_result(error);
         if (result != BRUCE_OK) {
             i2c__unlock();

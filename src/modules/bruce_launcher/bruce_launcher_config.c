@@ -9,6 +9,7 @@
 #include "bruce_launcher_menu_editor.h"
 #include "core_sdk/app_config.h"
 #include "core_sdk/dialog.h"
+#include "core_sdk/display.h"
 #include "core_sdk/result.h"
 #include "core_sdk/runtime.h"
 #include "core_sdk/stdio.h"
@@ -38,11 +39,17 @@ static bruce_launcher_label_mode_t bruce_launcher_config__parse_labels(const cha
     return BRUCE_LAUNCHER_LABELS_SELECTED;
 }
 
+/* Screens at least 240px both ways (e.g. T-Deck MAX, CoreS3) fit a grid. */
+static bruce_launcher_layout_t bruce_launcher_config__default_layout(void) {
+    bool big = display__width() >= 240 && display__height() >= 240;
+    return big ? BRUCE_LAUNCHER_LAYOUT_GRID : BRUCE_LAUNCHER_LAYOUT_CAROUSEL_H;
+}
+
 void bruce_launcher_config__load(bruce_launcher_render_config_t *out) {
     char text[BRUCE_APP_CONFIG_STRING_MAX_LEN];
 
     app_config__get_string(
-        BRUCE_LAUNCHER_CONFIG__APP_NAME, "render.layout", LAYOUT_NAMES[BRUCE_LAUNCHER_LAYOUT_CAROUSEL_H],
+        BRUCE_LAUNCHER_CONFIG__APP_NAME, "render.layout", LAYOUT_NAMES[bruce_launcher_config__default_layout()],
         text, sizeof(text)
     );
     out->layout = bruce_launcher_config__parse_layout(text);

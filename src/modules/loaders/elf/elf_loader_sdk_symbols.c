@@ -2310,6 +2310,7 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(input__read),
     ESP_ELFSYM_EXPORT(input__poll),
     ESP_ELFSYM_EXPORT(input__flush),
+    ESP_ELFSYM_EXPORT(input__has_touch),
     ESP_ELFSYM_EXPORT(input__peek),
     ESP_ELFSYM_EXPORT(input__wait),
     ESP_ELFSYM_EXPORT(input__wait_long_press),
@@ -2368,6 +2369,7 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
 
     /* Display (layout management remains built-in-only) */
     ESP_ELFSYM_EXPORT(display__width),
+    ESP_ELFSYM_EXPORT(display__is_epaper),
     ESP_ELFSYM_EXPORT(display__height),
     ESP_ELFSYM_EXPORT(display__color565),
     ESP_ELFSYM_EXPORT(display__fill_screen),

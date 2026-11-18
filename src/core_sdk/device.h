@@ -52,11 +52,13 @@ bruce_result_t device__power_off(uint32_t delay_ms);
 #define BRUCE_DEVICE_TOPIC_BATTERY "device.battery"
 
 /* x/y are panel pixel coordinates, already adjusted for the board's
- * configured swap/mirror settings. */
+ * configured swap/mirror settings. A message with key >= 0 is instead a
+ * touch key below the screen (0 left, 1 middle, 2 right) and has no x/y. */
 typedef struct {
     bruce_input_action_t action; /* BRUCE_INPUT_PRESS/RELEASE/CHANGE */
     int32_t x;
     int32_t y;
+    int32_t key;
 } bruce_device_touch_message_t;
 
 typedef struct {

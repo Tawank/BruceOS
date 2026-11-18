@@ -31,6 +31,9 @@
 #define BRUCE_LAUNCHER_SLIDE_DURATION_MS 160
 #define BRUCE_LAUNCHER_EASING_SCALE 1000
 #define BRUCE_LAUNCHER_STATUS_REFRESH_MS 1000
+#define BRUCE_LAUNCHER_SWIPE_PX 30
+/* How long a tapped entry stays highlighted before it opens. */
+#define BRUCE_LAUNCHER_TAP_FLASH_MS 50
 #define BRUCE_LAUNCHER_STATUS_TEXT_Y 11
 #define BRUCE_LAUNCHER_STATUS_CORNER_INSET 6
 #define BRUCE_LAUNCHER_BACKGROUND_WAIT_MS 1000
@@ -73,8 +76,10 @@ static bool bruce_launcher__compact(void) {
     return display__width() * display__height() * 4 < display__screen_width() * display__screen_height();
 }
 
+/* E-paper shows no seconds: each change would cost a screen refresh. */
 static void bruce_launcher__format_clock(char *out, size_t size) {
-    snprintf(out, size, "--:--:--");
+    bool seconds = !display__is_epaper();
+    snprintf(out, size, seconds ? "--:--:--" : "--:--");
     bruce_clock_datetime_t time;
     if (clock__get_local(&time) != BRUCE_OK) return;
     int hour = time.hour;
@@ -82,7 +87,8 @@ static void bruce_launcher__format_clock(char *out, size_t size) {
         hour %= 12;
         if (hour == 0) hour = 12;
     }
-    snprintf(out, size, "%02d:%02d:%02d", hour, time.minute, time.second);
+    if (seconds) snprintf(out, size, "%02d:%02d:%02d", hour, time.minute, time.second);
+    else snprintf(out, size, "%02d:%02d", hour, time.minute);
 }
 
 static void bruce_launcher__draw_compact_status(const bruce_launcher_theme_t *theme) {
@@ -507,23 +513,50 @@ static void bruce_launcher__grid_dimensions(int entry_count, int configured, int
     *out_rows = rows;
 }
 
+typedef struct {
+    int left, top, cols, rows, total_rows, cell_w, cell_h, content_h;
+} bruce_launcher_grid_t;
+
+/* Cell geometry, shared by drawing and touch hit-testing. */
+static bruce_launcher_grid_t bruce_launcher__grid(int count, const bruce_launcher_render_config_t *render) {
+    bruce_launcher_grid_t g = {.left = BRUCE_LAUNCHER_BORDER_PAD + 2, .top = BRUCE_LAUNCHER_STATUS_H + 4};
+    bruce_launcher__grid_dimensions(count, render->grid_columns, &g.cols, &g.rows);
+    g.total_rows = (g.cols + count - 1) / g.cols;
+    int scrollbar_w = g.total_rows > g.rows ? 10 : 0;
+    g.content_h = display__height() - BRUCE_LAUNCHER_BORDER_PAD - 2 - g.top;
+    g.cell_w = (display__width() - 2 * BRUCE_LAUNCHER_BORDER_PAD - 2 - scrollbar_w) / g.cols;
+    g.cell_h = g.content_h / (g.rows > 0 ? g.rows : 1);
+    return g;
+}
+
+/* Entry index under a tap, or -1. */
+static int bruce_launcher__grid_hit(
+    int count, const bruce_launcher_render_config_t *render, int scroll_state, int x, int y
+) {
+    bruce_launcher_grid_t g = bruce_launcher__grid(count, render);
+    if (x < g.left || y < g.top || g.cell_w <= 0 || g.cell_h <= 0) return -1;
+    int col = (x - g.left) / g.cell_w;
+    int row = (y - g.top) / g.cell_h;
+    if (col >= g.cols || row >= g.rows) return -1;
+    int index = (scroll_state + row) * g.cols + col;
+    return index < count ? index : -1;
+}
+
+/* On touch screens the grid hides its selection until a navigation key is
+ * used, and hides it again on the next tap. */
+static bool s_show_selection;
+
 static void bruce_launcher__draw_root_menu_grid(
     const bruce_launcher_menu_t *menu, int selected, const bruce_launcher_theme_t *theme,
     const bruce_launcher_render_config_t *render, int *scroll_state
 ) {
     int w = display__width();
     int h = display__height();
-    int top = BRUCE_LAUNCHER_STATUS_H + 4;
     int count = menu->entry_count;
-    int cols, rows;
-    bruce_launcher__grid_dimensions(count, render->grid_columns, &cols, &rows);
-    int total_rows = (count + cols - 1) / cols;
+    bruce_launcher_grid_t g = bruce_launcher__grid(count, render);
+    int top = g.top, cols = g.cols, rows = g.rows, total_rows = g.total_rows;
+    int cell_w = g.cell_w, cell_h = g.cell_h, content_h = g.content_h;
     bool scrollable = total_rows > rows;
-
-    int content_h = h - BRUCE_LAUNCHER_BORDER_PAD - 2 - top;
-    int scrollbar_w = scrollable ? 10 : 0;
-    int cell_w = (w - 2 * BRUCE_LAUNCHER_BORDER_PAD - 2 - scrollbar_w) / cols;
-    int cell_h = content_h / (rows > 0 ? rows : 1);
 
     int selected_row = selected / cols;
     bruce_launcher__scroll_follow(selected_row, rows, total_rows, scroll_state);
@@ -540,10 +573,10 @@ static void bruce_launcher__draw_root_menu_grid(
         for (int col = 0; col < cols; ++col) {
             int i = row_index * cols + col;
             if (i >= count) continue;
-            int cell_x = BRUCE_LAUNCHER_BORDER_PAD + 2 + col * cell_w;
+            int cell_x = g.left + col * cell_w;
             int cell_y = top + r * cell_h;
             int cx = cell_x + cell_w / 2;
-            bool is_selected = i == selected;
+            bool is_selected = i == selected && s_show_selection;
 
             /* The selection card covers the whole cell -- icon and label
              * together -- so "selected" visibly includes the text, not just
@@ -1114,6 +1147,7 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
 
     bruce_launcher_render_config_t render;
     bruce_launcher_config__load(&render);
+    s_show_selection = !input__has_touch();
 
     int selected = 0;
     int last_drawn = -1;
@@ -1125,6 +1159,8 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
     int scroll_state = 0;
     uint32_t icon_revision = UINT32_MAX;
     uint64_t status_drawn_at = 0;
+    int touch_x = -1, touch_y = -1;
+    bool tap_pending = false;
     for (;;) {
         int width = display__width();
         int height = display__height();
@@ -1171,15 +1207,71 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
             }
         }
 
-        bruce_input_event_t ev;
-        bruce_result_t result = input__read(&ev, 100);
+        bruce_input_event_t ev = {0};
+        bool tapped = tap_pending;
+        bruce_result_t result = BRUCE_OK;
+        if (tap_pending) {
+            /* The tapped entry was just drawn highlighted: open it now. */
+            tap_pending = false;
+            (void)runtime__delay(BRUCE_LAUNCHER_TAP_FLASH_MS);
+            s_show_selection = false;
+            ev.type = BRUCE_INPUT_BUTTON;
+            ev.action = BRUCE_INPUT_PRESS;
+            ev.code = BRUCE_INPUT_CODE_SELECT;
+        } else {
+            result = input__read(&ev, 100);
+        }
         if (result == BRUCE_ERR_NOT_FOREGROUND) {
             /* Visible in a preview tile: keep looping so the status bar clock stays live. */
             (void)runtime__delay(100);
             if (display__viewport_changed()) last_drawn = -1;
             continue;
         }
-        if (result != BRUCE_OK || ev.action != BRUCE_INPUT_PRESS) { continue; }
+        if (result != BRUCE_OK) continue;
+
+        if (ev.type == BRUCE_INPUT_TOUCH) {
+            /* Grid only: a tap opens the entry under it, a vertical swipe
+             * moves a page. */
+            if (render.layout != BRUCE_LAUNCHER_LAYOUT_GRID || menu->entry_count == 0) continue;
+            if (s_show_selection) {
+                s_show_selection = false;
+                last_drawn = -1;
+            }
+            if (ev.action == BRUCE_INPUT_PRESS) {
+                touch_x = ev.code;
+                touch_y = ev.value;
+                continue;
+            }
+            if (ev.action != BRUCE_INPUT_RELEASE || touch_x < 0) continue;
+            int dy = (int)ev.value - touch_y;
+            if (abs(dy) > BRUCE_LAUNCHER_SWIPE_PX) {
+                bruce_launcher_grid_t g = bruce_launcher__grid(menu->entry_count, &render);
+                selected += (dy < 0 ? 1 : -1) * g.cols * g.rows;
+                if (selected < 0) selected = 0;
+                if (selected >= menu->entry_count) selected = menu->entry_count - 1;
+                last_drawn = -1;
+            } else {
+                int hit = bruce_launcher__grid_hit(menu->entry_count, &render, scroll_state, touch_x, touch_y);
+                if (hit >= 0) {
+                    /* Highlight it on the next frame, then open it. */
+                    selected = hit;
+                    s_show_selection = true;
+                    tap_pending = true;
+                    last_drawn = -1;
+                }
+            }
+            touch_x = touch_y = -1;
+            continue;
+        }
+        if (ev.action != BRUCE_INPUT_PRESS) continue;
+
+        if (render.layout == BRUCE_LAUNCHER_LAYOUT_GRID && !s_show_selection && !tapped &&
+            (bruce_launcher__navigation_direction(ev.code) != 0 || ev.code == BRUCE_INPUT_CODE_SELECT)) {
+            /* With the selection hidden, the first key press only reveals it. */
+            s_show_selection = true;
+            last_drawn = -1;
+            continue;
+        }
 
         switch (ev.code) {
             case BRUCE_INPUT_CODE_LEFT:

@@ -54,9 +54,40 @@
 
 #define INPUT__KB_OUT_COUNT 3
 #define INPUT__KB_IN_COUNT 7
+#define INPUT__KB_HOTKEY_NONE BRUCE_CONFIG_HOTKEY_MAX_COUNT
+
+#if CONFIG_BRUCE_KEYBOARD_LAYOUT_TDECK
+#define INPUT__KB_COLS 10
+#define INPUT__KB_ROWS 4
+/* The microphone key is Esc/Back. */
+#define INPUT__KB_IS_ESC(x, y) ((y) == 3 && (x) == 6)
+
+static const char *const s_kb_normal[INPUT__KB_ROWS][INPUT__KB_COLS] = {
+    {"q",   "w", "e", "r", "t", "y",     "u", "i",     "o",  "p"    },
+    {"a",   "s", "d", "f", "g", "h",     "j", "k",     "l",  "del"  },
+    {"alt", "z", "x", "c", "v", "b",     "n", "m",     "$",  "enter"},
+    {"",    "",  "",  "",  "",  "shift", "`", "space", "fn", "shift"},
+};
+
+static const char *const s_kb_shifted[INPUT__KB_ROWS][INPUT__KB_COLS] = {
+    {"Q",   "W", "E", "R", "T", "Y",     "U", "I",     "O",  "P"    },
+    {"A",   "S", "D", "F", "G", "H",     "J", "K",     "L",  "del"  },
+    {"alt", "Z", "X", "C", "V", "B",     "N", "M",     "$",  "enter"},
+    {"",    "",  "",  "",  "",  "shift", "`", "space", "fn", "shift"},
+};
+
+/* Alt types the symbol printed on the key. */
+#define INPUT__KB_HAS_SYMBOLS 1
+static const char *const s_kb_symbols[INPUT__KB_ROWS][INPUT__KB_COLS] = {
+    {"#",   "1", "2", "3", "(", ")",     "_", "-",     "+",  "@"    },
+    {"*",   "4", "5", "6", "/", ":",     ";", "'",     "\"", "del" },
+    {"alt", "7", "8", "9", "?", "!",     ",", ".",     "",   "enter"},
+    {"",    "",  "",  "",  "",  "shift", "0", "space", "fn", "shift"},
+};
+#else
 #define INPUT__KB_COLS 14
 #define INPUT__KB_ROWS 4
-#define INPUT__KB_HOTKEY_NONE BRUCE_CONFIG_HOTKEY_MAX_COUNT
+#define INPUT__KB_IS_ESC(x, y) ((y) == 0 && (x) == 0)
 
 /* Visual layout (row 0 is the top `123... row). */
 static const char *const s_kb_normal[INPUT__KB_ROWS][INPUT__KB_COLS] = {
@@ -72,6 +103,7 @@ static const char *const s_kb_shifted[INPUT__KB_ROWS][INPUT__KB_COLS] = {
     {"fn",   "shift", "A",   "S", "D", "F", "G", "H", "J", "K", "L", ":", "\"", "enter"},
     {"ctrl", "opt",   "alt", "Z", "X", "C", "V", "B", "N", "M", "<", ">", "?",  "space"},
 };
+#endif
 
 #if CONFIG_BRUCE_KEYBOARD_ENABLED
 static const int s_kb_out_pins[INPUT__KB_OUT_COUNT] = INPUT__KB_OUT_PINS;
@@ -133,10 +165,16 @@ static bool input__kb_tca_init(void) {
     };
     if (i2c__open(&config, &s_kb_tca_bus) != BRUCE_OK) return false;
 
+#if CONFIG_BRUCE_KEYBOARD_LAYOUT_TDECK
+    /* 4 row pins and 10 column pins. */
+    const uint8_t rows = 0x0F, cols_low = 0xFF, cols_high = 0x03;
+#else
     /* Lowest 7 row pins and lowest 8 column pins form the ADV matrix. */
-    if (!input__kb_tca_write(INPUT__TCA_REG_KP_GPIO1, 0x7F) ||
-        !input__kb_tca_write(INPUT__TCA_REG_KP_GPIO2, 0xFF) ||
-        !input__kb_tca_write(INPUT__TCA_REG_KP_GPIO3, 0x00)) {
+    const uint8_t rows = 0x7F, cols_low = 0xFF, cols_high = 0x00;
+#endif
+    if (!input__kb_tca_write(INPUT__TCA_REG_KP_GPIO1, rows) ||
+        !input__kb_tca_write(INPUT__TCA_REG_KP_GPIO2, cols_low) ||
+        !input__kb_tca_write(INPUT__TCA_REG_KP_GPIO3, cols_high)) {
         return false;
     }
 
@@ -186,11 +224,17 @@ static bool input__kb_scan(bool out_pressed[INPUT__KB_ROWS][INPUT__KB_COLS]) {
         uint8_t raw = (uint8_t)((event & 0x7F) - 1);
         uint8_t controller_row = raw / 10;
         uint8_t controller_col = raw % 10;
+#if CONFIG_BRUCE_KEYBOARD_LAYOUT_TDECK
+        uint8_t x = (uint8_t)(INPUT__KB_COLS - 1 - controller_col);
+        uint8_t y = controller_row;
+        if (y < INPUT__KB_ROWS) s_kb_tca_pressed[y][x] = (event & 0x80) != 0;
+#else
         uint8_t x = (uint8_t)(controller_row * 2 + (controller_col > 3 ? 1 : 0));
         uint8_t y = (uint8_t)((controller_col + 4) % 4);
         if (controller_row < 7 && controller_col < 8 && x < INPUT__KB_COLS) {
             s_kb_tca_pressed[y][x] = (event & 0x80) != 0;
         }
+#endif
     }
     (void)input__kb_tca_write(INPUT__TCA_REG_INT_STAT, 0x01);
     memcpy(out_pressed, s_kb_tca_pressed, sizeof(s_kb_tca_pressed));
@@ -255,6 +299,13 @@ static int32_t input__kb_char_code(const char *label) {
     return 0;
 }
 
+static const char *input__kb_label(int x, int y) {
+#ifdef INPUT__KB_HAS_SYMBOLS
+    if (s_kb_alt_held) return s_kb_symbols[y][x];
+#endif
+    return s_kb_shift_held ? s_kb_shifted[y][x] : s_kb_normal[y][x];
+}
+
 static bool input__kb_is_modifier(int x, int y) {
     const char *label = s_kb_normal[y][x];
     return strcmp(label, "fn") == 0 || strcmp(label, "shift") == 0 || strcmp(label, "ctrl") == 0 ||
@@ -287,6 +338,17 @@ static void input__kb_update_modifiers(const bool pressed[INPUT__KB_ROWS][INPUT_
 
 /* Decode an Fn+key chord into a semantic navigation code.  Returns 0 if none. */
 static int32_t input__kb_decode_fn_nav(int x, int y) {
+#if CONFIG_BRUCE_KEYBOARD_LAYOUT_TDECK
+    /* Sym + W/A/S/D move, Sym + del deletes, Sym + I/O ("-"/"+") zoom. */
+    if (y == 0 && x == 1) { return BRUCE_INPUT_CODE_UP; }
+    if (y == 1 && x == 1) { return BRUCE_INPUT_CODE_DOWN; }
+    if (y == 1 && x == 0) { return BRUCE_INPUT_CODE_LEFT; }
+    if (y == 1 && x == 2) { return BRUCE_INPUT_CODE_RIGHT; }
+    if (y == 1 && x == 9) { return BRUCE_INPUT_CODE_DELETE; }
+    if (y == 0 && x == 7) { return BRUCE_INPUT_CODE_ZOOM_OUT; }
+    if (y == 0 && x == 8) { return BRUCE_INPUT_CODE_ZOOM_IN; }
+    return 0;
+#endif
     /* Cardputer captured bindings:
      *   NavUp    : Fn + ;   (row 2, col 11)
      *   NavDown  : Fn + .   (row 3, col 11)
@@ -405,7 +467,7 @@ void input_keyboard__poll(void) {
                             s_kb_hotkey_consumed[y][x] = true;
                         }
                     } else if (s_kb_fn_held) {
-                        if (y == 0 && x == 0) {
+                        if (INPUT__KB_IS_ESC(x, y)) {
                             input__emit(BRUCE_INPUT_KEY, BRUCE_INPUT_PRESS, '`', '`');
                         } else {
                             int32_t nav = input__kb_decode_fn_nav(x, y);
@@ -416,10 +478,8 @@ void input_keyboard__poll(void) {
                             }
                         }
                     } else {
-                        const char *normal_label = s_kb_normal[y][x];
-                        const char *label = s_kb_shift_held ? s_kb_shifted[y][x] : normal_label;
-                        int32_t code = input__kb_char_code(label);
-                        if (y == 0 && x == 0 && !s_kb_shift_held) {
+                        int32_t code = input__kb_char_code(input__kb_label(x, y));
+                        if (INPUT__KB_IS_ESC(x, y) && code == '`') {
                             input__emit(BRUCE_INPUT_KEY, BRUCE_INPUT_PRESS, BRUCE_INPUT_CODE_BACK, -1);
                         } else if (s_kb_ctrl_held && code == ';') {
                             /* ';'/'.' already double as the UP/DOWN nav
@@ -455,7 +515,7 @@ void input_keyboard__poll(void) {
                             int32_t code = input__kb_char_code(s_kb_normal[y][x]);
                             if (code != 0) {
                                 /* A tapped Esc replays as the semantic Back key, same as an unbound press. */
-                                bool esc = y == 0 && x == 0;
+                                bool esc = INPUT__KB_IS_ESC(x, y);
                                 input__emit(BRUCE_INPUT_KEY, BRUCE_INPUT_PRESS, esc ? BRUCE_INPUT_CODE_BACK : code,
                                             esc ? -1 : code);
                                 input__emit(BRUCE_INPUT_KEY, BRUCE_INPUT_RELEASE, code, code);
@@ -466,8 +526,7 @@ void input_keyboard__poll(void) {
                     } else if (s_kb_hotkey_consumed[y][x]) {
                         s_kb_hotkey_consumed[y][x] = false;
                     } else {
-                        const char *label = s_kb_shift_held ? s_kb_shifted[y][x] : s_kb_normal[y][x];
-                        int32_t code = input__kb_char_code(label);
+                        int32_t code = input__kb_char_code(input__kb_label(x, y));
                         if (code != 0) { input__emit(BRUCE_INPUT_KEY, BRUCE_INPUT_RELEASE, code, code); }
                     }
                 }
