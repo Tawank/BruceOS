@@ -26,7 +26,7 @@
 
 #if CONFIG_BRUCE_AUDIO_BACKEND_I2S
 #if CONFIG_BRUCE_AUDIO_ES8311_CODEC
-#include "core_sdk/i2c.h"
+#include "core/device/board_i2c.h"
 #endif
 #include "driver/i2s_std.h"
 #include "esp_heap_caps.h"
@@ -34,6 +34,7 @@
 #define AUDIO__I2S_BCLK_GPIO ((gpio_num_t)CONFIG_BRUCE_AUDIO_I2S_BCLK_GPIO)
 #define AUDIO__I2S_DATA_GPIO ((gpio_num_t)CONFIG_BRUCE_AUDIO_I2S_DATA_GPIO)
 #define AUDIO__I2S_LRCLK_GPIO ((gpio_num_t)CONFIG_BRUCE_AUDIO_I2S_LRCLK_GPIO)
+#define AUDIO__I2S_MCLK_GPIO ((gpio_num_t)CONFIG_BRUCE_AUDIO_I2S_MCLK_GPIO)
 #elif CONFIG_BRUCE_AUDIO_BACKEND_LEDC_BUZZER
 #include "driver/ledc.h"
 #define AUDIO__OUTPUT_GPIO CONFIG_BRUCE_AUDIO_BUZZER_GPIO
@@ -103,33 +104,60 @@ static i2s_chan_handle_t s_i2s_tx_channel;
 static bool s_i2s_tx_ready;
 
 #if CONFIG_BRUCE_AUDIO_ES8311_CODEC
+/* DAC-only bring-up of the ES8311 as an I2S slave, 48 kHz 16-bit, after
+ * Espressif's esp_codec_dev es8311 driver. Talks to the board I2C bus
+ * directly, like the other core drivers, so it works from whichever process
+ * plays the first sound. Needs the I2S clocks already running. */
 static bruce_result_t audio__es8311_enable(void) {
     static const uint8_t configuration[][2] = {
-        {0x00, 0x80}, /* Reset / CSM power on. */
+        {0x44, 0x08}, /* I2C noise immunity (written twice, as the datasheet asks). */
+        {0x44, 0x08},
+        {0x01, 0x30}, {0x02, 0x00}, {0x03, 0x10}, {0x16, 0x24}, {0x04, 0x10}, {0x05, 0x00},
+        {0x0B, 0x00}, {0x0C, 0x00}, {0x10, 0x1F}, {0x11, 0x7F}, /* Reference and analog power. */
+        {0x00, 0x80}, /* Slave mode, power on. */
+#if CONFIG_BRUCE_AUDIO_I2S_MCLK_GPIO >= 0
+        {0x01, 0x3F}, /* Clock source is the MCLK pin (256 fs), all clocks on. */
+        {0x02, 0x00}, /* No pre-divider or multiplier. */
+#else
         {0x01, 0xB5}, /* Clock source is BCLK. */
-        {0x02, 0x18},
-        {0x0D, 0x01}, /* Power analog circuitry. */
-        {0x12, 0x00}, /* Power up DAC. */
-        {0x13, 0x10}, /* Route DAC to headphone driver. */
+        {0x02, 0x18}, /* BCLK (32 fs) x 8 = 256 fs. */
+#endif
+        {0x13, 0x10}, /* Route DAC to the output driver. */
+        {0x1B, 0x0A}, {0x1C, 0x6A},
+        {0x09, 0x0C}, /* DAC input: I2S, 16-bit. */
+        {0x0A, 0x0C},
+        {0x0E, 0x02}, {0x12, 0x00}, /* Power up DAC. */
+        {0x14, 0x1A}, {0x0D, 0x01}, /* Power analog circuitry. */
+        {0x15, 0x40}, {0x37, 0x08}, /* Bypass DAC equalizer. */
+        {0x45, 0x00},
         {0x32, 0xBF}, /* DAC volume: 0 dB. */
-        {0x37, 0x08}, /* Bypass DAC equalizer. */
+        {0x31, 0x00}, /* Unmute. */
     };
-    bruce_i2c_bus_config_t bus_config = {
-        .port = BRUCE_I2C_PORT_AUTO,
-        .sda = CONFIG_BRUCE_BOARD_I2C_SDA_GPIO,
-        .scl = CONFIG_BRUCE_BOARD_I2C_SCL_GPIO,
-        .clock_hz = CONFIG_BRUCE_BOARD_I2C_FREQ_HZ,
-        .enable_internal_pullups = true,
+    i2c_master_bus_handle_t bus = board_i2c__acquire();
+    i2c_device_config_t device_config = {
+        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+        .device_address = 0x18,
+        .scl_speed_hz = CONFIG_BRUCE_BOARD_I2C_FREQ_HZ,
     };
-    bruce_i2c_id_t bus = BRUCE_I2C_ID_INVALID;
-    bruce_result_t result = i2c__open(&bus_config, &bus);
-    if (result != BRUCE_OK) return result;
-    for (size_t i = 0; i < sizeof(configuration) / sizeof(configuration[0]); ++i) {
-        result = i2c__write(bus, 0x18, configuration[i], sizeof(configuration[i]), 100);
-        if (result != BRUCE_OK) break;
+    i2c_master_dev_handle_t dev = NULL;
+    if (bus == NULL || i2c_master_bus_add_device(bus, &device_config, &dev) != ESP_OK) {
+        ESP_LOGW(TAG, "es8311: board I2C bus unavailable");
+        return BRUCE_ERR_NOT_INITIALIZED;
     }
-    (void)i2c__close(bus);
-    return result;
+    uint8_t id_reg = 0xFD;
+    uint8_t id[2] = {0};
+    esp_err_t error = i2c_master_transmit_receive(dev, &id_reg, 1, id, sizeof(id), 100);
+    if (error != ESP_OK) {
+        ESP_LOGW(TAG, "es8311: no answer at 0x18 (%s)", esp_err_to_name(error));
+    } else {
+        ESP_LOGI(TAG, "es8311: chip id %02X%02X", id[0], id[1]);
+    }
+    for (size_t i = 0; error == ESP_OK && i < sizeof(configuration) / sizeof(configuration[0]); ++i) {
+        error = i2c_master_transmit(dev, configuration[i], sizeof(configuration[i]), 100);
+        if (error != ESP_OK) ESP_LOGW(TAG, "es8311: write %02X failed (%s)", configuration[i][0], esp_err_to_name(error));
+    }
+    (void)i2c_master_bus_rm_device(dev);
+    return error == ESP_OK ? BRUCE_OK : BRUCE_ERR_IO;
 }
 #endif
 
@@ -262,11 +290,6 @@ static bool IRAM_ATTR audio__i2s_on_sent(i2s_chan_handle_t handle, i2s_event_dat
 static bruce_result_t audio__i2s_ensure_channel_locked(void) {
     if (s_i2s_tx_ready) return BRUCE_OK;
 
-#if CONFIG_BRUCE_AUDIO_ES8311_CODEC
-    bruce_result_t codec_result = audio__es8311_enable();
-    if (codec_result != BRUCE_OK) return codec_result;
-#endif
-
     i2s_chan_config_t channel_config = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_AUTO, I2S_ROLE_MASTER);
     channel_config.dma_desc_num = AUDIO__I2S_DMA_DESC_COUNT;
     channel_config.dma_frame_num = AUDIO__I2S_DMA_FRAME_COUNT;
@@ -277,7 +300,7 @@ static bruce_result_t audio__i2s_ensure_channel_locked(void) {
         .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(AUDIO__I2S_SAMPLE_RATE),
         .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO),
         .gpio_cfg = {
-                     .mclk = I2S_GPIO_UNUSED,
+                     .mclk = CONFIG_BRUCE_AUDIO_I2S_MCLK_GPIO >= 0 ? AUDIO__I2S_MCLK_GPIO : I2S_GPIO_UNUSED,
                      .bclk = AUDIO__I2S_BCLK_GPIO,
                      .ws = AUDIO__I2S_LRCLK_GPIO,
                      .dout = AUDIO__I2S_DATA_GPIO,
@@ -294,8 +317,13 @@ static bruce_result_t audio__i2s_ensure_channel_locked(void) {
         i2s_channel_enable(s_i2s_tx_channel) != ESP_OK) {
         i2s_del_channel(s_i2s_tx_channel);
         s_i2s_tx_channel = NULL;
+        ESP_LOGW(TAG, "i2s: channel setup failed");
         return BRUCE_ERR_INTERNAL;
     }
+#if CONFIG_BRUCE_AUDIO_ES8311_CODEC
+    /* Configured with the clocks already running; a failure leaves the channel up and is only logged. */
+    (void)audio__es8311_enable();
+#endif
     s_i2s_tx_ready = true;
     return BRUCE_OK;
 }

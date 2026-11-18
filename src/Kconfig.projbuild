@@ -445,6 +445,15 @@ menu "Bruce hardware configuration"
             default 43
             range 0 48
 
+        config BRUCE_AUDIO_I2S_MCLK_GPIO
+            int "I2S MCLK GPIO (-1 = not wired)"
+            depends on BRUCE_AUDIO_BACKEND_I2S
+            default -1
+            range -1 48
+            help
+                Master clock for codecs wired to one (256 x sample rate).
+                Without it an ES8311 derives its clock from BCLK.
+
         config BRUCE_AUDIO_ES8311_CODEC
             bool "ES8311 I2C audio codec"
             depends on BRUCE_AUDIO_BACKEND_I2S && BRUCE_BOARD_I2C_ENABLED

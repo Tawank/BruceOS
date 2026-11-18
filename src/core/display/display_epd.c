@@ -243,9 +243,14 @@ static void display_epd__to_panel(int x, int y, int *px, int *py) {
     }
 }
 
-static bool display_epd__is_white(bruce_display_color_t color) {
+/* 4x4 ordered (Bayer) dither in panel space, so partial redraws line up with what is already shown.
+ * Thresholds run 8..248: pure black and white (text, the E-paper theme) never get dots,
+ * only grays and colors (games, images) turn into patterns. */
+static bool display_epd__is_white(bruce_display_color_t color, int px, int py) {
+    static const uint8_t bayer[4][4] = {{0, 8, 2, 10}, {12, 4, 14, 6}, {3, 11, 1, 9}, {15, 7, 13, 5}};
     unsigned r = (color >> 11) << 3, g = ((color >> 5) & 0x3F) << 2, b = (color & 0x1F) << 3;
-    return ((r * 77 + g * 150 + b * 29) >> 8) >= 128;
+    unsigned luma = (r * 77 + g * 150 + b * 29) >> 8;
+    return luma >= bayer[py & 3][px & 3] * 16u + 8u;
 }
 
 bruce_result_t display_epd__draw_bitmap(
@@ -254,12 +259,13 @@ bruce_result_t display_epd__draw_bitmap(
     xSemaphoreTake(s_drawn_lock, portMAX_DELAY);
     for (int y = y_start; y < y_end; ++y) {
         for (int x = x_start; x < x_end; ++x) {
+            bruce_display_color_t color = *pixels++;
             int px = 0, py = 0;
             display_epd__to_panel(x, y, &px, &py);
             if (px < 0 || px >= EPD__WIDTH || py < 0 || py >= EPD__HEIGHT) continue;
             uint8_t *byte = &s_drawn[py * (EPD__WIDTH / 8) + px / 8];
             uint8_t bit = 0x80 >> (px & 7);
-            if (display_epd__is_white(*pixels++) != s_invert) *byte |= bit;
+            if (display_epd__is_white(color, px, py) != s_invert) *byte |= bit;
             else *byte &= (uint8_t)~bit;
         }
     }
