@@ -14,3 +14,4 @@ bruce_result_t display_epd__draw_bitmap(
 );
 bruce_result_t display_epd__invert(bool invert);
 bruce_result_t display_epd__set_enabled(bool enabled);
+void display_epd__request_full_refresh(void);

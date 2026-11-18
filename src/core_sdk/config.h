@@ -409,6 +409,22 @@ bool config__get_display_high_contrast(void);
 bruce_result_t config__set_display_high_contrast(bool value);
 
 /**
+ * @brief E-paper only: partial refreshes between full (black-white flash)
+ * refreshes, which clear the ghosting partial ones leave. 0 = never.
+ *
+ * @permission config
+ */
+int config__get_display_full_refresh_every(void);
+
+/**
+ * @brief Sets config__get_display_full_refresh_every().
+ *
+ * @param value Partial refreshes between full ones, 0 = never.
+ * @permission config
+ */
+bruce_result_t config__set_display_full_refresh_every(int value);
+
+/**
  * @brief Launcher command run at startup.
  *
  * @permission config

@@ -216,6 +216,25 @@ display__draw_aligned_string(const char *text, int16_t x, int16_t y, uint8_t ali
     return BRUCE_OK;
 }
 
+bruce_result_t display__set_clip(int16_t x, int16_t y, int16_t width, int16_t height) {
+    display__process_context_t *context;
+    bruce_result_t result = display_internal__begin_draw(&context);
+    if (result != BRUCE_OK) { return result; }
+    context->clip = (bruce_display_rect_t){.x = x, .y = y, .width = width, .height = height};
+    context->clip_set = true;
+    display_internal__unlock(context);
+    return BRUCE_OK;
+}
+
+bruce_result_t display__clear_clip(void) {
+    display__process_context_t *context;
+    bruce_result_t result = display_internal__begin_draw(&context);
+    if (result != BRUCE_OK) { return result; }
+    context->clip_set = false;
+    display_internal__unlock(context);
+    return BRUCE_OK;
+}
+
 bruce_result_t display__set_text_color(bruce_display_color_t color) {
     display__process_context_t *context;
     bruce_result_t result = display_internal__begin_draw(&context);

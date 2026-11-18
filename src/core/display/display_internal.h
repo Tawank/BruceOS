@@ -56,6 +56,8 @@ typedef struct {
     bruce_process_id_t process_id;
     bruce_process_state_t state;
     bruce_display_rect_t viewport;
+    bruce_display_rect_t clip; /* Viewport-relative; drawing stays inside it when clip_set. */
+    bool clip_set;
     uint32_t viewport_generation;
     uint32_t frame_generation;
     bruce_result_t draw_result;

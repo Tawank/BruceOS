@@ -12,6 +12,7 @@
 #include "core_sdk/base64.h"
 #include "core_sdk/clock.h"
 #include "core_sdk/device.h"
+#include "core_sdk/display.h"
 #include "core_sdk/input.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/process.h"
@@ -656,6 +657,19 @@ bnu__print_memory_row(const char *name, size_t total, size_t free_size, size_t l
     bnu__format_size((uint32_t)free_size, human, free_text, sizeof(free_text));
     bnu__format_size((uint32_t)largest, human, largest_text, sizeof(largest_text));
     stdio__printf("%-5s %7s %7s %6s %6s\n", name, total_text, used_text, free_text, largest_text);
+}
+
+int bnu_refresh_app_main(int argc, char **argv) {
+    ArgParser *parser = bnu__new_parser("Fully redraw an e-paper screen, clearing ghosting.");
+    if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
+    if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
+    ap_free(parser);
+    if (!display__is_epaper()) {
+        stdio__printf("refresh: only needed on e-paper screens\n");
+        return BRUCE_OK;
+    }
+    display__full_refresh();
+    return BRUCE_OK;
 }
 
 int bnu_free_app_main(int argc, char **argv) {

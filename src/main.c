@@ -69,6 +69,7 @@ static const bruce_app_descriptor_t s_default_apps[] = {
     {"coredump",             "Show or export the last crash's core dump",                 "System",  bnu_coredump_app_main,        8192,  false},
     {"date",                 "Show or set the date and time",                             "System",  bnu_date_app_main,            0,     false},
     {"free",                 "Show memory usage",                                         "System",  bnu_free_app_main,            0,     false},
+    {"refresh",              "Fully redraw an e-paper screen",                            "System",  bnu_refresh_app_main,         0,     false},
     {"memorydump",           "Dump a validated memory range",                             "System",  bnu_memorydump_app_main,      0,     false},
     {"launcher",             "Launches configured launcher",                              "System",  launcher_app_main,            3072,  false},
     {"man",                  "List commands or show command manuals",                     "System",  man_app_main,                 0,     false},

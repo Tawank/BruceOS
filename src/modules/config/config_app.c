@@ -411,6 +411,23 @@ static bruce_result_t config_app__set_rotation(int turns, bool *out_live_applied
 
 static int config_app__theme_gui(void);
 
+/* E-paper: how often a full (black-white flash) refresh clears ghosting. */
+static bruce_result_t config_app__full_refresh_gui(void) {
+    static const int every[4] = {10, 30, 100, 0};
+    static const char *const labels[5] = {
+        "Every 10 updates", "Every 30 updates", "Every 100 updates", "Never", "Refresh screen now"};
+    bruce_dialog_choice_t choices[5];
+    for (size_t i = 0; i < 5; ++i) choices[i] = (bruce_dialog_choice_t){.label = labels[i], .value = labels[i]};
+    size_t selected = config_app__closest_index(every, 4, config__get_display_full_refresh_every());
+    bruce_result_t result = dialog__choice_launcher("Full refresh", NULL, choices, 5, &selected);
+    if (result != BRUCE_OK) return result == BRUCE_ERR_CANCELLED ? BRUCE_OK : result;
+    if (selected == 4) {
+        display__full_refresh();
+        return BRUCE_OK;
+    }
+    return config__set_display_full_refresh_every(every[selected]);
+}
+
 static int config_app__display_gui(void) {
     /* 0% only on e-paper: it stays readable with the light off, an LCD doesn't. */
     static const int brightness_percents[6] = {100, 75, 50, 25, 1, 0};
@@ -434,7 +451,7 @@ static int config_app__display_gui(void) {
         char *dim_label = memory__malloc(32);
         char *rotation_label = memory__malloc(48);
         char *buffered_label = memory__malloc(48);
-        bruce_dialog_choice_t *choices = memory__calloc(7, sizeof(*choices));
+        bruce_dialog_choice_t *choices = memory__calloc(8, sizeof(*choices));
         if (brightness_label == NULL || dim_label == NULL || rotation_label == NULL ||
             buffered_label == NULL || choices == NULL) {
             memory__free(brightness_label);
@@ -449,17 +466,25 @@ static int config_app__display_gui(void) {
         else snprintf(dim_label, 32, "Dim time: Disabled");
         snprintf(rotation_label, 48, "Orientation: %s", rotation_labels[rotation]);
         snprintf(buffered_label, 48, "DMA Buf (64kB): %s", buffered ? "ON" : "OFF");
-        choices[0] = (bruce_dialog_choice_t){.label = brightness_label, .value = "brightness"};
-        choices[1] = (bruce_dialog_choice_t){.label = dim_label, .value = "dim"};
-        choices[2] = (bruce_dialog_choice_t){.label = rotation_label, .value = "rotation"};
-        choices[3] = (bruce_dialog_choice_t){.label = "UI Color", .value = "ui_color"};
-        choices[4] = (bruce_dialog_choice_t){
+        char refresh_label[32];
+        int refresh_every = config__get_display_full_refresh_every();
+        if (refresh_every > 0) snprintf(refresh_label, sizeof(refresh_label), "Full refresh: %d", refresh_every);
+        else snprintf(refresh_label, sizeof(refresh_label), "Full refresh: Never");
+        size_t count = 0;
+        choices[count++] = (bruce_dialog_choice_t){.label = brightness_label, .value = "brightness"};
+        choices[count++] = (bruce_dialog_choice_t){.label = dim_label, .value = "dim"};
+        choices[count++] = (bruce_dialog_choice_t){.label = rotation_label, .value = "rotation"};
+        choices[count++] = (bruce_dialog_choice_t){.label = "UI Color", .value = "ui_color"};
+        choices[count++] = (bruce_dialog_choice_t){
             .label = high_contrast ? "High contrast: ON" : "High contrast: OFF", .value = "high_contrast"};
-        choices[5] = (bruce_dialog_choice_t){.label = buffered_label, .value = "buffered"};
-        choices[6] = (bruce_dialog_choice_t){.label = "Back", .value = "back"};
+        if (display__is_epaper()) {
+            choices[count++] = (bruce_dialog_choice_t){.label = refresh_label, .value = "full_refresh"};
+        }
+        choices[count++] = (bruce_dialog_choice_t){.label = buffered_label, .value = "buffered"};
+        choices[count++] = (bruce_dialog_choice_t){.label = "Back", .value = "back"};
         size_t selected = 0;
-        bruce_result_t result = dialog__choice_launcher("Display & UI", NULL, choices, 7, &selected);
-        const char *action = result == BRUCE_OK && selected < 7 ? choices[selected].value : "back";
+        bruce_result_t result = dialog__choice_launcher("Display & UI", NULL, choices, count, &selected);
+        const char *action = result == BRUCE_OK && selected < count ? choices[selected].value : "back";
         bool back = result == BRUCE_ERR_CANCELLED || (result == BRUCE_OK && strcmp(action, "back") == 0);
         bool reboot_notice = false;
         if (!back && result == BRUCE_OK) {
@@ -501,6 +526,8 @@ static int config_app__display_gui(void) {
                 result = config_app__theme_gui();
             } else if (strcmp(action, "high_contrast") == 0) {
                 result = config__set_display_high_contrast(!high_contrast);
+            } else if (strcmp(action, "full_refresh") == 0) {
+                result = config_app__full_refresh_gui();
             } else if (strcmp(action, "buffered") == 0) {
                 result = config__set_display_buffered_rendering(!buffered);
                 reboot_notice = true;

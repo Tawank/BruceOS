@@ -86,6 +86,9 @@ int display__height(void);
  */
 bool display__is_epaper(void);
 
+/** @brief E-paper only: redraws the whole panel now, clearing ghosting. */
+void display__full_refresh(void);
+
 /**
  * @brief Full physical screen width, independent of the caller's own viewport.
  *
@@ -139,6 +142,15 @@ bruce_result_t display__clear(void);
  * @param color New foreground color.
  */
 bruce_result_t display__set_text_color(bruce_display_color_t color);
+
+/**
+ * @brief Limits all drawing to a rectangle of the caller's viewport until
+ * display__clear_clip(), e.g. to draw a list row cut off at the list's edge.
+ */
+bruce_result_t display__set_clip(int16_t x, int16_t y, int16_t width, int16_t height);
+
+/** @brief Removes the rectangle set by display__set_clip(). */
+bruce_result_t display__clear_clip(void);
 
 /**
  * @brief Set the background color used for erasing behind text.

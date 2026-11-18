@@ -123,6 +123,7 @@ static void config__set_defaults(config__t *cfg) {
     cfg->colorError = 0xF800;
 #endif
     cfg->displayRotation = 0;
+    cfg->displayFullRefreshEvery = 30;
     cfg->displayBufferedRendering = true;
     cfg->displayDmaFramebuffer = true;
     config__assign(&cfg->launcher, "");
@@ -192,6 +193,7 @@ static void config__validate(config__t *cfg) {
     if (cfg->displayDimTimeout > 60) cfg->displayDimTimeout = 0;
 
     if (cfg->displayBrightness > 100) cfg->displayBrightness = 100;
+    if (cfg->displayFullRefreshEvery < 0) cfg->displayFullRefreshEvery = 30;
 
     if (cfg->timeTimezone < -12 || cfg->timeTimezone > 14) cfg->timeTimezone = 0;
 
@@ -318,6 +320,7 @@ static void config__parse_json(config__t *cfg, const cJSON *root) {
         json_get_bool(display, "bufferedRendering", &cfg->displayBufferedRendering);
         json_get_bool(display, "dmaFramebuffer", &cfg->displayDmaFramebuffer);
         json_get_bool(display, "highContrast", &cfg->displayHighContrast);
+        json_get_int(display, "fullRefreshEvery", &cfg->displayFullRefreshEvery);
     }
 
     const cJSON *time = cJSON_GetObjectItemCaseSensitive(root, "time");
@@ -451,6 +454,7 @@ static cJSON *config__build_json(const config__t *cfg) {
     cJSON_AddBoolToObject(display, "bufferedRendering", cfg->displayBufferedRendering);
     cJSON_AddBoolToObject(display, "dmaFramebuffer", cfg->displayDmaFramebuffer);
     cJSON_AddBoolToObject(display, "highContrast", cfg->displayHighContrast);
+    cJSON_AddNumberToObject(display, "fullRefreshEvery", cfg->displayFullRefreshEvery);
 
     cJSON *time = cJSON_AddObjectToObject(root, "time");
     cJSON_AddBoolToObject(time, "automaticUpdateViaNTP", cfg->timeAutomaticUpdateViaNTP);
@@ -921,6 +925,7 @@ CONFIG__DEFINE_INT_FIELD(display_rotation, displayRotation)
 CONFIG__DEFINE_BOOL_FIELD(display_buffered_rendering, displayBufferedRendering)
 CONFIG__DEFINE_BOOL_FIELD(display_dma_framebuffer, displayDmaFramebuffer)
 CONFIG__DEFINE_BOOL_FIELD(display_high_contrast, displayHighContrast)
+CONFIG__DEFINE_INT_FIELD(display_full_refresh_every, displayFullRefreshEvery)
 CONFIG__DEFINE_STRING_FIELD(launcher, launcher, CONFIG__LAUNCHER_APP_MAX_LEN)
 
 CONFIG__DEFINE_INT_FIELD(display_dim_timeout, displayDimTimeout)

@@ -8,6 +8,8 @@
 
 #include "display_internal.h"
 
+#include "core_sdk/config.h"
+
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include "esp_heap_caps.h"
@@ -29,7 +31,6 @@
 #define EPD__CHUNK 4096        /* The SD card's bus allows no bigger transfers. */
 #define EPD__SETTLE_MS 40      /* Wait for drawing to stop before refreshing. */
 #define EPD__SETTLE_MAX 6      /* ...but refresh anyway during animations. */
-#define EPD__FULL_EVERY 30     /* Partial refreshes before a full one clears ghosting. */
 #define EPD__BUSY_TIMEOUT_MS 4000
 
 #if CONFIG_BRUCE_SD_ENABLED && CONFIG_BRUCE_SD_SPI_HOST == CONFIG_BRUCE_DISPLAY_SPI_HOST
@@ -50,6 +51,7 @@ static bool s_bus_owned;
 static uint8_t s_rotation;
 static bool s_invert;
 static bool s_enabled = true;
+static volatile bool s_full_requested = true; /* The panel's content is unknown at start. */
 
 static void display_epd__send(bool data, const uint8_t *bytes, size_t len) {
     gpio_set_level(EPD__PIN_DC, data);
@@ -116,7 +118,7 @@ static void display_epd__refresh(bool full) {
 
 static void display_epd__task(void *arg) {
     (void)arg;
-    int partials = EPD__FULL_EVERY; /* Start with a full refresh: the panel's content is unknown. */
+    int partials = 0;
     for (;;) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         for (int i = 0; i < EPD__SETTLE_MAX && ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(EPD__SETTLE_MS)); ++i) {}
@@ -125,9 +127,13 @@ static void display_epd__task(void *arg) {
         memcpy(s_sending, s_drawn, EPD__BYTES);
         bool enabled = s_enabled;
         xSemaphoreGive(s_drawn_lock);
-        if (!enabled || memcmp(s_sending, s_shown, EPD__BYTES) == 0) continue;
+        bool full = s_full_requested;
+        if (!enabled || (!full && memcmp(s_sending, s_shown, EPD__BYTES) == 0)) continue;
 
-        bool full = partials >= EPD__FULL_EVERY;
+        /* Full refreshes clear the ghosting partial ones leave; see the user setting. */
+        int every = config__get_display_full_refresh_every();
+        if (every > 0 && partials >= every) full = true;
+        s_full_requested = false;
         xSemaphoreTake(s_panel_lock, portMAX_DELAY);
         display_epd__refresh(full);
         xSemaphoreGive(s_panel_lock);
@@ -273,6 +279,11 @@ bruce_result_t display_epd__invert(bool invert) {
     xSemaphoreGive(s_drawn_lock);
     xTaskNotifyGive(s_task);
     return BRUCE_OK;
+}
+
+void display_epd__request_full_refresh(void) {
+    s_full_requested = true;
+    if (s_task != NULL) xTaskNotifyGive(s_task);
 }
 
 bruce_result_t display_epd__set_enabled(bool enabled) {

@@ -9,6 +9,7 @@
 #include "core_sdk/process.h"
 #include "core_sdk/runtime.h"
 #include "display_driver.h"
+#include "display_epd.h"
 #include "display_internal.h"
 #include "esp_attr.h"
 #include "esp_heap_caps.h"
@@ -268,13 +269,26 @@ bruce_result_t display_internal__begin_draw(display__process_context_t **out_con
 
 void display_internal__unlock(display__process_context_t *context) { xSemaphoreGive(context->lock); }
 
+/* Drawable area in viewport coordinates: the viewport, narrowed by any clip. */
+static void display__bounds(const display__process_context_t *context, int *x0, int *y0, int *x1, int *y1) {
+    *x0 = 0;
+    *y0 = 0;
+    *x1 = context->viewport.width;
+    *y1 = context->viewport.height;
+    if (!context->clip_set) return;
+    if (context->clip.x > *x0) *x0 = context->clip.x;
+    if (context->clip.y > *y0) *y0 = context->clip.y;
+    if (context->clip.x + context->clip.width < *x1) *x1 = context->clip.x + context->clip.width;
+    if (context->clip.y + context->clip.height < *y1) *y1 = context->clip.y + context->clip.height;
+}
+
 void display_internal__set_pixel(
     display__process_context_t *context, int16_t x, int16_t y, bruce_display_color_t color
 ) {
-    if (context == NULL || context->hidden || x < 0 || x >= context->viewport.width || y < 0 ||
-        y >= context->viewport.height) {
-        return;
-    }
+    if (context == NULL || context->hidden) return;
+    int x0, y0, x1, y1;
+    display__bounds(context, &x0, &y0, &x1, &y1);
+    if (x < x0 || x >= x1 || y < y0 || y >= y1) return;
     int screen_x = context->viewport.x + x;
     int screen_y = context->viewport.y + y;
     if (context->target_buffer != NULL) {
@@ -305,17 +319,19 @@ void display_internal__fill_rect(
     display__process_context_t *context, int16_t x, int16_t y, int16_t w, int16_t h,
     bruce_display_color_t color
 ) {
-    if (x < 0) {
-        w += x;
-        x = 0;
-    }
-    if (y < 0) {
-        h += y;
-        y = 0;
-    }
     if (context == NULL || context->hidden) return;
-    if (x + w > context->viewport.width) w = context->viewport.width - x;
-    if (y + h > context->viewport.height) h = context->viewport.height - y;
+    int x0, y0, x1, y1;
+    display__bounds(context, &x0, &y0, &x1, &y1);
+    if (x < x0) {
+        w -= x0 - x;
+        x = x0;
+    }
+    if (y < y0) {
+        h -= y0 - y;
+        y = y0;
+    }
+    if (x + w > x1) w = x1 - x;
+    if (y + h > y1) h = y1 - y;
     if (w <= 0 || h <= 0) return;
     x += context->viewport.x;
     y += context->viewport.y;
@@ -363,18 +379,20 @@ void display_internal__draw_rgb_bitmap(
     int16_t source_stride = w;
     int16_t src_x = 0;
     int16_t src_y = 0;
-    if (x < 0) {
-        src_x = -x;
-        w += x;
-        x = 0;
+    int x0, y0, x1, y1;
+    display__bounds(context, &x0, &y0, &x1, &y1);
+    if (x < x0) {
+        src_x = x0 - x;
+        w -= x0 - x;
+        x = x0;
     }
-    if (y < 0) {
-        src_y = -y;
-        h += y;
-        y = 0;
+    if (y < y0) {
+        src_y = y0 - y;
+        h -= y0 - y;
+        y = y0;
     }
-    if (x + w > context->viewport.width) w = context->viewport.width - x;
-    if (y + h > context->viewport.height) h = context->viewport.height - y;
+    if (x + w > x1) w = x1 - x;
+    if (y + h > y1) h = y1 - y;
     if (w <= 0 || h <= 0) return;
     int16_t screen_x = x + context->viewport.x;
     int16_t screen_y = y + context->viewport.y;
@@ -870,6 +888,12 @@ bool display__is_epaper(void) {
     return true;
 #else
     return false;
+#endif
+}
+
+void display__full_refresh(void) {
+#if CONFIG_BRUCE_DISPLAY_PANEL_UC8253
+    display_epd__request_full_refresh();
 #endif
 }
 

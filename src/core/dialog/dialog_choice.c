@@ -191,9 +191,11 @@ static void dialog__gui_choice_draw_list(
     bruce_display_color_t background_color, bruce_display_color_t text_color, uint16_t border, uint64_t now,
     uint64_t selected_at, bool *out_selected_overflows
 ) {
-    int last_visible = first_visible + items_per_page - 1;
+    /* One row more than fits, cut at the list's bottom edge, shows that the list scrolls. */
+    int last_visible = first_visible + items_per_page;
     if (last_visible >= total) { last_visible = total - 1; }
     *out_selected_overflows = false;
+    display__set_clip(content_left, list_y, content_w, list_h);
 
     /* A list longer than one page loses a strip on its right edge to a
      * scrollbar; every row's fill and label shrink to make room for it
@@ -253,6 +255,7 @@ static void dialog__gui_choice_draw_list(
             is_selected ? out_selected_overflows : NULL
         );
     }
+    display__clear_clip();
 
     if (list_scrollable) {
         dialog__gui_draw_scrollbar(
