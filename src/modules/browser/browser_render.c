@@ -179,6 +179,60 @@ bool browser_render__find_row(
 }
 
 typedef struct {
+    int x, y; /* Content-local point. */
+    float font_scale;
+    int link, image;
+} browser_render__hit_t;
+
+static void browser_render__hit_visitor(const browser_layout_token_t *token, void *context) {
+    browser_render__hit_t *hit = context;
+    if (hit->y < token->y || hit->y >= token->y + token->line_height) return;
+    if (token->image_index >= 0) {
+        hit->image = token->image_index;
+        return;
+    }
+    if (token->link_index < 0) return;
+    int16_t char_width, char_height;
+    browser_render__metrics(&char_width, &char_height);
+    float scale = browser_layout__heading_scale(token->heading_level, hit->font_scale);
+    /* A space's worth of slack each side, so a tap between two words of one link still counts. */
+    int slack = (int)((float)char_width * scale);
+    int width = (int)((float)token->text_len * (float)char_width * scale);
+    if (hit->x >= token->x - slack && hit->x < token->x + width + slack) hit->link = token->link_index;
+}
+
+void browser_render__hit(
+    const browser_document_t *doc, const browser_view_state_t *view, browser_image_cache_t *image_cache, int x, int y,
+    int *out_link, int *out_image
+) {
+    int16_t char_width, char_height;
+    browser_render__metrics(&char_width, &char_height);
+    browser_render__hit_t hit = {
+        .x = x - BROWSER_CONTENT_MARGIN,
+        .y = y - browser_render__chrome_height() + view->scroll_y,
+        .font_scale = view->font_scale,
+        .link = -1,
+        .image = -1,
+    };
+    browser_layout__walk(
+        doc, browser_render__content_width(), char_width, char_height, view->font_scale, image_cache,
+        browser_render__hit_visitor, &hit
+    );
+    *out_link = hit.link;
+    *out_image = hit.link >= 0 ? -1 : hit.image;
+}
+
+int browser_render__chrome_hit(int x) {
+    int16_t char_width, char_height;
+    browser_render__metrics(&char_width, &char_height);
+    int step = char_width + 4;
+    /* Each arrow gets a full step plus padding; one glyph alone is too small to hit. */
+    if (x < BROWSER_CONTENT_MARGIN + step + 2) return -1;
+    if (x < BROWSER_CONTENT_MARGIN + 2 * step + 4) return 1;
+    return 0;
+}
+
+typedef struct {
     const browser_document_t *doc;
     const browser_view_state_t *view;
     const browser_render__theme_t *theme;

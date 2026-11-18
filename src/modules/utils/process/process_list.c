@@ -14,6 +14,7 @@
 
 #define PROCESS_LIST__REFRESH_MS 1000u
 #define PROCESS_LIST__PAD 3
+#define PROCESS_LIST__TOUCH_ROW_H 24
 
 /* Selectable rows: the buttons first, then process i at PROCESS_LIST__BUTTONS + i. */
 enum { PROCESS_LIST__BUTTON_PREVIEW, PROCESS_LIST__BUTTON_EXIT, PROCESS_LIST__BUTTONS };
@@ -23,8 +24,36 @@ typedef struct {
     size_t count;
     size_t selected;
     size_t first_visible;
+    bool show_selection; /* Hidden on touch screens until a navigation key is used. */
     bruce_memory_stats_t memory;
 } process_list_state_t;
+
+/* Screen geometry, shared by drawing and touch hit-testing. */
+typedef struct {
+    int char_w, char_h;
+    int bar_h;   /* Title bar and column header. */
+    int row_h;   /* Buttons and process rows; taller on touch screens. */
+    int button_y, preview_w, exit_x;
+    int header_y, list_top;
+    size_t visible;
+} process_list_layout_t;
+
+static process_list_layout_t process_list__layout(void) {
+    int16_t char_w = 6, char_h = 10;
+    (void)display__get_font_metrics(&char_w, &char_h);
+    process_list_layout_t l = {.char_w = char_w, .char_h = char_h, .bar_h = char_h + 3};
+    l.row_h = l.bar_h;
+    if (input__has_touch() && l.row_h < PROCESS_LIST__TOUCH_ROW_H) l.row_h = PROCESS_LIST__TOUCH_ROW_H;
+    int w = display__width();
+    l.button_y = l.bar_h + 3;
+    l.preview_w = (w - 3 * PROCESS_LIST__PAD) * 2 / 3;
+    l.exit_x = 2 * PROCESS_LIST__PAD + l.preview_w;
+    l.header_y = l.button_y + l.row_h + 3;
+    l.list_top = l.header_y + l.bar_h;
+    int h = display__height();
+    l.visible = h > l.list_top ? (size_t)((h - l.list_top) / l.row_h) : 0;
+    return l;
+}
 
 static char process_list__state_letter(bruce_process_state_t state) {
     switch (state) {
@@ -79,7 +108,9 @@ static void process_list__draw_button(const char *label, int x, int y, int w, in
     else display__draw_rect((int16_t)x, (int16_t)y, (int16_t)w, (int16_t)h, pri);
     display__set_text_color(selected ? bg : pri);
     display__set_text_bg_color(selected ? pri : bg);
-    display__draw_string(label, (int16_t)(x + (w - (int)strlen(label) * char_w) / 2), (int16_t)(y + 2));
+    display__draw_string(
+        label, (int16_t)(x + (w - (int)strlen(label) * char_w) / 2), (int16_t)(y + (h - char_h) / 2 + 1)
+    );
 }
 
 static void process_list__print_right(const char *text, int right, int y) {
@@ -118,10 +149,8 @@ static bruce_result_t process_list__draw(process_list_state_t *state) {
     uint16_t text = config__get_color_text();
     uint16_t muted = config__get_color_text_muted();
     int w = display__width();
-    int h = display__height();
-    int16_t char_w = 6, char_h = 10;
-    (void)display__get_font_metrics(&char_w, &char_h);
-    int row_h = char_h + 3;
+    process_list_layout_t l = process_list__layout();
+    int char_w = l.char_w;
     char line[48];
     char internal[8];
     char psram[8];
@@ -129,7 +158,7 @@ static bruce_result_t process_list__draw(process_list_state_t *state) {
     display__fill_screen(bg);
     display__set_text_size(1);
 
-    display__fill_rect(0, 0, (int16_t)w, (int16_t)row_h, pri);
+    display__fill_rect(0, 0, (int16_t)w, (int16_t)l.bar_h, pri);
     display__set_text_color(bg);
     display__set_text_bg_color(pri);
     snprintf(line, sizeof(line), "Tasks %u", (unsigned)state->count);
@@ -139,49 +168,66 @@ static bruce_result_t process_list__draw(process_list_state_t *state) {
     snprintf(line, sizeof(line), "free int %s psram %s", internal, psram);
     process_list__print_right(line, w - PROCESS_LIST__PAD, 2);
 
-    int button_y = row_h + 3;
-    int preview_w = (w - 3 * PROCESS_LIST__PAD) * 2 / 3;
-    int exit_x = 2 * PROCESS_LIST__PAD + preview_w;
+    bool show = state->show_selection;
     process_list__draw_button(
-        "Process preview", PROCESS_LIST__PAD, button_y, preview_w, row_h,
-        state->selected == PROCESS_LIST__BUTTON_PREVIEW
+        "Process preview", PROCESS_LIST__PAD, l.button_y, l.preview_w, l.row_h,
+        show && state->selected == PROCESS_LIST__BUTTON_PREVIEW
     );
-    int exit_w = w - PROCESS_LIST__PAD - exit_x;
+    int exit_w = w - PROCESS_LIST__PAD - l.exit_x;
     process_list__draw_button(
-        "Exit", exit_x, button_y, exit_w, row_h, state->selected == PROCESS_LIST__BUTTON_EXIT
+        "Exit", l.exit_x, l.button_y, exit_w, l.row_h, show && state->selected == PROCESS_LIST__BUTTON_EXIT
     );
 
-    int header_y = button_y + row_h + 3;
     display__set_text_color(muted);
     display__set_text_bg_color(bg);
-    display__draw_string("PID S NAME", PROCESS_LIST__PAD, (int16_t)header_y);
-    process_list__print_right("MEM", w - PROCESS_LIST__PAD, header_y);
-    process_list__print_right("CPU", w - PROCESS_LIST__PAD - 7 * char_w, header_y);
-    int16_t rule_y = (int16_t)(header_y + row_h - 2);
+    display__draw_string("PID S NAME", PROCESS_LIST__PAD, (int16_t)l.header_y);
+    process_list__print_right("MEM", w - PROCESS_LIST__PAD, l.header_y);
+    process_list__print_right("CPU", w - PROCESS_LIST__PAD - 7 * char_w, l.header_y);
+    int16_t rule_y = (int16_t)(l.header_y + l.bar_h - 2);
     display__draw_line(0, rule_y, (int16_t)(w - 1), rule_y, muted);
 
-    int list_top = header_y + row_h;
-    size_t visible = h > list_top ? (size_t)((h - list_top) / row_h) : 0;
-    if (state->selected >= PROCESS_LIST__BUTTONS) {
+    size_t visible = l.visible;
+    if (show && state->selected >= PROCESS_LIST__BUTTONS) {
         size_t row = state->selected - PROCESS_LIST__BUTTONS;
         if (row < state->first_visible) state->first_visible = row;
         if (visible > 0 && row >= state->first_visible + visible) state->first_visible = row - visible + 1;
     }
-    if (state->first_visible > state->count) state->first_visible = 0;
+    size_t max_first = state->count > visible ? state->count - visible : 0;
+    if (state->first_visible > max_first) state->first_visible = max_first;
 
     int numbers_w = 14 * char_w;
     int name_w = w - 2 * PROCESS_LIST__PAD - 6 * char_w - numbers_w;
     size_t name_chars = name_w > 0 ? (size_t)(name_w / char_w) : 0;
     for (size_t i = 0; i < visible && state->first_visible + i < state->count; ++i) {
         size_t index = state->first_visible + i;
-        int y = list_top + (int)i * row_h;
-        bool selected = state->selected == PROCESS_LIST__BUTTONS + index;
-        if (selected) display__fill_rect(0, (int16_t)(y - 1), (int16_t)w, (int16_t)row_h, pri);
+        int y = l.list_top + (int)i * l.row_h;
+        bool selected = show && state->selected == PROCESS_LIST__BUTTONS + index;
+        if (selected) display__fill_rect(0, (int16_t)(y - 1), (int16_t)w, (int16_t)l.row_h, pri);
         process_list__draw_row(
-            &state->processes[index], y + 1, w, char_w, name_chars, selected ? bg : text, selected ? pri : bg
+            &state->processes[index], y + (l.row_h - l.char_h) / 2, w, char_w, name_chars, selected ? bg : text,
+            selected ? pri : bg
         );
     }
     return display__present();
+}
+
+/* The row under a tap, as a `selected` value, or -1 for none. */
+static int process_list__hit(const process_list_state_t *state, int x, int y) {
+    process_list_layout_t l = process_list__layout();
+    if (y >= l.button_y && y < l.button_y + l.row_h) {
+        return x < l.exit_x ? PROCESS_LIST__BUTTON_PREVIEW : PROCESS_LIST__BUTTON_EXIT;
+    }
+    if (y < l.list_top) return -1;
+    size_t row = state->first_visible + (size_t)((y - l.list_top) / l.row_h);
+    return row < state->count ? (int)(PROCESS_LIST__BUTTONS + row) : -1;
+}
+
+/* Swipe up shows later rows, swipe down earlier ones, half a screen at a time. */
+static void process_list__scroll(process_list_state_t *state, int direction) {
+    size_t step = process_list__layout().visible / 2;
+    if (step == 0) step = 1;
+    if (direction > 0) state->first_visible += step;
+    else state->first_visible = state->first_visible > step ? state->first_visible - step : 0;
 }
 
 static void process_list__print(void) {
@@ -225,7 +271,11 @@ static bool process_list__activate(process_list_state_t *state) {
 }
 
 static int process_list__gui(void) {
-    process_list_state_t state = {.processes = memory__malloc(BRUCE_PROCESS_MAX * sizeof(*state.processes))};
+    process_list_state_t state = {
+        .processes = memory__malloc(BRUCE_PROCESS_MAX * sizeof(*state.processes)),
+        .show_selection = !input__has_touch(),
+    };
+    bruce_input_touch_t touch = {0};
     if (state.processes == NULL) return BRUCE_ERR_NO_MEMORY;
     uint64_t next_refresh = 0;
     bool dirty = true;
@@ -263,7 +313,28 @@ static int process_list__gui(void) {
             if (display__viewport_changed()) dirty = true;
             continue;
         }
-        if (input_result != BRUCE_OK || event.action != BRUCE_INPUT_PRESS) continue;
+        if (input_result != BRUCE_OK) continue;
+        if (event.type == BRUCE_INPUT_TOUCH) {
+            bruce_input_gesture_t gesture = input__touch_gesture(&touch, &event);
+            if (gesture == BRUCE_INPUT_GESTURE_SWIPE_UP || gesture == BRUCE_INPUT_GESTURE_SWIPE_DOWN) {
+                process_list__scroll(&state, gesture == BRUCE_INPUT_GESTURE_SWIPE_UP ? 1 : -1);
+                state.show_selection = false;
+                dirty = true;
+            } else if (gesture == BRUCE_INPUT_GESTURE_TAP || gesture == BRUCE_INPUT_GESTURE_HOLD) {
+                int hit = process_list__hit(&state, touch.x, touch.y);
+                if (hit < 0) continue;
+                state.selected = (size_t)hit;
+                state.show_selection = false;
+                if (process_list__activate(&state)) break;
+                next_refresh = 0;
+            }
+            continue;
+        }
+        if (event.action != BRUCE_INPUT_PRESS) continue;
+        if (!state.show_selection) {
+            state.show_selection = true;
+            dirty = true;
+        }
 
         size_t total = PROCESS_LIST__BUTTONS + state.count;
         if (event.code == BRUCE_INPUT_CODE_BACK || event.code == BRUCE_INPUT_CODE_BUTTON_B) break;

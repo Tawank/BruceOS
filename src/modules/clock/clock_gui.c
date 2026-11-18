@@ -180,6 +180,22 @@ static bool clock_gui__on_key(clock_gui_t *gui, int32_t code, const clock_now_t 
     return false;
 }
 
+/* A tap opens the menu bar from the bare face, otherwise presses the button under it. */
+static bool clock_gui__on_touch(clock_gui_t *gui, bruce_input_gesture_t gesture, const bruce_input_touch_t *touch, const clock_now_t *now) {
+    switch (gesture) {
+    case BRUCE_INPUT_GESTURE_TAP:
+    case BRUCE_INPUT_GESTURE_HOLD:
+        if (gui->screen == CLOCK_SCREEN_FACE && !gui->menu_open) return clock_gui__on_select(gui, now);
+        if (clock_ui__focus_at(&gui->ui, (int16_t)touch->x, (int16_t)touch->y)) return clock_gui__on_select(gui, now);
+        if (gui->screen == CLOCK_SCREEN_FACE) gui->menu_open = false;
+        break;
+    case BRUCE_INPUT_GESTURE_SWIPE_UP: clock_ui__focus_row(&gui->ui, 1); break;
+    case BRUCE_INPUT_GESTURE_SWIPE_DOWN: clock_ui__focus_row(&gui->ui, -1); break;
+    default: break;
+    }
+    return false;
+}
+
 static void clock_gui__redraw_if_changed(clock_gui_t *gui, const clock_now_t *now) {
     if (process__is_background() && display__width() == 0) return;
     clock_scene_t scene = clock_gui__scene(gui, now);
@@ -224,6 +240,7 @@ static void clock_gui__follow_foreground(clock_gui_t *gui) {
 }
 
 static int clock_gui__loop(clock_gui_t *gui) {
+    bruce_input_touch_t touch = {0};
     for (;;) {
         clock_now_t now = clock_gui__now();
         clock_event_t event = clock_model__tick(&gui->model, runtime__now(), now.seconds);
@@ -239,6 +256,8 @@ static int clock_gui__loop(clock_gui_t *gui) {
         bruce_result_t result = input__read(&input, clock_gui__poll_ms(gui));
         if (result == BRUCE_ERR_NOT_FOREGROUND) {
             if (runtime__delay(CLOCK_GUI__IDLE_POLL_MS) != BRUCE_OK) return BRUCE_ERR_CANCELLED;
+        } else if (result == BRUCE_OK && input.type == BRUCE_INPUT_TOUCH) {
+            if (clock_gui__on_touch(gui, input__touch_gesture(&touch, &input), &touch, &now)) return BRUCE_OK;
         } else if (result == BRUCE_OK && input.action == BRUCE_INPUT_PRESS) {
             if (clock_gui__on_key(gui, input.code, &now)) return BRUCE_OK;
         } else if (result != BRUCE_OK && result != BRUCE_ERR_TIMEOUT) {

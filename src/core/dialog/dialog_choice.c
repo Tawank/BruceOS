@@ -500,7 +500,7 @@ bruce_result_t dialog__gui_choice(
         if (ev.type == BRUCE_INPUT_TOUCH) {
             if (!touch) continue;
             if (ev.action == BRUCE_INPUT_PRESS) {
-                touch_y = ev.value;
+                touch_y = ev.y;
                 touch_first_visible = first_visible;
                 touch_dragged = false;
                 if (show_selection) {
@@ -508,7 +508,7 @@ bruce_result_t dialog__gui_choice(
                     redraw = true;
                 }
             } else if (ev.action == BRUCE_INPUT_CHANGE && touch_y >= 0) {
-                int moved_rows = (touch_y - (int)ev.value) / row_h;
+                int moved_rows = (touch_y - (int)ev.y) / row_h;
                 if (moved_rows != 0) touch_dragged = true;
                 int max_first = (int)choice_count - items_per_page;
                 int first = touch_first_visible + moved_rows;

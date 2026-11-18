@@ -248,15 +248,15 @@ static void maps__touch(maps_t *app, const bruce_input_event_t *event) {
         app->hud.zoom_buttons = true;
         app->touch_on_button = true;
         hud_rect_t search = hud__search_rect(&app->view, &app->hud, display__width());
-        if (maps__hit_button(HUD_BUTTON_ZOOM_IN, event->code, event->value)) maps__zoom(app, 1);
-        else if (maps__hit_button(HUD_BUTTON_ZOOM_OUT, event->code, event->value)) maps__zoom(app, -1);
-        else if (maps__hit(search, event->code, event->value)) maps__search(app);
+        if (maps__hit_button(HUD_BUTTON_ZOOM_IN, event->x, event->y)) maps__zoom(app, 1);
+        else if (maps__hit_button(HUD_BUTTON_ZOOM_OUT, event->x, event->y)) maps__zoom(app, -1);
+        else if (maps__hit(search, event->x, event->y)) maps__search(app);
         else app->touch_on_button = false;
     } else if (event->action == BRUCE_INPUT_CHANGE && !app->touch_on_button) {
-        maps__pan(app, app->touch_x - event->code, app->touch_y - event->value);
+        maps__pan(app, app->touch_x - event->x, app->touch_y - event->y);
     }
-    app->touch_x = event->code;
-    app->touch_y = event->value;
+    app->touch_x = event->x;
+    app->touch_y = event->y;
 }
 
 static void maps__handle(maps_t *app, const bruce_input_event_t *event) {

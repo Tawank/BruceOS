@@ -50,6 +50,9 @@ void clock_ui__focus_step(clock_ui_t *ui, int step);
 void clock_ui__focus_row(clock_ui_t *ui, int direction);
 const clock_item_t *clock_ui__focused(const clock_ui_t *ui);
 
+/* Focuses the button drawn under (x, y); false when there is none. */
+bool clock_ui__focus_at(clock_ui_t *ui, int16_t x, int16_t y);
+
 /* Changes whenever anything visible changes, so callers can skip identical frames. */
 uint32_t clock_ui__signature(const clock_ui_t *ui);
 

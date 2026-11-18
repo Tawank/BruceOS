@@ -45,7 +45,14 @@ void input_touch__poll(void) {
         bruce_device_touch_message_t touch;
         memcpy(&touch, message.data, sizeof(touch));
         if (touch.key < 0) {
-            input__emit(BRUCE_INPUT_TOUCH, touch.action, touch.x, touch.y);
+            bruce_input_event_t event = {
+                .type = BRUCE_INPUT_TOUCH,
+                .action = touch.action,
+                .code = BRUCE_INPUT_CODE_TOUCH,
+                .x = (int16_t)touch.x,
+                .y = (int16_t)touch.y,
+            };
+            (void)input__inject(&event);
         } else if (touch.action == BRUCE_INPUT_PRESS) {
             input_touch__key_pressed(touch.key);
         }

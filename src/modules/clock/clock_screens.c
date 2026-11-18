@@ -1,6 +1,7 @@
 #include "clock_screens.h"
 
 #include "core_sdk/config.h"
+#include "core_sdk/input.h"
 
 #include <stdio.h>
 
@@ -152,7 +153,7 @@ static void clock_screens__build_face(clock_ui_t *ui, const clock_scene_t *scene
     clock_screens__add_face(ui, scene, viewport_h, true);
     if (menu_open) clock_screens__add_bar(ui, scene, layout, CLOCK_SCREEN_FACE);
     else if (scene->show_menu_hint) {
-        clock_ui__label(ui, 0, scene->height - CLOCK_SCREENS__GLYPH_H - 4, scene->width, CLOCK_SCREENS__GLYPH_H, "OK for menu")->tone = CLOCK_TONE_MUTED;
+        clock_ui__label(ui, 0, scene->height - CLOCK_SCREENS__GLYPH_H - 4, scene->width, CLOCK_SCREENS__GLYPH_H, input__has_touch() ? "Tap for menu" : "OK for menu")->tone = CLOCK_TONE_MUTED;
     }
 }
 

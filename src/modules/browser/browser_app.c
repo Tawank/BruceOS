@@ -47,6 +47,8 @@ typedef struct {
     char load_url[BROWSER_URL_MAX];
     bool load_push_history;
     int load_percent;
+    bruce_input_touch_t touch;
+    int drag_from_scroll; /* scroll_y when the current touch started. */
 } browser_app_state_t;
 
 static const char *browser_app__load_message(const browser_app_state_t *state) {
@@ -532,6 +534,67 @@ static void browser_app__image_menu(browser_app_state_t *state, const char *url,
     }
 }
 
+/* Opens the selected link, or loads (then offers to save) the selected image. */
+static void browser_app__open_selected(browser_app_state_t *state) {
+    if (state->view.selected_link >= 0) {
+        const char *url = state->doc->links[state->view.selected_link].url;
+        if (!browser_app__scroll_to_fragment(state, url)) browser_app__navigate(state, url, true);
+    } else if (state->view.selected_image >= 0) {
+        const char *url = state->doc->images[state->view.selected_image].url;
+        const image_bitmap_t *bitmap = NULL;
+        if (browser_image_cache__peek(state->image_cache, url, &bitmap) == BRUCE_OK) {
+            browser_app__image_menu(state, url, bitmap->format);
+        } else {
+            browser_app__load_image(state);
+        }
+    }
+}
+
+static void browser_app__tap(browser_app_state_t *state, int x, int y) {
+    if (y < browser_render__chrome_height()) {
+        int button = browser_render__chrome_hit(x);
+        const char *url = button < 0   ? browser_history__back(state->history)
+                          : button > 0 ? browser_history__forward(state->history)
+                                       : NULL;
+        if (url != NULL) browser_app__navigate(state, url, false);
+        else if (button == 0) browser_app__edit_url(state);
+        return;
+    }
+    int link = -1, image = -1;
+    browser_render__hit(state->doc, &state->view, state->image_cache, x, y, &link, &image);
+    if (link < 0 && image < 0) return;
+    state->view.selected_link = link;
+    state->view.selected_image = image;
+    browser_app__open_selected(state);
+}
+
+/* Drags scroll the page with the finger; taps press what is under them. Returns true when it needs a redraw. */
+static bool browser_app__handle_touch(browser_app_state_t *state, const bruce_input_event_t *event) {
+    if (event->action == BRUCE_INPUT_PRESS) state->drag_from_scroll = state->view.scroll_y;
+    bruce_input_gesture_t gesture = input__touch_gesture(&state->touch, event);
+    if (state->phase != BROWSER_LOAD_IDLE) return false;
+    if (gesture == BRUCE_INPUT_GESTURE_TAP || gesture == BRUCE_INPUT_GESTURE_HOLD) {
+        browser_app__tap(state, state->touch.x, state->touch.y);
+        return true;
+    }
+    bool swipe = gesture == BRUCE_INPUT_GESTURE_SWIPE_UP || gesture == BRUCE_INPUT_GESTURE_SWIPE_DOWN;
+    if (!swipe && event->action != BRUCE_INPUT_CHANGE) return false;
+    int16_t char_width, char_height;
+    if (display__get_font_metrics(&char_width, &char_height) != BRUCE_OK) char_height = 8;
+    int max_scroll = browser_render__max_scroll(state->doc, state->view.font_scale, state->image_cache);
+    int scroll_y = state->drag_from_scroll - state->touch.dy;
+    if (scroll_y > max_scroll) scroll_y = max_scroll;
+    if (scroll_y < 0) scroll_y = 0;
+    /* Redraw a line at a time while dragging, but always land exactly where the finger let go. */
+    int moved = scroll_y - state->view.scroll_y;
+    if (moved == 0 || (!swipe && moved < char_height && moved > -char_height)) return false;
+    state->view.scroll_y = scroll_y;
+    state->view.selected_link = -1;
+    state->view.selected_image = -1;
+    state->view.row_y = -1;
+    return true;
+}
+
 static bool browser_app__handle_event(browser_app_state_t *state, const bruce_input_event_t *event) {
     if (event->action != BRUCE_INPUT_PRESS) return true;
     bool semantic = event->type != BRUCE_INPUT_KEY || event->value != event->code;
@@ -557,20 +620,7 @@ static bool browser_app__handle_event(browser_app_state_t *state, const bruce_in
             if (url != NULL) browser_app__navigate(state, url, false);
             break;
         }
-        case BRUCE_INPUT_CODE_SELECT:
-            if (state->view.selected_link >= 0) {
-                const char *url = state->doc->links[state->view.selected_link].url;
-                if (!browser_app__scroll_to_fragment(state, url)) browser_app__navigate(state, url, true);
-            } else if (state->view.selected_image >= 0) {
-                const char *url = state->doc->images[state->view.selected_image].url;
-                const image_bitmap_t *bitmap = NULL;
-                if (browser_image_cache__peek(state->image_cache, url, &bitmap) == BRUCE_OK) {
-                    browser_app__image_menu(state, url, bitmap->format);
-                } else {
-                    browser_app__load_image(state);
-                }
-            }
-            break;
+        case BRUCE_INPUT_CODE_SELECT: browser_app__open_selected(state); break;
         case BRUCE_INPUT_CODE_UP:
         case BRUCE_INPUT_CODE_PREV: browser_app__move_line(state, -1); break;
         case BRUCE_INPUT_CODE_DOWN:
@@ -655,6 +705,10 @@ int browser_app_main(int argc, char **argv) {
             break;
         }
         if (read_result != BRUCE_OK) continue;
+        if (event.type == BRUCE_INPUT_TOUCH) {
+            if (browser_app__handle_touch(&state, &event)) browser_app__redraw(&state);
+            continue;
+        }
         if (!browser_app__handle_event(&state, &event)) break;
         /* handle_event() no-ops on anything but a PRESS, so a RELEASE (half
          * of every encoder detent - see input_encoder.c) never actually

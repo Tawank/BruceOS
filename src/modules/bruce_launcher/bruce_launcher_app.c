@@ -1238,12 +1238,12 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
                 last_drawn = -1;
             }
             if (ev.action == BRUCE_INPUT_PRESS) {
-                touch_x = ev.code;
-                touch_y = ev.value;
+                touch_x = ev.x;
+                touch_y = ev.y;
                 continue;
             }
             if (ev.action != BRUCE_INPUT_RELEASE || touch_x < 0) continue;
-            int dy = (int)ev.value - touch_y;
+            int dy = (int)ev.y - touch_y;
             if (abs(dy) > BRUCE_LAUNCHER_SWIPE_PX) {
                 bruce_launcher_grid_t g = bruce_launcher__grid(menu->entry_count, &render);
                 selected += (dy < 0 ? 1 : -1) * g.cols * g.rows;

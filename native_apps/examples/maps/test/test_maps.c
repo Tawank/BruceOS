@@ -168,10 +168,10 @@ static void touch_drag_moves_map_with_finger(void) {
     start();
     geo_point_t before = app.view.center;
     bruce_input_event_t touch[] = {
-        {.type = BRUCE_INPUT_TOUCH, .action = BRUCE_INPUT_PRESS, .code = 100, .value = 50},
-        {.type = BRUCE_INPUT_TOUCH, .action = BRUCE_INPUT_CHANGE, .code = 130, .value = 40},
-        {.type = BRUCE_INPUT_TOUCH, .action = BRUCE_INPUT_CHANGE, .code = 140, .value = 40},
-        {.type = BRUCE_INPUT_TOUCH, .action = BRUCE_INPUT_RELEASE, .code = 140, .value = 40},
+        {.type = BRUCE_INPUT_TOUCH, .action = BRUCE_INPUT_PRESS, .code = BRUCE_INPUT_CODE_TOUCH, .x = 100, .y = 50},
+        {.type = BRUCE_INPUT_TOUCH, .action = BRUCE_INPUT_CHANGE, .code = BRUCE_INPUT_CODE_TOUCH, .x = 130, .y = 40},
+        {.type = BRUCE_INPUT_TOUCH, .action = BRUCE_INPUT_CHANGE, .code = BRUCE_INPUT_CODE_TOUCH, .x = 140, .y = 40},
+        {.type = BRUCE_INPUT_TOUCH, .action = BRUCE_INPUT_RELEASE, .code = BRUCE_INPUT_CODE_TOUCH, .x = 140, .y = 40},
     };
     for (size_t i = 0; i < sizeof(touch) / sizeof(touch[0]); ++i) maps__handle(&app, &touch[i]);
     CHECK_EQ(app.view.center.x, before.x - 40);
@@ -414,7 +414,7 @@ static void menu_back_just_closes(void) {
 }
 
 static void touch(bruce_input_action_t action, int32_t x, int32_t y) {
-    bruce_input_event_t event = {.type = BRUCE_INPUT_TOUCH, .action = action, .code = x, .value = y};
+    bruce_input_event_t event = {.type = BRUCE_INPUT_TOUCH, .action = action, .code = BRUCE_INPUT_CODE_TOUCH, .x = x, .y = y};
     maps__handle(&app, &event);
 }
 
@@ -548,7 +548,7 @@ static void tapping_search_box_opens_search(void) {
     fakes.text_input = "1, 2";
     hud_rect_t box = hud__search_rect(&app.view, &app.hud, 240);
     bruce_input_event_t tap = {.type = BRUCE_INPUT_TOUCH, .action = BRUCE_INPUT_PRESS,
-                               .code = box.x + box.w / 2, .value = box.y + 2};
+                               .code = BRUCE_INPUT_CODE_TOUCH, .x = box.x + box.w / 2, .y = box.y + 2};
     maps__handle(&app, &tap);
     CHECK_STR(app.hud.place, "1 2");
     stop();

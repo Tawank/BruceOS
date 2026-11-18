@@ -172,7 +172,10 @@ process_app__preview_draw_page(const bruce_process_snapshot_t *processes, size_t
     display__set_text_color(pri);
     display__set_text_bg_color(bg);
     display__set_cursor(4, 7);
-    display__print("Task Manager  select: open  hold: options  back: exit");
+    display__print(
+        input__has_touch() ? "Task Manager  tap: open  hold: options"
+                           : "Task Manager  select: open  hold: options  back: exit"
+    );
     int header_y = PROCESS_APP__PREVIEW_HEADER_H;
     display__draw_line(0, header_y, display__width() - 1, header_y, pri);
     if (count == 0) {
@@ -217,7 +220,34 @@ bool process_app__menu(const bruce_process_snapshot_t *process, bool can_switch)
     return strcmp(choices[selected].value, "switch") == 0;
 }
 
+/* Opens `target`, or first shows its options when `menu` is set; true once it is in front. */
+static bool process_app__preview_open(const bruce_process_snapshot_t *target, bool menu) {
+    bool switch_to = true;
+    if (menu) {
+        (void)display__set_tiles(NULL, 0);
+        switch_to = process_app__menu(target, true);
+    }
+    bruce_process_snapshot_t snapshot;
+    if (!switch_to || process__snapshot(target->id, &snapshot) != BRUCE_OK) return false;
+    (void)process__foreground(target->id);
+    return true;
+}
+
+static int process_app__preview_hit(size_t count, int x, int y) {
+    bruce_display_rect_t frames[BRUCE_DISPLAY_MAX_TILES];
+    process_app__preview_frames(count, frames);
+    for (size_t i = 0; i < count; ++i) {
+        bruce_display_rect_t f = frames[i];
+        /* The name label above the frame counts as part of the tile. */
+        if (x >= f.x && x < f.x + f.width && y >= f.y - PROCESS_APP__PREVIEW_LABEL_H && y < f.y + f.height) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
 static int process_app__preview_run(bruce_process_snapshot_t *candidates) {
+    bruce_input_touch_t touch = {0};
     size_t index = 0;
     bool layout_dirty = true;
     int drawn_selected = -1;
@@ -259,7 +289,25 @@ static int process_app__preview_run(bruce_process_snapshot_t *candidates) {
         bruce_input_event_t event;
         bruce_result_t input_result = input__read(&event, 100);
         if (input_result == BRUCE_ERR_NOT_FOREGROUND) { return 0; }
-        if (input_result != BRUCE_OK || event.action != BRUCE_INPUT_PRESS) { continue; }
+        if (input_result != BRUCE_OK) { continue; }
+        if (event.type == BRUCE_INPUT_TOUCH) {
+            bruce_input_gesture_t gesture = input__touch_gesture(&touch, &event);
+            if (gesture == BRUCE_INPUT_GESTURE_SWIPE_LEFT && start + BRUCE_DISPLAY_MAX_TILES < total) {
+                index = start + BRUCE_DISPLAY_MAX_TILES;
+            } else if (gesture == BRUCE_INPUT_GESTURE_SWIPE_RIGHT && start > 0) {
+                index = start - BRUCE_DISPLAY_MAX_TILES;
+            } else if (gesture == BRUCE_INPUT_GESTURE_TAP || gesture == BRUCE_INPUT_GESTURE_HOLD) {
+                int hit = process_app__preview_hit(page_count, touch.x, touch.y);
+                if (hit < 0) continue;
+                if (process_app__preview_open(&candidates[start + (size_t)hit], gesture == BRUCE_INPUT_GESTURE_HOLD)) {
+                    return 0;
+                }
+                index = start + (size_t)hit;
+                layout_dirty = true;
+            }
+            continue;
+        }
+        if (event.action != BRUCE_INPUT_PRESS) { continue; }
         if (event.code == BRUCE_INPUT_CODE_BACK || event.code == BRUCE_INPUT_CODE_BUTTON_B) return 0;
         if ((event.code == BRUCE_INPUT_CODE_UP || event.code == BRUCE_INPUT_CODE_PREV ||
              event.code == BRUCE_INPUT_CODE_LEFT) &&
@@ -272,16 +320,8 @@ static int process_app__preview_run(bruce_process_snapshot_t *candidates) {
         } else if ((event.code == BRUCE_INPUT_CODE_SELECT || event.code == BRUCE_INPUT_CODE_BUTTON_A) &&
                    total > 0) {
             bruce_process_snapshot_t target = candidates[index];
-            bool switch_to = true;
-            if (input__wait_long_press(&event, PROCESS_APP__PREVIEW_LONG_PRESS_MS)) {
-                (void)display__set_tiles(NULL, 0);
-                switch_to = process_app__menu(&target, true);
-            }
-            bruce_process_snapshot_t snapshot;
-            if (switch_to && process__snapshot(target.id, &snapshot) == BRUCE_OK) {
-                (void)process__foreground(target.id);
-                return 0;
-            }
+            bool menu = input__wait_long_press(&event, PROCESS_APP__PREVIEW_LONG_PRESS_MS);
+            if (process_app__preview_open(&target, menu)) return 0;
             layout_dirty = true;
         }
     }

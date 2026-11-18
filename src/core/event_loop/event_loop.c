@@ -10,6 +10,7 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "sdkconfig.h"
+#include <stdlib.h>
 
 #define EVENT_LOOP__QUEUE_LENGTH 16
 
@@ -203,6 +204,31 @@ bool input__has_touch(void) {
 #else
     return false;
 #endif
+}
+
+_Static_assert(sizeof(bruce_input_event_t) == 32, "bruce_input_event_t size is part of the app ABI");
+
+#define INPUT__SWIPE_PX 30
+#define INPUT__HOLD_MS 500u
+
+bruce_input_gesture_t input__touch_gesture(bruce_input_touch_t *touch, const bruce_input_event_t *event) {
+    if (touch == NULL || event == NULL || event->type != BRUCE_INPUT_TOUCH) return BRUCE_INPUT_GESTURE_NONE;
+    if (event->action == BRUCE_INPUT_PRESS) {
+        *touch = (bruce_input_touch_t){event->x, event->y, 0, 0, event->timestamp_ms, true};
+        return BRUCE_INPUT_GESTURE_NONE;
+    }
+    if (!touch->down) return BRUCE_INPUT_GESTURE_NONE;
+    touch->dx = event->x - touch->x;
+    touch->dy = event->y - touch->y;
+    if (event->action != BRUCE_INPUT_RELEASE) return BRUCE_INPUT_GESTURE_NONE;
+    touch->down = false;
+    int32_t ax = abs(touch->dx), ay = abs(touch->dy);
+    if (ax > INPUT__SWIPE_PX || ay > INPUT__SWIPE_PX) {
+        if (ay >= ax) return touch->dy < 0 ? BRUCE_INPUT_GESTURE_SWIPE_UP : BRUCE_INPUT_GESTURE_SWIPE_DOWN;
+        return touch->dx < 0 ? BRUCE_INPUT_GESTURE_SWIPE_LEFT : BRUCE_INPUT_GESTURE_SWIPE_RIGHT;
+    }
+    if (event->timestamp_ms - touch->pressed_ms >= INPUT__HOLD_MS) return BRUCE_INPUT_GESTURE_HOLD;
+    return BRUCE_INPUT_GESTURE_TAP;
 }
 
 bool input__check(int32_t code, bool consume) {

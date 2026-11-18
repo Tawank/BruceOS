@@ -107,6 +107,21 @@ const clock_item_t *clock_ui__focused(const clock_ui_t *ui) {
     return count == 0 ? NULL : clock_ui__focusable_at(ui, ui->focus % count);
 }
 
+bool clock_ui__focus_at(clock_ui_t *ui, int16_t x, int16_t y) {
+    for (size_t i = 0, ordinal = 0; i < ui->count; ++i) {
+        const clock_item_t *item = &ui->items[i];
+        if (!item->button) continue;
+        int16_t top = item->y - clock_ui__row_offset(ui, item);
+        bool visible = clock_ui__is_fixed(ui, item) || (top >= 0 && top + item->h <= ui->viewport_h);
+        if (visible && x >= item->x && x < item->x + item->w && y >= top && y < top + item->h) {
+            ui->focus = ordinal;
+            return true;
+        }
+        ordinal++;
+    }
+    return false;
+}
+
 static void clock_ui__reveal_focus(clock_ui_t *ui) {
     const clock_item_t *item = clock_ui__focused(ui);
     if (item == NULL || clock_ui__is_fixed(ui, item)) return;

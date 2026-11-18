@@ -96,6 +96,15 @@ bool browser_render__find_row(
     browser_render_row_t *out_row
 );
 
+/* The link or image drawn at screen point (x, y) for `view`; each is -1 when there is none. */
+void browser_render__hit(
+    const browser_document_t *doc, const browser_view_state_t *view, browser_image_cache_t *image_cache, int x, int y,
+    int *out_link, int *out_image
+);
+
+/* What a tap at `x` in the chrome bar presses: -1 back, 1 forward, 0 the URL. */
+int browser_render__chrome_hit(int x);
+
 /* Draws one full frame: chrome bar plus the visible slice of `doc` for
  * `view`. Fetches/decodes any inline images newly scrolled into view through
  * `image_cache`. Requires GUI context (a foreground viewport). */

@@ -68,13 +68,15 @@ typedef enum {
 #define BRUCE_INPUT_CODE_GAMEPAD_AXIS_Y 0x301
 #define BRUCE_INPUT_CODE_GAMEPAD_AXIS_RX 0x302
 #define BRUCE_INPUT_CODE_GAMEPAD_AXIS_RY 0x303
+#define BRUCE_INPUT_CODE_TOUCH 0x400
 
 /*
- * For BRUCE_INPUT_TOUCH events, `code` is the tap's X coordinate and `value`
- * is its Y coordinate (panel pixel space, after any swap/mirror configured
- * for the board - see BRUCE_TOUCH_SWAP_XY/MIRROR_X/MIRROR_Y in Kconfig).
- * BRUCE_INPUT_PRESS/RELEASE mark the start/end of a touch; BRUCE_INPUT_CHANGE
- * is emitted while a touch moves without lifting (a drag).
+ * BRUCE_INPUT_TOUCH events have `code` BRUCE_INPUT_CODE_TOUCH, which no key
+ * uses, so apps that only compare codes never mistake a touch for a key. The
+ * point is in `x`/`y` (panel pixel space, after any swap/mirror configured
+ * for the board - see BRUCE_TOUCH_SWAP_XY/MIRROR_X/MIRROR_Y in Kconfig);
+ * other event types leave them 0. BRUCE_INPUT_PRESS/RELEASE mark the
+ * start/end of a touch; BRUCE_INPUT_CHANGE is emitted while it moves (a drag).
  */
 typedef struct {
     bruce_input_type_t type;
@@ -84,6 +86,8 @@ typedef struct {
     /* A RELEASE stamped in the future means the button stays held until then. */
     uint64_t timestamp_ms;
     bruce_process_id_t source_process_id;
+    /* Fills what was tail padding, so the struct keeps its size for already-built apps. */
+    int16_t x, y;
 } bruce_input_event_t;
 
 /**
@@ -185,6 +189,32 @@ bool input__check(int32_t code, bool consume);
 
 /** @brief True if the device has a touchscreen (BRUCE_INPUT_TOUCH events). */
 bool input__has_touch(void);
+
+typedef enum {
+    BRUCE_INPUT_GESTURE_NONE,
+    BRUCE_INPUT_GESTURE_TAP,
+    BRUCE_INPUT_GESTURE_HOLD,
+    BRUCE_INPUT_GESTURE_SWIPE_UP,
+    BRUCE_INPUT_GESTURE_SWIPE_DOWN,
+    BRUCE_INPUT_GESTURE_SWIPE_LEFT,
+    BRUCE_INPUT_GESTURE_SWIPE_RIGHT,
+} bruce_input_gesture_t;
+
+typedef struct {
+    int32_t x, y;   /* Where the touch started. */
+    int32_t dx, dy; /* How far it has moved since. */
+    uint64_t pressed_ms;
+    bool down;
+} bruce_input_touch_t;
+
+/**
+ * @brief Tracks one finger across BRUCE_INPUT_TOUCH events.
+ *
+ * Feed it every touch event. It returns the finished gesture on release
+ * (a swipe is named by the direction the finger moved) and NONE otherwise;
+ * `touch` keeps the start point and the movement so far for live dragging.
+ */
+bruce_input_gesture_t input__touch_gesture(bruce_input_touch_t *touch, const bruce_input_event_t *event);
 
 /**
  * @brief Adds an event to the input queue.

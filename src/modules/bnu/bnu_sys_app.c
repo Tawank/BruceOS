@@ -1231,14 +1231,16 @@ int bnu_wev_app_main(int argc, char **argv) {
         if (result != BRUCE_OK) return result;
         stdio__printf(
             "time=%" PRIu64 " source=%" PRIu32 " type=%s action=%s code=%" PRId32 " (0x%08" PRIx32
-            ") value=%" PRId32 "\n",
+            ") value=%" PRId32 " x=%d y=%d\n",
             event.timestamp_ms,
             event.source_process_id,
             bnu__input_type_name(event.type),
             bnu__input_action_name(event.action),
             event.code,
             (uint32_t)event.code,
-            event.value
+            event.value,
+            event.x,
+            event.y
         );
         if (event.action == BRUCE_INPUT_PRESS &&
             (event.code == BRUCE_INPUT_CODE_BACK ||
