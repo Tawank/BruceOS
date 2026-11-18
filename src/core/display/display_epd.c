@@ -58,7 +58,8 @@ static void display_epd__send(bool data, const uint8_t *bytes, size_t len) {
     while (len > 0) {
         size_t n = len < EPD__CHUNK ? len : EPD__CHUNK;
         spi_transaction_t t = {.length = n * 8, .tx_buffer = bytes};
-        esp_err_t err = spi_device_polling_transmit(s_spi, &t);
+        /* Interrupt-driven, so the task sleeps through the ~40 ms frame instead of spinning a core. */
+        esp_err_t err = spi_device_transmit(s_spi, &t);
         if (err != ESP_OK) ESP_LOGW(TAG, "SPI write of %u bytes failed: %s", (unsigned)n, esp_err_to_name(err));
         bytes += n;
         len -= n;
@@ -123,6 +124,7 @@ static void display_epd__task(void *arg) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         for (int i = 0; i < EPD__SETTLE_MAX && ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(EPD__SETTLE_MS)); ++i) {}
 
+        display_internal__epd_pull();
         xSemaphoreTake(s_drawn_lock, portMAX_DELAY);
         memcpy(s_sending, s_drawn, EPD__BYTES);
         bool enabled = s_enabled;
@@ -184,7 +186,7 @@ static bruce_result_t display_epd__init_spi(void) {
 }
 
 bruce_result_t display_epd__init(void) {
-    s_drawn = heap_caps_malloc(EPD__BYTES, MALLOC_CAP_DEFAULT);
+    s_drawn = heap_caps_malloc(EPD__BYTES, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     s_shown = heap_caps_malloc(EPD__BYTES, MALLOC_CAP_DMA);
     s_sending = heap_caps_malloc(EPD__BYTES, MALLOC_CAP_DMA);
     s_drawn_lock = xSemaphoreCreateMutex();
@@ -198,7 +200,7 @@ bruce_result_t display_epd__init(void) {
 
     bruce_result_t result = display_epd__init_gpio();
     if (result == BRUCE_OK) result = display_epd__init_spi();
-    if (result == BRUCE_OK && xTaskCreate(display_epd__task, "epd", 3072, NULL, 3, &s_task) != pdPASS) {
+    if (result == BRUCE_OK && xTaskCreate(display_epd__task, "epd", 4096, NULL, 3, &s_task) != pdPASS) {
         result = BRUCE_ERR_NO_MEMORY;
     }
     if (result != BRUCE_OK) {
@@ -234,43 +236,40 @@ void display_epd__deinit(void) {
 
 void display_epd__configure_rotation(uint8_t rotation) { s_rotation = rotation & 3; }
 
-static void display_epd__to_panel(int x, int y, int *px, int *py) {
-    switch (s_rotation) {
-        case 1: *px = EPD__WIDTH - 1 - y; *py = x; break;
-        case 2: *px = EPD__WIDTH - 1 - x; *py = EPD__HEIGHT - 1 - y; break;
-        case 3: *px = y; *py = EPD__HEIGHT - 1 - x; break;
-        default: *px = x; *py = y; break;
-    }
-}
-
-/* 4x4 ordered (Bayer) dither in panel space, so partial redraws line up with what is already shown.
- * Thresholds run 8..248: pure black and white (text, the E-paper theme) never get dots,
+/* 4x4 ordered (Bayer) dither thresholds in panel space, so partial redraws line up with what is
+ * already shown. They run 8..248: pure black and white (text, the E-paper theme) never get dots,
  * only grays and colors (games, images) turn into patterns. */
-static bool display_epd__is_white(bruce_display_color_t color, int px, int py) {
-    static const uint8_t bayer[4][4] = {{0, 8, 2, 10}, {12, 4, 14, 6}, {3, 11, 1, 9}, {15, 7, 13, 5}};
-    unsigned r = (color >> 11) << 3, g = ((color >> 5) & 0x3F) << 2, b = (color & 0x1F) << 3;
-    unsigned luma = (r * 77 + g * 150 + b * 29) >> 8;
-    return luma >= bayer[py & 3][px & 3] * 16u + 8u;
-}
+static const uint8_t s_threshold[4][4] = {
+    {8, 136, 40, 168}, {200, 72, 232, 104}, {56, 184, 24, 152}, {248, 120, 216, 88}
+};
 
+/* Runs in the drawing app's own frame, for every frame: rotation is resolved once per row and the
+ * panel position stepped per pixel, keeping a full-screen frame to a few milliseconds. */
 bruce_result_t display_epd__draw_bitmap(
     int x_start, int y_start, int x_end, int y_end, const bruce_display_color_t *pixels
 ) {
     xSemaphoreTake(s_drawn_lock, portMAX_DELAY);
     for (int y = y_start; y < y_end; ++y) {
-        for (int x = x_start; x < x_end; ++x) {
-            bruce_display_color_t color = *pixels++;
-            int px = 0, py = 0;
-            display_epd__to_panel(x, y, &px, &py);
-            if (px < 0 || px >= EPD__WIDTH || py < 0 || py >= EPD__HEIGHT) continue;
-            uint8_t *byte = &s_drawn[py * (EPD__WIDTH / 8) + px / 8];
-            uint8_t bit = 0x80 >> (px & 7);
-            if (display_epd__is_white(color, px, py) != s_invert) *byte |= bit;
+        int px, py, dx = 0, dy = 0;
+        switch (s_rotation) {
+            case 1: px = EPD__WIDTH - 1 - y; py = x_start; dy = 1; break;
+            case 2: px = EPD__WIDTH - 1 - x_start; py = EPD__HEIGHT - 1 - y; dx = -1; break;
+            case 3: px = y; py = EPD__HEIGHT - 1 - x_start; dy = -1; break;
+            default: px = x_start; py = y; dx = 1; break;
+        }
+        for (int x = x_start; x < x_end; ++x, px += dx, py += dy) {
+            unsigned c = *pixels++;
+            if ((unsigned)px >= EPD__WIDTH || (unsigned)py >= EPD__HEIGHT) continue;
+            unsigned luma = ((c >> 11) * 616u + ((c >> 5) & 0x3Fu) * 600u + (c & 0x1Fu) * 232u) >> 8;
+            uint8_t *byte = &s_drawn[py * (EPD__WIDTH / 8) + (px >> 3)];
+            uint8_t bit = (uint8_t)(0x80u >> (px & 7));
+            if ((luma >= s_threshold[py & 3][px & 3]) != s_invert) *byte |= bit;
             else *byte &= (uint8_t)~bit;
         }
     }
     xSemaphoreGive(s_drawn_lock);
-    xTaskNotifyGive(s_task);
+    /* The panel task's own pull lands here too; it must not wake itself for another round. */
+    if (xTaskGetCurrentTaskHandle() != s_task) xTaskNotifyGive(s_task);
     /* Nothing is in flight: tell display.c the "transfer" is done right away. */
     (void)display_internal__on_transfer_done_from_isr();
     return BRUCE_OK;
@@ -285,6 +284,10 @@ bruce_result_t display_epd__invert(bool invert) {
     xSemaphoreGive(s_drawn_lock);
     xTaskNotifyGive(s_task);
     return BRUCE_OK;
+}
+
+void display_epd__frame_ready(void) {
+    if (s_task != NULL) xTaskNotifyGive(s_task);
 }
 
 void display_epd__request_full_refresh(void) {

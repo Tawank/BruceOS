@@ -509,7 +509,7 @@ IRAM_ATTR bool display_internal__on_transfer_done_from_isr(void) {
  * from other processes, and against display__deinit() freeing the
  * framebuffer/pack buffer out from under it -- via s_transfer_mutex, since
  * there is only one physical display bus and one shared pack buffer. */
-static bruce_result_t display__transfer_locked(bruce_display_rect_t rect, bool fullscreen) {
+static bruce_result_t display__transfer_now_locked(bruce_display_rect_t rect, bool fullscreen) {
 #if CONFIG_BRUCE_QEMU_TEST_MODE
     (void)rect;
     (void)fullscreen;
@@ -580,6 +580,36 @@ static bruce_result_t display__transfer_locked(bruce_display_rect_t rect, bool f
     return result;
 #endif
 }
+
+#if CONFIG_BRUCE_DISPLAY_PANEL_UC8253 && !CONFIG_BRUCE_QEMU_TEST_MODE
+/* E-paper shows about one frame a second, so converting every presented
+ * frame would only slow the app down. Presents just collect the changed
+ * area; the panel task pulls it (display_internal__epd_pull()) right before
+ * each refresh, so the work happens once per refresh, off the app's thread. */
+static bruce_display_rect_t s_epd_dirty;
+
+static bruce_result_t display__transfer_locked(bruce_display_rect_t rect, bool fullscreen) {
+    (void)fullscreen;
+    s_epd_dirty = display_internal__rect_union(s_epd_dirty, rect);
+    display_epd__frame_ready();
+    return BRUCE_OK;
+}
+
+void display_internal__epd_pull(void) {
+    display__lock();
+    bruce_display_rect_t rect = s_epd_dirty;
+    s_epd_dirty = (bruce_display_rect_t){0};
+    if (s_initialized && s_buffered_rendering && rect.width > 0 && rect.height > 0) {
+        bool fullscreen = rect.x == 0 && rect.y == 0 && rect.width == s_fb_width && rect.height == s_fb_height;
+        (void)display__transfer_now_locked(rect, fullscreen);
+    }
+    display__unlock();
+}
+#else
+static bruce_result_t display__transfer_locked(bruce_display_rect_t rect, bool fullscreen) {
+    return display__transfer_now_locked(rect, fullscreen);
+}
+#endif
 
 bruce_result_t display_internal__repaint_rect_locked(bruce_display_rect_t rect) {
     if (display__frame_conflicts_locked(rect)) return BRUCE_OK;

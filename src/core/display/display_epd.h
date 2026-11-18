@@ -15,3 +15,5 @@ bruce_result_t display_epd__draw_bitmap(
 bruce_result_t display_epd__invert(bool invert);
 bruce_result_t display_epd__set_enabled(bool enabled);
 void display_epd__request_full_refresh(void);
+/* A presented frame is waiting in the framebuffer; the panel task pulls it before its next refresh. */
+void display_epd__frame_ready(void);
