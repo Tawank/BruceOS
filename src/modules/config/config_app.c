@@ -428,6 +428,23 @@ static bruce_result_t config_app__full_refresh_gui(void) {
     return config__set_display_full_refresh_every(every[selected]);
 }
 
+static const char *const s_dither_labels[BRUCE_DISPLAY_DITHER_COUNT] = {
+    "Threshold", "Bayer 2x2", "Bayer 4x4", "Random noise", "Blue noise"};
+static const char *const s_dither_names[BRUCE_DISPLAY_DITHER_COUNT] = {
+    "threshold", "bayer2", "bayer4", "noise", "blue-noise"};
+
+/* E-paper: how grays and colors become black and white dots. */
+static bruce_result_t config_app__dither_gui(void) {
+    bruce_dialog_choice_t choices[BRUCE_DISPLAY_DITHER_COUNT];
+    for (size_t i = 0; i < BRUCE_DISPLAY_DITHER_COUNT; ++i)
+        choices[i] = (bruce_dialog_choice_t){.label = s_dither_labels[i], .value = s_dither_labels[i]};
+    size_t selected = (size_t)config__get_display_dither();
+    bruce_result_t result =
+        dialog__choice_launcher("Dithering", NULL, choices, BRUCE_DISPLAY_DITHER_COUNT, &selected);
+    if (result != BRUCE_OK) return result == BRUCE_ERR_CANCELLED ? BRUCE_OK : result;
+    return config__set_display_dither((int)selected);
+}
+
 static int config_app__display_gui(void) {
     /* 0% only on e-paper: it stays readable with the light off, an LCD doesn't. */
     static const int brightness_percents[6] = {100, 75, 50, 25, 1, 0};
@@ -451,7 +468,7 @@ static int config_app__display_gui(void) {
         char *dim_label = memory__malloc(32);
         char *rotation_label = memory__malloc(48);
         char *buffered_label = memory__malloc(48);
-        bruce_dialog_choice_t *choices = memory__calloc(8, sizeof(*choices));
+        bruce_dialog_choice_t *choices = memory__calloc(9, sizeof(*choices));
         if (brightness_label == NULL || dim_label == NULL || rotation_label == NULL ||
             buffered_label == NULL || choices == NULL) {
             memory__free(brightness_label);
@@ -470,6 +487,10 @@ static int config_app__display_gui(void) {
         int refresh_every = config__get_display_full_refresh_every();
         if (refresh_every > 0) snprintf(refresh_label, sizeof(refresh_label), "Full refresh: %d", refresh_every);
         else snprintf(refresh_label, sizeof(refresh_label), "Full refresh: Never");
+        char dither_label[32];
+        int dither = config__get_display_dither();
+        snprintf(dither_label, sizeof(dither_label), "Dithering: %s",
+                 dither >= 0 && dither < BRUCE_DISPLAY_DITHER_COUNT ? s_dither_labels[dither] : "?");
         size_t count = 0;
         choices[count++] = (bruce_dialog_choice_t){.label = brightness_label, .value = "brightness"};
         choices[count++] = (bruce_dialog_choice_t){.label = dim_label, .value = "dim"};
@@ -479,6 +500,7 @@ static int config_app__display_gui(void) {
             .label = high_contrast ? "High contrast: ON" : "High contrast: OFF", .value = "high_contrast"};
         if (display__is_epaper()) {
             choices[count++] = (bruce_dialog_choice_t){.label = refresh_label, .value = "full_refresh"};
+            choices[count++] = (bruce_dialog_choice_t){.label = dither_label, .value = "dither"};
         }
         choices[count++] = (bruce_dialog_choice_t){.label = buffered_label, .value = "buffered"};
         choices[count++] = (bruce_dialog_choice_t){.label = "Back", .value = "back"};
@@ -528,6 +550,8 @@ static int config_app__display_gui(void) {
                 result = config__set_display_high_contrast(!high_contrast);
             } else if (strcmp(action, "full_refresh") == 0) {
                 result = config_app__full_refresh_gui();
+            } else if (strcmp(action, "dither") == 0) {
+                result = config_app__dither_gui();
             } else if (strcmp(action, "buffered") == 0) {
                 result = config__set_display_buffered_rendering(!buffered);
                 reboot_notice = true;
@@ -546,9 +570,13 @@ static int config_app__display_gui(void) {
 }
 
 static int config_app__display_cli(
-    ArgParser *display_parser, ArgParser *buffered, ArgParser *brightness, ArgParser *dim, ArgParser *rotation
+    ArgParser *display_parser, ArgParser *buffered, ArgParser *brightness, ArgParser *dim, ArgParser *rotation,
+    ArgParser *full_refresh, ArgParser *dither
 ) {
     ArgParser *action = ap_get_cmd_parser(display_parser);
+    int dither_mode = config__get_display_dither();
+    const char *dither_name =
+        dither_mode >= 0 && dither_mode < BRUCE_DISPLAY_DITHER_COUNT ? s_dither_names[dither_mode] : "?";
     if (action == NULL) {
         int dim_timeout = config__get_display_dim_timeout();
         stdio__printf(
@@ -561,6 +589,12 @@ static int config_app__display_cli(
             dim_timeout,
             config__get_display_rotation() * 90
         );
+        if (display__is_epaper()) {
+            stdio__printf(
+                "Full refresh every: %d updates (0 = never)\nDithering: %s\n",
+                config__get_display_full_refresh_every(), dither_name
+            );
+        }
         return BRUCE_OK;
     }
     if (action == buffered) {
@@ -610,6 +644,35 @@ static int config_app__display_cli(
         else if (strcmp(degrees, "270") == 0) turns = 3;
         else return BRUCE_ERR_INVALID_ARGUMENT;
         return config_app__set_rotation(turns, NULL);
+    }
+    if (action == full_refresh) {
+        const char *updates = ap_get_arg(full_refresh, "updates");
+        if (updates == NULL) {
+            stdio__printf(
+                "Full refresh every: %d updates (0 = never)\n", config__get_display_full_refresh_every()
+            );
+            return BRUCE_OK;
+        }
+        char *end = NULL;
+        long value = strtol(updates, &end, 10);
+        if (end == updates || *end != '\0' || value < 0 || value > 1000) return BRUCE_ERR_INVALID_ARGUMENT;
+        return config__set_display_full_refresh_every((int)value);
+    }
+    if (action == dither) {
+        const char *mode = ap_get_arg(dither, "mode");
+        if (mode == NULL) {
+            stdio__printf("Dithering: %s\n", dither_name);
+            return BRUCE_OK;
+        }
+        if (strcmp(mode, "toggle") == 0) {
+            int next = (dither_mode + 1) % BRUCE_DISPLAY_DITHER_COUNT;
+            stdio__printf("Dithering: %s\n", s_dither_names[next]);
+            return config__set_display_dither(next);
+        }
+        for (int i = 0; i < BRUCE_DISPLAY_DITHER_COUNT; ++i) {
+            if (strcmp(mode, s_dither_names[i]) == 0) return config__set_display_dither(i);
+        }
+        return BRUCE_ERR_INVALID_ARGUMENT;
     }
     return BRUCE_ERR_INVALID_ARGUMENT;
 }
@@ -929,6 +992,8 @@ int config_app_main(int argc, char **argv) {
     ArgParser *display_brightness = display != NULL ? ap_new_cmd(display, "brightness") : NULL;
     ArgParser *display_dim = display != NULL ? ap_new_cmd(display, "dim") : NULL;
     ArgParser *display_rotation = display != NULL ? ap_new_cmd(display, "rotation") : NULL;
+    ArgParser *display_full_refresh = display != NULL ? ap_new_cmd(display, "full-refresh") : NULL;
+    ArgParser *display_dither = display != NULL ? ap_new_cmd(display, "dither") : NULL;
     ArgParser *theme = ap_new_cmd(root, "theme");
     ArgParser *theme_list = theme != NULL ? ap_new_cmd(theme, "list") : NULL;
     ArgParser *theme_set = theme != NULL ? ap_new_cmd(theme, "set") : NULL;
@@ -961,6 +1026,8 @@ int config_app_main(int argc, char **argv) {
         display_brightness,
         display_dim,
         display_rotation,
+        display_full_refresh,
+        display_dither,
         theme,
         theme_list,
         theme_set,
@@ -1017,6 +1084,10 @@ int config_app_main(int argc, char **argv) {
     ap_add_optional_arg(display_dim, "seconds", "0 to 60, 0 = off (required outside GUI mode)");
     ap_set_helptext(display_rotation, "Set the display orientation.");
     ap_add_optional_arg(display_rotation, "degrees", "0, 90, 180, or 270 (required outside GUI mode)");
+    ap_set_helptext(display_full_refresh, "E-paper: partial updates between full refreshes.");
+    ap_add_optional_arg(display_full_refresh, "updates", "0 to 1000, 0 = never");
+    ap_set_helptext(display_dither, "E-paper: how grays and colors become black and white dots.");
+    ap_add_optional_arg(display_dither, "mode", "threshold, bayer2, bayer4, noise, blue-noise, or toggle (next one)");
     ap_set_helptext(theme, "Select or inspect the UI color theme.");
     ap_set_helptext(theme_list, "List available theme presets.");
     ap_set_helptext(theme_set, "Apply a named theme preset (see 'theme list').");
@@ -1067,7 +1138,8 @@ int config_app_main(int argc, char **argv) {
     } else if (display_hierarchy) {
         result = gui ? config_app__display_gui()
                      : config_app__display_cli(
-                           display, display_buffered, display_brightness, display_dim, display_rotation
+                           display, display_buffered, display_brightness, display_dim, display_rotation,
+                           display_full_refresh, display_dither
                        );
     } else if (theme_hierarchy) {
         ArgParser *theme_action = ap_get_cmd_parser(theme);

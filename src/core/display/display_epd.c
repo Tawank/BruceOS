@@ -117,6 +117,9 @@ static void display_epd__refresh(bool full) {
              full ? "full" : "partial", busy_after_reset, power_on_ms, busy_in_refresh, refresh_ms, power_off_ms);
 }
 
+static bool display_epd__load_dither(void);
+static void display_epd__set_dither(int mode);
+
 static void display_epd__task(void *arg) {
     (void)arg;
     int partials = 0;
@@ -124,7 +127,7 @@ static void display_epd__task(void *arg) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         for (int i = 0; i < EPD__SETTLE_MAX && ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(EPD__SETTLE_MS)); ++i) {}
 
-        display_internal__epd_pull();
+        display_internal__epd_pull(display_epd__load_dither());
         xSemaphoreTake(s_drawn_lock, portMAX_DELAY);
         memcpy(s_sending, s_drawn, EPD__BYTES);
         bool enabled = s_enabled;
@@ -196,6 +199,7 @@ bruce_result_t display_epd__init(void) {
         return BRUCE_ERR_NO_MEMORY;
     }
     memset(s_drawn, 0xFF, EPD__BYTES);
+    display_epd__set_dither(BRUCE_DISPLAY_DITHER_BAYER4);
     memset(s_shown, 0x00, EPD__BYTES); /* Unknown: never equal to the first frame, so it is always drawn. */
 
     bruce_result_t result = display_epd__init_gpio();
@@ -236,15 +240,119 @@ void display_epd__deinit(void) {
 
 void display_epd__configure_rotation(uint8_t rotation) { s_rotation = rotation & 3; }
 
-/* 4x4 ordered (Bayer) dither thresholds in panel space, so partial redraws line up with what is
- * already shown. They run 8..248: pure black and white (text, the E-paper theme) never get dots,
- * only grays and colors (games, images) turn into patterns. */
-static const uint8_t s_threshold[4][4] = {
+/* Dither thresholds are laid out in panel space, so partial redraws line up with what is already
+ * shown. They run 8..248: pure black and white (text, the E-paper theme) never get dots, only
+ * grays and colors (games, images) turn into patterns. */
+static const uint8_t s_bayer2[2][2] = {{32, 160}, {224, 96}};
+static const uint8_t s_bayer4[4][4] = {
     {8, 136, 40, 168}, {200, 72, 232, 104}, {56, 184, 24, 152}, {248, 120, 216, 88}
 };
+/* Void-and-cluster blue noise. */
+static const uint8_t s_blue_noise[32][32] = {
+    {61, 90, 31, 79, 221, 16, 128, 159, 105, 13, 209, 36, 240, 129, 177, 91,
+     198, 13, 133, 228, 67, 120, 17, 75, 154, 125, 8, 182, 234, 99, 73, 12},
+    {169, 207, 185, 141, 43, 188, 69, 235, 48, 192, 118, 164, 52, 146, 68, 31,
+     242, 168, 51, 190, 34, 141, 184, 220, 40, 247, 55, 109, 137, 42, 196, 123},
+    {106, 46, 124, 236, 97, 150, 211, 88, 175, 138, 79, 221, 97, 201, 227, 122,
+     152, 75, 116, 98, 157, 232, 56, 113, 92, 195, 147, 208, 82, 219, 151, 238},
+    {24, 220, 71, 9, 167, 59, 20, 125, 30, 241, 60, 26, 180, 9, 107, 47,
+     193, 22, 223, 204, 12, 81, 200, 135, 20, 174, 72, 30, 169, 16, 58, 85},
+    {158, 138, 181, 114, 203, 231, 109, 164, 199, 100, 155, 196, 132, 82, 172, 218,
+     95, 138, 170, 60, 128, 178, 37, 160, 236, 49, 120, 227, 100, 133, 187, 212},
+    {101, 55, 246, 86, 35, 140, 78, 219, 65, 40, 226, 110, 53, 246, 156, 35,
+     63, 233, 28, 89, 245, 104, 216, 71, 101, 209, 142, 190, 63, 240, 117, 40},
+    {204, 165, 27, 131, 191, 49, 181, 24, 130, 186, 83, 143, 32, 205, 73, 126,
+     188, 109, 158, 207, 41, 148, 24, 122, 184, 11, 85, 39, 161, 21, 178, 76},
+    {14, 112, 214, 65, 230, 102, 148, 243, 105, 160, 18, 215, 167, 114, 15, 147,
+     210, 49, 74, 132, 187, 64, 173, 232, 52, 158, 244, 111, 216, 91, 147, 229},
+    {186, 143, 89, 175, 157, 11, 62, 87, 206, 53, 238, 69, 93, 192, 236, 86,
+     26, 176, 239, 10, 113, 225, 93, 139, 78, 199, 131, 57, 197, 34, 128, 53},
+    {69, 225, 30, 46, 116, 222, 193, 163, 26, 139, 120, 180, 43, 134, 61, 166,
+     223, 120, 94, 197, 163, 51, 18, 213, 36, 101, 23, 179, 75, 159, 237, 104},
+    {169, 124, 196, 242, 70, 133, 39, 107, 230, 79, 197, 8, 157, 222, 31, 104,
+     141, 38, 60, 145, 77, 206, 106, 161, 184, 235, 149, 224, 119, 8, 208, 38},
+    {82, 15, 96, 152, 183, 85, 214, 174, 46, 153, 99, 233, 113, 81, 206, 184,
+     72, 202, 170, 227, 29, 134, 243, 70, 120, 54, 87, 41, 170, 94, 140, 193},
+    {234, 136, 217, 55, 20, 145, 28, 122, 71, 218, 29, 63, 177, 48, 150, 13,
+     127, 247, 20, 116, 91, 188, 41, 153, 11, 203, 137, 215, 66, 244, 52, 115},
+    {64, 33, 171, 110, 234, 195, 98, 245, 186, 134, 168, 208, 121, 241, 95, 216,
+     54, 102, 155, 49, 200, 62, 173, 98, 228, 178, 109, 18, 189, 154, 23, 177},
+    {214, 158, 202, 72, 129, 44, 162, 59, 12, 106, 44, 85, 19, 142, 38, 163,
+     192, 83, 180, 218, 123, 233, 25, 133, 76, 50, 162, 81, 129, 103, 226, 89},
+    {121, 48, 92, 9, 176, 224, 82, 207, 150, 229, 191, 130, 221, 183, 74, 118,
+     226, 33, 137, 9, 78, 149, 108, 185, 206, 33, 241, 217, 56, 201, 38, 145},
+    {21, 247, 140, 218, 105, 29, 139, 117, 36, 92, 70, 165, 57, 103, 200, 16,
+     146, 69, 238, 103, 169, 45, 214, 59, 151, 122, 96, 146, 27, 166, 77, 187},
+    {66, 107, 190, 56, 152, 195, 67, 240, 161, 201, 16, 243, 32, 153, 233, 51,
+     174, 111, 204, 61, 194, 245, 17, 84, 230, 22, 191, 70, 116, 239, 135, 210},
+    {175, 156, 81, 37, 235, 90, 14, 180, 47, 104, 142, 119, 212, 90, 130, 80,
+     217, 39, 154, 25, 129, 93, 139, 179, 106, 167, 46, 211, 180, 10, 99, 42},
+    {229, 15, 203, 132, 171, 115, 215, 131, 84, 230, 185, 76, 43, 176, 19, 191,
+     135, 90, 231, 182, 71, 164, 34, 210, 68, 135, 235, 83, 154, 55, 218, 125},
+    {89, 115, 57, 221, 23, 62, 150, 34, 205, 58, 23, 157, 199, 110, 239, 61,
+     162, 14, 117, 50, 203, 110, 225, 52, 196, 15, 100, 31, 114, 192, 73, 150},
+    {35, 240, 160, 83, 190, 101, 237, 165, 111, 174, 126, 222, 63, 144, 28, 101,
+     198, 220, 148, 83, 241, 10, 144, 79, 121, 158, 217, 141, 172, 244, 19, 199},
+    {65, 182, 124, 43, 139, 211, 50, 80, 11, 245, 98, 35, 87, 228, 172, 124,
+     41, 67, 177, 27, 126, 189, 97, 173, 237, 45, 189, 64, 37, 92, 135, 165},
+    {215, 96, 8, 227, 170, 27, 127, 198, 145, 68, 209, 189, 137, 50, 207, 78,
+     246, 136, 95, 209, 156, 64, 38, 213, 22, 112, 88, 229, 126, 213, 47, 108},
+    {29, 143, 205, 111, 72, 93, 179, 224, 118, 45, 151, 22, 168, 112, 17, 156,
+     185, 30, 225, 45, 108, 233, 162, 132, 74, 182, 155, 11, 197, 75, 179, 231},
+    {58, 80, 187, 47, 242, 153, 56, 19, 88, 173, 231, 102, 73, 194, 232, 97,
+     60, 115, 166, 74, 199, 19, 88, 194, 51, 246, 136, 60, 166, 119, 18, 154},
+    {130, 238, 164, 123, 30, 202, 107, 188, 237, 32, 127, 54, 220, 131, 41, 146,
+     213, 13, 188, 144, 128, 56, 223, 149, 98, 26, 203, 105, 40, 236, 95, 201},
+    {37, 91, 14, 66, 143, 219, 77, 134, 155, 66, 186, 208, 8, 90, 181, 68,
+     125, 236, 86, 36, 243, 168, 113, 34, 214, 121, 171, 80, 211, 146, 65, 175},
+    {114, 212, 181, 226, 96, 169, 44, 12, 198, 94, 112, 159, 138, 244, 32, 202,
+     163, 48, 105, 195, 71, 10, 184, 79, 161, 64, 228, 15, 183, 128, 23, 225},
+    {54, 148, 76, 131, 25, 191, 119, 247, 53, 216, 24, 45, 77, 171, 118, 99,
+     21, 223, 151, 124, 219, 94, 204, 127, 239, 42, 142, 94, 53, 242, 84, 161},
+    {102, 21, 200, 49, 234, 62, 147, 84, 167, 123, 178, 229, 195, 59, 152, 232,
+     75, 183, 57, 26, 159, 42, 144, 58, 25, 193, 113, 165, 206, 117, 39, 194},
+    {136, 244, 160, 116, 173, 100, 205, 33, 224, 67, 143, 87, 109, 17, 212, 44,
+     140, 108, 210, 86, 176, 240, 103, 210, 172, 86, 221, 68, 28, 149, 176, 222},
+};
+static uint8_t s_pattern[32][32];
+static bool s_noise; /* White noise comes from a hash of the position, not s_pattern. */
+static int s_dither;
 
-/* Runs in the drawing app's own frame, for every frame: rotation is resolved once per row and the
- * panel position stepped per pixel, keeping a full-screen frame to a few milliseconds. */
+/* Call with s_drawn_lock held. */
+static void display_epd__set_dither(int mode) {
+    for (int y = 0; y < 32; ++y) {
+        for (int x = 0; x < 32; ++x) {
+            switch (mode) {
+                case BRUCE_DISPLAY_DITHER_THRESHOLD: s_pattern[y][x] = 128; break;
+                case BRUCE_DISPLAY_DITHER_BAYER2: s_pattern[y][x] = s_bayer2[y & 1][x & 1]; break;
+                case BRUCE_DISPLAY_DITHER_BLUE_NOISE: s_pattern[y][x] = s_blue_noise[y][x]; break;
+                default: s_pattern[y][x] = s_bayer4[y & 3][x & 3]; break;
+            }
+        }
+    }
+    s_noise = mode == BRUCE_DISPLAY_DITHER_NOISE;
+    s_dither = mode;
+}
+
+/* Applies the dither setting; true when it changed, so the whole frame needs converting again. */
+static bool display_epd__load_dither(void) {
+    int mode = config__get_display_dither();
+    if (mode == s_dither) return false;
+    xSemaphoreTake(s_drawn_lock, portMAX_DELAY);
+    display_epd__set_dither(mode);
+    xSemaphoreGive(s_drawn_lock);
+    return true;
+}
+
+static inline unsigned display_epd__noise(unsigned x, unsigned y) {
+    unsigned h = x * 0x9E3779B1u ^ y * 0x85EBCA77u;
+    h ^= h >> 15;
+    h *= 0x2C1B3C6Du;
+    return 8 + (((h >> 16) & 0xFFu) * 240u >> 8);
+}
+
+/* Runs once per refresh in the panel task (see display_internal__epd_pull()): rotation is resolved
+ * once per row and the panel position stepped per pixel, keeping a full-screen frame fast. */
 bruce_result_t display_epd__draw_bitmap(
     int x_start, int y_start, int x_end, int y_end, const bruce_display_color_t *pixels
 ) {
@@ -263,7 +371,8 @@ bruce_result_t display_epd__draw_bitmap(
             unsigned luma = ((c >> 11) * 616u + ((c >> 5) & 0x3Fu) * 600u + (c & 0x1Fu) * 232u) >> 8;
             uint8_t *byte = &s_drawn[py * (EPD__WIDTH / 8) + (px >> 3)];
             uint8_t bit = (uint8_t)(0x80u >> (px & 7));
-            if ((luma >= s_threshold[py & 3][px & 3]) != s_invert) *byte |= bit;
+            unsigned threshold = s_noise ? display_epd__noise(px, py) : s_pattern[py & 31][px & 31];
+            if ((luma >= threshold) != s_invert) *byte |= bit;
             else *byte &= (uint8_t)~bit;
         }
     }

@@ -121,9 +121,10 @@ void display_internal__draw_rgb_bitmap(
     display__process_context_t *context, int16_t x, int16_t y, const uint16_t *bitmap, int16_t w, int16_t h
 );
 bool display_internal__on_transfer_done_from_isr(void);
-/* E-paper: transfers the area presented since the last call into the panel
- * driver. Called by the panel task right before each refresh. */
-void display_internal__epd_pull(void);
+/* E-paper: transfers the area presented since the last call (or, with `all`,
+ * the whole frame) into the panel driver. Called by the panel task right
+ * before each refresh. */
+void display_internal__epd_pull(bool all);
 
 /* The font every display__* text primitive currently renders through.
  * Defaults to display_font_bitmap__instance(); swappable at runtime so a

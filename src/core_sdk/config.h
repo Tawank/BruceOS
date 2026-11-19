@@ -424,6 +424,31 @@ int config__get_display_full_refresh_every(void);
  */
 bruce_result_t config__set_display_full_refresh_every(int value);
 
+/** E-paper dithering: how grays and colors become black and white dots. */
+typedef enum {
+    BRUCE_DISPLAY_DITHER_THRESHOLD = 0, /* No dots: each pixel goes to the nearer of black or white. */
+    BRUCE_DISPLAY_DITHER_BAYER2,
+    BRUCE_DISPLAY_DITHER_BAYER4,
+    BRUCE_DISPLAY_DITHER_NOISE,
+    BRUCE_DISPLAY_DITHER_BLUE_NOISE,
+    BRUCE_DISPLAY_DITHER_COUNT,
+} bruce_display_dither_t;
+
+/**
+ * @brief E-paper only: the dithering used, a bruce_display_dither_t.
+ *
+ * @permission config
+ */
+int config__get_display_dither(void);
+
+/**
+ * @brief Sets config__get_display_dither().
+ *
+ * @param value A bruce_display_dither_t.
+ * @permission config
+ */
+bruce_result_t config__set_display_dither(int value);
+
 /**
  * @brief Launcher command run at startup.
  *

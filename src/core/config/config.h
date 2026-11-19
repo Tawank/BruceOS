@@ -51,6 +51,7 @@ typedef struct {
     bool displayDmaFramebuffer;
     bool displayHighContrast;
     int displayFullRefreshEvery;
+    int displayDither;
 
     const char *launcher;
 
