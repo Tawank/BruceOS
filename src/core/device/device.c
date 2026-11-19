@@ -91,6 +91,23 @@ bruce_result_t device__power_off(uint32_t delay_ms) {
                : BRUCE_ERR_NO_MEMORY;
 }
 
+bruce_result_t device__sleep(void) {
+    bruce_result_t permission = permission__check(BRUCE_PERMISSION_PROCESS);
+    if (permission != BRUCE_OK) return permission;
+#if CONFIG_BRUCE_BUTTON_SELECT_ENABLED && !CONFIG_BRUCE_QEMU_TEST_MODE
+    gpio_num_t pin = (gpio_num_t)CONFIG_BRUCE_BUTTON_SELECT_GPIO;
+    while (gpio_get_level(pin) == 0) vTaskDelay(pdMS_TO_TICKS(20));
+    gpio_wakeup_enable(pin, GPIO_INTR_LOW_LEVEL);
+    esp_sleep_enable_gpio_wakeup();
+    esp_light_sleep_start();
+    esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_GPIO);
+    gpio_wakeup_disable(pin);
+    return BRUCE_OK;
+#else
+    return BRUCE_ERR_UNSUPPORTED;
+#endif
+}
+
 #if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
 /* BRUCE_ERR_NOT_FOUND: blank partition (nothing was ever written).
  * BRUCE_ERR_INVALID_STATE: something was written but its header is

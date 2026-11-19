@@ -38,6 +38,17 @@ bruce_result_t device__restart(uint32_t delay_ms);
 bruce_result_t device__power_off(uint32_t delay_ms);
 
 /**
+ * @brief Light-sleeps the whole device until the Select button is pressed.
+ *
+ * Blocks until wake-up. Everything pauses meanwhile; an e-paper panel keeps
+ * showing its last image. Waits for the button to be released first.
+ *
+ * @return BRUCE_ERR_UNSUPPORTED on boards without a Select button.
+ * @permission process
+ */
+bruce_result_t device__sleep(void);
+
+/**
  * @brief Shared board I2C sensor topics (touch, battery).
  *
  * On boards with a touchscreen or an I2C fuel-gauge/PMIC battery backend,

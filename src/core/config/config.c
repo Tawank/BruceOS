@@ -155,6 +155,11 @@ static void config__set_defaults(config__t *cfg) {
 #endif
 
     cfg->hotkeys.count = 4;
+#if CONFIG_BRUCE_TOUCH_ENABLED
+    config__assign(&cfg->hotkeys.items[4].key, "SWIPE_DOWN");
+    config__assign(&cfg->hotkeys.items[4].action, "GUI=1 OVERLAY=1 menu");
+    cfg->hotkeys.count = 5;
+#endif
 
     cfg->ledBrightness = 50;
     cfg->ledEnabled = true;

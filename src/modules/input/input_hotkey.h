@@ -27,6 +27,9 @@
  *   BTN_A BTN_B BTN_C BTN_X BTN_Y BTN_L1 BTN_R1 BTN_L2 BTN_R2
  *   BTN_START BTN_SELECT BTN_THUMB_L BTN_THUMB_R
  *
+ * On touchscreens, SWIPE_DOWN is a swipe down from the top edge of the
+ * screen (input_touch.c); it takes no duration prefix.
+ *
  * A hotkey `action` may be either an AppRunner command line (launched the
  * same way a launcher entry is, e.g. "process preview") or "bind <NAME>",
  * which rebinds the key/button to the named code instead, e.g.
