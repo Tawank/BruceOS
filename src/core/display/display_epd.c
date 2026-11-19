@@ -43,6 +43,7 @@
 static uint8_t *s_drawn;   /* What apps have drawn. */
 static uint8_t *s_sending; /* Snapshot being sent. */
 static uint8_t *s_shown;   /* What the panel shows. */
+static uint8_t *s_chunk;   /* Internal DMA copy of each SPI write; the frames above live in PSRAM. */
 static SemaphoreHandle_t s_drawn_lock;
 static SemaphoreHandle_t s_panel_lock;
 static TaskHandle_t s_task;
@@ -57,7 +58,8 @@ static void display_epd__send(bool data, const uint8_t *bytes, size_t len) {
     gpio_set_level(EPD__PIN_DC, data);
     while (len > 0) {
         size_t n = len < EPD__CHUNK ? len : EPD__CHUNK;
-        spi_transaction_t t = {.length = n * 8, .tx_buffer = bytes};
+        memcpy(s_chunk, bytes, n);
+        spi_transaction_t t = {.length = n * 8, .tx_buffer = s_chunk};
         /* Interrupt-driven, so the task sleeps through the ~40 ms frame instead of spinning a core. */
         esp_err_t err = spi_device_transmit(s_spi, &t);
         if (err != ESP_OK) ESP_LOGW(TAG, "SPI write of %u bytes failed: %s", (unsigned)n, esp_err_to_name(err));
@@ -188,13 +190,20 @@ static bruce_result_t display_epd__init_spi(void) {
     return spi_bus_add_device(EPD__HOST, &device, &s_spi) == ESP_OK ? BRUCE_OK : BRUCE_ERR_INTERNAL;
 }
 
+static uint8_t *display_epd__alloc_frame(void) {
+    uint8_t *frame = heap_caps_malloc(EPD__BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    return frame != NULL ? frame : heap_caps_malloc(EPD__BYTES, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+}
+
 bruce_result_t display_epd__init(void) {
-    s_drawn = heap_caps_malloc(EPD__BYTES, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    s_shown = heap_caps_malloc(EPD__BYTES, MALLOC_CAP_DMA);
-    s_sending = heap_caps_malloc(EPD__BYTES, MALLOC_CAP_DMA);
+    s_drawn = display_epd__alloc_frame();
+    s_shown = display_epd__alloc_frame();
+    s_sending = display_epd__alloc_frame();
+    s_chunk = heap_caps_malloc(EPD__CHUNK, MALLOC_CAP_DMA);
     s_drawn_lock = xSemaphoreCreateMutex();
     s_panel_lock = xSemaphoreCreateMutex();
-    if (s_drawn == NULL || s_shown == NULL || s_sending == NULL || s_drawn_lock == NULL || s_panel_lock == NULL) {
+    if (s_drawn == NULL || s_shown == NULL || s_sending == NULL || s_chunk == NULL || s_drawn_lock == NULL ||
+        s_panel_lock == NULL) {
         display_epd__deinit();
         return BRUCE_ERR_NO_MEMORY;
     }
@@ -235,7 +244,8 @@ void display_epd__deinit(void) {
     heap_caps_free(s_drawn);
     heap_caps_free(s_shown);
     heap_caps_free(s_sending);
-    s_drawn = s_shown = s_sending = NULL;
+    heap_caps_free(s_chunk);
+    s_drawn = s_shown = s_sending = s_chunk = NULL;
 }
 
 void display_epd__configure_rotation(uint8_t rotation) { s_rotation = rotation & 3; }

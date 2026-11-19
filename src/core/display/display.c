@@ -20,6 +20,13 @@
 #include "freertos/semphr.h"
 #include "sdkconfig.h"
 
+#if CONFIG_BRUCE_DISPLAY_PANEL_UC8253 && CONFIG_SPIRAM
+/* The e-paper driver converts transfers on the CPU; nothing DMAs these buffers. */
+#define DISPLAY__TRANSFER_CAPS (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
+#else
+#define DISPLAY__TRANSFER_CAPS (MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA)
+#endif
+
 #define TAG "bruce_display"
 #define DISPLAY__MAX_CONTEXTS BRUCE_PROCESS_MAX
 #define DISPLAY__MAX_RENDER_REQUESTS 8
@@ -723,7 +730,7 @@ static bruce_result_t display__reconfigure_render_mode_locked(bool buffered, boo
         new_framebuffer = display__alloc_framebuffer(&new_dma);
         if (new_framebuffer == NULL) return BRUCE_ERR_NO_MEMORY;
         new_pack_buffer = heap_caps_malloc(
-            DISPLAY__DIRECT_BUF_PIXELS * sizeof(*new_pack_buffer), MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA
+            DISPLAY__DIRECT_BUF_PIXELS * sizeof(*new_pack_buffer), DISPLAY__TRANSFER_CAPS
         );
         if (new_pack_buffer == NULL) {
             heap_caps_free(new_framebuffer);
@@ -732,7 +739,7 @@ static bruce_result_t display__reconfigure_render_mode_locked(bool buffered, boo
         memset(new_framebuffer, 0, DISPLAY__FB_SIZE);
     } else {
         new_direct_buffer = heap_caps_malloc(
-            DISPLAY__DIRECT_BUF_PIXELS * sizeof(*new_direct_buffer), MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA
+            DISPLAY__DIRECT_BUF_PIXELS * sizeof(*new_direct_buffer), DISPLAY__TRANSFER_CAPS
         );
         if (new_direct_buffer == NULL) return BRUCE_ERR_NO_MEMORY;
     }
@@ -820,7 +827,7 @@ bruce_result_t display__init(void) {
             return BRUCE_ERR_NO_MEMORY;
         }
         s_pack_buffer = heap_caps_malloc(
-            DISPLAY__DIRECT_BUF_PIXELS * sizeof(*s_pack_buffer), MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA
+            DISPLAY__DIRECT_BUF_PIXELS * sizeof(*s_pack_buffer), DISPLAY__TRANSFER_CAPS
         );
         if (s_pack_buffer == NULL) {
             ESP_LOGE(TAG, "failed to allocate transfer pack buffer");
@@ -830,7 +837,7 @@ bruce_result_t display__init(void) {
         }
     } else {
         s_direct_buffer = heap_caps_malloc(
-            DISPLAY__DIRECT_BUF_PIXELS * sizeof(*s_direct_buffer), MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA
+            DISPLAY__DIRECT_BUF_PIXELS * sizeof(*s_direct_buffer), DISPLAY__TRANSFER_CAPS
         );
         if (s_direct_buffer == NULL) {
             ESP_LOGE(TAG, "failed to allocate direct rendering buffer");
