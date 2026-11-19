@@ -53,6 +53,9 @@ static uint8_t s_rotation;
 static bool s_invert;
 static bool s_enabled = true;
 static volatile bool s_full_requested = true; /* The panel's content is unknown at start. */
+static volatile bool s_frozen;                /* Shutdown/suspend: keep showing what is on the panel. */
+static volatile uint32_t s_pull_seq;          /* Refresh rounds started... */
+static volatile uint32_t s_done_seq;          /* ...and the last one finished. */
 
 static void display_epd__send(bool data, const uint8_t *bytes, size_t len) {
     gpio_set_level(EPD__PIN_DC, data);
@@ -129,23 +132,33 @@ static void display_epd__task(void *arg) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         for (int i = 0; i < EPD__SETTLE_MAX && ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(EPD__SETTLE_MS)); ++i) {}
 
+        if (s_frozen) continue;
+        uint32_t seq = ++s_pull_seq;
         display_internal__epd_pull(display_epd__load_dither());
         xSemaphoreTake(s_drawn_lock, portMAX_DELAY);
         memcpy(s_sending, s_drawn, EPD__BYTES);
         bool enabled = s_enabled;
         xSemaphoreGive(s_drawn_lock);
         bool full = s_full_requested;
-        if (!enabled || (!full && memcmp(s_sending, s_shown, EPD__BYTES) == 0)) continue;
+        if (!enabled || (!full && memcmp(s_sending, s_shown, EPD__BYTES) == 0)) {
+            s_done_seq = seq;
+            continue;
+        }
 
         /* Full refreshes clear the ghosting partial ones leave; see the user setting. */
         int every = config__get_display_full_refresh_every();
         if (every > 0 && partials >= every) full = true;
         s_full_requested = false;
         xSemaphoreTake(s_panel_lock, portMAX_DELAY);
+        if (s_frozen) {
+            xSemaphoreGive(s_panel_lock);
+            continue;
+        }
         display_epd__refresh(full);
         xSemaphoreGive(s_panel_lock);
         memcpy(s_shown, s_sending, EPD__BYTES);
         partials = full ? 0 : partials + 1;
+        s_done_seq = seq;
     }
 }
 
@@ -326,6 +339,14 @@ static const uint8_t s_blue_noise[32][32] = {
 };
 static uint8_t s_pattern[32][32];
 static bool s_noise; /* White noise comes from a hash of the position, not s_pattern. */
+static bool s_atkinson;
+
+/* Atkinson error for the current row and the two below it, indexed by x - x_start + 2. Kept between
+ * calls, so the chunks of one frame continue where the previous chunk stopped. */
+#define EPD__SIDE (EPD__WIDTH > EPD__HEIGHT ? EPD__WIDTH : EPD__HEIGHT)
+static int16_t s_error[3][EPD__SIDE + 4];
+static int16_t *s_error_rows[3] = {s_error[0], s_error[1], s_error[2]};
+static int s_error_y = -1, s_error_x0, s_error_x1;
 static int s_dither;
 
 /* Call with s_drawn_lock held. */
@@ -341,6 +362,8 @@ static void display_epd__set_dither(int mode) {
         }
     }
     s_noise = mode == BRUCE_DISPLAY_DITHER_NOISE;
+    s_atkinson = mode == BRUCE_DISPLAY_DITHER_ATKINSON;
+    s_error_y = -1;
     s_dither = mode;
 }
 
@@ -368,6 +391,14 @@ bruce_result_t display_epd__draw_bitmap(
 ) {
     xSemaphoreTake(s_drawn_lock, portMAX_DELAY);
     for (int y = y_start; y < y_end; ++y) {
+        int16_t **err = s_error_rows;
+        if (s_atkinson) {
+            bool continues = y == s_error_y && x_start == s_error_x0 && x_end == s_error_x1;
+            if (!continues) memset(s_error, 0, sizeof(s_error));
+            s_error_y = y + 1;
+            s_error_x0 = x_start;
+            s_error_x1 = x_end;
+        }
         int px, py, dx = 0, dy = 0;
         switch (s_rotation) {
             case 1: px = EPD__WIDTH - 1 - y; py = x_start; dy = 1; break;
@@ -381,9 +412,31 @@ bruce_result_t display_epd__draw_bitmap(
             unsigned luma = ((c >> 11) * 616u + ((c >> 5) & 0x3Fu) * 600u + (c & 0x1Fu) * 232u) >> 8;
             uint8_t *byte = &s_drawn[py * (EPD__WIDTH / 8) + (px >> 3)];
             uint8_t bit = (uint8_t)(0x80u >> (px & 7));
-            unsigned threshold = s_noise ? display_epd__noise(px, py) : s_pattern[py & 31][px & 31];
-            if ((luma >= threshold) != s_invert) *byte |= bit;
+            bool white;
+            if (s_atkinson) {
+                /* White is luma 250; 6/8 of the error spreads to the neighbours, the rest is dropped. */
+                int i = x - x_start + 2;
+                int value = (int)luma + err[0][i];
+                white = value >= 125;
+                int16_t e = (int16_t)((white ? value - 250 : value) / 8);
+                err[0][i + 1] += e;
+                err[0][i + 2] += e;
+                err[1][i - 1] += e;
+                err[1][i] += e;
+                err[1][i + 1] += e;
+                err[2][i] += e;
+            } else {
+                white = luma >= (s_noise ? display_epd__noise(px, py) : s_pattern[py & 31][px & 31]);
+            }
+            if (white != s_invert) *byte |= bit;
             else *byte &= (uint8_t)~bit;
+        }
+        if (s_atkinson) {
+            int16_t *done = err[0];
+            err[0] = err[1];
+            err[1] = err[2];
+            err[2] = done;
+            memset(done, 0, sizeof(s_error[0]));
         }
     }
     xSemaphoreGive(s_drawn_lock);
@@ -403,6 +456,31 @@ bruce_result_t display_epd__invert(bool invert) {
     xSemaphoreGive(s_drawn_lock);
     xTaskNotifyGive(s_task);
     return BRUCE_OK;
+}
+
+bruce_result_t display_epd__wait_shown(uint32_t timeout_ms) {
+    if (s_task == NULL) return BRUCE_OK;
+    /* A round already under way may have pulled before the caller's last present; wait for the next one. */
+    uint32_t target = s_pull_seq + 1;
+    xTaskNotifyGive(s_task);
+    TickType_t start = xTaskGetTickCount();
+    while ((int32_t)(s_done_seq - target) < 0) {
+        if (xTaskGetTickCount() - start > pdMS_TO_TICKS(timeout_ms)) return BRUCE_ERR_TIMEOUT;
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    return BRUCE_OK;
+}
+
+void display_epd__freeze(bool frozen) {
+    if (s_task == NULL) return;
+    s_frozen = frozen;
+    if (frozen) {
+        /* Let a refresh already running finish. */
+        xSemaphoreTake(s_panel_lock, portMAX_DELAY);
+        xSemaphoreGive(s_panel_lock);
+    } else {
+        xTaskNotifyGive(s_task);
+    }
 }
 
 void display_epd__frame_ready(void) {

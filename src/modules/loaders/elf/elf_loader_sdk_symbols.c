@@ -2374,6 +2374,7 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(display__clear_clip),
     ESP_ELFSYM_EXPORT(display__is_epaper),
     ESP_ELFSYM_EXPORT(display__full_refresh),
+    ESP_ELFSYM_EXPORT(display__wait_shown),
     ESP_ELFSYM_EXPORT(display__height),
     ESP_ELFSYM_EXPORT(display__color565),
     ESP_ELFSYM_EXPORT(display__fill_screen),

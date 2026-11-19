@@ -11,6 +11,9 @@ bruce_result_t display__init(void);
 void display__boot_backlight_off(void);
 void display__deinit(void);
 bruce_result_t display__flush(void);
+/* Shutdown/suspend: an e-paper panel stops refreshing and keeps its picture
+ * (waiting for a refresh already running) until unfrozen. No-op on LCDs. */
+void display__freeze(bool frozen);
 
 void display__process_created(bruce_process_id_t process_id, bool gui_requested);
 void display__process_set_gui_requested(bruce_process_id_t process_id);

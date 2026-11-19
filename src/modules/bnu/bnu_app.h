@@ -11,6 +11,7 @@ int bnu_refresh_app_main(int argc, char **argv);
 int bnu_top_app_main(int argc, char **argv);
 int bnu_shutdown_app_main(int argc, char **argv);
 int bnu_reboot_app_main(int argc, char **argv);
+int bnu_suspend_app_main(int argc, char **argv);
 int bnu_date_app_main(int argc, char **argv);
 int bnu_sleep_app_main(int argc, char **argv);
 int bnu_tone_app_main(int argc, char **argv);

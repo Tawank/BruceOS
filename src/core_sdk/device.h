@@ -40,8 +40,10 @@ bruce_result_t device__power_off(uint32_t delay_ms);
 /**
  * @brief Light-sleeps the whole device until the Select button is pressed.
  *
- * Blocks until wake-up. Everything pauses meanwhile; an e-paper panel keeps
- * showing its last image. Waits for the button to be released first.
+ * Blocks until wake-up. Everything pauses meanwhile and the backlight is
+ * off; an e-paper panel keeps showing what it shows now (drawing still in
+ * progress is not shown -- see display__wait_shown()). Waits for the button
+ * to be released first.
  *
  * @return BRUCE_ERR_UNSUPPORTED on boards without a Select button.
  * @permission process

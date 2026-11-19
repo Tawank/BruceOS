@@ -700,6 +700,27 @@ static bool app_runner__append_quoted(char *out, size_t capacity, size_t *used, 
     return true;
 }
 
+static bool app_runner__is_shell_operator(const char *word) {
+    return strcmp(word, "&&") == 0 || strcmp(word, "||") == 0 || strcmp(word, ";") == 0 ||
+           strcmp(word, "|") == 0;
+}
+
+/* "a && b" as `shell -c "a && b"`: words stay quoted, operators don't. */
+static bool app_runner__shell_script(char *out, size_t capacity, char **words, int first, int count) {
+    size_t used = 0;
+    out[0] = '\0';
+    for (int i = first; i < count; ++i) {
+        if (!app_runner__is_shell_operator(words[i])) {
+            if (!app_runner__append_quoted(out, capacity, &used, words[i])) return false;
+            continue;
+        }
+        int written = snprintf(out + used, capacity - used, " %s", words[i]);
+        if (written < 0 || (size_t)written >= capacity - used) return false;
+        used += (size_t)written;
+    }
+    return true;
+}
+
 bruce_result_t app_runner__run_command(const char *command_line, bruce_launch_mode_t default_mode) {
     if (command_line == NULL || !app_runner__mode_valid(default_mode)) return BRUCE_ERR_INVALID_ARGUMENT;
     char **words = NULL;
@@ -742,22 +763,39 @@ bruce_result_t app_runner__run_command(const char *command_line, bruce_launch_mo
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
 
-    size_t argument_capacity = strlen(command_line) * 2u + 1u;
+    bool chained = false;
+    for (int i = command_index + 1; i < word_count; ++i) {
+        chained = chained || app_runner__is_shell_operator(words[i]);
+    }
+
+    /* A chain is quoted twice: once into the script, then as shell's -c argument. */
+    size_t argument_capacity = strlen(command_line) * 4u + 16u;
     char *arguments = malloc(argument_capacity);
-    if (arguments == NULL) {
+    char *script = chained ? malloc(argument_capacity) : NULL;
+    if (arguments == NULL || (chained && script == NULL)) {
+        free(arguments);
+        free(script);
         app_runner__free_args(words, word_count);
         return BRUCE_ERR_NO_MEMORY;
     }
     arguments[0] = '\0';
     size_t used = 0;
-    for (int i = command_index + 1; i < word_count; ++i) {
-        if (!app_runner__append_quoted(arguments, argument_capacity, &used, words[i])) {
-            free(arguments);
-            app_runner__free_args(words, word_count);
-            return BRUCE_ERR_RESOURCE_LIMIT;
-        }
+    bool fits = true;
+    if (chained) {
+        fits = app_runner__shell_script(script, argument_capacity, words, command_index, word_count) &&
+               app_runner__append_quoted(arguments, argument_capacity, &used, "-c") &&
+               app_runner__append_quoted(arguments, argument_capacity, &used, script);
     }
-    const char *command = words[command_index];
+    for (int i = command_index + 1; fits && !chained && i < word_count; ++i) {
+        fits = app_runner__append_quoted(arguments, argument_capacity, &used, words[i]);
+    }
+    free(script);
+    if (!fits) {
+        free(arguments);
+        app_runner__free_args(words, word_count);
+        return BRUCE_ERR_RESOURCE_LIMIT;
+    }
+    const char *command = chained ? "shell" : words[command_index];
     int result;
     if (command[0] == '/' || strncmp(command, "./", 2) == 0) {
         result = app_runner__run_path_with_environment(

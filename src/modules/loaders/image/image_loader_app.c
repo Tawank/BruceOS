@@ -76,13 +76,22 @@ image_viewer__present_bitmap(const image_bitmap_t *bitmap, const bruce_image_dra
     return result;
 }
 
-static bruce_result_t image_viewer__draw_gif(const char *path, const bruce_image_draw_options_t *options) {
+/* How long the panel may take to show the image before a timeout starts counting. */
+#define IMAGE_SHOWN_TIMEOUT_MS 5000u
+
+static bool image_viewer__expired(int timeout_ms, uint64_t shown_ms) {
+    return timeout_ms >= 0 && runtime__now() - shown_ms >= (uint64_t)timeout_ms;
+}
+
+static bruce_result_t
+image_viewer__draw_gif(const char *path, const bruce_image_draw_options_t *options, int timeout_ms) {
     bruce_gif_t *gif = NULL;
     bruce_result_t result = image__gif_open(path, options, &gif, NULL);
     if (result != BRUCE_OK) return result;
 
     (void)input__flush();
-    while (result == BRUCE_OK) {
+    uint64_t shown_ms = runtime__now();
+    while (result == BRUCE_OK && !image_viewer__expired(timeout_ms, shown_ms)) {
         uint32_t delay_ms = 0;
         result = display__begin_frame();
         if (result == BRUCE_OK) result = display__fill_screen(options->background);
@@ -106,7 +115,10 @@ static bruce_result_t image_viewer__draw_gif(const char *path, const bruce_image
 int image_app_main(int argc, char **argv) {
     ArgParser *parser = ap_new_parser();
     if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
-    ap_set_helptext(parser, "Display an image, or piped stdin, until an input event is received.");
+    ap_add_int_opt(parser, "t timeout", -1);
+    ap_set_helptext(parser, "Display an image, or piped stdin, until an input event is received. "
+                            "-t MS exits MS milliseconds after the screen shows it instead, e.g. "
+                            "\"image -t 0 /sdcard/cover.png && suspend\".");
     ap_add_optional_arg(parser, "path", "Path to a JPEG, PNG, or GIF image");
     ap_unknown_options_as_args(parser);
     ap_allow_extra_args(parser);
@@ -118,6 +130,7 @@ int image_app_main(int argc, char **argv) {
         return status == AP_STATUS_NO_MEMORY ? BRUCE_ERR_NO_MEMORY : BRUCE_ERR_INVALID_ARGUMENT;
     }
     const char *path = ap_get_arg(parser, "path");
+    int timeout_ms = ap_get_int_value(parser, "t");
     const char *stdin_size_arg = environment__get("STDIN_SIZE");
     char *end = NULL;
     unsigned long parsed_stdin_size = stdin_size_arg != NULL ? strtoul(stdin_size_arg, &end, 10) : 0;
@@ -143,19 +156,11 @@ int image_app_main(int argc, char **argv) {
         .fit = true,
         .background = BRUCE_COLOR_BLACK,
     };
-    /* A pipe destination always launches backgrounded, with no per-stage
-     * GUI=1 support (see shell_executor__pipe_write()'s doc comment) -- a
-     * background process's display context stays hidden (display.c), so
-     * every draw call below would silently no-op without this, and
-     * image__fit_size() (render.c), which the decode step below calls to
-     * size the bitmap to the screen, reads this same process's own
-     * display__width()/height() -- 0 until promoted -- so promoting has to
-     * happen before decoding too, not just before drawing. Same
-     * self-promotion wifi_app.c's wifi_app_on() uses to reach the
-     * foreground from a process that didn't start there. A path-based
-     * launch needs no such push: interactively typing "image foo.png"
-     * already starts in the foreground. */
-    bruce_result_t result = from_stdin ? runtime__to_foreground() : BRUCE_OK;
+    /* A viewer always needs the screen, however it was launched: the shell
+     * starts commands as background CLI processes ("image x.png && suspend",
+     * a pipe destination), whose draw calls would silently no-op. Promoting
+     * also sizes the viewport image__fit_size() reads while decoding below. */
+    bruce_result_t result = runtime__to_foreground();
     if (result == BRUCE_OK) result = display__begin_frame();
     if (result == BRUCE_OK) result = display__fill_screen(options.background);
     if (result == BRUCE_OK) result = display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
@@ -177,7 +182,7 @@ int image_app_main(int argc, char **argv) {
     image_bitmap_t bitmap = {0};
     bool have_bitmap = false;
     if (is_gif) {
-        if (result == BRUCE_OK) result = image_viewer__draw_gif(path, &options);
+        if (result == BRUCE_OK) result = image_viewer__draw_gif(path, &options, timeout_ms);
     } else {
         if (result == BRUCE_OK) {
             if (from_stdin) {
@@ -219,7 +224,10 @@ int image_app_main(int argc, char **argv) {
 
     if (!is_gif) {
         (void)input__flush();
-        for (;;) {
+        /* E-paper shows a frame well after it is presented; a timeout counts from when it is visible. */
+        if (timeout_ms >= 0) (void)display__wait_shown(IMAGE_SHOWN_TIMEOUT_MS);
+        uint64_t shown_ms = runtime__now();
+        while (!image_viewer__expired(timeout_ms, shown_ms)) {
             bruce_input_event_t event;
             bruce_result_t input_result = input__read(&event, 100);
             if (input_result == BRUCE_ERR_NOT_FOREGROUND) {

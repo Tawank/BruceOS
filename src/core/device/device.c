@@ -2,6 +2,8 @@
 
 #include "board_i2c.h"
 
+#include "core/display/display.h"
+
 #include "core_sdk/device.h"
 #include "core_sdk/permission.h"
 #include "core_sdk/pubsub.h"  // IWYU pragma: keep
@@ -61,6 +63,8 @@ static void device__restart_task(void *context) {
 static void device__power_off_task(void *context) {
     uint32_t delay_ms = (uint32_t)(uintptr_t)context;
     if (delay_ms > 0) vTaskDelay(pdMS_TO_TICKS(delay_ms));
+    /* An e-paper panel keeps its picture without power; don't let it change now. */
+    display__freeze(true);
 #if CONFIG_BRUCE_POWER_HOLD_GPIO >= 0
     gpio_config_t cfg = {
         .pin_bit_mask = 1ULL << CONFIG_BRUCE_POWER_HOLD_GPIO,
@@ -97,11 +101,16 @@ bruce_result_t device__sleep(void) {
 #if CONFIG_BRUCE_BUTTON_SELECT_ENABLED && !CONFIG_BRUCE_QEMU_TEST_MODE
     gpio_num_t pin = (gpio_num_t)CONFIG_BRUCE_BUTTON_SELECT_GPIO;
     while (gpio_get_level(pin) == 0) vTaskDelay(pdMS_TO_TICKS(20));
+    display__freeze(true);
+    uint8_t brightness = display__get_brightness();
+    (void)display__set_brightness(0);
     gpio_wakeup_enable(pin, GPIO_INTR_LOW_LEVEL);
     esp_sleep_enable_gpio_wakeup();
     esp_light_sleep_start();
     esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_GPIO);
     gpio_wakeup_disable(pin);
+    (void)display__set_brightness(brightness);
+    display__freeze(false);
     return BRUCE_OK;
 #else
     return BRUCE_ERR_UNSUPPORTED;

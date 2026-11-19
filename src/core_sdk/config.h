@@ -431,6 +431,7 @@ typedef enum {
     BRUCE_DISPLAY_DITHER_BAYER4,
     BRUCE_DISPLAY_DITHER_NOISE,
     BRUCE_DISPLAY_DITHER_BLUE_NOISE,
+    BRUCE_DISPLAY_DITHER_ATKINSON, /* Error diffusion: keeps light areas clean and fine detail sharp. */
     BRUCE_DISPLAY_DITHER_COUNT,
 } bruce_display_dither_t;
 

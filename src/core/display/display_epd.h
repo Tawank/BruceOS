@@ -17,3 +17,6 @@ bruce_result_t display_epd__set_enabled(bool enabled);
 void display_epd__request_full_refresh(void);
 /* A presented frame is waiting in the framebuffer; the panel task pulls it before its next refresh. */
 void display_epd__frame_ready(void);
+/* See display__wait_shown() and display__freeze(). */
+bruce_result_t display_epd__wait_shown(uint32_t timeout_ms);
+void display_epd__freeze(bool frozen);

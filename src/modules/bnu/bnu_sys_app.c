@@ -933,6 +933,15 @@ int bnu_shutdown_app_main(int argc, char **argv) {
     return device__power_off(delay_ms);
 }
 
+int bnu_suspend_app_main(int argc, char **argv) {
+    ArgParser *parser =
+        bnu__new_parser("Sleep until the Select button is pressed. An e-paper screen keeps its picture.");
+    if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
+    if (argc < 1 || !ap_parse(parser, argc, argv)) return bnu__parse_failure(parser);
+    ap_free(parser);
+    return device__sleep();
+}
+
 int bnu_reboot_app_main(int argc, char **argv) {
     ArgParser *parser = bnu__new_parser("Restart the device.");
     if (parser == NULL) return BRUCE_ERR_NO_MEMORY;

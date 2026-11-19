@@ -934,6 +934,23 @@ void display__full_refresh(void) {
 #endif
 }
 
+bruce_result_t display__wait_shown(uint32_t timeout_ms) {
+#if CONFIG_BRUCE_DISPLAY_PANEL_UC8253 && !CONFIG_BRUCE_QEMU_TEST_MODE
+    return display_epd__wait_shown(timeout_ms);
+#else
+    (void)timeout_ms;
+    return BRUCE_OK;
+#endif
+}
+
+void display__freeze(bool frozen) {
+#if CONFIG_BRUCE_DISPLAY_PANEL_UC8253 && !CONFIG_BRUCE_QEMU_TEST_MODE
+    display_epd__freeze(frozen);
+#else
+    (void)frozen;
+#endif
+}
+
 int display__width(void) {
     bruce_process_id_t caller = process__current_id();
     /* A process's viewport isn't sized until it's promoted to a real GUI

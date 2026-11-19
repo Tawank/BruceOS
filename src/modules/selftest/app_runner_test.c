@@ -203,6 +203,16 @@ bool selftest__run_apprunner_args_case(void) {
         return false;
     }
     (void)environment__global_unset("TEST_VALUE");
+    /* A chain runs through the shell; the second command sees its own quoted argument. */
+    memset(&s_echo, 0, sizeof(s_echo));
+    int chain_result = app_runner__run_command(
+        "BG=1 selftest_echo first && selftest_echo second \"x y\"", BRUCE_LAUNCH_FOREGROUND
+    );
+    if (chain_result <= 0 || process__wait((bruce_process_id_t)chain_result, 4000) != BRUCE_OK ||
+        s_echo.argc != 3 || strcmp(s_echo.argv_buf[1], "second") != 0 || strcmp(s_echo.argv_buf[2], "x y") != 0) {
+        printf("[selftest] apprunner/args: chain result=%d argc=%d\n", chain_result, s_echo.argc);
+        return false;
+    }
     if (app_runner__run_command("BG=invalid selftest_echo", BRUCE_LAUNCH_BACKGROUND) !=
         BRUCE_ERR_INVALID_ARGUMENT) {
         printf("[selftest] apprunner/args: invalid BG value was accepted\n");

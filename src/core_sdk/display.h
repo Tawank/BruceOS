@@ -90,6 +90,14 @@ bool display__is_epaper(void);
 void display__full_refresh(void);
 
 /**
+ * @brief Waits until the panel shows everything presented so far.
+ *
+ * Returns at once on LCDs. On e-paper it waits for the next panel refresh,
+ * up to timeout_ms (BRUCE_ERR_TIMEOUT).
+ */
+bruce_result_t display__wait_shown(uint32_t timeout_ms);
+
+/**
  * @brief Full physical screen width, independent of the caller's own viewport.
  *
  * (which may be smaller, tiled, or zero while hidden/background). Meant for

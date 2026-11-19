@@ -429,9 +429,9 @@ static bruce_result_t config_app__full_refresh_gui(void) {
 }
 
 static const char *const s_dither_labels[BRUCE_DISPLAY_DITHER_COUNT] = {
-    "Threshold", "Bayer 2x2", "Bayer 4x4", "Random noise", "Blue noise"};
+    "Threshold", "Bayer 2x2", "Bayer 4x4", "Random noise", "Blue noise", "Atkinson"};
 static const char *const s_dither_names[BRUCE_DISPLAY_DITHER_COUNT] = {
-    "threshold", "bayer2", "bayer4", "noise", "blue-noise"};
+    "threshold", "bayer2", "bayer4", "noise", "blue-noise", "atkinson"};
 
 /* E-paper: how grays and colors become black and white dots. */
 static bruce_result_t config_app__dither_gui(void) {
@@ -1087,7 +1087,7 @@ int config_app_main(int argc, char **argv) {
     ap_set_helptext(display_full_refresh, "E-paper: partial updates between full refreshes.");
     ap_add_optional_arg(display_full_refresh, "updates", "0 to 1000, 0 = never");
     ap_set_helptext(display_dither, "E-paper: how grays and colors become black and white dots.");
-    ap_add_optional_arg(display_dither, "mode", "threshold, bayer2, bayer4, noise, blue-noise, or toggle (next one)");
+    ap_add_optional_arg(display_dither, "mode", "threshold, bayer2, bayer4, noise, blue-noise, atkinson, or toggle (next one)");
     ap_set_helptext(theme, "Select or inspect the UI color theme.");
     ap_set_helptext(theme_list, "List available theme presets.");
     ap_set_helptext(theme_set, "Apply a named theme preset (see 'theme list').");
