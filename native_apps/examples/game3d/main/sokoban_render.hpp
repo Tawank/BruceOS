@@ -209,7 +209,10 @@ inline void frameCameraOnPlayer(Camera &camera, int32_t px, int32_t pz, int widt
     float worldRadius = kFollowRadiusTiles * (float)kTile;
     // `height` here is already the game viewport (main.cpp reserves the HUD
     // bars out of the framebuffer itself), so no separate margin is needed.
-    float targetApparentRadius = 0.85f * (float)std::min(width, height);
+    // Portrait screens (T-Deck MAX) are limited by their full width, which
+    // comes out closer than the landscape ones: pull back to match.
+    float share = height > width ? 0.6f : 0.85f;
+    float targetApparentRadius = share * (float)std::min(width, height);
     if (targetApparentRadius < 1.0f) targetApparentRadius = 1.0f;
 
     float dist = camera.fovFactor * worldRadius / targetApparentRadius;

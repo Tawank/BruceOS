@@ -70,6 +70,9 @@ typedef struct {
     int http_max_active;
 
     bool wifi_connected;
+    bool has_keyboard;
+    bool has_touch;
+    bool epaper;
     bool wifi_connect_ok;
     int wifi_connect_calls;  /* Background connects started. */
     bool wifi_connect_manual; /* Connect stays busy until fakes__wifi_finish(). */

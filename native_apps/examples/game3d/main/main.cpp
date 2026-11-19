@@ -216,6 +216,7 @@ extern "C" int app_main(int argc, char **argv) {
 
     bool hudCleared = true;
     bool running = true;
+    bruce_input_touch_t touch = {};
     while (running) {
         // Standard event-loop drain (see native_apps/examples/nes's
         // nes_input.c) instead of input__check()-per-code polling: pulls
@@ -224,6 +225,33 @@ extern "C" int app_main(int argc, char **argv) {
         // frames regardless of which codes this loop happens to test for.
         bruce_input_event_t ev;
         while (input__poll(&ev) == BRUCE_OK) {
+            // Touch: the board is seen from a corner, so each grid direction
+            // runs diagonally on screen -- UP up-right, RIGHT down-right, DOWN
+            // down-left, LEFT up-left -- and a swipe picks the one in its
+            // quadrant. A tap continues after a solved level, a hold restarts
+            // the level like Enter.
+            if (ev.code == BRUCE_INPUT_CODE_TOUCH) {
+                bruce_input_event_t key = {};
+                key.type = BRUCE_INPUT_BUTTON;
+                key.action = BRUCE_INPUT_PRESS;
+                switch (input__touch_gesture(&touch, &ev)) {
+                    case BRUCE_INPUT_GESTURE_NONE: break;
+                    case BRUCE_INPUT_GESTURE_TAP: key.code = gs.solved ? BRUCE_INPUT_CODE_SELECT : 0; break;
+                    case BRUCE_INPUT_GESTURE_HOLD:
+                        key.type = BRUCE_INPUT_KEY;
+                        key.code = BRUCE_INPUT_CODE_SELECT;
+                        break;
+                    default:
+                        if (touch.dy < 0) {
+                            key.code = touch.dx >= 0 ? BRUCE_INPUT_CODE_UP : BRUCE_INPUT_CODE_LEFT;
+                        } else {
+                            key.code = touch.dx >= 0 ? BRUCE_INPUT_CODE_RIGHT : BRUCE_INPUT_CODE_DOWN;
+                        }
+                        break;
+                }
+                if (key.code == 0) continue;
+                ev = key;
+            }
             if (ev.action != BRUCE_INPUT_PRESS) continue;
             if (ev.code == BRUCE_INPUT_CODE_BACK) {
                 running = false;

@@ -198,6 +198,14 @@ bool input__wait_long_press(const bruce_input_event_t *press, uint32_t long_ms) 
     }
 }
 
+bool input__has_keyboard(void) {
+#if CONFIG_BRUCE_KEYBOARD_ENABLED || CONFIG_BRUCE_KEYBOARD_TCA8418_ENABLED
+    return true;
+#else
+    return false;
+#endif
+}
+
 bool input__has_touch(void) {
 #if CONFIG_BRUCE_TOUCH_ENABLED
     return true;

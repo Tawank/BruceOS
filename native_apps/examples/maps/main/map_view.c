@@ -25,20 +25,31 @@ static int32_t map_view__floor_div(int32_t value, int32_t divisor) {
     return (value % divisor != 0 && value < 0) ? quotient - 1 : quotient;
 }
 
+/* The zoom level tiles come from, and their size on screen. */
+static int map_view__tile_zoom(const map_view_t *view) {
+    return view->big && view->zoom > GEO_MIN_ZOOM ? view->zoom - 1 : view->zoom;
+}
+
+static int32_t map_view__tile_px(const map_view_t *view) {
+    return GEO_TILE_SIZE << (view->zoom - map_view__tile_zoom(view));
+}
+
 static map_view_range_t map_view__range(const map_view_t *view, int width, int height) {
+    int32_t size = map_view__tile_px(view);
     map_view_range_t range = {.left = view->center.x - width / 2, .top = view->center.y - height / 2};
-    range.first_x = map_view__floor_div(range.left, GEO_TILE_SIZE);
-    range.first_y = map_view__floor_div(range.top, GEO_TILE_SIZE);
-    range.last_x = map_view__floor_div(range.left + width - 1, GEO_TILE_SIZE);
-    range.last_y = map_view__floor_div(range.top + height - 1, GEO_TILE_SIZE);
+    range.first_x = map_view__floor_div(range.left, size);
+    range.first_y = map_view__floor_div(range.top, size);
+    range.last_x = map_view__floor_div(range.left + width - 1, size);
+    range.last_y = map_view__floor_div(range.top + height - 1, size);
     return range;
 }
 
 static bool map_view__key(const map_view_t *view, int32_t tile_x, int32_t tile_y, tile_key_t *out_key) {
-    int32_t count = 1 << view->zoom;
+    int zoom = map_view__tile_zoom(view);
+    int32_t count = 1 << zoom;
     if (tile_y < 0 || tile_y >= count) return false;
     int x = (int)(((tile_x % count) + count) % count);
-    *out_key = (tile_key_t){.z = view->zoom, .x = x, .y = (int)tile_y};
+    *out_key = (tile_key_t){.z = zoom, .x = x, .y = (int)tile_y};
     return true;
 }
 
@@ -78,11 +89,24 @@ size_t map_view__max_visible_tiles(int width, int height) {
     return columns * rows;
 }
 
-static void map_view__draw_placeholder(int x, int y) {
-    display__fill_rect(x, y, GEO_TILE_SIZE, GEO_TILE_SIZE, MAP_VIEW_LAND);
-    for (int offset = 0; offset < GEO_TILE_SIZE; offset += MAP_VIEW_GRID_STEP) {
-        display__fill_rect(x + offset, y, 1, GEO_TILE_SIZE, MAP_VIEW_GRID);
-        display__fill_rect(x, y + offset, GEO_TILE_SIZE, 1, MAP_VIEW_GRID);
+static void map_view__draw_placeholder(int x, int y, int size) {
+    display__fill_rect(x, y, size, size, MAP_VIEW_LAND);
+    for (int offset = 0; offset < size; offset += MAP_VIEW_GRID_STEP) {
+        display__fill_rect(x + offset, y, 1, size, MAP_VIEW_GRID);
+        display__fill_rect(x, y + offset, size, 1, MAP_VIEW_GRID);
+    }
+}
+
+/* A whole tile at twice the size, two screen rows per source row. */
+static void map_view__draw_doubled(const uint16_t *pixels, int x, int y, int height) {
+    static uint16_t rows[2 * 2 * GEO_TILE_SIZE];
+    for (int row = 0; row < GEO_TILE_SIZE; ++row) {
+        if (y + 2 * row + 2 <= 0 || y + 2 * row >= height) continue;
+        const uint16_t *source = pixels + row * GEO_TILE_SIZE;
+        for (int column = 0; column < 2 * GEO_TILE_SIZE; ++column) {
+            rows[column] = rows[2 * GEO_TILE_SIZE + column] = source[column / 2];
+        }
+        display__draw_rgb_bitmap(x, y + 2 * row, rows, 2 * GEO_TILE_SIZE, 2);
     }
 }
 
@@ -108,20 +132,24 @@ static bool map_view__draw_from_parent(tiles_t *tiles, tile_key_t key, int x, in
 
 void map_view__draw(const map_view_t *view, tiles_t *tiles, int width, int height) {
     map_view_range_t range = map_view__range(view, width, height);
+    int size = (int)map_view__tile_px(view);
+    bool doubled = size != GEO_TILE_SIZE;
     for (int32_t tile_y = range.first_y; tile_y <= range.last_y; ++tile_y) {
         for (int32_t tile_x = range.first_x; tile_x <= range.last_x; ++tile_x) {
-            int x = tile_x * GEO_TILE_SIZE - range.left;
-            int y = tile_y * GEO_TILE_SIZE - range.top;
+            int x = tile_x * size - range.left;
+            int y = tile_y * size - range.top;
             tile_key_t key;
             if (!map_view__key(view, tile_x, tile_y, &key)) {
-                display__fill_rect(x, y, GEO_TILE_SIZE, GEO_TILE_SIZE, MAP_VIEW_WATER);
+                display__fill_rect(x, y, size, size, MAP_VIEW_WATER);
                 continue;
             }
             const image_bitmap_t *bitmap = tiles__get(tiles, key);
-            if (bitmap != NULL) {
+            if (bitmap != NULL && doubled) {
+                map_view__draw_doubled(bitmap->pixels, x, y, height);
+            } else if (bitmap != NULL) {
                 display__draw_rgb_bitmap(x, y, bitmap->pixels, GEO_TILE_SIZE, GEO_TILE_SIZE);
-            } else if (!map_view__draw_from_parent(tiles, key, x, y, height)) {
-                map_view__draw_placeholder(x, y);
+            } else if (doubled || !map_view__draw_from_parent(tiles, key, x, y, height)) {
+                map_view__draw_placeholder(x, y, size);
             }
         }
     }
@@ -131,6 +159,7 @@ size_t map_view__pending(
     const map_view_t *view, tiles_t *tiles, int width, int height, tile_key_t *out_keys, size_t capacity
 ) {
     map_view_range_t range = map_view__range(view, width, height);
+    int32_t size = map_view__tile_px(view);
     int32_t distances[MAP_VIEW_PENDING_MAX];
     if (capacity > MAP_VIEW_PENDING_MAX) capacity = MAP_VIEW_PENDING_MAX;
     size_t count = 0;
@@ -138,8 +167,8 @@ size_t map_view__pending(
         for (int32_t tile_x = range.first_x; tile_x <= range.last_x; ++tile_x) {
             tile_key_t key;
             if (!map_view__key(view, tile_x, tile_y, &key) || !tiles__needs_load(tiles, key)) continue;
-            int32_t dx = tile_x * GEO_TILE_SIZE + GEO_TILE_SIZE / 2 - view->center.x;
-            int32_t dy = tile_y * GEO_TILE_SIZE + GEO_TILE_SIZE / 2 - view->center.y;
+            int32_t dx = tile_x * size + size / 2 - view->center.x;
+            int32_t dy = tile_y * size + size / 2 - view->center.y;
             int32_t distance = abs(dx) + abs(dy);
             size_t at = count < capacity ? count++ : capacity;
             while (at > 0 && distances[at - 1] > distance) {
@@ -159,7 +188,7 @@ size_t map_view__pending(
 }
 
 bool map_view__is_near(const map_view_t *view, tile_key_t key, int width, int height) {
-    if (key.z != view->zoom) return false;
+    if (key.z != map_view__tile_zoom(view)) return false;
     map_view_range_t range = map_view__range(view, width, height);
     if (key.y < range.first_y - 1 || key.y > range.last_y + 1) return false;
     for (int32_t tile_x = range.first_x - 1; tile_x <= range.last_x + 1; ++tile_x) {

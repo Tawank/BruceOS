@@ -33,6 +33,18 @@ static void invalid_zoom_falls_back(void) {
     CHECK_EQ(settings.zoom, 4);
 }
 
+static void big_defaults_on_for_epaper(void) {
+    settings_t settings;
+    settings__load(&settings);
+    CHECK(!settings.big);
+    fakes.epaper = true;
+    settings__load(&settings);
+    CHECK(settings.big);
+    settings__save_big(false);
+    settings__load(&settings);
+    CHECK(!settings.big);
+}
+
 static void saves_view_and_online(void) {
     settings_t settings = {.lat_e6 = 1, .lon_e6 = -2, .zoom = 9};
     settings__save_view(&settings);
@@ -47,4 +59,5 @@ SUITE(settings_tests,
       TEST(defaults_without_config),
       TEST(stored_values_win),
       TEST(invalid_zoom_falls_back),
+      TEST(big_defaults_on_for_epaper),
       TEST(saves_view_and_online))

@@ -188,8 +188,13 @@ static void maps__toggle_online(maps_t *app) {
     settings__save_online(app->tiles.online);
 }
 
+static void maps__toggle_big(maps_t *app) {
+    app->view.big = !app->view.big;
+    settings__save_big(app->view.big);
+}
+
 static void maps__menu(maps_t *app) {
-    enum { NAV_MODE, SEARCH, CLEAR_PIN, ONLINE, EXIT, BACK };
+    enum { NAV_MODE, SEARCH, CLEAR_PIN, ONLINE, BIG, EXIT, BACK };
     hud_nav_mode_t next_mode = maps__next_nav_mode(app);
     char nav_label[32];
     snprintf(nav_label, sizeof(nav_label), "Change to %s", s_nav_names[next_mode]);
@@ -199,6 +204,7 @@ static void maps__menu(maps_t *app) {
         [CLEAR_PIN] = {.label = "Clear pin", .icon_name = "map-marker"},
         [ONLINE] = {.label = "Online tiles", .icon_name = "earth",
                     .right_text = app->tiles.online ? "On" : "Off"},
+        [BIG] = {.label = "Bigger text", .icon_name = "format-size", .right_text = app->view.big ? "On" : "Off"},
         [EXIT] = {.label = "Exit", .icon_name = "power"},
         [BACK] = {.label = "Back", .icon_name = "arrow-left"},
     };
@@ -207,6 +213,8 @@ static void maps__menu(maps_t *app) {
     size_t count = 0;
     for (int i = 0; i < (int)(sizeof(all) / sizeof(all[0])); ++i) {
         if (i == CLEAR_PIN && !app->hud.pin) continue;
+        /* Keyboards and touch screens pan and zoom directly; the Prev/Next mode is for button boards. */
+        if (i == NAV_MODE && (input__has_keyboard() || input__has_touch())) continue;
         choices[count] = all[i];
         actions[count++] = i;
     }
@@ -217,6 +225,7 @@ static void maps__menu(maps_t *app) {
             case SEARCH: maps__search(app); break;
             case CLEAR_PIN: maps__clear_pin(app); break;
             case ONLINE: maps__toggle_online(app); break;
+            case BIG: maps__toggle_big(app); break;
             case EXIT: app->running = false; break;
             case BACK: break;
         }
@@ -396,6 +405,7 @@ int app_main(int argc, char **argv) {
 
     settings__load(&app->settings);
     map_view__set(&app->view, app->settings.lat_e6 / 1e6, app->settings.lon_e6 / 1e6, app->settings.zoom);
+    app->view.big = app->settings.big;
     app->start_view = app->view;
     int screen_width = display__screen_width();
     int screen_height = display__screen_height();

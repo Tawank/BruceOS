@@ -190,6 +190,9 @@ bool input__check(int32_t code, bool consume);
 /** @brief True if the device has a touchscreen (BRUCE_INPUT_TOUCH events). */
 bool input__has_touch(void);
 
+/** @brief True if the device has a keyboard (letter and arrow keys), not just a few buttons. */
+bool input__has_keyboard(void);
+
 typedef enum {
     BRUCE_INPUT_GESTURE_NONE,
     BRUCE_INPUT_GESTURE_TAP,

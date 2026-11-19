@@ -9,6 +9,7 @@
 typedef struct {
     geo_point_t center;
     int zoom;
+    bool big; /* Tiles from one zoom level out at twice the size: labels twice as large. */
 } map_view_t;
 
 void map_view__set(map_view_t *view, double lat, double lon, int zoom);

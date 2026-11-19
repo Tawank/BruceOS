@@ -1,6 +1,7 @@
 #include "settings.h"
 
 #include "core_sdk/app_config.h"
+#include "core_sdk/display.h"
 #include "geo.h"
 
 #define SETTINGS_DEFAULT_TILE_DIR "/sdcard/maps/tiles"
@@ -13,6 +14,8 @@ void settings__load(settings_t *settings) {
     settings->zoom = app_config__get_int(NULL, "view.zoom", 4);
     if (settings->zoom < GEO_MIN_ZOOM || settings->zoom > GEO_MAX_ZOOM) settings->zoom = 4;
     settings->online = app_config__get_bool(NULL, "tiles.online", true);
+    /* Small map labels are hard to read once dithered to black and white. */
+    settings->big = app_config__get_bool(NULL, "view.big", display__is_epaper());
     app_config__get_string(
         NULL, "tiles.dir", SETTINGS_DEFAULT_TILE_DIR, settings->tile_dir, sizeof(settings->tile_dir)
     );
@@ -31,3 +34,5 @@ void settings__save_view(const settings_t *settings) {
 }
 
 void settings__save_online(bool online) { (void)app_config__set_bool(NULL, "tiles.online", online); }
+
+void settings__save_big(bool big) { (void)app_config__set_bool(NULL, "view.big", big); }

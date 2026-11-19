@@ -2311,6 +2311,7 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(input__poll),
     ESP_ELFSYM_EXPORT(input__flush),
     ESP_ELFSYM_EXPORT(input__has_touch),
+    ESP_ELFSYM_EXPORT(input__has_keyboard),
     ESP_ELFSYM_EXPORT(input__touch_gesture),
     ESP_ELFSYM_EXPORT(input__peek),
     ESP_ELFSYM_EXPORT(input__wait),

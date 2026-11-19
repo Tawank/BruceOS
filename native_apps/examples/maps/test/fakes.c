@@ -124,6 +124,9 @@ int display__height(void) { return fakes.height; }
 int display__screen_width(void) { return fakes.width; }
 int display__screen_height(void) { return fakes.height; }
 bool display__viewport_changed(void) { return false; }
+bool display__is_epaper(void) { return fakes.epaper; }
+bool input__has_keyboard(void) { return fakes.has_keyboard; }
+bool input__has_touch(void) { return fakes.has_touch; }
 bool display__await_redraw(void) { return false; }
 
 bruce_result_t display__begin_frame(void) { return BRUCE_OK; }

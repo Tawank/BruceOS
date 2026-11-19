@@ -316,12 +316,12 @@ static void menu_offers_clear_pin_with_a_pin(void) {
     fakes.choice_result = BRUCE_OK;
     fakes.choice = 2;
     maps__menu(&app);
-    CHECK_EQ(fakes.choice_count, 6u);
+    CHECK_EQ(fakes.choice_count, 7u);
     CHECK_STR(fakes.choice_labels[2], "Clear pin");
     CHECK(!app.hud.pin);
     CHECK(app.hud.place == NULL);
     maps__menu(&app);
-    CHECK_EQ(fakes.choice_count, 5u);
+    CHECK_EQ(fakes.choice_count, 6u);
     stop();
 }
 
@@ -347,10 +347,39 @@ static void menu_toggles_online_and_saves(void) {
     stop();
 }
 
-static void menu_exit_stops(void) {
+static void menu_toggles_big_and_saves(void) {
     start();
     fakes.choice_result = BRUCE_OK;
     fakes.choice = 3;
+    maps__menu(&app);
+    CHECK_STR(fakes.choice_labels[3], "Bigger text");
+    CHECK_STR(fakes.choice_right_text[3], "Off");
+    CHECK(app.view.big);
+    CHECK_STR(fakes__config_get("view.big"), "true");
+    maps__menu(&app);
+    CHECK_STR(fakes.choice_right_text[3], "On");
+    CHECK(!app.view.big);
+    stop();
+}
+
+static void menu_hides_nav_mode_with_keyboard_or_touch(void) {
+    start();
+    fakes.has_keyboard = true;
+    maps__menu(&app);
+    CHECK_EQ(fakes.choice_count, 5u);
+    CHECK_STR(fakes.choice_labels[0], "Search");
+    fakes.has_keyboard = false;
+    fakes.has_touch = true;
+    maps__menu(&app);
+    CHECK_EQ(fakes.choice_count, 5u);
+    CHECK_STR(fakes.choice_labels[0], "Search");
+    stop();
+}
+
+static void menu_exit_stops(void) {
+    start();
+    fakes.choice_result = BRUCE_OK;
+    fakes.choice = 4;
     maps__menu(&app);
     CHECK(!app.running);
     stop();
@@ -389,11 +418,12 @@ static void status_reflects_loading_and_network(void) {
 static void menu_has_icons_and_back_last(void) {
     start();
     maps__menu(&app);
-    CHECK_EQ(fakes.choice_count, 5u);
+    CHECK_EQ(fakes.choice_count, 6u);
     CHECK_STR(fakes.choice_icons[0], "arrow-up-down");
-    CHECK_STR(fakes.choice_labels[4], "Back");
-    CHECK_STR(fakes.choice_icons[4], "arrow-left");
-    CHECK_STR(fakes.choice_icons[3], "power");
+    CHECK_STR(fakes.choice_labels[5], "Back");
+    CHECK_STR(fakes.choice_icons[5], "arrow-left");
+    CHECK_STR(fakes.choice_icons[3], "format-size");
+    CHECK_STR(fakes.choice_icons[4], "power");
     app.hud.nav_mode = HUD_NAV_LEFT_RIGHT;
     maps__menu(&app);
     CHECK_STR(fakes.choice_icons[0], "plus");
@@ -403,7 +433,7 @@ static void menu_has_icons_and_back_last(void) {
 static void menu_back_just_closes(void) {
     start();
     fakes.choice_result = BRUCE_OK;
-    fakes.choice = 4;
+    fakes.choice = 5;
     map_view_t before = app.view;
     maps__menu(&app);
     CHECK(app.running);
@@ -579,6 +609,8 @@ SUITE(maps_tests,
       TEST(coordinates_name_the_pin),
       TEST(tapping_search_box_opens_search),
       TEST(menu_toggles_online_and_saves),
+      TEST(menu_toggles_big_and_saves),
+      TEST(menu_hides_nav_mode_with_keyboard_or_touch),
       TEST(menu_exit_stops),
       TEST(view_saved_only_when_moved),
       TEST(status_reflects_loading_and_network),

@@ -211,6 +211,62 @@ static void draw_scales_up_parent_quarter(void) {
     tiles__deinit(&tiles);
 }
 
+/* Zoom 5 centred in z5 tile (10, 12), which lies in z4 tile (5, 6). */
+static map_view_t big_view(void) {
+    map_view_t view = view_at_tile(5, 10, 12);
+    view.big = true;
+    return view;
+}
+
+static void big_loads_tiles_one_zoom_out(void) {
+    init_tiles();
+    map_view_t view = big_view();
+    tile_key_t keys[8];
+    CHECK_EQ(map_view__pending(&view, &tiles, 240, 135, keys, 8), 1u);
+    CHECK_EQ(keys[0].z, 4);
+    CHECK_EQ(keys[0].x, 5);
+    CHECK_EQ(keys[0].y, 6);
+    CHECK(map_view__is_near(&view, (tile_key_t){4, 5, 6}, 240, 135));
+    CHECK(!map_view__is_near(&view, (tile_key_t){5, 10, 12}, 240, 135));
+    tiles__deinit(&tiles);
+}
+
+static void big_stays_at_min_zoom(void) {
+    init_tiles();
+    map_view_t view = {.zoom = GEO_MIN_ZOOM, .big = true, .center = {256, 256}};
+    tile_key_t keys[8];
+    CHECK(map_view__pending(&view, &tiles, 240, 135, keys, 8) > 0);
+    CHECK_EQ(keys[0].z, GEO_MIN_ZOOM);
+    tiles__deinit(&tiles);
+}
+
+static void big_draws_tile_doubled(void) {
+    init_tiles();
+    put_tile(0, (tile_key_t){4, 5, 6}, fakes__bitmap(GEO_TILE_SIZE, 0, true));
+    map_view_t view = big_view();
+    map_view__draw(&view, &tiles, 240, 135);
+
+    /* Tile (5, 6) starts at z5 pixel (2560, 3072); the screen's top-left is (2568, 3133). */
+    const fake_draw_t *first = NULL;
+    size_t strips = 0;
+    for (size_t i = 0; i < fakes.draw_count; ++i) {
+        const fake_draw_t *draw = &fakes.draws[i];
+        if (draw->kind != FAKE_RGB_BITMAP || draw->h != 2 || draw->w != 2 * GEO_TILE_SIZE) continue;
+        if (first == NULL) first = draw;
+        strips += draw->x == -8;
+    }
+    CHECK(first != NULL);
+    if (first != NULL) {
+        int source_row = (first->y + 61) / 2;
+        uint16_t expected = (uint16_t)(source_row * GEO_TILE_SIZE);
+        CHECK_EQ(first->first_pixels[0], expected);
+        CHECK_EQ(first->first_pixels[1], expected);
+        CHECK_EQ(first->first_pixels[2], (uint16_t)(expected + 1));
+    }
+    CHECK(strips >= 135 / 2 && strips <= 135 / 2 + 2);
+    tiles__deinit(&tiles);
+}
+
 SUITE(map_view_tests,
       TEST(set_and_center_round_trip),
       TEST(pan_wraps_x_and_clamps_y),
@@ -224,4 +280,7 @@ SUITE(map_view_tests,
       TEST(draw_places_cached_tile),
       TEST(draw_uses_placeholder_without_data),
       TEST(draw_fills_water_outside_world),
-      TEST(draw_scales_up_parent_quarter))
+      TEST(draw_scales_up_parent_quarter),
+      TEST(big_loads_tiles_one_zoom_out),
+      TEST(big_stays_at_min_zoom),
+      TEST(big_draws_tile_doubled))
