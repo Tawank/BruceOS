@@ -165,6 +165,85 @@ static void pin_tip_marks_the_place(void) {
     CHECK(fakes__find_icon("map-marker") == NULL);
 }
 
+static void me_dot_marks_gps_position(void) {
+    map_view_t view;
+    map_view__set(&view, 50.0, 20.0, 12);
+    hud_state_t state = {.me = true, .me_lat = 50.0, .me_lon = 20.0};
+    hud__draw(&view, &state, 240, 135);
+    const fake_draw_t *dot = NULL;
+    for (size_t i = 0; i < fakes.draw_count; ++i) {
+        if (fakes.draws[i].kind == FAKE_CIRCLE && fakes.draws[i].color == 0x1C9F) dot = &fakes.draws[i];
+    }
+    CHECK(dot != NULL);
+    if (dot != NULL) CHECK(dot->x == 120 && dot->y == 135 / 2);
+    state.me_lat = -10.0;
+    fakes.draw_count = 0;
+    hud__draw(&view, &state, 240, 135);
+    CHECK_EQ(fakes__count(FAKE_CIRCLE), 1u); /* Only the crosshair's centre. */
+}
+
+static void locate_button_bottom_right_shows_fix(void) {
+    draw(0, 0, 7, (hud_state_t){0}, 240, 135);
+    CHECK(fakes__find_icon("crosshairs") == NULL);
+    fakes__reset();
+    draw(0, 0, 7, (hud_state_t){.locate_button = true}, 240, 135);
+    const fake_draw_t *icon = fakes__find_icon("crosshairs");
+    CHECK(icon != NULL);
+    hud_rect_t rect = hud__button_rect(HUD_BUTTON_LOCATE, 240, 135);
+    hud_rect_t out = hud__button_rect(HUD_BUTTON_ZOOM_OUT, 240, 135);
+    CHECK(rect.x + rect.w == 240 - 4 && rect.y + rect.h < 135 - 8 && rect.y >= out.y + out.h);
+    if (icon != NULL) CHECK(icon->x > rect.x && icon->y > rect.y);
+    fakes__reset();
+    draw(0, 0, 7, (hud_state_t){.locate_button = true, .me = true, .following = true}, 240, 135);
+    icon = fakes__find_icon("crosshairs-gps");
+    CHECK(icon != NULL);
+    if (icon != NULL) CHECK_EQ(icon->color, 0xFB20);
+}
+
+static bool overlaps(int ax, int ay, int aw, int ah, hud_rect_t b) {
+    return ax < b.x + b.w && b.x < ax + aw && ay < b.y + b.h && b.y < ay + ah;
+}
+
+/* Under the status pill on the left, clear of the right-hand buttons. */
+static void gps_status_clear_of_buttons(void) {
+    const char *text = "GPS 3/3: 4/4 locked, 99 seen";
+    hud_state_t state = {.gps_status = text, .zoom_buttons = true, .locate_button = true};
+    for (int height = 135; height <= 320; height += 185) {
+        fakes__reset();
+        draw(0, 0, 7, state, 240, height);
+        const fake_draw_t *pill = NULL;
+        for (size_t i = 0; i < fakes.draw_count; ++i) {
+            if (fakes.draws[i].kind == FAKE_ROUND_RECT && fakes.draws[i].y == 4 + 2 * 18) pill = &fakes.draws[i];
+        }
+        CHECK(pill != NULL && fakes__find_string(text) != NULL);
+        if (pill == NULL) continue;
+        for (int button = HUD_BUTTON_ZOOM_IN; button <= HUD_BUTTON_LOCATE; ++button) {
+            CHECK(!overlaps(pill->x, pill->y, pill->w, pill->h, hud__button_rect(button, 240, height)));
+        }
+    }
+    fakes__reset();
+    state.status = "Loading";
+    draw(0, 0, 7, state, 240, 135);
+    const fake_draw_t *gps = fakes__find_string(text);
+    const fake_draw_t *loading = fakes__find_string("Loading");
+    CHECK(gps != NULL && loading != NULL);
+    if (gps != NULL && loading != NULL) CHECK(gps->y > loading->y + 8);
+}
+
+static void speed_box_bottom_left_above_scale(void) {
+    draw(0, 0, 7, (hud_state_t){0}, 240, 320);
+    CHECK(fakes__find_string("km/h") == NULL);
+    fakes__reset();
+    draw(0, 0, 7, (hud_state_t){.speed = true, .speed_kmh = 42}, 240, 320);
+    const fake_draw_t *number = fakes__find_string("42");
+    const fake_draw_t *unit = fakes__find_string("km/h");
+    CHECK(number != NULL && unit != NULL);
+    if (number != NULL && unit != NULL) {
+        CHECK(number->x < 60 && unit->y > number->y);
+        CHECK(unit->y + 8 < 320 - 4 - 8 - 6);
+    }
+}
+
 SUITE(hud_tests,
       TEST(shows_centre_coordinates),
       TEST(negative_coordinates_keep_sign),
@@ -176,4 +255,8 @@ SUITE(hud_tests,
       TEST(scale_bar_picks_round_distance),
       TEST(shows_attribution_and_status),
       TEST(hint_is_centred_on_bottom_edge),
-      TEST(pin_tip_marks_the_place))
+      TEST(pin_tip_marks_the_place),
+      TEST(me_dot_marks_gps_position),
+      TEST(locate_button_bottom_right_shows_fix),
+      TEST(gps_status_clear_of_buttons),
+      TEST(speed_box_bottom_left_above_scale))

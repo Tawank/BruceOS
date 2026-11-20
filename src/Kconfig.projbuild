@@ -973,6 +973,47 @@ menu "Bruce hardware configuration"
                 legacy builds. The radio uses SPI3_HOST; IRQ is not required.
     endmenu
 
+    menu "GPS"
+        config BRUCE_GPS_ENABLED
+            bool "Built-in GPS receiver"
+            default n
+            help
+                An NMEA receiver on a UART, read by core/gps. It is powered
+                on while apps read it.
+
+        config BRUCE_GPS_UART_PORT
+            int "GPS UART port"
+            depends on BRUCE_GPS_ENABLED
+            range 1 2
+            default 1
+
+        config BRUCE_GPS_RX_GPIO
+            int "GPS RX GPIO (the receiver's TX)"
+            depends on BRUCE_GPS_ENABLED
+            range 0 48
+            default 2
+
+        config BRUCE_GPS_TX_GPIO
+            int "GPS TX GPIO (the receiver's RX)"
+            depends on BRUCE_GPS_ENABLED
+            range 0 48
+            default 16
+
+        config BRUCE_GPS_BAUD
+            int "GPS baud rate"
+            depends on BRUCE_GPS_ENABLED
+            default 9600
+            help
+                Tried first; with no data Core alternates with 9600 (or
+                38400 when this is 9600).
+
+        config BRUCE_GPS_POWER_XL9555_PIN
+            int "XL9555 pin that powers the receiver (-1 = always on)"
+            depends on BRUCE_GPS_ENABLED
+            range -1 15
+            default -1
+    endmenu
+
     menu "Memory"
         config BRUCE_MEMORY_FORCE_PSRAM
             bool "Force memory__malloc()/calloc()/realloc() into PSRAM only"

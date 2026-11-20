@@ -24,6 +24,7 @@
 #include "core_sdk/environment.h"  // IWYU pragma: export
 #include "core_sdk/filetype.h"     // IWYU pragma: export
 #include "core_sdk/gpio.h"         // IWYU pragma: export
+#include "core_sdk/gps.h"          // IWYU pragma: export
 #include "core_sdk/hash.h"         // IWYU pragma: export
 #include "core_sdk/http.h"         // IWYU pragma: export
 #include "core_sdk/i2c.h"          // IWYU pragma: export

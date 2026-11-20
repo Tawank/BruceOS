@@ -56,6 +56,8 @@ static doom_held_key_t s_held[HELD_COUNT] = {
 /* Pending synthesized key press, delivered on the next DG_GetKey() call. */
 static int s_pending_press = -1;
 static bool s_key_nav_down[128];
+/* Doom key each keyboard letter pressed as, so its release matches even if the menu opened in between. */
+static unsigned char s_key_game[128];
 static bool s_walking;
 static bool s_walk_down;
 /* A click toggles walking at once; a second click inside the window undoes that and fires instead. */
@@ -143,6 +145,18 @@ static bool doom_synth_key(int *pressed, unsigned char *key) {
     return false;
 }
 
+/* WASD moves and turns, J fires; only in game, so menus still take typed letters. */
+static int doom_game_letter(int code) {
+    switch (code | 0x20) {
+        case 'w': return KEY_UPARROW;
+        case 's': return KEY_DOWNARROW;
+        case 'a': return KEY_LEFTARROW;
+        case 'd': return KEY_RIGHTARROW;
+        case 'j': return KEY_FIRE;
+        default: return 0;
+    }
+}
+
 static int bruce_code_to_doom_key(int32_t code) {
     switch (code) {
         case BRUCE_INPUT_CODE_UP: return KEY_UPARROW;
@@ -184,8 +198,13 @@ int DG_GetKey(int *pressed, unsigned char *key) {
             doom_key = bruce_code_to_doom_key(event.code);
         } else if (code == '\n') {
             doom_key = KEY_ENTER;
+        } else if (event.action == BRUCE_INPUT_PRESS) {
+            int game = menuactive == 0 ? doom_game_letter(code) : 0;
+            s_key_game[code] = (unsigned char)game;
+            doom_key = game != 0 ? game : code;
         } else {
-            doom_key = code;
+            doom_key = s_key_game[code] != 0 ? s_key_game[code] : code;
+            s_key_game[code] = 0;
         }
     } else if (event.type == BRUCE_INPUT_BUTTON) {
         doom_key = bruce_code_to_doom_key(event.code);

@@ -20,6 +20,8 @@
 #define HUD_BUTTON_SIZE 28
 #define HUD_BUTTON_ICON 20
 #define HUD_PIN_SIZE 24
+#define HUD_ME 0x1C9F
+#define HUD_ME_RADIUS 5
 
 static int16_t s_char_w = 6;
 static int16_t s_char_h = 8;
@@ -90,6 +92,18 @@ static void hud__draw_pin(const map_view_t *view, double lat, double lon, int wi
         hud__icon("map-marker", x + halo[i][0], y + halo[i][1], HUD_PIN_SIZE, HUD_INK);
     }
     hud__icon("map-marker", x, y, HUD_PIN_SIZE, HUD_ACCENT);
+}
+
+/* A blue dot in a white ring, outlined so it shows on any map colour. */
+static void hud__draw_me(const map_view_t *view, double lat, double lon, int width, int height) {
+    geo_point_t point = geo__from_lat_lon(lat, lon, view->zoom);
+    int x = point.x - view->center.x + width / 2;
+    int y = point.y - view->center.y + height / 2;
+    int r = HUD_ME_RADIUS + 3;
+    if (x < -r || x > width + r || y < -r || y > height + r) return;
+    display__fill_circle(x, y, HUD_ME_RADIUS + 3, HUD_INK);
+    display__fill_circle(x, y, HUD_ME_RADIUS + 2, BRUCE_COLOR_WHITE);
+    display__fill_circle(x, y, HUD_ME_RADIUS, HUD_ME);
 }
 
 static void hud__draw_coordinates(const map_view_t *view) {
@@ -183,19 +197,51 @@ static void hud__draw_attribution(int width, int height) {
     display__draw_string(text, width - HUD_MARGIN - hud__text_width(text), height - HUD_MARGIN - s_char_h);
 }
 
+/* My location sits in the bottom right corner; +/- are centred on the right edge, above it when short. */
 hud_rect_t hud__button_rect(hud_button_t button, int width, int height) {
-    int y = height / 2 + (button == HUD_BUTTON_ZOOM_IN ? -HUD_BUTTON_SIZE - 2 : 2);
-    return (hud_rect_t){.x = width - HUD_MARGIN - HUD_BUTTON_SIZE, .y = y, .w = HUD_BUTTON_SIZE, .h = HUD_BUTTON_SIZE};
+    hud_rect_t rect = {.x = width - HUD_MARGIN - HUD_BUTTON_SIZE, .w = HUD_BUTTON_SIZE, .h = HUD_BUTTON_SIZE};
+    int locate_y = height - HUD_MARGIN - s_char_h - HUD_GAP - HUD_BUTTON_SIZE;
+    int out_y = height / 2 + 2;
+    if (out_y > locate_y - HUD_GAP - HUD_BUTTON_SIZE) out_y = locate_y - HUD_GAP - HUD_BUTTON_SIZE;
+    rect.y = button == HUD_BUTTON_LOCATE    ? locate_y
+             : button == HUD_BUTTON_ZOOM_OUT ? out_y
+                                             : out_y - 4 - HUD_BUTTON_SIZE;
+    return rect;
 }
 
-static void hud__draw_buttons(int width, int height) {
-    static const char *const icons[] = {[HUD_BUTTON_ZOOM_IN] = "plus", [HUD_BUTTON_ZOOM_OUT] = "minus"};
+static void hud__draw_button(hud_button_t button, const char *icon, bruce_display_color_t color, int width,
+                             int height) {
     const int inset = (HUD_BUTTON_SIZE - HUD_BUTTON_ICON) / 2;
-    for (int button = HUD_BUTTON_ZOOM_IN; button <= HUD_BUTTON_ZOOM_OUT; ++button) {
-        hud_rect_t rect = hud__button_rect(button, width, height);
-        display__fill_round_rect(rect.x, rect.y, rect.w, rect.h, 6, HUD_PANEL);
-        hud__icon(icons[button], rect.x + inset, rect.y + inset, HUD_BUTTON_ICON, HUD_TEXT);
-    }
+    hud_rect_t rect = hud__button_rect(button, width, height);
+    display__fill_round_rect(rect.x, rect.y, rect.w, rect.h, 6, HUD_PANEL);
+    hud__icon(icon, rect.x + inset, rect.y + inset, HUD_BUTTON_ICON, color);
+}
+
+/* Filled while there is a fix, orange while the map follows it. */
+static void hud__draw_locate(const hud_state_t *state, int width, int height) {
+    const char *icon = state->me ? "crosshairs-gps" : "crosshairs";
+    bruce_display_color_t color = state->following ? HUD_ACCENT : state->me ? HUD_TEXT : HUD_MUTED;
+    hud__draw_button(HUD_BUTTON_LOCATE, icon, color, width, height);
+}
+
+/* Big number in a box at the left, above the scale bar, clear of the hint and the buttons. */
+static void hud__draw_speed(int speed_kmh, int height) {
+    char number[8];
+    snprintf(number, sizeof(number), "%d", speed_kmh);
+    const char *unit = "km/h";
+    int number_w = (int)strlen(number) * s_char_w * 2;
+    int unit_w = hud__text_width(unit);
+    int w = (number_w > unit_w ? number_w : unit_w) + 2 * HUD_PAD;
+    int h = 3 * s_char_h + 2 * HUD_PAD;
+    int x = HUD_MARGIN;
+    int y = height - HUD_MARGIN - s_char_h - 8 - h;
+    display__fill_round_rect(x, y, w, h, 6, HUD_PANEL);
+    display__set_text_color(HUD_TEXT);
+    display__set_text_size(2);
+    display__draw_string(number, x + (w - number_w) / 2, y + HUD_PAD);
+    display__set_text_size(1);
+    display__set_text_color(HUD_MUTED);
+    display__draw_string(unit, x + (w - unit_w) / 2, y + HUD_PAD + 2 * s_char_h);
 }
 
 /* Sits on the bottom edge, over the scale bar and attribution while it shows. */
@@ -217,14 +263,24 @@ void hud__draw(const map_view_t *view, const hud_state_t *state, int width, int 
 
     if (state->pin) hud__draw_pin(view, state->pin_lat, state->pin_lon, width, height);
     hud__draw_crosshair(width / 2, height / 2);
+    if (state->me) hud__draw_me(view, state->me_lat, state->me_lon, width, height);
     hud__draw_search(view, state, width);
     hud__draw_zoom(view, state->nav_mode, width);
     hud__draw_coordinates(view);
     hud__draw_scale(view, height);
     hud__draw_attribution(width, height);
-    if (state->zoom_buttons) hud__draw_buttons(width, height);
+    if (state->zoom_buttons) {
+        hud__draw_button(HUD_BUTTON_ZOOM_IN, "plus", HUD_TEXT, width, height);
+        hud__draw_button(HUD_BUTTON_ZOOM_OUT, "minus", HUD_TEXT, width, height);
+    }
+    if (state->locate_button) hud__draw_locate(state, width, height);
     if (state->status != NULL) {
         hud__pill(state->status, state->status_icon, HUD_MARGIN, hud__row_y(2), HUD_ACCENT);
     }
+    if (state->gps_status != NULL) {
+        int row = state->status != NULL ? 3 : 2;
+        hud__pill(state->gps_status, "crosshairs", HUD_MARGIN, hud__row_y(row), HUD_TEXT);
+    }
+    if (state->speed) hud__draw_speed(state->speed_kmh, height);
     hud__draw_hint(state->hint, state->hint_icon, width, height);
 }

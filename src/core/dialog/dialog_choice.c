@@ -349,7 +349,8 @@ bruce_result_t dialog__gui_choice(
     if (usable_h < row_h) { return BRUCE_ERR_INVALID_ARGUMENT; }
     int items_per_page = usable_h / row_h;
     int list_y = content_top + title_h + message_h + list_gap;
-    int touch_y = -1, touch_first_visible = 0;
+    int touch_y = -1, touch_first_visible = 0, touch_index = -1;
+    uint64_t touch_at = 0;
     bool touch_dragged = false;
     bool tap_pending = false;
     bool redraw = true;
@@ -483,7 +484,15 @@ bruce_result_t dialog__gui_choice(
             return BRUCE_OK;
         }
 
-        uint32_t input_timeout_ms = 100;
+        /* A row held still long enough is a long press, reported while still held. */
+        bool holding = long_press_enabled && touch_index >= 0 && !touch_dragged;
+        if (holding && runtime__now() - touch_at >= DIALOG__LONG_PRESS_MS) {
+            if (render_params->out_long_press != NULL) *render_params->out_long_press = true;
+            *out_selected = (size_t)touch_index;
+            return BRUCE_OK;
+        }
+
+        uint32_t input_timeout_ms = holding ? 20 : 100;
         if (poll != NULL) {
             now = runtime__now();
             uint64_t until_poll = next_poll_at > now ? next_poll_at - now : 0;
@@ -500,16 +509,25 @@ bruce_result_t dialog__gui_choice(
         if (ev.type == BRUCE_INPUT_TOUCH) {
             if (!touch) continue;
             if (ev.action == BRUCE_INPUT_PRESS) {
+                /* The row under the finger lights up while it is held. */
+                int row = ev.y >= list_y ? (ev.y - list_y) / row_h : -1;
+                int index = first_visible + row;
+                bool on_row = row >= 0 && row < items_per_page && index < (int)choice_count;
                 touch_y = ev.y;
                 touch_first_visible = first_visible;
                 touch_dragged = false;
-                if (show_selection) {
-                    show_selection = false;
-                    redraw = true;
-                }
+                touch_index = on_row ? index : -1;
+                touch_at = runtime__now();
+                if (on_row) selected = index;
+                show_selection = on_row;
+                redraw = true;
             } else if (ev.action == BRUCE_INPUT_CHANGE && touch_y >= 0) {
                 int moved_rows = (touch_y - (int)ev.y) / row_h;
-                if (moved_rows != 0) touch_dragged = true;
+                if (moved_rows != 0 && !touch_dragged) {
+                    touch_dragged = true;
+                    show_selection = false; /* Scrolling, not picking. */
+                    redraw = true;
+                }
                 int max_first = (int)choice_count - items_per_page;
                 int first = touch_first_visible + moved_rows;
                 if (first > max_first) first = max_first;
@@ -522,16 +540,12 @@ bruce_result_t dialog__gui_choice(
                     redraw = true;
                 }
             } else if (ev.action == BRUCE_INPUT_RELEASE && touch_y >= 0) {
-                int row = touch_y >= list_y ? (touch_y - list_y) / row_h : -1;
-                int index = first_visible + row;
                 touch_y = -1;
-                if (!touch_dragged && row >= 0 && row < items_per_page && index < (int)choice_count) {
-                    /* Highlight the row on the next frame, then return it. */
-                    selected = index;
-                    show_selection = true;
-                    tap_pending = true;
-                    redraw = true;
+                if (!touch_dragged && touch_index >= 0) {
+                    selected = touch_index;
+                    tap_pending = true; /* Already highlighted: return it. */
                 }
+                touch_index = -1;
             }
             continue;
         }

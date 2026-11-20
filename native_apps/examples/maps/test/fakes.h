@@ -6,6 +6,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "core_sdk/gps.h"
 #include "core_sdk/http.h"
 #include "core_sdk/image.h"
 #include "core_sdk/input.h"
@@ -23,6 +24,7 @@ typedef enum {
     FAKE_ROUND_RECT,
     FAKE_STRING,
     FAKE_ICON, /* text holds the icon name */
+    FAKE_CIRCLE, /* x, y centre; w radius */
 } fake_draw_kind_t;
 
 typedef struct {
@@ -73,6 +75,10 @@ typedef struct {
     bool has_keyboard;
     bool has_touch;
     bool epaper;
+    bool gps;
+    bruce_result_t gps_result;
+    bruce_gps_fix_t gps_fix;
+    int gps_reads;
     bool wifi_connect_ok;
     int wifi_connect_calls;  /* Background connects started. */
     bool wifi_connect_manual; /* Connect stays busy until fakes__wifi_finish(). */

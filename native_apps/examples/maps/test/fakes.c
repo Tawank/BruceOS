@@ -129,6 +129,14 @@ bool input__has_keyboard(void) { return fakes.has_keyboard; }
 bool input__has_touch(void) { return fakes.has_touch; }
 bool display__await_redraw(void) { return false; }
 
+bool gps__is_available(void) { return fakes.gps; }
+
+bruce_result_t gps__read(bruce_gps_fix_t *out) {
+    fakes.gps_reads++;
+    *out = fakes.gps_fix;
+    return fakes.gps_result;
+}
+
 bruce_result_t display__begin_frame(void) { return BRUCE_OK; }
 
 bruce_result_t display__present(void) {
@@ -185,7 +193,7 @@ bruce_result_t display__draw_bitmap_scaled(
 }
 
 bruce_result_t display__fill_circle(int16_t x, int16_t y, int16_t r, bruce_display_color_t color) {
-    (void)x, (void)y, (void)r, (void)color;
+    (void)fakes__record(FAKE_CIRCLE, x, y, r, r, color);
     return BRUCE_OK;
 }
 

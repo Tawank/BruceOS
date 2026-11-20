@@ -2,7 +2,7 @@
 # e-paper, TCA8418 keyboard, CST3530 touch, XL9555 GPIO expander).
 #
 # Pins from LilyGO's TDeckMaxBoard.h (github.com/Xinyuan-LilyGO/T-Deck-MAX).
-# LoRa (SX1262), GPS, 4G modem, gyroscope and vibration motor have no
+# LoRa (SX1262), 4G modem, gyroscope and vibration motor have no
 # driver in this HAL yet; their XL9555 power enables are left off.
 CONFIG_IDF_TARGET="esp32s3"
 
@@ -99,3 +99,11 @@ CONFIG_BRUCE_BOARD_GPIO_HIGH_MASK=0x1000400000018
 
 # Front light: LilyGO runs it at 50/255; full power can brown out the board.
 CONFIG_BRUCE_DISPLAY_BACKLIGHT_MAX_LEVEL=64
+
+# GPS: u-blox MIA-M10Q on UART at 38400, powered by XL9555 pin 2.
+CONFIG_BRUCE_GPS_ENABLED=y
+CONFIG_BRUCE_GPS_UART_PORT=1
+CONFIG_BRUCE_GPS_RX_GPIO=2
+CONFIG_BRUCE_GPS_TX_GPIO=16
+CONFIG_BRUCE_GPS_BAUD=38400
+CONFIG_BRUCE_GPS_POWER_XL9555_PIN=2

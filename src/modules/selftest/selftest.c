@@ -47,6 +47,7 @@
 #include "memory_test.h"
 #include "net_test.h"
 #include "notification_test.h"
+#include "gps_test.h"
 #include "nrf24_test.h"
 #include "partition_manager_test.h"
 #include "clipboard_test.h"
@@ -286,6 +287,7 @@ static const selftest__case_t selftest__cases[] = {
     SELFTEST_CASE(selftest__run_audio_file_mp3_leak_case),
     SELFTEST_CASE(selftest__run_nrf24_permission_denied_case),
     SELFTEST_CASE(selftest__run_nrf24_validation_case),
+    SELFTEST_CASE(selftest__run_gps_parse_case),
     SELFTEST_CASE(selftest__run_gpio_bus_permission_denied_case),
     SELFTEST_CASE(selftest__run_gpio_bus_validation_case),
     SELFTEST_CASE(selftest__run_input_poll_case),

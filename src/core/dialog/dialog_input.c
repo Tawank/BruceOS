@@ -326,6 +326,14 @@ static uint16_t dialog__input_background_color(void) {
     return bg;
 }
 
+static uint16_t dialog__input_text_color(void) {
+    uint16_t pri, sec, bg, surface, text, muted, border, success, warning, error;
+    config__get_colors_internal(
+        &pri, &sec, &bg, &surface, &text, &muted, &border, &success, &warning, &error
+    );
+    return text;
+}
+
 static uint16_t dialog__input_primary_color(void) {
     uint16_t pri, sec, bg, surface, text, muted, border, success, warning, error;
     config__get_colors_internal(
@@ -409,14 +417,16 @@ static void dialog__keyboard_draw_cell(
     } else if (!key->special && st->diacritics) {
         label = dialog__diacritic_label(st, row, col, label);
     }
-    display__fill_rect(x, y, key_w, cell_h, selected ? BRUCE_COLOR_WHITE : bg);
+    /* Theme colours, the selected key inverted: white on black is unreadable on a light theme. */
+    uint16_t text = dialog__input_text_color();
+    display__fill_rect(x, y, key_w, cell_h, selected ? text : bg);
     if (selected) {
-        display__set_text_color(BRUCE_COLOR_BLACK);
+        display__set_text_color(bg);
     } else {
         if ((st->cols == 12 && row >= 4) || key->special != 0) {
-            display__draw_rect(x, y, key_w, cell_h, BRUCE_COLOR_WHITE);
+            display__draw_rect(x, y, key_w, cell_h, text);
         }
-        display__set_text_color(BRUCE_COLOR_WHITE);
+        display__set_text_color(text);
     }
     int text_size = layout->label_size;
     if (st->cols == 12 && row == 4 && col == 10) text_size = DIALOG__TEXT_SIZE;
@@ -442,7 +452,7 @@ static bruce_result_t dialog__keyboard_draw(dialog__keyboard_state_t *st, dialog
     } else {
         dialog__input_clear_and_title(st->title, &layout);
     }
-    display__set_text_color(BRUCE_COLOR_WHITE);
+    display__set_text_color(dialog__input_text_color());
     display__set_text_size(layout.prompt_size);
     display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
     display__set_cursor(DIALOG__MARGIN, layout.prompt_y);
@@ -502,7 +512,7 @@ static bruce_result_t dialog__keyboard_draw(dialog__keyboard_state_t *st, dialog
         input_y + 2,
         1,
         DIALOG__CHAR_H * input_text_size - 2,
-        BRUCE_COLOR_WHITE
+        dialog__input_text_color()
     );
     uint16_t bg = dialog__input_background_color();
     for (int row = 0; row < st->rows; ++row)

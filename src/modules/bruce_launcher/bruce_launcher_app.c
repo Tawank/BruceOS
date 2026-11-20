@@ -1230,35 +1230,34 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
         if (result != BRUCE_OK) continue;
 
         if (ev.type == BRUCE_INPUT_TOUCH) {
-            /* Grid only: a tap opens the entry under it, a vertical swipe
-             * moves a page. */
+            /* Grid only: the entry under a finger lights up while it is held,
+             * a tap opens it, a vertical swipe moves a page. */
             if (render.layout != BRUCE_LAUNCHER_LAYOUT_GRID || menu->entry_count == 0) continue;
-            if (s_show_selection) {
-                s_show_selection = false;
-                last_drawn = -1;
-            }
             if (ev.action == BRUCE_INPUT_PRESS) {
                 touch_x = ev.x;
                 touch_y = ev.y;
+                int hit = bruce_launcher__grid_hit(menu->entry_count, &render, scroll_state, touch_x, touch_y);
+                if (hit >= 0) selected = hit;
+                s_show_selection = hit >= 0;
+                last_drawn = -1;
                 continue;
             }
-            if (ev.action != BRUCE_INPUT_RELEASE || touch_x < 0) continue;
+            if (touch_x < 0) continue;
             int dy = (int)ev.y - touch_y;
-            if (abs(dy) > BRUCE_LAUNCHER_SWIPE_PX) {
+            bool swipe = abs(dy) > BRUCE_LAUNCHER_SWIPE_PX;
+            if (swipe && s_show_selection) {
+                s_show_selection = false;
+                last_drawn = -1;
+            }
+            if (ev.action != BRUCE_INPUT_RELEASE) continue;
+            if (swipe) {
                 bruce_launcher_grid_t g = bruce_launcher__grid(menu->entry_count, &render);
                 selected += (dy < 0 ? 1 : -1) * g.cols * g.rows;
                 if (selected < 0) selected = 0;
                 if (selected >= menu->entry_count) selected = menu->entry_count - 1;
                 last_drawn = -1;
-            } else {
-                int hit = bruce_launcher__grid_hit(menu->entry_count, &render, scroll_state, touch_x, touch_y);
-                if (hit >= 0) {
-                    /* Highlight it on the next frame, then open it. */
-                    selected = hit;
-                    s_show_selection = true;
-                    tap_pending = true;
-                    last_drawn = -1;
-                }
+            } else if (s_show_selection) {
+                tap_pending = true; /* Already highlighted: open it. */
             }
             touch_x = touch_y = -1;
             continue;

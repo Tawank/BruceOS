@@ -52,6 +52,7 @@
 #include "core_sdk/ext_mem_loader.h"
 #include "core_sdk/filetype.h"
 #include "core_sdk/gpio.h"
+#include "core_sdk/gps.h"
 #include "core_sdk/hash.h"
 #include "core_sdk/http.h"
 #include "core_sdk/i2c.h"
@@ -2348,6 +2349,10 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(nrf24__get_channel),
     ESP_ELFSYM_EXPORT(nrf24__scan),
     ESP_ELFSYM_EXPORT(nrf24__get_pins),
+
+    /* GPS */
+    ESP_ELFSYM_EXPORT(gps__is_available),
+    ESP_ELFSYM_EXPORT(gps__read),
 
     /* GPIO and serial buses */
     ESP_ELFSYM_EXPORT(gpio__configure),

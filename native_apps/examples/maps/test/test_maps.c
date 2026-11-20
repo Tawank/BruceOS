@@ -485,6 +485,161 @@ static void drag_from_button_does_not_pan(void) {
     stop();
 }
 
+static void gps_here(double lat, double lon) {
+    fakes.gps_fix = (bruce_gps_fix_t){.receiving = true, .fix = true, .latitude = lat, .longitude = lon};
+    fakes.now_ms += MAPS_GPS_POLL_MS;
+    maps__poll_gps(&app);
+}
+
+static void gps_stays_off_until_locate(void) {
+    start();
+    app.gps_available = true;
+    fakes.now_ms += MAPS_GPS_POLL_MS;
+    maps__poll_gps(&app);
+    CHECK_EQ(fakes.gps_reads, 0);
+    CHECK(app.hud.gps_status == NULL);
+    maps__locate(&app);
+    CHECK(app.gps);
+    maps__poll_gps(&app);
+    CHECK_EQ(fakes.gps_reads, 1);
+    stop();
+}
+
+static void gps_shows_position_speed_and_redraws_when_it_moves(void) {
+    start();
+    app.gps = true;
+    fakes.gps_fix.receiving = true;
+    maps__poll_gps(&app);
+    CHECK(!app.hud.me);
+    CHECK(!app.hud.speed);
+    CHECK(app.hud.gps_status != NULL);
+    app.dirty = false;
+    gps_here(50.1, 20.1);
+    CHECK(app.hud.me);
+    CHECK(app.hud.speed);
+    CHECK_EQ(app.hud.speed_kmh, 0);
+    CHECK(app.dirty);
+    app.dirty = false;
+    gps_here(50.1, 20.1);
+    CHECK(!app.dirty);
+    fakes.gps_fix.speed_kmh = 41.6f;
+    fakes.now_ms += MAPS_GPS_POLL_MS;
+    maps__poll_gps(&app);
+    CHECK_EQ(app.hud.speed_kmh, 42);
+    CHECK(app.dirty);
+    int reads = fakes.gps_reads;
+    maps__poll_gps(&app);
+    CHECK_EQ(fakes.gps_reads, reads);
+    stop();
+}
+
+static void locate_centres_on_first_fix_and_follows_until_panned(void) {
+    start();
+    app.gps_available = true;
+    maps__locate(&app);
+    CHECK(!app.hud.following);
+    CHECK(app.locate_pending);
+    gps_here(50.1, 20.1);
+    CHECK(app.hud.following);
+    CHECK(!app.locate_pending);
+    CHECK_EQ(app.view.zoom, MAPS_PLACE_ZOOM);
+    geo_point_t here = geo__from_lat_lon(50.1, 20.1, MAPS_PLACE_ZOOM);
+    CHECK_EQ(app.view.center.x, here.x);
+    gps_here(50.2, 20.2);
+    CHECK_EQ(app.view.center.x, geo__from_lat_lon(50.2, 20.2, MAPS_PLACE_ZOOM).x);
+    press(BRUCE_INPUT_KEY, BRUCE_INPUT_CODE_RIGHT);
+    CHECK(!app.hud.following);
+    geo_point_t panned = app.view.center;
+    gps_here(50.3, 20.3);
+    CHECK_EQ(app.view.center.x, panned.x);
+    maps__locate(&app);
+    CHECK(app.hud.following);
+    stop();
+}
+
+static void tapping_locate_button_and_menu_locate(void) {
+    start();
+    app.gps_available = app.hud.locate_button = true;
+    hud_rect_t button = hud__button_rect(HUD_BUTTON_LOCATE, 240, 135);
+    touch(BRUCE_INPUT_PRESS, button.x + 2, button.y + 2);
+    CHECK(app.gps);
+    touch(BRUCE_INPUT_CHANGE, button.x - 40, button.y + 2);
+    touch(BRUCE_INPUT_RELEASE, button.x - 40, button.y + 2);
+    gps_here(50.1, 20.1);
+    CHECK(app.hud.following);
+
+    app.hud.following = false;
+    fakes.choice_result = BRUCE_OK;
+    fakes.choice = 2;
+    maps__menu(&app);
+    CHECK_STR(fakes.choice_labels[2], "My location");
+    CHECK(app.hud.following);
+    stop();
+}
+
+static void menu_turns_gps_off(void) {
+    start();
+    app.gps_available = true;
+    maps__menu(&app);
+    CHECK_EQ(fakes.choice_count, 7u);
+    maps__locate(&app);
+    gps_here(50.1, 20.1);
+    fakes.choice_result = BRUCE_OK;
+    fakes.choice = 3;
+    maps__menu(&app);
+    CHECK_STR(fakes.choice_labels[3], "Turn GPS off");
+    CHECK(!app.gps && !app.hud.me && !app.hud.speed && !app.hud.following);
+    int reads = fakes.gps_reads;
+    gps_here(50.1, 20.1);
+    CHECK_EQ(fakes.gps_reads, reads);
+    stop();
+}
+
+static void gps_status_shows_progress_until_fix(void) {
+    start();
+    app.gps = true;
+    fakes.now_ms = 1000;
+    maps__poll_gps(&app);
+    CHECK_STR(app.hud.gps_status, "GPS 1/3: starting");
+    fakes.now_ms += MAPS_GPS_NO_DATA_MS;
+    maps__poll_gps(&app);
+    CHECK_STR(app.hud.gps_status, "GPS 1/3: no data");
+    fakes.gps_fix = (bruce_gps_fix_t){.receiving = true, .satellites_in_view = 7};
+    fakes.now_ms += MAPS_GPS_POLL_MS;
+    maps__poll_gps(&app);
+    CHECK_STR(app.hud.gps_status, "GPS 2/3: time sync, 7 seen");
+    fakes.gps_fix.time_valid = true;
+    fakes.gps_fix.satellites = 2;
+    fakes.now_ms += MAPS_GPS_POLL_MS;
+    app.dirty = false;
+    maps__poll_gps(&app);
+    CHECK_STR(app.hud.gps_status, "GPS 3/3: 2/4 locked, 7 seen");
+    CHECK(app.dirty);
+    app.dirty = false;
+    fakes.now_ms += MAPS_GPS_POLL_MS;
+    maps__poll_gps(&app);
+    CHECK(!app.dirty);
+    gps_here(50.1, 20.1);
+    CHECK(app.hud.gps_status == NULL);
+    stop();
+}
+
+static void gps_error_hides_location(void) {
+    start();
+    app.gps_available = app.hud.locate_button = true;
+    maps__locate(&app);
+    gps_here(50.1, 20.1);
+    fakes.gps_result = BRUCE_ERR_PERMISSION;
+    gps_here(50.1, 20.1);
+    CHECK(!app.gps);
+    CHECK(!app.hud.me);
+    CHECK(!app.hud.locate_button);
+    CHECK(app.hud.gps_status == NULL);
+    maps__menu(&app);
+    CHECK_EQ(fakes.choice_count, 6u);
+    stop();
+}
+
 static void app_main_draws_loads_and_exits(void) {
     fakes__add_file("/sdcard/maps/tiles/4/8/5.png", 500);
     fakes.polls_until_back = 8;
@@ -619,6 +774,13 @@ SUITE(maps_tests,
       TEST(first_touch_shows_zoom_buttons),
       TEST(tapping_zoom_buttons_zooms),
       TEST(drag_from_button_does_not_pan),
+      TEST(gps_stays_off_until_locate),
+      TEST(gps_shows_position_speed_and_redraws_when_it_moves),
+      TEST(locate_centres_on_first_fix_and_follows_until_panned),
+      TEST(tapping_locate_button_and_menu_locate),
+      TEST(menu_turns_gps_off),
+      TEST(gps_status_shows_progress_until_fix),
+      TEST(gps_error_hides_location),
       TEST(app_main_draws_loads_and_exits),
       TEST(no_wifi_status_clears_when_wifi_comes_back),
       TEST(scrolling_keeps_five_downloads_and_cancels_far_ones),

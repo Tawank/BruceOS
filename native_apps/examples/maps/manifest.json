@@ -3,7 +3,7 @@
   "entryPoint": "app_main",
   "appIcon": "icon:compass",
   "coreAbiVersion": 4,
-  "permissions": ["storage", "http", "wifi"],
+  "permissions": ["storage", "http", "wifi", "gps"],
   "stackSize": 16384,
   "heapSize": 524288,
   "targets": ["elf"]

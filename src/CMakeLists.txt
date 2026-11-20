@@ -22,6 +22,7 @@ set(BRUCE_SELFTEST_SOURCES
     "modules/selftest/filemanager_pathicons_test.c"
     "modules/selftest/filetype_test.c"
     "modules/selftest/gpio_bus_test.c"
+    "modules/selftest/gps_test.c"
     "modules/selftest/core_launcher_test.c"
     "modules/selftest/hash_test.c"
     "modules/selftest/html_test.c"
@@ -97,6 +98,7 @@ idf_component_register(SRCS
                     "core/disk/disk.c"
                     "core/format/format.c"
                     "core/gpio/gpio.c"
+                    "core/gps/gps.c"
                     "core/hash/hash.c"
                     "core/html/html_entities.c"
                     "core/html/html_events.c"
@@ -256,6 +258,7 @@ idf_component_register(SRCS
                      "modules/ir/ir_app.c"
                      "modules/ir/ir_tvbgone.c"
                     "modules/nrf24/nrf24_app.c"
+                    "modules/gps/gps_app.c"
                     "modules/bparted/bparted_app.c"
                     "modules/bparted/bparted_cli.c"
                     "modules/bparted/bparted_gui.c"
@@ -283,6 +286,7 @@ idf_component_register(SRCS
                      esp_driver_ledc
                     esp_driver_rmt
                     esp_driver_spi
+                    esp_driver_uart
                     esp_driver_usb_serial_jtag
                     esp_driver_sdspi
                     esp_http_client
@@ -551,6 +555,11 @@ target_include_directories(bruce_sdk_builtin_nrf24_check PRIVATE
                            "${CMAKE_CURRENT_LIST_DIR}"
                            "${CMAKE_CURRENT_LIST_DIR}/modules/nrf24")
 
+add_library(bruce_sdk_builtin_gps_check OBJECT "modules/gps/gps_app.c")
+target_include_directories(bruce_sdk_builtin_gps_check PRIVATE
+                           "${CMAKE_CURRENT_LIST_DIR}"
+                           "${CMAKE_CURRENT_LIST_DIR}/modules/gps")
+
 add_library(bruce_sdk_builtin_bparted_check OBJECT
             "modules/bparted/bparted_app.c"
             "modules/bparted/bparted_cli.c"
@@ -759,6 +768,7 @@ set(BRUCE_ARGS_SDK_CHECK_TARGETS
     bruce_sdk_builtin_bluetooth_hid_check
     bruce_sdk_builtin_ir_check
     bruce_sdk_builtin_nrf24_check
+    bruce_sdk_builtin_gps_check
     bruce_sdk_builtin_bparted_check
     bruce_sdk_builtin_browser_check
     bruce_sdk_builtin_image_loader_check

@@ -443,6 +443,19 @@ fails with `BRUCE_ERR_INVALID_STATE` until the system clock contains a valid
 date. These APIs expose state only; launcher status-bar rendering remains
 module-owned.
 
+### GPS
+
+`gps__read()` (permission `gps`) returns the latest state of the board's
+NMEA receiver (`BRUCE_GPS_*` in Kconfig): position, altitude, speed,
+course, satellites, HDOP and UTC time from RMC and GGA sentences. The first
+call powers the receiver on (an XL9555 power enable on the T-Deck MAX) and
+starts a Core task that reads its UART; the task powers it off again after
+30 seconds without a call, and power-off cuts it before deep sleep. With no
+data Core alternates between the configured baud rate and 9600/38400. On
+boards without GPS `gps__is_available()` is false and `gps__read()` returns
+`BRUCE_ERR_UNSUPPORTED`. The built-in `gps` command prints the position
+every second.
+
 ### Clock and time
 
 Core keeps the libc system clock in UTC. `clock__get_utc()` reads it directly,

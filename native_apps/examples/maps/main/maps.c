@@ -16,6 +16,9 @@
 #define MAPS_LONG_PRESS_MS 500
 #define MAPS_HINT_MS 2000
 #define MAPS_PENDING_MAX 16
+#define MAPS_GPS_POLL_MS 1000
+#define MAPS_GPS_NO_DATA_MS 10000
+#define MAPS_GPS_FIX_SATELLITES 4
 
 typedef struct {
     settings_t settings;
@@ -32,12 +35,19 @@ typedef struct {
     int32_t touch_x;
     int32_t touch_y;
     bool touch_on_button;
+    bool gps_available;
+    bool gps;            /* Turned on by My location. */
+    bool locate_pending; /* Centre on the first fix. */
+    uint64_t gps_at;
+    uint64_t gps_started_at;
+    char gps_text[40];
 } maps_t;
 
 static int32_t maps__to_e6(double degrees) { return (int32_t)floor(degrees * 1000000.0 + 0.5); }
 
 static void maps__pan(maps_t *app, int dx, int dy) {
     map_view__pan(&app->view, dx, dy);
+    app->hud.following = false;
     app->dirty = true;
 }
 
@@ -85,6 +95,7 @@ static void maps__expire_hint(maps_t *app) {
 static void maps__show_place(maps_t *app, double lat, double lon, const char *name) {
     int zoom = app->view.zoom > MAPS_PLACE_ZOOM ? app->view.zoom : MAPS_PLACE_ZOOM;
     map_view__set(&app->view, lat, lon, zoom);
+    app->hud.following = false;
     app->hud.pin = true;
     app->hud.pin_lat = lat;
     app->hud.pin_lon = lon;
@@ -183,6 +194,77 @@ static void maps__poll_search(maps_t *app) {
     if (result != BRUCE_ERR_BUSY) maps__search_finished(app, result, places, count);
 }
 
+/* Turns GPS on, then centres on the position and keeps following it until the map is panned. */
+static void maps__locate(maps_t *app) {
+    if (!app->gps) {
+        app->gps = true;
+        app->gps_at = app->gps_started_at = 0;
+        app->gps_text[0] = '\0';
+    }
+    if (!app->hud.me) {
+        app->locate_pending = true;
+        app->dirty = true;
+        return;
+    }
+    app->locate_pending = false;
+    int zoom = app->view.zoom > MAPS_PLACE_ZOOM ? app->view.zoom : MAPS_PLACE_ZOOM;
+    map_view__set(&app->view, app->hud.me_lat, app->hud.me_lon, zoom);
+    app->hud.following = true;
+    app->dirty = true;
+}
+
+static void maps__gps_off(maps_t *app) {
+    app->gps = app->locate_pending = app->hud.me = app->hud.following = app->hud.speed = false;
+    app->hud.gps_status = NULL;
+    app->dirty = true;
+}
+
+/* Steps towards a fix: data from the receiver, the time, then enough satellites. */
+static void maps__gps_status(maps_t *app, const bruce_gps_fix_t *fix, uint64_t now) {
+    char text[sizeof(app->gps_text)] = "";
+    unsigned used = fix->satellites < MAPS_GPS_FIX_SATELLITES ? fix->satellites : MAPS_GPS_FIX_SATELLITES;
+    if (fix->fix) {
+        text[0] = '\0';
+    } else if (!fix->receiving) {
+        bool slow = now - app->gps_started_at >= MAPS_GPS_NO_DATA_MS;
+        snprintf(text, sizeof(text), "GPS 1/3: %s", slow ? "no data" : "starting");
+    } else if (!fix->time_valid) {
+        snprintf(text, sizeof(text), "GPS 2/3: time sync, %u seen", fix->satellites_in_view);
+    } else {
+        snprintf(text, sizeof(text), "GPS 3/3: %u/%d locked, %u seen", used, MAPS_GPS_FIX_SATELLITES,
+                 fix->satellites_in_view);
+    }
+    if (strcmp(text, app->gps_text) != 0) app->dirty = true;
+    snprintf(app->gps_text, sizeof(app->gps_text), "%s", text);
+    app->hud.gps_status = app->gps_text[0] != '\0' ? app->gps_text : NULL;
+}
+
+static void maps__poll_gps(maps_t *app) {
+    uint64_t now = runtime__now();
+    if (!app->gps || now < app->gps_at) return;
+    if (app->gps_started_at == 0) app->gps_started_at = now;
+    app->gps_at = now + MAPS_GPS_POLL_MS;
+    bruce_gps_fix_t fix;
+    if (gps__read(&fix) != BRUCE_OK) {
+        maps__gps_off(app);
+        app->gps_available = app->hud.locate_button = false;
+        return;
+    }
+    geo_point_t before = geo__from_lat_lon(app->hud.me_lat, app->hud.me_lon, app->view.zoom);
+    geo_point_t after = geo__from_lat_lon(fix.latitude, fix.longitude, app->view.zoom);
+    bool moved = before.x != after.x || before.y != after.y;
+    maps__gps_status(app, &fix, now);
+    int speed = (int)(fix.speed_kmh + 0.5f);
+    if (fix.fix != app->hud.me || (fix.fix && (moved || speed != app->hud.speed_kmh))) app->dirty = true;
+    app->hud.me = app->hud.speed = fix.fix;
+    if (!fix.fix) return;
+    app->hud.me_lat = fix.latitude;
+    app->hud.me_lon = fix.longitude;
+    app->hud.speed_kmh = speed;
+    if (app->locate_pending) maps__locate(app);
+    else if (app->hud.following) app->view.center = after;
+}
+
 static void maps__toggle_online(maps_t *app) {
     tiles__set_online(&app->tiles, !app->tiles.online);
     settings__save_online(app->tiles.online);
@@ -194,13 +276,15 @@ static void maps__toggle_big(maps_t *app) {
 }
 
 static void maps__menu(maps_t *app) {
-    enum { NAV_MODE, SEARCH, CLEAR_PIN, ONLINE, BIG, EXIT, BACK };
+    enum { NAV_MODE, SEARCH, LOCATE, GPS_OFF, CLEAR_PIN, ONLINE, BIG, EXIT, BACK };
     hud_nav_mode_t next_mode = maps__next_nav_mode(app);
     char nav_label[32];
     snprintf(nav_label, sizeof(nav_label), "Change to %s", s_nav_names[next_mode]);
     const bruce_dialog_choice_t all[] = {
         [NAV_MODE] = {.label = nav_label, .icon_name = hud__nav_icon(next_mode)},
         [SEARCH] = {.label = "Search", .icon_name = "magnify"},
+        [LOCATE] = {.label = "My location", .icon_name = "crosshairs-gps"},
+        [GPS_OFF] = {.label = "Turn GPS off", .icon_name = "crosshairs"},
         [CLEAR_PIN] = {.label = "Clear pin", .icon_name = "map-marker"},
         [ONLINE] = {.label = "Online tiles", .icon_name = "earth",
                     .right_text = app->tiles.online ? "On" : "Off"},
@@ -213,6 +297,8 @@ static void maps__menu(maps_t *app) {
     size_t count = 0;
     for (int i = 0; i < (int)(sizeof(all) / sizeof(all[0])); ++i) {
         if (i == CLEAR_PIN && !app->hud.pin) continue;
+        if (i == LOCATE && !app->gps_available) continue;
+        if (i == GPS_OFF && !app->gps) continue;
         /* Keyboards and touch screens pan and zoom directly; the Prev/Next mode is for button boards. */
         if (i == NAV_MODE && (input__has_keyboard() || input__has_touch())) continue;
         choices[count] = all[i];
@@ -223,6 +309,8 @@ static void maps__menu(maps_t *app) {
         switch (actions[selected]) {
             case NAV_MODE: maps__set_nav_mode(app, next_mode, true); break;
             case SEARCH: maps__search(app); break;
+            case LOCATE: maps__locate(app); break;
+            case GPS_OFF: maps__gps_off(app); break;
             case CLEAR_PIN: maps__clear_pin(app); break;
             case ONLINE: maps__toggle_online(app); break;
             case BIG: maps__toggle_big(app); break;
@@ -259,7 +347,9 @@ static void maps__touch(maps_t *app, const bruce_input_event_t *event) {
         hud_rect_t search = hud__search_rect(&app->view, &app->hud, display__width());
         if (maps__hit_button(HUD_BUTTON_ZOOM_IN, event->x, event->y)) maps__zoom(app, 1);
         else if (maps__hit_button(HUD_BUTTON_ZOOM_OUT, event->x, event->y)) maps__zoom(app, -1);
-        else if (maps__hit(search, event->x, event->y)) maps__search(app);
+        else if (app->hud.locate_button && maps__hit_button(HUD_BUTTON_LOCATE, event->x, event->y)) {
+            maps__locate(app);
+        } else if (maps__hit(search, event->x, event->y)) maps__search(app);
         else app->touch_on_button = false;
     } else if (event->action == BRUCE_INPUT_CHANGE && !app->touch_on_button) {
         maps__pan(app, app->touch_x - event->x, app->touch_y - event->y);
@@ -368,6 +458,7 @@ static void maps__run(maps_t *app) {
         while (app->running && input__poll(&event) == BRUCE_OK) maps__handle(app, &event);
         maps__expire_hint(app);
         maps__poll_search(app);
+        maps__poll_gps(app);
         if (tiles__check_network(&app->tiles)) app->dirty = true;
         if (display__viewport_changed()) app->dirty = true;
 
@@ -407,6 +498,8 @@ int app_main(int argc, char **argv) {
     map_view__set(&app->view, app->settings.lat_e6 / 1e6, app->settings.lon_e6 / 1e6, app->settings.zoom);
     app->view.big = app->settings.big;
     app->start_view = app->view;
+    app->gps_available = gps__is_available();
+    app->hud.locate_button = app->gps_available && input__has_touch();
     int screen_width = display__screen_width();
     int screen_height = display__screen_height();
     int screen = screen_width > screen_height ? screen_width : screen_height;

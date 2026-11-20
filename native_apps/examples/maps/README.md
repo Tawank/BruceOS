@@ -33,6 +33,23 @@ arrow icon while Prev/Next pan. The menu also has *Search*, *Clear pin*
 (while a pin is shown), *Online tiles* on/off, *Exit* and *Back*. On touch
 screens the +/- buttons appear after the first touch.
 
+## My location
+
+On boards with a GPS receiver (`gps__is_available()`, e.g. the LilyGO T-Deck
+MAX) GPS stays off until you ask for your location: the *My location* button
+in the bottom right corner on touch screens, or *My location* in the menu.
+That turns the receiver on, and the map centres on the first fix and keeps
+following it until the map is panned; press it again to centre once more.
+*Turn GPS off* in the menu powers it down again.
+
+The position is a blue dot, and the current speed sits in a box at the bottom
+left, above the scale bar. The button is grey without a fix, white with one,
+and orange while the map follows. Until there is a fix, a line on the left
+under the status shows the progress: *GPS 1/3: starting* (or *no data* when
+the receiver stays silent), *GPS 2/3: time sync, N seen*, then *GPS 3/3: 2/4
+locked, N seen* while it waits for four satellites. GPS needs the `gps`
+permission.
+
 ## Search
 
 The search box at the top of the map shows the pinned place's name, or

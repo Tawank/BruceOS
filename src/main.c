@@ -39,6 +39,7 @@
 #include "modules/nc/nc_app.h"
 #include "modules/nmap/nmap_app.h"
 #include "modules/notification_service/notification_service.h"
+#include "modules/gps/gps_app.h"
 #include "modules/nrf24/nrf24_app.h"
 #include "modules/player/player_app.h"
 #include "modules/privileged/permissions/permissions_app.h"
@@ -132,6 +133,7 @@ static const bruce_app_descriptor_t s_default_apps[] = {
     {"bluetooth",            "Scan and manage Bluetooth devices",                         "Radio",   bluetooth_app_main,           0,     false},
     {"bluetooth_hid_app",    "Use Bruce as a Bluetooth HID peripheral",                   "Radio",   bluetooth_hid_app_main,       0,     false},
     {"device_bus",           "Inspect device buses",                                      "Radio",   device_bus_app_main,          3072,  false},
+    {"gps",                  "Show the GPS position",                                     "Radio",   gps_app_main,                 0,     false},
     {"input",                "Inspect input devices",                                     "Radio",   input_app_main,               3072,  false},
     {"ir",                   "Control infrared devices",                                  "Radio",   ir_app_main,                  0,     false},
     {"nrf24",                "Control NRF24 radios",                                      "Radio",   nrf24_app_main,               0,     false},

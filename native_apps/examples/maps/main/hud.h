@@ -15,6 +15,7 @@ typedef enum {
 typedef enum {
     HUD_BUTTON_ZOOM_IN,
     HUD_BUTTON_ZOOM_OUT,
+    HUD_BUTTON_LOCATE,
 } hud_button_t;
 
 typedef struct {
@@ -32,6 +33,14 @@ typedef struct {
     double pin_lon;
     const char *place;   /* Pinned place's name, shown in the search box. */
     bool zoom_buttons;   /* On-screen +/- for touch screens. */
+    bool me;             /* GPS position. */
+    double me_lat;
+    double me_lon;
+    bool locate_button;  /* "My location" button, bottom right. */
+    bool following;      /* The map follows the GPS position. */
+    const char *gps_status; /* Progress towards a fix, under the status. */
+    bool speed;
+    int speed_kmh;
 } hud_state_t;
 
 const char *hud__nav_icon(hud_nav_mode_t mode);
