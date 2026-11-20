@@ -13,6 +13,7 @@
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include "esp_heap_caps.h"
+#include "esp_private/spi_common_internal.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h" // IWYU pragma: keep
 #include "freertos/semphr.h"
@@ -187,9 +188,10 @@ static bruce_result_t display_epd__init_spi(void) {
         .max_transfer_sz = EPD__CHUNK,
     };
     /* The SD card may already own the shared bus. */
-    esp_err_t err = spi_bus_initialize(EPD__HOST, &bus, SPI_DMA_CH_AUTO);
-    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) return BRUCE_ERR_INTERNAL;
-    s_bus_owned = err == ESP_OK;
+    if (spi_bus_get_attr(EPD__HOST) == NULL) {
+        if (spi_bus_initialize(EPD__HOST, &bus, SPI_DMA_CH_AUTO) != ESP_OK) return BRUCE_ERR_INTERNAL;
+        s_bus_owned = true;
+    }
 
     spi_device_interface_config_t device = {
         .clock_speed_hz = EPD__SPI_HZ,
@@ -197,7 +199,6 @@ static bruce_result_t display_epd__init_spi(void) {
         .spics_io_num = CONFIG_BRUCE_DISPLAY_PIN_CS,
         .cs_ena_pretrans = 2,
         .cs_ena_posttrans = 2,
-        .flags = SPI_DEVICE_HALFDUPLEX,
         .queue_size = 1,
     };
     return spi_bus_add_device(EPD__HOST, &device, &s_spi) == ESP_OK ? BRUCE_OK : BRUCE_ERR_INTERNAL;

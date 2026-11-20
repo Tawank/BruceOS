@@ -1,0 +1,26 @@
+# Boards with PSRAM: move everything that tolerates PSRAM's latency out of
+# internal RAM, which stays for task stacks and DMA buffers. Applied after
+# sdkconfig.defaults to every board whose boards/<board>/sdkconfig.defaults
+# sets CONFIG_SPIRAM=y (see CMakeLists.txt and tools/board.py); the board
+# file picks the PSRAM mode and speed.
+
+# ELF apps load into executable PSRAM, so the flash-backed swap partition
+# isn't needed.
+CONFIG_ELF_LOADER_LOAD_PSRAM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# Plain malloc() may use PSRAM, and prefers it from 5KB up (the threshold is a
+# preference, either side falls back to the other). That covers TLS in/out
+# buffers, which land in the 5-16KB range.
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=5120
+
+# mbedTLS, Wi-Fi/LWIP and NimBLE allocate from PSRAM, and tasks that never
+# touch flash (e.g. the MP3 decoder) may have PSRAM stacks.
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y
+CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY=y
+
+# memory__malloc() and friends always use PSRAM; see BRUCE_MEMORY_FORCE_PSRAM.
+CONFIG_BRUCE_MEMORY_FORCE_PSRAM=y

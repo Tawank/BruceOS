@@ -13,6 +13,7 @@
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_panel_vendor.h" // IWYU pragma: keep
 #include "esp_log.h"
+#include "esp_private/esp_gpio_reserve.h"
 
 #include <string.h>
 
@@ -66,6 +67,8 @@ void display_driver__boot_backlight_off(void) {
     };
     (void)gpio_config(&bl_gpio);
     (void)gpio_set_level(DISPLAY__PIN_BL, 0);
+    /* Hand the pin back so the backlight PWM can claim it without a conflict warning. */
+    (void)esp_gpio_revoke(1ULL << DISPLAY__PIN_BL);
 #endif
 }
 

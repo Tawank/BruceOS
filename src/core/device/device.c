@@ -17,6 +17,7 @@
 #include "esp_adc/adc_cali.h"        // IWYU pragma: keep
 #include "esp_adc/adc_cali_scheme.h" // IWYU pragma: keep
 #include "esp_adc/adc_oneshot.h"     // IWYU pragma: keep
+#include "esp_private/esp_gpio_reserve.h"
 #include "esp_sleep.h"
 #include "sdkconfig.h"
 #if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
@@ -287,6 +288,8 @@ void device__power_hold_init(void) {
     for (int pin = 0; pin < 64; ++pin) {
         if ((uint64_t)CONFIG_BRUCE_BOARD_GPIO_HIGH_MASK & (1ULL << pin)) gpio_set_level((gpio_num_t)pin, 1);
     }
+    /* The levels hold; hand the pins back so the SD and display drivers claim them without a conflict warning. */
+    (void)esp_gpio_revoke(CONFIG_BRUCE_BOARD_GPIO_HIGH_MASK);
 #endif
 #if CONFIG_BRUCE_BOARD_XL9555_ENABLED
     device__xl9555_init();

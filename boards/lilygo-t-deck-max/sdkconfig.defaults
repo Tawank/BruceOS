@@ -1,4 +1,4 @@
-# LilyGO T-Deck MAX (ESP32-S3, 16MB flash / 8MB PSRAM, GDEQ031T10 240x320
+# LilyGO T-Deck MAX (ESP32-S3, 16MB flash / 8MB quad PSRAM, GDEQ031T10 240x320
 # e-paper, TCA8418 keyboard, CST3530 touch, XL9555 GPIO expander).
 #
 # Pins from LilyGO's TDeckMaxBoard.h (github.com/Xinyuan-LilyGO/T-Deck-MAX).
@@ -6,21 +6,23 @@
 # driver in this HAL yet; their XL9555 power enables are left off.
 CONFIG_IDF_TARGET="esp32s3"
 
+# ---- Chip, flash and memory ----
+
+# 16MB QIO flash.
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+
+# Quad PSRAM at 80 MHz; flash runs at the shared 80 MHz. That is the most
+# this board supports: ESP-IDF knows how to run only listed flash chips above
+# 80 MHz, and this module's 16MB Winbond chip is not one of them, while flash
+# and PSRAM share one clock, so 120 MHz PSRAM would need 120 MHz flash.
+# With PSRAM, sdkconfig.defaults.psram applies.
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_QUAD=y
 CONFIG_SPIRAM_SPEED_80M=y
-CONFIG_ELF_LOADER_LOAD_PSRAM=y
-CONFIG_SPIRAM_USE_MALLOC=y
-CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=5120
-CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
 
-CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
-CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ=240
-CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
-CONFIG_ESPTOOLPY_FLASHFREQ="80m"
-CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
-CONFIG_ESPTOOLPY_FLASHMODE="qio"
-CONFIG_ESP32S3_INSTRUCTION_CACHE_16KB=y
+# ---- Board buses and power ----
 
 # Board I2C: keyboard, touch, XL9555, ES8311, BQ27220.
 CONFIG_BRUCE_BOARD_I2C_ENABLED=y
@@ -35,8 +37,14 @@ CONFIG_BRUCE_BOARD_XL9555_ENABLED=y
 CONFIG_BRUCE_BOARD_XL9555_I2C_ADDR=0x20
 CONFIG_BRUCE_BOARD_XL9555_OUTPUTS=0x02D0
 
-# Display: e-paper on SPI2_HOST, shared with the SD card. GPIO41 is the
-# front light.
+# Keep LoRa (CS 3, reset 4), SD (CS 48) and e-paper (CS 34) deselected on
+# the shared SPI bus from boot, as LilyGO's firmware does.
+CONFIG_BRUCE_BOARD_GPIO_HIGH_MASK=0x1000400000018
+
+# ---- Display ----
+
+# E-paper on SPI2_HOST, shared with the SD card. GPIO41 is the front light;
+# LilyGO runs it at 50/255, full power can brown out the board.
 CONFIG_BRUCE_DISPLAY_PANEL_UC8253=y
 CONFIG_BRUCE_DISPLAY_WIDTH=240
 CONFIG_BRUCE_DISPLAY_HEIGHT=320
@@ -49,9 +57,12 @@ CONFIG_BRUCE_DISPLAY_PIN_DC=35
 CONFIG_BRUCE_DISPLAY_PIN_RST=9
 CONFIG_BRUCE_DISPLAY_PIN_BUSY=37
 CONFIG_BRUCE_DISPLAY_PIN_BL=41
+CONFIG_BRUCE_DISPLAY_BACKLIGHT_MAX_LEVEL=64
 
-# Audio: ES8311 codec. The ESP32 transmits on GPIO 40 (LilyGO's header calls
-# it BOARD_ES8311_ASDOUT but passes it as the I2S data-out pin); 17 is the
+# ---- Audio ----
+
+# ES8311 codec. The ESP32 transmits on GPIO 40 (LilyGO's header calls it
+# BOARD_ES8311_ASDOUT but passes it as the I2S data-out pin); 17 is the
 # codec's microphone output.
 CONFIG_BRUCE_AUDIO_BACKEND_I2S=y
 CONFIG_BRUCE_AUDIO_I2S_BCLK_GPIO=39
@@ -60,12 +71,16 @@ CONFIG_BRUCE_AUDIO_I2S_LRCLK_GPIO=18
 CONFIG_BRUCE_AUDIO_I2S_MCLK_GPIO=38
 CONFIG_BRUCE_AUDIO_ES8311_CODEC=y
 
-# Battery: BQ27220 fuel gauge.
+# ---- Battery ----
+
+# BQ27220 fuel gauge.
 CONFIG_BRUCE_BATTERY_ENABLED=y
 CONFIG_BRUCE_BATTERY_BACKEND_BQ27220=y
 CONFIG_BRUCE_BATTERY_BQ27220_I2C_ADDR=0x55
 
-# SD card: same bus as the display.
+# ---- Storage ----
+
+# SD card on the display's bus.
 CONFIG_BRUCE_SD_ENABLED=y
 CONFIG_BRUCE_SD_SPI_HOST=1
 CONFIG_BRUCE_SD_PIN_MOSI=33
@@ -73,32 +88,27 @@ CONFIG_BRUCE_SD_PIN_MISO=47
 CONFIG_BRUCE_SD_PIN_SCK=36
 CONFIG_BRUCE_SD_PIN_CS=48
 
-# Buttons: BOOT is Select.
+# ---- Input ----
+
+# BOOT is Select.
 CONFIG_BRUCE_BUTTON_SELECT_ENABLED=y
 CONFIG_BRUCE_BUTTON_SELECT_GPIO=0
 # CONFIG_BRUCE_BUTTON_A_ENABLED is not set
 # CONFIG_BRUCE_BUTTON_B_ENABLED is not set
 # CONFIG_BRUCE_BUTTON_C_ENABLED is not set
 
-# Keyboard: TCA8418, BlackBerry-style layout.
+# TCA8418 keyboard, BlackBerry-style layout.
 # CONFIG_BRUCE_KEYBOARD_ENABLED is not set
 CONFIG_BRUCE_KEYBOARD_TCA8418_ENABLED=y
 CONFIG_BRUCE_KEYBOARD_TCA8418_I2C_ADDR=0x34
 CONFIG_BRUCE_KEYBOARD_LAYOUT_TDECK=y
 
-# Touch: CST3530, reset through the XL9555 above.
+# CST3530 touch, reset through the XL9555 above.
 CONFIG_BRUCE_TOUCH_ENABLED=y
 CONFIG_BRUCE_TOUCH_CST3530=y
 CONFIG_BRUCE_TOUCH_I2C_ADDR=0x1A
 
-# No infrared or NRF24 on this board; left at the Kconfig defaults.
-
-# Keep LoRa (CS 3, reset 4), SD (CS 48) and e-paper (CS 34) deselected on
-# the shared SPI bus from boot, as LilyGO's firmware does.
-CONFIG_BRUCE_BOARD_GPIO_HIGH_MASK=0x1000400000018
-
-# Front light: LilyGO runs it at 50/255; full power can brown out the board.
-CONFIG_BRUCE_DISPLAY_BACKLIGHT_MAX_LEVEL=64
+# ---- Radios ----
 
 # GPS: u-blox MIA-M10Q on UART at 38400, powered by XL9555 pin 2.
 CONFIG_BRUCE_GPS_ENABLED=y
@@ -107,3 +117,5 @@ CONFIG_BRUCE_GPS_RX_GPIO=2
 CONFIG_BRUCE_GPS_TX_GPIO=16
 CONFIG_BRUCE_GPS_BAUD=38400
 CONFIG_BRUCE_GPS_POWER_XL9555_PIN=2
+
+# No infrared or NRF24 on this board; left at the Kconfig defaults.

@@ -28,116 +28,13 @@ CONFIG_IDF_TARGET="esp32s3"
 # speed for Octal PSRAM on ESP32-S3 (120MHz is flagged experimental/
 # thermal-sensitive in Kconfig.spiram; 40MHz leaves it underused). CLK/CS
 # IO default to the fixed internal pins the R8 in-package PSRAM actually
-# uses, not GPIOs, so nothing else needs configuring here.
+# uses, not GPIOs, so nothing else needs configuring here. With PSRAM,
+# sdkconfig.defaults.psram applies.
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_OCT=y
 CONFIG_SPIRAM_SPEED_80M=y
-# Relocate ELF apps into executable PSRAM instead of requiring swap-backed XIP.
-CONFIG_ELF_LOADER_LOAD_PSRAM=y
-# Route plain malloc() (not just explicit MALLOC_CAP_SPIRAM callers like
-# memory__external_alloc() below) through PSRAM once it no longer fits
-# internal RAM. This is already ESP-IDF's own default SPIRAM_USE choice
-# once CONFIG_SPIRAM=y - pinned explicitly here so it can't silently change
-# out from under this board if that upstream default ever does.
-CONFIG_SPIRAM_USE_MALLOC=y
-# SPIRAM_MALLOC_ALWAYSINTERNAL (esp_psram/Kconfig.spiram.common) is a
-# *preference* threshold, not a hard split: plain malloc() below this size
-# prefers internal RAM (falling back to PSRAM if internal is full), and
-# above it prefers PSRAM (falling back to internal if PSRAM is full).
-# BRUCE_MEMORY_FORCE_PSRAM below already routes memory__malloc() around
-# this entirely, but this still governs every allocation this board makes
-# through plain malloc()/calloc() directly - most notably mbedTLS once
-# MBEDTLS_DEFAULT_MEM_ALLOC is on (see below), whose TLS in/out buffers
-# regularly land in the 5-16KB range and, at the 16KB default, would still
-# prefer this board's scarce internal RAM. Lowered to 5KB so only truly
-# small/hot allocations stay internal by preference; everything from 5KB up
-# prefers PSRAM instead.
-CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=5120
 
-
-# Run the supported ESP32 targets at their maximum CPU frequency.
-CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
-CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ=240
-CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
-CONFIG_ESPTOOLPY_FLASHFREQ="80m"
 CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
-CONFIG_ESPTOOLPY_FLASHMODE="qio"
-
-# ESP32-S3's I/D-cache Kconfig choice is a false economy at its default: the
-# "32KB data cache" and "16KB data cache" options both configure the same
-# physical 32KB of cache hardware (see Kconfig.cache's own comment) - "16KB"
-# just donates the other 16KB to the heap instead of leaving it as cache.
-# boards/m5stack-cardputer already opts into this; this board didn't, which
-# left it with 16KB less internal RAM than necessary. That 16KB matters more
-# here than almost anywhere else: FreeRTOS task stacks (see BROWSER_STACK_BYTES
-# in main.c) are allocated via xTaskCreate(), which - unlike plain malloc() -
-# always pulls from internal RAM with no PSRAM fallback, so every KB of
-# internal headroom directly affects which apps can even launch.
-CONFIG_ESP32S3_INSTRUCTION_CACHE_16KB=y
-
-# ESP-IDF's default Wi-Fi buffer pools (32 dynamic RX + 32 dynamic TX
-# buffers) are sized for routing/high-throughput use, not this device's
-# interactive shell/app traffic. On measured hardware, associating to a WPA2
-# AP dropped this board's largest free internal block from ~31KB (fresh
-# boot) to ~10.5KB - below the 16KB a task like the browser app needs for
-# its stack (see BROWSER_STACK_BYTES in main.c, and the note on
-# CONFIG_SPIRAM_USE_MALLOC above for why task stacks can't fall back to
-# PSRAM the way most other allocations do). boards/m5stack-cardputer
-# already carries this same trim for the same reason - mirrored here.
-CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=12
-CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=12
-CONFIG_ESP_WIFI_RX_BA_WIN=6
-CONFIG_ESP_WIFI_IRAM_OPT=n
-CONFIG_ESP_WIFI_RX_IRAM_OPT=n
-# CONFIG_ESP_WIFI_STATIC_RX_MGMT_BUFFER is not set
-CONFIG_ESP_WIFI_DYNAMIC_RX_MGMT_BUFFER=y
-CONFIG_ESP_WIFI_RX_MGMT_BUF_NUM_DEF=5
-
-# mbedTLS
-CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
-
-# boards/m5stack-cardputer already carries these two mbedTLS trims (it has no
-# PSRAM at all, so it needs every internal KB back); this board never picked
-# them up even though its own internal headroom turns out to be just as
-# tight once Wi-Fi + the browser's own state are both live:
-# - DYNAMIC_FREE_* releases the peer certificate, CA cert, and SSL config
-#   data as soon as the handshake no longer needs them, instead of holding
-#   each (often multiple KB for a real cert chain) for the connection's
-#   whole lifetime.
-# - The shared sdkconfig.defaults only trims SSL_IN_CONTENT_LEN (the
-#   incoming/download side); the outgoing side was left at Kconfig's 4096B
-#   default, far more than an HTTP request's headers need. 512B (matching
-#   Cardputer) gives back 3.5KB per connection at no real cost.
-CONFIG_MBEDTLS_DYNAMIC_FREE_PEER_CERT=y
-CONFIG_MBEDTLS_DYNAMIC_FREE_CONFIG_DATA=y
-CONFIG_MBEDTLS_DYNAMIC_FREE_CA_CERT=y
-CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN=512
-
-# Move Wi-Fi/LWIP and NimBLE heap use to PSRAM, and allow PSRAM task stacks
-# for tasks that never touch flash (e.g. the MP3 decoder).
-CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
-CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y
-CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY=y
-
-# All the fixes above only narrow how much of the app layer's own general
-# heap traffic (memory__malloc() and friends, core/memory/memory.c) spills
-# into internal RAM instead of avoiding it outright - plain malloc()'s
-# prefer-internal/fall-back-to-PSRAM policy (CONFIG_SPIRAM_MALLOC_
-# ALWAYSINTERNAL above) still keeps every small allocation internal. With
-# 8MB of PSRAM sitting mostly idle and internal RAM the one truly scarce
-# resource here, pin that entire traffic class to PSRAM instead - see
-# BRUCE_MEMORY_FORCE_PSRAM's help text for what this does and does not
-# cover (task stacks and DMA buffers are unaffected either way) and its one
-# real cost (PSRAM's higher access latency).
-CONFIG_BRUCE_MEMORY_FORCE_PSRAM=y
-
-# Partition layout: with PSRAM now available, memory__external_alloc()
-# (src/core_sdk/memory.h) prefers PSRAM over the flash-backed "swap"
-# partition, so swap's 512K is mostly wasted space here - use the swap-less
-# layout instead. memory__external_alloc() still falls back straight to
-# internal RAM if a PSRAM allocation doesn't fit and there's no swap
-# partition to fall back to next, per that function's documented order.
-CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 
 # Power: GPIO46 must be driven high at boot to latch the board's peripheral
 # power rail on (legacy PIN_POWER_ON, set HIGH in interface.cpp before

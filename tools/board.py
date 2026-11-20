@@ -6,6 +6,10 @@ Each board under boards/<id>/ contributes:
     Kconfig overrides that need to differ per board.
   - target: the IDF_TARGET chip name (e.g. esp32, esp32s3), one line.
 
+Between the shared and the board's own file come sdkconfig.defaults.psram for
+boards whose sdkconfig.defaults sets CONFIG_SPIRAM=y, and
+sdkconfig.defaults.no-psram for the rest.
+
 The root CMakeLists.txt recognizes the build-board/<id> directory name and
 wires up SDKCONFIG/SDKCONFIG_DEFAULTS for that board automatically (the
 same trick it already uses for build-qemu) - but only once CMake actually
@@ -76,6 +80,14 @@ def discover_boards() -> dict[str, Path]:
     return boards
 
 
+def board_defaults(board: str) -> list[str]:
+    """The sdkconfig defaults files for a board, in order; keep in sync with CMakeLists.txt."""
+    board_file = BOARDS_DIR / board / "sdkconfig.defaults"
+    has_psram = any(line.startswith("CONFIG_SPIRAM=y") for line in board_file.read_text().splitlines())
+    memory = "sdkconfig.defaults.psram" if has_psram else "sdkconfig.defaults.no-psram"
+    return ["sdkconfig.defaults", memory, f"boards/{board}/sdkconfig.defaults"]
+
+
 def board_target(board_dir_name: str) -> str:
     target_file = BOARDS_DIR / board_dir_name / "target"
     if not target_file.is_file():
@@ -141,7 +153,7 @@ def update_vscode_intellisense(target: str) -> None:
 
 def set_default(board: str) -> int:
     target = board_target(board)
-    defaults = f"sdkconfig.defaults;boards/{board}/sdkconfig.defaults"
+    defaults = ";".join(board_defaults(board))
 
     # Wipe the previous default's generated state so set-target regenerates the
     # root sdkconfig purely from these defaults, instead of merging on top of

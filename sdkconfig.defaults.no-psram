@@ -1,0 +1,27 @@
+# Boards without PSRAM: trade Wi-Fi and TLS performance for internal RAM.
+# Applied after sdkconfig.defaults to every board whose
+# boards/<board>/sdkconfig.defaults doesn't set CONFIG_SPIRAM=y (see
+# CMakeLists.txt and tools/board.py).
+
+# Wi-Fi pools sized for interactive use rather than throughput; the AMPDU
+# receive window must not exceed the RX pool.
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=12
+CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=12
+CONFIG_ESP_WIFI_RX_BA_WIN=6
+
+# Management frames are only needed while scanning, associating, or serving
+# clients, so they use a small dynamic pool instead of five static 500-byte
+# buffers held for the whole Wi-Fi session.
+# CONFIG_ESP_WIFI_STATIC_RX_MGMT_BUFFER is not set
+CONFIG_ESP_WIFI_DYNAMIC_RX_MGMT_BUFFER=y
+CONFIG_ESP_WIFI_RX_MGMT_BUF_NUM_DEF=5
+
+# No DTLS, renegotiation, session tickets or PSK (this ESP-IDF's mbedTLS has
+# no TLS below 1.2 to turn off). Incoming records are capped at 8KB and
+# outgoing ones at 512 bytes.
+CONFIG_MBEDTLS_SSL_PROTO_DTLS=n
+CONFIG_MBEDTLS_SSL_RENEGOTIATION=n
+CONFIG_MBEDTLS_SERVER_SSL_SESSION_TICKETS=n
+CONFIG_MBEDTLS_PSK_MODES=n
+CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=8192
+CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN=512

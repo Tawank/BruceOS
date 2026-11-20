@@ -1,3 +1,11 @@
+# Shared by every board. Settings that depend on a chip family live in
+# sdkconfig.defaults.<target>, memory settings in sdkconfig.defaults.psram or
+# sdkconfig.defaults.no-psram (by whether the board has PSRAM), and pins,
+# PSRAM type and flash mode in boards/<board>/sdkconfig.defaults (applied
+# last, so a board can override anything here).
+
+# ---- Flash, partitions and clocks ----
+
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_swap.csv"
 
@@ -17,6 +25,8 @@ CONFIG_SPI_MASTER_ISR_IN_IRAM=y
 CONFIG_SPI_SLAVE_ISR_IN_IRAM=y
 CONFIG_I2C_ISR_IRAM_SAFE=y
 
+# ---- Build ----
+
 # Production build settings: favor compact optimized code and retain warnings
 # without compiling INFO/DEBUG logs into the firmware.
 CONFIG_COMPILER_OPTIMIZATION_SIZE=y
@@ -27,6 +37,8 @@ CONFIG_LOG_DEFAULT_LEVEL_WARN=y
 # though ESP-IDF's default bundle no longer ships it.
 CONFIG_MBEDTLS_CUSTOM_CERTIFICATE_BUNDLE=y
 CONFIG_MBEDTLS_CUSTOM_CERTIFICATE_BUNDLE_PATH="certs/globalsign_root_ca_r1.pem"
+
+# ---- FreeRTOS, memory, libc and the ELF loader ----
 
 # Required by the Core process registry (src/core/process/process.c) for sampled
 # per-process CPU accounting via uxTaskGetSystemState()/TaskStatus_t.
@@ -91,6 +103,8 @@ CONFIG_LIBC_PICOLIBC_NEWLIB_COMPATIBILITY=y
 CONFIG_ELF_LOADER_LIBC_SYMBOLS=n
 CONFIG_ELF_LOADER_ESPIDF_SYMBOLS=n
 
+# ---- Boards and Bluetooth ----
+
 # Every board-specific pin and peripheral choice (display, audio, battery,
 # SD card, buttons, keyboard, IR, NRF24 - see src/Kconfig.projbuild) lives in
 # boards/<board>/sdkconfig.defaults, one file per supported board, selected
@@ -104,6 +118,8 @@ CONFIG_ELF_LOADER_ESPIDF_SYMBOLS=n
 # target (esp32s3 and onward) uses NimBLE instead, since Bluedroid's dual-mode
 # footprint buys nothing there -- see sdkconfig.defaults.esp32/.esp32s3.
 CONFIG_BT_ENABLED=y
+
+# ---- SSH, WebAssembly and audio libraries ----
 
 # wolfSSL/wolfSSH (src/core/ssh/ssh.c): this ESP-IDF v6 mbedTLS port has no PSA
 # crypto support, which permanently disables libssh2's ECDH/curve25519 KEX -
@@ -128,7 +144,6 @@ CONFIG_WAMR_ENABLE_LIBC_BUILTIN=n
 CONFIG_WAMR_ENABLE_LIBC_WASI=n
 CONFIG_WAMR_ENABLE_AOT=n
 CONFIG_WAMR_ENABLE_INTERP=y
-CONFIG_WAMR_INTERP_CLASSIC=y
 CONFIG_WAMR_INTERP_CLASSIC=y
 CONFIG_WAMR_INTERP_LOADER_NORMAL=y
 CONFIG_WAMR_ENABLE_MULTI_MODULE=n

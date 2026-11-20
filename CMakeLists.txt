@@ -23,7 +23,14 @@ elseif(BRUCE_BUILD_DIR_PARENT_NAME STREQUAL "build-board")
     set(BRUCE_BOARD_DEFAULTS "${CMAKE_CURRENT_LIST_DIR}/boards/${BRUCE_BOARD_ID}/sdkconfig.defaults")
     if(EXISTS "${BRUCE_BOARD_DEFAULTS}")
         set(SDKCONFIG "${CMAKE_BINARY_DIR}/sdkconfig")
-        set(SDKCONFIG_DEFAULTS "sdkconfig.defaults;boards/${BRUCE_BOARD_ID}/sdkconfig.defaults")
+        # sdkconfig.defaults.psram or .no-psram, by whether the board sets CONFIG_SPIRAM=y;
+        # keep in sync with tools/board.py.
+        file(STRINGS "${BRUCE_BOARD_DEFAULTS}" BRUCE_BOARD_PSRAM REGEX "^CONFIG_SPIRAM=y")
+        set(BRUCE_MEMORY_DEFAULTS "sdkconfig.defaults.no-psram")
+        if(BRUCE_BOARD_PSRAM)
+            set(BRUCE_MEMORY_DEFAULTS "sdkconfig.defaults.psram")
+        endif()
+        set(SDKCONFIG_DEFAULTS "sdkconfig.defaults;${BRUCE_MEMORY_DEFAULTS};boards/${BRUCE_BOARD_ID}/sdkconfig.defaults")
     endif()
 endif()
 
