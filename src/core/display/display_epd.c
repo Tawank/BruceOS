@@ -58,11 +58,12 @@ static volatile bool s_frozen;                /* Shutdown/suspend: keep showing 
 static volatile uint32_t s_pull_seq;          /* Refresh rounds started... */
 static volatile uint32_t s_done_seq;          /* ...and the last one finished. */
 
-static void display_epd__send(bool data, const uint8_t *bytes, size_t len) {
+static void display_epd__send(bool data, const uint8_t *bytes, size_t len, bool invert) {
     gpio_set_level(EPD__PIN_DC, data);
     while (len > 0) {
         size_t n = len < EPD__CHUNK ? len : EPD__CHUNK;
         memcpy(s_chunk, bytes, n);
+        for (size_t i = 0; invert && i < n; ++i) s_chunk[i] = (uint8_t)~s_chunk[i];
         spi_transaction_t t = {.length = n * 8, .tx_buffer = s_chunk};
         /* Interrupt-driven, so the task sleeps through the ~40 ms frame instead of spinning a core. */
         esp_err_t err = spi_device_transmit(s_spi, &t);
@@ -73,8 +74,8 @@ static void display_epd__send(bool data, const uint8_t *bytes, size_t len) {
 }
 
 static void display_epd__cmd(uint8_t cmd, const uint8_t *data, size_t len) {
-    display_epd__send(false, &cmd, 1);
-    if (len > 0) display_epd__send(true, data, len);
+    display_epd__send(false, &cmd, 1, false);
+    if (len > 0) display_epd__send(true, data, len, false);
 }
 
 /* Returns how long the panel was busy, in ms. */
@@ -103,7 +104,13 @@ static void display_epd__refresh(bool full) {
     display_epd__wait_idle("reset");
 
     display_epd__cmd(0x00, (const uint8_t[]){0x1F, 0x0D}, 2); /* Panel setting: black/white, LUT from OTP. */
-    display_epd__cmd(0x10, s_shown, EPD__BYTES);
+    /* KW mode picks each pixel's waveform from its old and new value, and a
+     * pixel white (or black) in both gets the unchanged-pixel one (UC8253
+     * datasheet, R50H DDX), which leaves partial-refresh ghosts in place. A
+     * full refresh claims the old image was the inverse, so every pixel is
+     * driven through the black-to-white or white-to-black waveform. */
+    display_epd__send(false, &(const uint8_t){0x10}, 1, false);
+    display_epd__send(true, full ? s_sending : s_shown, EPD__BYTES, full);
     display_epd__cmd(0x13, s_sending, EPD__BYTES);
 
     if (!full) {

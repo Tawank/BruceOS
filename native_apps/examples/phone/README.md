@@ -50,15 +50,13 @@ On e-paper the call timer redraws every 15 seconds instead of every second.
 | Answer / decline     | Enter / Back                    | green / red              |
 | Hang up              | Back                            | red                      |
 | Volume, mute         | Up / Down, `m`                  | buttons                  |
-| Minimise             | Back                            |                          |
-| Exit                 | menu > Exit                     | menu > Exit              |
+| Exit                 | Back                            | menu > Exit              |
 
 On the T-Deck keyboard the keypad keys work without Alt: the letter keys
 that show 1-9, `*`, `#` and 0 type those.
 
-Back minimises the app instead of closing it, so it keeps running for
-incoming calls; it ends with menu > Exit or from the task manager. The app
-draws inside the launcher's window frame (`dialog__draw_window()`), so the
+The app does not need to stay open for calls: Core watches the modem and
+starts it when one rings. The app draws inside the launcher's window frame (`dialog__draw_window()`), so the
 top bar with the clock, battery and status icons is the launcher's; the
 signal bars are the cellular status icon there.
 

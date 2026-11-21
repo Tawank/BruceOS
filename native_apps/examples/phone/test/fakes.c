@@ -235,10 +235,6 @@ bool display__is_epaper(void) { return fakes.epaper; }
 bool display__viewport_changed(void) { return false; }
 bool display__await_redraw(void) { return false; }
 bool process__is_background(void) { return false; }
-bruce_result_t runtime__to_background(void) {
-    fakes.backgrounds++;
-    return BRUCE_OK;
-}
 bruce_result_t dialog__draw_window(bruce_dialog_window_area_t *out_area) {
     *out_area = (bruce_dialog_window_area_t){.width = fakes.width, .height = fakes.height};
     return BRUCE_OK;

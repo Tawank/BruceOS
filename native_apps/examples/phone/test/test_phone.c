@@ -159,11 +159,10 @@ static void keypad_letters_map_to_digits(void) {
     CHECK_EQ(phone__keypad_char('h'), 0);
 }
 
-static void back_minimises(void) {
+static void back_exits(void) {
     start();
     phone__key(&app, BRUCE_INPUT_CODE_BACK, 320);
-    CHECK_EQ(fakes.backgrounds, 1);
-    CHECK(app.running);
+    CHECK(!app.running);
 }
 
 static void paper_timer_redraws_every_15_seconds(void) {
@@ -187,5 +186,5 @@ SUITE(
     TEST(touch_answer_and_keypad), TEST(missed_calls_from_the_modem_log_are_saved),
     TEST(phone_is_turned_on_at_start), TEST(lists_navigate_and_call), TEST(new_contact_from_keypad),
     TEST(menu_deletes_a_contact), TEST(keypad_letters_map_to_digits),
-    TEST(paper_timer_redraws_every_15_seconds), TEST(back_minimises)
+    TEST(paper_timer_redraws_every_15_seconds), TEST(back_exits)
 )

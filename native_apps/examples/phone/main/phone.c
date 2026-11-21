@@ -374,8 +374,7 @@ static void phone__key(phone_t *app, int32_t code, int height) {
         return;
     }
     switch (code) {
-        /* Stays running so calls come in; menu > Exit or the task manager ends it. */
-        case BRUCE_INPUT_CODE_BACK: runtime__to_background(); return;
+        case BRUCE_INPUT_CODE_BACK: app->running = false; return;
         case BRUCE_INPUT_CODE_MENU: phone__menu(app); return;
         case BRUCE_INPUT_CODE_LEFT:
             phone__set_tab(app, (ui_tab_t)((app->ui.tab + UI_TAB_COUNT - 1) % UI_TAB_COUNT));
