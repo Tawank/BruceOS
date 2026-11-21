@@ -8,12 +8,17 @@
 #include "freertos/FreeRTOS.h" // IWYU pragma: export
 #include "freertos/task.h"
 
+#include "core/audio/audio_codec_lib.h"
+#include "core/lib/lib.h"
 #include "core/process/process.h"
+#include "core/storage/storage.h"
 #include "core_sdk/audio.h"
 #include "core_sdk/process.h"
 #include "core_sdk/storage.h"
+#include "esp_g711_dec.h"
 #include "esp_heap_caps.h"
 #include "esp_system.h"
+#include "sdkconfig.h"
 
 bool selftest__run_audio_validation_case(void) {
     bool ok = audio__tone(0, 100, false) == BRUCE_ERR_INVALID_ARGUMENT &&
@@ -355,6 +360,90 @@ bool selftest__run_audio_file_wav_leak_case(void) {
     (void)storage__remove(path);
     return ok;
 }
+
+/* Formats beyond WAV/MP3 need their codec library in /lib; selftest runs
+ * with none, so they are unsupported and audio__file_play() says so. */
+bool selftest__run_audio_codec_lib_case(void) {
+    static const char flac_path[] = "/selftest_codec.flac";
+    lib_handle_t *lib = NULL;
+    const void *api = NULL;
+    bool ok = audio__file_supported("/a.mp3") && audio__file_supported("/music/A.WAV") &&
+              !audio__file_supported("/a.txt") && !audio__file_supported("/a") &&
+              !audio__file_supported(NULL);
+    ok = ok && lib__open("../aac", &lib, &api) == BRUCE_ERR_INVALID_ARGUMENT;
+    ok = ok && lib__open("selftest_none", &lib, &api) == BRUCE_ERR_NOT_FOUND && lib == NULL && api == NULL;
+    ok = ok && !lib__exists("selftest_none") && !audio__file_supported("/a.flac");
+    bruce_file_id_t file;
+    uint32_t flags = BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE | BRUCE_STORAGE_OPEN_TRUNCATE;
+    ok = ok && storage__open(flac_path, flags, &file) == BRUCE_OK;
+    if (ok) {
+        size_t written = 0;
+        (void)storage__write(file, "fLaC", 4, &written);
+        storage__close(file);
+        ok = audio__file_play(flac_path) == BRUCE_ERR_UNSUPPORTED;
+        (void)storage__remove(flac_path);
+    }
+    printf("[selftest] audio/codec-lib: %s\n", ok ? "OK" : "FAIL");
+    return ok;
+}
+
+#if CONFIG_BRUCE_QEMU_TEST_MODE
+extern const uint8_t _binary_selftest_g711_lib_start[];
+extern const uint8_t _binary_selftest_g711_lib_end[];
+
+static bool audio_test__write_blob(const char *path, const uint8_t *data, size_t size) {
+    bruce_file_id_t file;
+    uint32_t flags = BRUCE_STORAGE_OPEN_WRITE | BRUCE_STORAGE_OPEN_CREATE | BRUCE_STORAGE_OPEN_TRUNCATE;
+    if (storage__open(path, flags, &file) != BRUCE_OK) return false;
+    size_t written = 0;
+    bool ok = storage__write(file, data, size, &written) == BRUCE_OK && written == size;
+    storage__close(file);
+    return ok;
+}
+
+/* Loads the real G.711 codec library (embedded in QEMU builds, which have no
+ * PSRAM, so it runs from swap) and decodes mu-law with it. */
+bool selftest__run_audio_codec_lib_load_case(void) {
+    static const char path[] = "/lib/g711_" CONFIG_IDF_TARGET ".so";
+    (void)storage__mkdir_internal("/lib");
+    bool ok = audio_test__write_blob(
+        path,
+        _binary_selftest_g711_lib_start,
+        (size_t)(_binary_selftest_g711_lib_end - _binary_selftest_g711_lib_start)
+    );
+    lib_handle_t *lib = NULL;
+    lib_handle_t *again = NULL;
+    const void *api = NULL;
+    const void *api_again = NULL;
+    ok = ok && lib__exists("g711") && lib__open("g711", &lib, &api) == BRUCE_OK;
+    const audio_codec_lib_t *codec = api;
+    ok = ok && codec->abi == AUDIO_CODEC_LIB_ABI && codec->decoder_count == 2 &&
+         codec->decoders[1].type == ESP_AUDIO_TYPE_G711U;
+    ok = ok && lib__open("g711", &again, &api_again) == BRUCE_OK && api_again == api;
+    lib__close(again);
+    int16_t pcm[3] = {1, 1, 1};
+    if (ok) {
+        const esp_audio_dec_ops_t *ops = &codec->decoders[1].ops;
+        esp_g711_dec_cfg_t cfg = ESP_G711_DEC_CONFIG_DEFAULT();
+        void *decoder = NULL;
+        uint8_t mu_law[3] = {0xFF, 0x80, 0x00};
+        esp_audio_dec_in_raw_t raw = {.buffer = mu_law, .len = sizeof(mu_law)};
+        esp_audio_dec_out_frame_t frame = {.buffer = (uint8_t *)pcm, .len = sizeof(pcm)};
+        esp_audio_dec_info_t info = {0};
+        ok = ops->open(&cfg, sizeof(cfg), &decoder) == ESP_AUDIO_ERR_OK &&
+             ops->decode(decoder, &raw, &frame, &info) == ESP_AUDIO_ERR_OK &&
+             frame.decoded_size == sizeof(pcm);
+        if (decoder != NULL) ops->close(decoder);
+    }
+    ok = ok && pcm[0] == 0 && pcm[1] > 30000 && pcm[2] < -30000;
+    lib__close(lib);
+    (void)storage__remove(path);
+    printf(
+        "[selftest] audio/codec-lib-load: %s (pcm=%d,%d,%d)\n", ok ? "OK" : "FAIL", pcm[0], pcm[1], pcm[2]
+    );
+    return ok;
+}
+#endif
 
 bool selftest__run_audio_file_mp3_leak_case(void) {
     static const char path[] = "/selftest_audio_leak.mp3";

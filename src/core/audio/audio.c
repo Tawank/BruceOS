@@ -6,7 +6,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "audio_codec_lib.h"
 #include "core/config/config.h"
+#include "core/lib/lib.h"
 #include "core/process/process.h"
 #include "core_sdk/memory.h"
 #include "core_sdk/runtime.h"
@@ -16,6 +18,7 @@
 #include "freertos/task.h"
 #include "sdkconfig.h"
 
+#include "esp_audio_codec_version.h"
 #include "esp_audio_simple_player.h"
 #include "esp_gmf_err.h"
 #include "esp_gmf_oal_mem.h"
@@ -1076,6 +1079,42 @@ static bruce_result_t audio__file_play_blocking(const char *path, uint32_t token
     return BRUCE_OK;
 }
 
+/* A format decoded by esp_audio_simple_player: the extension it goes by in
+ * the player's URI, and the /lib codec libraries carrying its decoders (MP3
+ * is built in; any one present library is enough). Only MP3 and ADTS AAC
+ * resync from an arbitrary byte, so other formats seek by decoding from the
+ * start and dropping the audio before the target. */
+#define AUDIO__CODEC_LIBS_MAX 3
+
+typedef struct {
+    const char *extension;
+    const char *uri_extension;
+    const char *libs[AUDIO__CODEC_LIBS_MAX];
+    bool byte_seek;
+} audio__codec_t;
+
+static const audio__codec_t s_audio_codecs[] = {
+    {"mp3",   "mp3",   {NULL},                   true },
+    {"aac",   "aac",   {"aac"},                  true },
+    {"m4a",   "m4a",   {"aac", "alac"},          false},
+    {"mp4",   "m4a",   {"aac", "alac"},          false},
+    {"m4b",   "m4a",   {"aac", "alac"},          false},
+    {"ts",    "ts",    {"aac"},                  false},
+    {"flac",  "flac",  {"flac"},                 false},
+    {"ogg",   "ogg",   {"vorbis", "opus"},       false},
+    {"oga",   "ogg",   {"vorbis", "opus"},       false},
+    {"opus",  "ogg",   {"opus"},                 false},
+    {"amr",   "amr",   {"amrnb"},                false},
+    {"awb",   "awb",   {"amrwb"},                false},
+    {"sbc",   "sbc",   {"sbc"},                  false},
+    {"lc3",   "lc3",   {"lc3"},                  false},
+    {"g722",  "g722",  {"g722"},                 false},
+    {"g711a", "g711a", {"g711"},                 false},
+    {"g711u", "g711u", {"g711"},                 false},
+    /* WAVs audio__wav_open() can't read: ADPCM, A-law/mu-law, float. */
+    {"wav",   "wav",   {"adpcm", "g711", "pcm"}, false},
+};
+
 /* Context for audio__file_play_process_entry()/audio__mp3_play_process_entry()
  * below -- a heap copy of the path (the caller's own stack/path buffer
  * won't outlive this call once audio__file_play() returns) plus the open
@@ -1087,6 +1126,7 @@ static bruce_result_t audio__file_play_blocking(const char *path, uint32_t token
 typedef struct {
     char *path;
     uint32_t token;
+    const audio__codec_t *codec;
 } audio__file_play_context_t;
 
 static int audio__file_play_process_entry(void *context) {
@@ -1300,7 +1340,8 @@ static int audio__mp3_event_cb(esp_asp_event_pkt_t *event, void *ctx) {
     return 0;
 }
 
-static bruce_result_t audio__mp3_play_blocking(const char *path, uint32_t token) {
+static bruce_result_t
+audio__mp3_play_blocking(const char *path, uint32_t token, const audio__codec_t *codec) {
     bruce_file_id_t file;
     if (storage__open(path, BRUCE_STORAGE_OPEN_READ, &file) != BRUCE_OK) {
         ESP_LOGE(TAG, "mp3: could not open %s", path);
@@ -1375,7 +1416,11 @@ static bruce_result_t audio__mp3_play_blocking(const char *path, uint32_t token)
      * seek to) just breaks out below instead of looping again. */
     size_t start_byte_offset = 0;
     uint32_t position_base_ms = 0;
+    /* Formats without byte seek restart from the start; audio before this is dropped. */
+    uint32_t skip_until_ms = 0;
     bool first_session = true;
+    char uri[32];
+    snprintf(uri, sizeof(uri), "raw://local/audio.%s", codec->uri_extension);
 
     for (;;) {
         if (storage__seek(file, (int64_t)start_byte_offset, SEEK_SET, NULL) != BRUCE_OK) break;
@@ -1464,7 +1509,7 @@ static bruce_result_t audio__mp3_play_blocking(const char *path, uint32_t token)
          * in the serial log has the actual free-heap number next to it instead
          * of requiring another guess at how much headroom the pipeline needed. */
         ESP_LOGI(TAG, "mp3: free heap before run(): %u bytes", (unsigned)esp_get_free_heap_size());
-        esp_gmf_err_t run_result = esp_audio_simple_player_run(handle, "raw://local/audio.mp3", NULL);
+        esp_gmf_err_t run_result = esp_audio_simple_player_run(handle, uri, NULL);
         if (run_result != ESP_GMF_ERR_OK) {
             ESP_LOGE(TAG, "mp3: esp_audio_simple_player_run() failed: %d", (int)run_result);
             pipe.finished = true;
@@ -1554,10 +1599,11 @@ static bruce_result_t audio__mp3_play_blocking(const char *path, uint32_t token)
             xSemaphoreGive(pipe.lock);
 
             if (want > 0) {
-                audio__file_apply_volume_and_track_level(transfer, want, 2);
                 played_frames_this_session += (uint32_t)want;
                 s_mp3_position_ms = position_base_ms + (uint32_t)(((uint64_t)played_frames_this_session * 1000u) /
                                                                    AUDIO__MP3_OUTPUT_SAMPLE_RATE);
+                if (s_mp3_position_ms < skip_until_ms) continue;
+                audio__file_apply_volume_and_track_level(transfer, want, 2);
                 /* Gated on >300ms decoded so the ratio has settled past the
                  * input ring's own priming (otherwise the first update or
                  * two, with very little decoded time in the denominator,
@@ -1622,6 +1668,13 @@ static bruce_result_t audio__mp3_play_blocking(const char *path, uint32_t token)
          * decoded by the input ring's own lookahead -- same order of
          * imprecision already accepted above) instead of restarting from
          * this session's original start offset and losing progress. */
+        if (!codec->byte_seek) {
+            start_byte_offset = 0;
+            position_base_ms = 0;
+            skip_until_ms = restart_target_ms;
+            first_session = false;
+            continue;
+        }
         if (s_mp3_bitrate_bps == 0) {
             start_byte_offset = source.total_read;
             position_base_ms = s_mp3_position_ms;
@@ -1654,18 +1707,88 @@ done:
     return BRUCE_OK;
 }
 
+typedef struct {
+    lib_handle_t *libs[AUDIO__CODEC_LIBS_MAX];
+    const audio_codec_lib_t *apis[AUDIO__CODEC_LIBS_MAX];
+} audio__codec_libs_t;
+
+/* Loads the codec's /lib libraries and registers their decoders. The
+ * libraries share esp_audio_codec's structs, so one built from another
+ * version is refused. */
+static bruce_result_t audio__codec_libs_load(const audio__codec_t *codec, audio__codec_libs_t *out) {
+    memset(out, 0, sizeof(*out));
+    if (codec->libs[0] == NULL) return BRUCE_OK;
+    bool any = false;
+    for (size_t i = 0; i < AUDIO__CODEC_LIBS_MAX && codec->libs[i] != NULL; ++i) {
+        lib_handle_t *lib = NULL;
+        const void *api = NULL;
+        if (lib__open(codec->libs[i], &lib, &api) != BRUCE_OK) continue;
+        const audio_codec_lib_t *codec_lib = api;
+        if (codec_lib->abi != AUDIO_CODEC_LIB_ABI ||
+            codec_lib->decoder_count > AUDIO_CODEC_LIB_DECODERS_MAX ||
+            strcmp(codec_lib->codec_version(), esp_audio_codec_get_version()) != 0) {
+            ESP_LOGE(TAG, "codec library %s does not match this firmware", codec->libs[i]);
+            lib__close(lib);
+            continue;
+        }
+        for (size_t d = 0; d < codec_lib->decoder_count; ++d) {
+            esp_audio_dec_unregister(codec_lib->decoders[d].type);
+            (void)esp_audio_dec_register(codec_lib->decoders[d].type, &codec_lib->decoders[d].ops);
+        }
+        out->libs[i] = lib;
+        out->apis[i] = codec_lib;
+        any = true;
+    }
+    return any ? BRUCE_OK : BRUCE_ERR_UNSUPPORTED;
+}
+
+static void audio__codec_libs_unload(audio__codec_libs_t *libs) {
+    for (size_t i = 0; i < AUDIO__CODEC_LIBS_MAX; ++i) {
+        if (libs->libs[i] == NULL) continue;
+        for (size_t d = 0; d < libs->apis[i]->decoder_count; ++d) {
+            esp_audio_dec_unregister(libs->apis[i]->decoders[d].type);
+        }
+        lib__close(libs->libs[i]);
+    }
+}
+
 static int audio__mp3_play_process_entry(void *context) {
     audio__file_play_context_t *ctx = context;
-    (void)audio__mp3_play_blocking(ctx->path, ctx->token);
+    audio__codec_libs_t libs;
+    bruce_result_t loaded = audio__codec_libs_load(ctx->codec, &libs);
+    if (loaded != BRUCE_OK) {
+        audio__file_publish_open_result(ctx->token, loaded);
+        return 0;
+    }
+    (void)audio__mp3_play_blocking(ctx->path, ctx->token, ctx->codec);
+    audio__codec_libs_unload(&libs);
     return 0;
 }
 
-static bool audio__path_has_mp3_extension(const char *path) {
-    size_t length = strlen(path);
-    if (length < 4) return false;
-    const char *suffix = path + length - 4;
-    return (suffix[0] == '.') && (tolower((unsigned char)suffix[1]) == 'm') &&
-           (tolower((unsigned char)suffix[2]) == 'p') && (tolower((unsigned char)suffix[3]) == '3');
+static const audio__codec_t *audio__codec_for_path(const char *path) {
+    const char *dot = strrchr(path, '.');
+    if (dot == NULL || strchr(dot, '/') != NULL) return NULL;
+    for (size_t i = 0; i < sizeof(s_audio_codecs) / sizeof(s_audio_codecs[0]); ++i) {
+        if (strcasecmp(dot + 1, s_audio_codecs[i].extension) == 0) return &s_audio_codecs[i];
+    }
+    return NULL;
+}
+
+/* Whether this build can decode the codec: built in, or a library present. */
+static bool audio__codec_available(const audio__codec_t *codec) {
+    if (codec->libs[0] == NULL) return true;
+    for (size_t i = 0; i < AUDIO__CODEC_LIBS_MAX && codec->libs[i] != NULL; ++i) {
+        if (lib__exists(codec->libs[i])) return true;
+    }
+    return false;
+}
+
+bool audio__file_supported(const char *path) {
+    if (path == NULL) return false;
+    const char *dot = strrchr(path, '.');
+    if (dot != NULL && strcasecmp(dot, ".wav") == 0) return true;
+    const audio__codec_t *codec = audio__codec_for_path(path);
+    return codec != NULL && audio__codec_available(codec);
 }
 
 bruce_result_t audio__file_play(const char *path) {
@@ -1682,16 +1805,17 @@ bruce_result_t audio__file_play(const char *path) {
     audio__wav_t probe;
     bool is_wav = audio__wav_open(path, &probe);
     if (is_wav) storage__close(probe.file);
-    bool is_mp3 = false;
-    if (!is_wav && audio__path_has_mp3_extension(path)) {
+    const audio__codec_t *codec = is_wav ? NULL : audio__codec_for_path(path);
+    bool decodable = false;
+    if (codec != NULL && audio__codec_available(codec)) {
         bruce_file_id_t probe_file;
         if (storage__open(path, BRUCE_STORAGE_OPEN_READ, &probe_file) == BRUCE_OK) {
             uint64_t size = 0;
-            is_mp3 = storage__seek(probe_file, 0, SEEK_END, &size) == BRUCE_OK && size > 0;
+            decodable = storage__seek(probe_file, 0, SEEK_END, &size) == BRUCE_OK && size > 0;
             storage__close(probe_file);
         }
     }
-    if (!is_wav && !is_mp3) return BRUCE_ERR_UNSUPPORTED;
+    if (!is_wav && !decodable) return BRUCE_ERR_UNSUPPORTED;
 
     audio__file_play_context_t *context = malloc(sizeof(*context));
     if (context == NULL) return BRUCE_ERR_NO_MEMORY;
@@ -1701,6 +1825,7 @@ bruce_result_t audio__file_play(const char *path) {
         return BRUCE_ERR_NO_MEMORY;
     }
     memcpy(context->path, path, path_length + 1);
+    context->codec = codec;
 
     audio__ensure_mutex();
     xSemaphoreTake(s_audio_mutex, portMAX_DELAY);

@@ -21,10 +21,10 @@
 #include "core_sdk/stdio.h"
 #include "core_sdk/storage.h"
 
-/* Simple GUI music player: plays one .wav/.mp3 file at a time through
- * core/audio's audio__file_play() and steps through the other .wav/.mp3
- * files in the same folder for Prev/Next, like a typical single-folder
- * music player rather than a real playlist manager. */
+/* Simple GUI music player: plays one audio file at a time through
+ * core/audio's audio__file_play() and steps through the other playable
+ * files (audio__file_supported()) in the same folder for Prev/Next, like a
+ * typical single-folder music player rather than a real playlist manager. */
 
 #define PLAYER_APP__SEEK_STEP_MS 5000u
 #define PLAYER_APP__LONG_PRESS_MS 500u
@@ -58,11 +58,7 @@ typedef struct {
     size_t current;
 } player__playlist_t;
 
-static bool player__is_supported_path(const char *path) {
-    if (path == NULL) return false;
-    const char *extension = strrchr(path, '.');
-    return extension != NULL && (strcasecmp(extension, ".wav") == 0 || strcasecmp(extension, ".mp3") == 0);
-}
+static bool player__is_supported_path(const char *path) { return audio__file_supported(path); }
 
 /* Resolves `path` against $PWD the same way the shell's own builtins do,
  * since this can be run as a plain command with a relative argument (e.g.
@@ -475,8 +471,10 @@ player__draw(const char *title, player__playlist_t *playlist, bool paused, int f
 int player_app_main(int argc, char **argv) {
     ArgParser *parser = ap_new_parser();
     if (parser == NULL) return BRUCE_ERR_NO_MEMORY;
-    ap_set_helptext(parser, "Play a local .wav or .mp3 file with basic playback controls.");
-    ap_add_optional_arg(parser, "path", "Path to a .wav or .mp3 file");
+    ap_set_helptext(parser, "Play a local audio file with basic playback controls.");
+    ap_add_optional_arg(
+        parser, "path", "Path to an audio file (.wav, .mp3, or a format with a codec in /lib)"
+    );
     ap_unknown_options_as_args(parser);
     ap_allow_extra_args(parser);
     ap_first_pos_arg_ends_option_parsing(parser);
@@ -499,7 +497,9 @@ int player_app_main(int argc, char **argv) {
         return BRUCE_OK; /* cancelled */
     }
     if (!player__is_supported_path(path)) {
-        (void)dialog__message(BRUCE_DIALOG_ERROR, "Player", "Only .wav and .mp3 files are supported.");
+        (void)dialog__message(
+            BRUCE_DIALOG_ERROR, "Player", "Unsupported file type, or its codec library is missing from /lib."
+        );
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
 
@@ -523,9 +523,10 @@ int player_app_main(int argc, char **argv) {
     if (result != BRUCE_OK) {
         player__free_playlist(&playlist);
         (void)dialog__message(
-            BRUCE_DIALOG_ERROR, "Player",
-            result == BRUCE_ERR_UNSUPPORTED ? "Unsupported file (only 8/16-bit PCM .wav or .mp3)."
-                                             : "Could not play this file."
+            BRUCE_DIALOG_ERROR,
+            "Player",
+            result == BRUCE_ERR_UNSUPPORTED ? "Unsupported file, or its codec library is missing from /lib."
+                                            : "Could not play this file."
         );
         return result;
     }

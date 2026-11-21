@@ -2979,6 +2979,27 @@ _Not permission-gated._
 
 ---
 
+## audio__file_supported()
+
+```c
+bool audio__file_supported(const char *path);
+```
+
+Whether audio__file_play() can decode this file type, judged by its extension: WAV and MP3 always, the rest when their codec library is in /lib.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `path` | `const char *` |  |
+
+### Returns
+
+`bool`
+
+
+---
+
 ## audio__file_play()
 
 ```c
@@ -2988,7 +3009,10 @@ bruce_result_t audio__file_play(const char *path);
 Starts playing a local audio file in the background and returns immediately.
 
 WAV (8- or 16-bit PCM, mono or stereo, any sample rate -- resampled to
-audio__stream_sample_rate()) and MP3 are understood; anything else returns
+audio__stream_sample_rate()) and MP3 are built in. AAC, M4A, TS, FLAC,
+Ogg Vorbis/Opus, AMR, SBC, LC3, G.711, G.722 and other WAV codecs decode
+through codec libraries in /lib (see core/lib), loaded for the length of
+playback; without the library the file is unsupported. Anything else returns
 BRUCE_ERR_UNSUPPORTED without side effects, checked synchronously before
 this returns (so a bad path or unsupported file is reported right away,
 not discovered later in the background). A valid file is then handed off

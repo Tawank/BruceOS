@@ -168,11 +168,11 @@ CONFIG_ESP_AUDIO_SIMPLE_PLAYER_BIT_CVT_EN=y
 CONFIG_AUDIO_SIMPLE_PLAYER_BIT_CVT_DEST_16BIT=y
 
 # esp_audio_codec (gmf_audio's dependency) defaults every decoder, every
-# encoder, and every simple-decoder container to y -- MP3 is the only one
-# audio.c's MP3 path actually uses (WAV goes through our own
-# audio__wav_open(), never through esp_audio_simple_player's own container
-# support), and we never encode/record/mux anything at all. Dropping the
-# rest is most of the flash cost of adding MP3 support in the first place.
+# encoder, and every simple-decoder container to y. Only MP3 is built in;
+# the other decoders are libraries in /lib that core/audio/audio.c loads
+# while a file needs them (tools/build_libs.py builds them), so they stay off
+# here. The container parsers (WAV for what audio__wav_open() can't read,
+# M4A, TS, OGG) are small and stay in. Nothing is encoded or muxed.
 CONFIG_AUDIO_DECODER_AAC_SUPPORT=n
 CONFIG_AUDIO_DECODER_MP3_SUPPORT=y
 CONFIG_AUDIO_DECODER_G711_SUPPORT=n
@@ -187,10 +187,10 @@ CONFIG_AUDIO_DECODER_PCM_SUPPORT=n
 CONFIG_AUDIO_DECODER_SBC_SUPPORT=n
 CONFIG_AUDIO_DECODER_LC3_SUPPORT=n
 CONFIG_AUDIO_DECODER_G722_SUPPORT=n
-CONFIG_AUDIO_SIMPLE_DEC_WAV_SUPPORT=n
-CONFIG_AUDIO_SIMPLE_DEC_M4A_SUPPORT=n
-CONFIG_AUDIO_SIMPLE_DEC_TS_SUPPORT=n
-CONFIG_AUDIO_SIMPLE_DEC_OGG_SUPPORT=n
+CONFIG_AUDIO_SIMPLE_DEC_WAV_SUPPORT=y
+CONFIG_AUDIO_SIMPLE_DEC_M4A_SUPPORT=y
+CONFIG_AUDIO_SIMPLE_DEC_TS_SUPPORT=y
+CONFIG_AUDIO_SIMPLE_DEC_OGG_SUPPORT=y
 CONFIG_AUDIO_ENCODER_AAC_SUPPORT=n
 CONFIG_AUDIO_ENCODER_G711_SUPPORT=n
 CONFIG_AUDIO_ENCODER_AMRNB_SUPPORT=n

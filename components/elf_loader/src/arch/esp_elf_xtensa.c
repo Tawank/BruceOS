@@ -140,6 +140,9 @@ int esp_elf_arch_relocate(esp_elf_t *elf, const elf32_rela_t *rela,
 
     assert(elf && rela);
 
+    /* R_XTENSA_NONE: a padding entry ld can leave in .rela.dyn. */
+    if (ELF_R_TYPE(rela->info) == R_XTENSA_NONE) return 0;
+
     where = (uint32_t *)esp_elf_map_reloc(elf, rela->offset);
     if (!where) {
         /* elf->ptext == NULL here normally means "out of memory, this

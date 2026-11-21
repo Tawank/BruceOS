@@ -153,14 +153,30 @@
     },
     {
       "description": "Ogg audio",
-      "extensions": [".ogg"],
+      "program": "player",
+      "extensions": [".ogg", ".oga", ".opus"],
       "mimetypes": ["audio/ogg"],
       "icon": "file-music"
     },
     {
       "description": "FLAC audio",
+      "program": "player",
       "extensions": [".flac"],
       "mimetypes": ["audio/flac"],
+      "icon": "file-music"
+    },
+    {
+      "description": "AAC audio",
+      "program": "player",
+      "extensions": [".aac", ".m4a", ".m4b"],
+      "mimetypes": ["audio/aac", "audio/mp4"],
+      "icon": "file-music"
+    },
+    {
+      "description": "AMR audio",
+      "program": "player",
+      "extensions": [".amr", ".awb"],
+      "mimetypes": ["audio/amr", "audio/amr-wb"],
       "icon": "file-music"
     },
     {

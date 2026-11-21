@@ -597,6 +597,41 @@ The allowlist also includes the narrow set of GCC floating-point helper symbols
 needed by freestanding C applications. These resolve to the firmware's libgcc
 implementation and are compiler runtime support, not ESP-IDF or Core APIs.
 
+## Core libraries in /lib
+
+Code too big to keep in the firmware, but used only now and then, lives in
+`/lib` as ELF shared objects that Core loads on demand (`core/lib`):
+`lib__open(name)` loads `/lib/<name>_<chip>.so` (or `/lib/<name>.so`) with
+the ELF loader, or shares the copy already loaded, and `lib__close()` unloads
+it with its last user. It goes into executable PSRAM, or, where the ELF
+loader can't run code from PSRAM, into swap through the same
+`ext_mem_loader__elf_xip_ops` the app loader uses. Swap belongs to a
+process, so a library in swap is only shared within the process that loaded
+it (another gets `BRUCE_ERR_BUSY`), and every open is a resource of its
+process, closed if the process exits first. Process teardown runs those
+cleanups with the registry locked, so the list lock is never held across a
+registry call; a separate lock serializes loads. A library is Core code, not an app: it imports only the names in
+`core/lib/lib_symbols.c` (a little libc and logging), resolved by the ELF
+loader's resolver while `lib__resolving()`, and exports one entry point,
+`lib_main(void)`, whose return value is that kind of library's API.
+
+The audio codec libraries are the first kind (`core/audio/audio_codec_lib.h`).
+`tools/build_libs.py`, run by the firmware build, makes one per decoder of
+Espressif's prebuilt `libesp_audio_codec.a` into `<build>/lib`: AAC, ALAC,
+FLAC, Vorbis, Opus, AMR-NB/WB, ADPCM, PCM, G.711, G.722, SBC and LC3. It
+links each through one relocatable object whose symbols are made local
+(hiding them with `--exclude-libs` crashes ld 2.45), with writable `.rodata`
+since some codecs keep pointer tables there and the loader copies every
+section to RAM anyway, and fails the build if a library imports a name the
+table lacks. MP3 stays built in. `audio__file_play()` picks the format by
+extension, loads the libraries it needs (any present one is enough, e.g.
+Vorbis or Opus for `.ogg`), registers their decoders with
+`esp_audio_dec_register()` for the length of playback and refuses a library
+built from another `esp_audio_codec` version. The M4A, TS, OGG and WAV
+container parsers are built in. Only MP3 and ADTS AAC seek by byte offset;
+other formats seek by decoding from the start and dropping audio before the
+target. `audio__file_supported()` tells apps (the player) what plays.
+
 ## JavaScript contract
 
 The built-in JavaScript loader module evaluates the script and owns its

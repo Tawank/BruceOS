@@ -13,6 +13,8 @@
 #include "elf_loader_internal.h"
 #include "esp_elf.h"
 
+#include "core/ext_mem_loader/ext_mem_loader_elf.h"
+#include "core/lib/lib.h"
 #include "core/process/process.h"
 #include "core_sdk/app_runner.h"
 #include "core_sdk/dialog.h"
@@ -92,6 +94,8 @@ typedef struct {
 extern const struct esp_elfsym g_bruce_sdk_elfsyms[];
 
 static uintptr_t elf_loader__find_symbol(const char *sym_name) {
+    /* A library in /lib resolves from Core's own table, not the app SDK. */
+    if (lib__resolving()) return lib__find_symbol(sym_name);
     const struct esp_elfsym *syms = g_bruce_sdk_elfsyms;
     while (syms->name != NULL) {
         if (strcmp(syms->name, sym_name) == 0) { return (uintptr_t)syms->sym; }
@@ -167,48 +171,6 @@ static int elf_loader__entry(void *context) {
     process_registry__set_sandbox_exit_target(NULL);
     return result;
 }
-
-#if !CONFIG_ELF_LOADER_LOAD_PSRAM
-static int elf_loader__xip_allocate(
-    void *context, size_t size, const uint8_t **instruction, const uint8_t **data, uint32_t *handle
-) {
-    elf_loader_process_ctx_t *ctx = context;
-    bruce_result_t result = ext_mem_loader__allocate_xip(size, &ctx->xip);
-    if (result != BRUCE_OK) return result == BRUCE_ERR_NO_MEMORY ? -ENOMEM : -ENOSPC;
-    *instruction = ctx->xip.instruction;
-    *data = ctx->xip.data;
-    *handle = ctx->xip.memory.handle;
-    return 0;
-}
-
-static int
-elf_loader__xip_write(void *context, uint32_t handle, size_t offset, const void *data, size_t size) {
-    elf_loader_process_ctx_t *ctx = context;
-    if (ctx->xip.memory.handle != handle) { return -EINVAL; }
-    bruce_result_t result = ext_mem_loader__write_xip(&ctx->xip, offset, data, size);
-    if (result != BRUCE_OK) {
-        printf(
-            "[elf_loader] %s: xip write failed at offset %u size %u (result=%d)\n",
-            ctx->permission_key,
-            (unsigned)offset,
-            (unsigned)size,
-            (int)result
-        );
-    }
-    return result == BRUCE_OK ? 0 : (result == BRUCE_ERR_INVALID_ARGUMENT ? -EINVAL : -EIO);
-}
-
-static void elf_loader__xip_release(void *context, uint32_t handle) {
-    elf_loader_process_ctx_t *ctx = context;
-    if (ctx->xip.memory.handle == handle) (void)ext_mem_loader__release_xip(&ctx->xip);
-}
-
-static const esp_elf_xip_ops_t s_xip_ops = {
-    .allocate = elf_loader__xip_allocate,
-    .write = elf_loader__xip_write,
-    .release = elf_loader__xip_release,
-};
-#endif
 
 /* Relaunches `path` inside a GUI terminal window. The terminal re-quotes each
  * of its startup arguments, so the path and `arg` are handed over as separate
@@ -391,7 +353,8 @@ static int elf_loader__open(
          * esp_elf_deinit(), which runs from this process's context cleanup. */
         relocate_result = esp_elf_relocate(&ctx->elf, image.data);
 #else
-        relocate_result = esp_elf_relocate_xip(&ctx->elf, image.data, image.size, &s_xip_ops, ctx);
+        relocate_result =
+            esp_elf_relocate_xip(&ctx->elf, image.data, image.size, &ext_mem_loader__elf_xip_ops, &ctx->xip);
 #endif
     }
     bruce_result_t release_result = ext_mem_loader__release_image(&image);

@@ -5,6 +5,7 @@
 build/
 build-qemu/
 build-board/
+build-lib/
 native_apps/build_modules/
 managed_components/
 BrucePIO_legacy/

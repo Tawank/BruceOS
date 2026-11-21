@@ -9,3 +9,7 @@ their final flash-mapped addresses, commits those sections through caller-owned
 storage callbacks, and retains the mapping until `esp_elf_deinit()`. Writable
 sections continue to use RAM. The original `esp_elf_relocate()` API remains
 RAM-backed.
+
+BruceOS also skips `R_XTENSA_NONE` relocations, which ld can leave as
+padding in a shared object's `.rela.dyn` (seen in the LC3 codec library
+built by `tools/build_libs.py`).

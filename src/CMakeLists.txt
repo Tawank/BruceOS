@@ -125,6 +125,8 @@ idf_component_register(SRCS
                     "core/ext_mem_loader/ext_mem_loader.c"
                     "core/filetype/filetype.c"
                      "core/launcher/launcher.c"
+                    "core/lib/lib.c"
+                    "core/lib/lib_symbols.c"
                      "core/launcher/launcher_tree.c"
                      "core/manifest/manifest.c"
                     "core/memory/memory.c"
@@ -816,3 +818,28 @@ endforeach()
 #   future modules/privileged/* module inherits the same Core-private
 #   exemption for the same class of reason - a built-in that legitimately
 #   needs to see something the public SDK deliberately hides from apps.
+
+# Audio codec libraries for /lib (core/lib, core/audio/audio_codec_lib.h),
+# built from esp_audio_codec's prebuilt archive into <build>/lib.
+# tools/build_libs.py links with Xtensa options.
+if(CONFIG_IDF_TARGET_ARCH_XTENSA)
+    idf_build_get_property(bruce_python PYTHON)
+    idf_build_get_property(bruce_build_dir BUILD_DIR)
+    idf_build_get_property(bruce_target IDF_TARGET)
+    idf_component_get_property(bruce_audio_codec_dir espressif__esp_audio_codec COMPONENT_DIR)
+    add_custom_target(bruce_libs ALL
+        COMMAND ${bruce_python} ${CMAKE_CURRENT_LIST_DIR}/../tools/build_libs.py
+                --cc ${CMAKE_C_COMPILER}
+                --codec-dir ${bruce_audio_codec_dir}
+                --target ${bruce_target}
+                --include ${CMAKE_CURRENT_LIST_DIR}/core/audio
+                --symbols ${CMAKE_CURRENT_LIST_DIR}/core/lib/lib_symbols.c
+                --out ${bruce_build_dir}/lib
+        BYPRODUCTS ${bruce_build_dir}/lib/g711_${bruce_target}.so
+        VERBATIM)
+    # QEMU selftest loads a real library: the small G.711 one, embedded.
+    if(CONFIG_BRUCE_QEMU_TEST_MODE)
+        target_add_binary_data(${COMPONENT_LIB} ${bruce_build_dir}/lib/g711_${bruce_target}.so BINARY
+                               RENAME_TO selftest_g711_lib DEPENDS bruce_libs)
+    endif()
+endif()

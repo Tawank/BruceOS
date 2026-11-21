@@ -1,5 +1,7 @@
 #include "core_sdk/ext_mem_loader.h"
+#include "ext_mem_loader_elf.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -158,3 +160,42 @@ bruce_result_t ext_mem_loader__release_xip(bruce_ext_mem_loader_xip_image_t *ima
     if (result == BRUCE_OK) memset(image, 0, sizeof(*image));
     return result;
 }
+
+static int ext_mem_loader__elf_xip_allocate(
+    void *context, size_t size, const uint8_t **instruction, const uint8_t **data, uint32_t *handle
+) {
+    bruce_ext_mem_loader_xip_image_t *image = context;
+    bruce_result_t result = ext_mem_loader__allocate_xip(size, image);
+    if (result != BRUCE_OK) return result == BRUCE_ERR_NO_MEMORY ? -ENOMEM : -ENOSPC;
+    *instruction = image->instruction;
+    *data = image->data;
+    *handle = image->memory.handle;
+    return 0;
+}
+
+static int
+ext_mem_loader__elf_xip_write(void *context, uint32_t handle, size_t offset, const void *data, size_t size) {
+    bruce_ext_mem_loader_xip_image_t *image = context;
+    if (image->memory.handle != handle) return -EINVAL;
+    bruce_result_t result = ext_mem_loader__write_xip(image, offset, data, size);
+    if (result != BRUCE_OK) {
+        printf(
+            "[ext_mem_loader] xip write failed at offset %u size %u (result=%d)\n",
+            (unsigned)offset,
+            (unsigned)size,
+            (int)result
+        );
+    }
+    return result == BRUCE_OK ? 0 : (result == BRUCE_ERR_INVALID_ARGUMENT ? -EINVAL : -EIO);
+}
+
+static void ext_mem_loader__elf_xip_release(void *context, uint32_t handle) {
+    bruce_ext_mem_loader_xip_image_t *image = context;
+    if (image->memory.handle == handle) (void)ext_mem_loader__release_xip(image);
+}
+
+const esp_elf_xip_ops_t ext_mem_loader__elf_xip_ops = {
+    .allocate = ext_mem_loader__elf_xip_allocate,
+    .write = ext_mem_loader__elf_xip_write,
+    .release = ext_mem_loader__elf_xip_release,
+};

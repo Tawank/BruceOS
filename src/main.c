@@ -161,7 +161,7 @@ static const bruce_app_descriptor_t s_default_apps[] = {
     {"image",                "View image files",                                          "Content", image_app_main,               8192,  false},
     {"less",                 "Page through text",                                         "Content", bnu_less_app_main,            0,     false},
     {"md5sum",               "Print MD5 checksums",                                       "Content", bnu_md5sum_app_main,          0,     false},
-    {"player",               "Play .wav/.mp3 audio files",                                "Content", player_app_main,              0,     false},
+    {"player",               "Play audio files",                                          "Content", player_app_main,              0,     false},
     {"rev",                  "Reverse the characters of each line",                       "Content", bnu_rev_app_main,             0,     false},
     {"sed",                  "Edit text with a stream editor script",                     "Content", bnu_sed_app_main,             0,     false},
     {"seq",                  "Print a sequence of numbers",                               "Content", bnu_seq_app_main,             0,     false},

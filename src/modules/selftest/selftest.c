@@ -290,6 +290,10 @@ static const selftest__case_t selftest__cases[] = {
     SELFTEST_CASE(selftest__run_audio_mixer_kill_frees_slot_case),
     SELFTEST_CASE(selftest__run_audio_file_wav_leak_case),
     SELFTEST_CASE(selftest__run_audio_file_mp3_leak_case),
+    SELFTEST_CASE(selftest__run_audio_codec_lib_case),
+#if CONFIG_BRUCE_QEMU_TEST_MODE
+    SELFTEST_CASE(selftest__run_audio_codec_lib_load_case),
+#endif
     SELFTEST_CASE(selftest__run_nrf24_permission_denied_case),
     SELFTEST_CASE(selftest__run_nrf24_validation_case),
     SELFTEST_CASE(selftest__run_gps_parse_case),
