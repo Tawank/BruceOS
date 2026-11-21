@@ -87,3 +87,8 @@ void cellular__power_off(void);
 
 /* Powers the modem on at boot when it was left enabled. */
 void cellular__start(void);
+
+/* Before light sleep: the modem's RI GPIO to wake on, or -1. */
+int cellular__sleep_prepare(void);
+/* After light sleep; ring is whether RI woke the device. */
+void cellular__sleep_done(bool ring);

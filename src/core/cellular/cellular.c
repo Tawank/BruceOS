@@ -23,6 +23,7 @@
 #include "sdkconfig.h"
 
 #if CONFIG_BRUCE_CELLULAR_ENABLED
+#include "driver/gpio.h"
 #include "driver/uart.h"
 #endif
 
@@ -547,6 +548,10 @@ static cellular_model_t s_model;
 static bruce_cellular_call_record_t s_log[BRUCE_CELLULAR_LOG_MAX];
 static uint32_t s_log_sequence;
 static uint32_t s_message_sequence;
+/* Messages on the SIM and the message sequence when the device went to sleep. */
+static int s_sleep_sms_used;
+static uint32_t s_sleep_sequence;
+static volatile bool s_check_sms;
 static char s_line[CELLULAR__LINE_MAX];
 static size_t s_line_length;
 
@@ -707,6 +712,8 @@ static void cellular__setup(void) {
     cellular__command("AT+CMGF=1", 1000);
     cellular__command("AT+CSDH=1", 1000);
     cellular__command("AT+CNMI=2,1,0,0,0", 1000);
+    /* RI pulses low on a call or text, so it can wake the device. */
+    if (CONFIG_BRUCE_CELLULAR_RI_GPIO >= 0) cellular__command("AT+CFGRI=1", 1000);
     cellular__set_volume_level();
     cellular__query_network();
 }
@@ -903,6 +910,20 @@ static void cellular__sms_arrived(void) {
     notification__push(text, BRUCE_NOTIFICATION_DURATION_MAX_MS);
 }
 
+/* The +CMTI line can be lost while the device sleeps: RI woke it, but the UART
+ * was stopped. A message count above the one before sleep means a new text. */
+static void cellular__sms_check(void) {
+    if (!s_check_sms) return;
+    s_check_sms = false;
+    if (!cellular__command("AT+CPMS?", 3000)) return;
+    cellular__lock();
+    bool missed = s_model.sms_used > s_sleep_sms_used && s_model.sms_index == 0 &&
+                  s_message_sequence == s_sleep_sequence;
+    if (missed) s_message_sequence++;
+    cellular__unlock();
+    if (missed) notification__push("New message", BRUCE_NOTIFICATION_DURATION_MAX_MS);
+}
+
 static void cellular__run_request(cellular__request_t *request) {
     if (!s_alive) {
         request->result = BRUCE_ERR_INVALID_STATE;
@@ -962,6 +983,7 @@ static void cellular__session(void) {
         if (cellular__read_line(line, sizeof(line), 100)) cellular__handle_line(line);
         cellular__incoming();
         cellular__sms_arrived();
+        cellular__sms_check();
         cellular__update_status_icon();
         uint64_t now = cellular__now();
         bool in_call = cellular__in_call();
@@ -1116,6 +1138,28 @@ static bruce_result_t cellular__request(
     return cellular__submit(&request);
 }
 
+int cellular__sleep_prepare(void) {
+    if (CONFIG_BRUCE_CELLULAR_RI_GPIO < 0 || !s_alive) return -1;
+    gpio_config_t config = {
+        .pin_bit_mask = 1ULL << CONFIG_BRUCE_CELLULAR_RI_GPIO,
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+    };
+    if (gpio_config(&config) != ESP_OK) return -1;
+    (void)cellular__request(CELLULAR__REQUEST_COMMAND, "AT+CPMS?", 3000, NULL, 0);
+    cellular__lock();
+    s_sleep_sms_used = s_model.sms_used;
+    s_sleep_sequence = s_message_sequence;
+    cellular__unlock();
+    return CONFIG_BRUCE_CELLULAR_RI_GPIO;
+}
+
+void cellular__sleep_done(bool ring) {
+    if (!ring || s_task == NULL) return;
+    s_check_sms = true;
+    xTaskNotifyGive(s_task);
+}
+
 static bool cellular__valid_number(const char *number) {
     if (number == NULL || number[0] == '\0' || strlen(number) >= BRUCE_CELLULAR_NUMBER_MAX) return false;
     for (const char *c = number; *c != '\0'; ++c) {
@@ -1266,6 +1310,10 @@ void cellular__power_off(void) {}
 void cellular__start(void) {}
 
 bool cellular__is_available(void) { return false; }
+
+int cellular__sleep_prepare(void) { return -1; }
+
+void cellular__sleep_done(bool ring) { (void)ring; }
 
 static bruce_result_t cellular__unsupported(void) {
     bruce_result_t permission = permission__check(BRUCE_PERMISSION_PHONE);

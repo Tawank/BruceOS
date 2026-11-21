@@ -490,6 +490,12 @@ parts unpacked by hand. `cellular__send_message()` sends ASCII as GSM 7-bit
 line and SMS parsers are pure and covered by the `cellular/parse` and
 `cellular/sms` selftests.
 
+`device__sleep()` also wakes on the modem's RI pin (`BRUCE_CELLULAR_RI_GPIO`,
+GPIO 7 on the T-Deck MAX; `AT+CFGRI=1` makes RI pulse on calls and texts).
+A call keeps sending `RING`, so the woken device picks it up. A `+CMTI` sent
+while the UART was stopped can be lost, so after an RI wake Core compares the
+SIM's message count with the one before sleep and announces a missed text.
+
 ### Clock and time
 
 Core keeps the libc system clock in UTC. `clock__get_utc()` reads it directly,

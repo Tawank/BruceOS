@@ -1062,6 +1062,15 @@ menu "Bruce hardware configuration"
             default -1
             help
                 Driven high during a call and low again afterwards.
+
+        config BRUCE_CELLULAR_RI_GPIO
+            int "GPIO wired to the modem's RI pin (-1 = none)"
+            depends on BRUCE_CELLULAR_ENABLED
+            range -1 48
+            default -1
+            help
+                The modem pulls RI low on an incoming call or text, which wakes
+                the device from sleep.
     endmenu
 
     menu "Memory"
