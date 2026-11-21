@@ -331,15 +331,65 @@ static void player__draw_volume_button(int16_t cx, int16_t cy, int16_t char_widt
     (void)display__draw_string(text, (int16_t)(left + icon_half * 2 + 3), (int16_t)(cy - 4));
 }
 
-static void player__draw_volume_bar(int width, int cy, int margin, int16_t char_width, uint16_t color) {
+/* Where everything sits; drawing and touch both use it. */
+typedef struct {
+    int width, height;
+    int16_t char_width, char_height;
+    bool compact; /* A quarter-screen preview tile: title, bars, seek bar and time only. */
+    int margin, icon_half, highlight_half, progress_height;
+    int controls_y, time_row_y, progress_y, bars_top, bars_bottom, cell_w;
+    int volume_track_x, volume_track_w;
+} player__layout_t;
+
+static void player__layout(player__layout_t *layout) {
+    layout->width = display__width();
+    layout->height = display__height();
+    layout->char_width = 6;
+    layout->char_height = 8;
+    if (display__get_font_metrics(&layout->char_width, &layout->char_height) != BRUCE_OK ||
+        layout->char_height <= 0) {
+        layout->char_height = 8;
+    }
+    layout->compact = layout->width * layout->height * 4 < display__screen_width() * display__screen_height();
+    layout->margin = layout->compact ? 3 : 6;
+    int gap = layout->compact ? 3 : 10;
+    layout->icon_half = 10;
+    layout->highlight_half = layout->icon_half + 5;
+    layout->progress_height = layout->compact ? 4 : 6;
+    layout->controls_y = layout->height - layout->margin - layout->highlight_half;
+    layout->time_row_y = layout->compact
+                             ? layout->height - layout->margin - layout->char_height
+                             : layout->controls_y - layout->highlight_half - 4 - layout->char_height;
+    layout->progress_y = layout->time_row_y - 2 - layout->progress_height;
+    layout->bars_top = layout->margin + layout->char_height + (layout->compact ? 3 : 6);
+    layout->bars_bottom = layout->progress_y - gap;
+    if (layout->bars_bottom < layout->bars_top) layout->bars_bottom = layout->bars_top;
+    layout->cell_w = layout->width / PLAYER_APP__BOTTOM_BUTTONS;
+    /* Volume bar: speaker, track, then "100%". */
+    layout->volume_track_x = layout->margin + 16 + 8;
+    layout->volume_track_w =
+        layout->width - layout->margin - 4 * layout->char_width - 6 - layout->volume_track_x;
+}
+
+/* What the screen shows; it is redrawn only when this changes. */
+typedef struct {
+    int width, height;
+    size_t track;
+    bool paused, volume_open, show_focus;
+    int focused, volume;
+    uint32_t position_step, duration_step; /* The estimated duration settles over time too. */
+    uint32_t frame;                        /* Bar animation, LCD only. */
+} player__view_t;
+
+static void player__draw_volume_bar(const player__layout_t *layout, uint16_t color) {
     char text[8];
     int volume = config__get_sound_volume();
     snprintf(text, sizeof(text), "%d%%", volume);
     const int16_t icon_half = 8;
-    player__draw_speaker_icon((int16_t)(margin + icon_half), (int16_t)cy, icon_half, color);
-    int text_w = 4 * char_width;
-    int track_x = margin + icon_half * 2 + 8;
-    int track_w = width - margin - text_w - 6 - track_x;
+    int cy = layout->controls_y;
+    player__draw_speaker_icon((int16_t)(layout->margin + icon_half), (int16_t)cy, icon_half, color);
+    int track_x = layout->volume_track_x;
+    int track_w = layout->volume_track_w;
     const int track_h = 8;
     (void)display__draw_rect((int16_t)track_x, (int16_t)(cy - track_h / 2), (int16_t)track_w, track_h, color);
     int fill = (track_w - 2) * volume / 100;
@@ -348,13 +398,58 @@ static void player__draw_volume_bar(int width, int cy, int margin, int16_t char_
         (void)display__fill_rect((int16_t)(track_x + 1), fill_y, (int16_t)fill, track_h - 2, color);
     }
     (void)display__set_text_color(color);
-    (void)display__draw_right_string(text, (int16_t)(width - margin), (int16_t)(cy - 4));
+    (void)display__draw_right_string(text, (int16_t)(layout->width - layout->margin), (int16_t)(cy - 4));
 }
 
-static bruce_result_t
-player__draw(const char *title, player__playlist_t *playlist, bool paused, int focused, bool volume_open) {
-    int width = display__width();
-    int height = display__height();
+/* Reactive color bars: each bar's height is audio__file_level() (the real
+ * decoded playback level, 0-100) scaled by a per-bar wobble that cycles over
+ * time, so the row pulses with the music. */
+static void player__draw_bars(const player__layout_t *layout, uint32_t frame) {
+    int bars_height = layout->bars_bottom - layout->bars_top;
+    uint8_t level = audio__file_level();
+    int bar_gap = 4;
+    int bars_total_width = layout->width - layout->margin * 2;
+    int bar_width = (bars_total_width - bar_gap * (PLAYER_APP__BAR_COUNT - 1)) / PLAYER_APP__BAR_COUNT;
+    if (bar_width < 2) bar_width = 2;
+    size_t colors = sizeof(PLAYER_APP__BAR_COLORS) / sizeof(PLAYER_APP__BAR_COLORS[0]);
+    for (int i = 0; i < PLAYER_APP__BAR_COUNT; ++i) {
+        uint32_t phase = (frame + (uint32_t)i * 3u) % PLAYER_APP__BAR_WOBBLE_PERIOD_TICKS;
+        uint32_t half_period = PLAYER_APP__BAR_WOBBLE_PERIOD_TICKS / 2u;
+        uint32_t wobble = phase < half_period ? phase : PLAYER_APP__BAR_WOBBLE_PERIOD_TICKS - phase;
+        uint32_t height_percent = ((uint32_t)level * (half_period / 2u + wobble)) / half_period;
+        if (height_percent > 100u) height_percent = 100u;
+        int bar_height = (int)(((uint32_t)bars_height * height_percent) / 100u);
+        int x = layout->margin + i * (bar_width + bar_gap);
+        (void)display__fill_rect(
+            (int16_t)x,
+            (int16_t)(layout->bars_bottom - bar_height),
+            (int16_t)bar_width,
+            (int16_t)bar_height,
+            PLAYER_APP__BAR_COLORS[(size_t)i % colors]
+        );
+    }
+}
+
+/* E-paper: a still note instead of bars, since every change is a refresh. */
+static void player__draw_note(const player__layout_t *layout, uint16_t color) {
+    const bruce_icon_t *icon = icon__get("music");
+    int room = layout->bars_bottom - layout->bars_top;
+    int size = room < layout->width / 2 ? room : layout->width / 2;
+    if (size > 96) size = 96;
+    if (icon == NULL || size < 8) return;
+    int16_t x = (int16_t)((layout->width - size) / 2);
+    int16_t y = (int16_t)(layout->bars_top + (room - size) / 2);
+    (void)display__draw_bitmap_scaled(
+        x, y, icon->bits, icon->width, icon->height, (int16_t)size, (int16_t)size, color
+    );
+}
+
+static bruce_result_t player__draw(
+    const player__layout_t *layout, const player__view_t *view, const char *title, size_t playlist_count,
+    bool epaper
+) {
+    int width = layout->width;
+    int margin = layout->margin;
     uint16_t primary = config__get_color_primary();
     uint16_t secondary = config__get_color_secondary();
     uint16_t background = config__get_color_background();
@@ -365,86 +460,68 @@ player__draw(const char *title, player__playlist_t *playlist, bool paused, int f
     (void)display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
     (void)display__set_text_size(1);
 
-    int16_t char_width = 6, char_height = 8;
-    if (display__get_font_metrics(&char_width, &char_height) != BRUCE_OK || char_height <= 0) char_height = 8;
-
-    /* A quarter-screen preview tile only shows the title, bars, seek bar and time. */
-    bool compact = width * height * 4 < display__screen_width() * display__screen_height();
-    const int margin = compact ? 3 : 6;
-    const int gap = compact ? 3 : 10;
-    const int icon_half = 10;
-    const int highlight_half = icon_half + 5;
-    const int progress_height = compact ? 4 : 6;
-    int controls_y = height - margin - highlight_half;
-    int time_row_y = compact ? height - margin - char_height : controls_y - highlight_half - 4 - char_height;
-    int progress_y = time_row_y - 2 - progress_height;
-
     (void)display__set_text_color(secondary);
     (void)display__draw_centre_string(title, width / 2, margin);
-    if (!compact) player__draw_close(width, margin, char_height, focused == PLAYER_APP__BUTTON_CLOSE);
-
-
-    /* Reactive color bars: each bar's height is audio__file_level() (the
-     * real decoded playback level, 0-100) scaled by a per-bar wobble that
-     * cycles over time, so the row visibly pulses with the music instead of
-     * every bar moving in lockstep. Flat when paused/silent, since the
-     * level itself is then 0. */
-    int bars_top = margin + char_height + (compact ? 3 : 6);
-    int bars_bottom = progress_y - gap;
-    if (bars_bottom < bars_top) bars_bottom = bars_top;
-    int bars_height = bars_bottom - bars_top;
-    uint8_t level = audio__file_level();
-    uint32_t tick = (uint32_t)(runtime__now() / 80u);
-    int bar_gap = 4;
-    int bars_total_width = width - margin * 2;
-    int bar_width = (bars_total_width - bar_gap * (PLAYER_APP__BAR_COUNT - 1)) / PLAYER_APP__BAR_COUNT;
-    if (bar_width < 2) bar_width = 2;
-    for (int i = 0; i < PLAYER_APP__BAR_COUNT; ++i) {
-        uint32_t phase = (tick + (uint32_t)i * 3u) % PLAYER_APP__BAR_WOBBLE_PERIOD_TICKS;
-        uint32_t half_period = PLAYER_APP__BAR_WOBBLE_PERIOD_TICKS / 2u;
-        uint32_t wobble = phase < half_period ? phase : PLAYER_APP__BAR_WOBBLE_PERIOD_TICKS - phase;
-        uint32_t height_percent = ((uint32_t)level * (half_period / 2u + wobble)) / half_period;
-        if (height_percent > 100u) height_percent = 100u;
-        int bar_height = (int)(((uint32_t)bars_height * height_percent) / 100u);
-        int x = margin + i * (bar_width + bar_gap);
-        uint16_t color = PLAYER_APP__BAR_COLORS[(size_t)i % (sizeof(PLAYER_APP__BAR_COLORS) / sizeof(PLAYER_APP__BAR_COLORS[0]))];
-        (void)display__fill_rect((int16_t)x, (int16_t)(bars_bottom - bar_height), (int16_t)bar_width, (int16_t)bar_height, color);
+    if (!layout->compact) {
+        player__draw_close(
+            width, margin, layout->char_height, view->show_focus && view->focused == PLAYER_APP__BUTTON_CLOSE
+        );
     }
 
-    /* Progress bar. */
-    (void)display__draw_rect((int16_t)margin, (int16_t)progress_y, (int16_t)(width - margin * 2), (int16_t)progress_height, secondary);
+    if (epaper) {
+        player__draw_note(layout, primary);
+    } else {
+        player__draw_bars(layout, view->frame);
+    }
+
+    /* Progress bar and times, from the view so they only move when it does. */
+    int progress_y = layout->progress_y;
+    int progress_height = layout->progress_height;
+    (void)display__draw_rect(
+        (int16_t)margin,
+        (int16_t)progress_y,
+        (int16_t)(width - margin * 2),
+        (int16_t)progress_height,
+        secondary
+    );
     uint32_t position_ms = audio__file_position_ms();
     uint32_t duration_ms = audio__file_duration_ms();
     int fillable_width = width - margin * 2 - 2;
     int fill_width = duration_ms > 0 ? (int)(((uint64_t)fillable_width * position_ms) / duration_ms) : 0;
     if (fill_width > fillable_width) fill_width = fillable_width;
     if (fill_width > 0) {
-        (void)display__fill_rect((int16_t)(margin + 1), (int16_t)(progress_y + 1), (int16_t)fill_width, (int16_t)(progress_height - 2), primary);
+        (void)display__fill_rect(
+            (int16_t)(margin + 1),
+            (int16_t)(progress_y + 1),
+            (int16_t)fill_width,
+            (int16_t)(progress_height - 2),
+            primary
+        );
     }
     char position_text[8], duration_text[8];
     player__format_time(position_ms, position_text, sizeof(position_text));
     player__format_time(duration_ms, duration_text, sizeof(duration_text));
     (void)display__set_text_color(secondary);
-    (void)display__draw_string(position_text, (int16_t)margin, (int16_t)time_row_y);
-    (void)display__draw_right_string(duration_text, (int16_t)(width - margin), (int16_t)time_row_y);
+    (void)display__draw_string(position_text, (int16_t)margin, (int16_t)layout->time_row_y);
+    (void)display__draw_right_string(duration_text, (int16_t)(width - margin), (int16_t)layout->time_row_y);
 
-    if (compact) return display__present();
-    if (volume_open) {
-        player__draw_volume_bar(width, controls_y, margin, char_width, primary);
+    if (layout->compact) return display__present();
+    if (view->volume_open) {
+        player__draw_volume_bar(layout, primary);
         return display__present();
     }
 
-    /* Bottom controls. PREV/NEXT move `focused` among these instead of acting
-     * directly, so SELECT can activate whichever one is highlighted -- a
-     * focused control draws on top of a filled box in the inverse of its own
-     * color, same convention as a selected row in a list dialog. */
-    uint16_t has_siblings_color = playlist->count > 1 ? primary : secondary;
-    int cell_w = width / PLAYER_APP__BOTTOM_BUTTONS;
+    /* Bottom controls. A focused control draws on a filled box in the inverse
+     * of its own color, same convention as a selected row in a list dialog. */
+    uint16_t has_siblings_color = playlist_count > 1 ? primary : secondary;
+    int cell_w = layout->cell_w;
+    int controls_y = layout->controls_y;
+    int highlight_half = layout->highlight_half;
     for (int i = 0; i < PLAYER_APP__BOTTOM_BUTTONS; ++i) {
         int16_t x = (int16_t)(cell_w * i + cell_w / 2);
         bool skip = i == PLAYER_APP__BUTTON_PREV || i == PLAYER_APP__BUTTON_NEXT;
         uint16_t color = skip ? has_siblings_color : primary;
-        if (i == focused) {
+        if (view->show_focus && i == view->focused) {
             int box_half = i == PLAYER_APP__BUTTON_VOLUME ? cell_w / 2 - 2 : highlight_half;
             (void)display__fill_rect(
                 (int16_t)(x - box_half), (int16_t)(controls_y - highlight_half), (int16_t)(box_half * 2),
@@ -453,19 +530,63 @@ player__draw(const char *title, player__playlist_t *playlist, bool paused, int f
             color = background;
         }
         int16_t y = (int16_t)controls_y;
+        int16_t icon_half = (int16_t)layout->icon_half;
         switch ((player__button_t)i) {
             case PLAYER_APP__BUTTON_PREV: player__draw_skip_icon(x, y, icon_half, false, color); break;
             case PLAYER_APP__BUTTON_PLAY_PAUSE:
-                player__draw_play_pause_icon(x, y, icon_half, paused, color);
+                player__draw_play_pause_icon(x, y, icon_half, view->paused, color);
                 break;
             case PLAYER_APP__BUTTON_NEXT: player__draw_skip_icon(x, y, icon_half, true, color); break;
-            case PLAYER_APP__BUTTON_VOLUME: player__draw_volume_button(x, y, char_width, color); break;
+            case PLAYER_APP__BUTTON_VOLUME:
+                player__draw_volume_button(x, y, layout->char_width, color);
+                break;
             case PLAYER_APP__BUTTON_MINIMIZE: player__draw_minimize_icon(x, y, icon_half, color); break;
             default: break;
         }
     }
-
     return display__present();
+}
+
+/* A tap at (x, y). Returns true when the player should close. */
+static bool player__tap(
+    const player__layout_t *layout, int x, int y, player__playlist_t *playlist, char *title,
+    size_t title_size, bool *paused, int *focused, bool *volume_open
+) {
+    int row_top = layout->controls_y - layout->highlight_half - 6;
+    if (*volume_open) {
+        if (y >= row_top && x >= layout->volume_track_x - 8) {
+            int volume = (x - layout->volume_track_x) * 100 /
+                         (layout->volume_track_w > 0 ? layout->volume_track_w : 1);
+            (void)config__set_sound_volume(volume < 0 ? 0 : volume > 100 ? 100 : volume);
+        } else {
+            *volume_open = false;
+        }
+        return false;
+    }
+    if (x >= layout->width - layout->margin - 30 && y <= layout->margin + layout->char_height + 12)
+        return true;
+    if (y >= layout->progress_y - 12 && y <= layout->progress_y + layout->progress_height + 12) {
+        uint32_t duration_ms = audio__file_duration_ms();
+        int span = layout->width - layout->margin * 2;
+        int offset = x - layout->margin;
+        if (duration_ms > 0 && span > 0) {
+            offset = offset < 0 ? 0 : offset > span ? span : offset;
+            (void)audio__file_seek((uint32_t)(((uint64_t)duration_ms * (uint32_t)offset) / (uint32_t)span));
+        }
+        return false;
+    }
+    if (y >= row_top) {
+        int button = x / (layout->cell_w > 0 ? layout->cell_w : 1);
+        if (button >= PLAYER_APP__BOTTOM_BUTTONS) button = PLAYER_APP__BOTTOM_BUTTONS - 1;
+        *focused = button;
+        return player__activate_focused(button, playlist, title, title_size, paused, volume_open);
+    }
+    if (y >= layout->bars_top && y < layout->bars_bottom) {
+        return player__activate_focused(
+            PLAYER_APP__BUTTON_PLAY_PAUSE, playlist, title, title_size, paused, volume_open
+        );
+    }
+    return false;
 }
 
 int player_app_main(int argc, char **argv) {
@@ -535,6 +656,17 @@ int player_app_main(int argc, char **argv) {
     bool paused = false;
     int focused = PLAYER_APP__BUTTON_PLAY_PAUSE;
     bool volume_open = false;
+    /* On touch screens the focus box shows only once a key is used. */
+    bool show_focus = !input__has_touch();
+    bool epaper = display__is_epaper();
+    /* E-paper: every change is a slow refresh, and a run of them leaves
+     * ghosts, so the time moves in 10 s steps and nothing animates. */
+    uint32_t position_step_ms = epaper ? 10000u : 1000u;
+    player__view_t shown;
+    memset(&shown, 0, sizeof(shown));
+    bool redraw = true;
+    bool background = false;
+    int touch_x = -1, touch_y = -1;
     /* LEFT/RIGHT are dual-purpose (tap = move focus, hold = seek), which
      * input__wait() can't distinguish -- it only ever reports presses (see
      * its own doc comment: "release and change events are ignored"). Using
@@ -558,7 +690,33 @@ int player_app_main(int argc, char **argv) {
             break;
         }
 
-        (void)player__draw(title, &playlist, paused, focused, volume_open);
+        player__layout_t layout;
+        player__layout(&layout);
+        player__view_t view;
+        memset(&view, 0, sizeof(view));
+        view.width = layout.width;
+        view.height = layout.height;
+        view.track = playlist.current;
+        view.paused = paused;
+        view.volume_open = volume_open;
+        view.show_focus = show_focus;
+        view.focused = focused;
+        view.volume = config__get_sound_volume();
+        view.position_step = audio__file_position_ms() / position_step_ms;
+        view.duration_step = audio__file_duration_ms() / position_step_ms;
+        if (!epaper && audio__file_level() > 0) view.frame = (uint32_t)(runtime__now() / 80u);
+        if (display__viewport_changed()) redraw = true;
+        if (background && !process__is_background()) {
+            /* Back in front: whatever was drawn meanwhile is gone. */
+            background = false;
+            redraw = true;
+        }
+        if (redraw || memcmp(&view, &shown, sizeof(view)) != 0) {
+            if (player__draw(&layout, &view, title, playlist.count, epaper) == BRUCE_OK) {
+                shown = view;
+                redraw = false;
+            }
+        }
 
         bruce_input_event_t event;
         bruce_result_t input_result = input__read(&event, 80);
@@ -573,11 +731,39 @@ int player_app_main(int argc, char **argv) {
         if (input_result == BRUCE_ERR_NOT_FOREGROUND) {
             held_code = 0;
             long_press_fired = false;
+            touch_x = -1;
+            background = true;
             if (runtime__delay(100) != BRUCE_OK) break;
             continue;
         }
         if (input_result == BRUCE_ERR_TIMEOUT) continue; /* just redraw/animate again */
         if (input_result != BRUCE_OK) break; /* e.g. input deinitialized during shutdown */
+
+        if (event.type == BRUCE_INPUT_TOUCH) {
+            /* A tap acts on release, where it started; a drag does nothing. */
+            if (event.action == BRUCE_INPUT_PRESS) {
+                touch_x = event.x;
+                touch_y = event.y;
+            } else if (event.action == BRUCE_INPUT_RELEASE && touch_x >= 0) {
+                bool tap = abs(event.x - touch_x) < 20 && abs(event.y - touch_y) < 20;
+                show_focus = false;
+                if (tap && player__tap(
+                               &layout,
+                               touch_x,
+                               touch_y,
+                               &playlist,
+                               title,
+                               sizeof(title),
+                               &paused,
+                               &focused,
+                               &volume_open
+                           )) {
+                    goto done;
+                }
+                touch_x = -1;
+            }
+            continue;
+        }
 
         if (event.action == BRUCE_INPUT_RELEASE) {
             if (event.code == held_code) {
@@ -589,6 +775,11 @@ int player_app_main(int argc, char **argv) {
             continue;
         }
         if (event.action != BRUCE_INPUT_PRESS) continue; /* ignore CHANGE */
+        if (!show_focus && event.code != BRUCE_INPUT_CODE_BACK) {
+            /* After touch, the first key only brings the focus box back. */
+            show_focus = true;
+            continue;
+        }
 
         if (volume_open) {
             switch (event.code) {
@@ -636,5 +827,7 @@ int player_app_main(int argc, char **argv) {
 done:
     (void)audio__file_stop();
     player__free_playlist(&playlist);
+    /* Clears what partial refreshes left of the player once the next screen is drawn. */
+    if (epaper) display__full_refresh();
     return BRUCE_OK;
 }
