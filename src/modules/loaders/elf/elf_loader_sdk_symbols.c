@@ -52,6 +52,8 @@
 #include "core_sdk/ext_mem_loader.h"
 #include "core_sdk/filetype.h"
 #include "core_sdk/gpio.h"
+#include "core_sdk/appdata.h"
+#include "core_sdk/cellular.h"
 #include "core_sdk/gps.h"
 #include "core_sdk/hash.h"
 #include "core_sdk/http.h"
@@ -2039,6 +2041,9 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(clock__sync_ntp),
     ESP_ELFSYM_EXPORT(clock__get_sync_status),
     ESP_ELFSYM_EXPORT(clock__get_ntp_server),
+    ESP_ELFSYM_EXPORT(clock__datetime_to_epoch),
+    ESP_ELFSYM_EXPORT(clock__epoch_to_datetime),
+    ESP_ELFSYM_EXPORT(clock__get_local_offset_seconds),
 
     /* Read-only application preferences. Protected values enforce config
      * permission in Core. */
@@ -2351,6 +2356,22 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(nrf24__get_pins),
 
     /* GPS */
+    ESP_ELFSYM_EXPORT(appdata__get_path),
+    ESP_ELFSYM_EXPORT(appdata__read),
+    ESP_ELFSYM_EXPORT(appdata__write),
+    ESP_ELFSYM_EXPORT(appdata__remove),
+    ESP_ELFSYM_EXPORT(appdata__get_usage),
+    ESP_ELFSYM_EXPORT(cellular__is_available),
+    ESP_ELFSYM_EXPORT(cellular__set_enabled),
+    ESP_ELFSYM_EXPORT(cellular__get_status),
+    ESP_ELFSYM_EXPORT(cellular__dial),
+    ESP_ELFSYM_EXPORT(cellular__answer),
+    ESP_ELFSYM_EXPORT(cellular__hang_up),
+    ESP_ELFSYM_EXPORT(cellular__send_dtmf),
+    ESP_ELFSYM_EXPORT(cellular__set_muted),
+    ESP_ELFSYM_EXPORT(cellular__set_volume),
+    ESP_ELFSYM_EXPORT(cellular__ussd),
+    ESP_ELFSYM_EXPORT(cellular__get_call_log),
     ESP_ELFSYM_EXPORT(gps__is_available),
     ESP_ELFSYM_EXPORT(gps__read),
 
@@ -2464,6 +2485,7 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
 
     /* Dialog */
     ESP_ELFSYM_EXPORT(dialog__message),
+    ESP_ELFSYM_EXPORT(dialog__message_show),
     ESP_ELFSYM_EXPORT(dialog__choice),
     ESP_ELFSYM_EXPORT(dialog__choice_launcher),
     ESP_ELFSYM_EXPORT(dialog__choice_ex),

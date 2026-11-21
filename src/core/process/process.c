@@ -985,6 +985,18 @@ bruce_result_t process_registry__current_context(
     return BRUCE_OK;
 }
 
+bool process_registry__is_app_running(const char *app_name) {
+    if (app_name == NULL || app_name[0] == '\0') return false;
+    process__ensure_init();
+    process__lock();
+    bool running = false;
+    for (process__record_t *record = s_processes; record != NULL && !running; record = record->next) {
+        running = record->in_use && strcmp(record->permission_key, app_name) == 0;
+    }
+    process__unlock();
+    return running;
+}
+
 void process_registry__set_sandbox_exit_target(void *target) {
     process__ensure_init();
     process__lock();

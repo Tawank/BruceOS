@@ -340,6 +340,12 @@ static void config__parse_json(config__t *cfg, const cJSON *root) {
         json_get_bool(time, "clock24hr", &cfg->timeClock24hr);
     }
 
+    const cJSON *storage = cJSON_GetObjectItemCaseSensitive(root, "storage");
+    if (cJSON_IsObject(storage)) json_get_bool(storage, "appdataOnSd", &cfg->appdataOnSd);
+
+    const cJSON *cellular = cJSON_GetObjectItemCaseSensitive(root, "cellular");
+    if (cJSON_IsObject(cellular)) json_get_bool(cellular, "enabled", &cfg->cellularEnabled);
+
     const cJSON *sound = cJSON_GetObjectItemCaseSensitive(root, "sound");
     if (cJSON_IsObject(sound)) {
         json_get_bool(sound, "enabled", &cfg->soundEnabled);
@@ -471,6 +477,12 @@ static cJSON *config__build_json(const config__t *cfg) {
     cJSON_AddNumberToObject(time, "timezone", cfg->timeTimezone);
     cJSON_AddBoolToObject(time, "dst", cfg->timeDst);
     cJSON_AddBoolToObject(time, "clock24hr", cfg->timeClock24hr);
+
+    cJSON *storage = cJSON_AddObjectToObject(root, "storage");
+    cJSON_AddBoolToObject(storage, "appdataOnSd", cfg->appdataOnSd);
+
+    cJSON *cellular = cJSON_AddObjectToObject(root, "cellular");
+    cJSON_AddBoolToObject(cellular, "enabled", cfg->cellularEnabled);
 
     cJSON *sound = cJSON_AddObjectToObject(root, "sound");
     cJSON_AddBoolToObject(sound, "enabled", cfg->soundEnabled);
@@ -665,6 +677,9 @@ static bruce_result_t config__guard(void) { return permission__check(BRUCE_PERMI
 static bruce_result_t config__guard_protected(void) {
     return config__caller_is_trusted() ? BRUCE_OK : BRUCE_ERR_PERMISSION;
 }
+
+/* For fields only Core reads and writes (core/config/config.h, not exported to apps). */
+static bruce_result_t config__guard_core(void) { return BRUCE_OK; }
 
 typedef bruce_result_t (*config__guard_fn_t)(void);
 
@@ -946,6 +961,8 @@ CONFIG__DEFINE_FLOAT_FIELD(time_timezone, timeTimezone)
 CONFIG__DEFINE_BOOL_FIELD(time_dst, timeDst)
 CONFIG__DEFINE_BOOL_FIELD(time_clock24hr, timeClock24hr)
 CONFIG__DEFINE_BOOL_FIELD(sound_enabled, soundEnabled)
+CONFIG__DEFINE_BOOL_FIELD_GUARDED(appdata_on_sd, appdataOnSd, config__guard_core)
+CONFIG__DEFINE_BOOL_FIELD_GUARDED(cellular_enabled, cellularEnabled, config__guard_core)
 CONFIG__DEFINE_INT_FIELD(sound_volume, soundVolume)
 
 /* Lock-free: audio playback calls this for every chunk and must never wait

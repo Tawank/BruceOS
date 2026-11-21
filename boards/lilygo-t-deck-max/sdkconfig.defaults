@@ -2,8 +2,8 @@
 # e-paper, TCA8418 keyboard, CST3530 touch, XL9555 GPIO expander).
 #
 # Pins from LilyGO's TDeckMaxBoard.h (github.com/Xinyuan-LilyGO/T-Deck-MAX).
-# LoRa (SX1262), 4G modem, gyroscope and vibration motor have no
-# driver in this HAL yet; their XL9555 power enables are left off.
+# LoRa (SX1262), gyroscope and vibration motor have no driver in this HAL
+# yet; their XL9555 power enables are left off.
 CONFIG_IDF_TARGET="esp32s3"
 
 # ---- Chip, flash and memory ----
@@ -117,5 +117,17 @@ CONFIG_BRUCE_GPS_RX_GPIO=2
 CONFIG_BRUCE_GPS_TX_GPIO=16
 CONFIG_BRUCE_GPS_BAUD=38400
 CONFIG_BRUCE_GPS_POWER_XL9555_PIN=2
+
+# A7682E modem on UART2 at 115200 (ESP RX 11 = modem TXD, TX 10 = modem
+# RXD, as LilyGO's factory firmware opens it). XL9555 pin 0 powers it, pin 8
+# drives PWRKEY, pin 10 high routes the speaker and mic to it.
+CONFIG_BRUCE_CELLULAR_ENABLED=y
+CONFIG_BRUCE_CELLULAR_UART_PORT=2
+CONFIG_BRUCE_CELLULAR_RX_GPIO=11
+CONFIG_BRUCE_CELLULAR_TX_GPIO=10
+CONFIG_BRUCE_CELLULAR_BAUD=115200
+CONFIG_BRUCE_CELLULAR_POWER_XL9555_PIN=0
+CONFIG_BRUCE_CELLULAR_PWRKEY_XL9555_PIN=8
+CONFIG_BRUCE_CELLULAR_AUDIO_XL9555_PIN=10
 
 # No infrared or NRF24 on this board; left at the Kconfig defaults.

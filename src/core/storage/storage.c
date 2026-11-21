@@ -21,6 +21,7 @@
 #include "freertos/task.h"
 #include "spi_flash_mmap.h"
 
+#include "core/appdata/appdata.h"
 #include "core/partition_manager/partition_manager.h"
 #include "core/process/process.h"
 #include "core_sdk/permission.h"
@@ -56,7 +57,6 @@ static storage__extra_mount_t s_extra_mounts[BRUCE_PARTITION_MAX_ENTRIES];
 
 static bool storage__is_protected_path(const char *path);
 static bool storage__is_valid_public_path(const char *path);
-static bool storage__is_sd_path(const char *path);
 static bool storage__has_open_sd_files_locked(void);
 static int storage__extra_mount_find_by_label_locked(const char *label);
 static int storage__extra_mount_find_by_point_locked(const char *mount_point);
@@ -185,7 +185,7 @@ bool storage__mkdir_internal(const char *path) {
     return created;
 }
 
-static bool storage__is_sd_path(const char *path) {
+bool storage__is_sd_path(const char *path) {
     size_t mount_length = strlen(STORAGE__SD_MOUNT_PATH);
     return path != NULL && strncmp(path, STORAGE__SD_MOUNT_PATH, mount_length) == 0 &&
            (path[mount_length] == '\0' || path[mount_length] == '/');
@@ -283,6 +283,18 @@ static bool storage__write_file_atomic_locked(const char *path, const void *data
     return true;
 }
 
+/* Relative public paths are in the caller's appdata folder (see
+ * core_sdk/appdata.h) and need no `storage` permission; *path then points at
+ * a heap copy in *out_owned, which the caller frees. Absolute paths are used
+ * as they are, so the common case adds nothing to deep call stacks. */
+static bruce_result_t storage__resolve_public(const char **path, char **out_owned) {
+    *out_owned = NULL;
+    if (*path != NULL && (*path)[0] == '/') return permission__check(BRUCE_PERMISSION_STORAGE);
+    bruce_result_t result = appdata__resolve(*path, out_owned);
+    if (result == BRUCE_OK) *path = *out_owned;
+    return result;
+}
+
 bool storage__exists_internal(const char *path) {
     storage__lock();
     struct stat path_stat;
@@ -291,11 +303,9 @@ bool storage__exists_internal(const char *path) {
     return exists;
 }
 
-bruce_result_t storage__exists(const char *path, bool *out_exists) {
+static bruce_result_t storage__exists_at(const char *path, bool *out_exists) {
     if (out_exists == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     *out_exists = false;
-    bruce_result_t permission = permission__check(BRUCE_PERMISSION_STORAGE);
-    if (permission != BRUCE_OK) return permission;
     if (!storage__is_valid_public_path(path)) return BRUCE_ERR_INVALID_PATH;
     if (storage__is_protected_path(path)) return BRUCE_ERR_PERMISSION;
 
@@ -364,6 +374,135 @@ bool storage__get_usage_internal(const char *path, size_t *total_bytes, size_t *
     }
     storage__unlock();
     return known;
+}
+
+#define STORAGE__TREE_MAX_DEPTH 8
+
+typedef bruce_result_t (*storage__tree_visit_t)(const char *path, bool directory, void *context);
+
+/* Calls visit for every entry under `path`, children before their directory.
+ * Caller must hold the lock. */
+static bruce_result_t
+storage__tree_walk_locked(const char *path, int depth, storage__tree_visit_t visit, void *context) {
+    if (depth > STORAGE__TREE_MAX_DEPTH) return BRUCE_ERR_RESOURCE_LIMIT;
+    DIR *dir = opendir(path);
+    if (dir == NULL) return errno == ENOENT ? BRUCE_ERR_NOT_FOUND : BRUCE_ERR_IO;
+    bruce_result_t result = BRUCE_OK;
+    struct dirent *entry;
+    while (result == BRUCE_OK && (entry = readdir(dir)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
+        char child[STORAGE__PATH_MAX];
+        if (snprintf(child, sizeof(child), "%s/%s", path, entry->d_name) >= (int)sizeof(child)) {
+            result = BRUCE_ERR_INVALID_PATH;
+            break;
+        }
+        struct stat child_stat;
+        if (stat(child, &child_stat) != 0) {
+            result = BRUCE_ERR_IO;
+        } else if (S_ISDIR(child_stat.st_mode)) {
+            result = storage__tree_walk_locked(child, depth + 1, visit, context);
+            if (result == BRUCE_OK) result = visit(child, true, context);
+        } else {
+            result = visit(child, false, context);
+        }
+    }
+    closedir(dir);
+    return result;
+}
+
+static bruce_result_t storage__tree_size_visit(const char *path, bool directory, void *context) {
+    struct stat path_stat;
+    if (!directory && stat(path, &path_stat) == 0) *(size_t *)context += (size_t)path_stat.st_size;
+    return BRUCE_OK;
+}
+
+bruce_result_t storage__tree_size_internal(const char *path, size_t *out_bytes) {
+    if (path == NULL || out_bytes == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    *out_bytes = 0;
+    storage__lock();
+    bruce_result_t result = storage__is_ready(path)
+                                ? storage__tree_walk_locked(path, 0, storage__tree_size_visit, out_bytes)
+                                : BRUCE_ERR_INVALID_STATE;
+    storage__unlock();
+    return result == BRUCE_ERR_NOT_FOUND ? BRUCE_OK : result;
+}
+
+static bruce_result_t storage__tree_remove_visit(const char *path, bool directory, void *context) {
+    (void)context;
+    return (directory ? rmdir(path) : remove(path)) == 0 ? BRUCE_OK : BRUCE_ERR_IO;
+}
+
+bruce_result_t storage__tree_remove_internal(const char *path) {
+    if (path == NULL || path[0] != '/' || path[1] == '\0') return BRUCE_ERR_INVALID_PATH;
+    if (!process_registry__operation_begin()) return BRUCE_ERR_INVALID_STATE;
+    storage__lock();
+    bruce_result_t result = BRUCE_ERR_INVALID_STATE;
+    if (storage__is_ready(path)) {
+        result = storage__tree_walk_locked(path, 0, storage__tree_remove_visit, NULL);
+        if (result == BRUCE_OK && rmdir(path) != 0) result = BRUCE_ERR_IO;
+    }
+    storage__unlock();
+    process_registry__operation_end();
+    return result == BRUCE_ERR_NOT_FOUND ? BRUCE_OK : result;
+}
+
+static bool storage__copy_file_locked(const char *from, const char *to) {
+    FILE *source = fopen(from, "rb");
+    if (source == NULL) return false;
+    FILE *target = fopen(to, "wb");
+    if (target == NULL) {
+        fclose(source);
+        return false;
+    }
+    char buffer[1024];
+    size_t length;
+    bool copied = true;
+    while (copied && (length = fread(buffer, 1, sizeof(buffer), source)) > 0) {
+        copied = fwrite(buffer, 1, length, target) == length;
+    }
+    copied = copied && !ferror(source);
+    fclose(source);
+    if (fclose(target) != 0) copied = false;
+    return copied;
+}
+
+static bruce_result_t storage__tree_copy_locked(const char *from, const char *to, int depth) {
+    if (depth > STORAGE__TREE_MAX_DEPTH) return BRUCE_ERR_RESOURCE_LIMIT;
+    struct stat path_stat;
+    if (stat(to, &path_stat) != 0 && mkdir(to, 0775) != 0) return BRUCE_ERR_IO;
+    DIR *dir = opendir(from);
+    if (dir == NULL) return errno == ENOENT ? BRUCE_ERR_NOT_FOUND : BRUCE_ERR_IO;
+    bruce_result_t result = BRUCE_OK;
+    struct dirent *entry;
+    while (result == BRUCE_OK && (entry = readdir(dir)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
+        char source[STORAGE__PATH_MAX];
+        char target[STORAGE__PATH_MAX];
+        if (snprintf(source, sizeof(source), "%s/%s", from, entry->d_name) >= (int)sizeof(source) ||
+            snprintf(target, sizeof(target), "%s/%s", to, entry->d_name) >= (int)sizeof(target)) {
+            result = BRUCE_ERR_INVALID_PATH;
+        } else if (stat(source, &path_stat) != 0) {
+            result = BRUCE_ERR_IO;
+        } else if (S_ISDIR(path_stat.st_mode)) {
+            result = storage__tree_copy_locked(source, target, depth + 1);
+        } else if (!storage__copy_file_locked(source, target)) {
+            result = BRUCE_ERR_IO;
+        }
+    }
+    closedir(dir);
+    return result;
+}
+
+bruce_result_t storage__tree_copy_internal(const char *from, const char *to) {
+    if (from == NULL || to == NULL || from[0] != '/' || to[0] != '/') return BRUCE_ERR_INVALID_PATH;
+    if (!process_registry__operation_begin()) return BRUCE_ERR_INVALID_STATE;
+    storage__lock();
+    bruce_result_t result = storage__is_ready(from) && storage__is_ready(to)
+                                ? storage__tree_copy_locked(from, to, 0)
+                                : BRUCE_ERR_INVALID_STATE;
+    storage__unlock();
+    process_registry__operation_end();
+    return result;
 }
 
 bool storage__sd_mount_spi(const storage__sdspi_config_t *config) {
@@ -707,12 +846,10 @@ static void storage__file_cleanup(void *context) {
     storage__unlock();
 }
 
-bruce_result_t storage__open(const char *path, uint32_t flags, bruce_file_id_t *out_file) {
+static bruce_result_t storage__open_at(const char *path, uint32_t flags, bruce_file_id_t *out_file) {
     if (out_file == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     *out_file = BRUCE_FILE_ID_INVALID;
 
-    bruce_result_t permission = permission__check(BRUCE_PERMISSION_STORAGE);
-    if (permission != BRUCE_OK) return permission;
     if (!storage__is_valid_public_path(path)) return BRUCE_ERR_INVALID_PATH;
     if (storage__is_protected_path(path)) return BRUCE_ERR_PERMISSION;
 
@@ -899,10 +1036,8 @@ bruce_result_t storage__close(bruce_file_id_t file) {
     return BRUCE_OK;
 }
 
-bruce_result_t
-storage__list(const char *path, bruce_storage_entry_t *entries, size_t capacity, size_t *out_count) {
-    bruce_result_t permission = permission__check(BRUCE_PERMISSION_STORAGE);
-    if (permission != BRUCE_OK) return permission;
+static bruce_result_t
+storage__list_at(const char *path, bruce_storage_entry_t *entries, size_t capacity, size_t *out_count) {
     if (out_count == NULL || !storage__is_valid_public_path(path) || (capacity != 0 && entries == NULL)) {
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
@@ -951,9 +1086,7 @@ storage__list(const char *path, bruce_storage_entry_t *entries, size_t capacity,
     return BRUCE_OK;
 }
 
-bruce_result_t storage__mkdir(const char *path) {
-    bruce_result_t permission = permission__check(BRUCE_PERMISSION_STORAGE);
-    if (permission != BRUCE_OK) return permission;
+static bruce_result_t storage__mkdir_at(const char *path) {
     if (!storage__is_valid_public_path(path) || strcmp(path, "/") == 0) return BRUCE_ERR_INVALID_PATH;
     if (storage__is_protected_path(path)) return BRUCE_ERR_PERMISSION;
 
@@ -968,9 +1101,7 @@ bruce_result_t storage__mkdir(const char *path) {
     return result;
 }
 
-bruce_result_t storage__remove(const char *path) {
-    bruce_result_t permission = permission__check(BRUCE_PERMISSION_STORAGE);
-    if (permission != BRUCE_OK) return permission;
+static bruce_result_t storage__remove_at(const char *path) {
     if (!storage__is_valid_public_path(path) || strcmp(path, "/") == 0) return BRUCE_ERR_INVALID_PATH;
     if (storage__is_protected_path(path)) return BRUCE_ERR_PERMISSION;
 
@@ -990,9 +1121,7 @@ bruce_result_t storage__remove(const char *path) {
     return result;
 }
 
-bruce_result_t storage__rename(const char *from, const char *to) {
-    bruce_result_t permission = permission__check(BRUCE_PERMISSION_STORAGE);
-    if (permission != BRUCE_OK) return permission;
+static bruce_result_t storage__rename_at(const char *from, const char *to) {
     if (!storage__is_valid_public_path(from) || !storage__is_valid_public_path(to) ||
         strcmp(from, "/") == 0 || strcmp(to, "/") == 0) {
         return BRUCE_ERR_INVALID_PATH;
@@ -1071,11 +1200,73 @@ bruce_result_t storage__copy(const char *from, const char *to) {
     return close_dst;
 }
 
-bruce_result_t storage__get_usage(const char *path, size_t *total_bytes, size_t *used_bytes) {
-    bruce_result_t permission = permission__check(BRUCE_PERMISSION_STORAGE);
-    if (permission != BRUCE_OK) return permission;
+static bruce_result_t storage__get_usage_at(const char *path, size_t *total_bytes, size_t *used_bytes) {
     if (!storage__is_valid_public_path(path) || total_bytes == NULL || used_bytes == NULL) {
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
     return storage__get_usage_internal(path, total_bytes, used_bytes) ? BRUCE_OK : BRUCE_ERR_INVALID_STATE;
+}
+
+/* ---- Public entry points: resolve the path, then run the operation ---- */
+
+bruce_result_t storage__exists(const char *path, bool *out_exists) {
+    char *owned = NULL;
+    bruce_result_t result = storage__resolve_public(&path, &owned);
+    if (result == BRUCE_OK) result = storage__exists_at(path, out_exists);
+    else if (out_exists != NULL) *out_exists = false;
+    free(owned);
+    return result;
+}
+
+bruce_result_t storage__open(const char *path, uint32_t flags, bruce_file_id_t *out_file) {
+    char *owned = NULL;
+    bruce_result_t result = storage__resolve_public(&path, &owned);
+    if (result == BRUCE_OK) result = storage__open_at(path, flags, out_file);
+    else if (out_file != NULL) *out_file = BRUCE_FILE_ID_INVALID;
+    free(owned);
+    return result;
+}
+
+bruce_result_t
+storage__list(const char *path, bruce_storage_entry_t *entries, size_t capacity, size_t *out_count) {
+    char *owned = NULL;
+    bruce_result_t result = storage__resolve_public(&path, &owned);
+    if (result == BRUCE_OK) result = storage__list_at(path, entries, capacity, out_count);
+    free(owned);
+    return result;
+}
+
+bruce_result_t storage__mkdir(const char *path) {
+    char *owned = NULL;
+    bruce_result_t result = storage__resolve_public(&path, &owned);
+    if (result == BRUCE_OK) result = storage__mkdir_at(path);
+    free(owned);
+    return result;
+}
+
+bruce_result_t storage__remove(const char *path) {
+    char *owned = NULL;
+    bruce_result_t result = storage__resolve_public(&path, &owned);
+    if (result == BRUCE_OK) result = storage__remove_at(path);
+    free(owned);
+    return result;
+}
+
+bruce_result_t storage__rename(const char *from, const char *to) {
+    char *owned_from = NULL;
+    char *owned_to = NULL;
+    bruce_result_t result = storage__resolve_public(&from, &owned_from);
+    if (result == BRUCE_OK) result = storage__resolve_public(&to, &owned_to);
+    if (result == BRUCE_OK) result = storage__rename_at(from, to);
+    free(owned_from);
+    free(owned_to);
+    return result;
+}
+
+bruce_result_t storage__get_usage(const char *path, size_t *total_bytes, size_t *used_bytes) {
+    char *owned = NULL;
+    bruce_result_t result = storage__resolve_public(&path, &owned);
+    if (result == BRUCE_OK) result = storage__get_usage_at(path, total_bytes, used_bytes);
+    free(owned);
+    return result;
 }

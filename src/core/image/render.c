@@ -11,6 +11,12 @@ void image__bitmap_release(image_bitmap_t *bitmap) {
     *bitmap = (image_bitmap_t){0};
 }
 
+void *image__malloc_pixels(size_t size) {
+    void *pixels = memory__malloc(size);
+    if (pixels == NULL && memory__reclaim(size, NULL, NULL) == BRUCE_OK) pixels = memory__malloc(size);
+    return pixels;
+}
+
 void image__fit_size(
     uint32_t source_width, uint32_t source_height, bool fit, uint16_t *out_width, uint16_t *out_height
 ) {
@@ -50,7 +56,7 @@ bruce_result_t image__draw_scaled_pixels(
     if (out_width == 0 || out_height == 0 ||
         (size_t)out_width > SIZE_MAX / ((size_t)out_height * sizeof(uint16_t)))
         return BRUCE_ERR_RESOURCE_LIMIT;
-    uint16_t *scaled = memory__malloc((size_t)out_width * out_height * sizeof(*scaled));
+    uint16_t *scaled = image__malloc_pixels((size_t)out_width * out_height * sizeof(*scaled));
     if (scaled == NULL) return BRUCE_ERR_NO_MEMORY;
     for (uint16_t y = 0; y < out_height; ++y) {
         uint32_t source_y = (uint32_t)(((uint64_t)y * height) / out_height);

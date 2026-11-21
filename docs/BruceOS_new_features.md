@@ -183,7 +183,7 @@ The launcher menu is defined in `launcher.conf`:
     },
     "Power": "config power",
     "Install App Store": "appstore install",
-    "App Permissions": "permissions",
+    "App Settings": "appsettings",
     "Partitions": "bparted",
     "About": "config about"
   },

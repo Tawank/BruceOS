@@ -7,6 +7,7 @@
 #include "core_sdk/ext_mem_loader.h"
 
 #include "core/autostart/autostart.h"
+#include "core/cellular/cellular.h"
 #include "core/config/config.h"
 #include "core/device/device.h"
 #include "core/disk/disk.h"
@@ -42,7 +43,7 @@
 #include "modules/gps/gps_app.h"
 #include "modules/nrf24/nrf24_app.h"
 #include "modules/player/player_app.h"
-#include "modules/privileged/permissions/permissions_app.h"
+#include "modules/privileged/app_settings/app_settings_app.h"
 #include "modules/selftest/selftest.h"
 #include "modules/shell/shell_app.h"
 #include "modules/ssh/ssh_app.h"
@@ -77,7 +78,8 @@ static const bruce_app_descriptor_t s_default_apps[] = {
     {"menu",                 "Open the system menu",                                      "System",  system_menu_app_main,         0,     false},
     {"notification_service", "The notification service",                                  "System",  notification_service_main,    3072,  false},
     {"notify",               "Send a notification",                                       "System",  notify_app_main,              0,     false},
-    {"permissions",          "Manage application permissions",                            "System",  permissions_app_main,         8192,  false},
+    {"appsettings",          "Manage app permissions and app data",                       "System",  app_settings_app_main,        8192,  false},
+    {"permissions",          "Alias of appsettings",                                      "System",  app_settings_app_main,        8192,  false},
     {"process",              "List and manage processes",                                 "System",  process_app_main,             0,     false},
     {"reboot",               "Restart the device",                                        "System",  bnu_reboot_app_main,          0,     false},
     {"selftest",             "Hardware and Core self-tests",                              "System",  selftest_app_main,            8192,  false},
@@ -258,6 +260,7 @@ void app_main(void) {
     bool ui_ok = init_user_interface();
 
     app_runner__register_defaults();
+    cellular__start();
 
     autostart__run(ui_ok);
 

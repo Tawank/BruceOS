@@ -1,9 +1,10 @@
-#include "permissions_app.h"
+#include "app_settings_app.h"
 
 #include "args.h"
 #include "cJSON.h"
 
 #include "core_sdk/dialog.h"
+#include "core_sdk/format.h"
 #include "core_sdk/permission.h"
 #include "core_sdk/result.h"
 #include "core_sdk/runtime.h"
@@ -23,6 +24,7 @@
  * core/permission/permission.c's in-memory cache; only enumeration and
  * "forget" bypass it. This module is excluded from the core_sdk-only-headers
  * build check the same way modules/selftest and modules/device_bus are. */
+#include "core/appdata/appdata.h"
 #include "core/storage/storage.h"
 
 #include <stdio.h>
@@ -107,25 +109,65 @@ static size_t permissions__list_permissions(const char *app, permissions__entry_
  * this boot keeps answering from that cache (and would clobber this edit back
  * on its next unrelated permission__set() elsewhere) until reboot. Callers
  * are told this via the CLI/GUI copy below. */
+static bool permissions__forget_in(cJSON *app_obj, const bruce_permission_t *permission) {
+    bool changed = false;
+    for (int p = 0; p < BRUCE_PERMISSION_COUNT; ++p) {
+        if (permission != NULL && p != (int)*permission) continue;
+        const char *name = permission__name((bruce_permission_t)p);
+        if (cJSON_GetObjectItemCaseSensitive(app_obj, name) == NULL) continue;
+        cJSON_DeleteItemFromObjectCaseSensitive(app_obj, name);
+        changed = true;
+    }
+    return changed;
+}
+
+/* Keeps the app's appdata path, so its data is still found afterwards. */
 static bool permissions__forget(const char *app, const bruce_permission_t *permission) {
     cJSON *root = permissions__load_raw();
     cJSON *app_obj = cJSON_GetObjectItemCaseSensitive(root, app);
-    bool changed = false;
-    if (app_obj != NULL) {
-        if (permission == NULL) {
-            cJSON_DeleteItemFromObjectCaseSensitive(root, app);
-            changed = true;
-        } else {
-            const char *name = permission__name(*permission);
-            if (name != NULL && cJSON_GetObjectItemCaseSensitive(app_obj, name) != NULL) {
-                cJSON_DeleteItemFromObjectCaseSensitive(app_obj, name);
-                changed = true;
-            }
-        }
-    }
+    bool changed = cJSON_IsObject(app_obj) && permissions__forget_in(app_obj, permission);
+    if (changed && app_obj->child == NULL) cJSON_DeleteItemFromObjectCaseSensitive(root, app);
     bool saved = !changed || permissions__save_raw(root);
     cJSON_Delete(root);
     return changed && saved;
+}
+
+static bool permissions__forget_all(void) {
+    cJSON *root = permissions__load_raw();
+    cJSON *app_obj = root->child;
+    while (app_obj != NULL) {
+        cJSON *next = app_obj->next;
+        if (cJSON_IsObject(app_obj)) permissions__forget_in(app_obj, NULL);
+        if (!cJSON_IsObject(app_obj) || app_obj->child == NULL)
+            cJSON_Delete(cJSON_DetachItemViaPointer(root, app_obj));
+        app_obj = next;
+    }
+    bool saved = permissions__save_raw(root);
+    cJSON_Delete(root);
+    return saved;
+}
+
+static const char *app_settings__location(bool on_sd) { return on_sd ? "SD card" : "Internal"; }
+
+static void app_settings__usage_text(const char *app, char *out, size_t capacity) {
+    size_t bytes = 0;
+    bruce_result_t result = appdata__app_usage(app, &bytes);
+    if (result == BRUCE_ERR_INVALID_STATE) {
+        snprintf(out, capacity, "SD card missing");
+    } else if (result != BRUCE_OK) {
+        snprintf(out, capacity, "?");
+    } else {
+        format__bytes_human(bytes, out, capacity);
+    }
+}
+
+static const char *app_settings__error_text(bruce_result_t result) {
+    switch (result) {
+        case BRUCE_ERR_BUSY: return "Close the app first.";
+        case BRUCE_ERR_INVALID_STATE: return "No SD card inserted.";
+        case BRUCE_ERR_NO_MEMORY: return "Not enough memory.";
+        default: return "Storage error.";
+    }
 }
 
 static bool permissions__parse_state(const char *text, bool *out) {
@@ -145,7 +187,7 @@ static bool permissions__parse_state(const char *text, bool *out) {
 /* CLI                                                                        */
 /* -------------------------------------------------------------------------- */
 
-static int permissions_app__list_cli(void) {
+static int app_settings__list_cli(void) {
     permissions__app_t apps[PERMISSIONS__MAX_APPS];
     size_t app_count = permissions__list_apps(apps, PERMISSIONS__MAX_APPS);
     if (app_count == 0) {
@@ -169,7 +211,7 @@ static int permissions_app__list_cli(void) {
     return BRUCE_OK;
 }
 
-static int permissions_app__get_cli(const char *app, const char *permission_name) {
+static int app_settings__get_cli(const char *app, const char *permission_name) {
     bruce_permission_t permission;
     if (app == NULL || permission_name == NULL || !permission__from_name(permission_name, &permission)) {
         stdio__printf("Unknown permission: %s\n", permission_name != NULL ? permission_name : "(none)");
@@ -185,12 +227,12 @@ static int permissions_app__get_cli(const char *app, const char *permission_name
     return BRUCE_OK;
 }
 
-static int permissions_app__set_cli(const char *app, const char *permission_name, const char *state) {
+static int app_settings__set_cli(const char *app, const char *permission_name, const char *state) {
     bruce_permission_t permission;
     bool allowed = false;
     if (app == NULL || permission_name == NULL || !permission__from_name(permission_name, &permission) ||
         !permissions__parse_state(state, &allowed)) {
-        stdio__printf("Usage: permissions set <app> <permission> <allow|deny>\n");
+        stdio__printf("Usage: appsettings set <app> <permission> <allow|deny>\n");
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
     bruce_result_t result = permission__set(app, permission, allowed);
@@ -202,7 +244,7 @@ static int permissions_app__set_cli(const char *app, const char *permission_name
     return BRUCE_OK;
 }
 
-static int permissions_app__forget_cli(const char *app, const char *permission_name) {
+static int app_settings__forget_cli(const char *app, const char *permission_name) {
     if (app == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     bruce_permission_t permission;
     bool has_permission = permission_name != NULL;
@@ -219,13 +261,12 @@ static int permissions_app__forget_cli(const char *app, const char *permission_n
     return BRUCE_OK;
 }
 
-static int permissions_app__wipe_cli(const char *confirm) {
+static int app_settings__wipe_cli(const char *confirm) {
     if (confirm == NULL || strcmp(confirm, "confirm") != 0) {
         stdio__printf("Refusing to wipe every saved decision without 'confirm'\n");
         return BRUCE_ERR_INVALID_ARGUMENT;
     }
-    bool removed =
-        storage__remove_internal(PERMISSIONS__FILE_PATH) || !storage__exists_internal(PERMISSIONS__FILE_PATH);
+    bool removed = permissions__forget_all();
     stdio__printf(
         removed ? "All saved permission decisions cleared. Apps already checked this boot keep answering "
                   "from cache until reboot.\n"
@@ -234,117 +275,205 @@ static int permissions_app__wipe_cli(const char *confirm) {
     return removed ? BRUCE_OK : BRUCE_ERR_IO;
 }
 
+static int app_settings__data_cli(const char *only_app) {
+    permissions__app_t apps[PERMISSIONS__MAX_APPS];
+    size_t app_count = only_app != NULL ? 1 : permissions__list_apps(apps, PERMISSIONS__MAX_APPS);
+    if (only_app != NULL) snprintf(apps[0].name, sizeof(apps[0].name), "%s", only_app);
+    stdio__printf("Default for new apps: %s\n", app_settings__location(appdata__default_on_sd()));
+    for (size_t i = 0; i < app_count; ++i) {
+        char path[BRUCE_STORAGE_PATH_MAX] = "?";
+        char usage[24];
+        appdata__app_path(apps[i].name, path, sizeof(path));
+        app_settings__usage_text(apps[i].name, usage, sizeof(usage));
+        stdio__printf("%-24s %-10s %s\n", apps[i].name, usage, path);
+    }
+    return BRUCE_OK;
+}
+
+static bool app_settings__parse_location(const char *text, bool *out_on_sd) {
+    if (text == NULL) return false;
+    if (strcmp(text, "sd") == 0 || strcmp(text, "sdcard") == 0) {
+        *out_on_sd = true;
+        return true;
+    }
+    if (strcmp(text, "internal") == 0) {
+        *out_on_sd = false;
+        return true;
+    }
+    return false;
+}
+
+static int app_settings__move_cli(const char *app, const char *location) {
+    bool on_sd = false;
+    if (app == NULL || !app_settings__parse_location(location, &on_sd)) {
+        stdio__printf("Usage: appsettings move <app> <internal|sd>\n");
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    bruce_result_t result = appdata__move(app, on_sd);
+    stdio__printf(
+        "%s: %s\n", app, result == BRUCE_OK ? app_settings__location(on_sd) : app_settings__error_text(result)
+    );
+    return result;
+}
+
+static int app_settings__clear_cli(const char *app, const char *confirm) {
+    if (app == NULL || confirm == NULL || strcmp(confirm, "confirm") != 0) {
+        stdio__printf("Usage: appsettings clear <app> confirm\n");
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    bruce_result_t result = appdata__clear(app);
+    stdio__printf("%s: %s\n", app, result == BRUCE_OK ? "data cleared" : app_settings__error_text(result));
+    return result;
+}
+
+static int app_settings__default_cli(const char *location) {
+    bool on_sd = false;
+    if (location == NULL) {
+        stdio__printf("%s\n", app_settings__location(appdata__default_on_sd()));
+        return BRUCE_OK;
+    }
+    if (!app_settings__parse_location(location, &on_sd)) {
+        stdio__printf("Usage: appsettings default [internal|sd]\n");
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    bruce_result_t result = appdata__set_default_on_sd(on_sd);
+    stdio__printf("New apps store data on: %s\n", app_settings__location(on_sd));
+    return result;
+}
+
 /* -------------------------------------------------------------------------- */
 /* GUI                                                                        */
 /* -------------------------------------------------------------------------- */
 
-static void permissions_app__gui_app(const char *app) {
+#define APP_SETTINGS__TITLE "App Settings"
+
+static void app_settings__set_choice(
+    bruce_dialog_choice_t *choice, const char *label, const char *value, const char *right
+) {
+    choice->label = label;
+    choice->value = value;
+    choice->icon_name = NULL;
+    choice->right_text = right;
+}
+
+static bool app_settings__confirm(const char *title, const char *message, const char *action) {
+    bruce_dialog_choice_t choices[2];
+    app_settings__set_choice(&choices[0], "Cancel", "cancel", NULL);
+    app_settings__set_choice(&choices[1], action, "ok", NULL);
+    size_t selected = 0;
+    return dialog__choice_launcher(title, message, choices, 2, &selected) == BRUCE_OK && selected == 1;
+}
+
+static void app_settings__show_result(bruce_result_t result, const char *done) {
+    (void)dialog__message(
+        result == BRUCE_OK ? BRUCE_DIALOG_INFO : BRUCE_DIALOG_ERROR,
+        APP_SETTINGS__TITLE,
+        result == BRUCE_OK ? done : app_settings__error_text(result)
+    );
+}
+
+static void app_settings__gui_app(const char *app) {
     for (;;) {
         permissions__entry_t entries[BRUCE_PERMISSION_COUNT];
         size_t entry_count = permissions__list_permissions(app, entries, BRUCE_PERMISSION_COUNT);
-        if (entry_count == 0) return;
+        bool on_sd = appdata__app_on_sd(app);
 
-        char labels[BRUCE_PERMISSION_COUNT][40];
-        bruce_dialog_choice_t choices[BRUCE_PERMISSION_COUNT + 2];
+        char labels[BRUCE_PERMISSION_COUNT][24];
+        char storage_label[32];
+        char usage[24];
+        bruce_dialog_choice_t choices[BRUCE_PERMISSION_COUNT + 4];
+        size_t count = 0;
         for (size_t i = 0; i < entry_count; ++i) {
             bool allowed = false;
             bruce_result_t saved = permission__get_saved(app, entries[i].permission, &allowed);
-            snprintf(
+            snprintf(labels[i], sizeof(labels[i]), "%s", permission__name(entries[i].permission));
+            app_settings__set_choice(
+                &choices[count++],
                 labels[i],
-                sizeof(labels[i]),
-                "%s: %s",
                 permission__name(entries[i].permission),
                 saved == BRUCE_OK ? (allowed ? "Allow" : "Deny") : "Unknown"
             );
-            choices[i].label = labels[i];
-            choices[i].value = permission__name(entries[i].permission);
-            choices[i].icon_name = NULL;
-            choices[i].right_text = saved == BRUCE_OK ? (allowed ? "Allow" : "Deny") : "Unknown";
         }
-        choices[entry_count].label = "Forget this app";
-        choices[entry_count].value = "forget";
-        choices[entry_count].icon_name = NULL;
-        choices[entry_count].right_text = NULL;
-        choices[entry_count + 1].label = "Back";
-        choices[entry_count + 1].value = "back";
-        choices[entry_count + 1].icon_name = NULL;
-        choices[entry_count + 1].right_text = NULL;
+        snprintf(storage_label, sizeof(storage_label), "Data on %s", app_settings__location(on_sd));
+        app_settings__usage_text(app, usage, sizeof(usage));
+        app_settings__set_choice(&choices[count++], storage_label, "move", usage);
+        app_settings__set_choice(&choices[count++], "Clear data", "clear", NULL);
+        if (entry_count > 0)
+            app_settings__set_choice(&choices[count++], "Forget permissions", "forget", NULL);
+        app_settings__set_choice(&choices[count++], "Back", "back", NULL);
 
-        char title[BRUCE_PERMISSION_FILE_NAME_MAX + 16];
-        snprintf(title, sizeof(title), "%s permissions", app);
         size_t selected = 0;
-        bruce_result_t result = dialog__choice_launcher(title, NULL, choices, entry_count + 2, &selected);
-        if (result == BRUCE_ERR_CANCELLED || strcmp(choices[selected].value, "back") == 0) return;
-        if (result != BRUCE_OK) return;
+        bruce_result_t result = dialog__choice_launcher(app, NULL, choices, count, &selected);
+        if (result != BRUCE_OK || strcmp(choices[selected].value, "back") == 0) return;
+        const char *value = choices[selected].value;
 
-        if (strcmp(choices[selected].value, "forget") == 0) {
+        if (strcmp(value, "move") == 0) {
+            const char *target = app_settings__location(!on_sd);
+            char message[64];
+            snprintf(message, sizeof(message), "Move %s data to %s?", app, target);
+            if (app_settings__confirm("Move data", message, "Move")) {
+                app_settings__show_result(
+                    appdata__move(app, !on_sd), on_sd ? "Moved to internal storage." : "Moved to the SD card."
+                );
+            }
+        } else if (strcmp(value, "clear") == 0) {
+            if (app_settings__confirm("Clear data", "Delete every file this app saved?", "Clear")) {
+                app_settings__show_result(appdata__clear(app), "Data cleared.");
+            }
+        } else if (strcmp(value, "forget") == 0) {
             bool forgot = permissions__forget(app, NULL);
             (void)dialog__message(
                 forgot ? BRUCE_DIALOG_INFO : BRUCE_DIALOG_ERROR,
-                "App permissions",
+                APP_SETTINGS__TITLE,
                 forgot ? "Forgotten. Takes effect after reboot." : "Nothing to forget."
             );
-            return;
+        } else {
+            bool allowed = false;
+            bruce_result_t saved = permission__get_saved(app, entries[selected].permission, &allowed);
+            (void)permission__set(app, entries[selected].permission, saved != BRUCE_OK || !allowed);
         }
-
-        bool allowed = false;
-        bruce_result_t saved = permission__get_saved(app, entries[selected].permission, &allowed);
-        (void)permission__set(app, entries[selected].permission, saved != BRUCE_OK || !allowed);
     }
 }
 
-static int permissions_app__gui(void) {
+static int app_settings__gui(void) {
     for (;;) {
         permissions__app_t apps[PERMISSIONS__MAX_APPS];
         size_t app_count = permissions__list_apps(apps, PERMISSIONS__MAX_APPS);
-        if (app_count == 0) {
-            (void
-            )dialog__message(BRUCE_DIALOG_INFO, "App permissions", "No app has requested a permission yet");
-            return BRUCE_OK;
-        }
+        bool default_sd = appdata__default_on_sd();
 
-        bruce_dialog_choice_t choices[PERMISSIONS__MAX_APPS + 2];
+        bruce_dialog_choice_t choices[PERMISSIONS__MAX_APPS + 3];
+        size_t count = 0;
         for (size_t i = 0; i < app_count; ++i) {
-            choices[i].label = apps[i].name;
-            choices[i].value = apps[i].name;
-            choices[i].icon_name = NULL;
-            choices[i].right_text = NULL;
+            app_settings__set_choice(
+                &choices[count++], apps[i].name, apps[i].name, appdata__app_on_sd(apps[i].name) ? "SD" : NULL
+            );
         }
-        choices[app_count].label = "Wipe all saved decisions";
-        choices[app_count].value = "wipe";
-        choices[app_count].icon_name = NULL;
-        choices[app_count].right_text = NULL;
-        choices[app_count + 1].label = "Back";
-        choices[app_count + 1].value = "back";
-        choices[app_count + 1].icon_name = NULL;
-        choices[app_count + 1].right_text = NULL;
+        app_settings__set_choice(
+            &choices[count++], "New apps store data", "default", app_settings__location(default_sd)
+        );
+        app_settings__set_choice(&choices[count++], "Wipe all permissions", "wipe", NULL);
+        app_settings__set_choice(&choices[count++], "Back", "back", NULL);
 
         size_t selected = 0;
-        bruce_result_t result =
-            dialog__choice_launcher("App permissions", NULL, choices, app_count + 2, &selected);
-        if (result == BRUCE_ERR_CANCELLED || strcmp(choices[selected].value, "back") == 0) return BRUCE_OK;
-        if (result != BRUCE_OK) return result;
-
-        if (strcmp(choices[selected].value, "wipe") == 0) {
-            bruce_dialog_choice_t confirm_choices[2] = {
-                {.label = "Cancel",   .value = "cancel"},
-                {.label = "Wipe all", .value = "wipe"  },
-            };
-            size_t confirm_selected = 0;
-            if (dialog__choice_launcher(
-                    "Wipe all?",
-                    "Clears every app's saved permission decisions",
-                    confirm_choices,
-                    2,
-                    &confirm_selected
-                ) == BRUCE_OK &&
-                strcmp(confirm_choices[confirm_selected].value, "wipe") == 0) {
-                (void)permissions_app__wipe_cli("confirm");
-            }
-            continue;
+        bruce_result_t result = dialog__choice_launcher(APP_SETTINGS__TITLE, NULL, choices, count, &selected);
+        if (result == BRUCE_ERR_CANCELLED ||
+            (result == BRUCE_OK && strcmp(choices[selected].value, "back") == 0)) {
+            return BRUCE_OK;
         }
+        if (result != BRUCE_OK) return result;
+        const char *value = choices[selected].value;
 
-        permissions_app__gui_app(apps[selected].name);
+        if (strcmp(value, "default") == 0) {
+            (void)appdata__set_default_on_sd(!default_sd);
+        } else if (strcmp(value, "wipe") == 0) {
+            if (app_settings__confirm(
+                    "Wipe all?", "Clears every app's saved permission decisions", "Wipe all"
+                )) {
+                (void)app_settings__wipe_cli("confirm");
+            }
+        } else {
+            app_settings__gui_app(apps[selected].name);
+        }
     }
 }
 
@@ -352,17 +481,21 @@ static int permissions_app__gui(void) {
 /* Entry point                                                               */
 /* -------------------------------------------------------------------------- */
 
-int permissions_app_main(int argc, char **argv) {
+int app_settings_app_main(int argc, char **argv) {
     ArgParser *root = ap_new_parser();
     if (root == NULL) return BRUCE_ERR_NO_MEMORY;
-    ap_set_helptext(root, "View and manage saved app permission decisions.");
+    ap_set_helptext(root, "Manage app permissions and app data.");
 
     ArgParser *list = ap_new_cmd(root, "list");
     ArgParser *get = ap_new_cmd(root, "get");
     ArgParser *set = ap_new_cmd(root, "set");
     ArgParser *forget = ap_new_cmd(root, "forget");
     ArgParser *wipe = ap_new_cmd(root, "wipe");
-    ArgParser *parsers[] = {list, get, set, forget, wipe};
+    ArgParser *data = ap_new_cmd(root, "data");
+    ArgParser *move = ap_new_cmd(root, "move");
+    ArgParser *clear = ap_new_cmd(root, "clear");
+    ArgParser *default_cmd = ap_new_cmd(root, "default");
+    ArgParser *parsers[] = {list, get, set, forget, wipe, data, move, clear, default_cmd};
     for (size_t i = 0; i < sizeof(parsers) / sizeof(parsers[0]); ++i) {
         if (parsers[i] == NULL) {
             ap_free(root);
@@ -385,6 +518,16 @@ int permissions_app_main(int argc, char **argv) {
     );
     ap_set_helptext(wipe, "Delete every saved permission decision for every app.");
     ap_add_required_arg(wipe, "confirm", "Must be the literal word 'confirm'");
+    ap_set_helptext(data, "Show where apps keep their data and how much they use.");
+    ap_add_optional_arg(data, "app", "App file name; omit for every app");
+    ap_set_helptext(move, "Move an app's data to internal storage or the SD card.");
+    ap_add_required_arg(move, "app", "App file name, e.g. game.elf");
+    ap_add_required_arg(move, "location", "internal or sd");
+    ap_set_helptext(clear, "Delete every file an app saved.");
+    ap_add_required_arg(clear, "app", "App file name, e.g. game.elf");
+    ap_add_required_arg(clear, "confirm", "Must be the literal word 'confirm'");
+    ap_set_helptext(default_cmd, "Show or set where new apps store their data.");
+    ap_add_optional_arg(default_cmd, "location", "internal or sd");
 
     if (!ap_parse(root, argc, argv)) {
         ap_status_t status = ap_get_status(root);
@@ -397,19 +540,27 @@ int permissions_app_main(int argc, char **argv) {
     bool gui = runtime__is_gui_requested();
     int result;
     if (root_action == NULL) {
-        result = gui ? permissions_app__gui() : permissions_app__list_cli();
+        result = gui ? app_settings__gui() : app_settings__list_cli();
     } else if (root_action == list) {
-        result = permissions_app__list_cli();
+        result = app_settings__list_cli();
     } else if (root_action == get) {
-        result = permissions_app__get_cli(ap_get_arg(get, "app"), ap_get_arg(get, "permission"));
+        result = app_settings__get_cli(ap_get_arg(get, "app"), ap_get_arg(get, "permission"));
     } else if (root_action == set) {
-        result = permissions_app__set_cli(
+        result = app_settings__set_cli(
             ap_get_arg(set, "app"), ap_get_arg(set, "permission"), ap_get_arg(set, "state")
         );
     } else if (root_action == forget) {
-        result = permissions_app__forget_cli(ap_get_arg(forget, "app"), ap_get_arg(forget, "permission"));
+        result = app_settings__forget_cli(ap_get_arg(forget, "app"), ap_get_arg(forget, "permission"));
     } else if (root_action == wipe) {
-        result = permissions_app__wipe_cli(ap_get_arg(wipe, "confirm"));
+        result = app_settings__wipe_cli(ap_get_arg(wipe, "confirm"));
+    } else if (root_action == data) {
+        result = app_settings__data_cli(ap_get_arg(data, "app"));
+    } else if (root_action == move) {
+        result = app_settings__move_cli(ap_get_arg(move, "app"), ap_get_arg(move, "location"));
+    } else if (root_action == clear) {
+        result = app_settings__clear_cli(ap_get_arg(clear, "app"), ap_get_arg(clear, "confirm"));
+    } else if (root_action == default_cmd) {
+        result = app_settings__default_cli(ap_get_arg(default_cmd, "location"));
     } else {
         result = BRUCE_ERR_INVALID_ARGUMENT;
     }

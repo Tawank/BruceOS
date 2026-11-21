@@ -82,6 +82,12 @@ typedef struct {
     size_t wifiCredentialCount;
     const char *wifiMac;
 
+    /* Storage: where new apps get their appdata folder. */
+    bool appdataOnSd;
+
+    /* Cellular modem kept on, so calls come in. */
+    bool cellularEnabled;
+
     /* Misc */
     bruce_config_startup_apps_t startup;
     int devMode;
@@ -115,6 +121,14 @@ void config__get_colors_internal(
  * where text and primary are both black) whichever of text or background
  * stands out more from `fill`. */
 uint16_t config__high_contrast_text_on(uint16_t fill);
+
+/* Default appdata location for new apps (core/appdata). */
+bool config__get_appdata_on_sd(void);
+bruce_result_t config__set_appdata_on_sd(bool value);
+
+/* Whether the cellular modem is on (core/cellular). */
+bool config__get_cellular_enabled(void);
+bruce_result_t config__set_cellular_enabled(bool value);
 
 /* Compatibility initializer. New callers should use config__init(). */
 void config__init_defaults(void);

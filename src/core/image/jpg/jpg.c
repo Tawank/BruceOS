@@ -152,7 +152,7 @@ static bruce_result_t image__jpeg_resample_to_fit(
     if (target_width == 0 || target_height == 0 ||
         (size_t)target_width > SIZE_MAX / ((size_t)target_height * sizeof(uint16_t)))
         return BRUCE_ERR_RESOURCE_LIMIT;
-    uint16_t *scaled = memory__malloc((size_t)target_width * target_height * sizeof(uint16_t));
+    uint16_t *scaled = image__malloc_pixels((size_t)target_width * target_height * sizeof(uint16_t));
     if (scaled == NULL) return BRUCE_ERR_NO_MEMORY;
     for (uint16_t y = 0; y < target_height; ++y) {
         size_t source_row = (size_t)y * *height / target_height;
@@ -195,7 +195,7 @@ static bruce_result_t image__decode_jpeg_baseline(
         return BRUCE_ERR_RESOURCE_LIMIT;
     size_t output_size = (size_t)output.width * output.height * sizeof(uint16_t);
     if (output_size > UINT32_MAX) return BRUCE_ERR_RESOURCE_LIMIT;
-    uint16_t *pixels = memory__malloc(output_size);
+    uint16_t *pixels = image__malloc_pixels(output_size);
     if (pixels == NULL) return BRUCE_ERR_NO_MEMORY;
     config.outbuf = (uint8_t *)pixels;
     config.outbuf_size = output_size;
@@ -348,7 +348,7 @@ static bruce_result_t image__decode_jpeg_progressive_attempt(
     }
 
     size_t output_size = decoder.output_width * decoder.output_height * sizeof(uint16_t);
-    pixels = memory__malloc(output_size);
+    pixels = image__malloc_pixels(output_size);
     if (pixels == NULL) {
         jpeg_destroy_decompress(&decoder);
         return BRUCE_ERR_NO_MEMORY;

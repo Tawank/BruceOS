@@ -3,6 +3,7 @@
 #include "board_i2c.h"
 
 #include "core/display/display.h"
+#include "core/cellular/cellular.h"
 #include "core/gps/gps.h"
 
 #include "core_sdk/device.h"
@@ -68,6 +69,7 @@ static void device__power_off_task(void *context) {
     /* An e-paper panel keeps its picture without power; don't let it change now. */
     display__freeze(true);
     gps__power_off();
+    cellular__power_off();
 #if CONFIG_BRUCE_POWER_HOLD_GPIO >= 0
     gpio_config_t cfg = {
         .pin_bit_mask = 1ULL << CONFIG_BRUCE_POWER_HOLD_GPIO,

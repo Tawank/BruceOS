@@ -19,11 +19,13 @@
 #define PERMISSION__DIRECTORY "/config"
 #define PERMISSION__FILE_PATH PERMISSION__DIRECTORY "/permissions.json"
 #define PERMISSION__MAX_FILES 32
+#define PERMISSION__APPDATA_KEY "appdata"
 
 typedef struct {
     char file_name[BRUCE_PERMISSION_FILE_NAME_MAX];
     bool known[BRUCE_PERMISSION_COUNT];
     bool allowed[BRUCE_PERMISSION_COUNT];
+    char appdata[PERMISSION__APPDATA_PATH_MAX];
 } permission__file_entry_t;
 
 static const char *const s_permission_names[BRUCE_PERMISSION_COUNT] = {
@@ -44,6 +46,7 @@ static const char *const s_permission_names[BRUCE_PERMISSION_COUNT] = {
     [BRUCE_PERMISSION_CONFIG] = "config",
     [BRUCE_PERMISSION_SERIAL] = "serial",
     [BRUCE_PERMISSION_SSH] = "ssh",
+    [BRUCE_PERMISSION_PHONE] = "phone",
 };
 
 static StaticSemaphore_t s_mutex_storage;
@@ -146,6 +149,10 @@ static bruce_result_t permission__load_locked(void) {
             s_loaded = false;
             return BRUCE_ERR_NO_MEMORY;
         }
+        const cJSON *appdata = cJSON_GetObjectItemCaseSensitive(file_item, PERMISSION__APPDATA_KEY);
+        if (cJSON_IsString(appdata) && strlen(appdata->valuestring) < sizeof(entry->appdata)) {
+            strcpy(entry->appdata, appdata->valuestring);
+        }
         const cJSON *perm_item;
         cJSON_ArrayForEach(perm_item, file_item) {
             if (perm_item->string == NULL || !cJSON_IsNumber(perm_item)) continue;
@@ -177,6 +184,9 @@ static bool permission__save_locked(void) {
         for (int p = 0; p < BRUCE_PERMISSION_COUNT; ++p) {
             if (!s_files[i].known[p]) continue;
             cJSON_AddNumberToObject(file_obj, s_permission_names[p], s_files[i].allowed[p] ? 1 : 0);
+        }
+        if (s_files[i].appdata[0] != '\0') {
+            cJSON_AddStringToObject(file_obj, PERMISSION__APPDATA_KEY, s_files[i].appdata);
         }
     }
 
@@ -326,7 +336,7 @@ permission__preflight(const char *file_name, const char *const *permission_names
      * including entries this process's earlier launches already cached -
      * back over /config/permissions.json on every single app launch. That
      * would silently resurrect decisions removed out-of-band (e.g.
-     * modules/privileged/permissions's "forget", which edits the file
+     * modules/privileged/app_settings's "forget", which edits the file
      * directly and has no way to invalidate this cache), undoing a forget on
      * the very next launch instead of letting it take effect on reboot as
      * documented. */
@@ -379,6 +389,40 @@ bruce_result_t permission__set(const char *file_name, bruce_permission_t permiss
     permission__unlock();
 
     return permission__save() ? BRUCE_OK : BRUCE_ERR_IO;
+}
+
+bool permission__get_appdata(const char *file_name, char *out_path, size_t capacity) {
+    if (file_name == NULL || out_path == NULL || capacity == 0 || permission__ensure_loaded() != BRUCE_OK) {
+        return false;
+    }
+    permission__lock();
+    permission__file_entry_t *entry = permission__find_locked(file_name);
+    bool found = entry != NULL && entry->appdata[0] != '\0' && strlen(entry->appdata) < capacity;
+    if (found) strcpy(out_path, entry->appdata);
+    permission__unlock();
+    return found;
+}
+
+bruce_result_t permission__set_appdata(const char *file_name, const char *path) {
+    if (file_name == NULL || file_name[0] == '\0' || strlen(file_name) >= BRUCE_PERMISSION_FILE_NAME_MAX ||
+        path == NULL || strlen(path) >= PERMISSION__APPDATA_PATH_MAX) {
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    }
+    bruce_result_t loaded = permission__ensure_loaded();
+    if (loaded != BRUCE_OK) return loaded;
+
+    permission__lock();
+    permission__file_entry_t *entry = permission__find_or_create_locked(file_name);
+    if (entry == NULL) {
+        bruce_result_t result =
+            s_file_count == PERMISSION__MAX_FILES ? BRUCE_ERR_RESOURCE_LIMIT : BRUCE_ERR_NO_MEMORY;
+        permission__unlock();
+        return result;
+    }
+    strcpy(entry->appdata, path);
+    bool saved = permission__save_locked();
+    permission__unlock();
+    return saved ? BRUCE_OK : BRUCE_ERR_IO;
 }
 
 bool permission__test_reset(void) {

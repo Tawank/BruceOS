@@ -456,6 +456,25 @@ boards without GPS `gps__is_available()` is false and `gps__read()` returns
 `BRUCE_ERR_UNSUPPORTED`. The built-in `gps` command prints the position
 every second.
 
+### Cellular
+
+`core/cellular` drives a SIMCom A76xx modem (`BRUCE_CELLULAR_*` in Kconfig;
+the T-Deck MAX's A7682E on UART2). One Core task owns the UART: it powers the
+modem with LilyGO's sequence (supply on, PWRKEY pulsed only when `AT` gets no
+answer), configures it (`ATE0`, `+CLIP`, `+CREG`/`+CEREG` reports, `IRA`
+charset), polls SIM, registration, operator and signal every 20 seconds and
+the call list (`AT+CLCC`) every second during a call. API calls (permission
+`phone`) are queued to that task and wait for the command's final result.
+`cellular__set_enabled()` is saved as `cellular.enabled` in `bruce.conf`, and
+an enabled modem is powered on at boot so calls can come in. A ringing call
+routes the speaker and mic to the modem (an XL9555 pin), shows a notification
+and runs `GUI=1 phone incoming` (the phone app is single-instance, so a
+running one comes to the front); a call that
+ends unanswered shows a missed-call notification. The last 16 ended calls
+since boot are kept with increasing sequence numbers for
+`cellular__get_call_log()`. USSD replies in UCS2 are decoded to UTF-8. The
+line parser is pure and covered by the `cellular/parse` selftest.
+
 ### Clock and time
 
 Core keeps the libc system clock in UTC. `clock__get_utc()` reads it directly,
@@ -736,7 +755,7 @@ Permissions are coarse-grained.  The current vocabulary is:
 
 ```
 http, wifi, bt, gps, rf, input, gpio, ir, rfid, microphone,
-hid, execute, process, storage, config, serial, ssh
+hid, execute, process, storage, config, serial, ssh, phone
 ```
 
 `gpio` includes raw GPIO, I²C, and SPI. `rf` includes Sub-GHz, LoRa, and NRF24. `audio` is not
@@ -1122,6 +1141,20 @@ temporary files; all other mounted paths are usable by a storage-granted app.
 permission policy and succeeds when that directory already exists. Public
 remove, same-volume rename, and volume-usage queries enforce the same normalized
 path and protected-configuration policy.
+
+Every app has an appdata folder for its files, `/appdata/<app>` on internal
+storage or `/sdcard/appdata/<app>`, where `<app>` is the permission key
+without its extension. A relative storage path is resolved inside that folder
+and needs no `storage` permission; `..` cannot leave it. The folder's path is
+saved as `"appdata"` in the app's `/config/permissions.json` entry when the
+app first uses it, taking the default location from `storage.appdataOnSd` in
+`bruce.conf` (internal when no card is mounted), so changing the default
+never moves existing apps. A folder on a missing SD card returns
+`BRUCE_ERR_INVALID_STATE`. `appdata__read()`/`appdata__write()` read and
+atomically replace whole files. App Settings moves a folder between internal
+storage and SD (copy, save the new path, delete the old copy), clears it, and
+shows its size; both refuse while the app runs. App settings stay in
+`/config/<app>.conf` (`app_config`).
 
 Raw IPv4 TCP uses process-owned opaque handles through `tcp__connect()`,
 `tcp__listen()`, `tcp__accept()`, `tcp__read()`, `tcp__write()`, and

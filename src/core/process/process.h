@@ -165,6 +165,9 @@ bruce_result_t process_registry__current_context(
     bool *out_built_in, char *out_permission_key, size_t permission_key_size, bool *out_gui_requested
 );
 
+/* Whether the app with this file name (e.g. "maps.elf", its permission key) is running. */
+bool process_registry__is_app_running(const char *app_name);
+
 /* Opaque per-process "sandbox exit target" slot, exactly one per process.
  * Sandboxed loader modules (currently the ELF loader) use this to implement
  * libc exit()/abort() semantics for code they run with no real OS process

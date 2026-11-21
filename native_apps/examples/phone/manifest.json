@@ -1,0 +1,11 @@
+{
+  "appName": "Phone",
+  "entryPoint": "app_main",
+  "appIcon": "icon:phone",
+  "coreAbiVersion": 4,
+  "permissions": ["phone"],
+  "singleInstance": true,
+  "stackSize": 12288,
+  "heapSize": 65536,
+  "targets": ["elf"]
+}

@@ -17,6 +17,11 @@ bool image__reader_read_u8(image_reader_t *reader, uint8_t *out);
 bool image__reader_read_u16(image_reader_t *reader, uint16_t *out);
 bool image__reader_skip(image_reader_t *reader, size_t size);
 
+/* memory__malloc() for a pixel buffer, which can be screen-sized: when no
+ * free block is big enough it reclaims memory (the display's framebuffer)
+ * for the rest of the calling process and tries again. */
+void *image__malloc_pixels(size_t size);
+
 void image__fit_size(
     uint32_t source_width, uint32_t source_height, bool fit, uint16_t *out_width, uint16_t *out_height
 );

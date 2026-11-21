@@ -47,6 +47,8 @@
 #include "memory_test.h"
 #include "net_test.h"
 #include "notification_test.h"
+#include "appdata_test.h"
+#include "cellular_test.h"
 #include "gps_test.h"
 #include "nrf24_test.h"
 #include "partition_manager_test.h"
@@ -109,6 +111,11 @@ static const selftest__case_t selftest__cases[] = {
     SELFTEST_CASE(selftest__run_process_status_case),
     SELFTEST_CASE(selftest__run_process_killed_case),
     SELFTEST_CASE(selftest__run_process_clear_signal_case),
+    /* Before registry growth: on a board without PSRAM the viewer needs two
+     * screen-sized blocks of internal RAM (framebuffer and decoded image),
+     * and the process stress cases leave the heap too fragmented for that. */
+    SELFTEST_CASE(selftest__run_image_stdin_pipe_case),
+    SELFTEST_CASE(selftest__run_image_redraw_on_regain_case),
     SELFTEST_CASE(selftest__run_process_registry_growth_case),
     SELFTEST_CASE(selftest__run_process_completion_retention_case),
     SELFTEST_CASE(selftest__run_process_resource_growth_case),
@@ -194,8 +201,6 @@ static const selftest__case_t selftest__cases[] = {
     SELFTEST_CASE(selftest__run_wasm_manifest_case),
     SELFTEST_CASE(selftest__run_wasm_bruce_abi_case),
     SELFTEST_CASE(selftest__run_js_loader_case),
-    SELFTEST_CASE(selftest__run_image_stdin_pipe_case),
-    SELFTEST_CASE(selftest__run_image_redraw_on_regain_case),
     SELFTEST_CASE(selftest__run_terminal_named_case),
     SELFTEST_CASE(selftest__run_terminal_path_case),
     SELFTEST_CASE(selftest__run_terminal_invalid_case),
@@ -288,6 +293,9 @@ static const selftest__case_t selftest__cases[] = {
     SELFTEST_CASE(selftest__run_nrf24_permission_denied_case),
     SELFTEST_CASE(selftest__run_nrf24_validation_case),
     SELFTEST_CASE(selftest__run_gps_parse_case),
+    SELFTEST_CASE(selftest__run_appdata_sandbox_case),
+    SELFTEST_CASE(selftest__run_appdata_manage_case),
+    SELFTEST_CASE(selftest__run_cellular_parse_case),
     SELFTEST_CASE(selftest__run_gpio_bus_permission_denied_case),
     SELFTEST_CASE(selftest__run_gpio_bus_validation_case),
     SELFTEST_CASE(selftest__run_input_poll_case),

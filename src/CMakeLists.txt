@@ -23,6 +23,8 @@ set(BRUCE_SELFTEST_SOURCES
     "modules/selftest/filetype_test.c"
     "modules/selftest/gpio_bus_test.c"
     "modules/selftest/gps_test.c"
+    "modules/selftest/appdata_test.c"
+    "modules/selftest/cellular_test.c"
     "modules/selftest/core_launcher_test.c"
     "modules/selftest/hash_test.c"
     "modules/selftest/html_test.c"
@@ -66,6 +68,7 @@ idf_component_register(SRCS
                     "main.c"
                      "core/app_config/app_config.c"
                      "core/app_runner/app_runner.c"
+                     "core/appdata/appdata.c"
                      "core/archive/archive.c"
                      "core/archive/archive_zip.c"
                      "core/audio/audio.c"
@@ -74,6 +77,7 @@ idf_component_register(SRCS
                     "core/bluetooth/bluetooth.c"
                     "${BRUCE_BLUETOOTH_BACKEND_SRC}"
                     "core/bluetooth/bluetooth_hid.c"
+                    "core/cellular/cellular.c"
                     "core/clock/clock.c"
                     "core/compress/compress.c"
                     "core/config/config.c"
@@ -270,7 +274,7 @@ idf_component_register(SRCS
                     "modules/webui/webui_auth.c"
                     "modules/webui/webui_files.c"
                     "modules/webui/webui_system.c"
-                    "modules/privileged/permissions/permissions_app.c"
+                    "modules/privileged/app_settings/app_settings_app.c"
                     REQUIRES
                     args
                     ncurses
@@ -803,7 +807,7 @@ endforeach()
 #   process-scoped i2c__open() cannot be used at that boot stage, so this
 #   module is Core-private by necessity rather than SDK-only like other
 #   built-ins.
-# - modules/privileged/permissions reads/writes /config/permissions.json
+# - modules/privileged/app_settings reads/writes /config/permissions.json
 #   directly via core/storage/storage.h's storage__read_file()/
 #   storage__write_file_atomic(); that path is unconditionally refused by the
 #   public core_sdk/storage.h storage__open()/storage__list() (see

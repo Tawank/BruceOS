@@ -31,6 +31,12 @@ bool storage__remove_internal(const char *path);
 bool storage__rename_internal(const char *from, const char *to);
 bool storage__get_usage_internal(const char *path, size_t *total_bytes, size_t *used_bytes);
 
+/* Whole directory trees, for core/appdata. A missing `path` counts as empty. */
+bruce_result_t storage__tree_size_internal(const char *path, size_t *out_bytes);
+bruce_result_t storage__tree_copy_internal(const char *from, const char *to);
+bruce_result_t storage__tree_remove_internal(const char *path);
+bool storage__is_sd_path(const char *path);
+
 /* SD is optional and board-specific. The caller supplies the SPI host and pins. */
 bool storage__sd_mount_spi(const storage__sdspi_config_t *config);
 bruce_result_t storage__sd_unmount(void);

@@ -1012,6 +1012,56 @@ menu "Bruce hardware configuration"
             depends on BRUCE_GPS_ENABLED
             range -1 15
             default -1
+
+        config BRUCE_CELLULAR_ENABLED
+            bool "Built-in cellular modem"
+            default n
+            help
+                A SIMCom A76xx modem on a UART, driven by core/cellular for
+                voice calls and USSD.
+
+        config BRUCE_CELLULAR_UART_PORT
+            int "Modem UART port"
+            depends on BRUCE_CELLULAR_ENABLED
+            range 1 2
+            default 2
+
+        config BRUCE_CELLULAR_RX_GPIO
+            int "Modem RX GPIO (the modem's TXD)"
+            depends on BRUCE_CELLULAR_ENABLED
+            range 0 48
+            default 11
+
+        config BRUCE_CELLULAR_TX_GPIO
+            int "Modem TX GPIO (the modem's RXD)"
+            depends on BRUCE_CELLULAR_ENABLED
+            range 0 48
+            default 10
+
+        config BRUCE_CELLULAR_BAUD
+            int "Modem baud rate"
+            depends on BRUCE_CELLULAR_ENABLED
+            default 115200
+
+        config BRUCE_CELLULAR_POWER_XL9555_PIN
+            int "XL9555 pin that powers the modem"
+            depends on BRUCE_CELLULAR_ENABLED
+            range 0 15
+            default 0
+
+        config BRUCE_CELLULAR_PWRKEY_XL9555_PIN
+            int "XL9555 pin that drives the modem's PWRKEY"
+            depends on BRUCE_CELLULAR_ENABLED
+            range 0 15
+            default 8
+
+        config BRUCE_CELLULAR_AUDIO_XL9555_PIN
+            int "XL9555 pin that routes the speaker and mic to the modem (-1 = none)"
+            depends on BRUCE_CELLULAR_ENABLED
+            range -1 15
+            default -1
+            help
+                Driven high during a call and low again afterwards.
     endmenu
 
     menu "Memory"

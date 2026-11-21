@@ -6,12 +6,14 @@
 |---|---|
 | [`app_config.h`](#app_configh) | App settings. |
 | [`app_runner.h`](#app_runnerh) | Runs apps and built-in commands. |
+| [`appdata.h`](#appdatah) | The app's own data folder. |
 | [`archive.h`](#archiveh) | ".tar.gz" and ".zip" archive create/list/extract. |
 | [`args.h`](#argsh) | Command-line argument parser (argparse-style). |
 | [`audio.h`](#audioh) | Tone and PCM audio playback. |
 | [`base64.h`](#base64h) | Base64 encoding (RFC 4648). |
 | [`bluetooth.h`](#bluetoothh) | BLE advertisement scanning. |
 | [`bluetooth_hid.h`](#bluetooth_hidh) | Bluetooth keyboard and gamepad connections. |
+| [`cellular.h`](#cellularh) | Built-in cellular modem: voice calls and USSD. |
 | [`clipboard.h`](#clipboardh) | Shared copy/paste clipboard. |
 | [`clock.h`](#clockh) | Clock, time zone, and NTP settings. |
 | [`compress.h`](#compressh) | DEFLATE compression/decompression (zlib-backed). |
@@ -171,6 +173,19 @@ Functions that explicitly document a `bruce_permission_t` check, grouped by perm
 - `ir__receive` (ir.h)
 - `ir__transmit_file` (ir.h)
 - `ir__transmit_record` (ir.h)
+
+### `phone`
+
+- `cellular__set_enabled` (cellular.h)
+- `cellular__get_status` (cellular.h)
+- `cellular__dial` (cellular.h)
+- `cellular__answer` (cellular.h)
+- `cellular__hang_up` (cellular.h)
+- `cellular__send_dtmf` (cellular.h)
+- `cellular__set_muted` (cellular.h)
+- `cellular__set_volume` (cellular.h)
+- `cellular__ussd` (cellular.h)
+- `cellular__get_call_log` (cellular.h)
 
 ### `process`
 
@@ -1082,6 +1097,141 @@ process interaction").
 ### Returns
 
 `bool`
+
+
+---
+
+# `appdata.h`
+
+**The app's own data folder.**
+
+Every app has a folder for the files it keeps: /appdata/<app> on internal
+storage, or /sdcard/appdata/<app> once moved to the SD card in App
+Settings. <app> is the app's file name without its extension.
+
+A relative path passed to the storage API ("history.json", "cache/a.bin")
+is inside this folder, and needs no `storage` permission. The folder is
+created on first use. When it is on an SD card that is not inserted, these
+calls return BRUCE_ERR_INVALID_STATE.
+
+Settings belong in app_config (core_sdk/app_config.h), not here.
+
+---
+
+## appdata__get_path()
+
+```c
+bruce_result_t appdata__get_path(char *out_path, size_t capacity);
+```
+
+Copies the absolute path of the app's folder into out_path.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `out_path` | `char *` | Receives the NUL-terminated path. |
+| `capacity` | `size_t` | Size of out_path in bytes. |
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
+## appdata__read()
+
+```c
+bruce_result_t appdata__read(const char *name, void *buffer, size_t capacity, size_t *out_size);
+```
+
+Reads a whole file from the app's folder.
+
+Returns BRUCE_ERR_NOT_FOUND when the file does not exist, and
+BRUCE_ERR_RESOURCE_LIMIT when it is larger than capacity (the first
+capacity bytes are still read).
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `name` | `const char *` | Path relative to the app's folder. |
+| `buffer` | `void *` | Receives the file contents. |
+| `capacity` | `size_t` | Size of buffer in bytes. |
+| `out_size` | `size_t *` | Receives the number of bytes read. |
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
+## appdata__write()
+
+```c
+bruce_result_t appdata__write(const char *name, const void *data, size_t size);
+```
+
+Replaces a file in the app's folder.
+
+Writes a temporary file first, so a power loss leaves either the old or
+the new contents.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `name` | `const char *` | Path relative to the app's folder. |
+| `data` | `const void *` | Bytes to write. |
+| `size` | `size_t` | Number of bytes in data. |
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
+## appdata__remove()
+
+```c
+bruce_result_t appdata__remove(const char *name);
+```
+
+Removes a file or an empty folder from the app's folder.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `name` | `const char *` | Path relative to the app's folder. |
+
+### Returns
+
+`bruce_result_t`
+
+
+---
+
+## appdata__get_usage()
+
+```c
+bruce_result_t appdata__get_usage(size_t *out_bytes);
+```
+
+Total size of the files in the app's folder.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `out_bytes` | `size_t *` | Receives the size in bytes. |
+
+### Returns
+
+`bruce_result_t`
 
 
 ---
@@ -3463,6 +3613,375 @@ Returns the currently connected HID device's identity.
 #### Permissions
 
 - `bt`
+
+
+---
+
+# `cellular.h`
+
+**Built-in cellular modem: voice calls and USSD.**
+
+The modem stays on once enabled (also across reboots) so calls can come
+in. An incoming call shows a notification and opens the phone app; one
+that ends unanswered shows a missed-call notification. Ended calls are
+kept in a small log since boot, so the phone app can record them even when
+it was not running.
+
+**Constants**
+
+| Name | Value |
+|---|---|
+| `BRUCE_CELLULAR_NUMBER_MAX` | `32` |
+| `BRUCE_CELLULAR_OPERATOR_MAX` | `24` |
+| `BRUCE_CELLULAR_LOG_MAX` | `16` |
+
+---
+
+## bruce_cellular_state_t()
+
+```c
+typedef enum {
+    BRUCE_CELLULAR_OFF = 0,
+    BRUCE_CELLULAR_STARTING,
+    BRUCE_CELLULAR_FAILED, /**< The modem did not answer. */
+    BRUCE_CELLULAR_NO_SIM,
+    BRUCE_CELLULAR_SIM_LOCKED, /**< The SIM asks for a PIN. */
+    BRUCE_CELLULAR_SEARCHING,
+    BRUCE_CELLULAR_DENIED, /**< The network refused registration. */
+    BRUCE_CELLULAR_READY,
+} bruce_cellular_state_t;
+```
+
+
+---
+
+## bruce_call_state_t()
+
+```c
+typedef enum {
+    BRUCE_CALL_NONE = 0,
+    BRUCE_CALL_DIALING,
+    BRUCE_CALL_ALERTING, /**< The other phone is ringing. */
+    BRUCE_CALL_INCOMING,
+    BRUCE_CALL_ACTIVE,
+} bruce_call_state_t;
+```
+
+
+---
+
+## bruce_call_result_t()
+
+```c
+typedef enum {
+    BRUCE_CALL_RESULT_ANSWERED = 0,
+    BRUCE_CALL_RESULT_MISSED,    /**< Incoming, never answered. */
+    BRUCE_CALL_RESULT_REJECTED,  /**< Incoming, declined here. */
+    BRUCE_CALL_RESULT_CANCELLED, /**< Outgoing, hung up before it was answered. */
+    BRUCE_CALL_RESULT_BUSY,
+    BRUCE_CALL_RESULT_NO_ANSWER,
+    BRUCE_CALL_RESULT_FAILED,
+} bruce_call_result_t;
+```
+
+
+---
+
+## bruce_cellular_status_t()
+
+```c
+typedef struct {
+    bruce_cellular_state_t state;
+    int8_t signal_bars; /**< 0 to 4, or -1 when unknown. */
+    char operator_name[BRUCE_CELLULAR_OPERATOR_MAX];
+    bruce_call_state_t call;
+    bool call_incoming;
+    char call_number[BRUCE_CELLULAR_NUMBER_MAX];
+    uint32_t call_seconds; /**< Talk time of the active call. */
+    bool muted;
+    uint8_t volume;             /**< 0 to 100. */
+    uint32_t last_log_sequence; /**< Sequence of the newest call log record. */
+} bruce_cellular_status_t;
+```
+
+
+---
+
+## bruce_cellular_call_record_t()
+
+```c
+typedef struct {
+    uint32_t sequence; /**< 1 for the first call since boot. */
+    bool incoming;
+    bruce_call_result_t result;
+    char number[BRUCE_CELLULAR_NUMBER_MAX];
+    int64_t started_utc; /**< Unix seconds, or 0 when the clock was not set. */
+    uint32_t seconds;    /**< Talk time. */
+} bruce_cellular_call_record_t;
+```
+
+
+---
+
+## cellular__is_available()
+
+```c
+bool cellular__is_available(void);
+```
+
+Returns whether the board has a cellular modem. Not permission-gated.
+
+### Returns
+
+`bool`
+
+
+---
+
+## cellular__set_enabled()
+
+```c
+bruce_result_t cellular__set_enabled(bool enabled);
+```
+
+Turns the modem on or off; remembered across reboots.
+
+Turning it on returns at once; the state goes from STARTING to READY (or
+an error state) within about 20 seconds.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `enabled` | `bool` | Whether the modem should be on. |
+
+### Returns
+
+`bruce_result_t`
+
+#### Permissions
+
+- `phone`
+
+
+---
+
+## cellular__get_status()
+
+```c
+bruce_result_t cellular__get_status(bruce_cellular_status_t *out);
+```
+
+Reads the modem, network and call state.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `out` | `bruce_cellular_status_t *` | Receives the state. |
+
+### Returns
+
+`bruce_result_t`
+
+#### Permissions
+
+- `phone`
+
+
+---
+
+## cellular__dial()
+
+```c
+bruce_result_t cellular__dial(const char *number);
+```
+
+Calls a number (digits, '+', '*' and '#').
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `number` | `const char *` | The number to call. |
+
+### Returns
+
+`bruce_result_t`
+
+#### Permissions
+
+- `phone`
+
+
+---
+
+## cellular__answer()
+
+```c
+bruce_result_t cellular__answer(void);
+```
+
+Answers the incoming call.
+
+### Returns
+
+`bruce_result_t`
+
+#### Permissions
+
+- `phone`
+
+
+---
+
+## cellular__hang_up()
+
+```c
+bruce_result_t cellular__hang_up(void);
+```
+
+Ends the current call, or declines an incoming one.
+
+### Returns
+
+`bruce_result_t`
+
+#### Permissions
+
+- `phone`
+
+
+---
+
+## cellular__send_dtmf()
+
+```c
+bruce_result_t cellular__send_dtmf(char digit);
+```
+
+Sends a keypad tone during a call.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `digit` | `char` | One of 0-9, '*', '#'. |
+
+### Returns
+
+`bruce_result_t`
+
+#### Permissions
+
+- `phone`
+
+
+---
+
+## cellular__set_muted()
+
+```c
+bruce_result_t cellular__set_muted(bool muted);
+```
+
+Mutes or unmutes the microphone during a call.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `muted` | `bool` | Whether the microphone is muted. |
+
+### Returns
+
+`bruce_result_t`
+
+#### Permissions
+
+- `phone`
+
+
+---
+
+## cellular__set_volume()
+
+```c
+bruce_result_t cellular__set_volume(uint8_t volume);
+```
+
+Sets the call volume.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `volume` | `uint8_t` | 0 to 100. |
+
+### Returns
+
+`bruce_result_t`
+
+#### Permissions
+
+- `phone`
+
+
+---
+
+## cellular__ussd()
+
+```c
+bruce_result_t cellular__ussd(const char *code, char *out_reply, size_t capacity, uint32_t timeout_ms);
+```
+
+Sends a USSD code such as "*100#" and waits for the network's reply.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `code` | `const char *` | The code to send. |
+| `out_reply` | `char *` | Receives the reply as UTF-8. |
+| `capacity` | `size_t` | Size of out_reply in bytes. |
+| `timeout_ms` | `uint32_t` | How long to wait for the reply. |
+
+### Returns
+
+`bruce_result_t`
+
+#### Permissions
+
+- `phone`
+
+
+---
+
+## cellular__get_call_log()
+
+```c
+size_t cellular__get_call_log(uint32_t after_sequence, bruce_cellular_call_record_t *out, size_t capacity);
+```
+
+Copies call log records newer than after_sequence, oldest first.
+
+Returns the number of records copied.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `after_sequence` | `uint32_t` | Only records with a larger sequence are copied; 0 for all. |
+| `out` | `bruce_cellular_call_record_t *` | Receives the records. |
+| `capacity` | `size_t` | Number of records out can hold. |
+
+### Returns
+
+`size_t`
+
+#### Permissions
+
+- `phone`
 
 
 ---
@@ -15100,6 +15619,7 @@ typedef enum {
     BRUCE_PERMISSION_CONFIG,
     BRUCE_PERMISSION_SERIAL,
     BRUCE_PERMISSION_SSH,
+    BRUCE_PERMISSION_PHONE,
     BRUCE_PERMISSION_COUNT,
 } bruce_permission_t;
 ```
@@ -17763,8 +18283,10 @@ permission (built-ins always pass) and additionally refuse
 ".tmp" siblings entirely - BRUCE_ERR_PERMISSION - regardless of any
 granted permission; storage__list() silently omits those two names
 rather than erroring. Every other mounted path (LittleFS or SD) is
-otherwise reachable. `path` must be an absolute, normalized path with no
-"." or ".." components, else BRUCE_ERR_INVALID_PATH. A file handle can
+otherwise reachable. `path` must be normalized, with no "." or ".."
+components, else BRUCE_ERR_INVALID_PATH. A relative path is inside the
+caller's own appdata folder and needs no `storage` permission (see
+core_sdk/appdata.h); "" is the folder itself. A file handle can
 only be used by the process that opened it; any other process (or a
 stale/unknown id) gets BRUCE_ERR_NOT_FOUND/BRUCE_ERR_PERMISSION from
 storage__read()/write()/seek()/close().

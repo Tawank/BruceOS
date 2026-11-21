@@ -257,7 +257,7 @@ static bruce_result_t gif__decode_next(bruce_gif_t *gif, bool *out_trailer) {
         }
         if (disposal == 3) {
             if (gif->restore_canvas == NULL) {
-                gif->restore_canvas = memory__malloc(
+                gif->restore_canvas = image__malloc_pixels(
                     (size_t)gif->canvas_width * gif->canvas_height * sizeof(*gif->restore_canvas)
                 );
                 if (gif->restore_canvas == NULL) return BRUCE_ERR_NO_MEMORY;
@@ -282,8 +282,8 @@ static bruce_result_t gif__decode_next(bruce_gif_t *gif, bool *out_trailer) {
 }
 
 bruce_result_t gif__open_memory(
-    const uint8_t *data, size_t size, const bruce_image_draw_options_t *options,
-    const void *backing, bruce_gif_t **out_gif
+    const uint8_t *data, size_t size, const bruce_image_draw_options_t *options, const void *backing,
+    bruce_gif_t **out_gif
 ) {
     if (data == NULL || size < 13 || options == NULL || out_gif == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
     *out_gif = NULL;
@@ -324,7 +324,7 @@ bruce_result_t gif__open_memory(
         image__gif_close(gif);
         return BRUCE_ERR_RESOURCE_LIMIT;
     }
-    gif->canvas = memory__malloc((size_t)gif->canvas_width * gif->canvas_height * sizeof(*gif->canvas));
+    gif->canvas = image__malloc_pixels((size_t)gif->canvas_width * gif->canvas_height * sizeof(*gif->canvas));
     if (gif->canvas == NULL) {
         image__gif_close(gif);
         return BRUCE_ERR_NO_MEMORY;
