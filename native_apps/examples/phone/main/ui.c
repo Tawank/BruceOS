@@ -41,6 +41,8 @@ static const ui_palette_t s_paper = {
 
 static int16_t s_cw = 6;
 static int16_t s_ch = 8;
+/* Where the content area starts on screen; layout is relative to it. */
+static int s_origin_x, s_origin_y;
 
 static const char *const s_tab_names[UI_TAB_COUNT] = {"Keypad", "Recents", "Contacts"};
 static const char *const s_tab_icons[UI_TAB_COUNT] = {"dialpad", "history", "account"};
@@ -147,9 +149,15 @@ static int ui__button_radius(int width) { return ui__min(width / 10, 22); }
 
 static int ui__end_radius(int width) { return ui__min(width / 8, 28); }
 
-static int ui__buttons_y(int height) {
-    int top = ui__bar_height();
-    return top + (height - top) * 64 / 100;
+/* Landscape puts the call buttons and hang up in one row. */
+static bool ui__call_one_row(int width, int height) { return width > height; }
+
+static int ui__end_y(int width, int height) { return height - ui__end_radius(width) - 2 * UI_GAP; }
+
+/* Laid out from the bottom so the rows keep their gap on short screens. */
+static int ui__buttons_y(int width, int height) {
+    if (ui__call_one_row(width, height)) return ui__end_y(width, height);
+    return ui__end_y(width, height) - ui__end_radius(width) - 5 * UI_GAP - ui__button_radius(width);
 }
 
 static ui_rect_t ui__circle(int cx, int cy, int r) { return (ui_rect_t){cx - r, cy - r, 2 * r, 2 * r}; }
@@ -157,21 +165,29 @@ static ui_rect_t ui__circle(int cx, int cy, int r) { return (ui_rect_t){cx - r, 
 ui_rect_t ui__call_screen_rect(ui_hit_kind_t button, bool incoming, int width, int height) {
     int r = ui__button_radius(width);
     int end = ui__end_radius(width);
-    int end_y = height - end - 10;
+    int end_y = ui__end_y(width, height);
+    int buttons_y = ui__buttons_y(width, height);
+    bool row = ui__call_one_row(width, height);
+    /* Column centres: thirds above hang up, or four across in one row. */
+    int mute_x = row ? width / 8 : width / 4;
+    int pad_x = row ? 3 * width / 8 : width / 2;
+    int volume_x = row ? 5 * width / 8 : 3 * width / 4;
+    int hang_up_x = incoming ? width / 4 : row ? 7 * width / 8 : width / 2;
     switch (button) {
-        case UI_HIT_MUTE: return ui__circle(width / 4, ui__buttons_y(height), r);
-        case UI_HIT_DTMF_PAD: return ui__circle(width / 2, ui__buttons_y(height), r);
-        case UI_HIT_VOLUME: return ui__circle(3 * width / 4, ui__buttons_y(height), r);
+        case UI_HIT_MUTE: return ui__circle(mute_x, buttons_y, r);
+        case UI_HIT_DTMF_PAD: return ui__circle(pad_x, buttons_y, r);
+        case UI_HIT_VOLUME: return ui__circle(volume_x, buttons_y, r);
         case UI_HIT_DECLINE: return ui__circle(width / 4, end_y, end);
         case UI_HIT_ANSWER: return ui__circle(3 * width / 4, end_y, end);
-        case UI_HIT_HANG_UP: return ui__circle(incoming ? width / 4 : width / 2, end_y, end);
+        case UI_HIT_HANG_UP: return ui__circle(hang_up_x, end_y, end);
         default: return (ui_rect_t){0, 0, 0, 0};
     }
 }
 
 ui_rect_t ui__dtmf_key_rect(int index, int width, int height) {
     int top = ui__bar_height() + 2 * s_ch + 12;
-    int bottom = ui__buttons_y(height) - ui__button_radius(width) - 6;
+    int r = ui__call_one_row(width, height) ? ui__end_radius(width) : ui__button_radius(width);
+    int bottom = ui__buttons_y(width, height) - r - 6;
     int row_h = (bottom - top) / 4;
     int key_w = ui__key_width(width);
     int row = index / 3, col = index % 3;
@@ -344,36 +360,57 @@ static void ui__fit(const char *text, int max_chars, char *out, size_t capacity)
 
 /* ---- Drawing ---- */
 
+void ui__set_origin(int x, int y) {
+    s_origin_x = x;
+    s_origin_y = y;
+}
+
+static void ui__fill_rect(int x, int y, int w, int h, bruce_display_color_t color) {
+    display__fill_rect(s_origin_x + x, s_origin_y + y, w, h, color);
+}
+
+static void ui__round_rect(int x, int y, int w, int h, int radius, bruce_display_color_t color, bool fill) {
+    if (fill) display__fill_round_rect(s_origin_x + x, s_origin_y + y, w, h, radius, color);
+    else display__draw_round_rect(s_origin_x + x, s_origin_y + y, w, h, radius, color);
+}
+
+static void ui__disc(int cx, int cy, int radius, bruce_display_color_t color, bool fill) {
+    if (fill) display__fill_circle(s_origin_x + cx, s_origin_y + cy, radius, color);
+    else display__draw_circle(s_origin_x + cx, s_origin_y + cy, radius, color);
+}
+
 static void ui__icon(const char *name, int x, int y, int size, bruce_display_color_t color) {
     const bruce_icon_t *icon = icon__get(name);
     if (icon != NULL)
-        display__draw_bitmap_scaled(x, y, icon->bits, icon->width, icon->height, size, size, color);
+        display__draw_bitmap_scaled(
+            s_origin_x + x, s_origin_y + y, icon->bits, icon->width, icon->height, size, size, color
+        );
 }
 
 static void ui__text(const char *text, int x, int y, float size, bruce_display_color_t color) {
     display__set_text_size(size);
     display__set_text_color(color);
-    display__draw_string(text, x, y);
+    display__draw_string(text, s_origin_x + x, s_origin_y + y);
     display__set_text_size(1);
 }
 
 static void ui__centre_text(const char *text, int cx, int y, float size, bruce_display_color_t color) {
     display__set_text_size(size);
     display__set_text_color(color);
-    display__draw_centre_string(text, cx, y);
+    display__draw_centre_string(text, s_origin_x + cx, s_origin_y + y);
     display__set_text_size(1);
 }
 
 static void ui__right_text(const char *text, int right, int y, bruce_display_color_t color) {
     display__set_text_color(color);
-    display__draw_right_string(text, right, y);
+    display__draw_right_string(text, s_origin_x + right, s_origin_y + y);
 }
 
 /* A key: filled on LCDs, outlined on paper. */
 static void ui__key_shape(const ui_t *ui, ui_rect_t r, int radius) {
     const ui_palette_t *p = ui__palette(ui);
-    display__fill_round_rect(r.x, r.y, r.w, r.h, radius, p->surface);
-    if (ui->epaper) display__draw_round_rect(r.x, r.y, r.w, r.h, radius, p->outline);
+    ui__round_rect(r.x, r.y, r.w, r.h, radius, p->surface, true);
+    if (ui->epaper) ui__round_rect(r.x, r.y, r.w, r.h, radius, p->outline, false);
 }
 
 static void
@@ -382,10 +419,10 @@ ui__round_button(const ui_t *ui, ui_rect_t r, const char *icon, bool filled, bru
     int radius = r.w / 2;
     int cx = r.x + radius, cy = r.y + radius;
     if (filled) {
-        display__fill_circle(cx, cy, radius, fill);
+        ui__disc(cx, cy, radius, fill, true);
     } else {
-        display__fill_circle(cx, cy, radius, p->surface);
-        if (ui->epaper) display__draw_circle(cx, cy, radius, p->outline);
+        ui__disc(cx, cy, radius, p->surface, true);
+        if (ui->epaper) ui__disc(cx, cy, radius, p->outline, false);
     }
     int size = radius;
     ui__icon(icon, cx - size / 2, cy - size / 2, size, filled ? p->on_accent : p->text);
@@ -404,41 +441,25 @@ static void ui__draw_keys(const ui_t *ui, ui_rect_t (*rect)(int, int, int), int 
     }
 }
 
-static void ui__draw_signal(const ui_t *ui, int width) {
-    static const char *const icons[] = {
-        "signal-cellular-outline",
-        "signal-cellular-1",
-        "signal-cellular-2",
-        "signal-cellular-3",
-        "signal-cellular-3",
-    };
-    int bars = ui->status.signal_bars;
-    if (bars < 0 || bars > 4) return;
-    int size = s_ch + 4;
-    ui__icon(icons[bars], width - UI_GAP - size, 2, size, ui__palette(ui)->text);
-}
-
 static void ui__draw_bar(const ui_t *ui, int width) {
     const ui_palette_t *p = ui__palette(ui);
-    const char *text = ui->status.state == BRUCE_CELLULAR_READY && ui->status.operator_name[0] != '\0'
-                           ? ui->status.operator_name
-                           : ui__state_text(ui->status.state);
+    bool ready = ui->status.state == BRUCE_CELLULAR_READY;
+    const char *text = ready && ui->status.operator_name[0] != '\0' ? ui->status.operator_name
+                                                                    : ui__state_text(ui->status.state);
     char fitted[BRUCE_CELLULAR_OPERATOR_MAX + 8];
-    ui__fit(text, (width - 2 * s_ch - 16) / s_cw, fitted, sizeof(fitted));
-    ui__text(fitted, UI_GAP, 4, 1, ui->status.state == BRUCE_CELLULAR_READY ? p->text : p->muted);
-    ui__draw_signal(ui, width);
+    ui__fit(text, (width - 2 * UI_GAP) / s_cw, fitted, sizeof(fitted));
+    ui__text(fitted, UI_GAP, 4, 1, ready ? p->text : p->muted);
 }
 
 static void ui__draw_tabs(const ui_t *ui, int width, int height) {
     const ui_palette_t *p = ui__palette(ui);
     int top = ui__content_bottom(height);
-    display__fill_rect(0, top, width, 1, p->outline);
+    ui__fill_rect(0, top, width, 1, p->outline);
     for (int i = 0; i < UI_TAB_COUNT; ++i) {
         ui_rect_t r = ui__tab_rect(i, width, height);
         bool selected = (int)ui->tab == i;
         bruce_display_color_t color = selected ? (ui->epaper ? p->on_accent : p->accent) : p->muted;
-        if (selected && ui->epaper)
-            display__fill_round_rect(r.x + 3, r.y + 3, r.w - 6, r.h - 5, 6, p->highlight);
+        if (selected && ui->epaper) ui__round_rect(r.x + 3, r.y + 3, r.w - 6, r.h - 5, 6, p->highlight, true);
         ui__icon(s_tab_icons[i], r.x + (r.w - UI_TAB_ICON) / 2, r.y + 3, UI_TAB_ICON, color);
         ui__centre_text(s_tab_names[i], r.x + r.w / 2, r.y + UI_TAB_ICON + 5, 1, color);
     }
@@ -463,7 +484,7 @@ static void ui__draw_keypad(const ui_t *ui, int width, int height) {
     }
     ui__draw_keys(ui, ui__key_rect, width, height);
     ui_rect_t call = ui__call_button_rect(width, height);
-    display__fill_round_rect(call.x, call.y, call.w, call.h, call.h / 2, p->accent);
+    ui__round_rect(call.x, call.y, call.w, call.h, call.h / 2, p->accent, true);
     int icon = ui__min(call.h - 8, 24);
     ui__icon("phone", call.x + (call.w - icon) / 2, call.y + (call.h - icon) / 2, icon, p->on_accent);
     if (ui__can_save(ui)) {
@@ -475,8 +496,8 @@ static void ui__draw_keypad(const ui_t *ui, int width, int height) {
 
 static void ui__draw_row_frame(const ui_t *ui, ui_rect_t r, bool selected) {
     const ui_palette_t *p = ui__palette(ui);
-    if (selected) display__fill_round_rect(r.x + 2, r.y + 1, r.w - 4, r.h - 2, 6, p->highlight);
-    else display__fill_rect(r.x + 8, r.y + r.h - 1, r.w - 16, 1, ui->epaper ? p->outline : p->surface);
+    if (selected) ui__round_rect(r.x + 2, r.y + 1, r.w - 4, r.h - 2, 6, p->highlight, true);
+    else ui__fill_rect(r.x + 8, r.y + r.h - 1, r.w - 16, 1, ui->epaper ? p->outline : p->surface);
 }
 
 static void ui__draw_empty(const ui_t *ui, const char *text, int width, int height) {
@@ -538,7 +559,7 @@ static void ui__draw_recents(const ui_t *ui, int width, int height) {
 static void ui__draw_avatar(const ui_t *ui, const char *name, int cx, int cy, int r, bool inverted) {
     const ui_palette_t *p = ui__palette(ui);
     bruce_display_color_t fill = inverted ? p->on_accent : ui->epaper ? p->text : p->highlight;
-    display__fill_circle(cx, cy, r, fill);
+    ui__disc(cx, cy, r, fill, true);
     char initial[2] = {name != NULL && name[0] != '\0' && name[0] != '+' ? name[0] : 0, '\0'};
     bruce_display_color_t ink = inverted ? p->text : p->on_accent;
     if (initial[0] >= 'a' && initial[0] <= 'z') initial[0] = (char)(initial[0] - 'a' + 'A');
@@ -652,8 +673,9 @@ static void ui__draw_call(const ui_t *ui, int width, int height) {
 }
 
 void ui__draw(const ui_t *ui, int width, int height) {
-    display__fill_screen(ui__palette(ui)->bg);
+    ui__fill_rect(0, 0, width, height, ui__palette(ui)->bg);
     display__set_text_size(1);
+    display__set_text_bg_color(BRUCE_COLOR_TRANSPARENT);
     ui__draw_bar(ui, width);
     if (ui__in_call(ui)) {
         ui__draw_call(ui, width, height);

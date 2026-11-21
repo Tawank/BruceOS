@@ -18,6 +18,8 @@
 #include <string.h>
 #include <strings.h>
 
+#include "sdkconfig.h"
+
 /* Only a handful of tests ever call app_runner__register() at runtime (the
  * rest of the registry is the compile-time table app_runner__register_all()
  * points at directly -- see its comment below); this just needs headroom
@@ -613,8 +615,8 @@ int app_runner__run_with_environment(
         result = create_result == BRUCE_OK ? (int)process_id : (int)create_result;
     } else {
         /* 2. every registered loader, in registration order, matching
-         * /bin/<app_name><extension> or, failing that, the same exact
-         * match against /apps/<app_name><extension>  */
+         * /bin/<app_name><extension> or, failing that, /apps/; in each,
+         * a build for this chip (<app_name>_esp32s3.elf) also matches. */
         result = BRUCE_ERR_NOT_FOUND;
         /* Heap, not stack, for the same reason app_runner__run_path_with_
          * environment() heap-allocates its own equivalents: this runs on
@@ -633,17 +635,19 @@ int app_runner__run_with_environment(
                 bruce_loader_descriptor_t loader = app_runner__loader_at(i);
                 bool found = false;
                 static const char *const search_dirs[] = {"/bin", "/apps"};
-                for (size_t dir_index = 0; dir_index < sizeof(search_dirs) / sizeof(search_dirs[0]);
-                     ++dir_index) {
+                static const char *const suffixes[] = {"", "_" CONFIG_IDF_TARGET};
+                for (size_t n = 0; n < 4 && !found; ++n) {
                     int written = snprintf(
-                        scratch->path, sizeof(scratch->path), "%s/%s%s", search_dirs[dir_index], app_name,
+                        scratch->path,
+                        sizeof(scratch->path),
+                        "%s/%s%s%s",
+                        search_dirs[n / 2],
+                        app_name,
+                        suffixes[n % 2],
                         loader.extension
                     );
-                    if (written < 0 || (size_t)written >= sizeof(scratch->path)) { continue; }
-                    if (storage__exists_internal(scratch->path)) {
-                        found = true;
-                        break;
-                    }
+                    found = written >= 0 && (size_t)written < sizeof(scratch->path) &&
+                            storage__exists_internal(scratch->path);
                 }
                 if (found) {
                     int written_arg = snprintf(

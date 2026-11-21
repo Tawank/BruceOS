@@ -116,7 +116,17 @@ static void draws_recents_rows(void) {
     CHECK(fakes__find_string("Yesterday") != NULL);
 }
 
-static void draws_status_bar(void) {
+static void draws_inside_the_window(void) {
+    start();
+    ui.status.state = BRUCE_CELLULAR_NO_SIM;
+    ui__set_origin(6, 26);
+    ui__draw(&ui, 228, 288);
+    ui__set_origin(0, 0);
+    const fake_draw_t *line = fakes__find_string("No SIM card");
+    CHECK(line != NULL && line->x == 6 + 4 && line->y == 26 + 4);
+}
+
+static void draws_status_line(void) {
     start();
     ui.status.state = BRUCE_CELLULAR_NO_SIM;
     ui__draw(&ui, 240, 320);
@@ -124,7 +134,6 @@ static void draws_status_bar(void) {
     ui.status.state = BRUCE_CELLULAR_READY;
     ui__draw(&ui, 240, 320);
     CHECK(fakes__find_string("Orange") != NULL);
-    CHECK(fakes__find_icon("signal-cellular-3") != NULL);
 }
 
 static void formats_times(void) {
@@ -159,8 +168,32 @@ static void scroll_follows_selection(void) {
     CHECK_EQ(ui.scroll, 0);
 }
 
+/* The launcher window's area on the T-Deck MAX, portrait and landscape. */
+static void call_buttons_keep_apart(void) {
+    static const int sizes[][2] = {
+        {228, 288},
+        {308, 208},
+        {240, 320}
+    };
+    static const ui_hit_kind_t buttons[] = {UI_HIT_MUTE, UI_HIT_DTMF_PAD, UI_HIT_VOLUME, UI_HIT_HANG_UP};
+    for (size_t s = 0; s < sizeof(sizes) / sizeof(sizes[0]); ++s) {
+        int w = sizes[s][0], h = sizes[s][1];
+        for (size_t i = 0; i < 4; ++i) {
+            ui_rect_t a = ui__call_screen_rect(buttons[i], false, w, h);
+            CHECK(a.x >= 0 && a.x + a.w <= w && a.y + a.h <= h);
+            for (size_t j = i + 1; j < 4; ++j) {
+                ui_rect_t b = ui__call_screen_rect(buttons[j], false, w, h);
+                bool apart = a.x + a.w + 4 <= b.x || b.x + b.w + 4 <= a.x || a.y + a.h + 12 <= b.y ||
+                             b.y + b.h + 12 <= a.y;
+                CHECK(apart);
+            }
+        }
+    }
+}
+
 SUITE(
     ui_tests, TEST(keys_fit_between_display_and_tabs), TEST(hit_finds_keys_tabs_and_call),
     TEST(call_screen_buttons), TEST(draws_incoming_call_with_contact_name), TEST(draws_active_call_timer),
-    TEST(draws_recents_rows), TEST(draws_status_bar), TEST(formats_times), TEST(scroll_follows_selection)
+    TEST(draws_recents_rows), TEST(draws_status_line), TEST(draws_inside_the_window), TEST(formats_times),
+    TEST(scroll_follows_selection), TEST(call_buttons_keep_apart)
 )

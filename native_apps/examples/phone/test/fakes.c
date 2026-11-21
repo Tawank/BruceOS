@@ -233,6 +233,16 @@ int display__width(void) { return fakes.width; }
 int display__height(void) { return fakes.height; }
 bool display__is_epaper(void) { return fakes.epaper; }
 bool display__viewport_changed(void) { return false; }
+bool display__await_redraw(void) { return false; }
+bool process__is_background(void) { return false; }
+bruce_result_t runtime__to_background(void) {
+    fakes.backgrounds++;
+    return BRUCE_OK;
+}
+bruce_result_t dialog__draw_window(bruce_dialog_window_area_t *out_area) {
+    *out_area = (bruce_dialog_window_area_t){.width = fakes.width, .height = fakes.height};
+    return BRUCE_OK;
+}
 bruce_result_t display__begin_frame(void) {
     fakes.draw_count = 0;
     return BRUCE_OK;
@@ -266,6 +276,10 @@ bruce_result_t display__draw_circle(int16_t x, int16_t y, int16_t r, bruce_displ
 }
 bruce_result_t display__set_text_color(bruce_display_color_t color) {
     s_text_color = color;
+    return BRUCE_OK;
+}
+bruce_result_t display__set_text_bg_color(uint32_t color) {
+    (void)color;
     return BRUCE_OK;
 }
 bruce_result_t display__set_text_size(float size) {

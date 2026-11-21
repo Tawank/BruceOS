@@ -60,6 +60,8 @@ typedef struct {
 void ui__init_metrics(void);
 
 bool ui__in_call(const ui_t *ui);
+/* Screen position of the content area that drawing is relative to. */
+void ui__set_origin(int x, int y);
 void ui__draw(const ui_t *ui, int width, int height);
 ui_hit_t ui__hit(const ui_t *ui, int width, int height, int x, int y);
 

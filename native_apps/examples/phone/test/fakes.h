@@ -46,7 +46,7 @@ typedef struct {
     char dtmf[32];
     char ussd_code[32];
     const char *ussd_reply;
-    int answers, hang_ups, enables;
+    int answers, hang_ups, enables, backgrounds;
     bool enabled;
 
     int64_t now_utc;

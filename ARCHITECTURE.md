@@ -183,7 +183,9 @@ Resolution is deterministic and never scans directories:
 
 1. registered built-in module;
 2. every registered loader, tried in registration order, matching
-   `/bin/<app_name><extension>`;
+   `/bin/<app_name><extension>`, then `/apps/`; in each folder a build for the
+   running chip, `<app_name>_<chip><extension>` (e.g. `phone_esp32s3.elf`),
+   matches after the plain name;
 3. `BRUCE_ERR_NOT_FOUND`.
 
 Core ships built-in ELF and JavaScript loader mappings, so ELF still wins if
@@ -466,7 +468,8 @@ charset), polls SIM, registration, operator and signal every 20 seconds and
 the call list (`AT+CLCC`) every second during a call. API calls (permission
 `phone`) are queued to that task and wait for the command's final result.
 `cellular__set_enabled()` is saved as `cellular.enabled` in `bruce.conf`, and
-an enabled modem is powered on at boot so calls can come in. A ringing call
+an enabled modem is powered on at boot so calls can come in. While it is on,
+the signal bars are the `core.cellular` status icon. A ringing call
 routes the speaker and mic to the modem (an XL9555 pin), shows a notification
 and runs `GUI=1 phone incoming` (the phone app is single-instance, so a
 running one comes to the front); a call that

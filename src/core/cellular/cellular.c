@@ -12,6 +12,7 @@
 #include "core_sdk/app_runner.h"
 #include "core_sdk/notification.h"
 #include "core_sdk/permission.h"
+#include "core_sdk/status_icon.h"
 
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -558,6 +559,33 @@ static void cellular__run_request(cellular__request_t *request) {
     xSemaphoreGive(request->done);
 }
 
+#define CELLULAR__STATUS_ICON_KEY "core.cellular"
+
+/* Signal bars in the status bar while the modem is on. Runs on the modem task. */
+static void cellular__update_status_icon(void) {
+    static const char *const icons[] = {
+        "signal-cellular-outline",
+        "signal-cellular-1",
+        "signal-cellular-2",
+        "signal-cellular-3",
+        "signal-cellular-3",
+    };
+    static const char *s_shown;
+    const char *icon = NULL;
+    if (s_enabled && !s_failed) {
+        bool ready = s_alive && cellular__model_state(&s_model) == BRUCE_CELLULAR_READY;
+        int bars = ready ? s_model.signal_bars : 0;
+        icon = icons[bars > 0 && bars <= 4 ? bars : 0];
+    }
+    if (icon == s_shown) return;
+    s_shown = icon;
+    if (icon != NULL) {
+        (void)status_icon__push_named(CELLULAR__STATUS_ICON_KEY, icon);
+    } else {
+        (void)status_icon__remove(CELLULAR__STATUS_ICON_KEY);
+    }
+}
+
 /* Runs while the modem is enabled. */
 static void cellular__session(void) {
     s_failed = false;
@@ -574,6 +602,7 @@ static void cellular__session(void) {
         if (xQueueReceive(s_requests, &request, 0) == pdTRUE) cellular__run_request(request);
         if (cellular__read_line(line, sizeof(line), 100)) cellular__handle_line(line);
         cellular__incoming();
+        cellular__update_status_icon();
         uint64_t now = cellular__now();
         bool in_call = cellular__in_call();
         if (now - polled_at >= (in_call ? CELLULAR__POLL_CALL_MS : CELLULAR__POLL_IDLE_MS)) {
@@ -599,6 +628,7 @@ static void cellular__fail_requests(void) {
 static void cellular__task(void *context) {
     (void)context;
     for (;;) {
+        cellular__update_status_icon();
         if (!s_enabled) {
             cellular__fail_requests();
             ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(500));
@@ -606,6 +636,7 @@ static void cellular__task(void *context) {
         }
         if (!cellular__open()) {
             s_failed = true;
+            cellular__update_status_icon();
             ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
             continue;
         }
@@ -618,6 +649,7 @@ static void cellular__task(void *context) {
         cellular__model_reset(&s_model);
         cellular__unlock();
         cellular__fail_requests();
+        cellular__update_status_icon();
         /* A modem that did not answer stays off until it is enabled again. */
         while (s_failed && s_enabled) ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
     }

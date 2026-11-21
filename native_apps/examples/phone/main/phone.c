@@ -19,6 +19,8 @@ typedef struct {
     bool running;
     bool dirty;
     uint64_t polled_at;
+    bruce_dialog_window_area_t area; /* Inside the launcher's window frame. */
+    uint64_t drawn_at;
     uint32_t log_sequence; /* Newest modem call log record already in the book. */
 } phone_t;
 
@@ -372,7 +374,8 @@ static void phone__key(phone_t *app, int32_t code, int height) {
         return;
     }
     switch (code) {
-        case BRUCE_INPUT_CODE_BACK: app->running = false; return;
+        /* Stays running so calls come in; menu > Exit or the task manager ends it. */
+        case BRUCE_INPUT_CODE_BACK: runtime__to_background(); return;
         case BRUCE_INPUT_CODE_MENU: phone__menu(app); return;
         case BRUCE_INPUT_CODE_LEFT:
             phone__set_tab(app, (ui_tab_t)((app->ui.tab + UI_TAB_COUNT - 1) % UI_TAB_COUNT));
@@ -474,25 +477,39 @@ static bool phone__init(phone_t *app, book_t *book) {
     return true;
 }
 
+static bool phone__draw(phone_t *app) {
+    if (display__width() <= 0 || display__height() <= 0 || display__begin_frame() != BRUCE_OK) return false;
+    dialog__draw_window(&app->area);
+    ui__set_origin(app->area.x, app->area.y);
+    ui__draw(&app->ui, app->area.width, app->area.height);
+    display__present();
+    app->drawn_at = runtime__now();
+    app->dirty = false;
+    return true;
+}
+
 static void phone__run(phone_t *app) {
     ui__init_metrics();
     while (app->running) {
-        int width = display__width();
-        int height = display__height();
+        /* Blocks while minimised, until it is shown again or tiled in the preview. */
+        if (process__is_background() && display__await_redraw()) app->dirty = true;
         bruce_input_event_t event;
         while (app->running && input__poll(&event) == BRUCE_OK) {
-            if (event.type == BRUCE_INPUT_TOUCH) phone__touch(app, &event, width, height);
-            else if (event.action == BRUCE_INPUT_PRESS) phone__key(app, event.code, height);
+            if (event.type == BRUCE_INPUT_TOUCH) {
+                bruce_input_event_t local = event;
+                local.x = (int16_t)(event.x - app->area.x);
+                local.y = (int16_t)(event.y - app->area.y);
+                phone__touch(app, &local, app->area.width, app->area.height);
+            } else if (event.action == BRUCE_INPUT_PRESS) {
+                phone__key(app, event.code, app->area.height);
+            }
         }
         phone__poll(app, false);
         if (display__viewport_changed()) app->dirty = true;
-        if (app->dirty && width > 0 && height > 0 && display__begin_frame() == BRUCE_OK) {
-            ui__draw(&app->ui, width, height);
-            display__present();
-            app->dirty = false;
-        } else {
-            runtime__delay(PHONE_IDLE_DELAY_MS);
-        }
+        /* Keeps the frame's clock and status icons current. */
+        uint32_t refresh = app->area.refresh_interval_ms;
+        if (refresh > 0 && runtime__now() - app->drawn_at >= refresh) app->dirty = true;
+        if (!app->dirty || !phone__draw(app)) runtime__delay(PHONE_IDLE_DELAY_MS);
     }
 }
 

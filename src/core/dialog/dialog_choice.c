@@ -274,6 +274,34 @@ static bool dialog__gui_compact(int w, int h) {
     return w * h * 4 < display__screen_width() * display__screen_height();
 }
 
+bruce_result_t dialog__draw_window(bruce_dialog_window_area_t *out_area) {
+    if (out_area == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+    int w = display__width();
+    int h = display__height();
+    *out_area = (bruce_dialog_window_area_t){.width = w, .height = h};
+    if (!s_window_renderer_set) {
+        uint16_t pri, sec, bg, surface, text, muted, border, success, warning, error;
+        dialog__get_colors(&pri, &sec, &bg, &surface, &text, &muted, &border, &success, &warning, &error);
+        return display__fill_screen(bg);
+    }
+    const bruce_dialog_window_renderer_t *r = &s_window_renderer;
+    if (dialog__gui_compact(w, h)) {
+        out_area->y = r->compact_padding_top;
+        out_area->height = h - r->compact_padding_top;
+    } else {
+        out_area->x = r->padding_left;
+        out_area->y = r->padding_top;
+        out_area->width = w - r->padding_left - r->padding_right;
+        out_area->height = h - r->padding_top - r->padding_bottom;
+    }
+    if (r->draw_border != NULL) r->draw_border(s_window_renderer_context);
+    if (r->draw_status != NULL) {
+        r->draw_status(s_window_renderer_context);
+        out_area->refresh_interval_ms = r->status_refresh_interval_ms;
+    }
+    return BRUCE_OK;
+}
+
 bruce_result_t dialog__gui_choice(
     const char *title, const char *message, const bruce_dialog_choice_t *choices, size_t choice_count,
     size_t *out_selected, const bruce_dialog_render_params_t *render_params, const dialog__choice_poll_t *poll

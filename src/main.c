@@ -63,7 +63,7 @@
 // clang-format off
 static const bruce_app_descriptor_t s_default_apps[] = {
     /* System - boot, launcher, config, diagnostics, power. */
-    {"apps",                 "Browse installed apps",                                     "System",  apps_app_main,                0,     false},
+    {"apps",                 "Browse installed apps",                                     "System",  apps_app_main,                0,     true },
     {"bootanimation",        "Play the boot animation",                                   "System",  bootanimation_app_main,       0,     false},
     {"bruce_launcher",       "Open the Bruce launcher",                                   "System",  bruce_launcher_app_main,      0,     true },
     {"clock",                "Show clock and timer tools",                                "System",  clock_app_main,               6144,  true },

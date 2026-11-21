@@ -398,6 +398,27 @@ void dialog__set_window_renderer(const bruce_dialog_window_renderer_t *renderer,
  */
 bruce_dialog_render_params_t dialog__default_render_params(int text_size);
 
+typedef struct {
+    /* The area inside the window frame, in viewport coordinates. */
+    int x, y, width, height;
+    /* Redraw this often to keep the clock and status icons current; 0 = no need. */
+    uint32_t refresh_interval_ms;
+} bruce_dialog_window_area_t;
+
+/**
+ * @brief Draws the launcher's window frame for an app that draws its own screen.
+ *
+ * The same border and status bar (clock, battery, status icons) that
+ * dialog__choice_launcher() shows, from the renderer registered with
+ * dialog__set_window_renderer(); a preview tile gets its compact form.
+ * Without a renderer it clears the viewport and the area is all of it.
+ * Call it between display__begin_frame() and display__present(), then draw
+ * inside the area.
+ *
+ * @param out_area Receives the area inside the frame and the refresh interval.
+ */
+bruce_result_t dialog__draw_window(bruce_dialog_window_area_t *out_area);
+
 /**
  * @brief Text input dialog accepting printable ASCII characters and space.
  *

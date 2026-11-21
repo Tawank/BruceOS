@@ -8,8 +8,9 @@ screen and USSD codes.
 python3 native_apps/tools/build_apps.py --target elf --idf-target esp32s3 --app phone
 ```
 
-Copy `phone_esp32s3.elf` to `/apps/phone.elf`: an incoming call runs
-`phone incoming`, so Core finds it there. The app is single-instance
+Copy `phone_esp32s3.elf` to `/apps/`: an incoming call runs
+`phone incoming`, and Core finds `/apps/phone.elf` or the build for its chip,
+`/apps/phone_esp32s3.elf`. The app is single-instance
 (`singleInstance` in `manifest.json`), so a call brings a running one to the
 front instead of starting a second.
 
@@ -49,10 +50,17 @@ On e-paper the call timer redraws every 15 seconds instead of every second.
 | Answer / decline     | Enter / Back                    | green / red              |
 | Hang up              | Back                            | red                      |
 | Volume, mute         | Up / Down, `m`                  | buttons                  |
-| Exit                 | Back                            | menu > Exit              |
+| Minimise             | Back                            |                          |
+| Exit                 | menu > Exit                     | menu > Exit              |
 
 On the T-Deck keyboard the keypad keys work without Alt: the letter keys
 that show 1-9, `*`, `#` and 0 type those.
+
+Back minimises the app instead of closing it, so it keeps running for
+incoming calls; it ends with menu > Exit or from the task manager. The app
+draws inside the launcher's window frame (`dialog__draw_window()`), so the
+top bar with the clock, battery and status icons is the launcher's; the
+signal bars are the cellular status icon there.
 
 The options menu calls, adds the number to contacts, edits or deletes a
 contact or a call, clears recents, and turns the phone on or off. Opening
