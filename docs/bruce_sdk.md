@@ -3011,8 +3011,8 @@ Starts playing a local audio file in the background and returns immediately.
 WAV (8- or 16-bit PCM, mono or stereo, any sample rate -- resampled to
 audio__stream_sample_rate()) and MP3 are built in. AAC, M4A, TS, FLAC,
 Ogg Vorbis/Opus, AMR, SBC, LC3, G.711, G.722 and other WAV codecs decode
-through codec libraries in /lib (see core/lib), loaded for the length of
-playback; without the library the file is unsupported. Anything else returns
+through codec libraries in /lib (see core/lib), loaded into PSRAM or swap
+for the length of playback; without the library the file is unsupported. Anything else returns
 BRUCE_ERR_UNSUPPORTED without side effects, checked synchronously before
 this returns (so a bad path or unsupported file is reported right away,
 not discovered later in the background). A valid file is then handed off
@@ -6079,7 +6079,7 @@ Sets high contrast; see config__get_display_high_contrast().
 int config__get_display_full_refresh_every(void);
 ```
 
-E-paper only: partial refreshes between full (black-white flash) refreshes, which clear the ghosting partial ones leave. 0 = never.
+E-paper only: a full (black-white flash) refresh, which clears the ghosting partial ones leave, is due once some spot of the screen changed in this many partial refreshes. It waits for drawing to pause, or comes at twice the count if drawing never pauses. 0 = never.
 
 ### Returns
 
@@ -6104,7 +6104,7 @@ Sets config__get_display_full_refresh_every().
 
 | Parameter | Type | Description |
 | --- | --- | --- |
-| `value` | `int` | Partial refreshes between full ones, 0 = never. |
+| `value` | `int` | Partial refreshes a spot may change in before a full one, 0 = never. |
 
 ### Returns
 

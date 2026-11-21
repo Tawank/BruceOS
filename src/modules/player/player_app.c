@@ -659,9 +659,9 @@ int player_app_main(int argc, char **argv) {
     /* On touch screens the focus box shows only once a key is used. */
     bool show_focus = !input__has_touch();
     bool epaper = display__is_epaper();
-    /* E-paper: every change is a slow refresh, and a run of them leaves
-     * ghosts, so the time moves in 10 s steps and nothing animates. */
-    uint32_t position_step_ms = epaper ? 10000u : 1000u;
+    /* The time and progress move once a second. On e-paper only the changed
+     * area refreshes, and the bars don't animate. */
+    uint32_t position_step_ms = 1000u;
     player__view_t shown;
     memset(&shown, 0, sizeof(shown));
     bool redraw = true;

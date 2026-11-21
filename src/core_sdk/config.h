@@ -409,8 +409,10 @@ bool config__get_display_high_contrast(void);
 bruce_result_t config__set_display_high_contrast(bool value);
 
 /**
- * @brief E-paper only: partial refreshes between full (black-white flash)
- * refreshes, which clear the ghosting partial ones leave. 0 = never.
+ * @brief E-paper only: a full (black-white flash) refresh, which clears the
+ * ghosting partial ones leave, is due once some spot of the screen changed in
+ * this many partial refreshes. It waits for drawing to pause, or comes at
+ * twice the count if drawing never pauses. 0 = never.
  *
  * @permission config
  */
@@ -419,7 +421,7 @@ int config__get_display_full_refresh_every(void);
 /**
  * @brief Sets config__get_display_full_refresh_every().
  *
- * @param value Partial refreshes between full ones, 0 = never.
+ * @param value Partial refreshes a spot may change in before a full one, 0 = never.
  * @permission config
  */
 bruce_result_t config__set_display_full_refresh_every(int value);

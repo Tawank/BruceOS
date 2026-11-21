@@ -4,6 +4,7 @@
 
 #if CONFIG_BRUCE_DISPLAY_PANEL_UC8253
 
+#include <stdint.h>
 #include <string.h>
 
 #include "display_internal.h"
@@ -33,6 +34,10 @@
 #define EPD__SETTLE_MS 40      /* Wait for drawing to stop before refreshing. */
 #define EPD__SETTLE_MAX 6      /* ...but refresh anyway during animations. */
 #define EPD__BUSY_TIMEOUT_MS 4000
+#define EPD__ROW (EPD__WIDTH / 8)
+/* The partial window's x goes to the panel as one byte. */
+_Static_assert(EPD__WIDTH % 8 == 0 && EPD__WIDTH <= 256, "e-paper width must fit the partial window");
+#define EPD__FULL_IDLE_MS 2000 /* A due full refresh waits for this long without drawing. */
 
 #if CONFIG_BRUCE_SD_ENABLED && CONFIG_BRUCE_SD_SPI_HOST == CONFIG_BRUCE_DISPLAY_SPI_HOST
 #define EPD__PIN_MISO CONFIG_BRUCE_SD_PIN_MISO
@@ -45,6 +50,12 @@ static uint8_t *s_drawn;   /* What apps have drawn. */
 static uint8_t *s_sending; /* Snapshot being sent. */
 static uint8_t *s_shown;   /* What the panel shows. */
 static uint8_t *s_chunk;   /* Internal DMA copy of each SPI write; the frames above live in PSRAM. */
+static uint8_t *s_window;  /* One frame's partial window, row after row. */
+/* Partial refreshes each byte (8 pixels) changed in since the last full
+ * refresh: ghosting builds up where the panel changes, not with the count of
+ * refreshes. */
+static uint8_t *s_wear;
+static int s_wear_max;
 static SemaphoreHandle_t s_drawn_lock;
 static SemaphoreHandle_t s_panel_lock;
 static TaskHandle_t s_task;
@@ -91,11 +102,56 @@ static int display_epd__wait_idle(const char *step) {
     return (int)pdTICKS_TO_MS(xTaskGetTickCount() - start);
 }
 
+/* Rows y0..y1 and bytes x0..x1 of a row, inclusive. */
+typedef struct {
+    int x0, x1, y0, y1;
+} display_epd__rect_t;
+
+/* Where s_sending differs from s_shown; false when nowhere. */
+static bool display_epd__changed(display_epd__rect_t *out) {
+    *out = (display_epd__rect_t){.x0 = EPD__ROW, .x1 = -1, .y0 = EPD__HEIGHT, .y1 = -1};
+    for (int y = 0; y < EPD__HEIGHT; ++y) {
+        const uint8_t *sending = s_sending + y * EPD__ROW;
+        const uint8_t *shown = s_shown + y * EPD__ROW;
+        if (memcmp(sending, shown, EPD__ROW) == 0) continue;
+        if (out->y0 > y) out->y0 = y;
+        out->y1 = y;
+        for (int x = 0; x < EPD__ROW; ++x) {
+            if (sending[x] == shown[x]) continue;
+            if (out->x0 > x) out->x0 = x;
+            if (out->x1 < x) out->x1 = x;
+        }
+    }
+    return out->y1 >= 0;
+}
+
+/* Copies the window out of `frame` into s_window. */
+static size_t display_epd__window(const uint8_t *frame, const display_epd__rect_t *window) {
+    size_t width = (size_t)(window->x1 - window->x0 + 1);
+    size_t n = 0;
+    for (int y = window->y0; y <= window->y1; ++y) {
+        memcpy(s_window + n, frame + y * EPD__ROW + window->x0, width);
+        n += width;
+    }
+    return n;
+}
+
+/* Counts the bytes about to change in a partial refresh. */
+static void display_epd__wear(const display_epd__rect_t *window) {
+    for (int y = window->y0; y <= window->y1; ++y) {
+        for (int x = window->x0; x <= window->x1; ++x) {
+            int i = y * EPD__ROW + x;
+            if (s_sending[i] == s_shown[i] || s_wear[i] == UINT8_MAX) continue;
+            if (++s_wear[i] > s_wear_max) s_wear_max = s_wear[i];
+        }
+    }
+}
+
 /* Same order as GxEPD2's GDEQ031T10 driver, which LilyGO's firmware uses:
  * reset, panel setting, image data, then mode, power on and refresh. The
  * panel setting also holds the scan direction: it must only be sent once the
  * controller is out of reset, or that one refresh is drawn flipped. */
-static void display_epd__refresh(bool full) {
+static void display_epd__refresh(bool full, const display_epd__rect_t *window) {
     gpio_set_level(EPD__PIN_RST, 0);
     vTaskDelay(pdMS_TO_TICKS(10));
     gpio_set_level(EPD__PIN_RST, 1);
@@ -109,9 +165,29 @@ static void display_epd__refresh(bool full) {
      * datasheet, R50H DDX), which leaves partial-refresh ghosts in place. A
      * full refresh claims the old image was the inverse, so every pixel is
      * driven through the black-to-white or white-to-black waveform. */
-    display_epd__send(false, &(const uint8_t){0x10}, 1, false);
-    display_epd__send(true, full ? s_sending : s_shown, EPD__BYTES, full);
-    display_epd__cmd(0x13, s_sending, EPD__BYTES);
+    if (window != NULL) {
+        /* Partial in: only the window is written and refreshed; the rest of
+         * the panel is not driven at all (GxEPD2 GDEQ031T10, 0x90 x in pixels
+         * on byte boundaries, y in two bytes each, then PT_SCAN). */
+        uint16_t y0 = (uint16_t)window->y0, y1 = (uint16_t)window->y1;
+        display_epd__cmd(0x91, NULL, 0);
+        const uint8_t area[] = {
+            (uint8_t)(window->x0 * 8),
+            (uint8_t)(window->x1 * 8 + 7),
+            (uint8_t)(y0 >> 8),
+            (uint8_t)y0,
+            (uint8_t)(y1 >> 8),
+            (uint8_t)y1,
+            0x01
+        };
+        display_epd__cmd(0x90, area, sizeof(area));
+        display_epd__cmd(0x10, s_window, display_epd__window(s_shown, window));
+        display_epd__cmd(0x13, s_window, display_epd__window(s_sending, window));
+    } else {
+        display_epd__send(false, &(const uint8_t){0x10}, 1, false);
+        display_epd__send(true, full ? s_sending : s_shown, EPD__BYTES, full);
+        display_epd__cmd(0x13, s_sending, EPD__BYTES);
+    }
 
     if (!full) {
         display_epd__cmd(0xE0, (const uint8_t[]){0x02}, 1); /* Force temperature... */
@@ -124,6 +200,7 @@ static void display_epd__refresh(bool full) {
     vTaskDelay(pdMS_TO_TICKS(2));
     int busy_in_refresh = gpio_get_level(EPD__PIN_BUSY);
     int refresh_ms = display_epd__wait_idle("refresh");
+    if (window != NULL) display_epd__cmd(0x92, NULL, 0); /* Partial out. */
     display_epd__cmd(0x02, NULL, 0); /* Power off. */
     int power_off_ms = display_epd__wait_idle("power off");
     ESP_LOGD(TAG, "%s refresh: BUSY after reset %d, power on %d ms, BUSY in refresh %d, refresh %d ms, power off %d ms",
@@ -135,10 +212,17 @@ static void display_epd__set_dither(int mode);
 
 static void display_epd__task(void *arg) {
     (void)arg;
-    int partials = 0;
+    bool full_due = false;
     for (;;) {
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        for (int i = 0; i < EPD__SETTLE_MAX && ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(EPD__SETTLE_MS)); ++i) {}
+        /* Full refreshes clear the ghosting partial ones leave; see the user
+         * setting. One that is due waits for drawing to pause, so it doesn't
+         * flash in the middle of use. */
+        bool quiet =
+            ulTaskNotifyTake(pdTRUE, full_due ? pdMS_TO_TICKS(EPD__FULL_IDLE_MS) : portMAX_DELAY) == 0;
+        if (quiet) s_full_requested = true;
+        for (int i = 0;
+             !quiet && i < EPD__SETTLE_MAX && ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(EPD__SETTLE_MS));
+             ++i) {}
 
         if (s_frozen) continue;
         uint32_t seq = ++s_pull_seq;
@@ -148,24 +232,32 @@ static void display_epd__task(void *arg) {
         bool enabled = s_enabled;
         xSemaphoreGive(s_drawn_lock);
         bool full = s_full_requested;
-        if (!enabled || (!full && memcmp(s_sending, s_shown, EPD__BYTES) == 0)) {
+        display_epd__rect_t changed;
+        bool any = display_epd__changed(&changed);
+        if (!enabled || (!full && !any)) {
             s_done_seq = seq;
             continue;
         }
 
-        /* Full refreshes clear the ghosting partial ones leave; see the user setting. */
+        /* Drawing that never pauses still gets one, at twice the count. */
         int every = config__get_display_full_refresh_every();
-        if (every > 0 && partials >= every) full = true;
+        if (every > 0 && s_wear_max >= 2 * every) full = true;
         s_full_requested = false;
         xSemaphoreTake(s_panel_lock, portMAX_DELAY);
         if (s_frozen) {
             xSemaphoreGive(s_panel_lock);
             continue;
         }
-        display_epd__refresh(full);
+        if (full) {
+            memset(s_wear, 0, EPD__BYTES);
+            s_wear_max = 0;
+        } else {
+            display_epd__wear(&changed);
+        }
+        display_epd__refresh(full, full ? NULL : &changed);
         xSemaphoreGive(s_panel_lock);
         memcpy(s_shown, s_sending, EPD__BYTES);
-        partials = full ? 0 : partials + 1;
+        full_due = every > 0 && s_wear_max >= every;
         s_done_seq = seq;
     }
 }
@@ -220,17 +312,21 @@ bruce_result_t display_epd__init(void) {
     s_drawn = display_epd__alloc_frame();
     s_shown = display_epd__alloc_frame();
     s_sending = display_epd__alloc_frame();
+    s_window = display_epd__alloc_frame();
+    s_wear = display_epd__alloc_frame();
     s_chunk = heap_caps_malloc(EPD__CHUNK, MALLOC_CAP_DMA);
     s_drawn_lock = xSemaphoreCreateMutex();
     s_panel_lock = xSemaphoreCreateMutex();
-    if (s_drawn == NULL || s_shown == NULL || s_sending == NULL || s_chunk == NULL || s_drawn_lock == NULL ||
-        s_panel_lock == NULL) {
+    if (s_drawn == NULL || s_shown == NULL || s_sending == NULL || s_window == NULL || s_wear == NULL ||
+        s_chunk == NULL || s_drawn_lock == NULL || s_panel_lock == NULL) {
         display_epd__deinit();
         return BRUCE_ERR_NO_MEMORY;
     }
     memset(s_drawn, 0xFF, EPD__BYTES);
     display_epd__set_dither(BRUCE_DISPLAY_DITHER_BAYER4);
     memset(s_shown, 0x00, EPD__BYTES); /* Unknown: never equal to the first frame, so it is always drawn. */
+    memset(s_wear, 0, EPD__BYTES);
+    s_wear_max = 0;
 
     bruce_result_t result = display_epd__init_gpio();
     if (result == BRUCE_OK) result = display_epd__init_spi();
@@ -266,7 +362,9 @@ void display_epd__deinit(void) {
     heap_caps_free(s_shown);
     heap_caps_free(s_sending);
     heap_caps_free(s_chunk);
-    s_drawn = s_shown = s_sending = s_chunk = NULL;
+    heap_caps_free(s_window);
+    heap_caps_free(s_wear);
+    s_drawn = s_shown = s_sending = s_chunk = s_window = s_wear = NULL;
 }
 
 void display_epd__configure_rotation(uint8_t rotation) { s_rotation = rotation & 3; }

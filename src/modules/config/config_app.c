@@ -415,7 +415,7 @@ static int config_app__theme_gui(void);
 static bruce_result_t config_app__full_refresh_gui(void) {
     static const int every[4] = {10, 30, 100, 0};
     static const char *const labels[5] = {
-        "Every 10 updates", "Every 30 updates", "Every 100 updates", "Never", "Refresh screen now"};
+        "After 10 changes", "After 30 changes", "After 100 changes", "Never", "Refresh screen now"};
     bruce_dialog_choice_t choices[5];
     for (size_t i = 0; i < 5; ++i) choices[i] = (bruce_dialog_choice_t){.label = labels[i], .value = labels[i]};
     size_t selected = config_app__closest_index(every, 4, config__get_display_full_refresh_every());
