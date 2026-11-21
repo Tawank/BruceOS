@@ -96,7 +96,7 @@ static bool device_bus__touch_ensure_device(i2c_master_bus_handle_t bus) {
     };
     for (size_t i = 0; i < sizeof(normal_mode) / sizeof(normal_mode[0]); ++i) {
         (void)i2c_master_transmit(s_touch_dev, normal_mode[i], sizeof(normal_mode[i]), 50);
-        vTaskDelay(pdMS_TO_TICKS(1));
+        vTaskDelay(1); /* At least 1 ms: one tick, since pdMS_TO_TICKS(1) is 0 at 100 Hz. */
     }
 #endif
     s_touch_ready = true;

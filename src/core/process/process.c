@@ -110,8 +110,10 @@ static void process__reap_task(void *arg) {
             process__unlock();
             if (entry == NULL) break;
 
+            /* One tick: pdMS_TO_TICKS(1) is 0 at 100 Hz, which only yields to
+             * equal priority and could spin while a lower one never suspends. */
             while (eTaskGetState(entry->handle) != eSuspended) {
-                vTaskDelay(pdMS_TO_TICKS(1));
+                vTaskDelay(1);
             }
             vTaskDelete(entry->handle);
             process__free_stack_buffers(entry->stack_buffer, entry->tcb_buffer);

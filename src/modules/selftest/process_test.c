@@ -375,7 +375,7 @@ bool selftest__run_process_status_case(void) {
         printf("[selftest] process/status: terminate worker create failed\n");
         return false;
     }
-    for (int i = 0; i < 20 && !s_status_worker_started; ++i) vTaskDelay(pdMS_TO_TICKS(5));
+    for (int i = 0; i < 20 && !s_status_worker_started; ++i) vTaskDelay(1);
 
     unchanged.exit_code = 789;
     if (!s_status_worker_started || process__wait_status(term_id, 0, &unchanged) != BRUCE_ERR_TIMEOUT ||
@@ -438,7 +438,7 @@ bool selftest__run_process_clear_signal_case(void) {
      * file for that category, and was tight enough that ordinary QEMU/host
      * scheduling jitter could occasionally miss it with no functional bug
      * behind it. */
-    for (int i = 0; i < 400 && !s_clear_signal_worker_started; ++i) vTaskDelay(pdMS_TO_TICKS(5));
+    for (int i = 0; i < 400 && !s_clear_signal_worker_started; ++i) vTaskDelay(1);
     if (!s_clear_signal_worker_started) {
         (void)process__kill(id);
         printf("[selftest] process/clear-signal: worker did not start\n");
@@ -450,7 +450,7 @@ bool selftest__run_process_clear_signal_case(void) {
         printf("[selftest] process/clear-signal: signal(INT) failed\n");
         return false;
     }
-    for (int i = 0; i < 400 && !s_clear_signal_worker_saw_int; ++i) vTaskDelay(pdMS_TO_TICKS(5));
+    for (int i = 0; i < 400 && !s_clear_signal_worker_saw_int; ++i) vTaskDelay(1);
     if (!s_clear_signal_worker_saw_int) {
         bruce_process_snapshot_t debug_snapshot;
         bruce_result_t debug_result = process__snapshot(id, &debug_snapshot);

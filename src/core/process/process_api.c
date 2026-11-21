@@ -564,7 +564,9 @@ static bruce_result_t process__wait_ms(uint32_t ms, bool interruptible) {
     process__record_t *self = process__find_by_handle_locked(xTaskGetCurrentTaskHandle());
     process__unlock();
     if (self == NULL) {
-        vTaskDelay(pdMS_TO_TICKS(ms));
+        /* At least one tick, as below: a few ms round to 0 at 100 Hz. */
+        TickType_t ticks = pdMS_TO_TICKS(ms);
+        vTaskDelay(ticks == 0 && ms > 0 ? 1 : ticks);
         return BRUCE_OK;
     }
     process__lock();

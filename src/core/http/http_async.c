@@ -43,7 +43,6 @@
 #define HTTP_ASYNC__HEADER_NAME_MAX 48
 #define HTTP_ASYNC__MIN_BUFFER 4096
 #define HTTP_ASYNC__STREAM_WINDOW 8192
-#define HTTP_ASYNC__STREAM_WAIT_MS 5
 
 typedef enum {
     HTTP_ASYNC__FREE,
@@ -237,7 +236,7 @@ static void http_async__append_stream(http_async__job_t *job, const void *data, 
     while (!http_async__is_cancelled(job) && job->response_len > job->read_offset &&
            job->response_len - job->read_offset + len > HTTP_ASYNC__STREAM_WINDOW) {
         http_async__unlock();
-        vTaskDelay(pdMS_TO_TICKS(HTTP_ASYNC__STREAM_WAIT_MS));
+        vTaskDelay(1); /* One tick; a few ms round to 0 at 100 Hz, which would spin. */
         http_async__lock();
     }
     if (job->read_offset > 0) {

@@ -75,7 +75,8 @@ bruce_result_t nrf24__init(void) {
         .mode = 0,
     };
     if (result == BRUCE_OK) result = spi__open_internal(&device_config, false, &s_nrf24_device);
-    if (result == BRUCE_OK) vTaskDelay(pdMS_TO_TICKS(5));
+    /* At least 5 ms; one tick, since pdMS_TO_TICKS(5) is 0 at 100 Hz. */
+    if (result == BRUCE_OK) vTaskDelay(1);
     xSemaphoreGive(s_nrf24_mutex);
     return result;
 }
@@ -192,7 +193,7 @@ nrf24__scan(uint8_t first_channel, size_t channel_count, uint8_t samples, uint8_
             NRF24_CMD_W_REGISTER | NRF24_REG_RX_ADDR_P0, address, NULL, sizeof(address), NULL
         );
     }
-    vTaskDelay(pdMS_TO_TICKS(2));
+    vTaskDelay(1); /* At least 2 ms: one tick, since pdMS_TO_TICKS(2) is 0 at 100 Hz. */
 
     memset(out_activity, 0, channel_count);
     for (uint8_t sample = 0; result == BRUCE_OK && sample < samples; ++sample) {

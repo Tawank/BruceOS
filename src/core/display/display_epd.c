@@ -197,7 +197,7 @@ static void display_epd__refresh(bool full, const display_epd__rect_t *window) {
     display_epd__cmd(0x04, NULL, 0); /* Power on. */
     int power_on_ms = display_epd__wait_idle("power on");
     display_epd__cmd(0x12, NULL, 0); /* Refresh. */
-    vTaskDelay(pdMS_TO_TICKS(2));
+    vTaskDelay(1); /* At least 2 ms: one tick, since pdMS_TO_TICKS(2) is 0 at 100 Hz. */
     int busy_in_refresh = gpio_get_level(EPD__PIN_BUSY);
     int refresh_ms = display_epd__wait_idle("refresh");
     if (window != NULL) display_epd__cmd(0x92, NULL, 0); /* Partial out. */

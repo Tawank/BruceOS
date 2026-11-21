@@ -1248,7 +1248,7 @@ static void audio__mp3_source_fill(audio__mp3_source_t *source) {
     source->total_read += got;
 }
 
-/* Runs on esp_audio_simple_player's own task. Waits (briefly, via
+/* Runs on esp_audio_simple_player's own task. Waits (one tick, via
  * vTaskDelay -- see audio__mp3_out_cb()'s identical reasoning) for
  * audio__mp3_source_fill() to top the ring up if it's temporarily empty but
  * the file isn't fully read yet; returns less than requested (down to 0) at
@@ -1274,7 +1274,7 @@ static int audio__mp3_in_cb(uint8_t *data, int data_size, void *ctx) {
         got_total += chunk;
         if (chunk == 0) {
             if (eof || stop_requested) break;
-            vTaskDelay(pdMS_TO_TICKS(5));
+            vTaskDelay(1);
         }
     }
     return (int)got_total;
@@ -1313,7 +1313,9 @@ static int audio__mp3_out_cb(uint8_t *data, int data_size, void *ctx) {
         pipe->filled += chunk;
         written += chunk;
         xSemaphoreGive(pipe->lock);
-        if (chunk == 0) vTaskDelay(pdMS_TO_TICKS(5));
+        /* One tick, not pdMS_TO_TICKS(5): at 100 Hz that is 0, and vTaskDelay(0)
+         * only yields, so the decoder spun here and starved IDLE0 (task watchdog). */
+        if (chunk == 0) vTaskDelay(1);
     }
     return data_size;
 }
