@@ -275,6 +275,10 @@ bool input__check(int32_t code, bool consume) {
     return found;
 }
 
+static volatile bool s_input_blocked;
+
+void event_loop__set_input_blocked(bool blocked) { s_input_blocked = blocked; }
+
 bruce_result_t input__inject(const bruce_input_event_t *event) {
     if (event == NULL) { return BRUCE_ERR_INVALID_ARGUMENT; }
     if (event->type != BRUCE_INPUT_KEY && event->type != BRUCE_INPUT_BUTTON &&
@@ -288,6 +292,7 @@ bruce_result_t input__inject(const bruce_input_event_t *event) {
     }
     bruce_result_t permission = permission__check(BRUCE_PERMISSION_INPUT);
     if (permission != BRUCE_OK) { return permission; }
+    if (s_input_blocked) { return BRUCE_OK; }
 
     bruce_input_event_t queued_event = *event;
     if (queued_event.timestamp_ms == 0) queued_event.timestamp_ms = event_loop__now_ms();

@@ -4,6 +4,7 @@
 
 #include "core/display/display.h"
 #include "core/cellular/cellular.h"
+#include "core/event_loop/event_loop.h"
 #include "core/gps/gps.h"
 
 #include "core_sdk/device.h"
@@ -108,6 +109,7 @@ bruce_result_t device__sleep(void) {
     while (gpio_get_level(pin) == 0) vTaskDelay(pdMS_TO_TICKS(20));
     /* An incoming call or text wakes the device too. */
     int ring_pin = cellular__sleep_prepare();
+    event_loop__set_input_blocked(true);
     display__freeze(true);
     uint8_t brightness = display__get_brightness();
     (void)display__set_brightness(0);
@@ -122,6 +124,11 @@ bruce_result_t device__sleep(void) {
     if (ring_pin >= 0) gpio_wakeup_disable((gpio_num_t)ring_pin);
     (void)display__set_brightness(brightness);
     display__freeze(false);
+    /* The press that woke the device is not input: drop it until the input
+     * poller has debounced the release. */
+    while (gpio_get_level(pin) == 0) vTaskDelay(pdMS_TO_TICKS(20));
+    vTaskDelay(pdMS_TO_TICKS(CONFIG_BRUCE_INPUT_DEBOUNCE_MS + 2 * CONFIG_BRUCE_INPUT_POLL_PERIOD_MS + 20));
+    event_loop__set_input_blocked(false);
     cellular__sleep_done(ring);
     return BRUCE_OK;
 #else
