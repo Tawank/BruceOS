@@ -1037,17 +1037,23 @@ static void bruce_launcher__run_command_palette(const bruce_launcher_menu_t *roo
 
 /* The root is a horizontal carousel. Nested menus use Core's choice renderer
  * inside the launcher's status bar and outer border. */
-/* bruce_launcher is single-instance: "bruce_launcher config" started while the
- * menu runs brings this process back with its arguments instead. Returns
- * whether the settings ran. */
-static bool bruce_launcher__take_launch_args(void) {
+typedef enum {
+    BRUCE_LAUNCHER_LAUNCH_NONE,
+    BRUCE_LAUNCHER_LAUNCH_HOME,   /* A plain start, e.g. the launcher hotkey: show the main menu. */
+    BRUCE_LAUNCHER_LAUNCH_CONFIG, /* The settings ran. */
+} bruce_launcher_launch_t;
+
+/* bruce_launcher is single-instance: starting it again while the menu runs
+ * brings this process back with the new start's arguments instead. */
+static bruce_launcher_launch_t bruce_launcher__take_launch_args(void) {
     char buffer[128];
     char *argv[8];
     int argc = runtime__take_launch_args(buffer, sizeof(buffer), argv, 8);
-    if (argc < 2 || strcmp(argv[1], "config") != 0) return false;
+    if (argc == 0) return BRUCE_LAUNCHER_LAUNCH_NONE;
+    if (argc < 2 || strcmp(argv[1], "config") != 0) return BRUCE_LAUNCHER_LAUNCH_HOME;
     (void)bruce_launcher_config__run(argc - 1, argv + 1);
     (void)input__flush();
-    return true;
+    return BRUCE_LAUNCHER_LAUNCH_CONFIG;
 }
 
 static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
@@ -1079,7 +1085,7 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
         size_t selected = 0;
         bruce_dialog_render_params_t submenu_params = {.render_launcher = true};
         for (;;) {
-            (void)bruce_launcher__take_launch_args();
+            if (bruce_launcher__take_launch_args() == BRUCE_LAUNCHER_LAUNCH_HOME) break;
             const bruce_launcher_entry_t *entries = bruce_launcher__menu_entries(current);
             if (display__width() <= 0 || display__height() <= 0) {
                 (void)runtime__delay(20);
@@ -1100,6 +1106,10 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
             );
             submenu_params.skip_initial_flush = false; /* one-shot: only meant for the call just made */
             s_live_choices.count = 0;
+            /* A start that brings this back also cancels the dialog. */
+            bruce_launcher_launch_t launch = bruce_launcher__take_launch_args();
+            if (launch == BRUCE_LAUNCHER_LAUNCH_HOME) break;
+            if (launch == BRUCE_LAUNCHER_LAUNCH_CONFIG) continue;
             if (result == BRUCE_ERR_CANCELLED) {
                 /* Shown in a preview tile: redraw every second so the header clock keeps ticking. */
                 bool tiled = process__is_background() && display__width() > 0;
@@ -1176,7 +1186,7 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
     int touch_x = -1, touch_y = -1;
     bool tap_pending = false;
     for (;;) {
-        if (bruce_launcher__take_launch_args()) {
+        if (bruce_launcher__take_launch_args() != BRUCE_LAUNCHER_LAUNCH_NONE) {
             bruce_launcher_config__load(&render);
             last_drawn = -1;
         }

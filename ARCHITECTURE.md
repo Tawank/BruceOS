@@ -674,8 +674,9 @@ The redirected launch's arguments are kept on the running process, a later
 one replacing an untaken one, and the app takes them with
 `runtime__take_launch_args()` when it is back in the foreground. That is how
 `launcher config` opens the settings of a running `bruce_launcher` (or any
-ELF launcher), and `messages <number>` opens a conversation in a running
-Messages.
+ELF launcher), a plain `launcher` start (the launcher hotkey or touch key)
+takes it back to its main menu, and `messages <number>` opens a conversation
+in a running Messages.
 
 The built-in `shell` module owns command-language parsing and execution. It
 supports whitespace-delimited words, literal single quotes, expandable double
