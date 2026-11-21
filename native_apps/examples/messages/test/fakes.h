@@ -58,6 +58,7 @@ typedef struct {
     size_t choice_count;
     int message_count;
     char message[192];
+    const char *launch_number; /* A later "messages <number>" start, until taken. */
 } fakes_t;
 
 extern fakes_t fakes;

@@ -158,26 +158,78 @@ void process__lock(void) { xSemaphoreTakeRecursive(s_lock, portMAX_DELAY); }
 void process__unlock(void) { xSemaphoreGiveRecursive(s_lock); }
 
 /* Caller must hold the lock. */
-static bool process__activate_gui_instance_locked(const char *name, bruce_process_id_t *out_process_id) {
+static void process__free_argv(int argc, char **argv);
+static bool process__dup_argv(int argc, char *const *src_argv, char ***out_argv);
+
+/* argv is the new start's full argv, argv[0] its name; it replaces any start
+ * the process has not taken yet. Allocated before the lock is taken. */
+static bool process__activate_gui_instance_locked(
+    const char *name, int argc, char **argv, bruce_process_id_t *out_process_id
+) {
     for (process__record_t *record = s_processes; record != NULL; record = record->next) {
         if (!record->in_use || !record->gui_requested || record->state == BRUCE_PROCESS_STOPPING ||
             strcmp(record->name, name) != 0) {
             continue;
         }
         if (record->state == BRUCE_PROCESS_BACKGROUND) process__foreground_push_locked(record->id);
+        int old_argc = record->launch_argc;
+        char **old_argv = record->launch_argv;
+        record->launch_argc = argc;
+        record->launch_argv = argv;
+        process__free_argv(old_argc, old_argv);
         *out_process_id = record->id;
         return true;
     }
     return false;
 }
 
-bruce_result_t process_registry__activate_single_instance(const char *name, bruce_process_id_t *out_process_id) {
-    if (name == NULL || out_process_id == NULL) return BRUCE_ERR_INVALID_ARGUMENT;
+bruce_result_t process_registry__activate_single_instance(
+    const char *name, int argc, char *const *argv, bruce_process_id_t *out_process_id
+) {
+    if (name == NULL || out_process_id == NULL || argc < 0 || (argc > 0 && argv == NULL))
+        return BRUCE_ERR_INVALID_ARGUMENT;
+    process__ensure_init();
+    /* The stored argv is the start's arguments behind the app's name. */
+    char **launch_argv = calloc((size_t)argc + 2u, sizeof(char *));
+    if (launch_argv == NULL) return BRUCE_ERR_NO_MEMORY;
+    launch_argv[0] = (char *)name;
+    for (int i = 0; i < argc; ++i) launch_argv[i + 1] = argv[i];
+    char **copy = NULL;
+    bool copied = process__dup_argv(argc + 1, launch_argv, &copy);
+    free(launch_argv);
+    if (!copied) return BRUCE_ERR_NO_MEMORY;
+    process__lock();
+    bool found = process__activate_gui_instance_locked(name, argc + 1, copy, out_process_id);
+    process__unlock();
+    if (!found) process__free_argv(argc + 1, copy);
+    return found ? BRUCE_OK : BRUCE_ERR_NOT_FOUND;
+}
+
+int process_registry__take_launch_args(char *buffer, size_t capacity, char **argv, int argv_capacity) {
+    if (buffer == NULL || argv == NULL || argv_capacity <= 0 || capacity == 0) return 0;
     process__ensure_init();
     process__lock();
-    bool found = process__activate_gui_instance_locked(name, out_process_id);
+    process__record_t *record = process__find_by_handle_locked(xTaskGetCurrentTaskHandle());
+    int launch_argc = record != NULL ? record->launch_argc : 0;
+    char **launch_argv = record != NULL ? record->launch_argv : NULL;
+    if (record != NULL) {
+        record->launch_argc = 0;
+        record->launch_argv = NULL;
+    }
     process__unlock();
-    return found ? BRUCE_OK : BRUCE_ERR_NOT_FOUND;
+    if (launch_argv == NULL) return 0;
+    int count = 0;
+    size_t used = 0;
+    for (int i = 0; i < launch_argc && count < argv_capacity; ++i) {
+        size_t length = strlen(launch_argv[i]) + 1;
+        if (used + length > capacity) break;
+        memcpy(buffer + used, launch_argv[i], length);
+        argv[count++] = buffer + used;
+        used += length;
+    }
+    if (count < argv_capacity) argv[count] = NULL;
+    process__free_argv(launch_argc, launch_argv);
+    return count;
 }
 
 /* Caller must hold the lock. */
@@ -513,6 +565,9 @@ void process__teardown_locked(process__record_t *record, const bruce_process_sta
     process__foreground_recompute_locked();
     process__free_argv(record->argc, record->argv);
     record->argv = NULL;
+    process__free_argv(record->launch_argc, record->launch_argv);
+    record->launch_argv = NULL;
+    record->launch_argc = 0;
     if (record->handle != NULL && record->handle == xTaskGetCurrentTaskHandle()) {
         vTaskSetThreadLocalStoragePointer(record->handle, PROCESS__TLS_SLOT, NULL);
     }
@@ -618,9 +673,10 @@ process_registry__create(const process_create_params_t *params, bruce_process_id
 
     process__lock();
     const char *name = params->name != NULL && params->name[0] != '\0' ? params->name : "app";
-    if (params->single_instance && params->gui_requested && process__activate_gui_instance_locked(name, out_process_id)) {
+    if (params->single_instance && params->gui_requested &&
+        process__activate_gui_instance_locked(name, params->argc, argv_copy, out_process_id)) {
+        /* The running process now owns argv_copy as its pending start. */
         process__unlock();
-        process__free_argv(params->argc, argv_copy);
         return BRUCE_OK;
     }
     if (process__live_count_locked() >= BRUCE_PROCESS_MAX) {
@@ -704,6 +760,7 @@ process_registry__create(const process_create_params_t *params, bruce_process_id
         memory__stack_free(stack_header);
         free(tcb_buffer);
         process__free_argv(record->argc, record->argv);
+        process__free_argv(record->launch_argc, record->launch_argv);
         process__environment_free(&record->environment);
         record->in_use = false;
         process__dispose_if_unused_locked(record);
@@ -740,6 +797,7 @@ process_registry__create(const process_create_params_t *params, bruce_process_id
         record->stack_buffer = NULL;
         record->tcb_buffer = NULL;
         process__free_argv(record->argc, record->argv);
+        process__free_argv(record->launch_argc, record->launch_argv);
         process__environment_free(&record->environment);
         record->in_use = false;
         process__dispose_if_unused_locked(record);

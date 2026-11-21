@@ -602,6 +602,10 @@ bruce_result_t runtime__sleep(uint32_t milliseconds) { return process__wait_ms(m
 
 bruce_result_t runtime__delay(uint32_t milliseconds) { return process__wait_ms(milliseconds, false); }
 
+int runtime__take_launch_args(char *buffer, size_t capacity, char **argv, int argv_capacity) {
+    return process_registry__take_launch_args(buffer, capacity, argv, argv_capacity);
+}
+
 bool runtime__is_gui_requested(void) {
     const char *value = environment__get("GUI");
     return value != NULL && strcmp(value, "1") == 0;

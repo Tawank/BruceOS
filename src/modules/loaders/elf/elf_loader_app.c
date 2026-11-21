@@ -270,10 +270,21 @@ static int elf_loader__open(
 
     const char *permission_key = elf_loader__basename(normalized_path);
 
+    char **argv = NULL;
+    int argc = 0;
+    bruce_result_t parse_result = app_runner__parse_args(arg, &argv, &argc);
+    if (parse_result != BRUCE_OK) {
+        memory__free(inspection);
+        return (int)parse_result;
+    }
+
+    /* A running instance takes this start's arguments instead. */
     bruce_process_id_t running_instance = BRUCE_PROCESS_ID_INVALID;
     if (inspection->manifest.single_instance &&
         app_runner__environment_requests_gui(environment, environment_count) &&
-        process_registry__activate_single_instance(permission_key, &running_instance) == BRUCE_OK) {
+        process_registry__activate_single_instance(permission_key, argc, argv, &running_instance) ==
+            BRUCE_OK) {
+        app_runner__free_args(argv, argc);
         memory__free(inspection);
         return (int)running_instance;
     }
@@ -283,14 +294,6 @@ static int elf_loader__open(
         permission_names[i] = inspection->manifest.permissions[i];
     }
     (void)permission__preflight(permission_key, permission_names, inspection->manifest.permission_count);
-
-    char **argv = NULL;
-    int argc = 0;
-    bruce_result_t parse_result = app_runner__parse_args(arg, &argv, &argc);
-    if (parse_result != BRUCE_OK) {
-        memory__free(inspection);
-        return (int)parse_result;
-    }
 
     /* argv[0] is the display name for the loaded ELF app. */
     const char *cmd_name = elf_loader__command_name(normalized_path);

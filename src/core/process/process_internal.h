@@ -73,6 +73,10 @@ typedef struct process__record {
     bruce_app_entry_t entry;
     int argc;
     char **argv;
+    /* Arguments of a later start that activated this single-instance process,
+     * until runtime__take_launch_args() takes them. NULL when none. */
+    int launch_argc;
+    char **launch_argv;
 
     int (*process_entry)(void *context);
     void *process_entry_context;

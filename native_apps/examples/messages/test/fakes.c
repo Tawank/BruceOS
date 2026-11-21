@@ -184,6 +184,15 @@ bruce_result_t runtime__delay(uint32_t milliseconds) {
 
 bool process__is_background(void) { return false; }
 
+int runtime__take_launch_args(char *buffer, size_t capacity, char **argv, int argv_capacity) {
+    if (fakes.launch_number == NULL || argv_capacity < 2) return 0;
+    snprintf(buffer, capacity, "%s", fakes.launch_number);
+    argv[0] = "messages";
+    argv[1] = buffer;
+    fakes.launch_number = NULL;
+    return 2;
+}
+
 /* ---- cellular ---- */
 
 bool cellular__is_available(void) { return true; }

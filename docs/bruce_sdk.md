@@ -16955,6 +16955,40 @@ through standard input and output.
 
 ---
 
+## runtime__take_launch_args()
+
+```c
+int runtime__take_launch_args(char *buffer, size_t capacity, char **argv, int argv_capacity);
+```
+
+Takes the arguments of a later start of this single-instance app.
+
+Starting a single-instance app (manifest "singleInstance") with a GUI while
+it already runs brings the running one to the front instead of starting a
+second one, and its arguments wait here. Check after coming back to the
+foreground, e.g. when display__await_redraw() returns or in the main loop.
+A later start replaces one not yet taken.
+
+            main(). NULL-terminated when there is room.
+@return The argument count, as main()'s argc: 0 when no start is waiting,
+        1 for a start without arguments.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `buffer` | `char *` | Receives the argument strings. |
+| `capacity` | `size_t` | Size of buffer in bytes. |
+| `argv` | `char **` | Receives pointers into buffer; argv[0] is the app's name, as in |
+| `argv_capacity` | `int` | Number of entries argv holds. |
+
+### Returns
+
+`int`
+
+
+---
+
 ## runtime__to_foreground()
 
 ```c

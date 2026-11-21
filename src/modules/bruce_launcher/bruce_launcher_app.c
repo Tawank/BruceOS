@@ -1037,6 +1037,19 @@ static void bruce_launcher__run_command_palette(const bruce_launcher_menu_t *roo
 
 /* The root is a horizontal carousel. Nested menus use Core's choice renderer
  * inside the launcher's status bar and outer border. */
+/* bruce_launcher is single-instance: "bruce_launcher config" started while the
+ * menu runs brings this process back with its arguments instead. Returns
+ * whether the settings ran. */
+static bool bruce_launcher__take_launch_args(void) {
+    char buffer[128];
+    char *argv[8];
+    int argc = runtime__take_launch_args(buffer, sizeof(buffer), argv, 8);
+    if (argc < 2 || strcmp(argv[1], "config") != 0) return false;
+    (void)bruce_launcher_config__run(argc - 1, argv + 1);
+    (void)input__flush();
+    return true;
+}
+
 static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
     bruce_launcher_theme_t theme;
     bruce_launcher__get_theme(&theme);
@@ -1066,6 +1079,7 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
         size_t selected = 0;
         bruce_dialog_render_params_t submenu_params = {.render_launcher = true};
         for (;;) {
+            (void)bruce_launcher__take_launch_args();
             const bruce_launcher_entry_t *entries = bruce_launcher__menu_entries(current);
             if (display__width() <= 0 || display__height() <= 0) {
                 (void)runtime__delay(20);
@@ -1162,6 +1176,10 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
     int touch_x = -1, touch_y = -1;
     bool tap_pending = false;
     for (;;) {
+        if (bruce_launcher__take_launch_args()) {
+            bruce_launcher_config__load(&render);
+            last_drawn = -1;
+        }
         int width = display__width();
         int height = display__height();
         if (width <= 0 || height <= 0) {
@@ -1347,6 +1365,8 @@ static int bruce_launcher__run_gui_menu(const bruce_launcher_menu_t *menu) {
                 if (entry->kind == BRUCE_LAUNCHER_ENTRY_BACK) { return 0; }
                 if (entry->kind == BRUCE_LAUNCHER_ENTRY_SUBMENU) {
                     (void)bruce_launcher__run_gui_menu(bruce_launcher__entry_submenu(menu, entry));
+                    /* The settings may have run from inside it. */
+                    bruce_launcher_config__load(&render);
                 } else {
                     (void)bruce_launcher__run_entry(entry);
                 }

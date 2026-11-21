@@ -113,6 +113,16 @@ static void new_message_to_a_typed_number(void) {
     CHECK_STR(app.ui.number, "+48600100200");
 }
 
+static void a_later_start_opens_its_number(void) {
+    start(NULL);
+    messages__take_launch(&app);
+    CHECK_EQ(app.ui.screen, UI_SCREEN_LIST);
+    fakes.launch_number = "600100200";
+    messages__take_launch(&app);
+    CHECK_EQ(app.ui.screen, UI_SCREEN_THREAD);
+    CHECK_STR(app.ui.number, "600100200");
+}
+
 static void menu_deletes_a_conversation(void) {
     fakes__set_file(STORE_MESSAGES_FILE, "5,i,r,1,a\n6,i,r,2,b\n");
     start(NULL);
@@ -131,5 +141,6 @@ SUITE(
     messages_tests, TEST(opening_moves_sim_messages_into_the_store), TEST(new_message_while_open_is_synced),
     TEST(opening_a_conversation_marks_it_read), TEST(typing_and_sending), TEST(failed_send_keeps_the_draft),
     TEST(backspace_removes_a_whole_character), TEST(new_message_to_a_contact),
-    TEST(new_message_to_a_typed_number), TEST(menu_deletes_a_conversation)
+    TEST(new_message_to_a_typed_number), TEST(a_later_start_opens_its_number),
+    TEST(menu_deletes_a_conversation)
 )

@@ -118,6 +118,22 @@ static int selftest__worker_wait_for_kill(int argc, char **argv) {
     return 0;
 }
 
+/* The last start this single-instance worker took: "argc:argv1". */
+static char s_launch_seen[32];
+
+static int selftest__worker_take_launch_args(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    while (runtime__delay(5) == BRUCE_OK) {
+        char buffer[32];
+        char *args[4];
+        int count = runtime__take_launch_args(buffer, sizeof(buffer), args, 4);
+        if (count > 0)
+            snprintf(s_launch_seen, sizeof(s_launch_seen), "%d:%s", count, count > 1 ? args[1] : "");
+    }
+    return 0;
+}
+
 static void selftest__count_resource_cleanup(void *context) {
     (void)context;
     s_resource_cleanup_count++;
@@ -641,9 +657,10 @@ bool selftest__run_process_app_kill_case(void) {
 }
 
 bool selftest__run_process_single_instance_case(void) {
+    char *second_argv[] = {"selftest_single", "config"};
     process_create_params_t params = {
         .name = "selftest_single",
-        .entry = selftest__worker_wait_for_kill,
+        .entry = selftest__worker_take_launch_args,
         .built_in = true,
         .gui_requested = true,
         .single_instance = true,
@@ -655,10 +672,25 @@ bool selftest__run_process_single_instance_case(void) {
     bruce_process_id_t found = BRUCE_PROCESS_ID_INVALID;
     bruce_process_id_t headless = BRUCE_PROCESS_ID_INVALID;
 
+    s_launch_seen[0] = '\0';
     bool ok = process_registry__create(&params, &first) == BRUCE_OK && first != BRUCE_PROCESS_ID_INVALID;
+    /* A second start hands its arguments to the running one. */
+    params.argc = 2;
+    params.argv = second_argv;
     ok = ok && process_registry__create(&params, &second) == BRUCE_OK && second == first;
-    ok = ok && process_registry__activate_single_instance("selftest_single", &found) == BRUCE_OK && found == first;
-    ok = ok && process_registry__activate_single_instance("selftest_missing", &found) == BRUCE_ERR_NOT_FOUND;
+    for (int i = 0; i < 100 && s_launch_seen[0] == '\0'; ++i) vTaskDelay(pdMS_TO_TICKS(10));
+    ok = ok && strcmp(s_launch_seen, "2:config") == 0;
+    s_launch_seen[0] = '\0';
+    char *loader_args[] = {"+48600"};
+    ok = ok &&
+         process_registry__activate_single_instance("selftest_single", 1, loader_args, &found) == BRUCE_OK &&
+         found == first;
+    for (int i = 0; i < 100 && s_launch_seen[0] == '\0'; ++i) vTaskDelay(pdMS_TO_TICKS(10));
+    ok = ok && strcmp(s_launch_seen, "2:+48600") == 0;
+    ok = ok && process_registry__activate_single_instance("selftest_missing", 0, NULL, &found) ==
+                   BRUCE_ERR_NOT_FOUND;
+    params.argc = 0;
+    params.argv = NULL;
 
     params.gui_requested = false;
     ok = ok && process_registry__create(&params, &headless) == BRUCE_OK && headless != first;
@@ -666,7 +698,8 @@ bool selftest__run_process_single_instance_case(void) {
     (void)process__kill(first);
     if (headless != BRUCE_PROCESS_ID_INVALID) (void)process__kill(headless);
     (void)process__wait(first, 0);
-    ok = ok && process_registry__activate_single_instance("selftest_single", &found) == BRUCE_ERR_NOT_FOUND;
+    ok = ok && process_registry__activate_single_instance("selftest_single", 0, NULL, &found) ==
+                   BRUCE_ERR_NOT_FOUND;
     printf("[selftest] process/single-instance: %s\n", ok ? "OK" : "FAIL");
     return ok;
 }

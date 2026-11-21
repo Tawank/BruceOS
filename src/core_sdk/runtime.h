@@ -88,6 +88,25 @@ bruce_result_t runtime__timer_stop(bruce_timer_id_t timer_id);
 bool runtime__is_gui_requested(void);
 
 /**
+ * @brief Takes the arguments of a later start of this single-instance app.
+ *
+ * Starting a single-instance app (manifest "singleInstance") with a GUI while
+ * it already runs brings the running one to the front instead of starting a
+ * second one, and its arguments wait here. Check after coming back to the
+ * foreground, e.g. when display__await_redraw() returns or in the main loop.
+ * A later start replaces one not yet taken.
+ *
+ * @param buffer Receives the argument strings.
+ * @param capacity Size of buffer in bytes.
+ * @param argv Receives pointers into buffer; argv[0] is the app's name, as in
+ *             main(). NULL-terminated when there is room.
+ * @param argv_capacity Number of entries argv holds.
+ * @return The argument count, as main()'s argc: 0 when no start is waiting,
+ *         1 for a start without arguments.
+ */
+int runtime__take_launch_args(char *buffer, size_t capacity, char **argv, int argv_capacity);
+
+/**
  * @brief Gives the calling process foreground ownership.
  *
  * Marks the process GUI-capable when necessary. This is self-only and does

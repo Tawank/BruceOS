@@ -8,7 +8,8 @@ python3 native_apps/tools/build_apps.py --target elf --idf-target esp32s3 --app 
 ```
 
 Copy `messages_esp32s3.elf` to `/apps/`. `messages <number>` opens that
-conversation; the phone app's menu does this with "Send message".
+conversation, also when Messages already runs; the phone app's menu does
+this with "Send message".
 
 ## Tests
 

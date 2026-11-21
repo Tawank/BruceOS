@@ -56,7 +56,8 @@ typedef struct {
     bool preserve_display;
     /* When set on a GUI launch and a live GUI process with the same `name`
      * already exists, that process is brought to the foreground and its id is
-     * returned instead of creating a second one. Loaders that own resources
+     * returned instead of creating a second one; argv is handed to it for
+     * runtime__take_launch_args(). Loaders that own resources
      * handed to the new process must check first with
      * process_registry__activate_single_instance(), since a hit here creates
      * nothing that would ever run process_entry_cleanup. */
@@ -92,9 +93,15 @@ typedef struct {
 bruce_result_t
 process_registry__create(const process_create_params_t *params, bruce_process_id_t *out_process_id);
 
-/* Foregrounds the live GUI process called `name`, if any. Returns BRUCE_OK and
- * its id via *out_process_id, or BRUCE_ERR_NOT_FOUND. */
-bruce_result_t process_registry__activate_single_instance(const char *name, bruce_process_id_t *out_process_id);
+/* Foregrounds the live GUI process called `name`, if any, and hands it this
+ * start's arguments (argc/argv without the app name) for
+ * runtime__take_launch_args(). Returns BRUCE_OK and its id via
+ * *out_process_id, or BRUCE_ERR_NOT_FOUND. */
+bruce_result_t process_registry__activate_single_instance(
+    const char *name, int argc, char *const *argv, bruce_process_id_t *out_process_id
+);
+/* runtime__take_launch_args() for the calling process. */
+int process_registry__take_launch_args(char *buffer, size_t capacity, char **argv, int argv_capacity);
 
 /* Loads process-global environment defaults from /config/.env. Missing files
  * are created with an explanatory template. Call once after storage init. */

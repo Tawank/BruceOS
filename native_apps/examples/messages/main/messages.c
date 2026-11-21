@@ -329,11 +329,19 @@ static void messages__init(messages_t *app, store_t *store, const char *number) 
     if (number != NULL && number[0] != '\0') messages__open(app, number);
 }
 
+/* "messages <number>" started while this runs brings it back with the number. */
+static void messages__take_launch(messages_t *app) {
+    char buffer[64];
+    char *argv[3];
+    if (runtime__take_launch_args(buffer, sizeof(buffer), argv, 3) > 1) messages__open(app, argv[1]);
+}
+
 static void messages__run(messages_t *app) {
     ui__init_metrics();
     while (app->running) {
         /* Blocks while minimised, until it is shown again or tiled in the preview. */
         if (process__is_background() && display__await_redraw()) app->dirty = true;
+        messages__take_launch(app);
         bruce_input_event_t event;
         while (app->running && input__poll(&event) == BRUCE_OK) {
             if (event.type == BRUCE_INPUT_TOUCH) {
