@@ -10,6 +10,7 @@
 #include "core/device/device.h"
 #include "core/process/process.h"
 #include "core_sdk/app_runner.h"
+#include "core_sdk/clock.h"
 #include "core_sdk/notification.h"
 #include "core_sdk/permission.h"
 #include "core_sdk/status_icon.h"
@@ -233,6 +234,12 @@ cellular_line_t cellular__parse_line(cellular_model_t *model, const char *line, 
             snprintf(model->operator_name, sizeof(model->operator_name), "%s", name);
     } else if (cellular__starts(line, "+CUSD:", &values)) {
         cellular__cusd(model, values);
+    } else if (cellular__starts(line, "+CMTI:", &values)) {
+        const char *comma = strchr(values, ',');
+        if (comma != NULL && atoi(comma + 1) > 0) model->sms_index = atoi(comma + 1);
+    } else if (cellular__starts(line, "+CPMS:", &values)) {
+        const char *comma = strchr(values, ',');
+        if (comma != NULL) sscanf(comma + 1, "%d,%d", &model->sms_used, &model->sms_total);
     }
     return result;
 }
@@ -262,11 +269,18 @@ static size_t cellular__utf8(uint32_t code, char *out, size_t room) {
         out[1] = (char)(0x80 | (code & 0x3F));
         return 2;
     }
-    if (code >= 0x800 && room >= 3) {
+    if (code >= 0x800 && code < 0x10000 && room >= 3) {
         out[0] = (char)(0xE0 | code >> 12);
         out[1] = (char)(0x80 | ((code >> 6) & 0x3F));
         out[2] = (char)(0x80 | (code & 0x3F));
         return 3;
+    }
+    if (code >= 0x10000 && room >= 4) {
+        out[0] = (char)(0xF0 | code >> 18);
+        out[1] = (char)(0x80 | ((code >> 12) & 0x3F));
+        out[2] = (char)(0x80 | ((code >> 6) & 0x3F));
+        out[3] = (char)(0x80 | (code & 0x3F));
+        return 4;
     }
     return 0;
 }
@@ -291,12 +305,209 @@ void cellular__ussd_decode(const char *text, int dcs, char *out, size_t capacity
     out[written] = '\0';
 }
 
+/* ---- Text messages (no I/O) ---- */
+
+/* Field `index` of a comma-separated list whose quoted fields may hold
+ * commas, without its quotes. */
+static bool cellular__field(const char *values, int index, char *out, size_t capacity) {
+    const char *c = values;
+    for (int i = 0;; ++i) {
+        const char *start = c;
+        bool quoted = false;
+        while (*c != '\0' && (quoted || *c != ',')) {
+            if (*c == '"') quoted = !quoted;
+            ++c;
+        }
+        if (i == index) {
+            const char *end = c;
+            if (end - start >= 2 && *start == '"' && end[-1] == '"') {
+                ++start;
+                --end;
+            }
+            cellular__copy(out, capacity, start, (size_t)(end - start));
+            return true;
+        }
+        if (*c == '\0') return false;
+        ++c;
+    }
+}
+
+/* "yy/MM/dd,hh:mm:ss+zz", local time with its offset in quarter hours. */
+static int64_t cellular__sms_time(const char *scts) {
+    int year, month, day, hour, minute, second, quarters = 0;
+    if (sscanf(scts, "%d/%d/%d,%d:%d:%d%d", &year, &month, &day, &hour, &minute, &second, &quarters) < 6)
+        return 0;
+    bruce_clock_datetime_t local = {
+        .year = (uint16_t)(2000 + year),
+        .month = (uint8_t)month,
+        .day = (uint8_t)day,
+        .hour = (uint8_t)hour,
+        .minute = (uint8_t)minute,
+        .second = (uint8_t)second,
+    };
+    int64_t epoch = 0;
+    if (clock__datetime_to_epoch(&local, &epoch) != BRUCE_OK) return 0;
+    return epoch - (int64_t)quarters * 15 * 60;
+}
+
+bool cellular__sms_header(const char *values, cellular_sms_header_t *out) {
+    memset(out, 0, sizeof(*out));
+    char field[32];
+    if (!cellular__field(values, 0, field, sizeof(field))) return false;
+    out->received = strncmp(field, "REC ", 4) == 0;
+    cellular__field(values, 1, out->number, sizeof(out->number));
+    if (cellular__field(values, 3, field, sizeof(field))) out->utc = cellular__sms_time(field);
+    if (cellular__field(values, 5, field, sizeof(field))) out->fo = atoi(field);
+    if (cellular__field(values, 7, field, sizeof(field))) out->dcs = atoi(field);
+    return true;
+}
+
+/* GSM 03.38 default alphabet; 0x1B starts the extension table. */
+static const uint16_t s_gsm7[128] = {
+    '@',   0xA3, '$',   0xA5,  0xE8,  0xE9,  0xF9,  0xEC,  0xF2,  0xC7,  '\n',  0xD8, 0xF8, '\r', 0xC5, 0xE5,
+    0x394, '_',  0x3A6, 0x393, 0x39B, 0x3A9, 0x3A0, 0x3A8, 0x3A3, 0x398, 0x39E, 0x1B, 0xC6, 0xE6, 0xDF, 0xC9,
+    ' ',   '!',  '"',   '#',   0xA4,  '%',   '&',   '\'',  '(',   ')',   '*',   '+',  ',',  '-',  '.',  '/',
+    '0',   '1',  '2',   '3',   '4',   '5',   '6',   '7',   '8',   '9',   ':',   ';',  '<',  '=',  '>',  '?',
+    0xA1,  'A',  'B',   'C',   'D',   'E',   'F',   'G',   'H',   'I',   'J',   'K',  'L',  'M',  'N',  'O',
+    'P',   'Q',  'R',   'S',   'T',   'U',   'V',   'W',   'X',   'Y',   'Z',   0xC4, 0xD6, 0xD1, 0xDC, 0xA7,
+    0xBF,  'a',  'b',   'c',   'd',   'e',   'f',   'g',   'h',   'i',   'j',   'k',  'l',  'm',  'n',  'o',
+    'p',   'q',  'r',   's',   't',   'u',   'v',   'w',   'x',   'y',   'z',   0xE4, 0xF6, 0xF1, 0xFC, 0xE0,
+};
+
+static uint16_t cellular__gsm7_extension(uint8_t septet) {
+    switch (septet) {
+        case 0x0A: return '\f';
+        case 0x14: return '^';
+        case 0x28: return '{';
+        case 0x29: return '}';
+        case 0x2F: return '\\';
+        case 0x3C: return '[';
+        case 0x3D: return '~';
+        case 0x3E: return ']';
+        case 0x40: return '|';
+        case 0x65: return 0x20AC;
+        default: return ' ';
+    }
+}
+
+/* 0 GSM 7-bit, 1 8-bit, 2 UCS2 (3GPP TS 23.038). */
+static int cellular__sms_alphabet(int dcs) {
+    if ((dcs & 0x80) == 0) return (dcs >> 2) & 3;
+    if ((dcs & 0xF0) == 0xF0) return (dcs & 0x04) != 0 ? 1 : 0;
+    if ((dcs & 0xF0) == 0xE0) return 2;
+    return 0;
+}
+
+void cellular__sms_text(const char *data, int fo, int dcs, char *out, size_t capacity) {
+    if (capacity == 0) return;
+    int alphabet = cellular__sms_alphabet(dcs);
+    bool header = (fo & 0x40) != 0;
+    size_t hex_length = strlen(data);
+    uint8_t octets[160];
+    size_t length = hex_length / 2;
+    bool hex = (alphabet != 0 || header) && hex_length % 2 == 0 && length <= sizeof(octets);
+    for (size_t i = 0; hex && i < length; ++i) {
+        int high = cellular__hex(data[2 * i]), low = cellular__hex(data[2 * i + 1]);
+        hex = high >= 0 && low >= 0;
+        octets[i] = (uint8_t)(high << 4 | low);
+    }
+    if (!hex) {
+        snprintf(out, capacity, "%s", data);
+        return;
+    }
+    size_t skip = header && length > 0 ? (size_t)octets[0] + 1 : 0;
+    if (skip > length) skip = length;
+    size_t written = 0;
+    if (alphabet == 2) {
+        for (size_t i = skip; i + 1 < length; i += 2) {
+            uint32_t code = (uint32_t)(octets[i] << 8 | octets[i + 1]);
+            if (code >= 0xD800 && code < 0xDC00 && i + 3 < length) {
+                uint32_t low = (uint32_t)(octets[i + 2] << 8 | octets[i + 3]);
+                code = 0x10000 + ((code - 0xD800) << 10) + (low - 0xDC00);
+                i += 2;
+            }
+            size_t used = cellular__utf8(code, out + written, capacity - 1 - written);
+            if (used == 0) break;
+            written += used;
+        }
+    } else if (alphabet == 1) {
+        for (size_t i = skip; i < length; ++i) {
+            size_t used = cellular__utf8(octets[i], out + written, capacity - 1 - written);
+            if (used == 0) break;
+            written += used;
+        }
+    } else {
+        /* Septets packed after the header, which is padded to a septet boundary. */
+        size_t septets = length * 8 / 7;
+        bool escape = false;
+        for (size_t s = (skip * 8 + 6) / 7; s < septets; ++s) {
+            size_t bit = s * 7, byte = bit / 8, shift = bit % 8;
+            unsigned value = octets[byte] >> shift;
+            if (shift > 1 && byte + 1 < length) value |= (unsigned)octets[byte + 1] << (8 - shift);
+            uint8_t septet = (uint8_t)(value & 0x7F);
+            /* A last septet of fill bits reads as '@'. */
+            if (s == septets - 1 && septet == 0 && length * 8 % 7 == 0) break;
+            uint32_t code = escape ? cellular__gsm7_extension(septet) : s_gsm7[septet];
+            escape = !escape && septet == 0x1B;
+            if (escape) continue;
+            size_t used = cellular__utf8(code, out + written, capacity - 1 - written);
+            if (used == 0) break;
+            written += used;
+        }
+    }
+    out[written] = '\0';
+}
+
+bool cellular__sms_ascii(const char *text) {
+    for (const unsigned char *c = (const unsigned char *)text; *c != '\0'; ++c) {
+        if (*c < 0x20 || *c > 0x7E) return false;
+    }
+    return true;
+}
+
+size_t cellular__sms_ucs2(const char *text, size_t max_chars, char *out, size_t capacity) {
+    static const char digits[] = "0123456789ABCDEF";
+    size_t chars = 0, written = 0;
+    const unsigned char *c = (const unsigned char *)text;
+    while (*c != '\0') {
+        uint32_t code;
+        size_t extra;
+        if (*c < 0x80) code = *c, extra = 0;
+        else if ((*c & 0xE0) == 0xC0) code = *c & 0x1F, extra = 1;
+        else if ((*c & 0xF0) == 0xE0) code = *c & 0x0F, extra = 2;
+        else if ((*c & 0xF8) == 0xF0) code = *c & 0x07, extra = 3;
+        else return 0;
+        for (size_t i = 1; i <= extra; ++i) {
+            if ((c[i] & 0xC0) != 0x80) return 0;
+            code = code << 6 | (c[i] & 0x3F);
+        }
+        c += extra + 1;
+        uint16_t units[2] = {(uint16_t)code, 0};
+        size_t count = 1;
+        if (code >= 0x10000) {
+            code -= 0x10000;
+            units[0] = (uint16_t)(0xD800 | code >> 10);
+            units[1] = (uint16_t)(0xDC00 | (code & 0x3FF));
+            count = 2;
+        }
+        if (chars + count > max_chars || written + 4 * count >= capacity) return 0;
+        for (size_t i = 0; i < count; ++i, written += 4) {
+            for (int digit = 0; out != NULL && digit < 4; ++digit)
+                out[written + digit] = digits[(units[i] >> (12 - 4 * digit)) & 0xF];
+        }
+        chars += count;
+    }
+    if (out != NULL && capacity > 0) out[written] = '\0';
+    return chars;
+}
+
 /* ---- Modem task ---- */
 
 #if CONFIG_BRUCE_CELLULAR_ENABLED
 
 #define CELLULAR__PORT ((uart_port_t)CONFIG_BRUCE_CELLULAR_UART_PORT)
-#define CELLULAR__LINE_MAX 256
+/* An AT+CMGR body is up to about 300 characters of hex. */
+#define CELLULAR__LINE_MAX 400
 #define CELLULAR__POLL_IDLE_MS 20000
 #define CELLULAR__POLL_CALL_MS 1000
 #define CELLULAR__PHONE_COMMAND "GUI=1 phone incoming"
@@ -304,14 +515,19 @@ void cellular__ussd_decode(const char *text, int dcs, char *out, size_t capacity
 typedef enum {
     CELLULAR__REQUEST_COMMAND,
     CELLULAR__REQUEST_USSD,
+    CELLULAR__REQUEST_SMS_LIST,
+    CELLULAR__REQUEST_SMS_SEND,
 } cellular__request_type_t;
 
 typedef struct {
     cellular__request_type_t type;
-    char command[64];
+    char command[64]; /* Or the USSD code, or the message's recipient. */
     uint32_t timeout_ms;
     char *reply;
     size_t reply_capacity;
+    const char *text;                   /* SMS_SEND */
+    bruce_cellular_message_t *messages; /* SMS_LIST */
+    size_t message_capacity, message_count;
     bruce_result_t result;
     SemaphoreHandle_t done;
 } cellular__request_t;
@@ -330,6 +546,7 @@ static uint8_t s_volume = 60;
 static cellular_model_t s_model;
 static bruce_cellular_call_record_t s_log[BRUCE_CELLULAR_LOG_MAX];
 static uint32_t s_log_sequence;
+static uint32_t s_message_sequence;
 static char s_line[CELLULAR__LINE_MAX];
 static size_t s_line_length;
 
@@ -409,9 +626,8 @@ static void cellular__write(const char *command) {
     uart_write_bytes(CELLULAR__PORT, "\r", 1);
 }
 
-/* Sends one command and reads lines until its final result. */
-static bool cellular__command(const char *command, uint32_t timeout_ms) {
-    cellular__write(command);
+/* Reads lines until a final result. */
+static bool cellular__finish(uint32_t timeout_ms) {
     uint64_t deadline = cellular__now() + timeout_ms;
     char line[CELLULAR__LINE_MAX];
     for (uint64_t now = cellular__now(); now < deadline; now = cellular__now()) {
@@ -420,6 +636,12 @@ static bool cellular__command(const char *command, uint32_t timeout_ms) {
         if (result.final) return result.ok;
     }
     return false;
+}
+
+/* Sends one command and reads lines until its final result. */
+static bool cellular__command(const char *command, uint32_t timeout_ms) {
+    cellular__write(command);
+    return cellular__finish(timeout_ms);
 }
 
 static bool cellular__open(void) {
@@ -482,6 +704,9 @@ static void cellular__setup(void) {
     cellular__command("AT+CEREG=1", 1000);
     cellular__command("AT+COPS=3,0", 2000);
     cellular__command("AT+CSCS=\"IRA\"", 1000);
+    cellular__command("AT+CMGF=1", 1000);
+    cellular__command("AT+CSDH=1", 1000);
+    cellular__command("AT+CNMI=2,1,0,0,0", 1000);
     cellular__set_volume_level();
     cellular__query_network();
 }
@@ -548,11 +773,145 @@ static void cellular__ussd_request(cellular__request_t *request) {
     if (request->result != BRUCE_OK) cellular__command("AT+CUSD=2", 2000);
 }
 
+static bool cellular__is_final(const char *line) {
+    return strcmp(line, "OK") == 0 || strcmp(line, "ERROR") == 0 || strncmp(line, "+CMS ERROR:", 11) == 0 ||
+           strncmp(line, "+CME ERROR:", 11) == 0;
+}
+
+/* Reads SIM slot `index`; returns whether it holds a received message.
+ * *out_stored says whether the slot held any message. */
+static bool cellular__read_sms(int index, bruce_cellular_message_t *out, bool *out_stored) {
+    static char s_body[CELLULAR__LINE_MAX];
+    char line[CELLULAR__LINE_MAX];
+    snprintf(line, sizeof(line), "AT+CMGR=%d", index);
+    cellular__write(line);
+    cellular_sms_header_t header = {0};
+    bool stored = false;
+    size_t body_length = 0;
+    s_body[0] = '\0';
+    uint64_t deadline = cellular__now() + 5000;
+    for (uint64_t now = cellular__now(); now < deadline; now = cellular__now()) {
+        if (!cellular__read_line(line, sizeof(line), (uint32_t)(deadline - now))) break;
+        if (!stored && strncmp(line, "+CMGR:", 6) == 0) {
+            stored = cellular__sms_header(line + 6 + strspn(line + 6, " "), &header);
+        } else if (cellular__is_final(line)) {
+            cellular__handle_line(line);
+            break;
+        } else if (stored) {
+            /* A message with line breaks comes as several lines. */
+            int written = snprintf(
+                s_body + body_length, sizeof(s_body) - body_length, "%s%s", body_length > 0 ? "\n" : "", line
+            );
+            if (written > 0) body_length = strnlen(s_body, sizeof(s_body) - 1);
+        } else {
+            cellular__handle_line(line);
+        }
+    }
+    *out_stored = stored;
+    if (!stored || !header.received) return false;
+    memset(out, 0, sizeof(*out));
+    out->id = (uint16_t)index;
+    out->received_utc = header.utc;
+    snprintf(out->number, sizeof(out->number), "%s", header.number);
+    cellular__sms_text(s_body, header.fo, header.dcs, out->text, sizeof(out->text));
+    return true;
+}
+
+static void cellular__sms_list_request(cellular__request_t *request) {
+    cellular__lock();
+    s_model.sms_used = s_model.sms_total = 0;
+    cellular__unlock();
+    if (!cellular__command("AT+CPMS?", 3000)) {
+        request->result = BRUCE_ERR_IO;
+        return;
+    }
+    cellular__lock();
+    int used = s_model.sms_used, total = s_model.sms_total;
+    cellular__unlock();
+    int found = 0;
+    for (int index = 1; index <= total && found < used && request->message_count < request->message_capacity;
+         ++index) {
+        bool stored = false;
+        if (cellular__read_sms(index, &request->messages[request->message_count], &stored))
+            request->message_count++;
+        if (stored) found++;
+    }
+    request->result = BRUCE_OK;
+}
+
+/* Waits for the "> " that asks for the message text. */
+static bool cellular__wait_prompt(uint32_t timeout_ms) {
+    uint64_t deadline = cellular__now() + timeout_ms;
+    for (uint64_t now = cellular__now(); now < deadline; now = cellular__now()) {
+        uint8_t c;
+        if (uart_read_bytes(CELLULAR__PORT, &c, 1, pdMS_TO_TICKS(deadline - now)) != 1) return false;
+        if (c == '>' && s_line_length == 0) return true;
+        if (c == '\r') continue;
+        if (c != '\n') {
+            if (s_line_length + 1 < sizeof(s_line)) s_line[s_line_length++] = (char)c;
+            continue;
+        }
+        if (s_line_length == 0) continue;
+        char line[CELLULAR__LINE_MAX];
+        s_line[s_line_length] = '\0';
+        snprintf(line, sizeof(line), "%s", s_line);
+        s_line_length = 0;
+        if (cellular__handle_line(line).final) return false;
+    }
+    return false;
+}
+
+static void cellular__sms_send_request(cellular__request_t *request) {
+    static char s_hex[BRUCE_CELLULAR_SMS_UCS2_MAX * 4 + 1];
+    bool ascii = cellular__sms_ascii(request->text);
+    if (!ascii) cellular__sms_ucs2(request->text, BRUCE_CELLULAR_SMS_UCS2_MAX, s_hex, sizeof(s_hex));
+    request->result = BRUCE_ERR_IO;
+    if (!cellular__command(ascii ? "AT+CSMP=17,167,0,0" : "AT+CSMP=17,167,0,8", 2000)) return;
+    char command[sizeof(request->command) + 16];
+    snprintf(command, sizeof(command), "AT+CMGS=\"%s\"", request->command);
+    cellular__write(command);
+    if (!cellular__wait_prompt(5000)) {
+        uart_write_bytes(CELLULAR__PORT, "\x1B", 1); /* ESC cancels. */
+        cellular__finish(2000);
+        return;
+    }
+    const char *body = ascii ? request->text : s_hex;
+    uart_write_bytes(CELLULAR__PORT, body, strlen(body));
+    uart_write_bytes(CELLULAR__PORT, "\x1A", 1); /* Ctrl-Z sends. */
+    if (cellular__finish(60000)) request->result = BRUCE_OK;
+}
+
+/* A new message: tell the user, and apps watching message_sequence. */
+static void cellular__sms_arrived(void) {
+    cellular__lock();
+    int index = s_model.sms_index;
+    s_model.sms_index = 0;
+    cellular__unlock();
+    if (index <= 0) return;
+    static bruce_cellular_message_t s_message;
+    bool stored = false;
+    char text[BRUCE_NOTIFICATION_TEXT_MAX];
+    if (cellular__read_sms(index, &s_message, &stored)) {
+        /* The notification shows the start of the message. */
+        snprintf(text, sizeof(text), "%.31s: %.*s", s_message.number, (int)sizeof(text) - 34, s_message.text);
+    } else {
+        snprintf(text, sizeof(text), "New message");
+    }
+    cellular__lock();
+    s_message_sequence++;
+    cellular__unlock();
+    notification__push(text, BRUCE_NOTIFICATION_DURATION_MAX_MS);
+}
+
 static void cellular__run_request(cellular__request_t *request) {
     if (!s_alive) {
         request->result = BRUCE_ERR_INVALID_STATE;
     } else if (request->type == CELLULAR__REQUEST_USSD) {
         cellular__ussd_request(request);
+    } else if (request->type == CELLULAR__REQUEST_SMS_LIST) {
+        cellular__sms_list_request(request);
+    } else if (request->type == CELLULAR__REQUEST_SMS_SEND) {
+        cellular__sms_send_request(request);
     } else {
         request->result = cellular__command(request->command, request->timeout_ms) ? BRUCE_OK : BRUCE_ERR_IO;
     }
@@ -602,6 +961,7 @@ static void cellular__session(void) {
         if (xQueueReceive(s_requests, &request, 0) == pdTRUE) cellular__run_request(request);
         if (cellular__read_line(line, sizeof(line), 100)) cellular__handle_line(line);
         cellular__incoming();
+        cellular__sms_arrived();
         cellular__update_status_icon();
         uint64_t now = cellular__now();
         bool in_call = cellular__in_call();
@@ -666,7 +1026,7 @@ static bool cellular__ensure_task(void) {
         cellular__model_reset(&s_model);
         cellular__unlock();
         s_requests = xQueueCreate(4, sizeof(cellular__request_t *));
-        if (s_requests == NULL || xTaskCreate(cellular__task, "cellular", 4096, NULL, 5, &s_task) != pdPASS) {
+        if (s_requests == NULL || xTaskCreate(cellular__task, "cellular", 6144, NULL, 5, &s_task) != pdPASS) {
             portENTER_CRITICAL(&s_init_mux);
             s_creating = false;
             portEXIT_CRITICAL(&s_init_mux);
@@ -721,35 +1081,39 @@ bruce_result_t cellular__get_status(bruce_cellular_status_t *out) {
     out->muted = s_muted;
     out->volume = s_volume;
     out->last_log_sequence = s_log_sequence;
+    out->message_sequence = s_message_sequence;
     cellular__unlock();
     return BRUCE_OK;
 }
 
 /* Hands a request to the modem task and waits for it. */
+static bruce_result_t cellular__submit(cellular__request_t *request) {
+    if (!s_enabled || s_requests == NULL) return BRUCE_ERR_INVALID_STATE;
+    StaticSemaphore_t done_storage;
+    request->result = BRUCE_ERR_INVALID_STATE;
+    request->done = xSemaphoreCreateBinaryStatic(&done_storage);
+    if (!process_registry__operation_begin()) return BRUCE_ERR_INVALID_STATE;
+    bruce_result_t result = BRUCE_ERR_BUSY;
+    if (xQueueSend(s_requests, &request, pdMS_TO_TICKS(1000)) == pdTRUE) {
+        xTaskNotifyGive(s_task);
+        xSemaphoreTake(request->done, portMAX_DELAY);
+        result = request->result;
+    }
+    process_registry__operation_end();
+    return result;
+}
+
 static bruce_result_t cellular__request(
     cellular__request_type_t type, const char *command, uint32_t timeout_ms, char *reply, size_t capacity
 ) {
-    if (!s_enabled || s_requests == NULL) return BRUCE_ERR_INVALID_STATE;
-    StaticSemaphore_t done_storage;
     cellular__request_t request = {
         .type = type,
         .timeout_ms = timeout_ms,
         .reply = reply,
         .reply_capacity = capacity,
-        .result = BRUCE_ERR_INVALID_STATE,
-        .done = xSemaphoreCreateBinaryStatic(&done_storage),
     };
     snprintf(request.command, sizeof(request.command), "%s", command);
-    if (!process_registry__operation_begin()) return BRUCE_ERR_INVALID_STATE;
-    cellular__request_t *pointer = &request;
-    bruce_result_t result = BRUCE_ERR_BUSY;
-    if (xQueueSend(s_requests, &pointer, pdMS_TO_TICKS(1000)) == pdTRUE) {
-        xTaskNotifyGive(s_task);
-        xSemaphoreTake(request.done, portMAX_DELAY);
-        result = request.result;
-    }
-    process_registry__operation_end();
-    return result;
+    return cellular__submit(&request);
 }
 
 static bool cellular__valid_number(const char *number) {
@@ -846,6 +1210,44 @@ bruce_result_t cellular__ussd(const char *code, char *out_reply, size_t capacity
     return cellular__request(CELLULAR__REQUEST_USSD, code, timeout_ms, out_reply, capacity);
 }
 
+bruce_result_t cellular__get_messages(bruce_cellular_message_t *out, size_t capacity, size_t *out_count) {
+    bruce_result_t permission = permission__check(BRUCE_PERMISSION_PHONE);
+    if (permission != BRUCE_OK) return permission;
+    if (out_count == NULL || (out == NULL && capacity > 0)) return BRUCE_ERR_INVALID_ARGUMENT;
+    *out_count = 0;
+    cellular__request_t request = {
+        .type = CELLULAR__REQUEST_SMS_LIST,
+        .messages = out,
+        .message_capacity = capacity,
+    };
+    bruce_result_t result = cellular__submit(&request);
+    *out_count = request.message_count;
+    return result;
+}
+
+bruce_result_t cellular__delete_message(uint16_t id) {
+    bruce_result_t permission = permission__check(BRUCE_PERMISSION_PHONE);
+    if (permission != BRUCE_OK) return permission;
+    if (id == 0) return BRUCE_ERR_INVALID_ARGUMENT;
+    char command[24];
+    snprintf(command, sizeof(command), "AT+CMGD=%u", (unsigned)id);
+    return cellular__request(CELLULAR__REQUEST_COMMAND, command, 5000, NULL, 0);
+}
+
+bruce_result_t cellular__send_message(const char *number, const char *text) {
+    bruce_result_t permission = permission__check(BRUCE_PERMISSION_PHONE);
+    if (permission != BRUCE_OK) return permission;
+    if (!cellular__valid_number(number) || text == NULL || text[0] == '\0') return BRUCE_ERR_INVALID_ARGUMENT;
+    if (cellular__sms_ascii(text)
+            ? strlen(text) > BRUCE_CELLULAR_SMS_ASCII_MAX
+            : cellular__sms_ucs2(text, BRUCE_CELLULAR_SMS_UCS2_MAX, NULL, SIZE_MAX) == 0) {
+        return BRUCE_ERR_RESOURCE_LIMIT;
+    }
+    cellular__request_t request = {.type = CELLULAR__REQUEST_SMS_SEND, .text = text};
+    snprintf(request.command, sizeof(request.command), "%s", number);
+    return cellular__submit(&request);
+}
+
 size_t cellular__get_call_log(uint32_t after_sequence, bruce_cellular_call_record_t *out, size_t capacity) {
     if (permission__check(BRUCE_PERMISSION_PHONE) != BRUCE_OK || out == NULL) return 0;
     size_t count = 0;
@@ -908,6 +1310,24 @@ bruce_result_t cellular__ussd(const char *code, char *out_reply, size_t capacity
     (void)code;
     (void)timeout_ms;
     if (out_reply != NULL && capacity > 0) out_reply[0] = '\0';
+    return cellular__unsupported();
+}
+
+bruce_result_t cellular__get_messages(bruce_cellular_message_t *out, size_t capacity, size_t *out_count) {
+    (void)out;
+    (void)capacity;
+    if (out_count != NULL) *out_count = 0;
+    return cellular__unsupported();
+}
+
+bruce_result_t cellular__delete_message(uint16_t id) {
+    (void)id;
+    return cellular__unsupported();
+}
+
+bruce_result_t cellular__send_message(const char *number, const char *text) {
+    (void)number;
+    (void)text;
     return cellular__unsupported();
 }
 

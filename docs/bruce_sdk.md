@@ -13,7 +13,7 @@
 | [`base64.h`](#base64h) | Base64 encoding (RFC 4648). |
 | [`bluetooth.h`](#bluetoothh) | BLE advertisement scanning. |
 | [`bluetooth_hid.h`](#bluetooth_hidh) | Bluetooth keyboard and gamepad connections. |
-| [`cellular.h`](#cellularh) | Built-in cellular modem: voice calls and USSD. |
+| [`cellular.h`](#cellularh) | Built-in cellular modem: voice calls, text messages and USSD. |
 | [`clipboard.h`](#clipboardh) | Shared copy/paste clipboard. |
 | [`clock.h`](#clockh) | Clock, time zone, and NTP settings. |
 | [`compress.h`](#compressh) | DEFLATE compression/decompression (zlib-backed). |
@@ -186,6 +186,9 @@ Functions that explicitly document a `bruce_permission_t` check, grouped by perm
 - `cellular__set_volume` (cellular.h)
 - `cellular__ussd` (cellular.h)
 - `cellular__get_call_log` (cellular.h)
+- `cellular__get_messages` (cellular.h)
+- `cellular__delete_message` (cellular.h)
+- `cellular__send_message` (cellular.h)
 
 ### `process`
 
@@ -3619,13 +3622,14 @@ Returns the currently connected HID device's identity.
 
 # `cellular.h`
 
-**Built-in cellular modem: voice calls and USSD.**
+**Built-in cellular modem: voice calls, text messages and USSD.**
 
-The modem stays on once enabled (also across reboots) so calls can come
-in. An incoming call shows a notification and opens the phone app; one
-that ends unanswered shows a missed-call notification. Ended calls are
-kept in a small log since boot, so the phone app can record them even when
-it was not running.
+The modem stays on once enabled (also across reboots) so calls and
+messages can come in. An incoming call shows a notification and opens the
+phone app; one that ends unanswered shows a missed-call notification.
+Ended calls are kept in a small log since boot, so the phone app can record
+them even when it was not running. Received messages stay on the SIM, with
+a notification, until an app reads and deletes them.
 
 **Constants**
 
@@ -3634,6 +3638,9 @@ it was not running.
 | `BRUCE_CELLULAR_NUMBER_MAX` | `32` |
 | `BRUCE_CELLULAR_OPERATOR_MAX` | `24` |
 | `BRUCE_CELLULAR_LOG_MAX` | `16` |
+| `BRUCE_CELLULAR_TEXT_MAX` | `400` |
+| `BRUCE_CELLULAR_SMS_ASCII_MAX` | `160` |
+| `BRUCE_CELLULAR_SMS_UCS2_MAX` | `70` |
 
 ---
 
@@ -3701,6 +3708,7 @@ typedef struct {
     bool muted;
     uint8_t volume;             /**< 0 to 100. */
     uint32_t last_log_sequence; /**< Sequence of the newest call log record. */
+    uint32_t message_sequence;  /**< Goes up with every message received since boot. */
 } bruce_cellular_status_t;
 ```
 
@@ -3718,6 +3726,20 @@ typedef struct {
     int64_t started_utc; /**< Unix seconds, or 0 when the clock was not set. */
     uint32_t seconds;    /**< Talk time. */
 } bruce_cellular_call_record_t;
+```
+
+
+---
+
+## bruce_cellular_message_t()
+
+```c
+typedef struct {
+    uint16_t id;                            /**< Where the SIM keeps it, for cellular__delete_message(). */
+    int64_t received_utc;                   /**< Unix seconds from the network's timestamp, or 0. */
+    char number[BRUCE_CELLULAR_NUMBER_MAX]; /**< The sender; may be a name such as "Orange". */
+    char text[BRUCE_CELLULAR_TEXT_MAX];     /**< UTF-8; each part of a long message is its own message. */
+} bruce_cellular_message_t;
 ```
 
 
@@ -3978,6 +4000,92 @@ Returns the number of records copied.
 ### Returns
 
 `size_t`
+
+#### Permissions
+
+- `phone`
+
+
+---
+
+## cellular__get_messages()
+
+```c
+bruce_result_t cellular__get_messages(bruce_cellular_message_t *out, size_t capacity, size_t *out_count);
+```
+
+Copies the received messages stored on the SIM, oldest slot first.
+
+Messages stay on the SIM until deleted, so an app saves them and then
+calls cellular__delete_message() for each; a SIM holds only a few dozen.
+Reading takes up to a few seconds.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `out` | `bruce_cellular_message_t *` | Receives the messages. |
+| `capacity` | `size_t` | Number of messages out can hold. |
+| `out_count` | `size_t *` | Receives the number copied. |
+
+### Returns
+
+`bruce_result_t`
+
+#### Permissions
+
+- `phone`
+
+
+---
+
+## cellular__delete_message()
+
+```c
+bruce_result_t cellular__delete_message(uint16_t id);
+```
+
+Deletes a received message from the SIM.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `id` | `uint16_t` | The message's id from cellular__get_messages(). |
+
+### Returns
+
+`bruce_result_t`
+
+#### Permissions
+
+- `phone`
+
+
+---
+
+## cellular__send_message()
+
+```c
+bruce_result_t cellular__send_message(const char *number, const char *text);
+```
+
+Sends a text message and waits until the network takes it.
+
+Plain ASCII fits BRUCE_CELLULAR_SMS_ASCII_MAX characters; any other text,
+or a line break, is sent as UCS2 and fits BRUCE_CELLULAR_SMS_UCS2_MAX.
+Longer text returns BRUCE_ERR_RESOURCE_LIMIT.
+
+### Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `number` | `const char *` | The recipient's number. |
+| `text` | `const char *` | The message, UTF-8. |
+
+### Returns
+
+`bruce_result_t`
 
 #### Permissions
 

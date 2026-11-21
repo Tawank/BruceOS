@@ -31,7 +31,18 @@ typedef struct {
 
     bool ussd_done;
     char ussd[CELLULAR__USSD_MAX];
+
+    int sms_index;           /* SIM slot of the newest +CMTI, 0 when none is pending. */
+    int sms_used, sms_total; /* From AT+CPMS?. */
 } cellular_model_t;
+
+/* The header line of AT+CMGR in text mode with AT+CSDH=1. */
+typedef struct {
+    bool received; /* "REC READ" or "REC UNREAD", not a stored outgoing message. */
+    char number[BRUCE_CELLULAR_NUMBER_MAX];
+    int64_t utc;
+    int fo, dcs;
+} cellular_sms_header_t;
 
 typedef struct {
     bool final; /* OK, ERROR or another final result code. */
@@ -55,6 +66,21 @@ bruce_cellular_state_t cellular__model_state(const cellular_model_t *model);
 
 /* Decodes a +CUSD string; UCS2 hex when dcs says so. */
 void cellular__ussd_decode(const char *text, int dcs, char *out, size_t capacity);
+
+/* Parses the values after "+CMGR: ". */
+bool cellular__sms_header(const char *values, cellular_sms_header_t *out);
+
+/* Decodes a message body: modem text for plain GSM 7-bit, otherwise hex
+ * octets (UCS2, 8-bit, or a part of a long message with its header). */
+void cellular__sms_text(const char *data, int fo, int dcs, char *out, size_t capacity);
+
+/* Whether text can go as GSM 7-bit through the modem's text mode. */
+bool cellular__sms_ascii(const char *text);
+
+/* UTF-8 to UCS2 hex for sending; returns the number of UCS2 characters, or
+ * 0 when the text is invalid or does not fit `max_chars` or `capacity`.
+ * With out NULL it only checks. */
+size_t cellular__sms_ucs2(const char *text, size_t max_chars, char *out, size_t capacity);
 
 /* Cuts the modem's power before deep sleep. */
 void cellular__power_off(void);

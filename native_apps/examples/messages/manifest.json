@@ -1,0 +1,11 @@
+{
+  "appName": "Messages",
+  "entryPoint": "app_main",
+  "appIcon": "icon:message-text",
+  "coreAbiVersion": 4,
+  "permissions": ["phone", "storage"],
+  "singleInstance": true,
+  "stackSize": 12288,
+  "heapSize": 131072,
+  "targets": ["elf"]
+}

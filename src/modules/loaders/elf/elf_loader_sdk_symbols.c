@@ -2372,6 +2372,9 @@ const struct esp_elfsym g_bruce_sdk_elfsyms[] = {
     ESP_ELFSYM_EXPORT(cellular__set_volume),
     ESP_ELFSYM_EXPORT(cellular__ussd),
     ESP_ELFSYM_EXPORT(cellular__get_call_log),
+    ESP_ELFSYM_EXPORT(cellular__get_messages),
+    ESP_ELFSYM_EXPORT(cellular__delete_message),
+    ESP_ELFSYM_EXPORT(cellular__send_message),
     ESP_ELFSYM_EXPORT(gps__is_available),
     ESP_ELFSYM_EXPORT(gps__read),
 

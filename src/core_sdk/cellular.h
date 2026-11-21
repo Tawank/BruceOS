@@ -7,18 +7,23 @@
 #include "core_sdk/result.h"
 
 /**
- * @brief Built-in cellular modem: voice calls and USSD.
+ * @brief Built-in cellular modem: voice calls, text messages and USSD.
  *
- * The modem stays on once enabled (also across reboots) so calls can come
- * in. An incoming call shows a notification and opens the phone app; one
- * that ends unanswered shows a missed-call notification. Ended calls are
- * kept in a small log since boot, so the phone app can record them even when
- * it was not running.
+ * The modem stays on once enabled (also across reboots) so calls and
+ * messages can come in. An incoming call shows a notification and opens the
+ * phone app; one that ends unanswered shows a missed-call notification.
+ * Ended calls are kept in a small log since boot, so the phone app can record
+ * them even when it was not running. Received messages stay on the SIM, with
+ * a notification, until an app reads and deletes them.
  */
 
 #define BRUCE_CELLULAR_NUMBER_MAX 32
 #define BRUCE_CELLULAR_OPERATOR_MAX 24
 #define BRUCE_CELLULAR_LOG_MAX 16
+#define BRUCE_CELLULAR_TEXT_MAX 400
+/* One message: 160 characters of plain ASCII, otherwise 70 (UCS2). */
+#define BRUCE_CELLULAR_SMS_ASCII_MAX 160
+#define BRUCE_CELLULAR_SMS_UCS2_MAX 70
 
 typedef enum {
     BRUCE_CELLULAR_OFF = 0,
@@ -60,6 +65,7 @@ typedef struct {
     bool muted;
     uint8_t volume;             /**< 0 to 100. */
     uint32_t last_log_sequence; /**< Sequence of the newest call log record. */
+    uint32_t message_sequence;  /**< Goes up with every message received since boot. */
 } bruce_cellular_status_t;
 
 typedef struct {
@@ -70,6 +76,13 @@ typedef struct {
     int64_t started_utc; /**< Unix seconds, or 0 when the clock was not set. */
     uint32_t seconds;    /**< Talk time. */
 } bruce_cellular_call_record_t;
+
+typedef struct {
+    uint16_t id;                            /**< Where the SIM keeps it, for cellular__delete_message(). */
+    int64_t received_utc;                   /**< Unix seconds from the network's timestamp, or 0. */
+    char number[BRUCE_CELLULAR_NUMBER_MAX]; /**< The sender; may be a name such as "Orange". */
+    char text[BRUCE_CELLULAR_TEXT_MAX];     /**< UTF-8; each part of a long message is its own message. */
+} bruce_cellular_message_t;
 
 /** @brief Returns whether the board has a cellular modem. Not permission-gated. */
 bool cellular__is_available(void);
@@ -161,3 +174,38 @@ bruce_result_t cellular__ussd(const char *code, char *out_reply, size_t capacity
  * @permission phone
  */
 size_t cellular__get_call_log(uint32_t after_sequence, bruce_cellular_call_record_t *out, size_t capacity);
+
+/**
+ * @brief Copies the received messages stored on the SIM, oldest slot first.
+ *
+ * Messages stay on the SIM until deleted, so an app saves them and then
+ * calls cellular__delete_message() for each; a SIM holds only a few dozen.
+ * Reading takes up to a few seconds.
+ *
+ * @param out Receives the messages.
+ * @param capacity Number of messages out can hold.
+ * @param out_count Receives the number copied.
+ * @permission phone
+ */
+bruce_result_t cellular__get_messages(bruce_cellular_message_t *out, size_t capacity, size_t *out_count);
+
+/**
+ * @brief Deletes a received message from the SIM.
+ *
+ * @param id The message's id from cellular__get_messages().
+ * @permission phone
+ */
+bruce_result_t cellular__delete_message(uint16_t id);
+
+/**
+ * @brief Sends a text message and waits until the network takes it.
+ *
+ * Plain ASCII fits BRUCE_CELLULAR_SMS_ASCII_MAX characters; any other text,
+ * or a line break, is sent as UCS2 and fits BRUCE_CELLULAR_SMS_UCS2_MAX.
+ * Longer text returns BRUCE_ERR_RESOURCE_LIMIT.
+ *
+ * @param number The recipient's number.
+ * @param text The message, UTF-8.
+ * @permission phone
+ */
+bruce_result_t cellular__send_message(const char *number, const char *text);

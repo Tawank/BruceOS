@@ -60,7 +60,8 @@ starts it when one rings. The app draws inside the launcher's window frame (`dia
 top bar with the clock, battery and status icons is the launcher's; the
 signal bars are the cellular status icon there.
 
-The options menu calls, adds the number to contacts, edits or deletes a
+The options menu calls, opens the conversation in the Messages app
+(`messages <number>`), adds the number to contacts, edits or deletes a
 contact or a call, clears recents, and turns the phone on or off. Opening
 the app turns the phone on; it then stays on, also after a reboot, so calls
 can come in.

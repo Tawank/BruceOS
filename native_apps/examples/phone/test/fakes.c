@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "core_sdk/app_runner.h"
 #include "core_sdk/appdata.h"
 #include "core_sdk/clock.h"
 #include "core_sdk/dialog.h"
@@ -366,4 +367,10 @@ bruce_result_t dialog__choice(
         fakes.choice_next < fakes.choice_queue ? fakes.choices[fakes.choice_next++] : fakes.choice;
     *out_selected = answer < choice_count ? answer : 0;
     return BRUCE_OK;
+}
+
+bruce_result_t app_runner__run_command(const char *command_line, bruce_launch_mode_t default_mode) {
+    (void)default_mode;
+    snprintf(fakes.command, sizeof(fakes.command), "%s", command_line);
+    return 7;
 }

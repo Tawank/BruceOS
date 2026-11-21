@@ -136,13 +136,13 @@ static void menu_deletes_a_contact(void) {
     start();
     app.ui.tab = UI_TAB_CONTACTS;
     app.ui.selected = 1;
-    /* Call, Edit contact, Delete, ...; then Cancel in the confirmation. */
-    fakes.choices[0] = 2;
+    /* Call, Send message, Edit contact, Delete, ...; then Cancel in the confirmation. */
+    fakes.choices[0] = 3;
     fakes.choice_queue = 1;
     phone__menu(&app);
     CHECK_STR(fakes.choice_labels[1], "Delete");
     CHECK_EQ(book.contact_count, 1);
-    fakes.choices[0] = 2;
+    fakes.choices[0] = 3;
     fakes.choices[1] = 1;
     fakes.choice_queue = 2;
     fakes.choice_next = 0;
@@ -150,6 +150,16 @@ static void menu_deletes_a_contact(void) {
     CHECK_EQ(book.contact_count, 0);
     CHECK_STR(fakes__file(BOOK_CONTACTS_FILE)->data, "");
     CHECK_EQ(app.ui.selected, 0);
+}
+
+static void menu_opens_messages(void) {
+    fakes__set_file(BOOK_CONTACTS_FILE, "600100200,Ann\n");
+    start();
+    app.ui.tab = UI_TAB_CONTACTS;
+    app.ui.selected = 1;
+    fakes.choice = 1;
+    phone__menu(&app);
+    CHECK_STR(fakes.command, "GUI=1 messages 600100200");
 }
 
 static void keypad_letters_map_to_digits(void) {
@@ -186,5 +196,5 @@ SUITE(
     TEST(touch_answer_and_keypad), TEST(missed_calls_from_the_modem_log_are_saved),
     TEST(phone_is_turned_on_at_start), TEST(lists_navigate_and_call), TEST(new_contact_from_keypad),
     TEST(menu_deletes_a_contact), TEST(keypad_letters_map_to_digits),
-    TEST(paper_timer_redraws_every_15_seconds), TEST(back_exits)
+    TEST(paper_timer_redraws_every_15_seconds), TEST(back_exits), TEST(menu_opens_messages)
 )

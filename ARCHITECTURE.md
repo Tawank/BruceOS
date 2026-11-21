@@ -475,8 +475,20 @@ and runs `GUI=1 phone incoming` (the phone app is single-instance, so a
 running one comes to the front); a call that
 ends unanswered shows a missed-call notification. The last 16 ended calls
 since boot are kept with increasing sequence numbers for
-`cellular__get_call_log()`. USSD replies in UCS2 are decoded to UTF-8. The
-line parser is pure and covered by the `cellular/parse` selftest.
+`cellular__get_call_log()`. USSD replies in UCS2 are decoded to UTF-8.
+
+Text messages use the modem's text mode with `AT+CSDH=1`, so `AT+CMGR`
+reports each message's coding. A new message stays on the SIM
+(`AT+CNMI=2,1` announces it with `+CMTI`); Core reads it for a notification
+and bumps `message_sequence` in the status. `cellular__get_messages()` reads
+the stored messages and `cellular__delete_message()` removes one, so an app
+saves a message before it is gone and nothing is lost while no app runs.
+Bodies in UCS2, 8-bit or with a user data header (a part of a long message,
+shown as its own message) come as hex and are decoded to UTF-8, GSM 7-bit
+parts unpacked by hand. `cellular__send_message()` sends ASCII as GSM 7-bit
+(160 characters) and anything else, or a line break, as UCS2 hex (70). The
+line and SMS parsers are pure and covered by the `cellular/parse` and
+`cellular/sms` selftests.
 
 ### Clock and time
 

@@ -1,5 +1,6 @@
 #include "cellular_test.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -75,6 +76,54 @@ bool selftest__run_cellular_parse_case(void) {
         still,
         ended,
         ussd
+    );
+    return ok;
+}
+
+bool selftest__run_cellular_sms_case(void) {
+    cellular_model_t model;
+    cellular__model_reset(&model);
+    cellular__parse_line(&model, "+CMTI: \"SM\",3", 0);
+    cellular__parse_line(&model, "+CPMS: \"SM\",2,50,\"SM\",2,50,\"SM\",2,50", 0);
+    bool urc = model.sms_index == 3 && model.sms_used == 2 && model.sms_total == 50;
+
+    /* The time stamp holds a comma inside its quotes; +04 is UTC+1. */
+    cellular_sms_header_t header;
+    bool parsed = cellular__sms_header(
+        "\"REC UNREAD\",\"+48600100200\",,\"24/11/21,10:00:00+04\",145,4,0,8,\"+48790998250\",145,8", &header
+    );
+    bool header_ok = parsed && header.received && strcmp(header.number, "+48600100200") == 0 &&
+                     header.utc == 1732179600 && header.fo == 4 && header.dcs == 8;
+    cellular__sms_header("\"STO SENT\",\"123\",,", &header);
+    bool sent = !header.received;
+
+    char text[64];
+    cellular__sms_text("Hi there", 17, 0, text, sizeof(text));
+    bool plain = strcmp(text, "Hi there") == 0;
+    /* "Zażółć 😀" in UCS2, the emoji as a surrogate pair. */
+    cellular__sms_text("005A0061017C00F3014201070020D83DDE00", 4, 8, text, sizeof(text));
+    bool ucs2 = strcmp(text, "Za\xc5\xbc\xc3\xb3\xc5\x82\xc4\x87 \xf0\x9f\x98\x80") == 0;
+    /* Part of a long message: 6-octet header, then "Hi" in GSM 7-bit after a fill bit. */
+    cellular__sms_text("050003AB02019069", 0x44, 0, text, sizeof(text));
+    bool long_part = strcmp(text, "Hi") == 0;
+
+    char hex[32];
+    bool encode = cellular__sms_ascii("Hello, world!") && !cellular__sms_ascii("a\nb") &&
+                  cellular__sms_ucs2("\xc5\xbc!", 70, hex, sizeof(hex)) == 2 &&
+                  strcmp(hex, "017C0021") == 0 && cellular__sms_ucs2("abc", 2, hex, sizeof(hex)) == 0 &&
+                  cellular__sms_ucs2("\xf0\x9f\x98\x80", 70, NULL, SIZE_MAX) == 2;
+
+    bool ok = urc && header_ok && sent && plain && ucs2 && long_part && encode;
+    printf(
+        "[selftest] cellular/sms: %s (urc=%d header=%d sent=%d plain=%d ucs2=%d long=%d encode=%d)\n",
+        ok ? "OK" : "FAIL",
+        urc,
+        header_ok,
+        sent,
+        plain,
+        ucs2,
+        long_part,
+        encode
     );
     return ok;
 }

@@ -185,6 +185,14 @@ static void phone__edit_contact(phone_t *app, size_t index) {
     book__save_contacts(app->book);
 }
 
+/* Opens the conversation in the messages app. */
+static void phone__message(const char *number) {
+    char command[24 + BRUCE_CELLULAR_NUMBER_MAX];
+    snprintf(command, sizeof(command), "GUI=1 messages %s", number);
+    if (app_runner__run_command(command, BRUCE_LAUNCH_FOREGROUND) < 0)
+        dialog__message(BRUCE_DIALOG_ERROR, "Phone", "The Messages app is not installed");
+}
+
 static bool phone__confirm(const char *title, const char *message, const char *action) {
     bruce_dialog_choice_t choices[] = {
         {.label = "Cancel"},
@@ -196,6 +204,7 @@ static bool phone__confirm(const char *title, const char *message, const char *a
 
 typedef enum {
     PHONE_MENU_CALL,
+    PHONE_MENU_MESSAGE,
     PHONE_MENU_SAVE,
     PHONE_MENU_EDIT,
     PHONE_MENU_DELETE,
@@ -227,6 +236,9 @@ static void phone__menu(phone_t *app) {
     } while (0)
     if ((on_call || on_contact || app->ui.tab == UI_TAB_KEYPAD) && number[0] != '\0')
         PHONE_ADD(PHONE_MENU_CALL, "Call");
+    if ((on_call || on_contact || app->ui.tab == UI_TAB_KEYPAD) && number[0] != '\0' &&
+        !book__is_ussd(number))
+        PHONE_ADD(PHONE_MENU_MESSAGE, "Send message");
     if ((on_call || app->ui.tab == UI_TAB_KEYPAD) && number[0] != '\0' && !book__is_ussd(number) &&
         book__name_for(book, number) == NULL) {
         PHONE_ADD(PHONE_MENU_SAVE, "Add to contacts");
@@ -244,6 +256,7 @@ static void phone__menu(phone_t *app) {
     if (dialog__choice("Phone", NULL, choices, count, &selected) != BRUCE_OK) return;
     switch (actions[selected]) {
         case PHONE_MENU_CALL: phone__call(app, number); break;
+        case PHONE_MENU_MESSAGE: phone__message(number); break;
         case PHONE_MENU_SAVE: phone__new_contact(app, number); break;
         case PHONE_MENU_EDIT: phone__edit_contact(app, (size_t)row - 1); break;
         case PHONE_MENU_DELETE:

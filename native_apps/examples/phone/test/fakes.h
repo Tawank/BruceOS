@@ -62,6 +62,7 @@ typedef struct {
     char choice_labels[12][32];
     size_t choice_count;
     int message_count;
+    char command[64];
     char message[192];
 } fakes_t;
 

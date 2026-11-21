@@ -296,6 +296,7 @@ static const selftest__case_t selftest__cases[] = {
     SELFTEST_CASE(selftest__run_appdata_sandbox_case),
     SELFTEST_CASE(selftest__run_appdata_manage_case),
     SELFTEST_CASE(selftest__run_cellular_parse_case),
+    SELFTEST_CASE(selftest__run_cellular_sms_case),
     SELFTEST_CASE(selftest__run_gpio_bus_permission_denied_case),
     SELFTEST_CASE(selftest__run_gpio_bus_validation_case),
     SELFTEST_CASE(selftest__run_input_poll_case),
