@@ -8,7 +8,9 @@
 #include "core_sdk/runtime.h"
 #include "core_sdk/storage.h"
 #include "core_sdk/net.h"
+#include "core_sdk/display.h"
 #include "geo.h"
+#include "ink.h"
 
 #define TILES_BYTES (GEO_TILE_SIZE * GEO_TILE_SIZE * 2)
 #define TILES_MAX_SLOTS 16
@@ -195,6 +197,7 @@ static bool tiles__decode(tiles_t *tiles, tile_key_t key, const char *path) {
         image__bitmap_release(&slot->bitmap);
         return false;
     }
+    if (display__is_epaper()) ink__convert(slot->bitmap.pixels, GEO_TILE_SIZE, GEO_TILE_SIZE);
     slot->key = key;
     slot->last_used = ++tiles->clock;
     return true;

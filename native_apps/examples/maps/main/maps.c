@@ -239,6 +239,25 @@ static void maps__gps_status(maps_t *app, const bruce_gps_fix_t *fix, uint64_t n
     app->hud.gps_status = app->gps_text[0] != '\0' ? app->gps_text : NULL;
 }
 
+/* Keeps the map on the position. An e-paper map stays still while the
+ * position is in the middle half of the screen, so only the dot redraws; when
+ * it leaves, the map moves to put it at the far side of that box, so the
+ * screen shows more of the way ahead. */
+static void maps__follow(maps_t *app, geo_point_t me) {
+    int32_t dx = me.x - app->view.center.x;
+    int32_t dy = me.y - app->view.center.y;
+    int32_t box_x = display__width() / 4;
+    int32_t box_y = display__height() / 4;
+    bool off_screen = abs(dx) > 2 * box_x || abs(dy) > 2 * box_y;
+    if (!display__is_epaper() || off_screen) {
+        app->view.center = me;
+        return;
+    }
+    int32_t move_x = dx > box_x ? dx + box_x : dx < -box_x ? dx - box_x : 0;
+    int32_t move_y = dy > box_y ? dy + box_y : dy < -box_y ? dy - box_y : 0;
+    if (move_x != 0 || move_y != 0) map_view__pan(&app->view, move_x, move_y);
+}
+
 static void maps__poll_gps(maps_t *app) {
     uint64_t now = runtime__now();
     if (!app->gps || now < app->gps_at) return;
@@ -262,7 +281,7 @@ static void maps__poll_gps(maps_t *app) {
     app->hud.me_lon = fix.longitude;
     app->hud.speed_kmh = speed;
     if (app->locate_pending) maps__locate(app);
-    else if (app->hud.following) app->view.center = after;
+    else if (app->hud.following) maps__follow(app, after);
 }
 
 static void maps__toggle_online(maps_t *app) {

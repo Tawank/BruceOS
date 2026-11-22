@@ -557,6 +557,41 @@ static void locate_centres_on_first_fix_and_follows_until_panned(void) {
     stop();
 }
 
+/* Places the GPS position (dx, dy) screen pixels from the map centre. */
+static void gps_at_offset(int32_t dx, int32_t dy) {
+    geo_point_t point = {app.view.center.x + dx, app.view.center.y + dy};
+    double lat = 0, lon = 0;
+    geo__to_lat_lon(point, app.view.zoom, &lat, &lon);
+    gps_here(lat, lon);
+}
+
+static void epaper_map_moves_only_when_position_leaves_middle(void) {
+    start();
+    fakes.width = 240;
+    fakes.height = 320;
+    fakes.epaper = true;
+    app.gps_available = true;
+    map_view__set(&app.view, 50.1, 20.1, MAPS_PLACE_ZOOM);
+    maps__locate(&app);
+    gps_here(50.1, 20.1);
+    geo_point_t centre = app.view.center;
+    gps_at_offset(50, -70);
+    CHECK_EQ(app.view.center.x, centre.x);
+    CHECK_EQ(app.view.center.y, centre.y);
+    gps_at_offset(70, 0);
+    geo_point_t me = geo__from_lat_lon(app.hud.me_lat, app.hud.me_lon, app.view.zoom);
+    CHECK(abs(me.x - app.view.center.x + 60) <= 1);
+    CHECK_EQ(app.view.center.y, centre.y);
+    gps_at_offset(0, 1000);
+    me = geo__from_lat_lon(app.hud.me_lat, app.hud.me_lon, app.view.zoom);
+    CHECK_EQ(app.view.center.y, me.y);
+    fakes.epaper = false;
+    gps_at_offset(10, 0);
+    me = geo__from_lat_lon(app.hud.me_lat, app.hud.me_lon, app.view.zoom);
+    CHECK_EQ(app.view.center.x, me.x);
+    stop();
+}
+
 static void tapping_locate_button_and_menu_locate(void) {
     start();
     app.gps_available = app.hud.locate_button = true;
@@ -777,6 +812,7 @@ SUITE(maps_tests,
       TEST(gps_stays_off_until_locate),
       TEST(gps_shows_position_speed_and_redraws_when_it_moves),
       TEST(locate_centres_on_first_fix_and_follows_until_panned),
+      TEST(epaper_map_moves_only_when_position_leaves_middle),
       TEST(tapping_locate_button_and_menu_locate),
       TEST(menu_turns_gps_off),
       TEST(gps_status_shows_progress_until_fix),

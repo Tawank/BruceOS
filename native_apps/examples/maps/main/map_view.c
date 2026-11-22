@@ -89,11 +89,13 @@ size_t map_view__max_visible_tiles(int width, int height) {
     return columns * rows;
 }
 
+/* E-paper gets white and black, which it shows without dithering. */
 static void map_view__draw_placeholder(int x, int y, int size) {
-    display__fill_rect(x, y, size, size, MAP_VIEW_LAND);
+    bool epaper = display__is_epaper();
+    display__fill_rect(x, y, size, size, epaper ? BRUCE_COLOR_WHITE : MAP_VIEW_LAND);
     for (int offset = 0; offset < size; offset += MAP_VIEW_GRID_STEP) {
-        display__fill_rect(x + offset, y, 1, size, MAP_VIEW_GRID);
-        display__fill_rect(x, y + offset, size, 1, MAP_VIEW_GRID);
+        display__fill_rect(x + offset, y, 1, size, epaper ? BRUCE_COLOR_BLACK : MAP_VIEW_GRID);
+        display__fill_rect(x, y + offset, size, 1, epaper ? BRUCE_COLOR_BLACK : MAP_VIEW_GRID);
     }
 }
 
@@ -140,7 +142,7 @@ void map_view__draw(const map_view_t *view, tiles_t *tiles, int width, int heigh
             int y = tile_y * size - range.top;
             tile_key_t key;
             if (!map_view__key(view, tile_x, tile_y, &key)) {
-                display__fill_rect(x, y, size, size, MAP_VIEW_WATER);
+                display__fill_rect(x, y, size, size, display__is_epaper() ? BRUCE_COLOR_WHITE : MAP_VIEW_WATER);
                 continue;
             }
             const image_bitmap_t *bitmap = tiles__get(tiles, key);

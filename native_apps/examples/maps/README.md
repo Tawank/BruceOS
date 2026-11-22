@@ -40,6 +40,9 @@ MAX) GPS stays off until you ask for your location: the *My location* button
 in the bottom right corner on touch screens, or *My location* in the menu.
 That turns the receiver on, and the map centres on the first fix and keeps
 following it until the map is panned; press it again to centre once more.
+On e-paper the map stays still while the dot is in the middle half of the
+screen, so only the dot redraws; when it leaves, the map jumps ahead in that
+direction.
 *Turn GPS off* in the menu powers it down again.
 
 The position is a blue dot, and the current speed sits in a box at the bottom
@@ -79,6 +82,13 @@ handshake instead of one per tile. When offline, the app gets online in the
 background (`net__connect_start()`: a saved Wi-Fi network, or mobile data;
 at most every 30 s) and shows "Connecting" meanwhile; a connection made
 elsewhere is picked up within a second. It needs no `wifi` permission.
+
+On e-paper each tile is turned into black and white as it loads
+(`main/ink.c`), because the panel would dither the pale map colours into
+speckles: text, railways and road casings are black, roads are outlined
+(except around labels, whose white halos would otherwise look like roads),
+water is dotted, and everything else is white. The tiles on the SD card
+stay in colour.
 
 ## Settings
 

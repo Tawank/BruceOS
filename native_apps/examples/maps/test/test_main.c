@@ -16,6 +16,7 @@ DECLARE_SUITE(settings_tests)
 DECLARE_SUITE(hud_tests)
 DECLARE_SUITE(search_tests)
 DECLARE_SUITE(maps_tests)
+DECLARE_SUITE(ink_tests)
 
 static int run_suite(const char *suite, const test_case_t *tests, size_t count) {
     int failed = 0;
@@ -39,6 +40,7 @@ int main(void) {
     failed += run_suite("hud", hud_tests, hud_tests_count);
     failed += run_suite("search", search_tests, search_tests_count);
     failed += run_suite("maps", maps_tests, maps_tests_count);
+    failed += run_suite("ink", ink_tests, ink_tests_count);
     printf("\n%s: %d failed test(s)\n", failed ? "FAILED" : "PASSED", failed);
     return failed ? 1 : 0;
 }
